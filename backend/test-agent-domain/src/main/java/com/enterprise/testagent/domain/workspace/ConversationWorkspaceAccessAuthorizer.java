@@ -10,7 +10,8 @@ public interface ConversationWorkspaceAccessAuthorizer {
     /** 文件访问授权时识别的业务工作区类型；分类与授权必须来自同一次权威判断。 */
     enum FileWorkspaceKind {
         STANDARD,
-        APP_SOURCE
+        APP_SOURCE,
+        EXPERIENCE
     }
 
     /**

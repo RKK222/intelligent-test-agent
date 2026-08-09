@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.persistence.mybatis.ConfigurationManagementMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisConfigurationManagementRepository;
 import java.sql.Timestamp;
@@ -152,6 +153,22 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
     }
 
     @Test
+    void enabledApplicationMembershipExistsQueryIgnoresDeletedMembersAndDisabledApplications() {
+        insertUser("usr_no_app");
+        insertUser("usr_active_app");
+        insertUser("usr_deleted_member");
+        insertUser("usr_disabled_app");
+        insertApplicationAndMember("app_active", true, "usr_active_app", null);
+        insertApplicationAndMember("app_deleted", true, "usr_deleted_member", NOW.plusSeconds(1));
+        insertApplicationAndMember("app_disabled", false, "usr_disabled_app", null);
+
+        assertThat(repository.hasEnabledApplicationMembership(new UserId("usr_active_app"))).isTrue();
+        assertThat(repository.hasEnabledApplicationMembership(new UserId("usr_no_app"))).isFalse();
+        assertThat(repository.hasEnabledApplicationMembership(new UserId("usr_deleted_member"))).isFalse();
+        assertThat(repository.hasEnabledApplicationMembership(new UserId("usr_disabled_app"))).isFalse();
+    }
+
+    @Test
     void workspaceEnabledMigrationDefaultsLegacyRowsAndMyBatisPersistsChanges() {
         assertThat(repository.hasApplicationWorkspaceHistory(new CodeRepositoryId("repo_legacy_standard"))).isTrue();
         assertThat(repository.hasApplicationWorkspaceHistory(new CodeRepositoryId("repo_legacy_application"))).isFalse();
@@ -212,6 +229,44 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                 .param("createdAt", Timestamp.from(NOW))
                 .param("updatedAt", Timestamp.from(NOW))
                 .update();
+    }
+
+    private void insertUser(String userId) {
+        jdbcClient.sql("""
+                        insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
+                        values (:userId, :authId, :username, 'hash', 'ACTIVE', :createdAt, :updatedAt)
+                        """)
+                .param("userId", userId)
+                .param("authId", "auth_" + userId)
+                .param("username", "name_" + userId)
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW))
+                .update();
+    }
+
+    private void insertApplicationAndMember(String appId, boolean enabled, String userId, Instant deletedAt) {
+        jdbcClient.sql("""
+                        insert into applications(app_id, app_name, enabled, created_at, updated_at)
+                        values (:appId, :appName, :enabled, :createdAt, :updatedAt)
+                        """)
+                .param("appId", appId)
+                .param("appName", appId)
+                .param("enabled", enabled)
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW))
+                .update();
+        var statement = jdbcClient.sql("""
+                        insert into application_members(app_id, user_id, created_at, updated_at, deleted_at)
+                        values (:appId, :userId, :createdAt, :updatedAt, :deletedAt)
+                        """)
+                .param("appId", appId)
+                .param("userId", userId)
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW));
+        statement.param(
+                "deletedAt",
+                deletedAt == null ? null : Timestamp.from(deletedAt),
+                java.sql.Types.TIMESTAMP).update();
     }
 
     /**

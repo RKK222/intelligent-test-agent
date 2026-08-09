@@ -10,8 +10,11 @@ type SettingsGuideTarget = "personal" | "repository" | "members" | "repositories
 const props = withDefaults(defineProps<{
   userId?: string | null;
   appAdmin?: boolean;
+  /** 体验邀请尚未处理时暂停引导，避免两个全屏交互争抢焦点。 */
+  enabled?: boolean;
 }>(), {
-  appAdmin: false
+  appAdmin: false,
+  enabled: true
 });
 
 const emit = defineEmits<{
@@ -136,14 +139,20 @@ watch(current, async (step) => {
 });
 
 watch(
-  () => props.userId?.trim() || null,
-  (userId) => {
-    if (!userId || userId === scheduledUserId || hasSeen(userId)) return;
+  () => [props.userId?.trim() || null, props.enabled] as const,
+  ([userId, enabled]) => {
+    if (!enabled || !userId || userId === scheduledUserId || hasSeen(userId)) return;
     scheduledUserId = userId;
     void show();
   },
   { immediate: true }
 );
+
+watch(() => props.enabled, (enabled) => {
+  if (enabled || !open.value) return;
+  open.value = false;
+  emit("settings-step", false);
+});
 
 defineExpose({ restart });
 </script>

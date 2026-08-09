@@ -6,12 +6,14 @@ import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 用户关联工作区只读查询服务，为普通用户对象级鉴权和排查只读入口提供同一范围定义。
@@ -21,12 +23,27 @@ public class UserWorkspaceQueryService {
 
     private final UserWorkspaceQueryRepository repository;
     private final ManagedWorkspacePathResolver pathResolver;
+    private final ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
 
+    @Autowired
+    public UserWorkspaceQueryService(
+            UserWorkspaceQueryRepository repository,
+            ManagedWorkspacePathResolver pathResolver,
+            ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer) {
+        this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+        this.experienceWorkspaceAccessAuthorizer = Objects.requireNonNull(
+                experienceWorkspaceAccessAuthorizer,
+                "experienceWorkspaceAccessAuthorizer must not be null");
+    }
+
+    /** 兼容不涉及体验 Workspace 的单元测试和嵌入式构造路径。 */
     public UserWorkspaceQueryService(
             UserWorkspaceQueryRepository repository,
             ManagedWorkspacePathResolver pathResolver) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+        this.experienceWorkspaceAccessAuthorizer = null;
     }
 
     /** 用户范围过滤完成后仍解析托管逻辑路径，保持 Workspace API 返回物理绝对路径。 */
@@ -41,6 +58,10 @@ public class UserWorkspaceQueryService {
 
     /** 详情查询与列表使用同一物理路径响应语义，避免前端把 personalworktree 逻辑值传给外部页面。 */
     public Workspace requireUserWorkspace(UserId userId, WorkspaceId workspaceId) {
+        if (experienceWorkspaceAccessAuthorizer != null
+                && experienceWorkspaceAccessAuthorizer.isExperienceWorkspace(workspaceId)) {
+            return experienceWorkspaceAccessAuthorizer.requireAccess(userId, workspaceId);
+        }
         return repository.findUserWorkspace(userId, workspaceId)
                 .map(pathResolver::withResolvedRootPath)
                 .orElseThrow(() -> new PlatformException(

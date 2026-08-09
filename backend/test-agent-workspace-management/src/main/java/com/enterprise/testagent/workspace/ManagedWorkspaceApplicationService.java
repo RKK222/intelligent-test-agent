@@ -2,6 +2,7 @@ package com.enterprise.testagent.workspace;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.git.GitCommandExecutor;
 import com.enterprise.testagent.common.git.GitCommitIdentity;
 import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
@@ -55,6 +56,7 @@ import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
@@ -100,6 +102,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private static final Pattern STANDARD_BRANCH_PATTERN = Pattern.compile("^feature_testagent_(\\d{8})$");
     private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^wco_[A-Za-z0-9_-]{8,128}$");
     private static final Pattern SCP_LIKE_SSH_URL = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+:.+");
+    private static final Pattern EXPERIENCE_PROTECTED_GIT_NAMESPACE = Pattern.compile(
+            "(?i)(?:^|[/\\\\\"'{ >])\\.(?:git|opencode)(?=$|[/\\\\\"'} <])");
     private static final String VERSION_SYNC_EVENT = "workspace.version.sync-requested";
     private static final String PARAM_OPENCODE_APP_WORKSPACE_ROOT = "OPENCODE_APP_WORKSPACE_ROOT";
     private static final String PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT = "OPENCODE_PERSONAL_WORKTREE_ROOT";
@@ -155,6 +159,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private ConversationContextStore conversationContextStore;
     private PublicAgentConfigRolloutCoordinator agentConfigRolloutCoordinator;
     private AgentSkillHubPushIndexer agentSkillHubPushIndexer;
+    private ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
 
     /**
      * 可选注入运行上下文端口；测试构造器无需感知 Redis，实现仍保持模块只依赖 domain。
@@ -174,6 +179,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     @Autowired(required = false)
     void setAgentSkillHubPushIndexer(AgentSkillHubPushIndexer indexer) {
         this.agentSkillHubPushIndexer = indexer;
+    }
+
+    /** 体验目录的 Git 状态只读入口必须复用与文件、会话相同的实时资格校验。 */
+    @Autowired(required = false)
+    void setExperienceWorkspaceAccessAuthorizer(ExperienceWorkspaceAccessAuthorizer authorizer) {
+        this.experienceWorkspaceAccessAuthorizer = authorizer;
     }
 
     /**
@@ -1411,11 +1422,23 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         if (!Files.exists(context.repoRoot())) {
             return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(List.of());
         }
-        try {
+        boolean experienceWorkspace = experienceWorkspaceAccessAuthorizer != null
+                && experienceWorkspaceAccessAuthorizer.isExperienceWorkspace(new WorkspaceId(workspaceId));
+        List<String> sensitiveLogArguments = experienceWorkspace
+                ? List.of(context.repoRoot().toString())
+                : List.of();
+        try (GitCommandExecutor.LogRedaction ignored =
+                GitCommandExecutor.redactSensitiveArguments(sensitiveLogArguments)) {
             String porcelain = context.pathspec().isBlank()
-                    ? gitWorkspaceService.statusPorcelain(context.repoRoot())
+                    ? (experienceWorkspace
+                            ? gitWorkspaceService.statusPorcelainReadOnly(context.repoRoot())
+                            : gitWorkspaceService.statusPorcelain(context.repoRoot()))
                     : gitWorkspaceService.statusPorcelain(context.repoRoot(), context.pathspec());
-            List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = gitWorkspaceService.collectDiffFiles(context.repoRoot(), porcelain).stream()
+            List<GitWorkspaceService.GitDiffFile> gitDiffFiles = experienceWorkspace
+                    ? gitWorkspaceService.collectDiffFilesReadOnly(
+                            context.repoRoot(), experienceVisibleGitStatusEntries(context.repoRoot(), porcelain))
+                    : gitWorkspaceService.collectDiffFiles(context.repoRoot(), porcelain);
+            List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = gitDiffFiles.stream()
                     .map(file -> new ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse(
                             stripDisplayPathPrefix(file.path(), context.displayPathPrefix()),
                             file.rawStatus(),
@@ -1437,7 +1460,48 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     syncState.targetCommit(),
                     blockingFiles);
         } catch (Exception exception) {
+            if (experienceWorkspace) {
+                // 共享体验目录由管理员配置，底层 Git 异常常包含物理路径；该路径不能进入响应或异常日志链。
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "获取体验工作区 Git 变更失败");
+            }
             throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "获取 Git 变更列表失败: " + exception.getMessage(), Map.of(), exception);
+        }
+    }
+
+    /**
+     * 体验区 Git 只读视图与文件 RPC 使用同一受控命名空间边界；rename 行会同时检查旧、新路径。
+     * 符号链接条目也不进入 Diff，避免未跟踪链接被当作普通文件读取外部内容。
+     */
+    private List<GitStatusEntry> experienceVisibleGitStatusEntries(Path repoRoot, String porcelain) {
+        if (porcelain == null || porcelain.isBlank()) {
+            return List.of();
+        }
+        String visiblePorcelain = porcelain.lines()
+                .filter(line -> line.length() < 4
+                        || !EXPERIENCE_PROTECTED_GIT_NAMESPACE.matcher(line.substring(3)).find())
+                .collect(Collectors.joining("\n"));
+        Path normalizedRoot = repoRoot.toAbsolutePath().normalize();
+        return gitWorkspaceService.parseStatusPorcelain(visiblePorcelain).stream()
+                .filter(entry -> !usesSymbolicLink(normalizedRoot, entry.path()))
+                .toList();
+    }
+
+    private boolean usesSymbolicLink(Path repoRoot, String gitPath) {
+        try {
+            Path target = repoRoot.resolve(gitPath).normalize();
+            if (!target.startsWith(repoRoot)) {
+                return true;
+            }
+            Path current = repoRoot;
+            for (Path segment : repoRoot.relativize(target)) {
+                current = current.resolve(segment);
+                if (Files.isSymbolicLink(current)) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (InvalidPathException exception) {
+            return true;
         }
     }
 
@@ -1592,6 +1656,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     private WorkspaceGitContext workspaceGitContext(String workspaceId, UserId userId) {
         Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
+        if (experienceWorkspaceAccessAuthorizer != null
+                && experienceWorkspaceAccessAuthorizer.isExperienceWorkspace(workspace.workspaceId())) {
+            Workspace current = experienceWorkspaceAccessAuthorizer.requireAccess(userId, workspace.workspaceId());
+            Path root = Path.of(current.rootPath()).toAbsolutePath().normalize();
+            return workspaceGitContext(root, root, null);
+        }
         Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId());
         if (personal.isPresent()) {
             PersonalWorkspace current = personal.get();

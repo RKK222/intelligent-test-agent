@@ -1402,6 +1402,36 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void experienceWorkspaceRejectsApplicationAgentConfigOperations() {
+        Path workspaceRoot = root.resolve("experience");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_exp_1234567890abcdef"),
+                        "体验工作区",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_experience")));
+
+        assertThatThrownBy(() -> service.workspaceDiff("wrk_exp_1234567890abcdef", null))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+                    assertThat(exception.getMessage()).contains("体验工作区");
+                });
+        assertThat(git.diffFiles).isEmpty();
+    }
+
+    @Test
     void publicDiffKeepsRawPorcelainStatusAndMergesStagedAndUnstagedPatch() {
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         git.stagedAfterAdd = "MM opencode/agents/public-review.md\n";

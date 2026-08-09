@@ -31,6 +31,9 @@ import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -69,6 +72,77 @@ class RunSessionMessageSnapshotServiceTest {
         assertThat(messages.saved).singleElement().satisfies(message -> {
             assertThat(message.content()).isEqualTo("assistant text");
             assertThat(message.remoteMessageId()).startsWith("synthetic:");
+        });
+    }
+
+    @Test
+    void experienceSnapshotRedactsPhysicalRootBeforePersistingContentAndParts() {
+        WorkspaceId experienceWorkspaceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        Session experienceSession = new Session(
+                SESSION_ID,
+                experienceWorkspaceId,
+                "Experience session",
+                SessionStatus.ACTIVE,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+        FakeMessageRepository messages = new FakeMessageRepository();
+        AgentRuntime runtime = new AgentRuntime() {
+            @Override
+            public String agentId() {
+                return "opencode";
+            }
+
+            @Override
+            public Mono<AgentSessionMessagesResult> sessionMessages(AgentSessionMessagesCommand command) {
+                return Mono.just(new AgentSessionMessagesResult(List.of(new AgentSessionMessage(
+                        Map.of("id", "msg_experience", "role", "assistant"),
+                        List.of(Map.of(
+                                "id", "part_experience",
+                                "type", "text",
+                                "text", "Read /physical/experience/docs",
+                                "metadata", Map.of(
+                                        "/physical/experience/result", new String[] {
+                                                "/physical/experience/a", "/physical/experience/b"
+                                        })))))));
+            }
+        };
+        RunSessionMessageSnapshotService service = service(messages, runtime);
+        service.configureWorkspaceRepository(new WorkspaceRepository() {
+            @Override
+            public Workspace save(Workspace workspace) {
+                return workspace;
+            }
+
+            @Override
+            public Optional<Workspace> findById(WorkspaceId workspaceId) {
+                return Optional.of(new Workspace(
+                        experienceWorkspaceId,
+                        "Experience",
+                        "/physical/experience",
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "server-a",
+                        "trace_1234567890abcdef"));
+            }
+
+            @Override
+            public PageResponse<Workspace> findPage(PageRequest pageRequest) {
+                return new PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0);
+            }
+        });
+
+        assertThat(service.refreshSessionSnapshot("opencode", experienceSession, "trace_1234567890abcdef"))
+                .isTrue();
+
+        assertThat(messages.saved).singleElement().satisfies(message -> {
+            assertThat(message.content())
+                    .contains("<experience-workspace>")
+                    .doesNotContain("/physical/experience");
+            assertThat(message.partsJson())
+                    .contains("<experience-workspace>")
+                    .doesNotContain("/physical/experience");
         });
     }
 

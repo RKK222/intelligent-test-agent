@@ -1,6 +1,9 @@
 package com.enterprise.testagent.workspace;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
@@ -10,6 +13,7 @@ import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.configuration.ResolvedParameter;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -43,6 +47,26 @@ class UserWorkspaceQueryServiceTest {
 
         assertThat(page.items()).singleElement().extracting(Workspace::rootPath).isEqualTo(PHYSICAL_ROOT);
         assertThat(detail.rootPath()).isEqualTo(PHYSICAL_ROOT);
+    }
+
+    @Test
+    void currentExperienceWorkspaceDetailUsesRealtimePolicyWithoutOrdinaryUserMapping() {
+        WorkspaceId experienceId = new WorkspaceId("wrk_exp_current_workspace");
+        Workspace experience = new Workspace(
+                experienceId,
+                "体验工作区",
+                "/srv/experience",
+                Instant.parse("2026-08-09T00:00:00Z"));
+        ExperienceWorkspaceAccessAuthorizer authorizer = mock(ExperienceWorkspaceAccessAuthorizer.class);
+        when(authorizer.isExperienceWorkspace(experienceId)).thenReturn(true);
+        when(authorizer.requireAccess(USER_ID, experienceId)).thenReturn(experience);
+        UserWorkspaceQueryService service = new UserWorkspaceQueryService(
+                new FixedRepository(null),
+                new ManagedWorkspacePathResolver(parameters()),
+                authorizer);
+
+        assertThat(service.requireUserWorkspace(USER_ID, experienceId)).isEqualTo(experience);
+        verify(authorizer).requireAccess(USER_ID, experienceId);
     }
 
     private CommonParameterValues parameters() {
@@ -81,12 +105,15 @@ class UserWorkspaceQueryServiceTest {
 
         @Override
         public PageResponse<Workspace> findUserWorkspaces(UserId userId, PageRequest pageRequest) {
-            return new PageResponse<>(List.of(workspace), pageRequest.page(), pageRequest.size(), 1);
+            List<Workspace> workspaces = workspace == null ? List.of() : List.of(workspace);
+            return new PageResponse<>(workspaces, pageRequest.page(), pageRequest.size(), workspaces.size());
         }
 
         @Override
         public Optional<Workspace> findUserWorkspace(UserId userId, WorkspaceId workspaceId) {
-            return workspace.workspaceId().equals(workspaceId) ? Optional.of(workspace) : Optional.empty();
+            return workspace != null && workspace.workspaceId().equals(workspaceId)
+                    ? Optional.of(workspace)
+                    : Optional.empty();
         }
     }
 }

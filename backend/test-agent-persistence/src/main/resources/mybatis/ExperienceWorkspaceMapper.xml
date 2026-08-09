@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.ExperienceWorkspaceMapper">
+    <resultMap id="ExperienceBindingMap"
+               type="com.enterprise.testagent.persistence.mybatis.ExperienceWorkspaceBindingRow">
+        <constructor>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="configured_parameter_value" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findCurrentByLinuxServerId" resultMap="ExperienceBindingMap">
+        select linux_server_id, workspace_id, configured_parameter_value, trace_id, created_at, updated_at
+        from experience_workspace_bindings
+        where linux_server_id = #{linuxServerId}
+    </select>
+
+    <insert id="insertWorkspaceIfAbsent" databaseId="postgresql">
+        insert into workspaces(
+            workspace_id, name, root_path, status, linux_server_id, trace_id, created_at, updated_at
+        ) values (
+            #{workspaceId}, #{name}, #{rootPath}, #{status}, #{linuxServerId}, #{traceId}, #{createdAt}, #{updatedAt}
+        )
+        on conflict (workspace_id) do nothing
+    </insert>
+
+    <insert id="insertWorkspaceIfAbsent" databaseId="h2">
+        insert into workspaces(
+            workspace_id, name, root_path, status, linux_server_id, trace_id, created_at, updated_at
+        )
+        select #{workspaceId}, #{name}, #{rootPath}, #{status}, #{linuxServerId}, #{traceId}, #{createdAt}, #{updatedAt}
+        where not exists (
+            select 1 from workspaces where workspace_id = #{workspaceId}
+        )
+    </insert>
+
+    <insert id="insertCurrentBindingIfAbsent" databaseId="postgresql">
+        insert into experience_workspace_bindings(
+            linux_server_id, workspace_id, configured_parameter_value, trace_id, created_at, updated_at
+        ) values (
+            #{linuxServerId}, #{workspaceId}, #{configuredParameterValue}, #{traceId}, #{createdAt}, #{updatedAt}
+        )
+        on conflict (linux_server_id) do nothing
+    </insert>
+
+    <insert id="insertCurrentBindingIfAbsent" databaseId="h2">
+        insert into experience_workspace_bindings(
+            linux_server_id, workspace_id, configured_parameter_value, trace_id, created_at, updated_at
+        ) select
+            #{linuxServerId}, #{workspaceId}, #{configuredParameterValue}, #{traceId}, #{createdAt}, #{updatedAt}
+        where not exists (
+            select 1 from experience_workspace_bindings where linux_server_id = #{linuxServerId}
+        )
+    </insert>
+
+    <update id="updateCurrentBindingIfMatches">
+        update experience_workspace_bindings
+        set workspace_id = #{binding.workspaceId},
+            configured_parameter_value = #{binding.configuredParameterValue},
+            trace_id = #{binding.traceId},
+            updated_at = #{binding.updatedAt}
+        where linux_server_id = #{expected.linuxServerId}
+          and workspace_id = #{expected.workspaceId}
+          and configured_parameter_value = #{expected.configuredParameterValue}
+          and trace_id = #{expected.traceId}
+          and created_at = #{expected.createdAt}
+          and updated_at = #{expected.updatedAt}
+    </update>
+</mapper>

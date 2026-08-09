@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
@@ -87,8 +88,10 @@ class WorkspaceFileSocketTicketService {
                     Map.of("targetLinuxServerId", request.linuxServerId(), "currentLinuxServerId", currentLinuxServerId));
         }
         if (MODE_AGENT_CONFIG.equals(mode)) {
+            String workspaceId = agentConfigWorkspaceId(request);
+            rejectExperienceAgentConfig(principal.userId(), workspaceId);
             return response(ticketStore.issue(
-                    agentConfigWorkspaceId(request),
+                    workspaceId,
                     currentLinuxServerId,
                     null,
                     superAdmin,
@@ -314,6 +317,22 @@ class WorkspaceFileSocketTicketService {
 
     private String agentConfigWorkspaceId(WorkspaceFileSocketDtos.TicketRequest request) {
         return SCOPE_WORKSPACE.equals(agentConfigScope(request)) ? requiredWorkspaceId(request) : null;
+    }
+
+    /**
+     * 体验区只复用普通文件与对话能力，不能借 Agent 配置文件通道触达受保护的 .opencode 目录。
+     * 先走实时策略可确保历史绑定、失效资格和换目录场景同样按体验工作区失败关闭。
+     */
+    private void rejectExperienceAgentConfig(UserId userId, String workspaceId) {
+        if (workspaceId == null) {
+            return;
+        }
+        WorkspaceId id = new WorkspaceId(workspaceId);
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(id)) {
+            return;
+        }
+        workspaceAccessAuthorizer.requireClassifiedFileAccess(userId, id, true);
+        throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区不支持应用 Agent 配置管理");
     }
 
     private String agentConfigScope(WorkspaceFileSocketDtos.TicketRequest request) {

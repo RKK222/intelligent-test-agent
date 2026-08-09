@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
@@ -164,6 +165,34 @@ class WorkspaceFileSocketTicketServiceTest {
         assertThat(ticket.mode()).isEqualTo("agent-config");
         assertThat(ticket.scope()).isEqualTo("PUBLIC");
         assertThat(ticket.worktreeId()).isEqualTo("agw_1234567890abcdef");
+        verify(assignmentService, never()).fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
+    }
+
+    @Test
+    void rejectsExperienceWorkspaceAgentConfigTicket() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService, authorizer);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        when(workspaceService.currentLinuxServerId()).thenReturn("10.8.0.12");
+        when(authorizer.requireClassifiedFileAccess(USER_ID, workspaceId, true))
+                .thenReturn(FileWorkspaceKind.EXPERIENCE);
+
+        assertThatThrownBy(() -> service.createTicket(
+                        principal(List.of(Dictionary.ROLE_APP_ADMIN)),
+                        new WorkspaceFileSocketDtos.TicketRequest(
+                                workspaceId.value(),
+                                "10.8.0.12",
+                                "agent-config",
+                                "WORKSPACE",
+                                null),
+                        TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+                    assertThat(exception.getMessage()).contains("体验工作区");
+                });
+
         verify(assignmentService, never()).fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
     }
 

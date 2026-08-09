@@ -43,6 +43,54 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
+    void unavailableWorkspaceRootDoesNotExposePhysicalPath() {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Path missingRoot = root.resolve("missing-sensitive-root");
+
+        assertThatThrownBy(() -> service.listDirectory(missingRoot.toString(), ""))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.getMessage()).doesNotContain(missingRoot.toString());
+                    assertThat(exception.details().toString()).doesNotContain(missingRoot.toString());
+                    assertThat(exception.getCause()).isNull();
+                });
+    }
+
+    @Test
+    void serviceDoesNotFollowSymbolicLinks() throws Exception {
+        assumeTrue(isUnixLikePlatform());
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(externalRoot.resolve("external-secret.txt"), "external secret");
+        Files.createDirectories(root.resolve(".git"));
+        Files.writeString(root.resolve(".git/config"), "git metadata");
+        Files.createSymbolicLink(root.resolve("outside-alias"), externalRoot);
+        Files.createSymbolicLink(root.resolve("git-alias"), root.resolve(".git"));
+
+        assertThat(service.listDirectory(root.toString(), ""))
+                .extracting(FileTreeEntryResponse::name)
+                .doesNotContain("outside-alias", "git-alias");
+        assertThat(service.searchFiles(root.toString(), "secret"))
+                .extracting(FileSearchResultResponse::path)
+                .isEmpty();
+        assertThatThrownBy(() -> service.listDirectory(root.toString(), "outside-alias"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.readContent(root.toString(), "git-alias/config"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.writeContent(root.toString(), "outside-alias/created.txt", "blocked"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.createDirectory(root.toString(), "outside-alias/created"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        assertThat(externalRoot.resolve("created.txt")).doesNotExist();
+        assertThat(externalRoot.resolve("created")).doesNotExist();
+        assertThat(root.resolve(".git/config")).hasContent("git metadata");
+    }
+
+    @Test
     void serviceListsSingleDirectoryInSortedOrderWithConfiguredLimit() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 2);
         Files.createDirectories(root.resolve("src"));
@@ -367,7 +415,7 @@ class WorkspaceFileServiceTest {
 
         assertThatThrownBy(() -> service.moveFile(root.toString(), "suite", "alias/moved-suite"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
         assertThat(Files.isDirectory(root.resolve("suite"))).isTrue();
         assertThat(Files.readString(root.resolve("suite/case.md"))).isEqualTo("case");
     }
@@ -400,7 +448,7 @@ class WorkspaceFileServiceTest {
 
         assertThatThrownBy(() -> service.moveFile(root.toString(), "linked.txt", "target/linked.txt"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
 
         assumeTrue(isUnixLikePlatform());
         Path fifo = root.resolve("events.fifo");

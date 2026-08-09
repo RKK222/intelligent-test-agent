@@ -62,8 +62,7 @@ public class TerminalProcessFactory {
             throw new PlatformException(
                     ErrorCode.TERMINAL_UNAVAILABLE,
                     "PTY 后端不可用",
-                    Map.of("targetType", ticket.targetType(), "targetId", ticket.auditTargetId()),
-                    exception);
+                    Map.of("targetType", ticket.targetType(), "targetId", ticket.auditTargetId()));
         }
     }
 

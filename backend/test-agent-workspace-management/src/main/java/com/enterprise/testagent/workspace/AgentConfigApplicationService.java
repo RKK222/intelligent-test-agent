@@ -38,6 +38,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
@@ -914,7 +915,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
      */
     private List<FileTreeEntryResponse> listAgentConfigDirectory(Path agentRoot, String relativePath) {
         Path normalizedRoot = agentRoot.toAbsolutePath().normalize();
-        return fileService.listDirectory(normalizedRoot.toString(), relativePath).stream()
+        return fileService.listDirectoryIncludingSymbolicLinks(normalizedRoot.toString(), relativePath).stream()
                 .map(entry -> withAgentConfigDisplayNames(normalizedRoot, entry))
                 .toList();
     }
@@ -2384,6 +2385,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
 
     private Workspace existingWorkspaceForRouting(String workspaceId) {
         WorkspaceId id = new WorkspaceId(requireText(workspaceId, "工作区 ID 不能为空", "workspaceId"));
+        // 体验区只开放普通文件与对话；在底层服务统一阻断可覆盖 HTTP、路由和文件 WebSocket 的直接调用。
+        if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(id)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区不支持应用 Agent 配置管理");
+        }
         Workspace workspace = workspaceRepository.findById(id)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "工作区不存在", Map.of("workspaceId", workspaceId)));
         if (workspace.status() != WorkspaceStatus.ACTIVE) {

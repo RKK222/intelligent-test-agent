@@ -19,6 +19,7 @@
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。应用源码分支读取固定使用 70 秒、远端树/固定提交快照固定使用 130 秒的局部超时，以覆盖后端一次 60 秒分支命令及目录快照串行的两次 60 秒 Git 读取，不放宽其它 API。
 - 映射统一错误响应为 `BackendApiError`。
 - 暴露 Workspace、Session message、Run 与 Diff API；历史恢复优先使用 `getSessionTreeMessages`，`listSessionMessages(..., refresh=false)` 用于只读 transcript、Run ID 恢复和旧消息反馈兼容。新反馈不再依赖平台 assistant messageId。
+- `openExperienceWorkspace()` 使用 routed POST 调用 `/api/internal/platform/workspace-management/workspaces/experience/open`，不发送请求体、路径、服务器或 Workspace ID；`closeWorkspaceFileSocket(workspaceId)` 可在成员资格变化或页面卸载时立即关闭已建立或仍在连接中的指定工作区 socket，避免旧 ticket/RPC 继续留在页面。
 - 暴露 `getToolboxCatalog()` 与 `recordToolboxClick(toolId, eventId)`，统一访问 `/api/internal/platform/toolbox`；目录和点击沿用登录 Token，不携带工具级角色，`toolId` 使用路径编码，点击失败由工具盒子页面静默处理且不得阻断原生链接打开。
 - 工作区原始文件列表、读取、写入、二进制上传、普通文件复制/移动、状态和删除，以及工作台使用的引用组合视图 `listWorkspaceView/readWorkspaceViewFile`，统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。组合视图只映射后端签发的稳定 `id/locator/source/readonly/workspacePath/warnings`，不在浏览器自行解析引用根目录。`readFileBinaryChunk` / `readWorkspaceViewFileBinaryChunk` 透传有界 Base64 原始字节分段及文件快照，供任意二进制文件下载。
 - 工作区与 Agent 配置文件连接分别按路由键复用 single-flight 建连过程，并对缓存连接做实例身份校验；连接在 open 前关闭、报错或同步发送失败时会立即结算 pending，同步发送失败还会安全关闭已失效的底层 socket。只有 `workspace.read`、`workspace.view.read`、三类 `*.read.chunk`、两类 `*.read.binary.chunk` 与 `agent-config.read` 等幂等只读操作遇到明确 WebSocket 传输错误时自动重连并重试一次，业务错误、请求超时和写操作不重试。

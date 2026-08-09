@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -158,6 +159,50 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void sessionRuntimeRejectsAnotherUsersSessionBeforeResolvingProcess() {
+        Fixture fixture = new Fixture();
+        UserId owner = new UserId("usr_session_owner");
+        UserId caller = new UserId("usr_session_caller");
+        when(fixture.sessionRepository.findById(new SessionId("ses_1234567890abcdef")))
+                .thenReturn(Optional.of(Fixture.session().withSource(
+                        com.enterprise.testagent.domain.session.ConversationSourceType.MANUAL,
+                        null,
+                        owner)));
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        caller,
+                        () -> fixture.service.sessionTodo(
+                                "ses_1234567890abcdef",
+                                "trace_1234567890abcdef")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+
+        verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
+        verify(fixture.facade, never()).runtime(any());
+    }
+
+    @Test
+    void sessionRuntimeRechecksCurrentExperienceWorkspaceAccess() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_experience_owner");
+        fixture.useExperienceSession(userId);
+        doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(fixture.workspaceAccessAuthorizer)
+                .requireAccess(userId, new WorkspaceId("wrk_exp_1234567890abcdef"));
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.sessionTodo(
+                                "ses_1234567890abcdef",
+                                "trace_1234567890abcdef")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
+        verify(fixture.facade, never()).runtime(any());
+    }
+
+    @Test
     void listProvidersUsesV2ProviderPath() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
@@ -199,6 +244,214 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.path()).isEqualTo("/global/health");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(result).isInstanceOf(Map.class);
+    }
+
+    @Test
+    void experienceWorkspaceRejectsLegacyRuntimeFileApisBeforeForwarding() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        fixture.useExperienceWorkspace();
+        when(fixture.assignmentService.requireReadyProcess(
+                        userId,
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(Fixture.userProcessNode(
+                        "node_ocp_1234567890abcdef", "http://10.8.0.12:4096")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(List.of(Map.of("path", "/physical/experience/.git/config"))))));
+
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.fsList(
+                        "wrk_exp_1234567890abcdef", ".", "trace_1234567890abcdef")));
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.fsFind(
+                        "wrk_exp_1234567890abcdef", "config", "trace_1234567890abcdef")));
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.fsRead(
+                        "wrk_exp_1234567890abcdef", ".git/config", "trace_1234567890abcdef")));
+
+        verify(fixture.workspaceAccessAuthorizer, times(3))
+                .requireAccess(userId, new WorkspaceId("wrk_exp_1234567890abcdef"));
+        verify(fixture.facade, never()).runtime(any());
+    }
+
+    @Test
+    void experienceWorkspaceRejectsGenericRuntimeVcsBeforeForwarding() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        fixture.useExperienceWorkspace();
+        when(fixture.assignmentService.requireReadyProcess(
+                        userId,
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(Fixture.userProcessNode(
+                        "node_ocp_1234567890abcdef", "http://10.8.0.12:4096")));
+
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.vcsStatus(
+                        "wrk_exp_1234567890abcdef", "trace_1234567890abcdef")));
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.vcsDiff(
+                        "wrk_exp_1234567890abcdef", "working", 3, "trace_1234567890abcdef")));
+
+        verify(fixture.workspaceAccessAuthorizer, times(2))
+                .requireAccess(userId, new WorkspaceId("wrk_exp_1234567890abcdef"));
+        verify(fixture.facade, never()).runtime(any());
+    }
+
+    @Test
+    void experienceWorkspaceRedactsPhysicalRootFromRuntimeCatalogResponse() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        fixture.useExperienceWorkspace();
+        when(fixture.assignmentService.requireReadyProcess(
+                        userId,
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(Fixture.userProcessNode(
+                        "node_ocp_1234567890abcdef", "http://10.8.0.12:4096")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(List.of(Map.of(
+                        "name", "review",
+                        "template", "Review /physical/experience and /physical/experience/docs",
+                        "metadata", Map.of(
+                                "baseDirectory", "/physical/experience/.opencode/skills/review",
+                                "/physical/experience/commands/review", Map.of(
+                                        "references", List.of("/physical/experience/docs")))))))));
+
+        Object response = fixture.service.withUser(
+                userId,
+                () -> fixture.service.listCommands(
+                        "wrk_exp_1234567890abcdef", "trace_1234567890abcdef"));
+
+        assertThat(response.toString())
+                .contains("<experience-workspace>")
+                .doesNotContain("/physical/experience");
+    }
+
+    @Test
+    void experienceWorkspaceRedactsPhysicalRootFromRuntimeErrors() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        fixture.useExperienceWorkspace();
+        when(fixture.assignmentService.requireReadyProcess(
+                        userId,
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(Fixture.userProcessNode(
+                        "node_ocp_1234567890abcdef", "http://10.8.0.12:4096")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.error(new PlatformException(
+                ErrorCode.OPENCODE_BAD_GATEWAY,
+                "runtime failed at /physical/experience",
+                Map.of("directory", "/physical/experience/.opencode"))));
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.listAgents(
+                                "wrk_exp_1234567890abcdef", "trace_1234567890abcdef")))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.getMessage())
+                            .contains("<experience-workspace>")
+                            .doesNotContain("/physical/experience");
+                    assertThat(exception.details().toString())
+                            .contains("<experience-workspace>")
+                            .doesNotContain("/physical/experience");
+                });
+    }
+
+    @Test
+    void experienceWorkspaceRejectsExperimentalWorktreeApisBeforeForwarding() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        fixture.useExperienceWorkspace();
+        when(fixture.assignmentService.requireReadyProcess(
+                        userId,
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(Fixture.userProcessNode(
+                        "node_ocp_1234567890abcdef", "http://10.8.0.12:4096")));
+
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.listWorktrees(
+                        "wrk_exp_1234567890abcdef", "trace_1234567890abcdef")));
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.createWorktree(
+                        Map.of("workspaceId", "wrk_exp_1234567890abcdef", "name", "feature"),
+                        "trace_1234567890abcdef")));
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.removeWorktree(
+                        Map.of("workspaceId", "wrk_exp_1234567890abcdef", "name", "feature"),
+                        "trace_1234567890abcdef")));
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.withUser(
+                userId,
+                () -> fixture.service.resetWorktree(
+                        Map.of("workspaceId", "wrk_exp_1234567890abcdef"),
+                        "trace_1234567890abcdef")));
+
+        verify(fixture.facade, never()).runtime(any());
+    }
+
+    @Test
+    void staticTokenCannotRouteHistoricalExperienceWorkspace() {
+        Fixture fixture = new Fixture();
+        fixture.useExperienceWorkspace();
+
+        assertExperienceRuntimeFileApiForbidden(() -> fixture.service.listAgents(
+                "wrk_exp_1234567890abcdef", "trace_1234567890abcdef"));
+
+        verify(fixture.facade, never()).runtime(any());
+        verify(fixture.workspaceAccessAuthorizer, never()).requireAccess(any(), any());
+    }
+
+    @Test
+    void worktreeMutationRejectsMissingWorkspaceAndUnlistedPhysicalDirectory() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        when(fixture.assignmentService.requireReadyProcess(
+                        userId,
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(Fixture.userProcessNode(
+                        "node_ocp_1234567890abcdef", "http://10.8.0.12:4096")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(List.of(Map.of(
+                        "name", "feature",
+                        "directory", "/tmp/demo/.worktrees/feature"))))));
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.removeWorktree(
+                                Map.of("directory", "/physical/experience"),
+                                "trace_1234567890abcdef")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.removeWorktree(
+                                Map.of(
+                                        "workspaceId", "wrk_1234567890abcdef",
+                                        "directory", "/physical/experience"),
+                                "trace_1234567890abcdef")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("GET");
+        assertThat(command.path()).isEqualTo("/experimental/worktree");
+    }
+
+    private void assertExperienceRuntimeFileApiForbidden(Runnable invocation) {
+        assertThatThrownBy(invocation::run)
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }
 
     @Test
@@ -446,6 +699,7 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.method()).isEqualTo("POST");
         assertThat(command.path()).isEqualTo("/experimental/worktree");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
+        assertThat(command.body()).isEqualTo(Map.of("branch", "feature"));
     }
 
     @Test
@@ -766,6 +1020,38 @@ class OpencodeRuntimeApplicationServiceTest {
                     new ObjectMapper(),
                     null,
                     runApplicationService);
+        }
+
+        private void useExperienceWorkspace() {
+            when(workspaceRepository.findById(new WorkspaceId("wrk_exp_1234567890abcdef")))
+                    .thenReturn(Optional.of(new Workspace(
+                            new WorkspaceId("wrk_exp_1234567890abcdef"),
+                            "体验工作区",
+                            "/physical/experience",
+                            WorkspaceStatus.ACTIVE,
+                            NOW,
+                            NOW,
+                            "server-1",
+                            "trace_1234567890abcdef")));
+        }
+
+        private void useExperienceSession(UserId owner) {
+            useExperienceWorkspace();
+            when(sessionRepository.findById(new SessionId("ses_1234567890abcdef")))
+                    .thenReturn(Optional.of(new Session(
+                            new SessionId("ses_1234567890abcdef"),
+                            new WorkspaceId("wrk_exp_1234567890abcdef"),
+                            "体验会话",
+                            SessionStatus.ACTIVE,
+                            NOW,
+                            NOW,
+                            "trace_1234567890abcdef",
+                            "ses_remote1234567890abcdef",
+                            new ExecutionNodeId("node_1234567890abcdef"))
+                            .withSource(
+                                    com.enterprise.testagent.domain.session.ConversationSourceType.MANUAL,
+                                    null,
+                                    owner)));
         }
 
         private OpencodeRuntimeCommand captureCommand() {

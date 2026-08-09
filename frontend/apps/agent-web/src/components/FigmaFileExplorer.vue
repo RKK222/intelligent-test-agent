@@ -18,7 +18,7 @@ import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe,
 import type { AppSourceWorkspaceContext, SelectedWorkspaceKind } from "./app-source-workspace";
 import { normalizePhysicalAbsolutePath } from "./physical-path";
 
-const props = defineProps<FileExplorerProps & {
+const props = withDefaults(defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
   /** 当前应用名，传递给 WorkbenchFooter 作为两级菜单首行提示 */
   appName?: string;
@@ -36,6 +36,8 @@ const props = defineProps<FileExplorerProps & {
   pullingPersonalWorkspace?: boolean;
   /** 是否允许当前个人工作区执行普通文件写操作 */
   canWrite?: boolean;
+  /** 是否允许修改 Git index、回退、提交或发布；体验区与普通文件写权限分离。 */
+  canMutateGit?: boolean;
   /** 是否允许编辑应用级 Agent/Skill/Rules/Templates 配置 */
   canManageAgentConfig?: boolean;
   /** 是否允许编辑公共 Git 中的 Agent/Skill 配置（仅超级管理员） */
@@ -89,7 +91,10 @@ const props = defineProps<FileExplorerProps & {
   appSourceRepositories?: AppSourceRepositorySummary[];
   loadingAppSourceRepositories?: boolean;
   appSourceRepositoriesError?: string | null;
-}>();
+}>(), {
+  // 旧调用方未传该新增能力时继续继承 canWrite，不能被 Boolean prop 的缺省 false 改成只读。
+  canMutateGit: undefined
+});
 
 const emit = defineEmits<{
   toggleDirectory: [path: string];
@@ -164,6 +169,8 @@ const gitChangesPanelRef = ref<InstanceType<typeof GitChangesPanel> | null>(null
 const tab = ref<ExplorerTab>("explorer");
 const totalChangedFileCount = ref<number | null>(null);
 const displayedChangedFileCount = computed(() => totalChangedFileCount.value ?? props.changedFiles.length);
+const managedWorkspaceMode = computed(() => (props.workspaceKind ?? "MANAGED") === "MANAGED");
+const experienceWorkspaceMode = computed(() => props.workspaceKind === "EXPERIENCE");
 // Git diff 文件是当前目录内路径；把当前版本所属目录下传，才能与仓库级阻塞路径做无歧义映射。
 const selectedWorkspaceDirectoryPath = computed(() => {
   const selectedVersionId = props.selectedVersionId;
@@ -320,6 +327,7 @@ function onResizeEnd() {
 }
 
 function refreshAgents() {
+  if (!managedWorkspaceMode.value) return;
   agentConfigPanelRef.value?.refreshAll();
 }
 
@@ -427,6 +435,12 @@ defineExpose({
       </div>
       <button type="button" aria-label="返回应用工作区" @click="emit('returnManagedWorkspace')">返回应用工作区</button>
     </div>
+    <div v-else-if="experienceWorkspaceMode" class="experience-mode-banner" role="status">
+      <strong>体验工作区</strong>
+      <span>多人共享，可能同时修改相同文件</span>
+      <span>本地 Git 只读展示</span>
+      <span class="is-warning">请勿存放敏感数据</span>
+    </div>
 
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
@@ -444,8 +458,10 @@ defineExpose({
         :api-base-url="apiBaseUrl"
         :route-linux-server-id="routeLinuxServerId"
         :can-write="!!canWrite"
-        :can-manage-agent-config="canManageAgentConfig ?? !!canWrite"
-        :can-manage-public-config="canManagePublicConfig ?? !!canWrite"
+        :can-mutate-git="canMutateGit ?? !!canWrite"
+        :include-agent-scopes="managedWorkspaceMode"
+        :can-manage-agent-config="managedWorkspaceMode && (canManageAgentConfig ?? !!canWrite)"
+        :can-manage-public-config="managedWorkspaceMode && (canManagePublicConfig ?? !!canWrite)"
         @open-diff="(payload) => emit('openDiff', payload)"
         @changes-refreshed="handleChangesRefreshed"
         @agent-files-discarded="(payload) => emit('agent-files-discarded', payload)"
@@ -490,7 +506,7 @@ defineExpose({
                 <Plus class="h-3.5 w-3.5 figma-fe-action-icon--plus" :stroke-width="1.5" />
               </button>
               <button
-                v-if="tab === 'explorer'"
+                v-if="tab === 'explorer' && managedWorkspaceMode"
                 type="button"
                 class="figma-fe-section-action-btn"
                 :title="iframeUrl ? '打开外部页面' : '工作区物理路径不可用'"
@@ -525,7 +541,7 @@ defineExpose({
                     <span>刷新文件树</span>
                   </button>
                   <button
-                    v-if="workspaceKind !== 'APP_SOURCE'"
+                    v-if="managedWorkspaceMode"
                     type="button"
                     class="figma-fe-more-menu-item"
                     aria-label="拉取远程"
@@ -605,7 +621,7 @@ defineExpose({
 
         <!-- Resizer divider: only show if both sections are expanded -->
         <div
-          v-if="workspaceKind !== 'APP_SOURCE' && workspaceExpanded && agentsExpanded"
+          v-if="managedWorkspaceMode && workspaceExpanded && agentsExpanded"
           class="figma-fe-resize-handle"
           @mousedown="onResizeStart"
           role="separator"
@@ -613,7 +629,7 @@ defineExpose({
         />
 
         <!-- Section 2: agents -->
-        <div v-if="workspaceKind !== 'APP_SOURCE'" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
+        <div v-if="managedWorkspaceMode" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
           <div class="figma-fe-section-header">
             <button
               type="button"
@@ -750,6 +766,35 @@ defineExpose({
   color: #5b21b6;
   font-size: 10px;
   cursor: pointer;
+}
+
+.experience-mode-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid #cddbec;
+  background: #f3f7fc;
+  color: #52647b;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.experience-mode-banner strong {
+  color: #294f82;
+  font-size: 12px;
+}
+
+.experience-mode-banner span + span::before {
+  margin-right: 8px;
+  color: #a8b5c5;
+  content: "·";
+}
+
+.experience-mode-banner .is-warning {
+  color: #8a5a13;
+  font-weight: 600;
 }
 
 .figma-file-explorer {

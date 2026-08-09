@@ -1,5 +1,7 @@
 # test-agent-persistence
 
+- 候选 `V20260809210000__common_parameters_add_experience_workspace.sql` 初始化 `OPENCODE_EXPERIENCE_WORKSPACE_DIR/all=UNCONFIGURED`（可编辑），并创建按 `linux_server_id` 唯一的 `experience_workspace_bindings` 当前绑定表及有效成员用户索引；不创建物理目录、Git 仓库或演示 Workspace。`ExperienceWorkspaceMapper.xml` / `MyBatisExperienceWorkspaceRepository` 使用数据库原子 CAS 幂等登记 Workspace 与当前绑定，换目录只更新绑定并保留历史 Workspace，多 Java 实例的迟到旧配置不能覆盖新绑定。
+
 - `V20260809120000__create_external_api_credentials.sql` 创建外部工具凭据与 scope 表，不写默认工具数据；`ExternalApiCredentialMapper.xml` / `MyBatisExternalApiCredentialRepository` 承载分页、整表加载、CRUD 和 scope 原子替换，数据库仅保存 RSA 密文、指纹和掩码提示。
 
 - 用户管理组合分页查询和“全部检索结果”有界 ID 解析由 `UserManagementQueryMapper.xml` / `MyBatisUserManagementQueryRepository` 实现，支持用户关键字、角色（含未分配角色）、组织、研发部门和部门筛选，并可在 SQL 中排除当前操作者；未修改 users/user_roles 表结构，也没有新增 Flyway migration。
@@ -32,7 +34,7 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、外部 API 凭据、opencode 用户进程管理拓扑、AI 回复反馈、运营分析 rollup、应用配置管理、应用版本工作区、个人工作区和定时任务框架等持久化；运行态 Workspace 记录可空 `linux_server_id` 以支持文件 WebSocket 同服务器校验和 legacy 回填。
+- Workspace、每服务器体验 Workspace 当前绑定、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、外部 API 凭据、opencode 用户进程管理拓扑、AI 回复反馈、运营分析 rollup、应用配置管理、应用版本工作区、个人工作区和定时任务框架等持久化；运行态 Workspace 记录可空 `linux_server_id` 以支持文件 WebSocket 同服务器校验和 legacy 回填。
 - `RunMapper.xml` 提供精确 `SIDE_QUESTION + active + updated_at < cutoff` 孤儿查询；Session history 与用户 runtime-state 查询显式排除内部 `SIDE_QUESTION` Session，即使异常数据误为 ACTIVE 也不可见。
 - `InactiveOpencodeProcessMapper.xml` 按 ACTIVE binding 和本机 Linux 服务器查询 `RUNNING/UNHEALTHY` 用户进程，以该用户全部来源 Run 的最大 `updated_at` 聚合最近 OpenCode 活动；无 Run 时回退 manager 权威 `started_at`。SQL 先收窄相关进程，再分别利用 `runs.triggered_by_user_id` 和 `sessions.created_by_user_id` 现有索引聚合直接归属与 legacy Run，避免按每个候选重复全表扫描；同时通过 `night_execution_tasks(owner_user_id,status,slot_start)` 现有索引排除执行窗口尚未结束的跨夜遗留任务和北京时间当天 `SCHEDULED/DISPATCHING` 任务。候选和闸门内精确复核都走该 MyBatis XML，不向存量进程 JDBC Repository 新增 SQL，也不新增数据库结构。
 - Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。

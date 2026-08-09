@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.run.RunResendRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService;
@@ -54,6 +55,7 @@ public class SessionApplicationService {
     private NightExecutionSessionLockGuard nightExecutionLockGuard;
     private RunResendRepository runResendRepository;
     private UserWorkspaceQueryRepository userWorkspaceQueryRepository;
+    private ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
 
     /**
      * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
@@ -306,7 +308,7 @@ public class SessionApplicationService {
 
     /** 更新用户自己的会话。 */
     public Session updateSession(UserId userId, SessionId sessionId, String title, Boolean pinned, String traceId) {
-        getSession(userId, sessionId);
+        requireUserSessionWriteAccess(userId, sessionId);
         return updateSession(sessionId, title, pinned, traceId);
     }
 
@@ -322,7 +324,9 @@ public class SessionApplicationService {
      */
     public Session archiveSession(UserId userId, SessionId sessionId, String traceId) {
         requireNightExecutionUnlocked(sessionId);
-        Session current = userId == null ? getSession(sessionId) : getSession(userId, sessionId);
+        Session current = userId == null
+                ? getSession(sessionId)
+                : requireUserSessionWriteAccess(userId, sessionId);
         ConversationContextSessionRevocation revocation = conversationContextStore == null
                 ? null
                 : conversationContextStore.revokeSession(sessionId);
@@ -362,7 +366,7 @@ public class SessionApplicationService {
         if (userId == null) {
             getSession(sessionId);
         } else {
-            getSession(userId, sessionId);
+            requireUserSessionWriteAccess(userId, sessionId);
         }
         SessionMessageRole resolvedRole = role == null ? SessionMessageRole.USER : role;
         SessionMessage draft = new SessionMessage(
@@ -395,10 +399,27 @@ public class SessionApplicationService {
         this.userWorkspaceQueryRepository = userWorkspaceQueryRepository;
     }
 
+    /** 体验工作区没有个人关联行，创建会话前必须改走体验实时访问策略。 */
+    @Autowired
+    void setExperienceWorkspaceAccessAuthorizer(
+            ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer) {
+        this.experienceWorkspaceAccessAuthorizer = experienceWorkspaceAccessAuthorizer;
+    }
+
     private void requireNightExecutionUnlocked(SessionId sessionId) {
         if (nightExecutionLockGuard != null) {
             nightExecutionLockGuard.requireUnlocked(sessionId);
         }
+    }
+
+    /** 历史会话保持可读，但体验资格或当前绑定失效后不能再修改会话及追加本地消息。 */
+    private Session requireUserSessionWriteAccess(UserId userId, SessionId sessionId) {
+        Session session = getSession(userId, sessionId);
+        if (experienceWorkspaceAccessAuthorizer != null
+                && experienceWorkspaceAccessAuthorizer.isExperienceWorkspace(session.workspaceId())) {
+            experienceWorkspaceAccessAuthorizer.requireAccess(userId, session.workspaceId());
+        }
+        return session;
     }
 
     /**
@@ -446,12 +467,42 @@ public class SessionApplicationService {
             PageRequest pageRequest,
             String traceId,
             boolean refreshSnapshot) {
-        getSession(userId, sessionId);
-        return listMessages(sessionId, pageRequest, traceId, refreshSnapshot);
+        Session session = getSession(userId, sessionId);
+        return listMessages(
+                sessionId,
+                pageRequest,
+                traceId,
+                refreshSnapshot && currentExperienceRuntimeAvailable(userId, session));
+    }
+
+    /**
+     * 历史 Session 可继续展示数据库快照；只有当前体验绑定仍有效时才允许控制器读取远端 Session tree。
+     */
+    public boolean canUseLiveRuntime(UserId userId, SessionId sessionId) {
+        return currentExperienceRuntimeAvailable(userId, getSession(userId, sessionId));
+    }
+
+    private boolean currentExperienceRuntimeAvailable(UserId userId, Session session) {
+        if (experienceWorkspaceAccessAuthorizer == null
+                || !experienceWorkspaceAccessAuthorizer.isExperienceWorkspace(session.workspaceId())) {
+            return true;
+        }
+        try {
+            experienceWorkspaceAccessAuthorizer.requireAccess(userId, session.workspaceId());
+            return true;
+        } catch (PlatformException exception) {
+            // 参数换目录、加入应用或服务器变化后，历史读取降级到已持久化快照，绝不触发远端访问。
+            return false;
+        }
     }
 
     private void requireUserWorkspace(UserId userId, WorkspaceId workspaceId) {
         if (userId == null || userWorkspaceQueryRepository == null) {
+            return;
+        }
+        if (experienceWorkspaceAccessAuthorizer != null
+                && experienceWorkspaceAccessAuthorizer.isExperienceWorkspace(workspaceId)) {
+            experienceWorkspaceAccessAuthorizer.requireAccess(userId, workspaceId);
             return;
         }
         if (userWorkspaceQueryRepository.findUserWorkspace(userId, workspaceId).isEmpty()) {

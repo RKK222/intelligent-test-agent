@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.observability.TraceConstants;
@@ -23,6 +24,7 @@ import com.enterprise.testagent.system.supportaccess.SupportAccessAuthorization;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -208,13 +210,20 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             id = text(root, "id");
             op = requiredText(root, "op");
             JsonNode params = root.path("params");
+            boolean experienceWorkspaceRpc = false;
             if (MODE_WORKSPACE.equals(ticket.mode()) && op.startsWith("workspace.")) {
                 if (ticket.supportReadOnly()) {
                     requireSupportReadOperation(op);
                 }
                 auditedWorkspaceId = workspaceId(ticket, params);
-                auditedPath = supportAuditPath(op, params);
                 supportAuthorization = authorizeWorkspaceRpc(ticket, auditedWorkspaceId);
+                // 实时授权必须先于路径级拒绝，确保体验资格、当前绑定和服务器事实每条 RPC 都重新核对。
+                auditedPath = supportAuditPath(op, params);
+                experienceWorkspaceRpc = ExperienceWorkspaceAccessAuthorizer
+                        .isExperienceWorkspaceId(auditedWorkspaceId);
+                if (experienceWorkspaceRpc) {
+                    requireExperienceWorkspaceOperation(op, params);
+                }
             }
             Object data = switch (op) {
                 case "workspace.list" -> workspaceService.listFiles(workspaceId(ticket, params), text(params, "path"));
@@ -363,6 +372,9 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 case "workspace.create" -> createWorkspace(ticket, params, traceId);
                 default -> throw new PlatformException(ErrorCode.VALIDATION_ERROR, "不支持的文件 WebSocket 操作", Map.of("op", op));
             };
+            if (experienceWorkspaceRpc) {
+                data = sanitizeExperienceReadResult(op, data);
+            }
             if (supportAuthorization != null) {
                 data = sanitizeSupportReadResult(op, data);
                 // 审计必须先于正文响应落库；审计存储异常时不会把 data 发送给浏览器。
@@ -438,6 +450,43 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         if ("workspace.search".equals(op) && data instanceof java.util.List<?> values) {
             return values.stream()
                     .filter(value -> !(value instanceof FileSearchResultResponse entry) || !protectedConfigPath(entry.path()))
+                    .toList();
+        }
+        return data;
+    }
+
+    /**
+     * 体验区的普通文件通道不能借管理员角色触达 Git 元数据、受控 Agent 配置或应用引用组合视图。
+     * 直接路径在执行前拒绝，根列表与搜索结果在响应前过滤，双层约束避免目录名侧漏后再被别名访问。
+     */
+    private void requireExperienceWorkspaceOperation(String op, JsonNode params) {
+        if (op.startsWith("workspace.view.")) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区不支持应用引用目录");
+        }
+        List<String> paths = new java.util.ArrayList<>();
+        paths.add(text(params, "path"));
+        paths.add(text(params, "sourcePath"));
+        paths.add(text(params, "targetPath"));
+        if ("workspace.rename".equals(op)) {
+            paths.add(text(params, "name"));
+        }
+        if (paths.stream().anyMatch(this::experienceProtectedPath)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区不允许访问受控目录");
+        }
+    }
+
+    /** 体验区列表和搜索不返回 .git 或 .opencode 命名空间。 */
+    private Object sanitizeExperienceReadResult(String op, Object data) {
+        if ("workspace.list".equals(op) && data instanceof java.util.List<?> values) {
+            return values.stream()
+                    .filter(value -> !(value instanceof FileTreeEntryResponse entry)
+                            || !experienceProtectedPath(entry.path()))
+                    .toList();
+        }
+        if ("workspace.search".equals(op) && data instanceof java.util.List<?> values) {
+            return values.stream()
+                    .filter(value -> !(value instanceof FileSearchResultResponse entry)
+                            || !experienceProtectedPath(entry.path()))
                     .toList();
         }
         return data;
@@ -542,6 +591,10 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     new com.enterprise.testagent.domain.user.UserId(ticket.userId()),
                     ticket.appAdmin());
         }
+        if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspaceId)
+                && experienceProtectedPath(path)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区不允许访问受控目录");
+        }
         if (protectedConfigPath(path) && !ticket.appAdmin()) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "应用 OpenCode 配置仅应用管理员可编辑");
         }
@@ -563,6 +616,18 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         }
         // 整个命名空间都属于应用配置，不能让 command/plugin 或辅助源码通过目录别名绕过管理员权限。
         return normalized.equals(".opencode") || normalized.startsWith(".opencode/");
+    }
+
+    private boolean experienceProtectedPath(String path) {
+        String normalized = path == null ? "" : path.trim().replace('\\', '/');
+        try {
+            normalized = java.nio.file.Path.of(normalized).normalize().toString().replace('\\', '/');
+        } catch (RuntimeException exception) {
+            return true;
+        }
+        // 体验目录多人共享，任意层级的 Git 元数据和 OpenCode 配置命名空间都不通过文件 RPC 暴露。
+        return java.util.Arrays.stream(normalized.split("/"))
+                .anyMatch(segment -> ".git".equalsIgnoreCase(segment) || ".opencode".equalsIgnoreCase(segment));
     }
 
     private Object directoryList(WorkspaceFileSocketTicket ticket, JsonNode params) {

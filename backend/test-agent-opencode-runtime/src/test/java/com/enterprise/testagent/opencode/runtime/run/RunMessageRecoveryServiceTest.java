@@ -41,7 +41,10 @@ import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import com.enterprise.testagent.opencode.client.OpencodeCancelCommand;
 import com.enterprise.testagent.opencode.client.OpencodeCancelResult;
@@ -83,6 +86,65 @@ class RunMessageRecoveryServiceTest {
     private static final RunId RUN_ID = new RunId("run_1234567890abcdef");
     private static final SessionId SESSION_ID = new SessionId("ses_1234567890abcdef");
     private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
+
+    @Test
+    void experienceSessionRecoveryRedactsPhysicalRootFromMessageAndPartPayloads() {
+        WorkspaceId experienceWorkspaceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        Session experienceSession = new Session(
+                        SESSION_ID,
+                        experienceWorkspaceId,
+                        "Experience session",
+                        SessionStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "trace_1234567890abcdef")
+                .attachOpencodeSession(
+                        REMOTE_SESSION_ID,
+                        node().executionNodeId(),
+                        NOW,
+                        "trace_1234567890abcdef");
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.result = new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of(
+                                "id", "msg_experience",
+                                "role", "assistant",
+                                "/physical/experience/message", "metadata"),
+                        List.of(Map.of(
+                                "id", "part_experience",
+                                "messageID", "msg_experience",
+                                "type", "text",
+                                "text", "Read /physical/experience/docs")))),
+                null,
+                null);
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(experienceSession),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+        WorkspaceRepository workspaceRepository = mock(WorkspaceRepository.class);
+        when(workspaceRepository.findById(experienceWorkspaceId)).thenReturn(Optional.of(new Workspace(
+                experienceWorkspaceId,
+                "Experience",
+                "/physical/experience",
+                WorkspaceStatus.ACTIVE,
+                NOW,
+                NOW,
+                "server-a",
+                "trace_1234567890abcdef")));
+        service.configureWorkspaceRepository(workspaceRepository);
+
+        RunHistoryRecoveryResult result = service
+                .recoverSessionTreeHistory(SESSION_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.events())
+                .extracting(event -> event.payload().toString())
+                .allMatch(payload -> !payload.contains("/physical/experience"))
+                .anyMatch(payload -> payload.contains("<experience-workspace>"));
+    }
 
     @Test
     void historyRecoveryUsesRedisSnapshotBeforeOpenCodeAndPostgresql() {

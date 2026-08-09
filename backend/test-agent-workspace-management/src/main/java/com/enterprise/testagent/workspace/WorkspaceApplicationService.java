@@ -415,13 +415,20 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         try {
             Path root = Path.of(rootPath).toRealPath();
             if (!Files.isDirectory(root)) {
-                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作区根路径必须是目录", Map.of("rootPath", rootPath));
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "工作区根路径不可用",
+                        Map.of("reason", "ROOT_NOT_DIRECTORY"));
             }
             return root;
         } catch (PlatformException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作区根路径不存在", Map.of("rootPath", rootPath), exception);
+            // 物理根目录属于服务器配置事实，任何文件路由失败都只返回安全 reason，不回传路径或 cause。
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "工作区根路径不可用",
+                    Map.of("reason", "ROOT_UNAVAILABLE"));
         }
     }
 

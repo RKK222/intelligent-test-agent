@@ -239,6 +239,14 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - 当前 workspace 必须由远端 session 经平台 agent binding 反查，禁止接受 Tool 传入 workspace ID、个人 workspace ID、物理路径或目标服务器。owner 不一致、非个人 workspace 或绑定缺失必须失败关闭。
 - `discard`、`publish`、冲突解决和取消合并必须先显示 OpenCode permission 确认；Tool 返回给模型的错误详情只保留原因、相对文件和并发提交等安全字段，不返回凭据、Git 命令或物理路径。
 
+## 平台体验工作区安全边界
+
+- 体验资格只由服务端权威事实判断：用户不存在任何启用应用的未删除成员关系。客户端不得提交应用、路径、服务器或 Workspace ID 来扩大资格；`SUPER_ADMIN` 角色不旁路。当前用户加入应用后，所有旧体验 ID 必须继续进入体验策略并失败关闭，禁止降级为超级管理员任意目录或普通非托管 Workspace。
+- 每次打开、Workspace 详情、Session 创建与用户写入、Git 状态、文件 route/ticket、每条文件 RPC、Session runtime 目标、无 token 兼容 Run、contextToken 滑动续期和会话上下文签发都必须确认当前服务器最新绑定、Workspace ACTIVE、稳定服务器身份和当前目录真实路径一致。参数换目录、服务器变化或绑定失效后，旧连接和历史 Session 不能改写会话、读取文件、启动新 Run 或签发/续期上下文；历史会话列表和数据库快照可按原归因保留，但不能退化为写入或运行授权。Workspace PTY 与体验 Run SSE 必须独立于客户端输入/新事件按固定短间隔复核，撤权后主动关闭长连接；Diff、Diff 决策和 session-tree 等实时 Run 子路由必须严格转发到 Run 生产 Java，不能在随机入口服务器本地执行。
+- 体验目录是同服务器多用户共享写域，不能承诺用户隔离、并发写保护、快照恢复、自动清理或远端备份。邀请和工作台必须明确提示并发覆盖与敏感数据风险；禁止在目录中存放密码、Token、SSH key、客户数据或其它秘密。平台文件接口继续拒绝根目录以及任意层级 `.git`、`.opencode`；目录列表不展示符号链接，直接请求逐段拒绝末端或中间链接，搜索不跟随链接。由于保留终端和 Agent 普通写工具，且共享用户以同一 Java/worker 操作系统身份访问，这些路径校验不是抵御同机恶意并发替换的 OS 沙箱；需要对不互信用户提供隔离时，必须另行采用独立操作系统身份、容器/挂载策略或关闭终端与通用写工具，不能把本体验区用于该场景。
+- “Git 只读”特指平台 Git 展示和受控 HTTP/RPC：体验 Workspace 不能获得 personal workspace ID，后端 Git mutation 入口仍要求个人 owner 映射，OpenCode experimental worktree 列表和变更接口固定拒绝；OpenCode 通用 `/vcs/status|diff` 同样固定拒绝。体验变更面板只能调用平台使用精确 pathspec、`--no-optional-locks`、禁 fsmonitor/untracked cache、external diff/textconv 的只读实现，并过滤任意层级且大小写不敏感的 `.git`/`.opencode` 与符号链接条目。只读 patch 必须同时限制单文件与整次响应预算；未跟踪超大、多行、二进制或非严格 UTF-8 文件只返回状态，不读取或复制完整正文。前端同时隐藏 stage、unstage、discard、commit、pull/push、发布、个人 worktree 和应用 Agent 配置。所有体验 ID（含历史绑定）的 Agent 配置 HTTP/路由服务必须失败关闭，`agent-config/WORKSPACE` 文件 ticket 必须先实时校验体验资格与当前绑定再返回 `FORBIDDEN`，`SUPER_ADMIN`/`APP_ADMIN` 都不能绕过。普通文件 RPC 也必须拒绝受控命名空间并过滤列表/搜索；体验区只使用普通 `workspace.*` 文件 RPC，不开放应用引用 `workspace.view.*` 组合视图，旧 `/opencode-runtime/fs/list|find|read` 也固定拒绝。保留的终端和 Agent shell/write/edit 能力可修改共享普通文件，也可能直接执行 Git 命令，因此平台不承诺 Git 元数据对主动命令不可写；这是共享体验模型的显式信任边界。Git 状态失败不得阻断普通文件或对话。
+- `UNCONFIGURED`、目录不存在/不可写、非 Git、进程/服务器不可用和 Git 状态错误只返回稳定错误码、通用文案与 traceId。成功 `WorkspaceResponse` 只返回 `workspace:{workspaceId}` 逻辑根；OpenCode runtime 的 catalog/session 投影、Run 实时/恢复事件、旁路问答 delta/答案、自动标题、消息持久化快照和错误详情必须递归替换体验物理根，Map key、集合与数组也不能遗漏。响应 details、异常 cause 和日志不得包含配置原值、真实物理路径、remote 或底层命令输出；Git 工作树探测和只读状态命令必须在专用脱敏作用域内执行，命令的 `-C` 参数、stderr 与执行失败详情统一用固定占位符替换体验目录。
+
 ## UI 测试执行 Tool 安全边界
 
 - `ui_test_execute` 每次先通过 `TEST_AGENT_PLATFORM_BASE_URL` 直连同节点 Java 的精确只读接口，读取超级管理员维护的 `UITEST_BASE_URL`，再直连独立 UI 平台；地址不进入 Tool 参数、Agent prompt 或案例内容，Java 不代理 UI 请求。

@@ -32,6 +32,7 @@
 14. 企业同源部署将前端 API base URL 显式配置为空，RunEvent 与用户级运行态 SSE 客户端必须保留 `/api/...` 相对地址交给浏览器按当前 origin 解析；不得用缺少 origin 的 `new URL("/api/...")` 构造地址。前后端分离部署仍使用配置的绝对 base URL。
 15. 已认证 fetch SSE 可携带页面内存中的 `X-Test-Agent-Linux-Server-Id`，RunEvent 与用户级运行态 SSE 使用同一动态值；空值不发送。它只供 Nginx 做静态白名单首跳，Nginx 转发前删除，后端仍按 Run/用户归属执行权威校验和跨 Java 兜底。旧客户端或无法自定义 header 的原生 EventSource 不发送时继续使用默认 upstream，事件格式和恢复语义不变。
 16. 批量生成子条目测试案例只编排多个独立 Session、Run 或夜间任务，不新增批量级 RunEvent。每个立即执行项仍订阅自己的既有 RunEvent SSE；定时项在普通 Run 受理后沿用相同事件流，`batchId/itemRequestId` 不进入事件 payload。
+17. 平台体验工作区只新增 Workspace 打开 HTTP 能力和前端工作区类型，不新增或修改 RunEvent/SSE wire name。体验区对话仍使用既有 Session、Run 与 RunEvent；所有实时、恢复和旁路问答 payload 在发布/持久化前递归投影物理根且保留原 scope。体验 Run SSE 建连后每秒独立复核当前 Workspace 资格，加入应用、改配或 binding 变化时直接结束旧连接，不新增撤权事件类型。
 
 ## RunEvent 基础字段
 

@@ -244,10 +244,13 @@ public class SessionController {
         SessionId currentSessionId = new SessionId(sessionId);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return Mono.fromCallable(() -> {
-                    sessionService.getSession(userId, currentSessionId);
+                    boolean liveRuntimeAvailable = sessionService.canUseLiveRuntime(userId, currentSessionId);
                     RunHistoryRecoveryResult recovery = messageRecoveryService == null
                             ? RunHistoryRecoveryResult.full(
                                     List.of(), null, RunHistoryRecoverySource.OPENCODE)
+                            : !liveRuntimeAvailable
+                                    ? messageRecoveryService.recoverPersistedSessionTreeHistory(
+                                            currentSessionId, traceId).block(Duration.ofSeconds(30))
                             : (hasAgentId(agentId)
                                     ? messageRecoveryService.recoverSessionTreeHistory(
                                             agentId, currentSessionId, traceId)

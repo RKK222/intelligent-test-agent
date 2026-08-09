@@ -18,6 +18,7 @@ import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceReposito
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -42,12 +43,13 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
     private final ConfigurationManagementRepository configurationRepository;
     private final AppSourceRepository appSourceRepository;
     private final WorkspaceRepository workspaceRepository;
+    private final ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
     private final Clock clock;
 
     public ManagedConversationWorkspaceAccessAuthorizer(
             ManagedWorkspaceRepository managedWorkspaceRepository,
             ConfigurationManagementRepository configurationRepository) {
-        this(managedWorkspaceRepository, configurationRepository, null, null, Clock.systemUTC());
+        this(managedWorkspaceRepository, configurationRepository, null, null, null, Clock.systemUTC());
     }
 
     /** 生产构造器同时接入 generation 专属 app-source Runtime Workspace 反查。 */
@@ -56,8 +58,24 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
             ManagedWorkspaceRepository managedWorkspaceRepository,
             ConfigurationManagementRepository configurationRepository,
             AppSourceRepository appSourceRepository,
+            WorkspaceRepository workspaceRepository,
+            ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer) {
+        this(
+                managedWorkspaceRepository,
+                configurationRepository,
+                appSourceRepository,
+                workspaceRepository,
+                experienceWorkspaceAccessAuthorizer,
+                Clock.systemUTC());
+    }
+
+    /** 兼容不需要体验策略的手工构造路径。 */
+    public ManagedConversationWorkspaceAccessAuthorizer(
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            ConfigurationManagementRepository configurationRepository,
+            AppSourceRepository appSourceRepository,
             WorkspaceRepository workspaceRepository) {
-        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, workspaceRepository, Clock.systemUTC());
+        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, workspaceRepository, null, Clock.systemUTC());
     }
 
     /** 测试构造器允许固定到期判断时间。 */
@@ -66,7 +84,7 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
             ConfigurationManagementRepository configurationRepository,
             AppSourceRepository appSourceRepository,
             Clock clock) {
-        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, null, clock);
+        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, null, null, clock);
     }
 
     /** 测试构造器可同时验证 Workspace 行与 replica server 的交叉绑定。 */
@@ -76,6 +94,17 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
             AppSourceRepository appSourceRepository,
             WorkspaceRepository workspaceRepository,
             Clock clock) {
+        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, workspaceRepository, null, clock);
+    }
+
+    /** 测试构造器可同时验证体验、app-source 与 Workspace 服务器交叉绑定。 */
+    ManagedConversationWorkspaceAccessAuthorizer(
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            ConfigurationManagementRepository configurationRepository,
+            AppSourceRepository appSourceRepository,
+            WorkspaceRepository workspaceRepository,
+            ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer,
+            Clock clock) {
         this.managedWorkspaceRepository = Objects.requireNonNull(
                 managedWorkspaceRepository,
                 "managedWorkspaceRepository must not be null");
@@ -84,6 +113,7 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
                 "configurationRepository must not be null");
         this.appSourceRepository = appSourceRepository;
         this.workspaceRepository = workspaceRepository;
+        this.experienceWorkspaceAccessAuthorizer = experienceWorkspaceAccessAuthorizer;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -111,6 +141,12 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
             boolean allowUnmanagedWorkspace) {
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(workspaceId, "workspaceId must not be null");
+        if (experienceWorkspaceAccessAuthorizer != null
+                && experienceWorkspaceAccessAuthorizer.isExperienceWorkspace(workspaceId)) {
+            // 历史体验 ID 也必须进入实时策略；策略失败时不能降级为普通非托管目录。
+            experienceWorkspaceAccessAuthorizer.requireAccess(userId, workspaceId);
+            return FileWorkspaceKind.EXPERIENCE;
+        }
         Optional<ApplicationWorkspaceVersion> version =
                 managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspaceId);
         ApplicationId appId;

@@ -2082,3 +2082,23 @@
   - 回顾全部 `.agents/session-log*.md` 近期记录，执行规则残留检索和 `git diff --check`。
 - Result:
   - 稳定文档已统一采用“时间戳 + 表名 + 描述”规则；不涉及运行时代码、SQL、HTTP API、RunEvent、数据库结构、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+### 2026-08-09 - 新增无所属应用用户的平台体验工作区
+
+- Why:
+  - 无任何“应用已启用且成员关系未删除”归属的用户进入工作台后缺少可直接浏览目录、编辑文件和对话的体验入口；体验目录需由管理员在每台后端人工初始化，同机用户共享本地 Git，不关联远端仓库。
+- What:
+  - 新增 `EXPERIENCE` 工作区类型、每次挂载一次的体验询问、TestAgent 初始化后自动续接、文件/编辑/搜索/终端/对话复用，以及用户加入应用后的即时退出和长连接关闭。
+  - 新增无请求体的 `POST /api/internal/platform/workspace-management/workspaces/experience/open`、通用参数 `OPENCODE_EXPERIENCE_WORKSPACE_DIR`、按服务器唯一的 `experience_workspace_bindings` 与 MyBatis XML 幂等/CAS 登记；Workspace ID 由服务器和目录真实路径稳定摘要生成，参数换目录时保留历史记录并创建新身份。
+  - 将当前资格、服务器、绑定、配置与目录事实的实时校验复用到 Workspace、Session、Run/SSE、ConversationContext、文件 WebSocket/RPC、runtime 路由和 Terminal；保护任意层级/大小写的 `.git`/`.opencode`、符号链接和物理路径，禁用应用专属与 Git 写入 API。
+  - 体验 Git 变更仅读：严格校验配置目录即 Git 顶层，使用禁止可选锁/fsmonitor/untracked cache/外部 diff 的命令，过滤受控路径和符号链接，并对未跟踪文件及整次 patch 设置字节、行数和聚合预算，避免大文件导致堆内存放大。
+  - 新增候选 migration `V20260809210000__common_parameters_add_experience_workspace.sql`，同步 HTTP API、无新增事件说明、数据库、安全、后端部署、模块图及前后端 README。
+- How:
+  - 前端全量 Vitest 121 个文件（1889 passed / 1 skipped）、15 个 workspace typecheck、production build 均通过；Chromium 体验流程 E2E 2/2 通过，覆盖询问与首登引导顺序、浏览/编辑/对话及 Git 只读边界。
+  - 后端相关依赖链执行干净的 Maven `clean test` 全部通过；真实 PostgreSQL 从 `V20260809120000` 生产基线升级到 HEAD 的 MyBatis/Flyway 集成用例通过，覆盖参数、表/索引、checksum 和并发 CAS。
+  - `test-agent-app` 生产包构建通过；迁移 SQL 在源码、persistence JAR 和最终应用内嵌 JAR 的 SHA-256 均为 `c093695aac4305aed3caeb8fcec58f0731f1519527031f1775adaf8be86cf24a`，两个制品都只包含新命名迁移。
+  - 独立只读审查完成多轮权限、长连接、路由、路径脱敏、Git 只读和并发复核，最终无剩余 Critical/Important/Minor 交付问题；`git diff --check` 通过。
+- Result:
+  - 无所属应用用户可在当前后端服务器上打开共享体验目录并进行文件操作、终端与对话；有效应用成员、旧绑定、跨服务器和配置变更后的访问均失败关闭，物理目录不返回前端或普通日志。
+  - HTTP API 和数据库为增量兼容变更，不新增 RunEvent/SSE 类型；现有应用/个人/超管目录流程保持原样。未修改 `.env*`、generated SDK 或 OpenCode 源码。
+  - 共享体验目录及其终端/Agent 不提供用户级 OS 隔离；平台 Git API 保持只读，但共享 shell/Agent 仍能直接改动本地 Git。部署前仍须核对目标环境 `flyway_schema_history`/checksum，并由管理员配置参数、在每台后端人工创建且 `git init` 目录并授予运行用户读写权限。

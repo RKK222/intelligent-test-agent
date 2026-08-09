@@ -6,6 +6,7 @@
 
 ## 主要职责
 
+- 体验 Workspace 的 Session 创建不写应用最近工作区或个人工作区映射，但会先复用 `ExperienceWorkspaceAccessAuthorizer` 做实时资格校验；用户 Session 写入口、Session runtime 目标、无 contextToken 兼容 Run、contextToken 每次滑动续期和新上下文签发都会再次执行统一 `ConversationWorkspaceAccessAuthorizer`。因此用户加入应用、服务器绑定或目录参数变化后，旧体验 Session 只保留历史只读归因，不能改写、启动新 Run、代理 runtime 或签发/续期上下文。Workspace PTY 与体验 Run SSE 每秒独立重验并在撤权后关闭，实时 Diff/session-tree 子路由严格回到 Run 生产 Java。旧 `/opencode-runtime/fs/list|find|read`、通用 `/vcs/status|diff` 和 experimental worktree 全部拒绝体验 ID；OpenCode catalog/session、Run 实时与恢复事件、旁路问答、自动标题、持久化消息快照及平台异常通过共享递归投影器替换体验物理根，同时保留原 Run scope。
 - Workspace 级 OpenCode 运行态代理（包括 Agent/Command 目录）在解析用户进程前复用 `ConversationWorkspaceAccessAuthorizer` 校验实时应用成员关系和个人工作区 owner；旧 workspaceId 不能让非成员读取或选择应用 `.opencode` 能力。无用户主体的 static-token/本地兼容链路仍保留固定节点行为。
 - Agent 配置 rollout 以 `config_scope=PUBLIC/APPLICATION/PERSONAL_APPLICATION` 区分流程，而不是新增 OpenCode 配置覆盖层：公共范围单独互斥，应用范围按版本 ID 互斥，不同应用发布不会再占用公共发布锁。公共范围由公共配置服务把全服务器共享运行副本同步到同一固定 commit，并原生 merge 本机全部公共个人 worktree；共享副本恢复确认随 rollout 持久化，个人冲突进入独立 `AWAITING_USER` 补偿且不占用主锁。应用范围由托管工作区服务先把指定 feature 提交投影到个人 worktree，再只登记同步成功用户的进程。脏工作区或合并冲突持久化为独立补偿任务，主 rollout 完成后仍会按 worktree 租约继续尝试；收敛后仅为该用户登记 dispose 目标。`PERSONAL_APPLICATION` 只用于个人 `git-pull` 已完成 Git merge 后的当前用户运行态重载：只登记发起用户所在服务器和本人进程，不同步 Git、不枚举服务器成员、不广播。三者复用同一进程身份核验、Session 空闲检查、用户消息闸门和 OpenCode 原生 `/global/dispose`。
 

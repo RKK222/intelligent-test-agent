@@ -56,7 +56,7 @@ type PendingPublicAgentPublish = {
   diffFiles: WorkspaceAgentDiffFile[];
 };
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   workspaceId?: string;
   /** 应用 Agent 配置所属的个人 workspace；与普通文件共用同一 Git worktree。 */
   agentConfigWorkspaceId?: string;
@@ -74,11 +74,19 @@ const props = defineProps<{
   /** 当前页面内存中的用户绑定服务器。 */
   routeLinuxServerId?: string;
   canWrite: boolean;
+  /** 普通文件可写与 Git index/commit 权限分离；体验区固定为 false。 */
+  canMutateGit?: boolean;
+  /** 体验区只展示目录自身 Git 变更，不加载公共或应用 Agent 配置作用域。 */
+  includeAgentScopes?: boolean;
   /** 应用级 Agent/Skill/Rules/Templates 的独立写权限。 */
   canManageAgentConfig?: boolean;
   /** 公共 Git Agent/Skill 的独立写权限，仅超级管理员可用。 */
   canManagePublicConfig?: boolean;
-}>();
+}>(), {
+  // Vue 会把缺省的 Boolean prop 强制转换为 false；显式保留 undefined 才能兼容原有 canWrite 默认语义。
+  canMutateGit: undefined,
+  includeAgentScopes: true
+});
 
 const emit = defineEmits<{
   openDiff: [payload: {
@@ -107,6 +115,8 @@ const api = createBackendApiClient({
 const effectiveAgentConfigWorkspaceId = computed(() =>
   props.agentConfigWorkspaceId === undefined ? props.workspaceId : (props.agentConfigWorkspaceId || undefined)
 );
+const canMutateWorkspaceGit = computed(() => props.canMutateGit ?? props.canWrite);
+const includeAgentScopes = computed(() => props.includeAgentScopes !== false);
 const pendingWorkspaceAgentPublish = ref<PendingWorkspaceAgentPublish | null>(null);
 const pendingPublicAgentPublish = ref<PendingPublicAgentPublish | null>(null);
 
@@ -510,7 +520,7 @@ const workspaceConflicts = computed(() =>
   workspaceDiffFiles.value.filter((f) => isConflictFile(f))
 );
 const hasWorkspaceConflicts = computed(() => workspaceConflicts.value.length > 0);
-const hasBlockingWorkspaceConflicts = computed(() => props.canWrite && hasWorkspaceConflicts.value);
+const hasBlockingWorkspaceConflicts = computed(() => canMutateWorkspaceGit.value && hasWorkspaceConflicts.value);
 const workspaceGitMutationPending = computed(() =>
   updatingWorkspaceIndexPaths.value.size > 0 || discardingWorkspacePaths.value.size > 0
 );
@@ -575,18 +585,19 @@ const hasAnyPersonalWorkspaceConflicts = computed(() =>
   workspaceConflicts.value.length + workspaceAgentConflicts.value.length > 0
 );
 const canCompleteWorkspaceMerge = computed(() =>
-  props.canWrite && workspaceMergeInProgress.value && !hasAnyPersonalWorkspaceConflicts.value
+  canMutateWorkspaceGit.value && workspaceMergeInProgress.value && !hasAnyPersonalWorkspaceConflicts.value
 );
 
 const activeDiffScope = ref<DiffScope>("WORKSPACE");
 const hasSelectedDiffScope = ref(false);
-const diffScopes = computed(() => [
-  {
+const diffScopes = computed(() => {
+  const workspaceScope = {
     key: "WORKSPACE" as const,
     label: "workspace",
     count: workspaceUnstaged.value.length + workspaceStaged.value.length + workspaceConflicts.value.length
-  },
-  {
+  };
+  if (!includeAgentScopes.value) return [workspaceScope];
+  return [workspaceScope, {
     key: "AGENT_WORKSPACE" as const,
     label: "应用Agent",
     count: workspaceAgentUnstaged.value.length + workspaceAgentStaged.value.length + workspaceAgentConflicts.value.length
@@ -595,8 +606,8 @@ const diffScopes = computed(() => [
     key: "PUBLIC" as const,
     label: "公共Agent",
     count: publicAgentUnstaged.value.length + publicAgentStaged.value.length + publicAgentConflicts.value.length
-  }
-]);
+  }];
+});
 // 外层“变更”入口展示三个作用域的文件总量；分类 Tab 只负责分开展示，不改变总数口径。
 const totalChangedFileCount = computed(() =>
   diffScopes.value.reduce((total, scope) => total + scope.count, 0)
@@ -694,19 +705,20 @@ const activeStagedCount = computed(() => activeDiffScope.value === "WORKSPACE"
   : activeAgentStaged.value.length);
 
 function canWriteAgentScope(scope: "PUBLIC" | "WORKSPACE"): boolean {
+  if (!includeAgentScopes.value) return false;
   return scope === "PUBLIC"
-    ? (props.canManagePublicConfig ?? props.canWrite)
-    : (props.canManageAgentConfig ?? props.canWrite);
+    ? (props.canManagePublicConfig ?? canMutateWorkspaceGit.value)
+    : (props.canManageAgentConfig ?? canMutateWorkspaceGit.value);
 }
 
 const hasWritableStagedChanges = computed(() =>
   activeDiffScope.value === "WORKSPACE"
-    ? props.canWrite && workspaceStaged.value.length > 0
+    ? canMutateWorkspaceGit.value && workspaceStaged.value.length > 0
     : activeAgentStaged.value.some((file) => canWriteAgentScope(file.scope))
 );
 const hasPublishableStagedChanges = computed(() =>
   activeDiffScope.value === "WORKSPACE"
-    ? props.canWrite && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path))
+    ? canMutateWorkspaceGit.value && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path))
     : activeAgentStaged.value.some((file) => canWriteAgentScope(file.scope))
 );
 const workspaceStagedSpecCount = computed(() =>
@@ -910,6 +922,14 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
       workspaceApplicationUpdateBlockingFiles.value = [];
     }
 
+    if (!includeAgentScopes.value) {
+      publicAgentDiffs.value = [];
+      workspaceAgentDiffs.value = [];
+      activeDiffScope.value = "WORKSPACE";
+      selectInitialDiffScope();
+      return;
+    }
+
     // 2. Fetch public agent changes
     try {
       const pubDiff = await api.getPublicAgentDiff(workbench.publicWorktree?.worktreeId);
@@ -978,7 +998,7 @@ function normalizeWorkspaceAgentDiffPath(path: string): string | null {
 
 // 单文件和批量暂存复用同一真实 Git index 链路，避免批量操作产生第二套状态语义。
 async function stageWorkspaceFiles(paths: string[]) {
-  if (!props.canWrite || !props.workspaceId || paths.length === 0) return;
+  if (!canMutateWorkspaceGit.value || !props.workspaceId || paths.length === 0) return;
   const pendingPaths = paths.filter((path) => !updatingWorkspaceIndexPaths.value.has(path));
   if (pendingPaths.length === 0) return;
   errorMessage.value = "";
@@ -1017,7 +1037,7 @@ async function stageAllWorkspaceChanges() {
 
 // 单文件和批量取消暂存也复用同一 index 更新链路，确保两个分组的 all 操作完全对称。
 async function unstageWorkspaceFiles(paths: string[]) {
-  if (!props.canWrite || !props.workspaceId || paths.length === 0) return;
+  if (!canMutateWorkspaceGit.value || !props.workspaceId || paths.length === 0) return;
   const pendingPaths = paths.filter((path) => !updatingWorkspaceIndexPaths.value.has(path));
   if (pendingPaths.length === 0) return;
   errorMessage.value = "";
@@ -1085,7 +1105,7 @@ function isConflictFile(file: { status?: string; rawStatus?: string }): boolean 
 }
 
 async function openWorkspaceConflict(path: string) {
-  if (!props.canWrite || !props.workspaceId || conflictLoading.value) return;
+  if (!canMutateWorkspaceGit.value || !props.workspaceId || conflictLoading.value) return;
   conflictLoading.value = true;
   errorMessage.value = "";
   try {
@@ -1102,7 +1122,7 @@ async function resolveWorkspaceConflict(payload: {
   resolution: WorkspaceGitConflictResolution;
   content?: string | null;
 }) {
-  if (!props.canWrite || !props.workspaceId || !activeConflict.value || conflictResolving.value) return;
+  if (!canMutateWorkspaceGit.value || !props.workspaceId || !activeConflict.value || conflictResolving.value) return;
   conflictResolving.value = true;
   errorMessage.value = "";
   try {
@@ -1120,7 +1140,7 @@ async function resolveWorkspaceConflict(payload: {
 }
 
 async function abortWorkspaceConflict() {
-  if (!props.canWrite || !props.workspaceId || conflictResolving.value) return;
+  if (!canMutateWorkspaceGit.value || !props.workspaceId || conflictResolving.value) return;
   conflictResolving.value = true;
   errorMessage.value = "";
   try {
@@ -1137,7 +1157,7 @@ async function abortWorkspaceConflict() {
 }
 
 async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") {
-  if (!props.canWrite || !props.workspaceId || conflictResolving.value) return;
+  if (!canMutateWorkspaceGit.value || !props.workspaceId || conflictResolving.value) return;
   const label = resolution === "CURRENT" ? "个人版本" : "远程应用版本";
   if (!window.confirm(`将 ${workspaceConflicts.value.length} 个冲突文件全部采用${label}，是否继续？`)) return;
   conflictResolving.value = true;
@@ -1267,7 +1287,7 @@ function abortActiveConflict() {
 
 // 批量丢弃与单文件回退共用后端多路径 API，并一次刷新文件树和 Diff 状态。
 async function discardWorkspaceFiles(paths: string[]) {
-  if (!props.canWrite || !props.workspaceId || paths.length === 0) return;
+  if (!canMutateWorkspaceGit.value || !props.workspaceId || paths.length === 0) return;
   const pendingPaths = paths.filter((path) => !discardingWorkspacePaths.value.has(path));
   if (pendingPaths.length === 0) return;
   errorMessage.value = "";
@@ -1507,7 +1527,7 @@ async function handleCommit(push = false) {
     progressMessage.value = "";
     return;
   }
-  if (activeDiffScope.value === "WORKSPACE" && props.canWrite && hasWorkspaceConflicts.value) {
+  if (activeDiffScope.value === "WORKSPACE" && canMutateWorkspaceGit.value && hasWorkspaceConflicts.value) {
     errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
     progressMessage.value = "";
     return;
@@ -1605,7 +1625,7 @@ async function handleCommit(push = false) {
     }
 
     // 1. 应用工作空间先提交个人 worktree；推送时再从个人 HEAD 投影到 feature worktree。
-    if (activeDiffScope.value === "WORKSPACE" && props.canWrite && workspaceStaged.value.length > 0) {
+    if (activeDiffScope.value === "WORKSPACE" && canMutateWorkspaceGit.value && workspaceStaged.value.length > 0) {
       if (!props.personalWorkspaceId) {
         errorMessage.value = "当前不是个人 worktree，不能提交或发布应用变更。";
         progressMessage.value = "";
@@ -1928,6 +1948,9 @@ defineExpose({
       <Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin" :stroke-width="1.5" />
       <span>{{ progressMessage }}</span>
     </div>
+    <div v-if="!canMutateWorkspaceGit" class="git-readonly-note" role="status">
+      本地 Git 变更仅供查看；暂存、回退、提交、拉取和推送均已禁用。
+    </div>
 
     <div class="git-scope-switcher" role="tablist" aria-label="Git 变更作用域">
       <button
@@ -2004,7 +2027,7 @@ defineExpose({
                 class="git-bulk-action"
                 aria-label="丢弃全部应用工作空间改动"
                 :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '丢弃全部应用工作空间改动'"
-                :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceDiffFiles.length === 0 || workspaceGitMutationPending"
+                :disabled="!canMutateWorkspaceGit || hasWorkspaceConflicts || workspaceDiffFiles.length === 0 || workspaceGitMutationPending"
                 @click.stop="discardAllWorkspaceChanges"
               >
                 <Loader2 v-if="discardingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
@@ -2016,7 +2039,7 @@ defineExpose({
                 class="git-bulk-action"
                 aria-label="全部暂存应用工作空间变更"
                 :title="hasWorkspaceConflicts ? '存在未解决冲突，请先处理或取消合并' : '全部暂存应用工作空间变更'"
-                :disabled="!props.canWrite || hasWorkspaceConflicts || workspaceUnstaged.length === 0 || workspaceGitMutationPending"
+                :disabled="!canMutateWorkspaceGit || hasWorkspaceConflicts || workspaceUnstaged.length === 0 || workspaceGitMutationPending"
                 @click.stop="stageAllWorkspaceChanges"
               >
                 <Loader2 v-if="stagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
@@ -2093,7 +2116,7 @@ defineExpose({
                   <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
                   <span>检测到 {{ workspaceConflicts.length }} 个冲突</span>
                 </div>
-                <div v-if="props.canWrite" class="git-conflict-actions">
+                <div v-if="canMutateWorkspaceGit" class="git-conflict-actions">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2135,7 +2158,7 @@ defineExpose({
                 class="git-file-row git-conflict-row group"
                 :title="file.path"
                 :aria-label="file.path"
-                @click="props.canWrite && openWorkspaceConflict(file.path)"
+                @click="canMutateWorkspaceGit && openWorkspaceConflict(file.path)"
               >
                 <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
                 <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
@@ -2179,7 +2202,7 @@ defineExpose({
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
                 <button
-                  v-if="props.canWrite"
+                  v-if="canMutateWorkspaceGit"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="回退文件改动"
@@ -2190,7 +2213,7 @@ defineExpose({
                   <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
                 <button
-                  v-if="props.canWrite"
+                  v-if="canMutateWorkspaceGit"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="暂存文件"
@@ -2365,7 +2388,7 @@ defineExpose({
             class="git-bulk-action ml-auto"
             aria-label="全部回退到未暂存"
             title="全部回退到未暂存"
-            :disabled="!props.canWrite || workspaceStaged.length === 0 || workspaceGitMutationPending"
+            :disabled="!canMutateWorkspaceGit || workspaceStaged.length === 0 || workspaceGitMutationPending"
             @click.stop="unstageAllWorkspaceChanges"
           >
             <Loader2 v-if="unstagingAllWorkspaceFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
@@ -2409,7 +2432,7 @@ defineExpose({
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
                 <button
-                  v-if="props.canWrite && !hasWorkspaceConflicts"
+                  v-if="canMutateWorkspaceGit && !hasWorkspaceConflicts"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="回退文件改动"
@@ -2420,7 +2443,7 @@ defineExpose({
                   <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
                 <button
-                  v-if="props.canWrite"
+                  v-if="canMutateWorkspaceGit"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="取消暂存"
@@ -2688,9 +2711,18 @@ defineExpose({
   color: #15803d;
 }
 
+.git-readonly-note {
+  padding: 7px 9px;
+  border-bottom: 1px solid #dbe7f7;
+  background: #f5f8fc;
+  color: #53657d;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .git-scope-switcher {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
   gap: 4px;
   padding: 7px 8px 5px;
   border-bottom: 1px solid #e4e4e7;

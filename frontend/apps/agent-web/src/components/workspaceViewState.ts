@@ -35,6 +35,23 @@ export const ROOT_WORKSPACE_VIEW_TARGET: WorkspaceViewLoadTarget = {
   locator: { kind: "COMPOSITE", path: "" }
 };
 
+/**
+ * 体验区没有应用引用挂载；把普通目录 RPC 结果投影成现有文件树节点，且只生成 WORKSPACE locator。
+ */
+export function workspaceFilesAsViewEntries(entries: FileTreeEntry[]): WorkspaceViewEntry[] {
+  return entries.map((entry) => ({
+    ...entry,
+    id: `workspace:${entry.path.replaceAll("\\", "/")}`,
+    locator: { kind: "WORKSPACE", path: entry.path },
+    source: "WORKSPACE",
+    merged: false,
+    collision: false,
+    readonly: false,
+    workspacePath: entry.path,
+    referenceAliases: []
+  }));
+}
+
 /** 文件树刷新会废弃当前代次的读取；这里同步结束 loading，确保空白 tab 可见错误并可重试。 */
 export function workspaceFileRefreshSettlements(
   tabs: readonly WorkspaceFileLoadingTab[],

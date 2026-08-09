@@ -1305,6 +1305,19 @@ ACL/pubsub 全路径测试。正式合并/企业打包前仍必须读取每个�
 LobeHub fork 使用独立 ParadeDB/PostgreSQL 17、独立账号、卷和自身 migration；平台 Flyway datasource 永远
 不得访问该库。详细安装和回滚见 `docs/deployment/lobehub-offline.md`。
 
+## V20260809210000 平台体验工作区
+
+候选 migration `V20260809210000__common_parameters_add_experience_workspace.sql` 只增加生产必需的默认配置、当前绑定结构和高频资格查询索引：
+
+| 对象 | 用途与约束 |
+|---|---|
+| `common_parameters.OPENCODE_EXPERIENCE_WORKSPACE_DIR` | `platform=all`、`editable=true`、初始值 `UNCONFIGURED`；管理员部署后人工填写目录。migration 不写环境专属路径。 |
+| `experience_workspace_bindings` | `linux_server_id` 主键，每台服务器唯一指向当前 `workspace_id`；保存配置原值、最近 traceId、首次创建和更新时间。`workspace_id` 唯一且外键引用 `workspaces`。 |
+
+migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示文件。运行期 SQL 全部位于 `ExperienceWorkspaceMapper.xml`：先按确定性 ID `ON CONFLICT DO NOTHING` 登记 `workspaces`，再以调用前读取的完整 binding 快照执行 compare-and-set；无绑定时只插入、已有绑定时只有 `workspace_id + configured_parameter_value + updated_at` 全部仍匹配才更新。两步由 `MyBatisExperienceWorkspaceRepository` 在同一事务内完成，CAS 失败由应用层从通用参数重新读取并重试，跨 Java 的旧配置请求不能迟到覆盖新绑定。参数换目录时旧 `workspaces` 行不删除、不改指，继续承载历史 Session/Run 外键；普通 Workspace 用户查询按转义后的字面 `wrk_exp_` 前缀排除历史体验记录。
+
+`MyBatisExperienceWorkspacePostgresqlIntegrationTest` 使用真实 PostgreSQL 从已部署基线 `V20260809120000` 升级到 HEAD，校验 Flyway checksum/脚本字节、参数和表结构，并发同服务器只产生一个当前绑定、不同服务器隔离、换目录保留旧 Workspace。合并或企业打包前仍必须读取每个目标环境完整 `flyway_schema_history`；若该候选尚未在任何共享/稳定库执行且出现更高或冲突候选，重新统一编号。任何环境一旦执行，本文件名、注释、空白和 SQL 字节全部冻结，禁止 `outOfOrder`、`repair` 或手工改历史表。
+
 ## V20260628100000 通用参数修改日志表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260628100000__add_common_parameter_change_logs.sql` 创建通用参数修改日志表，用于记录每次参数值修改的审计信息：

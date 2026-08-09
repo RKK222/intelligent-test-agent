@@ -59,6 +59,11 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
     }
 
     @Override
+    public boolean hasEnabledApplicationMembership(UserId userId) {
+        return mapper.countEnabledApplicationMembership(userId.value()) > 0;
+    }
+
+    @Override
     public boolean isActiveMember(ApplicationId appId, UserId userId) {
         return mapper.countActiveMember(appId.value(), userId.value()) > 0;
     }

@@ -28,6 +28,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.workspace.FileContentResponse;
+import com.enterprise.testagent.workspace.FileSearchResultResponse;
 import com.enterprise.testagent.workspace.FileTreeEntryResponse;
 import com.enterprise.testagent.workspace.FileBinaryChunkResponse;
 import com.enterprise.testagent.workspace.FilePreviewChunkResponse;
@@ -529,6 +530,126 @@ class WorkspaceFileWebSocketHandlerTest {
         });
         verify(workspaceService, never()).writeFile(Mockito.any(), Mockito.anyString(), Mockito.anyString());
         verify(workspaceService, never()).deleteFile(Mockito.any(), Mockito.anyString());
+    }
+
+    @Test
+    void experienceWorkspaceHidesProtectedConfigEvenForApplicationAdministrator() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
+                "wft_experience",
+                workspaceId.value(),
+                "linux-1",
+                "linux-1",
+                true,
+                true,
+                "usr_experience_admin",
+                "workspace",
+                null,
+                null,
+                TRACE_ID,
+                NOW.plusSeconds(60));
+        when(ticketService.consume("wft_experience", "http://localhost:3000")).thenReturn(ticket);
+        when(workspaceService.listFiles(workspaceId, "")).thenReturn(List.of(
+                new FileTreeEntryResponse(".git", ".git", true, 0, NOW),
+                new FileTreeEntryResponse(".opencode", ".opencode", true, 0, NOW),
+                new FileTreeEntryResponse("examples/.OPENCODE", ".OPENCODE", true, 0, NOW),
+                new FileTreeEntryResponse("README.md", "README.md", false, 12, NOW)));
+        when(workspaceService.searchFiles(workspaceId, "agent")).thenReturn(List.of(
+                new FileSearchResultResponse(".git/config", "config", ".git", 12, NOW),
+                new FileSearchResultResponse(
+                        ".opencode/agents/review.md", "review.md", ".opencode/agents", 12, NOW),
+                new FileSearchResultResponse(
+                        "examples/.GIT/config", "config", "examples/.GIT", 12, NOW),
+                new FileSearchResultResponse("docs/agent.md", "agent.md", "docs", 12, NOW)));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                agentConfigService,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_experience",
+                List.of("""
+                        {"id":"req_list","op":"workspace.list","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":""}}
+                        """, """
+                        {"id":"req_search","op":"workspace.search","params":{"workspaceId":"wrk_exp_1234567890abcdef","query":"agent"}}
+                        """, """
+                        {"id":"req_read","op":"workspace.read","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":".opencode/opencode.jsonc"}}
+                        """, """
+                        {"id":"req_write","op":"workspace.write","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":".opencode/opencode.jsonc","content":"{}"}}
+                        """, """
+                        {"id":"req_read_nested_config","op":"workspace.read","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":"examples/.opencode/opencode.jsonc"}}
+                        """, """
+                        {"id":"req_write_nested_config","op":"workspace.write","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":"examples/.opencode/opencode.jsonc","content":"{}"}}
+                        """, """
+                        {"id":"req_read_upper_git","op":"workspace.read","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":"examples/.GIT/config"}}
+                        """, """
+                        {"id":"req_write_upper_config","op":"workspace.write","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":"examples/.OPENCODE/opencode.jsonc","content":"{}"}}
+                        """, """
+                        {"id":"req_read_git","op":"workspace.read","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":".git/config"}}
+                        """, """
+                        {"id":"req_write_git","op":"workspace.write","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":".git/config","content":"changed"}}
+                        """, """
+                        {"id":"req_copy_git","op":"workspace.copy","params":{"workspaceId":"wrk_exp_1234567890abcdef","sourcePath":"README.md","targetPath":".git/copied"}}
+                        """, """
+                        {"id":"req_move_config","op":"workspace.move","params":{"workspaceId":"wrk_exp_1234567890abcdef","sourcePath":".opencode/agent.md","targetPath":"agent.md"}}
+                        """, """
+                        {"id":"req_rename_git","op":"workspace.rename","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":"README.md","name":".git"}}
+                        """, """
+                        {"id":"req_status_git","op":"workspace.status","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":".git/config"}}
+                        """, """
+                        {"id":"req_delete_config","op":"workspace.delete","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":".opencode/agent.md"}}
+                        """, """
+                        {"id":"req_mkdir_git","op":"workspace.mkdir","params":{"workspaceId":"wrk_exp_1234567890abcdef","path":".git/generated"}}
+                        """, """
+                        {"id":"req_view","op":"workspace.view.list","params":{"workspaceId":"wrk_exp_1234567890abcdef","locator":{"kind":"WORKSPACE","path":""}}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText())
+                .filteredOn(message -> message.contains("\"id\":\"req_list\""))
+                .singleElement()
+                .satisfies(message -> assertThat(message)
+                        .contains("README.md")
+                        .doesNotContain(".opencode", ".git"));
+        assertThat(session.sentText())
+                .filteredOn(message -> message.contains("\"id\":\"req_search\""))
+                .singleElement()
+                .satisfies(message -> assertThat(message)
+                        .contains("docs/agent.md")
+                        .doesNotContain(".opencode", ".git"));
+        assertThat(session.sentText().stream()
+                .filter(message -> message.contains("\"id\":\"req_read\"")
+                        || message.contains("\"id\":\"req_write\"")
+                        || message.contains("\"id\":\"req_read_git\"")
+                        || message.contains("\"id\":\"req_write_git\"")
+                        || message.contains("\"id\":\"req_read_nested_config\"")
+                        || message.contains("\"id\":\"req_write_nested_config\"")
+                        || message.contains("\"id\":\"req_read_upper_git\"")
+                        || message.contains("\"id\":\"req_write_upper_config\"")
+                        || message.contains("\"id\":\"req_copy_git\"")
+                        || message.contains("\"id\":\"req_move_config\"")
+                        || message.contains("\"id\":\"req_rename_git\"")
+                        || message.contains("\"id\":\"req_status_git\"")
+                        || message.contains("\"id\":\"req_delete_config\"")
+                        || message.contains("\"id\":\"req_mkdir_git\"")
+                        || message.contains("\"id\":\"req_view\"")))
+                .hasSize(15)
+                .allSatisfy(message -> assertThat(message)
+                        .contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
+        verify(workspaceService, never()).readFile(workspaceId, ".opencode/opencode.jsonc");
+        verify(workspaceService, never()).writeFile(workspaceId, ".opencode/opencode.jsonc", "{}");
+        verify(workspaceService, never()).readFile(workspaceId, "examples/.opencode/opencode.jsonc");
+        verify(workspaceService, never()).writeFile(workspaceId, "examples/.opencode/opencode.jsonc", "{}");
+        verify(workspaceService, never()).readFile(workspaceId, "examples/.GIT/config");
+        verify(workspaceService, never()).writeFile(workspaceId, "examples/.OPENCODE/opencode.jsonc", "{}");
+        verify(workspaceService, never()).readFile(workspaceId, ".git/config");
+        verify(workspaceService, never()).writeFile(workspaceId, ".git/config", "changed");
     }
 
     @Test

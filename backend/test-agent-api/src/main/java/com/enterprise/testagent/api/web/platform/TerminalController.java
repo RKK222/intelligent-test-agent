@@ -87,9 +87,10 @@ public class TerminalController {
             @RequestBody(required = false) TerminalTicketRequest request,
             ServerWebExchange exchange) {
         TerminalTicketRequest resolved = request == null ? new TerminalTicketRequest(null, null, null, null, null) : request;
+        var principal = AuthWebSupport.getAuthPrincipal(exchange);
         return blockingResponse(exchange, traceId -> terminalTicketResponse(
                 sessionId,
-                terminalService.createTicket(new SessionId(sessionId), resolved, traceId)));
+                terminalService.createTicket(principal.userId(), new SessionId(sessionId), resolved, traceId)));
     }
 
     /**

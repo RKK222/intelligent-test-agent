@@ -6,9 +6,11 @@ import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.session.SessionHistoryRepository;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -41,6 +43,8 @@ public class TerminalApplicationService {
     private final BackendInstanceIdentity backendIdentity;
     private final boolean serverTerminalEnabled;
     private final Path serverWorkingDirectory;
+    private final SessionHistoryRepository sessionHistoryRepository;
+    private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
 
     /**
      * 创建 PTY ticket 应用服务，所有安全校验在签发 ticket 前完成。
@@ -54,10 +58,13 @@ public class TerminalApplicationService {
             TerminalAuditLogger auditLogger,
             ManagedWorkspacePathResolver pathResolver,
             BackendInstanceIdentity backendIdentity,
+            SessionHistoryRepository sessionHistoryRepository,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
             @Value("${test-agent.terminal.server-enabled:false}") boolean serverTerminalEnabled,
             @Value("${test-agent.terminal.server-working-directory:${user.dir}}") String serverWorkingDirectory) {
         this(workspaceRepository, sessionRepository, ticketStore, ticketRateLimiter, auditLogger, pathResolver,
-                backendIdentity, serverTerminalEnabled, Path.of(serverWorkingDirectory));
+                backendIdentity, serverTerminalEnabled, Path.of(serverWorkingDirectory),
+                sessionHistoryRepository, workspaceAccessAuthorizer);
     }
 
     TerminalApplicationService(
@@ -70,6 +77,32 @@ public class TerminalApplicationService {
             BackendInstanceIdentity backendIdentity,
             boolean serverTerminalEnabled,
             Path serverWorkingDirectory) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                ticketStore,
+                ticketRateLimiter,
+                auditLogger,
+                pathResolver,
+                backendIdentity,
+                serverTerminalEnabled,
+                serverWorkingDirectory,
+                null,
+                null);
+    }
+
+    TerminalApplicationService(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            TerminalTicketStore ticketStore,
+            TerminalTicketRateLimiter ticketRateLimiter,
+            TerminalAuditLogger auditLogger,
+            ManagedWorkspacePathResolver pathResolver,
+            BackendInstanceIdentity backendIdentity,
+            boolean serverTerminalEnabled,
+            Path serverWorkingDirectory,
+            SessionHistoryRepository sessionHistoryRepository,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.ticketStore = Objects.requireNonNull(ticketStore, "ticketStore must not be null");
@@ -79,6 +112,8 @@ public class TerminalApplicationService {
         this.backendIdentity = Objects.requireNonNull(backendIdentity, "backendIdentity must not be null");
         this.serverTerminalEnabled = serverTerminalEnabled;
         this.serverWorkingDirectory = Objects.requireNonNull(serverWorkingDirectory, "serverWorkingDirectory must not be null");
+        this.sessionHistoryRepository = sessionHistoryRepository;
+        this.workspaceAccessAuthorizer = workspaceAccessAuthorizer;
     }
 
     public TerminalApplicationService(
@@ -141,14 +176,16 @@ public class TerminalApplicationService {
      * 签发一次性 PTY ticket，校验 Session、Workspace、cwd、shell 和 ticket 创建频率。
      */
     public TerminalTicketResponse createTicket(SessionId sessionId, TerminalTicketRequest request, String traceId) {
-        Session session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value())));
-        if (session.status() == SessionStatus.ARCHIVED) {
-            throw new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value()));
-        }
-        if (!session.hasOpencodeSessionMapping()) {
-            throw new PlatformException(ErrorCode.CONFLICT, "Session 尚未绑定远端运行上下文", Map.of("sessionId", sessionId.value()));
-        }
+        return createTicket(null, sessionId, request, traceId);
+    }
+
+    /** 用户终端 ticket 在签发时绑定用户，并执行 Session 归因与当前 Workspace 实时鉴权。 */
+    public TerminalTicketResponse createTicket(
+            UserId userId,
+            SessionId sessionId,
+            TerminalTicketRequest request,
+            String traceId) {
+        Session session = requireTerminalAccess(userId, sessionId, null);
         WorkspaceId workspaceId = request.workspaceId() == null || request.workspaceId().isBlank()
                 ? session.workspaceId()
                 : new WorkspaceId(request.workspaceId());
@@ -164,6 +201,8 @@ public class TerminalApplicationService {
                 session.sessionId(),
                 workspace.workspaceId(),
                 session.opencodeExecutionNodeId(),
+                null,
+                userId,
                 root,
                 cwd,
                 resolveShell(request.shell()),
@@ -181,7 +220,50 @@ public class TerminalApplicationService {
      * 消费一次性 ticket，供 WebSocket upgrade 后创建受控 PTY 会话。
      */
     public TerminalTicket consumeTicket(SessionId sessionId, String ticket, String origin, String traceId) {
-        return ticketStore.consume(sessionId, ticket, origin, traceId);
+        TerminalTicket consumed = ticketStore.consume(sessionId, ticket, origin, traceId);
+        requireTicketAccess(consumed);
+        return consumed;
+    }
+
+    /** 已建立的 Workspace PTY 连接按固定短间隔重验，服务器管理终端保持原超级管理员语义。 */
+    public void requireTicketAccess(TerminalTicket ticket) {
+        if (ticket == null || ticket.serverShell()) return;
+        requireTerminalAccess(ticket.userId(), ticket.sessionId(), ticket.workspaceId());
+    }
+
+    private Session requireTerminalAccess(UserId userId, SessionId sessionId, WorkspaceId expectedWorkspaceId) {
+        Session session = sessionRepository.findById(sessionId)
+                .filter(candidate -> candidate.status() == SessionStatus.ACTIVE)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "Session 不存在",
+                        Map.of("sessionId", sessionId.value())));
+        if (expectedWorkspaceId != null && !expectedWorkspaceId.equals(session.workspaceId())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "PTY ticket 与 Workspace 不匹配");
+        }
+        if (userId != null) {
+            boolean owned = session.createdByUserId() != null
+                    ? userId.equals(session.createdByUserId())
+                    : sessionHistoryRepository != null
+                            && sessionHistoryRepository.findUserSession(userId, sessionId).isPresent();
+            if (!owned) {
+                throw new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "Session 不存在",
+                        Map.of("sessionId", sessionId.value()));
+            }
+            if (workspaceAccessAuthorizer == null) {
+                throw new IllegalStateException("workspaceAccessAuthorizer must be provided for user terminal");
+            }
+            workspaceAccessAuthorizer.requireAccess(userId, session.workspaceId());
+        }
+        if (!session.hasOpencodeSessionMapping()) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "Session 尚未绑定远端运行上下文",
+                    Map.of("sessionId", sessionId.value()));
+        }
+        return session;
     }
 
     /** 消费目标服务器的一次性终端 ticket。 */
@@ -196,7 +278,10 @@ public class TerminalApplicationService {
         try {
             return pathResolver.resolve(workspace.rootPath()).toRealPath();
         } catch (Exception exception) {
-            throw new PlatformException(ErrorCode.CONFLICT, "Workspace 根路径不可用", Map.of("workspaceId", workspace.workspaceId().value()), exception);
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "Workspace 根路径不可用",
+                    Map.of("workspaceId", workspace.workspaceId().value()));
         }
     }
 
@@ -217,7 +302,10 @@ public class TerminalApplicationService {
         } catch (PlatformException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "PTY cwd 不可访问", Map.of("cwd", cwd == null ? "." : cwd), exception);
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "PTY cwd 不可访问",
+                    Map.of("cwd", cwd == null ? "." : cwd));
         }
     }
 

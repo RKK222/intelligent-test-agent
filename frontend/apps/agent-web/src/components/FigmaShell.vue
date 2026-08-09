@@ -107,6 +107,7 @@ const props = withDefaults(
     ],
     appTemplates: () => [],
     showAppSource: false,
+    workspaceKind: "MANAGED",
     appSourceRepositories: () => [],
     loadingAppSourceRepositories: false,
     appSourceRepositoriesError: null,
@@ -215,6 +216,7 @@ function closeVersionMenu() {
 }
 
 function toggleWorkspaceMenu() {
+  if (props.workspaceKind === "EXPERIENCE") return;
   const opening = !workspaceMenuOpen.value;
   workspaceMenuOpen.value = opening;
   appMenuOpen.value = false;
@@ -226,7 +228,7 @@ function toggleWorkspaceMenu() {
 }
 
 function toggleVersionMenu() {
-  if (props.workspaceKind === "APP_SOURCE") return;
+  if ((props.workspaceKind ?? "MANAGED") !== "MANAGED") return;
   versionMenuOpen.value = !versionMenuOpen.value;
   appMenuOpen.value = false;
   workspaceMenuOpen.value = false;
@@ -281,7 +283,7 @@ const selectedAppSourceRepository = computed(() => visibleAppSourceRepositories.
   (repository) => repository.repositoryId === props.selectedAppSourceRepositoryId
 ) ?? null);
 const headerWorkspaceTemplate = computed(() => {
-  if (props.workspaceKind === "APP_SOURCE") return null;
+  if ((props.workspaceKind ?? "MANAGED") !== "MANAGED") return null;
   const templates = availableWorkspaceTemplates.value;
   return templates.find((template) => template.workspaceId === headerWorkspaceTemplateId.value)
     ?? templates.find((template) => template.workspaceId === props.selectedWorkspaceTemplateId)
@@ -295,9 +297,19 @@ const headerWorkspaceVersion = computed(() => {
     ?? versions.find((version) => version.versionId === props.selectedVersionId)
     ?? null;
 });
-const headerWorkspaceLabel = computed(() => props.workspaceKind === "APP_SOURCE"
-  ? selectedAppSourceRepository.value?.name ?? props.workspaceName ?? "应用代码库"
-  : headerWorkspaceTemplate.value?.workspaceName ?? (props.loadingAppTemplates ? "加载中…" : "未选择"));
+const headerWorkspaceLabel = computed(() => {
+  if (props.workspaceKind === "EXPERIENCE") return "体验工作区";
+  if (props.workspaceKind === "APP_SOURCE") {
+    return selectedAppSourceRepository.value?.name ?? props.workspaceName ?? "应用代码库";
+  }
+  return headerWorkspaceTemplate.value?.workspaceName ?? (props.loadingAppTemplates ? "加载中…" : "未选择");
+});
+const headerVersionLabel = computed(() => {
+  if (props.workspaceKind === "EXPERIENCE") return "共享目录";
+  if (props.workspaceKind === "APP_SOURCE") return "源码快照";
+  return headerWorkspaceVersion.value?.version
+    || (props.loadingAppVersions && !headerWorkspaceTemplate.value?.versions ? "加载中…" : "请选择");
+});
 
 // 版本接口已按 version desc、updatedAt desc 返回；直接复用首项，避免前端复制另一套“最新”排序规则。
 function defaultHeaderVersion(template: AppWorkspaceTemplate) {
@@ -385,8 +397,16 @@ function returnHeaderManagedWorkspace() {
 }
 
 const selectedApp = computed(
-  () => props.apps.find((a) => a.id === props.selectedAppId) ?? props.apps[0] ?? { id: "", name: "未选择应用" }
+  () => props.workspaceKind === "EXPERIENCE"
+    ? { id: "experience", name: "平台体验" }
+    : props.apps.find((a) => a.id === props.selectedAppId) ?? props.apps[0] ?? { id: "", name: "未选择应用" }
 );
+
+watch(() => props.workspaceKind, (kind) => {
+  if (kind !== "EXPERIENCE") return;
+  workspaceMenuOpen.value = false;
+  versionMenuOpen.value = false;
+});
 // 逐字段兼容旧调用方，避免新增 Tool 目录后旧快照缺字段导致详情面板失效。
 const runtimeInventory = computed<RuntimeInventorySummary>(() => ({
   agents: props.runtimeInventory?.agents ?? [],
@@ -2104,7 +2124,7 @@ function submitJoinApp() {
             @blur="onAppMenuBlur"
           >
             <span class="figma-context-menu-key">应用</span>
-            <span class="figma-app-menu-name figma-context-menu-value">{{ selectedApp?.name || "F-GCMS-PSN" }}</span>
+            <span class="figma-app-menu-name figma-context-menu-value">{{ selectedApp?.name || "未选择应用" }}</span>
             <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': appMenuOpen }" />
           </button>
           <ul v-if="appMenuOpen" class="figma-app-menu-dropdown" role="listbox">
@@ -2141,6 +2161,7 @@ function submitJoinApp() {
             aria-haspopup="listbox"
             :aria-expanded="workspaceMenuOpen"
             :aria-label="`工作空间：${headerWorkspaceLabel}`"
+            :disabled="workspaceKind === 'EXPERIENCE'"
             @click="toggleWorkspaceMenu"
             @blur="onWorkspaceMenuBlur"
           >
@@ -2152,7 +2173,7 @@ function submitJoinApp() {
             />
             <FlaskConical v-else class="figma-context-trigger-type-icon figma-context-icon--workspace" aria-hidden="true" />
             <span class="figma-context-menu-value">{{ headerWorkspaceLabel }}</span>
-            <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
+            <ChevronDown v-if="workspaceKind !== 'EXPERIENCE'" class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
           </button>
           <ul
             v-if="workspaceMenuOpen"
@@ -2296,17 +2317,17 @@ function submitJoinApp() {
             data-testid="header-version-selector"
             aria-haspopup="listbox"
             :aria-expanded="versionMenuOpen"
-            :aria-label="workspaceKind === 'APP_SOURCE' ? '版本：源码快照' : `版本：${headerWorkspaceVersion?.version || '未选择'}`"
-            :disabled="workspaceKind === 'APP_SOURCE'"
+            :aria-label="`版本：${headerVersionLabel}`"
+            :disabled="workspaceKind !== 'MANAGED'"
             @click="toggleVersionMenu"
             @blur="onVersionMenuBlur"
           >
             <span class="figma-context-menu-key">版本</span>
             <span class="figma-context-menu-value">
-              {{ workspaceKind === 'APP_SOURCE' ? '源码快照' : (headerWorkspaceVersion?.version || (loadingAppVersions && !headerWorkspaceTemplate?.versions ? "加载中…" : "请选择")) }}
+              {{ headerVersionLabel }}
             </span>
             <ChevronDown
-              v-if="workspaceKind !== 'APP_SOURCE'"
+              v-if="workspaceKind === 'MANAGED'"
               class="figma-app-menu-chevron"
               :class="{ 'is-open': versionMenuOpen }"
             />

@@ -79,4 +79,20 @@ class CommonParameterSeedMigrationTest {
                 "update common_parameter_change_logs",
                 "delete from common_parameters");
     }
+
+    @Test
+    void experienceWorkspaceMigrationSeedsEditableUnconfiguredParameterAndCurrentBindingTable() throws Exception {
+        String sql = Files.readString(Path.of(
+                "src/main/resources/db/migration/V20260809210000__common_parameters_add_experience_workspace.sql"));
+
+        assertThat(sql).contains(
+                "OPENCODE_EXPERIENCE_WORKSPACE_DIR",
+                "UNCONFIGURED",
+                "'all'",
+                "true",
+                "create table experience_workspace_bindings",
+                "primary key",
+                "foreign key (workspace_id) references workspaces(workspace_id)");
+        assertThat(sql).doesNotContain("insert into workspaces");
+    }
 }

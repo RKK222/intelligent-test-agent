@@ -27,6 +27,16 @@ class GitWorkspaceServiceRealGitTest {
     Path tempDir;
 
     @Test
+    void gitWorkTreeRootRejectsParentRepositorySubdirectory() throws Exception {
+        Path repo = initializeRepository();
+        Path child = Files.createDirectories(repo.resolve("experience-child"));
+        GitWorkspaceService service = new GitWorkspaceService();
+
+        assertThat(service.isGitWorkTreeRoot(repo)).isTrue();
+        assertThat(service.isGitWorkTreeRoot(child)).isFalse();
+    }
+
+    @Test
     void whitelistCommitLeavesResidualStagedFileOutOfCommit() throws Exception {
         Path repo = initializeRepository();
         write(repo, "selected.txt", "base selected\n");
@@ -445,6 +455,13 @@ class GitWorkspaceServiceRealGitTest {
             assertThat(command).contains("core.untrackedCache=false");
             assertThat(command).contains("core.fsmonitor=false");
         });
+
+        Files.setLastModifiedTime(index, preservedTime);
+        before = Files.readAllBytes(index);
+        String porcelain = new GitWorkspaceService().statusPorcelainReadOnly(repo);
+        assertThat(porcelain).contains("tracked.txt", "untracked.txt");
+        assertThat(Files.readAllBytes(index)).containsExactly(before);
+        assertThat(Files.getLastModifiedTime(index)).isEqualTo(preservedTime);
     }
 
     private Path createAddDeleteConflict(String suffix) throws Exception {

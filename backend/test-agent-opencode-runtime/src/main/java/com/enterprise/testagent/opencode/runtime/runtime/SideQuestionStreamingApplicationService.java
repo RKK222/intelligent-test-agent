@@ -30,10 +30,12 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.event.RunEventAppender;
 import com.enterprise.testagent.event.RunEventLiveBus;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
+import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.Duration;
@@ -268,6 +270,9 @@ public class SideQuestionStreamingApplicationService {
         String normalizedQuestion = SideQuestionPolicy.requireQuestion(question);
         String normalizedModel = normalizeOptional(model);
 
+        // 手册问答保存内部 Session 前先走公共 Workspace 实时鉴权，旧体验 ID 不得留下数据库副作用。
+        targetResolver.workspaceTarget(agentId, userId, workspaceId.value(), traceId);
+
         Instant now = Instant.now();
         Session internalSession = new Session(
                         new SessionId(RuntimeIdGenerator.sessionId()),
@@ -414,7 +419,7 @@ public class SideQuestionStreamingApplicationService {
             if (answer == null) {
                 throw new IllegalStateException("side-question final answer was empty");
             }
-            TruncatedAnswer bounded = truncateAnswer(answer);
+            TruncatedAnswer bounded = truncateAnswer(redactExperienceText(target, answer));
             LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
             payload.put("sideQuestion", true);
             payload.put("answer", bounded.answer());
@@ -461,7 +466,7 @@ public class SideQuestionStreamingApplicationService {
         Mono<RunEventDraft> remoteTerminal = opened.events()
                 .filter(event -> belongsToTemporarySession(event, temporarySessionId))
                 .filter(event -> promptDispatched.get())
-                .doOnNext(event -> publishProjected(run.runId(), projector.project(event)))
+                .doOnNext(event -> publishProjected(run.runId(), target, projector.project(event)))
                 .handle((event, sink) -> {
                     if (event.type() == RunEventType.RUN_FAILED || event.type() == RunEventType.SESSION_ERROR) {
                         sink.next(remoteTerminal(run, event, RunEventType.RUN_FAILED));
@@ -603,21 +608,54 @@ public class SideQuestionStreamingApplicationService {
         return false;
     }
 
-    private void publishProjected(RunId runId, List<RunEventDraft> projectedEvents) {
+    private void publishProjected(
+            RunId runId,
+            AgentRuntimeTargetResolver.SessionRuntimeTarget target,
+            List<RunEventDraft> projectedEvents) {
         for (RunEventDraft projected : projectedEvents) {
-            RunEventDraft event = new RunEventDraft(
+            RunEventDraft event = redactExperienceProjected(target, new RunEventDraft(
                     runId,
                     projected.type(),
                     projected.traceId(),
                     projected.occurredAt(),
                     projected.payload(),
-                    projected.scopeContext());
+                    projected.scopeContext()));
             if (event.type() == RunEventType.SIDE_QUESTION_DELTA) {
                 runEventLiveBus.publishTransient(event);
             } else {
                 runEventAppender.append(event);
             }
         }
+    }
+
+    private String redactExperienceText(
+            AgentRuntimeTargetResolver.SessionRuntimeTarget target,
+            String value) {
+        if (target.workspaceId() == null
+                || !ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(target.workspaceId())) {
+            return value;
+        }
+        return ExperienceWorkspacePathRedactor.redactText(value, target.directory());
+    }
+
+    /** 旁路 delta/tool payload 与最终答案使用同一体验物理路径投影。 */
+    @SuppressWarnings("unchecked")
+    private RunEventDraft redactExperienceProjected(
+            AgentRuntimeTargetResolver.SessionRuntimeTarget target,
+            RunEventDraft event) {
+        if (target.workspaceId() == null
+                || !ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(target.workspaceId())) {
+            return event;
+        }
+        Map<String, Object> safePayload = (Map<String, Object>) ExperienceWorkspacePathRedactor.redact(
+                event.payload(), target.directory());
+        return new RunEventDraft(
+                event.runId(),
+                event.type(),
+                event.traceId(),
+                event.occurredAt(),
+                safePayload,
+                event.scopeContext());
     }
 
     private String fork(

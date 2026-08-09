@@ -26,6 +26,14 @@ describe("app source workspace state", () => {
       canPublishApplicationAgentConfig: false,
       canSelectApplicationVersion: false
     });
+    expect(appSourceWorkspaceCapabilities("EXPERIENCE")).toEqual({
+      canWriteWorkspaceFiles: true,
+      canUseSessionsAndRuns: true,
+      canUseTerminal: true,
+      canUseGitPublication: false,
+      canPublishApplicationAgentConfig: false,
+      canSelectApplicationVersion: false
+    });
   });
 
   it("stores only logical source identity and never accepts a physical path", () => {
@@ -53,9 +61,11 @@ describe("app source workspace state", () => {
 
   it("derives ordinary file writes from explicit workspace kind instead of personal worktree identity", () => {
     expect(ordinaryWorkspaceCanWrite("APP_SOURCE", undefined, "wrk-source")).toBe(true);
+    expect(ordinaryWorkspaceCanWrite("EXPERIENCE", undefined, "wrk-experience")).toBe(true);
     expect(ordinaryWorkspaceCanWrite("MANAGED", "pws-personal", "wrk-personal")).toBe(true);
     expect(ordinaryWorkspaceCanWrite("MANAGED", undefined, "wrk-feature-readonly")).toBe(false);
     expect(ordinaryWorkspaceCanWrite("APP_SOURCE", undefined, undefined)).toBe(false);
+    expect(ordinaryWorkspaceCanWrite("EXPERIENCE", undefined, undefined)).toBe(false);
   });
 
   it("restores personal worktree identity only from an exact runtime workspace match", () => {
@@ -101,6 +111,11 @@ describe("app source workspace state", () => {
     expect(diffFileCanWrite({ ...source, agentScope: null })).toBe(true);
     expect(diffFileCanWrite({ ...source, agentScope: "PUBLIC" })).toBe(false);
     expect(diffFileCanWrite({ ...source, agentScope: "WORKSPACE" })).toBe(false);
+
+    const experience = { ...source, workspaceKind: "EXPERIENCE" as const };
+    expect(diffFileCanWrite({ ...experience, agentScope: null })).toBe(true);
+    expect(diffFileCanWrite({ ...experience, agentScope: "PUBLIC" })).toBe(false);
+    expect(diffFileCanWrite({ ...experience, agentScope: "WORKSPACE" })).toBe(false);
 
     const managed = {
       workspaceKind: "MANAGED" as const,

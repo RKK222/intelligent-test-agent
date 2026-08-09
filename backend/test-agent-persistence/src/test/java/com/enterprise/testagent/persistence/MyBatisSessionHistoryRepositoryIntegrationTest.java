@@ -174,6 +174,30 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 CURRENT_USER, new WorkspaceId("wrk_history_other"))).isEmpty();
     }
 
+    @Test
+    void experiencePrefixFilterTreatsUnderscoresAsLiteralCharacters() {
+        jdbcClient.sql("""
+                insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)
+                values('wrk_expXordinary', 'ordinary workspace', '/tmp/ordinary', 'ACTIVE',
+                       'trace_history', :now, :now)
+                """)
+                .param("now", NOW)
+                .update();
+        jdbcClient.sql("""
+                insert into sessions(
+                    session_id, workspace_id, title, status, trace_id,
+                    created_at, updated_at, pinned, created_by_user_id)
+                values('ses_history_ordinary', 'wrk_expXordinary', '普通工作区', 'ACTIVE',
+                       'trace_history', :now, :now, false, 'usr_history_current')
+                """)
+                .param("now", NOW)
+                .update();
+
+        assertThat(workspaceQueryRepository.findUserWorkspaces(CURRENT_USER, new PageRequest(1, 30)).items())
+                .extracting(workspace -> workspace.workspaceId().value())
+                .contains("wrk_expXordinary");
+    }
+
     private void seedData() {
         seedUsers();
         seedWorkspaces();

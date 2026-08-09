@@ -12,12 +12,14 @@ import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
 import com.enterprise.testagent.domain.session.Session;
+import com.enterprise.testagent.domain.session.SessionHistoryRepository;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -49,6 +51,7 @@ public class AgentRuntimeTargetResolver {
     private final UserOpencodeProcessAssignmentService userProcessAssignmentService;
     private final ManagedWorkspacePathResolver pathResolver;
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
+    private SessionHistoryRepository sessionHistoryRepository;
 
     /**
      * 注入 runtime 目标解析所需端口；用户进程服务仅在认证用户访问默认 opencode 时使用。
@@ -123,18 +126,17 @@ public class AgentRuntimeTargetResolver {
         WorkspaceId resolvedWorkspaceId = workspaceId == null || workspaceId.isBlank()
                 ? null
                 : new WorkspaceId(workspaceId);
-        if (resolvedWorkspaceId != null && userId != null) {
-            // Agent/Command 等运行态目录同样会暴露应用 `.opencode` 内容，必须先校验实时成员关系。
-            workspaceAccessAuthorizer.requireAccess(userId, resolvedWorkspaceId);
+        if (resolvedWorkspaceId != null) {
+            requireRuntimeWorkspaceAccess(userId, resolvedWorkspaceId);
         }
         ExecutionNode node = resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
                 .map(UserOpencodeProcessAssignment::node)
                 .orElseGet(this::routableNode);
         if (resolvedWorkspaceId == null) {
-            return new WorkspaceRuntimeTarget(runtime, node, null);
+            return new WorkspaceRuntimeTarget(runtime, node, null, null);
         }
         Workspace workspace = findWorkspace(resolvedWorkspaceId);
-        return new WorkspaceRuntimeTarget(runtime, node, workspaceRoot(workspace));
+        return new WorkspaceRuntimeTarget(runtime, node, workspaceRoot(workspace), workspace.workspaceId());
     }
 
     /**
@@ -144,6 +146,8 @@ public class AgentRuntimeTargetResolver {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Session session = findSession(new SessionId(sessionId));
+        requireAuthenticatedSessionAccess(userId, session);
+        requireRuntimeWorkspaceAccess(userId, session.workspaceId());
         Workspace workspace = findWorkspace(session.workspaceId());
         Optional<UserOpencodeProcessAssignment> userAssignment =
                 resolveUserProcessAssignment(userId, resolvedAgentId, traceId);
@@ -159,7 +163,8 @@ public class AgentRuntimeTargetResolver {
                     runtime,
                     userAssignment.get().node(),
                     workspaceRoot(workspace),
-                    binding.remoteSessionId());
+                    binding.remoteSessionId(),
+                    workspace.workspaceId());
         }
         AgentSessionBinding binding = findAgentBinding(resolvedAgentId, session, traceId)
                 .orElseThrow(() -> new PlatformException(
@@ -171,7 +176,48 @@ public class AgentRuntimeTargetResolver {
                         ErrorCode.OPENCODE_UNAVAILABLE,
                         "会话绑定的 agent 执行节点不存在",
                         Map.of("agentId", resolvedAgentId, "nodeId", binding.executionNodeId().value())));
-        return new SessionRuntimeTarget(runtime, node, workspaceRoot(workspace), binding.remoteSessionId());
+        return new SessionRuntimeTarget(
+                runtime, node, workspaceRoot(workspace), binding.remoteSessionId(), workspace.workspaceId());
+    }
+
+    /**
+     * 生产环境按用户历史归因校验 ACTIVE 会话；兼容手工构造测试时至少校验显式创建人。
+     * 工作区策略随后再次确认体验资格、当前服务器绑定和应用成员关系。
+     */
+    private void requireAuthenticatedSessionAccess(UserId userId, Session session) {
+        if (userId == null) {
+            return;
+        }
+        boolean visible = session.status() == SessionStatus.ACTIVE;
+        if (visible && session.createdByUserId() != null) {
+            visible = session.createdByUserId().equals(userId);
+        } else if (visible && sessionHistoryRepository != null) {
+            visible = sessionHistoryRepository.findUserSession(userId, session.sessionId()).isPresent();
+        }
+        if (!visible) {
+            throw new PlatformException(
+                    ErrorCode.NOT_FOUND,
+                    "Session 不存在",
+                    Map.of("sessionId", session.sessionId().value()));
+        }
+    }
+
+    /** static token 只保留普通固定节点兼容，不得用历史体验 ID 绕过用户资格与服务器绑定。 */
+    private void requireRuntimeWorkspaceAccess(UserId userId, WorkspaceId workspaceId) {
+        if (userId == null) {
+            if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspaceId)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区必须使用用户身份访问");
+            }
+            return;
+        }
+        workspaceAccessAuthorizer.requireAccess(userId, workspaceId);
+    }
+
+    /** 旧会话创建人字段可能为空，生产装配使用历史归因端口完成同一用户校验。 */
+    @Autowired
+    void configureSessionHistoryRepository(SessionHistoryRepository sessionHistoryRepository) {
+        this.sessionHistoryRepository = Objects.requireNonNull(
+                sessionHistoryRepository, "sessionHistoryRepository must not be null");
     }
 
     /**
@@ -203,7 +249,8 @@ public class AgentRuntimeTargetResolver {
                         ErrorCode.OPENCODE_UNAVAILABLE,
                         "会话映射的 agent 执行节点不存在",
                         Map.of("agentId", resolvedAgentId, "nodeId", binding.executionNodeId().value())));
-        return new SessionRuntimeTarget(runtime, node, workspaceRoot(workspace), binding.remoteSessionId());
+        return new SessionRuntimeTarget(
+                runtime, node, workspaceRoot(workspace), binding.remoteSessionId(), workspace.workspaceId());
     }
 
     /**
@@ -248,13 +295,39 @@ public class AgentRuntimeTargetResolver {
                     existing.get().remoteSessionId());
         }
         // 首次或用户进程迁移后才创建远端 session；旧远端 session 保留给 opencode 自身清理。
-        AgentCreateSessionResult created = runtime.createSession(new AgentCreateSessionCommand(
-                        node,
-                        workspaceRoot(workspace),
-                        null,
-                        null,
-                        traceId))
-                .block();
+        AgentCreateSessionResult created;
+        try {
+            created = runtime.createSession(new AgentCreateSessionCommand(
+                            node,
+                            workspaceRoot(workspace),
+                            null,
+                            null,
+                            traceId))
+                    .block();
+        } catch (RuntimeException exception) {
+            if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspace.workspaceId())) {
+                throw exception;
+            }
+            ErrorCode errorCode = exception instanceof PlatformException platformException
+                    ? platformException.errorCode()
+                    : ErrorCode.OPENCODE_BAD_GATEWAY;
+            // 上游创建请求 URI 携带 directory；体验路径失败时不得把原 message/details/cause 带入响应或日志链。
+            LOGGER.warn(
+                    "experience_remote_session_create_failed traceId={} sessionId={} agentId={} nodeId={} failureType={}",
+                    traceId,
+                    session.sessionId().value(),
+                    resolvedAgentId,
+                    node.executionNodeId().value(),
+                    exception.getClass().getSimpleName());
+            throw new PlatformException(
+                    errorCode,
+                    "体验工作区远端会话创建失败",
+                    Map.of(
+                            "sessionId", session.sessionId().value(),
+                            "agentId", resolvedAgentId,
+                            "nodeId", node.executionNodeId().value(),
+                            "reason", "REMOTE_SESSION_CREATE_FAILED"));
+        }
         if (created == null) {
             throw new PlatformException(
                     ErrorCode.OPENCODE_BAD_GATEWAY,
@@ -386,19 +459,45 @@ public class AgentRuntimeTargetResolver {
          * 返回要传给 opencode 的 directory。
          */
         String directory();
+
+        /** 返回该调用绑定的平台 Workspace；全局 runtime 调用为空。 */
+        WorkspaceId workspaceId();
     }
 
     /**
      * workspace 级 runtime 调用目标。
      */
-    public record WorkspaceRuntimeTarget(AgentRuntime runtime, ExecutionNode node, String directory)
+    public record WorkspaceRuntimeTarget(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String directory,
+            WorkspaceId workspaceId)
             implements RuntimeTarget {
+
+        /** 兼容不需要 Workspace 分类的既有内部测试。 */
+        public WorkspaceRuntimeTarget(AgentRuntime runtime, ExecutionNode node, String directory) {
+            this(runtime, node, directory, null);
+        }
     }
 
     /**
      * session 级 runtime 调用目标，包含已解析的远端 session id。
      */
-    public record SessionRuntimeTarget(AgentRuntime runtime, ExecutionNode node, String directory, String remoteSessionId)
+    public record SessionRuntimeTarget(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String directory,
+            String remoteSessionId,
+            WorkspaceId workspaceId)
             implements RuntimeTarget {
+
+        /** 兼容历史清理与旁路会话测试的手工目标。 */
+        public SessionRuntimeTarget(
+                AgentRuntime runtime,
+                ExecutionNode node,
+                String directory,
+                String remoteSessionId) {
+            this(runtime, node, directory, remoteSessionId, null);
+        }
     }
 }

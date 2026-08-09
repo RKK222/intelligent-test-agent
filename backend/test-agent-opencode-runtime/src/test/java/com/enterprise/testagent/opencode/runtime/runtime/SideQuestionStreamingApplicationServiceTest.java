@@ -125,6 +125,26 @@ class SideQuestionStreamingApplicationServiceTest {
     }
 
     @Test
+    void manualQuestionAuthorizesWorkspaceBeforeSavingInternalSession() {
+        Fixture fixture = new Fixture(Runnable::run);
+        doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(fixture.targetResolver)
+                .workspaceTarget("opencode", USER_ID, WORKSPACE_ID.value(), TRACE_ID);
+
+        assertThatThrownBy(() -> fixture.service.startManual(
+                        USER_ID,
+                        "opencode",
+                        WORKSPACE_ID,
+                        "怎样初始化工作区？",
+                        "provider/model",
+                        TRACE_ID))
+                .isInstanceOf(PlatformException.class);
+
+        verify(fixture.sessions, never()).save(any());
+        verify(fixture.runs, never()).save(any());
+    }
+
+    @Test
     void startReturnsImmediatelyAndCreatesArchivedInternalSessionAndIndependentPendingRun() {
         Fixture fixture = new Fixture(command -> {
             // 本测试只验证同步创建边界，故意保留后台任务不执行。
@@ -261,6 +281,43 @@ class SideQuestionStreamingApplicationServiceTest {
                         && Boolean.FALSE.equals(payload.get("compacted"))),
                 eq(TRACE_ID));
         assertThat(fixture.deleteCalls).hasValue(1);
+    }
+
+    @Test
+    void experienceSideQuestionRedactsPhysicalRootFromDeltasAndFinalAnswer() {
+        Fixture fixture = new Fixture(Runnable::run);
+        WorkspaceId experienceWorkspaceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        when(fixture.targetResolver.sessionTarget("opencode", USER_ID, MAIN_SESSION_ID.value(), TRACE_ID))
+                .thenReturn(new AgentRuntimeTargetResolver.SessionRuntimeTarget(
+                        fixture.runtime,
+                        fixture.node,
+                        "/secret",
+                        "remote_main",
+                        experienceWorkspaceId));
+        fixture.finalMessages = finalAnswer("答案来自 /secret/docs");
+        fixture.remoteEvents = Flux.fromIterable(remoteAnswerEvents());
+        fixture.rewireRuntime();
+
+        fixture.service.start(
+                USER_ID,
+                "opencode",
+                MAIN_SESSION_ID,
+                "当前任务进展如何？",
+                "msg_boundary",
+                "provider/model",
+                TRACE_ID);
+
+        verify(fixture.terminal).succeed(
+                any(),
+                org.mockito.ArgumentMatchers.argThat((Map<String, Object> payload) ->
+                        payload.toString().contains("<experience-workspace>")
+                                && !payload.toString().contains("/secret")),
+                eq(TRACE_ID));
+        assertThat(fixture.durableEvents)
+                .extracting(event -> event.payload().toString())
+                .allMatch(payload -> !payload.contains("/secret"));
+        verify(fixture.liveBus, atLeastOnce()).publishTransient(org.mockito.ArgumentMatchers.argThat(
+                event -> !event.payload().toString().contains("/secret")));
     }
 
     @Test

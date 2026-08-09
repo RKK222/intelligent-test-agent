@@ -51,6 +51,7 @@ declare module 'vue' {
     ElTag: typeof import('element-plus/es')['ElTag']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ExecutionTimePicker: typeof import('./src/components/ExecutionTimePicker.vue')['default']
+    ExperienceWorkspaceDialog: typeof import('./src/components/ExperienceWorkspaceDialog.vue')['default']
     FigmaChatPanel: typeof import('./src/components/FigmaChatPanel.vue')['default']
     FigmaEditorArea: typeof import('./src/components/FigmaEditorArea.vue')['default']
     FigmaFileExplorer: typeof import('./src/components/FigmaFileExplorer.vue')['default']

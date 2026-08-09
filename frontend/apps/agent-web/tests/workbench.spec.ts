@@ -276,7 +276,7 @@ test("workspace tree merges references with source colors and exposes non-merged
   await guide.click();
   await expect(page.getByTestId("file-load-state")).toHaveAttribute("data-state", "loaded");
   await expect(page.locator(".monaco-editor")).toContainText("reference guide");
-  await page.getByRole("textbox", { name: "Editor content" }).focus();
+  await page.locator(".monaco-editor .view-line").first().click();
   await page.keyboard.press("End");
   await page.keyboard.type(" must remain readonly");
   await expect(page.locator(".monaco-editor")).not.toContainText("must remain readonly");
@@ -513,7 +513,7 @@ test("dirty Agent tabs and edits made during refresh are never overwritten", asy
   await row.click();
   await expect(page.locator(".monaco-editor")).toContainText("initial Agent disk content", { timeout: 10_000 });
 
-  await page.locator(".monaco-editor .view-line").first().click();
+  await page.getByRole("textbox", { name: "Editor content" }).focus();
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.type("local dirty Agent content");
   await row.click();
@@ -2824,6 +2824,100 @@ test("workbench does not read a workspace file tree before an application is sel
   await expect(page.getByRole("button", { name: "未选择应用" })).toBeVisible();
   await expect(page.getByRole("button", { name: /tests/ })).toHaveCount(0);
   expect(fileRequests).toEqual([]);
+});
+
+test("experience offer precedes onboarding and declining restores the existing guide", async ({ page }) => {
+  await mockBackendApi(page, {
+    applications: [],
+    managedApplications: [],
+    workspaces: [],
+    authRoles: ["USER"],
+    showOnboarding: true
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await expect(page.getByRole("dialog").getByText("现在体验平台功能吗？", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("这是你的工作面板", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "暂不体验" }).click();
+  await expect(page.getByText("这是你的工作面板", { exact: true })).toBeVisible();
+});
+
+test("experience workspace browses and edits files, starts chat, and keeps Git read-only", async ({ page }) => {
+  const experienceWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_exp_e2e_shared",
+    name: "体验工作区",
+    rootPath: "/srv/test-agent/experience"
+  };
+  const experienceOpenRequests: string[] = [];
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const fileOperations: string[] = [];
+  const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
+  const gitDiffRequests: string[] = [];
+  const sessionRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    applications: [],
+    managedApplications: [],
+    workspaces: [],
+    authRoles: ["USER"],
+    experienceWorkspace,
+    experienceOpenRequests,
+    fileRequests,
+    fileOperations,
+    fileWriteRequests,
+    gitDiffRequests,
+    sessionRequests,
+    fileContents: { "package.json": "" },
+    historyDiffFiles: [{
+      path: "package.json",
+      rawStatus: " M",
+      status: "modified",
+      staged: false,
+      patch: "@@ -1 +1 @@\n-false\n+true",
+      additions: 1,
+      deletions: 1
+    }]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "开始体验" }).click();
+
+  await expect(page.locator(".experience-mode-banner")).toContainText("多人共享");
+  await expect(page.locator(".experience-mode-banner")).toContainText("本地 Git 只读展示");
+  await expect.poll(() => experienceOpenRequests).toEqual([
+    "POST /api/internal/platform/workspace-management/workspaces/experience/open"
+  ]);
+  await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_exp_e2e_shared", path: "" });
+  await expect.poll(() => fileOperations).toContain("workspace.list");
+  expect(fileOperations).not.toContain("workspace.view.list");
+
+  await page.getByRole("button", { name: /^package\.json/ }).click();
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("textbox", { name: "Editor content" }).focus();
+  await page.keyboard.type('{"experience":true}');
+  await page.locator(".ta-workbench-footer-save").click();
+  await expect.poll(() => fileWriteRequests).toContainEqual({
+    workspaceId: "wrk_exp_e2e_shared",
+    path: "package.json",
+    content: '{"experience":true}'
+  });
+
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "变更" }).click();
+  await expect(page.getByText("本地 Git 变更仅供查看；暂存、回退、提交、拉取和推送均已禁用。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "全部暂存应用工作空间变更" })).toBeDisabled();
+  await expect.poll(() => gitDiffRequests).toContain(
+    "GET /api/internal/platform/workspace-management/workspaces/wrk_exp_e2e_shared/git-diff"
+  );
+  await expect(page.locator(".agent-root-row")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "新建对话" }).click();
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("体验区对话");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => sessionRequests).toContainEqual({
+    workspaceId: "wrk_exp_e2e_shared",
+    title: "体验区对话"
+  });
 });
 
 test("revoking the selected application hides its retained workspace after membership refresh", async ({ page }) => {
@@ -7775,6 +7869,7 @@ async function mockBackendApi(
     questionReplies?: Array<Record<string, unknown>>;
     terminalTickets?: Array<Record<string, unknown>>;
     fileRequests?: Array<{ workspaceId: string; path: string }>;
+    fileOperations?: string[];
     fileReadRequests?: Array<{ workspaceId: string; path: string; attempt: number }>;
     fileReadDelays?: Record<string, number[]>;
     fileReadFailuresBeforeSuccess?: Record<string, number>;
@@ -7835,6 +7930,10 @@ async function mockBackendApi(
     providers?: Array<Record<string, unknown>>;
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
+    /** 不预置 onboarding seen，用于验证体验邀请与首登引导的优先级。 */
+    showOnboarding?: boolean;
+    experienceWorkspace?: ReturnType<typeof workspace> & Record<string, unknown>;
+    experienceOpenRequests?: string[];
     recentWorkspaces?: Record<string, (ReturnType<typeof workspace> & Record<string, unknown>) | null>;
     forbiddenRecentWorkspaces?: Record<string, { code: string; message: string; details?: Record<string, unknown>; status?: number }>;
     markRecentRequests?: string[];
@@ -7948,6 +8047,9 @@ async function mockBackendApi(
   await page.exposeFunction("__taRecordWorkspaceFileRequest", (workspaceId: string, path: string) => {
     capture.fileRequests?.push({ workspaceId, path });
   });
+  await page.exposeFunction("__taRecordWorkspaceFileOperation", (operation: string) => {
+    capture.fileOperations?.push(operation);
+  });
   await page.exposeFunction("__taRecordWorkspaceFileWrite", (workspaceId: string, path: string, content: string) => {
     capture.fileWriteRequests?.push({ workspaceId, path, content });
   });
@@ -7969,11 +8071,11 @@ async function mockBackendApi(
     capture.agentFileFrames?.push(frame);
   });
   if (!capture.skipInitialAuthToken) {
-    await page.addInitScript(() => {
+    await page.addInitScript(({ showOnboarding }) => {
       sessionStorage.setItem("test-agent.auth.token", "test-token");
       // 工作台 E2E 默认跳过首次引导，避免遮罩拦截真实文件树与 tab 点击。
-      localStorage.setItem("test-agent.onboarding.v7:usr_admin", "seen");
-    });
+      if (!showOnboarding) localStorage.setItem("test-agent.onboarding.v7:usr_admin", "seen");
+    }, { showOnboarding: capture.showOnboarding === true });
   }
   await page.addInitScript(({
     fileContents,
@@ -8001,6 +8103,12 @@ async function mockBackendApi(
         __taRecordWorkspaceMove?: (workspaceId: string, sourcePath: string, targetPath: string) => void;
       };
       win.__taRecordWorkspaceFileRequest?.(workspaceId, path);
+    };
+    const recordFileOperation = (operation: string) => {
+      const win = window as Window & {
+        __taRecordWorkspaceFileOperation?: (operation: string) => void;
+      };
+      win.__taRecordWorkspaceFileOperation?.(operation);
     };
     const recordWorkspaceMove = (workspaceId: string, sourcePath: string, targetPath: string) => {
       const win = window as Window & {
@@ -8150,6 +8258,7 @@ async function mockBackendApi(
       }
       send(payload: string) {
         const request = JSON.parse(payload) as { id: string; op: string; params?: Record<string, string | undefined> };
+        recordFileOperation(request.op);
         const params = request.params ?? {};
         const locator = (request.params as unknown as { locator?: ViewLocator } | undefined)?.locator
           ?? { kind: "COMPOSITE", path: "" };
@@ -8645,6 +8754,15 @@ async function mockBackendApi(
             sameAsAgent: true
           }
         ]));
+        return;
+      }
+      if (method === "POST" && url.pathname === "/api/internal/platform/workspace-management/workspaces/experience/open") {
+        capture.experienceOpenRequests?.push(`${method} ${url.pathname}`);
+        await route.fulfill(json(capture.experienceWorkspace ?? {
+          ...workspace(),
+          workspaceId: "wrk_exp_e2e_shared",
+          name: "体验工作区"
+        }));
         return;
       }
       if (method === "POST" && url.pathname === "/api/internal/platform/workspace-management/file-ws/tickets") {

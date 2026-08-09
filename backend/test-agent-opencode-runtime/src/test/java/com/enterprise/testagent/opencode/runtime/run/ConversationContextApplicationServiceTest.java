@@ -277,12 +277,45 @@ class ConversationContextApplicationServiceTest {
         ConversationRunContext context = context();
         ConversationRunContext refreshed = context.withExpiresAt(NOW.plusSeconds(24 * 60 * 60));
         when(contextStore.peek(TOKEN)).thenReturn(Optional.of(context));
+        when(sessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
         when(contextStore.touch(TOKEN, context)).thenReturn(Optional.of(refreshed));
 
         assertThat(service.require(TOKEN, USER_ID, "opencode", SESSION_ID)).isEqualTo(refreshed);
 
         verify(contextStore).peek(TOKEN);
         verify(contextStore).touch(TOKEN, context);
+    }
+
+    @Test
+    void requireRechecksCurrentWorkspaceAccessBeforeSlidingRenewal() {
+        ConversationRunContext context = context();
+        when(contextStore.peek(TOKEN)).thenReturn(Optional.of(context));
+        when(sessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+        org.mockito.Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(workspaceAccessAuthorizer)
+                .requireAccess(USER_ID, WORKSPACE_ID);
+
+        assertCode(
+                () -> service.require(TOKEN, USER_ID, "opencode", SESSION_ID),
+                ErrorCode.FORBIDDEN);
+
+        verify(contextStore).invalidate(USER_ID, SESSION_ID);
+        verify(contextStore, org.mockito.Mockito.never()).touch(TOKEN, context);
+    }
+
+    @Test
+    void requireExpiresContextAfterSessionWasArchived() {
+        ConversationRunContext context = context();
+        Session archived = session().archive(NOW.plusSeconds(60), "trace_archive");
+        when(contextStore.peek(TOKEN)).thenReturn(Optional.of(context));
+        when(sessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(archived));
+
+        assertCode(
+                () -> service.require(TOKEN, USER_ID, "opencode", SESSION_ID),
+                ErrorCode.CONVERSATION_CONTEXT_EXPIRED);
+
+        verify(contextStore).invalidate(USER_ID, SESSION_ID);
+        verify(contextStore, org.mockito.Mockito.never()).touch(TOKEN, context);
     }
 
     @Test

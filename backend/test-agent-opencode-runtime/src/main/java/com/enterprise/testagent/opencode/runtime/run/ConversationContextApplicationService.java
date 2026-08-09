@@ -260,6 +260,7 @@ public class ConversationContextApplicationService {
                     ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
                     "会话运行上下文已过期或与当前请求不匹配");
         }
+        requireCurrentAccess(context);
         requireBindingSnapshotCurrent(context);
         ConversationRunContext refreshed = contextStore.touch(normalizedToken, context)
                 .orElseThrow(() -> new PlatformException(ErrorCode.CONVERSATION_CONTEXT_EXPIRED));
@@ -270,6 +271,32 @@ public class ConversationContextApplicationService {
         }
         requireBindingSnapshotCurrent(refreshed);
         return refreshed;
+    }
+
+    /**
+     * 滑动续期前重新读取 ACTIVE 会话并执行当前工作区策略。
+     * 用户加入应用、体验目录改配或服务器绑定变化后，旧 token 不得继续延长有效期。
+     */
+    private void requireCurrentAccess(ConversationRunContext context) {
+        Session current = sessionRepository.findById(context.sessionId())
+                .filter(session -> session.status() == SessionStatus.ACTIVE)
+                .filter(session -> session.workspaceId().equals(context.workspaceId()))
+                .filter(session -> session.createdByUserId() == null
+                        || session.createdByUserId().equals(context.userId()))
+                .orElse(null);
+        if (current == null) {
+            contextStore.invalidate(context.userId(), context.sessionId());
+            throw new PlatformException(
+                    ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
+                    "会话运行上下文对应的会话已失效");
+        }
+        try {
+            workspaceAccessAuthorizer.requireAccess(context.userId(), context.workspaceId());
+        } catch (RuntimeException exception) {
+            // 撤权后先删除可续期 token，再把权威策略的安全错误返回给调用方。
+            contextStore.invalidate(context.userId(), context.sessionId());
+            throw exception;
+        }
     }
 
     /**
