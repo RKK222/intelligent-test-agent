@@ -7535,3 +7535,33 @@
   显式兼容，数据库所有者明确选择重建是唯一可跳过该历史的例外。
 - 本次仅修改规范、模块 README、数据库部署文档和本机会话记录，不修改代码、migration SQL、API、事件、数据库结构、
   `.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-09 - 清理本机 Docker 旧资源并下调内存上限
+
+### Why
+
+- 本机 16 GiB 内存长期卡顿；排查确认 Docker Desktop VM 以 8092 MiB 启动，宿主机只剩约 145 MiB 空闲，Swap 一度使用
+  约 10.3 GiB，同时遗留多个已退出的 TestAgent 开发容器、旧镜像和空闲 BuildKit 容器。
+
+### What
+
+- 删除可选 AMD64 工具箱容器与镜像、已退出的 Temporal/LobeHub 开发容器及其镜像、旧 memory-service/pgvector 镜像；
+  保留所有数据库和对象存储 volume，并保留当前后端实际使用的 PostgreSQL、Redis、MySQL 和 memory-service。
+- 将本机 Docker Desktop 设置 `/Users/kaka/Library/Group Containers/group.com.docker/settings.json` 的 `memoryMiB` 从 8092
+  调整为 5120；该文件位于仓库外，未修改项目 `.env*`。
+- 重启 Docker 后恢复 memory compose；空闲的 `mimoagent-builder` 未自动重启，后续构建会按需重新启动。
+
+### How
+
+- 通过容器架构、端口连接、restart policy 和实时 CPU/内存快照确认删除边界；显式按容器/镜像 ID 清理，没有使用全局
+  volume prune 或删除其他项目数据。
+- Docker Desktop 4.20.1 首次重启因旧 VM 退出错误弹出 `virtualization.framework ... %!w(<nil>)`；终止失败的 message-box
+  后第二次启动成功，实际进程参数确认包含 `--memoryMiB 5120`。
+- 验证 backend health/readiness、前端 3000、登录 CORS、manager 4104、memory-service 与全部恢复容器健康。
+
+### Result
+
+- Docker VM 上限已降为 5 GiB，BuildKit 常驻约 752 MiB 已释放；系统内存压力指标由约 15% 提升到 44%，Swap 使用量由
+  约 10.3 GiB 降至约 4.95 GiB。
+- TestAgent、memory-service 和 Sub2API 均恢复健康；未修改代码、API、RunEvent、数据库结构、migration、安全配置、
+  generated SDK 或 OpenCode 源码。
