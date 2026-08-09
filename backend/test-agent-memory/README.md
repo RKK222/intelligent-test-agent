@@ -11,6 +11,13 @@ QA Agent 长期记忆的业务编排模块。它负责个人记忆、Application
 - OpenCode Session 与现有恢复链路仍是原始聊天的事实源；本模块只在学习任务执行期间瞬时读取当前 Run 对应的用户输入和最终回答。
 - `displaySummary` 是列表降级展示字段，不是可直接注入 Agent 的记忆事实。
 
+## Mem0 适配边界
+
+- `MemoryDocumentStore` 是本模块访问独立 `memory-service` 的唯一端口；启用开关关闭时装配安全降级实现，不能影响既有 Run。
+- `HttpMemoryDocumentStore` 只调用受控的 health、派生记忆 CRUD/search/history 和候选抽取窄接口，请求超时、响应大小和 ID 格式都在适配层收口。
+- 原始聊天只允许作为抽取请求的瞬时输入，不得调用派生记忆写入接口保存整段消息；正文、模型短期授权和服务密钥不得进入日志或 `toString()`。
+- Python 服务的固定版本、离线模型和运行说明见仓库根目录 `memory-service/README.md`。
+
 ## 允许依赖
 
 - `test-agent-common`、`test-agent-domain`、`test-agent-agent-runtime`、`test-agent-model-gateway`。
@@ -30,4 +37,11 @@ QA Agent 长期记忆的业务编排模块。它负责个人记忆、Application
 
 ```bash
 mvn -q -DappLogDir=target/log -pl test-agent-memory -am test
+```
+
+真实适配器聚焦回归可运行：
+
+```bash
+mvn -q -DappLogDir=target/log -pl test-agent-memory -am \
+  -Dtest=HttpMemoryDocumentStoreTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
