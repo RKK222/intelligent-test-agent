@@ -23,8 +23,15 @@ QA Agent 长期记忆的业务编排模块。它负责个人记忆、Application
 - 只有灰度白名单用户的成功人工根 Run 会写学习 Outbox；Outbox 仅保存 Run、Session、Workspace、用户、Application 和模型定位字段。worker 随后从既有 `session_messages` 恢复链瞬时读取 USER/ASSISTANT 内容，忽略工具输出，并把抽取失败限制在异步重试链路。
 - 抽取模型按“系统管理固定 CHAT 模型 → 当前 Run 内部 CHAT 模型”选择；回退前必须再次通过内部目录与 CHAT 探测。每次调用签发绑定用户、Run、模型且只能消费一次的 `mfg_` grant，Redis 只以 SHA-256 摘要寻址。
 - 明确要求或手工记忆一次生效；隐式偏好必须在 90 天内由 3 个不同 Session 支撑。临时要求丢弃；明确替代会封存旧版本，隐式冲突进入待确认状态。
+- 自动团队候选只接受当前 Application 有效成员的证据，至少需要 2 名成员和 3 个不同 Session；达到阈值后仍只进入 `PENDING_CONFIRMATION`，必须由 `APP_ADMIN` 审核，绝不自动替代团队记忆。
 - Run 启动前并行搜索个人全局、个人 Application 和团队 Application 范围，重新校验白名单、成员关系、状态、任务类型和正文安全。整个检索预算默认 600ms，最多注入 6 条、约 800 tokens；超时或任一依赖失败都返回空上下文继续原 Run。
 - 只有已选中、已写入批量使用记录的条目才进入 `AgentStartRunCommand.system`。当前输入与 Application 规则始终优先，注入内容不得被解释为项目业务事实。
+
+## Skill 沉淀边界
+
+- 已生效个人或团队记忆可以发起 `PENDING_REVIEW` 提案；审核前不生成 `SKILL.md`，避免把未经确认的方法直接扩散。
+- 所属 Application 的 `APP_ADMIN` 审核通过后生成 `DRAFT`，创建人或管理员可编辑；草稿正文允许大于单条记忆的 2000 字限制，但仍执行控制字符、凭据和提示覆盖检查。
+- 文件落盘、Git 提交、发布、修订和 Hub 分类继续使用既有链路。记忆模块只在该流程成功后校验并关联同 Application 的已发布 Skill 资产，不自动写文件、提交或发布，也不因记忆归档而撤回 Skill。
 
 ## 允许依赖
 

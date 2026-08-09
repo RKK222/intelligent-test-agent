@@ -7,6 +7,7 @@ import com.enterprise.testagent.domain.memory.MemoryReview;
 import com.enterprise.testagent.domain.memory.MemoryScope;
 import com.enterprise.testagent.domain.memory.MemorySettings;
 import com.enterprise.testagent.domain.memory.MemorySkillProposal;
+import com.enterprise.testagent.domain.memory.MemorySkillProposalStatus;
 import com.enterprise.testagent.domain.memory.MemorySource;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.MemoryUsage;
@@ -286,14 +287,15 @@ public class MyBatisQaMemoryRepository implements QaMemoryRepository {
     private MemorySkillProposal toDomain(SkillProposalRow row) {
         return new MemorySkillProposal(
                 row.proposalId(), new MemoryId(row.memoryId()), row.applicationId(), row.title(), row.skillMdDraft(),
-                row.status(), row.createdByUserId(), row.reviewedByUserId(), row.publishedAssetId(),
+                MemorySkillProposalStatus.valueOf(row.status()), row.createdByUserId(),
+                row.reviewedByUserId(), row.publishedAssetId(),
                 row.version(), row.createdAt(), row.updatedAt());
     }
 
     private SkillProposalRow toRow(MemorySkillProposal proposal) {
         return new SkillProposalRow(
                 proposal.proposalId(), proposal.memoryId().value(), proposal.applicationId(), proposal.title(),
-                proposal.skillMdDraft(), proposal.status(), proposal.createdByUserId(), proposal.reviewedByUserId(),
+                proposal.skillMdDraft(), proposal.status().name(), proposal.createdByUserId(), proposal.reviewedByUserId(),
                 proposal.publishedAssetId(), proposal.version(), proposal.createdAt(), proposal.updatedAt());
     }
 

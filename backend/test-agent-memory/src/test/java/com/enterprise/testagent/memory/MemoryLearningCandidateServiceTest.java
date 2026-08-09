@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.memory.MemoryEvidence;
 import com.enterprise.testagent.domain.memory.MemoryLearningJob;
+import com.enterprise.testagent.domain.memory.MemoryReview;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.QaMemory;
 import com.enterprise.testagent.domain.memory.QaMemoryRepository;
@@ -32,12 +34,14 @@ class MemoryLearningCandidateServiceTest {
     private final Map<String, List<MemoryEvidence>> evidence = new LinkedHashMap<>();
     private final Map<String, MemoryDocumentStore.StoredDocument> stored = new LinkedHashMap<>();
     private final AtomicInteger documentSequence = new AtomicInteger();
+    private QaMemoryRepository repository;
+    private ConfigurationManagementRepository configuration;
     private MemoryLearningCandidateService service;
 
     @BeforeEach
     void setUp() {
-        QaMemoryRepository repository = mock(QaMemoryRepository.class);
-        ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
+        repository = mock(QaMemoryRepository.class);
+        configuration = mock(ConfigurationManagementRepository.class);
         MemoryDocumentStore documents = mock(MemoryDocumentStore.class);
         QaMemoryProperties properties = new QaMemoryProperties();
         properties.setImplicitSessionThreshold(3);
@@ -141,11 +145,50 @@ class MemoryLearningCandidateServiceTest {
                 .hasSize(1);
     }
 
+    @Test
+    void implicitTeamCandidateNeedsTwoActiveMembersAndThreeSessionsThenStillWaitsForAdmin() {
+        service.apply(teamJob(1, "usr_1"), teamCandidate());
+        service.apply(teamJob(2, "usr_1"), teamCandidate());
+        assertThat(memories.values()).singleElement().satisfies(memory -> {
+            assertThat(memory.status()).isEqualTo(MemoryStatus.CANDIDATE);
+            assertThat(memory.distinctUserCount()).isEqualTo(1);
+        });
+
+        service.apply(teamJob(3, "usr_2"), teamCandidate());
+
+        assertThat(memories.values()).singleElement().satisfies(memory -> {
+            assertThat(memory.status()).isEqualTo(MemoryStatus.PENDING_CONFIRMATION);
+            assertThat(memory.distinctSessionCount()).isEqualTo(3);
+            assertThat(memory.distinctUserCount()).isEqualTo(2);
+            assertThat(memory.confirmedAt()).isNull();
+            assertThat(memory.ownerUserId()).isNull();
+            assertThat(memory.applicationId()).isEqualTo("app_1");
+        });
+        verify(repository).insertReview(any(MemoryReview.class));
+    }
+
+    @Test
+    void teamCandidateFromFormerMemberIsIgnored() {
+        when(configuration.isActiveMember(any(), any())).thenReturn(false);
+
+        service.apply(teamJob(1, "usr_left"), teamCandidate());
+
+        assertThat(memories).isEmpty();
+        assertThat(stored).isEmpty();
+    }
+
     private MemoryLearningJob job(int index) {
         return new MemoryLearningJob(
                 "mlj_" + index, "run_" + index, "ses_" + index, "wrk_1", "usr_1", "app_1",
                 "opencode", "chat-model", "PROCESSING", 0, NOW, "worker", NOW.plusSeconds(60),
                 null, NOW, NOW);
+    }
+
+    private MemoryLearningJob teamJob(int index, String userId) {
+        return new MemoryLearningJob(
+                "mlj_team_" + index, "run_team_" + index, "ses_team_" + index,
+                "wrk_1", userId, "app_1", "opencode", "chat-model", "PROCESSING", 0,
+                NOW, "worker", NOW.plusSeconds(60), null, NOW, NOW);
     }
 
     private MemoryDocumentStore.ExtractedCandidate candidate(
@@ -159,5 +202,13 @@ class MemoryLearningCandidateServiceTest {
                 replacesExisting,
                 0.95d,
                 "用户反复提出同一测试要求");
+    }
+
+    private MemoryDocumentStore.ExtractedCandidate teamCandidate() {
+        return new MemoryDocumentStore.ExtractedCandidate(
+                "缺陷结论必须附带可追溯证据",
+                "TEAM_APPLICATION",
+                List.of(QaTaskType.DEFECT_ANALYSIS),
+                false, false, false, 0.92d, "多个成员采用同一验收要求");
     }
 }

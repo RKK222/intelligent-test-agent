@@ -13,6 +13,7 @@ import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.memory.MemoryScope;
 import com.enterprise.testagent.domain.memory.MemorySource;
+import com.enterprise.testagent.domain.memory.MemorySkillProposalStatus;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.QaTaskType;
 import com.enterprise.testagent.domain.user.UserId;
@@ -20,6 +21,7 @@ import com.enterprise.testagent.memory.MemoryDocumentStore;
 import com.enterprise.testagent.memory.MemoryViews.AdminHealthView;
 import com.enterprise.testagent.memory.MemoryViews.EmbeddingProfile;
 import com.enterprise.testagent.memory.MemoryViews.MemoryView;
+import com.enterprise.testagent.memory.MemoryViews.SkillProposalView;
 import com.enterprise.testagent.memory.QaMemoryApplicationService;
 import java.time.Instant;
 import java.util.List;
@@ -81,12 +83,52 @@ class QaMemoryControllerTest {
                 .jsonPath("$.data.serviceApiKey").doesNotExist();
     }
 
+    @Test
+    void skillReviewAndPublishedAssetLinkRequireAppAdmin() {
+        QaMemoryApplicationService service = mock(QaMemoryApplicationService.class);
+        when(service.reviewSkillProposal(USER, "msp_1", "APPROVE", 0L))
+                .thenReturn(skillView(MemorySkillProposalStatus.DRAFT, 1L));
+        when(service.linkPublishedSkill(USER, "msp_1", "asset_skill_1", 1L))
+                .thenReturn(skillView(MemorySkillProposalStatus.PUBLISHED, 2L));
+
+        client(new QaMemoryController(service), List.of(Dictionary.ROLE_USER)).post()
+                .uri("/api/internal/platform/qa-memory/v1/skill-proposals/msp_1/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"decision\":\"APPROVE\",\"expectedVersion\":0}")
+                .exchange().expectStatus().isForbidden();
+
+        WebTestClient appAdmin = client(
+                new QaMemoryController(service), List.of(Dictionary.ROLE_APP_ADMIN));
+        appAdmin.post().uri("/api/internal/platform/qa-memory/v1/skill-proposals/msp_1/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"decision\":\"APPROVE\",\"expectedVersion\":0}")
+                .exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.data.status").isEqualTo("DRAFT");
+        appAdmin.post().uri("/api/internal/platform/qa-memory/v1/skill-proposals/msp_1/published-asset")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"publishedAssetId\":\"asset_skill_1\",\"expectedVersion\":1}")
+                .exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.data.status").isEqualTo("PUBLISHED");
+
+        verify(service).reviewSkillProposal(USER, "msp_1", "APPROVE", 0L);
+        verify(service).linkPublishedSkill(USER, "msp_1", "asset_skill_1", 1L);
+    }
+
     private MemoryView memoryView() {
         return new MemoryView(
                 "mem_api", MemoryScope.TEAM_APPLICATION, null, "app_memory",
                 MemoryStatus.ACTIVE, MemorySource.ADMIN_CREATED, List.of(QaTaskType.TEST_CASE_GENERATION),
                 "覆盖边界", true, "覆盖边界", 1.0d, 0, 1, 0L,
                 NOW, NOW, NOW);
+    }
+
+    private SkillProposalView skillView(MemorySkillProposalStatus status, long version) {
+        return new SkillProposalView(
+                "msp_1", "mem_1", "app_memory", "异常边界检查",
+                status == MemorySkillProposalStatus.PENDING_REVIEW ? "" : "---\nname: edge-check\n---",
+                status, USER.value(), USER.value(),
+                status == MemorySkillProposalStatus.PUBLISHED ? "asset_skill_1" : null,
+                version, NOW, NOW);
     }
 
     private WebTestClient client(Object controller, List<String> roles) {

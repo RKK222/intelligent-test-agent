@@ -4,6 +4,7 @@ import com.enterprise.testagent.domain.memory.MemoryEvidence;
 import com.enterprise.testagent.domain.memory.MemoryScope;
 import com.enterprise.testagent.domain.memory.MemorySettings;
 import com.enterprise.testagent.domain.memory.MemorySkillProposal;
+import com.enterprise.testagent.domain.memory.MemorySkillProposalStatus;
 import com.enterprise.testagent.domain.memory.MemorySource;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.MemoryUsage;
@@ -58,7 +59,7 @@ public final class MemoryViews {
 
     public record SkillProposalView(
             String proposalId, String memoryId, String applicationId, String title, String skillMdDraft,
-            String status, String createdByUserId, String reviewedByUserId, String publishedAssetId,
+            MemorySkillProposalStatus status, String createdByUserId, String reviewedByUserId, String publishedAssetId,
             long version, Instant createdAt, Instant updatedAt) {
         static SkillProposalView from(MemorySkillProposal proposal) {
             return new SkillProposalView(

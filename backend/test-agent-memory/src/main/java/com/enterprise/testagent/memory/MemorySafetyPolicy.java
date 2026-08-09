@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class MemorySafetyPolicy {
     private static final int MAX_MEMORY_CODE_POINTS = 2_000;
+    private static final int MAX_SKILL_DRAFT_CODE_POINTS = 100_000;
     private static final Pattern SECRET_ASSIGNMENT = Pattern.compile(
             "(?is)(?:password|passwd|api[_-]?key|access[_-]?token|secret)\\s*[:=]\\s*[^\\s,;]{6,}");
     private static final Pattern PRIVATE_KEY = Pattern.compile("-----BEGIN [A-Z ]*PRIVATE KEY-----");
@@ -16,12 +17,22 @@ public class MemorySafetyPolicy {
             "(?is)(?:忽略|覆盖|绕过).{0,20}(?:系统|上文|之前).{0,20}(?:指令|规则)|ignore.{0,20}(?:system|previous).{0,20}instructions");
 
     public String requireSafeContent(String value) {
+        return requireSafe(value, MAX_MEMORY_CODE_POINTS, "记忆内容不能为空", "单条记忆不能超过 2000 字");
+    }
+
+    /** Skill 草稿允许完整方法说明，但沿用凭据、控制字符和提示覆盖防护。 */
+    public String requireSafeSkillDraft(String value) {
+        return requireSafe(value, MAX_SKILL_DRAFT_CODE_POINTS,
+                "SKILL.md 草稿不能为空", "SKILL.md 草稿不能超过 100000 字");
+    }
+
+    private String requireSafe(String value, int maxCodePoints, String emptyMessage, String lengthMessage) {
         if (value == null || value.isBlank()) {
-            throw validation("记忆内容不能为空");
+            throw validation(emptyMessage);
         }
         String normalized = value.trim();
-        if (normalized.codePointCount(0, normalized.length()) > MAX_MEMORY_CODE_POINTS) {
-            throw validation("单条记忆不能超过 2000 字");
+        if (normalized.codePointCount(0, normalized.length()) > maxCodePoints) {
+            throw validation(lengthMessage);
         }
         if (normalized.chars().anyMatch(ch -> ch == 0 || ch < 0x20 && ch != '\n' && ch != '\r' && ch != '\t')) {
             throw validation("记忆内容包含不允许的控制字符");

@@ -7,6 +7,7 @@ import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepo
 import com.enterprise.testagent.domain.memory.MemoryEvidence;
 import com.enterprise.testagent.domain.memory.MemoryId;
 import com.enterprise.testagent.domain.memory.MemoryLearningJob;
+import com.enterprise.testagent.domain.memory.MemoryReview;
 import com.enterprise.testagent.domain.memory.MemoryScope;
 import com.enterprise.testagent.domain.memory.MemorySource;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
@@ -65,13 +66,12 @@ public class MemoryLearningCandidateService {
 
     @Transactional
     public void apply(MemoryLearningJob job, MemoryDocumentStore.ExtractedCandidate candidate) {
-        if (candidate.temporary() || candidate.scopeSuggestion() == null
-                || MemoryScope.TEAM_APPLICATION.name().equals(candidate.scopeSuggestion())) {
+        if (candidate.temporary() || candidate.scopeSuggestion() == null) {
             return;
         }
         String content = safety.requireSafeContent(candidate.content());
         List<QaTaskType> tasks = normalizeTasks(candidate.taskTypes());
-        Optional<MemoryScope> resolvedScope = resolvePersonalScope(job, candidate.scopeSuggestion());
+        Optional<MemoryScope> resolvedScope = resolveScope(job, candidate.scopeSuggestion());
         if (resolvedScope.isEmpty()) {
             return;
         }
@@ -79,7 +79,10 @@ public class MemoryLearningCandidateService {
         Optional<QaMemory> match = findMatch(job, scope, content);
         MemorySource source = candidate.explicit() ? MemorySource.EXPLICIT : MemorySource.IMPLICIT;
         if (match.isPresent() && candidate.replacesExisting()) {
-            if (candidate.explicit()) {
+            if (scope == MemoryScope.TEAM_APPLICATION) {
+                // 团队新要求必须等待 APP_ADMIN 判断，不能直接替代当前团队记忆。
+                create(job, scope, content, tasks, candidate, source, MemoryStatus.CONFLICTED, null);
+            } else if (candidate.explicit()) {
                 replaceExplicit(job, match.orElseThrow(), scope, content, tasks, candidate, source);
             } else {
                 create(job, scope, content, tasks, candidate, source, MemoryStatus.CONFLICTED, null);
@@ -97,15 +100,17 @@ public class MemoryLearningCandidateService {
                 tasks,
                 candidate,
                 source,
-                candidate.explicit() ? MemoryStatus.ACTIVE : MemoryStatus.CANDIDATE,
+                scope != MemoryScope.TEAM_APPLICATION && candidate.explicit()
+                        ? MemoryStatus.ACTIVE : MemoryStatus.CANDIDATE,
                 null);
     }
 
-    private Optional<MemoryScope> resolvePersonalScope(MemoryLearningJob job, String suggestion) {
+    private Optional<MemoryScope> resolveScope(MemoryLearningJob job, String suggestion) {
+        if (MemoryScope.TEAM_APPLICATION.name().equals(suggestion)) {
+            return activeApplicationMember(job) ? Optional.of(MemoryScope.TEAM_APPLICATION) : Optional.empty();
+        }
         if (MemoryScope.PERSONAL_APPLICATION.name().equals(suggestion)) {
-            if (job.applicationId() != null
-                    && configuration.isActiveMember(new ApplicationId(job.applicationId()),
-                            new com.enterprise.testagent.domain.user.UserId(job.userId()))) {
+            if (activeApplicationMember(job)) {
                 return Optional.of(MemoryScope.PERSONAL_APPLICATION);
             }
             return Optional.empty();
@@ -113,12 +118,18 @@ public class MemoryLearningCandidateService {
         return Optional.of(MemoryScope.PERSONAL_GLOBAL);
     }
 
+    private boolean activeApplicationMember(MemoryLearningJob job) {
+        return job.applicationId() != null
+                && configuration.isActiveMember(new ApplicationId(job.applicationId()),
+                        new com.enterprise.testagent.domain.user.UserId(job.userId()));
+    }
+
     private Optional<QaMemory> findMatch(MemoryLearningJob job, MemoryScope scope, String content) {
         List<MemoryDocumentStore.StoredDocument> found = documents.search(new MemoryDocumentStore.SearchQuery(
                 content,
-                "platform:" + job.userId(),
-                null,
-                scope == MemoryScope.PERSONAL_APPLICATION ? job.applicationId() : null,
+                scope == MemoryScope.TEAM_APPLICATION ? null : "platform:" + job.userId(),
+                scope == MemoryScope.TEAM_APPLICATION ? "qa-team:" + job.applicationId() : null,
+                scope == MemoryScope.PERSONAL_GLOBAL ? null : job.applicationId(),
                 scope.name(),
                 5,
                 properties.getCandidateMatchThreshold()));
@@ -138,10 +149,14 @@ public class MemoryLearningCandidateService {
     }
 
     private boolean sameOwner(QaMemory memory, MemoryLearningJob job, MemoryScope scope) {
-        return memory.scope() == scope
-                && job.userId().equals(memory.ownerUserId())
-                && Objects.equals(
-                        scope == MemoryScope.PERSONAL_APPLICATION ? job.applicationId() : null,
+        if (memory.scope() != scope) {
+            return false;
+        }
+        if (scope == MemoryScope.TEAM_APPLICATION) {
+            return memory.ownerUserId() == null && Objects.equals(job.applicationId(), memory.applicationId());
+        }
+        return job.userId().equals(memory.ownerUserId())
+                && Objects.equals(scope == MemoryScope.PERSONAL_APPLICATION ? job.applicationId() : null,
                         memory.applicationId());
     }
 
@@ -167,7 +182,14 @@ public class MemoryLearningCandidateService {
                 .map(MemoryEvidence::observedUserId).distinct().count());
         MemoryStatus nextStatus = current.status();
         Instant confirmedAt = current.confirmedAt();
-        if (candidate.explicit()) {
+        if (current.scope() == MemoryScope.TEAM_APPLICATION) {
+            if ((current.status() == MemoryStatus.CANDIDATE
+                    || current.status() == MemoryStatus.PENDING_CONFIRMATION)
+                    && sessions >= properties.getTeamSessionThreshold()
+                    && users >= properties.getTeamUserThreshold()) {
+                nextStatus = MemoryStatus.PENDING_CONFIRMATION;
+            }
+        } else if (candidate.explicit()) {
             nextStatus = MemoryStatus.ACTIVE;
             confirmedAt = now;
         } else if (current.status() == MemoryStatus.CANDIDATE
@@ -233,22 +255,28 @@ public class MemoryLearningCandidateService {
             String supersededBy) {
         MemoryDocumentStore.StoredDocument document = documents.add(new MemoryDocumentStore.AddDocument(
                 content,
-                "platform:" + job.userId(),
-                null,
-                scope == MemoryScope.PERSONAL_APPLICATION ? job.applicationId() : null,
+                scope == MemoryScope.TEAM_APPLICATION ? null : "platform:" + job.userId(),
+                scope == MemoryScope.TEAM_APPLICATION ? "qa-team:" + job.applicationId() : null,
+                scope == MemoryScope.PERSONAL_GLOBAL ? null : job.applicationId(),
                 tasks,
                 Map.of("scope", scope.name(), "source", source.name())));
         Instant now = clock.instant();
         MemoryId memoryId = new MemoryId("mem_" + UUID.randomUUID().toString().replace("-", ""));
         QaMemory memory = new QaMemory(
-                memoryId, document.id(), scope, job.userId(),
-                scope == MemoryScope.PERSONAL_APPLICATION ? job.applicationId() : null,
+                memoryId, document.id(), scope,
+                scope == MemoryScope.TEAM_APPLICATION ? null : job.userId(),
+                scope == MemoryScope.PERSONAL_GLOBAL ? null : job.applicationId(),
                 status, source, tasks, safety.displaySummary(content), candidate.confidence(),
                 1, 1, now, now, status == MemoryStatus.ACTIVE ? now : null,
                 supersededBy, job.userId(), 0L, "SYNCED", now, now);
         try {
             repository.insertMemory(memory);
             repository.insertEvidence(evidence(job, memoryId, candidate, source, now));
+            if (scope == MemoryScope.TEAM_APPLICATION) {
+                repository.insertReview(new MemoryReview(
+                        "mrev_" + UUID.randomUUID().toString().replace("-", ""), memoryId,
+                        job.applicationId(), job.userId(), null, "PENDING", null, now, null));
+            }
             return memory;
         } catch (RuntimeException failure) {
             try {

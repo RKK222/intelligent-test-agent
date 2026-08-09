@@ -35,6 +35,9 @@ final class QaMemoryDtos {
     record UpdateSkillProposalRequest(String title, String skillMdDraft, long expectedVersion) {
     }
 
+    record LinkPublishedSkillRequest(String publishedAssetId, long expectedVersion) {
+    }
+
     record AvailabilityResponse(boolean enabled) {
     }
 

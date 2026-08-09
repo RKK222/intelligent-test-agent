@@ -4,12 +4,15 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
+import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
 import com.enterprise.testagent.domain.memory.MemoryEvidence;
 import com.enterprise.testagent.domain.memory.MemoryId;
 import com.enterprise.testagent.domain.memory.MemoryReview;
 import com.enterprise.testagent.domain.memory.MemoryScope;
 import com.enterprise.testagent.domain.memory.MemorySettings;
 import com.enterprise.testagent.domain.memory.MemorySkillProposal;
+import com.enterprise.testagent.domain.memory.MemorySkillProposalStatus;
 import com.enterprise.testagent.domain.memory.MemorySource;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.MemoryUsage;
@@ -48,6 +51,7 @@ public class QaMemoryApplicationService {
 
     private final QaMemoryRepository repository;
     private final ConfigurationManagementRepository configuration;
+    private final AgentSkillHubRepository skillHubRepository;
     private final MemoryDocumentStore documents;
     private final MemorySafetyPolicy safety;
     private final QaMemoryProperties properties;
@@ -57,21 +61,24 @@ public class QaMemoryApplicationService {
     public QaMemoryApplicationService(
             QaMemoryRepository repository,
             ConfigurationManagementRepository configuration,
+            AgentSkillHubRepository skillHubRepository,
             MemoryDocumentStore documents,
             MemorySafetyPolicy safety,
             QaMemoryProperties properties) {
-        this(repository, configuration, documents, safety, properties, Clock.systemUTC());
+        this(repository, configuration, skillHubRepository, documents, safety, properties, Clock.systemUTC());
     }
 
     QaMemoryApplicationService(
             QaMemoryRepository repository,
             ConfigurationManagementRepository configuration,
+            AgentSkillHubRepository skillHubRepository,
             MemoryDocumentStore documents,
             MemorySafetyPolicy safety,
             QaMemoryProperties properties,
             Clock clock) {
         this.repository = Objects.requireNonNull(repository);
         this.configuration = Objects.requireNonNull(configuration);
+        this.skillHubRepository = Objects.requireNonNull(skillHubRepository);
         this.documents = Objects.requireNonNull(documents);
         this.safety = Objects.requireNonNull(safety);
         this.properties = Objects.requireNonNull(properties);
@@ -265,7 +272,9 @@ public class QaMemoryApplicationService {
         }
         requireMember(adminUserId, current.applicationId());
         requireVersion(current, expectedVersion);
-        if (current.status() != MemoryStatus.CANDIDATE && current.status() != MemoryStatus.PENDING_CONFIRMATION) {
+        if (current.status() != MemoryStatus.CANDIDATE
+                && current.status() != MemoryStatus.PENDING_CONFIRMATION
+                && current.status() != MemoryStatus.CONFLICTED) {
             throw conflict("团队候选已处理或状态已变化");
         }
         String normalized = decision == null ? "" : decision.trim().toUpperCase(Locale.ROOT);
@@ -310,18 +319,11 @@ public class QaMemoryApplicationService {
         if (memory.scope() == MemoryScope.TEAM_APPLICATION && !appId.equals(memory.applicationId())) {
             throw forbidden("团队记忆只能在所属应用中沉淀为 Skill");
         }
-        String content = documentContent(memory);
-        String safeTitle = title == null || title.isBlank() ? memory.displaySummary() : title.trim();
-        if (safeTitle.codePointCount(0, safeTitle.length()) > 120) {
-            safeTitle = safety.evidenceSummary(safeTitle).substring(0, Math.min(120, safeTitle.length()));
-        }
-        String skillName = slug(safeTitle);
-        String draft = "---\nname: " + skillName + "\ndescription: " + yamlText(safeTitle)
-                + "\n---\n\n# " + safeTitle + "\n\n## 适用场景\n\n"
-                + taskDescription(memory.taskTypes()) + "\n\n## 工作要求\n\n" + content + "\n";
+        String safeTitle = normalizeSkillTitle(title, memory.displaySummary());
         Instant now = clock.instant();
         MemorySkillProposal proposal = new MemorySkillProposal(
-                id("msp_"), memory.memoryId(), appId, safeTitle, draft, "DRAFT",
+                id("msp_"), memory.memoryId(), appId, safeTitle, "",
+                MemorySkillProposalStatus.PENDING_REVIEW,
                 userId.value(), null, null, 0L, now, now);
         repository.insertSkillProposal(proposal);
         return SkillProposalView.from(proposal);
@@ -348,19 +350,107 @@ public class QaMemoryApplicationService {
         if (!appAdmin && !userId.value().equals(current.createdByUserId())) {
             throw forbidden("无权编辑该 Skill 提案");
         }
-        if (current.version() != expectedVersion || !"DRAFT".equals(current.status())) {
+        if (current.version() != expectedVersion || current.status() != MemorySkillProposalStatus.DRAFT) {
             throw conflict("Skill 提案版本或状态已变化");
         }
-        String safeDraft = safety.requireSafeContent(skillMdDraft);
+        String safeDraft = safety.requireSafeSkillDraft(skillMdDraft);
         Instant now = clock.instant();
         MemorySkillProposal updated = new MemorySkillProposal(
                 current.proposalId(), current.memoryId(), current.applicationId(),
-                title == null || title.isBlank() ? current.title() : title.trim(), safeDraft, current.status(),
+                normalizeSkillTitle(title, current.title()), safeDraft, current.status(),
                 current.createdByUserId(), current.reviewedByUserId(), current.publishedAssetId(),
                 expectedVersion + 1, current.createdAt(), now);
         if (!repository.updateSkillProposal(updated, expectedVersion)) {
             throw conflict("Skill 提案已被其他操作修改");
         }
+        return SkillProposalView.from(updated);
+    }
+
+    /** APP_ADMIN 审核通过后才根据派生记忆生成可编辑草稿；不会写文件、提交 Git 或发布 Hub。 */
+    public SkillProposalView reviewSkillProposal(
+            UserId adminUserId, String proposalId, String decision, long expectedVersion) {
+        requireEnabled(adminUserId);
+        MemorySkillProposal current = requireSkillProposal(proposalId);
+        requireMember(adminUserId, current.applicationId());
+        requireSkillVersion(current, expectedVersion);
+        if (current.status() != MemorySkillProposalStatus.PENDING_REVIEW) {
+            throw conflict("Skill 提案已审核或状态已变化");
+        }
+        String normalized = decision == null ? "" : decision.trim().toUpperCase(Locale.ROOT);
+        MemorySkillProposalStatus status;
+        String draft;
+        if ("APPROVE".equals(normalized) || "APPROVED".equals(normalized)) {
+            QaMemory memory = repository.findById(current.memoryId())
+                    .orElseThrow(() -> notFound("提案来源记忆不存在"));
+            if (memory.status() != MemoryStatus.ACTIVE) {
+                throw conflict("来源记忆已不再生效，不能生成 Skill 草稿");
+            }
+            status = MemorySkillProposalStatus.DRAFT;
+            draft = generateSkillDraft(current.title(), memory);
+        } else if ("REJECT".equals(normalized) || "REJECTED".equals(normalized)) {
+            status = MemorySkillProposalStatus.REJECTED;
+            draft = "";
+        } else {
+            throw validation("审核决定只支持 APPROVE 或 REJECT");
+        }
+        Instant now = clock.instant();
+        MemorySkillProposal updated = new MemorySkillProposal(
+                current.proposalId(), current.memoryId(), current.applicationId(), current.title(), draft,
+                status, current.createdByUserId(), adminUserId.value(), null,
+                expectedVersion + 1, current.createdAt(), now);
+        persistSkillExpected(updated, expectedVersion);
+        return SkillProposalView.from(updated);
+    }
+
+    /** 既有 Skill 发布流程完成后显式关联资产；本接口本身绝不提交或发布。 */
+    public SkillProposalView linkPublishedSkill(
+            UserId adminUserId, String proposalId, String publishedAssetId, long expectedVersion) {
+        requireEnabled(adminUserId);
+        MemorySkillProposal current = requireSkillProposal(proposalId);
+        requireMember(adminUserId, current.applicationId());
+        requireSkillVersion(current, expectedVersion);
+        if (current.status() != MemorySkillProposalStatus.DRAFT) {
+            throw conflict("只有审核通过的可编辑草稿可以关联已发布 Skill");
+        }
+        String assetId = optional(publishedAssetId);
+        if (assetId == null || assetId.length() > 128 || !assetId.matches("[A-Za-z0-9._:-]+")) {
+            throw validation("publishedAssetId 格式不正确");
+        }
+        var asset = skillHubRepository.findAsset(assetId)
+                .orElseThrow(() -> notFound("已发布 Skill 资产不存在"));
+        if (asset.assetType() != AssetType.SKILL
+                || !current.applicationId().equals(asset.sourceAppId())
+                || asset.latestPublishedRevisionId() == null) {
+            throw conflict("资产不是该应用已经发布的 Skill");
+        }
+        Instant now = clock.instant();
+        MemorySkillProposal updated = new MemorySkillProposal(
+                current.proposalId(), current.memoryId(), current.applicationId(), current.title(),
+                current.skillMdDraft(), MemorySkillProposalStatus.PUBLISHED, current.createdByUserId(),
+                adminUserId.value(), assetId, expectedVersion + 1, current.createdAt(), now);
+        persistSkillExpected(updated, expectedVersion);
+        return SkillProposalView.from(updated);
+    }
+
+    public SkillProposalView archiveSkillProposal(
+            UserId userId, String proposalId, long expectedVersion, boolean appAdmin) {
+        requireEnabled(userId);
+        MemorySkillProposal current = requireSkillProposal(proposalId);
+        requireMember(userId, current.applicationId());
+        if (!appAdmin && !userId.value().equals(current.createdByUserId())) {
+            throw forbidden("无权归档该 Skill 提案");
+        }
+        requireSkillVersion(current, expectedVersion);
+        if (current.status() == MemorySkillProposalStatus.ARCHIVED) {
+            throw conflict("Skill 提案已经归档");
+        }
+        Instant now = clock.instant();
+        MemorySkillProposal updated = new MemorySkillProposal(
+                current.proposalId(), current.memoryId(), current.applicationId(), current.title(),
+                current.skillMdDraft(), MemorySkillProposalStatus.ARCHIVED, current.createdByUserId(),
+                current.reviewedByUserId(), current.publishedAssetId(), expectedVersion + 1,
+                current.createdAt(), now);
+        persistSkillExpected(updated, expectedVersion);
         return SkillProposalView.from(updated);
     }
 
@@ -432,6 +522,44 @@ public class QaMemoryApplicationService {
         }
         return documents.get(memory.mem0MemoryId()).map(MemoryDocumentStore.StoredDocument::content)
                 .orElseThrow(() -> new PlatformException(ErrorCode.MEMORY_UNAVAILABLE, "Mem0 中未找到记忆正文"));
+    }
+
+    private MemorySkillProposal requireSkillProposal(String proposalId) {
+        return repository.findSkillProposal(proposalId)
+                .orElseThrow(() -> notFound("Skill 提案不存在"));
+    }
+
+    private void requireSkillVersion(MemorySkillProposal proposal, long expectedVersion) {
+        if (expectedVersion < 0 || proposal.version() != expectedVersion) {
+            throw conflict("Skill 提案已被其他操作修改，请刷新后重试");
+        }
+    }
+
+    private void persistSkillExpected(MemorySkillProposal proposal, long expectedVersion) {
+        if (!repository.updateSkillProposal(proposal, expectedVersion)) {
+            throw conflict("Skill 提案已被其他操作修改，请刷新后重试");
+        }
+    }
+
+    private String generateSkillDraft(String title, QaMemory memory) {
+        String content = documentContent(memory);
+        String draft = "---\nname: " + slug(title) + "\ndescription: " + yamlText(title)
+                + "\n---\n\n# " + title + "\n\n## 适用场景\n\n"
+                + taskDescription(memory.taskTypes()) + "\n\n## 工作要求\n\n" + content + "\n";
+        return safety.requireSafeSkillDraft(draft);
+    }
+
+    private String normalizeSkillTitle(String value, String fallback) {
+        String title = value == null || value.isBlank() ? fallback : value.trim();
+        if (title == null || title.isBlank()) {
+            throw validation("Skill 标题不能为空");
+        }
+        String normalized = safety.displaySummary(title);
+        if (normalized.codePointCount(0, normalized.length()) > 120) {
+            int end = normalized.offsetByCodePoints(0, 120);
+            normalized = normalized.substring(0, end);
+        }
+        return normalized;
     }
 
     private QaMemory requireAccessible(UserId userId, MemoryId memoryId) {

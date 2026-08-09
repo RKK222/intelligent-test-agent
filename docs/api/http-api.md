@@ -3865,9 +3865,12 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 | `POST` | `/personal/{memoryId}/pause` | 暂停已生效个人记忆 |
 | `GET` | `/memories/{memoryId}/evidence` | 返回不超过 200 字的证据摘要及 Run/Session 定位标识 |
 | `POST` | `/run-usage/query` | 按最多 200 个 Run ID 批量恢复真正注入的记忆 |
-| `GET/POST/PATCH` | `/skill-proposals...` | 查询、创建和编辑 Skill 草稿；不自动提交或发布 |
+| `GET/POST` | `/skill-proposals` | 查询提案，或从已生效个人/团队记忆发起 `PENDING_REVIEW` 提案；此时不生成草稿 |
+| `POST` | `/skill-proposals/{proposalId}/reviews` | 所属 Application 的 `APP_ADMIN` 审核；通过后才生成可编辑 `SKILL.md` 草稿，拒绝后状态为 `REJECTED` |
+| `PATCH/DELETE` | `/skill-proposals/{proposalId}` | 创建人或 `APP_ADMIN` 编辑已审核草稿、归档提案；修改携带 `expectedVersion` |
+| `POST` | `/skill-proposals/{proposalId}/published-asset` | `APP_ADMIN` 在既有文件 WebSocket、Git、发布和 Hub 流程完成后，关联同 Application 已发布 Skill 资产 |
 
-团队数据的唯一边界是 `application_members` 中未删除的成员关系。修改时版本不匹配返回 `409 CONFLICT`。Mem0 不可用时，列表仍可返回 `contentAvailable=false` 的安全摘要；需要正文的创建/编辑返回 `503 MEMORY_UNAVAILABLE`。
+团队数据的唯一边界是 `application_members` 中未删除的成员关系。跨成员隐式团队候选必须在 90 天内至少由 2 名当前有效成员、3 个不同 Session 支撑，达到阈值后也只进入待审核状态；成员退出后，查询、贡献、审核和运行时复用都立即失效。修改时版本不匹配返回 `409 CONFLICT`。Mem0 不可用时，列表仍可返回 `contentAvailable=false` 的安全摘要；需要正文的创建/编辑返回 `503 MEMORY_UNAVAILABLE`。
 
 系统管理 Base URL：`/api/internal/platform/system-management/memory`，仅 `SUPER_ADMIN`：
 
@@ -3877,7 +3880,7 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 运行时行为不新增 HTTP 或 RunEvent 协议：成功人工根 Run 只写无原文学习 Outbox，异步任务通过现有 Session 恢复表读取本轮 USER/ASSISTANT 内容。固定 CHAT 模型优先；只有当前 Run 模型仍属于内部模型目录且 CHAT 探测有效时才可回退。模型网关的 `mfg_` grant 绑定用户、Run、公开模型和短 TTL，只允许调用 `/chat/completions`，且消费一次后立即失效。
 
-隐式个人偏好在 90 天内累计 3 个不同 Session 后生效；明确要求一次生效，临时要求不沉淀。Run 启动前在 600ms 总预算内检索并重新校验治理状态，最多注入 6 条、约 800 tokens；失败时不带记忆继续执行。只有实际进入 system 上下文的条目会写 Run 使用记录，当前输入和 Application 规则始终高于历史记忆。
+隐式个人偏好在 90 天内累计 3 个不同 Session 后生效；明确要求一次生效，临时要求不沉淀。团队候选始终由 `APP_ADMIN` 决定是否生效，自动学习不能覆盖已有团队记忆。Run 启动前在 600ms 总预算内检索并重新校验治理状态，最多注入 6 条、约 800 tokens；失败时不带记忆继续执行。只有实际进入 system 上下文的条目会写 Run 使用记录，当前输入和 Application 规则始终高于历史记忆。
 
 新增稳定错误码为 `MEMORY_UNAVAILABLE(503)` 与 `MEMORY_TIMEOUT(504)`。所有成功/失败响应继续使用统一 envelope 与 traceId，日志不得记录记忆正文、证据原文、模型 grant 或 service API key。
 

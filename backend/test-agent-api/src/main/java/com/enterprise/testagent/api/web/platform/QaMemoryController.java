@@ -183,6 +183,37 @@ public class QaMemoryController {
                 AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)));
     }
 
+    @PostMapping("/skill-proposals/{proposalId}/reviews")
+    public ApiResponse<SkillProposalView> reviewSkillProposal(
+            @PathVariable String proposalId,
+            @RequestBody QaMemoryDtos.ReviewRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        return ok(exchange, service.reviewSkillProposal(
+                principal.userId(), proposalId, request.decision(), request.expectedVersion()));
+    }
+
+    @PostMapping("/skill-proposals/{proposalId}/published-asset")
+    public ApiResponse<SkillProposalView> linkPublishedSkill(
+            @PathVariable String proposalId,
+            @RequestBody QaMemoryDtos.LinkPublishedSkillRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        return ok(exchange, service.linkPublishedSkill(
+                principal.userId(), proposalId, request.publishedAssetId(), request.expectedVersion()));
+    }
+
+    @DeleteMapping("/skill-proposals/{proposalId}")
+    public ApiResponse<SkillProposalView> archiveSkillProposal(
+            @PathVariable String proposalId,
+            @RequestParam long expectedVersion,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = principal(exchange);
+        return ok(exchange, service.archiveSkillProposal(
+                principal.userId(), proposalId, expectedVersion,
+                AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)));
+    }
+
     private AuthPrincipal principal(ServerWebExchange exchange) {
         return AuthWebSupport.getAuthPrincipal(exchange);
     }

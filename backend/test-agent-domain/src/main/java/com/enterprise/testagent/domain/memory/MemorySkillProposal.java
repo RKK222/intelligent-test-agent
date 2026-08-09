@@ -10,7 +10,7 @@ public record MemorySkillProposal(
         String applicationId,
         String title,
         String skillMdDraft,
-        String status,
+        MemorySkillProposalStatus status,
         String createdByUserId,
         String reviewedByUserId,
         String publishedAssetId,
@@ -20,6 +20,7 @@ public record MemorySkillProposal(
 
     public MemorySkillProposal {
         Objects.requireNonNull(memoryId, "memoryId must not be null");
+        Objects.requireNonNull(status, "status must not be null");
         Objects.requireNonNull(createdAt, "createdAt must not be null");
         Objects.requireNonNull(updatedAt, "updatedAt must not be null");
         if (version < 0) {

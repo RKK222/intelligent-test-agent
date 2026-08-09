@@ -6,6 +6,8 @@ import com.enterprise.testagent.domain.memory.MemoryId;
 import com.enterprise.testagent.domain.memory.MemoryLearningJob;
 import com.enterprise.testagent.domain.memory.MemoryLearningEvidenceRepository;
 import com.enterprise.testagent.domain.memory.MemoryScope;
+import com.enterprise.testagent.domain.memory.MemorySkillProposal;
+import com.enterprise.testagent.domain.memory.MemorySkillProposalStatus;
 import com.enterprise.testagent.domain.memory.MemorySource;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.QaMemory;
@@ -125,6 +127,29 @@ class MyBatisQaMemoryRepositoryIntegrationTest {
                     .containsExactly("必须覆盖异常场景", "已覆盖异常场景")
                     .doesNotContain("secret tool output");
         });
+    }
+
+    @Test
+    void skillProposalStatusRoundTripsAndUsesOptimisticVersion() {
+        repository.insertMemory(personalMemory(0L, MemoryStatus.ACTIVE, NOW));
+        MemorySkillProposal pending = new MemorySkillProposal(
+                "msp_memory", new MemoryId("mem_memory"), "app_memory", "异常边界检查", "",
+                MemorySkillProposalStatus.PENDING_REVIEW, "usr_memory", null, null, 0L, NOW, NOW);
+        repository.insertSkillProposal(pending);
+
+        assertThat(repository.findSkillProposal("msp_memory")).hasValueSatisfying(found -> {
+            assertThat(found.status()).isEqualTo(MemorySkillProposalStatus.PENDING_REVIEW);
+            assertThat(found.skillMdDraft()).isEmpty();
+        });
+
+        MemorySkillProposal draft = new MemorySkillProposal(
+                pending.proposalId(), pending.memoryId(), pending.applicationId(), pending.title(),
+                "---\nname: edge-check\n---", MemorySkillProposalStatus.DRAFT,
+                pending.createdByUserId(), "usr_memory", null, 1L, NOW, NOW.plusSeconds(1));
+        assertThat(repository.updateSkillProposal(draft, 0L)).isTrue();
+        assertThat(repository.updateSkillProposal(draft, 0L)).isFalse();
+        assertThat(repository.findSkillProposal("msp_memory"))
+                .get().extracting(MemorySkillProposal::status).isEqualTo(MemorySkillProposalStatus.DRAFT);
     }
 
     private QaMemory personalMemory(long version, MemoryStatus status, Instant updatedAt) {
