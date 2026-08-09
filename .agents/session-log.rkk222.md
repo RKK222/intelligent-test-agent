@@ -7721,3 +7721,35 @@
 - 未修改 `.env*`、generated SDK、OpenCode 源码或工作区中同期的 Figma/Git 面板与聊天重发改动；旧 migration checksum 保持
   `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`，新增前向 migration SHA-256 为
   `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`。
+
+## 2026-08-10 - 扩充通用记忆多节点端到端发布门禁
+
+### Why
+
+- 原真实浏览器套件只覆盖四个主场景，故障编排主要验证存量记忆召回，尚未证明只剩一个 Mem0 副本、单个 Java 节点或企业
+  Embedding 中断时仍能从浏览器完成新记忆学习，也缺少治理版本、旧 API、原始对话权限、投影积压和并发隔离的完整验收。
+
+### What
+
+- 将真实 Playwright 套件扩为七个场景：原生学习与跨会话/团队 ACL、个人记忆新增编辑提升暂停归档、故障中学习与同 ID 召回、
+  投影积压可见、双 profile fail-open、投影恢复、逐 actor 基线召回与两阶段并发；浏览器状态文件以 `0600` 保存非敏感 ID，供后续故障阶段复用。
+- 多节点脚本按“Mem0 仅余一副本、Java 节点逐台、企业 Embedding、CPU、双 profile、扩缩容”顺序执行真实浏览器学习/召回，
+  并新增静态编排回归锁定 17 个阶段、节点控制 hook、状态传递和最终门禁摘要。
+- 数据面审计增加 Alembic head、逻辑版本/history、投影版本/outbox、原生操作幂等、collection 内逻辑 ID 唯一、向量维度、容器非
+  root/只读/capability/tmpfs、原始对话 canary 与密钥日志泄漏检查；同步部署、测试场景和前端测试说明。
+
+### How
+
+- 记忆定向 Vitest 为 3 files / 10 tests，workspace 15 项 typecheck 通过；Playwright 可发现七个真实场景，严格 TypeScript 编译通过。
+- `memory-cluster-e2e-test.sh`、`memory-dev-services-test.sh`、shell 语法、AI 文档校验和 `git diff --check` 通过；项目未提供可执行
+  eslint 命令，因此没有把 eslint 记为已运行成功。
+- 本地真实独立 pgvector、CPU BGE、Nginx VIP 和三个 Mem0 副本保持健康，增强后的 `--audit` 对当前数据面全部通过，包括
+  collection 512 维、无重复逻辑记忆、无投影积压、容器安全和原始对话/密钥 canary 检查。
+
+### Result
+
+- 发布门禁现在能从浏览器证明故障期间仍可学习、恢复后不二次抽取并补齐相同 `logicalMemoryId`，同时覆盖治理、授权、性能、
+  幂等、存储和安全边界；没有新增或变更生产 API、RunEvent、数据库 migration、SQL 或运行时实现。
+- 企业真实 `.2 → .4/.114 → Mem0 VIP → 记忆库 → Java 模型网关 → 企业模型/CPU BGE` 七场景及批准容量 p99 仍未运行；当前缺少
+  目标 URL、测试账号和节点/模型控制 hook，不能据本地验证开启企业记忆白名单。
+- 未修改 `.env*`、generated SDK 或 OpenCode 源码；工作区中同期的 Figma/Git 面板和聊天回归改动继续保持未暂存。

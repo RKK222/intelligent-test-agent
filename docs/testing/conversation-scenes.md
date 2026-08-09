@@ -22,6 +22,7 @@
 | subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`keeps native pending task visible and converts it to a clickable subagent card` | task part、child Session、子 Agent 卡片和点击进入 |
 | 历史 subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`makes historical subagent cards clickable from session tree snapshot indexes` | 历史树恢复、子 Agent 导航、子时间线 |
 | UI 执行 subagent | 公共配置 `test-execution-ui.md` / `ui_test_execute.ts` 与独立 UI 平台契约测试 | 必填被测系统环境、单行四列传递、缺环境中断、Tool 直连、一次提交、同 executionId 轮询和终态结果 |
+| 通用长期记忆真实链路 | `frontend/apps/agent-web/tests/memory.real-spec.ts`、`tools/memory-cluster-e2e.sh` | 浏览器建 Application、原生学习、来源 Session/Run、跨会话和团队召回、原文 ACL、手工治理写链、Mem0/Java/双 Embedding 故障窗口学习、投影积压恢复、同步并发 p99 与存储泄漏审计 |
 | 宠物旁路成功 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question streams progress, survives outside clicks, and calibrates replayed deltas` |旁路 Run、阶段进度、增量、最终答案、重放去重 |
 | 宠物旁路失败/重试 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question keeps a failure editable and starts a fresh run on retry` | 失败弹层、问题保留、重新提交 |
 | 宠物形象策略 | `frontend/apps/agent-web/tests/pet-companions.test.ts` 与 `FigmaShell.test.ts`：`lets the user choose a companion and persists the selected mode` | 本地日期轮换、每日随机稳定、异常存储回退、固定角色与名册交互 |

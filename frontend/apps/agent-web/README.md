@@ -162,7 +162,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 对话完成摘要只消费 `queryQaMemoryRunUsage` 返回的实际注入记录，没有记录不显示徽标。系统管理 `MemoryAdminPanel.vue` 使用 `/memory/v1/admin` 展示 Mem0 多节点、固定 CHAT、企业/CPU Embedding、学习/投影积压和白名单；模型选项只接受已启用、配置凭据且对应能力探测成功的内部模型。健康卡和配置区在中栏、窄屏和暗色模式下不产生横向滚动。
 - 页面以 evidence rail 作为唯一标志元素，个人蓝 `#4F6BED`、团队青 `#0F8F88`、候选琥珀 `#B7791F`、冲突红 `#C2414B` 只表达状态；其它表面和字体沿用工作台 token，并覆盖暗色、键盘焦点、Reduced Motion 与窄屏抽屉。
 
-`tests/memory-center.test.ts`、`tests/memory-admin-panel.test.ts`、`tests/FigmaChatPanel.test.ts` 与 `tests/workbench.spec.ts` 覆盖通用治理、来源证据、团队审核、双 profile、白名单和 usage；`tests/memory.real-spec.ts` 从浏览器覆盖建 Application、原生学习、跨会话召回、团队审核和原对话 ACL，并由 `tools/memory-cluster-e2e.sh` 编排副本/Embedding 故障与目标并发。
+`tests/memory-center.test.ts`、`tests/memory-admin-panel.test.ts`、`tests/FigmaChatPanel.test.ts` 与 `tests/workbench.spec.ts` 覆盖通用治理、来源证据、团队审核、双 profile、白名单和 usage；`tests/memory.real-spec.ts` 从浏览器覆盖建 Application、原生学习、来源 Session/Run 精确匹配、跨会话召回、团队审核、原对话 ACL、旧 API 410，以及手工新增/编辑/范围提升/暂停/归档完整写链。`tools/memory-cluster-e2e.sh` 会在只剩一个 Mem0、只剩一个 Java 和企业 Embedding 中断窗口继续从浏览器学习，先验证真实投影积压再恢复，并以同步发送屏障、每 actor 基线召回、p99、Run/Session 唯一性和抽样学习证据执行目标并发；`tools/memory-cluster-e2e-test.sh` 锁定这套编排顺序和状态传递，但不替代真实浏览器发布准入。
 
 独立 worktree 跑 Playwright 时可设置 `TEST_AGENT_E2E_PORT` 使用非 3000 端口；配置中的 `webServer.url`、Vite 端口和浏览器 `baseURL` 会同步切换，避免 `reuseExistingServer` 误连其它 worktree 的开发服务。默认仍为 3000。
 

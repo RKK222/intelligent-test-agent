@@ -265,27 +265,40 @@ tools/memory-cluster-e2e.sh --full --faults --concurrency 8 --partition same --a
 tools/memory-cluster-e2e.sh --enterprise --all --concurrency 32 --partition both
 ```
 
+修改编排脚本后先运行不接触真实环境的顺序回归；它用假 Playwright/hook 只验证场景次序、状态文件和故障恢复命令，不能作为发布证据：
+
+```bash
+tools/memory-cluster-e2e-test.sh
+```
+
 环境变量和远程停启 hook 的完整清单运行 `tools/memory-cluster-e2e.sh --help` 查看。审计场景必须提供
 `TEST_AGENT_MEMORY_E2E_AUDIT_CMD`，由发布人员注入只读命令核对平台 PostgreSQL、Session 事实表和
-Java 日志；企业停启 hook 同样由发布人员注入 SSH/编排命令，不写入仓库或发布包。准入条件：
+Java 日志；企业停启 hook 同样由发布人员注入 SSH/编排命令，不写入仓库或发布包。脚本会把
+`TEST_AGENT_MEMORY_E2E_ENTERPRISE_FAULT_SESSION_ID/RUN_ID/MEMORY_ID`、治理记忆 ID/平台版本/逻辑版本和状态文件路径
+传给审计 hook；企业审计必须据此确认故障 Session 只产生一次 `native_started` 操作、两个 collection
+投影到同一逻辑版本且治理记忆的 update/promote/delete 均已同步。准入条件：
 
-- 三个 Mem0 副本逐个摘除、只剩一个时仍能学习/召回，无本地 history 丢失。
-- 两个 Java 节点逐台摘除后浏览器仍经 Nginx 完成 Run。
-- 企业 embedding 断开时 CPU 集合召回同一 `logicalMemoryId`；恢复后 outbox 归零，不二次抽取。
+- 三个 Mem0 副本逐个摘除、只剩一个时仍从浏览器完成新偏好学习和跨会话召回；副本恢复后召回同一平台记忆 ID，无本地 history 丢失。
+- 两个 Java 节点逐台摘除；第一台停止窗口继续学习，第二台停止窗口召回同一记忆，浏览器始终经过 Nginx。
+- 企业 embedding 断开时在 CPU profile 上只执行一次原生抽取，再通过浏览器编辑制造确定的新版本；页面必须先看到投影 outbox 非零，CPU 集合召回同一记忆，恢复后 outbox 归零且审计确认没有第二次抽取。
 - CPU 断开时企业集合可召回；两个 profile 全断时 Run 在 2 秒检索预算内无记忆继续。
-- 同分区版本单调且无重复逻辑 ID；多用户分区可并行。
-- 浏览器 Run 启动 p99 不超过 2 秒。该值同时包含 Nginx/Java 路由和记忆检索，是对“检索 p99≤2秒”的更严格浏览器侧门禁。
+- 手工记忆必须从页面走完新增、编辑、Application→全局、暂停、归档；平台版本逐次递增，归档后 usage 不得包含该 ID，独立记忆库最终为删除版本且所有 profile 为 `DELETED`。
+- 同分区版本单调且无重复逻辑 ID；多用户/Application 分区可并行。不同分区目标并发为 N 时，`TEST_AGENT_MEMORY_E2E_USERS_JSON` 必须提供至少 N 个唯一 `username/Application` actor，禁止循环复用少量账号伪装不同分区；未指定 `applicationName` 的 actor 会在 `full` 场景通过 UI 加入新建 Application（搜索值可用 `directoryQuery` 指定），指向其他 Application 时必须为该 actor 提供 `expectedMemoryId`。每个 actor 都必须真实召回基线记忆，不能用无记忆请求冒充检索性能。并发用例先把全部上下文准备到可发送状态，再在同一 2 秒窗口发起请求；最多抽样 4 个（可配 1–8）Session 核对真实学习证据，全部 Run/Session 和数据库版本由审计覆盖。
+- 浏览器 Run 启动 p99 不超过 2 秒。该值同时包含 Nginx/Java 路由和记忆检索，是对“检索 p99≤2秒”的更严格浏览器侧门禁；不能把登录/工作区初始化混入计时掩盖请求未同时发起。
 - 浏览器把明确标注为“一次性、非偏好”的随机原始对话 marker 写入 Session；记忆控制/history、每个向量
-  collection、Mem0/CPU/VIP 运行时文件系统和日志中均不得出现该 marker。投影还必须无越版本、无积压/死信；
-  Mem0 与 CPU Embedding 容器只读且无本地数据 mount，VIP 以固定 `101:101` 非 root 身份运行，
-  只挂载只读 Nginx 配置；三者均丢弃全部 Linux capability。
+  collection、Mem0/CPU/VIP 运行时文件系统和日志中均不得出现该 marker。投影还必须无缺行、越版本、积压或死信；
+  collection 内同一 `logicalMemoryId` 只能有一个向量且实际维度匹配名称。Mem0 与 CPU Embedding 容器必须以非 root、
+  只读根文件系统、无本地数据 mount、`no-new-privileges` 和 `cap_drop=ALL` 运行；VIP 固定 `101:101`，只挂载只读 Nginx 配置。
+- 数据面日志不得出现 memory service key、HMAC secret、Embedding API key 或记忆 PostgreSQL 密码；Alembic 必须保持单一预期 head。
 - 平台审计确认原始聊天只存在既有 Session 事实表，没有第二份消息镜像。
 
-`full` 场景会把浏览器记忆卡片观察到的平台记忆 ID 和本次随机审计 marker 写入默认
+`full` 场景会把浏览器记忆卡片观察到的平台记忆 ID、来源 Session/Run、随机审计 marker、随机创建的
+Application/workspace、团队记忆 ID 和治理记忆 ID 写入默认
 `.tmp/memory-e2e-state.json`（可用 `TEST_AGENT_MEMORY_E2E_STATE_FILE` 改路径，文件权限为 `0600`，
-不含凭据或对话正文）。后续每一次 Mem0/Java/企业 Embedding/CPU 故障召回都从浏览器实际收到的
-run-usage 响应核对同一 ID，而不以“召回数量非零”代替逻辑记忆一致性。单独运行故障门禁时可显式
-提供 `TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_ID`。
+不含凭据或对话正文）。同一次 `--full --faults --concurrency` 自动复用该随机 Application，不再要求操作者
+预先猜测随机名称。后续每一次 Mem0/Java/企业 Embedding/CPU 故障召回都从浏览器实际收到的 run-usage
+响应核对指定状态键中的同一 ID，而不以“召回数量非零”代替逻辑记忆一致性。单独运行故障门禁时可复用
+已有状态文件，或显式提供 `TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_ID` 和既有 Application/workspace。
 
 ## 灰度与回滚
 

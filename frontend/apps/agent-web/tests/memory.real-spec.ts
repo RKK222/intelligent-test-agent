@@ -1,5 +1,5 @@
-import { expect, test, type Browser, type BrowserContext, type Page, type Response } from "@playwright/test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page, type Response } from "@playwright/test";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const runMemoryE2e = process.env.TEST_AGENT_RUN_MEMORY_E2E === "1";
@@ -17,7 +17,9 @@ type ExistingWorkspace = {
 
 type StartedRun = {
   runId: string;
+  sessionId: string;
   startLatencyMs: number;
+  requestStartedAt: number;
 };
 
 type LearnedMemory = {
@@ -27,6 +29,25 @@ type LearnedMemory = {
   sessionId: string;
   sessionTitle: string;
   sessionHref: string;
+  runId: string;
+  content: string;
+};
+
+type ConcurrencyActor = Credentials & Partial<ExistingWorkspace> & {
+  directoryQuery?: string;
+  expectedMemoryId?: string;
+};
+
+type MemoryE2eState = Record<string, unknown> & {
+  memoryId?: string;
+  sessionId?: string;
+  sessionTitle?: string;
+  runId?: string;
+  rawTranscriptMarker?: string;
+  applicationName?: string;
+  workspaceAlias?: string;
+  teamMemoryId?: string;
+  governanceMemoryId?: string;
 };
 
 test.describe.configure({ mode: "serial" });
@@ -61,7 +82,8 @@ test.describe("通用记忆真实浏览器端到端", () => {
       workspaceAlias,
       memberQueries: [
         requiredEnv("TEST_AGENT_MEMORY_E2E_ADMIN_USER_QUERY"),
-        requiredEnv("TEST_AGENT_MEMORY_E2E_MEMBER_USER_QUERY")
+        requiredEnv("TEST_AGENT_MEMORY_E2E_MEMBER_USER_QUERY"),
+        ...concurrencyMemberQueriesFromEnv()
       ]
     });
 
@@ -75,12 +97,21 @@ test.describe("通用记忆真实浏览器端到端", () => {
     const beforeIds = await memoryCardIds(page);
 
     await openWorkbench(page);
-    await sendPromptAndWait(page, firstPrompt);
+    const firstRun = await sendPromptAndWait(page, firstPrompt);
 
-    const learned = await waitForLearnedMemory(page, marker, beforeIds);
-    writeMemoryState(learned, rawTranscriptMarker);
+    const learned = await waitForLearnedMemory(page, {
+      marker,
+      baselineIds: beforeIds,
+      expectedSessionId: firstRun.sessionId,
+      expectedRunId: firstRun.runId,
+      requireNew: true
+    });
+    writeMemoryState(learned, rawTranscriptMarker, { applicationName, workspaceAlias });
     expect(learned.sessionId).toBeTruthy();
     expect(learned.sessionHref).toBe(`/s/${encodeURIComponent(learned.sessionId)}`);
+    expect(learned.runId).toBe(firstRun.runId);
+    await expect(page.getByTestId("memory-detail-drawer")).not.toContainText(rawTranscriptMarker);
+    await expectLegacyMemoryApiGone(page);
 
     await page.getByRole("link", { name: "打开原始对话" }).click();
     await expect(page).toHaveURL(new RegExp(`/s/${escapeRegex(learned.sessionId)}(?:$|[?#])`));
@@ -112,6 +143,10 @@ test.describe("通用记忆真实浏览器端到端", () => {
     await teamCard.getByRole("button").first().click();
     await page.getByRole("button", { name: "批准" }).click();
     await expect(teamCard).toContainText("已生效", { timeout: 30_000 });
+    const teamCardTestId = await teamCard.getAttribute("data-testid");
+    const teamMemoryId = teamCardTestId?.replace(/^memory-card-/, "") ?? "";
+    expect(teamMemoryId).toBeTruthy();
+    mergeMemoryState({ teamMemoryId });
 
     const memberContext = await browser.newContext();
     try {
@@ -131,20 +166,179 @@ test.describe("通用记忆真实浏览器端到端", () => {
       await expect(evidence).toContainText(`会话 ID ${learned.sessionId}`);
       await expect(evidence.getByRole("link", { name: "打开原始对话" })).toHaveCount(0);
       await expect(evidence.getByText("仅会话所有者可打开原始对话")).toBeVisible();
+      await expect(memberPage.getByRole("button", { name: "批准", exact: true })).toHaveCount(0);
+      await expect(memberPage.getByRole("button", { name: "拒绝", exact: true })).toHaveCount(0);
 
       // 不只验证页面隐藏入口：在该成员的真实浏览器登录态下直接请求消息资源，
       // 后端仍必须拒绝，防止手工拼接 /s/{sessionId} 绕过 UI。
       const transcriptStatus = await memberPage.evaluate(async (sessionId) => {
+        const token = sessionStorage.getItem("test-agent.auth.token");
         const response = await fetch(
           `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/messages?page=1&size=20&refresh=false`,
-          { credentials: "same-origin" }
+          {
+            credentials: "same-origin",
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          }
         );
         return response.status;
       }, learned.sessionId);
       expect([403, 404]).toContain(transcriptStatus);
+
+      // 再验证真实深链接也不会把所有者原文渲染给团队成员。
+      await memberPage.goto(learned.sessionHref, { waitUntil: "domcontentloaded" });
+      await expect(memberPage.locator(".figma-app")).toBeVisible({ timeout: 60_000 });
+      await expect(memberPage.getByText(rawTranscriptMarker, { exact: false })).toHaveCount(0);
     } finally {
       await memberContext.close();
     }
+  });
+
+  test("手工记忆的编辑、范围提升、暂停和归档贯穿双集合写链", async ({ page }) => {
+    test.skip(scenario !== "full", "仅完整业务验收继续覆盖记忆治理写链。");
+    test.setTimeout(8 * 60_000);
+
+    const state = readMemoryState();
+    const workspace = workspaceFromState(state);
+    const marker = `MEMORY_GOVERNANCE_${Date.now().toString(36).toUpperCase()}`;
+    const initialContent = `${marker}：所有测试结论需要先列风险，再列建议。`;
+    const updatedContent = `${marker}：所有测试结论先列风险，再给出可执行建议和负责人。`;
+
+    await login(page, credentialsFromEnv("ADMIN"));
+    await selectApplicationAndWorkspace(page, workspace);
+    await page.getByRole("button", { name: "长期记忆" }).click();
+    await expectMemoryAvailable(page);
+    await page.getByTestId("add-personal-memory").click();
+    const createDialog = page.getByRole("dialog", { name: "添加个人记忆" });
+    await createDialog.getByRole("textbox", { name: "长期信息或偏好" }).fill(initialContent);
+    await createDialog.getByLabel("当前应用").check();
+    await createDialog.getByRole("button", { name: "保存", exact: true }).click();
+
+    let card = page.locator('[data-testid^="memory-card-"]').filter({ hasText: marker }).first();
+    await expect(card).toContainText(initialContent, { timeout: 30_000 });
+    const cardTestId = await card.getAttribute("data-testid");
+    const memoryId = cardTestId?.replace(/^memory-card-/, "") ?? "";
+    expect(memoryId).toBeTruthy();
+    const initialVersion = await memoryCardVersion(card);
+
+    await card.getByRole("button", { name: "编辑记忆" }).click();
+    const editDialog = page.getByRole("dialog", { name: "编辑记忆" });
+    await editDialog.getByRole("textbox", { name: "长期信息或偏好" }).fill(updatedContent);
+    await editDialog.getByRole("button", { name: "保存", exact: true }).click();
+    card = page.getByTestId(`memory-card-${memoryId}`);
+    await expect(card).toContainText(updatedContent, { timeout: 30_000 });
+    await expect.poll(() => memoryCardVersion(card)).toBe(initialVersion + 1);
+
+    await card.getByRole("button").first().click();
+    await page.getByRole("button", { name: "提升为个人全局" }).click();
+    card = page.getByTestId(`memory-card-${memoryId}`);
+    await expect(card).toContainText("个人 · 全局", { timeout: 30_000 });
+    await expect.poll(() => memoryCardVersion(card)).toBe(initialVersion + 2);
+
+    await card.getByRole("button").first().click();
+    await page.getByRole("button", { name: "暂停使用" }).click();
+    card = page.getByTestId(`memory-card-${memoryId}`);
+    await expect(card).toContainText("已暂停", { timeout: 30_000 });
+    await expect.poll(() => memoryCardVersion(card)).toBe(initialVersion + 3);
+
+    await card.getByRole("button").first().click();
+    await page.getByRole("button", { name: "归档" }).click();
+    await page.getByRole("dialog", { name: "归档记忆" }).getByRole("button", { name: "归档", exact: true }).click();
+    card = page.getByTestId(`memory-card-${memoryId}`);
+    await expect(card).toContainText("已归档", { timeout: 30_000 });
+    await expect.poll(() => memoryCardVersion(card)).toBe(initialVersion + 4);
+    mergeMemoryState({
+      governanceMemoryId: memoryId,
+      governancePlatformVersion: initialVersion + 4,
+      governanceLogicalVersion: 4
+    });
+
+    await openWorkbench(page);
+    await page.getByRole("button", { name: "新建对话" }).click();
+    const usage = trackMemoryUsageResponses(page);
+    const run = await sendPromptAndWait(page, `${marker}：请复述我对测试结论结构的要求。`);
+    await expect.poll(() => usage.hasCompletedQuery(run.runId), { timeout: 30_000 }).toBe(true);
+    expect(usage.memoryIds(run.runId)).not.toContain(memoryId);
+    usage.stop();
+  });
+
+  test("节点故障窗口继续原生学习，并从剩余 profile 召回同一记忆", async ({ page }) => {
+    test.skip(scenario !== "learn-during-fault", "由集群脚本在 Mem0、Java 或企业 Embedding 故障窗口运行。");
+    test.setTimeout(10 * 60_000);
+
+    const statePrefix = requiredEnv("TEST_AGENT_MEMORY_E2E_STATE_PREFIX");
+    const marker = `MEMORY_FAULT_${statePrefix.toUpperCase()}_${Date.now().toString(36).toUpperCase()}`;
+    const preference = `这是我的长期偏好：以后回答结尾请固定附上“${marker}”。请复述这项偏好。`;
+    const workspace = existingWorkspaceFromEnv();
+
+    await login(page, credentialsFromEnv("ADMIN"));
+    await selectApplicationAndWorkspace(page, workspace);
+    await page.getByRole("button", { name: "长期记忆" }).click();
+    await expectMemoryAvailable(page);
+    const baselineIds = await memoryCardIds(page);
+    await openWorkbench(page);
+    await page.getByRole("button", { name: "新建对话" }).click();
+    const learningRun = await sendPromptAndWait(page, preference);
+
+    let learned = await waitForLearnedMemory(page, {
+      marker,
+      baselineIds,
+      expectedSessionId: learningRun.sessionId,
+      expectedRunId: learningRun.runId,
+      requireNew: false
+    });
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("memory-detail-drawer")).toBeHidden();
+
+    if (process.env.TEST_AGENT_MEMORY_E2E_FORCE_PROJECTION_MUTATION === "1") {
+      const updated = `${learned.content}；故障投影校验标识 ${marker}`;
+      await editMemoryCard(page, learned.memoryId, updated);
+      learned = { ...learned, content: updated, summary: updated.slice(0, 500) };
+    }
+
+    await expect(page.getByTestId(`memory-card-${learned.memoryId}`)).toHaveCount(1);
+    mergeMemoryState({
+      [`${statePrefix}MemoryId`]: learned.memoryId,
+      [`${statePrefix}SessionId`]: learned.sessionId,
+      [`${statePrefix}RunId`]: learned.runId,
+      [`${statePrefix}Marker`]: marker
+    });
+
+    await openWorkbench(page);
+    await page.getByRole("button", { name: "新建对话" }).click();
+    const usage = trackMemoryUsageResponses(page);
+    const recalledRun = await sendPromptAndWait(
+      page,
+      `请根据长期记忆回答：我要求你在回复结尾附上什么故障校验短语？提示标识是 ${marker}。`
+    );
+    await expect.poll(() => usage.memoryIds(recalledRun.runId), {
+      timeout: 60_000,
+      message: `故障窗口学习后必须召回同一平台记忆 ${learned.memoryId}`
+    }).toContain(learned.memoryId);
+    usage.stop();
+  });
+
+  test("企业 Embedding 中断期间浏览器可观察到真实投影积压", async ({ page }) => {
+    test.skip(scenario !== "projection-backlog", "仅企业 Embedding 故障窗口检查投影积压。");
+    test.setTimeout(4 * 60_000);
+
+    await login(page, credentialsFromEnv("ADMIN"));
+    await openMemoryAdmin(page);
+    const expectedProfiles = boundedInteger("TEST_AGENT_MEMORY_E2E_EXPECT_PROFILE_COUNT", 2, 8);
+    await expect(page.getByTestId("memory-health-embedding")).toContainText(
+      new RegExp(`\\d+ / ${expectedProfiles} 可用`),
+      { timeout: 30_000 }
+    );
+    await expect.poll(async () => {
+      const backlog = await projectionBacklog(page);
+      if (backlog === 0) await refreshMemoryAdmin(page);
+      return backlog;
+    }, {
+      timeout: 180_000,
+      intervals: [1_000, 2_000, 5_000],
+      message: "故障期间至少一条跨 profile 投影必须进入共享 outbox"
+    }).toBeGreaterThan(0);
+    const counts = await projectionBacklogCounts(page);
+    expect(counts.dead, "短时故障不应直接产生不可恢复死信").toBe(0);
   });
 
   test("故障切换后仍可召回，双 profile 全失效时 2 秒 fail-open", async ({ page }) => {
@@ -171,6 +365,9 @@ test.describe("通用记忆真实浏览器端到端", () => {
       // Run 启动响应覆盖 Java 侧记忆检索阶段；用浏览器可观察的整段时延执行更严格的 2 秒门禁。
       expect(run.startLatencyMs).toBeLessThanOrEqual(2_000);
       await expect(page.getByTestId(`run-memory-usage-${run.runId}`)).toHaveCount(0);
+      await expect.poll(() => usage.hasCompletedQuery(run.runId), { timeout: 10_000 }).toBe(true);
+      expect(usage.memoryIds(run.runId)).toEqual([]);
+      await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
     }
     usage.stop();
   });
@@ -180,18 +377,18 @@ test.describe("通用记忆真实浏览器端到端", () => {
     test.setTimeout(4 * 60_000);
 
     await login(page, credentialsFromEnv("ADMIN"));
-    await page.getByRole("button", { name: "系统管理" }).click();
-    await page.getByRole("button", { name: "记忆能力" }).click();
+    await openMemoryAdmin(page);
+    const expectedProfiles = boundedInteger("TEST_AGENT_MEMORY_E2E_EXPECT_PROFILE_COUNT", 2, 8);
 
     await expect.poll(async () => {
-      const projection = page.getByTestId("memory-health-projection");
-      if (await projection.isVisible()) {
-        const text = await projection.innerText();
-        if (/0 待投影/.test(text) && /0 死信/.test(text)) return true;
-      }
-      await page.getByTestId("memory-admin-panel").getByRole("button", { name: "刷新" }).click();
+      const embedding = await page.getByTestId("memory-health-embedding").innerText();
+      const backlog = await projectionBacklog(page);
+      if (embedding.includes(`${expectedProfiles} / ${expectedProfiles} 可用`) && backlog === 0) return true;
+      await refreshMemoryAdmin(page);
       return false;
     }, { timeout: 180_000, intervals: [1_000, 2_000, 5_000] }).toBe(true);
+    const counts = await projectionBacklogCounts(page);
+    expect(counts).toEqual({ pending: 0, processing: 0, dead: 0 });
   });
 
   test("按目标并发数从浏览器并行启动会话", async ({ browser }) => {
@@ -200,34 +397,98 @@ test.describe("通用记忆真实浏览器端到端", () => {
 
     const concurrency = boundedInteger("TEST_AGENT_MEMORY_E2E_CONCURRENCY", 1, 64);
     const partitionMode = env("TEST_AGENT_MEMORY_E2E_PARTITION_MODE", "same");
-    const users = concurrencyCredentials(partitionMode);
-    const workspace = existingWorkspaceFromEnv();
+    const actors = concurrencyCredentials(partitionMode, concurrency);
+    const defaultWorkspace = existingWorkspaceFromEnv();
+    const expectedInjectedMemoryIds = Array.from({ length: concurrency }, (_, index) => {
+      const actor = actors[partitionMode === "same" ? 0 : index];
+      const applicationName = actor.applicationName ?? defaultWorkspace.applicationName;
+      return actor.expectedMemoryId?.trim()
+        || expectedConcurrencyMemoryId(partitionMode, applicationName);
+    });
+    if (expectedInjectedMemoryIds.some((memoryId) => !memoryId)) {
+      throw new Error(
+        "每个并发 actor 都必须有可召回的基线记忆；同一新建 Application 可复用 teamMemoryId，其他 Application 请配置 expectedMemoryId"
+      );
+    }
+    if (partitionMode === "distinct") {
+      const partitionKeys = actors.slice(0, concurrency).map((actor) =>
+        `${actor.username}\u0000${actor.applicationName ?? defaultWorkspace.applicationName}`);
+      if (new Set(partitionKeys).size !== concurrency) {
+        throw new Error("distinct 并发要求每个 actor 使用唯一的 username/Application 分区");
+      }
+    }
     const contexts: BrowserContext[] = [];
+    const batchId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`.toUpperCase();
     try {
-      const runs = await Promise.all(Array.from({ length: concurrency }, async (_, index) => {
+      // 先把所有浏览器准备到可发送状态，再同时点击发送；登录和工作区初始化耗时
+      // 不应被混进并发检索 p99，也不能用串行创建上下文伪装并发。
+      const prepared = await Promise.all(Array.from({ length: concurrency }, async (_, index) => {
+        const actor = actors[partitionMode === "same" ? 0 : index];
         const context = await browser.newContext();
         contexts.push(context);
         const page = await context.newPage();
-        await login(page, users[index % users.length]);
-        await selectApplicationAndWorkspace(page, workspace);
-        const marker = `MEMORY_CONCURRENCY_${Date.now()}_${index}`;
-        return sendPromptAndWait(
-          page,
-          `${marker}：请按我的长期偏好简短回答“并发验收已收到”。`,
-          8 * 60_000
-        );
+        await login(page, actor);
+        await selectApplicationAndWorkspace(page, {
+          applicationName: actor.applicationName ?? defaultWorkspace.applicationName,
+          workspaceAlias: actor.workspaceAlias ?? defaultWorkspace.workspaceAlias
+        });
+        await page.getByRole("button", { name: "长期记忆" }).click();
+        await expectMemoryAvailable(page);
+        const baselineIds = await memoryCardIds(page);
+        await openWorkbench(page);
+        await page.getByRole("button", { name: "新建对话" }).click();
+        return { page, baselineIds, usage: trackMemoryUsageResponses(page), index };
       }));
 
+      const runs = await Promise.all(prepared.map(({ page, index }) => sendPromptAndWait(
+        page,
+        `MEMORY_CONCURRENCY_${batchId}_${index}：这是长期偏好；以后回答结尾附上批次编号 ${batchId}-${index}。请确认。`,
+        8 * 60_000
+      )));
+
       expect(new Set(runs.map((run) => run.runId)).size).toBe(concurrency);
+      expect(new Set(runs.map((run) => run.sessionId)).size).toBe(concurrency);
       const latencies = runs.map((run) => run.startLatencyMs).sort((left, right) => left - right);
       const p99 = latencies[Math.max(0, Math.ceil(latencies.length * 0.99) - 1)];
       expect(p99, `Run 启动 p99=${p99}ms；该值包含路由与记忆检索阶段`).toBeLessThanOrEqual(2_000);
+      const requestSpread = Math.max(...runs.map((run) => run.requestStartedAt))
+        - Math.min(...runs.map((run) => run.requestStartedAt));
+      expect(requestSpread, "全部浏览器必须在同一个 2 秒窗口发起请求").toBeLessThanOrEqual(2_000);
 
-      const auditPage = contexts[0].pages()[0];
-      await auditPage.getByRole("button", { name: "长期记忆" }).click();
-      await expectMemoryAvailable(auditPage);
-      const ids = await memoryCardIds(auditPage);
-      expect(new Set(ids).size).toBe(ids.length);
+      await Promise.all(prepared.map(({ usage }, index) => expect.poll(
+          () => usage.memoryIds(runs[index].runId),
+          { timeout: 60_000, message: `并发 Run ${runs[index].runId} 必须注入基线团队/个人记忆` }
+        ).toContain(expectedInjectedMemoryIds[index])));
+
+      // 容量可到 64，但浏览器逐卡核验证据只抽取至多 4 个会话；完整版本、锁和
+      // outbox 一致性由随后的共享库审计覆盖，避免 UI 轮询本身改变容量结果。
+      const sampleCount = Math.min(concurrency, optionalBoundedInteger(
+        "TEST_AGENT_MEMORY_E2E_CONCURRENCY_LEARNING_SAMPLES", 4, 1, 8
+      ));
+      const learned = await Promise.all(prepared.slice(0, sampleCount).map((item, index) =>
+        waitForLearnedMemory(item.page, {
+          marker: `MEMORY_CONCURRENCY_${batchId}_${index}`,
+          baselineIds: item.baselineIds,
+          expectedSessionId: runs[index].sessionId,
+          expectedRunId: runs[index].runId,
+          requireNew: false
+        })));
+      if (partitionMode === "distinct") {
+        expect(new Set(learned.map((memory) => memory.memoryId)).size,
+          "不同用户分区的个人记忆不能合并成同一个平台记忆").toBe(learned.length);
+      }
+      for (const { page } of prepared.slice(0, sampleCount)) {
+        const ids = await memoryCardIds(page);
+        expect(new Set(ids).size).toBe(ids.length);
+      }
+      mergeMemoryState({
+        [`concurrency${capitalize(partitionMode)}RunIds`]: runs.map((run) => run.runId),
+        [`concurrency${capitalize(partitionMode)}SessionIds`]: runs.map((run) => run.sessionId),
+        [`concurrency${capitalize(partitionMode)}SampleMemoryIds`]: learned.map((memory) => memory.memoryId),
+        [`concurrency${capitalize(partitionMode)}P99Ms`]: p99,
+        [`concurrency${capitalize(partitionMode)}RequestSpreadMs`]: requestSpread
+      });
+      prepared.forEach(({ usage }) => usage.stop());
     } finally {
       await Promise.all(contexts.map((context) => context.close()));
     }
@@ -341,26 +602,29 @@ async function sendPromptAndWait(page: Page, prompt: string, terminalTimeout = 5
   const composer = page.locator(".figma-chat-textarea");
   await expect(composer).toBeEnabled({ timeout: 60_000 });
   await composer.fill(prompt);
-  const startedAt = Date.now();
+  const requestStartedAt = Date.now();
   const responsePromise = page.waitForResponse((response) => isRunStartResponse(response), { timeout: 60_000 });
   await page.getByRole("button", { name: "发送", exact: true }).click();
   const response = await responsePromise;
   if (!response.ok()) {
     throw new Error(`Run 启动失败：HTTP ${response.status()} ${await response.text()}`);
   }
-  const startLatencyMs = Date.now() - startedAt;
+  const startLatencyMs = Date.now() - requestStartedAt;
   const payload = await response.json() as {
-    data?: { runId?: string };
+    data?: { runId?: string; sessionId?: string };
     runId?: string;
+    sessionId?: string;
   };
   const runId = payload.data?.runId ?? payload.runId;
+  const sessionId = payload.data?.sessionId ?? payload.sessionId;
   if (!runId) throw new Error("Run 启动响应缺少 runId");
+  if (!sessionId) throw new Error("Run 启动响应缺少 sessionId");
 
   // 等待页面处理启动响应，随后以发送按钮重新出现作为浏览器侧终态，不读取后端数据库或直接调用 API。
   await page.waitForTimeout(300);
   await expect(page.getByRole("button", { name: "发送", exact: true })).toBeVisible({ timeout: terminalTimeout });
   await expect(page.getByRole("button", { name: "发送", exact: true })).toBeEnabled({ timeout: terminalTimeout });
-  return { runId, startLatencyMs };
+  return { runId, sessionId, startLatencyMs, requestStartedAt };
 }
 
 function isRunStartResponse(response: Response) {
@@ -368,10 +632,16 @@ function isRunStartResponse(response: Response) {
   return response.request().method() === "POST" && url.pathname === "/api/internal/agent/opencode/runs";
 }
 
-async function waitForLearnedMemory(page: Page, marker: string, baselineIds: string[]): Promise<LearnedMemory> {
+async function waitForLearnedMemory(page: Page, input: {
+  marker: string;
+  baselineIds: string[];
+  expectedSessionId: string;
+  expectedRunId: string;
+  requireNew: boolean;
+}): Promise<LearnedMemory> {
   await page.getByRole("button", { name: "长期记忆" }).click();
   await expectMemoryAvailable(page);
-  const baseline = new Set(baselineIds);
+  const baseline = new Set(input.baselineIds);
   let found: LearnedMemory | null = null;
 
   await expect.poll(async () => {
@@ -385,25 +655,47 @@ async function waitForLearnedMemory(page: Page, marker: string, baselineIds: str
     for (const index of ordered) {
       const card = cards.nth(index);
       const cardTestId = await card.getAttribute("data-testid");
-      if (!cardTestId || baseline.has(cardTestId)) continue;
+      if (!cardTestId || (input.requireNew && baseline.has(cardTestId))) continue;
       const summary = (await card.locator(".memory-card__main > strong").innerText()).trim();
       await card.getByRole("button").first().click();
       const rail = page.getByTestId("memory-evidence-rail");
       await expect(rail).toBeVisible();
-      const observation = rail.locator(".evidence-node--observation").first();
-      const sessionTitle = (await observation.locator("strong").innerText()).trim();
-      const details = await observation.locator("small").filter({ hasText: "会话 ID" }).innerText();
-      const sessionId = /会话 ID\s+([^·\s]+)/.exec(details)?.[1] ?? "";
+      const observations = rail.locator(".evidence-node--observation");
+      let observationIndex = -1;
+      let sessionId = "";
+      let runId = "";
+      for (let evidenceIndex = 0; evidenceIndex < await observations.count(); evidenceIndex += 1) {
+        const details = await observations.nth(evidenceIndex).locator("small").filter({ hasText: "会话 ID" }).innerText();
+        const candidateSessionId = /会话 ID\s+([^·\s]+)/.exec(details)?.[1] ?? "";
+        const candidateRunId = /Run ID\s+([^·\s]+)/.exec(details)?.[1] ?? "";
+        if (candidateSessionId === input.expectedSessionId && candidateRunId === input.expectedRunId) {
+          observationIndex = evidenceIndex;
+          sessionId = candidateSessionId;
+          runId = candidateRunId;
+          break;
+        }
+      }
+      const observation = observationIndex >= 0 ? observations.nth(observationIndex) : observations.first();
+      const sessionTitle = observationIndex >= 0
+        ? (await observation.locator("strong").innerText()).trim()
+        : "";
       const link = observation.getByRole("link", { name: "打开原始对话" });
-      const sessionHref = (await link.getAttribute("href")) ?? "";
-      if (sessionId && sessionHref && sessionTitle && sessionTitle !== "未命名对话") {
+      const sessionHref = observationIndex >= 0 ? (await link.getAttribute("href")) ?? "" : "";
+      const content = (await page.locator(".memory-detail__summary p").innerText()).trim();
+      if (sessionId === input.expectedSessionId
+        && runId === input.expectedRunId
+        && sessionHref
+        && sessionTitle
+        && sessionTitle !== "未命名对话") {
         found = {
           cardTestId,
           memoryId: cardTestId.replace(/^memory-card-/, ""),
           summary,
           sessionId,
           sessionTitle,
-          sessionHref
+          sessionHref,
+          runId,
+          content
         };
         return true;
       }
@@ -413,7 +705,11 @@ async function waitForLearnedMemory(page: Page, marker: string, baselineIds: str
     return false;
   }, { timeout: 4 * 60_000, intervals: [2_000, 3_000, 5_000] }).toBe(true);
 
-  if (!found) throw new Error(`Mem0 学习完成但未找到包含来源会话标题和 ID 的新记忆：${marker}`);
+  if (!found) {
+    throw new Error(
+      `Mem0 学习完成但未找到来源 Session/Run 匹配的记忆：${input.marker} / ${input.expectedSessionId} / ${input.expectedRunId}`
+    );
+  }
   return found;
 }
 
@@ -429,6 +725,66 @@ async function memoryCardIds(page: Page) {
     .filter((value): value is string => Boolean(value)));
 }
 
+async function memoryCardVersion(card: Locator) {
+  const text = await card.locator(".memory-card__meta").innerText();
+  const version = Number(/版本\s+(\d+)/.exec(text)?.[1]);
+  if (!Number.isInteger(version)) throw new Error(`记忆卡片缺少可解析版本：${text}`);
+  return version;
+}
+
+async function editMemoryCard(page: Page, memoryId: string, content: string) {
+  const card = page.getByTestId(`memory-card-${memoryId}`);
+  const previousVersion = await memoryCardVersion(card);
+  await card.getByRole("button", { name: "编辑记忆" }).click();
+  const dialog = page.getByRole("dialog", { name: "编辑记忆" });
+  await dialog.getByRole("textbox", { name: "长期信息或偏好" }).fill(content);
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(card).toContainText(content, { timeout: 30_000 });
+  await expect.poll(() => memoryCardVersion(card)).toBe(previousVersion + 1);
+}
+
+async function expectLegacyMemoryApiGone(page: Page) {
+  const result = await page.evaluate(async () => {
+    const token = sessionStorage.getItem("test-agent.auth.token");
+    const response = await fetch("/api/internal/platform/qa-memory/v1/availability", {
+      credentials: "same-origin",
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return { status: response.status, body: await response.text() };
+  });
+  expect(result.status).toBe(410);
+  expect(result.body).toContain("API_GONE");
+}
+
+async function openMemoryAdmin(page: Page) {
+  await page.getByRole("button", { name: "系统管理" }).click();
+  await page.getByRole("button", { name: "记忆能力", exact: true }).click();
+  await expect(page.getByTestId("memory-admin-panel")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("正在检查服务")).toHaveCount(0, { timeout: 30_000 });
+}
+
+async function refreshMemoryAdmin(page: Page) {
+  const panel = page.getByTestId("memory-admin-panel");
+  await panel.getByRole("button", { name: "刷新", exact: true }).click();
+  await expect(panel.getByText("正在检查服务")).toHaveCount(0, { timeout: 30_000 });
+}
+
+async function projectionBacklogCounts(page: Page) {
+  const text = await page.getByTestId("memory-health-projection").innerText();
+  const pending = Number(/(\d+)\s+待投影/.exec(text)?.[1]);
+  const processing = Number(/(\d+)\s+处理中/.exec(text)?.[1]);
+  const dead = Number(/(\d+)\s+死信/.exec(text)?.[1]);
+  if (![pending, processing, dead].every(Number.isInteger)) {
+    throw new Error(`投影积压卡片格式不可解析：${text}`);
+  }
+  return { pending, processing, dead };
+}
+
+async function projectionBacklog(page: Page) {
+  const counts = await projectionBacklogCounts(page);
+  return counts.pending + counts.processing + counts.dead;
+}
+
 function credentialsFromEnv(role: "ADMIN" | "MEMBER"): Credentials {
   return {
     username: requiredEnv(`TEST_AGENT_MEMORY_E2E_${role}_USERNAME`),
@@ -436,26 +792,63 @@ function credentialsFromEnv(role: "ADMIN" | "MEMBER"): Credentials {
   };
 }
 
-function concurrencyCredentials(partitionMode: string): Credentials[] {
+function concurrencyCredentials(partitionMode: string, concurrency: number): ConcurrencyActor[] {
   if (partitionMode === "same") return [credentialsFromEnv("ADMIN")];
   if (partitionMode !== "distinct") throw new Error("TEST_AGENT_MEMORY_E2E_PARTITION_MODE 只能是 same 或 distinct");
   const raw = requiredEnv("TEST_AGENT_MEMORY_E2E_USERS_JSON");
-  const parsed = JSON.parse(raw) as Credentials[];
-  if (!Array.isArray(parsed) || parsed.length < 2 || parsed.some((item) => !item?.username || !item?.password)) {
-    throw new Error("TEST_AGENT_MEMORY_E2E_USERS_JSON 至少需要两个 username/password 用户");
+  const parsed = JSON.parse(raw) as ConcurrencyActor[];
+  if (!Array.isArray(parsed)
+    || parsed.length < concurrency
+    || parsed.some((item) => !item?.username || !item?.password)) {
+    throw new Error(`TEST_AGENT_MEMORY_E2E_USERS_JSON 需要至少 ${concurrency} 个 username/password actor`);
   }
   return parsed;
 }
 
+function concurrencyMemberQueriesFromEnv() {
+  const raw = process.env.TEST_AGENT_MEMORY_E2E_USERS_JSON?.trim();
+  if (!raw) return [];
+  const parsed = JSON.parse(raw) as ConcurrencyActor[];
+  if (!Array.isArray(parsed) || parsed.some((item) => !item?.username || !item?.password)) {
+    throw new Error("TEST_AGENT_MEMORY_E2E_USERS_JSON 必须是有效的 username/password actor 数组");
+  }
+  // 未指定外部 Application 的 actor 会参加 full 场景新建 Application 的并发验收，
+  // 因此必须从浏览器应用管理入口真实加入成员，不能用后台脚本补数据。
+  return parsed
+    .filter((actor) => !actor.applicationName?.trim())
+    .map((actor) => actor.directoryQuery?.trim() || actor.username);
+}
+
 function existingWorkspaceFromEnv(): ExistingWorkspace {
+  const state = readMemoryState();
+  if (typeof state.applicationName === "string" && typeof state.workspaceAlias === "string") {
+    return workspaceFromState(state);
+  }
   return {
     applicationName: requiredEnv("TEST_AGENT_MEMORY_E2E_EXISTING_APPLICATION_NAME"),
     workspaceAlias: requiredEnv("TEST_AGENT_MEMORY_E2E_EXISTING_WORKSPACE_ALIAS")
   };
 }
 
+function workspaceFromState(state: MemoryE2eState): ExistingWorkspace {
+  if (typeof state.applicationName !== "string" || typeof state.workspaceAlias !== "string") {
+    throw new Error("浏览器 E2E 状态缺少 applicationName/workspaceAlias；请先运行 full 场景");
+  }
+  return { applicationName: state.applicationName, workspaceAlias: state.workspaceAlias };
+}
+
 function boundedInteger(name: string, min: number, max: number) {
   const value = Number(requiredEnv(name));
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} 必须是 ${min}..${max} 的整数`);
+  }
+  return value;
+}
+
+function optionalBoundedInteger(name: string, fallback: number, min: number, max: number) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new Error(`${name} 必须是 ${min}..${max} 的整数`);
   }
@@ -485,38 +878,83 @@ function stateFile() {
     || resolve(process.cwd(), "../.tmp/memory-e2e-state.json");
 }
 
-function writeMemoryState(memory: LearnedMemory, rawTranscriptMarker: string) {
+function readMemoryState(): MemoryE2eState {
+  try {
+    const parsed = JSON.parse(readFileSync(stateFile(), "utf8")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as MemoryE2eState
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function mergeMemoryState(patch: MemoryE2eState) {
   const file = stateFile();
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify({
+  writeFileSync(file, `${JSON.stringify({ ...readMemoryState(), ...patch })}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
+  chmodSync(file, 0o600);
+}
+
+function writeMemoryState(
+  memory: LearnedMemory,
+  rawTranscriptMarker: string,
+  workspace: ExistingWorkspace
+) {
+  mergeMemoryState({
     memoryId: memory.memoryId,
     sessionId: memory.sessionId,
     sessionTitle: memory.sessionTitle,
-    rawTranscriptMarker
-  })}\n`, { encoding: "utf8", mode: 0o600 });
+    runId: memory.runId,
+    rawTranscriptMarker,
+    applicationName: workspace.applicationName,
+    workspaceAlias: workspace.workspaceAlias
+  });
 }
 
 function expectedMemoryIdFromState() {
   const explicit = process.env.TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_ID?.trim();
   if (explicit) return explicit;
-  try {
-    const parsed = JSON.parse(readFileSync(stateFile(), "utf8")) as { memoryId?: string };
-    if (parsed.memoryId) return parsed.memoryId;
-  } catch {
-    // 统一在下面给出缺失配置错误，不泄漏本地路径或文件内容。
-  }
+  const stateKey = env("TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_STATE_KEY", "memoryId");
+  const value = readMemoryState()[stateKey];
+  if (typeof value === "string" && value) return value;
   throw new Error(
-    "故障验收缺少基线记忆 ID；先运行 full 场景，或设置 TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_ID"
+    `故障验收缺少基线记忆 ID（state key=${stateKey}）；先运行 full/故障学习场景，或显式设置 ID`
   );
+}
+
+function expectedConcurrencyMemoryId(partitionMode: string, applicationName: string) {
+  const explicit = process.env.TEST_AGENT_MEMORY_E2E_EXPECTED_CONCURRENCY_MEMORY_ID?.trim();
+  if (explicit) return explicit;
+  const state = readMemoryState();
+  if (state.applicationName !== applicationName) return null;
+  if (typeof state.teamMemoryId === "string" && state.teamMemoryId) return state.teamMemoryId;
+  return partitionMode === "same" && typeof state.memoryId === "string" ? state.memoryId : null;
+}
+
+function capitalize(value: string) {
+  return value ? `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}` : value;
 }
 
 function trackMemoryUsageResponses(page: Page) {
   const byRunId = new Map<string, Set<string>>();
+  const completedRunIds = new Set<string>();
+  const failedRunIds = new Set<string>();
   const listener = (response: Response) => {
     const url = new URL(response.url());
     if (response.request().method() !== "POST"
       || url.pathname !== "/api/internal/platform/memory/v1/run-usage/query"
       || !response.ok()) return;
+    let requestRunIds: string[] = [];
+    try {
+      const request = JSON.parse(response.request().postData() ?? "{}") as { runIds?: string[] };
+      requestRunIds = (request.runIds ?? []).filter((runId): runId is string => typeof runId === "string");
+    } catch {
+      // 非法请求会由接口契约测试覆盖；真实 E2E 仍等待下一次合法批量恢复。
+    }
     void response.json().then((payload: { data?: Array<{ runId?: string; memoryId?: string }> }) => {
       for (const item of payload.data ?? []) {
         if (!item.runId || !item.memoryId) continue;
@@ -524,11 +962,27 @@ function trackMemoryUsageResponses(page: Page) {
         ids.add(item.memoryId);
         byRunId.set(item.runId, ids);
       }
-    }).catch(() => undefined);
+    }).catch(() => {
+      for (const runId of requestRunIds) failedRunIds.add(runId);
+    }).finally(() => {
+      // 空结果必须等响应体真正消费完成后才能断言，否则 response 事件与 json()
+      // 解析之间的竞态会把“尚未解析”误判成“没有注入记忆”。
+      for (const runId of requestRunIds) completedRunIds.add(runId);
+    });
   };
   page.on("response", listener);
+  const requireParsed = (runId: string) => {
+    if (failedRunIds.has(runId)) throw new Error(`run-usage 响应体无法解析：${runId}`);
+  };
   return {
-    memoryIds: (runId: string) => [...(byRunId.get(runId) ?? [])],
+    memoryIds: (runId: string) => {
+      requireParsed(runId);
+      return [...(byRunId.get(runId) ?? [])];
+    },
+    hasCompletedQuery: (runId: string) => {
+      requireParsed(runId);
+      return completedRunIds.has(runId);
+    },
     stop: () => page.off("response", listener)
   };
 }
