@@ -9,13 +9,19 @@
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
-## V20260809120000 QA 长期记忆治理
+## V20260809120000 长期记忆兼容基线
 
 `V20260809120000__create_qa_memory_governance.sql` 创建个人/团队治理、证据、审核、学习 Outbox、Run 使用、白名单、Skill 提案和设置表。完整记忆正文、向量和历史属于独立 Mem0 PostgreSQL + pgvector 数据库；平台表只保存范围/状态、最多 200 字证据摘要和可恢复定位信息，不保存 Prompt、回答或聊天消息。
 
 默认白名单为空，单独执行该 migration 不会开启学习或检索。文件首次在任何需要保留的 PostgreSQL 执行后，版本、文件名和字节必须永久锁定；后续只能新增更高版本 migration。合入与发布前仍须收集全部目标库 `flyway_schema_history`，在每套已知基线上验证升级并核对最终 JAR 内 SHA-256，禁止 `outOfOrder`、`repair` 或手工修改历史表。
 
-当前锁定 SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`。独立 pgvector 库不扫描 Java Flyway，Mem0 history 使用独立 `/data/mem0-history.db`；两者必须与平台库恢复点一起纳入变更单。详细部署、备份与回滚见 `docs/deployment/qa-memory.md`。
+当前锁定 SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`。遗留 `qa_*` 表名继续作为隐藏兼容存储，不能因产品通用化而重命名或改写已执行 migration。
+
+## V20260809230000 通用记忆与 Embedding profile
+
+`V20260809230000__generalize_memory_and_embedding_profiles.sql` 前向增加内部模型 `embedding_dimension`，并在遗留设置表增加可空企业 `primary_embedding_model_id` 与固定 `cpu_embedding_model_id`。新增/修改查询全部位于 MyBatis XML。锁定 SHA-256：`2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`。
+
+独立记忆 PostgreSQL/pgvector 不扫描 Java Flyway。`memory-service/alembic` 唯一管理共享 Mem0 history、operation 幂等、逻辑记录/版本历史、profile 投影和补偿 outbox；只允许一个 migration job 在副本启动前执行。Mem0 副本没有本地 history 或数据卷。平台库和记忆库必须记录同一变更窗口的独立一致恢复点；禁止第二套 Java migration runner。详细部署、备份与回滚见 `docs/deployment/qa-memory.md`。
 
 ## V20260807230000 批量会话归因
 

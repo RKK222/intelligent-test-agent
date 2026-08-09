@@ -1,33 +1,54 @@
 package com.enterprise.testagent.memory;
 
-import com.enterprise.testagent.domain.memory.QaTaskType;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Mem0 窄接口；业务层不能访问 Mem0 原始服务 API 或上游对象。 */
+/** 通用 Mem0 REST 窄接口；Java 不直连记忆 PostgreSQL，也不感知具体向量集合。 */
 public interface MemoryDocumentStore {
-    StoredDocument add(AddDocument command);
-    StoredDocument update(String mem0MemoryId, String content, Map<String, Object> metadata);
-    Optional<StoredDocument> get(String mem0MemoryId);
-    void delete(String mem0MemoryId);
+    List<StoredDocument> add(AddMemories command);
+    StoredDocument update(
+            String logicalMemoryId,
+            String content,
+            Map<String, Object> metadata,
+            String scope,
+            String applicationId,
+            RequestContext context);
+    Optional<StoredDocument> get(String logicalMemoryId);
+    void delete(String logicalMemoryId, RequestContext context);
     List<StoredDocument> search(SearchQuery query);
-    List<HistoryEntry> history(String mem0MemoryId);
-    List<ExtractedCandidate> extract(ExtractCommand command);
+    List<HistoryEntry> history(String logicalMemoryId);
     Health health();
 
-    record AddDocument(
-            String content,
-            String userId,
-            String agentId,
-            String applicationId,
-            List<QaTaskType> taskTypes,
+    record Message(String role, String content) {
+        @Override
+        public String toString() {
+            return "Message[role=" + role + ", contentLength=" + (content == null ? 0 : content.length()) + "]";
+        }
+    }
+
+    record RequestContext(
+            String requesterUserId, String runId, String sessionId, String operationId) {
+    }
+
+    record OwnerScope(
+            String scope, String userId, String agentId, String applicationId) {
+    }
+
+    record AddMemories(
+            Object messages,
+            boolean infer,
+            String chatModelId,
+            RequestContext context,
+            OwnerScope owner,
             Map<String, Object> metadata) {
         @Override
         public String toString() {
-            return "AddDocument[userId=" + userId + ", agentId=" + agentId
-                    + ", applicationId=" + applicationId + ", taskTypes=" + taskTypes + "]";
+            int count = messages instanceof List<?> values ? values.size() : 1;
+            return "AddMemories[infer=" + infer + ", operationId=" + context.operationId()
+                    + ", chatModelId=" + chatModelId + ", scope=" + owner.scope()
+                    + ", messageCount=" + count + "]";
         }
     }
 
@@ -46,56 +67,39 @@ public interface MemoryDocumentStore {
     }
 
     record SearchQuery(
-            String query, String userId, String agentId, String applicationId,
-            String scope, int topK, double threshold) {
+            String query,
+            List<OwnerScope> scopes,
+            int topK,
+            double threshold,
+            RequestContext context) {
         @Override
         public String toString() {
-            return "SearchQuery[userId=" + userId + ", agentId=" + agentId
-                    + ", applicationId=" + applicationId + ", scope=" + scope + ", topK=" + topK + "]";
+            return "SearchQuery[scopeCount=" + (scopes == null ? 0 : scopes.size())
+                    + ", topK=" + topK + ", operationId=" + context.operationId() + "]";
         }
     }
 
     record HistoryEntry(
             String id, String memoryId, String oldMemory, String newMemory,
             String event, Instant createdAt, Instant updatedAt, boolean deleted) {
-        @Override
-        public String toString() {
-            return "HistoryEntry[id=" + id + ", memoryId=" + memoryId + ", event=" + event + "]";
-        }
     }
 
-    record ExtractionMessage(String role, String content) {
-        @Override
-        public String toString() {
-            return "ExtractionMessage[role=" + role + ", contentLength="
-                    + (content == null ? 0 : content.length()) + "]";
-        }
+    record EmbeddingProfileHealth(
+            String profileKey, String provider, String model, int dimension,
+            String fingerprint, String collection, boolean primary, boolean available) {
     }
 
-    record ExtractCommand(
-            String model, String modelGrant, String userId, String runId, String sessionId,
-            String applicationId, QaTaskType taskType, List<ExtractionMessage> messages) {
-        @Override
-        public String toString() {
-            return "ExtractCommand[model=" + model + ", userId=" + userId + ", runId=" + runId
-                    + ", sessionId=" + sessionId + ", applicationId=" + applicationId
-                    + ", taskType=" + taskType + ", messageCount="
-                    + (messages == null ? 0 : messages.size()) + "]";
-        }
+    record ProjectionBacklog(int pending, int processing, int dead) {
     }
 
-    record ExtractedCandidate(
-            String content, String scopeSuggestion, List<QaTaskType> taskTypes,
-            boolean explicit, boolean temporary, boolean replacesExisting,
-            double confidence, String reason) {
-        @Override
-        public String toString() {
-            return "ExtractedCandidate[scopeSuggestion=" + scopeSuggestion + ", taskTypes=" + taskTypes
-                    + ", explicit=" + explicit + ", temporary=" + temporary
-                    + ", replacesExisting=" + replacesExisting + ", confidence=" + confidence + "]";
+    record Health(
+            boolean available,
+            String status,
+            String version,
+            List<EmbeddingProfileHealth> profiles,
+            ProjectionBacklog projectionBacklog) {
+        public Health(boolean available, String status, String version) {
+            this(available, status, version, List.of(), new ProjectionBacklog(0, 0, 0));
         }
-    }
-
-    record Health(boolean available, String status, String version) {
     }
 }

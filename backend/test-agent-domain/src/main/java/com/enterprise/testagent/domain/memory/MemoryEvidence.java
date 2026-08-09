@@ -10,6 +10,8 @@ public record MemoryEvidence(
         MemoryId memoryId,
         String runId,
         String sessionId,
+        String sessionTitle,
+        String sessionOwnerUserId,
         String observedUserId,
         MemorySource source,
         String summary,
@@ -20,6 +22,8 @@ public record MemoryEvidence(
         Objects.requireNonNull(memoryId, "memoryId must not be null");
         runId = DomainValidation.requireText(runId, "runId");
         sessionId = DomainValidation.requireText(sessionId, "sessionId");
+        sessionTitle = optional(sessionTitle);
+        sessionOwnerUserId = optional(sessionOwnerUserId);
         observedUserId = DomainValidation.requireText(observedUserId, "observedUserId");
         Objects.requireNonNull(source, "source must not be null");
         summary = DomainValidation.requireText(summary, "summary");
@@ -27,5 +31,22 @@ public record MemoryEvidence(
             throw new IllegalArgumentException("evidence summary must not exceed 200 characters");
         }
         Objects.requireNonNull(observedAt, "observedAt must not be null");
+    }
+
+    public MemoryEvidence(
+            String evidenceId,
+            MemoryId memoryId,
+            String runId,
+            String sessionId,
+            String observedUserId,
+            MemorySource source,
+            String summary,
+            Instant observedAt) {
+        this(evidenceId, memoryId, runId, sessionId, null, null,
+                observedUserId, source, summary, observedAt);
+    }
+
+    private static String optional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

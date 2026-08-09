@@ -3100,7 +3100,7 @@ test("ordinary user opens toolbox immersively and browser history restores panel
   await expect.poll(() => rightPanel.evaluate((node) => Number.parseFloat(getComputedStyle(node).width))).toBeLessThanOrEqual(2);
 });
 
-test("ordinary user opens QA memories, inspects evidence and restores the workbench layout", async ({ page }, testInfo) => {
+test("ordinary user opens generic memories, inspects the source conversation and restores the workbench layout", async ({ page }, testInfo) => {
   testInfo.setTimeout(90_000);
   await mockBackendApi(page, {
     authRoles: ["USER"],
@@ -3109,15 +3109,11 @@ test("ordinary user opens QA memories, inspects evidence and restores the workbe
       scope: "PERSONAL_GLOBAL",
       ownerUserId: "usr_admin",
       applicationId: null,
-      status: "PENDING_CONFIRMATION",
-      source: "IMPLICIT",
-      taskTypes: ["TEST_CASE_GENERATION", "RISK_ANALYSIS"],
+      status: "ACTIVE",
+      source: "NATIVE",
       content: "测试案例必须覆盖异常场景和边界条件",
       contentAvailable: true,
       displaySummary: "测试案例必须覆盖异常场景和边界条件",
-      confidence: 0.91,
-      distinctSessionCount: 3,
-      distinctUserCount: 1,
       version: 2,
       confirmedAt: null,
       createdAt: "2026-08-01T00:00:00Z",
@@ -3128,15 +3124,11 @@ test("ordinary user opens QA memories, inspects evidence and restores the workbe
       scope: "TEAM_APPLICATION",
       ownerUserId: null,
       applicationId: "app_gcms",
-      status: "PENDING_CONFIRMATION",
+      status: "CANDIDATE",
       source: "TEAM_PROPOSAL",
-      taskTypes: ["DEFECT_ANALYSIS", "ROOT_CAUSE_ANALYSIS"],
       content: "缺陷分析结论必须附带可复核证据",
       contentAvailable: true,
       displaySummary: "缺陷分析结论必须附带可复核证据",
-      confidence: 0.88,
-      distinctSessionCount: 3,
-      distinctUserCount: 2,
       version: 1,
       confirmedAt: null,
       createdAt: "2026-08-02T00:00:00Z",
@@ -3161,7 +3153,9 @@ test("ordinary user opens QA memories, inspects evidence and restores the workbe
       memoryId: "mem_e2e_1",
       runId: "run_e2e_1",
       sessionId: "ses_e2e_1",
-      source: "IMPLICIT",
+      sessionTitle: "边界条件偏好讨论",
+      transcriptAvailable: true,
+      source: "NATIVE",
       summary: "用户连续三个会话要求覆盖边界条件",
       observedAt: "2026-08-08T00:00:00Z"
     }]
@@ -3175,7 +3169,7 @@ test("ordinary user opens QA memories, inspects evidence and restores the workbe
 
   await page.getByRole("button", { name: "长期记忆" }).click();
   await expect(page).toHaveURL(/\/memories$/);
-  await expect(page.getByRole("heading", { name: "测试习惯记忆" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "长期记忆" })).toBeVisible();
   await expect(page.getByTestId("memory-tab-personal")).toContainText("我的记忆");
   await expect(page.getByTestId("memory-tab-team")).toContainText("团队记忆");
   await expect(page.getByTestId("memory-tab-skills")).toContainText("Skill 提案");
@@ -3186,6 +3180,9 @@ test("ordinary user opens QA memories, inspects evidence and restores the workbe
   await page.getByTestId("memory-card-mem_e2e_1").getByText("查看证据").click();
   await expect(page.getByTestId("memory-evidence-rail")).toBeVisible();
   await expect(page.getByText("用户连续三个会话要求覆盖边界条件")).toBeVisible();
+  await expect(page.getByText("边界条件偏好讨论")).toBeVisible();
+  await expect(page.getByText(/会话 ID ses_e2e_1 · Run ID run_e2e_1/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开原始对话" })).toHaveAttribute("href", "/s/ses_e2e_1");
   await expect(page.getByTestId("memory-evidence-rail").getByText("使用", { exact: true })).toBeVisible();
   await expect.poll(async () => Math.round((await page.locator(".memory-detail-drawer").boundingBox())?.x ?? -1)).toBe(760);
   await page.screenshot({ path: testInfo.outputPath("memory-center-desktop.png"), fullPage: true });
@@ -3224,30 +3221,51 @@ test("ordinary user opens QA memories, inspects evidence and restores the workbe
   await expect(rightPanel).toHaveCSS("width", initialRightWidth);
 });
 
-test("super admin inspects QA memory health, model policy and rollout", async ({ page }, testInfo) => {
+test("super admin configures generic memory profiles and rollout without clipped controls", async ({ page }, testInfo) => {
+  const memorySettingsRequests: Array<Record<string, unknown>> = [];
+  const memoryWhitelistEnableRequests: string[] = [];
+  const memoryWhitelistDisableRequests: string[] = [];
+  const memoryDirectoryUserQueries: string[] = [];
   await mockBackendApi(page, {
     authRoles: ["SUPER_ADMIN"],
     memoryAdminHealth: {
       enabled: true,
-      memoryService: { available: true, status: "UP", version: "0.1.0" },
-      embedding: {
-        provider: "LOCAL_BGE",
-        model: "BAAI/bge-small-zh-v1.5",
-        revision: "fixed-revision",
-        dimension: 512,
-        device: "cpu",
-        normalized: true,
-        collectionVersion: "v1"
+      memoryService: {
+        available: true,
+        status: "UP",
+        version: "2.0.17",
+        profiles: [{
+          profileKey: "enterprise:enterprise/embedding-only:768:enterprise-v1",
+          provider: "ENTERPRISE",
+          model: "enterprise/embedding-only",
+          dimension: 768,
+          fingerprint: "enterprise-v1",
+          collection: "memory_enterprise_v1",
+          primary: true,
+          available: true
+        }, {
+          profileKey: "cpu:bge-small-zh-v1.5:512:fixed-revision",
+          provider: "CPU",
+          model: "memory-bge-small-zh-v1.5",
+          dimension: 512,
+          fingerprint: "fixed-revision",
+          collection: "memory_cpu_v1",
+          primary: false,
+          available: true
+        }],
+        projectionBacklog: { pending: 3, processing: 1, dead: 0 }
       },
       primaryChatModelId: "enterprise/chat-model",
-      currentRunModelFallbackEnabled: false,
+      primaryEmbeddingModelId: "enterprise/embedding-only",
+      cpuEmbeddingModelId: "memory-bge-small-zh-v1.5",
       queuePending: 2,
       queueProcessing: 1,
       queueDead: 0
     },
     memorySettings: {
       primaryChatModelId: "enterprise/chat-model",
-      currentRunModelFallbackEnabled: false,
+      primaryEmbeddingModelId: "enterprise/embedding-only",
+      cpuEmbeddingModelId: "memory-bge-small-zh-v1.5",
       version: 3,
       updatedByUserId: "usr_admin",
       updatedAt: "2026-08-09T00:00:00Z"
@@ -3258,6 +3276,64 @@ test("super admin inspects QA memory health, model policy and rollout", async ({
       updatedByUserId: "usr_admin",
       createdAt: "2026-08-09T00:00:00Z",
       updatedAt: "2026-08-09T00:00:00Z"
+    }],
+    memorySettingsRequests,
+    memoryWhitelistEnableRequests,
+    memoryWhitelistDisableRequests,
+    memoryDirectoryUserQueries,
+    memoryInternalModelProviders: {
+      providers: [{
+        providerId: "enterprise",
+        name: "企业内部模型",
+        baseUrl: "https://models.example.test",
+        enabled: true,
+        sortOrder: 1,
+        tokenConfigured: true
+      }],
+      tokenConfigured: true
+    },
+    memoryInternalModelsByProvider: {
+      enterprise: [{
+        providerId: "enterprise",
+        modelId: "enterprise/chat-model",
+        upstreamModelId: "chat-model",
+        displayName: "企业聊天模型 V1",
+        enabled: true,
+        declaredCapabilities: ["CHAT"],
+        probedCapabilities: ["CHAT"]
+      }, {
+        providerId: "enterprise",
+        modelId: "enterprise/chat-model-v2",
+        upstreamModelId: "chat-model-v2",
+        displayName: "企业聊天模型 V2",
+        enabled: true,
+        declaredCapabilities: ["CHAT"],
+        probedCapabilities: ["CHAT"]
+      }, {
+        providerId: "enterprise",
+        modelId: "enterprise/embedding-only",
+        upstreamModelId: "embedding-only",
+        displayName: "仅向量模型",
+        embeddingDimension: 768,
+        enabled: true,
+        declaredCapabilities: ["EMBEDDING"],
+        probedCapabilities: ["EMBEDDING"]
+      }]
+    },
+    memoryDirectoryUsers: [{
+      userId: "usr_88",
+      username: "测试用户 88",
+      unifiedAuthId: "AUTH88",
+      status: "ACTIVE",
+      roles: ["USER"],
+      createdAt: "2026-08-09T00:00:00Z"
+    }, {
+      userId: "usr_inactive_88",
+      username: "停用用户 88",
+      unifiedAuthId: "INACTIVE88",
+      status: "DISABLED",
+      roles: ["USER"],
+      createdAt: "2026-08-09T00:00:00Z"
     }]
   });
 
@@ -3265,15 +3341,102 @@ test("super admin inspects QA memory health, model policy and rollout", async ({
   await page.getByRole("button", { name: "系统管理" }).click();
   await page.getByRole("button", { name: "记忆能力", exact: true }).click();
   await expect(page.getByTestId("memory-health-mem0")).toContainText("就绪");
-  await expect(page.getByTestId("memory-health-embedding")).toContainText("512 维");
+  await expect(page.getByTestId("memory-health-embedding")).toContainText("2 / 2 可用");
   await expect(page.getByTestId("memory-health-chat")).toContainText("enterprise/chat-model");
   await expect(page.getByTestId("memory-health-queue")).toContainText("2 待处理");
+  await expect(page.getByTestId("memory-health-projection")).toContainText("3 待投影");
   await expect(page.getByText("usr_tester")).toBeVisible();
+
+  const panel = page.getByTestId("memory-admin-panel");
+  await expect.poll(() => panel.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
+  const cards = page.locator(".memory-admin-card");
+  await expect.poll(async () => {
+    const [policy, rollout] = await Promise.all([cards.nth(0).boundingBox(), cards.nth(1).boundingBox()]);
+    return policy && rollout ? Math.round(Math.min(policy.width, rollout.width)) : -1;
+  }).toBeGreaterThanOrEqual(340);
+
+  const modelSelect = page.getByRole("combobox", { name: "选择固定内部 CHAT 模型" });
+  await modelSelect.click();
+  const modelListbox = page.getByRole("listbox", { name: "选择固定内部 CHAT 模型" });
+  await expect(modelListbox.getByRole("option")).toHaveCount(2);
+  await modelListbox.getByRole("option", { name: /企业聊天模型 V2.*enterprise\/chat-model-v2/ }).click();
+  const embeddingSelect = page.getByRole("combobox", { name: "选择企业 Embedding 模型" });
+  await embeddingSelect.click();
+  await page.getByRole("option", { name: /仅向量模型.*768 维.*enterprise\/embedding-only/ }).click();
+  await page.getByRole("button", { name: "保存策略", exact: true }).click();
+  await expect.poll(() => memorySettingsRequests.length).toBe(1);
+  expect(memorySettingsRequests[0]).toEqual({
+    primaryChatModelId: "enterprise/chat-model-v2",
+    primaryEmbeddingModelId: "enterprise/embedding-only",
+    expectedVersion: 3
+  });
+
+  const modelWrapper = page.locator(".memory-model-select .el-select__wrapper").first();
+  await modelWrapper.hover();
+  await page.locator(".memory-model-select .el-select__clear").click();
+  await page.getByRole("button", { name: "保存策略", exact: true }).click();
+  await expect.poll(() => memorySettingsRequests.length).toBe(2);
+  expect(memorySettingsRequests[1]).toEqual({
+    primaryChatModelId: null,
+    primaryEmbeddingModelId: "enterprise/embedding-only",
+    expectedVersion: 4
+  });
+
+  await page.getByRole("button", { name: "添加用户", exact: true }).click();
+  let whitelistDialog = page.getByRole("dialog", { name: "添加白名单用户" });
+  let whitelistSelect = whitelistDialog.getByRole("combobox", { name: "选择白名单用户" });
+  await whitelistSelect.fill("88");
+  let whitelistListbox = page.getByRole("listbox", { name: "选择白名单用户" });
+  await expect(whitelistListbox.getByRole("option")).toHaveCount(1);
+  await expect(whitelistListbox.getByRole("option")).toContainText("usr_88");
+  const [listboxBox, cancelBox] = await Promise.all([
+    whitelistListbox.boundingBox(),
+    whitelistDialog.getByRole("button", { name: "取消", exact: true }).boundingBox()
+  ]);
+  expect(listboxBox && cancelBox
+    ? Math.max(0, Math.min(listboxBox.y + listboxBox.height, cancelBox.y + cancelBox.height) - Math.max(listboxBox.y, cancelBox.y))
+    : -1).toBe(0);
+  await whitelistDialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(page.locator(".memory-user-dialog")).toBeHidden();
+
+  await page.getByRole("button", { name: "添加用户", exact: true }).click();
+  whitelistDialog = page.getByRole("dialog", { name: "添加白名单用户" });
+  whitelistSelect = whitelistDialog.getByRole("combobox", { name: "选择白名单用户" });
+  await whitelistSelect.fill("88");
+  whitelistListbox = page.getByRole("listbox", { name: "选择白名单用户" });
+  await whitelistListbox.getByRole("option", { name: /测试用户 88.*AUTH88.*usr_88/ }).click();
+  await whitelistDialog.getByRole("button", { name: "确认添加", exact: true }).click();
+  await expect.poll(() => memoryWhitelistEnableRequests).toEqual(["usr_88"]);
+  await expect(page.getByRole("button", { name: "移出 usr_88" })).toBeVisible();
+  await page.getByRole("button", { name: "移出 usr_88" }).click();
+  await page.getByRole("dialog", { name: "移出白名单" }).getByRole("button", { name: "移出", exact: true }).click();
+  await expect.poll(() => memoryWhitelistDisableRequests).toEqual(["usr_88"]);
+  expect(memoryDirectoryUserQueries).toContain("88");
+
+  await page.getByRole("button", { name: "查看技术信息", exact: true }).click();
+  await expect(page.locator("#embedding-technical-details")).toContainText("fixed-revision");
+  await page.getByRole("button", { name: "收起技术信息", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("memory-admin.png"), fullPage: true });
 
   await page.evaluate(() => document.documentElement.classList.add("dark"));
-  await expect(page.getByTestId("memory-admin-panel")).toHaveCSS("background-color", "rgb(17, 19, 24)");
+  await expect(panel).toHaveCSS("background-color", "rgb(17, 19, 24)");
   await page.screenshot({ path: testInfo.outputPath("memory-admin-dark.png"), fullPage: true });
+  await page.evaluate(() => document.documentElement.classList.remove("dark"));
+
+  await page.setViewportSize({ width: 560, height: 820 });
+  await page.getByRole("button", { name: "添加用户", exact: true }).click();
+  const narrowDialog = page.locator(".memory-user-dialog");
+  await expect(narrowDialog).toBeVisible();
+  const narrowBox = await narrowDialog.boundingBox();
+  expect(narrowBox).not.toBeNull();
+  expect(narrowBox!.x).toBeGreaterThanOrEqual(0);
+  expect(narrowBox!.x + narrowBox!.width).toBeLessThanOrEqual(560);
+  await expect.poll(() => page.locator("html").evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
+  await page.keyboard.press("Escape");
+  await expect(narrowDialog).toBeHidden();
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(page.locator(".embedding-technical__toggle svg")).toHaveCSS("transition-duration", "0s");
 });
 
 test("toolbox keeps search source and clear filters on one row at tablet width", async ({ page }) => {
@@ -8069,7 +8232,7 @@ async function mockBackendApi(
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
     /** 工具盒子目录；滚动布局用例注入足量工具，普通用例保留最小目录。 */
     toolboxTools?: Array<Record<string, unknown>>;
-    /** QA 记忆中心 mock；默认能力开放但列表为空。 */
+    /** 通用记忆中心 mock；默认能力开放但列表为空。 */
     memoryAvailable?: boolean;
     personalMemories?: Array<Record<string, unknown>>;
     teamMemories?: Array<Record<string, unknown>>;
@@ -8078,6 +8241,13 @@ async function mockBackendApi(
     memoryAdminHealth?: Record<string, unknown>;
     memorySettings?: Record<string, unknown>;
     memoryWhitelist?: Array<Record<string, unknown>>;
+    memorySettingsRequests?: Array<Record<string, unknown>>;
+    memoryWhitelistEnableRequests?: string[];
+    memoryWhitelistDisableRequests?: string[];
+    memoryInternalModelProviders?: Record<string, unknown>;
+    memoryInternalModelsByProvider?: Record<string, Array<Record<string, unknown>>>;
+    memoryDirectoryUsers?: Array<Record<string, unknown>>;
+    memoryDirectoryUserQueries?: string[];
     /** 版本选择前的 Git 只读访问预检响应，以 versionId 为键。 */
     gitAccessResults?: Record<string, Record<string, unknown>>;
     gitAccessRequests?: string[];
@@ -8678,6 +8848,8 @@ async function mockBackendApi(
   const nightTasks = capture.nightTasks ?? [];
   let currentProcessStatus = capture.processStatus ?? "READY";
   let sshKeys: Array<Record<string, unknown>> = [];
+  let memorySettings = { ...(capture.memorySettings ?? {}) };
+  let memoryWhitelist = [...(capture.memoryWhitelist ?? [])];
   const appSourceOperationRequestCounts: Record<string, number> = {};
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -8747,40 +8919,97 @@ async function mockBackendApi(
       }));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/platform/qa-memory/v1/availability") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/memory/v1/availability") {
       await route.fulfill(json({ enabled: capture.memoryAvailable ?? true }));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/platform/qa-memory/v1/personal") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/memory/v1/personal") {
       const items = capture.personalMemories ?? [];
       await route.fulfill(json({ items, page: 1, size: 100, total: items.length }));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/platform/qa-memory/v1/team") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/memory/v1/team") {
       const items = capture.teamMemories ?? [];
       await route.fulfill(json({ items, page: 1, size: 100, total: items.length }));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/platform/qa-memory/v1/skill-proposals") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/memory/v1/skill-proposals") {
       const items = capture.memorySkillProposals ?? [];
       await route.fulfill(json({ items, page: 1, size: 100, total: items.length }));
       return;
     }
-    if (method === "GET" && /^\/api\/internal\/platform\/qa-memory\/v1\/memories\/[^/]+\/evidence$/.test(url.pathname)) {
+    if (method === "GET" && /^\/api\/internal\/platform\/memory\/v1\/memories\/[^/]+\/evidence$/.test(url.pathname)) {
       await route.fulfill(json(capture.memoryEvidence ?? []));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/platform/system-management/memory/health") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/memory/v1/admin/health") {
       await route.fulfill(json(capture.memoryAdminHealth ?? {}));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/platform/system-management/memory/settings") {
-      await route.fulfill(json(capture.memorySettings ?? {}));
+    if (method === "GET" && url.pathname === "/api/internal/platform/memory/v1/admin/settings") {
+      await route.fulfill(json(memorySettings));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/platform/system-management/memory/whitelist") {
-      const items = capture.memoryWhitelist ?? [];
-      await route.fulfill(json({ items, page: 1, size: 100, total: items.length }));
+    if (method === "PATCH" && url.pathname === "/api/internal/platform/memory/v1/admin/settings") {
+      const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      capture.memorySettingsRequests?.push(request);
+      memorySettings = {
+        ...memorySettings,
+        primaryChatModelId: request.primaryChatModelId ?? null,
+        primaryEmbeddingModelId: request.primaryEmbeddingModelId ?? null,
+        version: Number(memorySettings.version ?? 0) + 1,
+        updatedByUserId: "usr_admin",
+        updatedAt: "2026-08-09T01:00:00Z"
+      };
+      await route.fulfill(json(memorySettings));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/memory/v1/admin/whitelist") {
+      await route.fulfill(json({ items: memoryWhitelist, page: 1, size: 100, total: memoryWhitelist.length }));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/internal/platform/memory/v1/admin/whitelist") {
+      const request = JSON.parse(route.request().postData() ?? "{}") as { userId?: string };
+      const userId = request.userId ?? "";
+      capture.memoryWhitelistEnableRequests?.push(userId);
+      const entry = {
+        userId,
+        enabled: true,
+        updatedByUserId: "usr_admin",
+        createdAt: "2026-08-09T01:00:00Z",
+        updatedAt: "2026-08-09T01:00:00Z"
+      };
+      memoryWhitelist = [...memoryWhitelist.filter((item) => item.userId !== userId), entry];
+      await route.fulfill(json(entry));
+      return;
+    }
+    if (method === "DELETE" && /^\/api\/internal\/platform\/memory\/v1\/admin\/whitelist\/[^/]+$/.test(url.pathname)) {
+      const userId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      capture.memoryWhitelistDisableRequests?.push(userId);
+      memoryWhitelist = memoryWhitelist.filter((item) => item.userId !== userId);
+      await route.fulfill(json(null));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/internal-model-providers") {
+      await route.fulfill(json(capture.memoryInternalModelProviders ?? { providers: [], tokenConfigured: false }));
+      return;
+    }
+    const internalModelsMatch = url.pathname.match(/^\/api\/internal\/platform\/configuration-management\/internal-model-providers\/([^/]+)\/models$/);
+    if (method === "GET" && internalModelsMatch) {
+      const providerId = decodeURIComponent(internalModelsMatch[1] ?? "");
+      await route.fulfill(json(capture.memoryInternalModelsByProvider?.[providerId] ?? []));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/system-management/users") {
+      const keyword = url.searchParams.get("keyword") ?? "";
+      capture.memoryDirectoryUserQueries?.push(keyword);
+      const items = (capture.memoryDirectoryUsers ?? []).filter((user) => {
+        if (!keyword) return true;
+        const normalized = keyword.toLocaleLowerCase();
+        return [user.userId, user.username, user.unifiedAuthId]
+          .some((value) => String(value ?? "").toLocaleLowerCase().includes(normalized));
+      });
+      await route.fulfill(json({ items, page: 1, size: 30, total: items.length }));
       return;
     }
     if (url.pathname.startsWith("/api/internal/platform/configuration-management")) {

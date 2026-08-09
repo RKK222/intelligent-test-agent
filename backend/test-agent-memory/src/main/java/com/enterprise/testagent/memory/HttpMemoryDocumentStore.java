@@ -2,7 +2,6 @@ package com.enterprise.testagent.memory;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
-import com.enterprise.testagent.domain.memory.QaTaskType;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,21 +21,21 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** memory-service 窄 HTTP 适配器；响应、请求和异常日志均不得包含正文或授权。 */
+/** 官方风格 Mem0 REST 适配器；日志和异常不包含消息正文、记忆正文或认证密钥。 */
 public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
-    private static final String API_PREFIX = "/memory-api/v1";
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
     private final URI serviceBase;
     private final String serviceApiKey;
     private final Duration timeout;
-    private final Duration extractionTimeout;
+    private final Duration learningTimeout;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
     HttpMemoryDocumentStore(QaMemoryProperties properties, ObjectMapper objectMapper) {
         this(properties, objectMapper, HttpClient.newBuilder()
                 .connectTimeout(properties.getRequestTimeout())
+                .version(HttpClient.Version.HTTP_1_1)
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build());
     }
@@ -47,61 +46,78 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
         this.serviceBase = validateBaseUri(properties.getServiceUrl());
         this.serviceApiKey = requireApiKey(properties.getServiceApiKey());
         this.timeout = properties.getRequestTimeout();
-        this.extractionTimeout = properties.getExtractionTimeout();
+        this.learningTimeout = properties.getLearningTimeout();
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.httpClient = Objects.requireNonNull(httpClient);
     }
 
     @Override
-    public StoredDocument add(AddDocument command) {
+    public List<StoredDocument> add(AddMemories command) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("content", command.content());
-        put(body, "userId", command.userId());
-        put(body, "agentId", command.agentId());
-        put(body, "applicationId", command.applicationId());
-        body.put("taskTypes", command.taskTypes().stream().map(Enum::name).toList());
-        body.put("metadata", command.metadata());
-        return document(request("POST", "/documents", body, false).path("data"));
+        body.put("messages", messagePayload(command.messages()));
+        body.put("infer", command.infer());
+        put(body, "chatModelId", command.chatModelId());
+        context(body, command.context());
+        owner(body, command.owner());
+        body.put("metadata", command.metadata() == null ? Map.of() : command.metadata());
+        JsonNode rows = request("POST", "/memories", body, Map.of(), false,
+                command.infer() ? learningTimeout : timeout).path("results");
+        List<StoredDocument> result = new ArrayList<>();
+        rows.forEach(row -> result.add(document(row)));
+        return List.copyOf(result);
     }
 
     @Override
-    public StoredDocument update(String memoryId, String content, Map<String, Object> metadata) {
-        JsonNode response = request("PATCH", "/documents/" + safeId(memoryId),
-                Map.of("content", content, "metadata", metadata == null ? Map.of() : metadata), false);
-        return document(response.path("data"));
+    public StoredDocument update(
+            String memoryId,
+            String content,
+            Map<String, Object> metadata,
+            String scope,
+            String applicationId,
+            RequestContext requestContext) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("text", content);
+        body.put("metadata", metadata == null ? Map.of() : metadata);
+        put(body, "scope", scope);
+        put(body, "applicationId", applicationId);
+        context(body, requestContext);
+        return document(request("PUT", "/memories/" + safeId(memoryId), body, Map.of(), false, timeout));
     }
 
     @Override
     public Optional<StoredDocument> get(String memoryId) {
-        JsonNode response = request("GET", "/documents/" + safeId(memoryId), null, true);
-        return response == null ? Optional.empty() : Optional.of(document(response.path("data")));
+        JsonNode response = request("GET", "/memories/" + safeId(memoryId), null, Map.of(), true, timeout);
+        return response == null ? Optional.empty() : Optional.of(document(response));
     }
 
     @Override
-    public void delete(String memoryId) {
-        request("DELETE", "/documents/" + safeId(memoryId), null, false);
+    public void delete(String memoryId, RequestContext context) {
+        Map<String, String> headers = Map.of(
+                "X-Memory-Requester-User-Id", context.requesterUserId(),
+                "X-Memory-Run-Id", context.runId(),
+                "X-Memory-Session-Id", context.sessionId(),
+                "X-Memory-Operation-Id", context.operationId());
+        request("DELETE", "/memories/" + safeId(memoryId), null, headers, false, timeout);
     }
 
     @Override
     public List<StoredDocument> search(SearchQuery query) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("query", query.query());
-        put(body, "userId", query.userId());
-        put(body, "agentId", query.agentId());
-        put(body, "applicationId", query.applicationId());
-        put(body, "scope", query.scope());
+        body.put("scopes", query.scopes().stream().map(HttpMemoryDocumentStore::ownerPayload).toList());
         body.put("topK", query.topK());
         body.put("threshold", query.threshold());
-        JsonNode items = request("POST", "/search", body, false).path("data").path("items");
+        context(body, query.context());
+        JsonNode rows = request("POST", "/search", body, Map.of(), false, timeout).path("results");
         List<StoredDocument> result = new ArrayList<>();
-        items.forEach(item -> result.add(document(item)));
+        rows.forEach(item -> result.add(document(item)));
         return List.copyOf(result);
     }
 
     @Override
     public List<HistoryEntry> history(String memoryId) {
-        JsonNode rows = request("GET", "/documents/" + safeId(memoryId) + "/history", null, false)
-                .path("data");
+        JsonNode rows = request("GET", "/memories/" + safeId(memoryId) + "/history",
+                null, Map.of(), false, timeout).path("results");
         List<HistoryEntry> result = new ArrayList<>();
         rows.forEach(row -> result.add(new HistoryEntry(
                 text(row, "id"), firstText(row, "memory_id", "memoryId"),
@@ -113,73 +129,51 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
     }
 
     @Override
-    public List<ExtractedCandidate> extract(ExtractCommand command) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", command.model());
-        body.put("modelGrant", command.modelGrant());
-        body.put("userId", command.userId());
-        body.put("runId", command.runId());
-        body.put("sessionId", command.sessionId());
-        put(body, "applicationId", command.applicationId());
-        body.put("taskType", command.taskType().name());
-        body.put("messages", command.messages().stream()
-                .map(message -> Map.of("role", message.role(), "content", message.content())).toList());
-        JsonNode rows = request("POST", "/extract", body, false, true, extractionTimeout)
-                .path("data").path("candidates");
-        List<ExtractedCandidate> result = new ArrayList<>();
-        rows.forEach(row -> result.add(new ExtractedCandidate(
-                text(row, "content"), text(row, "scopeSuggestion"), taskTypes(row.path("taskTypes")),
-                row.path("explicit").asBoolean(), row.path("temporary").asBoolean(),
-                row.path("replacesExisting").asBoolean(), row.path("confidence").asDouble(),
-                text(row, "reason"))));
-        return List.copyOf(result);
-    }
-
-    @Override
     public Health health() {
         try {
-            // 管理页展示的是可用于真实检索的就绪状态，必须同时验证鉴权、pgvector、
-            // Embedding 与“原始消息零持久化”合同，不能只读取无鉴权的进程存活探针。
-            JsonNode data = request("GET", "/ready", null, false, true).path("data");
-            return new Health("UP".equals(data.path("status").asText()),
-                    data.path("status").asText("DOWN"), nullableText(data, "version"));
+            JsonNode data = request("GET", "/ready", null, Map.of(), false, timeout);
+            Map<String, Boolean> availability = new LinkedHashMap<>();
+            data.path("profileAvailability").fields().forEachRemaining(
+                    entry -> availability.put(entry.getKey(), entry.getValue().asBoolean()));
+            List<EmbeddingProfileHealth> profiles = new ArrayList<>();
+            data.path("profiles").forEach(profile -> {
+                String key = text(profile, "profileKey");
+                profiles.add(new EmbeddingProfileHealth(
+                        key, text(profile, "provider"), text(profile, "model"),
+                        profile.path("dimension").asInt(), text(profile, "fingerprint"),
+                        text(profile, "collection"), profile.path("primary").asBoolean(),
+                        Boolean.TRUE.equals(availability.get(key))));
+            });
+            JsonNode backlog = data.path("projectionBacklog");
+            return new Health(true, data.path("status").asText("UP"), nullableText(data, "version"),
+                    List.copyOf(profiles), new ProjectionBacklog(
+                            backlog.path("PENDING").asInt(), backlog.path("PROCESSING").asInt(),
+                            backlog.path("DEAD").asInt()));
         } catch (RuntimeException exception) {
             return new Health(false, "DOWN", null);
         }
     }
 
     private JsonNode request(
-            String method, String path, Map<String, ?> body, boolean allowNotFound) {
-        return request(method, path, body, allowNotFound, true);
-    }
-
-    private JsonNode request(
-            String method, String path, Map<String, ?> body, boolean allowNotFound, boolean authenticate) {
-        return request(method, path, body, allowNotFound, authenticate, timeout);
-    }
-
-    private JsonNode request(
             String method,
             String path,
             Map<String, ?> body,
+            Map<String, String> extraHeaders,
             boolean allowNotFound,
-            boolean authenticate,
             Duration requestTimeout) {
         try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder(serviceBase.resolve(API_PREFIX + path))
+            HttpRequest.Builder builder = HttpRequest.newBuilder(serviceBase.resolve(path.substring(1)))
                     .timeout(requestTimeout)
-                    .header("Accept", "application/json");
-            if (authenticate) {
-                builder.header("X-Memory-Service-Key", serviceApiKey);
-            }
+                    .header("Accept", "application/json")
+                    .header("X-Memory-Service-Key", serviceApiKey);
+            extraHeaders.forEach(builder::header);
             if (body != null) {
                 builder.header("Content-Type", "application/json")
                         .method(method, HttpRequest.BodyPublishers.ofByteArray(objectMapper.writeValueAsBytes(body)));
             } else {
                 builder.method(method, HttpRequest.BodyPublishers.noBody());
             }
-            HttpResponse<byte[]> response = httpClient.send(
-                    builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<byte[]> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
             if (allowNotFound && response.statusCode() == 404) {
                 return null;
             }
@@ -206,15 +200,48 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
     }
 
     private StoredDocument document(JsonNode node) {
-        if (!node.isObject() || text(node, "id") == null || text(node, "content") == null) {
+        String content = firstText(node, "content", "memory");
+        if (!node.isObject() || text(node, "id") == null || content == null) {
             throw new PlatformException(ErrorCode.MEMORY_UNAVAILABLE, "长期记忆服务响应缺少字段");
         }
         Map<String, Object> metadata = objectMapper.convertValue(
                 node.path("metadata"), objectMapper.getTypeFactory()
                         .constructMapType(Map.class, String.class, Object.class));
-        return new StoredDocument(text(node, "id"), text(node, "content"),
-                metadata == null ? Map.of() : Map.copyOf(metadata), instant(node, "updatedAt"),
+        String updatedAt = firstText(node, "updatedAt", "updated_at");
+        return new StoredDocument(text(node, "id"), content,
+                metadata == null ? Map.of() : Map.copyOf(metadata),
+                updatedAt == null ? Instant.EPOCH : Instant.parse(updatedAt),
                 node.hasNonNull("score") ? node.path("score").asDouble() : null);
+    }
+
+    private static Object messagePayload(Object messages) {
+        if (messages instanceof List<?> values) {
+            return values.stream().map(value -> {
+                Message message = (Message) value;
+                return Map.of("role", message.role(), "content", message.content());
+            }).toList();
+        }
+        return messages;
+    }
+
+    private static void context(Map<String, Object> body, RequestContext context) {
+        body.put("requesterUserId", context.requesterUserId());
+        body.put("runId", context.runId());
+        body.put("sessionId", context.sessionId());
+        body.put("operationId", context.operationId());
+    }
+
+    private static void owner(Map<String, Object> body, OwnerScope owner) {
+        body.putAll(ownerPayload(owner));
+    }
+
+    private static Map<String, Object> ownerPayload(OwnerScope owner) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("scope", owner.scope());
+        put(body, "userId", owner.userId());
+        put(body, "agentId", owner.agentId());
+        put(body, "applicationId", owner.applicationId());
+        return body;
     }
 
     private static URI validateBaseUri(String value) {
@@ -239,7 +266,7 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
     }
 
     private static String safeId(String value) {
-        if (value == null || !value.matches("[A-Za-z0-9-]{8,80}")) {
+        if (value == null || !value.matches("[A-Za-z0-9_-]{8,128}")) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "记忆 ID 格式无效");
         }
         return value;
@@ -274,19 +301,5 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
     private static boolean firstBoolean(JsonNode node, String first, String second) {
         JsonNode value = node.get(first);
         return value == null ? node.path(second).asBoolean() : value.asBoolean();
-    }
-
-    private static Instant instant(JsonNode node, String field) {
-        String value = text(node, field);
-        if (value == null || value.isBlank()) {
-            throw new PlatformException(ErrorCode.MEMORY_UNAVAILABLE, "长期记忆服务响应缺少时间");
-        }
-        return Instant.parse(value);
-    }
-
-    private static List<QaTaskType> taskTypes(JsonNode node) {
-        List<QaTaskType> result = new ArrayList<>();
-        node.forEach(item -> result.add(QaTaskType.valueOf(item.asText())));
-        return List.copyOf(result);
     }
 }

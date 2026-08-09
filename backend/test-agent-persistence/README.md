@@ -227,15 +227,15 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 
 ## LobeHub 与模型网关持久化
 
-## QA 长期记忆治理持久化
+## 通用长期记忆治理持久化
 
-- `V20260809120000__create_qa_memory_governance.sql` 一次建立个人/团队治理、最多 200 字证据摘要、Application 审核、学习 Outbox、Run 使用记录、灰度白名单、Skill 草稿和固定 CHAT 设置。
-- 该 migration 锁定 SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`；首次执行后不得改名或改变字节。平台库与独立 pgvector/history 的备份、升级和回滚见 `docs/deployment/qa-memory.md`。
+- `V20260809120000__create_qa_memory_governance.sql` 是不可改写的兼容基线，建立个人/团队治理、最多 200 字证据摘要、审核、学习 Outbox、Run usage、白名单、Skill 草稿和固定 CHAT 设置；SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`。
+- `V20260809230000__generalize_memory_and_embedding_profiles.sql` 前向增加内部模型 embedding 维度、可空企业 embedding 和固定 CPU profile；SHA-256 为 `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`。遗留 `qa_*` 表/字段保留为隐藏兼容存储，公开 DTO 不再返回 QA taskTypes 或 confidence。
 - `QaMemoryMapper.xml` 是全部关系型 SQL 的唯一实现，包含乐观版本、团队成员实时过滤、无原文 Outbox 幂等、租约认领和 PostgreSQL/H2 双分支。
 - `MemoryLearningEvidenceMapper.xml` 只按 `run_id` 从既有 `session_messages` 读取 USER/ASSISTANT 文本，限制 20 条且不读取 parts、工具输出或凭据；它不是聊天镜像。
-- `RedisMemoryModelGrantStore` 在 `test-agent:qa-memory:model-grant:*` 保存一次性授权的结构化可信摘要，key 只含 grant SHA-256；Lua get-and-delete 保证并发消费单胜者并保留短 TTL。
-- 完整记忆正文、向量与历史不进入平台 PostgreSQL；`display_summary` 仅用于 Mem0 不可用时的列表降级，不得注入 Agent。
-- `MyBatisQaMemoryRepositoryIntegrationTest` 覆盖 migration、治理读写、乐观冲突、Outbox 幂等/认领、受限学习证据读取和无 Prompt/回答列边界。
+- `RedisMemoryHmacNonceStore` 只保存 HMAC nonce 防重放状态；不保存签名、正文、service key 或模型凭据。
+- 完整记忆正文、向量、Mem0 history、operation 幂等和双 profile 投影 outbox 位于 Alembic 管理的独立记忆 PostgreSQL；`display_summary` 仅用于降级展示。
+- `MyBatisQaMemoryRepositoryIntegrationTest` 覆盖 migration、治理读写、乐观冲突、Outbox 幂等/认领、受限学习证据和无原始消息副本边界。
 
 - `RedisLobehubSsoStore` 把 ticket、nonce 和 grant 摘要限制在 `test-agent:lobehub-sso:*`，使用 Lua 原子消费、
   nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。

@@ -39,7 +39,7 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 | `test-agent-scheduler` | XXL adapter 复用的任务 handler/context/result、Redis 全局锁和旧运行记录清理；不再启动 PostgreSQL runner 或创建 `USER_PLAN` |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界；承载版本化工具盒子、LobeHub 联动及 Python workflow 共享能力的实时授权/HMAC 编排 |
 | `test-agent-model-gateway` | 中立企业模型目录、能力探测、OpenAI-compatible 流式代理、上游错误脱敏和每日用量聚合，并向既有 OpenCode 内部代理提供共享安全支持 |
-| `test-agent-memory` | QA 长期记忆业务编排：个人/团队治理、Mem0 窄接口、学习 Outbox、运行时检索合并、短期模型授权和 Skill 提案；不保存聊天正文或项目知识 |
+| `test-agent-memory` | 通用长期记忆编排：个人/团队治理、官方风格 Mem0 REST、学习 Outbox、2 秒 fail-open 检索、证据引用和 Skill 提案；不保存聊天正文、不直连记忆库 |
 | `test-agent-xxl-job-admin-upstream` | 原样保存 XXL-JOB Admin 3.4.2 源码/资源与 GPL-3.0 许可证，不承载平台补丁 |
 | `test-agent-xxl-job-integration` | 独立 Servlet Admin 子上下文、MySQL Flyway、Admin readiness 就绪后延迟启动的 executor、周期任务 adapter、平台一次性 SSO、JIT 用户和 XXL health |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合、应用源码快照/持久化进度入口、Python workflow 白名单能力入口和统一异常入口 |

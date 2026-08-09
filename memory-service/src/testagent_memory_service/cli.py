@@ -14,8 +14,6 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=18888)
     args = parser.parse_args()
     os.environ["MEM0_TELEMETRY"] = "False"
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
     uvicorn.run(
         "testagent_memory_service.factory:app",
         host=args.host,

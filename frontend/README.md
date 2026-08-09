@@ -6,6 +6,8 @@
 
 顶部按“36px 首行 + 8px 面板间隔”的 44px 视觉带统一上下居中：Logo 左对齐；应用、工作空间、版本三个入口在 Logo 末端与右侧工具组起点之间的网格列正中合并为 34px 高的连续“上下文舱”，共享纯白表面、11px 圆角、发丝边框与轻阴影，内部分隔线表达三层工作上下文，左侧 3px 工行红信号条提供品牌定位，左右留白相等。各分段保留原宽度、菜单、加载和切换回调；悬停只提升当前分段，键盘焦点与展开态使用柔红背景和工行红反馈。三个下拉菜单统一为 12px 圆角、双层轻阴影、8px 项目圆角和柔红选中态，不改变菜单内容、分组、禁用语义或定位逻辑。书本手册、透明底细框的 Agent/Skill/MCP/Tool/Plugin 数量摘要和单字用户名依次固定在右侧。资源摘要详情可从左边缘拖拽调宽并进入页面内全屏。手册默认透明无框，弹框打开期间保持与最左活动栏一致的柔红底、深红图标和工行红定位标记；单字用户名为 12px。顶部工作空间/版本与左下角保留入口复用同一数据和切换回调；顶部选定工作空间后，单版本默认选中该项，多版本默认选中最新项，不改变对话逻辑。
 
+全局顶部反馈消息只用于告知结果，不拦截其下方编辑器和工作台控件的鼠标操作；消息关闭按钮保持可点击，避免保存或运行态刷新提示打断连续编辑。
+
 超级管理员可在工作台任意位置于 2 秒内连续按 3 次 Shift，直接临时打开系统管理的问题排查入口；手势在捕获阶段监听，即使焦点控件阻止键盘事件冒泡也能触发。该手势不是鉴权凭据，不存在部署侧激活暗号。排查授权令牌只保存在页面内存，目标选择和切换逐次审计；页面严格关闭文件写入、加入对话、下载、终端、Git、Agent 配置和批量导出能力。
 
 公共或应用 Agent/Skill 发布进入存量 Session 排空期时，`/processes/me` 按当前用户返回 `messageSendAllowed=false` 和阻断原因。应用发布先把固定 feature commit 原生 merge 到各服务器相关个人 worktree；存在 dirty 或冲突时不覆盖个人内容，持久化 rollout 保持 retry，相关个人 worktree 全部包含目标 commit 后才登记 dispose 用户并进入排空。前端只在被阻断期间每 5 秒刷新状态，该用户旧 opencode target dispose 后下一轮立即恢复为 true。聊天面板禁用发送与新会话按钮、输入框展示排空提示，后端所有新 opencode 消息入口仍以同一持久化用户级门禁为准。
@@ -77,11 +79,11 @@ packages/shared-types
 
 活动栏页面级入口使用稳定 URI：工作台 `/workbench`、工具箱 `/toolbox`、记忆 `/memories`、超级管理员控制台 `/system`、能力库 `/hub`，左下角设置弹窗使用 `/settings`。历史根路径 `/` 只作兼容入口并跳转到 `/workbench`；浏览器刷新、前进/后退和登录回跳均以命名路由恢复对应页面，工具箱、记忆、控制台与能力库继续共用沉浸式布局快照。通用问答 `/lobehub/launch` 和长程任务 `/workflow-chat` 保留既有发布开关与独立页面边界。
 
-### QA 长期记忆中心
+### 通用长期记忆中心
 
-`/memories` 是受登录保护的沉浸式路由，活动栏 `BrainCircuit` 入口与 `/toolbox`、`/system`、`/hub` 共用布局快照和浏览器前进/后退恢复。页面固定分为“我的记忆、团队记忆、Skill 提案”：个人记忆可选择全局或当前 Application 范围；团队候选始终以 Application 为边界并由 `APP_ADMIN` 审核；Skill 提案审核通过后才生成可编辑 `SKILL.md`，实际文件、Git 和发布仍进入既有 Hub 流程。详情抽屉只展示派生摘要与安全证据定位，使用纵向 evidence rail 区分观察、确认、真实注入说明和变更，不复制聊天正文。白名单未开放时页面显示无侵入空态，既有对话保持原行为。
+`/memories` 是受登录保护的沉浸式路由，活动栏 `BrainCircuit` 入口与 `/toolbox`、`/system`、`/hub` 共用布局快照和浏览器前进/后退恢复。页面固定分为“我的记忆、团队记忆、Skill 提案”：个人记忆可选择全局或当前 Application 范围；团队记忆只能由用户从自己已生效的个人记忆手工提交，并由当前 Application 的 `APP_ADMIN` 审核，不从对话自动产生。Skill 提案审核通过后才生成可编辑 `SKILL.md`，实际文件、Git 和发布仍进入既有 Hub 流程。证据只保留 `sessionId`、`sessionTitle`、`runId` 和 `transcriptAvailable` 等安全引用，不复制对话正文；所有有权查看记忆的人都能看到对话标题和 ID，只有 Session 所有者才能打开 `/s/{sessionId}` 阅读完整原始对话。白名单未开放时页面显示无侵入空态，既有对话保持原行为。
 
-成功 Run 的完成摘要通过批量 HTTP 恢复实际注入记录，仅在记录非空时显示“参考了 N 条记忆”；不修改 RunEvent SSE，也不根据检索候选猜测使用情况。系统管理新增“记忆能力”，集中显示经过鉴权的 Mem0/pgvector/BGE 就绪状态、固定 CHAT 模型、学习 Outbox 和灰度白名单。固定模型从已启用且 CHAT 探测成功的内部模型目录选择；白名单通过平台用户目录按姓名、用户 ID 或统一认证号搜索选择，不再要求管理员手填 ID。当前任务内部模型的备用规则使用业务化说明，Embedding 版本、集合和归一化字段收进按需展开的技术信息。页面复用 `--ta-shell-*` 主题变量，个人蓝、团队青、候选琥珀和冲突红只承担记忆治理语义，并支持暗色、键盘焦点、Reduced Motion 与窄屏全屏抽屉。
+成功 Run 的完成摘要通过批量 HTTP 恢复实际注入记录，仅在记录非空时显示“参考了 N 条记忆”；不修改 RunEvent SSE，也不根据检索候选猜测使用情况。学习链路把当前会话的 USER/ASSISTANT 消息作为一次请求上下文，使用 Mem0 原生 `add(messages, infer=true)` 且不传自定义提示词；平台和 Mem0 独立库都不新建对话副本。系统管理“记忆能力”集中显示 Mem0 节点、固定 CHAT 模型、可空的企业 Embedding profile、固定 CPU BGE profile、双集合投影状态、积压数和灰度白名单。白名单通过平台用户目录搜索选择。页面复用 `--ta-shell-*` 主题变量，个人蓝、团队青、候选琥珀和冲突红只承担记忆治理语义；健康卡和配置区按嵌入面板宽度自动换列，在暗色、窄屏、Reduced Motion 和中栏布局下不产生横向滚动。
 
 应用源码快照的仓库、分支、目录树、物化、保留期调整、重试、打开、最近选择和持久化操作查询统一由 `packages/backend-api` 调用平台 workspace-management API；`listAppSourceTree` 保持节点数组语义，新的 `getAppSourceTreeSnapshot` 在同一 URL 上请求 `includeCommit=true` 并返回 `{targetCommit,nodes}`，调用方把该固定提交直接作为物化 `expectedTreeCommit`。选择项使用 `{path,type}`，下载状态固定为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。物化进度使用独立的一次性 ticket WebSocket；client 单次连接不自行重连，意外 `error/close` 会向调用方报告安全失败，工作台按有界退避串行执行“数据库 snapshot → 新 ticket → 新 WebSocket”。主动关闭只停止观察，不取消后台任务。保留期调整是同步 PATCH，不创建进度连接。`packages/shared-types` 保存严格判别的安全 DTO/envelope：成功帧必须完整包含 operation/operationId/traceId，失败帧必须包含 `FAILED` 与安全错误；runtime validator 拒绝畸形消息，业务回调异常不会被二次包装为消息格式错误。RunEvent union 不增加应用源码事件。
 

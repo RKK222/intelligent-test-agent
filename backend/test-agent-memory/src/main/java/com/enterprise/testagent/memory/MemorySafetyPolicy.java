@@ -5,10 +5,10 @@ import com.enterprise.testagent.common.error.PlatformException;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
-/** 记忆正文统一安全边界：阻止密钥、控制字符和明显的指令注入被长期复用。 */
+/** 记忆正文只做结构安全校验；语义取舍完全交给 Mem0 原生能力和人工治理。 */
 @Component
 public class MemorySafetyPolicy {
-    private static final int MAX_MEMORY_CODE_POINTS = 2_000;
+    private static final int MAX_MEMORY_CODE_POINTS = 8_000;
     private static final int MAX_SKILL_DRAFT_CODE_POINTS = 100_000;
     private static final Pattern SECRET_ASSIGNMENT = Pattern.compile(
             "(?is)(?:password|passwd|api[_-]?key|access[_-]?token|secret)\\s*[:=]\\s*[^\\s,;]{6,}");
@@ -17,7 +17,17 @@ public class MemorySafetyPolicy {
             "(?is)(?:忽略|覆盖|绕过).{0,20}(?:系统|上文|之前).{0,20}(?:指令|规则)|ignore.{0,20}(?:system|previous).{0,20}instructions");
 
     public String requireSafeContent(String value) {
-        return requireSafe(value, MAX_MEMORY_CODE_POINTS, "记忆内容不能为空", "单条记忆不能超过 2000 字");
+        if (value == null || value.isBlank()) {
+            throw validation("记忆内容不能为空");
+        }
+        if (value.codePointCount(0, value.length()) > MAX_MEMORY_CODE_POINTS) {
+            throw validation("单条记忆不能超过 8000 字");
+        }
+        if (hasForbiddenControlCharacter(value)) {
+            throw validation("记忆内容包含不允许的控制字符");
+        }
+        // 不再判断 QA 类型、临时性、置信度、凭据语义或提示词语义，保持 Mem0 结果原样。
+        return value;
     }
 
     /** Skill 草稿允许完整方法说明，但沿用凭据、控制字符和提示覆盖防护。 */
@@ -34,7 +44,7 @@ public class MemorySafetyPolicy {
         if (normalized.codePointCount(0, normalized.length()) > maxCodePoints) {
             throw validation(lengthMessage);
         }
-        if (normalized.chars().anyMatch(ch -> ch == 0 || ch < 0x20 && ch != '\n' && ch != '\r' && ch != '\t')) {
+        if (hasForbiddenControlCharacter(normalized)) {
             throw validation("记忆内容包含不允许的控制字符");
         }
         if (SECRET_ASSIGNMENT.matcher(normalized).find() || PRIVATE_KEY.matcher(normalized).find()) {
@@ -44,6 +54,10 @@ public class MemorySafetyPolicy {
             throw validation("记忆内容包含不允许长期复用的指令覆盖语句");
         }
         return normalized;
+    }
+
+    private boolean hasForbiddenControlCharacter(String value) {
+        return value.chars().anyMatch(ch -> ch == 0 || ch < 0x20 && ch != '\n' && ch != '\r' && ch != '\t');
     }
 
     public String displaySummary(String content) {

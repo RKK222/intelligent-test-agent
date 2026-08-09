@@ -91,7 +91,9 @@
 
     <update id="updateMemory">
         update qa_memories set
-            mem0_memory_id = #{row.mem0MemoryId}, status = #{row.status}, task_types_csv = #{row.taskTypesCsv},
+            mem0_memory_id = #{row.mem0MemoryId}, scope = #{row.scope},
+            owner_user_id = #{row.ownerUserId}, application_id = #{row.applicationId},
+            status = #{row.status}, task_types_csv = #{row.taskTypesCsv},
             display_summary = #{row.displaySummary}, confidence = #{row.confidence},
             distinct_session_count = #{row.distinctSessionCount}, distinct_user_count = #{row.distinctUserCount},
             first_observed_at = #{row.firstObservedAt}, last_observed_at = #{row.lastObservedAt},
@@ -108,10 +110,13 @@
         )
     </insert>
     <select id="listEvidence" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$EvidenceRow">
-        select evidence_id, memory_id, run_id, session_id, observed_user_id, source,
-               evidence_summary, observed_at
-        from qa_memory_evidence where memory_id = #{memoryId}
-        order by observed_at desc, evidence_id asc
+        select e.evidence_id, e.memory_id, e.run_id, e.session_id,
+               s.title as session_title, s.created_by_user_id as session_owner_user_id,
+               e.observed_user_id, e.source, e.evidence_summary, e.observed_at
+        from qa_memory_evidence e
+        left join sessions s on s.session_id = e.session_id
+        where e.memory_id = #{memoryId}
+        order by e.observed_at desc, e.evidence_id asc
     </select>
 
     <insert id="insertReview">
@@ -296,12 +301,14 @@
     <delete id="removeWhitelist">delete from qa_memory_whitelist where user_id = #{userId}</delete>
 
     <select id="loadSettings" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$SettingsRow">
-        select primary_chat_model_id, current_run_model_fallback_enabled, version, updated_by_user_id, updated_at
+        select primary_chat_model_id, primary_embedding_model_id, cpu_embedding_model_id,
+               version, updated_by_user_id, updated_at
         from qa_memory_settings where setting_key = 'DEFAULT'
     </select>
     <update id="updateSettings">
         update qa_memory_settings set primary_chat_model_id = #{row.primaryChatModelId},
-            current_run_model_fallback_enabled = #{row.currentRunModelFallbackEnabled},
+            primary_embedding_model_id = #{row.primaryEmbeddingModelId},
+            cpu_embedding_model_id = #{row.cpuEmbeddingModelId},
             version = #{row.version}, updated_by_user_id = #{row.updatedByUserId}, updated_at = #{row.updatedAt}
         where setting_key = 'DEFAULT' and version = #{expectedVersion}
     </update>

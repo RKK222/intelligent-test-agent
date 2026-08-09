@@ -60,6 +60,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
     public static final String GATEWAY_PATH = "/api/internal/platform/model-gateway/v1";
     public static final String PROVIDER_HEADER = OpenAiUpstreamSupport.PROVIDER_HEADER;
     public static final String UCID_HEADER = OpenAiUpstreamSupport.UCID_HEADER;
+    public static final String EMBEDDING_INPUT_TYPE_HEADER = "X-Embedding-Input-Type";
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(30);
@@ -231,7 +232,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
         Mono<Void> requestMono = webClient.post()
                 .uri(URI.create(targetUrl))
                 .headers(headers -> applyUpstreamHeaders(
-                        headers, exchange, resolvedModel, caller, safeTraceId, contentType))
+                        headers, exchange, endpoint, resolvedModel, caller, safeTraceId, contentType))
                 .body(bodyInserter)
                 .exchangeToMono(response -> {
                     responseHeadersReady.tryEmitEmpty();
@@ -477,6 +478,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
     private void applyUpstreamHeaders(
             HttpHeaders headers,
             ServerWebExchange exchange,
+            String endpoint,
             ResolvedModel resolvedModel,
             ModelGatewayCaller caller,
             String traceId,
@@ -489,7 +491,19 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
                 traceId,
                 contentType,
                 accept);
-        // 不复制 Authorization、provider、UCID 或其他客户端 Header。
+        // 只有通过 HMAC 身份进入的记忆 embedding 请求可以把已签名的输入类型转发给
+        // 独立 CPU BGE；浏览器、workflow 与其它客户端不能伪造该模型语义。
+        if ("memory".equals(caller.sourceClient()) && "/embeddings".equals(endpoint)) {
+            String inputType = exchange.getRequest().getHeaders()
+                    .getFirst(EMBEDDING_INPUT_TYPE_HEADER);
+            if (!"query".equals(inputType) && !"document".equals(inputType)) {
+                throw new PlatformException(ErrorCode.UNAUTHENTICATED, "记忆 embedding 输入类型无效");
+            }
+            headers.set(EMBEDDING_INPUT_TYPE_HEADER, inputType);
+        } else {
+            headers.remove(EMBEDDING_INPUT_TYPE_HEADER);
+        }
+        // 不复制 Authorization、provider、UCID 或其它客户端 Header。
     }
 
     private void copySafeResponseHeaders(HttpHeaders target, HttpHeaders source) {

@@ -3,7 +3,7 @@ package com.enterprise.testagent.persistence.mybatis;
 import java.math.BigDecimal;
 import java.time.Instant;
 
-/** QA 记忆治理表行模型，仅供 MyBatis XML 与持久化适配器使用。 */
+/** 通用记忆治理表行模型；QA 命名是不可重命名的存量表兼容边界。 */
 public final class QaMemoryRows {
     private QaMemoryRows() {
     }
@@ -17,7 +17,8 @@ public final class QaMemoryRows {
     }
 
     public record EvidenceRow(
-            String evidenceId, String memoryId, String runId, String sessionId, String observedUserId,
+            String evidenceId, String memoryId, String runId, String sessionId,
+            String sessionTitle, String sessionOwnerUserId, String observedUserId,
             String source, String evidenceSummary, Instant observedAt) {
     }
 
@@ -49,7 +50,7 @@ public final class QaMemoryRows {
     }
 
     public record SettingsRow(
-            String primaryChatModelId, boolean currentRunModelFallbackEnabled, long version,
+            String primaryChatModelId, String primaryEmbeddingModelId, String cpuEmbeddingModelId, long version,
             String updatedByUserId, Instant updatedAt) {
     }
 }

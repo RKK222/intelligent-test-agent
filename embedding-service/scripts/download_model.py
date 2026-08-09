@@ -1,4 +1,4 @@
-"""构建期下载并锁定 BGE 权重；运行期不会调用此脚本。"""
+"""镜像构建期下载固定 BGE revision，并生成可校验模型身份清单。"""
 
 from __future__ import annotations
 
@@ -24,16 +24,9 @@ def main() -> None:
     if not args.destination.is_absolute():
         raise SystemExit("模型目标目录必须为绝对路径")
     args.destination.mkdir(parents=True, exist_ok=True)
-    snapshot_download(
-        repo_id=args.model,
-        revision=args.revision,
-        local_dir=args.destination,
-    )
+    snapshot_download(repo_id=args.model, revision=args.revision, local_dir=args.destination)
     model = SentenceTransformer(
-        str(args.destination),
-        device="cpu",
-        local_files_only=True,
-        trust_remote_code=False,
+        str(args.destination), device="cpu", local_files_only=True, trust_remote_code=False
     )
     dimension = int(model.get_sentence_embedding_dimension())
     if dimension != DIMENSION:
@@ -44,9 +37,8 @@ def main() -> None:
         "dimension": dimension,
         "normalized": True,
     }
-    (args.destination / ".qa-memory-model.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8",
+    (args.destination / ".testagent-embedding-model.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
     )
 
 

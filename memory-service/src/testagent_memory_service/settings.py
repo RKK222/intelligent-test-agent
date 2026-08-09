@@ -1,9 +1,9 @@
-"""记忆服务显式配置；模型身份、集合版本和离线约束集中在这里。"""
+"""通用记忆服务配置：共享 PostgreSQL、模型网关和互不混写的向量 profile。"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from hashlib import sha256
-from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
@@ -11,15 +11,44 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-LOCAL_BGE_PROVIDER = "LOCAL_BGE"
-LOCAL_BGE_MODEL_ID = "BAAI/bge-small-zh-v1.5"
-LOCAL_BGE_REVISION = "7999e1d3359715c523056ef9478215996d62a620"
-LOCAL_BGE_DIMENSION = 512
-LOCAL_BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
+CPU_PROFILE_KEY = "cpu:bge-small-zh-v1.5:512:7999e1d3359715c523056ef9478215996d62a620"
+CPU_MODEL_ID = "BAAI/bge-small-zh-v1.5"
+CPU_MODEL_REVISION = "7999e1d3359715c523056ef9478215996d62a620"
+CPU_DIMENSION = 512
+CPU_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingProfile:
+    """一个可独立读写的 embedding profile；profile_key 是集合身份而非展示名。"""
+
+    profile_key: str
+    model_id: str
+    dimension: int
+    fingerprint: str
+    provider: str
+    primary: bool
+
+    def collection_name(self) -> str:
+        digest = sha256(self.profile_key.encode("utf-8")).hexdigest()[:16]
+        prefix = "memory_cpu" if self.provider == "CPU" else "memory_enterprise"
+        return f"{prefix}_d{self.dimension}_{digest}"
+
+    def public_view(self) -> dict[str, object]:
+        return {
+            "profileKey": self.profile_key,
+            "provider": self.provider,
+            "model": self.model_id,
+            "dimension": self.dimension,
+            "fingerprint": self.fingerprint,
+            "collection": self.collection_name(),
+            "primary": self.primary,
+            "normalized": True,
+        }
 
 
 class MemoryServiceSettings(BaseSettings):
-    """生产配置只接受固定本地 BGE profile，不允许运行期漂移。"""
+    """所有节点读取同一配置；节点自身不保存 history、幂等或投影状态。"""
 
     model_config = SettingsConfigDict(
         env_prefix="TEST_AGENT_MEMORY_SERVICE_",
@@ -29,68 +58,50 @@ class MemoryServiceSettings(BaseSettings):
 
     api_key: SecretStr = Field(min_length=32)
     database_url: SecretStr = SecretStr(
-        "postgresql://qa_memory:qa_memory@127.0.0.1:15433/qa_memory"
+        "postgresql://testagent_memory:testagent_memory@127.0.0.1:15433/testagent_memory"
     )
-    history_db_path: Path = Path("/data/mem0-history.db")
-    model_root: Path = Path("/models")
-    model_path: Path = Path("/models/BAAI__bge-small-zh-v1.5")
-    embedding_provider: str = LOCAL_BGE_PROVIDER
-    embedding_model_id: str = LOCAL_BGE_MODEL_ID
-    embedding_revision: str = LOCAL_BGE_REVISION
-    embedding_dimension: int = LOCAL_BGE_DIMENSION
-    collection_version: str = "v1"
-    request_timeout_seconds: float = Field(default=120.0, gt=0.0, le=180.0)
-    extraction_gateway_url: str | None = None
+    model_gateway_url: str = "http://127.0.0.1:8080/api/internal/platform/model-gateway/v1"
+    model_gateway_hmac_secret: SecretStr = SecretStr("replace-memory-hmac-secret-at-least-32-bytes")
+    model_gateway_client_id: str = Field(default="mem0-cluster", pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,63}$")
+    chat_model_id: str = Field(default="memory-chat", pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+    cpu_embedding_model_id: str = Field(
+        default="memory-bge-small-zh-v1.5",
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+    )
+    enterprise_embedding_model_id: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    )
+    enterprise_embedding_dimension: int | None = Field(default=None, ge=1, le=65_535)
+    enterprise_embedding_fingerprint: str | None = Field(default=None, max_length=128)
+    chat_timeout_seconds: float = Field(default=120.0, gt=0.0, le=180.0)
+    embedding_timeout_seconds: float = Field(default=15.0, gt=0.0, le=60.0)
+    search_profile_timeout_seconds: float = Field(default=1.5, ge=0.1, le=1.8)
     max_document_chars: int = Field(default=8_000, ge=1, le=20_000)
-    max_extraction_chars: int = Field(default=120_000, ge=1, le=200_000)
+    max_learning_chars: int = Field(default=120_000, ge=1, le=200_000)
+    max_search_top_k: int = Field(default=50, ge=1, le=100)
+    postgres_pool_min_size: int = Field(default=1, ge=1, le=20)
+    postgres_pool_max_size: int = Field(default=20, ge=2, le=100)
+    projection_poll_seconds: float = Field(default=1.0, ge=0.1, le=30.0)
+    projection_batch_size: int = Field(default=32, ge=1, le=200)
+    operation_stale_seconds: int = Field(default=300, ge=30, le=3600)
 
-    @field_validator("history_db_path", "model_root", "model_path")
+    @field_validator(
+        "enterprise_embedding_model_id",
+        "enterprise_embedding_dimension",
+        "enterprise_embedding_fingerprint",
+        mode="before",
+    )
     @classmethod
-    def require_absolute_path(cls, value: Path) -> Path:
-        if not value.is_absolute():
-            raise ValueError("记忆服务持久化和模型路径必须为绝对路径")
-        return value
-
-    @field_validator("embedding_provider")
-    @classmethod
-    def fixed_provider(cls, value: str) -> str:
-        if value != LOCAL_BGE_PROVIDER:
-            raise ValueError("V1 只允许 LOCAL_BGE；企业 Embedding 必须新增 Provider 和集合")
-        return value
-
-    @field_validator("embedding_model_id")
-    @classmethod
-    def fixed_model(cls, value: str) -> str:
-        if value != LOCAL_BGE_MODEL_ID:
-            raise ValueError("V1 模型身份不可覆盖")
-        return value
-
-    @field_validator("embedding_revision")
-    @classmethod
-    def fixed_revision(cls, value: str) -> str:
-        if value != LOCAL_BGE_REVISION:
-            raise ValueError("V1 模型 revision 不可覆盖")
-        return value
-
-    @field_validator("embedding_dimension")
-    @classmethod
-    def fixed_dimension(cls, value: int) -> int:
-        if value != LOCAL_BGE_DIMENSION:
-            raise ValueError("V1 向量维度必须为 512")
-        return value
-
-    @field_validator("collection_version")
-    @classmethod
-    def safe_collection_version(cls, value: str) -> str:
-        if not re.fullmatch(r"v[1-9][0-9]{0,3}", value):
-            raise ValueError("collection_version 格式无效")
-        return value
-
-    @field_validator("extraction_gateway_url")
-    @classmethod
-    def fixed_gateway_path(cls, value: str | None) -> str | None:
-        if value is None:
+    def empty_optional_profile_value(cls, value: object) -> object | None:
+        # Docker Compose 对未配置的可选环境变量会传空字符串；这在语义上就是
+        # “没有企业 profile”，必须在类型/正则校验前统一为 None。
+        if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("model_gateway_url")
+    @classmethod
+    def fixed_gateway_path(cls, value: str) -> str:
         normalized = value.rstrip("/")
         parsed = urlsplit(normalized)
         if (
@@ -102,45 +113,64 @@ class MemoryServiceSettings(BaseSettings):
             or parsed.fragment
             or parsed.path != "/api/internal/platform/model-gateway/v1"
         ):
-            raise ValueError("抽取网关必须使用固定 model-gateway base path 且不得内嵌凭据")
+            raise ValueError("模型网关必须使用固定 model-gateway base path 且不得内嵌凭据")
+        return normalized
+
+    @field_validator("enterprise_embedding_fingerprint")
+    @classmethod
+    def safe_fingerprint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", normalized):
+            raise ValueError("企业 embedding fingerprint 格式无效")
         return normalized
 
     @model_validator(mode="after")
-    def require_model_under_root(self) -> "MemoryServiceSettings":
-        try:
-            self.model_path.relative_to(self.model_root)
-        except ValueError as exception:
-            raise ValueError("模型只能从只读 /models 根目录加载") from exception
+    def validate_profiles(self) -> "MemoryServiceSettings":
+        secret = self.model_gateway_hmac_secret.get_secret_value().encode("utf-8")
+        if len(secret) < 32:
+            raise ValueError("模型网关 HMAC secret 至少需要 32 字节")
+        configured = self.enterprise_embedding_model_id is not None
+        if configured != (self.enterprise_embedding_dimension is not None) or configured != (
+            self.enterprise_embedding_fingerprint is not None
+        ):
+            raise ValueError("企业 embedding 的 modelId、dimension、fingerprint 必须同时配置或同时为空")
+        if self.postgres_pool_max_size < self.postgres_pool_min_size:
+            raise ValueError("PostgreSQL pool max size 不能小于 min size")
         return self
 
-    def collection_name(self) -> str:
-        """PostgreSQL 标识符最多 63 字节，保留可读身份并追加完整 profile 摘要。"""
-        identity = ":".join(
+    def profiles(self) -> tuple[EmbeddingProfile, ...]:
+        cpu = EmbeddingProfile(
+            profile_key=CPU_PROFILE_KEY,
+            model_id=self.cpu_embedding_model_id,
+            dimension=CPU_DIMENSION,
+            fingerprint=CPU_MODEL_REVISION,
+            provider="CPU",
+            primary=self.enterprise_embedding_model_id is None,
+        )
+        if self.enterprise_embedding_model_id is None:
+            return (cpu,)
+        enterprise_key = ":".join(
             [
-                self.embedding_provider,
-                self.embedding_model_id,
-                self.embedding_revision,
-                str(self.embedding_dimension),
-                self.collection_version,
+                "enterprise",
+                self.enterprise_embedding_model_id,
+                str(self.enterprise_embedding_dimension),
+                str(self.enterprise_embedding_fingerprint),
             ]
         )
-        digest = sha256(identity.encode("utf-8")).hexdigest()[:8]
-        return (
-            "qm_local_bge_bge_small_zh_15_"
-            f"r{self.embedding_revision[:8]}_d{self.embedding_dimension}_"
-            f"{self.collection_version}_{digest}"
+        enterprise = EmbeddingProfile(
+            profile_key=enterprise_key,
+            model_id=self.enterprise_embedding_model_id,
+            dimension=int(self.enterprise_embedding_dimension),
+            fingerprint=str(self.enterprise_embedding_fingerprint),
+            provider="ENTERPRISE",
+            primary=True,
         )
+        return (enterprise, cpu)
 
-    def embedding_profile(self) -> dict[str, object]:
-        return {
-            "provider": self.embedding_provider,
-            "model": self.embedding_model_id,
-            "revision": self.embedding_revision,
-            "dimension": self.embedding_dimension,
-            "device": "CPU",
-            "normalized": True,
-            "queryPrefix": LOCAL_BGE_QUERY_PREFIX,
-            "collection": self.collection_name(),
-            "collectionVersion": self.collection_version,
-            "runtimeOffline": True,
-        }
+    def primary_profile(self) -> EmbeddingProfile:
+        return next(profile for profile in self.profiles() if profile.primary)
+
+    def embedding_profiles(self) -> list[dict[str, object]]:
+        return [profile.public_view() for profile in self.profiles()]

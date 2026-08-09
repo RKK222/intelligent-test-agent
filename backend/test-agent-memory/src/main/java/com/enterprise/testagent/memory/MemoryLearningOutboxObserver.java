@@ -52,6 +52,10 @@ public class MemoryLearningOutboxObserver implements AgentRootRunTerminalObserve
         }
         Instant now = clock.instant();
         String applicationId = memories.findApplicationIdByRuntimeWorkspace(run.workspaceId().value()).orElse(null);
+        // 自动学习必须落在“当前用户 + 当前 Application”；无法解析应用时不自动扩大为个人全局。
+        if (applicationId == null || applicationId.isBlank()) {
+            return;
+        }
         memories.enqueueLearningJob(new MemoryLearningJob(
                 "mlj_" + UUID.randomUUID().toString().replace("-", ""),
                 run.runId().value(), run.sessionId().value(), run.workspaceId().value(),

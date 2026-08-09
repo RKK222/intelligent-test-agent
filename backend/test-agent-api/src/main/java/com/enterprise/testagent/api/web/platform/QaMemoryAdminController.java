@@ -23,7 +23,7 @@ import org.springframework.web.server.ServerWebExchange;
 
 /** 系统管理中的记忆健康、固定 CHAT 模型、Embedding profile、队列和白名单入口。 */
 @RestController
-@RequestMapping("/api/internal/platform/system-management/memory")
+@RequestMapping("/api/internal/platform/memory/v1/admin")
 public class QaMemoryAdminController {
     private final QaMemoryApplicationService service;
 
@@ -49,7 +49,7 @@ public class QaMemoryAdminController {
             ServerWebExchange exchange) {
         AuthPrincipal principal = requireSuperAdmin(exchange);
         return ok(exchange, service.updateSettings(
-                request.primaryChatModelId(), request.currentRunModelFallbackEnabled(),
+                request.primaryChatModelId(), request.primaryEmbeddingModelId(),
                 request.expectedVersion(), principal.userId().value()));
     }
 

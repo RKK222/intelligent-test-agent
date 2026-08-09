@@ -70,6 +70,24 @@ class MemoryLearningOutboxObserverTest {
         verify(memories, never()).enqueueLearningJob(any());
     }
 
+    @Test
+    void workspaceWithoutApplicationIsNeverPromotedToPersonalGlobal() {
+        RunRepository runs = mock(RunRepository.class);
+        QaMemoryRepository memories = mock(QaMemoryRepository.class);
+        QaMemoryProperties properties = new QaMemoryProperties();
+        properties.setEnabled(true);
+        Run run = run(ConversationSourceType.MANUAL);
+        when(runs.findById(run.runId())).thenReturn(Optional.of(run));
+        when(memories.isWhitelisted("usr_1")).thenReturn(true);
+        when(memories.findApplicationIdByRuntimeWorkspace("wrk_1")).thenReturn(Optional.empty());
+        MemoryLearningOutboxObserver observer = new MemoryLearningOutboxObserver(
+                runs, memories, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        observer.onTerminal(run.runId(), RunStatus.SUCCEEDED, "trace_1");
+
+        verify(memories, never()).enqueueLearningJob(any());
+    }
+
     private Run run(ConversationSourceType sourceType) {
         return new Run(
                 new RunId("run_1"), new SessionId("ses_1"), new WorkspaceId("wrk_1"),

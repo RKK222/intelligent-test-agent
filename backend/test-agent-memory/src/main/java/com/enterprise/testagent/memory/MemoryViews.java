@@ -10,7 +10,6 @@ import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.MemoryUsage;
 import com.enterprise.testagent.domain.memory.MemoryWhitelistEntry;
 import com.enterprise.testagent.domain.memory.QaMemory;
-import com.enterprise.testagent.domain.memory.QaTaskType;
 import java.time.Instant;
 import java.util.List;
 
@@ -24,27 +23,27 @@ public final class MemoryViews {
 
     public record MemoryView(
             String memoryId, MemoryScope scope, String ownerUserId, String applicationId,
-            MemoryStatus status, MemorySource source, List<QaTaskType> taskTypes,
-            String content, boolean contentAvailable, String displaySummary, double confidence,
-            int distinctSessionCount, int distinctUserCount, long version,
+            MemoryStatus status, MemorySource source,
+            String content, boolean contentAvailable, String displaySummary, long version,
             Instant confirmedAt, Instant createdAt, Instant updatedAt) {
         static MemoryView from(QaMemory memory, String content, boolean contentAvailable) {
             return new MemoryView(
                     memory.memoryId().value(), memory.scope(), memory.ownerUserId(), memory.applicationId(),
-                    memory.status(), memory.source(), memory.taskTypes(), content, contentAvailable,
-                    memory.displaySummary(), memory.confidence(), memory.distinctSessionCount(),
-                    memory.distinctUserCount(), memory.version(), memory.confirmedAt(),
+                    memory.status(), publicSource(memory.source()), content, contentAvailable,
+                    memory.displaySummary(), memory.version(), memory.confirmedAt(),
                     memory.createdAt(), memory.updatedAt());
         }
     }
 
     public record MemoryEvidenceView(
-            String evidenceId, String memoryId, String runId, String sessionId,
+            String evidenceId, String memoryId, String runId, String sessionId, String sessionTitle,
+            boolean transcriptAvailable,
             MemorySource source, String summary, Instant observedAt) {
-        static MemoryEvidenceView from(MemoryEvidence evidence) {
+        static MemoryEvidenceView from(MemoryEvidence evidence, String viewerUserId) {
             return new MemoryEvidenceView(
                     evidence.evidenceId(), evidence.memoryId().value(), evidence.runId(), evidence.sessionId(),
-                    evidence.source(), evidence.summary(), evidence.observedAt());
+                    evidence.sessionTitle(), viewerUserId.equals(evidence.sessionOwnerUserId()),
+                    publicSource(evidence.source()), evidence.summary(), evidence.observedAt());
         }
     }
 
@@ -78,23 +77,28 @@ public final class MemoryViews {
         }
     }
 
-    public record EmbeddingProfile(
-            String provider, String model, String revision, int dimension,
-            String device, boolean normalized, String collectionVersion) {
-    }
-
     public record AdminHealthView(
-            boolean enabled, MemoryDocumentStore.Health memoryService, EmbeddingProfile embedding,
-            String primaryChatModelId, boolean currentRunModelFallbackEnabled,
+            boolean enabled, MemoryDocumentStore.Health memoryService,
+            String primaryChatModelId, String primaryEmbeddingModelId, String cpuEmbeddingModelId,
             int queuePending, int queueProcessing, int queueDead) {
     }
 
     public record SettingsView(
-            String primaryChatModelId, boolean currentRunModelFallbackEnabled,
+            String primaryChatModelId, String primaryEmbeddingModelId, String cpuEmbeddingModelId,
             long version, String updatedByUserId, Instant updatedAt) {
         static SettingsView from(MemorySettings settings) {
-            return new SettingsView(settings.primaryChatModelId(), settings.currentRunModelFallbackEnabled(),
+            return new SettingsView(
+                    settings.primaryChatModelId(), settings.primaryEmbeddingModelId(), settings.cpuEmbeddingModelId(),
                     settings.version(), settings.updatedByUserId(), settings.updatedAt());
         }
+    }
+
+    /** 升级前来源值只留在隐藏兼容表中，通用 API 不再暴露 QA 抽取分类。 */
+    private static MemorySource publicSource(MemorySource source) {
+        return switch (source) {
+            case EXPLICIT, IMPLICIT -> MemorySource.NATIVE;
+            case ADMIN_CREATED -> MemorySource.MANUAL;
+            default -> source;
+        };
     }
 }

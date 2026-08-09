@@ -26,7 +26,7 @@ import org.springframework.web.server.ServerWebExchange;
 
 /** 当前用户个人记忆、Application 团队记忆和 Skill 提案 HTTP 入口。 */
 @RestController
-@RequestMapping("/api/internal/platform/qa-memory/v1")
+@RequestMapping("/api/internal/platform/memory/v1")
 public class QaMemoryController {
     private final QaMemoryApplicationService service;
 
@@ -56,7 +56,7 @@ public class QaMemoryController {
             ServerWebExchange exchange) {
         return ok(exchange, service.createPersonal(
                 principal(exchange).userId(), request.scope(), request.applicationId(),
-                request.content(), request.taskTypes()));
+                request.content()));
     }
 
     @GetMapping("/team")
@@ -74,16 +74,8 @@ public class QaMemoryController {
             @RequestBody QaMemoryDtos.CreateTeamRequest request,
             ServerWebExchange exchange) {
         return ok(exchange, service.createTeamCandidate(
-                principal(exchange).userId(), request.applicationId(), request.content(), request.taskTypes()));
-    }
-
-    @PostMapping("/team")
-    public ApiResponse<MemoryView> createTeamDirect(
-            @RequestBody QaMemoryDtos.CreateTeamRequest request,
-            ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
-        return ok(exchange, service.createTeamDirect(
-                principal.userId(), request.applicationId(), request.content(), request.taskTypes()));
+                principal(exchange).userId(), request.applicationId(), request.content(),
+                request.sourceMemoryId()));
     }
 
     @PostMapping("/team/{memoryId}/reviews")
@@ -108,16 +100,16 @@ public class QaMemoryController {
             ServerWebExchange exchange) {
         AuthPrincipal principal = principal(exchange);
         return ok(exchange, service.update(
-                principal.userId(), memoryId, request.content(), request.taskTypes(), request.expectedVersion(),
+                principal.userId(), memoryId, request.content(), request.expectedVersion(),
                 AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)));
     }
 
-    @PostMapping("/personal/{memoryId}/confirm")
-    public ApiResponse<MemoryView> confirm(
+    @PostMapping("/personal/{memoryId}/promote-global")
+    public ApiResponse<MemoryView> promoteGlobal(
             @PathVariable String memoryId,
             @RequestBody QaMemoryDtos.VersionRequest request,
             ServerWebExchange exchange) {
-        return ok(exchange, service.confirmPersonal(
+        return ok(exchange, service.promotePersonalGlobal(
                 principal(exchange).userId(), memoryId, request.expectedVersion()));
     }
 

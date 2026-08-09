@@ -1,98 +1,100 @@
-import json
-import math
-from pathlib import Path
-
-import numpy as np
-import pytest
+import httpx
 
 from mem0.configs.embeddings.base import BaseEmbedderConfig
+from mem0.configs.llms.base import BaseLlmConfig
 
-from testagent_memory_service import embedding
-from testagent_memory_service.embedding import LocalBgeEmbedding, ModelIdentityError
-from testagent_memory_service.settings import (
-    LOCAL_BGE_DIMENSION,
-    LOCAL_BGE_MODEL_ID,
-    LOCAL_BGE_QUERY_PREFIX,
-    LOCAL_BGE_REVISION,
+from testagent_memory_service.embedding import (
+    GatewayEmbedding,
+    GatewayMemoryLlm,
+    ProviderRuntime,
 )
+from testagent_memory_service.gateway import (
+    GatewayCallContext,
+    HmacModelGatewayClient,
+    gateway_call_context,
+)
+from testagent_memory_service.settings import MemoryServiceSettings
 
 
-class FakeSentenceTransformer:
-    encoded: list[str] = []
+def test_gateway_embedding_batches_and_marks_query_type() -> None:
+    captured: list[httpx.Request] = []
 
-    def __init__(self, model_path: str, **kwargs: object):
-        self.model_path = model_path
-        self.kwargs = kwargs
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": [1.0, 0.0]},
+                    {"index": 1, "embedding": [0.0, 1.0]},
+                ]
+            },
+        )
 
-    def get_sentence_embedding_dimension(self) -> int:
-        return LOCAL_BGE_DIMENSION
-
-    def encode(self, texts: str | list[str], **kwargs: object) -> np.ndarray:
-        values = [texts] if isinstance(texts, str) else texts
-        self.encoded.extend(values)
-        vector = np.ones((len(values), LOCAL_BGE_DIMENSION), dtype=float)
-        vector /= math.sqrt(LOCAL_BGE_DIMENSION)
-        return vector[0] if isinstance(texts, str) else vector
-
-
-def config(model_root: Path, model_path: Path) -> BaseEmbedderConfig:
-    return BaseEmbedderConfig(
-        model=str(model_path),
-        embedding_dims=LOCAL_BGE_DIMENSION,
-        model_kwargs={
-            "model_root": str(model_root),
-            "expected_model_id": LOCAL_BGE_MODEL_ID,
-            "expected_revision": LOCAL_BGE_REVISION,
-        },
+    settings = MemoryServiceSettings(
+        _env_file=None,
+        api_key="service-key-" + "k" * 32,
+        model_gateway_hmac_secret="gateway-secret-" + "s" * 32,
     )
-
-
-def write_manifest(model_path: Path) -> None:
-    model_path.mkdir(parents=True)
-    (model_path / ".qa-memory-model.json").write_text(
-        json.dumps(
-            {
-                "model": LOCAL_BGE_MODEL_ID,
-                "revision": LOCAL_BGE_REVISION,
-                "dimension": LOCAL_BGE_DIMENSION,
-            }
-        ),
-        encoding="utf-8",
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    gateway = HmacModelGatewayClient(settings, client)
+    ProviderRuntime.install(gateway)
+    provider = GatewayEmbedding(
+        BaseEmbedderConfig(
+            model="embedding-model", embedding_dims=2, model_kwargs={"timeout_seconds": 2}
+        )
     )
+    with gateway_call_context(
+        GatewayCallContext(
+            "u1",
+            "run-1",
+            "session-1",
+            "operation-1",
+            "trace_1",
+            embedding_timeout_seconds=1.5,
+        )
+    ):
+        vectors = provider.embed_batch(["边界", "异常"], "search")
+    client.close()
+
+    assert vectors == [[1.0, 0.0], [0.0, 1.0]]
+    assert captured[0].headers["x-embedding-input-type"] == "query"
+    assert captured[0].headers["x-memory-capability"] == "EMBEDDING"
+    assert captured[0].headers["x-memory-signature"]
+    assert "authorization" not in captured[0].headers
+    assert captured[0].extensions["timeout"]["read"] == 1.5
 
 
-def test_search_uses_prefix_and_returns_normalized_512_vector(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    model_root = tmp_path / "models"
-    model_path = model_root / "bge"
-    write_manifest(model_path)
-    FakeSentenceTransformer.encoded = []
-    monkeypatch.setattr(embedding, "SentenceTransformer", FakeSentenceTransformer)
+def test_gateway_llm_uses_service_chat_timeout_by_default() -> None:
+    captured: list[httpx.Request] = []
 
-    provider = LocalBgeEmbedding(config(model_root, model_path))
-    vector = provider.embed("边界场景", "search")
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "ok"}}]},
+        )
 
-    assert FakeSentenceTransformer.encoded == [LOCAL_BGE_QUERY_PREFIX + "边界场景"]
-    assert len(vector) == LOCAL_BGE_DIMENSION
-    assert math.isclose(math.sqrt(sum(value * value for value in vector)), 1.0)
-
-
-def test_missing_or_drifting_manifest_is_rejected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    model_root = tmp_path / "models"
-    model_path = model_root / "bge"
-    model_path.mkdir(parents=True)
-    monkeypatch.setattr(embedding, "SentenceTransformer", FakeSentenceTransformer)
-    with pytest.raises(ModelIdentityError, match="身份清单"):
-        LocalBgeEmbedding(config(model_root, model_path))
-
-    (model_path / ".qa-memory-model.json").write_text(
-        json.dumps(
-            {"model": LOCAL_BGE_MODEL_ID, "revision": "main", "dimension": 512}
-        ),
-        encoding="utf-8",
+    settings = MemoryServiceSettings(
+        _env_file=None,
+        api_key="service-key-" + "k" * 32,
+        model_gateway_hmac_secret="gateway-secret-" + "s" * 32,
+        chat_timeout_seconds=7.25,
     )
-    with pytest.raises(ModelIdentityError, match="不一致"):
-        LocalBgeEmbedding(config(model_root, model_path))
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    gateway = HmacModelGatewayClient(settings, client)
+    ProviderRuntime.install(gateway)
+    provider = GatewayMemoryLlm(BaseLlmConfig(model="memory-chat"))
+    with gateway_call_context(
+        GatewayCallContext(
+            "u1",
+            "run-1",
+            "session-1",
+            "operation-1",
+            "trace_1",
+        )
+    ):
+        assert provider.generate_response([{"role": "user", "content": "偏好"}]) == "ok"
+    client.close()
+
+    assert captured[0].extensions["timeout"]["read"] == 7.25

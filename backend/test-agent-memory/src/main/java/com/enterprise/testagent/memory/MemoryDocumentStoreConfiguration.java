@@ -12,6 +12,8 @@ public class MemoryDocumentStoreConfiguration {
         if (!properties.isEnabled()) {
             return new UnavailableMemoryDocumentStore();
         }
+        // 开关打开即校验双向认证材料，避免 Java 看似就绪、首个 Mem0 回调才失败。
+        properties.requireModelGatewayHmacSecret();
         return new HttpMemoryDocumentStore(properties, objectMapper);
     }
 }

@@ -2,8 +2,10 @@ package com.enterprise.testagent.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.enterprise.testagent.domain.memory.MemoryEvidence;
 import com.enterprise.testagent.domain.memory.MemoryId;
 import com.enterprise.testagent.domain.memory.MemoryScope;
+import com.enterprise.testagent.domain.memory.MemorySettings;
 import com.enterprise.testagent.domain.memory.MemorySource;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.MemoryWhitelistEntry;
@@ -71,6 +73,24 @@ class MyBatisQaMemoryPostgresqlIntegrationTest {
         assertThat(repository.findById(memory.memoryId())).isPresent();
         assertThat(repository.countWhitelist()).isZero();
 
+        repository.insertEvidence(new MemoryEvidence(
+                "mev_pg", memory.memoryId(), "run_memory_pg", "ses_memory_pg",
+                "usr_memory_pg", MemorySource.NATIVE, "只保存安全证据引用", NOW));
+        assertThat(repository.listEvidence(memory.memoryId())).singleElement().satisfies(evidence -> {
+            assertThat(evidence.sessionTitle()).isEqualTo("通用记忆会话");
+            assertThat(evidence.sessionOwnerUserId()).isEqualTo("usr_memory_pg");
+            assertThat(evidence.runId()).isEqualTo("run_memory_pg");
+        });
+
+        MemorySettings settings = repository.loadSettings();
+        assertThat(settings.primaryEmbeddingModelId()).isNull();
+        assertThat(settings.cpuEmbeddingModelId()).isEqualTo("memory-bge-small-zh-v1.5");
+        MemorySettings updatedSettings = new MemorySettings(
+                "memory-chat", "enterprise-embedding", settings.cpuEmbeddingModelId(),
+                settings.version() + 1, "usr_memory_pg", NOW.plusSeconds(1));
+        assertThat(repository.updateSettings(updatedSettings, settings.version())).isTrue();
+        assertThat(repository.loadSettings()).isEqualTo(updatedSettings);
+
         MemoryWhitelistEntry entry = new MemoryWhitelistEntry(
                 "usr_memory_pg", true, "usr_memory_pg", NOW, NOW);
         repository.upsertWhitelist(entry);
@@ -82,12 +102,43 @@ class MyBatisQaMemoryPostgresqlIntegrationTest {
                 select checksum::text from flyway_schema_history where version = '20260809120000'
                 """).query(String.class).single();
         assertThat(checksum).isNotBlank();
+        assertThat(jdbc.sql("""
+                select checksum::text from flyway_schema_history where version = '20260809230000'
+                """).query(String.class).single()).isNotBlank();
+        assertThat(jdbc.sql("""
+                select count(*) from information_schema.columns
+                where table_name = 'internal_model_provider_models'
+                  and column_name = 'embedding_dimension'
+                """).query(Long.class).single()).isEqualTo(1L);
     }
 
     private static void seedParents() {
         jdbc.sql("""
                 insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
                 values ('usr_memory_pg', 'U_MEMORY_PG', 'memory-pg', 'x', 'ACTIVE', :now, :now)
+                """).param("now", Timestamp.from(NOW)).update();
+        jdbc.sql("""
+                insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)
+                values ('wks_memory_pg', '通用记忆工作区', '/tmp/memory-pg', 'ACTIVE',
+                        'trace_memory_pg', :now, :now)
+                """).param("now", Timestamp.from(NOW)).update();
+        jdbc.sql("""
+                insert into sessions(
+                    session_id, workspace_id, title, status, trace_id,
+                    created_by_user_id, created_at, updated_at
+                ) values (
+                    'ses_memory_pg', 'wks_memory_pg', '通用记忆会话', 'ACTIVE',
+                    'trace_memory_pg', 'usr_memory_pg', :now, :now
+                )
+                """).param("now", Timestamp.from(NOW)).update();
+        jdbc.sql("""
+                insert into runs(
+                    run_id, session_id, workspace_id, status, trace_id,
+                    triggered_by_user_id, created_at, updated_at
+                ) values (
+                    'run_memory_pg', 'ses_memory_pg', 'wks_memory_pg', 'SUCCEEDED',
+                    'trace_memory_pg', 'usr_memory_pg', :now, :now
+                )
                 """).param("now", Timestamp.from(NOW)).update();
     }
 }

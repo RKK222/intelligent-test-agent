@@ -55,7 +55,7 @@
 - `docs/deployment/frontend.md`：前端 Vue + Vite 生产构建与部署。
 - `docs/deployment/toolbox.md`：IT-Tools + OmniTools 的 193 项离线目录、派生源码、双后台共置容器、Nginx、增量发布与回滚。
 - `docs/deployment/lobehub-offline.md`：LobeHub/ParadeDB/RustFS 独立离线制品、安装、Redis ACL、启动、验收和回滚。
-- `docs/deployment/qa-memory.md`：QA 长期记忆的数据边界、Mem0/BGE/pgvector 部署、灰度、验收与回滚。
+- `docs/deployment/qa-memory.md`：通用长期记忆、多节点 Mem0、独立 CPU BGE/pgvector、离线交付、端到端验收与回滚。
 - `docs/deployment/lobehub-client-build.md`：LobeHub Windows/Linux 原生客户端构建、Authenticode、Linux 双人审批与证据汇集。
 - `docs/deployment/lobehub-fork-transfer.md`：LobeHub 独立 fork 的最小 ref Git Bundle、企业 Git 导入、校验和回滚。
 - `docs/deployment/workflow-offline.md`：Python 工作流、Runner、分析任务镜像、Redis ACL、独立数据库与 Nginx 直连部署。

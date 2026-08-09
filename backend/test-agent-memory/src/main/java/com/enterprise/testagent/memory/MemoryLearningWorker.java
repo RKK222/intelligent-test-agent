@@ -1,9 +1,16 @@
 package com.enterprise.testagent.memory;
 
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.memory.MemoryEvidence;
+import com.enterprise.testagent.domain.memory.MemoryId;
 import com.enterprise.testagent.domain.memory.MemoryLearningEvidence;
 import com.enterprise.testagent.domain.memory.MemoryLearningEvidenceRepository;
 import com.enterprise.testagent.domain.memory.MemoryLearningJob;
+import com.enterprise.testagent.domain.memory.MemoryScope;
+import com.enterprise.testagent.domain.memory.MemorySettings;
+import com.enterprise.testagent.domain.memory.MemorySource;
+import com.enterprise.testagent.domain.memory.MemoryStatus;
+import com.enterprise.testagent.domain.memory.QaMemory;
 import com.enterprise.testagent.domain.memory.QaMemoryRepository;
 import com.enterprise.testagent.domain.memory.QaTaskType;
 import jakarta.annotation.PreDestroy;
@@ -12,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -22,18 +30,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** 异步消费持久化学习 Outbox；失败只重试学习，不阻塞或改写原 QA Run。 */
+/** 异步消费学习 Outbox；一次调用 Mem0 2.0.17 原生 infer，不做 QA 分类或二次提示词抽取。 */
 @Component
 public class MemoryLearningWorker {
     private static final Logger LOGGER = LoggerFactory.getLogger(MemoryLearningWorker.class);
-    private static final int MAX_EXTRACTION_CHARS = 100_000;
+    private static final int MAX_LEARNING_CHARS = 120_000;
 
     private final QaMemoryRepository repository;
     private final MemoryLearningEvidenceRepository evidenceRepository;
     private final MemoryDocumentStore documents;
-    private final MemoryModelGrantService modelGrants;
-    private final MemoryLearningCandidateService candidates;
-    private final QaTaskClassifier taskClassifier;
+    private final MemorySafetyPolicy safety;
     private final QaMemoryProperties properties;
     private final Clock clock;
     private final String workerId;
@@ -44,12 +50,9 @@ public class MemoryLearningWorker {
             QaMemoryRepository repository,
             MemoryLearningEvidenceRepository evidenceRepository,
             MemoryDocumentStore documents,
-            MemoryModelGrantService modelGrants,
-            MemoryLearningCandidateService candidates,
-            QaTaskClassifier taskClassifier,
+            MemorySafetyPolicy safety,
             QaMemoryProperties properties) {
-        this(repository, evidenceRepository, documents, modelGrants, candidates,
-                taskClassifier, properties, Clock.systemUTC(),
+        this(repository, evidenceRepository, documents, safety, properties, Clock.systemUTC(),
                 "mlw_" + UUID.randomUUID().toString().replace("-", ""),
                 Executors.newVirtualThreadPerTaskExecutor());
     }
@@ -58,9 +61,7 @@ public class MemoryLearningWorker {
             QaMemoryRepository repository,
             MemoryLearningEvidenceRepository evidenceRepository,
             MemoryDocumentStore documents,
-            MemoryModelGrantService modelGrants,
-            MemoryLearningCandidateService candidates,
-            QaTaskClassifier taskClassifier,
+            MemorySafetyPolicy safety,
             QaMemoryProperties properties,
             Clock clock,
             String workerId,
@@ -68,9 +69,7 @@ public class MemoryLearningWorker {
         this.repository = Objects.requireNonNull(repository);
         this.evidenceRepository = Objects.requireNonNull(evidenceRepository);
         this.documents = Objects.requireNonNull(documents);
-        this.modelGrants = Objects.requireNonNull(modelGrants);
-        this.candidates = Objects.requireNonNull(candidates);
-        this.taskClassifier = Objects.requireNonNull(taskClassifier);
+        this.safety = Objects.requireNonNull(safety);
         this.properties = Objects.requireNonNull(properties);
         this.clock = Objects.requireNonNull(clock);
         this.workerId = Objects.requireNonNull(workerId);
@@ -99,7 +98,7 @@ public class MemoryLearningWorker {
                     job.jobId(), workerId, code, now.plus(backoff(job.attempts())), now,
                     properties.getLearningMaxAttempts());
             LOGGER.warn(
-                    "QA memory learning deferred, jobId={}, runId={}, attempt={}, errorCode={}, exceptionType={}",
+                    "Memory learning deferred, jobId={}, runId={}, attempt={}, errorCode={}, exceptionType={}",
                     job.jobId(), job.runId(), job.attempts() + 1, code,
                     failure.getClass().getSimpleName());
         }
@@ -109,45 +108,90 @@ public class MemoryLearningWorker {
         if (!properties.isEnabled() || !repository.isWhitelisted(job.userId())) {
             return;
         }
+        // 兼容升级前可能遗留的无 Application 任务：完成但不学习，禁止自动生成个人全局记忆。
+        if (job.applicationId() == null || job.applicationId().isBlank()) {
+            return;
+        }
         MemoryLearningEvidence evidence = evidenceRepository.findByRunId(job.runId())
                 .orElseThrow(() -> new LearningFailure("EVIDENCE_NOT_READY"));
-        List<MemoryDocumentStore.ExtractionMessage> messages = boundedMessages(evidence.messages());
+        List<MemoryDocumentStore.Message> messages = boundedMessages(evidence.messages());
         if (messages.stream().noneMatch(message -> "user".equals(message.role()))
                 || messages.stream().noneMatch(message -> "assistant".equals(message.role()))) {
             throw new LearningFailure("EVIDENCE_NOT_READY");
         }
-        String prompt = messages.stream()
-                .filter(message -> "user".equals(message.role()))
-                .map(MemoryDocumentStore.ExtractionMessage::content)
-                .reduce((left, right) -> left + "\n" + right)
-                .orElse("");
-        QaTaskType taskType = taskClassifier.classify(prompt);
-        String model = modelGrants.selectModel(job)
-                .orElseThrow(() -> new LearningFailure("CHAT_MODEL_UNAVAILABLE"));
-        MemoryModelGrantService.IssuedGrant grant = modelGrants.issue(job.userId(), job.runId(), model);
-        List<MemoryDocumentStore.ExtractedCandidate> extracted = documents.extract(
-                new MemoryDocumentStore.ExtractCommand(
-                        model, grant.token(), job.userId(), job.runId(), job.sessionId(),
-                        job.applicationId(), taskType, messages));
-        for (MemoryDocumentStore.ExtractedCandidate candidate : extracted) {
-            candidates.apply(job, candidate);
+        MemorySettings settings = repository.loadSettings();
+        if (settings.primaryChatModelId() == null || settings.primaryChatModelId().isBlank()) {
+            throw new LearningFailure("CHAT_MODEL_UNAVAILABLE");
+        }
+        MemoryScope scope = MemoryScope.PERSONAL_APPLICATION;
+        MemoryDocumentStore.RequestContext context = new MemoryDocumentStore.RequestContext(
+                job.userId(), job.runId(), job.sessionId(), "learn:" + job.jobId());
+        List<MemoryDocumentStore.StoredDocument> learned = documents.add(new MemoryDocumentStore.AddMemories(
+                messages, true, settings.primaryChatModelId(), context,
+                new MemoryDocumentStore.OwnerScope(
+                        scope.name(), "platform:" + job.userId(), null, job.applicationId()),
+                Map.of("source", MemorySource.NATIVE.name())));
+        for (MemoryDocumentStore.StoredDocument document : learned) {
+            persistNativeMemory(job, scope, document);
         }
     }
 
-    private List<MemoryDocumentStore.ExtractionMessage> boundedMessages(
+    private void persistNativeMemory(
+            MemoryLearningJob job,
+            MemoryScope scope,
+            MemoryDocumentStore.StoredDocument document) {
+        String content = safety.requireSafeContent(document.content());
+        OptionalMemory existing = existing(document.id(), job.runId());
+        if (existing.alreadyObserved()) {
+            return;
+        }
+        Instant now = clock.instant();
+        if (existing.memory() != null) {
+            repository.insertEvidence(evidence(job, existing.memory().memoryId(), content, now));
+            return;
+        }
+        QaMemory memory = new QaMemory(
+                new MemoryId("mem_" + UUID.randomUUID().toString().replace("-", "")),
+                document.id(), scope, job.userId(), job.applicationId(), MemoryStatus.ACTIVE,
+                MemorySource.NATIVE, List.of(QaTaskType.GENERAL), safety.displaySummary(content),
+                0.0d, 1, 1, now, now, now, null, job.userId(), 0L,
+                "SYNCED", now, now);
+        repository.insertMemory(memory);
+        repository.insertEvidence(evidence(job, memory.memoryId(), content, now));
+    }
+
+    private OptionalMemory existing(String logicalMemoryId, String runId) {
+        QaMemory memory = repository.findByMem0MemoryId(logicalMemoryId).orElse(null);
+        if (memory == null) {
+            return new OptionalMemory(null, false);
+        }
+        boolean observed = repository.listEvidence(memory.memoryId()).stream()
+                .anyMatch(item -> runId.equals(item.runId()));
+        return new OptionalMemory(memory, observed);
+    }
+
+    private MemoryEvidence evidence(
+            MemoryLearningJob job, MemoryId memoryId, String content, Instant now) {
+        return new MemoryEvidence(
+                "mev_" + UUID.randomUUID().toString().replace("-", ""),
+                memoryId, job.runId(), job.sessionId(), job.userId(), MemorySource.NATIVE,
+                safety.evidenceSummary(content), now);
+    }
+
+    private List<MemoryDocumentStore.Message> boundedMessages(
             List<MemoryLearningEvidence.Message> source) {
-        List<MemoryDocumentStore.ExtractionMessage> result = new ArrayList<>();
-        int remaining = MAX_EXTRACTION_CHARS;
+        List<MemoryDocumentStore.Message> result = new ArrayList<>();
+        int remaining = MAX_LEARNING_CHARS;
         for (MemoryLearningEvidence.Message message : source) {
             if (!("user".equals(message.role()) || "assistant".equals(message.role()))
                     || message.content() == null || message.content().isBlank() || remaining <= 0) {
                 continue;
             }
-            String content = message.content().trim();
+            String content = message.content();
             if (content.length() > remaining) {
                 content = content.substring(0, remaining);
             }
-            result.add(new MemoryDocumentStore.ExtractionMessage(message.role(), content));
+            result.add(new MemoryDocumentStore.Message(message.role(), content));
             remaining -= content.length();
         }
         return List.copyOf(result);
@@ -171,6 +215,9 @@ public class MemoryLearningWorker {
     @PreDestroy
     void close() {
         executor.close();
+    }
+
+    private record OptionalMemory(QaMemory memory, boolean alreadyObserved) {
     }
 
     private static final class LearningFailure extends RuntimeException {

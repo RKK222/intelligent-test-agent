@@ -7677,3 +7677,47 @@
   `/global/config` 返回 200；manager 曾因后端连接切换断开一次，10 秒后自动恢复且没有重连循环。
 - 本次不变更 HTTP API、RunEvent、共享 DTO、数据库/Flyway、后端服务、权限模型或安全边界，未修改 `.env*`、generated SDK、
   OpenCode 源码，也未推送、创建 PR 或合并分支。
+
+## 2026-08-10 - 通用化长期记忆并增加多节点与 CPU Embedding 热备
+
+### Why
+
+- 原实现绑定 QA 任务分类、自定义抽取提示词和单节点本地向量模型，无法直接复用 Mem0 原生记忆能力，也无法满足企业无
+  Embedding、Mem0 横向扩容和模型故障切换要求。
+- 记忆证据只展示摘要，缺少原始 Session 标题、ID 与所有者访问入口；既有离线包也没有独立记忆库、CPU Embedding 和多副本
+  Mem0 的可审计交付物。
+
+### What
+
+- 将服务锁定到 `mem0ai==2.0.17`，学习只调用一次原生 `add(messages, infer=true)` 且不传自定义 prompt；删除 QA 分类、候选、
+  自定义置信度和语义过滤，Java 统一改用 `/api/internal/platform/memory/v1/**`，旧 `/qa-memory/v1/**` 明确返回
+  `410 API_GONE`。
+- 新增独立 pgvector/Alembic 控制面、三副本无状态 Mem0/VIP、稳定 `logicalMemoryId`、双 profile 隔离 collection、advisory lock、
+  幂等 outbox 投影与 RRF 去重；企业向量不可用时使用 CPU profile，双 profile 都失败时保持 2 秒 fail-open。
+- 将固定 revision 的 `BAAI/bge-small-zh-v1.5` 拆成独立 OpenAI-compatible CPU 服务，提供批量 embedding、模型/类型校验、
+  L2 归一化、仅 query 加前缀、有界并发和 API Key 鉴权；Mem0 到 Java 模型网关使用带 nonce 的 HMAC。
+- 证据补齐 `sessionId/sessionTitle/transcriptAvailable/runId` 并复用 `/s/{sessionId}` 所有者权限；团队记忆保持手工提交和
+  APP_ADMIN 审核。同步前端记忆中心、管理员 profile/积压展示、HTTP/API/事件/数据库/部署/安全/测试文档。
+- 新增开发集群、真实浏览器 E2E 场景、并发/故障/存储审计脚本，以及 linux/amd64 Mem0、CPU BGE、pgvector、Nginx 离线镜像、
+  SHA256、SPDX SBOM、许可证、模型身份和 Alembic 交付清单；不改已执行 QA migration 的字节和 checksum。
+
+### How
+
+- Python：记忆服务 25 passed / 1 integration skipped，Embedding 4 passed；另用真实 PostgreSQL/pgvector 跑集成测试 1 passed。
+- Java：JDK 25 下 model-gateway 13、memory 26、API 9 项通过；另用临时真实 PostgreSQL 跑 MyBatis/Flyway 集成测试 1 passed。
+  更宽 Maven reactor 到无关 `test-agent-xxl-job-integration` 时，被 Docker/QEMU 下 MySQL 8.4 启动超时阻断。
+- 前端：workspace typecheck、production build 和全量 Vitest 通过（122 files，1891 passed / 1 skipped）；记忆定向 3 files / 10 tests
+  通过，Playwright 能发现 4 个真实记忆场景，但当前没有企业地址、账号和节点控制 hook，未伪造企业浏览器验收结果。
+- 真实启动本地独立 pgvector、CPU BGE、Nginx VIP 和三个 Mem0 副本：CPU 批量结果均为 512 维且范数约 1；逐台停止副本时 VIP
+  连续可用，恢复后三副本健康；存储审计确认版本单调、无投影积压/原始对话字段、只读容器文件系统和日志 canary 泄漏。
+- `memory-dev-services-test.sh`、离线包静态测试、AI 文档校验、shell 语法、`git diff --check` 与全部离线 SHA256/SBOM/镜像架构/
+  模型身份/Alembic head 校验通过。最终完整离线包位于 `/private/tmp/testagent-memory-offline-final.ZtHLJ4/memory`，约 1.8G。
+
+### Result
+
+- 通用记忆、多节点共享存储、CPU Embedding 单 profile/双集合热备、证据回链和离线交付代码已实现并在本机真实数据面验证。
+- 尚未完成企业真实 `.2 → .4/.114 → Mem0 VIP → 记忆库 → Java 模型网关 → 企业模型/CPU BGE` 浏览器验收和批准容量压测；
+  发布白名单不能据此开启，必须在拿到目标环境参数后执行脚本中的全量门禁。
+- 未修改 `.env*`、generated SDK、OpenCode 源码或工作区中同期的 Figma/Git 面板与聊天重发改动；旧 migration checksum 保持
+  `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`，新增前向 migration SHA-256 为
+  `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`。

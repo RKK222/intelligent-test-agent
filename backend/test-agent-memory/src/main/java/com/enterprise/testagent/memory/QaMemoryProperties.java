@@ -1,33 +1,32 @@
 package com.enterprise.testagent.memory;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
-/** 长期记忆统一策略配置；阈值、预算和超时不得散落在业务分支中。 */
+/** 通用长期记忆配置；检索总预算、学习超时和 HMAC 边界集中管理。 */
 @Component
 @ConfigurationProperties(prefix = "test-agent.memory")
 public class QaMemoryProperties {
     private boolean enabled;
     private String serviceUrl = "http://127.0.0.1:18888";
     private String serviceApiKey = "";
-    private Duration requestTimeout = Duration.ofSeconds(5);
-    private Duration extractionTimeout = Duration.ofSeconds(130);
-    private Duration retrievalTimeout = Duration.ofMillis(600);
-    private Duration grantTtl = Duration.ofMinutes(2);
-    private Duration implicitWindow = Duration.ofDays(90);
-    private int implicitSessionThreshold = 3;
-    private int teamSessionThreshold = 3;
-    private int teamUserThreshold = 2;
+    private Duration requestTimeout = Duration.ofSeconds(2);
+    private Duration learningTimeout = Duration.ofSeconds(130);
+    private Duration retrievalTimeout = Duration.ofSeconds(2);
     private int maxInjectedMemories = 6;
     private int maxContextTokens = 800;
-    private int retrievalTopKPerScope = 12;
-    private double retrievalThreshold = 0.20d;
-    private double candidateMatchThreshold = 0.86d;
+    private int retrievalTopK = 20;
+    private double retrievalThreshold = 0.10d;
     private int learningBatchSize = 8;
     private int learningMaxAttempts = 8;
     private Duration learningPollInterval = Duration.ofSeconds(5);
     private Duration learningLease = Duration.ofMinutes(5);
+    private String modelGatewayHmacClientId = "mem0-cluster";
+    private String modelGatewayHmacSecret = "";
+    private Duration modelGatewayHmacClockSkew = Duration.ofSeconds(30);
+    private Duration modelGatewayNonceTtl = Duration.ofMinutes(2);
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -36,31 +35,19 @@ public class QaMemoryProperties {
     public String getServiceApiKey() { return serviceApiKey; }
     public void setServiceApiKey(String serviceApiKey) { this.serviceApiKey = serviceApiKey; }
     public Duration getRequestTimeout() { return requestTimeout; }
-    public void setRequestTimeout(Duration requestTimeout) { this.requestTimeout = positive(requestTimeout, "requestTimeout"); }
-    public Duration getExtractionTimeout() { return extractionTimeout; }
-    public void setExtractionTimeout(Duration extractionTimeout) { this.extractionTimeout = positive(extractionTimeout, "extractionTimeout"); }
+    public void setRequestTimeout(Duration value) { requestTimeout = positive(value, "requestTimeout"); }
+    public Duration getLearningTimeout() { return learningTimeout; }
+    public void setLearningTimeout(Duration value) { learningTimeout = positive(value, "learningTimeout"); }
     public Duration getRetrievalTimeout() { return retrievalTimeout; }
-    public void setRetrievalTimeout(Duration retrievalTimeout) { this.retrievalTimeout = positive(retrievalTimeout, "retrievalTimeout"); }
-    public Duration getGrantTtl() { return grantTtl; }
-    public void setGrantTtl(Duration grantTtl) { this.grantTtl = positive(grantTtl, "grantTtl"); }
-    public Duration getImplicitWindow() { return implicitWindow; }
-    public void setImplicitWindow(Duration implicitWindow) { this.implicitWindow = positive(implicitWindow, "implicitWindow"); }
-    public int getImplicitSessionThreshold() { return implicitSessionThreshold; }
-    public void setImplicitSessionThreshold(int value) { implicitSessionThreshold = positive(value, "implicitSessionThreshold"); }
-    public int getTeamSessionThreshold() { return teamSessionThreshold; }
-    public void setTeamSessionThreshold(int value) { teamSessionThreshold = positive(value, "teamSessionThreshold"); }
-    public int getTeamUserThreshold() { return teamUserThreshold; }
-    public void setTeamUserThreshold(int value) { teamUserThreshold = positive(value, "teamUserThreshold"); }
+    public void setRetrievalTimeout(Duration value) { retrievalTimeout = positive(value, "retrievalTimeout"); }
     public int getMaxInjectedMemories() { return maxInjectedMemories; }
     public void setMaxInjectedMemories(int value) { maxInjectedMemories = positive(value, "maxInjectedMemories"); }
     public int getMaxContextTokens() { return maxContextTokens; }
     public void setMaxContextTokens(int value) { maxContextTokens = positive(value, "maxContextTokens"); }
-    public int getRetrievalTopKPerScope() { return retrievalTopKPerScope; }
-    public void setRetrievalTopKPerScope(int value) { retrievalTopKPerScope = positive(value, "retrievalTopKPerScope"); }
+    public int getRetrievalTopK() { return retrievalTopK; }
+    public void setRetrievalTopK(int value) { retrievalTopK = positive(value, "retrievalTopK"); }
     public double getRetrievalThreshold() { return retrievalThreshold; }
     public void setRetrievalThreshold(double value) { retrievalThreshold = probability(value, "retrievalThreshold"); }
-    public double getCandidateMatchThreshold() { return candidateMatchThreshold; }
-    public void setCandidateMatchThreshold(double value) { candidateMatchThreshold = probability(value, "candidateMatchThreshold"); }
     public int getLearningBatchSize() { return learningBatchSize; }
     public void setLearningBatchSize(int value) { learningBatchSize = positive(value, "learningBatchSize"); }
     public int getLearningMaxAttempts() { return learningMaxAttempts; }
@@ -69,6 +56,24 @@ public class QaMemoryProperties {
     public void setLearningPollInterval(Duration value) { learningPollInterval = positive(value, "learningPollInterval"); }
     public Duration getLearningLease() { return learningLease; }
     public void setLearningLease(Duration value) { learningLease = positive(value, "learningLease"); }
+    public String getModelGatewayHmacClientId() { return modelGatewayHmacClientId; }
+    public void setModelGatewayHmacClientId(String value) { modelGatewayHmacClientId = required(value, "modelGatewayHmacClientId"); }
+    public String getModelGatewayHmacSecret() { return modelGatewayHmacSecret; }
+    public void setModelGatewayHmacSecret(String value) { modelGatewayHmacSecret = value == null ? "" : value; }
+    public Duration getModelGatewayHmacClockSkew() { return modelGatewayHmacClockSkew; }
+    public void setModelGatewayHmacClockSkew(Duration value) {
+        modelGatewayHmacClockSkew = positive(value, "modelGatewayHmacClockSkew");
+    }
+    public Duration getModelGatewayNonceTtl() { return modelGatewayNonceTtl; }
+    public void setModelGatewayNonceTtl(Duration value) { modelGatewayNonceTtl = positive(value, "modelGatewayNonceTtl"); }
+
+    public byte[] requireModelGatewayHmacSecret() {
+        byte[] secret = modelGatewayHmacSecret.getBytes(StandardCharsets.UTF_8);
+        if (secret.length < 32) {
+            throw new IllegalStateException("启用长期记忆时 model-gateway-hmac-secret 至少需要 32 字节");
+        }
+        return secret;
+    }
 
     private static Duration positive(Duration value, String field) {
         if (value == null || value.isZero() || value.isNegative()) {
@@ -89,5 +94,12 @@ public class QaMemoryProperties {
             throw new IllegalArgumentException(field + " must be between 0 and 1");
         }
         return value;
+    }
+
+    private static String required(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " must not be blank");
+        }
+        return value.trim();
     }
 }

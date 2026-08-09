@@ -80,19 +80,10 @@ export type MemoryStatus =
   | "REJECTED"
   | "ARCHIVED"
   | "SUPERSEDED";
-export type MemorySource = "MANUAL" | "EXPLICIT" | "IMPLICIT" | "TEAM_PROPOSAL" | "ADMIN_CREATED";
-export type QaTaskType =
-  | "GENERAL"
-  | "TEST_CASE_GENERATION"
-  | "TEST_DATA_PREPARATION"
-  | "REQUIREMENT_ANALYSIS"
-  | "TEST_PLAN_DESIGN"
-  | "DEFECT_ANALYSIS"
-  | "ROOT_CAUSE_ANALYSIS"
-  | "AUTOMATION_TESTING"
-  | "RISK_ANALYSIS"
-  | "TEST_REPORTING"
-  | "RESULT_ACCEPTANCE";
+export type MemorySource =
+  | "MANUAL"
+  | "NATIVE"
+  | "TEAM_PROPOSAL";
 
 /** Mem0 正文不可用时 content 只承载治理摘要，contentAvailable 明确标识降级。 */
 export type MemoryView = {
@@ -102,13 +93,9 @@ export type MemoryView = {
   applicationId?: string | null;
   status: MemoryStatus;
   source: MemorySource;
-  taskTypes: QaTaskType[];
   content: string;
   contentAvailable: boolean;
   displaySummary: string;
-  confidence: number;
-  distinctSessionCount: number;
-  distinctUserCount: number;
   version: number;
   confirmedAt?: string | null;
   createdAt: string;
@@ -118,8 +105,10 @@ export type MemoryView = {
 export type MemoryEvidenceView = {
   evidenceId: string;
   memoryId: string;
-  runId: string;
-  sessionId: string;
+  runId?: string | null;
+  sessionId?: string | null;
+  sessionTitle?: string | null;
+  transcriptAvailable: boolean;
   source: MemorySource;
   summary: string;
   observedAt: string;
@@ -150,23 +139,31 @@ export type MemorySkillProposalView = {
   updatedAt: string;
 };
 
-export type EmbeddingProfile = {
+export type EmbeddingProfileHealth = {
+  profileKey: string;
   provider: string;
   model: string;
-  revision: string;
   dimension: number;
-  device: string;
-  normalized: boolean;
-  collectionVersion: string;
+  fingerprint: string;
+  collection: string;
+  primary: boolean;
+  available: boolean;
 };
 
-export type MemoryServiceHealth = { available: boolean; status: string; version?: string | null };
+export type MemoryProjectionBacklog = { pending: number; processing: number; dead: number };
+export type MemoryServiceHealth = {
+  available: boolean;
+  status: string;
+  version?: string | null;
+  profiles: EmbeddingProfileHealth[];
+  projectionBacklog: MemoryProjectionBacklog;
+};
 export type MemoryAdminHealth = {
   enabled: boolean;
   memoryService: MemoryServiceHealth;
-  embedding: EmbeddingProfile;
   primaryChatModelId?: string | null;
-  currentRunModelFallbackEnabled: boolean;
+  primaryEmbeddingModelId?: string | null;
+  cpuEmbeddingModelId: string;
   queuePending: number;
   queueProcessing: number;
   queueDead: number;
@@ -174,7 +171,8 @@ export type MemoryAdminHealth = {
 
 export type MemorySettingsView = {
   primaryChatModelId?: string | null;
-  currentRunModelFallbackEnabled: boolean;
+  primaryEmbeddingModelId?: string | null;
+  cpuEmbeddingModelId: string;
   version: number;
   updatedByUserId: string;
   updatedAt: string;
@@ -1885,6 +1883,7 @@ export type InternalModelProviderModel = {
   upstreamModelId: string;
   displayName: string;
   contextLimit?: number | null;
+  embeddingDimension?: number | null;
   enabled: boolean;
   declaredCapabilities: InternalModelCapability[];
   probedCapabilities: InternalModelCapability[];
@@ -1899,6 +1898,7 @@ export type InternalModelProviderModelUpdatePayload = {
     upstreamModelId: string;
     displayName: string;
     contextLimit?: number | null;
+    embeddingDimension?: number | null;
     enabled?: boolean;
     capabilities: InternalModelCapability[];
   }>;

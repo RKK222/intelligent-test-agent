@@ -227,29 +227,37 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
-  it("opens the QA memory health and rollout panel from system management", async () => {
+  it("opens the generic memory health and rollout panel from system management", async () => {
     const backendApi = api({
       getQaMemoryAdminHealth: vi.fn().mockResolvedValue({
         enabled: true,
-        memoryService: { available: true, status: "UP", version: "0.1.0" },
-        embedding: {
-          provider: "LOCAL_BGE",
-          model: "BAAI/bge-small-zh-v1.5",
-          revision: "fixed",
-          dimension: 512,
-          device: "cpu",
-          normalized: true,
-          collectionVersion: "v1"
+        memoryService: {
+          available: true,
+          status: "UP",
+          version: "2.0.17",
+          profiles: [{
+            profileKey: "cpu:bge-small-zh-v1.5:512:fixed",
+            provider: "CPU",
+            model: "memory-bge-small-zh-v1.5",
+            dimension: 512,
+            fingerprint: "fixed",
+            collection: "memory_cpu_v1",
+            primary: true,
+            available: true
+          }],
+          projectionBacklog: { pending: 0, processing: 0, dead: 0 }
         },
         primaryChatModelId: "enterprise/chat",
-        currentRunModelFallbackEnabled: false,
+        primaryEmbeddingModelId: null,
+        cpuEmbeddingModelId: "memory-bge-small-zh-v1.5",
         queuePending: 0,
         queueProcessing: 0,
         queueDead: 0
       }),
       getQaMemorySettings: vi.fn().mockResolvedValue({
         primaryChatModelId: "enterprise/chat",
-        currentRunModelFallbackEnabled: false,
+        primaryEmbeddingModelId: null,
+        cpuEmbeddingModelId: "memory-bge-small-zh-v1.5",
         version: 1,
         updatedByUserId: "usr_admin",
         updatedAt: "2026-08-09T00:00:00Z"

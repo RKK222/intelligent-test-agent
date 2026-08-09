@@ -1,185 +1,301 @@
-# QA Agent 长期记忆 V1 部署与验收
+# 通用长期记忆、多节点 Mem0 与 CPU Embedding 部署
 
-本文档说明 QA Agent 长期记忆的数据边界、本地启动、企业部署、健康检查、灰度和回滚。V1 的目标是让 Agent 长期复用测试人员稳定的工作习惯，不是新建一份聊天记录或项目知识库。
+本文档是通用长期记忆的稳定部署、扩容、离线交付、验收和回滚入口。旧名称中的 `qa` 只作为已执行数据库表和 Java 类名的兼容痕迹保留，不再表示产品能力或 API 语义。
 
-## 能力边界
+## 部署拓扑与事实源
 
-| 信息类型 | V1 事实源与处理方式 | 为什么不混存 |
+PostgreSQL、Java、Mem0 和 CPU Embedding 都是独立进程/容器，不能互相打进同一镜像或共享本地数据目录。
+
+```mermaid
+flowchart LR
+    UI["浏览器 / 前端 .2"] --> LBJ["Nginx"]
+    LBJ --> J1["Java .4"]
+    LBJ --> J2["Java .114"]
+    J1 --> PPG["平台 PostgreSQL .147"]
+    J2 --> PPG
+    J1 --> MVIP["Mem0 VIP / DNS"]
+    J2 --> MVIP
+    MVIP --> M1["Mem0 节点 1"]
+    MVIP --> M2["Mem0 节点 2..N"]
+    M1 --> MPG["独立记忆 PostgreSQL / pgvector"]
+    M2 --> MPG
+    M1 -->|"HMAC"| MGW["Java 模型网关"]
+    M2 -->|"HMAC"| MGW
+    MGW --> CHAT["企业 CHAT 模型"]
+    MGW --> EE["企业 Embedding（可选）"]
+    MGW --> CPU["独立 CPU BGE 服务"]
+```
+
+| 数据 | 唯一事实源 | 禁止事项 |
 |---|---|---|
-| 原始聊天 | 继续由 OpenCode Session 和现有会话恢复链路保存；学习 worker 仅在处理当前 Run 时瞬时读取用户输入与最终回答 | 聊天记录是可回放的业务证据，而记忆是经提取、确认和版本化的派生结论；复制会导致隐私边界和删除语义混乱 |
-| 个人记忆 | Mem0 保存派生正文、向量和历史；平台 PostgreSQL 保存用户、全局/应用范围、状态、证据摘要与乐观版本 | 这是“这个测试人员怎么工作”的可治理事实 |
-| 团队记忆 | 仅在 Application 边界内生效；普通成员提案，`APP_ADMIN` 审核 | 团队规则不应被写成某个人的画像，也不能跨 Application 泄漏 |
-| 项目业务知识 | 不进入本系统，后续由独立项目知识库管理 | 业务事实的生命周期、权限和召回规则与个人习惯不同 |
-| 通用测试方法 | 由已生效记忆发起 Skill 提案，审核后生成可编辑 `SKILL.md` 草稿，继续走现有 Git/发布/Hub 流程 | 可复用方法是可发布能力，不应无审核地变成所有人的个人画像 |
-| 静态用户画像 | 只能作为页面汇总视图，从当前有效记忆即时投影 | 汇总文本不具备证据、作用域、版本和冲突语义，不能作为事实源 |
+| Session、原始 USER/ASSISTANT、Run | 平台 PostgreSQL 与既有 Session 恢复链 | 不复制到 Mem0、记忆库、outbox、日志或容器文件系统 |
+| 范围、状态、证据引用/摘要、审核、学习队列、使用记录、白名单、设置 | 平台 PostgreSQL `.147` | Java 不把向量或 Mem0 history 放入平台库 |
+| 派生记忆正文、逻辑 ID、版本、幂等、投影状态/outbox、Mem0 history、向量集合 | 独立记忆 PostgreSQL/pgvector | 不与平台库共库；Java 不直连 |
+| BGE 权重和推理 | 独立 CPU Embedding 镜像/容器 | 不打进 Mem0 镜像；运行时不访问 Hugging Face |
 
-Mem0 不保存原始消息。定制 history manager 的 `save_messages()` 为空操作，`get_last_messages()` 固定返回空；带鉴权的 readiness 必须同时报告 `rawMessageCount=0`。页面上的证据摘要最多 200 字，用于人工判断，不是聊天正文镜像。
+证据只保存 `sessionId`、`sessionTitle`、`runId`、最多 200 字摘要和时间。所有授权查看者可见标题和 ID；只有 Session owner 能通过既有 `/s/{sessionId}` 打开原始对话。团队成员不能凭团队记忆读取别人的原文。
 
-## 运行链路
+## 通用学习与检索
+
+- Python 锁定 `mem0ai==2.0.17`，Java 只经 REST 调用 `/memories`、`/search`、`PUT/DELETE /memories/{id}` 和 `/memories/{id}/history`。
+- 自动学习把能解析到当前 Application 的成功人工根 Run 的 USER/ASSISTANT 作为一次请求传给 `Mem0.add(messages, infer=true)`；无法解析 Application 时不学习，禁止自动扩大成个人全局。请求不配置自定义抽取 prompt/custom instructions，不做 QA 任务分类、显式/隐式/临时判定、置信度阈值或内容语义过滤。
+- 输入消息只存在请求内存中；Mem0 原生结果作为个人记忆立即生效。默认是当前用户 + 当前 Application，可由 owner 手工提升为个人全局。
+- 团队记忆只能手工提交并由 `APP_ADMIN` 审核。个人记忆“提交为团队记忆”会复制安全的 Session/Run 引用和摘要，不复制聊天正文，也不触发第二次原生抽取。
+- Run 前一次检索个人全局、当前 Application 个人和当前 Application 团队三个 scope。Java 总预算为 2 秒，最多注入 6 条、约 800 tokens；失败或超时返回空上下文继续 Run。
+- 只有实际注入的条目写 Run usage，页面才显示“参考了 N 条记忆”。本功能不新增 RunEvent 类型。
+
+## 双 Embedding profile 与一致性
+
+CPU profile 固定为：
+
+- model：`BAAI/bge-small-zh-v1.5`
+- revision：`7999e1d3359715c523056ef9478215996d62a620`
+- dimension：512
+- L2 normalization：开启
+- query prefix：`为这个句子生成表示以用于检索相关文章：`
+- identity：`cpu:bge-small-zh-v1.5:512:7999e1d3359715c523056ef9478215996d62a620`
+
+CPU 服务提供 `POST /v1/embeddings`、`GET /health`、`GET /ready`。请求必须带模型供应商 API key 和 `X-Embedding-Input-Type: query|document`；仅 `query` 增加前缀。服务限制批量、字符数、队列等待和有界并发。
+
+企业没有 embedding 时，只创建 CPU 集合。配置企业 embedding 时创建两个不可混写的集合：
 
 ```text
-成功的人工根 Run
-  -> 平台 PostgreSQL 学习 Outbox（只存定位字段）
-  -> worker 从现有 session_messages 瞬时读取 USER/ASSISTANT
-  -> 固定内部 CHAT 模型，或经目录与 CHAT 探测确认的当前内部模型
-  -> 用户 + Run + 模型 + TTL 绑定的一次性 mfg_ 授权
-  -> memory-service 提取候选
-  -> 平台阈值、范围、冲突和审核治理
-  -> Mem0 保存已治理的派生记忆
+enterprise:{modelId}:{dimension}:{fingerprint}
+cpu:bge-small-zh-v1.5:512:{revision}
 ```
 
-Run 开始前分别搜索个人全局、个人 Application 和团队 Application，Java 再次校验白名单、成员关系、状态和任务类型。检索总预算默认 600 ms，最多 6 条、约 800 tokens；超时或任一依赖失败时继续原 Run。只有实际写入使用记录的记忆才注入 `AgentStartRunCommand.system`，当前用户要求始终优先。
+管理页保存的是 Java 模型网关的运行许可，Mem0 副本从外置 `memory.env` 读取实际 profile 身份；两处的 `modelId`、维度和 fingerprint 必须一致。启用企业 profile 时，先在管理页保存并验证模型，再滚动写入 `memory.env`、逐副本重启并核对 `/ready`；停用时顺序相反，先把 Mem0 副本滚动为 CPU-only 并核对可用性，再清空管理页配置。变更 modelId、维度或 fingerprint 会创建新 collection，禁止原地复用旧 collection。这个双阶段顺序允许切换窗口继续使用 CPU profile，并避免网关先拒绝仍在运行的企业 profile。
 
-## 固定数据面
+一次写入只执行一次原生抽取：先探测企业 profile，企业不可用才在 CPU profile 抽取；进入 `infer=true` 前把 at-most-once 状态持久化。节点若在向量写入后退出，重试按 operationId 从共享 collection 恢复结果；若 LLM 已开始但没有可恢复向量，本次按空结果完成，禁止再次抽取。幂等绑定还包含 owner 分区、操作类型、目标和请求摘要，同一 key 不能改写另一正文或跨租户复用。原始结果以 `infer=false` 投影到另一集合。每条记录使用稳定 `logicalMemoryId`，共享控制表记录每个 profile 的 Mem0 ID、版本和状态。投影失败写共享 PostgreSQL outbox，恢复后按版本补齐；更新、删除和范围提升同样投影。每个 Mem0 副本还会周期扫描“共享逻辑版本 × 当前 profile”差异并幂等补发 outbox，覆盖逻辑提交后进程退出的缝隙，也会把存量逻辑记忆自动回填到后来启用的新企业 collection。单个投影任务连续 12 次失败进入 `DEAD`，保留可观测状态并冷却 5 分钟；若共享版本差异仍存在，巡检会自动重开同一幂等任务，provider 恢复后无需人工补数。
 
-- Mem0：`mem0ai==2.0.3`。
-- Embedding provider：`LOCAL_BGE`。
-- 模型：`BAAI/bge-small-zh-v1.5`。
-- revision：`7999e1d3359715c523056ef9478215996d62a620`。
-- 运行方式：CPU、512 维、L2 归一化，中文 query 使用固定检索前缀。
-- 模型目录：构建期写入镜像的 `/models/BAAI__bge-small-zh-v1.5`；运行期开启 HuggingFace/Transformers offline 与 Mem0 telemetry 禁用。
-- 向量库：独立 PostgreSQL + pgvector，不与平台 PostgreSQL 共库。
-- 集合名：provider、model、revision、dimension、collection version 和 profile 摘要共同决定。
+检索并行请求所有可用 profile，按 `logicalMemoryId` 去重并用 Reciprocal Rank Fusion 合并名次，不比较跨模型原始相似度。单 profile embedding 默认超时 1.5 秒、可配硬上限 1.8 秒，为 RRF 和 HTTP 返回预留预算；任一 profile 成功即可返回，全部失败才由 Java 的 2 秒总预算 fail-open。
 
-未来企业 Embedding 可用时，必须新增 Provider 和新集合，运行双写/回填与对比验证后再切换；禁止用新模型直接覆盖 `LOCAL_BGE` 集合。
+同一用户/Application 或团队分区持有 PostgreSQL advisory lock，保证写入和版本顺序；不同分区可并行。Mem0 副本无本地 history、幂等或 outbox，扩缩容不迁移数据。Alembic 迁移必须先于任一副本启动，且只能有一个 migration job；副本不能自行建表。
 
-## 本地启动
+由于 Mem0 2.0.17 原生抽取的既有事实查询只识别 `user_id/agent_id/run_id`，Application 个人记忆会额外携带由 Application ID 单向摘要生成的内部 `run_id` 作用域键。它不是平台 Run ID，也不包含对话内容；写入、恢复、投影和检索使用同一稳定键，从而保证不同 Application 之间不会互相去重或召回。
 
-`deploy/dev/memory-compose.yml` 是个人开发专用 Compose，固定工程名 `test-agent-memory-dev`，只管理 `memory-postgres` 和 `memory-service`。默认不启动，也不探测、停止已存在的记忆容器。
+## 安全门禁与限值
 
-在独立 worktree 中使用现有绝对路径 `.env.test`，不复制或修改环境文件。源码和 Git 状态仍在记忆
-worktree；`TEST_AGENT_ROOT`、`TESTAGENT` 与 `SYS_DATA_ROOT_DIR` 必须显式复用主工作区已有的本地运行数据，
-否则启动脚本会默认查找记忆 worktree 下的空 `.testagent`，用户 OpenCode 初始化将因公共 Agent 配置源目录不可用而失败：
+Java 调用 memory-service 必须携带 `X-Memory-Service-Key`。该 key 只用于服务到服务认证，不代表最终用户；Java 在调用前后仍校验登录用户、白名单、owner、Application 成员和角色。Mem0 回调 Java 模型网关使用 HMAC-SHA256，签名覆盖方法、固定路径、正文 SHA-256、client/user/run/session/operation、时间、nonce、能力和 embedding input type。允许时钟偏差 30 秒，nonce TTL 2 分钟，Redis 原子防重放。
 
-```bash
-cd /Users/kaka/Desktop/intelligent-test-agent-memory-v1
-export TEST_AGENT_ROOT=/Users/kaka/Desktop/intelligent-test-agent
-export TESTAGENT="$TEST_AGENT_ROOT"
-export SYS_DATA_ROOT_DIR="$TEST_AGENT_ROOT/.testagent"
-JAVA_VERSION=25 ./restart-dev-services.sh \
-  --profile test \
-  --env-file /Users/kaka/Desktop/intelligent-test-agent/.env.test \
-  --skip-frontend-build \
-  --without-workflow \
-  --with-memory
-```
+| 边界 | 当前值 |
+|---|---:|
+| Java WebFlux 单请求内存上限 | 256 KiB |
+| 自动学习消息数 | 1–100 条 USER/ASSISTANT |
+| 单条消息 schema 上限 | 100,000 字符 |
+| 一次学习总字符 | 默认 120,000，最大可配 200,000 |
+| 手工/投影正文 | 默认 8,000 字符，服务硬上限 20,000 |
+| metadata JSON | 16 KiB |
+| search query | 8,000 字符 |
+| search scopes | 1–3 个，不得重复 |
+| topK | API 1–100，服务默认最多 50；Java 默认请求 20 |
+| Java REST 普通请求超时 | 2 秒 |
+| Java 学习请求超时 | 130 秒 |
+| Run 前检索总预算 | 2 秒 |
+| 单 embedding profile 检索超时 | 默认 1.5 秒，硬上限 1.8 秒 |
+| CPU batch | 默认最大 64 条、单条 8,000 字符、总计 120,000 字符 |
+| CPU 有界并发 | 默认 4；排队默认最多 2 秒 |
 
-启动输出必须同时确认上述 `TEST_AGENT_ROOT` 与 `SYS_DATA_ROOT_DIR`；该覆盖只改变本地运行数据位置，不会让
-backend/frontend 构建物脱离记忆 worktree，也不会复制、清理或回退主工作区中的 Agent 配置。
+metadata 任意层级禁止键 `messages/transcript/rawConversation/prompt/answer/assistantMessage/userMessage`；readiness 固定返回 `rawMessageCount=0`。日志不能记录记忆正文、原始聊天、service key、HMAC secret/signature、模型 API key 或上游原始错误。
 
-首次 `--with-memory` 会拉取固定 pgvector 镜像，构建 memory-service 并在构建期下载固定 revision 的 BGE 权重，因此构建机需要一次网络访问；完成后容器运行不访问 HuggingFace。默认主机端口为：
+## 本地真实数据面
 
-| 服务 | 地址 | 边界 |
-|---|---|---|
-| memory-service | `127.0.0.1:18888` | 只对本机发布；`/health` 只表示进程存活，平台使用带 key 的 `/memory-api/v1/ready` |
-| memory-postgres | `127.0.0.1:15433` | 只对本机发布，数据库名与用户均为 `qa_memory` |
-| Java backend | `127.0.0.1:8080` | memory-service 通过固定 model-gateway base path 回调 |
-| frontend | `127.0.0.1:3000` | `/memories` 和“系统管理 → 记忆能力” |
-
-辅助脚本可单独使用：
+开发 Compose 固定包含独立 pgvector、独立 CPU BGE、一次性 Alembic、三个无状态 Mem0 副本和 Nginx VIP：
 
 ```bash
 tools/memory-dev-services.sh prepare
 tools/memory-dev-services.sh build
 tools/memory-dev-services.sh start
 tools/memory-dev-services.sh status
+```
+
+开发环境默认使用显式版本化 volume `test-agent-memory-dev-pgvector-v1`，与升级前原型留下的
+Compose volume 隔离；脚本不会删除或改写旧库。PostgreSQL readiness 会使用容器内配置的角色、密码和
+数据库执行真实 `select 1`，不能再由“端口已监听但角色不存在”的 `pg_isready` 假阳性放行。
+
+`prepare` 只写 `.tmp/dev-services/memory/*.env`，权限 `0600`，不会修改 `.env.local/.env.test`。Java 使用生成的 `memory-backend.env`，其中没有记忆数据库密码。默认端口：VIP `18888`、CPU `18989`、记忆 PostgreSQL `15433`。停止使用：
+
+```bash
 tools/memory-dev-services.sh stop
 ```
 
-`prepare` 生成两个 `0600` 文件：
+脚本只 `stop` 自己的 Compose 服务并保留记忆库 volume，不执行 `down -v`。
 
-- `.tmp/dev-services/memory/memory-dev.env`：Compose 专用 API key、pgvector 密码、端口和镜像标识。
-- `.tmp/dev-services/memory/memory-backend.env`：Java 仅需的 `enabled/service-url/service-api-key`，不含 pgvector 密码。
+## 企业离线构建
 
-脚本不 `source` dotenv，不回显密钥，也不执行 `docker compose down`。`stop` 只停止该 Compose 工程的两个容器，保留 pgvector 和 Mem0 history 卷。
-启动不依赖 Compose 的普通 health 等待；脚本会在 CPU 模型冷启动期间最多等待 7 分钟，并且只在带鉴权 readiness 返回
-`UP` 且 `rawMessageCount=0` 后放行。
+Mac 外网构建机必须能访问固定镜像和 Hugging Face，仅构建阶段允许联网：
 
-## 灰度与管理
+```bash
+cp deploy/internal/memory/build.env.example /secure/path/memory-build.env
+chmod 0600 /secure/path/memory-build.env
+TEST_AGENT_MEMORY_BUILD_ENV_FILE=/secure/path/memory-build.env \
+  deploy/internal/package-memory-offline.sh --output-dir /absolute/release-dir
+```
 
-数据库 migration 后白名单默认为空。这意味着即使 `TEST_AGENT_MEMORY_ENABLED=true`，存量用户的对话也不会学习或注入记忆。超级管理员先在“系统管理 → 记忆能力”检查 Mem0、pgvector、BGE、CHAT 和队列，再逐用户加入白名单。
+或并入完整包：
 
-建议灰度顺序：
+```bash
+deploy/internal/package-release.sh --with-memory
+# 仅构建记忆数据面
+deploy/internal/package-release.sh --memory-only
+```
 
-1. 只加入一名内部测试人员，人工新增一条个人记忆并跨 Session 验证注入徽标。
-2. 验证明确要求一次生效，隐式偏好必须在 90 天内由 3 个不同 Session 支撑。
-3. 在一个 Application 内验证普通成员只能提案，`APP_ADMIN` 可批准/拒绝；移除成员后立即无权检索。
-4. 再扩大白名单，持续观察 Outbox 待处理/失败数、检索超时和实际使用记录。
+记忆包必须包含并由 `SHA256SUMS` 覆盖：
 
-固定 CHAT 模型未设置时，只有当前 Run 模型来自平台内部目录且 CHAT 探测成功才能回退。外部模型、未探测模型或网关不可用时，学习任务重试/失败，但不阻断 QA Run。
+- `test-agent-memory-service_internal-linux-amd64.tar`
+- `test-agent-embedding-bge-small-zh-v1.5_internal-linux-amd64.tar`
+- 固定 `test-agent-pgvector_0.8.1-pg16_internal-linux-amd64.tar`
+- 固定 `test-agent-memory-nginx_1.27.2_internal-linux-amd64.tar`
+- 每个镜像 SPDX SBOM、许可证清单、源码依赖锁、模型 `MODEL-IDENTITY.json`；源码副本排除
+  `__pycache__`、`.pytest_cache` 和 `*.pyc/*.pyo`，不得把本机已删除模块的陈旧字节码带入企业包
+- `alembic.ini` 与全部 Alembic migration
+- `memory.env.example`、`embedding.env.example`、`memory-docker.sh`
 
-## 企业离线部署边界
+所有 Docker base/infrastructure image 使用 linux/amd64 digest；禁止 `latest`。BGE 权重必须已经位于 embedding 镜像，现场 readiness 的 model/revision/dimension/normalized 不完全匹配即停止发布。
 
-企业环境不使用开发 Compose。`memory-service/Dockerfile` 是独立可部署产物；需在可联网的构建机生成目标 Linux 架构镜像，同时获取固定 `pgvector/pgvector:0.8.1-pg16` 镜像，再通过企业标准的 image tar、SHA-256、SBOM 和许可清单流程转运。不得在离线现场下载模型，也不得把开发机 `.tmp` 密钥带入交付包。
+## 企业分发与启动
 
-生产拓扑要求：
+记忆 PostgreSQL 必须绑定可被 Mem0 节点访问的具体内网 IP；若使用模板中的 `0.0.0.0`，主机防火墙必须把 5432 来源限制为 Mem0 节点。不能保留 `127.0.0.1` 后却让独立 Mem0 节点连远程库。
 
-- 独立 PostgreSQL 16 + pgvector 0.8.1 数据库，使用独立账号，不扫描 Java Flyway location。
-- V1 只允许单活 memory-service；`/data/mem0-history.db` 与 pgvector 数据库必须同时备份。未完成 history store 外置化前不得水平扩容。
-- 容器使用 UID/GID `10004`、只读根文件系统、只读 `/models`，仅 `/data` 可写；丢弃 Linux capabilities 并禁止 privilege escalation。
-- `TEST_AGENT_MEMORY_SERVICE_API_KEY` 和数据库密码由配置中心或 `0600` 敏感文件注入，不放在命令行、日志或镜像层。Java 节点只获得相同的 service URL/key，不获得 Mem0 数据库密码。
-- memory-service 只能访问 pgvector 和 Java 固定 `/api/internal/platform/model-gateway/v1`；禁止直连模型供应商或公网。
-- Java 使用 `TEST_AGENT_MEMORY_ENABLED=true`、`TEST_AGENT_MEMORY_SERVICE_URL`、`TEST_AGENT_MEMORY_SERVICE_API_KEY`；所有节点配置必须一致。
+U 盘完整包先进入企业中转机 `~/Desktop/mimoagent/0709`，执行 SHA-256 校验后再分发：
 
-发布顺序为“备份 → 独立 pgvector 数据库 → memory-service → 平台 PostgreSQL migration → Java → 前端 → 健康检查 → 单用户白名单”。正式启用前必须确认交付 JAR 内 migration 字节与已验收源文件一致。
+| 目标 | 产物目录 |
+|---|---|
+| `<memory-db-node>:/data/0709` | pgvector 镜像、Alembic、部署脚本 |
+| `<embedding-node>:/data/0709` | CPU BGE 镜像、身份清单、部署脚本 |
+| 每个 `<memory-node>:/data/0709` | memory-service 镜像、配置模板、部署脚本 |
+| `.4/.114:/data/0709` | Java JAR/worker 和 backend 配置 |
+| `.2:/data/0709` | 前端/Nginx 包 |
 
-## Migration 与备份
-
-平台 migration：
+外置配置固定为：
 
 ```text
-backend/test-agent-persistence/src/main/resources/db/migration/
+/data/testagent/config/backend.env
+/data/testagent/config/memory.env
+/data/testagent/config/embedding.env
+```
+
+三者必须是非符号链接普通文件、mode `0600`，不得含占位符、重复 key、命令替换或 CRLF。每个物理节点只执行自己的 role 命令：
+
+```bash
+TEST_AGENT_MEMORY_ARTIFACT_DIR=/data/0709/memory deploy/internal/memory-docker.sh verify-artifacts
+deploy/internal/memory-docker.sh validate-memory-config
+deploy/internal/memory-docker.sh validate-embedding-config
+
+# memory DB node
+deploy/internal/memory-docker.sh load-db
+deploy/internal/memory-docker.sh start-db
+deploy/internal/memory-docker.sh verify-db
+
+# embedding node
+deploy/internal/memory-docker.sh load-embedding
+deploy/internal/memory-docker.sh start-embedding
+deploy/internal/memory-docker.sh verify-embedding
+
+# 只执行一次
+deploy/internal/memory-docker.sh load-memory
+deploy/internal/memory-docker.sh migrate
+
+# 每个 Mem0 node 使用不同 TEST_AGENT_MEMORY_NODE_ID
+deploy/internal/memory-docker.sh start-memory
+deploy/internal/memory-docker.sh verify-memory
+
+# VIP node
+deploy/internal/memory-docker.sh load-vip
+deploy/internal/memory-docker.sh start-vip
+deploy/internal/memory-docker.sh verify-vip
+```
+
+固定发布顺序：
+
+1. 备份并核对平台 Flyway 与记忆 Alembic 当前历史。
+2. 记忆 PostgreSQL/pgvector。
+3. CPU BGE。
+4. Alembic upgrade，再启动 Mem0 首节点和 VIP。
+5. `.4` Java 及 worker。
+6. `.114` Java 及 worker。
+7. `.2` 前端/Nginx。
+8. 在系统管理配置固定 CHAT、可选企业 embedding，并确认两个 profile 身份。
+9. 浏览器完整端到端验收。
+10. 开启首批用户白名单。
+11. 增加其余 Mem0 副本并执行故障/容量验收。
+
+任一 checksum、Alembic head、模型身份、向量维度、首台 Java readiness 或浏览器 E2E 失败，必须停止后续节点发布。Java 和 Mem0 的滚动扩容不能用本地降级掩盖 VIP/路由错误。
+
+## 数据库迁移与备份
+
+已执行的 QA 初始 migration 必须保持文件名和字节：
+
+```text
 V20260809120000__create_qa_memory_governance.sql
 SHA-256 b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a
 ```
 
-该 migration 只创建治理、证据摘要、审核、Outbox、Run 使用、白名单、Skill 提案和设置表，不存原始 Prompt/回答。一旦在任一需要保留的数据库执行，文件名和字节不得修改；后续只能新增更高版本 migration。
+通用化使用前向 migration：
 
-备份必须作为同一变更窗口的两个受控产物：
-
-1. pgvector 数据库一致性备份，保留集合、metadata 和向量。
-2. memory-service `/data/mem0-history.db` 快照，保留 Mem0 派生历史。
-
-平台库、pgvector 和 history 的恢复点必须记录在同一变更单中。恢复后先保持白名单关闭，验证 readiness 和抽样历史后再开放。
-
-## 验收清单
-
-```bash
-# Python 合同与单元测试
-cd memory-service
-PYTHONPATH=src .venv/bin/pytest tests
-
-# Java 定向及相关全量测试
-JAVA_HOME=<jdk-25-home> PATH="$JAVA_HOME/bin:$PATH" \
-  mvn -f backend/pom.xml \
-  -pl test-agent-memory,test-agent-model-gateway,test-agent-opencode-runtime,test-agent-api,test-agent-persistence,test-agent-app \
-  -am test
-
-# 前端
-cd frontend
-corepack pnpm test
-corepack pnpm --filter @test-agent/agent-web typecheck
-corepack pnpm --filter @test-agent/agent-web build
-
-# 开发数据面与脚本边界
-cd ..
-tools/verify-dev-scripts.sh
-tools/memory-dev-services.sh status
+```text
+V20260809230000__generalize_memory_and_embedding_profiles.sql
+SHA-256 2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3
 ```
 
-运行态必须通过：
+遗留 `qa_*` 物理表继续作为隐藏兼容存储，Java 新增 SQL 只走 MyBatis XML。独立记忆库不扫描 Java Flyway，只由 `memory-service/alembic` 管理；禁止创建第二套 Java migration runner、Flyway `repair/outOfOrder` 或现场手改历史表。
 
-- backend `/actuator/health/readiness`、frontend `3000` 和 memory-service authenticated readiness 均为 UP。
-- readiness 返回 `rawMessageCount=0`，pgvector extension 可用，Embedding profile 为固定 512 维版本。
-- 空白名单时既有对话正常，不写学习 Outbox，不注入记忆。
-- 白名单用户的明确记忆能跨 Session 生效，完成卡只显示真正注入的数量。
-- 两名用户、两个 Application 的团队隔离、成员移除、`APP_ADMIN` 审核和越权拒绝通过。
-- Skill 提案审核后仅生成草稿，不自动写工作区、提交、发布或撤回。
-- memory-service、CHAT 或 pgvector 不可用时，QA Run 按无记忆降级并保留可观测错误，日志不含原始聊天、grant 或 service key。
+同一变更窗口必须分别备份平台 PostgreSQL和独立记忆 PostgreSQL，并记录一致恢复点。Mem0 节点没有需要备份的本地卷。恢复后先保持白名单关闭，执行 Alembic/Flyway、readiness、双集合版本核对和浏览器回归，再开放用户。
 
-## 回滚
+## 发布准入测试
 
-1. 先从白名单移除所有用户，确认新 Run 不再产生 Outbox 和使用记录。
-2. 将所有 Java 节点的 `TEST_AGENT_MEMORY_ENABLED=false` 并重启；记忆不可用不影响原对话链路。
-3. 停止 memory-service，保留 pgvector 和 history 备份；未经数据所有者批准不删卷、不删库。
-4. Flyway migration 不回退、不 `repair`。旧 Java 不读取新表，新表保留以便审计和再启用。
+单元测试只作补充。真实浏览器套件不直接调用 Python API或数据库来替代业务验收：
+
+```bash
+cd frontend
+TEST_AGENT_RUN_MEMORY_E2E=1 \
+TEST_AGENT_MEMORY_E2E_SCENARIO=full \
+corepack pnpm exec playwright test \
+  --config playwright.real.config.ts \
+  apps/agent-web/tests/memory.real-spec.ts --project chromium --workers 1
+```
+
+集群、热备、并发和审计由统一入口编排：
+
+```bash
+# 本地三副本数据面
+tools/memory-cluster-e2e.sh --full --faults --concurrency 8 --partition same --audit
+
+# 企业 .2 -> .4/.114 -> Mem0 VIP -> 记忆库 -> 模型网关 -> 企业模型/CPU
+tools/memory-cluster-e2e.sh --enterprise --all --concurrency 32 --partition both
+```
+
+环境变量和远程停启 hook 的完整清单运行 `tools/memory-cluster-e2e.sh --help` 查看。审计场景必须提供
+`TEST_AGENT_MEMORY_E2E_AUDIT_CMD`，由发布人员注入只读命令核对平台 PostgreSQL、Session 事实表和
+Java 日志；企业停启 hook 同样由发布人员注入 SSH/编排命令，不写入仓库或发布包。准入条件：
+
+- 三个 Mem0 副本逐个摘除、只剩一个时仍能学习/召回，无本地 history 丢失。
+- 两个 Java 节点逐台摘除后浏览器仍经 Nginx 完成 Run。
+- 企业 embedding 断开时 CPU 集合召回同一 `logicalMemoryId`；恢复后 outbox 归零，不二次抽取。
+- CPU 断开时企业集合可召回；两个 profile 全断时 Run 在 2 秒检索预算内无记忆继续。
+- 同分区版本单调且无重复逻辑 ID；多用户分区可并行。
+- 浏览器 Run 启动 p99 不超过 2 秒。该值同时包含 Nginx/Java 路由和记忆检索，是对“检索 p99≤2秒”的更严格浏览器侧门禁。
+- 浏览器把明确标注为“一次性、非偏好”的随机原始对话 marker 写入 Session；记忆控制/history、每个向量
+  collection、Mem0/CPU/VIP 运行时文件系统和日志中均不得出现该 marker。投影还必须无越版本、无积压/死信；
+  Mem0 与 CPU Embedding 容器只读且无本地数据 mount，VIP 以固定 `101:101` 非 root 身份运行，
+  只挂载只读 Nginx 配置；三者均丢弃全部 Linux capability。
+- 平台审计确认原始聊天只存在既有 Session 事实表，没有第二份消息镜像。
+
+`full` 场景会把浏览器记忆卡片观察到的平台记忆 ID 和本次随机审计 marker 写入默认
+`.tmp/memory-e2e-state.json`（可用 `TEST_AGENT_MEMORY_E2E_STATE_FILE` 改路径，文件权限为 `0600`，
+不含凭据或对话正文）。后续每一次 Mem0/Java/企业 Embedding/CPU 故障召回都从浏览器实际收到的
+run-usage 响应核对同一 ID，而不以“召回数量非零”代替逻辑记忆一致性。单独运行故障门禁时可显式
+提供 `TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_ID`。
+
+## 灰度与回滚
+
+migration 后白名单默认空。先配置模型并完成 E2E，再加入一名用户；观察学习队列、投影 outbox、2 秒 fail-open 和 usage 记录后扩大。团队候选即使由管理员提交也必须再审核。
+
+回滚顺序：
+
+1. 清空/关闭记忆白名单，确认新 Run 不再学习或注入。
+2. 两个 Java 节点设置 `TEST_AGENT_MEMORY_ENABLED=false` 后滚动重启。
+3. 停止 Mem0 VIP/副本和 CPU 服务，保留两套数据库与备份。
+4. 不回退、不改写 Flyway/Alembic 历史；恢复服务时按正常启动顺序前向迁移。
+
+回滚记忆能力不会删除平台 Session，也不影响无记忆的 Run 主链。

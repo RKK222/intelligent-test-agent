@@ -14,7 +14,9 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
 import com.enterprise.testagent.domain.memory.MemorySkillProposal;
 import com.enterprise.testagent.domain.memory.MemorySkillProposalStatus;
+import com.enterprise.testagent.domain.memory.MemoryEvidence;
 import com.enterprise.testagent.domain.memory.MemoryScope;
+import com.enterprise.testagent.domain.memory.MemorySource;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.QaMemory;
 import com.enterprise.testagent.domain.memory.QaMemoryRepository;
@@ -54,8 +56,8 @@ class QaMemoryApplicationServiceTest {
         properties.setEnabled(true);
         when(repository.isWhitelisted(USER.value())).thenReturn(true);
         when(configuration.isActiveMember(any(ApplicationId.class), any(UserId.class))).thenReturn(true);
-        when(documents.add(any())).thenReturn(new MemoryDocumentStore.StoredDocument(
-                "mem0_1", "覆盖异常与边界", Map.of(), NOW));
+        when(documents.add(any())).thenReturn(List.of(new MemoryDocumentStore.StoredDocument(
+                "mem0_1", "覆盖异常与边界", Map.of(), NOW)));
         when(documents.get("mem0_1")).thenReturn(Optional.of(new MemoryDocumentStore.StoredDocument(
                 "mem0_1", "覆盖异常与边界", Map.of(), NOW)));
         Mockito.doAnswer(invocation -> {
@@ -91,7 +93,7 @@ class QaMemoryApplicationServiceTest {
     void manualPersonalMemoryActivatesImmediatelyWithoutPersistingFullDocumentInGovernance() {
         var view = service.createPersonal(
                 USER, MemoryScope.PERSONAL_GLOBAL, null,
-                "覆盖异常与边界", List.of(QaTaskType.TEST_CASE_GENERATION));
+                "覆盖异常与边界");
 
         assertThat(view.status()).isEqualTo(MemoryStatus.ACTIVE);
         assertThat(view.content()).isEqualTo("覆盖异常与边界");
@@ -105,7 +107,7 @@ class QaMemoryApplicationServiceTest {
     @Test
     void ordinaryTeamContributionStaysCandidateAndCreatesPendingReview() {
         var view = service.createTeamCandidate(
-                USER, "app_memory", "分析结论必须附证据", List.of(QaTaskType.DEFECT_ANALYSIS));
+                USER, "app_memory", "分析结论必须附证据");
 
         assertThat(view.scope()).isEqualTo(MemoryScope.TEAM_APPLICATION);
         assertThat(view.status()).isEqualTo(MemoryStatus.CANDIDATE);
@@ -113,10 +115,31 @@ class QaMemoryApplicationServiceTest {
     }
 
     @Test
+    void personalMemoryCanBeManuallyProposedToTeamWithReferenceOnlyEvidence() {
+        var personal = service.createPersonal(
+                USER, MemoryScope.PERSONAL_GLOBAL, null, "覆盖异常与边界");
+        when(repository.listEvidence(new com.enterprise.testagent.domain.memory.MemoryId(personal.memoryId())))
+                .thenReturn(List.of(new MemoryEvidence(
+                        "mev_source", new com.enterprise.testagent.domain.memory.MemoryId(personal.memoryId()),
+                        "run_source", "session_source", "来源对话", USER.value(), USER.value(),
+                        MemorySource.NATIVE, "用户明确表达长期偏好", NOW)));
+
+        var team = service.createTeamCandidate(
+                USER, "app_memory", personal.content(), personal.memoryId());
+
+        assertThat(team.scope()).isEqualTo(MemoryScope.TEAM_APPLICATION);
+        ArgumentCaptor<MemoryEvidence> copied = ArgumentCaptor.forClass(MemoryEvidence.class);
+        verify(repository).insertEvidence(copied.capture());
+        assertThat(copied.getValue().memoryId().value()).isEqualTo(team.memoryId());
+        assertThat(copied.getValue().sessionId()).isEqualTo("session_source");
+        assertThat(copied.getValue().summary()).isEqualTo("用户明确表达长期偏好");
+    }
+
+    @Test
     void skillProposalProducesEditableDraftOnlyAfterAdminApproval() {
         var memory = service.createPersonal(
                 USER, MemoryScope.PERSONAL_GLOBAL, null,
-                "覆盖异常与边界", List.of(QaTaskType.TEST_CASE_GENERATION));
+                "覆盖异常与边界");
 
         var pending = service.createSkillProposal(USER, memory.memoryId(), "app_memory", "异常边界检查");
         assertThat(pending.status()).isEqualTo(MemorySkillProposalStatus.PENDING_REVIEW);
@@ -135,7 +158,7 @@ class QaMemoryApplicationServiceTest {
     void publishedSkillCanOnlyBeLinkedToPublishedSkillAssetFromSameApplication() {
         var memory = service.createPersonal(
                 USER, MemoryScope.PERSONAL_GLOBAL, null,
-                "覆盖异常与边界", List.of(QaTaskType.TEST_CASE_GENERATION));
+                "覆盖异常与边界");
         var pending = service.createSkillProposal(USER, memory.memoryId(), "app_memory", "异常边界检查");
         var draft = service.reviewSkillProposal(USER, pending.proposalId(), "APPROVE", 0L);
         when(skillHubRepository.findAsset("asset_skill_1")).thenReturn(Optional.of(new Asset(
@@ -152,7 +175,7 @@ class QaMemoryApplicationServiceTest {
     @Test
     void memberExitRevokesTeamMemoryAndProposalReviewAccessImmediately() {
         var team = service.createTeamCandidate(
-                USER, "app_memory", "分析结论必须附证据", List.of(QaTaskType.DEFECT_ANALYSIS));
+                USER, "app_memory", "分析结论必须附证据");
         when(configuration.isActiveMember(any(ApplicationId.class), any(UserId.class))).thenReturn(false);
 
         assertThatThrownBy(() -> service.get(USER, team.memoryId()))

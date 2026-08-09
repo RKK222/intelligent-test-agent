@@ -1,6 +1,8 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,7 +27,7 @@ import com.enterprise.testagent.model.gateway.ModelGatewayCaller;
 import com.enterprise.testagent.model.gateway.ModelGatewayForwarder;
 import com.enterprise.testagent.model.gateway.PreparedModelGatewayRequest;
 import com.enterprise.testagent.model.gateway.PreparedModelGatewayMultipartRequest;
-import com.enterprise.testagent.memory.MemoryModelGrantService;
+import com.enterprise.testagent.memory.MemoryModelHmacAuthenticator;
 import org.springframework.http.client.MultipartBodyBuilder;
 import java.time.Instant;
 import java.util.List;
@@ -136,17 +138,18 @@ class ModelGatewayControllerTest {
     }
 
     @Test
-    void memoryGrantIsBoundToHeadersModelAndChatCompletionsOnly() {
+    void memoryHmacIdentityIsBoundToBodyAndConfiguredModel() {
         FakeSsoService sso = new FakeSsoService();
         CapturingForwarder forwarder = new CapturingForwarder();
-        MemoryModelGrantService grants = mock(MemoryModelGrantService.class);
-        MemoryModelGrantService.GrantIdentity identity = new MemoryModelGrantService.GrantIdentity(
-                "usr_memory", "AUTH_MEMORY", "run_memory", "enterprise-chat");
-        when(grants.authenticate("mfg_short_lived_12345678901234567890", "usr_memory", "run_memory"))
-                .thenReturn(identity);
+        MemoryModelHmacAuthenticator hmac = mock(MemoryModelHmacAuthenticator.class);
+        MemoryModelHmacAuthenticator.Identity identity = new MemoryModelHmacAuthenticator.Identity(
+                "usr_memory", "AUTH_MEMORY", "run_memory", "session_memory", "operation_memory",
+                ModelCapability.CHAT);
+        when(hmac.supports(any(ServerWebExchange.class))).thenReturn(true);
+        when(hmac.authenticate(any(ServerWebExchange.class), any(byte[].class))).thenReturn(identity);
         ModelGatewayController controller = new ModelGatewayController(
                 sso, new ModelGatewayCatalogService(new Providers(), new Models()), forwarder);
-        controller.setMemoryModelGrants(grants);
+        controller.setMemoryHmac(hmac);
         WebTestClient client = WebTestClient.bindToController(controller)
                 .webFilter(new TraceIdWebFilter())
                 .controllerAdvice(new GlobalExceptionHandler())
@@ -154,26 +157,19 @@ class ModelGatewayControllerTest {
 
         client.post()
                 .uri(ModelGatewayController.BASE_PATH + "/chat/completions")
-                .header("Authorization", "Bearer mfg_short_lived_12345678901234567890")
-                .header("X-Memory-User-Id", "usr_memory")
-                .header("X-Memory-Run-Id", "run_memory")
+                .header("X-Memory-Client-Id", "memory-service")
+                .header("X-Memory-Signature", "placeholder")
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                 .bodyValue("{\"model\":\"enterprise-chat\",\"messages\":[]}")
                 .exchange()
                 .expectStatus().isOk();
 
-        verify(grants).requireModel(identity, "enterprise-chat");
+        verify(hmac).authenticate(any(ServerWebExchange.class), aryEq(
+                "{\"model\":\"enterprise-chat\",\"messages\":[]}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        verify(hmac).requireModel(identity, "enterprise-chat");
         assertThat(forwarder.forwardedCaller.userId()).isEqualTo("usr_memory");
         assertThat(forwarder.forwardedCaller.unifiedAuthId()).isEqualTo("AUTH_MEMORY");
         assertThat(forwarder.forwardedCaller.sourceClient()).isEqualTo("memory");
-
-        client.get()
-                .uri(ModelGatewayController.MODELS_PATH)
-                .header("Authorization", "Bearer mfg_short_lived_12345678901234567890")
-                .header("X-Memory-User-Id", "usr_memory")
-                .header("X-Memory-Run-Id", "run_memory")
-                .exchange()
-                .expectStatus().isUnauthorized();
     }
 
     private static final class CapturingForwarder implements ModelGatewayForwarder {

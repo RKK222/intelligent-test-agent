@@ -34,9 +34,10 @@ const error = ref("");
 const health = ref<MemoryAdminHealth | null>(null);
 const settings = ref<MemorySettingsView | null>(null);
 const whitelist = ref<MemoryWhitelistView[]>([]);
-const chatModelId = ref("");
-const allowRunModelFallback = ref(false);
+const chatModelId = ref<string | null>("");
+const enterpriseEmbeddingModelId = ref<string | null>("");
 const chatModels = ref<ChatModelOption[]>([]);
+const embeddingModels = ref<ChatModelOption[]>([]);
 const chatModelsLoading = ref(false);
 const chatModelsError = ref("");
 const technicalDetailsOpen = ref(false);
@@ -56,6 +57,8 @@ type ChatModelOption = InternalModelProviderModel & {
 
 const selectedChatModelUnavailable = computed(() => Boolean(chatModelId.value)
   && !chatModels.value.some((model) => model.modelId === chatModelId.value));
+const selectedEmbeddingModelUnavailable = computed(() => Boolean(enterpriseEmbeddingModelId.value)
+  && !embeddingModels.value.some((model) => model.modelId === enterpriseEmbeddingModelId.value));
 
 onMounted(() => void refreshAll());
 
@@ -76,7 +79,7 @@ async function load() {
     settings.value = settingsView;
     whitelist.value = whitelistPage.items;
     chatModelId.value = settingsView.primaryChatModelId ?? "";
-    allowRunModelFallback.value = settingsView.currentRunModelFallbackEnabled;
+    enterpriseEmbeddingModelId.value = settingsView.primaryEmbeddingModelId ?? "";
   } catch {
     error.value = "记忆管理数据加载失败";
   } finally {
@@ -104,19 +107,31 @@ async function loadChatModels() {
     if (requestId !== chatModelRequest) return;
 
     const options = new Map<string, ChatModelOption>();
+    const embeddingOptions = new Map<string, ChatModelOption>();
     for (const result of results) {
       if (result.status !== "fulfilled") continue;
       const { provider, models } = result.value;
       for (const model of models) {
-        if (!model.enabled || !model.probedCapabilities.includes("CHAT") || options.has(model.modelId)) continue;
-        options.set(model.modelId, {
+        if (!model.enabled) continue;
+        const option = {
           ...model,
           providerName: provider.name,
           providerSortOrder: provider.sortOrder
-        });
+        };
+        if (model.probedCapabilities.includes("CHAT") && !options.has(model.modelId)) {
+          options.set(model.modelId, option);
+        }
+        if (model.probedCapabilities.includes("EMBEDDING")
+          && Number(model.embeddingDimension) > 0
+          && !embeddingOptions.has(model.modelId)) {
+          embeddingOptions.set(model.modelId, option);
+        }
       }
     }
     chatModels.value = [...options.values()].sort((left, right) =>
+      left.providerSortOrder - right.providerSortOrder
+      || left.displayName.localeCompare(right.displayName, "zh-CN"));
+    embeddingModels.value = [...embeddingOptions.values()].sort((left, right) =>
       left.providerSortOrder - right.providerSortOrder
       || left.displayName.localeCompare(right.displayName, "zh-CN"));
     if (results.some((result) => result.status === "rejected")) {
@@ -139,8 +154,8 @@ async function saveSettings() {
   saving.value = true;
   try {
     settings.value = await api.updateQaMemorySettings({
-      primaryChatModelId: chatModelId.value.trim() || null,
-      currentRunModelFallbackEnabled: allowRunModelFallback.value,
+      primaryChatModelId: chatModelId.value?.trim() || null,
+      primaryEmbeddingModelId: enterpriseEmbeddingModelId.value?.trim() || null,
       expectedVersion: settings.value.version
     });
     ElMessage.success("记忆模型策略已保存");
@@ -227,9 +242,9 @@ function formatTime(value: string) {
   <section class="memory-admin" aria-labelledby="memory-admin-title" data-testid="memory-admin-panel">
     <header class="memory-admin__header">
       <div>
-        <div class="memory-admin__eyebrow"><BrainCircuit :size="15" /> QA MEMORY CONTROL</div>
+        <div class="memory-admin__eyebrow"><BrainCircuit :size="15" /> MEMORY CONTROL</div>
         <h2 id="memory-admin-title">记忆能力</h2>
-        <p>检查 Mem0、向量模型、抽取 CHAT 模型和异步学习队列，并按用户灰度开放。</p>
+        <p>检查 Mem0 多节点、双 Embedding profile、原生抽取 CHAT 模型和投影积压，并按用户灰度开放。</p>
       </div>
       <button type="button" :disabled="loading" @click="refreshAll"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新</button>
     </header>
@@ -244,14 +259,15 @@ function formatTime(value: string) {
           <CheckCircle2 v-if="health.memoryService.available" class="health-check" :size="18" />
           <CircleAlert v-else class="health-alert" :size="18" />
         </article>
-        <article :class="{ healthy: health.embedding.provider === 'LOCAL_BGE' }" data-testid="memory-health-embedding">
+        <article :class="{ healthy: health.memoryService.profiles.some((profile) => profile.available) }" data-testid="memory-health-embedding">
           <span class="memory-health-icon"><Cpu :size="20" /></span>
-          <div><small>EMBEDDING PROFILE</small><strong>{{ health.embedding.provider }}</strong><p>{{ health.embedding.model }} · {{ health.embedding.dimension }} 维 · {{ health.embedding.device }}</p></div>
-          <CheckCircle2 class="health-check" :size="18" />
+          <div><small>EMBEDDING PROFILES</small><strong>{{ health.memoryService.profiles.filter((profile) => profile.available).length }} / {{ health.memoryService.profiles.length }} 可用</strong><p>CPU 热备：{{ health.cpuEmbeddingModelId }}</p></div>
+          <CheckCircle2 v-if="health.memoryService.profiles.some((profile) => profile.available)" class="health-check" :size="18" />
+          <CircleAlert v-else class="health-alert" :size="18" />
         </article>
         <article :class="{ healthy: Boolean(health.primaryChatModelId) }" data-testid="memory-health-chat">
           <span class="memory-health-icon"><MessageSquareText :size="20" /></span>
-          <div><small>FIXED CHAT MODEL</small><strong>{{ health.primaryChatModelId || "未配置" }}</strong><p>备用模型：{{ health.currentRunModelFallbackEnabled ? "仅限当前任务的可用内部模型" : "关闭" }}</p></div>
+          <div><small>FIXED CHAT MODEL</small><strong>{{ health.primaryChatModelId || "未配置" }}</strong><p>Mem0 原生 infer=true，不使用平台自定义抽取提示词</p></div>
           <CheckCircle2 v-if="health.primaryChatModelId" class="health-check" :size="18" />
           <CircleAlert v-else class="health-alert" :size="18" />
         </article>
@@ -259,6 +275,12 @@ function formatTime(value: string) {
           <span class="memory-health-icon"><BrainCircuit :size="20" /></span>
           <div><small>LEARNING OUTBOX</small><strong>{{ health.queuePending }} 待处理</strong><p>{{ health.queueProcessing }} 处理中 · {{ health.queueDead }} 死信</p></div>
           <CheckCircle2 v-if="health.queueDead === 0" class="health-check" :size="18" />
+          <CircleAlert v-else class="health-alert" :size="18" />
+        </article>
+        <article :class="{ healthy: health.memoryService.projectionBacklog.dead === 0 }" data-testid="memory-health-projection">
+          <span class="memory-health-icon"><Database :size="20" /></span>
+          <div><small>PROJECTION OUTBOX</small><strong>{{ health.memoryService.projectionBacklog.pending }} 待投影</strong><p>{{ health.memoryService.projectionBacklog.processing }} 处理中 · {{ health.memoryService.projectionBacklog.dead }} 死信</p></div>
+          <CheckCircle2 v-if="health.memoryService.projectionBacklog.dead === 0" class="health-check" :size="18" />
           <CircleAlert v-else class="health-alert" :size="18" />
         </article>
       </div>
@@ -273,7 +295,6 @@ function formatTime(value: string) {
               aria-label="选择固定内部 CHAT 模型"
               class="memory-model-select"
               filterable
-              clearable
               :loading="chatModelsLoading"
               placeholder="选择已通过 CHAT 探测的内部模型"
               no-data-text="没有可用的内部 CHAT 模型"
@@ -281,7 +302,7 @@ function formatTime(value: string) {
               <el-option
                 v-if="selectedChatModelUnavailable"
                 :label="`${chatModelId}（当前配置，目录中不可用）`"
-                :value="chatModelId"
+                :value="chatModelId ?? ''"
                 disabled
               />
               <el-option
@@ -300,14 +321,44 @@ function formatTime(value: string) {
             <small>记忆提取优先使用该模型；这里只显示已启用且通过 CHAT 能力探测的内部模型。</small>
             <small v-if="chatModelsError" class="memory-inline-error">{{ chatModelsError }}</small>
           </div>
-          <label class="memory-admin-switch">
-            <input v-model="allowRunModelFallback" type="checkbox" />
-            <span>
-              <strong>固定模型不可用时，使用当前任务的内部模型</strong>
-              <small>只有当前任务模型也在企业内部目录且通过 CHAT 探测时才会使用；外部模型不会参与记忆提取。</small>
-              <small>关闭或条件不满足时，记忆提取会降级或等待重试，当前测试任务不受影响。</small>
-            </span>
-          </label>
+          <div class="memory-admin-field memory-admin-field--spaced">
+            <span>企业 Embedding 模型（可空）</span>
+            <el-select
+              v-model="enterpriseEmbeddingModelId"
+              aria-label="选择企业 Embedding 模型"
+              class="memory-model-select"
+              filterable
+              clearable
+              :loading="chatModelsLoading"
+              placeholder="未配置时仅使用 CPU BGE"
+              no-data-text="没有已配置维度并通过探测的 Embedding 模型"
+            >
+              <el-option
+                v-if="selectedEmbeddingModelUnavailable"
+                :label="`${enterpriseEmbeddingModelId}（当前配置，目录中不可用）`"
+                :value="enterpriseEmbeddingModelId ?? ''"
+                disabled
+              />
+              <el-option
+                v-for="model in embeddingModels"
+                :key="`${model.providerId}:${model.modelId}`"
+                :label="`${model.displayName} · ${model.embeddingDimension} 维 · ${model.modelId}`"
+                :value="model.modelId"
+              >
+                <div class="memory-model-option">
+                  <strong>{{ model.displayName }}</strong>
+                  <span>{{ model.embeddingDimension }} 维 · {{ model.providerName }}</span>
+                  <code>{{ model.modelId }}</code>
+                </div>
+              </el-option>
+            </el-select>
+            <small>为空时只维护 CPU 集合；配置后维护企业主集合和 CPU 热备集合，原始相似度不会跨模型直接比较。</small>
+          </div>
+          <div class="memory-admin-field memory-admin-field--spaced">
+            <span>CPU Embedding profile</span>
+            <code>{{ settings.cpuEmbeddingModelId }}</code>
+            <small>固定 512 维 BGE 服务；外网测试和企业内网复用同一离线镜像。</small>
+          </div>
           <section class="embedding-technical" aria-labelledby="embedding-technical-title">
             <div>
               <strong id="embedding-technical-title">向量模型技术信息</strong>
@@ -325,9 +376,11 @@ function formatTime(value: string) {
             </button>
           </section>
           <dl v-if="technicalDetailsOpen" id="embedding-technical-details" class="embedding-details">
-            <div><dt>模型版本</dt><dd>{{ health.embedding.revision }}</dd><small>锁定同一套模型权重，避免检索结果无意变化。</small></div>
-            <div><dt>向量集合版本</dt><dd>{{ health.embedding.collectionVersion }}</dd><small>升级模型时使用新集合，不直接覆盖旧记忆向量。</small></div>
-            <div><dt>向量归一化</dt><dd>{{ health.embedding.normalized ? "已开启" : "未开启" }}</dd><small>让不同记忆之间的语义相似度可以稳定比较。</small></div>
+            <div v-for="profile in health.memoryService.profiles" :key="profile.profileKey">
+              <dt>{{ profile.provider }} · {{ profile.primary ? "主集合" : "热备集合" }} · {{ profile.available ? "可用" : "不可用" }}</dt>
+              <dd>{{ profile.model }} · {{ profile.dimension }} 维</dd>
+              <small>{{ profile.collection }} · {{ profile.fingerprint }}</small>
+            </div>
           </dl>
           <button class="memory-admin-primary" type="button" :disabled="saving" @click="saveSettings"><Save :size="15" />{{ saving ? "保存中" : "保存策略" }}</button>
         </section>
@@ -337,7 +390,7 @@ function formatTime(value: string) {
             <div><small>ROLLOUT</small><h3>用户白名单</h3></div>
             <button type="button" data-testid="add-memory-whitelist-user" @click="openWhitelistDialog"><Plus :size="15" />添加用户</button>
           </div>
-          <p class="memory-admin-card__description">白名单为空时，不学习、不检索，也不会改变任何现有 QA 对话。</p>
+          <p class="memory-admin-card__description">白名单为空时，不学习、不检索，也不会改变任何现有对话。</p>
           <div v-if="whitelist.length" class="memory-whitelist">
             <article v-for="user in whitelist" :key="user.userId">
               <span class="memory-user-icon"><UsersRound :size="16" /></span>
@@ -371,6 +424,9 @@ function formatTime(value: string) {
         :remote-method="loadWhitelistUsers"
         :loading="whitelistUsersLoading"
         :disabled="addingWhitelistUser"
+        :fit-input-width="true"
+        placement="bottom-start"
+        popper-class="memory-user-select-popper"
         placeholder="输入姓名、用户 ID 或统一认证号"
         no-data-text="没有可添加的用户"
       >
@@ -425,8 +481,9 @@ function formatTime(value: string) {
 .memory-admin button:disabled { opacity: .5; cursor: not-allowed; }
 .memory-admin__state { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 300px; color: var(--memory-muted); }
 .memory-admin__state--error { color: #c2414b; }
-.memory-health-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; max-width: 1180px; margin: 0 auto 14px; }
+.memory-health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; max-width: 1180px; margin: 0 auto 14px; }
 .memory-health-grid article { position: relative; display: grid; grid-template-columns: 38px 1fr auto; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--memory-border); border-radius: 8px; background: var(--memory-surface); }
+.memory-health-grid article > div { min-width: 0; }
 .memory-health-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: var(--memory-hover); color: var(--memory-muted); }
 .memory-health-grid article.healthy .memory-health-icon { background: color-mix(in srgb, var(--memory-team) 14%, transparent); color: var(--memory-team); }
 .memory-health-grid small { display: block; overflow: hidden; color: var(--memory-soft); font: 700 9px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .06em; text-overflow: ellipsis; white-space: nowrap; }
@@ -434,13 +491,15 @@ function formatTime(value: string) {
 .memory-health-grid p { overflow: hidden; margin: 4px 0 0; color: var(--memory-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .health-check { color: var(--memory-team); }
 .health-alert { color: var(--memory-warn); }
-.memory-admin__columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; max-width: 1180px; margin: 0 auto; }
+.memory-admin__columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 14px; max-width: 1180px; margin: 0 auto; }
 .memory-admin-card { padding: 18px; border: 1px solid var(--memory-border); border-radius: 8px; background: var(--memory-surface); }
 .memory-admin-card__title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
 .memory-admin-card__title small { color: var(--memory-blue); font: 700 9px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .08em; }
 .memory-admin-card__title h3 { margin: 2px 0 0; font-size: 15px; }
 .memory-admin-card__description { margin: -7px 0 13px; color: var(--memory-muted); font-size: 11px; line-height: 1.6; }
 .memory-admin-field { display: grid; gap: 6px; font-size: 12px; font-weight: 650; }
+.memory-admin-field--spaced { margin-top: 17px; }
+.memory-admin-field > code { overflow: hidden; padding: 9px 10px; border: 1px solid var(--memory-border); border-radius: 6px; background: var(--memory-hover); font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .memory-model-select { width: 100%; }
 .memory-admin-field :deep(.el-select__wrapper) { min-height: 36px; border-radius: 6px; background: var(--memory-surface); box-shadow: 0 0 0 1px var(--memory-border-strong) inset; }
 .memory-admin-field :deep(.el-select__wrapper.is-focused) { box-shadow: 0 0 0 1px var(--memory-blue) inset, 0 0 0 3px color-mix(in srgb, var(--memory-blue) 14%, transparent); }
@@ -461,7 +520,7 @@ function formatTime(value: string) {
 .memory-admin .embedding-technical__toggle { min-width: max-content; border: 0; color: var(--memory-blue); }
 .embedding-technical__toggle svg { transition: transform .18s ease; }
 .embedding-technical__toggle svg.open { transform: rotate(180deg); }
-.embedding-details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 16px; border: 1px solid var(--memory-border); border-radius: 6px; }
+.embedding-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); margin: 0 0 16px; border: 1px solid var(--memory-border); border-radius: 6px; }
 .embedding-details div { min-width: 0; padding: 9px; border-right: 1px solid var(--memory-border); }
 .embedding-details div:last-child { border-right: 0; }
 .embedding-details dt { color: var(--memory-text); font-size: 9px; font-weight: 700; }
@@ -482,6 +541,8 @@ function formatTime(value: string) {
 .memory-whitelist-empty span { font-size: 10px; }
 .memory-user-dialog__description { margin: -4px 0 14px; color: var(--el-text-color-regular, #6b7280); font-size: 12px; line-height: 1.65; }
 .memory-user-select { width: 100%; }
+:global(.memory-user-dialog .el-dialog__body) { min-height: 220px; }
+:global(.memory-user-select-popper .el-select-dropdown__wrap) { max-height: min(120px, 24vh); }
 .memory-dialog-error { margin: 9px 0 0; color: #c2414b; font-size: 11px; }
 .spinning { animation: memory-admin-spin .9s linear infinite; }
 @keyframes memory-admin-spin { to { transform: rotate(360deg); } }

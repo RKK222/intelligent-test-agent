@@ -75,23 +75,21 @@ test-agent:
     enabled: ${TEST_AGENT_MEMORY_ENABLED:false}
     service-url: ${TEST_AGENT_MEMORY_SERVICE_URL:http://127.0.0.1:18888}
     service-api-key: ${TEST_AGENT_MEMORY_SERVICE_API_KEY:}
-    request-timeout: ${TEST_AGENT_MEMORY_REQUEST_TIMEOUT:5s}
-    extraction-timeout: ${TEST_AGENT_MEMORY_EXTRACTION_TIMEOUT:130s}
-    retrieval-timeout: ${TEST_AGENT_MEMORY_RETRIEVAL_TIMEOUT:600ms}
-    grant-ttl: ${TEST_AGENT_MEMORY_MODEL_GRANT_TTL:2m}
-    implicit-window: ${TEST_AGENT_MEMORY_IMPLICIT_WINDOW:90d}
-    implicit-session-threshold: ${TEST_AGENT_MEMORY_IMPLICIT_SESSION_THRESHOLD:3}
-    team-session-threshold: ${TEST_AGENT_MEMORY_TEAM_SESSION_THRESHOLD:3}
-    team-user-threshold: ${TEST_AGENT_MEMORY_TEAM_USER_THRESHOLD:2}
+    request-timeout: ${TEST_AGENT_MEMORY_REQUEST_TIMEOUT:2s}
+    learning-timeout: ${TEST_AGENT_MEMORY_LEARNING_TIMEOUT:130s}
+    retrieval-timeout: ${TEST_AGENT_MEMORY_RETRIEVAL_TIMEOUT:2s}
     max-injected-memories: ${TEST_AGENT_MEMORY_MAX_INJECTED:6}
     max-context-tokens: ${TEST_AGENT_MEMORY_MAX_CONTEXT_TOKENS:800}
-    retrieval-top-k-per-scope: ${TEST_AGENT_MEMORY_RETRIEVAL_TOP_K_PER_SCOPE:12}
-    retrieval-threshold: ${TEST_AGENT_MEMORY_RETRIEVAL_THRESHOLD:0.20}
-    candidate-match-threshold: ${TEST_AGENT_MEMORY_CANDIDATE_MATCH_THRESHOLD:0.86}
+    retrieval-top-k: ${TEST_AGENT_MEMORY_RETRIEVAL_TOP_K:20}
+    retrieval-threshold: ${TEST_AGENT_MEMORY_RETRIEVAL_THRESHOLD:0.10}
     learning-batch-size: ${TEST_AGENT_MEMORY_LEARNING_BATCH_SIZE:8}
     learning-max-attempts: ${TEST_AGENT_MEMORY_LEARNING_MAX_ATTEMPTS:8}
     learning-poll-interval: ${TEST_AGENT_MEMORY_LEARNING_POLL_INTERVAL:5s}
     learning-lease: ${TEST_AGENT_MEMORY_LEARNING_LEASE:5m}
+    model-gateway-hmac-client-id: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_CLIENT_ID:mem0-cluster}
+    model-gateway-hmac-secret: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET:}
+    model-gateway-hmac-clock-skew: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_CLOCK_SKEW:30s}
+    model-gateway-nonce-ttl: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_NONCE_TTL:2m}
   workflow-capability:
     hmac-secret: ${TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET:}
     runner-hmac-secret: ${TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET:}

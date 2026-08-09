@@ -1,36 +1,82 @@
 # testagent-memory-service
 
-QA Agent 长期记忆的独立数据面。服务固定使用 `mem0ai==2.0.3`，只暴露平台需要的健康、Embedding profile、派生记忆 CRUD/search/history 和候选抽取窄接口；不提供 Mem0 上游通用 API。
+独立、无状态的通用 Mem0 REST 数据面，锁定 `mem0ai==2.0.17`。所有副本共享独立 PostgreSQL/pgvector；Java 只访问 REST，不连接该数据库。本镜像不包含 BGE 权重、torch 或本地 history 卷。
 
-## 数据边界
+## 接口
 
-- `documents` 中的正文必须已经是“稳定测试工作习惯”候选或生效记忆，不允许传入整段聊天。
-- 原始聊天只由 OpenCode Session/现有恢复链路保存。候选抽取请求在内存中短暂使用本轮用户消息与最终回答，响应后不在本服务保存。
-- `NoRawMessageHistoryManager.save_messages()` 永远为空操作，`get_last_messages()` 永远为空；合同测试同时检查 SQLite `messages` 为 0 行。Mem0 的派生记忆增删改历史仍写入持久化 `/data/mem0-history.db`。
-- 向量正文、metadata 和 512 维向量写入独立 PostgreSQL + pgvector。平台 PostgreSQL 只保存治理状态和安全摘要。
+除 `/health` 外均要求 `X-Memory-Service-Key`：
 
-## 固定 Embedding profile
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/health` | 仅进程存活，不代表数据库/profile 可用 |
+| `GET` | `/ready` | 共享 collection、profile、投影 outbox 和 `rawMessageCount=0` |
+| `POST` | `/memories` | 官方风格 add；学习使用 `messages + infer=true`，投影/手工使用 `infer=false` |
+| `GET/PUT/DELETE` | `/memories/{logicalMemoryId}` | 读取、更新、删除逻辑记忆 |
+| `GET` | `/memories/{logicalMemoryId}/history` | 共享逻辑版本历史 |
+| `POST` | `/search` | 最多三个 scope；多 profile RRF 合并 |
 
-- Provider：`LOCAL_BGE`
-- 模型：`BAAI/bge-small-zh-v1.5`
-- revision：`7999e1d3359715c523056ef9478215996d62a620`
-- 维度：512，CPU，L2 归一化
-- 搜索文本前缀：`为这个句子生成表示以用于检索相关文章：`
-- 权重在镜像构建期下载到 `/models/BAAI__bge-small-zh-v1.5` 并写入身份清单。运行期设置 HuggingFace/Transformers offline，代码也要求 `local_files_only=True`。
+旧 `/memory-api/v1/**` 返回 `410 API_GONE`。
 
-集合名由 provider、模型、revision 前缀、维度、collection version 和完整 profile SHA-256 摘要构成。未来接入企业 Embedding 必须新增 Provider 和集合版本，不能覆盖 V1 集合。
+原生学习不传自定义 prompt/custom instructions，不做 QA 分类、显式/隐式/临时判定或置信度规则。当前 Run 的 USER/ASSISTANT 只作为一次请求交给 `Mem0.add(..., infer=true)`；服务不保存 Mem0 message history，`rawMessageCount()` 固定为 0。metadata 任意层级禁止原始消息、prompt、answer 和 transcript 字段。
 
-## 本地测试
+## 多 profile 与共享控制面
 
-```bash
-cd memory-service
-uv sync --dev
-PYTHONPATH=src uv run pytest tests
+- 无企业 embedding：只使用固定 CPU profile。
+- 有企业 embedding：企业 profile 为原生抽取首选；不可用时 CPU profile 执行唯一一次抽取。
+- `infer=true` 前在共享操作表写 at-most-once 标记；重试优先按 operationId 恢复已写向量，LLM 已开始但无法恢复时返回空结果，绝不再次抽取。幂等绑定请求摘要，不能用同一 key 改写内容或跨分区复用。
+- 原始结果使用稳定 `logicalMemoryId`，以 `infer=false` 投影另一个 collection；不同维度/模型永不混入同一 collection。
+- 更新、删除和 scope 提升按逻辑版本同步到全部 profile；失败进入 PostgreSQL outbox，由各副本竞争领取并补偿。后台巡检还会对共享逻辑版本与当前 profile 清单做差异扫描，自动补齐“逻辑提交后、outbox 写入前退出”的崩溃窗口，以及后来新增企业 profile 的历史投影。单任务连续 12 次失败标记为 `DEAD`，冷却 5 分钟后若版本差异仍存在会自动重新入队，避免 provider 恢复后永久搁置。
+- 检索并行查询可用 profile，按 `logicalMemoryId` 去重并用 Reciprocal Rank Fusion 合并，不比较跨模型 score。单 profile embedding 默认 1.5 秒超时、硬上限 1.8 秒，为 Java 2 秒总预算预留 RRF 和 HTTP 返回时间。
+- 同一 owner/Application 分区使用 PostgreSQL advisory lock 串行写；history、幂等、逻辑版本、投影状态和 outbox 全部位于共享库。
+- Application 个人记忆同时使用由 Application ID 单向摘要得到的 Mem0 `run_id` 作为原生去重分区；这是内部作用域键，不是平台 Run ID，也不保存对话。它避免 Mem0 2.0.17 仅按 user/session entity 去重时让一个 Application 的事实抑制另一个 Application。
+
+独立记忆库只由 `alembic upgrade head` 管理。不要让每个 Web 副本自动迁移，也不要引入 Java Flyway。
+
+## 模型访问
+
+Mem0 的 CHAT 与 embedding provider 均回调 Java 固定 base path `/api/internal/platform/model-gateway/v1`。每次请求使用 HMAC-SHA256，签名覆盖正文摘要、平台用户、Run、Session、operation、时间、nonce、能力和 `query/document` 类型。服务不持有供应商 URL 或供应商 Token。
+
+CPU profile 的模型实际运行在相邻的独立 `embedding-service`；模型身份、revision、512 维、L2 和查询前缀见其 README。memory-service 镜像运行时不访问 Hugging Face，Mem0 telemetry 关闭。
+
+## 配置
+
+所有变量使用 `TEST_AGENT_MEMORY_SERVICE_` 前缀，主要配置：
+
+```text
+API_KEY
+DATABASE_URL
+MODEL_GATEWAY_URL
+MODEL_GATEWAY_CLIENT_ID
+MODEL_GATEWAY_HMAC_SECRET
+CHAT_MODEL_ID
+CPU_EMBEDDING_MODEL_ID
+ENTERPRISE_EMBEDDING_MODEL_ID             # 三项同时为空或同时配置
+ENTERPRISE_EMBEDDING_DIMENSION
+ENTERPRISE_EMBEDDING_FINGERPRINT
+POSTGRES_POOL_MIN_SIZE
+POSTGRES_POOL_MAX_SIZE
+PROJECTION_BATCH_SIZE
+PROJECTION_POLL_SECONDS
+SEARCH_PROFILE_TIMEOUT_SECONDS             # 默认 1.5，硬上限 1.8 秒
 ```
 
-真实 pgvector/BGE smoke 使用 `TEST_AGENT_MEMORY_RUN_INTEGRATION=true` 显式开启；需要固定 revision 模型目录以及 Docker。
+API key/HMAC secret 至少 32 字节。配置及正文不能写日志。运行容器采用非 root、只读根文件系统和临时 `/tmp`，不挂载本地数据卷。
 
-完整本地数据面通过仓库根目录脚本显式启动：
+## 测试
+
+```bash
+uv sync --frozen --dev
+uv run pytest
+```
+
+真实 Mem0 2.0.17 + 双 collection + PostgreSQL/pgvector 集成测试（embedding 经内存模型网关桩，不下载权重）：
+
+```bash
+TESTCONTAINERS_RYUK_DISABLED=true TEST_AGENT_MEMORY_RUN_INTEGRATION=true \
+  uv run pytest tests/test_pgvector_integration.py
+```
+
+本地三副本数据面：
 
 ```bash
 tools/memory-dev-services.sh prepare
@@ -39,12 +85,4 @@ tools/memory-dev-services.sh start
 tools/memory-dev-services.sh status
 ```
 
-`restart-dev-services.sh --with-memory` 会调用同一辅助脚本；不带开关时不启动、探测或停止记忆容器。本地密钥只写入 `.tmp/dev-services/memory` 下的 `0600` 文件，不修改 `.env.local/.env.test`。
-
-## 运行配置
-
-所有配置使用 `TEST_AGENT_MEMORY_SERVICE_` 前缀。`API_KEY` 至少 32 字节；`DATABASE_URL`、`API_KEY` 不得输出日志。抽取模型通过 `EXTRACTION_GATEWAY_URL=/api/internal/platform/model-gateway/v1` 固定路径和短期 `mfg_` grant 调用，不接受供应商 URL 或长期密钥。
-
-生产容器默认以 UID/GID `10004` 运行，`/models` 只读，只有 `/data` 需要持久化写权限。Mem0 telemetry、PostHog 和 HuggingFace 运行期网络访问均关闭。
-
-本地、企业离线拓扑、备份、灰度、运行态验收和回滚见 `docs/deployment/qa-memory.md`。V1 的 Provider 注册表仅开启 `LOCAL_BGE`；后续企业 Embedding 接入时必须新增 Provider 和集合，不得覆盖现有向量。
+完整架构、限值、企业离线包、发布顺序、真实浏览器 E2E 和回滚见 `docs/deployment/qa-memory.md`。

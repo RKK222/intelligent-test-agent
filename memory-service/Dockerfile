@@ -1,5 +1,5 @@
-ARG PYTHON_IMAGE=python:3.12.11-slim-bookworm
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.17
+ARG PYTHON_IMAGE=python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.17@sha256:e4644cb5bd56fdc2c5ea3ee0525d9d21eed1603bccd6a21f887a938be7e85be1
 
 FROM ${UV_IMAGE} AS uv-bin
 
@@ -15,12 +15,9 @@ COPY --from=uv-bin /uv /usr/local/bin/uv
 WORKDIR /opt/test-agent-memory
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
-COPY scripts/download_model.py ./scripts/download_model.py
-RUN python ./scripts/download_model.py \
-      --destination /models/BAAI__bge-small-zh-v1.5 \
-      --model BAAI/bge-small-zh-v1.5 \
-      --revision 7999e1d3359715c523056ef9478215996d62a620
 COPY src ./src
+COPY alembic.ini ./alembic.ini
+COPY alembic ./alembic
 RUN uv sync --frozen --no-dev \
     && test "$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')" = "3.12"
 
@@ -31,33 +28,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/test-agent-memory/.venv/bin:${PATH} \
     MEM0_TELEMETRY=False \
     MEM0_TELEMETRY_SAMPLE_RATE=0 \
-    HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1 \
-    HF_DATASETS_OFFLINE=1 \
-    DO_NOT_TRACK=1 \
-    HF_HOME=/nonexistent/.cache/huggingface \
-    SENTENCE_TRANSFORMERS_HOME=/nonexistent/.cache/sentence-transformers
+    DO_NOT_TRACK=1
 
 RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends libgomp1; \
-    rm -rf /var/lib/apt/lists/*; \
     groupadd --gid 10004 memory; \
     useradd --uid 10004 --gid 10004 --no-create-home --home-dir /nonexistent memory; \
-    mkdir -p /opt/test-agent-memory /data; \
-    chown 10004:10004 /opt/test-agent-memory /data
+    mkdir -p /opt/test-agent-memory; \
+    chown 10004:10004 /opt/test-agent-memory
 
-ENV MEM0_DIR=/data/mem0
+ENV MEM0_DIR=/tmp/mem0
 
 WORKDIR /opt/test-agent-memory
 COPY --from=builder --chown=10004:10004 /opt/test-agent-memory/.venv ./.venv
 COPY --from=builder --chown=10004:10004 /opt/test-agent-memory/src ./src
-COPY --from=builder --chown=10004:10004 /models /models
-RUN test -f /models/BAAI__bge-small-zh-v1.5/.qa-memory-model.json
+COPY --from=builder --chown=10004:10004 /opt/test-agent-memory/alembic.ini ./alembic.ini
+COPY --from=builder --chown=10004:10004 /opt/test-agent-memory/alembic ./alembic
 
 USER 10004:10004
-VOLUME ["/data"]
 EXPOSE 18888
-HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=12 CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18888/memory-api/v1/health', timeout=2).read()"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=12 CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18888/health', timeout=2).read()"]
 ENTRYPOINT ["testagent-memory"]
 CMD ["--host", "0.0.0.0", "--port", "18888"]

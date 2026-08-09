@@ -33,7 +33,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-/** QA 长期记忆领域端口的 MyBatis XML 实现。 */
+/** 通用长期记忆领域端口的 MyBatis XML 实现；保留 QA 类名仅为物理表兼容。 */
 @Repository
 public class MyBatisQaMemoryRepository implements QaMemoryRepository {
 
@@ -94,6 +94,7 @@ public class MyBatisQaMemoryRepository implements QaMemoryRepository {
     public void insertEvidence(MemoryEvidence evidence) {
         mapper.insertEvidence(new EvidenceRow(
                 evidence.evidenceId(), evidence.memoryId().value(), evidence.runId(), evidence.sessionId(),
+                null, null,
                 evidence.observedUserId(), evidence.source().name(), evidence.summary(), evidence.observedAt()));
     }
 
@@ -101,6 +102,7 @@ public class MyBatisQaMemoryRepository implements QaMemoryRepository {
     public List<MemoryEvidence> listEvidence(MemoryId memoryId) {
         return mapper.listEvidence(memoryId.value()).stream().map(row -> new MemoryEvidence(
                 row.evidenceId(), new MemoryId(row.memoryId()), row.runId(), row.sessionId(),
+                row.sessionTitle(), row.sessionOwnerUserId(),
                 row.observedUserId(), MemorySource.valueOf(row.source()), row.evidenceSummary(), row.observedAt()))
                 .toList();
     }
@@ -238,14 +240,15 @@ public class MyBatisQaMemoryRepository implements QaMemoryRepository {
     public MemorySettings loadSettings() {
         SettingsRow row = mapper.loadSettings();
         return new MemorySettings(
-                row.primaryChatModelId(), row.currentRunModelFallbackEnabled(), row.version(),
+                row.primaryChatModelId(), row.primaryEmbeddingModelId(), row.cpuEmbeddingModelId(), row.version(),
                 row.updatedByUserId(), row.updatedAt());
     }
 
     @Override
     public boolean updateSettings(MemorySettings settings, long expectedVersion) {
         return mapper.updateSettings(new SettingsRow(
-                settings.primaryChatModelId(), settings.currentRunModelFallbackEnabled(), settings.version(),
+                settings.primaryChatModelId(), settings.primaryEmbeddingModelId(), settings.cpuEmbeddingModelId(),
+                settings.version(),
                 settings.updatedByUserId(), settings.updatedAt()), expectedVersion) == 1;
     }
 

@@ -41,4 +41,4 @@ mvn -q -DappLogDir=target/log -pl test-agent-model-gateway -am test
 上游错误正文被丢弃时还用 Netty 引用计数锁定 `DataBuffer` 已释放；`ModelCapabilityProbeServiceTest` 覆盖全部
 探测端点；`OpenAiUpstreamSupportTest` 锁定 OpenCode 复用契约。
 
-Memory 调用只接受 `/chat/completions` 上的短期 `mfg_` grant。API 层必须同时校验 `X-Memory-User-Id`、`X-Memory-Run-Id` 与请求公开模型 ID，调用身份固定标记为 `memory`；不得把该 grant 用于模型目录、Embedding、音频或其它端点。
+Memory 调用只接受 `/chat/completions` 与 `/embeddings` 上的集群 HMAC，不再签发短期 `mfg_` grant。API 层必须验证 body SHA-256、client/user/run/session/operation、timestamp、nonce、capability、签名和 embedding `query/document` 类型，并把 nonce 交 Redis 原子防重放；CHAT 只允许管理设置中的固定模型，Embedding 只允许企业 profile 或固定 CPU profile。调用身份固定标记为 `memory`，HMAC 不适用于模型目录、音频或其它端点。

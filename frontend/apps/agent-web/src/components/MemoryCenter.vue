@@ -6,8 +6,7 @@ import type {
   MemoryEvidenceView,
   MemorySkillProposalView,
   MemoryStatus,
-  MemoryView,
-  QaTaskType
+  MemoryView
 } from "@test-agent/shared-types";
 import {
   Archive,
@@ -45,22 +44,8 @@ if (!api) throw new Error("MemoryCenter requires backend api");
 type MemoryTab = "personal" | "team" | "skills";
 type MemoryEditorMode = "personal" | "team" | "edit";
 
-const TASK_OPTIONS: Array<{ value: QaTaskType; label: string }> = [
-  { value: "GENERAL", label: "通用测试" },
-  { value: "TEST_CASE_GENERATION", label: "测试案例生成" },
-  { value: "TEST_DATA_PREPARATION", label: "测试数据准备" },
-  { value: "REQUIREMENT_ANALYSIS", label: "需求分析" },
-  { value: "TEST_PLAN_DESIGN", label: "测试方案设计" },
-  { value: "DEFECT_ANALYSIS", label: "缺陷分析" },
-  { value: "ROOT_CAUSE_ANALYSIS", label: "根因定位" },
-  { value: "AUTOMATION_TESTING", label: "自动化测试" },
-  { value: "RISK_ANALYSIS", label: "风险分析" },
-  { value: "TEST_REPORTING", label: "测试报告" },
-  { value: "RESULT_ACCEPTANCE", label: "结果验收" }
-];
-
 const STATUS_LABELS: Record<MemoryStatus, string> = {
-  CANDIDATE: "观察中",
+  CANDIDATE: "待审核",
   PENDING_CONFIRMATION: "待确认",
   ACTIVE: "已生效",
   PAUSED: "已暂停",
@@ -87,9 +72,7 @@ const editorOpen = ref(false);
 const editorMode = ref<MemoryEditorMode>("personal");
 const editingMemory = ref<MemoryView | null>(null);
 const editorContent = ref("");
-const editorTaskTypes = ref<QaTaskType[]>(["GENERAL"]);
 const personalApplicationScope = ref(false);
-const directTeamCreate = ref(false);
 
 const skillEditorOpen = ref(false);
 const editingProposal = ref<MemorySkillProposalView | null>(null);
@@ -105,7 +88,7 @@ const appRequired = computed(() => tab.value !== "personal" && !props.selectedAp
 const editorTitle = computed(() => editorMode.value === "edit"
   ? "编辑记忆"
   : editorMode.value === "team"
-    ? (directTeamCreate.value ? "直接创建团队记忆" : "提交团队记忆候选")
+    ? "提交团队记忆"
     : "添加个人记忆");
 
 onMounted(() => void initialize());
@@ -162,9 +145,7 @@ function openCreate(mode: Exclude<MemoryEditorMode, "edit">) {
   editorMode.value = mode;
   editingMemory.value = null;
   editorContent.value = "";
-  editorTaskTypes.value = ["GENERAL"];
   personalApplicationScope.value = mode === "personal" && Boolean(props.selectedAppId);
-  directTeamCreate.value = false;
   editorOpen.value = true;
 }
 
@@ -172,7 +153,6 @@ function openEdit(memory: MemoryView) {
   editorMode.value = "edit";
   editingMemory.value = memory;
   editorContent.value = memory.contentAvailable ? memory.content : memory.displaySummary;
-  editorTaskTypes.value = [...memory.taskTypes];
   personalApplicationScope.value = memory.scope === "PERSONAL_APPLICATION";
   editorOpen.value = true;
 }
@@ -180,11 +160,7 @@ function openEdit(memory: MemoryView) {
 async function saveMemory() {
   const content = editorContent.value.trim();
   if (!content) {
-    ElMessage.warning("请填写需要长期复用的测试习惯");
-    return;
-  }
-  if (editorTaskTypes.value.length === 0) {
-    ElMessage.warning("至少选择一个适用任务");
+    ElMessage.warning("请填写需要长期复用的信息或偏好");
     return;
   }
   if (editorMode.value === "personal" && personalApplicationScope.value && !props.selectedAppId) {
@@ -196,23 +172,19 @@ async function saveMemory() {
     if (editorMode.value === "edit" && editingMemory.value) {
       await api.updateQaMemory(editingMemory.value.memoryId, {
         content,
-        taskTypes: editorTaskTypes.value,
         expectedVersion: editingMemory.value.version
       });
     } else if (editorMode.value === "team") {
-      const payload = { applicationId: props.selectedAppId!, content, taskTypes: editorTaskTypes.value };
-      if (directTeamCreate.value && props.canManageTeam) await api.createTeamMemory(payload);
-      else await api.createTeamMemoryProposal(payload);
+      await api.createTeamMemoryProposal({ applicationId: props.selectedAppId!, content });
     } else {
       await api.createPersonalMemory({
         scope: personalApplicationScope.value ? "PERSONAL_APPLICATION" : "PERSONAL_GLOBAL",
         applicationId: personalApplicationScope.value ? props.selectedAppId : null,
-        content,
-        taskTypes: editorTaskTypes.value
+        content
       });
     }
     editorOpen.value = false;
-    ElMessage.success(editorMode.value === "team" && !directTeamCreate.value ? "团队候选已提交审核" : "记忆已保存");
+    ElMessage.success(editorMode.value === "team" ? "团队记忆已提交审核" : "记忆已保存");
     await loadCurrentTab();
   } catch (error) {
     showActionError(error, "保存失败");
@@ -235,17 +207,17 @@ async function openDetails(memory: MemoryView) {
   }
 }
 
-async function confirmMemory(memory: MemoryView) {
-  await runMemoryAction(
-    () => api.confirmPersonalMemory(memory.memoryId, memory.version),
-    "已确认，这条习惯将在适用任务中生效"
-  );
-}
-
 async function pauseMemory(memory: MemoryView) {
   await runMemoryAction(
     () => api.pausePersonalMemory(memory.memoryId, memory.version),
     "记忆已暂停"
+  );
+}
+
+async function promoteGlobal(memory: MemoryView) {
+  await runMemoryAction(
+    () => api.promotePersonalMemoryGlobal(memory.memoryId, memory.version),
+    "已提升为个人全局记忆"
   );
 }
 
@@ -400,6 +372,36 @@ async function archiveSkill(proposal: MemorySkillProposalView) {
   }
 }
 
+async function proposePersonalToTeam(memory: MemoryView) {
+  if (!props.selectedAppId) {
+    ElMessage.warning("请先选择一个 Application");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      "将以当前正文提交团队候选，并仅复制来源 Session/Run 引用和摘要；原始对话不会进入记忆库。",
+      "提交为团队记忆"
+    );
+  } catch {
+    return;
+  }
+  actionLoading.value = true;
+  try {
+    await api.createTeamMemoryProposal({
+      applicationId: props.selectedAppId,
+      content: memory.contentAvailable ? memory.content : memory.displaySummary,
+      sourceMemoryId: memory.memoryId
+    });
+    ElMessage.success("已提交团队候选，等待 APP_ADMIN 审核");
+    detailOpen.value = false;
+    tab.value = "team";
+  } catch (error) {
+    showActionError(error, "团队候选提交失败");
+  } finally {
+    actionLoading.value = false;
+  }
+}
+
 function statusClass(status: MemoryStatus) {
   if (status === "CONFLICTED") return "conflict";
   if (status === "CANDIDATE" || status === "PENDING_CONFIRMATION") return "candidate";
@@ -413,13 +415,13 @@ function scopeLabel(memory: MemoryView) {
   return "个人 · 全局";
 }
 
-function taskLabel(task: QaTaskType) {
-  return TASK_OPTIONS.find((item) => item.value === task)?.label ?? task;
-}
-
 function formatTime(value?: string | null) {
   if (!value) return "—";
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function sessionHref(sessionId: string) {
+  return `/s/${encodeURIComponent(sessionId)}`;
 }
 
 function isCancel(error: unknown) {
@@ -436,9 +438,9 @@ function showActionError(error: unknown, fallback: string) {
   <section class="memory-center" aria-labelledby="memory-center-title" data-testid="memory-center">
     <header class="memory-hero">
       <div>
-        <div class="memory-eyebrow"><BrainCircuit :size="15" /> QA MEMORY</div>
-        <h1 id="memory-center-title">测试习惯记忆</h1>
-        <p>只沉淀可复用的工作习惯；原始聊天仍留在原会话，项目知识和通用方法走各自的治理路径。</p>
+        <div class="memory-eyebrow"><BrainCircuit :size="15" /> MEMORY</div>
+        <h1 id="memory-center-title">长期记忆</h1>
+        <p>Mem0 从对话中原生学习通用信息和偏好；原始聊天只保留在平台会话中，团队记忆始终走人工审核。</p>
       </div>
       <button class="memory-refresh" type="button" :disabled="loading" aria-label="刷新记忆" @click="loadCurrentTab">
         <RefreshCw :size="16" :class="{ spinning: loading }" />
@@ -476,7 +478,7 @@ function showActionError(error: unknown, fallback: string) {
           <Plus :size="16" />添加个人记忆
         </button>
         <button v-else class="memory-primary memory-primary--team" type="button" :disabled="!selectedAppId" data-testid="add-team-memory" @click="openCreate('team')">
-          <Send :size="16" />{{ canManageTeam ? "新增团队记忆" : "提交团队候选" }}
+          <Send :size="16" />提交团队记忆
         </button>
       </div>
 
@@ -504,12 +506,8 @@ function showActionError(error: unknown, fallback: string) {
               <span :class="['memory-status', statusClass(memory.status)]">{{ STATUS_LABELS[memory.status] }}</span>
             </span>
             <strong>{{ memory.displaySummary }}</strong>
-            <span class="memory-card__tasks">
-              <span v-for="task in memory.taskTypes.slice(0, 3)" :key="task">{{ taskLabel(task) }}</span>
-              <span v-if="memory.taskTypes.length > 3">+{{ memory.taskTypes.length - 3 }}</span>
-            </span>
             <span class="memory-card__meta">
-              {{ memory.distinctSessionCount }} 个会话证据 · 置信度 {{ Math.round(memory.confidence * 100) }}%
+              版本 {{ memory.version }} · 更新于 {{ formatTime(memory.updatedAt) }}
             </span>
           </button>
           <div class="memory-card__actions">
@@ -521,7 +519,7 @@ function showActionError(error: unknown, fallback: string) {
       <div v-else-if="tab !== 'skills'" class="memory-state memory-state--quiet">
         <BrainCircuit :size="28" />
         <strong>{{ tab === "personal" ? "还没有个人记忆" : "当前应用还没有团队记忆" }}</strong>
-        <span>{{ tab === "personal" ? "可以手工添加明确习惯；隐式习惯会在跨会话证据足够后出现。" : "普通成员可提交候选，APP_ADMIN 审核后才会对团队生效。" }}</span>
+        <span>{{ tab === "personal" ? "可以手工添加，或在对话完成后由 Mem0 原生学习。" : "所有成员只能提交，APP_ADMIN 审核后才会对团队生效。" }}</span>
       </div>
 
       <div v-else-if="skillProposals.length" class="skill-proposal-list" data-testid="skill-proposal-list">
@@ -559,27 +557,16 @@ function showActionError(error: unknown, fallback: string) {
     <el-dialog v-model="editorOpen" class="memory-editor-dialog" :title="editorTitle" width="min(620px, calc(100vw - 32px))" append-to-body>
       <form class="memory-editor" @submit.prevent="saveMemory">
         <label>
-          <span>稳定测试习惯</span>
-          <textarea v-model="editorContent" rows="5" maxlength="2000" placeholder="例如：生成测试案例时必须覆盖异常路径和边界条件，并注明每条案例的验收依据。" />
-          <small>{{ editorContent.length }}/2000；不要填写项目业务知识或一次性任务要求</small>
+          <span>长期信息或偏好</span>
+          <textarea v-model="editorContent" rows="5" maxlength="2000" placeholder="例如：回答时优先使用中文，并先给结论再说明依据。" />
+          <small>{{ editorContent.length }}/2000；原始对话不会复制到记忆库</small>
         </label>
         <fieldset v-if="editorMode === 'personal'">
           <legend>适用范围</legend>
           <label class="memory-radio"><input v-model="personalApplicationScope" type="radio" :value="false" />所有应用</label>
           <label class="memory-radio"><input v-model="personalApplicationScope" type="radio" :value="true" :disabled="!selectedAppId" />当前应用</label>
         </fieldset>
-        <label v-if="editorMode === 'team' && canManageTeam" class="memory-switch">
-          <input v-model="directTeamCreate" type="checkbox" />
-          <span><strong>管理员直接生效</strong><small>关闭时仍作为候选进入审核链路</small></span>
-        </label>
-        <fieldset>
-          <legend>适用测试任务</legend>
-          <div class="memory-task-grid">
-            <label v-for="option in TASK_OPTIONS" :key="option.value">
-              <input v-model="editorTaskTypes" type="checkbox" :value="option.value" />{{ option.label }}
-            </label>
-          </div>
-        </fieldset>
+        <p v-if="editorMode === 'team'" class="memory-editor__notice">团队记忆提交后保持待审核状态，即使 APP_ADMIN 提交也不能绕过审核。</p>
       </form>
       <template #footer>
         <button class="memory-secondary" type="button" @click="editorOpen = false">取消</button>
@@ -617,12 +604,18 @@ function showActionError(error: unknown, fallback: string) {
         <div class="evidence-rail" data-testid="memory-evidence-rail">
           <article v-for="item in evidence" :key="item.evidenceId" class="evidence-node evidence-node--observation">
             <span class="evidence-node__dot"><FileSearch2 :size="14" /></span>
-            <div><strong>观察</strong><p>{{ item.summary }}</p><small>会话 {{ item.sessionId }} · {{ formatTime(item.observedAt) }}</small></div>
+            <div>
+              <strong>{{ item.sessionTitle || "未命名对话" }}</strong>
+              <p>{{ item.summary }}</p>
+              <small>会话 ID {{ item.sessionId || "—" }} · Run ID {{ item.runId || "—" }} · {{ formatTime(item.observedAt) }}</small>
+              <a v-if="item.transcriptAvailable && item.sessionId" class="evidence-session-link" :href="sessionHref(item.sessionId)">打开原始对话</a>
+              <span v-else class="evidence-session-unavailable">仅会话所有者可打开原始对话</span>
+            </div>
           </article>
           <article v-if="evidenceLoading" class="evidence-node"><span class="evidence-node__dot"><RefreshCw class="spinning" :size="14" /></span><div><strong>读取证据</strong></div></article>
           <article v-else-if="!evidence.length" class="evidence-node"><span class="evidence-node__dot"><FileClock :size="14" /></span><div><strong>暂无可展示证据</strong><p>手工添加的记忆可以直接成为事实，不依赖原始聊天副本。</p></div></article>
           <article v-if="selectedMemory.confirmedAt" class="evidence-node evidence-node--confirmation">
-            <span class="evidence-node__dot"><Check :size="14" /></span><div><strong>确认</strong><p>用户或管理员已明确确认这条记忆。</p><small>{{ formatTime(selectedMemory.confirmedAt) }}</small></div>
+            <span class="evidence-node__dot"><Check :size="14" /></span><div><strong>生效</strong><p>这条记忆已进入可检索状态。</p><small>{{ formatTime(selectedMemory.confirmedAt) }}</small></div>
           </article>
           <article class="evidence-node evidence-node--usage">
             <span class="evidence-node__dot"><BrainCircuit :size="14" /></span><div><strong>使用</strong><p>只有实际注入 Run 的记忆才会记账，并在对应对话结果显示“参考了 N 条记忆”。</p></div>
@@ -633,9 +626,10 @@ function showActionError(error: unknown, fallback: string) {
         </div>
 
         <div class="memory-detail__actions">
-          <button v-if="selectedMemory.scope !== 'TEAM_APPLICATION' && (selectedMemory.status === 'PENDING_CONFIRMATION' || selectedMemory.status === 'CONFLICTED')" class="memory-primary" type="button" :disabled="actionLoading" @click="confirmMemory(selectedMemory)"><Check :size="15" />确认并生效</button>
+          <button v-if="selectedMemory.scope === 'PERSONAL_APPLICATION'" type="button" :disabled="actionLoading" @click="promoteGlobal(selectedMemory)"><BrainCircuit :size="15" />提升为个人全局</button>
+          <button v-if="selectedMemory.scope !== 'TEAM_APPLICATION' && selectedMemory.status === 'ACTIVE' && selectedAppId" type="button" :disabled="actionLoading" @click="proposePersonalToTeam(selectedMemory)"><UsersRound :size="15" />提交为团队记忆</button>
           <button v-if="selectedMemory.scope !== 'TEAM_APPLICATION' && selectedMemory.status === 'ACTIVE'" type="button" :disabled="actionLoading" @click="pauseMemory(selectedMemory)"><Pause :size="15" />暂停使用</button>
-          <template v-if="selectedMemory.scope === 'TEAM_APPLICATION' && canManageTeam && (selectedMemory.status === 'PENDING_CONFIRMATION' || selectedMemory.status === 'CONFLICTED')">
+          <template v-if="selectedMemory.scope === 'TEAM_APPLICATION' && canManageTeam && (selectedMemory.status === 'CANDIDATE' || selectedMemory.status === 'PENDING_CONFIRMATION' || selectedMemory.status === 'CONFLICTED')">
             <button class="memory-primary memory-primary--team" type="button" :disabled="actionLoading" @click="reviewTeam(selectedMemory, 'APPROVE')"><Check :size="15" />批准</button>
             <button type="button" :disabled="actionLoading" @click="reviewTeam(selectedMemory, 'REJECT')"><X :size="15" />拒绝</button>
           </template>
@@ -731,8 +725,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .memory-status.candidate { background: color-mix(in srgb, var(--memory-candidate) 14%, transparent); color: var(--memory-candidate); }
 .memory-status.conflict { background: color-mix(in srgb, var(--memory-conflict) 12%, transparent); color: var(--memory-conflict); }
 .memory-card__main > strong { min-height: 42px; color: var(--ta-shell-header-text, #111827); font-size: 14px; line-height: 1.55; }
-.memory-card__tasks { display: flex; flex-wrap: wrap; gap: 5px; }
-.memory-card__tasks span { border: 1px solid var(--ta-shell-border, #e5e7eb); border-radius: 4px; padding: 2px 6px; color: var(--ta-shell-muted, #6b7280); font-size: 10px; }
 .memory-card__meta { margin-top: auto; color: var(--ta-shell-muted, #6b7280); font-size: 11px; }
 .memory-card__actions { display: flex; justify-content: space-between; padding: 8px 10px; border-top: 1px solid var(--ta-shell-border, #e5e7eb); }
 .memory-card__actions button { min-height: 28px; padding: 0 8px; border: 0; background: transparent; }
@@ -762,8 +754,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .memory-radio { display: inline-flex; align-items: center; gap: 6px; margin-right: 18px; font-size: 12px; }
 .memory-switch { grid-template-columns: auto 1fr !important; align-items: center; }
 .memory-switch span { display: grid; }
-.memory-task-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.memory-task-grid label { display: flex; align-items: center; gap: 6px; color: var(--ta-shell-muted, #6b7280); font-size: 11px; }
 .skill-draft { font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; font-size: 12px !important; line-height: 1.6; }
 .memory-detail__header { display: grid; gap: 4px; padding-right: 20px; }
 .memory-detail__header span { color: var(--ta-shell-muted, #6b7280); font-size: 11px; }
@@ -784,6 +774,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .evidence-node strong { color: var(--ta-shell-header-text, #111827); font-size: 12px; }
 .evidence-node p { margin: 5px 0; font-size: 12px; line-height: 1.55; }
 .evidence-node small { color: var(--ta-shell-muted, #6b7280); font-size: 10px; }
+.evidence-session-link, .evidence-session-unavailable { display: block; width: fit-content; margin-top: 7px; font-size: 10px; }
+.evidence-session-link { color: var(--memory-personal); font-weight: 650; text-decoration: none; }
+.evidence-session-link:hover { text-decoration: underline; }
+.evidence-session-unavailable { color: var(--ta-shell-muted, #6b7280); }
 .memory-detail__actions { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 7px; margin: 10px -20px -20px; padding: 12px 20px; border-top: 1px solid var(--ta-shell-border, #e5e7eb); background: color-mix(in srgb, var(--ta-shell-surface, #fff) 94%, transparent); backdrop-filter: blur(8px); }
 .spinning { animation: memory-spin .9s linear infinite; }
 @keyframes memory-spin { to { transform: rotate(360deg); } }
@@ -825,7 +819,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .memory-tabs button { font-size: 11px; }
   .memory-toolbar { align-items: flex-start; }
   .memory-metrics { flex-direction: column; gap: 2px; }
-  .memory-task-grid { grid-template-columns: 1fr; }
   .skill-proposal-card { padding: 12px; }
   .skill-proposal-card__icon { display: none; }
   :global(.memory-detail-drawer) { width: 100vw !important; }

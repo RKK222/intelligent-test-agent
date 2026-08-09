@@ -147,7 +147,6 @@ import type {
   PublicAgentRepositoryStatus,
   PublicAgentConfigRolloutStatus,
   ProviderInfo,
-  QaTaskType,
   RepositoryDeploymentOptions,
   RepositoryTreeResponse,
   PublishPersonalWorkspacePayload,
@@ -419,8 +418,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const lobehubSsoBase = "/api/internal/platform/lobehub-sso";
   const systemManagementBase = "/api/internal/platform/system-management";
   const toolboxBase = "/api/internal/platform/toolbox";
-  const qaMemoryBase = "/api/internal/platform/qa-memory/v1";
-  const qaMemoryAdminBase = `${systemManagementBase}/memory`;
+  const memoryBase = "/api/internal/platform/memory/v1";
+  const memoryAdminBase = `${memoryBase}/admin`;
   const analyticsBase = "/api/internal/platform/analytics";
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
@@ -2386,22 +2385,21 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         }
       ),
 
-    // ---- QA 长期记忆 API ----
+    // ---- 通用长期记忆 API ----
 
     getQaMemoryAvailability: () =>
-      request<{ enabled: boolean }>(`${qaMemoryBase}/availability`),
+      request<{ enabled: boolean }>(`${memoryBase}/availability`),
     listPersonalMemories: (params: {
       applicationId?: string;
       status?: MemoryStatus;
       page?: number;
       size?: number;
-    } = {}) => request<PageResponse<MemoryView>>(`${qaMemoryBase}/personal${query(params)}`),
+    } = {}) => request<PageResponse<MemoryView>>(`${memoryBase}/personal${query(params)}`),
     createPersonalMemory: (payload: {
       scope: Extract<MemoryScope, "PERSONAL_GLOBAL" | "PERSONAL_APPLICATION">;
       applicationId?: string | null;
       content: string;
-      taskTypes: QaTaskType[];
-    }) => request<MemoryView>(`${qaMemoryBase}/personal`, {
+    }) => request<MemoryView>(`${memoryBase}/personal`, {
       method: "POST",
       body: JSON.stringify(payload)
     }),
@@ -2410,20 +2408,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       status?: MemoryStatus;
       page?: number;
       size?: number;
-    } = {}) => request<PageResponse<MemoryView>>(`${qaMemoryBase}/team${query(params)}`),
+    } = {}) => request<PageResponse<MemoryView>>(`${memoryBase}/team${query(params)}`),
     createTeamMemoryProposal: (payload: {
       applicationId: string;
       content: string;
-      taskTypes: QaTaskType[];
-    }) => request<MemoryView>(`${qaMemoryBase}/team/proposals`, {
-      method: "POST",
-      body: JSON.stringify(payload)
-    }),
-    createTeamMemory: (payload: {
-      applicationId: string;
-      content: string;
-      taskTypes: QaTaskType[];
-    }) => request<MemoryView>(`${qaMemoryBase}/team`, {
+      sourceMemoryId?: string;
+    }) => request<MemoryView>(`${memoryBase}/team/proposals`, {
       method: "POST",
       body: JSON.stringify(payload)
     }),
@@ -2431,39 +2421,38 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       decision: "APPROVE" | "REJECT";
       comment?: string;
       expectedVersion: number;
-    }) => request<MemoryView>(`${qaMemoryBase}/team/${encodeURIComponent(memoryId)}/reviews`, {
+    }) => request<MemoryView>(`${memoryBase}/team/${encodeURIComponent(memoryId)}/reviews`, {
       method: "POST",
       body: JSON.stringify(payload)
     }),
     getQaMemory: (memoryId: string) =>
-      request<MemoryView>(`${qaMemoryBase}/memories/${encodeURIComponent(memoryId)}`),
+      request<MemoryView>(`${memoryBase}/memories/${encodeURIComponent(memoryId)}`),
     updateQaMemory: (memoryId: string, payload: {
       content?: string;
-      taskTypes?: QaTaskType[];
       expectedVersion: number;
-    }) => request<MemoryView>(`${qaMemoryBase}/memories/${encodeURIComponent(memoryId)}`, {
+    }) => request<MemoryView>(`${memoryBase}/memories/${encodeURIComponent(memoryId)}`, {
       method: "PATCH",
       body: JSON.stringify(payload)
     }),
-    confirmPersonalMemory: (memoryId: string, expectedVersion: number) =>
-      request<MemoryView>(`${qaMemoryBase}/personal/${encodeURIComponent(memoryId)}/confirm`, {
+    promotePersonalMemoryGlobal: (memoryId: string, expectedVersion: number) =>
+      request<MemoryView>(`${memoryBase}/personal/${encodeURIComponent(memoryId)}/promote-global`, {
         method: "POST",
         body: JSON.stringify({ expectedVersion })
       }),
     pausePersonalMemory: (memoryId: string, expectedVersion: number) =>
-      request<MemoryView>(`${qaMemoryBase}/personal/${encodeURIComponent(memoryId)}/pause`, {
+      request<MemoryView>(`${memoryBase}/personal/${encodeURIComponent(memoryId)}/pause`, {
         method: "POST",
         body: JSON.stringify({ expectedVersion })
       }),
     archiveQaMemory: (memoryId: string, expectedVersion: number) =>
       request<MemoryView>(
-        `${qaMemoryBase}/memories/${encodeURIComponent(memoryId)}${query({ expectedVersion })}`,
+        `${memoryBase}/memories/${encodeURIComponent(memoryId)}${query({ expectedVersion })}`,
         { method: "DELETE" }
       ),
     listQaMemoryEvidence: (memoryId: string) =>
-      request<MemoryEvidenceView[]>(`${qaMemoryBase}/memories/${encodeURIComponent(memoryId)}/evidence`),
+      request<MemoryEvidenceView[]>(`${memoryBase}/memories/${encodeURIComponent(memoryId)}/evidence`),
     queryQaMemoryRunUsage: (runIds: string[]) =>
-      request<MemoryUsageView[]>(`${qaMemoryBase}/run-usage/query`, {
+      request<MemoryUsageView[]>(`${memoryBase}/run-usage/query`, {
         method: "POST",
         body: JSON.stringify({ runIds })
       }),
@@ -2471,55 +2460,55 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       memoryId: string;
       applicationId: string;
       title?: string;
-    }) => request<MemorySkillProposalView>(`${qaMemoryBase}/skill-proposals`, {
+    }) => request<MemorySkillProposalView>(`${memoryBase}/skill-proposals`, {
       method: "POST",
       body: JSON.stringify(payload)
     }),
     listMemorySkillProposals: (params: { applicationId?: string; page?: number; size?: number } = {}) =>
-      request<PageResponse<MemorySkillProposalView>>(`${qaMemoryBase}/skill-proposals${query(params)}`),
+      request<PageResponse<MemorySkillProposalView>>(`${memoryBase}/skill-proposals${query(params)}`),
     updateMemorySkillProposal: (proposalId: string, payload: {
       title?: string;
       skillMdDraft: string;
       expectedVersion: number;
     }) => request<MemorySkillProposalView>(
-      `${qaMemoryBase}/skill-proposals/${encodeURIComponent(proposalId)}`,
+      `${memoryBase}/skill-proposals/${encodeURIComponent(proposalId)}`,
       { method: "PATCH", body: JSON.stringify(payload) }
     ),
     reviewMemorySkillProposal: (proposalId: string, decision: "APPROVE" | "REJECT", expectedVersion: number) =>
       request<MemorySkillProposalView>(
-        `${qaMemoryBase}/skill-proposals/${encodeURIComponent(proposalId)}/reviews`,
+        `${memoryBase}/skill-proposals/${encodeURIComponent(proposalId)}/reviews`,
         { method: "POST", body: JSON.stringify({ decision, expectedVersion }) }
       ),
     linkPublishedMemorySkill: (proposalId: string, publishedAssetId: string, expectedVersion: number) =>
       request<MemorySkillProposalView>(
-        `${qaMemoryBase}/skill-proposals/${encodeURIComponent(proposalId)}/published-asset`,
+        `${memoryBase}/skill-proposals/${encodeURIComponent(proposalId)}/published-asset`,
         { method: "POST", body: JSON.stringify({ publishedAssetId, expectedVersion }) }
       ),
     archiveMemorySkillProposal: (proposalId: string, expectedVersion: number) =>
       request<MemorySkillProposalView>(
-        `${qaMemoryBase}/skill-proposals/${encodeURIComponent(proposalId)}${query({ expectedVersion })}`,
+        `${memoryBase}/skill-proposals/${encodeURIComponent(proposalId)}${query({ expectedVersion })}`,
         { method: "DELETE" }
       ),
 
-    getQaMemoryAdminHealth: () => request<MemoryAdminHealth>(`${qaMemoryAdminBase}/health`),
-    getQaMemorySettings: () => request<MemorySettingsView>(`${qaMemoryAdminBase}/settings`),
+    getQaMemoryAdminHealth: () => request<MemoryAdminHealth>(`${memoryAdminBase}/health`),
+    getQaMemorySettings: () => request<MemorySettingsView>(`${memoryAdminBase}/settings`),
     updateQaMemorySettings: (payload: {
       primaryChatModelId?: string | null;
-      currentRunModelFallbackEnabled: boolean;
+      primaryEmbeddingModelId?: string | null;
       expectedVersion: number;
-    }) => request<MemorySettingsView>(`${qaMemoryAdminBase}/settings`, {
+    }) => request<MemorySettingsView>(`${memoryAdminBase}/settings`, {
       method: "PATCH",
       body: JSON.stringify(payload)
     }),
     listQaMemoryWhitelist: (page = 1, size = 50) =>
-      request<PageResponse<MemoryWhitelistView>>(`${qaMemoryAdminBase}/whitelist${query({ page, size })}`),
+      request<PageResponse<MemoryWhitelistView>>(`${memoryAdminBase}/whitelist${query({ page, size })}`),
     enableQaMemoryUser: (userId: string) =>
-      request<MemoryWhitelistView>(`${qaMemoryAdminBase}/whitelist`, {
+      request<MemoryWhitelistView>(`${memoryAdminBase}/whitelist`, {
         method: "POST",
         body: JSON.stringify({ userId })
       }),
     disableQaMemoryUser: (userId: string) =>
-      request<void>(`${qaMemoryAdminBase}/whitelist/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+      request<void>(`${memoryAdminBase}/whitelist/${encodeURIComponent(userId)}`, { method: "DELETE" }),
 
     // ---- 工具盒子 API ----
 

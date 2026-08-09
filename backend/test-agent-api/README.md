@@ -141,8 +141,8 @@
 
 ## 后续 AI 编码指引
 
-QA 长期记忆 HTTP 入口固定在 `/api/internal/platform/qa-memory/v1/**`，系统管理入口固定在
-`/api/internal/platform/system-management/memory/**`。Controller 只做当前用户/角色鉴权、DTO、traceId 和统一响应；
+通用长期记忆 HTTP 入口固定在 `/api/internal/platform/memory/v1/**`，系统管理入口固定在同前缀的
+`/admin/**`。旧 `/qa-memory/v1/**` 由专用 Controller 返回 `410 API_GONE`。Controller 只做当前用户/角色鉴权、DTO、traceId 和统一响应；
 个人/团队范围、Application 成员和 `expectedVersion` 规则由 `test-agent-memory` 执行。Run 使用记录通过批量 HTTP
 恢复，不新增或修改 RunEvent SSE。Skill 提案创建、审核、草稿编辑、归档和已发布资产关联均使用该前缀；审核与关联
 要求 `APP_ADMIN`，Controller 不直接写 Workspace、不调用 Git 或 Hub 发布协议。

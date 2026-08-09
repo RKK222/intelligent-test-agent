@@ -118,10 +118,13 @@ require_text "docs/deployment/backend.md" "tools/verify-opencode-process-deploym
 require_text "docs/deployment/backend.md" "多服务器用户进程拓扑规划"
 require_text "docs/deployment/qa-memory.md" "rawMessageCount=0"
 require_text "docs/deployment/qa-memory.md" "b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a"
+require_text "docs/deployment/qa-memory.md" "2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3"
 require_text "docs/deployment/qa-memory.md" "--with-memory"
-require_text "docs/deployment/qa-memory.md" "未来企业 Embedding"
-require_text "memory-service/README.md" "mem0ai==2.0.3"
-require_text "backend/test-agent-memory/README.md" "不保存聊天记录"
+require_text "docs/deployment/qa-memory.md" "--memory-only"
+require_text "docs/deployment/qa-memory.md" "双 Embedding profile"
+require_text "docs/api/http-api.md" "/api/internal/platform/memory/v1"
+require_text "memory-service/README.md" "mem0ai==2.0.17"
+require_text "backend/test-agent-memory/README.md" "不保存聊天副本"
 require_text "docs/deployment/database.md" "V10 opencode 用户进程管理表"
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '中转机不创建、不使用 `/data/0709`'
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'cd ~/Desktop/mimoagent/0709'

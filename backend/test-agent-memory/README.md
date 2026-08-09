@@ -2,37 +2,35 @@
 
 ## 工程定位
 
-QA Agent 长期记忆的业务编排模块。它负责个人记忆、Application 团队记忆、证据、冲突、审核、检索合并、Run 学习和 Skill 提案，不保存聊天记录，也不承担项目知识库职责。
+通用长期记忆的 Java 编排模块。它负责平台治理、个人/团队授权、证据引用、学习 outbox、运行前检索、Run usage 和 Skill 提案；不保存聊天副本，不直连记忆 PostgreSQL，也不承担项目知识库职责。
 
-## 数据事实边界
+## 事实与依赖边界
 
-- Mem0 是派生记忆正文、向量和记忆历史的事实源。
-- 平台 PostgreSQL 只保存治理元数据、适用范围、最多 200 字的证据摘要、审核、学习 Outbox、Run 使用记录和灰度白名单。
-- OpenCode Session 与现有恢复链路仍是原始聊天的事实源；本模块只在学习任务执行期间瞬时读取当前 Run 对应的用户输入和最终回答。
-- `displaySummary` 是列表降级展示字段，不是可直接注入 Agent 的记忆事实。
+- 平台 PostgreSQL：范围、状态、owner/Application、证据 Session/Run 引用和摘要、审核、学习 outbox、usage、白名单、设置。
+- memory-service：派生正文、逻辑版本、Mem0 history、幂等、双 collection 投影/outbox 和向量。
+- 平台 Session：原始聊天的唯一事实源。worker 只在成功人工根 Run 的学习任务中瞬时读取本轮 USER/ASSISTANT。
+- `MemoryDocumentStore` 是唯一 REST 端口；Controller 不直接调用它，业务层不依赖 generated SDK。
 
-## Mem0 适配边界
+## 学习和检索
 
-- `MemoryDocumentStore` 是本模块访问独立 `memory-service` 的唯一端口；启用开关关闭时装配安全降级实现，不能影响既有 Run。
-- `HttpMemoryDocumentStore` 只调用受控的 ready、派生记忆 CRUD/search/history 和候选抽取窄接口，请求超时、响应大小和 ID 格式都在适配层收口；管理健康使用带 service key 的 `/ready`，同时核验 pgvector/Embedding 和原始消息零持久化合同，不把无鉴权 `/health` 当作业务就绪。
-- 原始聊天只允许作为抽取请求的瞬时输入，不得调用派生记忆写入接口保存整段消息；正文、模型短期授权和服务密钥不得进入日志或 `toString()`。
-- Python 服务的固定版本、离线模型和运行说明见仓库根目录 `memory-service/README.md`。
-- 完整数据边界、本地 `--with-memory` 启动、企业离线拓扑、灰度和回滚见 `docs/deployment/qa-memory.md`。
+- 白名单用户、且能解析到当前 Application 的成功人工根 Run 写无原文学习 outbox；无法解析 Application 时不自动学习，也不会降级生成个人全局记忆。worker 读取本轮消息后调用 `/memories`，固定 `infer=true`、固定管理端 CHAT model，不添加平台抽取 prompt。
+- Mem0 原生个人记忆直接 `ACTIVE`。默认 `PERSONAL_APPLICATION`；owner 可提升为 `PERSONAL_GLOBAL`。
+- 团队记忆只允许成员手工提案，始终 `CANDIDATE`，必须由 `APP_ADMIN` 审核。个人记忆提案可以携带 `sourceMemoryId`，只复制安全证据引用/摘要。
+- Run 前一次 `/search` 包含个人全局、Application 个人和团队三个 scope。总超时默认 2 秒，任何错误 fail-open；最多注入 6 条/约 800 tokens。
+- DTO 和运行逻辑不再使用 `taskTypes`、自定义 confidence、QA candidate、显式/隐式/临时来源。
 
-## 自动学习与运行时复用
+## 模型网关安全
 
-- 只有灰度白名单用户的成功人工根 Run 会写学习 Outbox；Outbox 仅保存 Run、Session、Workspace、用户、Application 和模型定位字段。worker 随后从既有 `session_messages` 恢复链瞬时读取 USER/ASSISTANT 内容，忽略工具输出，并把抽取失败限制在异步重试链路。
-- 抽取模型按“系统管理固定 CHAT 模型 → 当前 Run 内部 CHAT 模型”选择；回退前必须再次通过内部目录与 CHAT 探测。每次调用签发绑定用户、Run、模型且只能消费一次的 `mfg_` grant，Redis 只以 SHA-256 摘要寻址。
-- 明确要求或手工记忆一次生效；隐式偏好必须在 90 天内由 3 个不同 Session 支撑。临时要求丢弃；明确替代会封存旧版本，隐式冲突进入待确认状态。
-- 自动团队候选只接受当前 Application 有效成员的证据，至少需要 2 名成员和 3 个不同 Session；达到阈值后仍只进入 `PENDING_CONFIRMATION`，必须由 `APP_ADMIN` 审核，绝不自动替代团队记忆。
-- Run 启动前并行搜索个人全局、个人 Application 和团队 Application 范围，重新校验白名单、成员关系、状态、任务类型和正文安全。整个检索预算默认 600ms，最多注入 6 条、约 800 tokens；超时或任一依赖失败都返回空上下文继续原 Run。
-- 只有已选中、已写入批量使用记录的条目才进入 `AgentStartRunCommand.system`。当前输入与 Application 规则始终优先，注入内容不得被解释为项目业务事实。
+Mem0 回调 `/api/internal/platform/model-gateway/v1/chat/completions|embeddings` 使用 `MemoryModelHmacAuthenticator`。HMAC 覆盖方法、路径、body SHA-256、client/user/run/session/operation、时间、nonce、capability 和 embedding input type。Redis nonce store 原子防重放；时钟偏差默认 30 秒，nonce TTL 默认 2 分钟。CHAT model 必须等于系统记忆设置，Embedding model 必须等于企业 profile 或固定 CPU profile，调用者不能选择供应商。
 
-## Skill 沉淀边界
+Java 到 memory-service 使用 `X-Memory-Service-Key`，固定 HTTP/1.1、响应上限和低敏错误。key 只做服务认证；owner、白名单、成员和角色仍在平台校验。禁用开关或服务异常不能阻断普通 Run。
 
-- 已生效个人或团队记忆可以发起 `PENDING_REVIEW` 提案；审核前不生成 `SKILL.md`，避免把未经确认的方法直接扩散。
-- 所属 Application 的 `APP_ADMIN` 审核通过后生成 `DRAFT`，创建人或管理员可编辑；草稿正文允许大于单条记忆的 2000 字限制，但仍执行控制字符、凭据和提示覆盖检查。
-- 文件落盘、Git 提交、发布、修订和 Hub 分类继续使用既有链路。记忆模块只在该流程成功后校验并关联同 Application 的已发布 Skill 资产，不自动写文件、提交或发布，也不因记忆归档而撤回 Skill。
+## API 与兼容性
+
+- 新 API：`/api/internal/platform/memory/v1/**`，管理入口 `/api/internal/platform/memory/v1/admin/**`。
+- 旧 `/api/internal/platform/qa-memory/v1/**` 返回 `410 API_GONE`。
+- 遗留 `qa_*` 表和初始 Flyway 保持字节不变；新增字段只用前向 migration 和 MyBatis XML。
+- 不新增 RunEvent；“参考了 N 条记忆”继续通过 usage HTTP 批量恢复。
 
 ## 允许依赖
 
@@ -41,23 +39,15 @@ QA Agent 长期记忆的业务编排模块。它负责个人记忆、Application
 
 ## 禁止依赖
 
-- `test-agent-api`、`test-agent-persistence`、`test-agent-app` 和 generated SDK。
+- `test-agent-api`、`test-agent-persistence`、`test-agent-app`、generated SDK。
 - OpenCode 源码、MyBatis mapper、Redis key 或供应商密钥。
-- 保存原始聊天、完整 Prompt、完整回答、工具输出或隐藏系统指令。
-
-## 后续 AI 编码指引
-
-记忆策略、集中 Prompt、Mem0 窄接口、模型短期授权、学习和检索编排改这里；领域对象与端口改 `test-agent-domain`，SQL/Redis 实现改 `test-agent-persistence`，HTTP DTO 改 `test-agent-api`。
+- 保存完整 prompt、回答、工具输出或隐藏系统指令。
 
 ## 验证
 
 ```bash
-mvn -q -DappLogDir=target/log -pl test-agent-memory -am test
+JAVA_HOME=$(/usr/libexec/java_home -v 25) PATH="$JAVA_HOME/bin:$PATH" \
+  mvn -q -DappLogDir=target/log -pl test-agent-memory -am test
 ```
 
-真实适配器聚焦回归可运行：
-
-```bash
-mvn -q -DappLogDir=target/log -pl test-agent-memory -am \
-  -Dtest=HttpMemoryDocumentStoreTest -Dsurefire.failIfNoSpecifiedTests=false test
-```
+完整部署与浏览器准入见 `docs/deployment/qa-memory.md`。
