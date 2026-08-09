@@ -2140,3 +2140,18 @@
   - 前端全量 123 个 Vitest 文件为 1896 passed / 1 skipped，15 个 workspace 类型检查与 production build 通过；Chromium、Firefox、WebKit 分享回归 15/15 通过，仅保留既有 jsdom Canvas 提示和大 chunk 警告。
 - Result:
   - 用户看到的消息气泡现只有两种：自己绿色、其他人统一紫色，且都没有边框；不涉及 HTTP API、RunEvent、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码，也未新建分支。
+
+### 2026-08-09 - 修复分享成员无法签发会话运行上下文
+
+- Why:
+  - 被分享用户发送消息前签发 RunContext 时，`ConversationContextController` 忽略了分享头，直接用真实 actor 调用只允许会话所属人的运行上下文服务，因此返回 `FORBIDDEN: 无权为该会话创建运行上下文`。
+- What:
+  - 运行上下文入口新增可选 `X-Test-Agent-Session-Share` 解析；分享请求保留真实 `AuthPrincipal`，先校验 actor 的有效成员、`canChat` 与精确 Session，再显式使用 `executionOwnerUserId` 签发所属人的进程上下文。
+  - 多构造器场景显式标注生产构造器 `@Autowired`；新增 Controller 回归测试，并同步 API 模块说明、HTTP API、事件流与会话场景测试文档。
+- How:
+  - TDD 红灯阶段新增分享成员用例，确认生产 Controller 缺少分享上下文依赖时 3 项测试中 1 项按预期失败；实现后定向测试 3/3 通过。
+  - 完整 `test-agent-api` 测试 485 项全部通过；`test-agent-app` 连同依赖执行跳过测试的 Maven package 成功；`git diff --check` 通过。
+  - 提交前回顾全部 `.agents/session-log*.md`，未修改 `.env*`、Flyway migration、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 有对话权限的分享成员可按“真实 actor 鉴权、所属人执行”的既定模型取得 RunContext，原会话所属人的普通签发路径保持兼容。
+  - 本次修正既有 HTTP 请求头语义与安全校验，不新增 URL、请求/响应字段、SSE 事件或数据库结构，不涉及性能与迁移发布风险。

@@ -292,7 +292,7 @@ data 使用 `active/reason/shareId/version/sessionId/workspaceId/canChat/expires
 
 服务端至少每秒重新校验登录用户状态、share/version、成员状态、有效期、精确 Session/Workspace 和权限。分享设置更新会提升版本；旧连接收到更新或失效后不得继续用旧权限执行。RunEvent SSE、文件 WebSocket 和 PTY 终端也各自周期或逐操作重新鉴权，成员移除、降权、取消或到期时关闭连接；已经启动的 Run 不因此自动取消。
 
-分享工作台同时订阅当前 Run 的既有 RunEvent SSE，并在跨 Java 转发时保留分享头。RunEvent 的 USER `message.updated`（包括 `run.snapshot.reset`、Session tree 和断线恢复投影）在 payload 顶层及 message 对象中以 additive 字段补充：
+分享工作台发送前先使用同一分享头签发会话运行上下文：服务端保留真实 actor 鉴权，但上下文绑定会话所属人的进程与执行身份；该 HTTP 签发过程不新增 SSE 事件。随后工作台订阅当前 Run 的既有 RunEvent SSE，并在跨 Java 转发时保留分享头。RunEvent 的 USER `message.updated`（包括 `run.snapshot.reset`、Session tree 和断线恢复投影）在 payload 顶层及 message 对象中以 additive 字段补充：
 
 | 字段 | 说明 |
 |---|---|

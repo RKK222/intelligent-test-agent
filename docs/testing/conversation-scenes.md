@@ -28,7 +28,7 @@
 | 会话协作分享管理 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share management and received list preserve one link and inactive history` | 我的会话/分享给我、唯一链接、成员与可对话权限、1/3/7 天、待执行任务提示、取消与失效历史 |
 | 会话协作分享工作台 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share read-only workbench shows sender identity colors and fixed scope`、`session share busy run blocks every participant and only sender can stop` | 固定 Session/Workspace、分享头、只读限权、发送人姓名/气泡色、运行互斥、非发送人停止限制 |
 | 会话协作分享失效与所属人路由 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share invalid page and owner link redirect remain isolated` | 移除/过期/取消提示、所属人回普通工作台、兼容旧 `/s/{sessionId}`、分享头隔离 |
-| 会话协作分享后端 | `SessionShareControllerTest`、`SessionCollaborationShareServiceTest`、`DelegatedOperationContextResolverTest`、`MyBatisSessionShareRepositoryIntegrationTest`、`RunControllerSessionShareTest`、`ManagedWorkspaceControllerSessionShareTest`、`WorkspaceControllerSessionShareTest` | 唯一 256 位链接、50 人/7 天上限、乐观锁、代操作边界、跨工作区拒绝、文件/终端票据、审计脱敏 |
+| 会话协作分享后端 | `SessionShareControllerTest`、`SessionCollaborationShareServiceTest`、`DelegatedOperationContextResolverTest`、`MyBatisSessionShareRepositoryIntegrationTest`、`ConversationContextControllerTest`、`RunControllerSessionShareTest`、`ManagedWorkspaceControllerSessionShareTest`、`WorkspaceControllerSessionShareTest` | 唯一 256 位链接、50 人/7 天上限、乐观锁、代操作边界、分享 RunContext 使用所属人执行身份、跨工作区拒绝、文件/终端票据、审计脱敏 |
 
 ## 一次性复现全部前端场景
 

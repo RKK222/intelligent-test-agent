@@ -122,7 +122,7 @@
 
 | 新 URL | 平台业务实现 |
 |---|---|
-| `/api/internal/agent/{agentId}/sessions/{sessionId}/run-context` | 为当前登录用户签发会话运行上下文。 |
+| `/api/internal/agent/{agentId}/sessions/{sessionId}/run-context` | 普通请求为当前登录用户签发；分享请求校验真实 actor 后为会话所属人签发运行上下文。 |
 | `/api/internal/agent/{agentId}/runs` | 启动 Run；默认前端传 `opencode`。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/events` | 订阅 RunEvent SSE。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` | 查询当前 Run scope 的 root + child session message snapshot。 |
@@ -2805,9 +2805,9 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
 
 ### 会话运行上下文 API
 
-`POST /api/internal/agent/{agentId}/sessions/{sessionId}/run-context` 为当前登录用户签发后续 Run 使用的会话运行上下文，无请求体。前端在新建 Session、首次进入或切换到历史 Session 时调用一次；页面内后续 Run 复用同一个结果，只有上下文失效或页面刷新后才重新签发。
+`POST /api/internal/agent/{agentId}/sessions/{sessionId}/run-context` 为后续 Run 签发会话运行上下文，无请求体。普通请求使用当前登录用户；分享工作台必须同时携带当前登录用户自己的 Bearer Token 和 `X-Test-Agent-Session-Share`，服务端先校验真实 actor 的用户状态、分享有效期、成员状态、`canChat` 和精确 Session，再以 `executionOwnerUserId` 使用会话所属人的进程签发上下文。真实 `AuthPrincipal` 不被替换，只读成员不能签发。前端在新建 Session、首次进入或切换到历史 Session 时调用一次；页面内后续 Run 复用同一个结果，只有上下文失效或页面刷新后才重新签发。
 
-后端从权威 Session、Workspace、当前用户 `READY` 进程、agent binding、执行节点、Linux 服务器和后端解析后的可信工作区根路径构造上下文。响应只暴露 opaque token、版本和过期时间，不返回上述内部字段：
+后端从权威 Session、Workspace、执行所属人的 `READY` 进程、agent binding、执行节点、Linux 服务器和后端解析后的可信工作区根路径构造上下文。响应只暴露 opaque token、版本和过期时间，不返回上述内部字段：
 
 ```json
 {
