@@ -9231,19 +9231,20 @@ function onCompositionEnd() {
   justify-content: center;
   width: 20px;
   height: 20px;
-  margin-left: 4px;
+  margin-left: auto;
   padding: 0;
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: #6b6b73;
+  color: #6366f1;
   cursor: pointer;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .figma-chat-status-raw-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #1d2939;
+  background: rgba(99, 102, 241, 0.08);
+  color: #4f46e5;
 }
 
 .figma-chat-status-item {

@@ -13,7 +13,7 @@
   - `frontend/apps/agent-web/src/components/FigmaChatPanel.vue`:
     - 从 `figma-chat-header-left` 顶栏元素中移除 `figma-chat-header-btn--raw` 按钮。
     - 在底部 `figma-chat-usage` 容器末尾添加 `.figma-chat-status-raw-btn` 图标按钮，使用 `<Download :size="13" />`，保留 `aria-label="原始输出"` 与 `title`，绑定 `openRawOutput`。
-    - 添加对应的 hover 交互与布局 CSS 样式。
+    - 设置 `margin-left: auto` 默认靠最右侧显示，并复用原原始输出图标颜色 `#6366f1` (hover `#4f46e5`)。
   - `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`: 更新测试查找原始输出按钮的选择逻辑。
   - `frontend/apps/agent-web/README.md`: 同步更新文档中对“原始输出”入口位置与展现形式的说明。
 - How:
