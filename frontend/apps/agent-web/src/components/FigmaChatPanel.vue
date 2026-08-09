@@ -75,6 +75,7 @@ import BatchTestCaseGenerationDialog from './BatchTestCaseGenerationDialog.vue'
 import ExecutionTimePicker from './ExecutionTimePicker.vue'
 import SessionContextUsage from './SessionContextUsage.vue'
 import PetCompanionAvatar from './PetCompanionAvatar.vue'
+import FullColorAlarmClockIcon from './FullColorAlarmClockIcon.vue'
 import {
   loadPetPreference,
   resolvePetPreference,
@@ -4454,7 +4455,7 @@ function onCompositionEnd() {
           class="figma-chat-night-source-badge"
           title="该对话由夜间定时任务创建"
         >
-          <Clock3 :size="11" /> 夜间执行
+          <FullColorAlarmClockIcon :size="15" title="夜间执行" />
         </span>
         <button
           v-if="canManageShare"
@@ -6484,7 +6485,13 @@ function onCompositionEnd() {
                 <div class="figma-chat-history-card-content">
                   <div class="figma-chat-history-card-title-row">
                     <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
-                    <span v-if="item.sourceType === 'SCHEDULED_TASK'" class="figma-chat-history-source-badge">夜间执行</span>
+                    <span
+                      v-if="item.sourceType === 'SCHEDULED_TASK'"
+                      class="figma-chat-history-source-badge"
+                      title="该对话由夜间定时任务创建"
+                    >
+                      <FullColorAlarmClockIcon :size="13" title="夜间执行" />
+                    </span>
                     <span
                       :class="[
                         'figma-chat-history-card-status',
@@ -6806,16 +6813,14 @@ function onCompositionEnd() {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
   min-height: 18px;
-  padding: 0 6px;
+  padding: 1px 4px;
   border: 1px solid #d8dbe7;
   border-radius: 9px;
   background: #f1f2f8;
   color: #3d466e;
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 16px;
+  line-height: 1;
 }
 .figma-chat-history-source-badge {
   margin-left: auto;

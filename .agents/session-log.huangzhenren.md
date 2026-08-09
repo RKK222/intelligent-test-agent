@@ -2226,3 +2226,18 @@
 - Result:
   - 被分享人进入分享会话后可加载会话所属人固定工作区的可用模型并完成选择，同时继续由后端执行精确 Workspace 校验。
   - 本次仅修复前端请求范围与缓存隔离，不放宽权限，不涉及数据库、性能或兼容性协议变更。
+
+### 2026-08-09 - 夜间执行来源标识调整为全彩闹钟图标
+
+- Why:
+  - 响应 UI 需求，将顶栏对话 Header 与左侧会话历史列表中“夜间执行”来源标识由纯文字/单色图标徽章替换为无文字的全彩闹钟图标。
+- What:
+  - 新增 `FullColorAlarmClockIcon.vue` SVG 矢量全彩闹钟组件（采用蓝靛色表盘、金色铃铛与渐变高光）。
+  - 在 `FigmaChatPanel.vue` 中将 Header `figma-chat-night-source-badge` 与历史卡片 `figma-chat-history-source-badge` 中的 `Clock3` + 文字替换为 `<FullColorAlarmClockIcon>`，去掉“夜间执行”字样并保留 hover title 提示。
+  - 调整 CSS 样式，使无文字图标居中并自适应气泡尺寸。
+- How:
+  - 执行 `vue-tsc` 类型检查与 `vitest` 定向测试 (154 passed)，确认无类型错误和测试断言问题。
+  - 提交前回顾全部 `.agents/session-log*.md`；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 顶栏 Header 和历史列表里的夜间执行标识均已更替为全彩闹钟图标，展示美观且符合规范。
+
