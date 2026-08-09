@@ -303,6 +303,8 @@ data 使用 `active/reason/shareId/version/sessionId/workspaceId/canChat/expires
 
 显示姓名不进入 RunEvent，前端从 `SessionShareAccess.participants` 按 `senderUserId` 解析。旧客户端可以忽略新增字段；旧事件缺失时按所属人普通发送兼容。分享模式禁止 follow-up queue，任一活动 Run 出现后立即禁用输入，后端 Redis + PostgreSQL 会话占用仍是最终并发裁决。
 
+多人同步不依赖消息发送方浏览器的本地乐观状态。`LEGACY_FULL` RunEvent SSE 建连时，后端先按精确 `sessionId + runId + role=USER` 从 `session_messages` 生成一条 transient `message.updated`，其中 `message.id` 优先使用已保存的远端消息 ID、`platformMessageId` 保留平台 ID；随后才读取 OpenCode assistant snapshot。OpenCode 尚未初始化或暂不可用时，平台 USER 事件仍独立返回。OpenCode 后到的空 user envelope 只作为同 ID 合并边界，客户端不得把它渲染为空气泡；重连重放必须按稳定消息 ID 原位更新，不得新增重复轮次。`REDIS_SUMMARY` 继续由 Redis input 物化快照提供同一权威输入。
+
 ## stale active `run.failed`
 
 本节只适用于 `LEGACY_FULL`。`StaleActiveRunReconcileTaskHandler` 的 MyBatis 查询会排除 `REDIS_SUMMARY`；当它扫描到超过 2 小时仍处于 `PENDING/RUNNING/CANCELLING` 的 legacy Run 时，服务端会先检查 Redis 运行态：
@@ -386,7 +388,7 @@ retry 字段：
 - 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传优先使用 `GET /api/internal/agent/{agentId}/runs/{runId}/events?lastEventId={seq}`，默认 `agentId=opencode`。内部平台入口 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}` 继续有效；旧 `GET /api/runs/{runId}/events?lastEventId={seq}` 已作废，返回 `410 API_GONE`。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
-- `LEGACY_FULL` 的消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 从最新页沿 `before` cursor 查找本 Run 的稳定 USER dispatch ID，只把该 user 的直接 assistant 转换为 transient `message.updated` / `message.part.updated` snapshot 事件。平台 USER、root scope 与 locator 锚点不一致，明确锚点尚未到达，重复 cursor、20 页超限或旧 Run 时间窗内 user 不唯一时都返回空消息投影，不回退“最后一轮”；因此旧轮 `todowrite` 不会被重新标成当前 Run。快照恢复与 durable replay、本机 live bus 并发订阅。`REDIS_SUMMARY` 不订阅该兼容远端 snapshot Flux；每次建连先发完整 Redis 物化 reset，再按 `runtimeVersion` 读取 durable/transient 尾流，容量换代时按上节再次重置 reducer。opencode workspace 级事件流由 opencode-client 保留 raw/mapped DTO 边界，事件是否属于当前 Run 的 root/child scope 由 runtime `RunSessionScopeRouter` 判定；显式属于未知 session 的事件不会按 root 处理。当前 Run 收到 root 成功/失败终态后结束远端订阅，避免同一会话后续轮次串流。
+- `LEGACY_FULL` 的消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时先从平台 `session_messages` 精确恢复当前 Run 的 USER 输入，再通过当前 `AgentRuntime.messages` 从最新页沿 `before` cursor 查找稳定 USER dispatch ID，只把该 user 的直接 assistant 转换为 transient `message.updated` / `message.part.updated` snapshot 事件。平台 USER、root scope 与 locator 锚点不一致，明确锚点尚未到达，重复 cursor、20 页超限或旧 Run 时间窗内 user 不唯一时都返回空 OpenCode assistant 投影，不回退“最后一轮”；平台 USER 输入不受该远端失败影响，因此旧轮 `todowrite` 不会被重新标成当前 Run，且其他参与方仍能立即看到发送内容。快照恢复与 durable replay、本机 live bus 并发订阅。`REDIS_SUMMARY` 不订阅该兼容远端 snapshot Flux；每次建连先发完整 Redis 物化 reset，再按 `runtimeVersion` 读取 durable/transient 尾流，容量换代时按上节再次重置 reducer。opencode workspace 级事件流由 opencode-client 保留 raw/mapped DTO 边界，事件是否属于当前 Run 的 root/child scope 由 runtime `RunSessionScopeRouter` 判定；显式属于未知 session 的事件不会按 root 处理。当前 Run 收到 root 成功/失败终态后结束远端订阅，避免同一会话后续轮次串流。
 
 ## Run Session Scope
 

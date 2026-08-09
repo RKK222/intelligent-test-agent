@@ -217,11 +217,26 @@ public class RunMessageRecoveryService {
         return recoverLegacyOpenCodeSession(agentRuntimeRegistry.normalize(agentId), sessionId, traceId);
     }
 
-    /** legacy SSE 初始快照继续排除 user，避免与平台已持久化的乐观 user 消息重复。 */
+    /**
+     * legacy SSE 先发布平台权威 USER 消息，再恢复 OpenCode assistant 快照。
+     *
+     * <p>会话所属人的本地乐观消息不能代表其他协作者视图；平台消息必须先到达，且 OpenCode
+     * 暂不可用时也不能阻塞用户输入同步。远端快照仍排除 user，避免同一消息重复投影。</p>
+     */
     private Flux<RunEventSsePayload> recoverLegacyOpenCodeRun(String agentId, RunId runId, String traceId) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(traceId, "traceId must not be null");
-        return Mono.fromCallable(() -> recoverOpenCodeRunSync(agentId, runId, traceId, false).orElse(List.of()))
+        Flux<RunEventSsePayload> platformInput = Mono.fromCallable(() ->
+                        recoverPlatformUserInput(runId, traceId).map(List::of).orElse(List.of()))
+                .subscribeOn(Schedulers.boundedElastic())
+                .onErrorResume(error -> {
+                    LOGGER.warn("Failed to recover platform Run user input, runId={}, traceId={}",
+                            runId.value(), traceId, error);
+                    return Mono.just(List.of());
+                })
+                .flatMapMany(Flux::fromIterable);
+        Flux<RunEventSsePayload> openCodeSnapshot = Mono.fromCallable(() ->
+                        recoverOpenCodeRunSync(agentId, runId, traceId, false).orElse(List.of()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
                     LOGGER.warn("Failed to recover legacy Run SSE snapshot, agentId={}, runId={}, traceId={}",
@@ -229,6 +244,59 @@ public class RunMessageRecoveryService {
                     return Mono.just(List.of());
                 })
                 .flatMapMany(Flux::fromIterable);
+        return Flux.concat(platformInput, openCodeSnapshot);
+    }
+
+    /** 将 session_messages 中的单 Run USER 输入转换为既有 message.updated 协议。 */
+    private Optional<RunEventSsePayload> recoverPlatformUserInput(RunId runId, String traceId) {
+        if (sessionMessageRepository == null) {
+            return Optional.empty();
+        }
+        Run run = runRepository.findById(runId).orElse(null);
+        if (run == null) {
+            return Optional.empty();
+        }
+        return sessionMessageRepository.findUserBySessionIdAndRunId(run.sessionId(), runId)
+                .map(message -> platformUserInputPayload(runId, traceId, message));
+    }
+
+    /** 平台 ID 用于归档定位，远端 ID 用于和后续 OpenCode envelope 原位归并。 */
+    private RunEventSsePayload platformUserInputPayload(
+            RunId runId,
+            String traceId,
+            SessionMessage item) {
+        String platformMessageId = item.messageId().value();
+        String runtimeMessageId = item.remoteMessageId() == null || item.remoteMessageId().isBlank()
+                ? platformMessageId
+                : item.remoteMessageId();
+        LinkedHashMap<String, Object> message = new LinkedHashMap<>();
+        message.put("id", runtimeMessageId);
+        message.put("messageID", runtimeMessageId);
+        message.put("messageId", runtimeMessageId);
+        message.put("platformMessageId", platformMessageId);
+        message.put("role", "user");
+        message.put("text", item.content());
+        message.put("createdAt", item.createdAt().toString());
+        appendUserAttribution(message, UserMessageAttribution.from(item));
+
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("messageId", runtimeMessageId);
+        payload.put("platformMessageId", platformMessageId);
+        payload.put("message", Map.copyOf(message));
+        UserMessageAttribution attribution = UserMessageAttribution.from(item);
+        if (attribution != null && attribution.senderUserId() != null) {
+            payload.put("senderUserId", attribution.senderUserId().value());
+            if (attribution.senderUnifiedAuthId() != null) {
+                payload.put("senderUnifiedAuthId", attribution.senderUnifiedAuthId());
+            }
+            payload.put("sentBySharedUser", attribution.sentBySharedUser());
+        }
+        return transientPayload(
+                runId.value(),
+                RunEventType.MESSAGE_UPDATED,
+                traceId,
+                item.createdAt(),
+                Map.copyOf(payload));
     }
 
     /** legacy Session tree 兼容方法保持旧的 assistant-only 行为；HTTP 历史主入口使用 metadata 方法。 */

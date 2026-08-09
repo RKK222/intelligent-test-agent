@@ -27,7 +27,7 @@ describe("resolveUserMessageAppearance", () => {
       own: false,
       displayName: "协作者",
       style: {
-        backgroundColor: "#C1B9F2",
+        backgroundColor: "#9A8EDE",
         border: "none"
       }
     });

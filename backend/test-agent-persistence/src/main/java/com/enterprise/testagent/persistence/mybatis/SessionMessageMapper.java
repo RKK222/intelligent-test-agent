@@ -16,6 +16,10 @@ public interface SessionMessageMapper {
             @Param("sessionId") String sessionId,
             @Param("remoteMessageId") String remoteMessageId);
 
+    SessionMessageRow findUserBySessionAndRun(
+            @Param("sessionId") String sessionId,
+            @Param("runId") String runId);
+
     List<SessionMessageRow> findBySession(
             @Param("sessionId") String sessionId,
             @Param("limit") int limit,

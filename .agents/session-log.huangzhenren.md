@@ -2258,5 +2258,21 @@
   - 所属人与被分享成员现在会在历史加载全过程保持同一活动 Run 的思考、停止权限、工具事件、Todo 与 Diff 投影，不再被迟到的历史基线回滚。
   - 只调整前端事件消费时序，既有后端鉴权、分享代操作模型和旧客户端协议保持兼容；缓存仅存在于单次历史切换窗口。
 
+### 2026-08-10 - 修复分享会话用户消息空气泡与实时正文不同步
+
+- Why:
+  - A 在分享会话发送消息后，B 会先收到 OpenCode 不含正文的 user envelope；legacy RunEvent SSE 又假定发送方本地已有乐观用户消息并排除 USER 恢复，导致非发送方看到空绿色气泡，正文不能随活动 Run 立即同步。
+- What:
+  - `SessionMessageRepository` 新增按 `sessionId + runId + USER` 读取平台权威输入的端口，生产实现通过 MyBatis XML 复用既有组合索引精确查询，不新增 JDBC SQL、字段、索引或 Flyway migration。
+  - legacy `RunMessageRecoveryService` 在每次 RunEvent SSE 建连时先发布平台 USER `message.updated`，再接续 assistant-only OpenCode 快照；事件保留平台 ID、远端 ID、正文和实际发送人归因，即使 OpenCode 暂不可用也先同步用户输入。
+  - 前端保留空 envelope 供 reducer 原位归并，但 `UserMessageRow` 在正文和可见上下文都为空时不渲染；其他人气泡恢复需求指定的 `#9A8EDE`，自己的消息继续为 `#B2EDDF`，两者无边框。
+  - 新增后端恢复与 MyBatis 集成测试、agent-chat 组件测试、A→B 分享工作台三浏览器回归；同时修正分享管理 E2E 对 Element Plus 隐藏开关输入的过期定位器，并同步模块 README、RunEvent 文档、会话测试说明和已执行计划。
+- How:
+  - TDD 红灯分别确认旧恢复在 OpenCode 不可用时返回空流、持久层缺少精确查询、空 envelope 会渲染气泡；实现后定向测试转绿。
+  - 后端相关模块全回归通过：`test-agent-opencode-runtime` 822 项、`test-agent-persistence` 283 项（18 项外部 Redis 条件用例跳过），连同依赖模块 Maven reactor 全部成功。
+  - 前端全量 Vitest 123 个文件通过，1898 passed / 1 skipped；会话分享 Chromium/Firefox/WebKit 24/24 通过；全 workspace 类型检查串行通过，agent-web production build 通过。并行运行类型检查和构建时曾因 VitePress `.temp` 竞争失败一次，串行复跑已通过。
+- Result:
+  - 分享会话任一参与方发现活动 Run 后，都以平台消息作为用户正文和发送人权威源；空远端 envelope 不再生成气泡，后到/重连事件按稳定 ID 原位合并且不会重复。
+  - 不新增 HTTP URL、DTO 字段或 RunEvent wire type；既有 `message.updated` 只补充恢复顺序和已有 additive 字段。每次 legacy SSE 建连增加一次走现有索引的单行查询；分享鉴权、执行所属人、安全日志和旧客户端兼容边界不变。未修改 `.env*`、generated SDK 或 OpenCode 源码，也未新建分支。
 
 

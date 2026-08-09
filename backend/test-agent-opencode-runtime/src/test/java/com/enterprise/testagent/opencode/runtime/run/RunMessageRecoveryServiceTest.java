@@ -465,6 +465,63 @@ class RunMessageRecoveryServiceTest {
     }
 
     @Test
+    void legacyRecoveryPublishesAuthoritativePlatformUserInputBeforeOpenCodeIsAvailable() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.error = new IllegalStateException("opencode starting");
+        SessionMessageRepository messages = mock(
+                SessionMessageRepository.class,
+                org.mockito.Answers.CALLS_REAL_METHODS);
+        SessionMessage platformInput = new SessionMessage(
+                new SessionMessageId("msg_platform_shared_input"),
+                SESSION_ID,
+                SessionMessageRole.USER,
+                "A 发出的多人同步消息",
+                NOW,
+                "trace_1234567890abcdef",
+                RUN_ID,
+                null,
+                "msg_remote_shared_input",
+                null,
+                null,
+                null,
+                NOW)
+                .withSender(new UserId("usr_owner"), "ucid_owner", false);
+        when(messages.findBySessionId(
+                        org.mockito.ArgumentMatchers.eq(SESSION_ID),
+                        org.mockito.ArgumentMatchers.any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(platformInput), 1, PageRequest.MAX_SIZE, 1));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run().withMessageSender(
+                        new UserId("usr_owner"), "ucid_owner", false)),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                null,
+                null,
+                null,
+                messages);
+
+        List<RunEventSsePayload> payloads = service.recover(RUN_ID, "trace_1234567890abcdef")
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(payloads).singleElement().satisfies(payload -> {
+            assertThat(payload.type()).isEqualTo("message.updated");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> message = (Map<String, Object>) payload.payload().get("message");
+            assertThat(message)
+                    .containsEntry("id", "msg_remote_shared_input")
+                    .containsEntry("platformMessageId", "msg_platform_shared_input")
+                    .containsEntry("role", "user")
+                    .containsEntry("text", "A 发出的多人同步消息")
+                    .containsEntry("senderUserId", "usr_owner")
+                    .containsEntry("senderUnifiedAuthId", "ucid_owner")
+                    .containsEntry("sentBySharedUser", false);
+        });
+    }
+
+    @Test
     void recoveryOnlyProjectsAssistantMessagesOwnedByCurrentRunDispatchUser() {
         String previousUserId = "msg_previous_user";
         String currentUserId = "msg_current_user";

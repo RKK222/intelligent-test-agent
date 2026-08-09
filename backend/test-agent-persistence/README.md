@@ -33,7 +33,7 @@
 ## 主要职责
 
 - `MyBatisSessionShareRepository` / `SessionShareMapper.xml` 持久化每个 Session 唯一且永久复用的 256 位随机分享 ID、全量成员更新与软移除历史、乐观锁版本、“分享给我”失效历史、最小用户目录和 365 天安全审计。审计只保存 actor、执行所属人、share/session/workspace/resource、结果、traceId 与可选路径 SHA-256，不保存消息/文件正文、明文路径、Token 或终端输入。
-- `MyBatisSessionMessageRepository` / `SessionMessageMapper.xml` 保存消息实际发送人、统一认证号和代操作标记；Run、夜间任务和重发 MyBatis mapper 同步保存实际 actor 归因。普通历史与普通 runtime-state SQL 显式排除分享发送者兜底，防止一次代发永久获得普通会话访问权。
+- `MyBatisSessionMessageRepository` / `SessionMessageMapper.xml` 保存消息实际发送人、统一认证号和代操作标记，并复用既有 `(session_id, run_id, created_at, id)` 索引按精确 `sessionId + runId + USER` 读取运行输入；Run、夜间任务和重发 MyBatis mapper 同步保存实际 actor 归因。普通历史与普通 runtime-state SQL 显式排除分享发送者兜底，防止一次代发永久获得普通会话访问权。
 - `runs.active_session_id` 只在 `PENDING/RUNNING/CANCELLING` 期间占用，并以唯一索引作为跨节点并发发送最终裁决；终态写入必须原子清空。Redis `RunRuntimeStore` 同时提供原子 active-session 占用与 fencing，数据库和 Redis 任一准入失败都不得进入远端副作用。
 - Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、外部 API 凭据、opencode 用户进程管理拓扑、AI 回复反馈、运营分析 rollup、应用配置管理、应用版本工作区、个人工作区和定时任务框架等持久化；运行态 Workspace 记录可空 `linux_server_id` 以支持文件 WebSocket 同服务器校验和 legacy 回填。
 - `RunMapper.xml` 提供精确 `SIDE_QUESTION + active + updated_at < cutoff` 孤儿查询；Session history 与用户 runtime-state 查询显式排除内部 `SIDE_QUESTION` Session，即使异常数据误为 ACTIVE 也不可见。
@@ -185,7 +185,7 @@
 - `MyBatisReferenceRepositoryRepositoryIntegrationTest` 使用真实 Flyway + MyBatis 覆盖两表、并发初始化/推进 generation 单胜者、同服务器租约互斥与续租、过期 token/generation 写回拒绝、离线 `DEFERRED`/恢复和状态游标分页；`MyBatisReferenceRepositoryPostgresqlIntegrationTest` 覆盖 PostgreSQL 方言下的副本 upsert、认领和总体状态写回。
 - `MyBatisAppSourceRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式覆盖 XML mapper 的 slot 乐观冲突、结构化路径往返、snapshot 状态/摘要 CAS、副本首次建档与租约 fencing、旧/新步骤领取和 attempt reset/upsert、全终态步骤 operation 绑定、stranded 扫描、恢复索引、recent/cleanup；`MyBatisAppSourcePostgresqlIntegrationTest` 原样执行完整 PostgreSQL Flyway 链和真实 reset/backfill SQL，验证 JSONB、整小时过期/十六进制摘要约束、步骤终态保护、global/server 部分唯一索引、在途索引和业务事务 cleanup 第一写的延迟外键。
 - AppSource mapper 认领测试额外覆盖 exact operation 绑定、非终态步骤门禁、过期 `RUNNING` attempt 接管，以及 PostgreSQL 并发屏障下“worker 读 operation 后暂停、另一事务先终态化步骤再终态化 operation、迟到 claim 被拒绝且副本不变”。
-- SessionMessage/Run 覆盖 V16 token/cost 字段读写、parts_json 兼容、按 `(sessionId, remoteMessageId)` 查询以及最近非终态 Run 查询。
+- SessionMessage/Run 覆盖 V16 token/cost 字段读写、parts_json 兼容、按 `(sessionId, remoteMessageId)` 与 `(sessionId, runId, USER)` 精确查询，以及最近非终态 Run 查询。
 - RunEvent 覆盖 append-only seq 单调递增、并发追加唯一性、`runId + lastSeq` 增量读取、结构化 scope 列和 `(run_id, seq)` 唯一约束。
 - Session 覆盖远端 opencode 映射、全局搜索、置顶排序、工作区会话分页和归档过滤。
 - AgentSessionBinding 覆盖 upsert、按 agent 查询、远端 session 唯一约束和从旧 opencode 字段回填。

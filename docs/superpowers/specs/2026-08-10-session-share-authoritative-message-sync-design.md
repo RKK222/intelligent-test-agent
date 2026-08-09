@@ -6,7 +6,7 @@
 
 ## 设计决策
 
-平台保存的 `session_messages` 是用户输入正文和实际发送人归因的权威来源。legacy RunEvent SSE 建连时，恢复服务先按精确 `sessionId + runId + USER` 读取本轮平台消息，立即投影一条既有 wire type `message.updated`；随后再并发接续 OpenCode assistant snapshot、durable RunEvent 和 live bus。Redis 摘要模式继续使用现有 input snapshot，不增加第二份投影。
+平台保存的 `session_messages` 是用户输入正文和实际发送人归因的权威来源。legacy RunEvent SSE 建连时，恢复服务先按精确 `sessionId + runId + USER` 读取本轮平台消息，立即投影一条既有 wire type `message.updated`；随后再接续 OpenCode assistant snapshot、durable RunEvent 和 live bus。Redis 摘要模式继续使用现有 input snapshot，不增加第二份投影。
 
 平台输入投影使用 `remote_message_id` 作为运行时 message id，使后续 OpenCode user envelope/part 与同一条消息原地合并；同时携带平台 message id、正文、`senderUserId`、`senderUnifiedAuthId` 和 `sentBySharedUser`。前端仍通过分享参与人目录把 user id 补成姓名，不向 OpenCode 传递分享身份。
 

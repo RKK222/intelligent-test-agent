@@ -73,7 +73,7 @@ test("session share management and received list preserve one link and inactive 
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("当前会话有 1 个待执行定时任务；分享失效后仍将按原计划执行。")).toBeVisible();
   await dialog.getByRole("button", { name: /协作者/ }).click();
-  await dialog.getByRole("checkbox").check();
+  await dialog.locator(".session-share-dialog__permission-switch .el-switch__core").click();
   await dialog.getByRole("radio", { name: "3 天" }).click();
   await dialog.getByRole("button", { name: "创建分享" }).click();
 
@@ -294,6 +294,103 @@ test("session share busy run blocks every participant and only sender can stop",
   await expect(stop).toBeDisabled();
   await expect(stop).toHaveAttribute("title", "仅会话所属人或本次消息发送人可以停止");
   await expect(page.getByRole("button", { name: "发送" })).toHaveCount(0);
+});
+
+test("session share participant receives the owner's authoritative user message without an empty bubble", async ({ page }) => {
+  const activeRun = {
+    runId: "run_shared_owner_live",
+    sessionId: "ses_shared_owner_live",
+    workspaceId: "wrk_shared_owner_live",
+    status: "RUNNING",
+    triggeredByUserId: "usr_owner",
+    messageSenderUserId: "usr_owner",
+    messageSenderUnifiedAuthId: "ucid_owner",
+    messageSentBySharedUser: false,
+    createdAt: "2026-08-10T01:10:00Z",
+    updatedAt: "2026-08-10T01:10:01Z"
+  };
+  await installAuthenticatedRunEventFetchStream(page, {
+    run_shared_owner_live: [
+      {
+        delayMs: 20,
+        events: [{
+          eventId: "evt_shared_empty_envelope",
+          seq: 0,
+          type: "message.updated",
+          payload: {
+            message: {
+              id: "msg_shared_owner_live",
+              role: "user"
+            }
+          }
+        }]
+      },
+      {
+        delayMs: 800,
+        events: [{
+          eventId: "evt_shared_platform_input",
+          seq: 0,
+          type: "message.updated",
+          payload: {
+            messageId: "msg_shared_owner_live",
+            platformMessageId: "smsg_shared_owner_live",
+            message: {
+              id: "msg_shared_owner_live",
+              platformMessageId: "smsg_shared_owner_live",
+              role: "user",
+              text: "A 发出的多人同步消息",
+              senderUserId: "usr_owner",
+              senderUnifiedAuthId: "ucid_owner",
+              sentBySharedUser: false
+            }
+          }
+        }]
+      }
+    ]
+  });
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_reader", username: "阅读者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_owner_live", name: "共享同步工作区" }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_shared_owner_live",
+      workspaceId: "wrk_shared_owner_live",
+      title: "多人绝对同步会话"
+    }],
+    sessionShareAccess: sessionShareAccess({
+      shareId: "shr_owner_live",
+      actorUserId: "usr_reader",
+      actorUnifiedAuthId: "ucid_reader",
+      actorUsername: "阅读者",
+      sessionId: "ses_shared_owner_live",
+      workspaceId: "wrk_shared_owner_live",
+      canChat: true
+    }),
+    sessionShareRuntimeStates: [sessionShareRuntimeState({
+      shareId: "shr_owner_live",
+      sessionId: "ses_shared_owner_live",
+      workspaceId: "wrk_shared_owner_live",
+      canChat: true,
+      activeRun
+    })],
+    activeRun,
+    runsByRunId: { run_shared_owner_live: activeRun },
+    sessionMessagesBySessionId: { ses_shared_owner_live: [] }
+  });
+
+  await page.goto("/s/shr_owner_live", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & { __titleWatchRunStreams?: Array<{ runId: string }> })
+      .__titleWatchRunStreams?.some((item) => item.runId === "run_shared_owner_live") ?? false
+  ))).toBe(true);
+  await page.waitForTimeout(150);
+  await expect(page.locator('[data-oc-turn-id="msg_shared_owner_live"]')).toHaveCount(0);
+
+  const ownerTurn = page.locator('[data-oc-turn-id="msg_shared_owner_live"]');
+  await expect(ownerTurn).toBeVisible({ timeout: 5_000 });
+  await expect(ownerTurn.locator(".oc-user-message__sender")).toHaveText("会话所属人");
+  await expect(ownerTurn.locator(".oc-user-message__bubble")).toHaveText("A 发出的多人同步消息");
+  await expect(page.locator('[data-oc-turn-id="msg_shared_owner_live"]')).toHaveCount(1);
 });
 
 test("session share invalid page and owner link redirect remain isolated", async ({ page, context }) => {
@@ -8119,7 +8216,7 @@ test("workspace cascade submenu shifts up when it would overflow the viewport bo
 
 type RunEventFetchBatch = {
   delayMs: number;
-  events: Array<{ seq: number; type: string; payload: Record<string, unknown> }>;
+  events: Array<{ eventId?: string; seq: number; type: string; payload: Record<string, unknown> }>;
 };
 
 /** 认证后的主 RunEvent 客户端走 fetch SSE；同一 batch 用于复现 durable 终态同步重放。 */
@@ -8162,8 +8259,8 @@ async function installAuthenticatedRunEventFetchStream(
             timers.push(window.setTimeout(() => {
               if (probe.closed) return;
               const frame = batch.events.map((item) => (
-                `id: evt_title_${runId}_${item.seq}\nevent: ${item.type}\ndata: ${JSON.stringify({
-                  eventId: `evt_title_${runId}_${item.seq}`,
+                `id: ${item.eventId ?? `evt_title_${runId}_${item.seq}`}\nevent: ${item.type}\ndata: ${JSON.stringify({
+                  eventId: item.eventId ?? `evt_title_${runId}_${item.seq}`,
                   runId,
                   seq: item.seq,
                   type: item.type,

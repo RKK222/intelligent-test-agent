@@ -52,6 +52,13 @@ public class MyBatisSessionMessageRepository implements SessionMessageRepository
                 .map(this::toDomain);
     }
 
+    /** 使用现有 session/run 组合索引精确读取 Run 对应的平台 USER 消息。 */
+    @Override
+    public Optional<SessionMessage> findUserBySessionIdAndRunId(SessionId sessionId, RunId runId) {
+        return Optional.ofNullable(mapper.findUserBySessionAndRun(sessionId.value(), runId.value()))
+                .map(this::toDomain);
+    }
+
     @Override
     public PageResponse<SessionMessage> findBySessionId(SessionId sessionId, PageRequest pageRequest) {
         var items = mapper.findBySession(

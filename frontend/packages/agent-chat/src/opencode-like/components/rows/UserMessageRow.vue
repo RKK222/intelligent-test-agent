@@ -43,6 +43,8 @@ const workspaceContexts = computed(() => {
   const partContexts = workspaceContextAttachmentsFromPromptParts(props.message.parts);
   return partContexts.length ? partContexts : workspaceContextAttachmentsFromUserPrompt(props.message.text);
 });
+// 多人会话接管运行态时可能先收到 OpenCode 的空 user envelope；保留状态用于后续归并，但不渲染空气泡。
+const hasVisibleContent = computed(() => Boolean(displayText.value.trim()) || workspaceContexts.value.length > 0);
 const resendWaiting = computed(() => props.message.resend?.status === "WAITING");
 const resendActive = computed(() => ["WAITING", "REVERTING", "REVERTED"].includes(props.message.resend?.status ?? ""));
 const resendCountdown = computed(() => {
@@ -68,6 +70,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
+    v-if="hasVisibleContent"
     class="oc-user-message"
     data-testid="oc-user-message"
     data-oc-turn-row="true"

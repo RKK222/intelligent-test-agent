@@ -3,6 +3,7 @@ package com.enterprise.testagent.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.common.pagination.PageRequest;
+import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageId;
@@ -30,6 +31,8 @@ class MyBatisSessionMessageRepositoryIntegrationTest {
     private static final Instant NOW = Instant.parse("2026-08-09T08:00:00Z");
     private static final SessionId SESSION = new SessionId("ses_message_share_test");
     private static final UserId ACTOR = new UserId("usr_message_share_actor");
+    private static final RunId TARGET_RUN = new RunId("run_message_share_target");
+    private static final RunId OTHER_RUN = new RunId("run_message_share_other");
 
     private SingleConnectionDataSource dataSource;
     private SessionMessageRepository repository;
@@ -80,6 +83,37 @@ class MyBatisSessionMessageRepositoryIntegrationTest {
                 });
     }
 
+    @Test
+    void findsOnlyTheUserMessageForTheExactSessionRun() {
+        SessionMessage targetUser = message(
+                "msg_message_share_target_user", SessionMessageRole.USER,
+                "目标 Run 的用户消息", TARGET_RUN, "msg_remote_target");
+        SessionMessage targetAssistant = message(
+                "msg_message_share_target_assistant", SessionMessageRole.ASSISTANT,
+                "目标 Run 的助手消息", TARGET_RUN, "msg_remote_assistant");
+        SessionMessage otherUser = message(
+                "msg_message_share_other_user", SessionMessageRole.USER,
+                "其他 Run 的用户消息", OTHER_RUN, "msg_remote_other");
+        repository.save(targetUser);
+        repository.save(targetAssistant);
+        repository.save(otherUser);
+
+        assertThat(repository.findUserBySessionIdAndRunId(SESSION, TARGET_RUN))
+                .contains(targetUser);
+    }
+
+    private SessionMessage message(
+            String messageId,
+            SessionMessageRole role,
+            String content,
+            RunId runId,
+            String remoteMessageId) {
+        return new SessionMessage(
+                new SessionMessageId(messageId), SESSION, role, content, NOW,
+                "trace_message_share", runId, null, remoteMessageId, null,
+                null, null, NOW);
+    }
+
     private void seed(JdbcClient jdbc) {
         jdbc.sql("insert into users(user_id,unified_auth_id,username,password_hash,status,created_at,updated_at) "
                         + "values(:userId,'ucid_message_share','分享用户','hash','ACTIVE',:now,:now)")
@@ -90,5 +124,13 @@ class MyBatisSessionMessageRepositoryIntegrationTest {
         jdbc.sql("insert into sessions(session_id,workspace_id,title,status,trace_id,created_at,updated_at) "
                         + "values(:sessionId,'wrk_message_share','消息会话','ACTIVE','trace_message',:now,:now)")
                 .param("sessionId", SESSION.value()).param("now", NOW).update();
+        jdbc.sql("insert into runs(run_id,session_id,workspace_id,status,trace_id,created_at,updated_at) "
+                        + "values(:runId,:sessionId,'wrk_message_share','SUCCEEDED','trace_message',:now,:now)")
+                .param("runId", TARGET_RUN.value()).param("sessionId", SESSION.value())
+                .param("now", NOW).update();
+        jdbc.sql("insert into runs(run_id,session_id,workspace_id,status,trace_id,created_at,updated_at) "
+                        + "values(:runId,:sessionId,'wrk_message_share','SUCCEEDED','trace_message',:now,:now)")
+                .param("runId", OTHER_RUN.value()).param("sessionId", SESSION.value())
+                .param("now", NOW).update();
     }
 }
