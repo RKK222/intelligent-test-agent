@@ -543,6 +543,54 @@ describe("runEventProjection", () => {
 });
 
 describe("historyItems", () => {
+  it("groups pinned sessions first and sorts each group by updated time", () => {
+    const sessions: Session[] = [
+      {
+        sessionId: "ses_normal_old",
+        workspaceId: "wrk_1",
+        title: "普通旧会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-08T08:00:00Z",
+        updatedAt: "2026-07-08T09:00:00Z"
+      },
+      {
+        sessionId: "ses_pinned_old",
+        workspaceId: "wrk_1",
+        title: "置顶旧会话",
+        status: "ACTIVE",
+        pinned: true,
+        createdAt: "2026-07-08T08:00:00Z",
+        updatedAt: "2026-07-08T10:00:00Z"
+      },
+      {
+        sessionId: "ses_normal_new",
+        workspaceId: "wrk_1",
+        title: "普通新会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-08T08:00:00Z",
+        updatedAt: "2026-07-08T12:00:00Z"
+      },
+      {
+        sessionId: "ses_pinned_new",
+        workspaceId: "wrk_1",
+        title: "置顶新会话",
+        status: "ACTIVE",
+        pinned: true,
+        createdAt: "2026-07-08T08:00:00Z",
+        updatedAt: "2026-07-08T11:00:00Z"
+      }
+    ];
+
+    expect(historyItems(null, sessions).map((item) => item.id)).toEqual([
+      "ses_pinned_new",
+      "ses_pinned_old",
+      "ses_normal_new",
+      "ses_normal_old"
+    ]);
+  });
+
   it("keeps the scheduled-task source marker for the history list", () => {
     const items = historyItems(null, [{
       sessionId: "ses_night",

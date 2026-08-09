@@ -1701,6 +1701,58 @@ describe("FigmaChatPanel", () => {
     }
   });
 
+  it("emits accessible pin and unpin actions without selecting the session", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(FigmaChatPanel, {
+      attachTo: host,
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "session_normal",
+            title: "普通会话",
+            pinned: false,
+            createdAt: "2026-07-18T04:00:00Z",
+            updatedAt: "2026-07-18T05:00:00Z"
+          },
+          {
+            id: "session_pinned",
+            title: "置顶会话",
+            pinned: true,
+            createdAt: "2026-07-18T03:00:00Z",
+            updatedAt: "2026-07-18T04:00:00Z"
+          }
+        ]
+      } as any
+    });
+
+    try {
+      const drawer = await openSessionListDrawer(wrapper);
+      const pinButton = drawer.get<HTMLButtonElement>('[aria-label="置顶对话：普通会话"]');
+      const unpinButton = drawer.get<HTMLButtonElement>('[aria-label="取消置顶对话：置顶会话"]');
+      expect(pinButton.attributes("aria-pressed")).toBe("false");
+      expect(unpinButton.attributes("aria-pressed")).toBe("true");
+
+      await pinButton.trigger("click");
+      await unpinButton.trigger("click");
+      expect(wrapper.emitted("toggle-session-pinned")).toEqual([
+        ["session_normal", true],
+        ["session_pinned", false]
+      ]);
+      expect(wrapper.emitted("select-session")).toBeUndefined();
+
+      await wrapper.setProps({ historyPinningSessionId: "session_normal" } as any);
+      expect(pinButton.element.disabled).toBe(true);
+      expect(unpinButton.element.disabled).toBe(true);
+      expect(pinButton.find(".figma-chat-history-card-pin-spinner").exists()).toBe(true);
+    } finally {
+      wrapper.unmount();
+      host.remove();
+    }
+  });
+
   it("shows runtime count, spinning history icon and attention bell in history controls", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

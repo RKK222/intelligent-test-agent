@@ -3787,9 +3787,27 @@ watch(
 const updateSessionMutation = useMutation({
   mutationFn: async (input: { sessionId: string; title?: string; pinned?: boolean }) =>
     api.updateSession(input.sessionId, { title: input.title, pinned: input.pinned }),
-  onSuccess: (updated) => {
+  onSuccess: (updated, input) => {
     if (session.value?.sessionId === updated.sessionId) {
-      session.value = updated;
+      session.value = {
+        ...session.value,
+        ...updated,
+        workspaceContext: updated.workspaceContext ?? session.value.workspaceContext
+      };
+    }
+    // PATCH 单会话响应允许缺少 workspaceContext；保留历史列表已有上下文并立即投影置顶结果。
+    sessionHistoryItems.value = sessionHistoryItems.value.map((item) =>
+      item.sessionId === updated.sessionId
+        ? {
+            ...item,
+            ...updated,
+            workspaceContext: updated.workspaceContext ?? item.workspaceContext
+          }
+        : item
+    );
+    // 加载过后续页时，置顶会改变分页边界；回到第一页重新对齐服务端权威顺序，避免重复或漏项。
+    if (typeof input.pinned === "boolean" && sessionHistoryPage.value !== 1) {
+      sessionHistoryPage.value = 1;
     }
     void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   },
@@ -3797,6 +3815,18 @@ const updateSessionMutation = useMutation({
     feedback.value = errorFeedback("更新 Session 失败", error);
   }
 });
+
+const historyPinningSessionId = computed(() => {
+  const input = updateSessionMutation.variables.value;
+  return updateSessionMutation.isPending.value && typeof input?.pinned === "boolean"
+    ? input.sessionId
+    : null;
+});
+
+function handleToggleSessionPinned(sessionId: string, pinned: boolean) {
+  if (historyPinningSessionId.value) return;
+  updateSessionMutation.mutate({ sessionId, pinned });
+}
 
 const deleteSessionMutation = useMutation({
   mutationFn: async (sessionId: string) => api.deleteSession(sessionId),
@@ -10121,6 +10151,7 @@ async function handleLogout() {
           :history-has-more="sessionHistoryHasMore"
           :history-loading-more="sessionHistoryLoadingMore"
           :history-loading="Boolean(historyLoadingSessionId)"
+          :history-pinning-session-id="historyPinningSessionId"
           :history-submit-blocked="Boolean(historySwitchingSessionId)"
           :history-running-count="sessionRuntimeState?.runningCount ?? 0"
           :history-question-count="sessionRuntimeState?.questionCount ?? 0"
@@ -10196,6 +10227,7 @@ async function handleLogout() {
           @open-history="refreshHistoryOnOpen"
           @history-search-change="handleHistorySearchChange"
           @load-more-history="loadMoreHistory"
+          @toggle-session-pinned="handleToggleSessionPinned"
           @initialize-process="beginInitializeOpencodeProcess"
           @open-help="openHelpCenter"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"

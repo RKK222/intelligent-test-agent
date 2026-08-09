@@ -184,7 +184,7 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 索引：
 
-- `idx_sessions_active_pinned_updated(status, pinned, updated_at, id)` 保留给旧内部列表兼容路径。
+- `idx_sessions_active_pinned_updated(status, pinned, updated_at, id)` 支持 ACTIVE 会话按置顶分组与更新时间排序。
 - `idx_sessions_workspace_active_pinned_updated(workspace_id, status, pinned, updated_at, id)` 支持 workspace 维度会话列表排序。
 
 ## 兼容策略
@@ -1069,11 +1069,11 @@ XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution
 
 | 索引 | 用途 |
 |---|---|
-| `idx_sessions_user_active_updated(created_by_user_id, status, updated_at, id)` | 支持按会话创建人查询当前用户 ACTIVE 历史并按更新时间倒序分页。 |
+| `idx_sessions_user_active_updated(created_by_user_id, status, updated_at, id)` | 支持按会话创建人筛选当前用户 ACTIVE 历史并辅助更新时间分页。 |
 | `idx_runs_session_trigger_user(session_id, triggered_by_user_id)` | 支持旧会话通过 Run 触发人归因到当前用户。 |
 | `idx_session_messages_session_sender(session_id, sender_user_id)` | 支持旧会话通过用户消息发送人归因到当前用户。 |
 
-用户历史列表 SQL 位于 `SessionHistoryMapper.xml`，通过 MyBatis XML left join 个人工作区、应用版本工作区、副本、应用工作空间模板和应用信息补齐 `workspaceContext`。该查询只返回 `sessions.status='ACTIVE'` 且能归因到当前用户的会话，排序严格使用 `sessions.updated_at desc, sessions.id desc`，`pinned` 字段仅保留展示和兼容，不参与用户历史排序。
+用户历史列表 SQL 位于 `SessionHistoryMapper.xml`，通过 MyBatis XML left join 个人工作区、应用版本工作区、副本、应用工作空间模板和应用信息补齐 `workspaceContext`。该查询只返回 `sessions.status='ACTIVE'` 且能归因到当前用户的会话，排序严格使用 `sessions.pinned desc, sessions.updated_at desc, sessions.id desc`：置顶组始终位于普通组之前，组内按更新时间倒序。本次排序调整复用既有 `pinned` 字段和索引，不新增 Flyway migration。
 
 ## V16 会话消息与 Run 消耗快照字段
 

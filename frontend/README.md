@@ -249,6 +249,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 - 运行管理的后端 Java 进程表格和趋势图会展示服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped、GC、线程等可空字段；旧后端缺失新增字段时继续显示 `-` 或使用旧字段回退，趋势图保留断点。
 - 运行管理无主进程明细展示可空 UCID 和 manager PID 状态；无平台记录时固定显示“平台未登记”和“未执行 HTTP 健康检查”，`baseUrl` 保持独立列，拓扑缺新字段时回退 `-`。这些字段只来自 `SUPER_ADMIN` overview，前端不解析启动命令中的 UCID，也不自动认领、停止或改绑无主进程。
 
+- 用户级 Session History 复用既有 Session PATCH 能力支持置顶/取消置顶；列表按置顶组优先、组内更新时间倒序展示，置顶发生在已加载后续页时回到第一页重新对齐服务端分页。
+
 ## UI 与主题边界
 
 - 全局 theme token、Figma Web IDE 风格 activity rail、Dockview/Monaco 视觉适配、滚动条、panel chrome 和轻量动画由 `apps/agent-web/src/styles/globals.css` 承载；包内组件只消费这些 token，不在业务组件里复制整套主题。

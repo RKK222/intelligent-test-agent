@@ -23,7 +23,7 @@
 - `mybatis.UserDeletionMapper` / `mybatis/UserDeletionMapper.xml` / `mybatis.MyBatisUserDeletionRepository`：用户安全删除领域端口的生产实现，锁定目标用户、识别会话/工作区/进程/调度等受保护引用，并按外键顺序清理可随账号删除的附属表。
 - `mybatis.UserManagementQueryMapper` / `mybatis/UserManagementQueryMapper.xml` / `mybatis.MyBatisUserManagementQueryRepository`：用户管理组合分页查询及“全部检索结果”有界 ID 解析端口的生产实现，按关键字、有效角色/未分配角色、组织和部门筛选，并可排除当前操作者；不扩展存量 JDBC SQL。
 - `mybatis.SupportAccessMapper` / `mybatis/SupportAccessMapper.xml` / `mybatis.MyBatisSupportAccessRepository`：短期只读排查授权快照、目标切换和逐次资源访问审计的关系型 SQL 与生产实现；审计按超级管理员可见并保留一年。
-- `mybatis.SessionHistoryMapper` / `mybatis/SessionHistoryMapper.xml` / `mybatis.MyBatisSessionHistoryRepository`：用户历史归因查询默认仅 ACTIVE，排查入口显式请求时包含 ARCHIVED，内部 SIDE_QUESTION 始终排除。
+- `mybatis.SessionHistoryMapper` / `mybatis/SessionHistoryMapper.xml` / `mybatis.MyBatisSessionHistoryRepository`：用户历史归因查询默认仅 ACTIVE，排查入口显式请求时包含 ARCHIVED，内部 SIDE_QUESTION 始终排除；用户及工作区历史统一按 `pinned desc, updated_at desc, id desc` 分页。
 - `RedisSupportAccessGrantStore` / `SupportAccessStoreConfig`：登录会话内当前授权和明文令牌的短期 Redis 适配；轮换、撤销使用 Lua 原子收敛，数据库只保存 SHA-256 摘要。
 - `mybatis.UserWorkspaceQueryMapper` / `mybatis/UserWorkspaceQueryMapper.xml` / `mybatis.MyBatisUserWorkspaceQueryRepository`：目标用户个人工作区与目标用户会话引用工作区的只读联合查询；所有新增关系型 SQL 均位于 MyBatis XML。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。

@@ -7565,3 +7565,35 @@
   约 10.3 GiB 降至约 4.95 GiB。
 - TestAgent、memory-service 和 Sub2API 均恢复健康；未修改代码、API、RunEvent、数据库结构、migration、安全配置、
   generated SDK 或 OpenCode 源码。
+
+## 2026-08-09 - 新增历史对话置顶与取消置顶
+
+### Why
+
+- release worktree 的 Session DTO、`pinned` 字段和 PATCH 更新接口已经存在，但当前 `FigmaChatPanel` 会话列表没有操作入口，
+  用户级 MyBatis 历史查询也只按更新时间排序，导致写入置顶状态后无法稳定出现在分页列表前部。
+
+### What
+
+- 会话列表卡片新增独立、可访问的置顶/取消置顶按钮，请求中显示 Spinner 并阻止重复操作；`AgentWorkbench` 复用既有
+  `updateSession` mutation，保留列表已有 `workspaceContext`，即时更新本地投影，并在加载过后续页时回到第一页对齐分页。
+- `SessionHistoryMapper.xml` 的用户历史与工作区历史统一改为 `pinned desc, updated_at desc, id desc`；前端投影也按同一分组
+  契约排序，兼容滚动发布期间仍按旧顺序返回的后端。没有新增字段、索引或 Flyway migration。
+- 补充 MyBatis 集成测试、排序单测、组件交互单测和 Chromium PATCH 往返用例；同步 HTTP API、数据库、测试场景、用户手册
+  以及 API/runtime/persistence/frontend 模块 README/PACKAGE。
+
+### How
+
+- `MyBatisSessionHistoryRepositoryIntegrationTest` 6 项通过；`workbench-utils.test.ts` 与 `FigmaChatPanel.test.ts` 合计
+  256 passed / 1 skipped；隔离端口 Chromium 置顶往返 1 项通过。
+- `corepack pnpm build` 通过；`mvn -pl test-agent-app -am -DskipTests package` 的 20 模块聚合打包通过，persistence JAR 中两条
+  查询均确认包含置顶优先排序。
+- Playwright 默认 `3000` 端口当时由 `intelligent-test-agent-memory-v1` worktree 占用，`reuseExistingServer` 会误用其旧页面；
+  本次未停止其它 worktree，而是在 `3011` 隔离启动 release 页面完成验证。
+
+### Result
+
+- 用户现在可以在会话列表中置顶或取消置顶；置顶组始终位于普通组之前，两组内部按最后更新时间倒序，分页边界会在更新后
+  重新对齐服务端权威结果。
+- release 前端已用 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3011` 启动在
+  `http://127.0.0.1:3011/` 并返回 200。未修改 `.env*`、OpenCode 源码、generated SDK、RunEvent、鉴权或安全契约。

@@ -67,20 +67,22 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     }
 
     @Test
-    void userHistoryReturnsCurrentUserSessionsWithWorkspaceContextByUpdatedAtDesc() {
+    void userHistoryReturnsPinnedSessionsFirstAndKeepsWorkspaceContext() {
         PageResponse<SessionHistoryItem> page = repository.findUserHistory(CURRENT_USER, "", new PageRequest(1, 30));
 
         assertThat(page.total()).isEqualTo(4);
         assertThat(page.items())
                 .extracting(item -> item.session().sessionId().value())
                 .containsExactly(
-                        "ses_history_created",
                         "ses_history_run",
+                        "ses_history_created",
                         "ses_history_message",
                         "ses_history_empty_context");
 
-        assertThat(page.items().get(0).session().pinned()).isFalse();
-        assertThat(page.items().get(0).workspaceContext()).satisfies(context -> {
+        assertThat(page.items().get(0).session().pinned()).isTrue();
+        assertThat(page.items().get(0).workspaceContext().versionId()).isEqualTo("ver_history_replica");
+        assertThat(page.items().get(1).session().pinned()).isFalse();
+        assertThat(page.items().get(1).workspaceContext()).satisfies(context -> {
             assertThat(context.appId()).isEqualTo("app_history");
             assertThat(context.appName()).isEqualTo("智能测试平台");
             assertThat(context.applicationWorkspaceId()).isEqualTo("aw_history_main");
@@ -88,8 +90,6 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
             assertThat(context.versionId()).isEqualTo("ver_history_main");
             assertThat(context.version()).isEqualTo("20260708");
         });
-        assertThat(page.items().get(1).session().pinned()).isTrue();
-        assertThat(page.items().get(1).workspaceContext().versionId()).isEqualTo("ver_history_replica");
         assertThat(page.items().get(2).workspaceContext()).satisfies(context -> {
             assertThat(context.appId()).isNull();
             assertThat(context.workspaceName()).isEqualTo("非托管工作区");

@@ -25,6 +25,7 @@ import {
   MinusCircle,
   Paperclip,
   PanelRightClose,
+  Pin,
   SquarePen,
   Send,
   Square,
@@ -704,6 +705,7 @@ const props =
       attentionEventId?: string
       attentionAt?: string
       sourceType?: string
+      pinned?: boolean
     }>
     /** 当前用户历史中仍在运行的会话数。 */
     historyRunningCount?: number
@@ -721,6 +723,8 @@ const props =
     historyLoadingMore?: boolean
     /** 正在切换历史会话；旧正文在此期间隐藏，避免误以为点击无响应。 */
     historyLoading?: boolean
+    /** 正在更新置顶状态的会话；请求完成前禁用其它置顶操作。 */
+    historyPinningSessionId?: string | null
     /** 历史完整投影尚未完成；正文可见后仍阻止向未稳定的 Session 发送。 */
     historySubmitBlocked?: boolean
     /** 当前历史会话只读原因；存在时禁止继续发送。 */
@@ -878,6 +882,7 @@ const emit =
     (e: 'history-search-change', query: string): void
     (e: 'load-more-history'): void
     (e: 'select-session', id: string): void
+    (e: 'toggle-session-pinned', id: string, pinned: boolean): void
     (e: 'request-night-tasks'): void
     (e: 'update:inputValue', value: string): void
     (e: 'upload-chat-attachments', files: File[]): void
@@ -6362,11 +6367,18 @@ function onCompositionEnd() {
             </p>
           </div>
           <ul v-else class="figma-chat-history-list">
-            <li v-for="item in visibleHistory" :key="item.id">
+            <li
+              v-for="item in visibleHistory"
+              :key="item.id"
+              class="figma-chat-history-card"
+              :class="{
+                'is-active': item.id === currentSessionId,
+                'is-pinned': item.pinned
+              }"
+            >
               <button
                 type="button"
-                class="figma-chat-history-card"
-                :class="{ 'is-active': item.id === currentSessionId }"
+                class="figma-chat-history-card-main"
                 :title="item.title"
                 :aria-current="item.id === currentSessionId ? 'true' : undefined"
                 @click="selectHistoryItem(item.id)"
@@ -6410,6 +6422,23 @@ function onCompositionEnd() {
                     <span class="figma-chat-history-card-id">#{{ item.id.slice(-6) }}</span>
                   </div>
                 </div>
+              </button>
+              <button
+                type="button"
+                class="figma-chat-history-card-pin"
+                :class="{ 'is-pinned': item.pinned }"
+                :disabled="Boolean(historyPinningSessionId)"
+                :aria-label="`${item.pinned ? '取消置顶对话' : '置顶对话'}：${item.title || '新对话'}`"
+                :aria-pressed="Boolean(item.pinned)"
+                :title="item.pinned ? '取消置顶' : '置顶'"
+                @click="emit('toggle-session-pinned', item.id, !item.pinned)"
+              >
+                <Loader2
+                  v-if="historyPinningSessionId === item.id"
+                  :size="14"
+                  class="figma-chat-history-card-pin-spinner"
+                />
+                <Pin v-else :size="14" />
               </button>
             </li>
           </ul>
@@ -7096,14 +7125,11 @@ function onCompositionEnd() {
   width: 100%;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
+  padding: 0;
   border-radius: 8px;
   background: var(--ta-surface);
   border: 1px solid var(--ta-border);
-  text-align: left;
   transition: all 0.15s ease;
-  cursor: pointer;
 }
 .figma-chat-history-card:hover {
   background: var(--ta-hover);
@@ -7115,6 +7141,54 @@ function onCompositionEnd() {
   border-color: #27325e;
   background: #f3f4f9;
   box-shadow: inset 3px 0 0 #27325e;
+}
+.figma-chat-history-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 4px 8px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.figma-chat-history-card-pin {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 6px 8px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ta-muted);
+  cursor: pointer;
+  opacity: 0.68;
+  transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+}
+.figma-chat-history-card-pin:hover:not(:disabled),
+.figma-chat-history-card-pin:focus-visible {
+  color: var(--ta-text);
+  background: var(--ta-hover);
+  opacity: 1;
+}
+.figma-chat-history-card-pin.is-pinned {
+  color: #27325e;
+  background: #e7e9f2;
+  opacity: 1;
+}
+.figma-chat-history-card-pin:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.figma-chat-history-card-pin-spinner {
+  animation: figma-chat-spin 0.9s linear infinite;
 }
 .figma-chat-history-card-icon {
   position: relative;

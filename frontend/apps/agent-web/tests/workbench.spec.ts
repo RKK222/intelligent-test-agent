@@ -3949,6 +3949,63 @@ test("late session creation cannot replace a history switch", async ({ page }) =
   await expect(page.getByText("目标历史正文")).toBeVisible();
 });
 
+test("history drawer pins and unpins sessions through the existing session update API", async ({ page }) => {
+  const sessionUpdateRequests: Array<{ sessionId: string; payload: Record<string, unknown> }> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    sessionUpdateRequests,
+    sessions: [
+      {
+        sessionId: "ses_normal_latest",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "最新普通会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T08:00:00Z",
+        updatedAt: "2026-07-10T12:00:00Z"
+      },
+      {
+        sessionId: "ses_pin_target",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "待置顶会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T08:00:00Z",
+        updatedAt: "2026-07-10T11:00:00Z"
+      },
+      {
+        sessionId: "ses_pinned_old",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "原置顶会话",
+        status: "ACTIVE",
+        pinned: true,
+        createdAt: "2026-07-10T07:00:00Z",
+        updatedAt: "2026-07-10T08:00:00Z"
+      }
+    ]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "会话列表" }).click();
+  const titles = page.locator(".figma-chat-history-card-title");
+  await expect(titles).toHaveText(["原置顶会话", "最新普通会话", "待置顶会话"]);
+
+  await page.getByRole("button", { name: "置顶对话：待置顶会话" }).click();
+  await expect.poll(() => sessionUpdateRequests).toEqual([
+    { sessionId: "ses_pin_target", payload: { pinned: true } }
+  ]);
+  await expect(page.getByRole("button", { name: "取消置顶对话：待置顶会话" })).toBeVisible();
+  await expect(titles).toHaveText(["待置顶会话", "原置顶会话", "最新普通会话"]);
+
+  await page.getByRole("button", { name: "取消置顶对话：待置顶会话" }).click();
+  await expect.poll(() => sessionUpdateRequests).toEqual([
+    { sessionId: "ses_pin_target", payload: { pinned: true } },
+    { sessionId: "ses_pin_target", payload: { pinned: false } }
+  ]);
+  await expect(page.getByRole("button", { name: "置顶对话：待置顶会话" })).toBeVisible();
+  await expect(titles).toHaveText(["原置顶会话", "最新普通会话", "待置顶会话"]);
+});
+
 test("agent picker updates the run agent", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const agentRequests: string[] = [];
@@ -9122,12 +9179,18 @@ async function mockBackendApi(
       const sessionId = decodeURIComponent(url.pathname.match(/\/sessions\/([^/]+)$/)?.[1] ?? "ses_1");
       const payload = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       capture.sessionUpdateRequests?.push({ sessionId, payload });
-      await route.fulfill(json({
-        ...session(),
+      const current = capture.sessions?.find((item) => item.sessionId === sessionId) ?? session();
+      const updated = {
+        ...current,
         sessionId,
-        title: typeof payload.title === "string" ? payload.title : session().title,
+        title: typeof payload.title === "string" ? payload.title : current.title,
         ...(typeof payload.pinned === "boolean" ? { pinned: payload.pinned } : {})
-      }));
+      };
+      const currentIndex = capture.sessions?.findIndex((item) => item.sessionId === sessionId) ?? -1;
+      if (currentIndex >= 0 && capture.sessions) {
+        capture.sessions[currentIndex] = updated;
+      }
+      await route.fulfill(json(updated));
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+$/.test(url.pathname)) {

@@ -102,7 +102,7 @@
         <include refid="SessionHistoryColumns"/>
         <include refid="SessionHistoryFrom"/>
         <include refid="SessionHistoryWhere"/>
-        order by s.updated_at desc, s.id desc
+        order by s.pinned desc, s.updated_at desc, s.id desc
         limit #{limit} offset #{offset}
     </select>
 
@@ -127,7 +127,7 @@
         <include refid="SessionHistoryFrom"/>
         <include refid="SessionHistoryWhere"/>
           and s.workspace_id = #{workspaceId}
-        order by s.updated_at desc, s.id desc
+        order by s.pinned desc, s.updated_at desc, s.id desc
         limit #{limit} offset #{offset}
     </select>
 
