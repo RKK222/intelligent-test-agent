@@ -7611,3 +7611,30 @@
 
 - 原“公共 Agent 配置源目录不可用”启动阻断已消除；当前用户进程仍为 `STOPPED`，因页面登录态失效尚未执行新的已认证
   `/processes/me/initialize`，所以 4104 的最终 `RUNNING` 与 `/global/config` 200 闭环仍待用户重新登录后复测。
+
+## 2026-08-09 - 为工作台活动栏补齐稳定 URI
+
+### Why
+
+- 记忆中心已有 `/memories` 深链接，但工作台、控制台、能力库和设置仍主要依赖组件内状态；切换后地址栏无法表达当前页面，
+  刷新、登录回跳和浏览器前进/后退也不能统一恢复。
+
+### What
+
+- 复用既有 `WorkbenchView`、vue-router 和 `toolbox-navigation.ts` 状态机，统一提供 `/workbench`、`/toolbox`、
+  `/memories`、`/system`、`/hub`、`/settings`；旧根路径 `/` 兼容跳转到 `/workbench`。
+- 控制台与能力库纳入既有沉浸式路由权威保护，后台 Diff/SSE 更新不能切走当前页面；设置活动栏入口支持深链接，关闭普通入口
+  返回原页面，直接访问时安全回到工作台。同步登录回跳白名单、404 首页动作、稳定文档和路由回归。
+
+### How
+
+- `toolbox-navigation.test.ts` 与 `login-redirect.test.ts` 共 10 项通过；`@test-agent/agent-web` typecheck 和 production build 通过，
+  构建仅保留既有大 chunk 提示；`tools/verify-ai-docs.sh`、`git diff --check` 通过。
+- Chromium 定向回归分别验证全部活动栏 URI/根跳转/设置深链/历史恢复、工具箱布局恢复、记忆中心布局恢复，共 3 项通过；
+  当前 `127.0.0.1:3000` 开发服务的 6 个页面 URI 均返回 HTTP 200。
+
+### Result
+
+- 左侧页面级入口现在都可复制、刷新和通过浏览器历史恢复；旧 `/` 入口保持兼容，不新增页面组件或第二套路由状态。
+- 本次不变更 HTTP API、RunEvent、DTO、数据库/Flyway、后端、性能或安全策略，未修改 `.env*`、generated SDK 或 OpenCode
+  源码；工作树中同期存在的 `MemoryAdminPanel.vue` 及其测试修改保持未暂存，不纳入本次提交。

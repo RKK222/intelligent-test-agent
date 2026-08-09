@@ -9,6 +9,7 @@ import { useAuthStore } from "./stores/authStore";
 
 const TOKEN_KEY = "test-agent.auth.token";
 const UNIFIED_AUTH_ID_KEY = "test-agent.auth.unifiedAuthId";
+const DEFAULT_WORKBENCH_PATH = "/workbench";
 
 const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
 
@@ -30,6 +31,10 @@ export const router = createRouter({
 
     {
       path: "/",
+      redirect: { name: "workbench" },
+    },
+    {
+      path: DEFAULT_WORKBENCH_PATH,
       name: "workbench",
       component: () => import("./views/WorkbenchView.vue"),
     },
@@ -41,6 +46,21 @@ export const router = createRouter({
     {
       path: "/memories",
       name: "memories",
+      component: () => import("./views/WorkbenchView.vue"),
+    },
+    {
+      path: "/system",
+      name: "system",
+      component: () => import("./views/WorkbenchView.vue"),
+    },
+    {
+      path: "/hub",
+      name: "hub",
+      component: () => import("./views/WorkbenchView.vue"),
+    },
+    {
+      path: "/settings",
+      name: "settings",
       component: () => import("./views/WorkbenchView.vue"),
     },
     {
@@ -74,27 +94,27 @@ export function resolveLoginRedirect(
   features: ReleaseFeatureFlags = releaseFeatures
 ): string {
   if (typeof rawRedirect !== "string") {
-    return "/";
+    return DEFAULT_WORKBENCH_PATH;
   }
 
   const redirect = rawRedirect.trim();
   if (redirect.length === 0 || redirect.startsWith("//")) {
-    return "/";
+    return DEFAULT_WORKBENCH_PATH;
   }
 
   let target: URL;
   try {
     target = new URL(redirect, LOGIN_REDIRECT_BASE_URL);
   } catch {
-    return "/";
+    return DEFAULT_WORKBENCH_PATH;
   }
 
   if (target.origin !== LOGIN_REDIRECT_BASE_URL || target.pathname === "/985211") {
-    return "/";
+    return DEFAULT_WORKBENCH_PATH;
   }
 
   if (!isKnownLoginRedirectPath(target.pathname, features)) {
-    return "/";
+    return DEFAULT_WORKBENCH_PATH;
   }
 
   // LobeHub 只能恢复到固定 launch 路由，任何查询或片段都不参与回跳。
@@ -102,13 +122,22 @@ export function resolveLoginRedirect(
     return target.pathname;
   }
 
+  // 根路径只作为旧入口兼容，登录后统一落到可识别的工作台 URI。
+  if (target.pathname === "/") {
+    return `${DEFAULT_WORKBENCH_PATH}${target.search}${target.hash}`;
+  }
+
   return `${target.pathname}${target.search}${target.hash}`;
 }
 
 function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlags): boolean {
   return pathname === "/"
+    || /^\/workbench\/?$/.test(pathname)
     || /^\/toolbox\/?$/.test(pathname)
     || /^\/memories\/?$/.test(pathname)
+    || /^\/system\/?$/.test(pathname)
+    || /^\/hub\/?$/.test(pathname)
+    || /^\/settings\/?$/.test(pathname)
     || (pathname === "/lobehub/launch" && features.lobehub)
     || (pathname === "/workflow-chat" && features.workflow)
     || /^\/s\/[^/]+$/.test(pathname);
@@ -148,7 +177,7 @@ router.beforeEach(async (to, _from) => {
   }
 
   if (!isReleaseFeaturePathEnabled(to.path)) {
-    return { path: "/", replace: true };
+    return { name: "workbench", replace: true };
   }
 
   if (to.name === "login") {

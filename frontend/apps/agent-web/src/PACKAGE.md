@@ -10,7 +10,7 @@
 - `main.ts`：应用入口，装配 Pinia、`@tanstack/vue-query` 的 `VueQueryPlugin` 和 vue-router。
 - `App.vue`：根组件，渲染 `<RouterView />`。
 - `release-features.ts`：集中解析 Workflow/LobeHub 编译期开关；只接受显式 `true`，并为入口、登录回跳和路由守卫提供同一事实源。当前 release 两项默认关闭。
-- `router.ts`：SPA 客户端路由，`/985211` 登录页、`/` 工作台、`/toolbox` 离线工具箱、受发布开关保护的 `/lobehub/launch` 与懒加载 `/workflow-chat`、`/s/:sessionId` 只读 transcript，以及未知路径 404 页面。
+- `router.ts`：SPA 客户端路由，`/985211` 登录页、`/workbench` 工作台、`/toolbox` 离线工具箱、`/memories` 记忆中心、`/system` 超级管理员控制台、`/hub` 能力库、`/settings` 设置弹窗、受发布开关保护的 `/lobehub/launch` 与懒加载 `/workflow-chat`、`/s/:sessionId` 只读 transcript，以及未知路径 404 页面；历史根路径 `/` 兼容跳转到 `/workbench`。
 - `views/LoginView.vue`：登录页入口，登录成功后只跳回 SPA 内已知页面，非法 redirect 回退到工作台。
 - `views/WorkbenchView.vue`：工作台首页入口。
 - `views/TranscriptView.vue`：只读 transcript 页面入口，复用平台 session/messages API。
@@ -18,7 +18,7 @@
 - `SupportAccessPanel` 的目标用户入口固定在顶部状态栏，使用 Element Plus 远程可搜索下拉匹配姓名、用户 ID 和统一认证号；不再渲染左右用户列表栏，目标切换继续复用既有 `selectSupportAccessTarget` 审计链路。
 - `views/WorkflowChatView.vue`：独立 Python 长程任务页面入口；读取既有认证状态，组合 `workflow-api-client` 与 `workflow-chat`，不进入 OpenCode 工作台状态。
 - `components/ToolboxPanel.vue`：所有登录用户可见的沉浸式离线工具目录；移除可见 Hero，仅保留无障碍标题。搜索、来源和 14 个带实时数量的固定分类标签绑定组件自身滚动容器吸顶；计数只按搜索与来源计算，分类选择只过滤卡片，热门 Top 10 不受筛选影响。移动端标签单行横向滚动，工具卡片保持原生新标签打开和静默点击上报。
-- `components/MemoryCenter.vue`、`components/toolbox-navigation.ts`：受 `/memories` 路由控制的沉浸式 QA 记忆中心，提供个人/团队/Skill 提案治理、证据 rail 和既有 Hub 交接；与工具盒子共享面板快照，后台 Diff/SSE 不得劫持激活路由。
+- `components/MemoryCenter.vue`、`components/toolbox-navigation.ts`：受 `/memories` 路由控制的沉浸式 QA 记忆中心，提供个人/团队/Skill 提案治理、证据 rail 和既有 Hub 交接；工作台组合层用同一状态机管理 `/toolbox`、`/memories`、`/system`、`/hub` 的面板快照，后台 Diff/SSE 不得劫持激活路由。
 - `components/AgentWorkbench.vue`：组合 workspace、应用切换、用户头像退出、系统管理入口、应用版本/个人工作区切换与同步、文件树、编辑器、Agent、RunEvent SSE、用户级运行态 fetch SSE、Session History 搜索/置顶/删除、历史会话只读态、follow-up 队列、编辑器选区上下文、Diff 操作、底部 PTY terminal panel 和宠物旁路问答 API 编排；登录/刷新后查询一次 `/processes/me` 获取用户 opencode 进程归属，常态每 10 秒用弱健康接口驱动发送、目录和运行态 ready，弱健康不健康时复查 `/processes/me` 并以强状态结果覆盖；普通消息和 slash 技能统一创建平台 Run，先签发并复用页面内存 `contextToken`，`startRun` 携带稳定 `clientRequestId`，认证、Session、Workspace 或历史交互变化时通过 interaction fence 丢弃迟到的 Session/context/Run 结果，历史切换加载完成前由聊天面板和 `handleSend` 双层阻断发送；用户级 runtime-state fetch SSE 是启动 pending、页面刷新和历史切回的主恢复入口，`active-run` 仅在流不可用时按“每故障窗口、每 Session 一次”fallback，不做 1.5 秒轮询；切换历史会话时同时读取 OpenCode 当前 permission/question pending 列表并覆盖历史事件中的 ask 快照，避免拿已失效的 requestId 提交；会话历史首批和后续“显示更多”统一按 20 条渐进加载；运行中点击新建对话只清空当前视图并关闭当前 RunEvent SSE，不取消后端 Run，后台运行计数由用户级运行态摘要补齐；RunEvent 只应用到当前订阅且仍为页面活动态的 Run，防止旧订阅晚到终态污染新一轮；将运行态 Agent 列表和当前 `selectedAgent` 下发给 `FigmaChatPanel`，切换后下一次 `startRun` 携带用户选择的 `agent`；模型/Provider 选择作为用户级偏好持久化，不随工作区切换清空，目录查询还要求用户进程 READY；未初始化或不健康时不请求，READY 后目录为空或请求失败才以 3 秒间隔恢复并在非空后停止，进程初始化 operation 为 `RUNNING` 时先取消在途请求并暂停恢复；设置页异步工作空间 operation 成功事件会失效现有模板查询，使左下角选择器即时更新；同时维护当前页面生命周期内最近访问 20 个会话的原始报文内存缓存，只收集会话创建、Run 启动/取消、active-run、消息加载、permission/question 回复和 RunEvent SSE，超限时按最久未访问顺序淘汰，认证切换或会话删除时同步清理。
 - `AgentWorkbench` 在用户显式点击应用版本时先调用 `checkWorkspaceVersionGitAccess`；无关联版本库读取权限时展示版本库名称和 SCM GMP 申请地址，并通过“前往申请”新窗口打开 `https://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@`，缺少 SSH key 时引导到个人设置，只有预检通过才调用默认个人 worktree 创建/修复接口。
 - `AgentWorkbench` 在版本、应用、服务器目录和历史 Session 切换时，把个人 worktree 身份作为 Workspace 切换参数在目录加载前同步写入；未知入口复用个人工作区列表按运行态 Workspace ID 精确匹配，避免个人 worktree 暂时降级只读或依赖刷新恢复新增/删除入口。

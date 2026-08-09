@@ -3011,11 +3011,52 @@ test("release-disabled question and workflow entries stay hidden for super admin
   await expect(page.getByRole("button", { name: "通用参数管理" })).toBeVisible();
 });
 
+test("left activity pages expose stable URIs and restore through browser history", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/workbench$/);
+  await expect(page.locator(".figma-app")).toBeVisible();
+
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await expect(page).toHaveURL(/\/toolbox$/);
+
+  await page.getByRole("button", { name: "长期记忆" }).click();
+  await expect(page).toHaveURL(/\/memories$/);
+
+  await page.getByRole("button", { name: "系统管理" }).click();
+  await expect(page).toHaveURL(/\/system$/);
+  await expect(page.getByRole("navigation", { name: "系统管理导航" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Agent、Skill、MCP 与 Tool Hub" }).click();
+  await expect(page).toHaveURL(/\/hub$/);
+
+  await page.getByRole("button", { name: "打开工作台" }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+
+  await page.getByRole("button", { name: "系统设置" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole("dialog", { name: "设置" })).toBeVisible();
+  await page.getByRole("dialog", { name: "设置" }).getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/hub$/);
+  await expect(page.getByTestId("agent-skill-hub-button")).toHaveClass(/figma-activity-btn--active/);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/workbench$/);
+
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("dialog", { name: "设置" })).toBeVisible();
+  await page.getByRole("dialog", { name: "设置" }).getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+});
+
 test("ordinary user opens toolbox immersively and browser history restores panels", async ({ page }) => {
   await mockBackendApi(page, { authRoles: ["USER"] });
 
   await gotoWorkbench(page, { selectConversation: false });
-  const editorButton = page.getByRole("button", { name: "打开编辑器" });
+  const editorButton = page.getByRole("button", { name: "打开工作台" });
   const toolboxButton = page.getByRole("button", { name: "工具盒子" });
   await expect(editorButton).toBeVisible();
   await expect(toolboxButton).toBeVisible();
@@ -3040,7 +3081,7 @@ test("ordinary user opens toolbox immersively and browser history restores panel
   await expect.poll(() => rightPanel.evaluate((node) => Number.parseFloat(getComputedStyle(node).width))).toBeLessThanOrEqual(2);
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/workbench$/);
   await expect(leftPanel).toHaveCSS("width", initialLeftWidth);
   await expect(rightPanel).toHaveCSS("width", initialRightWidth);
 
@@ -3178,7 +3219,7 @@ test("ordinary user opens QA memories, inspects evidence and restores the workbe
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/workbench$/);
   await expect(leftPanel).toHaveCSS("width", initialLeftWidth);
   await expect(rightPanel).toHaveCSS("width", initialRightWidth);
 });
@@ -9722,7 +9763,7 @@ async function emitDiffViewerSave(page: Page, path: string, content: string) {
 }
 
 async function gotoWorkbench(page: Page, options: { selectConversation?: boolean } = {}) {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto("/workbench", { waitUntil: "domcontentloaded" });
   // 工作台会并行加载用户、应用、工作区和运行态目录；先等外围壳挂载，再开始交互，避免慢机器下把初始化竞态误报为功能失败。
   await page.locator(".figma-app").waitFor({ state: "visible", timeout: 20_000 }).catch(() => undefined);
   if (options.selectConversation === false) return;

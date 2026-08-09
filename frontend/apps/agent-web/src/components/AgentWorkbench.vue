@@ -193,7 +193,9 @@ import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
 import MemoryCenter from "./MemoryCenter.vue";
 import {
+  isRoutedCenterMode,
   routeCenterTransition,
+  routedCenterModeFromRouteName,
   transitionImmersivePanels,
   type NonRoutedCenterMode,
   type RoutedCenterMode,
@@ -523,7 +525,7 @@ const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<WorkbenchCenterMode>("editor");
 const supportAccessRequested = ref(false);
 const supportAccessShortcut = createSupportAccessShortcut();
-const centerModeBeforeHub = ref<"editor" | "diff" | "system">("editor");
+const centerModeBeforeHub = ref<Exclude<WorkbenchCenterMode, "hub">>("editor");
 const centerModeBeforeRoute = ref<NonRoutedCenterMode>("editor");
 const hubUpdateCount = ref(0);
 let hubUpdateTimer: ReturnType<typeof setInterval> | null = null;
@@ -589,12 +591,12 @@ function clearRunEventSseFeedback() {
 }
 
 watch(centerMode, (newMode, oldMode) => {
-  // /toolbox 与 /memories 是可前进/后退的权威路由；后台事件不得切走对应沉浸式页面。
+  // 活动栏沉浸式页面以 URI 为权威；后台事件不得切走当前深链接页面。
   if (restoringRoutedCenterMode) {
     restoringRoutedCenterMode = false;
     return;
   }
-  const routedMode = route.name === "toolbox" ? "toolbox" : route.name === "memories" ? "memories" : null;
+  const routedMode = routedCenterModeFromRouteName(route.name);
   if (routedMode && newMode !== routedMode) {
     restoringRoutedCenterMode = true;
     centerMode.value = routedMode;
@@ -617,16 +619,22 @@ watch(centerMode, (newMode, oldMode) => {
   savedBottomDrawerOpen.value = next.savedBottomOpen;
 });
 
-watch((): RoutedCenterMode | null => route.name === "toolbox"
-  ? "toolbox"
-  : route.name === "memories" ? "memories" : null, (routeMode) => {
+watch((): RoutedCenterMode | null => routedCenterModeFromRouteName(route.name), (routeMode) => {
   const next = routeCenterTransition(routeMode, centerMode.value, centerModeBeforeRoute.value);
   centerModeBeforeRoute.value = next.beforeRoute;
   centerMode.value = next.mode;
 }, { immediate: true });
 
-async function selectActivityCenterMode(mode: NonRoutedCenterMode) {
-  if (route.name === "toolbox" || route.name === "memories") {
+async function selectActivityCenterMode(mode: WorkbenchCenterMode) {
+  if (isRoutedCenterMode(mode)) {
+    if (route.name !== mode) {
+      await router.push({ name: mode });
+    } else if (centerMode.value !== mode) {
+      centerMode.value = mode;
+    }
+    return;
+  }
+  if (routedCenterModeFromRouteName(route.name)) {
     await router.push({ name: "workbench" });
   }
   centerMode.value = mode;
@@ -634,10 +642,10 @@ async function selectActivityCenterMode(mode: NonRoutedCenterMode) {
 
 async function toggleMemories() {
   if (route.name === "memories") {
-    await router.push({ name: "workbench" });
+    await selectActivityCenterMode(centerModeBeforeRoute.value);
     return;
   }
-  await router.push({ name: "memories" });
+  await selectActivityCenterMode("memories");
 }
 
 /** SUPER_ADMIN 可在工作台任意位置三击 Shift，直接进入仍需二次授权的问题排查页。 */
@@ -648,22 +656,20 @@ async function openSupportAccessFromShortcut() {
 
 async function toggleToolbox() {
   if (route.name === "toolbox") {
-    await router.push({ name: "workbench" });
+    await selectActivityCenterMode(centerModeBeforeRoute.value);
     return;
   }
-  await router.push({ name: "toolbox" });
+  await selectActivityCenterMode("toolbox");
 }
 
 async function toggleAgentSkillHub() {
-  if (centerMode.value === "toolbox" || centerMode.value === "memories") {
-    await selectActivityCenterMode("hub");
-    return;
-  }
-  if (centerMode.value === "hub") {
+  if (route.name === "hub") {
     await selectActivityCenterMode(centerModeBeforeHub.value);
     return;
   }
-  centerModeBeforeHub.value = centerMode.value;
+  if (centerMode.value !== "hub") {
+    centerModeBeforeHub.value = centerMode.value;
+  }
   await selectActivityCenterMode("hub");
 }
 
@@ -802,6 +808,15 @@ let lastTokens = 0;
 const nowTick = ref(Date.now());
 const scheduledRunTimingHydrationRunIds = new Set<string>();
 const settingsOpen = ref(false);
+let settingsOpenedFromActivity = false;
+watch(() => route.name === "settings", (isSettingsRoute, wasSettingsRoute) => {
+  if (isSettingsRoute) {
+    settingsOpen.value = true;
+  } else if (wasSettingsRoute) {
+    settingsOpen.value = false;
+    settingsOpenedFromActivity = false;
+  }
+}, { immediate: true });
 const firstLoginGuideSettingsMenu = ref<"appWorkspace" | "repository" | "personal">("appWorkspace");
 const firstLoginGuideSettingsTab = ref<"members" | "repositories" | "workspaces" | undefined>();
 const helpCenterOpen = ref(false);
@@ -8085,10 +8100,33 @@ function handleCloseRobotSideQuestion() {
   robotSideQuestion.reset();
 }
 
+async function openSettingsRoute() {
+  if (route.name === "settings") {
+    settingsOpen.value = true;
+    return;
+  }
+  settingsOpenedFromActivity = true;
+  try {
+    await router.push({ name: "settings" });
+  } catch (error) {
+    settingsOpenedFromActivity = false;
+    throw error;
+  }
+}
+
 function closeSettings() {
   settingsOpen.value = false;
   // 设置页可能修改工作空间启用状态，关闭后仅刷新切换模板，不改变当前工作空间。
   void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
+  if (route.name !== "settings") return;
+
+  // 活动栏打开时返回原页面；直接访问 /settings 时替换为工作台，避免退出 SPA。
+  if (settingsOpenedFromActivity) {
+    settingsOpenedFromActivity = false;
+    router.back();
+    return;
+  }
+  void router.replace({ name: "workbench" });
 }
 
 function refreshManagedWorkspaceCatalog() {
@@ -9788,7 +9826,7 @@ async function handleLogout() {
             data-onboarding="settings"
             aria-label="系统设置"
             title="设置"
-            @click="settingsOpen = true"
+            @click="openSettingsRoute"
           >
             <ElSetting class="figma-activity-icon" />
             <span class="figma-activity-text">设置</span>

@@ -75,11 +75,13 @@ packages/shared-types
 
 `apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent / Skill / MCP / Tool Hub。Agent 与 Skill 延续能力市场结构，包含远端能力概览、发现/分类目录、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；Skill 目录额外按日常工作（Worker）、测试（Test）、代码（Code）和其他筛选，测试细分测试设计、测试数据构造、测试执行、测试分析，代码细分白盒分析。用户推送默认进入“其他”，只有超级管理员可在详情页调整分类。MCP 与 Tool 复用顶部已加载的运行态目录，只读展示连接状态、工具标识和说明，不引入发布或引用语义。Hub 详情从左边缘拖拽调宽，支持页面内全屏。所有用户可读取远端精确快照，应用管理员可发布、引用、取消并重新引用，以及确认三方合并冲突；取消关系会立即退出应用引用库。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
 
+活动栏页面级入口使用稳定 URI：工作台 `/workbench`、工具箱 `/toolbox`、记忆 `/memories`、超级管理员控制台 `/system`、能力库 `/hub`，左下角设置弹窗使用 `/settings`。历史根路径 `/` 只作兼容入口并跳转到 `/workbench`；浏览器刷新、前进/后退和登录回跳均以命名路由恢复对应页面，工具箱、记忆、控制台与能力库继续共用沉浸式布局快照。通用问答 `/lobehub/launch` 和长程任务 `/workflow-chat` 保留既有发布开关与独立页面边界。
+
 ### QA 长期记忆中心
 
-`/memories` 是受登录保护的沉浸式路由，活动栏 `BrainCircuit` 入口与 `/toolbox` 共用布局快照和浏览器前进/后退恢复。页面固定分为“我的记忆、团队记忆、Skill 提案”：个人记忆可选择全局或当前 Application 范围；团队候选始终以 Application 为边界并由 `APP_ADMIN` 审核；Skill 提案审核通过后才生成可编辑 `SKILL.md`，实际文件、Git 和发布仍进入既有 Hub 流程。详情抽屉只展示派生摘要与安全证据定位，使用纵向 evidence rail 区分观察、确认、真实注入说明和变更，不复制聊天正文。白名单未开放时页面显示无侵入空态，既有对话保持原行为。
+`/memories` 是受登录保护的沉浸式路由，活动栏 `BrainCircuit` 入口与 `/toolbox`、`/system`、`/hub` 共用布局快照和浏览器前进/后退恢复。页面固定分为“我的记忆、团队记忆、Skill 提案”：个人记忆可选择全局或当前 Application 范围；团队候选始终以 Application 为边界并由 `APP_ADMIN` 审核；Skill 提案审核通过后才生成可编辑 `SKILL.md`，实际文件、Git 和发布仍进入既有 Hub 流程。详情抽屉只展示派生摘要与安全证据定位，使用纵向 evidence rail 区分观察、确认、真实注入说明和变更，不复制聊天正文。白名单未开放时页面显示无侵入空态，既有对话保持原行为。
 
-成功 Run 的完成摘要通过批量 HTTP 恢复实际注入记录，仅在记录非空时显示“参考了 N 条记忆”；不修改 RunEvent SSE，也不根据检索候选猜测使用情况。系统管理新增“记忆能力”，集中显示经过鉴权的 Mem0/pgvector/BGE 就绪状态、固定 CHAT 模型、学习 Outbox 和灰度白名单。页面复用 `--ta-shell-*` 主题变量，个人蓝、团队青、候选琥珀和冲突红只承担记忆治理语义，并支持暗色、键盘焦点、Reduced Motion 与窄屏全屏抽屉。
+成功 Run 的完成摘要通过批量 HTTP 恢复实际注入记录，仅在记录非空时显示“参考了 N 条记忆”；不修改 RunEvent SSE，也不根据检索候选猜测使用情况。系统管理新增“记忆能力”，集中显示经过鉴权的 Mem0/pgvector/BGE 就绪状态、固定 CHAT 模型、学习 Outbox 和灰度白名单。固定模型从已启用且 CHAT 探测成功的内部模型目录选择；白名单通过平台用户目录按姓名、用户 ID 或统一认证号搜索选择，不再要求管理员手填 ID。当前任务内部模型的备用规则使用业务化说明，Embedding 版本、集合和归一化字段收进按需展开的技术信息。页面复用 `--ta-shell-*` 主题变量，个人蓝、团队青、候选琥珀和冲突红只承担记忆治理语义，并支持暗色、键盘焦点、Reduced Motion 与窄屏全屏抽屉。
 
 应用源码快照的仓库、分支、目录树、物化、保留期调整、重试、打开、最近选择和持久化操作查询统一由 `packages/backend-api` 调用平台 workspace-management API；`listAppSourceTree` 保持节点数组语义，新的 `getAppSourceTreeSnapshot` 在同一 URL 上请求 `includeCommit=true` 并返回 `{targetCommit,nodes}`，调用方把该固定提交直接作为物化 `expectedTreeCommit`。选择项使用 `{path,type}`，下载状态固定为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。物化进度使用独立的一次性 ticket WebSocket；client 单次连接不自行重连，意外 `error/close` 会向调用方报告安全失败，工作台按有界退避串行执行“数据库 snapshot → 新 ticket → 新 WebSocket”。主动关闭只停止观察，不取消后台任务。保留期调整是同步 PATCH，不创建进度连接。`packages/shared-types` 保存严格判别的安全 DTO/envelope：成功帧必须完整包含 operation/operationId/traceId，失败帧必须包含 `FAILED` 与安全错误；runtime validator 拒绝畸形消息，业务回调异常不会被二次包装为消息格式错误。RunEvent union 不增加应用源码事件。
 
