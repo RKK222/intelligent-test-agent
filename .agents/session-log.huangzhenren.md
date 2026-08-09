@@ -2195,3 +2195,18 @@
 - Result:
   - “分享给我”中的有效会话现在从独立标签页进入，原工作台继续保留；失效分享项仍保持禁用。
   - 本次仅调整前端导航与测试，不涉及后端、性能或安全边界变更。
+
+### 2026-08-09 - 修复分享工作台模型目录为空
+
+- Why:
+  - 分享专用客户端会携带分享头，但模型和 Provider 目录请求未携带 `workspaceId`；后端按分享安全边界拒绝未绑定精确 Session/Workspace 的请求，因此被分享人只能看到已选模型文本，候选列表显示为空。
+- What:
+  - 分享模式从 `SessionShareAccess.workspaceId` 取得固定工作区，将其同时传给模型、Provider 与 Provider 白名单配置请求，并纳入 Vue Query 缓存键；普通工作台继续使用原有无工作区目录请求。
+  - Playwright mock 按真实后端规则拒绝缺少或越界工作区的分享目录请求，新增被分享人加载所属人工作区目录并实际选择模型的回归场景；同步 agent-web README 与会话场景测试文档。
+- How:
+  - TDD 红灯确认旧实现无法展示所属人 Provider；修复后 Chromium 模型相关场景 4/4、Chromium/Firefox/WebKit 分享模型场景 3/3 通过，agent-web 类型检查和 production build 通过。
+  - 并行权限开关任务在收尾期间提交了共享工作区，代码、测试和稳定文档已随前序提交 `3eebd21e3` 一并落库；本条独立记录该缺陷修复，未重写或回滚并行提交。
+  - 提交前回顾全部 `.agents/session-log*.md`；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 被分享人进入分享会话后可加载会话所属人固定工作区的可用模型并完成选择，同时继续由后端执行精确 Workspace 校验。
+  - 本次仅修复前端请求范围与缓存隔离，不放宽权限，不涉及数据库、性能或兼容性协议变更。
