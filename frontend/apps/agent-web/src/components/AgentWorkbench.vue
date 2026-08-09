@@ -596,6 +596,13 @@ const historySwitchingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 let activeRunProbeSeq = 0;
 const runtimeStateRunReconciliations = new Set<string>();
+type HistorySwitchRunEventBuffer = {
+  switchSeq: number;
+  sessionId: string;
+  runId?: string;
+  events: RunEvent[];
+};
+let historySwitchRunEventBuffer: HistorySwitchRunEventBuffer | null = null;
 const followUpQueue = ref<FollowUpDraft[]>([]);
 const retryDeadlines = ref<RetryDeadlineMap>({});
 const resendStarting = ref(false);
@@ -2887,6 +2894,7 @@ watch(
           applyRunEventWorkbenchProjection(event, false, subscribedSessionId);
           return;
         }
+        bufferHistorySwitchRunEvent(event, subscribedSessionId);
         handleRunEvent(event, subscribedSessionId);
       },
       onStatus: (status) => {
@@ -3433,6 +3441,7 @@ function invalidateConversationInteraction() {
   activeRunProbeSeq += 1;
   // 非历史交互会取消当前 switch；递增 owner 代次可确保旧 finally 无权清除后来启动的新 switch。
   historySwitchSeq += 1;
+  historySwitchRunEventBuffer = null;
   historyLoadingSessionId.value = null;
   historySwitchingSessionId.value = null;
 }
@@ -8448,6 +8457,48 @@ function handleRunEvent(event: RunEvent, subscribedSessionId?: string, allowNoti
   applyRunEventWorkbenchProjection(projectedEvent, allowNotification, subscribedSessionId);
 }
 
+/**
+ * 历史基线与 RunEvent 并发加载时保留当前 Run 的实时事件；迟到的消息页或会话树覆盖基线后会立即重放。
+ * 新 reset 已包含当时完整物化状态，因此可以丢弃它之前的缓存，避免长时间历史加载无限积累事件。
+ */
+function bufferHistorySwitchRunEvent(event: RunEvent, subscribedSessionId: string) {
+  const buffer = historySwitchRunEventBuffer;
+  if (
+    !buffer
+    || buffer.switchSeq !== historySwitchSeq
+    || buffer.sessionId !== subscribedSessionId
+    || historySwitchingSessionId.value !== subscribedSessionId
+  ) {
+    return;
+  }
+  if (buffer.runId && buffer.runId !== event.runId) {
+    // 替代 Run 在历史加载期间接管订阅时，旧 Run 的缓存必须整体让位；旧连接晚到事件已在投影守卫处被拒绝。
+    buffer.events = [];
+  }
+  buffer.runId = event.runId;
+  if (event.type === "run.snapshot.reset") {
+    buffer.events = [event];
+    return;
+  }
+  if (!buffer.events.some((item) => item.eventId === event.eventId)) {
+    buffer.events.push(event);
+  }
+}
+
+/** 历史状态被整块替换后，无通知地重放同一批实时事件，恢复思考、工具、Todo 与运行状态。 */
+function replayHistorySwitchRunEvents(buffer: HistorySwitchRunEventBuffer) {
+  if (
+    historySwitchRunEventBuffer !== buffer
+    || buffer.switchSeq !== historySwitchSeq
+    || session.value?.sessionId !== buffer.sessionId
+  ) {
+    return;
+  }
+  for (const event of buffer.events) {
+    handleRunEvent(event, buffer.sessionId, false);
+  }
+}
+
 function isInteractionAskSupersededBySnapshot(event: RunEvent): boolean {
   if (event.type !== "permission.asked" && event.type !== "question.asked") {
     return false;
@@ -9369,6 +9420,12 @@ async function switchSession(
   }
   session.value = selected;
   readonlySessionReason.value = readonlyReason;
+  const liveRunEvents: HistorySwitchRunEventBuffer = {
+    switchSeq,
+    sessionId,
+    events: []
+  };
+  historySwitchRunEventBuffer = liveRunEvents;
   // 工作区校验已通过后立即清理上一 Session 的交互 dock；新 Session 的 pending 快照随后再填充。
   dispatchChat({ type: "reset" });
   if (!readonlyReason) {
@@ -9403,6 +9460,12 @@ async function switchSession(
     rememberPersistedMessageIdentities(persistedMessages);
     // 先以分页消息渲染正文，树快照和 Todo 作为后续增强；避免大历史树把首屏卡住。
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
+    const restoredFiles = diffFilesFromSessionMessages(persistedMessages).map((file) => ({
+      ...file,
+      path: normalizeWorkspacePath(file.path) || file.path
+    }));
+    diffFiles.value = restoredFiles;
+    replayHistorySwitchRunEvents(liveRunEvents);
     // 视觉 loading 只等待数据库正文；实时 interaction 校准继续后台完成，发送锁仍由 switching 状态持有。
     historyLoadingSessionId.value = null;
     const [livePermissions, liveQuestions] = await historyInteractionsPromise;
@@ -9437,6 +9500,7 @@ async function switchSession(
     const restoredState = treeSnapshot ? chatStateFromSessionTreeSnapshot(treeSnapshot, persistedMessages) : null;
     if (restoredState && restoredState.messages.length > 0) {
       chatState.value = restoredState;
+      replayHistorySwitchRunEvents(liveRunEvents);
       if (livePermissions !== null || liveQuestions !== null || liveTodos !== null) {
         chatState.value = {
           ...chatState.value,
@@ -9454,11 +9518,6 @@ async function switchSession(
     // 正文可以先展示，但发送锁必须保留到关联 Run/Diff 投影完成，避免迟到历史详情覆盖新 Run。
     // 反馈状态独立异步补齐，不延长这把锁。
     void loadFeedbacksForMessages(persistedMessages, sessionId, switchIsCurrent);
-    const restoredFiles = diffFilesFromSessionMessages(persistedMessages).map((file) => ({
-      ...file,
-      path: normalizeWorkspacePath(file.path) || file.path
-    }));
-    diffFiles.value = restoredFiles;
 
     // 寻找最新的 runId 从而恢复 Run 状态与文件 Diff
     const lastMsgWithRunId = [...persistedMessages].reverse().find((m) => m.runId);
@@ -9471,19 +9530,24 @@ async function switchSession(
         if (!switchIsCurrent()) {
           return;
         }
-        run.value = runDetail;
-        rememberRunSession(runDetail);
+        const currentRun = run.value;
+        if (!currentRun || !isRunBusyStatus(currentRun.status) || currentRun.runId === runDetail.runId) {
+          // runtime-state 已接管其它活动 Run 时，历史消息关联的旧终态只能补 Diff，不能抢走停止权限和 SSE 身份。
+          run.value = runDetail;
+          rememberRunSession(runDetail);
+        }
         const runFiles = (diffDetail.files ?? []).map((file) => ({
           ...file,
           path: normalizeWorkspacePath(file.path) || file.path
         }));
-        diffFiles.value = mergeDiffFiles(restoredFiles, runFiles);
+        // RunEvent 可能已在历史详情请求期间补入实时 Diff；以当前投影为基线合并，不能退回旧快照。
+        diffFiles.value = mergeDiffFiles(diffFiles.value, runFiles);
       } catch (runErr) {
         if (switchIsCurrent()) {
           console.error("加载关联 Run 失败", runErr);
         }
       }
-    } else {
+    } else if (!isRunBusyStatus(run.value?.status)) {
       run.value = null;
     }
 
@@ -9520,6 +9584,9 @@ async function switchSession(
     if (switchIsCurrent()) {
       historyLoadingSessionId.value = null;
       historySwitchingSessionId.value = null;
+      if (historySwitchRunEventBuffer === liveRunEvents) {
+        historySwitchRunEventBuffer = null;
+      }
     }
   }
 }

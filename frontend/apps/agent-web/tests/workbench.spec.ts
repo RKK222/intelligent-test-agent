@@ -6260,6 +6260,194 @@ test("switching history resumes the runtime-state run and reconciles active-run 
   await expect(page.getByText("正交表实时输出")).toBeVisible();
 });
 
+test("session share owner history keeps a shared actor run snapshot when history enrichment arrives late", async ({ page }) => {
+  let releaseHistoryInteractions!: () => void;
+  const sessionInteractionsGate = new Promise<void>((resolve) => {
+    releaseHistoryInteractions = resolve;
+  });
+  const activeRun = {
+    runId: "run_delegated_live",
+    sessionId: "ses_delegated_live",
+    workspaceId: "wrk_1234567890abcdef",
+    status: "RUNNING",
+    triggeredByUserId: "usr_admin",
+    messageSenderUserId: "usr_shared_writer",
+    messageSenderUnifiedAuthId: "ucid_shared_writer",
+    messageSentBySharedUser: true,
+    createdAt: "2026-08-10T01:00:00Z",
+    updatedAt: "2026-08-10T01:00:01Z"
+  };
+  await installAuthenticatedRunEventFetchStream(page, {
+    run_delegated_live: [{
+      delayMs: 20,
+      events: [{
+        seq: 0,
+        type: "run.snapshot.reset",
+        payload: {
+          reason: "TRANSIENT_SNAPSHOT_RECOVERY",
+          snapshot: {
+            barrierSeq: 2,
+            runtimeVersion: 5,
+            events: [
+              {
+                eventId: "evt_delegated_started",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "run.started",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:01Z",
+                payload: { status: "RUNNING" }
+              },
+              {
+                eventId: "evt_delegated_user",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "message.updated",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:00Z",
+                payload: {
+                  sessionId: "ses_delegated_live",
+                  rootSessionId: "ses_delegated_live",
+                  message: {
+                    id: "msg_delegated_user",
+                    role: "user",
+                    text: "由协作者发起的实时任务",
+                    senderUserId: "usr_shared_writer",
+                    senderUsername: "协作者"
+                  }
+                }
+              },
+              {
+                eventId: "evt_delegated_assistant",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "message.updated",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:02Z",
+                payload: {
+                  sessionId: "ses_delegated_live",
+                  rootSessionId: "ses_delegated_live",
+                  message: { id: "msg_delegated_assistant", role: "assistant" }
+                }
+              },
+              {
+                eventId: "evt_delegated_reasoning",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "message.part.updated",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:03Z",
+                payload: {
+                  sessionId: "ses_delegated_live",
+                  rootSessionId: "ses_delegated_live",
+                  messageID: "msg_delegated_assistant",
+                  part: {
+                    id: "part_delegated_reasoning",
+                    messageID: "msg_delegated_assistant",
+                    type: "reasoning",
+                    text: "正在同步分析共享会话",
+                    state: { status: "running" }
+                  }
+                }
+              },
+              {
+                eventId: "evt_delegated_write",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "message.part.updated",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:04Z",
+                payload: {
+                  sessionId: "ses_delegated_live",
+                  rootSessionId: "ses_delegated_live",
+                  messageID: "msg_delegated_assistant",
+                  part: {
+                    id: "part_delegated_write",
+                    messageID: "msg_delegated_assistant",
+                    type: "tool",
+                    tool: "write",
+                    state: {
+                      status: "completed",
+                      input: { filePath: "tests/shared.spec.ts" }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }]
+    }]
+  });
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    sessionInteractionsGate,
+    sessions: [{
+      sessionId: "ses_delegated_live",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "协作者运行中的会话",
+      status: "ACTIVE",
+      createdAt: "2026-08-10T00:59:00Z",
+      updatedAt: "2026-08-10T01:00:04Z"
+    }],
+    sessionMessagesBySessionId: {
+      ses_delegated_live: [{
+        messageId: "msg_delegated_user",
+        sessionId: "ses_delegated_live",
+        role: "USER",
+        content: "由协作者发起的实时任务",
+        senderUserId: "usr_shared_writer",
+        senderUsername: "协作者",
+        senderUnifiedAuthId: "ucid_shared_writer",
+        sentBySharedUser: true,
+        createdAt: "2026-08-10T01:00:00Z"
+      }]
+    },
+    sessionTreeMessagesBySessionId: {
+      ses_delegated_live: {
+        sessionId: "ses_delegated_live",
+        sessions: [{ rootSessionId: "ses_delegated_live", sessionId: "ses_delegated_live", childSession: false }],
+        messagesBySessionId: {},
+        childSessionIdByTaskPartId: {},
+        events: []
+      }
+    },
+    runtimeStateSummary: {
+      runningCount: 1,
+      questionCount: 0,
+      permissionCount: 0,
+      sessions: [{
+        sessionId: "ses_delegated_live",
+        runId: "run_delegated_live",
+        runStatus: "RUNNING",
+        attention: null,
+        updatedAt: "2026-08-10T01:00:04Z"
+      }],
+      generatedAt: "2026-08-10T01:00:05Z"
+    },
+    activeRun,
+    runsByRunId: { run_delegated_live: activeRun }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "会话列表" }).click();
+  await page.getByRole("button", { name: /协作者运行中的会话/ }).click();
+
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & { __titleWatchRunStreams?: Array<{ runId: string }> })
+      .__titleWatchRunStreams?.some((item) => item.runId === "run_delegated_live") ?? false
+  ))).toBe(true);
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeEnabled();
+  await expect(page.getByText("正在同步分析共享会话")).toBeVisible();
+  await expect(page.getByTestId("oc-work-status-event-write")).toBeVisible();
+
+  releaseHistoryInteractions();
+  await expect(page.getByText("已切换 Session", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeEnabled();
+  await expect(page.getByText("正在同步分析共享会话")).toBeVisible();
+  await expect(page.getByTestId("oc-work-status-event-write")).toBeVisible();
+});
+
 test("runtime-state outage performs only one active-run fallback", async ({ page }) => {
   const activeRunRequests: string[] = [];
   const runtimeStateEventRequests: string[] = [];

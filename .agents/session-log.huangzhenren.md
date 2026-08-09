@@ -2242,6 +2242,21 @@
 - Result:
   - 顶栏 Header 标识已移至标题前方，分享按钮位于最右侧且间距缩窄；历史列表中对已分享会话清晰展示“已分享”状态，并以蓝底（未过期）/灰底（已过期）正确区分。
 
+### 2026-08-10 - 修复分享成员代操作 Run 的历史切换实时投影覆盖
+
+- Why:
+  - 被分享成员发起 Run 后，会话所属人从历史列表进入同一会话时虽然运行态摘要已显示运行中，但迟到的消息页、session-tree 和旧 Run 详情会覆盖先到的 `run.snapshot.reset`，导致思考状态、停止按钮和工具事件短暂消失或双方不同步。
+- What:
+  - `AgentWorkbench` 在历史会话切换窗口缓存当前活动 Run 的 snapshot/尾流，并在消息页与 session-tree 两次基线替换后无通知重放；替代 Run 会清理旧缓存，新 snapshot 会压缩此前缓存。
+  - 旧历史 Run 详情不得抢占已由 runtime-state 接管的其它 busy Run，Diff 以当前实时投影为基线合并，避免回退到旧快照。
+  - 新增所属人打开分享成员活动 Run、历史增强延迟返回的 Playwright 回归，并同步 agent-web、RunEvent 与会话测试文档。
+- How:
+  - TDD 红灯确认延迟历史增强返回后思考文本被覆盖；修复后该场景在 Chromium、Firefox、WebKit 3/3 通过，邻近运行态场景 5/5 通过。
+  - agent-web 类型检查与 production build 通过；前端全量 Vitest 123 个文件通过，1897 passed / 1 skipped。完整分享套件另暴露已有权限控件定位与气泡颜色期望不一致，均与本次运行态修复无关，未扩大范围处理。
+  - 提交前回顾全部 `.agents/session-log*.md`，并执行差异、冲突标记与空白校验；未修改 `.env*`、HTTP API、RunEvent wire schema、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 所属人与被分享成员现在会在历史加载全过程保持同一活动 Run 的思考、停止权限、工具事件、Todo 与 Diff 投影，不再被迟到的历史基线回滚。
+  - 只调整前端事件消费时序，既有后端鉴权、分享代操作模型和旧客户端协议保持兼容；缓存仅存在于单次历史切换窗口。
 
 
 
