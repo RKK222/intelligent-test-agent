@@ -2069,3 +2069,16 @@
 - Result:
   - 外部调用方可使用工具编码与 API Key 经 O(1) 内存认证后获取加密 SSH 私钥，超级管理员可完整管理凭据；API、数据库和安全契约均为新增，旧内部 API 与认证路径保持兼容。
   - 本机没有可用 Docker/Podman、PostgreSQL、共享 Redis，未能执行真实 PostgreSQL 的空库及各目标历史升级，也未能启动双 Java 实例验证跨节点收敛；这两项及目标环境 `flyway_schema_history`/checksum 核对仍是发布前阻断验收，禁止用当前 H2 与单 JVM 测试替代。
+
+### 2026-08-09 - 统一 Flyway SQL 文件命名为时间戳、表名与描述
+
+- Why:
+  - 后续 Flyway SQL 需要从文件名直接识别创建时间、主要目标表和变更目的；多表 migration 还需要统一主表选择规则。
+- What:
+  - 将 V18 之后新增 migration 的命名规则统一为 `VyyyyMMddHHmmss__table_name_description.sql`，多表时按 SQL 实际变更顺序取第一张表。
+  - 同步入口规范、后端规范、数据库部署说明、持久化模块 README/PACKAGE 和完成前自检，并补充单表、多表示例及历史文件不可改名边界。
+- How:
+  - 检索稳定文档中的旧 `VyyyyMMddHHmmss__description.sql` 规则并逐处更新；未修改或重命名任何现有 migration，也未触碰并行任务的未跟踪文件。
+  - 回顾全部 `.agents/session-log*.md` 近期记录，执行规则残留检索和 `git diff --check`。
+- Result:
+  - 稳定文档已统一采用“时间戳 + 表名 + 描述”规则；不涉及运行时代码、SQL、HTTP API、RunEvent、数据库结构、性能、安全、环境配置、generated SDK 或 OpenCode 源码。

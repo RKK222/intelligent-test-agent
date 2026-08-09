@@ -1189,7 +1189,9 @@ XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution
 
 ## 后续 migration 版本规则
 
-V18 及以前保留既有数字版本，已在共享或稳定数据库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支创建时可先使用本地时间作为候选版本；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。
+V18 及以前保留既有数字版本，已在共享或稳定数据库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__table_name_description.sql`：14 位版本取开发者创建迁移时的本地时间戳；双下划线后先写 migration 实际变更的表名，再用简短的 snake_case 描述说明变更内容；涉及多张表时，按 SQL 实际变更顺序取第一张表。例如，为 `users` 增加状态字段时命名为 `V20260809170000__users_add_status.sql`，依次扩展 `sessions`、`runs` 和 `session_messages` 的来源类型时命名为 `V20260809170000__sessions_extend_source_type.sql`。开发分支创建时可先使用本地时间作为候选版本；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。
+
+新规则只约束尚未创建的 migration。历史文件及任何已进入共享、本地、稳定或企业数据库的 migration 即使仍使用动作描述，也必须保持原文件名和原始字节，禁止为套用新规则而改名。
 
 14 位时间戳只能降低同号冲突，不能保证多个分支按相同顺序合并和部署。多人或多分支同时增加 migration 时，发布集成人必须执行以下门禁：
 
