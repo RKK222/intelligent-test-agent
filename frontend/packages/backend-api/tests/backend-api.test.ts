@@ -2,13 +2,72 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BackendApiError,
   createBackendApiClient,
+  createSessionShareApiClient,
   LINUX_SERVER_ROUTE_HEADER,
+  SESSION_SHARE_HEADER,
   SUPPORT_ACCESS_GRANT_HEADER,
   type ReferenceRepositoryStatus,
   type WorkspaceWebSocketFactory
 } from "../src";
 
 describe("backend-api", () => {
+  it("keeps collaboration-share credentials on the dedicated client only", async () => {
+    const exchanges: Array<Record<string, unknown>> = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: { sessionId: "ses_one", workspaceId: "wks_one", title: "协作会话", status: "ACTIVE" }
+    }), { status: 200 }));
+    const ordinary = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "login-token",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+    const shared = createSessionShareApiClient({
+      baseUrl: "http://api",
+      apiToken: "login-token",
+      shareId: "share-secret-256-bit",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    await ordinary.getSession("ses_one");
+    await shared.getSession("ses_one");
+
+    const ordinaryHeaders = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    const sharedHeaders = new Headers(fetcher.mock.calls[1]?.[1]?.headers);
+    expect(ordinaryHeaders.get(SESSION_SHARE_HEADER)).toBeNull();
+    expect(sharedHeaders.get(SESSION_SHARE_HEADER)).toBe("share-secret-256-bit");
+    expect(JSON.stringify(exchanges)).not.toContain("share-secret-256-bit");
+  });
+
+  it("uses ordinary requests for share management and shared-list APIs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: { items: [], page: 1, size: 30, total: 0 }
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "login-token",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.listSharedSessions(1, 30);
+    await client.listSessionShareCandidates("张", 1, 20);
+
+    expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual([
+      "http://api/api/internal/platform/opencode-runtime/session-shares?page=1&size=30",
+      "http://api/api/internal/platform/opencode-runtime/session-share-candidates?q=%E5%BC%A0&page=1&size=20"
+    ]);
+    for (const call of fetcher.mock.calls) {
+      expect(new Headers(call[1]?.headers).get(SESSION_SHARE_HEADER)).toBeNull();
+    }
+  });
+
   it("uses the fixed API Key management routes and redacts revealed keys from raw exchanges", async () => {
     const exchanges: Array<Record<string, unknown>> = [];
     const apiKey = "taak_v1_must-not-enter-observer";

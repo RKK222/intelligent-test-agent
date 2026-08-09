@@ -8,10 +8,13 @@ import com.enterprise.testagent.opencode.runtime.run.RunHistoryRecoveryResult;
 import com.enterprise.testagent.opencode.runtime.run.RunHistoryRecoverySource;
 import com.enterprise.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.enterprise.testagent.opencode.runtime.run.RunResendQueryService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunResend;
 import com.enterprise.testagent.domain.run.RunStorageMode;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.event.RunEventSseMapper;
 import com.enterprise.testagent.event.RunEventSsePayload;
@@ -52,6 +55,7 @@ public class RunController {
     private final RunMessageRecoveryService messageRecoveryService;
     private final RunEventSseMapper sseMapper;
     private final RunResendQueryService resendQueryService;
+    private final SessionCollaborationShareService shareService;
 
     /**
      * 注入运行、diff、SSE 与消息恢复服务，兼容生产构造路径。
@@ -63,13 +67,27 @@ public class RunController {
             RunEventSseStreamService eventStreamService,
             RunMessageRecoveryService messageRecoveryService,
             RunEventSseMapper sseMapper,
-            RunResendQueryService resendQueryService) {
+            RunResendQueryService resendQueryService,
+            SessionCollaborationShareService shareService) {
         this.runService = runService;
         this.runDiffService = runDiffService;
         this.eventStreamService = eventStreamService;
         this.messageRecoveryService = messageRecoveryService;
         this.sseMapper = Objects.requireNonNull(sseMapper, "sseMapper must not be null");
         this.resendQueryService = resendQueryService;
+        this.shareService = shareService;
+    }
+
+    /** 兼容既有手工装配；不携带分享头的调用不需要分享服务。 */
+    public RunController(
+            RunApplicationService runService,
+            RunDiffApplicationService runDiffService,
+            RunEventSseStreamService eventStreamService,
+            RunMessageRecoveryService messageRecoveryService,
+            RunEventSseMapper sseMapper,
+            RunResendQueryService resendQueryService) {
+        this(runService, runDiffService, eventStreamService, messageRecoveryService, sseMapper,
+                resendQueryService, null);
     }
 
     /** 兼容既有测试和手工装配；生产 Spring 构造器额外注入重发查询服务。 */
@@ -79,7 +97,7 @@ public class RunController {
             RunEventSseStreamService eventStreamService,
             RunMessageRecoveryService messageRecoveryService,
             RunEventSseMapper sseMapper) {
-        this(runService, runDiffService, eventStreamService, messageRecoveryService, sseMapper, null);
+        this(runService, runDiffService, eventStreamService, messageRecoveryService, sseMapper, null, null);
     }
 
     /**
@@ -89,7 +107,7 @@ public class RunController {
             RunApplicationService runService,
             RunDiffApplicationService runDiffService,
             RunEventSseStreamService eventStreamService) {
-        this(runService, runDiffService, eventStreamService, null, new RunEventSseMapper(), null);
+        this(runService, runDiffService, eventStreamService, null, new RunEventSseMapper(), null, null);
     }
 
     /**
@@ -102,12 +120,21 @@ public class RunController {
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> startRun(
             @PathVariable(name = "agentId", required = false) String agentId,
             @Valid @RequestBody RuntimeDtos.StartRunRequest request,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
-        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return blockingResponse(exchange, traceId -> toRunResponse(
-                hasAgentId(agentId)
-                        ? runService.startRun(userId, agentId, request.toInput(), traceId)
-                        : runService.startRun(userId, request.toInput(), traceId)));
+        var principal = AuthWebSupport.getAuthPrincipal(exchange);
+        return blockingResponse(exchange, traceId -> {
+            DelegatedOperationContext context = shareContext(principal.userId(), shareId, true, traceId);
+            if (context != null) {
+                context.requireSession(request.toInput().sessionId());
+                return toRunResponse(hasAgentId(agentId)
+                        ? runService.startRun(context, agentId, request.toInput(), traceId)
+                        : runService.startRun(context, request.toInput(), traceId));
+            }
+            return toRunResponse(hasAgentId(agentId)
+                    ? runService.startRun(principal.userId(), agentId, request.toInput(), traceId)
+                    : runService.startRun(principal.userId(), request.toInput(), traceId));
+        });
     }
 
     /**
@@ -120,9 +147,10 @@ public class RunController {
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> getRun(
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
-        return blockingResponse(exchange, ignored -> {
-            RunId authorizedRunId = requireRunAccess(exchange, runId);
+        return blockingResponse(exchange, traceId -> {
+            RunId authorizedRunId = requireRunAccess(exchange, runId, shareId, false, false, traceId);
             return toRunResponse(runService.getRun(authorizedRunId));
         });
     }
@@ -137,9 +165,10 @@ public class RunController {
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> cancelRun(
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId -> {
-            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            RunId authorizedRunId = requireRunAccess(exchange, runId, shareId, false, true, traceId);
             return toRunResponse(hasAgentId(agentId)
                     ? runService.cancelRun(agentId, authorizedRunId, traceId)
                     : runService.cancelRun(authorizedRunId, traceId));
@@ -148,18 +177,26 @@ public class RunController {
 
     private RuntimeDtos.RunResponse toRunResponse(com.enterprise.testagent.domain.run.Run run) {
         RunResend resend = resendFor(run.runId());
+        Function<UserId, String> usernameLookup = usernameLookup();
         return runService.storageMetadata(run.runId())
                 .map(metadata -> RuntimeDtos.RunResponse.from(
                         run,
                         metadata.storageMode(),
                         metadata.clientRequestId(),
                         metadata.detailsAvailableUntil(),
-                        resend))
-                .orElseGet(() -> RuntimeDtos.RunResponse.from(run, null, null, null, resend));
+                        resend,
+                        usernameLookup))
+                .orElseGet(() -> RuntimeDtos.RunResponse.from(
+                        run, null, null, null, resend, usernameLookup));
     }
 
     private RunResend resendFor(RunId runId) {
         return resendQueryService == null ? null : resendQueryService.findForRun(runId);
+    }
+
+    private Function<UserId, String> usernameLookup() {
+        return RuntimeDtos.memoizedUsernameLookup(
+                shareService == null ? null : shareService::findUsername);
     }
 
     /**
@@ -172,9 +209,10 @@ public class RunController {
     public Mono<ApiResponse<RuntimeDtos.RunDiffResponse>> getDiff(
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId -> {
-            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            RunId authorizedRunId = requireRunAccess(exchange, runId, shareId, false, false, traceId);
             return RuntimeDtos.RunDiffResponse.from(hasAgentId(agentId)
                     ? runDiffService.getDiff(agentId, authorizedRunId, traceId)
                     : runDiffService.getDiff(authorizedRunId, traceId));
@@ -191,9 +229,10 @@ public class RunController {
     public Mono<ApiResponse<RuntimeDtos.RunDiffActionResponse>> acceptDiff(
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId -> {
-            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            RunId authorizedRunId = requireRunAccess(exchange, runId, shareId, true, false, traceId);
             return RuntimeDtos.RunDiffActionResponse.from(hasAgentId(agentId)
                     ? runDiffService.acceptDiff(agentId, authorizedRunId, traceId)
                     : runDiffService.acceptDiff(authorizedRunId, traceId));
@@ -210,9 +249,10 @@ public class RunController {
     public Mono<ApiResponse<RuntimeDtos.RunDiffActionResponse>> rejectDiff(
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId -> {
-            RunId authorizedRunId = requireRunAccess(exchange, runId);
+            RunId authorizedRunId = requireRunAccess(exchange, runId, shareId, true, false, traceId);
             return RuntimeDtos.RunDiffActionResponse.from(hasAgentId(agentId)
                     ? runDiffService.rejectDiff(agentId, authorizedRunId, traceId)
                     : runDiffService.rejectDiff(authorizedRunId, traceId));
@@ -232,6 +272,7 @@ public class RunController {
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
             @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             @RequestParam(name = "lastEventId", required = false) String lastEventIdQuery,
             ServerWebExchange exchange) {
         exchange.getResponse().getHeaders().set("X-Accel-Buffering", "no");
@@ -240,9 +281,8 @@ public class RunController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         // Redis/legacy 归属读取属于阻塞调用；延迟到 boundedElastic 执行，且仍严格先于首帧与任何恢复读取。
         return Flux.defer(() -> {
-                    runService.requireRunAccess(
-                            AuthWebSupport.getAuthPrincipal(exchange).userId(),
-                            currentRunId);
+                    DelegatedOperationContext sharedContext = requireRunAccessContext(
+                            exchange, currentRunId, shareId, false, false, traceId);
                     boolean redisSummary = runService.eventStorageMode(currentRunId) == RunStorageMode.REDIS_SUMMARY;
                     Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = messageRecoveryService == null || redisSummary
                             ? Flux.empty()
@@ -250,12 +290,15 @@ public class RunController {
                                     ? messageRecoveryService.recover(agentId, currentRunId, traceId)
                                     : messageRecoveryService.recover(currentRunId, traceId))
                                     .map(sseMapper::toTransientSse);
-                    return eventStreamService.streamAfterWithSnapshot(
+                    Flux<ServerSentEvent<RunEventSsePayload>> events = eventStreamService.streamAfterWithSnapshot(
                             currentRunId,
                             resumeEventId,
                             DEFAULT_POLL_INTERVAL,
                             DEFAULT_BATCH_LIMIT,
                             snapshotEvents);
+                    return sharedContext == null
+                            ? events
+                            : events.takeUntilOther(sharedAccessInvalidation(sharedContext, traceId));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -270,13 +313,12 @@ public class RunController {
     public Mono<ApiResponse<RuntimeDtos.RunSessionTreeMessagesResponse>> getSessionTreeMessages(
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable("runId") String runId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         RunId currentRunId = new RunId(runId);
         return Mono.fromCallable(() -> {
-                    runService.requireRunAccess(
-                            AuthWebSupport.getAuthPrincipal(exchange).userId(),
-                            currentRunId);
+                    requireRunAccess(exchange, runId, shareId, false, false, traceId);
                     RunHistoryRecoveryResult recovery = messageRecoveryService == null
                             ? RunHistoryRecoveryResult.full(
                                     List.of(), null, RunHistoryRecoverySource.OPENCODE)
@@ -321,14 +363,74 @@ public class RunController {
     }
 
     /** 所有 runId 入口在读取详情或执行副作用前统一校验认证用户归属。 */
-    private RunId requireRunAccess(ServerWebExchange exchange, String runId) {
+    private RunId requireRunAccess(
+            ServerWebExchange exchange,
+            String runId,
+            String shareId,
+            boolean requireChat,
+            boolean requireStopPermission,
+            String traceId) {
         RunId currentRunId = new RunId(runId);
-        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        runService.requireRunAccess(userId, currentRunId);
+        requireRunAccessContext(
+                exchange, currentRunId, shareId, requireChat, requireStopPermission, traceId);
         return currentRunId;
+    }
+
+    private DelegatedOperationContext requireRunAccessContext(
+            ServerWebExchange exchange,
+            RunId currentRunId,
+            String shareId,
+            boolean requireChat,
+            boolean requireStopPermission,
+            String traceId) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        DelegatedOperationContext context = shareContext(userId, shareId, requireChat, traceId);
+        if (context == null) {
+            runService.requireRunAccess(userId, currentRunId);
+        } else if (requireStopPermission) {
+            runService.requireRunStopAccess(context, currentRunId);
+        } else {
+            runService.requireRunAccess(context, currentRunId);
+        }
+        return context;
+    }
+
+    /** 分享 Run SSE 每秒重验授权；成员/权限/版本/有效期变化或存储不可用时立即断流。 */
+    private Flux<Long> sharedAccessInvalidation(
+            DelegatedOperationContext initial,
+            String traceId) {
+        return Flux.interval(Duration.ofSeconds(1))
+                .concatMap(ignored -> Mono.fromCallable(() -> shareService.refreshAccess(
+                                initial.actorUserId(), initial.shareId(), traceId))
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .filter(refreshed -> refreshed.shareVersion() != initial.shareVersion()
+                        || refreshed.canChat() != initial.canChat()
+                        || !refreshed.sessionId().equals(initial.sessionId())
+                        || !refreshed.workspaceId().equals(initial.workspaceId())
+                        || !refreshed.executionOwnerUserId().equals(initial.executionOwnerUserId()))
+                .map(ignored -> 1L)
+                .onErrorResume(RuntimeException.class, ignored -> Flux.just(1L))
+                .take(1);
     }
 
     private boolean hasAgentId(String agentId) {
         return agentId != null && !agentId.isBlank();
+    }
+
+    private DelegatedOperationContext shareContext(
+            UserId actor,
+            String shareId,
+            boolean requireChat,
+            String traceId) {
+        if (shareId == null || shareId.isBlank()) {
+            return null;
+        }
+        if (shareService == null) {
+            throw new com.enterprise.testagent.common.error.PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                    "会话分享服务未配置");
+        }
+        return shareService.requireAccess(
+                actor, new SessionShareId(shareId), requireChat, traceId);
     }
 }

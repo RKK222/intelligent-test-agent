@@ -27,6 +27,7 @@ import {
   PanelRightClose,
   SquarePen,
   Send,
+  Share2,
   Square,
   ThumbsDown,
   ThumbsUp,
@@ -54,6 +55,7 @@ import type {
   QuestionRequest,
   ProviderInfo,
   RunDiffFile,
+  SharedSessionListItem,
   SubagentSession,
   TodoItem,
 } from '@test-agent/shared-types'
@@ -705,6 +707,13 @@ const props =
       attentionAt?: string
       sourceType?: string
     }>
+    /** 当前用户收到的协作分享；保留失效记录供审计与识别。 */
+    sharedSessions?: SharedSessionListItem[]
+    sharedSessionsLoading?: boolean
+    /** 分享入口固定在单个会话时，不允许再打开会话列表或新建会话。 */
+    fixedSession?: boolean
+    /** 当前普通会话是否可由所属人管理分享。 */
+    canManageShare?: boolean
     /** 当前用户历史中仍在运行的会话数。 */
     historyRunningCount?: number
     /** 当前用户历史中存在待回答 question 的会话数。 */
@@ -801,6 +810,8 @@ const props =
     questions?: QuestionRequest[]
     /** 当前 root 会话；历史切换时用于退出上一次子 Agent 视图。 */
     currentSessionId?: string
+    /** 协作消息用于判断“自己”并隐藏姓名。 */
+    currentUserId?: string
     currentSessionSourceType?: string | null
     /** 仅根会话最后一条、具备远端回退边界的终态用户消息可撤销重发。 */
     resendableMessageId?: string
@@ -851,6 +862,10 @@ const props =
     nightSlots: null,
     nightTaskActionPending: () => ({}),
     canScheduleCustomTime: false,
+    sharedSessions: () => [],
+    sharedSessionsLoading: false,
+    fixedSession: false,
+    canManageShare: false,
     panelVisible: true,
   })
 
@@ -878,6 +893,9 @@ const emit =
     (e: 'history-search-change', query: string): void
     (e: 'load-more-history'): void
     (e: 'select-session', id: string): void
+    (e: 'select-shared-session', shareId: string): void
+    (e: 'request-shared-sessions'): void
+    (e: 'manage-share'): void
     (e: 'request-night-tasks'): void
     (e: 'update:inputValue', value: string): void
     (e: 'upload-chat-attachments', files: File[]): void
@@ -1239,7 +1257,7 @@ function isRemoteRuntimeMessageId(id: string | undefined): id is string {
 }
 
 function submitNegativeFeedback() {
-  if (!negativeFeedbackRunId.value) return
+  if (!negativeFeedbackRunId.value || readonlyBlockedReason.value) return
   emit('submit-feedback', {
     runId: negativeFeedbackRunId.value,
     rating: 'NEGATIVE',
@@ -1253,6 +1271,7 @@ function canFeedbackRun(row: { runId?: string; runStatus?: string }): row is { r
   const status = row.runStatus?.toUpperCase()
   return !activeSubagentSessionId.value
     && !props.historyLoading
+    && !readonlyBlockedReason.value
     && Boolean(row.runId)
     && (status === 'SUCCEEDED' || status === 'COMPLETED')
 }
@@ -1266,10 +1285,12 @@ function isRunFeedbackSubmitting(runId: string) {
 }
 
 function submitPositiveRunFeedback(runId: string) {
+  if (readonlyBlockedReason.value) return
   emit('submit-feedback', { runId, rating: 'POSITIVE' })
 }
 
 function openNegativeRunFeedback(runId: string) {
+  if (readonlyBlockedReason.value) return
   const current = runFeedbackFor(runId)
   negativeFeedbackRunId.value = runId
   negativeFeedbackReason.value = current?.rating === 'NEGATIVE' ? current.reasonCode ?? '' : ''
@@ -1469,6 +1490,7 @@ function canReplyQuestion(item: QuestionRequest): boolean {
 }
 
 function replyQuestion(item: QuestionRequest) {
+  if (readonlyBlockedReason.value) return
   if (!canReplyQuestion(item)) return
   emit('reply-question', item.requestId, buildQuestionAnswers(item))
 }
@@ -2972,17 +2994,20 @@ function selectDrawerFile(path: string) {
   void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }))
 }
 
-type HistoryDrawerView = 'sessions' | 'night'
+type HistoryDrawerView = 'sessions' | 'shared' | 'night'
 
 const chatRootEl = ref<HTMLElement | null>(null)
 const historyDrawerTriggerEl = ref<HTMLButtonElement | null>(null)
 const historyDrawerSearchEl = ref<HTMLInputElement | null>(null)
 const historyDrawerSessionsTabEl = ref<HTMLButtonElement | null>(null)
+const historyDrawerSharedTabEl = ref<HTMLButtonElement | null>(null)
 const historyDrawerNightTabEl = ref<HTMLButtonElement | null>(null)
 const historyDrawerId = useId()
 const historyDrawerSessionsTabId = `${historyDrawerId}-sessions-tab`
+const historyDrawerSharedTabId = `${historyDrawerId}-shared-tab`
 const historyDrawerNightTabId = `${historyDrawerId}-night-tab`
 const historyDrawerSessionsPanelId = `${historyDrawerId}-sessions-panel`
+const historyDrawerSharedPanelId = `${historyDrawerId}-shared-panel`
 const historyDrawerNightPanelId = `${historyDrawerId}-night-panel`
 const historyDrawerOpen = ref(false)
 const historyDrawerView = ref<HistoryDrawerView>('sessions')
@@ -3065,21 +3090,28 @@ function toggleHistoryDrawer() {
 
 function showHistoryDrawerView(view: HistoryDrawerView) {
   historyDrawerView.value = view
+  if (view === 'shared') emit('request-shared-sessions')
   if (view === 'night') emit('request-night-tasks')
 }
 
 // 按 WAI-ARIA Tabs 模式提供循环方向键与 Home/End 导航，选中页签同时进入 Tab 顺序。
 function onHistoryDrawerTabKeydown(event: KeyboardEvent, current: HistoryDrawerView) {
+  const views: HistoryDrawerView[] = ['sessions', 'shared', 'night']
   let target: HistoryDrawerView | null = null
   if (event.key === 'Home') target = 'sessions'
   if (event.key === 'End') target = 'night'
-  if (event.key === 'ArrowLeft') target = current === 'sessions' ? 'night' : 'sessions'
-  if (event.key === 'ArrowRight') target = current === 'sessions' ? 'night' : 'sessions'
+  const currentIndex = views.indexOf(current)
+  if (event.key === 'ArrowLeft') target = views[(currentIndex + views.length - 1) % views.length]
+  if (event.key === 'ArrowRight') target = views[(currentIndex + 1) % views.length]
   if (!target) return
   event.preventDefault()
   if (historyDrawerView.value !== target) showHistoryDrawerView(target)
   void nextTick(() => {
-    const tab = target === 'sessions' ? historyDrawerSessionsTabEl.value : historyDrawerNightTabEl.value
+    const tab = target === 'sessions'
+      ? historyDrawerSessionsTabEl.value
+      : target === 'shared'
+        ? historyDrawerSharedTabEl.value
+        : historyDrawerNightTabEl.value
     tab?.focus()
   })
 }
@@ -3092,6 +3124,20 @@ function closeHistoryDrawer(restoreFocus = true) {
 }
 function selectHistoryItem(id: string) {
   emit('select-session', id)
+}
+
+function selectSharedHistoryItem(item: SharedSessionListItem) {
+  if (item.status !== 'ACTIVE') return
+  emit('select-shared-session', item.shareId)
+}
+
+function sharedSessionStatusLabel(status: string) {
+  if (status === 'ACTIVE') return '有效'
+  if (status === 'EXPIRED') return '已过期'
+  if (status === 'REVOKED') return '已取消'
+  if (status === 'REMOVED') return '已移除'
+  if (status === 'SESSION_ARCHIVED') return '会话已归档'
+  return status
 }
 
 function historyContextText(item: { appName?: string; workspaceName?: string; version?: string }) {
@@ -4203,7 +4249,13 @@ function nightActionPending(taskId: string): boolean {
 }
 
 function canAdjustNightTask(task: NightExecutionTask): boolean {
-  return !isCustomSchedule(task) || props.canScheduleCustomTime
+  return !readonlyBlockedReason.value
+    && (!props.fixedSession || task.creatorUserId === props.currentUserId)
+    && (!isCustomSchedule(task) || props.canScheduleCustomTime)
+}
+
+function canManageNightTask(task: NightExecutionTask): boolean {
+  return !props.fixedSession || task.creatorUserId === props.currentUserId
 }
 
 function refreshCustomScheduleBounds(now = new Date()) {
@@ -4414,6 +4466,18 @@ function onCompositionEnd() {
           <span>原始输出</span>
         </button>
         <button
+          v-if="canManageShare"
+          type="button"
+          class="figma-chat-header-btn figma-chat-header-btn--share"
+          title="管理会话分享"
+          data-testid="manage-session-share"
+          @click="emit('manage-share')"
+        >
+          <Share2 :size="15" />
+          <span>分享</span>
+        </button>
+        <button
+          v-if="!fixedSession"
           ref="historyDrawerTriggerEl"
           type="button"
           class="figma-chat-header-btn figma-chat-header-btn--history"
@@ -4459,6 +4523,7 @@ function onCompositionEnd() {
         v-else
         :state="opencodeTimelineState"
         :resendable-message-id="resendableMessageId"
+        :current-user-id="currentUserId"
         :work-status-dock-target="activeSubagentSessionId ? undefined : workStatusDockRef"
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
@@ -4529,17 +4594,19 @@ function onCompositionEnd() {
               :disabled="nightActionPending(currentNightTask.taskId)"
               @click="beginAdjustNightTask(currentNightTask)"
             >调整时间</button>
-            <button
-              v-if="cancelConfirmTaskId !== currentNightTask.taskId"
-              type="button"
-              class="is-danger"
-              :disabled="nightActionPending(currentNightTask.taskId)"
-              @click="askCancelNightTask(currentNightTask.taskId)"
-            >取消任务</button>
-            <template v-else>
-              <span class="figma-chat-night-confirm-copy">取消后可继续对话，确定取消？</span>
-              <button type="button" class="is-danger" @click="confirmCancelNightTask(currentNightTask.taskId)">确认</button>
-              <button type="button" @click="cancelConfirmTaskId = null">返回</button>
+            <template v-if="canManageNightTask(currentNightTask)">
+              <button
+                v-if="cancelConfirmTaskId !== currentNightTask.taskId"
+                type="button"
+                class="is-danger"
+                :disabled="nightActionPending(currentNightTask.taskId)"
+                @click="askCancelNightTask(currentNightTask.taskId)"
+              >取消任务</button>
+              <template v-else>
+                <span class="figma-chat-night-confirm-copy">取消后可继续对话，确定取消？</span>
+                <button type="button" class="is-danger" @click="confirmCancelNightTask(currentNightTask.taskId)">确认</button>
+                <button type="button" @click="cancelConfirmTaskId = null">返回</button>
+              </template>
             </template>
           </template>
           <span v-else class="figma-chat-night-dispatch-copy">任务正在启动，请稍候…</span>
@@ -4560,6 +4627,7 @@ function onCompositionEnd() {
         <p class="figma-chat-night-error">{{ nightVisibleFailure.errorMessage || '任务未能在夜间窗口内启动' }}</p>
         <div class="figma-chat-night-actions">
           <button
+            v-if="canManageNightTask(nightVisibleFailure)"
             type="button"
             :disabled="nightActionPending(nightVisibleFailure.taskId)"
             @click="emit('dismiss-night-task', nightVisibleFailure.taskId)"
@@ -5467,6 +5535,9 @@ function onCompositionEnd() {
       v-if="visiblePermissionCards.length || visibleQuestions.length"
       class="figma-chat-question-dock"
     >
+      <p v-if="readonlyBlockedReason" class="figma-chat-question-readonly-note">
+        当前分享权限为只读，仅可查看这些请求。
+      </p>
       <div
         v-for="permission in visiblePermissionCards"
         :key="permission.request.requestId"
@@ -5483,9 +5554,9 @@ function onCompositionEnd() {
           <code v-for="pattern in permission.presentation.patterns" :key="pattern">{{ pattern }}</code>
         </div>
         <div class="figma-chat-question-actions">
-          <button type="button" class="figma-chat-question-reject" @click="emit('reply-permission', permission.request.requestId, 'reject')">拒绝</button>
-          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.request.requestId, 'always')">始终允许</button>
-          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.request.requestId, 'once')">允许一次</button>
+          <button type="button" class="figma-chat-question-reject" :disabled="Boolean(readonlyBlockedReason)" @click="emit('reply-permission', permission.request.requestId, 'reject')">拒绝</button>
+          <button type="button" class="figma-chat-question-submit" :disabled="Boolean(readonlyBlockedReason)" @click="emit('reply-permission', permission.request.requestId, 'always')">始终允许</button>
+          <button type="button" class="figma-chat-question-submit" :disabled="Boolean(readonlyBlockedReason)" @click="emit('reply-permission', permission.request.requestId, 'once')">允许一次</button>
         </div>
       </div>
       <template v-for="item in visibleQuestions" :key="item.requestId">
@@ -5511,6 +5582,7 @@ function onCompositionEnd() {
                 :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
                 class="figma-chat-question-custom-input"
                 placeholder="输入你的答案..."
+                :disabled="Boolean(readonlyBlockedReason)"
                 @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
               />
               <div v-else class="figma-chat-question-options" :class="{ 'is-multiple': isMultipleQuestion(currentQuestionRequired(item)) }">
@@ -5522,6 +5594,7 @@ function onCompositionEnd() {
                     'figma-chat-question-option',
                     isQuestionOptionSelected(currentQuestionRequired(item), option.label) && 'is-selected',
                   ]"
+                  :disabled="Boolean(readonlyBlockedReason)"
                   @click="chooseQuestionOption(currentQuestionRequired(item), option.label)"
                 >
                   <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
@@ -5543,6 +5616,7 @@ function onCompositionEnd() {
                       :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
                       class="figma-chat-question-custom-input"
                       placeholder="输入你的答案..."
+                      :disabled="Boolean(readonlyBlockedReason)"
                       @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
                     />
                   </span>
@@ -5554,6 +5628,7 @@ function onCompositionEnd() {
             <button
               type="button"
               class="figma-chat-question-reject"
+              :disabled="Boolean(readonlyBlockedReason)"
               @click="emit('reject-question', item.requestId)"
             >
               忽略
@@ -5579,7 +5654,7 @@ function onCompositionEnd() {
               v-else
               type="button"
               class="figma-chat-question-submit"
-              :disabled="!canReplyQuestion(item)"
+              :disabled="Boolean(readonlyBlockedReason) || !canReplyQuestion(item)"
               @click="replyQuestion(item)"
             >
               提交
@@ -5903,6 +5978,7 @@ function onCompositionEnd() {
           <div class="figma-chat-card-spacer" />
           <!-- 右侧：新建对话 + 发送/停止 -->
           <el-tooltip
+            v-if="!fixedSession"
             content="新建对话"
             placement="top"
             :show-after="0"
@@ -6309,7 +6385,23 @@ function onCompositionEnd() {
             @click="showHistoryDrawerView('sessions')"
             @keydown="onHistoryDrawerTabKeydown($event, 'sessions')"
           >
-            会话 <span>{{ historyTotalCount }}</span>
+            我的会话 <span>{{ historyTotalCount }}</span>
+          </button>
+          <button
+            :id="historyDrawerSharedTabId"
+            ref="historyDrawerSharedTabEl"
+            type="button"
+            class="figma-chat-history-tab"
+            :class="{ 'is-active': historyDrawerView === 'shared' }"
+            role="tab"
+            :aria-selected="historyDrawerView === 'shared'"
+            :aria-controls="historyDrawerSharedPanelId"
+            :tabindex="historyDrawerView === 'shared' ? 0 : -1"
+            data-testid="session-list-shared-tab"
+            @click="showHistoryDrawerView('shared')"
+            @keydown="onHistoryDrawerTabKeydown($event, 'shared')"
+          >
+            分享给我 <span>{{ sharedSessions.length }}</span>
           </button>
           <button
             :id="historyDrawerNightTabId"
@@ -6425,6 +6517,56 @@ function onCompositionEnd() {
           </div>
         </div>
         <div
+          v-else-if="historyDrawerView === 'shared'"
+          :id="historyDrawerSharedPanelId"
+          class="figma-chat-history-body figma-chat-history-body--shared"
+          role="tabpanel"
+          :aria-labelledby="historyDrawerSharedTabId"
+        >
+          <div v-if="sharedSessionsLoading" class="figma-chat-history-empty" role="status">
+            <Spinner />
+            <p class="figma-chat-history-empty-text">正在加载分享会话…</p>
+          </div>
+          <div v-else-if="sharedSessions.length === 0" class="figma-chat-history-empty">
+            <Share2 :size="32" class="figma-chat-history-empty-icon" />
+            <p class="figma-chat-history-empty-text">暂无其他用户分享给你的会话</p>
+          </div>
+          <ul v-else class="figma-chat-history-list">
+            <li v-for="item in sharedSessions" :key="`${item.shareId}:${item.status}`">
+              <button
+                type="button"
+                class="figma-chat-history-card figma-chat-history-card--shared"
+                :class="{ 'is-disabled': item.status !== 'ACTIVE' }"
+                :disabled="item.status !== 'ACTIVE'"
+                :title="item.status === 'ACTIVE' ? item.sessionTitle : sharedSessionStatusLabel(item.status)"
+                @click="selectSharedHistoryItem(item)"
+              >
+                <div class="figma-chat-history-card-icon">
+                  <Share2 :size="15" />
+                </div>
+                <div class="figma-chat-history-card-content">
+                  <div class="figma-chat-history-card-title-row">
+                    <div class="figma-chat-history-card-title">{{ item.sessionTitle || '分享会话' }}</div>
+                    <span
+                      class="figma-chat-history-card-status"
+                      :class="item.status === 'ACTIVE'
+                        ? 'figma-chat-history-card-status--completed'
+                        : 'figma-chat-history-card-status--inactive'"
+                    >{{ sharedSessionStatusLabel(item.status) }}</span>
+                  </div>
+                  <div class="figma-chat-history-card-context">
+                    分享人 {{ item.ownerUsername }} · {{ item.canChat ? '可对话' : '只读' }}
+                  </div>
+                  <div class="figma-chat-history-card-meta">
+                    <span>分享 {{ historyTime(item.sharedAt) }}</span>
+                    <span>过期 {{ historyTime(item.expiresAt) }}</span>
+                  </div>
+                </div>
+              </button>
+            </li>
+          </ul>
+        </div>
+        <div
           v-else
           :id="historyDrawerNightPanelId"
           class="figma-chat-history-body figma-chat-history-body--night"
@@ -6462,17 +6604,19 @@ function onCompositionEnd() {
                       :disabled="nightActionPending(task.taskId)"
                       @click="beginAdjustNightTask(task)"
                     >调整时间</button>
-                    <button
-                      v-if="cancelConfirmTaskId !== task.taskId"
-                      type="button"
-                      class="is-danger"
-                      :disabled="nightActionPending(task.taskId)"
-                      @click="askCancelNightTask(task.taskId)"
-                    >取消任务</button>
-                    <template v-else>
-                      <span class="figma-chat-night-confirm-copy">确定取消？</span>
-                      <button type="button" class="is-danger" @click="confirmCancelNightTask(task.taskId)">确认</button>
-                      <button type="button" @click="cancelConfirmTaskId = null">返回</button>
+                    <template v-if="canManageNightTask(task)">
+                      <button
+                        v-if="cancelConfirmTaskId !== task.taskId"
+                        type="button"
+                        class="is-danger"
+                        :disabled="nightActionPending(task.taskId)"
+                        @click="askCancelNightTask(task.taskId)"
+                      >取消任务</button>
+                      <template v-else>
+                        <span class="figma-chat-night-confirm-copy">确定取消？</span>
+                        <button type="button" class="is-danger" @click="confirmCancelNightTask(task.taskId)">确认</button>
+                        <button type="button" @click="cancelConfirmTaskId = null">返回</button>
+                      </template>
                     </template>
                   </template>
                   <span v-else class="figma-chat-night-dispatch-copy">正在复用对话后台执行能力启动…</span>
@@ -7116,6 +7260,17 @@ function onCompositionEnd() {
   background: #f3f4f9;
   box-shadow: inset 3px 0 0 #27325e;
 }
+.figma-chat-history-card.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  filter: grayscale(0.3);
+}
+.figma-chat-history-card.is-disabled:hover {
+  border-color: var(--ta-border);
+  background: var(--ta-surface);
+  box-shadow: none;
+  transform: none;
+}
 .figma-chat-history-card-icon {
   position: relative;
   display: inline-flex;
@@ -7179,6 +7334,10 @@ function onCompositionEnd() {
 .figma-chat-history-card-status--completed {
   color: #166534;
   background: #dcfce7;
+}
+.figma-chat-history-card-status--inactive {
+  color: #475467;
+  background: #eaecf0;
 }
 .figma-chat-history-card-context {
   margin-bottom: 2px;
@@ -8358,6 +8517,15 @@ function onCompositionEnd() {
   flex-direction: column;
   gap: 6px;
   overflow: hidden;
+}
+
+.figma-chat-question-readonly-note {
+  margin: 0;
+  border-radius: 6px;
+  background: #f2f4f7;
+  color: #667085;
+  padding: 6px 8px;
+  font-size: 11px;
 }
 
 .figma-chat-question-card,

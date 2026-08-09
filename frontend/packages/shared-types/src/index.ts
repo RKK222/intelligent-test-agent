@@ -589,6 +589,110 @@ export type Session = {
   sourceRefId?: string | null;
 };
 
+/** 协作分享候选用户只暴露平台最小身份资料。 */
+export type SessionShareCandidate = {
+  userId: string;
+  unifiedAuthId: string;
+  username: string;
+};
+
+export type SessionShareMembershipStatus =
+  | "ACTIVE"
+  | "EXPIRED"
+  | "REVOKED"
+  | "REMOVED"
+  | "SESSION_ARCHIVED"
+  | string;
+
+export type SessionShareStatus = "ACTIVE" | "REVOKED" | string;
+
+export type SessionShareMember = {
+  userId: string;
+  unifiedAuthId: string;
+  username: string;
+  canChat: boolean;
+  status: SessionShareMembershipStatus;
+  sharedAt: string;
+  updatedAt: string;
+  removedAt?: string | null;
+};
+
+export type SessionCollaborationShare = {
+  shareId: string;
+  sharePath: string;
+  sessionId: string;
+  workspaceId: string;
+  ownerUserId: string;
+  status: SessionShareStatus;
+  expiresAt: string;
+  version: number;
+  members: SessionShareMember[];
+  createdAt: string;
+  updatedAt: string;
+  revokedAt?: string | null;
+};
+
+export type PutSessionCollaborationSharePayload = {
+  expectedVersion?: number | null;
+  expiresAt: string;
+  members: Array<{ userId: string; canChat: boolean }>;
+};
+
+/** “分享给我”列表保留失效历史，只有 ACTIVE 项允许进入。 */
+export type SharedSessionListItem = {
+  shareId: string;
+  sharePath: string;
+  sessionId: string;
+  workspaceId: string;
+  sessionTitle: string;
+  ownerUserId: string;
+  ownerUnifiedAuthId: string;
+  ownerUsername: string;
+  sharedAt: string;
+  expiresAt: string;
+  canChat: boolean;
+  status: SessionShareMembershipStatus;
+};
+
+export type SessionShareParticipant = {
+  userId: string;
+  unifiedAuthId: string;
+  username: string;
+  owner: boolean;
+  canChat: boolean;
+  status: SessionShareMembershipStatus | "OWNER";
+};
+
+/** 登录主体保持 actor，executionOwnerUserId 是显式代操作执行身份。 */
+export type SessionShareAccess = {
+  shareId: string;
+  version: number;
+  actorUserId: string;
+  actorUnifiedAuthId: string;
+  actorUsername: string;
+  executionOwnerUserId: string;
+  sessionId: string;
+  workspaceId: string;
+  canChat: boolean;
+  delegated: boolean;
+  ownerAccess: boolean;
+  expiresAt: string;
+  participants: SessionShareParticipant[];
+};
+
+export type SessionShareRuntimeState = {
+  active: boolean;
+  reason?: string | null;
+  shareId: string;
+  version: number;
+  sessionId: string;
+  workspaceId: string;
+  canChat: boolean;
+  expiresAt: string;
+  activeRun?: Run | null;
+  generatedAt: string;
+};
+
 export type ConversationSourceType = "MANUAL" | "SCHEDULED_TASK" | "SIDE_QUESTION" | string;
 
 export type SessionWorkspaceContext = {
@@ -644,6 +748,10 @@ export type ResendMetadata = {
   executeAt: string;
   sourceRunId: string;
   replacementRunId: string;
+  requesterUserId?: string | null;
+  requesterUsername?: string | null;
+  requesterUnifiedAuthId?: string | null;
+  requestedBySharedUser?: boolean;
 };
 
 export type SessionMessage = {
@@ -664,6 +772,11 @@ export type SessionMessage = {
   summaryVersion?: number | null;
   sourceType?: ConversationSourceType | null;
   sourceRefId?: string | null;
+  /** 实际发送人；旧消息可缺失，OpenCode 仍只感知会话所属人。 */
+  senderUserId?: string | null;
+  senderUsername?: string | null;
+  senderUnifiedAuthId?: string | null;
+  sentBySharedUser?: boolean;
   resend?: ResendMetadata | null;
 };
 
@@ -717,6 +830,10 @@ export type NightExecutionTask = {
   runId?: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  creatorUserId?: string | null;
+  creatorUsername?: string | null;
+  creatorUnifiedAuthId?: string | null;
+  createdBySharedUser?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -1071,6 +1188,10 @@ export type Run = {
   tokens?: TokenUsage;
   sourceType?: ConversationSourceType | null;
   sourceRefId?: string | null;
+  messageSenderUserId?: string | null;
+  messageSenderUsername?: string | null;
+  messageSenderUnifiedAuthId?: string | null;
+  messageSentBySharedUser?: boolean;
   resend?: ResendMetadata | null;
 };
 
@@ -2415,6 +2536,11 @@ export type AgentMessage =
       runId?: string;
       sourceType?: ConversationSourceType | null;
       sourceRefId?: string | null;
+      senderUserId?: string | null;
+      senderUnifiedAuthId?: string | null;
+      /** 由分享访问上下文的参与人目录补齐，只用于前端展示。 */
+      senderUsername?: string | null;
+      sentBySharedUser?: boolean;
       resend?: ResendMetadata | null;
     }
   | {

@@ -3,6 +3,7 @@ import {
   KNOWN_RUN_EVENT_TYPES,
   parseRunEvent,
   subscribeRunEvents,
+  subscribeSessionShareRuntimeState,
   subscribeSessionRuntimeState,
   type EventSourceLike
 } from "../src";
@@ -188,6 +189,56 @@ describe("event-stream-client", () => {
     expect(headers.get("X-Test-Agent-Linux-Server-Id")).toBe("server-a");
     expect(received).toEqual(["question.asked"]);
     expect(rawIds).toEqual(["evt_durable_7"]);
+  });
+
+  it("adds the share credential to RunEvent fetch without putting it in the URL", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(sseResponse([
+      'event: run.started\n',
+      'data: {"eventId":"evt_1","runId":"run_1","seq":1,"type":"run.started","payload":{}}\n\n'
+    ]));
+    const received: string[] = [];
+    const subscription = subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_1",
+      token: "login-token",
+      sessionShareId: "share-secret",
+      fetcher,
+      onEvent: (event) => received.push(event.type)
+    });
+
+    await waitFor(() => received.length === 1);
+    subscription.close();
+
+    expect(String(fetcher.mock.calls[0]?.[0])).not.toContain("share-secret");
+    const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("X-Test-Agent-Session-Share")).toBe("share-secret");
+  });
+
+  it("subscribes to the single-session collaboration state and surfaces invalidation", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(sseResponse([
+      'event: session-share.snapshot\n',
+      'data: {"active":true,"shareId":"shr_1","version":2,"sessionId":"ses_1","workspaceId":"wks_1","canChat":true,"expiresAt":"2026-08-10T00:00:00Z","activeRun":null,"generatedAt":"2026-08-09T00:00:00Z"}\n\n',
+      'event: session-share.invalidated\n',
+      'data: {"active":false,"reason":"REVOKED","shareId":"shr_1","version":2,"sessionId":"ses_1","workspaceId":"wks_1","canChat":false,"expiresAt":"2026-08-10T00:00:00Z","activeRun":null,"generatedAt":"2026-08-09T00:00:01Z"}\n\n'
+    ]));
+    const received: Array<{ active: boolean; eventName: string }> = [];
+    const subscription = subscribeSessionShareRuntimeState({
+      baseUrl: "http://api",
+      token: "login-token",
+      shareId: "shr_1",
+      fetcher,
+      onEvent: (state, meta) => received.push({ active: state.active, eventName: meta.eventName })
+    });
+
+    await waitFor(() => received.length === 2);
+    subscription.close();
+
+    const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("X-Test-Agent-Session-Share")).toBe("shr_1");
+    expect(received).toEqual([
+      { active: true, eventName: "session-share.snapshot" },
+      { active: false, eventName: "session-share.invalidated" }
+    ]);
   });
 
   it("subscribes to session.updated named SSE events", () => {

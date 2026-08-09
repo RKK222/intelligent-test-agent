@@ -32,7 +32,10 @@ public record RunResend(
         String traceId,
         String safeErrorMessage,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        UserId requesterUserId,
+        String requesterUnifiedAuthId,
+        boolean requestedBySharedUser) {
 
     public RunResend {
         Objects.requireNonNull(resendId, "resendId must not be null");
@@ -75,6 +78,52 @@ public record RunResend(
                 safeErrorMessage = safeErrorMessage.substring(0, 512);
             }
         }
+        requesterUserId = requesterUserId == null ? ownerUserId : requesterUserId;
+        requesterUnifiedAuthId = requesterUnifiedAuthId == null || requesterUnifiedAuthId.isBlank()
+                ? null : requesterUnifiedAuthId.strip();
+        if (requestedBySharedUser && requesterUnifiedAuthId == null) {
+            throw new IllegalArgumentException("shared requester requires unifiedAuthId");
+        }
+    }
+
+    /** 兼容代操作归因字段加入前的构造器；普通重发默认由所属人发起。 */
+    public RunResend(
+            RunResendId resendId,
+            SessionId sessionId,
+            UserId ownerUserId,
+            RunId sourceRunId,
+            RunId replacementRunId,
+            String sourceRemoteMessageId,
+            String replacementRemoteMessageId,
+            RunResendTrigger trigger,
+            int totalAttempt,
+            int automaticAttempt,
+            int automaticLimit,
+            RunResendStatus status,
+            Instant executeAt,
+            String targetLinuxServerId,
+            String leaseToken,
+            Instant leaseUntil,
+            String clientRequestId,
+            String traceId,
+            String safeErrorMessage,
+            Instant createdAt,
+            Instant updatedAt) {
+        this(resendId, sessionId, ownerUserId, sourceRunId, replacementRunId,
+                sourceRemoteMessageId, replacementRemoteMessageId, trigger, totalAttempt,
+                automaticAttempt, automaticLimit, status, executeAt, targetLinuxServerId,
+                leaseToken, leaseUntil, clientRequestId, traceId, safeErrorMessage, createdAt, updatedAt,
+                ownerUserId, null, false);
+    }
+
+    /** 记录真实重发发起人；该身份只用于平台归因与权限，不传递给 OpenCode。 */
+    public RunResend withRequester(UserId requester, String unifiedAuthId, boolean shared) {
+        return new RunResend(
+                resendId, sessionId, ownerUserId, sourceRunId, replacementRunId,
+                sourceRemoteMessageId, replacementRemoteMessageId, trigger, totalAttempt,
+                automaticAttempt, automaticLimit, status, executeAt, targetLinuxServerId,
+                leaseToken, leaseUntil, clientRequestId, traceId, safeErrorMessage, createdAt, updatedAt,
+                requester, unifiedAuthId, shared);
     }
 
     /** 用上一替代 Run 作为下一轮来源；人工重发不增加或重置自动额度。 */
@@ -110,7 +159,10 @@ public record RunResend(
                 traceId,
                 null,
                 nextExecuteAt,
-                nextExecuteAt);
+                nextExecuteAt,
+                requesterUserId,
+                requesterUnifiedAuthId,
+                requestedBySharedUser);
     }
 
     public RunResend startReverting(String nextLeaseToken, Instant nextLeaseUntil, Instant now) {
@@ -164,7 +216,7 @@ public record RunResend(
                 sourceRemoteMessageId, replacementRemoteMessageId, trigger, totalAttempt,
                 automaticAttempt, automaticLimit, nextStatus, executeAt, targetLinuxServerId,
                 nextLeaseToken, nextLeaseUntil, clientRequestId, traceId, nextSafeError,
-                createdAt, now);
+                createdAt, now, requesterUserId, requesterUnifiedAuthId, requestedBySharedUser);
     }
 
     private void requireStatus(RunResendStatus required) {

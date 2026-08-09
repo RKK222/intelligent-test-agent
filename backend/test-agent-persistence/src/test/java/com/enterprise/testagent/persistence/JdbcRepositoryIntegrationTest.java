@@ -588,7 +588,9 @@ class JdbcRepositoryIntegrationTest {
         sessions.save(scheduledSession);
 
         Run scheduledRun = run()
-                .withSource(ConversationSourceType.SCHEDULED_TASK, "str_1234567890abcdef", userId);
+                .withSource(ConversationSourceType.SCHEDULED_TASK, "str_1234567890abcdef", userId)
+                // 存量定时 Run 未显式传入实际发送人时，持久层按执行所属人兼容回填。
+                .withMessageSender(userId, null, false);
         runs.save(scheduledRun);
 
         SessionMessage scheduledMessage = sessionMessage("msg_1234567890abcdef", "scheduled prompt")

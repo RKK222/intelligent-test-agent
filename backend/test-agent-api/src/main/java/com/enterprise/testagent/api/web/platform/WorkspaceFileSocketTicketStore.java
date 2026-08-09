@@ -63,7 +63,8 @@ class WorkspaceFileSocketTicketStore {
                 null,
                 null,
                 traceId,
-                clock.instant().plus(DEFAULT_TTL));
+                clock.instant().plus(DEFAULT_TTL),
+                null, null, null, null, false, null);
         tickets.put(ticket.ticket(), ticket);
         return ticket;
     }
@@ -123,7 +124,33 @@ class WorkspaceFileSocketTicketStore {
         WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
                 ticketFactory.get(), workspaceId, linuxServerId, null, false, true, false,
                 actorUserId, "workspace", null, null, true, grantId, grantTokenDigest,
-                actorSessionDigest, targetUserId, traceId, clock.instant().plus(DEFAULT_TTL));
+                actorSessionDigest, targetUserId, traceId, clock.instant().plus(DEFAULT_TTL),
+                null, null, null, null, false, null);
+        tickets.put(ticket.ticket(), ticket);
+        return ticket;
+    }
+
+    /** 分享文件 ticket 同时绑定 actor、执行所属人、分享版本和权限快照。 */
+    WorkspaceFileSocketTicket issueShared(
+            String workspaceId,
+            String linuxServerId,
+            String agentLinuxServerId,
+            String executionOwnerUserId,
+            String actorUserId,
+            String shareId,
+            String shareSessionId,
+            long shareVersion,
+            boolean canChat,
+            Instant shareExpiresAt,
+            String traceId) {
+        Instant expiresAt = clock.instant().plus(DEFAULT_TTL);
+        if (shareExpiresAt.isBefore(expiresAt)) expiresAt = shareExpiresAt;
+        WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
+                ticketFactory.get(), workspaceId, linuxServerId, agentLinuxServerId,
+                false, false, false, executionOwnerUserId, "workspace", null, null,
+                false, null, null, null, null, traceId, expiresAt,
+                shareId, shareVersion, actorUserId, executionOwnerUserId, canChat, shareExpiresAt,
+                shareSessionId);
         tickets.put(ticket.ticket(), ticket);
         return ticket;
     }

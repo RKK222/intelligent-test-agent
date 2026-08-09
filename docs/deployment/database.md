@@ -1638,3 +1638,34 @@ checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线
 该 migration 不写测试、演示或个人数据，尚未声明为任何共享环境已执行的冻结版本。合并交付或企业打包前，集成人必须对照所有目标
 环境 `flyway_schema_history` 的版本/checksum 和并行 migration，必要时只在尚未执行前重排候选版本；随后用每套已知真实
 PostgreSQL 基线验证升级，并校验最终 JAR 中 migration 字节。禁止 `outOfOrder`、`repair` 或改写任何已经执行的 migration。
+
+## V20260809170000 会话协作分享
+
+`V20260809170000__session_shares_create_collaboration_share.sql` 是开发期候选 migration，新增：
+
+- `session_shares`：每个 `session_id` 和 256 位随机 `share_id` 均唯一，保存所属人、固定 Workspace、`ACTIVE/REVOKED`、最长 7 天有效期、乐观锁版本和 traceId；取消或重新启用不会换 shareId。
+- `session_share_memberships`：每个 share/user 唯一，保存统一认证号、用户名安全快照、`can_chat`、`ACTIVE/REMOVED` 和软移除时间。分享过期、取消及会话归档是 share/session 事实，不批量改写成员行；查询时与成员事实合并投影 `ACTIVE/EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED`，因此历史状态不会因续期覆盖。
+- `session_share_audit_events`：保存真实 actor、执行所属人、share/session/workspace/resource、结果、错误码、traceId 和可选路径 SHA-256。禁止写入消息正文、文件正文、明文路径、Token、终端输入或第三方原始错误；默认由业务维护任务清理 365 天前记录。
+
+关系型访问全部通过 `SessionShareMapper.xml`，普通候选用户查询只返回有效用户的 `user_id/unified_auth_id/username`。最多 50 名活动成员和 7 天边界由领域聚合与 API 双重校验；数据库唯一约束负责单 Session 唯一链接和并发首次创建的最终裁决。
+
+## V20260809170001 代操作归因与单会话运行准入
+
+`V20260809170001__session_messages_add_delegated_attribution.sql` 是开发期候选 migration：
+
+- `session_messages` 增加实际发送人统一认证号和 `sent_by_shared_user`；已有 `sender_user_id` 继续表示实际发送人。
+- `runs` 增加实际消息发送人、统一认证号、代操作标记和可空 `active_session_id`。`triggered_by_user_id` 继续表示执行所属人；活动状态占用 Session，终态必须清空。
+- `night_execution_tasks` 增加实际创建人、统一认证号、代操作标记及分享 ID/版本/有效期/`canChat` 授权快照。分享失效后任务仍按创建时快照使用所属人身份执行。
+- `run_resends` 增加实际发起人、统一认证号和代操作标记；替代 Run/消息继续保留源消息发送人。
+
+migration 会把存量普通数据的实际 actor 回填为原所属人，并把已有活动 Run 的 `active_session_id` 设为 `session_id`，随后创建唯一索引 `uk_runs_active_session`。发布前必须先在每个目标 PostgreSQL 执行只读预检；任何结果行都表示同一 Session 已有多个活动 Run，必须停止发布并按真实运行事实收敛，不能删除记录或使用 `repair/outOfOrder` 掩盖：
+
+```sql
+select session_id, count(*) as active_run_count, array_agg(run_id order by created_at) as run_ids
+from runs
+where status in ('PENDING', 'RUNNING', 'CANCELLING')
+group by session_id
+having count(*) > 1;
+```
+
+上线顺序固定为：先备份并完成所有已知真实 PostgreSQL 基线升级验证，再发布含 migration 的全部后端节点，确认新旧请求均由能识别分享上下文的节点处理后，最后发布前端。滚动期间不得让新前端把分享头发给旧 Java。打包后还要解出 `test-agent-persistence-*.jar`，逐字节比对上述两个 migration 与已完成真实升级测试的源码。

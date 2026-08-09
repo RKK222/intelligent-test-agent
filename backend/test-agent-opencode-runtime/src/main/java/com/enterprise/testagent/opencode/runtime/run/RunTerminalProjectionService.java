@@ -159,7 +159,9 @@ public class RunTerminalProjectionService {
                 manifest.agentId(),
                 ConversationSourceType.MANUAL,
                 null,
-                manifest.userId(),
+                manifest.messageSenderUserId(),
+                manifest.messageSenderUnifiedAuthId(),
+                manifest.messageSentBySharedUser(),
                 summaries);
         try {
             RunTerminalProjectionResult result = persistencePort.persistTerminal(projection);

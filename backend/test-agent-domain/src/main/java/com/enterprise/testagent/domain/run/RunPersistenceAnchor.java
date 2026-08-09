@@ -42,7 +42,46 @@ public record RunPersistenceAnchor(
         String sourceRefId,
         UserId triggeredByUserId,
         String agentId,
-        String modelId) {
+        String modelId,
+        UserId messageSenderUserId,
+        String messageSenderUnifiedAuthId,
+        boolean messageSentBySharedUser) {
+
+    /** 兼容新增实际消息发送人归因前的完整锚点构造器。 */
+    public RunPersistenceAnchor(
+            RunId runId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            RunStatus status,
+            RunStorageMode storageMode,
+            long statusVersion,
+            String clientRequestId,
+            String producerLinuxServerId,
+            String executionNodeIdSnapshot,
+            String opencodeProcessIdSnapshot,
+            String rootRemoteSessionId,
+            String dispatchMessageId,
+            String scheduledDispatchAttemptId,
+            Instant scheduledDispatchLeaseUntil,
+            Instant scheduledDispatchAcceptedAt,
+            SessionMessageId assistantSummaryMessageId,
+            String traceId,
+            Instant createdAt,
+            Instant updatedAt,
+            Instant detailsExpiresAt,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            UserId triggeredByUserId,
+            String agentId,
+            String modelId) {
+        this(runId, sessionId, workspaceId, status, storageMode, statusVersion,
+                clientRequestId, producerLinuxServerId, executionNodeIdSnapshot,
+                opencodeProcessIdSnapshot, rootRemoteSessionId, dispatchMessageId,
+                scheduledDispatchAttemptId, scheduledDispatchLeaseUntil,
+                scheduledDispatchAcceptedAt, assistantSummaryMessageId, traceId, createdAt,
+                updatedAt, detailsExpiresAt, sourceType, sourceRefId, triggeredByUserId,
+                agentId, modelId, triggeredByUserId, null, false);
+    }
 
     public RunPersistenceAnchor {
         Objects.requireNonNull(runId, "runId must not be null");

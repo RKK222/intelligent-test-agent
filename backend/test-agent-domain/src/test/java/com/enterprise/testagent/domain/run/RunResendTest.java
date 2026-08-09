@@ -67,6 +67,24 @@ class RunResendTest {
                 .hasMessageContaining("REVERTING");
     }
 
+    @Test
+    void requesterAttributionSurvivesStateTransitionsAndNextAttempt() {
+        UserId requester = new UserId("usr_shared_requester");
+        RunResend resend = waiting(RunResendTrigger.MANUAL, 1, 0)
+                .withRequester(requester, "ucid-shared-requester", true);
+
+        RunResend reverting = resend.startReverting("lease_shared", NOW.plusSeconds(30), NOW);
+        RunResend next = resend.nextAttempt(
+                new RunResendId("rsd_3234567890abcdef"),
+                new RunId("run_4234567890abcdef"),
+                "msg_4234567890abcdef", RunResendTrigger.MANUAL,
+                NOW.plusSeconds(60), "req_shared_2");
+
+        assertThat(reverting.requesterUserId()).isEqualTo(requester);
+        assertThat(next.requesterUnifiedAuthId()).isEqualTo("ucid-shared-requester");
+        assertThat(next.requestedBySharedUser()).isTrue();
+    }
+
     private static RunResend waiting(RunResendTrigger trigger, int totalAttempt, int automaticAttempt) {
         return new RunResend(
                 new RunResendId("rsd_1234567890abcdef"),

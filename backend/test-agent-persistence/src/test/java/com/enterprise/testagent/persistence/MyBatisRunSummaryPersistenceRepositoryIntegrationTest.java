@@ -76,6 +76,14 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
         jdbcClient.sql("alter table runs add column scheduled_dispatch_attempt_id varchar(128)").update();
         jdbcClient.sql("alter table runs add column scheduled_dispatch_lease_until timestamp with time zone").update();
         jdbcClient.sql("alter table runs add column scheduled_dispatch_accepted_at timestamp with time zone").update();
+        // 测试仍固定在摘要基线，显式补齐当前 Run 锚点的代操作归因和活动会话占用列。
+        jdbcClient.sql("alter table runs add column message_sender_user_id varchar(128)").update();
+        jdbcClient.sql("alter table runs add column message_sender_unified_auth_id varchar(255)").update();
+        jdbcClient.sql("alter table runs add column message_sent_by_shared_user boolean not null default false").update();
+        jdbcClient.sql("alter table runs add column active_session_id varchar(128)").update();
+        jdbcClient.sql("alter table session_messages add column sender_unified_auth_id varchar(255)").update();
+        jdbcClient.sql("alter table session_messages add column sent_by_shared_user boolean not null default false")
+                .update();
         seedWorkspaceSessionAndUser();
 
         countingDataSource = new CountingDataSource(physicalDataSource);

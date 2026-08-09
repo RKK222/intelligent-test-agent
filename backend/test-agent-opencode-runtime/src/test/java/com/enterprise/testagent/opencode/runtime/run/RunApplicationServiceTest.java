@@ -49,6 +49,7 @@ import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionStatus;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -63,6 +64,7 @@ import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationSe
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import com.enterprise.testagent.opencode.client.OpencodeCancelCommand;
 import com.enterprise.testagent.opencode.client.OpencodeCancelResult;
 import com.enterprise.testagent.opencode.client.OpencodeClientFacade;
@@ -161,6 +163,47 @@ class RunApplicationServiceTest {
         assertThatThrownBy(() -> service.startRun(sessionId, "manual", "trace_1234567890abcdef"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
+    void sharedRunStopAllowsOwnerOrActualSenderEvenAfterSenderBecomesReadOnly() {
+        UserId owner = new UserId("usr_1234567890abcdef");
+        UserId sender = new UserId("usr_shared_stop_sender");
+        RunId runId = new RunId("run_shared_stop_access");
+        FakeRunRepository runs = new FakeRunRepository();
+        runs.save(new Run(
+                runId,
+                session().sessionId(),
+                workspace().workspaceId(),
+                RunStatus.RUNNING,
+                NOW,
+                NOW,
+                "trace_shared_stop")
+                .withSource(ConversationSourceType.MANUAL, null, owner)
+                .withMessageSender(sender, "ucid_shared_stop_sender", true));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), runs,
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(), new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()), new FakeAgentSessionBindingRepository());
+        SessionShareId shareId = new SessionShareId("shr_" + "b".repeat(64));
+
+        service.requireRunStopAccess(new DelegatedOperationContext(
+                shareId, 4L, sender, "ucid_shared_stop_sender", "消息发送人", owner,
+                session().sessionId(), workspace().workspaceId(), false,
+                true, false, NOW.plusSeconds(3_600)), runId);
+        service.requireRunStopAccess(new DelegatedOperationContext(
+                shareId, 4L, owner, "ucid_owner", "会话所属人", owner,
+                session().sessionId(), workspace().workspaceId(), true,
+                false, true, NOW.plusSeconds(3_600)), runId);
+
+        DelegatedOperationContext otherMember = new DelegatedOperationContext(
+                shareId, 4L, new UserId("usr_other_stop_member"), "ucid_other", "其他成员", owner,
+                session().sessionId(), workspace().workspaceId(), true,
+                true, false, NOW.plusSeconds(3_600));
+        assertThatThrownBy(() -> service.requireRunStopAccess(otherMember, runId))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }
 
     @Test
@@ -2915,8 +2958,22 @@ class RunApplicationServiceTest {
                         RunEventType.MESSAGE_UPDATED,
                         command.traceId(),
                         Instant.now(),
-                        Map.of("message", Map.of("id", "msg_1", "role", "assistant"))));
+                        Map.of("message", Map.of("id", "msg_1", "role", "assistant"))),
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.MESSAGE_UPDATED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of("message", Map.of("id", "msg_user_1", "role", "user"))));
         RecordingRunEventLiveBus liveBus = new RecordingRunEventLiveBus();
+        UserOpencodeProcessAssignmentService assignmentService =
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ExecutionNode assignedNode = userProcessNode("node_shared_event_123456", "http://10.8.0.12:4096");
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(assignedNode));
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 new FakeSessionRepository(session()),
@@ -2928,17 +2985,39 @@ class RunApplicationServiceTest {
                 runtimeRegistry(facade),
                 new FakeAgentSessionBindingRepository(),
                 liveBus,
-                new RunEventPersistencePolicy());
+                new RunEventPersistencePolicy(),
+                null,
+                assignmentService,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                null,
+                null);
 
-        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+        service.startRun(
+                new RunActorAttribution(
+                        new UserId("usr_1234567890abcdef"),
+                        new UserId("usr_shared_actor"),
+                        "ucid_shared_actor",
+                        true),
+                new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"), "run the tests",
+                        List.of(), null, null, null, null, null),
+                "trace_1234567890abcdef");
 
-        awaitLiveEvents(liveBus, 2);
+        awaitLiveEvents(liveBus, 3);
         assertThat(events.events).extracting(RunEvent::type)
                 .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
         assertThat(liveBus.transientPayloads).extracting(RunEventSsePayload::type)
-                .containsExactly("message.part.delta", "message.updated");
+                .containsExactly("message.part.delta", "message.updated", "message.updated");
         assertThat(liveBus.transientPayloads).allSatisfy(payload -> assertThat(payload.seq()).isZero());
         assertThat(liveBus.transientPayloads.get(0).payload()).doesNotContainKey("rawPayload");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> userMessage = (Map<String, Object>) liveBus.transientPayloads
+                .get(2).payload().get("message");
+        assertThat(userMessage)
+                .containsEntry("senderUserId", "usr_shared_actor")
+                .containsEntry("senderUnifiedAuthId", "ucid_shared_actor")
+                .containsEntry("sentBySharedUser", true);
     }
 
     @Test

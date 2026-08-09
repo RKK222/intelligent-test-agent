@@ -4,6 +4,7 @@ import type { AgentMessage } from "@test-agent/shared-types";
 export type UserMessageRowProps = {
   message: Extract<AgentMessage, { role: "user" }>;
   resendable?: boolean;
+  currentUserId?: string;
 };
 </script>
 
@@ -16,12 +17,14 @@ import {
   workspaceContextAttachmentsFromUserPrompt
 } from "../../../user-message-display";
 import OcCopyButton from "../primitives/OcCopyButton.vue";
+import { resolveUserMessageAppearance } from "../../../user-message-appearance";
 
 const props = defineProps<UserMessageRowProps>();
 const emit = defineEmits<{ resend: [] }>();
 const nowMs = ref(Date.now());
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 const displayText = computed(() => displayTextFromUserPrompt(props.message.text));
+const appearance = computed(() => resolveUserMessageAppearance(props.message, props.currentUserId));
 const scheduledAtFormatter = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
   month: "numeric",
@@ -75,7 +78,8 @@ onBeforeUnmount(() => {
         <Clock3 aria-hidden="true" />
         <span>{{ sourceBadge }}<span v-if="resendWaiting"> · {{ resendCountdown }} 秒后</span><span v-else-if="scheduledAt"> · {{ scheduledAt }}</span></span>
       </div>
-      <div class="oc-user-message__bubble">
+      <div v-if="appearance.displayName" class="oc-user-message__sender">{{ appearance.displayName }}</div>
+      <div class="oc-user-message__bubble" :style="appearance.style">
         <p>{{ displayText }}</p>
       </div>
       <div class="oc-user-message__actions">

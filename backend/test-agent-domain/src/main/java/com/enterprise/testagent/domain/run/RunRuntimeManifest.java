@@ -13,6 +13,9 @@ public record RunRuntimeManifest(
         RunId runId,
         RunStorageMode storageMode,
         UserId userId,
+        UserId messageSenderUserId,
+        String messageSenderUnifiedAuthId,
+        boolean messageSentBySharedUser,
         SessionId sessionId,
         WorkspaceId workspaceId,
         String agentId,
@@ -37,6 +40,43 @@ public record RunRuntimeManifest(
         Instant detailsExpiresAt,
         Instant createdAt,
         Instant updatedAt) {
+
+    /** 兼容新增分享发送人归因前的完整构造器。 */
+    public RunRuntimeManifest(
+            RunId runId,
+            RunStorageMode storageMode,
+            UserId userId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            String agentId,
+            String clientRequestId,
+            String dispatchMessageId,
+            String producerLinuxServerId,
+            String backendProcessId,
+            String executionNodeId,
+            String opencodeProcessId,
+            String rootRemoteSessionId,
+            RunStatus status,
+            long statusVersion,
+            long lastSeq,
+            long earliestSeq,
+            long resetGeneration,
+            boolean detailsTruncated,
+            long durableEventCount,
+            long detailBytes,
+            String attention,
+            String attentionEventId,
+            Instant attentionAt,
+            Instant detailsExpiresAt,
+            Instant createdAt,
+            Instant updatedAt) {
+        this(runId, storageMode, userId, userId, null, false, sessionId, workspaceId,
+                agentId, clientRequestId, dispatchMessageId, producerLinuxServerId,
+                backendProcessId, executionNodeId, opencodeProcessId, rootRemoteSessionId,
+                status, statusVersion, lastSeq, earliestSeq, resetGeneration, detailsTruncated,
+                durableEventCount, detailBytes, attention, attentionEventId, attentionAt,
+                detailsExpiresAt, createdAt, updatedAt);
+    }
 
     public RunRuntimeManifest {
         Objects.requireNonNull(runId, "runId must not be null");

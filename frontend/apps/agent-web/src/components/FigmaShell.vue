@@ -51,6 +51,8 @@ export type RuntimeInventorySummary = {
 const props = withDefaults(
   defineProps<{
     workspaceName?: string;
+    /** 分享工作台锁定到单一会话及工作区，顶栏只展示上下文而不提供切换入口。 */
+    fixedWorkspace?: boolean;
     bottomOpen?: boolean;
     apps?: AppItem[];
     joinableApps?: { appId: string; appName: string }[];
@@ -122,6 +124,7 @@ const props = withDefaults(
     canManageWorkspaceAgentConfig: false,
     personalRuntimeReloading: null,
     runtimeBusy: false,
+    fixedWorkspace: false,
     showLeftPanel: true,
     showRightPanel: true
   }
@@ -2084,7 +2087,15 @@ function submitJoinApp() {
         </div>
       </div>
 
-      <div class="figma-header-center" aria-label="应用、工作空间和版本">
+      <div v-if="fixedWorkspace" class="figma-header-center" aria-label="固定分享工作空间">
+        <div class="figma-context-rail figma-context-rail--fixed" data-testid="header-fixed-share-context">
+          <span class="figma-context-menu-key">分享会话</span>
+          <FlaskConical class="figma-context-trigger-type-icon figma-context-icon--workspace" aria-hidden="true" />
+          <span class="figma-context-menu-value">{{ workspaceName || '固定工作空间' }}</span>
+          <span class="figma-context-fixed-badge">不可切换</span>
+        </div>
+      </div>
+      <div v-else class="figma-header-center" aria-label="应用、工作空间和版本">
         <div
           :class="[
             'figma-context-rail',
@@ -2347,7 +2358,7 @@ function submitJoinApp() {
         >
           <BookOpen :size="20" :stroke-width="1.5" />
         </button>
-        <div class="figma-runtime-inventory-wrapper" @click.stop>
+        <div v-if="!fixedWorkspace" class="figma-runtime-inventory-wrapper" @click.stop>
           <button
             type="button"
             class="figma-runtime-inventory-summary"
@@ -2537,6 +2548,7 @@ function submitJoinApp() {
               <span class="figma-user-menu-name">{{ userName }}</span>
             </div>
             <div
+              v-if="!fixedWorkspace"
               class="figma-user-menu-service"
               :class="`figma-user-menu-service--${opencodeServiceDisplay.tone}`"
               role="status"
@@ -3951,6 +3963,27 @@ function submitJoinApp() {
 .figma-context-rail.has-open-menu {
   border-color: var(--ta-shell-accent, #c8161d);
   box-shadow: 0 0 0 2px rgba(200, 22, 29, 0.08), 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.figma-context-rail--fixed {
+  gap: 7px;
+  max-width: min(460px, 42vw);
+  padding-inline: 12px 9px;
+  background: #f8fafc;
+}
+
+.figma-context-fixed-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #e8eefc;
+  color: #3159b8;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.figma-context-rail--fixed > :not(:first-child)::before {
+  content: none;
 }
 
 .figma-context-rail > :not(:first-child)::before {

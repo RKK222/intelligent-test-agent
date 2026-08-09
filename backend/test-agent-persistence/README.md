@@ -32,6 +32,9 @@
 
 ## 主要职责
 
+- `MyBatisSessionShareRepository` / `SessionShareMapper.xml` 持久化每个 Session 唯一且永久复用的 256 位随机分享 ID、全量成员更新与软移除历史、乐观锁版本、“分享给我”失效历史、最小用户目录和 365 天安全审计。审计只保存 actor、执行所属人、share/session/workspace/resource、结果、traceId 与可选路径 SHA-256，不保存消息/文件正文、明文路径、Token 或终端输入。
+- `MyBatisSessionMessageRepository` / `SessionMessageMapper.xml` 保存消息实际发送人、统一认证号和代操作标记；Run、夜间任务和重发 MyBatis mapper 同步保存实际 actor 归因。普通历史与普通 runtime-state SQL 显式排除分享发送者兜底，防止一次代发永久获得普通会话访问权。
+- `runs.active_session_id` 只在 `PENDING/RUNNING/CANCELLING` 期间占用，并以唯一索引作为跨节点并发发送最终裁决；终态写入必须原子清空。Redis `RunRuntimeStore` 同时提供原子 active-session 占用与 fencing，数据库和 Redis 任一准入失败都不得进入远端副作用。
 - Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、外部 API 凭据、opencode 用户进程管理拓扑、AI 回复反馈、运营分析 rollup、应用配置管理、应用版本工作区、个人工作区和定时任务框架等持久化；运行态 Workspace 记录可空 `linux_server_id` 以支持文件 WebSocket 同服务器校验和 legacy 回填。
 - `RunMapper.xml` 提供精确 `SIDE_QUESTION + active + updated_at < cutoff` 孤儿查询；Session history 与用户 runtime-state 查询显式排除内部 `SIDE_QUESTION` Session，即使异常数据误为 ACTIVE 也不可见。
 - `InactiveOpencodeProcessMapper.xml` 按 ACTIVE binding 和本机 Linux 服务器查询 `RUNNING/UNHEALTHY` 用户进程，以该用户全部来源 Run 的最大 `updated_at` 聚合最近 OpenCode 活动；无 Run 时回退 manager 权威 `started_at`。SQL 先收窄相关进程，再分别利用 `runs.triggered_by_user_id` 和 `sessions.created_by_user_id` 现有索引聚合直接归属与 legacy Run，避免按每个候选重复全表扫描；同时通过 `night_execution_tasks(owner_user_id,status,slot_start)` 现有索引排除执行窗口尚未结束的跨夜遗留任务和北京时间当天 `SCHEDULED/DISPATCHING` 任务。候选和闸门内精确复核都走该 MyBatis XML，不向存量进程 JDBC Repository 新增 SQL，也不新增数据库结构。

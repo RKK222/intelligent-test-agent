@@ -7,6 +7,7 @@ export type OpencodeTimelineProps = {
   forceToolDetailsOpen?: boolean;
   showReasoning?: boolean;
   resendableMessageId?: string;
+  currentUserId?: string;
   emptyTitle?: string;
   emptySubtitle?: string;
 };
@@ -139,6 +140,7 @@ watch(latestUserMessageKey, () => {
         :completed-work-status-expanded="expandedCompletedStatusKey === row.key"
         :open-work-status-event-key="openWorkStatusDetail?.rowKey === row.key ? openWorkStatusDetail.eventKey : undefined"
         :resendable-message-id="resendableMessageId"
+        :current-user-id="currentUserId"
         @open-diff="emit('openDiff')"
         @open-file="(path) => emit('openFile', path)"
         @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
@@ -165,6 +167,7 @@ watch(latestUserMessageKey, () => {
           :completed-work-status-expanded="expandedCompletedStatusKey === row.key"
           :open-work-status-event-key="openWorkStatusDetail?.rowKey === row.key ? openWorkStatusDetail.eventKey : undefined"
           :resendable-message-id="resendableMessageId"
+          :current-user-id="currentUserId"
           @open-diff="emit('openDiff')"
           @open-file="(path) => emit('openFile', path)"
           @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"

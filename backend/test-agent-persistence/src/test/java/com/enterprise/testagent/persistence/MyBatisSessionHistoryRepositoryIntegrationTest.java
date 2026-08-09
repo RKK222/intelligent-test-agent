@@ -51,6 +51,8 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
                 .target("20260715213000").load().migrate();
         jdbcClient = JdbcClient.create(dataSource);
+        jdbcClient.sql("alter table session_messages add column sent_by_shared_user boolean not null default false")
+                .update();
         seedData();
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
@@ -118,6 +120,9 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         assertThat(page.items())
                 .extracting(item -> item.session().sessionId().value())
                 .doesNotContain("ses_history_side_question", "ses_history_side_question_active");
+        assertThat(page.items())
+                .extracting(item -> item.session().sessionId().value())
+                .doesNotContain("ses_history_shared_message");
     }
 
     @Test
@@ -283,6 +288,8 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                      :now, :updatedOther, false, 'usr_history_other'),
                     ('ses_history_unknown', 'wrk_history_other', '无归因历史', 'ACTIVE', 'trace_history',
                      :now, :updatedOther, false, null),
+                    ('ses_history_shared_message', 'wrk_history_other', '分享代发不进入普通历史', 'ACTIVE', 'trace_history',
+                     :now, :updatedOther, false, null),
                     ('ses_history_archived', 'wrk_history_other', '已归档历史', 'ARCHIVED', 'trace_history',
                      :now, :updatedOther, false, 'usr_history_current'),
                     ('ses_history_side_question', 'wrk_history_other', '宠物旁路问答（内部）', 'ARCHIVED', 'trace_history',
@@ -312,9 +319,12 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 .update();
         jdbcClient.sql("""
                 insert into session_messages(
-                    message_id, session_id, role, content, trace_id, created_at, updated_at, sender_user_id)
+                    message_id, session_id, role, content, trace_id, created_at, updated_at,
+                    sender_user_id, sent_by_shared_user)
                 values('msg_history_current', 'ses_history_message', 'USER', 'message attribution',
-                       'trace_history', :now, :now, 'usr_history_current')
+                       'trace_history', :now, :now, 'usr_history_current', false),
+                      ('msg_history_shared', 'ses_history_shared_message', 'USER', 'delegated attribution',
+                       'trace_history', :now, :now, 'usr_history_current', true)
                 """)
                 .param("now", NOW)
                 .update();

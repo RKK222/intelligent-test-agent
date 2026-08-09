@@ -1528,9 +1528,13 @@ describe("FigmaChatPanel", () => {
       const drawer = document.body.querySelector<HTMLElement>('[aria-label="会话列表"]');
       expect(drawer).not.toBeNull();
       const drawerTabs = Array.from(drawer!.querySelectorAll<HTMLElement>('[role="tab"]'));
-      expect(drawerTabs.map((tab) => tab.textContent?.trim())).toEqual(["会话 1", "待执行任务 1"]);
+      expect(drawerTabs.map((tab) => tab.textContent?.trim())).toEqual([
+        "我的会话 1",
+        "分享给我 0",
+        "待执行任务 1"
+      ]);
 
-      drawerTabs[1].click();
+      drawerTabs[2].click();
       await nextTick();
       expect(wrapper.emitted("request-night-tasks")).toHaveLength(1);
       expect(drawer!.querySelector('[data-testid="night-task-list"]')?.textContent).toContain("执行完整回归");
@@ -1543,7 +1547,7 @@ describe("FigmaChatPanel", () => {
 
       expect(wrapper.emitted("open-night-task-session")?.[0]).toEqual(["session_target"]);
       expect(document.body.querySelector('[aria-label="会话列表"]')).not.toBeNull();
-      expect(drawerTabs[1].getAttribute("aria-selected")).toBe("true");
+      expect(drawerTabs[2].getAttribute("aria-selected")).toBe("true");
 
       const closeButton = drawer!.querySelector<HTMLButtonElement>('[aria-label="关闭会话列表抽屉"]')!;
       closeButton.click();
@@ -1582,20 +1586,30 @@ describe("FigmaChatPanel", () => {
 
       expect(tabs[0].getAttribute("aria-controls")).toBe(sessionsPanel.id);
       expect(sessionsPanel.getAttribute("aria-labelledby")).toBe(tabs[0].id);
-      expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1"]);
+      expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
 
       tabs[0].focus();
       tabs[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
       await nextTick();
 
-      const nightPanel = drawer.querySelector<HTMLElement>('[role="tabpanel"]')!;
+      const sharedPanel = drawer.querySelector<HTMLElement>('[role="tabpanel"]')!;
       expect(document.activeElement).toBe(tabs[1]);
       expect(tabs[1].getAttribute("aria-selected")).toBe("true");
-      expect(tabs[1].getAttribute("aria-controls")).toBe(nightPanel.id);
-      expect(nightPanel.getAttribute("aria-labelledby")).toBe(tabs[1].id);
+      expect(tabs[1].getAttribute("aria-controls")).toBe(sharedPanel.id);
+      expect(sharedPanel.getAttribute("aria-labelledby")).toBe(tabs[1].id);
+      expect(wrapper.emitted("request-shared-sessions")).toHaveLength(1);
+
+      tabs[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await nextTick();
+
+      const nightPanel = drawer.querySelector<HTMLElement>('[role="tabpanel"]')!;
+      expect(document.activeElement).toBe(tabs[2]);
+      expect(tabs[2].getAttribute("aria-selected")).toBe("true");
+      expect(tabs[2].getAttribute("aria-controls")).toBe(nightPanel.id);
+      expect(nightPanel.getAttribute("aria-labelledby")).toBe(tabs[2].id);
       expect(wrapper.emitted("request-night-tasks")).toHaveLength(1);
 
-      tabs[1].dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      tabs[2].dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
       await nextTick();
       expect(document.activeElement).toBe(tabs[0]);
       expect(tabs[0].getAttribute("aria-selected")).toBe("true");

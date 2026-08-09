@@ -13,6 +13,8 @@ import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -41,6 +43,7 @@ public class TerminalApplicationService {
     private final BackendInstanceIdentity backendIdentity;
     private final boolean serverTerminalEnabled;
     private final Path serverWorkingDirectory;
+    private SessionCollaborationShareService shareService;
 
     /**
      * 创建 PTY ticket 应用服务，所有安全校验在签发 ticket 前完成。
@@ -141,6 +144,24 @@ public class TerminalApplicationService {
      * 签发一次性 PTY ticket，校验 Session、Workspace、cwd、shell 和 ticket 创建频率。
      */
     public TerminalTicketResponse createTicket(SessionId sessionId, TerminalTicketRequest request, String traceId) {
+        return createTicketInternal(sessionId, request, traceId, null);
+    }
+
+    /** 分享终端只向 canChat 成员签发，ticket 绑定分享版本并以所属人的工作区执行。 */
+    public TerminalTicketResponse createTicket(
+            DelegatedOperationContext context,
+            TerminalTicketRequest request,
+            String traceId) {
+        Objects.requireNonNull(context, "context must not be null");
+        context.requireChat();
+        return createTicketInternal(context.sessionId(), request, traceId, context);
+    }
+
+    private TerminalTicketResponse createTicketInternal(
+            SessionId sessionId,
+            TerminalTicketRequest request,
+            String traceId,
+            DelegatedOperationContext context) {
         Session session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value())));
         if (session.status() == SessionStatus.ARCHIVED) {
@@ -155,6 +176,14 @@ public class TerminalApplicationService {
         if (!session.workspaceId().equals(workspaceId)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "Session 与 Workspace 不匹配", Map.of("sessionId", sessionId.value(), "workspaceId", workspaceId.value()));
         }
+        if (context != null) {
+            context.requireSession(sessionId);
+            context.requireWorkspace(workspaceId);
+            if (session.createdByUserId() != null
+                    && !session.createdByUserId().equals(context.executionOwnerUserId())) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "分享执行所属人与会话不匹配");
+            }
+        }
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
         ticketRateLimiter.acquire(session.sessionId(), workspace.workspaceId());
@@ -164,17 +193,65 @@ public class TerminalApplicationService {
                 session.sessionId(),
                 workspace.workspaceId(),
                 session.opencodeExecutionNodeId(),
+                null,
+                null,
                 root,
                 cwd,
                 resolveShell(request.shell()),
                 clamp(request.cols(), DEFAULT_COLS, MAX_COLS),
                 clamp(request.rows(), DEFAULT_ROWS, MAX_ROWS),
-                traceId));
+                traceId,
+                context == null ? null : context.shareId(),
+                context == null ? null : context.shareVersion(),
+                context == null ? null : context.actorUserId(),
+                context == null ? null : context.executionOwnerUserId(),
+                context == null ? null : context.expiresAt()));
         auditLogger.ticketCreated(ticket);
+        recordSharedOperation(ticket, "TERMINAL_TICKET_CREATED", "SUCCESS", null);
         return new TerminalTicketResponse(
                 ticket.ticket(),
                 ticket.expiresAt(),
                 "/api/sessions/" + session.sessionId().value() + "/terminal/ws?ticket=" + ticket.ticket());
+    }
+
+    /** WebSocket 建连及每条输入前重新校验分享版本、成员状态和 canChat。 */
+    public void revalidateSharedTicket(TerminalTicket ticket) {
+        if (ticket == null || !ticket.sharedSession()) return;
+        if (shareService == null || ticket.shareActorUserId() == null || ticket.shareVersion() == null) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "分享终端授权已失效");
+        }
+        DelegatedOperationContext refreshed = shareService.refreshAccess(
+                ticket.shareActorUserId(), ticket.shareId(), ticket.traceId());
+        refreshed.requireChat();
+        refreshed.requireSession(ticket.sessionId());
+        refreshed.requireWorkspace(ticket.workspaceId());
+        if (refreshed.shareVersion() != ticket.shareVersion()
+                || !refreshed.executionOwnerUserId().equals(ticket.executionOwnerUserId())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "分享终端授权版本已变化");
+        }
+    }
+
+    /** 分享终端审计只记录动作类型，不接收命令、输入或输出正文。 */
+    public void recordSharedOperation(
+            TerminalTicket ticket,
+            String action,
+            String outcome,
+            String errorCode) {
+        if (ticket == null || !ticket.sharedSession()) return;
+        if (shareService == null || ticket.shareActorUserId() == null
+                || ticket.executionOwnerUserId() == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "分享终端审计上下文不完整");
+        }
+        shareService.recordOperationSnapshot(
+                ticket.shareId(), ticket.sessionId(), ticket.workspaceId(),
+                ticket.shareActorUserId(), ticket.executionOwnerUserId(), action,
+                "TERMINAL", ticket.sessionId().value(), null, outcome, errorCode, ticket.traceId());
+    }
+
+    /** 可选 setter 保持既有终端单测构造器兼容。 */
+    @Autowired(required = false)
+    void configureSessionShareService(SessionCollaborationShareService shareService) {
+        this.shareService = shareService;
     }
 
     /**

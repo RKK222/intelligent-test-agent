@@ -4,6 +4,7 @@ import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionCreateCommand;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionRunInputSnapshot;
@@ -18,6 +19,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Function;
 
 /** 夜间执行 HTTP DTO，完整输入只允许进入创建命令，不出现在任何响应中。 */
 final class NightExecutionDtos {
@@ -121,10 +123,20 @@ final class NightExecutionDtos {
             String runId,
             String errorCode,
             String errorMessage,
+            String creatorUserId,
+            String creatorUsername,
+            String creatorUnifiedAuthId,
+            boolean createdBySharedUser,
             Instant createdAt,
             Instant updatedAt) {
 
         static TaskResponse from(NightExecutionTask task) {
+            return from(task, null);
+        }
+
+        static TaskResponse from(
+                NightExecutionTask task,
+                Function<UserId, String> usernameLookup) {
             if (task == null) return null;
             return new TaskResponse(
                     task.taskId().value(), task.sessionId().value(), task.workspaceId().value(),
@@ -132,7 +144,10 @@ final class NightExecutionDtos {
                     task.scheduleMode().name(), task.slotStart(),
                     task.slotEnd(), task.windowEnd(), task.rolloverCount(),
                     task.runId() == null ? null : task.runId().value(),
-                    task.errorCode(), task.errorMessage(), task.createdAt(), task.updatedAt());
+                    task.errorCode(), task.errorMessage(), task.creatorUserId().value(),
+                    usernameLookup == null ? null : usernameLookup.apply(task.creatorUserId()),
+                    task.creatorUnifiedAuthId(), task.createdBySharedUser(),
+                    task.createdAt(), task.updatedAt());
         }
     }
 
@@ -144,10 +159,17 @@ final class NightExecutionDtos {
             TaskResponse visibleFailure) {
 
         static TaskQueryResponse from(NightExecutionTaskQueryResult result) {
+            return from(result, null);
+        }
+
+        static TaskQueryResponse from(
+                NightExecutionTaskQueryResult result,
+                Function<UserId, String> usernameLookup) {
             PageResponse<NightExecutionTask> page = result.pendingTasks();
             return new TaskQueryResponse(
-                    page.items().stream().map(TaskResponse::from).toList(),
-                    page.page(), page.size(), page.total(), TaskResponse.from(result.visibleFailure()));
+                    page.items().stream().map(task -> TaskResponse.from(task, usernameLookup)).toList(),
+                    page.page(), page.size(), page.total(),
+                    TaskResponse.from(result.visibleFailure(), usernameLookup));
         }
     }
 }

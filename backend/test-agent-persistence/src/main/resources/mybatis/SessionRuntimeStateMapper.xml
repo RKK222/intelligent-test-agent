@@ -80,6 +80,7 @@
                     from session_messages visible_messages
                     where visible_messages.session_id = s.session_id
                       and visible_messages.sender_user_id = #{userId}
+                      and coalesce(visible_messages.sent_by_shared_user, false) = false
                 )
               )
         ),

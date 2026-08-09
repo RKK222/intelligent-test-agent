@@ -2082,3 +2082,23 @@
   - 回顾全部 `.agents/session-log*.md` 近期记录，执行规则残留检索和 `git diff --check`。
 - Result:
   - 稳定文档已统一采用“时间戳 + 表名 + 描述”规则；不涉及运行时代码、SQL、HTTP API、RunEvent、数据库结构、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+### 2026-08-09 - 实现会话协作分享与被分享人代操作
+
+- Why:
+  - 平台需要让会话所属人通过唯一分享链接邀请最多 50 名现有用户，在最长 7 天内查看或代所属人对话；平台必须保留真实操作人归因，同时 OpenCode、工作区、Git/SSH 与进程执行身份始终保持为会话所属人。
+  - 分享范围内还需统一约束并发发送、停止、撤回重发、定时任务、文件与终端访问、实时消息可见性，以及分享过期、取消、移除和降权后的行为。
+- What:
+  - 新增 `session_shares`、`session_share_memberships`、`session_share_audit_events`，实现单会话永久复用一个 256 位随机分享标识、乐观锁版本、成员软状态历史、候选用户搜索、分享管理、被分享列表、访问解析和单会话 runtime SSE；扩展消息、Run、重发与夜间任务的实际操作人、统一认证号及代操作归因。
+  - 引入独立 `DelegatedOperationContext`，逐请求验证 actor、会话、工作区、资源、有效期和 `canChat`，执行身份显式保持所属人；只读成员仅可查看，代操作成员按所属人权限上限执行，分享管理及平台级操作仍仅限所属人。普通历史与普通 runtime 查询不因代操作归因获得额外访问权。
+  - Run 准入同时使用 `runs.active_session_id` 唯一约束与 Redis 原子占用，忙碌时统一返回 `409 SESSION_BUSY`；停止、最后一条消息撤回重发和定时任务按所属人、实际发送人/创建人规则鉴权，分享失效后已授权定时任务继续按快照执行。
+  - 文件访问继续复用 route → ticket → WebSocket RPC，分享 ticket 绑定 actor、所属人、session、workspace、版本、权限与到期时间并逐条重验；敏感操作审计不记录正文、Token、终端输入或明文路径，路径仅记录 SHA-256 摘要。OpenCode 源码和 generated SDK 均未修改。
+  - 前端新增分享管理弹窗、“分享给我”列表和 `/s/{shareId}` 完整工作台；所属人跳回普通历史会话，被分享人固定在授权 session/workspace。消息按实际发送人稳定着色，别人消息显示姓名；运行期间所有参与方禁用再次发送，并按权限隐藏或禁用越界入口。
+  - 新增迁移 `V20260809170000__session_shares_create_collaboration_share.sql` 与 `V20260809170001__session_messages_add_delegated_attribution.sql`，SHA-256 分别为 `b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`、`dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`；源码、persistence JAR 和最终应用 JAR 字节一致。
+- How:
+  - 后端依赖链与应用测试全部通过：persistence 282 项（18 skipped）、API 534 项、app 62 项（1 个既有 skip）；app 测试覆盖 9 条真实 PostgreSQL/Flyway 已知历史升级，最终应用 JAR 构建成功。并发准入、归因、权限、定时任务、路由和迁移兼容均有回归覆盖。
+  - 前端全量 123 个 Vitest 文件为 1896 passed / 1 skipped，15 个 workspace 类型检查与 production build 通过；Chromium、Firefox、WebKit 会话分享 E2E 共 15 项全部通过，构建只保留既有大 chunk 警告。
+  - `git diff --check`、变更文件冲突标记扫描、禁改目录与 `.env*` 扫描通过；提交前回顾全部 `.agents/session-log*.md`，确认未覆盖其他提交者成果或改写既有 migration。
+- Result:
+  - 会话分享、多人实时协作和“被分享人替所属人操作、平台记录真实 actor”的完整链路已经落地；HTTP API、RunEvent/runtime SSE、数据库、审计安全与兼容文档同步更新，旧客户端通过可选字段保持兼容。
+  - 发布必须先核对目标环境 `flyway_schema_history`、checksum 和存量重复活动 Run，完成数据库迁移并升级全部后端节点后再发布前端；已启动 Run 在分享失效时不自动取消，分享失效后的授权快照定时任务仍会继续执行，这是确认后的业务语义。

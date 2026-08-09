@@ -133,6 +133,18 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             return redis.call('DEL', KEYS[1])
             """, Long.class);
 
+    /** 单 Session 活动 Run 原子占用；同一 Run 可重入续期，其它 Run 统一失败。 */
+    private static final DefaultRedisScript<Long> RESERVE_ACTIVE_SESSION_SCRIPT = new DefaultRedisScript<>("""
+            local current = redis.call('GET', KEYS[1])
+            if not current then
+              redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+              return 1
+            end
+            if current ~= ARGV[1] then return 0 end
+            redis.call('PEXPIRE', KEYS[1], ARGV[2])
+            return 1
+            """, Long.class);
+
     private static final DefaultRedisScript<Long> CONFIRM_CLIENT_REQUEST_SCRIPT = new DefaultRedisScript<>("""
             local current = redis.call('GET', KEYS[1])
             if not current then
@@ -1229,6 +1241,14 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 throw new IllegalStateException("Redis Run initialize returned no result");
             }
         } catch (RuntimeException exception) {
+            // initialize 尚未完成时不能留下 active/session/user/server 悬空占用；compare-delete 只清理本 Run。
+            try {
+                removeActive(manifest);
+                redisTemplate.opsForZSet().remove(
+                        historySessionKey(manifest.sessionId()), manifest.runId().value());
+            } catch (RuntimeException ignored) {
+                // 保留原始异常；读路径仍会按缺失 manifest 清理跨 slot 悬空索引。
+            }
             if (exception instanceof PlatformException platformException) {
                 throw platformException;
             }
@@ -2353,7 +2373,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             redisTemplate.opsForZSet().add(activeUserKey(manifest.userId()), manifest.runId().value(), expiresAt);
             extendTtl(activeUserKey(manifest.userId()), ttl);
         }
-        redisTemplate.opsForValue().set(activeSessionKey(manifest.sessionId()), manifest.runId().value(), ttl);
+        reserveActiveSession(manifest, ttl);
         indexServerRecovery(manifest, ttl, expiresAt);
     }
 
@@ -2366,10 +2386,10 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (manifest.userId() != null) {
             redisTemplate.opsForZSet().remove(activeUserKey(manifest.userId()), manifest.runId().value());
         }
-        String sessionRun = redisTemplate.opsForValue().get(activeSessionKey(manifest.sessionId()));
-        if (manifest.runId().value().equals(sessionRun)) {
-            redisTemplate.delete(activeSessionKey(manifest.sessionId()));
-        }
+        redisTemplate.execute(
+                COMPARE_AND_DELETE_SCRIPT,
+                List.of(activeSessionKey(manifest.sessionId())),
+                manifest.runId().value());
     }
 
     private void removeServerRecoveryIndex(RunRuntimeManifest manifest) {
@@ -2415,7 +2435,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     private RunRuntimeManifest overlay(RunRuntimeManifest base, Map<Object, Object> fields) {
         return new RunRuntimeManifest(
-                base.runId(), base.storageMode(), base.userId(), base.sessionId(), base.workspaceId(), base.agentId(),
+                base.runId(), base.storageMode(), base.userId(), base.messageSenderUserId(),
+                base.messageSenderUnifiedAuthId(), base.messageSentBySharedUser(),
+                base.sessionId(), base.workspaceId(), base.agentId(),
                 base.clientRequestId(), base.dispatchMessageId(), base.producerLinuxServerId(), base.backendProcessId(),
                 base.executionNodeId(), base.opencodeProcessId(),
                 optionalText(fields, "rootRemoteSessionId") == null
@@ -2518,6 +2540,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (manifest.active()) {
             Duration ttl = indexRetentionTtl();
             long expiresAt = clock.instant().plus(ttl).toEpochMilli();
+            reserveActiveSession(manifest, ttl);
             if (manifest.userId() != null) {
                 String markerOwner = "initialize:" + UUID.randomUUID();
                 Long reserved = redisTemplate.execute(
@@ -2538,8 +2561,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                     throw new PlatformException(ErrorCode.CONFLICT, "当前用户运行态正在重载，请稍后再启动 Run");
                 }
             }
-            redisTemplate.opsForValue().set(
-                    activeSessionKey(manifest.sessionId()), manifest.runId().value(), ttl);
+            // 任一后续步骤失败均由 initialize 外层统一 compare-delete，避免重复清理同一 Session 占用。
             indexServerRecovery(manifest, ttl, expiresAt);
         }
         indexHistory(manifest);
@@ -2549,6 +2571,24 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         if (!manifest.active()) {
             redisTemplate.opsForValue().set(
                     userRuntimeMarkerKey(manifest.userId()), "1", indexRetentionTtl());
+        }
+    }
+
+    /** session hash slot 内执行原子 NX/重入续期，冲突统一映射为 SESSION_BUSY。 */
+    private void reserveActiveSession(RunRuntimeManifest manifest, Duration ttl) {
+        Long reserved = redisTemplate.execute(
+                RESERVE_ACTIVE_SESSION_SCRIPT,
+                List.of(activeSessionKey(manifest.sessionId())),
+                manifest.runId().value(),
+                Long.toString(ttl.toMillis()));
+        if (reserved == null) {
+            throw new IllegalStateException("Redis active session reservation returned no result");
+        }
+        if (reserved == 0L) {
+            throw new PlatformException(
+                    ErrorCode.SESSION_BUSY,
+                    "会话中已有消息正在运行",
+                    Map.of("sessionId", manifest.sessionId().value()));
         }
     }
 
@@ -2673,6 +2713,13 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         message.put("id", messageId);
         message.put("role", "user");
         message.put("text", input.prompt());
+        if (manifest.messageSenderUserId() != null) {
+            message.put("senderUserId", manifest.messageSenderUserId().value());
+            if (manifest.messageSenderUnifiedAuthId() != null) {
+                message.put("senderUnifiedAuthId", manifest.messageSenderUnifiedAuthId());
+            }
+            message.put("sentBySharedUser", manifest.messageSentBySharedUser());
+        }
         if (manifest.rootRemoteSessionId() != null) {
             message.put("sessionID", manifest.rootRemoteSessionId());
         }
@@ -2681,6 +2728,13 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         payload.put("role", "user");
         payload.put("text", input.prompt());
         payload.put("message", Map.copyOf(message));
+        if (manifest.messageSenderUserId() != null) {
+            payload.put("senderUserId", manifest.messageSenderUserId().value());
+            if (manifest.messageSenderUnifiedAuthId() != null) {
+                payload.put("senderUnifiedAuthId", manifest.messageSenderUnifiedAuthId());
+            }
+            payload.put("sentBySharedUser", manifest.messageSentBySharedUser());
+        }
         if (manifest.rootRemoteSessionId() != null) {
             payload.put("sessionId", manifest.rootRemoteSessionId());
         }

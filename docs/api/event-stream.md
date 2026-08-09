@@ -276,6 +276,32 @@ data 字段：
 - 低频触发器作为兜底，避免本机实时触发丢失时状态长期不更新；用户已有 Redis 运行态 marker 时，每次摘要刷新只读取 Redis active 索引和 manifest，不轮询 PostgreSQL。未进入新链路的 legacy 用户继续使用现有只读 Repository。
 - 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 恢复正文，active-run 只作为上述流不可用时的单次 fallback。
 
+## 分享会话运行态 fetch SSE
+
+`GET /api/internal/platform/opencode-runtime/session-shares/runtime-state/events` 是分享工作台专用的单会话状态流。请求使用当前登录用户自己的 Bearer Token，并携带 `X-Test-Agent-Session-Share`；它不进入普通用户历史 runtime-state，也不允许用分享消息归因扩大普通会话可见范围。
+
+事件类型：
+
+| event name | 说明 |
+|---|---|
+| `session-share.snapshot` | 建连后首帧，包含分享版本、权限、有效期和当前 active Run。 |
+| `session-share.updated` | active Run、`canChat`、版本或有效期发生变化。 |
+| `session-share.invalidated` | 分享过期、取消、成员移除、会话归档或其它授权失效的末帧；发送后服务端关闭连接。 |
+
+data 使用 `active/reason/shareId/version/sessionId/workspaceId/canChat/expiresAt/activeRun/generatedAt`。`activeRun` 为空表示当前没有 `PENDING/RUNNING/CANCELLING` Run；非空时字段与 HTTP `RunResponse` 一致。失效末帧固定 `active=false`、`canChat=false`、`activeRun=null`，`reason` 使用 `EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED` 或稳定平台错误码。无变化时每 25 秒发送标准 heartbeat comment。
+
+服务端至少每秒重新校验登录用户状态、share/version、成员状态、有效期、精确 Session/Workspace 和权限。分享设置更新会提升版本；旧连接收到更新或失效后不得继续用旧权限执行。RunEvent SSE、文件 WebSocket 和 PTY 终端也各自周期或逐操作重新鉴权，成员移除、降权、取消或到期时关闭连接；已经启动的 Run 不因此自动取消。
+
+分享工作台同时订阅当前 Run 的既有 RunEvent SSE，并在跨 Java 转发时保留分享头。RunEvent 的 USER `message.updated`（包括 `run.snapshot.reset`、Session tree 和断线恢复投影）在 payload 顶层及 message 对象中以 additive 字段补充：
+
+| 字段 | 说明 |
+|---|---|
+| `senderUserId` | 实际发送用户的平台 ID。 |
+| `senderUnifiedAuthId` | 实际发送人的统一认证号快照，可空。 |
+| `sentBySharedUser` | 是否由被分享人代会话所属人发送。 |
+
+显示姓名不进入 RunEvent，前端从 `SessionShareAccess.participants` 按 `senderUserId` 解析。旧客户端可以忽略新增字段；旧事件缺失时按所属人普通发送兼容。分享模式禁止 follow-up queue，任一活动 Run 出现后立即禁用输入，后端 Redis + PostgreSQL 会话占用仍是最终并发裁决。
+
 ## stale active `run.failed`
 
 本节只适用于 `LEGACY_FULL`。`StaleActiveRunReconcileTaskHandler` 的 MyBatis 查询会排除 `REDIS_SUMMARY`；当它扫描到超过 2 小时仍处于 `PENDING/RUNNING/CANCELLING` 的 legacy Run 时，服务端会先检查 Redis 运行态：
@@ -531,7 +557,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 /api/internal/platform/workspace-management/file/ws?ticket=wft_...
 ```
 
-route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。upgrade 必须校验 Origin；全局 CORS 恰好配置为单个 `*` 时可以接受任意格式合法的 canonical Origin，但缺失或畸形 Origin 仍拒绝，混合 wildcard 与显式来源不放宽。workspace ticket 还绑定签票授权同一次权威判断产生的 `STANDARD/APP_SOURCE` 事实；APP_SOURCE 票后续禁止 `SUPER_ADMIN` 非托管回退，每条 RPC 都必须再次识别为 APP_SOURCE，replica 映射消失即 `FORBIDDEN`，而真正的非托管超级管理员服务器工作区保持兼容。连接建立后，每条 `workspace.*` RPC 仍会重新读取当前用户 `opencode` 文件路由 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致；binding 迁移或错误 JVM 上的旧连接从下一条 RPC 起返回 `FORBIDDEN`，文件服务不再执行。
+route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。upgrade 必须校验 Origin；全局 CORS 恰好配置为单个 `*` 时可以接受任意格式合法的 canonical Origin，但缺失或畸形 Origin 仍拒绝，混合 wildcard 与显式来源不放宽。workspace ticket 还绑定签票授权同一次权威判断产生的 `STANDARD/APP_SOURCE/SESSION_SHARE` 事实；分享票绑定 share/version、真实 actor、执行所属人、精确 session/workspace、`canChat` 和到期时间，且只能访问 `workspace.*`，不能借此进入 Agent 配置、Hub 或服务器目录模式。每条分享 RPC 和连接级定时监视都会重新校验授权与范围：只读成员只能 list/search/read/status，写入、上传、复制、移动、改名和删除要求当前 `canChat`；降权、移除、取消或到期会中止上传并关闭连接。APP_SOURCE 票后续禁止 `SUPER_ADMIN` 非托管回退，每条 RPC 都必须再次识别为 APP_SOURCE，replica 映射消失即 `FORBIDDEN`，而真正的非托管超级管理员服务器工作区保持兼容。连接建立后，每条普通 `workspace.*` RPC 仍会重新读取当前用户 `opencode` 文件路由 affinity；分享票改用执行所属人的 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致。binding 迁移或错误 JVM 上的旧连接从下一条 RPC 起返回 `FORBIDDEN`，文件服务不再执行。
 
 文件 RPC 的每条请求和响应仍是单条 JSON 文本消息，但上传、大文件预览和原始字节下载都由多条有界 RPC 组成。目标 Java 的单帧上限同时覆盖 `test-agent.files.max-preview-bytes` 以内的一次性 UTF-8 读写、单个预览/下载分段和单个 Base64 上传分片，并附加 RPC envelope 余量；它只限制单条消息，不代表整个上传、下载文件或最终可预览内容的大小。默认一次性预览/可编辑阈值为 5 MiB，超过后前端改用固定约 512 KiB 的 UTF-8 渐进预览分段；用户可继续加载一段或确认加载到文件末尾，界面必须提示完整加载超大文件可能占用较多内存并导致 Monaco 卡顿，大文件始终只读，避免把部分内容误保存。原始字节下载同样使用约 512 KiB 分段并通过 Base64 放入 JSON，支持任意二进制内容。默认上传分片为 256 KiB、可配置上限为 4 MiB。分片上传、渐进预览和原始字节下载都不设置应用层文件总大小上限，实际可处理大小仍受浏览器、网络、磁盘空间和基础设施超时约束。
 

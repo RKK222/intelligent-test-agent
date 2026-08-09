@@ -169,7 +169,12 @@ import type {
   ScheduledTaskUpdatePayload,
   SessionDiff,
   Session,
+  SessionCollaborationShare,
   SessionMessage,
+  SessionShareAccess,
+  SessionShareCandidate,
+  SharedSessionListItem,
+  PutSessionCollaborationSharePayload,
   SideQuestionRequest,
   SideQuestionResponse,
   SideQuestionRunRequest,
@@ -301,9 +306,11 @@ export class BackendApiError extends Error {
 }
 
 export type BackendApiClient = ReturnType<typeof createBackendApiClient>;
+export type SessionShareApiClient = ReturnType<typeof createSessionShareApiClient>;
 
 export const LINUX_SERVER_ROUTE_HEADER = "X-Test-Agent-Linux-Server-Id";
 export const SUPPORT_ACCESS_GRANT_HEADER = "X-Support-Access-Grant";
+export const SESSION_SHARE_HEADER = "X-Test-Agent-Session-Share";
 
 // 应用源码分支读取最多执行一次 60 秒 Git 命令，目录快照还会串行解析提交并读取远端树；
 // 这里仅放宽这两类慢 Git 读取，避免全局 30 秒超时先于后端的权威 Git 结果返回。
@@ -397,7 +404,30 @@ export type ExtraRequestInit = RequestInit & { timeoutMs?: number };
 
 type RequestFn = <T>(path: string, init?: ExtraRequestInit) => Promise<T>;
 
+type BackendApiClientInternalOptions = BackendApiClientOptions & {
+  /** 仅由 createSessionShareApiClient 设置，避免普通客户端误带分享凭据。 */
+  sessionShareId?: string;
+};
+
+export type SessionShareApiClientOptions = BackendApiClientOptions & { shareId: string };
+
 export function createBackendApiClient(options: BackendApiClientOptions = {}) {
+  return createBackendApiClientInternal(options);
+}
+
+/**
+ * 创建分享工作台专用客户端。shareId 只进入请求头，并由原始报文观察器自动排除。
+ */
+export function createSessionShareApiClient(options: SessionShareApiClientOptions) {
+  const shareId = options.shareId.trim();
+  if (!shareId) {
+    throw new Error("shareId is required");
+  }
+  const { shareId: _, ...baseOptions } = options;
+  return createBackendApiClientInternal({ ...baseOptions, sessionShareId: shareId });
+}
+
+function createBackendApiClientInternal(options: BackendApiClientInternalOptions = {}) {
   const baseUrl = (options.baseUrl ?? readEnv("VITE_TEST_AGENT_API_BASE_URL") ?? "http://127.0.0.1:8080").replace(
     /\/$/,
     ""
@@ -448,6 +478,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     const userToken = options.apiToken ?? (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("test-agent.auth.token") : null);
     if (userToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${userToken}`);
+    }
+    if (options.sessionShareId && !headers.has(SESSION_SHARE_HEADER)) {
+      headers.set(SESSION_SHARE_HEADER, options.sessionShareId);
     }
     // 所有后端请求统一设置超时，避免文件、运行和配置管理界面在连接悬挂时一直停留在加载态。
     const controller = new AbortController();
@@ -562,6 +595,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     const userToken = options.apiToken ?? (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("test-agent.auth.token") : null);
     if (userToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${userToken}`);
+    }
+    if (options.sessionShareId && !headers.has(SESSION_SHARE_HEADER)) {
+      headers.set(SESSION_SHARE_HEADER, options.sessionShareId);
     }
     const response = await fetcher(`${baseUrl}${path}`, { ...init, headers });
     if (!response.ok) {
@@ -779,6 +815,17 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     } finally {
       if (workspaceFileConnections.get(workspaceId) === connection) {
         workspaceFileConnections.delete(workspaceId);
+      }
+    }
+  }
+
+  /** 分享失效或权限变化时主动关闭已有文件连接，后续操作必须重新签发并鉴权。 */
+  function closeWorkspaceFileConnections(workspaceId?: string) {
+    for (const [key, client] of workspaceFileSockets) {
+      if (!workspaceId || key === workspaceId) {
+        client.close();
+        workspaceFileSockets.delete(key);
+        workspaceFileConnections.delete(key);
       }
     }
   }
@@ -1362,6 +1409,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/file-ws/tickets`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
+    closeWorkspaceFileConnections,
     listServerWorkspaceDirectories: async (server: WorkspaceBackendServer, path?: string) => {
       const client = await createDirectoryPickerClient(server);
       try {
@@ -1950,6 +1998,30 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     listAllSessions: (page = 1, size = 30, q?: string) =>
       routedRequest<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),
+    listSessionShareCandidates: (q?: string, page = 1, size = 20) =>
+      request<PageResponse<SessionShareCandidate>>(
+        `${opencodeRuntimeBase}/session-share-candidates${query({ q, page, size })}`
+      ),
+    getSessionCollaborationShare: (sessionId: string) =>
+      request<SessionCollaborationShare | null>(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/collaboration-share`
+      ),
+    putSessionCollaborationShare: (sessionId: string, payload: PutSessionCollaborationSharePayload) =>
+      request<SessionCollaborationShare>(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/collaboration-share`,
+        { method: "PUT", body: JSON.stringify(payload) }
+      ),
+    revokeSessionCollaborationShare: (sessionId: string, expectedVersion: number) =>
+      request<SessionCollaborationShare>(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/collaboration-share${query({ expectedVersion })}`,
+        { method: "DELETE" }
+      ),
+    listSharedSessions: (page = 1, size = 30) =>
+      request<PageResponse<SharedSessionListItem>>(
+        `${opencodeRuntimeBase}/session-shares${query({ page, size })}`
+      ),
+    getSessionShareAccess: () =>
+      request<SessionShareAccess>(`${opencodeRuntimeBase}/session-shares/access`),
     getSessionRuntimeState: async () =>
       normalizeSessionRuntimeStateSummary(
         await routedRequest<SessionRuntimeStateSummary>(`${opencodeRuntimeBase}/sessions/runtime-state`)

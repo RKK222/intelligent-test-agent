@@ -30,6 +30,9 @@
             <arg column="triggered_by_user_id" javaType="java.lang.String"/>
             <arg column="agent_id" javaType="java.lang.String"/>
             <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="message_sender_user_id" javaType="java.lang.String"/>
+            <arg column="message_sender_unified_auth_id" javaType="java.lang.String"/>
+            <arg column="message_sent_by_shared_user" javaType="java.lang.Boolean"/>
         </constructor>
     </resultMap>
 
@@ -48,6 +51,8 @@
             <arg column="source_type" javaType="java.lang.String"/>
             <arg column="source_ref_id" javaType="java.lang.String"/>
             <arg column="sender_user_id" javaType="java.lang.String"/>
+            <arg column="sender_unified_auth_id" javaType="java.lang.String"/>
+            <arg column="sent_by_shared_user" javaType="java.lang.Boolean"/>
             <arg column="content_kind" javaType="java.lang.String"/>
             <arg column="summary_key" javaType="java.lang.String"/>
             <arg column="summary_version" javaType="_int"/>
@@ -74,7 +79,8 @@
         opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
         scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
         assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
-        source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+        source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+        message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user
     </sql>
 
     <insert id="insertAnchor" databaseId="postgresql">
@@ -84,14 +90,18 @@
             opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
             scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
-            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+            message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
+            active_session_id
         ) values (
             #{row.runId}, #{row.sessionId}, #{row.workspaceId}, #{row.status}, #{row.storageMode}, #{row.statusVersion},
             #{row.clientRequestId}, #{row.producerLinuxServerId}, #{row.executionNodeIdSnapshot},
             #{row.opencodeProcessIdSnapshot}, #{row.rootRemoteSessionId}, #{row.dispatchMessageId},
             #{row.scheduledDispatchAttemptId}, #{row.scheduledDispatchLeaseUntil}, #{row.scheduledDispatchAcceptedAt},
             #{row.assistantSummaryMessageId}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt}, #{row.detailsExpiresAt},
-            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId}
+            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId},
+            #{row.messageSenderUserId}, #{row.messageSenderUnifiedAuthId}, #{row.messageSentBySharedUser},
+            #{row.sessionId}
         )
         on conflict(session_id, client_request_id) do nothing
     </insert>
@@ -107,14 +117,18 @@
             cast(#{row.scheduledDispatchAcceptedAt} as timestamp),
             #{row.assistantSummaryMessageId}, #{row.traceId}, cast(#{row.createdAt} as timestamp),
             cast(#{row.updatedAt} as timestamp), cast(#{row.detailsExpiresAt} as timestamp),
-            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId}
+            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId},
+            #{row.messageSenderUserId}, #{row.messageSenderUnifiedAuthId}, #{row.messageSentBySharedUser},
+            #{row.sessionId}
         )) as source(
             run_id, session_id, workspace_id, status, storage_mode, status_version,
             client_request_id, producer_linux_server_id, execution_node_id_snapshot,
             opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
             scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
-            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+            message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
+            active_session_id
         )
         on target.session_id = source.session_id and target.client_request_id = source.client_request_id
         when not matched then insert (
@@ -123,7 +137,9 @@
             opencode_process_id_snapshot, root_remote_session_id, dispatch_message_id,
             scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
-            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+            message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
+            active_session_id
         ) values (
             source.run_id, source.session_id, source.workspace_id, source.status, source.storage_mode,
             source.status_version, source.client_request_id, source.producer_linux_server_id,
@@ -132,7 +148,9 @@
             source.scheduled_dispatch_lease_until, source.scheduled_dispatch_accepted_at,
             source.assistant_summary_message_id,
             source.trace_id, source.created_at, source.updated_at, source.details_expires_at,
-            source.source_type, source.source_ref_id, source.triggered_by_user_id, source.agent_id, source.model_id
+            source.source_type, source.source_ref_id, source.triggered_by_user_id, source.agent_id, source.model_id,
+            source.message_sender_user_id, source.message_sender_unified_auth_id,
+            source.message_sent_by_shared_user, source.active_session_id
         )
     </insert>
 
@@ -240,6 +258,7 @@
     <update id="updateTerminalIfVersion">
         update runs
         set status = #{row.status},
+            active_session_id = null,
             status_version = status_version + 1,
             terminal_source = #{row.terminalSource},
             terminal_reason_code = #{row.terminalReasonCode},
@@ -294,12 +313,14 @@
                 #{row.messageId}, #{row.sessionId}, #{row.role}, #{row.content}, #{row.traceId},
                 cast(#{row.createdAt} as timestamp), #{row.runId}, #{row.agentId}, #{row.remoteMessageId},
                 cast(null as varchar), cast(#{row.updatedAt} as timestamp), #{row.sourceType}, #{row.sourceRefId},
-                #{row.senderUserId}, #{row.contentKind}, #{row.summaryKey}, #{row.summaryVersion}, #{row.summaryStatus}
+                #{row.senderUserId}, #{row.senderUnifiedAuthId}, #{row.sentBySharedUser},
+                #{row.contentKind}, #{row.summaryKey}, #{row.summaryVersion}, #{row.summaryStatus}
             )
         </foreach>
         ) as source(
             message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
             remote_message_id, parts_json, updated_at, source_type, source_ref_id, sender_user_id,
+            sender_unified_auth_id, sent_by_shared_user,
             content_kind, summary_key, summary_version, summary_status
         )
         on target.summary_key = source.summary_key
@@ -316,17 +337,21 @@
             source_type = source.source_type,
             source_ref_id = source.source_ref_id,
             sender_user_id = source.sender_user_id,
+            sender_unified_auth_id = source.sender_unified_auth_id,
+            sent_by_shared_user = source.sent_by_shared_user,
             content_kind = source.content_kind,
             summary_version = source.summary_version,
             summary_status = source.summary_status
         when not matched then insert (
             message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
             remote_message_id, parts_json, updated_at, source_type, source_ref_id, sender_user_id,
+            sender_unified_auth_id, sent_by_shared_user,
             content_kind, summary_key, summary_version, summary_status
         ) values (
             source.message_id, source.session_id, source.role, source.content, source.trace_id, source.created_at,
             source.run_id, source.agent_id, source.remote_message_id, source.parts_json, source.updated_at,
-            source.source_type, source.source_ref_id, source.sender_user_id, source.content_kind,
+            source.source_type, source.source_ref_id, source.sender_user_id,
+            source.sender_unified_auth_id, source.sent_by_shared_user, source.content_kind,
             source.summary_key, source.summary_version, source.summary_status
         )
     </insert>
@@ -340,6 +365,7 @@
     <select id="findSummariesByRunId" resultMap="RunSummaryRowMap">
         select message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
                remote_message_id, updated_at, source_type, source_ref_id, sender_user_id,
+               sender_unified_auth_id, sent_by_shared_user,
                content_kind, summary_key, summary_version, summary_status
         from session_messages
         where run_id = #{runId}
@@ -350,6 +376,7 @@
     <select id="findSummariesBySessionId" resultMap="RunSummaryRowMap">
         select message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
                remote_message_id, updated_at, source_type, source_ref_id, sender_user_id,
+               sender_unified_auth_id, sent_by_shared_user,
                content_kind, summary_key, summary_version, summary_status
         from session_messages
         where session_id = #{sessionId}
