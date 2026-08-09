@@ -6111,16 +6111,17 @@ function onCompositionEnd() {
             </template>
           </span>
         </template>
-        <button
-          type="button"
-          class="figma-chat-status-raw-btn"
-          title="查看前端与平台后端原始报文"
-          aria-label="原始输出"
-          @click="openRawOutput"
-        >
-          <Download :size="13" />
-        </button>
       </div>
+      <button
+        v-if="!activeSubagentSessionId"
+        type="button"
+        class="figma-chat-status-raw-btn"
+        title="查看前端与平台后端原始报文"
+        aria-label="原始输出"
+        @click="openRawOutput"
+      >
+        <Download :size="13" />
+      </button>
     </div>
 
     <div
@@ -9182,6 +9183,7 @@ function onCompositionEnd() {
   align-items: center;
   flex-wrap: nowrap;
   gap: 6px;
+  margin-left: 10px;
   padding: 0;
   background: transparent;
   font-family: 'JetBrains Mono', 'PingFang SC', monospace;
