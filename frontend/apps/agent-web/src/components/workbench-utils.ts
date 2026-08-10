@@ -808,7 +808,10 @@ export function historyItems(run: Run | null, sessions: Session[], runtimeStates
       pendingAttention: Boolean(runtimeState?.attention),
       attentionEventId: runtimeState?.attentionEventId ?? undefined,
       attentionAt: runtimeState?.attentionAt ?? undefined,
-      ...(item.sourceType ? { sourceType: item.sourceType } : {})
+      ...(item.sourceType ? { sourceType: item.sourceType } : {}),
+      ...(item.shareStatus !== undefined ? { shareStatus: item.shareStatus } : {}),
+      ...(item.shareExpired !== undefined ? { shareExpired: item.shareExpired } : {}),
+      ...(item.isShared !== undefined ? { isShared: item.isShared } : {})
     };
   });
 }
@@ -904,6 +907,10 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
         runId: message.runId,
         ...(message.sourceType ? { sourceType: message.sourceType } : {}),
         ...(message.sourceRefId ? { sourceRefId: message.sourceRefId } : {}),
+        ...(message.senderUserId ? { senderUserId: message.senderUserId } : {}),
+        ...(message.senderUsername ? { senderUsername: message.senderUsername } : {}),
+        ...(message.senderUnifiedAuthId ? { senderUnifiedAuthId: message.senderUnifiedAuthId } : {}),
+        ...(message.sentBySharedUser !== undefined ? { sentBySharedUser: message.sentBySharedUser } : {}),
         ...(message.resend ? { resend: message.resend } : {}),
         role: "user",
         text: message.content,

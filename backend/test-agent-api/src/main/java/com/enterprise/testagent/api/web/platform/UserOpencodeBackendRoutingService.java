@@ -13,10 +13,13 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatS
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationRunContext;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.workspace.WorkspaceServerIdentity;
 import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
@@ -69,6 +72,7 @@ class UserOpencodeBackendRoutingService {
     private final ObjectMapper objectMapper;
     private final ConversationContextStore conversationContextStore;
     private final int maxRoutedRequestBodyBytes;
+    private SessionCollaborationShareService sessionShareService;
 
     @Autowired
     UserOpencodeBackendRoutingService(
@@ -188,7 +192,8 @@ class UserOpencodeBackendRoutingService {
         if (agentId.isEmpty()) {
             return Optional.empty();
         }
-        Optional<String> boundTarget = assignmentService.routingLinuxServerId(principal.userId(), agentId.get());
+        UserId routingUserId = routingUserId(exchange, principal);
+        Optional<String> boundTarget = assignmentService.routingLinuxServerId(routingUserId, agentId.get());
         if (boundTarget.isPresent()) {
             return boundTarget.flatMap(routeResolver::remoteTarget);
         }
@@ -209,27 +214,39 @@ class UserOpencodeBackendRoutingService {
         if (exchange.getRequest().getHeaders().getFirst(BackendHttpForwarder.ROUTED_HEADER) != null) {
             return Mono.just(new RoutingResolution(exchange, Optional.empty()));
         }
+        if (routeAgentId(exchange).isEmpty()) {
+            return Mono.just(new RoutingResolution(exchange, Optional.empty()));
+        }
+        return Mono.fromCallable(() -> routingUserId(exchange, principal))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(routingUserId -> resolveRoute(exchange, routingUserId));
+    }
+
+    /** 分享上下文解析可能访问数据库，必须在上层 bounded-elastic 调度后再进入具体路由分支。 */
+    private Mono<RoutingResolution> resolveRoute(
+            ServerWebExchange exchange,
+            UserId routingUserId) {
         if (isNightExecutionTaskCreate(exchange)) {
             return cacheRequestBody(exchange)
                     .map(cached -> new RoutingResolution(
                             cached.exchange(),
-                            legacyTarget(principal, OPENCODE_AGENT_ID)));
+                            legacyTarget(routingUserId, OPENCODE_AGENT_ID)));
         }
         Optional<String> startRunAgentId = startRunAgentId(exchange);
         if (startRunAgentId.isEmpty()) {
             // binding 查询与 Redis 全局选服均为同步 I/O，延迟到订阅后才能进入统一异常链路。
             return Mono.fromCallable(() -> new RoutingResolution(
                             exchange,
-                            targetLinuxServerId(exchange, principal)))
+                            targetLinuxServerId(exchange, routingUserId)))
                     .subscribeOn(Schedulers.boundedElastic());
         }
         return cacheRequestBody(exchange)
-                .map(cached -> resolveStartRun(cached, principal, startRunAgentId.get()));
+                .map(cached -> resolveStartRun(cached, routingUserId, startRunAgentId.get()));
     }
 
     private RoutingResolution resolveStartRun(
             CachedRequest cached,
-            AuthPrincipal principal,
+            UserId routingUserId,
             String agentId) {
         JsonNode body;
         try {
@@ -238,11 +255,11 @@ class UserOpencodeBackendRoutingService {
                     : objectMapper.readTree(cached.body());
         } catch (Exception ignored) {
             // 非法 JSON 仍交给 Controller 返回统一校验错误；兼容路径按原 assignment 路由。
-            return new RoutingResolution(cached.exchange(), legacyTarget(principal, agentId));
+            return new RoutingResolution(cached.exchange(), legacyTarget(routingUserId, agentId));
         }
         boolean contextTokenPresent = body.isObject() && body.has("contextToken");
         if (!contextTokenPresent || conversationContextStore == null) {
-            return new RoutingResolution(cached.exchange(), legacyTarget(principal, agentId));
+            return new RoutingResolution(cached.exchange(), legacyTarget(routingUserId, agentId));
         }
         String contextToken = textField(body, "contextToken");
         if (contextToken == null) {
@@ -266,16 +283,56 @@ class UserOpencodeBackendRoutingService {
         }
         ConversationRunContext context = conversationContextStore.resolveForRouting(
                         contextToken,
-                        principal.userId(),
+                        routingUserId,
                         agentId,
                         sessionId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.CONVERSATION_CONTEXT_EXPIRED));
         return new RoutingResolution(cached.exchange(), routeResolver.remoteTarget(context.linuxServerId()));
     }
 
-    private Optional<String> legacyTarget(AuthPrincipal principal, String agentId) {
-        return assignmentService.routingLinuxServerId(principal.userId(), agentId)
+    private Optional<String> legacyTarget(UserId routingUserId, String agentId) {
+        return assignmentService.routingLinuxServerId(routingUserId, agentId)
                 .flatMap(routeResolver::remoteTarget);
+    }
+
+    private Optional<String> targetLinuxServerId(ServerWebExchange exchange, UserId routingUserId) {
+        if (exchange.getRequest().getHeaders().getFirst(BackendHttpForwarder.ROUTED_HEADER) != null) {
+            return Optional.empty();
+        }
+        Optional<String> agentId = routeAgentId(exchange);
+        if (agentId.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<String> boundTarget = assignmentService.routingLinuxServerId(routingUserId, agentId.get());
+        if (boundTarget.isPresent()) {
+            return boundTarget.flatMap(routeResolver::remoteTarget);
+        }
+        if (!isInitialAllocationRequest(exchange)) {
+            return Optional.empty();
+        }
+        return routeResolver.selectLeastLoadedInitializableServer()
+                .flatMap(routeResolver::remoteTarget)
+                .map(LinuxServerId::value);
+    }
+
+    /** 分享请求必须按会话所属人的用户进程路由；目标 Java 仍会使用真实 actor 重新鉴权。 */
+    private UserId routingUserId(ServerWebExchange exchange, AuthPrincipal principal) {
+        String shareId = exchange.getRequest().getHeaders().getFirst(SessionShareController.SHARE_HEADER);
+        if (shareId == null || shareId.isBlank()) {
+            return principal.userId();
+        }
+        if (sessionShareService == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "会话分享服务未配置");
+        }
+        return sessionShareService.refreshAccess(
+                        principal.userId(), new SessionShareId(shareId), traceId(exchange))
+                .executionOwnerUserId();
+    }
+
+    /** 可选 setter 保持既有路由测试构造器兼容；生产 Spring 装配始终注入分享服务。 */
+    @Autowired(required = false)
+    void configureSessionShareService(SessionCollaborationShareService sessionShareService) {
+        this.sessionShareService = Objects.requireNonNull(sessionShareService, "sessionShareService must not be null");
     }
 
     private Optional<String> startRunAgentId(ServerWebExchange exchange) {
@@ -460,6 +517,12 @@ class UserOpencodeBackendRoutingService {
         if (suffix.startsWith("/management")
                 || suffix.startsWith("/manager")
                 || suffix.startsWith("/messages")) {
+            return false;
+        }
+        // 分享管理、访问解析和分享状态 SSE 只依赖共享数据库/Redis；禁止交给会缓冲响应体的普通 HTTP 转发器。
+        if (suffix.startsWith("/session-shares")
+                || suffix.startsWith("/session-share-candidates")
+                || suffix.endsWith("/collaboration-share")) {
             return false;
         }
         if ("/runs".equals(suffix)) {

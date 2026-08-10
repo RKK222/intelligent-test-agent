@@ -9,12 +9,16 @@ import com.enterprise.testagent.opencode.runtime.terminal.TerminalTicketResponse
 import com.enterprise.testagent.opencode.runtime.terminal.ServerTerminalTicketRequest;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import java.util.function.Function;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ServerWebExchange;
@@ -30,22 +34,32 @@ public class TerminalController {
     private final TerminalApplicationService terminalService;
     private final CurrentBackendWebSocketUrlFactory webSocketUrlFactory;
     private final RuntimeManagementBackendRoutingService backendRoutingService;
+    private final SessionCollaborationShareService shareService;
 
     /**
      * 注入终端应用服务，HTTP 层只负责发放短期 WebSocket ticket。
      */
-    @Autowired
     public TerminalController(
             TerminalApplicationService terminalService,
             CurrentBackendWebSocketUrlFactory webSocketUrlFactory,
             RuntimeManagementBackendRoutingService backendRoutingService) {
+        this(terminalService, webSocketUrlFactory, backendRoutingService, null);
+    }
+
+    @Autowired
+    public TerminalController(
+            TerminalApplicationService terminalService,
+            CurrentBackendWebSocketUrlFactory webSocketUrlFactory,
+            RuntimeManagementBackendRoutingService backendRoutingService,
+            SessionCollaborationShareService shareService) {
         this.terminalService = terminalService;
         this.webSocketUrlFactory = webSocketUrlFactory;
         this.backendRoutingService = backendRoutingService;
+        this.shareService = shareService;
     }
 
     TerminalController(TerminalApplicationService terminalService, CurrentBackendWebSocketUrlFactory webSocketUrlFactory) {
-        this(terminalService, webSocketUrlFactory, null);
+        this(terminalService, webSocketUrlFactory, null, null);
     }
 
     /**
@@ -85,11 +99,33 @@ public class TerminalController {
     public Mono<ApiResponse<TerminalTicketResponse>> createTicket(
             @PathVariable String sessionId,
             @RequestBody(required = false) TerminalTicketRequest request,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         TerminalTicketRequest resolved = request == null ? new TerminalTicketRequest(null, null, null, null, null) : request;
+        DelegatedOperationContext context = shareId == null || shareId.isBlank()
+                ? null
+                : shareContext(
+                        AuthWebSupport.getAuthPrincipal(exchange).userId(),
+                        shareId,
+                        RuntimeApiSupport.traceId(exchange));
         return blockingResponse(exchange, traceId -> terminalTicketResponse(
                 sessionId,
-                terminalService.createTicket(new SessionId(sessionId), resolved, traceId)));
+                context == null
+                        ? terminalService.createTicket(new SessionId(sessionId), resolved, traceId)
+                        : terminalService.createTicket(context, resolved, traceId)));
+    }
+
+    private DelegatedOperationContext shareContext(
+            com.enterprise.testagent.domain.user.UserId actor,
+            String shareId,
+            String traceId) {
+        if (shareId == null || shareId.isBlank()) return null;
+        if (shareService == null) {
+            throw new com.enterprise.testagent.common.error.PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                    "会话分享服务未配置");
+        }
+        return shareService.requireAccess(actor, new SessionShareId(shareId), true, traceId);
     }
 
     /**

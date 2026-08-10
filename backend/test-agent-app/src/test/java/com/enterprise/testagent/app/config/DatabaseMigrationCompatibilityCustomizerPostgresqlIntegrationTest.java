@@ -88,10 +88,28 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_APPLIED_MIGRATION_VERSION;
     private static final String QA_MEMORY_APPLIED_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_APPLIED_COMPATIBILITY_LOCATION;
+    private static final String QA_MEMORY_GENERALIZE_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_GENERALIZE_MIGRATION_VERSION;
+    private static final String QA_MEMORY_IDENTITY_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_IDENTITY_MIGRATION_VERSION;
+    private static final String QA_MEMORY_EXTENDED_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_EXTENDED_COMPATIBILITY_LOCATION;
     private static final String EXTERNAL_API_FORWARD_VERSION =
             DatabaseMigrationCompatibilityCustomizer.EXTERNAL_API_FORWARD_MIGRATION_VERSION;
     private static final String EXTERNAL_API_FORWARD_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.EXTERNAL_API_FORWARD_COMPATIBILITY_LOCATION;
+    private static final String SESSION_SHARE_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.SESSION_SHARE_MIGRATION_VERSION;
+    private static final String SESSION_SHARE_ATTRIBUTION_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.SESSION_SHARE_ATTRIBUTION_MIGRATION_VERSION;
+    private static final String SESSION_SHARE_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.SESSION_SHARE_FORWARD_MIGRATION_VERSION;
+    private static final String SESSION_SHARE_ATTRIBUTION_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION_VERSION;
+    private static final String SESSION_SHARE_MAIN_RESOURCE =
+            "db/migration/V20260809170000__session_shares_create_collaboration_share.sql";
+    private static final String SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE =
+            "db/migration/V20260809170001__session_messages_add_delegated_attribution.sql";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -422,6 +440,95 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     }
 
     @Test
+    void appliedExtendedQaMemoryHistoryUsesByteExactCompatibilityAndAllForwardMigrations() {
+        DataSource dataSource = dataSource("qa_memory_extended_before_release_migrations");
+        // 复现当前 .env.test 保留库：三条 QA Memory history 已执行，外部 API 与会话分享均未执行。
+        migrateWithoutResourceTo(
+                dataSource,
+                QA_MEMORY_IDENTITY_VERSION,
+                new String[] {MAIN_LOCATION, QA_MEMORY_APPLIED_LOCATION, QA_MEMORY_EXTENDED_LOCATION},
+                EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE,
+                SESSION_SHARE_MAIN_RESOURCE,
+                SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE);
+
+        assertThat(appliedChecksum(dataSource, QA_MEMORY_GENERALIZE_VERSION))
+                .isEqualTo(DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_GENERALIZE_MIGRATION_CHECKSUM);
+        assertThat(appliedChecksum(dataSource, QA_MEMORY_IDENTITY_VERSION))
+                .isEqualTo(DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_IDENTITY_MIGRATION_CHECKSUM);
+        assertThat(applied(dataSource, EXTERNAL_API_CREDENTIALS_VERSION)).isFalse();
+        assertThat(applied(dataSource, SESSION_SHARE_VERSION)).isFalse();
+        assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(
+                    QA_MEMORY_APPLIED_LOCATION,
+                    QA_MEMORY_EXTENDED_LOCATION,
+                    EXTERNAL_API_FORWARD_LOCATION);
+            assertThat(applied(dataSource, EXTERNAL_API_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, SESSION_SHARE_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, EXTERNAL_API_CREDENTIALS_VERSION)).isFalse();
+            assertThat(applied(dataSource, SESSION_SHARE_VERSION)).isFalse();
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isFalse();
+            assertExternalApiCredentialTables(dataSource);
+            assertSessionShareSchema(dataSource);
+        });
+
+        // 第二次启动必须继续解析相同的高版本补偿资源，不能重新暴露低版本主 migration。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(
+                    QA_MEMORY_APPLIED_LOCATION,
+                    QA_MEMORY_EXTENDED_LOCATION,
+                    EXTERNAL_API_FORWARD_LOCATION);
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_FORWARD_VERSION)).isTrue();
+            assertSessionShareSchema(dataSource);
+        });
+    }
+
+    @Test
+    void partialExtendedQaMemoryHistoryResumesBeforeApplyingForwardMigrations() {
+        DataSource dataSource = dataSource("qa_memory_extended_after_generalize");
+        migrateWithoutResourceTo(
+                dataSource,
+                QA_MEMORY_GENERALIZE_VERSION,
+                new String[] {MAIN_LOCATION, QA_MEMORY_APPLIED_LOCATION, QA_MEMORY_EXTENDED_LOCATION},
+                EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE,
+                SESSION_SHARE_MAIN_RESOURCE,
+                SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, QA_MEMORY_GENERALIZE_VERSION)).isTrue();
+        assertThat(applied(dataSource, QA_MEMORY_IDENTITY_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_IDENTITY_VERSION)).isTrue();
+            assertThat(applied(dataSource, EXTERNAL_API_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_FORWARD_VERSION)).isTrue();
+            assertSessionShareSchema(dataSource);
+        });
+    }
+
+    @Test
+    void unknownExtendedQaMemoryChecksumStillFailsClosed() {
+        DataSource dataSource = dataSource("qa_memory_extended_unknown_checksum");
+        migrateWithoutResourceTo(
+                dataSource,
+                QA_MEMORY_IDENTITY_VERSION,
+                new String[] {MAIN_LOCATION, QA_MEMORY_APPLIED_LOCATION, QA_MEMORY_EXTENDED_LOCATION},
+                EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE,
+                SESSION_SHARE_MAIN_RESOURCE,
+                SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE);
+        overwriteAppliedChecksum(dataSource, QA_MEMORY_GENERALIZE_VERSION, 987654321);
+
+        bootFlywayRunner(dataSource).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure())
+                    .hasStackTraceContaining("检测到未知的 QA Memory 扩展 migration checksum");
+        });
+    }
+
+    @Test
     void unknownQaMemoryChecksumStillFailsClosed() {
         DataSource dataSource = dataSource("qa_memory_unknown_checksum");
         migrateWithoutResourceTo(
@@ -697,6 +804,37 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .query(Long.class)
                 .single();
         assertThat(tableCount).isEqualTo(2L);
+    }
+
+    private static void assertSessionShareSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'session_shares',
+                              'session_share_memberships',
+                              'session_share_audit_events'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long attributionColumnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and (
+                              (table_name = 'session_messages'
+                                  and column_name in ('sender_unified_auth_id', 'sent_by_shared_user'))
+                              or (table_name = 'runs'
+                                  and column_name in ('message_sender_user_id', 'active_session_id'))
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(3L);
+        assertThat(attributionColumnCount).isEqualTo(4L);
     }
 
     private static long qaMemorySchemaTableCount(DataSource dataSource) {

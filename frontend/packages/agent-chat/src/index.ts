@@ -43,5 +43,7 @@ export {
   workspaceContextAttachmentsFromUserPrompt
 } from "./user-message-display";
 export type { UserPromptWorkspaceContextAttachment } from "./user-message-display";
+export { resolveUserMessageAppearance } from "./user-message-appearance";
+export type { UserMessageAppearance, UserMessageAttribution } from "./user-message-appearance";
 export { default as MarkdownView } from "./MarkdownView.vue";
 export type { MarkdownViewProps } from "./MarkdownView.vue";

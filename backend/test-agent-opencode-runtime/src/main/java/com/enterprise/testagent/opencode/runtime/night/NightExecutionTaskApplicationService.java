@@ -26,6 +26,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -95,19 +96,62 @@ public class NightExecutionTaskApplicationService {
             boolean superAdmin,
             NightExecutionCreateCommand command,
             String traceId) {
+        return createInternal(new TaskActor(owner, owner, null, false, null), superAdmin, command, traceId);
+    }
+
+    /** 普通认证入口补齐创建人的统一认证号快照。 */
+    @Transactional
+    public NightExecutionTask create(
+            UserId owner,
+            String creatorUnifiedAuthId,
+            boolean superAdmin,
+            NightExecutionCreateCommand command,
+            String traceId) {
+        return createInternal(
+                new TaskActor(owner, owner, creatorUnifiedAuthId, false, null),
+                superAdmin, command, traceId);
+    }
+
+    /** 分享成员创建任务时固化授权；任务执行时不再依赖分享是否仍有效。 */
+    @Transactional
+    public NightExecutionTask create(
+            DelegatedOperationContext context,
+            boolean superAdmin,
+            NightExecutionCreateCommand command,
+            String traceId) {
+        Objects.requireNonNull(context, "context must not be null");
+        context.requireChat();
+        if (command.sessionId() == null) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "分享模式只能在当前会话创建定时任务");
+        }
+        context.requireSession(command.sessionId());
+        context.requireWorkspace(command.workspaceId());
+        // 被分享人的平台角色不能抬高会话所属人的权限上限；只有所属人通过分享链接访问时保留本人管理员能力。
+        boolean effectiveSuperAdmin = context.ownerAccess() && superAdmin;
+        return createInternal(new TaskActor(
+                context.executionOwnerUserId(), context.actorUserId(), context.actorUnifiedAuthId(),
+                context.delegated(), context), effectiveSuperAdmin, command, traceId);
+    }
+
+    private NightExecutionTask createInternal(
+            TaskActor actor,
+            boolean superAdmin,
+            NightExecutionCreateCommand command,
+            String traceId) {
+        UserId owner = actor.executionOwner();
         Objects.requireNonNull(owner, "owner must not be null");
         Objects.requireNonNull(command, "command must not be null");
         requireCustomPermission(command.scheduleMode(), superAdmin);
         NightExecutionTask existing = taskRepository
                 .findByOwnerAndClientRequestId(owner, command.clientRequestId()).orElse(null);
-        if (existing != null) return existing;
+        if (existing != null) return idempotentTask(existing, actor);
 
         Instant now = clock.instant();
         TaskSchedule schedule = scheduleForCreate(command, now);
         taskRepository.lockCreateRequest(owner, command.clientRequestId());
         existing = taskRepository
                 .findByOwnerAndClientRequestId(owner, command.clientRequestId()).orElse(null);
-        if (existing != null) return existing;
+        if (existing != null) return idempotentTask(existing, actor);
 
         Workspace workspace = workspaceRepository.findById(command.workspaceId())
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在"));
@@ -131,12 +175,25 @@ public class NightExecutionTaskApplicationService {
                 schedule.slotStart(), schedule.slotEnd(), schedule.windowEnd(),
                 targetLinuxServerId, null, null, 0, session.created(),
                 null, null, null, null, 0L, null, null, null, null,
-                traceId, now, now);
+                traceId, now, now)
+                .withCreatorSnapshot(
+                        actor.actualCreator(), actor.unifiedAuthId(), actor.shared(),
+                        actor.context() == null ? null : actor.context().shareId(),
+                        actor.context() == null ? null : actor.context().shareVersion(),
+                        actor.context() == null ? null : actor.context().expiresAt(),
+                        actor.context() == null ? null : actor.context().canChat());
         taskRepository.save(draft);
         if (!taskRepository.insertSessionLock(session.session().sessionId(), taskId, owner, now)) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前会话已有待执行夜间任务");
         }
         return draft;
+    }
+
+    private NightExecutionTask idempotentTask(NightExecutionTask existing, TaskActor actor) {
+        if (!existing.creatorUserId().equals(actor.actualCreator())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "clientRequestId 已被其他用户使用");
+        }
+        return existing;
     }
 
     /** 定时批量只能绑定本事务新建的 Session，归因写入失败时整体回滚。 */
@@ -166,6 +223,17 @@ public class NightExecutionTaskApplicationService {
         return new NightExecutionTaskQueryResult(
                 new PageResponse<>(items, 1, pageRequest.size(), items.size()),
                 taskRepository.findVisibleFailureBySession(owner, sessionId).orElse(null));
+    }
+
+    /** 分享列表只读取固定会话，不校验成员的普通工作区关系。 */
+    public NightExecutionTaskQueryResult list(
+            DelegatedOperationContext context,
+            SessionId sessionId,
+            PageRequest pageRequest) {
+        Objects.requireNonNull(context, "context must not be null");
+        SessionId scoped = sessionId == null ? context.sessionId() : sessionId;
+        context.requireSession(scoped);
+        return list(context.executionOwnerUserId(), scoped, pageRequest);
     }
 
     /** 用户改期只允许尚未认领的任务；新占位写入成功后才释放旧时段。 */
@@ -209,6 +277,19 @@ public class NightExecutionTaskApplicationService {
         return adjusted;
     }
 
+    /** 分享成员只有仍具 canChat 且为原创建人时才可改期；所属人仍拥有上限权限。 */
+    @Transactional
+    public NightExecutionTask adjust(
+            DelegatedOperationContext context,
+            boolean superAdmin,
+            NightExecutionTaskId taskId,
+            Instant slotStart,
+            String traceId) {
+        context.requireChat();
+        NightExecutionTask task = managed(context, taskId);
+        return adjust(task.ownerUserId(), context.ownerAccess() && superAdmin, taskId, slotStart, traceId);
+    }
+
     /** 取消任务后释放会话锁；专门创建且仍为空的 Session 自动归档。 */
     @Transactional
     public NightExecutionTask cancel(UserId owner, NightExecutionTaskId taskId, String traceId) {
@@ -223,6 +304,16 @@ public class NightExecutionTaskApplicationService {
         releaseCapacity(current, now);
         archiveEmptyCreatedSession(current, traceId, now);
         return cancelled;
+    }
+
+    /** 原创建人降为只读后仍可取消，但其他成员不能代为取消。 */
+    @Transactional
+    public NightExecutionTask cancel(
+            DelegatedOperationContext context,
+            NightExecutionTaskId taskId,
+            String traceId) {
+        NightExecutionTask task = managed(context, taskId);
+        return cancel(task.ownerUserId(), taskId, traceId);
     }
 
     /** 关闭最终失败卡；重复请求幂等，空 Session 在同一事务中归档。 */
@@ -240,6 +331,16 @@ public class NightExecutionTaskApplicationService {
         }
         archiveEmptyCreatedSession(current, traceId, now);
         return dismissed;
+    }
+
+    /** 失败卡属于任务管理范围，原创建人可在分享会话内关闭。 */
+    @Transactional
+    public NightExecutionTask dismiss(
+            DelegatedOperationContext context,
+            NightExecutionTaskId taskId,
+            String traceId) {
+        NightExecutionTask task = managed(context, taskId);
+        return dismiss(task.ownerUserId(), taskId, traceId);
     }
 
     private SessionResolution resolveSession(
@@ -330,6 +431,19 @@ public class NightExecutionTaskApplicationService {
         return task;
     }
 
+    private NightExecutionTask managed(DelegatedOperationContext context, NightExecutionTaskId taskId) {
+        Objects.requireNonNull(context, "context must not be null");
+        NightExecutionTask task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "夜间任务不存在"));
+        context.requireSession(task.sessionId());
+        context.requireWorkspace(task.workspaceId());
+        if (!context.executionOwnerUserId().equals(task.ownerUserId())
+                || (!context.ownerAccess() && !context.actorUserId().equals(task.creatorUserId()))) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "夜间任务不存在");
+        }
+        return task;
+    }
+
     private void requireScheduled(NightExecutionTask task, String message) {
         if (task.status() != NightExecutionTaskStatus.SCHEDULED) {
             throw new PlatformException(ErrorCode.CONFLICT, message);
@@ -365,6 +479,13 @@ public class NightExecutionTaskApplicationService {
     }
 
     private record SessionResolution(Session session, boolean created) { }
+
+    private record TaskActor(
+            UserId executionOwner,
+            UserId actualCreator,
+            String unifiedAuthId,
+            boolean shared,
+            DelegatedOperationContext context) { }
 
     /** 两种模式统一交给聚合的持久时间边界；容量字段仅对标准夜间模式有意义。 */
     private record TaskSchedule(

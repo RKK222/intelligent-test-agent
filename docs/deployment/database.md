@@ -1189,7 +1189,9 @@ XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution
 
 ## 后续 migration 版本规则
 
-V18 及以前保留既有数字版本。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支创建时可先使用本地时间区分候选，不再抢占 `V19`、`V20` 这类顺序数字版本。14 位时间戳只能降低同号冲突，不能让彼此不可见的本地分支自动取得一致执行顺序。
+V18 及以前保留既有数字版本，已在共享或稳定数据库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__table_name_description.sql`：14 位版本取开发者创建迁移时的本地时间戳；双下划线后先写 migration 实际变更的表名，再用简短的 snake_case 描述说明变更内容；涉及多张表时，按 SQL 实际变更顺序取第一张表。例如，为 `users` 增加状态字段时命名为 `V20260809170000__users_add_status.sql`，依次扩展 `sessions`、`runs` 和 `session_messages` 的来源类型时命名为 `V20260809170000__sessions_extend_source_type.sql`。开发分支创建时可先使用本地时间作为候选版本；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。
+
+新规则只约束尚未创建的 migration。历史文件及任何已进入共享、本地、稳定或企业数据库的 migration 即使仍使用动作描述，也必须保持原文件名和原始字节，禁止为套用新规则而改名。
 
 当前开发协作没有共享数据库、中央 migration 编号服务或自动合并门禁，每个开发者使用需要保留的个人本地数据库。两个尚未推送的分支无法感知对方的 migration，开发顺序也可能与最终合并顺序不同；因此本项目不把自动编号、merge queue、CI 清单或临时 worktree schema 描述为当前能力。并行 migration 只能在合并时由集成人显式处理，不能承诺在保留双方本地历史的同时自动重新编号。
 
@@ -1286,7 +1288,11 @@ migration 不写默认、测试或演示工具数据。全部运行期分页、�
 
 已执行 QA Memory 历史的个人库不能倒序补跑 `20260809110000`。唯一 Flyway 装配 `DatabaseMigrationCompatibilityCustomizer` 会精确匹配 `20260809120000/311175224`，加载 `db/migration-compat/qa-memory-applied` 中的 QA Memory 原始字节，过滤外部 API 主 migration，并加载更高版本 `V20260810110000__create_external_api_credentials_after_qa_memory.sql`；该前向资源与主 migration 字节相同。未知 QA checksum、主迁移与前向迁移混用、或前向迁移缺少 QA 历史均失败关闭，不启用 `outOfOrder`，不执行 `repair`，也不改写 history。
 
-正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 个人历史，并核对源码、persistence JAR 与最终 ZIP 内主迁移、QA 原始迁移及前向迁移 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
+当前个人持久库还已经执行 `V20260809230000__generalize_memory_and_embedding_profiles.sql`（Flyway checksum `-433275068`，SHA-256 `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`）和 `V20260810090000__enforce_qa_memory_identity.sql`（Flyway checksum `572596329`，SHA-256 `619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`）。两份已执行资源按原始字节保存在 `db/migration-compat/qa-memory-extended`，不可重命名或修改。
+
+远程主链新增的会话分享迁移版本 `20260809170000`、`20260809170001` 低于上述个人库最高版本，不能直接倒序补跑。兼容装配会在精确匹配 QA Memory 扩展 history 后过滤两份低版本主 migration，并加载 `V20260810110001__session_shares_create_collaboration_share_after_qa_memory.sql` 与 `V20260810110002__session_messages_add_delegated_attribution_after_qa_memory.sql`；两份前向资源分别与对应主 migration 字节一致。只执行到 `20260809230000` 的中间态 history 会先顺序补齐 `20260810090000`，再执行三份 `20260810110000` 至 `20260810110002` 前向 migration。主/前向路径混用、缺少基础版本、未知 checksum 或不完整分享 history 均拒绝启动。
+
+正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
 
 同一 migration 只写入四个生产必需且默认禁用/不可用的公共参数：
 
@@ -1664,3 +1670,34 @@ PostgreSQL 基线验证升级，并校验最终 JAR 中 migration 字节。禁�
 上述兼容逻辑只新增 Flyway 可验证的隔离资源，不执行 `repair`、不打开 `outOfOrder`，也不更新或删除
 `flyway_schema_history` 中已有记录；正式交付前仍须针对每套真实 PostgreSQL 已部署基线核对版本、checksum 和
 最终 JAR 内 migration 字节。
+
+## V20260809170000 会话协作分享
+
+`V20260809170000__session_shares_create_collaboration_share.sql` 是开发期候选 migration，新增：
+
+- `session_shares`：每个 `session_id` 和 256 位随机 `share_id` 均唯一，保存所属人、固定 Workspace、`ACTIVE/REVOKED`、最长 7 天有效期、乐观锁版本和 traceId；取消或重新启用不会换 shareId。
+- `session_share_memberships`：每个 share/user 唯一，保存统一认证号、用户名安全快照、`can_chat`、`ACTIVE/REMOVED` 和软移除时间。分享过期、取消及会话归档是 share/session 事实，不批量改写成员行；查询时与成员事实合并投影 `ACTIVE/EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED`，因此历史状态不会因续期覆盖。
+- `session_share_audit_events`：保存真实 actor、执行所属人、share/session/workspace/resource、结果、错误码、traceId 和可选路径 SHA-256。禁止写入消息正文、文件正文、明文路径、Token、终端输入或第三方原始错误；默认由业务维护任务清理 365 天前记录。
+
+关系型访问全部通过 `SessionShareMapper.xml`，普通候选用户查询只返回有效用户的 `user_id/unified_auth_id/username`。最多 50 名活动成员和 7 天边界由领域聚合与 API 双重校验；数据库唯一约束负责单 Session 唯一链接和并发首次创建的最终裁决。
+
+## V20260809170001 代操作归因与单会话运行准入
+
+`V20260809170001__session_messages_add_delegated_attribution.sql` 是开发期候选 migration：
+
+- `session_messages` 增加实际发送人统一认证号和 `sent_by_shared_user`；已有 `sender_user_id` 继续表示实际发送人。
+- `runs` 增加实际消息发送人、统一认证号、代操作标记和可空 `active_session_id`。`triggered_by_user_id` 继续表示执行所属人；活动状态占用 Session，终态必须清空。
+- `night_execution_tasks` 增加实际创建人、统一认证号、代操作标记及分享 ID/版本/有效期/`canChat` 授权快照。分享失效后任务仍按创建时快照使用所属人身份执行。
+- `run_resends` 增加实际发起人、统一认证号和代操作标记；替代 Run/消息继续保留源消息发送人。
+
+migration 会把存量普通数据的实际 actor 回填为原所属人，并把已有活动 Run 的 `active_session_id` 设为 `session_id`，随后创建唯一索引 `uk_runs_active_session`。发布前必须先在每个目标 PostgreSQL 执行只读预检；任何结果行都表示同一 Session 已有多个活动 Run，必须停止发布并按真实运行事实收敛，不能删除记录或使用 `repair/outOfOrder` 掩盖：
+
+```sql
+select session_id, count(*) as active_run_count, array_agg(run_id order by created_at) as run_ids
+from runs
+where status in ('PENDING', 'RUNNING', 'CANCELLING')
+group by session_id
+having count(*) > 1;
+```
+
+上线顺序固定为：先备份并完成所有已知真实 PostgreSQL 基线升级验证，再发布含 migration 的全部后端节点，确认新旧请求均由能识别分享上下文的节点处理后，最后发布前端。滚动期间不得让新前端把分享头发给旧 Java。打包后还要解出 `test-agent-persistence-*.jar`，逐字节比对上述两个 migration 与已完成真实升级测试的源码。

@@ -351,7 +351,7 @@ public class SessionApplicationService {
      * 追加平台侧 Session 消息，role 缺省为 USER；assistant 正文恢复不依赖本地消息表。
      */
     public SessionMessage appendMessage(SessionId sessionId, SessionMessageRole role, String content, String traceId) {
-        return appendMessage(null, sessionId, role, content, traceId);
+        return appendMessage((UserId) null, sessionId, role, content, traceId);
     }
 
     /**
@@ -375,6 +375,27 @@ public class SessionApplicationService {
         return sessionMessageRepository.save(userId == null
                 ? draft
                 : draft.withSource(ConversationSourceType.MANUAL, null, userId));
+    }
+
+    /** 分享会话的平台消息入口；执行所属人和实际发送人分别记录，且不改写认证主体。 */
+    public SessionMessage appendMessage(
+            com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext context,
+            SessionId sessionId,
+            SessionMessageRole role,
+            String content,
+            String traceId) {
+        Objects.requireNonNull(context, "context must not be null");
+        context.requireChat();
+        context.requireSession(sessionId);
+        requireNightExecutionUnlocked(sessionId);
+        getSession(sessionId);
+        SessionMessageRole resolvedRole = role == null ? SessionMessageRole.USER : role;
+        SessionMessage draft = new SessionMessage(
+                new SessionMessageId(RuntimeIdGenerator.messageId()), sessionId, resolvedRole,
+                content, Instant.now(), traceId)
+                .withSource(ConversationSourceType.MANUAL, null, context.executionOwnerUserId())
+                .withSender(context.actorUserId(), context.actorUnifiedAuthId(), context.delegated());
+        return sessionMessageRepository.save(draft);
     }
 
     /** 可选 setter 保持大量既有手工构造测试兼容；生产 Spring 装配始终注入数据库锁门禁。 */

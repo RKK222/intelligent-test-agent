@@ -27,7 +27,32 @@ public record SessionMessage(
         Instant updatedAt,
         ConversationSourceType sourceType,
         String sourceRefId,
-        UserId senderUserId) {
+        UserId senderUserId,
+        String senderUnifiedAuthId,
+        boolean sentBySharedUser) {
+
+    /** 兼容新增分享归因字段前的完整构造器；普通消息默认不是被分享用户代发。 */
+    public SessionMessage(
+            SessionMessageId messageId,
+            SessionId sessionId,
+            SessionMessageRole role,
+            String content,
+            Instant createdAt,
+            String traceId,
+            RunId runId,
+            String agentId,
+            String remoteMessageId,
+            String partsJson,
+            TokenUsage tokenUsage,
+            BigDecimal costUsd,
+            Instant updatedAt,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            UserId senderUserId) {
+        this(messageId, sessionId, role, content, createdAt, traceId, runId, agentId,
+                remoteMessageId, partsJson, tokenUsage, costUsd, updatedAt, sourceType,
+                sourceRefId, senderUserId, null, false);
+    }
 
     /**
      * 构造旧版纯文本消息，兼容既有用户输入和历史数据读取路径。
@@ -156,6 +181,19 @@ public record SessionMessage(
                 updatedAt,
                 sourceType,
                 sourceRefId,
-                senderUserId);
+                senderUserId,
+                senderUnifiedAuthId,
+                sentBySharedUser);
+    }
+
+    /** 设置实际发送人归因；执行身份仍由 Run 的 triggeredByUserId 表达。 */
+    public SessionMessage withSender(
+            UserId actualSenderUserId,
+            String actualSenderUnifiedAuthId,
+            boolean sharedUser) {
+        return new SessionMessage(
+                messageId, sessionId, role, content, createdAt, traceId, runId, agentId,
+                remoteMessageId, partsJson, tokenUsage, costUsd, updatedAt, sourceType,
+                sourceRefId, actualSenderUserId, actualSenderUnifiedAuthId, sharedUser);
     }
 }

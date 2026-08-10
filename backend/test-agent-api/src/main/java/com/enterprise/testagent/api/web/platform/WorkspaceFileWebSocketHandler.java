@@ -35,6 +35,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
@@ -175,7 +176,34 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 })
                 .then();
         Mono<Void> sender = session.send(outbound.asFlux().map(session::textMessage));
-        return Mono.when(inbound, sender);
+        Mono<Void> authorization = activeTicket.sharedSession()
+                ? Flux.interval(java.time.Duration.ofSeconds(1))
+                        .publishOn(Schedulers.boundedElastic())
+                        .doOnNext(ignored -> ticketService.authorizeWorkspaceRpc(
+                                activeTicket, new WorkspaceId(activeTicket.workspaceId())))
+                        .then()
+                        .onErrorResume(RuntimeException.class, failure -> {
+                            String errorCode = failure instanceof PlatformException platform
+                                    ? platform.errorCode().name()
+                                    : ErrorCode.INTERNAL_ERROR.name();
+                            try {
+                                ticketService.recordSharedRpc(
+                                        activeTicket, "workspace.authorization",
+                                        new WorkspaceId(activeTicket.workspaceId()), null,
+                                        failure instanceof PlatformException ? "DENIED" : "FAILED",
+                                        errorCode, traceId);
+                            } catch (RuntimeException ignored) {
+                                // 授权与审计同时失败时仍优先断开连接，禁止继续使用旧 ticket。
+                            }
+                            outbound.tryEmitNext(error(
+                                    null, errorCode, "分享文件授权已失效", traceId, Map.of()));
+                            outbound.tryEmitComplete();
+                            abortUploads(activeUploads);
+                            return session.close();
+                        })
+                : Mono.never();
+        return Mono.firstWithSignal(Mono.when(inbound, sender), authorization)
+                .doFinally(ignored -> abortUploads(activeUploads));
     }
 
     /**
@@ -369,6 +397,11 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 ticketService.recordSupportRpc(
                         supportAuthorization, op, auditedWorkspaceId, auditedPath, "SUCCESS", null, traceId);
             }
+            if (ticket.sharedSession()) {
+                ticketService.recordSharedRpc(
+                        ticket, op, sharedAuditWorkspace(ticket, auditedWorkspaceId), auditedPath,
+                        "SUCCESS", null, traceId);
+            }
             return success(id, data, traceId);
         } catch (PlatformException exception) {
             if (supportAuthorization != null) {
@@ -383,6 +416,20 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                             traceId);
                 } catch (RuntimeException auditFailure) {
                     return error(id, ErrorCode.INTERNAL_ERROR.name(), "排查访问审计失败", traceId, Map.of());
+                }
+            }
+            if (ticket.sharedSession()) {
+                try {
+                    ticketService.recordSharedRpc(
+                            ticket,
+                            op == null ? "workspace.unknown" : op,
+                            sharedAuditWorkspace(ticket, auditedWorkspaceId),
+                            auditedPath,
+                            "DENIED",
+                            exception.errorCode().name(),
+                            traceId);
+                } catch (RuntimeException auditFailure) {
+                    return error(id, ErrorCode.INTERNAL_ERROR.name(), "分享文件审计失败", traceId, Map.of());
                 }
             }
             return error(id, exception.errorCode().name(), exception.getMessage(), traceId, exception.details());
@@ -401,8 +448,30 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     // 两次失败均只返回稳定错误，不暴露审计存储或文件系统异常细节。
                 }
             }
+            if (ticket.sharedSession()) {
+                try {
+                    ticketService.recordSharedRpc(
+                            ticket,
+                            op == null ? "workspace.unknown" : op,
+                            sharedAuditWorkspace(ticket, auditedWorkspaceId),
+                            auditedPath,
+                            "FAILED",
+                            ErrorCode.INTERNAL_ERROR.name(),
+                            traceId);
+                } catch (RuntimeException ignored) {
+                    // 审计与文件处理均失败时只返回稳定错误，不泄露任一内部异常。
+                }
+            }
             return error(id, ErrorCode.VALIDATION_ERROR.name(), "文件 WebSocket 消息无效", traceId, Map.of());
         }
+    }
+
+    private WorkspaceId sharedAuditWorkspace(
+            WorkspaceFileSocketTicket ticket,
+            WorkspaceId requestedWorkspaceId) {
+        return requestedWorkspaceId != null
+                ? requestedWorkspaceId
+                : new WorkspaceId(ticket.workspaceId());
     }
 
     /** 排查 ticket 只开放有限文件读取白名单，所有写入、Git、配置和组合视图操作均拒绝。 */
@@ -536,6 +605,9 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     }
 
     private void requireWorkspaceWrite(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId, String path) {
+        if (ticket.sharedSession() && !ticket.shareCanChat()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前分享成员仅可查看工作区文件");
+        }
         if (ticket.userId() != null) {
             workspaceService.requireWorkspaceWriteAccess(
                     workspaceId,

@@ -13,6 +13,7 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -45,6 +46,19 @@ class RuntimeDtosCompatibilityTest {
         assertThat(response.storageMode()).isEqualTo("REDIS_SUMMARY");
         assertThat(response.clientRequestId()).isEqualTo("req_1234567890abcdef");
         assertThat(response.detailsAvailableUntil()).isEqualTo(DETAILS_EXPIRE_AT);
+    }
+
+    @Test
+    void runAndMessageMappingsExposeOptionalActualSenderUsername() {
+        UserId actor = new UserId("usr_shared_dto_actor");
+        RuntimeDtos.RunResponse runResponse = RuntimeDtos.RunResponse.from(
+                run().withMessageSender(actor, "ucid-shared-dto", true), ignored -> "协作者");
+        RuntimeDtos.SessionMessageResponse messageResponse = RuntimeDtos.SessionMessageResponse.from(
+                message().withSender(actor, "ucid-shared-dto", true),
+                null, null, null, null, ignored -> "协作者");
+
+        assertThat(runResponse.messageSenderUsername()).isEqualTo("协作者");
+        assertThat(messageResponse.senderUsername()).isEqualTo("协作者");
     }
 
     @Test

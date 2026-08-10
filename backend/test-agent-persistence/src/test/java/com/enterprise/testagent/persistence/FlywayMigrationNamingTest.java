@@ -68,6 +68,26 @@ class FlywayMigrationNamingTest {
             "V20260809120000__create_qa_memory_governance.sql";
     private static final String APPLIED_QA_MEMORY_SHA256 =
             "b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a";
+    private static final String APPLIED_QA_MEMORY_GENERALIZE_MIGRATION =
+            "V20260809230000__generalize_memory_and_embedding_profiles.sql";
+    private static final String APPLIED_QA_MEMORY_GENERALIZE_SHA256 =
+            "2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3";
+    private static final String APPLIED_QA_MEMORY_IDENTITY_MIGRATION =
+            "V20260810090000__enforce_qa_memory_identity.sql";
+    private static final String APPLIED_QA_MEMORY_IDENTITY_SHA256 =
+            "619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3";
+    private static final String SESSION_SHARE_MAIN_MIGRATION =
+            "V20260809170000__session_shares_create_collaboration_share.sql";
+    private static final String SESSION_SHARE_FORWARD_MIGRATION =
+            "V20260810110001__session_shares_create_collaboration_share_after_qa_memory.sql";
+    private static final String SESSION_SHARE_SHA256 =
+            "b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9";
+    private static final String SESSION_SHARE_ATTRIBUTION_MAIN_MIGRATION =
+            "V20260809170001__session_messages_add_delegated_attribution.sql";
+    private static final String SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION =
+            "V20260810110002__session_messages_add_delegated_attribution_after_qa_memory.sql";
+    private static final String SESSION_SHARE_ATTRIBUTION_SHA256 =
+            "dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -191,6 +211,30 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/external-api-after-qa-memory",
                 EXTERNAL_API_CREDENTIALS_FORWARD_MIGRATION,
                 EXTERNAL_API_CREDENTIALS_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/qa-memory-extended",
+                APPLIED_QA_MEMORY_GENERALIZE_MIGRATION,
+                APPLIED_QA_MEMORY_GENERALIZE_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/qa-memory-extended",
+                APPLIED_QA_MEMORY_IDENTITY_MIGRATION,
+                APPLIED_QA_MEMORY_IDENTITY_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                SESSION_SHARE_MAIN_MIGRATION,
+                SESSION_SHARE_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/qa-memory-extended",
+                SESSION_SHARE_FORWARD_MIGRATION,
+                SESSION_SHARE_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                SESSION_SHARE_ATTRIBUTION_MAIN_MIGRATION,
+                SESSION_SHARE_ATTRIBUTION_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/qa-memory-extended",
+                SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION,
+                SESSION_SHARE_ATTRIBUTION_SHA256);
     }
 
     private static void assertMigrationSha256(

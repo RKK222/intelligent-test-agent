@@ -29,6 +29,7 @@
 ## 数据与安全
 
 - [ ] 数据库结构变更包含 Flyway migration，并更新 `docs/deployment/database.md`。
+- [ ] V18 之后新增 Flyway migration 已按 `VyyyyMMddHHmmss__table_name_description.sql` 命名；涉及多张表时，表名取 SQL 实际变更顺序中的第一张表。
 - [ ] Flyway migration 未写入测试、演示、个人开发或环境专属数据；此类数据已放入测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程。
 - [ ] 已查询并留存所有目标环境 `flyway_schema_history` 的版本、checksum 和成功状态；已执行 migration 的 SQL、注释、文件名和字节均未改写。
 - [ ] 涉及 Flyway 时已用真实 PostgreSQL 验证空库、已部署企业基线和每套已知分叉历史；未使用 `outOfOrder`、`repair` 或手工改历史表。

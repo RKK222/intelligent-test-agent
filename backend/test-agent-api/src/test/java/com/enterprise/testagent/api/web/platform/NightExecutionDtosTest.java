@@ -7,6 +7,7 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
@@ -45,6 +46,27 @@ class NightExecutionDtosTest {
     }
 
     @Test
+    void taskResponseExposesOptionalActualCreatorUsername() {
+        UserId creator = new UserId("usr_shared_night_creator");
+        NightExecutionTask attributed = task().withCreatorSnapshot(
+                creator,
+                "ucid-shared-night",
+                true,
+                new SessionShareId(
+                        "shr_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+                3L,
+                Instant.parse("2026-07-19T12:00:00Z"),
+                true);
+
+        NightExecutionDtos.TaskResponse response = NightExecutionDtos.TaskResponse.from(
+                attributed, ignored -> "定时协作者");
+
+        assertThat(response.creatorUsername()).isEqualTo("定时协作者");
+        assertThat(response.creatorUnifiedAuthId()).isEqualTo("ucid-shared-night");
+        assertThat(response.createdBySharedUser()).isTrue();
+    }
+
+    @Test
     void mapsOptionalBatchContextAndKeepsSessionIdEmpty() {
         NightExecutionDtos.CreateTaskRequest request = new NightExecutionDtos.CreateTaskRequest(
                 "request-night-batch", null, "wrk_night_dto_test", "批量夜间",
@@ -56,5 +78,17 @@ class NightExecutionDtosTest {
         assertThat(request.toCommand().batchContext().batchId()).isEqualTo("batch_dto");
         assertThat(request.toCommand().batchContext().itemRequestId()).isEqualTo("batch_item_dto");
         assertThat(request.toCommand().sessionId()).isNull();
+    }
+
+    private static NightExecutionTask task() {
+        Instant now = Instant.parse("2026-07-18T12:00:00Z");
+        return new NightExecutionTask(
+                new NightExecutionTaskId("net_night_dto_username"), new UserId("usr_night_dto"),
+                new SessionId("ses_night_dto_username"), new WorkspaceId("wrk_night_dto_username"),
+                "request-night-username", "夜间任务", "安全预览", "{}",
+                NightExecutionTaskStatus.SCHEDULED, Instant.parse("2026-07-18T13:00:00Z"),
+                Instant.parse("2026-07-18T13:15:00Z"), Instant.parse("2026-07-18T23:00:00Z"),
+                "linux-night", null, null, 0, false, null, null, null, null, null,
+                "trace_night_username", now, now);
     }
 }

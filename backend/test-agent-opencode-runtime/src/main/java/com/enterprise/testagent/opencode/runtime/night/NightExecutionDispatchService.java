@@ -20,6 +20,7 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssi
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.run.ConversationContextApplicationService;
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
+import com.enterprise.testagent.opencode.runtime.run.RunActorAttribution;
 import com.enterprise.testagent.opencode.runtime.run.ScheduledRunMetadata;
 import java.time.Clock;
 import java.time.Instant;
@@ -208,11 +209,13 @@ public class NightExecutionDispatchService {
                     runStartAt)) {
                 throw new PlatformException(ErrorCode.CONFLICT, "夜间任务分发租约已失效");
             }
-            Run run = runService.startScheduledRun(
-                    task.ownerUserId(),
-                    snapshot.toStartRunInput(task.sessionId(), issued.contextToken()),
-                    metadata,
-                    traceId);
+            var runInput = snapshot.toStartRunInput(task.sessionId(), issued.contextToken());
+            Run run = task.createdBySharedUser()
+                    ? runService.startScheduledRun(
+                            new RunActorAttribution(
+                                    task.ownerUserId(), task.creatorUserId(), task.creatorUnifiedAuthId(), true),
+                            runInput, metadata, traceId)
+                    : runService.startScheduledRun(task.ownerUserId(), runInput, metadata, traceId);
             return result(taskId, NightExecutionDispatchStatus.STARTED, run.runId().value(), null);
         } catch (PlatformException failure) {
             lifecycleService.onRejected(metadata, failure);

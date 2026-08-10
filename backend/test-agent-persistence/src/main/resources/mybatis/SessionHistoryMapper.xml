@@ -24,6 +24,7 @@
             <arg column="workspace_name" javaType="java.lang.String"/>
             <arg column="version_id" javaType="java.lang.String"/>
             <arg column="version" javaType="java.lang.String"/>
+            <arg column="share_status" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
 
@@ -46,7 +47,13 @@
         coalesce(v.application_workspace_id, pw.application_workspace_id) as application_workspace_id,
         coalesce(aw.workspace_name, w.name) as workspace_name,
         v.version_id,
-        v.version
+        v.version,
+        case
+            when sh.share_id is null then null
+            when sh.status = 'REVOKED' then 'REVOKED'
+            when sh.expires_at &lt;= current_timestamp then 'EXPIRED'
+            else 'ACTIVE'
+        end as share_status
     </sql>
 
     <sql id="SessionHistoryFrom">
@@ -61,6 +68,7 @@
           on v.version_id = coalesce(v_direct.version_id, v_replica.version_id, v_personal.version_id)
         left join application_workspaces aw on aw.workspace_id = coalesce(v.application_workspace_id, pw.application_workspace_id)
         left join applications a on a.app_id = coalesce(v.app_id, pw.app_id)
+        left join session_shares sh on sh.session_id = s.session_id
     </sql>
 
     <sql id="SessionHistoryWhere">
@@ -87,6 +95,7 @@
                 from session_messages sm
                 where sm.session_id = s.session_id
                   and sm.sender_user_id = #{userId}
+                  and coalesce(sm.sent_by_shared_user, false) = false
             )
           )
         <if test="queryPattern != null">

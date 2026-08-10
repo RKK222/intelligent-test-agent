@@ -11,6 +11,7 @@ export type TimelineRowProps = {
   forceToolDetailsOpen?: boolean;
   showReasoning?: boolean;
   resendableMessageId?: string;
+  currentUserId?: string;
 };
 </script>
 
@@ -110,6 +111,7 @@ const toolGroupParts = computed(() => {
     class="oc-row"
     :message="userMessage"
     :resendable="resendableMessageId === (userMessage.remoteMessageId ?? userMessage.messageId ?? userMessage.id)"
+    :current-user-id="currentUserId"
     @resend="emit('resend')"
   />
   <AssistantMessageFrame

@@ -30,6 +30,7 @@ import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.event.RunEventAppender;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -82,6 +83,45 @@ public class RunResendApplicationService {
             SessionId sessionId,
             CreateRunResendCommand command,
             String traceId) {
+        return createManualInternal(
+                RunActorAttribution.direct(owner), null, agentId, sessionId, command, traceId);
+    }
+
+    /** 普通入口补齐真实发起人的统一认证号快照。 */
+    @Transactional
+    public RunResend createManual(
+            RunActorAttribution attribution,
+            String agentId,
+            SessionId sessionId,
+            CreateRunResendCommand command,
+            String traceId) {
+        return createManualInternal(attribution, null, agentId, sessionId, command, traceId);
+    }
+
+    /** 分享成员仅可重发自己发送的最后一条消息，且操作时必须仍具有 canChat。 */
+    @Transactional
+    public RunResend createManual(
+            DelegatedOperationContext context,
+            String agentId,
+            SessionId sessionId,
+            CreateRunResendCommand command,
+            String traceId) {
+        Objects.requireNonNull(context, "context must not be null");
+        context.requireChat();
+        context.requireSession(sessionId);
+        return createManualInternal(
+                RunActorAttribution.from(context), context, agentId, sessionId, command, traceId);
+    }
+
+    private RunResend createManualInternal(
+            RunActorAttribution attribution,
+            DelegatedOperationContext delegatedContext,
+            String agentId,
+            SessionId sessionId,
+            CreateRunResendCommand command,
+            String traceId) {
+        Objects.requireNonNull(attribution, "attribution must not be null");
+        UserId owner = attribution.executionOwnerUserId();
         Objects.requireNonNull(owner, "owner must not be null");
         Objects.requireNonNull(command, "command must not be null");
         RunResend existing = resendRepository
@@ -90,6 +130,9 @@ public class RunResendApplicationService {
         if (existing != null) {
             if (!existing.sessionId().equals(sessionId)) {
                 throw conflict("clientRequestId 已用于其它会话", sessionId);
+            }
+            if (!existing.requesterUserId().equals(attribution.actualSenderUserId())) {
+                throw conflict("clientRequestId 已被其他用户使用", sessionId);
             }
             return existing;
         }
@@ -125,6 +168,10 @@ public class RunResendApplicationService {
             sourceRunId = sourceTurn.runId();
         }
         Run sourceRun = requireTerminalSourceRun(sourceRunId, sessionId);
+        if (delegatedContext != null) {
+            delegatedContext.requireWorkspace(sourceRun.workspaceId());
+        }
+        requireManualRequester(attribution, sourceRun, sessionId);
         AgentRuntime runtime = runtimeRegistry.require(resolvedAgentId);
         AgentReplayableTurn replayable;
         try {
@@ -144,7 +191,7 @@ public class RunResendApplicationService {
         }
         RunResend previous = resendRepository.findByReplacementRunId(sourceRun.runId()).orElse(null);
         return reserve(
-                owner,
+                attribution,
                 resolvedAgentId,
                 sourceRun,
                 command.expectedRemoteMessageId(),
@@ -159,7 +206,7 @@ public class RunResendApplicationService {
     }
 
     private RunResend reserve(
-            UserId owner,
+            RunActorAttribution requester,
             String agentId,
             Run sourceRun,
             String sourceRemoteMessageId,
@@ -171,6 +218,7 @@ public class RunResendApplicationService {
             Instant executeAt,
             String clientRequestId,
             String traceId) {
+        UserId owner = requester.executionOwnerUserId();
         Instant now = clock.instant();
         RunId replacementRunId = new RunId(RuntimeIdGenerator.runId());
         String replacementMessageId = runtimeRegistry.require(agentId).createDispatchMessageId();
@@ -183,6 +231,10 @@ public class RunResendApplicationService {
                 now,
                 traceId)
                 .withSource(sourceRun.sourceType(), sourceRun.sourceRefId(), owner)
+                .withMessageSender(
+                        sourceSender(sourceRun, owner),
+                        sourceRun.messageSenderUnifiedAuthId(),
+                        sourceRun.messageSentBySharedUser())
                 .withRuntimeSelection(replayable.agent(), modelId(replayable));
         RunResend resend = new RunResend(
                 new RunResendId(RuntimeIdGenerator.runResendId()),
@@ -205,7 +257,10 @@ public class RunResendApplicationService {
                 traceId,
                 null,
                 now,
-                now);
+                now)
+                .withRequester(
+                        requester.actualSenderUserId(), requester.actualSenderUnifiedAuthId(),
+                        requester.sentBySharedUser());
 
         // 精确输入先进入有限 TTL Redis；后续任何执行者在 revert 前都必须重新读取确认。
         replayInputStore.save(new RunResendReplayInput(
@@ -251,7 +306,7 @@ public class RunResendApplicationService {
             throw conflict("会话已有重发等待执行", sourceRun.sessionId());
         }
         return reserve(
-                owner,
+                RunActorAttribution.direct(owner),
                 agentId,
                 sourceRun,
                 sourceRemoteMessageId,
@@ -263,6 +318,25 @@ public class RunResendApplicationService {
                 executeAt,
                 clientRequestId,
                 traceId);
+    }
+
+    private void requireManualRequester(
+            RunActorAttribution requester,
+            Run sourceRun,
+            SessionId sessionId) {
+        UserId actor = requester.actualSenderUserId();
+        UserId sourceSender = sourceSender(sourceRun, requester.executionOwnerUserId());
+        if (!actor.equals(requester.executionOwnerUserId()) && !actor.equals(sourceSender)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "只有会话所属人或最后一条消息发送人可以撤回重发",
+                    Map.of("sessionId", sessionId.value()));
+        }
+    }
+
+    private UserId sourceSender(Run sourceRun, UserId owner) {
+        if (sourceRun.messageSenderUserId() != null) return sourceRun.messageSenderUserId();
+        return sourceRun.triggeredByUserId() == null ? owner : sourceRun.triggeredByUserId();
     }
 
     private Run requireTerminalSourceRun(RunId runId, SessionId sessionId) {

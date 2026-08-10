@@ -4,6 +4,7 @@ import type { AgentMessage } from "@test-agent/shared-types";
 export type UserMessageRowProps = {
   message: Extract<AgentMessage, { role: "user" }>;
   resendable?: boolean;
+  currentUserId?: string;
 };
 </script>
 
@@ -16,12 +17,14 @@ import {
   workspaceContextAttachmentsFromUserPrompt
 } from "../../../user-message-display";
 import OcCopyButton from "../primitives/OcCopyButton.vue";
+import { resolveUserMessageAppearance } from "../../../user-message-appearance";
 
 const props = defineProps<UserMessageRowProps>();
 const emit = defineEmits<{ resend: [] }>();
 const nowMs = ref(Date.now());
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 const displayText = computed(() => displayTextFromUserPrompt(props.message.text));
+const appearance = computed(() => resolveUserMessageAppearance(props.message, props.currentUserId));
 const scheduledAtFormatter = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
   month: "numeric",
@@ -40,6 +43,8 @@ const workspaceContexts = computed(() => {
   const partContexts = workspaceContextAttachmentsFromPromptParts(props.message.parts);
   return partContexts.length ? partContexts : workspaceContextAttachmentsFromUserPrompt(props.message.text);
 });
+// 多人会话接管运行态时可能先收到 OpenCode 的空 user envelope；保留状态用于后续归并，但不渲染空气泡。
+const hasVisibleContent = computed(() => Boolean(displayText.value.trim()) || workspaceContexts.value.length > 0);
 const resendWaiting = computed(() => props.message.resend?.status === "WAITING");
 const resendActive = computed(() => ["WAITING", "REVERTING", "REVERTED"].includes(props.message.resend?.status ?? ""));
 const resendCountdown = computed(() => {
@@ -65,6 +70,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
+    v-if="hasVisibleContent"
     class="oc-user-message"
     data-testid="oc-user-message"
     data-oc-turn-row="true"
@@ -75,7 +81,8 @@ onBeforeUnmount(() => {
         <Clock3 aria-hidden="true" />
         <span>{{ sourceBadge }}<span v-if="resendWaiting"> · {{ resendCountdown }} 秒后</span><span v-else-if="scheduledAt"> · {{ scheduledAt }}</span></span>
       </div>
-      <div class="oc-user-message__bubble">
+      <div v-if="appearance.displayName" class="oc-user-message__sender">{{ appearance.displayName }}</div>
+      <div class="oc-user-message__bubble" :style="appearance.style">
         <p>{{ displayText }}</p>
       </div>
       <div class="oc-user-message__actions">

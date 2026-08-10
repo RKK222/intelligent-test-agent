@@ -81,4 +81,22 @@ class SessionMessageTest {
         assertThat(scheduled.sourceRefId()).isEqualTo("str_1234567890abcdef");
         assertThat(scheduled.senderUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
     }
+
+    @Test
+    void delegatedSenderAttributionSurvivesSourceChanges() {
+        UserId actor = new UserId("usr_shared1234567890abcdef");
+        SessionMessage delegated = new SessionMessage(
+                new SessionMessageId("msg_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                SessionMessageRole.USER,
+                "run the tests",
+                NOW,
+                "trace_1234567890abcdef")
+                .withSender(actor, "uac_shared_user", true)
+                .withSource(ConversationSourceType.SCHEDULED_TASK, "net_1234567890abcdef", actor);
+
+        assertThat(delegated.senderUserId()).isEqualTo(actor);
+        assertThat(delegated.senderUnifiedAuthId()).isEqualTo("uac_shared_user");
+        assertThat(delegated.sentBySharedUser()).isTrue();
+    }
 }

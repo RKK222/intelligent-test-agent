@@ -210,7 +210,9 @@ public class RunRuntimeLossConvergenceService {
                 request.agentId(),
                 request.sourceType(),
                 request.sourceRefId(),
-                request.userId(),
+                request.messageSenderUserId(),
+                request.messageSenderUnifiedAuthId(),
+                request.messageSentBySharedUser(),
                 fallbackSummaries(request, now));
     }
 
@@ -246,7 +248,9 @@ public class RunRuntimeLossConvergenceService {
                 request.agentId(),
                 request.sourceType(),
                 request.sourceRefId(),
-                request.userId(),
+                manifest.messageSenderUserId(),
+                manifest.messageSenderUnifiedAuthId(),
+                manifest.messageSentBySharedUser(),
                 fallbackSummaries(request, now));
     }
 

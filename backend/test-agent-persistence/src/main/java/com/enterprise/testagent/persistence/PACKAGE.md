@@ -144,7 +144,7 @@
 - AppSource 测试必须覆盖 slot 乐观冲突、snapshot JSONB/整小时过期/十六进制摘要/状态 CAS、副本首次建档与 generation+owner+lease fencing、步骤作用域唯一/活租约更新/attempt reset/旧步骤回填与终态防回退、普通 operation stranded 恢复与 retry SERVER steps 终态门禁、同 operationId 并发单写和冻结目标、operation 历史守卫、cleanup 第一写的延迟外键和每用户 recent selection；PostgreSQL 专有约束、并发事务及 reset SQL 必须使用真实 PostgreSQL 验证。
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL、MyBatis 注解 SQL，并固化 PostgreSQL 专有 SQL 兼容约束。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
-- Flyway migration 命名测试必须覆盖版本唯一性和已落库历史文件仍可解析；V18 之后新增 migration 只能使用 `VyyyyMMddHHmmss__description.sql`。
+- Flyway migration 命名测试必须覆盖版本唯一性和已落库历史文件仍可解析；V18 之后新增 migration 只能使用 `VyyyyMMddHHmmss__table_name_description.sql`，涉及多张表时按 SQL 实际变更顺序取第一张表。
 - 内部模型代理鉴权列去机构标识时，历史 SQL migration 保持已落库 checksum，`db.migration.V20260716143000__rename_internal_model_auth_token_column` 负责兼容重命名既有数据库列。
 - `RedisRunRuntimeStoreIntegrationTest` 必须连接真实 Redis，覆盖 Lua 并发 seq/runtimeVersion、双 Stream、Hash/ZSET 物化、分页 tail、动态 key TTL、attention/active 索引、scope/dedup/pending 和容量截断；H2 或 mock 不能替代 Redis Streams/Lua 行为验证。
 - `RedisRunTerminalRetryStoreIntegrationTest` 覆盖同 slot Lua 原子写删契约，并在连接真实 Redis 时覆盖安全白名单、严格 due、generation 单调覆盖、旧重排拒绝、compare-delete 和 24 小时 TTL。

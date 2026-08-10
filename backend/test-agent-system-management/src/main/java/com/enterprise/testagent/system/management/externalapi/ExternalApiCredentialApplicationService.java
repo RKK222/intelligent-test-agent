@@ -32,6 +32,7 @@ public class ExternalApiCredentialApplicationService {
     private final Clock clock;
     private final Supplier<String> idSupplier;
 
+    // 存在多个构造器时必须显式标注生产构造器，否则 Spring 会回退查找无参构造器并启动失败。
     @Autowired
     public ExternalApiCredentialApplicationService(
             ExternalApiCredentialRepository repository,

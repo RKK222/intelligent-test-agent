@@ -1,7 +1,10 @@
 package com.enterprise.testagent.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunRepository;
@@ -57,6 +60,10 @@ class MyBatisRunRepositoryIntegrationTest {
         jdbcClient.sql("alter table runs add column scheduled_dispatch_attempt_id varchar(128)").update();
         jdbcClient.sql("alter table runs add column scheduled_dispatch_lease_until timestamp with time zone").update();
         jdbcClient.sql("alter table runs add column scheduled_dispatch_accepted_at timestamp with time zone").update();
+        jdbcClient.sql("alter table runs add column message_sender_user_id varchar(128)").update();
+        jdbcClient.sql("alter table runs add column message_sender_unified_auth_id varchar(128)").update();
+        jdbcClient.sql("alter table runs add column message_sent_by_shared_user boolean not null default false").update();
+        jdbcClient.sql("alter table runs add column active_session_id varchar(128)").update();
         seedWorkspaceSessionAndUser();
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
@@ -73,6 +80,7 @@ class MyBatisRunRepositoryIntegrationTest {
     void saveAndFindRoundTripsRunFields() {
         Run run = run("run_mybatis_roundtrip123456", RunStatus.RUNNING, NOW.plusSeconds(1))
                 .withSource(ConversationSourceType.MANUAL, null, USER_ID)
+                .withMessageSender(USER_ID, "u_run1234567890abcdef", true)
                 .withRuntimeSelection("OpenCode", "enterprise-openai/deepseek")
                 .withUsage(new TokenUsage(10L, 20L, 3L, 4L, 5L), new BigDecimal("0.25000000"));
 
@@ -86,6 +94,9 @@ class MyBatisRunRepositoryIntegrationTest {
             assertThat(saved.triggeredByUserId()).isEqualTo(USER_ID);
             assertThat(saved.agentId()).isEqualTo("opencode");
             assertThat(saved.modelId()).isEqualTo("enterprise-openai/deepseek");
+            assertThat(saved.messageSenderUserId()).isEqualTo(USER_ID);
+            assertThat(saved.messageSenderUnifiedAuthId()).isEqualTo("u_run1234567890abcdef");
+            assertThat(saved.messageSentBySharedUser()).isTrue();
         });
     }
 
@@ -172,6 +183,21 @@ class MyBatisRunRepositoryIntegrationTest {
 
         assertThat(repository.findStaleActiveSideQuestionRuns(NOW.plusSeconds(10), 10))
                 .containsExactly(stalePending, staleRunning);
+    }
+
+    @Test
+    void uniqueActiveSessionRejectsConcurrentRunAndTerminalStateReleasesSlot() {
+        jdbcClient.sql("create unique index uk_runs_active_session on runs(active_session_id)").update();
+        Run first = run("run_active_guard_first0001", RunStatus.RUNNING, NOW.plusSeconds(1));
+        Run second = run("run_active_guard_second001", RunStatus.PENDING, NOW.plusSeconds(2));
+        repository.save(first);
+
+        assertThatThrownBy(() -> repository.save(second))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.SESSION_BUSY));
+
+        repository.save(first.succeed(NOW.plusSeconds(3)));
+        assertThat(repository.save(second)).isEqualTo(second);
     }
 
     private Run run(String runId, RunStatus status, Instant updatedAt) {

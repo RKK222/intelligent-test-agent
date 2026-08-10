@@ -12,6 +12,7 @@ import com.enterprise.testagent.agent.runtime.AgentReplayableTurn;
 import com.enterprise.testagent.agent.runtime.AgentRuntime;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
@@ -34,11 +35,13 @@ import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionStatus;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.event.RunEventAppender;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -52,7 +55,10 @@ class RunResendApplicationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-08-07T10:00:00Z");
     private static final UserId OWNER = new UserId("usr_resend_owner");
+    private static final UserId SHARED_SENDER = new UserId("usr_resend_shared_sender");
     private static final SessionId SESSION_ID = new SessionId("ses_resend_service");
+    private static final WorkspaceId WORKSPACE_ID = new WorkspaceId("wrk_resend_service");
+    private static final SessionShareId SHARE_ID = new SessionShareId("shr_" + "c".repeat(64));
     private static final RunId SOURCE_RUN_ID = new RunId("run_resend_service_source");
     private static final String SOURCE_MESSAGE_ID = "msg_resend_service_source";
 
@@ -164,11 +170,60 @@ class RunResendApplicationServiceTest {
         assertThat(result.automaticAttempt()).isEqualTo(2);
     }
 
+    @Test
+    void sharedSenderCanResendOwnLastMessageAndReplacementKeepsSourceAttribution() {
+        when(runRepository.findById(SOURCE_RUN_ID)).thenReturn(Optional.of(
+                sourceRun().withMessageSender(SHARED_SENDER, "ucid_resend_shared", true)));
+
+        RunResend result = service.createManual(
+                sharedContext(SHARED_SENDER, true),
+                "opencode",
+                SESSION_ID,
+                new CreateRunResendCommand(
+                        SOURCE_MESSAGE_ID,
+                        SOURCE_RUN_ID,
+                        "context_token_shared",
+                        "request_resend_shared"),
+                "trace_resend_shared");
+
+        assertThat(result.requesterUserId()).isEqualTo(SHARED_SENDER);
+        assertThat(result.requesterUnifiedAuthId()).isEqualTo("ucid_resend_shared");
+        assertThat(result.requestedBySharedUser()).isTrue();
+        verify(runRepository).save(org.mockito.ArgumentMatchers.argThat(run ->
+                run.runId().equals(result.replacementRunId())
+                        && SHARED_SENDER.equals(run.messageSenderUserId())
+                        && "ucid_resend_shared".equals(run.messageSenderUnifiedAuthId())
+                        && run.messageSentBySharedUser()));
+    }
+
+    @Test
+    void sharedResendRequiresCurrentChatPermissionAndOriginalSender() {
+        CreateRunResendCommand command = new CreateRunResendCommand(
+                SOURCE_MESSAGE_ID,
+                SOURCE_RUN_ID,
+                "context_token_shared",
+                "request_resend_shared_denied");
+        when(runRepository.findById(SOURCE_RUN_ID)).thenReturn(Optional.of(
+                sourceRun().withMessageSender(SHARED_SENDER, "ucid_resend_shared", true)));
+
+        assertThatThrownBy(() -> service.createManual(
+                        sharedContext(SHARED_SENDER, false), "opencode", SESSION_ID, command,
+                        "trace_resend_shared_readonly"))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        assertThatThrownBy(() -> service.createManual(
+                        sharedContext(new UserId("usr_resend_other_member"), true),
+                        "opencode", SESSION_ID, command, "trace_resend_shared_other"))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
     private Run sourceRun() {
         return new Run(
                 SOURCE_RUN_ID,
                 SESSION_ID,
-                new WorkspaceId("wrk_resend_service"),
+                WORKSPACE_ID,
                 RunStatus.FAILED,
                 NOW.minusSeconds(60),
                 NOW.minusSeconds(1),
@@ -178,12 +233,11 @@ class RunResendApplicationServiceTest {
     }
 
     private ConversationRunContext context() {
-        WorkspaceId workspaceId = new WorkspaceId("wrk_resend_service");
         Workspace workspace = new Workspace(
-                workspaceId, "resend", "/tmp/resend", WorkspaceStatus.ACTIVE,
+                WORKSPACE_ID, "resend", "/tmp/resend", WorkspaceStatus.ACTIVE,
                 NOW.minusSeconds(120), NOW, "linux-resend-1", "trace_workspace");
         Session session = new Session(
-                SESSION_ID, workspaceId, "resend", SessionStatus.ACTIVE, NOW.minusSeconds(120), NOW,
+                SESSION_ID, WORKSPACE_ID, "resend", SessionStatus.ACTIVE, NOW.minusSeconds(120), NOW,
                 "trace_session", "ses_remote_resend", new ExecutionNodeId("node_process-resend"), false)
                 .withSource(ConversationSourceType.SCHEDULED_TASK, "net_resend_source", OWNER);
         ExecutionNode node = new ExecutionNode(
@@ -198,5 +252,21 @@ class RunResendApplicationServiceTest {
         return new ConversationRunContext(
                 OWNER, "opencode", "process-resend", "linux-resend-1",
                 session, workspace, node, binding, 1, NOW.plusSeconds(300));
+    }
+
+    private DelegatedOperationContext sharedContext(UserId actor, boolean canChat) {
+        return new DelegatedOperationContext(
+                SHARE_ID,
+                5L,
+                actor,
+                actor.equals(SHARED_SENDER) ? "ucid_resend_shared" : "ucid_resend_other",
+                actor.equals(SHARED_SENDER) ? "消息发送人" : "其他成员",
+                OWNER,
+                SESSION_ID,
+                WORKSPACE_ID,
+                canChat,
+                true,
+                false,
+                NOW.plusSeconds(3_600));
     }
 }

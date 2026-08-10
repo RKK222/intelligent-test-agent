@@ -49,6 +49,8 @@ class MyBatisRunDetailsLocatorIntegrationTest {
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
                 .target("20260715213000").load().migrate();
         jdbcClient = JdbcClient.create(dataSource);
+        // 本测试固定旧 Flyway 基线；补齐当前终态投影会释放的活动会话占用列。
+        jdbcClient.sql("alter table runs add column active_session_id varchar(128)").update();
         jdbcClient.sql("""
                         insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)
                         values('wrk_run_locator', 'locator', '/tmp/locator', 'ACTIVE', 'trace_locator', :now, :now)

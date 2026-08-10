@@ -3,6 +3,7 @@ package com.enterprise.testagent.domain.nightexecution;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
@@ -39,7 +40,14 @@ public record NightExecutionTask(
         String errorMessage,
         String traceId,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        UserId creatorUserId,
+        String creatorUnifiedAuthId,
+        boolean createdBySharedUser,
+        SessionShareId shareIdSnapshot,
+        Long shareVersionSnapshot,
+        Instant shareExpiresAtSnapshot,
+        Boolean canChatSnapshot) {
 
     public NightExecutionTask {
         Objects.requireNonNull(taskId); Objects.requireNonNull(ownerUserId); Objects.requireNonNull(sessionId);
@@ -58,12 +66,59 @@ public record NightExecutionTask(
         targetLinuxServerId = required(targetLinuxServerId, "targetLinuxServerId");
         dispatchAttemptId = optional(dispatchAttemptId);
         dispatchOwnerBackendProcessId = optional(dispatchOwnerBackendProcessId);
+        creatorUserId = creatorUserId == null ? ownerUserId : creatorUserId;
+        creatorUnifiedAuthId = optional(creatorUnifiedAuthId);
         traceId = required(traceId, "traceId");
+        if (createdBySharedUser && (creatorUnifiedAuthId == null || shareIdSnapshot == null
+                || shareVersionSnapshot == null || shareExpiresAtSnapshot == null
+                || !Boolean.TRUE.equals(canChatSnapshot))) {
+            throw new IllegalArgumentException("shared task requires complete authorization snapshot");
+        }
         if (status == NightExecutionTaskStatus.DISPATCHING
                 && (dispatchStartedAt == null || dispatchAttemptId == null
                 || dispatchOwnerBackendProcessId == null || dispatchLeaseUntil == null)) {
             throw new IllegalArgumentException("dispatching task requires attempt owner and lease");
         }
+    }
+
+    /** 兼容增加代操作归因字段前的完整构造器；普通任务的创建人默认等于执行所属人。 */
+    public NightExecutionTask(
+            NightExecutionTaskId taskId,
+            UserId ownerUserId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            String clientRequestId,
+            String sessionTitle,
+            String contentPreview,
+            String runInputJson,
+            NightExecutionScheduleMode scheduleMode,
+            NightExecutionTaskStatus status,
+            Instant slotStart,
+            Instant slotEnd,
+            Instant windowEnd,
+            String targetLinuxServerId,
+            ScheduledTaskRunId scheduledTaskRunId,
+            RunId runId,
+            int rolloverCount,
+            boolean taskCreatedSession,
+            Instant dispatchStartedAt,
+            String dispatchAttemptId,
+            String dispatchOwnerBackendProcessId,
+            Instant dispatchLeaseUntil,
+            long stateVersion,
+            Instant dismissedAt,
+            Instant reservationReleasedAt,
+            String errorCode,
+            String errorMessage,
+            String traceId,
+            Instant createdAt,
+            Instant updatedAt) {
+        this(taskId, ownerUserId, sessionId, workspaceId, clientRequestId, sessionTitle, contentPreview,
+                runInputJson, scheduleMode, status, slotStart, slotEnd, windowEnd, targetLinuxServerId,
+                scheduledTaskRunId, runId, rolloverCount, taskCreatedSession, dispatchStartedAt,
+                dispatchAttemptId, dispatchOwnerBackendProcessId, dispatchLeaseUntil, stateVersion,
+                dismissedAt, reservationReleasedAt, errorCode, errorMessage, traceId, createdAt, updatedAt,
+                ownerUserId, null, false, null, null, null, null);
     }
 
     /** 兼容迁移前调用方；新增的投递租约字段使用空值，状态版本从零开始。 */
@@ -99,6 +154,24 @@ public record NightExecutionTask(
                 scheduledTaskRunId, runId, rolloverCount, taskCreatedSession, dispatchStartedAt,
                 null, null, null, 0L, dismissedAt, reservationReleasedAt, errorCode, errorMessage,
                 traceId, createdAt, updatedAt);
+    }
+
+    /** 保存任务创建时的分享授权快照；后续调度不再依赖分享是否仍有效。 */
+    public NightExecutionTask withCreatorSnapshot(
+            UserId creator,
+            String unifiedAuthId,
+            boolean shared,
+            SessionShareId shareId,
+            Long shareVersion,
+            Instant shareExpiresAt,
+            Boolean canChat) {
+        return new NightExecutionTask(
+                taskId, ownerUserId, sessionId, workspaceId, clientRequestId, sessionTitle, contentPreview,
+                runInputJson, scheduleMode, status, slotStart, slotEnd, windowEnd, targetLinuxServerId,
+                scheduledTaskRunId, runId, rolloverCount, taskCreatedSession, dispatchStartedAt,
+                dispatchAttemptId, dispatchOwnerBackendProcessId, dispatchLeaseUntil, stateVersion,
+                dismissedAt, reservationReleasedAt, errorCode, errorMessage, traceId, createdAt, updatedAt,
+                creator, unifiedAuthId, shared, shareId, shareVersion, shareExpiresAt, canChat);
     }
 
     /** 构造持久投递认领；真正并发裁决由仓储按状态、版本和目标服务器执行 CAS。 */
@@ -228,7 +301,9 @@ public record NightExecutionTask(
                 nextScheduledRunId, nextRunId, nextRolloverCount, taskCreatedSession, nextDispatchStartedAt,
                 nextDispatchAttemptId, nextDispatchOwnerBackendProcessId, nextDispatchLeaseUntil,
                 nextStateVersion, nextDismissedAt, nextReservationReleasedAt, nextErrorCode,
-                nextErrorMessage, traceId, createdAt, now);
+                nextErrorMessage, traceId, createdAt, now,
+                creatorUserId, creatorUnifiedAuthId, createdBySharedUser, shareIdSnapshot,
+                shareVersionSnapshot, shareExpiresAtSnapshot, canChatSnapshot);
     }
 
     /** 测试定时不占用夜间容量，因此不能记录一个并未发生的容量释放动作。 */

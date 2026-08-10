@@ -1133,6 +1133,28 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("keeps actual sender username on restored shared user messages", () => {
+    const mapped = messagesFromSessionMessages([{
+      messageId: "msg_shared_sender",
+      sessionId: "ses_shared_sender",
+      role: "USER",
+      content: "协作消息",
+      senderUserId: "usr_shared_sender",
+      senderUsername: "协作者",
+      senderUnifiedAuthId: "A0001",
+      sentBySharedUser: true,
+      createdAt: "2026-08-09T08:00:00Z"
+    }]);
+
+    expect(mapped[0]).toMatchObject({
+      role: "user",
+      senderUserId: "usr_shared_sender",
+      senderUsername: "协作者",
+      senderUnifiedAuthId: "A0001",
+      sentBySharedUser: true
+    });
+  });
+
   it("deduplicates persisted history rows before rendering", () => {
     const messages: SessionMessage[] = [
       {

@@ -1,6 +1,7 @@
 # test-agent-persistence
 
-- `V20260809110000__create_external_api_credentials.sql` 创建外部工具凭据与 scope 表，不写默认工具数据；`ExternalApiCredentialMapper.xml` / `MyBatisExternalApiCredentialRepository` 承载分页、整表加载、CRUD 和 scope 原子替换，数据库仅保存 RSA 密文、指纹和掩码提示。已执行 QA Memory 同号历史的个人库由 `DatabaseMigrationCompatibilityCustomizer` 加载原始字节兼容目录，并改走更高版本的外部 API 前向 migration。
+- `V20260809110000__create_external_api_credentials.sql` 创建外部工具凭据与 scope 表，不写默认工具数据；`ExternalApiCredentialMapper.xml` / `MyBatisExternalApiCredentialRepository` 承载分页、整表加载、CRUD 和 scope 原子替换，数据库仅保存 RSA 密文、指纹和掩码提示。已执行 QA Memory 历史的个人库由 `DatabaseMigrationCompatibilityCustomizer` 加载原始字节兼容目录，并改走更高版本的外部 API 前向 migration。
+- `V20260809170000__session_shares_create_collaboration_share.sql` 与 `V20260809170001__session_messages_add_delegated_attribution.sql` 创建会话协作分享、成员、审计结构和代操作消息归属字段；已执行 `V20260809230000`/`V20260810090000` QA Memory 扩展历史的个人库不倒序执行这两版，而由 `db/migration-compat/qa-memory-extended` 保留已执行 SQL 原始字节并通过 `V20260810110001`/`V20260810110002` 的同字节前向副本补齐结构。
 
 - 用户管理组合分页查询和“全部检索结果”有界 ID 解析由 `UserManagementQueryMapper.xml` / `MyBatisUserManagementQueryRepository` 实现，支持用户关键字、角色（含未分配角色）、组织、研发部门和部门筛选，并可在 SQL 中排除当前操作者；未修改 users/user_roles 表结构，也没有新增 Flyway migration。
 
@@ -32,6 +33,9 @@
 
 ## 主要职责
 
+- `MyBatisSessionShareRepository` / `SessionShareMapper.xml` 持久化每个 Session 唯一且永久复用的 256 位随机分享 ID、全量成员更新与软移除历史、乐观锁版本、“分享给我”失效历史、最小用户目录和 365 天安全审计。审计只保存 actor、执行所属人、share/session/workspace/resource、结果、traceId 与可选路径 SHA-256，不保存消息/文件正文、明文路径、Token 或终端输入。
+- `MyBatisSessionMessageRepository` / `SessionMessageMapper.xml` 保存消息实际发送人、统一认证号和代操作标记，并复用既有 `(session_id, run_id, created_at, id)` 索引按精确 `sessionId + runId + USER` 读取运行输入；Run、夜间任务和重发 MyBatis mapper 同步保存实际 actor 归因。普通历史与普通 runtime-state SQL 显式排除分享发送者兜底，防止一次代发永久获得普通会话访问权。
+- `runs.active_session_id` 只在 `PENDING/RUNNING/CANCELLING` 期间占用，并以唯一索引作为跨节点并发发送最终裁决；终态写入必须原子清空。Redis `RunRuntimeStore` 同时提供原子 active-session 占用与 fencing，数据库和 Redis 任一准入失败都不得进入远端副作用。
 - Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、外部 API 凭据、opencode 用户进程管理拓扑、AI 回复反馈、运营分析 rollup、应用配置管理、应用版本工作区、个人工作区和定时任务框架等持久化；运行态 Workspace 记录可空 `linux_server_id` 以支持文件 WebSocket 同服务器校验和 legacy 回填。
 - `RunMapper.xml` 提供精确 `SIDE_QUESTION + active + updated_at < cutoff` 孤儿查询；Session history 与用户 runtime-state 查询显式排除内部 `SIDE_QUESTION` Session，即使异常数据误为 ACTIVE 也不可见。
 - `InactiveOpencodeProcessMapper.xml` 按 ACTIVE binding 和本机 Linux 服务器查询 `RUNNING/UNHEALTHY` 用户进程，以该用户全部来源 Run 的最大 `updated_at` 聚合最近 OpenCode 活动；无 Run 时回退 manager 权威 `started_at`。SQL 先收窄相关进程，再分别利用 `runs.triggered_by_user_id` 和 `sessions.created_by_user_id` 现有索引聚合直接归属与 legacy Run，避免按每个候选重复全表扫描；同时通过 `night_execution_tasks(owner_user_id,status,slot_start)` 现有索引排除执行窗口尚未结束的跨夜遗留任务和北京时间当天 `SCHEDULED/DISPATCHING` 任务。候选和闸门内精确复核都走该 MyBatis XML，不向存量进程 JDBC Repository 新增 SQL，也不新增数据库结构。
@@ -182,7 +186,7 @@
 - `MyBatisReferenceRepositoryRepositoryIntegrationTest` 使用真实 Flyway + MyBatis 覆盖两表、并发初始化/推进 generation 单胜者、同服务器租约互斥与续租、过期 token/generation 写回拒绝、离线 `DEFERRED`/恢复和状态游标分页；`MyBatisReferenceRepositoryPostgresqlIntegrationTest` 覆盖 PostgreSQL 方言下的副本 upsert、认领和总体状态写回。
 - `MyBatisAppSourceRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式覆盖 XML mapper 的 slot 乐观冲突、结构化路径往返、snapshot 状态/摘要 CAS、副本首次建档与租约 fencing、旧/新步骤领取和 attempt reset/upsert、全终态步骤 operation 绑定、stranded 扫描、恢复索引、recent/cleanup；`MyBatisAppSourcePostgresqlIntegrationTest` 原样执行完整 PostgreSQL Flyway 链和真实 reset/backfill SQL，验证 JSONB、整小时过期/十六进制摘要约束、步骤终态保护、global/server 部分唯一索引、在途索引和业务事务 cleanup 第一写的延迟外键。
 - AppSource mapper 认领测试额外覆盖 exact operation 绑定、非终态步骤门禁、过期 `RUNNING` attempt 接管，以及 PostgreSQL 并发屏障下“worker 读 operation 后暂停、另一事务先终态化步骤再终态化 operation、迟到 claim 被拒绝且副本不变”。
-- SessionMessage/Run 覆盖 V16 token/cost 字段读写、parts_json 兼容、按 `(sessionId, remoteMessageId)` 查询以及最近非终态 Run 查询。
+- SessionMessage/Run 覆盖 V16 token/cost 字段读写、parts_json 兼容、按 `(sessionId, remoteMessageId)` 与 `(sessionId, runId, USER)` 精确查询，以及最近非终态 Run 查询。
 - RunEvent 覆盖 append-only seq 单调递增、并发追加唯一性、`runId + lastSeq` 增量读取、结构化 scope 列和 `(run_id, seq)` 唯一约束。
 - Session 覆盖远端 opencode 映射、全局搜索、置顶排序、工作区会话分页和归档过滤。
 - AgentSessionBinding 覆盖 upsert、按 agent 查询、远端 session 唯一约束和从旧 opencode 字段回填。
@@ -217,7 +221,7 @@
 
 ## 后续 AI 编码指引
 
-新增表结构、Repository、数据库映射和 migration 时改这里。V18 之后新增 migration 文件名必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支可先使用创建时的本地时间区分候选，不再使用顺序数字版本。当前没有共享开发数据库、中央编号服务或自动合并门禁，每个开发者使用需要保留的个人本地数据库；因此多人或多分支只能在合并时由集成人收集全部待合并 migration 和相关个人本地库/目标库 `flyway_schema_history`，统一设计最终主链及已执行分叉的兼容路径。只有从未在任何需要保留的数据库执行的候选 migration 才能重命名或重排；已在个人本地持久库或其它需要保留的数据库执行的文件必须保持版本和字节不变。冲突历史复用现有 Flyway 兼容装配、隔离 location 和更高版本前向 migration，并用真实 PostgreSQL 覆盖每套历史；只有数据库所有者明确同意废弃并重建个人库后，才可不保留其历史。禁止用 `outOfOrder`、`repair` 或手改历史表绕过。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
+新增表结构、Repository、数据库映射和 migration 时改这里。V18 之后新增 migration 文件名必须使用 `VyyyyMMddHHmmss__table_name_description.sql`：版本取创建时的本地时间戳，双下划线后先写实际表名，再写简短的 snake_case 描述；涉及多张表时，按 SQL 实际变更顺序取第一张表，不得继续使用顺序数字版本。当前没有共享开发数据库、中央编号服务或自动合并门禁，每个开发者使用需要保留的个人本地数据库；因此多人或多分支只能在合并时由集成人收集全部待合并 migration 和相关个人本地库、稳定库及企业目标库 `flyway_schema_history`，统一设计最终主链及已执行分叉的兼容路径。只有从未在任何需要保留的数据库执行的候选 migration 才能重命名或重排，最终版本必须严格递增且全部高于已部署基线；已在个人本地持久库、共享库、稳定库或企业库执行的文件即使不符合新规则，也必须保持版本、文件名和字节不变。冲突历史复用现有 Flyway 兼容装配、隔离 location 和更高版本前向 migration，并用真实 PostgreSQL 覆盖每套历史；只有数据库所有者明确同意废弃并重建个人库后，才可不保留其历史。禁止用 `outOfOrder`、`repair` 或手改历史表绕过。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
 Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止新增写入测试、演示、个人开发或环境专属数据的 seed migration。测试数据应放在 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本中。
 新增或修改关系型 SQL 必须新增/调整 `mybatis/*.xml` 与 `com.enterprise.testagent.persistence.mybatis` 内部 mapper，不能继续扩展 `Jdbc*Repository` 或使用 MyBatis 注解 SQL；存量 JDBC 仓储后续按触点分批迁移。
 JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。

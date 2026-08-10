@@ -3,6 +3,7 @@ package com.enterprise.testagent.opencode.runtime.terminal;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.nio.file.Path;
@@ -25,7 +26,12 @@ public record TerminalTicket(
         int cols,
         int rows,
         String traceId,
-        Instant expiresAt) {
+        Instant expiresAt,
+        SessionShareId shareId,
+        Long shareVersion,
+        UserId shareActorUserId,
+        UserId executionOwnerUserId,
+        Instant shareExpiresAt) {
 
     public static final String TARGET_WORKSPACE = "workspace";
     public static final String TARGET_SERVER_SHELL = "server-shell";
@@ -44,12 +50,38 @@ public record TerminalTicket(
             String traceId,
             Instant expiresAt) {
         this(ticket, TARGET_WORKSPACE, sessionId, workspaceId, executionNodeId, null, null,
-                workspaceRoot, cwd, shell, cols, rows, traceId, expiresAt);
+                workspaceRoot, cwd, shell, cols, rows, traceId, expiresAt,
+                null, null, null, null, null);
+    }
+
+    /** 兼容加入分享范围字段前的完整 ticket 构造器。 */
+    public TerminalTicket(
+            String ticket,
+            String targetType,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            ExecutionNodeId executionNodeId,
+            LinuxServerId linuxServerId,
+            UserId userId,
+            Path workspaceRoot,
+            Path cwd,
+            String shell,
+            int cols,
+            int rows,
+            String traceId,
+            Instant expiresAt) {
+        this(ticket, targetType, sessionId, workspaceId, executionNodeId, linuxServerId, userId,
+                workspaceRoot, cwd, shell, cols, rows, traceId, expiresAt,
+                null, null, null, null, null);
     }
 
     /** 判断是否为部署服务器终端。 */
     public boolean serverShell() {
         return TARGET_SERVER_SHELL.equals(targetType);
+    }
+
+    public boolean sharedSession() {
+        return shareId != null;
     }
 
     /** 生成 JVM 内 active 租约键，隔离 workspace session 与部署服务器终端。 */

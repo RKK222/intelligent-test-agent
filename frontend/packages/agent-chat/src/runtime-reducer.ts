@@ -1034,6 +1034,14 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
         parts: existing?.role === "user" ? existing.parts : undefined,
         sourceType: existing?.role === "user" ? existing.sourceType : undefined,
         sourceRefId: existing?.role === "user" ? existing.sourceRefId : undefined,
+        senderUserId: text(raw.senderUserId) ?? text(payload.senderUserId)
+          ?? (existing?.role === "user" ? existing.senderUserId : undefined),
+        senderUsername: text(raw.senderUsername) ?? text(payload.senderUsername)
+          ?? (existing?.role === "user" ? existing.senderUsername : undefined),
+        senderUnifiedAuthId: text(raw.senderUnifiedAuthId) ?? text(payload.senderUnifiedAuthId)
+          ?? (existing?.role === "user" ? existing.senderUnifiedAuthId : undefined),
+        sentBySharedUser: booleanValue(raw.sentBySharedUser) ?? booleanValue(payload.sentBySharedUser)
+          ?? (existing?.role === "user" ? existing.sentBySharedUser : undefined),
         resend: existing?.role === "user" ? existing.resend : undefined
       }
     : {

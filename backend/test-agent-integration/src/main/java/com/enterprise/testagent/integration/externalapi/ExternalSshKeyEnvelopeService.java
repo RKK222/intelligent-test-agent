@@ -28,6 +28,7 @@ public class ExternalSshKeyEnvelopeService {
     private final SecureRandom secureRandom;
     private final Clock clock;
 
+    // 存在多个构造器时必须显式标注生产构造器，否则 Spring 会回退查找无参构造器并启动失败。
     @Autowired
     public ExternalSshKeyEnvelopeService(ObjectMapper objectMapper) {
         this(objectMapper, new SecureRandom(), Clock.systemUTC());

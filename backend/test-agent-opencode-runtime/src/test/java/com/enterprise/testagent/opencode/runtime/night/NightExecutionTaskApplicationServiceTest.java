@@ -26,6 +26,7 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -36,6 +37,7 @@ import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolve
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.run.StartRunInput;
 import com.enterprise.testagent.opencode.runtime.session.BatchContext;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -53,8 +55,10 @@ class NightExecutionTaskApplicationServiceTest {
     private static final Instant SLOT = Instant.parse("2026-07-18T13:00:00Z");
     private static final Instant CUSTOM_SLOT = Instant.parse("2026-07-18T12:01:00Z");
     private static final UserId USER = new UserId("usr_night_service");
+    private static final UserId SHARED_USER = new UserId("usr_night_shared");
     private static final WorkspaceId WORKSPACE_ID = new WorkspaceId("wrk_night_service");
     private static final SessionId SESSION_ID = new SessionId("ses_night_service");
+    private static final SessionShareId SHARE_ID = new SessionShareId("shr_" + "a".repeat(64));
 
     private NightExecutionTaskRepository taskRepository;
     private SessionRepository sessionRepository;
@@ -340,6 +344,75 @@ class NightExecutionTaskApplicationServiceTest {
         verify(taskRepository).deleteSessionLock(created.sessionId(), created.taskId());
     }
 
+    @Test
+    void delegatedCreatorUsesOwnerExecutionAndKeepsSnapshotAfterDowngrade() {
+        DelegatedOperationContext writable = sharedContext(true);
+
+        NightExecutionTask created = service.create(
+                writable,
+                false,
+                new NightExecutionCreateCommand(
+                        "request-night-service", SESSION_ID, WORKSPACE_ID, "分享定时任务",
+                        new NightExecutionRunInputSnapshot(
+                                "生成分享回归测试", List.of(StartRunInput.PromptPart.text("生成分享回归测试")),
+                                "msg-night-shared", "build", null, null, "build",
+                                null, null, "run-request-night-shared"),
+                        SLOT),
+                "trace_night_shared");
+
+        assertThat(created.ownerUserId()).isEqualTo(USER);
+        assertThat(created.creatorUserId()).isEqualTo(SHARED_USER);
+        assertThat(created.creatorUnifiedAuthId()).isEqualTo("ucid_night_shared");
+        assertThat(created.createdBySharedUser()).isTrue();
+        assertThat(created.shareIdSnapshot()).isEqualTo(SHARE_ID);
+        assertThat(created.shareVersionSnapshot()).isEqualTo(3L);
+        assertThat(created.canChatSnapshot()).isTrue();
+        verify(accessAuthorizer).requireAccess(USER, WORKSPACE_ID);
+
+        clearInvocations(taskRepository);
+        when(taskRepository.findById(created.taskId())).thenReturn(Optional.of(created));
+        when(taskRepository.updateIfStatus(any(), eq(NightExecutionTaskStatus.SCHEDULED))).thenReturn(true);
+
+        NightExecutionTask cancelled = service.cancel(
+                sharedContext(false), created.taskId(), "trace_night_shared_cancel");
+
+        assertThat(cancelled.status()).isEqualTo(NightExecutionTaskStatus.CANCELLED);
+        verify(taskRepository).deleteSessionLock(created.sessionId(), created.taskId());
+    }
+
+    @Test
+    void delegatedSuperAdminCannotExceedOwnerPermissionUpperBound() {
+        assertThatThrownBy(() -> service.create(
+                        sharedContext(true), true, customCommand(CUSTOM_SLOT), "trace_night_shared_admin"))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(taskRepository, never()).lockCreateRequest(USER, "request-night-custom");
+    }
+
+    @Test
+    void readOnlyCreatorCanCancelButCannotReschedule() {
+        NightExecutionTask task = existingNightTask().withCreatorSnapshot(
+                SHARED_USER,
+                "ucid_night_shared",
+                true,
+                SHARE_ID,
+                3L,
+                NOW.plusSeconds(3_600),
+                true);
+        when(taskRepository.findById(task.taskId())).thenReturn(Optional.of(task));
+
+        assertThatThrownBy(() -> service.adjust(
+                        sharedContext(false), false, task.taskId(), SLOT.plusSeconds(900),
+                        "trace_night_shared_adjust"))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        when(taskRepository.updateIfStatus(any(), eq(NightExecutionTaskStatus.SCHEDULED))).thenReturn(true);
+        assertThat(service.cancel(sharedContext(false), task.taskId(), "trace_night_shared_cancel").status())
+                .isEqualTo(NightExecutionTaskStatus.CANCELLED);
+    }
+
     private NightExecutionCreateCommand customCommand(Instant slotStart) {
         return new NightExecutionCreateCommand(
                 "request-night-custom", SESSION_ID, WORKSPACE_ID, "测试定时",
@@ -380,5 +453,21 @@ class NightExecutionTaskApplicationServiceTest {
         return new Workspace(
                 WORKSPACE_ID, "night", "/tmp/night", WorkspaceStatus.ACTIVE, NOW, NOW,
                 "linux-night-a", "trace_night_service");
+    }
+
+    private DelegatedOperationContext sharedContext(boolean canChat) {
+        return new DelegatedOperationContext(
+                SHARE_ID,
+                3L,
+                SHARED_USER,
+                "ucid_night_shared",
+                "分享成员",
+                USER,
+                SESSION_ID,
+                WORKSPACE_ID,
+                canChat,
+                true,
+                false,
+                NOW.plusSeconds(3_600));
     }
 }

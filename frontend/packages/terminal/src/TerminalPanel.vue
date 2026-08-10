@@ -15,7 +15,7 @@ export type TerminalPanelProps = {
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -144,6 +144,12 @@ function close() {
   sessionRef.value?.close("user");
   snapshot.value = sessionRef.value?.snapshot() ?? { ...initialSnapshot, status: "closed" };
 }
+
+watch(() => props.disabled, (disabled) => {
+  if (!disabled || !sessionRef.value) return;
+  sessionRef.value.close("permission-changed");
+  snapshot.value = sessionRef.value.snapshot();
+});
 </script>
 
 <template>

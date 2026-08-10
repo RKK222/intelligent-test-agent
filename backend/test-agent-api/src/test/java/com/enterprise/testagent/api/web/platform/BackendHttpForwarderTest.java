@@ -64,6 +64,7 @@ class BackendHttpForwarderTest {
                 .header(TraceConstants.TRACE_ID_HEADER, "trace_1234567890abcdef")
                 .header(org.springframework.http.HttpHeaders.AUTHORIZATION, "Bearer user-token")
                 .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .header(SessionShareController.SHARE_HEADER, "shr_" + "a".repeat(64))
                 .body("{\"workspaceName\":\"Demo\"}"));
 
         forwarder.forwardRaw(exchange, backend("10.8.0.22", "http://10.8.0.22:18080"))
@@ -74,6 +75,8 @@ class BackendHttpForwarderTest {
                     "http://10.8.0.22:18080/api/internal/platform/configuration-management/applications/app_1/workspaces?force=true");
             assertThat(request.headers().firstValue(TraceConstants.TRACE_ID_HEADER)).contains("trace_1234567890abcdef");
             assertThat(request.headers().firstValue(org.springframework.http.HttpHeaders.AUTHORIZATION)).contains("Bearer user-token");
+            assertThat(request.headers().firstValue(SessionShareController.SHARE_HEADER))
+                    .contains("shr_" + "a".repeat(64));
             assertThat(request.headers().firstValue(BackendHttpForwarder.ROUTED_HEADER)).contains("true");
         });
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatusCode.valueOf(200));

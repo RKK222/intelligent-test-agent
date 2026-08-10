@@ -28,6 +28,7 @@ public class ExternalApiCredentialUpdateBroadcaster implements ServerBroadcastHa
     private final ExternalApiCredentialRegistry registry;
     private final Clock clock;
 
+    // 存在多个构造器时必须显式标注生产构造器，否则 Spring 会回退查找无参构造器并启动失败。
     @Autowired
     public ExternalApiCredentialUpdateBroadcaster(
             ServerBroadcastPublisher broadcastPublisher,

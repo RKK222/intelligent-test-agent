@@ -7,15 +7,21 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.workspace.ManagedWorkspaceApplicationService;
 import com.enterprise.testagent.workspace.ManagedWorkspaceGitPathPolicy;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,12 +40,22 @@ public class ManagedWorkspaceController {
 
     private final ManagedWorkspaceApplicationService service;
     private final UserOpencodeProcessAssignmentService processAssignmentService;
+    private final SessionCollaborationShareService shareService;
 
     public ManagedWorkspaceController(
             ManagedWorkspaceApplicationService service,
             UserOpencodeProcessAssignmentService processAssignmentService) {
+        this(service, processAssignmentService, null);
+    }
+
+    @Autowired
+    public ManagedWorkspaceController(
+            ManagedWorkspaceApplicationService service,
+            UserOpencodeProcessAssignmentService processAssignmentService,
+            SessionCollaborationShareService shareService) {
         this.service = service;
         this.processAssignmentService = processAssignmentService;
+        this.shareService = shareService;
     }
 
     @GetMapping("/applications")
@@ -254,7 +270,9 @@ public class ManagedWorkspaceController {
     public ApiResponse<Object> getWorkspaceGitDiff(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {
-        return ok(exchange, service.getWorkspaceGitDiff(workspaceId, userId(exchange)));
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, false, "WORKSPACE_GIT_DIFF_READ",
+                (executionUser, context) -> service.getWorkspaceGitDiff(workspaceId, executionUser)));
     }
 
     @PostMapping("/workspaces/{workspaceId}/git-discard")
@@ -262,13 +280,14 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
-        service.discardWorkspaceGitFiles(
-                workspaceId,
-                request.files(),
-                principal.userId(),
-                RuntimeApiSupport.traceId(exchange));
-        return ok(exchange, null);
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, true, "WORKSPACE_GIT_DISCARD",
+                (executionUser, context) -> {
+                    requireWorkspaceGitPathPermission(exchange, context, request.files());
+                    service.discardWorkspaceGitFiles(
+                            workspaceId, request.files(), executionUser, RuntimeApiSupport.traceId(exchange));
+                    return null;
+                }));
     }
 
     @PostMapping("/workspaces/{workspaceId}/git-stage")
@@ -276,9 +295,13 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
-        service.stageWorkspaceGitFiles(workspaceId, request.files(), principal.userId());
-        return ok(exchange, null);
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, true, "WORKSPACE_GIT_STAGE",
+                (executionUser, context) -> {
+                    requireWorkspaceGitPathPermission(exchange, context, request.files());
+                    service.stageWorkspaceGitFiles(workspaceId, request.files(), executionUser);
+                    return null;
+                }));
     }
 
     @PostMapping("/workspaces/{workspaceId}/git-unstage")
@@ -286,9 +309,13 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, request.files());
-        service.unstageWorkspaceGitFiles(workspaceId, request.files(), principal.userId());
-        return ok(exchange, null);
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, true, "WORKSPACE_GIT_UNSTAGE",
+                (executionUser, context) -> {
+                    requireWorkspaceGitPathPermission(exchange, context, request.files());
+                    service.unstageWorkspaceGitFiles(workspaceId, request.files(), executionUser);
+                    return null;
+                }));
     }
 
     @GetMapping("/workspaces/{workspaceId}/git-conflict")
@@ -296,7 +323,9 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestParam String path,
             ServerWebExchange exchange) {
-        return ok(exchange, service.getWorkspaceGitConflict(workspaceId, path, userId(exchange)));
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, false, "WORKSPACE_GIT_CONFLICT_READ",
+                (executionUser, context) -> service.getWorkspaceGitConflict(workspaceId, path, executionUser)));
     }
 
     @PostMapping("/workspaces/{workspaceId}/git-conflict/resolve")
@@ -304,23 +333,27 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.ResolveWorkspaceGitConflictRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = requirePersonalWorkspacePathPermission(exchange, List.of(request.path()));
-        service.resolveWorkspaceGitConflict(
-                workspaceId,
-                request.path(),
-                request.resolution(),
-                request.content(),
-                principal.userId());
-        return ok(exchange, null);
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, true, "WORKSPACE_GIT_CONFLICT_RESOLVE",
+                (executionUser, context) -> {
+                    requireWorkspaceGitPathPermission(exchange, context, List.of(request.path()));
+                    service.resolveWorkspaceGitConflict(
+                            workspaceId, request.path(), request.resolution(), request.content(), executionUser);
+                    return null;
+                }));
     }
 
     @PostMapping("/workspaces/{workspaceId}/git-conflict/abort")
     public ApiResponse<Object> abortWorkspaceGitConflict(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = requireWorkspaceConflictPermission(exchange, workspaceId);
-        service.abortWorkspaceGitConflict(workspaceId, principal.userId());
-        return ok(exchange, null);
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, true, "WORKSPACE_GIT_CONFLICT_ABORT",
+                (executionUser, context) -> {
+                    requireWorkspaceConflictPermission(exchange, workspaceId, executionUser, context);
+                    service.abortWorkspaceGitConflict(workspaceId, executionUser);
+                    return null;
+                }));
     }
 
     @PostMapping("/workspaces/{workspaceId}/git-conflict/resolve-all")
@@ -328,9 +361,13 @@ public class ManagedWorkspaceController {
             @PathVariable String workspaceId,
             @RequestBody ManagedWorkspaceDtos.ResolveAllWorkspaceGitConflictsRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = requireWorkspaceConflictPermission(exchange, workspaceId);
-        service.resolveAllWorkspaceGitConflicts(workspaceId, request.resolution(), principal.userId());
-        return ok(exchange, null);
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, true, "WORKSPACE_GIT_CONFLICT_RESOLVE_ALL",
+                (executionUser, context) -> {
+                    requireWorkspaceConflictPermission(exchange, workspaceId, executionUser, context);
+                    service.resolveAllWorkspaceGitConflicts(workspaceId, request.resolution(), executionUser);
+                    return null;
+                }));
     }
 
     /** 全部冲突解决后提交完整 merge index；不得走会 reset index 的普通文件提交入口。 */
@@ -338,11 +375,13 @@ public class ManagedWorkspaceController {
     public ApiResponse<Object> completeWorkspaceGitMerge(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = requireWorkspaceMergeCompletionPermission(exchange, workspaceId);
-        return ok(exchange, service.completeWorkspaceGitMerge(
-                workspaceId,
-                principal.userId(),
-                RuntimeApiSupport.traceId(exchange)));
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, true, "WORKSPACE_GIT_MERGE_COMPLETE",
+                (executionUser, context) -> {
+                    requireWorkspaceMergeCompletionPermission(exchange, workspaceId, executionUser, context);
+                    return service.completeWorkspaceGitMerge(
+                            workspaceId, executionUser, RuntimeApiSupport.traceId(exchange));
+                }));
     }
 
     @PostMapping("/personal-workspaces/{personalWorkspaceId}/publish-preview")
@@ -400,19 +439,48 @@ public class ManagedWorkspaceController {
         return principal;
     }
 
+    /** 分享成员不得借 Git 接口修改 owner-only 的 Agent 配置；普通请求继续沿用角色策略。 */
+    private void requireWorkspaceGitPathPermission(
+            ServerWebExchange exchange,
+            DelegatedOperationContext context,
+            List<String> files) {
+        if (context == null) {
+            requirePersonalWorkspacePathPermission(exchange, files);
+            return;
+        }
+        List<String> protectedFiles = files.stream()
+                .filter(ManagedWorkspaceGitPathPolicy::isApplicationConfigPath)
+                .toList();
+        if (!protectedFiles.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "分享成员不能修改应用 Agent 配置",
+                    Map.of("files", protectedFiles));
+        }
+    }
+
     /** 批量解决或取消 merge 前检查当前冲突中是否包含受保护的应用 Agent 配置。 */
     private AuthPrincipal requireWorkspaceConflictPermission(ServerWebExchange exchange, String workspaceId) {
+        return requireWorkspaceConflictPermission(exchange, workspaceId, userId(exchange), null);
+    }
+
+    private AuthPrincipal requireWorkspaceConflictPermission(
+            ServerWebExchange exchange,
+            String workspaceId,
+            UserId executionUser,
+            DelegatedOperationContext context) {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
-        if (AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
+        if (context == null && AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
             return principal;
         }
-        var diff = service.getWorkspaceGitDiff(workspaceId, principal.userId());
+        var diff = service.getWorkspaceGitDiff(workspaceId, executionUser);
         List<String> protectedFiles = diff == null ? List.of() : diff.files().stream()
                 .filter(file -> "conflict".equalsIgnoreCase(file.status()))
                 .map(com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse::path)
                 .filter(this::isApplicationAgentConfigPath)
                 .toList();
-        if (!protectedFiles.isEmpty() && !AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
+        if (!protectedFiles.isEmpty()
+                && (context != null || !AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN))) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
                     "应用 Agent 配置冲突仅允许应用管理员处理",
@@ -425,11 +493,19 @@ public class ManagedWorkspaceController {
     private AuthPrincipal requireWorkspaceMergeCompletionPermission(
             ServerWebExchange exchange,
             String workspaceId) {
+        return requireWorkspaceMergeCompletionPermission(exchange, workspaceId, userId(exchange), null);
+    }
+
+    private AuthPrincipal requireWorkspaceMergeCompletionPermission(
+            ServerWebExchange exchange,
+            String workspaceId,
+            UserId executionUser,
+            DelegatedOperationContext context) {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
-        if (AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
+        if (context == null && AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
             return principal;
         }
-        var diff = service.getWorkspaceGitDiff(workspaceId, principal.userId());
+        var diff = service.getWorkspaceGitDiff(workspaceId, executionUser);
         List<String> protectedFiles = diff == null ? List.of() : diff.files().stream()
                 .map(com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse::path)
                 .filter(this::isApplicationAgentConfigPath)
@@ -445,6 +521,42 @@ public class ManagedWorkspaceController {
 
     private boolean isApplicationAgentConfigPath(String file) {
         return ManagedWorkspaceGitPathPolicy.isApplicationConfigPath(file);
+    }
+
+    /** 精确分享范围解析后，把业务执行用户显式替换为会话所属人，真实 principal 始终不变。 */
+    private Object workspaceShareAction(
+            ServerWebExchange exchange,
+            String workspaceId,
+            boolean requireChat,
+            String auditAction,
+            BiFunction<UserId, DelegatedOperationContext, Object> action) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        String shareId = exchange.getRequest().getHeaders().getFirst(SessionShareController.SHARE_HEADER);
+        if (shareId == null || shareId.isBlank()) {
+            return action.apply(principal.userId(), null);
+        }
+        if (shareService == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "会话分享服务未配置");
+        }
+        DelegatedOperationContext context = shareService.requireAccess(
+                principal.userId(), new SessionShareId(shareId), requireChat, traceId);
+        context.requireWorkspace(new WorkspaceId(workspaceId));
+        try {
+            Object result = action.apply(context.executionOwnerUserId(), context);
+            shareService.recordOperation(
+                    context, auditAction, "WORKSPACE", workspaceId, null,
+                    "SUCCESS", null, traceId);
+            return result;
+        } catch (RuntimeException failure) {
+            shareService.recordOperation(
+                    context, auditAction, "WORKSPACE", workspaceId, null,
+                    failure instanceof PlatformException ? "DENIED" : "FAILED",
+                    failure instanceof PlatformException platform
+                            ? platform.errorCode().name() : "WORKSPACE_GIT_OPERATION_FAILED",
+                    traceId);
+            throw failure;
+        }
     }
 
     private UserId userId(ServerWebExchange exchange) {

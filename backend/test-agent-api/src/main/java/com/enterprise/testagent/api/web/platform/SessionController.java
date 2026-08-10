@@ -11,10 +11,13 @@ import com.enterprise.testagent.opencode.runtime.session.SessionApplicationServi
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import com.enterprise.testagent.event.RunEventSseStreamService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import jakarta.validation.Valid;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -22,6 +25,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +33,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
@@ -46,6 +51,7 @@ public class SessionController {
     private final RunMessageRecoveryService messageRecoveryService;
     private final RunEventSseStreamService eventStreamService;
     private final RunResendQueryService resendQueryService;
+    private final SessionCollaborationShareService shareService;
 
     /**
      * 注入会话应用服务，Controller 仅保留协议和 DTO 转换职责。
@@ -79,7 +85,7 @@ public class SessionController {
             RunApplicationService runService,
             RunMessageRecoveryService messageRecoveryService,
             RunEventSseStreamService eventStreamService) {
-        this(sessionService, runService, messageRecoveryService, eventStreamService, null);
+        this(sessionService, runService, messageRecoveryService, eventStreamService, null, null);
     }
 
     @Autowired
@@ -88,12 +94,25 @@ public class SessionController {
             RunApplicationService runService,
             RunMessageRecoveryService messageRecoveryService,
             RunEventSseStreamService eventStreamService,
-            RunResendQueryService resendQueryService) {
+            RunResendQueryService resendQueryService,
+            SessionCollaborationShareService shareService) {
         this.sessionService = sessionService;
         this.runService = runService;
         this.messageRecoveryService = messageRecoveryService;
         this.eventStreamService = eventStreamService;
         this.resendQueryService = resendQueryService;
+        this.shareService = shareService;
+    }
+
+    /** 兼容既有手工装配；普通会话调用不需要分享服务。 */
+    public SessionController(
+            SessionApplicationService sessionService,
+            RunApplicationService runService,
+            RunMessageRecoveryService messageRecoveryService,
+            RunEventSseStreamService eventStreamService,
+            RunResendQueryService resendQueryService) {
+        this(sessionService, runService, messageRecoveryService, eventStreamService,
+                resendQueryService, null);
     }
 
     /**
@@ -145,10 +164,18 @@ public class SessionController {
     @GetMapping("/api/internal/platform/opencode-runtime/sessions/{sessionId}")
     public ApiResponse<RuntimeDtos.SessionResponse> getSession(
             @PathVariable String sessionId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.getSession(userId, new SessionId(sessionId))), traceId);
+        SessionId requested = new SessionId(sessionId);
+        DelegatedOperationContext context = shareContext(userId, shareId, false, traceId);
+        if (context != null) {
+            context.requireSession(requested);
+        }
+        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(context == null
+                ? sessionService.getSession(userId, requested)
+                : sessionService.getSession(requested)), traceId);
     }
 
     /**
@@ -157,13 +184,19 @@ public class SessionController {
     @GetMapping("/api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run")
     public ApiResponse<RuntimeDtos.RunResponse> getActiveRun(
             @PathVariable String sessionId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        SessionId requested = new SessionId(sessionId);
+        DelegatedOperationContext context = shareContext(userId, shareId, false, traceId);
+        if (context != null) {
+            context.requireSession(requested);
+        }
         RuntimeDtos.RunResponse response = runService == null
                 ? null
-                : runService.findActiveRun(userId, new SessionId(sessionId))
-                        .map(RuntimeDtos.RunResponse::from)
+                : (context == null ? runService.findActiveRun(userId, requested) : runService.findActiveRun(requested))
+                        .map(run -> RuntimeDtos.RunResponse.from(run, usernameLookup()))
                         .orElse(null);
         return ApiResponse.ok(response, traceId);
     }
@@ -202,11 +235,19 @@ public class SessionController {
     public ApiResponse<RuntimeDtos.SessionMessageResponse> appendMessage(
             @PathVariable String sessionId,
             @Valid @RequestBody RuntimeDtos.AppendMessageRequest request,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return ApiResponse.ok(RuntimeDtos.SessionMessageResponse.from(sessionService.appendMessage(
-                userId, new SessionId(sessionId), request.role(), request.content(), traceId)), traceId);
+        SessionId requested = new SessionId(sessionId);
+        DelegatedOperationContext context = shareContext(userId, shareId, true, traceId);
+        var message = context == null
+                ? sessionService.appendMessage(
+                        userId, requested, request.role(), request.content(), traceId)
+                : sessionService.appendMessage(
+                        context, requested, request.role(), request.content(), traceId);
+        return ApiResponse.ok(RuntimeDtos.SessionMessageResponse.from(
+                message, null, null, null, null, usernameLookup()), traceId);
     }
 
     /**
@@ -218,14 +259,25 @@ public class SessionController {
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false, defaultValue = "true") Boolean refresh,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         // 历史消息查询会同步刷新远端快照，必须整体 offload，避免在 Reactor 事件线程调用 block()。
-        return Mono.fromCallable(() -> ApiResponse.ok(RuntimeDtos.messagePage(sessionService.listMessages(
-                        userId, new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId,
-                        Boolean.TRUE.equals(refresh)),
-                        resendQueryService == null ? null : resendQueryService::findForRun), traceId))
+        SessionId requested = new SessionId(sessionId);
+        DelegatedOperationContext context = shareContext(userId, shareId, false, traceId);
+        if (context != null) {
+            context.requireSession(requested);
+        }
+        return Mono.fromCallable(() -> ApiResponse.ok(RuntimeDtos.messagePage((context == null
+                        ? sessionService.listMessages(
+                                userId, requested, RuntimeApiSupport.pageRequest(page, size), traceId,
+                                Boolean.TRUE.equals(refresh))
+                        : sessionService.listMessages(
+                                requested, RuntimeApiSupport.pageRequest(page, size), traceId,
+                                Boolean.TRUE.equals(refresh))),
+                        resendQueryService == null ? null : resendQueryService::findForRun,
+                        usernameLookup()), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -239,12 +291,21 @@ public class SessionController {
     public Mono<ApiResponse<RuntimeDtos.SessionTreeMessagesResponse>> getSessionTreeMessages(
             @PathVariable(name = "agentId", required = false) String agentId,
             @PathVariable String sessionId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         SessionId currentSessionId = new SessionId(sessionId);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        DelegatedOperationContext context = shareContext(userId, shareId, false, traceId);
+        if (context != null) {
+            context.requireSession(currentSessionId);
+        }
         return Mono.fromCallable(() -> {
-                    sessionService.getSession(userId, currentSessionId);
+                    if (context == null) {
+                        sessionService.getSession(userId, currentSessionId);
+                    } else {
+                        sessionService.getSession(currentSessionId);
+                    }
                     RunHistoryRecoveryResult recovery = messageRecoveryService == null
                             ? RunHistoryRecoveryResult.full(
                                     List.of(), null, RunHistoryRecoverySource.OPENCODE)
@@ -295,5 +356,27 @@ public class SessionController {
 
     private boolean hasAgentId(String agentId) {
         return agentId != null && !agentId.isBlank();
+    }
+
+    private Function<UserId, String> usernameLookup() {
+        return RuntimeDtos.memoizedUsernameLookup(
+                shareService == null ? null : shareService::findUsername);
+    }
+
+    private DelegatedOperationContext shareContext(
+            UserId actor,
+            String shareId,
+            boolean requireChat,
+            String traceId) {
+        if (shareId == null || shareId.isBlank()) {
+            return null;
+        }
+        if (shareService == null) {
+            throw new com.enterprise.testagent.common.error.PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                    "会话分享服务未配置");
+        }
+        return shareService.requireAccess(
+                actor, new SessionShareId(shareId), requireChat, traceId);
     }
 }

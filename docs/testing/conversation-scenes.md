@@ -26,6 +26,10 @@
 | 宠物旁路成功 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question streams progress, survives outside clicks, and calibrates replayed deltas` |旁路 Run、阶段进度、增量、最终答案、重放去重 |
 | 宠物旁路失败/重试 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question keeps a failure editable and starts a fresh run on retry` | 失败弹层、问题保留、重新提交 |
 | 宠物形象策略 | `frontend/apps/agent-web/tests/pet-companions.test.ts` 与 `FigmaShell.test.ts`：`lets the user choose a companion and persists the selected mode` | 本地日期轮换、每日随机稳定、异常存储回退、固定角色与名册交互 |
+| 会话协作分享管理 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share management and received list preserve one link and inactive history` | 我的会话/分享给我、有效分享以新标签页打开且原工作台不跳转、唯一链接、成员与可对话权限、1/3/7 天、待执行任务提示、取消与失效历史 |
+| 会话协作分享工作台 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share read-only workbench shows sender identity colors and fixed scope`、`session share model picker selects from the fixed owner workspace catalog`、`session share busy run blocks every participant and only sender can stop`、`session share participant receives the owner's authoritative user message without an empty bubble`、`session share owner history keeps a shared actor run snapshot when history enrichment arrives late` | 固定 Session/Workspace、分享头、所属人工作区模型目录与模型选择、只读限权、发送人姓名/固定两色、运行互斥、非发送人停止限制、空远端 envelope 不展示、平台 USER 正文实时原位归并，以及所属人中途打开被分享人发起的活动 Run 时对思考、停止按钮和工具事件的无覆盖同步 |
+| 会话协作分享失效与所属人路由 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share invalid page and owner link redirect remain isolated` | 移除/过期/取消提示、所属人回普通工作台、兼容旧 `/s/{sessionId}`、分享头隔离 |
+| 会话协作分享后端 | `SessionShareControllerTest`、`SessionCollaborationShareServiceTest`、`DelegatedOperationContextResolverTest`、`MyBatisSessionShareRepositoryIntegrationTest`、`ConversationContextControllerTest`、`RunControllerSessionShareTest`、`ManagedWorkspaceControllerSessionShareTest`、`WorkspaceControllerSessionShareTest` | 唯一 256 位链接、50 人/7 天上限、乐观锁、代操作边界、分享 RunContext 使用所属人执行身份、跨工作区拒绝、文件/终端票据、审计脱敏 |
 
 ## 一次性复现全部前端场景
 
@@ -44,6 +48,17 @@ corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
 会话卡片主按钮与置顶按钮拥有包含同一标题的可访问名称。端到端测试切换历史会话时统一限定
 `.figma-chat-history-card-main`，置顶操作再按“置顶对话/取消置顶对话”可访问名称定位，避免模糊标题选择器
 同时命中两个按钮而把测试基础设施问题误报为会话功能失败。
+
+会话协作分享额外使用 Chromium、Firefox 和 WebKit 三浏览器固定回归：
+
+```bash
+cd /Users/huang/workspace/intelligent-test-agent-gitee/frontend
+corepack pnpm e2e:session-share
+```
+
+首次执行前如本机未安装对应 Playwright 运行包，先执行
+`corepack pnpm exec playwright install chromium firefox webkit`。三浏览器配置只筛选标题以
+`session share` 开头的专项场景，不扩大现有全量桌面 E2E 范围。
 
 ## 真实 OpenCode 三轮回复验收
 
