@@ -65,8 +65,8 @@ test("session share management and received list preserve one link and inactive 
   expect(page.url()).toBe(ordinaryWorkbenchUrl);
 
   await page.getByRole("tab", { name: /我的会话/ }).click();
-  await page.getByRole("button", { name: /支付回归协作会话/ }).click();
-  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
+  await historySessionButton(page, /支付回归协作会话/).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click({ force: true });
   await page.getByTestId("manage-session-share").click();
 
   const dialog = page.locator(".session-share-dialog");
@@ -130,7 +130,7 @@ test("session share owner workbench resolves collaborator names from the managed
 
   await gotoWorkbench(page, { selectConversation: false });
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /所属人协作会话/ }).click();
+  await historySessionButton(page, /所属人协作会话/).click();
   const collaboratorTurn = page.locator('[data-oc-turn-id="msg_collaborator_owner_view"]');
   await expect(collaboratorTurn).toBeVisible({ timeout: 20_000 });
   await expect(collaboratorTurn.locator(".oc-user-message__sender")).toHaveText("协作者");
@@ -586,7 +586,7 @@ test("session share participant receives the owner's authoritative user message 
         }]
       },
       {
-        delayMs: 800,
+        releaseKey: "shared-platform-input",
         events: [{
           eventId: "evt_shared_platform_input",
           seq: 0,
@@ -643,8 +643,19 @@ test("session share participant receives the owner's authoritative user message 
     (window as Window & { __titleWatchRunStreams?: Array<{ runId: string }> })
       .__titleWatchRunStreams?.some((item) => item.runId === "run_shared_owner_live") ?? false
   ))).toBe(true);
-  await page.waitForTimeout(150);
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & {
+      __titleWatchRunStreams?: Array<{ runId: string; emittedEventIds: string[] }>;
+    }).__titleWatchRunStreams
+      ?.find((item) => item.runId === "run_shared_owner_live")
+      ?.emittedEventIds.includes("evt_shared_empty_envelope") ?? false
+  ))).toBe(true);
   await expect(page.locator('[data-oc-turn-id="msg_shared_owner_live"]')).toHaveCount(0);
+
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & { __releaseRunEventBatch?: (releaseKey: string) => boolean })
+      .__releaseRunEventBatch?.("shared-platform-input") ?? false
+  ))).toBe(true);
 
   const ownerTurn = page.locator('[data-oc-turn-id="msg_shared_owner_live"]');
   await expect(ownerTurn).toBeVisible({ timeout: 5_000 });
@@ -6899,7 +6910,7 @@ test("session share owner history keeps a shared actor run snapshot when history
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /协作者运行中的会话/ }).click();
+  await historySessionButton(page, /协作者运行中的会话/).click();
 
   await expect.poll(() => page.evaluate(() => (
     (window as Window & { __titleWatchRunStreams?: Array<{ runId: string }> })
@@ -8602,7 +8613,8 @@ test("workspace cascade submenu shifts up when it would overflow the viewport bo
 });
 
 type RunEventFetchBatch = {
-  delayMs: number;
+  delayMs?: number;
+  releaseKey?: string;
   events: Array<{ eventId?: string; seq: number; type: string; payload: Record<string, unknown> }>;
 };
 
@@ -8612,9 +8624,26 @@ async function installAuthenticatedRunEventFetchStream(
   scenarios: Record<string, RunEventFetchBatch[]>
 ) {
   await page.addInitScript(({ scenarios }) => {
-    type StreamProbe = { runId: string; authorization: string | null; closed: boolean };
+    type StreamProbe = {
+      runId: string;
+      authorization: string | null;
+      closed: boolean;
+      emittedEventIds: string[];
+    };
     const probes: StreamProbe[] = [];
-    (window as Window & { __titleWatchRunStreams?: StreamProbe[] }).__titleWatchRunStreams = probes;
+    const manualReleases = new Map<string, () => void>();
+    const testWindow = window as Window & {
+      __titleWatchRunStreams?: StreamProbe[];
+      __releaseRunEventBatch?: (releaseKey: string) => boolean;
+    };
+    testWindow.__titleWatchRunStreams = probes;
+    testWindow.__releaseRunEventBatch = (releaseKey) => {
+      const release = manualReleases.get(releaseKey);
+      if (!release) return false;
+      manualReleases.delete(releaseKey);
+      release();
+      return true;
+    };
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (input, init) => {
       const request = new Request(input, init);
@@ -8627,24 +8656,30 @@ async function installAuthenticatedRunEventFetchStream(
       const probe: StreamProbe = {
         runId,
         authorization: request.headers.get("authorization"),
-        closed: false
+        closed: false,
+        emittedEventIds: []
       };
       probes.push(probe);
       const encoder = new TextEncoder();
       let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
       let timers: number[] = [];
+      let releaseKeys: string[] = [];
       const closeProbe = () => {
         if (probe.closed) return;
         probe.closed = true;
         timers.forEach((timer) => window.clearTimeout(timer));
         timers = [];
+        releaseKeys.forEach((releaseKey) => manualReleases.delete(releaseKey));
+        releaseKeys = [];
       };
       const body = new ReadableStream<Uint8Array>({
         start(streamController) {
           controller = streamController;
           for (const batch of scenarios[runId] ?? []) {
-            timers.push(window.setTimeout(() => {
+            // 双用户同步用例需要精确控制空 envelope 与平台正文的先后，避免靠浏览器定时器猜测。
+            const emitBatch = () => {
               if (probe.closed) return;
+              probe.emittedEventIds.push(...batch.events.map((item) => item.eventId ?? `evt_title_${runId}_${item.seq}`));
               const frame = batch.events.map((item) => (
                 `id: ${item.eventId ?? `evt_title_${runId}_${item.seq}`}\nevent: ${item.type}\ndata: ${JSON.stringify({
                   eventId: item.eventId ?? `evt_title_${runId}_${item.seq}`,
@@ -8657,7 +8692,13 @@ async function installAuthenticatedRunEventFetchStream(
                 })}\n\n`
               )).join("");
               streamController.enqueue(encoder.encode(frame));
-            }, batch.delayMs));
+            };
+            if (batch.releaseKey) {
+              manualReleases.set(batch.releaseKey, emitBatch);
+              releaseKeys.push(batch.releaseKey);
+            } else {
+              timers.push(window.setTimeout(emitBatch, batch.delayMs ?? 0));
+            }
           }
         },
         cancel() {

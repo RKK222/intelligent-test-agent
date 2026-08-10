@@ -8149,3 +8149,26 @@
 
 - 被分享成员无需刷新或退出登录，即可从分享页直接进入自己的空白对话。
 - 本次仅调整前端路由交互、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能、安全、`.env*`、generated SDK 或 OpenCode 只读源码，普通工作台行为保持兼容。
+
+## 2026-08-10 - 稳定分享双用户专项 E2E
+
+### Why
+
+- 分享专项 E2E 中，会话历史主按钮与置顶按钮具有相同的可访问名称，导致严格定位偶发匹配两个元素；空 envelope 到平台正文的验证依赖固定延时，在 WebKit 下存在时序抖动；Firefox 中通知层可能短暂遮挡抽屉关闭按钮。
+
+### What
+
+- 复用既有 `historySessionButton` 精确定位三个分享历史入口，并沿用既有强制点击方式关闭被通知层遮挡的抽屉。
+- 扩展现有 RunEvent fetch stream 测试辅助器，支持手动释放事件批次并记录已发事件；先确认空 envelope 不展示，再释放所属人的权威正文，避免用浏览器定时器猜测顺序。
+
+### How
+
+- 使用 JDK 25、`.env.test` 和 `--without-workflow` 重启 backend、manager、frontend；health/readiness 均为 `UP`，frontend 返回 200，CORS 正确，manager WebSocket 已连接且受管 OpenCode 为 `HEALTHY`。
+- 三个问题场景在 Chromium、Firefox、WebKit 共 9 项通过；完整 `e2e:session-share` 33 项全部通过且无重试；agent-web typecheck 与 `git diff --check` 通过。
+- 用户明确聚焦分享双用户查看后，中止了 150 项通用 E2E；中止前发现的两个分享定位问题均已修复，另一个通用用例仅因中止而停止，不作为失败结论。
+- 提交前回顾全部 `.agents/session-log*.md`，保留同期压缩摘要与用户消息展示改动，不回退也不纳入本次提交。
+
+### Result
+
+- 分享所属人和被分享人两个视角的专项流程在三种浏览器中稳定通过，权威用户消息顺序不再依赖固定等待时间。
+- 本次仅修改 E2E 测试及测试辅助器；不涉及生产代码、HTTP API、RunEvent wire、DTO、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。
