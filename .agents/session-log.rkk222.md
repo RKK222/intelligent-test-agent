@@ -7713,3 +7713,33 @@
 - 已消除企业后端启动时 `ExternalSshKeyEnvelopeService.<init>()` 的无参构造异常；原失败包应撤回并从本提交的干净 release 快照重打。
 - 未修改 Flyway migration、API、事件、数据库结构、安全配置、`.env*`、generated SDK 或 OpenCode 源码；企业 PostgreSQL
   已到 `20260809110000`，重新部署只应校验现有 migration，禁止 `repair`、`outOfOrder` 或手工改 history。
+
+## 2026-08-10 - 修复外部 API 凭据服务装配并增加发布门禁
+
+### Why
+
+- 第二次企业启动已越过 `ExternalSshKeyEnvelopeService`，但随后在 `ExternalApiCredentialApplicationService` 上再次出现
+  `No default constructor found`；两次 Flyway 均成功校验 92 条 migration，当前版本仍为 `20260809110000`，数据库不是根因。
+- 仅逐个修复现场首先暴露的 Bean 无法阻止同类问题继续串行出现，需要在源码与企业打包入口增加全量结构审计。
+
+### What
+
+- 为 `ExternalApiCredentialApplicationService` 和同一调用链中的 `ExternalApiCredentialUpdateBroadcaster` 生产构造器显式增加
+  `@Autowired`，保留包内测试构造器，不改变凭据生成、加密、缓存或广播行为。
+- 两个服务均增加 `ApplicationContextRunner` 真实 Spring 容器装配回归；`test-agent-app` 新增
+  `SpringBeanConstructorWiringTest`，扫描全部生产 Spring Bean，要求多构造器 Bean 必须有无参构造器或显式注入构造器。
+- `package-release.sh` 在后端打包前强制运行该全局审计，失败时终止企业包生成；同步 app、system-management 与内部部署 README。
+
+### How
+
+- 修复前全局审计稳定只检出上述两个 Bean；修复后两个上下文测试与全局审计共 9 项通过。
+- JDK 25 下 system-management/integration 依赖链全量测试通过：common 97、domain 99、system-management 56、integration 44，
+  共 296 项；发布脚本 `bash -n` 与 `git diff --check` 通过。
+- 按 `.env.test`、`test` profile 且 `--without-workflow` 执行完整本地重启时，21 模块后端构建成功；运行启动被本机保留库已经执行、
+  但当前 release 未解析的 `20260809230000`、`20260810090000` 阻断。未执行 `repair`、未改 history，也未启用 LobeHub。
+
+### Result
+
+- 第二次现场异常及全仓当前同类构造器歧义均已消除，并由企业打包门禁持续阻止回归；需从本提交干净快照重新生成并验证发布包。
+- 当前 release 明确保持 Workflow、LobeHub 为 `disabled`。未修改 migration SQL、API、事件、数据库结构、安全配置、`.env*`、
+  generated SDK 或 OpenCode 源码；企业库仍只允许对既有 `20260809110000` 历史做严格校验。

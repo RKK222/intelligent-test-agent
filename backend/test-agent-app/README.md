@@ -74,6 +74,7 @@
 - `WebClientConfigTest` 覆盖运行态提供可构建的 `WebClient.Builder`。
 - `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 分别验证企业顺序基线、三类工具盒子历史、仅执行 UI marker 的 LobeHub 分叉及已执行 release rollout 的更高版本分叉都能升级到当前版本，且均未启用 `outOfOrder`。
 - `TestAgentApplicationTest` 覆盖即使 classpath 含 Servlet 依赖，平台主应用仍强制为 Reactive 并使用北京时间；integration 模块覆盖 Admin 独立端口、真实 MySQL Flyway、SSO 与故障退避。
+- `SpringBeanConstructorWiringTest` 扫描最终应用 `com.enterprise.testagent` 下的全部生产 Spring 组件，禁止多构造器 Bean 在既无显式注入构造器、又无无参构造器的情况下进入发布包，避免运行时回退到不存在的无参构造器。
 - `LobehubDevelopmentBootstrapRunnerTest` 使用真实内存参数仓储和通用参数管理服务，覆盖占位值替换、审计顺序、
   启用开关最后写入、owner/审计异常失败关闭、启动失败补偿模式，以及非回环 PostgreSQL 零写入拒绝。
 

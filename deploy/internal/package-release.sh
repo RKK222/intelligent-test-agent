@@ -714,8 +714,13 @@ package_backend() {
   require_command unzip
   require_command zip
   mkdir -p "${backend_dir}"
+  echo "Validating Spring bean constructor wiring"
+  # 发布前必须扫描全部生产 Spring Bean，避免多构造器未显式注入导致企业环境启动失败。
+  (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am \
+    -Dtest=SpringBeanConstructorWiringTest \
+    -Dsurefire.failIfNoSpecifiedTests=false test)
   echo "Building backend jar"
-  # 企业包只需要主代码和运行时依赖；跳过测试源码编译，避免无关的存量测试假实现阻断交付包生成。
+  # 强制装配审计通过后，交付构建只需要主代码和运行时依赖；不再重复执行其它测试。
   (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am -Dmaven.test.skip=true package)
 
   local jar

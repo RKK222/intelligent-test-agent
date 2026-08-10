@@ -196,6 +196,8 @@ deploy/internal/package-release.sh --output-dir deploy/internal/dist
 
 当前 release 必须使用上述默认命令，不添加 `--with-workflow` 或 `--with-lobehub`。打包后应从 `release-components.env` 复核两项均为 `disabled`，且 ZIP 中不存在 `dist/test-agent-workflow-offline.tar.gz` 和 `dist/lobehub/`。
 
+后端打包前会强制运行 `SpringBeanConstructorWiringTest`，扫描全部生产 Spring Bean；发现多构造器 Bean 既没有无参构造器、也没有显式注入构造器时立即终止打包，避免只能在企业环境启动阶段暴露装配错误。其它测试仍按发布前自检要求单独执行。
+
 `VITE_TEST_AGENT_API_BASE_URL` 是编译期参数。只允许一个入口时可固化完整 origin；域名和 IP 需要同时兼容时必须显式传空值，让前端使用当前页面同源的相对 `/api`。当前双入口包使用：
 
 ```bash

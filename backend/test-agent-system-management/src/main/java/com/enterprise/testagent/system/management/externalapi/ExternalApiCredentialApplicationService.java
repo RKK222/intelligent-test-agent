@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class ExternalApiCredentialApplicationService {
     private final Clock clock;
     private final Supplier<String> idSupplier;
 
+    @Autowired
     public ExternalApiCredentialApplicationService(
             ExternalApiCredentialRepository repository,
             ExternalApiCredentialCipher cipher,

@@ -19,6 +19,7 @@
 - **数据库 IDENTITY 运维**：查询/对齐/手动重启白名单表（users/user_roles/dictionaries/user_login_logs）的 identity 序列，修复序列落后于已有主键导致的新增冲突。
 - **问题排查只读授权**：`SupportAccessApplicationService` 为实时 `SUPER_ADMIN` 签发绑定当前平台登录会话的 5–240 分钟授权，同一会话只保留一个有效 grant；目标用户只作为查询范围，不切换 actor。签发时间在派生到期时间前统一归一化到 PostgreSQL `timestamp` 的微秒精度，使 Redis payload 与关系库授权身份在 Linux 纳秒时钟下仍严格一致，不通过误差窗口放宽校验。当前工程没有权威工单数据源，服务为每轮新上下文生成唯一 `sai_` 排查单号，不再从历史授权循环回填；未来接入工单时通过建议响应的 `source=WORK_ORDER` 区分。签发、撤销、目标切换、每次读取和失败均先落审计，审计失败时正文不返回；每日清理一年以前的审计。
 - **外部 API 凭据**：`ExternalApiCredentialApplicationService` 仅保存平台生成 Key 的 RSA-OAEP/SHA-256 密文，支持 scope、启停、reveal、立即轮换和删除；事务提交后由 `ExternalApiCredentialUpdateBroadcaster` 本机整表刷新并发布空载荷服务器广播。`ExternalApiCredentialRegistry` 启动严格加载、每 60 秒补偿重载、完整构建后原子替换，并按工具编码 O(1) 常量时间认证。
+  应用服务和刷新广播同时保留生产构造器与包内可测试构造器，生产构造器必须显式标记为 Spring 注入入口，并由容器装配测试锁定。
 
 ## 依赖
 
@@ -50,7 +51,7 @@
 ## 测试覆盖
 
 - `SupportAccessApplicationServiceTest` 覆盖无共享暗号签发、每次生成唯一排查单号、登录会话绑定、Linux 纳秒时钟与 PostgreSQL 微秒持久化兼容、实时角色撤销、成功读取先审计和审计不可用时正文 fail-closed。
-- `ExternalApiKeyGeneratorTest`、`ExternalApiCredentialApplicationServiceTest`、`ExternalApiCredentialRegistryTest`、`ExternalApiCredentialUpdateBroadcasterTest` 覆盖 Key 格式、无明文持久化、CRUD/轮换、不可变快照、启动失败、本机/远端刷新与空广播载荷。
+- `ExternalApiKeyGeneratorTest`、`ExternalApiCredentialApplicationServiceTest`、`ExternalApiCredentialRegistryTest`、`ExternalApiCredentialUpdateBroadcasterTest` 覆盖 Key 格式、无明文持久化、CRUD/轮换、不可变快照、启动失败、本机/远端刷新、空广播载荷和生产构造器的真实 Spring 容器装配。
 
 ## 后续 AI 编码指引
 
