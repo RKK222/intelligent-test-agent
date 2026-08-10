@@ -8077,3 +8077,28 @@
 
 - 压缩完成态现在与思考/搜索过程使用同一轻量图标层级，只有用户主动点击时才展开详情；分享协作者气泡明显变浅且仍能与自己的消息区分。
 - 本次仅修改前端展示、主题 token、测试和稳定 README；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，旧消息和旧后端兼容性不变。
+
+## 2026-08-10 - 修复分享成员撤销重发的生产服务装配
+
+### Why
+
+- 分享成员 `wr` 在可对话分享会话中撤销并修改自己的最后一条消息后，提交固定失败为 `RUNTIME_STATE_UNAVAILABLE: 会话分享服务未配置`；会话所属人不携带分享头，因此未触发同一故障。
+- 根因是 `RunResendController` 的双参测试兼容构造器被标记为 `@Autowired`，生产 Spring 装配始终绕过包含 `SessionCollaborationShareService` 的完整构造器，导致分享请求进入控制器时 `shareService` 为 null。
+
+### What
+
+- 将生产 `@Autowired` 移到包含分享服务的三参构造器，保留双参构造器仅供不涉及分享头的既有单元测试兼容；分享成员仍先走既有 `requireAccess(..., requireCanChat=true)`，未放宽权限或绕过实际发送人校验。
+- 新增 `RunResendControllerSessionShareTest`，用真实 `ApplicationContextRunner` 构造器选择和预注册业务单例锁定生产装配，并验证分享头在进入异步业务链前解析为代操作上下文。
+- 同步 `test-agent-api` README、HTTP API 对应测试和会话测试场景说明。
+
+### How
+
+- TDD 红灯在修复前精确复现“会话分享服务未配置”；修复后 JDK 25 定向测试 1 项通过，18 模块 Maven reactor 全部成功。扩大到 `test-agent-api -am` 的全测试时，相关 runtime/API 批次均通过，最终仅既有 `XxlJobMysqlMigrationTest` 因本机 Docker 中 MySQL 8.4 三次初始化超过连接窗口报错，随后停止无关剩余批次。
+- 按 `.env.test`、JDK 25 和 `--without-workflow` 完成 21 模块构建并重启 backend、opencode-manager、frontend；health/readiness 为 `UP`、CORS 正确、manager WebSocket 已连接，8080/3000 监听进程与 cwd 均属于当前仓库。
+- 真实登录分享成员 `wr`，进入“重新完成案例设计”，撤销“共享测试”并改为“仅答复 OK”后提交成功；POST `/resends` 返回成功，新 Run `run_8448ba49d6cb4f04932bcab55c584ab5` 最终 `SUCCEEDED`，成员页显示新文本和回复 `OK`，思考态与停止按钮正常收敛。
+- 提交前回顾全部 `.agents/session-log*.md`，确认近期其它工作没有覆盖本次 Controller/API 文档/测试文件；冲突标记与空白校验通过。
+
+### Result
+
+- 被分享成员现在可以正常撤销、修改并重发自己最后一条消息，不再要求刷新或报“会话分享服务未配置”；分享授权、`canChat`、源消息实际发送人和会话边界仍由原有服务端规则复验。
+- 本次修复只更正既有 Controller 的 Spring 装配并增加回归测试/文档，不新增或变更 HTTP URL、请求/响应 DTO、RunEvent、数据库/Flyway、关系型 SQL、性能链路或安全策略；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。

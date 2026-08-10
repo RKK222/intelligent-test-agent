@@ -38,13 +38,15 @@ public class RunResendController {
     private final RunApplicationService runService;
     private final SessionCollaborationShareService shareService;
 
-    @Autowired
+    /** 兼容不涉及分享头的既有单元测试；生产装配必须使用包含分享服务的完整构造器。 */
     public RunResendController(
             RunResendApplicationService resendService,
             RunApplicationService runService) {
         this(resendService, runService, null);
     }
 
+    /** 生产入口显式注入分享服务，确保分享成员的撤销重发先完成代操作授权。 */
+    @Autowired
     public RunResendController(
             RunResendApplicationService resendService,
             RunApplicationService runService,
