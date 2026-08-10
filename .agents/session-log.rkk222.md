@@ -7955,7 +7955,7 @@
 ### What
 
 - 在内置用户手册的功能总览、对话、工作区和常见问题章节补充协作分享、只读/可对话权限、分享失效、并发互斥、定时任务边界，以及测试设计/测试执行资料多选跳转和子条目编号传递说明。
-- 更新 `frontend/apps/user-manual/README.md` 的章节边界；新增 `docs/assets/marketing/mimo-recent-features-announcement.md`，用通俗语言介绍四组近期功能，并在 `docs/README.md` 增加宣传素材索引。
+- 更新 `frontend/apps/user-manual/README.md` 的章节边界；新增 `docs/assets/marketing/mimo-recent-features-announcement.md`，以克制、事实导向的内部通知口吻介绍四组近期功能，并在 `docs/README.md` 增加宣传素材索引。
 - 同步修正 `frontend/README.md` 与 `frontend/apps/agent-web/README.md` 中仍把分享页写成只读 transcript 的过期说明，使工程文档与现有 Session Share 行为一致。
 
 ### How
