@@ -1,6 +1,7 @@
 package com.enterprise.testagent.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.testagent.domain.memory.MemoryId;
 import com.enterprise.testagent.domain.memory.MemoryLearningJob;
@@ -53,6 +54,8 @@ class MyBatisQaMemoryRepositoryIntegrationTest {
                 "db/migration/V16__add_message_and_run_usage_fields.sql")).execute(dataSource);
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260809120000__create_qa_memory_governance.sql")).execute(dataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260810090000__enforce_qa_memory_identity.sql")).execute(dataSource);
         jdbc = JdbcClient.create(dataSource);
         seedParents();
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
@@ -76,6 +79,7 @@ class MyBatisQaMemoryRepositoryIntegrationTest {
     void persistsGovernanceClaimsOutboxAndUsesOptimisticVersion() {
         QaMemory memory = personalMemory(0L, MemoryStatus.ACTIVE, NOW);
         repository.insertMemory(memory);
+        assertThat(repository.findByIdForUpdate(memory.memoryId())).isPresent();
         assertThat(repository.listPersonal("usr_memory", null, null, 0, 10)).singleElement()
                 .satisfies(found -> {
                     assertThat(found.mem0MemoryId()).isEqualTo("mem0_memory");
@@ -152,9 +156,42 @@ class MyBatisQaMemoryRepositoryIntegrationTest {
                 .get().extracting(MemorySkillProposal::status).isEqualTo(MemorySkillProposalStatus.DRAFT);
     }
 
+    @Test
+    void nativeMemoryIdentityIsUniqueAndInsertIfAbsentKeepsTheWinner() {
+        QaMemory winner = personalMemory("mem_winner", "mem0_shared", 0L, MemoryStatus.ACTIVE, NOW);
+        QaMemory loser = personalMemory("mem_loser", "mem0_shared", 0L, MemoryStatus.ACTIVE, NOW);
+
+        assertThat(repository.insertMemoryIfAbsentByMem0MemoryId(winner)).isTrue();
+        assertThat(repository.insertMemoryIfAbsentByMem0MemoryId(loser)).isFalse();
+        assertThat(repository.findByMem0MemoryId("mem0_shared"))
+                .get().extracting(memory -> memory.memoryId().value()).isEqualTo("mem_winner");
+        assertThatThrownBy(() -> repository.insertMemory(loser)).isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void formerApplicationMemberCannotListProposalDraftFromOwnedPersonalMemory() {
+        repository.insertMemory(personalMemory(0L, MemoryStatus.ACTIVE, NOW));
+        repository.insertSkillProposal(new MemorySkillProposal(
+                "msp_departed", new MemoryId("mem_memory"), "app_memory", "异常边界检查",
+                "---\nname: edge-check\n---", MemorySkillProposalStatus.DRAFT,
+                "usr_memory", "usr_memory", null, 1L, NOW, NOW));
+        assertThat(repository.listSkillProposals("usr_memory", null, 0, 10)).hasSize(1);
+
+        jdbc.sql("update application_members set deleted_at = :now where app_id = 'app_memory'")
+                .param("now", NOW.plusSeconds(1)).update();
+
+        assertThat(repository.listSkillProposals("usr_memory", null, 0, 10)).isEmpty();
+        assertThat(repository.countSkillProposals("usr_memory", null)).isZero();
+    }
+
     private QaMemory personalMemory(long version, MemoryStatus status, Instant updatedAt) {
+        return personalMemory("mem_memory", "mem0_memory", version, status, updatedAt);
+    }
+
+    private QaMemory personalMemory(
+            String memoryId, String mem0MemoryId, long version, MemoryStatus status, Instant updatedAt) {
         return new QaMemory(
-                new MemoryId("mem_memory"), "mem0_memory", MemoryScope.PERSONAL_GLOBAL,
+                new MemoryId(memoryId), mem0MemoryId, MemoryScope.PERSONAL_GLOBAL,
                 "usr_memory", null, status, MemorySource.MANUAL,
                 List.of(QaTaskType.TEST_CASE_GENERATION), "覆盖异常与边界", 1.0d,
                 0, 1, NOW, NOW, NOW, null, "usr_memory", version, "SYNCED", NOW, updatedAt);

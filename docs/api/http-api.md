@@ -3869,7 +3869,7 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 | `PATCH/DELETE` | `/skill-proposals/{proposalId}` | 创建人或 `APP_ADMIN` 编辑已审核草稿、归档提案；修改携带 `expectedVersion` |
 | `POST` | `/skill-proposals/{proposalId}/published-asset` | `APP_ADMIN` 在既有文件 WebSocket、Git、发布和 Hub 流程完成后，关联同 Application 已发布 Skill 资产 |
 
-团队数据的唯一边界是 `application_members` 中未删除的成员关系。团队记忆不从聊天自动生成；成员只能手工提交 `CANDIDATE`，包括 `APP_ADMIN` 自己提交的候选也必须再次审核。成员退出后查询、贡献、审核和运行时复用立即失效。修改时版本不匹配返回 `409 CONFLICT`。Mem0 不可用时，列表仍可返回 `contentAvailable=false` 的安全摘要；需要正文的创建/编辑返回 `503 MEMORY_UNAVAILABLE`。
+团队数据的唯一边界是 `application_members` 中未删除的成员关系。团队记忆不从聊天自动生成；成员只能手工提交 `CANDIDATE`，包括 `APP_ADMIN` 自己提交的候选也必须再次审核。成员退出后，团队记忆与所属 Application 的 Skill 提案查询、贡献、审核和运行时复用立即失效。修改时版本不匹配返回 `409 CONFLICT`；平台在数据库事务内锁定治理记录，先写未提交状态，再执行同 operationId 可重放的 Mem0 修改，避免多 Java 节点交错写入。Mem0 不可用时，列表仍可返回 `contentAvailable=false` 的安全摘要，但 `content` 为空；前端不得编辑该摘要或把它提交为团队候选，需要正文的创建/编辑返回 `503 MEMORY_UNAVAILABLE`。
 
 系统管理 Base URL：`/api/internal/platform/memory/v1/admin`，仅 `SUPER_ADMIN`：
 

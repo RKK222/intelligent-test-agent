@@ -238,6 +238,15 @@ V20260809230000__generalize_memory_and_embedding_profiles.sql
 SHA-256 2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3
 ```
 
+治理身份唯一性继续使用更高版本前向 migration：
+
+```text
+V20260810090000__enforce_qa_memory_identity.sql
+SHA-256 619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3
+```
+
+执行前必须查询 `qa_memories` 中非空 `mem0_memory_id` 的重复分组；发现重复就停止发布并显式归并关联证据、审核、usage 和 Skill 提案，禁止 migration 自动删行。约束生效后，原生学习通过 MyBatis PostgreSQL `ON CONFLICT DO NOTHING` 原子选出唯一治理记录，并把并行 Run 的证据追加到胜者。
+
 遗留 `qa_*` 物理表继续作为隐藏兼容存储，Java 新增 SQL 只走 MyBatis XML。独立记忆库不扫描 Java Flyway，只由 `memory-service/alembic` 管理；禁止创建第二套 Java migration runner、Flyway `repair/outOfOrder` 或现场手改历史表。
 
 同一变更窗口必须分别备份平台 PostgreSQL和独立记忆 PostgreSQL，并记录一致恢复点。Mem0 节点没有需要备份的本地卷。恢复后先保持白名单关闭，执行 Alembic/Flyway、readiness、双集合版本核对和浏览器回归，再开放用户。

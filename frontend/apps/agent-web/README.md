@@ -159,6 +159,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 - activity rail 的 `BrainCircuit` 入口打开 `/memories`，与工具盒子共用沉浸式面板快照；路由激活期间 Run Diff、VCS 刷新和 SSE 状态更新只更新后台数据，不切走页面。
 - `MemoryCenter.vue` 提供个人、团队、Skill 提案三个治理视图和证据抽屉。个人记忆支持全局/当前 Application 范围、编辑、提升全局、暂停和归档；原生 Mem0 学习结果直接生效。团队只能手工提交并由 `APP_ADMIN` 审核，个人记忆可携带来源安全引用提交团队候选。证据展示 Session 标题/ID和 Run ID，只有 Session owner 能打开 `/s/{sessionId}` 原对话。
+- Mem0 正文不可用时，页面只展示 `displaySummary` 治理摘要并禁用编辑与“提交为团队记忆”；摘要不会进入编辑器或作为完整正文回写，刷新取得 `contentAvailable=true` 后才能继续。
 - 对话完成摘要只消费 `queryQaMemoryRunUsage` 返回的实际注入记录，没有记录不显示徽标。系统管理 `MemoryAdminPanel.vue` 使用 `/memory/v1/admin` 展示 Mem0 多节点、固定 CHAT、企业/CPU Embedding、学习/投影积压和白名单；模型选项只接受已启用、配置凭据且对应能力探测成功的内部模型。健康卡和配置区在中栏、窄屏和暗色模式下不产生横向滚动。
 - 页面以 evidence rail 作为唯一标志元素，个人蓝 `#4F6BED`、团队青 `#0F8F88`、候选琥珀 `#B7791F`、冲突红 `#C2414B` 只表达状态；其它表面和字体沿用工作台 token，并覆盖暗色、键盘焦点、Reduced Motion 与窄屏抽屉。
 

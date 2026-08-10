@@ -16,6 +16,8 @@
 - 白名单用户、且能解析到当前 Application 的成功人工根 Run 写无原文学习 outbox；无法解析 Application 时不自动学习，也不会降级生成个人全局记忆。worker 读取本轮消息后调用 `/memories`，固定 `infer=true`、固定管理端 CHAT model，不添加平台抽取 prompt。
 - Mem0 原生个人记忆直接 `ACTIVE`。默认 `PERSONAL_APPLICATION`；owner 可提升为 `PERSONAL_GLOBAL`。
 - 团队记忆只允许成员手工提案，始终 `CANDIDATE`，必须由 `APP_ADMIN` 审核。个人记忆提案可以携带 `sourceMemoryId`，只复制安全证据引用/摘要。
+- 同一记忆的编辑、暂停、范围提升、归档和团队审核在平台事务内通过 `findByIdForUpdate` 锁定治理行；先写未提交的平台状态，再调用同 operationId 可重放的 Mem0 操作，外部失败会回滚平台事务。候选创建的数据库失败补偿使用独立 DELETE operationId，不能复用 ADD 幂等键。
+- 原生学习按 `mem0_memory_id` 原子建档；并行 Run 得到同一 Mem0 逻辑 ID 时只有一条治理记录，其余 worker 只追加各自的证据引用。
 - Run 前一次 `/search` 包含个人全局、Application 个人和团队三个 scope。总超时默认 2 秒，任何错误 fail-open；最多注入 6 条/约 800 tokens。
 - DTO 和运行逻辑不再使用 `taskTypes`、自定义 confidence、QA candidate、显式/隐式/临时来源。
 
@@ -30,6 +32,7 @@ Java 到 memory-service 使用 `X-Memory-Service-Key`，固定 HTTP/1.1、响应
 - 新 API：`/api/internal/platform/memory/v1/**`，管理入口 `/api/internal/platform/memory/v1/admin/**`。
 - 旧 `/api/internal/platform/qa-memory/v1/**` 返回 `410 API_GONE`。
 - 遗留 `qa_*` 表和初始 Flyway 保持字节不变；新增字段只用前向 migration 和 MyBatis XML。
+- Application Skill 提案只对当前有效成员可见；成员退出后不能继续读取管理员审核或编辑过的草稿。
 - 不新增 RunEvent；“参考了 N 条记忆”继续通过 usage HTTP 批量恢复。
 
 ## 允许依赖

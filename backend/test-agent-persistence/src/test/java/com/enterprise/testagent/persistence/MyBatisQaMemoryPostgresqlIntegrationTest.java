@@ -43,8 +43,16 @@ class MyBatisQaMemoryPostgresqlIntegrationTest {
         dataSource.setURL(System.getenv("TEST_AGENT_MEMORY_POSTGRES_URL"));
         dataSource.setUser(System.getenv("TEST_AGENT_MEMORY_POSTGRES_USERNAME"));
         dataSource.setPassword(System.getenv("TEST_AGENT_MEMORY_POSTGRES_PASSWORD"));
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
         jdbc = JdbcClient.create(dataSource);
+        // 先形成已部署记忆基线，再从该真实 PostgreSQL 历史升级到当前 HEAD；不能只测空库直达。
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260809230000").load().migrate();
+        assertThat(jdbc.sql("""
+                select count(*) from information_schema.table_constraints
+                where table_name = 'qa_memories'
+                  and constraint_name = 'uk_qa_memories_mem0_memory_id'
+                """).query(Long.class).single()).isZero();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
         seedParents();
 
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
@@ -71,6 +79,12 @@ class MyBatisQaMemoryPostgresqlIntegrationTest {
                 null, "usr_memory_pg", 0L, "SYNCED", NOW, NOW);
         repository.insertMemory(memory);
         assertThat(repository.findById(memory.memoryId())).isPresent();
+        QaMemory duplicate = new QaMemory(
+                new MemoryId("mem_pg_duplicate"), "mem0_pg", MemoryScope.PERSONAL_GLOBAL,
+                "usr_memory_pg", null, MemoryStatus.ACTIVE, MemorySource.MANUAL,
+                List.of(QaTaskType.RISK_ANALYSIS), "重复事实不得重复建档", 1.0d,
+                0, 1, NOW, NOW, NOW, null, "usr_memory_pg", 0L, "SYNCED", NOW, NOW);
+        assertThat(repository.insertMemoryIfAbsentByMem0MemoryId(duplicate)).isFalse();
         assertThat(repository.countWhitelist()).isZero();
 
         repository.insertEvidence(new MemoryEvidence(
@@ -109,6 +123,12 @@ class MyBatisQaMemoryPostgresqlIntegrationTest {
                 select count(*) from information_schema.columns
                 where table_name = 'internal_model_provider_models'
                   and column_name = 'embedding_dimension'
+                """).query(Long.class).single()).isEqualTo(1L);
+        assertThat(jdbc.sql("""
+                select count(*) from information_schema.table_constraints
+                where table_name = 'qa_memories'
+                  and constraint_name = 'uk_qa_memories_mem0_memory_id'
+                  and constraint_type = 'UNIQUE'
                 """).query(Long.class).single()).isEqualTo(1L);
     }
 

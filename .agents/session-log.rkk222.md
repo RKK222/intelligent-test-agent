@@ -7789,3 +7789,42 @@
   运行时、安全实现或兼容接口，只修改测试、编排和稳定文档。
 - 企业真实链路、批准容量和新增专项非功能项仍未运行，缺少目标 URL、账号、模型与停启/扩缩容 hook，不能据本地结果声称完全覆盖或
   开启白名单；未修改 `.env*`、generated SDK、OpenCode 源码及同期 Figma/Git/聊天未暂存改动。
+
+## 2026-08-10 - 修复通用记忆一致性、授权与降级写入边界
+
+### Why
+
+- 重新审查发现跨 Java 节点对同一记忆并发修改时，平台治理状态与 Mem0 操作缺少统一事务/行锁顺序；原生学习也可能让同一个
+  `mem0_memory_id` 生成多条治理记录。创建失败补偿还复用了 ADD operationId，存在被幂等层误判为原操作的风险。
+- 团队记忆普通编辑错误携带 `TEAM_APPLICATION` 作为范围迁移，Mem0 会按“只允许个人范围调整”拒绝；正文服务降级时，前端又可能
+  把截断的 `displaySummary` 当完整正文编辑或提交。成员退出 Application 后仍可凭提案创建人身份读取 Skill 草稿。
+
+### What
+
+- 记忆编辑、暂停、个人范围提升、归档和团队审核统一增加 Spring 事务与 `SELECT ... FOR UPDATE`；事务内先写未提交治理状态，再执行
+  同 operationId 可重放的 Mem0 操作，外部失败回滚平台状态。归档/拒绝删除后不再读取已删除正文，创建补偿改用独立 DELETE operationId。
+- 普通编辑不再发送 scope/applicationId；`contentAvailable=false` 时 API 的 `content` 固定为空，前端禁用编辑和团队提交，只把
+  `displaySummary` 用于展示。Skill 提案列表改为始终要求当前有效 Application 成员关系。
+- 新增 `V20260810090000__enforce_qa_memory_identity.sql`，为非空 `qa_memories.mem0_memory_id` 建唯一约束；原生学习使用 MyBatis
+  PostgreSQL `ON CONFLICT DO NOTHING` 原子选出胜者，失败方重读胜者并追加当前 Run 的安全证据。同步 HTTP、数据库、记忆部署及
+  前后端模块说明和回归测试。
+
+### How
+
+- JDK 25 下 `test-agent-memory` reactor、H2 MyBatis/Flyway、`QaMemoryControllerTest` 定向测试均通过；临时真实 PostgreSQL 16
+  从 `20260809230000` 已部署基线升级到 HEAD 的集成测试通过且没有 skip。应用 reactor 打包成功。
+- memory-service 为 25 passed / 1 skipped，Embedding 为 4 passed；记忆开发/集群静态门禁通过。前端记忆定向 2 文件 13 项、
+  agent-web typecheck 和 production build 通过，构建只保留既有大 chunk 提示；`git diff --check` 通过。
+- 未修改的主工作区 `.env.test` 已把本地平台 PostgreSQL 升级到 `20260810090000`，源码、persistence JAR、应用 JAR及实际运行 JAR
+  中 migration SHA-256 均为 `619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`，该文件自此不可改写。
+- 使用共享 `TEST_AGENT_ROOT/TESTAGENT/SYS_DATA_ROOT_DIR` 从 memory worktree 重启 backend、manager、frontend；health/readiness、
+  前端 3000、登录 CORS 和 manager WebSocket 正常。既有三副本 Mem0、CPU BGE、pgvector 的鉴权 status 为 UP，`rawMessageCount=0`。
+
+### Result
+
+- 七处审查问题已按现有 repository、MyBatis、Mem0 operation 幂等和成员关系程序收口，没有新增第二套一致性或授权实现；HTTP 路径、
+  RunEvent、generated SDK、OpenCode 源码和 `.env*` 未修改，降级响应继续通过既有 `contentAvailable` 字段兼容识别。
+- 默认完整重启的 workflow bootstrap 被本地 PostgreSQL 账号缺少 `CREATEROLE/ADMIN OPTION` 阻断，随后按官方
+  `--without-workflow` 路径完成本次相关服务重启，workflow 未重启。重复执行 `--with-memory` 时 Docker BuildKit 在 0/0 阶段停滞，
+  中止前没有替换现有容器；其后独立 status 证明现有全部记忆容器健康。本次没有完成企业真实多节点浏览器验收或批准容量压测。
+- 工作树中同期的 Figma/Git 面板六个未提交文件保持未暂存，未覆盖或纳入本次修改。

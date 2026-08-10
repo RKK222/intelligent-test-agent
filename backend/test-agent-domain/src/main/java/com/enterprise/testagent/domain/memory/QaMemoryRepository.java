@@ -10,6 +10,9 @@ public interface QaMemoryRepository {
 
     Optional<QaMemory> findById(MemoryId memoryId);
 
+    /** 写操作在同一数据库事务中锁定治理记录，串行化跨节点的同一记忆变更。 */
+    Optional<QaMemory> findByIdForUpdate(MemoryId memoryId);
+
     Optional<QaMemory> findByMem0MemoryId(String mem0MemoryId);
 
     List<QaMemory> listPersonal(String userId, String applicationId, MemoryStatus status, int offset, int limit);
@@ -21,6 +24,9 @@ public interface QaMemoryRepository {
     long countTeam(String userId, String applicationId, MemoryStatus status);
 
     void insertMemory(QaMemory memory);
+
+    /** 原生学习按 Mem0 逻辑 ID 原子落库；已有相同事实记录时返回 false。 */
+    boolean insertMemoryIfAbsentByMem0MemoryId(QaMemory memory);
 
     boolean updateMemory(QaMemory memory, long expectedVersion);
 

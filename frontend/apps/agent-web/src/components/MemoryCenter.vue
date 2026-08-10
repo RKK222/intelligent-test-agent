@@ -150,9 +150,14 @@ function openCreate(mode: Exclude<MemoryEditorMode, "edit">) {
 }
 
 function openEdit(memory: MemoryView) {
+  // displaySummary 只是服务降级时的治理摘要，绝不能作为完整正文回写覆盖 Mem0。
+  if (!memory.contentAvailable) {
+    ElMessage.warning("记忆正文暂时不可用，请刷新后再编辑");
+    return;
+  }
   editorMode.value = "edit";
   editingMemory.value = memory;
-  editorContent.value = memory.contentAvailable ? memory.content : memory.displaySummary;
+  editorContent.value = memory.content;
   personalApplicationScope.value = memory.scope === "PERSONAL_APPLICATION";
   editorOpen.value = true;
 }
@@ -377,6 +382,10 @@ async function proposePersonalToTeam(memory: MemoryView) {
     ElMessage.warning("请先选择一个 Application");
     return;
   }
+  if (!memory.contentAvailable) {
+    ElMessage.warning("记忆正文暂时不可用，请刷新后再提交团队候选");
+    return;
+  }
   try {
     await ElMessageBox.confirm(
       "将以当前正文提交团队候选，并仅复制来源 Session/Run 引用和摘要；原始对话不会进入记忆库。",
@@ -389,7 +398,7 @@ async function proposePersonalToTeam(memory: MemoryView) {
   try {
     await api.createTeamMemoryProposal({
       applicationId: props.selectedAppId,
-      content: memory.contentAvailable ? memory.content : memory.displaySummary,
+      content: memory.content,
       sourceMemoryId: memory.memoryId
     });
     ElMessage.success("已提交团队候选，等待 APP_ADMIN 审核");
@@ -511,7 +520,13 @@ function showActionError(error: unknown, fallback: string) {
             </span>
           </button>
           <div class="memory-card__actions">
-            <button type="button" aria-label="编辑记忆" @click="openEdit(memory)"><Pencil :size="15" />编辑</button>
+            <button
+              type="button"
+              aria-label="编辑记忆"
+              :disabled="!memory.contentAvailable"
+              :title="memory.contentAvailable ? undefined : '正文暂时不可用，请刷新后再编辑'"
+              @click="openEdit(memory)"
+            ><Pencil :size="15" />编辑</button>
             <button type="button" @click="openDetails(memory)">查看证据<ChevronRight :size="15" /></button>
           </div>
         </article>
@@ -627,7 +642,13 @@ function showActionError(error: unknown, fallback: string) {
 
         <div class="memory-detail__actions">
           <button v-if="selectedMemory.scope === 'PERSONAL_APPLICATION'" type="button" :disabled="actionLoading" @click="promoteGlobal(selectedMemory)"><BrainCircuit :size="15" />提升为个人全局</button>
-          <button v-if="selectedMemory.scope !== 'TEAM_APPLICATION' && selectedMemory.status === 'ACTIVE' && selectedAppId" type="button" :disabled="actionLoading" @click="proposePersonalToTeam(selectedMemory)"><UsersRound :size="15" />提交为团队记忆</button>
+          <button
+            v-if="selectedMemory.scope !== 'TEAM_APPLICATION' && selectedMemory.status === 'ACTIVE' && selectedAppId"
+            type="button"
+            :disabled="actionLoading || !selectedMemory.contentAvailable"
+            :title="selectedMemory.contentAvailable ? undefined : '正文暂时不可用，请刷新后再提交'"
+            @click="proposePersonalToTeam(selectedMemory)"
+          ><UsersRound :size="15" />提交为团队记忆</button>
           <button v-if="selectedMemory.scope !== 'TEAM_APPLICATION' && selectedMemory.status === 'ACTIVE'" type="button" :disabled="actionLoading" @click="pauseMemory(selectedMemory)"><Pause :size="15" />暂停使用</button>
           <template v-if="selectedMemory.scope === 'TEAM_APPLICATION' && canManageTeam && (selectedMemory.status === 'CANDIDATE' || selectedMemory.status === 'PENDING_CONFIRMATION' || selectedMemory.status === 'CONFLICTED')">
             <button class="memory-primary memory-primary--team" type="button" :disabled="actionLoading" @click="reviewTeam(selectedMemory, 'APPROVE')"><Check :size="15" />批准</button>

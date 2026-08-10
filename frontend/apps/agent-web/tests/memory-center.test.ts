@@ -72,6 +72,7 @@ function createApi() {
     }),
     reviewTeamMemory: vi.fn().mockResolvedValue({ ...teamMemory, status: "ACTIVE", version: 3 }),
     createTeamMemoryProposal: vi.fn().mockResolvedValue(teamMemory),
+    updateQaMemory: vi.fn().mockResolvedValue({ ...personalMemory, version: 3 }),
     reviewMemorySkillProposal: vi.fn().mockResolvedValue({})
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -216,5 +217,34 @@ describe("MemoryCenter", () => {
     expect(await view.findByTestId("memory-unavailable")).toBeTruthy();
     expect(view.getByText(/默认白名单为空，不影响现有对话/)).toBeTruthy();
     expect(api.listPersonalMemories).not.toHaveBeenCalled();
+  });
+
+  it("never edits or submits a fallback summary while the full document is unavailable", async () => {
+    const api = createApi();
+    vi.mocked(api.listPersonalMemories).mockResolvedValue({
+      items: [{
+        ...personalMemory,
+        content: "",
+        contentAvailable: false,
+        displaySummary: "这只是截断后的治理摘要"
+      }],
+      page: 1,
+      size: 100,
+      total: 1
+    });
+    const view = renderCenter(api);
+
+    const card = await view.findByTestId("memory-card-mem_personal_1");
+    const edit = card.querySelector<HTMLButtonElement>('button[aria-label="编辑记忆"]')!;
+    expect(edit.disabled).toBe(true);
+    await fireEvent.click(edit);
+    expect(view.container.querySelector(".memory-editor textarea")).toBeNull();
+    expect(api.updateQaMemory).not.toHaveBeenCalled();
+
+    await fireEvent.click(card.querySelector(".memory-card__main")!);
+    const propose = await view.findByRole("button", { name: "提交为团队记忆" });
+    expect((propose as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(propose);
+    expect(api.createTeamMemoryProposal).not.toHaveBeenCalled();
   });
 });

@@ -41,6 +41,7 @@ import java.util.UUID;
 import com.enterprise.testagent.model.gateway.ModelGatewayCatalogService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 个人/团队记忆治理、审核、使用记录和 Skill 提案的唯一业务入口。 */
 @Service
@@ -164,6 +165,7 @@ public class QaMemoryApplicationService {
         return MemoryView.from(memory, safeContent, true);
     }
 
+    @Transactional
     public MemoryView createTeamCandidate(
             UserId userId, String applicationId, String content) {
         return createTeamCandidate(userId, applicationId, content, null);
@@ -173,6 +175,7 @@ public class QaMemoryApplicationService {
      * 团队记忆始终由用户显式提交。sourceMemoryId 可把个人记忆的安全证据引用带入候选，
      * 只复制 Session/Run ID 与摘要，不复制任何原始消息正文。
      */
+    @Transactional
     public MemoryView createTeamCandidate(
             UserId userId, String applicationId, String content, String sourceMemoryId) {
         requireEnabled(userId);
@@ -226,30 +229,33 @@ public class QaMemoryApplicationService {
         return MemoryView.from(memory, safeContent, true);
     }
 
+    @Transactional
     public MemoryView update(
             UserId userId, String memoryId, String content,
             long expectedVersion, boolean appAdmin) {
         requireEnabled(userId);
-        QaMemory current = requireAccessible(userId, new MemoryId(memoryId));
+        QaMemory current = requireAccessibleForUpdate(userId, new MemoryId(memoryId));
         requireMutationAuthority(userId, current, appAdmin);
         requireVersion(current, expectedVersion);
         String safeContent = content == null ? documentContent(current) : safety.requireSafeContent(content);
         if (current.mem0MemoryId() == null) {
             throw new PlatformException(ErrorCode.MEMORY_UNAVAILABLE, "记忆正文尚未同步到 Mem0");
         }
-        documents.update(current.mem0MemoryId(), safeContent, Map.of("source", current.source().name()),
-                current.scope().name(), current.applicationId(),
-                manualContext(userId, memoryId + ":" + expectedVersion));
         Instant now = clock.instant();
         QaMemory updated = copy(current, current.status(), current.taskTypes(), safety.displaySummary(safeContent),
                 current.confirmedAt(), current.supersededByMemoryId(), expectedVersion + 1, "SYNCED", now);
         persistExpected(updated, expectedVersion);
+        // 普通编辑不携带 scope，避免把团队编辑误解释为“个人范围迁移”。数据库事务未提交前
+        // 完成可幂等的 Mem0 更新；外部失败会回滚平台状态，同版本重试可安全续作。
+        documents.update(current.mem0MemoryId(), safeContent, Map.of("source", current.source().name()),
+                null, null, manualContext(userId, memoryId + ":" + expectedVersion));
         return MemoryView.from(updated, safeContent, true);
     }
 
+    @Transactional
     public MemoryView pausePersonal(UserId userId, String memoryId, long expectedVersion) {
         requireEnabled(userId);
-        QaMemory current = requireAccessible(userId, new MemoryId(memoryId));
+        QaMemory current = requireAccessibleForUpdate(userId, new MemoryId(memoryId));
         if (current.scope() == MemoryScope.TEAM_APPLICATION || !userId.value().equals(current.ownerUserId())) {
             throw forbidden("只能暂停自己的个人记忆");
         }
@@ -266,19 +272,16 @@ public class QaMemoryApplicationService {
     }
 
     /** 用户显式把当前 Application 个人记忆提升为个人全局；不会自动扩大团队范围。 */
+    @Transactional
     public MemoryView promotePersonalGlobal(UserId userId, String memoryId, long expectedVersion) {
         requireEnabled(userId);
-        QaMemory current = requireAccessible(userId, new MemoryId(memoryId));
+        QaMemory current = requireAccessibleForUpdate(userId, new MemoryId(memoryId));
         if (current.scope() != MemoryScope.PERSONAL_APPLICATION
                 || !userId.value().equals(current.ownerUserId())) {
             throw validation("只有自己的 Application 个人记忆可以提升为全局");
         }
         requireVersion(current, expectedVersion);
         String content = documentContent(current);
-        documents.update(
-                current.mem0MemoryId(), content, Map.of("source", current.source().name()),
-                MemoryScope.PERSONAL_GLOBAL.name(), null,
-                manualContext(userId, memoryId + ":promote:" + expectedVersion));
         Instant now = clock.instant();
         QaMemory updated = new QaMemory(
                 current.memoryId(), current.mem0MemoryId(), MemoryScope.PERSONAL_GLOBAL,
@@ -288,30 +291,36 @@ public class QaMemoryApplicationService {
                 current.confirmedAt(), current.supersededByMemoryId(), current.createdByUserId(),
                 expectedVersion + 1, current.vectorSyncStatus(), current.createdAt(), now);
         persistExpected(updated, expectedVersion);
+        documents.update(
+                current.mem0MemoryId(), content, Map.of("source", current.source().name()),
+                MemoryScope.PERSONAL_GLOBAL.name(), null,
+                manualContext(userId, memoryId + ":promote:" + expectedVersion));
         return MemoryView.from(updated, content, true);
     }
 
+    @Transactional
     public MemoryView archive(
             UserId userId, String memoryId, long expectedVersion, boolean appAdmin) {
         requireEnabled(userId);
-        QaMemory current = requireAccessible(userId, new MemoryId(memoryId));
+        QaMemory current = requireAccessibleForUpdate(userId, new MemoryId(memoryId));
         requireMutationAuthority(userId, current, appAdmin);
         requireVersion(current, expectedVersion);
-        if (current.mem0MemoryId() != null) {
-            documents.delete(current.mem0MemoryId(), manualContext(userId, memoryId + ":archive:" + expectedVersion));
-        }
         Instant now = clock.instant();
         QaMemory updated = copy(current, MemoryStatus.ARCHIVED, current.taskTypes(), current.displaySummary(),
                 current.confirmedAt(), current.supersededByMemoryId(), expectedVersion + 1,
                 current.vectorSyncStatus(), now);
         persistExpected(updated, expectedVersion);
-        return view(updated);
+        if (current.mem0MemoryId() != null) {
+            documents.delete(current.mem0MemoryId(), manualContext(userId, memoryId + ":archive:" + expectedVersion));
+        }
+        return MemoryView.from(updated, "", false);
     }
 
+    @Transactional
     public MemoryView reviewTeam(
             UserId adminUserId, String memoryId, String decision, String comment, long expectedVersion) {
         requireEnabled(adminUserId);
-        QaMemory current = requireAccessible(adminUserId, new MemoryId(memoryId));
+        QaMemory current = requireAccessibleForUpdate(adminUserId, new MemoryId(memoryId));
         if (current.scope() != MemoryScope.TEAM_APPLICATION) {
             throw validation("只有团队候选需要审核");
         }
@@ -328,10 +337,6 @@ public class QaMemoryApplicationService {
             case "REJECT", "REJECTED" -> MemoryStatus.REJECTED;
             default -> throw validation("审核决定只支持 APPROVE 或 REJECT");
         };
-        if (status == MemoryStatus.REJECTED && current.mem0MemoryId() != null) {
-            documents.delete(current.mem0MemoryId(), manualContext(
-                    adminUserId, memoryId + ":reject:" + expectedVersion));
-        }
         Instant now = clock.instant();
         QaMemory updated = copy(current, status, current.taskTypes(), current.displaySummary(),
                 status == MemoryStatus.ACTIVE ? now : current.confirmedAt(), current.supersededByMemoryId(),
@@ -341,7 +346,13 @@ public class QaMemoryApplicationService {
                 id("mrev_"), current.memoryId(), current.applicationId(), current.createdByUserId(),
                 adminUserId.value(), status == MemoryStatus.ACTIVE ? "APPROVED" : "REJECTED",
                 optional(comment), now, now));
-        return view(updated);
+        if (status == MemoryStatus.REJECTED && current.mem0MemoryId() != null) {
+            documents.delete(current.mem0MemoryId(), manualContext(
+                    adminUserId, memoryId + ":reject:" + expectedVersion));
+        }
+        return status == MemoryStatus.REJECTED
+                ? MemoryView.from(updated, "", false)
+                : view(updated);
     }
 
     public List<MemoryEvidenceView> evidence(UserId userId, String memoryId) {
@@ -382,11 +393,15 @@ public class QaMemoryApplicationService {
     public Page<SkillProposalView> listSkillProposals(
             UserId userId, String applicationId, int page, int size) {
         requireEnabled(userId);
+        String appId = optional(applicationId);
+        if (appId != null) {
+            requireMember(userId, appId);
+        }
         PageWindow window = pageWindow(page, size);
         return new Page<>(repository.listSkillProposals(
-                        userId.value(), optional(applicationId), window.offset(), window.size())
+                        userId.value(), appId, window.offset(), window.size())
                         .stream().map(SkillProposalView::from).toList(),
-                repository.countSkillProposals(userId.value(), optional(applicationId)),
+                repository.countSkillProposals(userId.value(), appId),
                 window.page(), window.size());
     }
 
@@ -571,18 +586,18 @@ public class QaMemoryApplicationService {
 
     private MemoryView view(QaMemory memory) {
         if (memory.mem0MemoryId() == null) {
-            return MemoryView.from(memory, memory.displaySummary(), false);
+            return MemoryView.from(memory, "", false);
         }
         try {
             Optional<MemoryDocumentStore.StoredDocument> document = documents.get(memory.mem0MemoryId());
             return document.map(value -> MemoryView.from(memory, value.content(), true))
-                    .orElseGet(() -> MemoryView.from(memory, memory.displaySummary(), false));
+                    .orElseGet(() -> MemoryView.from(memory, "", false));
         } catch (PlatformException failure) {
             if (failure.errorCode() != ErrorCode.MEMORY_UNAVAILABLE
                     && failure.errorCode() != ErrorCode.MEMORY_TIMEOUT) {
                 throw failure;
             }
-            return MemoryView.from(memory, memory.displaySummary(), false);
+            return MemoryView.from(memory, "", false);
         }
     }
 
@@ -634,6 +649,17 @@ public class QaMemoryApplicationService {
 
     private QaMemory requireAccessible(UserId userId, MemoryId memoryId) {
         QaMemory memory = repository.findById(memoryId).orElseThrow(() -> notFound("记忆不存在"));
+        return requireAccessible(userId, memory);
+    }
+
+    /** 写入口必须在 @Transactional 方法内先取得行锁，避免多 Java 节点交错修改 Mem0 与治理状态。 */
+    private QaMemory requireAccessibleForUpdate(UserId userId, MemoryId memoryId) {
+        QaMemory memory = repository.findByIdForUpdate(memoryId)
+                .orElseThrow(() -> notFound("记忆不存在"));
+        return requireAccessible(userId, memory);
+    }
+
+    private QaMemory requireAccessible(UserId userId, QaMemory memory) {
         if (memory.scope() == MemoryScope.TEAM_APPLICATION) {
             requireMember(userId, memory.applicationId());
         } else if (!userId.value().equals(memory.ownerUserId())) {
@@ -697,7 +723,10 @@ public class QaMemoryApplicationService {
     private void deleteBestEffort(
             String documentId, MemoryDocumentStore.RequestContext context) {
         try {
-            documents.delete(documentId, context);
+            MemoryDocumentStore.RequestContext compensation = new MemoryDocumentStore.RequestContext(
+                    context.requesterUserId(), context.runId(), context.sessionId(),
+                    context.operationId() + ":compensate-delete");
+            documents.delete(documentId, compensation);
         } catch (RuntimeException ignored) {
             // 主事务失败时只做补偿尝试，不能把第三方错误覆盖为数据库错误。
         }

@@ -35,8 +35,18 @@
         created_by_user_id, version, vector_sync_status, created_at, updated_at
     </sql>
 
+    <sql id="MemoryValues">
+        #{memoryId}, #{mem0MemoryId}, #{scope}, #{ownerUserId}, #{applicationId}, #{status}, #{source},
+        #{taskTypesCsv}, #{displaySummary}, #{confidence}, #{distinctSessionCount}, #{distinctUserCount},
+        #{firstObservedAt}, #{lastObservedAt}, #{confirmedAt}, #{supersededByMemoryId},
+        #{createdByUserId}, #{version}, #{vectorSyncStatus}, #{createdAt}, #{updatedAt}
+    </sql>
+
     <select id="findMemory" resultMap="MemoryMap">
         select <include refid="MemoryColumns"/> from qa_memories where memory_id = #{memoryId}
+    </select>
+    <select id="findMemoryForUpdate" resultMap="MemoryMap">
+        select <include refid="MemoryColumns"/> from qa_memories where memory_id = #{memoryId} for update
     </select>
     <select id="findMemoryByMem0Id" resultMap="MemoryMap">
         select <include refid="MemoryColumns"/> from qa_memories where mem0_memory_id = #{mem0MemoryId}
@@ -82,10 +92,24 @@
         insert into qa_memories(
             <include refid="MemoryColumns"/>
         ) values (
-            #{memoryId}, #{mem0MemoryId}, #{scope}, #{ownerUserId}, #{applicationId}, #{status}, #{source},
-            #{taskTypesCsv}, #{displaySummary}, #{confidence}, #{distinctSessionCount}, #{distinctUserCount},
-            #{firstObservedAt}, #{lastObservedAt}, #{confirmedAt}, #{supersededByMemoryId},
-            #{createdByUserId}, #{version}, #{vectorSyncStatus}, #{createdAt}, #{updatedAt}
+            <include refid="MemoryValues"/>
+        )
+    </insert>
+
+    <insert id="insertMemoryIfAbsentByMem0Id" databaseId="postgresql">
+        insert into qa_memories(
+            <include refid="MemoryColumns"/>
+        ) values (
+            <include refid="MemoryValues"/>
+        ) on conflict (mem0_memory_id) do nothing
+    </insert>
+    <insert id="insertMemoryIfAbsentByMem0Id">
+        insert into qa_memories(
+            <include refid="MemoryColumns"/>
+        )
+        select <include refid="MemoryValues"/>
+        where not exists (
+            select 1 from qa_memories where mem0_memory_id = #{mem0MemoryId}
         )
     </insert>
 
@@ -238,10 +262,10 @@
         from qa_memory_skill_proposals where proposal_id = #{proposalId}
     </select>
     <sql id="SkillProposalWhere">
-        (m.owner_user_id = #{userId} or exists (
+        exists (
             select 1 from application_members am
             where am.app_id = p.application_id and am.user_id = #{userId} and am.deleted_at is null
-        ))
+        )
         <if test="applicationId != null and applicationId != ''">and p.application_id = #{applicationId}</if>
     </sql>
     <select id="listSkillProposals" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$SkillProposalRow">

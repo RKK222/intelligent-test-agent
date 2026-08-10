@@ -17,6 +17,7 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface QaMemoryMapper {
     MemoryRow findMemory(@Param("memoryId") String memoryId);
+    MemoryRow findMemoryForUpdate(@Param("memoryId") String memoryId);
     MemoryRow findMemoryByMem0Id(@Param("mem0MemoryId") String mem0MemoryId);
     List<MemoryRow> listPersonal(@Param("userId") String userId,
                                  @Param("applicationId") String applicationId,
@@ -33,6 +34,7 @@ public interface QaMemoryMapper {
                    @Param("applicationId") String applicationId,
                    @Param("status") String status);
     int insertMemory(MemoryRow row);
+    int insertMemoryIfAbsentByMem0Id(MemoryRow row);
     int updateMemory(@Param("row") MemoryRow row, @Param("expectedVersion") long expectedVersion);
     int insertEvidence(EvidenceRow row);
     List<EvidenceRow> listEvidence(@Param("memoryId") String memoryId);

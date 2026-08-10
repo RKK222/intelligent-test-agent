@@ -49,6 +49,11 @@ public class MyBatisQaMemoryRepository implements QaMemoryRepository {
     }
 
     @Override
+    public Optional<QaMemory> findByIdForUpdate(MemoryId memoryId) {
+        return Optional.ofNullable(mapper.findMemoryForUpdate(memoryId.value())).map(this::toDomain);
+    }
+
+    @Override
     public Optional<QaMemory> findByMem0MemoryId(String mem0MemoryId) {
         if (mem0MemoryId == null || mem0MemoryId.isBlank()) {
             return Optional.empty();
@@ -83,6 +88,11 @@ public class MyBatisQaMemoryRepository implements QaMemoryRepository {
     @Override
     public void insertMemory(QaMemory memory) {
         mapper.insertMemory(toRow(memory));
+    }
+
+    @Override
+    public boolean insertMemoryIfAbsentByMem0MemoryId(QaMemory memory) {
+        return mapper.insertMemoryIfAbsentByMem0Id(toRow(memory)) == 1;
     }
 
     @Override

@@ -156,7 +156,18 @@ public class MemoryLearningWorker {
                 MemorySource.NATIVE, List.of(QaTaskType.GENERAL), safety.displaySummary(content),
                 0.0d, 1, 1, now, now, now, null, job.userId(), 0L,
                 "SYNCED", now, now);
-        repository.insertMemory(memory);
+        if (!repository.insertMemoryIfAbsentByMem0MemoryId(memory)) {
+            // 多节点或并行 Run 可能同时收到同一 Mem0 逻辑 ID；唯一约束的胜者负责建档，
+            // 其余 worker 只向胜者追加本 Run 的安全证据，不能制造重复治理记录。
+            OptionalMemory concurrent = existing(document.id(), job.runId());
+            if (concurrent.memory() == null) {
+                throw new IllegalStateException("Mem0 逻辑记忆去重后未找到平台治理记录");
+            }
+            if (!concurrent.alreadyObserved()) {
+                repository.insertEvidence(evidence(job, concurrent.memory().memoryId(), content, now));
+            }
+            return;
+        }
         repository.insertEvidence(evidence(job, memory.memoryId(), content, now));
     }
 

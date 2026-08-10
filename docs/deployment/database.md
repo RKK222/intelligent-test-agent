@@ -23,6 +23,12 @@
 
 独立记忆 PostgreSQL/pgvector 不扫描 Java Flyway。`memory-service/alembic` 唯一管理共享 Mem0 history、operation 幂等、逻辑记录/版本历史、profile 投影和补偿 outbox；只允许一个 migration job 在副本启动前执行。Mem0 副本没有本地 history 或数据卷。平台库和记忆库必须记录同一变更窗口的独立一致恢复点；禁止第二套 Java migration runner。详细部署、备份与回滚见 `docs/deployment/qa-memory.md`。
 
+## V20260810090000 记忆逻辑身份唯一约束
+
+`V20260810090000__enforce_qa_memory_identity.sql` 为 `qa_memories.mem0_memory_id` 增加唯一约束，保证独立 Mem0 中一个逻辑记忆在平台治理面最多只有一条记录；空值继续允许，兼容尚未同步正文的历史治理记录。原生学习写入使用 MyBatis XML 的 PostgreSQL `ON CONFLICT DO NOTHING`，并发失败方读取胜者后只追加本 Run 的安全证据。源码与最终应用 JAR 内嵌 persistence JAR 已核对 SHA-256：`619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`。
+
+升级前必须执行 `select mem0_memory_id, count(*) from qa_memories where mem0_memory_id is not null group by mem0_memory_id having count(*) > 1`。若返回任何记录，必须停止升级并由数据所有者确认保留记录及证据、审核、usage、Skill 提案的归并方案；不得让 migration 自动删除治理或审计数据，也不得使用 Flyway `repair` 掩盖。该 migration 是高于两条已执行记忆基线的前向结构变更，不改写其版本或 checksum。
+
 ## V20260807230000 批量会话归因
 
 `V20260807230000__add_batch_session_attribution.sql` 为 `sessions` 增加 `batch_mode boolean not null default false`、`batch_id varchar(128)` 和 `batch_item_request_id varchar(128)`。普通会话继续使用默认值且两个 ID 必须为空；批量会话必须存在 `created_by_user_id` 和两个非空白 ID。部分唯一索引 `uk_sessions_batch_item_request(created_by_user_id, batch_item_request_id)` 保证同一用户的单项创建幂等，不同用户互不冲突；`idx_sessions_batch_created(batch_id, created_at)` 只服务后续运营统计查询。本期不新增报表，也不改变 `source_type`：立即批量保持 `MANUAL`，定时批量保持 `SCHEDULED_TASK`。

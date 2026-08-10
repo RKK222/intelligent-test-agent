@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.enterprise.testagent.domain.memory.MemoryLearningEvidence;
 import com.enterprise.testagent.domain.memory.MemoryLearningEvidenceRepository;
 import com.enterprise.testagent.domain.memory.MemoryLearningJob;
+import com.enterprise.testagent.domain.memory.MemoryId;
 import com.enterprise.testagent.domain.memory.MemoryScope;
 import com.enterprise.testagent.domain.memory.MemorySettings;
 import com.enterprise.testagent.domain.memory.MemorySource;
@@ -53,6 +54,7 @@ class MemoryLearningWorkerTest {
         when(repository.isWhitelisted("usr_1")).thenReturn(true);
         when(repository.loadSettings()).thenReturn(new MemorySettings(
                 "fixed-chat", null, "memory-bge-small-zh-v1.5", 0L, null, NOW));
+        when(repository.insertMemoryIfAbsentByMem0MemoryId(any())).thenReturn(true);
         when(evidence.findByRunId("run_1")).thenReturn(Optional.of(new MemoryLearningEvidence(
                 "run_1", List.of(
                         new MemoryLearningEvidence.Message("user", "以后回答都使用中文", NOW),
@@ -85,7 +87,7 @@ class MemoryLearningWorkerTest {
             assertThat((List<?>) value.messages()).hasSize(2);
         });
         ArgumentCaptor<QaMemory> persisted = ArgumentCaptor.forClass(QaMemory.class);
-        verify(repository).insertMemory(persisted.capture());
+        verify(repository).insertMemoryIfAbsentByMem0MemoryId(persisted.capture());
         assertThat(persisted.getValue()).satisfies(memory -> {
             assertThat(memory.mem0MemoryId()).isEqualTo("logical-memory-0001");
             assertThat(memory.scope()).isEqualTo(MemoryScope.PERSONAL_APPLICATION);
@@ -132,8 +134,34 @@ class MemoryLearningWorkerTest {
 
         worker.processSafely(job);
 
-        verify(repository, never()).insertMemory(any());
+        verify(repository, never()).insertMemoryIfAbsentByMem0MemoryId(any());
         verify(repository, never()).insertEvidence(any());
+        verify(repository).completeLearningJob("mlj_1", "worker_1", NOW);
+    }
+
+    @Test
+    void concurrentWinnerOwnsTheGovernanceRowAndCurrentRunOnlyAddsEvidence() {
+        MemoryLearningJob job = job();
+        QaMemory winner = new QaMemory(
+                new MemoryId("mem_winner"), "logical-memory-0001",
+                MemoryScope.PERSONAL_APPLICATION, "usr_1", "app_1",
+                MemoryStatus.ACTIVE, MemorySource.NATIVE,
+                List.of(com.enterprise.testagent.domain.memory.QaTaskType.GENERAL),
+                "用户偏好使用中文回答", 0.0d, 1, 1, NOW, NOW, NOW, null,
+                "usr_1", 0L, "SYNCED", NOW, NOW);
+        when(documents.add(any())).thenReturn(List.of(new MemoryDocumentStore.StoredDocument(
+                "logical-memory-0001", "用户偏好使用中文回答", Map.of(), NOW)));
+        when(repository.findByMem0MemoryId("logical-memory-0001"))
+                .thenReturn(Optional.empty(), Optional.of(winner));
+        when(repository.insertMemoryIfAbsentByMem0MemoryId(any())).thenReturn(false);
+        when(repository.listEvidence(winner.memoryId())).thenReturn(List.of());
+
+        worker.processSafely(job);
+
+        ArgumentCaptor<com.enterprise.testagent.domain.memory.MemoryEvidence> persistedEvidence =
+                ArgumentCaptor.forClass(com.enterprise.testagent.domain.memory.MemoryEvidence.class);
+        verify(repository).insertEvidence(persistedEvidence.capture());
+        assertThat(persistedEvidence.getValue().memoryId()).isEqualTo(winner.memoryId());
         verify(repository).completeLearningJob("mlj_1", "worker_1", NOW);
     }
 
@@ -147,7 +175,7 @@ class MemoryLearningWorkerTest {
         worker.processSafely(job);
 
         verify(documents, never()).add(any());
-        verify(repository, never()).insertMemory(any());
+        verify(repository, never()).insertMemoryIfAbsentByMem0MemoryId(any());
         verify(repository).completeLearningJob("mlj_legacy", "worker_1", NOW);
     }
 
