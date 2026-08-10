@@ -9,6 +9,34 @@ import AssistantThread from "../src/AssistantThread.vue";
 const waitMarkdown = () => new Promise((resolve) => setTimeout(resolve, 400));
 
 describe("OpencodeTimeline", () => {
+  it("keeps an empty remote user envelope hidden until the authoritative shared message arrives", async () => {
+    const emptyEnvelope = {
+      ...userMessage("msg_shared_remote", ""),
+      senderUserId: "usr_owner",
+      senderUsername: "会话所属人"
+    };
+    const { container, rerender } = render(OpencodeTimeline, {
+      props: {
+        state: createOpencodeLikeState({ messages: [emptyEnvelope], running: true }),
+        currentUserId: "usr_shared_member"
+      }
+    });
+
+    expect(container.querySelectorAll("[data-testid='oc-user-message']")).toHaveLength(0);
+
+    await rerender({
+      state: createOpencodeLikeState({
+        messages: [{ ...emptyEnvelope, text: "A 发出的多人同步消息" }],
+        running: true
+      }),
+      currentUserId: "usr_shared_member"
+    });
+
+    expect(container.querySelectorAll("[data-testid='oc-user-message']")).toHaveLength(1);
+    expect(container.querySelector(".oc-user-message__sender")?.textContent).toBe("会话所属人");
+    expect(container.querySelector(".oc-user-message__bubble")?.textContent).toContain("A 发出的多人同步消息");
+  });
+
   it("marks a user turn that originated from a scheduled night task", () => {
     const scheduled = {
       ...userMessage("msg_night_1", "执行夜间回归"),

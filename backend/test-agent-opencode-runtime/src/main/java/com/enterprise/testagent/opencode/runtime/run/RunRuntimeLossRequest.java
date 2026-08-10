@@ -14,6 +14,9 @@ public record RunRuntimeLossRequest(
         RunId runId,
         SessionId sessionId,
         UserId userId,
+        UserId messageSenderUserId,
+        String messageSenderUnifiedAuthId,
+        boolean messageSentBySharedUser,
         String agentId,
         String dispatchMessageId,
         String remoteSessionId,
@@ -21,6 +24,22 @@ public record RunRuntimeLossRequest(
         ConversationSourceType sourceType,
         String sourceRefId,
         String traceId) {
+
+    /** 兼容新增分享发送人归因前的运行态丢失请求。 */
+    public RunRuntimeLossRequest(
+            RunId runId,
+            SessionId sessionId,
+            UserId userId,
+            String agentId,
+            String dispatchMessageId,
+            String remoteSessionId,
+            String workspaceRoot,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            String traceId) {
+        this(runId, sessionId, userId, userId, null, false, agentId, dispatchMessageId,
+                remoteSessionId, workspaceRoot, sourceType, sourceRefId, traceId);
+    }
 
     /** 校验收敛、远端取消和关系型终态投影必需的安全字段。 */
     public RunRuntimeLossRequest {

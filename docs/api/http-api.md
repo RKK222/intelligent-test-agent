@@ -61,6 +61,7 @@
 | `/workflow-api/v1/**` | 独立 Python 浏览器 API；Nginx 直达，不属于 Java Controller URL。 |
 | `/api/internal/platform/scheduler-management/**` | 已作废，统一返回 `410 API_GONE`；周期任务在 XXL iframe 管理。 |
 | `/api/internal/platform/system-management` | 超级管理员用户管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
+| `/api/external/v1/**` | 受信内网服务端工具调用入口，强制使用工具编码和平台生成的 API Key Header，不接受用户 JWT 或静态 Token 替代。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
 
 当前已落地的新平台入口：
@@ -109,6 +110,8 @@
 | `system-management` | `/api/internal/platform/system-management/users` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/users/{userId}/roles` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/roles` | 无旧 URL |
+| `system-management` | `/api/internal/platform/system-management/api-keys` | 无旧 URL；仅 `SUPER_ADMIN` 管理外部工具凭据。 |
+| `integration/external-api` | `/api/external/v1/users/{unifiedAuthId}/ssh-key` | 无旧 URL；返回 TAEK1 加密 SSH 私钥信封。 |
 | `integration/toolbox` | `/api/internal/platform/toolbox/tools`、`/api/internal/platform/toolbox/tools/{toolId}/clicks` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
@@ -119,7 +122,7 @@
 
 | 新 URL | 平台业务实现 |
 |---|---|
-| `/api/internal/agent/{agentId}/sessions/{sessionId}/run-context` | 为当前登录用户签发会话运行上下文。 |
+| `/api/internal/agent/{agentId}/sessions/{sessionId}/run-context` | 普通请求为当前登录用户签发；分享请求校验真实 actor 后为会话所属人签发运行上下文。 |
 | `/api/internal/agent/{agentId}/runs` | 启动 Run；默认前端传 `opencode`。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/events` | 订阅 RunEvent SSE。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` | 查询当前 Run scope 的 root + child session message snapshot。 |
@@ -297,8 +300,11 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `FORBIDDEN` | 403 | 无权限 |
 | `NOT_FOUND` | 404 | 资源不存在 |
 | `CONFLICT` | 409 | 状态冲突 |
+| `SESSION_BUSY` | 409 | 会话已有活动 Run；所有参与方必须等待终态释放 |
+| `SESSION_SHARE_VERSION_CONFLICT` | 409 | 分享设置已被其他操作更新 |
 | `CONVERSATION_CONTEXT_REQUIRED` | 409 | 需要会话运行上下文 |
 | `CONVERSATION_CONTEXT_EXPIRED` | 409 | 会话运行上下文已过期 |
+| `SESSION_SHARE_EXPIRED` | 410 | 分享已过期、取消、移除或因会话归档而失效；`details.reason` 给出稳定原因 |
 | `RUN_DETAILS_EXPIRED` | 410 | 运行详情已过期 |
 | `RATE_LIMITED` | 429 | 请求过于频繁 |
 | `INTERNAL_ERROR` | 500 | 服务器内部错误 |
@@ -307,6 +313,7 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
 | `RUNTIME_STATE_UNAVAILABLE` | 503 | 运行态存储不可用 |
 | `NIGHT_EXECUTION_UNAVAILABLE` | 503 | 夜间执行功能不可用 |
+| `EXTERNAL_API_UNAVAILABLE` | 503 | 外部 API 认证服务不可用 |
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
 | `GIT_TIMEOUT` | 504 | Git 操作超时 |
 
@@ -1969,6 +1976,47 @@ Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` | 同上，内部平台入口。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` | 查询会话最近的非终态 Run；用户已有 Redis 运行态 marker 时只读 Session active 索引，legacy 用户兼容查询数据库；没有时 `data=null`。 |
 
+#### 会话协作分享 API
+
+分享链接属于平台协作能力，不是 OpenCode 原生 share。每个 Session 永久只生成一个 256 位随机 `shareId`，取消、过期后重新启用仍复用 `/s/{shareId}`。除候选、管理和列表外，分享范围请求必须使用登录用户自己的认证信息，并携带：
+
+```http
+X-Test-Agent-Session-Share: shr_<64 位十六进制>
+```
+
+该头只建立 `DelegatedOperationContext`，不会替换真实 `AuthPrincipal`。服务端保存实际 actor 与统一认证号，但 OpenCode、进程、Workspace、Git/SSH 和 Run 的执行所属人始终是会话所属人。分享头跨 Java 转发后由目标 Java 重新校验精确 share/version/actor/session/workspace；普通账号 API、候选用户、分享列表和所属人管理接口不得携带该头。
+
+| 方法 | 路径 | 权限与用途 |
+|---|---|---|
+| `GET` | `/api/internal/platform/opencode-runtime/session-share-candidates?q=&page=&size=` | 已登录用户分页搜索可分享的有效平台用户；仅返回 `userId/unifiedAuthId/username`，排除自己。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/collaboration-share` | 仅所属人查询当前设置；从未分享时 `data=null`。 |
+| `PUT` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/collaboration-share` | 仅所属人首次创建、全量更新或重新启用；更新必须携带当前 `expectedVersion`，首次创建可为 `null`。 |
+| `DELETE` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/collaboration-share?expectedVersion=` | 仅所属人取消；保留 shareId、成员和审计历史。 |
+| `GET` | `/api/internal/platform/opencode-runtime/session-shares?page=&size=` | “分享给我”列表，不校验当前用户是否仍属于会话工作区；保留失效历史。 |
+| `GET` | `/api/internal/platform/opencode-runtime/session-shares/access` | 携带分享头解析固定 Session/Workspace、权限和安全参与者目录。 |
+| `GET` | `/api/internal/platform/opencode-runtime/session-shares/runtime-state/events` | 携带分享头订阅单会话 active Run、权限版本、有效期和失效通知 SSE。 |
+
+`PUT` 请求是全量成员语义，最多 50 名成员；缺失的历史成员被软移除，重新加入复用历史记录。`expiresAt` 必须晚于操作时刻且不得晚于操作时刻加 7 天：
+
+```json
+{
+  "expectedVersion": 3,
+  "expiresAt": "2026-08-16T02:00:00Z",
+  "members": [
+    { "userId": "usr_reader", "canChat": false },
+    { "userId": "usr_operator", "canChat": true }
+  ]
+}
+```
+
+分享设置响应包含 `shareId/sharePath/sessionId/workspaceId/ownerUserId/status/expiresAt/version/members/createdAt/updatedAt/revokedAt`。成员项包含 `userId/unifiedAuthId/username/canChat/status/sharedAt/updatedAt/removedAt`；存储状态为 `ACTIVE/REMOVED`，列表访问状态会结合分享与会话事实投影为 `ACTIVE/EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED`。
+
+`SessionShareAccess` 包含 `actorUserId/actorUnifiedAuthId/actorUsername/executionOwnerUserId/sessionId/workspaceId/canChat/delegated/ownerAccess/expiresAt/participants`。`participants` 是消息显示名目录，包含所属人和历史成员的最小资料；消息 DTO 不复制用户名快照，前端按 `senderUserId` 从该目录解析显示名。
+
+权限边界：只读成员可以读取会话、消息、Run/SSE、文件树/正文、状态和 Diff；`canChat=true` 可以在固定 Session/Workspace 中发送、写文件、执行当前工作区 Git/终端/command/shell、compact/revert、回复 permission/question、提交反馈和管理自己的定时任务。分享管理、归档/删除、置顶、应用/工作区切换、持久 fork、设置、Agent 配置、源码/Hub、系统管理和服务器终端始终只属于所属人。所属人的当前权限是所有代操作的上限。
+
+停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人后来降为只读仍可停止。最后一条用户消息的撤回重发只允许所属人或源消息发送人；分享发送人操作时必须仍有 `canChat`。任一 Run 为 `PENDING/RUNNING/CANCELLING` 时，所有参与方的新发送都返回 `409 SESSION_BUSY`。
+
 旧 `/api/sessions/**` 和 `/api/workspaces/{workspaceId}/sessions` 已作废，返回 `410 API_GONE`。
 
 `POST /api/internal/platform/opencode-runtime/sessions` 请求体：
@@ -2006,6 +2054,20 @@ Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST
 
 `SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`、`workspaceContext`，以及可选来源字段 `sourceType/sourceRefId`。普通会话默认为 `MANUAL/null`；由夜间任务预创建的会话返回 `SCHEDULED_TASK/net_...`。旧后端缺失来源字段时前端按普通会话兼容。
 
+仅变更 `pinned` 时，服务端保留会话原有 `updatedAt`：置顶只改变分组，取消置顶后会话回到普通组中由原 `updatedAt` 决定的位置。只有标题实际变化等会话内容更新才刷新 `updatedAt`。
+
+可选分享状态字段 `shareStatus/isShared/shareExpired` 仅在历史列表（`GET /api/internal/platform/opencode-runtime/sessions`）中派生返回，用于列表直接展示是否已分享及是否过期：
+
+```json
+{
+  "shareStatus": "ACTIVE",
+  "isShared": true,
+  "shareExpired": false
+}
+```
+
+`shareStatus` 由 `session_shares` 左连接派生（分享与会话一对一）：未分享为 `null`；已分享取 `REVOKED` 优先，其次 `expires_at <= current_timestamp` 为 `EXPIRED`，否则为 `ACTIVE`。`isShared` 仅在存在分享记录时为 `true`；`shareExpired` 在 `EXPIRED` 或 `REVOKED` 时为 `true`。单会话详情、创建、更新、删除等接口不附带分享状态（所属人当前分享设置由 `GET /sessions/{sessionId}/collaboration-share` 独立读取），旧后端缺失时前端按未分享兼容。
+
 `workspaceContext` 仅在用户历史列表中尽量补齐，详情/更新/删除等单会话接口可为 `null`：
 
 ```json
@@ -2021,8 +2083,8 @@ Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST
 
 兼容要求：
 
-- `GET /api/internal/platform/opencode-runtime/sessions` 只返回当前登录用户的历史会话。用户归因按 `sessions.created_by_user_id` 优先，并用 `runs.triggered_by_user_id`、`session_messages.sender_user_id` 兜底兼容旧会话；完全没有用户归因的旧会话不返回，避免泄露其他用户历史。
-- 列表严格按 `updatedAt desc, id desc` 排序，`pinned` 字段保留在响应中但不再影响历史排序。
+- `GET /api/internal/platform/opencode-runtime/sessions` 只返回当前登录用户的普通历史会话。用户归因按 `sessions.created_by_user_id` 优先，并用 `runs.triggered_by_user_id`、非分享消息的 `session_messages.sender_user_id` 兜底兼容旧会话；`sent_by_shared_user=true` 不能给实际发送人建立普通历史访问权，分享会话只从 `/session-shares` 进入。完全没有用户归因的旧会话不返回，避免泄露其他用户历史。
+- 列表严格按 `pinned desc, updatedAt desc, id desc` 排序：置顶会话始终位于普通会话之前，两组内部继续按更新时间和数据库自增 ID 倒序。
 - 列表查询不校验当前用户是否仍属于历史会话所属应用，确保用户被移出应用后仍能看到自己的历史；前端点击历史会话时再调用 `/workspace-management/workspaces/{workspaceId}/recent` 校验切换权限，失败后只能只读查看该会话。
 - `workspaceContext.workspaceName` 对托管工作区展示应用工作空间模板名；非托管工作区回退运行态 `workspaces.name`。应用、版本或模板缺失时对应字段可为 `null`。
 - `DELETE /api/internal/platform/opencode-runtime/sessions/{sessionId}` 为软删除，不删除消息、Run、事件或远端 opencode 映射；普通详情、列表和消息追加会把 `ARCHIVED` 会话视为不存在。
@@ -2064,6 +2126,10 @@ Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST
 | `summaryStatus` | 摘要状态；正常、截断和安全兜底分别使用 `COMPLETE`、`PARTIAL`、`FALLBACK`。 |
 | `summaryVersion` | 确定性摘要规则版本；旧数据可空。 |
 | `sourceType` / `sourceRefId` | 可选消息来源；夜间任务启动的 USER 消息为 `SCHEDULED_TASK/net_...`，旧数据可空。 |
+| `senderUserId` | 实际发送消息的平台用户；普通旧数据可空。 |
+| `senderUsername` | 实际发送人的当前平台姓名；用户目录无法解析或旧后端响应时可空。 |
+| `senderUnifiedAuthId` | 实际发送人的统一认证号快照；可空。 |
+| `sentBySharedUser` | 是否由被分享人代所属人发送；旧响应缺失时按 `false`。 |
 
 ### Run、Cancel 和 Event API
 
@@ -2633,7 +2699,7 @@ Base URL：`/api/internal/platform/scheduler-management`
 
 ### 夜间异步执行 API
 
-Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文单列的系统内部批量入口外，所有入口要求当前登录用户，owner 始终取认证主体；任务完整输入不会出现在响应、XXL 参数/结果、跨服务器请求或日志中。调度模式分为 `NIGHT_WINDOW` 和 `ADMIN_CUSTOM`：前者固定使用 `Asia/Shanghai` 21:00 至次日 07:00 的 15 分钟启动时段；后者仅允许 `SUPER_ADMIN` 选择下一完整分钟至未来 24 小时内的任意完整分钟，允许白天执行，显示区间为 1 分钟、分发重试窗口为 15 分钟且不占用夜间容量。`scheduleMode` 缺失时按 `NIGHT_WINDOW` 兼容。夜间全局容量来自 `platform=all` 的可编辑通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY`，migration 初始化为 `20`。各 Java 实例启动时加载到内存，修改后经现有通用参数广播刷新；后端根据每个夜间时段的全局占用选择最低占用且最早的推荐时段，前端可以调整。
+Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文单列的系统内部批量入口外，所有入口要求当前登录用户；普通入口 owner 取认证主体，携带有效分享头时 owner 取会话所属人并另外记录真实 creator。任务完整输入不会出现在响应、XXL 参数/结果、跨服务器请求或日志中。调度模式分为 `NIGHT_WINDOW` 和 `ADMIN_CUSTOM`：前者固定使用 `Asia/Shanghai` 21:00 至次日 07:00 的 15 分钟启动时段；后者仅允许 `SUPER_ADMIN` 选择下一完整分钟至未来 24 小时内的任意完整分钟，允许白天执行，显示区间为 1 分钟、分发重试窗口为 15 分钟且不占用夜间容量。`scheduleMode` 缺失时按 `NIGHT_WINDOW` 兼容。夜间全局容量来自 `platform=all` 的可编辑通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY`，migration 初始化为 `20`。各 Java 实例启动时加载到内存，修改后经现有通用参数广播刷新；后端根据每个夜间时段的全局占用选择最低占用且最早的推荐时段，前端可以调整。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -2713,12 +2779,18 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
   "runId": null,
   "errorCode": null,
   "errorMessage": null,
+  "creatorUserId": "usr_actual_actor",
+  "creatorUsername": "协作者",
+  "creatorUnifiedAuthId": "ucid_actual_actor",
+  "createdBySharedUser": true,
   "createdAt": "2026-07-18T08:00:00Z",
   "updatedAt": "2026-07-18T08:00:00Z"
 }
 ```
 
-`GET /tasks` 返回 `{ items, page, size, total, visibleFailure }`。任务响应新增 `scheduleMode`；旧响应缺失该字段时客户端按 `NIGHT_WINDOW` 展示。无 `sessionId` 时 `items` 只包含当前用户的 `SCHEDULED/DISPATCHING` 任务并按 `slotStart` 排序，两种模式都进入同一查询；带 `sessionId` 时 `items` 最多一条，`visibleFailure` 返回该会话最近一条 `FAILED` 且未关闭的任务。任务状态为 `SCHEDULED` 时允许改期/取消；进入 `DISPATCHING` 后不可改期或取消。`DISPATCHED` 表示定时调度已成功交给普通 Run 且 `runId` 非空，不表示对话最终成功；Run 后续 `SUCCEEDED/FAILED/CANCELLED` 均不反向改变该状态。`CANCELLED/FAILED` 是尚未交给 Run 的调度终态。完整输入在 `DISPATCHED/CANCELLED/FAILED` 时清除，终态任务和夜间时段占位保留 30 天后清理；`ADMIN_CUSTOM` 的 `reservationReleasedAt` 始终为空，也不会创建、释放或改动夜间容量行。
+`GET /tasks` 返回 `{ items, page, size, total, visibleFailure }`。任务响应新增 `scheduleMode` 以及可选的 `creatorUserId/creatorUsername/creatorUnifiedAuthId/createdBySharedUser`；姓名按当前平台用户目录解析，无法解析时可空，旧响应缺失时按普通所属人创建兼容。无 `sessionId` 时 `items` 只包含当前 owner 或实际 creator 的 `SCHEDULED/DISPATCHING` 任务并按 `slotStart` 排序，两种模式都进入同一查询；带 `sessionId` 时 `items` 最多一条，`visibleFailure` 返回该会话最近一条 `FAILED` 且未关闭的任务。任务状态为 `SCHEDULED` 时允许改期/取消；所属人和原创建人可管理，分享创建人必须有 `canChat` 才能创建或改期，降为只读后仍可取消。进入 `DISPATCHING` 后不可改期或取消。`DISPATCHED` 表示定时调度已成功交给普通 Run 且 `runId` 非空，不表示对话最终成功；Run 后续 `SUCCEEDED/FAILED/CANCELLED` 均不反向改变该状态。`CANCELLED/FAILED` 是尚未交给 Run 的调度终态。完整输入在 `DISPATCHED/CANCELLED/FAILED` 时清除，终态任务和夜间时段占位保留 30 天后清理；`ADMIN_CUSTOM` 的 `reservationReleasedAt` 始终为空，也不会创建、释放或改动夜间容量行。
+
+分享成员创建任务时持久化 `shareId/version/expiresAt/canChat` 授权快照。后续分享过期、取消、成员移除或降权不会取消或阻断该任务；到期仍以会话所属人的 Workspace、Git/SSH 和 OpenCode 进程执行，生成的 USER 消息与 Run 继续归因给原创建人。取消分享前前端必须提示该会话尚有待执行任务。
 
 同一 Session 同时最多一个 `SCHEDULED/DISPATCHING` 定时任务。持锁期间普通 Run 启动、手工追加消息和 Session 归档返回 `409 CONFLICT`；取消、最终失败或普通 Run 锚点受理后解除锁。XXL 每分钟扫描最多 500 条 `slotStart<=now && windowEnd>now` 的 `SCHEDULED`，不按模式过滤，按固定目标服务器分组，每批最多 50 条、同时最多调用 8 台服务器。公共 resolver 先选出目标服务器上的精确 backendProcessId，同服务器多 JVM 也不得按 linuxServerId 直接本机执行。目标 Java 生成 attemptId，以 `status + stateVersion + targetLinuxServerId` 原子认领为 `DISPATCHING`，写入精确 backendProcessId 和 5 分钟租约；普通 Run 同步受理期间每分钟续租，单批最多并发 4 个受理调用，不等待 Run 完成，也没有夜间专属执行队列。
 
@@ -2747,9 +2819,9 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
 
 ### 会话运行上下文 API
 
-`POST /api/internal/agent/{agentId}/sessions/{sessionId}/run-context` 为当前登录用户签发后续 Run 使用的会话运行上下文，无请求体。前端在新建 Session、首次进入或切换到历史 Session 时调用一次；页面内后续 Run 复用同一个结果，只有上下文失效或页面刷新后才重新签发。
+`POST /api/internal/agent/{agentId}/sessions/{sessionId}/run-context` 为后续 Run 签发会话运行上下文，无请求体。普通请求使用当前登录用户；分享工作台必须同时携带当前登录用户自己的 Bearer Token 和 `X-Test-Agent-Session-Share`，服务端先校验真实 actor 的用户状态、分享有效期、成员状态、`canChat` 和精确 Session，再以 `executionOwnerUserId` 使用会话所属人的进程签发上下文。真实 `AuthPrincipal` 不被替换，只读成员不能签发。前端在新建 Session、首次进入或切换到历史 Session 时调用一次；页面内后续 Run 复用同一个结果，只有上下文失效或页面刷新后才重新签发。
 
-后端从权威 Session、Workspace、当前用户 `READY` 进程、agent binding、执行节点、Linux 服务器和后端解析后的可信工作区根路径构造上下文。响应只暴露 opaque token、版本和过期时间，不返回上述内部字段：
+后端从权威 Session、Workspace、执行所属人的 `READY` 进程、agent binding、执行节点、Linux 服务器和后端解析后的可信工作区根路径构造上下文。响应只暴露 opaque token、版本和过期时间，不返回上述内部字段：
 
 ```json
 {
@@ -2837,6 +2909,14 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 Run 进入成功、失败或取消终态后，后端会从 agent 标准 session messages 的最新页沿 `before` cursor 向前查找本轮稳定 USER 锚点，单页 100、最多 20 页，只把该 user 以及 `parentID/parentId` 直接指向它的 assistant 纳入当前 Run。锚点未到达、来源冲突、重复 cursor、页数超限或旧 Run 时间窗内不唯一时不写任何消息；不得边分页边把当前 `runId` 赋给全会话。选择成功后只 upsert 本轮 assistant 可见 text、完整 parts，并把本轮最后一条 assistant 的 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。已经错误归属的历史消息不在读取或刷新时修复。
 
 `test-agent.redis-summary.enabled=false`、rollout `0` 是稳定默认。部署方完成 Redis 持久化、安全、容量与故障恢复验收后，可按 userId 稳定哈希逐步提高比例；只有携带有效 `contextToken + clientRequestId` 的新 Run 可进入 `REDIS_SUMMARY`，活动 Run 固定创建时模式，回滚只影响后续新 Run。旧客户端兼容调用会递增 `legacy_run_without_context_total`；该指标连续 7 天为 0 后再关闭 `legacy-run-without-context-enabled`，关闭后缺 token 返回 `409 CONVERSATION_CONTEXT_REQUIRED`，不会自动查询数据库。
+
+### system-management API Key 管理与外部 SSH Key API
+
+API Key 管理基础路径为 `/api/internal/platform/system-management/api-keys`，要求用户 JWT 和实时 `SUPER_ADMIN`；支持 scope 查询、分页、新建、编辑、按需查看、立即轮换和永久删除。列表只返回 `keyHint`，新建、查看和轮换响应携带 `Cache-Control: no-store` 与 `Pragma: no-cache`。`toolCode` 创建后不可修改，scope 首版只有 `USER_SSH_KEY_READ`。
+
+外部调用固定为 `GET /api/external/v1/users/{unifiedAuthId}/ssh-key`，请求 Header 为 `X-Test-Agent-Tool-Code` 和 `X-Test-Agent-Api-Key`。成功 `data` 只包含 `version/keyDerivation/cipher/salt/nonce/ciphertext`，私钥载荷使用 API Key 经 HKDF-SHA256 派生的 AES-256-GCM 密钥加密，AAD 同时绑定工具、统一认证号和外层 `traceId`。缺失、未知、停用或错误 Key 统一 `401`，scope 不足 `403`，用户/Key 不存在 `404`，旧 SSH 加密格式 `409`，注册表不可用 `503 EXTERNAL_API_UNAVAILABLE`。
+
+完整 DTO、校验、TAEK1 字节级协议、Python 解密示例、多 Java 刷新与发布顺序见 `docs/api/external-api.md`。对应后端测试：`ExternalApiCredentialControllerTest`、`ExternalApiKeyWebFilterTest`、`ExternalUserSshKeyControllerTest`、`ExternalUserSshKeyApplicationServiceTest`、`ExternalSshKeyEnvelopeServiceTest`；前端测试：`api-key-management-panel.test.ts`、`backend-api.test.ts`。
 
 ### system-management 用户管理 API
 
@@ -3180,7 +3260,13 @@ Token 列表及写入响应只返回 `{tokenId,name,referencedProviderCount,crea
 | `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/probe-status` | 查询逐 provider 最近探活状态（`lastOutcome/lastProbedAt/lastSuccessAt/consecutiveFailures`）。 |
 | `POST` | `/api/internal/platform/opencode-runtime/internal-model-observability/probe` | 手动触发探活；请求体 `{providerId}` 可空，为空时全量探活，同步返回逐 provider 探活结果。 |
 
-调用明细只含结构化字段：`providerId/model/endpoint/source(USER_CALL|PROBE)/outcome/httpStatus/errorClass/streaming/durationMillis/firstByteMillis/firstTokenMillis/streamCompleteMillis/traceId/ucid/startedAt`。请求在转发前因鉴权、供应商选择或请求体校验失败且尚不能取得真实供应商/模型时，对应维度使用稳定哨兵值 `unknown`，确保明细与小时聚合仍能同事务落库；分块传输和显式 `Content-Length` 的超限请求都记为 `REQUEST_INVALID`。页面在 `source=USER_CALL` 时直接展示 `ucid` 作为用户 ID，缺失时显示“未知用户”；`source=PROBE` 时显示“探活”。`firstByteMillis` 是收到上游响应头的相对耗时；`firstTokenMillis` 按业界常用的 Time to First Token（TTFT）口径，记录从调用开始到首个包含模型输出字段的 SSE `data` 到达时间（如 `content`、`reasoning_content`、`refusal`、legacy `text` 或工具输出）；`streamCompleteMillis` 是收到协议终点 `[DONE]` 的时间。注释、空事件、role/usage 元数据、非对象 data、`data: ping` 和畸形 JSON 均不计作模型输出，也不能刷新首输出或输出空闲截止时间。`durationMillis` 是代理调用端到端耗时，可能包含 `[DONE]` 后下游写出与终态处理，不能替代上游流完成耗时。小时聚合分别用 `firstTokenMillisSum/Max/Count` 和 `streamCompleteMillisSum/Max/Count` 准确计算平均/最大值，但不提供 P90/P95 或耗时分布。**不返回、不记录任何请求/响应正文、Token、密钥或错误文本**；`errorClass` 只保存剥离 Reactor 包装后的异常类简名。`outcome` 枚举取值：`SUCCESS/PROXY_AUTH_FAILED/PROVIDER_UNAVAILABLE/REQUEST_INVALID/UPSTREAM_CONNECT_FAILED/UPSTREAM_FIRST_RESPONSE_TIMEOUT/UPSTREAM_FIRST_EVENT_TIMEOUT/UPSTREAM_STREAM_IDLE_TIMEOUT/UPSTREAM_HTTP_ERROR/UPSTREAM_STREAM_INTERRUPTED/UPSTREAM_STREAM_FAILED/CLIENT_DISCONNECTED/UNKNOWN_ERROR`。看板把精确结果归并为五类：`SUCCESS`（成功）、`REQUEST_OR_CONFIGURATION`（请求或配置问题）、`UPSTREAM_FAILURE`（上游服务异常）、`CALLER_INTERRUPTED`（调用方中断）、`OTHER`（其他异常）；精确 `outcome` 仍保留在明细中说明具体原因。流式 Chat Completions 正常结束必须收到有效输出 chunk 和 `[DONE]`，否则记为 `UPSTREAM_STREAM_INTERRUPTED`；探活固定发送 `stream=true,max_tokens=1`，`2xx` 非 SSE、空流、只有元数据或缺少 `[DONE]` 均不记成功。探活状态中的 `lastDurationMillis` 使用该次探活的真实端到端耗时。明细保留 30 天、小时聚合保留 180 天，由 `opencode-runtime.internal-model-observability-retention` 定时清理。
+调用明细只含结构化字段：`providerId/model/endpoint/source(USER_CALL|PROBE)/outcome/httpStatus/errorClass/streaming/durationMillis/firstByteMillis/firstTokenMillis/streamCompleteMillis/traceId/ucid/startedAt`。请求在转发前因鉴权、供应商选择或请求体校验失败且尚不能取得真实供应商/模型时，对应维度使用稳定哨兵值 `unknown`，确保明细与小时聚合仍能同事务落库；分块传输和显式 `Content-Length` 的超限请求都记为 `REQUEST_INVALID`。页面在 `source=USER_CALL` 时直接展示 `ucid` 作为用户 ID，缺失时显示“未知用户”；`source=PROBE` 时显示“探活”。
+
+`firstByteMillis` 是收到上游响应头的相对耗时；`firstTokenMillis` 按业界常用的 Time to First Token（TTFT）口径，记录从调用开始到首个包含模型输出字段的 SSE `data` 到达时间（如 `content`、`reasoning_content`、`refusal`、legacy `text` 或工具输出）；`streamCompleteMillis` 是收到 `[DONE]` 或 `choices[*].finish_reason` 非空的时间。注释、空事件、role/usage 元数据、非对象 data、`data: ping` 和畸形 JSON 均不计作模型输出，也不能刷新首输出或输出空闲截止时间。`durationMillis` 是代理调用端到端耗时，可能包含上游正常收尾后的下游写出与终态处理，不能替代上游流完成耗时。小时聚合分别用 `firstTokenMillisSum/Max/Count` 和 `streamCompleteMillisSum/Max/Count` 准确计算平均/最大值，但不提供 P90/P95 或耗时分布。
+
+**不返回、不记录任何请求/响应正文、Token、密钥或错误文本**；`errorClass` 只保存剥离 Reactor 包装后的异常类简名。`outcome` 枚举取值：`SUCCESS/PROXY_AUTH_FAILED/PROVIDER_UNAVAILABLE/REQUEST_INVALID/UPSTREAM_CONNECT_FAILED/UPSTREAM_FIRST_RESPONSE_TIMEOUT/UPSTREAM_FIRST_EVENT_TIMEOUT/UPSTREAM_STREAM_IDLE_TIMEOUT/UPSTREAM_HTTP_ERROR/UPSTREAM_STREAM_INTERRUPTED/UPSTREAM_STREAM_FAILED/CLIENT_DISCONNECTED/UNKNOWN_ERROR`。看板把精确结果归并为五类：`SUCCESS`（成功）、`REQUEST_OR_CONFIGURATION`（请求或配置问题）、`UPSTREAM_FAILURE`（上游服务异常）、`CALLER_INTERRUPTED`（调用方中断）、`OTHER`（其他异常）；精确 `outcome` 仍保留在明细中说明具体原因。
+
+流式 Chat Completions 正常结束必须同时收到有效输出 chunk，以及 `[DONE]` 或非空 `finish_reason` 两种正常收尾信号之一；否则记为 `UPSTREAM_STREAM_INTERRUPTED`。探活固定发送 `stream=true,max_tokens=1`，`2xx` 非 SSE、空流、只有元数据或缺少正常收尾信号均不记成功。探活状态中的 `lastDurationMillis` 使用该次探活的真实端到端耗时。明细保留 30 天、小时聚合保留 180 天，由 `opencode-runtime.internal-model-observability-retention` 定时清理。
 
 结果分类不只看 HTTP 错误码：请求发出前可以根据鉴权、供应商配置和请求校验直接判断；请求发出后会根据发生问题的阶段区分连接失败、等待首响应超时、等待首输出超时、输出中途停住、流读取失败等情况；收到上游非成功 HTTP 状态时才使用 `UPSTREAM_HTTP_ERROR` 并记录 `httpStatus`；调用方提前断开单独记为 `CLIENT_DISCONNECTED`；流式调用只有收到真实输出且正常结束才记成功，无法可靠判断时才落到 `UNKNOWN_ERROR`。因此页面大类用于运营汇总，明细中的精确原因和 `httpStatus/errorClass` 用于进一步排障。
 
@@ -3587,8 +3673,8 @@ permission 列表中的 `PermissionRequest` 保留 `pattern/title/description` �
 - `workspaceId` 为平台 workspace id，后端只把 workspace root 映射为 opencode `directory`；不得把平台 id 当作 opencode `workspace` query。
 - `sessionId` 为平台 session id。无用户主体时，后端通过 `agent_session_bindings` 中的 `(sessionId, agentId)` 定位远端 session；`opencode` 会兼容读取旧 `sessions.opencode_*` 字段并回填 binding，未绑定远端 session 时返回 `CONFLICT`。有用户主体且 agent 为 `opencode` 时，缺失或不匹配的绑定会自动在当前用户进程上重建。
 - `permission`/`question` 的平台路径保留在 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/...` 下，后端实际映射到 opencode `/permission`、`/question` 族 API。
-- config/provider auth/worktree/share/MCP auth 均为受控代理能力，前端不得改为直接调用 opencode 原 URL；provider secret 不得写入 localStorage 或日志。
-- 只读 transcript 页面 `/s/{sessionId}` 只消费平台 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}` 与 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages?refresh=false`，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
+- config/provider auth/worktree/OpenCode 原生 share/MCP auth 均为受控代理能力，前端不得改为直接调用 opencode 原 URL；provider secret 不得写入 localStorage 或日志。OpenCode 原生 share 兼容接口继续保留，但不提供前端入口，也不受平台“每会话唯一协作链接”约束。
+- `/s/{shareId}` 使用上述平台协作分享访问上下文和完整工作台；所属人打开时按普通历史会话流程跳转。旧 `/s/{sessionId}` 只对所属人兼容跳转，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
 - PTY WebSocket 未进入默认 HTTP/SSE 契约；P2 只能按 `docs/standards/security.md` 新增受控 ticket + WebSocket 例外。ticket 只通过新平台 URL `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` 创建，响应中的 `webSocketUrl` 固定为签发 ticket 的当前 Java 绝对 WebSocket URL。
 
 对应测试：
@@ -3607,7 +3693,7 @@ permission 列表中的 `PermissionRequest` 保留 `pattern/title/description` �
 
 成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。
 
-`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`、`storageMode`、`clientRequestId`、`detailsAvailableUntil`、`sourceType`、`sourceRefId`。`storageMode` 为创建时固定的 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动 Run 不允许中途切换；`clientRequestId` 用于同一次发送的幂等关联；`detailsAvailableUntil` 表示 Redis 完整详情最晚可用时间。夜间任务启动的 Run 返回 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...`，普通/旧 Run 为 `MANUAL/null` 或缺失；`tokens` 字段结构同 `SessionMessageResponse.tokens`。
+`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`、`storageMode`、`clientRequestId`、`detailsAvailableUntil`、`sourceType`、`sourceRefId`、`messageSenderUserId`、`messageSenderUsername`、`messageSenderUnifiedAuthId`、`messageSentBySharedUser`。`triggeredByUserId` 继续表示执行所属人；后四个字段表示本轮消息的实际发送人、当前平台姓名、统一认证号快照及代操作归因，姓名无法解析时可空。`storageMode` 为创建时固定的 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动 Run 不允许中途切换；`clientRequestId` 用于同一次发送的幂等关联；`detailsAvailableUntil` 表示 Redis 完整详情最晚可用时间。夜间任务启动的 Run 返回 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...`，普通/旧 Run 为 `MANUAL/null` 或缺失；`tokens` 字段结构同 `SessionMessageResponse.tokens`。
 
 `REDIS_SUMMARY` 的 `run.created` 事件还会携带 `assistantSummaryMessageId`，格式为稳定的 `msg_` + 32 位十六进制；终态 ASSISTANT 摘要复用同一 ID。反馈目标已经统一为 `runId`，该消息 ID 只保留摘要定位和旧消息反馈接口兼容用途。
 
@@ -3923,8 +4009,8 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
   `PENDING` Run 和会话锁；实际 revert/dispatch 由统一恢复状态机执行。
 - 鉴权：必须登录；服务端通过会话上下文重新验证 owner、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径或请求体。
 - 请求：`expectedRemoteMessageId`、可选 `expectedRunId`、短期 `contextToken`、幂等 `clientRequestId`。四者都不得包含 prompt 或附件正文。
-- 响应：`resendId/status/executeAt/resend/replacementRun`。`resend` 包含 `trigger/totalAttempt/automaticAttempt/automaticLimit/status`
-  以及源/替代 Run；`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。
+- 响应：`resendId/status/executeAt/resend/replacementRun`。`resend` 包含 `trigger/totalAttempt/automaticAttempt/automaticLimit/status`、
+  源/替代 Run，以及可选 `requesterUserId/requesterUsername/requesterUnifiedAuthId/requestedBySharedUser` 真实发起人归因；姓名无法解析时可空。`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。
 - 错误：非 owner 为统一 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
 - traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、模型回答或供应商正文。

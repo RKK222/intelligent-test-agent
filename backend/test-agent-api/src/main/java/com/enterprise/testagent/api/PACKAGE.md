@@ -2,7 +2,7 @@
 
 ## 职责
 
-API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响应包装、错误处理、traceId、鉴权、限流和 CORS/WebSocket 配置。
+API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响应包装、错误处理、traceId、鉴权、限流和 CORS/WebSocket 配置；外部 `/api/external/v1/**` 使用独立 Header API Key 过滤器，管理入口强制 `SUPER_ADMIN`，SSH 成功响应只含 TAEK1 密文信封。
 
 ## 不负责
 

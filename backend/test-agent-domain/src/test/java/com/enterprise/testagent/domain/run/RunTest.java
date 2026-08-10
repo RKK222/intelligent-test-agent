@@ -111,4 +111,27 @@ class RunTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("terminalStatus");
     }
+
+    @Test
+    void delegatedMessageSenderSurvivesLifecycleAndOwnerRemainsExecutionIdentity() {
+        UserId owner = new UserId("usr_owner1234567890abcdef");
+        UserId actor = new UserId("usr_shared1234567890abcdef");
+        Run delegated = new Run(
+                new RunId("run_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                RunStatus.PENDING,
+                CREATED_AT,
+                CREATED_AT,
+                "trace_123")
+                .withSource(ConversationSourceType.MANUAL, null, owner)
+                .withMessageSender(actor, "uac_shared_user", true)
+                .start(UPDATED_AT)
+                .succeed(UPDATED_AT.plusSeconds(1));
+
+        assertThat(delegated.triggeredByUserId()).isEqualTo(owner);
+        assertThat(delegated.messageSenderUserId()).isEqualTo(actor);
+        assertThat(delegated.messageSenderUnifiedAuthId()).isEqualTo("uac_shared_user");
+        assertThat(delegated.messageSentBySharedUser()).isTrue();
+    }
 }

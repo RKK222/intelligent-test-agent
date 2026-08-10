@@ -188,7 +188,7 @@ public class InternalModelProviderProbeService {
                                         responseTimeout,
                                         responseTimeout)
                                 .doOnNext(streamObservation::mark)
-                                .takeUntil(ObservedEvent::done)
+                                .takeUntil(ObservedEvent::protocolComplete)
                                 .then(Mono.just(header));
                     })
                     // 响应头、首有效输出、流完成各有独立边界；额外保留连接建立时间。
@@ -204,7 +204,7 @@ public class InternalModelProviderProbeService {
             } else if (response.streaming() && streamObservation.completed()) {
                 outcome = InternalModelCallOutcome.SUCCESS;
             } else {
-                // 2xx 非 SSE、空流、只有元数据或缺少 [DONE] 都不代表模型可用。
+                // 2xx 非 SSE、空流、只有元数据或缺少正常收尾信号都不代表模型可用。
                 outcome = InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED;
             }
             return recordProbe(provider.providerId(), model, outcome, status.value(), null,
@@ -346,14 +346,14 @@ public class InternalModelProviderProbeService {
     private static final class ProbeStreamObservation {
         private final AtomicLong firstTokenNanos = new AtomicLong(UNSET_NANOS);
         private final AtomicLong streamCompleteNanos = new AtomicLong(UNSET_NANOS);
-        private final AtomicBoolean doneSeen = new AtomicBoolean(false);
+        private final AtomicBoolean protocolCompleteSeen = new AtomicBoolean(false);
 
         void mark(ObservedEvent event) {
             if (event.output()) {
                 firstTokenNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
             }
-            if (event.done()) {
-                doneSeen.set(true);
+            if (event.protocolComplete()) {
+                protocolCompleteSeen.set(true);
                 if (hasFirstToken()) {
                     streamCompleteNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
                 }
@@ -365,7 +365,7 @@ public class InternalModelProviderProbeService {
         }
 
         boolean completed() {
-            return hasFirstToken() && doneSeen.get();
+            return hasFirstToken() && protocolCompleteSeen.get();
         }
 
         Long firstTokenNanos() {

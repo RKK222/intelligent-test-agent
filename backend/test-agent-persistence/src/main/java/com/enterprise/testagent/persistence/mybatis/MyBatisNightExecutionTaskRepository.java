@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.sql.Timestamp;
@@ -221,13 +222,24 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
                 text(row, "dispatchOwnerBackendProcessId"), instant(row, "dispatchLeaseUntil"),
                 number(row, "stateVersion").longValue(), instant(row, "dismissedAt"),
                 instant(row, "reservationReleasedAt"), text(row, "errorCode"), text(row, "errorMessage"),
-                text(row, "traceId"), instant(row, "createdAt"), instant(row, "updatedAt"));
+                text(row, "traceId"), instant(row, "createdAt"), instant(row, "updatedAt"),
+                value(row, "creatorUserId", UserId::new), text(row, "creatorUnifiedAuthId"),
+                bool(row, "createdBySharedUser"), value(row, "shareIdSnapshot", SessionShareId::new),
+                optionalLong(row, "shareVersionSnapshot"), instant(row, "shareExpiresAtSnapshot"),
+                optionalBoolean(row, "canChatSnapshot"));
     }
 
     private Map<String, Object> params(NightExecutionTask task) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("taskId", task.taskId().value());
         values.put("ownerUserId", task.ownerUserId().value());
+        values.put("creatorUserId", task.creatorUserId().value());
+        values.put("creatorUnifiedAuthId", task.creatorUnifiedAuthId());
+        values.put("createdBySharedUser", task.createdBySharedUser());
+        values.put("shareIdSnapshot", task.shareIdSnapshot() == null ? null : task.shareIdSnapshot().value());
+        values.put("shareVersionSnapshot", task.shareVersionSnapshot());
+        values.put("shareExpiresAtSnapshot", task.shareExpiresAtSnapshot());
+        values.put("canChatSnapshot", task.canChatSnapshot());
         values.put("sessionId", task.sessionId().value());
         values.put("workspaceId", task.workspaceId().value());
         values.put("clientRequestId", task.clientRequestId());
@@ -277,6 +289,15 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
         Object value = row.get(key);
         if (value instanceof Boolean booleanValue) return booleanValue;
         return value instanceof Number number && number.intValue() != 0;
+    }
+
+    private Long optionalLong(Map<String, Object> row, String key) {
+        Object value = row.get(key);
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
+    private Boolean optionalBoolean(Map<String, Object> row, String key) {
+        return row.get(key) == null ? null : bool(row, key);
     }
 
     private Instant instant(Map<String, Object> row, String key) {

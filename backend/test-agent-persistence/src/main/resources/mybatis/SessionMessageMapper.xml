@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.SessionMessageMapper">
+    <resultMap id="SessionMessageRowMap" type="com.enterprise.testagent.persistence.mybatis.SessionMessageRow">
+        <constructor>
+            <arg column="message_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="role" javaType="java.lang.String"/>
+            <arg column="content" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="remote_message_id" javaType="java.lang.String"/>
+            <arg column="parts_json" javaType="java.lang.String"/>
+            <arg column="tokens_input" javaType="java.lang.Long"/>
+            <arg column="tokens_output" javaType="java.lang.Long"/>
+            <arg column="tokens_reasoning" javaType="java.lang.Long"/>
+            <arg column="tokens_cache_read" javaType="java.lang.Long"/>
+            <arg column="tokens_cache_write" javaType="java.lang.Long"/>
+            <arg column="cost_usd" javaType="java.math.BigDecimal"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="source_type" javaType="java.lang.String"/>
+            <arg column="source_ref_id" javaType="java.lang.String"/>
+            <arg column="sender_user_id" javaType="java.lang.String"/>
+            <arg column="sender_unified_auth_id" javaType="java.lang.String"/>
+            <arg column="sent_by_shared_user" javaType="java.lang.Boolean"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="Columns">
+        message_id, session_id, role, content, trace_id, created_at, run_id, agent_id,
+        remote_message_id, parts_json, tokens_input, tokens_output, tokens_reasoning,
+        tokens_cache_read, tokens_cache_write, cost_usd, updated_at, source_type,
+        source_ref_id, sender_user_id, sender_unified_auth_id, sent_by_shared_user
+    </sql>
+
+    <insert id="insert">
+        insert into session_messages(
+            <include refid="Columns"/>
+        ) values (
+            #{row.messageId}, #{row.sessionId}, #{row.role}, #{row.content}, #{row.traceId},
+            #{row.createdAt}, #{row.runId}, #{row.agentId}, #{row.remoteMessageId}, #{row.partsJson},
+            #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning}, #{row.tokensCacheRead},
+            #{row.tokensCacheWrite}, #{row.costUsd}, #{row.updatedAt}, #{row.sourceType},
+            #{row.sourceRefId}, #{row.senderUserId}, #{row.senderUnifiedAuthId}, #{row.sentBySharedUser}
+        )
+    </insert>
+
+    <update id="update">
+        update session_messages
+        set session_id = #{row.sessionId}, role = #{row.role}, content = #{row.content},
+            trace_id = #{row.traceId}, created_at = #{row.createdAt}, run_id = #{row.runId},
+            agent_id = #{row.agentId}, remote_message_id = #{row.remoteMessageId},
+            parts_json = #{row.partsJson}, tokens_input = #{row.tokensInput},
+            tokens_output = #{row.tokensOutput}, tokens_reasoning = #{row.tokensReasoning},
+            tokens_cache_read = #{row.tokensCacheRead}, tokens_cache_write = #{row.tokensCacheWrite},
+            cost_usd = #{row.costUsd}, updated_at = #{row.updatedAt}, source_type = #{row.sourceType},
+            source_ref_id = #{row.sourceRefId}, sender_user_id = #{row.senderUserId},
+            sender_unified_auth_id = #{row.senderUnifiedAuthId},
+            sent_by_shared_user = #{row.sentBySharedUser}
+        where message_id = #{row.messageId}
+    </update>
+
+    <select id="findById" resultMap="SessionMessageRowMap">
+        select <include refid="Columns"/> from session_messages where message_id = #{messageId}
+    </select>
+
+    <select id="findBySessionAndRemoteMessage" resultMap="SessionMessageRowMap">
+        select <include refid="Columns"/>
+        from session_messages
+        where session_id = #{sessionId} and remote_message_id = #{remoteMessageId}
+        order by updated_at desc, id desc
+        limit 1
+    </select>
+
+    <select id="findUserBySessionAndRun" resultMap="SessionMessageRowMap">
+        select <include refid="Columns"/>
+        from session_messages
+        where session_id = #{sessionId}
+          and run_id = #{runId}
+          and role = 'USER'
+        order by created_at desc, id desc
+        limit 1
+    </select>
+
+    <select id="findBySession" resultMap="SessionMessageRowMap">
+        select <include refid="Columns"/>
+        from session_messages
+        where session_id = #{sessionId}
+        order by created_at asc, id asc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countBySession" resultType="long">
+        select count(*) from session_messages where session_id = #{sessionId}
+    </select>
+</mapper>

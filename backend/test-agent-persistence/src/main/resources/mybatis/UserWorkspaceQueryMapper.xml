@@ -41,6 +41,7 @@
                         select 1 from session_messages sm
                         where sm.session_id = s.session_id
                           and sm.sender_user_id = #{userId}
+                          and coalesce(sm.sent_by_shared_user, false) = false
                     )
                   )
             )

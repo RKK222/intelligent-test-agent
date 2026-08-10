@@ -2,6 +2,7 @@ package com.enterprise.testagent.api.web.aop;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
+import com.enterprise.testagent.api.web.common.ExternalApiWebSupport;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.observability.TraceLogContext;
 import java.lang.reflect.Method;
@@ -232,6 +233,11 @@ public class ApiLoggingAspect {
      */
     String extractUserId(ServerWebExchange exchange) {
         if (exchange == null) return "anonymous";
+        Optional<String> externalActor = ExternalApiWebSupport.getOptionalPrincipal(exchange)
+                .map(principal -> "external:" + principal.toolCode());
+        if (externalActor.isPresent()) {
+            return externalActor.get();
+        }
         return AuthWebSupport.getOptionalAuthPrincipal(exchange)
                 .map(p -> p.userId().value())
                 .orElse("anonymous");

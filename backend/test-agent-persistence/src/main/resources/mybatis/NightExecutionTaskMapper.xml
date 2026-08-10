@@ -9,6 +9,10 @@
     <!-- PostgreSQL 会折叠未引用的驼峰别名，Map 映射必须保留 Java 读取使用的精确键名。 -->
     <sql id="columns">
         task_id as "taskId", owner_user_id as "ownerUserId", session_id as "sessionId",
+        creator_user_id as "creatorUserId", creator_unified_auth_id as "creatorUnifiedAuthId",
+        created_by_shared_user as "createdBySharedUser", share_id_snapshot as "shareIdSnapshot",
+        share_version_snapshot as "shareVersionSnapshot",
+        share_expires_at_snapshot as "shareExpiresAtSnapshot", can_chat_snapshot as "canChatSnapshot",
         workspace_id as "workspaceId", client_request_id as "clientRequestId", session_title as "sessionTitle",
         content_preview as "contentPreview", run_input_json as "runInputJson",
         schedule_mode as "scheduleMode", status,
@@ -24,7 +28,11 @@
         updated_at as "updatedAt"
     </sql>
     <sql id="taskValues">
-        owner_user_id=#{ownerUserId}, session_id=#{sessionId}, workspace_id=#{workspaceId},
+        owner_user_id=#{ownerUserId}, creator_user_id=#{creatorUserId},
+        creator_unified_auth_id=#{creatorUnifiedAuthId}, created_by_shared_user=#{createdBySharedUser},
+        share_id_snapshot=#{shareIdSnapshot}, share_version_snapshot=#{shareVersionSnapshot},
+        share_expires_at_snapshot=#{shareExpiresAtSnapshot}, can_chat_snapshot=#{canChatSnapshot},
+        session_id=#{sessionId}, workspace_id=#{workspaceId},
         client_request_id=#{clientRequestId}, session_title=#{sessionTitle}, content_preview=#{contentPreview},
         run_input_json=#{runInputJson}, schedule_mode=#{scheduleMode}, status=#{status},
         slot_start=#{slotStart}, slot_end=#{slotEnd},
@@ -66,12 +74,16 @@
     </update>
     <insert id="insertTask" parameterType="map">
         insert into night_execution_tasks(
-        task_id, owner_user_id, session_id, workspace_id, client_request_id, session_title, content_preview,
+        task_id, owner_user_id, creator_user_id, creator_unified_auth_id, created_by_shared_user,
+        share_id_snapshot, share_version_snapshot, share_expires_at_snapshot, can_chat_snapshot,
+        session_id, workspace_id, client_request_id, session_title, content_preview,
         run_input_json, schedule_mode, status, slot_start, slot_end, window_end, target_linux_server_id,
         scheduled_task_run_id, run_id, rollover_count, task_created_session, dispatch_started_at,
         dispatch_attempt_id, dispatch_owner_backend_process_id, dispatch_lease_until, state_version,
         dismissed_at, reservation_released_at, error_code, error_message, trace_id, created_at, updated_at)
-        values(#{taskId},#{ownerUserId},#{sessionId},#{workspaceId},#{clientRequestId},#{sessionTitle},
+        values(#{taskId},#{ownerUserId},#{creatorUserId},#{creatorUnifiedAuthId},#{createdBySharedUser},
+        #{shareIdSnapshot},#{shareVersionSnapshot},#{shareExpiresAtSnapshot},#{canChatSnapshot},
+        #{sessionId},#{workspaceId},#{clientRequestId},#{sessionTitle},
         #{contentPreview},#{runInputJson},#{scheduleMode},#{status},#{slotStart},#{slotEnd},#{windowEnd},
         #{targetLinuxServerId},#{scheduledTaskRunId},#{runId},#{rolloverCount},#{taskCreatedSession},
         #{dispatchStartedAt},#{dispatchAttemptId},#{dispatchOwnerBackendProcessId},#{dispatchLeaseUntil},

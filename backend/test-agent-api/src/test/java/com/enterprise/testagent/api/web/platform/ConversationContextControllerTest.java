@@ -16,11 +16,14 @@ import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionStatus;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.opencode.runtime.run.ConversationContextApplicationService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -30,6 +33,11 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 class ConversationContextControllerTest {
 
     private static final Instant NOW = Instant.parse("2026-07-10T00:00:00Z");
+    private static final UserId OWNER_USER_ID = new UserId("usr_1234567890abcdef");
+    private static final UserId SHARED_USER_ID = new UserId("usr_abcdef1234567890");
+    private static final SessionId SESSION_ID = new SessionId("ses_1234567890abcdef");
+    private static final WorkspaceId WORKSPACE_ID = new WorkspaceId("wrk_1234567890abcdef");
+    private static final SessionShareId SHARE_ID = new SessionShareId("shr_" + "a".repeat(64));
 
     @Test
     void authenticatedUserCanBootstrapConversationContext() {
@@ -72,6 +80,52 @@ class ConversationContextControllerTest {
                 .expectStatus().isUnauthorized()
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("UNAUTHENTICATED");
+    }
+
+    @Test
+    void sharedMemberBootstrapsConversationContextUsingExecutionOwner() {
+        ConversationContextApplicationService service = mock(ConversationContextApplicationService.class);
+        SessionCollaborationShareService shareService = mock(SessionCollaborationShareService.class);
+        when(shareService.requireAccess(
+                        eq(SHARED_USER_ID), eq(SHARE_ID), eq(true), eq("trace_1234567890abcdef")))
+                .thenReturn(sharedContext());
+        when(service.bootstrap(
+                        eq(OWNER_USER_ID),
+                        eq("opencode"),
+                        eq(SESSION_ID),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new ConversationContextApplicationService.IssuedConversationContext("ctx_secret", context()));
+        WebTestClient client = WebTestClient.bindToController(new ConversationContextController(service, shareService))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter(SHARED_USER_ID))
+                .controllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        client.post()
+                .uri("/api/internal/agent/opencode/sessions/ses_1234567890abcdef/run-context")
+                .header(SessionShareController.SHARE_HEADER, SHARE_ID.value())
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.contextToken").isEqualTo("ctx_secret");
+    }
+
+    private static DelegatedOperationContext sharedContext() {
+        return new DelegatedOperationContext(
+                SHARE_ID,
+                3,
+                SHARED_USER_ID,
+                "ucid_shared",
+                "协作者",
+                OWNER_USER_ID,
+                SESSION_ID,
+                WORKSPACE_ID,
+                true,
+                true,
+                false,
+                NOW.plusSeconds(3600));
     }
 
     private static ConversationRunContext context() {
@@ -126,10 +180,14 @@ class ConversationContextControllerTest {
     }
 
     private static org.springframework.web.server.WebFilter authenticatedUserFilter() {
+        return authenticatedUserFilter(OWNER_USER_ID);
+    }
+
+    private static org.springframework.web.server.WebFilter authenticatedUserFilter(UserId userId) {
         return (exchange, chain) -> {
             exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, new AuthPrincipal(
                     "token",
-                    new UserId("usr_1234567890abcdef"),
+                    userId,
                     "admin",
                     "admin",
                     List.of("APP_ADMIN"),

@@ -59,7 +59,7 @@ public class JwtAuthWebFilter implements WebFilter {
         if (!path.startsWith("/api/")) {
             return chain.filter(exchange);
         }
-        if (path.equals(LOGIN_PATH) || token == null) {
+        if (path.equals(LOGIN_PATH) || ExternalApiWebSupport.isExternalPath(path) || token == null) {
             return chain.filter(exchange);
         }
 

@@ -16,6 +16,7 @@
 故障模式：
     ok        按请求 stream 参数返回合法 JSON 或 SSE
     sse       返回 200 text/event-stream，含 data: 与 [DONE]
+    finish-reason-eof 返回有效输出和 finish_reason 后直接 EOF，模拟不发 [DONE] 的企业网关
     nonstream-200 强制返回 200 JSON，用于验证流式探活拒绝非 SSE 成功响应
     http400   返回 400 非 SSE 错误正文
     http500   返回 500 非 SSE 错误正文
@@ -87,6 +88,21 @@ class MockHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
             return
 
+        if self.mode == "finish-reason-eof":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(
+                b'data: {"choices":[{"delta":{"content":"finished"},"finish_reason":null}]}\n\n'
+            )
+            self.wfile.flush()
+            self.wfile.write(
+                b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            )
+            self.wfile.flush()
+            return
+
         if self.mode == "first-output-timeout":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -148,7 +164,7 @@ def main():
     parser = argparse.ArgumentParser(description="OpenAI-compatible 模型 mock 服务")
     parser.add_argument("--port", type=int, default=19070)
     parser.add_argument("--mode", choices=[
-        "ok", "sse", "nonstream-200", "http400", "http500", "timeout",
+        "ok", "sse", "finish-reason-eof", "nonstream-200", "http400", "http500", "timeout",
         "header-timeout", "first-output-timeout", "idle-timeout", "empty"
     ],
                         default="ok", help="故障模式（默认 ok）")

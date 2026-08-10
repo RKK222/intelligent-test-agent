@@ -1,11 +1,14 @@
 # @test-agent/backend-api
 
+新增外部 API 凭据管理 client：scope、分页、新建、编辑、reveal、rotate、delete 全部调用 `/api/internal/platform/system-management/api-keys`。原始交换观察器把 `apiKey/ciphertext/encryptedApiKey` 视为敏感字段递归脱敏；一次性明文响应由组件直接消费，不应写入共享缓存。
+
 ## 工程定位
 
 前端访问 `test-agent-app` HTTP API 的唯一 client。
 
 ## 主要职责
 
+- 提供独立 `SessionShareApiClient`：候选用户、分享管理和“分享给我”列表保持普通认证请求，不携带分享头；访问上下文及分享范围内的会话、Run、夜间任务、文件、Git、终端和反馈请求按实例注入 `X-Test-Agent-Session-Share`。错误和调试信息不得输出分享 ID、Authorization 或文件正文。
 - 统一 baseUrl、traceId、鉴权头和 JSON 解析；`VITE_TEST_AGENT_API_BASE_URL` 显式为空时，HTTP 请求保留同源相对 `/api`，WebSocket ticket 的相对路径则按当前页面 origin 补全为绝对 `ws://` / `wss://` 地址，不会回退到本机开发地址。
 - 超级管理员排查读取使用独立的 `X-Support-Access-Grant` 内存令牌和独立 support 文件 WebSocket 连接；client 提供授权签发/撤销、目标选择、显式归档会话筛选/读取、会话树、带后端可用状态的用户工作区和审计查询，只暴露文件列表、搜索、文本/二进制预览分段读取。该令牌会从原始交换 observer 递归脱敏，带该头的 401 不触发普通登录全局退出。
 - Model/Provider 目录仍读取 opencode 原生接口；平台 config GET 代理实例级 `/config` 合并有效配置，存在非空 `enabled_providers` 时，client 只按同一 Provider ID 白名单过滤两类目录，不改变各自原生顺序；企业配置只展示白名单 Provider 下的全部模型，不会混入 OpenCode Zen。OpenCode 1.18.4 的本地 JSONC 模型 `release_date` 不会进入 V2 `/api/model` 的发布时间字段，client 不对其做二次解释。未配置白名单或 config 暂时读取失败时保持原生目录；并发目录查询复用同一轮 config 请求，请求结束即失效以支持配置热加载。

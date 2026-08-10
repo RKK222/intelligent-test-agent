@@ -14,6 +14,8 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvai
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.UserWorkspaceQueryService;
 import com.enterprise.testagent.system.supportaccess.SupportAccessApplicationService;
@@ -43,6 +45,7 @@ class WorkspaceFileSocketTicketService {
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
     private final SupportAccessApplicationService supportAccessService;
     private final UserWorkspaceQueryService userWorkspaceQueryService;
+    private SessionCollaborationShareService shareService;
 
     WorkspaceFileSocketTicketService(
             WorkspaceApplicationService workspaceService,
@@ -75,6 +78,15 @@ class WorkspaceFileSocketTicketService {
             AuthPrincipal principal,
             WorkspaceFileSocketDtos.TicketRequest request,
             String traceId) {
+        return createTicket(principal, request, null, traceId);
+    }
+
+    /** 分享模式只允许固定会话工作区，不开放目录选择、Agent 配置和 Hub。 */
+    WorkspaceFileSocketDtos.TicketResponse createTicket(
+            AuthPrincipal principal,
+            WorkspaceFileSocketDtos.TicketRequest request,
+            DelegatedOperationContext context,
+            String traceId) {
         String mode = mode(request);
         boolean superAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN);
         boolean appAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN);
@@ -85,6 +97,30 @@ class WorkspaceFileSocketTicketService {
                     ErrorCode.CONFLICT,
                     "文件 WebSocket ticket 必须在目标后端签发",
                     Map.of("targetLinuxServerId", request.linuxServerId(), "currentLinuxServerId", currentLinuxServerId));
+        }
+        if (context != null) {
+            if (!principal.userId().equals(context.actorUserId()) || !MODE_WORKSPACE.equals(mode)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "分享模式只允许当前会话的工作区文件操作");
+            }
+            WorkspaceId workspaceId = new WorkspaceId(requiredWorkspaceId(request));
+            context.requireWorkspace(workspaceId);
+            FileWorkspaceKind workspaceKind = workspaceAccessAuthorizer.requireClassifiedFileAccess(
+                    context.executionOwnerUserId(), workspaceId, false);
+            if (workspaceKind == FileWorkspaceKind.APP_SOURCE) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "分享模式不允许访问应用源码工作区");
+            }
+            UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(
+                    context.executionOwnerUserId(), traceId);
+            String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY
+                    ? process.linuxServerId() : null;
+            requireReadyAgentOnCurrentServer(process, currentLinuxServerId, workspaceId.value());
+            workspaceService.requireWorkspaceOnCurrentServer(workspaceId, traceId);
+            return response(ticketStore.issueShared(
+                    workspaceId.value(), currentLinuxServerId, agentLinuxServerId,
+                    context.executionOwnerUserId().value(), context.actorUserId().value(),
+                    context.shareId().value(), context.sessionId().value(),
+                    context.shareVersion(), context.canChat(),
+                    context.expiresAt(), traceId));
         }
         if (MODE_AGENT_CONFIG.equals(mode)) {
             return response(ticketStore.issue(
@@ -110,7 +146,7 @@ class WorkspaceFileSocketTicketService {
                     principal.userId(),
                     new WorkspaceId(workspaceId),
                     false);
-            UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal, traceId);
+            UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal.userId(), traceId);
             String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY
                     ? process.linuxServerId()
                     : null;
@@ -132,7 +168,7 @@ class WorkspaceFileSocketTicketService {
         if (!MODE_DIRECTORY_PICKER.equals(mode)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "文件 WebSocket ticket 模式无效", Map.of("mode", mode));
         }
-        UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal, traceId);
+        UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal.userId(), traceId);
         String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY ? process.linuxServerId() : null;
         if (!superAdmin) {
             requireReadyAgentOnCurrentServer(process, currentLinuxServerId, "directory-picker");
@@ -212,6 +248,23 @@ class WorkspaceFileSocketTicketService {
             }
             return authorization;
         }
+        if (ticket.sharedSession()) {
+            if (shareService == null || ticket.shareActorUserId() == null
+                    || ticket.executionOwnerUserId() == null || ticket.shareVersion() == null
+                    || ticket.shareSessionId() == null) {
+                throw workspaceRpcDenied();
+            }
+            DelegatedOperationContext refreshed = shareService.refreshAccess(
+                    new UserId(ticket.shareActorUserId()),
+                    new com.enterprise.testagent.domain.sessionshare.SessionShareId(ticket.shareId()),
+                    ticket.traceId());
+            refreshed.requireWorkspace(workspaceId);
+            if (refreshed.shareVersion() != ticket.shareVersion()
+                    || !refreshed.sessionId().value().equals(ticket.shareSessionId())
+                    || !refreshed.executionOwnerUserId().value().equals(ticket.executionOwnerUserId())) {
+                throw workspaceRpcDenied();
+            }
+        }
         String currentLinuxServerId = workspaceService.currentLinuxServerId();
         if (!Objects.equals(currentLinuxServerId, ticket.linuxServerId())
                 || !Objects.equals(currentLinuxServerId, ticket.agentLinuxServerId())) {
@@ -254,16 +307,53 @@ class WorkspaceFileSocketTicketService {
                 new SupportAccessRequestContext(traceId, null, null));
     }
 
+    /** 分享文件操作审计仅保存路径 SHA-256，不保存文件正文、明文路径或上传内容。 */
+    void recordSharedRpc(
+            WorkspaceFileSocketTicket ticket,
+            String operation,
+            WorkspaceId workspaceId,
+            String path,
+            String outcome,
+            String errorCode,
+            String traceId) {
+        if (shareService == null || ticket == null || !ticket.sharedSession()
+                || ticket.shareSessionId() == null || ticket.shareActorUserId() == null
+                || ticket.executionOwnerUserId() == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "分享文件审计上下文不完整");
+        }
+        String action = ("WORKSPACE_FILE_" + operation).toUpperCase(java.util.Locale.ROOT)
+                .replace('.', '_');
+        shareService.recordOperationSnapshot(
+                new com.enterprise.testagent.domain.sessionshare.SessionShareId(ticket.shareId()),
+                new com.enterprise.testagent.domain.session.SessionId(ticket.shareSessionId()),
+                workspaceId,
+                new UserId(ticket.shareActorUserId()),
+                new UserId(ticket.executionOwnerUserId()),
+                action.length() <= 64 ? action : action.substring(0, 64),
+                "WORKSPACE_FILE",
+                workspaceId.value(),
+                path,
+                outcome,
+                errorCode,
+                traceId);
+    }
+
     private void requireSupportServices() {
         if (supportAccessService == null || userWorkspaceQueryService == null) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "排查只读文件服务未装配");
         }
     }
 
-    private UserOpencodeProcessFileRoutingAffinity userProcessAffinity(AuthPrincipal principal, String traceId) {
+    private UserOpencodeProcessFileRoutingAffinity userProcessAffinity(UserId userId, String traceId) {
         // 文件路由只需要用户进程的服务器归属，不触发强健康检查
         // 直接使用 fileRoutingAffinity，避免因瞬时健康检查失败导致文件树不可用
-        return assignmentService.fileRoutingAffinity(principal.userId(), "opencode", traceId);
+        return assignmentService.fileRoutingAffinity(userId, "opencode", traceId);
+    }
+
+    /** 可选注入保持既有轻量测试装配；生产环境始终用于每条分享 RPC 重新鉴权。 */
+    @Autowired(required = false)
+    void configureSessionShareService(SessionCollaborationShareService shareService) {
+        this.shareService = shareService;
     }
 
     private void requireReadyAgentOnCurrentServer(

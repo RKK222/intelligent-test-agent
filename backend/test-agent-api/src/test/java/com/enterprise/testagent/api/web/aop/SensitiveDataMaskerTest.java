@@ -119,6 +119,20 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
+        @DisplayName("脱敏外部 API Key 和 TAEK1 密文")
+        void mask_externalApiCredentialAndCiphertext() {
+            String input = "{\"apiKey\":\"taak_v1_secret\",\"ciphertext\":\"TAEK1-secret\",\"toolCode\":\"deploy.bot\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"apiKey\":\"***\""));
+            assertTrue(result.contains("\"ciphertext\":\"***\""));
+            assertFalse(result.contains("taak_v1_secret"));
+            assertFalse(result.contains("TAEK1-secret"));
+            assertTrue(result.contains("\"toolCode\":\"deploy.bot\""));
+        }
+
+        @Test
         @DisplayName("长加密私钥信封脱敏不发生正则栈溢出")
         void mask_longEncryptedPrivateKeyWithoutStackOverflow() {
             String input = "{\"encryptedPrivateKey\":\"" + "A".repeat(16_384) + "\",\"name\":\"work\"}";

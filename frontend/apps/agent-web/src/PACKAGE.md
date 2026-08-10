@@ -84,7 +84,8 @@
 - `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、版本库管理、版本库关联、应用工作空间和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示；"应用人员管理" tab 用 `el-autocomplete` 懒加载搜索候选用户（userId/unifiedAuthId/username LIKE 匹配，空输入不查后端），选中后主按钮从"搜索"切换为"添加"；"工作空间管理" tab 的创建区只允许从已关联测试工作库中选择版本库，随后自动刷新分支、加载目录并创建工作空间，创建时生成 `operationId` 并轮询后端进度接口；成功终态按 operationId 只上报一次 `workspace-catalog-changed`，经 `SettingsPanel`/`SettingsDialog` 通知工作台刷新模板目录；移除应用成员、解除应用与版本库关联前必须弹出页面内 div 确认框。
 - `utils/ssh-crypto.ts`：个人 SSH key 浏览器端混合加密工具，按后端契约生成 AES-GCM 私钥密文、RSA-OAEP/SHA-256 临时 AES 密钥密文和 SHA-256 指纹；优先使用 Web Crypto，企业内 Chromium 108 的 HTTP 内网访问缺少 `crypto.subtle` 时使用 node-forge 纯 JS 回退；如果 `getRandomValues` 不可用则返回明确错误，不允许明文降级。
 - `utils/sha256.ts`：浏览器二进制内容 SHA-256 公共实现；优先使用 Web Crypto，HTTP 内网缺少或拒绝 `crypto.subtle.digest` 时按 64 KiB 分块使用 node-forge 回退，聊天附件内容寻址与 SSH 指纹兼容路径复用同一纯 JS 摘要实现。
-- `components/SystemManagementWrapper.vue`、`components/system/SystemManagementPanel.vue`、`components/system/MemoryAdminPanel.vue`：超级管理员系统管理入口和二级导航；记忆页展示 Mem0/pgvector/BGE 就绪状态、固定 CHAT 模型、学习队列和灰度白名单，版本化保存抽取策略。固定模型复用内部目录的 CHAT 探测结果并允许清空为未配置，白名单复用平台用户远程搜索；用户下拉展开时不得遮住弹窗操作按钮。备用模型使用业务化说明，向量版本字段默认折叠为技术信息；卡片按面板真实宽度自动换列，嵌入中栏与窄屏均不得产生横向滚动。
+- `components/SystemManagementWrapper.vue`、`components/system/SystemManagementPanel.vue`、`components/system/MemoryAdminPanel.vue`：超级管理员系统管理入口和二级导航，包含定时任务、运行、配置与记忆管理；记忆页展示 Mem0/pgvector/BGE 就绪状态、固定 CHAT 模型、学习队列和灰度白名单，版本化保存抽取策略。固定模型复用内部目录的 CHAT 探测结果并允许清空为未配置，白名单复用平台用户远程搜索；用户下拉展开时不得遮住弹窗操作按钮。备用模型使用业务化说明，向量版本字段默认折叠为技术信息；卡片按面板真实宽度自动换列，嵌入中栏与窄屏均不得产生横向滚动。
+- `components/system/ApiKeyManagementPanel.vue`：仅超级管理员可见的外部工具凭据管理面板；明文 Key 只在新建/查看/轮换结果弹窗的组件内存短暂存在，关闭、卸载和 mutation 结束后清空，不进入 Query cache 或浏览器存储。
 - `components/system/ConfigurationManagementPanel.vue`、`components/system/OpencodePublicConfigManagementPanel.vue`、`components/system/ApplicationGitRefreshManagementPanel.vue`：超级管理员配置管理二级页；公共配置保留逐服务器初始化，但已初始化仓库只通过一个全局按钮选择远端分支，活动期每 2 秒轮询逐服务器 Git 同步、进程排空、个人 worktree 补偿和 `last_error` 并禁用重复刷新。应用 Git 页只展示已经形成具体 feature 分支组的应用和每个工作空间版本对应的实际分支，可选择单分支或整个应用刷新物理 feature 组及相关个人 worktree，展示逐组部分失败明细，不依赖用户进程服务器路由。
 - `components/system/GeneralParamManagementPanel.vue`：通用参数列表、变量名/平台筛选、审计历史和显式 JVM 内存值运维入口；`UITEST_BASE_URL` 使用独立 HTTP 地址输入提示，不展示额外运行机制说明。
 - `components/settings/RuntimeManagementPanel.vue`、`components/settings/runtimeTopologyGraphData.ts`：超级管理员运行管理表格与拓扑投影；无主进程的 12 列明细独立展示 baseUrl、可空 UCID 和 manager PID 状态，无平台记录时使用固定文案且不执行 HTTP health，不从启动命令解析身份或自动认领。“容器 / 管理进程”标题栏按 overview 中 `ownership=BOUND` 汇总可选的有主用户 OpenCode，支持逐项勾选和全选，二次确认后串行复用既有 restart/stop API 执行批量重启或关闭，跳过无主进程、单项失败不阻断后续项且只保留失败项选择；底部用户进程查询只保留单项重启，相同关键字和首页条件再次点击也显式 `refetch`，不沿用旧空结果。旧 overview 缺新增字段时统一回退 `-`。
@@ -100,6 +101,8 @@
 - `AgentWorkbench.handleSend` 继续把完整 text/file parts 交给 Run 请求；本地乐观 user message 只接收经 `promptPartsForUserDisplay` 收敛后的文本和附件元数据。历史 session-tree 恢复会预先按 `sessionId + messageId` 建立首个非 synthetic text 索引，仅补齐同 Session、无正文的 OpenCode user envelope；`events` 与 `messagesBySessionId` 两次回放复用该索引后再交给原 reducer 归并 file part，避免后续用户文本落入上一条 assistant，且不改变 Timeline、实时事件投影和 OpenCode parts 协议。
 
 - `components/GitChangesPanel.vue` 的应用 Agent 与公共 Agent 未暂存分组均支持“全部暂存”；单文件与批量暂存共用同一状态和 API 链路，批量请求不逐文件发送，也不跨作用域混合路径。
+
+- 会话列表置顶交互由 `FigmaChatPanel` 发出 `toggle-session-pinned`，`AgentWorkbench` 复用 backend-api 的 Session PATCH mutation，成功后保留历史 `workspaceContext`、立即更新本地投影，并在加载过后续页时回到第一页对齐 `pinned desc, updatedAt desc` 的服务端顺序。
 
 ## 允许依赖
 

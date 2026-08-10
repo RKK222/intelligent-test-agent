@@ -34,6 +34,7 @@
 14. 企业同源部署将前端 API base URL 显式配置为空，RunEvent 与用户级运行态 SSE 客户端必须保留 `/api/...` 相对地址交给浏览器按当前 origin 解析；不得用缺少 origin 的 `new URL("/api/...")` 构造地址。前后端分离部署仍使用配置的绝对 base URL。
 15. 已认证 fetch SSE 可携带页面内存中的 `X-Test-Agent-Linux-Server-Id`，RunEvent 与用户级运行态 SSE 使用同一动态值；空值不发送。它只供 Nginx 做静态白名单首跳，Nginx 转发前删除，后端仍按 Run/用户归属执行权威校验和跨 Java 兜底。旧客户端或无法自定义 header 的原生 EventSource 不发送时继续使用默认 upstream，事件格式和恢复语义不变。
 16. 批量生成子条目测试案例只编排多个独立 Session、Run 或夜间任务，不新增批量级 RunEvent。每个立即执行项仍订阅自己的既有 RunEvent SSE；定时项在普通 Run 受理后沿用相同事件流，`batchId/itemRequestId` 不进入事件 payload。
+17. 从历史列表进入活动 Session 时，用户级运行态摘要一旦提供 busy `runId`，前端应立即接管对应 RunEvent SSE。若消息页、session-tree 或旧 Run 详情与首个 `run.snapshot.reset` 并发返回，迟到的历史基线不得覆盖已经接收的实时投影；实现必须在基线替换后无通知重放当前 Run 的快照/尾流，并保持活动 Run 的停止权限、思考、工具事件、Todo 和 Diff 一致。该规则同时适用于会话所属人打开被分享成员发起的代操作 Run，以及被分享成员自身的分享工作台。
 
 ## RunEvent 基础字段
 
@@ -278,6 +279,34 @@ data 字段：
 - 低频触发器作为兜底，避免本机实时触发丢失时状态长期不更新；用户已有 Redis 运行态 marker 时，每次摘要刷新只读取 Redis active 索引和 manifest，不轮询 PostgreSQL。未进入新链路的 legacy 用户继续使用现有只读 Repository。
 - 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 恢复正文，active-run 只作为上述流不可用时的单次 fallback。
 
+## 分享会话运行态 fetch SSE
+
+`GET /api/internal/platform/opencode-runtime/session-shares/runtime-state/events` 是分享工作台专用的单会话状态流。请求使用当前登录用户自己的 Bearer Token，并携带 `X-Test-Agent-Session-Share`；它不进入普通用户历史 runtime-state，也不允许用分享消息归因扩大普通会话可见范围。
+
+事件类型：
+
+| event name | 说明 |
+|---|---|
+| `session-share.snapshot` | 建连后首帧，包含分享版本、权限、有效期和当前 active Run。 |
+| `session-share.updated` | active Run、`canChat`、版本或有效期发生变化。 |
+| `session-share.invalidated` | 分享过期、取消、成员移除、会话归档或其它授权失效的末帧；发送后服务端关闭连接。 |
+
+data 使用 `active/reason/shareId/version/sessionId/workspaceId/canChat/expiresAt/activeRun/generatedAt`。`activeRun` 为空表示当前没有 `PENDING/RUNNING/CANCELLING` Run；非空时字段与 HTTP `RunResponse` 一致。失效末帧固定 `active=false`、`canChat=false`、`activeRun=null`，`reason` 使用 `EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED` 或稳定平台错误码。无变化时每 25 秒发送标准 heartbeat comment。
+
+服务端至少每秒重新校验登录用户状态、share/version、成员状态、有效期、精确 Session/Workspace 和权限。分享设置更新会提升版本；旧连接收到更新或失效后不得继续用旧权限执行。RunEvent SSE、文件 WebSocket 和 PTY 终端也各自周期或逐操作重新鉴权，成员移除、降权、取消或到期时关闭连接；已经启动的 Run 不因此自动取消。
+
+分享工作台发送前先使用同一分享头签发会话运行上下文：服务端保留真实 actor 鉴权，但上下文绑定会话所属人的进程与执行身份；该 HTTP 签发过程不新增 SSE 事件。随后工作台订阅当前 Run 的既有 RunEvent SSE，并在跨 Java 转发时保留分享头。RunEvent 的 USER `message.updated`（包括 `run.snapshot.reset`、Session tree 和断线恢复投影）在 payload 顶层及 message 对象中以 additive 字段补充：
+
+| 字段 | 说明 |
+|---|---|
+| `senderUserId` | 实际发送用户的平台 ID。 |
+| `senderUnifiedAuthId` | 实际发送人的统一认证号快照，可空。 |
+| `sentBySharedUser` | 是否由被分享人代会话所属人发送。 |
+
+显示姓名不进入 RunEvent，前端从 `SessionShareAccess.participants` 按 `senderUserId` 解析。旧客户端可以忽略新增字段；旧事件缺失时按所属人普通发送兼容。分享模式禁止 follow-up queue，任一活动 Run 出现后立即禁用输入，后端 Redis + PostgreSQL 会话占用仍是最终并发裁决。
+
+多人同步不依赖消息发送方浏览器的本地乐观状态。`LEGACY_FULL` RunEvent SSE 建连时，后端先按精确 `sessionId + runId + role=USER` 从 `session_messages` 生成一条 transient `message.updated`，其中 `message.id` 优先使用已保存的远端消息 ID、`platformMessageId` 保留平台 ID；随后才读取 OpenCode assistant snapshot。OpenCode 尚未初始化或暂不可用时，平台 USER 事件仍独立返回。OpenCode 后到的空 user envelope 只作为同 ID 合并边界，客户端不得把它渲染为空气泡；重连重放必须按稳定消息 ID 原位更新，不得新增重复轮次。`REDIS_SUMMARY` 继续由 Redis input 物化快照提供同一权威输入。
+
 ## stale active `run.failed`
 
 本节只适用于 `LEGACY_FULL`。`StaleActiveRunReconcileTaskHandler` 的 MyBatis 查询会排除 `REDIS_SUMMARY`；当它扫描到超过 2 小时仍处于 `PENDING/RUNNING/CANCELLING` 的 legacy Run 时，服务端会先检查 Redis 运行态：
@@ -361,7 +390,7 @@ retry 字段：
 - 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传优先使用 `GET /api/internal/agent/{agentId}/runs/{runId}/events?lastEventId={seq}`，默认 `agentId=opencode`。内部平台入口 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}` 继续有效；旧 `GET /api/runs/{runId}/events?lastEventId={seq}` 已作废，返回 `410 API_GONE`。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
-- `LEGACY_FULL` 的消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 从最新页沿 `before` cursor 查找本 Run 的稳定 USER dispatch ID，只把该 user 的直接 assistant 转换为 transient `message.updated` / `message.part.updated` snapshot 事件。平台 USER、root scope 与 locator 锚点不一致，明确锚点尚未到达，重复 cursor、20 页超限或旧 Run 时间窗内 user 不唯一时都返回空消息投影，不回退“最后一轮”；因此旧轮 `todowrite` 不会被重新标成当前 Run。快照恢复与 durable replay、本机 live bus 并发订阅。`REDIS_SUMMARY` 不订阅该兼容远端 snapshot Flux；每次建连先发完整 Redis 物化 reset，再按 `runtimeVersion` 读取 durable/transient 尾流，容量换代时按上节再次重置 reducer。opencode workspace 级事件流由 opencode-client 保留 raw/mapped DTO 边界，事件是否属于当前 Run 的 root/child scope 由 runtime `RunSessionScopeRouter` 判定；显式属于未知 session 的事件不会按 root 处理。当前 Run 收到 root 成功/失败终态后结束远端订阅，避免同一会话后续轮次串流。
+- `LEGACY_FULL` 的消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时先从平台 `session_messages` 精确恢复当前 Run 的 USER 输入，再通过当前 `AgentRuntime.messages` 从最新页沿 `before` cursor 查找稳定 USER dispatch ID，只把该 user 的直接 assistant 转换为 transient `message.updated` / `message.part.updated` snapshot 事件。平台 USER、root scope 与 locator 锚点不一致，明确锚点尚未到达，重复 cursor、20 页超限或旧 Run 时间窗内 user 不唯一时都返回空 OpenCode assistant 投影，不回退“最后一轮”；平台 USER 输入不受该远端失败影响，因此旧轮 `todowrite` 不会被重新标成当前 Run，且其他参与方仍能立即看到发送内容。快照恢复与 durable replay、本机 live bus 并发订阅。`REDIS_SUMMARY` 不订阅该兼容远端 snapshot Flux；每次建连先发完整 Redis 物化 reset，再按 `runtimeVersion` 读取 durable/transient 尾流，容量换代时按上节再次重置 reducer。opencode workspace 级事件流由 opencode-client 保留 raw/mapped DTO 边界，事件是否属于当前 Run 的 root/child scope 由 runtime `RunSessionScopeRouter` 判定；显式属于未知 session 的事件不会按 root 处理。当前 Run 收到 root 成功/失败终态后结束远端订阅，避免同一会话后续轮次串流。
 
 ## Run Session Scope
 
@@ -423,7 +452,7 @@ scope 发现与缓存规则：
 
 `POST /api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` 仅供用户 OpenCode 进程调用，不是前端 RunEvent SSE。Java 只对 `2xx + text/event-stream` 响应使用 `ServerSentEvent` 语义转换：每个事件的 `id/event/retry/comment/data` 语义保留；没有 `reasoning_content` 时把 `data` 中的 `<think>...</think>` 迁移为 `reasoning_content`，已有 textual `reasoning_content` 时整个 delta 原样保留；`[DONE]` 原样保留。代理不会手工追加 `data:`，因此下游不会出现 `data:data:`。
 
-所有非 `2xx` 响应（包括 `4xx + text/event-stream`）和非 SSE 响应按 `DataBuffer` 原样转发，保留状态码、`Content-Type`、`Content-Encoding`、错误正文、`Retry-After` 和 trace header。连接超时为 10 秒，首个响应头与首个真实模型输出等待均为 30 秒，后续真实输出空闲为 120 秒；注释、空事件、role/usage 元数据、`data: ping` 和畸形 data 不刷新这些截止时间。收到 `[DONE]` 后代理结束上游订阅；不设置其它整体 SSE 生命周期超时，下游取消也会取消到企业内部模型的订阅。
+所有非 `2xx` 响应（包括 `4xx + text/event-stream`）和非 SSE 响应按 `DataBuffer` 原样转发，保留状态码、`Content-Type`、`Content-Encoding`、错误正文、`Retry-After` 和 trace header。连接超时为 10 秒，首个响应头与首个真实模型输出等待均为 30 秒，后续真实输出空闲为 120 秒；注释、空事件、role/usage 元数据、`data: ping` 和畸形 data 不刷新这些截止时间。调用结果以 `[DONE]` 或 `choices[*].finish_reason` 非空作为正常收尾信号，兼容企业网关在 `finish_reason` 后直接 EOF；收到 `[DONE]` 后代理仍主动结束上游订阅。不设置其它整体 SSE 生命周期超时，下游取消也会取消到企业内部模型的订阅。
 
 ## Runtime SSE
 
@@ -453,7 +482,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 ## Internal Server Broadcast
 
-内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件包括应用版本工作区副本同步、公共 Agent 配置同步、通用参数刷新和引用资产库副本同步。
+内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件包括应用版本工作区副本同步、公共 Agent 配置同步、通用参数刷新、外部 API 凭据刷新和引用资产库副本同步。
 
 传输：
 
@@ -498,6 +527,8 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 }
 ```
 
+`external-api-credential.refresh-requested` 用于 API Key 新增、编辑、启停、轮换或删除事务提交后的跨 Java 重载。发布端先在本机整表构建不可变凭据快照，再发送空业务 payload 的广播；其它 Java 收到后从 PostgreSQL 整表读取并解密，完整校验成功后才原子替换本机快照。广播不得携带工具编码、API Key、密文、指纹、scope 或 SSH 内容，远端消费也不得二次发布。Redis pub/sub 丢失时由每 60 秒补偿整表刷新收敛；该事件不进入 RunEvent/SSE。
+
 `reference-repository.sync-requested` 用于应用资产库首次初始化、同分支同步、受控分支切换或只读指针核验 generation 的低延迟唤醒。事件名称保持不变，具体操作由消费者读取数据库 `operation_type` 判断；payload 固定只包含：
 
 ```json
@@ -531,7 +562,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 /api/internal/platform/workspace-management/file/ws?ticket=wft_...
 ```
 
-route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。upgrade 必须校验 Origin；全局 CORS 恰好配置为单个 `*` 时可以接受任意格式合法的 canonical Origin，但缺失或畸形 Origin 仍拒绝，混合 wildcard 与显式来源不放宽。workspace ticket 还绑定签票授权同一次权威判断产生的 `STANDARD/APP_SOURCE` 事实；APP_SOURCE 票后续禁止 `SUPER_ADMIN` 非托管回退，每条 RPC 都必须再次识别为 APP_SOURCE，replica 映射消失即 `FORBIDDEN`，而真正的非托管超级管理员服务器工作区保持兼容。连接建立后，每条 `workspace.*` RPC 仍会重新读取当前用户 `opencode` 文件路由 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致；binding 迁移或错误 JVM 上的旧连接从下一条 RPC 起返回 `FORBIDDEN`，文件服务不再执行。
+route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。upgrade 必须校验 Origin；全局 CORS 恰好配置为单个 `*` 时可以接受任意格式合法的 canonical Origin，但缺失或畸形 Origin 仍拒绝，混合 wildcard 与显式来源不放宽。workspace ticket 还绑定签票授权同一次权威判断产生的 `STANDARD/APP_SOURCE/SESSION_SHARE` 事实；分享票绑定 share/version、真实 actor、执行所属人、精确 session/workspace、`canChat` 和到期时间，且只能访问 `workspace.*`，不能借此进入 Agent 配置、Hub 或服务器目录模式。每条分享 RPC 和连接级定时监视都会重新校验授权与范围：只读成员只能 list/search/read/status，写入、上传、复制、移动、改名和删除要求当前 `canChat`；降权、移除、取消或到期会中止上传并关闭连接。APP_SOURCE 票后续禁止 `SUPER_ADMIN` 非托管回退，每条 RPC 都必须再次识别为 APP_SOURCE，replica 映射消失即 `FORBIDDEN`，而真正的非托管超级管理员服务器工作区保持兼容。连接建立后，每条普通 `workspace.*` RPC 仍会重新读取当前用户 `opencode` 文件路由 affinity；分享票改用执行所属人的 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致。binding 迁移或错误 JVM 上的旧连接从下一条 RPC 起返回 `FORBIDDEN`，文件服务不再执行。
 
 文件 RPC 的每条请求和响应仍是单条 JSON 文本消息，但上传、大文件预览和原始字节下载都由多条有界 RPC 组成。目标 Java 的单帧上限同时覆盖 `test-agent.files.max-preview-bytes` 以内的一次性 UTF-8 读写、单个预览/下载分段和单个 Base64 上传分片，并附加 RPC envelope 余量；它只限制单条消息，不代表整个上传、下载文件或最终可预览内容的大小。默认一次性预览/可编辑阈值为 5 MiB，超过后前端改用固定约 512 KiB 的 UTF-8 渐进预览分段；用户可继续加载一段或确认加载到文件末尾，界面必须提示完整加载超大文件可能占用较多内存并导致 Monaco 卡顿，大文件始终只读，避免把部分内容误保存。原始字节下载同样使用约 512 KiB 分段并通过 Base64 放入 JSON，支持任意二进制内容。默认上传分片为 256 KiB、可配置上限为 4 MiB。分片上传、渐进预览和原始字节下载都不设置应用层文件总大小上限，实际可处理大小仍受浏览器、网络、磁盘空间和基础设施超时约束。
 
@@ -832,6 +863,10 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 超级管理员问题排查授权、目标切换、会话/工作区列表、审计查询均为普通 HTTP API，文件内容继续使用平台文件 WebSocket 的独立 RPC 协议。本功能不创建 Session、Run、RunEvent 或用户级 runtime-state 事件，也不新增 SSE。
 
 会话正文读取复用既有 `RunMessageRecoveryService` 和 durable session-tree 快照，只把当前保留链路已有的事件投影为一次 HTTP 响应，并携带 `FULL/SUMMARY`、回放可用性和详情保留时间；不得把排查读取重新发布到 RunEvent/SSE，亦不得因此延长消息保留。文件 WebSocket 每条排查 RPC 都重新校验短期授权和目标归属，授权失效后直接返回错误并清理连接，不通过事件通知目标用户。
+
+## 外部 API Key 与 SSH Key 查询不新增事件
+
+API Key 管理只使用管理 HTTP API，外部 SSH Key 查询只使用 `/api/external/v1/**` HTTP。凭据重载仅产生内部 `external-api-credential.refresh-requested` 广播，不新增 RunEvent/SSE、用户级 runtime-state 事件或浏览器 WebSocket 消息；API Key、SSH Key 和 TAEK1 密文都不得进入事件流。
 
 ## LobeHub 不新增平台事件
 

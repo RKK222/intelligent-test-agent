@@ -4,13 +4,24 @@ import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
 import com.enterprise.testagent.api.web.common.SideQuestionDtos;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
 import com.enterprise.testagent.opencode.runtime.runtime.SideQuestionStreamingApplicationService;
+import com.enterprise.testagent.opencode.runtime.run.RunActorAttribution;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.common.api.ApiResponse;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import java.util.Map;
+import java.util.Locale;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpMethod;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -29,8 +40,11 @@ import reactor.core.publisher.Mono;
 @RestController
 public class PlatformOpencodeRuntimeController {
 
+    private static final Pattern SESSION_PATH = Pattern.compile("/sessions/([^/]+)");
+
     private final OpencodeRuntimeApplicationService runtimeService;
     private final SideQuestionStreamingApplicationService sideQuestionStreamingService;
+    private final SessionCollaborationShareService shareService;
 
     /**
      * 注入运行态应用服务，所有 opencode 兼容路径均在应用层完成转发。
@@ -38,8 +52,18 @@ public class PlatformOpencodeRuntimeController {
     public PlatformOpencodeRuntimeController(
             OpencodeRuntimeApplicationService runtimeService,
             SideQuestionStreamingApplicationService sideQuestionStreamingService) {
+        this(runtimeService, sideQuestionStreamingService, null);
+    }
+
+    /** 生产装配增加分享服务，真实认证主体与 OpenCode 执行主体在统一代理入口显式分离。 */
+    @Autowired
+    public PlatformOpencodeRuntimeController(
+            OpencodeRuntimeApplicationService runtimeService,
+            SideQuestionStreamingApplicationService sideQuestionStreamingService,
+            SessionCollaborationShareService shareService) {
         this.runtimeService = runtimeService;
         this.sideQuestionStreamingService = sideQuestionStreamingService;
+        this.shareService = shareService;
     }
 
     /**
@@ -424,17 +448,32 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @jakarta.validation.Valid @RequestBody SideQuestionDtos.StreamRequest request,
             ServerWebExchange exchange) {
-        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return RuntimeApiSupport.blockingObjectResponse(
                 exchange,
-                traceId -> SideQuestionDtos.StreamResponse.from(sideQuestionStreamingService.start(
-                        userId,
-                        "opencode",
-                        new SessionId(sessionId),
-                        request.question(),
-                        request.messageId(),
-                        request.model(),
-                        traceId)));
+                traceId -> {
+                    DelegatedOperationContext context = sharedContext(exchange, traceId);
+                    UserId actor = AuthWebSupport.getAuthPrincipal(exchange).userId();
+                    try {
+                        var result = context == null
+                                ? sideQuestionStreamingService.start(
+                                        actor, "opencode", new SessionId(sessionId), request.question(),
+                                        request.messageId(), request.model(), traceId)
+                                : sideQuestionStreamingService.start(
+                                        RunActorAttribution.from(context), "opencode", new SessionId(sessionId),
+                                        request.question(), request.messageId(), request.model(), traceId);
+                        auditSharedRuntime(exchange, context, "SUCCESS", null, traceId);
+                        return SideQuestionDtos.StreamResponse.from(result);
+                    } catch (RuntimeException failure) {
+                        auditSharedRuntime(
+                                exchange, context,
+                                failure instanceof PlatformException platform
+                                        && platform.errorCode().httpStatus() < 500 ? "DENIED" : "FAILED",
+                                failure instanceof PlatformException platform
+                                        ? platform.errorCode().name() : "SIDE_QUESTION_FAILED",
+                                traceId);
+                        throw failure;
+                    }
+                });
     }
 
     /**
@@ -444,6 +483,9 @@ public class PlatformOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> startManualQuestionRun(
             @jakarta.validation.Valid @RequestBody SideQuestionDtos.ManualStreamRequest request,
             ServerWebExchange exchange) {
+        if (exchange.getRequest().getHeaders().getFirst(SessionShareController.SHARE_HEADER) != null) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "分享模式不能创建独立手册问答");
+        }
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return RuntimeApiSupport.blockingObjectResponse(
                 exchange,
@@ -707,7 +749,133 @@ public class PlatformOpencodeRuntimeController {
     private Mono<ApiResponse<Object>> platformResponse(ServerWebExchange exchange, Function<String, Object> action) {
         return RuntimeApiSupport.blockingObjectResponse(
                 exchange,
-                traceId -> runtimeService.withUser(optionalUserId(exchange), () -> action.apply(traceId)));
+                traceId -> {
+                    DelegatedOperationContext context = sharedContext(exchange, traceId);
+                    UserId executionUser = context == null
+                            ? optionalUserId(exchange)
+                            : context.executionOwnerUserId();
+                    try {
+                        Object result = runtimeService.withUser(executionUser, () -> action.apply(traceId));
+                        auditSharedRuntime(exchange, context, "SUCCESS", null, traceId);
+                        return result;
+                    } catch (RuntimeException failure) {
+                        auditSharedRuntime(
+                                exchange,
+                                context,
+                                failure instanceof PlatformException platform
+                                        && platform.errorCode().httpStatus() < 500 ? "DENIED" : "FAILED",
+                                failure instanceof PlatformException platform
+                                        ? platform.errorCode().name() : "RUNTIME_OPERATION_FAILED",
+                                traceId);
+                        throw failure;
+                    }
+                });
+    }
+
+    /**
+     * 分享头只允许访问精确 Session/Workspace 的工作台能力；所有 owner-only 路径在转发前拒绝。
+     */
+    private DelegatedOperationContext sharedContext(ServerWebExchange exchange, String traceId) {
+        String shareId = exchange.getRequest().getHeaders().getFirst(SessionShareController.SHARE_HEADER);
+        if (shareId == null || shareId.isBlank()) {
+            return null;
+        }
+        if (shareService == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "会话分享服务未配置");
+        }
+        String path = exchange.getRequest().getURI().getPath();
+        boolean write = exchange.getRequest().getMethod() != HttpMethod.GET
+                && exchange.getRequest().getMethod() != HttpMethod.HEAD;
+        DelegatedOperationContext context = shareService.requireAccess(
+                AuthWebSupport.getAuthPrincipal(exchange).userId(),
+                new SessionShareId(shareId),
+                write,
+                traceId);
+        try {
+            requireSharedRuntimeScope(context, path, exchange);
+        } catch (RuntimeException failure) {
+            shareService.recordOperation(
+                    context,
+                    "RUNTIME_SCOPE_DENIED",
+                    "SESSION",
+                    context.sessionId().value(),
+                    null,
+                    "DENIED",
+                    failure instanceof PlatformException platform
+                            ? platform.errorCode().name() : "RUNTIME_SCOPE_DENIED",
+                    traceId);
+            throw failure;
+        }
+        return context;
+    }
+
+    private void requireSharedRuntimeScope(
+            DelegatedOperationContext context,
+            String path,
+            ServerWebExchange exchange) {
+        if (ownerOnlySharedPath(path, exchange.getRequest().getMethod())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "该操作仅会话所属人可执行");
+        }
+        boolean scoped = false;
+        Matcher sessionMatcher = SESSION_PATH.matcher(path);
+        if (sessionMatcher.find()) {
+            context.requireSession(new SessionId(sessionMatcher.group(1)));
+            scoped = true;
+        }
+        String workspaceId = exchange.getRequest().getQueryParams().getFirst("workspaceId");
+        if (workspaceId != null && !workspaceId.isBlank()) {
+            context.requireWorkspace(new WorkspaceId(workspaceId));
+            scoped = true;
+        }
+        if (!scoped) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "分享请求必须绑定精确会话或工作区");
+        }
+    }
+
+    private boolean ownerOnlySharedPath(String path, HttpMethod method) {
+        return path.contains("/global/dispose")
+                || path.contains("/worktrees")
+                || path.contains("/manual-question")
+                || path.contains("/sessions/") && (path.endsWith("/fork")
+                        || path.endsWith("/share")
+                        || path.endsWith("/abort"))
+                || path.contains("/provider/")
+                || path.contains("/provider/auth")
+                || path.contains("/auth/")
+                || path.contains("/mcp/") && path.contains("/auth")
+                || path.endsWith("/config") && method != HttpMethod.GET;
+    }
+
+    private void auditSharedRuntime(
+            ServerWebExchange exchange,
+            DelegatedOperationContext context,
+            String outcome,
+            String errorCode,
+            String traceId) {
+        if (context == null || shareService == null) {
+            return;
+        }
+        String path = exchange.getRequest().getURI().getPath();
+        boolean sessionScoped = SESSION_PATH.matcher(path).find();
+        shareService.recordOperation(
+                context,
+                runtimeAuditAction(exchange.getRequest().getMethod(), path),
+                sessionScoped ? "SESSION" : "WORKSPACE",
+                sessionScoped ? context.sessionId().value() : context.workspaceId().value(),
+                exchange.getRequest().getQueryParams().getFirst("path"),
+                outcome,
+                errorCode,
+                traceId);
+    }
+
+    private String runtimeAuditAction(HttpMethod method, String path) {
+        String suffix = path.replaceFirst("^.*/opencode-runtime/", "")
+                .replaceAll("/sessions/[^/]+", "/sessions")
+                .replaceAll("[^A-Za-z0-9]+", "_")
+                .replaceAll("^_+|_+$", "")
+                .toUpperCase(Locale.ROOT);
+        String action = "RUNTIME_" + (method == null ? "UNKNOWN" : method.name()) + "_" + suffix;
+        return action.length() <= 64 ? action : action.substring(0, 64);
     }
 
     /**

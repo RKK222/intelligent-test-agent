@@ -703,6 +703,116 @@ export type Session = {
   sourceType?: ConversationSourceType | null;
   /** 来源业务主键，例如夜间执行任务 id。 */
   sourceRefId?: string | null;
+  /** 会话分享状态："ACTIVE" | "EXPIRED" | "REVOKED" 等；未分享时为 null/undefined。 */
+  shareStatus?: SessionShareStatus | null;
+  /** 会话分享是否已过期 */
+  shareExpired?: boolean | null;
+  /** 是否已被分享 */
+  isShared?: boolean | null;
+};
+
+/** 协作分享候选用户只暴露平台最小身份资料。 */
+export type SessionShareCandidate = {
+  userId: string;
+  unifiedAuthId: string;
+  username: string;
+};
+
+export type SessionShareMembershipStatus =
+  | "ACTIVE"
+  | "EXPIRED"
+  | "REVOKED"
+  | "REMOVED"
+  | "SESSION_ARCHIVED"
+  | string;
+
+export type SessionShareStatus = "ACTIVE" | "REVOKED" | string;
+
+export type SessionShareMember = {
+  userId: string;
+  unifiedAuthId: string;
+  username: string;
+  canChat: boolean;
+  status: SessionShareMembershipStatus;
+  sharedAt: string;
+  updatedAt: string;
+  removedAt?: string | null;
+};
+
+export type SessionCollaborationShare = {
+  shareId: string;
+  sharePath: string;
+  sessionId: string;
+  workspaceId: string;
+  ownerUserId: string;
+  status: SessionShareStatus;
+  expiresAt: string;
+  version: number;
+  members: SessionShareMember[];
+  createdAt: string;
+  updatedAt: string;
+  revokedAt?: string | null;
+};
+
+export type PutSessionCollaborationSharePayload = {
+  expectedVersion?: number | null;
+  expiresAt: string;
+  members: Array<{ userId: string; canChat: boolean }>;
+};
+
+/** “分享给我”列表保留失效历史，只有 ACTIVE 项允许进入。 */
+export type SharedSessionListItem = {
+  shareId: string;
+  sharePath: string;
+  sessionId: string;
+  workspaceId: string;
+  sessionTitle: string;
+  ownerUserId: string;
+  ownerUnifiedAuthId: string;
+  ownerUsername: string;
+  sharedAt: string;
+  expiresAt: string;
+  canChat: boolean;
+  status: SessionShareMembershipStatus;
+};
+
+export type SessionShareParticipant = {
+  userId: string;
+  unifiedAuthId: string;
+  username: string;
+  owner: boolean;
+  canChat: boolean;
+  status: SessionShareMembershipStatus | "OWNER";
+};
+
+/** 登录主体保持 actor，executionOwnerUserId 是显式代操作执行身份。 */
+export type SessionShareAccess = {
+  shareId: string;
+  version: number;
+  actorUserId: string;
+  actorUnifiedAuthId: string;
+  actorUsername: string;
+  executionOwnerUserId: string;
+  sessionId: string;
+  workspaceId: string;
+  canChat: boolean;
+  delegated: boolean;
+  ownerAccess: boolean;
+  expiresAt: string;
+  participants: SessionShareParticipant[];
+};
+
+export type SessionShareRuntimeState = {
+  active: boolean;
+  reason?: string | null;
+  shareId: string;
+  version: number;
+  sessionId: string;
+  workspaceId: string;
+  canChat: boolean;
+  expiresAt: string;
+  activeRun?: Run | null;
+  generatedAt: string;
 };
 
 export type ConversationSourceType = "MANUAL" | "SCHEDULED_TASK" | "SIDE_QUESTION" | string;
@@ -760,6 +870,10 @@ export type ResendMetadata = {
   executeAt: string;
   sourceRunId: string;
   replacementRunId: string;
+  requesterUserId?: string | null;
+  requesterUsername?: string | null;
+  requesterUnifiedAuthId?: string | null;
+  requestedBySharedUser?: boolean;
 };
 
 export type SessionMessage = {
@@ -780,6 +894,11 @@ export type SessionMessage = {
   summaryVersion?: number | null;
   sourceType?: ConversationSourceType | null;
   sourceRefId?: string | null;
+  /** 实际发送人；旧消息可缺失，OpenCode 仍只感知会话所属人。 */
+  senderUserId?: string | null;
+  senderUsername?: string | null;
+  senderUnifiedAuthId?: string | null;
+  sentBySharedUser?: boolean;
   resend?: ResendMetadata | null;
 };
 
@@ -833,6 +952,10 @@ export type NightExecutionTask = {
   runId?: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  creatorUserId?: string | null;
+  creatorUsername?: string | null;
+  creatorUnifiedAuthId?: string | null;
+  createdBySharedUser?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -1187,6 +1310,10 @@ export type Run = {
   tokens?: TokenUsage;
   sourceType?: ConversationSourceType | null;
   sourceRefId?: string | null;
+  messageSenderUserId?: string | null;
+  messageSenderUsername?: string | null;
+  messageSenderUnifiedAuthId?: string | null;
+  messageSentBySharedUser?: boolean;
   resend?: ResendMetadata | null;
 };
 
@@ -1805,6 +1932,55 @@ export type GeneralParameterUpdatePayload = {
   value: string;
 };
 
+export type ExternalApiScope = "USER_SSH_KEY_READ";
+
+export type ExternalApiScopeOption = {
+  code: ExternalApiScope;
+  name: string;
+};
+
+export type ExternalApiCredential = {
+  credentialId: string;
+  toolCode: string;
+  toolName: string;
+  scopes: ExternalApiScope[];
+  keyHint: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExternalApiCredentialListParams = {
+  keyword?: string;
+  enabled?: boolean;
+  page?: number;
+  size?: number;
+};
+
+export type ExternalApiCredentialCreatePayload = {
+  toolCode: string;
+  toolName: string;
+  scopes: ExternalApiScope[];
+  enabled: boolean;
+};
+
+export type ExternalApiCredentialUpdatePayload = {
+  toolName: string;
+  scopes: ExternalApiScope[];
+  enabled: boolean;
+};
+
+export type ExternalApiCredentialCreated = {
+  credential: ExternalApiCredential;
+  apiKey: string;
+};
+
+export type ExternalApiCredentialRevealed = {
+  credentialId: string;
+  toolCode: string;
+  apiKey: string;
+};
+
 export type CommonParameterChangeLog = {
   logId: string;
   parameterId: string;
@@ -1997,7 +2173,7 @@ export type InternalModelCallRecord = {
   firstByteMillis?: number | null;
   /** 首个包含模型输出的 SSE data 相对耗时；非流式或未收到有效输出 chunk 时为空。 */
   firstTokenMillis?: number | null;
-  /** 从请求开始到收到 OpenAI 兼容 SSE [DONE]；未完整结束或非流式时为空。 */
+  /** 从请求开始到收到 OpenAI 兼容正常收尾信号（[DONE] 或非空 finish_reason）；未完整结束或非流式时为空。 */
   streamCompleteMillis?: number | null;
   traceId: string;
   ucid?: string | null;
@@ -2484,6 +2660,11 @@ export type AgentMessage =
       runId?: string;
       sourceType?: ConversationSourceType | null;
       sourceRefId?: string | null;
+      senderUserId?: string | null;
+      senderUnifiedAuthId?: string | null;
+      /** 由分享访问上下文的参与人目录补齐，只用于前端展示。 */
+      senderUsername?: string | null;
+      sentBySharedUser?: boolean;
       resend?: ResendMetadata | null;
     }
   | {

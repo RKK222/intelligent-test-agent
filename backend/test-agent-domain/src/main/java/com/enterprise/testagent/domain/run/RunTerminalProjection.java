@@ -36,7 +36,41 @@ public record RunTerminalProjection(
         ConversationSourceType sourceType,
         String sourceRefId,
         UserId senderUserId,
+        String senderUnifiedAuthId,
+        boolean sentBySharedUser,
         List<RunConversationSummary> summaries) {
+
+    /** 兼容新增分享发送人归因前的终态投影构造器。 */
+    public RunTerminalProjection(
+            RunId runId,
+            SessionId sessionId,
+            RunStatus status,
+            long expectedStatusVersion,
+            String terminalSource,
+            String terminalReasonCode,
+            String safeErrorMessage,
+            boolean remoteStopConfirmed,
+            long lastEventSeq,
+            Instant detailsExpiresAt,
+            String rootRemoteSessionId,
+            RunDiffCounts diffCounts,
+            String lastRemoteMessageId,
+            String lastRemotePartId,
+            TokenUsage tokenUsage,
+            BigDecimal costUsd,
+            String traceId,
+            Instant updatedAt,
+            String agentId,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            UserId senderUserId,
+            List<RunConversationSummary> summaries) {
+        this(runId, sessionId, status, expectedStatusVersion, terminalSource,
+                terminalReasonCode, safeErrorMessage, remoteStopConfirmed, lastEventSeq,
+                detailsExpiresAt, rootRemoteSessionId, diffCounts, lastRemoteMessageId,
+                lastRemotePartId, tokenUsage, costUsd, traceId, updatedAt, agentId,
+                sourceType, sourceRefId, senderUserId, null, false, summaries);
+    }
 
     public RunTerminalProjection {
         Objects.requireNonNull(runId, "runId must not be null");

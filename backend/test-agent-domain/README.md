@@ -18,6 +18,7 @@
 - 认证领域端口 `TokenSessionMarkerStore` 只定义平台 Token 的 SHA-256 session marker 写入、删除、校验与摘要规则，供平台 Token 生命周期和 XXL 会话联动复用；不暴露 Redis key。
 - `WorkflowCapabilityStore` 只定义一次性 checkout ticket、HMAC nonce、短期模型 grant、run撤销墓碑的原子端口；payload绑定用户/session/task/run/runner/分支或analyzer，不包含Python工作流会话、任务、报告和事件。
 - `supportaccess` 定义限时排查授权、内存态授权摘要、审计事件/查询与 Repository/Redis store 端口；领域对象禁止包含平台 Token、授权 Token、消息/文件正文和文件路径明文。`UserWorkspaceQueryRepository` 与 `SessionHistoryRepository` 提供按目标用户归因的工作区/会话只读端口，供普通归属校验和受审排查入口共同复用；会话端口保留默认 ACTIVE 方法，并提供排查显式包含 ARCHIVED 的兼容重载。
+- `externalapi` 定义外部工具凭据聚合、`USER_SSH_KEY_READ` scope、Repository 端口、认证主体与刷新事件；聚合只保存 RSA 密文、SHA-256 指纹和 Key 提示，不保存明文。
 
 ## 已有模型
 
@@ -101,6 +102,6 @@ Repository 端口只定义在 domain，具体 JDBC/Flyway 实现必须放在 `te
   唯一，`upstreamModelId` 只供模型网关解析。
 - `ModelGatewayUsageDailyRepository` 接受无正文的 `ModelGatewayUsageDelta`，只按稳定聚合维度累加计数、token
   和耗时。
-- `InternalModelCallRecordRepository` 接受不含正文的代理/探活结构化观测；明细中的 `firstByteMillis`、`firstTokenMillis`、`streamCompleteMillis` 分别表达响应头、首 Token 延迟（TTFT）和 `[DONE]` 到达，`durationMillis` 保留端到端耗时。小时聚合为 TTFT 与流完成分别保留 sum/max/count，未达到对应阶段时不参与该指标统计。`InternalModelCallOutcomeGroup` 把底层 13 个精确结果稳定归入成功、请求或配置问题、上游服务异常、调用方中断、其他异常五个看板大类；查询仍返回精确原因，不丢失排障信息。
+- `InternalModelCallRecordRepository` 接受不含正文的代理/探活结构化观测；明细中的 `firstByteMillis`、`firstTokenMillis`、`streamCompleteMillis` 分别表达响应头、首 Token 延迟（TTFT）和正常收尾信号（`[DONE]` 或非空 `finish_reason`）到达，`durationMillis` 保留端到端耗时。小时聚合为 TTFT 与流完成分别保留 sum/max/count，未达到对应阶段时不参与该指标统计。`InternalModelCallOutcomeGroup` 把底层 13 个精确结果稳定归入成功、请求或配置问题、上游服务异常、调用方中断、其他异常五个看板大类；查询仍返回精确原因，不丢失排障信息。
 
 LobeHub 自身用户、Session、部门 Workspace、资源与审计是独立 fork 的领域，不在本模块建模。

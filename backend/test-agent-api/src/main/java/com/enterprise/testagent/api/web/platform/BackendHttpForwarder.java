@@ -42,7 +42,8 @@ public class BackendHttpForwarder {
             HttpHeaders.ACCEPT,
             HttpHeaders.CONTENT_TYPE,
             HttpHeaders.ACCEPT_LANGUAGE,
-            TraceConstants.TRACE_ID_HEADER);
+            TraceConstants.TRACE_ID_HEADER,
+            SessionShareController.SHARE_HEADER);
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;

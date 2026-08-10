@@ -137,7 +137,7 @@
 
 .oc-disclosure.is-running .oc-tool__status {
   color: var(--oc-accent);
-  opacity: var(--oc-pulse-opacity);
+  animation: oc-pulse 1.6s ease-in-out infinite;
 }
 
 .oc-reasoning-part__body {

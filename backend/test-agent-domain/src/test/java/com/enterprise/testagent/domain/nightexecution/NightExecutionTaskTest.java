@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
@@ -48,6 +49,25 @@ class NightExecutionTaskTest {
         assertThat(customTask().cancel(claimedAt).reservationReleasedAt()).isNull();
         assertThat(customTask().fail("WINDOW_EXPIRED", "测试定时已过期", claimedAt)
                 .reservationReleasedAt()).isNull();
+    }
+
+    @Test
+    void delegatedCreatorSnapshotSurvivesLifecycleTransitions() {
+        NightExecutionTask task = customTask().withCreatorSnapshot(
+                new UserId("usr_shared_creator"), "ucid-shared-creator", true,
+                new SessionShareId("shr_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+                7L, CREATED_AT.plusSeconds(3600), true);
+
+        NightExecutionTask adjusted = task.reschedule(
+                SLOT_START.plusSeconds(120), SLOT_START.plusSeconds(180), SLOT_START.plusSeconds(1020),
+                task.targetLinuxServerId(), CREATED_AT.plusSeconds(30));
+
+        assertThat(adjusted.creatorUserId()).isEqualTo(new UserId("usr_shared_creator"));
+        assertThat(adjusted.creatorUnifiedAuthId()).isEqualTo("ucid-shared-creator");
+        assertThat(adjusted.createdBySharedUser()).isTrue();
+        assertThat(adjusted.shareIdSnapshot()).isEqualTo(task.shareIdSnapshot());
+        assertThat(adjusted.shareVersionSnapshot()).isEqualTo(7L);
+        assertThat(adjusted.canChatSnapshot()).isTrue();
     }
 
     private NightExecutionTask compatibilityTask() {

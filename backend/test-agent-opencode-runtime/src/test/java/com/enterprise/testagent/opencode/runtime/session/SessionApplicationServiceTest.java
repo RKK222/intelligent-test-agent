@@ -209,7 +209,23 @@ class SessionApplicationServiceTest {
 
         assertThat(updated.title()).isEqualTo("Demo session");
         assertThat(updated.pinned()).isTrue();
+        assertThat(updated.updatedAt()).isEqualTo(NOW);
         assertThat(sessions.saved.getLast()).isEqualTo(updated);
+    }
+
+    /** 验证纯置顶往返不改变普通会话组的排序锚点。 */
+    @Test
+    void pinAndUnpinPreserveHistorySortTimestamp() {
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        SessionApplicationService service = service(new FakeWorkspaceRepository(true), sessions, new FakeMessageRepository());
+
+        Session pinned = service.updateSession(SESSION_ID, null, true, "trace_pin1234567890abcdef");
+        Session unpinned = service.updateSession(SESSION_ID, null, false, "trace_unpin1234567890abcd");
+
+        assertThat(pinned.pinned()).isTrue();
+        assertThat(unpinned.pinned()).isFalse();
+        assertThat(pinned.updatedAt()).isEqualTo(NOW);
+        assertThat(unpinned.updatedAt()).isEqualTo(NOW);
     }
 
     @Test

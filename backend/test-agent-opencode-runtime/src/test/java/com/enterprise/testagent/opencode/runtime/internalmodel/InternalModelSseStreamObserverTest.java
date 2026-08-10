@@ -29,7 +29,35 @@ class InternalModelSseStreamObserverTest {
                 .output()).isTrue();
         assertThat(observer.inspect(data("{\"choices\":[{\"delta\":{\"function_call\":{\"name\":\"lookup\"}}}]}"))
                 .output()).isTrue();
-        assertThat(observer.inspect(data("[DONE]")).done()).isTrue();
+        assertThat(observer.inspect(data("[DONE]"))).satisfies(event -> {
+            assertThat(event.protocolComplete()).isTrue();
+            assertThat(event.done()).isTrue();
+        });
+    }
+
+    @Test
+    void recognizesNonEmptyFinishReasonAsCompatibleCompletionSignal() {
+        assertThat(observer.inspect(data("""
+                {"choices":[{"delta":{},"finish_reason":"stop"}]}
+                """))).satisfies(event -> {
+            assertThat(event.output()).isFalse();
+            assertThat(event.protocolComplete()).isTrue();
+            assertThat(event.done()).isFalse();
+        });
+        assertThat(observer.inspect(data("""
+                {"choices":[{"delta":{"content":"last"},"finish_reason":"stop"}]}
+                """))).satisfies(event -> {
+            assertThat(event.output()).isTrue();
+            assertThat(event.protocolComplete()).isTrue();
+        });
+        assertThat(observer.inspect(data("""
+                {"choices":[{"delta":{},"finish_reason":null}]}
+                """))).extracting(InternalModelSseStreamObserver.ObservedEvent::protocolComplete)
+                .isEqualTo(false);
+        assertThat(observer.inspect(data("""
+                {"choices":[{"delta":{},"finish_reason":""}]}
+                """))).extracting(InternalModelSseStreamObserver.ObservedEvent::protocolComplete)
+                .isEqualTo(false);
     }
 
     @Test

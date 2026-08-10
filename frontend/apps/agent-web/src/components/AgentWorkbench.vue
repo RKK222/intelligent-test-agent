@@ -16,13 +16,19 @@ import {
 import {
   BackendApiError,
   createBackendApiClient,
+  createSessionShareApiClient,
   type AppSourceProgressConnection,
   type CreateNightExecutionTaskPayload,
   type RawHttpExchange
 } from "@test-agent/backend-api";
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
-import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
+import {
+  subscribeRunEvents,
+  subscribeSessionRuntimeState,
+  subscribeSessionShareRuntimeState,
+  type RunEventRawMessage
+} from "@test-agent/event-stream-client";
 import { BookOpenText, Boxes, BrainCircuit, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
@@ -60,6 +66,10 @@ import type {
   ProviderInfo,
   ResendMetadata,
   Session,
+  SessionCollaborationShare,
+  SessionShareAccess,
+  SessionShareRuntimeState,
+  SharedSessionListItem,
   SessionMessage,
   SessionRuntimeState,
   SessionRuntimeStateSummary,
@@ -169,6 +179,8 @@ import {
   type WorkspaceViewWarningSnapshot
 } from "./workspaceViewState";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
+import SessionShareDialog from "./SessionShareDialog.vue";
+import { sessionCollaborationShareIsActive } from "./session-share-management";
 import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
 import { type PreviewMode } from "./WorkbenchFooter.vue";
@@ -283,18 +295,34 @@ import {
   type WorkspaceRequirementReference
 } from "./workbench-utils";
 
+const props = defineProps<{
+  sessionShareId?: string;
+  initialShareAccess?: SessionShareAccess;
+}>();
+
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
 const SCM_GMP_PERMISSION_APPLICATION_URL = "https://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@";
 // 只保存当前页面生命周期内的 binding 提示，避免刷新或切换用户后沿用旧服务器。
 const routeLinuxServerId = ref("");
-const routeLinuxServerResolved = ref(false);
+const shareMode = computed(() => Boolean(props.sessionShareId?.trim()));
+const shareAccess = ref<SessionShareAccess | null>(props.initialShareAccess ?? null);
+const shareRuntimeState = ref<SessionShareRuntimeState | null>(null);
+const routeLinuxServerResolved = ref(shareMode.value);
 const publicWorktreeMountRequest = ref<PublicWorktreeMountRequest | null>(null);
 let publicWorktreeMountRevision = 0;
-const api = createBackendApiClient({
+const ordinaryApi = createBackendApiClient({
   baseUrl: apiBaseUrl,
   routeLinuxServerId: () => routeLinuxServerId.value,
   rawExchangeObserver: observeRawHttpExchange
 });
+const api = props.sessionShareId
+  ? createSessionShareApiClient({
+      baseUrl: apiBaseUrl,
+      shareId: props.sessionShareId,
+      routeLinuxServerId: () => routeLinuxServerId.value,
+      rawExchangeObserver: observeRawHttpExchange
+    })
+  : ordinaryApi;
 const conversationRunContexts = createConversationRunContextCache((sessionId) => api.getRunContext(sessionId));
 provide("api", api);
 const queryClient = useQueryClient();
@@ -344,11 +372,11 @@ type RawOutputEntry = {
   occurredAt: string;
 };
 
-const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const isSuperAdmin = computed(() => !shareMode.value && authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const canUseLobehub = computed(() => releaseFeatures.lobehub && isSuperAdmin.value);
 const canUseWorkflow = computed(() => releaseFeatures.workflow && isSuperAdmin.value);
 const isAppAdmin = computed(() =>
-  isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true
+  !shareMode.value && (isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true)
 );
 
 const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v7";
@@ -412,7 +440,7 @@ watch(
   (userId) => {
     // 登录态尚未加载时先保持抑制，避免进程状态面板抢在引导组件之前闪现。
     if (!userId) return;
-    firstLoginGuideActive.value = !hasSeenFirstLoginGuide(userId);
+    firstLoginGuideActive.value = !shareMode.value && !hasSeenFirstLoginGuide(userId);
   },
   { immediate: true }
 );
@@ -480,7 +508,10 @@ const workspaceRequirementCandidates = ref<WorkspaceRequirementReference[]>([]);
 const workspaceRequirementCandidatesLoading = ref(false);
 let workspaceRequirementLoadSeq = 0;
 const session = shallowRef<Session | null>(null);
+// 普通工作台由会话所属人进入，通过分享管理快照补齐协作者姓名；分享模式则使用 access participants。
+const ordinarySessionShare = shallowRef<SessionCollaborationShare | null>(null);
 const run = shallowRef<Run | null>(null);
+const sessionShareDialogOpen = ref(false);
 const nightTasks = ref<NightExecutionTask[]>([]);
 const nightVisibleFailure = shallowRef<NightExecutionTask | null>(null);
 const nightSlots = shallowRef<NightExecutionSlots | null>(null);
@@ -490,6 +521,7 @@ const nightTaskActionPending = ref<Record<string, boolean>>({});
 const recentlyCreatedNightTask = shallowRef<NightExecutionTask | null>(null);
 let nightTaskRefreshSequence = 0;
 let nightSlotRequestSequence = 0;
+let ordinarySessionShareLoadSequence = 0;
 let nightTaskPollingTimer: ReturnType<typeof setInterval> | null = null;
 let nightCreateIdempotency: {
   signature: string;
@@ -569,6 +601,13 @@ const historySwitchingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 let activeRunProbeSeq = 0;
 const runtimeStateRunReconciliations = new Set<string>();
+type HistorySwitchRunEventBuffer = {
+  switchSeq: number;
+  sessionId: string;
+  runId?: string;
+  events: RunEvent[];
+};
+let historySwitchRunEventBuffer: HistorySwitchRunEventBuffer | null = null;
 const followUpQueue = ref<FollowUpDraft[]>([]);
 const retryDeadlines = ref<RetryDeadlineMap>({});
 const resendStarting = ref(false);
@@ -683,7 +722,7 @@ function handleHubChanged(paths: string[]) {
 }
 
 async function refreshHubUpdateCount() {
-  if (!authStore.token || !selectedWorkspaceId.value) {
+  if (shareMode.value || !authStore.token || !selectedWorkspaceId.value) {
     hubUpdateCount.value = 0;
     return;
   }
@@ -758,7 +797,7 @@ const canWriteSelectedWorkspace = computed(() => ordinaryWorkspaceCanWrite(
   selectedWorkspaceKind.value,
   currentPersonalWorkspaceId.value,
   selectedWorkspaceId.value
-));
+) || (shareMode.value && shareAccess.value?.canChat === true && shareRuntimeState.value?.active !== false));
 const personalPullBlockState = ref<{
   personalWorkspaceId: string;
   files: WorkspaceGitUpdateBlocker[];
@@ -1021,6 +1060,11 @@ function platformMessageIdForAgentMessage(message: AgentMessage): string | undef
   return remoteMessageId ? platformMessageIdsByRemoteId.value[remoteMessageId] : undefined;
 }
 
+const shareParticipantNameByUserId = computed(() => new Map([
+  ...(ordinarySessionShare.value?.members ?? []).map((member) => [member.userId, member.username] as const),
+  ...(shareAccess.value?.participants ?? []).map((participant) => [participant.userId, participant.username] as const)
+]));
+
 const chatMessagesForPanel = computed<AgentMessage[]>(() =>
   chatState.value.messages.map((message) => {
     if (message.role === "card") return message;
@@ -1033,7 +1077,12 @@ const chatMessagesForPanel = computed<AgentMessage[]>(() =>
       const resend = belongsToCurrentResend
         ? currentResend
         : message.resend;
-      return platformMessageId || resend ? { ...message, platformMessageId, resend } : message;
+      const senderUsername = message.senderUserId
+        ? shareParticipantNameByUserId.value.get(message.senderUserId)
+        : undefined;
+      return platformMessageId || resend || senderUsername
+        ? { ...message, platformMessageId, resend, senderUsername: senderUsername ?? message.senderUsername }
+        : message;
     }
     return platformMessageId ? { ...message, platformMessageId } : message;
   })
@@ -1076,6 +1125,13 @@ const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
 // selectedWorkspace 只接受应用 recent workspace 或用户显式选择产生的 selectedWorkspaceId。
 // 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
 const selectedWorkspace = computed(() => {
+  // 分享模式的 session/workspace 已由后端精确授权，不依赖被分享人的应用成员关系。
+  if (shareMode.value) {
+    const fromList = workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
+    if (fromList) return fromList;
+    const snapshot = selectedWorkspaceSnapshot.value;
+    return snapshot?.workspaceId === selectedWorkspaceId.value ? snapshot : undefined;
+  }
   const appId = selectedAppId.value;
   if (!appId || (visibleManagedApplicationIds.value && !visibleManagedApplicationIds.value.has(appId))) {
     return undefined;
@@ -1185,6 +1241,7 @@ onBeforeUnmount(() => {
 const managedApplicationsQuery = useQuery({
   queryKey: ["managed-workspace", "applications"],
   queryFn: () => api.listManagedApplications(),
+  enabled: () => !shareMode.value,
   retry: false,
   // 成员撤权不删除物理 worktree；前台定期刷新成员目录并在失权后收起旧工作区。
   refetchOnWindowFocus: "always",
@@ -1372,7 +1429,7 @@ watch(selectedAppId, () => {
 
 const sessionsQuery = useQuery({
   queryKey: ["sessions", "user-history", sessionSearchTrim, sessionHistoryPage],
-  enabled: () => authStore.isAuthenticated() && routeLinuxServerResolved.value,
+  enabled: () => !shareMode.value && authStore.isAuthenticated() && routeLinuxServerResolved.value,
   queryFn: () => {
     const query = sessionSearchTrim.value;
     return api.listAllSessions(
@@ -1382,6 +1439,45 @@ const sessionsQuery = useQuery({
     );
   }
 });
+
+const sharedSessionsQuery = useQuery({
+  queryKey: ["sessions", "shared-with-me"],
+  enabled: () => !shareMode.value && authStore.isAuthenticated(),
+  queryFn: () => ordinaryApi.listSharedSessions(1, 50),
+  staleTime: 15_000
+});
+const sharedSessionItems = computed<SharedSessionListItem[]>(() => sharedSessionsQuery.data.value?.items ?? []);
+
+function refreshSharedSessions() {
+  if (!shareMode.value && !sharedSessionsQuery.isFetching.value) void sharedSessionsQuery.refetch();
+}
+
+function handleSessionShareUpdated(updated: SessionCollaborationShare) {
+  ordinarySessionShare.value = updated;
+  refreshSharedSessions();
+}
+
+watch(
+  () => session.value?.sessionId,
+  (sessionId) => {
+    const sequence = ++ordinarySessionShareLoadSequence;
+    ordinarySessionShare.value = null;
+    if (shareMode.value || !sessionId) return;
+    // 姓名目录是消息展示增强项；读取失败不能阻断所属人打开普通会话。
+    void ordinaryApi.getSessionCollaborationShare(sessionId).then((current) => {
+      if (sequence === ordinarySessionShareLoadSequence && session.value?.sessionId === sessionId) {
+        ordinarySessionShare.value = current;
+      }
+    }).catch(() => undefined);
+  },
+  { immediate: true }
+);
+
+/** 分享会话使用独立标签页，避免普通工作台与分享工作台复用页面初始化状态。 */
+function openSharedSession(shareId: string) {
+  const targetUrl = router.resolve(`/s/${encodeURIComponent(shareId)}`).href;
+  window.open(targetUrl, "_blank", "noopener,noreferrer");
+}
 
 watch(sessionSearchTrim, () => {
   sessionHistoryPage.value = 1;
@@ -1417,10 +1513,10 @@ watch(
       resetRawOutputCache();
       runtimeStateOutages.reset();
       routeLinuxServerId.value = "";
-      routeLinuxServerResolved.value = false;
+      routeLinuxServerResolved.value = shareMode.value;
       publicWorktreeMountRequest.value = null;
     }
-    if (!token || !subscriptionRouteResolved) {
+    if (shareMode.value || !token || !subscriptionRouteResolved) {
       sessionRuntimeState.value = null;
       return;
     }
@@ -1456,6 +1552,93 @@ watch(
   },
   { immediate: true }
 );
+
+watch(
+  [() => authStore.token, () => props.sessionShareId],
+  ([token, sessionShareId], _old, onCleanup) => {
+    if (!token || !sessionShareId || !shareMode.value) return;
+    const subscription = subscribeSessionShareRuntimeState({
+      baseUrl: apiBaseUrl,
+      token,
+      shareId: sessionShareId,
+      onEvent: (state, meta) => {
+        const previous = shareRuntimeState.value;
+        shareRuntimeState.value = state;
+        if (shareAccess.value) {
+          shareAccess.value = {
+            ...shareAccess.value,
+            version: state.version,
+            canChat: state.canChat,
+            expiresAt: state.expiresAt
+          };
+        }
+        readonlySessionReason.value = state.active
+          ? (state.canChat ? "" : "当前分享权限为只读，不能修改工作区或发送消息。")
+          : shareInvalidReason(state.reason);
+        const activeRun = state.activeRun && isRunBusyStatus(state.activeRun.status)
+          ? state.activeRun
+          : null;
+        run.value = activeRun;
+        const sessions: SessionRuntimeState[] = activeRun ? [{
+          sessionId: state.sessionId,
+          runId: activeRun.runId,
+          runStatus: activeRun.status,
+          updatedAt: activeRun.updatedAt
+        }] : [];
+        sessionRuntimeState.value = {
+          runningCount: sessions.length,
+          questionCount: 0,
+          permissionCount: 0,
+          sessions,
+          generatedAt: state.generatedAt
+        };
+        if (!state.active || previous?.version !== state.version || previous?.canChat !== state.canChat) {
+          api.closeWorkspaceFileConnections(state.workspaceId);
+        }
+        if (state.active && previous?.version !== state.version) {
+          void api.getSessionShareAccess().then((latest) => {
+            shareAccess.value = latest;
+          }).catch(() => undefined);
+        }
+        logs.value = [...logs.value.slice(-200), `[session-share] ${meta.eventName}`];
+      },
+      onStatus: (status) => {
+        logs.value = [...logs.value.slice(-200), `[session-share] ${status}`];
+      }
+    });
+    onCleanup(() => subscription.close());
+  },
+  { immediate: true }
+);
+
+onMounted(() => {
+  const access = shareAccess.value;
+  if (!shareMode.value || !access) return;
+  routeLinuxServerResolved.value = true;
+  readonlySessionReason.value = access.canChat
+    ? ""
+    : "当前分享权限为只读，不能修改工作区或发送消息。";
+  void switchSession(access.sessionId);
+});
+
+watch(
+  [
+    () => typeof route.query.sessionId === "string" ? route.query.sessionId.trim() : "",
+    routeLinuxServerResolved
+  ],
+  ([sessionId, routeResolved]) => {
+    if (shareMode.value || !routeResolved || !sessionId || session.value?.sessionId === sessionId) return;
+    void switchSession(sessionId);
+  },
+  { immediate: true }
+);
+
+function shareInvalidReason(reason?: string | null): string {
+  if (reason === "EXPIRED" || reason === "SESSION_SHARE_EXPIRED") return "该分享链接已过期。";
+  if (reason === "REVOKED" || reason === "SESSION_SHARE_REVOKED") return "该分享已被会话所属人取消。";
+  if (reason === "REMOVED" || reason === "SESSION_SHARE_MEMBER_REMOVED") return "你已被移出该分享会话。";
+  return "当前分享权限已失效。";
+}
 
 /**
  * 用户级 runtime-state 已包含接管 RunEvent SSE 所需的 runId/status；直接构造前端 Run，避免再查数据库。
@@ -1598,7 +1781,7 @@ function fallbackActiveRunOnce(reason: string) {
   );
 }
 
-const opencodeProcessEnabled = computed(() => authStore.isAuthenticated());
+const opencodeProcessEnabled = computed(() => !shareMode.value && authStore.isAuthenticated());
 const opencodeProcessQueryKey = computed(() => ["runtime", "opencode-process", "me", authStore.token ?? ""] as const);
 const opencodeProcessQuery = useQuery({
   queryKey: opencodeProcessQueryKey,
@@ -1634,6 +1817,11 @@ const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => {
 watch(
   [opencodeProcessStatus, () => opencodeProcessQuery.status.value],
   ([process, queryStatus]) => {
+    if (shareMode.value) {
+      routeLinuxServerResolved.value = true;
+      routeLinuxServerId.value = "";
+      return;
+    }
     const resolution = opencodeProcessRouteResolution(process, queryStatus);
     routeLinuxServerResolved.value = resolution.resolved;
     if (resolution.resolved) {
@@ -1664,7 +1852,7 @@ const opencodeHealthQuery = useQuery({
   refetchIntervalInBackground: false
 });
 const opencodeHealthReady = computed(() => opencodeAvailability.value.ready);
-const opencodeProcessReady = computed(() => opencodeHealthReady.value);
+const opencodeProcessReady = computed(() => shareMode.value || opencodeHealthReady.value);
 const batchTestCaseGeneration = useBatchTestCaseGeneration({
   api,
   conversationContexts: conversationRunContexts,
@@ -1847,12 +2035,17 @@ async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: st
 // 拆分就绪条件：不同能力依赖不同条件
 // 1. 模型和 Provider：依赖用户 opencode 进程，不依赖 workspace
 const authReady = computed(() => authStore.isAuthenticated());
+// 分享目录必须显式携带授权中的固定 Workspace，既满足后端精确范围校验，也隔离普通目录缓存。
+const runtimeCatalogWorkspaceId = computed(() => shareMode.value
+  ? shareAccess.value?.workspaceId?.trim() || undefined
+  : undefined
+);
 const runtimeCatalogRecoveryReady = computed(() =>
   runtimeCatalogRecoveryAllowed(
     authReady.value,
     opencodeProcessReady.value,
     processStartupOperation.value
-  )
+  ) && (!shareMode.value || Boolean(runtimeCatalogWorkspaceId.value))
 );
 // 2. 文件路由：只需要 workspace 存在，不依赖 opencode 状态
 const fileRouteReady = computed(() => Boolean(selectedWorkspaceIdRef.value));
@@ -1869,18 +2062,18 @@ const robotQuestionAvailable = computed(() => opencodeProcessReady.value
 
 // 模型和 Provider 在进程 READY 后加载；未初始化页面不发起无效 503 轮询。
 const modelsQuery = useQuery({
-  queryKey: ["runtime", "models"],
+  queryKey: computed(() => ["runtime", "models", runtimeCatalogWorkspaceId.value ?? ""] as const),
   enabled: runtimeCatalogRecoveryReady,
-  queryFn: () => api.listModels(),
+  queryFn: ({ queryKey }) => api.listModels(queryKey[2] || undefined),
   retry: false,
   refetchOnWindowFocus: "always",
   // 服务重启窗口可能先返回空目录或请求失败；仅在目录为空时短轮询，恢复后立即停止。
   refetchInterval: (query) => runtimeCatalogRecoveryRefetchInterval(query.state.data)
 });
 const providersQuery = useQuery({
-  queryKey: ["runtime", "providers"],
+  queryKey: computed(() => ["runtime", "providers", runtimeCatalogWorkspaceId.value ?? ""] as const),
   enabled: runtimeCatalogRecoveryReady,
-  queryFn: () => api.listProviders(),
+  queryFn: ({ queryKey }) => api.listProviders(queryKey[2] || undefined),
   retry: false,
   refetchOnWindowFocus: "always",
   refetchInterval: (query) => runtimeCatalogRecoveryRefetchInterval(query.state.data)
@@ -2154,7 +2347,24 @@ function refreshAgentsCatalog() {
   if (!opencodeCatalogReady.value || agentsQuery.isFetching.value) return;
   void agentsQuery.refetch();
 }
-const historyList = computed(() => historyItems(run.value, sessionsItems.value, runtimeStatesBySessionId.value));
+
+const historyList = computed(() => {
+  const items = historyItems(run.value, sessionsItems.value, runtimeStatesBySessionId.value);
+  const currentShare = ordinarySessionShare.value;
+  if (!currentShare) return items;
+  const isExpired = !sessionCollaborationShareIsActive(currentShare, new Date(nowTick.value));
+  return items.map((item) => {
+    if (item.id === currentShare.sessionId) {
+      return {
+        ...item,
+        isShared: true,
+        shareStatus: currentShare.status,
+        shareExpired: isExpired,
+      };
+    }
+    return item;
+  });
+});
 
 function handleHistorySearchChange(query: string) {
   if (sessionSearch.value === query) return;
@@ -2695,6 +2905,7 @@ watch(
       runId: subscribedRunId,
       token,
       linuxServerId,
+      sessionShareId: props.sessionShareId,
       onRawMessage: (message) => observeRawRunEventMessage(message, subscribedSessionId),
       onEvent: (event) => {
         if (ignoredRunIds.value.has(event.runId)) {
@@ -2713,6 +2924,7 @@ watch(
           applyRunEventWorkbenchProjection(event, false, subscribedSessionId);
           return;
         }
+        bufferHistorySwitchRunEvent(event, subscribedSessionId);
         handleRunEvent(event, subscribedSessionId);
       },
       onStatus: (status) => {
@@ -3259,6 +3471,7 @@ function invalidateConversationInteraction() {
   activeRunProbeSeq += 1;
   // 非历史交互会取消当前 switch；递增 owner 代次可确保旧 finally 无权清除后来启动的新 switch。
   historySwitchSeq += 1;
+  historySwitchRunEventBuffer = null;
   historyLoadingSessionId.value = null;
   historySwitchingSessionId.value = null;
 }
@@ -3490,6 +3703,10 @@ const runtimeBusy = computed(() =>
     pendingRequestedRunUserMessageId.value !== null
   )
 );
+const collaborativeSessionActive = computed(() =>
+  shareMode.value
+  || sessionCollaborationShareIsActive(ordinarySessionShare.value, new Date(nowTick.value))
+);
 const resendableMessageId = computed(() => {
   if (runtimeBusy.value || resendStarting.value) return undefined;
   const sourceRun = run.value;
@@ -3502,6 +3719,10 @@ const resendableMessageId = computed(() => {
     }
   );
   if (!sourceMessage || sourceMessage.runId !== sourceRun.runId || !sourceMessage.remoteMessageId) return undefined;
+  if (shareMode.value && (
+    shareAccess.value?.canChat !== true
+    || sourceMessage.senderUserId !== shareAccess.value.actorUserId
+  )) return undefined;
   if (["WAITING", "REVERTING", "REVERTED"].includes(sourceMessage.resend?.status ?? "")) return undefined;
   return sourceMessage.remoteMessageId;
 });
@@ -3526,11 +3747,19 @@ const timelineRuntimeStatusForPanel = computed(() => {
     retryAfterSeconds: retryCountdownSeconds(status, nowTick.value, retryDeadlines.value)
   };
 });
-const canStopRun = computed(() => Boolean(run.value && isRunBusyStatus(run.value.status) && !cancelRunMutation.isPending.value));
+const canStopRun = computed(() => Boolean(
+  run.value
+  && isRunBusyStatus(run.value.status)
+  && !cancelRunMutation.isPending.value
+  && (!shareMode.value || run.value.messageSenderUserId === shareAccess.value?.actorUserId)
+));
 const stopDisabledReason = computed(() => {
   if (cancelRunMutation.isPending.value) return "正在终止";
   if (!run.value) return "当前没有可终止的运行";
   if (!isRunBusyStatus(run.value.status)) return "当前运行已结束";
+  if (shareMode.value && run.value.messageSenderUserId !== shareAccess.value?.actorUserId) {
+    return "仅会话所属人或本次消息发送人可以停止";
+  }
   return "";
 });
 
@@ -3789,9 +4018,10 @@ async function retryLastRun() {
 
 // follow-up 队列：Run 空闲且有排队 prompt 时自动出队执行
 watch(
-  [followUpQueue, run, session, () => startRunMutation.isPending.value, opencodeProcessReady],
+  [followUpQueue, run, session, () => startRunMutation.isPending.value, opencodeProcessReady, collaborativeSessionActive],
   () => {
     if (
+      collaborativeSessionActive.value ||
       followUpQueue.value.length === 0 ||
       !opencodeProcessReady.value ||
       !canStartFollowUp(run.value, startRunMutation.isPending.value)
@@ -3814,12 +4044,37 @@ watch(
   }
 );
 
+watch(collaborativeSessionActive, (active) => {
+  if (active && followUpQueue.value.length > 0) {
+    // 分享启用后禁止继续消费此前的本地队列，避免其他参与方看到隐式自动发送。
+    followUpQueue.value = [];
+  }
+});
+
 const updateSessionMutation = useMutation({
   mutationFn: async (input: { sessionId: string; title?: string; pinned?: boolean }) =>
     api.updateSession(input.sessionId, { title: input.title, pinned: input.pinned }),
-  onSuccess: (updated) => {
+  onSuccess: (updated, input) => {
     if (session.value?.sessionId === updated.sessionId) {
-      session.value = updated;
+      session.value = {
+        ...session.value,
+        ...updated,
+        workspaceContext: updated.workspaceContext ?? session.value.workspaceContext
+      };
+    }
+    // PATCH 单会话响应允许缺少 workspaceContext；保留历史列表已有上下文并立即投影置顶结果。
+    sessionHistoryItems.value = sessionHistoryItems.value.map((item) =>
+      item.sessionId === updated.sessionId
+        ? {
+            ...item,
+            ...updated,
+            workspaceContext: updated.workspaceContext ?? item.workspaceContext
+          }
+        : item
+    );
+    // 加载过后续页时，置顶会改变分页边界；回到第一页重新对齐服务端权威顺序，避免重复或漏项。
+    if (typeof input.pinned === "boolean" && sessionHistoryPage.value !== 1) {
+      sessionHistoryPage.value = 1;
     }
     void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   },
@@ -3827,6 +4082,18 @@ const updateSessionMutation = useMutation({
     feedback.value = errorFeedback("更新 Session 失败", error);
   }
 });
+
+const historyPinningSessionId = computed(() => {
+  const input = updateSessionMutation.variables.value;
+  return updateSessionMutation.isPending.value && typeof input?.pinned === "boolean"
+    ? input.sessionId
+    : null;
+});
+
+function handleToggleSessionPinned(sessionId: string, pinned: boolean) {
+  if (historyPinningSessionId.value) return;
+  updateSessionMutation.mutate({ sessionId, pinned });
+}
 
 const deleteSessionMutation = useMutation({
   mutationFn: async (sessionId: string) => api.deleteSession(sessionId),
@@ -7261,6 +7528,19 @@ type CacheFileData = {
   content: string;
 };
 
+function extractItemNo(filePath: string): string | undefined {
+  const segments = filePath.split(/[\\/]+/).filter(Boolean);
+  for (const seg of segments) {
+    if (seg.startsWith("S") || seg.startsWith("s")) {
+      const parts = seg.split("-");
+      if (parts.length >= 2 && /^\d+$/.test(parts[1] ?? "")) {
+        return `${parts[0]}-${parts[1]}`;
+      }
+    }
+  }
+  return undefined;
+}
+
 type SingleResponse = {
   data: {
     jumpUrl: string;
@@ -7314,10 +7594,13 @@ async function handleCacheAndNavigate(path: string, type: "file" | "directory") 
       return;
     }
 
+    const itemNo = extractItemNo(path);
+
     const body = JSON.stringify({
       type: cacheType,
       appName,
       version,
+      itemNo,
       data: files,
     });
 
@@ -7339,6 +7622,97 @@ async function handleCacheAndNavigate(path: string, type: "file" | "directory") 
     }
   } catch (error) {
     console.error("缓存数据并跳转失败", error);
+    ElMessage.error(error instanceof Error ? error.message : "缓存数据并跳转失败");
+  }
+}
+
+async function handleCacheAndNavigateEntries(entries: { path: string; type: "file" | "directory" }[]) {
+  if (!selectedWorkspace.value) {
+    return;
+  }
+  const workspaceId = selectedWorkspace.value.workspaceId;
+  const appName = selectedManagedApplication.value?.appName ?? "";
+  const now = new Date();
+  const version = `${now.getFullYear()}年${now.getMonth() + 1}月`;
+  const cacheDataUrl = import.meta.env.VITE_CACHE_DATA_URL ?? "";
+
+  if (!cacheDataUrl) {
+    ElMessage.error("缓存数据地址未配置");
+    return;
+  }
+
+  if (entries.length === 0) {
+    ElMessage.warning("没有选中的文件");
+    return;
+  }
+
+  try {
+    const files: CacheFileData[] = [];
+    let cacheType = "md";
+    let hasValidFile = false;
+
+    for (const entry of entries) {
+      if (entry.type === "directory") {
+        if (entry.path.includes("测试执行")) {
+          cacheType = "json";
+          const dirFiles = await collectAllFilesInDirectory(workspaceId, entry.path);
+          files.push(...dirFiles);
+          hasValidFile = true;
+        }
+      } else {
+        if (entry.path.includes("测试设计")) {
+          cacheType = "md";
+          const fileContent = await api.readFile(workspaceId, entry.path);
+          files.push({ title: fileNameOf(entry.path), content: fileContent.content });
+          hasValidFile = true;
+        } else if (entry.path.includes("测试执行")) {
+          cacheType = "json";
+          const fileContent = await api.readFile(workspaceId, entry.path);
+          files.push({ title: fileNameOf(entry.path), content: fileContent.content });
+          hasValidFile = true;
+        }
+      }
+    }
+
+    if (!hasValidFile) {
+      ElMessage.warning("仅测试设计和测试执行目录下的文件支持缓存跳转");
+      return;
+    }
+
+    if (files.length === 0) {
+      ElMessage.warning("没有可缓存的文件");
+      return;
+    }
+
+    const firstValidEntry = entries.find((e) => e.path.includes("测试设计") || e.path.includes("测试执行"));
+    const itemNo = firstValidEntry ? extractItemNo(firstValidEntry.path) : undefined;
+
+    const body = JSON.stringify({
+      type: cacheType,
+      appName,
+      version,
+      itemNo,
+      data: files,
+    });
+
+    const response = await fetch(`${cacheDataUrl}/aiTool/cacheData`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+
+    const result = await response.json() as SingleResponse;
+    console.log("============请求后台（多选）=====================", result);
+
+    if (result.data?.jumpUrl) {
+      window.open(result.data.jumpUrl, "_blank", "noopener,noreferrer");
+    } else {
+      ElMessage.error("获取跳转地址失败");
+    }
+  } catch (error) {
+    console.error("多选文件缓存数据并跳转失败", error);
     ElMessage.error(error instanceof Error ? error.message : "缓存数据并跳转失败");
   }
 }
@@ -7623,6 +7997,14 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   }
   if (readonlySessionReason.value) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
+    return;
+  }
+  if (collaborativeSessionActive.value && runtimeBusy.value) {
+    feedback.value = {
+      kind: "info",
+      title: "当前会话正在运行",
+      description: "分享会话运行期间所有参与者都需等待，不能排队或再次发送。"
+    };
     return;
   }
   if (opencodeProcessStatus.value?.messageSendAllowed === false) {
@@ -8217,6 +8599,10 @@ function handleStopRun() {
     feedback.value = { kind: "info", title: "当前没有可终止的运行", description: "运行启动成功并返回 Run ID 后才能终止。" };
     return;
   }
+  if (!canStopRun.value) {
+    feedback.value = { kind: "info", title: "无权停止当前运行", description: stopDisabledReason.value };
+    return;
+  }
   cancelRunMutation.mutate();
   if (chatStartedAt.value) {
     totalDurationMs.value += Date.now() - chatStartedAt.value;
@@ -8229,6 +8615,10 @@ function handleStopRun() {
 
 /** 手动入口只预留替代 Run；旧轮次清理由 run.resend.started 原子接管，不追加乐观重复消息。 */
 function handleRetryRun() {
+  if (!resendableMessageId.value) {
+    feedback.value = { kind: "info", title: "无权撤回重发", description: "仅会话所属人或最后一条用户消息的发送人可以操作。" };
+    return;
+  }
   void retryLastRun();
 }
 
@@ -8255,6 +8645,48 @@ function handleRunEvent(event: RunEvent, subscribedSessionId?: string, allowNoti
     return;
   }
   applyRunEventWorkbenchProjection(projectedEvent, allowNotification, subscribedSessionId);
+}
+
+/**
+ * 历史基线与 RunEvent 并发加载时保留当前 Run 的实时事件；迟到的消息页或会话树覆盖基线后会立即重放。
+ * 新 reset 已包含当时完整物化状态，因此可以丢弃它之前的缓存，避免长时间历史加载无限积累事件。
+ */
+function bufferHistorySwitchRunEvent(event: RunEvent, subscribedSessionId: string) {
+  const buffer = historySwitchRunEventBuffer;
+  if (
+    !buffer
+    || buffer.switchSeq !== historySwitchSeq
+    || buffer.sessionId !== subscribedSessionId
+    || historySwitchingSessionId.value !== subscribedSessionId
+  ) {
+    return;
+  }
+  if (buffer.runId && buffer.runId !== event.runId) {
+    // 替代 Run 在历史加载期间接管订阅时，旧 Run 的缓存必须整体让位；旧连接晚到事件已在投影守卫处被拒绝。
+    buffer.events = [];
+  }
+  buffer.runId = event.runId;
+  if (event.type === "run.snapshot.reset") {
+    buffer.events = [event];
+    return;
+  }
+  if (!buffer.events.some((item) => item.eventId === event.eventId)) {
+    buffer.events.push(event);
+  }
+}
+
+/** 历史状态被整块替换后，无通知地重放同一批实时事件，恢复思考、工具、Todo 与运行状态。 */
+function replayHistorySwitchRunEvents(buffer: HistorySwitchRunEventBuffer) {
+  if (
+    historySwitchRunEventBuffer !== buffer
+    || buffer.switchSeq !== historySwitchSeq
+    || session.value?.sessionId !== buffer.sessionId
+  ) {
+    return;
+  }
+  for (const event of buffer.events) {
+    handleRunEvent(event, buffer.sessionId, false);
+  }
 }
 
 function isInteractionAskSupersededBySnapshot(event: RunEvent): boolean {
@@ -9178,6 +9610,12 @@ async function switchSession(
   }
   session.value = selected;
   readonlySessionReason.value = readonlyReason;
+  const liveRunEvents: HistorySwitchRunEventBuffer = {
+    switchSeq,
+    sessionId,
+    events: []
+  };
+  historySwitchRunEventBuffer = liveRunEvents;
   // 工作区校验已通过后立即清理上一 Session 的交互 dock；新 Session 的 pending 快照随后再填充。
   dispatchChat({ type: "reset" });
   if (!readonlyReason) {
@@ -9212,6 +9650,12 @@ async function switchSession(
     rememberPersistedMessageIdentities(persistedMessages);
     // 先以分页消息渲染正文，树快照和 Todo 作为后续增强；避免大历史树把首屏卡住。
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
+    const restoredFiles = diffFilesFromSessionMessages(persistedMessages).map((file) => ({
+      ...file,
+      path: normalizeWorkspacePath(file.path) || file.path
+    }));
+    diffFiles.value = restoredFiles;
+    replayHistorySwitchRunEvents(liveRunEvents);
     // 视觉 loading 只等待数据库正文；实时 interaction 校准继续后台完成，发送锁仍由 switching 状态持有。
     historyLoadingSessionId.value = null;
     const [livePermissions, liveQuestions] = await historyInteractionsPromise;
@@ -9246,6 +9690,7 @@ async function switchSession(
     const restoredState = treeSnapshot ? chatStateFromSessionTreeSnapshot(treeSnapshot, persistedMessages) : null;
     if (restoredState && restoredState.messages.length > 0) {
       chatState.value = restoredState;
+      replayHistorySwitchRunEvents(liveRunEvents);
       if (livePermissions !== null || liveQuestions !== null || liveTodos !== null) {
         chatState.value = {
           ...chatState.value,
@@ -9263,11 +9708,6 @@ async function switchSession(
     // 正文可以先展示，但发送锁必须保留到关联 Run/Diff 投影完成，避免迟到历史详情覆盖新 Run。
     // 反馈状态独立异步补齐，不延长这把锁。
     void loadFeedbacksForMessages(persistedMessages, sessionId, switchIsCurrent);
-    const restoredFiles = diffFilesFromSessionMessages(persistedMessages).map((file) => ({
-      ...file,
-      path: normalizeWorkspacePath(file.path) || file.path
-    }));
-    diffFiles.value = restoredFiles;
 
     // 寻找最新的 runId 从而恢复 Run 状态与文件 Diff
     const lastMsgWithRunId = [...persistedMessages].reverse().find((m) => m.runId);
@@ -9280,19 +9720,24 @@ async function switchSession(
         if (!switchIsCurrent()) {
           return;
         }
-        run.value = runDetail;
-        rememberRunSession(runDetail);
+        const currentRun = run.value;
+        if (!currentRun || !isRunBusyStatus(currentRun.status) || currentRun.runId === runDetail.runId) {
+          // runtime-state 已接管其它活动 Run 时，历史消息关联的旧终态只能补 Diff，不能抢走停止权限和 SSE 身份。
+          run.value = runDetail;
+          rememberRunSession(runDetail);
+        }
         const runFiles = (diffDetail.files ?? []).map((file) => ({
           ...file,
           path: normalizeWorkspacePath(file.path) || file.path
         }));
-        diffFiles.value = mergeDiffFiles(restoredFiles, runFiles);
+        // RunEvent 可能已在历史详情请求期间补入实时 Diff；以当前投影为基线合并，不能退回旧快照。
+        diffFiles.value = mergeDiffFiles(diffFiles.value, runFiles);
       } catch (runErr) {
         if (switchIsCurrent()) {
           console.error("加载关联 Run 失败", runErr);
         }
       }
-    } else {
+    } else if (!isRunBusyStatus(run.value?.status)) {
       run.value = null;
     }
 
@@ -9329,6 +9774,9 @@ async function switchSession(
     if (switchIsCurrent()) {
       historyLoadingSessionId.value = null;
       historySwitchingSessionId.value = null;
+      if (historySwitchRunEventBuffer === liveRunEvents) {
+        historySwitchRunEventBuffer = null;
+      }
     }
   }
 }
@@ -9337,6 +9785,26 @@ async function switchToHistorySessionWorkspace(
   selected: Session,
   interactionIsCurrent: () => boolean
 ): Promise<string | null> {
+  if (shareMode.value) {
+    try {
+      const workspace = await api.getWorkspace(selected.workspaceId);
+      if (!interactionIsCurrent()) return null;
+      const switched = await switchWorkspace(workspace, {
+        preserveConversationInteraction: true,
+        awaitDirectory: false,
+        kind: "MANAGED",
+        isCurrent: interactionIsCurrent
+      });
+      if (!switched || !interactionIsCurrent()) return null;
+      return shareAccess.value?.canChat
+        ? ""
+        : "当前分享权限为只读，不能修改工作区或发送消息。";
+    } catch (error) {
+      if (!interactionIsCurrent()) return null;
+      feedback.value = errorFeedback("打开分享会话工作区失败", error);
+      return "分享会话所属工作区暂时不可用。";
+    }
+  }
   const expectedAppId = selected.workspaceContext?.appId?.trim();
   const requiresManagedWorkspace = Boolean(expectedAppId);
   const selectionAuthority = beginManagedWorkspaceIntent(expectedAppId || selectedAppId.value);
@@ -9674,8 +10142,22 @@ async function handleLogout() {
 </script>
 
 <template>
+  <div
+    v-if="shareMode && shareRuntimeState?.active === false"
+    class="session-share-invalid-overlay"
+    role="alertdialog"
+    aria-modal="true"
+    aria-label="分享会话已失效"
+  >
+    <div>
+      <strong>分享会话已失效</strong>
+      <p>{{ shareInvalidReason(shareRuntimeState.reason) }}</p>
+      <button type="button" @click="router.replace({ name: 'workbench' })">返回我的工作台</button>
+    </div>
+  </div>
   <FigmaShell
     :workspace-name="selectedWorkspace?.name"
+    :fixed-workspace="shareMode"
     :bottom-open="bottomDrawerOpen"
     :show-left-panel="leftPanelOpen"
     :show-right-panel="rightPanelOpen"
@@ -9704,7 +10186,7 @@ async function handleLogout() {
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
-    show-process-status-in-pet
+    :show-process-status-in-pet="!shareMode"
     :onboarding-active="firstLoginGuideActive"
     :side-question-answer="robotSideQuestion.answer.value"
     :side-question-error="robotSideQuestion.error.value"
@@ -9733,7 +10215,7 @@ async function handleLogout() {
     @open-help="openHelpCenter"
   >
     <template #activity>
-      <nav class="figma-activity-nav" aria-label="工作台活动栏">
+      <nav v-if="!shareMode" class="figma-activity-nav" aria-label="工作台活动栏">
         <div class="figma-activity-top">
           <button
             type="button"
@@ -9926,6 +10408,7 @@ async function handleLogout() {
           @upload-files="handleUploadFiles"
           @undo-entry="handleUndoWorkspaceFileOperation"
           @cache-and-navigate="handleCacheAndNavigate"
+          @cache-and-navigate-entries="handleCacheAndNavigateEntries"
         />
       </div>
       <div v-else class="managed-workspace-empty">
@@ -10212,11 +10695,16 @@ async function handleLogout() {
           :file-changes="diffFiles"
           :task-usage="taskUsage"
           :history="historyList"
+          :shared-sessions="sharedSessionItems"
+          :shared-sessions-loading="sharedSessionsQuery.isFetching.value"
+          :fixed-session="shareMode"
+          :can-manage-share="!shareMode && Boolean(session?.sessionId)"
           :history-search="sessionSearch"
           :history-total="sessionHistoryTotal"
           :history-has-more="sessionHistoryHasMore"
           :history-loading-more="sessionHistoryLoadingMore"
           :history-loading="Boolean(historyLoadingSessionId)"
+          :history-pinning-session-id="historyPinningSessionId"
           :history-submit-blocked="Boolean(historySwitchingSessionId)"
           :history-running-count="sessionRuntimeState?.runningCount ?? 0"
           :history-question-count="sessionRuntimeState?.questionCount ?? 0"
@@ -10224,13 +10712,14 @@ async function handleLogout() {
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
           process-status-placement="pet"
-          process-required
+          :process-required="!shareMode"
           :process-loading="opencodeProcessInitialLoading"
           :process-refreshing="opencodeProcessRefreshing"
           :process-initializing="initializeOpencodeProcessMutation.isPending.value"
           :permissions="chatState.permissions"
           :questions="chatState.questions"
           :current-session-id="session?.sessionId"
+          :current-user-id="authStore.currentUser?.userId"
           :current-session-source-type="session?.sourceType"
           :resendable-message-id="resendableMessageId"
           :night-tasks="nightTasks"
@@ -10293,6 +10782,7 @@ async function handleLogout() {
           @open-history="refreshHistoryOnOpen"
           @history-search-change="handleHistorySearchChange"
           @load-more-history="loadMoreHistory"
+          @toggle-session-pinned="handleToggleSessionPinned"
           @initialize-process="beginInitializeOpencodeProcess"
           @open-help="openHelpCenter"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
@@ -10302,6 +10792,9 @@ async function handleLogout() {
           @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
           @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
           @select-session="(id: string) => switchSession(id)"
+          @select-shared-session="openSharedSession"
+          @request-shared-sessions="refreshSharedSessions"
+          @manage-share="sessionShareDialogOpen = true"
           @change-agent="selectRuntimeAgent"
           @refresh-agents="refreshAgentsCatalog"
           @search-workspace-files="handleWorkspaceFileCandidateSearch"
@@ -10345,7 +10838,9 @@ async function handleLogout() {
             v-if="bottomMode === 'run'"
             :run="run"
             :logs="logs"
-            @cancel="cancelRunMutation.mutate()"
+            :cancel-disabled="!canStopRun"
+            :retry-disabled="!resendableMessageId"
+            @cancel="handleStopRun"
             @retry="handleRetryRun"
           />
           <TerminalPanel
@@ -10361,6 +10856,7 @@ async function handleLogout() {
   </FigmaShell>
 
   <AppSourcePicker
+    v-if="!shareMode"
     :open="appSourcePickerOpen"
     :repositories="appSourceRepositories"
     :loading="appSourcePickerLoading"
@@ -10372,6 +10868,7 @@ async function handleLogout() {
   />
 
   <AppSourceDialog
+    v-if="!shareMode"
     :open="appSourceDialogOpen"
     :repositories="appSourceRepositories"
     :repository="selectedAppSourceRepository"
@@ -10398,6 +10895,7 @@ async function handleLogout() {
   />
 
   <PersonalWorkspacePullDialog
+    v-if="!shareMode"
     :open="personalPullDialog.open"
     :phase="personalPullDialog.phase"
     :app-name="selectedManagedApplication?.appName"
@@ -10412,6 +10910,7 @@ async function handleLogout() {
   />
 
   <ServerWorkspacePickerDialog
+    v-if="!shareMode"
     :open="serverWorkspacePickerOpen"
     :servers="serverWorkspaceServers"
     :selected-server-id="selectedServerWorkspaceServerId"
@@ -10429,6 +10928,7 @@ async function handleLogout() {
   />
 
   <ReferenceConfigurationDialog
+    v-if="!shareMode"
     :open="referenceConfigurationOpen"
     :app-id="selectedAppId ?? ''"
     :workspace-id="selectedWorkspace?.workspaceId ?? ''"
@@ -10437,6 +10937,7 @@ async function handleLogout() {
   />
 
   <SettingsDialog
+    v-if="!shareMode"
     :open="settingsOpen"
     :current-user="authStore.currentUser"
     :route-linux-server-id="routeLinuxServerId"
@@ -10461,6 +10962,7 @@ async function handleLogout() {
   />
 
   <FirstLoginGuide
+    v-if="!shareMode"
     ref="firstLoginGuideRef"
     :user-id="authStore.currentUser?.userId"
     :app-admin="isAppAdmin"
@@ -10471,10 +10973,21 @@ async function handleLogout() {
   />
 
   <OpencodeProcessStartupDialog
+    v-if="!shareMode"
     :open="processStartupDialogOpen"
     :action-label="processStartupActionLabel"
     :operation="processStartupOperation"
     @close="processStartupDialogOpen = false"
+  />
+
+  <SessionShareDialog
+    v-if="!shareMode"
+    :open="sessionShareDialogOpen"
+    :session="session"
+    :api="ordinaryApi"
+    :pending-task-count="currentNightTask ? 1 : 0"
+    @close="sessionShareDialogOpen = false"
+    @updated="handleSessionShareUpdated"
   />
 
   <FileUploadOverlay v-if="workspaceUploadOverlay" v-bind="workspaceUploadOverlay" />
@@ -10495,6 +11008,41 @@ async function handleLogout() {
 </template>
 
 <style scoped>
+.session-share-invalid-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  place-content: center;
+  background: rgba(245, 247, 251, 0.94);
+  backdrop-filter: blur(5px);
+}
+
+.session-share-invalid-overlay > div {
+  display: grid;
+  width: min(420px, calc(100vw - 32px));
+  justify-items: center;
+  gap: 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(16, 24, 40, 0.14);
+  padding: 30px;
+  text-align: center;
+}
+
+.session-share-invalid-overlay strong { color: #1d2939; font-size: 19px; }
+.session-share-invalid-overlay p { margin: 0; color: #667085; }
+.session-share-invalid-overlay button {
+  margin-top: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: #315ed8;
+  color: white;
+  padding: 9px 15px;
+  cursor: pointer;
+}
+
 .hub-activity-button {
   position: relative;
 }

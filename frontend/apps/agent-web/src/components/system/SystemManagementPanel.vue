@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from "vue";
-import { Activity, BarChart3, BrainCircuit, CalendarClock, KeyRound, Network, Radar, Settings2, SlidersHorizontal } from "lucide-vue-next";
+import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, Settings2, SlidersHorizontal } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
 import ScheduledTaskManagementPanel from "./ScheduledTaskManagementPanel.vue";
@@ -11,6 +11,7 @@ import InternalModelProviderPanel from "./InternalModelProviderPanel.vue";
 import InternalModelObservabilityPanel from "./InternalModelObservabilityPanel.vue";
 import SupportAccessPanel from "./SupportAccessPanel.vue";
 import MemoryAdminPanel from "./MemoryAdminPanel.vue";
+import ApiKeyManagementPanel from "./ApiKeyManagementPanel.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -21,7 +22,7 @@ const emit = defineEmits<{
   supportAccessOpened: [];
 }>();
 
-type SystemMenuKey = "scheduler" | "runtime" | "params" | "internalModels" | "internalModelObservability" | "memory" | "config" | "analytics" | "support";
+type SystemMenuKey = "scheduler" | "runtime" | "params" | "apiKeys" | "internalModels" | "internalModelObservability" | "memory" | "config" | "analytics" | "support";
 type SystemMenuItem = { key: SystemMenuKey; label: string; icon: Component };
 
 const activeKey = ref<SystemMenuKey>("scheduler");
@@ -33,6 +34,7 @@ const items: SystemMenuItem[] = [
   { key: "scheduler", label: "定时任务管理", icon: CalendarClock },
   { key: "runtime", label: "运行管理", icon: Activity },
   { key: "params", label: "通用参数管理", icon: SlidersHorizontal },
+  { key: "apiKeys", label: "API Key 管理", icon: Fingerprint },
   { key: "internalModels", label: "内部模型供应商", icon: Network },
   { key: "internalModelObservability", label: "内部模型可观测", icon: Radar },
   { key: "memory", label: "记忆能力", icon: BrainCircuit },
@@ -92,6 +94,7 @@ watch(hasSuperAdmin, (allowed) => {
         <ScheduledTaskManagementPanel v-if="activeKey === 'scheduler'" :current-user="currentUser" />
         <RuntimeManagementPanel v-else-if="activeKey === 'runtime'" :current-user="currentUser" />
         <GeneralParamManagementPanel v-else-if="activeKey === 'params'" :current-user="currentUser" />
+        <ApiKeyManagementPanel v-else-if="activeKey === 'apiKeys'" :current-user="currentUser" />
         <InternalModelProviderPanel v-else-if="activeKey === 'internalModels'" :current-user="currentUser" />
         <InternalModelObservabilityPanel v-else-if="activeKey === 'internalModelObservability'" :current-user="currentUser" />
         <MemoryAdminPanel v-else-if="activeKey === 'memory'" />

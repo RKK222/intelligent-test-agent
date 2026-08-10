@@ -840,6 +840,45 @@ public class RunApplicationService {
                 Objects.requireNonNull(userId, "userId must not be null"), agentId, input, traceId, RunSource.manual());
     }
 
+    /** 使用显式双身份启动 Run；普通 HTTP 入口也可借此补齐统一认证号快照。 */
+    public Run startRun(RunActorAttribution attribution, StartRunInput input, String traceId) {
+        return startRun(attribution, agentRuntimeRegistry.defaultAgentId(), input, traceId);
+    }
+
+    /** 使用显式双身份启动指定 agent Run。 */
+    public Run startRun(
+            RunActorAttribution attribution,
+            String agentId,
+            StartRunInput input,
+            String traceId) {
+        Objects.requireNonNull(attribution, "attribution must not be null");
+        return startRunInternal(
+                Objects.requireNonNull(attribution.executionOwnerUserId()), agentId, input, traceId,
+                RunSource.manual(), null, attribution);
+    }
+
+    /** 分享会话发送入口；认证 actor 保持不变，OpenCode 执行身份显式使用会话所属人。 */
+    public Run startRun(
+            com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext context,
+            StartRunInput input,
+            String traceId) {
+        return startRun(context, agentRuntimeRegistry.defaultAgentId(), input, traceId);
+    }
+
+    /** 指定 agent 的分享会话发送入口。 */
+    public Run startRun(
+            com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext context,
+            String agentId,
+            StartRunInput input,
+            String traceId) {
+        Objects.requireNonNull(context, "context must not be null");
+        context.requireChat();
+        context.requireSession(input.sessionId());
+        return startRunInternal(
+                context.executionOwnerUserId(), agentId, input, traceId, RunSource.manual(), null,
+                RunActorAttribution.from(context));
+    }
+
     /** 调度器内部入口；来源由服务端固定，浏览器无法伪造。 */
     public Run startScheduledRun(UserId userId, StartRunInput input, String sourceRefId, String traceId) {
         return startScheduledRun(userId, input, new ScheduledRunMetadata(sourceRefId, null), traceId);
@@ -853,15 +892,27 @@ public class RunApplicationService {
             StartRunInput input,
             ScheduledRunMetadata metadata,
             String traceId) {
+        return startScheduledRun(RunActorAttribution.direct(userId), input, metadata, traceId);
+    }
+
+    /** 调度任务沿用创建时的真实创建人快照，但所有 OpenCode 副作用仍使用任务所属人。 */
+    public Run startScheduledRun(
+            RunActorAttribution attribution,
+            StartRunInput input,
+            ScheduledRunMetadata metadata,
+            String traceId) {
+        Objects.requireNonNull(attribution, "attribution must not be null");
         Objects.requireNonNull(metadata, "metadata must not be null");
         Run run;
         try {
             run = startRunInternal(
-                    Objects.requireNonNull(userId, "userId must not be null"),
+                    Objects.requireNonNull(attribution.executionOwnerUserId(), "userId must not be null"),
                     agentRuntimeRegistry.defaultAgentId(),
                     input,
                     traceId,
-                    RunSource.scheduled(metadata.sourceRefId(), metadata.dispatchAttemptId()));
+                    RunSource.scheduled(metadata.sourceRefId(), metadata.dispatchAttemptId()),
+                    null,
+                    attribution);
         } catch (RuntimeException failure) {
             notifyScheduledRunRejected(metadata, failure, traceId);
             throw failure;
@@ -894,7 +945,8 @@ public class RunApplicationService {
             StartRunInput input,
             String traceId,
             RunSource source) {
-        return startRunInternal(userId, agentId, input, traceId, source, null);
+        return startRunInternal(
+                userId, agentId, input, traceId, source, null, RunActorAttribution.direct(userId));
     }
 
     /**
@@ -914,7 +966,8 @@ public class RunApplicationService {
                 input,
                 traceId,
                 new RunSource(sourceType, sourceRefId, null),
-                replacementRunId);
+                replacementRunId,
+                RunActorAttribution.direct(userId));
     }
 
     private Run startRunInternal(
@@ -923,7 +976,11 @@ public class RunApplicationService {
             StartRunInput input,
             String traceId,
             RunSource source,
-            RunId reservedRunId) {
+            RunId reservedRunId,
+            RunActorAttribution actorAttribution) {
+        RunActorAttribution attribution = actorAttribution == null
+                ? RunActorAttribution.direct(userId)
+                : actorAttribution;
         if (reservedRunId == null
                 && source.type() == ConversationSourceType.MANUAL
                 && nightExecutionLockGuard != null) {
@@ -977,6 +1034,12 @@ public class RunApplicationService {
         if (userId != null) {
             pending = pending.withSource(source.type(), source.refId(), userId);
         }
+        if (attribution.actualSenderUserId() != null) {
+            pending = pending.withMessageSender(
+                    attribution.actualSenderUserId(),
+                    attribution.actualSenderUnifiedAuthId(),
+                    attribution.sentBySharedUser());
+        }
         pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
         RunStorageMode storageMode = runStorageModeSelector == null
                 ? RunStorageMode.LEGACY_FULL
@@ -1029,11 +1092,11 @@ public class RunApplicationService {
         if (scheduledClaim.managed()) {
             userMessageCreated = ensureLegacyScheduledUserMessage(
                     session.sessionId(), pending.runId(), prompt, input.parts(), userId,
-                    dispatchMessageId, traceId, now, source);
+                    dispatchMessageId, traceId, now, source, attribution);
         } else {
             saveUserMessage(
                     session.sessionId(), pending.runId(), prompt, input.parts(), userId,
-                    dispatchMessageId, traceId, now, source);
+                    dispatchMessageId, traceId, now, source, attribution);
             userMessageCreated = true;
         }
         if (userMessageCreated) {
@@ -1223,6 +1286,9 @@ public class RunApplicationService {
                 pending.runId(),
                 RunStorageMode.REDIS_SUMMARY,
                 userId,
+                pending.messageSenderUserId(),
+                pending.messageSenderUnifiedAuthId(),
+                pending.messageSentBySharedUser(),
                 session.sessionId(),
                 workspace.workspaceId(),
                 resolvedAgentId,
@@ -1259,17 +1325,8 @@ public class RunApplicationService {
                             now,
                             workspaceRootPath(workspace),
                             target.node().baseUrl()));
-            append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
-                    Map.of(
-                            "status", RunStatus.PENDING.name(),
-                            "storageMode", RunStorageMode.REDIS_SUMMARY.name(),
-                            "clientRequestId", input.clientRequestId(),
-                            "assistantSummaryMessageId", RunSummaryIdentifiers.assistant(pending.runId()).value()),
-                    RunStorageMode.REDIS_SUMMARY);
             Instant startedAt = Instant.now();
             Run running = pending.start(startedAt);
-            append(running.runId(), RunEventType.RUN_STARTED, traceId, startedAt,
-                    Map.of("status", RunStatus.RUNNING.name()), RunStorageMode.REDIS_SUMMARY);
             RunRuntimeManifest runningManifest = runRuntimeStore.findManifest(running.runId())
                     .orElseThrow(() -> new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run manifest 不存在"));
             boolean inserted = runSummaryPersistencePort.insertAnchor(new RunPersistenceAnchor(
@@ -1278,7 +1335,7 @@ public class RunApplicationService {
                     running.workspaceId(),
                     RunStatus.RUNNING,
                     RunStorageMode.REDIS_SUMMARY,
-                    runningManifest.statusVersion(),
+                    1L,
                     input.clientRequestId(),
                     context.linuxServerId(),
                     target.node().executionNodeId().value(),
@@ -1297,7 +1354,10 @@ public class RunApplicationService {
                     running.sourceRefId(),
                     running.triggeredByUserId(),
                     resolvedAgentId,
-                    firstText(modelSelection.modelId(), input.model())));
+                    firstText(modelSelection.modelId(), input.model()),
+                    running.messageSenderUserId(),
+                    running.messageSenderUnifiedAuthId(),
+                    running.messageSentBySharedUser()));
             if (!inserted) {
                 // 锚点幂等冲突意味着本轮绝不会派发，必须清掉刚初始化的 Redis active/history 详情。
                 runRuntimeStore.discardBeforeDispatch(running.runId());
@@ -1314,6 +1374,17 @@ public class RunApplicationService {
                 return anchorRun(existingAnchor);
             }
             anchorInserted = true;
+
+            // 关系库唯一活动会话锁与 Redis 原子占用都成功后，才允许发布任何可见事件。
+            append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
+                    Map.of(
+                            "status", RunStatus.PENDING.name(),
+                            "storageMode", RunStorageMode.REDIS_SUMMARY.name(),
+                            "clientRequestId", input.clientRequestId(),
+                            "assistantSummaryMessageId", RunSummaryIdentifiers.assistant(pending.runId()).value()),
+                    RunStorageMode.REDIS_SUMMARY);
+            append(running.runId(), RunEventType.RUN_STARTED, traceId, startedAt,
+                    Map.of("status", RunStatus.RUNNING.name()), RunStorageMode.REDIS_SUMMARY);
 
             RunOwnerLeaseSupervisor.OwnershipHandle ownership = null;
             boolean subscriptionHandedOff = false;
@@ -1622,7 +1693,10 @@ public class RunApplicationService {
                     pending.sourceRefId(),
                     userId,
                     pending.agentId(),
-                    pending.modelId()));
+                    pending.modelId(),
+                    pending.messageSenderUserId(),
+                    pending.messageSenderUnifiedAuthId(),
+                    pending.messageSentBySharedUser()));
             if (inserted) {
                 return new LegacyScheduledAnchorClaim(pending, dispatchMessageId, true, false, false);
             }
@@ -1890,6 +1964,9 @@ public class RunApplicationService {
                 run.runId(),
                 run.sessionId(),
                 run.triggeredByUserId(),
+                run.messageSenderUserId(),
+                run.messageSenderUnifiedAuthId(),
+                run.messageSentBySharedUser(),
                 agentId,
                 dispatchMessageId,
                 remoteSessionId,
@@ -2452,6 +2529,40 @@ public class RunApplicationService {
         }
     }
 
+    /** 分享读取只校验固定 session/workspace，不把真实 actor 写成 Run 执行所属人。 */
+    public void requireRunAccess(
+            com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext context,
+            RunId runId) {
+        sharedRun(context, runId);
+    }
+
+    /** 停止权限仅属于会话所属人或该 Run 的实际消息发送人，降为只读后仍保留停止权。 */
+    public void requireRunStopAccess(
+            com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext context,
+            RunId runId) {
+        Run run = sharedRun(context, runId);
+        if (!context.ownerAccess()
+                && !context.actorUserId().equals(run.messageSenderUserId())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "仅会话所属人或消息发送人可以停止该 Run");
+        }
+    }
+
+    private Run sharedRun(
+            com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext context,
+            RunId runId) {
+        Objects.requireNonNull(context, "context must not be null");
+        Objects.requireNonNull(runId, "runId must not be null");
+        Run run = runRuntimeStore == null
+                ? getRun(runId)
+                : runRuntimeStore.findManifest(runId)
+                        .filter(manifest -> manifest.storageMode() == RunStorageMode.REDIS_SUMMARY)
+                        .map(this::runtimeRun)
+                        .orElseGet(() -> getRun(runId));
+        context.requireSession(run.sessionId());
+        context.requireWorkspace(run.workspaceId());
+        return run;
+    }
+
     /** 越权统一使用不携带 Run 元数据的安全错误，避免通过差异响应枚举归属。 */
     private PlatformException forbiddenRunAccess() {
         return new PlatformException(ErrorCode.FORBIDDEN, "无权访问该 Run");
@@ -2996,7 +3107,10 @@ public class RunApplicationService {
                 null,
                 manifest.userId(),
                 manifest.agentId(),
-                null);
+                null,
+                manifest.messageSenderUserId(),
+                manifest.messageSenderUnifiedAuthId(),
+                manifest.messageSentBySharedUser());
     }
 
     /**
@@ -3192,7 +3306,8 @@ public class RunApplicationService {
             String remoteMessageId,
             String traceId,
             Instant createdAt,
-            RunSource source) {
+            RunSource source,
+            RunActorAttribution attribution) {
         SessionMessage message = new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
                 sessionId,
@@ -3207,9 +3322,16 @@ public class RunApplicationService {
                 null,
                 null,
                 createdAt);
-        sessionMessageRepository.save(userId == null
+        SessionMessage sourced = userId == null
                 ? message
-                : message.withSource(source.type(), source.refId(), userId));
+                : message.withSource(source.type(), source.refId(), userId);
+        if (attribution != null && attribution.actualSenderUserId() != null) {
+            sourced = sourced.withSender(
+                    attribution.actualSenderUserId(),
+                    attribution.actualSenderUnifiedAuthId(),
+                    attribution.sentBySharedUser());
+        }
+        sessionMessageRepository.save(sourced);
     }
 
     /**
@@ -3224,13 +3346,14 @@ public class RunApplicationService {
             String remoteMessageId,
             String traceId,
             Instant createdAt,
-            RunSource source) {
+            RunSource source,
+            RunActorAttribution attribution) {
         Optional<SessionMessage> existing = sessionMessageRepository
                 .findBySessionIdAndRemoteMessageId(sessionId, remoteMessageId);
         if (existing.isEmpty()) {
             saveUserMessage(
                     sessionId, runId, prompt, parts, userId,
-                    remoteMessageId, traceId, createdAt, source);
+                    remoteMessageId, traceId, createdAt, source, attribution);
             return true;
         }
         SessionMessage message = existing.orElseThrow();
@@ -3238,7 +3361,8 @@ public class RunApplicationService {
                 || !Objects.equals(message.runId(), runId)
                 || message.sourceType() != ConversationSourceType.SCHEDULED_TASK
                 || !Objects.equals(message.sourceRefId(), source.refId())
-                || !Objects.equals(message.senderUserId(), userId)) {
+                || !Objects.equals(message.senderUserId(), attribution.actualSenderUserId())
+                || message.sentBySharedUser() != attribution.sentBySharedUser()) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
                     "Scheduled Run 稳定消息号已被其它消息使用");
@@ -3712,6 +3836,9 @@ public class RunApplicationService {
                         run.runId(),
                         run.sessionId(),
                         run.triggeredByUserId(),
+                        run.messageSenderUserId(),
+                        run.messageSenderUnifiedAuthId(),
+                        run.messageSentBySharedUser(),
                         agentId,
                         dispatchMessageId,
                         remoteSessionId,
@@ -3747,7 +3874,8 @@ public class RunApplicationService {
             RunStorageMode storageMode,
             RunEventDraft draft,
             RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
-        RunEventDraft eventDraft = synchronizeRootSessionTitle(originalRun, draft);
+        RunEventDraft eventDraft = withUserMessageAttribution(
+                originalRun, synchronizeRootSessionTitle(originalRun, draft));
         if (eventDraft.type() == RunEventType.RUN_SUCCEEDED && isTitleWatchPending(originalRun.runId())) {
             eventDraft = withPendingPlatformSessionTitle(eventDraft);
         }
@@ -3813,6 +3941,42 @@ public class RunApplicationService {
                 runEventPersistencePolicy.sanitizeForPersistence(eventDraft),
                 storageMode,
                 ownerLeaseIfPresent(ownership));
+    }
+
+    /**
+     * OpenCode 不区分分享成员，因此只在平台事件投影中为 user message 补齐真实发送人，
+     * 且以可信 Run 锚点覆盖远端同名字段，避免客户端被伪造归因误导。
+     */
+    private RunEventDraft withUserMessageAttribution(Run run, RunEventDraft draft) {
+        if (draft.type() != RunEventType.MESSAGE_UPDATED || run.messageSenderUserId() == null) {
+            return draft;
+        }
+        Object rawMessage = draft.payload().get("message");
+        if (!(rawMessage instanceof Map<?, ?> message)
+                || !"user".equalsIgnoreCase(String.valueOf(message.get("role")))) {
+            return draft;
+        }
+        LinkedHashMap<String, Object> attributedMessage = new LinkedHashMap<>();
+        message.forEach((key, value) -> attributedMessage.put(String.valueOf(key), value));
+        attributedMessage.put("senderUserId", run.messageSenderUserId().value());
+        if (run.messageSenderUnifiedAuthId() != null) {
+            attributedMessage.put("senderUnifiedAuthId", run.messageSenderUnifiedAuthId());
+        } else {
+            attributedMessage.remove("senderUnifiedAuthId");
+        }
+        attributedMessage.put("sentBySharedUser", run.messageSentBySharedUser());
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>(draft.payload());
+        payload.put("message", Map.copyOf(attributedMessage));
+        payload.put("senderUserId", run.messageSenderUserId().value());
+        if (run.messageSenderUnifiedAuthId() != null) {
+            payload.put("senderUnifiedAuthId", run.messageSenderUnifiedAuthId());
+        } else {
+            payload.remove("senderUnifiedAuthId");
+        }
+        payload.put("sentBySharedUser", run.messageSentBySharedUser());
+        return new RunEventDraft(
+                draft.runId(), draft.type(), draft.traceId(), draft.occurredAt(),
+                Map.copyOf(payload), draft.scopeContext());
     }
 
     /** 只接受 OpenCode mapper 从根 session.error 派生的失败事实；观察者失败不回滚 Run 终态。 */

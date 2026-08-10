@@ -54,6 +54,13 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
                 "db/migration/V20260718211000__create_night_execution_tasks.sql")).execute(dataSource);
 
         jdbc = new JdbcTemplate(dataSource);
+        jdbc.execute("alter table night_execution_tasks add column creator_user_id varchar(128)");
+        jdbc.execute("alter table night_execution_tasks add column creator_unified_auth_id varchar(128)");
+        jdbc.execute("alter table night_execution_tasks add column created_by_shared_user boolean not null default false");
+        jdbc.execute("alter table night_execution_tasks add column share_id_snapshot varchar(68)");
+        jdbc.execute("alter table night_execution_tasks add column share_version_snapshot bigint");
+        jdbc.execute("alter table night_execution_tasks add column share_expires_at_snapshot timestamptz");
+        jdbc.execute("alter table night_execution_tasks add column can_chat_snapshot boolean");
         jdbc.update("insert into scheduled_tasks(task_key,name,cron_expression,enabled,lock_ttl_seconds,"
                         + "registration_status,trace_id,created_at,updated_at) values(?,?,?,?,?,?,?,?,?)",
                 "opencode-runtime.night-execution", "legacy night", "0 0/15 * * * ?", true, 300,
@@ -83,6 +90,7 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
                 "trace_legacy_night_mode", NOW, NOW.plusSeconds(3600));
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260724143000__add_night_execution_schedule_mode.sql")).execute(dataSource);
+        jdbc.update("update night_execution_tasks set creator_user_id=owner_user_id where creator_user_id is null");
 
         SqlSessionFactoryBean factoryBean = new SqlSessionFactoryBean();
         factoryBean.setDataSource(dataSource);

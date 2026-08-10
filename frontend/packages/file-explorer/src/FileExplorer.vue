@@ -34,7 +34,7 @@ export type ExplorerTab = "explorer" | "search" | "changes";
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { FolderTree, GitBranch, Plus, RefreshCw, Search } from "lucide-vue-next";
+import { FolderTree, GitBranch, Plane, Plus, RefreshCw, Search } from "lucide-vue-next";
 import { Input, cn } from "@test-agent/ui-kit";
 import { fileNameIncludesKeyword, filterLoadedFiles } from "./filterLoadedFiles";
 import { getVsCodeFileIconClass } from "./fileIcons";
@@ -71,6 +71,8 @@ const emit = defineEmits<{
   uploadFiles: [directory: string, files: File[]];
   undoEntry: [];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
+  cacheAndNavigateEntries: [entries: WorkspaceSelectionEntry[]];
+  selectionChange: [entries: WorkspaceSelectionEntry[]];
   downloadEntry: [entry: FileTreeEntry];
 }>();
 
@@ -332,6 +334,17 @@ defineExpose({ openRootActions });
         <span class="min-w-0 truncate" :title="workspaceName">{{ workspaceName }}</span>
         <div class="flex shrink-0 items-center gap-1">
           <button
+            v-if="selectedEntries.length > 0"
+            type="button"
+            class="ta-fe-icon-btn ta-fe-plane-btn"
+            :title="`缓存并跳转选中的 ${selectedEntries.length} 个文件`"
+            :aria-label="`缓存并跳转选中的 ${selectedEntries.length} 个文件`"
+            @click="emit('cacheAndNavigateEntries', selectedEntries)"
+          >
+            <Plane class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <span class="ta-fe-plane-badge">{{ selectedEntries.length }}</span>
+          </button>
+          <button
             v-if="canWrite"
             type="button"
             class="ta-fe-icon-btn"
@@ -391,7 +404,7 @@ defineExpose({ openRootActions });
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
         @download-entry="emit('downloadEntry', $event)"
         @drag-source-change="setDragSources"
-        @selection-change="selectedEntries = $event"
+        @selection-change="(entries) => { selectedEntries = entries; emit('selectionChange', entries); }"
       />
       <input
         ref="uploadInput"
@@ -497,5 +510,32 @@ defineExpose({ openRootActions });
   border-radius: 2px !important;
   font-size: var(--ta-tree-font-size) !important;
   font-family: var(--ta-tree-font-family) !important;
+}
+
+.ta-fe-plane-btn {
+  position: relative;
+  color: #d97706;
+}
+
+.ta-fe-plane-btn:hover {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.ta-fe-plane-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #d97706;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
 }
 </style>

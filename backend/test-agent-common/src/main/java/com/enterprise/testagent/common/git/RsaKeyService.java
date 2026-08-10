@@ -87,6 +87,17 @@ public class RsaKeyService {
         }
     }
 
+    /** 使用 RSA-OAEP/SHA-256 公钥加密需要持久化的短凭据。 */
+    public byte[] encrypt(byte[] plaintext) {
+        try {
+            Cipher cipher = Cipher.getInstance(CIPHER_TRANSFORMATION);
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey, WEB_CRYPTO_OAEP_SHA256);
+            return cipher.doFinal(plaintext);
+        } catch (Exception e) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "RSA encryption failed", Map.of(), e);
+        }
+    }
+
     /** 返回公钥对象，供测试中模拟前端加密。 */
     public PublicKey getPublicKey() {
         return publicKey;

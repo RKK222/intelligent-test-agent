@@ -8,13 +8,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
+import com.enterprise.testagent.api.web.common.ExternalApiWebSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.externalapi.ExternalApiCredentialId;
+import com.enterprise.testagent.domain.externalapi.ExternalApiPrincipal;
+import com.enterprise.testagent.domain.externalapi.ExternalApiScope;
 import com.enterprise.testagent.domain.user.UserId;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.BeforeEach;
@@ -108,6 +113,20 @@ class ApiLoggingAspectTest {
             String userId = aspect.extractUserId(exchange);
 
             assertEquals("anonymous", userId);
+        }
+
+        @Test
+        @DisplayName("外部调用记录稳定工具编码而不记录 API Key")
+        void extractUserId_externalTool() {
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/external/v1/users/u001/ssh-key").build());
+            exchange.getAttributes().put(ExternalApiWebSupport.PRINCIPAL_ATTR, new ExternalApiPrincipal(
+                    new ExternalApiCredentialId("eac_one"),
+                    "deploy.bot",
+                    Set.of(ExternalApiScope.USER_SSH_KEY_READ),
+                    "taak_v1_do-not-log"));
+
+            assertEquals("external:deploy.bot", aspect.extractUserId(exchange));
         }
 
         @Test

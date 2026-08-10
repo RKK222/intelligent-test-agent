@@ -150,7 +150,7 @@ class RunMessageRecoveryServiceTest {
         RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
         when(runtimeStore.findManifest(RUN_ID)).thenReturn(Optional.empty());
         when(summaryPersistence.findSummariesByRunId(RUN_ID)).thenReturn(List.of(
-                summary("msg_user_summary", SessionMessageRole.USER, "prompt summary"),
+                delegatedSummary("msg_user_summary", "prompt summary"),
                 summary("msg_assistant_summary", SessionMessageRole.ASSISTANT, "answer summary")));
         RunMessageRecoveryService service = new RunMessageRecoveryService(
                 new FakeRunRepository(run()),
@@ -177,6 +177,13 @@ class RunMessageRecoveryServiceTest {
                         "message.updated", "message.part.updated");
         assertThat(result.events().get(0).payload()).containsEntry("contentKind", "SUMMARY");
         assertThat(result.events().get(0).payload()).containsEntry("summaryStatus", "COMPLETE");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summaryUserMessage = (Map<String, Object>) result.events()
+                .getFirst().payload().get("message");
+        assertThat(summaryUserMessage)
+                .containsEntry("senderUserId", "usr_shared_actor")
+                .containsEntry("senderUnifiedAuthId", "ucid_shared_actor")
+                .containsEntry("sentBySharedUser", true);
     }
 
     @Test
@@ -196,7 +203,11 @@ class RunMessageRecoveryServiceTest {
                                 SessionMessageRole.USER,
                                 "历史问题",
                                 NOW,
-                                "trace_1234567890abcdef"),
+                                "trace_1234567890abcdef")
+                                .withSender(
+                                        new UserId("usr_shared_actor"),
+                                        "ucid_shared_actor",
+                                        true),
                         new SessionMessage(
                                 new SessionMessageId("msg_legacy_assistant"),
                                 SESSION_ID,
@@ -232,6 +243,13 @@ class RunMessageRecoveryServiceTest {
                 .anyMatch(payload -> payload.contains("历史问题"))
                 .anyMatch(payload -> payload.contains("历史答案"))
                 .allMatch(payload -> payload.contains("RAW_LEGACY"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> userMessage = (Map<String, Object>) result.events()
+                .getFirst().payload().get("message");
+        assertThat(userMessage)
+                .containsEntry("senderUserId", "usr_shared_actor")
+                .containsEntry("senderUnifiedAuthId", "ucid_shared_actor")
+                .containsEntry("sentBySharedUser", true);
     }
 
     @Test
@@ -444,6 +462,63 @@ class RunMessageRecoveryServiceTest {
         assertThat(facade.lastCommand.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(facade.lastCommand.limit()).isEqualTo(100);
         assertThat(facade.lastCommand.order()).isEqualTo("asc");
+    }
+
+    @Test
+    void legacyRecoveryPublishesAuthoritativePlatformUserInputBeforeOpenCodeIsAvailable() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.error = new IllegalStateException("opencode starting");
+        SessionMessageRepository messages = mock(
+                SessionMessageRepository.class,
+                org.mockito.Answers.CALLS_REAL_METHODS);
+        SessionMessage platformInput = new SessionMessage(
+                new SessionMessageId("msg_platform_shared_input"),
+                SESSION_ID,
+                SessionMessageRole.USER,
+                "A 发出的多人同步消息",
+                NOW,
+                "trace_1234567890abcdef",
+                RUN_ID,
+                null,
+                "msg_remote_shared_input",
+                null,
+                null,
+                null,
+                NOW)
+                .withSender(new UserId("usr_owner"), "ucid_owner", false);
+        when(messages.findBySessionId(
+                        org.mockito.ArgumentMatchers.eq(SESSION_ID),
+                        org.mockito.ArgumentMatchers.any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(platformInput), 1, PageRequest.MAX_SIZE, 1));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run().withMessageSender(
+                        new UserId("usr_owner"), "ucid_owner", false)),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                null,
+                null,
+                null,
+                messages);
+
+        List<RunEventSsePayload> payloads = service.recover(RUN_ID, "trace_1234567890abcdef")
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(payloads).singleElement().satisfies(payload -> {
+            assertThat(payload.type()).isEqualTo("message.updated");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> message = (Map<String, Object>) payload.payload().get("message");
+            assertThat(message)
+                    .containsEntry("id", "msg_remote_shared_input")
+                    .containsEntry("platformMessageId", "msg_platform_shared_input")
+                    .containsEntry("role", "user")
+                    .containsEntry("text", "A 发出的多人同步消息")
+                    .containsEntry("senderUserId", "usr_owner")
+                    .containsEntry("senderUnifiedAuthId", "ucid_owner")
+                    .containsEntry("sentBySharedUser", false);
+        });
     }
 
     @Test
@@ -997,6 +1072,8 @@ class RunMessageRecoveryServiceTest {
                 "msg_remote",
                 "part_remote",
                 NOW.plus(Duration.ofHours(24)))));
+        when(summaryPersistence.findSummariesByRunId(RUN_ID))
+                .thenReturn(List.of(delegatedSummary("msg_user_history", "完整用户输入")));
         RunMessageRecoveryService service = new RunMessageRecoveryService(
                 runRepository,
                 sessionRepository,
@@ -1017,8 +1094,14 @@ class RunMessageRecoveryServiceTest {
                 .containsExactly(
                         "message.updated", "message.part.updated",
                         "message.updated", "message.part.updated");
-        assertThat(((Map<?, ?>) result.events().get(0).payload().get("message")).get("role"))
-                .isEqualTo("user");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> recoveredUserMessage = (Map<String, Object>) result.events()
+                .get(0).payload().get("message");
+        assertThat(recoveredUserMessage)
+                .containsEntry("role", "user")
+                .containsEntry("senderUserId", "usr_shared_actor")
+                .containsEntry("senderUnifiedAuthId", "ucid_shared_actor")
+                .containsEntry("sentBySharedUser", true);
         verifyNoInteractions(runRepository, sessionRepository, bindingRepository);
     }
 
@@ -1146,6 +1229,21 @@ class RunMessageRecoveryServiceTest {
                 RunSummaryStatus.COMPLETE,
                 NOW,
                 role == SessionMessageRole.ASSISTANT ? "msg_remote" : null);
+    }
+
+    private static RunConversationSummary delegatedSummary(String messageId, String content) {
+        return new RunConversationSummary(
+                new SessionMessageId(messageId),
+                SessionMessageRole.USER,
+                content,
+                RUN_ID.value() + ":user",
+                1,
+                RunSummaryStatus.COMPLETE,
+                NOW,
+                messageId,
+                new UserId("usr_shared_actor"),
+                "ucid_shared_actor",
+                true);
     }
 
     private static Run run() {

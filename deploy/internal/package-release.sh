@@ -55,6 +55,42 @@ PUBLIC_SKILL_HUB_CLASSIFICATION_MIGRATION_RESOURCE="db/migration/V20260806190500
 PUBLIC_SKILL_HUB_CLASSIFICATION_MIGRATION_SHA256="19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf"
 MEMORY_PROFILE_MIGRATION_RESOURCE="db/migration/V20260809230000__generalize_memory_and_embedding_profiles.sql"
 MEMORY_PROFILE_MIGRATION_SHA256="2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3"
+RUN_RESEND_MAIN_MIGRATION_RESOURCE="db/migration/V20260807190000__create_run_resends.sql"
+RUN_RESEND_BEFORE_BATCH_MIGRATION_RESOURCE="db/migration-compat/run-resend-after-internal-model-before-batch/V20260807229999__create_run_resends_after_legacy_internal_model.sql"
+BATCH_SESSION_MIGRATION_RESOURCE="db/migration/V20260807230000__add_batch_session_attribution.sql"
+RUN_RESEND_AFTER_BATCH_MIGRATION_RESOURCE="db/migration-compat/run-resend-after-internal-model-after-batch/V20260808143303__create_run_resends_after_legacy_internal_model.sql"
+RUN_RESEND_MIGRATION_SHA256="ca044d9819c7259b62e29243e9d72a06a2f01a532f1803f37e117de1d2f5d83d"
+BATCH_SESSION_MIGRATION_SHA256="42ec1917deb16d96b910f81a0a4739487500453f90dc742e516822f800fdd6e3"
+INTERNAL_MODEL_LEGACY_CREATE_MIGRATION_RESOURCE="db/migration-compat/internal-model-observability-legacy/V20260807130134__create_internal_model_observability.sql"
+INTERNAL_MODEL_LEGACY_FIRST_TOKEN_MIGRATION_RESOURCE="db/migration-compat/internal-model-observability-legacy/V20260807203000__add_internal_model_first_token_metrics.sql"
+INTERNAL_MODEL_LEGACY_STREAM_MIGRATION_RESOURCE="db/migration-compat/internal-model-observability-legacy/V20260807222227__add_internal_model_stream_complete_metrics.sql"
+INTERNAL_MODEL_CREATE_MIGRATION_RESOURCE="db/migration/V20260808143300__create_internal_model_observability.sql"
+INTERNAL_MODEL_FIRST_TOKEN_MIGRATION_RESOURCE="db/migration/V20260808143301__add_internal_model_first_token_metrics.sql"
+INTERNAL_MODEL_STREAM_MIGRATION_RESOURCE="db/migration/V20260808143302__add_internal_model_stream_complete_metrics.sql"
+INTERNAL_MODEL_CREATE_MIGRATION_SHA256="f214dfd0d4f26de830452d9f4121bc938cf031e4867555d5248e159d99377084"
+INTERNAL_MODEL_FIRST_TOKEN_MIGRATION_SHA256="de7188e3ba5d01148a655dbc238783cf7881abf168bd7b6e422c9f2fa118a5c3"
+INTERNAL_MODEL_STREAM_MIGRATION_SHA256="46f0a8e687f59c037a7e02cb1f9ba3db4893633ba20edd67d4ae75f0b6fd0d9e"
+EXTERNAL_API_MAIN_MIGRATION_RESOURCE="db/migration/V20260809110000__create_external_api_credentials.sql"
+QA_MEMORY_APPLIED_MIGRATION_RESOURCE="db/migration-compat/qa-memory-applied/V20260809120000__create_qa_memory_governance.sql"
+EXTERNAL_API_FORWARD_MIGRATION_RESOURCE="db/migration-compat/external-api-after-qa-memory/V20260810110000__create_external_api_credentials_after_qa_memory.sql"
+EXTERNAL_API_MIGRATION_SHA256="356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53"
+QA_MEMORY_APPLIED_MIGRATION_SHA256="b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a"
+QA_MEMORY_GENERALIZE_MIGRATION_RESOURCE="db/migration-compat/qa-memory-extended/V20260809230000__generalize_memory_and_embedding_profiles.sql"
+QA_MEMORY_IDENTITY_MIGRATION_RESOURCE="db/migration-compat/qa-memory-extended/V20260810090000__enforce_qa_memory_identity.sql"
+QA_MEMORY_GENERALIZE_MIGRATION_SHA256="2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3"
+QA_MEMORY_IDENTITY_MIGRATION_SHA256="619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3"
+QA_MEMORY_AFTER_SESSION_SHARE_MIGRATION_RESOURCE="db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql"
+QA_MEMORY_AFTER_SESSION_SHARE_MIGRATION_SHA256="44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984"
+SESSION_SHARE_MAIN_MIGRATION_RESOURCE="db/migration/V20260809170000__session_shares_create_collaboration_share.sql"
+SESSION_SHARE_FORWARD_MIGRATION_RESOURCE="db/migration-compat/qa-memory-extended/V20260810110001__session_shares_create_collaboration_share_after_qa_memory.sql"
+SESSION_SHARE_ATTRIBUTION_MAIN_MIGRATION_RESOURCE="db/migration/V20260809170001__session_messages_add_delegated_attribution.sql"
+SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION_RESOURCE="db/migration-compat/qa-memory-extended/V20260810110002__session_messages_add_delegated_attribution_after_qa_memory.sql"
+SESSION_SHARE_MIGRATION_SHA256="b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9"
+SESSION_SHARE_ATTRIBUTION_MIGRATION_SHA256="dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5"
+XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_internal_model_probe_task.sql"
+XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
+XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
+XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
 
 usage() {
   cat <<'USAGE'
@@ -501,6 +537,16 @@ find_unique_persistence_jar() {
   find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print -quit
 }
 
+find_unique_xxl_job_integration_jar() {
+  local lib_dir="$1" count
+  count="$(find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-xxl-job-integration-*.jar' | wc -l | tr -d '[:space:]')"
+  if [[ "${count}" != 1 ]]; then
+    echo "Expected exactly one test-agent-xxl-job-integration JAR under ${lib_dir}, found ${count}" >&2
+    exit 1
+  fi
+  find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-xxl-job-integration-*.jar' -print -quit
+}
+
 verify_release_flyway_resource() {
   local jar="$1" label="$2" resource="$3" expected="$4" actual
   if ! unzip -Z1 "${jar}" | grep -Fx "${resource}" >/dev/null; then
@@ -537,6 +583,54 @@ verify_release_flyway_migrations_jar() {
     "${PUBLIC_SKILL_HUB_CLASSIFICATION_MIGRATION_RESOURCE}" "${PUBLIC_SKILL_HUB_CLASSIFICATION_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${MEMORY_PROFILE_MIGRATION_RESOURCE}" "${MEMORY_PROFILE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${RUN_RESEND_MAIN_MIGRATION_RESOURCE}" "${RUN_RESEND_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${RUN_RESEND_BEFORE_BATCH_MIGRATION_RESOURCE}" "${RUN_RESEND_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${BATCH_SESSION_MIGRATION_RESOURCE}" "${BATCH_SESSION_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${RUN_RESEND_AFTER_BATCH_MIGRATION_RESOURCE}" "${RUN_RESEND_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${INTERNAL_MODEL_LEGACY_CREATE_MIGRATION_RESOURCE}" "${INTERNAL_MODEL_CREATE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${INTERNAL_MODEL_LEGACY_FIRST_TOKEN_MIGRATION_RESOURCE}" "${INTERNAL_MODEL_FIRST_TOKEN_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${INTERNAL_MODEL_LEGACY_STREAM_MIGRATION_RESOURCE}" "${INTERNAL_MODEL_STREAM_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${INTERNAL_MODEL_CREATE_MIGRATION_RESOURCE}" "${INTERNAL_MODEL_CREATE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${INTERNAL_MODEL_FIRST_TOKEN_MIGRATION_RESOURCE}" "${INTERNAL_MODEL_FIRST_TOKEN_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${INTERNAL_MODEL_STREAM_MIGRATION_RESOURCE}" "${INTERNAL_MODEL_STREAM_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${EXTERNAL_API_MAIN_MIGRATION_RESOURCE}" "${EXTERNAL_API_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${QA_MEMORY_APPLIED_MIGRATION_RESOURCE}" "${QA_MEMORY_APPLIED_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${EXTERNAL_API_FORWARD_MIGRATION_RESOURCE}" "${EXTERNAL_API_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${QA_MEMORY_GENERALIZE_MIGRATION_RESOURCE}" "${QA_MEMORY_GENERALIZE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${QA_MEMORY_IDENTITY_MIGRATION_RESOURCE}" "${QA_MEMORY_IDENTITY_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${QA_MEMORY_AFTER_SESSION_SHARE_MIGRATION_RESOURCE}" "${QA_MEMORY_AFTER_SESSION_SHARE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${SESSION_SHARE_MAIN_MIGRATION_RESOURCE}" "${SESSION_SHARE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${SESSION_SHARE_FORWARD_MIGRATION_RESOURCE}" "${SESSION_SHARE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${SESSION_SHARE_ATTRIBUTION_MAIN_MIGRATION_RESOURCE}" "${SESSION_SHARE_ATTRIBUTION_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION_RESOURCE}" "${SESSION_SHARE_ATTRIBUTION_MIGRATION_SHA256}"
+}
+
+verify_release_xxl_flyway_migrations_jar() {
+  local jar="$1" label="$2"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
 }
 
 verify_memory_artifact_set() {
@@ -699,12 +793,17 @@ plan_release_components() {
 
 package_backend() {
   local backend_dir="${OUTPUT_DIR}/backend"
-  local backend_jar_path extract_dir manifest_dir manifest_file persistence_jar
+  local backend_jar_path extract_dir manifest_dir manifest_file persistence_jar xxl_job_integration_jar
   require_command unzip
   require_command zip
   mkdir -p "${backend_dir}"
+  echo "Validating Spring bean constructor wiring"
+  # 发布前必须扫描全部生产 Spring Bean，避免多构造器未显式注入导致企业环境启动失败。
+  (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am \
+    -Dtest=SpringBeanConstructorWiringTest \
+    -Dsurefire.failIfNoSpecifiedTests=false test)
   echo "Building backend jar"
-  # 企业包只需要主代码和运行时依赖；跳过测试源码编译，避免无关的存量测试假实现阻断交付包生成。
+  # 强制装配审计通过后，交付构建只需要主代码和运行时依赖；不再重复执行其它测试。
   (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am -Dmaven.test.skip=true package)
 
   local jar
@@ -743,6 +842,8 @@ package_backend() {
   }
   persistence_jar="$(find_unique_persistence_jar "${backend_dir}/lib")"
   verify_release_flyway_migrations_jar "${persistence_jar}" "Packaged persistence JAR"
+  xxl_job_integration_jar="$(find_unique_xxl_job_integration_jar "${backend_dir}/lib")"
+  verify_release_xxl_flyway_migrations_jar "${xxl_job_integration_jar}" "Packaged XXL integration JAR"
   unzip -Z1 "${backend_dir}/test-agent-app.jar" | grep -Fx 'BOOT-INF/classes/rsa-private.key' >/dev/null || {
     echo "Backend jar is missing the embedded RSA private key resource" >&2
     exit 1
@@ -1164,7 +1265,7 @@ package_lobehub_zip() {
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
-  local worker_tar it_tools_tar omni_tools_tar required_artifact persistence_jar
+  local worker_tar it_tools_tar omni_tools_tar required_artifact persistence_jar xxl_job_integration_jar
 
   require_command zip
   require_command rsync
@@ -1197,6 +1298,8 @@ package_release_zip() {
   fi
   persistence_jar="$(find_unique_persistence_jar "${OUTPUT_DIR}/backend/lib")"
   verify_release_flyway_migrations_jar "${persistence_jar}" "Release ZIP input persistence JAR"
+  xxl_job_integration_jar="$(find_unique_xxl_job_integration_jar "${OUTPUT_DIR}/backend/lib")"
+  verify_release_xxl_flyway_migrations_jar "${xxl_job_integration_jar}" "Release ZIP input XXL integration JAR"
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     require_artifact_fingerprint "${OUTPUT_DIR}/.worker-runtime-artifact.env" \
       TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_RUNTIME_FINGERPRINT}"

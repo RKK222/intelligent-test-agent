@@ -9,3 +9,4 @@ export { default as FileIcon } from "./FileIcon.vue";
 export { getVsCodeFileIconClass, getMaterialFileIconName } from "./fileIcons";
 export { filterLoadedFiles } from "./filterLoadedFiles";
 export { highlightKeyword } from "./highlightKeyword";
+export type { WorkspaceSelectionEntry, WorkspaceClipboardEntry } from "./DirectoryRows.vue";

@@ -65,12 +65,25 @@ Token 校验流程：
 2. 单 Run 的 manifest、input、durable/runtime 双 Stream、snapshot Hash + order ZSET、动态 key registry、scope、dedup 和 pending key 必须使用同一个 `{runId}` hash tag，active 用户/Session/服务器索引只能保存 Run ID 与过期时间。读取 active 索引后必须回读 manifest 校验认证用户、Session、服务器和非终态状态，禁止仅凭可猜测的索引成员跨用户返回运行态。
 3. Run durable seq、全事件 runtimeVersion 分配，双 Stream 追加，Hash/ZSET snapshot 投影，manifest 容量计数和动态 key TTL 刷新必须由同 slot Lua 原子执行；durable Stream ID 固定为 `${seq}-0`，runtime Stream ID 固定为 `${runtimeVersion}-0`。脚本、JSON、连接或 manifest 异常统一返回安全的 `RUNTIME_STATE_UNAVAILABLE` / `RUN_DETAILS_EXPIRED`，错误详情和日志不得包含 Redis value、prompt、消息、工具内容、附件或内部连接凭据。
 4. 生产 Redis 必须使用 `noeviction` 和 AOF `everysec`，并对容量、AOF、复制、命令延迟、拒绝连接及 `evicted_keys` 告警。单 Run durable/runtime 事件或 snapshot 投影项超过 20,000，或 input + scope + 双 Stream + snapshot 详情超过 32 MiB 时，只允许应用 Lua 显式删除旧 Stream、规范化过大 payload、优先移除低价值投影、保留当前关键物化状态并生成 `run.snapshot.reset`；禁止依赖 LRU/LFU/随机淘汰、Stream 静默裁剪或跨租户 key 清理。
-5. `run.snapshot.reset` 只允许携带当前 Run 的物化状态和安全元数据，不设置 SSE `id`，不作为鉴权或续传凭据。Run 详情、取消、Diff、RunEvent SSE 和 Run 级 session-tree 在任何读取或副作用前都必须校验认证用户归属：`REDIS_SUMMARY` manifest 存在时只比较其中的 `userId`，不得为鉴权回查 PostgreSQL；legacy 或 manifest 已过期时才读取 Run 与 Session，并要求所有已记录的 `triggeredByUserId/createdByUserId` 都属于当前用户，归属缺失或不一致一律返回 `FORBIDDEN`。跨 Java 转发后的目标 Controller 必须再次执行同一校验。Redis 新模式 SSE 首帧和容量换代后的 reset 都必须经过该用户/Run 归属校验；前端只清空当前订阅 Run 的 reducer，再按顺序应用 snapshot；未知/空 snapshot 必须安全兼容，不能借 reset 读取其它 Run 或覆盖当前认证/Workspace 上下文。
+5. `run.snapshot.reset` 只允许携带当前 Run 的物化状态和安全元数据，不设置 SSE `id`，不作为鉴权或续传凭据。普通 Run 详情、取消、Diff、RunEvent SSE 和 Run 级 session-tree 在任何读取或副作用前都必须校验认证用户归属：`REDIS_SUMMARY` manifest 存在时只比较其中的执行所属人，不得为鉴权回查 PostgreSQL；legacy 或 manifest 已过期时才读取 Run 与 Session，并要求所有已记录的 `triggeredByUserId/createdByUserId` 都属于当前用户。分享请求则必须额外解析独立代操作上下文，并同时匹配 share/version/actor/execution owner/session/workspace 和操作权限；不能把实际消息发送人归因当成普通归属。跨 Java 转发后的目标 Controller 必须再次执行同一校验。Redis 新模式 SSE 首帧和容量换代后的 reset 都必须经过该用户/Run 归属或分享范围校验；前端只清空当前订阅 Run 的 reducer，再按顺序应用 snapshot；未知/空 snapshot 必须安全兼容，不能借 reset 读取其它 Run 或覆盖当前认证/Workspace 上下文。
 6. Redis 运行态不可用时新模式必须 fail-closed，禁止把完整输入输出、reasoning、工具内容或原始事件降级写入 PostgreSQL/JVM 内存，也禁止切换活动 Run 的 storageMode。legacy/旧 Run 仅按其创建时模式使用既有数据库恢复，不得通过请求参数伪造模式。
 7. `REDIS_SUMMARY` 只允许携带已校验 `contextToken + clientRequestId` 的新请求按 userId 稳定灰度进入；开关默认关闭、rollout 为 0。活动 Run 不得切换模式，回滚只把后续新 Run 比例调为 0。
 8. 新模式 PostgreSQL 只允许保存无原文 Run 锚点和终态 USER/ASSISTANT 双摘要。摘要生成必须确定性删除 `<context>`、reasoning、工具输入输出、附件正文、data URL、控制字符、私钥、Bearer/JWT/常见云密钥和 secret 赋值；USER/ASSISTANT 分别限制 512/2000 Unicode 字符，失败只写固定 `FALLBACK`，不得把原文当降级内容。
 9. `safe_error_message` 必须经过同一敏感模式清洗并限制长度；任何数据库异常、终态重试或 Redis 故障不得把 prompt、回答、parts、原始事件、Redis value 或第三方响应正文写入 PostgreSQL/日志。稳定 `assistantSummaryMessageId` 只作为平台消息业务 ID，不是鉴权凭据。
 10. Run 恢复必须先经过公共后端路由选择并取得 15 秒 owner lease；续租、释放和终态投影必须校验同一 fencing token。dispatch 探测只能使用 Redis 中的可信节点快照查询 OpenCode，会话查询失败或未穷尽统一视为 UNKNOWN，禁止盲目重发 prompt；恢复日志不得记录第三方响应、异常 message 或堆栈中的原始内容。
+
+## 会话协作分享安全
+
+1. 分享链接必须使用至少 256 位安全随机 `shareId`，但 shareId 不是登录凭据。每个请求都必须先校验真实 Bearer Token 对应的有效 `AuthPrincipal`，再校验所属人/成员、分享状态、有效期、版本和精确 Session/Workspace；禁止匿名访问、仅凭 URL 访问或把 shareId 写入 Cookie/本地持久化认证状态。
+2. 必须使用独立 `DelegatedOperationContext`，绝不替换、包装成所属人或覆盖真实 `AuthPrincipal`。上下文至少绑定真实 actor/统一认证号/用户名、执行所属人、share/version/session/workspace、`canChat`、有效期和 ownerAccess；所有 OpenCode、进程、Workspace、Git/SSH 操作只显式使用执行所属人，所有平台归因和审计只使用真实 actor。
+3. 分享授权严格限定一个 Session 及其创建时绑定的 Workspace，且上限为所属人当前真实权限。Workspace 改绑、会话归档、所属人停用、分享取消/过期、成员移除都必须 fail-closed；被分享人不需要成为工作区成员，但不能切换应用/Workspace、持久 fork、管理分享/会话、置顶、设置、Agent 配置、源码/Hub、系统管理或服务器终端。
+4. 只读成员只允许会话/消息/Run/SSE、文件树/正文、状态和 Diff 读取。`canChat=true` 才允许发送、文件写入、当前工作区 Git、工作区终端、command/shell、compact/revert、permission/question 回复、反馈和定时任务。服务端必须在每个入口判定，不能依赖前端隐藏按钮。
+5. 停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人降为只读后仍可停止。撤回重发只允许所属人或最后 USER 消息发送人；分享发送人发起时还必须有当前 `canChat`。定时任务创建/改期要求 `canChat`，所属人和实际创建人可管理，降为只读的创建人只允许取消。
+6. 单 Session 发送必须同时取得 Redis 原子 active-session 占用和 PostgreSQL `runs.active_session_id` 唯一准入；任一失败都必须在发布 RunEvent、写可见消息或调用 OpenCode 前退出并返回 `SESSION_BUSY`。终态清空占用，存储异常 fail-closed，不允许降级 JVM 锁或 busy follow-up queue。
+7. 分享范围敏感读取和写入必须记录 actor、执行所属人、share/session/workspace/resource、结果、traceId；路径只能保存 SHA-256 摘要。审计禁止正文、明文路径、Token、终端输入、命令输出和第三方响应，默认保留 365 天。分享管理成功/失败和访问拒绝同样需要审计。
+8. `X-Test-Agent-Session-Share` 只允许跨 Java 公共 forwarder/SSE forwarder按原值透传，目标 Java 必须重新鉴权且仍使用所属人的进程路由；禁止自行扫描 Redis、使用本机降级、信任防循环头放行或新增 Java→Java 文件代理。CORS 只把该头加入受控允许列表，反向代理和日志必须脱敏。
+9. 分享 runtime SSE、RunEvent SSE、文件 WebSocket 与 PTY 必须周期和/或逐操作刷新授权；版本变化、降权、移除、取消、到期后关闭旧连接并记录拒绝。授权失效不自动取消已经启动的 Run，也不能让旧连接继续产生副作用。
+10. 分享创建的定时任务必须固化授权快照，后续分享失效仍使用所属人的 Workspace/OpenCode 执行并保留原创建人归因。这是明确的延迟代操作授权，UI 必须在取消分享时提示待执行任务；任务快照不能被复用为其它 Session/Workspace 的访问凭据。
 
 ## 限流
 
@@ -93,16 +106,26 @@ Token 校验流程：
 10. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
 11. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。manager 心跳中的 `unifiedAuthId` 只允许由现有运行管理 overview 透传和展示，普通用户进程状态、普通错误响应、RunEvent/SSE、监控指标及业务日志不得新增该字段。运行管理归属必须按数据库 binding/process 与 manager 快照关联，禁止从 `startCommand` 解析身份；无平台记录的进程不得自动认领、停止或改绑。
 12. XXL SSO 票据 API 必须使用用户 JWT 并由后端强制校验 `SUPER_ADMIN`；票据使用至少 256 位安全随机值、最长 60 秒、Redis Lua 原子读删一次消费，且不得保存原始平台 Token。iframe 只能通过隐藏表单 POST 传票据，禁止 URL/query/hash、浏览器存储、访问日志和错误响应携带票据。JIT 用户以稳定平台用户 ID 唯一，所有 XXL 账号均为管理员展示账号但不得使用本地密码登录；原生登录、改密和账号写入口必须禁用。XXL 会话每次请求校验平台 SHA-256 session marker，平台登出、刷新或过期必须同步失效。Cookie 必须保持 `HttpOnly`、`SameSite=Lax` 和受限 Path，`Secure` 默认开启；仅当受控企业内网明确无法提供 HTTPS 时，才允许通过受审部署配置显式关闭 `Secure`，并在 HTTPS 可用后恢复。周期任务 `GLOBAL_MUTEX` 必须使用现有 Redis 锁和续租，不得回退本机或数据库锁。
-13. 普通定时任务 API 必须使用用户 JWT，owner 只能取认证主体；按 `taskId/sessionId` 查询或变更时必须隔离其他用户。`ADMIN_CUSTOM` 创建和改期必须由后端根据当前认证主体强制校验 `SUPER_ADMIN`，前端入口可见性、请求中的模式值或历史创建人身份均不能替代；权限被移除后只允许取消，不允许继续改期。模式权限和自定义时间边界必须先于幂等锁、Session、会话锁、任务和容量写入校验，伪造请求不得留下副作用。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 XXL 参数/result、跨服务器请求、HTTP 响应、RunEvent、运营分析或日志；普通 Run 锚点受理、取消或最终调度失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview`、调度模式和安全错误。目标 Java 必须从共享数据库重读完整任务并重新校验 Session/Workspace 权限，固定目标只能使用任务提交时服务端保存的 `target_linux_server_id`；不得接受客户端覆盖、根据后续 binding 自动迁移、直调 manager gateway或建立夜间专属队列。内部批量请求只允许 `linuxServerId + 1..50 taskId`，使用公共 resolver 选出的精确 backendProcessId 和公共 forwarder、traceId、标准 XXL token、统一防循环 header；同服务器多 JVM 不得按 linuxServerId 本机短路。Run 锚点恢复必须校验来源类型、taskId、owner、Session 和 Workspace，客户端提供的幂等 ID 不能替代归属校验。token、prompt、附件、用户信息和底层异常不得进入日志。夜间容量只能由 `SUPER_ADMIN` 通过既有通用参数管理入口修改，服务端必须在审计和广播前校验正整数；`ADMIN_CUSTOM` 不得预留、释放或读取夜间容量。跨服务器刷新 payload 不携带参数值，刷新失败日志不得记录数据库原值或底层敏感错误。
+13. 普通定时任务 API 必须使用用户 JWT；普通入口 owner 取认证主体，分享入口 owner 取会话所属人并另存真实 creator 与授权快照。按 `taskId/sessionId` 查询或变更时必须隔离无关用户，所属人和 creator 权限按“会话协作分享安全”执行。`ADMIN_CUSTOM` 创建和改期必须由后端根据真实认证主体强制校验 `SUPER_ADMIN`，分享上下文、前端入口可见性、请求中的模式值或历史创建人身份均不能替代；权限被移除后只允许取消，不允许继续改期。模式权限和自定义时间边界必须先于幂等锁、Session、会话锁、任务和容量写入校验，伪造请求不得留下副作用。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 XXL 参数/result、跨服务器请求、HTTP 响应、RunEvent、运营分析或日志；普通 Run 锚点受理、取消或最终调度失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview`、调度模式和安全 actor 归因。目标 Java 必须从共享数据库重读完整任务并重新校验固定 Session/Workspace 范围，固定目标只能使用任务提交时服务端保存的 `target_linux_server_id`；不得接受客户端覆盖、根据后续 binding 自动迁移、直调 manager gateway或建立夜间专属队列。内部批量请求只允许 `linuxServerId + 1..50 taskId`，使用公共 resolver 选出的精确 backendProcessId 和公共 forwarder、traceId、标准 XXL token、统一防循环 header；同服务器多 JVM 不得按 linuxServerId 本机短路。Run 锚点恢复必须校验来源类型、taskId、owner、Session 和 Workspace，客户端提供的幂等 ID 不能替代归属校验。token、prompt、附件、用户信息和底层异常不得进入日志。夜间容量只能由 `SUPER_ADMIN` 通过既有通用参数管理入口修改，服务端必须在审计和广播前校验正整数；`ADMIN_CUSTOM` 不得预留、释放或读取夜间容量。跨服务器刷新 payload 不携带参数值，刷新失败日志不得记录数据库原值或底层敏感错误。
 14. JVM 内存通用参数的查询和手工刷新接口必须强制校验 `SUPER_ADMIN`，因为响应会同时暴露数据库加载源值与进程实际生效值；前端入口可见性不能替代后端权限。跨 Java 请求必须按 `backendProcessId` 精确路由并使用统一防循环头。手工刷新不得写参数修改历史或重复发布广播，日志只允许记录脱敏 traceId、进程身份、参数键和结果状态，不得记录源值、内存值、底层异常消息或堆栈。
 15. 企业离线完整包中的 MySQL root/应用密码和 XXL access token 必须在打包阶段使用安全随机值生成，只能写入权限为 `0600` 的 `.147` MySQL 节点配置和对应后台节点敏感配置；部署脚本只能按文本解析 dotenv，禁止 `source`、回显或写入普通日志。外层 ZIP 因同时包含这些配置和 JAR 内置 RSA 私钥，必须整体按密钥交付物通过受控 U 盘和企业中转机传递。
 15. 内部模型 Token 由外部系统提供，平台不得生成或猜测。仅 `SUPER_ADMIN` 可新增、改名、轮换和删除；API 响应只能返回 `tokenId/name/referencedProviderCount/createdAt/updatedAt`，不得返回明文或密文。`internal_model_tokens.token_value` 继续遵循本系统已确认的明文存储约定，数据库权限、备份和导出必须按密钥数据保护；被 Provider 引用时必须拒绝删除。前端密钥草稿只保存在组件内存，请求完成后立即清空，不得进入浏览器持久化、原始报文或错误提示。刷新广播只携带 traceId 等安全元数据，不携带 Token；Java 仅在一次联表重载时读取明文，并按 Provider ID 保存于不可变内存快照。启用不同 Provider Token 前必须确保全部 Java 节点已经升级。
+
+## 外部 API Key 与 SSH Key 安全边界
+
+1. `/api/external/v1/**` 必须由独立外部认证过滤器强制认证；只有精确 `/api/external/v1` 根及其 `/` 子路径可以绕过旧用户 JWT 和静态 `TEST_AGENT_API_TOKEN` 过滤器，相邻路径不得继承。用户 Bearer Token、Cookie、静态 Token 或前端菜单都不能替代 `X-Test-Agent-Tool-Code` 与 `X-Test-Agent-Api-Key`。
+2. API Key 只能由平台使用 32 字节安全随机数生成，格式固定为 `taak_v1_` 加无填充 Base64URL。数据库只保存 RSA-OAEP/SHA-256 密文、SHA-256 指纹和掩码提示；认证在 JVM 不可变快照中按 `toolCode` O(1) 查询，并用 `MessageDigest.isEqual` 常量时间比较。未知、停用和错误 Key 必须统一为 `UNAUTHENTICATED`，禁止泄露工具存在性或启用状态。
+3. 新建、查看和轮换只允许实时 `SUPER_ADMIN`，响应必须 `no-store/no-cache`；列表不得返回明文或数据库密文。前端明文只允许存在于当前弹窗组件内存，请求结束后清除 mutation 数据，关闭或卸载立即清空，禁止写 localStorage/sessionStorage、TanStack Query cache、URL、原始交换观察器或错误提示。
+4. 外部 SSH 私钥成功响应必须按 `docs/api/external-api.md` 的 TAEK1 协议使用 API Key 派生的 AES-256-GCM 密钥加密，并把工具编码、统一认证号和 traceId 全部纳入 AAD。私钥明文只允许存在于后端方法局部变量和调用方受控处理过程；HTTP 正文、错误、日志、广播、数据库新表和监控均不得出现明文。用户不存在、停用或未配置 Key 使用同一 404，旧加密格式使用安全 409。
+5. 管理事务提交后只能广播空 payload 的 `external-api-credential.refresh-requested`；各 Java 必须自行整表读取、完整解密校验并原子替换快照。启动加载失败必须阻止实例就绪，运行期刷新失败保留上一份有效快照；60 秒补偿刷新只用于收敛漏广播。
+6. Header 按已确认契约以明文传输，不做应用层二次加密；该例外只允许受信内网服务端调用。截获 API Key 的攻击者同时能冒用请求和解密响应，因此生产必须依赖网络隔离和链路保护，不开放浏览器 CORS Header，网关按工具/来源限流并屏蔽公网路由。应用层不新增单机限流。
+7. 共享同一数据库的全部 Java 必须使用同一交付 JAR 内的 `classpath:rsa-private.key`，并共享 Redis、开启服务器广播。滚动升级必须先完成数据库 migration 和全部 Java 升级，确认所有注册表已加载后才开放外部路由；仍有旧 Java 时不得启用外部调用。
 
 ## 日志脱敏
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`X-Support-Access-Grant`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
+- Authorization、Cookie、API key、`X-Test-Agent-Api-Key`、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`ciphertext/encryptedApiKey/privateKey`、`X-Test-Agent-Session-Share`/shareId、`X-Support-Access-Grant`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。
@@ -161,6 +184,7 @@ Token 校验流程：
 8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
 9. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
 10. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
+11. 分享工作区文件 ticket 必须额外绑定 share/version、真实 actor、执行所属人、固定 session/workspace、`canChat` 和分享到期时间；路由使用执行所属人的进程服务器。每条 RPC 和连接级定时监视都必须刷新分享授权，读写按当前 `canChat` 分流，失效时中止未完成上传、记录路径摘要审计并关闭连接。分享 ticket 禁止执行 `agent-config.*`、`directory.*`、`workspace.create` 或 Hub 操作，也禁止通过普通用户 affinity 获得其它 Workspace。
 
 ## 个人工作区搬迁 WebSocket 安全例外
 
@@ -206,6 +230,7 @@ Token 校验流程：
 7. 断开连接、session abort、后端关闭或超时时必须清理 PTY 进程。
 8. 服务器终端的应用级默认值必须关闭；获批的企业交付模板可在同时配置 WSS 定向网关时显式启用。终端仅允许 `SUPER_ADMIN`，每次连接都展示目标服务器二次确认，并由后端严格校验 `SERVER@{linuxServerId}` 目标绑定值；PTY 必须直接继承启动目标 Java 的操作系统用户和权限，禁止 `sudo`、切换用户、SSH 密码、私钥或其它额外提权。
 9. 正式环境的服务器终端只能返回 `wss://` 网关地址，网关必须按 `linuxServerId` 定向到签票 JVM；仅本地 `test` profile 可显式允许直连 `ws://`。shell 使用不含 Java 进程密钥的最小环境，审计不得记录命令和输出正文。默认配色只能通过当前 Java 用户创建的随机临时 rcfile 注入，不得写入用户主目录、系统 shell 配置或全局 Git 配置；兼容加载用户已有 `.bashrc` 时不得改变其文件内容。
+10. 分享成员只能在 `canChat=true` 时创建固定会话/工作区的 workspace terminal ticket；ticket 必须绑定 share/version、真实 actor、执行所属人和到期时间，PTY 使用所属人的进程、工作区和操作系统身份。upgrade 后至少每秒及每次 input 重新校验授权，降权、移除、取消或到期立即关闭 PTY；分享权限永远不能创建服务器终端。
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 

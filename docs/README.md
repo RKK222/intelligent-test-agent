@@ -35,6 +35,7 @@
 ## 前后端 API 约定
 
 - `docs/api/http-api.md`：HTTP API 路径、方法、请求/响应、错误码、traceId。
+- `docs/api/external-api.md`：外部 API Key 管理、用户 SSH Key 查询及 TAEK1 跨语言解密契约。
 - `docs/api/event-stream.md`：RunEvent SSE 事件类型、字段、续传规则（单一事实源）。
 - `docs/api/workflow-api.md`：浏览器直连 Python 的 `/workflow-api/v1/**` 与 Java 窄能力接口。
 - `docs/api/workflow-ag-ui.md`：独立工作流原生 AG-UI SSE、快照和断点续传协议。
@@ -46,6 +47,11 @@
 - `docs/testing/app-source-snapshot.md`：应用源码固定提交、多服务器物化、独立进度 WebSocket、文件能力和到期清理的自动化与人工验收。
 - `docs/testing/xxl-job-integration.md`：XXL-JOB 自动化、双 Java、故障隔离和安全验收清单。
 - `docs/testing/internal-model-observability-local.md`：企业内部模型调用可观测性的本地验证——用 `tools/mock-model-server.py` 在不部署/不连真实企业端点时复现成功、上游错误、超时、连接失败并核对明细/探活/查询 API。
+
+## 产品介绍与宣传素材
+
+- `docs/assets/marketing/mimo-recent-features-announcement.md`：可直接用于群公告或邮件的近期功能简短介绍。
+- `docs/assets/marketing/deep-space/mimo-product-intro-email.md`：面向跨部门使用与共建邀请的完整邮件正文。
 
 ## 部署与数据库
 

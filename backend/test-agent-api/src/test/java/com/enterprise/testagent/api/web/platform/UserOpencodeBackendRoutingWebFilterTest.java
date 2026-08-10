@@ -26,11 +26,15 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationRunContext;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeServiceStatus;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.workspace.WorkspaceServerIdentity;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
@@ -278,6 +282,86 @@ class UserOpencodeBackendRoutingWebFilterTest {
             assertThat(request.headers().firstValue(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER)).contains("true");
         });
         assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
+    void sharedRequestUsesExecutionOwnersBindingAndForwardsShareHeader() {
+        UserId owner = new UserId("usr_shared_session_owner");
+        SessionShareId shareId = new SessionShareId("shr_" + "a".repeat(64));
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(owner, "opencode"))
+                .thenReturn(Optional.of("server-b"));
+        SessionCollaborationShareService shareService = Mockito.mock(SessionCollaborationShareService.class);
+        Mockito.when(shareService.refreshAccess(USER_ID, shareId, "trace_shared_route"))
+                .thenReturn(new DelegatedOperationContext(
+                        shareId,
+                        4,
+                        USER_ID,
+                        "uac-shared-actor",
+                        "shared-actor",
+                        owner,
+                        new SessionId("ses_shared_scope"),
+                        new WorkspaceId("wrk_shared_scope"),
+                        true,
+                        true,
+                        false,
+                        NOW.plus(Duration.ofDays(1))));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingService routingService = new UserOpencodeBackendRoutingService(
+                assignmentService,
+                new WorkspaceServerIdentity("10.8.0.21"),
+                heartbeatStore(List.of(backend(
+                        "bjp_shared_owner", "server-b", "http://10.8.0.22:8080", NOW))),
+                new ObjectMapper().findAndRegisterModules(),
+                httpClient);
+        routingService.configureSessionShareService(shareService);
+        UserOpencodeBackendRoutingWebFilter filter = new UserOpencodeBackendRoutingWebFilter(routingService);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/platform/opencode-runtime/sessions/ses_shared_scope/command")
+                .header("X-Trace-Id", "trace_shared_route")
+                .header(SessionShareController.SHARE_HEADER, shareId.value())
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body("{\"command\":\"test\"}"));
+
+        filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        Mockito.verify(assignmentService).routingLinuxServerId(owner, "opencode");
+        Mockito.verify(assignmentService, Mockito.never()).routingLinuxServerId(USER_ID, "opencode");
+        assertThat(httpClient.requests).singleElement().satisfies(request -> {
+            assertThat(request.uri().toString()).isEqualTo(
+                    "http://10.8.0.22:8080/api/internal/platform/opencode-runtime/sessions/ses_shared_scope/command");
+            assertThat(request.headers().firstValue(SessionShareController.SHARE_HEADER))
+                    .contains(shareId.value());
+        });
+    }
+
+    @Test
+    void collaborationShareInfrastructureAndRuntimeSseStayOnCurrentBackend() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        SessionCollaborationShareService shareService = Mockito.mock(SessionCollaborationShareService.class);
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingService routingService = new UserOpencodeBackendRoutingService(
+                assignmentService,
+                new WorkspaceServerIdentity("10.8.0.21"),
+                heartbeatStore("server-b"),
+                new ObjectMapper().findAndRegisterModules(),
+                httpClient);
+        routingService.configureSessionShareService(shareService);
+        UserOpencodeBackendRoutingWebFilter filter = new UserOpencodeBackendRoutingWebFilter(routingService);
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .get("/api/internal/platform/opencode-runtime/session-shares/runtime-state/events")
+                .header(SessionShareController.SHARE_HEADER, "shr_" + "b".repeat(64))
+                .build());
+
+        filter.filter(exchange, chain(ignored -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isTrue();
+        assertThat(httpClient.requests).isEmpty();
+        Mockito.verifyNoInteractions(assignmentService, shareService);
     }
 
     @Test

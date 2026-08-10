@@ -67,6 +67,13 @@ class RedisRunRuntimeStoreIntegrationTest {
         RunRuntimeManifest manifest = manifest("run_redis_concurrent", RunStatus.RUNNING);
         try {
             store.initialize(manifest, input(manifest.runId()));
+            RunRuntimeManifest concurrent = manifest("run_redis_concurrent_other", RunStatus.PENDING);
+            assertThatThrownBy(() -> store.initialize(concurrent, input(concurrent.runId())))
+                    .isInstanceOfSatisfying(PlatformException.class, exception ->
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.SESSION_BUSY));
+            assertThat(store.findActiveBySession(manifest.sessionId()))
+                    .map(RunRuntimeManifest::runId)
+                    .contains(manifest.runId());
             assertThat(store.findInput(manifest.runId())).contains(input(manifest.runId()));
             assertThat(store.claimClientRequest(manifest.sessionId(), "req-1", manifest.runId())).isTrue();
             assertThat(store.claimClientRequest(
@@ -358,7 +365,7 @@ class RedisRunRuntimeStoreIntegrationTest {
                 100,
                 1024 * 1024,
                 100);
-        RunRuntimeManifest manifest = manifest("run_redis_materialized", RunStatus.RUNNING);
+        RunRuntimeManifest manifest = delegatedManifest("run_redis_materialized", RunStatus.RUNNING);
         try {
             store.initialize(manifest, input(manifest.runId()));
             assertThat(store.replayAfter(manifest.runId(), 0, 100).snapshot().events())
@@ -368,6 +375,12 @@ class RedisRunRuntimeStoreIntegrationTest {
                         assertThat(event.payload()).containsEntry("messageId", "msg_input");
                         assertThat(event.payload()).containsEntry("role", "user");
                         assertThat(event.payload()).containsEntry("text", "完整 prompt 不得进数据库");
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> message = (Map<String, Object>) event.payload().get("message");
+                        assertThat(message)
+                                .containsEntry("senderUserId", "usr_shared_actor")
+                                .containsEntry("senderUnifiedAuthId", "ucid_shared_actor")
+                                .containsEntry("sentBySharedUser", true);
                     });
             store.projectTransient(delta(manifest.runId(), "hel", 1));
             store.projectTransient(delta(manifest.runId(), "lo", 2));
@@ -812,6 +825,20 @@ class RedisRunRuntimeStoreIntegrationTest {
                 NOW.plus(Duration.ofHours(3)),
                 NOW,
                 NOW);
+    }
+
+    private RunRuntimeManifest delegatedManifest(String runId, RunStatus status) {
+        RunRuntimeManifest base = manifest(runId, status);
+        return new RunRuntimeManifest(
+                base.runId(), base.storageMode(), base.userId(),
+                new UserId("usr_shared_actor"), "ucid_shared_actor", true,
+                base.sessionId(), base.workspaceId(), base.agentId(), base.clientRequestId(),
+                base.dispatchMessageId(), base.producerLinuxServerId(), base.backendProcessId(),
+                base.executionNodeId(), base.opencodeProcessId(), base.rootRemoteSessionId(),
+                base.status(), base.statusVersion(), base.lastSeq(), base.earliestSeq(),
+                base.resetGeneration(), base.detailsTruncated(), base.durableEventCount(),
+                base.detailBytes(), base.attention(), base.attentionEventId(), base.attentionAt(),
+                base.detailsExpiresAt(), base.createdAt(), base.updatedAt());
     }
 
     private RunRuntimeInput input(RunId runId) {

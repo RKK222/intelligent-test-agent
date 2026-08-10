@@ -1528,9 +1528,13 @@ describe("FigmaChatPanel", () => {
       const drawer = document.body.querySelector<HTMLElement>('[aria-label="会话列表"]');
       expect(drawer).not.toBeNull();
       const drawerTabs = Array.from(drawer!.querySelectorAll<HTMLElement>('[role="tab"]'));
-      expect(drawerTabs.map((tab) => tab.textContent?.trim())).toEqual(["会话 1", "待执行任务 1"]);
+      expect(drawerTabs.map((tab) => tab.textContent?.trim())).toEqual([
+        "我的会话 1",
+        "分享给我 0",
+        "待执行任务 1"
+      ]);
 
-      drawerTabs[1].click();
+      drawerTabs[2].click();
       await nextTick();
       expect(wrapper.emitted("request-night-tasks")).toHaveLength(1);
       expect(drawer!.querySelector('[data-testid="night-task-list"]')?.textContent).toContain("执行完整回归");
@@ -1543,7 +1547,7 @@ describe("FigmaChatPanel", () => {
 
       expect(wrapper.emitted("open-night-task-session")?.[0]).toEqual(["session_target"]);
       expect(document.body.querySelector('[aria-label="会话列表"]')).not.toBeNull();
-      expect(drawerTabs[1].getAttribute("aria-selected")).toBe("true");
+      expect(drawerTabs[2].getAttribute("aria-selected")).toBe("true");
 
       const closeButton = drawer!.querySelector<HTMLButtonElement>('[aria-label="关闭会话列表抽屉"]')!;
       closeButton.click();
@@ -1582,20 +1586,30 @@ describe("FigmaChatPanel", () => {
 
       expect(tabs[0].getAttribute("aria-controls")).toBe(sessionsPanel.id);
       expect(sessionsPanel.getAttribute("aria-labelledby")).toBe(tabs[0].id);
-      expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1"]);
+      expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
 
       tabs[0].focus();
       tabs[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
       await nextTick();
 
-      const nightPanel = drawer.querySelector<HTMLElement>('[role="tabpanel"]')!;
+      const sharedPanel = drawer.querySelector<HTMLElement>('[role="tabpanel"]')!;
       expect(document.activeElement).toBe(tabs[1]);
       expect(tabs[1].getAttribute("aria-selected")).toBe("true");
-      expect(tabs[1].getAttribute("aria-controls")).toBe(nightPanel.id);
-      expect(nightPanel.getAttribute("aria-labelledby")).toBe(tabs[1].id);
+      expect(tabs[1].getAttribute("aria-controls")).toBe(sharedPanel.id);
+      expect(sharedPanel.getAttribute("aria-labelledby")).toBe(tabs[1].id);
+      expect(wrapper.emitted("request-shared-sessions")).toHaveLength(1);
+
+      tabs[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await nextTick();
+
+      const nightPanel = drawer.querySelector<HTMLElement>('[role="tabpanel"]')!;
+      expect(document.activeElement).toBe(tabs[2]);
+      expect(tabs[2].getAttribute("aria-selected")).toBe("true");
+      expect(tabs[2].getAttribute("aria-controls")).toBe(nightPanel.id);
+      expect(nightPanel.getAttribute("aria-labelledby")).toBe(tabs[2].id);
       expect(wrapper.emitted("request-night-tasks")).toHaveLength(1);
 
-      tabs[1].dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      tabs[2].dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
       await nextTick();
       expect(document.activeElement).toBe(tabs[0]);
       expect(tabs[0].getAttribute("aria-selected")).toBe("true");
@@ -1701,6 +1715,58 @@ describe("FigmaChatPanel", () => {
     }
   });
 
+  it("emits accessible pin and unpin actions without selecting the session", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(FigmaChatPanel, {
+      attachTo: host,
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "session_normal",
+            title: "普通会话",
+            pinned: false,
+            createdAt: "2026-07-18T04:00:00Z",
+            updatedAt: "2026-07-18T05:00:00Z"
+          },
+          {
+            id: "session_pinned",
+            title: "置顶会话",
+            pinned: true,
+            createdAt: "2026-07-18T03:00:00Z",
+            updatedAt: "2026-07-18T04:00:00Z"
+          }
+        ]
+      } as any
+    });
+
+    try {
+      const drawer = await openSessionListDrawer(wrapper);
+      const pinButton = drawer.get<HTMLButtonElement>('[aria-label="置顶对话：普通会话"]');
+      const unpinButton = drawer.get<HTMLButtonElement>('[aria-label="取消置顶对话：置顶会话"]');
+      expect(pinButton.attributes("aria-pressed")).toBe("false");
+      expect(unpinButton.attributes("aria-pressed")).toBe("true");
+
+      await pinButton.trigger("click");
+      await unpinButton.trigger("click");
+      expect(wrapper.emitted("toggle-session-pinned")).toEqual([
+        ["session_normal", true],
+        ["session_pinned", false]
+      ]);
+      expect(wrapper.emitted("select-session")).toBeUndefined();
+
+      await wrapper.setProps({ historyPinningSessionId: "session_normal" } as any);
+      expect(pinButton.element.disabled).toBe(true);
+      expect(unpinButton.element.disabled).toBe(true);
+      expect(pinButton.find(".figma-chat-history-card-pin-spinner").exists()).toBe(true);
+    } finally {
+      wrapper.unmount();
+      host.remove();
+    }
+  });
+
   it("shows runtime count, spinning history icon and attention bell in history controls", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -1742,6 +1808,63 @@ describe("FigmaChatPanel", () => {
     expect(drawer.find(".figma-chat-history-card-attention").exists()).toBe(true);
     expect(drawer.text()).toContain("运行中");
     expect(drawer.text()).toContain("已完成");
+    wrapper.unmount();
+  });
+
+  it("renders shared session share icons with blue color for active and gray color for expired shares", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "ses_shared_active",
+            title: "未过期分享会话",
+            isShared: true,
+            shareStatus: "ACTIVE",
+            shareExpired: false,
+            createdAt: "2026-07-08T09:00:00Z",
+            updatedAt: "2026-07-08T10:00:00Z"
+          },
+          {
+            id: "ses_shared_expired",
+            title: "已过期分享会话",
+            isShared: true,
+            shareStatus: "EXPIRED",
+            shareExpired: true,
+            createdAt: "2026-07-07T09:00:00Z",
+            updatedAt: "2026-07-07T10:00:00Z"
+          },
+          {
+            // 后端对未分享会话返回 isShared=false、shareStatus=null、shareExpired=false；
+            // 不能因为 shareExpired=false 而误判为已分享。
+            id: "ses_not_shared",
+            title: "未分享会话",
+            isShared: false,
+            shareStatus: null,
+            shareExpired: false,
+            createdAt: "2026-07-06T09:00:00Z",
+            updatedAt: "2026-07-06T10:00:00Z"
+          }
+        ]
+      } as any
+    });
+
+    const drawer = await openSessionListDrawer(wrapper);
+
+    const activeIcon = drawer.find(".figma-chat-history-card-share-icon--active");
+    expect(activeIcon.exists()).toBe(true);
+    expect(activeIcon.find("svg").exists()).toBe(true);
+    expect(activeIcon.attributes("aria-label")).toBe("该会话已分享（未过期）");
+
+    const expiredIcon = drawer.find(".figma-chat-history-card-share-icon--expired");
+    expect(expiredIcon.exists()).toBe(true);
+    expect(expiredIcon.find("svg").exists()).toBe(true);
+    expect(expiredIcon.attributes("aria-label")).toBe("该会话已分享（已过期）");
+
+    // 仅两条已分享会话渲染分享图标，未分享会话不渲染。
+    expect(drawer.findAll(".figma-chat-history-card-share-icon")).toHaveLength(2);
+
     wrapper.unmount();
   });
 
@@ -3482,7 +3605,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+    const rawButton = wrapper.findAll("button").find((button) => button.attributes("aria-label")?.includes("原始输出") || button.text().includes("原始输出"));
     expect(rawButton).toBeTruthy();
     await rawButton!.trigger("click");
 
@@ -3579,7 +3702,7 @@ describe("FigmaChatPanel", () => {
         } as any
       });
 
-      const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+      const rawButton = wrapper.findAll("button").find((button) => button.attributes("aria-label")?.includes("原始输出") || button.text().includes("原始输出"));
       expect(rawButton).toBeTruthy();
       await rawButton!.trigger("click");
 
@@ -3634,7 +3757,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+    const rawButton = wrapper.findAll("button").find((button) => button.attributes("aria-label")?.includes("原始输出") || button.text().includes("原始输出"));
     expect(rawButton).toBeTruthy();
     await rawButton!.trigger("click");
 

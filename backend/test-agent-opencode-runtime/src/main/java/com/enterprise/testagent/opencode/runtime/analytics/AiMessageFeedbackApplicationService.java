@@ -130,6 +130,17 @@ public class AiMessageFeedbackApplicationService {
         return feedbackRepository.findByUserIdAndMessageId(userId, messageId);
     }
 
+    /** 控制器建立分享上下文时通过应用层解析消息所属会话，避免 HTTP 层直接访问 Repository。 */
+    public com.enterprise.testagent.domain.session.SessionId requireMessageSessionId(SessionMessageId messageId) {
+        Objects.requireNonNull(messageId, "messageId must not be null");
+        return messageRepository.findById(messageId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "消息不存在",
+                        Map.of("messageId", messageId.value())))
+                .sessionId();
+    }
+
     /** 旧消息反馈响应继续返回调用方传入的 messageId，但事实只写 Run 级记录。 */
     private AiMessageFeedback asLegacyMessageFeedback(AiRunFeedback feedback, SessionMessageId messageId) {
         return new AiMessageFeedback(

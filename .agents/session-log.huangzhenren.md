@@ -5,6 +5,47 @@
 
 ## Entries
 
+### 2026-08-09 - 将“原始输出”入口从对话框顶栏移动至底部状态栏（改为下载图标）
+
+- Why:
+  - 响应用户 UI 规范调整需求，将 Chat 面板顶栏文字按钮“原始输出”移除，并以“下载图标”形式下沉移动至底部状态栏（任务消耗/终态文字右侧）。
+- What:
+  - `frontend/apps/agent-web/src/components/FigmaChatPanel.vue`:
+    - 从 `figma-chat-header-left` 顶栏元素中移除 `figma-chat-header-btn--raw` 按钮。
+    - 在底部 `figma-chat-footer` 容器末尾添加 `.figma-chat-status-raw-btn` 图标按钮，使用 `<Download :size="13" />`，保留 `aria-label="原始输出"` 与 `title`，绑定 `openRawOutput`。
+    - 保持 `figma-chat-usage` 紧跟左侧上下文统计，单独设置 `.figma-chat-status-raw-btn` 为 `margin-left: auto`，使下载图标独立悬浮在底部状态栏最右侧边缘，并复用原原始输出图标颜色 `#6366f1` (hover `#4f46e5`)。
+  - `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`: 更新测试查找原始输出按钮的选择逻辑。
+  - `frontend/apps/agent-web/README.md`: 同步更新文档中对“原始输出”入口位置与展现形式的说明。
+- How:
+  - 调整组件模板与样式，并重跑 `npx vitest run apps/agent-web/tests/FigmaChatPanel.test.ts` 进行测试校验。
+- Result:
+  - 原始输出按钮成功从顶栏移至底部状态栏，改为简洁精致的下载图标，无遗留视觉冗余。
+
+### 2026-08-09 - 将协作分享弹窗被分享人权限选择改造为开关切换（双侧标注“只读”与“可对话”）
+
+- Why:
+  - 响应用户交互需求，将“协作分享”弹窗（`SessionShareDialog.vue`）中被分享人的权限选择控件由复选框 `[ ] 只读` 改为开关切换（`el-switch`），开关左侧显示“只读”，右侧显示“可对话”。
+- What:
+  - `frontend/apps/agent-web/src/components/SessionShareDialog.vue`: 将被分享人列表项中的 checkbox `<input>` 替换为 `<el-switch>`，设置 `inactive-text="只读"`、`active-text="可对话"`，并添加对应的 Vue/Element-Plus deep 样式以保证切换文本与选定高亮效果。
+  - `frontend/apps/agent-web/README.md`: 同步更新“协作分享弹窗”逐人 `canChat` 权限开关说明。
+- How:
+  - 修改模板与样式，并通过 `npx vitest run apps/agent-web/tests/session-share-management.test.ts apps/agent-web/tests/session-share-route.test.ts` 验证测试全部通过。
+- Result:
+  - 界面成功转换为符合要求的开关交互，两侧清晰展示“只读”与“可对话”，单测 100% 通过。
+
+### 2026-08-09 - 修改分享会话页面他人消息背景色为 #C1B9F2
+
+- Why:
+  - 响应用户需求，把 `OTHER_MESSAGE_STYLE` 以及分享会话页面他人消息颜色修改为 `#C1B9F2`。
+- What:
+  - `frontend/packages/agent-chat/src/user-message-appearance.ts`: `OTHER_MESSAGE_STYLE` 中的 `backgroundColor` 从 `#9A8EDE` 改为 `#C1B9F2`。
+  - `frontend/packages/agent-chat/tests/user-message-appearance.test.ts`: 更新单测断言中的颜色预期为 `#C1B9F2`。
+  - `frontend/apps/agent-web/README.md` & `frontend/packages/agent-chat/README.md`: 同步更新相关模块 README 中关于他人消息背景色的文档说明。
+- How:
+  - 修改对应代码及测试、文档，并执行 `npx vitest run packages/agent-chat/tests/user-message-appearance.test.ts` 验证测试通过。
+- Result:
+  - 测试 100% 通过，相关代码与稳定文档同步更新完毕。
+
 ### 2026-08-08 - 落地多中心不规则蓝紫弥散雾环境光背景（无方向感、冷白清透低干扰）
 
 - Why:
@@ -2052,3 +2093,249 @@
 - Result:
   - 文件搜索面板不再展示仅因父目录路径命中而误报的文件；API、事件、数据库和安全边界均未变更。
   - 最终审查同时锁定大小写不敏感、首尾空白归一化和纯空白短路这三个公开搜索边界。
+
+### 2026-08-09 - 新增外部 API Key 认证与 SSH Key 查询
+
+- Why:
+  - 平台需要向受信外部系统提供独立认证的 API，首版按统一认证号查询状态正常用户的 SSH 私钥；同时需要仅超级管理员可用的工具凭据管理、多 Java 内存快照与跨节点刷新能力。
+- What:
+  - 新增 `/api/external/v1/users/{unifiedAuthId}/ssh-key` 和 `/api/internal/platform/system-management/api-keys` 管理接口；实现工具编码、scope、启停、分页、新建、按需查看、轮换和删除，并增加系统管理“API Key 管理”面板。
+  - API Key 使用安全随机格式生成，以 RSA-OAEP/SHA-256 密文持久化；认证注册表启动时严格整表加载、原子替换不可变快照、常量时间比较，并复用 `external-api-credential.refresh-requested` Redis 广播和 60 秒补偿刷新。SSH 私钥使用 HKDF-SHA256 与 AES-256-GCM 封装为 TAEK1 响应，旧 Bearer Token 和静态 Token 均不能旁路外部认证。
+  - 新增候选 Flyway `V20260809120000__create_external_api_credentials.sql` 与 MyBatis XML 持久化；迁移高于当前最高 `V20260808143302`，源码、persistence JAR、最终应用 JAR 的 SHA-256 均为 `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。
+  - 同步外部 API/HTTP API/事件流、安全、数据库、后端部署、架构模块、各后端模块与前端包说明及用户手册；刷新广播明确为内部事件，不新增 RunEvent/SSE。
+- How:
+  - 后端 21 个 Maven 模块 `mvn test` 全部成功，外部凭据、认证过滤器、TAEK1 固定向量/篡改、MyBatis H2 PostgreSQL 模式等专项测试通过；`mvn clean package -DskipTests` 成功。
+  - 前端 15 个 workspace typecheck、120 个 Vitest 文件（1882 passed / 1 skipped）与 production build 通过；仅有既有 jsdom Canvas 提示和大分块警告。独立只读安全复核确认明文 Key 不进入 TanStack Query/Mutation 缓存，组件卸载后的晚到响应不会读取或回写 Key。
+  - 提交前回顾全部 `.agents/session-log*.md`，确认既有已执行迁移未被改写；未修改 `.env*`、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 外部调用方可使用工具编码与 API Key 经 O(1) 内存认证后获取加密 SSH 私钥，超级管理员可完整管理凭据；API、数据库和安全契约均为新增，旧内部 API 与认证路径保持兼容。
+  - 本机没有可用 Docker/Podman、PostgreSQL、共享 Redis，未能执行真实 PostgreSQL 的空库及各目标历史升级，也未能启动双 Java 实例验证跨节点收敛；这两项及目标环境 `flyway_schema_history`/checksum 核对仍是发布前阻断验收，禁止用当前 H2 与单 JVM 测试替代。
+
+### 2026-08-09 - 统一 Flyway SQL 文件命名为时间戳、表名与描述
+
+- Why:
+  - 后续 Flyway SQL 需要从文件名直接识别创建时间、主要目标表和变更目的；多表 migration 还需要统一主表选择规则。
+- What:
+  - 将 V18 之后新增 migration 的命名规则统一为 `VyyyyMMddHHmmss__table_name_description.sql`，多表时按 SQL 实际变更顺序取第一张表。
+  - 同步入口规范、后端规范、数据库部署说明、持久化模块 README/PACKAGE 和完成前自检，并补充单表、多表示例及历史文件不可改名边界。
+- How:
+  - 检索稳定文档中的旧 `VyyyyMMddHHmmss__description.sql` 规则并逐处更新；未修改或重命名任何现有 migration，也未触碰并行任务的未跟踪文件。
+  - 回顾全部 `.agents/session-log*.md` 近期记录，执行规则残留检索和 `git diff --check`。
+- Result:
+  - 稳定文档已统一采用“时间戳 + 表名 + 描述”规则；不涉及运行时代码、SQL、HTTP API、RunEvent、数据库结构、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+### 2026-08-09 - 实现会话协作分享与被分享人代操作
+
+- Why:
+  - 平台需要让会话所属人通过唯一分享链接邀请最多 50 名现有用户，在最长 7 天内查看或代所属人对话；平台必须保留真实操作人归因，同时 OpenCode、工作区、Git/SSH 与进程执行身份始终保持为会话所属人。
+  - 分享范围内还需统一约束并发发送、停止、撤回重发、定时任务、文件与终端访问、实时消息可见性，以及分享过期、取消、移除和降权后的行为。
+- What:
+  - 新增 `session_shares`、`session_share_memberships`、`session_share_audit_events`，实现单会话永久复用一个 256 位随机分享标识、乐观锁版本、成员软状态历史、候选用户搜索、分享管理、被分享列表、访问解析和单会话 runtime SSE；扩展消息、Run、重发与夜间任务的实际操作人、统一认证号及代操作归因。
+  - 引入独立 `DelegatedOperationContext`，逐请求验证 actor、会话、工作区、资源、有效期和 `canChat`，执行身份显式保持所属人；只读成员仅可查看，代操作成员按所属人权限上限执行，分享管理及平台级操作仍仅限所属人。普通历史与普通 runtime 查询不因代操作归因获得额外访问权。
+  - Run 准入同时使用 `runs.active_session_id` 唯一约束与 Redis 原子占用，忙碌时统一返回 `409 SESSION_BUSY`；停止、最后一条消息撤回重发和定时任务按所属人、实际发送人/创建人规则鉴权，分享失效后已授权定时任务继续按快照执行。
+  - 文件访问继续复用 route → ticket → WebSocket RPC，分享 ticket 绑定 actor、所属人、session、workspace、版本、权限与到期时间并逐条重验；敏感操作审计不记录正文、Token、终端输入或明文路径，路径仅记录 SHA-256 摘要。OpenCode 源码和 generated SDK 均未修改。
+  - 前端新增分享管理弹窗、“分享给我”列表和 `/s/{shareId}` 完整工作台；所属人跳回普通历史会话，被分享人固定在授权 session/workspace。消息按实际发送人稳定着色，别人消息显示姓名；运行期间所有参与方禁用再次发送，并按权限隐藏或禁用越界入口。
+  - 新增迁移 `V20260809170000__session_shares_create_collaboration_share.sql` 与 `V20260809170001__session_messages_add_delegated_attribution.sql`，SHA-256 分别为 `b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`、`dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`；源码、persistence JAR 和最终应用 JAR 字节一致。
+- How:
+  - 后端依赖链与应用测试全部通过：persistence 282 项（18 skipped）、API 534 项、app 62 项（1 个既有 skip）；app 测试覆盖 9 条真实 PostgreSQL/Flyway 已知历史升级，最终应用 JAR 构建成功。并发准入、归因、权限、定时任务、路由和迁移兼容均有回归覆盖。
+  - 前端全量 123 个 Vitest 文件为 1896 passed / 1 skipped，15 个 workspace 类型检查与 production build 通过；Chromium、Firefox、WebKit 会话分享 E2E 共 15 项全部通过，构建只保留既有大 chunk 警告。
+  - `git diff --check`、变更文件冲突标记扫描、禁改目录与 `.env*` 扫描通过；提交前回顾全部 `.agents/session-log*.md`，确认未覆盖其他提交者成果或改写既有 migration。
+- Result:
+  - 会话分享、多人实时协作和“被分享人替所属人操作、平台记录真实 actor”的完整链路已经落地；HTTP API、RunEvent/runtime SSE、数据库、审计安全与兼容文档同步更新，旧客户端通过可选字段保持兼容。
+  - 发布必须先核对目标环境 `flyway_schema_history`、checksum 和存量重复活动 Run，完成数据库迁移并升级全部后端节点后再发布前端；已启动 Run 在分享失效时不自动取消，分享失效后的授权快照定时任务仍会继续执行，这是确认后的业务语义。
+
+### 2026-08-09 - 修复 ExternalSshKeyEnvelopeService 多构造器导致 Spring 启动失败
+
+- Why:
+  - `ExternalSshKeyEnvelopeService` 同时声明生产单参构造器与测试用包级三参构造器，二者均未标注 `@Autowired`。Spring 在“多构造器且无注入提示”时会回退查找无参构造器，该类无无参构造器，应用启动抛 `NoSuchMethodException: <init>()` / “No default constructor found”，连带 `ExternalUserSshKeyApplicationService`、`ExternalUserSshKeyController` 装配失败。
+- What:
+  - 在生产单参构造器上补 `@Autowired` 并加一行中文注释说明多构造器场景必须显式标注；保留包级三参构造器供测试注入确定性 `SecureRandom`/`Clock`。
+- How:
+  - 复用 `RunInactiveExpiryCoordinator` 既有写法；`mvn -pl test-agent-integration test` 跑 `ExternalSshKeyEnvelopeServiceTest`(2)、`ExternalUserSshKeyApplicationServiceTest`(3) 全绿；扫描后端 stereotype bean 确认同问题仅此一例，其余“多构造器”命中均为方法名误匹配的假阳性。
+- Result:
+  - 仅改 `ExternalSshKeyEnvelopeService.java` 一处；不涉及 HTTP API、RunEvent、数据库结构、generated SDK、OpenCode 源码或环境配置；启动期 `ExternalSshKeyEnvelopeService` -> `ExternalUserSshKeyApplicationService` -> `ExternalUserSshKeyController` 装配链路恢复。
+
+### 2026-08-09 - 修复 ExternalApiCredential 两服务同类多构造器启动失败（修正前次扫描结论）
+
+- Why:
+  - 前一条记录称“同问题仅此一例”结论有误：当时校验用的 `grep '^\s*(public|protected|private)\s+[A-Z]'` 要求显式访问修饰符，漏掉包级私有测试构造器，把 `ExternalApiCredentialApplicationService` 等真实命中误判为假阳性。重启后应用在 `externalApiCredentialController` -> `externalApiCredentialApplicationService` 再次抛 “No default constructor found”。
+  - 同一根因：`ExternalApiCredentialApplicationService`（public 4 参 -> 包级 6 参，无无参构造器）、`ExternalApiCredentialUpdateBroadcaster`（public 3 参 -> 包级 4 参，无无参构造器）均为“生产多参构造器 + 包级测试构造器、无无参构造器、无 @Autowired”的 Pattern B，启动必失败。
+- What:
+  - 在两者的 public 生产构造器上补 `@Autowired` + 中文注释（与 `ExternalSshKeyEnvelopeService` 一致）。
+  - 用 Java 感知脚本重扫全后端 stereotype bean：Pattern B（多构造器、无 @Autowired、无无参构造器、启动必失败）目前为 0；Pattern A（多构造器但有无参构造器，且无参构造器委托真实生产依赖，如 `this(new SecureRandom())`、`this(Clock.systemUTC(), ...)`）共 9 个：`ExternalApiKeyGenerator`、`TerminalTicketStore`、`RunConversationSummarizer`、`AppSourceIndexManager`、`AppSourceGitMaterializer`、`WorkspaceFileSocketTicketStore`、`BackendSseForwarder`、`AppSourceOperationTicketStore`、`AgentConfigOperationTicketStore`，Spring 经无参回退落到正确构造器，按最小改动原则不动。
+- How:
+  - `mvn -pl test-agent-system-management test` 跑 `ExternalApiCredentialApplicationServiceTest`(4)、`ExternalApiCredentialUpdateBroadcasterTest`(2)、`ExternalApiKeyGeneratorTest`(1)、`ExternalApiCredentialRegistryTest`(6) 共 13 项全绿，编译通过。
+- Result:
+  - 仅改 `ExternalApiCredentialApplicationService.java`、`ExternalApiCredentialUpdateBroadcaster.java` 两处；不涉及 HTTP API、RunEvent、数据库结构、generated SDK、OpenCode 源码或环境配置；Pattern B 启动失败链已全部消除。
+
+### 2026-08-09 - 固定分享消息气泡为两色且移除边框
+
+- Why:
+  - 会话分享初版按实际发送人哈希生成多种气泡颜色，范围也会覆盖普通会话中带归因的消息；产品要求只保留两种颜色，并始终以当前查看者区分自己与其他人。
+- What:
+  - `resolveUserMessageAppearance` 删除哈希色相逻辑：自己的消息固定使用 `#B2EDDF`，所有其他人的消息统一使用 `#9A8EDE`，两者均返回 `border: none`。
+  - 姓名规则保持不变：自己的消息不显示姓名，其他人显示姓名；缺少发送人归因的历史消息按自己发送处理，使用绿色且无边框。
+  - 分享工作台 E2E 从“颜色不同”收紧为精确断言两个浏览器计算色值和 `border-style: none`；同步 agent-web、agent-chat README 以及设计/实施计划文档。
+- How:
+  - TDD 先将两个单元测试改为固定色值与无边框断言，确认旧实现 2/2 按预期失败；最小修改解析函数后定向测试 2/2 通过。
+  - 前端全量 123 个 Vitest 文件为 1896 passed / 1 skipped，15 个 workspace 类型检查与 production build 通过；Chromium、Firefox、WebKit 分享回归 15/15 通过，仅保留既有 jsdom Canvas 提示和大 chunk 警告。
+- Result:
+  - 用户看到的消息气泡现只有两种：自己绿色、其他人统一紫色，且都没有边框；不涉及 HTTP API、RunEvent、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码，也未新建分支。
+
+### 2026-08-09 - 修复分享成员无法签发会话运行上下文
+
+- Why:
+  - 被分享用户发送消息前签发 RunContext 时，`ConversationContextController` 忽略了分享头，直接用真实 actor 调用只允许会话所属人的运行上下文服务，因此返回 `FORBIDDEN: 无权为该会话创建运行上下文`。
+- What:
+  - 运行上下文入口新增可选 `X-Test-Agent-Session-Share` 解析；分享请求保留真实 `AuthPrincipal`，先校验 actor 的有效成员、`canChat` 与精确 Session，再显式使用 `executionOwnerUserId` 签发所属人的进程上下文。
+  - 多构造器场景显式标注生产构造器 `@Autowired`；新增 Controller 回归测试，并同步 API 模块说明、HTTP API、事件流与会话场景测试文档。
+- How:
+  - TDD 红灯阶段新增分享成员用例，确认生产 Controller 缺少分享上下文依赖时 3 项测试中 1 项按预期失败；实现后定向测试 3/3 通过。
+  - 完整 `test-agent-api` 测试 485 项全部通过；`test-agent-app` 连同依赖执行跳过测试的 Maven package 成功；`git diff --check` 通过。
+  - 提交前回顾全部 `.agents/session-log*.md`，未修改 `.env*`、Flyway migration、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 有对话权限的分享成员可按“真实 actor 鉴权、所属人执行”的既定模型取得 RunContext，原会话所属人的普通签发路径保持兼容。
+  - 本次修正既有 HTTP 请求头语义与安全校验，不新增 URL、请求/响应字段、SSE 事件或数据库结构，不涉及性能与迁移发布风险。
+
+### 2026-08-09 - 分享给我的会话改为新标签页打开
+
+- Why:
+  - 被分享人从当前工作台的会话列表直接进入分享链接时，原实现复用当前标签页执行路由切换，可能短暂沿用普通工作台的初始化状态并提示 OpenCode 进程不可用；刷新独立分享路由后才能正常进入。
+- What:
+  - `AgentWorkbench` 保留会话列表组件的选择事件，在父组件通过 `router.resolve` 生成 `/s/{shareId}`，并以 `_blank`、`noopener,noreferrer` 打开独立浏览器标签页；当前普通工作台 URL 和状态保持不变。
+  - 分享管理 Playwright 场景新增对新标签调用参数、目标路由和原标签不跳转的精确断言；同步 agent-web README 与会话场景测试文档。
+- How:
+  - TDD 红灯确认旧实现未调用新标签入口；最小修改后 Chromium 定向用例 1/1 通过，Chromium/Firefox/WebKit 分享回归 15/15 通过，agent-web 类型检查和 production build 通过。
+  - 并行颜色调整在收尾期间提交了共享工作区，代码、测试和稳定文档已随前序提交 `810c76e89` 一并落库；本条独立记录该行为修复，未重写或回滚并行提交。
+  - 提交前回顾全部 `.agents/session-log*.md`；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - “分享给我”中的有效会话现在从独立标签页进入，原工作台继续保留；失效分享项仍保持禁用。
+  - 本次仅调整前端导航与测试，不涉及后端、性能或安全边界变更。
+
+### 2026-08-09 - 修复分享工作台模型目录为空
+
+- Why:
+  - 分享专用客户端会携带分享头，但模型和 Provider 目录请求未携带 `workspaceId`；后端按分享安全边界拒绝未绑定精确 Session/Workspace 的请求，因此被分享人只能看到已选模型文本，候选列表显示为空。
+- What:
+  - 分享模式从 `SessionShareAccess.workspaceId` 取得固定工作区，将其同时传给模型、Provider 与 Provider 白名单配置请求，并纳入 Vue Query 缓存键；普通工作台继续使用原有无工作区目录请求。
+  - Playwright mock 按真实后端规则拒绝缺少或越界工作区的分享目录请求，新增被分享人加载所属人工作区目录并实际选择模型的回归场景；同步 agent-web README 与会话场景测试文档。
+- How:
+  - TDD 红灯确认旧实现无法展示所属人 Provider；修复后 Chromium 模型相关场景 4/4、Chromium/Firefox/WebKit 分享模型场景 3/3 通过，agent-web 类型检查和 production build 通过。
+  - 并行权限开关任务在收尾期间提交了共享工作区，代码、测试和稳定文档已随前序提交 `3eebd21e3` 一并落库；本条独立记录该缺陷修复，未重写或回滚并行提交。
+  - 提交前回顾全部 `.agents/session-log*.md`；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 被分享人进入分享会话后可加载会话所属人固定工作区的可用模型并完成选择，同时继续由后端执行精确 Workspace 校验。
+  - 本次仅修复前端请求范围与缓存隔离，不放宽权限，不涉及数据库、性能或兼容性协议变更。
+
+### 2026-08-09 - 夜间执行来源标识调整为全彩闹钟图标、微调 Header 布局与新增已分享状态勋章
+
+- Why:
+  - 响应 UI 需求，将顶栏对话 Header 与左侧会话历史列表中“夜间执行”来源标识由纯文字/单色图标徽章替换为无文字的全彩闹钟图标；按图示将 Header 全彩闹钟图标调整至对话标题前，“分享”按钮调整至最右侧，并缩小“分享”与右侧栏折叠按钮之间的空暇间距；为“我的会话”列表中已分享的会话增加“已分享”状态显示，并用底色区分是否已过期（蓝底未过期，灰底已过期）。
+- What:
+  - 新增 `FullColorAlarmClockIcon.vue` SVG 矢量全彩闹钟组件（采用蓝靛色表盘、金色铃铛与渐变高光）。
+  - 在 `FigmaChatPanel.vue` 中将 Header 与历史卡片中的“夜间执行”文字与旧图标替换为 `<FullColorAlarmClockIcon>`，保留 hover title 提示。
+  - 调整 Header DOM 布局：全彩闹钟图标移至标题 `<h2 class="figma-chat-title">` 前面，`分享` 按钮移至 `会话列表` 按钮右侧；修改 `.figma-chat-header` 右侧 padding（由 `56px` 缩减为 `36px`），保持紧凑统一的 8px 间距。
+  - 在 `FigmaChatPanel.vue` 与 `AgentWorkbench.vue` 历史列表中为已分享的会话新增 `.figma-chat-history-card-share-badge`：“已分享”未过期渲染为蓝底蓝字（`.figma-chat-history-card-share-badge--active`），已过期渲染为灰底灰字（`.figma-chat-history-card-share-badge--expired`）。
+- How:
+  - 在 `FigmaChatPanel.test.ts` 中新增对已分享（蓝底未过期/灰底已过期）勋章的单元测试；执行 `vue-tsc` 类型检查与 `vitest` 定向测试 (155 passed)，确认无类型错误和测试断言问题。
+  - 提交前回顾全部 `.agents/session-log*.md`；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 顶栏 Header 标识已移至标题前方，分享按钮位于最右侧且间距缩窄；历史列表中对已分享会话清晰展示“已分享”状态，并以蓝底（未过期）/灰底（已过期）正确区分。
+
+### 2026-08-10 - 修复分享成员代操作 Run 的历史切换实时投影覆盖
+
+- Why:
+  - 被分享成员发起 Run 后，会话所属人从历史列表进入同一会话时虽然运行态摘要已显示运行中，但迟到的消息页、session-tree 和旧 Run 详情会覆盖先到的 `run.snapshot.reset`，导致思考状态、停止按钮和工具事件短暂消失或双方不同步。
+- What:
+  - `AgentWorkbench` 在历史会话切换窗口缓存当前活动 Run 的 snapshot/尾流，并在消息页与 session-tree 两次基线替换后无通知重放；替代 Run 会清理旧缓存，新 snapshot 会压缩此前缓存。
+  - 旧历史 Run 详情不得抢占已由 runtime-state 接管的其它 busy Run，Diff 以当前实时投影为基线合并，避免回退到旧快照。
+  - 新增所属人打开分享成员活动 Run、历史增强延迟返回的 Playwright 回归，并同步 agent-web、RunEvent 与会话测试文档。
+- How:
+  - TDD 红灯确认延迟历史增强返回后思考文本被覆盖；修复后该场景在 Chromium、Firefox、WebKit 3/3 通过，邻近运行态场景 5/5 通过。
+  - agent-web 类型检查与 production build 通过；前端全量 Vitest 123 个文件通过，1897 passed / 1 skipped。完整分享套件另暴露已有权限控件定位与气泡颜色期望不一致，均与本次运行态修复无关，未扩大范围处理。
+  - 提交前回顾全部 `.agents/session-log*.md`，并执行差异、冲突标记与空白校验；未修改 `.env*`、HTTP API、RunEvent wire schema、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 所属人与被分享成员现在会在历史加载全过程保持同一活动 Run 的思考、停止权限、工具事件、Todo 与 Diff 投影，不再被迟到的历史基线回滚。
+  - 只调整前端事件消费时序，既有后端鉴权、分享代操作模型和旧客户端协议保持兼容；缓存仅存在于单次历史切换窗口。
+
+### 2026-08-10 - 修复分享会话用户消息空气泡与实时正文不同步
+
+- Why:
+  - A 在分享会话发送消息后，B 会先收到 OpenCode 不含正文的 user envelope；legacy RunEvent SSE 又假定发送方本地已有乐观用户消息并排除 USER 恢复，导致非发送方看到空绿色气泡，正文不能随活动 Run 立即同步。
+- What:
+  - `SessionMessageRepository` 新增按 `sessionId + runId + USER` 读取平台权威输入的端口，生产实现通过 MyBatis XML 复用既有组合索引精确查询，不新增 JDBC SQL、字段、索引或 Flyway migration。
+  - legacy `RunMessageRecoveryService` 在每次 RunEvent SSE 建连时先发布平台 USER `message.updated`，再接续 assistant-only OpenCode 快照；事件保留平台 ID、远端 ID、正文和实际发送人归因，即使 OpenCode 暂不可用也先同步用户输入。
+  - 前端保留空 envelope 供 reducer 原位归并，但 `UserMessageRow` 在正文和可见上下文都为空时不渲染；其他人气泡恢复需求指定的 `#9A8EDE`，自己的消息继续为 `#B2EDDF`，两者无边框。
+  - 新增后端恢复与 MyBatis 集成测试、agent-chat 组件测试、A→B 分享工作台三浏览器回归；同时修正分享管理 E2E 对 Element Plus 隐藏开关输入的过期定位器，并同步模块 README、RunEvent 文档、会话测试说明和已执行计划。
+- How:
+  - TDD 红灯分别确认旧恢复在 OpenCode 不可用时返回空流、持久层缺少精确查询、空 envelope 会渲染气泡；实现后定向测试转绿。
+  - 后端相关模块全回归通过：`test-agent-opencode-runtime` 822 项、`test-agent-persistence` 283 项（18 项外部 Redis 条件用例跳过），连同依赖模块 Maven reactor 全部成功。
+  - 前端全量 Vitest 123 个文件通过，1898 passed / 1 skipped；会话分享 Chromium/Firefox/WebKit 24/24 通过；全 workspace 类型检查串行通过，agent-web production build 通过。并行运行类型检查和构建时曾因 VitePress `.temp` 竞争失败一次，串行复跑已通过。
+- Result:
+  - 分享会话任一参与方发现活动 Run 后，都以平台消息作为用户正文和发送人权威源；空远端 envelope 不再生成气泡，后到/重连事件按稳定 ID 原位合并且不会重复。
+  - 不新增 HTTP URL、DTO 字段或 RunEvent wire type；既有 `message.updated` 只补充恢复顺序和已有 additive 字段。每次 legacy SSE 建连增加一次走现有索引的单行查询；分享鉴权、执行所属人、安全日志和旧客户端兼容边界不变。未修改 `.env*`、generated SDK 或 OpenCode 源码，也未新建分支。
+
+### 2026-08-10 - 会话历史已分享指示由“已分享”文字徽标改为彩色分享图标
+
+- Why:
+  - 会话历史列表原以“已分享”文字徽标（未过期蓝底蓝字、已过期灰底灰字）标识已分享会话，视觉较重且与工作台“图标优先 + tooltip”的设计语言不一致；用户要求改为分享图标，仅用图标颜色区分是否过期。
+- What:
+  - `FigmaChatPanel.vue` 历史卡片标题行将原 `.figma-chat-history-card-share-badge` 文字徽标替换为 `.figma-chat-history-card-share-icon`，内部渲染已引入的 lucide `Share2` 图标（`:size="13"`，与同行的夜间执行图标密度一致）。
+  - 颜色区分改为图标前景色：未过期 `.figma-chat-history-card-share-icon--active` 为蓝色 `#1a73e8`，已过期 `.figma-chat-history-card-share-icon--expired` 为灰色 `#5f6368`；去除原背景、边框与内边距。
+  - 图标节点新增 `role="img"` 与 `:aria-label`（与 `:title` 同文案），避免文字移除后屏幕阅读器丢失“已分享（未过期/已过期）”语义。
+  - `isHistoryItemShared` / `isHistoryItemShareExpired` 判定逻辑、`isShared/shareStatus/shareExpired` 数据字段与 `title` 文案不变。
+  - 单测由断言“已分享”文字与蓝底/灰底类，改为断言 `--active` / `--expired` 图标容器存在、内含 `<svg>`、`aria-label` 文案正确；用例标题同步更新为“蓝色图标（未过期）/灰色图标（已过期）”。
+- How:
+  - 定向执行 `vitest run apps/agent-web/tests/FigmaChatPanel.test.ts`，154 passed / 1 skipped，包含更新后的分享图标用例；未触碰其他模块。
+  - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 会话历史列表已分享会话现以分享图标呈现，未过期为蓝色、已过期为灰色，hover/读屏可获“该会话已分享（未过期/已过期）”提示；纯前端视觉与可访问性调整，无 API/DTO/事件/数据库变更，向后兼容。
+
+### 2026-08-10 - 会话历史列表分享状态改由后端列表查询派生
+
+- Why:
+  - 前端只在点击进入某个会话后，用 `ordinarySessionShare` 给当前会话单项补 `isShared/shareStatus/shareExpired`，列表里其他会话没有分享状态，导致分享图标只在点开后才出现，无法在列表中直接看出哪些会话已分享。
+- What:
+  - `SessionHistoryMapper.xml` 在 `SessionHistoryFrom` 增加 `left join session_shares sh on sh.session_id = s.session_id`（1:1 唯一约束，不影响计数），并在 `SessionHistoryColumns` 用 CASE 派生 `share_status`：无分享为 null、`REVOKED` 优先、`expires_at <= current_timestamp` 为 `EXPIRED`、否则 `ACTIVE`；resultMap 末尾补 `share_status` 构造参数。
+  - `SessionHistoryRow` 增加 `shareStatus` 字段；`SessionHistoryItem` 增加 `shareStatus` 第三组件并保留两参兼容构造方法（默认 null=未分享），旧调用方零改动。
+  - `MyBatisSessionHistoryRepository.toHistoryItem` 透传 `row.shareStatus()`；`RuntimeDtos.SessionResponse` 增加 `shareStatus/isShared/shareExpired`，仅在 `from(SessionHistoryItem)`（历史列表）派生，`from(Session)`（详情/创建/更新/删除/批量）保持 null，所属人当前设置仍由 `GET /sessions/{sessionId}/collaboration-share` 独立读取。
+  - 前端 `Session` 类型、`workbench-utils.ts historyItems` 透传与 `isHistoryItemShared/isHistoryItemShareExpired` 判定均已在上一次图标改动中就绪，无需再改；后端字段补齐后列表项即获得分享状态，`ordinarySessionShare` 仅作为当前会话的实时刷新覆盖。
+  - `docs/api/http-api.md` 补充 `SessionResponse` 分享状态字段与派生规则、单会话接口不带分享状态的兼容说明。
+- How:
+  - `MyBatisSessionHistoryRepositoryIntegrationTest` 手动 apply `V20260809170000` 建表（与分享仓库集成测试同样方式，避免抬高基线 Flyway target），种子 ACTIVE/EXPIRED/REVOKED 三种分享，新增 `userHistoryExposesDerivedShareStatusFromSessionSharesJoin` 断言四条会话的 `shareStatus` 与单会话读取一致。
+  - 后端定向回归：`test-agent-persistence` 全量 284 passed / 18 skipped（Redis 外部条件跳过）、`RuntimeControllerTest` 25 passed、`SessionShareControllerTest` 4 passed、`SessionApplicationServiceTest` 16 passed；前端 `FigmaChatPanel` 分享图标用例与 agent-web typecheck 通过。
+  - 注意：单模块 `mvn -pl test-agent-persistence test` 不带 `-am` 会用本地仓库旧 domain jar 导致 `SessionHistoryItem` 三参 `NoSuchMethodError`，必须 `-am` 重建上游 domain。
+  - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、RunEvent、Flyway migration、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 会话历史列表每条会话现由后端 `GET /sessions` 一次查询派生分享状态，无需点击即可在列表中看到分享图标；未过期蓝色、已过期灰色。无新增数据库结构（复用既有 `session_shares` 表与索引）、无新增 HTTP URL、无 RunEvent/DTO 字段破坏性变更，`SessionHistoryItem` 两参构造方法保持兼容。
+
+### 2026-08-10 - 修复未分享会话被误判为已分享导致全列表出现分享图标
+
+- Why:
+  - 后端列表派生分享状态后，所有会话（含未分享）都渲染了分享图标。
+- What:
+  - 根因在前端 `isHistoryItemShared` 的第三条判据 `item.shareExpired !== undefined && item.shareExpired !== null`：`shareExpired` 只表示“已分享会话是否过期”，后端对未分享会话返回 `shareExpired=false`，而 `false !== undefined && false !== null` 为真，于是未分享会话被误判为已分享。此前该判据无害，是因为旧实现只在 `ordinarySessionShare` 覆盖当前会话时设置 `shareExpired`（且当前会话总是 `isShared=true`），后端补齐字段后该潜在 bug 显形。
+  - 移除该判据，仅以 `isShared===true` 或非 `NONE/UNSHARED` 的 `shareStatus` 判定是否已分享；`isHistoryItemShareExpired` 本就用 `shareExpired===true` 严格判断，无需改动。
+  - `FigmaChatPanel.test.ts` 分享图标用例补一条未分享会话（`isShared=false、shareStatus=null、shareExpired=false`），并断言全列表仅渲染 2 个分享图标，锁住回归。
+- How:
+  - 定向 `vitest run apps/agent-web/tests/FigmaChatPanel.test.ts`，154 passed / 1 skipped；agent-web typecheck 通过。
+  - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 列表现在仅对真正已分享的会话显示分享图标，未分享会话不再误显示；未过期蓝色、已过期灰色。纯前端判定逻辑修正，无后端/API 变更，向后兼容。
+
+### 2026-08-10 - 修复 opencode-like 全局脉冲动画导致浏览器 CPU 持续偏高
+
+- Why:
+  - 用户反馈打开网页后浏览器 CPU 明显且持续升高，不随加载完成回落；已排除宠物动画。
+  - 运行时定位（Playwright + `document.getAnimations()`）发现 `packages/agent-chat/src/opencode-like/styles/animations.css` 在 `:root` 上挂了 `oc-pulse-global 1.6s ease-in-out infinite` 无限动画，动画对象是 `@property` 注册的 `inherits: true` 自定义属性 `--oc-pulse-opacity`。
+  - 该属性 `inherits:true`，`:root` 每帧变化会把继承值重新传播到整棵 DOM 触发全树样式重算，即使没有任何运行态指示器在消费它也持续运行；A/B 测得主线程吞吐下降约 15%（963 -> 1110 次/5s）。因每帧重算 <50ms，长任务（longtask）测量抓不到，表现为"一直高 CPU 但无长任务"。
+- What:
+  - 删除 `@property --oc-pulse-opacity`、`@keyframes oc-pulse-global` 与 `:root { animation: ... }` 三段。
+  - 三个原消费方改为各自直接动画 `opacity`（复用已有的 `@keyframes oc-pulse`）：`animations.css` 的 `.oc-thinking-dot`、`tools.css` 的 `.oc-tool__status.is-running`、`parts.css` 的 `.oc-disclosure.is-running .oc-tool__status`。`opacity` 动画走 GPU 合成层，且这些元素只在有活动 Run 时才存在，空闲时零开销。
+  - 保留 `@keyframes oc-pulse`（`parts.css` 既有的 `.oc-disclosure.is-running::before` 等已直接使用）。视觉行为不变（仍是 0.45 <-> 1 的 opacity 脉冲）。
+- How:
+  - 前端全量校验通过：`corepack pnpm lint`（15 包 vue-tsc/tsc）、`corepack pnpm typecheck`、`corepack pnpm test`（123 文件 / 1898 passed / 1 skipped）。
+  - 运行时复测：重载后 `document.getAnimations()` 在空闲态返回 0 个动画、`:root` 与所有 infinite 动画均清零，主线程吞吐回到 1115 次/5s（与修复前手动取消动画的基线一致），确认 ~15% 开销已消除。
+  - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 页面空闲时不再有全局无限动画触发全树样式重算，浏览器 CPU 回归正常；运行态指示器（思考点、工具运行、disclosure 运行）在有活动 Run 时仍正常脉冲。纯 CSS 性能修复，无 API/DTO/事件/数据库变更，向后兼容。

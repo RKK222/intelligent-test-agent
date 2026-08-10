@@ -16,6 +16,17 @@ Java 前必须从每个后台节点验证 Redis TCP。值为 `0` 时，Docker DN
 
 生产 Java 固定从交付 JAR 的 `classpath:rsa-private.key` 读取 PKCS8 PEM RSA 私钥，用于解开数据库 `user_ssh_keys` 中每条记录的临时 AES 密钥；外置 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 已废除。共享同一数据库的全部 Java 必须部署同一 JAR，升级前后不得替换内置密钥，否则既有 SSH key 密文无法解密。企业交付 JAR/ZIP 因包含平台私钥，必须按密钥交付物限制访问、复制和留存。
 
+外部 API 凭据也使用同一内置 RSA 私钥执行 RSA-OAEP/SHA-256 入库加解密。应用在 Flyway 完成后严格加载全部工具凭据，任何密文、指纹、工具编码或 scope 校验失败都会让该 Java 启动失败并阻止就绪；运行期刷新失败保留上一份有效不可变快照。多 Java 部署必须连接同一 PostgreSQL/Redis，并设置 `TEST_AGENT_SERVER_BROADCAST_ENABLED=true`，使管理事务提交后的 `external-api-credential.refresh-requested` 空载荷广播低延迟触发整表重载；每 60 秒补偿刷新用于收敛漏消息。
+
+外部路由发布顺序固定为：
+
+1. 执行并核验 `V20260809110000__create_external_api_credentials.sql`；已执行 QA Memory `20260809120000/311175224` 的个人库改走隔离兼容路径和 `V20260810110000` 前向 migration。
+2. 滚动升级全部 Java，确认每个实例完成外部凭据启动加载且 readiness 为 UP；所有 JAR 的内置 RSA 私钥必须一致。
+3. 升级前端，确认只有 `SUPER_ADMIN` 能看到“API Key 管理”。
+4. 最后在受信内网网关开放 `/api/external/v1/**`，按来源和工具限流，不开放浏览器 CORS Header。
+
+旧 Java 全部退出前不得创建并启用外部调用。请求工具编码和 API Key 按已确认契约在 HTTP Header 中明文传输；部署必须用网络隔离和链路保护降低截获风险。SSH 响应的 TAEK1 加密不能抵消 API Key 已被截获后的冒用和解密风险，完整调用契约见 `docs/api/external-api.md`。
+
 ## XXL Admin、MySQL 与 executor
 
 生产必须提供外部共享 MySQL 8.4（或经兼容验证的 MySQL 8.x）并预先创建空库 `xxl_job` 和最小权限账号。平台 PostgreSQL 与 XXL MySQL 不得共库、共用户或共 Flyway location；表、执行器组和首批任务由每个 Java 内的 Admin 子上下文 Flyway 幂等初始化。

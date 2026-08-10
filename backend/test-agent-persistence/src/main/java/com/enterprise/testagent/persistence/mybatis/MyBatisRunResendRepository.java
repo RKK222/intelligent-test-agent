@@ -147,7 +147,10 @@ public class MyBatisRunResendRepository implements RunResendRepository, RunResen
                 text(row, "traceId"),
                 text(row, "safeErrorMessage"),
                 instant(row, "createdAt"),
-                instant(row, "updatedAt"));
+                instant(row, "updatedAt"),
+                value(row, "requesterUserId", UserId::new),
+                text(row, "requesterUnifiedAuthId"),
+                bool(row, "requestedBySharedUser"));
     }
 
     private Map<String, Object> params(RunResend resend) {
@@ -155,6 +158,9 @@ public class MyBatisRunResendRepository implements RunResendRepository, RunResen
         values.put("resendId", resend.resendId().value());
         values.put("sessionId", resend.sessionId().value());
         values.put("ownerUserId", resend.ownerUserId().value());
+        values.put("requesterUserId", resend.requesterUserId().value());
+        values.put("requesterUnifiedAuthId", resend.requesterUnifiedAuthId());
+        values.put("requestedBySharedUser", resend.requestedBySharedUser());
         values.put("sourceRunId", resend.sourceRunId().value());
         values.put("replacementRunId", resend.replacementRunId().value());
         values.put("sourceRemoteMessageId", resend.sourceRemoteMessageId());
@@ -183,6 +189,20 @@ public class MyBatisRunResendRepository implements RunResendRepository, RunResen
 
     private static Number number(Map<String, Object> row, String key) {
         return (Number) row.get(key);
+    }
+
+    private static <T> T value(
+            Map<String, Object> row,
+            String key,
+            java.util.function.Function<String, T> constructor) {
+        String value = text(row, key);
+        return value == null || value.isBlank() ? null : constructor.apply(value);
+    }
+
+    private static boolean bool(Map<String, Object> row, String key) {
+        Object value = row.get(key);
+        if (value instanceof Boolean bool) return bool;
+        return value instanceof Number number && number.intValue() != 0;
     }
 
     private static Instant instant(Map<String, Object> row, String key) {

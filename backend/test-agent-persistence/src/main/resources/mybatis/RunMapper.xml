@@ -23,13 +23,17 @@
             <arg column="triggered_by_user_id" javaType="java.lang.String"/>
             <arg column="agent_id" javaType="java.lang.String"/>
             <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="message_sender_user_id" javaType="java.lang.String"/>
+            <arg column="message_sender_unified_auth_id" javaType="java.lang.String"/>
+            <arg column="message_sent_by_shared_user" javaType="java.lang.Boolean"/>
         </constructor>
     </resultMap>
 
     <sql id="RunColumns">
         run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
         tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost_usd,
-        source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+        source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+        message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user
     </sql>
 
     <sql id="RunAssignments">
@@ -49,7 +53,14 @@
         source_ref_id = #{row.sourceRefId},
         triggered_by_user_id = #{row.triggeredByUserId},
         agent_id = #{row.agentId},
-        model_id = #{row.modelId}
+        model_id = #{row.modelId},
+        message_sender_user_id = #{row.messageSenderUserId},
+        message_sender_unified_auth_id = #{row.messageSenderUnifiedAuthId},
+        message_sent_by_shared_user = #{row.messageSentBySharedUser},
+        active_session_id = case
+            when #{row.status} in ('PENDING', 'RUNNING', 'CANCELLING') then #{row.sessionId}
+            else null
+        end
     </sql>
 
     <insert id="insert">
@@ -57,12 +68,16 @@
             run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
             tokens_input, tokens_output, tokens_reasoning,
             tokens_cache_read, tokens_cache_write, cost_usd,
-            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+            message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
+            active_session_id
         ) values (
             #{row.runId}, #{row.sessionId}, #{row.workspaceId}, #{row.status}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt},
             #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning},
             #{row.tokensCacheRead}, #{row.tokensCacheWrite}, #{row.costUsd},
-            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId}
+            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId},
+            #{row.messageSenderUserId}, #{row.messageSenderUnifiedAuthId}, #{row.messageSentBySharedUser},
+            case when #{row.status} in ('PENDING', 'RUNNING', 'CANCELLING') then #{row.sessionId} else null end
         )
     </insert>
 

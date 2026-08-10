@@ -28,6 +28,9 @@ python3 tools/mock-model-server.py --port 19070 --mode idle-timeout
 # 强制非流式 200 / SSE 响应头后立即 EOF
 python3 tools/mock-model-server.py --port 19070 --mode nonstream-200
 python3 tools/mock-model-server.py --port 19070 --mode empty
+
+# 企业网关兼容：返回 finish_reason=stop 后直接 EOF，不另发 [DONE]
+python3 tools/mock-model-server.py --port 19070 --mode finish-reason-eof
 ```
 
 验证 mock 可用：
@@ -69,6 +72,7 @@ curl -N -X POST http://127.0.0.1:8080/api/internal/platform/opencode-runtime/int
 | mock 模式 | 真实流式代理 outcome | 流式探活 outcome | httpStatus |
 |---|---|---|---|
 | `ok` / `sse` | `SUCCESS` | `SUCCESS` | 200 |
+| `finish-reason-eof` | `SUCCESS` | `SUCCESS` | 200 |
 | `nonstream-200` | `SUCCESS`（非 SSE 原样透传） | `UPSTREAM_STREAM_INTERRUPTED` | 200 |
 | `http400` / `http500` | `UPSTREAM_HTTP_ERROR` | `UPSTREAM_HTTP_ERROR` | 400 / 500 |
 | `header-timeout` | `UPSTREAM_FIRST_RESPONSE_TIMEOUT` | `UPSTREAM_FIRST_RESPONSE_TIMEOUT` | 空（响应头未到） |
@@ -90,7 +94,7 @@ curl -X POST http://127.0.0.1:8080/api/internal/platform/opencode-runtime/intern
   -H "Authorization: Bearer <超管token>" -H "Content-Type: application/json" -d '{}'
 ```
 
-探活固定发送 `stream=true,max_tokens=1`，必须收到至少一个真实输出 chunk 和 `[DONE]` 才成功。把 mock 切到 `http500` 或 `nonstream-200` 后再探活，观察探活状态卡片变红、`consecutiveFailures` 递增；切回 `ok` 后探活，连续失败清零。
+探活固定发送 `stream=true,max_tokens=1`，必须收到至少一个真实输出 chunk，并收到 `[DONE]` 或非空 `finish_reason` 才成功。把 mock 切到 `http500` 或 `nonstream-200` 后再探活，观察探活状态卡片变红、`consecutiveFailures` 递增；切回 `ok` 后探活，连续失败清零。
 
 ## 5. 核对观测查询 API
 
@@ -116,7 +120,7 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 
 ## 验证结论
 
-- **插桩→分类→落库**：由 `InternalModelSseStreamObserverTest` 固化真实输出与伪心跳语义；`InternalModelProxyForwardingServiceTest` 覆盖首 token、`[DONE]` 流完成和流中断；`InternalModelProviderProbeServiceTest` 用本地 HttpServer 覆盖完整 SSE、空 200、超时、500 与连接拒绝。
+- **插桩→分类→落库**：由 `InternalModelSseStreamObserverTest` 固化真实输出、伪心跳与两种收尾信号语义；`InternalModelProxyForwardingServiceTest` 覆盖首 token、`[DONE]`、`finish_reason` 后 EOF 和无收尾信号的流中断；`InternalModelProviderProbeServiceTest` 用本地 HttpServer 覆盖两种完整 SSE、空 200、超时、500 与连接拒绝。
 - **查询/探活 API**：由 `InternalModelObservabilityControllerTest`、持久化集成测试覆盖。
 - **本指南**用真实 HTTP 链路串起上述各层，作为部署前的人工交互复现，不替代真实企业端点验收。
 
@@ -124,5 +128,5 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 
 - mock 不校验 Token/鉴权，仅用于链路验证；真实环境仍走代理 key 与 provider Token。
 - 三种 timeout 模式最长挂起 120 秒，客户端达到平台截止时间后会主动断开；需要切换模式时可直接重启 mock。`empty` 与 `nonstream-200` 用于验证 2xx 不会让流式探活误报健康。
-- 明细的 `firstTokenMillis` 是首个真实输出到达耗时，`streamCompleteMillis` 是收到 `[DONE]` 的上游完整流耗时；`durationMillis` 还包含代理向下游写出和终态处理，不应拿来替代前两者。
+- 明细的 `firstTokenMillis` 是首个真实输出到达耗时，`streamCompleteMillis` 是收到 `[DONE]` 或非空 `finish_reason` 的上游完整流耗时；`durationMillis` 还包含代理向下游写出和终态处理，不应拿来替代前两者。
 - 真实企业端点的网络时延、真实 token 计数、TLS 与证书等，仍需部署后按 `deploy/internal/EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md` 现场验收。

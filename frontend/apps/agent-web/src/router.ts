@@ -74,9 +74,9 @@ export const router = createRouter({
       component: () => import("./views/WorkflowChatView.vue"),
     },
     {
-      path: "/s/:sessionId",
+      path: "/s/:shareId",
       name: "transcript",
-      component: () => import("./views/TranscriptView.vue"),
+      component: () => import("./views/SharedWorkbenchView.vue"),
       props: true,
     },
     {

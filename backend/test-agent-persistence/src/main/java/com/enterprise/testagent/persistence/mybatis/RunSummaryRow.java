@@ -17,6 +17,8 @@ public record RunSummaryRow(
         String sourceType,
         String sourceRefId,
         String senderUserId,
+        String senderUnifiedAuthId,
+        Boolean sentBySharedUser,
         String contentKind,
         String summaryKey,
         int summaryVersion,
