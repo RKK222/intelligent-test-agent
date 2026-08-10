@@ -7231,6 +7231,19 @@ type CacheFileData = {
   content: string;
 };
 
+function extractItemNo(filePath: string): string | undefined {
+  const segments = filePath.split(/[\\/]+/).filter(Boolean);
+  for (const seg of segments) {
+    if (seg.startsWith("S") || seg.startsWith("s")) {
+      const parts = seg.split("-");
+      if (parts.length >= 2 && /^\d+$/.test(parts[1] ?? "")) {
+        return `${parts[0]}-${parts[1]}`;
+      }
+    }
+  }
+  return undefined;
+}
+
 type SingleResponse = {
   data: {
     jumpUrl: string;
@@ -7284,10 +7297,13 @@ async function handleCacheAndNavigate(path: string, type: "file" | "directory") 
       return;
     }
 
+    const itemNo = extractItemNo(path);
+
     const body = JSON.stringify({
       type: cacheType,
       appName,
       version,
+      itemNo,
       data: files,
     });
 
@@ -7309,6 +7325,97 @@ async function handleCacheAndNavigate(path: string, type: "file" | "directory") 
     }
   } catch (error) {
     console.error("缓存数据并跳转失败", error);
+    ElMessage.error(error instanceof Error ? error.message : "缓存数据并跳转失败");
+  }
+}
+
+async function handleCacheAndNavigateEntries(entries: { path: string; type: "file" | "directory" }[]) {
+  if (!selectedWorkspace.value) {
+    return;
+  }
+  const workspaceId = selectedWorkspace.value.workspaceId;
+  const appName = selectedManagedApplication.value?.appName ?? "";
+  const now = new Date();
+  const version = `${now.getFullYear()}年${now.getMonth() + 1}月`;
+  const cacheDataUrl = import.meta.env.VITE_CACHE_DATA_URL ?? "";
+
+  if (!cacheDataUrl) {
+    ElMessage.error("缓存数据地址未配置");
+    return;
+  }
+
+  if (entries.length === 0) {
+    ElMessage.warning("没有选中的文件");
+    return;
+  }
+
+  try {
+    const files: CacheFileData[] = [];
+    let cacheType = "md";
+    let hasValidFile = false;
+
+    for (const entry of entries) {
+      if (entry.type === "directory") {
+        if (entry.path.includes("测试执行")) {
+          cacheType = "json";
+          const dirFiles = await collectAllFilesInDirectory(workspaceId, entry.path);
+          files.push(...dirFiles);
+          hasValidFile = true;
+        }
+      } else {
+        if (entry.path.includes("测试设计")) {
+          cacheType = "md";
+          const fileContent = await api.readFile(workspaceId, entry.path);
+          files.push({ title: fileNameOf(entry.path), content: fileContent.content });
+          hasValidFile = true;
+        } else if (entry.path.includes("测试执行")) {
+          cacheType = "json";
+          const fileContent = await api.readFile(workspaceId, entry.path);
+          files.push({ title: fileNameOf(entry.path), content: fileContent.content });
+          hasValidFile = true;
+        }
+      }
+    }
+
+    if (!hasValidFile) {
+      ElMessage.warning("仅测试设计和测试执行目录下的文件支持缓存跳转");
+      return;
+    }
+
+    if (files.length === 0) {
+      ElMessage.warning("没有可缓存的文件");
+      return;
+    }
+
+    const firstValidEntry = entries.find((e) => e.path.includes("测试设计") || e.path.includes("测试执行"));
+    const itemNo = firstValidEntry ? extractItemNo(firstValidEntry.path) : undefined;
+
+    const body = JSON.stringify({
+      type: cacheType,
+      appName,
+      version,
+      itemNo,
+      data: files,
+    });
+
+    const response = await fetch(`${cacheDataUrl}/aiTool/cacheData`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+
+    const result = await response.json() as SingleResponse;
+    console.log("============请求后台（多选）=====================", result);
+
+    if (result.data?.jumpUrl) {
+      window.open(result.data.jumpUrl, "_blank", "noopener,noreferrer");
+    } else {
+      ElMessage.error("获取跳转地址失败");
+    }
+  } catch (error) {
+    console.error("多选文件缓存数据并跳转失败", error);
     ElMessage.error(error instanceof Error ? error.message : "缓存数据并跳转失败");
   }
 }
@@ -9837,6 +9944,7 @@ async function handleLogout() {
           @upload-files="handleUploadFiles"
           @undo-entry="handleUndoWorkspaceFileOperation"
           @cache-and-navigate="handleCacheAndNavigate"
+          @cache-and-navigate-entries="handleCacheAndNavigateEntries"
         />
       </div>
       <div v-else class="managed-workspace-empty">

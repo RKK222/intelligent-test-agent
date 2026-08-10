@@ -14,7 +14,7 @@ import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
 import type { AgentConfigMutation, AgentFileLoadRequest, PublicWorktreeMountRequest } from "./agentFileLoad";
 import GitChangesPanel from "./GitChangesPanel.vue";
-import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe, MoreHorizontal, Plus, RefreshCw, Search } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe, MoreHorizontal, Plane, Plus, RefreshCw, Search } from "lucide-vue-next";
 import type { AppSourceWorkspaceContext, SelectedWorkspaceKind } from "./app-source-workspace";
 import { normalizePhysicalAbsolutePath } from "./physical-path";
 
@@ -152,6 +152,7 @@ const emit = defineEmits<{
   undoEntry: [];
   // 缓存并跳转
   cacheAndNavigate: [path: string, type: "file" | "directory"];
+  cacheAndNavigateEntries: [entries: import("@test-agent/file-explorer").WorkspaceSelectionEntry[]];
   downloadEntry: [entry: FileTreeEntry];
 }>();
 
@@ -160,6 +161,7 @@ const workspaceExpanded = ref(true);
 const agentsExpanded = ref(false);
 const agentConfigPanelRef = ref<InstanceType<typeof AgentConfigPanel> | null>(null);
 const gitChangesPanelRef = ref<InstanceType<typeof GitChangesPanel> | null>(null);
+const selectedEntries = ref<import("@test-agent/file-explorer").WorkspaceSelectionEntry[]>([]);
 
 const tab = ref<ExplorerTab>("explorer");
 const totalChangedFileCount = ref<number | null>(null);
@@ -479,6 +481,18 @@ defineExpose({
             </button>
             <div class="figma-fe-section-actions" v-if="workspaceExpanded">
               <button
+                v-if="tab === 'explorer' && selectedEntries.length > 0"
+                type="button"
+                class="figma-fe-section-action-btn figma-fe-plane-multi-btn"
+                :title="`缓存并跳转选中的 ${selectedEntries.length} 个文件`"
+                aria-label="缓存并跳转选中的文件"
+                :disabled="!workspaceId"
+                @click="emit('cacheAndNavigateEntries', selectedEntries)"
+              >
+                <Plane class="h-3.5 w-3.5" :stroke-width="1.5" />
+                <span class="figma-fe-plane-badge">{{ selectedEntries.length }}</span>
+              </button>
+              <button
                 v-if="tab === 'explorer' && canWrite"
                 type="button"
                 class="figma-fe-section-action-btn"
@@ -598,6 +612,8 @@ defineExpose({
               @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
               @undo-entry="emit('undoEntry')"
               @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
+              @cache-and-navigate-entries="emit('cacheAndNavigateEntries', $event)"
+              @selection-change="selectedEntries = $event"
               @download-entry="emit('downloadEntry', $event)"
             />
           </div>
@@ -878,6 +894,33 @@ defineExpose({
 
 .figma-fe-section-action-btn:disabled {
   opacity: 0.5;
+  pointer-events: none;
+}
+
+.figma-fe-plane-multi-btn {
+  position: relative;
+  color: #d97706;
+}
+
+.figma-fe-plane-multi-btn:hover {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.figma-fe-plane-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #d97706;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
   pointer-events: none;
 }
 
