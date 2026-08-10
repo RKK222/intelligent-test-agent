@@ -129,7 +129,7 @@ async function saveShare() {
     share.value = updated
     members.value = activeSessionShareMembers(updated.members)
     emit('updated', updated)
-    ElMessage.success(updated.status === 'ACTIVE' ? '分享设置已保存' : '分享已更新')
+    ElMessage.success(updated.status === 'ACTIVE' ? '已通知被分享人，分享设置已保存' : '分享已更新')
   } catch (error) {
     ElMessage.error(errorMessage(error, '保存分享设置失败'))
     if (error instanceof BackendApiError && error.status === 409) await loadShare()
@@ -205,7 +205,7 @@ function errorMessage(error: unknown, fallback: string) {
 
       <section v-if="share" class="session-share-dialog__link-card">
         <div>
-          <span class="session-share-dialog__eyebrow">唯一分享链接</span>
+          <span class="session-share-dialog__eyebrow">备用分享链接</span>
           <strong>{{ share.status === 'ACTIVE' ? '当前有效' : '已取消，可重新启用' }}</strong>
         </div>
         <div class="session-share-dialog__link-row">
@@ -322,12 +322,12 @@ function errorMessage(error: unknown, fallback: string) {
 .session-share-dialog__error, .session-share-dialog__task-warning { margin: 0; border-radius: 8px; padding: 9px 11px; font-size: 12px; }
 .session-share-dialog__error { background: #fff0f0; color: #b42318; }
 .session-share-dialog__task-warning { background: #fff8e7; color: #8a4b08; }
-.session-share-dialog__link-card { display: grid; gap: 9px; border: 1px solid #d8e2fb; border-radius: 12px; background: linear-gradient(135deg, #f7f9ff, #eef3ff); padding: 13px; }
+.session-share-dialog__link-card { display: grid; gap: 9px; border: 1px solid #e5e7eb; border-radius: 10px; background: #f8f9fa; padding: 12px; }
 .session-share-dialog__link-card > div:first-child { display: flex; justify-content: space-between; align-items: center; }
-.session-share-dialog__link-card strong { color: #3159b8; font-size: 12px; }
+.session-share-dialog__link-card strong { color: #6b7280; font-size: 12px; }
 .session-share-dialog__eyebrow { color: #475467; font-size: 12px; font-weight: 650; }
 .session-share-dialog__link-row { display: flex; gap: 8px; }
-.session-share-dialog__link-row input { min-width: 0; flex: 1; border: 1px solid #cbd7f2; border-radius: 8px; background: white; padding: 8px 10px; color: #344054; }
+.session-share-dialog__link-row input { min-width: 0; flex: 1; border: 1px solid #d1d5db; border-radius: 8px; background: white; padding: 8px 10px; color: #6b7280; }
 .session-share-dialog__link-row button, .session-share-dialog__expiry button, .session-share-dialog__candidates button, .session-share-dialog__revoke { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #cbd7f2; border-radius: 8px; background: white; color: #3159b8; padding: 7px 10px; cursor: pointer; }
 .session-share-dialog__section { display: grid; gap: 10px; }
 .session-share-dialog__section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }

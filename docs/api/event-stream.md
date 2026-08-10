@@ -277,6 +277,32 @@ data 字段：
 - 低频触发器作为兜底，避免本机实时触发丢失时状态长期不更新；用户已有 Redis 运行态 marker 时，每次摘要刷新只读取 Redis active 索引和 manifest，不轮询 PostgreSQL。未进入新链路的 legacy 用户继续使用现有只读 Repository。
 - 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 恢复正文，active-run 只作为上述流不可用时的单次 fallback。
 
+## 用户通知中心 fetch SSE
+
+`GET /api/internal/platform/notification-center/notifications/events` 是工作台通用通知变化通道。请求使用当前登录用户自己的 Bearer Token；接收人只取认证主体，客户端不能通过 query 或 header 指定其它用户。前端必须使用 `event-stream-client` 的 fetch SSE，以便携带 Authorization。
+
+事件类型：
+
+| event name | 说明 |
+|---|---|
+| `user-notification.snapshot` | 建连首帧及每 30 秒数据库校准快照；`changeType=SNAPSHOT`。 |
+| `user-notification.updated` | 创建、已读、快照更新或失效后的变化信号；`changeType` 分别为 `CREATED/READ/UPDATED/INVALIDATED`。 |
+
+data 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `changeType` | string | `SNAPSHOT/CREATED/READ/UPDATED/INVALIDATED`。 |
+| `notificationId` | string/null | 可精确标识单条变化时返回通知 ID；批量失效、按分享已读或校准快照可为 null。 |
+| `unreadCount` | number | 数据库重新计算的当前用户权威未读数。 |
+| `generatedAt` | string | 生成本次状态的 ISO-8601 时间，同时作为 SSE `id` 便于调试关联。 |
+
+SSE `id` 不表示 durable 游标，客户端不得持久化它或请求历史 replay。每 25 秒发送 `: heartbeat` comment；heartbeat 不含 event/data/id，client 必须忽略。断线后按 1、2、5、10、30 秒退避重新建连，并以新的 snapshot 恢复，不依赖 `Last-Event-ID`。
+
+数据库事务提交成功后才发布变化，回滚不得产生 SSE。当前 Java 先向本机该用户连接 fan-out，再复用通用 `ServerBroadcastPublisher` 唤醒其它 Java；内部广播只携带接收人 ID、可选通知 ID、变化类型和既有 trace/实例元数据，不携带标题、摘要、shareId、URL、消息正文或 Token。广播是低延迟增强，不是事实源；广播失败或断线由建连 snapshot 和 30 秒数据库校准恢复。
+
+SSE 只提供未读数和刷新信号，不承载通知正文。收到合法 snapshot/updated 后，工作台按需重新调用 `GET /api/internal/platform/notification-center/notifications` 取得权威分页；只有未读角标变化且面板未打开时可以只更新 `unreadCount`，不能从事件自行构造可点击动作。
+
 ## 分享会话运行态 fetch SSE
 
 `GET /api/internal/platform/opencode-runtime/session-shares/runtime-state/events` 是分享工作台专用的单会话状态流。请求使用当前登录用户自己的 Bearer Token，并携带 `X-Test-Agent-Session-Share`；它不进入普通用户历史 runtime-state，也不允许用分享消息归因扩大普通会话可见范围。

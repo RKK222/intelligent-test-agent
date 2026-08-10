@@ -21,6 +21,7 @@
     <modules>
         <module>test-agent-common</module>
         <module>test-agent-domain</module>
+        <module>test-agent-notification</module>
         <module>test-agent-observability</module>
         <module>test-agent-opencode-sdk-generated</module>
         <module>test-agent-opencode-client</module>
@@ -148,6 +149,11 @@
             <dependency>
                 <groupId>com.enterprise.testagent</groupId>
                 <artifactId>test-agent-domain</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-notification</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

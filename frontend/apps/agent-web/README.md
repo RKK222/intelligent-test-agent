@@ -10,6 +10,9 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 ## 主要职责
 
+- 全局顶部栏在用户手册与资源/头像区之间渲染 `UserNotificationCenter`。面板支持全部/未读、分页、加载/空态/错误重试/失效态、Esc/点击外部关闭、焦点返回和键盘操作；未读角标与打开态使用现有工行红令牌。点击有效 `SESSION_SHARE` 通知在新标签页打开 `/s/{shareId}`，当前工作台保留，且不会在页面侧提前调用通用已读接口。
+- `AgentWorkbench` 登录后先读取通知分页，再订阅用户级通知 SSE；变化信号更新角标并合并刷新列表，断流由 client 重连。固定分享工作台隐藏铃铛。分享设置成功文案明确“已通知被分享人”，复制链接保留为备用入口。
+
 - 会话列表提供“我的会话 / 分享给我”双 Tab；分享列表保留过期、取消、移除和会话归档记录并置灰，只有 `ACTIVE` 可进入，点击有效分享会话时使用独立浏览器标签页打开 `/s/{shareId}`，当前普通工作台不切换路由。所属人通过分享弹窗使用 1/3/7 天有效期、用户搜索、多选、逐人 `canChat` 权限开关（双侧显示只读与可对话）、复制永久唯一链接、乐观锁更新、取消和原链接重新启用；取消前会提示仍待执行的定时任务。
 - `/s/{shareId}` 为固定 Session/Workspace 的完整分享工作台：所属人按普通历史会话流程跳转，被分享人隐藏会话列表等越界入口，但保留“新建对话”，点击后直接回到本人工作台的空白对话；旧 `/s/{sessionId}` 仅对所属人兼容跳转。模型与 Provider 目录显式绑定分享授权中的固定 Workspace，并通过所属人的 OpenCode 进程加载，可对话成员可选择模型后代操作。只读成员可查看消息、Run、Diff 和文件，不能修改或执行；可对话成员按所属人身份代操作，界面仍记录实际 actor。权限失效会关闭 SSE、文件连接和终端并进入明确失效页。
 - 分享消息以当前查看者为基准使用固定两色：自己的用户气泡为 `#B2EDDF`，所有其他人的用户气泡统一使用浅紫 token `--ta-chat-other-user-bg`（默认 `#DED9F6`），两者均无边框；别人的用户气泡显示姓名，自己的不显示，姓名由分享访问上下文的参与者目录解析。多人页面以平台 `session_messages` 用户输入为正文权威源：分享 runtime-state 发现活动 Run 后立即订阅 RunEvent SSE，先恢复平台消息并按远端 message ID 与 OpenCode envelope 原位归并；空 envelope 不展示，断线重放也不重复生成气泡。后续帧中 active Run 消失时保留本地 Run 身份并按精确 `runId` 拉取终态，不能只清空 Run 导致持续“思考中”；`sessionUpdatedAt` 变化且当前无活动 Run 时重新读取消息，使 compact 结果无需刷新页面即可同步；替代 Run 活跃时只轻量读取并原位替换该 Run 的权威 USER，不切换 Session、不重载历史树，也不触发 history loading 或滚动到底。分享模式禁用 busy follow-up 队列，任一活动 Run 都立即禁用所有参与方输入，后端唯一约束仍是最终裁决。
@@ -182,8 +185,11 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 工作流HTTP/AG-UI不得经 `backend-api`、`event-stream-client` 或Java转发。
 - 不把通用业务组件堆在 app 内，必须下沉到 packages。
 - `/s/[shareId]` 必须使用平台 Session Share 授权，不得接 opencode 公网 share API；旧 Session ID 兼容入口只允许会话所属人访问。
+- 通知动作不得信任后端或页面传入任意 URL；首期只接受 `actionType=SESSION_SHARE` 并由页面对 `shareId` 做内部路由编码。点击分享通知不得先调用 `markUserNotificationRead`，只有分享访问鉴权成功才算已读。
 
 ## 验证
+
+`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、筛选、状态、分页、新标签页和键盘/焦点行为；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间，并在固定分享工作台隐藏。
 
 `packages/workflow-api-client/tests/client.test.ts` 覆盖同源请求、Authorization、Python错误、HTML fallback/纯文本网关错误收敛与带 `Last-Event-ID` 的fetch SSE；`tests/workflow-dev-proxy.test.ts`锁定开发态`/workflow-api/**`直达Python；`packages/workflow-chat/tests` 覆盖AG-UI快照/重放、输入卡、报告版本和局部重分析；`tests/login-redirect.test.ts` 覆盖 `/workflow-chat` 登录保护。
 

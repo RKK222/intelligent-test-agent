@@ -80,12 +80,119 @@ test("session share management and received list preserve one link and inactive 
   await expect.poll(() => sharePutRequests.length).toBe(1);
   expect(sharePutRequests[0]?.expectedVersion).toBeNull();
   expect(sharePutRequests[0]?.members).toEqual([{ userId: "usr_collaborator", canChat: true }]);
+  await expect(page.getByText("已通知被分享人，分享设置已保存")).toBeVisible();
   await expect(dialog.getByLabel("唯一分享链接")).toHaveValue(/\/s\/shr_e2e_unique$/);
 
   await dialog.getByRole("button", { name: "取消分享" }).click();
   await expect(page.getByText(/取消分享不会取消任务/)).toBeVisible();
   await page.getByRole("button", { name: "取消分享", exact: true }).last().click();
   await expect.poll(() => shareRevokeRequests).toEqual([{ sessionId: "ses_1", expectedVersion: "0" }]);
+});
+
+test("session share notification appears in real time, opens a new tab, then reflects read and invalidated changes", async ({ page }) => {
+  let releaseCreated!: () => void;
+  let releaseRead!: () => void;
+  let releaseInvalidated!: () => void;
+  const createdGate = new Promise<void>((resolve) => { releaseCreated = resolve; });
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  const invalidatedGate = new Promise<void>((resolve) => { releaseInvalidated = resolve; });
+  const notificationReadRequests: string[] = [];
+  const notificationEventRequests: string[] = [];
+  const activeNotification = {
+    notificationId: "ntf_share_live",
+    type: "SESSION_SHARED",
+    actorUserId: "usr_owner",
+    title: "张敏 向你分享了对话",
+    body: "支付回归问题定位 · 可对话",
+    actionType: "SESSION_SHARE",
+    actionTargetId: "shr_notification_live",
+    status: "ACTIVE",
+    invalidationReason: null,
+    actionAvailable: true,
+    unread: true,
+    expiresAt: "2026-08-11T12:00:00Z",
+    readAt: null,
+    createdAt: "2026-08-10T10:00:00Z",
+    updatedAt: "2026-08-10T10:00:00Z"
+  };
+  const notificationCapture = {
+    authUser: {
+      userId: "usr_collaborator",
+      username: "协作者",
+      unifiedAuthId: "ucid_collaborator",
+      roles: ["APP_MEMBER"]
+    },
+    userNotifications: [] as Array<Record<string, unknown>>,
+    userNotificationUnreadCount: 0,
+    userNotificationReadRequests: notificationReadRequests,
+    userNotificationEventRequests: notificationEventRequests,
+    userNotificationEvents: [
+      { gate: createdGate, changeType: "CREATED", notificationId: "ntf_share_live", unreadCount: 1 },
+      { gate: readGate, changeType: "READ", notificationId: "ntf_share_live", unreadCount: 0 },
+      { gate: invalidatedGate, changeType: "INVALIDATED", notificationId: "ntf_share_live", unreadCount: 0 }
+    ]
+  };
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v7:usr_collaborator", "seen");
+    window.open = ((url?: string | URL, target?: string, features?: string) => {
+      Object.assign(window, { __testOpenedNotificationShare: [String(url), target, features] });
+      return window;
+    }) as typeof window.open;
+  });
+  await mockBackendApi(page, notificationCapture);
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const trigger = page.getByTestId("notification-center-trigger");
+  await expect(trigger).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".user-notification-center__badge")).toHaveCount(0);
+
+  notificationCapture.userNotifications = [activeNotification];
+  notificationCapture.userNotificationUnreadCount = 1;
+  releaseCreated();
+  await expect(page.locator(".user-notification-center__badge")).toHaveText("1");
+
+  await trigger.click();
+  const activeItem = page.getByRole("button", { name: /张敏 向你分享了对话.*在新标签页打开/ });
+  await expect(activeItem).toBeVisible();
+  await expect(page.getByText("支付回归问题定位", { exact: true })).toBeVisible();
+  await expect(page.getByText("可对话", { exact: true })).toBeVisible();
+  const sourceUrl = page.url();
+  await activeItem.click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __testOpenedNotificationShare?: string[] }
+  ).__testOpenedNotificationShare)).toEqual([
+    "/s/shr_notification_live",
+    "_blank",
+    "noopener,noreferrer"
+  ]);
+  expect(page.url()).toBe(sourceUrl);
+  expect(notificationReadRequests).toEqual([]);
+
+  notificationCapture.userNotifications = [{
+    ...activeNotification,
+    unread: false,
+    readAt: "2026-08-10T10:02:00Z",
+    updatedAt: "2026-08-10T10:02:00Z"
+  }];
+  notificationCapture.userNotificationUnreadCount = 0;
+  releaseRead();
+  await expect(page.locator(".user-notification-center__badge")).toHaveCount(0);
+  await expect(page.locator(".user-notification-center__item")).not.toHaveClass(/is-unread/);
+
+  notificationCapture.userNotifications = [{
+    ...activeNotification,
+    status: "INVALIDATED",
+    invalidationReason: "REVOKED",
+    actionAvailable: false,
+    unread: false,
+    readAt: "2026-08-10T10:02:00Z",
+    updatedAt: "2026-08-10T10:03:00Z"
+  }];
+  releaseInvalidated();
+  const invalidItem = page.getByRole("button", { name: /张敏 向你分享了对话.*分享已失效/ });
+  await expect(invalidItem).toBeDisabled();
+  await expect(page.getByText("分享已失效", { exact: true })).toBeVisible();
+  await expect.poll(() => notificationEventRequests.length).toBeGreaterThanOrEqual(3);
 });
 
 test("session share owner repairs historical collaborator resend attribution from audit metadata", async ({ page }) => {
@@ -9537,6 +9644,17 @@ async function mockBackendApi(
     sessionShareCandidates?: Array<Record<string, unknown>>;
     sessionSharePutRequests?: Array<Record<string, unknown>>;
     sessionShareRevokeRequests?: Array<{ sessionId: string; expectedVersion: string | null }>;
+    userNotifications?: Array<Record<string, unknown>>;
+    userNotificationUnreadCount?: number;
+    userNotificationReadRequests?: string[];
+    userNotificationEventRequests?: string[];
+    userNotificationEvents?: Array<{
+      gate?: Promise<void>;
+      eventName?: "user-notification.snapshot" | "user-notification.updated";
+      changeType: string;
+      notificationId?: string | null;
+      unreadCount: number;
+    }>;
     skipInitialAuthToken?: boolean;
     loginRequests?: Array<{ username?: string; password?: string }>;
     sideQuestionRequests?: Array<Record<string, unknown>>;
@@ -10126,6 +10244,54 @@ async function mockBackendApi(
         // E2E mock 直接把后端 translations 关系预生成好；用户菜单顶部灰显行会展示这里的中文标签。
         roleLabels: roles.map((role) => roleLabelOf(role))
       }));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/notification-center/notifications/events") {
+      const requestIndex = capture.userNotificationEventRequests?.length ?? 0;
+      capture.userNotificationEventRequests?.push(url.pathname);
+      const update = capture.userNotificationEvents?.[requestIndex] ?? {
+        eventName: "user-notification.snapshot" as const,
+        changeType: "SNAPSHOT",
+        notificationId: null,
+        unreadCount: capture.userNotificationUnreadCount ?? 0
+      };
+      await update.gate;
+      await route.fulfill({
+        status: 200,
+        headers: { ...corsHeaders(), "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+        body: `event: ${update.eventName ?? "user-notification.updated"}\ndata: ${JSON.stringify({
+          changeType: update.changeType,
+          notificationId: update.notificationId ?? null,
+          unreadCount: update.unreadCount,
+          generatedAt: "2026-08-10T10:00:00Z"
+        })}\n\n`
+      });
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/notification-center/notifications") {
+      const pageNumber = Number(url.searchParams.get("page") ?? "1");
+      const size = Number(url.searchParams.get("size") ?? "20");
+      const unreadOnly = url.searchParams.get("unreadOnly") === "true";
+      const allItems = capture.userNotifications ?? [];
+      const filtered = unreadOnly ? allItems.filter((item) => item.unread === true) : allItems;
+      const offset = Math.max(0, (pageNumber - 1) * size);
+      await route.fulfill(json({
+        items: filtered.slice(offset, offset + size),
+        page: pageNumber,
+        size,
+        total: filtered.length,
+        unreadCount: capture.userNotificationUnreadCount
+          ?? allItems.filter((item) => item.unread === true && item.actionAvailable === true).length
+      }));
+      return;
+    }
+    const notificationReadMatch = url.pathname.match(
+      /^\/api\/internal\/platform\/notification-center\/notifications\/([^/]+)\/read$/
+    );
+    if (method === "POST" && notificationReadMatch) {
+      const notificationId = decodeURIComponent(notificationReadMatch[1] ?? "");
+      capture.userNotificationReadRequests?.push(notificationId);
+      await route.fulfill(json({ notificationId, read: true }));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/session-shares/access") {

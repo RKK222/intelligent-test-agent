@@ -34,6 +34,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
+import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -273,6 +274,26 @@ class SessionApplicationServiceTest {
         service.archiveSession(SESSION_ID, "trace_1234567890abcdef");
 
         verify(titleWatchService).cancelForSession(SESSION_ID, "trace_1234567890abcdef");
+    }
+
+    @Test
+    void archiveInvalidatesShareNotificationsWithoutRollingBackSuccessfulArchiveOnNotificationFailure() {
+        UserNotificationApplicationService notifications = Mockito.mock(UserNotificationApplicationService.class);
+        Mockito.doThrow(new IllegalStateException("notification unavailable"))
+                .when(notifications)
+                .invalidateSessionSharesBySession(
+                        SESSION_ID, "SESSION_ARCHIVED", "trace_1234567890abcdef");
+        SessionApplicationService service = service(
+                new FakeWorkspaceRepository(true),
+                new FakeSessionRepository(session()),
+                new FakeMessageRepository());
+        service.setNotificationService(notifications);
+
+        Session archived = service.archiveSession(SESSION_ID, "trace_1234567890abcdef");
+
+        assertThat(archived.status()).isEqualTo(SessionStatus.ARCHIVED);
+        verify(notifications).invalidateSessionSharesBySession(
+                SESSION_ID, "SESSION_ARCHIVED", "trace_1234567890abcdef");
     }
 
     @Test

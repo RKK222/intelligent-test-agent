@@ -8541,3 +8541,30 @@
 - 本地核心三服务当前可用；Workflow 因本机缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 按官方 `--without-workflow` 模式保持未启动。
 - 当前 `wr` 旧工作区的跨服务器冲突仍会保留，正确恢复方式是让旧 `192.168.100.115` 以原稳定身份和原磁盘重新上线完成搬迁，或在当前服务器新建个人工作区；不能通过重启、Flyway 操作或直接改 `linux_server_id` 绕过。
 - 企业多后台架构已提供稳定服务器身份、Java 间路由和个人 worktree 搬迁，但必须固定且唯一配置 `TEST_AGENT_LINUX_SERVER_ID`、配置可达的 `TEST_AGENT_SERVER_ADVERTISED_HOST`、保留与身份绑定的持久化本地盘，并在源服务器下线前完成排空/搬迁；当前前端仍会在搬迁窗口误把异服 recent 工作区当作可发送，这是需另行修复的产品缺陷。
+## 2026-08-10 - 新增工作台通用通知中心并接入会话分享
+
+### Why
+
+- 被分享人此前需要手工复制分享链接并输入地址，工作台缺少可实时发现、可追溯且不依赖外部渠道的通用站内通知入口。
+- 首期需要把会话分享生命周期接入通知，同时保持“成功访问分享后才已读”、服务端受控跳转、跨 Java 低敏广播和既有“分享给我”入口兼容。
+
+### What
+
+- 新增 `test-agent-notification` 模块与通知领域端口，提供创建/去重/更新/失效/已读、未读统计、事务提交后本机及跨节点变化、25 秒心跳、30 秒数据库校准和 90 天清理；HTTP/SSE 与 MyBatis 实现分别位于 API、persistence 模块。
+- 新增 `user_notifications` 及 migration `V20260810170000__user_notifications_create_notification_center.sql`，只保存受控 `SESSION_SHARE + shareId` 和安全标题/摘要快照；回填仅覆盖仍有效分享，并且只有严格晚于成员 `shared_at` 的成功读取审计才回填已读。migration 已在本机保留 PostgreSQL 执行，源码、persistence JAR、应用嵌套 JAR SHA-256 均冻结为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`。
+- 分享新增/重新加入/重新激活创建新通知，普通权限或有效期保存更新现有通知，移除/撤销/归档失效；通过通知、“分享给我”或旧链接鉴权成功后统一幂等已读，已读同步失败只记录低敏告警，不阻断已获授权的访问。
+- 前端顶栏新增工行红通知铃铛、角标和约 400px 面板，覆盖全部/未读、分页、加载/空态/错误/失效、键盘、Esc、点击外部关闭与焦点返回；有效分享在新标签页打开 `/s/{shareId}`，复制链接保留为备用。登录身份或工作台模式切换会使旧分页请求失效并清空旧快照，避免跨用户短暂回显。
+- 同步 shared-types、backend-api、event-stream-client 以及 HTTP、事件流、数据库、安全、模块依赖和前后端 README；未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+### How
+
+- 后端通知/runtime/API/MyBatis 定向测试通过：notification 7 项、runtime 24 项、API 3 项、persistence 12 项；真实 PostgreSQL 通知仓储/回填 1 项和全部已知 Flyway history 升级 18 项通过。`mvn clean package -DskipTests` 通过，migration 三处成品 SHA 一致。
+- 完整 `mvn clean package` 两次均被本机 Docker Desktop 冷启动/资源时序阻断：一次 MySQL Testcontainers 超过 120 秒，另一次 PostgreSQL 启动与既有并发模型用例超时；运行到的 persistence 129 项没有断言失败。没有通过延长业务断言、`repair` 或 `outOfOrder` 掩盖该环境失败。
+- 最终前端全量 Vitest 为 124 文件、1907 passed / 1 skipped；15 个 workspace typecheck、production build 通过，Chromium/Firefox/WebKit 分享专项 27/27 通过。构建仅保留既有 jsdom Canvas 提示和大 chunk 警告。
+- 原计划启动命令读取原工作区 `.env.test` 后，Workflow 初始化因数据库账号缺少 `CREATEROLE/CREATEDB` 被环境阻断；未修改环境或数据库权限。随后使用同一脚本 `--without-workflow` 从新 worktree 启动 backend、frontend、manager，health/readiness 均为 `UP`，前端 3000 返回 200，通知未登录为 401，CORS 与 manager WebSocket 正常。
+- 提交前回顾全部 `.agents/session-log*.md`，确认未改写已执行 migration、未覆盖其它提交者成果，也未发现冲突标记。
+
+### Result
+
+- 工作台通知中心及会话分享首期链路已实现并由模块、真实 PostgreSQL、前端单测、三浏览器 E2E、生产构建和本地运行态共同验证；广播异常时由初始快照与 30 秒数据库回源恢复，通知不携带任意 URL、分享正文或凭据。
+- 当前可验证地址为 `http://127.0.0.1:3000/`，后端为 `http://127.0.0.1:8080/`。本地没有可用的文档示例登录账号，因此未在真实本地库执行登录后的双用户手工流程；该流程已由三浏览器 E2E 覆盖。Workflow 仍因本地数据库管理权限不足未启动，核心通知服务不依赖 Workflow。

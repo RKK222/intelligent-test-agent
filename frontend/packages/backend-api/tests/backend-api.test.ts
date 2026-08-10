@@ -4629,6 +4629,63 @@ describe("backend-api", () => {
     await expect(connection).resolves.toBe(socket);
     expect(resolved).toBe(true);
   });
+
+  it("lists notification-center pages and marks one controlled notification read", async () => {
+    const page = {
+      items: [{
+        notificationId: "ntf_1",
+        type: "SESSION_SHARED",
+        actorUserId: "usr_owner",
+        title: "会话所属人 向你分享了对话",
+        body: "登录失败排查 · 只读",
+        actionType: "SESSION_SHARE",
+        actionTargetId: "shr_1",
+        status: "ACTIVE",
+        invalidationReason: null,
+        actionAvailable: true,
+        unread: true,
+        expiresAt: "2026-08-11T09:00:00Z",
+        readAt: null,
+        createdAt: "2026-08-10T09:00:00Z",
+        updatedAt: "2026-08-10T09:00:00Z"
+      }],
+      page: 2,
+      size: 10,
+      total: 11,
+      unreadCount: 3
+    };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: page
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { notificationId: "ntf_1", read: true }
+      }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "notification-token",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.listUserNotifications(2, 10, true)).resolves.toEqual(page);
+    await expect(client.markUserNotificationRead("ntf_1")).resolves.toEqual({
+      notificationId: "ntf_1",
+      read: true
+    });
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "http://api/api/internal/platform/notification-center/notifications?page=2&size=10&unreadOnly=true",
+      "http://api/api/internal/platform/notification-center/notifications/ntf_1/read"
+    ]);
+    expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer notification-token");
+  });
 });
 
 type WebSocketEventHandler = ((event: any) => void) | null;

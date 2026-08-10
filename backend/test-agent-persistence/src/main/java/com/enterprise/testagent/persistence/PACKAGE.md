@@ -24,6 +24,7 @@
 - `mybatis.UserManagementQueryMapper` / `mybatis/UserManagementQueryMapper.xml` / `mybatis.MyBatisUserManagementQueryRepository`：用户管理组合分页查询及“全部检索结果”有界 ID 解析端口的生产实现，按关键字、有效角色/未分配角色、组织和部门筛选，并可排除当前操作者；不扩展存量 JDBC SQL。
 - `mybatis.SupportAccessMapper` / `mybatis/SupportAccessMapper.xml` / `mybatis.MyBatisSupportAccessRepository`：短期只读排查授权快照、目标切换和逐次资源访问审计的关系型 SQL 与生产实现；审计按超级管理员可见并保留一年。
 - `mybatis.SessionHistoryMapper` / `mybatis/SessionHistoryMapper.xml` / `mybatis.MyBatisSessionHistoryRepository`：用户历史归因查询默认仅 ACTIVE，排查入口显式请求时包含 ARCHIVED，内部 SIDE_QUESTION 始终排除；用户及工作区历史统一按 `pinned desc, updated_at desc, id desc` 分页。
+- `mybatis.UserNotificationMapper` / `mybatis/UserNotificationMapper.xml` / `mybatis.MyBatisUserNotificationRepository`：用户通知原子去重、快照更新、失效、接收人分页、未读、幂等已读和 90 天清理；列表通过分享/成员/会话/所属人联表计算实时有效性，关系型 SQL 全部位于 XML。
 - `RedisSupportAccessGrantStore` / `SupportAccessStoreConfig`：登录会话内当前授权和明文令牌的短期 Redis 适配；轮换、撤销使用 Lua 原子收敛，数据库只保存 SHA-256 摘要。
 - `mybatis.UserWorkspaceQueryMapper` / `mybatis/UserWorkspaceQueryMapper.xml` / `mybatis.MyBatisUserWorkspaceQueryRepository`：目标用户个人工作区与目标用户会话引用工作区的只读联合查询；所有新增关系型 SQL 均位于 MyBatis XML。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。
@@ -94,6 +95,7 @@
 - `db/migration-compat/toolbox-current-idempotent/V20260728160800__create_toolbox_click_tracking.sql`：曾误发并执行的当前版本 `-74327385` 幂等原文，只能由 app 在 checksum 命中时隔离加载。
 - `db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql`：LobeHub 主 migration 缺失历史的早期顺序补偿原文；已执行的库继续按该资源校验。
 - `db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql`：release rollout migration 已执行且早期补偿未执行时使用的更高版本补偿，避免倒序迁移。
+- `db/migration/V20260810170000__user_notifications_create_notification_center.sql`：创建通知表并仅回填当前有效分享；成员授权后的成功读取审计回填已读，过期/撤销/移除/归档不进入通知历史。
 - `db/migration/V20260728210000__index_in_flight_app_source_operations.sql`：为周期恢复增加 status 前导的 operation 排序索引，避免历史终态数据导致每实例全表扫描。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现；Run 运行数据面不得新增 PostgreSQL 或 JVM 内存降级实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。

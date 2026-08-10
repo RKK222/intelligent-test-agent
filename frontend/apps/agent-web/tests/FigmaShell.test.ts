@@ -125,6 +125,29 @@ describe("FigmaShell", () => {
     expect(wrapper.emitted("open-help")?.[0]).toEqual(["getting-started"]);
   });
 
+  it("places the notification bell after the manual and hides it in the fixed share workbench", async () => {
+    const wrapper = mountShell({
+      props: {
+        notificationUnreadCount: 2,
+        notifications: [],
+      },
+    });
+    const right = wrapper.get('.figma-header-right');
+    const help = right.get('[data-testid="help-center-open"]');
+    const bell = right.get('[data-testid="notification-center-trigger"]');
+    const inventory = right.get('[data-testid="runtime-inventory-summary"]');
+    const children = Array.from(right.element.children);
+
+    expect(children.indexOf(help.element)).toBeLessThan(children.indexOf(bell.element.parentElement!));
+    expect(children.indexOf(bell.element.parentElement!)).toBeLessThan(children.indexOf(inventory.element.parentElement!));
+    expect(bell.text()).toContain('2');
+    await bell.trigger('click');
+    expect(wrapper.emitted('refresh-notifications')).toHaveLength(1);
+
+    await wrapper.setProps({ fixedWorkspace: true });
+    expect(wrapper.find('[data-testid="notification-center-trigger"]').exists()).toBe(false);
+  });
+
   it("exposes the pet button and manual as onboarding targets", () => {
     const wrapper = mountShell();
 

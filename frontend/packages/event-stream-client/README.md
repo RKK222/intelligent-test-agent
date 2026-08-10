@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-前端消费平台 RunEvent SSE 和用户级运行态 fetch SSE 的唯一 client。
+前端消费平台 RunEvent SSE、用户级运行态和用户通知 fetch SSE 的唯一 client。
 
 ## 主要职责
 
@@ -16,6 +16,7 @@
 - `baseUrl` 显式为空时按同源相对路径 `/api/...` 建立 RunEvent SSE，兼容企业版由 Nginx 统一代理前端与多后台；非空地址继续支持前后端分离部署。
 - 已认证 fetch RunEvent SSE 和用户级运行态 SSE 可传 `linuxServerId`，非空时设置 `X-Test-Agent-Linux-Server-Id` 供 Nginx 首跳；值会修剪且不会写入 URL。空值和原生 EventSource 保持旧行为。
 - 提供 `subscribeSessionRuntimeState()`，通过 fetch 订阅 `/api/internal/platform/opencode-runtime/sessions/runtime-state/events`，可携带 Bearer Token，解析 `session-runtime.snapshot` / `session-runtime.updated`、`permissionCount` 和 `sessions[].attention=PERMISSION`，并按 SSE 协议忽略服务端 `: heartbeat` comment；旧摘要缺少计数时从会话 attention 安全推导。断线按 1/2/5/10/30 秒退避重连。是否执行 active-run fallback 及迟到结果 fencing 属于 app 交互状态，不在 client 内写 Vue 状态。
+- 提供 `subscribeUserNotifications()`，使用 Bearer fetch SSE 订阅 `/api/internal/platform/notification-center/notifications/events`，解析 `user-notification.snapshot/updated`，忽略 heartbeat，并按 1/2/5/10/30 秒退避重连。事件只携带变化类型、可选通知 ID、未读数和生成时间；正文由页面重新读取分页接口。
 - 可选 `onRawMessage` 在解析 RunEvent 前回调浏览器实际收到的 SSE `MessageEvent.data`、事件名、`lastEventId`、runId 和接收时间；浏览器 `EventSource` 不暴露完整 HTTP 字节流，因此该回调不代表 DevTools 里的 wire bytes。
 - 提供关闭订阅和连接状态回调。
 
@@ -25,7 +26,7 @@
 
 - 不直接修改 Vue 状态。
 - 不访问 opencode server。
-- 不绕过 agent-scoped RunEvent SSE URL 或用户级 runtime-state fetch SSE URL 订阅旧 runtime 入口。
+- 不绕过 agent-scoped RunEvent SSE、用户级 runtime-state 或 notification-center fetch SSE URL 订阅旧入口。
 - 不处理业务卡片渲染。
 
 ## 验证

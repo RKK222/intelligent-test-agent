@@ -24,6 +24,10 @@
         </dependency>
         <dependency>
             <groupId>com.enterprise.testagent</groupId>
+            <artifactId>test-agent-notification</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.enterprise.testagent</groupId>
             <artifactId>test-agent-observability</artifactId>
         </dependency>
         <dependency>

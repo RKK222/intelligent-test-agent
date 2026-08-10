@@ -177,6 +177,7 @@ import type {
   SessionShareCandidate,
   SharedSessionListItem,
   PutSessionCollaborationSharePayload,
+  UserNotificationPage,
   SideQuestionRequest,
   SideQuestionResponse,
   SideQuestionRunRequest,
@@ -450,6 +451,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const externalApiCredentialBase = `${systemManagementBase}/api-keys`;
   const toolboxBase = "/api/internal/platform/toolbox";
   const analyticsBase = "/api/internal/platform/analytics";
+  const notificationCenterBase = "/api/internal/platform/notification-center/notifications";
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
     `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/reference-repositories`;
@@ -2021,6 +2023,16 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     listSharedSessions: (page = 1, size = 30) =>
       request<PageResponse<SharedSessionListItem>>(
         `${opencodeRuntimeBase}/session-shares${query({ page, size })}`
+      ),
+    /** 通知目标是受控 actionTargetId；客户端不得把返回字段当成外部 URL。 */
+    listUserNotifications: (page = 1, size = 20, unreadOnly = false) =>
+      request<UserNotificationPage>(
+        `${notificationCenterBase}${query({ page, size, unreadOnly })}`
+      ),
+    markUserNotificationRead: (notificationId: string) =>
+      request<{ notificationId: string; read: boolean }>(
+        `${notificationCenterBase}/${encodeURIComponent(notificationId)}/read`,
+        { method: "POST" }
       ),
     getSessionShareAccess: () =>
       request<SessionShareAccess>(`${opencodeRuntimeBase}/session-shares/access`),

@@ -19,6 +19,7 @@
 - `WorkflowCapabilityStore` 只定义一次性 checkout ticket、HMAC nonce、短期模型 grant、run撤销墓碑的原子端口；payload绑定用户/session/task/run/runner/分支或analyzer，不包含Python工作流会话、任务、报告和事件。
 - `supportaccess` 定义限时排查授权、内存态授权摘要、审计事件/查询与 Repository/Redis store 端口；领域对象禁止包含平台 Token、授权 Token、消息/文件正文和文件路径明文。`UserWorkspaceQueryRepository` 与 `SessionHistoryRepository` 提供按目标用户归因的工作区/会话只读端口，供普通归属校验和受审排查入口共同复用；会话端口保留默认 ACTIVE 方法，并提供排查显式包含 ARCHIVED 的兼容重载。
 - `externalapi` 定义外部工具凭据聚合、`USER_SSH_KEY_READ` scope、Repository 端口、认证主体与刷新事件；聚合只保存 RSA 密文、SHA-256 指纹和 Key 提示，不保存明文。
+- `notification` 定义用户通知、受控类型/动作/状态、列表有效性投影和值对象/Repository 端口；领域对象只保存安全展示快照和内部动作目标 ID，不表达任意 URL、SSE 或 MyBatis 行模型。
 
 ## 已有模型
 
@@ -46,6 +47,7 @@
 - AppSource：`AppSourceOperationId` 统一物化、重试、查询、ticket 和 WebSocket 的 1–128 字符可路由标识；首尾规范化显式固定为 ECMAScript WhiteSpace + LineTerminator 集合（包括 ASCII 空白、NBSP、Unicode Zs、行分隔符和 BOM），不依赖 locale 或 Java `trim/strip` 差异。不限定业务前缀并拒绝控制字符、路径分隔符及规范化后精确的 `.`/`..` 路径段，普通内部双点如 `release..1` 仍合法；`AppSourceRepositorySlot` 以 repositoryId 唯一分配 active/pending generation 并通过 `lockVersion` 乐观并发；`AppSourceSnapshot` 冻结仓库英文名、`PERSONAL/TEAM` 用途、分支、提交和结构化路径选择，并严格校验 `expiresAt = acceptedAt + 1..168` 整小时，续期只改变相对首次受理时间的总保留期；`AppSourceReplica`、`AppSourceOperation`、全局/服务器步骤、绝对 `deleteAt` 清理任务和每用户 recent selection 分别表达 generation/lease fencing、操作进度、延迟删除和最近入口。`AppSourceRepository` 还定义精确副本活租约下的步骤推进/attempt 重置、共享槽位行锁、保留期与 cleanup 计划同步更新，以及全副本终态但操作未终结的有界恢复扫描；领域端口仍不暴露 JSONB、SQL 或物理目录。`AppSourceRetention` 只接受 1–168 小时且默认 48 小时。
 - AppSource 副本认领必须原子绑定精确 operationId、非终态 operation 和同服务器时间线；普通 `PENDING/FAILED/STALE` 副本还必须存在 `PENDING/RUNNING` 步骤，过期 `RUNNING` 副本则以自身旧 attempt 作为恢复锚点，认领后统一重置整条步骤时间线。
 - Broadcast：`ServerBroadcastEvent`、`ServerBroadcastPublisher`、`ServerBroadcastHandler`，定义后端实例之间广播事件的领域端口，不绑定 Redis 或其他传输。
+- Notification：`UserNotification`、`UserNotificationView`、`UserNotificationId`、`UserNotificationType`、`UserNotificationActionType`、`UserNotificationStatus`、`UserNotificationRepository`；区分持久状态与合并当前分享事实后的有效/未读投影。
 - Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象只保留旧数据兼容和运行记录清理端口；生产调度不再创建或执行 `USER_PLAN`。
 - NightExecution：`NightExecutionTask`、`NightExecutionScheduleMode`、`NightExecutionTaskStatus`、`NightExecutionTaskRepository` 表达任务状态机、完整输入短期持有、固定目标服务器、会话锁、15 分钟时段容量以及 attempt/owner/租约 fencing；`NIGHT_WINDOW` 预留夜间容量，`ADMIN_CUSTOM` 使用精确分钟且不产生容量释放标记。`SCHEDULED/DISPATCHING` 为待执行，普通 Run 锚点受理后进入 `DISPATCHED`，Run 后续终态不反向修改调度状态。
 - Analytics：`AiRunFeedback` 是新反馈事实，按 `(userId, runId)` 定位整轮回复；`AiMessageFeedback` 仅保留旧消息兼容。反馈评分/原因枚举、`AnalyticsModels` 和 `AnalyticsRepository` 不暴露 prompt/assistant 原文或 cost 字段。

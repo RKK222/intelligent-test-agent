@@ -28,6 +28,7 @@ import {
   subscribeRunEvents,
   subscribeSessionRuntimeState,
   subscribeSessionShareRuntimeState,
+  subscribeUserNotifications,
   type RunEventRawMessage
 } from "@test-agent/event-stream-client";
 import { BookOpenText, Boxes, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
@@ -70,6 +71,7 @@ import type {
   SessionShareAccess,
   SessionShareRuntimeState,
   SharedSessionListItem,
+  UserNotification,
   SessionMessage,
   SessionRuntimeState,
   SessionRuntimeStateSummary,
@@ -104,6 +106,7 @@ import {
   type ChatContextItem
 } from "../stores/chatContextStore";
 import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } from "./FigmaShell.vue";
+import type { UserNotificationFilter } from "./UserNotificationCenter.vue";
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import AppSourceDialog from "./AppSourceDialog.vue";
@@ -1521,6 +1524,131 @@ const sharedSessionsQuery = useQuery({
   staleTime: 15_000
 });
 const sharedSessionItems = computed<SharedSessionListItem[]>(() => sharedSessionsQuery.data.value?.items ?? []);
+
+const USER_NOTIFICATION_PAGE_SIZE = 20;
+const notificationFilter = ref<UserNotificationFilter>("ALL");
+const notificationItems = ref<UserNotification[]>([]);
+const notificationPage = ref(1);
+const notificationTotal = ref(0);
+const notificationUnreadCount = ref(0);
+const notificationsLoading = ref(false);
+const notificationsLoadingMore = ref(false);
+const notificationsError = ref<string | null>(null);
+const notificationsHasMore = computed(() => notificationItems.value.length < notificationTotal.value);
+let notificationLoadSequence = 0;
+
+/** 通知正文始终从分页接口读取；SSE 仅作为低敏刷新信号和未读数快照。 */
+async function refreshUserNotifications() {
+  if (shareMode.value || !authStore.token) return;
+  const sequence = ++notificationLoadSequence;
+  notificationsLoading.value = true;
+  notificationsError.value = null;
+  try {
+    const result = await ordinaryApi.listUserNotifications(
+      1,
+      USER_NOTIFICATION_PAGE_SIZE,
+      notificationFilter.value === "UNREAD"
+    );
+    if (sequence !== notificationLoadSequence) return;
+    notificationItems.value = result.items;
+    notificationPage.value = result.page;
+    notificationTotal.value = result.total;
+    notificationUnreadCount.value = result.unreadCount;
+  } catch (error) {
+    if (sequence !== notificationLoadSequence) return;
+    notificationsError.value = error instanceof BackendApiError
+      ? error.message
+      : error instanceof Error ? error.message : "通知读取失败";
+  } finally {
+    if (sequence === notificationLoadSequence) notificationsLoading.value = false;
+  }
+}
+
+async function loadMoreUserNotifications() {
+  if (notificationsLoadingMore.value || !notificationsHasMore.value) return;
+  const sequence = notificationLoadSequence;
+  notificationsLoadingMore.value = true;
+  notificationsError.value = null;
+  try {
+    const nextPage = notificationPage.value + 1;
+    const result = await ordinaryApi.listUserNotifications(
+      nextPage,
+      USER_NOTIFICATION_PAGE_SIZE,
+      notificationFilter.value === "UNREAD"
+    );
+    if (sequence !== notificationLoadSequence) return;
+    const seen = new Set(notificationItems.value.map((item) => item.notificationId));
+    notificationItems.value = [
+      ...notificationItems.value,
+      ...result.items.filter((item) => !seen.has(item.notificationId))
+    ];
+    notificationPage.value = result.page;
+    notificationTotal.value = result.total;
+    notificationUnreadCount.value = result.unreadCount;
+  } catch (error) {
+    notificationsError.value = error instanceof BackendApiError
+      ? error.message
+      : error instanceof Error ? error.message : "加载更多通知失败";
+  } finally {
+    notificationsLoadingMore.value = false;
+  }
+}
+
+function handleNotificationFilter(filter: UserNotificationFilter) {
+  notificationFilter.value = filter;
+  notificationItems.value = [];
+  notificationPage.value = 1;
+  notificationTotal.value = 0;
+  void refreshUserNotifications();
+}
+
+/** 分享通知不提前调用通用已读接口，必须等新标签页鉴权访问成功后由后端统一标记。 */
+function handleOpenNotification(notification: UserNotification) {
+  if (!notification.actionAvailable || notification.actionType !== "SESSION_SHARE") return;
+  openSharedSession(notification.actionTargetId);
+}
+
+watch(
+  [() => authStore.token, shareMode],
+  ([token, isShare], _previous, onCleanup) => {
+    // 使旧身份尚未结束的分页请求失效，避免它们在清空后重新写入旧用户快照。
+    notificationLoadSequence += 1;
+    // 登录身份或工作台模式切换时先清空旧快照，避免短暂展示上一用户的通知。
+    notificationItems.value = [];
+    notificationPage.value = 1;
+    notificationTotal.value = 0;
+    notificationUnreadCount.value = 0;
+    notificationsLoading.value = false;
+    notificationsLoadingMore.value = false;
+    notificationsError.value = null;
+    if (!token || isShare) {
+      return;
+    }
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void refreshUserNotifications();
+      }, 80);
+    };
+    const subscription = subscribeUserNotifications({
+      baseUrl: apiBaseUrl,
+      token,
+      onEvent: (update) => {
+        notificationUnreadCount.value = update.unreadCount;
+        // UPDATED 可能不改变未读数；每个 30 秒快照也必须回源，才能补偿丢失的广播。
+        scheduleRefresh();
+      }
+    });
+    void refreshUserNotifications();
+    onCleanup(() => {
+      subscription.close();
+      if (refreshTimer) clearTimeout(refreshTimer);
+    });
+  },
+  { immediate: true }
+);
 
 function refreshSharedSessions() {
   if (!shareMode.value && !sharedSessionsQuery.isFetching.value) void sharedSessionsQuery.refetch();
@@ -10362,6 +10490,13 @@ async function handleLogout() {
     :side-question-available="robotQuestionAvailable"
     :side-question-manual-mode="!session?.sessionId"
     :runtime-inventory="runtimeInventoryForShell"
+    :notifications="notificationItems"
+    :notification-unread-count="notificationUnreadCount"
+    :notification-filter="notificationFilter"
+    :notifications-loading="notificationsLoading"
+    :notifications-loading-more="notificationsLoadingMore"
+    :notifications-has-more="notificationsHasMore"
+    :notifications-error="notificationsError"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
@@ -10380,6 +10515,10 @@ async function handleLogout() {
     @close-robot-side-question="handleCloseRobotSideQuestion"
     @personal-runtime-reload="handlePersonalRuntimeReload"
     @open-help="openHelpCenter"
+    @notification-filter="handleNotificationFilter"
+    @refresh-notifications="refreshUserNotifications"
+    @load-more-notifications="loadMoreUserNotifications"
+    @open-notification="handleOpenNotification"
   >
     <template #activity>
       <nav v-if="!shareMode" class="figma-activity-nav" aria-label="工作台活动栏">

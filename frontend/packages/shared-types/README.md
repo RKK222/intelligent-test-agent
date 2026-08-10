@@ -8,6 +8,8 @@
 
 ## 主要职责
 
+- 定义通知中心 `UserNotification`、分页响应、`UserNotificationStreamUpdate` 和变化类型。动作只允许服务端声明的 `actionType + actionTargetId`；首期 `SESSION_SHARE` 由页面映射到内部 `/s/{shareId}`，类型不提供任意 URL 字段。
+
 - 提供 `XxlJobSsoTicket`，只表达短期 `ticket/expiresAt/formAction` 响应；原始票据不得进入持久化状态、URL 或日志。
 - 提供 `LobehubSsoTicket`，只表达当前用户签票得到的 `ticket/expiresAt/consumeUrl`；`consumeUrl` 必须由 launch
   helper 再校验，类型本身不表达任意 return URL、模型委托或 LobeHub Session。

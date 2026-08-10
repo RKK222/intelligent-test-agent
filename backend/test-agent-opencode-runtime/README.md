@@ -6,6 +6,8 @@
 
 ## 主要职责
 
+- 会话协作分享在创建/成员重新加入/重新激活、普通设置更新、成员移除、撤销和会话归档后调用 `test-agent-notification` 同步通知生命周期；被分享人通过通知、“分享给我”或旧链接完成分享访问鉴权后，统一按 `shareId` 幂等标记已读。通知写入或已读同步异常只记录脱敏告警，不得阻断分享设置主事务之外的既有访问能力；通知查询还会联表复核分享事实，避免短暂同步失败形成可点击的过期授权。
+
 - 平台会话协作使用独立 `DelegatedOperationContext` 保留真实认证 actor、统一认证号、唯一分享 ID/版本和精确 Session/Workspace 范围，同时把 `executionOwnerUserId` 显式传给既有运行链路。OpenCode 请求、用户进程、工作区与 Git/SSH 身份始终属于会话所属人；消息、Run、夜间任务和重发分别保存实际发送人/创建人/发起人及代操作标记。分享权限永远不超过所属人的当前权限，分享过期、取消、移除或降权会关闭相关 SSE、文件 WebSocket 和终端，但不会自动取消已启动 Run。
 - 普通历史和普通 runtime-state 不把 `sent_by_shared_user=true` 当作被分享人的访问归因；分享会话只从独立列表进入。Run 启动同时竞争 Redis 原子会话占用与数据库 `active_session_id` 唯一约束，取得双重准入前不发布可见事件、不调用 OpenCode；终态释放占用，并发失败统一为 `SESSION_BUSY`。停止只允许所属人或该 Run 的实际消息发送人；最后一条消息的撤回并重新发送只允许源消息实际发送人，分享发送人还必须保持 `canChat=true`，所属人不能改写其他参与者的问题。
 - 被分享人创建夜间任务时固化分享授权快照，并继续以会话所属人的进程和工作区执行；后续分享过期、取消、移除或降权不影响已排期任务。所属人和实际创建人可管理任务，降为只读的创建人仍可取消但不能改期；替代 Run 和消息继续保留源消息发送人归因。
@@ -133,6 +135,7 @@
 
 - `test-agent-common`。
 - `test-agent-domain`。
+- `test-agent-notification`，仅用于会话分享生命周期和访问成功已读同步。
 - `test-agent-event`。
 - `test-agent-agent-runtime`。
 - `test-agent-scheduler`，仅用于注册本模块业务定时任务，不把业务任务放入 scheduler 模块。

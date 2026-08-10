@@ -33,6 +33,8 @@
 
 ## 主要职责
 
+- 使用 `UserNotificationMapper.xml` 实现通用通知创建去重、快照更新、失效、接收人分页、未读统计、幂等已读和 90 天历史清理；通知列表实时联表校验分享、成员、会话、所属人和到期事实，失效授权不再可点击或计入未读。
+
 - `MyBatisSessionShareRepository` / `SessionShareMapper.xml` 持久化每个 Session 唯一且永久复用的 256 位随机分享 ID、全量成员更新与软移除历史、乐观锁版本、“分享给我”失效历史、最小用户目录和 365 天安全审计。审计只保存 actor、执行所属人、share/session/workspace/resource、结果、traceId 与可选路径 SHA-256，不保存消息/文件正文、明文路径、Token 或终端输入。
 - `MyBatisSessionMessageRepository` / `SessionMessageMapper.xml` 保存消息实际发送人、统一认证号和代操作标记，并复用既有 `(session_id, run_id, created_at, id)` 索引按精确 `sessionId + runId + USER` 读取运行输入；Run、夜间任务和重发 MyBatis mapper 同步保存实际 actor 归因。普通历史与普通 runtime-state SQL 显式排除分享发送者兜底，防止一次代发永久获得普通会话访问权。
 - `runs.active_session_id` 只在 `PENDING/RUNNING/CANCELLING` 期间占用，并以唯一索引作为跨节点并发发送最终裁决；终态写入必须原子清空。Redis `RunRuntimeStore` 同时提供原子 active-session 占用与 fencing，数据库和 Redis 任一准入失败都不得进入远端副作用。
@@ -52,6 +54,8 @@
 - 表和字段必须添加中文注释说明。
 
 ## 已有实现
+
+- `user_notifications`：只保存安全标题/摘要、受控 `action_type/action_target_id`、去重键、状态、已读/失效/到期时间和 traceId。`V20260810170000__user_notifications_create_notification_center.sql` 仅回填当前仍有效的分享成员；成员授权后的成功 `READ_ACCESS_GRANTED` 审计会直接回填 `read_at`。
 
 - `V1__create_core_tables.sql`：创建 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 核心表。
 - `V20260711120000__document_side_question_run_source.sql`：只更新三个 `source_type` 字段的允许值注释以包含 `SIDE_QUESTION`，不改结构、不写数据。
@@ -166,6 +170,8 @@
 内部模型代理鉴权列改为企业中性命名时，两条已落库历史 migration 通过仅影响校验和的兼容注释保持原 Flyway checksum；`V20260716143000__rename_internal_model_auth_token_column` Java migration 按固定列位置识别历史列并重命名，新建数据库目标列已存在时幂等跳过。`V20260722180000__add_internal_model_token_definitions.sql` 新建数据库 identity 主键的 `internal_model_tokens`，给 Provider 增加 `RESTRICT` 外键，并把非空旧全局值迁移成单个共享“默认 Token”；旧单例表继续保留，但新运行时只读取联表快照。
 
 ## 测试覆盖
+
+- `MyBatisUserNotificationRepositoryIntegrationTest` 使用 H2 覆盖分页、未读、失效事实投影、已读和清理；`MyBatisUserNotificationRepositoryPostgresqlIntegrationTest` 使用真实 PostgreSQL/Testcontainers 覆盖空库迁移、已部署分享基线升级、审计已读回填和 MyBatis 查询。
 
 - 通用 H2 PostgreSQL 模式测试固定迁移到 `V20260715213000` 这一最后兼容基线；后续含 `timestamptz`、部分表达式索引和 `ON CONFLICT DO UPDATE` 的完整生产链由真实 PostgreSQL 集成测试与应用启动验证。旧 H2 用例只按 mapper 所需补列或单独执行可兼容 migration，历史 V17 本机种子改由 `src/test/resources/db/fixture` 注入；测试不会修改已发布 migration 及其 checksum，也不会依赖生产 migration 写入开发用户。
 - `MyBatisPersonalWorkspaceRelocationPostgresqlIntegrationTest` 在 PostgreSQL 16 上执行完整 Flyway 链，验证错配扫描、ACTIVE Run 阻断、租约状态、目标三表原子切换，以及 `CLEANUP_PENDING` 在连续换服时不被下一段搬迁覆盖；`MyBatisPersonalWorkspaceRelocationRepositoryTest` 固化 MyBatis XML 条件和目标更新顺序。

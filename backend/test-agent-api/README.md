@@ -16,6 +16,7 @@
 - CORS allowed headers 包含前端可选的 `X-Test-Agent-Linux-Server-Id`、会话协作专用 `X-Test-Agent-Session-Share` 和排查专用 `X-Support-Access-Grant`。分享头只解析单个 Session/Workspace 的代操作上下文，不替换真实 `AuthPrincipal`；跨 Java HTTP/SSE 转发保留该头，目标 Java 必须重新鉴权。Linux Server 首跳提示在生产由 Nginx 静态白名单消费并在转发前删除；排查头只绑定限时排查授权，不参与用户路由。API 层仍执行既有权威路由与鉴权。
 - 会话消息、Run、夜间任务与重发 DTO additive 返回实际 actor 的用户 ID、可选当前姓名、统一认证号快照和代操作标记；同一响应页按用户 ID 缓存姓名查询，旧节点或目录无法解析时姓名保持可空。
 - 会话协作入口提供候选用户、所属人唯一分享设置、“分享给我”历史列表、分享访问上下文和单会话 runtime SSE；运行态帧包含可选 `sessionUpdatedAt` 内容修订时间，compact 成功会推进该值以触发其它参与方刷新消息。所属人管理接口不接受分享头授权；分享工作台中的会话、Run、定时任务、文件、Git、终端和反馈入口统一显式传递 `DelegatedOperationContext`，以所属人的进程和工作区执行并记录实际 actor。只读成员只能读取，`canChat=true` 才能写入；撤回并重新发送额外要求 actor 是源消息实际发送人，会话所属人只有在本人就是实际发送人时才能操作。归档、置顶、切换、持久 fork、设置、Agent 配置、源码/Hub、系统管理和服务器终端不会因分享放开。
+- `UserNotificationController` 暴露当前用户通知分页、幂等已读和 fetch SSE。入口只从认证主体取得接收人，不接受客户端指定用户；DTO 只返回受控 `actionType/actionTargetId` 和安全标题/摘要，不返回去重键、数据库行 ID 或任意跳转 URL。SSE 首帧为 `user-notification.snapshot`，后续变化为 `user-notification.updated`，每 25 秒发送 heartbeat comment。
 - 普通 Workspace HTTP 入口只保留查询和文件路由；服务器目录选择与创建仅通过超级管理员文件 WebSocket ticket 执行。
 - 普通与排查 Workspace 响应统一通过 `ManagedWorkspacePathResolver` 投影物理根目录：显式 `physicalRootPath` 与兼容 `rootPath` 返回同一绝对路径，数据库逻辑前缀不出 API，未托管相对路径在响应边界失败关闭。Workspace 文件 WebSocket 创建回包和托管运行态响应遵循同一契约。
 - `SupportAccessController` 暴露 `/api/internal/platform/system-management/support-access/**`：签发/撤销绑定当前登录会话的限时只读 grant、返回带来源的排查单号建议、目标切换、目标用户会话/工作区/消息读取、权威文件 route/ticket 和一年期审计查询。当前没有权威工单数据源时每次返回新的 `sai_` 单号；旧 `/grants/recent-incident` 仅为兼容别名，同样不读取历史授权。会话默认仅 ACTIVE，显式筛选才包含 ARCHIVED；工作区响应用公共 `BackendJavaRouteResolver` 标记 `ONLINE/OFFLINE/UNBOUND/UNKNOWN`，但不改写服务器归属。排查会话读取只在其权威工作区 Java ONLINE 时尝试 OpenCode，离线/未绑定/未知时直接使用 Redis/数据库历史，避免等待不可达远端。普通 Workspace/Session/文件入口已按当前用户归属收紧；排查文件 RPC 只允许列表/搜索/读取并拒绝 `.opencode`，成功正文在审计落库后才返回。
@@ -134,6 +135,7 @@
 - `PersonalWorkspaceRelocationTransferControllerTest` 覆盖内部 access token、权威搬迁授权、固定 Origin/源服务器绑定和 ticket 一次消费；`PersonalWorkspaceRelocationTransferWebSocketHandlerTest` 覆盖二进制分片、唯一完成帧、成功安全响应、无效 ticket 和连接提前结束时中止临时归档；`ApiTokenWebFilterTest` 固化仅两个精确内部路径豁免普通静态 API token，子路径不继承。
 - Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、公共个人 `runtime-reload` 离开 WebFlux 事件线程执行、文件 WebSocket route/ticket/op、文件读写改名复制移动删除权限、Git stage/unstage/discard/冲突操作鉴权、纠错替换的超管成功与非超管拒绝、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
+- `UserNotificationControllerTest` 覆盖当前用户分页隔离、幂等已读和通知 SSE 的 snapshot/updated 事件名。
 - `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull`、工作区 Git stage/unstage、冲突解决、最近使用接口，以及普通成员绕过 Agent API 提交 `.opencode/**` 时的拒绝。
 - `WorkspaceGitToolControllerTest`、`ApiTokenWebFilterTest` 覆盖专用 Tool 凭据入口的身份透传和精确过滤器例外；其它 API 路径仍要求原有用户或静态 Token。
 - `UiTestToolConfigControllerTest`、`ApiTokenWebFilterTest` 覆盖 UI Tool 无凭据只读响应、精确过滤器例外和相邻路径仍要求原有 Token。

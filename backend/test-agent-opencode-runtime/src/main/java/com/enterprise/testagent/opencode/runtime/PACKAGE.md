@@ -12,6 +12,8 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 
 ## 主要程序清单
 
+- `share.SessionCollaborationShareService` 与 `session.SessionApplicationService` 调用 `test-agent-notification` 同步分享创建/更新/重新激活/成员移除/撤销/归档，并在被分享人访问鉴权成功后幂等已读；通知异常使用脱敏告警且不扩大分享权限。
+
 - `session.SessionApplicationService`：会话创建、查询、消息和归档；普通入口按当前用户归因校验单会话/工作区历史，消息列表会优先触发 projected messages 刷新，失败回退数据库快照；远端 compact 成功后只推进 Session 内容修订时间，供分享 runtime SSE 触发其它页面刷新消息投影。
 - `night.NightExecutionCapacityRegistry` / `NightExecutionTaskApplicationService` / `NightExecutionCustomSchedulePolicy`：从全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 原子维护内存容量快照，并负责标准夜间窗口、15 分钟容量时段、仅超级管理员可用的未来 24 小时精确分钟测试定时、提交查询/改期/取消和会话锁；测试定时不读写夜间容量，任务提交时固化目标 Linux 服务器，不创建 `USER_PLAN`。
 - `night.NightExecutionDispatchScanTaskHandler` / `NightExecutionDispatchCoordinator` / `NightExecutionDispatchService`：复用已注册的 XXL 每分钟 task key，同轮扫描 500 条两种模式的到期夜间任务并调用 `RunResendDispatchCoordinator` 扫描重发，不新增孤立调度键；夜间任务按目标服务器分组并以 50 条批次/8 台服务器并发分发，目标 Java 用 attempt/owner/5 分钟租约认领并在 Run 副作用前再次执行窗口续租 CAS。

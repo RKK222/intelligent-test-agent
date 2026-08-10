@@ -9,6 +9,7 @@
 ```text
 test-agent-app
   -> test-agent-api
+  -> test-agent-notification
   -> test-agent-xxl-job-integration
   -> test-agent-system-management
   -> test-agent-configuration-management
@@ -20,6 +21,7 @@ test-agent-app
 test-agent-api
   -> test-agent-common
   -> test-agent-domain
+  -> test-agent-notification
   -> test-agent-observability
   -> test-agent-event
   -> test-agent-workspace-management
@@ -52,6 +54,7 @@ test-agent-workspace-management
 test-agent-opencode-runtime
   -> test-agent-common
   -> test-agent-domain
+  -> test-agent-notification
   -> test-agent-event
   -> test-agent-agent-runtime
   -> test-agent-scheduler
@@ -60,6 +63,10 @@ test-agent-agent-runtime
   -> test-agent-common
   -> test-agent-domain
   -> test-agent-opencode-client
+
+test-agent-notification
+  -> test-agent-common
+  -> test-agent-domain
 
 test-agent-system-management
   -> test-agent-common
@@ -131,6 +138,7 @@ test-agent-event
 - Workspace、文件查看/新增/修改/删除、git 操作、差异比对、应用版本工作区、个人工作区、应用源码固定提交物化/多服务器副本/打开/清理、agent 和 skill 管理：`test-agent-workspace-management`。应用源码 XXL handler 只消费 `test-agent-scheduler` 契约，持久化 SQL 仍在 `test-agent-persistence` MyBatis XML。
 - 多 agent 运行时接口、agentId registry、统一日志/指标包装、opencode/otheragent 适配骨架：`test-agent-agent-runtime`。
 - Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、terminal ticket/PTY、opencode runtime 业务定时任务：`test-agent-opencode-runtime`。
+- 通用用户站内通知生命周期、未读统计、事务提交后实时变化、数据库校准和历史清理：`test-agent-notification`。具体业务模块只调用其服务生产/失效通知；Controller/SSE DTO 与 MyBatis/Flyway 分别归 `test-agent-api`、`test-agent-persistence`。
 - 用户、角色、权限等平台内部管理：`test-agent-system-management`。
 - 应用定义只读消费、应用成员、代码库配置、应用工作空间模板、个人 SSH key 和 Git 远端只读目录查询：`test-agent-configuration-management`。
 - 周期任务 Admin/executor/SSO/MySQL Flyway 与统一 handler adapter：`test-agent-xxl-job-integration`；未修改的上游代码只放 `test-agent-xxl-job-admin-upstream`。业务 handler 仍放所属业务模块。
@@ -162,7 +170,7 @@ test-agent-event
 
 1. 前端不得直接访问 opencode server。
 2. 所有平台 Java 调用必须通过 `backend-api`。受控例外：`/workflow-chat` 只能通过 `workflow-api-client` 同源访问 Python `/workflow-api/v1/**`，不得由 `backend-api` 或页面组件转发。
-3. 所有平台实时事件必须通过 `event-stream-client` 消费平台 RunEvent SSE。受控例外：独立工作流只通过 `workflow-api-client` 的 fetch SSE 消费 Python 原生 AG-UI，不能映射为 RunEvent。
+3. 所有平台实时事件必须通过 `event-stream-client` 消费平台 RunEvent、用户运行态或通知中心 SSE。受控例外：独立工作流只通过 `workflow-api-client` 的 fetch SSE 消费 Python 原生 AG-UI，不能映射为 RunEvent。
 4. `backend-api` 不得依赖页面、工作台、Monaco、Dockview 或具体业务组件。
 5. `event-stream-client` 不得直接修改 Vue 组件状态。
 6. `ui-kit` 和 `shared-types` 不得依赖业务 API 或事件流。

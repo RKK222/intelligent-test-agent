@@ -2,6 +2,7 @@ package com.enterprise.testagent.app.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collection;
 import javax.sql.DataSource;
@@ -114,7 +115,9 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
-            DockerImageName.parse("postgres:16-alpine"));
+            DockerImageName.parse("postgres:16-alpine"))
+            // 全历史迁移断言较重，允许 Docker Desktop 冷启动时完成镜像初始化。
+            .withStartupTimeout(Duration.ofMinutes(3));
 
     @Test
     void enterpriseBaselineUsesOnlyMainLocationAndMigratesInOrder() {
@@ -632,6 +635,8 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         bootFlywayRunner(dataSource).run(context -> {
             assertThat(context).hasNotFailed().hasSingleBean(Flyway.class);
             assertions.accept(context.getBean(Flyway.class));
+            // 每套已知已部署 history 升级到当前 HEAD 后都必须具备通知中心结构。
+            assertUserNotificationSchema(dataSource);
         });
     }
 
@@ -840,6 +845,38 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .single();
         assertThat(tableCount).isEqualTo(3L);
         assertThat(attributionColumnCount).isEqualTo(4L);
+    }
+
+    private static void assertUserNotificationSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name = 'user_notifications'
+                        """)
+                .query(Long.class)
+                .single();
+        Long actionColumnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and table_name = 'user_notifications'
+                          and column_name in (
+                              'notification_id',
+                              'recipient_user_id',
+                              'action_type',
+                              'action_target_id',
+                              'status',
+                              'read_at',
+                              'expires_at',
+                              'trace_id'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(1L);
+        assertThat(actionColumnCount).isEqualTo(8L);
     }
 
     private static long qaMemorySchemaTableCount(DataSource dataSource) {

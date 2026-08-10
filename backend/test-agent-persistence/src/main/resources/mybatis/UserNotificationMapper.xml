@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.UserNotificationMapper">
+
+    <resultMap id="NotificationRowMap" type="com.enterprise.testagent.persistence.mybatis.UserNotificationRow">
+        <constructor>
+            <arg column="notification_id" javaType="java.lang.String"/>
+            <arg column="recipient_user_id" javaType="java.lang.String"/>
+            <arg column="type" javaType="java.lang.String"/>
+            <arg column="actor_user_id" javaType="java.lang.String"/>
+            <arg column="title" javaType="java.lang.String"/>
+            <arg column="body" javaType="java.lang.String"/>
+            <arg column="action_type" javaType="java.lang.String"/>
+            <arg column="action_target_id" javaType="java.lang.String"/>
+            <arg column="dedup_key" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="invalidation_reason" javaType="java.lang.String"/>
+            <arg column="expires_at" javaType="java.time.Instant"/>
+            <arg column="read_at" javaType="java.time.Instant"/>
+            <arg column="invalidated_at" javaType="java.time.Instant"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="NotificationViewRowMap" type="com.enterprise.testagent.persistence.mybatis.UserNotificationViewRow">
+        <constructor>
+            <arg column="notification_id" javaType="java.lang.String"/>
+            <arg column="type" javaType="java.lang.String"/>
+            <arg column="actor_user_id" javaType="java.lang.String"/>
+            <arg column="title" javaType="java.lang.String"/>
+            <arg column="body" javaType="java.lang.String"/>
+            <arg column="action_type" javaType="java.lang.String"/>
+            <arg column="action_target_id" javaType="java.lang.String"/>
+            <arg column="effective_status" javaType="java.lang.String"/>
+            <arg column="effective_invalidation_reason" javaType="java.lang.String"/>
+            <arg column="action_available" javaType="java.lang.Boolean"/>
+            <arg column="unread" javaType="java.lang.Boolean"/>
+            <arg column="expires_at" javaType="java.time.Instant"/>
+            <arg column="read_at" javaType="java.time.Instant"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="NotificationColumns">
+        notification_id, recipient_user_id, type, actor_user_id, title, body,
+        action_type, action_target_id, dedup_key, status, invalidation_reason,
+        expires_at, read_at, invalidated_at, trace_id, created_at, updated_at
+    </sql>
+
+    <insert id="insertNotification" databaseId="postgresql">
+        insert into user_notifications(
+            <include refid="NotificationColumns"/>
+        ) values (
+            #{row.notificationId}, #{row.recipientUserId}, #{row.type}, #{row.actorUserId},
+            #{row.title}, #{row.body}, #{row.actionType}, #{row.actionTargetId}, #{row.dedupKey},
+            #{row.status}, #{row.invalidationReason}, #{row.expiresAt}, #{row.readAt},
+            #{row.invalidatedAt}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt}
+        ) on conflict (dedup_key) do nothing
+    </insert>
+
+    <!-- 测试数据源未设置 databaseId 时使用标准 INSERT SELECT；生产 PostgreSQL 走上面的原子冲突语句。 -->
+    <insert id="insertNotification">
+        insert into user_notifications(
+            <include refid="NotificationColumns"/>
+        )
+        select
+            #{row.notificationId}, #{row.recipientUserId}, #{row.type}, #{row.actorUserId},
+            #{row.title}, #{row.body}, #{row.actionType}, #{row.actionTargetId}, #{row.dedupKey},
+            #{row.status}, #{row.invalidationReason}, #{row.expiresAt}, #{row.readAt},
+            #{row.invalidatedAt}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt}
+        where not exists (
+            select 1 from user_notifications where dedup_key = #{row.dedupKey}
+        )
+    </insert>
+
+    <update id="updateActiveByAction">
+        update user_notifications
+        set actor_user_id = #{actorUserId},
+            title = #{title},
+            body = #{body},
+            expires_at = #{expiresAt},
+            trace_id = #{traceId},
+            updated_at = #{updatedAt}
+        where recipient_user_id = #{recipientUserId}
+          and action_type = #{actionType}
+          and action_target_id = #{actionTargetId}
+          and status = 'ACTIVE'
+    </update>
+
+    <select id="findActiveRecipientsByAction" resultType="string">
+        select distinct recipient_user_id
+        from user_notifications
+        where action_type = #{actionType}
+          and action_target_id = #{actionTargetId}
+          and status = 'ACTIVE'
+          <if test="recipientUserId != null">
+            and recipient_user_id = #{recipientUserId}
+          </if>
+        order by recipient_user_id
+    </select>
+
+    <select id="findActiveSessionShareRecipientsBySession" resultType="string">
+        select distinct notification.recipient_user_id
+        from user_notifications notification
+        join session_shares share on share.share_id = notification.action_target_id
+        where notification.action_type = 'SESSION_SHARE'
+          and notification.status = 'ACTIVE'
+          and share.session_id = #{sessionId}
+        order by notification.recipient_user_id
+    </select>
+
+    <update id="invalidateActiveByAction">
+        update user_notifications
+        set status = 'INVALIDATED',
+            invalidation_reason = #{reason},
+            invalidated_at = #{invalidatedAt},
+            trace_id = #{traceId},
+            updated_at = #{invalidatedAt}
+        where action_type = #{actionType}
+          and action_target_id = #{actionTargetId}
+          and status = 'ACTIVE'
+          <if test="recipientUserId != null">
+            and recipient_user_id = #{recipientUserId}
+          </if>
+    </update>
+
+    <update id="invalidateSessionSharesBySession">
+        update user_notifications
+        set status = 'INVALIDATED',
+            invalidation_reason = #{reason},
+            invalidated_at = #{invalidatedAt},
+            trace_id = #{traceId},
+            updated_at = #{invalidatedAt}
+        where action_type = 'SESSION_SHARE'
+          and status = 'ACTIVE'
+          and action_target_id in (
+              select share_id from session_shares where session_id = #{sessionId}
+          )
+    </update>
+
+    <select id="findByIdForRecipient" resultMap="NotificationRowMap">
+        select <include refid="NotificationColumns"/>
+        from user_notifications
+        where notification_id = #{notificationId}
+          and recipient_user_id = #{recipientUserId}
+    </select>
+
+    <sql id="ActionJoins">
+        left join session_shares share
+          on notification.action_type = 'SESSION_SHARE'
+         and share.share_id = notification.action_target_id
+        left join sessions session_scope
+          on share.session_id = session_scope.session_id
+        left join session_share_memberships membership
+          on share.share_id = membership.share_id
+         and membership.user_id = notification.recipient_user_id
+        left join users share_owner
+          on share.owner_user_id = share_owner.user_id
+    </sql>
+
+    <sql id="ActionAvailablePredicate">
+        notification.status = 'ACTIVE'
+        and (notification.expires_at is null or notification.expires_at &gt; #{now})
+        and (
+            notification.action_type &lt;&gt; 'SESSION_SHARE'
+            or (
+                share.share_id is not null
+                and share.status = 'ACTIVE'
+                and share.expires_at &gt; #{now}
+                and session_scope.status = 'ACTIVE'
+                and membership.status = 'ACTIVE'
+                and share_owner.status = 'ACTIVE'
+            )
+        )
+    </sql>
+
+    <sql id="NotificationViewColumns">
+        notification.notification_id,
+        notification.type,
+        notification.actor_user_id,
+        notification.title,
+        notification.body,
+        notification.action_type,
+        notification.action_target_id,
+        case when (<include refid="ActionAvailablePredicate"/>)
+             then 'ACTIVE' else 'INVALIDATED' end as effective_status,
+        case
+            when notification.status = 'INVALIDATED' then notification.invalidation_reason
+            when notification.expires_at is not null and notification.expires_at &lt;= #{now} then 'EXPIRED'
+            when notification.action_type = 'SESSION_SHARE' and session_scope.status = 'ARCHIVED' then 'SESSION_ARCHIVED'
+            when notification.action_type = 'SESSION_SHARE' and membership.status = 'REMOVED' then 'REMOVED'
+            when notification.action_type = 'SESSION_SHARE' and share.status = 'REVOKED' then 'REVOKED'
+            when notification.action_type = 'SESSION_SHARE' and share.expires_at &lt;= #{now} then 'EXPIRED'
+            when notification.action_type = 'SESSION_SHARE' and share_owner.status &lt;&gt; 'ACTIVE' then 'OWNER_UNAVAILABLE'
+            when notification.action_type = 'SESSION_SHARE' then 'ACTION_UNAVAILABLE'
+            else null
+        end as effective_invalidation_reason,
+        case when (<include refid="ActionAvailablePredicate"/>) then true else false end as action_available,
+        case when notification.read_at is null and (<include refid="ActionAvailablePredicate"/>)
+             then true else false end as unread,
+        notification.expires_at,
+        notification.read_at,
+        notification.created_at,
+        notification.updated_at
+    </sql>
+
+    <select id="findPage" resultMap="NotificationViewRowMap">
+        select <include refid="NotificationViewColumns"/>
+        from user_notifications notification
+        <include refid="ActionJoins"/>
+        where notification.recipient_user_id = #{recipientUserId}
+        <if test="unreadOnly">
+          and notification.read_at is null
+          and (<include refid="ActionAvailablePredicate"/>)
+        </if>
+        order by notification.created_at desc, notification.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countPage" resultType="long">
+        select count(*)
+        from user_notifications notification
+        <include refid="ActionJoins"/>
+        where notification.recipient_user_id = #{recipientUserId}
+        <if test="unreadOnly">
+          and notification.read_at is null
+          and (<include refid="ActionAvailablePredicate"/>)
+        </if>
+    </select>
+
+    <select id="countUnread" resultType="long">
+        select count(*)
+        from user_notifications notification
+        <include refid="ActionJoins"/>
+        where notification.recipient_user_id = #{recipientUserId}
+          and notification.read_at is null
+          and (<include refid="ActionAvailablePredicate"/>)
+    </select>
+
+    <update id="markReadById">
+        update user_notifications
+        set read_at = #{readAt},
+            trace_id = #{traceId},
+            updated_at = #{readAt}
+        where notification_id = #{notificationId}
+          and recipient_user_id = #{recipientUserId}
+          and read_at is null
+    </update>
+
+    <update id="markReadByAction">
+        update user_notifications
+        set read_at = #{readAt},
+            trace_id = #{traceId},
+            updated_at = #{readAt}
+        where recipient_user_id = #{recipientUserId}
+          and action_type = #{actionType}
+          and action_target_id = #{actionTargetId}
+          and status = 'ACTIVE'
+          and read_at is null
+    </update>
+
+    <delete id="deleteCreatedBefore">
+        delete from user_notifications where created_at &lt; #{cutoff}
+    </delete>
+</mapper>

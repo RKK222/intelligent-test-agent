@@ -2020,6 +2020,66 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 
 停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人后来降为只读仍可停止。最后一条用户消息的撤回并重新发送只允许该消息的实际发送人；分享发送人还必须有 `canChat=true`，包括会话所属人在内的其它用户返回 `FORBIDDEN`。任一 Run 为 `PENDING/RUNNING/CANCELLING` 时，所有参与方的新发送都返回 `409 SESSION_BUSY`。
 
+#### 工作台通用通知中心 API
+
+通知中心只接受当前登录用户的 Bearer Token，接收人从 `AuthPrincipal` 取得，客户端不能查询或修改其他用户通知。首期只有会话分享产生通知；通知动作固定为服务端受控 `actionType=SESSION_SHARE` 和 `actionTargetId=shareId`，响应不提供任意 URL、去重键或数据库行 ID。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/internal/platform/notification-center/notifications?page=&size=&unreadOnly=` | 分页读取当前用户通知；`page` 默认 1、`size` 默认 50 并使用平台公共分页边界、`unreadOnly` 默认 false。 |
+| `POST` | `/api/internal/platform/notification-center/notifications/{notificationId}/read` | 当前接收人幂等标记通知已读；用于后续通用通知类型。未读的分享通知拒绝该入口，必须等分享访问成功。 |
+| `GET` | `/api/internal/platform/notification-center/notifications/events` | 当前用户通知变化 fetch SSE；稳定事件契约见 `docs/api/event-stream.md`。 |
+
+列表响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "notificationId": "ntf_...",
+        "type": "SESSION_SHARED",
+        "actorUserId": "usr_owner",
+        "title": "张三 向你分享了对话",
+        "body": "支付回归分析 · 可对话",
+        "actionType": "SESSION_SHARE",
+        "actionTargetId": "shr_...",
+        "status": "ACTIVE",
+        "invalidationReason": null,
+        "actionAvailable": true,
+        "unread": true,
+        "expiresAt": "2026-08-16T02:00:00Z",
+        "readAt": null,
+        "createdAt": "2026-08-10T02:00:00Z",
+        "updatedAt": "2026-08-10T02:00:00Z"
+      }
+    ],
+    "page": 1,
+    "size": 20,
+    "total": 1,
+    "unreadCount": 1
+  },
+  "traceId": "trace_..."
+}
+```
+
+`unreadCount` 始终表示当前用户全部通知中“未读、仍有效且未过期”的权威数量，不受当前页或 `unreadOnly` 筛选影响。列表会实时合并通知、分享、成员、会话和所属人事实：取消、成员移除、会话归档、到期或所属人停用即使通知失效回写暂时失败，也会返回 `actionAvailable=false`、`unread=false` 和稳定 `invalidationReason`。失效历史保留在全部列表但不可点击。
+
+分享通知必须在新标签页打开内部 `/s/{shareId}`，并继续使用当前用户自己的认证。只有 `/s/{shareId}` 分享访问鉴权成功后，后端才按 `recipientUserId + shareId` 幂等写入 `readAt`；从通知、“分享给我”或旧分享链接进入均采用同一规则。已读写入失败不阻断已获授权的分享访问，只记录不含标题、摘要或链接的脱敏告警。
+
+通用已读成功响应为：
+
+```json
+{
+  "success": true,
+  "data": { "notificationId": "ntf_...", "read": true },
+  "traceId": "trace_..."
+}
+```
+
+不存在或不属于当前接收人的通知统一返回 `404 NOT_FOUND`，不得泄露其他用户通知是否存在。重复已读仍返回成功，不重复产生变化；未读的 `SESSION_SHARE` 通知调用通用已读入口返回 `400 VALIDATION_ERROR`，防止绕过分享访问成功事实。
+
 旧 `/api/sessions/**` 和 `/api/workspaces/{workspaceId}/sessions` 已作废，返回 `410 API_GONE`。
 
 `POST /api/internal/platform/opencode-runtime/sessions` 请求体：

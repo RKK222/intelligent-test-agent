@@ -701,6 +701,46 @@ export type SessionShareRuntimeState = {
   generatedAt: string;
 };
 
+/** 工作台通知首期只开放受控的会话分享动作，前端不得把通知目标解释为任意 URL。 */
+export type UserNotificationType = "SESSION_SHARED" | string;
+export type UserNotificationActionType = "SESSION_SHARE" | string;
+export type UserNotificationStatus = "ACTIVE" | "INVALIDATED" | string;
+export type UserNotificationChangeType = "SNAPSHOT" | "CREATED" | "READ" | "UPDATED" | "INVALIDATED";
+
+export type UserNotification = {
+  notificationId: string;
+  type: UserNotificationType;
+  actorUserId?: string | null;
+  title: string;
+  body: string;
+  actionType: UserNotificationActionType;
+  actionTargetId: string;
+  status: UserNotificationStatus;
+  invalidationReason?: string | null;
+  actionAvailable: boolean;
+  unread: boolean;
+  expiresAt?: string | null;
+  readAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UserNotificationPage = {
+  items: UserNotification[];
+  page: number;
+  size: number;
+  total: number;
+  unreadCount: number;
+};
+
+/** SSE 仅发送低敏变化信号，通知正文由分页接口读取。 */
+export type UserNotificationStreamUpdate = {
+  changeType: UserNotificationChangeType;
+  notificationId?: string | null;
+  unreadCount: number;
+  generatedAt: string;
+};
+
 export type ConversationSourceType = "MANUAL" | "SCHEDULED_TASK" | "SIDE_QUESTION" | string;
 
 export type SessionWorkspaceContext = {

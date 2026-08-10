@@ -12,6 +12,8 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 
 ## 主要程序清单
 
+- `web.platform.UserNotificationController` / `UserNotificationDtos`：当前用户通知分页、幂等已读和 fetch SSE；DTO 不返回去重键、数据库行 ID 或任意跳转 URL。
+
 - `web.platform.WorkspaceController`、`web.platform.SessionController`、`web.platform.RunController`、`web.platform.TerminalController`：平台协议入口，普通 Workspace/Session 读取按当前认证用户归属校验；旧 `/api/...`、`/api/internal/platform/...` 和 Run 相关 `/api/internal/agent/{agentId}/...` URL 并行映射；SessionController 暴露消息列表和 active-run 恢复入口。
 - `web.platform.RunEventSseBackendRoutingWebFilter`、`web.platform.BackendSseForwarder`：RunEvent SSE 建连前按 Run 原始生产 Java 流式转发，保留 Authorization、trace、Last-Event-ID、query 和 `text/event-stream`，并复用 `X-Test-Agent-Backend-Routed` 防循环。
 - `web.platform.RunResendController`：源消息实际发送人对最后一条根会话消息执行撤销重发的入口，分享发送人还必须持有 `canChat`；接收远端边界、可选源 Run、上下文令牌、幂等键和可选修改文本，具体 actor/终态/边界/会话锁验证及可信远端 part 保留由应用服务完成。

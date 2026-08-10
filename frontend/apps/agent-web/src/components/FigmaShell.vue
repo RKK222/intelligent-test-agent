@@ -2,12 +2,12 @@
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
 import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
-import type { AppSourceRepositorySummary } from "@test-agent/shared-types";
-import type { UserOpencodeProcess } from "@test-agent/shared-types";
+import type { AppSourceRepositorySummary, UserNotification, UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import PetMiniGames from "./PetMiniGames.vue";
 import PetCompanionAvatar from "./PetCompanionAvatar.vue";
+import UserNotificationCenter, { type UserNotificationFilter } from "./UserNotificationCenter.vue";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import type { SelectedWorkspaceKind } from "./app-source-workspace";
 import {
@@ -72,6 +72,13 @@ const props = withDefaults(
     loadingAppVersions?: boolean;
     /** 用户手册弹框是否打开，用于让入口保持与左侧活动按钮一致的选中态。 */
     helpCenterOpen?: boolean;
+    notifications?: UserNotification[];
+    notificationUnreadCount?: number;
+    notificationFilter?: UserNotificationFilter;
+    notificationsLoading?: boolean;
+    notificationsLoadingMore?: boolean;
+    notificationsHasMore?: boolean;
+    notificationsError?: string | null;
     currentUserName?: string;
     currentUserRoleLabels?: string[];
     opencodeProcessStatus?: UserOpencodeProcess | null;
@@ -115,6 +122,13 @@ const props = withDefaults(
     joinableApps: () => [],
     selectedAppId: "fgcms-psn",
     helpCenterOpen: false,
+    notifications: () => [],
+    notificationUnreadCount: 0,
+    notificationFilter: "ALL",
+    notificationsLoading: false,
+    notificationsLoadingMore: false,
+    notificationsHasMore: false,
+    notificationsError: null,
     showProcessStatusInPet: false,
     onboardingActive: false,
     sideQuestionAvailable: true,
@@ -174,6 +188,10 @@ const emit = defineEmits<{
   (e: "close-robot-side-question"): void;
   (e: "personal-runtime-reload", payload: { scope: "PUBLIC" | "WORKSPACE" }): void;
   (e: "open-help", topic?: string): void;
+  (e: "notification-filter", filter: UserNotificationFilter): void;
+  (e: "refresh-notifications"): void;
+  (e: "load-more-notifications"): void;
+  (e: "open-notification", notification: UserNotification): void;
 }>();
 
 const appMenuOpen = ref(false);
@@ -2358,6 +2376,20 @@ function submitJoinApp() {
         >
           <BookOpen :size="20" :stroke-width="1.5" />
         </button>
+        <UserNotificationCenter
+          v-if="!fixedWorkspace"
+          :notifications="notifications"
+          :unread-count="notificationUnreadCount"
+          :filter="notificationFilter"
+          :loading="notificationsLoading"
+          :loading-more="notificationsLoadingMore"
+          :has-more="notificationsHasMore"
+          :error="notificationsError"
+          @update:filter="emit('notification-filter', $event)"
+          @refresh="emit('refresh-notifications')"
+          @load-more="emit('load-more-notifications')"
+          @open-notification="emit('open-notification', $event)"
+        />
         <div v-if="!fixedWorkspace" class="figma-runtime-inventory-wrapper" @click.stop>
           <button
             type="button"

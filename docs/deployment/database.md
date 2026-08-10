@@ -1712,3 +1712,22 @@ having count(*) > 1;
 ```
 
 上线顺序固定为：先备份并完成所有已知真实 PostgreSQL 基线升级验证，再发布含 migration 的全部后端节点，确认新旧请求均由能识别分享上下文的节点处理后，最后发布前端。滚动期间不得让新前端把分享头发给旧 Java。打包后还要解出 `test-agent-persistence-*.jar`，逐字节比对上述两个 migration 与已完成真实升级测试的源码。
+
+## V20260810170000 工作台通用通知中心
+
+`V20260810170000__user_notifications_create_notification_center.sql` 是开发期候选 migration，当前源码 SHA-256 为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`。在任何需保留数据库执行后，文件名和字节必须冻结；执行前仍要核对目标环境 `flyway_schema_history`，确认版本高于该环境已执行主链或已选择的隔离兼容链。
+
+migration 创建 `user_notifications`：
+
+- `notification_id` 和 `dedup_key` 分别唯一；接收人删除时级联清理，发送人删除时置空。
+- `type` 首期只允许 `SESSION_SHARED`，`action_type` 首期只允许 `SESSION_SHARE`；`action_target_id` 只保存内部 `shareId`，禁止任意 URL。
+- `ACTIVE/INVALIDATED` 与 `invalidation_reason/invalidated_at` 由约束保持一致；`read_at`、`expires_at`、创建/更新时间和 `trace_id` 用于未读、保留和审计关联。
+- 标题和摘要只保存通知展示快照，禁止消息正文、文件路径、Token、终端输入和第三方原始错误。
+
+回填只选择 `ACTIVE` 分享、`ACTIVE` 成员、`ACTIVE` 会话、`ACTIVE` 所属人且尚未到期的数据，并使用成员 `shared_at` 作为通知 `created_at`。若同一成员在本次 `shared_at` 之后已有成功 `READ_ACCESS_GRANTED` 审计，取其最大 `occurred_at` 回填 `read_at`；旧授权代际的访问审计不会误判新授权已读。过期、撤销、移除、已归档或所属人停用的分享不回填。回填去重键使用 `SESSION_SHARE:LEGACY:{shareId}:{recipientUserId}`，通知 ID 使用迁移内部稳定前缀，不与运行期 `ntf_` ID 冲突。
+
+运行期关系型访问全部通过 `UserNotificationMapper.xml`。未读查询不只检查通知行，还左连接当前分享、成员、会话和所属人事实；因此通知生命周期回写暂时失败时，已撤权分享仍不可点击且不计入未读。创建按 `dedup_key` 原子去重，普通分享设置更新只更新活动通知快照，重新加入或重新激活会失效旧代际并创建新行。每日任务删除严格早于 90 天边界的通知，失效或过期记录在保留期内继续作为历史展示。
+
+该版本高于 QA Memory 扩展兼容链的 `V20260810110000` 至 `V20260810110002`，无需复制第二份兼容 SQL：既有 `DatabaseMigrationCompatibilityCustomizer` 仍只过滤不适配的低版本主分享 migration，通知 migration 由主 location 在分享前向迁移之后顺序执行。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 对每套已知已部署 history 升级到当前 HEAD 后统一断言 `user_notifications` 表和关键列存在；通知仓储 PostgreSQL 集成测试另覆盖空库、主分享基线、审计回填和查询口径。
+
+打包后必须分别从 persistence JAR 和最终应用 JAR 读取 `db/migration/V20260810170000__user_notifications_create_notification_center.sql`，与已测试源码计算 SHA-256；三者不一致不得发布。禁止通过 `repair`、`outOfOrder` 或手工修改 `flyway_schema_history` 处理冲突。
