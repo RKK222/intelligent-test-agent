@@ -7873,3 +7873,27 @@
 - 取消置顶后，会话按置顶前的 `updatedAt` 回到普通组原位置；置顶目标以外的会话顺序、当前选中态和正文保持隔离。
 - HTTP URL、请求/响应 DTO 和事件契约不变；未新增 SQL、Flyway migration 或数据库字段，不涉及安全、环境配置、generated SDK
   或 OpenCode 源码。排序仍复用既有索引与查询，未增加分页查询或网络请求，向后兼容旧客户端。
+
+## 2026-08-10 - 兼容企业模型 finish_reason 收尾并修正 FR 误报
+
+### Why
+
+- 企业环境用户 `001177621` 在 `.114` 完成对话，但可观测 FR 为 100%，明细全部归为“上游服务异常（流中断）”。
+- 现场原始输出证明 `run_dacd40b0051746c8aa3269b6b3b48212` 有完整助手正文、`finish=stop`、`step-finish reason=stop`、`run.succeeded` 和最终 idle；代码却只把字面 `[DONE]` 当作正常收尾，与已有指标词汇中“`[DONE]` 或 `finish_reason`”的口径不一致。
+
+### What
+
+- 扩展既有 `InternalModelSseStreamObserver`，在单次 JSON 解析中同时识别真实输出和正常收尾信号：字面 `[DONE]` 或 `choices[*].finish_reason` 非空。
+- 真实代理和探活统一复用新信号；仍要求至少一个真实模型输出，所以空流、仅元数据、仅正文后无收尾信号 EOF 仍记 `UPSTREAM_STREAM_INTERRUPTED`。
+- 新增 `finish-reason-eof` 本地 mock 模式，并同步 runtime/API/数据库/事件流/前端类型与本地验证文档。页面指标注释仍使用“模型正常结束回答”的用户语言，不暴露 SSE 收尾细节。
+
+### How
+
+- JDK 25 下运行 `InternalModelSseStreamObserverTest`、`InternalModelProviderProbeServiceTest`、`InternalModelProxyForwardingServiceTest`，runtime 12 项、API 13 项共 25 项通过。
+- `python3 -m py_compile tools/mock-model-server.py` 通过；实际启动 `finish-reason-eof` mock 并用 `curl -N` 确认输出有效 content、`finish_reason=stop` 后直接 EOF，不含 `[DONE]`。
+- 首次按 `.env.test` 启动被本机 workflow 密钥缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 阻断；不修改环境文件，改用脚本显式 `--without-workflow` 模式完成 21 模块构建和三服务重启。Backend health/readiness 均 `UP`，Frontend 为 HTTP 200，CORS 预检返回正确 Origin，manager WebSocket 已连接且受管 OpenCode 进程最终 `HEALTHY`。
+
+### Result
+
+- 企业网关在有效回答后用非空 `finish_reason` 收尾并直接 EOF 时，用户调用与探活均记 `SUCCESS`，SCT 记录收尾信号到达耗时，不再把完成对话误算进 FR。
+- 未变更 HTTP URL、DTO、结果枚举、RunEvent 字段、SQL、Flyway migration 或数据库结构；不涉及安全、`.env*`、generated SDK 或 OpenCode 源码。旧的历史误分类记录不回填，新版部署后的新调用按修正口径统计。

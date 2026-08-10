@@ -109,6 +109,35 @@ class InternalModelProviderProbeServiceTest {
     }
 
     @Test
+    void probeAcceptsFinishReasonThenEofWithoutDoneMarker() throws IOException {
+        upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/chat/completions", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream output = exchange.getResponseBody()) {
+                writeAndFlush(output,
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n");
+                writeAndFlush(output,
+                        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n");
+            }
+        });
+        upstream.start();
+
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        List<InternalModelProbeStatus> statuses = new CopyOnWriteArrayList<>();
+
+        var result = service(upstreamBaseUrl(), recorded, statuses).probeAll("trace_finish_reason");
+
+        assertThat(result.outcomes().get(PROVIDER_ID).outcome())
+                .isEqualTo(InternalModelCallOutcome.SUCCESS);
+        assertThat(recorded.getFirst().outcome()).isEqualTo(InternalModelCallOutcome.SUCCESS);
+        assertThat(recorded.getFirst().firstTokenMillis()).isNotNull();
+        assertThat(recorded.getFirst().streamCompleteMillis())
+                .isGreaterThanOrEqualTo(recorded.getFirst().firstTokenMillis());
+        assertThat(statuses.getFirst().lastSuccessAt()).isNotNull();
+    }
+
+    @Test
     void probeRecordsHttpErrorStatus() throws IOException {
         upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         upstream.createContext("/chat/completions", exchange -> {

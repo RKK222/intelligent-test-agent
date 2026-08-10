@@ -450,7 +450,7 @@ scope 发现与缓存规则：
 
 `POST /api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` 仅供用户 OpenCode 进程调用，不是前端 RunEvent SSE。Java 只对 `2xx + text/event-stream` 响应使用 `ServerSentEvent` 语义转换：每个事件的 `id/event/retry/comment/data` 语义保留；没有 `reasoning_content` 时把 `data` 中的 `<think>...</think>` 迁移为 `reasoning_content`，已有 textual `reasoning_content` 时整个 delta 原样保留；`[DONE]` 原样保留。代理不会手工追加 `data:`，因此下游不会出现 `data:data:`。
 
-所有非 `2xx` 响应（包括 `4xx + text/event-stream`）和非 SSE 响应按 `DataBuffer` 原样转发，保留状态码、`Content-Type`、`Content-Encoding`、错误正文、`Retry-After` 和 trace header。连接超时为 10 秒，首个响应头与首个真实模型输出等待均为 30 秒，后续真实输出空闲为 120 秒；注释、空事件、role/usage 元数据、`data: ping` 和畸形 data 不刷新这些截止时间。收到 `[DONE]` 后代理结束上游订阅；不设置其它整体 SSE 生命周期超时，下游取消也会取消到企业内部模型的订阅。
+所有非 `2xx` 响应（包括 `4xx + text/event-stream`）和非 SSE 响应按 `DataBuffer` 原样转发，保留状态码、`Content-Type`、`Content-Encoding`、错误正文、`Retry-After` 和 trace header。连接超时为 10 秒，首个响应头与首个真实模型输出等待均为 30 秒，后续真实输出空闲为 120 秒；注释、空事件、role/usage 元数据、`data: ping` 和畸形 data 不刷新这些截止时间。调用结果以 `[DONE]` 或 `choices[*].finish_reason` 非空作为正常收尾信号，兼容企业网关在 `finish_reason` 后直接 EOF；收到 `[DONE]` 后代理仍主动结束上游订阅。不设置其它整体 SSE 生命周期超时，下游取消也会取消到企业内部模型的订阅。
 
 ## Runtime SSE
 

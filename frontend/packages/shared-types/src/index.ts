@@ -2055,7 +2055,7 @@ export type InternalModelCallRecord = {
   firstByteMillis?: number | null;
   /** 首个包含模型输出的 SSE data 相对耗时；非流式或未收到有效输出 chunk 时为空。 */
   firstTokenMillis?: number | null;
-  /** 从请求开始到收到 OpenAI 兼容 SSE [DONE]；未完整结束或非流式时为空。 */
+  /** 从请求开始到收到 OpenAI 兼容正常收尾信号（[DONE] 或非空 finish_reason）；未完整结束或非流式时为空。 */
   streamCompleteMillis?: number | null;
   traceId: string;
   ucid?: string | null;

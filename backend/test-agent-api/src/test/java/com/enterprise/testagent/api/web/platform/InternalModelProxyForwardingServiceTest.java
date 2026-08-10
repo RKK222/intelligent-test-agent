@@ -296,6 +296,34 @@ class InternalModelProxyForwardingServiceTest {
         assertThat(record.streamCompleteMillis()).isLessThanOrEqualTo(record.durationMillis());
     }
 
+    @Test
+    void acceptsFinishReasonThenEofAsCompatibleStreamCompletion() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        org.springframework.core.io.buffer.DataBufferFactory bufferFactory =
+                org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance;
+        String body = "data: {\"choices\":[{\"delta\":{\"content\":\"\u5b8c\u6210\"},\"finish_reason\":null}]}\n\n"
+                + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.just(bufferFactory.wrap(body.getBytes(StandardCharsets.UTF_8))))
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_finish_reason"))
+                .verifyComplete();
+
+        awaitRecorded(recorded);
+        InternalModelCallRecord record = recorded.getFirst();
+        assertThat(record.outcome()).isEqualTo(InternalModelCallOutcome.SUCCESS);
+        assertThat(record.firstTokenMillis()).isNotNull();
+        assertThat(record.streamCompleteMillis()).isGreaterThanOrEqualTo(record.firstTokenMillis());
+        assertThat(record.streamCompleteMillis()).isLessThanOrEqualTo(record.durationMillis());
+    }
+
     private InternalModelProxyForwardingService service(WebClient webClient) {
         return service(webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)));
     }

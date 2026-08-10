@@ -504,7 +504,7 @@ public class InternalModelProxyForwardingService {
         private final long startedNanos;
         private final AtomicBoolean firstByteMarked = new AtomicBoolean(false);
         private final AtomicBoolean firstEventMarked = new AtomicBoolean(false);
-        private final AtomicBoolean doneSeen = new AtomicBoolean(false);
+        private final AtomicBoolean protocolCompleteSeen = new AtomicBoolean(false);
         private final AtomicBoolean streaming = new AtomicBoolean(false);
         private final AtomicBoolean streamOutcomeSet = new AtomicBoolean(false);
         private final AtomicBoolean outcomeExplicitlySet = new AtomicBoolean(false);
@@ -559,24 +559,22 @@ public class InternalModelProxyForwardingService {
         }
 
         void markSseEvent(ObservedEvent event) {
-            if (event.done()) {
-                doneSeen.set(true);
+            if (event.output()) {
+                firstEventMarked.set(true);
+                // 使用数据到达时刻而非 JSON 解析完成时刻，避免解析开销污染首 token 指标。
+                firstTokenNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
+            }
+            if (event.protocolComplete()) {
+                protocolCompleteSeen.set(true);
                 if (hasFirstToken()) {
                     streamCompleteNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
                 }
-                return;
             }
-            if (!event.output()) {
-                return;
-            }
-            firstEventMarked.set(true);
-            // 使用数据到达时刻而非 JSON 解析完成时刻，避免解析开销污染首 token 指标。
-            firstTokenNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
         }
 
         void markDirectStreamEnd() {
-            // Chat Completions 流必须有有效 chunk 并以 [DONE] 结束；正常 EOF 否则属于截断/空流。
-            if (!hasFirstToken() || !doneSeen.get()) {
+            // 流必须有有效输出和正常收尾信号；仅有正文就 EOF 仍属于截断。
+            if (!hasFirstToken() || !protocolCompleteSeen.get()) {
                 markStreamOutcome(InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
             }
         }

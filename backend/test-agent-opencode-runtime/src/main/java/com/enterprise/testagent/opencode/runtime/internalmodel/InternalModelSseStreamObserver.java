@@ -53,24 +53,28 @@ public final class InternalModelSseStreamObserver {
         long receivedNanos = System.nanoTime();
         String data = event == null ? null : event.data();
         if (data == null || data.isBlank()) {
-            return new ObservedEvent(event, false, false, receivedNanos);
+            return new ObservedEvent(event, false, false, false, receivedNanos);
         }
         if (DONE.equals(data.trim())) {
-            return new ObservedEvent(event, false, true, receivedNanos);
+            return new ObservedEvent(event, false, true, true, receivedNanos);
         }
-        return new ObservedEvent(event, containsModelOutput(data), false, receivedNanos);
+        PayloadSignals signals = inspectPayload(data);
+        return new ObservedEvent(
+                event, signals.output(), signals.protocolComplete(), false, receivedNanos);
     }
 
-    private boolean containsModelOutput(String data) {
+    private PayloadSignals inspectPayload(String data) {
         try {
             JsonNode root = objectMapper.readTree(data);
             if (root == null || !root.isObject()) {
-                return false;
+                return PayloadSignals.NONE;
             }
             JsonNode choices = root.get("choices");
             if (choices == null || !choices.isArray()) {
-                return false;
+                return PayloadSignals.NONE;
             }
+            boolean output = false;
+            boolean protocolComplete = false;
             for (JsonNode choice : choices) {
                 JsonNode delta = choice.get("delta");
                 if (containsOutputText(delta, "content")
@@ -79,13 +83,20 @@ public final class InternalModelSseStreamObserver {
                         || containsOutputText(choice, "text")
                         || containsToolOutput(delta)
                         || containsLegacyFunctionOutput(delta)) {
-                    return true;
+                    output = true;
+                }
+                JsonNode finishReason = choice.get("finish_reason");
+                if (finishReason != null
+                        && finishReason.isTextual()
+                        && !finishReason.textValue().isBlank()) {
+                    // 部分企业网关以非空 finish_reason 正常收尾后直接 EOF，不再发 [DONE]。
+                    protocolComplete = true;
                 }
             }
-            return false;
+            return new PayloadSignals(output, protocolComplete);
         } catch (Exception ignored) {
             // 畸形 data 仍由转发/适配链路按原有协议处理，但不能伪装成首 token 或刷新输出空闲时间。
-            return false;
+            return PayloadSignals.NONE;
         }
     }
 
@@ -131,10 +142,19 @@ public final class InternalModelSseStreamObserver {
         return duration;
     }
 
-    /** 原始 SSE 事件及一次性派生的低基数观测信号；不保存或复制响应正文。 */
+    private record PayloadSignals(boolean output, boolean protocolComplete) {
+
+        private static final PayloadSignals NONE = new PayloadSignals(false, false);
+    }
+
+    /**
+     * 原始 SSE 事件及一次性派生的低基数观测信号；不保存或复制响应正文。
+     * protocolComplete 同时兼容两种正常收尾，done 仅表示字面 [DONE]，供转发链安全取消上游连接。
+     */
     public record ObservedEvent(
             ServerSentEvent<String> event,
             boolean output,
+            boolean protocolComplete,
             boolean done,
             long receivedNanos) {
     }
