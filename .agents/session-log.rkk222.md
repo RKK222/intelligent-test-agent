@@ -8219,3 +8219,28 @@
 
 - wr 的 OpenCode 已在本机重新分配并健康启动，可继续正常对话。
 - 本次是本地测试库的定点运行态修复，仅更新会话记录；未修改生产代码、HTTP API、RunEvent、数据库结构/Flyway、SQL mapper、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-10 - 增加 TTFT 箱线图与并排看板布局
+
+### Why
+
+- 单看平均 TTFT 和最大 TTFT 无法说明多数调用集中在哪个等待区间，也容易被少数慢请求影响判断；用户要求用竖向箱线图展示整体分布，并把调用结果分布、供应商请求量上下排列后放在箱线图旁边。
+
+### What
+
+- 新增受 `SUPER_ADMIN` 保护的 `GET /api/internal/platform/opencode-runtime/internal-model-observability/ttft-distribution`，沿用供应商、结果大类、来源和时间筛选，返回样本数、最小值、P25、中位数、P75、最大值。
+- 持久层通过 MyBatis XML 直接基于 `first_token_ms` 明细使用 PostgreSQL `percentile_cont` 计算分位数；只统计确实收到首个模型输出的调用，空样本返回 0 和空值，不从小时均值反推。
+- 前端新增竖向 ECharts 箱线图和说人话的说明/悬浮提示；调用结果分布与供应商请求量在左侧上下排列，箱线图在右侧占据对应整列，失败原因分类移到下方，窄屏自动改为单列。
+- 同步 domain、persistence、runtime、API、backend-api、shared-types、agent-web 的 README，以及 HTTP API、数据库、指标词汇表和本地测试说明。
+
+### How
+
+- H2 与真实 PostgreSQL 持久层测试共 10 项通过，覆盖 100/200/300/400 等样本的连续分位数和空样本；Controller 测试 3 项通过。前端组件与 API 客户端测试 109 项通过，agent-web/backend-api 类型检查和 agent-web production build 通过。
+- 使用 `.env.test`、JDK 25 和脚本现成的 `--without-workflow` 模式完成 21 模块构建并启动 backend、opencode-manager、frontend；标准 Workflow 模式因本机未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 被预检拦截，未修改环境文件。
+- 仅在本地测试库插入 7 条 `local-ttft-boxplot` 模拟调用，TTFT 为 120、180、240、320、450、700、1200ms；实际页面显示中间 50% 为 210–575ms、中位数 320ms，并通过应用内浏览器确认左右布局、竖向箱体和明细/聚合无重叠。
+- 提交前回顾全部 `.agents/session-log*.md`，并执行差异、冲突标记和空白校验；未覆盖同期 agent-chat 样式与 Playwright 临时文件。
+
+### Result
+
+- 看板现在既能查看 TTFT 的总体区间，又能在同一视野比较调用结果和供应商请求量；箱线图五个位置均来自当前筛选范围的真实调用明细。
+- 新增只读 HTTP API 和一次受 31 天最大查询窗口约束的数据库聚合查询；没有数据库结构/Flyway、RunEvent、安全策略或 OpenCode 兼容边界变更，未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。

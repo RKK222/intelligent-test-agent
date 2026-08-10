@@ -19,6 +19,14 @@ public interface InternalModelCallRecordRepository {
     List<InternalModelCallHourlyStat> queryHourlyStats(
             String providerId, InternalModelCallSource source, Instant from, Instant to);
 
+    /** 按筛选范围从调用明细计算 TTFT 五数概括，不用小时均值估算分位数。 */
+    InternalModelTtftDistribution queryTtftDistribution(
+            String providerId,
+            List<InternalModelCallOutcome> outcomes,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to);
+
     /** 保留旧调用形态，未传 source 时查询所有来源。 */
     default List<InternalModelCallHourlyStat> queryHourlyStats(String providerId, Instant from, Instant to) {
         return queryHourlyStats(providerId, null, from, to);

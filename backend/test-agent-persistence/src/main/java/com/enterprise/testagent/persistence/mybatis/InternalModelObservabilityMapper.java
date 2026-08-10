@@ -45,6 +45,14 @@ public interface InternalModelObservabilityMapper {
             @Param("from") Instant from,
             @Param("to") Instant to);
 
+    /** 直接由数据库按明细计算分位数，避免把大量 TTFT 样本搬到 JVM。 */
+    InternalModelTtftDistributionRow findTtftDistribution(
+            @Param("providerId") String providerId,
+            @Param("outcomes") List<String> outcomes,
+            @Param("source") String source,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
+
     int deleteCallRecordsBefore(@Param("cutoff") Instant cutoff);
 
     int deleteHourlyStatsBefore(@Param("cutoff") Instant cutoff);

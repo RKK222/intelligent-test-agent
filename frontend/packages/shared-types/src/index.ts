@@ -2085,6 +2085,16 @@ export type InternalModelCallHourlyStat = {
   streamCompleteCount?: number | null;
 };
 
+/** TTFT 五数概括；只统计确实收到首个模型输出的调用。 */
+export type InternalModelTtftDistribution = {
+  sampleCount: number;
+  minimumMillis?: number | null;
+  firstQuartileMillis?: number | null;
+  medianMillis?: number | null;
+  thirdQuartileMillis?: number | null;
+  maximumMillis?: number | null;
+};
+
 /** 逐 provider 最近探活状态，供健康卡片直接读取。 */
 export type InternalModelProbeStatus = {
   providerId: string;

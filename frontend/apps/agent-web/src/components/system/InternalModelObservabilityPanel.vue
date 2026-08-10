@@ -10,7 +10,8 @@ import type {
   InternalModelCallHourlyStat,
   InternalModelCallOutcome,
   InternalModelCallOutcomeGroup,
-  InternalModelCallSource
+  InternalModelCallSource,
+  InternalModelTtftDistribution
 } from "@test-agent/shared-types";
 import MetricHelpLabel from "./MetricHelpLabel.vue";
 
@@ -183,6 +184,7 @@ const metricHelp = {
 
 const chartHelp = {
   hourlyTrend: "按小时查看请求数和请求成功率如何变化；选择结果大类后只展示该类请求数。",
+  ttftDistribution: "查看模型开始回答前的等待时间分布。箱体表示中间一半的调用，箱内竖线表示中位数，两端表示当前范围内最短和最长的等待时间。",
   successComposition: "把当前筛选范围内的调用分成成功和错误两类，展示各自所占比例。",
   failureBreakdown: "只看异常调用，归并为请求或配置问题、上游服务异常、调用方中断和其他异常。",
   providerVolume: "按供应商汇总当前筛选范围内的调用次数，用来比较各供应商实际承载的调用量。"
@@ -236,6 +238,25 @@ const statsQuery = useQuery({
   })
 });
 
+const ttftDistributionQuery = useQuery({
+  queryKey: computed(() => ["internal-model-observability-ttft-distribution", {
+    providerId: filterProviderId.value || null,
+    outcomeGroup: filterOutcomeGroup.value || null,
+    source: filterSource.value || null,
+    from: queryWindow.value.from,
+    to: queryWindow.value.to
+  }]),
+  enabled: () => hasSuperAdmin.value,
+  retry: false,
+  queryFn: () => api.getInternalModelTtftDistribution({
+    providerId: filterProviderId.value || null,
+    outcomeGroup: filterOutcomeGroup.value || null,
+    source: filterSource.value || null,
+    from: queryWindow.value.from,
+    to: queryWindow.value.to
+  })
+});
+
 const probeMutation = useMutation({
   mutationFn: (variables: { providerId?: string }) =>
     api.triggerInternalModelProbe(variables.providerId),
@@ -256,6 +277,7 @@ async function refreshAll() {
   await Promise.all([
     recordsQuery.refetch(),
     statsQuery.refetch(),
+    ttftDistributionQuery.refetch(),
     probeStatusQuery.refetch()
   ]);
   await nextTick();
@@ -284,6 +306,33 @@ const recordsTotal = computed(() => records.value.length);
 const stats = computed(() => (statsQuery.data.value ?? []).filter((row) =>
   !filterOutcomeGroup.value || outcomeGroupOf(row.outcome) === filterOutcomeGroup.value
 ));
+
+const emptyTtftDistribution: InternalModelTtftDistribution = { sampleCount: 0 };
+const ttftDistribution = computed(() => ttftDistributionQuery.data.value ?? emptyTtftDistribution);
+
+/** 只有后端返回完整、单调的五数概括时才绘图，避免异常数据生成误导性区间。 */
+const ttftBoxData = computed<[number, number, number, number, number] | null>(() => {
+  const distribution = ttftDistribution.value;
+  const values = [
+    distribution.minimumMillis,
+    distribution.firstQuartileMillis,
+    distribution.medianMillis,
+    distribution.thirdQuartileMillis,
+    distribution.maximumMillis
+  ];
+  if (distribution.sampleCount <= 0 || !values.every((value) => typeof value === "number" && Number.isFinite(value))) {
+    return null;
+  }
+  const [minimum, firstQuartile, median, thirdQuartile, maximum] = values as [number, number, number, number, number];
+  if (minimum < 0 || minimum > firstQuartile || firstQuartile > median || median > thirdQuartile || thirdQuartile > maximum) {
+    return null;
+  }
+  return [minimum, firstQuartile, median, thirdQuartile, maximum];
+});
+
+const observabilityFetching = computed(() =>
+  recordsQuery.isFetching.value || statsQuery.isFetching.value || ttftDistributionQuery.isFetching.value
+);
 
 const showRateMetrics = computed(() => !filterOutcomeGroup.value);
 
@@ -523,10 +572,12 @@ const failureBarData = computed(() =>
 );
 
 const trendChartEl = ref<HTMLDivElement | null>(null);
+const ttftChartEl = ref<HTMLDivElement | null>(null);
 const pieChartEl = ref<HTMLDivElement | null>(null);
 const failureChartEl = ref<HTMLDivElement | null>(null);
 const providerChartEl = ref<HTMLDivElement | null>(null);
 let trendChart: echarts.ECharts | null = null;
+let ttftChart: echarts.ECharts | null = null;
 let pieChart: echarts.ECharts | null = null;
 let failureChart: echarts.ECharts | null = null;
 let providerChart: echarts.ECharts | null = null;
@@ -582,6 +633,52 @@ function renderCharts() {
       ]
     }, true);
   }
+  if (ttftBoxData.value && ttftChartEl.value && ttftChartEl.value.clientWidth > 0) {
+    ttftChart = ensureChart(ttftChartEl.value, { current: ttftChart });
+    const [minimum, firstQuartile, median, thirdQuartile, maximum] = ttftBoxData.value;
+    ttftChart?.setOption({
+      animation: false,
+      tooltip: {
+        trigger: "item",
+        formatter: () => [
+          `<strong>TTFT 分布（${ttftDistribution.value.sampleCount} 次）</strong>`,
+          `最短：${formatDuration(minimum)}`,
+          `25% 的调用不超过：${formatDuration(firstQuartile)}`,
+          `中位数：${formatDuration(median)}`,
+          `75% 的调用不超过：${formatDuration(thirdQuartile)}`,
+          `最长：${formatDuration(maximum)}`
+        ].join("<br/>")
+      },
+      grid: { top: 18, left: 72, right: 38, bottom: 42 },
+      xAxis: {
+        type: "category",
+        data: ["全部调用"],
+        axisTick: { show: false }
+      },
+      yAxis: {
+        type: "value",
+        name: "TTFT",
+        min: 0,
+        scale: true,
+        axisLabel: { formatter: (value: number) => formatDuration(value) }
+      },
+      series: [{
+        name: "TTFT",
+        type: "boxplot",
+        layout: "vertical",
+        boxWidth: [48, 100],
+        data: [[minimum, firstQuartile, median, thirdQuartile, maximum]],
+        itemStyle: {
+          color: "#dbeafe",
+          borderColor: "#2563eb",
+          borderWidth: 2
+        }
+      }]
+    }, true);
+  } else if (ttftChart) {
+    ttftChart.dispose();
+    ttftChart = null;
+  }
   if (showRateMetrics.value && pieChartEl.value && pieChartEl.value.clientWidth > 0) {
     pieChart = ensureChart(pieChartEl.value, { current: pieChart });
     pieChart?.setOption({
@@ -635,6 +732,7 @@ function renderCharts() {
 
 function resizeCharts() {
   trendChart?.resize();
+  ttftChart?.resize();
   pieChart?.resize();
   failureChart?.resize();
   providerChart?.resize();
@@ -647,15 +745,16 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resizeCharts);
-  [trendChart, pieChart, failureChart, providerChart].forEach((chart) => chart?.dispose());
+  [trendChart, ttftChart, pieChart, failureChart, providerChart].forEach((chart) => chart?.dispose());
   trendChart = null;
+  ttftChart = null;
   pieChart = null;
   failureChart = null;
   providerChart = null;
 });
 
 // 数据变动后 post-flush 触发重新渲染，确保在新 DOM 或过滤数据更新后重绘图表
-watch([() => stats.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
+watch([() => stats.value, () => ttftDistribution.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
   void nextTick(renderCharts);
 }, { deep: true, flush: "post" });
 
@@ -927,12 +1026,12 @@ function onPageChange(next: number) {
             <button
               type="button"
               class="ta-imob-btn-small"
-              :disabled="recordsQuery.isFetching.value || statsQuery.isFetching.value"
+              :disabled="observabilityFetching"
               @click="refreshAll()"
             >
               <RefreshCw
                 :size="11"
-                :class="{ 'ta-imob-spin': recordsQuery.isFetching.value || statsQuery.isFetching.value }"
+                :class="{ 'ta-imob-spin': observabilityFetching }"
               />
               <span>刷新</span>
             </button>
@@ -1076,7 +1175,7 @@ function onPageChange(next: number) {
               </div>
             </div>
 
-            <!-- 图表：趋势 / 成功率 / 失败分类 / 供应商对比 -->
+            <!-- 图表：趋势 / 调用结果与供应商对比 / TTFT 分布 / 失败分类 -->
             <div class="ta-imob-charts">
               <!-- 折线图独立占满全行 -->
               <div class="ta-imob-chart-card ta-imob-chart-card-full">
@@ -1088,23 +1187,50 @@ function onPageChange(next: number) {
                 </h4>
                 <div ref="trendChartEl" class="ta-imob-chart ta-imob-chart-trend" />
               </div>
-              <div v-if="showRateMetrics" class="ta-imob-chart-card">
-                <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="调用结果分布" :description="chartHelp.successComposition" />
-                </h4>
-                <div ref="pieChartEl" class="ta-imob-chart" />
+
+              <!-- 左侧两张对比图纵向排列，右侧箱线图占据同一整列，便于一起查看。 -->
+              <div class="ta-imob-chart-comparison">
+                <div class="ta-imob-chart-stack">
+                  <div v-if="showRateMetrics" class="ta-imob-chart-card">
+                    <h4 class="ta-imob-overview-title">
+                      <MetricHelpLabel label="调用结果分布" :description="chartHelp.successComposition" />
+                    </h4>
+                    <div ref="pieChartEl" class="ta-imob-chart" />
+                  </div>
+                  <div v-if="providerBarData.length" class="ta-imob-chart-card">
+                    <h4 class="ta-imob-overview-title">
+                      <MetricHelpLabel label="供应商请求量对比" :description="chartHelp.providerVolume" />
+                    </h4>
+                    <div ref="providerChartEl" class="ta-imob-chart" />
+                  </div>
+                </div>
+
+                <div v-loading="ttftDistributionQuery.isLoading.value" class="ta-imob-chart-card ta-imob-box-card">
+                  <div class="ta-imob-box-title-row">
+                    <h4 class="ta-imob-overview-title">
+                      <MetricHelpLabel label="TTFT 分布（箱线图）" :description="chartHelp.ttftDistribution" />
+                    </h4>
+                    <div v-if="ttftBoxData" class="ta-imob-box-summary">
+                      <span>中间 50%：{{ formatDuration(ttftBoxData[1]) }}–{{ formatDuration(ttftBoxData[3]) }}</span>
+                      <span>中位数：{{ formatDuration(ttftBoxData[2]) }}</span>
+                      <span>样本：{{ ttftDistribution.sampleCount }} 次</span>
+                    </div>
+                  </div>
+                  <div v-if="ttftDistributionQuery.isError.value" class="ta-imob-chart-empty">
+                    TTFT 分布加载失败，请刷新重试
+                  </div>
+                  <div v-else-if="ttftBoxData" ref="ttftChartEl" class="ta-imob-chart ta-imob-chart-box" />
+                  <div v-else-if="!ttftDistributionQuery.isLoading.value" class="ta-imob-chart-empty">
+                    当前筛选范围没有可用于统计的 TTFT
+                  </div>
+                </div>
               </div>
-              <div v-if="failureBarData.length" class="ta-imob-chart-card">
+
+              <div v-if="failureBarData.length" class="ta-imob-chart-card ta-imob-chart-card-full">
                 <h4 class="ta-imob-overview-title">
                   <MetricHelpLabel label="失败原因分类" :description="chartHelp.failureBreakdown" />
                 </h4>
                 <div ref="failureChartEl" class="ta-imob-chart" />
-              </div>
-              <div v-if="providerBarData.length" class="ta-imob-chart-card">
-                <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="供应商请求量对比" :description="chartHelp.providerVolume" />
-                </h4>
-                <div ref="providerChartEl" class="ta-imob-chart" />
               </div>
             </div>
 
@@ -1553,12 +1679,72 @@ function onPageChange(next: number) {
 .ta-imob-chart-card-full {
   grid-column: 1 / -1;
 }
+.ta-imob-chart-comparison {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr);
+  align-items: stretch;
+  gap: 12px;
+}
+.ta-imob-chart-stack {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+.ta-imob-chart-stack .ta-imob-chart-card,
+.ta-imob-box-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .ta-imob-chart {
   width: 100%;
   height: 240px;
 }
+.ta-imob-chart-stack .ta-imob-chart {
+  flex: 1;
+  height: auto;
+  min-height: 200px;
+}
 .ta-imob-chart-trend {
   height: 260px;
+}
+.ta-imob-chart-box {
+  flex: 1;
+  height: auto;
+  min-height: 480px;
+}
+.ta-imob-box-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ta-imob-box-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 14px;
+  color: #475569;
+  font-size: 12px;
+}
+.ta-imob-chart-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  color: #64748b;
+  font-size: 13px;
+}
+@media (max-width: 960px) {
+  .ta-imob-chart-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ta-imob-chart-box {
+    min-height: 320px;
+  }
 }
 .ta-imob-metric-grid {
   display: grid;

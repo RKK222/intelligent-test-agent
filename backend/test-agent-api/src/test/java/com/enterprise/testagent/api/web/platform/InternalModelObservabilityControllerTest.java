@@ -18,6 +18,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelTtftDistribution;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelObservabilityQueryService;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelProviderProbeService;
@@ -100,6 +101,34 @@ class InternalModelObservabilityControllerTest {
                 .uri("/api/internal/platform/opencode-runtime/internal-model-observability/stats")
                 .exchange()
                 .expectStatus().isForbidden();
+    }
+
+    @Test
+    void superAdminCanQueryFilteredTtftDistribution() {
+        InternalModelObservabilityQueryService queryService = mock(InternalModelObservabilityQueryService.class);
+        when(queryService.queryTtftDistribution(
+                        eq("enterprise-deepseek"),
+                        eq(InternalModelCallOutcomeGroup.SUCCESS),
+                        eq(InternalModelCallSource.USER_CALL),
+                        any(),
+                        any()))
+                .thenReturn(new InternalModelTtftDistribution(4, 100.0, 175.0, 250.0, 325.0, 400.0));
+        WebTestClient client = client(queryService, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-observability/ttft-distribution"
+                        + "?providerId=enterprise-deepseek&outcomeGroup=SUCCESS&source=USER_CALL"
+                        + "&from=2026-08-07T00:00:00Z&to=2026-08-08T00:00:00Z")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.sampleCount").isEqualTo(4)
+                .jsonPath("$.data.minimumMillis").isEqualTo(100.0)
+                .jsonPath("$.data.firstQuartileMillis").isEqualTo(175.0)
+                .jsonPath("$.data.medianMillis").isEqualTo(250.0)
+                .jsonPath("$.data.thirdQuartileMillis").isEqualTo(325.0)
+                .jsonPath("$.data.maximumMillis").isEqualTo(400.0);
     }
 
     private WebTestClient client(InternalModelObservabilityQueryService queryService, List<String> roles) {

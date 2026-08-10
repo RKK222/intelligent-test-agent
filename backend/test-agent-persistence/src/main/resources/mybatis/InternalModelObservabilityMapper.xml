@@ -45,6 +45,17 @@
         </constructor>
     </resultMap>
 
+    <resultMap id="TtftDistributionRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelTtftDistributionRow">
+        <constructor>
+            <arg column="sample_count" javaType="java.lang.Long"/>
+            <arg column="minimum_ms" javaType="java.lang.Double"/>
+            <arg column="first_quartile_ms" javaType="java.lang.Double"/>
+            <arg column="median_ms" javaType="java.lang.Double"/>
+            <arg column="third_quartile_ms" javaType="java.lang.Double"/>
+            <arg column="maximum_ms" javaType="java.lang.Double"/>
+        </constructor>
+    </resultMap>
+
     <resultMap id="ProbeStatusRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelProbeStatusRow">
         <constructor>
             <arg column="provider_id" javaType="java.lang.String"/>
@@ -194,6 +205,18 @@
         <if test="from != null">and stat_hour &gt;= #{from}</if>
         <if test="to != null">and stat_hour &lt; #{to}</if>
         order by stat_hour asc, provider_id asc, outcome asc
+    </select>
+
+    <select id="findTtftDistribution" resultMap="TtftDistributionRowMap">
+        select count(*) as sample_count,
+               cast(min(first_token_ms) as double precision) as minimum_ms,
+               percentile_cont(0.25) within group (order by first_token_ms) as first_quartile_ms,
+               percentile_cont(0.50) within group (order by first_token_ms) as median_ms,
+               percentile_cont(0.75) within group (order by first_token_ms) as third_quartile_ms,
+               cast(max(first_token_ms) as double precision) as maximum_ms
+        from internal_model_call_records
+        <include refid="CallRecordWhere"/>
+        and first_token_ms is not null
     </select>
 
     <delete id="deleteCallRecordsBefore">

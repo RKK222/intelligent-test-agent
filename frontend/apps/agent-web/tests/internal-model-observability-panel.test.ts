@@ -10,7 +10,13 @@ import type {
 import InternalModelObservabilityPanel from "../src/components/system/InternalModelObservabilityPanel.vue";
 
 vi.mock("echarts", () => ({
-  init: vi.fn(() => ({ setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() }))
+  init: vi.fn((element: HTMLElement) => ({
+    setOption: vi.fn(),
+    resize: vi.fn(),
+    dispose: vi.fn(),
+    isDisposed: vi.fn(() => false),
+    getDom: vi.fn(() => element)
+  }))
 }));
 
 const currentUser: CurrentUser = {
@@ -90,6 +96,14 @@ function renderPanel() {
       items: [record], page: 1, size: 20, total: 1
     }),
     getInternalModelCallStats: vi.fn().mockResolvedValue(stats),
+    getInternalModelTtftDistribution: vi.fn().mockResolvedValue({
+      sampleCount: 4,
+      minimumMillis: 100,
+      firstQuartileMillis: 175,
+      medianMillis: 250,
+      thirdQuartileMillis: 325,
+      maximumMillis: 400
+    }),
     triggerInternalModelProbe: vi.fn().mockResolvedValue({})
   } as Partial<BackendApiClient> as BackendApiClient;
 
@@ -116,6 +130,7 @@ describe("InternalModelObservabilityPanel", () => {
 
   it("uses standard metric names, plain-language help, grouped outcomes, and the user id", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-07T10:30:00Z"));
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
     const view = renderPanel();
 
     await view.findByText("Overview");
@@ -124,13 +139,21 @@ describe("InternalModelObservabilityPanel", () => {
     expect(await view.findByText("user-10086")).toBeTruthy();
     expect(view.getAllByText("上游服务异常").length).toBeGreaterThan(0);
     expect(view.getByText("上游 HTTP 错误")).toBeTruthy();
+    expect(await view.findByText("中间 50%：175ms–325ms")).toBeTruthy();
+    expect(view.getByText("中位数：250ms")).toBeTruthy();
+    expect(view.getByText("样本：4 次")).toBeTruthy();
+    expect(view.container.querySelector(".ta-imob-chart-box")).toBeTruthy();
+    const comparison = view.container.querySelector(".ta-imob-chart-comparison");
+    expect(comparison?.querySelector(".ta-imob-chart-stack")).toBeTruthy();
+    expect(comparison?.querySelector(".ta-imob-box-card")).toBeTruthy();
+    expect(comparison?.querySelectorAll(".ta-imob-chart-stack > .ta-imob-chart-card")).toHaveLength(2);
 
     const explainedLabels = [
       "REQ", "Providers", "SR", "FR", "Failures",
       "Avg E2E", "Max E2E", "Total Duration", "RPS",
       "Avg TTFT", "Max TTFT",
       "Avg SCT", "Max SCT",
-      "请求数与成功率趋势", "调用结果分布", "失败原因分类", "供应商请求量对比",
+      "请求数与成功率趋势", "TTFT 分布（箱线图）", "调用结果分布", "失败原因分类", "供应商请求量对比",
       "E2E Latency", "TTFT", "SCT"
     ];
     for (const label of explainedLabels) {

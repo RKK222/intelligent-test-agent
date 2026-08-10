@@ -11,7 +11,7 @@
 
 | 缩写 | 全称 (Full Name) | 中文名称 | 定义与计算逻辑 (Definition & Logic) | 计算状态 / 参考标准 (AIPerf Ref) |
 |---|---|---|---|---|
-| **TTFT** | Time to First Token | 首 Token 延迟 | 从客户端向 API 发起请求，到接收到模型返回的第一个 Output Token 之间的等待耗时。反映模型响应的启动速度。 | 已统计 (`time_to_first_token`) |
+| **TTFT** | Time to First Token | 首 Token 延迟 | 从客户端向 API 发起请求，到接收到模型返回的第一个 Output Token 之间的等待耗时。反映模型响应的启动速度；看板箱线图用最小值、P25、中位数、P75、最大值展示选定范围内的整体分布。 | 已统计 (`time_to_first_token`) |
 | **ITL / TPOT** | Inter-Token Latency / Time Per Output Token | Token 输出间隔 / 单 Token 耗时 | 生成流式回答过程中，连续两个 Output Token 之间的平均时间间隔。计算公式为 `(E2E - TTFT) / (Output Tokens - 1)`。 | <span style="color: #d97706; font-weight: bold;">[暂未计算]</span> (`inter_token_latency`) |
 | **SCT** | Stream Completion Time | 流式完成时间 | 从发起请求到流式回答接收到结束标记（`[DONE]` 或 `finish_reason`）的完整传输耗时。 | 已统计 (`stream_completion_time`) |
 | **E2E** | End-to-End Latency | 端到端总延迟 | 从客户端发送 HTTP 请求开始，到接收完全部响应或确认异常终止的总经历时间。 | 已统计 (`request_latency` / `end_to_end_latency`) |

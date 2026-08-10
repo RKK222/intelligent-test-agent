@@ -111,6 +111,10 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/stats?providerId=local-mock&source=USER_CALL" \
   -H "Authorization: Bearer <超管token>"
 
+# TTFT 箱线图五数概括；只统计确实开始返回回答的调用
+curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/ttft-distribution?providerId=local-mock&source=USER_CALL" \
+  -H "Authorization: Bearer <超管token>"
+
 # 探活状态
 curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/probe-status" \
   -H "Authorization: Bearer <超管token>"
@@ -121,7 +125,7 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 ## 验证结论
 
 - **插桩→分类→落库**：由 `InternalModelSseStreamObserverTest` 固化真实输出、伪心跳与两种收尾信号语义；`InternalModelProxyForwardingServiceTest` 覆盖首 token、`[DONE]`、`finish_reason` 后 EOF 和无收尾信号的流中断；`InternalModelProviderProbeServiceTest` 用本地 HttpServer 覆盖两种完整 SSE、空 200、超时、500 与连接拒绝。
-- **查询/探活 API**：由 `InternalModelObservabilityControllerTest`、持久化集成测试覆盖。
+- **查询/探活 API**：由 `InternalModelObservabilityControllerTest` 固化 TTFT 五数概括的筛选和返回字段；H2 持久化集成测试验证四分位数插值与空样本，PostgreSQL Testcontainers 测试验证生产数据库的 `percentile_cont` 结果。
 - **本指南**用真实 HTTP 链路串起上述各层，作为部署前的人工交互复现，不替代真实企业端点验收。
 
 ## 已知边界

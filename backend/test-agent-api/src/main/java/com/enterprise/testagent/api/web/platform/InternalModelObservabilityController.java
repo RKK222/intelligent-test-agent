@@ -79,6 +79,22 @@ public class InternalModelObservabilityController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
+    @GetMapping("/ttft-distribution")
+    public Mono<ApiResponse<Object>> ttftDistribution(
+            @RequestParam(required = false) String providerId,
+            @RequestParam(required = false) InternalModelCallOutcomeGroup outcomeGroup,
+            @RequestParam(required = false) InternalModelCallSource source,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return Mono.fromCallable(() -> ApiResponse.ok(
+                        (Object) queryService.queryTtftDistribution(
+                                providerId, outcomeGroup, source, from, to), traceId))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
     @GetMapping("/probe-status")
     public Mono<ApiResponse<Object>> probeStatus(ServerWebExchange exchange) {
         requireSuperAdmin(exchange);

@@ -8,6 +8,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordQuery;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelTtftDistribution;
 import com.enterprise.testagent.persistence.mybatis.InternalModelObservabilityMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelCallRecordRepository;
 import java.time.Instant;
@@ -167,6 +168,28 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 .satisfies(stat -> assertThat(stat.requestCount()).isEqualTo(1L));
     }
 
+    @Test
+    void calculatesTtftQuartilesWithPostgresqlPercentileCont() {
+        repository.record(distributionRecord(100L, 1));
+        repository.record(distributionRecord(200L, 2));
+        repository.record(distributionRecord(300L, 3));
+        repository.record(distributionRecord(400L, 4));
+
+        InternalModelTtftDistribution distribution = repository.queryTtftDistribution(
+                "provider-pg-distribution",
+                java.util.List.of(InternalModelCallOutcome.SUCCESS),
+                InternalModelCallSource.USER_CALL,
+                STARTED_AT.minusSeconds(1),
+                STARTED_AT.plusSeconds(10));
+
+        assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.minimumMillis()).isEqualTo(100.0);
+        assertThat(distribution.firstQuartileMillis()).isEqualTo(175.0);
+        assertThat(distribution.medianMillis()).isEqualTo(250.0);
+        assertThat(distribution.thirdQuartileMillis()).isEqualTo(325.0);
+        assertThat(distribution.maximumMillis()).isEqualTo(400.0);
+    }
+
     private static InternalModelCallRecord record(Long streamCompleteMillis) {
         return new InternalModelCallRecord(
                 null,
@@ -185,6 +208,26 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 "trace_pg",
                 "ucid_pg",
                 STARTED_AT);
+    }
+
+    private static InternalModelCallRecord distributionRecord(long firstTokenMillis, long offsetSeconds) {
+        return new InternalModelCallRecord(
+                null,
+                "provider-pg-distribution",
+                "model-pg",
+                "/chat/completions",
+                InternalModelCallSource.USER_CALL,
+                InternalModelCallOutcome.SUCCESS,
+                200,
+                null,
+                true,
+                1000L,
+                10L,
+                firstTokenMillis,
+                firstTokenMillis,
+                "trace_pg_distribution_" + offsetSeconds,
+                "ucid_pg",
+                STARTED_AT.plusSeconds(offsetSeconds));
     }
 
     private static boolean columnExists(String tableName, String columnName) {

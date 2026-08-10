@@ -101,6 +101,6 @@ Repository 端口只定义在 domain，具体 JDBC/Flyway 实现必须放在 `te
   唯一，`upstreamModelId` 只供模型网关解析。
 - `ModelGatewayUsageDailyRepository` 接受无正文的 `ModelGatewayUsageDelta`，只按稳定聚合维度累加计数、token
   和耗时。
-- `InternalModelCallRecordRepository` 接受不含正文的代理/探活结构化观测；明细中的 `firstByteMillis`、`firstTokenMillis`、`streamCompleteMillis` 分别表达响应头、首 Token 延迟（TTFT）和正常收尾信号（`[DONE]` 或非空 `finish_reason`）到达，`durationMillis` 保留端到端耗时。小时聚合为 TTFT 与流完成分别保留 sum/max/count，未达到对应阶段时不参与该指标统计。`InternalModelCallOutcomeGroup` 把底层 13 个精确结果稳定归入成功、请求或配置问题、上游服务异常、调用方中断、其他异常五个看板大类；查询仍返回精确原因，不丢失排障信息。
+- `InternalModelCallRecordRepository` 接受不含正文的代理/探活结构化观测；明细中的 `firstByteMillis`、`firstTokenMillis`、`streamCompleteMillis` 分别表达响应头、首 Token 延迟（TTFT）和正常收尾信号（`[DONE]` 或非空 `finish_reason`）到达，`durationMillis` 保留端到端耗时。小时聚合为 TTFT 与流完成分别保留 sum/max/count，未达到对应阶段时不参与该指标统计；`InternalModelTtftDistribution` 以样本数和最小值、P25、中位数、P75、最大值表达选定范围内的真实 TTFT 分布。`InternalModelCallOutcomeGroup` 把底层 13 个精确结果稳定归入成功、请求或配置问题、上游服务异常、调用方中断、其他异常五个看板大类；查询仍返回精确原因，不丢失排障信息。
 
 LobeHub 自身用户、Session、部门 Workspace、资源与审计是独立 fork 的领域，不在本模块建模。

@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatusRepository;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelTtftDistribution;
 import com.enterprise.testagent.persistence.mybatis.InternalModelObservabilityMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelCallRecordRepository;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelProbeStatusRepository;
@@ -147,6 +148,55 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         assertThat(probeStats).hasSize(1);
         assertThat(probeStats.getFirst().firstTokenCount()).isZero();
         assertThat(probeStats.getFirst().streamCompleteCount()).isZero();
+    }
+
+    @Test
+    void calculatesTtftFiveNumberSummaryFromFilteredCallRecords() {
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200,
+                5000L, null, T0, InternalModelCallSource.USER_CALL, 100L));
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200,
+                5000L, null, T0.plusSeconds(1), InternalModelCallSource.USER_CALL, 200L));
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200,
+                5000L, null, T0.plusSeconds(2), InternalModelCallSource.USER_CALL, 300L));
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200,
+                5000L, null, T0.plusSeconds(3), InternalModelCallSource.USER_CALL, 400L));
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "UPSTREAM_HTTP_ERROR", 500,
+                5000L, "UpstreamException", T0.plusSeconds(4), InternalModelCallSource.USER_CALL, 1000L));
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200,
+                5000L, null, T0.plusSeconds(5), InternalModelCallSource.PROBE, 2000L));
+        callRepository.record(record("other-provider", "deepseek-v4", "/chat/completions", "SUCCESS", 200,
+                5000L, null, T0.plusSeconds(6), InternalModelCallSource.USER_CALL, 3000L));
+
+        InternalModelTtftDistribution distribution = callRepository.queryTtftDistribution(
+                PROVIDER,
+                List.of(InternalModelCallOutcome.SUCCESS),
+                InternalModelCallSource.USER_CALL,
+                T0.minusSeconds(1),
+                T0.plusSeconds(10));
+
+        assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.minimumMillis()).isEqualTo(100.0);
+        assertThat(distribution.firstQuartileMillis()).isEqualTo(175.0);
+        assertThat(distribution.medianMillis()).isEqualTo(250.0);
+        assertThat(distribution.thirdQuartileMillis()).isEqualTo(325.0);
+        assertThat(distribution.maximumMillis()).isEqualTo(400.0);
+    }
+
+    @Test
+    void returnsEmptyTtftDistributionWhenNoCallReachedFirstToken() {
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "UPSTREAM_CONNECT_FAILED", null,
+                100L, "ConnectException", T0, InternalModelCallSource.USER_CALL, null));
+
+        InternalModelTtftDistribution distribution = callRepository.queryTtftDistribution(
+                PROVIDER, List.of(), InternalModelCallSource.USER_CALL,
+                T0.minusSeconds(1), T0.plusSeconds(1));
+
+        assertThat(distribution.sampleCount()).isZero();
+        assertThat(distribution.minimumMillis()).isNull();
+        assertThat(distribution.firstQuartileMillis()).isNull();
+        assertThat(distribution.medianMillis()).isNull();
+        assertThat(distribution.thirdQuartileMillis()).isNull();
+        assertThat(distribution.maximumMillis()).isNull();
     }
 
     @Test

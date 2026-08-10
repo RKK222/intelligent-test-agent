@@ -8,6 +8,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordQuery;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelTtftDistribution;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -63,6 +64,25 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                         providerId, source == null ? null : source.name(), from, to).stream()
                 .map(this::toDomain)
                 .toList();
+    }
+
+    @Override
+    public InternalModelTtftDistribution queryTtftDistribution(
+            String providerId,
+            List<InternalModelCallOutcome> outcomes,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to) {
+        List<String> outcomeNames = outcomes == null ? List.of() : outcomes.stream().map(Enum::name).toList();
+        InternalModelTtftDistributionRow row = mapper.findTtftDistribution(
+                providerId, outcomeNames, source == null ? null : source.name(), from, to);
+        return new InternalModelTtftDistribution(
+                row.sampleCount(),
+                row.minimumMillis(),
+                row.firstQuartileMillis(),
+                row.medianMillis(),
+                row.thirdQuartileMillis(),
+                row.maximumMillis());
     }
 
     @Override
