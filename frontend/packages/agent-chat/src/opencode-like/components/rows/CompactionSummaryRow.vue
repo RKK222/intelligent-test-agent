@@ -9,9 +9,8 @@ export type CompactionSummaryRowProps = {
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Minimize2 } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, Minimize2 } from "lucide-vue-next";
 import MarkdownView from "../../../MarkdownView.vue";
-import OcIconButton from "../primitives/OcIconButton.vue";
 
 const props = defineProps<CompactionSummaryRowProps>();
 
@@ -40,6 +39,9 @@ const displaySummary = computed(() => props.summary.split("\n").map((line) => {
 const modeLabel = computed(() => props.part.overflow
   ? "超出窗口"
   : props.part.auto ? "自动压缩" : "手动压缩");
+const triggerLabel = computed(() => props.part.auto || props.part.overflow
+  ? "上下文已自动压缩"
+  : "上下文已手动压缩");
 const expanded = ref(false);
 const detailId = computed(() => `oc-compaction-detail-${props.part.partId.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
 </script>
@@ -50,15 +52,22 @@ const detailId = computed(() => `oc-compaction-detail-${props.part.partId.replac
     :data-testid="`compaction-part-${part.partId}`"
   >
     <div class="oc-compaction-summary__summary">
-      <OcIconButton
+      <button
+        type="button"
         class="oc-compaction-summary__trigger"
-        :label="expanded ? '收起上下文压缩详情' : '展开上下文压缩详情'"
+        :class="{ 'is-expanded': expanded }"
+        :aria-label="expanded ? '收起上下文压缩详情' : '展开上下文压缩详情'"
+        :title="expanded ? '收起上下文压缩详情' : '展开上下文压缩详情'"
         :aria-expanded="expanded"
         :aria-controls="detailId"
         @click="expanded = !expanded"
       >
-        <Minimize2 aria-hidden="true" />
-      </OcIconButton>
+        <Minimize2 class="oc-compaction-summary__icon" aria-hidden="true" />
+        <span class="oc-compaction-summary__label">{{ triggerLabel }}</span>
+        <ChevronDown v-if="expanded" class="oc-compaction-summary__chevron" aria-hidden="true" />
+        <ChevronRight v-else class="oc-compaction-summary__chevron" aria-hidden="true" />
+      </button>
+      <span class="oc-compaction-summary__rule" aria-hidden="true" />
     </div>
     <div
       v-if="expanded"
@@ -68,7 +77,7 @@ const detailId = computed(() => `oc-compaction-detail-${props.part.partId.replac
       aria-label="上下文压缩详情"
     >
       <div class="oc-compaction-summary__heading">
-        <strong>上下文已压缩</strong>
+        <strong>压缩摘要</strong>
         <span>{{ modeLabel }}</span>
       </div>
       <div class="oc-compaction-summary__body">

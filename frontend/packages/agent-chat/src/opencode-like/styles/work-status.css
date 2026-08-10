@@ -56,16 +56,14 @@
 }
 
 .oc-work-status-completed-trigger,
-.oc-work-status-history-trigger,
-.oc-compaction-summary__trigger {
+.oc-work-status-history-trigger {
   width: 28px;
   height: 28px;
   color: var(--oc-muted);
 }
 
 .oc-work-status-completed-trigger svg,
-.oc-work-status-history-trigger svg,
-.oc-compaction-summary__trigger svg {
+.oc-work-status-history-trigger svg {
   width: 15px;
   height: 15px;
 }

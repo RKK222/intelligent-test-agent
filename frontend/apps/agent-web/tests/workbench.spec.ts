@@ -542,9 +542,10 @@ test("session share refreshes a compacted summary when the session revision chan
 
   const compaction = page.getByTestId("compaction-part-prt-shared-compaction");
   await expect(compaction).toBeVisible({ timeout: 10_000 });
-  await expect(compaction).not.toContainText("上下文已压缩");
+  await expect(compaction.getByRole("button", { name: "展开上下文压缩详情" })).toContainText("上下文已手动压缩");
+  await expect(compaction).not.toContainText("当前目标");
   await compaction.getByRole("button", { name: "展开上下文压缩详情" }).click();
-  await expect(compaction).toContainText("上下文已压缩");
+  await expect(compaction).toContainText("压缩摘要");
   await expect(compaction).toContainText("当前目标");
   await expect(compaction).toContainText("下一步");
 });

@@ -8102,3 +8102,28 @@
 
 - 被分享成员现在可以正常撤销、修改并重发自己最后一条消息，不再要求刷新或报“会话分享服务未配置”；分享授权、`canChat`、源消息实际发送人和会话边界仍由原有服务端规则复验。
 - 本次修复只更正既有 Controller 的 Spring 装配并增加回归测试/文档，不新增或变更 HTTP URL、请求/响应 DTO、RunEvent、数据库/Flyway、关系型 SQL、性能链路或安全策略；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-10 - 将上下文压缩恢复为清晰的独立记录
+
+### Why
+
+- 上一版把压缩完成态收成了没有文字的 28px 图标；它虽然与历史思考图标同尺寸，但在实际时间线中位置和含义都不明显，用户容易误以为压缩按钮消失。
+- 用户进一步明确压缩必须与思考入口分离，可用独立分隔行或独立按钮展示，并在点击后查看具体摘要。
+
+### What
+
+- `CompactionSummaryRow` 改为独立的带文字按钮，自动和手动压缩分别显示“上下文已自动压缩”“上下文已手动压缩”，右侧细分隔线标明压缩发生的时间线位置；不复用或并入思考按钮。
+- 按钮保留压缩图标、展开箭头、键盘焦点和 `aria-expanded/aria-controls`；点击后继续在下方展示压缩方式、触发原因、中文字段映射、内部续写摘要和“不是新的回答”说明。
+- 同步 agent-chat、agent-web、用户手册和原生 Part/组件/分享会话回归断言；消息投影和协议原文保持不变。
+
+### How
+
+- 定向 Vitest 2 个文件 179 项通过、1 项跳过；前端全量 Vitest 123 个文件 1904 项通过、1 项跳过；共享会话 compact 修订 Chromium Playwright 1 项通过。
+- 全 workspace lint、typecheck 按近期日志记录的 VitePress 临时目录竞争要求串行复跑并通过；agent-web production build 和 `tools/verify-ai-docs.sh` 通过，构建仅保留既有大 chunk 提示。
+- 按 `.env.test`、JDK 25、`--without-workflow` 重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端 3000 返回 200，CORS 正确，manager 受管 OpenCode health 为 `HEALTHY`。浏览器接管本地 URL 被产品安全策略阻止，未绕过该限制，因此本次没有新增真实页面截图证据。
+- 提交前回顾全部 `.agents/session-log*.md`，确认前序分享撤回装配修复已独立提交，当前暂存范围不覆盖其它开发者成果；冲突标记和空白校验通过。
+
+### Result
+
+- 压缩完成后会在发生位置显示一条可直接识别、可点击的独立记录，不再像图标消失，也不会和思考状态共用按钮；详情仍默认折叠并按需展开。
+- 本次仅修改前端展示、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，旧消息与旧后端兼容性不变。
