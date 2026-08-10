@@ -8198,3 +8198,24 @@
 
 - 分享所属人和被分享人两个视角的专项流程在三种浏览器中稳定通过，权威用户消息顺序不再依赖固定等待时间。
 - 本次仅修改 E2E 测试及测试辅助器；不涉及生产代码、HTTP API、RunEvent wire、DTO、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-10 - 修复 wr 本地 OpenCode 失效绑定
+
+### Why
+
+- wr 的 `ACTIVE` 用户进程绑定仍指向已离线的旧服务器 `192.168.100.115:4097`，对应进程已为 `FAILED`；当前本机稳定身份是 `kakadeMacBook-Pro.local`，因此状态与初始化请求在后端路由阶段返回 `OPENCODE_UNAVAILABLE`，没有进入本机 manager。
+
+### What
+
+- 在本地 `.env.test` 测试库中精确删除 wr/opencode 这一条旧 assignment，保留旧失败进程记录及其他用户绑定；随后以 wr 当前登录态调用正式“初始化进程”入口，由公共分配、预留和启动链路重新创建本机进程。
+
+### How
+
+- 删除前锁定并核对旧 binding 的 user/process/server/port/status，删除后确认 wr 绑定数为 0；未修改其他用户、旧进程记录或环境配置。
+- 正式初始化后，manager 在 4096 返回 `STARTED`，公共健康等待从短暂 `UNHEALTHY` 收敛为 `HEALTHY`；`/global/health` 返回 `healthy=true`、版本 `1.18.4`，`/global/config` 返回成功，端口 4096 由新 opencode PID 监听。
+- 数据库最终状态为 wr 新 binding `ACTIVE`、进程 `RUNNING`，服务器 `kakadeMacBook-Pro.local`、端口 4096；页面显示“TestAgent 进程可用”。提交前已回顾全部 `.agents/session-log*.md`。
+
+### Result
+
+- wr 的 OpenCode 已在本机重新分配并健康启动，可继续正常对话。
+- 本次是本地测试库的定点运行态修复，仅更新会话记录；未修改生产代码、HTTP API、RunEvent、数据库结构/Flyway、SQL mapper、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。
