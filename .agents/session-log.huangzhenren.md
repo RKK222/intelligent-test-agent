@@ -2323,4 +2323,21 @@
 - Result:
   - 列表现在仅对真正已分享的会话显示分享图标，未分享会话不再误显示；未过期蓝色、已过期灰色。纯前端判定逻辑修正，无后端/API 变更，向后兼容。
 
+### 2026-08-10 - 修复 opencode-like 全局脉冲动画导致浏览器 CPU 持续偏高
+
+- Why:
+  - 用户反馈打开网页后浏览器 CPU 明显且持续升高，不随加载完成回落；已排除宠物动画。
+  - 运行时定位（Playwright + `document.getAnimations()`）发现 `packages/agent-chat/src/opencode-like/styles/animations.css` 在 `:root` 上挂了 `oc-pulse-global 1.6s ease-in-out infinite` 无限动画，动画对象是 `@property` 注册的 `inherits: true` 自定义属性 `--oc-pulse-opacity`。
+  - 该属性 `inherits:true`，`:root` 每帧变化会把继承值重新传播到整棵 DOM 触发全树样式重算，即使没有任何运行态指示器在消费它也持续运行；A/B 测得主线程吞吐下降约 15%（963 -> 1110 次/5s）。因每帧重算 <50ms，长任务（longtask）测量抓不到，表现为"一直高 CPU 但无长任务"。
+- What:
+  - 删除 `@property --oc-pulse-opacity`、`@keyframes oc-pulse-global` 与 `:root { animation: ... }` 三段。
+  - 三个原消费方改为各自直接动画 `opacity`（复用已有的 `@keyframes oc-pulse`）：`animations.css` 的 `.oc-thinking-dot`、`tools.css` 的 `.oc-tool__status.is-running`、`parts.css` 的 `.oc-disclosure.is-running .oc-tool__status`。`opacity` 动画走 GPU 合成层，且这些元素只在有活动 Run 时才存在，空闲时零开销。
+  - 保留 `@keyframes oc-pulse`（`parts.css` 既有的 `.oc-disclosure.is-running::before` 等已直接使用）。视觉行为不变（仍是 0.45 <-> 1 的 opacity 脉冲）。
+- How:
+  - 前端全量校验通过：`corepack pnpm lint`（15 包 vue-tsc/tsc）、`corepack pnpm typecheck`、`corepack pnpm test`（123 文件 / 1898 passed / 1 skipped）。
+  - 运行时复测：重载后 `document.getAnimations()` 在空闲态返回 0 个动画、`:root` 与所有 infinite 动画均清零，主线程吞吐回到 1115 次/5s（与修复前手动取消动画的基线一致），确认 ~15% 开销已消除。
+  - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 页面空闲时不再有全局无限动画触发全树样式重算，浏览器 CPU 回归正常；运行态指示器（思考点、工具运行、disclosure 运行）在有活动 Run 时仍正常脉冲。纯 CSS 性能修复，无 API/DTO/事件/数据库变更，向后兼容。
+
 

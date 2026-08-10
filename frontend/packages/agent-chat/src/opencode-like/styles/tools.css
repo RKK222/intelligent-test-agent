@@ -161,7 +161,7 @@
   background: rgba(49, 91, 220, 0.07);
   color: var(--oc-accent);
   border-color: rgba(49, 91, 220, 0.25);
-  opacity: var(--oc-pulse-opacity);
+  animation: oc-pulse 1.6s ease-in-out infinite;
 }
 
 .oc-tool__status.is-completed,
