@@ -8244,3 +8244,27 @@
 
 - 看板现在既能查看 TTFT 的总体区间，又能在同一视野比较调用结果和供应商请求量；箱线图五个位置均来自当前筛选范围的真实调用明细。
 - 新增只读 HTTP API 和一次受 31 天最大查询窗口约束的数据库聚合查询；没有数据库结构/Flyway、RunEvent、安全策略或 OpenCode 兼容边界变更，未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-10 - 降低上下文压缩结果与摘要字号
+
+### Why
+
+- 压缩结果按钮视觉层级高于正常回答正文。源码原先使用 11px，但 agent-web 未分层的全局 `button` 规则把最终计算值覆盖为 14px/500；仅调整 token 数值无法在真实页面生效。
+- 展开摘要同时受到 `MarkdownView` 和全局标题、代码样式影响，正文、标题与代码需要按压缩辅助信息范围定向降级。
+
+### What
+
+- 新增 agent-chat 的 9px `--oc-text-2xs` 微型状态 token；压缩结果按钮最终固定为 9px/400、22px 高，图标、箭头、间距和内边距同步缩小。
+- 压缩摘要正文固定为 10px，标题为 1.08em，代码和表格为 0.92em；使用压缩组件作用域内的必要优先级覆盖，避免影响普通回答 Markdown。
+- 同步 agent-chat README，记录结果按钮和摘要的稳定视觉层级。
+
+### How
+
+- 定向 `FigmaChatPanel` 压缩摘要用例 1 项通过（其余 158 项按筛选跳过），agent-chat typecheck、agent-web production build、AI 文档校验和 `git diff --check` 通过。
+- Playwright CLI 在当前仓库真实 Vite 样式下读取最终计算值：按钮 9px/400、22px，摘要正文 10px、标题 10.8px、代码 9.2px。
+- 发现 3000 端口由兄弟 worktree `intelligent-test-agent-notification-center` 占用，未停止或改动对方进程；当前仓库改用 3001 独立启动并返回 200，后端 8080 保持健康。
+
+### Result
+
+- 上下文压缩结果和展开摘要都明显低于正常回答正文层级，且不再被 agent-web 全局按钮、标题或代码字号覆盖。
+- 本次仅修改 agent-chat 样式 token、组件样式和稳定 README；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。

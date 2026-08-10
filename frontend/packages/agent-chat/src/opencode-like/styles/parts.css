@@ -197,25 +197,28 @@
 .oc-compaction-summary__summary {
   display: flex;
   min-width: 0;
-  min-height: 28px;
+  min-height: 22px;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .oc-compaction-summary__trigger {
   display: inline-flex;
   width: auto;
-  height: 28px;
+  height: 22px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   border: 1px solid var(--oc-border);
   border-radius: var(--oc-radius-sm);
   background: var(--oc-surface);
   color: var(--oc-muted);
-  padding: 0 8px;
+  padding: 0 5px;
   font-family: var(--oc-font-sans);
-  font-size: var(--oc-text-sm);
+  /* agent-web 的未分层全局 button 规则固定为 14px/500；这里必须显式覆盖，才能保持辅助状态层级。 */
+  font-size: var(--oc-text-2xs) !important;
+  font-weight: 400 !important;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -233,20 +236,21 @@
 }
 
 .oc-compaction-summary__icon {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
 }
 
 .oc-compaction-summary__label {
-  font-weight: 500;
+  font-size: var(--oc-text-2xs);
+  font-weight: 400;
   white-space: nowrap;
 }
 
 .oc-compaction-summary__chevron {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 13px;
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
   color: var(--oc-subtle);
 }
 
@@ -261,12 +265,26 @@
   border: 1px solid var(--oc-border);
   border-radius: var(--oc-radius-md);
   background: var(--oc-surface-muted);
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .oc-compaction-summary__markdown {
   color: var(--oc-fg);
-  font-size: var(--oc-text-sm);
+  font-size: var(--oc-text-xs);
+}
+
+/* MarkdownView 与应用全局样式会重新设置正文、标题、表格和代码字号，压缩摘要在本行内统一降级排版。 */
+.oc-compaction-summary__markdown .markdown-body {
+  font-size: var(--oc-text-xs) !important;
+  line-height: 1.35;
+}
+
+.oc-compaction-summary__markdown .markdown-body :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1.08em !important;
+}
+
+.oc-compaction-summary__markdown .markdown-body :is(pre, code, table) {
+  font-size: 0.92em !important;
 }
 
 .oc-timeline-root[data-debug="true"] .oc-unknown-part {
