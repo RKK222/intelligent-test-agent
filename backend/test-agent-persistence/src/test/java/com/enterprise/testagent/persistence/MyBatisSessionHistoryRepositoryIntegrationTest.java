@@ -116,8 +116,8 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                         item -> item.session().sessionId().value(),
                         SessionHistoryItem::shareStatus)
                 .containsExactly(
-                        tuple("ses_history_created", "ACTIVE"),
                         tuple("ses_history_run", "EXPIRED"),
+                        tuple("ses_history_created", "ACTIVE"),
                         tuple("ses_history_message", null),
                         tuple("ses_history_empty_context", "REVOKED"));
 
@@ -125,6 +125,24 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         assertThat(repository.findUserSession(CURRENT_USER, new SessionId("ses_history_created")))
                 .isPresent()
                 .hasValueSatisfying(item -> assertThat(item.shareStatus()).isEqualTo("ACTIVE"));
+    }
+
+    /** 验证取消置顶后 MyBatis 查询继续按原更新时间确定普通组位置。 */
+    @Test
+    void unpinnedSessionReturnsToItsOriginalUpdatedAtPosition() {
+        assertThat(repository.findUserHistory(CURRENT_USER, "", new PageRequest(1, 30)).items())
+                .extracting(item -> item.session().sessionId().value())
+                .startsWith("ses_history_run", "ses_history_created");
+
+        jdbcClient.sql("update sessions set pinned = false where session_id = 'ses_history_run'").update();
+
+        assertThat(repository.findUserHistory(CURRENT_USER, "", new PageRequest(1, 30)).items())
+                .extracting(item -> item.session().sessionId().value())
+                .containsExactly(
+                        "ses_history_created",
+                        "ses_history_run",
+                        "ses_history_message",
+                        "ses_history_empty_context");
     }
 
     @Test

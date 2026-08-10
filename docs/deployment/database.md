@@ -194,6 +194,7 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 - `agent_session_bindings` 是 agent 运行态绑定主数据源，按 `(session_id, agent_id)` 记录平台 session 到远端 session/node 的映射。
 - `sessions.opencode_session_id` 和 `sessions.opencode_execution_node_id` 是后端内部兼容字段，不进入 API DTO；旧 session 两列为空时由首次 `opencode` Run 懒创建远端 session，非 opencode agent 不扩展这些列。
 - `sessions.pinned` 进入 Session API DTO；软删除复用 `status=ARCHIVED`，不新增删除时间字段，旧数据默认 `ACTIVE` 且 `pinned=false`。
+- `sessions.updated_at` 同时作为置顶组和普通组内的稳定排序锚点；纯 `pinned` 更新不刷新该字段，确保取消置顶后回到置顶前的位置。标题实际变化等会话更新仍按既有规则刷新。
 - `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；前者只服务 `LEGACY_FULL`/旧数据，`REDIS_SUMMARY` 的运行态 JSON 位于 Redis。未来迁移到 JSONB 时必须先保持旧列读取兼容。
 - `LEGACY_FULL` 的 `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复；`REDIS_SUMMARY` seq 由 Redis Lua 原子分配，Stream ID 为 `${seq}-0`。
 - `run_events.raw_event_id` 可空；opencode raw event id 缺失时必须保持 `NULL`，不能写入 `"unknown"` 这类伪值，否则会导致唯一索引误去重。

@@ -2054,6 +2054,8 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 
 `SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`、`workspaceContext`，以及可选来源字段 `sourceType/sourceRefId`。普通会话默认为 `MANUAL/null`；由夜间任务预创建的会话返回 `SCHEDULED_TASK/net_...`。旧后端缺失来源字段时前端按普通会话兼容。
 
+仅变更 `pinned` 时，服务端保留会话原有 `updatedAt`：置顶只改变分组，取消置顶后会话回到普通组中由原 `updatedAt` 决定的位置。只有标题实际变化等会话内容更新才刷新 `updatedAt`。
+
 可选分享状态字段 `shareStatus/isShared/shareExpired` 仅在历史列表（`GET /api/internal/platform/opencode-runtime/sessions`）中派生返回，用于列表直接展示是否已分享及是否过期：
 
 ```json

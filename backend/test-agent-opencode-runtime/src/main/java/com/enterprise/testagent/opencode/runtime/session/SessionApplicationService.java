@@ -290,13 +290,15 @@ public class SessionApplicationService {
     }
 
     /**
-     * 更新 Session 标题和 pinned 状态，未传字段保持原值。
+     * 更新 Session 标题和 pinned 状态，未传字段保持原值；纯置顶变更保留历史排序时间。
      */
     public Session updateSession(SessionId sessionId, String title, Boolean pinned, String traceId) {
         Session current = getSession(sessionId);
         String nextTitle = title == null || title.isBlank() ? current.title() : title;
         boolean nextPinned = pinned == null ? current.pinned() : pinned;
-        Session updated = sessionRepository.save(current.updateTitleAndPinned(nextTitle, nextPinned, Instant.now(), traceId));
+        // updatedAt 是普通会话组的排序锚点；置顶/取消置顶属于展示元数据，不能把旧会话抬到普通组最前。
+        Instant nextUpdatedAt = nextTitle.equals(current.title()) ? current.updatedAt() : Instant.now();
+        Session updated = sessionRepository.save(current.updateTitleAndPinned(nextTitle, nextPinned, nextUpdatedAt, traceId));
         // 仅标题确实已保存时才使原生 title agent 的旧代际失效；置顶等元数据更新不能中断标题等待。
         if (!nextTitle.equals(current.title()) && titleWatchService != null) {
             titleWatchService.cancelForSession(sessionId, traceId);

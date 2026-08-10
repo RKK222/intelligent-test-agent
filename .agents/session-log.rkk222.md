@@ -7845,3 +7845,31 @@
   因未使用 `--with-lobehub` 且前端入口关闭，本次本地启动不启用 LobeHub。
 - 当前启动仅有一条 macOS Netty 原生 DNS provider 缺失的 fallback 日志；应用仍使用系统 DNS 且 readiness 为 UP，
   未发现新的 Spring/Flyway 启动异常。未修改 `.env.test`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-10 - 修复取消置顶后的会话排序位置
+
+### Why
+
+- 历史会话仅切换 `pinned` 时，应用服务仍把 `updatedAt` 刷新为当前时间；旧会话取消置顶后因此被排到普通组最前，
+  无法回到置顶前按最后活动时间确定的位置。
+
+### What
+
+- `SessionApplicationService` 将 `updatedAt` 继续作为普通会话组的稳定排序锚点：纯置顶/取消置顶保留原值，只有标题实际变化时刷新。
+- 增加服务层置顶往返时间戳回归和 MyBatis 取消置顶排序回归，并修正同一查询测试中未体现“置顶优先”的旧断言。
+- 同步 runtime、API、persistence、前端、用户手册、HTTP API、数据库语义和会话场景测试说明。
+
+### How
+
+- `SessionApplicationServiceTest` 17 项通过；`MyBatisSessionHistoryRepositoryIntegrationTest` 8 项通过。
+- `workbench-utils.test.ts` 与 `FigmaChatPanel.test.ts` 共 258 项通过、1 项按设计跳过；Chromium Playwright 置顶/取消置顶场景 1 项通过，
+  覆盖目标会话恢复原位置、普通会话选中态与正文不被置顶操作串改。
+- 后端 `mvn -pl test-agent-app -am -DskipTests package` 的 20 模块构建、前端 agent-web production build（含用户手册）均通过。
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow` 重新构建并启动 release 三服务；
+  Backend liveness/readiness 均为 `UP`，Frontend `http://127.0.0.1:3000/` 返回 HTTP 200。
+
+### Result
+
+- 取消置顶后，会话按置顶前的 `updatedAt` 回到普通组原位置；置顶目标以外的会话顺序、当前选中态和正文保持隔离。
+- HTTP URL、请求/响应 DTO 和事件契约不变；未新增 SQL、Flyway migration 或数据库字段，不涉及安全、环境配置、generated SDK
+  或 OpenCode 源码。排序仍复用既有索引与查询，未增加分页查询或网络请求，向后兼容旧客户端。
