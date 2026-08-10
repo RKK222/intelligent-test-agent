@@ -1834,6 +1834,17 @@ describe("FigmaChatPanel", () => {
             shareExpired: true,
             createdAt: "2026-07-07T09:00:00Z",
             updatedAt: "2026-07-07T10:00:00Z"
+          },
+          {
+            // 后端对未分享会话返回 isShared=false、shareStatus=null、shareExpired=false；
+            // 不能因为 shareExpired=false 而误判为已分享。
+            id: "ses_not_shared",
+            title: "未分享会话",
+            isShared: false,
+            shareStatus: null,
+            shareExpired: false,
+            createdAt: "2026-07-06T09:00:00Z",
+            updatedAt: "2026-07-06T10:00:00Z"
           }
         ]
       } as any
@@ -1850,6 +1861,9 @@ describe("FigmaChatPanel", () => {
     expect(expiredIcon.exists()).toBe(true);
     expect(expiredIcon.find("svg").exists()).toBe(true);
     expect(expiredIcon.attributes("aria-label")).toBe("该会话已分享（已过期）");
+
+    // 仅两条已分享会话渲染分享图标，未分享会话不渲染。
+    expect(drawer.findAll(".figma-chat-history-card-share-icon")).toHaveLength(2);
 
     wrapper.unmount();
   });

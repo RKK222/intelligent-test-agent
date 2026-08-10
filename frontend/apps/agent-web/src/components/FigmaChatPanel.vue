@@ -3154,9 +3154,10 @@ function isHistoryItemShared(item: {
   shareStatus?: string | null
   shareExpired?: boolean | null
 }): boolean {
+  // shareExpired 只表示“已分享会话是否过期”，不能作为是否已分享的判据：
+  // 后端对未分享会话也会返回 shareExpired=false，若用 !== undefined/null 判定会把未分享会话误判为已分享。
   if (item.isShared === true) return true
   if (item.shareStatus && item.shareStatus !== 'NONE' && item.shareStatus !== 'UNSHARED') return true
-  if (item.shareExpired !== undefined && item.shareExpired !== null) return true
   return false
 }
 

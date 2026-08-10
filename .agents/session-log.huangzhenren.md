@@ -2308,3 +2308,19 @@
   - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、RunEvent、Flyway migration、generated SDK 或 OpenCode 源码，也未新建分支。
 - Result:
   - 会话历史列表每条会话现由后端 `GET /sessions` 一次查询派生分享状态，无需点击即可在列表中看到分享图标；未过期蓝色、已过期灰色。无新增数据库结构（复用既有 `session_shares` 表与索引）、无新增 HTTP URL、无 RunEvent/DTO 字段破坏性变更，`SessionHistoryItem` 两参构造方法保持兼容。
+
+### 2026-08-10 - 修复未分享会话被误判为已分享导致全列表出现分享图标
+
+- Why:
+  - 后端列表派生分享状态后，所有会话（含未分享）都渲染了分享图标。
+- What:
+  - 根因在前端 `isHistoryItemShared` 的第三条判据 `item.shareExpired !== undefined && item.shareExpired !== null`：`shareExpired` 只表示“已分享会话是否过期”，后端对未分享会话返回 `shareExpired=false`，而 `false !== undefined && false !== null` 为真，于是未分享会话被误判为已分享。此前该判据无害，是因为旧实现只在 `ordinarySessionShare` 覆盖当前会话时设置 `shareExpired`（且当前会话总是 `isShared=true`），后端补齐字段后该潜在 bug 显形。
+  - 移除该判据，仅以 `isShared===true` 或非 `NONE/UNSHARED` 的 `shareStatus` 判定是否已分享；`isHistoryItemShareExpired` 本就用 `shareExpired===true` 严格判断，无需改动。
+  - `FigmaChatPanel.test.ts` 分享图标用例补一条未分享会话（`isShared=false、shareStatus=null、shareExpired=false`），并断言全列表仅渲染 2 个分享图标，锁住回归。
+- How:
+  - 定向 `vitest run apps/agent-web/tests/FigmaChatPanel.test.ts`，154 passed / 1 skipped；agent-web typecheck 通过。
+  - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 列表现在仅对真正已分享的会话显示分享图标，未分享会话不再误显示；未过期蓝色、已过期灰色。纯前端判定逻辑修正，无后端/API 变更，向后兼容。
+
+
