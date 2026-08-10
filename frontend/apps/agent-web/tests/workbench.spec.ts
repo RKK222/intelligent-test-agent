@@ -1,6 +1,437 @@
 import { expect, test, type Page } from "@playwright/test";
 import { applicationWorkspaceRestrictionsFixture as permissionFixture } from "../../../tests/fixtures/application-workspace-restrictions";
 
+test("session share management and received list preserve one link and inactive history", async ({ page }) => {
+  const sharePutRequests: Array<Record<string, unknown>> = [];
+  const shareRevokeRequests: Array<{ sessionId: string; expectedVersion: string | null }> = [];
+  await page.addInitScript(() => {
+    window.open = ((url?: string | URL, target?: string, features?: string) => {
+      Object.assign(window, {
+        __testOpenedSessionShare: [String(url), target, features]
+      });
+      return window;
+    }) as typeof window.open;
+  });
+  const sessionUnderShare = { ...session(), title: "支付回归协作会话" };
+  await mockBackendApi(page, {
+    sessions: [sessionUnderShare],
+    sessionMessagesBySessionId: { ses_1: [] },
+    sharedSessions: [
+      sharedSessionListItem({ shareId: "shr_active", sessionTitle: "接口联调协作", status: "ACTIVE" }),
+      sharedSessionListItem({ shareId: "shr_expired", sessionTitle: "已过期协作", status: "EXPIRED" })
+    ],
+    sessionCollaborationShare: null,
+    sessionShareCandidates: [
+      { userId: "usr_collaborator", unifiedAuthId: "ucid_collaborator", username: "协作者" }
+    ],
+    sessionSharePutRequests: sharePutRequests,
+    sessionShareRevokeRequests: shareRevokeRequests,
+    nightTasks: [{
+      taskId: "net_share_pending",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1234567890abcdef",
+      sessionTitle: "支付回归协作会话",
+      contentPreview: "稍后执行",
+      status: "SCHEDULED",
+      scheduleMode: "NIGHT_WINDOW",
+      slotStart: "2026-08-09T13:00:00Z",
+      slotEnd: "2026-08-09T13:15:00Z",
+      windowEnd: "2026-08-09T23:00:00Z",
+      rolloverCount: 0,
+      runId: null,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: "2026-08-09T01:00:00Z",
+      updatedAt: "2026-08-09T01:00:00Z"
+    }]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await expect(page.getByRole("button", { name: "会话列表" })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "会话列表" }).click();
+  await page.getByRole("tab", { name: /分享给我/ }).click();
+  await expect(page.getByRole("button", { name: /接口联调协作/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /已过期协作/ })).toBeDisabled();
+  await expect(page.getByText("已过期", { exact: true })).toBeVisible();
+  const ordinaryWorkbenchUrl = page.url();
+  await page.getByRole("button", { name: /接口联调协作/ }).click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __testOpenedSessionShare?: string[] }
+  ).__testOpenedSessionShare)).toEqual([
+    "/s/shr_active",
+    "_blank",
+    "noopener,noreferrer"
+  ]);
+  expect(page.url()).toBe(ordinaryWorkbenchUrl);
+
+  await page.getByRole("tab", { name: /我的会话/ }).click();
+  await page.getByRole("button", { name: /支付回归协作会话/ }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
+  await page.getByTestId("manage-session-share").click();
+
+  const dialog = page.locator(".session-share-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("当前会话有 1 个待执行定时任务；分享失效后仍将按原计划执行。")).toBeVisible();
+  await dialog.getByRole("button", { name: /协作者/ }).click();
+  await dialog.locator(".session-share-dialog__permission-switch .el-switch__core").click();
+  await dialog.getByRole("radio", { name: "3 天" }).click();
+  await dialog.getByRole("button", { name: "创建分享" }).click();
+
+  await expect.poll(() => sharePutRequests.length).toBe(1);
+  expect(sharePutRequests[0]?.expectedVersion).toBeNull();
+  expect(sharePutRequests[0]?.members).toEqual([{ userId: "usr_collaborator", canChat: true }]);
+  await expect(dialog.getByLabel("唯一分享链接")).toHaveValue(/\/s\/shr_e2e_unique$/);
+
+  await dialog.getByRole("button", { name: "取消分享" }).click();
+  await expect(page.getByText(/取消分享不会取消任务/)).toBeVisible();
+  await page.getByRole("button", { name: "取消分享", exact: true }).last().click();
+  await expect.poll(() => shareRevokeRequests).toEqual([{ sessionId: "ses_1", expectedVersion: "0" }]);
+});
+
+test("session share owner workbench resolves collaborator names from the managed share", async ({ page }) => {
+  await mockBackendApi(page, {
+    sessions: [{ ...session(), title: "所属人协作会话" }],
+    sessionCollaborationShare: {
+      shareId: "shr_owner_names",
+      sharePath: "/s/shr_owner_names",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1234567890abcdef",
+      ownerUserId: "usr_admin",
+      status: "ACTIVE",
+      expiresAt: "2026-08-16T00:00:00Z",
+      version: 3,
+      members: [{
+        userId: "usr_collaborator",
+        unifiedAuthId: "ucid_collaborator",
+        username: "协作者",
+        canChat: true,
+        status: "ACTIVE",
+        sharedAt: "2026-08-09T00:00:00Z",
+        updatedAt: "2026-08-09T00:00:00Z",
+        removedAt: null
+      }],
+      createdAt: "2026-08-09T00:00:00Z",
+      updatedAt: "2026-08-09T00:00:00Z",
+      revokedAt: null
+    },
+    sessionMessagesBySessionId: {
+      ses_1: [{
+        messageId: "msg_collaborator_owner_view",
+        sessionId: "ses_1",
+        role: "USER",
+        content: "协作者发出的消息",
+        senderUserId: "usr_collaborator",
+        senderUnifiedAuthId: "ucid_collaborator",
+        sentBySharedUser: true,
+        createdAt: "2026-08-09T01:00:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "会话列表" }).click();
+  await page.getByRole("button", { name: /所属人协作会话/ }).click();
+  const collaboratorTurn = page.locator('[data-oc-turn-id="msg_collaborator_owner_view"]');
+  await expect(collaboratorTurn).toBeVisible({ timeout: 20_000 });
+  await expect(collaboratorTurn.locator(".oc-user-message__sender")).toHaveText("协作者");
+});
+
+test("session share read-only workbench shows sender identity colors and fixed scope", async ({ page }) => {
+  const shareHeaderRequests: Array<{ method: string; path: string; shareId: string }> = [];
+  const sharedSession = {
+    ...session(),
+    sessionId: "ses_shared_readonly",
+    workspaceId: "wrk_shared_readonly",
+    title: "共享只读会话"
+  };
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_reader", username: "阅读者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_readonly", name: "共享固定工作区" }],
+    sessions: [sharedSession],
+    sessionShareAccess: sessionShareAccess({ canChat: false }),
+    sessionShareRuntimeStates: [sessionShareRuntimeState({ canChat: false })],
+    sessionShareHeaderRequests: shareHeaderRequests,
+    sessionMessagesBySessionId: {
+      ses_shared_readonly: [
+        {
+          messageId: "msg_owner_shared",
+          sessionId: "ses_shared_readonly",
+          role: "USER",
+          content: "所属人发出的消息",
+          senderUserId: "usr_owner",
+          senderUnifiedAuthId: "ucid_owner",
+          sentBySharedUser: false,
+          createdAt: "2026-08-09T01:00:00Z"
+        },
+        {
+          messageId: "msg_reader_shared",
+          sessionId: "ses_shared_readonly",
+          role: "USER",
+          content: "我之前发出的消息",
+          senderUserId: "usr_reader",
+          senderUnifiedAuthId: "ucid_reader",
+          sentBySharedUser: true,
+          createdAt: "2026-08-09T01:01:00Z"
+        },
+        {
+          messageId: "msg_assistant_shared",
+          sessionId: "ses_shared_readonly",
+          role: "ASSISTANT",
+          content: "协作回复",
+          createdAt: "2026-08-09T01:02:00Z"
+        }
+      ]
+    }
+  });
+
+  await page.goto("/s/shr_readonly", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("header-fixed-share-context")).toContainText("共享固定工作区");
+  await expect(page.getByText("所属人发出的消息")).toBeVisible();
+  await expect(page.getByText("我之前发出的消息")).toBeVisible();
+  const ownerTurn = page.locator('[data-oc-turn-id="msg_owner_shared"]');
+  const ownTurn = page.locator('[data-oc-turn-id="msg_reader_shared"]');
+  await expect(ownerTurn.locator(".oc-user-message__sender")).toHaveText("会话所属人");
+  await expect(ownTurn.locator(".oc-user-message__sender")).toHaveCount(0);
+  const ownerAppearance = await ownerTurn.locator(".oc-user-message__bubble").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, borderStyle: style.borderStyle };
+  });
+  const ownAppearance = await ownTurn.locator(".oc-user-message__bubble").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, borderStyle: style.borderStyle };
+  });
+  expect(ownerAppearance).toEqual({ backgroundColor: "rgb(154, 142, 222)", borderStyle: "none" });
+  expect(ownAppearance).toEqual({ backgroundColor: "rgb(178, 237, 223)", borderStyle: "none" });
+  await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
+  await expect(page.locator(".figma-chat-textarea")).toHaveAttribute("title", "当前分享权限为只读，不能修改工作区或发送消息。");
+  await expect(page.getByTestId("manage-session-share")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "新建对话" })).toHaveCount(0);
+
+  await expect.poll(() => shareHeaderRequests.some((request) =>
+    request.path === "/api/internal/platform/opencode-runtime/sessions/ses_shared_readonly/messages"
+      && request.shareId === "shr_readonly")).toBe(true);
+  expect(shareHeaderRequests.every((request) => request.shareId === "shr_readonly")).toBe(true);
+});
+
+test("session share model picker selects from the fixed owner workspace catalog", async ({ page }) => {
+  const runtimeCatalogRequests: Array<{ path: string; workspaceId: string | null; shareId: string | null }> = [];
+  const sharedSession = {
+    ...session(),
+    sessionId: "ses_shared_model",
+    workspaceId: "wrk_shared_model",
+    title: "共享模型会话"
+  };
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_writer", username: "协作者", unifiedAuthId: "ucid_writer", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_model", name: "所属人固定工作区" }],
+    sessions: [sharedSession],
+    sessionShareAccess: sessionShareAccess({
+      actorUserId: "usr_writer",
+      actorUnifiedAuthId: "ucid_writer",
+      actorUsername: "协作者",
+      sessionId: "ses_shared_model",
+      workspaceId: "wrk_shared_model",
+      canChat: true
+    }),
+    sessionShareRuntimeStates: [sessionShareRuntimeState({
+      sessionId: "ses_shared_model",
+      workspaceId: "wrk_shared_model",
+      canChat: true
+    })],
+    sessionMessagesBySessionId: { ses_shared_model: [] },
+    models: [{ id: "shared-model", providerId: "owner-provider", name: "所属人模型" }],
+    providers: [{ id: "owner-provider", name: "所属人 Provider", status: "ready" }],
+    runtimeCatalogRequests
+  });
+
+  await page.goto("/s/shr_model", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("header-fixed-share-context")).toContainText("所属人固定工作区");
+  await page.getByRole("button", { name: "切换模型" }).click();
+  await expect(page.locator(".figma-chat-model-group-title", { hasText: "所属人 Provider" })).toBeVisible();
+  const ownerModel = page.locator(".figma-chat-model-option-item", { hasText: "所属人模型" });
+  await expect(ownerModel).toBeVisible();
+  await ownerModel.click();
+  await expect(page.getByRole("button", { name: "切换模型" })).toContainText("所属人模型");
+  await expect.poll(() => runtimeCatalogRequests).toEqual(expect.arrayContaining([
+    { path: "/api/internal/platform/opencode-runtime/models", workspaceId: "wrk_shared_model", shareId: "shr_model" },
+    { path: "/api/internal/platform/opencode-runtime/providers", workspaceId: "wrk_shared_model", shareId: "shr_model" }
+  ]));
+});
+
+test("session share busy run blocks every participant and only sender can stop", async ({ page }) => {
+  const activeRun = {
+    runId: "run_shared_busy",
+    sessionId: "ses_shared_readonly",
+    workspaceId: "wrk_shared_readonly",
+    status: "RUNNING",
+    triggeredByUserId: "usr_owner",
+    messageSenderUserId: "usr_writer",
+    messageSenderUnifiedAuthId: "ucid_writer",
+    messageSentBySharedUser: true,
+    createdAt: "2026-08-09T01:00:00Z",
+    updatedAt: "2026-08-09T01:00:01Z"
+  };
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_reader", username: "阅读者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_readonly", name: "共享固定工作区" }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_shared_readonly",
+      workspaceId: "wrk_shared_readonly",
+      title: "共享运行中会话"
+    }],
+    sessionShareAccess: sessionShareAccess({ canChat: true }),
+    sessionShareRuntimeStates: [sessionShareRuntimeState({ canChat: true, activeRun })],
+    activeRun,
+    runEventsByRunId: { run_shared_busy: [] },
+    runsByRunId: { run_shared_busy: activeRun },
+    sessionMessagesBySessionId: { ses_shared_readonly: [] }
+  });
+
+  await page.goto("/s/shr_busy", { waitUntil: "domcontentloaded" });
+  const stop = page.getByRole("button", { name: "停止执行" });
+  await expect(stop).toBeVisible();
+  await expect(stop).toBeDisabled();
+  await expect(stop).toHaveAttribute("title", "仅会话所属人或本次消息发送人可以停止");
+  await expect(page.getByRole("button", { name: "发送" })).toHaveCount(0);
+});
+
+test("session share participant receives the owner's authoritative user message without an empty bubble", async ({ page }) => {
+  const activeRun = {
+    runId: "run_shared_owner_live",
+    sessionId: "ses_shared_owner_live",
+    workspaceId: "wrk_shared_owner_live",
+    status: "RUNNING",
+    triggeredByUserId: "usr_owner",
+    messageSenderUserId: "usr_owner",
+    messageSenderUnifiedAuthId: "ucid_owner",
+    messageSentBySharedUser: false,
+    createdAt: "2026-08-10T01:10:00Z",
+    updatedAt: "2026-08-10T01:10:01Z"
+  };
+  await installAuthenticatedRunEventFetchStream(page, {
+    run_shared_owner_live: [
+      {
+        delayMs: 20,
+        events: [{
+          eventId: "evt_shared_empty_envelope",
+          seq: 0,
+          type: "message.updated",
+          payload: {
+            message: {
+              id: "msg_shared_owner_live",
+              role: "user"
+            }
+          }
+        }]
+      },
+      {
+        delayMs: 800,
+        events: [{
+          eventId: "evt_shared_platform_input",
+          seq: 0,
+          type: "message.updated",
+          payload: {
+            messageId: "msg_shared_owner_live",
+            platformMessageId: "smsg_shared_owner_live",
+            message: {
+              id: "msg_shared_owner_live",
+              platformMessageId: "smsg_shared_owner_live",
+              role: "user",
+              text: "A 发出的多人同步消息",
+              senderUserId: "usr_owner",
+              senderUnifiedAuthId: "ucid_owner",
+              sentBySharedUser: false
+            }
+          }
+        }]
+      }
+    ]
+  });
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_reader", username: "阅读者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_owner_live", name: "共享同步工作区" }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_shared_owner_live",
+      workspaceId: "wrk_shared_owner_live",
+      title: "多人绝对同步会话"
+    }],
+    sessionShareAccess: sessionShareAccess({
+      shareId: "shr_owner_live",
+      actorUserId: "usr_reader",
+      actorUnifiedAuthId: "ucid_reader",
+      actorUsername: "阅读者",
+      sessionId: "ses_shared_owner_live",
+      workspaceId: "wrk_shared_owner_live",
+      canChat: true
+    }),
+    sessionShareRuntimeStates: [sessionShareRuntimeState({
+      shareId: "shr_owner_live",
+      sessionId: "ses_shared_owner_live",
+      workspaceId: "wrk_shared_owner_live",
+      canChat: true,
+      activeRun
+    })],
+    activeRun,
+    runsByRunId: { run_shared_owner_live: activeRun },
+    sessionMessagesBySessionId: { ses_shared_owner_live: [] }
+  });
+
+  await page.goto("/s/shr_owner_live", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & { __titleWatchRunStreams?: Array<{ runId: string }> })
+      .__titleWatchRunStreams?.some((item) => item.runId === "run_shared_owner_live") ?? false
+  ))).toBe(true);
+  await page.waitForTimeout(150);
+  await expect(page.locator('[data-oc-turn-id="msg_shared_owner_live"]')).toHaveCount(0);
+
+  const ownerTurn = page.locator('[data-oc-turn-id="msg_shared_owner_live"]');
+  await expect(ownerTurn).toBeVisible({ timeout: 5_000 });
+  await expect(ownerTurn.locator(".oc-user-message__sender")).toHaveText("会话所属人");
+  await expect(ownerTurn.locator(".oc-user-message__bubble")).toHaveText("A 发出的多人同步消息");
+  await expect(page.locator('[data-oc-turn-id="msg_shared_owner_live"]')).toHaveCount(1);
+});
+
+test("session share invalid page and owner link redirect remain isolated", async ({ page, context }) => {
+  await mockBackendApi(page, {
+    missingSessionsNotFound: true,
+    sessionShareAccessFailure: {
+      status: 410,
+      code: "SESSION_SHARE_EXPIRED",
+      message: "会话分享已失效",
+      details: { reason: "REMOVED" }
+    }
+  });
+  await page.goto("/s/shr_removed", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: "无法打开分享会话" })).toBeVisible();
+  await expect(page.getByText("你已不在该分享会话中")).toBeVisible();
+
+  const ownerPage = await context.newPage();
+  const ownerHeaderRequests: Array<{ method: string; path: string; shareId: string }> = [];
+  await mockBackendApi(ownerPage, {
+    sessions: [{ ...session(), sessionId: "ses_owner_link", title: "所属人普通会话" }],
+    sessionShareAccess: sessionShareAccess({
+      actorUserId: "usr_owner",
+      actorUnifiedAuthId: "ucid_owner",
+      actorUsername: "会话所属人",
+      delegated: false,
+      ownerAccess: true,
+      canChat: true,
+      sessionId: "ses_owner_link",
+      workspaceId: "wrk_1234567890abcdef"
+    }),
+    sessionShareHeaderRequests: ownerHeaderRequests,
+    sessionMessagesBySessionId: { ses_owner_link: [] }
+  });
+  await ownerPage.goto("/s/shr_owner", { waitUntil: "domcontentloaded" });
+  await expect(ownerPage).toHaveURL(/\/?sessionId=ses_owner_link$/);
+  await expect(ownerPage.getByTestId("header-fixed-share-context")).toHaveCount(0);
+  await expect(ownerPage.getByTestId("header-context-rail")).toBeVisible();
+  expect(ownerHeaderRequests.filter((request) => request.path.endsWith("/session-shares/access"))).toHaveLength(1);
+  expect(ownerHeaderRequests.filter((request) => request.path.includes("/sessions/ses_owner_link"))).toHaveLength(0);
+});
+
 test("workbench opens a workspace file with mocked backend api", async ({ page }) => {
   const fileReadRequests: Array<{ workspaceId: string; path: string; attempt: number }> = [];
   await mockBackendApi(page, {
@@ -750,7 +1181,7 @@ test("initial file loading is not editable and applies the response readonly sta
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /只读历史会话/ }).click();
+  await historySessionButton(page, "只读历史会话").click();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click({ force: true });
   await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
   await expect(page.getByRole("button", { name: "docs", exact: true })).toBeVisible();
@@ -3936,7 +4367,7 @@ test("late session creation cannot replace a history switch", async ({ page }) =
   await expect.poll(() => sessionRequests.length).toBe(1);
 
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "目标历史会话" }).click();
+  await historySessionButton(page, "目标历史会话").click();
   await expect(page.getByText("目标历史正文")).toBeVisible();
   releaseSessionRequest();
   await page.waitForTimeout(200);
@@ -3947,6 +4378,92 @@ test("late session creation cannot replace a history switch", async ({ page }) =
     "/api/internal/platform/opencode-runtime/sessions/ses_history_target/messages?page=1&size=100&refresh=false"
   );
   await expect(page.getByText("目标历史正文")).toBeVisible();
+});
+
+test("history drawer pins and unpins sessions through the existing session update API", async ({ page }) => {
+  const sessionUpdateRequests: Array<{ sessionId: string; payload: Record<string, unknown> }> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    sessionUpdateRequests,
+    sessionMessagesBySessionId: {
+      ses_normal_latest: [{
+        messageId: "msg_normal_latest",
+        sessionId: "ses_normal_latest",
+        role: "ASSISTANT",
+        content: "最新普通会话正文",
+        createdAt: "2026-07-10T12:00:00Z"
+      }],
+      ses_pin_target: [{
+        messageId: "msg_pin_target",
+        sessionId: "ses_pin_target",
+        role: "ASSISTANT",
+        content: "待置顶会话正文",
+        createdAt: "2026-07-10T11:00:00Z"
+      }]
+    },
+    sessions: [
+      {
+        sessionId: "ses_normal_latest",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "最新普通会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T08:00:00Z",
+        updatedAt: "2026-07-10T12:00:00Z"
+      },
+      {
+        sessionId: "ses_pin_target",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "待置顶会话",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-07-10T08:00:00Z",
+        updatedAt: "2026-07-10T11:00:00Z"
+      },
+      {
+        sessionId: "ses_pinned_old",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "原置顶会话",
+        status: "ACTIVE",
+        pinned: true,
+        createdAt: "2026-07-10T07:00:00Z",
+        updatedAt: "2026-07-10T08:00:00Z"
+      }
+    ]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "会话列表" }).click();
+  const titles = page.locator(".figma-chat-history-card-title");
+  await expect(titles).toHaveText(["原置顶会话", "最新普通会话", "待置顶会话"]);
+
+  await page.getByRole("button", { name: "置顶对话：待置顶会话" }).click();
+  await expect.poll(() => sessionUpdateRequests).toEqual([
+    { sessionId: "ses_pin_target", payload: { pinned: true } }
+  ]);
+  await expect(page.getByRole("button", { name: "取消置顶对话：待置顶会话" })).toBeVisible();
+  await expect(titles).toHaveText(["待置顶会话", "原置顶会话", "最新普通会话"]);
+
+  await historySessionButton(page, "最新普通会话").click();
+  await expect(historySessionButton(page, "最新普通会话")).toHaveAttribute("aria-current", "true");
+  await expect(historySessionButton(page, "待置顶会话")).not.toHaveAttribute("aria-current", "true");
+  await expect(page.getByText("最新普通会话正文")).toBeVisible();
+  await expect(page.getByText("待置顶会话正文")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "取消置顶对话：待置顶会话" }).click();
+  await expect.poll(() => sessionUpdateRequests).toEqual([
+    { sessionId: "ses_pin_target", payload: { pinned: true } },
+    { sessionId: "ses_pin_target", payload: { pinned: false } }
+  ]);
+  await expect(page.getByRole("button", { name: "置顶对话：待置顶会话" })).toBeVisible();
+  await expect(titles).toHaveText(["原置顶会话", "最新普通会话", "待置顶会话"]);
+  await expect(historySessionButton(page, "最新普通会话")).toHaveAttribute("aria-current", "true");
+  await expect(page.getByText("最新普通会话正文")).toBeVisible();
+
+  await historySessionButton(page, "待置顶会话").click();
+  await expect(historySessionButton(page, "待置顶会话")).toHaveAttribute("aria-current", "true");
+  await expect(page.getByText("待置顶会话正文")).toBeVisible();
+  await expect(page.getByText("最新普通会话正文")).toHaveCount(0);
 });
 
 test("agent picker updates the run agent", async ({ page }) => {
@@ -4825,14 +5342,16 @@ test("a superseded title-pending run cannot restore its todos into the next turn
   await expect(page.getByTestId("oc-work-status-dock").getByText("共 4")).toHaveCount(0);
 });
 
-test("retrying a failed chat run sends the previous prompt again", async ({ page }) => {
+test("retrying a failed chat run resends the previous remote user turn", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
+  const runResendRequests: Array<Record<string, unknown>> = [];
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
   });
   await mockBackendApi(page, {
     runRequests,
-    runIds: ["run_1", "run_2"],
+    runResendRequests,
+    runIds: ["run_1"],
     recentWorkspaces: {
       app_gcms: {
         ...workspace(),
@@ -4845,12 +5364,15 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
       awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
     },
     runEvents: [
-      event(1, "run.failed", {
+      event(1, "message.updated", {
+        message: { id: "msg_remote_retry_source", role: "user", content: "重试这条测试任务" }
+      }),
+      event(2, "run.failed", {
         error: { name: "ConnectionError", message: "Streaming response failed" }
       })
     ],
     runEventsByRunId: {
-      run_2: []
+      run_resend_replacement: []
     }
   });
 
@@ -4864,25 +5386,30 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
-  await expect.poll(() => runRequests.length).toBe(2);
-  expect(runRequests[1]).toMatchObject({ prompt: runRequests[0]?.prompt });
+  await expect.poll(() => runResendRequests.length).toBe(1);
+  expect(runResendRequests[0]).toMatchObject({
+    expectedRemoteMessageId: "msg_remote_retry_source",
+    expectedRunId: "run_1"
+  });
+  expect(runRequests).toHaveLength(1);
   await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
 });
 
-test("manual retry isolates a still-running run after an abnormal session interruption", async ({ page }) => {
+test("manual retry refuses to replace a still-running run after a transient session interruption", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const cancelRunRequests: string[] = [];
+  const runResendRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
     ...runnableWorkspaceSetup(),
     runRequests,
     cancelRunRequests,
-    runIds: ["run_1", "run_2"],
+    runResendRequests,
+    runIds: ["run_1"],
     runEventsByRunId: {
       run_1: [event(1, "session.status", {
         status: { type: "error", message: "conversation interrupted" }
-      })],
-      run_2: []
+      })]
     }
   });
 
@@ -4894,18 +5421,18 @@ test("manual retry isolates a still-running run after an abnormal session interr
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
-  await expect.poll(() => cancelRunRequests).toEqual(["run_1"]);
-  await expect.poll(() => runRequests.length).toBe(2);
-  expect(runRequests[1]).toMatchObject({ prompt: runRequests[0]?.prompt });
-  await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
+  expect(cancelRunRequests).toEqual([]);
+  expect(runResendRequests).toEqual([]);
+  expect(runRequests).toHaveLength(1);
+  await expect(page.getByText("无法撤销重发")).toBeVisible();
+  await expect(page.locator(".figma-chat-retry-card")).toBeVisible();
 });
 
-test("retrying a reopened failed chat restores the persisted user request", async ({ page }) => {
-  const runRequests: Array<Record<string, unknown>> = [];
+test("retrying a reopened failed chat resends the persisted remote user turn", async ({ page }) => {
+  const runResendRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
     ...runnableWorkspaceSetup(),
-    runRequests,
-    runIds: ["run_2"],
+    runResendRequests,
     sessions: [{
       sessionId: "ses_history",
       workspaceId: "wrk_1234567890abcdef",
@@ -4917,6 +5444,7 @@ test("retrying a reopened failed chat restores the persisted user request", asyn
     }],
     sessionMessages: [{
       messageId: "msg_user_failed",
+      remoteMessageId: "msg_remote_user_failed",
       sessionId: "ses_history",
       role: "USER",
       content: "重新检查登录流程",
@@ -4935,25 +5463,21 @@ test("retrying a reopened failed chat restores the persisted user request", asyn
       createdAt: "2026-07-05T10:00:00Z",
       updatedAt: "2026-07-05T10:01:00Z"
     },
-    runEventsByRunId: { run_2: [] }
+    runEventsByRunId: { run_resend_replacement: [] }
   });
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "异常中断的对话" }).click();
+  await historySessionButton(page, "异常中断的对话").click();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await expect(page.locator(".figma-chat-retry-card")).toBeVisible();
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
-  await expect.poll(() => runRequests.length).toBe(1);
-  expect(runRequests[0]).toMatchObject({
-    sessionId: "ses_history",
-    prompt: "重新检查登录流程",
-    parts: [
-      { type: "text", text: "重新检查登录流程" },
-      { type: "file", path: "docs/login.md", name: "login.md", mimeType: "text/markdown" }
-    ]
+  await expect.poll(() => runResendRequests.length).toBe(1);
+  expect(runResendRequests[0]).toMatchObject({
+    expectedRemoteMessageId: "msg_remote_user_failed",
+    expectedRunId: "run_history"
   });
   await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
@@ -5323,7 +5847,7 @@ test("switching history restores assistant documents and the file changes summar
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: /请生成登录测试报告/ }).click();
+  await historySessionButton(page, "请生成登录测试报告").click();
   // 当前会话切换会短暂展示顶部信息提示；提示层不改变关闭处理，直接触发关闭按钮。
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click({ force: true });
 
@@ -5472,7 +5996,7 @@ test("history run projection keeps sending locked until stale details cannot ove
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "等待历史运行详情" }).click();
+  await historySessionButton(page, "等待历史运行详情").click();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await expect.poll(() => historyRunRequests).toContain("/api/internal/agent/opencode/runs/run_history");
   await expect(page.getByText("历史正文已就绪")).toBeVisible();
@@ -5544,7 +6068,7 @@ test("switching history restores a pending native question dock instead of only 
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /历史提问会话/ }).click();
+  await historySessionButton(page, "历史提问会话").click();
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("请选择验证范围");
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
@@ -5588,7 +6112,7 @@ test("switching history restores a pending native permission dock and allows rep
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /历史权限会话/ }).click();
+  await historySessionButton(page, "历史权限会话").click();
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("允许修改测试文件");
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
@@ -5673,7 +6197,7 @@ test("history root permission snapshot keeps child permission attention from the
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: /历史子智能体权限会话/ }).click();
+  await historySessionButton(page, "历史子智能体权限会话").click();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   await expect(page.locator(".figma-chat-question-dock")).toContainText("README.md");
@@ -5746,18 +6270,18 @@ test("history pending interaction stays scoped to its own session", async ({ pag
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /A 会话有提问/ }).click();
+  await historySessionButton(page, "A 会话有提问").click();
   await expect(page.locator(".figma-chat-question-dock")).toContainText("只属于 A 的问题");
   await expect(page.getByRole("dialog", { name: "会话列表" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /A 会话有提问/ })).toHaveAttribute("aria-current", "true");
-  await page.getByRole("button", { name: /B 会话无提问/ }).click({ force: true });
+  await expect(historySessionButton(page, "A 会话有提问")).toHaveAttribute("aria-current", "true");
+  await historySessionButton(page, "B 会话无提问").click({ force: true });
   await expect.poll(() => sessionMessageRequests).toContain(
     "/api/internal/platform/opencode-runtime/sessions/ses_history_question_b/messages?page=1&size=100&refresh=false"
   );
   await expect(page.locator(".figma-chat-question-dock")).toHaveCount(0);
   await expect(page.getByText("只属于 A 的问题")).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: "会话列表" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /B 会话无提问/ })).toHaveAttribute("aria-current", "true");
+  await expect(historySessionButton(page, "B 会话无提问")).toHaveAttribute("aria-current", "true");
 });
 
 test("switching to a running history maps its remote question event and allows reply", async ({ page }) => {
@@ -5835,7 +6359,7 @@ test("switching to a running history maps its remote question event and allows r
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: "运行中的历史提问" }).click();
+  await historySessionButton(page, "运行中的历史提问").click();
 
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("历史运行中：选择继续方式");
@@ -5918,12 +6442,200 @@ test("switching history resumes the runtime-state run and reconciles active-run 
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: /test-design-orthogonal/ }).click();
+  await historySessionButton(page, /test-design-orthogonal/).click();
 
   await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
   expect(activeRunRequests).toEqual(["/api/internal/platform/opencode-runtime/sessions/ses_history/active-run"]);
   expect(runContextRequests).toEqual(["ses_history"]);
   await expect(page.getByText("正交表实时输出")).toBeVisible();
+});
+
+test("session share owner history keeps a shared actor run snapshot when history enrichment arrives late", async ({ page }) => {
+  let releaseHistoryInteractions!: () => void;
+  const sessionInteractionsGate = new Promise<void>((resolve) => {
+    releaseHistoryInteractions = resolve;
+  });
+  const activeRun = {
+    runId: "run_delegated_live",
+    sessionId: "ses_delegated_live",
+    workspaceId: "wrk_1234567890abcdef",
+    status: "RUNNING",
+    triggeredByUserId: "usr_admin",
+    messageSenderUserId: "usr_shared_writer",
+    messageSenderUnifiedAuthId: "ucid_shared_writer",
+    messageSentBySharedUser: true,
+    createdAt: "2026-08-10T01:00:00Z",
+    updatedAt: "2026-08-10T01:00:01Z"
+  };
+  await installAuthenticatedRunEventFetchStream(page, {
+    run_delegated_live: [{
+      delayMs: 20,
+      events: [{
+        seq: 0,
+        type: "run.snapshot.reset",
+        payload: {
+          reason: "TRANSIENT_SNAPSHOT_RECOVERY",
+          snapshot: {
+            barrierSeq: 2,
+            runtimeVersion: 5,
+            events: [
+              {
+                eventId: "evt_delegated_started",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "run.started",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:01Z",
+                payload: { status: "RUNNING" }
+              },
+              {
+                eventId: "evt_delegated_user",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "message.updated",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:00Z",
+                payload: {
+                  sessionId: "ses_delegated_live",
+                  rootSessionId: "ses_delegated_live",
+                  message: {
+                    id: "msg_delegated_user",
+                    role: "user",
+                    text: "由协作者发起的实时任务",
+                    senderUserId: "usr_shared_writer",
+                    senderUsername: "协作者"
+                  }
+                }
+              },
+              {
+                eventId: "evt_delegated_assistant",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "message.updated",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:02Z",
+                payload: {
+                  sessionId: "ses_delegated_live",
+                  rootSessionId: "ses_delegated_live",
+                  message: { id: "msg_delegated_assistant", role: "assistant" }
+                }
+              },
+              {
+                eventId: "evt_delegated_reasoning",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "message.part.updated",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:03Z",
+                payload: {
+                  sessionId: "ses_delegated_live",
+                  rootSessionId: "ses_delegated_live",
+                  messageID: "msg_delegated_assistant",
+                  part: {
+                    id: "part_delegated_reasoning",
+                    messageID: "msg_delegated_assistant",
+                    type: "reasoning",
+                    text: "正在同步分析共享会话",
+                    state: { status: "running" }
+                  }
+                }
+              },
+              {
+                eventId: "evt_delegated_write",
+                runId: "run_delegated_live",
+                seq: 0,
+                type: "message.part.updated",
+                traceId: "trace_delegated_live",
+                occurredAt: "2026-08-10T01:00:04Z",
+                payload: {
+                  sessionId: "ses_delegated_live",
+                  rootSessionId: "ses_delegated_live",
+                  messageID: "msg_delegated_assistant",
+                  part: {
+                    id: "part_delegated_write",
+                    messageID: "msg_delegated_assistant",
+                    type: "tool",
+                    tool: "write",
+                    state: {
+                      status: "completed",
+                      input: { filePath: "tests/shared.spec.ts" }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }]
+    }]
+  });
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    sessionInteractionsGate,
+    sessions: [{
+      sessionId: "ses_delegated_live",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "协作者运行中的会话",
+      status: "ACTIVE",
+      createdAt: "2026-08-10T00:59:00Z",
+      updatedAt: "2026-08-10T01:00:04Z"
+    }],
+    sessionMessagesBySessionId: {
+      ses_delegated_live: [{
+        messageId: "msg_delegated_user",
+        sessionId: "ses_delegated_live",
+        role: "USER",
+        content: "由协作者发起的实时任务",
+        senderUserId: "usr_shared_writer",
+        senderUsername: "协作者",
+        senderUnifiedAuthId: "ucid_shared_writer",
+        sentBySharedUser: true,
+        createdAt: "2026-08-10T01:00:00Z"
+      }]
+    },
+    sessionTreeMessagesBySessionId: {
+      ses_delegated_live: {
+        sessionId: "ses_delegated_live",
+        sessions: [{ rootSessionId: "ses_delegated_live", sessionId: "ses_delegated_live", childSession: false }],
+        messagesBySessionId: {},
+        childSessionIdByTaskPartId: {},
+        events: []
+      }
+    },
+    runtimeStateSummary: {
+      runningCount: 1,
+      questionCount: 0,
+      permissionCount: 0,
+      sessions: [{
+        sessionId: "ses_delegated_live",
+        runId: "run_delegated_live",
+        runStatus: "RUNNING",
+        attention: null,
+        updatedAt: "2026-08-10T01:00:04Z"
+      }],
+      generatedAt: "2026-08-10T01:00:05Z"
+    },
+    activeRun,
+    runsByRunId: { run_delegated_live: activeRun }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "会话列表" }).click();
+  await page.getByRole("button", { name: /协作者运行中的会话/ }).click();
+
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & { __titleWatchRunStreams?: Array<{ runId: string }> })
+      .__titleWatchRunStreams?.some((item) => item.runId === "run_delegated_live") ?? false
+  ))).toBe(true);
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeEnabled();
+  await expect(page.getByText("正在同步分析共享会话")).toBeVisible();
+  await expect(page.getByTestId("oc-work-status-event-write")).toBeVisible();
+
+  releaseHistoryInteractions();
+  await expect(page.getByText("已切换 Session", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeEnabled();
+  await expect(page.getByText("正在同步分析共享会话")).toBeVisible();
+  await expect(page.getByTestId("oc-work-status-event-write")).toBeVisible();
 });
 
 test("runtime-state outage performs only one active-run fallback", async ({ page }) => {
@@ -5948,7 +6660,7 @@ test("runtime-state outage performs only one active-run fallback", async ({ page
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: /恢复中的会话/ }).click();
+  await historySessionButton(page, "恢复中的会话").click();
   await expect.poll(() => runtimeStateEventRequests.length).toBeGreaterThanOrEqual(2);
   await page.waitForTimeout(3500);
 
@@ -5988,12 +6700,12 @@ test("runtime-state outage falls back once for each switched session in the same
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "故障会话 A" }).click();
+  await historySessionButton(page, "故障会话 A").click();
   await expect.poll(() => activeRunRequests).toContain(
     "/api/internal/platform/opencode-runtime/sessions/ses_outage_a/active-run"
   );
 
-  await page.getByRole("button", { name: "故障会话 B" }).click();
+  await historySessionButton(page, "故障会话 B").click();
   await expect.poll(() => activeRunRequests).toContain(
     "/api/internal/platform/opencode-runtime/sessions/ses_outage_b/active-run"
   );
@@ -6079,10 +6791,10 @@ test("a delayed history switch cannot overwrite a newer session and workspace", 
   await gotoWorkbench(page);
   fileRequests.length = 0;
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "竞态会话 A" }).click();
+  await historySessionButton(page, "竞态会话 A").click();
   await expect.poll(() => workspaceRequests).toContain("wrk_race_a");
 
-  await page.getByRole("button", { name: "竞态会话 B" }).click();
+  await historySessionButton(page, "竞态会话 B").click();
   await expect(page.getByText("竞态正文 B")).toBeVisible();
   releaseWorkspaceA();
   await page.waitForTimeout(200);
@@ -6169,14 +6881,14 @@ test("history loading cannot send a run to the previous session", async ({ page 
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "发送保护旧会话" }).click();
+  await historySessionButton(page, "发送保护旧会话").click();
   await expect(page.getByText("发送保护旧正文")).toBeVisible();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
   await composer.fill("切换中不得发送");
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "发送保护目标会话" }).click();
+  await historySessionButton(page, "发送保护目标会话").click();
   await expect.poll(() => workspaceRequests).toContain("wrk_history_send_target");
 
   const sendButton = page.getByRole("button", { name: "发送", exact: true });
@@ -6240,7 +6952,7 @@ test("a delayed history switch cannot survive a new conversation", async ({ page
   await gotoWorkbench(page);
   fileRequests.length = 0;
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "等待后新建对话" }).click();
+  await historySessionButton(page, "等待后新建对话").click();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await page.getByRole("button", { name: "新建对话" }).click();
   releaseHistoryWorkspace();
@@ -6337,7 +7049,7 @@ test("a delayed history switch cannot overwrite a manual application workspace s
   await gotoWorkbench(page);
   fileRequests.length = 0;
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "等待手动切工作区" }).click();
+  await historySessionButton(page, "等待手动切工作区").click();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   await page.getByRole("button", { name: "F-GCMS" }).click();
@@ -6411,7 +7123,7 @@ test("a delayed history switch cannot survive an authentication change", async (
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "等待认证变化" }).click();
+  await historySessionButton(page, "等待认证变化").click();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
   await expect.poll(() => sessionMessageRequests.length).toBe(1);
   await page.getByRole("button", { name: /当前用户/ }).click();
@@ -6479,7 +7191,7 @@ test("a delayed conversation context cannot dispatch after switching history", a
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "上下文会话 A" }).click();
+  await historySessionButton(page, "上下文会话 A").click();
   await expect(page.getByText("上下文正文 A")).toBeVisible();
   await expect.poll(() => runContextRequests).toContain("ses_context_a");
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
@@ -6487,7 +7199,7 @@ test("a delayed conversation context cannot dispatch after switching history", a
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("等待上下文");
   await page.getByRole("button", { name: "发送" }).click();
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "上下文会话 B" }).click();
+  await historySessionButton(page, "上下文会话 B").click();
   await expect(page.getByText("上下文正文 B")).toBeVisible();
   releaseContextA();
   await page.waitForTimeout(200);
@@ -6548,7 +7260,7 @@ test("a delayed startRun response cannot replace a newer history session", async
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "启动会话 A" }).click();
+  await historySessionButton(page, "启动会话 A").click();
   await expect(page.getByText("启动正文 A")).toBeVisible();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
@@ -6556,7 +7268,7 @@ test("a delayed startRun response cannot replace a newer history session", async
   await page.getByRole("button", { name: "发送" }).click();
   await expect.poll(() => runRequests.length).toBe(1);
   await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByRole("button", { name: "启动会话 B" }).click();
+  await historySessionButton(page, "启动会话 B").click();
   await expect(page.getByText("启动正文 B")).toBeVisible();
   releaseRunRequest();
   await page.waitForTimeout(200);
@@ -6711,7 +7423,7 @@ test("history loading does not wait for interaction snapshot or message feedback
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /历史加载测试/ }).click();
+  await historySessionButton(page, "历史加载测试").click();
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 
   await expect(page.getByText("正在加载会话内容…")).toBeVisible();
@@ -6811,7 +7523,7 @@ test("switching history changes to the session application and workspace", async
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
   await expect(page.getByText("F-COSS · COSS 主干 · 20260708")).toBeVisible();
-  await page.getByRole("button", { name: /COSS 历史会话/ }).click();
+  await historySessionButton(page, "COSS 历史会话").click();
 
   await expect.poll(() => markRecentRequests).toContain("wrk_history_coss");
   await expect.poll(() => personalWorkspaceRequests).toContain("awv_coss");
@@ -6889,14 +7601,22 @@ test("history switch failure keeps current context and makes the session readonl
 
   await gotoWorkbench(page);
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /失效应用历史/ }).click();
+  await historySessionButton(page, "失效应用历史").click();
 
   await expect.poll(() => markRecentRequests).toContain("wrk_forbidden_coss");
   await expect(page.getByRole("button", { name: "F-GCMS" })).toBeVisible();
   await expect.poll(() => fileRequests).not.toContainEqual({ workspaceId: "wrk_forbidden_coss", path: "" });
   await expect(page.getByText("只读历史正文")).toBeVisible();
-  await expect(page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因")).toBeDisabled();
-  await expect(page.locator(".figma-chat-send-card")).toHaveAttribute("title", "你已不属于该会话所属应用，当前会话只读。");
+  const readonlyReason = "你已不属于该会话所属应用，当前会话只读。";
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  const sendButton = page.locator(".figma-chat-send-card");
+  await expect(composer).toBeEnabled();
+  await expect(composer).toHaveAttribute("title", readonlyReason);
+  await composer.fill("继续执行");
+  await expect(sendButton).toBeDisabled();
+  await expect(sendButton).toHaveAttribute("title", readonlyReason);
+  await composer.fill("/clear");
+  await expect(sendButton).toBeEnabled();
 });
 
 test("workbench disables chat until opencode process is initialized", async ({ page }) => {
@@ -7597,7 +8317,7 @@ test("workspace cascade submenu shifts up when it would overflow the viewport bo
 
 type RunEventFetchBatch = {
   delayMs: number;
-  events: Array<{ seq: number; type: string; payload: Record<string, unknown> }>;
+  events: Array<{ eventId?: string; seq: number; type: string; payload: Record<string, unknown> }>;
 };
 
 /** 认证后的主 RunEvent 客户端走 fetch SSE；同一 batch 用于复现 durable 终态同步重放。 */
@@ -7640,8 +8360,8 @@ async function installAuthenticatedRunEventFetchStream(
             timers.push(window.setTimeout(() => {
               if (probe.closed) return;
               const frame = batch.events.map((item) => (
-                `id: evt_title_${runId}_${item.seq}\nevent: ${item.type}\ndata: ${JSON.stringify({
-                  eventId: `evt_title_${runId}_${item.seq}`,
+                `id: ${item.eventId ?? `evt_title_${runId}_${item.seq}`}\nevent: ${item.type}\ndata: ${JSON.stringify({
+                  eventId: item.eventId ?? `evt_title_${runId}_${item.seq}`,
                   runId,
                   seq: item.seq,
                   type: item.type,
@@ -7748,7 +8468,7 @@ async function installPetSideQuestionRunEventStream(page: Page, scenarios: Recor
 async function selectPetContextSession(page: Page) {
   // 顶部工作区/版本选择器采用绝对定位；在慢速初始化期间可能暂时压到聊天按钮的命中区域，仍调用同一按钮事件完成会话列表打开。
   await page.getByRole("button", { name: "会话列表" }).click({ force: true });
-  await page.getByRole("button", { name: /E2E Session/ }).click();
+  await historySessionButton(page, "E2E Session").click();
   await expect(page.locator(".figma-chat-title")).toHaveText("E2E Session");
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
 }
@@ -7833,6 +8553,7 @@ async function mockBackendApi(
     models?: Array<Record<string, unknown>>;
     modelResponses?: Array<Array<Record<string, unknown>>>;
     providers?: Array<Record<string, unknown>>;
+    runtimeCatalogRequests?: Array<{ path: string; workspaceId: string | null; shareId: string | null }>;
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     recentWorkspaces?: Record<string, (ReturnType<typeof workspace> & Record<string, unknown>) | null>;
@@ -7906,6 +8627,18 @@ async function mockBackendApi(
     runtimeStateEventGate?: Promise<void>;
     runtimeStateStreamFailure?: boolean;
     runtimeStateEventRequests?: string[];
+    /** 分享工作台与分享管理 mock；分享头只应出现在固定分享范围请求。 */
+    authUser?: { userId: string; username: string; unifiedAuthId: string; roles?: string[] };
+    sessionShareAccess?: Record<string, unknown>;
+    sessionShareAccessFailure?: { status: number; code: string; message: string; details?: Record<string, unknown> };
+    missingSessionsNotFound?: boolean;
+    sessionShareRuntimeStates?: Array<Record<string, unknown>>;
+    sessionShareHeaderRequests?: Array<{ method: string; path: string; shareId: string }>;
+    sharedSessions?: Array<Record<string, unknown>>;
+    sessionCollaborationShare?: Record<string, unknown> | null;
+    sessionShareCandidates?: Array<Record<string, unknown>>;
+    sessionSharePutRequests?: Array<Record<string, unknown>>;
+    sessionShareRevokeRequests?: Array<{ sessionId: string; expectedVersion: string | null }>;
     skipInitialAuthToken?: boolean;
     loginRequests?: Array<{ username?: string; password?: string }>;
     sideQuestionRequests?: Array<Record<string, unknown>>;
@@ -8456,6 +9189,14 @@ async function mockBackendApi(
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
+    const sessionShareHeader = route.request().headers()["x-test-agent-session-share"];
+    if (sessionShareHeader) {
+      capture.sessionShareHeaderRequests?.push({
+        method,
+        path: url.pathname,
+        shareId: sessionShareHeader
+      });
+    }
     if (method === "OPTIONS") {
       await route.fulfill({ status: 204, headers: corsHeaders() });
       return;
@@ -8472,15 +9213,119 @@ async function mockBackendApi(
     }
     if (method === "GET" && url.pathname === "/api/auth/me") {
       await capture.authMeGate;
-      const roles = capture.authRoles ?? ["APP_ADMIN"];
-      await route.fulfill(json({
+      const currentUser = capture.authUser ?? {
         userId: "usr_admin",
         username: "admin",
         unifiedAuthId: "admin",
+        roles: capture.authRoles ?? ["APP_ADMIN"]
+      };
+      const roles = currentUser.roles ?? capture.authRoles ?? ["APP_ADMIN"];
+      await route.fulfill(json({
+        userId: currentUser.userId,
+        username: currentUser.username,
+        unifiedAuthId: currentUser.unifiedAuthId,
         roles,
         // E2E mock 直接把后端 translations 关系预生成好；用户菜单顶部灰显行会展示这里的中文标签。
         roleLabels: roles.map((role) => roleLabelOf(role))
       }));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/session-shares/access") {
+      const failure = capture.sessionShareAccessFailure;
+      if (failure) {
+        await route.fulfill({
+          status: failure.status,
+          ...jsonFailure(failure.code, failure.message, failure.details)
+        });
+        return;
+      }
+      await route.fulfill(json(capture.sessionShareAccess ?? null));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/session-shares/runtime-state/events") {
+      const states = capture.sessionShareRuntimeStates ?? [];
+      const body = states.map((state, index) => {
+        const eventName = state.active === false
+          ? "session-share.invalidated"
+          : index === 0
+            ? "session-share.snapshot"
+            : "session-share.updated";
+        return `event: ${eventName}\ndata: ${JSON.stringify(state)}\n\n`;
+      }).join("");
+      await route.fulfill({
+        status: 200,
+        headers: { ...corsHeaders(), "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+        body
+      });
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/session-shares") {
+      await route.fulfill(json(pageOf(capture.sharedSessions ?? [])));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/session-share-candidates") {
+      await route.fulfill(json(pageOf(capture.sessionShareCandidates ?? [])));
+      return;
+    }
+    const collaborationShareMatch = url.pathname.match(
+      /^\/api\/internal\/platform\/opencode-runtime\/sessions\/([^/]+)\/collaboration-share$/
+    );
+    if (collaborationShareMatch && method === "GET") {
+      await route.fulfill(json(capture.sessionCollaborationShare ?? null));
+      return;
+    }
+    if (collaborationShareMatch && method === "PUT") {
+      const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      capture.sessionSharePutRequests?.push(request);
+      const sessionId = decodeURIComponent(collaborationShareMatch[1] ?? "ses_1");
+      const members = Array.isArray(request.members) ? request.members : [];
+      const candidates = capture.sessionShareCandidates ?? [];
+      const updated = {
+        shareId: "shr_e2e_unique",
+        sharePath: "/s/shr_e2e_unique",
+        sessionId,
+        workspaceId: "wrk_1234567890abcdef",
+        ownerUserId: capture.authUser?.userId ?? "usr_admin",
+        status: "ACTIVE",
+        expiresAt: String(request.expiresAt ?? "2026-08-16T00:00:00Z"),
+        version: Number(capture.sessionCollaborationShare?.version ?? -1) + 1,
+        members: members.map((member) => {
+          const item = member as { userId?: string; canChat?: boolean };
+          const candidate = candidates.find((value) => value.userId === item.userId) ?? {};
+          return {
+            userId: item.userId,
+            unifiedAuthId: candidate.unifiedAuthId ?? item.userId,
+            username: candidate.username ?? item.userId,
+            canChat: item.canChat === true,
+            status: "ACTIVE",
+            sharedAt: "2026-08-09T00:00:00Z",
+            updatedAt: "2026-08-09T00:00:00Z",
+            removedAt: null
+          };
+        }),
+        createdAt: "2026-08-09T00:00:00Z",
+        updatedAt: "2026-08-09T00:00:00Z",
+        revokedAt: null
+      };
+      capture.sessionCollaborationShare = updated;
+      await route.fulfill(json(updated));
+      return;
+    }
+    if (collaborationShareMatch && method === "DELETE") {
+      const sessionId = decodeURIComponent(collaborationShareMatch[1] ?? "ses_1");
+      capture.sessionShareRevokeRequests?.push({
+        sessionId,
+        expectedVersion: url.searchParams.get("expectedVersion")
+      });
+      const updated = {
+        ...(capture.sessionCollaborationShare ?? {}),
+        status: "REVOKED",
+        version: Number(capture.sessionCollaborationShare?.version ?? 0) + 1,
+        updatedAt: "2026-08-09T00:01:00Z",
+        revokedAt: "2026-08-09T00:01:00Z"
+      };
+      capture.sessionCollaborationShare = updated;
+      await route.fulfill(json(updated));
       return;
     }
     if (method === "POST" && url.pathname === "/api/auth/logout") {
@@ -9122,17 +9967,28 @@ async function mockBackendApi(
       const sessionId = decodeURIComponent(url.pathname.match(/\/sessions\/([^/]+)$/)?.[1] ?? "ses_1");
       const payload = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       capture.sessionUpdateRequests?.push({ sessionId, payload });
-      await route.fulfill(json({
-        ...session(),
+      const current = capture.sessions?.find((item) => item.sessionId === sessionId) ?? session();
+      const updated = {
+        ...current,
         sessionId,
-        title: typeof payload.title === "string" ? payload.title : session().title,
+        title: typeof payload.title === "string" ? payload.title : current.title,
         ...(typeof payload.pinned === "boolean" ? { pinned: payload.pinned } : {})
-      }));
+      };
+      const currentIndex = capture.sessions?.findIndex((item) => item.sessionId === sessionId) ?? -1;
+      if (currentIndex >= 0 && capture.sessions) {
+        capture.sessions[currentIndex] = updated;
+      }
+      await route.fulfill(json(updated));
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+$/.test(url.pathname)) {
       const sessionId = decodeURIComponent(url.pathname.match(/\/sessions\/([^/]+)$/)?.[1] ?? "ses_1");
       const nightTask = nightTasks.find((task) => task.sessionId === sessionId);
+      const configuredSession = (capture.sessions ?? []).find((item) => item.sessionId === sessionId);
+      if (!nightTask && !configuredSession && capture.missingSessionsNotFound) {
+        await route.fulfill({ status: 404, ...jsonFailure("SESSION_NOT_FOUND", "Session 不存在") });
+        return;
+      }
       await route.fulfill(json(nightTask ? {
         sessionId,
         workspaceId: nightTask.workspaceId,
@@ -9142,7 +9998,7 @@ async function mockBackendApi(
         sourceRefId: nightTask.taskId,
         createdAt: "2026-07-18T04:00:00Z",
         updatedAt: "2026-07-18T04:00:00Z"
-      } : (capture.sessions ?? []).find((item) => item.sessionId === sessionId) ?? session()));
+      } : configuredSession ?? session()));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/sessions") {
@@ -9321,6 +10177,15 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/models") {
+      const workspaceId = url.searchParams.get("workspaceId");
+      capture.runtimeCatalogRequests?.push({ path: url.pathname, workspaceId, shareId: sessionShareHeader ?? null });
+      const expectedSharedWorkspaceId = typeof capture.sessionShareAccess?.workspaceId === "string"
+        ? capture.sessionShareAccess.workspaceId
+        : null;
+      if (sessionShareHeader && expectedSharedWorkspaceId && workspaceId !== expectedSharedWorkspaceId) {
+        await route.fulfill({ status: 403, ...jsonFailure("FORBIDDEN", "分享请求必须绑定精确会话或工作区") });
+        return;
+      }
       await route.fulfill(json(capture.modelResponses?.shift() ?? capture.models ?? [
         { id: "sonnet", providerId: "anthropic", name: "Sonnet" },
         { id: "opus", providerId: "anthropic", name: "Opus" },
@@ -9330,6 +10195,15 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/providers") {
+      const workspaceId = url.searchParams.get("workspaceId");
+      capture.runtimeCatalogRequests?.push({ path: url.pathname, workspaceId, shareId: sessionShareHeader ?? null });
+      const expectedSharedWorkspaceId = typeof capture.sessionShareAccess?.workspaceId === "string"
+        ? capture.sessionShareAccess.workspaceId
+        : null;
+      if (sessionShareHeader && expectedSharedWorkspaceId && workspaceId !== expectedSharedWorkspaceId) {
+        await route.fulfill({ status: 403, ...jsonFailure("FORBIDDEN", "分享请求必须绑定精确会话或工作区") });
+        return;
+      }
       await route.fulfill(json(capture.providers ?? [
         { id: "anthropic", name: "Anthropic", status: "ready" },
         { id: "volcengine", name: "Volcengine Ark", status: "ready" },
@@ -9514,6 +10388,11 @@ async function gotoWorkbench(page: Page, options: { selectConversation?: boolean
   if (buttonVisible && await newConversationButton.isEnabled()) {
     await newConversationButton.click();
   }
+}
+
+/** 会话卡片主按钮与置顶按钮并列；历史切换必须限定主按钮，避免可访问名称包含同一标题时产生歧义。 */
+function historySessionButton(page: Page, title: string | RegExp) {
+  return page.locator(".figma-chat-history-card-main").filter({ hasText: title });
 }
 
 /** Agents 为产品默认收起区；需要操作 Agent 树的用例必须显式展开，避免依赖旧版默认状态。 */
@@ -9877,6 +10756,84 @@ function session() {
     status: "ACTIVE",
     createdAt: "2026-06-19T00:00:00Z",
     updatedAt: "2026-06-19T00:00:00Z"
+  };
+}
+
+function sessionShareAccess(overrides: Record<string, unknown> = {}) {
+  return {
+    shareId: "shr_readonly",
+    version: 4,
+    actorUserId: "usr_reader",
+    actorUnifiedAuthId: "ucid_reader",
+    actorUsername: "阅读者",
+    executionOwnerUserId: "usr_owner",
+    sessionId: "ses_shared_readonly",
+    workspaceId: "wrk_shared_readonly",
+    canChat: false,
+    delegated: true,
+    ownerAccess: false,
+    expiresAt: "2026-08-16T00:00:00Z",
+    participants: [
+      {
+        userId: "usr_owner",
+        unifiedAuthId: "ucid_owner",
+        username: "会话所属人",
+        owner: true,
+        canChat: true,
+        status: "OWNER"
+      },
+      {
+        userId: "usr_reader",
+        unifiedAuthId: "ucid_reader",
+        username: "阅读者",
+        owner: false,
+        canChat: false,
+        status: "ACTIVE"
+      },
+      {
+        userId: "usr_writer",
+        unifiedAuthId: "ucid_writer",
+        username: "协作者",
+        owner: false,
+        canChat: true,
+        status: "ACTIVE"
+      }
+    ],
+    ...overrides
+  };
+}
+
+function sessionShareRuntimeState(overrides: Record<string, unknown> = {}) {
+  return {
+    active: true,
+    reason: null,
+    shareId: "shr_readonly",
+    version: 4,
+    sessionId: "ses_shared_readonly",
+    workspaceId: "wrk_shared_readonly",
+    canChat: false,
+    expiresAt: "2026-08-16T00:00:00Z",
+    activeRun: null,
+    generatedAt: "2026-08-09T01:00:00Z",
+    ...overrides
+  };
+}
+
+function sharedSessionListItem(overrides: Record<string, unknown> = {}) {
+  return {
+    shareId: "shr_active",
+    sharePath: "/s/shr_active",
+    sessionId: "ses_shared_list",
+    workspaceId: "wrk_shared_list",
+    sessionTitle: "分享会话",
+    ownerUserId: "usr_owner",
+    ownerUnifiedAuthId: "ucid_owner",
+    ownerUsername: "会话所属人",
+    sharedAt: "2026-08-09T00:00:00Z",
+    expiresAt: "2026-08-16T00:00:00Z",
+    canChat: true,
+    status: "ACTIVE",
+    ...overrides
   };
 }
 

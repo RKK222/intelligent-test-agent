@@ -43,6 +43,9 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
                 .target("20260715213000").load().migrate();
         jdbcClient = JdbcClient.create(dataSource);
+        // 本测试固定旧 Flyway 基线；普通运行态查询需识别并隔离分享用户代发消息。
+        jdbcClient.sql("alter table session_messages add column sent_by_shared_user boolean not null default false")
+                .update();
         seedData();
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();

@@ -32,6 +32,13 @@
   height: 12px;
 }
 
+.oc-user-message__sender {
+  margin: 0 4px 3px;
+  color: var(--oc-subtle);
+  font-size: var(--oc-text-xs);
+  font-weight: 650;
+}
+
 .oc-user-message__bubble {
   position: relative;
   width: fit-content;

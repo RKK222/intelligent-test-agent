@@ -53,7 +53,8 @@ class NightExecutionControllerTest {
     @Test
     void createsTaskForAuthenticatedUserWithoutReturningFullInput() {
         NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
-        when(service.create(eq(USER_ID), eq(false), any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
+        when(service.create(eq(USER_ID), eq("night-user"), eq(false),
+                any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
                 .thenReturn(task());
         WebTestClient client = authenticatedClient(service);
 
@@ -78,7 +79,7 @@ class NightExecutionControllerTest {
                 .jsonPath("$.data.runInputJson").doesNotExist()
                 .jsonPath("$.data.prompt").doesNotExist();
 
-        verify(service).create(eq(USER_ID), eq(false),
+        verify(service).create(eq(USER_ID), eq("night-user"), eq(false),
                 argThat(command -> command.scheduleMode() == NightExecutionScheduleMode.NIGHT_WINDOW),
                 eq(TRACE_ID));
     }
@@ -86,7 +87,8 @@ class NightExecutionControllerTest {
     @Test
     void mapsBatchContextAndRequiresASeparateSession() {
         NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
-        when(service.create(eq(USER_ID), eq(false), any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
+        when(service.create(eq(USER_ID), eq("night-user"), eq(false),
+                any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
                 .thenReturn(task());
         WebTestClient client = authenticatedClient(service);
 
@@ -106,7 +108,7 @@ class NightExecutionControllerTest {
                 .exchange()
                 .expectStatus().isOk();
 
-        verify(service).create(eq(USER_ID), eq(false), argThat(command -> command.sessionId() == null
+        verify(service).create(eq(USER_ID), eq("night-user"), eq(false), argThat(command -> command.sessionId() == null
                         && command.batchContext() != null
                         && command.batchContext().batchId().equals("batch_controller")
                         && command.batchContext().itemRequestId().equals("item_controller")),
@@ -134,7 +136,8 @@ class NightExecutionControllerTest {
     @Test
     void passesSuperAdminFactAndCustomModeToApplicationService() {
         NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
-        when(service.create(eq(USER_ID), eq(true), any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
+        when(service.create(eq(USER_ID), eq("night-user"), eq(true),
+                any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
                 .thenReturn(task());
         WebTestClient client = authenticatedClient(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
@@ -153,7 +156,7 @@ class NightExecutionControllerTest {
                 .exchange()
                 .expectStatus().isOk();
 
-        verify(service).create(eq(USER_ID), eq(true),
+        verify(service).create(eq(USER_ID), eq("night-user"), eq(true),
                 argThat(command -> command.scheduleMode() == NightExecutionScheduleMode.ADMIN_CUSTOM),
                 eq(TRACE_ID));
     }
@@ -163,6 +166,7 @@ class NightExecutionControllerTest {
         NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
         when(service.create(
                         eq(USER_ID),
+                        eq("night-user"),
                         eq(false),
                         argThat(command -> command.scheduleMode() == NightExecutionScheduleMode.ADMIN_CUSTOM),
                         eq(TRACE_ID)))

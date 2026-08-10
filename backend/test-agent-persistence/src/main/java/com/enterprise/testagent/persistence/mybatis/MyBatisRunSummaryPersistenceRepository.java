@@ -20,6 +20,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,7 +44,20 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
         if (anchor.status().isTerminal()) {
             throw new IllegalArgumentException("new Run anchor status must be active");
         }
-        return mapper.insertAnchor(toRow(anchor)) == 1;
+        try {
+            return mapper.insertAnchor(toRow(anchor)) == 1;
+        } catch (DataIntegrityViolationException conflict) {
+            Throwable cause = conflict.getMostSpecificCause();
+            String message = cause == null ? conflict.getMessage() : cause.getMessage();
+            if (message != null && message.toLowerCase(java.util.Locale.ROOT)
+                    .contains("uk_runs_active_session")) {
+                throw new com.enterprise.testagent.common.error.PlatformException(
+                        com.enterprise.testagent.common.error.ErrorCode.SESSION_BUSY,
+                        "会话中已有消息正在运行",
+                        java.util.Map.of("sessionId", anchor.sessionId().value()));
+            }
+            throw conflict;
+        }
     }
 
     @Override
@@ -165,7 +179,10 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                 anchor.sourceRefId(),
                 value(anchor.triggeredByUserId()),
                 anchor.agentId(),
-                anchor.modelId());
+                anchor.modelId(),
+                value(anchor.messageSenderUserId()),
+                anchor.messageSenderUnifiedAuthId(),
+                anchor.messageSentBySharedUser());
     }
 
     private RunTerminalProjectionRow toRow(RunTerminalProjection projection) {
@@ -197,6 +214,11 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
 
     private RunSummaryRow toRow(RunTerminalProjection projection, RunConversationSummary summary) {
         String senderUserId = summary.role() == SessionMessageRole.USER ? value(projection.senderUserId()) : null;
+        String senderUnifiedAuthId = summary.role() == SessionMessageRole.USER
+                ? projection.senderUnifiedAuthId()
+                : null;
+        boolean sentBySharedUser = summary.role() == SessionMessageRole.USER
+                && projection.sentBySharedUser();
         return new RunSummaryRow(
                 summary.messageId().value(),
                 projection.sessionId().value(),
@@ -211,6 +233,8 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                 projection.sourceType().name(),
                 projection.sourceRefId(),
                 senderUserId,
+                senderUnifiedAuthId,
+                sentBySharedUser,
                 SUMMARY_CONTENT_KIND,
                 summary.summaryKey(),
                 summary.summaryVersion(),
@@ -245,7 +269,10 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                 row.sourceRefId(),
                 userId(row.triggeredByUserId()),
                 row.agentId(),
-                row.modelId());
+                row.modelId(),
+                userId(row.messageSenderUserId()),
+                row.messageSenderUnifiedAuthId(),
+                Boolean.TRUE.equals(row.messageSentBySharedUser()));
     }
 
     private RunConversationSummary toDomain(RunSummaryRow row) {
@@ -257,7 +284,10 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                 row.summaryVersion(),
                 RunSummaryStatus.valueOf(row.summaryStatus()),
                 row.createdAt(),
-                row.remoteMessageId());
+                row.remoteMessageId(),
+                userId(row.senderUserId()),
+                row.senderUnifiedAuthId(),
+                Boolean.TRUE.equals(row.sentBySharedUser()));
     }
 
     private static String value(UserId userId) {

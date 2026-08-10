@@ -77,6 +77,7 @@ public class RuntimeSecurityConfig {
                 "X-Trace-Id",
                 "Last-Event-ID",
                 "X-Test-Agent-Linux-Server-Id",
+                "X-Test-Agent-Session-Share",
                 "X-Support-Access-Grant"));
         configuration.setExposedHeaders(List.of("X-Trace-Id"));
         configuration.setAllowCredentials(false);

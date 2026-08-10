@@ -38,7 +38,8 @@ class RuntimeSecurityConfigTest {
                 .options("http://127.0.0.1:8080/api/internal/platform/opencode-runtime/sessions")
                 .header("Origin", "http://127.0.0.1:4187")
                 .header("Access-Control-Request-Method", "POST")
-                .header("Access-Control-Request-Headers", "X-Test-Agent-Linux-Server-Id,X-Support-Access-Grant"));
+                .header("Access-Control-Request-Headers",
+                        "X-Test-Agent-Linux-Server-Id,X-Support-Access-Grant,X-Test-Agent-Session-Share"));
 
         filter.filter(exchange, chain -> reactor.core.publisher.Mono.empty()).block(java.time.Duration.ofSeconds(2));
 
@@ -49,6 +50,8 @@ class RuntimeSecurityConfigTest {
                 .containsIgnoringCase("X-Test-Agent-Linux-Server-Id");
         assertThat(headers.getFirst("Access-Control-Allow-Headers"))
                 .containsIgnoringCase("X-Support-Access-Grant");
+        assertThat(headers.getFirst("Access-Control-Allow-Headers"))
+                .containsIgnoringCase("X-Test-Agent-Session-Share");
     }
 
     @Test

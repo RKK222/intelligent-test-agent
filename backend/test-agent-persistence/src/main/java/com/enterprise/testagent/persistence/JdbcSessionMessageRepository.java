@@ -14,12 +14,10 @@ import com.enterprise.testagent.domain.user.UserId;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
 
 /**
  * SessionMessage JDBC Repository，负责平台会话消息与 session_messages 表的显式映射。
  */
-@Repository
 public class JdbcSessionMessageRepository extends JdbcRepositorySupport implements SessionMessageRepository {
 
     private final JdbcClient jdbcClient;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Activity, BookOpen, RefreshCw } from "lucide-vue-next";
+import { Activity, BookOpen, ChevronDown, ChevronUp, Clock, ExternalLink, FileText, Filter, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
 import * as echarts from "echarts";
 import { type BackendApiClient } from "@test-agent/backend-api";
@@ -25,11 +25,14 @@ const filterProviderId = ref("");
 const filterOutcomeGroup = ref<InternalModelCallOutcomeGroup | "">("");
 // 默认只看真实用户调用，避免每 5 分钟一次的探活把业务 TTFT/成功率冲淡。
 const filterSource = ref<InternalModelCallSource | "">("USER_CALL");
+const filterUcid = ref("");
+const customTimeRange = ref<[string, string] | null>(null);
 const page = ref(1);
 const pageSize = 20;
 const HOUR_MILLIS = 3_600_000;
 const selectedWindowHours = ref<number>(24);
 const showGlossary = ref(true);
+const showDocDialog = ref(false);
 
 const windowHourOptions = [
   { label: "最近 1 小时", value: 1 },
@@ -52,11 +55,51 @@ function createQueryWindow(hours = selectedWindowHours.value, nowMillis = Date.n
 }
 
 const queryWindow = ref<QueryWindow>(createQueryWindow());
+const timePopoverVisible = ref(false);
+const isCustomTime = ref(false);
 
-function onWindowHoursChange() {
-  queryWindow.value = createQueryWindow(selectedWindowHours.value);
+function selectPreset(hours: number) {
+  selectedWindowHours.value = hours;
+  isCustomTime.value = false;
+  customTimeRange.value = null;
+  queryWindow.value = createQueryWindow(hours);
+  timePopoverVisible.value = false;
   applyFilters();
 }
+
+function onCustomTimeChange(val: [string, string] | null) {
+  if (val && val.length === 2) {
+    isCustomTime.value = true;
+    selectedWindowHours.value = 0;
+    queryWindow.value = {
+      from: new Date(val[0]).toISOString(),
+      to: new Date(val[1]).toISOString()
+    };
+    timePopoverVisible.value = false;
+  } else {
+    isCustomTime.value = false;
+    selectedWindowHours.value = 24;
+    queryWindow.value = createQueryWindow(24);
+  }
+  applyFilters();
+}
+
+function formatShortTime(dateStr: string): string {
+  if (!dateStr) return "";
+  const parts = dateStr.split(" ");
+  if (parts.length === 2) {
+    return `${parts[0].slice(5)} ${parts[1].slice(0, 5)}`;
+  }
+  return dateStr;
+}
+
+const timeDisplayLabel = computed(() => {
+  if (isCustomTime.value && customTimeRange.value && customTimeRange.value.length === 2) {
+    return `${formatShortTime(customTimeRange.value[0])} 至 ${formatShortTime(customTimeRange.value[1])}`;
+  }
+  const found = windowHourOptions.find((o) => o.value === selectedWindowHours.value);
+  return found ? found.label : "最近 24 小时";
+});
 
 const outcomeGroupText: Record<InternalModelCallOutcomeGroup, string> = {
   SUCCESS: "成功",
@@ -89,16 +132,31 @@ function outcomeGroupOf(outcome: InternalModelCallOutcome): InternalModelCallOut
   return group ?? "OTHER";
 }
 
+interface GlossaryItem {
+  abbr: string;
+  name: string;
+  desc: string;
+  isPending?: boolean;
+  pendingText?: string;
+}
+
 // AIPerf (NVIDIA) 指标规范与业界标准英文缩写说明
-const glossaryItems = [
-  { abbr: "TTFT", name: "Time to First Token", desc: "首 Token 延迟：发起请求到接收到模型首个 Token 的时间。" },
+const glossaryItems: GlossaryItem[] = [
+  { abbr: "TTFT", name: "Time to First Token", desc: "首 Token 延迟：发起请求到接收到模型首个 Token 的时间（NVIDIA GenAI Perf 核心延迟指标）。" },
+  {
+    abbr: "ITL / TPOT",
+    name: "Inter-Token Latency / Time Per Output Token",
+    desc: "Token 输出间隔耗时：生成过程中连续两个 Output Token 之间的平均生成间隔。",
+    isPending: true,
+    pendingText: "（暂未计算）"
+  },
   { abbr: "SCT", name: "Stream Completion Time", desc: "流式完成时间：发起请求到流式响应正常结束的总耗时。" },
   { abbr: "E2E", name: "End-to-End Latency", desc: "端到端延迟：发起请求到接收到完整响应或异常终止的总端到端时长。" },
-  { abbr: "RPS", name: "Requests Per Second", desc: "每秒请求数：在统计时间窗口内的平均每秒请求处理量。" },
+  { abbr: "RPS", name: "Requests Per Second", desc: "每秒请求数：在统计时间窗口内的平均每秒请求处理量（Throughput 吞吐量指标）。" },
   { abbr: "REQ", name: "Requests", desc: "请求总数：包含成功与失败在内的总调用次数。" },
   { abbr: "SR", name: "Success Rate", desc: "请求成功率：成功完成的请求占总请求数的百分比。" },
   { abbr: "FR", name: "Failure Rate", desc: "请求错误率：失败或中途中断的请求占总请求数的百分比。" }
-] as const;
+];
 
 // 页面提示只讲业务含义、分母和空值规则，计算逻辑保持不变。
 const metricHelp = {
@@ -205,8 +263,23 @@ async function refreshAll() {
 }
 
 const probeStatuses = computed(() => probeStatusQuery.data.value ?? []);
-const records = computed(() => recordsQuery.data.value?.items ?? []);
-const recordsTotal = computed(() => recordsQuery.data.value?.total ?? 0);
+/** 从已获取的明细数据中动态汇总所有出现过的用户 ID 供下拉选单快捷选择。 */
+const ucidOptions = computed(() => {
+  const set = new Set<string>();
+  for (const item of recordsQuery.data.value?.items ?? []) {
+    if (item.ucid && item.ucid.trim()) {
+      set.add(item.ucid.trim());
+    }
+  }
+  return [...set].sort();
+});
+const records = computed(() => {
+  const list = recordsQuery.data.value?.items ?? [];
+  if (!filterUcid.value) return list;
+  const keyword = filterUcid.value.trim().toLowerCase();
+  return list.filter((row) => row.ucid && row.ucid.toLowerCase().includes(keyword));
+});
+const recordsTotal = computed(() => records.value.length);
 // stats API 返回底层 outcome；页面按大类筛选，明细 API 使用相同大类，保证两块口径一致。
 const stats = computed(() => (statsQuery.data.value ?? []).filter((row) =>
   !filterOutcomeGroup.value || outcomeGroupOf(row.outcome) === filterOutcomeGroup.value
@@ -478,8 +551,8 @@ function renderCharts() {
     trendChart?.setOption({
       animation: false,
       tooltip: { trigger: "axis" },
-      legend: { top: 0, right: 8, textStyle: { fontSize: 11 } },
-      grid: { top: 32, left: 48, right: 16, bottom: 28 },
+      legend: { top: 0, left: "center", itemGap: 16, textStyle: { fontSize: 11 } },
+      grid: { top: 34, left: 48, right: 44, bottom: 28 },
       xAxis: {
         type: "category",
         boundaryGap: false,
@@ -669,12 +742,14 @@ function onPageChange(next: number) {
         <div class="ta-imob-title-row">
           <h3 class="ta-imob-title">内部模型调用可观测</h3>
           <button
+            v-if="!showGlossary"
             type="button"
-            class="ta-imob-glossary-toggle"
-            @click="showGlossary = !showGlossary"
+            class="ta-imob-expand-glossary-btn"
+            @click="showGlossary = true"
           >
             <BookOpen :size="13" />
-            <span>{{ showGlossary ? "收起缩写指南" : "指标英文缩写指南 (Glossary)" }}</span>
+            <span>展开指标英文缩写指南 (Glossary)</span>
+            <ChevronDown :size="13" />
           </button>
         </div>
         <span class="ta-imob-sub">默认查看当前 {{ selectedWindowHours }} 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有的英文缩写见页首对照指南。</span>
@@ -682,12 +757,41 @@ function onPageChange(next: number) {
         <!-- 页首 AIPerf / 业界指标英文缩写对照指南 (Glossary) -->
         <div v-if="showGlossary" class="ta-imob-glossary-card">
           <div class="ta-imob-glossary-header">
-            <strong>AIPerf & 业界指标英文缩写指南 (Metrics Glossary)</strong>
-            <span>参照 NVIDIA AIPerf 性能指标规范定义</span>
+            <div class="ta-imob-glossary-header-title">
+              <BookOpen :size="14" class="ta-imob-glossary-icon" />
+              <strong>AIPerf & 业界指标英文缩写指南</strong>
+            </div>
+            <div class="ta-imob-glossary-actions">
+              <button
+                type="button"
+                class="ta-imob-spec-link"
+                @click="showDocDialog = true"
+              >
+                <FileText :size="12" />
+                <span>NVIDIA AIPerf 规范</span>
+                <ExternalLink :size="11" />
+              </button>
+              <button
+                type="button"
+                class="ta-imob-collapse-btn"
+                @click="showGlossary = false"
+              >
+                <ChevronUp :size="13" />
+                <span>收起指南</span>
+              </button>
+            </div>
           </div>
           <div class="ta-imob-glossary-grid">
-            <div v-for="item in glossaryItems" :key="item.abbr" class="ta-imob-glossary-item">
-              <code class="ta-imob-glossary-abbr">{{ item.abbr }}</code>
+            <div
+              v-for="item in glossaryItems"
+              :key="item.abbr"
+              class="ta-imob-glossary-item"
+              :class="{ 'is-pending': item.isPending }"
+            >
+              <div class="ta-imob-glossary-item-top">
+                <code class="ta-imob-glossary-abbr">{{ item.abbr }}</code>
+                <span v-if="item.pendingText" class="ta-imob-glossary-pending-badge">{{ item.pendingText }}</span>
+              </div>
               <span class="ta-imob-glossary-name">{{ item.name }}</span>
               <span class="ta-imob-glossary-desc">{{ item.desc }}</span>
             </div>
@@ -696,26 +800,89 @@ function onPageChange(next: number) {
       </div>
 
       <div class="ta-imob-combined">
-        <div class="ta-imob-filter-bar">
-          <span class="ta-imob-filter-title">筛选条件</span>
+        <div class="ta-imob-sticky-bar">
+          <div class="ta-imob-filter-label">
+            <Filter :size="13" />
+            <span>筛选</span>
+          </div>
+
+          <!-- 统一融合时间选择器 (Unified Time Picker) -->
+          <el-popover
+            v-model:visible="timePopoverVisible"
+            placement="bottom-start"
+            :width="300"
+            trigger="click"
+            popper-class="ta-imob-time-popover"
+          >
+            <template #reference>
+              <button
+                type="button"
+                class="ta-imob-time-picker-btn"
+                :class="{ 'is-custom': isCustomTime }"
+              >
+                <Clock :size="12" />
+                <span class="ta-imob-time-btn-text">{{ timeDisplayLabel }}</span>
+                <ChevronDown :size="11" />
+              </button>
+            </template>
+
+            <div class="ta-imob-time-popover-panel">
+              <div class="ta-imob-time-section-head">快捷时间窗口</div>
+              <div class="ta-imob-time-presets">
+                <button
+                  v-for="opt in windowHourOptions"
+                  :key="opt.value"
+                  type="button"
+                  class="ta-imob-preset-chip"
+                  :class="{ 'is-active': !isCustomTime && selectedWindowHours === opt.value }"
+                  @click="selectPreset(opt.value)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+
+              <div class="ta-imob-time-divider" />
+
+              <div class="ta-imob-time-section-head">自定义起止时间段</div>
+              <el-date-picker
+                v-model="customTimeRange"
+                type="datetimerange"
+                size="small"
+                range-separator="至"
+                start-placeholder="开始时间"
+                end-placeholder="结束时间"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                style="width: 100%"
+                @change="onCustomTimeChange"
+              />
+            </div>
+          </el-popover>
+
           <el-select
-            v-model="selectedWindowHours"
-            placeholder="时间范围"
-            class="ta-imob-filter"
-            @change="onWindowHoursChange"
+            v-model="filterUcid"
+            placeholder="按用户"
+            size="small"
+            clearable
+            filterable
+            allow-create
+            default-first-option
+            class="ta-imob-filter-select-user"
+            @change="applyFilters"
           >
             <el-option
-              v-for="option in windowHourOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
+              v-for="user in ucidOptions"
+              :key="user"
+              :label="user"
+              :value="user"
             />
           </el-select>
+
           <el-select
             v-model="filterProviderId"
             placeholder="供应商"
+            size="small"
             clearable
-            class="ta-imob-filter"
+            class="ta-imob-filter-select-provider"
             @change="applyFilters"
           >
             <el-option
@@ -725,11 +892,13 @@ function onPageChange(next: number) {
               :value="option.value"
             />
           </el-select>
+
           <el-select
             v-model="filterOutcomeGroup"
             placeholder="结果分类"
+            size="small"
             clearable
-            class="ta-imob-filter"
+            class="ta-imob-filter-select-outcome"
             @change="applyFilters"
           >
             <el-option
@@ -739,37 +908,44 @@ function onPageChange(next: number) {
               :value="key"
             />
           </el-select>
+
           <el-select
             v-model="filterSource"
             placeholder="来源"
+            size="small"
             clearable
-            class="ta-imob-filter"
+            class="ta-imob-filter-select-source"
             @change="applyFilters"
           >
             <el-option label="用户调用" value="USER_CALL" />
             <el-option label="探活" value="PROBE" />
           </el-select>
-          <button
-            type="button"
-            class="ta-imob-probe-all-btn"
-            :disabled="recordsQuery.isFetching.value || statsQuery.isFetching.value"
-            @click="refreshAll()"
-          >
-            <RefreshCw
-              :size="12"
-              :class="{ 'ta-imob-spin': recordsQuery.isFetching.value || statsQuery.isFetching.value }"
-            />
-            刷新数据
-          </button>
-          <button
-            type="button"
-            class="ta-imob-probe-all-btn"
-            :disabled="probeMutation.isPending.value"
-            @click="probeAll()"
-          >
-            <Activity class="ta-imob-probe-icon" :size="12" />
-            全部探活
-          </button>
+
+          <div class="ta-imob-filter-vdivider" />
+
+          <div class="ta-imob-filter-actions">
+            <button
+              type="button"
+              class="ta-imob-btn-small"
+              :disabled="recordsQuery.isFetching.value || statsQuery.isFetching.value"
+              @click="refreshAll()"
+            >
+              <RefreshCw
+                :size="11"
+                :class="{ 'ta-imob-spin': recordsQuery.isFetching.value || statsQuery.isFetching.value }"
+              />
+              <span>刷新</span>
+            </button>
+            <button
+              type="button"
+              class="ta-imob-btn-small"
+              :disabled="probeMutation.isPending.value"
+              @click="probeAll()"
+            >
+              <Activity class="ta-imob-probe-icon" :size="11" />
+              <span>探活</span>
+            </button>
+          </div>
         </div>
 
         <section class="ta-imob-section ta-imob-records-section">
@@ -906,7 +1082,7 @@ function onPageChange(next: number) {
               <div class="ta-imob-chart-card ta-imob-chart-card-full">
                 <h4 class="ta-imob-overview-title">
                   <MetricHelpLabel
-                    :label="showRateMetrics ? 'REQ & SR Trend' : 'REQ Trend'"
+                    :label="showRateMetrics ? '请求数与成功率趋势' : '请求数趋势'"
                     :description="chartHelp.hourlyTrend"
                   />
                 </h4>
@@ -914,19 +1090,19 @@ function onPageChange(next: number) {
               </div>
               <div v-if="showRateMetrics" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="Outcome Distribution" :description="chartHelp.successComposition" />
+                  <MetricHelpLabel label="调用结果分布" :description="chartHelp.successComposition" />
                 </h4>
                 <div ref="pieChartEl" class="ta-imob-chart" />
               </div>
               <div v-if="failureBarData.length" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="Failure Breakdown" :description="chartHelp.failureBreakdown" />
+                  <MetricHelpLabel label="失败原因分类" :description="chartHelp.failureBreakdown" />
                 </h4>
                 <div ref="failureChartEl" class="ta-imob-chart" />
               </div>
               <div v-if="providerBarData.length" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="Provider REQ Volume" :description="chartHelp.providerVolume" />
+                  <MetricHelpLabel label="供应商请求量对比" :description="chartHelp.providerVolume" />
                 </h4>
                 <div ref="providerChartEl" class="ta-imob-chart" />
               </div>
@@ -979,6 +1155,94 @@ function onPageChange(next: number) {
           </div>
         </section>
       </div>
+
+      <!-- 性能指标规范定义 (离线指南弹窗) -->
+      <el-dialog
+        v-model="showDocDialog"
+        title="AIPerf & 业界模型性能指标规范定义 (离线指南)"
+        width="760px"
+        append-to-body
+      >
+        <div class="ta-imob-doc-content">
+          <p class="ta-imob-doc-lead">
+            本文档参考
+            <a
+              href="https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="ta-imob-external-link"
+            >
+              NVIDIA GenAI Perf / AI Perf Metrics Reference
+            </a>
+            官方规范标准定义。对应本地源码 Markdown 文件位于 <code>docs/standards/metrics-glossary.md</code>。
+          </p>
+
+          <table class="ta-imob-doc-table">
+            <thead>
+              <tr>
+                <th>缩写</th>
+                <th>全称 (Full Name)</th>
+                <th>中文名称</th>
+                <th>状态 / 计算说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>TTFT</code></td>
+                <td>Time to First Token</td>
+                <td>首 Token 延迟</td>
+                <td>已统计（计算模型生成首包 Token 的启动延迟）</td>
+              </tr>
+              <tr class="is-pending-row">
+                <td><code>ITL / TPOT</code></td>
+                <td>Inter-Token Latency / Time Per Output Token</td>
+                <td>Token 输出间隔 / 单 Token 耗时</td>
+                <td><span class="ta-imob-orange-badge">[暂未计算]</span>（待代理协议提取 Token 粒度时间戳后计算）</td>
+              </tr>
+              <tr>
+                <td><code>SCT</code></td>
+                <td>Stream Completion Time</td>
+                <td>流式完成时间</td>
+                <td>已统计（计算流式响应完整结束传输的耗时）</td>
+              </tr>
+              <tr>
+                <td><code>E2E</code></td>
+                <td>End-to-End Latency</td>
+                <td>端到端总延迟</td>
+                <td>已统计（客户端 HTTP 请求开始到整体结束的总耗时）</td>
+              </tr>
+              <tr>
+                <td><code>RPS</code></td>
+                <td>Requests Per Second</td>
+                <td>每秒请求数 (吞吐量)</td>
+                <td>已统计（统计窗口内平均每秒请求处理量）</td>
+              </tr>
+              <tr>
+                <td><code>REQ</code></td>
+                <td>Requests</td>
+                <td>请求总数</td>
+                <td>已统计（全量请求计数，含成功与异常）</td>
+              </tr>
+              <tr>
+                <td><code>SR</code></td>
+                <td>Success Rate</td>
+                <td>请求成功率</td>
+                <td>已统计（成功请求占总请求数的百分比）</td>
+              </tr>
+              <tr>
+                <td><code>FR</code></td>
+                <td>Failure Rate</td>
+                <td>请求错误率</td>
+                <td>已统计（异常或中断请求占总请求数的百分比）</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="ta-imob-doc-footer">
+            <span>官方参考链接：<a href="https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference" target="_blank" rel="noopener noreferrer">NVIDIA GenAI Perf / AI Perf Metrics Reference ↗</a></span>
+          </div>
+        </div>
+      </el-dialog>
     </template>
     <div v-else class="ta-imob-placeholder">当前账号无系统管理权限</div>
   </section>
@@ -1012,23 +1276,24 @@ function onPageChange(next: number) {
   font-weight: 600;
   color: #111827;
 }
-.ta-imob-glossary-toggle {
+.ta-imob-expand-glossary-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
-  border: 1px solid #d0d7de;
   border-radius: 6px;
-  background: #f6f8fa;
-  color: #0969da;
+  background: #f0f9ff;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.ta-imob-glossary-toggle:hover {
-  background: #ddf4ff;
-  border-color: #54aeff;
+.ta-imob-expand-glossary-btn:hover {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #7dd3fc;
 }
 .ta-imob-sub {
   font-size: 12px;
@@ -1038,27 +1303,77 @@ function onPageChange(next: number) {
 .ta-imob-glossary-card {
   margin-top: 6px;
   padding: 12px 14px;
-  border: 1px solid #c8e1ff;
+  border: 1px solid #dbeafe;
   border-radius: 8px;
-  background: #f0f7ff;
-  color: #1f2328;
+  background: #f0f9ff;
+  color: #1e293b;
 }
 .ta-imob-glossary-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   margin-bottom: 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #d0e5ff;
+  border-bottom: 1px solid #e0f2fe;
 }
-.ta-imob-glossary-header strong {
+.ta-imob-glossary-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #0284c7;
+}
+.ta-imob-glossary-header-title strong {
   font-size: 13px;
-  color: #0969da;
+  font-weight: 600;
+  color: #0369a1;
 }
-.ta-imob-glossary-header span {
+.ta-imob-glossary-icon {
+  color: #0284c7;
+  flex-shrink: 0;
+}
+.ta-imob-glossary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ta-imob-spec-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
   font-size: 11px;
-  color: #57606a;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ta-imob-spec-link:hover {
+  background: #bae6fd;
+  color: #0284c7;
+  border-color: #7dd3fc;
+}
+.ta-imob-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ta-imob-collapse-btn:hover {
+  background: #f8fafc;
+  color: #1e293b;
+  border-color: #94a3b8;
 }
 .ta-imob-glossary-grid {
   display: grid;
@@ -1073,6 +1388,69 @@ function onPageChange(next: number) {
   border-radius: 6px;
   background: #ffffff;
   border: 1px solid #e1e4e8;
+}
+.ta-imob-glossary-item.is-pending {
+  border-color: #fcd34d;
+  background-color: #fffbeb;
+}
+.ta-imob-glossary-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ta-imob-glossary-pending-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #d97706;
+  background-color: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.ta-imob-doc-content {
+  font-size: 13px;
+  color: #1f2328;
+  line-height: 1.6;
+}
+.ta-imob-doc-lead {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #57606a;
+}
+.ta-imob-external-link {
+  color: #0969da;
+  text-decoration: underline;
+  font-weight: 500;
+}
+.ta-imob-doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+.ta-imob-doc-table th,
+.ta-imob-doc-table td {
+  border: 1px solid #d0d7de;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 12px;
+}
+.ta-imob-doc-table th {
+  background-color: #f6f8fa;
+  font-weight: 600;
+}
+.ta-imob-doc-table tr.is-pending-row {
+  background-color: #fffbeb;
+}
+.ta-imob-orange-badge {
+  color: #d97706;
+  font-weight: 700;
+}
+.ta-imob-doc-footer {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #57606a;
+  border-top: 1px dashed #d0d7de;
+  padding-top: 8px;
 }
 .ta-imob-glossary-abbr {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -1095,7 +1473,7 @@ function onPageChange(next: number) {
   min-height: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 .ta-imob-section {
   flex: 0 0 auto;
@@ -1109,8 +1487,6 @@ function onPageChange(next: number) {
 }
 .ta-imob-records-section {
   order: 2;
-  padding-top: 20px;
-  border-top: 1px solid #e5e7eb;
 }
 .ta-imob-section-title {
   margin: 0;
@@ -1261,42 +1637,113 @@ function onPageChange(next: number) {
   font-size: 11px;
   line-height: 1.25;
 }
-.ta-imob-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #f8fafc;
-  flex-wrap: wrap;
+.ta-imob-sticky-bar {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 100 !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 8px 12px !important;
+  margin: 0 !important;
+  background: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05) !important;
+  overflow-x: auto !important;
+  scrollbar-width: thin !important;
+  flex-shrink: 0 !important;
 }
-.ta-imob-filter-title {
-  margin-right: 4px;
-  color: #374151;
-  font-size: 13px;
-  font-weight: 600;
+.ta-imob-sticky-bar > * {
+  flex-shrink: 0 !important;
 }
-.ta-imob-filter {
-  width: 160px;
-}
-.ta-imob-probe-all-btn {
+.ta-imob-filter-label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
-  border: 1px solid #d1d5db;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-right: 2px;
+}
+.ta-imob-time-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #dcdfe6;
   border-radius: 4px;
-  background: #fff;
-  color: #2563eb;
+  background: #ffffff;
+  color: #606266;
   font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
 }
-.ta-imob-probe-all-btn:hover:not(:disabled) {
+.ta-imob-time-picker-btn:hover {
+  border-color: #c0c4cc;
+  color: #303133;
+}
+.ta-imob-time-picker-btn.is-custom {
+  border-color: #93c5fd;
   background: #eff6ff;
+  color: #1d4ed8;
 }
-.ta-imob-probe-all-btn:disabled {
-  opacity: 0.6;
+.ta-imob-time-btn-text {
+  font-weight: 500;
+}
+:deep(.ta-imob-filter-select-user) {
+  width: 155px !important;
+}
+:deep(.ta-imob-filter-select-provider) {
+  width: 145px !important;
+}
+:deep(.ta-imob-filter-select-outcome) {
+  width: 145px !important;
+}
+:deep(.ta-imob-filter-select-source) {
+  width: 125px !important;
+}
+.ta-imob-filter-vdivider {
+  width: 1px;
+  height: 14px;
+  background: #cbd5e1;
+  margin: 0 4px 0 auto;
+  flex-shrink: 0;
+}
+.ta-imob-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.ta-imob-btn-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.ta-imob-btn-small:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.ta-imob-btn-small:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 .ta-imob-probe-icon {
@@ -1325,5 +1772,47 @@ function onPageChange(next: number) {
 @keyframes ta-imob-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+.ta-imob-time-popover-panel {
+  padding: 4px 2px;
+}
+.ta-imob-time-section-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+.ta-imob-time-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.ta-imob-preset-chip {
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+.ta-imob-preset-chip:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #1e293b;
+}
+.ta-imob-preset-chip.is-active {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+  font-weight: 600;
+}
+.ta-imob-time-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 10px 0;
 }
 </style>

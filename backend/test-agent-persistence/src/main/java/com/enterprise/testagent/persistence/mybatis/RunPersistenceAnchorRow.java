@@ -28,5 +28,8 @@ public record RunPersistenceAnchorRow(
         String sourceRefId,
         String triggeredByUserId,
         String agentId,
-        String modelId) {
+        String modelId,
+        String messageSenderUserId,
+        String messageSenderUnifiedAuthId,
+        Boolean messageSentBySharedUser) {
 }

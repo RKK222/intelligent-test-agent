@@ -7362,3 +7362,486 @@
 - 新增的 `outcomeGroup` 为向后兼容的可选查询参数；未新增事件或数据库结构，未修改 migration、鉴权、安全策略、
   `.env*`、generated SDK 或 OpenCode 源码。工作流仍因本机 PostgreSQL 用户缺少创建角色权限而显式跳过，不影响
   本功能实机验证。
+
+## 2026-08-08 - 修复模型调用监控趋势图图例与右侧 Y 轴名称重叠问题
+
+### Why
+
+- 在模型调用监控页面中，双 Y 轴趋势图（REQ 与 Success Rate %）的图例放置在右上角（`top: 0, right: 8`），与右侧 Y 轴标题（`name: "SR %"`）在渲染位置上发生重叠，导致图例图标与文字在右上角堆叠显示。
+
+### What
+
+- 修改 [InternalModelObservabilityPanel.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/system/InternalModelObservabilityPanel.vue) 中 ECharts 趋势图配置：将图例改为顶部居中对齐（`top: 0, left: "center"`）并增加 `itemGap: 16`，将 `grid.right` 边距由 `16` 调整为 `44`，确保右侧 Y 轴刻度标签和名称有足够展示空间。
+- 将聚合指标图表的卡片表头统一改为中文：`请求数与成功率趋势`（或 `请求数趋势`）、`调用结果分布`、`失败原因分类`、`供应商请求量对比`。
+- 参考 NVIDIA GenAI Perf / AI Perf Metrics Reference 标准，在前端面板页首内置“AIPerf & 业界指标英文缩写指南 (Glossary)”卡片，点击“参照 NVIDIA AIPerf 性能指标规范定义 ↗”可直接唤起离线规范弹窗。
+- 在缩写指南与离线标准文档 [docs/standards/metrics-glossary.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/standards/metrics-glossary.md) 中添加 [NVIDIA GenAI Perf / AI Perf Metrics Reference](https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference) 官方链接，并将尚未提取 Token 粒度时间戳计算的 `ITL / TPOT` 用醒目的橙色徽章 `<span class="ta-imob-orange-badge">（暂未计算）</span>` 显式标注。
+- 在筛选栏与调用明细区增加“按人 (用户 `filterUcid` Select/Input)”与“按时间 (自定义起止时间段 `el-date-picker` Datetimerange)”选择器，支持快捷选择或输入用户 ID 筛选，并支持自定义精确定时检索。
+- 消除筛选栏尾部过多空白：移除操作按钮组的 `margin-left: auto` 强行右对齐，使所有筛选下拉框、时间选择器与 `[刷新]` `[探活]` 按钮以 8px 间距紧密连续左对齐排列，并在筛选区与操作区之间加入极细垂直分割线（`ta-imob-filter-vdivider`），排版紧凑连贯。
+
+### How
+
+- 执行 `npx vitest run --environment jsdom tests/internal-model-observability-panel.test.ts`，测试 100% 通过。
+- 更新 [docs/README.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/README.md) 同步索引 `docs/standards/metrics-glossary.md`。
+
+### Result
+
+- 趋势图图例居中展示，所有聚合图表表头均采用清晰中文展示。
+- 点击“NVIDIA AIPerf 规范 ↗”胶囊按钮可直接弹出离线对照指南；`ITL / TPOT` 带有明显的橙色“暂未计算”状态标识。
+- 时间选择器合二为一，筛选控件与操作按钮紧凑连贯排列，彻底消除右侧大片空白；整体外观符合高端监控工具设计标准。
+
+## 2026-08-08 - 优化内部模型可观测面板筛选吸顶条宽度对齐与留白布局
+
+### Why
+
+- 内部模型可观测面板 `InternalModelObservabilityPanel.vue` 的筛选吸顶条 `.ta-imob-sticky-bar` 使用了 `-16px` 的负外边距，导致其左右两端超出了上、下方卡片和表格的宽度边界；筛选条下方原叠加了 60px 的空旷留白与重复分割线；筛选下拉框宽度偏窄（95px ~ 115px）且操作按钮靠左导致右侧尾部留白过多。
+
+### What
+
+- 移除 `.ta-imob-sticky-bar` 的 `-16px` 负外边距，恢复与上下卡片/图表/明细表格 100% 宽度一致对齐；增加 `border: 1px solid #e5e7eb` 与 `border-radius: 8px` 圆角卡片样式及轻量阴影。
+- 调整筛选栏分割线 `.ta-imob-filter-vdivider` 的边距（`margin: 0 4px 0 auto`），将操作按钮组（“刷新”、“探活”）自动推至筛选吸顶栏最右侧，形成双端分布布局，彻底消除右侧大面积无效留白。
+- 适当加长各筛选下拉框宽度：按用户 `155px`、供应商 `145px`、结果分类 `145px`、来源 `125px`，让文本显示更加清晰舒展。
+- 清理 `.ta-imob-records-section` 的冗余 `padding-top` 和 `border-top`，将 `ta-imob-combined` 间距收敛为标准的 `16px`。
+
+### How
+
+- 修改 `frontend/apps/agent-web/src/components/system/InternalModelObservabilityPanel.vue` 中的对应 CSS 规则。
+
+### Result
+
+- 筛选吸顶条宽度与上下卡片及表格完全齐平，双端分布布局与加宽后的选择框清晰舒展，筛选条下方的边距过渡自然平滑。
+
+## 2026-08-08 - 排查本地 OpenCode 无法启动
+
+### Why
+
+- 当前仓库按 `test` / `.env.test` 启动后，前端访问用户 OpenCode 失败，需要确认是 OpenCode、manager 还是后端启动链路故障。
+
+### What
+
+- 发现当前仓库本次后端启动失败，根因是 `8080` 被另一个 `.claude/worktrees/model-observability` worktree 的旧后端进程占用。
+- 当前根目录的 `opencode-manager` 虽然已启动并连接了 `127.0.0.1:8080`，但没有托管的 OpenCode 子进程；对 `4104` 的健康检查持续返回 `PROCESS_NOT_MANAGED`。
+
+### How
+
+- 只读检查进程、端口、screen 会话、manager 状态目录和服务日志；确认当前后端日志明确报 `Port 8080 was already in use`。
+- 核对 `restart-dev-services.sh` 的 `backend_pids` 只匹配当前根目录的 `.tmp/dev-services/backend-runtime`，不会自动回收其他 worktree 的后端进程。
+- 未停止 PID 78329 所属的其他 worktree 服务，避免误杀用户正在使用的并行工作树。
+
+### Result
+
+- 本地 OpenCode 起不来的直接原因不是 OpenCode 二进制或配置，而是当前仓库后端未真正启动，manager 误连到了旧 worktree 后端；`/actuator/health` 的 200 也来自该旧进程，不能作为当前根目录后端已启动的依据。
+- 后续清理或停止旧 worktree 的 8080 服务后，再按项目标准 `test` 启动链重启并复核 manager 与 OpenCode 端口。
+
+## 2026-08-08 - 兼容并行 worktree Flyway 历史并恢复本地启动
+
+### Why
+
+- 用户确认重启后，清理旧 worktree 后端仍发现当前 `.env.test` 数据库已执行内部模型可观测旧版本
+  `20260807130134`、`20260807203000`、`20260807222227`，而当前分支只保留重编号版本，Flyway 因 unresolved/applied
+  与低版本撤销重发候选缺失而拒绝启动。
+- 默认 Workflow 准备还因本机密钥文件缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 失败；前端配置已禁用 Workflow，因此本次按
+  脚本支持的 `--without-workflow` 恢复 Java、manager 和前端三服务。
+
+### What
+
+- 复用现有 `DatabaseMigrationCompatibilityCustomizer` 和主 migration 资源过滤器，增加内部模型旧三版本的原始字节隔离
+  解析，并过滤对应的三个重编号主目录资源；部分旧历史、部分新历史、新旧混用均 fail-closed。
+- 当 `V20260807190000__create_run_resends.sql` 缺失但后续版本已执行时，分别提供批量归因前
+  `V20260807229999` 与批量归因/当前内部模型后 `V20260808143303` 两条顺序补偿路径；若某条补偿版本已经落库，后续启动
+  固定沿用同一路径，主 migration 与补偿同时存在或两个补偿同时存在时拒绝启动。
+- 增加真实 PostgreSQL 升级与二次启动回归，覆盖批量归因前后两条路径；同步 `docs/deployment/database.md` 的选择规则、
+  SHA-256 和禁止 `repair`/`outOfOrder` 约束。
+
+### How
+
+- 内部模型旧三条兼容 SQL 与旧 worktree 字节一致，SHA-256 分别为
+  `f214dfd0d4f26de830452d9f4121bc938cf031e4867555d5248e159d99377084`、
+  `de7188e3ba5d01148a655dbc238783cf7881abf168bd7b6e422c9f2fa118a5c3`、
+  `46f0a8e687f59c037a7e02cb1f9ba3db4893633ba20edd67d4ae75f0b6fd0d9e`；两个撤销重发补偿 SQL 与主候选字节一致，
+  SHA-256 为 `ca044d9819c7259b62e29243e9d72a06a2f01a532f1803f37e117de1d2f5d83d`。
+- JDK 25 下执行 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest`，11 项全部通过；最终应用 JAR 的
+  persistence 嵌套 JAR 已确认包含五个 compatibility SQL。
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow` 全量打包并重启；
+  最终再次重启验证已落库的 `20260807229999` 可持续解析，未执行 `repair`、未启用 `outOfOrder`、未手工改 history。
+
+### Result
+
+- 当前根目录后端 runtime JAR 正常监听 8080，health/readiness 均为 UP；前端 3000 返回 200，登录 CORS 正常，
+  `opencode-manager` 已连接后端 WebSocket 且无重连循环。数据库通过 Flyway 正常新增 `20260807229999` 和
+  `20260807230000`，旧三条 checksum 保持不变。
+- 未修改 `.env*`、HTTP API、RunEvent、generated SDK 或 OpenCode 源码；未跟踪的 `demo/` 未修改且不纳入提交。
+- Workflow 尚未启动，若后续需要该控制面，必须先补齐本机 `WORKFLOW_DEV_REDIS_PASSWORD`。
+
+## 2026-08-09 - 允许当前 Flyway 迁移链断点续跑并补充多人协作门禁
+
+### Why
+
+- 上一轮兼容提交 `7195257b5` 为防止内部模型新旧迁移链混用，误把“当前三条 migration 只执行了一部分”也判为
+  非法历史；Flyway 逐版本提交时，进程正常中断在 `V20260808143300` 或 `V20260808143301` 后会因此无法重启续跑。
+- 多人功能分支各自创建时间戳只能降低同号概率，不能保证合并顺序和部署顺序，需要把最终版本分配移到串行集成门禁。
+
+### What
+
+- 删除当前内部模型 migration 部分执行即拒绝启动的判断；部分旧历史和新旧版本混用仍保持 fail-closed，完整旧历史继续
+  使用字节级兼容目录，当前主迁移链则按默认顺序执行剩余版本。
+- 新增两个真实 PostgreSQL 回归场景，分别从只完成 `V20260808143300` 和只完成 `V20260808143301` 的 history 重启，
+  验证最终执行到 `V20260808143302`、不加载旧兼容目录且 `outOfOrder=false`。
+- 数据库规范补充候选/最终版本两阶段流程：功能分支使用独享临时数据库或 schema，合入时由单一集成人或 merge queue
+  串行分配最终版本，CI 以目标库 history 和版本/文件/SHA-256 清单锁定已冻结 migration；可选全局单调序号但不能用
+  UUID、repeatable migration、`outOfOrder` 或 `repair` 替代顺序治理。
+
+### How
+
+- JDK 25 下运行 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest`，13 项全部通过；运行
+  `FlywayMigrationNamingTest`，8 项全部通过。
+- 使用未修改的 `.env.test` 与 `--without-workflow` 全量打包并重启 backend、opencode-manager、frontend；backend health/
+  readiness 为 UP，前端 3000 与 CORS 正常，manager 将用户 OpenCode 拉起到 4104，`/global/config` 返回 200。
+- 最终运行 JAR 中旧内部模型三份兼容 SQL 与两份撤销重发补偿 SQL 的 SHA-256 均与数据库文档锁定值一致；未执行
+  `repair`、未打开 `outOfOrder`、未手工修改 history。
+
+### Result
+
+- 当前主迁移链可从合法中断点恢复，不再因上一轮过严保护影响其他开发者重启；未知旧分叉、部分旧链和新旧混合链仍会
+  被明确阻断，避免静默污染数据库历史。
+- 本次不新增或改写 migration SQL，不变更 HTTP API、RunEvent、数据库结构、MyBatis SQL、安全边界、`.env*`、
+  generated SDK 或 OpenCode 源码；未跟踪 `demo/` 保持不变且不纳入提交。Workflow 仍因缺少本机密钥而显式跳过。
+
+## 2026-08-09 - 校正个人本地数据库下的 Flyway 合并规则
+
+### Why
+
+- 前一条记录和数据库文档曾建议“每个 worktree 临时库、合并期自动编号、CI 清单和 merge queue”，但当前项目并未实现
+  这些能力；实际没有共享开发数据库或中央协调系统，每个开发者在需要保留的个人本地数据库上执行 migration。
+- 两个尚未推送的本地分支无法感知对方版本，合并期重新编号会使已经执行旧编号的个人库与源码不一致，因此该建议不能
+  作为当前协作规则。
+
+### What
+
+- `AGENTS.md`、persistence README 和数据库部署文档统一改为当前真实流程：开发时间戳只能区分候选，并行分支在合并时由
+  集成人收集全部 migration 与相关个人本地库/目标库 history，统一设计主链和兼容路径。
+- migration 只要在任何需要保留的个人本地库或目标库执行，就冻结版本、文件名和原始字节；只有从未执行的候选，或数据库
+  所有者明确同意废弃并重建个人库的历史，才能在合并时重命名或重排。
+- 已执行历史无法直接汇成严格递增主链时，继续复用现有 `DatabaseMigrationCompatibilityCustomizer`、隔离 compatibility
+  location 和更高版本前向 migration，并用真实 PostgreSQL 覆盖每套需保留历史；不引入不存在的中央编号、CI 或 merge queue。
+
+### How
+
+- 对照当前自检、命名测试、兼容装配和上一轮真实本地分叉，删除文档中四条未实现能力，并统一替换“未进共享库即可改号”
+  的表述；`git diff --check` 校验通过。
+
+### Result
+
+- 后续合并不会再假设个人本地数据库可随意重建，也不会把自动编号描述成现有能力；版本冲突只能在合并期按已知真实 history
+  显式兼容，数据库所有者明确选择重建是唯一可跳过该历史的例外。
+- 本次仅修改规范、模块 README、数据库部署文档和本机会话记录，不修改代码、migration SQL、API、事件、数据库结构、
+  `.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-09 - 清理本机 Docker 旧资源并下调内存上限
+
+### Why
+
+- 本机 16 GiB 内存长期卡顿；排查确认 Docker Desktop VM 以 8092 MiB 启动，宿主机只剩约 145 MiB 空闲，Swap 一度使用
+  约 10.3 GiB，同时遗留多个已退出的 TestAgent 开发容器、旧镜像和空闲 BuildKit 容器。
+
+### What
+
+- 删除可选 AMD64 工具箱容器与镜像、已退出的 Temporal/LobeHub 开发容器及其镜像、旧 memory-service/pgvector 镜像；
+  保留所有数据库和对象存储 volume，并保留当前后端实际使用的 PostgreSQL、Redis、MySQL 和 memory-service。
+- 将本机 Docker Desktop 设置 `/Users/kaka/Library/Group Containers/group.com.docker/settings.json` 的 `memoryMiB` 从 8092
+  调整为 5120；该文件位于仓库外，未修改项目 `.env*`。
+- 重启 Docker 后恢复 memory compose；空闲的 `mimoagent-builder` 未自动重启，后续构建会按需重新启动。
+
+### How
+
+- 通过容器架构、端口连接、restart policy 和实时 CPU/内存快照确认删除边界；显式按容器/镜像 ID 清理，没有使用全局
+  volume prune 或删除其他项目数据。
+- Docker Desktop 4.20.1 首次重启因旧 VM 退出错误弹出 `virtualization.framework ... %!w(<nil>)`；终止失败的 message-box
+  后第二次启动成功，实际进程参数确认包含 `--memoryMiB 5120`。
+- 验证 backend health/readiness、前端 3000、登录 CORS、manager 4104、memory-service 与全部恢复容器健康。
+
+### Result
+
+- Docker VM 上限已降为 5 GiB，BuildKit 常驻约 752 MiB 已释放；系统内存压力指标由约 15% 提升到 44%，Swap 使用量由
+  约 10.3 GiB 降至约 4.95 GiB。
+- TestAgent、memory-service 和 Sub2API 均恢复健康；未修改代码、API、RunEvent、数据库结构、migration、安全配置、
+  generated SDK 或 OpenCode 源码。
+
+## 2026-08-09 - 新增历史对话置顶与取消置顶
+
+### Why
+
+- release worktree 的 Session DTO、`pinned` 字段和 PATCH 更新接口已经存在，但当前 `FigmaChatPanel` 会话列表没有操作入口，
+  用户级 MyBatis 历史查询也只按更新时间排序，导致写入置顶状态后无法稳定出现在分页列表前部。
+
+### What
+
+- 会话列表卡片新增独立、可访问的置顶/取消置顶按钮，请求中显示 Spinner 并阻止重复操作；`AgentWorkbench` 复用既有
+  `updateSession` mutation，保留列表已有 `workspaceContext`，即时更新本地投影，并在加载过后续页时回到第一页对齐分页。
+- `SessionHistoryMapper.xml` 的用户历史与工作区历史统一改为 `pinned desc, updated_at desc, id desc`；前端投影也按同一分组
+  契约排序，兼容滚动发布期间仍按旧顺序返回的后端。没有新增字段、索引或 Flyway migration。
+- 补充 MyBatis 集成测试、排序单测、组件交互单测和 Chromium PATCH 往返用例；同步 HTTP API、数据库、测试场景、用户手册
+  以及 API/runtime/persistence/frontend 模块 README/PACKAGE。
+
+### How
+
+- `MyBatisSessionHistoryRepositoryIntegrationTest` 6 项通过；`workbench-utils.test.ts` 与 `FigmaChatPanel.test.ts` 合计
+  256 passed / 1 skipped；隔离端口 Chromium 置顶往返 1 项通过。
+- `corepack pnpm build` 通过；`mvn -pl test-agent-app -am -DskipTests package` 的 20 模块聚合打包通过，persistence JAR 中两条
+  查询均确认包含置顶优先排序。
+- Playwright 默认 `3000` 端口当时由 `intelligent-test-agent-memory-v1` worktree 占用，`reuseExistingServer` 会误用其旧页面；
+  本次未停止其它 worktree，而是在 `3011` 隔离启动 release 页面完成验证。
+
+### Result
+
+- 用户现在可以在会话列表中置顶或取消置顶；置顶组始终位于普通组之前，两组内部按最后更新时间倒序，分页边界会在更新后
+  重新对齐服务端权威结果。
+- release 前端已用 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3011` 启动在
+  `http://127.0.0.1:3011/` 并返回 200。未修改 `.env*`、OpenCode 源码、generated SDK、RunEvent、鉴权或安全契约。
+
+## 2026-08-10 - 补齐置顶之外的普通对话端到端回归
+
+### Why
+
+- 置顶功能首轮 E2E 只把普通会话作为排序参照，没有验证置顶操作期间其它会话能否继续切换、当前态和正文是否串线。
+- 新增图钉按钮后，旧用例按会话标题模糊查找按钮会同时命中卡片主按钮和图钉；扩大回归还发现三条重试用例仍等待 8 月 7 日前
+  的“取消旧 Run + 新建 Run”接口，以及只读会话用例仍要求禁用输入框，均已落后于当前稳定契约。
+
+### What
+
+- `workbench.spec.ts` 新增统一 `historySessionButton`，历史切换限定 `.figma-chat-history-card-main`；置顶按钮继续按独立可访问名称定位。
+- 扩展置顶往返用例：置顶目标后切到普通会话，验证 `aria-current` 和正文隔离；普通会话保持选中时取消目标置顶，再切回目标确认内容不丢失。
+- 三条失败重试用例改为验证当前 `/resends` 契约：终态远端用户轮次可撤销重发，仍运行的轮次不取消、不替换，重新打开的失败历史按
+  `remoteMessageId + sourceRunId` 重发。只读历史改为验证普通消息发送禁用、输入框保留原生命令能力。
+- `docs/testing/conversation-scenes.md` 同步普通会话隔离、撤销重发和稳定选择器约定。
+
+### How
+
+- production preview 的置顶、普通会话隔离、标题、历史恢复、竞态、工作区切换和只读核心集合 9/9 通过；更新后的三条重试用例 3/3 通过。
+- 项目官方 localhost Playwright 模式下，普通对话生命周期、历史恢复、跨会话竞态、认证变化、失败重试/撤销重发、只读降级、夜间任务
+  会话隔离和原生命令共 39/39 通过。
+- 原生 Python Playwright 在 1440×900 视口独立复核键盘 Enter 置顶、唯一 PATCH、主按钮/图钉可访问名称、普通会话
+  `aria-current=true` 与正文隔离；所有脚本声明的 API route 均命中，无未处理请求，helper 自动停止隔离服务。
+- `FigmaChatPanel.test.ts` 与 `workbench-utils.test.ts` 共 256 passed / 1 skipped；agent-web production build 通过，`git diff --check` 通过。
+
+### Result
+
+- 置顶/取消置顶不会隐式切换其它会话，也不会污染其它会话的选中态、正文或发送目标；普通对话的主要恢复、重试和竞态链路已有可重复回归证据。
+- 本次只修改 E2E、测试说明和本机会话记录，不修改产品代码、API、RunEvent、数据库、migration、安全、`.env*`、generated SDK 或
+  OpenCode 源码。production build 仍有既有大 chunk 警告，本次未扩大到性能拆包。
+
+## 2026-08-10 - 解除外部 API 与 QA Memory 同号迁移冲突
+
+### Why
+
+- 企业增量打包前盘点本机所有需保留 PostgreSQL history，发现个人持久库 `testagent` 已执行
+  `V20260809120000__create_qa_memory_governance.sql`，checksum 为 `311175224`；release 分支原本把尚未执行的外部 API
+  凭据 migration 也编号为 `20260809120000`，直接打包会在该历史上触发 Flyway 校验失败，并阻断以后 QA Memory 正序合并。
+
+### What
+
+- 将从未在需保留数据库执行的外部 API 候选 migration 调整为 `V20260809110000`，SQL 字节和 SHA-256
+  `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53` 不变。
+- 复用唯一 `DatabaseMigrationCompatibilityCustomizer`：对已执行 QA Memory `20260809120000/311175224` 加载
+  SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a` 的原始字节兼容资源，过滤更低版本外部 API
+  主 migration，并加载字节相同的 `V20260810110000` 前向 migration；未知 checksum、主/前向混用和孤立前向历史均失败关闭。
+- Mac 内层打包、双后台外层封装和现场安装脚本新增这批撤销重发、批量会话、内部模型、QA Memory 与外部 API migration
+  的 JAR 内 SHA-256 门禁；同步 persistence README、后端部署和数据库文档。
+
+### How
+
+- `mvn clean test -pl test-agent-app -am -Dtest=DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest,FlywayMigrationNamingTest`
+  在真实 PostgreSQL 16 上通过 15 套历史，命名/字节锁 9 项通过；覆盖企业基线、既有兼容分叉、逐版本恢复、QA Memory
+  同号历史、重复启动及未知 checksum 失败关闭，全程 `outOfOrder=false`。
+- 外部 API MyBatis 集成与命名/字节锁共 12 项通过；三个发布脚本 `bash -n` 通过。现有健康 MySQL 8.4 实例只读确认
+  XXL `V1-V11` 全成功且 V10/V11 两项任务启用；新 Testcontainers MySQL 因 Docker Desktop InnoDB 初始化超过容器等待时间，
+  未执行到 SQL，失败原因不是 migration。
+
+### Result
+
+- 当前 release 主链可从企业基线顺序执行外部 API `20260809110000`；已执行 QA Memory 的个人历史改走
+  `20260810110000` 前向路径，不需要也不允许 `repair`、`outOfOrder` 或手工修改 history。
+- 未修改已执行 migration、API、事件、DTO、安全配置、`.env*`、generated SDK 或 OpenCode 源码；未新建分支。
+
+## 2026-08-10 - 校准增量发布手册与 XXL Flyway 成品门禁
+
+### Why
+
+- 首次重打后的外层包复核发现 `START-HERE.md` 仍以更早企业包为基线，错误声称 PostgreSQL 本轮不新增版本、XXL MySQL
+  只到 V9；若照此执行会把本次正常的六条 PostgreSQL 主迁移和 XXL V10/V11 当作异常历史。
+- 发布脚本已锁定 persistence JAR 内的 PostgreSQL migration，但尚未自动锁定 XXL integration JAR 内 V10/V11 的最终字节。
+
+### What
+
+- 将多后台发布手册与内部部署入口更新为上一轮已部署提交 `1d4a7652f115404d0dfef8e8a0a599dfc8f25d0d` 基线，明确
+  `.4` 只允许新增 PostgreSQL `20260807190000`、`20260807230000`、`20260808143300-302`、`20260809110000`
+  及 XXL V10/V11，`.114` 共享数据库启动只做 validate；列出兼容版本停止条件、文件 SHA、XXL checksum 和四项任务频率。
+- 内层打包、外层封装、现场安装三条脚本增加 XXL integration JAR 定位、V10/V11 资源 SHA-256 校验和发布/安装完整 JAR
+  一致性检查；当前增量组件说明同步为 worker runtime 与 toolbox 均 `reuse`。
+
+### How
+
+- 三条脚本 `bash -n` 与 `git diff --check` 通过；最终包需重新从本提交干净快照构建，并由脚本实际打印 PostgreSQL、XXL
+  migration 字节校验结果后方可覆盖中转文件。
+
+### Result
+
+- 包内操作说明与本轮数据库增量保持一致；XXL V10/V11 不再只靠源码或本地数据库记录证明，发布 ZIP 和安装目录中的实际 JAR
+  都会失败关闭。未修改 migration SQL、API、事件、配置或 OpenCode 源码。
+
+## 2026-08-10 - 修复企业包外部 SSH Key 服务启动装配
+
+### Why
+
+- 首轮企业增量包在 `.4` 启动时，PostgreSQL 已成功校验 92 条 migration 并确认当前版本
+  `20260809110000` 无需迁移，但 Spring 随后创建 `ExternalSshKeyEnvelopeService` 失败：类同时存在生产构造器和包内测试构造器，
+  Spring 7 未找到明确注入入口后回退到不存在的无参构造器。
+
+### What
+
+- 为 `ExternalSshKeyEnvelopeService(ObjectMapper)` 生产构造器显式增加 `@Autowired`，保留包内三参数构造器供固定随机数和时钟的
+  TAEK1 测试复用，不新增无参构造器，也不改变加密协议或业务行为。
+- 增加 `ApplicationContextRunner` 装配回归，直接验证真实 Spring 容器可使用 `ObjectMapper` 构造服务；同步模块 README 的多构造器约束。
+
+### How
+
+- JDK 25 下运行 `ExternalSshKeyEnvelopeServiceTest` 3 项通过；随后运行 `test-agent-integration` 及其依赖模块全量测试，
+  common 97 项、domain 99 项、integration 44 项，共 240 项全部通过。
+- 初次使用终端默认 JDK 17 时在编译阶段报“不支持发行版本 21”，切换仓库约定的 JDK 21+ 后测试通过，该错误未进入业务代码。
+
+### Result
+
+- 已消除企业后端启动时 `ExternalSshKeyEnvelopeService.<init>()` 的无参构造异常；原失败包应撤回并从本提交的干净 release 快照重打。
+- 未修改 Flyway migration、API、事件、数据库结构、安全配置、`.env*`、generated SDK 或 OpenCode 源码；企业 PostgreSQL
+  已到 `20260809110000`，重新部署只应校验现有 migration，禁止 `repair`、`outOfOrder` 或手工改 history。
+
+## 2026-08-10 - 修复外部 API 凭据服务装配并增加发布门禁
+
+### Why
+
+- 第二次企业启动已越过 `ExternalSshKeyEnvelopeService`，但随后在 `ExternalApiCredentialApplicationService` 上再次出现
+  `No default constructor found`；两次 Flyway 均成功校验 92 条 migration，当前版本仍为 `20260809110000`，数据库不是根因。
+- 仅逐个修复现场首先暴露的 Bean 无法阻止同类问题继续串行出现，需要在源码与企业打包入口增加全量结构审计。
+
+### What
+
+- 为 `ExternalApiCredentialApplicationService` 和同一调用链中的 `ExternalApiCredentialUpdateBroadcaster` 生产构造器显式增加
+  `@Autowired`，保留包内测试构造器，不改变凭据生成、加密、缓存或广播行为。
+- 两个服务均增加 `ApplicationContextRunner` 真实 Spring 容器装配回归；`test-agent-app` 新增
+  `SpringBeanConstructorWiringTest`，扫描全部生产 Spring Bean，要求多构造器 Bean 必须有无参构造器或显式注入构造器。
+- `package-release.sh` 在后端打包前强制运行该全局审计，失败时终止企业包生成；同步 app、system-management 与内部部署 README。
+
+### How
+
+- 修复前全局审计稳定只检出上述两个 Bean；修复后两个上下文测试与全局审计共 9 项通过。
+- JDK 25 下 system-management/integration 依赖链全量测试通过：common 97、domain 99、system-management 56、integration 44，
+  共 296 项；发布脚本 `bash -n` 与 `git diff --check` 通过。
+- 按 `.env.test`、`test` profile 且 `--without-workflow` 执行完整本地重启时，21 模块后端构建成功；运行启动被本机保留库已经执行、
+  但当前 release 未解析的 `20260809230000`、`20260810090000` 阻断。未执行 `repair`、未改 history，也未启用 LobeHub。
+
+### Result
+
+- 第二次现场异常及全仓当前同类构造器歧义均已消除，并由企业打包门禁持续阻止回归；需从本提交干净快照重新生成并验证发布包。
+- 当前 release 明确保持 Workflow、LobeHub 为 `disabled`。未修改 migration SQL、API、事件、数据库结构、安全配置、`.env*`、
+  generated SDK 或 OpenCode 源码；企业库仍只允许对既有 `20260809110000` 历史做严格校验。
+
+## 2026-08-10 - 确认公共 Agent 发布门禁导致消息按钮禁用
+
+### Why
+
+- 企业环境部署后 OpenCode 正常、输入框可编辑，但“发送”和“新建”按钮同时置灰；需要区分前端构建故障、OpenCode 故障与平台发布保护。
+
+### What
+
+- 复核前端共用禁用条件及后端 `/processes/me/message-gate`：公共 Agent/Skill 发布处于排空或仍有用户目标待处理时，
+  `messageSendAllowed=false` 会同时禁用发送和新建，避免旧进程在公共配置切换期间继续接收消息。
+- 用户更新公共 Agent 后按钮立即恢复，现场行为与 rollout 完成后解除消息门禁一致；本次未修改业务代码，也无需重新打包或部署。
+
+### How
+
+- 后端 `PublicAgentConfigRolloutServiceTest` 35 项通过。
+- 从 `frontend` 根目录使用仓库 Vitest 配置运行测试，120 个测试文件通过，1884 项通过、1 项跳过；此前从子包直接执行导致
+  `document is not defined`，原因是绕过了根目录 jsdom 配置，不是产品回归。
+- 本地按 `.env.test`、`test` profile、`--without-workflow` 重启时，21 模块编译成功，但保留库已执行而当前 release 未解析的
+  `20260809230000`、`20260810090000` 仍触发 Flyway 校验阻断；未执行 `repair`、未修改 history，Workflow/LobeHub 均未启用。
+
+### Result
+
+- 企业现场功能已随公共 Agent 更新恢复；根因范围收敛为公共配置 rollout 消息门禁，而非前端编译或 OpenCode 运行异常。
+- 未修改 API、事件、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码；本地服务因 Flyway 历史不兼容未启动。
+
+## 2026-08-10 - 企业增量发布完成并固化交付校验边界
+
+### Why
+
+- 本轮企业增量部署经历两次后端启动装配失败和一次公共 Agent rollout 消息门禁现象；现场最终验收完成后，需要固化实际部署源码、
+  交付包与关键内嵌资源的 SHA-256，避免后续排障把失败包、最终包或本地合并后的新代码混为同一版本。
+
+### What
+
+- 最终部署源码提交为 `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`。
+- 外层 `test-agent-two-backend-complete.zip` SHA-256 为
+  `afe10e7ad6f9d2846fbe81e0fa80336ddfe2455b4783ad0b142d1970316fd3c6`；仓库 dist 与
+  `/Users/kaka/Desktop/mimoagent/0709` 中转副本一致。
+- 内层 `test-agent-internal-release.zip` SHA-256 为
+  `da9c840b5bd4b71d78892e29e23d5ecfd5aaa193a0d46d327cd717a90e4c1a18`，且外层 ZIP 内嵌副本逐字节一致。
+- 关键资源 SHA-256：`test-agent-app.jar` 为
+  `28c2bf250536c2f327e8e3ac5c6d4068d79529ed271592c7dedfb69e63d5fa44`，persistence JAR 为
+  `5f7c45d5363491a63364d1db96005579bbfa62856f07fde6d50308c7a3eb9a45`，包内 `deploy/internal/opencode-models.json` 为
+  `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
+- 外部 API 主 migration `V20260809110000__create_external_api_credentials.sql` 的最终 persistence JAR 内 SHA-256 为
+  `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。
+
+### How
+
+- 首次失败为 `ExternalSshKeyEnvelopeService.<init>()` 无默认构造器，修复提交 `d5b4072ac`；第二次失败为
+  `ExternalApiCredentialApplicationService.<init>()` 无默认构造器，同时补齐 broadcaster 并增加全量 Bean 构造器发布审计，
+  最终修复提交 `8a6955f8d`。
+- 两次现场日志均显示 Flyway 成功校验 92 条 migration、schema 当前版本 `20260809110000` 且无需迁移，证明数据库不是这两次
+  Spring 装配失败的根因；全程未执行 `repair`、`outOfOrder` 或手工修改 history。
+- 部署后“发送/新建”同时置灰由公共 Agent rollout 的 `messageSendAllowed=false` 门禁触发；更新公共 Agent、rollout 收敛后恢复，
+  OpenCode 和前端构建本身正常。
+
+### Result
+
+- 用户确认本轮 `.4/.114` 后台与 `.2` 前端企业部署结束；本轮发布基线以以上源码与制品 SHA-256 为准，Workflow、LobeHub 未启用。
+- 后续本地合并远程代码产生的新 HEAD 不代表企业已部署版本；排查现场问题时必须先对照本条 hash，再判断是否需要重打包。
+
+## 2026-08-10 - 合并远程 release 并兼容本地 QA Memory 历史
+
+### Why
+
+- 企业部署结束后需要合并当前 release 的远程更新并本地重启；本地保留库已经执行
+  `20260809120000`、`20260809230000`、`20260810090000`，而远程会话分享主 migration
+  `20260809170000/01` 低于当前最高版本，直接启动会触发 Flyway 倒序阻断。
+
+### What
+
+- 拉取并合并远程同名分支 `origin/codex/release-enterprise-20260801` 的
+  `de80b263cc663a79460189e8d908524e274c4613`；合并提交为
+  `ea0f4446e40d089a6c72b45a70655b23d477051a`，没有合并 `origin/main`。
+- 复用唯一 `DatabaseMigrationCompatibilityCustomizer`：精确校验 QA Memory 扩展 history/checksum，加载原始字节兼容资源，
+  过滤两份低版本会话分享主 migration，再以 `20260810110000/01/02` 顺序补齐外部 API、会话分享和代操作归属结构；
+  未新增第二套迁移器，未启用 `outOfOrder`，未执行 `repair`，未修改 `flyway_schema_history`。
+- QA Memory 扩展原始资源 SHA-256 为 `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`、
+  `619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`；会话分享主/前向资源逐字节一致，SHA-256
+  分别为 `b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`、
+  `dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`。三套企业打包/部署脚本均增加这些资源的 JAR SHA 门禁。
+
+### How
+
+- JDK 25 下真实 PostgreSQL Flyway 历史升级测试 18 项、迁移 SHA 锁定测试 9 项、Spring Bean 构造器门禁 1 项全部通过；
+  会话分享 service/controller/MyBatis 定向测试共 20 项通过。
+- 前端全仓 typecheck、lint、production build 通过；Vitest 123 个文件、1900 项通过，1 项按设计跳过。
+- `bash -n` 校验三套企业脚本通过；四份新兼容资源与历史分支/主 migration 的 `cmp` 逐字节校验通过。
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow`
+  完成三服务重启。真实本地库从 `20260810090000` 顺序执行三条前向 migration，到达 `20260810110002`；
+  history 中低版本 `20260809110000`、`20260809170000/01` 均未混入，活动 Run 重复会话预检为 0。
+
+### Result
+
+- Backend readiness、Frontend、OpenCode `/global/config` 均返回 HTTP 200；Manager WebSocket 已连接，端口 4104 的 OpenCode
+  从未纳管状态经公共启动程序拉起后达到 `HEALTHY`。
+- Workflow 与 LobeHub 进程均未启动，前端对应能力开关均为 `false`；数据库既有 `LOBEHUB_ENABLED=true` 未擅自改写，
+  因未使用 `--with-lobehub` 且前端入口关闭，本次本地启动不启用 LobeHub。
+- 当前启动仅有一条 macOS Netty 原生 DNS provider 缺失的 fallback 日志；应用仍使用系统 DNS 且 readiness 为 UP，
+  未发现新的 Spring/Flyway 启动异常。未修改 `.env.test`、generated SDK 或 OpenCode 源码。

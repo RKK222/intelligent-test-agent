@@ -3,6 +3,7 @@ package com.enterprise.testagent.domain.run;
 import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.support.DomainValidation;
+import com.enterprise.testagent.domain.user.UserId;
 import java.time.Instant;
 import java.util.Objects;
 
@@ -17,7 +18,24 @@ public record RunConversationSummary(
         int summaryVersion,
         RunSummaryStatus summaryStatus,
         Instant createdAt,
-        String remoteMessageId) {
+        String remoteMessageId,
+        UserId senderUserId,
+        String senderUnifiedAuthId,
+        boolean sentBySharedUser) {
+
+    /** 兼容新增分享发送人快照前的摘要构造器。 */
+    public RunConversationSummary(
+            SessionMessageId messageId,
+            SessionMessageRole role,
+            String content,
+            String summaryKey,
+            int summaryVersion,
+            RunSummaryStatus summaryStatus,
+            Instant createdAt,
+            String remoteMessageId) {
+        this(messageId, role, content, summaryKey, summaryVersion, summaryStatus,
+                createdAt, remoteMessageId, null, null, false);
+    }
 
     public RunConversationSummary {
         Objects.requireNonNull(messageId, "messageId must not be null");
@@ -40,6 +58,16 @@ public record RunConversationSummary(
         Objects.requireNonNull(summaryStatus, "summaryStatus must not be null");
         createdAt = DomainValidation.requireInstant(createdAt, "createdAt");
         remoteMessageId = optionalText(remoteMessageId, "remoteMessageId");
+        senderUnifiedAuthId = optionalText(senderUnifiedAuthId, "senderUnifiedAuthId");
+        if (role != SessionMessageRole.USER) {
+            senderUserId = null;
+            senderUnifiedAuthId = null;
+            sentBySharedUser = false;
+        }
+        if (sentBySharedUser && (senderUserId == null || senderUnifiedAuthId == null)) {
+            throw new IllegalArgumentException(
+                    "shared user summary requires senderUserId and senderUnifiedAuthId");
+        }
     }
 
     private static String optionalText(String value, String fieldName) {

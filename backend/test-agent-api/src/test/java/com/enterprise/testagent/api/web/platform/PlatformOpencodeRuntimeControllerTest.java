@@ -11,13 +11,19 @@ import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.opencode.runtime.runtime.SideQuestionInput;
 import com.enterprise.testagent.opencode.runtime.runtime.SideQuestionResult;
 import com.enterprise.testagent.opencode.runtime.runtime.SideQuestionRunStartResult;
 import com.enterprise.testagent.opencode.runtime.runtime.SideQuestionStreamingApplicationService;
 import com.enterprise.testagent.domain.run.RunId;
+import com.enterprise.testagent.opencode.runtime.run.RunActorAttribution;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +33,93 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 class PlatformOpencodeRuntimeControllerTest {
+
+    private static final String SHARE_ID = "shr_" + "a".repeat(64);
+
+    @Test
+    void sharedRuntimeReadExecutesAsSessionOwner() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SessionCollaborationShareService shareService = org.mockito.Mockito.mock(SessionCollaborationShareService.class);
+        UserId actor = new UserId("usr_shared_actor");
+        UserId owner = new UserId("usr_session_owner");
+        when(shareService.requireAccess(
+                eq(actor), eq(new SessionShareId(SHARE_ID)), eq(false), eq("trace_shared_runtime")))
+                .thenReturn(sharedContext(actor, owner, true));
+        when(service.listAgents(eq("wrk_shared_scope"), eq("trace_shared_runtime")))
+                .thenReturn(List.of(Map.of("id", "build")));
+        stubWithUser(service);
+        WebTestClient client = client(service, null, principal(actor), shareService);
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/agents?workspaceId=wrk_shared_scope")
+                .header("X-Trace-Id", "trace_shared_runtime")
+                .header(SessionShareController.SHARE_HEADER, SHARE_ID)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).withUser(eq(owner), any());
+    }
+
+    @Test
+    void sharedRuntimeRejectsWorkspaceOutsideExactScope() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SessionCollaborationShareService shareService = org.mockito.Mockito.mock(SessionCollaborationShareService.class);
+        UserId actor = new UserId("usr_shared_actor");
+        when(shareService.requireAccess(any(), any(), eq(false), any()))
+                .thenReturn(sharedContext(actor, new UserId("usr_session_owner"), true));
+        stubWithUser(service);
+        WebTestClient client = client(service, null, principal(actor), shareService);
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/vcs/status?workspaceId=wrk_outside_scope")
+                .header(SessionShareController.SHARE_HEADER, SHARE_ID)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        org.mockito.Mockito.verifyNoMoreInteractions(service);
+    }
+
+    @Test
+    void readOnlySharedRuntimeRejectsWriteOperation() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SessionCollaborationShareService shareService = org.mockito.Mockito.mock(SessionCollaborationShareService.class);
+        UserId actor = new UserId("usr_shared_actor");
+        when(shareService.requireAccess(any(), any(), eq(true), any()))
+                .thenThrow(new com.enterprise.testagent.common.error.PlatformException(
+                        com.enterprise.testagent.common.error.ErrorCode.FORBIDDEN,
+                        "当前分享成员仅可查看"));
+        WebTestClient client = client(service, null, principal(actor), shareService);
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_shared_scope/command")
+                .header(SessionShareController.SHARE_HEADER, SHARE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"command\":\"test\"}")
+                .exchange()
+                .expectStatus().isForbidden();
+
+        org.mockito.Mockito.verifyNoInteractions(service);
+    }
+
+    @Test
+    void sharedRuntimeAlwaysRejectsPersistentFork() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SessionCollaborationShareService shareService = org.mockito.Mockito.mock(SessionCollaborationShareService.class);
+        UserId actor = new UserId("usr_shared_actor");
+        when(shareService.requireAccess(any(), any(), eq(true), any()))
+                .thenReturn(sharedContext(actor, new UserId("usr_session_owner"), true));
+        WebTestClient client = client(service, null, principal(actor), shareService);
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_shared_scope/fork")
+                .header(SessionShareController.SHARE_HEADER, SHARE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{}")
+                .exchange()
+                .expectStatus().isForbidden();
+
+        org.mockito.Mockito.verifyNoInteractions(service);
+    }
 
     @Test
     void runtimeControllerListsAgentsThroughUnifiedResponse() {
@@ -207,6 +300,40 @@ class PlatformOpencodeRuntimeControllerTest {
     }
 
     @Test
+    void sharedSideQuestionRunExecutesAsOwnerAndRecordsActualActor() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        SideQuestionStreamingApplicationService streamingService =
+                org.mockito.Mockito.mock(SideQuestionStreamingApplicationService.class);
+        SessionCollaborationShareService shareService = org.mockito.Mockito.mock(SessionCollaborationShareService.class);
+        UserId actor = new UserId("usr_shared_actor");
+        UserId owner = new UserId("usr_session_owner");
+        DelegatedOperationContext context = sharedContext(actor, owner, true);
+        when(shareService.requireAccess(eq(actor), eq(new SessionShareId(SHARE_ID)), eq(true), eq("trace_shared_side")))
+                .thenReturn(context);
+        when(streamingService.start(
+                        eq(RunActorAttribution.from(context)),
+                        eq("opencode"),
+                        eq(new SessionId("ses_shared_scope")),
+                        eq("what changed?"),
+                        isNull(),
+                        isNull(),
+                        eq("trace_shared_side")))
+                .thenReturn(new SideQuestionRunStartResult(new RunId("run_shared_side123")));
+        WebTestClient client = client(service, streamingService, principal(actor), shareService);
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_shared_scope/side-question/runs")
+                .header("X-Trace-Id", "trace_shared_side")
+                .header(SessionShareController.SHARE_HEADER, SHARE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"question\":\"what changed?\"}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.runId").isEqualTo("run_shared_side123");
+    }
+
+    @Test
     void runtimeControllerStartsManualQuestionRunWithoutMainSession() {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         SideQuestionStreamingApplicationService streamingService =
@@ -323,7 +450,16 @@ class PlatformOpencodeRuntimeControllerTest {
             OpencodeRuntimeApplicationService service,
             SideQuestionStreamingApplicationService streamingService,
             AuthPrincipal principal) {
-        return WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service, streamingService))
+        return client(service, streamingService, principal, null);
+    }
+
+    private static WebTestClient client(
+            OpencodeRuntimeApplicationService service,
+            SideQuestionStreamingApplicationService streamingService,
+            AuthPrincipal principal,
+            SessionCollaborationShareService shareService) {
+        return WebTestClient.bindToController(new PlatformOpencodeRuntimeController(
+                        service, streamingService, shareService))
                 .controllerAdvice(new GlobalExceptionHandler())
                 .webFilter((exchange, chain) -> {
                     if (principal != null) {
@@ -333,6 +469,22 @@ class PlatformOpencodeRuntimeControllerTest {
                 })
                 .webFilter(new TraceIdWebFilter())
                 .build();
+    }
+
+    private static DelegatedOperationContext sharedContext(UserId actor, UserId owner, boolean canChat) {
+        return new DelegatedOperationContext(
+                new SessionShareId(SHARE_ID),
+                3,
+                actor,
+                "AUTH_SHARED_ACTOR",
+                "shared-actor",
+                owner,
+                new SessionId("ses_shared_scope"),
+                new WorkspaceId("wrk_shared_scope"),
+                canChat,
+                true,
+                false,
+                Instant.parse("2026-06-20T00:00:00Z"));
     }
 
     private static AuthPrincipal principal(UserId userId) {

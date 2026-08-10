@@ -100,6 +100,8 @@
 
 - `components/GitChangesPanel.vue` 的应用 Agent 与公共 Agent 未暂存分组均支持“全部暂存”；单文件与批量暂存共用同一状态和 API 链路，批量请求不逐文件发送，也不跨作用域混合路径。
 
+- 会话列表置顶交互由 `FigmaChatPanel` 发出 `toggle-session-pinned`，`AgentWorkbench` 复用 backend-api 的 Session PATCH mutation，成功后保留历史 `workspaceContext`、立即更新本地投影，并在加载过后续页时回到第一页对齐 `pinned desc, updatedAt desc` 的服务端顺序。
+
 ## 允许依赖
 
 - `@test-agent/*` 前端 workspace packages。

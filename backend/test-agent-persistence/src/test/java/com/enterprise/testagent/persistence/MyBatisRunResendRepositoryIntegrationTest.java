@@ -56,6 +56,9 @@ class MyBatisRunResendRepositoryIntegrationTest {
                 "db/migration/V20260807190000__create_run_resends.sql")).execute(dataSource);
 
         jdbc = new JdbcTemplate(dataSource);
+        jdbc.execute("alter table run_resends add column requester_user_id varchar(128)");
+        jdbc.execute("alter table run_resends add column requester_unified_auth_id varchar(128)");
+        jdbc.execute("alter table run_resends add column requested_by_shared_user boolean not null default false");
         jdbc.update("insert into users(user_id,unified_auth_id,username,password_hash,status,created_at,updated_at) "
                         + "values(?,?,?,?,?,?,?)",
                 USER.value(), "u_resend", "resend-user", "hash", "ACTIVE", NOW, NOW);

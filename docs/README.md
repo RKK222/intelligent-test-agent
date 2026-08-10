@@ -19,6 +19,7 @@
 - `runner-controller/README.md`、`analysis-task/README.md`：分析节点控制面与非特权任务镜像边界。
 - `docs/standards/backend.md`：后端编码、测试、性能、错误处理、可观测性、数据变更规范。
 - `docs/standards/frontend.md`：前端编码、性能、测试规范。
+- `docs/standards/metrics-glossary.md`：NVIDIA AIPerf / AI Perf Metrics Reference 英文缩写与性能指标对照指南。
 - `docs/standards/security.md`：安全、日志脱敏、PTY 安全例外。
 
 ## 找功能（模块/包定位）

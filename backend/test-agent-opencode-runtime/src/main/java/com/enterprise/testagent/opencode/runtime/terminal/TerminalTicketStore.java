@@ -60,7 +60,10 @@ public class TerminalTicketStore {
                 draft.cols(),
                 draft.rows(),
                 draft.traceId(),
-                expiresAt);
+                draft.shareExpiresAt() != null && draft.shareExpiresAt().isBefore(expiresAt)
+                        ? draft.shareExpiresAt() : expiresAt,
+                draft.shareId(), draft.shareVersion(), draft.shareActorUserId(),
+                draft.executionOwnerUserId(), draft.shareExpiresAt());
         tickets.put(ticket.ticket(), ticket);
         return ticket;
     }

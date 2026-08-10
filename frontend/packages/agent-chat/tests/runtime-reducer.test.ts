@@ -4,6 +4,36 @@ import { createOpencodeLikeState, createTimelineRows } from "../src/opencode-lik
 import type { RunEvent } from "@test-agent/shared-types";
 
 describe("agent-chat runtime reducer", () => {
+  it("keeps trusted delegated sender attribution from user message events", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: runEvent("message.updated", "run_shared", {
+        senderUserId: "usr_actor",
+        senderUsername: "协作者",
+        senderUnifiedAuthId: "A0001",
+        sentBySharedUser: true,
+        message: {
+          id: "msg_remote_user",
+          role: "user",
+          content: "协作消息",
+          senderUserId: "usr_actor",
+          senderUsername: "协作者",
+          senderUnifiedAuthId: "A0001",
+          sentBySharedUser: true
+        }
+      })
+    });
+
+    expect(state.messages).toContainEqual(expect.objectContaining({
+      role: "user",
+      text: "协作消息",
+      senderUserId: "usr_actor",
+      senderUsername: "协作者",
+      senderUnifiedAuthId: "A0001",
+      sentBySharedUser: true
+    }));
+  });
+
   it("projects an automatic resend countdown on the scheduled source message", () => {
     const initial = {
       ...createInitialAgentChatRuntimeState([

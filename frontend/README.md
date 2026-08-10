@@ -116,12 +116,13 @@ corepack pnpm typecheck
 corepack pnpm test
 corepack pnpm build
 corepack pnpm e2e
+corepack pnpm e2e:session-share
 corepack pnpm e2e:real
 ```
 
 Vitest 全量回归统一限制为最多 4 个 worker，并使用 20 秒单测超时，避免 Mermaid、Monaco 与多组件异步测试在高并发机器上因 CPU/计时器争抢产生随机假失败；直接执行默认 `corepack pnpm test` 即可使用这套稳定配置。
 
-Playwright 当前仅覆盖桌面 Chromium（项目没有移动端产品内容），统一单 worker 顺序执行，并将单例上限设为 60 秒、断言等待设为 10 秒。工作台 E2E 会加载 Monaco、Mermaid 与内嵌手册，避免额外视口把非产品范围纳入交付门槛。
+Playwright 常规全量回归覆盖桌面 Chromium（项目没有移动端产品内容），统一单 worker 顺序执行，并将单例上限设为 60 秒、断言等待设为 10 秒。会话协作分享使用独立 `playwright.session-share.config.ts` 在 Chromium、Firefox 和 WebKit 固定验证分享管理、只读/代操作工作台、运行互斥与失效路由。工作台 E2E 会加载 Monaco、Mermaid 与内嵌手册，避免额外视口把非产品范围纳入交付门槛。
 
 完整前端检查也可以从仓库根目录执行：
 
@@ -248,6 +249,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 - 右侧对话面板在当前页面生命周期内分别记忆主 Agent 与各子 Agent 的阅读位置。首次进入某个视图时滚到最新底部；离开时仍在底部的视图返回后继续跟随最新正文，已上滑的视图返回后恢复原位置，并在该视图正文有新增时显示“查看新内容”。其它子 Agent 的并行输出不会移动当前视口或触发当前视图提示；这些快照不写入持久化存储。
 - 运行管理的后端 Java 进程表格和趋势图会展示服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped、GC、线程等可空字段；旧后端缺失新增字段时继续显示 `-` 或使用旧字段回退，趋势图保留断点。
 - 运行管理无主进程明细展示可空 UCID 和 manager PID 状态；无平台记录时固定显示“平台未登记”和“未执行 HTTP 健康检查”，`baseUrl` 保持独立列，拓扑缺新字段时回退 `-`。这些字段只来自 `SUPER_ADMIN` overview，前端不解析启动命令中的 UCID，也不自动认领、停止或改绑无主进程。
+
+- 用户级 Session History 复用既有 Session PATCH 能力支持置顶/取消置顶；列表按置顶组优先、组内更新时间倒序展示，置顶发生在已加载后续页时回到第一页重新对齐服务端分页。
 
 ## UI 与主题边界
 

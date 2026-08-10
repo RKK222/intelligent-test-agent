@@ -9,13 +9,14 @@
 | 直接对话 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`direct run projects remote question and permission to the platform session and replies` | 直接 Run、root remote session 映射、question、permission、回复 |
 | 历史运行中继续 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching to a running history maps its remote question event and allows reply` | 历史 Session、运行中 SSE、历史 question、继续回复 |
 | 历史已结束 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching history restores assistant documents and the file changes summary` | 历史消息、assistant 文档、Diff、结束态 |
+| 历史置顶与普通会话隔离 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`history drawer pins and unpins sessions through the existing session update API`；`MyBatisSessionHistoryRepositoryIntegrationTest` | 置顶/取消置顶 PATCH、前端即时分组重排、后端置顶优先分页；置顶操作不切换当前会话，普通会话与目标会话的 `aria-current` 和正文互不串线 |
 | 历史 permission | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching history restores a pending native permission dock and allows reply` | 历史 pending 权限弹框、完整 `patterns[]`、中文原生说明、“允许一次”回复 |
 | 历史 child permission | `frontend/apps/agent-web/tests/workbench.spec.ts`：`history root permission snapshot keeps child permission attention from the session tree` | 根 permission 快照只替换 root scope、child pending 保留、目标 task “进行中”前铃铛、并行 child 隔离 |
 | Todo | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders todos above the composer and expands the task list on demand` | Todo 展示、展开详情、composer 位置 |
 | 跨 Run Todo 隔离 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`a superseded title-pending run cannot restore its todos into the next turn` | 两轮 Run、旧 `todo.updated/todowrite/snapshot reset` 迟到、标题同步、4/9 项分轮展示 |
 | 后端跨 Run 回放隔离 | `backend/test-agent-opencode-runtime/.../RunMessageRecoveryServiceTest.java`、`RunSessionMessageSnapshotServiceTest.java` | 两轮 OpenCode 消息、旧 `todowrite`、dispatch 锚点跨页/冲突/未到达、root/child、终态 `runId` 不覆盖、Session 全量历史 |
 | 后端多轮 dispatch 顺序 | `OpencodeMessageIdGeneratorTest.java`、`AgentRuntimeRegistryTest.java`、`OpencodeAgentRuntimeTest.java`、`RunApplicationServiceTest.java` | 真实随机 UUID 故障样本、OpenCode 时序 ID、同毫秒/时钟回退/并发、观测包装委托、Legacy/Redis 锚点复用、显式旧 ID 兼容 |
-| 最后一条用户消息撤销重发 | `RunResendTest`、`RunResendApplicationServiceTest`、`RunResendAutomaticServiceTest`、`RunResendExecutionServiceTest`、`MyBatisRunResendRepositoryIntegrationTest`、`runtime-reducer.test.ts`、`FigmaChatPanel.test.ts`、`workbench.real-spec.ts` | owner/最后轮次/终态/幂等、1/2/4 分钟与自动 3 次上限、WAITING 停止、会话锁、revert/稳定消息探测/响应丢失恢复、源明细清理、前端标签与原子接管、真实文件改动恢复 |
+| 最后一条用户消息撤销重发 | `RunResendTest`、`RunResendApplicationServiceTest`、`RunResendAutomaticServiceTest`、`RunResendExecutionServiceTest`、`MyBatisRunResendRepositoryIntegrationTest`、`runtime-reducer.test.ts`、`FigmaChatPanel.test.ts`、`workbench.spec.ts` 中 `retrying a failed chat run resends...` / `manual retry refuses...` / `manual resend keeps...`、`workbench.real-spec.ts` | owner/最后轮次/终态/幂等、1/2/4 分钟与自动 3 次上限、WAITING 停止、会话锁、运行中安全拒绝、revert/稳定消息探测/响应丢失恢复、源明细清理、前端标签与原子接管、真实文件改动恢复 |
 | permission | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders a pending permission and emits every native permission decision` | OpenCode 1.18.4 中文标题/说明、完整路径、未知类型与旧字段兼容、拒绝/始终允许/允许一次三种决策且不展示内部类型或 request id |
 | permission 后端摘要 | `RedisRunRuntimeStoreIntegrationTest`、`MyBatisSessionRuntimeStateRepositoryIntegrationTest`、`MyBatisSessionRuntimeStatePostgresqlIntegrationTest` | Redis question/permission 同 ID 隔离、并发回退、详情容量与终态清理；legacy H2/真实 PostgreSQL 顶层请求 ID、Run seq 因果和 occurredAt 回拨 |
 | question | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders a single-choice question with option descriptions and emits selected labels` | 单选、多选、选项描述、提交/拒绝 |
@@ -25,6 +26,10 @@
 | 宠物旁路成功 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question streams progress, survives outside clicks, and calibrates replayed deltas` |旁路 Run、阶段进度、增量、最终答案、重放去重 |
 | 宠物旁路失败/重试 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question keeps a failure editable and starts a fresh run on retry` | 失败弹层、问题保留、重新提交 |
 | 宠物形象策略 | `frontend/apps/agent-web/tests/pet-companions.test.ts` 与 `FigmaShell.test.ts`：`lets the user choose a companion and persists the selected mode` | 本地日期轮换、每日随机稳定、异常存储回退、固定角色与名册交互 |
+| 会话协作分享管理 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share management and received list preserve one link and inactive history` | 我的会话/分享给我、有效分享以新标签页打开且原工作台不跳转、唯一链接、成员与可对话权限、1/3/7 天、待执行任务提示、取消与失效历史 |
+| 会话协作分享工作台 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share read-only workbench shows sender identity colors and fixed scope`、`session share model picker selects from the fixed owner workspace catalog`、`session share busy run blocks every participant and only sender can stop`、`session share participant receives the owner's authoritative user message without an empty bubble`、`session share owner history keeps a shared actor run snapshot when history enrichment arrives late` | 固定 Session/Workspace、分享头、所属人工作区模型目录与模型选择、只读限权、发送人姓名/固定两色、运行互斥、非发送人停止限制、空远端 envelope 不展示、平台 USER 正文实时原位归并，以及所属人中途打开被分享人发起的活动 Run 时对思考、停止按钮和工具事件的无覆盖同步 |
+| 会话协作分享失效与所属人路由 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`session share invalid page and owner link redirect remain isolated` | 移除/过期/取消提示、所属人回普通工作台、兼容旧 `/s/{sessionId}`、分享头隔离 |
+| 会话协作分享后端 | `SessionShareControllerTest`、`SessionCollaborationShareServiceTest`、`DelegatedOperationContextResolverTest`、`MyBatisSessionShareRepositoryIntegrationTest`、`ConversationContextControllerTest`、`RunControllerSessionShareTest`、`ManagedWorkspaceControllerSessionShareTest`、`WorkspaceControllerSessionShareTest` | 唯一 256 位链接、50 人/7 天上限、乐观锁、代操作边界、分享 RunContext 使用所属人执行身份、跨工作区拒绝、文件/终端票据、审计脱敏 |
 
 ## 一次性复现全部前端场景
 
@@ -37,8 +42,23 @@ corepack pnpm test --run \
   packages/agent-chat/tests/runtime-reducer.test.ts \
   packages/agent-chat/tests/opencode-timeline.test.ts
 corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
-  --grep 'direct run projects|running history maps|pending native question|pending native permission|history root permission snapshot|superseded title-pending run|pet side-question'
+  --grep 'direct run projects|history drawer pins|running history maps|pending native question|pending native permission|history root permission snapshot|retrying a failed chat run resends|manual retry refuses|manual resend keeps|superseded title-pending run|pet side-question'
 ```
+
+会话卡片主按钮与置顶按钮拥有包含同一标题的可访问名称。端到端测试切换历史会话时统一限定
+`.figma-chat-history-card-main`，置顶操作再按“置顶对话/取消置顶对话”可访问名称定位，避免模糊标题选择器
+同时命中两个按钮而把测试基础设施问题误报为会话功能失败。
+
+会话协作分享额外使用 Chromium、Firefox 和 WebKit 三浏览器固定回归：
+
+```bash
+cd /Users/huang/workspace/intelligent-test-agent-gitee/frontend
+corepack pnpm e2e:session-share
+```
+
+首次执行前如本机未安装对应 Playwright 运行包，先执行
+`corepack pnpm exec playwright install chromium firefox webkit`。三浏览器配置只筛选标题以
+`session share` 开头的专项场景，不扩大现有全量桌面 E2E 范围。
 
 ## 真实 OpenCode 三轮回复验收
 

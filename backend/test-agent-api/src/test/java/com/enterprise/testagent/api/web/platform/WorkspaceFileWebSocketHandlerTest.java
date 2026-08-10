@@ -1146,6 +1146,38 @@ class WorkspaceFileWebSocketHandlerTest {
                 authorization, "workspace.list", workspaceId, "", "SUCCESS", null, TRACE_ID);
     }
 
+    @Test
+    void sharedWorkspaceReadIsReauthorizedAndAuditedWithoutBody() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceFileSocketTicket ticket = sharedWorkspaceTicket(true);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        when(ticketService.consume("wft_shared", "http://localhost:3000")).thenReturn(ticket);
+        when(workspaceService.readFile(workspaceId, "docs/secret.md"))
+                .thenReturn(new com.enterprise.testagent.workspace.FileContentResponse(
+                        "docs/secret.md", "sensitive body", 14));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_shared",
+                List.of("""
+                        {"id":"req_shared_read","op":"workspace.read","params":{"workspaceId":"wrk_1234567890abcdef","path":"docs/secret.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"type\":\"result\"", "sensitive body"));
+        verify(ticketService).authorizeWorkspaceRpc(ticket, workspaceId);
+        verify(ticketService).recordSharedRpc(
+                ticket, "workspace.read", workspaceId, "docs/secret.md", "SUCCESS", null, TRACE_ID);
+    }
+
     private static WorkspaceFileWebSocketHandler handler(
             WorkspaceFileSocketTicketService ticketService,
             AgentConfigApplicationService agentConfigService) {
@@ -1277,6 +1309,35 @@ class WorkspaceFileWebSocketHandlerTest {
                 null,
                 TRACE_ID,
                 NOW.plusSeconds(60));
+    }
+
+    private static WorkspaceFileSocketTicket sharedWorkspaceTicket(boolean canChat) {
+        return new WorkspaceFileSocketTicket(
+                "wft_shared",
+                "wrk_1234567890abcdef",
+                "linux-1",
+                "linux-1",
+                false,
+                false,
+                false,
+                "usr_session_owner",
+                "workspace",
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                TRACE_ID,
+                NOW.plusSeconds(60),
+                "shr_" + "b".repeat(64),
+                4L,
+                "usr_shared_actor",
+                "usr_session_owner",
+                canChat,
+                NOW.plusSeconds(3600),
+                "ses_shared_scope");
     }
 
     private static WorkspaceFileSocketTicket supportWorkspaceTicket() {

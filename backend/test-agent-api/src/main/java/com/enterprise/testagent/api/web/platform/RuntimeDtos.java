@@ -26,6 +26,7 @@ import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionRuntimeState;
 import com.enterprise.testagent.domain.session.SessionRuntimeStateSummary;
 import com.enterprise.testagent.domain.session.SessionWorkspaceContext;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.event.RunEventSsePayload;
@@ -37,6 +38,7 @@ import jakarta.validation.Valid;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -307,10 +309,16 @@ final class RuntimeDtos {
             Instant updatedAt,
             SessionWorkspaceContextResponse workspaceContext,
             String sourceType,
-            String sourceRefId) {
+            String sourceRefId,
+            String shareStatus,
+            Boolean isShared,
+            Boolean shareExpired) {
 
         /**
          * 从领域会话映射为 API 响应。
+         *
+         * <p>单会话详情读取不附带分享状态；所属人当前分享设置由前端独立调用
+         * 协作分享接口获取，避免单会话路径额外耦合分享聚合。
          */
         static SessionResponse from(Session session) {
             return new SessionResponse(
@@ -323,14 +331,24 @@ final class RuntimeDtos {
                     session.updatedAt(),
                     null,
                     session.sourceType().name(),
-                    session.sourceRefId());
+                    session.sourceRefId(),
+                    null,
+                    null,
+                    null);
         }
 
         /**
-         * 从历史会话列表项映射为 API 响应，附带应用/工作空间/版本上下文。
+         * 从历史会话列表项映射为 API 响应，附带应用/工作空间/版本上下文与分享状态。
+         *
+         * <p>{@code shareStatus} 来自历史查询对 session_shares 的左连接派生：
+         * 未分享为 {@code null}，已分享为 {@code ACTIVE}/{@code EXPIRED}/{@code REVOKED}；
+         * {@code isShared} 仅在存在分享记录时为 true，{@code shareExpired} 在过期或已取消时为 true。
          */
         static SessionResponse from(SessionHistoryItem item) {
             Session session = item.session();
+            String shareStatus = item.shareStatus();
+            boolean isShared = shareStatus != null;
+            boolean shareExpired = "EXPIRED".equals(shareStatus) || "REVOKED".equals(shareStatus);
             return new SessionResponse(
                     session.sessionId().value(),
                     session.workspaceId().value(),
@@ -341,7 +359,10 @@ final class RuntimeDtos {
                     session.updatedAt(),
                     SessionWorkspaceContextResponse.from(item.workspaceContext()),
                     session.sourceType().name(),
-                    session.sourceRefId());
+                    session.sourceRefId(),
+                    shareStatus,
+                    isShared,
+                    shareExpired);
         }
     }
 
@@ -365,6 +386,10 @@ final class RuntimeDtos {
             Integer summaryVersion,
             String sourceType,
             String sourceRefId,
+            String senderUserId,
+            String senderUsername,
+            String senderUnifiedAuthId,
+            boolean sentBySharedUser,
             ResendMetadataResponse resend) {
 
         /**
@@ -391,6 +416,16 @@ final class RuntimeDtos {
                 String summaryStatus,
                 Integer summaryVersion,
                 RunResend resend) {
+            return from(message, contentKind, summaryStatus, summaryVersion, resend, null);
+        }
+
+        static SessionMessageResponse from(
+                SessionMessage message,
+                String contentKind,
+                String summaryStatus,
+                Integer summaryVersion,
+                RunResend resend,
+                Function<UserId, String> usernameLookup) {
             return new SessionMessageResponse(
                     message.messageId().value(),
                     message.sessionId().value(),
@@ -408,7 +443,11 @@ final class RuntimeDtos {
                     summaryVersion,
                     message.sourceType().name(),
                     message.sourceRefId(),
-                    ResendMetadataResponse.from(resend));
+                    message.senderUserId() == null ? null : message.senderUserId().value(),
+                    username(usernameLookup, message.senderUserId()),
+                    message.senderUnifiedAuthId(),
+                    message.sentBySharedUser(),
+                    ResendMetadataResponse.from(resend, usernameLookup));
         }
     }
 
@@ -422,9 +461,19 @@ final class RuntimeDtos {
             String status,
             Instant executeAt,
             String sourceRunId,
-            String replacementRunId) {
+            String replacementRunId,
+            String requesterUserId,
+            String requesterUsername,
+            String requesterUnifiedAuthId,
+            boolean requestedBySharedUser) {
 
         static ResendMetadataResponse from(RunResend resend) {
+            return from(resend, null);
+        }
+
+        static ResendMetadataResponse from(
+                RunResend resend,
+                Function<UserId, String> usernameLookup) {
             if (resend == null) return null;
             return new ResendMetadataResponse(
                     resend.resendId().value(),
@@ -435,7 +484,11 @@ final class RuntimeDtos {
                     resend.status().name(),
                     resend.executeAt(),
                     resend.sourceRunId().value(),
-                    resend.replacementRunId().value());
+                    resend.replacementRunId().value(),
+                    resend.requesterUserId().value(),
+                    username(usernameLookup, resend.requesterUserId()),
+                    resend.requesterUnifiedAuthId(),
+                    resend.requestedBySharedUser());
         }
     }
 
@@ -479,6 +532,10 @@ final class RuntimeDtos {
             Instant detailsAvailableUntil,
             String sourceType,
             String sourceRefId,
+            String messageSenderUserId,
+            String messageSenderUsername,
+            String messageSenderUnifiedAuthId,
+            boolean messageSentBySharedUser,
             ResendMetadataResponse resend) {
 
         /**
@@ -486,6 +543,10 @@ final class RuntimeDtos {
          */
         static RunResponse from(Run run) {
             return from(run, null, null, null, null);
+        }
+
+        static RunResponse from(Run run, Function<UserId, String> usernameLookup) {
+            return from(run, null, null, null, null, usernameLookup);
         }
 
         /**
@@ -505,6 +566,16 @@ final class RuntimeDtos {
                 String clientRequestId,
                 Instant detailsAvailableUntil,
                 RunResend resend) {
+            return from(run, storageMode, clientRequestId, detailsAvailableUntil, resend, null);
+        }
+
+        static RunResponse from(
+                Run run,
+                RunStorageMode storageMode,
+                String clientRequestId,
+                Instant detailsAvailableUntil,
+                RunResend resend,
+                Function<UserId, String> usernameLookup) {
             return new RunResponse(
                     run.runId().value(),
                     run.sessionId().value(),
@@ -519,7 +590,11 @@ final class RuntimeDtos {
                     detailsAvailableUntil,
                     run.sourceType().name(),
                     run.sourceRefId(),
-                    ResendMetadataResponse.from(resend));
+                    run.messageSenderUserId() == null ? null : run.messageSenderUserId().value(),
+                    username(usernameLookup, run.messageSenderUserId()),
+                    run.messageSenderUnifiedAuthId(),
+                    run.messageSentBySharedUser(),
+                    ResendMetadataResponse.from(resend, usernameLookup));
         }
     }
 
@@ -1049,20 +1124,44 @@ final class RuntimeDtos {
      * 映射会话消息分页响应。
      */
     static PageResponse<SessionMessageResponse> messagePage(PageResponse<SessionMessage> page) {
-        List<SessionMessageResponse> items = page.items().stream().map(SessionMessageResponse::from).toList();
-        return new PageResponse<>(items, page.page(), page.size(), page.total());
+        return messagePage(page, null, null);
     }
 
     static PageResponse<SessionMessageResponse> messagePage(
             PageResponse<SessionMessage> page,
             Function<RunId, RunResend> resendLookup) {
-        if (resendLookup == null) return messagePage(page);
+        return messagePage(page, resendLookup, null);
+    }
+
+    static PageResponse<SessionMessageResponse> messagePage(
+            PageResponse<SessionMessage> page,
+            Function<RunId, RunResend> resendLookup,
+            Function<UserId, String> usernameLookup) {
         List<SessionMessageResponse> items = page.items().stream().map(message -> {
-            RunResend resend = message.runId() == null
+            RunResend resend = resendLookup == null || message.runId() == null
                     ? null
                     : resendLookup.apply(message.runId());
-            return SessionMessageResponse.from(message, null, null, null, resend);
+            return SessionMessageResponse.from(message, null, null, null, resend, usernameLookup);
         }).toList();
         return new PageResponse<>(items, page.page(), page.size(), page.total());
+    }
+
+    /** 同一响应页按用户 ID 缓存姓名查询，避免多条消息重复访问用户仓储；null 结果也会缓存。 */
+    static Function<UserId, String> memoizedUsernameLookup(Function<UserId, String> delegate) {
+        if (delegate == null) {
+            return ignored -> null;
+        }
+        Map<UserId, String> cache = new HashMap<>();
+        return userId -> {
+            if (userId == null) return null;
+            if (cache.containsKey(userId)) return cache.get(userId);
+            String resolved = delegate.apply(userId);
+            cache.put(userId, resolved);
+            return resolved;
+        };
+    }
+
+    private static String username(Function<UserId, String> lookup, UserId userId) {
+        return lookup == null || userId == null ? null : lookup.apply(userId);
     }
 }

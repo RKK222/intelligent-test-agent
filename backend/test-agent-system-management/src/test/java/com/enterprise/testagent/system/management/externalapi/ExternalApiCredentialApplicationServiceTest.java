@@ -21,12 +21,27 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.ApplicationEventPublisher;
 
 /** 验证外部 API 凭据管理的密文持久化、校验、查看、轮换和删除语义。 */
 class ExternalApiCredentialApplicationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-08-09T04:00:00Z");
+
+    @Test
+    void productionSpringBeanUsesRepositoryCipherAndGeneratorConstructor() {
+        new ApplicationContextRunner()
+                .withBean(ExternalApiCredentialRepository.class, () -> new FakeRepository())
+                .withBean(ExternalApiCredentialCipher.class, () -> org.mockito.Mockito.mock(
+                        ExternalApiCredentialCipher.class))
+                .withBean(ExternalApiKeyGenerator.class, () -> org.mockito.Mockito.mock(ExternalApiKeyGenerator.class))
+                .withBean(ExternalApiCredentialApplicationService.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(ExternalApiCredentialApplicationService.class);
+                });
+    }
 
     @Test
     void createPersistsCiphertextAndPublishesRefreshWithoutCredentialMaterial() {

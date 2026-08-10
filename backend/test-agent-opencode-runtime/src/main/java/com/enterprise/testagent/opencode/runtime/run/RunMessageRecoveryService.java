@@ -217,11 +217,26 @@ public class RunMessageRecoveryService {
         return recoverLegacyOpenCodeSession(agentRuntimeRegistry.normalize(agentId), sessionId, traceId);
     }
 
-    /** legacy SSE 初始快照继续排除 user，避免与平台已持久化的乐观 user 消息重复。 */
+    /**
+     * legacy SSE 先发布平台权威 USER 消息，再恢复 OpenCode assistant 快照。
+     *
+     * <p>会话所属人的本地乐观消息不能代表其他协作者视图；平台消息必须先到达，且 OpenCode
+     * 暂不可用时也不能阻塞用户输入同步。远端快照仍排除 user，避免同一消息重复投影。</p>
+     */
     private Flux<RunEventSsePayload> recoverLegacyOpenCodeRun(String agentId, RunId runId, String traceId) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(traceId, "traceId must not be null");
-        return Mono.fromCallable(() -> recoverOpenCodeRunSync(agentId, runId, traceId, false).orElse(List.of()))
+        Flux<RunEventSsePayload> platformInput = Mono.fromCallable(() ->
+                        recoverPlatformUserInput(runId, traceId).map(List::of).orElse(List.of()))
+                .subscribeOn(Schedulers.boundedElastic())
+                .onErrorResume(error -> {
+                    LOGGER.warn("Failed to recover platform Run user input, runId={}, traceId={}",
+                            runId.value(), traceId, error);
+                    return Mono.just(List.of());
+                })
+                .flatMapMany(Flux::fromIterable);
+        Flux<RunEventSsePayload> openCodeSnapshot = Mono.fromCallable(() ->
+                        recoverOpenCodeRunSync(agentId, runId, traceId, false).orElse(List.of()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
                     LOGGER.warn("Failed to recover legacy Run SSE snapshot, agentId={}, runId={}, traceId={}",
@@ -229,6 +244,59 @@ public class RunMessageRecoveryService {
                     return Mono.just(List.of());
                 })
                 .flatMapMany(Flux::fromIterable);
+        return Flux.concat(platformInput, openCodeSnapshot);
+    }
+
+    /** 将 session_messages 中的单 Run USER 输入转换为既有 message.updated 协议。 */
+    private Optional<RunEventSsePayload> recoverPlatformUserInput(RunId runId, String traceId) {
+        if (sessionMessageRepository == null) {
+            return Optional.empty();
+        }
+        Run run = runRepository.findById(runId).orElse(null);
+        if (run == null) {
+            return Optional.empty();
+        }
+        return sessionMessageRepository.findUserBySessionIdAndRunId(run.sessionId(), runId)
+                .map(message -> platformUserInputPayload(runId, traceId, message));
+    }
+
+    /** 平台 ID 用于归档定位，远端 ID 用于和后续 OpenCode envelope 原位归并。 */
+    private RunEventSsePayload platformUserInputPayload(
+            RunId runId,
+            String traceId,
+            SessionMessage item) {
+        String platformMessageId = item.messageId().value();
+        String runtimeMessageId = item.remoteMessageId() == null || item.remoteMessageId().isBlank()
+                ? platformMessageId
+                : item.remoteMessageId();
+        LinkedHashMap<String, Object> message = new LinkedHashMap<>();
+        message.put("id", runtimeMessageId);
+        message.put("messageID", runtimeMessageId);
+        message.put("messageId", runtimeMessageId);
+        message.put("platformMessageId", platformMessageId);
+        message.put("role", "user");
+        message.put("text", item.content());
+        message.put("createdAt", item.createdAt().toString());
+        appendUserAttribution(message, UserMessageAttribution.from(item));
+
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("messageId", runtimeMessageId);
+        payload.put("platformMessageId", platformMessageId);
+        payload.put("message", Map.copyOf(message));
+        UserMessageAttribution attribution = UserMessageAttribution.from(item);
+        if (attribution != null && attribution.senderUserId() != null) {
+            payload.put("senderUserId", attribution.senderUserId().value());
+            if (attribution.senderUnifiedAuthId() != null) {
+                payload.put("senderUnifiedAuthId", attribution.senderUnifiedAuthId());
+            }
+            payload.put("sentBySharedUser", attribution.sentBySharedUser());
+        }
+        return transientPayload(
+                runId.value(),
+                RunEventType.MESSAGE_UPDATED,
+                traceId,
+                item.createdAt(),
+                Map.copyOf(payload));
     }
 
     /** legacy Session tree 兼容方法保持旧的 assistant-only 行为；HTTP 历史主入口使用 metadata 方法。 */
@@ -497,6 +565,7 @@ public class RunMessageRecoveryService {
             payload.putIfAbsent("sessionId", rootSessionId);
             payload.putIfAbsent("isChildSession", false);
         }
+        appendManifestUserAttribution(payload, manifest);
         return new RunEventSsePayload(
                 "evt_history_redis_" + draft.runId().value() + "_" + index,
                 draft.runId().value(),
@@ -505,6 +574,33 @@ public class RunMessageRecoveryService {
                 draft.traceId(),
                 draft.occurredAt(),
                 Map.copyOf(payload));
+    }
+
+    /** 兼容升级前已存在且尚未携带发送人字段的 Redis user message 快照。 */
+    private static void appendManifestUserAttribution(
+            Map<String, Object> payload,
+            RunRuntimeManifest manifest) {
+        if (manifest.messageSenderUserId() == null) {
+            return;
+        }
+        Object rawMessage = payload.get("message");
+        if (!(rawMessage instanceof Map<?, ?> message)
+                || !"user".equalsIgnoreCase(String.valueOf(message.get("role")))) {
+            return;
+        }
+        LinkedHashMap<String, Object> attributedMessage = new LinkedHashMap<>();
+        message.forEach((key, value) -> attributedMessage.put(String.valueOf(key), value));
+        attributedMessage.put("senderUserId", manifest.messageSenderUserId().value());
+        if (manifest.messageSenderUnifiedAuthId() != null) {
+            attributedMessage.put("senderUnifiedAuthId", manifest.messageSenderUnifiedAuthId());
+        }
+        attributedMessage.put("sentBySharedUser", manifest.messageSentBySharedUser());
+        payload.put("message", Map.copyOf(attributedMessage));
+        payload.put("senderUserId", manifest.messageSenderUserId().value());
+        if (manifest.messageSenderUnifiedAuthId() != null) {
+            payload.put("senderUnifiedAuthId", manifest.messageSenderUnifiedAuthId());
+        }
+        payload.put("sentBySharedUser", manifest.messageSentBySharedUser());
     }
 
     /** OpenCode 完整会话读取失败时返回 empty，让调用方继续降级到关系库摘要。 */
@@ -551,7 +647,8 @@ public class RunMessageRecoveryService {
                 traceId,
                 List.of(SnapshotSessionScope.root(locator.rootRemoteSessionId())),
                 true,
-                RunTurnContext.anchored(locator.dispatchMessageId(), null, null)));
+                RunTurnContext.anchored(locator.dispatchMessageId(), null, null),
+                summaryUserAttribution(runId)));
     }
 
     /**
@@ -588,7 +685,8 @@ public class RunMessageRecoveryService {
                 traceId,
                 runScopes(runId, binding.remoteSessionId()),
                 includeUser,
-                RunTurnContext.fromPlatformAnchor(platformAnchor, run.createdAt(), run.updatedAt())));
+                RunTurnContext.fromPlatformAnchor(platformAnchor, run.createdAt(), run.updatedAt()),
+                UserMessageAttribution.from(run)));
     }
 
     private Optional<List<RunEventSsePayload>> recoverOpenCodeSession(
@@ -630,6 +728,7 @@ public class RunMessageRecoveryService {
                 traceId,
                 historyScopes(binding.remoteSessionId()),
                 includeUser,
+                null,
                 null));
     }
 
@@ -722,6 +821,13 @@ public class RunMessageRecoveryService {
             message.put("text", item.content());
             message.put("contentKind", "RAW_LEGACY");
             message.put("createdAt", item.createdAt().toString());
+            if (item.role() == SessionMessageRole.USER && item.senderUserId() != null) {
+                message.put("senderUserId", item.senderUserId().value());
+                if (item.senderUnifiedAuthId() != null) {
+                    message.put("senderUnifiedAuthId", item.senderUnifiedAuthId());
+                }
+                message.put("sentBySharedUser", item.sentBySharedUser());
+            }
             if (item.remoteMessageId() != null) {
                 message.put("remoteMessageId", item.remoteMessageId());
             }
@@ -815,6 +921,7 @@ public class RunMessageRecoveryService {
             if (summary.remoteMessageId() != null) {
                 message.put("remoteMessageId", summary.remoteMessageId());
             }
+            appendUserAttribution(message, UserMessageAttribution.from(summary));
             LinkedHashMap<String, Object> messagePayload = summaryPayloadBase(scopeSessionId, summary);
             messagePayload.put("messageId", messageId);
             messagePayload.put("role", role);
@@ -899,7 +1006,8 @@ public class RunMessageRecoveryService {
             String traceId,
             List<SnapshotSessionScope> scopes,
             boolean includeUser,
-            RunTurnContext runTurnContext) {
+            RunTurnContext runTurnContext,
+            UserMessageAttribution defaultUserAttribution) {
         if (runTurnContext != null && runTurnContext.conflicted()) {
             return List.of();
         }
@@ -933,7 +1041,8 @@ public class RunMessageRecoveryService {
                 messages = result == null || result.messages() == null ? List.of() : result.messages();
             }
             events.addAll(toSnapshotEvents(
-                    snapshotRunId, traceId, messages, scopedSession, includeUser));
+                    snapshotRunId, traceId, messages, scopedSession, includeUser,
+                    defaultUserAttribution));
             for (SnapshotSessionScope discovered : discoverChildScopesFromMessages(scopedSession, messages)) {
                 if (!scopesBySessionId.containsKey(discovered.sessionId())) {
                     scopesBySessionId.put(discovered.sessionId(), discovered);
@@ -1065,7 +1174,8 @@ public class RunMessageRecoveryService {
             String traceId,
             List<AgentSessionMessage> messages,
             SnapshotSessionScope scopedSession,
-            boolean includeUser) {
+            boolean includeUser,
+            UserMessageAttribution defaultUserAttribution) {
         Instant occurredAt = Instant.now();
         List<RunEventSsePayload> events = new ArrayList<>();
         for (AgentSessionMessage message : messages) {
@@ -1076,6 +1186,14 @@ public class RunMessageRecoveryService {
                 continue;
             }
             String messageId = text(messagePayload.get("id"));
+            if ("user".equalsIgnoreCase(role)) {
+                LinkedHashMap<String, Object> attributedMessage = new LinkedHashMap<>(messagePayload);
+                appendUserAttribution(
+                        attributedMessage,
+                        resolveSnapshotAttribution(
+                                snapshotRunId, scopedSession, messageId, defaultUserAttribution));
+                messagePayload = Map.copyOf(attributedMessage);
+            }
             LinkedHashMap<String, Object> messageEventPayload = new LinkedHashMap<>();
             appendScopePayload(messageEventPayload, scopedSession);
             messageEventPayload.put("message", messagePayload);
@@ -1104,6 +1222,90 @@ public class RunMessageRecoveryService {
             }
         }
         return List.copyOf(events);
+    }
+
+    /** 从终态摘要读取 locator-only Run 的发送人快照，避免为详情恢复重走普通会话归属。 */
+    private UserMessageAttribution summaryUserAttribution(RunId runId) {
+        if (runSummaryPersistencePort == null) {
+            return null;
+        }
+        try {
+            return runSummaryPersistencePort.findSummariesByRunId(runId).stream()
+                    .filter(summary -> summary.role() == SessionMessageRole.USER)
+                    .map(UserMessageAttribution::from)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse(null);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("PostgreSQL user attribution unavailable, runId={}", runId.value(), exception);
+            return null;
+        }
+    }
+
+    /** Session 全量 OpenCode 快照按远端消息号回查平台消息归因，精确到单条 user message。 */
+    private UserMessageAttribution resolveSnapshotAttribution(
+            String snapshotRunId,
+            SnapshotSessionScope scopedSession,
+            String remoteMessageId,
+            UserMessageAttribution fallback) {
+        if (fallback != null || sessionMessageRepository == null || remoteMessageId == null
+                || !snapshotRunId.startsWith("session_snapshot:") || scopedSession.childSession()) {
+            return fallback;
+        }
+        String sessionId = snapshotRunId.substring("session_snapshot:".length());
+        try {
+            return sessionMessageRepository
+                    .findBySessionIdAndRemoteMessageId(new SessionId(sessionId), remoteMessageId)
+                    .map(UserMessageAttribution::from)
+                    .orElse(null);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("Session user attribution unavailable, sessionId={}", sessionId, exception);
+            return null;
+        }
+    }
+
+    private static void appendUserAttribution(
+            Map<String, Object> message,
+            UserMessageAttribution attribution) {
+        if (attribution == null || attribution.senderUserId() == null) {
+            return;
+        }
+        message.put("senderUserId", attribution.senderUserId().value());
+        if (attribution.senderUnifiedAuthId() != null) {
+            message.put("senderUnifiedAuthId", attribution.senderUnifiedAuthId());
+        }
+        message.put("sentBySharedUser", attribution.sentBySharedUser());
+    }
+
+    /** 用户消息投影所需的最小归因，不携带正文。 */
+    private record UserMessageAttribution(
+            com.enterprise.testagent.domain.user.UserId senderUserId,
+            String senderUnifiedAuthId,
+            boolean sentBySharedUser) {
+
+        private static UserMessageAttribution from(Run run) {
+            return run == null || run.messageSenderUserId() == null
+                    ? null
+                    : new UserMessageAttribution(
+                            run.messageSenderUserId(), run.messageSenderUnifiedAuthId(),
+                            run.messageSentBySharedUser());
+        }
+
+        private static UserMessageAttribution from(RunConversationSummary summary) {
+            return summary == null || summary.senderUserId() == null
+                    ? null
+                    : new UserMessageAttribution(
+                            summary.senderUserId(), summary.senderUnifiedAuthId(),
+                            summary.sentBySharedUser());
+        }
+
+        private static UserMessageAttribution from(SessionMessage message) {
+            return message == null || message.senderUserId() == null
+                    ? null
+                    : new UserMessageAttribution(
+                            message.senderUserId(), message.senderUnifiedAuthId(),
+                            message.sentBySharedUser());
+        }
     }
 
     /**

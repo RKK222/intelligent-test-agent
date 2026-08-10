@@ -56,12 +56,60 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static final String INTERNAL_MODEL_OBSERVABILITY_VERSION = "20260808143300";
     private static final String INTERNAL_MODEL_FIRST_TOKEN_VERSION = "20260808143301";
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_VERSION = "20260808143302";
+    private static final String INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION;
     private static final String INTERNAL_MODEL_OBSERVABILITY_OLD_RESOURCE =
             "db/migration/V20260807130134__create_internal_model_observability.sql";
     private static final String INTERNAL_MODEL_FIRST_TOKEN_OLD_RESOURCE =
             "db/migration/V20260807203000__add_internal_model_first_token_metrics.sql";
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_OLD_RESOURCE =
             "db/migration/V20260807222227__add_internal_model_stream_complete_metrics.sql";
+    private static final String INTERNAL_MODEL_LEGACY_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_LEGACY_COMPATIBILITY_LOCATION;
+    private static final String RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION;
+    private static final String RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION;
+    private static final String RUN_RESEND_MAIN_RESOURCE =
+            "db/migration/V20260807190000__create_run_resends.sql";
+    private static final String RUN_RESEND_MIGRATION_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_MIGRATION_VERSION;
+    private static final String RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION;
+    private static final String RUN_RESEND_FORWARD_AFTER_BATCH_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_FORWARD_AFTER_BATCH_VERSION;
+    private static final String BATCH_SESSION_ATTRIBUTION_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.BATCH_SESSION_ATTRIBUTION_MIGRATION_VERSION;
+    private static final String EXTERNAL_API_CREDENTIALS_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.EXTERNAL_API_CREDENTIALS_MIGRATION_VERSION;
+    private static final String EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE =
+            "db/migration/V20260809110000__create_external_api_credentials.sql";
+    private static final String QA_MEMORY_APPLIED_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_APPLIED_MIGRATION_VERSION;
+    private static final String QA_MEMORY_APPLIED_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_APPLIED_COMPATIBILITY_LOCATION;
+    private static final String QA_MEMORY_GENERALIZE_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_GENERALIZE_MIGRATION_VERSION;
+    private static final String QA_MEMORY_IDENTITY_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_IDENTITY_MIGRATION_VERSION;
+    private static final String QA_MEMORY_EXTENDED_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_EXTENDED_COMPATIBILITY_LOCATION;
+    private static final String EXTERNAL_API_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.EXTERNAL_API_FORWARD_MIGRATION_VERSION;
+    private static final String EXTERNAL_API_FORWARD_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.EXTERNAL_API_FORWARD_COMPATIBILITY_LOCATION;
+    private static final String SESSION_SHARE_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.SESSION_SHARE_MIGRATION_VERSION;
+    private static final String SESSION_SHARE_ATTRIBUTION_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.SESSION_SHARE_ATTRIBUTION_MIGRATION_VERSION;
+    private static final String SESSION_SHARE_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.SESSION_SHARE_FORWARD_MIGRATION_VERSION;
+    private static final String SESSION_SHARE_ATTRIBUTION_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION_VERSION;
+    private static final String SESSION_SHARE_MAIN_RESOURCE =
+            "db/migration/V20260809170000__session_shares_create_collaboration_share.sql";
+    private static final String SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE =
+            "db/migration/V20260809170001__session_messages_add_delegated_attribution.sql";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -208,7 +256,10 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, SKILL_HUB_CLASSIFICATION_VERSION)).isTrue();
             assertThat(applied(dataSource, PUBLIC_SKILL_HUB_SNAPSHOT_VERSION)).isTrue();
             assertThat(applied(dataSource, PUBLIC_SKILL_HUB_CLASSIFICATION_VERSION)).isTrue();
+            assertThat(applied(dataSource, EXTERNAL_API_CREDENTIALS_VERSION)).isTrue();
+            assertThat(applied(dataSource, EXTERNAL_API_FORWARD_VERSION)).isFalse();
             assertCurrentReleaseTables(dataSource);
+            assertExternalApiCredentialTables(dataSource);
         });
     }
 
@@ -233,6 +284,87 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isTrue();
             assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
+        });
+    }
+
+    @Test
+    void currentInternalModelHistoryResumesAfterObservabilityMigration() {
+        assertCurrentInternalModelHistoryResumes(
+                "current_internal_model_after_observability",
+                INTERNAL_MODEL_OBSERVABILITY_VERSION,
+                false);
+    }
+
+    @Test
+    void currentInternalModelHistoryResumesAfterFirstTokenMigration() {
+        assertCurrentInternalModelHistoryResumes(
+                "current_internal_model_after_first_token",
+                INTERNAL_MODEL_FIRST_TOKEN_VERSION,
+                true);
+    }
+
+    @Test
+    void appliedLegacyInternalModelHistoryUsesCompatibilityAndForwardRunResendMigration() {
+        DataSource dataSource = dataSource("legacy_internal_model_history");
+        // 复现并行 worktree 已执行旧可观测版本、但撤销重发候选版本尚未执行的本地 history。
+        migrateWithoutResourceTo(
+                dataSource,
+                INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION,
+                new String[] {MAIN_LOCATION, INTERNAL_MODEL_LEGACY_LOCATION},
+                RUN_RESEND_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION)).isTrue();
+        assertThat(applied(dataSource, RUN_RESEND_MIGRATION_VERSION)).isFalse();
+        assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(
+                    INTERNAL_MODEL_LEGACY_LOCATION,
+                    RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION);
+            assertThat(applied(dataSource, RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION)).isTrue();
+            assertThat(applied(dataSource, BATCH_SESSION_ATTRIBUTION_VERSION)).isTrue();
+            assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isFalse();
+            assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isFalse();
+            assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isFalse();
+            assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+        });
+
+        // 第二次启动必须继续解析已经落库的“批量前”补偿版本，不能因批量版本已存在误切到另一条路径。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION);
+            assertThat(applied(dataSource, RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION)).isTrue();
+            assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+        });
+    }
+
+    @Test
+    void missingRunResendAfterBatchUsesHigherForwardMigrationAndRemainsResolvable() {
+        DataSource dataSource = dataSource("run_resend_missing_after_batch");
+        migrateWithoutResourceTo(
+                dataSource,
+                BATCH_SESSION_ATTRIBUTION_VERSION,
+                RUN_RESEND_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, BATCH_SESSION_ATTRIBUTION_VERSION)).isTrue();
+        assertThat(applied(dataSource, RUN_RESEND_MIGRATION_VERSION)).isFalse();
+        assertThat(runResendSchemaObjectCount(dataSource)).isZero();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION);
+            assertThat(applied(dataSource, RUN_RESEND_FORWARD_AFTER_BATCH_VERSION)).isTrue();
+            assertThat(applied(dataSource, RUN_RESEND_MIGRATION_VERSION)).isFalse();
+            assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+        });
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION);
+            assertThat(applied(dataSource, RUN_RESEND_FORWARD_AFTER_BATCH_VERSION)).isTrue();
+            assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
         });
     }
 
@@ -271,6 +403,149 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         });
     }
 
+    @Test
+    void appliedQaMemoryHistoryUsesByteExactCompatibilityAndExternalApiForwardMigration() {
+        DataSource dataSource = dataSource("qa_memory_applied_before_external_api");
+        // 复现个人持久库已执行 QA Memory 同号候选、但从未出现外部 API 主 migration 的真实历史。
+        migrateWithoutResourceTo(
+                dataSource,
+                QA_MEMORY_APPLIED_VERSION,
+                new String[] {MAIN_LOCATION, QA_MEMORY_APPLIED_LOCATION},
+                EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE);
+
+        assertThat(appliedChecksum(dataSource, QA_MEMORY_APPLIED_VERSION))
+                .isEqualTo(DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_APPLIED_MIGRATION_CHECKSUM);
+        assertThat(applied(dataSource, EXTERNAL_API_CREDENTIALS_VERSION)).isFalse();
+        assertThat(applied(dataSource, EXTERNAL_API_FORWARD_VERSION)).isFalse();
+        assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(
+                    QA_MEMORY_APPLIED_LOCATION,
+                    EXTERNAL_API_FORWARD_LOCATION);
+            assertThat(applied(dataSource, EXTERNAL_API_CREDENTIALS_VERSION)).isFalse();
+            assertThat(applied(dataSource, EXTERNAL_API_FORWARD_VERSION)).isTrue();
+            assertExternalApiCredentialTables(dataSource);
+        });
+
+        // 第二次启动继续解析相同分叉，不能回头加载更低版本的主 migration。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(
+                    QA_MEMORY_APPLIED_LOCATION,
+                    EXTERNAL_API_FORWARD_LOCATION);
+            assertThat(applied(dataSource, EXTERNAL_API_FORWARD_VERSION)).isTrue();
+            assertExternalApiCredentialTables(dataSource);
+        });
+    }
+
+    @Test
+    void appliedExtendedQaMemoryHistoryUsesByteExactCompatibilityAndAllForwardMigrations() {
+        DataSource dataSource = dataSource("qa_memory_extended_before_release_migrations");
+        // 复现当前 .env.test 保留库：三条 QA Memory history 已执行，外部 API 与会话分享均未执行。
+        migrateWithoutResourceTo(
+                dataSource,
+                QA_MEMORY_IDENTITY_VERSION,
+                new String[] {MAIN_LOCATION, QA_MEMORY_APPLIED_LOCATION, QA_MEMORY_EXTENDED_LOCATION},
+                EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE,
+                SESSION_SHARE_MAIN_RESOURCE,
+                SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE);
+
+        assertThat(appliedChecksum(dataSource, QA_MEMORY_GENERALIZE_VERSION))
+                .isEqualTo(DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_GENERALIZE_MIGRATION_CHECKSUM);
+        assertThat(appliedChecksum(dataSource, QA_MEMORY_IDENTITY_VERSION))
+                .isEqualTo(DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_IDENTITY_MIGRATION_CHECKSUM);
+        assertThat(applied(dataSource, EXTERNAL_API_CREDENTIALS_VERSION)).isFalse();
+        assertThat(applied(dataSource, SESSION_SHARE_VERSION)).isFalse();
+        assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(
+                    QA_MEMORY_APPLIED_LOCATION,
+                    QA_MEMORY_EXTENDED_LOCATION,
+                    EXTERNAL_API_FORWARD_LOCATION);
+            assertThat(applied(dataSource, EXTERNAL_API_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, SESSION_SHARE_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, EXTERNAL_API_CREDENTIALS_VERSION)).isFalse();
+            assertThat(applied(dataSource, SESSION_SHARE_VERSION)).isFalse();
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isFalse();
+            assertExternalApiCredentialTables(dataSource);
+            assertSessionShareSchema(dataSource);
+        });
+
+        // 第二次启动必须继续解析相同的高版本补偿资源，不能重新暴露低版本主 migration。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(
+                    QA_MEMORY_APPLIED_LOCATION,
+                    QA_MEMORY_EXTENDED_LOCATION,
+                    EXTERNAL_API_FORWARD_LOCATION);
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_FORWARD_VERSION)).isTrue();
+            assertSessionShareSchema(dataSource);
+        });
+    }
+
+    @Test
+    void partialExtendedQaMemoryHistoryResumesBeforeApplyingForwardMigrations() {
+        DataSource dataSource = dataSource("qa_memory_extended_after_generalize");
+        migrateWithoutResourceTo(
+                dataSource,
+                QA_MEMORY_GENERALIZE_VERSION,
+                new String[] {MAIN_LOCATION, QA_MEMORY_APPLIED_LOCATION, QA_MEMORY_EXTENDED_LOCATION},
+                EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE,
+                SESSION_SHARE_MAIN_RESOURCE,
+                SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, QA_MEMORY_GENERALIZE_VERSION)).isTrue();
+        assertThat(applied(dataSource, QA_MEMORY_IDENTITY_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_IDENTITY_VERSION)).isTrue();
+            assertThat(applied(dataSource, EXTERNAL_API_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_FORWARD_VERSION)).isTrue();
+            assertSessionShareSchema(dataSource);
+        });
+    }
+
+    @Test
+    void unknownExtendedQaMemoryChecksumStillFailsClosed() {
+        DataSource dataSource = dataSource("qa_memory_extended_unknown_checksum");
+        migrateWithoutResourceTo(
+                dataSource,
+                QA_MEMORY_IDENTITY_VERSION,
+                new String[] {MAIN_LOCATION, QA_MEMORY_APPLIED_LOCATION, QA_MEMORY_EXTENDED_LOCATION},
+                EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE,
+                SESSION_SHARE_MAIN_RESOURCE,
+                SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE);
+        overwriteAppliedChecksum(dataSource, QA_MEMORY_GENERALIZE_VERSION, 987654321);
+
+        bootFlywayRunner(dataSource).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure())
+                    .hasStackTraceContaining("检测到未知的 QA Memory 扩展 migration checksum");
+        });
+    }
+
+    @Test
+    void unknownQaMemoryChecksumStillFailsClosed() {
+        DataSource dataSource = dataSource("qa_memory_unknown_checksum");
+        migrateWithoutResourceTo(
+                dataSource,
+                QA_MEMORY_APPLIED_VERSION,
+                new String[] {MAIN_LOCATION, QA_MEMORY_APPLIED_LOCATION},
+                EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE);
+        // 只在测试 schema 中伪造未知 checksum，证明兼容程序不会静默接受其它同号 SQL。
+        overwriteAppliedChecksum(dataSource, QA_MEMORY_APPLIED_VERSION, 987654321);
+
+        bootFlywayRunner(dataSource).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure())
+                    .hasStackTraceContaining("检测到未知的 QA Memory migration checksum");
+        });
+    }
+
     /** 为每套历史创建独立 schema，避免测试之间共享 Flyway history。 */
     private static DataSource dataSource(String schema) {
         PGSimpleDataSource admin = postgresDataSource();
@@ -302,9 +577,17 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DataSource dataSource,
             String target,
             String... excludedResources) {
+        migrateWithoutResourceTo(dataSource, target, new String[] {MAIN_LOCATION}, excludedResources);
+    }
+
+    private static void migrateWithoutResourceTo(
+            DataSource dataSource,
+            String target,
+            String[] locations,
+            String... excludedResources) {
         FluentConfiguration configuration = Flyway.configure()
                 .dataSource(dataSource)
-                .locations(MAIN_LOCATION)
+                .locations(locations)
                 .target(target);
         ResourceProvider defaultProvider = new Scanner<>(
                 JavaMigration.class, configuration, configuration.getLocations());
@@ -345,6 +628,29 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         bootFlywayRunner(dataSource).run(context -> {
             assertThat(context).hasNotFailed().hasSingleBean(Flyway.class);
             assertions.accept(context.getBean(Flyway.class));
+        });
+    }
+
+    /** 模拟当前 migration 链在进程中断后重启，剩余版本必须按默认顺序继续执行。 */
+    private static void assertCurrentInternalModelHistoryResumes(
+            String schema,
+            String appliedThroughVersion,
+            boolean firstTokenAlreadyApplied) {
+        DataSource dataSource = dataSource(schema);
+        migrateTo(dataSource, appliedThroughVersion, MAIN_LOCATION);
+
+        assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
+        assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION))
+                .isEqualTo(firstTokenAlreadyApplied);
+        assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).doesNotContain(INTERNAL_MODEL_LEGACY_LOCATION);
+            assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
+            assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isTrue();
+            assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isTrue();
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
         });
     }
 
@@ -484,6 +790,74 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         assertThat(classificationColumnCount).isEqualTo(4L);
     }
 
+    private static void assertExternalApiCredentialTables(DataSource dataSource) {
+        Long tableCount = JdbcClient.create(dataSource)
+                .sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'external_api_credentials',
+                              'external_api_credential_scopes'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(2L);
+    }
+
+    private static void assertSessionShareSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'session_shares',
+                              'session_share_memberships',
+                              'session_share_audit_events'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long attributionColumnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and (
+                              (table_name = 'session_messages'
+                                  and column_name in ('sender_unified_auth_id', 'sent_by_shared_user'))
+                              or (table_name = 'runs'
+                                  and column_name in ('message_sender_user_id', 'active_session_id'))
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(3L);
+        assertThat(attributionColumnCount).isEqualTo(4L);
+    }
+
+    private static long qaMemorySchemaTableCount(DataSource dataSource) {
+        return JdbcClient.create(dataSource)
+                .sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'qa_memories',
+                              'qa_memory_evidence',
+                              'qa_memory_reviews',
+                              'qa_memory_learning_outbox',
+                              'qa_memory_run_usage',
+                              'qa_memory_whitelist',
+                              'qa_memory_skill_proposals',
+                              'qa_memory_settings'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+    }
+
     /** 三张可观测表及首 token、流完成列必须在同一正常 Flyway 链中落地。 */
     private static long internalModelObservabilitySchemaObjectCount(DataSource dataSource) {
         JdbcClient jdbc = JdbcClient.create(dataSource);
@@ -509,6 +883,18 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .query(Long.class)
                 .single();
         return tableCount + columnCount;
+    }
+
+    private static long runResendSchemaObjectCount(DataSource dataSource) {
+        return JdbcClient.create(dataSource)
+                .sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in ('run_resends', 'run_resend_session_locks')
+                        """)
+                .query(Long.class)
+                .single();
     }
 
     private static boolean matches(LoadableResource resource, String expectedResource) {

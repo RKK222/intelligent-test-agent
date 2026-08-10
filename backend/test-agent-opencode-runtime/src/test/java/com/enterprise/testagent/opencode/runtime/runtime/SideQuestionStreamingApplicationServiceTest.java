@@ -33,6 +33,7 @@ import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunRepository;
 import com.enterprise.testagent.domain.run.RunStatus;
+import com.enterprise.testagent.opencode.runtime.run.RunActorAttribution;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
@@ -168,6 +169,37 @@ class SideQuestionStreamingApplicationServiceTest {
         assertThat(fixture.durableEvents).extracting(RunEventDraft::type)
                 .containsExactly(RunEventType.RUN_CREATED);
         verify(fixture.runs, never()).findLatestActiveBySessionId(eq(MAIN_SESSION_ID));
+    }
+
+    @Test
+    void delegatedSideQuestionUsesOwnerForExecutionAndActorForRunAttribution() {
+        Fixture fixture = new Fixture(command -> {
+            // 本测试只验证同步身份归因，不执行后台旁路任务。
+        });
+        UserId actor = new UserId("usr_sidequestion_actor");
+        RunActorAttribution attribution = new RunActorAttribution(
+                USER_ID, actor, "uac-sidequestion-actor", true);
+
+        fixture.service.start(
+                attribution,
+                "opencode",
+                MAIN_SESSION_ID,
+                "当前任务进展如何？",
+                null,
+                null,
+                TRACE_ID);
+
+        verify(fixture.targetResolver).sessionTarget(
+                "opencode", USER_ID, MAIN_SESSION_ID.value(), TRACE_ID);
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(fixture.sessions).save(sessionCaptor.capture());
+        assertThat(sessionCaptor.getValue().createdByUserId()).isEqualTo(USER_ID);
+        ArgumentCaptor<Run> runCaptor = ArgumentCaptor.forClass(Run.class);
+        verify(fixture.runs).save(runCaptor.capture());
+        assertThat(runCaptor.getValue().triggeredByUserId()).isEqualTo(USER_ID);
+        assertThat(runCaptor.getValue().messageSenderUserId()).isEqualTo(actor);
+        assertThat(runCaptor.getValue().messageSenderUnifiedAuthId()).isEqualTo("uac-sidequestion-actor");
+        assertThat(runCaptor.getValue().messageSentBySharedUser()).isTrue();
     }
 
     @Test

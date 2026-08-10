@@ -14,9 +14,23 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 /** 验证外部凭据刷新广播不携带密钥，并区分本地提交与远端通知。 */
 class ExternalApiCredentialUpdateBroadcasterTest {
+
+    @Test
+    void productionSpringBeanUsesBroadcastIdentityAndRegistryConstructor() {
+        new ApplicationContextRunner()
+                .withBean(ServerBroadcastPublisher.class, () -> mock(ServerBroadcastPublisher.class))
+                .withBean(BackendInstanceIdentity.class, () -> mock(BackendInstanceIdentity.class))
+                .withBean(ExternalApiCredentialRegistry.class, () -> mock(ExternalApiCredentialRegistry.class))
+                .withBean(ExternalApiCredentialUpdateBroadcaster.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(ExternalApiCredentialUpdateBroadcaster.class);
+                });
+    }
 
     @Test
     void localCommitRefreshesRegistryAndBroadcastsEmptyPayload() {

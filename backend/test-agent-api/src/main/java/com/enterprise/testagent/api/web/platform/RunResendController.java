@@ -6,18 +6,25 @@ import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunResend;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.run.CreateRunResendCommand;
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
+import com.enterprise.testagent.opencode.runtime.run.RunActorAttribution;
 import com.enterprise.testagent.opencode.runtime.run.RunResendApplicationService;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.function.Function;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -29,12 +36,22 @@ public class RunResendController {
 
     private final RunResendApplicationService resendService;
     private final RunApplicationService runService;
+    private final SessionCollaborationShareService shareService;
 
+    @Autowired
     public RunResendController(
             RunResendApplicationService resendService,
             RunApplicationService runService) {
+        this(resendService, runService, null);
+    }
+
+    public RunResendController(
+            RunResendApplicationService resendService,
+            RunApplicationService runService,
+            SessionCollaborationShareService shareService) {
         this.resendService = Objects.requireNonNull(resendService);
         this.runService = Objects.requireNonNull(runService);
+        this.shareService = shareService;
     }
 
     @PostMapping("/api/internal/agent/{agentId}/sessions/{sessionId}/resends")
@@ -42,20 +59,28 @@ public class RunResendController {
             @PathVariable String agentId,
             @PathVariable String sessionId,
             @Valid @RequestBody Request request,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
-        UserId owner = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        var principal = AuthWebSupport.getAuthPrincipal(exchange);
+        UserId actor = principal.userId();
         String traceId = RuntimeApiSupport.traceId(exchange);
+        SessionId requestedSession = new SessionId(sessionId);
+        DelegatedOperationContext context = shareContext(actor, shareId, traceId);
         return Mono.fromCallable(() -> {
-                    RunResend resend = resendService.createManual(
-                            owner,
-                            agentId,
-                            new SessionId(sessionId),
-                            new CreateRunResendCommand(
-                                    request.expectedRemoteMessageId(),
-                                    request.expectedRunId() == null ? null : new RunId(request.expectedRunId()),
-                                    request.contextToken(),
-                                    request.clientRequestId()),
-                            traceId);
+                    CreateRunResendCommand command = new CreateRunResendCommand(
+                            request.expectedRemoteMessageId(),
+                            request.expectedRunId() == null ? null : new RunId(request.expectedRunId()),
+                            request.contextToken(),
+                            request.clientRequestId());
+                    RunResend resend = context == null
+                            ? resendService.createManual(
+                                    new RunActorAttribution(
+                                            actor, actor, principal.unifiedAuthId(), false),
+                                    agentId, requestedSession, command, traceId)
+                            : resendService.createManual(
+                                    context, agentId, requestedSession, command, traceId);
+                    Function<UserId, String> usernameLookup = RuntimeDtos.memoizedUsernameLookup(
+                            shareService == null ? null : shareService::findUsername);
                     return ApiResponse.ok(Response.from(
                             resend,
                             RuntimeDtos.RunResponse.from(
@@ -63,9 +88,21 @@ public class RunResendController {
                                     null,
                                     null,
                                     null,
-                                    resend)), traceId);
+                                    resend,
+                                    usernameLookup),
+                            usernameLookup), traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private DelegatedOperationContext shareContext(UserId actor, String shareId, String traceId) {
+        if (shareId == null || shareId.isBlank()) return null;
+        if (shareService == null) {
+            throw new com.enterprise.testagent.common.error.PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                    "会话分享服务未配置");
+        }
+        return shareService.requireAccess(actor, new SessionShareId(shareId), true, traceId);
     }
 
     record Request(
@@ -83,11 +120,18 @@ public class RunResendController {
             RuntimeDtos.RunResponse replacementRun) {
 
         static Response from(RunResend resend, RuntimeDtos.RunResponse run) {
+            return from(resend, run, null);
+        }
+
+        static Response from(
+                RunResend resend,
+                RuntimeDtos.RunResponse run,
+                Function<UserId, String> usernameLookup) {
             return new Response(
                     resend.resendId().value(),
                     resend.status().name(),
                     resend.executeAt(),
-                    RuntimeDtos.ResendMetadataResponse.from(resend),
+                    RuntimeDtos.ResendMetadataResponse.from(resend, usernameLookup),
                     run);
         }
     }

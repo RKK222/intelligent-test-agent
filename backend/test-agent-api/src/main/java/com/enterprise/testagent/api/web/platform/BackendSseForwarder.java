@@ -35,7 +35,8 @@ public class BackendSseForwarder {
             HttpHeaders.ACCEPT,
             HttpHeaders.ACCEPT_LANGUAGE,
             TraceConstants.TRACE_ID_HEADER,
-            LAST_EVENT_ID_HEADER);
+            LAST_EVENT_ID_HEADER,
+            SessionShareController.SHARE_HEADER);
 
     private final WebClient webClient;
 

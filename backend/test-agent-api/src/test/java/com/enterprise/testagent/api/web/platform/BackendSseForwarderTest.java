@@ -59,6 +59,7 @@ class BackendSseForwarderTest {
                     .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
                     .header(TraceConstants.TRACE_ID_HEADER, "trace_1234567890abcdef")
                     .header("Last-Event-ID", "11")
+                    .header(SessionShareController.SHARE_HEADER, "shr_0123456789abcdef")
                     .build());
 
             forwarder.forward(exchange, backend("http://127.0.0.1:" + port)).block(Duration.ofSeconds(3));
@@ -69,6 +70,8 @@ class BackendSseForwarderTest {
             assertThat(receivedHeaders.get().getFirst(TraceConstants.TRACE_ID_HEADER))
                     .isEqualTo("trace_1234567890abcdef");
             assertThat(receivedHeaders.get().getFirst("Last-Event-ID")).isEqualTo("11");
+            assertThat(receivedHeaders.get().getFirst(SessionShareController.SHARE_HEADER))
+                    .isEqualTo("shr_0123456789abcdef");
             assertThat(receivedHeaders.get().getFirst(BackendHttpForwarder.ROUTED_HEADER)).isEqualTo("true");
             assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
             assertThat(exchange.getResponse().getHeaders().getContentType()).isEqualTo(MediaType.TEXT_EVENT_STREAM);

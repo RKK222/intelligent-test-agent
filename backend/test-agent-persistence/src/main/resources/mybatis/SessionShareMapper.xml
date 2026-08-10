@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.SessionShareMapper">
+
+    <resultMap id="SessionShareRowMap" type="com.enterprise.testagent.persistence.mybatis.SessionShareRow">
+        <constructor>
+            <arg column="share_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="owner_user_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="expires_at" javaType="java.time.Instant"/>
+            <arg column="lock_version" javaType="java.lang.Long"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="revoked_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="MembershipRowMap" type="com.enterprise.testagent.persistence.mybatis.SessionShareMembershipRow">
+        <constructor>
+            <arg column="share_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="unified_auth_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="can_chat" javaType="java.lang.Boolean"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="shared_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="removed_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="SharedSessionListRowMap" type="com.enterprise.testagent.persistence.mybatis.SharedSessionListRow">
+        <constructor>
+            <arg column="share_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="session_title" javaType="java.lang.String"/>
+            <arg column="owner_user_id" javaType="java.lang.String"/>
+            <arg column="owner_unified_auth_id" javaType="java.lang.String"/>
+            <arg column="owner_username" javaType="java.lang.String"/>
+            <arg column="shared_at" javaType="java.time.Instant"/>
+            <arg column="expires_at" javaType="java.time.Instant"/>
+            <arg column="can_chat" javaType="java.lang.Boolean"/>
+            <arg column="access_status" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="CandidateRowMap" type="com.enterprise.testagent.persistence.mybatis.SessionShareCandidateRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="unified_auth_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="ShareColumns">
+        share_id, session_id, workspace_id, owner_user_id, status, expires_at,
+        lock_version, trace_id, created_at, updated_at, revoked_at
+    </sql>
+
+    <insert id="insertShare">
+        insert into session_shares(
+            share_id, session_id, workspace_id, owner_user_id, status, expires_at,
+            lock_version, trace_id, created_at, updated_at, revoked_at
+        ) values (
+            #{row.shareId}, #{row.sessionId}, #{row.workspaceId}, #{row.ownerUserId},
+            #{row.status}, #{row.expiresAt}, #{row.version}, #{row.traceId},
+            #{row.createdAt}, #{row.updatedAt}, #{row.revokedAt}
+        )
+    </insert>
+
+    <update id="updateShare">
+        update session_shares
+        set status = #{row.status},
+            expires_at = #{row.expiresAt},
+            lock_version = #{row.version},
+            trace_id = #{row.traceId},
+            updated_at = #{row.updatedAt},
+            revoked_at = #{row.revokedAt}
+        where share_id = #{row.shareId}
+          and session_id = #{row.sessionId}
+          and workspace_id = #{row.workspaceId}
+          and owner_user_id = #{row.ownerUserId}
+          and lock_version = #{expectedVersion}
+    </update>
+
+    <select id="findBySessionId" resultMap="SessionShareRowMap">
+        select <include refid="ShareColumns"/>
+        from session_shares
+        where session_id = #{sessionId}
+    </select>
+
+    <select id="findByShareId" resultMap="SessionShareRowMap">
+        select <include refid="ShareColumns"/>
+        from session_shares
+        where share_id = #{shareId}
+    </select>
+
+    <insert id="insertMembership">
+        insert into session_share_memberships(
+            share_id, user_id, unified_auth_id, username, can_chat, status,
+            shared_at, updated_at, removed_at
+        ) values (
+            #{row.shareId}, #{row.userId}, #{row.unifiedAuthId}, #{row.username},
+            #{row.canChat}, #{row.status}, #{row.sharedAt}, #{row.updatedAt}, #{row.removedAt}
+        )
+    </insert>
+
+    <update id="updateMembership">
+        update session_share_memberships
+        set unified_auth_id = #{row.unifiedAuthId},
+            username = #{row.username},
+            can_chat = #{row.canChat},
+            status = #{row.status},
+            shared_at = #{row.sharedAt},
+            updated_at = #{row.updatedAt},
+            removed_at = #{row.removedAt}
+        where share_id = #{row.shareId}
+          and user_id = #{row.userId}
+    </update>
+
+    <select id="findMemberships" resultMap="MembershipRowMap">
+        select share_id, user_id, unified_auth_id, username, can_chat, status,
+               shared_at, updated_at, removed_at
+        from session_share_memberships
+        where share_id = #{shareId}
+        order by id
+    </select>
+
+    <select id="findSharedWith" resultMap="SharedSessionListRowMap">
+        select sh.share_id,
+               sh.session_id,
+               sh.workspace_id,
+               s.title as session_title,
+               sh.owner_user_id,
+               owner.unified_auth_id as owner_unified_auth_id,
+               owner.username as owner_username,
+               member.shared_at,
+               sh.expires_at,
+               member.can_chat,
+               case
+                   when s.status = 'ARCHIVED' then 'SESSION_ARCHIVED'
+                   when member.status = 'REMOVED' then 'REMOVED'
+                   when sh.status = 'REVOKED' then 'REVOKED'
+                   when sh.expires_at &lt;= current_timestamp then 'EXPIRED'
+                   else 'ACTIVE'
+               end as access_status
+        from session_share_memberships member
+        join session_shares sh on sh.share_id = member.share_id
+        join sessions s on s.session_id = sh.session_id
+        join users owner on owner.user_id = sh.owner_user_id
+        where member.user_id = #{userId}
+        order by member.updated_at desc, member.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countSharedWith" resultType="long">
+        select count(*)
+        from session_share_memberships
+        where user_id = #{userId}
+    </select>
+
+    <select id="findCandidates" resultMap="CandidateRowMap">
+        select user_id, unified_auth_id, username
+        from users
+        where status = 'ACTIVE'
+          and user_id &lt;> #{excludedUserId}
+          <if test="pattern != null">
+            and (
+                lower(user_id) like #{pattern}
+                or lower(unified_auth_id) like #{pattern}
+                or lower(username) like #{pattern}
+            )
+          </if>
+        order by username, user_id
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countCandidates" resultType="long">
+        select count(*)
+        from users
+        where status = 'ACTIVE'
+          and user_id &lt;> #{excludedUserId}
+          <if test="pattern != null">
+            and (
+                lower(user_id) like #{pattern}
+                or lower(unified_auth_id) like #{pattern}
+                or lower(username) like #{pattern}
+            )
+          </if>
+    </select>
+
+    <!-- 空归因会话不允许抢占；全部普通历史归因必须唯一且正好为当前 actor。 -->
+    <update id="claimLegacySessionOwner">
+        update sessions
+        set created_by_user_id = #{actorUserId}
+        where session_id = #{sessionId}
+          and status = 'ACTIVE'
+          and created_by_user_id is null
+          and (
+              select count(distinct attribution.user_id)
+              from (
+                  select r.triggered_by_user_id as user_id
+                  from runs r
+                  where r.session_id = #{sessionId}
+                    and r.triggered_by_user_id is not null
+                  union all
+                  select sm.sender_user_id as user_id
+                  from session_messages sm
+                  where sm.session_id = #{sessionId}
+                    and sm.sender_user_id is not null
+                    and coalesce(sm.sent_by_shared_user, false) = false
+              ) attribution
+          ) = 1
+          and not exists (
+              select 1
+              from (
+                  select r.triggered_by_user_id as user_id
+                  from runs r
+                  where r.session_id = #{sessionId}
+                    and r.triggered_by_user_id is not null
+                  union all
+                  select sm.sender_user_id as user_id
+                  from session_messages sm
+                  where sm.session_id = #{sessionId}
+                    and sm.sender_user_id is not null
+                    and coalesce(sm.sent_by_shared_user, false) = false
+              ) attribution
+              where attribution.user_id &lt;> #{actorUserId}
+          )
+    </update>
+
+    <insert id="insertAudit">
+        insert into session_share_audit_events(
+            audit_event_id, share_id, session_id, workspace_id,
+            actor_user_id, execution_owner_user_id, action, resource_type,
+            resource_id, resource_path_sha256, outcome, error_code, trace_id, occurred_at
+        ) values (
+            #{event.auditEventId}, #{event.shareId.value}, #{event.sessionId.value},
+            #{event.workspaceId.value}, #{event.actorUserId.value},
+            #{event.executionOwnerUserId.value}, #{event.action}, #{event.resourceType},
+            #{event.resourceId}, #{event.resourcePathSha256}, #{event.outcome},
+            #{event.errorCode}, #{event.traceId}, #{event.occurredAt}
+        )
+    </insert>
+
+    <delete id="deleteAuditEventsBefore">
+        delete from session_share_audit_events
+        where occurred_at &lt; #{cutoff}
+    </delete>
+</mapper>

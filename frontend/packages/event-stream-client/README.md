@@ -6,6 +6,7 @@
 
 ## 主要职责
 
+- 分享工作台使用独立客户端订阅 `/session-shares/runtime-state/events` 和 RunEvent SSE，并只对这些请求注入 `X-Test-Agent-Session-Share`；普通账号运行态订阅不携带该头。客户端识别 `session-share.snapshot/updated/invalidated`，在权限版本变化、降权或失效末帧后主动关闭连接。
 - 连接 `/api/internal/agent/{agentId}/runs/{runId}/events`，`agentId` 默认 `opencode`；旧 `/api/runs/{runId}/events` 已作废并返回 `410 API_GONE`。
 - 监听并按原样转发平台 RunEvent wire name，包括 `side_question.started/progress/delta` 和既有 `session.updated`；旁路 delta 与其它 transient 事件一样按真实 `eventId` 去重，最终答案由上层以 `run.succeeded.payload.answer` 校准；标题等业务状态由上层应用按会话范围消费 `platformSessionTitleSynchronized/platformSessionTitle` 平台确认字段处理。
 - 将 `run.snapshot.reset` 作为已知 transient 事件投递给上层；该事件 `seq=0` 且没有 SSE `id`，client 不从 payload `seq/eventId` 推导或更新 `Last-Event-ID`，snapshot 的清空/重放由上层 reducer 负责。

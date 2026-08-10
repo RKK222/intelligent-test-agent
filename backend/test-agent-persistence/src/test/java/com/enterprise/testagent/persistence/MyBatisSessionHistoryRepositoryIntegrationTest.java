@@ -1,6 +1,7 @@
 package com.enterprise.testagent.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
@@ -14,6 +15,7 @@ import com.enterprise.testagent.persistence.mybatis.MyBatisSessionHistoryReposit
 import com.enterprise.testagent.persistence.mybatis.MyBatisUserWorkspaceQueryRepository;
 import com.enterprise.testagent.persistence.mybatis.SessionHistoryMapper;
 import com.enterprise.testagent.persistence.mybatis.UserWorkspaceQueryMapper;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -23,9 +25,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
 /**
  * 验证用户级历史会话查询只读链路使用 MyBatis XML，并能补齐应用/工作区/版本上下文。
@@ -51,6 +55,11 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
                 .target("20260715213000").load().migrate();
         jdbcClient = JdbcClient.create(dataSource);
+        jdbcClient.sql("alter table session_messages add column sent_by_shared_user boolean not null default false")
+                .update();
+        // 历史查询左连接 session_shares 派生分享状态，测试基线早于该表迁移，按分享仓库集成测试同样方式手动建表。
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260809170000__session_shares_create_collaboration_share.sql")).execute(dataSource);
         seedData();
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
@@ -67,20 +76,22 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     }
 
     @Test
-    void userHistoryReturnsCurrentUserSessionsWithWorkspaceContextByUpdatedAtDesc() {
+    void userHistoryReturnsPinnedSessionsFirstAndKeepsWorkspaceContext() {
         PageResponse<SessionHistoryItem> page = repository.findUserHistory(CURRENT_USER, "", new PageRequest(1, 30));
 
         assertThat(page.total()).isEqualTo(4);
         assertThat(page.items())
                 .extracting(item -> item.session().sessionId().value())
                 .containsExactly(
-                        "ses_history_created",
                         "ses_history_run",
+                        "ses_history_created",
                         "ses_history_message",
                         "ses_history_empty_context");
 
-        assertThat(page.items().get(0).session().pinned()).isFalse();
-        assertThat(page.items().get(0).workspaceContext()).satisfies(context -> {
+        assertThat(page.items().get(0).session().pinned()).isTrue();
+        assertThat(page.items().get(0).workspaceContext().versionId()).isEqualTo("ver_history_replica");
+        assertThat(page.items().get(1).session().pinned()).isFalse();
+        assertThat(page.items().get(1).workspaceContext()).satisfies(context -> {
             assertThat(context.appId()).isEqualTo("app_history");
             assertThat(context.appName()).isEqualTo("智能测试平台");
             assertThat(context.applicationWorkspaceId()).isEqualTo("aw_history_main");
@@ -88,14 +99,32 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
             assertThat(context.versionId()).isEqualTo("ver_history_main");
             assertThat(context.version()).isEqualTo("20260708");
         });
-        assertThat(page.items().get(1).session().pinned()).isTrue();
-        assertThat(page.items().get(1).workspaceContext().versionId()).isEqualTo("ver_history_replica");
         assertThat(page.items().get(2).workspaceContext()).satisfies(context -> {
             assertThat(context.appId()).isNull();
             assertThat(context.workspaceName()).isEqualTo("非托管工作区");
             assertThat(context.version()).isNull();
         });
         assertThat(page.items().get(3).workspaceContext()).isNull();
+    }
+
+    @Test
+    void userHistoryExposesDerivedShareStatusFromSessionSharesJoin() {
+        PageResponse<SessionHistoryItem> page = repository.findUserHistory(CURRENT_USER, "", new PageRequest(1, 30));
+
+        assertThat(page.items())
+                .extracting(
+                        item -> item.session().sessionId().value(),
+                        SessionHistoryItem::shareStatus)
+                .containsExactly(
+                        tuple("ses_history_created", "ACTIVE"),
+                        tuple("ses_history_run", "EXPIRED"),
+                        tuple("ses_history_message", null),
+                        tuple("ses_history_empty_context", "REVOKED"));
+
+        // 单会话历史读取复用同一查询投影，分享状态同样可透出。
+        assertThat(repository.findUserSession(CURRENT_USER, new SessionId("ses_history_created")))
+                .isPresent()
+                .hasValueSatisfying(item -> assertThat(item.shareStatus()).isEqualTo("ACTIVE"));
     }
 
     @Test
@@ -118,6 +147,9 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         assertThat(page.items())
                 .extracting(item -> item.session().sessionId().value())
                 .doesNotContain("ses_history_side_question", "ses_history_side_question_active");
+        assertThat(page.items())
+                .extracting(item -> item.session().sessionId().value())
+                .doesNotContain("ses_history_shared_message");
     }
 
     @Test
@@ -179,6 +211,7 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         seedWorkspaces();
         seedApplicationContext();
         seedSessions();
+        seedShares();
     }
 
     private void seedUsers() {
@@ -283,6 +316,8 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                      :now, :updatedOther, false, 'usr_history_other'),
                     ('ses_history_unknown', 'wrk_history_other', '无归因历史', 'ACTIVE', 'trace_history',
                      :now, :updatedOther, false, null),
+                    ('ses_history_shared_message', 'wrk_history_other', '分享代发不进入普通历史', 'ACTIVE', 'trace_history',
+                     :now, :updatedOther, false, null),
                     ('ses_history_archived', 'wrk_history_other', '已归档历史', 'ARCHIVED', 'trace_history',
                      :now, :updatedOther, false, 'usr_history_current'),
                     ('ses_history_side_question', 'wrk_history_other', '宠物旁路问答（内部）', 'ARCHIVED', 'trace_history',
@@ -312,11 +347,42 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 .update();
         jdbcClient.sql("""
                 insert into session_messages(
-                    message_id, session_id, role, content, trace_id, created_at, updated_at, sender_user_id)
+                    message_id, session_id, role, content, trace_id, created_at, updated_at,
+                    sender_user_id, sent_by_shared_user)
                 values('msg_history_current', 'ses_history_message', 'USER', 'message attribution',
-                       'trace_history', :now, :now, 'usr_history_current')
+                       'trace_history', :now, :now, 'usr_history_current', false),
+                      ('msg_history_shared', 'ses_history_shared_message', 'USER', 'delegated attribution',
+                       'trace_history', :now, :now, 'usr_history_current', true)
                 """)
                 .param("now", NOW)
+                .update();
+    }
+
+    /**
+     * 为当前用户的历史会话挂载不同状态的协作分享，验证列表查询派生 share_status 的能力。
+     *
+     * <p>{@code ses_history_message} 不挂分享，用于断言未分享返回 null。
+     * 过期判定基于数据库 current_timestamp，因此 ACTIVE/EXPIRED 的 expires_at 用真实时间前后偏移。
+     */
+    private void seedShares() {
+        Instant now = Instant.now();
+        Instant future = now.plus(Duration.ofHours(1));
+        Instant past = now.minus(Duration.ofHours(1));
+        jdbcClient.sql("""
+                insert into session_shares(
+                    share_id, session_id, workspace_id, owner_user_id, status, expires_at,
+                    lock_version, trace_id, created_at, updated_at, revoked_at)
+                values
+                    ('shr_history_active', 'ses_history_created', 'wrk_history_personal', 'usr_history_current',
+                     'ACTIVE', :future, 0, 'trace_history', :now, :now, null),
+                    ('shr_history_expired', 'ses_history_run', 'wrk_history_replica', 'usr_history_current',
+                     'ACTIVE', :past, 0, 'trace_history', :now, :now, null),
+                    ('shr_history_revoked', 'ses_history_empty_context', 'wrk_history_blank', 'usr_history_current',
+                     'REVOKED', :future, 1, 'trace_history', :now, :now, :now)
+                """)
+                .param("now", now)
+                .param("future", future)
+                .param("past", past)
                 .update();
     }
 

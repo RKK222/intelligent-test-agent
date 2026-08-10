@@ -10,6 +10,7 @@ import com.enterprise.testagent.opencode.runtime.terminal.TerminalProcessFactory
 import com.enterprise.testagent.opencode.runtime.terminal.TerminalProcessSession;
 import com.enterprise.testagent.opencode.runtime.terminal.TerminalServerMessage;
 import com.enterprise.testagent.opencode.runtime.terminal.TerminalTicket;
+import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
@@ -31,6 +32,8 @@ import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 受控 PTY WebSocket handler。所有 upgrade 必须先消费短期 ticket，不能直接信任前端路径。
@@ -110,17 +113,21 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         TerminalActiveSessionRegistry.Lease lease = null;
         TerminalProcessSession terminal;
         try {
+            terminalService.revalidateSharedTicket(ticket);
             lease = activeSessions.reserve(ticket);
             terminal = processFactory.start(ticket);
             auditLogger.upgradeAccepted(ticket);
+            recordSharedSuccess(ticket, "TERMINAL_CONNECTED");
         } catch (PlatformException exception) {
             auditLogger.upgradeRejected(ticket, exception.errorCode().name());
+            recordSharedFailure(ticket, "TERMINAL_CONNECT", exception.errorCode().name());
             if (lease != null) {
                 lease.close();
             }
             return sendErrorAndClose(session, exception.errorCode().name(), exception.getMessage());
         } catch (Exception exception) {
             auditLogger.upgradeRejected(ticket, "PTY_UNAVAILABLE");
+            recordSharedFailure(ticket, "TERMINAL_CONNECT", "PTY_UNAVAILABLE");
             if (lease != null) {
                 lease.close();
             }
@@ -156,7 +163,22 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
                 .map(session::textMessage));
         Mono<Void> main = Mono.when(inbound, outbound);
         Mono<Void> timeout = timeout(ticket, session, activeTerminal, controlMessages, terminalClosed, activity);
-        return Mono.firstWithSignal(main, timeout)
+        Mono<Void> authorization = ticket.sharedSession()
+                ? Flux.interval(Duration.ofSeconds(1))
+                        .publishOn(Schedulers.boundedElastic())
+                        .doOnNext(ignored -> terminalService.revalidateSharedTicket(ticket))
+                        .then()
+                        .onErrorResume(PlatformException.class, failure -> {
+                            recordSharedFailure(ticket, "TERMINAL_AUTHORIZATION", failure.errorCode().name());
+                            controlMessages.tryEmitNext(TerminalServerMessage.error(
+                                    failure.errorCode().name(), failure.getMessage()));
+                            controlMessages.tryEmitComplete();
+                            return closeTerminal(activeTerminal, terminalClosed)
+                                    .then(session.close())
+                                    .then(Mono.error(new TerminalConnectionClosed()));
+                        })
+                : Mono.never();
+        return Mono.firstWithSignal(main, timeout, authorization)
                 .onErrorResume(TerminalConnectionClosed.class, ignored -> Mono.empty())
                 .doFinally(ignored -> {
                     activeLease.close();
@@ -175,7 +197,20 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
             TerminalInputRateLimiter inputRateLimiter,
             Sinks.Many<TerminalServerMessage> controlMessages,
             AtomicBoolean terminalClosed) {
+        try {
+            terminalService.revalidateSharedTicket(ticket);
+        } catch (PlatformException failure) {
+            auditLogger.inputRejected(ticket, failure.errorCode().name(), inputBytes(message));
+            recordSharedFailure(ticket, "TERMINAL_INPUT", failure.errorCode().name());
+            controlMessages.tryEmitNext(TerminalServerMessage.error(
+                    failure.errorCode().name(), failure.getMessage()));
+            controlMessages.tryEmitComplete();
+            return closeTerminal(terminal, terminalClosed)
+                    .then(session.close())
+                    .then(Mono.error(new TerminalConnectionClosed()));
+        }
         if (!supported(message)) {
+            recordSharedFailure(ticket, "TERMINAL_MESSAGE", ErrorCode.VALIDATION_ERROR.name());
             controlMessages.tryEmitNext(TerminalServerMessage.error("VALIDATION_ERROR", "invalid terminal message"));
             controlMessages.tryEmitComplete();
             return closeTerminal(terminal, terminalClosed)
@@ -185,6 +220,7 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         TerminalInputRateLimiter.Decision decision = inputRateLimiter.check(message);
         if (!decision.allowed()) {
             auditLogger.inputRejected(ticket, decision.code(), inputBytes(message));
+            recordSharedFailure(ticket, "TERMINAL_INPUT", decision.code());
             controlMessages.tryEmitNext(TerminalServerMessage.error(decision.code(), decision.message()));
             controlMessages.tryEmitComplete();
             return closeTerminal(terminal, terminalClosed)
@@ -193,14 +229,17 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         }
         if ("input".equals(message.type())) {
             auditLogger.input(ticket, inputBytes(message));
+            recordSharedSuccess(ticket, "TERMINAL_INPUT");
             return terminal.input(message.data());
         }
         if ("resize".equals(message.type())) {
             auditLogger.resize(ticket, message.cols(), message.rows());
+            recordSharedSuccess(ticket, "TERMINAL_RESIZE");
             return terminal.resize(message.cols(), message.rows());
         }
         if ("close".equals(message.type())) {
             auditLogger.close(ticket, message.reason());
+            recordSharedSuccess(ticket, "TERMINAL_CLOSE");
             return closeTerminal(terminal, terminalClosed);
         }
         return Mono.empty();
@@ -246,12 +285,25 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         return Mono.firstWithSignal(idleTimeoutSignal, hardTimeoutSignal)
                 .flatMap(message -> {
                     auditLogger.timeout(ticket, message);
+                    recordSharedFailure(ticket, "TERMINAL_TIMEOUT", "PTY_TIMEOUT");
                     controlMessages.tryEmitNext(TerminalServerMessage.error("PTY_TIMEOUT", message));
                     controlMessages.tryEmitComplete();
                     return closeTerminal(terminal, terminalClosed)
                             .then(session.close())
                             .then(Mono.error(new TerminalConnectionClosed()));
                 });
+    }
+
+    private void recordSharedFailure(TerminalTicket ticket, String action, String errorCode) {
+        if (ticket != null && ticket.sharedSession()) {
+            terminalService.recordSharedOperation(ticket, action, "DENIED", errorCode);
+        }
+    }
+
+    private void recordSharedSuccess(TerminalTicket ticket, String action) {
+        if (ticket != null && ticket.sharedSession()) {
+            terminalService.recordSharedOperation(ticket, action, "SUCCESS", null);
+        }
     }
 
     /**

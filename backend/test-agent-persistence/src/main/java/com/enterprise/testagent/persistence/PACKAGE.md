@@ -23,7 +23,7 @@
 - `mybatis.UserDeletionMapper` / `mybatis/UserDeletionMapper.xml` / `mybatis.MyBatisUserDeletionRepository`：用户安全删除领域端口的生产实现，锁定目标用户、识别会话/工作区/进程/调度等受保护引用，并按外键顺序清理可随账号删除的附属表。
 - `mybatis.UserManagementQueryMapper` / `mybatis/UserManagementQueryMapper.xml` / `mybatis.MyBatisUserManagementQueryRepository`：用户管理组合分页查询及“全部检索结果”有界 ID 解析端口的生产实现，按关键字、有效角色/未分配角色、组织和部门筛选，并可排除当前操作者；不扩展存量 JDBC SQL。
 - `mybatis.SupportAccessMapper` / `mybatis/SupportAccessMapper.xml` / `mybatis.MyBatisSupportAccessRepository`：短期只读排查授权快照、目标切换和逐次资源访问审计的关系型 SQL 与生产实现；审计按超级管理员可见并保留一年。
-- `mybatis.SessionHistoryMapper` / `mybatis/SessionHistoryMapper.xml` / `mybatis.MyBatisSessionHistoryRepository`：用户历史归因查询默认仅 ACTIVE，排查入口显式请求时包含 ARCHIVED，内部 SIDE_QUESTION 始终排除。
+- `mybatis.SessionHistoryMapper` / `mybatis/SessionHistoryMapper.xml` / `mybatis.MyBatisSessionHistoryRepository`：用户历史归因查询默认仅 ACTIVE，排查入口显式请求时包含 ARCHIVED，内部 SIDE_QUESTION 始终排除；用户及工作区历史统一按 `pinned desc, updated_at desc, id desc` 分页。
 - `RedisSupportAccessGrantStore` / `SupportAccessStoreConfig`：登录会话内当前授权和明文令牌的短期 Redis 适配；轮换、撤销使用 Lua 原子收敛，数据库只保存 SHA-256 摘要。
 - `mybatis.UserWorkspaceQueryMapper` / `mybatis/UserWorkspaceQueryMapper.xml` / `mybatis.MyBatisUserWorkspaceQueryRepository`：目标用户个人工作区与目标用户会话引用工作区的只读联合查询；所有新增关系型 SQL 均位于 MyBatis XML。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。
@@ -144,7 +144,7 @@
 - AppSource 测试必须覆盖 slot 乐观冲突、snapshot JSONB/整小时过期/十六进制摘要/状态 CAS、副本首次建档与 generation+owner+lease fencing、步骤作用域唯一/活租约更新/attempt reset/旧步骤回填与终态防回退、普通 operation stranded 恢复与 retry SERVER steps 终态门禁、同 operationId 并发单写和冻结目标、operation 历史守卫、cleanup 第一写的延迟外键和每用户 recent selection；PostgreSQL 专有约束、并发事务及 reset SQL 必须使用真实 PostgreSQL 验证。
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL、MyBatis 注解 SQL，并固化 PostgreSQL 专有 SQL 兼容约束。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
-- Flyway migration 命名测试必须覆盖版本唯一性和已落库历史文件仍可解析；V18 之后新增 migration 只能使用 `VyyyyMMddHHmmss__description.sql`。
+- Flyway migration 命名测试必须覆盖版本唯一性和已落库历史文件仍可解析；V18 之后新增 migration 只能使用 `VyyyyMMddHHmmss__table_name_description.sql`，涉及多张表时按 SQL 实际变更顺序取第一张表。
 - 内部模型代理鉴权列去机构标识时，历史 SQL migration 保持已落库 checksum，`db.migration.V20260716143000__rename_internal_model_auth_token_column` 负责兼容重命名既有数据库列。
 - `RedisRunRuntimeStoreIntegrationTest` 必须连接真实 Redis，覆盖 Lua 并发 seq/runtimeVersion、双 Stream、Hash/ZSET 物化、分页 tail、动态 key TTL、attention/active 索引、scope/dedup/pending 和容量截断；H2 或 mock 不能替代 Redis Streams/Lua 行为验证。
 - `RedisRunTerminalRetryStoreIntegrationTest` 覆盖同 slot Lua 原子写删契约，并在连接真实 Redis 时覆盖安全白名单、严格 due、generation 单调覆盖、旧重排拒绝、compare-delete 和 24 小时 TTL。

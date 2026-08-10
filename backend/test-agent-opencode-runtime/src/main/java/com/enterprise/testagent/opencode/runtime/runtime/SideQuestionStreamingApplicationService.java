@@ -24,6 +24,7 @@ import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunRepository;
 import com.enterprise.testagent.domain.run.RunStatus;
+import com.enterprise.testagent.opencode.runtime.run.RunActorAttribution;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
@@ -180,7 +181,23 @@ public class SideQuestionStreamingApplicationService {
             String messageId,
             String model,
             String traceId) {
-        Objects.requireNonNull(userId, "userId must not be null");
+        return start(
+                RunActorAttribution.direct(userId), agentId, mainSessionId,
+                question, messageId, model, traceId);
+    }
+
+    /** 分享旁路问答继续使用所属人的进程与工作区，但 Run 记录真实发起人。 */
+    public SideQuestionRunStartResult start(
+            RunActorAttribution attribution,
+            String agentId,
+            SessionId mainSessionId,
+            String question,
+            String messageId,
+            String model,
+            String traceId) {
+        Objects.requireNonNull(attribution, "attribution must not be null");
+        UserId userId = Objects.requireNonNull(
+                attribution.executionOwnerUserId(), "executionOwnerUserId must not be null");
         Objects.requireNonNull(mainSessionId, "mainSessionId must not be null");
         requireNewMessageAllowed(userId, agentId, traceId);
         String normalizedQuestion = SideQuestionPolicy.requireQuestion(question);
@@ -216,6 +233,12 @@ public class SideQuestionStreamingApplicationService {
                         traceId)
                 .withSource(ConversationSourceType.SIDE_QUESTION, mainSessionId.value(), userId)
                 .withRuntimeSelection(null, normalizedModel);
+        if (attribution.actualSenderUserId() != null) {
+            pending = pending.withMessageSender(
+                    attribution.actualSenderUserId(),
+                    attribution.actualSenderUnifiedAuthId(),
+                    attribution.sentBySharedUser());
+        }
         pending = runRepository.save(pending);
         routingDecisionRepository.save(new RoutingDecision(
                 pending.runId(),

@@ -28,7 +28,31 @@ public record Run(
         String sourceRefId,
         UserId triggeredByUserId,
         String agentId,
-        String modelId) {
+        String modelId,
+        UserId messageSenderUserId,
+        String messageSenderUnifiedAuthId,
+        boolean messageSentBySharedUser) {
+
+    /** 兼容新增实际消息发送人归因前的完整构造器。 */
+    public Run(
+            RunId runId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            RunStatus status,
+            Instant createdAt,
+            Instant updatedAt,
+            String traceId,
+            TokenUsage tokenUsage,
+            BigDecimal costUsd,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            UserId triggeredByUserId,
+            String agentId,
+            String modelId) {
+        this(runId, sessionId, workspaceId, status, createdAt, updatedAt, traceId,
+                tokenUsage, costUsd, sourceType, sourceRefId, triggeredByUserId, agentId,
+                modelId, triggeredByUserId, null, false);
+    }
 
     /**
      * 构造未指定 traceId 的 Run，兼容历史测试和持久化重建路径，内部使用占位 traceId。
@@ -143,7 +167,10 @@ public record Run(
                 sourceRefId,
                 triggeredByUserId,
                 agentId,
-                modelId);
+                modelId,
+                messageSenderUserId,
+                messageSenderUnifiedAuthId,
+                messageSentBySharedUser);
     }
 
     /**
@@ -202,7 +229,10 @@ public record Run(
                 sourceRefId,
                 triggeredByUserId,
                 agentId,
-                modelId);
+                modelId,
+                messageSenderUserId,
+                messageSenderUnifiedAuthId,
+                messageSentBySharedUser);
     }
 
     /**
@@ -230,7 +260,10 @@ public record Run(
                 sourceRefId,
                 triggeredByUserId,
                 agentId,
-                modelId);
+                modelId,
+                messageSenderUserId,
+                messageSenderUnifiedAuthId,
+                messageSentBySharedUser);
     }
 
     /**
@@ -251,7 +284,10 @@ public record Run(
                 sourceRefId,
                 triggeredByUserId,
                 agentId,
-                modelId);
+                modelId,
+                messageSenderUserId,
+                messageSenderUnifiedAuthId,
+                messageSentBySharedUser);
     }
 
     /**
@@ -272,6 +308,34 @@ public record Run(
                 sourceRefId,
                 triggeredByUserId,
                 agentId,
-                modelId);
+                modelId,
+                messageSenderUserId,
+                messageSenderUnifiedAuthId,
+                messageSentBySharedUser);
+    }
+
+    /** 设置实际消息发送人；OpenCode、工作区和 Git/SSH 仍使用 triggeredByUserId。 */
+    public Run withMessageSender(
+            UserId actualSenderUserId,
+            String actualSenderUnifiedAuthId,
+            boolean sharedUser) {
+        return new Run(
+                runId,
+                sessionId,
+                workspaceId,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                tokenUsage,
+                costUsd,
+                sourceType,
+                sourceRefId,
+                triggeredByUserId,
+                agentId,
+                modelId,
+                actualSenderUserId,
+                actualSenderUnifiedAuthId,
+                sharedUser);
     }
 }

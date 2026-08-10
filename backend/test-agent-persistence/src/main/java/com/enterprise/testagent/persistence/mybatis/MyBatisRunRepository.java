@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -38,10 +39,17 @@ public class MyBatisRunRepository implements RunRepository {
     @Override
     public Run save(Run run) {
         RunRow row = toRow(run);
-        if (mapper.findById(run.runId().value()) == null) {
-            mapper.insert(row);
-        } else {
-            mapper.update(row);
+        try {
+            if (mapper.findById(run.runId().value()) == null) {
+                mapper.insert(row);
+            } else {
+                mapper.update(row);
+            }
+        } catch (DataIntegrityViolationException conflict) {
+            if (!run.status().isTerminal() && isActiveSessionConflict(conflict)) {
+                throw sessionBusy(run);
+            }
+            throw conflict;
         }
         return run;
     }
@@ -51,7 +59,15 @@ public class MyBatisRunRepository implements RunRepository {
      */
     @Override
     public Run saveIfStatus(Run run, RunStatus expectedStatus) {
-        int updated = mapper.updateIfStatus(toRow(run), expectedStatus.name());
+        int updated;
+        try {
+            updated = mapper.updateIfStatus(toRow(run), expectedStatus.name());
+        } catch (DataIntegrityViolationException conflict) {
+            if (!run.status().isTerminal() && isActiveSessionConflict(conflict)) {
+                throw sessionBusy(run);
+            }
+            throw conflict;
+        }
         if (updated == 1) {
             return run;
         }
@@ -134,7 +150,10 @@ public class MyBatisRunRepository implements RunRepository {
                 row.sourceRefId(),
                 userId(row.triggeredByUserId()),
                 row.agentId(),
-                row.modelId());
+                row.modelId(),
+                userId(row.messageSenderUserId()),
+                row.messageSenderUnifiedAuthId(),
+                Boolean.TRUE.equals(row.messageSentBySharedUser()));
     }
 
     private RunRow toRow(Run run) {
@@ -156,7 +175,10 @@ public class MyBatisRunRepository implements RunRepository {
                 run.sourceRefId(),
                 userIdValue(run.triggeredByUserId()),
                 run.agentId(),
-                run.modelId());
+                run.modelId(),
+                userIdValue(run.messageSenderUserId()),
+                run.messageSenderUnifiedAuthId(),
+                run.messageSentBySharedUser());
     }
 
     private static UserId userId(String value) {
@@ -165,5 +187,19 @@ public class MyBatisRunRepository implements RunRepository {
 
     private static String userIdValue(UserId userId) {
         return userId == null ? null : userId.value();
+    }
+
+    private PlatformException sessionBusy(Run run) {
+        return new PlatformException(
+                ErrorCode.SESSION_BUSY,
+                "会话中已有消息正在运行",
+                Map.of("sessionId", run.sessionId().value()));
+    }
+
+    private boolean isActiveSessionConflict(DataIntegrityViolationException conflict) {
+        Throwable cause = conflict.getMostSpecificCause();
+        String message = cause == null ? conflict.getMessage() : cause.getMessage();
+        return message != null && message.toLowerCase(java.util.Locale.ROOT)
+                .contains("uk_runs_active_session");
     }
 }

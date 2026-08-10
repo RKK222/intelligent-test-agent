@@ -775,7 +775,20 @@ function displayValue(value: unknown): string | undefined {
 
 export function historyItems(run: Run | null, sessions: Session[], runtimeStatesBySessionId: Record<string, SessionRuntimeState> = {}) {
   void run;
-  return sessions.map((item) => {
+  // 滚动发布期间旧后端可能仍按更新时间返回；前端也按相同契约分组，确保置顶响应后立即稳定重排。
+  const orderedSessions = sessions
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const pinnedOrder = Number(Boolean(right.item.pinned)) - Number(Boolean(left.item.pinned));
+      if (pinnedOrder !== 0) return pinnedOrder;
+      const leftUpdatedAt = Date.parse(left.item.updatedAt ?? "");
+      const rightUpdatedAt = Date.parse(right.item.updatedAt ?? "");
+      const updatedAtOrder = (Number.isFinite(rightUpdatedAt) ? rightUpdatedAt : 0)
+        - (Number.isFinite(leftUpdatedAt) ? leftUpdatedAt : 0);
+      return updatedAtOrder !== 0 ? updatedAtOrder : left.index - right.index;
+    })
+    .map(({ item }) => item);
+  return orderedSessions.map((item) => {
     const runtimeState = runtimeStatesBySessionId[item.sessionId];
     return {
       id: item.sessionId,
@@ -795,7 +808,10 @@ export function historyItems(run: Run | null, sessions: Session[], runtimeStates
       pendingAttention: Boolean(runtimeState?.attention),
       attentionEventId: runtimeState?.attentionEventId ?? undefined,
       attentionAt: runtimeState?.attentionAt ?? undefined,
-      ...(item.sourceType ? { sourceType: item.sourceType } : {})
+      ...(item.sourceType ? { sourceType: item.sourceType } : {}),
+      ...(item.shareStatus !== undefined ? { shareStatus: item.shareStatus } : {}),
+      ...(item.shareExpired !== undefined ? { shareExpired: item.shareExpired } : {}),
+      ...(item.isShared !== undefined ? { isShared: item.isShared } : {})
     };
   });
 }
@@ -891,6 +907,10 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
         runId: message.runId,
         ...(message.sourceType ? { sourceType: message.sourceType } : {}),
         ...(message.sourceRefId ? { sourceRefId: message.sourceRefId } : {}),
+        ...(message.senderUserId ? { senderUserId: message.senderUserId } : {}),
+        ...(message.senderUsername ? { senderUsername: message.senderUsername } : {}),
+        ...(message.senderUnifiedAuthId ? { senderUnifiedAuthId: message.senderUnifiedAuthId } : {}),
+        ...(message.sentBySharedUser !== undefined ? { sentBySharedUser: message.sentBySharedUser } : {}),
         ...(message.resend ? { resend: message.resend } : {}),
         role: "user",
         text: message.content,

@@ -1,4 +1,9 @@
-import type { RunEvent, RunEventType, SessionRuntimeStateSummary } from "@test-agent/shared-types";
+import type {
+  RunEvent,
+  RunEventType,
+  SessionRuntimeStateSummary,
+  SessionShareRuntimeState
+} from "@test-agent/shared-types";
 
 export type RunEventStreamStatus = "connecting" | "open" | "closed" | "error";
 export type SessionRuntimeStateStreamStatus = "connecting" | "open" | "closed" | "error";
@@ -8,6 +13,10 @@ export type RunEventSubscription = {
 };
 
 export type SessionRuntimeStateSubscription = {
+  close: () => void;
+};
+
+export type SessionShareRuntimeStateSubscription = {
   close: () => void;
 };
 
@@ -23,6 +32,8 @@ export type RunEventSubscribeOptions = {
   token?: string | null;
   /** Nginx 首跳路由提示；只作性能优化，后端仍以 Run 归属为准。 */
   linuxServerId?: string | null;
+  /** 协作分享凭据只放请求头；存在时强制使用 fetch SSE。 */
+  sessionShareId?: string | null;
   fetcher?: typeof fetch;
   onEvent: (event: RunEvent) => void;
   onRawMessage?: (message: RunEventRawMessage) => void;
@@ -60,9 +71,21 @@ export type SessionRuntimeStateSubscribeOptions = {
   onError?: (error: unknown) => void;
 };
 
+export type SessionShareRuntimeStateSubscribeOptions = {
+  shareId: string;
+  baseUrl?: string;
+  token?: string | null;
+  linuxServerId?: string | null;
+  fetcher?: typeof fetch;
+  onEvent: (event: SessionShareRuntimeState, meta: { eventName: string }) => void;
+  onStatus?: (status: SessionRuntimeStateStreamStatus) => void;
+  onError?: (error: unknown) => void;
+};
+
 const SESSION_RUNTIME_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 const RUN_EVENT_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 const LINUX_SERVER_ROUTE_HEADER = "X-Test-Agent-Linux-Server-Id";
+const SESSION_SHARE_HEADER = "X-Test-Agent-Session-Share";
 
 export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
   "run.created",
@@ -104,7 +127,7 @@ export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
 
 export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventSubscription {
   // 测试/嵌入方显式提供 EventSource factory 时保留其传输契约；真实登录页面未提供 factory，必须走带鉴权的 fetch。
-  if (options.token?.trim() && !options.eventSourceFactory) {
+  if ((options.token?.trim() || options.sessionShareId?.trim()) && !options.eventSourceFactory) {
     return subscribeAuthenticatedRunEvents(options);
   }
   const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
@@ -213,7 +236,10 @@ function subscribeAuthenticatedRunEvents(options: RunEventSubscribeOptions): Run
       try {
         const headers = new Headers();
         headers.set("Accept", "text/event-stream");
-        headers.set("Authorization", `Bearer ${options.token!.trim()}`);
+        if (options.token?.trim()) {
+          headers.set("Authorization", `Bearer ${options.token.trim()}`);
+        }
+        setSessionShareHeader(headers, options.sessionShareId);
         setLinuxServerRouteHeader(headers, options.linuxServerId);
         const response = await fetcher(runEventsUrl(baseUrl, agentId, options.runId, resumeEventId), {
           headers,
@@ -389,6 +415,97 @@ export function subscribeSessionRuntimeState(
   };
 }
 
+/**
+ * 订阅单个分享会话的运行与授权状态。收到 invalidated 后不再重连，避免失效链接持续探测。
+ */
+export function subscribeSessionShareRuntimeState(
+  options: SessionShareRuntimeStateSubscribeOptions
+): SessionShareRuntimeStateSubscription {
+  const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const shareId = options.shareId.trim();
+  if (!shareId) {
+    throw new Error("shareId is required");
+  }
+  const fetcher = options.fetcher ?? fetch;
+  let closed = false;
+  let invalidated = false;
+  let controller: AbortController | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resolveRetryWait: (() => void) | null = null;
+
+  void (async () => {
+    let failureCount = 0;
+    while (!closed && !invalidated) {
+      controller = new AbortController();
+      let receivedEvent = false;
+      options.onStatus?.("connecting");
+      try {
+        const headers = new Headers();
+        headers.set("Accept", "text/event-stream");
+        if (options.token?.trim()) {
+          headers.set("Authorization", `Bearer ${options.token.trim()}`);
+        }
+        setLinuxServerRouteHeader(headers, options.linuxServerId);
+        setSessionShareHeader(headers, shareId);
+        const response = await fetcher(sessionShareRuntimeStateEventsUrl(baseUrl), {
+          headers,
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`session share runtime state stream failed: ${response.status}`);
+        }
+        if (!response.body) {
+          throw new Error("session share runtime state stream has no body");
+        }
+        if (closed) return;
+        options.onStatus?.("open");
+        await readSseStream(response.body, (message) => {
+          if (closed || !isSessionShareRuntimeStateEvent(message.eventName)) return;
+          const parsed = parseSessionShareRuntimeState(message.data);
+          if (!parsed) return;
+          receivedEvent = true;
+          options.onEvent(parsed, { eventName: message.eventName });
+          if (message.eventName === "session-share.invalidated" || !parsed.active) {
+            invalidated = true;
+          }
+        });
+        if (closed || invalidated) return;
+        throw new Error("session share runtime state stream closed");
+      } catch (error) {
+        if (closed || invalidated || controller.signal.aborted) return;
+        options.onStatus?.("error");
+        options.onError?.(error);
+        if (receivedEvent) failureCount = 0;
+        const delay = SESSION_RUNTIME_RECONNECT_DELAYS_MS[
+          Math.min(failureCount, SESSION_RUNTIME_RECONNECT_DELAYS_MS.length - 1)
+        ];
+        failureCount += 1;
+        await new Promise<void>((resolve) => {
+          resolveRetryWait = resolve;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            resolveRetryWait = null;
+            resolve();
+          }, delay);
+        });
+      }
+    }
+  })();
+
+  return {
+    close: () => {
+      if (closed) return;
+      closed = true;
+      controller?.abort();
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+      resolveRetryWait?.();
+      resolveRetryWait = null;
+      options.onStatus?.("closed");
+    }
+  };
+}
+
 function runEventsUrl(baseUrl: string, agentId: string, runId: string, lastEventId?: string) {
   const path = `${baseUrl}/api/internal/agent/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/events`;
   const resumeEventId = lastEventId?.trim();
@@ -403,11 +520,22 @@ function sessionRuntimeStateEventsUrl(baseUrl: string) {
   return `${baseUrl}/api/internal/platform/opencode-runtime/sessions/runtime-state/events`;
 }
 
+function sessionShareRuntimeStateEventsUrl(baseUrl: string) {
+  return `${baseUrl}/api/internal/platform/opencode-runtime/session-shares/runtime-state/events`;
+}
+
 /** 空值时不发头，保持首次进程查询和旧前端的 least_conn 行为。 */
 function setLinuxServerRouteHeader(headers: Headers, linuxServerId?: string | null) {
   const normalized = linuxServerId?.trim();
   if (normalized) {
     headers.set(LINUX_SERVER_ROUTE_HEADER, normalized);
+  }
+}
+
+function setSessionShareHeader(headers: Headers, shareId?: string | null) {
+  const normalized = shareId?.trim();
+  if (normalized) {
+    headers.set(SESSION_SHARE_HEADER, normalized);
   }
 }
 
@@ -541,6 +669,44 @@ function parseSessionRuntimeState(data: string): SessionRuntimeStateSummary | nu
         : value.sessions.filter((item) => item?.attention === "PERMISSION").length,
       sessions: value.sessions,
       generatedAt: typeof value.generatedAt === "string" ? value.generatedAt : new Date().toISOString()
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isSessionShareRuntimeStateEvent(eventName: string) {
+  return eventName === "session-share.snapshot"
+    || eventName === "session-share.updated"
+    || eventName === "session-share.invalidated"
+    || eventName === "message";
+}
+
+export function parseSessionShareRuntimeState(data: string): SessionShareRuntimeState | null {
+  try {
+    const value = JSON.parse(data) as Partial<SessionShareRuntimeState>;
+    if (typeof value.active !== "boolean"
+      || typeof value.shareId !== "string"
+      || typeof value.version !== "number"
+      || typeof value.sessionId !== "string"
+      || typeof value.workspaceId !== "string"
+      || typeof value.canChat !== "boolean"
+      || typeof value.expiresAt !== "string") {
+      return null;
+    }
+    return {
+      active: value.active,
+      reason: typeof value.reason === "string" ? value.reason : null,
+      shareId: value.shareId,
+      version: value.version,
+      sessionId: value.sessionId,
+      workspaceId: value.workspaceId,
+      canChat: value.canChat,
+      expiresAt: value.expiresAt,
+      activeRun: value.activeRun ?? null,
+      generatedAt: typeof value.generatedAt === "string"
+        ? value.generatedAt
+        : new Date().toISOString()
     };
   } catch {
     return null;

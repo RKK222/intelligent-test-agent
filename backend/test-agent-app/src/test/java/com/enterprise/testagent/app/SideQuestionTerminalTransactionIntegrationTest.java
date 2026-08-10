@@ -208,6 +208,13 @@ class SideQuestionTerminalTransactionIntegrationTest {
             DriverManagerDataSource dataSource = new DriverManagerDataSource(JDBC_URL, "sa", "");
             Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
                     .target("20260715213000").load().migrate();
+            // 本事务测试固定旧 Flyway 基线，补齐当前 Run 持久化所需的代操作归因和活动会话占用列。
+            JdbcClient migrationJdbc = JdbcClient.create(dataSource);
+            migrationJdbc.sql("alter table runs add column message_sender_user_id varchar(128)").update();
+            migrationJdbc.sql("alter table runs add column message_sender_unified_auth_id varchar(255)").update();
+            migrationJdbc.sql("alter table runs add column message_sent_by_shared_user boolean not null default false")
+                    .update();
+            migrationJdbc.sql("alter table runs add column active_session_id varchar(128)").update();
             return dataSource;
         }
 

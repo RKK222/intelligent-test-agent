@@ -4,6 +4,8 @@ import type { Run } from "@test-agent/shared-types";
 export type TestRunnerPanelProps = {
   run?: Run | null;
   logs: string[];
+  cancelDisabled?: boolean;
+  retryDisabled?: boolean;
 };
 </script>
 
@@ -25,11 +27,11 @@ const running = computed(() => props.run?.status === "RUNNING" || props.run?.sta
       <Badge :tone="run?.status === 'FAILED' ? 'danger' : run?.status === 'SUCCEEDED' ? 'success' : running ? 'info' : 'neutral'">
         {{ run?.status ?? "IDLE" }}
       </Badge>
-      <Button size="sm" variant="secondary" :disabled="!running" @click="emit('cancel')">
+      <Button size="sm" variant="secondary" :disabled="!running || cancelDisabled" @click="emit('cancel')">
         <Square class="h-3.5 w-3.5" />
         取消
       </Button>
-      <Button size="sm" variant="secondary" @click="emit('retry')">
+      <Button size="sm" variant="secondary" :disabled="retryDisabled" @click="emit('retry')">
         <RotateCcw class="h-3.5 w-3.5" />
         重试
       </Button>

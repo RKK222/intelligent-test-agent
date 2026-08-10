@@ -246,6 +246,11 @@ public final class RuntimeIdGenerator {
         return prefixed("sae_");
     }
 
+    /** 生成会话分享审计事件 ID。 */
+    public static String sessionShareAuditEventId() {
+        return prefixed("ssa_");
+    }
+
     /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */

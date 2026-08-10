@@ -3,6 +3,9 @@
 <mapper namespace="com.enterprise.testagent.persistence.mybatis.RunResendMapper">
     <sql id="columns">
         resend_id as "resendId", session_id as "sessionId", owner_user_id as "ownerUserId",
+        requester_user_id as "requesterUserId",
+        requester_unified_auth_id as "requesterUnifiedAuthId",
+        requested_by_shared_user as "requestedBySharedUser",
         source_run_id as "sourceRunId", replacement_run_id as "replacementRunId",
         source_remote_message_id as "sourceRemoteMessageId",
         replacement_remote_message_id as "replacementRemoteMessageId",
@@ -14,7 +17,9 @@
         safe_error_message as "safeErrorMessage", created_at as "createdAt", updated_at as "updatedAt"
     </sql>
     <sql id="values">
-        session_id=#{sessionId}, owner_user_id=#{ownerUserId}, source_run_id=#{sourceRunId},
+        session_id=#{sessionId}, owner_user_id=#{ownerUserId}, requester_user_id=#{requesterUserId},
+        requester_unified_auth_id=#{requesterUnifiedAuthId},
+        requested_by_shared_user=#{requestedBySharedUser}, source_run_id=#{sourceRunId},
         replacement_run_id=#{replacementRunId}, source_remote_message_id=#{sourceRemoteMessageId},
         replacement_remote_message_id=#{replacementRemoteMessageId}, trigger_type=#{triggerType},
         total_attempt=#{totalAttempt}, automatic_attempt=#{automaticAttempt}, automatic_limit=#{automaticLimit},
@@ -26,12 +31,14 @@
 
     <insert id="insert" parameterType="map">
         insert into run_resends(
-            resend_id,session_id,owner_user_id,source_run_id,replacement_run_id,
+            resend_id,session_id,owner_user_id,requester_user_id,requester_unified_auth_id,
+            requested_by_shared_user,source_run_id,replacement_run_id,
             source_remote_message_id,replacement_remote_message_id,trigger_type,total_attempt,
             automatic_attempt,automatic_limit,status,execute_at,target_linux_server_id,
             lease_token,lease_until,client_request_id,trace_id,safe_error_message,created_at,updated_at)
         values(
-            #{resendId},#{sessionId},#{ownerUserId},#{sourceRunId},#{replacementRunId},
+            #{resendId},#{sessionId},#{ownerUserId},#{requesterUserId},#{requesterUnifiedAuthId},
+            #{requestedBySharedUser},#{sourceRunId},#{replacementRunId},
             #{sourceRemoteMessageId},#{replacementRemoteMessageId},#{triggerType},#{totalAttempt},
             #{automaticAttempt},#{automaticLimit},#{status},#{executeAt},#{targetLinuxServerId},
             #{leaseToken},#{leaseUntil},#{clientRequestId},#{traceId},#{safeErrorMessage},#{createdAt},#{updatedAt})
