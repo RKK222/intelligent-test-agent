@@ -1759,7 +1759,7 @@ describe("FigmaChatPanel", () => {
     wrapper.unmount();
   });
 
-  it("renders shared session status badges with blue background for active and gray background for expired shares", async () => {
+  it("renders shared session share icons with blue color for active and gray color for expired shares", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -1789,13 +1789,15 @@ describe("FigmaChatPanel", () => {
 
     const drawer = await openSessionListDrawer(wrapper);
 
-    const activeBadge = drawer.find(".figma-chat-history-card-share-badge--active");
-    expect(activeBadge.exists()).toBe(true);
-    expect(activeBadge.text()).toBe("已分享");
+    const activeIcon = drawer.find(".figma-chat-history-card-share-icon--active");
+    expect(activeIcon.exists()).toBe(true);
+    expect(activeIcon.find("svg").exists()).toBe(true);
+    expect(activeIcon.attributes("aria-label")).toBe("该会话已分享（未过期）");
 
-    const expiredBadge = drawer.find(".figma-chat-history-card-share-badge--expired");
-    expect(expiredBadge.exists()).toBe(true);
-    expect(expiredBadge.text()).toBe("已分享");
+    const expiredIcon = drawer.find(".figma-chat-history-card-share-icon--expired");
+    expect(expiredIcon.exists()).toBe(true);
+    expect(expiredIcon.find("svg").exists()).toBe(true);
+    expect(expiredIcon.attributes("aria-label")).toBe("该会话已分享（已过期）");
 
     wrapper.unmount();
   });

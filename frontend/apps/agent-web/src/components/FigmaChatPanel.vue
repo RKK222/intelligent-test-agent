@@ -6518,14 +6518,16 @@ function onCompositionEnd() {
                     <span
                       v-if="isHistoryItemShared(item)"
                       :class="[
-                        'figma-chat-history-card-share-badge',
+                        'figma-chat-history-card-share-icon',
                         isHistoryItemShareExpired(item)
-                          ? 'figma-chat-history-card-share-badge--expired'
-                          : 'figma-chat-history-card-share-badge--active'
+                          ? 'figma-chat-history-card-share-icon--expired'
+                          : 'figma-chat-history-card-share-icon--active'
                       ]"
+                      role="img"
                       :title="isHistoryItemShareExpired(item) ? '该会话已分享（已过期）' : '该会话已分享（未过期）'"
+                      :aria-label="isHistoryItemShareExpired(item) ? '该会话已分享（已过期）' : '该会话已分享（未过期）'"
                     >
-                      已分享
+                      <Share2 :size="13" />
                     </span>
                     <span
                       :class="[
@@ -6860,27 +6862,18 @@ function onCompositionEnd() {
 .figma-chat-history-source-badge {
   margin-left: auto;
 }
-.figma-chat-history-card-share-badge {
+.figma-chat-history-card-share-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 14px;
-  padding: 1px 6px;
-  border-radius: 4px;
   flex-shrink: 0;
-  white-space: nowrap;
+  line-height: 0;
 }
-.figma-chat-history-card-share-badge--active {
-  background: #e8f0fe;
+.figma-chat-history-card-share-icon--active {
   color: #1a73e8;
-  border: 1px solid #c2e7ff;
 }
-.figma-chat-history-card-share-badge--expired {
-  background: #f1f3f4;
+.figma-chat-history-card-share-icon--expired {
   color: #5f6368;
-  border: 1px solid #dadce0;
 }
 .figma-chat-header-btn {
   display: flex;

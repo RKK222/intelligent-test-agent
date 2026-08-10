@@ -2275,4 +2275,20 @@
   - 分享会话任一参与方发现活动 Run 后，都以平台消息作为用户正文和发送人权威源；空远端 envelope 不再生成气泡，后到/重连事件按稳定 ID 原位合并且不会重复。
   - 不新增 HTTP URL、DTO 字段或 RunEvent wire type；既有 `message.updated` 只补充恢复顺序和已有 additive 字段。每次 legacy SSE 建连增加一次走现有索引的单行查询；分享鉴权、执行所属人、安全日志和旧客户端兼容边界不变。未修改 `.env*`、generated SDK 或 OpenCode 源码，也未新建分支。
 
+### 2026-08-10 - 会话历史已分享指示由“已分享”文字徽标改为彩色分享图标
+
+- Why:
+  - 会话历史列表原以“已分享”文字徽标（未过期蓝底蓝字、已过期灰底灰字）标识已分享会话，视觉较重且与工作台“图标优先 + tooltip”的设计语言不一致；用户要求改为分享图标，仅用图标颜色区分是否过期。
+- What:
+  - `FigmaChatPanel.vue` 历史卡片标题行将原 `.figma-chat-history-card-share-badge` 文字徽标替换为 `.figma-chat-history-card-share-icon`，内部渲染已引入的 lucide `Share2` 图标（`:size="13"`，与同行的夜间执行图标密度一致）。
+  - 颜色区分改为图标前景色：未过期 `.figma-chat-history-card-share-icon--active` 为蓝色 `#1a73e8`，已过期 `.figma-chat-history-card-share-icon--expired` 为灰色 `#5f6368`；去除原背景、边框与内边距。
+  - 图标节点新增 `role="img"` 与 `:aria-label`（与 `:title` 同文案），避免文字移除后屏幕阅读器丢失“已分享（未过期/已过期）”语义。
+  - `isHistoryItemShared` / `isHistoryItemShareExpired` 判定逻辑、`isShared/shareStatus/shareExpired` 数据字段与 `title` 文案不变。
+  - 单测由断言“已分享”文字与蓝底/灰底类，改为断言 `--active` / `--expired` 图标容器存在、内含 `<svg>`、`aria-label` 文案正确；用例标题同步更新为“蓝色图标（未过期）/灰色图标（已过期）”。
+- How:
+  - 定向执行 `vitest run apps/agent-web/tests/FigmaChatPanel.test.ts`，154 passed / 1 skipped，包含更新后的分享图标用例；未触碰其他模块。
+  - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 会话历史列表已分享会话现以分享图标呈现，未过期为蓝色、已过期为灰色，hover/读屏可获“该会话已分享（未过期/已过期）”提示；纯前端视觉与可访问性调整，无 API/DTO/事件/数据库变更，向后兼容。
+
 
