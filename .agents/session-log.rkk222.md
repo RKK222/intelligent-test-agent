@@ -7805,3 +7805,43 @@
 
 - 用户确认本轮 `.4/.114` 后台与 `.2` 前端企业部署结束；本轮发布基线以以上源码与制品 SHA-256 为准，Workflow、LobeHub 未启用。
 - 后续本地合并远程代码产生的新 HEAD 不代表企业已部署版本；排查现场问题时必须先对照本条 hash，再判断是否需要重打包。
+
+## 2026-08-10 - 合并远程 release 并兼容本地 QA Memory 历史
+
+### Why
+
+- 企业部署结束后需要合并当前 release 的远程更新并本地重启；本地保留库已经执行
+  `20260809120000`、`20260809230000`、`20260810090000`，而远程会话分享主 migration
+  `20260809170000/01` 低于当前最高版本，直接启动会触发 Flyway 倒序阻断。
+
+### What
+
+- 拉取并合并远程同名分支 `origin/codex/release-enterprise-20260801` 的
+  `de80b263cc663a79460189e8d908524e274c4613`；合并提交为
+  `ea0f4446e40d089a6c72b45a70655b23d477051a`，没有合并 `origin/main`。
+- 复用唯一 `DatabaseMigrationCompatibilityCustomizer`：精确校验 QA Memory 扩展 history/checksum，加载原始字节兼容资源，
+  过滤两份低版本会话分享主 migration，再以 `20260810110000/01/02` 顺序补齐外部 API、会话分享和代操作归属结构；
+  未新增第二套迁移器，未启用 `outOfOrder`，未执行 `repair`，未修改 `flyway_schema_history`。
+- QA Memory 扩展原始资源 SHA-256 为 `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`、
+  `619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`；会话分享主/前向资源逐字节一致，SHA-256
+  分别为 `b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`、
+  `dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`。三套企业打包/部署脚本均增加这些资源的 JAR SHA 门禁。
+
+### How
+
+- JDK 25 下真实 PostgreSQL Flyway 历史升级测试 18 项、迁移 SHA 锁定测试 9 项、Spring Bean 构造器门禁 1 项全部通过；
+  会话分享 service/controller/MyBatis 定向测试共 20 项通过。
+- 前端全仓 typecheck、lint、production build 通过；Vitest 123 个文件、1900 项通过，1 项按设计跳过。
+- `bash -n` 校验三套企业脚本通过；四份新兼容资源与历史分支/主 migration 的 `cmp` 逐字节校验通过。
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow`
+  完成三服务重启。真实本地库从 `20260810090000` 顺序执行三条前向 migration，到达 `20260810110002`；
+  history 中低版本 `20260809110000`、`20260809170000/01` 均未混入，活动 Run 重复会话预检为 0。
+
+### Result
+
+- Backend readiness、Frontend、OpenCode `/global/config` 均返回 HTTP 200；Manager WebSocket 已连接，端口 4104 的 OpenCode
+  从未纳管状态经公共启动程序拉起后达到 `HEALTHY`。
+- Workflow 与 LobeHub 进程均未启动，前端对应能力开关均为 `false`；数据库既有 `LOBEHUB_ENABLED=true` 未擅自改写，
+  因未使用 `--with-lobehub` 且前端入口关闭，本次本地启动不启用 LobeHub。
+- 当前启动仅有一条 macOS Netty 原生 DNS provider 缺失的 fallback 日志；应用仍使用系统 DNS 且 readiness 为 UP，
+  未发现新的 Spring/Flyway 启动异常。未修改 `.env.test`、generated SDK 或 OpenCode 源码。
