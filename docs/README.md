@@ -48,6 +48,11 @@
 - `docs/testing/xxl-job-integration.md`：XXL-JOB 自动化、双 Java、故障隔离和安全验收清单。
 - `docs/testing/internal-model-observability-local.md`：企业内部模型调用可观测性的本地验证——用 `tools/mock-model-server.py` 在不部署/不连真实企业端点时复现成功、上游错误、超时、连接失败并核对明细/探活/查询 API。
 
+## 产品介绍与宣传素材
+
+- `docs/assets/marketing/mimo-recent-features-announcement.md`：可直接用于群公告或邮件的近期功能简短介绍。
+- `docs/assets/marketing/deep-space/mimo-product-intro-email.md`：面向跨部门使用与共建邀请的完整邮件正文。
+
 ## 部署与数据库
 
 - `docs/deployment/backend.md`：后端 Java 进程容器部署。

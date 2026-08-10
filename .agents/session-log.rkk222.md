@@ -7944,3 +7944,28 @@
   资源验签、部署手册基线和逐层压缩包完整性校验；发布物位于 `deploy/internal/dist/`，首轮旧 hash 不得使用。
 - 本次未部署企业服务器，也未取得企业库完整 `flyway_schema_history` 导出。部署首台后端前仍须导出并比对全部 `version/script/checksum/success`；发现未知 checksum、失败记录或版本分叉时必须停止，不能用 `repair`、`outOfOrder` 或手工改表绕过。
 - 本次只修改稳定部署文档与发布记录，无 API、事件、数据库 SQL、性能或安全实现变更；没有修改 generated SDK 或 OpenCode 源码。
+
+## 2026-08-10 - 补充近期功能用户手册与简短宣传
+
+### Why
+
+- 近期已上线会话协作分享、会话置顶、批量子条目案例设计、撤销重发和测试资料多选跳转，但内置用户手册尚未说明协作分享与多选跳转，用户难以仅凭按钮理解权限和操作边界。
+- 需要同时提供一份可直接用于群公告或邮件的简短功能介绍，且只宣传用户能够实际使用的能力。
+
+### What
+
+- 在内置用户手册的功能总览、对话、工作区和常见问题章节补充协作分享、只读/可对话权限、分享失效、并发互斥、定时任务边界，以及测试设计/测试执行资料多选跳转和子条目编号传递说明。
+- 更新 `frontend/apps/user-manual/README.md` 的章节边界；新增 `docs/assets/marketing/mimo-recent-features-announcement.md`，用通俗语言介绍四组近期功能，并在 `docs/README.md` 增加宣传素材索引。
+- 同步修正 `frontend/README.md` 与 `frontend/apps/agent-web/README.md` 中仍把分享页写成只读 transcript 的过期说明，使工程文档与现有 Session Share 行为一致。
+
+### How
+
+- 对照 2026-08-07 至 2026-08-10 的实际功能提交、工作台按钮文案和分享权限实现核对操作路径；没有把后台修复、管理端工程项或尚未启用能力写入宣传稿。
+- `corepack pnpm --filter @test-agent/user-manual build` 通过；前端全量 Vitest 123 个测试文件通过，1900 项通过、1 项按设计跳过。
+- `tools/verify-ai-docs.sh` 与 `git diff --check` 通过；变更文件未发现冲突标记，宣传稿未命中本次约束的生硬宣传用语。
+- VitePress 手册以 `corepack pnpm --filter @test-agent/user-manual dev` 启动在 `http://127.0.0.1:3001/help/`，新增页面返回 HTTP 200，最终 HTML 包含协作分享、多选跳转和对应 FAQ 标题。
+
+### Result
+
+- 用户现在可以从系统内置手册查到近期功能的入口、步骤、权限和失败处理；宣传稿可直接复制后使用。
+- 本次只修改文档与宣传文字，不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能、安全、兼容性实现、`.env*`、generated SDK 或 OpenCode 只读源码。
