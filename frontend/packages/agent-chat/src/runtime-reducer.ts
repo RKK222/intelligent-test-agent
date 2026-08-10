@@ -41,7 +41,7 @@ export type AgentChatRuntimeState = {
 
 export type AgentChatRuntimeAction =
   | { type: "event"; event: RunEvent }
-  | { type: "run.resend.requested"; resend: ResendMetadata }
+  | { type: "run.resend.requested"; resend: ResendMetadata; editedPrompt?: string }
   | { type: "run.requested"; userMessageId?: string; supersededRunId?: string }
   | { type: "run.adopted"; runId: string; userMessageId?: string }
   | { type: "run.request.failed"; message?: string }
@@ -86,7 +86,7 @@ export function reduceAgentChatRuntime(
     return { ...state, runStatusesByRunId: { ...state.runStatusesByRunId, ...action.statuses } };
   }
   if (action.type === "run.resend.requested") {
-    return adoptResendReplacement(state, action.resend);
+    return adoptResendReplacement(state, action.resend, action.editedPrompt);
   }
   if (action.type === "run.requested") {
     const userMessageId = action.userMessageId ?? state.pendingTodoUserMessageId ?? latestUserMessageId(state.messages);
@@ -526,7 +526,8 @@ function reduceResendStatus(state: AgentChatRuntimeState, event: RunEvent): Agen
 /** 等待阶段把现有用户轮次接管到替代 Run，使状态栏立即进入运行态；远端新 ID 到达前仍保留原气泡。 */
 function adoptResendReplacement(
   state: AgentChatRuntimeState,
-  metadata: ResendMetadata
+  metadata: ResendMetadata,
+  editedPrompt?: string
 ): AgentChatRuntimeState {
   const sourceUser = state.messages.find(
     (message) => message.role === "user" && message.runId === metadata.sourceRunId
@@ -536,7 +537,17 @@ function adoptResendReplacement(
   return {
     ...state,
     messages: state.messages.map((message) => message.role === "user" && message.runId === metadata.sourceRunId
-      ? { ...message, runId: metadata.replacementRunId, resend: metadata }
+      ? {
+          ...message,
+          runId: metadata.replacementRunId,
+          resend: metadata,
+          ...(editedPrompt === undefined
+            ? {}
+            : {
+                text: editedPrompt,
+                parts: replaceFirstPromptText(message.parts, editedPrompt)
+              })
+        }
       : message),
     status: "PENDING",
     runtimeStatus: { type: "busy" },
@@ -1004,9 +1015,15 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
   const incomingText = text(raw.text) ?? text(raw.content);
   let index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
   if (role === "user" && index < 0 && !forceNewMessage) {
-    const pendingUserIndex = findLastUserInCurrentTurn(messages);
+    // 撤回重发会更换文本和远端消息 ID；用替代 Run 边界原位接管，不能再依赖新旧文本相等。
+    const pendingResendIndex = findUnlinkedResendUser(messages, event.runId);
+    const pendingUserIndex = pendingResendIndex >= 0 ? pendingResendIndex : findLastUserInCurrentTurn(messages);
     const pendingUser = pendingUserIndex >= 0 ? messages[pendingUserIndex] : undefined;
-    if (pendingUser?.role === "user" && (incomingText === undefined || pendingUser.text === incomingText)) {
+    if (pendingUser?.role === "user" && (
+      pendingResendIndex >= 0
+      || incomingText === undefined
+      || pendingUser.text === incomingText
+    )) {
       index = pendingUserIndex;
     } else if (incomingText === undefined) {
       // 远端可能在 assistant 后才补发 user 的 message.updated，再补发 text part。
@@ -1141,6 +1158,25 @@ function findUnlinkedUserByText(messages: AgentMessage[], incomingText: string |
   return messages.findIndex(
     (message) => message.role === "user" && !message.messageId && (message.text === incomingText || message.text === displayText)
   );
+}
+
+// 撤回重发后的权威 user 事件可能晚于 assistant 事件到达；替代 Run 是比文本更稳定的归并边界。
+function findUnlinkedResendUser(messages: AgentMessage[], runId: string): number {
+  return messages.findIndex((message) => message.role === "user"
+    && !message.messageId
+    && message.runId === runId
+    && message.resend?.replacementRunId === runId);
+}
+
+/** 用编辑后的提问替换首个 text part，并保留附件、Agent 与引用 part。 */
+function replaceFirstPromptText(parts: PromptPart[] | undefined, editedPrompt: string): PromptPart[] {
+  const nextParts = [...(parts ?? [])];
+  const textIndex = nextParts.findIndex((part) => part.type === "text");
+  if (textIndex < 0) {
+    return [{ type: "text", text: editedPrompt }, ...nextParts];
+  }
+  nextParts[textIndex] = { type: "text", text: editedPrompt };
+  return nextParts;
 }
 
 // slash command 会被 opencode 展开成完整技能提示词；只用展开文本识别归属，用户气泡仍保留原始命令。

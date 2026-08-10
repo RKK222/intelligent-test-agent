@@ -99,7 +99,7 @@ public class RunResendApplicationService {
         return createManualInternal(attribution, null, agentId, sessionId, command, traceId);
     }
 
-    /** 分享会话只允许所属人撤回重发；普通成员即使发送了最后一条消息也不能操作。 */
+    /** 分享会话要求可对话；所属人或源消息的实际发送人可撤回重发。 */
     @Transactional
     public RunResend createManual(
             DelegatedOperationContext context,
@@ -110,12 +110,6 @@ public class RunResendApplicationService {
         Objects.requireNonNull(context, "context must not be null");
         context.requireChat();
         context.requireSession(sessionId);
-        if (!context.ownerAccess()) {
-            throw new PlatformException(
-                    ErrorCode.FORBIDDEN,
-                    "只有会话所属人可以撤回并重新发送上一条消息",
-                    Map.of("sessionId", sessionId.value()));
-        }
         return createManualInternal(
                 RunActorAttribution.from(context), context, agentId, sessionId, command, traceId);
     }
@@ -178,7 +172,7 @@ public class RunResendApplicationService {
         if (delegatedContext != null) {
             delegatedContext.requireWorkspace(sourceRun.workspaceId());
         }
-        requireManualRequester(attribution, sessionId);
+        requireManualRequester(attribution, sourceRun, sessionId);
         AgentRuntime runtime = runtimeRegistry.require(resolvedAgentId);
         AgentReplayableTurn replayable;
         try {
@@ -330,12 +324,14 @@ public class RunResendApplicationService {
 
     private void requireManualRequester(
             RunActorAttribution requester,
+            Run sourceRun,
             SessionId sessionId) {
         UserId actor = requester.actualSenderUserId();
-        if (!actor.equals(requester.executionOwnerUserId())) {
+        UserId sourceSender = sourceRun.messageSenderUserId();
+        if (!actor.equals(requester.executionOwnerUserId()) && !actor.equals(sourceSender)) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
-                    "只有会话所属人可以撤回并重新发送上一条消息",
+                    "只有会话所属人或最后一条消息的实际发送人可以撤回并重新发送",
                     Map.of("sessionId", sessionId.value()));
         }
     }

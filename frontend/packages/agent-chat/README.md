@@ -6,7 +6,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 
 ## 主要职责
 
-- 用户消息可选携带实际发送人、统一认证号、显示名和代操作标记。时间线以当前查看者为基准：自己的用户消息固定使用 `#B2EDDF`，所有其他人的用户消息统一使用 `#9A8EDE`，两者均无边框；只在消息属于他人时显示姓名，自己的消息不显示姓名，assistant 展示保持不变。分享工作台的停止按钮由调用方按所属人或实际发送人传入权限结果，撤回重发按钮则只对会话所属人传入；本包不自行推断授权。
+- 用户消息可选携带实际发送人、统一认证号、显示名和代操作标记。时间线以当前查看者为基准：自己的用户消息固定使用 `#B2EDDF`，所有其他人的用户消息统一使用 `#9A8EDE`，两者均无边框；只在消息属于他人时显示姓名，自己的消息不显示姓名，assistant 展示保持不变。分享工作台的停止按钮由调用方按所属人或实际发送人传入权限结果；撤回重发按钮由调用方按“会话所属人，或持有 `canChat` 的源消息实际发送人”传入，本包不自行推断授权。
 - 展示用户/助手消息。`AssistantThread` 和 agent-web 的 `FigmaChatPanel` 主路径均复用 `OpencodeTimeline`，不再以旧气泡/结构化卡片作为主要正文渲染方式；用户气泡展示层优先读取 user message 的原生 `file` parts 展示本轮关联的工作区文件/选区 chip，只显示用户原始提问。乐观 user message 进入 Timeline 前会把 file part 收敛为路径、文件名和选区行号等展示元数据，不携带 `content`、内联 URL 或 `source.text`；模型请求仍使用完整 parts。历史旧消息若仍是前端序列化的工作区 `<context>` 文本，会降级解析为同样的 chip 且隐藏正文上下文块；用户与助手侧均不展示头像或名称/时间行，以极简消息来源布局匹配主时间线，用户问题仍保持右对齐，助手过程与回答使用完整可用宽度。
 - `UserMessageRow` 在 `AgentMessage.sourceType=SCHEDULED_TASK` 时展示“夜间定时执行”来源标签和北京时间的实际启动时间；旧消息缺少来源字段时保持原样。多人运行态接管可能先收到不含正文的 OpenCode user envelope，组件保留该消息供 reducer 后续按稳定 ID 归并，但在平台权威正文或工作区上下文到达前不渲染空气泡。
 - 右侧 Agent 面板的主路径始终展示当前会话时间线，不再提供 Chat/History 顶部 tab；会话选择和待执行任务由 `agent-web` 的独立非模态会话列表浮层承载，本包继续只负责紧凑消息流和受控 composer/runtime 展示。
@@ -59,8 +59,8 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 
 ## 撤销重发投影
 
-用户消息行仅在调用方确认当前查看者是会话所属人、它是根会话最后一条、Run 已终态且具有远端边界时展示“撤销重发”。本包只发出入口动作；app 层先把上一条文本装入受控 composer 供所属人修改或取消，点击发送后才请求 resends API。定时来源读取可选 `resend` 元数据，
+用户消息行仅在调用方确认当前查看者是会话所属人或源消息实际发送人、它是根会话最后一条、Run 已终态且具有远端边界时展示“撤销重发”。本包只发出入口动作；app 层先把上一条文本装入受控 composer 供操作者修改或取消，点击发送后才请求 resends API。定时来源读取可选 `resend` 元数据，
 展示“夜间定时执行 · 自动重发 n/3”或“手动重发”，WAITING 显示本地倒计时并隐藏按钮。重发 API 返回后，`run.resend.requested`
-立即把源用户轮次的展示所有权切到预留替代 Run，使工作状态 Dock 按 `PENDING` 展示运行中，并在派生时间线中立即隐藏源 Run 的回答、工具、Todo 和 Diff；源数据暂留在 reducer，回退前失败时可恢复。
-`run.resend.started` reducer 再一次性移除源 Run 的回答、工具卡、Todo、Diff、失败卡、流式 overlay 和 child scope，但保留该用户轮次作为替代 Run 的页面锚点，并清除旧消息标识，让后到的真实 user message 原位替换且保留定时来源与重发元数据；
+立即用 `editedPrompt` 更新原用户气泡，并把源用户轮次的展示所有权切到预留替代 Run，使工作状态 Dock 按 `PENDING` 展示运行中，在派生时间线中立即隐藏源 Run 的回答、工具、Todo 和 Diff；源数据暂留在 reducer，回退前失败时可恢复。
+`run.resend.started` reducer 再一次性移除源 Run 的回答、工具卡、Todo、Diff、失败卡、流式 overlay 和 child scope，但保留该用户轮次作为替代 Run 的页面锚点，并清除旧消息标识；后到的真实 user message 按替代 Run 原位替换，即使 assistant 先到或新旧文本不同也不追加重复气泡，并保留附件展示、定时来源与重发元数据。assistant text part 的实时“生成中”还必须同时满足它属于当前 busy 轮次，历史/终态的残留 `running` 只按最终内容渲染；
 `session.status.retry` 只作为 OpenCode 原生供应商重试状态展示，不再触发前端自动取消或重复 startRun。

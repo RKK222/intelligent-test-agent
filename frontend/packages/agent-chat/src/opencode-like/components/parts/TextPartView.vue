@@ -3,6 +3,7 @@ import type { MessagePart } from "@test-agent/shared-types";
 
 export type TextPartViewProps = {
   part: Extract<MessagePart, { type: "text" }>;
+  busy?: boolean;
   streamingTextByPartId?: Record<string, string>;
 };
 </script>
@@ -17,7 +18,9 @@ const props = defineProps<TextPartViewProps>();
 const source = computed(() => readPartText(props.part, props.streamingTextByPartId));
 const hasSource = computed(() => source.value.trim().length > 0);
 const normalizedStatus = computed(() => (props.part.status ?? "completed").toLowerCase());
-const isWorkingOutput = computed(() => normalizedStatus.value === "running" || normalizedStatus.value === "pending");
+// part.status 来自历史快照时可能残留 running；只有当前轮仍 busy 才展示实时生成态。
+const isWorkingOutput = computed(() => props.busy === true
+  && (normalizedStatus.value === "running" || normalizedStatus.value === "pending"));
 // running 文本直接展示源内容，避免高频 delta 反复挂载 Markdown 渲染器。
 const usesLivePreview = computed(() => hasSource.value && isWorkingOutput.value);
 </script>

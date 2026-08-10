@@ -252,7 +252,8 @@ function appendAssistantGroupRow(
       appendSingleAssistantPartRow(rows, accumulator, {
         userMessageId,
         messageId: assistantMessageId,
-        partId: group.partId
+        partId: group.partId,
+        busy
       });
       return;
     }
@@ -293,7 +294,8 @@ function appendAssistantGroupRow(
     appendSingleAssistantPartRow(rows, accumulator, {
       userMessageId,
       messageId: assistantMessageId,
-      partId: group.partId
+      partId: group.partId,
+      busy
     });
     accumulator.toolPartIndices[toolKey] = rows.length - 1;
     return;
@@ -302,7 +304,8 @@ function appendAssistantGroupRow(
   appendSingleAssistantPartRow(rows, accumulator, {
     userMessageId,
     messageId: assistantMessageId,
-    partId: group.partId
+    partId: group.partId,
+    busy
   });
 }
 
@@ -354,6 +357,7 @@ function appendSingleAssistantPartRow(
     userMessageId: string;
     messageId: string;
     partId: string;
+    busy: boolean;
   }
 ): void {
   const showAssistantHeader = !accumulator.hasAssistantHeader;
@@ -363,6 +367,7 @@ function appendSingleAssistantPartRow(
     userMessageId: params.userMessageId,
     messageId: params.messageId,
     partId: params.partId,
+    busy: params.busy,
     previousAssistantPart: accumulator.partIndex > 0 || accumulator.hasAssistantHeader,
     showAssistantHeader
   });

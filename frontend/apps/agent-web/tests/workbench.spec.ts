@@ -296,8 +296,10 @@ test("session share busy run blocks every participant and only sender can stop",
   await expect(page.getByRole("button", { name: "发送" })).toHaveCount(0);
 });
 
-test("session share non-owner cannot undo even when they sent the last message", async ({ page }) => {
+test("session share sender can edit and resend their last message", async ({ page }) => {
+  const runResendRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
+    runResendRequests,
     authUser: { userId: "usr_writer", username: "协作者", unifiedAuthId: "ucid_writer", roles: ["USER"] },
     workspaces: [{ ...workspace(), workspaceId: "wrk_shared_resend", name: "共享撤回工作区" }],
     sessions: [{
@@ -344,12 +346,27 @@ test("session share non-owner cannot undo even when they sent the last message",
       createdAt: "2026-08-09T01:00:00Z",
       updatedAt: "2026-08-09T01:01:00Z",
       messageSenderUserId: "usr_writer"
-    }
+    },
+    runEventsByRunId: { run_resend_replacement: [] }
   });
 
   await page.goto("/s/shr_resend_member", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("协作者发送的最后一条消息")).toBeVisible();
-  await expect(page.getByRole("button", { name: "撤销重发最后一条消息" })).toHaveCount(0);
+  await page.getByRole("button", { name: "撤销重发最后一条消息" }).click();
+  const resendComposer = page.getByPlaceholder("修改上一条消息后发送");
+  await expect(resendComposer).toHaveValue("协作者发送的最后一条消息");
+  await resendComposer.fill("协作者修改后的新消息");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runResendRequests.length).toBe(1);
+  expect(runResendRequests[0]).toMatchObject({
+    expectedRemoteMessageId: "msg_remote_shared_member_source",
+    expectedRunId: "run_history",
+    editedPrompt: "协作者修改后的新消息"
+  });
+  await expect(page.getByText("协作者修改后的新消息")).toBeVisible();
+  await expect(page.getByText("协作者发送的最后一条消息")).toHaveCount(0);
+  await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
 });
 
 test("session share reconciles a disappeared active run without requiring refresh", async ({ page }) => {
@@ -395,11 +412,41 @@ test("session share reconciles a disappeared active run without requiring refres
     runEventsByRunId: { run_shared_terminal_sync: [] },
     runsByRunId,
     runDetailRequests,
-    sessionMessagesBySessionId: { ses_shared_terminal_sync: [] }
+    sessionMessagesBySessionId: {
+      ses_shared_terminal_sync: [
+        {
+          messageId: "msg_shared_terminal_user",
+          remoteMessageId: "msg_remote_shared_terminal_user",
+          sessionId: "ses_shared_terminal_sync",
+          role: "USER",
+          content: "开始共享任务",
+          senderUserId: "usr_owner",
+          createdAt: "2026-08-10T01:00:00Z",
+          runId: "run_shared_terminal_sync"
+        },
+        {
+          messageId: "msg_shared_terminal_answer",
+          remoteMessageId: "msg_remote_shared_terminal_answer",
+          sessionId: "ses_shared_terminal_sync",
+          role: "ASSISTANT",
+          content: "共享回答已经输出",
+          createdAt: "2026-08-10T01:00:01Z",
+          runId: "run_shared_terminal_sync",
+          parts: [{
+            partId: "part_shared_terminal_answer",
+            type: "text",
+            text: "共享回答已经输出",
+            status: "running"
+          }]
+        }
+      ]
+    }
   });
 
   await page.goto("/s/shr_terminal_sync", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("button", { name: "停止执行" })).toBeVisible();
+  await expect(page.getByText("共享回答已经输出")).toBeVisible();
+  await expect(page.getByText("生成中", { exact: true })).toBeVisible();
 
   runsByRunId.run_shared_terminal_sync = {
     ...activeRun,
@@ -417,6 +464,8 @@ test("session share reconciles a disappeared active run without requiring refres
 
   await expect.poll(() => runDetailRequests).toContain("run_shared_terminal_sync");
   await expect(page.getByRole("button", { name: "停止执行" })).toHaveCount(0);
+  await expect(page.getByText("生成中", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("共享回答已经输出")).toBeVisible();
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("继续共享任务");
   await expect(page.getByRole("button", { name: "发送" })).toBeEnabled({ timeout: 10_000 });
 });

@@ -8023,3 +8023,31 @@
 
 - 用户执行 `/compact` 后会持续看到压缩动效；压缩和消息刷新完成时状态条明确切换为完成态，无需通过刷新或猜测判断进度。
 - 未修改 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码；仅增加前端局部状态、交互门禁、样式、测试和稳定文档，旧客户端与后端兼容性不变。
+
+## 2026-08-10 - 修复分享发送人撤回编辑与历史回答生成态
+
+### Why
+
+- 用户进一步明确分享会话中的消息实际发送人也应能撤回、修改并重发自己的最后一条消息；上一轮将人工撤回收紧为仅会话所属人的产品判断已不符合最新需求。
+- resends API 返回替代 Run 后，reducer 只迁移 Run 归属而保留旧文本；权威 user 事件若携带编辑后的新文本，既有按文本相等归并又可能失败，导致旧文本继续显示或追加重复气泡。
+- OpenCode/历史快照中的 assistant text part 可能在 Run 终态后仍保留 `running`。此前组件只看 part 状态，旧回答在新一轮已可发送甚至已完成后仍持续显示“生成中”。
+
+### What
+
+- 后端人工撤回授权调整为“会话所属人，或源 Run 的实际消息发送人”；分享发送人还必须通过既有 `canChat` 校验，其它成员继续 `FORBIDDEN`，不能改写他人消息。HTTP 路径、请求/响应 DTO 和 RunEvent wire name 均未改变。
+- 前端分享入口复用权威 `Run.messageSenderUserId` 与当前 actor 判定。resends 返回后把 `editedPrompt` 交给既有 reducer，立即替换原用户气泡和首个 text part、保留附件等其它 part；`run.resend.started` 后的权威 user 事件按 replacement Run 原位接管，即使 assistant 先到或新旧文本不同也不重复。
+- assistant text 时间线行显式携带“是否为当前 busy 轮次”；只有该值为真且 part 自身为 `running/pending` 时展示轻量“生成中”，历史轮次和终态 Run 一律按最终 Markdown 渲染。
+- 同步 API、RunEvent、安全、OpenCode 规范、backend/frontend/agent-chat README/PACKAGE、测试场景和内置用户手册。
+
+### How
+
+- JDK 25 下 `RunResendApplicationServiceTest` 6 项通过，覆盖所属人、分享源消息发送人和无关成员；后端 `test-agent-api,test-agent-opencode-runtime -am -DskipTests package` 的 18 模块 reactor 构建成功。
+- agent-chat 全量 10 个测试文件、178 项通过；其中 reducer 覆盖编辑文本即时替换、附件保留、assistant 先到后的 replacement Run 归并，时间线覆盖历史轮次和终态残留 `running`。agent-chat 与 agent-web typecheck 均通过。
+- Chromium Playwright 5 项通过，覆盖分享发送人编辑重发、分享 active Run 消失后的终态对账和“生成中”收口、即时/历史/manual resend；agent-web production build（含 VitePress 用户手册）通过，仅保留既有大 chunk 提示。
+- `tools/verify-ai-docs.sh`、`git diff --check` 和本次改动文件的冲突标记扫描通过。提交前回顾全部 `.agents/session-log*.md`，确认未覆盖其他开发者成果或残留合并标记。
+
+### Result
+
+- 持有对话权限的分享成员现在可以撤回并修改自己发送的最后一条消息；会话所属人仍可操作，其它成员不能修改别人的消息。发送后页面立即显示新文本，后续权威事件不再恢复旧文本或产生双气泡。
+- 分享会话无需刷新即可在旧轮次或终态时移除回答卡中的“生成中”；新 Run 的工作状态仍按真实 busy 状态正常展示。
+- 本次变更涉及既有 HTTP 接口的鉴权行为放宽和前端状态投影；不新增 URL、DTO/事件字段、SQL、Flyway migration、数据库结构、轮询或持久缓存，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。修改文本仍只进入既有有限 TTL Redis 精确重放输入，不写控制表、事件、审计或日志。

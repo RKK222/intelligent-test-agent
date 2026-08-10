@@ -7,7 +7,7 @@
 ## 主要职责
 
 - 平台会话协作使用独立 `DelegatedOperationContext` 保留真实认证 actor、统一认证号、唯一分享 ID/版本和精确 Session/Workspace 范围，同时把 `executionOwnerUserId` 显式传给既有运行链路。OpenCode 请求、用户进程、工作区与 Git/SSH 身份始终属于会话所属人；消息、Run、夜间任务和重发分别保存实际发送人/创建人/发起人及代操作标记。分享权限永远不超过所属人的当前权限，分享过期、取消、移除或降权会关闭相关 SSE、文件 WebSocket 和终端，但不会自动取消已启动 Run。
-- 普通历史和普通 runtime-state 不把 `sent_by_shared_user=true` 当作被分享人的访问归因；分享会话只从独立列表进入。Run 启动同时竞争 Redis 原子会话占用与数据库 `active_session_id` 唯一约束，取得双重准入前不发布可见事件、不调用 OpenCode；终态释放占用，并发失败统一为 `SESSION_BUSY`。停止只允许所属人或该 Run 的实际消息发送人；最后一条消息的撤回并重新发送只允许会话所属人，普通分享成员即使是源消息发送人且仍有 `canChat` 也拒绝。
+- 普通历史和普通 runtime-state 不把 `sent_by_shared_user=true` 当作被分享人的访问归因；分享会话只从独立列表进入。Run 启动同时竞争 Redis 原子会话占用与数据库 `active_session_id` 唯一约束，取得双重准入前不发布可见事件、不调用 OpenCode；终态释放占用，并发失败统一为 `SESSION_BUSY`。停止只允许所属人或该 Run 的实际消息发送人；最后一条消息的撤回并重新发送只允许会话所属人或源消息实际发送人，分享发送人还必须保持 `canChat=true`。
 - 被分享人创建夜间任务时固化分享授权快照，并继续以会话所属人的进程和工作区执行；后续分享过期、取消、移除或降权不影响已排期任务。所属人和实际创建人可管理任务，降为只读的创建人仍可取消但不能改期；替代 Run 和消息继续保留源消息发送人归因。
 - Workspace 级 OpenCode 运行态代理（包括 Agent/Command 目录）在解析用户进程前复用 `ConversationWorkspaceAccessAuthorizer` 校验实时应用成员关系和个人工作区 owner；旧 workspaceId 不能让非成员读取或选择应用 `.opencode` 能力。无用户主体的 static-token/本地兼容链路仍保留固定节点行为。
 - Agent 配置 rollout 以 `config_scope=PUBLIC/APPLICATION/PERSONAL_APPLICATION` 区分流程，而不是新增 OpenCode 配置覆盖层：公共范围单独互斥，应用范围按版本 ID 互斥，不同应用发布不会再占用公共发布锁。公共范围由公共配置服务把全服务器共享运行副本同步到同一固定 commit，并原生 merge 本机全部公共个人 worktree；共享副本恢复确认随 rollout 持久化，个人冲突进入独立 `AWAITING_USER` 补偿且不占用主锁。应用范围由托管工作区服务先把指定 feature 提交投影到个人 worktree，再只登记同步成功用户的进程。脏工作区或合并冲突持久化为独立补偿任务，主 rollout 完成后仍会按 worktree 租约继续尝试；收敛后仅为该用户登记 dispose 目标。`PERSONAL_APPLICATION` 只用于个人 `git-pull` 已完成 Git merge 后的当前用户运行态重载：只登记发起用户所在服务器和本人进程，不同步 Git、不枚举服务器成员、不广播。三者复用同一进程身份核验、Session 空闲检查、用户消息闸门和 OpenCode 原生 `/global/dispose`。
@@ -159,7 +159,7 @@ runtime 代理入口有认证用户时必须通过 `AgentRuntimeTargetResolver` 
 
 ## 最后一条消息撤销重发
 
-`RunResendApplicationService` 统一承接手动与定时自动入口：人工入口只允许会话所属人，普通分享成员即使发送了源消息也拒绝；服务先验证 owner、终态、最后远端 user message 和会话锁，再预留
+`RunResendApplicationService` 统一承接手动与定时自动入口：人工入口只允许会话所属人或源消息实际发送人，分享发送人还必须持有 `canChat`，其它成员不得改写他人消息；服务先验证执行所属人、实际 actor、终态、最后远端 user message 和会话锁，再预留
 `PENDING` 替代 Run，并把精确输入写入有限 TTL Redis。人工请求可携带可选 `editedPrompt`，服务端只替换可信远端用户轮次中的文本并保留原附件、Agent、模型、variant 和其它 part；修改文本不进入控制表、事件、审计或日志。自动入口仅观察 root `session.error` 派生失败，定时来源最多自动 3 次，
 等待 1/2/4 分钟；人工重发继承整条链的自动次数，不重置额度。`RunResendExecutionService` 按
 `WAITING → REVERTING → REVERTED → DISPATCHED` 恢复，稳定消息探测为未知时保持锁，明确未投递且 unrevert 成功才失败解锁。

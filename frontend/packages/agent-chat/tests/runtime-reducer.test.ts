@@ -165,7 +165,18 @@ describe("agent-chat runtime reducer", () => {
 
   it("atomically removes the superseded run projection when native resend starts", () => {
     const initial = createInitialAgentChatRuntimeState([
-      { id: "user-old", role: "user", text: "retry me", createdAt: "2026-08-07T00:00:00Z", runId: "run_old", sourceType: "SCHEDULED_TASK" },
+      {
+        id: "user-old",
+        role: "user",
+        text: "原问题",
+        parts: [
+          { type: "text", text: "原问题" },
+          { type: "file", path: "docs/login.md", name: "login.md" }
+        ],
+        createdAt: "2026-08-07T00:00:00Z",
+        runId: "run_old",
+        sourceType: "SCHEDULED_TASK"
+      },
       { id: "assistant-old", role: "assistant", text: "old answer", createdAt: "2026-08-07T00:00:01Z", runId: "run_old" },
       { id: "card-old", role: "card", cardType: "event", title: "failed", payload: { runId: "run_old" }, createdAt: "2026-08-07T00:00:02Z" }
     ]);
@@ -179,21 +190,30 @@ describe("agent-chat runtime reducer", () => {
       todoUserMessageIdByRunId: { run_old: "user-old", run_new: "user-old" }
     } as unknown as AgentChatRuntimeState;
 
-    const scheduled = reduceAgentChatRuntime(dirty, { type: "event", event: runEvent(
-      "run.resend.scheduled",
-      "run_new",
-      {
-        resendId: "resend_2",
-        sourceRunId: "run_old",
-        replacementRunId: "run_new",
-        trigger: "MANUAL",
-        totalAttempt: 1,
-        automaticAttempt: 0,
-        automaticLimit: 3,
-        status: "WAITING",
-        executeAt: "2026-08-07T00:01:00Z"
-      }
-    ) });
+    const resend = {
+      resendId: "resend_2",
+      sourceRunId: "run_old",
+      replacementRunId: "run_new",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "WAITING",
+      executeAt: "2026-08-07T00:01:00Z"
+    } as const;
+    const scheduled = reduceAgentChatRuntime(dirty, {
+      type: "run.resend.requested",
+      resend,
+      editedPrompt: "修改后的新问题"
+    });
+    expect(scheduled.messages[0]).toMatchObject({
+      role: "user",
+      text: "修改后的新问题",
+      parts: [
+        { type: "text", text: "修改后的新问题" },
+        { type: "file", path: "docs/login.md", name: "login.md" }
+      ]
+    });
     const next = reduceAgentChatRuntime(scheduled, { type: "event", event: runEvent(
       "run.resend.started",
       "run_new",
@@ -219,14 +239,21 @@ describe("agent-chat runtime reducer", () => {
     expect(next.pendingTodoUserMessageId).toBe("user-old");
     expect(next.todoUserMessageIdByRunId).toEqual({ run_new: "user-old" });
 
-    const rebound = reduceAgentChatRuntime(next, { type: "event", event: runEvent(
+    // assistant 可能先于替代 user 消息到达；随后仍应按 replacementRunId 原位接管旧气泡。
+    const assistantFirst = reduceAgentChatRuntime(next, { type: "event", event: runEvent(
       "message.updated",
       "run_new",
-      { message: { id: "msg_remote_new", role: "user", content: "retry me" } }
+      { message: { id: "msg_remote_answer", role: "assistant" } }
     ) });
-    expect(rebound.messages).toEqual([
+    const rebound = reduceAgentChatRuntime(assistantFirst, { type: "event", event: runEvent(
+      "message.updated",
+      "run_new",
+      { message: { id: "msg_remote_new", role: "user", content: "修改后的新问题" } }
+    ) });
+    expect(rebound.messages.filter((message) => message.role === "user")).toEqual([
       expect.objectContaining({
         id: "msg_remote_new",
+        text: "修改后的新问题",
         runId: "run_new",
         sourceType: "SCHEDULED_TASK",
         resend: expect.objectContaining({ resendId: "resend_2", trigger: "MANUAL" })

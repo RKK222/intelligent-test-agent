@@ -3736,7 +3736,12 @@ const resendableMessageId = computed(() => {
     }
   );
   if (!sourceMessage || sourceMessage.runId !== sourceRun.runId || !sourceMessage.remoteMessageId) return undefined;
-  if (shareMode.value && shareAccess.value?.ownerAccess !== true) return undefined;
+  if (shareMode.value) {
+    const access = shareAccess.value;
+    const actorIsSourceSender = Boolean(access?.actorUserId)
+      && sourceRun.messageSenderUserId === access?.actorUserId;
+    if (access?.canChat !== true || (access.ownerAccess !== true && !actorIsSourceSender)) return undefined;
+  }
   if (["WAITING", "REVERTING", "REVERTED"].includes(sourceMessage.resend?.status ?? "")) return undefined;
   return sourceMessage.remoteMessageId;
 });
@@ -4017,7 +4022,7 @@ async function retryLastRun(editedPrompt: string) {
       });
     }
     run.value = response.replacementRun;
-    dispatchChat({ type: "run.resend.requested", resend: response.resend });
+    dispatchChat({ type: "run.resend.requested", resend: response.resend, editedPrompt });
     // 用户轮次已接管到替代 Run，远端新消息 ID 会在 started 后原位替换旧边界。
     markConversationRunAdopted(response.replacementRun.runId, draft.sourceMessageId);
     rememberRunSession(response.replacementRun);
@@ -8628,7 +8633,7 @@ function handleRetryRun() {
       kind: "info",
       title: "无权撤回重发",
       description: shareMode.value
-        ? "共享对话仅允许会话所属人操作。"
+        ? "共享对话仅允许会话所属人或最后一条消息的实际发送人操作。"
         : "仅支持会话最后一条已结束的用户消息。"
     };
     return;

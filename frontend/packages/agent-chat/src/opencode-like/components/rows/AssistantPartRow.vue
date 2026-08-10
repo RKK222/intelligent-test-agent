@@ -3,6 +3,7 @@ import type { MessagePart, PermissionRequest, SubagentSession } from "@test-agen
 
 export type AssistantPartRowProps = {
   part: MessagePart;
+  busy?: boolean;
   streamingTextByPartId?: Record<string, string>;
   previousAssistantPart?: boolean;
   subagentsBySessionId?: Record<string, SubagentSession>;
@@ -33,6 +34,7 @@ const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
     <TextPartView
       v-if="part.type === 'text'"
       :part="part"
+      :busy="busy"
       :streaming-text-by-part-id="streamingTextByPartId"
     />
     <ReasoningPartView

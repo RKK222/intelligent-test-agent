@@ -365,7 +365,7 @@ retry 字段：
 - `session.status.retry` 在右侧时间线展示原因和“重试中 N 秒后 - 第 X 次 / 共 3 次”。
 - 等待 retry 时前端运行态仍视为运行中，不出队 busy follow-up，不关闭 RunEvent SSE，也不显示失败卡。
 - 前端可按现有 60 秒口径展示 OpenCode 的 retry 等待状态，但倒计时只用于展示；不得在到期后取消 Run、重新 `startRun` 或本地伪造终态。后续消息、非 retry 状态或 `run.*` 终态到达后按真实事件收敛。
-- 失败卡片与最后一条用户消息的“撤销重发”只为会话所属人提供；点击后先把上一条文本装入输入框，所属人修改并发送时才调用平台 resends API。请求可携带 `editedPrompt`，但前端不得从本地草稿或历史 assistant 内容重建附件或其它结构化 part；后端重新验证远端最后用户边界，从原生用户轮次取得可信可重放输入，再仅替换文本。
+- 失败卡片与最后一条用户消息的“撤销重发”只为会话所属人或该消息的实际发送人提供；分享发送人还必须保持 `canChat=true`。点击后先把上一条文本装入输入框，操作者修改并发送时才调用平台 resends API。请求可携带 `editedPrompt`，但前端不得从本地草稿或历史 assistant 内容重建附件或其它结构化 part；后端重新验证远端最后用户边界，从原生用户轮次取得可信可重放输入，再仅替换文本。接口返回后前端立即显示新文本，后到 user 事件按替代 Run 原位接管；assistant text part 的 `running/pending` 只有在它属于当前仍 busy 的轮次时才展示“生成中”，历史轮次或终态 Run 不得被残留 part 状态重新点亮。
 - 后端 `run.succeeded/run.failed/run.cancelled` 仍是持久 Run 终态事实源；前端 retry 失败兜底只用于避免浏览器一直停留在运行中。
 
 ## `session.updated`
