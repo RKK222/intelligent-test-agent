@@ -7687,3 +7687,29 @@
 
 - 包内操作说明与本轮数据库增量保持一致；XXL V10/V11 不再只靠源码或本地数据库记录证明，发布 ZIP 和安装目录中的实际 JAR
   都会失败关闭。未修改 migration SQL、API、事件、配置或 OpenCode 源码。
+
+## 2026-08-10 - 修复企业包外部 SSH Key 服务启动装配
+
+### Why
+
+- 首轮企业增量包在 `.4` 启动时，PostgreSQL 已成功校验 92 条 migration 并确认当前版本
+  `20260809110000` 无需迁移，但 Spring 随后创建 `ExternalSshKeyEnvelopeService` 失败：类同时存在生产构造器和包内测试构造器，
+  Spring 7 未找到明确注入入口后回退到不存在的无参构造器。
+
+### What
+
+- 为 `ExternalSshKeyEnvelopeService(ObjectMapper)` 生产构造器显式增加 `@Autowired`，保留包内三参数构造器供固定随机数和时钟的
+  TAEK1 测试复用，不新增无参构造器，也不改变加密协议或业务行为。
+- 增加 `ApplicationContextRunner` 装配回归，直接验证真实 Spring 容器可使用 `ObjectMapper` 构造服务；同步模块 README 的多构造器约束。
+
+### How
+
+- JDK 25 下运行 `ExternalSshKeyEnvelopeServiceTest` 3 项通过；随后运行 `test-agent-integration` 及其依赖模块全量测试，
+  common 97 项、domain 99 项、integration 44 项，共 240 项全部通过。
+- 初次使用终端默认 JDK 17 时在编译阶段报“不支持发行版本 21”，切换仓库约定的 JDK 21+ 后测试通过，该错误未进入业务代码。
+
+### Result
+
+- 已消除企业后端启动时 `ExternalSshKeyEnvelopeService.<init>()` 的无参构造异常；原失败包应撤回并从本提交的干净 release 快照重打。
+- 未修改 Flyway migration、API、事件、数据库结构、安全配置、`.env*`、generated SDK 或 OpenCode 源码；企业 PostgreSQL
+  已到 `20260809110000`，重新部署只应校验现有 migration，禁止 `repair`、`outOfOrder` 或手工改 history。

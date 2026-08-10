@@ -14,6 +14,7 @@ import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /** 按固定 TAEK1 协议用调用 API Key 派生密钥并封装 SSH 私钥。 */
@@ -27,6 +28,7 @@ public class ExternalSshKeyEnvelopeService {
     private final SecureRandom secureRandom;
     private final Clock clock;
 
+    @Autowired
     public ExternalSshKeyEnvelopeService(ObjectMapper objectMapper) {
         this(objectMapper, new SecureRandom(), Clock.systemUTC());
     }

@@ -20,7 +20,7 @@
 - `LobehubDevelopmentOwnerResolver` 只供显式 `test/local` 开发启动使用：优先校验显式或已有 owner；仍为占位值时，
   只从状态正常、部门非空的超级管理员中选择唯一候选，零个或多个候选均失败关闭。
 - `WorkflowCapabilityHmacAuthenticator` / `WorkflowCapabilityApplicationService` 为Python workflow和Runner提供固定client/runner身份的HMAC防重放、平台session marker、当前用户/角色/应用成员/仓库复核、checkout票据与模型grant编排。Java只复用平台能力，不创建任何工作流业务对象；Runner兑换时才解密个人SSH Key，并用RSA-OAEP封装随机AES密钥、AES-256-GCM加密任意长度私钥的`TAEC1`信封重新封装，避免直接RSA加密真实OpenSSH私钥时超过明文上限。
-- `ExternalUserSshKeyApplicationService` 只查询状态正常用户的现有 SSH Key，复用平台解密校验后立即交给 `ExternalSshKeyEnvelopeService`；后者按 TAEK1 使用 API Key、HKDF-SHA256、AES-256-GCM 和绑定 traceId 的 AAD 加密，私钥明文不离开方法局部。
+- `ExternalUserSshKeyApplicationService` 只查询状态正常用户的现有 SSH Key，复用平台解密校验后立即交给 `ExternalSshKeyEnvelopeService`；后者按 TAEK1 使用 API Key、HKDF-SHA256、AES-256-GCM 和绑定 traceId 的 AAD 加密，私钥明文不离开方法局部。该服务同时保留生产构造器与包内可测试构造器，生产构造器必须显式标记为 Spring 注入入口，并由容器装配测试锁定，避免多构造器场景回退到不存在的无参构造器。
 
 ## 允许依赖
 

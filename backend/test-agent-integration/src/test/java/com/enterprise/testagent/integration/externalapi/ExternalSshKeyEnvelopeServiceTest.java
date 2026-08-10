@@ -17,12 +17,24 @@ import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 /** 固定 salt/nonce 的 TAEK1 协议向量与篡改保护测试。 */
 class ExternalSshKeyEnvelopeServiceTest {
 
     private static final String API_KEY = "taak_v1_AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
     private static final String TRACE_ID = "0123456789abcdef0123456789abcdef";
+
+    @Test
+    void productionSpringBeanUsesObjectMapperConstructor() {
+        new ApplicationContextRunner()
+                .withBean(ObjectMapper.class, ObjectMapper::new)
+                .withBean(ExternalSshKeyEnvelopeService.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(ExternalSshKeyEnvelopeService.class);
+                });
+    }
 
     @Test
     void createsDeterministicTaek1EnvelopeThatDecryptsToCompletePrivateKey() throws Exception {
