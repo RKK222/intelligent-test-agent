@@ -7743,3 +7743,28 @@
 - 第二次现场异常及全仓当前同类构造器歧义均已消除，并由企业打包门禁持续阻止回归；需从本提交干净快照重新生成并验证发布包。
 - 当前 release 明确保持 Workflow、LobeHub 为 `disabled`。未修改 migration SQL、API、事件、数据库结构、安全配置、`.env*`、
   generated SDK 或 OpenCode 源码；企业库仍只允许对既有 `20260809110000` 历史做严格校验。
+
+## 2026-08-10 - 确认公共 Agent 发布门禁导致消息按钮禁用
+
+### Why
+
+- 企业环境部署后 OpenCode 正常、输入框可编辑，但“发送”和“新建”按钮同时置灰；需要区分前端构建故障、OpenCode 故障与平台发布保护。
+
+### What
+
+- 复核前端共用禁用条件及后端 `/processes/me/message-gate`：公共 Agent/Skill 发布处于排空或仍有用户目标待处理时，
+  `messageSendAllowed=false` 会同时禁用发送和新建，避免旧进程在公共配置切换期间继续接收消息。
+- 用户更新公共 Agent 后按钮立即恢复，现场行为与 rollout 完成后解除消息门禁一致；本次未修改业务代码，也无需重新打包或部署。
+
+### How
+
+- 后端 `PublicAgentConfigRolloutServiceTest` 35 项通过。
+- 从 `frontend` 根目录使用仓库 Vitest 配置运行测试，120 个测试文件通过，1884 项通过、1 项跳过；此前从子包直接执行导致
+  `document is not defined`，原因是绕过了根目录 jsdom 配置，不是产品回归。
+- 本地按 `.env.test`、`test` profile、`--without-workflow` 重启时，21 模块编译成功，但保留库已执行而当前 release 未解析的
+  `20260809230000`、`20260810090000` 仍触发 Flyway 校验阻断；未执行 `repair`、未修改 history，Workflow/LobeHub 均未启用。
+
+### Result
+
+- 企业现场功能已随公共 Agent 更新恢复；根因范围收敛为公共配置 rollout 消息门禁，而非前端编译或 OpenCode 运行异常。
+- 未修改 API、事件、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码；本地服务因 Flyway 历史不兼容未启动。
