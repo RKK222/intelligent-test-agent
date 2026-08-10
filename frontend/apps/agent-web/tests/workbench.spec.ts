@@ -200,7 +200,7 @@ test("session share read-only workbench shows sender identity colors and fixed s
     const style = getComputedStyle(element);
     return { backgroundColor: style.backgroundColor, borderStyle: style.borderStyle };
   });
-  expect(ownerAppearance).toEqual({ backgroundColor: "rgb(154, 142, 222)", borderStyle: "none" });
+  expect(ownerAppearance).toEqual({ backgroundColor: "rgb(222, 217, 246)", borderStyle: "none" });
   expect(ownAppearance).toEqual({ backgroundColor: "rgb(178, 237, 223)", borderStyle: "none" });
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
   await expect(page.locator(".figma-chat-textarea")).toHaveAttribute("title", "当前分享权限为只读，不能修改工作区或发送消息。");
@@ -542,8 +542,9 @@ test("session share refreshes a compacted summary when the session revision chan
 
   const compaction = page.getByTestId("compaction-part-prt-shared-compaction");
   await expect(compaction).toBeVisible({ timeout: 10_000 });
+  await expect(compaction).not.toContainText("上下文已压缩");
+  await compaction.getByRole("button", { name: "展开上下文压缩详情" }).click();
   await expect(compaction).toContainText("上下文已压缩");
-  await compaction.getByRole("button").click();
   await expect(compaction).toContainText("当前目标");
   await expect(compaction).toContainText("下一步");
 });

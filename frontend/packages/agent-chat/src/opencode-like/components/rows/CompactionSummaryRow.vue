@@ -8,9 +8,10 @@ export type CompactionSummaryRowProps = {
 </script>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { Minimize2 } from "lucide-vue-next";
 import MarkdownView from "../../../MarkdownView.vue";
-import OcDisclosure from "../primitives/OcDisclosure.vue";
+import OcIconButton from "../primitives/OcIconButton.vue";
 
 const props = defineProps<CompactionSummaryRowProps>();
 
@@ -39,31 +40,53 @@ const displaySummary = computed(() => props.summary.split("\n").map((line) => {
 const modeLabel = computed(() => props.part.overflow
   ? "超出窗口"
   : props.part.auto ? "自动压缩" : "手动压缩");
+const expanded = ref(false);
+const detailId = computed(() => `oc-compaction-detail-${props.part.partId.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
 </script>
 
 <template>
-  <OcDisclosure
+  <section
     class="oc-compaction-summary"
-    title="上下文已压缩"
-    detail="较早的对话已整理为续写摘要"
-    :subtitle="modeLabel"
-    :default-open="false"
     :data-testid="`compaction-part-${part.partId}`"
   >
-    <div class="oc-compaction-summary__body">
-      <p>
-        这不是新的回答。系统用这份摘要替代较早的对话内容，让模型在有限上下文窗口内继续当前任务。
-      </p>
-      <p v-if="part.overflow" class="oc-compaction-summary__note">
-        本次由上下文接近容量上限触发。
-      </p>
-      <MarkdownView
-        v-if="displaySummary.trim()"
-        :source="displaySummary"
-        :highlight="false"
-        body-class="oc-compaction-summary__markdown"
-      />
-      <p v-else class="oc-compaction-summary__empty">压缩摘要正在同步。</p>
+    <div class="oc-compaction-summary__summary">
+      <OcIconButton
+        class="oc-compaction-summary__trigger"
+        :label="expanded ? '收起上下文压缩详情' : '展开上下文压缩详情'"
+        :aria-expanded="expanded"
+        :aria-controls="detailId"
+        @click="expanded = !expanded"
+      >
+        <Minimize2 aria-hidden="true" />
+      </OcIconButton>
     </div>
-  </OcDisclosure>
+    <div
+      v-if="expanded"
+      :id="detailId"
+      class="oc-compaction-summary__panel"
+      role="region"
+      aria-label="上下文压缩详情"
+    >
+      <div class="oc-compaction-summary__heading">
+        <strong>上下文已压缩</strong>
+        <span>{{ modeLabel }}</span>
+      </div>
+      <div class="oc-compaction-summary__body">
+        <p>较早的对话已整理为续写摘要。</p>
+        <p>
+          这不是新的回答。系统用这份摘要替代较早的对话内容，让模型在有限上下文窗口内继续当前任务。
+        </p>
+        <p v-if="part.overflow" class="oc-compaction-summary__note">
+          本次由上下文接近容量上限触发。
+        </p>
+        <MarkdownView
+          v-if="displaySummary.trim()"
+          :source="displaySummary"
+          :highlight="false"
+          body-class="oc-compaction-summary__markdown"
+        />
+        <p v-else class="oc-compaction-summary__empty">压缩摘要正在同步。</p>
+      </div>
+    </div>
+  </section>
 </template>

@@ -4997,7 +4997,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("需要分析");
   });
 
-  it("groups and explains the native compaction summary in the standard disclosure style", async () => {
+  it("collapses a completed compaction into an icon and expands its translated details", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -5023,10 +5023,14 @@ describe("FigmaChatPanel", () => {
 
     await showFullTimeline(wrapper);
     const compaction = wrapper.get('[data-testid="compaction-part-prt-compaction"]');
+    expect(compaction.find(".oc-compaction-summary__panel").exists()).toBe(false);
+    expect(compaction.get('button[aria-label="展开上下文压缩详情"]').attributes("aria-expanded")).toBe("false");
+    expect(compaction.text()).not.toContain("上下文已压缩");
+    expect(compaction.text()).not.toContain("Objective");
+    await compaction.get('button[aria-label="展开上下文压缩详情"]').trigger("click");
+    expect(compaction.get('button[aria-label="收起上下文压缩详情"]').attributes("aria-expanded")).toBe("true");
     expect(compaction.text()).toContain("上下文已压缩");
     expect(compaction.text()).toContain("较早的对话已整理为续写摘要");
-    expect(compaction.text()).not.toContain("Objective");
-    await compaction.get("button").trigger("click");
     expect(compaction.text()).toContain("这不是新的回答");
     expect(compaction.text()).toContain("当前目标");
     expect(compaction.text()).toContain("工作状态");

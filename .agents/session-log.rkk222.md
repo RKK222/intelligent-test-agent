@@ -8051,3 +8051,29 @@
 - 持有对话权限的分享成员现在可以撤回并修改自己发送的最后一条消息；会话所属人仍可操作，其它成员不能修改别人的消息。发送后页面立即显示新文本，后续权威事件不再恢复旧文本或产生双气泡。
 - 分享会话无需刷新即可在旧轮次或终态时移除回答卡中的“生成中”；新 Run 的工作状态仍按真实 busy 状态正常展示。
 - 本次变更涉及既有 HTTP 接口的鉴权行为放宽和前端状态投影；不新增 URL、DTO/事件字段、SQL、Flyway migration、数据库结构、轮询或持久缓存，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。修改文本仍只进入既有有限 TTL Redis 精确重放输入，不写控制表、事件、审计或日志。
+
+## 2026-08-10 - 压缩结果收为图标并调浅分享协作者气泡
+
+### Why
+
+- 上下文压缩完成后仍以整行 disclosure 展示，在短对话中反复占据大块空间，与已完成思考状态和搜索事件的图标语言不一致。
+- 分享工作台中其他参与者的 `#9A8EDE` 紫色气泡饱和且偏深，视觉权重高于助手正文。
+
+### What
+
+- `CompactionSummaryRow` 复用 `OcIconButton` 和历史完成态的 28px 图标尺寸，默认只展示 `Minimize2` 小图标；点击后图标保留，并在下方展开压缩方式、触发原因、语义说明和已翻译的续写摘要。
+- 压缩标记与紧邻摘要的既有投影、固定英文字段中文映射及原始协议内容保持不变；只替换展示壳和可访问的展开/收起语义。
+- 新增聊天主题 token `--ta-chat-other-user-bg`，默认值为低饱和浅紫 `#DED9F6`；其他参与者气泡通过该 token 展示，自己的 `#B2EDDF` 薄荷绿保持不变。
+- 同步 agent-web、agent-chat README，以及组件、归因和分享 Playwright 回归断言。
+
+### How
+
+- 定向 Vitest 2 个文件 159 项通过、1 项按设计跳过；前端全量 Vitest 123 个文件 1904 项通过、1 项跳过；全 workspace typecheck 和 agent-web production build 均通过，构建仅保留既有大 chunk 提示。
+- Chromium Playwright 两个分享场景通过，覆盖浅紫色 computed style、compact 修订同步、默认图标态和点击展开详情；保留 trace 截图并人工检查收起、展开和两种气泡颜色的实际布局。
+- 按 `.env.test`、JDK 25 和 `--without-workflow` 重启三服务；backend health/readiness 为 `UP`，frontend 返回 200，CORS 正确，manager WebSocket 已连接，监听路径均属于当前仓库。
+- 提交前回顾全部 `.agents/session-log*.md`。工作区同时存在另一组后端撤销重发 Controller/API 文档/测试改动，与本次文件无重叠，未修改、暂存或回滚。
+
+### Result
+
+- 压缩完成态现在与思考/搜索过程使用同一轻量图标层级，只有用户主动点击时才展开详情；分享协作者气泡明显变浅且仍能与自己的消息区分。
+- 本次仅修改前端展示、主题 token、测试和稳定 README；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，旧消息和旧后端兼容性不变。
