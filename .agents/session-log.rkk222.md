@@ -7768,3 +7768,40 @@
 
 - 企业现场功能已随公共 Agent 更新恢复；根因范围收敛为公共配置 rollout 消息门禁，而非前端编译或 OpenCode 运行异常。
 - 未修改 API、事件、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码；本地服务因 Flyway 历史不兼容未启动。
+
+## 2026-08-10 - 企业增量发布完成并固化交付校验边界
+
+### Why
+
+- 本轮企业增量部署经历两次后端启动装配失败和一次公共 Agent rollout 消息门禁现象；现场最终验收完成后，需要固化实际部署源码、
+  交付包与关键内嵌资源的 SHA-256，避免后续排障把失败包、最终包或本地合并后的新代码混为同一版本。
+
+### What
+
+- 最终部署源码提交为 `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`。
+- 外层 `test-agent-two-backend-complete.zip` SHA-256 为
+  `afe10e7ad6f9d2846fbe81e0fa80336ddfe2455b4783ad0b142d1970316fd3c6`；仓库 dist 与
+  `/Users/kaka/Desktop/mimoagent/0709` 中转副本一致。
+- 内层 `test-agent-internal-release.zip` SHA-256 为
+  `da9c840b5bd4b71d78892e29e23d5ecfd5aaa193a0d46d327cd717a90e4c1a18`，且外层 ZIP 内嵌副本逐字节一致。
+- 关键资源 SHA-256：`test-agent-app.jar` 为
+  `28c2bf250536c2f327e8e3ac5c6d4068d79529ed271592c7dedfb69e63d5fa44`，persistence JAR 为
+  `5f7c45d5363491a63364d1db96005579bbfa62856f07fde6d50308c7a3eb9a45`，包内 `deploy/internal/opencode-models.json` 为
+  `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
+- 外部 API 主 migration `V20260809110000__create_external_api_credentials.sql` 的最终 persistence JAR 内 SHA-256 为
+  `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。
+
+### How
+
+- 首次失败为 `ExternalSshKeyEnvelopeService.<init>()` 无默认构造器，修复提交 `d5b4072ac`；第二次失败为
+  `ExternalApiCredentialApplicationService.<init>()` 无默认构造器，同时补齐 broadcaster 并增加全量 Bean 构造器发布审计，
+  最终修复提交 `8a6955f8d`。
+- 两次现场日志均显示 Flyway 成功校验 92 条 migration、schema 当前版本 `20260809110000` 且无需迁移，证明数据库不是这两次
+  Spring 装配失败的根因；全程未执行 `repair`、`outOfOrder` 或手工修改 history。
+- 部署后“发送/新建”同时置灰由公共 Agent rollout 的 `messageSendAllowed=false` 门禁触发；更新公共 Agent、rollout 收敛后恢复，
+  OpenCode 和前端构建本身正常。
+
+### Result
+
+- 用户确认本轮 `.4/.114` 后台与 `.2` 前端企业部署结束；本轮发布基线以以上源码与制品 SHA-256 为准，Workflow、LobeHub 未启用。
+- 后续本地合并远程代码产生的新 HEAD 不代表企业已部署版本；排查现场问题时必须先对照本条 hash，再判断是否需要重打包。
