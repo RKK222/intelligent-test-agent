@@ -20,7 +20,7 @@ Java 前必须从每个后台节点验证 Redis TCP。值为 `0` 时，Docker DN
 
 外部路由发布顺序固定为：
 
-1. 执行并核验 `V20260809120000__create_external_api_credentials.sql`。
+1. 执行并核验 `V20260809110000__create_external_api_credentials.sql`；已执行 QA Memory `20260809120000/311175224` 的个人库改走隔离兼容路径和 `V20260810110000` 前向 migration。
 2. 滚动升级全部 Java，确认每个实例完成外部凭据启动加载且 readiness 为 UP；所有 JAR 的内置 RSA 私钥必须一致。
 3. 升级前端，确认只有 `SUPER_ADMIN` 能看到“API Key 管理”。
 4. 最后在受信内网网关开放 `/api/external/v1/**`，按来源和工具限流，不开放浏览器 CORS Header。

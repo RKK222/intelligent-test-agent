@@ -60,6 +60,14 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             "classpath:db/migration-compat/run-resend-after-internal-model-before-batch";
     static final String RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION =
             "classpath:db/migration-compat/run-resend-after-internal-model-after-batch";
+    static final String EXTERNAL_API_CREDENTIALS_MIGRATION_VERSION = "20260809110000";
+    static final String QA_MEMORY_APPLIED_MIGRATION_VERSION = "20260809120000";
+    static final int QA_MEMORY_APPLIED_MIGRATION_CHECKSUM = 311175224;
+    static final String QA_MEMORY_APPLIED_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/qa-memory-applied";
+    static final String EXTERNAL_API_FORWARD_MIGRATION_VERSION = "20260810110000";
+    static final String EXTERNAL_API_FORWARD_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/external-api-after-qa-memory";
 
     private static final String CURRENT_TOOLBOX_MIGRATION_FILE =
             "V20260728160800__create_toolbox_click_tracking.sql";
@@ -75,6 +83,8 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             "db/migration/V20260808143302__add_internal_model_stream_complete_metrics.sql";
     private static final String RUN_RESEND_MAIN_RESOURCE =
             "db/migration/V20260807190000__create_run_resends.sql";
+    private static final String EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE =
+            "db/migration/V20260809110000__create_external_api_credentials.sql";
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(DatabaseMigrationCompatibilityCustomizer.class);
@@ -174,6 +184,30 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                     : RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION;
         }
 
+        boolean externalApiCredentialsMigrationApplied = isMigrationApplied(
+                appliedMigrations, EXTERNAL_API_CREDENTIALS_MIGRATION_VERSION);
+        boolean qaMemoryMigrationApplied = isMigrationApplied(
+                appliedMigrations, QA_MEMORY_APPLIED_MIGRATION_VERSION);
+        Integer qaMemoryMigrationChecksum = appliedChecksum(
+                appliedMigrations, QA_MEMORY_APPLIED_MIGRATION_VERSION);
+        boolean externalApiForwardMigrationApplied = isMigrationApplied(
+                appliedMigrations, EXTERNAL_API_FORWARD_MIGRATION_VERSION);
+        if (qaMemoryMigrationApplied
+                && !Objects.equals(qaMemoryMigrationChecksum, QA_MEMORY_APPLIED_MIGRATION_CHECKSUM)) {
+            throw new IllegalStateException(
+                    "检测到未知的 QA Memory migration checksum，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (externalApiForwardMigrationApplied && !qaMemoryMigrationApplied) {
+            throw new IllegalStateException(
+                    "检测到外部 API 凭据顺序补偿 migration 缺少对应 QA Memory history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (externalApiCredentialsMigrationApplied && externalApiForwardMigrationApplied) {
+            throw new IllegalStateException(
+                    "检测到外部 API 凭据主 migration 与顺序补偿 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        boolean needsExternalApiForwardCompatibility =
+                qaMemoryMigrationApplied && !externalApiCredentialsMigrationApplied;
+
         List<String> locations = new ArrayList<>(Arrays.stream(configuration.getLocations())
                 .map(location -> location.getDescriptor())
                 .toList());
@@ -198,6 +232,12 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         if (runResendForwardLocation != null) {
             addLocationIfAbsent(locations, runResendForwardLocation);
         }
+        if (qaMemoryMigrationApplied) {
+            addLocationIfAbsent(locations, QA_MEMORY_APPLIED_COMPATIBILITY_LOCATION);
+        }
+        if (needsExternalApiForwardCompatibility) {
+            addLocationIfAbsent(locations, EXTERNAL_API_FORWARD_COMPATIBILITY_LOCATION);
+        }
         configuration.locations(locations.toArray(String[]::new));
 
         boolean legacyWithoutCurrentMigration = legacyMigrationApplied
@@ -216,6 +256,9 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         }
         if (needsRunResendForwardCompatibility) {
             filteredMainResources.add(RUN_RESEND_MAIN_RESOURCE);
+        }
+        if (needsExternalApiForwardCompatibility) {
+            filteredMainResources.add(EXTERNAL_API_CREDENTIALS_MAIN_RESOURCE);
         }
         if (!filteredMainResources.isEmpty()) {
             // Flyway 没有公开“排除单个 classpath migration”的配置入口；这里包装唯一默认扫描器，
@@ -253,6 +296,16 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             LOGGER.warn("检测到撤销重发 migration 未执行但后续版本已执行，启用顺序补偿路径: missingVersion={}, forwardVersion={}",
                     RUN_RESEND_MIGRATION_VERSION,
                     runResendForwardVersion);
+        }
+        if (qaMemoryMigrationApplied) {
+            LOGGER.warn("检测到已执行的 QA Memory migration，启用原始字节兼容解析: version={}, checksum={}",
+                    QA_MEMORY_APPLIED_MIGRATION_VERSION,
+                    qaMemoryMigrationChecksum);
+        }
+        if (needsExternalApiForwardCompatibility) {
+            LOGGER.warn("检测到外部 API 凭据 migration 早于已执行的 QA Memory history，启用顺序补偿路径: missingVersion={}, forwardVersion={}",
+                    EXTERNAL_API_CREDENTIALS_MIGRATION_VERSION,
+                    EXTERNAL_API_FORWARD_MIGRATION_VERSION);
         }
     }
 

@@ -58,6 +58,16 @@ class FlywayMigrationNamingTest {
             "V20260804123000__create_personal_workspace_relocations.sql";
     private static final String RELEASE_PERSONAL_WORKSPACE_RELOCATION_SHA256 =
             "f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212";
+    private static final String EXTERNAL_API_CREDENTIALS_MIGRATION =
+            "V20260809110000__create_external_api_credentials.sql";
+    private static final String EXTERNAL_API_CREDENTIALS_FORWARD_MIGRATION =
+            "V20260810110000__create_external_api_credentials_after_qa_memory.sql";
+    private static final String EXTERNAL_API_CREDENTIALS_SHA256 =
+            "356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53";
+    private static final String APPLIED_QA_MEMORY_MIGRATION =
+            "V20260809120000__create_qa_memory_governance.sql";
+    private static final String APPLIED_QA_MEMORY_SHA256 =
+            "b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -164,6 +174,23 @@ class FlywayMigrationNamingTest {
                 "db/migration",
                 RELEASE_PERSONAL_WORKSPACE_RELOCATION_MIGRATION,
                 RELEASE_PERSONAL_WORKSPACE_RELOCATION_SHA256);
+    }
+
+    @Test
+    void appliedQaMemoryAndExternalApiCompatibilityPathsRemainByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration-compat/qa-memory-applied",
+                APPLIED_QA_MEMORY_MIGRATION,
+                APPLIED_QA_MEMORY_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                EXTERNAL_API_CREDENTIALS_MIGRATION,
+                EXTERNAL_API_CREDENTIALS_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/external-api-after-qa-memory",
+                EXTERNAL_API_CREDENTIALS_FORWARD_MIGRATION,
+                EXTERNAL_API_CREDENTIALS_SHA256);
     }
 
     private static void assertMigrationSha256(

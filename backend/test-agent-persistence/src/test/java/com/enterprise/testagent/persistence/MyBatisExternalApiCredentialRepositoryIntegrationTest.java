@@ -38,7 +38,7 @@ class MyBatisExternalApiCredentialRepositoryIntegrationTest {
                         .formatted(UUID.randomUUID().toString().replace("-", "")),
                 "sa", "", true);
         new ResourceDatabasePopulator(new ClassPathResource(
-                "db/migration/V20260809120000__create_external_api_credentials.sql")).execute(dataSource);
+                "db/migration/V20260809110000__create_external_api_credentials.sql")).execute(dataSource);
         jdbcClient = JdbcClient.create(dataSource);
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
         factory.setDataSource(dataSource);

@@ -7628,3 +7628,36 @@
 - 置顶/取消置顶不会隐式切换其它会话，也不会污染其它会话的选中态、正文或发送目标；普通对话的主要恢复、重试和竞态链路已有可重复回归证据。
 - 本次只修改 E2E、测试说明和本机会话记录，不修改产品代码、API、RunEvent、数据库、migration、安全、`.env*`、generated SDK 或
   OpenCode 源码。production build 仍有既有大 chunk 警告，本次未扩大到性能拆包。
+
+## 2026-08-10 - 解除外部 API 与 QA Memory 同号迁移冲突
+
+### Why
+
+- 企业增量打包前盘点本机所有需保留 PostgreSQL history，发现个人持久库 `testagent` 已执行
+  `V20260809120000__create_qa_memory_governance.sql`，checksum 为 `311175224`；release 分支原本把尚未执行的外部 API
+  凭据 migration 也编号为 `20260809120000`，直接打包会在该历史上触发 Flyway 校验失败，并阻断以后 QA Memory 正序合并。
+
+### What
+
+- 将从未在需保留数据库执行的外部 API 候选 migration 调整为 `V20260809110000`，SQL 字节和 SHA-256
+  `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53` 不变。
+- 复用唯一 `DatabaseMigrationCompatibilityCustomizer`：对已执行 QA Memory `20260809120000/311175224` 加载
+  SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a` 的原始字节兼容资源，过滤更低版本外部 API
+  主 migration，并加载字节相同的 `V20260810110000` 前向 migration；未知 checksum、主/前向混用和孤立前向历史均失败关闭。
+- Mac 内层打包、双后台外层封装和现场安装脚本新增这批撤销重发、批量会话、内部模型、QA Memory 与外部 API migration
+  的 JAR 内 SHA-256 门禁；同步 persistence README、后端部署和数据库文档。
+
+### How
+
+- `mvn clean test -pl test-agent-app -am -Dtest=DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest,FlywayMigrationNamingTest`
+  在真实 PostgreSQL 16 上通过 15 套历史，命名/字节锁 9 项通过；覆盖企业基线、既有兼容分叉、逐版本恢复、QA Memory
+  同号历史、重复启动及未知 checksum 失败关闭，全程 `outOfOrder=false`。
+- 外部 API MyBatis 集成与命名/字节锁共 12 项通过；三个发布脚本 `bash -n` 通过。现有健康 MySQL 8.4 实例只读确认
+  XXL `V1-V11` 全成功且 V10/V11 两项任务启用；新 Testcontainers MySQL 因 Docker Desktop InnoDB 初始化超过容器等待时间，
+  未执行到 SQL，失败原因不是 migration。
+
+### Result
+
+- 当前 release 主链可从企业基线顺序执行外部 API `20260809110000`；已执行 QA Memory 的个人历史改走
+  `20260810110000` 前向路径，不需要也不允许 `repair`、`outOfOrder` 或手工修改 history。
+- 未修改已执行 migration、API、事件、DTO、安全配置、`.env*`、generated SDK 或 OpenCode 源码；未新建分支。
