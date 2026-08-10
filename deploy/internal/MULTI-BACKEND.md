@@ -541,11 +541,10 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
-企业现网当前实际基线是已部署提交
-`cec4ccf13769d9084c7d02efc158b021afe23c23`。该版本已经执行个人工作区搬迁的 PostgreSQL
-`20260804123000`，并在 XXL MySQL 连续执行 V7、V8，把搬迁任务最终频率调整为每 30 分钟；更早
-`0352efa987219b9dde5c09e77b1eabfa719fc068` 基线的 LobeHub 版本倒序兼容装配和公共 Agent rollout
-migration 也已经进入现网历史。部署前必须分别由数据库管理员导出平台 PostgreSQL 与 XXL MySQL 的
+企业现网当前实际基线是上一轮已经部署完成的 release 提交
+`1d4a7652f115404d0dfef8e8a0a599dfc8f25d0d`。该版本的正常 PostgreSQL 主链已经执行到
+`20260806190500`，XXL MySQL 已执行到 V9。部署前必须分别由数据库管理员导出平台 PostgreSQL 与
+XXL MySQL 的
 完整历史，不能只留最近 20 条：
 
 ```sql
@@ -554,41 +553,47 @@ from flyway_schema_history
 order by installed_rank;
 ```
 
-PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；`20260802173416`、`20260803133000` 与
-`20260804123000` 已成功；`20260730090000` 未被倒序补写；`20260803141754` 仅允许出现在已经登记的
-“rollout 已执行、早期 LobeHub 补偿仍缺失”历史中，正常现网路径不应出现。首次从 `cec4ccf...` 基线升级
-时，部署前不得已有 `20260805132000`、`20260806143000`、`20260806190000` 或 `20260806190500`，第一台
-新 Java 只允许按顺序新增：
+PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；上一轮的 `20260805132000`、
+`20260806143000`、`20260806190000`、`20260806190500` 已成功且 checksum 不变；正常企业历史中不得已有
+本轮新增版本。第一台 `.4` 新 Java 只允许按顺序新增以下六条主迁移：
 
-- `V20260805132000__create_support_access_audit.sql`，SHA-256
-  `54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`；
-- `V20260806143000__classify_skill_hub_assets.sql`，SHA-256
-  `f59f641527fdabaf21393319cd70ed578c6f75a55decae4d8839bc2b561ac06d`；
-- `V20260806190000__persist_public_skill_hub_snapshots.sql`，SHA-256
-  `1b2547cf466c09fe11a63b1f76e5e17ec1773e2187aa01e052288a9bb4861e75`；
-- `V20260806190500__classify_public_skill_hub_snapshots.sql`，SHA-256
-  `19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf`。
+- `V20260807190000__create_run_resends.sql`，SHA-256
+  `ca044d9819c7259b62e29243e9d72a06a2f01a532f1803f37e117de1d2f5d83d`；
+- `V20260807230000__add_batch_session_attribution.sql`，SHA-256
+  `42ec1917deb16d96b910f81a0a4739487500453f90dc742e516822f800fdd6e3`；
+- `V20260808143300__create_internal_model_observability.sql`，SHA-256
+  `f214dfd0d4f26de830452d9f4121bc938cf031e4867555d5248e159d99377084`；
+- `V20260808143301__add_internal_model_first_token_metrics.sql`，SHA-256
+  `de7188e3ba5d01148a655dbc238783cf7881abf168bd7b6e422c9f2fa118a5c3`；
+- `V20260808143302__add_internal_model_stream_complete_metrics.sql`，SHA-256
+  `46f0a8e687f59c037a7e02cb1f9ba3db4893633ba20edd67d4ae75f0b6fd0d9e`；
+- `V20260809110000__create_external_api_credentials.sql`，SHA-256
+  `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。
 
-若上一企业包已经部署，上述四条 migration 应全部存在、`success=true` 且保持原 checksum；当前相对
-`ab6e46936` 的 manager 故障修复包没有新增或修改 PostgreSQL migration，重部署只允许 Flyway validate，
-不得新增 history。只存在其中一部分、checksum 不同或出现未知更高版本时都必须停止发布。
+正常企业历史不得出现只用于已登记并行开发历史的兼容版本 `20260807130134`、`20260807203000`、
+`20260807222227`、`20260807229999`、`20260808143303`、`20260809120000` 或 `20260810110000`。特别是
+`20260809120000` 已被另一分支的 QA Memory migration 使用，不能与本轮外部 API migration 混同。发现上述
+版本、未知 checksum、未知更高版本或只执行了本轮六条中的一部分时必须停止发布并核对原始历史，禁止用
+`repair`、`outOfOrder` 或手工改表规避。
 
 虽然 LobeHub 服务和页面入口继续关闭，既有兼容 migration 创建的平台模型目录/聚合表和四个默认禁用参数仍必须
 保留，这是数据库兼容要求，不代表启用服务。
 
-XXL MySQL 使用独立的 `flyway_schema_history`。首次从 `cec4ccf...` 基线升级时应为 V1-V8 全部成功且
-没有 V9，第一台新 Java 启动后只允许新增 `V9__register_inactive_user_process_cleanup_task.sql`；若上一
-企业包已部署，则 V1-V9 应全部成功且本次不得新增版本。两种路径都不允许失败、未知 checksum 或更高版本，
-V7、V8 的原始 history 和搬迁任务每 30 分钟配置不得改写。
+XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后应为 V1-V9 全部成功且 checksum 不变；
+第一台 `.4` 新 Java 只允许新增 V10、V11：V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
+`665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47`，V11 的 Flyway checksum 为
+`-1863356225`、文件 SHA-256 为 `03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236`。
+V10 注册每 5 分钟一次的内部模型探活，V11 注册每天 03:30 的可观测数据清理。失败记录、未知 checksum、
+未知更高版本或只存在 V10 不存在 V11 时都必须停止发布。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
-`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常：首次升级只新增上述四条 PostgreSQL
-migration 和 XXL MySQL V9；已经部署上一企业包的修复重部署必须保持两套 history/checksum 完全不变。
-随后确认搬迁任务仍为
-`schedule_conf='0 0/30 * * * ? *'`，并确认闲置进程关闭任务为每日 02:00，再部署 `.114`。`.4` 日志出现
+`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并确认只新增上述六条 PostgreSQL
+migration 与 XXL MySQL V10/V11；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
+内部模型探活为每 5 分钟、可观测数据清理为每日 03:30，再部署 `.114`。共享数据库上 `.114` 启动只允许
+validate，不应再新增 history。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
 外部 MySQL 端口验证通过后，在 `.4` 执行：
@@ -1062,7 +1067,7 @@ where platform_task_key = 'workspace-management.personal-workspace-relocation';
 
 首次初始化前端仍先弹确认框；如果工作区正处于服务器归属修复/搬迁，普通用户只看到“工作区与 Agent 服务器归属正在调整，请稍后重试”一类安全提示，不显示 `workspaceId`、服务器路径或内部搬迁 ID。日志可按 `event=personal_workspace_relocation_succeeded`、`event=personal_workspace_relocation_retry` 和同一 traceId 对齐，但不要记录归档内容或文件清单。
 
-### 十五天未使用用户进程关闭
+### XXL 生产任务验收
 
 本轮 XXL V9 新增 `opencode-runtime.inactive-user-process-cleanup`，默认每天北京时间 02:00 执行。
 XXL 只取得全局锁并广播空 payload；每个 Java 只处理本机实际持有 manager 连接的用户进程。候选必须严格
@@ -1075,20 +1080,24 @@ ACTIVE binding，用户再次使用时由公共启动程序按原归属恢复。
 ```sql
 select version, description, checksum, success
 from flyway_schema_history
-where version in ('7', '8', '9')
+where version in ('7', '8', '9', '10', '11')
 order by installed_rank;
 
 select platform_task_key, schedule_conf, trigger_status
 from xxl_job_info
 where platform_task_key in (
     'workspace-management.personal-workspace-relocation',
-    'opencode-runtime.inactive-user-process-cleanup'
+    'opencode-runtime.inactive-user-process-cleanup',
+    'opencode-runtime.internal-model-probe',
+    'opencode-runtime.internal-model-observability-retention'
 )
 order by platform_task_key;
 ```
 
-预期 V7/V8 保持原 checksum、V9 首次成功；搬迁任务为 `0 0/30 * * * ? *`，闲置进程关闭为
-`0 0 2 * * ? *`，两条均 `trigger_status=1`。任一条件不满足时保持 `.114` 和 `.2` 未部署。
+预期 V7-V9 保持原 checksum，V10/V11 首次成功且 checksum 分别为 `1539433813`、`-1863356225`；
+搬迁任务为 `0 0/30 * * * ? *`，闲置进程关闭为 `0 0 2 * * ? *`，内部模型探活为
+`0 */5 * * * ? *`，可观测数据清理为 `0 30 3 * * ? *`，四条均 `trigger_status=1`。任一条件不满足时
+保持 `.114` 和 `.2` 未部署。
 
 ## 11. 故障定位与回滚
 

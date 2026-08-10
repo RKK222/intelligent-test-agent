@@ -7661,3 +7661,29 @@
 - 当前 release 主链可从企业基线顺序执行外部 API `20260809110000`；已执行 QA Memory 的个人历史改走
   `20260810110000` 前向路径，不需要也不允许 `repair`、`outOfOrder` 或手工修改 history。
 - 未修改已执行 migration、API、事件、DTO、安全配置、`.env*`、generated SDK 或 OpenCode 源码；未新建分支。
+
+## 2026-08-10 - 校准增量发布手册与 XXL Flyway 成品门禁
+
+### Why
+
+- 首次重打后的外层包复核发现 `START-HERE.md` 仍以更早企业包为基线，错误声称 PostgreSQL 本轮不新增版本、XXL MySQL
+  只到 V9；若照此执行会把本次正常的六条 PostgreSQL 主迁移和 XXL V10/V11 当作异常历史。
+- 发布脚本已锁定 persistence JAR 内的 PostgreSQL migration，但尚未自动锁定 XXL integration JAR 内 V10/V11 的最终字节。
+
+### What
+
+- 将多后台发布手册与内部部署入口更新为上一轮已部署提交 `1d4a7652f115404d0dfef8e8a0a599dfc8f25d0d` 基线，明确
+  `.4` 只允许新增 PostgreSQL `20260807190000`、`20260807230000`、`20260808143300-302`、`20260809110000`
+  及 XXL V10/V11，`.114` 共享数据库启动只做 validate；列出兼容版本停止条件、文件 SHA、XXL checksum 和四项任务频率。
+- 内层打包、外层封装、现场安装三条脚本增加 XXL integration JAR 定位、V10/V11 资源 SHA-256 校验和发布/安装完整 JAR
+  一致性检查；当前增量组件说明同步为 worker runtime 与 toolbox 均 `reuse`。
+
+### How
+
+- 三条脚本 `bash -n` 与 `git diff --check` 通过；最终包需重新从本提交干净快照构建，并由脚本实际打印 PostgreSQL、XXL
+  migration 字节校验结果后方可覆盖中转文件。
+
+### Result
+
+- 包内操作说明与本轮数据库增量保持一致；XXL V10/V11 不再只靠源码或本地数据库记录证明，发布 ZIP 和安装目录中的实际 JAR
+  都会失败关闭。未修改 migration SQL、API、事件、配置或 OpenCode 源码。

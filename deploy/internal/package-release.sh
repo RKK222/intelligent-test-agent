@@ -71,6 +71,10 @@ QA_MEMORY_APPLIED_MIGRATION_RESOURCE="db/migration-compat/qa-memory-applied/V202
 EXTERNAL_API_FORWARD_MIGRATION_RESOURCE="db/migration-compat/external-api-after-qa-memory/V20260810110000__create_external_api_credentials_after_qa_memory.sql"
 EXTERNAL_API_MIGRATION_SHA256="356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53"
 QA_MEMORY_APPLIED_MIGRATION_SHA256="b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a"
+XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_internal_model_probe_task.sql"
+XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
+XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
+XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
 
 usage() {
   cat <<'USAGE'
@@ -491,6 +495,16 @@ find_unique_persistence_jar() {
   find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print -quit
 }
 
+find_unique_xxl_job_integration_jar() {
+  local lib_dir="$1" count
+  count="$(find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-xxl-job-integration-*.jar' | wc -l | tr -d '[:space:]')"
+  if [[ "${count}" != 1 ]]; then
+    echo "Expected exactly one test-agent-xxl-job-integration JAR under ${lib_dir}, found ${count}" >&2
+    exit 1
+  fi
+  find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-xxl-job-integration-*.jar' -print -quit
+}
+
 verify_release_flyway_resource() {
   local jar="$1" label="$2" resource="$3" expected="$4" actual
   if ! unzip -Z1 "${jar}" | grep -Fx "${resource}" >/dev/null; then
@@ -551,6 +565,14 @@ verify_release_flyway_migrations_jar() {
     "${QA_MEMORY_APPLIED_MIGRATION_RESOURCE}" "${QA_MEMORY_APPLIED_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${EXTERNAL_API_FORWARD_MIGRATION_RESOURCE}" "${EXTERNAL_API_MIGRATION_SHA256}"
+}
+
+verify_release_xxl_flyway_migrations_jar() {
+  local jar="$1" label="$2"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
 }
 
 state_value() {
@@ -688,7 +710,7 @@ plan_release_components() {
 
 package_backend() {
   local backend_dir="${OUTPUT_DIR}/backend"
-  local backend_jar_path extract_dir manifest_dir manifest_file persistence_jar
+  local backend_jar_path extract_dir manifest_dir manifest_file persistence_jar xxl_job_integration_jar
   require_command unzip
   require_command zip
   mkdir -p "${backend_dir}"
@@ -732,6 +754,8 @@ package_backend() {
   }
   persistence_jar="$(find_unique_persistence_jar "${backend_dir}/lib")"
   verify_release_flyway_migrations_jar "${persistence_jar}" "Packaged persistence JAR"
+  xxl_job_integration_jar="$(find_unique_xxl_job_integration_jar "${backend_dir}/lib")"
+  verify_release_xxl_flyway_migrations_jar "${xxl_job_integration_jar}" "Packaged XXL integration JAR"
   unzip -Z1 "${backend_dir}/test-agent-app.jar" | grep -Fx 'BOOT-INF/classes/rsa-private.key' >/dev/null || {
     echo "Backend jar is missing the embedded RSA private key resource" >&2
     exit 1
@@ -1153,7 +1177,7 @@ package_lobehub_zip() {
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
-  local worker_tar it_tools_tar omni_tools_tar required_artifact persistence_jar
+  local worker_tar it_tools_tar omni_tools_tar required_artifact persistence_jar xxl_job_integration_jar
 
   require_command zip
   require_command rsync
@@ -1186,6 +1210,8 @@ package_release_zip() {
   fi
   persistence_jar="$(find_unique_persistence_jar "${OUTPUT_DIR}/backend/lib")"
   verify_release_flyway_migrations_jar "${persistence_jar}" "Release ZIP input persistence JAR"
+  xxl_job_integration_jar="$(find_unique_xxl_job_integration_jar "${OUTPUT_DIR}/backend/lib")"
+  verify_release_xxl_flyway_migrations_jar "${xxl_job_integration_jar}" "Release ZIP input XXL integration JAR"
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     require_artifact_fingerprint "${OUTPUT_DIR}/.worker-runtime-artifact.env" \
       TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_RUNTIME_FINGERPRINT}"

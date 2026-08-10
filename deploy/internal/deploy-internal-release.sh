@@ -56,8 +56,14 @@ QA_MEMORY_APPLIED_MIGRATION_RESOURCE="db/migration-compat/qa-memory-applied/V202
 EXTERNAL_API_FORWARD_MIGRATION_RESOURCE="db/migration-compat/external-api-after-qa-memory/V20260810110000__create_external_api_credentials_after_qa_memory.sql"
 EXTERNAL_API_MIGRATION_SHA256="356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53"
 QA_MEMORY_APPLIED_MIGRATION_SHA256="b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a"
+XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_internal_model_probe_task.sql"
+XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
+XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
+XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
 RELEASE_PERSISTENCE_JAR=""
 RELEASE_PERSISTENCE_JAR_SHA256=""
+RELEASE_XXL_JOB_INTEGRATION_JAR=""
+RELEASE_XXL_JOB_INTEGRATION_JAR_SHA256=""
 
 usage() {
   cat <<'USAGE'
@@ -264,6 +270,16 @@ find_unique_persistence_jar() {
   find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print -quit
 }
 
+find_unique_xxl_job_integration_jar() {
+  local lib_dir="$1" count
+  count="$(find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-xxl-job-integration-*.jar' | wc -l | tr -d '[:space:]')"
+  if [[ "${count}" != 1 ]]; then
+    echo "Expected exactly one test-agent-xxl-job-integration JAR under ${lib_dir}, found ${count}" >&2
+    exit 1
+  fi
+  find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-xxl-job-integration-*.jar' -print -quit
+}
+
 verify_release_flyway_resource() {
   local jar="$1" label="$2" resource="$3" expected="$4" actual
   if ! unzip -Z1 "${jar}" | grep -Fx "${resource}" >/dev/null; then
@@ -316,6 +332,14 @@ verify_release_flyway_migrations_jar() {
     "${QA_MEMORY_APPLIED_MIGRATION_RESOURCE}" "${QA_MEMORY_APPLIED_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${EXTERNAL_API_FORWARD_MIGRATION_RESOURCE}" "${EXTERNAL_API_MIGRATION_SHA256}"
+}
+
+verify_release_xxl_flyway_migrations_jar() {
+  local jar="$1" label="$2"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
 }
 
 manifest_value() {
@@ -742,6 +766,9 @@ require_file "${BACKEND_JAR}"
 RELEASE_PERSISTENCE_JAR="$(find_unique_persistence_jar "${BACKEND_LIB_DIR}")"
 verify_release_flyway_migrations_jar "${RELEASE_PERSISTENCE_JAR}" "Release archive persistence JAR"
 RELEASE_PERSISTENCE_JAR_SHA256="$(sha256_file "${RELEASE_PERSISTENCE_JAR}")"
+RELEASE_XXL_JOB_INTEGRATION_JAR="$(find_unique_xxl_job_integration_jar "${BACKEND_LIB_DIR}")"
+verify_release_xxl_flyway_migrations_jar "${RELEASE_XXL_JOB_INTEGRATION_JAR}" "Release archive XXL integration JAR"
+RELEASE_XXL_JOB_INTEGRATION_JAR_SHA256="$(sha256_file "${RELEASE_XXL_JOB_INTEGRATION_JAR}")"
 if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
   require_file "${PROGRAMS_ARCHIVE}"
 fi
@@ -852,6 +879,14 @@ if [[ "${INSTALLED_PERSISTENCE_JAR_SHA256}" != "${RELEASE_PERSISTENCE_JAR_SHA256
   exit 1
 fi
 printf 'Installed persistence JAR matches release archive: sha256=%s\n' "${INSTALLED_PERSISTENCE_JAR_SHA256}"
+INSTALLED_XXL_JOB_INTEGRATION_JAR="$(find_unique_xxl_job_integration_jar "${INSTALL_ROOT}/dist/backend/lib")"
+verify_release_xxl_flyway_migrations_jar "${INSTALLED_XXL_JOB_INTEGRATION_JAR}" "Installed XXL integration JAR"
+INSTALLED_XXL_JOB_INTEGRATION_JAR_SHA256="$(sha256_file "${INSTALLED_XXL_JOB_INTEGRATION_JAR}")"
+if [[ "${INSTALLED_XXL_JOB_INTEGRATION_JAR_SHA256}" != "${RELEASE_XXL_JOB_INTEGRATION_JAR_SHA256}" ]]; then
+  echo "Installed XXL integration JAR differs from the release archive: expected=${RELEASE_XXL_JOB_INTEGRATION_JAR_SHA256} actual=${INSTALLED_XXL_JOB_INTEGRATION_JAR_SHA256}" >&2
+  exit 1
+fi
+printf 'Installed XXL integration JAR matches release archive: sha256=%s\n' "${INSTALLED_XXL_JOB_INTEGRATION_JAR_SHA256}"
 
 if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
   log "Extract external programs (OpenCode Manager, OpenCode runtime and Codex MCP)"

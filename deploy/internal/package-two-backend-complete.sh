@@ -47,6 +47,10 @@ QA_MEMORY_APPLIED_MIGRATION_RESOURCE="db/migration-compat/qa-memory-applied/V202
 EXTERNAL_API_FORWARD_MIGRATION_RESOURCE="db/migration-compat/external-api-after-qa-memory/V20260810110000__create_external_api_credentials_after_qa_memory.sql"
 EXTERNAL_API_MIGRATION_SHA256="356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53"
 QA_MEMORY_APPLIED_MIGRATION_SHA256="b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a"
+XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_internal_model_probe_task.sql"
+XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
+XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
+XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
 
 usage() {
   cat <<'USAGE'
@@ -197,6 +201,14 @@ verify_release_flyway_migrations_jar() {
     "${EXTERNAL_API_FORWARD_MIGRATION_RESOURCE}" "${EXTERNAL_API_MIGRATION_SHA256}"
 }
 
+verify_release_xxl_flyway_migrations_jar() {
+  local jar="$1"
+  verify_release_flyway_resource "${jar}" \
+    "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
+}
+
 # SHA 文件必须指向同目录的实际文件名，避免误校验同目录中的历史版本。
 verify_checksum_pair() {
   local file="$1"
@@ -296,6 +308,14 @@ fi
 persistence_entry="$(grep -E '^dist/backend/lib/test-agent-persistence-[^/]+\.jar$' <<<"${release_listing}")"
 unzip -p "${RELEASE_ARCHIVE}" "${persistence_entry}" >"${TMP_ROOT}/test-agent-persistence.jar"
 verify_release_flyway_migrations_jar "${TMP_ROOT}/test-agent-persistence.jar"
+xxl_job_integration_entry_count="$(grep -Ec '^dist/backend/lib/test-agent-xxl-job-integration-[^/]+\.jar$' <<<"${release_listing}" || true)"
+if [[ "${xxl_job_integration_entry_count}" != 1 ]]; then
+  echo "Inner release must contain exactly one test-agent-xxl-job-integration JAR, found ${xxl_job_integration_entry_count}" >&2
+  exit 1
+fi
+xxl_job_integration_entry="$(grep -E '^dist/backend/lib/test-agent-xxl-job-integration-[^/]+\.jar$' <<<"${release_listing}")"
+unzip -p "${RELEASE_ARCHIVE}" "${xxl_job_integration_entry}" >"${TMP_ROOT}/test-agent-xxl-job-integration.jar"
+verify_release_xxl_flyway_migrations_jar "${TMP_ROOT}/test-agent-xxl-job-integration.jar"
 release_component_manifest="$(unzip -p "${RELEASE_ARCHIVE}" deploy/internal/release-components.env 2>/dev/null || true)"
 worker_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_WORKER_RUNTIME)"
 toolbox_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_TOOLBOX)"
