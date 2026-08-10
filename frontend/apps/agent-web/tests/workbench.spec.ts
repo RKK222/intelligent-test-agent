@@ -8269,9 +8269,17 @@ test("enterprise native slash commands open models, compact context, and rename 
   await page.getByTestId("slash-native-section").locator(".figma-chat-skill-row", { hasText: "/compact" }).click();
   await expect.poll(() => compactRequests.length).toBe(1);
   expect(compactRequests[0]).toEqual({ providerID: "anthropic", modelID: "sonnet" });
-  await expect(page.getByText("正在压缩上下文", { exact: true })).toBeVisible();
+  const compactProgress = page.getByTestId("compact-progress");
+  await expect(compactProgress).toHaveAttribute("data-phase", "running");
+  await expect(compactProgress.getByText("正在压缩上下文", { exact: true })).toBeVisible();
+  await expect(compactProgress.locator(".figma-chat-compact-progress-line")).toHaveCount(3);
+  expect(await compactProgress.locator(".figma-chat-compact-progress-line").first()
+    .evaluate((element) => getComputedStyle(element).animationName))
+    .toContain("figma-chat-compact-fold");
 
   releaseCompact();
+  await expect(compactProgress).toHaveAttribute("data-phase", "success");
+  await expect(compactProgress.getByText("上下文压缩完成", { exact: true })).toBeVisible();
   await expect(page.getByText("上下文已压缩", { exact: true })).toBeVisible();
 
   await textarea.fill("/rename");

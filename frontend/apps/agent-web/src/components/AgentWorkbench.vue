@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, toRaw, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import {
@@ -9985,6 +9985,28 @@ function handleNewConversation() {
 }
 
 const nativeCommandInFlight = ref(false);
+type CompactProgressStatus = "running" | "success";
+const compactProgressStatus = ref<CompactProgressStatus | null>(null);
+let compactProgressDismissTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearCompactProgressDismissTimer() {
+  if (compactProgressDismissTimer) {
+    clearTimeout(compactProgressDismissTimer);
+    compactProgressDismissTimer = null;
+  }
+}
+
+function dismissCompactProgressAfterSuccess() {
+  clearCompactProgressDismissTimer();
+  compactProgressDismissTimer = setTimeout(() => {
+    compactProgressStatus.value = null;
+    compactProgressDismissTimer = null;
+  }, 2600);
+}
+
+onBeforeUnmount(() => {
+  clearCompactProgressDismissTimer();
+});
 
 function nativeSessionActionAllowed(action: string, options: { allowBusy?: boolean } = {}): Session | null {
   const currentSession = session.value;
@@ -10023,6 +10045,7 @@ async function handleNativeTuiCommand(command: OpenCodeTuiCommandName) {
   if (!currentSession) return;
 
   nativeCommandInFlight.value = true;
+  let compactSucceeded = false;
   try {
     if (command === "rename") {
       const result = await ElMessageBox.prompt("请输入新的会话名称", "重命名会话", {
@@ -10048,19 +10071,33 @@ async function handleNativeTuiCommand(command: OpenCodeTuiCommandName) {
         feedback.value = { kind: "info", title: "无法压缩上下文", description: "请先选择包含供应商信息的模型。" };
         return;
       }
-      // 原生 summarize 会等待模型生成摘要；先给出可见反馈，避免长请求期间被误认为点击无效。
+      // 原生 summarize 会等待模型生成摘要；持久进度条覆盖整个长请求，完成后再原位收束为成功态。
+      clearCompactProgressDismissTimer();
+      compactProgressStatus.value = "running";
       feedback.value = { kind: "info", title: "正在压缩上下文", description: currentSession.title };
       await api.compactSession(currentSession.sessionId, { providerID, modelID });
+      const completionFeedback: Feedback = { kind: "success", title: "上下文已压缩", description: currentSession.title };
       await switchSession(currentSession.sessionId, {
         refreshSnapshot: true,
-        completionFeedback: { kind: "success", title: "上下文已压缩", description: currentSession.title }
+        completionFeedback
       });
+      // switchSession 会在消息刷新失败或被更新的会话选择作废时自行返回；只有它采用本次完成反馈才展示成功态。
+      if (toRaw(feedback.value) !== completionFeedback) return;
+      compactSucceeded = true;
+      compactProgressStatus.value = "success";
       return;
     }
   } catch (error) {
     if (command === "rename" && (error === "cancel" || error === "close")) return;
     feedback.value = errorFeedback(`${actionLabel}失败`, error);
   } finally {
+    if (command === "compact") {
+      if (compactSucceeded) {
+        dismissCompactProgressAfterSuccess();
+      } else {
+        compactProgressStatus.value = null;
+      }
+    }
     nativeCommandInFlight.value = false;
   }
 }
@@ -10718,6 +10755,7 @@ async function handleLogout() {
           :input-value="composerInputValue"
           :resend-editing="Boolean(resendEditDraft)"
           :resend-submitting="resendStarting"
+          :compact-status="compactProgressStatus"
           :night-tasks="nightTasks"
           :current-night-task="currentNightTask"
           :night-visible-failure="nightVisibleFailure"

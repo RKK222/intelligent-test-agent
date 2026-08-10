@@ -689,6 +689,8 @@ const props =
     /** 正在修改上一条消息；提交时走撤回重发而不是普通 Run 或原生命令。 */
     resendEditing?: boolean
     resendSubmitting?: boolean
+    /** /compact 的长请求状态；完成态短暂停留，让动效有明确收束。 */
+    compactStatus?: 'running' | 'success' | null
     title?: string
     /** 任务消耗（来自 SSE 事件统计） */
     taskUsage?: TaskUsage
@@ -2274,6 +2276,7 @@ const modelSelectionDisabled = computed(
 const processSubmitBlocked = computed(
   () =>
     props.running ||
+    props.compactStatus === 'running' ||
     !processReady.value ||
     publicConfigMessageBlocked.value ||
     (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
@@ -2282,6 +2285,7 @@ const newConversationBlocked = computed(
   () => !processReady.value
     || publicConfigMessageBlocked.value
     || (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
+    || props.compactStatus === 'running'
     || props.resendEditing === true
 )
 /** 只有在新建的对话（未建立/加载已有 Session），且还没有发送消息时，才允许展示输入框顶部的批量入口菜单 */
@@ -2300,6 +2304,7 @@ const contextSendBlockedReason = computed(() => {
 const sendBlockedTitle = computed(() => {
   if (!processReady.value) return '请先初始化 TestAgent 进程'
   if (publicConfigMessageBlocked.value) return publicConfigMessageBlockedReason.value
+  if (props.compactStatus === 'running') return '上下文压缩完成后才能发送'
   if (props.chatAttachmentsUploading) return '附件上传完成后才能发送'
   if (nightSessionLocked.value) return nightSessionLockedReason.value
   return readonlyBlockedReason.value || contextSendBlockedReason.value || '发送'
@@ -2329,12 +2334,14 @@ const composerPlaceholder = computed(() => {
   if (props.processLoading && !props.processStatus) return '正在检查 TestAgent 进程…'
   if (!processReady.value) return '请先初始化 TestAgent 进程'
   if (publicConfigMessageBlocked.value) return publicConfigMessageBlockedReason.value
+  if (props.compactStatus === 'running') return '正在压缩上下文，完成后可继续发送…'
   if (nightSessionLocked.value) return nightSessionLockedReason.value
   return props.placeholder || 'Ask the AI agent...'
 })
 const nightScheduleBlocked = computed(() =>
   (!localInput.value.trim() && props.chatAttachments.length === 0)
     || props.running === true
+    || props.compactStatus === 'running'
     || composerInteractionBlocked.value
     || publicConfigMessageBlocked.value
     || props.historyLoading === true
@@ -5762,6 +5769,32 @@ function onCompositionEnd() {
     </section>
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
+      <Transition name="figma-chat-compact-progress" mode="out-in">
+        <div
+          v-if="compactStatus"
+          :key="compactStatus"
+          class="figma-chat-compact-progress"
+          :class="`is-${compactStatus}`"
+          :data-phase="compactStatus"
+          data-testid="compact-progress"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <span class="figma-chat-compact-progress-glyph" aria-hidden="true">
+            <template v-if="compactStatus === 'running'">
+              <span class="figma-chat-compact-progress-line" />
+              <span class="figma-chat-compact-progress-line" />
+              <span class="figma-chat-compact-progress-line" />
+            </template>
+            <Check v-else class="figma-chat-compact-progress-check" :size="16" :stroke-width="2.4" />
+          </span>
+          <span class="figma-chat-compact-progress-copy">
+            <strong>{{ compactStatus === 'running' ? '正在压缩上下文' : '上下文压缩完成' }}</strong>
+            <span>{{ compactStatus === 'running' ? '正在整理较早对话，完成后会自动刷新' : '较早对话已整理为续写摘要' }}</span>
+          </span>
+        </div>
+      </Transition>
       <button
         v-if="showComposerTopMenu"
         type="button"
@@ -9652,6 +9685,133 @@ function onCompositionEnd() {
   flex-shrink: 0;
   padding: 8px 10px 3px;
   background: transparent;
+}
+
+/* compact 是可能持续数秒的 Session 操作：状态条常驻到请求完成，动效只作用于局部 transform/opacity。 */
+.figma-chat-compact-progress {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ta-accent, #315bdc) 22%, #d9dce5);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ta-accent, #315bdc) 5%, #fff);
+  color: var(--ta-chat-fg, #27272a);
+}
+
+.figma-chat-compact-progress.is-success {
+  border-color: color-mix(in srgb, #0f766e 24%, #d9e3e1);
+  background: color-mix(in srgb, #0f766e 6%, #fff);
+}
+
+.figma-chat-compact-progress-glyph {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--ta-accent, #315bdc) 28%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ta-accent, #315bdc) 10%, #fff);
+  color: var(--ta-accent, #315bdc);
+}
+
+.figma-chat-compact-progress.is-success .figma-chat-compact-progress-glyph {
+  border-color: color-mix(in srgb, #0f766e 30%, transparent);
+  background: color-mix(in srgb, #0f766e 11%, #fff);
+  color: #0f766e;
+}
+
+.figma-chat-compact-progress-line {
+  width: 15px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: center;
+  animation: figma-chat-compact-fold 1.1s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.figma-chat-compact-progress-line:nth-child(2) {
+  width: 12px;
+  animation-delay: -0.36s;
+}
+
+.figma-chat-compact-progress-line:nth-child(3) {
+  width: 9px;
+  animation-delay: -0.72s;
+}
+
+.figma-chat-compact-progress-check {
+  animation: figma-chat-compact-check-in 220ms cubic-bezier(0.2, 0.9, 0.25, 1.25) both;
+}
+
+.figma-chat-compact-progress-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.figma-chat-compact-progress-copy strong {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.figma-chat-compact-progress-copy > span {
+  color: var(--ta-chat-muted, #71717a);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.figma-chat-compact-progress-enter-active,
+.figma-chat-compact-progress-leave-active {
+  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.2, 0.75, 0.2, 1);
+}
+
+.figma-chat-compact-progress-enter-from,
+.figma-chat-compact-progress-leave-to {
+  opacity: 0;
+  transform: translateY(4px) scale(0.985);
+}
+
+@keyframes figma-chat-compact-fold {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scaleX(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(0.42);
+  }
+}
+
+@keyframes figma-chat-compact-check-in {
+  from {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .figma-chat-compact-progress-line,
+  .figma-chat-compact-progress-check {
+    animation: none;
+  }
+
+  .figma-chat-compact-progress-enter-active,
+  .figma-chat-compact-progress-leave-active {
+    transition: none;
+  }
 }
 
 /* 批量入口悬浮在输入卡上沿，仅在输入区域 hover 或 focus-within 时显现。 */

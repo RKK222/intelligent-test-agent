@@ -2331,6 +2331,42 @@ describe("FigmaChatPanel", () => {
     expect((textarea.element as HTMLTextAreaElement).value).toBe("");
   });
 
+  it("keeps compact progress visible, animates locally, and settles into a success state", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "继续处理任务",
+        compactStatus: "running",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    const progress = wrapper.get('[data-testid="compact-progress"]');
+    expect(progress.attributes("role")).toBe("status");
+    expect(progress.attributes("aria-live")).toBe("polite");
+    expect(progress.attributes("data-phase")).toBe("running");
+    expect(progress.text()).toContain("正在压缩上下文");
+    expect(progress.text()).toContain("完成后会自动刷新");
+    expect(progress.findAll(".figma-chat-compact-progress-line")).toHaveLength(3);
+    expect(wrapper.get('button[aria-label="发送"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[aria-label="发送"]').attributes("title")).toBe("上下文压缩完成后才能发送");
+
+    await wrapper.setProps({ compactStatus: "success" } as any);
+    const success = wrapper.get('[data-testid="compact-progress"]');
+    expect(success.attributes("data-phase")).toBe("success");
+    expect(success.text()).toContain("上下文压缩完成");
+    expect(success.text()).toContain("已整理为续写摘要");
+    expect(success.find(".figma-chat-compact-progress-check").exists()).toBe(true);
+    expect(wrapper.get('button[aria-label="发送"]').attributes("disabled")).toBeUndefined();
+
+    await wrapper.setProps({ compactStatus: null } as any);
+    expect(wrapper.find('[data-testid="compact-progress"]').exists()).toBe(false);
+
+    const source = readFileSync(resolve(__dirname, "../src/components/FigmaChatPanel.vue"), "utf8");
+    expect(source).toContain("@keyframes figma-chat-compact-fold");
+    expect(source).toContain(".figma-chat-compact-progress-line,\n  .figma-chat-compact-progress-check {\n    animation: none;");
+  });
+
   it("does not show a question panel for ordinary numbered assistant output", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

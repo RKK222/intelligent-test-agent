@@ -7997,3 +7997,29 @@
 - 只有会话所属人能撤回并修改上一条消息后重发；分享成员不再因自己是源消息发送人获得该权限。分享页面无需刷新即可退出旧 Run 的“思考中”并看到压缩后的摘要。
 - HTTP URL 和 RunEvent wire name 不变，只新增可选请求字段与分享 SSE data 字段，旧客户端不传/忽略时继续兼容；修改文本只进入既有有限 TTL Redis 精确重放输入，不进入控制表、事件、审计或日志。
 - 未新增 SQL、Flyway migration、数据库字段或索引，不修改 `.env*`、generated SDK 或 OpenCode 只读源码；新增的分享 SSE Session 修订读取复用既有单会话查询，不引入前端轮询。
+
+## 2026-08-10 - 为上下文压缩增加持续动效与完成反馈
+
+### Why
+
+- `/compact` 只在开始和结束时弹出短暂消息；OpenCode summarize 与消息刷新耗时较长时，中间没有常驻反馈，用户无法判断压缩是否仍在进行、何时完成。
+
+### What
+
+- `AgentWorkbench` 维护 compact 专用的 `running/success` 短生命周期状态：请求和当前会话消息刷新期间保持运行态，成功后保留勾选完成态 2.6 秒，失败立即收起并继续复用既有错误提示。
+- `FigmaChatPanel` 在输入框上方增加常驻状态条；进行中用三条上下文线局部收拢动画表达压缩，完成后原位切换勾选和明确文案。运行期间阻止普通发送、新建按钮和定时提交，避免与 Session 压缩并发。
+- 动画仅在 compact 状态节点存在时作用于局部 `transform/opacity`，没有恢复曾导致全树样式重算的全局继承动画；`prefers-reduced-motion: reduce` 下禁用动画和过渡。
+- 同步 agent-web README、内置用户手册和对话场景测试说明。
+
+### How
+
+- `FigmaChatPanel.test.ts` 157 项通过、1 项按设计跳过；agent-web typecheck 通过；agent-web production build（含用户手册 VitePress build）通过，仅保留既有大 chunk 提示。
+- Chromium Playwright 原生命令场景通过，实际断言运行态节点、三条动画线、编译后 keyframes、完成态和既有成功提示；`tools/verify-ai-docs.sh`、`git diff --check` 通过。
+- 首次浏览器回归误复用 3000 端口上 `intelligent-test-agent-memory-v1` 的旧 Vite；切回当前仓库后用同一用例复测通过。首次启动又发现旧 worktree 后端 PID 9927 占用 8080 且不响应 `SIGTERM`，精确停止该旧 screen/进程后，复用已构建 JAR，按 `.env.test`、`test` profile、`--without-workflow` 启动当前仓库三服务。
+- Backend health/readiness 均为 `UP`，Frontend 3000 返回 HTTP 200，登录 CORS 正确，当前监听 PID 的启动路径均属于本仓库；manager WebSocket 已连接。提交前回顾全部 `.agents/session-log*.md`，确认未覆盖其它开发者成果或残留合并标记。
+- 提交后 3000/8080 被 `intelligent-test-agent-memory-v1` 的另一组开发进程重新接管；未中断该 worktree，改在 4177 启动当前仓库 `agent-web`（进程 cwd 为本仓库），HTTP 返回 200，作为最终前端运行验收。标准端口的后端健康结果不再计入当前分支最终运行状态。
+
+### Result
+
+- 用户执行 `/compact` 后会持续看到压缩动效；压缩和消息刷新完成时状态条明确切换为完成态，无需通过刷新或猜测判断进度。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码；仅增加前端局部状态、交互门禁、样式、测试和稳定文档，旧客户端与后端兼容性不变。
