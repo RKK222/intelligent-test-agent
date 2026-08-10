@@ -7913,20 +7913,34 @@
 - 将 `deploy/internal/MULTI-BACKEND.md`、内部部署 README 和数据库文档统一更新为上一轮已部署源码
   `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`、PostgreSQL `20260809110000`、XXL V1-V11 基线；本轮企业主链
   只允许新增会话 `20260809170000/01`，XXL 不新增 history。
+- 最终发布物从包含上述文档修正的干净提交 `a15ea941c316f2cfc0ffe13e2f65480a4c79c54f` 构建。
 - 外层继续复用上一版已经校验的 `.4`、`.114`、`.2` 节点包，只替换本次重新生成的内层发布物。
 - 组件清单保持 worker runtime、toolbox 为 `reuse`，workflow、LobeHub 为 `disabled`；通用运维脚本仍随包保留，但不包含或启用对应运行时组件。
 - 首轮内层 `ae3ec04ef9d3248ba796b47d86d95c1a118c8d9e8aa1af723e053592a37f7bd3`、外层
   `8243fdcb6f13930db0c5189269cb6cb71639c05e31bccedecad230db71d65a8d` 因包含旧基线说明已判定废弃，不得进入中转机或企业服务器。
+- 最终发布物 SHA-256：内层 `79de4085fb2450955806212e98afc59a2370ec954abffed029c32dac0c3ed460`，外层
+  `d07b96af32820afcba1513905d13d4276bc4780c5baf2264c0599c9447aa792f`，app JAR
+  `953910ac99659fb9a86fb0a551b316c2e93a0ed17a1a1945fe062734243afb01`，persistence JAR
+  `06cfd20f4464524067ef0ca5dade53c16b63605e5be7680bfe2a18f4ceeabec0`，XXL integration JAR
+  `068ef8c619e944b8f9c44e4432e8765d55fc904b0a43aad54d5f8f26b977033d`，前端归档
+  `59f27125d71bc8105275d443b31559c1c9ce1c018d70837465c7cc7fb68afebc`，`opencode-models.json`
+  `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
 
 ### How
 
 - JDK 25 下执行真实 PostgreSQL Flyway 兼容集成测试：`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 18 项、`FlywayMigrationNamingTest` 9 项、`SpringBeanConstructorWiringTest` 1 项，全部通过且无跳过；没有使用 `repair`、`outOfOrder` 或手工修改历史表。
 - 首轮执行 `deploy/internal/package-release.sh`，Spring 装配校验、20 模块后端构建、agent-web `vue-tsc` 与 Vite 生产构建通过；脚本在 JAR 生成和 ZIP 输入阶段两次逐项校验全部受控 Flyway migration 字节。
 - 首轮执行 `deploy/internal/package-two-backend-complete.sh --nodes-dir <上一版已校验节点目录>`；三台节点包 checksum、内外层记录 checksum、两个 ZIP 完整性均通过，外层内嵌 ZIP 与内层包 `cmp` 完全一致；随后人工读取包内操作手册时发现基线过期并停止交付。
+- 文档修正提交后重新执行内层与外层打包；最终外层内嵌 ZIP 与最终内层包逐字节一致，内外层部署手册和三台
+  节点包内 `MULTI-BACKEND.md` 均与源码一致，且包含 `8a6955f8d`、`20260809170000/01`，不再包含旧基线
+  `1d4a7652f`。三台节点包 checksum、组件清单、两个 ZIP 完整性与记录 hash 再次全部通过。
+- 解包复核 `deploy/internal/opencode-models.json` 存在且 hash 不变；最终组件清单为 worker runtime/toolbox `reuse`、
+  workflow/LobeHub `disabled`。
 - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记，未修改 `.env*`。
 
 ### Result
 
-- 首轮制品已废弃；必须从包含本次文档校准的新 HEAD 重新生成内外层包并重复全部验签后，才能更新最终发布 hash。
+- 最终企业增量包已从干净提交 `a15ea941c` 重新生成并通过本地构建、真实 PostgreSQL 已知历史升级、Flyway
+  资源验签、部署手册基线和逐层压缩包完整性校验；发布物位于 `deploy/internal/dist/`，首轮旧 hash 不得使用。
 - 本次未部署企业服务器，也未取得企业库完整 `flyway_schema_history` 导出。部署首台后端前仍须导出并比对全部 `version/script/checksum/success`；发现未知 checksum、失败记录或版本分叉时必须停止，不能用 `repair`、`outOfOrder` 或手工改表绕过。
-- 本次仅新增发布记录，无 API、事件、数据库 SQL、性能或安全实现变更；没有修改 generated SDK 或 OpenCode 源码。
+- 本次只修改稳定部署文档与发布记录，无 API、事件、数据库 SQL、性能或安全实现变更；没有修改 generated SDK 或 OpenCode 源码。
