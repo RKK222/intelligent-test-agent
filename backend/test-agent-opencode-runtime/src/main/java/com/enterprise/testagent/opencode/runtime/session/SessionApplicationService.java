@@ -313,6 +313,15 @@ public class SessionApplicationService {
     }
 
     /**
+     * 仅推进会话内容修订时间，用于压缩等远端正文变更通知协作者刷新快照；不改变标题、置顶或标题监听。
+     */
+    public Session touchSession(SessionId sessionId, String traceId) {
+        Session current = getSession(sessionId);
+        return sessionRepository.save(current.updateTitleAndPinned(
+                current.title(), current.pinned(), Instant.now(), traceId));
+    }
+
+    /**
      * 归档 Session；归档后查询接口会按不存在处理。
      */
     public Session archiveSession(SessionId sessionId, String traceId) {

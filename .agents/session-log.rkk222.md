@@ -8267,24 +8267,52 @@
 
 ### Why
 
-- 用户要求切到 `codex/qa-agent-memory-v1`，把 `codex/release-enterprise-20260801` 的最新已提交代码合并进来；release 本地分支已在远端最新提交之上继续推进，实际源提交为 `a63919013`，mem 原始提交为 `a79b1122a`。
+- 用户要求切到 `codex/qa-agent-memory-v1`，把 `codex/release-enterprise-20260801` 的最新已提交代码合并进来；release 本地分支已在远端最新提交之上继续推进，合并期间又从 `a63919013` 前进到最终源提交 `5b2d66ed3`，mem 原始提交为 `a79b1122a`。
 - 两条分支分别执行过 QA Memory 扩展 migration 和会话分享/外部 API migration。简单接受任一侧的兼容器会让另一套真实 PostgreSQL 历史在 Flyway 严格递增规则下无法升级，必须在合并时显式覆盖双向历史。
 
 ### What
 
-- 在独立 worktree `/Users/kaka/Desktop/intelligent-test-agent-memory-v1` 执行 `--no-commit --no-ff` 合并；12 个文本冲突逐一保留双方语义，包含会话分享与记忆中心、系统管理 API Key 与 Memory 面板、路由/文档、发布脚本和两侧会话日志。主 release worktree 的既有未提交修改保持不动。
+- 在独立 worktree `/Users/kaka/Desktop/intelligent-test-agent-memory-v1` 执行 `--no-commit --no-ff` 合并；首轮 12 个文本冲突逐一保留双方语义并形成 `c50bc9e78`，提交前发现 release 新增共享会话修复后继续合并 `5b2d66ed3` 并处理 2 个增量冲突。覆盖会话分享与记忆中心、系统管理 API Key 与 Memory 面板、路由/文档、发布脚本和两侧会话日志；主 release worktree 的既有未提交修改保持不动。
 - 复用唯一 `DatabaseMigrationCompatibilityCustomizer` 和既有资源过滤器：允许 QA Memory 主链与会话分享主链合法共存；QA 历史缺少会话分享时继续走现有高版本前向迁移；release 历史已执行会话分享但缺少低版本 QA migration 时，过滤三条低版本主资源并执行新的 `V20260810173117__qa_memories_create_governance_after_session_share.sql`。
 - 新前向 migration 按原三条 QA migration 的顺序合并为一次事务，SHA-256 为 `44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984`；发布脚本增加源码和最终 JAR 资源锁定。没有新增第二套迁移器，没有启用 `repair`、`outOfOrder`，没有修改任何已执行 migration 字节或 `flyway_schema_history`。
 - 同步更新 app、persistence README、数据库部署文档和发布脚本，说明两种已部署历史的升级方向、版本与校验值。合并前把 mem worktree 既有 6 个未提交前端文件存入安全 stash，本次提交不纳入；合并提交后再原样恢复到工作树。
 
 ### How
 
-- JDK 21 下真实 PostgreSQL 16 兼容矩阵 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 19 项、`FlywayMigrationNamingTest` 9 项全部通过；JDK 21 下 `mvn clean package -DskipTests` 的 22 模块构建通过，源码与 persistence JAR 内新 migration 的 SHA-256 完全一致。
-- agent-web typecheck 和 production build 通过；前端全量在限制 4 workers 后为 126 个测试文件通过、1918 passed / 1 skipped，单独复跑 Mermaid 懒加载文件 12/12 通过。首次无并发限制的全量仅该文件 5 项超时，不是断言失败。
+- JDK 21 下真实 PostgreSQL 16 兼容矩阵 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 19 项、`FlywayMigrationNamingTest` 9 项全部通过；合入 `5b2d66ed3` 后，JDK 25 下 `RunResendApplicationServiceTest`、`OpencodeRuntimeApplicationServiceTest`、`SessionApplicationServiceTest` 和 `SessionShareControllerTest` 共 62 项通过，最终 `mvn clean package -DskipTests` 的 22 模块构建通过，源码与 persistence JAR 内新 migration 的 SHA-256 完全一致。
+- 最终 agent-web typecheck 和 production build 通过；前端全量限制 4 workers 后为 126 个测试文件通过、1920 passed / 1 skipped。首轮无并发限制时仅 Mermaid 懒加载文件 5 项超时，该文件独立 12/12 通过，限制并发后的两次全量均稳定通过。
 - `bash -n deploy/internal/package-release.sh`、`tools/verify-ai-docs.sh`、暂存/未暂存 `git diff --check` 和冲突标记扫描通过；提交前回顾全部 `.agents/session-log*.md`，未发现本次暂存内容覆盖其他开发者未完成事项，也未暂存 `.env*` 或 `opencode-source/`。
 - JDK 25 下使用主工作区只读 `.env.test`、共享 `TEST_AGENT_ROOT/TESTAGENT/SYS_DATA_ROOT_DIR` 和 `--with-memory --without-workflow` 从 mem worktree 完整重启；22 模块重新构建，backend health/readiness 为 `UP`，frontend 返回 200，CORS 返回正确 Origin，manager WebSocket 已连接，三副本 Memory/CPU BGE/pgvector readiness 通过且 `rawMessageCount=0`。
 
 ### Result
 
-- release 最新已提交代码和 mem 能力已在同一 merge 提交中完成集成，双向已部署数据库历史都有真实 PostgreSQL 升级证据；API、事件、安全与前端能力沿用两侧既有契约，合并修复只新增数据库兼容资源和对应装配，不修改 generated SDK、OpenCode 源码或环境文件。
+- release 最终源提交 `5b2d66ed3` 和 mem 能力已通过连续 merge 提交完成集成，双向已部署数据库历史都有真实 PostgreSQL 升级证据；API、事件、安全与前端能力沿用两侧既有契约，合并修复只新增数据库兼容资源和对应装配，不修改 generated SDK、OpenCode 源码或环境文件。
 - 当前平台服务运行于 mem worktree；用户 OpenCode 4104 进程数据库状态为无需自动恢复、manager 暂未托管，需用户保持/重新建立登录态后走既有认证初始化入口恢复，不影响 backend/frontend/Memory readiness。本次不推送远端。
+
+## 2026-08-10 - 修复共享会话撤回编辑、终态收敛与上下文压缩同步
+
+### Why
+
+- 会话协作中普通参与者也能对自己发送的最后一条消息执行撤回重发，不符合“只有分享人/会话所属人可撤回”的产品边界；既有入口点击后立即调用后端，用户没有修改上一条消息的机会。
+- 所属人撤回结束后，分享 runtime-state 直接清空本地 active Run，绕过精确终态对账，其他参与者持续显示“思考中”直到刷新。
+- compact 只改变 OpenCode 远端消息，没有推进平台可观察修订，分享 SSE 不会通知其他参与者；compaction 标记后的内部续写摘要又被当作普通助手回答直接展示，风格和语义都不清晰。
+
+### What
+
+- 人工撤回重发收紧为仅会话所属人；停止 Run 继续允许所属人或该 Run 实际发送人。前端点击“撤销重发”后先把上一条文本装入受控 composer，可编辑或取消，发送失败保留草稿；API additive 接受可选 `editedPrompt`，服务端从可信远端轮次恢复原 part，只替换文本并保留附件、Agent、模型、variant 等其它结构。
+- 分享 runtime-state 不再在 active Run 消失时提前清空本地 Run，而是复用精确 Run 详情终态对账；新增 additive `sessionUpdatedAt` 内容修订锚点，compact 远端成功后推进平台 Session 修订并触发分享 SSE，其他参与者自动刷新消息投影。
+- 将 compaction 标记与紧邻的内部续写摘要合并为默认折叠的标准 disclosure“上下文已压缩”，展开后说明它不是新回答，并在展示层把固定英文摘要字段映射为中文；原始消息和协议内容不改写。
+- 同步 runtime/API/frontend/agent-chat/backend-api README/PACKAGE、HTTP API、RunEvent、安全、OpenCode 规范、对话测试场景和内置用户手册。
+
+### How
+
+- JDK 25 下 `RunResendApplicationServiceTest`、`OpencodeRuntimeApplicationServiceTest`、`SessionApplicationServiceTest` 共 58 项通过；`SessionShareControllerTest` 4 项通过。
+- 前端相关 Vitest 3 个文件 196 项通过、1 项按设计跳过；agent-web、agent-chat、event-stream-client typecheck 均通过；Chromium Playwright 6 项通过，覆盖非所属人无入口、编辑重发、历史失败重发、分享 Run 终态自动收敛和 compact 修订自动刷新。
+- agent-web production build（含 `user-manual` VitePress build）、`tools/verify-ai-docs.sh` 与 `git diff --check` 通过，仅保留既有大 chunk 提示。提交前回顾全部 `.agents/session-log*.md`，未发现与本次文件重叠的未完成事项或残留合并标记。
+- 首次按 `.env.test` 启动被本机 workflow 缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 拦截；未修改环境文件，改用脚本现成 `--without-workflow` 模式完成 21 模块构建和 backend/opencode-manager/frontend 三服务重启。Backend health/readiness 为 `UP`，Frontend 返回 HTTP 200，CORS 正确，manager WebSocket 已连接且受管 OpenCode 最终 `HEALTHY`。
+
+### Result
+
+- 只有会话所属人能撤回并修改上一条消息后重发；分享成员不再因自己是源消息发送人获得该权限。分享页面无需刷新即可退出旧 Run 的“思考中”并看到压缩后的摘要。
+- HTTP URL 和 RunEvent wire name 不变，只新增可选请求字段与分享 SSE data 字段，旧客户端不传/忽略时继续兼容；修改文本只进入既有有限 TTL Redis 精确重放输入，不进入控制表、事件、审计或日志。
+- 未新增 SQL、Flyway migration、数据库字段或索引，不修改 `.env*`、generated SDK 或 OpenCode 只读源码；新增的分享 SSE Session 修订读取复用既有单会话查询，不引入前端轮询。

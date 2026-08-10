@@ -182,13 +182,14 @@ public class SessionShareController {
                         .map(run -> RuntimeDtos.RunResponse.from(
                                 run, RuntimeDtos.memoizedUsernameLookup(service::findUsername)))
                         .orElse(null);
-        return SessionShareDtos.SessionShareRuntimeStateResponse.active(context, activeRun, Instant.now());
+        return SessionShareDtos.SessionShareRuntimeStateResponse.active(
+                context, activeRun, service.sessionUpdatedAt(context), Instant.now());
     }
 
     private RuntimeStateKey runtimeKey(SessionShareDtos.SessionShareRuntimeStateResponse state) {
         RuntimeDtos.RunResponse run = state.activeRun();
         return new RuntimeStateKey(
-                state.version(), state.canChat(), state.expiresAt(),
+                state.version(), state.canChat(), state.expiresAt(), state.sessionUpdatedAt(),
                 run == null ? null : run.runId(), run == null ? null : run.status(),
                 run == null ? null : run.updatedAt());
     }
@@ -203,6 +204,7 @@ public class SessionShareController {
             long version,
             boolean canChat,
             Instant expiresAt,
+            Instant sessionUpdatedAt,
             String runId,
             String runStatus,
             Instant runUpdatedAt) { }

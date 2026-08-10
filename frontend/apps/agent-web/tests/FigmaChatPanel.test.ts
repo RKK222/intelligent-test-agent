@@ -4968,20 +4968,65 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("需要分析");
   });
 
-  it("renders the native compaction Part as a low-noise timeline separator", async () => {
+  it("groups and explains the native compaction summary in the standard disclosure style", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
-        messages: [{
-          id: "a-compaction", messageId: "a-compaction", role: "assistant", text: "",
-          parts: [{ partId: "prt-compaction", type: "compaction", auto: true, overflow: false, tailStartId: "msg-tail" }],
-          createdAt: "2026-07-11T09:00:00.000Z"
-        }],
+        messages: [
+          {
+            id: "a-compaction", messageId: "a-compaction", role: "assistant", text: "",
+            parts: [{ partId: "prt-compaction", type: "compaction", auto: true, overflow: true, tailStartId: "msg-tail" }],
+            createdAt: "2026-07-11T09:00:00.000Z"
+          },
+          {
+            id: "a-summary", messageId: "a-summary", role: "assistant",
+            text: "## Objective\n继续当前任务\n## Work State\n### Completed\n(none)",
+            parts: [{
+              partId: "prt-summary", type: "text",
+              text: "## Objective\n继续当前任务\n## Work State\n### Completed\n(none)"
+            }],
+            createdAt: "2026-07-11T09:00:01.000Z"
+          }
+        ],
         processStatus: { status: "READY", initializable: false, message: "ready" }
-      } as any
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
     await showFullTimeline(wrapper);
-    expect(wrapper.get('[data-testid="compaction-part-prt-compaction"]').text()).toContain("上下文已压缩");
+    const compaction = wrapper.get('[data-testid="compaction-part-prt-compaction"]');
+    expect(compaction.text()).toContain("上下文已压缩");
+    expect(compaction.text()).toContain("较早的对话已整理为续写摘要");
+    expect(compaction.text()).not.toContain("Objective");
+    await compaction.get("button").trigger("click");
+    expect(compaction.text()).toContain("这不是新的回答");
+    expect(compaction.text()).toContain("当前目标");
+    expect(compaction.text()).toContain("工作状态");
+    expect(compaction.text()).toContain("已完成");
+    expect(compaction.text()).toContain("无");
+    expect(compaction.text()).not.toContain("Objective");
+  });
+
+  it("keeps resend edits in the composer and treats native-command syntax as message text", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        inputValue: "上一条消息",
+        resendEditing: true
+      } as any
+    });
+
+    expect(wrapper.get('[data-testid="resend-edit-banner"]').text()).toContain("正在修改上一条消息");
+    expect(wrapper.get("textarea").attributes("placeholder")).toBe("修改上一条消息后发送");
+    await wrapper.get("textarea").setValue("/compact 修改后仍按普通文本重发");
+    await wrapper.get("textarea").trigger("keydown", { key: "Enter" });
+
+    expect(wrapper.emitted("send")).toEqual([["/compact 修改后仍按普通文本重发"]]);
+    expect(wrapper.emitted("native-command")).toBeUndefined();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value)
+      .toBe("/compact 修改后仍按普通文本重发");
+    await wrapper.get('[aria-label="取消修改上一条消息"]').trigger("click");
+    expect(wrapper.emitted("cancel-resend-edit")).toHaveLength(1);
   });
 
   it("shows the latest reasoning as running until the whole response finishes", async () => {

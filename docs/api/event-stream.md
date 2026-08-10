@@ -288,10 +288,10 @@ data 字段：
 | event name | 说明 |
 |---|---|
 | `session-share.snapshot` | 建连后首帧，包含分享版本、权限、有效期和当前 active Run。 |
-| `session-share.updated` | active Run、`canChat`、版本或有效期发生变化。 |
+| `session-share.updated` | active Run、`canChat`、版本、有效期或 Session 内容修订时间发生变化。 |
 | `session-share.invalidated` | 分享过期、取消、成员移除、会话归档或其它授权失效的末帧；发送后服务端关闭连接。 |
 
-data 使用 `active/reason/shareId/version/sessionId/workspaceId/canChat/expiresAt/activeRun/generatedAt`。`activeRun` 为空表示当前没有 `PENDING/RUNNING/CANCELLING` Run；非空时字段与 HTTP `RunResponse` 一致。失效末帧固定 `active=false`、`canChat=false`、`activeRun=null`，`reason` 使用 `EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED` 或稳定平台错误码。无变化时每 25 秒发送标准 heartbeat comment。
+data 使用 `active/reason/shareId/version/sessionId/workspaceId/canChat/expiresAt/sessionUpdatedAt/activeRun/generatedAt`。`sessionUpdatedAt` 是平台 Session 内容修订时间；compact 成功后即使 active Run 不变也会推进该值并产生 `session-share.updated`，分享工作台据此重新读取消息，无需刷新页面。`activeRun` 为空表示当前没有 `PENDING/RUNNING/CANCELLING` Run；非空时字段与 HTTP `RunResponse` 一致。若上一帧存在 active Run、后续帧消失，前端必须按精确 `runId` 查询 Run 详情并应用权威终态，不能仅清空本地 Run 后继续显示“思考中”。失效末帧固定 `active=false`、`canChat=false`、`activeRun=null`，`reason` 使用 `EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED` 或稳定平台错误码。无变化时每 25 秒发送标准 heartbeat comment。
 
 服务端至少每秒重新校验登录用户状态、share/version、成员状态、有效期、精确 Session/Workspace 和权限。分享设置更新会提升版本；旧连接收到更新或失效后不得继续用旧权限执行。RunEvent SSE、文件 WebSocket 和 PTY 终端也各自周期或逐操作重新鉴权，成员移除、降权、取消或到期时关闭连接；已经启动的 Run 不因此自动取消。
 
@@ -367,7 +367,7 @@ retry 字段：
 - `session.status.retry` 在右侧时间线展示原因和“重试中 N 秒后 - 第 X 次 / 共 3 次”。
 - 等待 retry 时前端运行态仍视为运行中，不出队 busy follow-up，不关闭 RunEvent SSE，也不显示失败卡。
 - 前端可按现有 60 秒口径展示 OpenCode 的 retry 等待状态，但倒计时只用于展示；不得在到期后取消 Run、重新 `startRun` 或本地伪造终态。后续消息、非 retry 状态或 `run.*` 终态到达后按真实事件收敛。
-- 失败卡片与最后一条用户消息的“撤销重发”统一调用平台 resends API。前端不得从本地草稿或历史 assistant 内容自行重建请求；后端重新验证远端最后用户边界，并从原生用户轮次取得可重放输入。
+- 失败卡片与最后一条用户消息的“撤销重发”只为会话所属人提供；点击后先把上一条文本装入输入框，所属人修改并发送时才调用平台 resends API。请求可携带 `editedPrompt`，但前端不得从本地草稿或历史 assistant 内容重建附件或其它结构化 part；后端重新验证远端最后用户边界，从原生用户轮次取得可信可重放输入，再仅替换文本。
 - 后端 `run.succeeded/run.failed/run.cancelled` 仍是持久 Run 终态事实源；前端 retry 失败兜底只用于避免浏览器一直停留在运行中。
 
 ## `session.updated`

@@ -28,6 +28,7 @@ import ReasoningPartGroup from "./parts/ReasoningPartGroup.vue";
 import ContextToolGroup from "./tools/ContextToolGroup.vue";
 import ToolPartGroup from "./tools/ToolPartGroup.vue";
 import WorkStatusRow from "./rows/WorkStatusRow.vue";
+import CompactionSummaryRow from "./rows/CompactionSummaryRow.vue";
 import OcIconButton from "./primitives/OcIconButton.vue";
 
 const props = withDefaults(defineProps<TimelineRowProps>(), {
@@ -65,7 +66,8 @@ const assistantMessage = computed(() => {
     row.type !== "assistant-part" &&
     row.type !== "context-tool-group" &&
     row.type !== "reasoning-group" &&
-    row.type !== "tool-group"
+    row.type !== "tool-group" &&
+    row.type !== "compaction-summary"
   ) {
     return undefined;
   }
@@ -101,6 +103,21 @@ const toolGroupParts = computed(() => {
   return row.refs
     .map((ref) => props.state.partsByMessageId[ref.messageId]?.find((part) => part.partId === ref.partId))
     .filter((part): part is Extract<MessagePart, { type: "tool" }> => part?.type === "tool");
+});
+
+const compactionPart = computed(() => {
+  const row = props.row;
+  if (row.type !== "compaction-summary") return undefined;
+  const part = props.state.partsByMessageId[row.messageId]?.find((candidate) => candidate.partId === row.partId);
+  return part?.type === "compaction" ? part : undefined;
+});
+
+const compactionSummary = computed(() => {
+  const row = props.row;
+  if (row.type !== "compaction-summary" || !row.summaryRef) return "";
+  const part = props.state.partsByMessageId[row.summaryRef.messageId]
+    ?.find((candidate) => candidate.partId === row.summaryRef?.partId);
+  return part?.type === "text" ? part.text : "";
 });
 </script>
 
@@ -139,6 +156,15 @@ const toolGroupParts = computed(() => {
       :force-open="forceToolDetailsOpen"
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
+  </AssistantMessageFrame>
+  <AssistantMessageFrame
+    v-else-if="row.type === 'compaction-summary' && compactionPart && assistantMessage"
+    class="oc-row"
+    :message="assistantMessage"
+    :continuation="row.previousAssistantPart"
+    :show-header="row.showAssistantHeader"
+  >
+    <CompactionSummaryRow :part="compactionPart" :summary="compactionSummary" />
   </AssistantMessageFrame>
   <AssistantMessageFrame
     v-else-if="row.type === 'assistant-part' && assistantPart && assistantMessage"

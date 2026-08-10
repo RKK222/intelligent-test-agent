@@ -136,6 +136,16 @@ export type TimelineRow =
       showAssistantHeader: boolean;
     }
   | {
+      type: "compaction-summary";
+      key: string;
+      userMessageId: string;
+      messageId: string;
+      partId: string;
+      summaryRef?: { messageId: string; partId: string };
+      previousAssistantPart: boolean;
+      showAssistantHeader: boolean;
+    }
+  | {
       type: "work-status";
       key: string;
       userMessageId: string;

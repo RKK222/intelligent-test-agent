@@ -252,6 +252,20 @@ public class SessionCollaborationShareService {
         return List.copyOf(participants);
     }
 
+    /** 返回共享状态流的会话内容修订锚点；压缩等正文变更会推进该时间。 */
+    public Instant sessionUpdatedAt(DelegatedOperationContext context) {
+        Objects.requireNonNull(context, "context must not be null");
+        Session session = sessionRepository.findById(context.sessionId())
+                .orElseThrow(() -> shareExpired("SESSION_MISSING"));
+        if (!session.workspaceId().equals(context.workspaceId())) {
+            throw shareExpired("SCOPE_CHANGED");
+        }
+        if (session.status() != SessionStatus.ACTIVE) {
+            throw shareExpired("SESSION_ARCHIVED");
+        }
+        return session.updatedAt();
+    }
+
     /** DTO 展示按真实用户 ID 查询当前平台姓名；账号停用不应抹掉既有消息的可选归因。 */
     public String findUsername(UserId userId) {
         if (userId == null) {

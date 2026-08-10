@@ -71,7 +71,8 @@ public class RunResendController {
                             request.expectedRemoteMessageId(),
                             request.expectedRunId() == null ? null : new RunId(request.expectedRunId()),
                             request.contextToken(),
-                            request.clientRequestId());
+                            request.clientRequestId(),
+                            request.editedPrompt());
                     RunResend resend = context == null
                             ? resendService.createManual(
                                     new RunActorAttribution(
@@ -109,7 +110,8 @@ public class RunResendController {
             @NotBlank @Size(max = 128) String expectedRemoteMessageId,
             @Size(max = 128) String expectedRunId,
             @NotBlank @Size(max = 4096) String contextToken,
-            @NotBlank @Size(max = 128) String clientRequestId) {
+            @NotBlank @Size(max = 128) String clientRequestId,
+            @Size(max = 20_000) String editedPrompt) {
     }
 
     record Response(

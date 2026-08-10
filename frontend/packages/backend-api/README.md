@@ -80,5 +80,5 @@ corepack pnpm test -- backend-api
 `night-execution.test.ts` 覆盖旧夜间请求不带模式、自定义请求携带 `ADMIN_CUSTOM`，以及查询/改期/取消/关闭。
 
 `createRunResend(sessionId, payload)` 调用 agent-scoped 撤销重发入口，传递远端消息前置条件、可选源 Run、页面内存中的
-`contextToken` 和幂等 `clientRequestId`；响应返回替代 Run 与可选重发元数据。该方法继续复用动态
-`X-Test-Agent-Linux-Server-Id` 路由提示，不直连 OpenCode server，也不记录上下文 token 或原始 prompt。
+`contextToken`、幂等 `clientRequestId` 和可选 `editedPrompt`；响应返回替代 Run 与可选重发元数据。该方法继续复用动态
+`X-Test-Agent-Linux-Server-Id` 路由提示，不直连 OpenCode server；client 只把修改文本放入实际请求 body，不持久化或写入调试日志。

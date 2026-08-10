@@ -812,6 +812,8 @@ export type SessionShareRuntimeState = {
   canChat: boolean;
   expiresAt: string;
   activeRun?: Run | null;
+  /** 会话正文修订锚点；共享参与者据此刷新压缩后的远端消息快照。 */
+  sessionUpdatedAt?: string | null;
   generatedAt: string;
 };
 
@@ -1322,6 +1324,8 @@ export type CreateRunResendPayload = {
   expectedRunId?: string | null;
   contextToken: string;
   clientRequestId: string;
+  /** 所属人确认后的替代文本；未传时兼容为精确重放原始轮次。 */
+  editedPrompt?: string;
 };
 
 export type RunResendResponse = {

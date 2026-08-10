@@ -7,6 +7,32 @@ import { formatModelLabel } from "../src/opencode-like/state/model-catalog";
 import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "../src/runtime-reducer";
 
 describe("opencode-like conversation state", () => {
+  it("groups a compaction marker with the following summary instead of rendering raw assistant text", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "继续任务"),
+        assistantMessage("msg_compaction", [
+          { partId: "part_compaction", type: "compaction", auto: true, overflow: true }
+        ]),
+        assistantMessage("msg_summary", [
+          textPart("part_summary", "## Objective\n继续完成当前任务")
+        ])
+      ]
+    });
+
+    const rows = createTimelineRows(state);
+
+    expect(rows.filter((row) => row.type === "compaction-summary")).toEqual([
+      expect.objectContaining({
+        type: "compaction-summary",
+        messageId: "msg_compaction",
+        partId: "part_compaction",
+        summaryRef: { messageId: "msg_summary", partId: "part_summary" }
+      })
+    ]);
+    expect(rows.some((row) => row.type === "assistant-part" && row.partId === "part_summary")).toBe(false);
+  });
+
   it("projects root process events into a work status row after text and diff output", () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),

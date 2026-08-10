@@ -34,6 +34,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
+import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.enterprise.testagent.opencode.client.OpencodeClientFacade;
 import com.enterprise.testagent.opencode.client.OpencodeCreateSessionCommand;
@@ -57,6 +58,37 @@ class OpencodeRuntimeApplicationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void compactSessionTouchesPlatformRevisionOnlyAfterRemoteSuccess() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("ok", true)))));
+
+        Object result = fixture.service.compactSession(
+                "ses_1234567890abcdef",
+                Map.of("providerID", "openai", "modelID", "gpt-5"),
+                "trace_1234567890abcdef");
+
+        assertThat(result).isEqualTo(Map.of("ok", true));
+        assertThat(fixture.captureCommand().path())
+                .isEqualTo("/session/ses_remote1234567890abcdef/summarize");
+        verify(fixture.sessionApplicationService).touchSession(
+                new SessionId("ses_1234567890abcdef"), "trace_1234567890abcdef");
+    }
+
+    @Test
+    void compactSessionDoesNotAdvanceRevisionWhenRemoteSummarizeFails() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.error(new PlatformException(
+                ErrorCode.OPENCODE_BAD_GATEWAY, "summarize failed")));
+
+        assertThatThrownBy(() -> fixture.service.compactSession(
+                        "ses_1234567890abcdef", Map.of(), "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class);
+
+        verify(fixture.sessionApplicationService, never()).touchSession(any(), anyString());
+    }
 
     @Test
     void legacySideQuestionUsesSamePublicConfigGate() {
@@ -738,6 +770,8 @@ class OpencodeRuntimeApplicationServiceTest {
                 org.mockito.Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
         private final RunApplicationService runApplicationService =
                 org.mockito.Mockito.mock(RunApplicationService.class);
+        private final SessionApplicationService sessionApplicationService =
+                org.mockito.Mockito.mock(SessionApplicationService.class);
         private final OpencodeRuntimeApplicationService service;
 
         private Fixture() {
@@ -766,6 +800,7 @@ class OpencodeRuntimeApplicationServiceTest {
                     new ObjectMapper(),
                     null,
                     runApplicationService);
+            service.configureSessionApplicationService(sessionApplicationService);
         }
 
         private OpencodeRuntimeCommand captureCommand() {
