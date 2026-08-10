@@ -704,6 +704,7 @@ export function parseSessionShareRuntimeState(data: string): SessionShareRuntime
       canChat: value.canChat,
       expiresAt: value.expiresAt,
       activeRun: value.activeRun ?? null,
+      sessionUpdatedAt: typeof value.sessionUpdatedAt === "string" ? value.sessionUpdatedAt : null,
       generatedAt: typeof value.generatedAt === "string"
         ? value.generatedAt
         : new Date().toISOString()

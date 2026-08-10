@@ -296,6 +296,209 @@ test("session share busy run blocks every participant and only sender can stop",
   await expect(page.getByRole("button", { name: "发送" })).toHaveCount(0);
 });
 
+test("session share non-owner cannot undo even when they sent the last message", async ({ page }) => {
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_writer", username: "协作者", unifiedAuthId: "ucid_writer", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_resend", name: "共享撤回工作区" }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_shared_resend",
+      workspaceId: "wrk_shared_resend",
+      title: "共享撤回权限会话"
+    }],
+    sessionShareAccess: sessionShareAccess({
+      shareId: "shr_resend_member",
+      actorUserId: "usr_writer",
+      actorUnifiedAuthId: "ucid_writer",
+      actorUsername: "协作者",
+      sessionId: "ses_shared_resend",
+      workspaceId: "wrk_shared_resend",
+      canChat: true,
+      ownerAccess: false
+    }),
+    sessionShareRuntimeStates: [sessionShareRuntimeState({
+      shareId: "shr_resend_member",
+      sessionId: "ses_shared_resend",
+      workspaceId: "wrk_shared_resend",
+      canChat: true
+    })],
+    sessionMessagesBySessionId: {
+      ses_shared_resend: [{
+        messageId: "msg_shared_member_source",
+        remoteMessageId: "msg_remote_shared_member_source",
+        sessionId: "ses_shared_resend",
+        role: "USER",
+        content: "协作者发送的最后一条消息",
+        senderUserId: "usr_writer",
+        senderUnifiedAuthId: "ucid_writer",
+        sentBySharedUser: true,
+        createdAt: "2026-08-09T01:00:00Z",
+        runId: "run_history"
+      }]
+    },
+    historyRun: {
+      runId: "run_history",
+      sessionId: "ses_shared_resend",
+      workspaceId: "wrk_shared_resend",
+      status: "FAILED",
+      createdAt: "2026-08-09T01:00:00Z",
+      updatedAt: "2026-08-09T01:01:00Z",
+      messageSenderUserId: "usr_writer"
+    }
+  });
+
+  await page.goto("/s/shr_resend_member", { waitUntil: "domcontentloaded" });
+  await expect(page.getByText("协作者发送的最后一条消息")).toBeVisible();
+  await expect(page.getByRole("button", { name: "撤销重发最后一条消息" })).toHaveCount(0);
+});
+
+test("session share reconciles a disappeared active run without requiring refresh", async ({ page }) => {
+  const runDetailRequests: string[] = [];
+  const activeRun = {
+    runId: "run_shared_terminal_sync",
+    sessionId: "ses_shared_terminal_sync",
+    workspaceId: "wrk_shared_terminal_sync",
+    status: "RUNNING",
+    triggeredByUserId: "usr_owner",
+    messageSenderUserId: "usr_owner",
+    createdAt: "2026-08-10T01:00:00Z",
+    updatedAt: "2026-08-10T01:00:01Z"
+  };
+  const runtimeStates: Array<Record<string, unknown>> = [sessionShareRuntimeState({
+    shareId: "shr_terminal_sync",
+    sessionId: "ses_shared_terminal_sync",
+    workspaceId: "wrk_shared_terminal_sync",
+    canChat: true,
+    activeRun,
+    generatedAt: "2026-08-10T01:00:02Z"
+  })];
+  const runsByRunId: Record<string, Record<string, unknown>> = {
+    run_shared_terminal_sync: activeRun
+  };
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_reader", username: "阅读者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_terminal_sync", name: "共享终态工作区" }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_shared_terminal_sync",
+      workspaceId: "wrk_shared_terminal_sync",
+      title: "共享终态同步会话"
+    }],
+    sessionShareAccess: sessionShareAccess({
+      shareId: "shr_terminal_sync",
+      sessionId: "ses_shared_terminal_sync",
+      workspaceId: "wrk_shared_terminal_sync",
+      canChat: true
+    }),
+    sessionShareRuntimeStates: runtimeStates,
+    activeRun,
+    runEventsByRunId: { run_shared_terminal_sync: [] },
+    runsByRunId,
+    runDetailRequests,
+    sessionMessagesBySessionId: { ses_shared_terminal_sync: [] }
+  });
+
+  await page.goto("/s/shr_terminal_sync", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeVisible();
+
+  runsByRunId.run_shared_terminal_sync = {
+    ...activeRun,
+    status: "SUCCEEDED",
+    updatedAt: "2026-08-10T01:00:04Z"
+  };
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_terminal_sync",
+    sessionId: "ses_shared_terminal_sync",
+    workspaceId: "wrk_shared_terminal_sync",
+    canChat: true,
+    activeRun: null,
+    generatedAt: "2026-08-10T01:00:05Z"
+  }));
+
+  await expect.poll(() => runDetailRequests).toContain("run_shared_terminal_sync");
+  await expect(page.getByRole("button", { name: "停止执行" })).toHaveCount(0);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("继续共享任务");
+  await expect(page.getByRole("button", { name: "发送" })).toBeEnabled({ timeout: 10_000 });
+});
+
+test("session share refreshes a compacted summary when the session revision changes", async ({ page }) => {
+  const runtimeStates: Array<Record<string, unknown>> = [sessionShareRuntimeState({
+    shareId: "shr_compaction_sync",
+    sessionId: "ses_shared_compaction_sync",
+    workspaceId: "wrk_shared_compaction_sync",
+    canChat: true,
+    sessionUpdatedAt: "2026-08-10T02:00:00Z",
+    generatedAt: "2026-08-10T02:00:01Z"
+  })];
+  const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {
+    ses_shared_compaction_sync: []
+  };
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_reader", username: "阅读者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_compaction_sync", name: "共享压缩工作区" }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_shared_compaction_sync",
+      workspaceId: "wrk_shared_compaction_sync",
+      title: "共享压缩同步会话"
+    }],
+    sessionShareAccess: sessionShareAccess({
+      shareId: "shr_compaction_sync",
+      sessionId: "ses_shared_compaction_sync",
+      workspaceId: "wrk_shared_compaction_sync",
+      canChat: true
+    }),
+    sessionShareRuntimeStates: runtimeStates,
+    sessionMessagesBySessionId
+  });
+
+  await page.goto("/s/shr_compaction_sync", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("compaction-part-prt-shared-compaction")).toHaveCount(0);
+
+  sessionMessagesBySessionId.ses_shared_compaction_sync = [
+    {
+      messageId: "msg_shared_compaction",
+      sessionId: "ses_shared_compaction_sync",
+      role: "ASSISTANT",
+      content: "",
+      createdAt: "2026-08-10T02:00:02Z",
+      parts: [{
+        partId: "prt-shared-compaction",
+        type: "compaction",
+        auto: false,
+        overflow: false
+      }]
+    },
+    {
+      messageId: "msg_shared_compaction_summary",
+      sessionId: "ses_shared_compaction_sync",
+      role: "ASSISTANT",
+      content: "## Objective\n继续共享任务\n## Next Move\n验证同步",
+      createdAt: "2026-08-10T02:00:03Z",
+      parts: [{
+        partId: "prt-shared-compaction-summary",
+        type: "text",
+        text: "## Objective\n继续共享任务\n## Next Move\n验证同步"
+      }]
+    }
+  ];
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_compaction_sync",
+    sessionId: "ses_shared_compaction_sync",
+    workspaceId: "wrk_shared_compaction_sync",
+    canChat: true,
+    sessionUpdatedAt: "2026-08-10T02:00:04Z",
+    generatedAt: "2026-08-10T02:00:05Z"
+  }));
+
+  const compaction = page.getByTestId("compaction-part-prt-shared-compaction");
+  await expect(compaction).toBeVisible({ timeout: 10_000 });
+  await expect(compaction).toContainText("上下文已压缩");
+  await compaction.getByRole("button").click();
+  await expect(compaction).toContainText("当前目标");
+  await expect(compaction).toContainText("下一步");
+});
+
 test("session share participant receives the owner's authoritative user message without an empty bubble", async ({ page }) => {
   const activeRun = {
     runId: "run_shared_owner_live",
@@ -5386,10 +5589,17 @@ test("retrying a failed chat run resends the previous remote user turn", async (
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
+  const resendComposer = page.getByPlaceholder("修改上一条消息后发送");
+  await expect(page.getByTestId("resend-edit-banner")).toBeVisible();
+  await expect(resendComposer).toHaveValue("重试这条测试任务");
+  await resendComposer.fill("修改后重试这条测试任务");
+  await page.getByRole("button", { name: "发送" }).click();
+
   await expect.poll(() => runResendRequests.length).toBe(1);
   expect(runResendRequests[0]).toMatchObject({
     expectedRemoteMessageId: "msg_remote_retry_source",
-    expectedRunId: "run_1"
+    expectedRunId: "run_1",
+    editedPrompt: "修改后重试这条测试任务"
   });
   expect(runRequests).toHaveLength(1);
   await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
@@ -5469,15 +5679,21 @@ test("retrying a reopened failed chat resends the persisted remote user turn", a
   await gotoWorkbench(page);
   await page.getByRole("button", { name: /会话列表/ }).click();
   await historySessionButton(page, "异常中断的对话").click();
-  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click({ force: true });
   await expect(page.locator(".figma-chat-retry-card")).toBeVisible();
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
+  const resendComposer = page.getByPlaceholder("修改上一条消息后发送");
+  await expect(resendComposer).toHaveValue("重新检查登录流程");
+  await resendComposer.fill("重新检查登录和退出流程");
+  await page.getByRole("button", { name: "发送" }).click();
+
   await expect.poll(() => runResendRequests.length).toBe(1);
   expect(runResendRequests[0]).toMatchObject({
     expectedRemoteMessageId: "msg_remote_user_failed",
-    expectedRunId: "run_history"
+    expectedRunId: "run_history",
+    editedPrompt: "重新检查登录和退出流程"
   });
   await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
@@ -5905,7 +6121,12 @@ test("manual resend keeps the user turn, shows running status, and replaces the 
   await expect(page.getByText("旧回答不应继续显示")).toBeVisible();
   await page.getByRole("button", { name: "撤销重发最后一条消息" }).click();
 
+  const resendComposer = page.getByPlaceholder("修改上一条消息后发送");
+  await expect(resendComposer).toHaveValue("重新检查登录流程");
+  await page.getByRole("button", { name: "发送" }).click();
+
   await expect.poll(() => runResendRequests.length).toBe(1);
+  expect(runResendRequests[0]).toMatchObject({ editedPrompt: "重新检查登录流程" });
   await expect(page.getByTestId("figma-work-status-dock").locator(".oc-work-status[data-status='running']")).toBeVisible();
   await expect(page.getByText("旧回答不应继续显示")).toHaveCount(0);
 
@@ -10814,6 +11035,7 @@ function sessionShareRuntimeState(overrides: Record<string, unknown> = {}) {
     canChat: false,
     expiresAt: "2026-08-16T00:00:00Z",
     activeRun: null,
+    sessionUpdatedAt: "2026-08-09T00:59:00Z",
     generatedAt: "2026-08-09T01:00:00Z",
     ...overrides
   };

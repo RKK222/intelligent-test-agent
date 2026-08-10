@@ -34,6 +34,7 @@ import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -98,7 +99,7 @@ public class RunResendApplicationService {
         return createManualInternal(attribution, null, agentId, sessionId, command, traceId);
     }
 
-    /** 分享成员仅可重发自己发送的最后一条消息，且操作时必须仍具有 canChat。 */
+    /** 分享会话只允许所属人撤回重发；普通成员即使发送了最后一条消息也不能操作。 */
     @Transactional
     public RunResend createManual(
             DelegatedOperationContext context,
@@ -109,6 +110,12 @@ public class RunResendApplicationService {
         Objects.requireNonNull(context, "context must not be null");
         context.requireChat();
         context.requireSession(sessionId);
+        if (!context.ownerAccess()) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "只有会话所属人可以撤回并重新发送上一条消息",
+                    Map.of("sessionId", sessionId.value()));
+        }
         return createManualInternal(
                 RunActorAttribution.from(context), context, agentId, sessionId, command, traceId);
     }
@@ -171,7 +178,7 @@ public class RunResendApplicationService {
         if (delegatedContext != null) {
             delegatedContext.requireWorkspace(sourceRun.workspaceId());
         }
-        requireManualRequester(attribution, sourceRun, sessionId);
+        requireManualRequester(attribution, sessionId);
         AgentRuntime runtime = runtimeRegistry.require(resolvedAgentId);
         AgentReplayableTurn replayable;
         try {
@@ -189,6 +196,7 @@ public class RunResendApplicationService {
         if (replayable == null) {
             throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "远端用户消息读取失败");
         }
+        replayable = withEditedPrompt(replayable, command.editedPrompt());
         RunResend previous = resendRepository.findByReplacementRunId(sourceRun.runId()).orElse(null);
         return reserve(
                 attribution,
@@ -322,16 +330,52 @@ public class RunResendApplicationService {
 
     private void requireManualRequester(
             RunActorAttribution requester,
-            Run sourceRun,
             SessionId sessionId) {
         UserId actor = requester.actualSenderUserId();
-        UserId sourceSender = sourceSender(sourceRun, requester.executionOwnerUserId());
-        if (!actor.equals(requester.executionOwnerUserId()) && !actor.equals(sourceSender)) {
+        if (!actor.equals(requester.executionOwnerUserId())) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
-                    "只有会话所属人或最后一条消息发送人可以撤回重发",
+                    "只有会话所属人可以撤回并重新发送上一条消息",
                     Map.of("sessionId", sessionId.value()));
         }
+    }
+
+    /**
+     * 用所属人确认后的新文本替换原轮次第一个可编辑文本，同时保留附件、Agent、模型和其它协议 part。
+     * 原消息没有 text 时优先修改 subtask prompt；两者都没有时在首位补一个 text part。
+     */
+    private AgentReplayableTurn withEditedPrompt(AgentReplayableTurn replayable, String editedPrompt) {
+        if (editedPrompt == null) {
+            return replayable;
+        }
+        List<AgentPromptPart> parts = new ArrayList<>(replayable.parts());
+        int editableIndex = -1;
+        for (int index = 0; index < parts.size(); index++) {
+            AgentPromptPart part = parts.get(index);
+            if ("text".equals(part.type())) {
+                editableIndex = index;
+                break;
+            }
+        }
+        if (editableIndex < 0) {
+            for (int index = 0; index < parts.size(); index++) {
+                if ("subtask".equals(parts.get(index).type())) {
+                    editableIndex = index;
+                    break;
+                }
+            }
+        }
+        if (editableIndex < 0) {
+            parts.add(0, AgentPromptPart.text(editedPrompt));
+        } else {
+            AgentPromptPart original = parts.get(editableIndex);
+            parts.set(editableIndex, new AgentPromptPart(
+                    original.type(), editedPrompt, original.url(), original.mime(), original.filename(),
+                    original.agentName(), original.source()));
+        }
+        return new AgentReplayableTurn(
+                replayable.messageId(), editedPrompt, parts, replayable.agent(),
+                replayable.modelProviderId(), replayable.modelId(), replayable.variant());
     }
 
     private UserId sourceSender(Run sourceRun, UserId owner) {

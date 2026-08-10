@@ -1994,7 +1994,7 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 | `DELETE` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/collaboration-share?expectedVersion=` | 仅所属人取消；保留 shareId、成员和审计历史。 |
 | `GET` | `/api/internal/platform/opencode-runtime/session-shares?page=&size=` | “分享给我”列表，不校验当前用户是否仍属于会话工作区；保留失效历史。 |
 | `GET` | `/api/internal/platform/opencode-runtime/session-shares/access` | 携带分享头解析固定 Session/Workspace、权限和安全参与者目录。 |
-| `GET` | `/api/internal/platform/opencode-runtime/session-shares/runtime-state/events` | 携带分享头订阅单会话 active Run、权限版本、有效期和失效通知 SSE。 |
+| `GET` | `/api/internal/platform/opencode-runtime/session-shares/runtime-state/events` | 携带分享头订阅单会话 active Run、权限版本、有效期、Session 内容修订时间和失效通知 SSE。 |
 
 `PUT` 请求是全量成员语义，最多 50 名成员；缺失的历史成员被软移除，重新加入复用历史记录。`expiresAt` 必须晚于操作时刻且不得晚于操作时刻加 7 天：
 
@@ -2015,7 +2015,7 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 
 权限边界：只读成员可以读取会话、消息、Run/SSE、文件树/正文、状态和 Diff；`canChat=true` 可以在固定 Session/Workspace 中发送、写文件、执行当前工作区 Git/终端/command/shell、compact/revert、回复 permission/question、提交反馈和管理自己的定时任务。分享管理、归档/删除、置顶、应用/工作区切换、持久 fork、设置、Agent 配置、源码/Hub、系统管理和服务器终端始终只属于所属人。所属人的当前权限是所有代操作的上限。
 
-停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人后来降为只读仍可停止。最后一条用户消息的撤回重发只允许所属人或源消息发送人；分享发送人操作时必须仍有 `canChat`。任一 Run 为 `PENDING/RUNNING/CANCELLING` 时，所有参与方的新发送都返回 `409 SESSION_BUSY`。
+停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人后来降为只读仍可停止。最后一条用户消息的撤回并重新发送只允许会话所属人；普通分享成员即使是源消息发送人且仍有 `canChat` 也返回 `FORBIDDEN`。任一 Run 为 `PENDING/RUNNING/CANCELLING` 时，所有参与方的新发送都返回 `409 SESSION_BUSY`。
 
 旧 `/api/sessions/**` 和 `/api/workspaces/{workspaceId}/sessions` 已作废，返回 `410 API_GONE`。
 
@@ -3609,7 +3609,7 @@ Session 运行态接口：
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question` | 旁路问答：从指定消息边界创建临时 fork，必要时只在临时 fork 上调用 summarize/compact，再使用 `plan` agent 的只读权限发送问题，等待工具执行后的自然语言最终回答并删除临时会话；问题和回答不写入主会话历史。body 为 `{ question, messageId?, agent?, model? }`，`question` 最长 4000 字；上下文超过 40 条消息或约 48000 字符时必须提供 `provider/model` 格式的 `model`。响应为 `{ answer, compacted }`。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question/runs` | 启动流式旁路问答。body 为 `{ question, messageId?, model? }`，服务端固定使用 `build` agent，并以系统提示限制为只读，立即返回 `{ runId }`；客户端随后通过既有 RunEvent SSE 订阅该 Run。平台创建从一开始即为 `ARCHIVED` 的内部 Session 和 `SIDE_QUESTION` Run，问题与答案不进入主 Session 消息历史。旧同步 `side-question` 路径继续保留兼容。 |
 | `POST` | `/api/internal/platform/opencode-runtime/manual-question/runs` | 无主对话的手册问答。body 为 `{ workspaceId, question, model? }`，前端问题已携带当前内置手册章节；后端创建归档内部 Session 和独立 `SIDE_QUESTION` Run，直接使用内部远端临时会话回答并在终态后删除，不创建普通主 Session。立即返回 `{ runId }`，事件仍通过既有 RunEvent SSE 订阅。 |
-| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/compact` | 调用 opencode summarize/compact，body 为 `{ providerID, modelID }`；Web `/compact` 与 `/summarize` 复用该入口。 |
+| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/compact` | 调用 opencode summarize/compact，body 为 `{ providerID, modelID }`；Web `/compact` 与 `/summarize` 复用该入口。远端成功后平台推进 Session `updatedAt` 内容修订时间，分享 runtime SSE 随即发出更新，使其它参与方无需刷新页面即可重新读取消息投影。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/revert` | revert 指定 message，body 为 `{ messageID }`；Web `/undo` 取当前投影中最后一条具有远端 ID 的用户消息。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/unrevert` | 取消 revert，不发送 body；Web `/redo` 复用该入口。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/command` | 执行 session command。 |
@@ -3951,18 +3951,18 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 
 ### `POST /api/internal/agent/{agentId}/sessions/{sessionId}/resends`
 
-- 用途：对当前根会话最后一条、已有远端 user message 边界且源 Run 已终态的消息创建原生撤销重发。接口同步预留新的
+- 用途：由会话所属人对当前根会话最后一条、已有远端 user message 边界且源 Run 已终态的消息执行“撤回并重新发送”。点击入口只让前端把上一条文本装入输入框；所属人修改并发送后，本接口同步预留新的
   `PENDING` Run 和会话锁；实际 revert/dispatch 由统一恢复状态机执行。
-- 鉴权：必须登录；服务端通过会话上下文重新验证 owner、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径或请求体。
-- 请求：`expectedRemoteMessageId`、可选 `expectedRunId`、短期 `contextToken`、幂等 `clientRequestId`。四者都不得包含 prompt 或附件正文。
+- 鉴权：必须登录且必须是会话所属人；普通分享成员即使发送了源消息并持有 `canChat` 也返回 `FORBIDDEN`。服务端通过会话上下文重新验证 owner、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径或请求体。
+- 请求：`expectedRemoteMessageId`、可选 `expectedRunId`、短期 `contextToken`、幂等 `clientRequestId`，以及可选、最长 20000 字符的 `editedPrompt`。缺少 `editedPrompt` 时保持旧客户端的原文精确重放；提供后只替换可信远端用户轮次中的第一个 `text` part（无文本时替换第一个 `subtask`，两者都无时在开头增加 `text`），继续保留原附件、Agent、模型、variant 和其它结构化 part。前端不得提交或重建附件正文。
 - 响应：`resendId/status/executeAt/resend/replacementRun`。`resend` 包含 `trigger/totalAttempt/automaticAttempt/automaticLimit/status`、
   源/替代 Run，以及可选 `requesterUserId/requesterUsername/requesterUnifiedAuthId/requestedBySharedUser` 真实发起人归因；姓名无法解析时可空。`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。
 - 错误：非 owner 为统一 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
-- traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、模型回答或供应商正文。
+- traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、修改后文本、模型回答或供应商正文。修改后文本只随既有精确重放输入写入有限 TTL Redis，日志、审计和事件均不得记录。
 - 幂等：同一 owner + `clientRequestId` 返回同一替代 Run；同一 source Run、replacement Run 和会话活动锁均有数据库唯一约束。
-- 页面接管：接口返回替代 Run 后，调用方应立即把源用户轮次的展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，并隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识，随后用替代 Run 的真实 user message ID 原位接管。定时来源及 `resend` 元数据在 ID 替换期间必须保留。
-- 兼容性：接口与所有 `resend` 字段均为新增，旧客户端缺失字段时按普通 Run/消息显示。
+- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。接口返回替代 Run 后，调用方应立即把源用户轮次的展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，并隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识，随后用替代 Run 的真实 user message ID 原位接管。定时来源及 `resend` 元数据在 ID 替换期间必须保留。
+- 兼容性：接口、可选 `editedPrompt` 与所有 `resend` 字段均为 additive 新增；旧客户端不传修改文本时仍按原内容重放，缺失响应字段时按普通 Run/消息显示。
 - 对应测试：`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendAutomaticServiceTest`、
   `MyBatisRunResendRepositoryIntegrationTest`、前端 reducer 和 `FigmaChatPanelTest`。
 

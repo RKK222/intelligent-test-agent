@@ -22,6 +22,7 @@ type AssistantRowAccumulator = {
   reasoningGroupIndex?: number;
   toolPartIndices: Record<string, number>;
   toolGroupIndices: Record<string, number>;
+  pendingCompactionIndex?: number;
   workStatus?: WorkStatusAccumulator;
 };
 
@@ -156,6 +157,7 @@ function appendAssistantGroupRow(
   // 会话级 running 只属于最新用户轮次，不能把已结束历史轮次重新投影为进行中。
   const busy = isActiveTurn(userMessageId, state) && state.running;
   if (group.type === "context-tool-group") {
+    accumulator.pendingCompactionIndex = undefined;
     const refs = group.refs.map((ref) => ({ messageId: assistantMessageId, partId: ref.partId }));
     if (aggregateWorkStatus && accumulator.workStatus) {
       for (const ref of refs) {
@@ -190,6 +192,30 @@ function appendAssistantGroupRow(
   }
 
   const part = state.partsByMessageId[assistantMessageId]?.find((candidate) => candidate.partId === group.partId);
+  if (part?.type === "text" && typeof accumulator.pendingCompactionIndex === "number") {
+    const compactionRow = rows[accumulator.pendingCompactionIndex];
+    if (compactionRow?.type === "compaction-summary") {
+      compactionRow.summaryRef = { messageId: assistantMessageId, partId: group.partId };
+      accumulator.pendingCompactionIndex = undefined;
+      return;
+    }
+  }
+  accumulator.pendingCompactionIndex = undefined;
+  if (part?.type === "compaction") {
+    const showAssistantHeader = !accumulator.hasAssistantHeader;
+    rows.push({
+      type: "compaction-summary",
+      key: `compaction:${assistantMessageId}:${group.partId}`,
+      userMessageId,
+      messageId: assistantMessageId,
+      partId: group.partId,
+      previousAssistantPart: accumulator.partIndex > 0 || accumulator.hasAssistantHeader,
+      showAssistantHeader
+    });
+    accumulator.pendingCompactionIndex = rows.length - 1;
+    markAssistantRowAdded(accumulator);
+    return;
+  }
   if (part?.type === "reasoning") {
     const ref = { messageId: assistantMessageId, partId: group.partId };
     if (aggregateWorkStatus && accumulator.workStatus) {

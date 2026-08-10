@@ -686,6 +686,9 @@ const props =
     timelineRuntimeStatus?: OpencodeLikeRuntimeStatus
     placeholder?: string
     inputValue?: string
+    /** 正在修改上一条消息；提交时走撤回重发而不是普通 Run 或原生命令。 */
+    resendEditing?: boolean
+    resendSubmitting?: boolean
     title?: string
     /** 任务消耗（来自 SSE 事件统计） */
     taskUsage?: TaskUsage
@@ -882,6 +885,7 @@ const emit =
     (e: 'send', prompt: string, attachments?: ComposerAttachment[]): void
     (e: 'stop'): void
     (e: 'retry'): void
+    (e: 'cancel-resend-edit'): void
     (e: 'new-conversation'): void
     (e: 'native-command', command: OpenCodeTuiCommandName): void
     (e: 'run-shell', command: string): void
@@ -2263,8 +2267,10 @@ const nightSessionLockedReason = computed(() =>
     ? '夜间任务正在启动，执行完成后可继续对话'
     : '当前对话已有待执行夜间任务，取消后可继续对话'
 )
-const agentPickerDisabled = computed(() => composerInteractionBlocked.value)
-const modelSelectionDisabled = computed(() => props.modelPickerDisabled === true || composerInteractionBlocked.value)
+const agentPickerDisabled = computed(() => composerInteractionBlocked.value || props.resendEditing === true)
+const modelSelectionDisabled = computed(
+  () => props.modelPickerDisabled === true || composerInteractionBlocked.value || props.resendEditing === true
+)
 const processSubmitBlocked = computed(
   () =>
     props.running ||
@@ -2276,10 +2282,11 @@ const newConversationBlocked = computed(
   () => !processReady.value
     || publicConfigMessageBlocked.value
     || (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
+    || props.resendEditing === true
 )
 /** 只有在新建的对话（未建立/加载已有 Session），且还没有发送消息时，才允许展示输入框顶部的批量入口菜单 */
 const showComposerTopMenu = computed(() => {
-  return !props.currentSessionId && (props.messages ?? []).length === 0
+  return !props.resendEditing && !props.currentSessionId && (props.messages ?? []).length === 0
 })
 const readonlyBlockedReason = computed(() => props.readonlyReason?.trim() ?? '')
 const readonlySubmitBlocked = computed(() => Boolean(readonlyBlockedReason.value))
@@ -2302,6 +2309,7 @@ const sendSubmitBlocked = computed(
     || props.historySubmitBlocked === true
     || processSubmitBlocked.value
     || props.chatAttachmentsUploading === true
+    || props.resendSubmitting === true
     || nightSessionLocked.value
     || readonlySubmitBlocked.value
     || contextSubmitBlocked.value
@@ -2309,7 +2317,7 @@ const sendSubmitBlocked = computed(
 // OpenCode 原生命令不是普通消息发送：即使会话只读、进程异常或上下文超限，
 // 也要允许用户输入并交给命令处理器，由具体命令自行判断是否可执行。
 const nativeComposerCommand = computed(() =>
-  props.chatAttachments.length === 0
+  !props.resendEditing && props.chatAttachments.length === 0
     ? resolveOpenCodeTuiCommand(localInput.value.trim())
     : null
 )
@@ -2317,6 +2325,7 @@ const composerSubmitBlocked = computed(
   () => sendSubmitBlocked.value && nativeComposerCommand.value === null
 )
 const composerPlaceholder = computed(() => {
+  if (props.resendEditing) return '修改上一条消息后发送'
   if (props.processLoading && !props.processStatus) return '正在检查 TestAgent 进程…'
   if (!processReady.value) return '请先初始化 TestAgent 进程'
   if (publicConfigMessageBlocked.value) return publicConfigMessageBlockedReason.value
@@ -2334,6 +2343,7 @@ const nightScheduleBlocked = computed(() =>
     || contextSubmitBlocked.value
     || nightSessionLocked.value
     || props.nightTaskSubmitting === true
+    || props.resendEditing === true
 )
 const processStatusVisible = computed(
   () =>
@@ -3458,6 +3468,20 @@ watch(
   }
 )
 
+watch(
+  () => props.resendEditing,
+  (editing) => {
+    if (!editing) return
+    dismissSkillPanel()
+    nextTick(() => {
+      const textarea = composerTextarea.value
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    })
+  }
+)
+
 watch(localInput, (v) => onComposerInput(v))
 
 watch(
@@ -4422,6 +4446,15 @@ function submit() {
   const text = localInput.value.trim()
   const attachments = props.chatAttachments
   if (!text && attachments.length === 0) return
+  if (props.resendEditing) {
+    if (!text || sendSubmitBlocked.value) return
+    wasStopped.value = false
+    wasCompleted.value = false
+    wasFailed.value = false
+    // 编辑撤回必须保留输入直到后端成功；失败时用户可以继续修改后再次发送。
+    emit('send', text)
+    return
+  }
   // TUI 内置命令和 !shell 必须先于通用 Run/Skill 分发处理，避免落入 session command 命名空间。
   const nativeCommand = attachments.length === 0 ? resolveOpenCodeTuiCommand(text) : null
   if (nativeCommand) {
@@ -5800,6 +5833,7 @@ function onCompositionEnd() {
           'is-resizing': isResizingComposer,
           'is-disabled': composerInteractionBlocked,
           'is-night-locked': nightSessionLocked,
+          'is-resend-editing': resendEditing,
         }"
         @click="onComposerCardClick"
       >
@@ -5810,6 +5844,25 @@ function onCompositionEnd() {
           aria-orientation="horizontal"
           @pointerdown.stop.prevent="startComposerResize"
         />
+        <div
+          v-if="resendEditing"
+          class="figma-chat-resend-edit-banner"
+          data-testid="resend-edit-banner"
+          role="status"
+        >
+          <div>
+            <strong>正在修改上一条消息</strong>
+            <span>发送后将替换上一轮，原消息的附件会继续复用</span>
+          </div>
+          <button
+            type="button"
+            :disabled="resendSubmitting"
+            aria-label="取消修改上一条消息"
+            @click.stop="emit('cancel-resend-edit')"
+          >
+            取消
+          </button>
+        </div>
         <textarea
           ref="composerTextarea"
           v-model="localInput"
@@ -5817,6 +5870,7 @@ function onCompositionEnd() {
           :style="composerTextareaStyle"
           :placeholder="composerPlaceholder"
           rows="1"
+          :disabled="resendSubmitting"
           :title="sendBlockedTitle"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
@@ -5833,7 +5887,7 @@ function onCompositionEnd() {
               type="button"
               class="figma-chat-card-btn figma-chat-attachment-btn"
               aria-label="上传附件"
-              :disabled="composerInteractionBlocked || chatAttachmentsUploading"
+              :disabled="composerInteractionBlocked || chatAttachmentsUploading || resendEditing"
               @click="openAttachmentDialog"
             >
               <Paperclip class="figma-chat-btn-icon figma-chat-icon--attachment" />
@@ -6040,7 +6094,8 @@ function onCompositionEnd() {
             aria-label="发送"
             @click="submit"
           >
-            <Send class="figma-chat-send-icon" />
+            <Spinner v-if="resendSubmitting" />
+            <Send v-else class="figma-chat-send-icon" />
           </button>
           <button
             v-else
@@ -9931,6 +9986,57 @@ function onCompositionEnd() {
 .figma-chat-input-card:focus-within {
   border-color: #3366ff;
   box-shadow: none;
+}
+
+.figma-chat-input-card.is-resend-editing {
+  border-color: color-mix(in srgb, var(--ta-accent, #315bdc) 48%, #d4d4d4);
+  background: color-mix(in srgb, var(--ta-accent, #315bdc) 3%, #fff);
+}
+
+.figma-chat-resend-edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 9px 10px 2px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ta-accent, #315bdc) 8%, #fff);
+  color: var(--ta-chat-fg, #27272a);
+}
+
+.figma-chat-resend-edit-banner > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.figma-chat-resend-edit-banner strong {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.figma-chat-resend-edit-banner span {
+  color: var(--ta-chat-muted, #71717a);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.figma-chat-resend-edit-banner button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ta-accent, #315bdc);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.figma-chat-resend-edit-banner button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* 进程不可用时整张输入卡进入统一灰显态；无 Session 时仍允许直接输入首条消息。 */

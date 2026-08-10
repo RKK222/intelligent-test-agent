@@ -213,6 +213,22 @@ class SessionApplicationServiceTest {
         assertThat(sessions.saved.getLast()).isEqualTo(updated);
     }
 
+    @Test
+    void touchSessionOnlyAdvancesContentRevisionWithoutCancellingTitleWatch() {
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        RunSessionTitleWatchService titleWatch = Mockito.mock(RunSessionTitleWatchService.class);
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true), sessions, new FakeMessageRepository(), null, titleWatch);
+
+        Session touched = service.touchSession(SESSION_ID, "trace_compaction_touch");
+
+        assertThat(touched.title()).isEqualTo("Demo session");
+        assertThat(touched.pinned()).isEqualTo(session().pinned());
+        assertThat(touched.updatedAt()).isAfter(NOW);
+        assertThat(touched.traceId()).isEqualTo("trace_compaction_touch");
+        verify(titleWatch, never()).cancelForSession(Mockito.any(), Mockito.anyString());
+    }
+
     /** 验证纯置顶往返不改变普通会话组的排序锚点。 */
     @Test
     void pinAndUnpinPreserveHistorySortTimestamp() {

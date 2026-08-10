@@ -131,6 +131,7 @@ class SessionShareControllerTest {
         SessionCollaborationShareService service = mock(SessionCollaborationShareService.class);
         RunApplicationService runService = mock(RunApplicationService.class);
         when(service.requireAccess(USER, SHARE_ID, false, TRACE_ID)).thenReturn(context());
+        when(service.sessionUpdatedAt(org.mockito.ArgumentMatchers.any())).thenReturn(NOW);
         when(service.refreshAccess(USER, SHARE_ID, TRACE_ID)).thenThrow(new PlatformException(
                 ErrorCode.SESSION_SHARE_EXPIRED, "分享已取消", java.util.Map.of("reason", "REVOKED")));
         when(runService.findActiveRun(SESSION)).thenReturn(Optional.of(new Run(
@@ -153,6 +154,8 @@ class SessionShareControllerTest {
                             .isEqualTo("session-share.snapshot");
                     org.assertj.core.api.Assertions.assertThat(event.data().activeRun().runId())
                             .isEqualTo("run_share_runtime_state");
+                    org.assertj.core.api.Assertions.assertThat(event.data().sessionUpdatedAt())
+                            .isEqualTo(NOW);
                 })
                 .assertNext(event -> {
                     org.assertj.core.api.Assertions.assertThat(event.event())

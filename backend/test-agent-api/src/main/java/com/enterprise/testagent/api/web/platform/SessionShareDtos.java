@@ -162,16 +162,18 @@ final class SessionShareDtos {
             boolean canChat,
             Instant expiresAt,
             RuntimeDtos.RunResponse activeRun,
+            Instant sessionUpdatedAt,
             Instant generatedAt) {
 
         static SessionShareRuntimeStateResponse active(
                 DelegatedOperationContext context,
                 RuntimeDtos.RunResponse activeRun,
+                Instant sessionUpdatedAt,
                 Instant generatedAt) {
             return new SessionShareRuntimeStateResponse(
                     true, null, context.shareId().value(), context.shareVersion(),
                     context.sessionId().value(), context.workspaceId().value(), context.canChat(),
-                    context.expiresAt(), activeRun, generatedAt);
+                    context.expiresAt(), activeRun, sessionUpdatedAt, generatedAt);
         }
 
         static SessionShareRuntimeStateResponse invalid(
@@ -181,7 +183,7 @@ final class SessionShareDtos {
             return new SessionShareRuntimeStateResponse(
                     false, reason, previous.shareId().value(), previous.shareVersion(),
                     previous.sessionId().value(), previous.workspaceId().value(), false,
-                    previous.expiresAt(), null, generatedAt);
+                    previous.expiresAt(), null, null, generatedAt);
         }
     }
 

@@ -7969,3 +7969,31 @@
 
 - 用户现在可以从系统内置手册查到近期功能的入口、步骤、权限和失败处理；宣传稿可直接复制后使用。
 - 本次只修改文档与宣传文字，不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能、安全、兼容性实现、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-10 - 修复共享会话撤回编辑、终态收敛与上下文压缩同步
+
+### Why
+
+- 会话协作中普通参与者也能对自己发送的最后一条消息执行撤回重发，不符合“只有分享人/会话所属人可撤回”的产品边界；既有入口点击后立即调用后端，用户没有修改上一条消息的机会。
+- 所属人撤回结束后，分享 runtime-state 直接清空本地 active Run，绕过精确终态对账，其他参与者持续显示“思考中”直到刷新。
+- compact 只改变 OpenCode 远端消息，没有推进平台可观察修订，分享 SSE 不会通知其他参与者；compaction 标记后的内部续写摘要又被当作普通助手回答直接展示，风格和语义都不清晰。
+
+### What
+
+- 人工撤回重发收紧为仅会话所属人；停止 Run 继续允许所属人或该 Run 实际发送人。前端点击“撤销重发”后先把上一条文本装入受控 composer，可编辑或取消，发送失败保留草稿；API additive 接受可选 `editedPrompt`，服务端从可信远端轮次恢复原 part，只替换文本并保留附件、Agent、模型、variant 等其它结构。
+- 分享 runtime-state 不再在 active Run 消失时提前清空本地 Run，而是复用精确 Run 详情终态对账；新增 additive `sessionUpdatedAt` 内容修订锚点，compact 远端成功后推进平台 Session 修订并触发分享 SSE，其他参与者自动刷新消息投影。
+- 将 compaction 标记与紧邻的内部续写摘要合并为默认折叠的标准 disclosure“上下文已压缩”，展开后说明它不是新回答，并在展示层把固定英文摘要字段映射为中文；原始消息和协议内容不改写。
+- 同步 runtime/API/frontend/agent-chat/backend-api README/PACKAGE、HTTP API、RunEvent、安全、OpenCode 规范、对话测试场景和内置用户手册。
+
+### How
+
+- JDK 25 下 `RunResendApplicationServiceTest`、`OpencodeRuntimeApplicationServiceTest`、`SessionApplicationServiceTest` 共 58 项通过；`SessionShareControllerTest` 4 项通过。
+- 前端相关 Vitest 3 个文件 196 项通过、1 项按设计跳过；agent-web、agent-chat、event-stream-client typecheck 均通过；Chromium Playwright 6 项通过，覆盖非所属人无入口、编辑重发、历史失败重发、分享 Run 终态自动收敛和 compact 修订自动刷新。
+- agent-web production build（含 `user-manual` VitePress build）、`tools/verify-ai-docs.sh` 与 `git diff --check` 通过，仅保留既有大 chunk 提示。提交前回顾全部 `.agents/session-log*.md`，未发现与本次文件重叠的未完成事项或残留合并标记。
+- 首次按 `.env.test` 启动被本机 workflow 缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 拦截；未修改环境文件，改用脚本现成 `--without-workflow` 模式完成 21 模块构建和 backend/opencode-manager/frontend 三服务重启。Backend health/readiness 为 `UP`，Frontend 返回 HTTP 200，CORS 正确，manager WebSocket 已连接且受管 OpenCode 最终 `HEALTHY`。
+
+### Result
+
+- 只有会话所属人能撤回并修改上一条消息后重发；分享成员不再因自己是源消息发送人获得该权限。分享页面无需刷新即可退出旧 Run 的“思考中”并看到压缩后的摘要。
+- HTTP URL 和 RunEvent wire name 不变，只新增可选请求字段与分享 SSE data 字段，旧客户端不传/忽略时继续兼容；修改文本只进入既有有限 TTL Redis 精确重放输入，不进入控制表、事件、审计或日志。
+- 未新增 SQL、Flyway migration、数据库字段或索引，不修改 `.env*`、generated SDK 或 OpenCode 只读源码；新增的分享 SSE Session 修订读取复用既有单会话查询，不引入前端轮询。

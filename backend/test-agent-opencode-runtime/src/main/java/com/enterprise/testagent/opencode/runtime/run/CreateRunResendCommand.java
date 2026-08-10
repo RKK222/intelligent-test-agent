@@ -8,12 +8,25 @@ public record CreateRunResendCommand(
         String expectedRemoteMessageId,
         RunId expectedRunId,
         String contextToken,
-        String clientRequestId) {
+        String clientRequestId,
+        String editedPrompt) {
+
+    /** 兼容自动重发和既有调用方：未提供编辑内容时精确重放原始用户轮次。 */
+    public CreateRunResendCommand(
+            String expectedRemoteMessageId,
+            RunId expectedRunId,
+            String contextToken,
+            String clientRequestId) {
+        this(expectedRemoteMessageId, expectedRunId, contextToken, clientRequestId, null);
+    }
 
     public CreateRunResendCommand {
         expectedRemoteMessageId = DomainValidation.requireText(
                 expectedRemoteMessageId, "expectedRemoteMessageId");
         contextToken = DomainValidation.requireText(contextToken, "contextToken");
         clientRequestId = DomainValidation.requireText(clientRequestId, "clientRequestId");
+        editedPrompt = editedPrompt == null
+                ? null
+                : DomainValidation.requireText(editedPrompt, "editedPrompt");
     }
 }

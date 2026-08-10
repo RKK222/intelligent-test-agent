@@ -18,6 +18,7 @@ import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationSe
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
+import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
@@ -49,6 +50,7 @@ public class OpencodeRuntimeApplicationService {
     private final RunApplicationService runApplicationService;
     private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
     private NightExecutionSessionLockGuard sessionLockGuard;
+    private SessionApplicationService sessionApplicationService;
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
     private final ThreadLocal<String> agentContext = new ThreadLocal<>();
@@ -99,6 +101,12 @@ public class OpencodeRuntimeApplicationService {
     @Autowired(required = false)
     void configureSessionLockGuard(NightExecutionSessionLockGuard lockGuard) {
         this.sessionLockGuard = Objects.requireNonNull(lockGuard, "lockGuard must not be null");
+    }
+
+    /** compact 成功后推进平台会话修订，供分享状态流通知所有参与者刷新远端消息快照。 */
+    @Autowired(required = false)
+    void configureSessionApplicationService(SessionApplicationService service) {
+        this.sessionApplicationService = Objects.requireNonNull(service, "service must not be null");
     }
 
     /**
@@ -552,7 +560,15 @@ public class OpencodeRuntimeApplicationService {
     public Object compactSession(String sessionId, Map<String, Object> body, String traceId) {
         requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/summarize", safeBody(body), traceId);
+        Object result = post(
+                location,
+                "/session/" + encodePath(location.remoteSessionId()) + "/summarize",
+                safeBody(body),
+                traceId);
+        if (sessionApplicationService != null) {
+            sessionApplicationService.touchSession(new SessionId(sessionId), traceId);
+        }
+        return result;
     }
 
     /**

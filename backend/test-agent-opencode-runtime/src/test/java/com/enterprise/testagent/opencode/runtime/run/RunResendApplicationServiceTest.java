@@ -22,6 +22,7 @@ import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunRepository;
 import com.enterprise.testagent.domain.run.RunResend;
+import com.enterprise.testagent.domain.run.RunResendReplayInput;
 import com.enterprise.testagent.domain.run.RunResendReplayInputStore;
 import com.enterprise.testagent.domain.run.RunResendRepository;
 import com.enterprise.testagent.domain.run.RunResendId;
@@ -49,6 +50,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
 class RunResendApplicationServiceTest {
@@ -171,24 +173,54 @@ class RunResendApplicationServiceTest {
     }
 
     @Test
-    void sharedSenderCanResendOwnLastMessageAndReplacementKeepsSourceAttribution() {
+    void sharedOwnerCanEditLastMessageAndPreservesOtherReplayParts() {
         when(runRepository.findById(SOURCE_RUN_ID)).thenReturn(Optional.of(
                 sourceRun().withMessageSender(SHARED_SENDER, "ucid_resend_shared", true)));
+        when(runtime.loadReplayableTurn(any())).thenReturn(Mono.just(new AgentReplayableTurn(
+                SOURCE_MESSAGE_ID,
+                "原始问题",
+                List.of(
+                        AgentPromptPart.text("原始问题", java.util.Map.of("kind", "original")),
+                        AgentPromptPart.file(
+                                "file:///tmp/report.txt", "text/plain", "report.txt",
+                                java.util.Map.of("kind", "attachment")),
+                        AgentPromptPart.agent("review", java.util.Map.of("kind", "mention"))),
+                "build",
+                "openai",
+                "gpt-5",
+                "high")));
 
         RunResend result = service.createManual(
-                sharedContext(SHARED_SENDER, true),
+                sharedContext(OWNER, true),
                 "opencode",
                 SESSION_ID,
                 new CreateRunResendCommand(
                         SOURCE_MESSAGE_ID,
                         SOURCE_RUN_ID,
                         "context_token_shared",
-                        "request_resend_shared"),
+                        "request_resend_shared",
+                        "修改后的问题"),
                 "trace_resend_shared");
 
-        assertThat(result.requesterUserId()).isEqualTo(SHARED_SENDER);
-        assertThat(result.requesterUnifiedAuthId()).isEqualTo("ucid_resend_shared");
-        assertThat(result.requestedBySharedUser()).isTrue();
+        assertThat(result.requesterUserId()).isEqualTo(OWNER);
+        assertThat(result.requestedBySharedUser()).isFalse();
+        ArgumentCaptor<RunResendReplayInput> inputCaptor = ArgumentCaptor.forClass(RunResendReplayInput.class);
+        verify(replayInputStore).save(inputCaptor.capture());
+        RunResendReplayInput replayInput = inputCaptor.getValue();
+        assertThat(replayInput.prompt()).isEqualTo("修改后的问题");
+        assertThat(replayInput.parts()).satisfiesExactly(
+                part -> assertThat(part)
+                        .containsEntry("type", "text")
+                        .containsEntry("text", "修改后的问题")
+                        .containsEntry("source", java.util.Map.of("kind", "original")),
+                part -> assertThat(part)
+                        .containsEntry("type", "file")
+                        .containsEntry("filename", "report.txt")
+                        .containsEntry("source", java.util.Map.of("kind", "attachment")),
+                part -> assertThat(part)
+                        .containsEntry("type", "agent")
+                        .containsEntry("agentName", "review")
+                        .containsEntry("source", java.util.Map.of("kind", "mention")));
         verify(runRepository).save(org.mockito.ArgumentMatchers.argThat(run ->
                 run.runId().equals(result.replacementRunId())
                         && SHARED_SENDER.equals(run.messageSenderUserId())
@@ -197,7 +229,7 @@ class RunResendApplicationServiceTest {
     }
 
     @Test
-    void sharedResendRequiresCurrentChatPermissionAndOriginalSender() {
+    void sharedResendRejectsEveryNonOwnerEvenWhenTheySentLastMessageAndCanChat() {
         CreateRunResendCommand command = new CreateRunResendCommand(
                 SOURCE_MESSAGE_ID,
                 SOURCE_RUN_ID,
@@ -207,16 +239,13 @@ class RunResendApplicationServiceTest {
                 sourceRun().withMessageSender(SHARED_SENDER, "ucid_resend_shared", true)));
 
         assertThatThrownBy(() -> service.createManual(
-                        sharedContext(SHARED_SENDER, false), "opencode", SESSION_ID, command,
-                        "trace_resend_shared_readonly"))
+                        sharedContext(SHARED_SENDER, true),
+                        "opencode", SESSION_ID, command, "trace_resend_shared_sender"))
                 .isInstanceOfSatisfying(PlatformException.class,
-                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
-
-        assertThatThrownBy(() -> service.createManual(
-                        sharedContext(new UserId("usr_resend_other_member"), true),
-                        "opencode", SESSION_ID, command, "trace_resend_shared_other"))
-                .isInstanceOfSatisfying(PlatformException.class,
-                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+                        exception -> {
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+                            assertThat(exception.getMessage()).contains("会话所属人");
+                        });
     }
 
     private Run sourceRun() {
@@ -255,18 +284,19 @@ class RunResendApplicationServiceTest {
     }
 
     private DelegatedOperationContext sharedContext(UserId actor, boolean canChat) {
+        boolean ownerAccess = actor.equals(OWNER);
         return new DelegatedOperationContext(
                 SHARE_ID,
                 5L,
                 actor,
-                actor.equals(SHARED_SENDER) ? "ucid_resend_shared" : "ucid_resend_other",
-                actor.equals(SHARED_SENDER) ? "消息发送人" : "其他成员",
+                actor.equals(SHARED_SENDER) ? "ucid_resend_shared" : "ucid_resend_owner",
+                actor.equals(SHARED_SENDER) ? "消息发送人" : "会话所属人",
                 OWNER,
                 SESSION_ID,
                 WORKSPACE_ID,
                 canChat,
-                true,
-                false,
+                !ownerAccess,
+                ownerAccess,
                 NOW.plusSeconds(3_600));
     }
 }
