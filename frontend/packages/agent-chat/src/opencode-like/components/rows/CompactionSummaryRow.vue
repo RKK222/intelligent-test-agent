@@ -36,9 +36,6 @@ const displaySummary = computed(() => props.summary.split("\n").map((line) => {
   return `${match[1]}${bold}${translated}${bold}`;
 }).join("\n"));
 
-const modeLabel = computed(() => props.part.overflow
-  ? "超出窗口"
-  : props.part.auto ? "自动压缩" : "手动压缩");
 const triggerLabel = computed(() => props.part.auto || props.part.overflow
   ? "上下文已自动压缩"
   : "上下文已手动压缩");
@@ -76,26 +73,11 @@ const detailId = computed(() => `oc-compaction-detail-${props.part.partId.replac
       role="region"
       aria-label="上下文压缩详情"
     >
-      <div class="oc-compaction-summary__heading">
-        <strong>压缩摘要</strong>
-        <span>{{ modeLabel }}</span>
-      </div>
-      <div class="oc-compaction-summary__body">
-        <p>较早的对话已整理为续写摘要。</p>
-        <p>
-          这不是新的回答。系统用这份摘要替代较早的对话内容，让模型在有限上下文窗口内继续当前任务。
-        </p>
-        <p v-if="part.overflow" class="oc-compaction-summary__note">
-          本次由上下文接近容量上限触发。
-        </p>
-        <MarkdownView
-          v-if="displaySummary.trim()"
-          :source="displaySummary"
-          :highlight="false"
-          body-class="oc-compaction-summary__markdown"
-        />
-        <p v-else class="oc-compaction-summary__empty">压缩摘要正在同步。</p>
-      </div>
+      <MarkdownView
+        :source="displaySummary"
+        :highlight="false"
+        body-class="oc-compaction-summary__markdown"
+      />
     </div>
   </section>
 </template>

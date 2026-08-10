@@ -8128,6 +8128,32 @@
 - 压缩完成后会在发生位置显示一条可直接识别、可点击的独立记录，不再像图标消失，也不会和思考状态共用按钮；详情仍默认折叠并按需展开。
 - 本次仅修改前端展示、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，旧消息与旧后端兼容性不变。
 
+## 2026-08-10 - 压缩摘要仅在独立按钮内按需展示
+
+### Why
+
+- 本地真实压缩消息经脱敏只读核对后，摘要 part 顺序为 `step-start → reasoning → text → step-finish`；时间线原先在 reasoning 处清空待配对状态，导致 text 摘要被当作普通助手正文平铺，即使压缩按钮处于收起态也仍可见。
+- OpenCode 还可能在 compaction 标记与摘要之间插入无正文或仅含系统 part 的 user envelope。用户要求时间线不显示“上下文压缩中”，只在摘要完成后保留唯一一条默认收起的压缩结果，点击后再展示摘要本身。
+
+### What
+
+- 抽取与 `UserMessageRow` 共用的用户消息可见性判定；compaction 待配对状态可跨不可见 user envelope 和摘要前的 reasoning part，遇到真实用户输入才终止，避免误吞下一轮正常回答。
+- `createTimelineRows` 过滤没有完整摘要或摘要 text 仍为 `pending/running` 的 compaction 行；压缩进行态继续只由输入区上方既有动效反馈，时间线在摘要落稳后才显示唯一结果。
+- `CompactionSummaryRow` 默认收起，结果行仅保留独立文字按钮、分隔线、展开箭头和固定字段中文映射；展开面板只渲染摘要本身，不再显示额外说明或平铺副本。
+- 新增真实 part 顺序、不可见系统包络、进行态不入时间线、下一轮隔离、默认收起和分享无刷新同步回归，并同步 agent-chat、agent-web、用户手册与会话测试文档。
+
+### How
+
+- 使用本地 PostgreSQL 对含 `Objective` 的近期消息只读查询 message 角色、时间和 part 类型，不输出摘要正文，确认真实结构含 reasoning；未修改数据库。
+- agent-chat 与 `FigmaChatPanel` 完整批次 11 个测试文件、340 项通过、1 项按设计跳过；agent-chat、agent-web 类型检查通过。补充“进行态不入时间线”后定向 5 项通过，冷重启后的 Chromium 分享 compact E2E 1 项通过。
+- 首次标准重启仍被既有 Workflow 密钥缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 拦截；未修改环境文件，改用脚本现成 `--without-workflow` 模式完成 21 模块后端构建和 backend/opencode-manager/frontend 冷重启。最终调整后再次冷重启，health/readiness 为 `UP`、3000 返回 200、受管 OpenCode 为 `HEALTHY`。
+- 应用内浏览器接管 localhost 被产品安全策略阻止，未绕过；真实浏览器行为由 Playwright Chromium E2E 验证。提交前回顾全部 `.agents/session-log*.md`，并执行 production build、AI 文档校验、冲突标记扫描和 `git diff --check`。
+
+### Result
+
+- 压缩进行态不再在时间线显示第二条记录；摘要完成后只出现一条默认收起的结果按钮，不再平铺 Objective 等正文，点击后才在按钮下方显示中文字段摘要。
+- 本次仅修改前端投影、展示、测试和稳定文档；不涉及 HTTP API、RunEvent wire、DTO、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，旧消息与旧后端保持兼容。
+
 ## 2026-08-10 - 恢复分享成员的新建对话入口
 
 ### Why

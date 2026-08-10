@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   displayTextFromUserPrompt,
+  hasVisibleUserMessageContent,
   promptPartsForUserDisplay,
   workspaceContextAttachmentsFromPromptParts,
   workspaceContextAttachmentsFromUserPrompt
@@ -71,6 +72,23 @@ describe("displayTextFromUserPrompt", () => {
 
   it("keeps normal user messages unchanged", () => {
     expect(displayTextFromUserPrompt("分析 checkout 失败")).toBe("分析 checkout 失败");
+  });
+
+  it("treats a system-only native user envelope as invisible", () => {
+    expect(hasVisibleUserMessageContent({
+      id: "msg-compaction-envelope",
+      role: "user",
+      text: "",
+      parts: [{ type: "agent", agentId: "build" }],
+      createdAt: "2026-08-10T00:00:00Z"
+    })).toBe(false);
+    expect(hasVisibleUserMessageContent({
+      id: "msg-visible-user",
+      role: "user",
+      text: "继续任务",
+      parts: [{ type: "agent", agentId: "build" }],
+      createdAt: "2026-08-10T00:00:00Z"
+    })).toBe(true);
   });
 
   it("extracts associated workspace context attachment metadata", () => {

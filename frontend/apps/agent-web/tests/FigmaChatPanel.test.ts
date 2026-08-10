@@ -5014,45 +5014,68 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("需要分析");
   });
 
-  it("renders compaction as a separate labeled button and expands its translated details", async () => {
+  it("keeps a compacted summary hidden until its separate button is expanded", async () => {
+    const messages = [
+      {
+        id: "u-before-compaction", messageId: "u-before-compaction", role: "user", text: "继续任务",
+        createdAt: "2026-07-11T08:59:59.000Z"
+      },
+      {
+        id: "a-compaction", messageId: "a-compaction", role: "assistant", text: "",
+        parts: [{ partId: "prt-compaction", type: "compaction", auto: false, overflow: false, tailStartId: "msg-tail" }],
+        createdAt: "2026-07-11T09:00:00.000Z"
+      },
+      {
+        id: "u-compaction-envelope", messageId: "u-compaction-envelope", role: "user", text: "",
+        parts: [{ type: "agent", agentId: "build" }],
+        createdAt: "2026-07-11T09:00:00.500Z"
+      },
+      {
+        id: "a-summary", messageId: "a-summary", role: "assistant",
+        text: "## Objective\n继续当前目标任务\n## Work State\n### Completed\n(none)",
+        parts: [{
+          partId: "prt-summary-step-start", type: "step-start"
+        }, {
+          partId: "prt-summary-reasoning", type: "reasoning", text: "整理较早对话", status: "completed"
+        }, {
+          partId: "prt-summary", type: "text",
+          text: "## Objective\n继续当前目标任务\n## Work State\n### Completed\n(none)"
+        }, {
+          partId: "prt-summary-step-finish", type: "step-finish", reason: "stop"
+        }],
+        createdAt: "2026-07-11T09:00:01.000Z"
+      }
+    ];
     const wrapper = mount(FigmaChatPanel, {
       props: {
-        messages: [
-          {
-            id: "a-compaction", messageId: "a-compaction", role: "assistant", text: "",
-            parts: [{ partId: "prt-compaction", type: "compaction", auto: true, overflow: true, tailStartId: "msg-tail" }],
-            createdAt: "2026-07-11T09:00:00.000Z"
-          },
-          {
-            id: "a-summary", messageId: "a-summary", role: "assistant",
-            text: "## Objective\n继续当前任务\n## Work State\n### Completed\n(none)",
-            parts: [{
-              partId: "prt-summary", type: "text",
-              text: "## Objective\n继续当前任务\n## Work State\n### Completed\n(none)"
-            }],
-            createdAt: "2026-07-11T09:00:01.000Z"
-          }
-        ],
+        messages: messages.slice(0, 3),
         processStatus: { status: "READY", initializable: false, message: "ready" }
       } as any,
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
     await showFullTimeline(wrapper);
+    expect(wrapper.find('[data-testid="compaction-part-prt-compaction"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("上下文压缩中");
+
+    await wrapper.setProps({ messages: messages as any });
+
     const compaction = wrapper.get('[data-testid="compaction-part-prt-compaction"]');
     expect(compaction.find(".oc-compaction-summary__panel").exists()).toBe(false);
     expect(compaction.get('button[aria-label="展开上下文压缩详情"]').attributes("aria-expanded")).toBe("false");
-    expect(compaction.text()).toContain("上下文已自动压缩");
+    expect(compaction.text()).toContain("上下文已手动压缩");
     expect(compaction.text()).not.toContain("Objective");
+    expect(wrapper.text()).not.toContain("继续当前目标任务");
+    expect(wrapper.findAll(".oc-text-part")).toHaveLength(0);
     await compaction.get('button[aria-label="展开上下文压缩详情"]').trigger("click");
     expect(compaction.get('button[aria-label="收起上下文压缩详情"]').attributes("aria-expanded")).toBe("true");
-    expect(compaction.text()).toContain("压缩摘要");
-    expect(compaction.text()).toContain("较早的对话已整理为续写摘要");
-    expect(compaction.text()).toContain("这不是新的回答");
     expect(compaction.text()).toContain("当前目标");
+    expect(compaction.text()).toContain("继续当前目标任务");
     expect(compaction.text()).toContain("工作状态");
     expect(compaction.text()).toContain("已完成");
     expect(compaction.text()).toContain("无");
+    expect(compaction.text()).not.toContain("较早的对话已整理为续写摘要");
+    expect(compaction.text()).not.toContain("这不是新的回答");
     expect(compaction.text()).not.toContain("Objective");
   });
 

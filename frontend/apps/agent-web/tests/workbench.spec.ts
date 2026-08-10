@@ -477,6 +477,7 @@ test("session share reconciles a disappeared active run without requiring refres
 });
 
 test("session share refreshes a compacted summary when the session revision changes", async ({ page }) => {
+  const sessionMessageRequests: string[] = [];
   const runtimeStates: Array<Record<string, unknown>> = [sessionShareRuntimeState({
     shareId: "shr_compaction_sync",
     sessionId: "ses_shared_compaction_sync",
@@ -504,13 +505,16 @@ test("session share refreshes a compacted summary when the session revision chan
       canChat: true
     }),
     sessionShareRuntimeStates: runtimeStates,
-    sessionMessagesBySessionId
+    sessionMessagesBySessionId,
+    sessionMessageRequests
   });
 
   await page.goto("/s/shr_compaction_sync", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("compaction-part-prt-shared-compaction")).toHaveCount(0);
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThanOrEqual(1);
+  const initialMessageRequestCount = sessionMessageRequests.length;
 
-  sessionMessagesBySessionId.ses_shared_compaction_sync = [
+  const compactionPrelude = [
     {
       messageId: "msg_shared_compaction",
       sessionId: "ses_shared_compaction_sync",
@@ -525,15 +529,52 @@ test("session share refreshes a compacted summary when the session revision chan
       }]
     },
     {
+      messageId: "msg_shared_compaction_envelope",
+      sessionId: "ses_shared_compaction_sync",
+      role: "USER",
+      content: "",
+      createdAt: "2026-08-10T02:00:02.500Z",
+      parts: []
+    }
+  ];
+  sessionMessagesBySessionId.ses_shared_compaction_sync = compactionPrelude;
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_compaction_sync",
+    sessionId: "ses_shared_compaction_sync",
+    workspaceId: "wrk_shared_compaction_sync",
+    canChat: true,
+    sessionUpdatedAt: "2026-08-10T02:00:03Z",
+    generatedAt: "2026-08-10T02:00:03Z"
+  }));
+
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
+  await expect(page.getByTestId("compaction-part-prt-shared-compaction")).toHaveCount(0);
+  await expect(page.getByText("上下文压缩中", { exact: true })).toHaveCount(0);
+
+  sessionMessagesBySessionId.ses_shared_compaction_sync = [
+    ...compactionPrelude,
+    {
       messageId: "msg_shared_compaction_summary",
       sessionId: "ses_shared_compaction_sync",
       role: "ASSISTANT",
       content: "## Objective\n继续共享任务\n## Next Move\n验证同步",
       createdAt: "2026-08-10T02:00:03Z",
       parts: [{
+        partId: "prt-shared-compaction-step-start",
+        type: "step-start"
+      }, {
+        partId: "prt-shared-compaction-reasoning",
+        type: "reasoning",
+        text: "整理共享对话",
+        status: "completed"
+      }, {
         partId: "prt-shared-compaction-summary",
         type: "text",
         text: "## Objective\n继续共享任务\n## Next Move\n验证同步"
+      }, {
+        partId: "prt-shared-compaction-step-finish",
+        type: "step-finish",
+        reason: "stop"
       }]
     }
   ];
@@ -550,10 +591,12 @@ test("session share refreshes a compacted summary when the session revision chan
   await expect(compaction).toBeVisible({ timeout: 10_000 });
   await expect(compaction.getByRole("button", { name: "展开上下文压缩详情" })).toContainText("上下文已手动压缩");
   await expect(compaction).not.toContainText("当前目标");
+  await expect(page.getByText("继续共享任务", { exact: true })).toHaveCount(0);
   await compaction.getByRole("button", { name: "展开上下文压缩详情" }).click();
-  await expect(compaction).toContainText("压缩摘要");
   await expect(compaction).toContainText("当前目标");
+  await expect(compaction).toContainText("继续共享任务");
   await expect(compaction).toContainText("下一步");
+  await expect(compaction).not.toContainText("这不是新的回答");
 });
 
 test("session share participant receives the owner's authoritative user message without an empty bubble", async ({ page }) => {
