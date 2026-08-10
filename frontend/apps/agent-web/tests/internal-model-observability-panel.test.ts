@@ -37,7 +37,9 @@ const record: InternalModelCallRecord = {
   streaming: true,
   durationMillis: 900,
   firstTokenMillis: 200,
+  lastTokenMillis: 700,
   streamCompleteMillis: 800,
+  outputTokenCount: 11,
   traceId: "trace_metric_help",
   ucid: "user-10086",
   startedAt: "2026-08-07T09:10:00Z"
@@ -104,6 +106,14 @@ function renderPanel() {
       thirdQuartileMillis: 325,
       maximumMillis: 400
     }),
+    getInternalModelItlDistribution: vi.fn().mockResolvedValue({
+      sampleCount: 4,
+      minimumMillis: 20,
+      firstQuartileMillis: 35,
+      medianMillis: 50,
+      thirdQuartileMillis: 65,
+      maximumMillis: 80
+    }),
     triggerInternalModelProbe: vi.fn().mockResolvedValue({})
   } as Partial<BackendApiClient> as BackendApiClient;
 
@@ -141,11 +151,13 @@ describe("InternalModelObservabilityPanel", () => {
     expect(view.getByText("上游 HTTP 错误")).toBeTruthy();
     expect(await view.findByText("中间 50%：175ms–325ms")).toBeTruthy();
     expect(view.getByText("中位数：250ms")).toBeTruthy();
-    expect(view.getByText("样本：4 次")).toBeTruthy();
-    expect(view.container.querySelector(".ta-imob-chart-box")).toBeTruthy();
+    expect(view.getByText("中位数：50ms")).toBeTruthy();
+    expect(view.getAllByText("50ms").length).toBeGreaterThan(0);
+    expect(view.getAllByText("样本：4 次")).toHaveLength(2);
+    expect(view.container.querySelectorAll(".ta-imob-chart-box")).toHaveLength(2);
     const comparison = view.container.querySelector(".ta-imob-chart-comparison");
     expect(comparison?.querySelector(".ta-imob-chart-stack")).toBeTruthy();
-    expect(comparison?.querySelector(".ta-imob-box-card")).toBeTruthy();
+    expect(comparison?.querySelectorAll(".ta-imob-latency-box-stack > .ta-imob-box-card")).toHaveLength(2);
     expect(comparison?.querySelectorAll(".ta-imob-chart-stack > .ta-imob-chart-card")).toHaveLength(2);
 
     const explainedLabels = [
@@ -153,8 +165,9 @@ describe("InternalModelObservabilityPanel", () => {
       "Avg E2E", "Max E2E", "Total Duration", "RPS",
       "Avg TTFT", "Max TTFT",
       "Avg SCT", "Max SCT",
-      "请求数与成功率趋势", "TTFT 分布（箱线图）", "调用结果分布", "失败原因分类", "供应商请求量对比",
-      "E2E Latency", "TTFT", "SCT"
+      "请求数与成功率趋势", "TTFT 分布（箱线图）", "ITL / TPOT 分布（箱线图）",
+      "调用结果分布", "失败原因分类", "供应商请求量对比",
+      "E2E Latency", "TTFT", "ITL / TPOT", "SCT"
     ];
     for (const label of explainedLabels) {
       expect(view.getAllByRole("button", { name: `查看${label}说明` }).length).toBeGreaterThan(0);

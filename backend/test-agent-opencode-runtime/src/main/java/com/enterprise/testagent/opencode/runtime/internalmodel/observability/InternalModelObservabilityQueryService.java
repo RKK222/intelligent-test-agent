@@ -11,7 +11,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatusRepository;
-import com.enterprise.testagent.domain.internalmodelobservability.InternalModelTtftDistribution;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -78,7 +78,7 @@ public class InternalModelObservabilityQueryService {
     /**
      * 查询 TTFT 五数概括。分位数必须基于单次调用明细计算，不能从小时平均值反推。
      */
-    public InternalModelTtftDistribution queryTtftDistribution(
+    public InternalModelLatencyDistribution queryTtftDistribution(
             String providerId,
             InternalModelCallOutcomeGroup outcomeGroup,
             InternalModelCallSource source,
@@ -87,6 +87,19 @@ public class InternalModelObservabilityQueryService {
         Instant[] window = boundedWindow(from, to);
         List<InternalModelCallOutcome> outcomes = outcomeGroup == null ? List.of() : outcomeGroup.outcomes();
         return callRecordRepository.queryTtftDistribution(
+                providerId, outcomes, source, window[0], window[1]);
+    }
+
+    /** ITL 与 TPOT 是同一指标，只统计上游返回准确输出 Token 数的完整流。 */
+    public InternalModelLatencyDistribution queryItlDistribution(
+            String providerId,
+            InternalModelCallOutcomeGroup outcomeGroup,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to) {
+        Instant[] window = boundedWindow(from, to);
+        List<InternalModelCallOutcome> outcomes = outcomeGroup == null ? List.of() : outcomeGroup.outcomes();
+        return callRecordRepository.queryItlDistribution(
                 providerId, outcomes, source, window[0], window[1]);
     }
 

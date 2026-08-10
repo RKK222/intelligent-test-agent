@@ -53,14 +53,19 @@ public final class InternalModelSseStreamObserver {
         long receivedNanos = System.nanoTime();
         String data = event == null ? null : event.data();
         if (data == null || data.isBlank()) {
-            return new ObservedEvent(event, false, false, false, receivedNanos);
+            return new ObservedEvent(event, false, false, false, null, receivedNanos);
         }
         if (DONE.equals(data.trim())) {
-            return new ObservedEvent(event, false, true, true, receivedNanos);
+            return new ObservedEvent(event, false, true, true, null, receivedNanos);
         }
         PayloadSignals signals = inspectPayload(data);
         return new ObservedEvent(
-                event, signals.output(), signals.protocolComplete(), false, receivedNanos);
+                event,
+                signals.output(),
+                signals.protocolComplete(),
+                false,
+                signals.outputTokenCount(),
+                receivedNanos);
     }
 
     private PayloadSignals inspectPayload(String data) {
@@ -69,9 +74,10 @@ public final class InternalModelSseStreamObserver {
             if (root == null || !root.isObject()) {
                 return PayloadSignals.NONE;
             }
+            Long outputTokenCount = outputTokenCount(root.get("usage"));
             JsonNode choices = root.get("choices");
             if (choices == null || !choices.isArray()) {
-                return PayloadSignals.NONE;
+                return new PayloadSignals(false, false, outputTokenCount);
             }
             boolean output = false;
             boolean protocolComplete = false;
@@ -93,7 +99,7 @@ public final class InternalModelSseStreamObserver {
                     protocolComplete = true;
                 }
             }
-            return new PayloadSignals(output, protocolComplete);
+            return new PayloadSignals(output, protocolComplete, outputTokenCount);
         } catch (Exception ignored) {
             // 畸形 data 仍由转发/适配链路按原有协议处理，但不能伪装成首 token 或刷新输出空闲时间。
             return PayloadSignals.NONE;
@@ -125,6 +131,19 @@ public final class InternalModelSseStreamObserver {
                 || containsOutputText(functionCall, "arguments");
     }
 
+    private static Long outputTokenCount(JsonNode usage) {
+        if (usage == null || !usage.isObject()) {
+            return null;
+        }
+        JsonNode value = usage.get("completion_tokens");
+        if (value == null) {
+            value = usage.get("output_tokens");
+        }
+        return value != null && value.isIntegralNumber() && value.canConvertToLong() && value.longValue() >= 0
+                ? value.longValue()
+                : null;
+    }
+
     private static long deadlineAfter(long baseNanos, Duration timeout) {
         return baseNanos + timeout.toNanos();
     }
@@ -142,9 +161,9 @@ public final class InternalModelSseStreamObserver {
         return duration;
     }
 
-    private record PayloadSignals(boolean output, boolean protocolComplete) {
+    private record PayloadSignals(boolean output, boolean protocolComplete, Long outputTokenCount) {
 
-        private static final PayloadSignals NONE = new PayloadSignals(false, false);
+        private static final PayloadSignals NONE = new PayloadSignals(false, false, null);
     }
 
     /**
@@ -156,6 +175,7 @@ public final class InternalModelSseStreamObserver {
             boolean output,
             boolean protocolComplete,
             boolean done,
+            Long outputTokenCount,
             long receivedNanos) {
     }
 }

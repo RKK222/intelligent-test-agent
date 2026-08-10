@@ -8268,3 +8268,28 @@
 
 - 上下文压缩结果和展开摘要都明显低于正常回答正文层级，且不再被 agent-web 全局按钮、标题或代码字号覆盖。
 - 本次仅修改 agent-chat 样式 token、组件样式和稳定 README；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-11 - 增加 ITL/TPOT 明细与箱线图统计
+
+### Why
+
+- 用户要求按业界口径补齐 ITL/TPOT，并和 TTFT 一样用竖向箱线图展示；SSE 数据块不等于 Token，不能拿 chunk 数近似，否则企业供应商分块策略会直接污染指标。
+
+### What
+
+- 代理在每次流式调用中记录首个与最后一个有效模型输出到达时刻，并读取上游 `usage.completion_tokens`（兼容 `usage.output_tokens`）的准确输出 Token 数；单次 ITL/TPOT 为 `(最后输出时刻-首个输出时刻)/(输出 Token 数-1)`，只纳入至少 2 个输出 Token 的可靠样本，收尾信号等待不计入。
+- `internal_model_call_records` 通过 `V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 增加可空 `last_token_ms/output_token_count` 与非负、时序约束；既有历史记录保持空值。MyBatis XML 新增 ITL 五数分布查询，返回最小值、P25、中位数、P75、最大值。
+- 新增受 `SUPER_ADMIN` 保护的只读 `GET /api/internal/platform/opencode-runtime/internal-model-observability/itl-distribution`；明细增加 ITL/TPOT 列。看板左侧调用结果与供应商图上下排列，右侧 TTFT 与 ITL/TPOT 两个竖向箱线图上下排列，窄屏改为单列。
+- mock 模型成功流改为两段有效输出并返回准确 usage；同步 domain/runtime/persistence/agent-web README、HTTP API、数据库、指标词汇表和本地验证指南。
+
+### How
+
+- 前端组件与 API 客户端定向回归 110 项通过；JDK 25 下后端持久层、SSE observer、代理转发和 Controller 定向测试通过。H2、真实 PostgreSQL、完整迁移兼容测试此前均通过，源码与最终 Boot JAR 内新 migration SHA-256 一致。
+- 使用隔离 PostgreSQL 和 18081 后端启动，readiness 为 `UP`，Flyway 从空库依次执行 95 个 migration 并到达 `20260810234154`；插入 7 条仅用于验证的 mock 明细后，真实 API 返回 ITL 最小值 35ms、P25 50ms、中位数 65ms、P75 90ms、最大值 130ms。
+- 应用内浏览器在独立 5173 前端验收：四张图表两列、每列上下排列且程序化检查无重叠；明细 ITL 与箱线图数值一致。临时前端、18081 后端和隔离数据库容器均已停止并清理，未写入 Flyway 演示数据。
+- 标准 8080 被兄弟 worktree 的旧后端占用且其数据库含当前分支未知 migration，未停止对方进程、未执行 Flyway repair；agent-web production build 另被同期未提交的 `AgentWorkbench.vue` 类型错误拦截，本次相关 Vitest 已通过，且页面由 Vite 实际编译运行。提交前回顾全部 `.agents/session-log*.md`，不纳入同期重发、agent-chat 与其他前端改动。
+
+### Result
+
+- 看板现可同时查看 TTFT 与 ITL/TPOT 的可靠五数分布，逐条明细也能解释单次 Token 输出节奏；没有准确 usage 的调用明确显示为空，不伪造统计。
+- 新增一个只读 HTTP API 和两个可空数据库字段；无 RunEvent 变更，既有超管鉴权、31 天查询上限、30 天明细保留、安全脱敏和旧记录兼容边界不变。未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。

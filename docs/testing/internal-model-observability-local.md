@@ -115,6 +115,10 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/ttft-distribution?providerId=local-mock&source=USER_CALL" \
   -H "Authorization: Bearer <超管token>"
 
+# ITL / TPOT 箱线图五数概括；只统计至少 2 个输出 Token 且有准确 usage 的调用
+curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/itl-distribution?providerId=local-mock&source=USER_CALL" \
+  -H "Authorization: Bearer <超管token>"
+
 # 探活状态
 curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/probe-status" \
   -H "Authorization: Bearer <超管token>"
@@ -125,12 +129,12 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 ## 验证结论
 
 - **插桩→分类→落库**：由 `InternalModelSseStreamObserverTest` 固化真实输出、伪心跳与两种收尾信号语义；`InternalModelProxyForwardingServiceTest` 覆盖首 token、`[DONE]`、`finish_reason` 后 EOF 和无收尾信号的流中断；`InternalModelProviderProbeServiceTest` 用本地 HttpServer 覆盖两种完整 SSE、空 200、超时、500 与连接拒绝。
-- **查询/探活 API**：由 `InternalModelObservabilityControllerTest` 固化 TTFT 五数概括的筛选和返回字段；H2 持久化集成测试验证四分位数插值与空样本，PostgreSQL Testcontainers 测试验证生产数据库的 `percentile_cont` 结果。
+- **查询/探活 API**：由 `InternalModelObservabilityControllerTest` 固化 TTFT、ITL/TPOT 五数概括的筛选和返回字段；H2 持久化集成测试验证四分位数、准确用量筛选与空样本，PostgreSQL Testcontainers 测试验证生产数据库的 `percentile_cont` 结果。
 - **本指南**用真实 HTTP 链路串起上述各层，作为部署前的人工交互复现，不替代真实企业端点验收。
 
 ## 已知边界
 
-- mock 不校验 Token/鉴权，仅用于链路验证；真实环境仍走代理 key 与 provider Token。
+- mock 不校验 Token/鉴权，仅用于链路验证；`ok/sse/finish-reason-eof` 会返回两段模型输出和准确 usage，便于形成 ITL/TPOT 样本。真实环境仍走代理 key 与 provider Token。
 - 三种 timeout 模式最长挂起 120 秒，客户端达到平台截止时间后会主动断开；需要切换模式时可直接重启 mock。`empty` 与 `nonstream-200` 用于验证 2xx 不会让流式探活误报健康。
-- 明细的 `firstTokenMillis` 是首个真实输出到达耗时，`streamCompleteMillis` 是收到 `[DONE]` 或非空 `finish_reason` 的上游完整流耗时；`durationMillis` 还包含代理向下游写出和终态处理，不应拿来替代前两者。
+- 明细的 `firstTokenMillis`/`lastTokenMillis` 是首末真实输出到达耗时，`outputTokenCount` 是上游准确用量，三者计算 ITL/TPOT；`streamCompleteMillis` 是收到 `[DONE]` 或非空 `finish_reason` 的上游完整流耗时，`durationMillis` 还包含代理向下游写出和终态处理。
 - 真实企业端点的网络时延、真实 token 计数、TLS 与证书等，仍需部署后按 `deploy/internal/EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md` 现场验收。

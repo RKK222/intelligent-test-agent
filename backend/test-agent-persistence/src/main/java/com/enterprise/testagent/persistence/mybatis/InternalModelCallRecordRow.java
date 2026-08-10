@@ -16,7 +16,9 @@ public record InternalModelCallRecordRow(
         Long durationMillis,
         Long firstByteMillis,
         Long firstTokenMillis,
+        Long lastTokenMillis,
         Long streamCompleteMillis,
+        Long outputTokenCount,
         String traceId,
         String ucid,
         Instant startedAt) {

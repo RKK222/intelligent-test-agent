@@ -515,7 +515,9 @@ public class InternalModelProxyForwardingService {
         private volatile long firstByteNanos;
         private static final long UNSET_NANOS = Long.MIN_VALUE;
         private final AtomicLong firstTokenNanos = new AtomicLong(UNSET_NANOS);
+        private final AtomicLong lastTokenNanos = new AtomicLong(UNSET_NANOS);
         private final AtomicLong streamCompleteNanos = new AtomicLong(UNSET_NANOS);
+        private final AtomicLong outputTokenCount = new AtomicLong(-1L);
 
         CallObservation(
                 String providerId,
@@ -563,6 +565,10 @@ public class InternalModelProxyForwardingService {
                 firstEventMarked.set(true);
                 // 使用数据到达时刻而非 JSON 解析完成时刻，避免解析开销污染首 token 指标。
                 firstTokenNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
+                lastTokenNanos.set(event.receivedNanos());
+            }
+            if (event.outputTokenCount() != null) {
+                outputTokenCount.accumulateAndGet(event.outputTokenCount(), Math::max);
             }
             if (event.protocolComplete()) {
                 protocolCompleteSeen.set(true);
@@ -617,6 +623,9 @@ public class InternalModelProxyForwardingService {
             Long firstTokenMillis = hasFirstToken()
                     ? (firstTokenNanos.get() - startedNanos) / 1_000_000
                     : null;
+            Long lastTokenMillis = hasFirstToken()
+                    ? (lastTokenNanos.get() - startedNanos) / 1_000_000
+                    : null;
             Long streamCompleteMillis = hasStreamComplete()
                     ? (streamCompleteNanos.get() - startedNanos) / 1_000_000
                     : null;
@@ -633,7 +642,9 @@ public class InternalModelProxyForwardingService {
                     durationMillis,
                     firstByteMillis,
                     firstTokenMillis,
+                    lastTokenMillis,
                     streamCompleteMillis,
+                    outputTokenCount.get() >= 0 ? outputTokenCount.get() : null,
                     traceId == null ? "" : traceId,
                     ucid,
                     startedAt);

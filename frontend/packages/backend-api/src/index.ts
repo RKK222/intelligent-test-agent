@@ -97,6 +97,7 @@ import type {
   InternalModelCallSource,
   InternalModelCallRecord,
   InternalModelCallHourlyStat,
+  InternalModelLatencyDistribution,
   InternalModelTtftDistribution,
   InternalModelProbeStatus,
   InternalModelProbeRunResult,
@@ -2363,6 +2364,21 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       to?: string | null;
     } = {}) => request<InternalModelTtftDistribution>(
       `${internalModelObservabilityBase}/ttft-distribution${query({
+        providerId: params.providerId,
+        outcomeGroup: params.outcomeGroup,
+        source: params.source,
+        from: params.from,
+        to: params.to
+      })}`
+    ),
+    getInternalModelItlDistribution: (params: {
+      providerId?: string | null;
+      outcomeGroup?: InternalModelCallOutcomeGroup | null;
+      source?: InternalModelCallSource | null;
+      from?: string | null;
+      to?: string | null;
+    } = {}) => request<InternalModelLatencyDistribution>(
+      `${internalModelObservabilityBase}/itl-distribution${query({
         providerId: params.providerId,
         outcomeGroup: params.outcomeGroup,
         source: params.source,

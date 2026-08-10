@@ -11,7 +11,7 @@ import type {
   InternalModelCallOutcome,
   InternalModelCallOutcomeGroup,
   InternalModelCallSource,
-  InternalModelTtftDistribution
+  InternalModelLatencyDistribution
 } from "@test-agent/shared-types";
 import MetricHelpLabel from "./MetricHelpLabel.vue";
 
@@ -137,8 +137,6 @@ interface GlossaryItem {
   abbr: string;
   name: string;
   desc: string;
-  isPending?: boolean;
-  pendingText?: string;
 }
 
 // AIPerf (NVIDIA) 指标规范与业界标准英文缩写说明
@@ -147,9 +145,7 @@ const glossaryItems: GlossaryItem[] = [
   {
     abbr: "ITL / TPOT",
     name: "Inter-Token Latency / Time Per Output Token",
-    desc: "Token 输出间隔耗时：生成过程中连续两个 Output Token 之间的平均生成间隔。",
-    isPending: true,
-    pendingText: "（暂未计算）"
+    desc: "Token 输出间隔：模型开始回答后，后续每个 Token 平均要等多久；至少输出 2 个 Token 且供应商返回准确用量时才统计。"
   },
   { abbr: "SCT", name: "Stream Completion Time", desc: "流式完成时间：发起请求到流式响应正常结束的总耗时。" },
   { abbr: "E2E", name: "End-to-End Latency", desc: "端到端延迟：发起请求到接收到完整响应或异常终止的总端到端时长。" },
@@ -172,6 +168,7 @@ const metricHelp = {
   totalDuration: "把每一次调用的耗时相加。多次调用可能同时进行，所以它不等于实际经过的钟表时间。",
   rps: "当前小时和之前 23 个小时段内，总请求数除以从最早整点到本次加载或刷新时刻的秒数。它反映平均请求负载，不是瞬时峰值。",
   firstToken: "首 Token 延迟（TTFT）：从发起调用到模型开始返回实际回答的等待时间；非流式调用或没有实际回答时显示“—”。",
+  interTokenLatency: "ITL / TPOT：模型开始回答后，后续每个输出 Token 平均间隔多久。至少输出 2 个 Token 且供应商返回准确用量时才显示；不会把数据块数量当作 Token 数。",
   avgFirstToken: "平均首 Token 延迟（TTFT）：只统计模型确实开始回答的流式调用，没有返回实际回答的调用不参与。",
   maxFirstToken: "最大首 Token 延迟（TTFT）：只比较模型确实开始回答的流式调用。",
   streamComplete: "从发起调用到流式回答正常结束所用的时间；它以完整结束信号为准，不等同于最后一个 Token 到达时间。",
@@ -185,6 +182,7 @@ const metricHelp = {
 const chartHelp = {
   hourlyTrend: "按小时查看请求数和请求成功率如何变化；选择结果大类后只展示该类请求数。",
   ttftDistribution: "查看模型开始回答前的等待时间分布。箱体表示中间一半的调用，箱内竖线表示中位数，两端表示当前范围内最短和最长的等待时间。",
+  itlDistribution: "查看模型开始回答后的输出节奏。箱体表示中间一半的调用，箱内横线表示中位数，两端表示当前范围内最快和最慢的平均 Token 间隔。",
   successComposition: "把当前筛选范围内的调用分成成功和错误两类，展示各自所占比例。",
   failureBreakdown: "只看异常调用，归并为请求或配置问题、上游服务异常、调用方中断和其他异常。",
   providerVolume: "按供应商汇总当前筛选范围内的调用次数，用来比较各供应商实际承载的调用量。"
@@ -257,6 +255,25 @@ const ttftDistributionQuery = useQuery({
   })
 });
 
+const itlDistributionQuery = useQuery({
+  queryKey: computed(() => ["internal-model-observability-itl-distribution", {
+    providerId: filterProviderId.value || null,
+    outcomeGroup: filterOutcomeGroup.value || null,
+    source: filterSource.value || null,
+    from: queryWindow.value.from,
+    to: queryWindow.value.to
+  }]),
+  enabled: () => hasSuperAdmin.value,
+  retry: false,
+  queryFn: () => api.getInternalModelItlDistribution({
+    providerId: filterProviderId.value || null,
+    outcomeGroup: filterOutcomeGroup.value || null,
+    source: filterSource.value || null,
+    from: queryWindow.value.from,
+    to: queryWindow.value.to
+  })
+});
+
 const probeMutation = useMutation({
   mutationFn: (variables: { providerId?: string }) =>
     api.triggerInternalModelProbe(variables.providerId),
@@ -278,6 +295,7 @@ async function refreshAll() {
     recordsQuery.refetch(),
     statsQuery.refetch(),
     ttftDistributionQuery.refetch(),
+    itlDistributionQuery.refetch(),
     probeStatusQuery.refetch()
   ]);
   await nextTick();
@@ -307,12 +325,12 @@ const stats = computed(() => (statsQuery.data.value ?? []).filter((row) =>
   !filterOutcomeGroup.value || outcomeGroupOf(row.outcome) === filterOutcomeGroup.value
 ));
 
-const emptyTtftDistribution: InternalModelTtftDistribution = { sampleCount: 0 };
-const ttftDistribution = computed(() => ttftDistributionQuery.data.value ?? emptyTtftDistribution);
+const emptyLatencyDistribution: InternalModelLatencyDistribution = { sampleCount: 0 };
+const ttftDistribution = computed(() => ttftDistributionQuery.data.value ?? emptyLatencyDistribution);
+const itlDistribution = computed(() => itlDistributionQuery.data.value ?? emptyLatencyDistribution);
 
 /** 只有后端返回完整、单调的五数概括时才绘图，避免异常数据生成误导性区间。 */
-const ttftBoxData = computed<[number, number, number, number, number] | null>(() => {
-  const distribution = ttftDistribution.value;
+function toBoxData(distribution: InternalModelLatencyDistribution): [number, number, number, number, number] | null {
   const values = [
     distribution.minimumMillis,
     distribution.firstQuartileMillis,
@@ -328,10 +346,16 @@ const ttftBoxData = computed<[number, number, number, number, number] | null>(()
     return null;
   }
   return [minimum, firstQuartile, median, thirdQuartile, maximum];
-});
+}
+
+const ttftBoxData = computed(() => toBoxData(ttftDistribution.value));
+const itlBoxData = computed(() => toBoxData(itlDistribution.value));
 
 const observabilityFetching = computed(() =>
-  recordsQuery.isFetching.value || statsQuery.isFetching.value || ttftDistributionQuery.isFetching.value
+  recordsQuery.isFetching.value
+    || statsQuery.isFetching.value
+    || ttftDistributionQuery.isFetching.value
+    || itlDistributionQuery.isFetching.value
 );
 
 const showRateMetrics = computed(() => !filterOutcomeGroup.value);
@@ -573,11 +597,13 @@ const failureBarData = computed(() =>
 
 const trendChartEl = ref<HTMLDivElement | null>(null);
 const ttftChartEl = ref<HTMLDivElement | null>(null);
+const itlChartEl = ref<HTMLDivElement | null>(null);
 const pieChartEl = ref<HTMLDivElement | null>(null);
 const failureChartEl = ref<HTMLDivElement | null>(null);
 const providerChartEl = ref<HTMLDivElement | null>(null);
 let trendChart: echarts.ECharts | null = null;
 let ttftChart: echarts.ECharts | null = null;
+let itlChart: echarts.ECharts | null = null;
 let pieChart: echarts.ECharts | null = null;
 let failureChart: echarts.ECharts | null = null;
 let providerChart: echarts.ECharts | null = null;
@@ -594,6 +620,55 @@ function ensureChart(el: HTMLDivElement, holder: { current: echarts.ECharts | nu
     holder.current = echarts.init(el);
   }
   return holder.current;
+}
+
+function renderLatencyBox(
+  el: HTMLDivElement | null,
+  chart: echarts.ECharts | null,
+  data: [number, number, number, number, number] | null,
+  distribution: InternalModelLatencyDistribution,
+  label: string,
+  color: string,
+  background: string
+): echarts.ECharts | null {
+  if (!data || !el || el.clientWidth <= 0) {
+    chart?.dispose();
+    return null;
+  }
+  const instance = ensureChart(el, { current: chart });
+  const [minimum, firstQuartile, median, thirdQuartile, maximum] = data;
+  instance?.setOption({
+    animation: false,
+    tooltip: {
+      trigger: "item",
+      formatter: () => [
+        `<strong>${label} 分布（${distribution.sampleCount} 次）</strong>`,
+        `最短：${formatDuration(minimum)}`,
+        `25% 的调用不超过：${formatDuration(firstQuartile)}`,
+        `中位数：${formatDuration(median)}`,
+        `75% 的调用不超过：${formatDuration(thirdQuartile)}`,
+        `最长：${formatDuration(maximum)}`
+      ].join("<br/>")
+    },
+    grid: { top: 18, left: 82, right: 30, bottom: 36 },
+    xAxis: { type: "category", data: ["全部调用"], axisTick: { show: false } },
+    yAxis: {
+      type: "value",
+      name: label,
+      min: 0,
+      scale: true,
+      axisLabel: { formatter: (value: number) => formatDuration(value) }
+    },
+    series: [{
+      name: label,
+      type: "boxplot",
+      layout: "vertical",
+      boxWidth: [40, 90],
+      data: [[minimum, firstQuartile, median, thirdQuartile, maximum]],
+      itemStyle: { color: background, borderColor: color, borderWidth: 2 }
+    }]
+  }, true);
+  return instance;
 }
 
 function renderCharts() {
@@ -633,52 +708,12 @@ function renderCharts() {
       ]
     }, true);
   }
-  if (ttftBoxData.value && ttftChartEl.value && ttftChartEl.value.clientWidth > 0) {
-    ttftChart = ensureChart(ttftChartEl.value, { current: ttftChart });
-    const [minimum, firstQuartile, median, thirdQuartile, maximum] = ttftBoxData.value;
-    ttftChart?.setOption({
-      animation: false,
-      tooltip: {
-        trigger: "item",
-        formatter: () => [
-          `<strong>TTFT 分布（${ttftDistribution.value.sampleCount} 次）</strong>`,
-          `最短：${formatDuration(minimum)}`,
-          `25% 的调用不超过：${formatDuration(firstQuartile)}`,
-          `中位数：${formatDuration(median)}`,
-          `75% 的调用不超过：${formatDuration(thirdQuartile)}`,
-          `最长：${formatDuration(maximum)}`
-        ].join("<br/>")
-      },
-      grid: { top: 18, left: 72, right: 38, bottom: 42 },
-      xAxis: {
-        type: "category",
-        data: ["全部调用"],
-        axisTick: { show: false }
-      },
-      yAxis: {
-        type: "value",
-        name: "TTFT",
-        min: 0,
-        scale: true,
-        axisLabel: { formatter: (value: number) => formatDuration(value) }
-      },
-      series: [{
-        name: "TTFT",
-        type: "boxplot",
-        layout: "vertical",
-        boxWidth: [48, 100],
-        data: [[minimum, firstQuartile, median, thirdQuartile, maximum]],
-        itemStyle: {
-          color: "#dbeafe",
-          borderColor: "#2563eb",
-          borderWidth: 2
-        }
-      }]
-    }, true);
-  } else if (ttftChart) {
-    ttftChart.dispose();
-    ttftChart = null;
-  }
+  ttftChart = renderLatencyBox(
+    ttftChartEl.value, ttftChart, ttftBoxData.value, ttftDistribution.value, "TTFT", "#2563eb", "#dbeafe"
+  );
+  itlChart = renderLatencyBox(
+    itlChartEl.value, itlChart, itlBoxData.value, itlDistribution.value, "ITL / TPOT", "#7c3aed", "#ede9fe"
+  );
   if (showRateMetrics.value && pieChartEl.value && pieChartEl.value.clientWidth > 0) {
     pieChart = ensureChart(pieChartEl.value, { current: pieChart });
     pieChart?.setOption({
@@ -733,6 +768,7 @@ function renderCharts() {
 function resizeCharts() {
   trendChart?.resize();
   ttftChart?.resize();
+  itlChart?.resize();
   pieChart?.resize();
   failureChart?.resize();
   providerChart?.resize();
@@ -745,16 +781,17 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resizeCharts);
-  [trendChart, ttftChart, pieChart, failureChart, providerChart].forEach((chart) => chart?.dispose());
+  [trendChart, ttftChart, itlChart, pieChart, failureChart, providerChart].forEach((chart) => chart?.dispose());
   trendChart = null;
   ttftChart = null;
+  itlChart = null;
   pieChart = null;
   failureChart = null;
   providerChart = null;
 });
 
 // 数据变动后 post-flush 触发重新渲染，确保在新 DOM 或过滤数据更新后重绘图表
-watch([() => stats.value, () => ttftDistribution.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
+watch([() => stats.value, () => ttftDistribution.value, () => itlDistribution.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
   void nextTick(renderCharts);
 }, { deep: true, flush: "post" });
 
@@ -782,6 +819,28 @@ function formatDuration(millis: number | null | undefined): string {
   if (millis < 1000) return `${Math.round(millis)}ms`;
   const seconds = millis / 1000;
   return seconds < 10 ? `${seconds.toFixed(2)}s` : `${seconds.toFixed(1)}s`;
+}
+
+/** 只按业界口径计算可靠样本：首末输出间隔除以后续 Token 数。 */
+function interTokenLatencyMillis(row: {
+  firstTokenMillis?: number | null;
+  lastTokenMillis?: number | null;
+  outputTokenCount?: number | null;
+}): number | null {
+  const first = row.firstTokenMillis;
+  const last = row.lastTokenMillis;
+  const count = row.outputTokenCount;
+  if (typeof first !== "number"
+    || typeof last !== "number"
+    || typeof count !== "number"
+    || !Number.isFinite(first)
+    || !Number.isFinite(last)
+    || !Number.isInteger(count)
+    || count < 2
+    || last < first) {
+    return null;
+  }
+  return (last - first) / (count - 1);
 }
 
 /** 低流量不压成 0.00，高流量保持两位小数。 */
@@ -885,11 +944,9 @@ function onPageChange(next: number) {
               v-for="item in glossaryItems"
               :key="item.abbr"
               class="ta-imob-glossary-item"
-              :class="{ 'is-pending': item.isPending }"
             >
               <div class="ta-imob-glossary-item-top">
                 <code class="ta-imob-glossary-abbr">{{ item.abbr }}</code>
-                <span v-if="item.pendingText" class="ta-imob-glossary-pending-badge">{{ item.pendingText }}</span>
               </div>
               <span class="ta-imob-glossary-name">{{ item.name }}</span>
               <span class="ta-imob-glossary-desc">{{ item.desc }}</span>
@@ -1066,6 +1123,12 @@ function onPageChange(next: number) {
               </template>
               <template #default="{ row }">{{ formatDuration(row.firstTokenMillis) }}</template>
             </el-table-column>
+            <el-table-column label="ITL / TPOT" min-width="190">
+              <template #header>
+                <MetricHelpLabel label="ITL / TPOT" :description="metricHelp.interTokenLatency" />
+              </template>
+              <template #default="{ row }">{{ formatDuration(interTokenLatencyMillis(row)) }}</template>
+            </el-table-column>
             <el-table-column label="SCT" min-width="170">
               <template #header>
                 <MetricHelpLabel label="SCT" :description="metricHelp.streamComplete" />
@@ -1188,7 +1251,7 @@ function onPageChange(next: number) {
                 <div ref="trendChartEl" class="ta-imob-chart ta-imob-chart-trend" />
               </div>
 
-              <!-- 左侧两张对比图纵向排列，右侧箱线图占据同一整列，便于一起查看。 -->
+              <!-- 左侧两张业务图、右侧两张时延箱线图均纵向排列，保持对照关系和视觉平衡。 -->
               <div class="ta-imob-chart-comparison">
                 <div class="ta-imob-chart-stack">
                   <div v-if="showRateMetrics" class="ta-imob-chart-card">
@@ -1205,23 +1268,45 @@ function onPageChange(next: number) {
                   </div>
                 </div>
 
-                <div v-loading="ttftDistributionQuery.isLoading.value" class="ta-imob-chart-card ta-imob-box-card">
-                  <div class="ta-imob-box-title-row">
-                    <h4 class="ta-imob-overview-title">
-                      <MetricHelpLabel label="TTFT 分布（箱线图）" :description="chartHelp.ttftDistribution" />
-                    </h4>
-                    <div v-if="ttftBoxData" class="ta-imob-box-summary">
-                      <span>中间 50%：{{ formatDuration(ttftBoxData[1]) }}–{{ formatDuration(ttftBoxData[3]) }}</span>
-                      <span>中位数：{{ formatDuration(ttftBoxData[2]) }}</span>
-                      <span>样本：{{ ttftDistribution.sampleCount }} 次</span>
+                <div class="ta-imob-latency-box-stack">
+                  <div v-loading="ttftDistributionQuery.isLoading.value" class="ta-imob-chart-card ta-imob-box-card">
+                    <div class="ta-imob-box-title-row">
+                      <h4 class="ta-imob-overview-title">
+                        <MetricHelpLabel label="TTFT 分布（箱线图）" :description="chartHelp.ttftDistribution" />
+                      </h4>
+                      <div v-if="ttftBoxData" class="ta-imob-box-summary">
+                        <span>中间 50%：{{ formatDuration(ttftBoxData[1]) }}–{{ formatDuration(ttftBoxData[3]) }}</span>
+                        <span>中位数：{{ formatDuration(ttftBoxData[2]) }}</span>
+                        <span>样本：{{ ttftDistribution.sampleCount }} 次</span>
+                      </div>
+                    </div>
+                    <div v-if="ttftDistributionQuery.isError.value" class="ta-imob-chart-empty">
+                      TTFT 分布加载失败，请刷新重试
+                    </div>
+                    <div v-else-if="ttftBoxData" ref="ttftChartEl" class="ta-imob-chart ta-imob-chart-box" />
+                    <div v-else-if="!ttftDistributionQuery.isLoading.value" class="ta-imob-chart-empty">
+                      当前筛选范围没有可用于统计的 TTFT
                     </div>
                   </div>
-                  <div v-if="ttftDistributionQuery.isError.value" class="ta-imob-chart-empty">
-                    TTFT 分布加载失败，请刷新重试
-                  </div>
-                  <div v-else-if="ttftBoxData" ref="ttftChartEl" class="ta-imob-chart ta-imob-chart-box" />
-                  <div v-else-if="!ttftDistributionQuery.isLoading.value" class="ta-imob-chart-empty">
-                    当前筛选范围没有可用于统计的 TTFT
+
+                  <div v-loading="itlDistributionQuery.isLoading.value" class="ta-imob-chart-card ta-imob-box-card">
+                    <div class="ta-imob-box-title-row">
+                      <h4 class="ta-imob-overview-title">
+                        <MetricHelpLabel label="ITL / TPOT 分布（箱线图）" :description="chartHelp.itlDistribution" />
+                      </h4>
+                      <div v-if="itlBoxData" class="ta-imob-box-summary">
+                        <span>中间 50%：{{ formatDuration(itlBoxData[1]) }}–{{ formatDuration(itlBoxData[3]) }}</span>
+                        <span>中位数：{{ formatDuration(itlBoxData[2]) }}</span>
+                        <span>样本：{{ itlDistribution.sampleCount }} 次</span>
+                      </div>
+                    </div>
+                    <div v-if="itlDistributionQuery.isError.value" class="ta-imob-chart-empty">
+                      ITL / TPOT 分布加载失败，请刷新重试
+                    </div>
+                    <div v-else-if="itlBoxData" ref="itlChartEl" class="ta-imob-chart ta-imob-chart-box" />
+                    <div v-else-if="!itlDistributionQuery.isLoading.value" class="ta-imob-chart-empty">
+                      当前范围没有可靠的 ITL / TPOT 样本
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1293,7 +1378,7 @@ function onPageChange(next: number) {
           <p class="ta-imob-doc-lead">
             本文档参考
             <a
-              href="https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference"
+              href="https://docs.nvidia.com/aiperf/reference/ai-perf-metrics-reference"
               target="_blank"
               rel="noopener noreferrer"
               class="ta-imob-external-link"
@@ -1319,11 +1404,11 @@ function onPageChange(next: number) {
                 <td>首 Token 延迟</td>
                 <td>已统计（计算模型生成首包 Token 的启动延迟）</td>
               </tr>
-              <tr class="is-pending-row">
+              <tr>
                 <td><code>ITL / TPOT</code></td>
                 <td>Inter-Token Latency / Time Per Output Token</td>
                 <td>Token 输出间隔 / 单 Token 耗时</td>
-                <td><span class="ta-imob-orange-badge">[暂未计算]</span>（待代理协议提取 Token 粒度时间戳后计算）</td>
+                <td>已统计（首末输出间隔 ÷ 后续 Token 数；至少 2 个输出 Token 且供应商返回准确用量）</td>
               </tr>
               <tr>
                 <td><code>SCT</code></td>
@@ -1365,7 +1450,7 @@ function onPageChange(next: number) {
           </table>
 
           <div class="ta-imob-doc-footer">
-            <span>官方参考链接：<a href="https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference" target="_blank" rel="noopener noreferrer">NVIDIA GenAI Perf / AI Perf Metrics Reference ↗</a></span>
+            <span>官方参考链接：<a href="https://docs.nvidia.com/aiperf/reference/ai-perf-metrics-reference" target="_blank" rel="noopener noreferrer">NVIDIA AIPerf Metrics Reference ↗</a></span>
           </div>
         </div>
       </el-dialog>
@@ -1692,6 +1777,12 @@ function onPageChange(next: number) {
   gap: 12px;
   min-width: 0;
 }
+.ta-imob-latency-box-stack {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
 .ta-imob-chart-stack .ta-imob-chart-card,
 .ta-imob-box-card {
   display: flex;
@@ -1713,7 +1804,7 @@ function onPageChange(next: number) {
 .ta-imob-chart-box {
   flex: 1;
   height: auto;
-  min-height: 480px;
+  min-height: 200px;
 }
 .ta-imob-box-title-row {
   display: flex;
@@ -1743,7 +1834,7 @@ function onPageChange(next: number) {
     grid-template-columns: minmax(0, 1fr);
   }
   .ta-imob-chart-box {
-    min-height: 320px;
+    min-height: 240px;
   }
 }
 .ta-imob-metric-grid {

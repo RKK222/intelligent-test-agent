@@ -20,7 +20,15 @@ public interface InternalModelCallRecordRepository {
             String providerId, InternalModelCallSource source, Instant from, Instant to);
 
     /** 按筛选范围从调用明细计算 TTFT 五数概括，不用小时均值估算分位数。 */
-    InternalModelTtftDistribution queryTtftDistribution(
+    InternalModelLatencyDistribution queryTtftDistribution(
+            String providerId,
+            List<InternalModelCallOutcome> outcomes,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to);
+
+    /** 按筛选范围计算 ITL/TPOT 五数概括，只纳入有准确输出 Token 数的完整样本。 */
+    InternalModelLatencyDistribution queryItlDistribution(
             String providerId,
             List<InternalModelCallOutcome> outcomes,
             InternalModelCallSource source,

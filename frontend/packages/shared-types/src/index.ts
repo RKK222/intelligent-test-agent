@@ -2059,8 +2059,12 @@ export type InternalModelCallRecord = {
   firstByteMillis?: number | null;
   /** 首个包含模型输出的 SSE data 相对耗时；非流式或未收到有效输出 chunk 时为空。 */
   firstTokenMillis?: number | null;
+  /** 最后一个有效模型输出的到达耗时；用于计算 ITL/TPOT。 */
+  lastTokenMillis?: number | null;
   /** 从请求开始到收到 OpenAI 兼容正常收尾信号（[DONE] 或非空 finish_reason）；未完整结束或非流式时为空。 */
   streamCompleteMillis?: number | null;
+  /** 上游 usage 返回的准确输出 Token 数；没有可靠用量时为空。 */
+  outputTokenCount?: number | null;
   traceId: string;
   ucid?: string | null;
   startedAt: string;
@@ -2085,8 +2089,8 @@ export type InternalModelCallHourlyStat = {
   streamCompleteCount?: number | null;
 };
 
-/** TTFT 五数概括；只统计确实收到首个模型输出的调用。 */
-export type InternalModelTtftDistribution = {
+/** 单次调用时延的五数概括；具体样本资格由对应指标决定。 */
+export type InternalModelLatencyDistribution = {
   sampleCount: number;
   minimumMillis?: number | null;
   firstQuartileMillis?: number | null;
@@ -2094,6 +2098,9 @@ export type InternalModelTtftDistribution = {
   thirdQuartileMillis?: number | null;
   maximumMillis?: number | null;
 };
+
+/** TTFT 五数概括；保留别名兼容既有调用方。 */
+export type InternalModelTtftDistribution = InternalModelLatencyDistribution;
 
 /** 逐 provider 最近探活状态，供健康卡片直接读取。 */
 export type InternalModelProbeStatus = {

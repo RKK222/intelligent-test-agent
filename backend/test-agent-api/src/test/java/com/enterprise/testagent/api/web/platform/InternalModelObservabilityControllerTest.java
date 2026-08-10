@@ -17,8 +17,8 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcomeGroup;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
-import com.enterprise.testagent.domain.internalmodelobservability.InternalModelTtftDistribution;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelObservabilityQueryService;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelProviderProbeService;
@@ -39,7 +39,7 @@ class InternalModelObservabilityControllerTest {
         InternalModelCallRecord record = new InternalModelCallRecord(
                 null, "enterprise-deepseek", "DeepSeek-V4", "/chat/completions",
                 InternalModelCallSource.USER_CALL, InternalModelCallOutcome.UPSTREAM_HTTP_ERROR,
-                500, "WebClientResponseException", true, 800L, 50L, 75L, 700L,
+                500, "WebClientResponseException", true, 800L, 50L, 75L, 675L, 700L, 13L,
                 TRACE_ID, "ucid", NOW);
         when(queryService.queryCallRecords(
                         eq("enterprise-deepseek"), any(), eq(InternalModelCallOutcomeGroup.UPSTREAM_FAILURE),
@@ -58,6 +58,8 @@ class InternalModelObservabilityControllerTest {
                 .jsonPath("$.data.items[0].outcome").isEqualTo("UPSTREAM_HTTP_ERROR")
                 .jsonPath("$.data.items[0].httpStatus").isEqualTo(500)
                 .jsonPath("$.data.items[0].streamCompleteMillis").isEqualTo(700)
+                .jsonPath("$.data.items[0].lastTokenMillis").isEqualTo(675)
+                .jsonPath("$.data.items[0].outputTokenCount").isEqualTo(13)
                 .jsonPath("$.data.items[0].source").isEqualTo("USER_CALL")
                 .jsonPath("$.data.items[0].ucid").isEqualTo("ucid");
 
@@ -112,7 +114,7 @@ class InternalModelObservabilityControllerTest {
                         eq(InternalModelCallSource.USER_CALL),
                         any(),
                         any()))
-                .thenReturn(new InternalModelTtftDistribution(4, 100.0, 175.0, 250.0, 325.0, 400.0));
+                .thenReturn(new InternalModelLatencyDistribution(4, 100.0, 175.0, 250.0, 325.0, 400.0));
         WebTestClient client = client(queryService, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
@@ -129,6 +131,29 @@ class InternalModelObservabilityControllerTest {
                 .jsonPath("$.data.medianMillis").isEqualTo(250.0)
                 .jsonPath("$.data.thirdQuartileMillis").isEqualTo(325.0)
                 .jsonPath("$.data.maximumMillis").isEqualTo(400.0);
+    }
+
+    @Test
+    void superAdminCanQueryFilteredItlDistribution() {
+        InternalModelObservabilityQueryService queryService = mock(InternalModelObservabilityQueryService.class);
+        when(queryService.queryItlDistribution(
+                        eq("enterprise-deepseek"),
+                        eq(InternalModelCallOutcomeGroup.SUCCESS),
+                        eq(InternalModelCallSource.USER_CALL),
+                        any(),
+                        any()))
+                .thenReturn(new InternalModelLatencyDistribution(3, 20.0, 30.0, 40.0, 50.0, 60.0));
+        WebTestClient client = client(queryService, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-observability/itl-distribution"
+                        + "?providerId=enterprise-deepseek&outcomeGroup=SUCCESS&source=USER_CALL")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.sampleCount").isEqualTo(3)
+                .jsonPath("$.data.medianMillis").isEqualTo(40.0);
     }
 
     private WebTestClient client(InternalModelObservabilityQueryService queryService, List<String> roles) {

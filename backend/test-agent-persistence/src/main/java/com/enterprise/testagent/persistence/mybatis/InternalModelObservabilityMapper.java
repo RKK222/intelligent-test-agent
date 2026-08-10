@@ -46,7 +46,15 @@ public interface InternalModelObservabilityMapper {
             @Param("to") Instant to);
 
     /** 直接由数据库按明细计算分位数，避免把大量 TTFT 样本搬到 JVM。 */
-    InternalModelTtftDistributionRow findTtftDistribution(
+    InternalModelLatencyDistributionRow findTtftDistribution(
+            @Param("providerId") String providerId,
+            @Param("outcomes") List<String> outcomes,
+            @Param("source") String source,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
+
+    /** 按准确输出 Token 数与首末输出时刻计算 ITL/TPOT，不把 chunk 数当 Token 数。 */
+    InternalModelLatencyDistributionRow findItlDistribution(
             @Param("providerId") String providerId,
             @Param("outcomes") List<String> outcomes,
             @Param("source") String source,

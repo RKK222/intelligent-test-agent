@@ -84,6 +84,13 @@ class MockHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write('data: {"choices":[{"delta":{"content":"流式"}}]}\n\n'.encode("utf-8"))
             self.wfile.flush()
+            time.sleep(0.04)
+            self.wfile.write('data: {"choices":[{"delta":{"content":"回答"}}]}\n\n'.encode("utf-8"))
+            self.wfile.flush()
+            self.wfile.write(
+                b'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}\n\n'
+            )
+            self.wfile.flush()
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
             return
@@ -97,8 +104,10 @@ class MockHandler(BaseHTTPRequestHandler):
                 b'data: {"choices":[{"delta":{"content":"finished"},"finish_reason":null}]}\n\n'
             )
             self.wfile.flush()
+            time.sleep(0.04)
             self.wfile.write(
-                b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":" answer"},"finish_reason":"stop"}],'
+                b'"usage":{"completion_tokens":4}}\n\n'
             )
             self.wfile.flush()
             return

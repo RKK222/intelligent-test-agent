@@ -1256,11 +1256,11 @@ PostgreSQL migration 与 XXL V9 则应全部成功且 checksum 不变；当前�
 
 | 表 | 口径与边界 |
 |---|---|
-| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/first_token_ms/stream_complete_ms/trace_id/ucid/started_at`。`first_byte_ms` 是响应头耗时，`first_token_ms` 是首个真实模型输出 SSE data 耗时，`stream_complete_ms` 是收到 `[DONE]` 或非空 `finish_reason` 的耗时；后二者在未达到对应协议阶段时为空。`duration_ms` 是端到端调用耗时，不等同于上游流完成耗时。TTFT 箱线图在最长 31 天的有界筛选范围内直接对非空 `first_token_ms` 计算最小值、P25、中位数、P75 和最大值，不增加冗余聚合列。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；`error_class` 只保存剥离 Reactor 包装后的异常类简名。索引 `(provider_id, started_at desc)`、`(outcome, started_at desc)`、`(started_at)`；保留 30 天。 |
+| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/first_token_ms/last_token_ms/stream_complete_ms/output_token_count/trace_id/ucid/started_at`。`first_token_ms`、`last_token_ms` 是首末有效输出到达耗时，`output_token_count` 是上游返回的准确输出 Token 数，三者共同计算 ITL/TPOT；`stream_complete_ms` 是收到 `[DONE]` 或非空 `finish_reason` 的耗时。TTFT 与 ITL/TPOT 箱线图在最长 31 天范围内直接从明细计算五数概括，不增加冗余聚合列。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；索引与 30 天保留策略不变。 |
 | `internal_model_call_stats_hourly` | 按 `(stat_hour, provider_id, model, endpoint, source, outcome)` 原子累加请求数、端到端耗时，以及首 token/流完成各自的 sum/max/count；两个耗时三元组只统计对应阶段存在的调用，可准确计算平均/最大值；小时聚合无法还原 P90/P95 或分布；`stat_hour` 由写入方截断到小时，保留 180 天。 |
 | `internal_model_probe_status` | 每 provider 一行的最近探活状态：`last_outcome/last_http_status/last_error_class/last_duration_ms/last_probed_at/last_success_at/consecutive_failures/trace_id/updated_at`；`consecutive_failures` 由 SQL 依据本次结果成功归零、失败 +1。 |
 
-写入与查询 SQL 位于 `InternalModelObservabilityMapper.xml`：明细 insert 与小时聚合 upsert 在同一事务完成（PostgreSQL `ON CONFLICT` 双实现，H2 用 MERGE），TTFT 五数概括使用数据库 `percentile_cont` 在明细上一次计算，探活状态 upsert 连续失败计数由数据库原子维护。明细与聚合保留期由 XXL 任务
+写入与查询 SQL 位于 `InternalModelObservabilityMapper.xml`：明细 insert 与小时聚合 upsert 在同一事务完成（PostgreSQL `ON CONFLICT` 双实现，H2 用 MERGE），TTFT 与 ITL/TPOT 五数概括使用数据库 `percentile_cont` 在明细上一次计算，探活状态 upsert 连续失败计数由数据库原子维护。`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 新增 `last_token_ms`、`output_token_count` 及非负/时序约束；既有记录保持空值，不伪造历史 ITL/TPOT。明细与聚合保留期由 XXL 任务
 `opencode-runtime.internal-model-observability-retention` 每日执行清理，不依赖 application 层逐条扫描。
 
 ## V20260808143301 首 token 观测指标

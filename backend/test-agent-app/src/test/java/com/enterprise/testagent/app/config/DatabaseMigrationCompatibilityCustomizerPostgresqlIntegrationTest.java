@@ -56,6 +56,7 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static final String INTERNAL_MODEL_OBSERVABILITY_VERSION = "20260808143300";
     private static final String INTERNAL_MODEL_FIRST_TOKEN_VERSION = "20260808143301";
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_VERSION = "20260808143302";
+    private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION = "20260810234154";
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION =
             DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION;
     private static final String INTERNAL_MODEL_OBSERVABILITY_OLD_RESOURCE =
@@ -283,7 +284,8 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isTrue();
-            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
+            assertThat(applied(dataSource, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION)).isTrue();
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(7L);
         });
     }
 
@@ -327,7 +329,9 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isFalse();
             assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isFalse();
             assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isFalse();
+            assertThat(applied(dataSource, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION)).isTrue();
             assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(7L);
         });
 
         // 第二次启动必须继续解析已经落库的“批量前”补偿版本，不能因批量版本已存在误切到另一条路径。
@@ -650,7 +654,8 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isTrue();
-            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
+            assertThat(applied(dataSource, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION)).isTrue();
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(7L);
         });
     }
 
@@ -858,7 +863,7 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .single();
     }
 
-    /** 三张可观测表及首 token、流完成列必须在同一正常 Flyway 链中落地。 */
+    /** 三张可观测表及首 Token、流完成、ITL/TPOT 原始量必须在同一正常 Flyway 链中落地。 */
     private static long internalModelObservabilitySchemaObjectCount(DataSource dataSource) {
         JdbcClient jdbc = JdbcClient.create(dataSource);
         Long tableCount = jdbc.sql("""
@@ -878,7 +883,12 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                         from information_schema.columns
                         where table_schema = current_schema()
                           and table_name = 'internal_model_call_records'
-                          and column_name in ('first_token_ms', 'stream_complete_ms')
+                          and column_name in (
+                              'first_token_ms',
+                              'stream_complete_ms',
+                              'last_token_ms',
+                              'output_token_count'
+                          )
                         """)
                 .query(Long.class)
                 .single();

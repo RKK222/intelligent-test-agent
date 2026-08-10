@@ -196,6 +196,30 @@ describe("backend-api", () => {
     );
   });
 
+  it("passes the active filters to the ITL distribution API", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: { sampleCount: 4, minimumMillis: 20, firstQuartileMillis: 35,
+        medianMillis: 50, thirdQuartileMillis: 65, maximumMillis: 80 }
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.getInternalModelItlDistribution({
+      providerId: "enterprise-deepseek",
+      outcomeGroup: "SUCCESS",
+      source: "USER_CALL",
+      from: "2026-08-07T00:00:00Z",
+      to: "2026-08-08T00:00:00Z"
+    });
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/opencode-runtime/internal-model-observability/itl-distribution"
+      + "?providerId=enterprise-deepseek&outcomeGroup=SUCCESS&source=USER_CALL"
+      + "&from=2026-08-07T00%3A00%3A00Z&to=2026-08-08T00%3A00%3A00Z"
+    );
+  });
+
   it("requests a fresh generated support incident suggestion", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,

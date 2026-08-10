@@ -263,7 +263,7 @@ public class InternalModelProviderProbeService {
         InternalModelCallRecord record = new InternalModelCallRecord(
                 null, providerId, model, CHAT_PATH, InternalModelCallSource.PROBE, outcome,
                 httpStatus, errorClass, streaming, durationMillis, firstByteMillis,
-                firstTokenMillis, streamCompleteMillis,
+                firstTokenMillis, firstTokenMillis, streamCompleteMillis, null,
                 traceId == null ? "" : traceId, PROBE_UCID, startedAt);
         try {
             callRecordRepository.record(record);

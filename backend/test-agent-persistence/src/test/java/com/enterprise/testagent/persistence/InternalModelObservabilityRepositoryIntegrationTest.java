@@ -9,18 +9,25 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordQuery;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatusRepository;
-import com.enterprise.testagent.domain.internalmodelobservability.InternalModelTtftDistribution;
 import com.enterprise.testagent.persistence.mybatis.InternalModelObservabilityMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelCallRecordRepository;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelProbeStatusRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.ResourceProvider;
+import org.flywaydb.core.api.configuration.FluentConfiguration;
+import org.flywaydb.core.api.migration.JavaMigration;
+import org.flywaydb.core.api.resource.LoadableResource;
+import org.flywaydb.core.internal.scanner.Scanner;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +45,11 @@ class InternalModelObservabilityRepositoryIntegrationTest {
     private SingleConnectionDataSource dataSource;
     private InternalModelCallRecordRepository callRepository;
     private InternalModelProbeStatusRepository probeRepository;
+    private static final Set<String> INTERNAL_MODEL_MIGRATIONS = Set.of(
+            "V20260808143300__create_internal_model_observability.sql",
+            "V20260808143301__add_internal_model_first_token_metrics.sql",
+            "V20260808143302__add_internal_model_stream_complete_metrics.sql",
+            "V20260810234154__internal_model_call_records_add_token_latency_inputs.sql");
 
     @BeforeEach
     void setUp() throws Exception {
@@ -48,10 +60,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         // baselineOnMigrate 只对非空库生效；先建占位表触发基线，避免 Flyway 从 V1 全量执行 PostgreSQL 专用 SQL。
         JdbcClient.create(dataSource).sql(
                 "create table observability_test_placeholder (id bigint primary key)").update();
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
-                .baselineOnMigrate(true)
-                .baselineVersion("20260808143259")
-                .target("20260808143302").load().migrate();
+        migrateInternalModelSchema();
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
         factory.setDataSource(dataSource);
         factory.setMapperLocations(new PathMatchingResourcePatternResolver()
@@ -66,6 +75,38 @@ class InternalModelObservabilityRepositoryIntegrationTest {
     @AfterEach
     void tearDown() {
         dataSource.destroy();
+    }
+
+    /** 精简 H2 库只装载本模块迁移；完整跨业务升级链由 PostgreSQL 兼容性测试负责。 */
+    private void migrateInternalModelSchema() {
+        FluentConfiguration configuration = Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .baselineOnMigrate(true)
+                .baselineVersion("20260808143259")
+                .target("20260810234154");
+        ResourceProvider defaultProvider = new Scanner<>(
+                JavaMigration.class, configuration, configuration.getLocations());
+        configuration.resourceProvider(new ResourceProvider() {
+            @Override
+            public LoadableResource getResource(String name) {
+                LoadableResource resource = defaultProvider.getResource(name);
+                return resource != null && isInternalModelMigration(resource) ? resource : null;
+            }
+
+            @Override
+            public Collection<LoadableResource> getResources(String prefix, String[] suffixes) {
+                return defaultProvider.getResources(prefix, suffixes).stream()
+                        .filter(InternalModelObservabilityRepositoryIntegrationTest::isInternalModelMigration)
+                        .toList();
+            }
+        });
+        configuration.load().migrate();
+    }
+
+    private static boolean isInternalModelMigration(LoadableResource resource) {
+        String path = resource.getAbsolutePath().replace('\\', '/');
+        return INTERNAL_MODEL_MIGRATIONS.stream().anyMatch(path::endsWith);
     }
 
     @Test
@@ -167,7 +208,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         callRepository.record(record("other-provider", "deepseek-v4", "/chat/completions", "SUCCESS", 200,
                 5000L, null, T0.plusSeconds(6), InternalModelCallSource.USER_CALL, 3000L));
 
-        InternalModelTtftDistribution distribution = callRepository.queryTtftDistribution(
+        InternalModelLatencyDistribution distribution = callRepository.queryTtftDistribution(
                 PROVIDER,
                 List.of(InternalModelCallOutcome.SUCCESS),
                 InternalModelCallSource.USER_CALL,
@@ -187,7 +228,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "UPSTREAM_CONNECT_FAILED", null,
                 100L, "ConnectException", T0, InternalModelCallSource.USER_CALL, null));
 
-        InternalModelTtftDistribution distribution = callRepository.queryTtftDistribution(
+        InternalModelLatencyDistribution distribution = callRepository.queryTtftDistribution(
                 PROVIDER, List.of(), InternalModelCallSource.USER_CALL,
                 T0.minusSeconds(1), T0.plusSeconds(1));
 
@@ -197,6 +238,28 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         assertThat(distribution.medianMillis()).isNull();
         assertThat(distribution.thirdQuartileMillis()).isNull();
         assertThat(distribution.maximumMillis()).isNull();
+    }
+
+    @Test
+    void calculatesItlFiveNumberSummaryOnlyFromExactTokenUsage() {
+        callRepository.record(itlRecord(10L, 1));
+        callRepository.record(itlRecord(20L, 2));
+        callRepository.record(itlRecord(30L, 3));
+        callRepository.record(itlRecord(40L, 4));
+        // 缺少准确用量的记录不会进入样本。
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200,
+                5000L, null, T0.plusSeconds(5), InternalModelCallSource.USER_CALL, 100L));
+
+        InternalModelLatencyDistribution distribution = callRepository.queryItlDistribution(
+                PROVIDER, List.of(InternalModelCallOutcome.SUCCESS), InternalModelCallSource.USER_CALL,
+                T0.minusSeconds(1), T0.plusSeconds(10));
+
+        assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.minimumMillis()).isEqualTo(10.0);
+        assertThat(distribution.firstQuartileMillis()).isEqualTo(17.5);
+        assertThat(distribution.medianMillis()).isEqualTo(25.0);
+        assertThat(distribution.thirdQuartileMillis()).isEqualTo(32.5);
+        assertThat(distribution.maximumMillis()).isEqualTo(40.0);
     }
 
     @Test
@@ -242,8 +305,19 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         return new InternalModelCallRecord(
                 null, providerId, model, endpoint, source,
                 InternalModelCallOutcome.valueOf(outcome), status, errorClass, true, duration, 50L, firstTokenMillis,
-                firstTokenMillis,
+                firstTokenMillis, firstTokenMillis, null,
                 "trace_imo_test", "ucid_test", startedAt);
+    }
+
+    private InternalModelCallRecord itlRecord(long itlMillis, long offsetSeconds) {
+        long firstTokenMillis = 100L;
+        long outputTokenCount = 11L;
+        long lastTokenMillis = firstTokenMillis + itlMillis * (outputTokenCount - 1);
+        return new InternalModelCallRecord(
+                null, PROVIDER, "deepseek-v4", "/chat/completions", InternalModelCallSource.USER_CALL,
+                InternalModelCallOutcome.SUCCESS, 200, null, true, 5000L, 50L, firstTokenMillis,
+                lastTokenMillis, lastTokenMillis, outputTokenCount,
+                "trace_imo_itl_" + offsetSeconds, "ucid_test", T0.plusSeconds(offsetSeconds));
     }
 
     private InternalModelProbeStatus probeStatus(
