@@ -541,11 +541,11 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
-企业现网当前实际基线是上一轮已经部署完成的 release 提交
-`1d4a7652f115404d0dfef8e8a0a599dfc8f25d0d`。该版本的正常 PostgreSQL 主链已经执行到
-`20260806190500`，XXL MySQL 已执行到 V9。部署前必须分别由数据库管理员导出平台 PostgreSQL 与
-XXL MySQL 的
-完整历史，不能只留最近 20 条：
+企业现网上一轮已经部署完成的平台 release 提交为
+`8a6955f8da40e8da4ae5caeb247e7eb782aa672b`。两次现场 Java 启动日志均显示 PostgreSQL 已校验
+92 条 migration、当前版本为 `20260809110000` 且无需迁移；这只能证明当时启动校验通过，不能代替本轮
+部署前的完整 history。XXL MySQL 的准入预期为 V1-V11 全部成功。部署前必须分别由数据库管理员导出
+平台 PostgreSQL 与 XXL MySQL 的完整历史，不能只留最近 20 条：
 
 ```sql
 select installed_rank, version, description, type, script, checksum, installed_on, success
@@ -553,45 +553,39 @@ from flyway_schema_history
 order by installed_rank;
 ```
 
-PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；上一轮的 `20260805132000`、
-`20260806143000`、`20260806190000`、`20260806190500` 已成功且 checksum 不变；正常企业历史中不得已有
-本轮新增版本。第一台 `.4` 新 Java 只允许按顺序新增以下六条主迁移：
+PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；上一轮新增的 `20260807190000`、
+`20260807230000`、`20260808143300`、`20260808143301`、`20260808143302`、`20260809110000`
+均已成功且 checksum 不变，其中 `V20260809110000__create_external_api_credentials.sql` 的文件 SHA-256
+必须为 `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。正常企业历史中不得已有本轮
+新增版本。第一台 `.4` 新 Java 只允许按顺序新增以下两条主迁移：
 
-- `V20260807190000__create_run_resends.sql`，SHA-256
-  `ca044d9819c7259b62e29243e9d72a06a2f01a532f1803f37e117de1d2f5d83d`；
-- `V20260807230000__add_batch_session_attribution.sql`，SHA-256
-  `42ec1917deb16d96b910f81a0a4739487500453f90dc742e516822f800fdd6e3`；
-- `V20260808143300__create_internal_model_observability.sql`，SHA-256
-  `f214dfd0d4f26de830452d9f4121bc938cf031e4867555d5248e159d99377084`；
-- `V20260808143301__add_internal_model_first_token_metrics.sql`，SHA-256
-  `de7188e3ba5d01148a655dbc238783cf7881abf168bd7b6e422c9f2fa118a5c3`；
-- `V20260808143302__add_internal_model_stream_complete_metrics.sql`，SHA-256
-  `46f0a8e687f59c037a7e02cb1f9ba3db4893633ba20edd67d4ae75f0b6fd0d9e`；
-- `V20260809110000__create_external_api_credentials.sql`，SHA-256
-  `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。
+- `V20260809170000__session_shares_create_collaboration_share.sql`，SHA-256
+  `b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`；
+- `V20260809170001__session_messages_add_delegated_attribution.sql`，SHA-256
+  `dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`。
 
 正常企业历史不得出现只用于已登记并行开发历史的兼容版本 `20260807130134`、`20260807203000`、
-`20260807222227`、`20260807229999`、`20260808143303`、`20260809120000` 或 `20260810110000`。特别是
-`20260809120000` 已被另一分支的 QA Memory migration 使用，不能与本轮外部 API migration 混同。发现上述
-版本、未知 checksum、未知更高版本或只执行了本轮六条中的一部分时必须停止发布并核对原始历史，禁止用
-`repair`、`outOfOrder` 或手工改表规避。
+`20260807222227`、`20260807229999`、`20260808143303`、`20260809120000`、`20260809230000`、
+`20260810090000` 或 `20260810110000` 至 `20260810110002`。特别是 `20260809120000` 已被另一分支的
+QA Memory migration 使用，不能与企业主链混同。发现上述版本、未知 checksum、未知更高版本或只执行了
+本轮两条中的一部分时必须停止发布并核对原始历史，禁止用 `repair`、`outOfOrder` 或手工改表规避。
 
 虽然 LobeHub 服务和页面入口继续关闭，既有兼容 migration 创建的平台模型目录/聚合表和四个默认禁用参数仍必须
 保留，这是数据库兼容要求，不代表启用服务。
 
-XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后应为 V1-V9 全部成功且 checksum 不变；
-第一台 `.4` 新 Java 只允许新增 V10、V11：V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
+XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后的准入历史应为 V1-V11 全部成功且
+checksum 不变，本轮不新增 XXL migration。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
 `665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47`，V11 的 Flyway checksum 为
 `-1863356225`、文件 SHA-256 为 `03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236`。
 V10 注册每 5 分钟一次的内部模型探活，V11 注册每天 03:30 的可观测数据清理。失败记录、未知 checksum、
-未知更高版本或只存在 V10 不存在 V11 时都必须停止发布。
+未知更高版本、缺少 V1-V11 任一版本或本轮启动后新增 history 时都必须停止发布。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
-`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并确认只新增上述六条 PostgreSQL
-migration 与 XXL MySQL V10/V11；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
+`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并确认 PostgreSQL 只新增上述两条
+会话 migration、XXL MySQL 没有新增 history；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
 内部模型探活为每 5 分钟、可观测数据清理为每日 03:30，再部署 `.114`。共享数据库上 `.114` 启动只允许
 validate，不应再新增 history。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。

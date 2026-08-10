@@ -1228,8 +1228,8 @@ Flyway 顺序校验会失败。该分叉由现有 `DatabaseMigrationCompatibilit
 `0352efa...` 的完整主 migration 上界 `V20260801104000`（排除当时尚不存在的 LobeHub migration）构造现网
 history，再验证默认 `outOfOrder=false` 升级为 `V20260802173416`，随后执行 `V20260803133000`。
 
-企业现网当前实际发布基线已升级为
-`cec4ccf13769d9084c7d02efc158b021afe23c23`。正常 PostgreSQL history 因此应已包含成功的
+后续曾部署的企业基线
+`cec4ccf13769d9084c7d02efc158b021afe23c23` 的正常 PostgreSQL history 应已包含成功的
 `20260802173416`、`20260803133000` 与 `20260804123000`，不应倒序补写 `20260730090000`，也不应包含
 仅用于另一套已知分叉的 `20260803141754`。首次从该基线升级时，部署前不应已有 `20260805132000`、
 `20260806143000`、`20260806190000`、`20260806190500`，XXL MySQL 应为 V1-V8 全部成功且没有 V9；第一台
@@ -1292,6 +1292,16 @@ migration 不写默认、测试或演示工具数据。全部运行期分页、�
 当前个人持久库还已经执行 `V20260809230000__generalize_memory_and_embedding_profiles.sql`（Flyway checksum `-433275068`，SHA-256 `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`）和 `V20260810090000__enforce_qa_memory_identity.sql`（Flyway checksum `572596329`，SHA-256 `619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`）。两份已执行资源按原始字节保存在 `db/migration-compat/qa-memory-extended`，不可重命名或修改。
 
 远程主链新增的会话分享迁移版本 `20260809170000`、`20260809170001` 低于上述个人库最高版本，不能直接倒序补跑。兼容装配会在精确匹配 QA Memory 扩展 history 后过滤两份低版本主 migration，并加载 `V20260810110001__session_shares_create_collaboration_share_after_qa_memory.sql` 与 `V20260810110002__session_messages_add_delegated_attribution_after_qa_memory.sql`；两份前向资源分别与对应主 migration 字节一致。只执行到 `20260809230000` 的中间态 history 会先顺序补齐 `20260810090000`，再执行三份 `20260810110000` 至 `20260810110002` 前向 migration。主/前向路径混用、缺少基础版本、未知 checksum 或不完整分享 history 均拒绝启动。
+
+企业现网上一轮已部署平台源码提交为 `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`；两次现场启动日志均显示
+Flyway 已校验 92 条 migration、PostgreSQL 当前版本为 `20260809110000` 且无需迁移。该日志不能代替完整
+`flyway_schema_history`：下一次部署前仍须导出全部 `installed_rank/version/script/checksum/success`。正常企业主链
+只允许从该版本顺序新增 `20260809170000`、`20260809170001`，文件 SHA-256 分别为
+`b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`、
+`dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`；`20260810110001/02` 仅属于精确匹配的
+QA Memory 扩展兼容路径，不得混入正常企业主链。共享 XXL MySQL 本轮准入预期为 V1-V11 全部成功且不新增
+history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或只新增两条会话 migration 中的一条时
+必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
 
 正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
 

@@ -7898,29 +7898,35 @@
 - 企业网关在有效回答后用非空 `finish_reason` 收尾并直接 EOF 时，用户调用与探活均记 `SUCCESS`，SCT 记录收尾信号到达耗时，不再把完成对话误算进 FR。
 - 未变更 HTTP URL、DTO、结果枚举、RunEvent 字段、SQL、Flyway migration 或数据库结构；不涉及安全、`.env*`、generated SDK 或 OpenCode 源码。旧的历史误分类记录不回填，新版部署后的新调用按修正口径统计。
 
-## 2026-08-10 - 基于当前 release HEAD 重打企业增量包
+## 2026-08-10 - 基于当前 release HEAD 重打企业增量包并校准 Flyway 基线
 
 ### Why
 
 - 上一轮企业部署已结束，需要仅以当前本地 release 工作树重新生成增量发布物，并保留已部署节点配置。
 - 当前包包含新的会话取消置顶排序修复和企业模型 `finish_reason` 收尾兼容；企业库已知部署版本为 `20260809110000`，打包前必须确认主链与本地已知 Flyway 分叉均可前向升级。
+- 首轮外层验包发现随包 `START-HERE.md` 仍把更早的 `20260806190500/V9` 当作当前基线，会把已部署的
+  `20260809110000/V10/V11` 误判为本轮新增，必须先校准稳定部署文档再重新生成发布物。
 
 ### What
 
-- 打包源固定为分支 `codex/release-enterprise-20260801` 的提交 `c6577cdac11737ffa68e9fdef47273acefd7c9de`，未切换、拉取或清理工作树。
-- 重新生成内层 `test-agent-internal-release.zip` 与固定名外层 `test-agent-two-backend-complete.zip`；外层复用上一版已经校验的 `.4`、`.114`、`.2` 节点包，只替换为本次新内层发布物。
+- 业务代码基线固定为分支 `codex/release-enterprise-20260801` 的提交 `c6577cdac11737ffa68e9fdef47273acefd7c9de`，未切换、拉取或清理工作树。
+- 将 `deploy/internal/MULTI-BACKEND.md`、内部部署 README 和数据库文档统一更新为上一轮已部署源码
+  `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`、PostgreSQL `20260809110000`、XXL V1-V11 基线；本轮企业主链
+  只允许新增会话 `20260809170000/01`，XXL 不新增 history。
+- 外层继续复用上一版已经校验的 `.4`、`.114`、`.2` 节点包，只替换本次重新生成的内层发布物。
 - 组件清单保持 worker runtime、toolbox 为 `reuse`，workflow、LobeHub 为 `disabled`；通用运维脚本仍随包保留，但不包含或启用对应运行时组件。
-- 发布物 SHA-256：内层 `ae3ec04ef9d3248ba796b47d86d95c1a118c8d9e8aa1af723e053592a37f7bd3`，外层 `8243fdcb6f13930db0c5189269cb6cb71639c05e31bccedecad230db71d65a8d`，app JAR `003fd925bbca4c8ed816341aba232adecd80d8d30648e8cdede2bd0fd7d35332`，persistence JAR `06cfd20f4464524067ef0ca5dade53c16b63605e5be7680bfe2a18f4ceeabec0`，前端归档 `6b1a5eecfacce7e4380c0612bdc04a529a368347538f0b84ee37777940e95763`，`opencode-models.json` `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
+- 首轮内层 `ae3ec04ef9d3248ba796b47d86d95c1a118c8d9e8aa1af723e053592a37f7bd3`、外层
+  `8243fdcb6f13930db0c5189269cb6cb71639c05e31bccedecad230db71d65a8d` 因包含旧基线说明已判定废弃，不得进入中转机或企业服务器。
 
 ### How
 
 - JDK 25 下执行真实 PostgreSQL Flyway 兼容集成测试：`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 18 项、`FlywayMigrationNamingTest` 9 项、`SpringBeanConstructorWiringTest` 1 项，全部通过且无跳过；没有使用 `repair`、`outOfOrder` 或手工修改历史表。
-- 执行 `deploy/internal/package-release.sh`，Spring 装配校验、20 模块后端构建、agent-web `vue-tsc` 与 Vite 生产构建通过；脚本在 JAR 生成和 ZIP 输入阶段两次逐项校验全部受控 Flyway migration 字节。
-- 执行 `deploy/internal/package-two-backend-complete.sh --nodes-dir <上一版已校验节点目录>`；三台节点包 checksum、内外层记录 checksum、两个 ZIP 完整性均通过，外层内嵌 ZIP 与本次内层包 `cmp` 完全一致。
-- 解包复核 `deploy/internal/opencode-models.json` 存在；提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记，未修改 `.env*`。
+- 首轮执行 `deploy/internal/package-release.sh`，Spring 装配校验、20 模块后端构建、agent-web `vue-tsc` 与 Vite 生产构建通过；脚本在 JAR 生成和 ZIP 输入阶段两次逐项校验全部受控 Flyway migration 字节。
+- 首轮执行 `deploy/internal/package-two-backend-complete.sh --nodes-dir <上一版已校验节点目录>`；三台节点包 checksum、内外层记录 checksum、两个 ZIP 完整性均通过，外层内嵌 ZIP 与内层包 `cmp` 完全一致；随后人工读取包内操作手册时发现基线过期并停止交付。
+- 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记，未修改 `.env*`。
 
 ### Result
 
-- 当前 HEAD 的企业增量包已生成并通过本地构建、真实 PostgreSQL 已知历史升级、Flyway 资源验签和逐层压缩包完整性校验；发布物位于 `deploy/internal/dist/`。
+- 首轮制品已废弃；必须从包含本次文档校准的新 HEAD 重新生成内外层包并重复全部验签后，才能更新最终发布 hash。
 - 本次未部署企业服务器，也未取得企业库完整 `flyway_schema_history` 导出。部署首台后端前仍须导出并比对全部 `version/script/checksum/success`；发现未知 checksum、失败记录或版本分叉时必须停止，不能用 `repair`、`outOfOrder` 或手工改表绕过。
 - 本次仅新增发布记录，无 API、事件、数据库 SQL、性能或安全实现变更；没有修改 generated SDK 或 OpenCode 源码。

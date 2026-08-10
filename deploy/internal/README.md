@@ -592,11 +592,11 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
 复验会锁定 PostgreSQL 主/兼容 migration 和 XXL MySQL V10/V11 的 SHA-256，并分别比较发布包与安装后的
 persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
-当前上一轮已部署基线为 release 提交 `1d4a7652f115404d0dfef8e8a0a599dfc8f25d0d`，正常历史应为 PostgreSQL
-主链执行到 `20260806190500`、XXL MySQL 执行到 V9；本次第一台 `.4` 只允许新增 PostgreSQL
-`20260807190000`、`20260807230000`、`20260808143300`、`20260808143301`、`20260808143302`、
-`20260809110000` 和 XXL MySQL V10/V11，`.114` 只做 validate。必须按多后台手册读取完整
-`flyway_schema_history`，不能只凭提交号或最高版本判断数据库历史一致。
+当前上一轮已部署平台基线为 release 提交 `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`；现场 Java 启动日志确认
+PostgreSQL 已校验 92 条 migration、当前版本为 `20260809110000`，XXL MySQL 本轮准入预期为 V1-V11
+全部成功。本次第一台 `.4` 只允许新增 PostgreSQL `20260809170000`、`20260809170001`，XXL MySQL
+不得新增 history，`.114` 只做 validate。必须按多后台手册读取两套完整 `flyway_schema_history`，不能只凭
+提交号、启动日志或最高版本判断数据库历史一致。
 
 ## 首次部署与版本升级顺序
 
@@ -604,9 +604,9 @@ persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app J
 
 1. 从两台后台确认外部 `122.210.106.43:3306` 可达，两份 `backend.env` 使用同一个 JDBC 地址、账号密码和 XXL access token。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
-3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 只允许新增撤销重发、批量会话归因、
-   内部模型可观测三条和外部 API 凭据共六条 migration；外部 XXL MySQL 只允许从 V9 升级到 V10/V11。
-   随后确认 Admin health、搬迁任务每 30 分钟、闲置进程关闭每日 02:00、模型探活每 5 分钟和可观测清理
+3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 只允许新增会话协作分享和代操作归因
+   两条 migration；外部 XXL MySQL 必须保持 V1-V11 且不新增 history。随后确认 Admin health、搬迁任务
+   每 30 分钟、闲置进程关闭每日 02:00、模型探活每 5 分钟和可观测清理
    每日 03:30 均正常。任一校验失败时不得继续 `.114` 和前端。
 4. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
 5. 导入 worker 镜像、解压 programs。
