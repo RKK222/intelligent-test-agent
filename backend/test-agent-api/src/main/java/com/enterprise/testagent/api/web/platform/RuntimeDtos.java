@@ -309,10 +309,16 @@ final class RuntimeDtos {
             Instant updatedAt,
             SessionWorkspaceContextResponse workspaceContext,
             String sourceType,
-            String sourceRefId) {
+            String sourceRefId,
+            String shareStatus,
+            Boolean isShared,
+            Boolean shareExpired) {
 
         /**
          * 从领域会话映射为 API 响应。
+         *
+         * <p>单会话详情读取不附带分享状态；所属人当前分享设置由前端独立调用
+         * 协作分享接口获取，避免单会话路径额外耦合分享聚合。
          */
         static SessionResponse from(Session session) {
             return new SessionResponse(
@@ -325,14 +331,24 @@ final class RuntimeDtos {
                     session.updatedAt(),
                     null,
                     session.sourceType().name(),
-                    session.sourceRefId());
+                    session.sourceRefId(),
+                    null,
+                    null,
+                    null);
         }
 
         /**
-         * 从历史会话列表项映射为 API 响应，附带应用/工作空间/版本上下文。
+         * 从历史会话列表项映射为 API 响应，附带应用/工作空间/版本上下文与分享状态。
+         *
+         * <p>{@code shareStatus} 来自历史查询对 session_shares 的左连接派生：
+         * 未分享为 {@code null}，已分享为 {@code ACTIVE}/{@code EXPIRED}/{@code REVOKED}；
+         * {@code isShared} 仅在存在分享记录时为 true，{@code shareExpired} 在过期或已取消时为 true。
          */
         static SessionResponse from(SessionHistoryItem item) {
             Session session = item.session();
+            String shareStatus = item.shareStatus();
+            boolean isShared = shareStatus != null;
+            boolean shareExpired = "EXPIRED".equals(shareStatus) || "REVOKED".equals(shareStatus);
             return new SessionResponse(
                     session.sessionId().value(),
                     session.workspaceId().value(),
@@ -343,7 +359,10 @@ final class RuntimeDtos {
                     session.updatedAt(),
                     SessionWorkspaceContextResponse.from(item.workspaceContext()),
                     session.sourceType().name(),
-                    session.sourceRefId());
+                    session.sourceRefId(),
+                    shareStatus,
+                    isShared,
+                    shareExpired);
         }
     }
 

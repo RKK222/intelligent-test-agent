@@ -105,7 +105,8 @@ public class MyBatisSessionHistoryRepository implements SessionHistoryRepository
                         blankToNull(row.applicationWorkspaceId()),
                         blankToNull(row.workspaceName()),
                         blankToNull(row.versionId()),
-                        blankToNull(row.version())));
+                        blankToNull(row.version())),
+                row.shareStatus());
     }
 
     private String searchPattern(String query) {

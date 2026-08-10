@@ -2291,4 +2291,22 @@
 - Result:
   - 会话历史列表已分享会话现以分享图标呈现，未过期为蓝色、已过期为灰色，hover/读屏可获“该会话已分享（未过期/已过期）”提示；纯前端视觉与可访问性调整，无 API/DTO/事件/数据库变更，向后兼容。
 
+### 2026-08-10 - 会话历史列表分享状态改由后端列表查询派生
+
+- Why:
+  - 前端只在点击进入某个会话后，用 `ordinarySessionShare` 给当前会话单项补 `isShared/shareStatus/shareExpired`，列表里其他会话没有分享状态，导致分享图标只在点开后才出现，无法在列表中直接看出哪些会话已分享。
+- What:
+  - `SessionHistoryMapper.xml` 在 `SessionHistoryFrom` 增加 `left join session_shares sh on sh.session_id = s.session_id`（1:1 唯一约束，不影响计数），并在 `SessionHistoryColumns` 用 CASE 派生 `share_status`：无分享为 null、`REVOKED` 优先、`expires_at <= current_timestamp` 为 `EXPIRED`、否则 `ACTIVE`；resultMap 末尾补 `share_status` 构造参数。
+  - `SessionHistoryRow` 增加 `shareStatus` 字段；`SessionHistoryItem` 增加 `shareStatus` 第三组件并保留两参兼容构造方法（默认 null=未分享），旧调用方零改动。
+  - `MyBatisSessionHistoryRepository.toHistoryItem` 透传 `row.shareStatus()`；`RuntimeDtos.SessionResponse` 增加 `shareStatus/isShared/shareExpired`，仅在 `from(SessionHistoryItem)`（历史列表）派生，`from(Session)`（详情/创建/更新/删除/批量）保持 null，所属人当前设置仍由 `GET /sessions/{sessionId}/collaboration-share` 独立读取。
+  - 前端 `Session` 类型、`workbench-utils.ts historyItems` 透传与 `isHistoryItemShared/isHistoryItemShareExpired` 判定均已在上一次图标改动中就绪，无需再改；后端字段补齐后列表项即获得分享状态，`ordinarySessionShare` 仅作为当前会话的实时刷新覆盖。
+  - `docs/api/http-api.md` 补充 `SessionResponse` 分享状态字段与派生规则、单会话接口不带分享状态的兼容说明。
+- How:
+  - `MyBatisSessionHistoryRepositoryIntegrationTest` 手动 apply `V20260809170000` 建表（与分享仓库集成测试同样方式，避免抬高基线 Flyway target），种子 ACTIVE/EXPIRED/REVOKED 三种分享，新增 `userHistoryExposesDerivedShareStatusFromSessionSharesJoin` 断言四条会话的 `shareStatus` 与单会话读取一致。
+  - 后端定向回归：`test-agent-persistence` 全量 284 passed / 18 skipped（Redis 外部条件跳过）、`RuntimeControllerTest` 25 passed、`SessionShareControllerTest` 4 passed、`SessionApplicationServiceTest` 16 passed；前端 `FigmaChatPanel` 分享图标用例与 agent-web typecheck 通过。
+  - 注意：单模块 `mvn -pl test-agent-persistence test` 不带 `-am` 会用本地仓库旧 domain jar 导致 `SessionHistoryItem` 三参 `NoSuchMethodError`，必须 `-am` 重建上游 domain。
+  - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、RunEvent、Flyway migration、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 会话历史列表每条会话现由后端 `GET /sessions` 一次查询派生分享状态，无需点击即可在列表中看到分享图标；未过期蓝色、已过期灰色。无新增数据库结构（复用既有 `session_shares` 表与索引）、无新增 HTTP URL、无 RunEvent/DTO 字段破坏性变更，`SessionHistoryItem` 两参构造方法保持兼容。
+
 

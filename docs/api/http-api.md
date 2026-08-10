@@ -2054,6 +2054,18 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 
 `SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`、`workspaceContext`，以及可选来源字段 `sourceType/sourceRefId`。普通会话默认为 `MANUAL/null`；由夜间任务预创建的会话返回 `SCHEDULED_TASK/net_...`。旧后端缺失来源字段时前端按普通会话兼容。
 
+可选分享状态字段 `shareStatus/isShared/shareExpired` 仅在历史列表（`GET /api/internal/platform/opencode-runtime/sessions`）中派生返回，用于列表直接展示是否已分享及是否过期：
+
+```json
+{
+  "shareStatus": "ACTIVE",
+  "isShared": true,
+  "shareExpired": false
+}
+```
+
+`shareStatus` 由 `session_shares` 左连接派生（分享与会话一对一）：未分享为 `null`；已分享取 `REVOKED` 优先，其次 `expires_at <= current_timestamp` 为 `EXPIRED`，否则为 `ACTIVE`。`isShared` 仅在存在分享记录时为 `true`；`shareExpired` 在 `EXPIRED` 或 `REVOKED` 时为 `true`。单会话详情、创建、更新、删除等接口不附带分享状态（所属人当前分享设置由 `GET /sessions/{sessionId}/collaboration-share` 独立读取），旧后端缺失时前端按未分享兼容。
+
 `workspaceContext` 仅在用户历史列表中尽量补齐，详情/更新/删除等单会话接口可为 `null`：
 
 ```json
