@@ -205,12 +205,18 @@ test("session share read-only workbench shows sender identity colors and fixed s
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
   await expect(page.locator(".figma-chat-textarea")).toHaveAttribute("title", "当前分享权限为只读，不能修改工作区或发送消息。");
   await expect(page.getByTestId("manage-session-share")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "新建对话" })).toHaveCount(0);
+  const newConversationButton = page.getByRole("button", { name: "新建对话" });
+  await expect(newConversationButton).toBeEnabled();
 
   await expect.poll(() => shareHeaderRequests.some((request) =>
     request.path === "/api/internal/platform/opencode-runtime/sessions/ses_shared_readonly/messages"
       && request.shareId === "shr_readonly")).toBe(true);
   expect(shareHeaderRequests.every((request) => request.shareId === "shr_readonly")).toBe(true);
+
+  await newConversationButton.click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("header-fixed-share-context")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "新建对话" })).toBeVisible();
 });
 
 test("session share model picker selects from the fixed owner workspace catalog", async ({ page }) => {

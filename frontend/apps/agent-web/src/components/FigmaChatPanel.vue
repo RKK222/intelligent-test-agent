@@ -6086,8 +6086,7 @@ function onCompositionEnd() {
           <div class="figma-chat-card-spacer" />
           <!-- 右侧：新建对话 + 发送/停止 -->
           <el-tooltip
-            v-if="!fixedSession"
-            content="新建对话"
+            :content="fixedSession ? '退出分享并新建对话' : '新建对话'"
             placement="top"
             :show-after="0"
           >

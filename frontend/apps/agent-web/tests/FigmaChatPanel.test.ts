@@ -1885,6 +1885,23 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("new-conversation")).toEqual([[]]);
   });
 
+  it("keeps new conversation available in a fixed shared session", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        fixedSession: true,
+        processRequired: false
+      } as any
+    });
+
+    const newConversationButton = wrapper.get('button[aria-label="新建对话"]');
+    expect(newConversationButton.attributes("disabled")).toBeUndefined();
+
+    await newConversationButton.trigger("click");
+
+    expect(wrapper.emitted("new-conversation")).toEqual([[]]);
+  });
+
   it("blocks readonly messages but keeps native slash commands available", async () => {
     const readonlyReason = "你已不属于该会话所属应用，当前会话只读。";
     const wrapper = mount(FigmaChatPanel, {

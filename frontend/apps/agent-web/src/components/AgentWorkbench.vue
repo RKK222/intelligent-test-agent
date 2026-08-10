@@ -9961,6 +9961,11 @@ function rememberCurrentRunAsBackgroundRuntimeState() {
 }
 
 function handleNewConversation() {
+  if (shareMode.value) {
+    // 分享路由固定绑定所属人的会话；新建对话必须先回到当前用户自己的工作台。
+    void router.push({ name: "workbench" });
+    return;
+  }
   invalidateConversationInteraction();
   rememberCurrentRunAsBackgroundRuntimeState();
   pendingSessionTitleRunId.value = null;
