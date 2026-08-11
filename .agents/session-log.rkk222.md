@@ -8989,3 +8989,27 @@
 
 - 记忆分支现兼容“尚未执行 token-latency migration 的 release 历史”和“已执行最新 release migration 的历史”两条严格递增升级链；API、RunEvent 与已有 migration 字节保持兼容。
 - 本条只记录 release 到 mem 的集成和验证；mem 回合 release、用户未提交改动恢复以及最终独立前后端启动由同一任务后续步骤完成。
+
+## 2026-08-11 - 将记忆能力回合 release 并切换独立前后端运行态
+
+### Why
+
+- 用户要求在记忆分支吸收最新 release 后，再把完整结果回合 `codex/release-enterprise-20260801`，并使用独立的前、后端进程启动最终 release 代码。
+
+### What
+
+- release 先保持在已核对的本地最新提交 `380f942343013d41fd46931fa5a8f6288d0d7988`（远端 `ee182e9d31b87db164205d8a35c0d8104e4f928c` 为其祖先），再以非快进方式合入 mem 提交 `c8cd006dca5f7b2ff88e346bb8694eb692652972`，生成 merge 提交 `4d5186104bf1643558fd235a4e7a1c02bcd7c2ad`。
+- 记忆 worktree 中用户原有的 6 个未提交前端文件已从安全 stash 无冲突恢复，并保持未暂存、未提交；恢复后定向 Vitest 204 passed / 1 skipped、agent-web typecheck 和 6 条 Chromium 工作台回归全部通过，较早的原始备份 stash 继续保留。
+- 最终 release 后端独立监听 `18081`，前端独立监听 `3100`；OpenCode manager 作为后端配套进程连接 `18081`，新受管实例在 `4097/4098` 健康运行。Workflow、LobeHub 和可选 QA Memory 数据面未随本次“独立前后端”启动。
+
+### How
+
+- 主工作区用 JDK 25 对最终 release 树执行 23 模块 `mvn clean package -DskipTests`，全部成功；后端从主工作区新生成的可执行 JAR 启动，前端从主工作区 agent-web 的 Vite 入口以显式 `--port 3100` 启动。
+- 后端第一次启动因本机 CORS 已是单独通配值、启动命令又追加具体 Origin 而被既有安全校验拒绝；保持通配值原样重启后成功，未修改 `.env.test`。前端通用 `PORT` 被项目 dev 入口固定端口覆盖，改用同一 Vite 入口的显式端口参数后在 3100 成功就绪。
+- 旧 manager 退出后遗留的 4096/4104 两个 PPID=1 进程阻塞端口；确认新 manager 已在 4097/4098 建立健康替代实例后，仅终止这两个旧孤儿。最终 8080/3000/4096/4104 均释放，18081/3100/4097/4098 按预期监听。
+
+### Result
+
+- 后端 health/readiness 均为 `UP`，前端 HTTP 200，3100 CORS 预检成功，通知与记忆平台入口未登录均为 401；manager WebSocket 已连接 18081，4097/4098 `/global/config` 均为 HTTP 200。
+- 三个独立 screen 为 `test-agent-release-backend-independent`、`test-agent-release-frontend-independent`、`test-agent-release-opencode-manager-independent`；进程日志位于 `.tmp/dev-services-release-independent/`，业务后端日志仍按既有配置写入 `backend/logs/`。
+- 本次未推送远端，未修改环境文件、generated SDK 或 OpenCode 只读源码；数据库只执行 Flyway validate，当前保留库已在 `20260810234154` 且无需新迁移。
