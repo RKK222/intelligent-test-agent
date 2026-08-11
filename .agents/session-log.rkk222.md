@@ -8517,3 +8517,27 @@
 - 分享撤回重发现在能在 revision 与持久化乱序下实时收敛；B 无需刷新，A/B 不再通过整会话重载切换新消息，自动化验证滚动位置保持不变。
 - 本次没有新增或变更 API、DTO、RunEvent 协议、数据库、Flyway、SQL、安全规则、generated SDK 或 OpenCode 只读源码；性能影响仅限活跃撤回竞态时最多 6 次单页消息补拉，成功即停止。
 - backend、frontend、opencode-manager 当前已运行；Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动，未新建分支。
+
+## 2026-08-11 - 重启本地服务并确认跨服务器个人工作区根因
+
+### Why
+
+- 用户在分享页返回“新建对话”后，`wr` 首次发送报“工作空间与 agent 不在同一服务器”，并怀疑刚切换网络后本地服务仍沿用旧状态；同时需要确认企业多后台部署是否会遇到同类问题。
+
+### What
+
+- 本次未修改业务代码、API、事件、数据库、环境文件或稳定文档；仅完成三服务冷重启和只读诊断。
+- 重启后确认 `wr` 的唯一 ACTIVE 个人工作区 `wrk_6e620f37a7a648f6a3e34293789fa86a` 仍绑定旧 `linuxServerId=192.168.100.115`，物理根路径属于 `/Users/rina/...`；当前 ACTIVE Agent binding 为 `kakadeMacBook-Pro.local:4096`，因此不是刷新或本次网络切换可以安全回绑的同机目录。
+- 旧服务器最新后端心跳停在 2026-07-02，且没有个人工作区搬迁记录；自动搬迁只能由仍持有源 worktree 的源服务器发现、导出并传输，源服务器离线时不能在目标机伪造或强制改绑。
+
+### How
+
+- 使用 JDK 25、`.env.test`、`test` profile 和 `--without-workflow` 执行完整构建；21 个 Maven 模块和 agent-web production build 均成功。首次启动因共享测试库已执行但当前 checkout 缺失 `20260810170000` 而失败，未执行 Flyway repair 或改历史表。
+- 复用既有临时 compatibility location，并确认其中 migration 与通知中心 checkout 原文 SHA-256 同为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`；随后复用刚构建的产物完成 backend、opencode-manager、frontend 冷重启。
+- 后端 health/readiness 均为 `UP`，前端返回 HTTP 200，登录 CORS 正确；manager WebSocket 已连接，受管 4096/4104 OpenCode 均为 `HEALTHY`，无遗留重启脚本进程。
+
+### Result
+
+- 本地核心三服务当前可用；Workflow 因本机缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 按官方 `--without-workflow` 模式保持未启动。
+- 当前 `wr` 旧工作区的跨服务器冲突仍会保留，正确恢复方式是让旧 `192.168.100.115` 以原稳定身份和原磁盘重新上线完成搬迁，或在当前服务器新建个人工作区；不能通过重启、Flyway 操作或直接改 `linux_server_id` 绕过。
+- 企业多后台架构已提供稳定服务器身份、Java 间路由和个人 worktree 搬迁，但必须固定且唯一配置 `TEST_AGENT_LINUX_SERVER_ID`、配置可达的 `TEST_AGENT_SERVER_ADVERTISED_HOST`、保留与身份绑定的持久化本地盘，并在源服务器下线前完成排空/搬迁；当前前端仍会在搬迁窗口误把异服 recent 工作区当作可发送，这是需另行修复的产品缺陷。
