@@ -8719,3 +8719,27 @@
 
 - 应用源码管理列表现在位于页面上方；首次打开已授权源码快照不再因尚无 Session 引用而被普通详情接口误判不存在，同时未扩大其它 Workspace 的读取范围。
 - HTTP URL、请求/响应字段和事件 wire 均未变；无数据库、SQL、migration、性能热路径或安全边界放宽，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-11 - 修复分享会话撤回重发乱序消息归并
+
+### Why
+
+- 企业部署的原始输出显示，分享会话含 compact 历史时，OpenCode 原生 `message.removed` 可能先于 durable `run.resend.started` 到达；旧 reducer 会提前删除已经交给替代 Run 的 USER 锚点。
+- 后续不含正文的 USER envelope 被忽略，紧随其后的 USER text part 因找不到稳定归属而误挂到上一条 assistant，权威消息刷新后页面又出现正确用户气泡，形成一瞬间错位和重复。
+
+### What
+
+- `runtime-reducer.ts` 在 removed 命中已绑定 replacement Run 的 USER 时，仅清除旧平台/远端消息别名并保留原位锚点；`run.resend.started` 复用同一别名迁移程序。
+- USER text part 在 role envelope 之前到达时，优先按 `replacementRunId` 接回未绑定的重发 USER，再回退文本匹配，禁止合入上一轮 assistant。
+- 新增包含 compact 历史、源 USER/ASSISTANT 删除早于 started、空 envelope、part 提前及平台权威同步的 reducer 回归；同步 `agent-chat/src/PACKAGE.md` 稳定说明。
+
+### How
+
+- `runtime-reducer.test.ts` 74/74 通过，`agent-chat` typecheck 通过；完整包测试为 186 passed / 1 个既有 `MarkdownView` 标题断言失败，本次未修改 Markdown 路径。
+- agent-web production build 通过；Chromium 的分享 + compact + 撤回重发 + 延迟原生事件回归 1/1 通过。
+- 使用 JDK 25、`test` profile、`.env.test` 与 `--without-workflow` 重启本地服务，后端 readiness 与前端均为 HTTP 200；真实 `Test message` 页面确认 `仅答复123` 仅出现一次，位于 USER 气泡且不在 assistant Markdown 中。
+
+### Result
+
+- transient 删除与 durable started 任意交错时，替代用户问题都保持单一、原位归并，不再短暂落入上一条助手回复或在权威刷新后重复。
+- 仅调整前端 RunEvent 投影和测试文档；没有变更 HTTP API、RunEvent wire schema、DTO、数据库、SQL、migration、鉴权、环境文件、generated SDK 或 OpenCode 只读源码。企业环境需重新构建并部署前端制品后生效。
