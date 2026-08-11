@@ -426,6 +426,14 @@ final class RuntimeDtos {
                 Integer summaryVersion,
                 RunResend resend,
                 Function<UserId, String> usernameLookup) {
+            UserId effectiveSender = resend != null && resend.requestedBySharedUser()
+                    ? resend.requesterUserId()
+                    : message.senderUserId();
+            String effectiveSenderUnifiedAuthId = resend != null && resend.requestedBySharedUser()
+                    ? resend.requesterUnifiedAuthId()
+                    : message.senderUnifiedAuthId();
+            boolean effectiveSentBySharedUser = resend != null && resend.requestedBySharedUser()
+                    || message.sentBySharedUser();
             return new SessionMessageResponse(
                     message.messageId().value(),
                     message.sessionId().value(),
@@ -443,10 +451,10 @@ final class RuntimeDtos {
                     summaryVersion,
                     message.sourceType().name(),
                     message.sourceRefId(),
-                    message.senderUserId() == null ? null : message.senderUserId().value(),
-                    username(usernameLookup, message.senderUserId()),
-                    message.senderUnifiedAuthId(),
-                    message.sentBySharedUser(),
+                    effectiveSender == null ? null : effectiveSender.value(),
+                    username(usernameLookup, effectiveSender),
+                    effectiveSenderUnifiedAuthId,
+                    effectiveSentBySharedUser,
                     ResendMetadataResponse.from(resend, usernameLookup));
         }
     }
@@ -576,6 +584,14 @@ final class RuntimeDtos {
                 Instant detailsAvailableUntil,
                 RunResend resend,
                 Function<UserId, String> usernameLookup) {
+            UserId effectiveSender = resend != null && resend.requestedBySharedUser()
+                    ? resend.requesterUserId()
+                    : run.messageSenderUserId();
+            String effectiveSenderUnifiedAuthId = resend != null && resend.requestedBySharedUser()
+                    ? resend.requesterUnifiedAuthId()
+                    : run.messageSenderUnifiedAuthId();
+            boolean effectiveSentBySharedUser = resend != null && resend.requestedBySharedUser()
+                    || run.messageSentBySharedUser();
             return new RunResponse(
                     run.runId().value(),
                     run.sessionId().value(),
@@ -590,10 +606,10 @@ final class RuntimeDtos {
                     detailsAvailableUntil,
                     run.sourceType().name(),
                     run.sourceRefId(),
-                    run.messageSenderUserId() == null ? null : run.messageSenderUserId().value(),
-                    username(usernameLookup, run.messageSenderUserId()),
-                    run.messageSenderUnifiedAuthId(),
-                    run.messageSentBySharedUser(),
+                    effectiveSender == null ? null : effectiveSender.value(),
+                    username(usernameLookup, effectiveSender),
+                    effectiveSenderUnifiedAuthId,
+                    effectiveSentBySharedUser,
                     ResendMetadataResponse.from(resend, usernameLookup));
         }
     }

@@ -3955,10 +3955,10 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 
 - 用途：由该消息的实际发送人，对当前根会话最后一条、已有远端 user message 边界且源 Run 已终态的消息执行“撤回并重新发送”。点击入口只让前端把上一条文本装入输入框；操作者修改并发送后，本接口同步预留新的
   `PENDING` Run 和会话锁；实际 revert/dispatch 由统一恢复状态机执行。
-- 鉴权：必须登录，actor ID 必须等于源 Run 的 `messageSenderUserId`；旧 Run 缺少该字段时只回退其可信 `triggeredByUserId`。分享发送人还必须满足 `canChat=true`。会话所属人若不是实际发送人同样返回 `FORBIDDEN`。服务端通过会话上下文重新验证执行所属人、实际发送人、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径、请求体或前端按钮。
+- 鉴权：必须登录，actor ID 必须等于源 Run 的实际发送人。源 Run 是共享人工重发生成的替代 Run 时，优先使用既有 `run_resends.requester_user_id` 审计纠正历史错误归因；否则使用 `messageSenderUserId`，旧 Run 缺少该字段时才回退可信 `triggeredByUserId`。分享发送人还必须满足 `canChat=true`。会话所属人若不是实际发送人同样返回 `FORBIDDEN`。服务端通过会话上下文重新验证执行所属人、实际发送人、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径、请求体或前端按钮。
 - 请求：`expectedRemoteMessageId`、可选 `expectedRunId`、短期 `contextToken`、幂等 `clientRequestId`，以及可选、最长 20000 字符的 `editedPrompt`。缺少 `editedPrompt` 时保持旧客户端的原文精确重放；提供后只替换可信远端用户轮次中的第一个 `text` part（无文本时替换第一个 `subtask`，两者都无时在开头增加 `text`），继续保留原附件、Agent、模型、variant 和其它结构化 part。前端不得提交或重建附件正文。
 - 响应：`resendId/status/executeAt/resend/replacementRun`。`resend` 包含 `trigger/totalAttempt/automaticAttempt/automaticLimit/status`、
-  源/替代 Run，以及可选 `requesterUserId/requesterUsername/requesterUnifiedAuthId/requestedBySharedUser` 真实发起人归因；姓名无法解析时可空。`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。
+  源/替代 Run，以及可选 `requesterUserId/requesterUsername/requesterUnifiedAuthId/requestedBySharedUser` 真实发起人归因；姓名无法解析时可空。`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。共享人工重发的历史 Run/消息若曾被执行所属人覆盖，响应中的发送人字段以 requester 审计恢复，不要求修改客户端协议或数据库历史。
 - 错误：不是源消息实际发送人，或分享发送人没有 `canChat` 时返回 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
 - traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、修改后文本、模型回答或供应商正文。修改后文本只随既有精确重放输入写入有限 TTL Redis，日志、审计和事件均不得记录。

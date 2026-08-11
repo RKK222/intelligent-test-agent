@@ -236,8 +236,9 @@ class RunResendApplicationServiceTest {
                 SOURCE_RUN_ID,
                 "context_token_shared",
                 "request_resend_owner_denied");
-        when(runRepository.findById(SOURCE_RUN_ID)).thenReturn(Optional.of(
-                sourceRun().withMessageSender(SHARED_SENDER, "ucid_resend_shared", true)));
+        // 模拟旧执行链把替代 Run 错写成所属人，但 run_resends 仍保留真实共享发起人。
+        when(resendRepository.findByReplacementRunId(SOURCE_RUN_ID))
+                .thenReturn(Optional.of(previousSharedResend()));
 
         assertThatThrownBy(() -> service.createManual(
                         OWNER, "opencode", SESSION_ID, command, "trace_resend_owner_denied"))
@@ -309,6 +310,18 @@ class RunResendApplicationServiceTest {
                 "trace_source")
                 .withSource(ConversationSourceType.SCHEDULED_TASK, "net_resend_source", OWNER)
                 .withRuntimeSelection("build", "openai/gpt-5");
+    }
+
+    private RunResend previousSharedResend() {
+        return new RunResend(
+                new RunResendId("rsd_previous_shared"), SESSION_ID, OWNER,
+                new RunId("run_previous_shared_source"), SOURCE_RUN_ID,
+                "msg_previous_shared_source", SOURCE_MESSAGE_ID,
+                RunResendTrigger.MANUAL, 1, 0, RunResendPolicy.MAX_AUTOMATIC_ATTEMPTS,
+                RunResendStatus.DISPATCHED, NOW.minusSeconds(60), "linux-resend-1",
+                null, null, "request_previous_shared", "trace_previous_shared", null,
+                NOW.minusSeconds(120), NOW.minusSeconds(60))
+                .withRequester(SHARED_SENDER, "ucid_resend_shared", true);
     }
 
     private ConversationRunContext context() {

@@ -162,10 +162,10 @@ runtime 代理入口有认证用户时必须通过 `AgentRuntimeTargetResolver` 
 `RunResendApplicationService` 统一承接手动与定时自动入口：人工入口只允许源消息实际发送人，分享发送人还必须持有 `canChat`，包括会话所属人在内的其它用户不得改写他人消息；服务先验证执行所属人、实际 actor、终态、最后远端 user message 和会话锁，再预留
 `PENDING` 替代 Run，并把精确输入写入有限 TTL Redis。人工请求可携带可选 `editedPrompt`，服务端只替换可信远端用户轮次中的文本并保留原附件、Agent、模型、variant 和其它 part；修改文本不进入控制表、事件、审计或日志。自动入口仅观察 root `session.error` 派生失败，定时来源最多自动 3 次，
 等待 1/2/4 分钟；人工重发继承整条链的自动次数，不重置额度。`RunResendExecutionService` 按
-`WAITING → REVERTING → REVERTED → DISPATCHED` 恢复，稳定消息探测为未知时保持锁，明确未投递且 unrevert 成功才失败解锁。
+`WAITING → REVERTING → REVERTED → DISPATCHED` 恢复；执行替代 Run 时必须同时用预留锚点的实际发送人写入 Run 和 USER `session_messages` 投影，不能被 OpenCode 执行所属人覆盖。稳定消息探测为未知时保持锁，明确未投递且 unrevert 成功才失败解锁。历史替代 Run 若已被错误归属给所属人，后续人工权限判断以共享重发审计的 requester 恢复真实发送人。
 
 已注册的每分钟 `opencode-runtime.night-execution-dispatch` 在夜间任务扫描后继续扫描到期、已 revert 和过期租约记录，按持久化目标服务器经公共 Java 路由器分发；重发不另建 task key。
 WAITING 替代 Run 可复用现有 cancel 入口；等待期间 `NightExecutionSessionLockGuard` 同时阻止新 Run、消息、command、shell、archive、
 compact 和 share 等主会话写入口。替代消息受理后在同一事务中清理源 Run 的 PostgreSQL 明细、推进 Session 内容修订时间，再清理 Redis 明细并发布 `run.resend.started`；重发事件携带真实 requester 身份，分享运行态据此刷新权威消息并保持分享发送人归属，Run、反馈、
-用量和关系保留。当前预留替代 Run 沿 `LEGACY_FULL` 明细链启动；源 Run 无论是 `LEGACY_FULL` 还是 `REDIS_SUMMARY` 都从远端
+用量和关系保留；历史消息/Run 响应也以共享 requester 修正旧错误归因，无需修改已执行数据库历史。当前预留替代 Run 沿 `LEGACY_FULL` 明细链启动；源 Run 无论是 `LEGACY_FULL` 还是 `REDIS_SUMMARY` 都从远端
 权威用户轮次读取并重放，避免把摘要数据库当作 prompt 事实源。

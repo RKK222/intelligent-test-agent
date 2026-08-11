@@ -151,4 +151,4 @@
 `RunResendController` 暴露 agent-scoped 最后一条消息撤销重发，只允许源消息实际发送人操作；分享发送人还必须持有 `canChat`，并接受可选、最长 20000 字符的 `editedPrompt`；`RunResendInternalDispatchController` 仅接收带既有 XXL token 的
 精确 Java→Java 批量恢复请求，`HttpRunResendDispatchGateway` 固定复用公共路由解析器和转发器。`Run`、Session message 与
 runtime-state DTO 的 `resend` 均为可选 additive 字段，分享 runtime-state 额外 additive 返回 `sessionUpdatedAt`；旧客户端缺失时继续按普通运行展示。内部响应与事件不返回 prompt、回答或
-供应商正文。
+供应商正文。共享人工重发的历史 Run/消息若曾被执行链错误写成所属人，DTO 映射以既有 `resend.requester*` 审计字段恢复实际发送人、姓名和代操作标记，不修改协议结构或数据库历史。

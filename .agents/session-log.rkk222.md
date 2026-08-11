@@ -8391,3 +8391,30 @@
 - 压缩分享会话中，成员改发后的问题只保留一条且归属成员，助手答复正常显示；拥有者看不到撤回入口，直接调用接口也会被拒绝。
 - 本次收紧既有重发接口鉴权并修复 RunEvent 合并行为，不新增 API/事件字段，不涉及数据库结构、Flyway 变更、关系型 SQL、性能路径、generated SDK、OpenCode 只读源码或 `.env*`，也未新建分支。
 - 后端、前端和 manager 当前分别运行于 `127.0.0.1:8080`、`127.0.0.1:3000` 和本地 manager 端口；Workflow 因本机缺少密钥未启动。
+
+## 2026-08-11 - 补全分享重发归因与 compact 边界修复
+
+### Why
+
+- 上一轮交付遗漏了三条真实链路：预留替代 Run 的 wr 归因会在执行阶段再次被所属人覆盖，USER `session_messages` 仍按执行所属人落库，迟到的 compact Part 又可能用不同 message alias 被追加到“仅答复 123”之后。
+- 因此前虽有定向测试和一次重启，用户按同一真实场景仍能看到 `仅答复 123 / 123` 落进 compact 边界，并可能由所属人取得错误的回撤入口；上一条日志的完成结论不完整。
+
+### What
+
+- 预留重发 Run 在真正执行时保留重发状态机已确认的发送人，并让 USER 消息投影复用同一归因；新替代 Run 与 `session_messages` 均写为 `wr / shared=true`。
+- 手工重发的替代 Run 以当前实际请求者为发送人；历史污染记录在授权、Run DTO、消息 DTO 和前端展示中优先使用共享重发审计 requester，所属人不再继承成员问题的修改权。
+- `agent-chat` 对 `message.part.updated/delta` 增加稳定 `partId` 跨 message alias 原位合并；迟到 compact Part 只更新原历史位置，不再插入替代轮次。
+- 同步 runtime、API、agent-web、agent-chat README/PACKAGE、HTTP API、安全和会话测试说明；没有新增 URL、DTO 字段、RunEvent 类型、数据库结构或 SQL。
+
+### How
+
+- JDK 25 下 runtime/API 定向回归 93/93 通过；前端全量 Vitest 123 个文件、1918 passed / 1 skipped，compact/所属人关键 Chromium E2E 2/2，agent-web production build 通过。
+- 使用 `.env.test`、JDK 25、字节一致的既有 Flyway compatibility location 和 `--without-workflow` 重新构建并重启 backend、opencode-manager、frontend；后端 health/readiness、前端、manager 与所属人 OpenCode 端口均健康。
+- 真实 wr 分享页重新执行“仅答复 OK → 回撤改为仅答复 123”：实时完成后连续观察 12 秒，compact 始终只有 1 个且始终在替代轮次之前，OK 消失，最终答复为 123；刷新后 wr 保留自己的回撤入口。
+- PostgreSQL 与所属人 API 复核新替代 Run `run_144d915982fb40d3835f4cbb7a3fbbf9`：Run、USER 消息和 resend requester 均为 wr/shared；所属人读取到的最新消息发送人同样为 wr。
+
+### Result
+
+- `compact → 仅答复 123 → 123` 的历史边界在实时事件和刷新恢复两条路径上保持稳定，不再把替代问题或答案包进 compact，也不再产生旧 OK 或第二条远端别名气泡。
+- wr 的问题归属和回撤权限保持给 wr，888888888 不再获得该消息的回撤入口；历史已污染记录无需改库即可按 resend 审计兼容展示和鉴权。
+- Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动；核心 backend、frontend、manager 与 OpenCode 已验证运行。未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。

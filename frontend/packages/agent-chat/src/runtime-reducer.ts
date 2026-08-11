@@ -817,9 +817,13 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
     }
   }
   const exact = findAssistantMessage(messages, messageId);
-  const lastIdx = exact.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
+  // 历史恢复会把原生 compaction user envelope 与后续摘要合成稳定展示消息，
+  // 因而迟到 part 事件的 messageId 可能与展示消息不同；partId 才是同一原生 Part 的稳定身份。
+  // 优先原位更新已有 Part，避免撤回重发时把旧 compact 标记再次追加到新用户轮次之后。
+  const partOwner = exact.message ? exact : findAssistantMessageByPartId(messages, partId);
+  const lastIdx = partOwner.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
-    exact.message ??
+    partOwner.message ??
     (lastIdx >= 0 ? (messages[lastIdx] as Extract<AgentMessage, { role: "assistant" }>) : undefined) ??
     ({
       id: messageId,
@@ -830,7 +834,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
       parts: [],
       runId: event.runId
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
-  const replaceIndex = exact.message ? exact.index : lastIdx;
+  const replaceIndex = partOwner.message ? partOwner.index : lastIdx;
 
   const parts = [...(assistant.parts ?? [])];
   const index = parts.findIndex((part) => part.partId === partId);
@@ -919,9 +923,12 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
     }
   }
   const exact = findAssistantMessage(messages, messageId);
-  const lastIdx = exact.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
+  // session-tree 历史可能已经按平台身份恢复同一 Part，而实时事件仍携带原生 envelope messageId。
+  // 使用全局唯一 partId 复用原位置，不能把 compact/工具等旧 Part 追加进当前替代轮次。
+  const partOwner = exact.message ? exact : findAssistantMessageByPartId(messages, partId);
+  const lastIdx = partOwner.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
-    exact.message ??
+    partOwner.message ??
     (lastIdx >= 0 ? (messages[lastIdx] as Extract<AgentMessage, { role: "assistant" }>) : undefined) ??
     ({
       id: messageId,
@@ -931,7 +938,7 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
       createdAt: event.occurredAt,
       parts: []
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
-  const replaceIndex = exact.message ? exact.index : lastIdx;
+  const replaceIndex = partOwner.message ? partOwner.index : lastIdx;
   const part = normalizeMessagePart(raw, partId);
   const parts = [...(assistant.parts ?? [])];
   const partIdx = parts.findIndex((item) => item.partId === partId);
@@ -1172,6 +1179,17 @@ function normalizeAssistantModel(raw: Record<string, unknown>) {
 function findAssistantMessage(messages: AgentMessage[], messageId: string) {
   const index = messages.findIndex(
     (message) => message.role === "assistant" && messageIdentityMatches(message, messageId)
+  );
+  return {
+    index,
+    message: index >= 0 ? (messages[index] as Extract<AgentMessage, { role: "assistant" }>) : undefined
+  };
+}
+
+/** 原生 Part ID 在一个 Session 内稳定唯一，可跨平台/远端 message alias 找回既有展示位置。 */
+function findAssistantMessageByPartId(messages: AgentMessage[], partId: string) {
+  const index = messages.findIndex(
+    (message) => message.role === "assistant" && message.parts?.some((part) => part.partId === partId)
   );
   return {
     index,

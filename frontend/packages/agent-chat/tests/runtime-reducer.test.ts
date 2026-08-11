@@ -100,6 +100,96 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("keeps a late compact part before an edited resend turn when its message alias changes", () => {
+    const initial = {
+      ...createInitialAgentChatRuntimeState([{
+        id: "msg_platform_compaction",
+        messageId: "msg_platform_compaction",
+        role: "assistant",
+        text: "",
+        parts: [{ partId: "part_compaction", type: "compaction", auto: false }],
+        createdAt: "2026-08-10T15:08:58Z"
+      }, {
+        id: "msg_compaction_summary",
+        messageId: "msg_compaction_summary",
+        role: "assistant",
+        text: "## Objective\n继续当前任务",
+        parts: [{ partId: "part_compaction_summary", type: "text", text: "## Objective\n继续当前任务" }],
+        createdAt: "2026-08-10T15:08:59Z"
+      }, {
+        id: "msg_source_user",
+        messageId: "msg_source_user",
+        role: "user",
+        text: "仅答复 OK",
+        runId: "run_source",
+        createdAt: "2026-08-10T15:09:00Z"
+      }, {
+        id: "msg_source_answer",
+        messageId: "msg_source_answer",
+        role: "assistant",
+        text: "OK",
+        parts: [{ partId: "part_source_answer", type: "text", text: "OK" }],
+        runId: "run_source",
+        createdAt: "2026-08-10T15:09:01Z"
+      }]),
+      todoUserMessageIdByRunId: { run_source: "msg_source_user" }
+    } satisfies AgentChatRuntimeState;
+    const resend = {
+      resendId: "resend_compacted",
+      sourceRunId: "run_source",
+      replacementRunId: "run_replacement",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "WAITING",
+      executeAt: "2026-08-10T15:09:02Z"
+    } as const;
+    const scheduled = reduceAgentChatRuntime(initial, {
+      type: "run.resend.requested",
+      resend,
+      editedPrompt: "仅答复 123"
+    });
+    const started = reduceAgentChatRuntime(scheduled, {
+      type: "event",
+      event: runEvent("run.resend.started", "run_replacement", {
+        ...resend,
+        status: "DISPATCHED"
+      })
+    });
+    const withLateCompaction = reduceAgentChatRuntime(started, {
+      type: "event",
+      event: runEvent("message.part.updated", "run_replacement", {
+        part: {
+          id: "part_compaction",
+          messageID: "msg_remote_compaction_envelope",
+          type: "compaction",
+          auto: false,
+          overflow: false
+        }
+      })
+    });
+    const completed = reduceAgentChatRuntime(withLateCompaction, {
+      type: "event",
+      event: runEvent("message.part.updated", "run_replacement", {
+        part: {
+          id: "part_replacement_answer",
+          messageID: "msg_replacement_answer",
+          type: "text",
+          text: "123"
+        }
+      })
+    });
+
+    expect(completed.messages.filter((message) => message.role === "assistant"
+      && message.parts?.some((part) => part.partId === "part_compaction"))).toHaveLength(1);
+    expect(completed.messages.findIndex((message) => message.id === "msg_platform_compaction"))
+      .toBeLessThan(completed.messages.findIndex((message) => message.role === "user" && message.runId === "run_replacement"));
+    const rows = createTimelineRows(createOpencodeLikeState({ messages: completed.messages }));
+    expect(rows.findIndex((row) => row.type === "compaction-summary"))
+      .toBeLessThan(rows.findIndex((row) => row.type === "user-message"));
+  });
+
   it("projects an automatic resend countdown on the scheduled source message", () => {
     const initial = {
       ...createInitialAgentChatRuntimeState([

@@ -1078,11 +1078,28 @@ const chatMessagesForPanel = computed<AgentMessage[]>(() =>
       const resend = belongsToCurrentResend
         ? currentResend
         : message.resend;
-      const senderUsername = message.senderUserId
-        ? shareParticipantNameByUserId.value.get(message.senderUserId)
+      // 兼容旧替代 Run 被执行所属人覆盖的历史数据；共享重发审计中的 requester
+      // 是后端确认过的实际发送人，展示和按钮权限都必须优先使用它。
+      const senderUserId = resend?.requestedBySharedUser
+        ? resend.requesterUserId ?? message.senderUserId
+        : message.senderUserId;
+      const senderUsername = senderUserId
+        ? shareParticipantNameByUserId.value.get(senderUserId)
         : undefined;
-      return platformMessageId || resend || senderUsername
-        ? { ...message, platformMessageId, resend, senderUsername: senderUsername ?? message.senderUsername }
+      return platformMessageId || resend || senderUsername || senderUserId !== message.senderUserId
+        ? {
+            ...message,
+            platformMessageId,
+            resend,
+            senderUserId,
+            senderUsername: resend?.requestedBySharedUser
+              ? resend.requesterUsername ?? senderUsername ?? message.senderUsername
+              : senderUsername ?? message.senderUsername,
+            senderUnifiedAuthId: resend?.requestedBySharedUser
+              ? resend.requesterUnifiedAuthId ?? message.senderUnifiedAuthId
+              : message.senderUnifiedAuthId,
+            sentBySharedUser: resend?.requestedBySharedUser ? true : message.sentBySharedUser
+          }
         : message;
     }
     return platformMessageId ? { ...message, platformMessageId } : message;

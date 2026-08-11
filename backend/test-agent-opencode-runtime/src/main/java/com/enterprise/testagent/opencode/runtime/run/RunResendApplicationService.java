@@ -169,10 +169,11 @@ public class RunResendApplicationService {
             sourceRunId = sourceTurn.runId();
         }
         Run sourceRun = requireTerminalSourceRun(sourceRunId, sessionId);
+        RunResend previous = resendRepository.findByReplacementRunId(sourceRun.runId()).orElse(null);
         if (delegatedContext != null) {
             delegatedContext.requireWorkspace(sourceRun.workspaceId());
         }
-        requireManualRequester(attribution, sourceRun, sessionId);
+        requireManualRequester(attribution, sourceRun, previous, sessionId);
         AgentRuntime runtime = runtimeRegistry.require(resolvedAgentId);
         AgentReplayableTurn replayable;
         try {
@@ -191,7 +192,6 @@ public class RunResendApplicationService {
             throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "远端用户消息读取失败");
         }
         replayable = withEditedPrompt(replayable, command.editedPrompt());
-        RunResend previous = resendRepository.findByReplacementRunId(sourceRun.runId()).orElse(null);
         return reserve(
                 attribution,
                 resolvedAgentId,
@@ -224,6 +224,15 @@ public class RunResendApplicationService {
         Instant now = clock.instant();
         RunId replacementRunId = new RunId(RuntimeIdGenerator.runId());
         String replacementMessageId = runtimeRegistry.require(agentId).createDispatchMessageId();
+        UserId replacementSender = trigger == RunResendTrigger.MANUAL
+                ? requester.actualSenderUserId()
+                : sourceSender(sourceRun, owner);
+        String replacementSenderUnifiedAuthId = trigger == RunResendTrigger.MANUAL
+                ? requester.actualSenderUnifiedAuthId()
+                : sourceRun.messageSenderUnifiedAuthId();
+        boolean replacementSentBySharedUser = trigger == RunResendTrigger.MANUAL
+                ? requester.sentBySharedUser()
+                : sourceRun.messageSentBySharedUser();
         Run replacement = new Run(
                 replacementRunId,
                 sourceRun.sessionId(),
@@ -234,9 +243,9 @@ public class RunResendApplicationService {
                 traceId)
                 .withSource(sourceRun.sourceType(), sourceRun.sourceRefId(), owner)
                 .withMessageSender(
-                        sourceSender(sourceRun, owner),
-                        sourceRun.messageSenderUnifiedAuthId(),
-                        sourceRun.messageSentBySharedUser())
+                        replacementSender,
+                        replacementSenderUnifiedAuthId,
+                        replacementSentBySharedUser)
                 .withRuntimeSelection(replayable.agent(), modelId(replayable));
         RunResend resend = new RunResend(
                 new RunResendId(RuntimeIdGenerator.runResendId()),
@@ -325,9 +334,14 @@ public class RunResendApplicationService {
     private void requireManualRequester(
             RunActorAttribution requester,
             Run sourceRun,
+            RunResend sourceResend,
             SessionId sessionId) {
         UserId actor = requester.actualSenderUserId();
-        UserId sourceSender = sourceSender(sourceRun, requester.executionOwnerUserId());
+        // 兼容修复前已经把替代 Run 误写成所属人的记录：共享重发审计中的 requester
+        // 才是该轮真实发送人，后续权限判断不能继续相信被污染的 Run 字段。
+        UserId sourceSender = sourceResend != null && sourceResend.requestedBySharedUser()
+                ? sourceResend.requesterUserId()
+                : sourceSender(sourceRun, requester.executionOwnerUserId());
         if (!actor.equals(sourceSender)) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,

@@ -1029,12 +1029,23 @@ public class RunApplicationService {
         if (userId != null) {
             pending = pending.withSource(source.type(), source.refId(), userId);
         }
-        if (attribution.actualSenderUserId() != null) {
+        // 重发状态机已经把实际操作人写入预留 Run；执行阶段仍以所属人调用 OpenCode，
+        // 但不能用所属人覆盖该可信归因，否则分享成员重发后会被永久记成会话所属人。
+        if (reservedRunId == null && attribution.actualSenderUserId() != null) {
             pending = pending.withMessageSender(
                     attribution.actualSenderUserId(),
                     attribution.actualSenderUnifiedAuthId(),
                     attribution.sentBySharedUser());
         }
+        // 预留重发 Run 的发送人已经由重发状态机确认；用户消息投影也必须复用同一归因。
+        // 执行入口收到的 actorAttribution 仍是 OpenCode 所属人，不能再把 session_messages 写回所属人。
+        RunActorAttribution messageAttribution = reservedRunId != null && pending.messageSenderUserId() != null
+                ? new RunActorAttribution(
+                        attribution.executionOwnerUserId(),
+                        pending.messageSenderUserId(),
+                        pending.messageSenderUnifiedAuthId(),
+                        pending.messageSentBySharedUser())
+                : attribution;
         pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
         RunStorageMode storageMode = runStorageModeSelector == null
                 ? RunStorageMode.LEGACY_FULL
@@ -1087,11 +1098,11 @@ public class RunApplicationService {
         if (scheduledClaim.managed()) {
             userMessageCreated = ensureLegacyScheduledUserMessage(
                     session.sessionId(), pending.runId(), prompt, input.parts(), userId,
-                    dispatchMessageId, traceId, now, source, attribution);
+                    dispatchMessageId, traceId, now, source, messageAttribution);
         } else {
             saveUserMessage(
                     session.sessionId(), pending.runId(), prompt, input.parts(), userId,
-                    dispatchMessageId, traceId, now, source, attribution);
+                    dispatchMessageId, traceId, now, source, messageAttribution);
             userMessageCreated = true;
         }
         if (userMessageCreated) {

@@ -88,7 +88,22 @@ test("session share management and received list preserve one link and inactive 
   await expect.poll(() => shareRevokeRequests).toEqual([{ sessionId: "ses_1", expectedVersion: "0" }]);
 });
 
-test("session share owner workbench resolves collaborator names from the managed share", async ({ page }) => {
+test("session share owner repairs historical collaborator resend attribution from audit metadata", async ({ page }) => {
+  const historicalResend = {
+    resendId: "rsd_collaborator_owner_view",
+    trigger: "MANUAL",
+    totalAttempt: 1,
+    automaticAttempt: 0,
+    automaticLimit: 3,
+    status: "DISPATCHED",
+    executeAt: "2026-08-09T01:00:00Z",
+    sourceRunId: "run_collaborator_owner_source",
+    replacementRunId: "run_collaborator_owner_view",
+    requesterUserId: "usr_collaborator",
+    requesterUsername: "协作者",
+    requesterUnifiedAuthId: "ucid_collaborator",
+    requestedBySharedUser: true
+  };
   await mockBackendApi(page, {
     sessions: [{ ...session(), title: "所属人协作会话" }],
     sessionCollaborationShare: {
@@ -121,11 +136,12 @@ test("session share owner workbench resolves collaborator names from the managed
         sessionId: "ses_1",
         role: "USER",
         content: "协作者发出的消息",
-        senderUserId: "usr_collaborator",
-        senderUnifiedAuthId: "ucid_collaborator",
-        sentBySharedUser: true,
+        senderUserId: "usr_admin",
+        senderUnifiedAuthId: "ucid_owner",
+        sentBySharedUser: false,
         createdAt: "2026-08-09T01:00:00Z",
-        runId: "run_collaborator_owner_view"
+        runId: "run_collaborator_owner_view",
+        resend: historicalResend
       }]
     },
     historyRun: {
@@ -134,9 +150,10 @@ test("session share owner workbench resolves collaborator names from the managed
       workspaceId: "wrk_1234567890abcdef",
       status: "SUCCEEDED",
       triggeredByUserId: "usr_admin",
-      messageSenderUserId: "usr_collaborator",
-      messageSenderUnifiedAuthId: "ucid_collaborator",
-      messageSentBySharedUser: true,
+      messageSenderUserId: "usr_admin",
+      messageSenderUnifiedAuthId: "ucid_owner",
+      messageSentBySharedUser: false,
+      resend: historicalResend,
       createdAt: "2026-08-09T01:00:00Z",
       updatedAt: "2026-08-09T01:00:01Z"
     }
@@ -159,9 +176,10 @@ test("session share owner keeps one collaborator resend after compacted history 
     workspaceId: "wrk_1234567890abcdef",
     status: "RUNNING",
     triggeredByUserId: "usr_admin",
-    messageSenderUserId: "usr_wr",
-    messageSenderUnifiedAuthId: "wr",
-    messageSentBySharedUser: true,
+    // 模拟旧执行链把替代 Run 错误覆盖成所属人；resend requester 才是可信发送人。
+    messageSenderUserId: "usr_admin",
+    messageSenderUnifiedAuthId: "DEV_888888888",
+    messageSentBySharedUser: false,
     resend: {
       resendId: "rsd_owner_resend_revision",
       trigger: "MANUAL",
@@ -259,8 +277,21 @@ test("session share owner keeps one collaborator resend after compacted history 
     }, {
       releaseKey: "owner-resend-late-native-events",
       events: [{
-        eventId: "evt_owner_resend_answer",
+        eventId: "evt_owner_resend_late_compaction",
         seq: 8,
+        type: "message.part.updated",
+        payload: {
+          part: {
+            id: "prt-owner-resend-compaction",
+            messageID: "msg_remote_owner_resend_compaction_envelope",
+            type: "compaction",
+            auto: false,
+            overflow: false
+          }
+        }
+      }, {
+        eventId: "evt_owner_resend_answer",
+        seq: 9,
         type: "message.updated",
         payload: {
           message: {
@@ -271,7 +302,7 @@ test("session share owner keeps one collaborator resend after compacted history 
         }
       }, {
         eventId: "evt_owner_resend_late_user",
-        seq: 9,
+        seq: 10,
         type: "message.updated",
         payload: {
           senderUserId: "usr_admin",
@@ -362,12 +393,13 @@ test("session share owner keeps one collaborator resend after compacted history 
     sessionId: "ses_owner_resend_revision",
     role: "USER",
     content: "仅答复 123",
-    senderUserId: "usr_wr",
-    senderUsername: "wr",
-    senderUnifiedAuthId: "wr",
-    sentBySharedUser: true,
+    senderUserId: "usr_admin",
+    senderUsername: "888888888",
+    senderUnifiedAuthId: "DEV_888888888",
+    sentBySharedUser: false,
     createdAt: "2026-08-10T03:30:02Z",
-    runId: "run_owner_resend_replacement"
+    runId: "run_owner_resend_replacement",
+    resend: activeRun.resend
   }];
   const released = await page.evaluate(() =>
     (window as Window & { __releaseRunEventBatch?: (releaseKey: string) => boolean })
@@ -392,7 +424,15 @@ test("session share owner keeps one collaborator resend after compacted history 
   await expect(page.getByText("仅答复 123", { exact: true })).toHaveCount(1);
   await expect(page.locator('[data-oc-turn-id="msg_remote_owner_resend_new"]')).toHaveCount(0);
   await expect(replacementTurn.locator(".oc-user-message__sender")).toHaveText("wr");
-  await expect(page.getByTestId("compaction-part-prt-owner-resend-compaction")).toBeVisible();
+  const compaction = page.getByTestId("compaction-part-prt-owner-resend-compaction");
+  await expect(compaction).toHaveCount(1);
+  await expect(compaction).toBeVisible();
+  expect(await page.locator([
+    '[data-testid="compaction-part-prt-owner-resend-compaction"]',
+    '[data-oc-turn-id="msg_owner_resend_new"]'
+  ].join(", ")).evaluateAll((nodes) => nodes.map((node) =>
+    node.getAttribute("data-oc-turn-id") ? "replacement" : "compaction"
+  ))).toEqual(["compaction", "replacement"]);
 });
 
 test("session share read-only workbench shows sender identity colors and fixed scope", async ({ page }) => {

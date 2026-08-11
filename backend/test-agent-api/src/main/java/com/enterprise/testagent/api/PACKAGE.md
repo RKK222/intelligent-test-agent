@@ -34,7 +34,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.SchedulerManagementController`：旧 `/scheduler-management/**` 兼容入口，所有方法统一返回 `410 API_GONE`，不再调用旧管理服务。
 - `web.platform.AgentConfigController`：Agent 配置 HTTP 元数据、Git 操作和进度 ticket 入口；公共仓库初始化和显式拉取按 `linuxServerId` 路由到目标后端，公共 update-and-push 合并冲突读取/解决/取消接口复用工作区冲突协议，公共 worktree 列表只返回指定服务器 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容操作继续走平台文件 WebSocket。
 - `web.agent.AgentOpencodeRuntimeController`：agent 侧 opencode 兼容代理入口，承载 `/api/internal/agent/{agentId}/...` 路径并把 agentId 与可选用户主体交给业务层选择 runtime。
-- `web.platform.RuntimeDtos`、`web.platform.AuthDtos`：平台 API 请求/响应 DTO；Session、SessionMessage、Run 可选暴露 `sourceType/sourceRefId`，Run、SessionMessage、AgentMessage 与运行态摘要的 `resend` 元数据保持 nullable/additive，旧客户端缺失时仍按普通消息展示；Run 历史与 Session 历史响应的新存储/摘要元数据保持 nullable，并通过显式映射重载接入新模式投影；session-tree 事件 DTO 保留原始 `traceId`，不改变既有 payload。
+- `web.platform.RuntimeDtos`、`web.platform.AuthDtos`：平台 API 请求/响应 DTO；Session、SessionMessage、Run 可选暴露 `sourceType/sourceRefId`，Run、SessionMessage、AgentMessage 与运行态摘要的 `resend` 元数据保持 nullable/additive，旧客户端缺失时仍按普通消息展示；共享人工重发响应以 requester 审计纠正旧替代 Run/消息的所属人错误归因；Run 历史与 Session 历史响应的新存储/摘要元数据保持 nullable，并通过显式映射重载接入新模式投影；session-tree 事件 DTO 保留原始 `traceId`，不改变既有 payload。
 - `web.common.TraceIdWebFilter`、`web.common.JwtAuthWebFilter`、`web.common.ApiTokenWebFilter`、`web.common.InMemoryRateLimitWebFilter`、`web.common.GlobalExceptionHandler`：入口公共处理。
 - `web.common.RuntimeApiSupport`、`web.common.AuthWebSupport`：Controller 与 WebFilter 共用的 HTTP 边界工具。
 - `web.platform.SupportAccessController` / `SupportAccessDtos`：超级管理员限时只读排查协议入口；actor 始终为当前管理员，target 只限定查询范围，会话可显式包含软删除 ARCHIVED，工作区附带公共 Java 路由可用状态；会话完整历史只在权威 Java 在线时访问 OpenCode，否则直接读取持久化来源。文件 route/ticket 复用公共路由并携带专用授权头。

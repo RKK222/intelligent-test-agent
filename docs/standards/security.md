@@ -369,7 +369,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
 ## 撤销重发安全边界
 
-- 浏览器手动入口必须重新校验登录 actor 是源消息实际发送人；分享发送人还必须有 `canChat=true`。会话所属人只有在其本人就是实际发送人时才能操作。同时校验可信 `contextToken`、根会话、最后远端 user message、终态 Run 和会话活动锁；
+- 浏览器手动入口必须重新校验登录 actor 是源消息实际发送人；源 Run 为共享人工重发替代 Run 时，必须以持久化 requester 审计纠正历史上可能被执行所属人覆盖的发送人归因。分享发送人还必须有 `canChat=true`，会话所属人只有在其本人就是实际发送人时才能操作。同时校验可信 `contextToken`、根会话、最后远端 user message、终态 Run 和会话活动锁；
   `expectedRunId/expectedRemoteMessageId/clientRequestId` 都只是并发前置条件，不是授权事实源。
 - Java→Java 内部分发只对精确路径豁免用户 token，并使用既有 XXL access token 常量时间校验；跨服务器固定复用公共路由解析与
   HTTP 转发器，不允许浏览器指定目标后端或通过本机降级绕过目标服务器。
