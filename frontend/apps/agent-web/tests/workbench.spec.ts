@@ -3142,6 +3142,9 @@ test("application source snapshot opens a logical workspace and enforces source 
   const fileExplorer = page.locator(".figma-file-explorer");
   await openAppSourceFromWorkspaceSwitch(page);
   const picker = page.getByRole("dialog", { name: "应用源码" });
+  const pickerBox = await picker.boundingBox();
+  expect(pickerBox?.y).toBeGreaterThanOrEqual(40);
+  expect(pickerBox?.y).toBeLessThan(100);
   await expect(picker).toContainText("团队可用");
   await expect(picker).toContainText("李四 · UCID-1002");
   await expect(picker).not.toContainText("尚未下载库");
