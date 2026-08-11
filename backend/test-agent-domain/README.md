@@ -104,6 +104,6 @@ Repository 端口只定义在 domain，具体 JDBC/Flyway 实现必须放在 `te
   唯一，`upstreamModelId` 只供模型网关解析。
 - `ModelGatewayUsageDailyRepository` 接受无正文的 `ModelGatewayUsageDelta`，只按稳定聚合维度累加计数、token
   和耗时。
-- `InternalModelCallRecordRepository` 接受不含正文的代理/探活结构化观测；明细中的 `firstByteMillis`、`firstTokenMillis`、`lastTokenMillis`、`streamCompleteMillis` 分别表达响应头、首个输出、最后一个输出和正常收尾信号到达，`outputTokenCount` 只接受上游返回的准确输出 Token 数，`durationMillis` 保留端到端耗时。`interTokenLatencyMillis()` 按 `(末输出-首输出)/(输出 Token 数-1)` 计算 ITL/TPOT，不完整或少于 2 个 Token 的样本返回空。小时聚合仍为 TTFT 与流完成保留 sum/max/count；`InternalModelLatencyDistribution` 统一表达 TTFT 和 ITL/TPOT 的样本数、最小值、P25、中位数、P75、最大值。`InternalModelCallOutcomeGroup` 把底层 13 个精确结果稳定归入五个看板大类，精确原因仍随明细返回。
+- `InternalModelCallRecordRepository` 接受不含正文的代理/探活结构化观测；明细中的 `firstByteMillis`、`firstTokenMillis`、`lastTokenMillis`、`streamCompleteMillis` 分别表达响应头、首个输出、最后一个输出和正常收尾信号到达，`outputTokenCount` 只接受上游返回的准确输出 Token 数，`durationMillis` 保留端到端耗时。`interTokenLatencyMillis()` 按 `(末输出-首输出)/(输出 Token 数-1)` 计算 ITL/TPOT，不完整或少于 2 个 Token 的样本返回空。小时聚合仍为 TTFT 与流完成保留 sum/max/count；`InternalModelLatencyDistribution` 统一表达 TTFT 和 ITL/TPOT 的样本数、平均值、最小值、P25、中位数、P75、最大值。`InternalModelCallOutcomeGroup` 把底层 13 个精确结果稳定归入五个看板大类，精确原因仍随明细返回。
 
 LobeHub 自身用户、Session、部门 Workspace、资源与审计是独立 fork 的领域，不在本模块建模。

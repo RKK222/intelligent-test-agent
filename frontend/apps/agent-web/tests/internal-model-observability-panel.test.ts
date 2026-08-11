@@ -1,5 +1,5 @@
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
-import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
@@ -10,6 +10,7 @@ import type {
 import InternalModelObservabilityPanel from "../src/components/system/InternalModelObservabilityPanel.vue";
 
 const chartOptions = vi.hoisted(() => [] as Array<{
+  xAxis?: { data?: unknown };
   yAxis?: { name?: string } | Array<{ name?: string }>;
   series?: Array<{ type?: string; data?: unknown }>;
 }>);
@@ -84,6 +85,23 @@ const stats: InternalModelCallHourlyStat[] = [
     streamCompleteMillisSum: 0,
     streamCompleteMillisMax: 0,
     streamCompleteCount: 0
+  },
+  {
+    statHour: "2026-08-07T10:00:00Z",
+    providerId: "vendor-b",
+    model: "vendor-model",
+    endpoint: "/chat/completions",
+    source: "USER_CALL",
+    outcome: "SUCCESS",
+    requestCount: 180,
+    durationMillisSum: 270_000,
+    durationMillisMax: 3_000,
+    firstTokenMillisSum: 90_000,
+    firstTokenMillisMax: 900,
+    firstTokenCount: 180,
+    streamCompleteMillisSum: 216_000,
+    streamCompleteMillisMax: 2_400,
+    streamCompleteCount: 180
   }
 ];
 
@@ -103,21 +121,53 @@ function renderPanel(recordsTotal = 1) {
       items: [record], page: 1, size: 20, total: recordsTotal
     }),
     getInternalModelCallStats: vi.fn().mockResolvedValue(stats),
-    getInternalModelTtftDistribution: vi.fn().mockResolvedValue({
-      sampleCount: 4,
-      minimumMillis: 100,
-      firstQuartileMillis: 175,
-      medianMillis: 250,
-      thirdQuartileMillis: 325,
-      maximumMillis: 400
-    }),
-    getInternalModelItlDistribution: vi.fn().mockResolvedValue({
-      sampleCount: 4,
-      minimumMillis: 20,
-      firstQuartileMillis: 35,
-      medianMillis: 50,
-      thirdQuartileMillis: 65,
-      maximumMillis: 80
+    getInternalModelTtftDistribution: vi.fn().mockImplementation((params: { providerId?: string | null }) =>
+      Promise.resolve(params.providerId === "vendor-b" ? {
+        sampleCount: 4,
+        averageMillis: 700,
+        minimumMillis: 500,
+        firstQuartileMillis: 600,
+        medianMillis: 700,
+        thirdQuartileMillis: 800,
+        maximumMillis: 900
+      } : {
+        sampleCount: 4,
+        averageMillis: 250,
+        minimumMillis: 100,
+        firstQuartileMillis: 175,
+        medianMillis: 250,
+        thirdQuartileMillis: 325,
+        maximumMillis: 400
+      })),
+    getInternalModelItlDistribution: vi.fn().mockImplementation((params: { providerId?: string | null }) => {
+      if (!params.providerId) {
+        return Promise.resolve({
+          sampleCount: 8,
+          averageMillis: 95,
+          minimumMillis: 20,
+          firstQuartileMillis: 50,
+          medianMillis: 90,
+          thirdQuartileMillis: 140,
+          maximumMillis: 180
+        });
+      }
+      return Promise.resolve(params.providerId === "vendor-b" ? {
+        sampleCount: 4,
+        averageMillis: 140,
+        minimumMillis: 100,
+        firstQuartileMillis: 120,
+        medianMillis: 140,
+        thirdQuartileMillis: 160,
+        maximumMillis: 180
+      } : {
+        sampleCount: 4,
+        averageMillis: 50,
+        minimumMillis: 20,
+        firstQuartileMillis: 35,
+        medianMillis: 50,
+        thirdQuartileMillis: 65,
+        maximumMillis: 80
+      });
     }),
     triggerInternalModelProbe: vi.fn().mockResolvedValue({})
   } as Partial<BackendApiClient> as BackendApiClient;
@@ -154,6 +204,7 @@ function renderPanel(recordsTotal = 1) {
 
 describe("InternalModelObservabilityPanel", () => {
   afterEach(() => {
+    cleanup();
     chartOptions.length = 0;
     vi.restoreAllMocks();
   });
@@ -165,17 +216,18 @@ describe("InternalModelObservabilityPanel", () => {
 
     await view.findByText("Overview");
     expect(view.getByText(/当前 24 小时时间段/)).toBeTruthy();
-    expect(view.getByText(/所有时长统一使用秒（s）/)).toBeTruthy();
-    expect(await view.findByText("0.0043")).toBeTruthy();
+    expect(view.getByText(/ITL \/ TPOT 使用毫秒（ms）/)).toBeTruthy();
+    expect(await view.findByText("0.0064")).toBeTruthy();
     expect(await view.findByText("user-10086")).toBeTruthy();
     expect(view.getAllByText("上游服务异常").length).toBeGreaterThan(0);
     expect(view.getByText("上游 HTTP 错误")).toBeTruthy();
     expect(await view.findByText("中间 50%：0.175s–0.325s")).toBeTruthy();
     expect(view.getByText("中位数：0.25s")).toBeTruthy();
-    expect(view.getByText("中位数：0.05s")).toBeTruthy();
-    expect(view.getAllByText("0.05s").length).toBeGreaterThan(0);
-    expect(view.getAllByText("样本：4 次")).toHaveLength(2);
-    expect(view.container.textContent).not.toMatch(/\d(?:\.\d+)?ms\b/);
+    expect(view.getByText("中位数：50ms")).toBeTruthy();
+    expect(view.getByText("中位数：140ms")).toBeTruthy();
+    expect(view.getAllByText("样本：4 次")).toHaveLength(4);
+    expect(view.getByText("95ms")).toBeTruthy();
+    expect(view.getByText("180ms")).toBeTruthy();
     expect(view.container.querySelectorAll(".ta-imob-chart-box")).toHaveLength(2);
     const comparison = view.container.querySelector(".ta-imob-chart-comparison");
     expect(comparison?.querySelector(".ta-imob-chart-stack")).toBeTruthy();
@@ -187,18 +239,37 @@ describe("InternalModelObservabilityPanel", () => {
         !Array.isArray(option.yAxis) && option.yAxis?.name === "TTFT (s)"
       );
       const itlOption = [...chartOptions].reverse().find((option) =>
-        !Array.isArray(option.yAxis) && option.yAxis?.name === "ITL / TPOT (s)"
+        !Array.isArray(option.yAxis) && option.yAxis?.name === "ITL / TPOT (ms)"
       );
-      expect(ttftOption?.series?.[0]?.data).toEqual([[0.1, 0.175, 0.25, 0.325, 0.4]]);
-      expect(itlOption?.series?.[0]?.data).toEqual([[0.02, 0.035, 0.05, 0.065, 0.08]]);
+      expect(ttftOption?.xAxis?.data).toEqual(["local-mock", "vendor-b"]);
+      expect(ttftOption?.series?.[0]?.data).toEqual([
+        [0.1, 0.175, 0.25, 0.325, 0.4],
+        [0.5, 0.6, 0.7, 0.8, 0.9]
+      ]);
+      expect(itlOption?.xAxis?.data).toEqual(["local-mock", "vendor-b"]);
+      expect(itlOption?.series?.[0]?.data).toEqual([
+        [20, 35, 50, 65, 80],
+        [100, 120, 140, 160, 180]
+      ]);
     });
+
+    expect(view.api.getInternalModelItlDistribution).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: null,
+      source: "USER_CALL"
+    }));
+    expect(view.api.getInternalModelItlDistribution).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: "local-mock"
+    }));
+    expect(view.api.getInternalModelItlDistribution).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: "vendor-b"
+    }));
 
     const explainedLabels = [
       "REQ", "Providers", "SR", "FR", "Failures",
       "Avg E2E", "Max E2E", "Total Duration", "RPS",
-      "Avg TTFT", "Max TTFT",
+      "Avg TTFT", "Max TTFT", "Avg ITL / TPOT", "Max ITL / TPOT",
       "Avg SCT", "Max SCT",
-      "请求数与成功率趋势", "TTFT 分布（箱线图）", "ITL / TPOT 分布（箱线图）",
+      "请求数与成功率趋势", "TTFT 厂商对比（箱线图）", "ITL / TPOT 厂商对比（箱线图）",
       "调用结果分布", "失败原因分类", "供应商请求量对比",
       "E2E Latency", "TTFT", "ITL / TPOT", "SCT"
     ];
@@ -231,6 +302,8 @@ describe("InternalModelObservabilityPanel", () => {
         size: 20
       }));
     });
+    // 当前页只有 1 条，但全量 Overview 仍来自后端聚合的 540 次调用。
+    expect(view.getByText("540")).toBeTruthy();
 
     await fireEvent.click(view.getByRole("button", { name: "下一页" }));
     await waitFor(() => {

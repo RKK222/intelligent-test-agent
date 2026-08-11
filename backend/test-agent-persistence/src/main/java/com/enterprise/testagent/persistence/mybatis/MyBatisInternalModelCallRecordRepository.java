@@ -94,6 +94,7 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
     private InternalModelLatencyDistribution toDistribution(InternalModelLatencyDistributionRow row) {
         return new InternalModelLatencyDistribution(
                 row.sampleCount(),
+                row.averageMillis(),
                 row.minimumMillis(),
                 row.firstQuartileMillis(),
                 row.medianMillis(),

@@ -8807,3 +8807,27 @@
 ### Result
 
 - 趋势和小时热力已按实际可用宽度适配常见窄屏、桌面和 2K/4K 视口；无 HTTP API、事件、DTO、数据库、SQL、migration、安全或环境配置变更，未修改 generated SDK 和 OpenCode 只读源码。
+
+## 2026-08-11 - 内部模型时延按厂商对比并补全 ITL Overview
+
+### Why
+
+- TTFT 与 ITL/TPOT 原先把不同模型厂商合成一个箱体，无法看出厂商差异；ITL/TPOT 又沿用了秒单位，且新指标没有出现在 Overview。
+- 明细列表默认只展示 20 条，必须明确保证聚合指标和图表不会拿当前页数据计算。
+
+### What
+
+- 两张竖向箱线图复用既有分布接口，按当前全量统计中的 Provider 分别查询并绘制，一个厂商一个箱体；TTFT 保持秒，ITL/TPOT 在明细、Overview、箱线图、坐标轴和提示中统一使用毫秒。
+- 分布响应兼容性新增 `averageMillis`，MyBatis XML 直接对全量合格明细计算平均值；Overview 新增 Avg ITL/TPOT 与 Max ITL/TPOT，不读取当前页明细。
+- 前端回归加入两个厂商和不同分布，并在当前页只有 1 条时断言 Overview 仍展示后端 540 次全量聚合；测试指南补充全量翻页和独立 Python 连续分位数复算方法。
+
+### How
+
+- 前端定向 Vitest 2/2、agent-web typecheck、development Vite build 通过；后端 domain/API/H2 persistence 定向测试 13/13 通过，JDK 25 全后端 package 通过，AI 文档校验通过。
+- PostgreSQL Testcontainers 用例在本机等待 Docker 容器期间持续无输出，人工终止，未把该项记作通过；同一 `avg`/`percentile_cont` SQL 已由 H2 定向测试和后端编译覆盖，生产 PostgreSQL 用例保留新增平均值断言。
+- 正式 Vite 入口运行于 `http://127.0.0.1:5174/` 并返回 200；Playwright 未登录访问会跳转企业统一认证，当前机器访问内网站点返回 502，因此无法取得真实登录态看板截图。
+
+### Result
+
+- 看板现在能直接比较每个模型厂商的 TTFT 与 ITL/TPOT 分布，并在 Overview 查看全量可靠 ITL 的平均值与最大值；明细分页只影响列表。
+- API 仅新增可忽略的响应字段，无 URL、事件或数据库结构变化；未新增 migration，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。

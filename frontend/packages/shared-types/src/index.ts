@@ -2129,9 +2129,11 @@ export type InternalModelCallHourlyStat = {
   streamCompleteCount?: number | null;
 };
 
-/** 单次调用时延的五数概括；具体样本资格由对应指标决定。 */
+/** 单次调用时延的平均值与五数概括；具体样本资格由对应指标决定。 */
 export type InternalModelLatencyDistribution = {
   sampleCount: number;
+  /** 兼容旧版后端：缺失时总览平均值显示为空，不使用中位数冒充平均值。 */
+  averageMillis?: number | null;
   minimumMillis?: number | null;
   firstQuartileMillis?: number | null;
   medianMillis?: number | null;

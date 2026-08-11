@@ -76,7 +76,7 @@ public class InternalModelObservabilityQueryService {
     }
 
     /**
-     * 查询 TTFT 五数概括。分位数必须基于单次调用明细计算，不能从小时平均值反推。
+     * 查询 TTFT 平均值与五数概括。分位数必须基于单次调用明细计算，不能从小时平均值反推。
      */
     public InternalModelLatencyDistribution queryTtftDistribution(
             String providerId,
