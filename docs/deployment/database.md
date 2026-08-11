@@ -1263,6 +1263,8 @@ PostgreSQL migration 与 XXL V9 则应全部成功且 checksum 不变；当前�
 写入与查询 SQL 位于 `InternalModelObservabilityMapper.xml`：明细 insert 与小时聚合 upsert 在同一事务完成（PostgreSQL `ON CONFLICT` 双实现，H2 用 MERGE），TTFT 与 ITL/TPOT 五数概括使用数据库 `percentile_cont` 在明细上一次计算，探活状态 upsert 连续失败计数由数据库原子维护。`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 新增 `last_token_ms`、`output_token_count` 及非负/时序约束；既有记录保持空值，不伪造历史 ITL/TPOT。明细与聚合保留期由 XXL 任务
 `opencode-runtime.internal-model-observability-retention` 每日执行清理，不依赖 application 层逐条扫描。
 
+`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 已进入需要保留的真实 PostgreSQL 历史，原始 SHA-256 固定为 `f684bd5d323d3816fc7ae982eff7b45256763f467f540020af41753c04fb837b`。`FlywayMigrationNamingTest`、内层发布、外层封装和现场安装复验必须从 persistence JAR 读取该资源并保持同一字节；后续不得改名、改注释或改 SQL。
+
 ## V20260808143301 首 token 观测指标
 
 `V20260808143301__add_internal_model_first_token_metrics.sql` 为既有明细表增加 `first_token_ms`，为小时聚合增加首 token sum/max/count，旧数据首 token 计数保持为 0；升级时必须按目标环境已执行 migration 版本顺序校验，不得改写已执行 migration。
@@ -1296,14 +1298,19 @@ migration 不写默认、测试或演示工具数据。全部运行期分页、�
 企业现网上一轮已部署平台源码提交为 `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`；两次现场启动日志均显示
 Flyway 已校验 92 条 migration、PostgreSQL 当前版本为 `20260809110000` 且无需迁移。该日志不能代替完整
 `flyway_schema_history`：下一次部署前仍须导出全部 `installed_rank/version/script/checksum/success`。正常企业主链
-只允许从该版本顺序新增 `20260809170000`、`20260809170001`，文件 SHA-256 分别为
+从该版本首次升级只允许顺序新增 `20260809170000`、`20260809170001`、`20260810170000`、
+`20260810234154`，文件 SHA-256 依次为
 `b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`、
-`dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`；`20260810110001/02` 仅属于精确匹配的
+`dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`、
+`4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`、
+`f684bd5d323d3816fc7ae982eff7b45256763f467f540020af41753c04fb837b`。如果前两条已由上一增量包完整执行，
+本包只允许新增后两条；四条都已执行的故障重部署不得新增 history。任一组只执行一部分或高版本存在而低版本
+缺失都必须停止。`20260810110001/02` 仅属于精确匹配的
 QA Memory 扩展兼容路径，不得混入正常企业主链。共享 XXL MySQL 本轮准入预期为 V1-V11 全部成功且不新增
-history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或只新增两条会话 migration 中的一条时
+history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或部分历史出现时
 必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
 
-正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
+正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移、通知中心和 Token 延迟输入 migration 的 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
 
 同一 migration 只写入四个生产必需且默认禁用/不可用的公共参数：
 

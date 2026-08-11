@@ -88,6 +88,14 @@ class FlywayMigrationNamingTest {
             "V20260810110002__session_messages_add_delegated_attribution_after_qa_memory.sql";
     private static final String SESSION_SHARE_ATTRIBUTION_SHA256 =
             "dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5";
+    private static final String USER_NOTIFICATION_MIGRATION =
+            "V20260810170000__user_notifications_create_notification_center.sql";
+    private static final String USER_NOTIFICATION_SHA256 =
+            "4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9";
+    private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_MIGRATION =
+            "V20260810234154__internal_model_call_records_add_token_latency_inputs.sql";
+    private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_SHA256 =
+            "f684bd5d323d3816fc7ae982eff7b45256763f467f540020af41753c04fb837b";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -235,6 +243,19 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/qa-memory-extended",
                 SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION,
                 SESSION_SHARE_ATTRIBUTION_SHA256);
+    }
+
+    @Test
+    void appliedNotificationAndTokenLatencyMigrationsRemainByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                USER_NOTIFICATION_MIGRATION,
+                USER_NOTIFICATION_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_MIGRATION,
+                INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_SHA256);
     }
 
     private static void assertMigrationSha256(

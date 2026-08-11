@@ -8619,3 +8619,28 @@
 
 - backend、frontend、opencode-manager 均已由 `/Users/kaka/Desktop/intelligent-test-agent` 运行；后端 readiness 与前端为 HTTP 200，通知未认证请求为 401，OpenCode 4096/4104 `/global/config` 均为 200，且没有遗留重启脚本进程。
 - Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD`，按既有 `--without-workflow` 模式未启动；本次未推送远端。
+
+## 2026-08-11 - 基于最新 release 重建企业增量包并补齐 Flyway 成品门禁
+
+### Why
+
+- 用户要求只基于当前本地最新 `codex/release-enterprise-20260801` 重新打企业增量包；开始时分支正在把本地通知中心提交 rebase 到远程 release，不能从冲突中间态构建。
+- rebase 后当前主链同时包含通知中心 `20260810170000` 与 ITL/TPOT `20260810234154`，两份 migration 已进入本机需保留 PostgreSQL history，但企业内层、外层和安装复验脚本尚未锁定它们的最终 JAR 字节。
+
+### What
+
+- 完成 release rebase，保留远程会话重发、工作空间等最新修复和本地通知中心 4 个提交；冲突中同时保留通知实时 E2E、历史重发归因回归及双方稳定文档，没有选择整侧覆盖。
+- `package-release.sh`、`package-two-backend-complete.sh`、`deploy-internal-release.sh` 新增通知中心和 Token 延迟输入 migration 的固定 SHA-256 门禁；`FlywayMigrationNamingTest` 同步冻结源码字节。
+- 企业 README、多后台执行单和数据库文档改为支持三种明确历史：从 `20260809110000` 首次增加四条、已部署会话分享后只增加后两条、四条都成功后的故障重部署不新增 history；任何部分、倒序、未知 checksum 或兼容链混入都停止。
+- 使用上一完整包中 checksum 通过的 `.4/.114/.2` 节点配置包，只重建当前 release 的后端、前端和内层发布物；worker runtime/toolbox 指纹未变并标记 `reuse`，Workflow/LobeHub 保持 `disabled`，未携带对应大制品。
+
+### How
+
+- 本机保留 PostgreSQL 只读确认 `20260810170000/-933121365`、`20260810234154/-1179183001` 均成功；真实 PostgreSQL 通知仓储 1/1、已知历史升级 18/18、migration 字节冻结 10/10、Spring Bean 装配 1/1 全部通过，默认 `outOfOrder=false`，未执行 repair 或改 history。
+- rebase 后 agent-web typecheck 通过，通知中心/FigmaShell Vitest 61/61、两条冲突相关 Chromium 分享 E2E 2/2 通过；正式打包再次通过后端装配、21 模块构建、前端 `vue-tsc` 和 Vite production build。
+- 首轮内外层 ZIP、三台节点包、ZIP CRC、内外层逐字节一致、组件清单及两份新 migration 的 persistence JAR 字节均通过；稳定组件 SHA-256：app JAR `4a80d55a2c0f054a0a44b8210b04b324a8aad554fe68aac32976b5f18c986c9b`，persistence JAR `00044a3d29bc971bdcea19454bf069dfd014599a4e2e7b35eaf06355a4812a10`，XXL integration JAR `d30f9f3c70bd870fb953a01a6d994a6880039fd467c2f3fee6ec41207eaf92f7`，前端归档 `70f212850cb367f07276f0a8d94f8cf4fe6ed9ae902cbfe5e6d78099a5214a10`，`opencode-models.json` `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
+
+### Result
+
+- 代码、Flyway 和构建门禁已通过；本条提交后用 `--zip-only` 把最新 session log 纳入内层，再重建固定名外层包并记录最终内外层 SHA-256。
+- 本次未修改 migration SQL、生产 API/DTO/RunEvent、环境文件、generated SDK 或 OpenCode 只读源码；企业目标库完整 `flyway_schema_history` 仍必须在部署前取得，未取得前不把包描述为已获现场部署准入。
