@@ -17,7 +17,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   notifications: () => [],
   unreadCount: 0,
-  filter: 'ALL',
+  filter: 'UNREAD',
   loading: false,
   loadingMore: false,
   hasMore: false,
@@ -183,17 +183,17 @@ onBeforeUnmount(() => {
         <button
           type="button"
           role="tab"
-          :aria-selected="filter === 'ALL'"
-          :class="{ 'is-active': filter === 'ALL' }"
-          @click="selectFilter('ALL')"
-        >全部</button>
-        <button
-          type="button"
-          role="tab"
           :aria-selected="filter === 'UNREAD'"
           :class="{ 'is-active': filter === 'UNREAD' }"
           @click="selectFilter('UNREAD')"
         >未读 <span v-if="unreadCount > 0">{{ badgeText }}</span></button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="filter === 'ALL'"
+          :class="{ 'is-active': filter === 'ALL' }"
+          @click="selectFilter('ALL')"
+        >全部</button>
       </div>
 
       <div class="user-notification-center__content" role="tabpanel" :aria-busy="loading">
