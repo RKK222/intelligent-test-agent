@@ -8442,3 +8442,27 @@
 
 - 后续角色补授等漏建场景最多等待一个补偿周期即可自动创建稳定公共个人 worktree；运维也可按目标服务器手工立即触发并获得逐用户安全结果摘要。
 - 新接口仅 `SUPER_ADMIN` 可调用并复用公共后端路由；无 RunEvent、数据库字段、Flyway、OpenCode 源码、generated SDK、前端或 `.env*` 变更，也未新建分支。
+
+## 2026-08-11 - 补测普通、分享、手工 compact 与子 Agent 对话
+
+### Why
+
+- 用户要求把“单纯手工 compact、无 compact 的普通对话并分享、普通未分享对话、调用子 Agent 对话”拆成独立真实场景补测，确认上一轮 compact 分享重发修复没有掩盖其它链路。
+
+### What
+
+- 使用 `888888888` 与 `wr` 新建专用真实会话，分别验证普通未分享问答、普通问答后分享并由 wr 继续对话、手工 `/compact`、父 Agent 通过 `task` 调用 `explore` 子 Agent。
+- 本次未修改业务代码、API、事件、数据库、配置或稳定文档；仅记录真实验证结论。
+
+### How
+
+- 发现此前另一次无 compatibility location 的启动使后端因缺失已执行 Flyway `20260810170000` 而退出；使用 JDK 25、`.env.test`、字节一致的既有 Flyway compatibility location、`--without-workflow` 重新构建并重启，21 个 Maven module 打包成功，后端 readiness 为 `UP`、前端返回 200。
+- 普通未分享会话精确得到 `NORMAL_UNSHARED_OK_20260811` 且无 compaction；普通分享会话精确得到 `SHARE_NO_COMPACT_BASE_OK_20260811`，分享给 wr 并授予可对话权限后，wr 精确得到 `SHARE_WR_REPLY_OK_20260811`，所属人实时同步看到 wr 问答，双端 compaction 数均为 0。
+- 子 Agent 会话出现可点击 `Explore` 卡片并完成；进入 child timeline 可见精确回复 `SUB_AGENT_CHILD_OK_20260811`、无可见聊天输入框，主时间线精确回复 `SUB_AGENT_PARENT_OK_20260811`。
+- 定向自动化通过：Playwright 的分享管理与原生 compact 命令 2/2；Vitest 的子 Agent 时间线 1/1。
+
+### Result
+
+- 普通未分享、无 compact 分享双端对话、真实子 Agent 三条链路通过。
+- 单纯手工 `/compact` 未通过：干净成功会话 `ses_a6564b19614545d1aca603dc466b0eb4` 先显示“正在压缩上下文”，约 30 秒后显示“压缩上下文失败”；后端 `compactSession` 在 30128ms 返回 `OPENCODE_TIMEOUT`。另一个独立会话也复现同类 30 秒超时，排除单条历史污染。
+- mock Playwright 的 compact 交互通过，但真实 OpenCode compact 超时，说明尚有运行时/模型链路问题未解决；不得把手工 compact 报为通过。Workflow 仍因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动。
