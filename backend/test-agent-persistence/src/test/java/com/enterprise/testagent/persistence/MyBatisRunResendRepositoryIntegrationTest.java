@@ -149,6 +149,35 @@ class MyBatisRunResendRepositoryIntegrationTest {
                 Long.class, SESSION.value(), contentRevision)).isEqualTo(1L);
     }
 
+    @Test
+    void failedOrCancelledCleanupRemovesOnlyPendingReplacementMessageAndAdvancesRevision() {
+        jdbc.update("insert into session_messages(message_id,session_id,role,content,trace_id,created_at,run_id,remote_message_id) "
+                        + "values(?,?,?,?,?,?,?,?)",
+                "msg_resend_pending_replacement", SESSION.value(), "USER", "edited prompt",
+                "trace_resend", NOW, "run_resend_replacement", "msg_resend_replacement");
+        jdbc.update("insert into run_events(event_id,run_id,seq,type,trace_id,occurred_at,payload_json) values(?,?,?,?,?,?,?)",
+                "evt_resend_pending", "run_resend_replacement", 1L, "run.resend.scheduled",
+                "trace_resend", NOW, "{}");
+
+        Instant contentRevision = NOW.plusSeconds(2);
+        new MyBatisRunResendDetailCleanup(mapper, summaryMapper)
+                .purgePendingReplacementMessage(
+                        new RunId("run_resend_replacement"), SESSION, contentRevision);
+
+        assertThat(jdbc.queryForObject(
+                "select count(*) from session_messages where run_id='run_resend_replacement'", Long.class))
+                .isZero();
+        assertThat(jdbc.queryForObject(
+                "select count(*) from run_events where run_id='run_resend_replacement'", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from runs where run_id='run_resend_replacement'", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from sessions where session_id=? and updated_at=?",
+                Long.class, SESSION.value(), contentRevision)).isEqualTo(1L);
+    }
+
     private RunResend waiting() {
         return new RunResend(
                 new RunResendId("rsd_resend_repository"), SESSION, USER,

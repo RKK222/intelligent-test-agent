@@ -1977,6 +1977,8 @@ Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST
 | `DELETE` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` | 软删除会话，状态变为 `ARCHIVED`。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` | 追加会话消息。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` | 分页读取会话消息；主历史恢复优先使用 session tree。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages/runs/{runId}/user` | 按 Session + Run 精确读取单条平台 USER；用于共享重发即时同步，不刷新远端快照。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages/runs/{runId}` | 按 Session + Run 精确读取完整平台轮次；用于取消/失败后恢复源 USER 与 ASSISTANT。 |
 | `GET` | `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` | 查询 root session 下全量历史 session tree message snapshot，工作台历史恢复主入口。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` | 同上，内部平台入口。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` | 查询会话最近的非终态 Run；用户已有 Redis 运行态 marker 时只读 Session active 索引，legacy 用户兼容查询数据库；没有时 `data=null`。 |
@@ -2164,6 +2166,10 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 ```
 
 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 是分页接口，查询参数为 `page`、`size` 和可选 `refresh`。`refresh` 默认 `true`，会在存在 agent binding 时从 bounded-elastic 线程分页读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；这是 Session 级全量同步，只保留已存在消息的 `runId`，新发现的远端历史 assistant 写空 `runId`，不得把整个 Session 重新归给最新 Run。`refresh=false` 只读数据库快照，用于前端反馈 messageId 映射、只读 transcript 或过渡只读场景，避免触发远端快照刷新。如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
+
+`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages/runs/{runId}/user` 只读关系库中该 Session/Run 的 USER 投影，返回既有 `SessionMessageResponse`，不存在时返回统一 `NOT_FOUND`。接口支持普通所属人身份和会话分享头鉴权，不调用 OpenCode、不扫描消息分页；共享参与者收到重发修订通知后应优先使用该接口按 `replacementRunId` 精确读取，长会话超过单页上限时仍能立即归并。
+
+`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages/runs/{runId}` 使用相同鉴权和只读约束，按稳定时间顺序返回该 Run 的完整 `SessionMessageResponse[]`。重发取消或明确失败的通知携带 `sourceRunId`，客户端用此接口原位恢复源 USER、ASSISTANT 及其结构化 parts；接口不受普通历史隐藏源轮次的规则影响，不依赖会话总消息数。
 
 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 是前端工作台历史恢复的主接口，返回 Session root 下全量历史消息树快照；内部平台入口 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` 保留，旧 `/api/sessions/{sessionId}/session-tree/messages` 返回 `410 API_GONE`。完整历史按 Redis 24 小时详情、OpenCode 完整会话、PostgreSQL 终态摘要的顺序读取。`events[]` 在既有 `type/sessionId/payload` 外增加原始 `traceId`，用于授权页面关联日志；滚动发布期间新前端必须兼容旧后端缺少该字段。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`，并增加以下可选兼容字段：
 
@@ -4026,11 +4032,11 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
   源/替代 Run，以及可选 `requesterUserId/requesterUsername/requesterUnifiedAuthId/requestedBySharedUser` 真实发起人归因；姓名无法解析时可空。`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。共享人工重发的历史 Run/消息若曾被执行所属人覆盖，响应中的发送人字段以 requester 审计恢复，不要求修改客户端协议或数据库历史。
 - 错误：不是源消息实际发送人，或分享发送人没有 `canChat` 时返回 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
-- traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、修改后文本、模型回答或供应商正文。修改后文本只随既有精确重放输入写入有限 TTL Redis，日志、审计和事件均不得记录。
+- traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、修改后文本、模型回答或供应商正文。修改后文本作为标准 USER 正文进入既有 `session_messages`，并随精确重放输入进入有限 TTL Redis；日志、审计和事件均不得记录正文。
 - 幂等：同一 owner + `clientRequestId` 返回同一替代 Run；同一 source Run、replacement Run 和会话活动锁均有数据库唯一约束。
-- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。接口返回替代 Run 后，调用方应立即用 `editedPrompt` 更新原用户气泡，并把该轮展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，同时隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识；服务端在替代 USER、源 Run 清理、重发状态、started 事实和 Session 内容修订均提交成功后发布安全的后端会话消息变化信号，所属人与分享参与方收到 `session-share.updated` 后应只调用一次消息分页接口并指定 `refresh=false`，读取已提交的平台数据库快照，不得使用本地延时重试猜测落库时机。同步期间继续缓冲并重放替代 Run 的实时事件。后到的权威 user 事件必须按替代 Run 或持久消息的 `remoteMessageId` 原位接管，保留平台消息身份和实际发送人，不得在压缩历史的 assistant 回答之后追加重复气泡。定时来源、附件展示及 `resend` 元数据在 ID 替换期间必须保留。
+- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。重发预约事务会原子创建替代 Run、持久化新的 USER、推进 Session 消息修订号并写入 `PENDING/WAITING` 事实；事务提交成功后立即发布安全的后端会话消息变化信号，不等待 `run.resend.started`、模型思考或流式输出。所属人与分享参与方收到 `session-share.updated` 或 `run.resend.scheduled` 后，只调用一次 `GET .../messages/runs/{replacementRunId}/user` 读取已提交的平台 USER，再按 `sourceRunId/replacementRunId` 原位更新用户气泡，不得扫描历史分页或使用本地延时重试猜测落库时机。等待执行期间普通历史消息查询隐藏源轮次，只返回替代 USER，避免整页刷新出现双气泡；执行器按稳定 `remoteMessageId` 复用该消息，不能重复插入。原生替代消息受理后，`run.resend.started` 再清理源 Run 的回答、工具、Todo 和 Diff 并推进下一修订。WAITING 取消或投递明确失败时，后端删除尚未投递的替代 USER、保留源轮次、推进修订并再次通知参与者恢复。同步期间继续缓冲并重放替代 Run 的实时事件。后到的权威 user 事件必须按替代 Run 或持久消息的 `remoteMessageId` 原位接管，保留平台消息身份和实际发送人，不得在压缩历史的 assistant 回答之后追加重复气泡。定时来源、附件展示及 `resend` 元数据在 ID 替换期间必须保留。
 - 兼容性：接口、可选 `editedPrompt` 与所有 `resend` 字段均为 additive 新增；旧客户端不传修改文本时仍按原内容重放，缺失响应字段时按普通 Run/消息显示。
-- 对应测试：`RunResendControllerSessionShareTest`、`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`SessionMessageRealtimeHubTest`、`SessionShareControllerTest`、`RunResendAutomaticServiceTest`、
+- 对应测试：`RunResendControllerSessionShareTest`、`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendCancellationServiceTest`、`SessionMessageRealtimeHubTest`、`SessionShareControllerTest`、`RunResendAutomaticServiceTest`、
   `MyBatisRunResendRepositoryIntegrationTest`、前端 reducer 和 `FigmaChatPanelTest`。
 
 ### 内部恢复分发

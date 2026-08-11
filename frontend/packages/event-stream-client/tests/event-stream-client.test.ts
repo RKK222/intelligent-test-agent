@@ -219,11 +219,16 @@ describe("event-stream-client", () => {
   it("subscribes to the single-session collaboration state and surfaces invalidation", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(sseResponse([
       'event: session-share.snapshot\n',
-      'data: {"active":true,"shareId":"shr_1","version":2,"sessionId":"ses_1","workspaceId":"wks_1","canChat":true,"expiresAt":"2026-08-10T00:00:00Z","activeRun":null,"sessionUpdatedAt":"2026-08-08T00:00:00Z","generatedAt":"2026-08-09T00:00:00Z"}\n\n',
+      'data: {"active":true,"shareId":"shr_1","version":2,"sessionId":"ses_1","workspaceId":"wks_1","canChat":true,"expiresAt":"2026-08-10T00:00:00Z","activeRun":null,"sessionUpdatedAt":"2026-08-08T00:00:00Z","messageChange":{"sessionId":"ses_1","sourceRunId":"run_source","replacementRunId":"run_replacement","changeType":"RESEND_RESTORED","revision":"2026-08-08T00:00:00Z"},"generatedAt":"2026-08-09T00:00:00Z"}\n\n',
       'event: session-share.invalidated\n',
       'data: {"active":false,"reason":"REVOKED","shareId":"shr_1","version":2,"sessionId":"ses_1","workspaceId":"wks_1","canChat":false,"expiresAt":"2026-08-10T00:00:00Z","activeRun":null,"generatedAt":"2026-08-09T00:00:01Z"}\n\n'
     ]));
-    const received: Array<{ active: boolean; eventName: string; sessionUpdatedAt?: string | null }> = [];
+    const received: Array<{
+      active: boolean;
+      eventName: string;
+      sessionUpdatedAt?: string | null;
+      changeType?: string;
+    }> = [];
     const subscription = subscribeSessionShareRuntimeState({
       baseUrl: "http://api",
       token: "login-token",
@@ -232,7 +237,8 @@ describe("event-stream-client", () => {
       onEvent: (state, meta) => received.push({
         active: state.active,
         eventName: meta.eventName,
-        sessionUpdatedAt: state.sessionUpdatedAt
+        sessionUpdatedAt: state.sessionUpdatedAt,
+        changeType: state.messageChange?.changeType
       })
     });
 
@@ -242,8 +248,13 @@ describe("event-stream-client", () => {
     const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
     expect(headers.get("X-Test-Agent-Session-Share")).toBe("shr_1");
     expect(received).toEqual([
-      { active: true, eventName: "session-share.snapshot", sessionUpdatedAt: "2026-08-08T00:00:00Z" },
-      { active: false, eventName: "session-share.invalidated", sessionUpdatedAt: null }
+      {
+        active: true,
+        eventName: "session-share.snapshot",
+        sessionUpdatedAt: "2026-08-08T00:00:00Z",
+        changeType: "RESEND_RESTORED"
+      },
+      { active: false, eventName: "session-share.invalidated", sessionUpdatedAt: null, changeType: undefined }
     ]);
   });
 

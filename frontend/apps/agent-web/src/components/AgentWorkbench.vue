@@ -68,6 +68,7 @@ import type {
   ResendMetadata,
   Session,
   SessionCollaborationShare,
+  SessionMessageChangeIdentity,
   SessionShareAccess,
   SessionShareRuntimeState,
   SharedSessionListItem,
@@ -603,6 +604,9 @@ const runtimeStateRunReconciliations = new Set<string>();
 // 同一后端同步信号可能在 SSE 重连后重放；成功同步后不再重复读取，失败时允许后续事件继续补偿。
 const refreshedAuthoritativeRunIds = new Set<string>();
 const authoritativeRunRefreshes = new Map<string, Promise<boolean>>();
+const restoredAuthoritativeRevisionKeys = new Set<string>();
+const authoritativeSourceRestoreRefreshes = new Map<string, Promise<boolean>>();
+const latestSessionMessageChanges = new Map<string, SessionMessageChangeIdentity>();
 type HistorySwitchRunEventBuffer = {
   switchSeq: number;
   sessionId: string;
@@ -984,13 +988,52 @@ function rememberAuthoritativeRunRefresh(runId: string): void {
   }
 }
 
+const sessionMessageChangeRanks: Record<SessionMessageChangeIdentity["changeType"], number> = {
+  RESEND_RESERVED: 1,
+  RESEND_STARTED: 2,
+  RESEND_RESTORED: 3
+};
+
+/** 记录每个 Session 已见的最高消息修订；同一替代 Run 内再以状态阶段消解等时刻事件。 */
+function acceptLatestSessionMessageChange(change: SessionMessageChangeIdentity): boolean {
+  const current = latestSessionMessageChanges.get(change.sessionId);
+  if (current) {
+    const incomingTime = Date.parse(change.revision);
+    const currentTime = Date.parse(current.revision);
+    const revisionOrder = Number.isFinite(incomingTime) && Number.isFinite(currentTime)
+      ? Math.sign(incomingTime - currentTime)
+      : change.revision.localeCompare(current.revision);
+    if (revisionOrder < 0) return false;
+    if (revisionOrder === 0
+      && current.replacementRunId === change.replacementRunId
+      && sessionMessageChangeRanks[change.changeType] < sessionMessageChangeRanks[current.changeType]) {
+      return false;
+    }
+  }
+  latestSessionMessageChanges.set(change.sessionId, change);
+  if (latestSessionMessageChanges.size > 100) {
+    const oldest = latestSessionMessageChanges.keys().next();
+    if (!oldest.done) latestSessionMessageChanges.delete(oldest.value);
+  }
+  return true;
+}
+
+/** 异步权威读取返回时再校验一次，避免慢响应越过之后到达的更高修订。 */
+function isCurrentSessionMessageChange(change: SessionMessageChangeIdentity): boolean {
+  const current = latestSessionMessageChanges.get(change.sessionId);
+  return current?.replacementRunId === change.replacementRunId
+    && current.changeType === change.changeType
+    && current.revision === change.revision;
+}
+
 /**
- * 后端只在替代 USER、重发状态和 Session 修订均提交后发出变化信号；这里据此读取一次平台数据库快照，
+ * 后端在替代 Run、USER 与 Session 修订事务提交后发出变化信号；这里据此读取一次平台数据库快照，
  * 原位替换该 USER，不切换 Session、不清空时间线，也不改变用户当前滚动位置。
  */
 async function refreshAuthoritativeResendUser(
   sessionId: string,
-  resend: ResendMetadata
+  resend: ResendMetadata,
+  change?: SessionMessageChangeIdentity
 ): Promise<boolean> {
   const replacementRunId = resend.replacementRunId;
   if (refreshedAuthoritativeRunIds.has(replacementRunId)) {
@@ -1002,26 +1045,23 @@ async function refreshAuthoritativeResendUser(
   }
   const refresh = (async () => {
     try {
-      const page = await api.listSessionMessages(sessionId, 1, 100, { refresh: false });
+      const authoritative = await api.getSessionUserMessageForRun(sessionId, replacementRunId);
       if (session.value?.sessionId !== sessionId) {
         return false;
       }
-      const persistedMessages = dedupeSessionMessages(page.items);
-      const authoritative = [...persistedMessages].reverse().find((message) =>
-        message.role === "USER" && message.runId === replacementRunId
-      );
-      if (authoritative) {
-        const projected = messagesFromSessionMessages([authoritative])[0];
-        if (projected?.role === "user") {
-          rememberPersistedMessageIdentities([authoritative]);
-          dispatchChat({
-            type: "run.resend.user.synchronized",
-            resend,
-            message: projected
-          });
-          rememberAuthoritativeRunRefresh(replacementRunId);
-          return true;
-        }
+      if (change && !isCurrentSessionMessageChange(change)) {
+        return false;
+      }
+      const projected = messagesFromSessionMessages([authoritative])[0];
+      if (projected?.role === "user") {
+        rememberPersistedMessageIdentities([authoritative]);
+        dispatchChat({
+          type: "run.resend.user.synchronized",
+          resend,
+          message: projected
+        });
+        rememberAuthoritativeRunRefresh(replacementRunId);
+        return true;
       }
     } catch {
       // 读取失败不记成功；后端 SSE 或 RunEvent 重连重放时仍可再次同步。
@@ -1034,6 +1074,65 @@ async function refreshAuthoritativeResendUser(
   } finally {
     if (authoritativeRunRefreshes.get(replacementRunId) === refresh) {
       authoritativeRunRefreshes.delete(replacementRunId);
+    }
+  }
+}
+
+/** 取消或失败通知携带 sourceRunId；按 Run 精确读取原 USER/ASSISTANT 并在原锚点恢复。 */
+async function restoreAuthoritativeResendSource(
+  sessionId: string,
+  change: SessionMessageChangeIdentity
+): Promise<boolean> {
+  const revisionKey = `${change.replacementRunId}:${change.revision}`;
+  if (restoredAuthoritativeRevisionKeys.has(revisionKey)) {
+    return true;
+  }
+  const pending = authoritativeSourceRestoreRefreshes.get(revisionKey);
+  if (pending) {
+    return pending;
+  }
+  const refresh = (async () => {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const authoritative = await api.listSessionMessagesForRun(sessionId, change.sourceRunId);
+        if (session.value?.sessionId !== sessionId) {
+          return false;
+        }
+        if (!isCurrentSessionMessageChange(change)) {
+          return false;
+        }
+        const projected = messagesFromSessionMessages(authoritative);
+        if (projected.some((message) => message.role === "user")) {
+          rememberPersistedMessageIdentities(authoritative);
+          dispatchChat({
+            type: "run.resend.source.restored",
+            sourceRunId: change.sourceRunId,
+            replacementRunId: change.replacementRunId,
+            messages: projected
+          });
+          refreshedAuthoritativeRunIds.delete(change.replacementRunId);
+          restoredAuthoritativeRevisionKeys.add(revisionKey);
+          if (restoredAuthoritativeRevisionKeys.size > 100) {
+            const oldest = restoredAuthoritativeRevisionKeys.values().next();
+            if (!oldest.done) restoredAuthoritativeRevisionKeys.delete(oldest.value);
+          }
+          return true;
+        }
+      } catch {
+        // afterCommit 理论上已可读；短暂路由或网络抖动时在同一通知内做有界补偿。
+      }
+      if (attempt < 3) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, attempt * 150));
+      }
+    }
+    return false;
+  })();
+  authoritativeSourceRestoreRefreshes.set(revisionKey, refresh);
+  try {
+    return await refresh;
+  } finally {
+    if (authoritativeSourceRestoreRefreshes.get(revisionKey) === refresh) {
+      authoritativeSourceRestoreRefreshes.delete(revisionKey);
     }
   }
 }
@@ -1123,7 +1222,7 @@ const chatMessagesForPanel = computed<AgentMessage[]>(() =>
     if (message.role === "user") {
       const currentRun = run.value;
       const currentResend = currentRun?.resend;
-      const belongsToCurrentResend = currentRun && currentResend
+      const belongsToCurrentResend = currentRun && currentResend && isRunBusyStatus(currentRun.status)
         && (message.runId === currentRun.runId || message.runId === currentResend.sourceRunId);
       const resend = belongsToCurrentResend
         ? currentResend
@@ -1806,10 +1905,34 @@ watch(
           && state.sessionUpdatedAt
           && previous.sessionUpdatedAt !== state.sessionUpdatedAt
         );
-        if (sessionRevisionChanged && state.active && session.value?.sessionId === state.sessionId) {
-          if (activeRun?.resend) {
-            // 撤回重发只同步替代 USER；整段 switchSession 会让 A/B 时间线 reset 并强制滚动到底。
-            void refreshAuthoritativeResendUser(state.sessionId, activeRun.resend);
+        const activeResendChanged = Boolean(activeRun?.resend && (
+          previous?.activeRun?.runId !== activeRun.runId
+          || previous.activeRun?.resend?.status !== activeRun.resend.status
+        ));
+        const messageChangeChanged = Boolean(state.messageChange && (
+          previous?.messageChange?.replacementRunId !== state.messageChange.replacementRunId
+          || previous.messageChange?.changeType !== state.messageChange.changeType
+          || previous.messageChange?.revision !== state.messageChange.revision
+        ));
+        const acceptedMessageChange = messageChangeChanged && state.messageChange
+          && acceptLatestSessionMessageChange(state.messageChange)
+          ? state.messageChange
+          : null;
+        if ((sessionRevisionChanged || activeResendChanged || acceptedMessageChange)
+          && state.active && session.value?.sessionId === state.sessionId) {
+          if (acceptedMessageChange?.changeType === "RESEND_RESTORED") {
+            // 取消或投递失败已删除替代 USER；按通知身份精确恢复源轮次，不等待全历史刷新。
+            if (run.value?.runId === acceptedMessageChange.replacementRunId
+              && isRunBusyStatus(run.value.status)) {
+              run.value = null;
+            }
+            void restoreAuthoritativeResendSource(state.sessionId, acceptedMessageChange);
+          } else if (activeRun?.resend) {
+            // 新替代 Run 与消息修订任一先到都读取同一后端 USER；不能等待 started 或模型流。
+            const matchingChange = acceptedMessageChange?.replacementRunId === activeRun.resend.replacementRunId
+              ? acceptedMessageChange
+              : undefined;
+            void refreshAuthoritativeResendUser(state.sessionId, activeRun.resend, matchingChange);
           } else if (!activeRun) {
             // compact 没有 active Run 和可原位归并的消息边界，继续按 revision 刷新权威历史。
             void switchSession(state.sessionId, {
@@ -4358,14 +4481,27 @@ const deleteSessionMutation = useMutation({
 
 const cancelRunMutation = useMutation({
   mutationFn: async () => {
-    if (!run.value) {
+    const currentRun = run.value;
+    if (!currentRun) {
       throw new Error("当前没有 Run");
     }
-    return api.cancelRun(run.value.runId);
+    return {
+      cancelled: await api.cancelRun(currentRun.runId),
+      resend: currentRun.resend
+    };
   },
-  onSuccess: (cancelled) => {
+  onSuccess: ({ cancelled, resend }) => {
     run.value = cancelled;
     rememberRunSession(cancelled);
+    if (resend?.status === "WAITING" && session.value?.sessionId === cancelled.sessionId) {
+      void restoreAuthoritativeResendSource(cancelled.sessionId, {
+        sessionId: cancelled.sessionId,
+        sourceRunId: resend.sourceRunId,
+        replacementRunId: resend.replacementRunId,
+        changeType: "RESEND_RESTORED",
+        revision: cancelled.updatedAt
+      });
+    }
   },
   onError: (error) => {
     feedback.value = errorFeedback("取消 Run 失败", error);
@@ -9036,6 +9172,11 @@ function applyRunEventWorkbenchProjection(
       };
       rememberRunSession(run.value);
     }
+    if ((event.type === "run.resend.scheduled" || event.type === "run.resend.started")
+      && subscribedSessionId && session.value?.sessionId === subscribedSessionId && resend) {
+      // 预约事务已经提交替代 USER；所属人与分享参与人都立即从后端读取，不等待模型执行。
+      void refreshAuthoritativeResendUser(subscribedSessionId, resend);
+    }
     if (event.type === "run.resend.started") {
       // reducer 已原子移除源 Run 明细；这里同步清理独立维护的文件与跟随投影，再接管替代 Run。
       diffFiles.value = [];
@@ -9046,12 +9187,17 @@ function applyRunEventWorkbenchProjection(
       accumulatedTokens.value = 0;
       void refreshWorkspaceGitDiff();
       void refreshWorkspaceView();
-      if (subscribedSessionId && session.value?.sessionId === subscribedSessionId && resend) {
-        // 所属人与分享参与人统一原位补齐平台 USER；revision 先到时复用同一 in-flight 任务。
-        void refreshAuthoritativeResendUser(subscribedSessionId, resend);
-      }
     }
     if (event.type === "run.resend.failed") {
+      if (subscribedSessionId && resend) {
+        void restoreAuthoritativeResendSource(subscribedSessionId, {
+          sessionId: subscribedSessionId,
+          sourceRunId: resend.sourceRunId,
+          replacementRunId: resend.replacementRunId,
+          changeType: "RESEND_RESTORED",
+          revision: event.occurredAt
+        });
+      }
       feedback.value = {
         kind: "error",
         title: "撤销重发失败",

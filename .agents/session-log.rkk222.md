@@ -8831,3 +8831,28 @@
 
 - 看板现在能直接比较每个模型厂商的 TTFT 与 ITL/TPOT 分布，并在 Overview 查看全量可靠 ITL 的平均值与最大值；明细分页只影响列表。
 - API 仅新增可忽略的响应字段，无 URL、事件或数据库结构变化；未新增 migration，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-11 - 修复共享会话撤回重发需等待模型流才同步
+
+### Why
+
+- 重发创建阶段只预留替代 Run 和 Redis 输入，平台 USER 直到模型执行入口才落库；共享变化信号又在 `run.resend.started` 后发布，观察方只能等思考或流式输出出现后才看到修改后的问题。
+- 取消或明确投递失败后没有对应的已提交消息通知，观察方也无法可靠恢复源 USER/ASSISTANT；跨节点迟到通知还可能覆盖较新的恢复状态。
+
+### What
+
+- 重发预约事务内原子创建替代 Run、持久化实际发送人归因的 USER、写入 scheduled 事实并推进 Session 修订；事务提交后立即广播 `sessionId/sourceRunId/replacementRunId/changeType/revision`，模型执行只按稳定远端消息号复用投影。
+- 分享 runtime SSE additive 暴露不含正文的 `messageChange`；新增按 Session + Run 精确读取替代 USER 和完整源轮次的两个鉴权 HTTP 接口。取消或明确失败删除未投递替代 USER、推进修订并发送 `RESEND_RESTORED`。
+- 前端按 replacement Run 原位同步 USER，恢复时按 source Run 原位还原 USER/ASSISTANT；按 Session 维护修订水位并在异步响应返回时二次校验，拒绝迟到旧通知。同步更新 API、事件、后端模块、前端和测试文档。
+
+### How
+
+- JDK 25 下受影响后端模块从干净构建通过 147 项测试，最终增量复跑仍为 runtime 110、API 32、persistence 5 全通过；前端相关 Vitest 207 项、全仓 typecheck 通过。
+- Chromium 共享场景覆盖 12 轮长历史、模型未启动时即时同步、取消恢复、无历史 loading/滚动跳变及迟到旧修订，连续 3/3 通过。
+- 首次按 `.env.test` 启动被既有工作流密钥文件缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 阻断；按项目规范在本次不验证 Workflow 的前提下使用 `--without-workflow` 重启。后端 health/readiness 为 UP、前端 3000 返回 200、CORS 正常，manager WebSocket 与 4097/4098 OpenCode 恢复健康且无解码/重连循环错误。
+- 提交前已回顾全部 `.agents/session-log*.md`，未发现冲突或合并标记；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+### Result
+
+- 共享参与者在重发事务提交后即可看到修改后的 USER，不再依赖模型思考或流式输出；取消和明确失败会恢复原轮次，重复及乱序通知不会回滚较新界面状态。
+- HTTP/SSE 仅做 additive 扩展并复用既有分享鉴权；未修改数据库结构或 Flyway migration，新增查询通过 MyBatis XML 使用现有 Run 索引，不在通知中传播消息正文。

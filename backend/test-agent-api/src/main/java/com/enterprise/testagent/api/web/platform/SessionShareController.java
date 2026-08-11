@@ -155,18 +155,19 @@ public class SessionShareController {
         DelegatedOperationContext initial = service.requireAccess(
                 actor, requestedShare, false, traceId);
 
-        Flux<Object> refreshTriggers = sessionMessageRealtimeHub == null
-                ? Flux.interval(Duration.ofSeconds(1)).cast(Object.class)
+        Flux<RuntimeStateTrigger> refreshTriggers = sessionMessageRealtimeHub == null
+                ? Flux.interval(Duration.ofSeconds(1)).map(ignored -> new RuntimeStateTrigger(null))
                 : Flux.merge(
-                        Flux.interval(Duration.ofSeconds(1)).cast(Object.class),
-                        sessionMessageRealtimeHub.events(initial.sessionId()).cast(Object.class));
-        Flux<DelegatedOperationContext> contexts = Flux.concat(
-                Mono.just(initial),
-                refreshTriggers.concatMap(ignored -> Mono.fromCallable(() -> service.refreshAccess(
-                                actor, requestedShare, traceId))
+                        Flux.interval(Duration.ofSeconds(1)).map(ignored -> new RuntimeStateTrigger(null)),
+                        sessionMessageRealtimeHub.events(initial.sessionId()).map(RuntimeStateTrigger::new));
+        Flux<RuntimeStateContext> contexts = Flux.concat(
+                Mono.just(new RuntimeStateContext(initial, null)),
+                refreshTriggers.concatMap(trigger -> Mono.fromCallable(() -> new RuntimeStateContext(
+                                service.refreshAccess(actor, requestedShare, traceId), trigger.messageChange()))
                         .subscribeOn(Schedulers.boundedElastic())));
         Flux<ServerSentEvent<SessionShareDtos.SessionShareRuntimeStateResponse>> states = contexts
-                .concatMap(context -> Mono.fromCallable(() -> runtimeState(context))
+                .concatMap(context -> Mono.fromCallable(() -> runtimeState(
+                                context.context(), context.messageChange()))
                         .subscribeOn(Schedulers.boundedElastic()))
                 .distinctUntilChanged(this::runtimeKey)
                 .index()
@@ -189,7 +190,8 @@ public class SessionShareController {
     }
 
     private SessionShareDtos.SessionShareRuntimeStateResponse runtimeState(
-            DelegatedOperationContext context) {
+            DelegatedOperationContext context,
+            SessionMessageRealtimeHub.SessionMessageChange messageChange) {
         RuntimeDtos.RunResponse activeRun = runService == null
                 ? null
                 : runService.findActiveRun(context.sessionId())
@@ -197,7 +199,7 @@ public class SessionShareController {
                                 run, RuntimeDtos.memoizedUsernameLookup(service::findUsername)))
                         .orElse(null);
         return SessionShareDtos.SessionShareRuntimeStateResponse.active(
-                context, activeRun, service.sessionUpdatedAt(context), Instant.now());
+                context, activeRun, service.sessionUpdatedAt(context), messageChange, Instant.now());
     }
 
     private RuntimeStateKey runtimeKey(SessionShareDtos.SessionShareRuntimeStateResponse state) {
@@ -205,7 +207,11 @@ public class SessionShareController {
         return new RuntimeStateKey(
                 state.version(), state.canChat(), state.expiresAt(), state.sessionUpdatedAt(),
                 run == null ? null : run.runId(), run == null ? null : run.status(),
-                run == null ? null : run.updatedAt());
+                run == null ? null : run.updatedAt(),
+                state.messageChange() == null ? null : state.messageChange().sourceRunId(),
+                state.messageChange() == null ? null : state.messageChange().replacementRunId(),
+                state.messageChange() == null ? null : state.messageChange().changeType(),
+                state.messageChange() == null ? null : state.messageChange().revision());
     }
 
     private String invalidReason(PlatformException failure) {
@@ -221,5 +227,16 @@ public class SessionShareController {
             Instant sessionUpdatedAt,
             String runId,
             String runStatus,
-            Instant runUpdatedAt) { }
+            Instant runUpdatedAt,
+            String sourceRunId,
+            String replacementRunId,
+            String messageChangeType,
+            Instant messageRevision) { }
+
+    private record RuntimeStateTrigger(
+            SessionMessageRealtimeHub.SessionMessageChange messageChange) { }
+
+    private record RuntimeStateContext(
+            DelegatedOperationContext context,
+            SessionMessageRealtimeHub.SessionMessageChange messageChange) { }
 }

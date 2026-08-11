@@ -100,6 +100,8 @@ class MyBatisSessionMessageRepositoryIntegrationTest {
 
         assertThat(repository.findUserBySessionIdAndRunId(SESSION, TARGET_RUN))
                 .contains(targetUser);
+        assertThat(repository.findBySessionIdAndRunId(SESSION, TARGET_RUN))
+                .containsExactlyInAnyOrder(targetUser, targetAssistant);
     }
 
     private SessionMessage message(

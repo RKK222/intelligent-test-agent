@@ -1095,8 +1095,8 @@ public class RunApplicationService {
             runRepository.save(pending);
         }
         boolean userMessageCreated;
-        if (scheduledClaim.managed()) {
-            userMessageCreated = ensureLegacyScheduledUserMessage(
+        if (reservedRunId != null || scheduledClaim.managed()) {
+            userMessageCreated = ensureUserMessage(
                     session.sessionId(), pending.runId(), prompt, input.parts(), userId,
                     dispatchMessageId, traceId, now, source, messageAttribution);
         } else {
@@ -3313,6 +3313,26 @@ public class RunApplicationService {
             Instant createdAt,
             RunSource source,
             RunActorAttribution attribution) {
+        sessionMessageRepository.save(newUserMessageProjection(
+                sessionId, runId, prompt, parts, userId, remoteMessageId, traceId, createdAt,
+                source.type(), source.refId(), attribution));
+    }
+
+    /**
+     * 创建用户消息的关系库投影；重发预约和真正执行必须复用同一字段规则，避免共享发送人归因漂移。
+     */
+    static SessionMessage newUserMessageProjection(
+            SessionId sessionId,
+            RunId runId,
+            String prompt,
+            List<?> parts,
+            UserId userId,
+            String remoteMessageId,
+            String traceId,
+            Instant createdAt,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            RunActorAttribution attribution) {
         SessionMessage message = new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
                 sessionId,
@@ -3329,20 +3349,20 @@ public class RunApplicationService {
                 createdAt);
         SessionMessage sourced = userId == null
                 ? message
-                : message.withSource(source.type(), source.refId(), userId);
+                : message.withSource(sourceType, sourceRefId, userId);
         if (attribution != null && attribution.actualSenderUserId() != null) {
             sourced = sourced.withSender(
                     attribution.actualSenderUserId(),
                     attribution.actualSenderUnifiedAuthId(),
                     attribution.sentBySharedUser());
         }
-        sessionMessageRepository.save(sourced);
+        return sourced;
     }
 
     /**
-     * 恢复 anchor-only legacy Run 时复用稳定 remote message id；既有消息必须精确属于同一 Run/任务/用户。
+     * 重发预约和 anchor-only legacy Run 均复用稳定 remote message id；既有消息必须精确属于同一 Run/来源/用户。
      */
-    private boolean ensureLegacyScheduledUserMessage(
+    private boolean ensureUserMessage(
             SessionId sessionId,
             RunId runId,
             String prompt,
@@ -3364,13 +3384,13 @@ public class RunApplicationService {
         SessionMessage message = existing.orElseThrow();
         if (message.role() != SessionMessageRole.USER
                 || !Objects.equals(message.runId(), runId)
-                || message.sourceType() != ConversationSourceType.SCHEDULED_TASK
+                || message.sourceType() != source.type()
                 || !Objects.equals(message.sourceRefId(), source.refId())
                 || !Objects.equals(message.senderUserId(), attribution.actualSenderUserId())
                 || message.sentBySharedUser() != attribution.sentBySharedUser()) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
-                    "Scheduled Run 稳定消息号已被其它消息使用");
+                    "Run 稳定消息号已被其它消息使用");
         }
         return false;
     }
@@ -3488,7 +3508,7 @@ public class RunApplicationService {
     /**
      * 保存用户原始 prompt parts，历史对话可据此恢复本轮关联文件/选区 chip。
      */
-    private Optional<String> userPromptPartsJson(List<StartRunInput.PromptPart> parts, String traceId) {
+    private static Optional<String> userPromptPartsJson(List<?> parts, String traceId) {
         if (parts == null || parts.isEmpty()) {
             return Optional.empty();
         }

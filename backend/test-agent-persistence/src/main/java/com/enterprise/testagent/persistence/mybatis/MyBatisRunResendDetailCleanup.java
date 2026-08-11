@@ -36,4 +36,18 @@ public class MyBatisRunResendDetailCleanup implements RunResendDetailCleanupPort
         // 分享运行态以 sessions.updated_at 作为正文修订号；必须与源轮清理原子提交，避免参与方读到半旧快照。
         summaryMapper.touchSession(sessionId.value(), updatedAt);
     }
+
+    @Override
+    @Transactional
+    public void purgePendingReplacementMessage(
+            RunId replacementRunId,
+            SessionId sessionId,
+            Instant updatedAt) {
+        Objects.requireNonNull(replacementRunId, "replacementRunId must not be null");
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        Objects.requireNonNull(updatedAt, "updatedAt must not be null");
+        // 替代 Run 尚未被 OpenCode 受理，事件与审计记录保留，只撤销提前展示的 USER 投影。
+        mapper.deleteSessionMessagesByRunId(replacementRunId.value());
+        summaryMapper.touchSession(sessionId.value(), updatedAt);
+    }
 }

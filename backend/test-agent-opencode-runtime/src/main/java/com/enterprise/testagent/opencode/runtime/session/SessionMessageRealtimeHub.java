@@ -74,9 +74,21 @@ public class SessionMessageRealtimeHub implements ServerBroadcastHandler {
         }
         try {
             Map<String, Object> payload = event.payload();
+            String replacementRunId = optionalString(payload, "replacementRunId");
+            if (replacementRunId == null) {
+                replacementRunId = requiredString(payload, "runId");
+            }
+            String sourceRunId = optionalString(payload, "sourceRunId");
+            String revision = optionalString(payload, "revision");
+            String changeType = optionalString(payload, "changeType");
             emitLocal(new SessionMessageChange(
                     new SessionId(requiredString(payload, "sessionId")),
-                    new RunId(requiredString(payload, "runId")),
+                    new RunId(sourceRunId == null ? replacementRunId : sourceRunId),
+                    new RunId(replacementRunId),
+                    changeType == null
+                            ? SessionMessageChangeType.RESEND_STARTED
+                            : SessionMessageChangeType.valueOf(changeType),
+                    revision == null ? event.occurredAt() : Instant.parse(revision),
                     event.traceId(),
                     event.occurredAt()));
         } catch (RuntimeException exception) {
@@ -97,10 +109,14 @@ public class SessionMessageRealtimeHub implements ServerBroadcastHandler {
                     change.occurredAt(),
                     Map.of(
                             "sessionId", change.sessionId().value(),
-                            "runId", change.runId().value())));
+                            "sourceRunId", change.sourceRunId().value(),
+                            "replacementRunId", change.replacementRunId().value(),
+                            "runId", change.replacementRunId().value(),
+                            "changeType", change.changeType().name(),
+                            "revision", change.revision().toString())));
         } catch (RuntimeException exception) {
-            LOGGER.warn("会话消息广播发布失败 sessionId={} runId={} traceId={}",
-                    change.sessionId().value(), change.runId().value(), change.traceId(), exception);
+            LOGGER.warn("会话消息广播发布失败 sessionId={} replacementRunId={} traceId={}",
+                    change.sessionId().value(), change.replacementRunId().value(), change.traceId(), exception);
         }
     }
 
@@ -109,23 +125,39 @@ public class SessionMessageRealtimeHub implements ServerBroadcastHandler {
     }
 
     private static String requiredString(Map<String, Object> payload, String key) {
-        Object value = payload.get(key);
-        if (value instanceof String text && !text.isBlank()) {
-            return text;
-        }
+        String value = optionalString(payload, key);
+        if (value != null) return value;
         throw new IllegalArgumentException("会话消息广播载荷缺少字段 " + key);
+    }
+
+    private static String optionalString(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        return value instanceof String text && !text.isBlank() ? text : null;
+    }
+
+    /** 重发消息投影的提交阶段；恢复类型要求客户端重新读取源轮次。 */
+    public enum SessionMessageChangeType {
+        RESEND_RESERVED,
+        RESEND_STARTED,
+        RESEND_RESTORED
     }
 
     /** 后端已提交的会话消息变化，不承载正文或模型输出。 */
     public record SessionMessageChange(
             SessionId sessionId,
-            RunId runId,
+            RunId sourceRunId,
+            RunId replacementRunId,
+            SessionMessageChangeType changeType,
+            Instant revision,
             String traceId,
             Instant occurredAt) {
 
         public SessionMessageChange {
             Objects.requireNonNull(sessionId, "sessionId must not be null");
-            Objects.requireNonNull(runId, "runId must not be null");
+            Objects.requireNonNull(sourceRunId, "sourceRunId must not be null");
+            Objects.requireNonNull(replacementRunId, "replacementRunId must not be null");
+            Objects.requireNonNull(changeType, "changeType must not be null");
+            Objects.requireNonNull(revision, "revision must not be null");
             if (traceId == null || traceId.isBlank()) {
                 throw new IllegalArgumentException("traceId must not be blank");
             }

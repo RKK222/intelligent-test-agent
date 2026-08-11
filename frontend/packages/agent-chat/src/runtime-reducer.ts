@@ -47,6 +47,12 @@ export type AgentChatRuntimeAction =
       resend: ResendMetadata;
       message: Extract<AgentMessage, { role: "user" }>;
     }
+  | {
+      type: "run.resend.source.restored";
+      sourceRunId: string;
+      replacementRunId: string;
+      messages: AgentMessage[];
+    }
   | { type: "run.requested"; userMessageId?: string; supersededRunId?: string }
   | { type: "run.adopted"; runId: string; userMessageId?: string }
   | { type: "run.request.failed"; message?: string }
@@ -95,6 +101,14 @@ export function reduceAgentChatRuntime(
   }
   if (action.type === "run.resend.user.synchronized") {
     return synchronizeAuthoritativeResendUser(state, action.resend, action.message);
+  }
+  if (action.type === "run.resend.source.restored") {
+    return restoreAuthoritativeResendSource(
+      state,
+      action.sourceRunId,
+      action.replacementRunId,
+      action.messages
+    );
   }
   if (action.type === "run.requested") {
     const userMessageId = action.userMessageId ?? state.pendingTodoUserMessageId ?? latestUserMessageId(state.messages);
@@ -746,6 +760,14 @@ function synchronizeAuthoritativeResendUser(
           ...state.messages.slice(firstReplacementAssistant)
         ];
   }
+  // 预约事务已经让平台历史以替代 USER 为准；同步同一修订时立即隐藏源回答，不能等模型 started。
+  messages = messages.filter((item) => {
+    if (item.role === "card") {
+      return text(item.payload.runId) !== resend.sourceRunId
+        && text(item.payload.sourceRunId) !== resend.sourceRunId;
+    }
+    return item.runId !== resend.sourceRunId;
+  });
 
   const previousMessageId = existing?.id;
   const authoritativeMessageId = synchronized.id;
@@ -771,6 +793,66 @@ function synchronizeAuthoritativeResendUser(
       || state.currentTodoRunId === replacementRunId
       ? authoritativeMessageId
       : state.pendingTodoUserMessageId
+  };
+}
+
+/** 取消或投递失败后，用后端按 sourceRun 精确返回的完整轮次原位替换临时替代轮次。 */
+function restoreAuthoritativeResendSource(
+  state: AgentChatRuntimeState,
+  sourceRunId: string,
+  replacementRunId: string,
+  sourceMessages: AgentMessage[]
+): AgentChatRuntimeState {
+  if (sourceMessages.length === 0) return state;
+  const belongsToResend = (message: AgentMessage) => {
+    if (message.role === "card") {
+      return text(message.payload.runId) === sourceRunId
+        || text(message.payload.runId) === replacementRunId
+        || text(message.payload.sourceRunId) === sourceRunId;
+    }
+    return message.runId === sourceRunId
+      || message.runId === replacementRunId
+      || (message.role === "user" && message.resend?.replacementRunId === replacementRunId);
+  };
+  const anchor = state.messages.findIndex(belongsToResend);
+  const insertionIndex = anchor < 0
+    ? state.messages.length
+    : state.messages.slice(0, anchor).filter((message) => !belongsToResend(message)).length;
+  const retained = state.messages.filter((message) => !belongsToResend(message));
+  const messages = [
+    ...retained.slice(0, insertionIndex),
+    ...sourceMessages,
+    ...retained.slice(insertionIndex)
+  ];
+  const restored = createInitialAgentChatRuntimeState(messages);
+  const runStatusesByRunId = { ...state.runStatusesByRunId };
+  delete runStatusesByRunId[replacementRunId];
+  const todoUserMessageIdByRunId = { ...state.todoUserMessageIdByRunId };
+  delete todoUserMessageIdByRunId[replacementRunId];
+  const restoredUser = sourceMessages.find(
+    (message): message is Extract<AgentMessage, { role: "user" }> => message.role === "user"
+  );
+  if (restoredUser) {
+    todoUserMessageIdByRunId[sourceRunId] = restoredUser.id;
+  }
+  return {
+    ...state,
+    messages,
+    permissions: [],
+    questions: [],
+    todos: restored.todos,
+    todoSnapshotsByUserMessageId: {
+      ...state.todoSnapshotsByUserMessageId,
+      ...restored.todoSnapshotsByUserMessageId
+    },
+    todoUserMessageIdByRunId,
+    pendingTodoUserMessageId: undefined,
+    currentTodoRunId: undefined,
+    streamingTextByPartId: {},
+    diff: undefined,
+    status: undefined,
+    runtimeStatus: undefined,
+    runStatusesByRunId
   };
 }
 

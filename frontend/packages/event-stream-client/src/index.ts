@@ -827,6 +827,15 @@ export function parseSessionShareRuntimeState(data: string): SessionShareRuntime
       || typeof value.expiresAt !== "string") {
       return null;
     }
+    const messageChange = value.messageChange;
+    const normalizedMessageChange = messageChange
+      && typeof messageChange.sessionId === "string"
+      && typeof messageChange.sourceRunId === "string"
+      && typeof messageChange.replacementRunId === "string"
+      && ["RESEND_RESERVED", "RESEND_STARTED", "RESEND_RESTORED"].includes(messageChange.changeType)
+      && typeof messageChange.revision === "string"
+      ? messageChange
+      : null;
     return {
       active: value.active,
       reason: typeof value.reason === "string" ? value.reason : null,
@@ -838,6 +847,7 @@ export function parseSessionShareRuntimeState(data: string): SessionShareRuntime
       expiresAt: value.expiresAt,
       activeRun: value.activeRun ?? null,
       sessionUpdatedAt: typeof value.sessionUpdatedAt === "string" ? value.sessionUpdatedAt : null,
+      messageChange: normalizedMessageChange,
       generatedAt: typeof value.generatedAt === "string"
         ? value.generatedAt
         : new Date().toISOString()

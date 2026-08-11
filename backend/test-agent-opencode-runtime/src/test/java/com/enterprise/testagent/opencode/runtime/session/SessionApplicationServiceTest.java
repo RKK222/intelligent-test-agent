@@ -15,6 +15,13 @@ import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextSessionRevocation;
+import com.enterprise.testagent.domain.run.RunId;
+import com.enterprise.testagent.domain.run.RunResend;
+import com.enterprise.testagent.domain.run.RunResendId;
+import com.enterprise.testagent.domain.run.RunResendPolicy;
+import com.enterprise.testagent.domain.run.RunResendRepository;
+import com.enterprise.testagent.domain.run.RunResendStatus;
+import com.enterprise.testagent.domain.run.RunResendTrigger;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionHistoryItem;
 import com.enterprise.testagent.domain.session.SessionHistoryRepository;
@@ -228,6 +235,64 @@ class SessionApplicationServiceTest {
         assertThat(touched.updatedAt()).isAfter(NOW);
         assertThat(touched.traceId()).isEqualTo("trace_compaction_touch");
         verify(titleWatch, never()).cancelForSession(Mockito.any(), Mockito.anyString());
+    }
+
+    @Test
+    void waitingResendHistoryShowsOnlyBackendReplacementUser() {
+        RunId sourceRunId = new RunId("run_resend_visible_source");
+        RunId replacementRunId = new RunId("run_resend_visible_replacement");
+        FakeMessageRepository messages = new FakeMessageRepository();
+        messages.save(new SessionMessage(
+                new SessionMessageId("msg_resend_visible_source"), SESSION_ID,
+                SessionMessageRole.USER, "旧问题", NOW, "trace_resend_visible",
+                sourceRunId, null, "msg_remote_source", null, null, null, NOW));
+        messages.save(new SessionMessage(
+                new SessionMessageId("msg_resend_visible_replacement"), SESSION_ID,
+                SessionMessageRole.USER, "新问题", NOW.plusSeconds(1), "trace_resend_visible",
+                replacementRunId, null, "msg_remote_replacement", null, null, null, NOW.plusSeconds(1)));
+        RunResendRepository resends = Mockito.mock(RunResendRepository.class);
+        Mockito.when(resends.findDispatchedSourceRunIds(SESSION_ID)).thenReturn(List.of());
+        Mockito.when(resends.findActiveBySession(SESSION_ID)).thenReturn(Optional.of(new RunResend(
+                new RunResendId("rsd_resend_visible"), SESSION_ID, new UserId("usr_resend_visible"),
+                sourceRunId, replacementRunId, "msg_remote_source", "msg_remote_replacement",
+                RunResendTrigger.MANUAL, 1, 0, RunResendPolicy.MAX_AUTOMATIC_ATTEMPTS,
+                RunResendStatus.WAITING, NOW, "linux-resend-visible", null, null,
+                "request_resend_visible", "trace_resend_visible", null, NOW, NOW)));
+        SessionApplicationService service = service(
+                new FakeWorkspaceRepository(true), new FakeSessionRepository(session()), messages);
+        service.setRunResendRepository(resends);
+
+        PageResponse<SessionMessage> page = service.listMessages(
+                SESSION_ID, new PageRequest(1, 100), "trace_resend_visible", false);
+
+        assertThat(page.items()).extracting(SessionMessage::runId).containsExactly(replacementRunId);
+        assertThat(page.items()).extracting(SessionMessage::content).containsExactly("新问题");
+    }
+
+    @Test
+    void exactRunLookupRestoresSourceTurnEvenWhenHistorySuppressionIsActive() {
+        RunId sourceRunId = new RunId("run_resend_restore_source");
+        RunId replacementRunId = new RunId("run_resend_restore_replacement");
+        FakeMessageRepository messages = new FakeMessageRepository();
+        messages.save(new SessionMessage(
+                new SessionMessageId("msg_resend_restore_user"), SESSION_ID,
+                SessionMessageRole.USER, "旧问题", NOW, "trace_resend_restore",
+                sourceRunId, null, "msg_remote_restore_user", null, null, null, NOW));
+        messages.save(new SessionMessage(
+                new SessionMessageId("msg_resend_restore_answer"), SESSION_ID,
+                SessionMessageRole.ASSISTANT, "旧回答", NOW.plusSeconds(1), "trace_resend_restore",
+                sourceRunId, null, "msg_remote_restore_answer", null, null, null, NOW.plusSeconds(1)));
+        messages.save(new SessionMessage(
+                new SessionMessageId("msg_resend_restore_replacement"), SESSION_ID,
+                SessionMessageRole.USER, "新问题", NOW.plusSeconds(2), "trace_resend_restore",
+                replacementRunId, null, "msg_remote_restore_replacement", null, null, null,
+                NOW.plusSeconds(2)));
+        SessionApplicationService service = service(
+                new FakeWorkspaceRepository(true), new FakeSessionRepository(session()), messages);
+
+        assertThat(service.listMessagesForRun(SESSION_ID, sourceRunId))
+                .extracting(SessionMessage::content)
+                .containsExactly("旧问题", "旧回答");
     }
 
     /** 验证纯置顶往返不改变普通会话组的排序锚点。 */

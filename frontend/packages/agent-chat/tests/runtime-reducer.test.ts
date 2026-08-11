@@ -280,6 +280,64 @@ describe("agent-chat runtime reducer", () => {
     expect(synchronized.pendingTodoUserMessageId).toBe("msg_replacement_user");
   });
 
+  it("restores the complete source turn after a reserved resend is cancelled", () => {
+    const sourceUser = {
+      id: "msg_source_user",
+      messageId: "msg_source_user",
+      role: "user" as const,
+      text: "仅答复 OK",
+      runId: "run_source",
+      createdAt: "2026-08-10T15:09:00Z"
+    };
+    const sourceAnswer = {
+      id: "msg_source_answer",
+      messageId: "msg_source_answer",
+      role: "assistant" as const,
+      text: "OK",
+      runId: "run_source",
+      createdAt: "2026-08-10T15:09:01Z"
+    };
+    const resend = {
+      resendId: "resend_cancelled",
+      sourceRunId: "run_source",
+      replacementRunId: "run_replacement",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "WAITING",
+      executeAt: "2026-08-10T15:09:02Z"
+    } as const;
+    const initial = createInitialAgentChatRuntimeState([sourceUser, sourceAnswer]);
+    const synchronized = reduceAgentChatRuntime(initial, {
+      type: "run.resend.user.synchronized",
+      resend,
+      message: {
+        ...sourceUser,
+        id: "msg_replacement_user",
+        messageId: "msg_replacement_user",
+        text: "仅答复 123",
+        runId: "run_replacement",
+        createdAt: "2026-08-10T15:09:02Z"
+      }
+    });
+
+    expect(synchronized.messages).toEqual([
+      expect.objectContaining({ id: "msg_replacement_user", text: "仅答复 123" })
+    ]);
+
+    const restored = reduceAgentChatRuntime(synchronized, {
+      type: "run.resend.source.restored",
+      sourceRunId: "run_source",
+      replacementRunId: "run_replacement",
+      messages: [sourceUser, sourceAnswer]
+    });
+
+    expect(restored.messages).toEqual([sourceUser, sourceAnswer]);
+    expect(restored.runtimeStatus).toBeUndefined();
+    expect(restored.currentTodoRunId).toBeUndefined();
+  });
+
   it("keeps the replacement user anchor when native removals arrive before resend started", () => {
     const initial = {
       ...createInitialAgentChatRuntimeState([{
