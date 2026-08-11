@@ -26,6 +26,8 @@ import com.enterprise.testagent.domain.run.RunRuntimeStore;
 import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.run.RunStorageMode;
 import com.enterprise.testagent.event.RunEventAppender;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChange;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -50,6 +52,7 @@ public class RunResendExecutionService {
     private final RunEventAppender eventAppender;
     private final Clock clock;
     private RunRuntimeStore runRuntimeStore;
+    private SessionMessageRealtimeHub sessionMessageRealtimeHub;
 
     public RunResendExecutionService(
             RunResendRepository resendRepository,
@@ -76,6 +79,12 @@ public class RunResendExecutionService {
     @Autowired(required = false)
     void configureRunRuntimeStore(RunRuntimeStore runRuntimeStore) {
         this.runRuntimeStore = runRuntimeStore;
+    }
+
+    /** 后端消息变更广播为可选方法注入，保持既有纯单元测试构造器稳定。 */
+    @Autowired(required = false)
+    void configureSessionMessageRealtimeHub(SessionMessageRealtimeHub sessionMessageRealtimeHub) {
+        this.sessionMessageRealtimeHub = sessionMessageRealtimeHub;
     }
 
     public RunResend execute(RunResendId resendId) {
@@ -282,6 +291,14 @@ public class RunResendExecutionService {
                 dispatched.traceId(),
                 acceptedAt,
                 RunResendApplicationService.eventPayload(dispatched)), RunStorageMode.LEGACY_FULL);
+        if (sessionMessageRealtimeHub != null) {
+            // started 事实和消息清理均成功后再唤醒当前会话，前端读取时只会看到已提交快照。
+            sessionMessageRealtimeHub.publishAfterCommit(new SessionMessageChange(
+                    dispatched.sessionId(),
+                    dispatched.replacementRunId(),
+                    dispatched.traceId(),
+                    acceptedAt));
+        }
         return dispatched;
     }
 

@@ -9,18 +9,19 @@ import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub;
+import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.opencode.runtime.share.SessionShareMemberCommand;
-import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
-import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import jakarta.validation.Valid;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -43,17 +44,26 @@ public class SessionShareController {
 
     private final SessionCollaborationShareService service;
     private final RunApplicationService runService;
+    private final SessionMessageRealtimeHub sessionMessageRealtimeHub;
 
     public SessionShareController(SessionCollaborationShareService service) {
-        this(service, null);
+        this(service, null, null);
+    }
+
+    public SessionShareController(
+            SessionCollaborationShareService service,
+            RunApplicationService runService) {
+        this(service, runService, null);
     }
 
     @Autowired
     public SessionShareController(
             SessionCollaborationShareService service,
-            RunApplicationService runService) {
+            RunApplicationService runService,
+            SessionMessageRealtimeHub sessionMessageRealtimeHub) {
         this.service = service;
         this.runService = runService;
+        this.sessionMessageRealtimeHub = sessionMessageRealtimeHub;
     }
 
     /** 分页搜索可被分享的有效平台用户，仅返回安全最小资料。 */
@@ -145,12 +155,16 @@ public class SessionShareController {
         DelegatedOperationContext initial = service.requireAccess(
                 actor, requestedShare, false, traceId);
 
+        Flux<Object> refreshTriggers = sessionMessageRealtimeHub == null
+                ? Flux.interval(Duration.ofSeconds(1)).cast(Object.class)
+                : Flux.merge(
+                        Flux.interval(Duration.ofSeconds(1)).cast(Object.class),
+                        sessionMessageRealtimeHub.events(initial.sessionId()).cast(Object.class));
         Flux<DelegatedOperationContext> contexts = Flux.concat(
                 Mono.just(initial),
-                Flux.interval(Duration.ofSeconds(1))
-                        .concatMap(ignored -> Mono.fromCallable(() -> service.refreshAccess(
-                                        actor, requestedShare, traceId))
-                                .subscribeOn(Schedulers.boundedElastic())));
+                refreshTriggers.concatMap(ignored -> Mono.fromCallable(() -> service.refreshAccess(
+                                actor, requestedShare, traceId))
+                        .subscribeOn(Schedulers.boundedElastic())));
         Flux<ServerSentEvent<SessionShareDtos.SessionShareRuntimeStateResponse>> states = contexts
                 .concatMap(context -> Mono.fromCallable(() -> runtimeState(context))
                         .subscribeOn(Schedulers.boundedElastic()))

@@ -1011,7 +1011,7 @@ test("session share refreshes a compacted summary when the session revision chan
   await expect(compaction).not.toContainText("这不是新的回答");
 });
 
-test("session share synchronizes an edited resend in place when revision wins the persistence race", async ({ page }) => {
+test("session share synchronizes an edited resend after the backend commits its message change", async ({ page }) => {
   const sessionMessageRequests: string[] = [];
   const sessionTreeRequests: string[] = [];
   const activeRun = {
@@ -1097,17 +1097,6 @@ test("session share synchronizes an edited resend in place when revision wins th
     },
     run_shared_resend_replacement: activeRun
   };
-  await installAuthenticatedRunEventFetchStream(page, {
-    run_shared_resend_replacement: [{
-      releaseKey: "shared-resend-started-after-stale-refresh",
-      events: [{
-        eventId: "evt_shared_resend_started_after_stale_refresh",
-        seq: 1,
-        type: "run.resend.started",
-        payload: activeRun.resend
-      }]
-    }]
-  });
   await mockBackendApi(page, {
     authUser: { userId: "usr_reader", username: "观察者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
     workspaces: [{ ...workspace(), workspaceId: "wrk_shared_resend_revision", name: "共享重发工作区" }],
@@ -1170,20 +1159,7 @@ test("session share synchronizes an edited resend in place when revision wins th
   });
   expect(scrollTopBeforeResend).toBeGreaterThan(0);
 
-  // revision 可能先于替代 USER 消息写入平台；第一次 refresh 故意仍返回旧轮次。
-  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
-    shareId: "shr_resend_revision",
-    sessionId: "ses_shared_resend_revision",
-    workspaceId: "wrk_shared_resend_revision",
-    canChat: true,
-    activeRun,
-    sessionUpdatedAt: "2026-08-10T03:00:03Z",
-    generatedAt: "2026-08-10T03:00:04Z"
-  }));
-
-  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
-  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
-
+  // 后端只在替代 USER 与 Session 修订提交后发出变化信号，前端无需猜测落库时机。
   sessionMessagesBySessionId.ses_shared_resend_revision = [...earlierMessages, {
     messageId: "msg_shared_resend_new",
     remoteMessageId: "msg_remote_shared_resend_new",
@@ -1198,11 +1174,20 @@ test("session share synchronizes an edited resend in place when revision wins th
     runId: "run_shared_resend_replacement",
     resend: activeRun.resend
   }];
-  const released = await page.evaluate(() =>
-    (window as Window & { __releaseRunEventBatch?: (releaseKey: string) => boolean })
-      .__releaseRunEventBatch?.("shared-resend-started-after-stale-refresh") ?? false
-  );
-  expect(released).toBe(true);
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_resend_revision",
+    sessionId: "ses_shared_resend_revision",
+    workspaceId: "wrk_shared_resend_revision",
+    canChat: true,
+    activeRun,
+    sessionUpdatedAt: "2026-08-10T03:00:03Z",
+    generatedAt: "2026-08-10T03:00:04Z"
+  }));
+
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
+  expect(sessionMessageRequests.slice(initialMessageRequestCount)).toEqual([
+    "/api/internal/platform/opencode-runtime/sessions/ses_shared_resend_revision/messages?page=1&size=100&refresh=false"
+  ]);
 
   await expect(page.getByText("仅答复 OK", { exact: true })).toHaveCount(0);
   await expect(page.getByText("仅答复 123", { exact: true })).toHaveCount(1);
