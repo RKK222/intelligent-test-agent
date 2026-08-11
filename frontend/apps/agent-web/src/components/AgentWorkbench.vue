@@ -605,11 +605,9 @@ const historySwitchingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 let activeRunProbeSeq = 0;
 const runtimeStateRunReconciliations = new Set<string>();
-// 同一 resend.started 可能在 SSE 重连后重放；成功同步后不再重复读取，未落库时允许后续事件继续补偿。
+// 同一后端同步信号可能在 SSE 重连后重放；成功同步后不再重复读取，失败时允许后续事件继续补偿。
 const refreshedAuthoritativeRunIds = new Set<string>();
 const authoritativeRunRefreshes = new Map<string, Promise<boolean>>();
-const AUTHORITATIVE_RESEND_USER_REFRESH_ATTEMPTS = 6;
-const AUTHORITATIVE_RESEND_USER_REFRESH_DELAY_MS = 250;
 type HistorySwitchRunEventBuffer = {
   switchSeq: number;
   sessionId: string;
@@ -1017,8 +1015,8 @@ function rememberAuthoritativeRunRefresh(runId: string): void {
 }
 
 /**
- * revision 可能早于替代 USER 持久化，started 也可能稍后重放。两条信号共用同一个轻量刷新任务：
- * 只读取并原位替换该 USER，不切换 Session、不清空时间线，也不改变用户当前滚动位置。
+ * 后端只在替代 USER、重发状态和 Session 修订均提交后发出变化信号；这里据此读取一次平台数据库快照，
+ * 原位替换该 USER，不切换 Session、不清空时间线，也不改变用户当前滚动位置。
  */
 async function refreshAuthoritativeResendUser(
   sessionId: string,
@@ -1033,37 +1031,30 @@ async function refreshAuthoritativeResendUser(
     return pending;
   }
   const refresh = (async () => {
-    for (let attempt = 1; attempt <= AUTHORITATIVE_RESEND_USER_REFRESH_ATTEMPTS; attempt += 1) {
-      try {
-        const page = await api.listSessionMessages(sessionId, 1, 100, { refresh: true });
-        if (session.value?.sessionId !== sessionId) {
-          return false;
-        }
-        const persistedMessages = dedupeSessionMessages(page.items);
-        const authoritative = [...persistedMessages].reverse().find((message) =>
-          message.role === "USER" && message.runId === replacementRunId
-        );
-        if (authoritative) {
-          const projected = messagesFromSessionMessages([authoritative])[0];
-          if (projected?.role === "user") {
-            rememberPersistedMessageIdentities([authoritative]);
-            dispatchChat({
-              type: "run.resend.user.synchronized",
-              resend,
-              message: projected
-            });
-            rememberAuthoritativeRunRefresh(replacementRunId);
-            return true;
-          }
-        }
-      } catch {
-        // 平台消息同步与 Session revision 非事务提交；短暂读取失败和未落库都走同一重试窗口。
+    try {
+      const page = await api.listSessionMessages(sessionId, 1, 100, { refresh: false });
+      if (session.value?.sessionId !== sessionId) {
+        return false;
       }
-      if (attempt < AUTHORITATIVE_RESEND_USER_REFRESH_ATTEMPTS) {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, AUTHORITATIVE_RESEND_USER_REFRESH_DELAY_MS);
-        });
+      const persistedMessages = dedupeSessionMessages(page.items);
+      const authoritative = [...persistedMessages].reverse().find((message) =>
+        message.role === "USER" && message.runId === replacementRunId
+      );
+      if (authoritative) {
+        const projected = messagesFromSessionMessages([authoritative])[0];
+        if (projected?.role === "user") {
+          rememberPersistedMessageIdentities([authoritative]);
+          dispatchChat({
+            type: "run.resend.user.synchronized",
+            resend,
+            message: projected
+          });
+          rememberAuthoritativeRunRefresh(replacementRunId);
+          return true;
+        }
       }
+    } catch {
+      // 读取失败不记成功；后端 SSE 或 RunEvent 重连重放时仍可再次同步。
     }
     return false;
   })();

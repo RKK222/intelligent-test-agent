@@ -3,6 +3,7 @@ package com.enterprise.testagent.opencode.runtime.run;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -11,11 +12,11 @@ import com.enterprise.testagent.agent.runtime.AgentMessageProbeResult;
 import com.enterprise.testagent.agent.runtime.AgentRevertTurnResult;
 import com.enterprise.testagent.agent.runtime.AgentRuntime;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
-import com.enterprise.testagent.domain.run.Run;
-import com.enterprise.testagent.domain.run.ConversationRunContext;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
+import com.enterprise.testagent.domain.run.ConversationRunContext;
+import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunRepository;
 import com.enterprise.testagent.domain.run.RunResend;
@@ -33,6 +34,7 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.event.RunEventAppender;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -58,6 +60,7 @@ class RunResendExecutionServiceTest {
     private RunResendDetailCleanupPort cleanupPort;
     private ConversationContextApplicationService contextService;
     private RunEventAppender eventAppender;
+    private SessionMessageRealtimeHub sessionMessageRealtimeHub;
     private RunResendExecutionService service;
 
     @BeforeEach
@@ -70,6 +73,7 @@ class RunResendExecutionServiceTest {
         cleanupPort = org.mockito.Mockito.mock(RunResendDetailCleanupPort.class);
         contextService = org.mockito.Mockito.mock(ConversationContextApplicationService.class);
         eventAppender = org.mockito.Mockito.mock(RunEventAppender.class);
+        sessionMessageRealtimeHub = org.mockito.Mockito.mock(SessionMessageRealtimeHub.class);
         AgentRuntimeRegistry registry = org.mockito.Mockito.mock(AgentRuntimeRegistry.class);
         when(registry.defaultAgentId()).thenReturn("opencode");
         when(registry.require("opencode")).thenReturn(runtime);
@@ -87,6 +91,7 @@ class RunResendExecutionServiceTest {
                 contextService,
                 eventAppender,
                 Clock.fixed(NOW, ZoneOffset.UTC));
+        service.configureSessionMessageRealtimeHub(sessionMessageRealtimeHub);
     }
 
     @Test
@@ -114,6 +119,11 @@ class RunResendExecutionServiceTest {
         assertThat(result.status()).isEqualTo(RunResendStatus.DISPATCHED);
         verify(runApplicationService, never()).startResendRun(any(), any(), any(), any(), any(), any());
         verify(cleanupPort).purgeSourceRun(SOURCE_RUN_ID, SESSION_ID, NOW);
+        verify(sessionMessageRealtimeHub).publishAfterCommit(argThat(change ->
+                change.sessionId().equals(SESSION_ID)
+                        && change.runId().equals(REPLACEMENT_RUN_ID)
+                        && change.traceId().equals("trace_execution")
+                        && change.occurredAt().equals(NOW)));
     }
 
     @Test
@@ -131,6 +141,7 @@ class RunResendExecutionServiceTest {
         verify(cleanupPort).purgeSourceRun(SOURCE_RUN_ID, SESSION_ID, NOW);
         verify(resendRepository, never()).deleteSessionLock(any(), any());
         verify(eventAppender, never()).append(any(), any());
+        verify(sessionMessageRealtimeHub, never()).publishAfterCommit(any());
     }
 
     @Test
