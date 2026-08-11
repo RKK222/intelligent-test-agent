@@ -71,6 +71,8 @@ test("session share management and received list preserve one link and inactive 
 
   const dialog = page.locator(".session-share-dialog");
   await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCSS("resize", "both");
+  await expect(dialog.getByRole("button", { name: "复制备用分享链接" })).toHaveCount(0);
   await expect(dialog.getByText("当前会话有 1 个待执行定时任务；分享失效后仍将按原计划执行。")).toBeVisible();
   await dialog.getByRole("button", { name: /协作者/ }).click();
   await dialog.locator(".session-share-dialog__permission-switch .el-switch__core").click();
@@ -81,7 +83,8 @@ test("session share management and received list preserve one link and inactive 
   expect(sharePutRequests[0]?.expectedVersion).toBeNull();
   expect(sharePutRequests[0]?.members).toEqual([{ userId: "usr_collaborator", canChat: true }]);
   await expect(page.getByText("已通知被分享人，分享设置已保存")).toBeVisible();
-  await expect(dialog.getByLabel("唯一分享链接")).toHaveValue(/\/s\/shr_e2e_unique$/);
+  await expect(dialog.getByLabel("唯一分享链接")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "复制备用分享链接" })).toBeVisible();
 
   await dialog.getByRole("button", { name: "取消分享" }).click();
   await expect(page.getByText(/取消分享不会取消任务/)).toBeVisible();
@@ -154,6 +157,8 @@ test("session share notification appears in real time, opens a new tab, then ref
   await trigger.click();
   const activeItem = page.getByRole("button", { name: /张敏 向你分享了对话.*在新标签页打开/ });
   await expect(activeItem).toBeVisible();
+  const notificationItem = page.locator(".user-notification-center__item").filter({ hasText: "张敏 向你分享了对话" });
+  await expect(notificationItem).toHaveAttribute("data-read-state", "unread");
   await expect(page.getByText("支付回归问题定位", { exact: true })).toBeVisible();
   await expect(page.getByText("可对话", { exact: true })).toBeVisible();
   const sourceUrl = page.url();
@@ -178,6 +183,7 @@ test("session share notification appears in real time, opens a new tab, then ref
   releaseRead();
   await expect(page.locator(".user-notification-center__badge")).toHaveCount(0);
   await expect(page.locator(".user-notification-center__item")).not.toHaveClass(/is-unread/);
+  await expect(notificationItem).toHaveAttribute("data-read-state", "read");
 
   notificationCapture.userNotifications = [{
     ...activeNotification,
@@ -191,6 +197,7 @@ test("session share notification appears in real time, opens a new tab, then ref
   releaseInvalidated();
   const invalidItem = page.getByRole("button", { name: /张敏 向你分享了对话.*分享已失效/ });
   await expect(invalidItem).toBeDisabled();
+  await expect(notificationItem).toHaveAttribute("data-read-state", "read");
   await expect(page.getByText("分享已失效", { exact: true })).toBeVisible();
   await expect.poll(() => notificationEventRequests.length).toBeGreaterThanOrEqual(3);
 });

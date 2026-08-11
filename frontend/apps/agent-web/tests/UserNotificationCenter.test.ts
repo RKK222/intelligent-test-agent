@@ -22,6 +22,23 @@ const notifications: UserNotification[] = [
     updatedAt: '2026-08-10T09:00:00Z',
   },
   {
+    notificationId: 'ntf_read',
+    type: 'SESSION_SHARED',
+    actorUserId: 'usr_owner',
+    title: '已读同事 向你分享了对话',
+    body: '已查看会话 · 可对话',
+    actionType: 'SESSION_SHARE',
+    actionTargetId: 'shr_read',
+    status: 'ACTIVE',
+    invalidationReason: null,
+    actionAvailable: true,
+    unread: false,
+    expiresAt: '2026-08-11T09:00:00Z',
+    readAt: '2026-08-10T08:30:00Z',
+    createdAt: '2026-08-10T08:00:00Z',
+    updatedAt: '2026-08-10T08:30:00Z',
+  },
+  {
     notificationId: 'ntf_invalid',
     type: 'SESSION_SHARED',
     actorUserId: 'usr_owner',
@@ -65,6 +82,12 @@ describe('UserNotificationCenter', () => {
     expect(wrapper.text()).toContain('登录失败排查')
     expect(wrapper.text()).toContain('只读')
     expect(wrapper.text()).toContain('分享已失效')
+    expect(wrapper.findAll('.user-notification-center__item').map((item) => item.attributes('data-read-state')))
+      .toEqual(['unread', 'read', 'inactive'])
+    expect(wrapper.findAll('.user-notification-center__item-icon').map((item) => item.attributes('title')))
+      .toEqual(['未读通知', '已读通知', '已失效通知'])
+    expect(wrapper.findAll('.user-notification-center__session-title').filter((item) => item.text() === '登录失败排查'))
+      .toHaveLength(1)
 
     const tabs = wrapper.findAll('[role="tab"]')
     await tabs[1]!.trigger('click')
@@ -73,8 +96,11 @@ describe('UserNotificationCenter', () => {
     const itemButtons = wrapper.findAll('.user-notification-center__item > button')
     await itemButtons[0]!.trigger('click')
     expect(wrapper.emitted('open-notification')?.[0]).toEqual([notifications[0]])
-    expect(itemButtons[1]!.attributes('disabled')).toBeDefined()
-    await itemButtons[1]!.trigger('click')
+    expect(itemButtons[0]!.attributes('aria-label')).toContain('未读通知')
+    expect(itemButtons[1]!.attributes('aria-label')).toContain('已读通知')
+    expect(itemButtons[2]!.attributes('disabled')).toBeDefined()
+    expect(itemButtons[2]!.attributes('aria-label')).toContain('已失效通知')
+    await itemButtons[2]!.trigger('click')
     expect(wrapper.emitted('open-notification')).toHaveLength(1)
 
     await wrapper.get('.user-notification-center__footer button').trigger('click')
