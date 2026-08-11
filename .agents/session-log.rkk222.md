@@ -9013,3 +9013,28 @@
 - 后端 health/readiness 均为 `UP`，前端 HTTP 200，3100 CORS 预检成功，通知与记忆平台入口未登录均为 401；manager WebSocket 已连接 18081，4097/4098 `/global/config` 均为 HTTP 200。
 - 三个独立 screen 为 `test-agent-release-backend-independent`、`test-agent-release-frontend-independent`、`test-agent-release-opencode-manager-independent`；进程日志位于 `.tmp/dev-services-release-independent/`，业务后端日志仍按既有配置写入 `backend/logs/`。
 - 本次未推送远端，未修改环境文件、generated SDK 或 OpenCode 只读源码；数据库只执行 Flyway validate，当前保留库已在 `20260810234154` 且无需新迁移。
+
+## 2026-08-11 - 将共享会话撤回重发消息改为后端提交后同步
+
+### Why
+
+- 共享会话撤回重发原先由前端在 Session revision 或 `run.resend.started` 到达后执行最多 6 次、每次间隔 250ms 的消息刷新；信号可能早于平台消息持久化，实时效果依赖本地计时器和数据库竞争结果。
+- 当前会话消息同步应由后端提交边界驱动，前端只消费已提交事实，不能猜测落库时机。
+
+### What
+
+- 新增 `SessionMessageRealtimeHub`：在后端事实提交成功后发布只含 `sessionId/runId/traceId/occurredAt` 的安全变化信号，本机直接 fan-out，并复用现有 `ServerBroadcastPublisher` 唤醒其它 Java；不广播 prompt、回答或工具输出。
+- `RunResendExecutionService` 仅在源 Run 清理、重发状态 CAS、锁/输入清理和 `run.resend.started` 事实均成功后发布变化；`SessionShareController` 将该信号合入既有分享 runtime SSE，1 秒检查继续作为鉴权和丢信号恢复兜底。
+- `AgentWorkbench` 移除 6 次延时重试，收到后端状态或 RunEvent 信号后只调用一次消息分页接口并指定 `refresh=false`，原位替换替代 USER，不重载历史树、不清空时间线或改变滚动位置。
+- 同步 runtime/API/agent-chat README、HTTP API、事件流和会话场景测试文档；未新增 URL、DTO、外部 SSE 事件名、数据库字段或 migration。
+
+### How
+
+- JDK 25 Maven 定向回归通过：`SessionMessageRealtimeHubTest` 2 项、`RunResendExecutionServiceTest` 4 项、`SessionShareControllerTest` 5 项，共 11 项；覆盖提交/回滚、跨 Java 过滤、CAS 失败不广播和后端信号即时唤醒 SSE。
+- `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；Chromium 用例 `session share synchronizes an edited resend after the backend commits its message change` 1/1 通过，并断言仅请求一次 `refresh=false`、不加载历史树且滚动位置不变。
+- 使用 JDK 25、`test` profile、`.env.test` 和 `--without-workflow` 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow`：23 个后端模块完整打包成功，Spring 装配、后端 readiness `8080` 和前端 `3000` 均正常；未修改环境文件。
+
+### Result
+
+- 共享会话撤回重发的权威 USER 现在由后端提交后信号驱动同步，不再受前端重试窗口和落库竞争影响；跨节点广播失败时仍由周期检查与 SSE 重连恢复。
+- 本次不涉及数据库结构、SQL、外部 API/DTO/RunEvent wire schema、性能敏感正文广播或鉴权放宽；未修改 generated SDK、OpenCode 源码和用户已有的通知/弹框/工作空间未提交改动。
