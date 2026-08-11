@@ -8568,3 +8568,30 @@
 
 - 工作台通知中心及会话分享首期链路已实现并由模块、真实 PostgreSQL、前端单测、三浏览器 E2E、生产构建和本地运行态共同验证；广播异常时由初始快照与 30 秒数据库回源恢复，通知不携带任意 URL、分享正文或凭据。
 - 当前可验证地址为 `http://127.0.0.1:3000/`，后端为 `http://127.0.0.1:8080/`。本地没有可用的文档示例登录账号，因此未在真实本地库执行登录后的双用户手工流程；该流程已由三浏览器 E2E 覆盖。Workflow 仍因本地数据库管理权限不足未启动，核心通知服务不依赖 Workflow。
+- 当前 backend、frontend、opencode-manager 均由 `/Users/kaka/Desktop/intelligent-test-agent-notification-center` 运行；后端 health/readiness 与前端均为 HTTP 200，通知未认证请求正确返回 401，登录 CORS 预检正确。
+- manager 在重启窗口重新连接后无持续断线或解码循环；运行中后端已确认加载通知 mapper 与完整 Flyway 主链。端口 4104 的存量未受管健康探测仍返回 `PROCESS_NOT_MANAGED`，不影响本次三服务健康与通知接口。
+- Workflow 因 `/Users/kaka/Desktop/intelligent-test-agent/.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD`，按仓库官方 `--without-workflow` 模式保持未启动；未自动推送。
+
+## 2026-08-11 - 修复通知中心 worktree 的 OpenCode 启动失败
+
+### Why
+
+- 通知中心 worktree 重启后，用户初始化 TestAgent 进程在 `STARTING_PROCESS` 阶段持续返回 `OPENCODE_UNAVAILABLE / 公共 Agent 配置源目录不可用`，manager 未收到 `start` 命令。
+- 数据库 macOS 通用参数 `SYS_DATA_ROOT_DIR` 的历史值为 `$TESTAGENT/.testagent`；仅在启动命令设置 `SYS_DATA_ROOT_DIR` 仍不足以改变 Java 的 `$TESTAGENT` 引用解析，脚本默认把兼容变量 `TESTAGENT` 指向当前通知中心 worktree，导致公共配置被解析到只有服务器标识的新空目录。
+
+### What
+
+- 未修改业务代码、`.env.test`、数据库参数、generated SDK 或 OpenCode 源码；从通知中心 worktree 重启时显式设置 `TESTAGENT=/Users/kaka/Desktop/intelligent-test-agent` 与 `SYS_DATA_ROOT_DIR=/Users/kaka/Desktop/intelligent-test-agent/.testagent`，继续复用原测试环境的持久化 OpenCode session 和公共配置。
+- 保持 `TEST_AGENT_ROOT=/Users/kaka/Desktop/intelligent-test-agent-notification-center`，因此运行代码和构建产物仍来自通知中心 worktree，仅持久化数据根复用原测试环境。
+
+### How
+
+- 先以数据库初始化进度、backend trace 和 manager 日志交叉确认失败发生在 `OpencodeProcessConfigLinkService.switchToShared`，并核对新 worktree 的公共配置目录缺失、原数据根下 `opencode.jsonc/agents/skills/tools` 完整。
+- 使用 JDK 25、`test` profile、原 `.env.test`、`--skip-backend-build --skip-frontend-build --without-workflow` 重新启动 backend、opencode-manager 和 frontend；随后在真实本地工作台以用户 `888888888` 再次点击“启动进程”。
+- manager 对 4104 执行 `start` 返回 `STARTED`，公共状态查询在进程短暂预热后连续返回 `HEALTHY`；backend readiness、frontend、OpenCode `/global/health` 和 `/global/config` 均为 HTTP 200，4104 由 PID 54658 实际监听。
+
+### Result
+
+- 工作台显示“TestAgent 进程可用”，地址 `kakadeMacBook-Pro.local / 127.0.0.1:4104`；文件树恢复，运行态加载到 20 个 Skill 和 1 个 MCP，输入框和对话操作重新可用。
+- backend、frontend、opencode-manager 三个 screen 会话保持运行；Workflow 仍因 `.env.test` 缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 按既有 `--without-workflow` 模式未启动。
+- 后续从该通知中心 worktree 重启并复用原本机测试数据时，必须同时保留 `TESTAGENT` 和 `SYS_DATA_ROOT_DIR` 两个显式值，不能只设置后者。
