@@ -10,6 +10,7 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChange;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChangeType;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Map;
@@ -22,6 +23,7 @@ import reactor.test.StepVerifier;
 class SessionMessageRealtimeHubTest {
 
     private static final SessionId SESSION = new SessionId("ses_message_realtime");
+    private static final RunId SOURCE_RUN = new RunId("run_message_realtime_source");
     private static final RunId RUN = new RunId("run_message_realtime");
     private static final Instant NOW = Instant.parse("2026-08-11T08:00:00Z");
 
@@ -50,7 +52,11 @@ class SessionMessageRealtimeHubTest {
         assertThat(publisher.events).hasSize(1);
         assertThat(publisher.events.getFirst().payload()).containsOnly(
                 Map.entry("sessionId", SESSION.value()),
-                Map.entry("runId", RUN.value()));
+                Map.entry("sourceRunId", SOURCE_RUN.value()),
+                Map.entry("replacementRunId", RUN.value()),
+                Map.entry("runId", RUN.value()),
+                Map.entry("changeType", SessionMessageChangeType.RESEND_RESERVED.name()),
+                Map.entry("revision", NOW.toString()));
         TransactionSynchronizationManager.clearSynchronization();
         TransactionSynchronizationManager.setActualTransactionActive(false);
 
@@ -74,13 +80,21 @@ class SessionMessageRealtimeHubTest {
                 "linux-a",
                 "trace_remote_message",
                 NOW,
-                Map.of("sessionId", SESSION.value(), "runId", RUN.value()));
+                Map.of(
+                        "sessionId", SESSION.value(),
+                        "sourceRunId", SOURCE_RUN.value(),
+                        "replacementRunId", RUN.value(),
+                        "changeType", SessionMessageChangeType.RESEND_RESTORED.name(),
+                        "revision", NOW.toString()));
 
         StepVerifier.create(hub.events(SESSION).take(1))
                 .then(() -> hub.handle(remote))
                 .assertNext(change -> {
                     assertThat(change.sessionId()).isEqualTo(SESSION);
-                    assertThat(change.runId()).isEqualTo(RUN);
+                    assertThat(change.sourceRunId()).isEqualTo(SOURCE_RUN);
+                    assertThat(change.replacementRunId()).isEqualTo(RUN);
+                    assertThat(change.changeType()).isEqualTo(SessionMessageChangeType.RESEND_RESTORED);
+                    assertThat(change.revision()).isEqualTo(NOW);
                     assertThat(change.traceId()).isEqualTo("trace_remote_message");
                 })
                 .verifyComplete();
@@ -107,7 +121,9 @@ class SessionMessageRealtimeHubTest {
     }
 
     private SessionMessageChange change(SessionId sessionId, RunId runId) {
-        return new SessionMessageChange(sessionId, runId, "trace_message_realtime", NOW);
+        return new SessionMessageChange(
+                sessionId, SOURCE_RUN, runId, SessionMessageChangeType.RESEND_RESERVED,
+                NOW, "trace_message_realtime", NOW);
     }
 
     private static final class RecordingPublisher implements ServerBroadcastPublisher {

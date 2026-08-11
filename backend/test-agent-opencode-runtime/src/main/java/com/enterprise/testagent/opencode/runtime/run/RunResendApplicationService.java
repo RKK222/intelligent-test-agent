@@ -27,9 +27,15 @@ import com.enterprise.testagent.domain.run.RunResendTrigger;
 import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.run.RunStorageMode;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
+import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.event.RunEventAppender;
+import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChange;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChangeType;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import java.time.Clock;
 import java.time.Duration;
@@ -55,6 +61,9 @@ public class RunResendApplicationService {
     private final ConversationRunContextResolver contextResolver;
     private final AgentRuntimeRegistry runtimeRegistry;
     private final RunEventAppender eventAppender;
+    private final SessionMessageRepository sessionMessageRepository;
+    private final SessionApplicationService sessionApplicationService;
+    private final SessionMessageRealtimeHub sessionMessageRealtimeHub;
     private final Clock clock;
 
     public RunResendApplicationService(
@@ -65,6 +74,9 @@ public class RunResendApplicationService {
             ConversationRunContextResolver contextResolver,
             AgentRuntimeRegistry runtimeRegistry,
             RunEventAppender eventAppender,
+            SessionMessageRepository sessionMessageRepository,
+            SessionApplicationService sessionApplicationService,
+            SessionMessageRealtimeHub sessionMessageRealtimeHub,
             Clock clock) {
         this.runRepository = Objects.requireNonNull(runRepository);
         this.resendRepository = Objects.requireNonNull(resendRepository);
@@ -73,6 +85,9 @@ public class RunResendApplicationService {
         this.contextResolver = Objects.requireNonNull(contextResolver);
         this.runtimeRegistry = Objects.requireNonNull(runtimeRegistry);
         this.eventAppender = Objects.requireNonNull(eventAppender);
+        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository);
+        this.sessionApplicationService = Objects.requireNonNull(sessionApplicationService);
+        this.sessionMessageRealtimeHub = Objects.requireNonNull(sessionMessageRealtimeHub);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -274,10 +289,11 @@ public class RunResendApplicationService {
                         requester.sentBySharedUser());
 
         // 精确输入先进入有限 TTL Redis；后续任何执行者在 revert 前都必须重新读取确认。
+        List<Map<String, Object>> replayParts = replayable.parts().stream().map(this::partMap).toList();
         replayInputStore.save(new RunResendReplayInput(
                 replacementRunId,
                 replayable.prompt(),
-                replayable.parts().stream().map(this::partMap).toList(),
+                replayParts,
                 replacementMessageId,
                 replayable.agent(),
                 replayable.modelProviderId(),
@@ -290,12 +306,30 @@ public class RunResendApplicationService {
         if (!resendRepository.insertSessionLock(sourceRun.sessionId(), resend.resendId(), owner, now)) {
             throw conflict("会话已被其它重发请求锁定", sourceRun.sessionId());
         }
+        // 替代 USER 是共享会话立即可见的后端事实；真正调用模型时只能复用，不能再次插入。
+        sessionMessageRepository.save(RunApplicationService.newUserMessageProjection(
+                sourceRun.sessionId(), replacementRunId, replayable.prompt(), replayParts, owner,
+                replacementMessageId, traceId, now, sourceRun.sourceType(), sourceRun.sourceRefId(),
+                new RunActorAttribution(
+                        owner, replacementSender, replacementSenderUnifiedAuthId, replacementSentBySharedUser)));
+        eventAppender.append(new RunEventDraft(
+                replacementRunId,
+                RunEventType.RUN_CREATED,
+                traceId,
+                now,
+                Map.of("status", RunStatus.PENDING.name())), RunStorageMode.LEGACY_FULL);
         eventAppender.append(new RunEventDraft(
                 replacementRunId,
                 RunEventType.RUN_RESEND_SCHEDULED,
                 traceId,
                 now,
                 eventPayload(resend)), RunStorageMode.LEGACY_FULL);
+        Session revised = sessionApplicationService.touchSession(sourceRun.sessionId(), traceId);
+        // 注册 afterCommit 后再返回 HTTP；其他参与者收到信号时一定能读取到替代 USER 与新修订号。
+        sessionMessageRealtimeHub.publishAfterCommit(new SessionMessageChange(
+                sourceRun.sessionId(), sourceRun.runId(), replacementRunId,
+                SessionMessageChangeType.RESEND_RESERVED,
+                revised.updatedAt(), traceId, now));
         return resend;
     }
 

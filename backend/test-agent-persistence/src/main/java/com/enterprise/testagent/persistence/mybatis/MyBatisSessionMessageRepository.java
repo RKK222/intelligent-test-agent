@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.user.UserId;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
@@ -57,6 +58,14 @@ public class MyBatisSessionMessageRepository implements SessionMessageRepository
     public Optional<SessionMessage> findUserBySessionIdAndRunId(SessionId sessionId, RunId runId) {
         return Optional.ofNullable(mapper.findUserBySessionAndRun(sessionId.value(), runId.value()))
                 .map(this::toDomain);
+    }
+
+    /** 同一 Run 的消息按稳定时间顺序返回，取消或失败恢复无需扫描整段会话历史。 */
+    @Override
+    public List<SessionMessage> findBySessionIdAndRunId(SessionId sessionId, RunId runId) {
+        return mapper.findBySessionAndRun(sessionId.value(), runId.value()).stream()
+                .map(this::toDomain)
+                .toList();
     }
 
     @Override

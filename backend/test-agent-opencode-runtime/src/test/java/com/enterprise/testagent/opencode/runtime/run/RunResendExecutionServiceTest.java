@@ -102,7 +102,12 @@ class RunResendExecutionServiceTest {
 
         assertThat(result.status()).isEqualTo(RunResendStatus.FAILED);
         verify(runtime, never()).revertTurn(any());
+        verify(cleanupPort).purgePendingReplacementMessage(REPLACEMENT_RUN_ID, SESSION_ID, NOW);
         verify(resendRepository).deleteSessionLock(any(), any());
+        verify(sessionMessageRealtimeHub).publishAfterCommit(argThat(change ->
+                change.sourceRunId().equals(SOURCE_RUN_ID)
+                        && change.replacementRunId().equals(REPLACEMENT_RUN_ID)
+                        && change.revision().equals(NOW)));
     }
 
     @Test
@@ -121,7 +126,9 @@ class RunResendExecutionServiceTest {
         verify(cleanupPort).purgeSourceRun(SOURCE_RUN_ID, SESSION_ID, NOW);
         verify(sessionMessageRealtimeHub).publishAfterCommit(argThat(change ->
                 change.sessionId().equals(SESSION_ID)
-                        && change.runId().equals(REPLACEMENT_RUN_ID)
+                        && change.sourceRunId().equals(SOURCE_RUN_ID)
+                        && change.replacementRunId().equals(REPLACEMENT_RUN_ID)
+                        && change.revision().equals(NOW)
                         && change.traceId().equals("trace_execution")
                         && change.occurredAt().equals(NOW)));
     }

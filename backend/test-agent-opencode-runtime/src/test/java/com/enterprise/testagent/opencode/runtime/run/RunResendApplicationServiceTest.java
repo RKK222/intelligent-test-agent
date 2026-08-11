@@ -35,6 +35,8 @@ import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.session.SessionMessage;
+import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
@@ -42,6 +44,8 @@ import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.event.RunEventAppender;
+import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import java.time.Clock;
 import java.time.Instant;
@@ -71,6 +75,9 @@ class RunResendApplicationServiceTest {
     private RunResendSourceTurnQuery sourceTurnQuery;
     private ConversationRunContextResolver contextResolver;
     private AgentRuntime runtime;
+    private SessionMessageRepository sessionMessageRepository;
+    private SessionApplicationService sessionApplicationService;
+    private SessionMessageRealtimeHub sessionMessageRealtimeHub;
     private RunResendApplicationService service;
 
     @BeforeEach
@@ -81,6 +88,9 @@ class RunResendApplicationServiceTest {
         sourceTurnQuery = mock(RunResendSourceTurnQuery.class);
         contextResolver = mock(ConversationRunContextResolver.class);
         runtime = mock(AgentRuntime.class);
+        sessionMessageRepository = mock(SessionMessageRepository.class);
+        sessionApplicationService = mock(SessionApplicationService.class);
+        sessionMessageRealtimeHub = mock(SessionMessageRealtimeHub.class);
         AgentRuntimeRegistry registry = mock(AgentRuntimeRegistry.class);
         when(registry.normalize("opencode")).thenReturn("opencode");
         when(registry.require("opencode")).thenReturn(runtime);
@@ -100,6 +110,7 @@ class RunResendApplicationServiceTest {
                 "openai",
                 "gpt-5",
                 "high")));
+        when(sessionApplicationService.touchSession(any(), any())).thenReturn(context().sessionSnapshot());
         service = new RunResendApplicationService(
                 runRepository,
                 resendRepository,
@@ -108,6 +119,9 @@ class RunResendApplicationServiceTest {
                 contextResolver,
                 registry,
                 mock(RunEventAppender.class),
+                sessionMessageRepository,
+                sessionApplicationService,
+                sessionMessageRealtimeHub,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -129,6 +143,16 @@ class RunResendApplicationServiceTest {
         assertThat(result.totalAttempt()).isEqualTo(1);
         assertThat(result.automaticAttempt()).isZero();
         verify(replayInputStore).save(any());
+        verify(sessionMessageRepository).save(org.mockito.ArgumentMatchers.argThat(message ->
+                message.role() == com.enterprise.testagent.domain.session.SessionMessageRole.USER
+                        && message.runId().equals(result.replacementRunId())
+                        && message.remoteMessageId().equals("msg_resend_service_replacement")
+                        && message.content().equals("重新检查")));
+        verify(sessionMessageRealtimeHub).publishAfterCommit(org.mockito.ArgumentMatchers.argThat(change ->
+                change.sessionId().equals(SESSION_ID)
+                        && change.sourceRunId().equals(SOURCE_RUN_ID)
+                        && change.replacementRunId().equals(result.replacementRunId())
+                        && change.revision().equals(NOW)));
         verify(runRepository).save(org.mockito.ArgumentMatchers.argThat(run ->
                 run.runId().equals(result.replacementRunId())
                         && run.status() == RunStatus.PENDING
@@ -227,6 +251,11 @@ class RunResendApplicationServiceTest {
                         && SHARED_SENDER.equals(run.messageSenderUserId())
                         && "ucid_resend_shared".equals(run.messageSenderUnifiedAuthId())
                         && run.messageSentBySharedUser()));
+        ArgumentCaptor<SessionMessage> messageCaptor = ArgumentCaptor.forClass(SessionMessage.class);
+        verify(sessionMessageRepository).save(messageCaptor.capture());
+        assertThat(messageCaptor.getValue().senderUserId()).isEqualTo(SHARED_SENDER);
+        assertThat(messageCaptor.getValue().senderUnifiedAuthId()).isEqualTo("ucid_resend_shared");
+        assertThat(messageCaptor.getValue().sentBySharedUser()).isTrue();
     }
 
     @Test

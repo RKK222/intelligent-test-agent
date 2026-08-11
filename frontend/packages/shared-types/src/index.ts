@@ -814,7 +814,17 @@ export type SessionShareRuntimeState = {
   activeRun?: Run | null;
   /** 会话正文修订锚点；共享参与者据此刷新压缩后的远端消息快照。 */
   sessionUpdatedAt?: string | null;
+  /** 提交后的安全归并身份；消息正文仍需通过会话消息接口读取。 */
+  messageChange?: SessionMessageChangeIdentity | null;
   generatedAt: string;
+};
+
+export type SessionMessageChangeIdentity = {
+  sessionId: string;
+  sourceRunId: string;
+  replacementRunId: string;
+  changeType: "RESEND_RESERVED" | "RESEND_STARTED" | "RESEND_RESTORED";
+  revision: string;
 };
 
 /** 工作台通知首期只开放受控的会话分享动作，前端不得把通知目标解释为任意 URL。 */

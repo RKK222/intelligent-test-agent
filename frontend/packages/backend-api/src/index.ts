@@ -2061,6 +2061,14 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<PageResponse<SessionMessage>>(
         `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages${query({ page, size, refresh: options.refresh })}`
       ),
+    getSessionUserMessageForRun: (sessionId: string, runId: string) =>
+      routedRequest<SessionMessage>(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages/runs/${encodeURIComponent(runId)}/user`
+      ),
+    listSessionMessagesForRun: (sessionId: string, runId: string) =>
+      routedRequest<SessionMessage[]>(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages/runs/${encodeURIComponent(runId)}`
+      ),
     getNightExecutionSlots: () =>
       routedRequest<NightExecutionSlots>(`${opencodeRuntimeBase}/night-execution/slots`),
     createNightExecutionTask: (payload: CreateNightExecutionTaskPayload) =>

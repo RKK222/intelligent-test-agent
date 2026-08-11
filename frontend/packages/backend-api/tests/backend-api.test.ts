@@ -2938,6 +2938,65 @@ describe("backend-api", () => {
     );
   });
 
+  it("reads the authoritative user message by session and run", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          messageId: "msg_replacement",
+          sessionId: "ses_1",
+          runId: "run_replacement",
+          role: "USER",
+          content: "edited prompt"
+        }
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.getSessionUserMessageForRun("ses_1", "run_replacement"))
+      .resolves.toMatchObject({ messageId: "msg_replacement", content: "edited prompt" });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/sessions/ses_1/messages/runs/run_replacement/user",
+      expect.any(Object)
+    );
+  });
+
+  it("reads the complete authoritative turn by session and run", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: [{
+          messageId: "msg_source_user",
+          sessionId: "ses_1",
+          runId: "run_source",
+          role: "USER",
+          content: "original prompt"
+        }, {
+          messageId: "msg_source_answer",
+          sessionId: "ses_1",
+          runId: "run_source",
+          role: "ASSISTANT",
+          content: "original answer"
+        }]
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listSessionMessagesForRun("ses_1", "run_source"))
+      .resolves.toMatchObject([
+        { messageId: "msg_source_user", role: "USER" },
+        { messageId: "msg_source_answer", role: "ASSISTANT" }
+      ]);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/sessions/ses_1/messages/runs/run_source",
+      expect.any(Object)
+    );
+  });
+
   it("reads session tree messages through the agent-scoped history API", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

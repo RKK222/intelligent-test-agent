@@ -10,6 +10,7 @@ import com.enterprise.testagent.opencode.runtime.run.RunResendQueryService;
 import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.common.pagination.PageResponse;
+import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
@@ -278,6 +279,69 @@ public class SessionController {
                                 Boolean.TRUE.equals(refresh))),
                         resendQueryService == null ? null : resendQueryService::findForRun,
                         usernameLookup()), traceId))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * 按 Run 精确读取单条 USER；共享重发同步不扫描历史分页，也不触发远端快照刷新。
+     */
+    @GetMapping("/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages/runs/{runId}/user")
+    public Mono<ApiResponse<RuntimeDtos.SessionMessageResponse>> getUserMessageForRun(
+            @PathVariable String sessionId,
+            @PathVariable String runId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        SessionId requestedSession = new SessionId(sessionId);
+        RunId requestedRun = new RunId(runId);
+        DelegatedOperationContext context = shareContext(userId, shareId, false, traceId);
+        if (context != null) {
+            context.requireSession(requestedSession);
+        }
+        return Mono.fromCallable(() -> {
+                    var message = context == null
+                            ? sessionService.getUserMessageForRun(userId, requestedSession, requestedRun)
+                            : sessionService.getUserMessageForRun(requestedSession, requestedRun);
+                    var resend = resendQueryService == null
+                            ? null
+                            : resendQueryService.findForRun(requestedRun);
+                    return ApiResponse.ok(RuntimeDtos.SessionMessageResponse.from(
+                            message, null, null, null, resend, usernameLookup()), traceId);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * 按 Run 精确读取完整 USER/ASSISTANT 轮次；取消或失败恢复不扫描整段历史分页。
+     */
+    @GetMapping("/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages/runs/{runId}")
+    public Mono<ApiResponse<List<RuntimeDtos.SessionMessageResponse>>> listMessagesForRun(
+            @PathVariable String sessionId,
+            @PathVariable String runId,
+            @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        SessionId requestedSession = new SessionId(sessionId);
+        RunId requestedRun = new RunId(runId);
+        DelegatedOperationContext context = shareContext(userId, shareId, false, traceId);
+        if (context != null) {
+            context.requireSession(requestedSession);
+        }
+        return Mono.fromCallable(() -> {
+                    var messages = context == null
+                            ? sessionService.listMessagesForRun(userId, requestedSession, requestedRun)
+                            : sessionService.listMessagesForRun(requestedSession, requestedRun);
+                    var usernameLookup = usernameLookup();
+                    return ApiResponse.ok(messages.stream().map(message -> {
+                        var resend = resendQueryService == null || message.runId() == null
+                                ? null
+                                : resendQueryService.findForRun(message.runId());
+                        return RuntimeDtos.SessionMessageResponse.from(
+                                message, null, null, null, resend, usernameLookup);
+                    }).toList(), traceId);
+                })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

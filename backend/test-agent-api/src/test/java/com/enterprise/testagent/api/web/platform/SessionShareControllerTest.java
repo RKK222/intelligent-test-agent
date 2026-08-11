@@ -27,6 +27,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
 import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub;
 import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChange;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChangeType;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import java.time.Instant;
@@ -202,7 +203,10 @@ class SessionShareControllerTest {
                 })
                 .then(() -> changes.tryEmitNext(new SessionMessageChange(
                         SESSION,
+                        new RunId("run_share_message_source"),
                         new RunId("run_share_message_change"),
+                        SessionMessageChangeType.RESEND_RESERVED,
+                        NOW.plusSeconds(1),
                         TRACE_ID,
                         NOW.plusSeconds(1))))
                 .assertNext(event -> {
@@ -210,6 +214,17 @@ class SessionShareControllerTest {
                             .isEqualTo("session-share.updated");
                     org.assertj.core.api.Assertions.assertThat(event.data().sessionUpdatedAt())
                             .isEqualTo(NOW.plusSeconds(1));
+                    org.assertj.core.api.Assertions.assertThat(event.data().messageChange())
+                            .satisfies(change -> {
+                                org.assertj.core.api.Assertions.assertThat(change.sourceRunId())
+                                        .isEqualTo("run_share_message_source");
+                                org.assertj.core.api.Assertions.assertThat(change.replacementRunId())
+                                        .isEqualTo("run_share_message_change");
+                                org.assertj.core.api.Assertions.assertThat(change.changeType())
+                                        .isEqualTo("RESEND_RESERVED");
+                                org.assertj.core.api.Assertions.assertThat(change.revision())
+                                        .isEqualTo(NOW.plusSeconds(1));
+                            });
                 })
                 .verifyComplete();
     }

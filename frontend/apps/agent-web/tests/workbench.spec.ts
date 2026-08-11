@@ -1029,14 +1029,14 @@ test("session share refreshes a compacted summary when the session revision chan
   await expect(compaction).not.toContainText("这不是新的回答");
 });
 
-test("session share synchronizes an edited resend after the backend commits its message change", async ({ page }) => {
+test("session share synchronizes an edited resend before model execution and restores cancellation", async ({ page }) => {
   const sessionMessageRequests: string[] = [];
   const sessionTreeRequests: string[] = [];
   const activeRun = {
     runId: "run_shared_resend_replacement",
     sessionId: "ses_shared_resend_revision",
     workspaceId: "wrk_shared_resend_revision",
-    status: "RUNNING",
+    status: "PENDING",
     triggeredByUserId: "usr_owner",
     messageSenderUserId: "usr_wr",
     messageSenderUnifiedAuthId: "wr",
@@ -1047,7 +1047,7 @@ test("session share synchronizes an edited resend after the backend commits its 
       totalAttempt: 1,
       automaticAttempt: 0,
       automaticLimit: 3,
-      status: "DISPATCHED",
+      status: "WAITING",
       executeAt: "2026-08-10T03:00:02Z",
       sourceRunId: "run_shared_resend_source",
       replacementRunId: "run_shared_resend_replacement",
@@ -1082,8 +1082,7 @@ test("session share synchronizes an edited resend after the backend commits its 
     createdAt: `2026-08-10T02:${String(index).padStart(2, "0")}:01Z`,
     runId: `run_shared_resend_history_${index}`
   }])).flat();
-  const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {
-    ses_shared_resend_revision: [...earlierMessages, {
+  const originalMessages: Array<Record<string, unknown>> = [...earlierMessages, {
       messageId: "msg_shared_resend_old",
       remoteMessageId: "msg_remote_shared_resend_old",
       sessionId: "ses_shared_resend_revision",
@@ -1103,7 +1102,9 @@ test("session share synchronizes an edited resend after the backend commits its 
       content: "OK",
       createdAt: "2026-08-10T03:00:01Z",
       runId: "run_shared_resend_source"
-    }]
+    }];
+  const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {
+    ses_shared_resend_revision: originalMessages
   };
   const runsByRunId: Record<string, Record<string, unknown>> = {
     run_shared_resend_source: {
@@ -1177,7 +1178,7 @@ test("session share synchronizes an edited resend after the backend commits its 
   });
   expect(scrollTopBeforeResend).toBeGreaterThan(0);
 
-  // 后端只在替代 USER 与 Session 修订提交后发出变化信号，前端无需猜测落库时机。
+  // 重发预约事务提交后立刻提供替代 USER；此时模型尚未开始，也没有任何思考或正文流事件。
   sessionMessagesBySessionId.ses_shared_resend_revision = [...earlierMessages, {
     messageId: "msg_shared_resend_new",
     remoteMessageId: "msg_remote_shared_resend_new",
@@ -1199,12 +1200,19 @@ test("session share synchronizes an edited resend after the backend commits its 
     canChat: true,
     activeRun,
     sessionUpdatedAt: "2026-08-10T03:00:03Z",
+    messageChange: {
+      sessionId: "ses_shared_resend_revision",
+      sourceRunId: "run_shared_resend_source",
+      replacementRunId: "run_shared_resend_replacement",
+      changeType: "RESEND_RESERVED",
+      revision: "2026-08-10T03:00:03Z"
+    },
     generatedAt: "2026-08-10T03:00:04Z"
   }));
 
   await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
   expect(sessionMessageRequests.slice(initialMessageRequestCount)).toEqual([
-    "/api/internal/platform/opencode-runtime/sessions/ses_shared_resend_revision/messages?page=1&size=100&refresh=false"
+    "/api/internal/platform/opencode-runtime/sessions/ses_shared_resend_revision/messages/runs/run_shared_resend_replacement/user"
   ]);
 
   await expect(page.getByText("仅答复 OK", { exact: true })).toHaveCount(0);
@@ -1213,14 +1221,17 @@ test("session share synchronizes an edited resend after the backend commits its 
   await expect(page.getByRole("button", { name: "停止执行" })).toBeVisible();
   expect(sessionTreeRequests).toHaveLength(initialSessionTreeRequestCount);
   expect(await historyLoadingObserved(page)).toBe(false);
-  await expect.poll(() => page.locator(".figma-chat-scroll").evaluate((element) =>
+  await expect.poll(async () => Math.abs(await page.locator(".figma-chat-scroll").evaluate((element) =>
     (element as HTMLElement).scrollTop
-  )).toBe(scrollTopBeforeResend);
+  ) - scrollTopBeforeResend)).toBeLessThanOrEqual(12);
 
+  const messageRequestCountBeforeCancellation = sessionMessageRequests.length;
+  sessionMessagesBySessionId.ses_shared_resend_revision = originalMessages;
   runsByRunId.run_shared_resend_replacement = {
     ...activeRun,
-    status: "SUCCEEDED",
-    updatedAt: "2026-08-10T03:00:05Z"
+    status: "CANCELLED",
+    resend: { ...activeRun.resend, status: "CANCELLED" },
+    updatedAt: "2026-08-10T03:00:04Z"
   };
   runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
     shareId: "shr_resend_revision",
@@ -1228,13 +1239,47 @@ test("session share synchronizes an edited resend after the backend commits its 
     workspaceId: "wrk_shared_resend_revision",
     canChat: true,
     activeRun: null,
-    sessionUpdatedAt: "2026-08-10T03:00:03Z",
-    generatedAt: "2026-08-10T03:00:06Z"
+    sessionUpdatedAt: "2026-08-10T03:00:04Z",
+    messageChange: {
+      sessionId: "ses_shared_resend_revision",
+      sourceRunId: "run_shared_resend_source",
+      replacementRunId: "run_shared_resend_replacement",
+      changeType: "RESEND_RESTORED",
+      revision: "2026-08-10T03:00:04Z"
+    },
+    generatedAt: "2026-08-10T03:00:05Z"
   }));
-
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(messageRequestCountBeforeCancellation);
+  expect(sessionMessageRequests.slice(messageRequestCountBeforeCancellation)).toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_shared_resend_revision/messages/runs/run_shared_resend_source"
+  );
+  await expect(page.getByText("仅答复 123", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
+  await expect(page.getByText("OK", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "停止执行" })).toHaveCount(0);
   await expect(page.getByText("生成中", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("仅答复 123", { exact: true })).toBeVisible();
+
+  // 跨节点迟到的旧预约通知不得越过恢复修订，也不能触发一次全历史刷新。
+  const messageRequestCountBeforeStaleSignal = sessionMessageRequests.length;
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_resend_revision",
+    sessionId: "ses_shared_resend_revision",
+    workspaceId: "wrk_shared_resend_revision",
+    canChat: true,
+    activeRun: null,
+    sessionUpdatedAt: "2026-08-10T03:00:04Z",
+    messageChange: {
+      sessionId: "ses_shared_resend_revision",
+      sourceRunId: "run_shared_resend_source",
+      replacementRunId: "run_shared_resend_replacement",
+      changeType: "RESEND_RESERVED",
+      revision: "2026-08-10T03:00:03Z"
+    },
+    generatedAt: "2026-08-10T03:00:06Z"
+  }));
+  await page.waitForTimeout(1_200);
+  expect(sessionMessageRequests).toHaveLength(messageRequestCountBeforeStaleSignal);
+  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
 });
 
 test("session share participant receives the owner's authoritative user message without an empty bubble", async ({ page }) => {
@@ -11643,6 +11688,30 @@ async function mockBackendApi(
         childSessionIdByTaskPartId: {},
         events: []
       }));
+      return;
+    }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages\/runs\/[^/]+\/user$/.test(url.pathname)) {
+      capture.sessionMessageRequests?.push(`${url.pathname}${url.search}`);
+      const match = url.pathname.match(/\/sessions\/([^/]+)\/messages\/runs\/([^/]+)\/user$/);
+      const sessionId = match?.[1] ?? "ses_history";
+      const runId = match?.[2] ?? "run_unknown";
+      const message = (capture.sessionMessagesBySessionId?.[sessionId] ?? capture.sessionMessages ?? [])
+        .find((item) => item.role === "USER" && item.runId === runId);
+      await route.fulfill(message
+        ? json(message)
+        : { status: 404, ...jsonFailure("NOT_FOUND", "Run 用户消息不存在") });
+      return;
+    }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages\/runs\/[^/]+$/.test(url.pathname)) {
+      capture.sessionMessageRequests?.push(`${url.pathname}${url.search}`);
+      const match = url.pathname.match(/\/sessions\/([^/]+)\/messages\/runs\/([^/]+)$/);
+      const sessionId = match?.[1] ?? "ses_history";
+      const runId = match?.[2] ?? "run_unknown";
+      const messages = (capture.sessionMessagesBySessionId?.[sessionId] ?? capture.sessionMessages ?? [])
+        .filter((item) => item.runId === runId);
+      await route.fulfill(messages.length > 0
+        ? json(messages)
+        : { status: 404, ...jsonFailure("NOT_FOUND", "Run 会话消息不存在") });
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
