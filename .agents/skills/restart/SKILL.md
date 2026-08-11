@@ -19,3 +19,24 @@ export PATH="$JAVA_HOME/bin:/Users/kaka/Desktop/intelligent-test-agent/.tmp/dev-
 ```
 
 如果本机没有 JDK 25，才允许把 `JAVA_VERSION` 改成 `21`；解析不到对应 JDK 时停止并报告，不要尝试用 Java 17 启动。即使使用 `--skip-backend-build`，也必须执行同一段 Java 初始化，因为后端运行进程同样需要兼容 JDK。
+
+## 从独立 worktree 启动并复用主工作区测试数据
+
+从 `/Users/kaka/Desktop/intelligent-test-agent-notification-center` 等独立 worktree 启动、但仍需复用主工作区已经初始化的 OpenCode session、公共 Agent 配置和稳定服务器身份时，必须同时显式设置 `TESTAGENT` 与 `SYS_DATA_ROOT_DIR`：
+
+```bash
+cd /Users/kaka/Desktop/intelligent-test-agent-notification-center
+export JAVA_VERSION=25
+export JAVA_HOME=$(/usr/libexec/java_home -v "$JAVA_VERSION")
+export PATH="$JAVA_HOME/bin:$PWD/.tmp/dev-bin:/opt/homebrew/opt/libpq/bin:$PATH"
+export TESTAGENT=/Users/kaka/Desktop/intelligent-test-agent
+export SYS_DATA_ROOT_DIR="$TESTAGENT/.testagent"
+"$JAVA_HOME/bin/java" -version
+./restart-dev-services.sh --profile test \
+  --env-file /Users/kaka/Desktop/intelligent-test-agent/.env.test \
+  --without-workflow
+```
+
+`TEST_AGENT_ROOT` 不要改成主工作区，继续由脚本默认设为当前 worktree，保证代码、构建产物和服务日志来自当前分支。必须同时设置上述两个兼容变量：本机历史测试库中的 macOS `SYS_DATA_ROOT_DIR` 参数值是 `$TESTAGENT/.testagent`，Java 通用参数展开读取 `TESTAGENT`；启动脚本和 manager 身份文件使用 `SYS_DATA_ROOT_DIR`。只设置后者会让 Java 仍解析到当前 worktree 的空数据目录，初始化进程时报“公共 Agent 配置源目录不可用”。
+
+只有 `.env.test` 确认未配置 `WORKFLOW_DEV_REDIS_PASSWORD`、且当前任务不需要 Workflow 时才使用 `--without-workflow`；否则移除该参数并按默认流程启动 Workflow。跳过构建时可追加 `--skip-backend-build --skip-frontend-build`，但只能复用已验证的当前 worktree 产物。

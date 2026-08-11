@@ -8583,6 +8583,7 @@
 
 - 未修改业务代码、`.env.test`、数据库参数、generated SDK 或 OpenCode 源码；从通知中心 worktree 重启时显式设置 `TESTAGENT=/Users/kaka/Desktop/intelligent-test-agent` 与 `SYS_DATA_ROOT_DIR=/Users/kaka/Desktop/intelligent-test-agent/.testagent`，继续复用原测试环境的持久化 OpenCode session 和公共配置。
 - 保持 `TEST_AGENT_ROOT=/Users/kaka/Desktop/intelligent-test-agent-notification-center`，因此运行代码和构建产物仍来自通知中心 worktree，仅持久化数据根复用原测试环境。
+- 将独立 worktree 的完整启动命令、双变量原因和 Workflow 条件写入 `.agents/skills/restart/SKILL.md` 与 `docs/guides/ai-workflow.md`，不再只依赖会话日志交接。
 
 ### How
 
