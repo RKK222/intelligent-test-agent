@@ -156,6 +156,27 @@ describe("analytics management panel", () => {
     view.queryClient.clear();
   });
 
+  it("uses the returned point count for the responsive trend and renders the hourly heatmap grid", async () => {
+    const backendApi = api();
+    vi.mocked(backendApi.getAnalyticsTimeseries).mockResolvedValue([
+      trend[0]!,
+      { ...trend[0]!, bucketStart: "2026-06-29T00:00:00Z", runCount: 5 }
+    ]);
+    vi.mocked(backendApi.getAnalyticsPeaks).mockResolvedValue({
+      ...peaks,
+      heatmap: [
+        { dayOfWeek: 1, hourOfDay: 8, activeUsers: 2, runCount: 3, userMessageCount: 5 },
+        { dayOfWeek: 1, hourOfDay: 9, activeUsers: 3, runCount: 4, userMessageCount: 6 }
+      ]
+    });
+    const view = renderPanel(backendApi);
+
+    await waitFor(() => expect(view.container.querySelectorAll(".ta-trend-item")).toHaveLength(2));
+    expect(view.container.querySelector<HTMLElement>(".ta-trend")?.style.getPropertyValue("--ta-trend-columns")).toBe("2");
+    expect(view.container.querySelectorAll(".ta-heatmap-cell")).toHaveLength(2);
+    view.queryClient.clear();
+  });
+
   it("exports csv with the current overview filters", async () => {
     const backendApi = api();
     const createObjectURL = vi.fn(() => "blob:test");
