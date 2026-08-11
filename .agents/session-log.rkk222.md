@@ -8341,3 +8341,26 @@
 
 - 可观测明细现在可以按服务端完整总数翻页，并可按 20/50/100 条切换页大小，不再只能看到首批 20 条。
 - 本次仅调整前端分页状态、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-11 - 可观测时长统一使用秒
+
+### Why
+
+- 可观测页面此前对短耗时显示毫秒、长耗时显示秒，同一看板存在两种单位；用户要求统一用秒（s）计算和展示。
+
+### What
+
+- 复用既有时长格式化入口，把明细、Overview、供应商汇总和箱线图摘要统一换算为秒；ITL/TPOT 单次值直接按秒计算。
+- TTFT 与 ITL/TPOT 箱线图的数据、纵轴、刻度和悬浮提示统一使用秒，而非只替换显示文字。
+- 保留 API 的 `*Millis` 原始字段，避免破坏既有客户端；同步 agent-web README 和指标词汇表。
+
+### How
+
+- 定向 Vitest 2/2 通过，覆盖页面不再出现毫秒单位，并断言 TTFT、ITL/TPOT 箱线图实际输入为秒值。
+- Vite development 模式构建成功；最新代码重新启动在 `127.0.0.1:5174` 并返回 HTTP 200。
+- `agent-web` 完整类型检查仍被同期未提交的 `AgentWorkbench.vue.triggeredByUserId` 和 `agent-chat/runtime-reducer.ts` 空值错误阻断；本次文件未新增类型错误，未越界修改并行工作。
+
+### Result
+
+- 可观测页面所有时长均以秒（s）呈现，短延迟保留最多毫秒级小数精度，非零极短值不会误显示为 0。
+- 本次仅修改前端单位换算、图表、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。

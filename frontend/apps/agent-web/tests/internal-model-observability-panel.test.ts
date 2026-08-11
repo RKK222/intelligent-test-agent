@@ -9,9 +9,14 @@ import type {
 } from "@test-agent/shared-types";
 import InternalModelObservabilityPanel from "../src/components/system/InternalModelObservabilityPanel.vue";
 
+const chartOptions = vi.hoisted(() => [] as Array<{
+  yAxis?: { name?: string } | Array<{ name?: string }>;
+  series?: Array<{ type?: string; data?: unknown }>;
+}>);
+
 vi.mock("echarts", () => ({
   init: vi.fn((element: HTMLElement) => ({
-    setOption: vi.fn(),
+    setOption: vi.fn((option) => chartOptions.push(option)),
     resize: vi.fn(),
     dispose: vi.fn(),
     isDisposed: vi.fn(() => false),
@@ -149,6 +154,7 @@ function renderPanel(recordsTotal = 1) {
 
 describe("InternalModelObservabilityPanel", () => {
   afterEach(() => {
+    chartOptions.length = 0;
     vi.restoreAllMocks();
   });
 
@@ -159,20 +165,33 @@ describe("InternalModelObservabilityPanel", () => {
 
     await view.findByText("Overview");
     expect(view.getByText(/当前 24 小时时间段/)).toBeTruthy();
+    expect(view.getByText(/所有时长统一使用秒（s）/)).toBeTruthy();
     expect(await view.findByText("0.0043")).toBeTruthy();
     expect(await view.findByText("user-10086")).toBeTruthy();
     expect(view.getAllByText("上游服务异常").length).toBeGreaterThan(0);
     expect(view.getByText("上游 HTTP 错误")).toBeTruthy();
-    expect(await view.findByText("中间 50%：175ms–325ms")).toBeTruthy();
-    expect(view.getByText("中位数：250ms")).toBeTruthy();
-    expect(view.getByText("中位数：50ms")).toBeTruthy();
-    expect(view.getAllByText("50ms").length).toBeGreaterThan(0);
+    expect(await view.findByText("中间 50%：0.175s–0.325s")).toBeTruthy();
+    expect(view.getByText("中位数：0.25s")).toBeTruthy();
+    expect(view.getByText("中位数：0.05s")).toBeTruthy();
+    expect(view.getAllByText("0.05s").length).toBeGreaterThan(0);
     expect(view.getAllByText("样本：4 次")).toHaveLength(2);
+    expect(view.container.textContent).not.toMatch(/\d(?:\.\d+)?ms\b/);
     expect(view.container.querySelectorAll(".ta-imob-chart-box")).toHaveLength(2);
     const comparison = view.container.querySelector(".ta-imob-chart-comparison");
     expect(comparison?.querySelector(".ta-imob-chart-stack")).toBeTruthy();
     expect(comparison?.querySelectorAll(".ta-imob-latency-box-stack > .ta-imob-box-card")).toHaveLength(2);
     expect(comparison?.querySelectorAll(".ta-imob-chart-stack > .ta-imob-chart-card")).toHaveLength(2);
+
+    await waitFor(() => {
+      const ttftOption = [...chartOptions].reverse().find((option) =>
+        !Array.isArray(option.yAxis) && option.yAxis?.name === "TTFT (s)"
+      );
+      const itlOption = [...chartOptions].reverse().find((option) =>
+        !Array.isArray(option.yAxis) && option.yAxis?.name === "ITL / TPOT (s)"
+      );
+      expect(ttftOption?.series?.[0]?.data).toEqual([[0.1, 0.175, 0.25, 0.325, 0.4]]);
+      expect(itlOption?.series?.[0]?.data).toEqual([[0.02, 0.035, 0.05, 0.065, 0.08]]);
+    });
 
     const explainedLabels = [
       "REQ", "Providers", "SR", "FR", "Failures",

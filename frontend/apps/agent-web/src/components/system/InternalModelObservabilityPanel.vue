@@ -31,6 +31,7 @@ const customTimeRange = ref<[string, string] | null>(null);
 const page = ref(1);
 const pageSize = ref(20);
 const pageSizeOptions = [20, 50, 100];
+const MILLISECONDS_PER_SECOND = 1000;
 const HOUR_MILLIS = 3_600_000;
 const selectedWindowHours = ref<number>(24);
 const showGlossary = ref(true);
@@ -332,8 +333,8 @@ const emptyLatencyDistribution: InternalModelLatencyDistribution = { sampleCount
 const ttftDistribution = computed(() => ttftDistributionQuery.data.value ?? emptyLatencyDistribution);
 const itlDistribution = computed(() => itlDistributionQuery.data.value ?? emptyLatencyDistribution);
 
-/** 只有后端返回完整、单调的五数概括时才绘图，避免异常数据生成误导性区间。 */
-function toBoxData(distribution: InternalModelLatencyDistribution): [number, number, number, number, number] | null {
+/** 只有后端返回完整、单调的五数概括时才绘图，并在进入图表前统一换算为秒。 */
+function toBoxDataSeconds(distribution: InternalModelLatencyDistribution): [number, number, number, number, number] | null {
   const values = [
     distribution.minimumMillis,
     distribution.firstQuartileMillis,
@@ -348,11 +349,12 @@ function toBoxData(distribution: InternalModelLatencyDistribution): [number, num
   if (minimum < 0 || minimum > firstQuartile || firstQuartile > median || median > thirdQuartile || thirdQuartile > maximum) {
     return null;
   }
-  return [minimum, firstQuartile, median, thirdQuartile, maximum];
+  return [minimum, firstQuartile, median, thirdQuartile, maximum]
+    .map((millis) => millis / MILLISECONDS_PER_SECOND) as [number, number, number, number, number];
 }
 
-const ttftBoxData = computed(() => toBoxData(ttftDistribution.value));
-const itlBoxData = computed(() => toBoxData(itlDistribution.value));
+const ttftBoxData = computed(() => toBoxDataSeconds(ttftDistribution.value));
+const itlBoxData = computed(() => toBoxDataSeconds(itlDistribution.value));
 
 const observabilityFetching = computed(() =>
   recordsQuery.isFetching.value
@@ -646,21 +648,21 @@ function renderLatencyBox(
       trigger: "item",
       formatter: () => [
         `<strong>${label} 分布（${distribution.sampleCount} 次）</strong>`,
-        `最短：${formatDuration(minimum)}`,
-        `25% 的调用不超过：${formatDuration(firstQuartile)}`,
-        `中位数：${formatDuration(median)}`,
-        `75% 的调用不超过：${formatDuration(thirdQuartile)}`,
-        `最长：${formatDuration(maximum)}`
+        `最短：${formatSeconds(minimum)}`,
+        `25% 的调用不超过：${formatSeconds(firstQuartile)}`,
+        `中位数：${formatSeconds(median)}`,
+        `75% 的调用不超过：${formatSeconds(thirdQuartile)}`,
+        `最长：${formatSeconds(maximum)}`
       ].join("<br/>")
     },
     grid: { top: 18, left: 82, right: 30, bottom: 36 },
     xAxis: { type: "category", data: ["全部调用"], axisTick: { show: false } },
     yAxis: {
       type: "value",
-      name: label,
+      name: `${label} (s)`,
       min: 0,
       scale: true,
-      axisLabel: { formatter: (value: number) => formatDuration(value) }
+      axisLabel: { formatter: (value: number) => formatSeconds(value) }
     },
     series: [{
       name: label,
@@ -816,16 +818,23 @@ const outcomeText: Record<InternalModelCallOutcome, string> = {
 
 const outcomeDetailLabel = (outcome: InternalModelCallOutcome) => outcomeText[outcome] ?? "未知错误";
 
-/** 耗时按量级自适应显示，短耗时保留毫秒，避免首 Token 延迟被四舍五入成 0。 */
+/** 页面所有时长统一展示为秒；接口保留毫秒字段，集中在此处完成兼容换算。 */
 function formatDuration(millis: number | null | undefined): string {
   if (millis === null || millis === undefined || !Number.isFinite(millis) || millis < 0) return "-";
-  if (millis < 1000) return `${Math.round(millis)}ms`;
-  const seconds = millis / 1000;
-  return seconds < 10 ? `${seconds.toFixed(2)}s` : `${seconds.toFixed(1)}s`;
+  return formatSeconds(millis / MILLISECONDS_PER_SECOND);
+}
+
+/** 秒值最多保留毫秒级精度；极短但非零的值不会显示成 0。 */
+function formatSeconds(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return "-";
+  const precision = seconds > 0 && seconds < 0.001 ? 6 : 3;
+  const rounded = Number(seconds.toFixed(precision));
+  if (seconds > 0 && rounded === 0) return "<0.000001s";
+  return `${rounded}s`;
 }
 
 /** 只按业界口径计算可靠样本：首末输出间隔除以后续 Token 数。 */
-function interTokenLatencyMillis(row: {
+function interTokenLatencySeconds(row: {
   firstTokenMillis?: number | null;
   lastTokenMillis?: number | null;
   outputTokenCount?: number | null;
@@ -843,7 +852,7 @@ function interTokenLatencyMillis(row: {
     || last < first) {
     return null;
   }
-  return (last - first) / (count - 1);
+  return (last - first) / (count - 1) / MILLISECONDS_PER_SECOND;
 }
 
 /** 低流量不压成 0.00，高流量保持两位小数。 */
@@ -918,7 +927,7 @@ function onPageSizeChange(next: number) {
             <ChevronDown :size="13" />
           </button>
         </div>
-        <span class="ta-imob-sub">默认查看当前 {{ selectedWindowHours }} 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有的英文缩写见页首对照指南。</span>
+        <span class="ta-imob-sub">默认查看当前 {{ selectedWindowHours }} 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有时长统一使用秒（s），英文缩写见页首对照指南。</span>
 
         <!-- 页首 AIPerf / 业界指标英文缩写对照指南 (Glossary) -->
         <div v-if="showGlossary" class="ta-imob-glossary-card">
@@ -1135,7 +1144,7 @@ function onPageSizeChange(next: number) {
               <template #header>
                 <MetricHelpLabel label="ITL / TPOT" :description="metricHelp.interTokenLatency" />
               </template>
-              <template #default="{ row }">{{ formatDuration(interTokenLatencyMillis(row)) }}</template>
+              <template #default="{ row }">{{ formatSeconds(interTokenLatencySeconds(row)) }}</template>
             </el-table-column>
             <el-table-column label="SCT" min-width="170">
               <template #header>
@@ -1285,8 +1294,8 @@ function onPageSizeChange(next: number) {
                         <MetricHelpLabel label="TTFT 分布（箱线图）" :description="chartHelp.ttftDistribution" />
                       </h4>
                       <div v-if="ttftBoxData" class="ta-imob-box-summary">
-                        <span>中间 50%：{{ formatDuration(ttftBoxData[1]) }}–{{ formatDuration(ttftBoxData[3]) }}</span>
-                        <span>中位数：{{ formatDuration(ttftBoxData[2]) }}</span>
+                        <span>中间 50%：{{ formatSeconds(ttftBoxData[1]) }}–{{ formatSeconds(ttftBoxData[3]) }}</span>
+                        <span>中位数：{{ formatSeconds(ttftBoxData[2]) }}</span>
                         <span>样本：{{ ttftDistribution.sampleCount }} 次</span>
                       </div>
                     </div>
@@ -1305,8 +1314,8 @@ function onPageSizeChange(next: number) {
                         <MetricHelpLabel label="ITL / TPOT 分布（箱线图）" :description="chartHelp.itlDistribution" />
                       </h4>
                       <div v-if="itlBoxData" class="ta-imob-box-summary">
-                        <span>中间 50%：{{ formatDuration(itlBoxData[1]) }}–{{ formatDuration(itlBoxData[3]) }}</span>
-                        <span>中位数：{{ formatDuration(itlBoxData[2]) }}</span>
+                        <span>中间 50%：{{ formatSeconds(itlBoxData[1]) }}–{{ formatSeconds(itlBoxData[3]) }}</span>
+                        <span>中位数：{{ formatSeconds(itlBoxData[2]) }}</span>
                         <span>样本：{{ itlDistribution.sampleCount }} 次</span>
                       </div>
                     </div>
