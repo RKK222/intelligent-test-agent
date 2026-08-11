@@ -8642,5 +8642,7 @@
 
 ### Result
 
-- 代码、Flyway 和构建门禁已通过；本条提交后用 `--zip-only` 把最新 session log 纳入内层，再重建固定名外层包并记录最终内外层 SHA-256。
+- 最终包由提交 `20deb0c6e` 的当前 release 内容重封：内层 `test-agent-internal-release.zip` SHA-256 为 `453a98163e53707bd34933e4078ebf6f78dbbec1ddf80c13a1f5e2e25d10db9a`，外层 `test-agent-two-backend-complete.zip` 为 `a7a50459e53c3e6cb623465cc1f36091c66b946b704ef06b9b974aaa311e0a5b`；外层内嵌内层与仓库 dist 逐字节一致。
+- 最终独立解包复验确认外层/内层 SHA 文件、两层 ZIP CRC、三台节点包 checksum、组件清单、`opencode-models.json`、部署手册、session log 和两份新 Flyway JAR 资源全部通过；固定名发布物位于 `deploy/internal/dist/`。
+- 本条最终 hash 是制品生成后的仓库追溯记录，不再据此重封 ZIP，否则 ZIP 自身 hash 会再次变化；包内已包含前一提交中的完整发布过程记录。
 - 本次未修改 migration SQL、生产 API/DTO/RunEvent、环境文件、generated SDK 或 OpenCode 只读源码；企业目标库完整 `flyway_schema_history` 仍必须在部署前取得，未取得前不把包描述为已获现场部署准入。
