@@ -104,6 +104,28 @@ public final class AgentConfigResponses {
             String message) {
     }
 
+    /** 单个超级管理员公共个人 worktree 的补偿结果；只暴露内部 userId 和安全错误摘要。 */
+    public record PublicWorktreeCompensationItemResponse(
+            String userId,
+            String status,
+            String worktreeId,
+            String errorCode,
+            String message) {
+    }
+
+    /** 本机服务器一次有界公共个人 worktree 补偿汇总。 */
+    public record PublicWorktreeCompensationResponse(
+            String linuxServerId,
+            String status,
+            int candidateCount,
+            int processedCount,
+            int succeededCount,
+            int failedCount,
+            List<PublicWorktreeCompensationItemResponse> items,
+            String message,
+            Instant completedAt) {
+    }
+
     public record AgentConfigWorktreeOptionResponse(
             String worktreeId,
             String scope,

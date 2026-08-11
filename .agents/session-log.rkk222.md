@@ -8418,3 +8418,27 @@
 - `compact → 仅答复 123 → 123` 的历史边界在实时事件和刷新恢复两条路径上保持稳定，不再把替代问题或答案包进 compact，也不再产生旧 OK 或第二条远端别名气泡。
 - wr 的问题归属和回撤权限保持给 wr，888888888 不再获得该消息的回撤入口；历史已污染记录无需改库即可按 resend 审计兼容展示和鉴权。
 - Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动；核心 backend、frontend、manager 与 OpenCode 已验证运行。未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-11 - 增加超级管理员公共个人 worktree 定时补偿
+
+### Why
+
+- 企业用户在 OpenCode 进程初始化后才取得 `SUPER_ADMIN` 角色时，不会再触发初始化链路中的公共个人 worktree 准备，导致数据库和服务器均缺少 `public-{userId}`，公共 Agent 页面无法进入且刷新按钮灰显；现场已发现不止一个用户存在相同历史窗口。
+
+### What
+
+- 每台 Java 启动 30 秒后、此后默认每 10 分钟有界查询本服务器具有 ACTIVE OpenCode binding、用户状态为 ACTIVE、当前角色为 `SUPER_ADMIN` 且缺少同服 ACTIVE 稳定公共个人 worktree 的用户，单轮最多 50 人。
+- 补偿与新增 `SUPER_ADMIN` 手工接口复用同一服务器级 Redis 租约和既有稳定 worktree 创建程序；单个用户失败隔离，后续轮次继续重试。
+- 后台补偿只基于本机已初始化共享仓库 HEAD 创建 `public-{userId}`，不读取或冒用目标用户 SSH key、不访问远端 Git、不自动切换其当前运行配置。
+- 候选关系 SQL 只落在 `AgentConfigMapper.xml`，没有数据库结构或 Flyway migration；同步 domain、persistence、workspace、HTTP API 和包级稳定文档。
+
+### How
+
+- JDK 25 下定向执行 `MyBatisAgentConfigRepositoryIntegrationTest`、`AgentConfigApplicationServiceTest`、`AgentConfigControllerTest`，覆盖角色/binding/服务器/稳定分支筛选、历史 worktree 不阻断、默认周期、Redis 锁、本地无凭据创建和接口鉴权，三模块 Maven reactor 全部通过。
+- `mvn clean package -Dmaven.test.skip=true` 的 21 模块构建成功；使用 `.env.test` 与 `--without-workflow` 重启后，当前运行 JAR 已核对包含补偿方法和 MyBatis SQL，后端 readiness 为 `UP`，首次定时任务日志为 `COMPLETED`、候选数 0。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，保留共享测试库既有 Flyway compatibility 处理，不执行 repair、不修改历史表或环境文件。
+
+### Result
+
+- 后续角色补授等漏建场景最多等待一个补偿周期即可自动创建稳定公共个人 worktree；运维也可按目标服务器手工立即触发并获得逐用户安全结果摘要。
+- 新接口仅 `SUPER_ADMIN` 可调用并复用公共后端路由；无 RunEvent、数据库字段、Flyway、OpenCode 源码、generated SDK、前端或 `.env*` 变更，也未新建分支。

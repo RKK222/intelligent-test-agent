@@ -367,6 +367,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `POST` | `/public/update-and-push` | 公共配置"提交并推送"复合操作：先 `fetch` 远端最新提交，再 stage/commit 本地变更，随后 merge `origin/{branch}` 并 push；`discardLocalChanges=true` 时先 `git reset --hard HEAD` 放弃受控仓库中的已跟踪修改。远端提交和 rollout 激活确认后即返回，服务器同步和进程排空在后台继续。 |
 | `POST` | `/file-ws-route` | 查询 Agent 配置文件 WebSocket 应连接的目标后端，body 包含 `scope`、`workspaceId?`、`worktreeId?`、`linuxServerId?`。 |
 | `POST` | `/public/worktrees` | 在请求指定且已初始化的 `linuxServerId` 上确保当前用户的长期公共配置 worktree；分支和目录按用户稳定命名、不包含应用版本，同一用户重复调用返回已有有效 worktree。目标服务器本地 Git 根目录未初始化时返回 `CONFLICT`，不在该接口 clone。 |
+| `POST` | `/public/worktrees/reconcile` | `SUPER_ADMIN` 手工触发目标服务器缺失公共个人 worktree 的有界补偿；body 为 `{ "linuxServerId": "test-agent-backend-122-233-30-114" }`，后端通过公共 Java 路由程序转到目标服务器，并与定时任务复用同一服务器级 Redis 锁和幂等创建程序。 |
 | `POST` | `/public/runtime-reload` | `SUPER_ADMIN` 保存本人公共个人 worktree 的 Agent/Skill 目录定义或 JSONC 后热加载本人。body 为 `{ "worktreeId": "agw_...", "linuxServerId": "linux-1" }`；后端按 worktree 归属路由，校验 owner/server，把本人受管公共配置软链接切到该 worktree 的 `opencode/` 并只调用本人进程 `/global/dispose`。不修改共享公共目录或其他用户；入口把同步等待 dispose 的调用调度到受控阻塞线程，禁止占用 WebFlux 事件线程。 |
 | `GET` | `/public/worktrees?linuxServerId=` | 查询当前用户在指定服务器上的有效 `ACTIVE` 公共配置 worktree；不会返回其他用户的 worktree。 |
 | `GET` | `/public/diff?worktreeId=` | 查询 Git 变更文件和 patch；后端复用公共 porcelain 解析与 diff 聚合，保留 Git 原始状态简写。响应额外返回 `publishPending`：porcelain clean、个人 HEAD 不是共享 HEAD 的旧版本且两者文件树不同时为 `true`，用于发布失败后跨页面重试；有未提交文件时仍优先展示正常变更流程。 |
@@ -378,6 +379,8 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `POST` | `/public/git-conflict/abort` | 取消公共配置未完成 merge。 |
 | `POST` | `/public/commit` | 提交当前暂存区。 |
 | `POST` | `/public/publish` | 在当前用户公共 worktree 中 fetch 并 merge `origin/{公共分支}`，把最终文件树投影为以远端当前提交为唯一父节点、由当前管理员企业身份签署的线性提交，避免长期个人分支的旧无效 committer 历史进入公共分支；远端 push 前建立持久化禁发任务，再以非强制 refspec 推送该固定提交。push 与 rollout 激活确认后即返回发布成功，请求线程不认领本机同步；成功后个人分支和发起服务器共享副本均重置到该干净提交。各服务器由广播或默认 5 秒补偿任务异步同步共享副本并登记本机 manager 进程，旧 Session 空闲后逐实例 dispose；某用户旧实例 dispose 后该用户立即恢复发送，个人 worktree 保持 `ACTIVE`。 |
+
+缺失公共个人 worktree 的定时补偿在每台 Java 启动 30 秒后首次执行，之后固定延迟 10 分钟；可分别通过 `test-agent.public-agent-config.worktree-compensation.initial-delay` 和 `test-agent.public-agent-config.worktree-compensation.delay` 覆盖。候选只包含本服务器具有 ACTIVE OpenCode binding、用户状态为 ACTIVE、当前角色为 `SUPER_ADMIN` 且不存在同服 ACTIVE 公共 worktree 的用户，单轮最多 50 人。任务只用本机已初始化共享仓库 HEAD 创建稳定 `public-{userId}` 分支与目录，不 fetch/pull、不解密或冒用目标用户 SSH key、不切换其当前运行配置；公共仓库未初始化或单个用户创建失败时记录安全摘要并在后续轮次重试。手工接口返回 `linuxServerId/status/candidateCount/processedCount/succeededCount/failedCount/items/message/completedAt`；`items` 只含内部 `userId`、状态、可选 `worktreeId/errorCode` 和安全消息。若同服任务已在运行，返回 `status=LOCKED`，不会并发建目录。
 
 工作空间级接口把同名能力挂在 `/workspaces/{workspaceId}/...`，其中 `diff/stage/unstage/discard/commit/publish/worktrees/status` 的语义与公共级一致；文件读写与上传必须通过文件 WebSocket。物理目录为当前运行态 Workspace 或指定 worktree 下的 `.opencode/`，但普通工作空间文件树不重复展示根级 `.opencode`。工作空间级 `diff` 返回同一 Git 根全部 Git 可见的 `.opencode/**` 用户配置，响应 path 会去掉 `.opencode/` 前缀；后端是该范围的唯一事实源，前端不得再枚举子目录。公共级和应用级根均支持按 OpenCode 模板创建 `agents/<name>.md`，或创建 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md`；前端同时保留普通文件、文件夹和上传入口。
 

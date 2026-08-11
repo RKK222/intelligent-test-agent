@@ -133,6 +133,63 @@ class AgentConfigControllerTest {
     }
 
     @Test
+    void superAdminCanTriggerMissingPublicWorktreeCompensationOnRequestedServer() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        when(service.reconcileMissingPublicWorktrees("127.0.0.1", TRACE_ID)).thenReturn(
+                new com.enterprise.testagent.workspace.AgentConfigResponses.PublicWorktreeCompensationResponse(
+                        "127.0.0.1",
+                        "COMPLETED",
+                        1,
+                        1,
+                        1,
+                        0,
+                        List.of(new com.enterprise.testagent.workspace.AgentConfigResponses.PublicWorktreeCompensationItemResponse(
+                                USER_ID.value(),
+                                "SUCCEEDED",
+                                "agw_compensated",
+                                null,
+                                "公共个人 worktree 已创建或复用")),
+                        "补偿执行完成",
+                        Instant.parse("2026-08-11T02:00:00Z")));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/worktrees/reconcile")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"linuxServerId":"127.0.0.1"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("COMPLETED")
+                .jsonPath("$.data.succeededCount").isEqualTo(1)
+                .jsonPath("$.data.items[0].userId").isEqualTo(USER_ID.value())
+                .jsonPath("$.data.items[0].worktreeId").isEqualTo("agw_compensated");
+
+        verify(service).reconcileMissingPublicWorktrees("127.0.0.1", TRACE_ID);
+    }
+
+    @Test
+    void nonSuperAdminCannotTriggerMissingPublicWorktreeCompensation() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/worktrees/reconcile")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"linuxServerId":"127.0.0.1"}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
     void nonSuperAdminCannotUpdatePublicConfig() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
         WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));

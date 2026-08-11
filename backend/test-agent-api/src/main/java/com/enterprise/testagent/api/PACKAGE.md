@@ -32,7 +32,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.InternalModelObservabilityController`：仅 `SUPER_ADMIN` 可用的内部模型调用明细、小时统计、探活状态和手工探活入口；明细支持精确 `outcome` 与五类 `outcomeGroup`，保留 `traceId/ucid` 等结构化排障字段，不返回请求或响应正文。
 - `web.platform.XxlJobSsoTicketController`：仅 `SUPER_ADMIN` 可用的 60 秒一次性 iframe 表单票据入口；业务签发与 Redis 消费属于 XXL integration。
 - `web.platform.SchedulerManagementController`：旧 `/scheduler-management/**` 兼容入口，所有方法统一返回 `410 API_GONE`，不再调用旧管理服务。
-- `web.platform.AgentConfigController`：Agent 配置 HTTP 元数据、Git 操作和进度 ticket 入口；公共仓库初始化和显式拉取按 `linuxServerId` 路由到目标后端，公共 update-and-push 合并冲突读取/解决/取消接口复用工作区冲突协议，公共 worktree 列表只返回指定服务器 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容操作继续走平台文件 WebSocket。
+- `web.platform.AgentConfigController`：Agent 配置 HTTP 元数据、Git 操作和进度 ticket 入口；公共仓库初始化、显式拉取和超级管理员缺失 worktree 手工补偿按 `linuxServerId` 路由到目标后端，补偿与定时任务复用目标 Java 上的服务器级锁，公共 update-and-push 合并冲突读取/解决/取消接口复用工作区冲突协议，公共 worktree 列表只返回指定服务器 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容操作继续走平台文件 WebSocket。
 - `web.agent.AgentOpencodeRuntimeController`：agent 侧 opencode 兼容代理入口，承载 `/api/internal/agent/{agentId}/...` 路径并把 agentId 与可选用户主体交给业务层选择 runtime。
 - `web.platform.RuntimeDtos`、`web.platform.AuthDtos`：平台 API 请求/响应 DTO；Session、SessionMessage、Run 可选暴露 `sourceType/sourceRefId`，Run、SessionMessage、AgentMessage 与运行态摘要的 `resend` 元数据保持 nullable/additive，旧客户端缺失时仍按普通消息展示；共享人工重发响应以 requester 审计纠正旧替代 Run/消息的所属人错误归因；Run 历史与 Session 历史响应的新存储/摘要元数据保持 nullable，并通过显式映射重载接入新模式投影；session-tree 事件 DTO 保留原始 `traceId`，不改变既有 payload。
 - `web.common.TraceIdWebFilter`、`web.common.JwtAuthWebFilter`、`web.common.ApiTokenWebFilter`、`web.common.InMemoryRateLimitWebFilter`、`web.common.GlobalExceptionHandler`：入口公共处理。

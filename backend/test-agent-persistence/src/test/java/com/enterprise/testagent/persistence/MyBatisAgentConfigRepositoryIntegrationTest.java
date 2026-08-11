@@ -160,6 +160,42 @@ class MyBatisAgentConfigRepositoryIntegrationTest {
     }
 
     @Test
+    void missingPublicWorktreeCandidatesRequireActiveSuperAdminBindingAndDisappearAfterCreation() {
+        insertSuperAdminOpencodeBinding();
+        repository.saveWorktree(new AgentConfigWorktree(
+                "agw_legacy_public",
+                AgentConfigScope.PUBLIC,
+                null,
+                "10.0.0.8",
+                "public-personal-20260717",
+                "public-personal-20260717",
+                "/data/.testagent/agent-opencode/.configdev/public-personal-20260717",
+                new UserId("usr_test_dev"),
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+
+        assertThat(repository.findMissingPublicWorktreeUsers("10.0.0.8", 50))
+                .containsExactly(new UserId("usr_test_dev"));
+        assertThat(repository.findMissingPublicWorktreeUsers("10.0.0.9", 50)).isEmpty();
+
+        repository.saveWorktree(new AgentConfigWorktree(
+                "agw_compensated_public",
+                AgentConfigScope.PUBLIC,
+                null,
+                "10.0.0.8",
+                "public-usr_test_dev",
+                "public-usr_test_dev",
+                "/data/.testagent/agent-opencode/.configdev/public-usr_test_dev",
+                new UserId("usr_test_dev"),
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+
+        assertThat(repository.findMissingPublicWorktreeUsers("10.0.0.8", 50)).isEmpty();
+    }
+
+    @Test
     void operationSnapshotsArePersistedThroughMyBatisXmlMapper() {
         AgentConfigOperation operation = repository.saveOperation(new AgentConfigOperation(
                 "aco_mybatis_1234567890",
@@ -199,6 +235,67 @@ class MyBatisAgentConfigRepositoryIntegrationTest {
                 .param("createdAt", Timestamp.from(NOW))
                 .param("updatedAt", Timestamp.from(NOW))
                 .param("linuxServerId", "10.0.0.8")
+                .update();
+    }
+
+    /** 构造 ACTIVE 超管、进程和同服 binding，候选 SQL 不依赖生产 migration 造测试用户。 */
+    private void insertSuperAdminOpencodeBinding() {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        jdbc.sql("""
+                        insert into user_roles(user_id, dict_id, created_at)
+                        select 'usr_test_dev', dict_id, :now
+                        from dictionaries
+                        where dict_key = 'ROLE' and dict_value = 'SUPER_ADMIN'
+                        """)
+                .param("now", Timestamp.from(NOW))
+                .update();
+        jdbc.sql("""
+                        insert into linux_servers(
+                            linux_server_id, name, status, capacity_summary_json,
+                            last_heartbeat_at, trace_id, created_at, updated_at
+                        ) values (
+                            '10.0.0.8', 'server-8', 'ONLINE', '{}',
+                            :now, 'trace_server_8', :now, :now
+                        )
+                        """)
+                .param("now", Timestamp.from(NOW))
+                .update();
+        jdbc.sql("""
+                        insert into opencode_containers(
+                            container_id, linux_server_id, container_name, port_start, port_end,
+                            max_processes, current_processes, status, last_heartbeat_at,
+                            trace_id, created_at, updated_at
+                        ) values (
+                            'container-agentcfg', '10.0.0.8', 'agentcfg', 14096, 15095,
+                            30, 1, 'ONLINE', :now,
+                            'trace_container_agentcfg', :now, :now
+                        )
+                        """)
+                .param("now", Timestamp.from(NOW))
+                .update();
+        jdbc.sql("""
+                        insert into opencode_server_processes(
+                            process_id, user_id, linux_server_id, container_id, port, pid, base_url,
+                            status, session_path, config_path, started_at, last_health_check_at,
+                            health_message, trace_id, created_at, updated_at
+                        ) values (
+                            'ocp_agentcfg', 'usr_test_dev', '10.0.0.8', 'container-agentcfg', 14123, 1234,
+                            'http://10.0.0.8:14123', 'RUNNING', '/data/session', '/data/config',
+                            :now, :now, 'ready', 'trace_process_agentcfg', :now, :now
+                        )
+                        """)
+                .param("now", Timestamp.from(NOW))
+                .update();
+        jdbc.sql("""
+                        insert into user_opencode_process_bindings(
+                            user_id, agent_id, process_id, linux_server_id, port,
+                            status, trace_id, created_at, updated_at
+                        ) values (
+                            'usr_test_dev', 'opencode', 'ocp_agentcfg', '10.0.0.8', 14123,
+                            'ACTIVE', 'trace_binding_agentcfg', :now, :now
+                        )
+                        """)
+                .param("now", Timestamp.from(NOW))
                 .update();
     }
 

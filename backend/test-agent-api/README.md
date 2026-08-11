@@ -72,6 +72,7 @@
 ### 公共 Agent 配置发布
 
 - `AgentConfigController` 的 `POST /public/rollout/supersede` 只负责 `SUPER_ADMIN` 鉴权、共享运行副本恢复确认、请求 DTO 和 traceId 透传；`activeRolloutId` 作为业务层 CAS 前置条件，前端不能提交 `forceStop`。响应沿用 Agent 配置 operation DTO，状态轮询通过 `GET /public/rollout` 的可选替换审计字段和 `pendingTargets` 完成；用户明细只含内部 userId/username，不返回统一认证号。
+- `AgentConfigController` 的 `POST /public/worktrees/reconcile` 只允许 `SUPER_ADMIN`，按请求的 `linuxServerId` 复用公共后端路由程序，把手工补偿交给目标 Java 上与定时任务相同的服务器级 Redis 锁和幂等创建程序；响应只含内部 userId、worktreeId 与安全结果摘要。
 
 ### LobeHub 与企业模型入口
 

@@ -46,6 +46,8 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
+import com.enterprise.testagent.scheduler.ScheduledTaskLock;
+import com.enterprise.testagent.scheduler.ScheduledTaskLockLease;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -58,6 +60,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.scheduling.annotation.Scheduled;
 
 class AgentConfigApplicationServiceTest {
 
@@ -69,6 +72,18 @@ class AgentConfigApplicationServiceTest {
 
     @TempDir
     Path root;
+
+    @Test
+    void missingPublicWorktreeCompensationDefaultsToTenMinutes() throws Exception {
+        Scheduled scheduled = AgentConfigApplicationService.class
+                .getDeclaredMethod("reconcileMissingPublicWorktreesScheduled")
+                .getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.initialDelayString())
+                .isEqualTo("${test-agent.public-agent-config.worktree-compensation.initial-delay:PT30S}");
+        assertThat(scheduled.fixedDelayString())
+                .isEqualTo("${test-agent.public-agent-config.worktree-compensation.delay:PT10M}");
+    }
 
     @Test
     void publicStatusIsDisabledWhenGitUrlIsUnconfigured() {
@@ -1116,6 +1131,78 @@ class AgentConfigApplicationServiceTest {
         assertThat(response.ready()).isFalse();
         assertThat(response.linuxServerId()).isEqualTo("linux-1");
         assertThat(response.message()).contains("未初始化");
+        assertThat(git.worktreeRoot).isNull();
+    }
+
+    @Test
+    void missingPublicWorktreeCompensationCreatesFromLocalRepositoryWithoutRuntimeActivation() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.missingPublicWorktreeUsers = List.of(ADMIN);
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+        PersonalAgentConfigRuntimeReloader reloader = mock(PersonalAgentConfigRuntimeReloader.class);
+        service.setPersonalRuntimeReloader(reloader);
+        ScheduledTaskLock lock = mock(ScheduledTaskLock.class);
+        ScheduledTaskLockLease lease = mock(ScheduledTaskLockLease.class);
+        when(lock.acquire(any(), any())).thenReturn(Optional.of(lease));
+        when(lease.renew()).thenReturn(true);
+        service.setScheduledTaskLock(lock);
+
+        AgentConfigResponses.PublicWorktreeCompensationResponse response =
+                service.reconcileMissingPublicWorktrees("linux-1", "trace_compensation");
+
+        assertThat(response.status()).isEqualTo("COMPLETED");
+        assertThat(response.candidateCount()).isEqualTo(1);
+        assertThat(response.succeededCount()).isEqualTo(1);
+        assertThat(response.failedCount()).isZero();
+        assertThat(response.items()).singleElement().satisfies(item -> {
+            assertThat(item.userId()).isEqualTo(ADMIN.value());
+            assertThat(item.status()).isEqualTo("SUCCEEDED");
+            assertThat(item.worktreeId()).isNotBlank();
+        });
+        assertThat(agentConfigs.findWorktrees(AgentConfigScope.PUBLIC, null, ADMIN)).hasSize(1);
+        assertThat(git.worktreeBranch).isEqualTo("public-usr_admin");
+        assertThat(git.fetchCallCount).isZero();
+        assertThat(git.privateKeyUsed).isNull();
+        verifyNoInteractions(reloader);
+    }
+
+    @Test
+    void missingPublicWorktreeCompensationReportsLockContentionWithoutCreatingDirectories() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.missingPublicWorktreeUsers = List.of(ADMIN);
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+        ScheduledTaskLock lock = mock(ScheduledTaskLock.class);
+        when(lock.acquire(any(), any())).thenReturn(Optional.empty());
+        service.setScheduledTaskLock(lock);
+
+        AgentConfigResponses.PublicWorktreeCompensationResponse response =
+                service.reconcileMissingPublicWorktrees("linux-1", "trace_compensation_locked");
+
+        assertThat(response.status()).isEqualTo("LOCKED");
+        assertThat(response.processedCount()).isZero();
+        assertThat(agentConfigs.findWorktrees(AgentConfigScope.PUBLIC, null, ADMIN)).isEmpty();
         assertThat(git.worktreeRoot).isNull();
     }
 
@@ -2459,6 +2546,7 @@ class AgentConfigApplicationServiceTest {
         public void createWorktree(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
             this.worktreeRoot = worktreeRoot;
             this.worktreeBranch = branch;
+            this.privateKeyUsed = privateKey;
         }
 
         @Override
@@ -2565,6 +2653,7 @@ class AgentConfigApplicationServiceTest {
     private static final class InMemoryAgentConfigRepository implements AgentConfigRepository {
         private final Map<String, AgentConfigOperation> operations = new LinkedHashMap<>();
         private final Map<String, AgentConfigWorktree> worktrees = new LinkedHashMap<>();
+        private List<UserId> missingPublicWorktreeUsers = List.of();
 
         @Override
         public AgentConfigOperation saveOperation(AgentConfigOperation operation) {
@@ -2595,6 +2684,11 @@ class AgentConfigApplicationServiceTest {
                     .filter(worktree -> workspaceId == null || workspaceId.equals(worktree.workspaceId()))
                     .filter(worktree -> createdBy == null || createdBy.equals(worktree.createdBy()))
                     .toList();
+        }
+
+        @Override
+        public List<UserId> findMissingPublicWorktreeUsers(String linuxServerId, int limit) {
+            return missingPublicWorktreeUsers.stream().limit(limit).toList();
         }
     }
 

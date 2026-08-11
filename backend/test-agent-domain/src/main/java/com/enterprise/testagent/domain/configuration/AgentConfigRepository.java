@@ -35,4 +35,14 @@ public interface AgentConfigRepository {
                 .filter(worktree -> status == null || status == worktree.status())
                 .toList();
     }
+
+    /**
+     * 查询目标服务器上缺少 ACTIVE 公共个人 worktree 的超级管理员。
+     *
+     * <p>默认实现用于保留存量测试替身兼容；生产 MyBatis 实现必须在数据库侧完成角色、用户状态、
+     * ACTIVE OpenCode binding 和 worktree 缺失条件过滤，并严格执行有界 limit。</p>
+     */
+    default List<UserId> findMissingPublicWorktreeUsers(String linuxServerId, int limit) {
+        return List.of();
+    }
 }
