@@ -101,6 +101,7 @@ test("session share notification appears in real time, opens a new tab, then ref
   const invalidatedGate = new Promise<void>((resolve) => { releaseInvalidated = resolve; });
   const notificationReadRequests: string[] = [];
   const notificationEventRequests: string[] = [];
+  const notificationListRequests: boolean[] = [];
   const activeNotification = {
     notificationId: "ntf_share_live",
     type: "SESSION_SHARED",
@@ -129,6 +130,7 @@ test("session share notification appears in real time, opens a new tab, then ref
     userNotificationUnreadCount: 0,
     userNotificationReadRequests: notificationReadRequests,
     userNotificationEventRequests: notificationEventRequests,
+    userNotificationListRequests: notificationListRequests,
     userNotificationEvents: [
       { gate: createdGate, changeType: "CREATED", notificationId: "ntf_share_live", unreadCount: 1 },
       { gate: readGate, changeType: "READ", notificationId: "ntf_share_live", unreadCount: 0 },
@@ -148,6 +150,7 @@ test("session share notification appears in real time, opens a new tab, then ref
   const trigger = page.getByTestId("notification-center-trigger");
   await expect(trigger).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".user-notification-center__badge")).toHaveCount(0);
+  await expect.poll(() => notificationListRequests.at(-1)).toBe(true);
 
   notificationCapture.userNotifications = [activeNotification];
   notificationCapture.userNotificationUnreadCount = 1;
@@ -155,6 +158,11 @@ test("session share notification appears in real time, opens a new tab, then ref
   await expect(page.locator(".user-notification-center__badge")).toHaveText("1");
 
   await trigger.click();
+  const filterTabs = page.getByRole("tab");
+  await expect(filterTabs).toHaveCount(2);
+  await expect(filterTabs.nth(0)).toHaveText(/未读/);
+  await expect(filterTabs.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(filterTabs.nth(1)).toHaveText("全部");
   const activeItem = page.getByRole("button", { name: /张敏 向你分享了对话.*在新标签页打开/ });
   await expect(activeItem).toBeVisible();
   const notificationItem = page.locator(".user-notification-center__item").filter({ hasText: "张敏 向你分享了对话" });
@@ -182,7 +190,10 @@ test("session share notification appears in real time, opens a new tab, then ref
   notificationCapture.userNotificationUnreadCount = 0;
   releaseRead();
   await expect(page.locator(".user-notification-center__badge")).toHaveCount(0);
-  await expect(page.locator(".user-notification-center__item")).not.toHaveClass(/is-unread/);
+  await expect(page.getByText("未读消息已经处理完", { exact: true })).toBeVisible();
+  await filterTabs.nth(1).click();
+  await expect.poll(() => notificationListRequests.at(-1)).toBe(false);
+  await expect(notificationItem).toBeVisible();
   await expect(notificationItem).toHaveAttribute("data-read-state", "read");
 
   notificationCapture.userNotifications = [{
@@ -9643,6 +9654,7 @@ async function mockBackendApi(
     userNotificationUnreadCount?: number;
     userNotificationReadRequests?: string[];
     userNotificationEventRequests?: string[];
+    userNotificationListRequests?: boolean[];
     userNotificationEvents?: Array<{
       gate?: Promise<void>;
       eventName?: "user-notification.snapshot" | "user-notification.updated";
@@ -10267,6 +10279,7 @@ async function mockBackendApi(
       const pageNumber = Number(url.searchParams.get("page") ?? "1");
       const size = Number(url.searchParams.get("size") ?? "20");
       const unreadOnly = url.searchParams.get("unreadOnly") === "true";
+      capture.userNotificationListRequests?.push(unreadOnly);
       const allItems = capture.userNotifications ?? [];
       const filtered = unreadOnly ? allItems.filter((item) => item.unread === true) : allItems;
       const offset = Math.max(0, (pageNumber - 1) * size);

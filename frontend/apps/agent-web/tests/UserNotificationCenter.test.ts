@@ -60,12 +60,11 @@ const notifications: UserNotification[] = [
 describe('UserNotificationCenter', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('shows the ICBC-red unread badge, filters, paginates and only opens available actions', async () => {
+  it('defaults to unread first, filters, paginates and only opens available actions', async () => {
     const wrapper = mount(UserNotificationCenter, {
       props: {
         notifications,
         unreadCount: 7,
-        filter: 'ALL',
         hasMore: true,
       },
       attachTo: document.body,
@@ -90,8 +89,11 @@ describe('UserNotificationCenter', () => {
       .toHaveLength(1)
 
     const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs.map((tab) => tab.text())).toEqual(['未读 7', '全部'])
+    expect(tabs[0]!.attributes('aria-selected')).toBe('true')
+    expect(tabs[1]!.attributes('aria-selected')).toBe('false')
     await tabs[1]!.trigger('click')
-    expect(wrapper.emitted('update:filter')?.[0]).toEqual(['UNREAD'])
+    expect(wrapper.emitted('update:filter')?.[0]).toEqual(['ALL'])
 
     const itemButtons = wrapper.findAll('.user-notification-center__item > button')
     await itemButtons[0]!.trigger('click')
