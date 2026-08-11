@@ -59,6 +59,23 @@ class RedisUserRuntimeDisposeLeaseTest {
                 eq(TOKEN));
     }
 
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void maintenanceLeaseUsesTheSameGateWithoutCheckingTheActiveRunIndex() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        RedisRunRuntimeStore store = new RedisRunRuntimeStore(
+                redis,
+                new ObjectMapper(),
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        when(redis.execute(
+                argThat(script -> contains(script, "SET") && !contains(script, "ZCARD")),
+                eq(List.of(LOCK_KEY)),
+                eq(TOKEN),
+                eq(Long.toString(TTL.toMillis())))).thenReturn(1L);
+
+        assertThat(store.tryAcquireUserRuntimeMaintenance(USER_ID, TOKEN, TTL)).isTrue();
+    }
+
     private boolean contains(RedisScript<?> script, String fragment) {
         return script != null && script.getScriptAsString().contains(fragment);
     }

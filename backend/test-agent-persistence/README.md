@@ -34,7 +34,7 @@
 
 ## 主要职责
 
-- 使用 `UserNotificationMapper.xml` 实现通用通知创建去重、快照更新、失效、接收人分页、未读统计、幂等已读和 90 天历史清理；通知列表实时联表校验分享、成员、会话、所属人和到期事实，失效授权不再可点击或计入未读。
+- 使用 `UserNotificationMapper.xml` 实现通用通知创建去重、按 dedupKey 条件状态更新、失效、接收人分页、未读统计、幂等已读和 90 天历史清理；通知有效与动作可用分别派生，`NONE` 仍可未读但不可执行。分享通知实时联表校验分享、成员、会话、所属人和到期事实，失效授权不再可点击或计入未读。
 
 - `MyBatisSessionShareRepository` / `SessionShareMapper.xml` 持久化每个 Session 唯一且永久复用的 256 位随机分享 ID、全量成员更新与软移除历史、乐观锁版本、“分享给我”失效历史、最小用户目录和 365 天安全审计。审计只保存 actor、执行所属人、share/session/workspace/resource、结果、traceId 与可选路径 SHA-256，不保存消息/文件正文、明文路径、Token 或终端输入。
 - `MyBatisSessionMessageRepository` / `SessionMessageMapper.xml` 保存消息实际发送人、统一认证号和代操作标记，并复用既有 `(session_id, run_id, created_at, id)` 索引按精确 `sessionId + runId + USER` 读取运行输入；Run、夜间任务和重发 MyBatis mapper 同步保存实际 actor 归因。普通历史与普通 runtime-state SQL 显式排除分享发送者兜底，防止一次代发永久获得普通会话访问权。
@@ -45,7 +45,7 @@
 - Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。
 - Repository 实现和数据库映射；新增或修改关系型 SQL 必须通过 MyBatis XML mapper。
 - `UserDeletionMapper.xml` / `MyBatisUserDeletionRepository` 以 MyBatis XML 锁定目标用户、汇总受保护业务引用，并按外键顺序清理账号附属数据；不级联删除会话、工作区、进程或调度历史。`RedisTokenStore` 使用增量 `SCAN` 撤销目标用户上线前已签发的 Token，不执行阻塞式 `KEYS`，也不记录 Token key/value。
-- Redis 会话运行上下文、Run 运行数据面、限流、幂等和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。用户级 OpenCode dispose 闸门与 `active:user`、`runtime-user` marker 使用同一 `{userId}` slot：新 Run 在一个 Lua 内先检查闸门再登记 active/marker，dispose 则先清理过期 active 成员再原子确认空闲并申请可续租 token，禁止跨 `{runId}`/`{userId}` slot 执行脚本。通用参数值不写入 Redis，运行态读取直接查询数据库。
+- Redis 会话运行上下文、Run 运行数据面、限流、幂等和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。用户级 OpenCode dispose 闸门与 `active:user`、`runtime-user` marker 使用同一 `{userId}` slot：普通 dispose 先清理过期 active 成员并原子确认空闲，个人重启维护租约允许已有活动 Run 但与 dispose 使用同一互斥键；两类租约都按 token 续租/释放，新 Run 在同一 Lua 中先检查闸门再登记 active/marker。
 - `RedisTokenStore` 在保存平台 Token 时同步写入 SHA-256 session marker，并使用相同绝对过期时间；删除、刷新或过期清理 Token 时同步删除 marker。原始 Token 不进入 marker key/value，XXL 只持有 digest。
 - `RedisSupportAccessGrantStore` 以 Lua 原子轮换/撤销同一平台登录会话的当前排查授权，只保存 `sessionDigest/grantTokenDigest` 与有界 payload，TTL 与 grant 到期时间一致；查找时同时校验 token key 和 session 当前摘要，不降级 JVM 内存。
 - `RedisWorkflowCapabilityStore` 在 `test-agent:workflow-capability:*` 前缀保存HMAC nonce摘要、一次性checkout ticket摘要和短期model grant摘要；Lua保证消费/续期/撤销原子性。取消run先写撤销墓碑再撤销现存grant，并使并发签发或刷新失败。该适配不保存Python conversation/task/report/event，也不新增关系型SQL或Flyway migration。
@@ -56,7 +56,7 @@
 
 ## 已有实现
 
-- `user_notifications`：只保存安全标题/摘要、受控 `action_type/action_target_id`、去重键、状态、已读/失效/到期时间和 traceId。`V20260810170000__user_notifications_create_notification_center.sql` 仅回填当前仍有效的分享成员；成员授权后的成功 `READ_ACCESS_GRANTED` 审计会直接回填 `read_at`。
+- `user_notifications`：只保存安全标题/摘要、受控 `action_type/action_target_id`、去重键、状态、已读/失效/到期时间和 traceId。`V20260810170000__user_notifications_create_notification_center.sql` 仅回填当前仍有效的分享成员；`V20260811213000__user_notifications_expand_dispose_types.sql` 只扩展四种 dispose 类型和 `NONE/RESTART_OWN_PROCESS` 动作约束，不写业务数据。
 
 - `V1__create_core_tables.sql`：创建 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 核心表。
 - `V20260711120000__document_side_question_run_source.sql`：只更新三个 `source_type` 字段的允许值注释以包含 `SIDE_QUESTION`，不改结构、不写数据。

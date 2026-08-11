@@ -13,6 +13,7 @@ import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStatusQu
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessWeakHealthRequest;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
+import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessRestartService;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
 import com.enterprise.testagent.workspace.AgentConfigResponses;
 import java.util.Objects;
@@ -37,6 +38,7 @@ public class UserOpencodeProcessController {
     private final UserOpencodeProcessAssignmentService processAssignmentService;
     private final OpencodeProcessStatusQueryService statusQueryService;
     private final AgentConfigApplicationService agentConfigService;
+    private final UserOpencodeProcessRestartService processRestartService;
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
 
@@ -46,18 +48,28 @@ public class UserOpencodeProcessController {
     public UserOpencodeProcessController(
             UserOpencodeProcessAssignmentService processAssignmentService,
             OpencodeProcessStatusQueryService statusQueryService) {
-        this(processAssignmentService, statusQueryService, null);
+        this(processAssignmentService, statusQueryService, null, null);
     }
 
-    /** Spring 生产入口额外注入工作区服务，在进程目标 Java 上准备同服公共个人 worktree。 */
-    @Autowired
+    /** 兼容既有手工装配入口。 */
     public UserOpencodeProcessController(
             UserOpencodeProcessAssignmentService processAssignmentService,
             OpencodeProcessStatusQueryService statusQueryService,
             AgentConfigApplicationService agentConfigService) {
+        this(processAssignmentService, statusQueryService, agentConfigService, null);
+    }
+
+    /** Spring 生产入口额外注入工作区和个人重启编排服务。 */
+    @Autowired
+    public UserOpencodeProcessController(
+            UserOpencodeProcessAssignmentService processAssignmentService,
+            OpencodeProcessStatusQueryService statusQueryService,
+            AgentConfigApplicationService agentConfigService,
+            UserOpencodeProcessRestartService processRestartService) {
         this.processAssignmentService = Objects.requireNonNull(processAssignmentService, "processAssignmentService must not be null");
         this.statusQueryService = Objects.requireNonNull(statusQueryService, "statusQueryService must not be null");
         this.agentConfigService = agentConfigService;
+        this.processRestartService = processRestartService;
     }
 
     /** 注入持久化发布闸门，供强状态响应和独立轻量轮询接口复用。 */
@@ -135,6 +147,25 @@ public class UserOpencodeProcessController {
                         traceId);
             }
             return RuntimeDtos.UserOpencodeProcessResponse.from(process, preparation);
+        });
+    }
+
+    /**
+     * 重启当前用户 TestAgent 进程；活动 Run 的二次确认和排空均由目标 Java 上的应用服务权威判定。
+     */
+    @PostMapping("/api/internal/agent/{agentId}/processes/me/restart")
+    public Mono<ApiResponse<RuntimeDtos.UserOpencodeProcessResponse>> restart(
+            @PathVariable String agentId,
+            @RequestBody(required = false) RuntimeDtos.UserOpencodeProcessRestartRequest request,
+            ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return blockingResponse(exchange, traceId -> {
+            if (processRestartService == null) {
+                throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "TestAgent 进程重启服务未配置");
+            }
+            boolean confirmRunning = request != null && request.confirmed();
+            return RuntimeDtos.UserOpencodeProcessResponse.from(
+                    processRestartService.restart(userId, agentId, confirmRunning, traceId));
         });
     }
 

@@ -1218,7 +1218,24 @@ describe("FigmaShell", () => {
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
 
     expect(wrapper.get(".figma-user-menu-service-text").text()).toBe("未运行(server-a / 192.168.100.171:82)");
-    expect(wrapper.find('[role="menuitem"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="restart-own-process"]').text()).toContain("重启 TestAgent 进程");
+  });
+
+  it("emits process restart from the avatar menu, shows pending state and hides it in shared workspaces", async () => {
+    const wrapper = mountShell({ props: { currentUserName: "developer" } });
+
+    await wrapper.get(".figma-user-avatar-btn").trigger("click");
+    const restartButton = wrapper.get('[data-testid="restart-own-process"]');
+    expect(restartButton.attributes("disabled")).toBeUndefined();
+    await restartButton.trigger("click");
+    expect(wrapper.emitted("restart-process")).toHaveLength(1);
+
+    await wrapper.setProps({ processRestarting: true });
+    expect(wrapper.get('[data-testid="restart-own-process"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[data-testid="restart-own-process"]').text()).toContain("正在重启");
+
+    await wrapper.setProps({ fixedWorkspace: true });
+    expect(wrapper.find('[data-testid="restart-own-process"]').exists()).toBe(false);
   });
 
   it("opens the focused side-question input directly when the process and main session are ready", async () => {

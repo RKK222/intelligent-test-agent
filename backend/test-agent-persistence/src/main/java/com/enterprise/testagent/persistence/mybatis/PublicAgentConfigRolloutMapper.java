@@ -117,6 +117,9 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("linuxServerId") String linuxServerId,
             @Param("now") Instant now);
 
+    List<PublicAgentConfigRolloutTargetRow> findPendingTargetsByServer(
+            @Param("linuxServerId") String linuxServerId);
+
     int abandonRolloutTargets(
             @Param("linuxServerId") String linuxServerId,
             @Param("now") Instant now);

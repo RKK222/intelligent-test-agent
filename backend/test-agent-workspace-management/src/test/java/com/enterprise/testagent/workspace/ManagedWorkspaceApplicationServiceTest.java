@@ -2252,7 +2252,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 new FakeGitWorkspaceService("F-GCMS/workspace"));
 
         List<ManagedWorkspaceResponses.ApplicationGitRefreshScopeResponse> scopes =
-                service.listApplicationGitRefreshScopes();
+                service.listApplicationGitRefreshScopes(new UserId("usr_1"), true);
 
         assertThat(scopes).singleElement().satisfies(scope -> {
             assertThat(scope.appId()).isEqualTo("app_gcms");
@@ -2275,7 +2275,82 @@ class ManagedWorkspaceApplicationServiceTest {
                 new FakeWorkspaceRepository(),
                 new FakeGitWorkspaceService("F-GCMS/workspace"));
 
-        assertThat(service.listApplicationGitRefreshScopes()).isEmpty();
+        assertThat(service.listApplicationGitRefreshScopes(new UserId("usr_1"), true)).isEmpty();
+    }
+
+    @Test
+    void applicationAdminRefreshScopeOnlyListsEnabledMemberApplications() {
+        Instant now = Instant.now();
+        FakeManagedWorkspaceRepository memberManaged = new FakeManagedWorkspaceRepository();
+        memberManaged.versions.add(versionForScope(
+                "awv_member", "awp_1", "wrk_member", "20260707",
+                "feature_testagent_20260707", "F-GCMS/workspace", now));
+        FakeManagedWorkspaceRepository nonMemberManaged = new FakeManagedWorkspaceRepository();
+        nonMemberManaged.versions.add(versionForScope(
+                "awv_outsider", "awp_1", "wrk_outsider", "20260707",
+                "feature_testagent_20260707", "F-GCMS/workspace", now));
+        ManagedWorkspaceApplicationService memberService = service(
+                new FakeConfigurationRepository(true),
+                memberManaged,
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+        ManagedWorkspaceApplicationService nonMemberService = service(
+                new FakeConfigurationRepository(false),
+                nonMemberManaged,
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        assertThat(memberService.listApplicationGitRefreshScopes(new UserId("usr_1"), false))
+                .singleElement()
+                .satisfies(scope -> assertThat(scope.appId()).isEqualTo("app_gcms"));
+        assertThat(nonMemberService.listApplicationGitRefreshScopes(new UserId("usr_1"), false)).isEmpty();
+    }
+
+    @Test
+    void applicationAdminCannotRefreshForgedApplicationIdWithoutMembership() {
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(false),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        assertThatThrownBy(() -> service.refreshApplicationGit(
+                "app_gcms", new UserId("usr_outsider"), false, "trace_forged_app"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.refreshApplicationGitGroup(
+                "app_gcms",
+                "repo_1",
+                "20260707",
+                "feature_testagent_20260707",
+                new UserId("usr_outsider"),
+                false,
+                "trace_forged_group"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void applicationAdminCannotDistinguishMissingOrDisabledApplicationId() {
+        ManagedWorkspaceApplicationService enabledService = service(
+                new FakeConfigurationRepository(true),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+        ManagedWorkspaceApplicationService disabledService = service(
+                new FakeConfigurationRepository(true, true, false),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        assertThatThrownBy(() -> enabledService.refreshApplicationGit(
+                "app_missing", new UserId("usr_1"), false, "trace_missing_app"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> disabledService.refreshApplicationGit(
+                "app_gcms", new UserId("usr_1"), false, "trace_disabled_app"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }
 
     private static ApplicationWorkspaceVersion versionForScope(
@@ -2333,6 +2408,7 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.ApplicationGitRefreshResponse response = service.refreshApplicationGit(
                 "app_gcms",
                 new UserId("usr_1"),
+                true,
                 "trace_admin_refresh");
 
         assertThat(response.totalGroups()).isEqualTo(1);
@@ -2394,6 +2470,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 "20260708",
                 "feature_testagent_20260708",
                 new UserId("usr_1"),
+                true,
                 "trace_one_branch");
 
         assertThat(response.totalGroups()).isEqualTo(1);
@@ -2438,6 +2515,7 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.ApplicationGitRefreshResponse response = service.refreshApplicationGit(
                 "app_gcms",
                 new UserId("usr_1"),
+                true,
                 "trace_admin_agent_refresh");
 
         assertThat(response.failedGroups()).isZero();
@@ -2469,6 +2547,7 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.ApplicationGitRefreshResponse response = service.refreshApplicationGit(
                 "app_gcms",
                 new UserId("usr_1"),
+                true,
                 "trace_admin_refresh_dirty");
 
         assertThat(response.totalGroups()).isEqualTo(1);
@@ -3742,8 +3821,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
     private static final class FakeConfigurationRepository implements ConfigurationManagementRepository {
         private final boolean member;
-        private final ApplicationDefinition app = new ApplicationDefinition(
-                new ApplicationId("app_gcms"), "F-GCMS", true, Instant.parse("2026-06-23T00:00:00Z"), Instant.parse("2026-06-23T00:00:00Z"));
+        private final ApplicationDefinition app;
         private final CodeRepository repository;
         private final List<UserSshKey> sshKeys;
         private final ApplicationWorkspace workspace;
@@ -3756,8 +3834,12 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         private FakeConfigurationRepository(boolean member, boolean workspaceEnabled) {
+            this(member, workspaceEnabled, true);
+        }
+
+        private FakeConfigurationRepository(boolean member, boolean workspaceEnabled, boolean applicationEnabled) {
             this(member, new CodeRepository(
-                    new CodeRepositoryId("repo_1"), "https://example.com/gcms.git", "gcms/gcms", "gcms", true, Instant.now(), Instant.now()), List.of(), workspaceEnabled);
+                    new CodeRepositoryId("repo_1"), "https://example.com/gcms.git", "gcms/gcms", "gcms", true, Instant.now(), Instant.now()), List.of(), workspaceEnabled, applicationEnabled);
         }
 
         private FakeConfigurationRepository(boolean member, CodeRepository repository, List<UserSshKey> sshKeys) {
@@ -3769,7 +3851,22 @@ class ManagedWorkspaceApplicationServiceTest {
                 CodeRepository repository,
                 List<UserSshKey> sshKeys,
                 boolean workspaceEnabled) {
+            this(member, repository, sshKeys, workspaceEnabled, true);
+        }
+
+        private FakeConfigurationRepository(
+                boolean member,
+                CodeRepository repository,
+                List<UserSshKey> sshKeys,
+                boolean workspaceEnabled,
+                boolean applicationEnabled) {
             this.member = member;
+            this.app = new ApplicationDefinition(
+                    new ApplicationId("app_gcms"),
+                    "F-GCMS",
+                    applicationEnabled,
+                    Instant.parse("2026-06-23T00:00:00Z"),
+                    Instant.parse("2026-06-23T00:00:00Z"));
             this.repository = repository;
             this.sshKeys = List.copyOf(sshKeys);
             this.workspace = new ApplicationWorkspace(
@@ -3784,9 +3881,15 @@ class ManagedWorkspaceApplicationServiceTest {
                     Instant.now());
         }
 
-        @Override public List<ApplicationDefinition> findApplications(Boolean enabledOnly) { return List.of(app); }
-        @Override public Optional<ApplicationDefinition> findApplication(ApplicationId appId) { return Optional.of(app); }
-        @Override public List<ApplicationDefinition> findApplicationsByMember(UserId userId) { return member ? List.of(app) : List.of(); }
+        @Override public List<ApplicationDefinition> findApplications(Boolean enabledOnly) {
+            return Boolean.TRUE.equals(enabledOnly) && !app.enabled() ? List.of() : List.of(app);
+        }
+        @Override public Optional<ApplicationDefinition> findApplication(ApplicationId appId) {
+            return app.appId().equals(appId) ? Optional.of(app) : Optional.empty();
+        }
+        @Override public List<ApplicationDefinition> findApplicationsByMember(UserId userId) {
+            return member && app.enabled() ? List.of(app) : List.of();
+        }
         @Override public boolean isActiveMember(ApplicationId appId, UserId userId) { return member; }
         @Override public List<ApplicationMember> findActiveMembers(ApplicationId appId) {
             return member

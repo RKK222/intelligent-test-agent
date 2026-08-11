@@ -217,6 +217,13 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     }
 
     @Override
+    public List<PublicAgentConfigRolloutTarget> findPendingTargetsByServer(String linuxServerId) {
+        return mapper.findPendingTargetsByServer(linuxServerId).stream()
+                .map(this::toTarget)
+                .toList();
+    }
+
+    @Override
     @Transactional
     public void decommissionServerMembership(String linuxServerId, Instant now) {
         mapper.decommissionServerMembership(linuxServerId, now);
@@ -474,11 +481,11 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                     if (updated != 1) {
                         return null;
                     }
-                    return new PublicAgentConfigRolloutTarget(
-                            row.targetId(), row.rolloutId(), AgentConfigRolloutScope.valueOf(row.configScope()),
-                            row.userId(), row.linuxServerId(), row.containerId(),
-                            row.port(), row.processPid(), row.processStartedAt(), row.baseUrl(), row.retryCount(),
-                            leaseUntil, leaseToken, row.traceId(), row.forceStop());
+                    return toTarget(new PublicAgentConfigRolloutTargetRow(
+                            row.targetId(), row.rolloutId(), row.configScope(), row.userId(),
+                            row.linuxServerId(), row.containerId(), row.port(), row.processPid(),
+                            row.processStartedAt(), row.baseUrl(), row.retryCount(), leaseUntil,
+                            leaseToken, row.traceId(), row.forceStop()));
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
@@ -520,5 +527,13 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                 target.userId(), target.linuxServerId(), target.containerId(),
                 target.port(), target.processPid(), target.processStartedAt(), target.baseUrl(), target.retryCount(),
                 target.leaseUntil(), target.leaseToken(), target.traceId(), target.forceStop());
+    }
+
+    private PublicAgentConfigRolloutTarget toTarget(PublicAgentConfigRolloutTargetRow row) {
+        return new PublicAgentConfigRolloutTarget(
+                row.targetId(), row.rolloutId(), AgentConfigRolloutScope.valueOf(row.configScope()),
+                row.userId(), row.linuxServerId(), row.containerId(), row.port(), row.processPid(),
+                row.processStartedAt(), row.baseUrl(), row.retryCount(), row.leaseUntil(),
+                row.leaseToken(), row.traceId(), row.forceStop());
     }
 }

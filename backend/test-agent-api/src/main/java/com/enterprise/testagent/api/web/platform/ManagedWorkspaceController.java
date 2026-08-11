@@ -63,11 +63,13 @@ public class ManagedWorkspaceController {
         return ok(exchange, service.listApplications(userId(exchange)));
     }
 
-    /** 超级管理员只读查看应用刷新将覆盖的工作空间、版本与实际 feature 分支。 */
+    /** 应用管理员按成员范围查看 Git 刷新范围；超级管理员继续查看全部应用。 */
     @GetMapping("/applications/git-refresh-scopes")
     public ApiResponse<Object> listApplicationGitRefreshScopes(ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
-        return ok(exchange, service.listApplicationGitRefreshScopes());
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        return ok(exchange, service.listApplicationGitRefreshScopes(
+                principal.userId(),
+                AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN)));
     }
 
     @GetMapping("/applications/{appId}/workspace-templates")
@@ -109,31 +111,33 @@ public class ManagedWorkspaceController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
-    /** 超级管理员刷新应用全部 feature 仓库组，并触发相关个人 worktree 安全收敛。 */
+    /** 应用管理员刷新有成员权限的应用；超级管理员保持全量刷新能力。 */
     @PostMapping("/applications/{appId}/git-refresh")
     public ApiResponse<Object> refreshApplicationGit(
             @PathVariable String appId,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
         return ok(exchange, service.refreshApplicationGit(
                 appId,
                 principal.userId(),
+                AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN),
                 RuntimeApiSupport.traceId(exchange)));
     }
 
-    /** 超级管理员只刷新一个实际 feature 分支组及其关联个人 worktree。 */
+    /** 应用管理员只刷新有成员权限应用中的一个实际 feature 分支组。 */
     @PostMapping("/applications/{appId}/git-refresh-groups")
     public ApiResponse<Object> refreshApplicationGitGroup(
             @PathVariable String appId,
             @RequestBody ManagedWorkspaceDtos.RefreshApplicationGitGroupRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
         return ok(exchange, service.refreshApplicationGitGroup(
                 appId,
                 request.repositoryId(),
                 request.version(),
                 request.branch(),
                 principal.userId(),
+                AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN),
                 RuntimeApiSupport.traceId(exchange)));
     }
 

@@ -303,7 +303,7 @@ SSE `id` 不表示 durable 游标，客户端不得持久化它或请求历史 r
 
 数据库事务提交成功后才发布变化，回滚不得产生 SSE。当前 Java 先向本机该用户连接 fan-out，再复用通用 `ServerBroadcastPublisher` 唤醒其它 Java；内部广播只携带接收人 ID、可选通知 ID、变化类型和既有 trace/实例元数据，不携带标题、摘要、shareId、URL、消息正文或 Token。广播是低延迟增强，不是事实源；广播失败或断线由建连 snapshot 和 30 秒数据库校准恢复。
 
-SSE 只提供未读数和刷新信号，不承载通知正文。收到合法 snapshot/updated 后，工作台按需重新调用 `GET /api/internal/platform/notification-center/notifications` 取得权威分页；只有未读角标变化且面板未打开时可以只更新 `unreadCount`，不能从事件自行构造可点击动作。
+SSE 只提供未读数和刷新信号，不承载通知正文。会话分享和 Agent 配置 dispose 通知共用本协议，不新增事件名；dispose 状态真实变化产生 `UPDATED`，相同状态重试不广播也不重复刷新未读。收到合法 snapshot/updated 后，工作台按需重新调用 `GET /api/internal/platform/notification-center/notifications` 取得权威分页；只有未读角标变化且面板未打开时可以只更新 `unreadCount`，不能从事件自行构造可点击动作、重启命令或目标 URL。
 
 ## 分享会话运行态 fetch SSE
 
@@ -486,7 +486,7 @@ scope 发现与缓存规则：
 
 应用配置管理、版本库部署模式配置和个人 SSH key 管理不产生 RunEvent，也不新增 SSE 事件类型。`/api/internal/platform/configuration-management/**` 的版本库创建/编辑/列表、部署模式选项查询和个人 SSH key 维护均通过 HTTP 同步返回；设置页创建应用工作空间接口虽然会触发初始版本工作区 clone/checkout 和运行态 Workspace 创建，但进度写入 `workspace_create_operations` 并由 `GET /api/internal/platform/configuration-management/workspace-create-operations/{operationId}` HTTP 轮询读取；不通过 RunEvent SSE 发布“校验、保存配置、解析版本、下载代码、创建运行态工作区、完成/失败”等步骤。
 
-应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push/merge 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人 `git-pull` 在当前 owner 的整棵个人 worktree 上 fetch/merge，应用 workspace 与应用 Agent 都交给原生 Git 判断是否会覆盖本地改动；该动作不修改共享 target、不广播、不同步其他用户。若应用 Agent 配置发生变化且本人进程正在运行，后端创建 `PERSONAL_APPLICATION` 单用户持久化任务并在 HTTP 响应中返回登记状态；任务复用已有数据库租约、Session 空闲检测和 dispose worker，不写浏览器状态，也不新增 SSE、RunEvent 或后台 Git 接口。超级管理员的应用刷新范围使用同步 HTTP GET 返回工作空间、版本与分支；应用级 `git-refresh` 和单分支组 `git-refresh-groups` 都是独立共享控制面 HTTP 操作：按选定物理 feature 组更新固定 target，以既有内部广播和数据库补偿驱动多服务器副本、相关个人 worktree 与应用 Agent rollout，浏览器只读取同步 HTTP 汇总，不新增进度 SSE 或 RunEvent。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。feature push 后，多服务器通过内部广播取得固定 `targetCommitHash`，再向当前服务器相关个人 worktree执行同样的原生 Git merge；因此其他用户无需主动拉取：非重叠本地改动保留并自动完成合并，只有 Git 判定会被覆盖的文件才进入待同步，真实冲突保留在本机 Diff。普通文件同步不触发 dispose。该分支同步不暴露给浏览器 SSE，已打开的文件树/标签仍按现有刷新或重新进入机制重读磁盘。
+应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push/merge 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人 `git-pull` 在当前 owner 的整棵个人 worktree 上 fetch/merge，应用 workspace 与应用 Agent 都交给原生 Git 判断是否会覆盖本地改动；该动作不修改共享 target、不广播、不同步其他用户。若应用 Agent 配置发生变化且本人进程正在运行，后端创建 `PERSONAL_APPLICATION` 单用户持久化任务并在 HTTP 响应中返回登记状态；任务复用已有数据库租约、Session 空闲检测和 dispose worker，不写浏览器状态，也不新增 SSE、RunEvent 或后台 Git 接口。应用 Git 管理员的刷新范围使用同步 HTTP GET 返回工作空间、版本与分支：`APP_ADMIN` 仅获得自己有效成员关系所属的启用应用，`SUPER_ADMIN` 保留启用和停用应用全量范围。应用级 `git-refresh` 和单分支组 `git-refresh-groups` 都是独立共享控制面 HTTP 操作：按选定物理 feature 组更新固定 target，以既有内部广播和数据库补偿驱动多服务器副本、相关个人 worktree 与应用 Agent rollout，浏览器只读取同步 HTTP 汇总，不新增进度 SSE 或 RunEvent。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。feature push 后，多服务器通过内部广播取得固定 `targetCommitHash`，再向当前服务器相关个人 worktree执行同样的原生 Git merge；因此其他用户无需主动拉取：非重叠本地改动保留并自动完成合并，只有 Git 判定会被覆盖的文件才进入待同步，真实冲突保留在本机 Diff。普通文件同步不触发 dispose。该分支同步不暴露给浏览器 SSE，已打开的文件树/标签仍按现有刷新或重新进入机制重读磁盘。
 
 应用引用资产库的初始化、同步、状态和目录树接口同样不产生 RunEvent/SSE。多服务器副本通过内部 `reference-repository.sync-requested` 广播低延迟唤醒，并通过数据库 generation、租约和定时补偿收敛；该广播不写入 `run_events`，不进入 RunEvent SSE，也不参与 `Last-Event-ID` 续传。
 

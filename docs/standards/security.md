@@ -19,7 +19,7 @@
 Token 校验流程：
 - `JwtAuthWebFilter`（Order +10）优先检查用户 Token，有效时设置 `AuthPrincipal` 到请求属性。
 - `ApiTokenWebFilter`（Order +20）作为静态 API Token 兜底，未配置时放行。
-- opencode runtime 代理可以读取可选 `AuthPrincipal`：存在用户主体时业务层使用用户专属 opencode 进程；用户已有 ACTIVE binding 且属于其他服务器时，API 层只允许把用户进程状态、初始化、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java，并必须透传原始用户 Authorization 和 traceId，由目标 Java 继续鉴权。只有 static token 或本地放行而没有用户主体时，才允许走固定 `execution_nodes` 兼容 fallback。静态 API token 不得被伪装成用户身份。
+- opencode runtime 代理可以读取可选 `AuthPrincipal`：存在用户主体时业务层使用用户专属 opencode 进程；用户已有 ACTIVE binding 且属于其他服务器时，API 层只允许把用户进程状态、初始化、个人重启、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java，并必须透传原始用户 Authorization 和 traceId，由目标 Java 继续鉴权。只有 static token 或本地放行而没有用户主体时，才允许走固定 `execution_nodes` 兼容 fallback。静态 API token 不得被伪装成用户身份。
 - RunEvent SSE 跨 Java 路由必须在鉴权过滤器之后执行，按 Run 原始归属定位生产 Java，并透传原始 `Authorization`、`X-Trace-Id`、`Last-Event-ID` 和 query；目标 Java 收到 `X-Test-Agent-Backend-Routed=true` 后跳过二次路由，但仍执行同一 Controller 和业务校验。
 - Run cancel 是跨 Java 写操作，不得仅凭 `X-Test-Agent-Backend-Routed` 跳过生产节点解析，因为该 HTTP 头可由浏览器伪造；每一跳都必须通过 `RunEventSseRouteService.forwardTargetStrict` 重新确认 Run 原始生产服务器和当前被选中的 Java，到达本机 owner 后才允许进入 Controller。
 - XXL SSO 票据签发必须使用真实用户 Token 主体并强制 `SUPER_ADMIN`；静态 API token、本地放行或仅前端菜单可见性都不能建立 XXL 用户会话。
@@ -88,9 +88,9 @@ Token 校验流程：
 ## 用户站内通知安全
 
 1. 通知列表、已读和 SSE 必须使用当前用户 Bearer Token，接收人只取服务端 `AuthPrincipal.userId`。按通知 ID 已读还必须同时匹配接收人；不存在和不属于当前用户统一返回 `NOT_FOUND`，不得泄露其它用户通知是否存在。
-2. 通知动作只允许枚举化 `action_type + action_target_id`。首期 `SESSION_SHARE` 的目标只能是 `shareId`，浏览器必须自行映射到同源 `/s/{shareId}`；数据库、HTTP 和 SSE 均禁止保存或下发任意外部 URL、javascript/data scheme 或客户端自报跳转地址。
+2. 通知动作只允许枚举化 `action_type + action_target_id`。`SESSION_SHARE` 的目标只能是 `shareId`，浏览器自行映射到同源 `/s/{shareId}`；`NONE` 不执行动作；`RESTART_OWN_PROCESS` 只允许与 dispose 失败类型组合并调用当前认证用户的进程重启 API，目标只保存 rolloutId 且不得参与进程或路由选择。数据库、HTTP 和 SSE 均禁止保存或下发任意外部 URL、javascript/data scheme 或客户端自报跳转地址；未知类型或动作必须失败关闭。
 3. `shareId` 仍不是认证凭据。通知点击不能提前取得分享权限或标记已读；只有 `/s/{shareId}` 完成真实登录用户、分享、成员、版本、有效期、Session/Workspace 和所属人校验后，才按接收人及 shareId 幂等已读。从通知、“分享给我”或旧链接进入必须走同一服务端入口。
-4. 标题和摘要只允许会话标题、发送人展示名、只读/可对话权限等有界安全快照；禁止消息正文、文件名/路径、Prompt、Token、终端输入/输出、第三方响应和异常堆栈。通知同步失败日志只记录低敏业务 ID 与 traceId，不回显标题、摘要或链接；已读同步失败不得阻断已经成功的分享访问。
+4. 标题和摘要只允许会话标题、发送人展示名、只读/可对话权限或平台固定的 dispose 状态文案；禁止消息正文、文件名/路径、Prompt、Token、终端输入/输出、第三方响应和异常堆栈。通知同步失败日志只记录低敏业务 ID 与 traceId，不回显标题、摘要或链接；已读同步失败不得阻断已经成功的分享访问或进程重启。
 5. 未读和可点击状态必须实时合并通知、分享、成员、会话、所属人和到期事实，不能只信任历史通知行。撤销、移除、归档、到期或所属人停用后立即视为不可用且不计未读，即使失效通知回写或广播暂时失败也不能恢复授权。
 6. 通知变化只能在数据库事务提交后发布。用户级 SSE 只发送变化类型、可选通知 ID、未读数和生成时间；正文必须重新走当前用户分页 API。每 25 秒 heartbeat、30 秒数据库校准和断线重连都必须重新使用当前认证，SSE `id` 不是续传或授权凭据。
 7. 通知保存 90 天后由定时任务删除。迁移回填只允许仍有效的分享；只有发生在成员当前 `shared_at` 之后的成功 `READ_ACCESS_GRANTED` 审计可回填已读，过期、撤销、移除、归档或所属人停用数据不得回填。
@@ -273,7 +273,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
 - 公共 `workspace-git` Tool 禁止直接执行原生 Git 绕过平台；所有副作用必须调用 agent-scoped 专用入口并复用 workspace-management 的 owner、路径角色、`spec/**` 禁发布、应用同步和冲突规则。
 - 对话中的个人拉取仅能合并当前会话绑定 owner 在当前应用的个人 worktree；应用 workspace 和应用 Agent 统一使用 Git 原生合并保护，禁止自动 stash/reset，也不得把该凭据扩大为共享版本、其他用户或公共 Agent 的更新权限。
-- 超级管理员“应用 Git 刷新”、单分支组刷新及其工作空间/版本/分支范围查询是单独的共享控制面能力，必须在 HTTP 入口强校验 `SUPER_ADMIN`，不以应用成员或 READY OpenCode 进程替代鉴权。范围查询只能读取应用与托管工作区元数据，不访问 Git 远端或返回物理仓库路径；单分支选择必须以 `repositoryId + version + branch` 三字段精确命中当前应用，禁止只按可重名分支字符串执行。Git 远端访问只使用当前超级管理员保存的唯一 SSH Key；物理 feature 只允许快进，脏工作树或分叉必须按仓库组失败。向相关个人 worktree 收敛时继续使用原生 merge，禁止 stash、reset 或强制覆盖个人 staged、unstaged、untracked 内容；部分失败必须在响应中显式计数和列明，不能伪装为全部成功。
+- “应用 Git 刷新”、单分支组刷新及其工作空间/版本/分支范围查询是独立共享控制面能力，HTTP 入口必须强校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。超级管理员保留启用/停用应用全量能力且不要求成员关系；应用管理员只能读取和刷新启用且自己仍为有效成员的应用，列表与执行必须复用同一授权程序，伪造 appId 统一 `FORBIDDEN`。范围查询只能读取应用与托管工作区元数据，不访问 Git 远端或返回物理仓库路径；单分支选择必须以 `repositoryId + version + branch` 三字段精确命中当前应用，禁止只按可重名分支字符串执行。Git 远端访问只使用当前操作者保存的唯一 SSH Key；物理 feature 只允许快进，脏工作树或分叉必须按仓库组失败。向相关个人 worktree 收敛时继续使用原生 merge，禁止 stash、reset 或强制覆盖个人 staged、unstaged、untracked 内容；部分失败必须在响应中显式计数和列明，不能伪装为全部成功。
 - Tool 凭据由 `OpencodeProcessStartupService` 按用户签发，只允许专用 Git 端点使用，不能被通用用户 Token 过滤器接受，也不能访问其它平台 API；签名密钥不得注入 OpenCode 进程。凭据包含过期时间，验证时必须实时检查用户启用状态和角色。
 - 当前 workspace 必须由远端 session 经平台 agent binding 反查，禁止接受 Tool 传入 workspace ID、个人 workspace ID、物理路径或目标服务器。owner 不一致、非个人 workspace 或绑定缺失必须失败关闭。
 - `discard`、`publish`、冲突解决和取消合并必须先显示 OpenCode permission 确认；Tool 返回给模型的错误详情只保留原因、相对文件和并发提交等安全字段，不返回凭据、Git 命令或物理路径。

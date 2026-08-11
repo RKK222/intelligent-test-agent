@@ -3,9 +3,12 @@ package com.enterprise.testagent.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.common.pagination.PageRequest;
+import com.enterprise.testagent.domain.notification.UserNotification;
 import com.enterprise.testagent.domain.notification.UserNotificationActionType;
+import com.enterprise.testagent.domain.notification.UserNotificationId;
 import com.enterprise.testagent.domain.notification.UserNotificationRepository;
 import com.enterprise.testagent.domain.notification.UserNotificationStatus;
+import com.enterprise.testagent.domain.notification.UserNotificationType;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.sessionshare.SessionShare;
 import com.enterprise.testagent.domain.sessionshare.SessionShareAuditEvent;
@@ -41,6 +44,7 @@ class MyBatisUserNotificationRepositoryIntegrationTest {
     private static final UserId OWNER = new UserId("usr_notification_owner");
     private static final UserId READ_MEMBER = new UserId("usr_notification_read");
     private static final UserId UNREAD_MEMBER = new UserId("usr_notification_unread");
+    private static final UserId DISPOSE_MEMBER = new UserId("usr_notification_dispose");
     private static final SessionId SESSION = new SessionId("ses_notification_repository");
     private static final WorkspaceId WORKSPACE = new WorkspaceId("wrk_notification_repository");
     private static final SessionShareId SHARE = new SessionShareId(
@@ -85,6 +89,7 @@ class MyBatisUserNotificationRepositoryIntegrationTest {
                 "SUCCESS", null, "trace_notification_read", now.plusMillis(1)));
 
         executeMigration("db/migration/V20260810170000__user_notifications_create_notification_center.sql");
+        executeMigration("db/migration/V20260811213000__user_notifications_expand_dispose_types.sql");
         repository = new MyBatisUserNotificationRepository(
                 template.getMapper(UserNotificationMapper.class));
     }
@@ -166,12 +171,92 @@ class MyBatisUserNotificationRepositoryIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from user_notifications", Long.class)).isEqualTo(1L);
     }
 
+    @Test
+    void disposeNotificationEvolvesInOneRowWithoutRefreshingUnreadForTheSameState() {
+        UserNotification pending = disposeNotification(
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+                UserNotificationActionType.NONE,
+                "Agent 配置等待生效",
+                "配置已更新，正在等待当前任务结束后应用。",
+                now);
+        assertThat(repository.insert(pending)).isTrue();
+        assertThat(repository.markReadById(
+                pending.notificationId(), DISPOSE_MEMBER, now.plusSeconds(1), "trace_dispose_read")).isTrue();
+
+        assertThat(repository.updateByDedupKeyIfChanged(disposeNotification(
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+                UserNotificationActionType.NONE,
+                pending.title(),
+                pending.body(),
+                now.plusSeconds(2)))).isFalse();
+        assertThat(repository.countUnread(DISPOSE_MEMBER, now.plusSeconds(2))).isZero();
+
+        assertThat(repository.updateByDedupKeyIfChanged(disposeNotification(
+                UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED,
+                UserNotificationActionType.RESTART_OWN_PROCESS,
+                "Agent 配置应用失败",
+                "配置暂未应用，可重启自己的 TestAgent 进程后重试。",
+                now.plusSeconds(3)))).isTrue();
+        assertThat(repository.findPage(
+                DISPOSE_MEMBER, false, now.plusSeconds(4), new PageRequest(1, 20)).items())
+                .singleElement()
+                .satisfies(notification -> {
+                    assertThat(notification.type()).isEqualTo(UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED);
+                    assertThat(notification.unread()).isTrue();
+                    assertThat(notification.actionAvailable()).isTrue();
+                    assertThat(notification.actionType())
+                            .isEqualTo(UserNotificationActionType.RESTART_OWN_PROCESS);
+                });
+
+        assertThat(repository.updateByDedupKeyIfChanged(disposeNotification(
+                UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED,
+                UserNotificationActionType.NONE,
+                "Agent 配置已生效",
+                "配置已应用到你的 TestAgent 进程。",
+                now.plusSeconds(5)))).isTrue();
+        assertThat(repository.findPage(
+                DISPOSE_MEMBER, false, now.plusSeconds(6), new PageRequest(1, 20)).items())
+                .singleElement()
+                .satisfies(notification -> {
+                    assertThat(notification.type()).isEqualTo(UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED);
+                    assertThat(notification.unread()).isTrue();
+                    assertThat(notification.actionAvailable()).isFalse();
+                });
+    }
+
+    private UserNotification disposeNotification(
+            UserNotificationType type,
+            UserNotificationActionType actionType,
+            String title,
+            String body,
+            Instant updatedAt) {
+        return new UserNotification(
+                new UserNotificationId("ntf_dispose_repository"),
+                DISPOSE_MEMBER,
+                type,
+                null,
+                title,
+                body,
+                actionType,
+                "acr_dispose_repository",
+                "AGENT_CONFIG_DISPOSE:acr_dispose_repository:" + DISPOSE_MEMBER.value(),
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                "trace_dispose_repository",
+                now,
+                updatedAt);
+    }
+
     private void seedScope() {
         jdbc.update("insert into users(user_id,unified_auth_id,username,password_hash,status,created_at,updated_at) "
-                        + "values(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?)",
+                        + "values(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?)",
                 OWNER.value(), "ucid_notification_owner", "会话所属人", "hash", "ACTIVE", now, now,
                 READ_MEMBER.value(), "ucid_notification_read", "已读成员", "hash", "ACTIVE", now, now,
-                UNREAD_MEMBER.value(), "ucid_notification_unread", "未读成员", "hash", "ACTIVE", now, now);
+                UNREAD_MEMBER.value(), "ucid_notification_unread", "未读成员", "hash", "ACTIVE", now, now,
+                DISPOSE_MEMBER.value(), "ucid_notification_dispose", "配置通知成员", "hash", "ACTIVE", now, now);
         jdbc.update("insert into workspaces(workspace_id,name,root_path,status,trace_id,created_at,updated_at) "
                         + "values(?,?,?,?,?,?,?)",
                 WORKSPACE.value(), "通知工作区", "/tmp/notification", "ACTIVE", "trace_notification", now, now);

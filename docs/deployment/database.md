@@ -1323,8 +1323,8 @@ migration 不写默认、测试或演示工具数据。全部运行期分页、�
 Flyway 已校验 92 条 migration、PostgreSQL 当前版本为 `20260809110000` 且无需迁移。该日志不能代替完整
 `flyway_schema_history`：下一次部署前仍须导出全部 `installed_rank/version/script/checksum/success`。仍停留在该版本的
 企业库首次升级合并后的主链时，应依次新增 QA Memory 基础 `20260809120000`、会话分享 `20260809170000/01`、
-QA Memory 扩展 `20260809230000`/`20260810090000`、通知中心 `20260810170000` 和时延输入
-`20260810234154`。已经由 release 增量包执行到 `20260810234154`、但从未执行 QA Memory 的数据库，不再倒序
+QA Memory 扩展 `20260809230000`/`20260810090000`、通知中心 `20260810170000`、时延输入
+`20260810234154` 和通知 dispose 枚举扩展 `20260811213000`。已经由 release 增量包执行到 `20260810234154`、但从未执行 QA Memory 的数据库，不再倒序
 加载上述三条 QA Memory 主 migration，而只新增隔离补偿 `20260811170050`；只执行到会话分享主链的旧 release
 历史则使用 `20260810173117`，再顺序执行其后的通知和时延输入 migration。两条 QA Memory 补偿不可混用，
 `20260810110001/02` 仅属于精确匹配的 QA Memory 扩展兼容路径，也不得混入正常企业主链。共享 XXL MySQL 本轮
@@ -1758,3 +1758,13 @@ migration 创建 `user_notifications`：
 该版本高于 QA Memory 扩展兼容链的 `V20260810110000` 至 `V20260810110002`，通知本身无需复制第二份兼容 SQL：既有 `DatabaseMigrationCompatibilityCustomizer` 仍只过滤不适配的低版本主分享 migration，通知 migration 由主 location 在分享前向迁移之后顺序执行。反向把 QA Memory 合入已执行通知和 `V20260810234154` 的 release 数据库时，使用的是独立的 `V20260811170050` QA Memory 补偿，不是通知迁移副本。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 对每套已知已部署 history 升级到当前 HEAD 后统一断言 `user_notifications` 表和关键列存在；通知仓储 PostgreSQL 集成测试另覆盖空库、主分享基线、审计回填和查询口径。
 
 打包后必须分别从 persistence JAR 和最终应用 JAR 读取 `db/migration/V20260810170000__user_notifications_create_notification_center.sql`，与已测试源码计算 SHA-256；三者不一致不得发布。禁止通过 `repair`、`outOfOrder` 或手工修改 `flyway_schema_history` 处理冲突。
+
+## V20260811213000 Agent 配置 dispose 通知枚举扩展
+
+`V20260811213000__user_notifications_expand_dispose_types.sql` 只扩展既有 `user_notifications` 的两个 CHECK 约束，不新增表、列或业务数据。当前源码 SHA-256 为 `00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c`；任何需要保留的数据库执行后必须冻结文件名和字节。
+
+- `type` 新增 `AGENT_CONFIG_DISPOSE_PENDING/SUCCEEDED/FAILED/SUPERSEDED`，原 `SESSION_SHARED` 保持不变。
+- `action_type` 新增 `NONE/RESTART_OWN_PROCESS`，原 `SESSION_SHARE` 保持不变；dispose 目标只保存 rolloutId，禁止 URL。
+- 运行期单行状态演进由 `UserNotificationMapper.xml` 按 dedupKey 条件更新；相同状态不修改 `read_at/updated_at`，真实状态变化才清空已读。
+
+真实 PostgreSQL 验证必须覆盖空库、已执行分享通知基线升级到 HEAD、dispose 单行状态演进，以及所有已知 compatibility location。打包后分别从 persistence JAR 和最终应用 JAR 解出本 migration 并与上述已测试源码 SHA-256 比对；禁止用 H2、Flyway `repair/outOfOrder` 或手工历史表修改替代存量升级验证。

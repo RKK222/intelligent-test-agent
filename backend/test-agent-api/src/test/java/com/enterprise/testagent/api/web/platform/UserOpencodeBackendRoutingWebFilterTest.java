@@ -285,6 +285,43 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesConfirmedProcessRestartToBoundBackendAndPreservesAuthTraceAndBody() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.of("server-b"));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, """
+                {"success":true,"traceId":"trace_restart_route","data":{"status":"READY"}}
+                """);
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore(List.of(
+                backend("bjp_restart_route", "server-b", "http://10.8.0.22:8080", NOW))), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/processes/me/restart")
+                .header("X-Trace-Id", "trace_restart_route")
+                .header(org.springframework.http.HttpHeaders.AUTHORIZATION, "Bearer user-token")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body("{\"confirmRunning\":true}"));
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).singleElement().satisfies(request -> {
+            assertThat(request.uri().toString()).isEqualTo(
+                    "http://10.8.0.22:8080/api/internal/agent/opencode/processes/me/restart");
+            assertThat(request.headers().firstValue("X-Trace-Id")).contains("trace_restart_route");
+            assertThat(request.headers().firstValue(org.springframework.http.HttpHeaders.AUTHORIZATION))
+                    .contains("Bearer user-token");
+            assertThat(request.headers().firstValue(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER))
+                    .contains("true");
+        });
+        assertThat(httpClient.requestBodies).containsExactly("{\"confirmRunning\":true}");
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
     void sharedRequestUsesExecutionOwnersBindingAndForwardsShareHeader() {
         UserId owner = new UserId("usr_shared_session_owner");
         SessionShareId shareId = new SessionShareId("shr_" + "a".repeat(64));

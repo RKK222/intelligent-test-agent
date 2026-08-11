@@ -14,6 +14,11 @@ public interface UserNotificationRepository {
     /** 按 dedupKey 幂等插入，返回是否新增。 */
     boolean insert(UserNotification notification);
 
+    /**
+     * 仅当 dedupKey 已存在且业务状态真实变化时更新单行通知，并清空已读时间；相同状态返回 false。
+     */
+    boolean updateByDedupKeyIfChanged(UserNotification notification);
+
     /** 更新仍有效的受控动作通知快照，返回命中行数。 */
     int updateActiveByAction(
             UserId recipientUserId,

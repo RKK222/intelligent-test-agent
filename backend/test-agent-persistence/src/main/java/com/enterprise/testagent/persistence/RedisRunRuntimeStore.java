@@ -108,6 +108,13 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             return 1
             """, Long.class);
 
+    /** 维护租约允许活动 Run 存在，但仍与空闲 dispose 共用同一互斥键。 */
+    private static final DefaultRedisScript<Long> CLAIM_USER_RUNTIME_MAINTENANCE_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) then return 0 end
+            redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+            return 1
+            """, Long.class);
+
     /** 用户 slot 内原子阻止 dispose，并登记新 Run 与带随机 owner 的 runtime marker。 */
     private static final DefaultRedisScript<Long> RESERVE_USER_RUNTIME_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('GET', KEYS[2]) then return -1 end
@@ -2075,6 +2082,23 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                     ownerToken,
                     Long.toString(leaseTtl.toMillis()),
                     Long.toString(clock.millis()));
+            return claimed != null && claimed == 1L;
+        } catch (RuntimeException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    @Override
+    public boolean tryAcquireUserRuntimeMaintenance(UserId userId, String token, Duration ttl) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        String ownerToken = requireText(token, "token");
+        Duration leaseTtl = positive(ttl, "ttl");
+        try {
+            Long claimed = redisTemplate.execute(
+                    CLAIM_USER_RUNTIME_MAINTENANCE_SCRIPT,
+                    List.of(userRuntimeDisposeKey(userId)),
+                    ownerToken,
+                    Long.toString(leaseTtl.toMillis()));
             return claimed != null && claimed == 1L;
         } catch (RuntimeException exception) {
             throw unavailable(exception);

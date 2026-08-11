@@ -117,4 +117,21 @@ class UserRuntimeDisposeCoordinatorTest {
 
         verify(store).releaseUserRuntimeDispose(eq(USER_ID), anyString());
     }
+
+    @Test
+    void maintenanceLeaseAllowsActiveRunsAndStillUsesTokenScopedRelease() {
+        RunRuntimeStore store = Mockito.mock(RunRuntimeStore.class);
+        SessionRuntimeStateApplicationService state = Mockito.mock(SessionRuntimeStateApplicationService.class);
+        when(store.tryAcquireUserRuntimeMaintenance(eq(USER_ID), anyString(), any(Duration.class))).thenReturn(true);
+        UserRuntimeDisposeCoordinator coordinator = new UserRuntimeDisposeCoordinator(store, state);
+
+        String result = coordinator.withUserMaintenance(USER_ID, "trace_restart", guard -> {
+            guard.requireActive();
+            return "restarted";
+        });
+
+        assertThat(result).isEqualTo("restarted");
+        verify(state, never()).snapshot(any());
+        verify(store).releaseUserRuntimeDispose(eq(USER_ID), anyString());
+    }
 }

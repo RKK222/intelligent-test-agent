@@ -937,6 +937,14 @@ final class RuntimeDtos {
     record UserOpencodeProcessInitializeRequest(String operationId) {
     }
 
+    /** 当前用户进程重启请求；缺省或空请求体均按未确认活动 Run 处理。 */
+    record UserOpencodeProcessRestartRequest(Boolean confirmRunning) {
+
+        boolean confirmed() {
+            return Boolean.TRUE.equals(confirmRunning);
+        }
+    }
+
     /** 公共配置发布消息闸门轻量响应，不包含进程健康状态。 */
     record PublicConfigMessageGateResponse(
             boolean messageSendAllowed,

@@ -84,6 +84,7 @@ const props = withDefaults(
     opencodeProcessStatus?: UserOpencodeProcess | null;
     opencodeProcessLoading?: boolean;
     opencodeProcessInitializing?: boolean;
+    processRestarting?: boolean;
     showProcessStatusInPet?: boolean;
     /** 新手引导展示期间不自动弹出宠物进程状态面板。 */
     onboardingActive?: boolean;
@@ -129,6 +130,7 @@ const props = withDefaults(
     notificationsLoadingMore: false,
     notificationsHasMore: false,
     notificationsError: null,
+    processRestarting: false,
     showProcessStatusInPet: false,
     onboardingActive: false,
     sideQuestionAvailable: true,
@@ -183,6 +185,7 @@ const emit = defineEmits<{
   (e: "logout"): void;
   (e: "refresh-opencode-process"): void;
   (e: "initialize-process"): void;
+  (e: "restart-process"): void;
   (e: "join-app", appId: string, callback: (success: boolean) => void): void;
   (e: "robot-side-question", question: string): void;
   (e: "close-robot-side-question"): void;
@@ -2589,6 +2592,18 @@ function submitJoinApp() {
               <span class="figma-user-menu-service-dot" aria-hidden="true" />
               <span class="figma-user-menu-service-text" :title="opencodeServiceDisplay.text">{{ opencodeServiceDisplay.text }}</span>
             </div>
+            <button
+              v-if="!fixedWorkspace"
+              type="button"
+              class="figma-user-menu-item"
+              role="menuitem"
+              data-testid="restart-own-process"
+              :disabled="processRestarting"
+              @click="emit('restart-process')"
+            >
+              <RefreshCw class="figma-user-menu-icon" :class="{ 'is-spinning': processRestarting }" />
+              <span>{{ processRestarting ? "正在重启…" : "重启 TestAgent 进程" }}</span>
+            </button>
             <button v-if="false" type="button" class="figma-user-menu-item" role="menuitem" @mousedown.prevent="logout">
               <LogOut class="figma-user-menu-icon" />
               <span>退出登录</span>
@@ -4635,6 +4650,15 @@ function submitJoinApp() {
 .figma-user-menu-item:focus-visible {
   background: #f4f4f5;
   outline: none;
+}
+
+.figma-user-menu-item:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.figma-user-menu-item:disabled:hover {
+  background: transparent;
 }
 
 .figma-user-menu-icon {

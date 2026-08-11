@@ -21,6 +21,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -39,6 +40,11 @@ public class UserNotificationApplicationService {
 
     private static final Duration RETENTION = Duration.ofDays(90);
     private static final Duration RECONCILE_INTERVAL = Duration.ofSeconds(30);
+    private static final Set<UserNotificationType> DISPOSE_TYPES = EnumSet.of(
+            UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+            UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED,
+            UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED,
+            UserNotificationType.AGENT_CONFIG_DISPOSE_SUPERSEDED);
 
     private final UserNotificationRepository repository;
     private final UserNotificationRealtimeHub realtimeHub;
@@ -160,6 +166,57 @@ public class UserNotificationApplicationService {
                 now,
                 traceId)) {
             publish(recipientUserId, null, UserNotificationChangeType.READ, traceId, now);
+        }
+    }
+
+    /**
+     * 推进单个 rollout/用户的 dispose 通知状态；采用更新、幂等插入、并发重试更新保证单行演进。
+     */
+    @Transactional
+    public void syncAgentConfigDispose(
+            UserId recipientUserId,
+            String rolloutId,
+            UserNotificationType stateType,
+            String traceId) {
+        Objects.requireNonNull(recipientUserId, "recipientUserId must not be null");
+        if (!DISPOSE_TYPES.contains(stateType)) {
+            throw new IllegalArgumentException("stateType must be an Agent config dispose type");
+        }
+        String normalizedRolloutId = rolloutId == null ? "" : rolloutId.trim();
+        if (normalizedRolloutId.isBlank()) {
+            throw new IllegalArgumentException("rolloutId must not be blank");
+        }
+        Instant now = clock.instant();
+        DisposeCopy copy = disposeCopy(stateType);
+        UserNotification notification = new UserNotification(
+                new UserNotificationId(RuntimeIdGenerator.userNotificationId()),
+                recipientUserId,
+                stateType,
+                null,
+                copy.title(),
+                copy.body(),
+                copy.actionType(),
+                normalizedRolloutId,
+                "AGENT_CONFIG_DISPOSE:" + normalizedRolloutId + ":" + recipientUserId.value(),
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                traceId,
+                now,
+                now);
+        if (repository.updateByDedupKeyIfChanged(notification)) {
+            publish(recipientUserId, null, UserNotificationChangeType.UPDATED, traceId, now);
+            return;
+        }
+        if (repository.insert(notification)) {
+            publish(recipientUserId, notification.notificationId(), UserNotificationChangeType.CREATED, traceId, now);
+            return;
+        }
+        // 并发插入可能发生在第一次 UPDATE 之后；只在状态确实不同的情况下命中并广播。
+        if (repository.updateByDedupKeyIfChanged(notification)) {
+            publish(recipientUserId, null, UserNotificationChangeType.UPDATED, traceId, now);
         }
     }
 
@@ -303,6 +360,29 @@ public class UserNotificationApplicationService {
         return truncate(safeText(sessionTitle, "未命名会话") + " · " + (canChat ? "可对话" : "只读"), 500);
     }
 
+    private DisposeCopy disposeCopy(UserNotificationType type) {
+        return switch (type) {
+            case AGENT_CONFIG_DISPOSE_PENDING -> new DisposeCopy(
+                    "Agent 配置等待生效",
+                    "配置已更新，正在等待当前任务结束后应用。",
+                    UserNotificationActionType.NONE);
+            case AGENT_CONFIG_DISPOSE_SUCCEEDED -> new DisposeCopy(
+                    "Agent 配置已生效",
+                    "配置已应用到你的 TestAgent 进程。",
+                    UserNotificationActionType.NONE);
+            case AGENT_CONFIG_DISPOSE_FAILED -> new DisposeCopy(
+                    "Agent 配置应用失败",
+                    "配置暂未应用，可重启自己的 TestAgent 进程后重试。",
+                    UserNotificationActionType.RESTART_OWN_PROCESS);
+            case AGENT_CONFIG_DISPOSE_SUPERSEDED -> new DisposeCopy(
+                    "Agent 配置更新已结束",
+                    "该配置更新已被替代或结束，无需处理。",
+                    UserNotificationActionType.NONE);
+            case SESSION_SHARED -> throw new IllegalArgumentException(
+                    "SESSION_SHARED is not an Agent config dispose type");
+        };
+    }
+
     private String safeText(String value, String fallback) {
         String normalized = value == null ? "" : value.strip().replaceAll("[\\p{Cntrl}]", "");
         return normalized.isBlank() ? fallback : normalized;
@@ -316,5 +396,12 @@ public class UserNotificationApplicationService {
         }
         int end = value.offsetByCodePoints(0, maxCodePoints - 1);
         return value.substring(0, end) + "…";
+    }
+
+    /** dispose 通知只保存固定安全文案和受控动作，不接收下游异常文本。 */
+    private record DisposeCopy(
+            String title,
+            String body,
+            UserNotificationActionType actionType) {
     }
 }

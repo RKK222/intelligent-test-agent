@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
-import { Bell, ExternalLink, Inbox, LoaderCircle, MessageSquareShare, RefreshCw } from 'lucide-vue-next'
+import {
+  AlertTriangle,
+  Bell,
+  CheckCircle2,
+  CircleSlash2,
+  ExternalLink,
+  Inbox,
+  LoaderCircle,
+  MessageSquareShare,
+  RefreshCw,
+} from 'lucide-vue-next'
 import type { UserNotification } from '@test-agent/shared-types'
 
 export type UserNotificationFilter = 'ALL' | 'UNREAD'
@@ -71,8 +81,87 @@ function selectFilter(filter: UserNotificationFilter) {
 }
 
 function openNotification(notification: UserNotification) {
-  if (!notification.actionAvailable) return
+  if (!canOpenNotification(notification)) return
   emit('open-notification', notification)
+}
+
+type NotificationKind =
+  | 'SESSION_SHARE'
+  | 'DISPOSE_PENDING'
+  | 'DISPOSE_SUCCEEDED'
+  | 'DISPOSE_FAILED'
+  | 'DISPOSE_SUPERSEDED'
+  | 'UNKNOWN'
+
+/** 未知类型或类型/动作组合必须失败关闭，不能把 actionTargetId 当作 URL 或其它命令。 */
+function notificationKind(notification: UserNotification): NotificationKind {
+  if (notification.type === 'SESSION_SHARED' && notification.actionType === 'SESSION_SHARE') return 'SESSION_SHARE'
+  if (notification.type === 'AGENT_CONFIG_DISPOSE_PENDING' && notification.actionType === 'NONE') return 'DISPOSE_PENDING'
+  if (notification.type === 'AGENT_CONFIG_DISPOSE_SUCCEEDED' && notification.actionType === 'NONE') return 'DISPOSE_SUCCEEDED'
+  if (notification.type === 'AGENT_CONFIG_DISPOSE_FAILED' && notification.actionType === 'RESTART_OWN_PROCESS') return 'DISPOSE_FAILED'
+  if (notification.type === 'AGENT_CONFIG_DISPOSE_SUPERSEDED' && notification.actionType === 'NONE') return 'DISPOSE_SUPERSEDED'
+  return 'UNKNOWN'
+}
+
+function isDisposeNotification(notification: UserNotification) {
+  return notificationKind(notification).startsWith('DISPOSE_')
+}
+
+function canOpenNotification(notification: UserNotification) {
+  const kind = notificationKind(notification)
+  if (kind === 'SESSION_SHARE') return notification.actionAvailable
+  if (kind === 'DISPOSE_FAILED') return notification.actionAvailable
+  if (kind === 'DISPOSE_PENDING' || kind === 'DISPOSE_SUCCEEDED' || kind === 'DISPOSE_SUPERSEDED') {
+    return notification.unread
+  }
+  return false
+}
+
+function shouldDimNotification(notification: UserNotification) {
+  const kind = notificationKind(notification)
+  return kind === 'UNKNOWN' || (kind === 'SESSION_SHARE' && !notification.actionAvailable)
+}
+
+function notificationTimestamp(notification: UserNotification) {
+  return isDisposeNotification(notification) ? notification.updatedAt : notification.createdAt
+}
+
+function notificationBody(notification: UserNotification) {
+  return notificationKind(notification) === 'SESSION_SHARE' ? sessionTitle(notification) : notification.body
+}
+
+function notificationStateLabel(notification: UserNotification) {
+  switch (notificationKind(notification)) {
+    case 'SESSION_SHARE': return permissionLabel(notification)
+    case 'DISPOSE_PENDING': return '等待生效'
+    case 'DISPOSE_SUCCEEDED': return '已生效'
+    case 'DISPOSE_FAILED': return '处理失败'
+    case 'DISPOSE_SUPERSEDED': return '已结束'
+    default: return '暂不支持'
+  }
+}
+
+function notificationActionLabel(notification: UserNotification) {
+  switch (notificationKind(notification)) {
+    case 'SESSION_SHARE':
+      return notification.actionAvailable ? formatExpiry(notification.expiresAt) : invalidationLabel(notification)
+    case 'DISPOSE_FAILED':
+      return notification.actionAvailable ? '重启进程' : '暂不可重启'
+    case 'DISPOSE_PENDING':
+    case 'DISPOSE_SUCCEEDED':
+    case 'DISPOSE_SUPERSEDED':
+      return notification.unread ? '标记已读' : '已读'
+    default:
+      return '不支持的通知动作'
+  }
+}
+
+function notificationAriaLabel(notification: UserNotification) {
+  // 会话分享保留既有“新标签页打开”语义，避免类型扩展改变辅助技术和自动化定位契约。
+  if (notificationKind(notification) === 'SESSION_SHARE' && notification.actionAvailable) {
+    return `${notification.title}，在新标签页打开`
+  }
+  return `${notification.title}，${notificationActionLabel(notification)}`
 }
 
 function permissionLabel(notification: UserNotification) {
@@ -192,7 +281,7 @@ onBeforeUnmount(() => {
         <div v-else-if="notifications.length === 0" class="user-notification-center__state">
           <Inbox :size="26" />
           <strong>{{ filter === 'UNREAD' ? '未读消息已经处理完' : '暂时没有通知' }}</strong>
-          <span>{{ filter === 'UNREAD' ? '新的分享会第一时间出现在这里' : '同事向你分享对话后，会出现在这里' }}</span>
+          <span>{{ filter === 'UNREAD' ? '新的分享和配置状态会第一时间出现在这里' : '会话分享和 Agent 配置状态会出现在这里' }}</span>
         </div>
         <div v-else class="user-notification-center__list" role="list">
           <article
@@ -201,29 +290,49 @@ onBeforeUnmount(() => {
             :class="[
               'user-notification-center__item',
               notification.unread && 'is-unread',
-              !notification.actionAvailable && 'is-invalid'
+              `is-${notificationKind(notification).toLowerCase().replaceAll('_', '-')}`,
+              shouldDimNotification(notification) && 'is-invalid'
             ]"
             role="listitem"
           >
             <button
               type="button"
-              :disabled="!notification.actionAvailable"
-              :aria-label="notification.actionAvailable ? `${notification.title}，在新标签页打开` : `${notification.title}，${invalidationLabel(notification)}`"
+              :data-testid="`notification-item-${notification.notificationId}`"
+              :disabled="!canOpenNotification(notification)"
+              :aria-label="notificationAriaLabel(notification)"
               @click="openNotification(notification)"
             >
-              <span class="user-notification-center__item-icon"><MessageSquareShare :size="17" /></span>
+              <span class="user-notification-center__item-icon">
+                <MessageSquareShare v-if="notificationKind(notification) === 'SESSION_SHARE'" :size="17" />
+                <LoaderCircle v-else-if="notificationKind(notification) === 'DISPOSE_PENDING'" :size="17" />
+                <CheckCircle2 v-else-if="notificationKind(notification) === 'DISPOSE_SUCCEEDED'" :size="17" />
+                <AlertTriangle v-else-if="notificationKind(notification) === 'DISPOSE_FAILED'" :size="17" />
+                <CircleSlash2 v-else-if="notificationKind(notification) === 'DISPOSE_SUPERSEDED'" :size="17" />
+                <Inbox v-else :size="17" />
+              </span>
               <span class="user-notification-center__item-main">
                 <span class="user-notification-center__item-heading">
                   <strong>{{ notification.title }}</strong>
-                  <time :datetime="notification.createdAt">{{ formatTime(notification.createdAt) }}</time>
+                  <time :datetime="notificationTimestamp(notification)">{{ formatTime(notificationTimestamp(notification)) }}</time>
                 </span>
-                <span class="user-notification-center__session-title">{{ sessionTitle(notification) }}</span>
+                <span class="user-notification-center__session-title">{{ notificationBody(notification) }}</span>
                 <span class="user-notification-center__meta">
-                  <em>{{ permissionLabel(notification) }}</em>
-                  <span>{{ notification.actionAvailable ? formatExpiry(notification.expiresAt) : invalidationLabel(notification) }}</span>
+                  <em>{{ notificationStateLabel(notification) }}</em>
+                  <span>{{ notificationActionLabel(notification) }}</span>
                 </span>
               </span>
-              <ExternalLink v-if="notification.actionAvailable" class="user-notification-center__open-icon" :size="15" aria-hidden="true" />
+              <ExternalLink
+                v-if="notificationKind(notification) === 'SESSION_SHARE' && canOpenNotification(notification)"
+                class="user-notification-center__open-icon"
+                :size="15"
+                aria-hidden="true"
+              />
+              <RefreshCw
+                v-else-if="notificationKind(notification) === 'DISPOSE_FAILED' && canOpenNotification(notification)"
+                class="user-notification-center__open-icon"
+                :size="15"
+                aria-hidden="true"
+              />
             </button>
           </article>
         </div>
@@ -277,6 +386,10 @@ onBeforeUnmount(() => {
 .user-notification-center__item.is-invalid > button { cursor: default; opacity: .62; }
 .user-notification-center__item.is-invalid > button:hover { background: transparent; }
 .user-notification-center__item-icon { display: grid; width: 34px; height: 34px; place-content: center; border-radius: 9px; background: #fdf2f2; color: #991b1b; }
+.user-notification-center__item.is-dispose-pending .user-notification-center__item-icon { background: #fff7ed; color: #c2410c; }
+.user-notification-center__item.is-dispose-succeeded .user-notification-center__item-icon { background: #f0fdf4; color: #15803d; }
+.user-notification-center__item.is-dispose-failed .user-notification-center__item-icon { background: #fef2f2; color: #b91c1c; }
+.user-notification-center__item.is-dispose-superseded .user-notification-center__item-icon { background: #f4f4f5; color: #71717a; }
 .user-notification-center__item-main { display: grid; min-width: 0; gap: 4px; }
 .user-notification-center__item-heading { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 8px; }
 .user-notification-center__item-heading strong { min-width: 0; overflow: hidden; color: #1f2937; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }

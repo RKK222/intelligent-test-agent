@@ -99,6 +99,9 @@ public interface PublicAgentConfigRolloutRepository {
 
     List<String> findActiveServerMembershipIds();
 
+    /** 查询服务器退役前仍会被弃用的进程目标，供通知状态与数据库终态同步推进。 */
+    List<PublicAgentConfigRolloutTarget> findPendingTargetsByServer(String linuxServerId);
+
     void decommissionServerMembership(String linuxServerId, Instant now);
 
     void addServer(String rolloutId, String linuxServerId, Instant now);

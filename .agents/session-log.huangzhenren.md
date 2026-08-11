@@ -2339,3 +2339,22 @@
   - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
 - Result:
   - 页面空闲时不再有全局无限动画触发全树样式重算，浏览器 CPU 回归正常；运行态指示器（思考点、工具运行、disclosure 运行）在有活动 Run 时仍正常脉冲。纯 CSS 性能修复，无 API/DTO/事件/数据库变更，向后兼容。
+
+### 2026-08-11 - 优化应用 Git 权限、个人进程重启与 dispose 通知
+
+- Why:
+  - 应用管理员需要在不获得超级管理员全量控制台权限的前提下刷新自己所属应用的 Git；普通用户需要从头像安全重启自己的 TestAgent/OpenCode 进程，并在配置 dispose 期间获得可追踪、可重试的站内通知。
+- What:
+  - 应用 Git 三个既有接口开放给 `APP_ADMIN`，服务层按当前用户有效成员关系过滤启用应用并对伪造 appId 返回 `FORBIDDEN`；`SUPER_ADMIN` 继续拥有启用及停用应用的全量能力。前端控制台为应用管理员只展示“配置管理 → 应用 Git 刷新”。
+  - 新增 `POST /api/internal/agent/{agentId}/processes/me/restart` 和个人进程重启编排：Redis 维护租约允许在活动 Run 存在时取得并阻止新 Run，未确认返回活动数量冲突；确认后取消全部活动 Run、复查终态，再复用公共停止、启动和跨 Java 路由程序。头像菜单及通知动作复用同一重启 mutation。
+  - dispose rollout 按 `AGENT_CONFIG_DISPOSE:<rolloutId>:<userId>` 幂等维护等待、成功、失败、替代四类通知；失败仅开放受控 `RESTART_OWN_PROCESS` 动作，相同状态不刷新未读或重复广播。MyBatis XML 实现条件更新和并发幂等插入，新增 `V20260811213000__user_notifications_expand_dispose_types.sql` 扩展通知约束。
+  - 通知中心拆分通知有效性与动作可用性，保留 `SESSION_SHARE` 访问/已读兼容，未知类型或动作失败关闭；同步 HTTP、事件流、数据库、安全、模块图、测试说明、前后端 README/PACKAGE 和用户手册。
+- How:
+  - 后端 12 个定向测试类共 242 项：239 passed、3 个 PostgreSQL/Testcontainers 用例因本机无 `/var/run/docker.sock` 跳过；重启、Redis 租约、Git 权限、dispose 状态机、通知 H2/MyBatis、路由与控制器覆盖均通过。最终 22 模块 `mvn -pl test-agent-app -am -DskipTests package` 成功。
+  - 前端 shared-types、backend-api、agent-web 类型检查通过；5 个定向 Vitest 文件 193/193、Chromium 工作台场景 2/2 通过；agent-web 与用户手册 production build 成功，仅保留既有大 chunk 警告。
+  - `FlywayMigrationNamingTest` 10/10 与 `tools/verify-ai-docs.sh` 通过。通知中心基线 migration SHA-256 为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`，本次 migration 为 `00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c`；两者在源码、persistence JAR 和最终应用嵌套 JAR 中字节一致。`git diff --check` 与冲突标记扫描通过。
+  - 提交前回顾全部 `.agents/session-log*.md` 近期记录，保留并纳入原有 `scheduler-management-panel.test.ts` 与 `MyBatisPublicAgentConfigRolloutPostgresqlIntegrationTest.java` 测试改动，未覆盖其他提交者成果。
+- Result:
+  - 三项功能已完整接入既有鉴权、进程公共程序、跨节点路由、Run 取消和通知 SSE 边界；未新增 RunEvent 类型，旧分享通知、超级管理员和普通用户权限保持兼容。通知不保存任意 URL、原始异常、路径、密钥或第三方响应。
+  - 本机 Docker/PostgreSQL 当前不可用，因此真实 PostgreSQL 空库、全部已知历史与 compatibility location 升级门禁尚未执行；发布前必须在可用环境补跑并核对目标库 `flyway_schema_history`，不能以 H2、JAR 字节校验或跳过用例替代。
+  - 未修改 `.env*`、generated SDK 或 `opencode-source/`，未创建新分支，也未推送远端。

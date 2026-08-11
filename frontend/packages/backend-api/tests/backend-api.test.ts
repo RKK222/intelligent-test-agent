@@ -1444,6 +1444,42 @@ describe("backend-api", () => {
     expect((fetcher.mock.calls[0]?.[1]?.headers as Headers).get("Authorization")).toBe("Bearer token_123");
   });
 
+  it("restarts the current user's opencode process with the backend confirmation flag", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            status: "READY",
+            initializable: false,
+            message: "TestAgent 进程已重启",
+            serviceStatus: "RUNNING",
+            serviceAddress: "10.8.0.12:4096",
+            checkedAt: "2026-08-11T14:00:00Z"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.restartMyOpencodeProcess(true)).resolves.toMatchObject({
+      status: "READY",
+      serviceStatus: "RUNNING"
+    });
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[0]).toBe("http://api/api/internal/agent/opencode/processes/me/restart");
+    expect(fetcher.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    expect(fetcher.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ confirmRunning: true }));
+  });
+
   it("maps opencode runtime management overview through platform URL with filters", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

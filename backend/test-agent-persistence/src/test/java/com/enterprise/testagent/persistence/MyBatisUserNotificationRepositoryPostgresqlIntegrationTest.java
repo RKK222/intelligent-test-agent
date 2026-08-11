@@ -3,7 +3,12 @@ package com.enterprise.testagent.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.common.pagination.PageRequest;
+import com.enterprise.testagent.domain.notification.UserNotification;
+import com.enterprise.testagent.domain.notification.UserNotificationActionType;
+import com.enterprise.testagent.domain.notification.UserNotificationId;
 import com.enterprise.testagent.domain.notification.UserNotificationRepository;
+import com.enterprise.testagent.domain.notification.UserNotificationStatus;
+import com.enterprise.testagent.domain.notification.UserNotificationType;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.persistence.mybatis.MyBatisUserNotificationRepository;
 import com.enterprise.testagent.persistence.mybatis.UserNotificationMapper;
@@ -26,11 +31,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-/** 真实 PostgreSQL 覆盖空库与已部署分享基线升级，并核验审计回填和 PostgreSQL ON CONFLICT。 */
+/** 真实 PostgreSQL 覆盖空库与已部署分享基线升级，并核验通知状态演进和 PostgreSQL 幂等写入。 */
 @Testcontainers(disabledWithoutDocker = true)
 class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
 
-    private static final String MIGRATION_VERSION = "20260810170000";
+    private static final String MIGRATION_VERSION = "20260811213000";
     private static final String PREVIOUS_VERSION = "20260809170001";
     private static final Instant NOW = Instant.parse("2026-08-10T09:00:00Z");
     private static final String SHARE_ID =
@@ -90,6 +95,103 @@ class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
         assertThat(repository.countUnread(
                 new UserId("usr_notification_pg_unread"), NOW.plusSeconds(3)))
                 .isEqualTo(1L);
+    }
+
+    @Test
+    void disposeNotificationEvolvesInOneRowAndOnlyRealChangesResetUnread() throws Exception {
+        DataSource disposeDataSource = dataSource("notification_dispose");
+        migrate(disposeDataSource, "notification_dispose", null);
+        JdbcClient jdbc = JdbcClient.create(disposeDataSource);
+        UserId recipient = new UserId("usr_notification_pg_dispose");
+        jdbc.sql("""
+                        insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
+                        values (:userId, 'ucid_pg_dispose', 'PostgreSQL配置通知成员', 'hash', 'ACTIVE', :now, :now)
+                        """)
+                .param("userId", recipient.value())
+                .param("now", Timestamp.from(NOW))
+                .update();
+        UserNotificationRepository repository = repository(disposeDataSource);
+
+        UserNotification pending = disposeNotification(
+                recipient,
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+                UserNotificationActionType.NONE,
+                "Agent 配置等待生效",
+                "配置已更新，正在等待当前任务结束后应用。",
+                NOW);
+        assertThat(repository.insert(pending)).isTrue();
+        assertThat(repository.markReadById(
+                pending.notificationId(), recipient, NOW.plusSeconds(1), "trace_pg_dispose_read"))
+                .isTrue();
+        assertThat(repository.updateByDedupKeyIfChanged(disposeNotification(
+                recipient,
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+                UserNotificationActionType.NONE,
+                pending.title(),
+                pending.body(),
+                NOW.plusSeconds(2)))).isFalse();
+        assertThat(repository.countUnread(recipient, NOW.plusSeconds(2))).isZero();
+
+        assertThat(repository.updateByDedupKeyIfChanged(disposeNotification(
+                recipient,
+                UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED,
+                UserNotificationActionType.RESTART_OWN_PROCESS,
+                "Agent 配置应用失败",
+                "配置暂未应用，可重启自己的 TestAgent 进程后重试。",
+                NOW.plusSeconds(3)))).isTrue();
+        assertThat(repository.findPage(recipient, false, NOW.plusSeconds(4), new PageRequest(1, 20)).items())
+                .singleElement()
+                .satisfies(notification -> {
+                    assertThat(notification.type()).isEqualTo(UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED);
+                    assertThat(notification.unread()).isTrue();
+                    assertThat(notification.actionAvailable()).isTrue();
+                });
+
+        assertThat(repository.updateByDedupKeyIfChanged(disposeNotification(
+                recipient,
+                UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED,
+                UserNotificationActionType.NONE,
+                "Agent 配置已生效",
+                "配置已应用到你的 TestAgent 进程。",
+                NOW.plusSeconds(5)))).isTrue();
+        assertThat(repository.findPage(recipient, false, NOW.plusSeconds(6), new PageRequest(1, 20)).items())
+                .singleElement()
+                .satisfies(notification -> {
+                    assertThat(notification.type()).isEqualTo(UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED);
+                    assertThat(notification.unread()).isTrue();
+                    assertThat(notification.actionAvailable()).isFalse();
+                });
+        assertThat(jdbc.sql("select count(*) from user_notifications where recipient_user_id = :userId")
+                .param("userId", recipient.value())
+                .query(Long.class)
+                .single()).isEqualTo(1L);
+    }
+
+    private static UserNotification disposeNotification(
+            UserId recipient,
+            UserNotificationType type,
+            UserNotificationActionType actionType,
+            String title,
+            String body,
+            Instant updatedAt) {
+        return new UserNotification(
+                new UserNotificationId("ntf_dispose_pg"),
+                recipient,
+                type,
+                null,
+                title,
+                body,
+                actionType,
+                "acr_dispose_pg",
+                "AGENT_CONFIG_DISPOSE:acr_dispose_pg:" + recipient.value(),
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                "trace_dispose_pg",
+                NOW,
+                updatedAt);
     }
 
     private static void seedShareBaseline(JdbcClient jdbc) {

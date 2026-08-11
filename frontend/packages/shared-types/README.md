@@ -8,7 +8,7 @@
 
 ## 主要职责
 
-- 定义通知中心 `UserNotification`、分页响应、`UserNotificationStreamUpdate` 和变化类型。动作只允许服务端声明的 `actionType + actionTargetId`；首期 `SESSION_SHARE` 由页面映射到内部 `/s/{shareId}`，类型不提供任意 URL 字段。
+- 定义通知中心 `UserNotification`、分页响应、`UserNotificationStreamUpdate` 和变化类型。通知类型包含 `SESSION_SHARED` 与配置 dispose 的 `PENDING/SUCCEEDED/FAILED/SUPERSEDED` 四态，动作只允许服务端声明的 `actionType + actionTargetId`：`SESSION_SHARE` 映射到内部 `/s/{shareId}`，`NONE` 仅用于展示和已读，`RESTART_OWN_PROCESS` 只重启当前用户进程；类型不提供任意 URL 字段。联合保留未知字符串以兼容滚动升级，前端必须失败关闭未知类型或动作。
 
 - 提供 `XxlJobSsoTicket`，只表达短期 `ticket/expiresAt/formAction` 响应；原始票据不得进入持久化状态、URL 或日志。
 - 提供 `LobehubSsoTicket`，只表达当前用户签票得到的 `ticket/expiresAt/consumeUrl`；`consumeUrl` 必须由 launch

@@ -817,9 +817,15 @@ export type SessionShareRuntimeState = {
   generatedAt: string;
 };
 
-/** 工作台通知首期只开放受控的会话分享动作，前端不得把通知目标解释为任意 URL。 */
-export type UserNotificationType = "SESSION_SHARED" | string;
-export type UserNotificationActionType = "SESSION_SHARE" | string;
+/** 工作台只执行显式列出的受控通知动作；保留 string 以兼容后端未来扩展并由前端失败关闭。 */
+export type UserNotificationType =
+  | "SESSION_SHARED"
+  | "AGENT_CONFIG_DISPOSE_PENDING"
+  | "AGENT_CONFIG_DISPOSE_SUCCEEDED"
+  | "AGENT_CONFIG_DISPOSE_FAILED"
+  | "AGENT_CONFIG_DISPOSE_SUPERSEDED"
+  | string;
+export type UserNotificationActionType = "SESSION_SHARE" | "NONE" | "RESTART_OWN_PROCESS" | string;
 export type UserNotificationStatus = "ACTIVE" | "INVALIDATED" | string;
 export type UserNotificationChangeType = "SNAPSHOT" | "CREATED" | "READ" | "UPDATED" | "INVALIDATED";
 

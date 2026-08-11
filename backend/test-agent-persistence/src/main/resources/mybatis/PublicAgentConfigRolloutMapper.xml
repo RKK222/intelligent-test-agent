@@ -434,6 +434,20 @@
           )
     </update>
 
+    <!-- 退役前读取即将被弃用的通知接收目标；只返回仍处于活动 rollout 的非终态进程。 -->
+    <select id="findPendingTargetsByServer" resultMap="TargetRowMap">
+        select t.target_id, t.rollout_id, r.config_scope, t.user_id,
+               t.linux_server_id, t.container_id, t.port, t.process_pid,
+               t.process_started_at, t.base_url, t.retry_count,
+               t.lease_until, t.lease_token, t.trace_id, t.force_stop
+        from public_agent_config_rollout_targets t
+        join public_agent_config_rollouts r on r.rollout_id = t.rollout_id
+        where t.linux_server_id = #{linuxServerId}
+          and t.status not in ('DISPOSED', 'ABANDONED')
+          and r.status in ('PREPARING', 'DRAINING')
+        order by t.rollout_id, t.created_at, t.target_id
+    </select>
+
     <update id="abandonRolloutTargets">
         update public_agent_config_rollout_targets t
         set status = 'ABANDONED', lease_until = null, lease_token = null,

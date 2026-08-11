@@ -195,6 +195,58 @@ test("session share notification appears in real time, opens a new tab, then ref
   await expect.poll(() => notificationEventRequests.length).toBeGreaterThanOrEqual(3);
 });
 
+test("avatar restart confirms active runs and dispose failure reuses the same current-user action", async ({ page }) => {
+  const processRestartRequests: boolean[] = [];
+  const notificationReadRequests: string[] = [];
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v7:usr_restart_owner", "seen");
+  });
+  await mockBackendApi(page, {
+    authUser: {
+      userId: "usr_restart_owner",
+      username: "重启用户",
+      unifiedAuthId: "ucid_restart_owner",
+      roles: ["USER"]
+    },
+    processRestartRequests,
+    processRestartConflictRunningCount: 2,
+    userNotifications: [{
+      notificationId: "ntf_dispose_failed",
+      type: "AGENT_CONFIG_DISPOSE_FAILED",
+      actorUserId: null,
+      title: "应用配置生效失败",
+      body: "配置暂未生效，可重启本人进程后重试",
+      actionType: "RESTART_OWN_PROCESS",
+      actionTargetId: "rollout_failed",
+      status: "ACTIVE",
+      invalidationReason: null,
+      actionAvailable: true,
+      unread: true,
+      expiresAt: null,
+      readAt: null,
+      createdAt: "2026-08-11T10:00:00Z",
+      updatedAt: "2026-08-11T10:05:00Z"
+    }],
+    userNotificationUnreadCount: 1,
+    userNotificationReadRequests: notificationReadRequests
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "当前用户 重启用户" }).click();
+  await page.getByTestId("restart-own-process").click();
+  await expect(page.getByText("检测到 2 个运行中的任务。继续重启会先中止这些任务，是否继续？")).toBeVisible();
+  await page.getByRole("button", { name: "中止任务并重启" }).click();
+  await expect.poll(() => processRestartRequests).toEqual([false, true]);
+  await expect(page.getByText("TestAgent 进程已重启")).toBeVisible();
+
+  await page.getByTestId("notification-center-trigger").click();
+  await page.getByRole("button", { name: /应用配置生效失败.*重启进程/ }).click();
+  await expect(page.getByText("检测到 2 个运行中的任务。继续重启会先中止这些任务，是否继续？")).toBeVisible();
+  await page.getByRole("button", { name: "中止任务并重启" }).click();
+  await expect.poll(() => processRestartRequests).toEqual([false, true, false, true]);
+  await expect.poll(() => notificationReadRequests).toEqual(["ntf_dispose_failed"]);
+});
+
 test("session share owner repairs historical collaborator resend attribution from audit metadata", async ({ page }) => {
   const historicalResend = {
     resendId: "rsd_collaborator_owner_view",
@@ -9984,6 +10036,8 @@ async function mockBackendApi(
     processServiceStatus?: "UNASSIGNED" | "NOT_RUNNING";
     processStatusRequests?: string[];
     processInitializations?: Array<Record<string, unknown>>;
+    processRestartRequests?: boolean[];
+    processRestartConflictRunningCount?: number;
     initializeFailureThenReady?: boolean;
     ensureDefaultRequiresReady?: boolean;
     sessions?: Array<Record<string, unknown>>;
@@ -11345,6 +11399,24 @@ async function mockBackendApi(
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me") {
       capture.processStatusRequests?.push(`${method} ${url.pathname}`);
+      await route.fulfill(json(opencodeProcessStatus(currentProcessStatus, capture.processServiceStatus)));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/processes/me/restart") {
+      const request = JSON.parse(route.request().postData() ?? "{}") as { confirmRunning?: boolean };
+      const confirmRunning = request.confirmRunning === true;
+      capture.processRestartRequests?.push(confirmRunning);
+      if (!confirmRunning && capture.processRestartConflictRunningCount !== undefined) {
+        await route.fulfill({
+          status: 409,
+          ...jsonFailure("CONFLICT", "当前用户仍有运行中的任务", {
+            confirmationRequired: true,
+            runningCount: capture.processRestartConflictRunningCount
+          })
+        });
+        return;
+      }
+      currentProcessStatus = "READY";
       await route.fulfill(json(opencodeProcessStatus(currentProcessStatus, capture.processServiceStatus)));
       return;
     }

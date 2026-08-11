@@ -25,10 +25,12 @@ const emit = defineEmits<{
 type SystemMenuKey = "scheduler" | "runtime" | "params" | "apiKeys" | "internalModels" | "internalModelObservability" | "memory" | "config" | "analytics" | "support";
 type SystemMenuItem = { key: SystemMenuKey; label: string; icon: Component };
 
-const activeKey = ref<SystemMenuKey>("scheduler");
+const activeKey = ref<SystemMenuKey>(props.currentUser?.roles?.includes("SUPER_ADMIN") === true ? "scheduler" : "config");
 const supportRevealed = ref(false);
 const supportActivationSequence = ref(0);
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasApplicationAdmin = computed(() => props.currentUser?.roles?.includes("APP_ADMIN") === true);
+const hasSystemAccess = computed(() => hasSuperAdmin.value || hasApplicationAdmin.value);
 
 const items: SystemMenuItem[] = [
   { key: "scheduler", label: "定时任务管理", icon: CalendarClock },
@@ -41,9 +43,13 @@ const items: SystemMenuItem[] = [
   { key: "config", label: "配置管理", icon: Settings2 },
   { key: "analytics", label: "运营分析", icon: BarChart3 }
 ];
-const visibleItems = computed<SystemMenuItem[]>(() => supportRevealed.value
-  ? [...items, { key: "support", label: "问题排查只读访问", icon: KeyRound }]
-  : items);
+const visibleItems = computed<SystemMenuItem[]>(() => {
+  // 应用管理员只获得应用 Git 控制台入口，其余系统能力继续由超级管理员独占。
+  if (!hasSuperAdmin.value) return items.filter((item) => item.key === "config");
+  return supportRevealed.value
+    ? [...items, { key: "support", label: "问题排查只读访问", icon: KeyRound }]
+    : items;
+});
 
 function selectMenu(key: SystemMenuKey) {
   activeKey.value = key;
@@ -62,16 +68,19 @@ watch(() => props.supportAccessRequested, (requested) => {
   if (requested) revealSupportAccess();
 }, { immediate: true });
 watch(hasSuperAdmin, (allowed) => {
-  if (!allowed) {
-    supportRevealed.value = false;
+  if (allowed) {
+    // 登录态异步恢复为超级管理员时，保持原有控制台默认进入定时任务管理的行为。
     activeKey.value = "scheduler";
+    return;
   }
+  supportRevealed.value = false;
+  activeKey.value = hasApplicationAdmin.value ? "config" : "scheduler";
 });
 </script>
 
 <template>
   <section class="ta-system-management">
-    <div v-if="!hasSuperAdmin" class="ta-system-placeholder">当前账号无系统管理权限</div>
+    <div v-if="!hasSystemAccess" class="ta-system-placeholder">当前账号无系统管理权限</div>
     <template v-else>
       <nav class="ta-system-menu" aria-label="系统管理导航">
         <el-tooltip

@@ -1,23 +1,30 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { FolderGit2, GitPullRequest } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import OpencodePublicConfigManagementPanel from "./OpencodePublicConfigManagementPanel.vue";
 import ApplicationGitRefreshManagementPanel from "./ApplicationGitRefreshManagementPanel.vue";
 
-defineProps<{
+const props = defineProps<{
   currentUser: CurrentUser | null;
 }>();
 
 type ConfigMenuKey = "opencode-public" | "application-git";
 
-const activeKey = ref<ConfigMenuKey>("opencode-public");
+const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const activeKey = ref<ConfigMenuKey>(hasSuperAdmin.value ? "opencode-public" : "application-git");
+
+watch(hasSuperAdmin, (allowed) => {
+  // 角色刷新后立即收回公共配置页，避免应用管理员停留在超管子页。
+  if (!allowed) activeKey.value = "application-git";
+});
 </script>
 
 <template>
   <section class="ta-config-management">
     <nav class="ta-config-submenu" aria-label="配置管理导航">
       <button
+        v-if="hasSuperAdmin"
         type="button"
         :class="['ta-config-submenu-item', { 'is-active': activeKey === 'opencode-public' }]"
         @click="activeKey = 'opencode-public'"
@@ -35,7 +42,7 @@ const activeKey = ref<ConfigMenuKey>("opencode-public");
       </button>
     </nav>
     <div class="ta-config-content">
-      <OpencodePublicConfigManagementPanel v-if="activeKey === 'opencode-public'" :current-user="currentUser" />
+      <OpencodePublicConfigManagementPanel v-if="hasSuperAdmin && activeKey === 'opencode-public'" :current-user="currentUser" />
       <ApplicationGitRefreshManagementPanel v-else :current-user="currentUser" />
     </div>
   </section>

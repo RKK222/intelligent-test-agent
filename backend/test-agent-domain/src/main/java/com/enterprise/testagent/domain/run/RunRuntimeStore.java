@@ -149,6 +149,14 @@ public interface RunRuntimeStore {
         return true;
     }
 
+    /**
+     * 原子申请当前用户的维护闸门；与 dispose 共用同一租约键，但允许申请时已经存在活动 Run。
+     * 取得租约后新 Run 仍会被同一用户级闸门拒绝，供确认式个人进程重启安全排空旧 Run。
+     */
+    default boolean tryAcquireUserRuntimeMaintenance(UserId userId, String token, Duration ttl) {
+        return true;
+    }
+
     /** 返回当前用户是否已经有另一个 dispose 闸门，供 Run 启动入口拒绝竞态请求。 */
     default boolean isUserRuntimeDisposeActive(UserId userId) {
         return false;

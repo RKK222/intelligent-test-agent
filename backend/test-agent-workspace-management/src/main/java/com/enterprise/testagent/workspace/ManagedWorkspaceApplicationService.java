@@ -2996,13 +2996,19 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 查询超级管理员应用 Git 刷新页的有效范围。
+     * 查询当前管理员可刷新的应用 Git 范围。
      *
-     * <p>范围与实际刷新共用同一分组程序，避免页面展示的分支和真正执行的分支发生漂移。
-     * 只返回已经形成实际 feature 分支组的应用；启用和停用应用都保留，是否执行仍由超级管理员显式确认。</p>
+     * <p>超级管理员保留启用和停用应用的全量视图；应用管理员只读取启用且成员关系有效的应用。
+     * 范围与实际刷新共用同一分组程序，避免页面展示和执行权限发生漂移。</p>
      */
-    public List<ManagedWorkspaceResponses.ApplicationGitRefreshScopeResponse> listApplicationGitRefreshScopes() {
-        return configurationRepository.findApplications(false).stream()
+    public List<ManagedWorkspaceResponses.ApplicationGitRefreshScopeResponse> listApplicationGitRefreshScopes(
+            UserId userId,
+            boolean superAdmin) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        List<ApplicationDefinition> applications = superAdmin
+                ? configurationRepository.findApplications(false)
+                : configurationRepository.findApplicationsByMember(userId);
+        return applications.stream()
                 .map(this::applicationGitRefreshScope)
                 .filter(scope -> !scope.groups().isEmpty())
                 .toList();
@@ -3048,41 +3054,36 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 超级管理员按应用刷新全部物理 feature 仓库组。
+     * 管理员按应用刷新全部物理 feature 仓库组。
      *
-     * <p>API 层负责 SUPER_ADMIN 强鉴权；这里按“版本库 + 版本 + 分支”去重，复用应用发布后的
+     * <p>API 层负责 APP_ADMIN 强鉴权；服务层再次校验应用成员边界，防止伪造 appId。
+     * 这里按“版本库 + 版本 + 分支”去重，复用应用发布后的
      * 固定提交同步、个人 worktree 原生 merge、多服务器广播和应用配置 rollout。单组失败不会
      * 阻断其它仓库组，结果必须完整返回，避免把部分刷新误报为全量成功。</p>
      */
     public ManagedWorkspaceResponses.ApplicationGitRefreshResponse refreshApplicationGit(
             String appId,
             UserId userId,
+            boolean superAdmin,
             String traceId) {
         ApplicationId applicationId = new ApplicationId(requireText(appId, "应用 ID 不能为空", "appId"));
-        ApplicationDefinition application = configurationRepository.findApplication(applicationId)
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.NOT_FOUND,
-                        "应用不存在",
-                        Map.of("appId", applicationId.value())));
+        ApplicationDefinition application = applicationForGitRefresh(applicationId, userId, superAdmin);
         Map<ApplicationGitRefreshGroupKey, List<ApplicationWorkspaceVersion>> groups =
                 applicationGitRefreshGroups(applicationId);
         return refreshApplicationGitGroups(applicationId, application.appName(), groups, userId, traceId);
     }
 
-    /** 超级管理员精确刷新一个物理 feature 分支组，避免影响同应用的其它分支。 */
+    /** 管理员精确刷新一个有权限应用的物理 feature 分支组。 */
     public ManagedWorkspaceResponses.ApplicationGitRefreshResponse refreshApplicationGitGroup(
             String appId,
             String repositoryId,
             String version,
             String branch,
             UserId userId,
+            boolean superAdmin,
             String traceId) {
         ApplicationId applicationId = new ApplicationId(requireText(appId, "应用 ID 不能为空", "appId"));
-        ApplicationDefinition application = configurationRepository.findApplication(applicationId)
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.NOT_FOUND,
-                        "应用不存在",
-                        Map.of("appId", applicationId.value())));
+        ApplicationDefinition application = applicationForGitRefresh(applicationId, userId, superAdmin);
         ApplicationGitRefreshGroupKey selectedKey = new ApplicationGitRefreshGroupKey(
                 new CodeRepositoryId(requireText(repositoryId, "版本库 ID 不能为空", "repositoryId")),
                 requireText(version, "版本不能为空", "version"),
@@ -3107,6 +3108,29 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 selectedGroup,
                 userId,
                 traceId);
+    }
+
+    /** 超级管理员保留历史全量语义；应用管理员必须同时满足应用启用和有效成员关系。 */
+    private ApplicationDefinition applicationForGitRefresh(
+            ApplicationId appId,
+            UserId userId,
+            boolean superAdmin) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        if (superAdmin) {
+            return configurationRepository.findApplication(appId)
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.NOT_FOUND,
+                            "应用不存在",
+                            Map.of("appId", appId.value())));
+        }
+        // 只在“启用且有效成员”的集合内匹配，避免通过 403/404 差异探测应用是否存在或是否停用。
+        return configurationRepository.findApplicationsByMember(userId).stream()
+                .filter(application -> application.appId().equals(appId))
+                .findFirst()
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "无权刷新该应用 Git",
+                        Map.of("appId", appId.value())));
     }
 
     /** 全量与单分支刷新共用同一执行程序和结果汇总。 */

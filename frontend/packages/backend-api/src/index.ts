@@ -2162,6 +2162,13 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         ...(operationId ? { body: JSON.stringify({ operationId }) } : {}),
         timeoutMs: 120000
       }),
+    /** 重启始终由后端按当前用户 binding 路由；confirmRunning 只确认取消活动 Run，不参与目标选择。 */
+    restartMyOpencodeProcess: (confirmRunning = false) =>
+      routedRequest<UserOpencodeProcess>(agentPath("/processes/me/restart"), {
+        method: "POST",
+        body: JSON.stringify({ confirmRunning }),
+        timeoutMs: 120000
+      }),
     getOpencodeProcessStartOperation: (operationId: string) =>
       request<OpencodeProcessStartOperation>(
         agentPath(`/processes/me/initialize-operations/${encodeURIComponent(operationId)}`)

@@ -40,6 +40,77 @@ const notifications: UserNotification[] = [
   },
 ]
 
+const disposeNotifications: UserNotification[] = [
+  {
+    notificationId: 'ntf_pending',
+    type: 'AGENT_CONFIG_DISPOSE_PENDING',
+    actorUserId: null,
+    title: 'Agent 配置等待生效',
+    body: '配置已更新，正在等待当前任务结束后生效。',
+    actionType: 'NONE',
+    actionTargetId: 'rollout_pending',
+    status: 'ACTIVE',
+    invalidationReason: null,
+    actionAvailable: false,
+    unread: true,
+    expiresAt: null,
+    readAt: null,
+    createdAt: '2026-08-10T08:00:00Z',
+    updatedAt: '2026-08-11T08:10:00Z',
+  },
+  {
+    notificationId: 'ntf_failed',
+    type: 'AGENT_CONFIG_DISPOSE_FAILED',
+    actorUserId: null,
+    title: 'Agent 配置生效失败',
+    body: '配置运行态更新失败，可以重启进程后重试。',
+    actionType: 'RESTART_OWN_PROCESS',
+    actionTargetId: 'rollout_failed',
+    status: 'ACTIVE',
+    invalidationReason: null,
+    actionAvailable: true,
+    unread: true,
+    expiresAt: null,
+    readAt: null,
+    createdAt: '2026-08-10T08:00:00Z',
+    updatedAt: '2026-08-11T08:20:00Z',
+  },
+  {
+    notificationId: 'ntf_succeeded',
+    type: 'AGENT_CONFIG_DISPOSE_SUCCEEDED',
+    actorUserId: null,
+    title: 'Agent 配置已生效',
+    body: '新的 Agent 配置已应用到当前进程。',
+    actionType: 'NONE',
+    actionTargetId: 'rollout_succeeded',
+    status: 'ACTIVE',
+    invalidationReason: null,
+    actionAvailable: false,
+    unread: false,
+    expiresAt: null,
+    readAt: '2026-08-11T08:25:00Z',
+    createdAt: '2026-08-10T08:00:00Z',
+    updatedAt: '2026-08-11T08:25:00Z',
+  },
+  {
+    notificationId: 'ntf_unknown',
+    type: 'FUTURE_NOTIFICATION_TYPE',
+    actorUserId: null,
+    title: '未来通知',
+    body: '客户端尚不支持该通知。',
+    actionType: 'FUTURE_ACTION',
+    actionTargetId: 'opaque_target',
+    status: 'ACTIVE',
+    invalidationReason: null,
+    actionAvailable: true,
+    unread: true,
+    expiresAt: null,
+    readAt: null,
+    createdAt: '2026-08-10T08:00:00Z',
+    updatedAt: '2026-08-11T08:30:00Z',
+  },
+]
+
 describe('UserNotificationCenter', () => {
   afterEach(() => vi.restoreAllMocks())
 
@@ -118,5 +189,32 @@ describe('UserNotificationCenter', () => {
 
     await wrapper.setProps({ error: null, filter: 'UNREAD' })
     expect(wrapper.text()).toContain('未读消息已经处理完')
+  })
+
+  it('renders dispose states and only emits controlled mark-read or restart actions', async () => {
+    const wrapper = mount(UserNotificationCenter, {
+      props: { notifications: disposeNotifications, unreadCount: 3 },
+    })
+
+    await wrapper.get('[data-testid="notification-center-trigger"]').trigger('click')
+    expect(wrapper.text()).toContain('等待生效')
+    expect(wrapper.text()).toContain('配置运行态更新失败')
+    expect(wrapper.text()).toContain('重启进程')
+    expect(wrapper.text()).toContain('已生效')
+
+    const pendingButton = wrapper.get('[data-testid="notification-item-ntf_pending"]')
+    expect(pendingButton.text()).toContain('标记已读')
+    await pendingButton.trigger('click')
+    expect(wrapper.emitted('open-notification')?.[0]).toEqual([disposeNotifications[0]])
+
+    const failedButton = wrapper.get('[data-testid="notification-item-ntf_failed"]')
+    await failedButton.trigger('click')
+    expect(wrapper.emitted('open-notification')?.[1]).toEqual([disposeNotifications[1]])
+
+    expect(wrapper.get('[data-testid="notification-item-ntf_succeeded"]').attributes('disabled')).toBeDefined()
+    const unknownButton = wrapper.get('[data-testid="notification-item-ntf_unknown"]')
+    expect(unknownButton.attributes('disabled')).toBeDefined()
+    await unknownButton.trigger('click')
+    expect(wrapper.emitted('open-notification')).toHaveLength(2)
   })
 })

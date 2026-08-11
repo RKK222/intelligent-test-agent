@@ -171,7 +171,7 @@ class ManagedWorkspaceControllerTest {
     @Test
     void superAdministratorCanRefreshAllApplicationGitGroupsWithoutAssignedOpencodeProcess() {
         ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
-        when(service.refreshApplicationGit("app_gcms", USER_ID, TRACE_ID))
+        when(service.refreshApplicationGit("app_gcms", USER_ID, true, TRACE_ID))
                 .thenReturn(new ApplicationGitRefreshResponse(
                         "app_gcms",
                         "F-GCMS",
@@ -204,7 +204,7 @@ class ManagedWorkspaceControllerTest {
                 .jsonPath("$.data.groups[0].workspaceCount").isEqualTo(2)
                 .jsonPath("$.data.groups[0].status").isEqualTo("UPDATED");
 
-        verify(service).refreshApplicationGit("app_gcms", USER_ID, TRACE_ID);
+        verify(service).refreshApplicationGit("app_gcms", USER_ID, true, TRACE_ID);
         org.mockito.Mockito.verifyNoInteractions(assignmentService);
     }
 
@@ -217,6 +217,7 @@ class ManagedWorkspaceControllerTest {
                 "20260707",
                 "feature_testagent_20260707",
                 USER_ID,
+                true,
                 TRACE_ID))
                 .thenReturn(new ApplicationGitRefreshResponse(
                         "app_gcms",
@@ -259,6 +260,7 @@ class ManagedWorkspaceControllerTest {
                 "20260707",
                 "feature_testagent_20260707",
                 USER_ID,
+                true,
                 TRACE_ID);
         org.mockito.Mockito.verifyNoInteractions(assignmentService);
     }
@@ -266,7 +268,7 @@ class ManagedWorkspaceControllerTest {
     @Test
     void superAdministratorCanPreviewWorkspaceBranchesWithoutAssignedOpencodeProcess() {
         ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
-        when(service.listApplicationGitRefreshScopes()).thenReturn(List.of(
+        when(service.listApplicationGitRefreshScopes(USER_ID, true)).thenReturn(List.of(
                 new ApplicationGitRefreshScopeResponse(
                         "app_gcms",
                         "F-GCMS",
@@ -296,8 +298,62 @@ class ManagedWorkspaceControllerTest {
                 .jsonPath("$.data[0].groups[0].branch").isEqualTo("feature_testagent_20260707")
                 .jsonPath("$.data[0].groups[0].workspaces[0].workspaceName").isEqualTo("登录测试");
 
-        verify(service).listApplicationGitRefreshScopes();
+        verify(service).listApplicationGitRefreshScopes(USER_ID, true);
         org.mockito.Mockito.verifyNoInteractions(assignmentService);
+    }
+
+    @Test
+    void applicationAdministratorCanUseMemberScopedGitRefreshEndpoints() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.listApplicationGitRefreshScopes(USER_ID, false)).thenReturn(List.of());
+        when(service.refreshApplicationGit("app_gcms", USER_ID, false, TRACE_ID))
+                .thenReturn(new ApplicationGitRefreshResponse(
+                        "app_gcms", "F-GCMS", 0, 0, 0, 0, List.of()));
+        when(service.refreshApplicationGitGroup(
+                "app_gcms",
+                "repo_123",
+                "20260707",
+                "feature_testagent_20260707",
+                USER_ID,
+                false,
+                TRACE_ID))
+                .thenReturn(new ApplicationGitRefreshResponse(
+                        "app_gcms", "F-GCMS", 0, 0, 0, 0, List.of()));
+        WebTestClient appAdmin = client(
+                service,
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                List.of("APP_ADMIN"));
+
+        appAdmin.get()
+                .uri("/api/internal/platform/workspace-management/applications/git-refresh-scopes")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk();
+        appAdmin.post()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/git-refresh")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk();
+        appAdmin.post()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/git-refresh-groups")
+                .header("X-Trace-Id", TRACE_ID)
+                .bodyValue(Map.of(
+                        "repositoryId", "repo_123",
+                        "version", "20260707",
+                        "branch", "feature_testagent_20260707"))
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).listApplicationGitRefreshScopes(USER_ID, false);
+        verify(service).refreshApplicationGit("app_gcms", USER_ID, false, TRACE_ID);
+        verify(service).refreshApplicationGitGroup(
+                "app_gcms",
+                "repo_123",
+                "20260707",
+                "feature_testagent_20260707",
+                USER_ID,
+                false,
+                TRACE_ID);
     }
 
     @Test

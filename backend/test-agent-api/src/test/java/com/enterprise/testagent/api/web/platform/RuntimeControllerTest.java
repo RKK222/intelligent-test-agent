@@ -27,6 +27,7 @@ import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessWeakHeal
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessWeakHealthResponse;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessWeakHealthStatus;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessRestartService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeServiceStatus;
@@ -392,6 +393,88 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.steps[0].code").isEqualTo("VALIDATING_REQUEST")
                 .jsonPath("$.data.steps[0].name").isEqualTo("校验请求")
                 .jsonPath("$.data.steps[7].status").isEqualTo("FAILED");
+    }
+
+    @Test
+    void opencodeProcessControllerRestartsCurrentUsersProcessWithExplicitConfirmationFlag() {
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessStatusQueryService statusQueryService = org.mockito.Mockito.mock(OpencodeProcessStatusQueryService.class);
+        UserOpencodeProcessRestartService restartService = org.mockito.Mockito.mock(UserOpencodeProcessRestartService.class);
+        UserOpencodeProcessStatusResponse ready = new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.READY,
+                false,
+                "TestAgent 进程已重启",
+                "ocp_1234567890abcdef",
+                "server-a",
+                "ctr_01",
+                4096,
+                "http://10.8.0.12:4096",
+                NOW);
+        when(restartService.restart(
+                eq(new UserId("usr_1234567890abcdef")),
+                eq("opencode"),
+                eq(true),
+                eq("trace_1234567890abcdef"))).thenReturn(ready);
+        UserOpencodeProcessController controller = new UserOpencodeProcessController(
+                assignmentService, statusQueryService, null, restartService);
+        WebTestClient client = WebTestClient.bindToController(controller)
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
+                .build();
+
+        client.post()
+                .uri("/api/internal/agent/opencode/processes/me/restart")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"confirmRunning":true}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("READY")
+                .jsonPath("$.data.processId").isEqualTo("ocp_1234567890abcdef");
+    }
+
+    @Test
+    void opencodeProcessControllerTreatsAnEmptyRestartBodyAsUnconfirmed() {
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessStatusQueryService statusQueryService = org.mockito.Mockito.mock(OpencodeProcessStatusQueryService.class);
+        UserOpencodeProcessRestartService restartService = org.mockito.Mockito.mock(UserOpencodeProcessRestartService.class);
+        when(restartService.restart(
+                eq(new UserId("usr_1234567890abcdef")),
+                eq("opencode"),
+                eq(false),
+                eq("trace_restart_without_body"))).thenReturn(new UserOpencodeProcessStatusResponse(
+                        UserOpencodeProcessAvailability.READY,
+                        false,
+                        "TestAgent 进程已重启",
+                        "ocp_1234567890abcdef",
+                        "server-a",
+                        "ctr_01",
+                        4096,
+                        "http://10.8.0.12:4096",
+                        NOW));
+        UserOpencodeProcessController controller = new UserOpencodeProcessController(
+                assignmentService, statusQueryService, null, restartService);
+        WebTestClient client = WebTestClient.bindToController(controller)
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
+                .build();
+
+        client.post()
+                .uri("/api/internal/agent/opencode/processes/me/restart")
+                .header("X-Trace-Id", "trace_restart_without_body")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("READY");
+
+        verify(restartService).restart(
+                new UserId("usr_1234567890abcdef"),
+                "opencode",
+                false,
+                "trace_restart_without_body");
     }
 
     @Test

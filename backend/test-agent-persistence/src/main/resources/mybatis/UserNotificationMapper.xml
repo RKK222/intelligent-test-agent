@@ -78,6 +78,29 @@
         )
     </insert>
 
+    <!-- dispose 状态机只在类型真实变化时重置已读；相同状态重试不更新时间也不制造未读。 -->
+    <update id="updateByDedupKeyIfChanged">
+        update user_notifications
+        set recipient_user_id = #{row.recipientUserId},
+            type = #{row.type},
+            actor_user_id = #{row.actorUserId},
+            title = #{row.title},
+            body = #{row.body},
+            action_type = #{row.actionType},
+            action_target_id = #{row.actionTargetId},
+            status = #{row.status},
+            invalidation_reason = #{row.invalidationReason},
+            expires_at = #{row.expiresAt},
+            read_at = null,
+            invalidated_at = #{row.invalidatedAt},
+            trace_id = #{row.traceId},
+            updated_at = #{row.updatedAt}
+        where dedup_key = #{row.dedupKey}
+          and (type &lt;&gt; #{row.type}
+            or action_type &lt;&gt; #{row.actionType}
+            or status &lt;&gt; #{row.status})
+    </update>
+
     <update id="updateActiveByAction">
         update user_notifications
         set actor_user_id = #{actorUserId},
@@ -163,7 +186,7 @@
           on share.owner_user_id = share_owner.user_id
     </sql>
 
-    <sql id="ActionAvailablePredicate">
+    <sql id="NotificationEffectivePredicate">
         notification.status = 'ACTIVE'
         and (notification.expires_at is null or notification.expires_at &gt; #{now})
         and (
@@ -179,6 +202,11 @@
         )
     </sql>
 
+    <sql id="ActionAvailablePredicate">
+        (<include refid="NotificationEffectivePredicate"/>)
+        and notification.action_type in ('SESSION_SHARE', 'RESTART_OWN_PROCESS')
+    </sql>
+
     <sql id="NotificationViewColumns">
         notification.notification_id,
         notification.type,
@@ -187,7 +215,7 @@
         notification.body,
         notification.action_type,
         notification.action_target_id,
-        case when (<include refid="ActionAvailablePredicate"/>)
+        case when (<include refid="NotificationEffectivePredicate"/>)
              then 'ACTIVE' else 'INVALIDATED' end as effective_status,
         case
             when notification.status = 'INVALIDATED' then notification.invalidation_reason
@@ -201,7 +229,7 @@
             else null
         end as effective_invalidation_reason,
         case when (<include refid="ActionAvailablePredicate"/>) then true else false end as action_available,
-        case when notification.read_at is null and (<include refid="ActionAvailablePredicate"/>)
+        case when notification.read_at is null and (<include refid="NotificationEffectivePredicate"/>)
              then true else false end as unread,
         notification.expires_at,
         notification.read_at,
@@ -216,7 +244,7 @@
         where notification.recipient_user_id = #{recipientUserId}
         <if test="unreadOnly">
           and notification.read_at is null
-          and (<include refid="ActionAvailablePredicate"/>)
+          and (<include refid="NotificationEffectivePredicate"/>)
         </if>
         order by notification.created_at desc, notification.id desc
         limit #{limit} offset #{offset}
@@ -229,7 +257,7 @@
         where notification.recipient_user_id = #{recipientUserId}
         <if test="unreadOnly">
           and notification.read_at is null
-          and (<include refid="ActionAvailablePredicate"/>)
+          and (<include refid="NotificationEffectivePredicate"/>)
         </if>
     </select>
 
@@ -239,7 +267,7 @@
         <include refid="ActionJoins"/>
         where notification.recipient_user_id = #{recipientUserId}
           and notification.read_at is null
-          and (<include refid="ActionAvailablePredicate"/>)
+          and (<include refid="NotificationEffectivePredicate"/>)
     </select>
 
     <update id="markReadById">

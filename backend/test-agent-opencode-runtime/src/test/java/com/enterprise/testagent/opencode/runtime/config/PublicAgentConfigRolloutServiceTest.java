@@ -28,6 +28,7 @@ import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTar
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutServerStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending;
+import com.enterprise.testagent.domain.notification.UserNotificationType;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
@@ -47,6 +48,7 @@ import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopRequest;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopService;
+import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.nio.file.Path;
@@ -69,6 +71,7 @@ class PublicAgentConfigRolloutServiceTest {
     private final AgentRuntimeRegistry registry = mock(AgentRuntimeRegistry.class);
     private final BackendInstanceIdentity backendInstanceIdentity = mock(BackendInstanceIdentity.class);
     private final ManagedWorkspacePathResolver workspacePathResolver = mock(ManagedWorkspacePathResolver.class);
+    private final UserNotificationApplicationService notificationService = mock(UserNotificationApplicationService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private PublicAgentConfigRolloutService service;
 
@@ -84,6 +87,10 @@ class PublicAgentConfigRolloutServiceTest {
         when(workspacePathResolver.resolve("/workspace/a")).thenReturn(Path.of("/workspace/a"));
         when(backendInstanceIdentity.linuxServerId()).thenReturn("linux-1");
         when(repository.renewTargetLease(eq("act_target"), eq("acl_lease"), any(), any())).thenReturn(true);
+        when(repository.markTargetDisposed(eq("act_target"), eq("acl_lease"), any())).thenReturn(true);
+        when(repository.markTargetRetry(
+                eq("act_target"), eq("acl_lease"), any(Integer.class), any(Instant.class),
+                any(String.class), any(Instant.class))).thenReturn(true);
         service = new PublicAgentConfigRolloutService(
                 repository,
                 heartbeatStore,
@@ -92,6 +99,7 @@ class PublicAgentConfigRolloutServiceTest {
                 backendInstanceIdentity,
                 workspacePathResolver,
                 1000L);
+        service.setNotificationService(notificationService);
     }
 
     @Test
@@ -333,6 +341,9 @@ class PublicAgentConfigRolloutServiceTest {
         assertThat(targetCaptor.getValue().configScope())
                 .isEqualTo(AgentConfigRolloutScope.PERSONAL_APPLICATION);
         assertThat(targetCaptor.getValue().userId()).isEqualTo("usr-1");
+        verify(notificationService).syncAgentConfigDispose(
+                new UserId("usr-1"), "acr_personal",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING, "trace-personal");
         verify(repository).markServerSynced(eq("acr_personal"), eq("linux-1"), eq("acl_sync"), any());
     }
 
@@ -379,10 +390,14 @@ class PublicAgentConfigRolloutServiceTest {
     @Test
     void offlineServerCanBeExplicitlyDecommissionedFromRolloutMembership() {
         when(repository.findPreparing(eq("linux-old"), any())).thenReturn(Optional.empty());
+        when(repository.findPendingTargetsByServer("linux-old")).thenReturn(List.of(target(0)));
 
         service.decommissionServer("linux-old");
 
         verify(repository).decommissionServerMembership(eq("linux-old"), any(Instant.class));
+        verify(notificationService).syncAgentConfigDispose(
+                new UserId("usr-1"), "acr_rollout",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_SUPERSEDED, "trace-rollout");
         verify(repository).completeReadyRollouts(any(Instant.class));
     }
 
@@ -409,6 +424,28 @@ class PublicAgentConfigRolloutServiceTest {
         verify(repository).markTargetRetry(
                 eq("act_target"), eq("acl_lease"), eq(3), any(Instant.class), eq("SESSION_RUNNING"), any(Instant.class));
         verify(repository, never()).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+        verify(notificationService).syncAgentConfigDispose(
+                new UserId("usr-1"), "acr_rollout",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING, "trace-rollout");
+    }
+
+    @Test
+    void lateWorkerCannotOverwriteDisposeNotificationAfterLosingRetryLease() {
+        PublicAgentConfigRolloutTarget target = target(0);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1))).thenReturn(List.of(target));
+        when(repository.markTargetRetry(
+                eq("act_target"), eq("acl_lease"), eq(1), any(Instant.class),
+                eq("SESSION_RUNNING"), any(Instant.class))).thenReturn(false);
+        useManagerPorts(4096);
+        when(runtime.runtime(any(AgentRuntimeCommand.class))).thenReturn(Mono.just(new AgentRuntimeResult(
+                objectMapper.valueToTree(java.util.Map.of("ses_1", java.util.Map.of("type", "busy"))))));
+
+        service.drainTargets();
+
+        verify(repository).markTargetRetry(
+                eq("act_target"), eq("acl_lease"), eq(1), any(Instant.class),
+                eq("SESSION_RUNNING"), any(Instant.class));
+        verify(notificationService, never()).syncAgentConfigDispose(any(), any(), any(), any());
     }
 
     @Test
@@ -638,6 +675,9 @@ class PublicAgentConfigRolloutServiceTest {
         service.drainTargets();
 
         verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any(Instant.class));
+        verify(notificationService).syncAgentConfigDispose(
+                new UserId("usr-1"), "acr_rollout",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED, "trace-rollout");
         verify(repository).completeReadyRollouts(any(Instant.class));
     }
 
@@ -655,6 +695,9 @@ class PublicAgentConfigRolloutServiceTest {
         verify(repository).markTargetRetry(
                 eq("act_target"), eq("acl_lease"), eq(1), any(Instant.class), eq("DISPOSE_REJECTED"), any(Instant.class));
         verify(repository, never()).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+        verify(notificationService).syncAgentConfigDispose(
+                new UserId("usr-1"), "acr_rollout",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED, "trace-rollout");
     }
 
     @Test
@@ -785,6 +828,9 @@ class PublicAgentConfigRolloutServiceTest {
         service.drainTargets();
 
         verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+        verify(notificationService).syncAgentConfigDispose(
+                new UserId("usr-1"), "acr_rollout",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED, "trace-rollout");
         verify(runtime, never()).runtime(any());
     }
 

@@ -33,7 +33,7 @@
 
 页面首次 `GET /api/internal/agent/opencode/processes/me` 不携带路由提示，按 Nginx 默认 upstream 进入任意 Java；若用户尚无 ACTIVE binding，入口 Java 会按 Redis 集群快照把该请求单次转发到进程总数最少且可初始化的服务器。响应包含非空 `linuxServerId` 后，前端只在当前页面内存保存该值；刷新、退出或切换登录用户都会清空，禁止写入 localStorage/sessionStorage。随后以下请求由 `backend-api` 的 routed request 或 fetch SSE 携带 `X-Test-Agent-Linux-Server-Id`：
 
-- 当前用户 OpenCode 进程状态、初始化、弱健康和 runtime 代理。
+- 当前用户 OpenCode 进程状态、初始化、个人重启、弱健康和 runtime 代理。
 - Session、run-context、Run、permission/question、Session 原生操作和 RunEvent/用户运行态 SSE。
 - 用户绑定服务器上的 Workspace、个人工作树、Git、Agent 配置与文件 route/ticket 操作。
 
@@ -128,7 +128,7 @@
 | `/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` | 查询当前 Run scope 的 root + child session message snapshot。 |
 | `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` | 查询 root session 下全量历史 session tree message snapshot。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/diff` | 查询 Run 级 Diff。 |
-| `/api/internal/agent/{agentId}/processes/me` | 查询或初始化当前用户的 opencode 进程。 |
+| `/api/internal/agent/{agentId}/processes/me` | 查询、初始化或重启当前用户的 opencode 进程。 |
 | `/api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}` | 只读查询当前用户 opencode 进程初始化进度。 |
 | `/api/internal/agent/opencode/api/agent` | Agent 目录。 |
 | `/api/internal/agent/opencode/api/model` | Model 目录。 |
@@ -150,6 +150,7 @@ Base URL：`/api/internal/agent/{agentId}/processes/me`，当前 `agentId` 只�
 | `GET` | `/` | 查询当前用户 opencode 进程强健康状态，不自动启动。 | 无 | `UserOpencodeProcessResponse` |
 | `GET` | `/health?linuxServerId=&containerId=&port=` | 前端周期弱健康检查；只按 Redis 快照定位目标进程并直接调用 opencode `/global/health`，不读写数据库、不触发 manager 强健康检查。 | 无 | `UserOpencodeProcessHealthResponse` |
 | `POST` | `/initialize` | 初始化或重建当前用户 opencode 进程；启动前自动选择同服有效公共个人配置，`SUPER_ADMIN` 进程健康检查成功后再幂等准备并自动加载本人公共个人 worktree。 | 可空；可传 `{ "operationId": "opi_..." }` 开启进度记录。 | `UserOpencodeProcessResponse` |
+| `POST` | `/restart` | 重启当前用户 ACTIVE 进程；后端检测到活动 Run 时要求二次确认，并在确认后先取消全部活动 Run。 | `{ "confirmRunning": false | true }`；缺省 false。 | `UserOpencodeProcessResponse`；未确认冲突见本节后文。 |
 | `GET` | `/initialize-operations/{operationId}` | 只读查询当前用户发起的初始化进度；不触发 manager health/start，不写 RunEvent。 | 无 | `OpencodeProcessStartOperationResponse` |
 
 `operationId` 由前端生成，格式为 `opi_` 开头，后续 8 到 120 位字母、数字、下划线或短横线；旧客户端不传 `operationId` 时 `POST /initialize` 保持同步返回兼容。
@@ -1532,7 +1533,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 鉴权：
 
 - 所有接口要求已登录用户。
-- `GET /applications/git-refresh-scopes`、`POST /applications/{appId}/git-refresh` 与 `POST /applications/{appId}/git-refresh-groups` 是共享控制面操作，仅允许 `SUPER_ADMIN`，不要求超级管理员先加入目标应用或启动个人 OpenCode；其它应用工作区接口仍按下述成员规则校验。
+- `GET /applications/git-refresh-scopes`、`POST /applications/{appId}/git-refresh` 与 `POST /applications/{appId}/git-refresh-groups` 要求 `APP_ADMIN`，`SUPER_ADMIN` 自动继承。超级管理员继续读取和刷新启用、停用应用且不要求加入应用；应用管理员只读取启用且自己仍是有效成员的应用，执行时再次复核相同条件，伪造、停用或非成员 `appId` 统一返回 `FORBIDDEN`。
 - 应用、模板、版本、切换最近使用等应用相关接口要求当前用户是 `application_members` 中的有效成员；不区分管理员和普通成员。
 - 个人工作区接口要求当前用户是个人工作区拥有者且属于对应应用。
 - 托管工作区成员校验失败返回 `FORBIDDEN`，message 固定包含当前加载上下文：`无该应用工作区权限：当前正在加载应用 {appName}({appId})，版本 {version/versionId/未确定}，工作区 {workspaceKind}:{workspaceName/workspaceId/未确定}`。`details` 仅放安全业务字段：`loadingStage`、`appId`、`appName`、`versionId`、`version`、`applicationWorkspaceId`、`workspaceKind`、`workspaceName`、`workspaceId`、`personalWorkspaceId`；无值字段不返回。
@@ -1540,9 +1541,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/applications` | 查询当前用户加入的启用应用。 |
-| `GET` | `/applications/git-refresh-scopes` | 超级管理员查询已形成实际 feature 分支组的应用及其工作空间、版本和分支。 |
-| `POST` | `/applications/{appId}/git-refresh` | 超级管理员按应用刷新全部物理 feature 仓库组，并触发相关个人 worktree 与应用 Agent 配置安全收敛。 |
-| `POST` | `/applications/{appId}/git-refresh-groups` | 超级管理员按 `repositoryId + version + branch` 精确刷新一个物理 feature 仓库组及其关联 worktree。 |
+| `GET` | `/applications/git-refresh-scopes` | 应用管理员查询有权管理且已形成实际 feature 分支组的应用及其工作空间、版本和分支；超级管理员查询全量。 |
+| `POST` | `/applications/{appId}/git-refresh` | 应用管理员按授权应用刷新全部物理 feature 仓库组，并触发相关个人 worktree 与应用 Agent 配置安全收敛。 |
+| `POST` | `/applications/{appId}/git-refresh-groups` | 应用管理员按 `repositoryId + version + branch` 精确刷新授权应用的一个物理 feature 仓库组及其关联 worktree。 |
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
@@ -1573,7 +1574,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/commit` | 仅在个人 worktree stage 并提交 `files` 白名单；不推送、不广播。请求包含 `.opencode/**` 时要求 `APP_ADMIN`（`SUPER_ADMIN` 继承）。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 要求 `files` 已在个人 worktree 本地提交，再从个人 `HEAD` 按白名单投影到应用 feature worktree，提交并推送；不 merge 整个个人分支。请求包含 `.opencode/**` 时要求 `APP_ADMIN`，响应包含 `currentStep/executedCommands`。 |
 
-`GET /applications/git-refresh-scopes` 只返回已经形成至少一个实际 feature 分支组的应用，不返回尚未创建任何工作空间版本分支的空应用；满足该条件的启用和停用应用都会返回。每个应用的 `groups[]` 按实际执行使用的 `repositoryId + version + branch` 去重，`workspaces[]` 列出该物理 feature 组对应的 `versionId/applicationWorkspaceId/workspaceName/directoryPath/enabled`；因此同一工作空间的不同版本、不同工作空间的不同分支都会逐项展示。该只读接口和执行接口复用同一分组程序，不访问 Git 远端，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+`GET /applications/git-refresh-scopes` 只返回已经形成至少一个实际 feature 分支组的应用，不返回尚未创建任何工作空间版本分支的空应用。`SUPER_ADMIN` 仍返回满足条件的启用和停用应用；`APP_ADMIN` 只返回启用且当前用户在 `application_members` 中保持有效成员关系的应用。每个应用的 `groups[]` 按实际执行使用的 `repositoryId + version + branch` 去重，`workspaces[]` 列出该物理 feature 组对应的 `versionId/applicationWorkspaceId/workspaceName/directoryPath/enabled`；因此同一工作空间的不同版本、不同工作空间的不同分支都会逐项展示。该只读接口和执行接口复用同一授权与分组程序，不访问 Git 远端，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
 
 范围响应示例：
 
@@ -1606,7 +1607,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 ]
 ```
 
-`POST /applications/{appId}/git-refresh` 使用当前超级管理员保存的唯一 SSH Key，对应用下每个去重后的 `repositoryId + version + branch` 物理 feature 仓库组执行 fetch 和只允许快进的更新。feature 工作树存在未提交修改、远端发生分叉、SSH Key 缺失或 Git 不可用时，该组返回 `FAILED`，其它组继续执行；接口以 HTTP 成功响应返回完整汇总，调用方必须检查 `failedGroups`，不能把部分成功显示为全量成功。更新或已是最新的组都会重新发布固定目标、按精确提交为组内每个工作空间目录刷新 Agent & Skill Hub 快照，并触发相关服务器个人 worktree 的原生 Git merge；Hub 更新不要求用户先在个人工作区拉取。非重叠 staged、unstaged 和 untracked 修改保留，可能被覆盖的 worktree 保持待处理，真实冲突保留三方 index，不执行 stash、reset 或强制覆盖个人内容。远端差异包含应用 `.opencode/**` 时复用既有应用 Agent rollout，仅在目标提交已进入对应个人 worktree 后等待该用户空闲并 dispose。该入口不要求超级管理员拥有 READY OpenCode 进程，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+`POST /applications/{appId}/git-refresh` 使用当前操作者保存的唯一 SSH Key，对授权范围内应用的每个去重 `repositoryId + version + branch` 物理 feature 仓库组执行 fetch 和只允许快进的更新。feature 工作树存在未提交修改、远端发生分叉、SSH Key 缺失或 Git 不可用时，该组返回 `FAILED`，其它组继续执行；接口以 HTTP 成功响应返回完整汇总，调用方必须检查 `failedGroups`，不能把部分成功显示为全量成功。更新或已是最新的组都会重新发布固定目标、按精确提交为组内每个工作空间目录刷新 Agent & Skill Hub 快照，并触发相关服务器个人 worktree 的原生 Git merge；Hub 更新不要求用户先在个人工作区拉取。非重叠 staged、unstaged 和 untracked 修改保留，可能被覆盖的 worktree 保持待处理，真实冲突保留三方 index，不执行 stash、reset 或强制覆盖个人内容。远端差异包含应用 `.opencode/**` 时复用既有应用 Agent rollout，仅在目标提交已进入对应个人 worktree 后等待该用户空闲并 dispose。该入口不要求操作者拥有 READY OpenCode 进程，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
 
 `POST /applications/{appId}/git-refresh-groups` 请求体为 `{"repositoryId":"repo_1","version":"20260728","branch":"feature_testagent_20260728"}`。三个字段必须精确命中范围查询中的同一个物理组；不存在时返回 `NOT_FOUND`，不能只凭分支名误选同名分支。命中后只复用上述执行程序处理该组，响应仍使用 `ApplicationGitRefreshResponse`，其中 `totalGroups=1`；同应用其它分支、target、replica 和个人 worktree 均不处理。
 
@@ -2022,7 +2023,7 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 
 #### 工作台通用通知中心 API
 
-通知中心只接受当前登录用户的 Bearer Token，接收人从 `AuthPrincipal` 取得，客户端不能查询或修改其他用户通知。首期只有会话分享产生通知；通知动作固定为服务端受控 `actionType=SESSION_SHARE` 和 `actionTargetId=shareId`，响应不提供任意 URL、去重键或数据库行 ID。
+通知中心只接受当前登录用户的 Bearer Token，接收人从 `AuthPrincipal` 取得，客户端不能查询或修改其他用户通知。通知类型包括会话分享，以及 Agent 配置 dispose 的 `AGENT_CONFIG_DISPOSE_PENDING/SUCCEEDED/FAILED/SUPERSEDED`。动作只允许受控枚举 `SESSION_SHARE/NONE/RESTART_OWN_PROCESS`：分享目标保存 `shareId`，dispose 目标只保存 `rolloutId`，响应不提供任意 URL、去重键或数据库行 ID。前端必须同时校验类型与动作组合，未知组合失败关闭。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -2064,7 +2065,9 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 }
 ```
 
-`unreadCount` 始终表示当前用户全部通知中“未读、仍有效且未过期”的权威数量，不受当前页或 `unreadOnly` 筛选影响。列表会实时合并通知、分享、成员、会话和所属人事实：取消、成员移除、会话归档、到期或所属人停用即使通知失效回写暂时失败，也会返回 `actionAvailable=false`、`unread=false` 和稳定 `invalidationReason`。失效历史保留在全部列表但不可点击。
+`unreadCount` 始终表示当前用户全部通知中“未读、仍有效且未过期”的权威数量，不受当前页或 `unreadOnly` 筛选影响。“通知有效”和“动作可用”是两个谓词：`actionType=NONE` 的 dispose 状态仍可计入未读并通过通用已读接口处理，但 `actionAvailable=false`；`RESTART_OWN_PROCESS` 只用于 dispose 失败并调用当前用户重启 API，不读取 `actionTargetId` 选择进程。分享列表仍实时合并通知、分享、成员、会话和所属人事实：取消、成员移除、会话归档、到期或所属人停用即使通知失效回写暂时失败，也会返回 `actionAvailable=false`、`unread=false` 和稳定 `invalidationReason`。失效历史保留在全部列表但不可点击。
+
+同一 rollout/用户使用 `AGENT_CONFIG_DISPOSE:{rolloutId}:{userId}` 去重并只演进一行。目标登记写入等待；活动 Session 重试保持等待；其它 dispose/状态探测失败写入失败并开放重启；dispose 成功或旧 PID/startedAt 因人工重启而消失时写入成功；rollout 替换或目标弃用时写入已结束。相同状态重试不修改 `updatedAt/readAt` 且不广播；真实变化清空 `readAt` 并发布 `UPDATED`。通知只使用固定安全文案，不保存异常、文件路径、密钥或第三方响应。
 
 分享通知必须在新标签页打开内部 `/s/{shareId}`，并继续使用当前用户自己的认证。只有 `/s/{shareId}` 分享访问鉴权成功后，后端才按 `recipientUserId + shareId` 幂等写入 `readAt`；从通知、“分享给我”或旧分享链接进入均采用同一规则。已读写入失败不阻断已获授权的分享访问，只记录不含标题、摘要或链接的脱敏告警。
 
@@ -2245,7 +2248,12 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 | `GET` | `/api/internal/agent/{agentId}/processes/me/message-gate` | 只读查询当前用户公共配置发布消息闸门；不按 binding 路由，不探测 manager/opencode。 |
 | `GET` | `/api/internal/agent/{agentId}/processes/me/health?linuxServerId=&containerId=&port=` | 前端弱健康轮询；只按参数和 Redis 快照检查 opencode `/global/health`，不读写数据库。 |
 | `POST` | `/api/internal/agent/{agentId}/processes/me/initialize` | 为当前用户初始化或重建 opencode 进程。 |
+| `POST` | `/api/internal/agent/{agentId}/processes/me/restart` | 重启当前用户 ACTIVE TestAgent 进程；活动 Run 需二次确认。 |
 | `DELETE` | `/api/internal/agent/{agentId}/processes/me/binding` | 清除当前用户的 opencode 进程绑定，便于本地 opencode 场景下用户主动放弃指向已下线 Linux 服务器的脏绑定，让后续状态 / Run 链路回退到 `execution_nodes` 中的固定节点。 |
+
+`POST /processes/me/restart` 请求体为 `{ "confirmRunning": false | true }`，请求体缺失时按 `false`。无活动 Run 时直接重启；存在当前用户任意 Session 的非终态 Run 且未确认时返回 `409 CONFLICT`，`details.confirmationRequired=true` 并给出 `runningCount`。确认后目标 Java 取得可续租的用户维护租约，从此阻止新 Run，按唯一 `runId` 调用统一取消服务并再次确认运行态为空；任一 Run 无法终态化时停止重启，已经取消的 Run 不回滚。随后通过 `OpencodeProcessStopService` 确认旧进程不可达，再由 `UserOpencodeProcessAssignmentService`/`OpencodeProcessStartupService` 恢复原分配；启动失败保留停止状态供用户重试。响应复用 `UserOpencodeProcessResponse`。
+
+该接口与已有用户进程请求一样按 ACTIVE binding 使用 `BackendJavaRouteResolver` 和 `BackendHttpForwarder` 路由，转发保留 Authorization、traceId 和 JSON body，目标 Java 重新鉴权；不允许本机降级或直接调用远端 manager。用户头像入口和 dispose 失败通知动作复用同一请求。旧客户端不调用该新增路径时行为不变，本次不新增 RunEvent。
 
 响应 `data`：
 

@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,6 +94,30 @@ public class UserRuntimeDisposeCoordinator {
         }
     }
 
+    /**
+     * 在允许既有活动 Run 的前提下取得同一用户级维护闸门；调用方负责排空 Run，并可在破坏性步骤前复核租约。
+     */
+    public <T> T withUserMaintenance(UserId userId, String traceId, Function<LeaseGuard, T> action) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(action, "action must not be null");
+        String token = "maintenance_" + UUID.randomUUID();
+        if (!runRuntimeStore.tryAcquireUserRuntimeMaintenance(userId, token, leaseTtl)) {
+            throw maintenanceBusy(traceId);
+        }
+        AtomicBoolean leaseLost = new AtomicBoolean();
+        Disposable renewal = renewWhileRunning(userId, token, traceId, leaseLost);
+        try {
+            LeaseGuard guard = () -> requireLease(leaseLost, traceId);
+            guard.requireActive();
+            T result = action.apply(guard);
+            guard.requireActive();
+            return result;
+        } finally {
+            renewal.dispose();
+            runRuntimeStore.releaseUserRuntimeDispose(userId, token);
+        }
+    }
+
     /** Run 启动前检查同一用户是否正在 dispose，供 Redis 初始化之外的兼容链路快速拒绝。 */
     public void requireNotDisposing(UserId userId, String traceId) {
         if (userId != null && runRuntimeStore.isUserRuntimeDisposeActive(userId)) {
@@ -108,6 +133,13 @@ public class UserRuntimeDisposeCoordinator {
                 java.util.Map.of(
                         "runningCount", runningCount,
                         "traceId", traceId == null ? "" : traceId));
+    }
+
+    private PlatformException maintenanceBusy(String traceId) {
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                "当前用户的 OpenCode 运行态正在维护，请稍后重试",
+                java.util.Map.of("traceId", traceId == null ? "" : traceId));
     }
 
     private Disposable renewWhileRunning(
@@ -151,5 +183,11 @@ public class UserRuntimeDisposeCoordinator {
             throw new IllegalArgumentException(field + " must be positive");
         }
         return value;
+    }
+
+    /** 调用方在取消 Run、停止和启动等关键边界前复核维护租约仍归当前操作所有。 */
+    @FunctionalInterface
+    public interface LeaseGuard {
+        void requireActive();
     }
 }

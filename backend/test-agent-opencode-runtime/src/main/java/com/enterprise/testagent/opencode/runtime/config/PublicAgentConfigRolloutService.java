@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePe
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
+import com.enterprise.testagent.domain.notification.UserNotificationType;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
@@ -39,6 +40,7 @@ import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopRequest;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopService;
+import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
@@ -83,6 +85,7 @@ public class PublicAgentConfigRolloutService
     private final Duration retryDelay;
     private OpencodeProcessConfigLinkService configLinkService;
     private OpencodeProcessStopService stopService;
+    private UserNotificationApplicationService notificationService;
 
     /** 公共发布排空时把个人预览指针恢复到共享运行副本；方法注入保持既有测试构造器兼容。 */
     @Autowired
@@ -94,6 +97,12 @@ public class PublicAgentConfigRolloutService
     @Autowired
     void setStopService(OpencodeProcessStopService stopService) {
         this.stopService = Objects.requireNonNull(stopService, "stopService must not be null");
+    }
+
+    /** dispose 生命周期只通过通用通知应用服务写入，不让运行时模块直接访问通知仓储。 */
+    @Autowired
+    void setNotificationService(UserNotificationApplicationService notificationService) {
+        this.notificationService = Objects.requireNonNull(notificationService, "notificationService must not be null");
     }
 
     public PublicAgentConfigRolloutService(
@@ -160,6 +169,7 @@ public class PublicAgentConfigRolloutService
         String targetServer = requireText(localLinuxServerId, "纠错发布缺少发起服务器");
         String replacementRolloutId = RuntimeIdGenerator.publicAgentConfigRolloutId();
         Instant now = Instant.now();
+        Set<String> supersededUsers = pendingUserIds(expectedActiveRolloutId);
 
         Set<String> serverIds = new LinkedHashSet<>(repository.findRolloutServerIds(expectedActiveRolloutId));
         serverIds.add(targetServer);
@@ -191,6 +201,11 @@ public class PublicAgentConfigRolloutService
                     "待替换的公共 Agent/Skill 发布已变化或不再处于排空状态",
                     Map.of("rolloutId", expectedActiveRolloutId));
         }
+        supersededUsers.forEach(userId -> notifyDispose(
+                userId,
+                expectedActiveRolloutId,
+                UserNotificationType.AGENT_CONFIG_DISPOSE_SUPERSEDED,
+                traceId));
         return replacementRolloutId;
     }
 
@@ -636,7 +651,15 @@ public class PublicAgentConfigRolloutService
                     Map.of("linuxServerId", linuxServerId));
         }
         Instant now = Instant.now();
+        List<PublicAgentConfigRolloutTarget> abandonedTargets = repository.findPendingTargetsByServer(linuxServerId);
         repository.decommissionServerMembership(linuxServerId, now);
+        Set<String> notified = new LinkedHashSet<>();
+        for (PublicAgentConfigRolloutTarget target : abandonedTargets) {
+            String notificationKey = target.rolloutId() + ":" + target.userId();
+            if (notified.add(notificationKey)) {
+                notifyDispose(target, UserNotificationType.AGENT_CONFIG_DISPOSE_SUPERSEDED);
+            }
+        }
         repository.completeReadyRollouts(now);
     }
 
@@ -720,7 +743,7 @@ public class PublicAgentConfigRolloutService
                         continue;
                     }
                 }
-                repository.addTarget(new PublicAgentConfigRolloutTarget(
+                PublicAgentConfigRolloutTarget target = new PublicAgentConfigRolloutTarget(
                         RuntimeIdGenerator.publicAgentConfigRolloutTargetId(),
                         rolloutId,
                         scope,
@@ -734,7 +757,11 @@ public class PublicAgentConfigRolloutService
                         0,
                         null,
                         null,
-                        traceId), now);
+                        traceId);
+                repository.addTarget(target, now);
+                notifyDispose(
+                        target,
+                        UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING);
             }
         }
     }
@@ -843,7 +870,7 @@ public class PublicAgentConfigRolloutService
             }
             if (presence == ProcessPresence.ABSENT) {
                 // manager 明确确认目标端口已不存在时等同于已经释放，无需向死地址重复调用 dispose。
-                repository.markTargetDisposed(target.targetId(), target.leaseToken(), Instant.now());
+                markTargetDisposed(target);
                 return;
             }
             if (target.forceStop()) {
@@ -900,7 +927,7 @@ public class PublicAgentConfigRolloutService
                 retry(target, "DISPOSE_REJECTED", now);
                 return;
             }
-            repository.markTargetDisposed(target.targetId(), target.leaseToken(), Instant.now());
+            markTargetDisposed(target);
         } catch (Exception exception) {
             retry(target, safeError(exception.getMessage()), now);
         }
@@ -927,7 +954,7 @@ public class PublicAgentConfigRolloutService
             return;
         }
         stopService.stopAndVerify(OpencodeProcessStopRequest.tracked(process.get(), target.traceId()));
-        repository.markTargetDisposed(target.targetId(), target.leaseToken(), Instant.now());
+        markTargetDisposed(target);
     }
 
     /** 应用发布不触碰公共配置指针；公共发布必须在 dispose 前把本人预览切回共享副本。 */
@@ -1007,13 +1034,51 @@ public class PublicAgentConfigRolloutService
     private void retry(PublicAgentConfigRolloutTarget target, String error, Instant now) {
         int retryCount = target.retryCount() + 1;
         long multiplier = Math.min(retryCount, 6);
-        repository.markTargetRetry(
+        boolean updated = repository.markTargetRetry(
                 target.targetId(),
                 target.leaseToken(),
                 retryCount,
                 now.plus(retryDelay.multipliedBy(multiplier)),
                 safeError(error),
                 now);
+        if (updated) {
+            // lease 条件更新成功才允许推进通知，避免迟到 worker 覆盖新一轮 rollout 状态。
+            notifyDispose(
+                    target,
+                    "SESSION_RUNNING".equals(error)
+                            ? UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING
+                            : UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED);
+        }
+    }
+
+    /** 只有持有当前 lease 的目标完成写回后才发送成功通知，避免迟到 worker 覆盖新状态。 */
+    private void markTargetDisposed(PublicAgentConfigRolloutTarget target) {
+        if (repository.markTargetDisposed(target.targetId(), target.leaseToken(), Instant.now())) {
+            notifyDispose(target, UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED);
+        }
+    }
+
+    private void notifyDispose(PublicAgentConfigRolloutTarget target, UserNotificationType type) {
+        notifyDispose(target.userId(), target.rolloutId(), type, target.traceId());
+    }
+
+    /** 未映射到平台用户的历史 manager 进程没有合法通知接收人，继续只做安全 dispose。 */
+    private void notifyDispose(String userId, String rolloutId, UserNotificationType type, String traceId) {
+        if (notificationService == null || userId == null || userId.isBlank()) {
+            return;
+        }
+        notificationService.syncAgentConfigDispose(new UserId(userId), rolloutId, type, traceId);
+    }
+
+    private Set<String> pendingUserIds(String rolloutId) {
+        Set<String> userIds = new LinkedHashSet<>();
+        repository.findRolloutServerStatuses(rolloutId).forEach(server ->
+                server.pendingTargets().forEach(target -> {
+                    if (target.userId() != null && !target.userId().isBlank()) {
+                        userIds.add(target.userId());
+                    }
+                }));
+        return Set.copyOf(userIds);
     }
 
     private ExecutionNode targetNode(PublicAgentConfigRolloutTarget target, Instant now) {

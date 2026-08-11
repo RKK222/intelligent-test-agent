@@ -177,7 +177,7 @@ function api(overrides: Partial<BackendApiClient> = {}) {
 function renderWithApi(
   component: Component,
   backendApi: BackendApiClient,
-  user: CurrentUser = currentUser,
+  user: CurrentUser | null = currentUser,
   props: Record<string, unknown> = {}
 ) {
   const client = queryClient();
@@ -224,6 +224,18 @@ describe("scheduler management panel", () => {
 
     await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());
     expect(await view.findByText("暂无服务器 / Java 进程")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("restores the super-admin scheduler default after the current user loads asynchronously", async () => {
+    const backendApi = api();
+    const view = renderWithApi(SystemManagementPanel, backendApi, null);
+
+    expect(await view.findByText("当前账号无系统管理权限")).toBeTruthy();
+    await view.rerender({ currentUser });
+
+    expect(await view.findByText("定时任务管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    expect(view.getByTitle("XXL-JOB 定时任务管理")).toBeTruthy();
     view.queryClient.clear();
   });
 
@@ -385,15 +397,28 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
-  it("keeps application Git refresh unavailable to non-super-admin users", async () => {
+  it("lets application administrators refresh only the member applications returned by the backend", async () => {
     const backendApi = api();
     const appAdmin: CurrentUser = { ...currentUser, roles: ["APP_ADMIN"] };
     const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi, appAdmin);
 
-    expect(await view.findByText("当前账号无配置管理权限")).toBeTruthy();
-    expect(backendApi.listApplicationGitRefreshScopes).not.toHaveBeenCalled();
-    expect(backendApi.refreshApplicationGit).not.toHaveBeenCalled();
-    expect(backendApi.refreshApplicationGitGroup).not.toHaveBeenCalled();
+    expect(await view.findByText("F-GCMS")).toBeTruthy();
+    expect(backendApi.listApplicationGitRefreshScopes).toHaveBeenCalledTimes(1);
+    expect(view.queryByText("当前账号无配置管理权限")).toBeNull();
+    view.queryClient.clear();
+  });
+
+  it("limits the application administrator console to application Git refresh", async () => {
+    const backendApi = api();
+    const appAdmin: CurrentUser = { ...currentUser, roles: ["APP_ADMIN"] };
+    const view = renderWithApi(SystemManagementPanel, backendApi, appAdmin);
+
+    expect(await view.findByText("配置管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    expect(await view.findByRole("heading", { name: "应用 Git 刷新" })).toBeTruthy();
+    expect(view.queryByText("定时任务管理", { selector: ".ta-system-menu-text" })).toBeNull();
+    expect(view.queryByText("运行管理", { selector: ".ta-system-menu-text" })).toBeNull();
+    expect(view.queryByText("TestAgent公共配置管理")).toBeNull();
+    expect(backendApi.listApplicationGitRefreshScopes).toHaveBeenCalledTimes(1);
     view.queryClient.clear();
   });
 

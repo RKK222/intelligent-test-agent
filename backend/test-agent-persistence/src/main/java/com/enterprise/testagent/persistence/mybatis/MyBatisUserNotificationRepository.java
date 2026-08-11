@@ -33,6 +33,11 @@ public class MyBatisUserNotificationRepository implements UserNotificationReposi
     }
 
     @Override
+    public boolean updateByDedupKeyIfChanged(UserNotification notification) {
+        return mapper.updateByDedupKeyIfChanged(toRow(notification)) == 1;
+    }
+
+    @Override
     public int updateActiveByAction(
             UserId recipientUserId,
             UserNotificationActionType actionType,

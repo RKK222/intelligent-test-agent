@@ -21,10 +21,12 @@ const loading = ref(false);
 const refreshingOperation = ref<string | null>(null);
 const errorMessage = ref("");
 const results = ref<Record<string, ApplicationGitRefreshResult>>({});
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const canRefreshApplicationGit = computed(() => props.currentUser?.roles?.some(
+  (role) => role === "SUPER_ADMIN" || role === "APP_ADMIN"
+) === true);
 
 onMounted(() => {
-  if (hasSuperAdmin.value) void loadApplications();
+  if (canRefreshApplicationGit.value) void loadApplications();
 });
 
 /** 配置管理使用平台应用主数据，不要求超级管理员先加入应用或启动个人 OpenCode。 */
@@ -118,7 +120,7 @@ function formatError(error: unknown, fallback: string) {
 
 <template>
   <section class="ta-app-git-refresh">
-    <div v-if="!hasSuperAdmin" class="ta-app-git-placeholder">当前账号无配置管理权限</div>
+    <div v-if="!canRefreshApplicationGit" class="ta-app-git-placeholder">当前账号无配置管理权限</div>
     <template v-else>
       <header class="ta-app-git-header">
         <div>

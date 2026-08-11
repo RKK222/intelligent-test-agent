@@ -100,6 +100,10 @@ class MyBatisPublicAgentConfigRolloutPostgresqlIntegrationTest {
         repository.addTarget(target("act_matching", "acr_fixed", 14102, 1234L, NOW.minusSeconds(60)), NOW);
         repository.addTarget(target("act_other", "acr_fixed", 14103, 5678L, NOW.minusSeconds(30)), NOW);
 
+        assertThat(repository.findPendingTargetsByServer("linux-1"))
+                .extracting(PublicAgentConfigRolloutTarget::targetId)
+                .containsExactlyInAnyOrder("act_matching", "act_other");
+
         assertThat(jdbc.sql("""
                         select target_id, force_stop
                         from public_agent_config_rollout_targets

@@ -206,6 +206,89 @@ class UserNotificationApplicationServiceTest {
         verify(repository).deleteCreatedBefore(NOW.minus(Duration.ofDays(90)));
     }
 
+    @Test
+    void createsOnePendingDisposeNotificationWithOnlyTheRolloutAsItsTarget() {
+        when(repository.updateByDedupKeyIfChanged(any())).thenReturn(false);
+        when(repository.insert(any())).thenReturn(true);
+
+        service.syncAgentConfigDispose(
+                MEMBER,
+                "acr_dispose_12345678",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+                "trace_dispose_pending");
+
+        ArgumentCaptor<UserNotification> notification = ArgumentCaptor.forClass(UserNotification.class);
+        verify(repository).insert(notification.capture());
+        assertThat(notification.getValue()).satisfies(value -> {
+            assertThat(value.type()).isEqualTo(UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING);
+            assertThat(value.actionType()).isEqualTo(UserNotificationActionType.NONE);
+            assertThat(value.actionTargetId()).isEqualTo("acr_dispose_12345678");
+            assertThat(value.dedupKey()).isEqualTo(
+                    "AGENT_CONFIG_DISPOSE:acr_dispose_12345678:" + MEMBER.value());
+            assertThat(value.body()).doesNotContain("trace", "/", "Exception");
+        });
+        assertThat(publisher.events).singleElement().satisfies(event ->
+                assertThat(event.payload().get("changeType")).isEqualTo("CREATED"));
+    }
+
+    @Test
+    void sameDisposeStateDoesNotBroadcastButFailureEnablesControlledRestart() {
+        when(repository.updateByDedupKeyIfChanged(any()))
+                .thenReturn(false, false, true);
+        when(repository.insert(any())).thenReturn(false);
+
+        service.syncAgentConfigDispose(
+                MEMBER,
+                "acr_dispose_12345678",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+                "trace_dispose_pending_retry");
+        assertThat(publisher.events).isEmpty();
+
+        service.syncAgentConfigDispose(
+                MEMBER,
+                "acr_dispose_12345678",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED,
+                "trace_dispose_failed");
+
+        ArgumentCaptor<UserNotification> notification = ArgumentCaptor.forClass(UserNotification.class);
+        verify(repository, org.mockito.Mockito.times(3)).updateByDedupKeyIfChanged(notification.capture());
+        assertThat(notification.getAllValues().get(2).actionType())
+                .isEqualTo(UserNotificationActionType.RESTART_OWN_PROCESS);
+        assertThat(publisher.events).singleElement().satisfies(event ->
+                assertThat(event.payload().get("changeType")).isEqualTo("UPDATED"));
+    }
+
+    @Test
+    void noneActionNotificationCanBeMarkedReadByItsRecipient() {
+        UserNotification pending = new UserNotification(
+                new UserNotificationId("ntf_dispose_pending"),
+                MEMBER,
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+                null,
+                "Agent 配置等待生效",
+                "配置已更新，正在等待当前任务结束后应用。",
+                UserNotificationActionType.NONE,
+                "acr_dispose_12345678",
+                "AGENT_CONFIG_DISPOSE:acr_dispose_12345678:" + MEMBER.value(),
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                "trace_dispose_pending",
+                NOW,
+                NOW);
+        when(repository.findByIdForRecipient(pending.notificationId(), MEMBER)).thenReturn(Optional.of(pending));
+        when(repository.markReadById(
+                pending.notificationId(), MEMBER, NOW, "trace_dispose_read")).thenReturn(true);
+
+        service.markRead(MEMBER, pending.notificationId(), "trace_dispose_read");
+
+        verify(repository).markReadById(pending.notificationId(), MEMBER, NOW, "trace_dispose_read");
+        assertThat(publisher.events).singleElement().satisfies(event ->
+                assertThat(event.payload().get("changeType")).isEqualTo("READ"));
+    }
+
     private SessionShare share(List<SessionShareMembership> memberships, long version) {
         return new SessionShare(
                 SHARE_ID,

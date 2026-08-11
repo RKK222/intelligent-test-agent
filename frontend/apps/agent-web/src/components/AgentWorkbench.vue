@@ -138,6 +138,7 @@ import {
   type FileUploadOverlayState
 } from "./fileUploadOverlayState";
 import { formatPreviewBytes, progressivePreviewRequired } from "./fileProgressivePreview";
+import { restartOwnProcessWithConfirmation } from "./process-restart";
 import {
   assertCompleteWorkspaceViewDownload,
   concatWorkspaceDownloadChunks,
@@ -1632,10 +1633,48 @@ function handleNotificationFilter(filter: UserNotificationFilter) {
   void refreshUserNotifications();
 }
 
-/** 分享通知不提前调用通用已读接口，必须等新标签页鉴权访问成功后由后端统一标记。 */
-function handleOpenNotification(notification: UserNotification) {
-  if (!notification.actionAvailable || notification.actionType !== "SESSION_SHARE") return;
-  openSharedSession(notification.actionTargetId);
+/** 通知动作按类型和受控枚举双重校验，未知组合不得跳转或执行进程操作。 */
+async function handleOpenNotification(notification: UserNotification) {
+  if (
+    notification.type === "SESSION_SHARED"
+    && notification.actionType === "SESSION_SHARE"
+    && notification.actionAvailable
+  ) {
+    // 分享通知不提前标记已读，必须等新标签页鉴权访问成功后由后端统一处理。
+    openSharedSession(notification.actionTargetId);
+    return;
+  }
+  if (
+    [
+      "AGENT_CONFIG_DISPOSE_PENDING",
+      "AGENT_CONFIG_DISPOSE_SUCCEEDED",
+      "AGENT_CONFIG_DISPOSE_SUPERSEDED"
+    ].includes(notification.type)
+    && notification.actionType === "NONE"
+    && notification.unread
+  ) {
+    try {
+      await ordinaryApi.markUserNotificationRead(notification.notificationId);
+      await refreshUserNotifications();
+    } catch (error) {
+      feedback.value = errorFeedback("标记通知已读失败", error);
+    }
+    return;
+  }
+  if (
+    notification.type === "AGENT_CONFIG_DISPOSE_FAILED"
+    && notification.actionType === "RESTART_OWN_PROCESS"
+    && notification.actionAvailable
+  ) {
+    const restarted = await restartMyOpencodeProcess();
+    if (!restarted) return;
+    try {
+      await ordinaryApi.markUserNotificationRead(notification.notificationId);
+      await refreshUserNotifications();
+    } catch (error) {
+      feedback.value = errorFeedback("进程已重启，但通知标记已读失败", error);
+    }
+  }
 }
 
 watch(
@@ -3962,6 +4001,55 @@ const initializeOpencodeProcessMutation = useMutation({
     })();
   }
 });
+
+const restartMyOpencodeProcessMutation = useMutation({
+  mutationFn: (confirmRunning: boolean) => api.restartMyOpencodeProcess(confirmRunning)
+});
+
+/** 头像入口和 dispose 失败通知共用同一重启编排与后端权威二次确认。 */
+async function restartMyOpencodeProcess(): Promise<boolean> {
+  try {
+    const status = await restartOwnProcessWithConfirmation(
+      (confirmRunning) => restartMyOpencodeProcessMutation.mutateAsync(confirmRunning),
+      async (runningCount) => {
+        const runningDescription = runningCount === null
+          ? "检测到运行中的任务。"
+          : `检测到 ${runningCount} 个运行中的任务。`;
+        try {
+          await ElMessageBox.confirm(
+            `${runningDescription}继续重启会先中止这些任务，是否继续？`,
+            "确认重启 TestAgent 进程",
+            {
+              type: "warning",
+              confirmButtonText: "中止任务并重启",
+              cancelButtonText: "取消",
+              autofocus: false
+            }
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    );
+    if (!status) return false;
+    queryClient.setQueryData(opencodeProcessQueryKey.value, status);
+    await Promise.allSettled([
+      opencodeProcessQuery.refetch(),
+      publicConfigMessageGateQuery.refetch(),
+      refreshUserNotifications()
+    ]);
+    feedback.value = {
+      kind: "success",
+      title: "TestAgent 进程已重启",
+      description: status.serviceAddress ?? status.message
+    };
+    return true;
+  } catch (error) {
+    feedback.value = errorFeedback("重启 TestAgent 进程失败", error);
+    return false;
+  }
+}
 
 // Run 与 reducer 可能因网络时序短暂不一致；明确终态优先，避免完成后的残留 shimmer。
 const runtimeBusy = computed(() =>
@@ -10559,6 +10647,7 @@ async function handleLogout() {
     :opencode-process-status="opencodeProcessStatus"
     :opencode-process-loading="opencodeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
+    :process-restarting="restartMyOpencodeProcessMutation.isPending.value"
     :show-process-status-in-pet="!shareMode"
     :onboarding-active="firstLoginGuideActive"
     :side-question-answer="robotSideQuestion.answer.value"
@@ -10587,6 +10676,7 @@ async function handleLogout() {
     @return-managed-workspace="fallbackToManagedWorkspace()"
     @refresh-opencode-process="refreshOpencodeProcessStatus"
     @initialize-process="beginInitializeOpencodeProcess"
+    @restart-process="restartMyOpencodeProcess"
     @logout="handleLogout"
     @join-app="handleJoinApp"
     @robot-side-question="handleRobotSideQuestion"
@@ -10660,7 +10750,7 @@ async function handleLogout() {
             <span class="figma-activity-text">长任务</span>
           </button>
           <button
-            v-if="isSuperAdmin"
+            v-if="isAppAdmin"
             type="button"
             :class="['figma-activity-btn figma-activity-btn--system', centerMode === 'system' && 'figma-activity-btn--active']"
             aria-label="系统管理"

@@ -11,6 +11,8 @@ public interface UserNotificationMapper {
 
     int insertNotification(@Param("row") UserNotificationRow row);
 
+    int updateByDedupKeyIfChanged(@Param("row") UserNotificationRow row);
+
     int updateActiveByAction(
             @Param("recipientUserId") String recipientUserId,
             @Param("actionType") String actionType,

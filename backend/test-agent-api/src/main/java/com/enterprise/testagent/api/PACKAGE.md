@@ -20,7 +20,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.RunResendInternalDispatchController` / `HttpRunResendDispatchGateway`：使用精确内部路径、XXL token 和公共 Java 路由/转发器分发到固定目标服务器，不接受用户 token 豁免到其它路径。
 - `web.platform.RunControlBackendRoutingWebFilter`、`web.platform.BackendRoutingErrorWriter`：普通 Run 的两个 cancel 写入口严格路由到生产 Java；尚未投递且没有生产路由的 WAITING 重发替代 Run 留在入口 Java，经 owner 校验后只做共享状态 CAS 和解锁。其它归属解析或普通 HTTP 转发失败时直接写统一平台错误，禁止降级执行本机副作用。
 - `web.platform.PlatformOpencodeRuntimeController`：平台侧 opencode runtime 代理入口，只承载旧 `/api/...` 与 `/api/internal/platform/...` 路径，并把可选用户主体交给业务层决定用户进程或固定节点 fallback。
-- `web.platform.UserOpencodeBackendRoutingWebFilter` / `UserOpencodeBackendRoutingService`：用户已有 ACTIVE opencode binding 属于远端服务器时，在 Controller 前把用户进程状态、初始化、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java；透传用户 Authorization/traceId/body，并用内部路由头防止循环。内部模型可观测接口读取共享统计，不跟随用户 binding 转发。
+- `web.platform.UserOpencodeBackendRoutingWebFilter` / `UserOpencodeBackendRoutingService`：用户已有 ACTIVE opencode binding 属于远端服务器时，在 Controller 前把用户进程状态、初始化、个人重启、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java；透传用户 Authorization/traceId/body，并用内部路由头防止循环。内部模型可观测接口读取共享统计，不跟随用户 binding 转发。
 - `web.platform.RuntimeManagementController`：超级管理员运行管理入口，校验 `SUPER_ADMIN` 后把筛选、分页、命令参数和 traceId 交给 runtime 查询/命令服务；manager 进程明细可空透传 `unifiedAuthId/managerStatus`，旧载荷缺字段保持兼容，UCID 不进入普通用户响应或日志。API 层不实现 opencode server 启动、停止、状态查询或健康确认。
 - `web.platform.CommonParameterMemoryController` / `CommonParameterMemoryBackendRoutingService`：超级管理员显式 JVM 内存参数查询与手工刷新入口；按 `backendProcessId` 精确聚合全部或单个在线 Java，跨 Java 复用公共 resolver/forwarder，部分失败保留逐进程结果。
 - `web.platform.UiTestToolConfigController`：仅供受信任 OpenCode worker 内网直连的 UI 平台地址查询入口；不使用应用层凭据，只返回 `configured/baseUrl`，公共 Nginx 必须精确拒绝该路径。

@@ -2,12 +2,12 @@
 
 ## 工程定位
 
-通用用户站内通知业务模块。首期生产者是会话协作分享；模块负责通知生命周期、未读统计、用户级实时变化和历史清理，不承载 HTTP DTO、MyBatis 实现或具体页面。
+通用用户站内通知业务模块。生产者包括会话协作分享和 Agent 配置 dispose rollout；模块负责通知生命周期、未读统计、用户级实时变化和历史清理，不承载 HTTP DTO、MyBatis 实现或具体页面。
 
 ## 上游调用方
 
 - `test-agent-api`：分页、幂等已读和用户级通知 SSE。
-- `test-agent-opencode-runtime`：分享创建/更新/撤销、成员移除、会话归档和分享访问成功后的已读同步。
+- `test-agent-opencode-runtime`：分享生命周期与已读同步，以及配置 dispose 的等待、成功、失败和已结束状态推进。
 - `test-agent-app`：通过依赖图装配 Spring Bean 和定时任务。
 
 ## 下游依赖
@@ -20,6 +20,7 @@
 
 - 用受控 `actionType + actionTargetId` 表达通知动作，禁止保存任意 URL。
 - 首次分享、重新加入或分享重新激活时创建新通知；普通设置更新只更新当前通知快照；成员移除、撤销和会话归档使当前通知失效。
+- dispose 按 `AGENT_CONFIG_DISPOSE:{rolloutId}:{userId}` 单行去重，采用“条件更新 → 幂等插入 → 并发重试更新”；相同状态不修改已读/更新时间或广播，真实变化清空已读并发布 `UPDATED`。失败状态只开放 `RESTART_OWN_PROCESS`，其它状态使用 `NONE`，目标只保存 rolloutId。
 - 未读口径固定为 `readAt` 为空、通知有效且未过期；分享的当前状态还要实时合并分享、成员、会话和所属人事实。
 - 分享访问鉴权成功后按 `recipientUserId + shareId` 幂等已读。该同步失败只记录脱敏告警，不阻断分享访问。
 - 数据库事务提交成功后才向本机连接和 `ServerBroadcastPublisher` 发布变化；跨节点 payload 只包含接收人 ID、通知 ID、变化类型和既有广播元数据。
