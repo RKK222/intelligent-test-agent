@@ -1,5 +1,19 @@
-export type WorkbenchCenterMode = "editor" | "diff" | "system" | "hub" | "toolbox";
-export type NonToolboxCenterMode = Exclude<WorkbenchCenterMode, "toolbox">;
+export type WorkbenchCenterMode = "editor" | "diff" | "system" | "hub" | "toolbox" | "memories";
+export type RoutedCenterMode = Extract<WorkbenchCenterMode, "system" | "hub" | "toolbox" | "memories">;
+export type NonRoutedCenterMode = Exclude<WorkbenchCenterMode, RoutedCenterMode>;
+
+const ROUTED_CENTER_MODES: readonly RoutedCenterMode[] = ["system", "hub", "toolbox", "memories"];
+
+/** 活动栏沉浸式页面使用同名路由，集中校验避免组件内散落字符串分支。 */
+export function routedCenterModeFromRouteName(routeName: unknown): RoutedCenterMode | null {
+  return typeof routeName === "string" && ROUTED_CENTER_MODES.includes(routeName as RoutedCenterMode)
+    ? routeName as RoutedCenterMode
+    : null;
+}
+
+export function isRoutedCenterMode(mode: WorkbenchCenterMode): mode is RoutedCenterMode {
+  return ROUTED_CENTER_MODES.includes(mode as RoutedCenterMode);
+}
 
 export type ImmersivePanelSnapshot = {
   leftOpen: boolean;
@@ -11,7 +25,7 @@ export type ImmersivePanelSnapshot = {
 };
 
 export function isImmersiveCenterMode(mode: WorkbenchCenterMode): boolean {
-  return mode === "system" || mode === "hub" || mode === "toolbox";
+  return mode === "system" || mode === "hub" || mode === "toolbox" || mode === "memories";
 }
 
 /** 沉浸式中心视图共用一次快照，互相切换时不覆盖用户进入前的面板状态。 */
@@ -43,20 +57,20 @@ export function transitionImmersivePanels(
   return state;
 }
 
-/** 将命名路由状态映射到中心视图，并保留进入工具盒子前的中心模式供后退恢复。 */
+/** 将命名路由状态映射到中心视图，并保留离开全部沉浸式路由后的工作台模式。 */
 export function routeCenterTransition(
-  isToolboxRoute: boolean,
+  routeMode: RoutedCenterMode | null,
   currentMode: WorkbenchCenterMode,
-  beforeToolbox: NonToolboxCenterMode
-): { mode: WorkbenchCenterMode; beforeToolbox: NonToolboxCenterMode } {
-  if (isToolboxRoute) {
+  beforeRoute: NonRoutedCenterMode
+): { mode: WorkbenchCenterMode; beforeRoute: NonRoutedCenterMode } {
+  if (routeMode) {
     return {
-      mode: "toolbox",
-      beforeToolbox: currentMode === "toolbox" ? beforeToolbox : currentMode
+      mode: routeMode,
+      beforeRoute: isRoutedCenterMode(currentMode) ? beforeRoute : currentMode
     };
   }
-  if (currentMode === "toolbox") {
-    return { mode: beforeToolbox, beforeToolbox };
+  if (isRoutedCenterMode(currentMode)) {
+    return { mode: beforeRoute, beforeRoute };
   }
-  return { mode: currentMode, beforeToolbox };
+  return { mode: currentMode, beforeRoute };
 }

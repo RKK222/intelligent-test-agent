@@ -77,6 +77,7 @@ Browser
 | `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/result、Redis 全局锁与旧运行记录清理；不再启动 runner 或创建/执行 `USER_PLAN`，全部周期任务由 XXL adapter 调用业务 handler。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界；当前承载 IT-Tools/OmniTools 版本化离线目录、193 项目录校验、热门 Top 10 和用户/工具 30 秒点击计数服务，以及按统一认证号读取既有用户 SSH Key 并输出 TAEK1 加密信封。 |
 | `test-agent-model-gateway` | 中立的企业模型目录投影、能力探测、OpenAI-compatible 请求准备/流式转发、上游错误脱敏和每日聚合调用；同时提供 OpenCode 内部代理复用的 URL/可信 Header/响应头安全支持，不承载 Controller 或 SQL。 |
+| `test-agent-memory` | 通用长期记忆业务边界；承载个人/团队治理、官方风格 Mem0 REST 端口、证据安全引用、学习 Outbox、2 秒 fail-open 检索和 Skill 提案，不保存聊天正文、不直连记忆 PostgreSQL。 |
 | `test-agent-xxl-job-admin-upstream` | 未做业务修改的 XXL-JOB Admin 3.4.2 源码与资源普通 JAR；只允许整体上游升级。 |
 | `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、平台 advertised host 地址派生、由本机 Admin readiness 门控且不阻塞主服务的 executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、含 `X-Test-Agent-Linux-Server-Id` 的 CORS 边界、RunEvent SSE 按生产 Java 流式转发入口、用户通知分页/已读/fetch SSE、夜间时段/任务 HTTP 入口、工具盒子目录/点击 HTTP 入口、带 `permissionCount/PERMISSION` 的用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图、Agent 配置文件及 Hub 制品/引用操作）、应用源码仓库/物化/打开/最近选择/持久化操作快照 HTTP 入口及独立一次性 ticket 进度 WebSocket、Agent & Skill Hub 浏览/发布/更新 HTTP 入口、应用引用资产库 7 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史、XXL 一次性 SSO 票据和显式 JVM 内存参数跨 Java 查询/刷新入口、trace Web 入口。 |
@@ -135,6 +136,10 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 
 活动栏底部 `Boxes` 入口的前端 Hub 统一表示 Agent、Skill、MCP、Tool：Agent/Skill 继续调用平台 Hub API 管理远端资产，MCP/Tool 只复用 `apps/agent-web` 已加载的 OpenCode 运行态目录，不新增服务端资产类型。顶部资源摘要另保留 Plugin 计数；顶部摘要与 Hub 详情面板都支持拖拽调宽和页面内全屏。
 
+活动栏 `BrainCircuit` 入口和 `/memories` 路由由 `apps/agent-web` 组合通用记忆中心：`MemoryCenter.vue` 负责个人/团队/Skill 提案治理与含 Session 标题/ID 的证据 rail，`MemoryAdminPanel.vue` 负责 Mem0 多节点、企业/CPU profile、投影积压、模型设置和白名单，`FigmaChatPanel.vue` 只显示 `run-usage/query` 恢复的真实注入数量。`packages/backend-api` 是页面访问 `/api/internal/platform/memory/v1` 的唯一入口；前端不直连 memory-service、不复制原始聊天、不扩展 RunEvent。
+
+`apps/agent-web/router.ts` 与 `AgentWorkbench.vue` 共同维护活动栏 URI：`/workbench`、`/toolbox`、`/memories`、`/system`、`/hub` 和 `/settings` 分别对应工作台、工具箱、记忆中心、超级管理员控制台、能力库和设置弹窗，`/` 只兼容跳转到 `/workbench`。`toolbox-navigation.ts` 复用同一沉浸式布局状态机，路由名是刷新、登录回跳和浏览器历史恢复的权威来源；组件内后台状态不能覆盖当前路由页面。
+
 Skill Hub 的事项分类以逻辑资产持久化：应用推送 Skill 复用 `agent_skill_hub_assets`，公共 Git Skill 使用 `agent_skill_hub_builtin_classifications`，首次入库默认 `OTHER`，后续修订或 commit 不覆盖分类；`test-agent-workspace-management` 校验 `WORKER/TEST/CODE/OTHER` 与受控二级事项组合，`test-agent-persistence` 通过 `AgentSkillHubMapper.xml` 筛选并审计分类者，`test-agent-api` 仅向 `SUPER_ADMIN` 开放分类 mutation。公共 Agent/Skill 由 `AgentSkillHubApplicationService` 定时用共享仓库现有 Git 身份刷新当前分支远端引用并按精确 commit 对账，修订元数据写入公共快照表、正文复用内容寻址 artifact 表，查询链路只读数据库。前端 `AgentSkillHub.vue` 复用同一目录/详情链路提供两级筛选和详情内管理，不新增独立分类服务或客户端直连。
 
 批量生成子条目测试案例不新增工作区目录协议：`apps/agent-web` 的弹层直接消费输入 `#` 已有的 `workspaceRequirementCandidates`，仍由 `AgentWorkbench` 通过四阶段 `searchFiles()` 聚合。前端局部上下文构建和最多四路编排不写当前输入附件；`packages/backend-api` 只新增批量 Session 方法并为夜间任务透传可选 `batchContext`。后端由 `test-agent-api` 暴露单项 Session HTTP DTO，`test-agent-opencode-runtime` 负责用户级幂等创建和定时事务归因，`test-agent-domain` 定义归因端口，`test-agent-persistence` 以专用 MyBatis XML 和 Flyway 保存 Session 字段、唯一索引与事务锁。每项仍使用既有 RunEvent SSE，不新增事件或统一运营报表。
@@ -165,7 +170,7 @@ Skill Hub 的事项分类以逻辑资产持久化：应用推送 Skill 复用 `a
 
 Workspace 的存储路径与物理路径边界由 `test-agent-domain/ManagedWorkspacePathResolver` 统一定义：数据库逻辑前缀保留跨服务器可迁移性，`test-agent-api` 和 `test-agent-workspace-management` 的对外 DTO 必须投影成同值的 `rootPath/physicalRootPath` 绝对路径。`apps/agent-web/components/physical-path.ts` 只允许复制路径与小地球消费该物理绝对路径，逻辑前缀、普通相对路径和内部 tab route 均失败关闭。
 
-`apps/agent-web` 的视觉边界由应用层维护：`FigmaShell.vue` 组合外围壳层，并让顶栏与 8px 栏间间隔共用浅雾蓝画布色、左/中/右三栏各自形成纯白悬浮面板；左侧工作区/Agent 目录加载前后与中间未打开文件时的预览区均保持纯白，当前文件标签只用 2px 工行红上沿标记激活态。顶栏按“36px 首行 + 8px 面板间隔”的 44px 视觉带统一上下居中：Logo 左对齐，直接使用用户确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形；应用、工作空间、版本三个白底细框按钮放在 Logo 末端与右侧工具组起点之间的网格列正中，使左右留白相等；书本手册、通知铃铛、透明底细框运行态摘要和单字头像依次固定在右侧。手册入口默认透明无框，打开弹框后保持与活动栏一致的柔红底、深红图标和工行红定位标记；通知未读角标和打开态复用工行红/柔红令牌。顶部工作空间/版本选择只复用 `AgentWorkbench` 既有数据和 `handleLoadVersions` / `handleSelectVersion` 回调，左下角 `WorkbenchFooter` 入口继续保留，两处不得各自新增切换链路；用户在顶部选定工作空间时，版本列表只有一项则直接默认该项，多项则复用后端倒序结果的首项（最新版本）。非品牌首行文字默认保持纯黑，单字用户名为 12px。`styles/globals.css` 提供隔离的 `--ta-shell-*` token。`FigmaChatPanel.vue` 和 `packages/agent-chat` 不消费 shell token，避免外围品牌色影响对话内容。
+`apps/agent-web` 的视觉边界由应用层维护：`FigmaShell.vue` 组合外围壳层，并让顶栏与 8px 栏间间隔共用浅雾蓝画布色、左/中/右三栏各自形成纯白悬浮面板；左侧工作区/Agent 目录加载前后与中间未打开文件时的预览区均保持纯白，当前文件标签只用 2px 工行红上沿标记激活态。顶栏按“36px 首行 + 8px 面板间隔”的 44px 视觉带统一上下居中：Logo 左对齐，直接使用用户确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形；应用、工作空间、版本三个白底细框按钮放在 Logo 末端与右侧工具组起点之间的网格列正中，使左右留白相等；书本手册、通知铃铛、透明底细框运行态摘要和单字头像依次固定在右侧。手册入口默认透明无框，打开弹框后保持与活动栏一致的柔红底、深红图标和工行红定位标记；通知未读角标和打开态复用工行红/柔红令牌。顶部工作空间/版本选择只复用 `AgentWorkbench` 既有数据和 `handleLoadVersions` / `handleSelectVersion` 回调，左下角 `WorkbenchFooter` 入口继续保留，两处不得各自新增切换链路；用户在顶部选定工作空间时，版本列表只有一项则直接默认该项，多项则复用后端倒序结果的首项（最新版本）。非品牌首行文字默认保持纯黑，单字用户名为 12px。`styles/globals.css` 提供隔离的 `--ta-shell-*` token；`styles/element-overrides.css` 让非模态顶部反馈主体透传指针事件，仅保留关闭按钮交互，避免遮挡工作区。`FigmaChatPanel.vue` 和 `packages/agent-chat` 不消费 shell token，避免外围品牌色影响对话内容。
 
 `apps/agent-web` 的 Git Changes 负责应用 Agent 与公共 Agent 当前作用域的逐文件和批量暂存；批量入口复用 `packages/backend-api` 既有 Agent stage 方法，不新增 API 或跨作用域状态。
 

@@ -3999,6 +3999,60 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 对应测试：`ToolboxControllerTest`、`ToolboxCatalogServiceTest`、`ToolboxCatalogContractTest`、`MyBatisToolboxClickRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发/用户删除测试。
 
+### 通用长期记忆 V1
+
+用户入口 Base URL：`/api/internal/platform/memory/v1`。所有接口要求平台登录，并且当前用户必须在记忆灰度白名单中；默认空白名单，因此 migration 上线后不会改变既有对话。完整记忆正文从 Mem0 读取，平台数据库中的 `displaySummary` 只用于服务不可用时的降级展示。旧 `/api/internal/platform/qa-memory/v1/**` 统一返回 `410 API_GONE`。
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/availability` | 查询当前用户是否已开通 |
+| `GET/POST` | `/personal` | 分页查询或手工新增个人记忆；范围仅 `PERSONAL_GLOBAL/PERSONAL_APPLICATION` |
+| `GET` | `/team` | 按当前有效 Application 成员关系查询团队记忆 |
+| `POST` | `/team/proposals` | 成员手工提交团队候选；可选 `sourceMemoryId` 只复制本人个人记忆的证据引用和摘要 |
+| `POST` | `/team/{memoryId}/reviews` | `APP_ADMIN` 审核候选，决定为 `APPROVE/REJECT` |
+| `GET/PATCH/DELETE` | `/memories/{memoryId}` | 详情、编辑和归档；修改必须携带 `expectedVersion` |
+| `POST` | `/personal/{memoryId}/promote-global` | owner 把 Application 个人记忆提升为个人全局 |
+| `POST` | `/personal/{memoryId}/pause` | 暂停已生效个人记忆 |
+| `GET` | `/memories/{memoryId}/evidence` | 返回 `sessionId/sessionTitle/transcriptAvailable/runId` 和不超过 200 字摘要 |
+| `POST` | `/run-usage/query` | 按最多 200 个 Run ID 批量恢复真正注入的记忆 |
+| `GET/POST` | `/skill-proposals` | 查询提案，或从已生效个人/团队记忆发起 `PENDING_REVIEW` 提案；此时不生成草稿 |
+| `POST` | `/skill-proposals/{proposalId}/reviews` | 所属 Application 的 `APP_ADMIN` 审核；通过后才生成可编辑 `SKILL.md` 草稿，拒绝后状态为 `REJECTED` |
+| `PATCH/DELETE` | `/skill-proposals/{proposalId}` | 创建人或 `APP_ADMIN` 编辑已审核草稿、归档提案；修改携带 `expectedVersion` |
+| `POST` | `/skill-proposals/{proposalId}/published-asset` | `APP_ADMIN` 在既有文件 WebSocket、Git、发布和 Hub 流程完成后，关联同 Application 已发布 Skill 资产 |
+
+团队数据的唯一边界是 `application_members` 中未删除的成员关系。团队记忆不从聊天自动生成；成员只能手工提交 `CANDIDATE`，包括 `APP_ADMIN` 自己提交的候选也必须再次审核。成员退出后，团队记忆与所属 Application 的 Skill 提案查询、贡献、审核和运行时复用立即失效。修改时版本不匹配返回 `409 CONFLICT`；平台在数据库事务内锁定治理记录，先写未提交状态，再执行同 operationId 可重放的 Mem0 修改，避免多 Java 节点交错写入。Mem0 不可用时，列表仍可返回 `contentAvailable=false` 的安全摘要，但 `content` 为空；前端不得编辑该摘要或把它提交为团队候选，需要正文的创建/编辑返回 `503 MEMORY_UNAVAILABLE`。
+
+系统管理 Base URL：`/api/internal/platform/memory/v1/admin`，仅 `SUPER_ADMIN`：
+
+- `GET /health`：Mem0 多节点共享数据面、CPU/企业 Embedding profile、固定 CHAT、学习队列和投影 outbox；后端携带 service key 调用 `/ready` 并验证 `rawMessageCount=0`。
+- `GET/PATCH /settings`：固定 CHAT 模型、可空企业 Embedding 模型和只读 CPU profile；修改携带 `expectedVersion`。企业模型必须已启用、配置凭据、探测 `EMBEDDING` 成功并声明正维度。
+- `GET/POST/DELETE /whitelist...`：分页查询、启用和移除用户白名单；移除不会删除记忆，但页面、学习和检索立即停止。
+
+能解析到当前 Application 的成功人工根 Run 只写无原文学习 outbox；无法解析 Application 时不自动学习，也不降级生成个人全局记忆。异步任务通过现有 Session 恢复表读取本轮 USER/ASSISTANT，并原样调用 `Mem0.add(messages,infer=true)`。不传自定义抽取 prompt，不产生 QA taskTypes、自定义 confidence、显式/隐式/临时候选。原生个人记忆直接生效，默认当前用户 + 当前 Application。
+
+Run 启动前一次请求检索个人全局、Application 个人和团队三个 scope；Java 总预算 2 秒，最多注入 6 条、约 800 tokens。任一 Embedding profile 可用即可返回，全部不可用或超时则不带记忆继续 Run。只有实际进入 system 上下文的条目写 usage。
+
+证据响应的 `sessionTitle/sessionId` 对授权查看者可见；`transcriptAvailable` 只在当前用户是 Session owner 时为 true，前端只能在此时提供 `/s/{sessionId}` 链接。所有成功/失败响应继续使用统一 envelope 与 traceId，日志不得记录记忆正文、聊天原文、模型凭据、HMAC 或 service key。
+
+#### memory-service 内部 REST
+
+Base URL 由 `TEST_AGENT_MEMORY_SERVICE_URL` 配置。除 `/health` 外必须携带 `X-Memory-Service-Key`：
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/health` | 仅 liveness |
+| `GET` | `/ready` | 共享 collection/profile、投影积压、`rawMessageCount=0` |
+| `POST` | `/memories` | `messages`、`infer`、scope/owner、固定 CHAT、operation/Run/Session 上下文 |
+| `GET/PUT/DELETE` | `/memories/{logicalMemoryId}` | 逻辑记忆 CRUD；update/delete 必须携带幂等 operation 上下文 |
+| `GET` | `/memories/{logicalMemoryId}/history` | 共享逻辑版本历史 |
+| `POST` | `/search` | 1–3 个 scope，多 profile RRF |
+
+学习最多 100 条消息、总计默认 120,000 字符；手工正文默认最多 8,000 字符；metadata JSON 最大 16 KiB且任意层级禁止原始消息/prompt/answer/transcript 键；query 最大 8,000 字符；topK API 最大 100、服务配置默认最大 50。旧 `/memory-api/v1/**` 返回 `410 API_GONE`。
+
+#### Mem0 模型网关 HMAC
+
+Mem0 对 `POST /api/internal/platform/model-gateway/v1/chat/completions|embeddings` 不使用浏览器 Bearer 或一次性 model grant，而使用集群 HMAC。请求头包含 client/user/run/session/operation、timestamp、nonce、body SHA-256、capability、signature；embedding 另含 `X-Embedding-Input-Type: query|document`。签名覆盖所有这些身份字段和固定路径，时间偏差默认 30 秒，nonce 在 Redis 中原子消费并保留 2 分钟。CHAT 只能路由管理设置中的固定模型，Embedding 只能路由已配置企业 profile 或固定 CPU profile。认证失败不回显供应商、凭据或正文。
+
 ### 健康检查
 
 Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring Boot/Druid 数据源；固定 opencode node yml 配置已作废，不再作为 Actuator health 来源；Redis 是系统必需依赖，健康检查会做 TCP 连通探测。

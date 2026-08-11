@@ -23,7 +23,7 @@ const loading = ref(false);
 /**
  * 登录成功后跳转的目标路径（从 query.redirect 读取）。
  */
-const redirectPath = ref("/");
+const redirectPath = ref("/workbench");
 
 onMounted(() => {
   redirectPath.value = resolveLoginRedirect(router.currentRoute.value.query.redirect);

@@ -116,6 +116,75 @@ class ModelGatewayForwardingServiceTest {
     }
 
     @Test
+    void forwardsSignedEmbeddingInputTypeOnlyForMemoryCaller() {
+        AtomicReference<ClientRequest> captured = new AtomicReference<>();
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> {
+                    captured.set(request);
+                    return Mono.just(ClientResponse.create(HttpStatus.OK)
+                            .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                            .body("{\"data\":[],\"usage\":{\"total_tokens\":0}}")
+                            .build());
+                })
+                .build();
+        ModelGatewayForwardingService service = service(
+                webClient,
+                new CapturingUsage(),
+                model(Set.of(ModelCapability.EMBEDDING), Set.of(ModelCapability.EMBEDDING)));
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
+                        ModelGatewayForwardingService.GATEWAY_PATH + "/embeddings")
+                .header(ModelGatewayForwardingService.EMBEDDING_INPUT_TYPE_HEADER, "query")
+                .contentType(MediaType.APPLICATION_JSON));
+        PreparedModelGatewayRequest prepared = service.prepare(
+                exchange,
+                "{\"model\":\"enterprise-chat\",\"input\":[\"检索\"]}"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        service.forward(
+                exchange,
+                prepared,
+                new ModelGatewayCaller("usr_memory", "AUTH_MEMORY", "memory"),
+                "trace_memory_embedding").block();
+
+        assertThat(captured.get().headers()
+                .getFirst(ModelGatewayForwardingService.EMBEDDING_INPUT_TYPE_HEADER))
+                .isEqualTo("query");
+        assertThat(captured.get().headers().getFirst(HttpHeaders.AUTHORIZATION))
+                .isEqualTo("Bearer provider-secret");
+    }
+
+    @Test
+    void stripsSpoofedEmbeddingInputTypeFromNonMemoryCaller() {
+        AtomicReference<ClientRequest> captured = new AtomicReference<>();
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> {
+                    captured.set(request);
+                    return Mono.just(ClientResponse.create(HttpStatus.OK)
+                            .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                            .body("{\"data\":[]}")
+                            .build());
+                })
+                .build();
+        ModelGatewayForwardingService service = service(
+                webClient,
+                new CapturingUsage(),
+                model(Set.of(ModelCapability.EMBEDDING), Set.of(ModelCapability.EMBEDDING)));
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
+                        ModelGatewayForwardingService.GATEWAY_PATH + "/embeddings")
+                .header(ModelGatewayForwardingService.EMBEDDING_INPUT_TYPE_HEADER, "query")
+                .contentType(MediaType.APPLICATION_JSON));
+        PreparedModelGatewayRequest prepared = service.prepare(
+                exchange,
+                "{\"model\":\"enterprise-chat\",\"input\":[\"检索\"]}"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        service.forward(exchange, prepared, caller(), "trace_browser_embedding").block();
+
+        assertThat(captured.get().headers()
+                .getFirst(ModelGatewayForwardingService.EMBEDDING_INPUT_TYPE_HEADER)).isNull();
+    }
+
+    @Test
     void acceptsEveryJsonModalityOnlyWhenItsCapabilityWasProbed() throws Exception {
         Set<ModelCapability> allCapabilities = Set.of(ModelCapability.values());
         InternalModelProviderModel model = model(allCapabilities, allCapabilities);

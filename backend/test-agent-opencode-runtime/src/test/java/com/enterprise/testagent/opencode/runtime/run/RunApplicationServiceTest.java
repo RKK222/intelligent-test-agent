@@ -278,6 +278,10 @@ class RunApplicationServiceTest {
                 new RunEventAppender(events),
                 runtimeRegistry(facade),
                 bindings);
+        service.setRunSystemPromptContributors(List.of(context -> {
+            assertThat(context.prompt()).isEqualTo("run the tests");
+            return Optional.of("<qa_long_term_memory>覆盖异常场景</qa_long_term_memory>");
+        }));
 
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
@@ -292,6 +296,8 @@ class RunApplicationServiceTest {
         assertThat(facade.startRunCommands.getFirst().opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(facade.startRunCommands.getFirst().workspace()).isNull();
         assertThat(facade.startRunCommands.getFirst().agent()).isEqualTo("build");
+        assertThat(facade.startRunCommands.getFirst().system())
+                .isEqualTo("<qa_long_term_memory>覆盖异常场景</qa_long_term_memory>");
         assertThat(facade.callOrder).containsSubsequence("streamRunEvents", "startRun");
         assertThat(sessions.current.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(sessions.current.opencodeExecutionNodeId()).isEqualTo(node().executionNodeId());

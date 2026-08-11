@@ -94,6 +94,8 @@ class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
 
     private static void seedShareBaseline(JdbcClient jdbc) {
         Timestamp now = Timestamp.from(NOW);
+        // 回填 SQL 使用数据库 current_timestamp；到期时间必须相对真实执行时钟，避免固定夹具随日期失效。
+        Timestamp expiresAt = Timestamp.from(Instant.now().plus(Duration.ofDays(1)));
         jdbc.sql("""
                         insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
                         values
@@ -128,7 +130,7 @@ class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
                                 'trace_notification_pg', :now, :now)
                         """)
                 .param("shareId", SHARE_ID)
-                .param("expiresAt", Timestamp.from(NOW.plus(Duration.ofDays(1))))
+                .param("expiresAt", expiresAt)
                 .param("now", now)
                 .update();
         jdbc.sql("""

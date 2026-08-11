@@ -57,7 +57,8 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static final String INTERNAL_MODEL_OBSERVABILITY_VERSION = "20260808143300";
     private static final String INTERNAL_MODEL_FIRST_TOKEN_VERSION = "20260808143301";
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_VERSION = "20260808143302";
-    private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION = "20260810234154";
+    private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION;
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION =
             DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION;
     private static final String INTERNAL_MODEL_OBSERVABILITY_OLD_RESOURCE =
@@ -90,12 +91,26 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_APPLIED_MIGRATION_VERSION;
     private static final String QA_MEMORY_APPLIED_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_APPLIED_COMPATIBILITY_LOCATION;
+    private static final String QA_MEMORY_APPLIED_MAIN_RESOURCE =
+            "db/migration/V20260809120000__create_qa_memory_governance.sql";
     private static final String QA_MEMORY_GENERALIZE_VERSION =
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_GENERALIZE_MIGRATION_VERSION;
     private static final String QA_MEMORY_IDENTITY_VERSION =
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_IDENTITY_MIGRATION_VERSION;
     private static final String QA_MEMORY_EXTENDED_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_EXTENDED_COMPATIBILITY_LOCATION;
+    private static final String QA_MEMORY_GENERALIZE_MAIN_RESOURCE =
+            "db/migration/V20260809230000__generalize_memory_and_embedding_profiles.sql";
+    private static final String QA_MEMORY_IDENTITY_MAIN_RESOURCE =
+            "db/migration/V20260810090000__enforce_qa_memory_identity.sql";
+    private static final String QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION;
+    private static final String QA_MEMORY_AFTER_SESSION_SHARE_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_AFTER_SESSION_SHARE_COMPATIBILITY_LOCATION;
+    private static final String QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION;
+    private static final String QA_MEMORY_AFTER_TOKEN_LATENCY_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_AFTER_TOKEN_LATENCY_COMPATIBILITY_LOCATION;
     private static final String EXTERNAL_API_FORWARD_VERSION =
             DatabaseMigrationCompatibilityCustomizer.EXTERNAL_API_FORWARD_MIGRATION_VERSION;
     private static final String EXTERNAL_API_FORWARD_LOCATION =
@@ -133,6 +148,21 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(appliedChecksum(dataSource, CURRENT_TOOLBOX_VERSION))
                     .isEqualTo(DatabaseMigrationCompatibilityCustomizer.CURRENT_TOOLBOX_ENTERPRISE_CHECKSUM);
             assertToolboxTables(dataSource);
+        });
+
+        // 合并后的完整主链允许 QA Memory 与会话分享低版本按顺序共存，第二次启动不能误切到任一补偿链。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(QA_MEMORY_APPLIED_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(
+                    QA_MEMORY_EXTENDED_LOCATION,
+                    QA_MEMORY_AFTER_SESSION_SHARE_LOCATION);
+            assertThat(applied(dataSource, QA_MEMORY_APPLIED_VERSION)).isTrue();
+            assertThat(applied(dataSource, QA_MEMORY_IDENTITY_VERSION)).isTrue();
+            assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isTrue();
+            assertThat(applied(dataSource, SESSION_SHARE_FORWARD_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isFalse();
+            assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
+            assertSessionShareSchema(dataSource);
         });
     }
 
@@ -407,6 +437,87 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                     DatabaseMigrationCompatibilityCustomizer.LOBEHUB_RELEASE_FORWARD_COMPATIBILITY_VERSION))
                     .isTrue();
             assertLobehubTablesAndParameters(dataSource, 3L);
+        });
+    }
+
+    @Test
+    void appliedReleaseSessionShareHistoryUsesQaMemoryForwardMigration() {
+        DataSource dataSource = dataSource("release_session_share_before_qa_memory");
+        // 复现 release 分支已执行外部 API 与会话分享、但从未执行较低版本 QA Memory 的真实历史。
+        migrateWithoutResourceTo(
+                dataSource,
+                SESSION_SHARE_ATTRIBUTION_VERSION,
+                QA_MEMORY_APPLIED_MAIN_RESOURCE,
+                QA_MEMORY_GENERALIZE_MAIN_RESOURCE,
+                QA_MEMORY_IDENTITY_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isTrue();
+        assertThat(applied(dataSource, QA_MEMORY_APPLIED_VERSION)).isFalse();
+        assertThat(qaMemorySchemaTableCount(dataSource)).isZero();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(QA_MEMORY_AFTER_SESSION_SHARE_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(
+                    QA_MEMORY_APPLIED_LOCATION,
+                    QA_MEMORY_EXTENDED_LOCATION);
+            assertThat(applied(dataSource, QA_MEMORY_APPLIED_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_GENERALIZE_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_IDENTITY_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isTrue();
+            assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
+            assertSessionShareSchema(dataSource);
+        });
+
+        // 已落库的补偿版本必须在后续启动继续由同一隔离 location 解析。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(QA_MEMORY_AFTER_SESSION_SHARE_LOCATION);
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isTrue();
+            assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
+        });
+    }
+
+    @Test
+    void appliedLatestReleaseHistoryUsesHigherQaMemoryForwardMigration() {
+        DataSource dataSource = dataSource("release_token_latency_before_qa_memory");
+        // 复现 release 已执行通知中心与当前最高迁移、但尚未合入较低版本 QA Memory 的历史。
+        migrateWithoutResourceTo(
+                dataSource,
+                INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION,
+                QA_MEMORY_APPLIED_MAIN_RESOURCE,
+                QA_MEMORY_GENERALIZE_MAIN_RESOURCE,
+                QA_MEMORY_IDENTITY_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isTrue();
+        assertThat(applied(dataSource, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION)).isTrue();
+        assertThat(applied(dataSource, QA_MEMORY_APPLIED_VERSION)).isFalse();
+        assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isFalse();
+        assertThat(qaMemorySchemaTableCount(dataSource)).isZero();
+        assertUserNotificationSchema(dataSource);
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(QA_MEMORY_AFTER_TOKEN_LATENCY_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(
+                    QA_MEMORY_AFTER_SESSION_SHARE_LOCATION,
+                    QA_MEMORY_APPLIED_LOCATION,
+                    QA_MEMORY_EXTENDED_LOCATION);
+            assertThat(applied(dataSource, QA_MEMORY_APPLIED_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_GENERALIZE_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_IDENTITY_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION)).isTrue();
+            assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
+            assertSessionShareSchema(dataSource);
+        });
+
+        // 后续启动必须继续解析新隔离 location，不能回退到较低的旧补偿版本。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(QA_MEMORY_AFTER_TOKEN_LATENCY_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(
+                    QA_MEMORY_AFTER_SESSION_SHARE_LOCATION);
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION)).isTrue();
+            assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
         });
     }
 

@@ -1,24 +1,46 @@
 import { describe, expect, it } from "vitest";
 import {
   routeCenterTransition,
+  routedCenterModeFromRouteName,
   transitionImmersivePanels,
   type ImmersivePanelSnapshot
 } from "../src/components/toolbox-navigation";
 
 describe("toolbox navigation", () => {
   it("opens a deep link and restores the previous center mode on browser back", () => {
-    const entered = routeCenterTransition(true, "system", "editor");
-    expect(entered).toEqual({ mode: "toolbox", beforeToolbox: "system" });
+    const entered = routeCenterTransition("toolbox", "diff", "editor");
+    expect(entered).toEqual({ mode: "toolbox", beforeRoute: "diff" });
 
-    const left = routeCenterTransition(false, entered.mode, entered.beforeToolbox);
-    expect(left).toEqual({ mode: "system", beforeToolbox: "system" });
+    const left = routeCenterTransition(null, entered.mode, entered.beforeRoute);
+    expect(left).toEqual({ mode: "diff", beforeRoute: "diff" });
 
-    const forwarded = routeCenterTransition(true, left.mode, left.beforeToolbox);
+    const forwarded = routeCenterTransition("toolbox", left.mode, left.beforeRoute);
     expect(forwarded.mode).toBe("toolbox");
   });
 
   it("uses the named toolbox route so a trailing slash still opens immersively", () => {
-    expect(routeCenterTransition(true, "editor", "editor").mode).toBe("toolbox");
+    expect(routeCenterTransition("toolbox", "editor", "editor").mode).toBe("toolbox");
+  });
+
+  it("keeps all activity pages as independent routed immersive views", () => {
+    const memories = routeCenterTransition("memories", "hub", "editor");
+    expect(memories).toEqual({ mode: "memories", beforeRoute: "editor" });
+    const toolbox = routeCenterTransition("toolbox", memories.mode, memories.beforeRoute);
+    expect(toolbox).toEqual({ mode: "toolbox", beforeRoute: "editor" });
+    const system = routeCenterTransition("system", toolbox.mode, toolbox.beforeRoute);
+    expect(system).toEqual({ mode: "system", beforeRoute: "editor" });
+    const hub = routeCenterTransition("hub", system.mode, system.beforeRoute);
+    expect(hub).toEqual({ mode: "hub", beforeRoute: "editor" });
+    expect(routeCenterTransition(null, hub.mode, hub.beforeRoute).mode).toBe("editor");
+  });
+
+  it("maps only named immersive activity routes to center modes", () => {
+    expect(routedCenterModeFromRouteName("toolbox")).toBe("toolbox");
+    expect(routedCenterModeFromRouteName("memories")).toBe("memories");
+    expect(routedCenterModeFromRouteName("system")).toBe("system");
+    expect(routedCenterModeFromRouteName("hub")).toBe("hub");
+    expect(routedCenterModeFromRouteName("workbench")).toBeNull();
+    expect(routedCenterModeFromRouteName("settings")).toBeNull();
   });
 
   it("closes every panel in immersive modes and restores the exact snapshot on exit", () => {
@@ -40,7 +62,7 @@ describe("toolbox navigation", () => {
       savedBottomOpen: true
     });
 
-    const switched = transitionImmersivePanels(entered, "hub", "toolbox");
+    const switched = transitionImmersivePanels(entered, "memories", "toolbox");
     expect(switched).toEqual(entered);
 
     const exited = transitionImmersivePanels(switched, "editor", "hub");

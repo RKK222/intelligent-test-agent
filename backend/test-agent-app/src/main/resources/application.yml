@@ -71,6 +71,25 @@ management:
       enabled: true
 
 test-agent:
+  memory:
+    enabled: ${TEST_AGENT_MEMORY_ENABLED:false}
+    service-url: ${TEST_AGENT_MEMORY_SERVICE_URL:http://127.0.0.1:18888}
+    service-api-key: ${TEST_AGENT_MEMORY_SERVICE_API_KEY:}
+    request-timeout: ${TEST_AGENT_MEMORY_REQUEST_TIMEOUT:2s}
+    learning-timeout: ${TEST_AGENT_MEMORY_LEARNING_TIMEOUT:130s}
+    retrieval-timeout: ${TEST_AGENT_MEMORY_RETRIEVAL_TIMEOUT:2s}
+    max-injected-memories: ${TEST_AGENT_MEMORY_MAX_INJECTED:6}
+    max-context-tokens: ${TEST_AGENT_MEMORY_MAX_CONTEXT_TOKENS:800}
+    retrieval-top-k: ${TEST_AGENT_MEMORY_RETRIEVAL_TOP_K:20}
+    retrieval-threshold: ${TEST_AGENT_MEMORY_RETRIEVAL_THRESHOLD:0.10}
+    learning-batch-size: ${TEST_AGENT_MEMORY_LEARNING_BATCH_SIZE:8}
+    learning-max-attempts: ${TEST_AGENT_MEMORY_LEARNING_MAX_ATTEMPTS:8}
+    learning-poll-interval: ${TEST_AGENT_MEMORY_LEARNING_POLL_INTERVAL:5s}
+    learning-lease: ${TEST_AGENT_MEMORY_LEARNING_LEASE:5m}
+    model-gateway-hmac-client-id: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_CLIENT_ID:mem0-cluster}
+    model-gateway-hmac-secret: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET:}
+    model-gateway-hmac-clock-skew: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_CLOCK_SKEW:30s}
+    model-gateway-nonce-ttl: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_NONCE_TTL:2m}
   workflow-capability:
     hmac-secret: ${TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET:}
     runner-hmac-secret: ${TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET:}

@@ -76,6 +76,12 @@ class FlywayMigrationNamingTest {
             "V20260810090000__enforce_qa_memory_identity.sql";
     private static final String APPLIED_QA_MEMORY_IDENTITY_SHA256 =
             "619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3";
+    private static final String QA_MEMORY_AFTER_SESSION_SHARE_MIGRATION =
+            "V20260810173117__qa_memories_create_governance_after_session_share.sql";
+    private static final String QA_MEMORY_AFTER_TOKEN_LATENCY_MIGRATION =
+            "V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql";
+    private static final String QA_MEMORY_RELEASE_FORWARD_SHA256 =
+            "44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984";
     private static final String SESSION_SHARE_MAIN_MIGRATION =
             "V20260809170000__session_shares_create_collaboration_share.sql";
     private static final String SESSION_SHARE_FORWARD_MIGRATION =
@@ -227,6 +233,14 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/qa-memory-extended",
                 APPLIED_QA_MEMORY_IDENTITY_MIGRATION,
                 APPLIED_QA_MEMORY_IDENTITY_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/qa-memory-after-session-share",
+                QA_MEMORY_AFTER_SESSION_SHARE_MIGRATION,
+                QA_MEMORY_RELEASE_FORWARD_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/qa-memory-after-token-latency-inputs",
+                QA_MEMORY_AFTER_TOKEN_LATENCY_MIGRATION,
+                QA_MEMORY_RELEASE_FORWARD_SHA256);
         assertMigrationSha256(
                 "db/migration",
                 SESSION_SHARE_MAIN_MIGRATION,

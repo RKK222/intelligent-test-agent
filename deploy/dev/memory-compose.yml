@@ -1,0 +1,140 @@
+name: test-agent-memory-dev
+
+x-memory-service: &memory-service
+  image: ${TEST_AGENT_MEMORY_SERVICE_IMAGE:-test-agent-memory-service:dev}
+  build:
+    context: ../../memory-service
+    dockerfile: Dockerfile
+  depends_on:
+    memory-migrate:
+      condition: service_completed_successfully
+  environment: &memory-environment
+    TEST_AGENT_MEMORY_SERVICE_API_KEY: ${TEST_AGENT_MEMORY_SERVICE_API_KEY:?memory service API key is required}
+    TEST_AGENT_MEMORY_SERVICE_DATABASE_URL: postgresql://testagent_memory:${TEST_AGENT_MEMORY_DEV_POSTGRES_PASSWORD}@memory-postgres:5432/testagent_memory
+    TEST_AGENT_MEMORY_SERVICE_MODEL_GATEWAY_URL: ${TEST_AGENT_MEMORY_SERVICE_MODEL_GATEWAY_URL:?Java model gateway URL is required}
+    TEST_AGENT_MEMORY_SERVICE_MODEL_GATEWAY_HMAC_SECRET: ${TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET:?memory HMAC secret is required}
+    TEST_AGENT_MEMORY_SERVICE_MODEL_GATEWAY_CLIENT_ID: mem0-cluster
+    TEST_AGENT_MEMORY_SERVICE_CHAT_MODEL_ID: ${TEST_AGENT_MEMORY_CHAT_MODEL_ID:-memory-chat}
+    TEST_AGENT_MEMORY_SERVICE_CPU_EMBEDDING_MODEL_ID: ${TEST_AGENT_MEMORY_CPU_EMBEDDING_MODEL_ID:-memory-bge-small-zh-v1.5}
+    TEST_AGENT_MEMORY_SERVICE_ENTERPRISE_EMBEDDING_MODEL_ID: ${TEST_AGENT_MEMORY_ENTERPRISE_EMBEDDING_MODEL_ID:-}
+    TEST_AGENT_MEMORY_SERVICE_ENTERPRISE_EMBEDDING_DIMENSION: ${TEST_AGENT_MEMORY_ENTERPRISE_EMBEDDING_DIMENSION:-}
+    TEST_AGENT_MEMORY_SERVICE_ENTERPRISE_EMBEDDING_FINGERPRINT: ${TEST_AGENT_MEMORY_ENTERPRISE_EMBEDDING_FINGERPRINT:-}
+    TEST_AGENT_MEMORY_SERVICE_SEARCH_PROFILE_TIMEOUT_SECONDS: ${TEST_AGENT_MEMORY_SEARCH_PROFILE_TIMEOUT_SECONDS:-1.5}
+    MEM0_TELEMETRY: "False"
+    MEM0_TELEMETRY_SAMPLE_RATE: "0"
+    DO_NOT_TRACK: "1"
+  expose:
+    - "18888"
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=256m
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+services:
+  memory-postgres:
+    image: ${TEST_AGENT_MEMORY_PGVECTOR_IMAGE:-pgvector/pgvector:0.8.1-pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337}
+    environment:
+      POSTGRES_DB: testagent_memory
+      POSTGRES_USER: testagent_memory
+      POSTGRES_PASSWORD: ${TEST_AGENT_MEMORY_DEV_POSTGRES_PASSWORD:?memory postgres password is required}
+    ports:
+      - "127.0.0.1:${TEST_AGENT_MEMORY_POSTGRES_PORT:-15433}:5432"
+    volumes:
+      - test-agent-memory-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$${POSTGRES_PASSWORD}" psql -h 127.0.0.1
+          -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -Atqc 'select 1'
+          | grep -qx 1
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  embedding-service:
+    image: ${TEST_AGENT_EMBEDDING_SERVICE_IMAGE:-test-agent-embedding-bge-small-zh-v1.5:dev}
+    build:
+      context: ../../embedding-service
+      dockerfile: Dockerfile
+    environment:
+      TEST_AGENT_EMBEDDING_API_KEY: ${TEST_AGENT_EMBEDDING_API_KEY:?embedding API key is required}
+      TEST_AGENT_EMBEDDING_MAX_CONCURRENCY: ${TEST_AGENT_EMBEDDING_MAX_CONCURRENCY:-4}
+      TEST_AGENT_EMBEDDING_TORCH_THREADS: ${TEST_AGENT_EMBEDDING_TORCH_THREADS:-1}
+    ports:
+      - "127.0.0.1:${TEST_AGENT_EMBEDDING_SERVICE_PORT:-18989}:18989"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  memory-migrate:
+    image: ${TEST_AGENT_MEMORY_SERVICE_IMAGE:-test-agent-memory-service:dev}
+    build:
+      context: ../../memory-service
+      dockerfile: Dockerfile
+    depends_on:
+      memory-postgres:
+        condition: service_healthy
+    environment: *memory-environment
+    entrypoint: ["alembic"]
+    command: ["-c", "/opt/test-agent-memory/alembic.ini", "upgrade", "head"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  memory-service-1:
+    <<: *memory-service
+
+  memory-service-2:
+    <<: *memory-service
+
+  memory-service-3:
+    <<: *memory-service
+
+  memory-lb:
+    image: ${TEST_AGENT_MEMORY_NGINX_IMAGE:-nginx:1.27.2-alpine3.20@sha256:d213b2a02ef4e7ec85882e8955343cdd08ab49d6548995ad18623f47017c65ee}
+    depends_on:
+      - memory-service-1
+      - memory-service-2
+      - memory-service-3
+    ports:
+      - "127.0.0.1:${TEST_AGENT_MEMORY_SERVICE_PORT:-18888}:18888"
+    volumes:
+      - ./memory-nginx.conf:/etc/nginx/nginx.conf:ro
+    user: "101:101"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=32m,uid=101,gid=101,mode=0700
+      - /var/run:rw,noexec,nosuid,nodev,size=4m,uid=101,gid=101,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=101,gid=101,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  test-agent-memory-postgres-data:
+    # 与升级前本地原型 volume 物理隔离；旧 volume 保留，不自动删除或改写。
+    name: ${TEST_AGENT_MEMORY_POSTGRES_VOLUME:-test-agent-memory-dev-pgvector-v1}

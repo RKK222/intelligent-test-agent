@@ -7536,6 +7536,299 @@
 - 本次仅修改规范、模块 README、数据库部署文档和本机会话记录，不修改代码、migration SQL、API、事件、数据库结构、
   `.env*`、generated SDK 或 OpenCode 源码。
 
+## 2026-08-09 - 在独立 worktree 建设 QA Agent 长期记忆 V1
+
+### Why
+
+- 需要让 QA Agent 跨会话复用测试人员稳定的工作习惯，同时把个人记忆、Application 团队记忆、项目业务知识、原始聊天、
+  静态画像和可发布 Skill 明确分层，避免把聊天镜像或项目事实误当成用户画像。
+- V1 明确使用自托管 Mem0 与本地 CPU Embedding，并为未来企业 Embedding 保留 Provider/新集合迁移边界；既有对话必须在
+  默认空白名单、记忆依赖超时或故障时继续运行。
+
+### What
+
+- 从 `93d1a8610` 创建独立 worktree `/Users/kaka/Desktop/intelligent-test-agent-memory-v1` 和分支
+  `codex/qa-agent-memory-v1`；按六个批次增加 `test-agent-memory` 领域模块、MyBatis/Flyway 治理表、Mem0 2.0.3 服务、
+  固定 BGE 512 维离线模型、学习 Outbox、mfg 授权、检索注入、团队审核、Skill 提案、用户/管理 API 和记忆中心页面。
+- 原始聊天仍由现有 OpenCode Session/恢复链路保存；学习 worker 只瞬时读取当前根 Run，Mem0 自定义 history manager 不保存
+  messages。项目知识不进入记忆系统，画像仅为有效记忆汇总视图，Skill 仍走既有文件 WebSocket、Git 和发布流程。
+- 新增 opt-in `deploy/dev/memory-compose.yml` 与 `tools/memory-dev-services.sh`：生成两个 `0600` 运行文件、隔离 pgvector
+  密码、关闭运行期模型联网/telemetry、保留数据卷，并以带鉴权 readiness 的 `UP + rawMessageCount=0` 作为启动门禁。
+  实跑发现繁忙 Docker Desktop 的 CPU 模型加载会晚于普通 health 窗口，已移除 `compose --wait`，改由鉴权 readiness 最多
+  等待 7 分钟，并补充行为回归。
+- `restart-dev-services.sh --with-memory` 在构建成功后才替换标准端口服务；修复跨 worktree 的完整 screen 会话关闭、Java
+  后端进程发现和本 worktree 不可变运行 JAR 归属校验，避免把旧 worktree 的 8080 readiness 误报成当前启动成功。
+- 平台 migration `V20260809120000__create_qa_memory_governance.sql` 已执行并锁定，SHA-256 为
+  `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`；源码、persistence 嵌套 JAR 与运行应用 JAR
+  字节一致。未修改 `.env*`、generated SDK、OpenCode 源码或 RunEvent SSE。
+
+### How
+
+- Python 合同/单元测试为 14 passed / 1 skipped；真实 memory-service + pgvector + BGE 完成中文 add/search/update/history/
+  delete、进程重启恢复、512 维集合和 `rawMessageCount=0` smoke，合成数据已清理。容器最终为 UID/GID 10004、只读根、
+  `cap_drop=ALL`、`no-new-privileges`，pgvector 为 0.8.1。
+- JDK 25 下记忆相关定向反应堆通过：memory 24、model gateway 17、integration 38、MyBatis 真实 PostgreSQL 空库 migration
+  1 项等均通过；显式临时库完成后已删除，保留的 `.env.test` 数据库由 Flyway 正常升级至 `20260809120000`，白名单为 0。
+- 前端全量为 1886 passed / 1 skipped，agent-web typecheck 与生产 build 通过；真实 Chromium 验证个人/团队/Skill 三个 Tab、
+  evidence drawer、历史 Run 记忆徽标、系统管理、暗色、键盘与窄屏页面。
+- 精确全量 Maven 命令未通过：第三次运行在前 17 个模块成功（其中 memory 24/24）后，既有
+  `DefaultXxlJobAdminContextLauncherTest` 的 `mysql:8.4` Testcontainers 三次都未在 120 秒内完成冷启动，业务断言前报
+  `ContainerLaunchException`，因此 API/persistence/app 被 Maven 跳过；该类独立复核也在同一容器启动阶段失败。此前
+  `XxlJobMysqlMigrationTest` 4/4、readiness 2/2 及受影响定向测试已通过，不能据此把全量结果记为成功。
+- `tools/memory-dev-services-test.sh`、`tools/verify-dev-scripts.sh`、`tools/verify-ai-docs.sh`、Compose config、migration/JAR
+  哈希及 `git diff --check` 通过；使用未修改的绝对路径 `.env.test` 执行计划中的 JDK 25 完整重启命令成功。
+
+### Result
+
+- 当前独立 worktree 的 backend `8080`、frontend `3000`、manager、memory-service `18888` 和 pgvector `15433` 均在运行；
+  backend readiness、前端 HTTP、manager WebSocket、Docker health 和记忆鉴权 readiness 正常，原始 messages 数为 0。
+- 既有用户仍可立即测试普通对话；记忆白名单默认空，不会自动学习或注入。测试记忆能力前需由超级管理员加入用户白名单，
+  并设置固定内部 CHAT 模型或使用已通过 CHAT 探测的内部 Run 模型。
+- 实现与记忆链路已按定向、真实数据面、真实 PostgreSQL 和页面完成验证，但后端全量仍受 Docker/MySQL Testcontainers
+  冷启动超时阻断；此外未使用真实登录凭据执行“两用户、两 Application”的跨会话端到端验收，仍需用户在灰度白名单中验收。
+- 最终保持六个约定的中文提交，不推送、不创建 PR、不合并回发布分支。
+
+## 2026-08-09 - 修正记忆 worktree 的 OpenCode 本地运行数据路径
+
+### Why
+
+- 按记忆部署文档从独立 worktree 启动后，后端与 manager 默认把 `TEST_AGENT_ROOT`/`SYS_DATA_ROOT_DIR` 指向
+  `intelligent-test-agent-memory-v1/.testagent`；该目录为空，而用户公共配置与 session 仍保存在主工作区，正式初始化报
+  `公共 Agent 配置源目录不可用`，4104 未被 manager 管理。
+
+### What
+
+- 不修改启动脚本、`.env.test`、OpenCode 源码或用户 Agent 配置；部署文档改为在独立 worktree 启动前显式复用主工作区的
+  `TEST_AGENT_ROOT`、兼容别名 `TESTAGENT` 和 `SYS_DATA_ROOT_DIR`，继续使用启动脚本现有可覆盖能力。
+
+### How
+
+- 使用 JDK 25、主工作区绝对路径 `.env.test` 和 `--with-memory --without-workflow` 从记忆 worktree 重启；脚本确认运行数据根为
+  `/Users/kaka/Desktop/intelligent-test-agent/.testagent`，backend、manager、frontend、memory-service 与 pgvector 均正常启动。
+- 后端日志确认公共配置 Git 根已解析回主工作区，原有用户公共 worktree 的未提交/未跟踪改动保持原状，未执行清理、回退或合并。
+
+### Result
+
+- 原“公共 Agent 配置源目录不可用”启动阻断已消除；当前用户进程仍为 `STOPPED`，因页面登录态失效尚未执行新的已认证
+  `/processes/me/initialize`，所以 4104 的最终 `RUNNING` 与 `/global/config` 200 闭环仍待用户重新登录后复测。
+
+## 2026-08-09 - 为工作台活动栏补齐稳定 URI
+
+### Why
+
+- 记忆中心已有 `/memories` 深链接，但工作台、控制台、能力库和设置仍主要依赖组件内状态；切换后地址栏无法表达当前页面，
+  刷新、登录回跳和浏览器前进/后退也不能统一恢复。
+
+### What
+
+- 复用既有 `WorkbenchView`、vue-router 和 `toolbox-navigation.ts` 状态机，统一提供 `/workbench`、`/toolbox`、
+  `/memories`、`/system`、`/hub`、`/settings`；旧根路径 `/` 兼容跳转到 `/workbench`。
+- 控制台与能力库纳入既有沉浸式路由权威保护，后台 Diff/SSE 更新不能切走当前页面；设置活动栏入口支持深链接，关闭普通入口
+  返回原页面，直接访问时安全回到工作台。同步登录回跳白名单、404 首页动作、稳定文档和路由回归。
+
+### How
+
+- `toolbox-navigation.test.ts` 与 `login-redirect.test.ts` 共 10 项通过；`@test-agent/agent-web` typecheck 和 production build 通过，
+  构建仅保留既有大 chunk 提示；`tools/verify-ai-docs.sh`、`git diff --check` 通过。
+- Chromium 定向回归分别验证全部活动栏 URI/根跳转/设置深链/历史恢复、工具箱布局恢复、记忆中心布局恢复，共 3 项通过；
+  当前 `127.0.0.1:3000` 开发服务的 6 个页面 URI 均返回 HTTP 200。
+
+### Result
+
+- 左侧页面级入口现在都可复制、刷新和通过浏览器历史恢复；旧 `/` 入口保持兼容，不新增页面组件或第二套路由状态。
+- 本次不变更 HTTP API、RunEvent、DTO、数据库/Flyway、后端、性能或安全策略，未修改 `.env*`、generated SDK 或 OpenCode
+  源码；工作树中同期存在的 `MemoryAdminPanel.vue` 及其测试修改保持未暂存，不纳入本次提交。
+
+## 2026-08-09 - 将记忆管理员用户与模型配置改为可搜索选择
+
+### Why
+
+- 记忆白名单要求管理员手填平台 `userId`，固定抽取模型也要求手填模型 ID，容易输错且无法判断对象是否真实存在、是否可用。
+- “当前 Run 内部模型回退”和常驻展示的 revision、collection version、归一化属于实现术语，管理员难以理解开启条件、失败影响
+  以及这些技术字段的用途。
+
+### What
+
+- `MemoryAdminPanel.vue` 复用现有平台用户目录，添加白名单改为按姓名、用户 ID 或统一认证号远程搜索，只提交选中用户的真实
+  `userId`，并过滤停用用户和已在白名单中的用户。
+- 固定抽取模型复用现有内部模型供应商目录，只展示供应商启用、凭据可用、模型启用且实际探测到 `CHAT` 能力的模型；目录临时
+  不可用时保留既有配置，避免读取失败把当前策略清空。
+- 将回退开关解释为“固定模型不可用时，使用当前任务的内部模型”，明确外部模型不会参与、条件不满足只影响异步记忆提取而不
+  影响当前测试任务；Embedding 版本、集合与归一化默认折叠，并逐项补充升级/排障用途说明。
+- 同步 agent-web README/PACKAGE 与前端总 README；工作期间并行的稳定路由提交 `9d6e469cd` 推进了 HEAD，并已包含两处
+  README 说明，本提交保留其成果，只纳入剩余组件、测试、PACKAGE 与本日志。
+
+### How
+
+- `memory-admin-panel.test.ts` 新增内部模型选择、平台用户远程搜索/真实 ID 提交和技术信息按需展开回归，定向 3/3 通过；
+  agent-web typecheck、production build 通过。
+- 前端全量首轮与生产构建并行时，既有 Markdown/Mermaid 懒加载 4 项超时；该文件独立 12/12 通过，取消并行后全量稳定为
+  122 个文件、1888 passed / 1 skipped。
+- 使用 JDK 25、未修改的主工作区绝对路径 `.env.test`、共享 `TEST_AGENT_ROOT/TESTAGENT/SYS_DATA_ROOT_DIR` 和
+  `--with-memory --without-workflow` 从独立 worktree 完整重启；backend health/readiness、frontend 3000、CORS、memory-service、
+  pgvector 均正常，鉴权 readiness 保持 `rawMessageCount=0`。
+- 真实登录页验证模型下拉加载 4 个 CHAT 探测成功模型，用户搜索“88”返回姓名、统一认证号与真实 ID；未确认保存或添加，生产
+  配置和白名单未发生变化。技术信息展开内容和页面视觉已检查。
+
+### Result
+
+- 管理员不再记忆或手填用户/模型 ID，页面直接约束到系统当前可选对象；备用模型失败边界与向量技术字段用途可在页面内读懂。
+- 重新登录触发受管初始化后，先前待验证的用户 OpenCode 进程已由 manager 在 4104 启动，后续健康检查均为 `HEALTHY`，
+  `/global/config` 返回 200；manager 曾因后端连接切换断开一次，10 秒后自动恢复且没有重连循环。
+- 本次不变更 HTTP API、RunEvent、共享 DTO、数据库/Flyway、后端服务、权限模型或安全边界，未修改 `.env*`、generated SDK、
+  OpenCode 源码，也未推送、创建 PR 或合并分支。
+
+## 2026-08-10 - 通用化长期记忆并增加多节点与 CPU Embedding 热备
+
+### Why
+
+- 原实现绑定 QA 任务分类、自定义抽取提示词和单节点本地向量模型，无法直接复用 Mem0 原生记忆能力，也无法满足企业无
+  Embedding、Mem0 横向扩容和模型故障切换要求。
+- 记忆证据只展示摘要，缺少原始 Session 标题、ID 与所有者访问入口；既有离线包也没有独立记忆库、CPU Embedding 和多副本
+  Mem0 的可审计交付物。
+
+### What
+
+- 将服务锁定到 `mem0ai==2.0.17`，学习只调用一次原生 `add(messages, infer=true)` 且不传自定义 prompt；删除 QA 分类、候选、
+  自定义置信度和语义过滤，Java 统一改用 `/api/internal/platform/memory/v1/**`，旧 `/qa-memory/v1/**` 明确返回
+  `410 API_GONE`。
+- 新增独立 pgvector/Alembic 控制面、三副本无状态 Mem0/VIP、稳定 `logicalMemoryId`、双 profile 隔离 collection、advisory lock、
+  幂等 outbox 投影与 RRF 去重；企业向量不可用时使用 CPU profile，双 profile 都失败时保持 2 秒 fail-open。
+- 将固定 revision 的 `BAAI/bge-small-zh-v1.5` 拆成独立 OpenAI-compatible CPU 服务，提供批量 embedding、模型/类型校验、
+  L2 归一化、仅 query 加前缀、有界并发和 API Key 鉴权；Mem0 到 Java 模型网关使用带 nonce 的 HMAC。
+- 证据补齐 `sessionId/sessionTitle/transcriptAvailable/runId` 并复用 `/s/{sessionId}` 所有者权限；团队记忆保持手工提交和
+  APP_ADMIN 审核。同步前端记忆中心、管理员 profile/积压展示、HTTP/API/事件/数据库/部署/安全/测试文档。
+- 新增开发集群、真实浏览器 E2E 场景、并发/故障/存储审计脚本，以及 linux/amd64 Mem0、CPU BGE、pgvector、Nginx 离线镜像、
+  SHA256、SPDX SBOM、许可证、模型身份和 Alembic 交付清单；不改已执行 QA migration 的字节和 checksum。
+
+### How
+
+- Python：记忆服务 25 passed / 1 integration skipped，Embedding 4 passed；另用真实 PostgreSQL/pgvector 跑集成测试 1 passed。
+- Java：JDK 25 下 model-gateway 13、memory 26、API 9 项通过；另用临时真实 PostgreSQL 跑 MyBatis/Flyway 集成测试 1 passed。
+  更宽 Maven reactor 到无关 `test-agent-xxl-job-integration` 时，被 Docker/QEMU 下 MySQL 8.4 启动超时阻断。
+- 前端：workspace typecheck、production build 和全量 Vitest 通过（122 files，1891 passed / 1 skipped）；记忆定向 3 files / 10 tests
+  通过，Playwright 能发现 4 个真实记忆场景，但当前没有企业地址、账号和节点控制 hook，未伪造企业浏览器验收结果。
+- 真实启动本地独立 pgvector、CPU BGE、Nginx VIP 和三个 Mem0 副本：CPU 批量结果均为 512 维且范数约 1；逐台停止副本时 VIP
+  连续可用，恢复后三副本健康；存储审计确认版本单调、无投影积压/原始对话字段、只读容器文件系统和日志 canary 泄漏。
+- `memory-dev-services-test.sh`、离线包静态测试、AI 文档校验、shell 语法、`git diff --check` 与全部离线 SHA256/SBOM/镜像架构/
+  模型身份/Alembic head 校验通过。最终完整离线包位于 `/private/tmp/testagent-memory-offline-final.ZtHLJ4/memory`，约 1.8G。
+
+### Result
+
+- 通用记忆、多节点共享存储、CPU Embedding 单 profile/双集合热备、证据回链和离线交付代码已实现并在本机真实数据面验证。
+- 尚未完成企业真实 `.2 → .4/.114 → Mem0 VIP → 记忆库 → Java 模型网关 → 企业模型/CPU BGE` 浏览器验收和批准容量压测；
+  发布白名单不能据此开启，必须在拿到目标环境参数后执行脚本中的全量门禁。
+- 未修改 `.env*`、generated SDK、OpenCode 源码或工作区中同期的 Figma/Git 面板与聊天重发改动；旧 migration checksum 保持
+  `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`，新增前向 migration SHA-256 为
+  `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`。
+
+## 2026-08-10 - 扩充通用记忆多节点端到端发布门禁
+
+### Why
+
+- 原真实浏览器套件只覆盖四个主场景，故障编排主要验证存量记忆召回，尚未证明只剩一个 Mem0 副本、单个 Java 节点或企业
+  Embedding 中断时仍能从浏览器完成新记忆学习，也缺少治理版本、旧 API、原始对话权限、投影积压和并发隔离的完整验收。
+
+### What
+
+- 将真实 Playwright 套件扩为七个场景：原生学习与跨会话/团队 ACL、个人记忆新增编辑提升暂停归档、故障中学习与同 ID 召回、
+  投影积压可见、双 profile fail-open、投影恢复、逐 actor 基线召回与两阶段并发；浏览器状态文件以 `0600` 保存非敏感 ID，供后续故障阶段复用。
+- 多节点脚本按“Mem0 仅余一副本、Java 节点逐台、企业 Embedding、CPU、双 profile、扩缩容”顺序执行真实浏览器学习/召回，
+  并新增静态编排回归锁定 17 个阶段、节点控制 hook、状态传递和最终门禁摘要。
+- 数据面审计增加 Alembic head、逻辑版本/history、投影版本/outbox、原生操作幂等、collection 内逻辑 ID 唯一、向量维度、容器非
+  root/只读/capability/tmpfs、原始对话 canary 与密钥日志泄漏检查；同步部署、测试场景和前端测试说明。
+
+### How
+
+- 记忆定向 Vitest 为 3 files / 10 tests，workspace 15 项 typecheck 通过；Playwright 可发现七个真实场景，严格 TypeScript 编译通过。
+- `memory-cluster-e2e-test.sh`、`memory-dev-services-test.sh`、shell 语法、AI 文档校验和 `git diff --check` 通过；项目未提供可执行
+  eslint 命令，因此没有把 eslint 记为已运行成功。
+- 本地真实独立 pgvector、CPU BGE、Nginx VIP 和三个 Mem0 副本保持健康，增强后的 `--audit` 对当前数据面全部通过，包括
+  collection 512 维、无重复逻辑记忆、无投影积压、容器安全和原始对话/密钥 canary 检查。
+
+### Result
+
+- 发布门禁现在能从浏览器证明故障期间仍可学习、恢复后不二次抽取并补齐相同 `logicalMemoryId`，同时覆盖治理、授权、性能、
+  幂等、存储和安全边界；没有新增或变更生产 API、RunEvent、数据库 migration、SQL 或运行时实现。
+- 企业真实 `.2 → .4/.114 → Mem0 VIP → 记忆库 → Java 模型网关 → 企业模型/CPU BGE` 七场景及批准容量 p99 仍未运行；当前缺少
+  目标 URL、测试账号和节点/模型控制 hook，不能据本地验证开启企业记忆白名单。
+- 未修改 `.env*`、generated SDK 或 OpenCode 源码；工作区中同期的 Figma/Git 面板和聊天回归改动继续保持未暂存。
+
+## 2026-08-10 - 补齐通用记忆功能、非功能与易用性测试
+
+### Why
+
+- 既有发布门禁已经覆盖原生学习、团队批准、故障降级和单轮并发，但仍缺少跨 Application 隔离、个人范围变化后的实际召回、
+  团队拒绝、浏览器登录态越权、真实管理写链和基础易用性；单轮 p99 样本也不足以支撑批准容量，重启既有副本不能证明扩容。
+
+### What
+
+- 扩展真实 Playwright `full`：创建主/隔离两个 Application，验证个人/团队 Application 记忆不越界，同一个人记忆在编辑后应用内
+  命中、提升全局后跨应用命中、暂停/归档后不再注入；增加团队带原因拒绝及拒绝后不召回。
+- 普通成员除页面无审核/原文入口外，还在真实浏览器登录态直接请求他人个人记忆 GET/PATCH、团队 review 和管理 health，锁定
+  `403/404` 权限边界；超级管理员从真实页面检查全部 profile/死信/白名单并用当前值完成一次版本化策略保存。
+- 增加 640 CSS px（等效 1280px 屏幕 200% 放大）、Reduced Motion、Tab/Enter 页签与 Escape 详情回归；组件测试补齐团队拒绝原因、
+  列表/管理加载失败重试、HTML-like 文本不执行和 2000 字输入上限。
+- 并发场景增加 `--rounds`（1–20），首轮并行学习、后续纯召回，聚合全部样本 p50/p95/p99/max、每轮请求发散和 Run/Session 唯一性；
+  企业故障门禁新增 `TEST_AGENT_MEM0_SCALE_OUT_CMD/TEST_AGENT_MEM0_SCALE_IN_CMD`，要求真正增加并移除无状态副本。
+- 同步 agent-web README、部署准入和对话场景文档，并明确在途精确故障、记忆库/VIP 切换、24 小时耐久、浏览器矩阵和读屏仍需专项证据。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/memory-center.test.ts apps/agent-web/tests/memory-admin-panel.test.ts packages/backend-api/tests/qa-memory.test.ts`：
+  3 files / 14 tests 通过；`corepack pnpm --filter @test-agent/agent-web typecheck` 通过。
+- `TEST_AGENT_RUN_MEMORY_E2E=0 corepack pnpm exec playwright test --config playwright.real.config.ts apps/agent-web/tests/memory.real-spec.ts
+  --project chromium --workers 1` 成功编译并发现 9 个真实场景，因未提供真实环境开关而按设计 9 skipped；`bash -n`、
+  `tools/memory-cluster-e2e-test.sh` 和 `git diff --check` 通过。
+- 当前 worktree 前端以 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 4317` 启动，`/memories` 返回
+  HTTP 200 和 `TestAgent IDE` 页面骨架。
+
+### Result
+
+- 当前方案声明的功能主链、权限、短时容量/扩缩容和基础易用性门禁已显著补齐；没有变更生产 API、RunEvent、DTO、数据库/Flyway、
+  运行时、安全实现或兼容接口，只修改测试、编排和稳定文档。
+- 企业真实链路、批准容量和新增专项非功能项仍未运行，缺少目标 URL、账号、模型与停启/扩缩容 hook，不能据本地结果声称完全覆盖或
+  开启白名单；未修改 `.env*`、generated SDK、OpenCode 源码及同期 Figma/Git/聊天未暂存改动。
+
+## 2026-08-10 - 修复通用记忆一致性、授权与降级写入边界
+
+### Why
+
+- 重新审查发现跨 Java 节点对同一记忆并发修改时，平台治理状态与 Mem0 操作缺少统一事务/行锁顺序；原生学习也可能让同一个
+  `mem0_memory_id` 生成多条治理记录。创建失败补偿还复用了 ADD operationId，存在被幂等层误判为原操作的风险。
+- 团队记忆普通编辑错误携带 `TEAM_APPLICATION` 作为范围迁移，Mem0 会按“只允许个人范围调整”拒绝；正文服务降级时，前端又可能
+  把截断的 `displaySummary` 当完整正文编辑或提交。成员退出 Application 后仍可凭提案创建人身份读取 Skill 草稿。
+
+### What
+
+- 记忆编辑、暂停、个人范围提升、归档和团队审核统一增加 Spring 事务与 `SELECT ... FOR UPDATE`；事务内先写未提交治理状态，再执行
+  同 operationId 可重放的 Mem0 操作，外部失败回滚平台状态。归档/拒绝删除后不再读取已删除正文，创建补偿改用独立 DELETE operationId。
+- 普通编辑不再发送 scope/applicationId；`contentAvailable=false` 时 API 的 `content` 固定为空，前端禁用编辑和团队提交，只把
+  `displaySummary` 用于展示。Skill 提案列表改为始终要求当前有效 Application 成员关系。
+- 新增 `V20260810090000__enforce_qa_memory_identity.sql`，为非空 `qa_memories.mem0_memory_id` 建唯一约束；原生学习使用 MyBatis
+  PostgreSQL `ON CONFLICT DO NOTHING` 原子选出胜者，失败方重读胜者并追加当前 Run 的安全证据。同步 HTTP、数据库、记忆部署及
+  前后端模块说明和回归测试。
+
+### How
+
+- JDK 25 下 `test-agent-memory` reactor、H2 MyBatis/Flyway、`QaMemoryControllerTest` 定向测试均通过；临时真实 PostgreSQL 16
+  从 `20260809230000` 已部署基线升级到 HEAD 的集成测试通过且没有 skip。应用 reactor 打包成功。
+- memory-service 为 25 passed / 1 skipped，Embedding 为 4 passed；记忆开发/集群静态门禁通过。前端记忆定向 2 文件 13 项、
+  agent-web typecheck 和 production build 通过，构建只保留既有大 chunk 提示；`git diff --check` 通过。
+- 未修改的主工作区 `.env.test` 已把本地平台 PostgreSQL 升级到 `20260810090000`，源码、persistence JAR、应用 JAR及实际运行 JAR
+  中 migration SHA-256 均为 `619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`，该文件自此不可改写。
+- 使用共享 `TEST_AGENT_ROOT/TESTAGENT/SYS_DATA_ROOT_DIR` 从 memory worktree 重启 backend、manager、frontend；health/readiness、
+  前端 3000、登录 CORS 和 manager WebSocket 正常。既有三副本 Mem0、CPU BGE、pgvector 的鉴权 status 为 UP，`rawMessageCount=0`。
+
+### Result
+
+- 七处审查问题已按现有 repository、MyBatis、Mem0 operation 幂等和成员关系程序收口，没有新增第二套一致性或授权实现；HTTP 路径、
+  RunEvent、generated SDK、OpenCode 源码和 `.env*` 未修改，降级响应继续通过既有 `contentAvailable` 字段兼容识别。
+- 默认完整重启的 workflow bootstrap 被本地 PostgreSQL 账号缺少 `CREATEROLE/ADMIN OPTION` 阻断，随后按官方
+  `--without-workflow` 路径完成本次相关服务重启，workflow 未重启。重复执行 `--with-memory` 时 Docker BuildKit 在 0/0 阶段停滞，
+  中止前没有替换现有容器；其后独立 status 证明现有全部记忆容器健康。本次没有完成企业真实多节点浏览器验收或批准容量压测。
+- 工作树中同期的 Figma/Git 面板六个未提交文件保持未暂存，未覆盖或纳入本次修改。
+
 ## 2026-08-09 - 清理本机 Docker 旧资源并下调内存上限
 
 ### Why
@@ -7969,6 +8262,32 @@
 
 - 用户现在可以从系统内置手册查到近期功能的入口、步骤、权限和失败处理；宣传稿可直接复制后使用。
 - 本次只修改文档与宣传文字，不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能、安全、兼容性实现、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-10 - 合并 release 最新代码到 QA Memory 分支并补齐双向 Flyway 兼容
+
+### Why
+
+- 用户要求切到 `codex/qa-agent-memory-v1`，把 `codex/release-enterprise-20260801` 的最新已提交代码合并进来；release 本地分支已在远端最新提交之上继续推进，合并期间又从 `a63919013` 前进到最终源提交 `5b2d66ed3`，mem 原始提交为 `a79b1122a`。
+- 两条分支分别执行过 QA Memory 扩展 migration 和会话分享/外部 API migration。简单接受任一侧的兼容器会让另一套真实 PostgreSQL 历史在 Flyway 严格递增规则下无法升级，必须在合并时显式覆盖双向历史。
+
+### What
+
+- 在独立 worktree `/Users/kaka/Desktop/intelligent-test-agent-memory-v1` 执行 `--no-commit --no-ff` 合并；首轮 12 个文本冲突逐一保留双方语义并形成 `c50bc9e78`，提交前发现 release 新增共享会话修复后继续合并 `5b2d66ed3` 并处理 2 个增量冲突。覆盖会话分享与记忆中心、系统管理 API Key 与 Memory 面板、路由/文档、发布脚本和两侧会话日志；主 release worktree 的既有未提交修改保持不动。
+- 复用唯一 `DatabaseMigrationCompatibilityCustomizer` 和既有资源过滤器：允许 QA Memory 主链与会话分享主链合法共存；QA 历史缺少会话分享时继续走现有高版本前向迁移；release 历史已执行会话分享但缺少低版本 QA migration 时，过滤三条低版本主资源并执行新的 `V20260810173117__qa_memories_create_governance_after_session_share.sql`。
+- 新前向 migration 按原三条 QA migration 的顺序合并为一次事务，SHA-256 为 `44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984`；发布脚本增加源码和最终 JAR 资源锁定。没有新增第二套迁移器，没有启用 `repair`、`outOfOrder`，没有修改任何已执行 migration 字节或 `flyway_schema_history`。
+- 同步更新 app、persistence README、数据库部署文档和发布脚本，说明两种已部署历史的升级方向、版本与校验值。合并前把 mem worktree 既有 6 个未提交前端文件存入安全 stash，本次提交不纳入；合并提交后再原样恢复到工作树。
+
+### How
+
+- JDK 21 下真实 PostgreSQL 16 兼容矩阵 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 19 项、`FlywayMigrationNamingTest` 9 项全部通过；合入 `5b2d66ed3` 后，JDK 25 下 `RunResendApplicationServiceTest`、`OpencodeRuntimeApplicationServiceTest`、`SessionApplicationServiceTest` 和 `SessionShareControllerTest` 共 62 项通过，最终 `mvn clean package -DskipTests` 的 22 模块构建通过，源码与 persistence JAR 内新 migration 的 SHA-256 完全一致。
+- 最终 agent-web typecheck 和 production build 通过；前端全量限制 4 workers 后为 126 个测试文件通过、1920 passed / 1 skipped。首轮无并发限制时仅 Mermaid 懒加载文件 5 项超时，该文件独立 12/12 通过，限制并发后的两次全量均稳定通过。
+- `bash -n deploy/internal/package-release.sh`、`tools/verify-ai-docs.sh`、暂存/未暂存 `git diff --check` 和冲突标记扫描通过；提交前回顾全部 `.agents/session-log*.md`，未发现本次暂存内容覆盖其他开发者未完成事项，也未暂存 `.env*` 或 `opencode-source/`。
+- JDK 25 下使用主工作区只读 `.env.test`、共享 `TEST_AGENT_ROOT/TESTAGENT/SYS_DATA_ROOT_DIR` 和 `--with-memory --without-workflow` 从 mem worktree 完整重启；22 模块重新构建，backend health/readiness 为 `UP`，frontend 返回 200，CORS 返回正确 Origin，manager WebSocket 已连接，三副本 Memory/CPU BGE/pgvector readiness 通过且 `rawMessageCount=0`。
+
+### Result
+
+- release 最终源提交 `5b2d66ed3` 和 mem 能力已通过连续 merge 提交完成集成，双向已部署数据库历史都有真实 PostgreSQL 升级证据；API、事件、安全与前端能力沿用两侧既有契约，合并修复只新增数据库兼容资源和对应装配，不修改 generated SDK、OpenCode 源码或环境文件。
+- 当前平台服务运行于 mem worktree；用户 OpenCode 4104 进程数据库状态为无需自动恢复、manager 暂未托管，需用户保持/重新建立登录态后走既有认证初始化入口恢复，不影响 backend/frontend/Memory readiness。本次不推送远端。
 
 ## 2026-08-10 - 修复共享会话撤回编辑、终态收敛与上下文压缩同步
 
@@ -8646,3 +8965,27 @@
 - 最终独立解包复验确认外层/内层 SHA 文件、两层 ZIP CRC、三台节点包 checksum、组件清单、`opencode-models.json`、部署手册、session log 和两份新 Flyway JAR 资源全部通过；固定名发布物位于 `deploy/internal/dist/`。
 - 本条最终 hash 是制品生成后的仓库追溯记录，不再据此重封 ZIP，否则 ZIP 自身 hash 会再次变化；包内已包含前一提交中的完整发布过程记录。
 - 本次未修改 migration SQL、生产 API/DTO/RunEvent、环境文件、generated SDK 或 OpenCode 只读源码；企业目标库完整 `flyway_schema_history` 仍必须在部署前取得，未取得前不把包描述为已获现场部署准入。
+
+## 2026-08-11 - 将最新 release 合入记忆分支并补齐迁移兼容
+
+### Why
+
+- 用户要求以本地最新 `codex/release-enterprise-20260801` 为基线重新合并记忆分支，随后再回合 release；最新 release 相比记忆分支已合入点新增 28 个提交、168 个文件，并加入版本更高的 `20260810234154` migration。
+- 已部署最新 release 的数据库若仍加载原记忆兼容版本 `20260810173117`，会在默认 `outOfOrder=false` 下拒绝升级，必须为该已执行历史增加严格递增的前向兼容路径。
+
+### What
+
+- 将 release 提交 `380f942343013d41fd46931fa5a8f6288d0d7988` 合入 `codex/qa-agent-memory-v1`；三个文档冲突同时保留通知中心、消息层穿透和最新重发权限语义，没有整侧覆盖业务代码。
+- 新增前向兼容 migration `V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`，仅在分享历史与 `20260810234154` 已执行、且旧记忆兼容版本未执行时选择；原 `20260810173117` 与新版本 SQL 字节一致，SHA-256 均为 `44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984`。兼容装配拒绝旧/新路径混用，不启用 `outOfOrder`、`repair` 或历史表改写。
+- 修复 `MyBatisUserNotificationRepositoryPostgresqlIntegrationTest` 使用固定过期时间导致 2026-08-11 后必然失败的问题：仅将测试通知有效期改为相对当前时钟的一天后，确定性审计时间保持不变；同步 persistence/app README、数据库部署文档和发布包 migration 字节门禁。
+
+### How
+
+- 真实 PostgreSQL 已知历史升级 20/20、Flyway 命名与字节冻结 10/10 通过；通知 PostgreSQL 用例首次准确暴露固定时间失效，修复后单测 1/1 通过。后端相关 notification/workspace/runtime/API 定向测试通过，JDK 25 下 23 模块 `mvn clean package -DskipTests` 成功。
+- 前端全量 Vitest 127 文件为 1944 passed / 1 skipped，agent-web typecheck 与含用户手册的 production build 通过；通知实时打开、已读和失效 Chromium E2E 1/1 通过。发布脚本与重启脚本 `bash -n`、AI 文档校验、暂存差异空白检查及两层 JAR migration 字节校验均通过。
+- 合并前将用户原有 6 个未提交前端文件安全存入 stash，未把它们纳入本次提交；提交后将恢复为未暂存状态。提交前回顾全部 `.agents/session-log*.md`，未发现需要覆盖的并行成果；未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+### Result
+
+- 记忆分支现兼容“尚未执行 token-latency migration 的 release 历史”和“已执行最新 release migration 的历史”两条严格递增升级链；API、RunEvent 与已有 migration 字节保持兼容。
+- 本条只记录 release 到 mem 的集成和验证；mem 回合 release、用户未提交改动恢复以及最终独立前后端启动由同一任务后续步骤完成。

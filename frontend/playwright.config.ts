@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// 独立 worktree 可覆盖端口，避免 reuseExistingServer 误连另一份源码启动的 3000 服务。
+const e2ePort = Number.parseInt(process.env.TEST_AGENT_E2E_PORT ?? "3000", 10);
+const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
+
 export default defineConfig({
   testDir: "./apps/agent-web/tests",
   testMatch: "**/*.spec.ts",
@@ -12,13 +16,13 @@ export default defineConfig({
     timeout: 10_000
   },
   webServer: {
-    command: "corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3000",
-    url: "http://127.0.0.1:3000",
+    command: `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port ${e2ePort}`,
+    url: e2eBaseUrl,
     reuseExistingServer: true,
     timeout: 120_000
   },
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: e2eBaseUrl,
     trace: "retain-on-failure"
   },
   projects: [

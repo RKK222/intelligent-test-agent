@@ -2339,5 +2339,3 @@
   - 提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
 - Result:
   - 页面空闲时不再有全局无限动画触发全树样式重算，浏览器 CPU 回归正常；运行态指示器（思考点、工具运行、disclosure 运行）在有活动 Run 时仍正常脉冲。纯 CSS 性能修复，无 API/DTO/事件/数据库变更，向后兼容。
-
-

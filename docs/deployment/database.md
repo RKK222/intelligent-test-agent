@@ -9,6 +9,26 @@
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
+## V20260809120000 长期记忆兼容基线
+
+`V20260809120000__create_qa_memory_governance.sql` 创建个人/团队治理、证据、审核、学习 Outbox、Run 使用、白名单、Skill 提案和设置表。完整记忆正文、向量和历史属于独立 Mem0 PostgreSQL + pgvector 数据库；平台表只保存范围/状态、最多 200 字证据摘要和可恢复定位信息，不保存 Prompt、回答或聊天消息。
+
+默认白名单为空，单独执行该 migration 不会开启学习或检索。文件首次在任何需要保留的 PostgreSQL 执行后，版本、文件名和字节必须永久锁定；后续只能新增更高版本 migration。合入与发布前仍须收集全部目标库 `flyway_schema_history`，在每套已知基线上验证升级并核对最终 JAR 内 SHA-256，禁止 `outOfOrder`、`repair` 或手工修改历史表。
+
+当前锁定 SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`。遗留 `qa_*` 表名继续作为隐藏兼容存储，不能因产品通用化而重命名或改写已执行 migration。
+
+## V20260809230000 通用记忆与 Embedding profile
+
+`V20260809230000__generalize_memory_and_embedding_profiles.sql` 前向增加内部模型 `embedding_dimension`，并在遗留设置表增加可空企业 `primary_embedding_model_id` 与固定 `cpu_embedding_model_id`。新增/修改查询全部位于 MyBatis XML。锁定 SHA-256：`2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`。
+
+独立记忆 PostgreSQL/pgvector 不扫描 Java Flyway。`memory-service/alembic` 唯一管理共享 Mem0 history、operation 幂等、逻辑记录/版本历史、profile 投影和补偿 outbox；只允许一个 migration job 在副本启动前执行。Mem0 副本没有本地 history 或数据卷。平台库和记忆库必须记录同一变更窗口的独立一致恢复点；禁止第二套 Java migration runner。详细部署、备份与回滚见 `docs/deployment/qa-memory.md`。
+
+## V20260810090000 记忆逻辑身份唯一约束
+
+`V20260810090000__enforce_qa_memory_identity.sql` 为 `qa_memories.mem0_memory_id` 增加唯一约束，保证独立 Mem0 中一个逻辑记忆在平台治理面最多只有一条记录；空值继续允许，兼容尚未同步正文的历史治理记录。原生学习写入使用 MyBatis XML 的 PostgreSQL `ON CONFLICT DO NOTHING`，并发失败方读取胜者后只追加本 Run 的安全证据。源码与最终应用 JAR 内嵌 persistence JAR 已核对 SHA-256：`619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`。
+
+升级前必须执行 `select mem0_memory_id, count(*) from qa_memories where mem0_memory_id is not null group by mem0_memory_id having count(*) > 1`。若返回任何记录，必须停止升级并由数据所有者确认保留记录及证据、审核、usage、Skill 提案的归并方案；不得让 migration 自动删除治理或审计数据，也不得使用 Flyway `repair` 掩盖。该 migration 是高于两条已执行记忆基线的前向结构变更，不改写其版本或 checksum。
+
 ## V20260807230000 批量会话归因
 
 `V20260807230000__add_batch_session_attribution.sql` 为 `sessions` 增加 `batch_mode boolean not null default false`、`batch_id varchar(128)` 和 `batch_item_request_id varchar(128)`。普通会话继续使用默认值且两个 ID 必须为空；批量会话必须存在 `created_by_user_id` 和两个非空白 ID。部分唯一索引 `uk_sessions_batch_item_request(created_by_user_id, batch_item_request_id)` 保证同一用户的单项创建幂等，不同用户互不冲突；`idx_sessions_batch_created(batch_id, created_at)` 只服务后续运营统计查询。本期不新增报表，也不改变 `source_type`：立即批量保持 `MANUAL`，定时批量保持 `SCHEDULED_TASK`。
@@ -1295,20 +1315,21 @@ migration 不写默认、测试或演示工具数据。全部运行期分页、�
 
 远程主链新增的会话分享迁移版本 `20260809170000`、`20260809170001` 低于上述个人库最高版本，不能直接倒序补跑。兼容装配会在精确匹配 QA Memory 扩展 history 后过滤两份低版本主 migration，并加载 `V20260810110001__session_shares_create_collaboration_share_after_qa_memory.sql` 与 `V20260810110002__session_messages_add_delegated_attribution_after_qa_memory.sql`；两份前向资源分别与对应主 migration 字节一致。只执行到 `20260809230000` 的中间态 history 会先顺序补齐 `20260810090000`，再执行三份 `20260810110000` 至 `20260810110002` 前向 migration。主/前向路径混用、缺少基础版本、未知 checksum 或不完整分享 history 均拒绝启动。
 
+反向合并也必须显式兼容：已执行 `20260809170000`/`20260809170001` 会话分享主链、但从未执行较低版本 QA Memory 的 release 数据库，不能倒序补跑 `20260809120000`。兼容装配会过滤三份 QA Memory 低版本主资源；若该库尚未执行 `20260810234154`，加载 `db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql`；若已执行 release 当前最高的 `20260810234154`，则加载更高版本 `db/migration-compat/qa-memory-after-token-latency-inputs/V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`，避免新补偿自身再次倒序。两份补偿 SQL 字节完全一致，均在一次 PostgreSQL 事务中按三份已冻结 SQL 的原始语义建立治理表、双 Embedding 字段和 Mem0 逻辑身份唯一约束，SHA-256 固定为 `44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984`。后续启动继续使用已经落库的原隔离 location；新旧补偿路径混用、低版本 QA 主链与任一补偿版本混用、补偿版本缺少对应 release history，均拒绝启动。
+
+空库或低于 `20260809120000` 的旧基线仍按“外部 API → QA Memory 基础 → 会话分享 → QA Memory 扩展”执行默认主链。已执行 QA Memory 基础、但尚未执行扩展的中间态可以先顺序执行会话分享主 migration，再继续执行 QA Memory 扩展；完整主链重启时允许两组低版本合法共存，不得误切到会话分享或 QA Memory 的高版本补偿路径。
+
 企业现网上一轮已部署平台源码提交为 `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`；两次现场启动日志均显示
 Flyway 已校验 92 条 migration、PostgreSQL 当前版本为 `20260809110000` 且无需迁移。该日志不能代替完整
-`flyway_schema_history`：下一次部署前仍须导出全部 `installed_rank/version/script/checksum/success`。正常企业主链
-从该版本首次升级只允许顺序新增 `20260809170000`、`20260809170001`、`20260810170000`、
-`20260810234154`，文件 SHA-256 依次为
-`b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`、
-`dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`、
-`4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`、
-`f684bd5d323d3816fc7ae982eff7b45256763f467f540020af41753c04fb837b`。如果前两条已由上一增量包完整执行，
-本包只允许新增后两条；四条都已执行的故障重部署不得新增 history。任一组只执行一部分或高版本存在而低版本
-缺失都必须停止。`20260810110001/02` 仅属于精确匹配的
-QA Memory 扩展兼容路径，不得混入正常企业主链。共享 XXL MySQL 本轮准入预期为 V1-V11 全部成功且不新增
-history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或部分历史出现时
-必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
+`flyway_schema_history`：下一次部署前仍须导出全部 `installed_rank/version/script/checksum/success`。仍停留在该版本的
+企业库首次升级合并后的主链时，应依次新增 QA Memory 基础 `20260809120000`、会话分享 `20260809170000/01`、
+QA Memory 扩展 `20260809230000`/`20260810090000`、通知中心 `20260810170000` 和时延输入
+`20260810234154`。已经由 release 增量包执行到 `20260810234154`、但从未执行 QA Memory 的数据库，不再倒序
+加载上述三条 QA Memory 主 migration，而只新增隔离补偿 `20260811170050`；只执行到会话分享主链的旧 release
+历史则使用 `20260810173117`，再顺序执行其后的通知和时延输入 migration。两条 QA Memory 补偿不可混用，
+`20260810110001/02` 仅属于精确匹配的 QA Memory 扩展兼容路径，也不得混入正常企业主链。共享 XXL MySQL 本轮
+准入预期为 V1-V11 全部成功且不新增 history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或
+部分历史出现时必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
 
 正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移、通知中心和 Token 延迟输入 migration 的 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
 
@@ -1688,7 +1709,6 @@ PostgreSQL 基线验证升级，并校验最终 JAR 中 migration 字节。禁�
 上述兼容逻辑只新增 Flyway 可验证的隔离资源，不执行 `repair`、不打开 `outOfOrder`，也不更新或删除
 `flyway_schema_history` 中已有记录；正式交付前仍须针对每套真实 PostgreSQL 已部署基线核对版本、checksum 和
 最终 JAR 内 migration 字节。
-
 ## V20260809170000 会话协作分享
 
 `V20260809170000__session_shares_create_collaboration_share.sql` 是开发期候选 migration，新增：
@@ -1735,6 +1755,6 @@ migration 创建 `user_notifications`：
 
 运行期关系型访问全部通过 `UserNotificationMapper.xml`。未读查询不只检查通知行，还左连接当前分享、成员、会话和所属人事实；因此通知生命周期回写暂时失败时，已撤权分享仍不可点击且不计入未读。创建按 `dedup_key` 原子去重，普通分享设置更新只更新活动通知快照，重新加入或重新激活会失效旧代际并创建新行。每日任务删除严格早于 90 天边界的通知，失效或过期记录在保留期内继续作为历史展示。
 
-该版本高于 QA Memory 扩展兼容链的 `V20260810110000` 至 `V20260810110002`，无需复制第二份兼容 SQL：既有 `DatabaseMigrationCompatibilityCustomizer` 仍只过滤不适配的低版本主分享 migration，通知 migration 由主 location 在分享前向迁移之后顺序执行。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 对每套已知已部署 history 升级到当前 HEAD 后统一断言 `user_notifications` 表和关键列存在；通知仓储 PostgreSQL 集成测试另覆盖空库、主分享基线、审计回填和查询口径。
+该版本高于 QA Memory 扩展兼容链的 `V20260810110000` 至 `V20260810110002`，通知本身无需复制第二份兼容 SQL：既有 `DatabaseMigrationCompatibilityCustomizer` 仍只过滤不适配的低版本主分享 migration，通知 migration 由主 location 在分享前向迁移之后顺序执行。反向把 QA Memory 合入已执行通知和 `V20260810234154` 的 release 数据库时，使用的是独立的 `V20260811170050` QA Memory 补偿，不是通知迁移副本。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 对每套已知已部署 history 升级到当前 HEAD 后统一断言 `user_notifications` 表和关键列存在；通知仓储 PostgreSQL 集成测试另覆盖空库、主分享基线、审计回填和查询口径。
 
 打包后必须分别从 persistence JAR 和最终应用 JAR 读取 `db/migration/V20260810170000__user_notifications_create_notification_center.sql`，与已测试源码计算 SHA-256；三者不一致不得发布。禁止通过 `repair`、`outOfOrder` 或手工修改 `flyway_schema_history` 处理冲突。

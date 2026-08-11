@@ -31,7 +31,7 @@ import {
   subscribeUserNotifications,
   type RunEventRawMessage
 } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
+import { BookOpenText, Boxes, BrainCircuit, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -50,6 +50,7 @@ import type {
   FileSearchResult,
   FileTreeEntry,
   ManagedApplication,
+  MemoryUsageView,
   MessagePart,
   PageResponse,
   PromptPart,
@@ -206,10 +207,14 @@ import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import { createSupportAccessShortcut } from "./support-access-shortcut";
 import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
+import MemoryCenter from "./MemoryCenter.vue";
 import {
+  isRoutedCenterMode,
   routeCenterTransition,
+  routedCenterModeFromRouteName,
   transitionImmersivePanels,
-  type NonToolboxCenterMode,
+  type NonRoutedCenterMode,
+  type RoutedCenterMode,
   type WorkbenchCenterMode
 } from "./toolbox-navigation";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
@@ -556,8 +561,8 @@ const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<WorkbenchCenterMode>("editor");
 const supportAccessRequested = ref(false);
 const supportAccessShortcut = createSupportAccessShortcut();
-const centerModeBeforeHub = ref<"editor" | "diff" | "system">("editor");
-const centerModeBeforeToolbox = ref<NonToolboxCenterMode>("editor");
+const centerModeBeforeHub = ref<Exclude<WorkbenchCenterMode, "hub">>("editor");
+const centerModeBeforeRoute = ref<NonRoutedCenterMode>("editor");
 const hubUpdateCount = ref(0);
 let hubUpdateTimer: ReturnType<typeof setInterval> | null = null;
 const feedback = ref<Feedback | null>(null);
@@ -633,7 +638,7 @@ const rightPanelOpen = ref(true);
 const savedLeftPanelOpen = ref(true);
 const savedRightPanelOpen = ref(true);
 const savedBottomDrawerOpen = ref(false);
-let restoringToolboxRouteMode = false;
+let restoringRoutedCenterMode = false;
 
 function clearRunEventSseFeedback() {
   if (feedback.value?.title === RUN_EVENT_SSE_ERROR_TITLE) {
@@ -642,14 +647,15 @@ function clearRunEventSseFeedback() {
 }
 
 watch(centerMode, (newMode, oldMode) => {
-  // /toolbox 是可前进/后退的权威路由；后台事件不得把沉浸式目录切回编辑器。
-  if (restoringToolboxRouteMode) {
-    restoringToolboxRouteMode = false;
+  // 活动栏沉浸式页面以 URI 为权威；后台事件不得切走当前深链接页面。
+  if (restoringRoutedCenterMode) {
+    restoringRoutedCenterMode = false;
     return;
   }
-  if (route.name === "toolbox" && newMode !== "toolbox") {
-    restoringToolboxRouteMode = true;
-    centerMode.value = "toolbox";
+  const routedMode = routedCenterModeFromRouteName(route.name);
+  if (routedMode && newMode !== routedMode) {
+    restoringRoutedCenterMode = true;
+    centerMode.value = routedMode;
     return;
   }
 
@@ -669,17 +675,33 @@ watch(centerMode, (newMode, oldMode) => {
   savedBottomDrawerOpen.value = next.savedBottomOpen;
 });
 
-watch(() => route.name === "toolbox", (isToolboxRoute) => {
-  const next = routeCenterTransition(isToolboxRoute, centerMode.value, centerModeBeforeToolbox.value);
-  centerModeBeforeToolbox.value = next.beforeToolbox;
+watch((): RoutedCenterMode | null => routedCenterModeFromRouteName(route.name), (routeMode) => {
+  const next = routeCenterTransition(routeMode, centerMode.value, centerModeBeforeRoute.value);
+  centerModeBeforeRoute.value = next.beforeRoute;
   centerMode.value = next.mode;
 }, { immediate: true });
 
-async function selectActivityCenterMode(mode: NonToolboxCenterMode) {
-  if (route.name === "toolbox") {
+async function selectActivityCenterMode(mode: WorkbenchCenterMode) {
+  if (isRoutedCenterMode(mode)) {
+    if (route.name !== mode) {
+      await router.push({ name: mode });
+    } else if (centerMode.value !== mode) {
+      centerMode.value = mode;
+    }
+    return;
+  }
+  if (routedCenterModeFromRouteName(route.name)) {
     await router.push({ name: "workbench" });
   }
   centerMode.value = mode;
+}
+
+async function toggleMemories() {
+  if (route.name === "memories") {
+    await selectActivityCenterMode(centerModeBeforeRoute.value);
+    return;
+  }
+  await selectActivityCenterMode("memories");
 }
 
 /** SUPER_ADMIN 可在工作台任意位置三击 Shift，直接进入仍需二次授权的问题排查页。 */
@@ -690,22 +712,20 @@ async function openSupportAccessFromShortcut() {
 
 async function toggleToolbox() {
   if (route.name === "toolbox") {
-    await router.push({ name: "workbench" });
+    await selectActivityCenterMode(centerModeBeforeRoute.value);
     return;
   }
-  await router.push({ name: "toolbox" });
+  await selectActivityCenterMode("toolbox");
 }
 
 async function toggleAgentSkillHub() {
-  if (centerMode.value === "toolbox") {
-    await selectActivityCenterMode("hub");
-    return;
-  }
-  if (centerMode.value === "hub") {
+  if (route.name === "hub") {
     await selectActivityCenterMode(centerModeBeforeHub.value);
     return;
   }
-  centerModeBeforeHub.value = centerMode.value;
+  if (centerMode.value !== "hub") {
+    centerModeBeforeHub.value = centerMode.value;
+  }
   await selectActivityCenterMode("hub");
 }
 
@@ -844,6 +864,15 @@ let lastTokens = 0;
 const nowTick = ref(Date.now());
 const scheduledRunTimingHydrationRunIds = new Set<string>();
 const settingsOpen = ref(false);
+let settingsOpenedFromActivity = false;
+watch(() => route.name === "settings", (isSettingsRoute, wasSettingsRoute) => {
+  if (isSettingsRoute) {
+    settingsOpen.value = true;
+  } else if (wasSettingsRoute) {
+    settingsOpen.value = false;
+    settingsOpenedFromActivity = false;
+  }
+}, { immediate: true });
 const firstLoginGuideSettingsMenu = ref<"appWorkspace" | "repository" | "personal">("appWorkspace");
 const firstLoginGuideSettingsTab = ref<"members" | "repositories" | "workspaces" | undefined>();
 const helpCenterOpen = ref(false);
@@ -967,6 +996,7 @@ onBeforeUnmount(() => {
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
 const runFeedbacks = ref<Record<string, AiRunFeedback | null>>({});
+const memoryUsageByRunId = ref<Record<string, MemoryUsageView[]>>({});
 const feedbackSubmitting = ref<Record<string, boolean>>({});
 const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
 const assistantSummaryMessageIdsByRunId = ref<Record<string, string>>({});
@@ -8747,10 +8777,33 @@ function handleCloseRobotSideQuestion() {
   robotSideQuestion.reset();
 }
 
+async function openSettingsRoute() {
+  if (route.name === "settings") {
+    settingsOpen.value = true;
+    return;
+  }
+  settingsOpenedFromActivity = true;
+  try {
+    await router.push({ name: "settings" });
+  } catch (error) {
+    settingsOpenedFromActivity = false;
+    throw error;
+  }
+}
+
 function closeSettings() {
   settingsOpen.value = false;
   // 设置页可能修改工作空间启用状态，关闭后仅刷新切换模板，不改变当前工作空间。
   void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
+  if (route.name !== "settings") return;
+
+  // 活动栏打开时返回原页面；直接访问 /settings 时替换为工作台，避免退出 SPA。
+  if (settingsOpenedFromActivity) {
+    settingsOpenedFromActivity = false;
+    router.back();
+    return;
+  }
+  void router.replace({ name: "workbench" });
 }
 
 function refreshManagedWorkspaceCatalog() {
@@ -9083,7 +9136,7 @@ function applyRunEventWorkbenchProjection(
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "run";
@@ -9102,7 +9155,7 @@ function applyRunEventWorkbenchProjection(
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "session";
@@ -9680,7 +9733,7 @@ async function refreshWorkspaceGitDiff(options: {
     vcsDiffFiles.value = nextFiles;
     if (diffSource.value === "vcs") {
       diffFiles.value = nextFiles;
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterVcsRefresh(centerMode.value, diffSource.value, nextFiles);
       }
       if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
@@ -10214,6 +10267,7 @@ function handleNewConversation() {
   clearAutoRetryState();
   dispatchChat({ type: "reset" });
   runFeedbacks.value = {};
+  memoryUsageByRunId.value = {};
   feedbackSubmitting.value = {};
   platformMessageIdsByRemoteId.value = {};
   assistantSummaryMessageIdsByRunId.value = {};
@@ -10411,6 +10465,30 @@ async function loadFeedbacksForRunIds(
       dispatchChat({ type: "run.statuses.loaded", statuses });
     }
   }
+  await loadMemoryUsageForRunIds(runIds, expectedSessionId, interactionIsCurrent);
+}
+
+/** 记忆使用记录走批量 HTTP 恢复；白名单未开放或服务降级时静默保持无徽标。 */
+async function loadMemoryUsageForRunIds(
+  runIds: string[],
+  expectedSessionId?: string,
+  interactionIsCurrent: () => boolean = () => true
+) {
+  if (runIds.length === 0) return;
+  const loaded: Record<string, MemoryUsageView[]> = Object.fromEntries(runIds.map((runId) => [runId, []]));
+  try {
+    for (let index = 0; index < runIds.length; index += 200) {
+      const usages = await api.queryQaMemoryRunUsage(runIds.slice(index, index + 200));
+      for (const usage of usages) {
+        (loaded[usage.runId] ??= []).push(usage);
+      }
+    }
+  } catch {
+    return;
+  }
+  if (interactionIsCurrent() && (!expectedSessionId || session.value?.sessionId === expectedSessionId)) {
+    memoryUsageByRunId.value = { ...memoryUsageByRunId.value, ...loaded };
+  }
 }
 
 function handleSubmitFeedback(payload: AiRunFeedbackPayload & { runId: string }) {
@@ -10546,6 +10624,17 @@ async function handleLogout() {
             <span class="figma-activity-text">工具箱</span>
           </button>
           <button
+            type="button"
+            :class="['figma-activity-btn figma-activity-btn--memories', centerMode === 'memories' && 'figma-activity-btn--active']"
+            aria-label="长期记忆"
+            title="记忆中心"
+            data-testid="memory-activity-button"
+            @click="toggleMemories"
+          >
+            <BrainCircuit class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">记忆</span>
+          </button>
+          <button
             v-if="canUseLobehub"
             type="button"
             class="figma-activity-btn figma-activity-btn--qa"
@@ -10603,7 +10692,7 @@ async function handleLogout() {
             data-onboarding="settings"
             aria-label="系统设置"
             title="设置"
-            @click="settingsOpen = true"
+            @click="openSettingsRoute"
           >
             <ElSetting class="figma-activity-icon" />
             <span class="figma-activity-text">设置</span>
@@ -10715,6 +10804,13 @@ async function handleLogout() {
       <main class="managed-editor-main">
         <template v-if="centerMode === 'toolbox'">
           <ToolboxPanel />
+        </template>
+        <template v-else-if="centerMode === 'memories'">
+          <MemoryCenter
+            :selected-app-id="selectedAppId"
+            :can-manage-team="isAppAdmin"
+            @open-skill-hub="toggleAgentSkillHub"
+          />
         </template>
         <template v-else-if="centerMode === 'hub'">
           <AgentSkillHub
@@ -11050,6 +11146,7 @@ async function handleLogout() {
           :selected-provider="selectedProvider"
           :selected-model="selectedModel"
           :run-feedbacks="runFeedbacks"
+          :memory-usage-by-run-id="memoryUsageByRunId"
           :feedback-submitting="feedbackSubmitting"
           :run-statuses-by-run-id="chatState.runStatusesByRunId"
           :commands="commands"

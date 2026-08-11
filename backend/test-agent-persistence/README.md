@@ -2,6 +2,7 @@
 
 - `V20260809110000__create_external_api_credentials.sql` 创建外部工具凭据与 scope 表，不写默认工具数据；`ExternalApiCredentialMapper.xml` / `MyBatisExternalApiCredentialRepository` 承载分页、整表加载、CRUD 和 scope 原子替换，数据库仅保存 RSA 密文、指纹和掩码提示。已执行 QA Memory 历史的个人库由 `DatabaseMigrationCompatibilityCustomizer` 加载原始字节兼容目录，并改走更高版本的外部 API 前向 migration。
 - `V20260809170000__session_shares_create_collaboration_share.sql` 与 `V20260809170001__session_messages_add_delegated_attribution.sql` 创建会话协作分享、成员、审计结构和代操作消息归属字段；已执行 `V20260809230000`/`V20260810090000` QA Memory 扩展历史的个人库不倒序执行这两版，而由 `db/migration-compat/qa-memory-extended` 保留已执行 SQL 原始字节并通过 `V20260810110001`/`V20260810110002` 的同字节前向副本补齐结构。
+- 已先执行会话分享主链但缺少较低版本 QA Memory 的 release 数据库，在尚未执行 `V20260810234154` 时由 `db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql` 补齐；已执行该最新 release 迁移时改走更高的 `db/migration-compat/qa-memory-after-token-latency-inputs/V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`。两份 SQL 字节一致，均在一次 PostgreSQL 事务中复用三条已冻结 migration 的语义建立相同最终记忆治理结构；已落库路径保持原 location，原始低版本继续保留给空库、旧基线和 QA Memory 个人历史，禁止 `outOfOrder` 或改写任一已执行文件。
 
 - 用户管理组合分页查询和“全部检索结果”有界 ID 解析由 `UserManagementQueryMapper.xml` / `MyBatisUserManagementQueryRepository` 实现，支持用户关键字、角色（含未分配角色）、组织、研发部门和部门筛选，并可在 SQL 中排除当前操作者；未修改 users/user_roles 表结构，也没有新增 Flyway migration。
 
@@ -239,6 +240,17 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 修改 `RedisRunRuntimeStore` 时必须使用真实 Redis 验证 Lua 原子性、durable seq 与 runtimeVersion 双 Stream、Hash/ZSET 物化、分页 tail、动态 key 滑动 TTL、7 天 attention/pending、active 索引清理、scope/dedup/pending、20,000 条/32 MiB 显式截断和 `run.snapshot.reset` 语义；禁止以 `MAXLEN`、LRU/LFU 或静默 eviction 代替显式截断。
 
 ## LobeHub 与模型网关持久化
+
+## 通用长期记忆治理持久化
+
+- `V20260809120000__create_qa_memory_governance.sql` 是不可改写的兼容基线，建立个人/团队治理、最多 200 字证据摘要、审核、学习 Outbox、Run usage、白名单、Skill 草稿和固定 CHAT 设置；SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`。
+- `V20260809230000__generalize_memory_and_embedding_profiles.sql` 前向增加内部模型 embedding 维度、可空企业 embedding 和固定 CPU profile；SHA-256 为 `2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`。遗留 `qa_*` 表/字段保留为隐藏兼容存储，公开 DTO 不再返回 QA taskTypes 或 confidence。
+- `V20260810090000__enforce_qa_memory_identity.sql` 前向为 `qa_memories.mem0_memory_id` 增加唯一约束，SHA-256 为 `619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3`；升级前必须审计重复逻辑 ID，发现重复时停止并制定保留证据/审核/usage/Skill 关联的显式归并方案，migration 不自动删除数据。
+- `QaMemoryMapper.xml` 是全部关系型 SQL 的唯一实现，包含写操作行锁、乐观版本、团队与 Skill 提案成员实时过滤、Mem0 逻辑 ID 原子建档、无原文 Outbox 幂等、租约认领和 PostgreSQL/H2 双分支。
+- `MemoryLearningEvidenceMapper.xml` 只按 `run_id` 从既有 `session_messages` 读取 USER/ASSISTANT 文本，限制 20 条且不读取 parts、工具输出或凭据；它不是聊天镜像。
+- `RedisMemoryHmacNonceStore` 只保存 HMAC nonce 防重放状态；不保存签名、正文、service key 或模型凭据。
+- 完整记忆正文、向量、Mem0 history、operation 幂等和双 profile 投影 outbox 位于 Alembic 管理的独立记忆 PostgreSQL；`display_summary` 仅用于降级展示。
+- `MyBatisQaMemoryRepositoryIntegrationTest` 覆盖 migration、治理读写、Mem0 身份唯一性、成员退出后 Skill 草稿撤权、乐观冲突、Outbox 幂等/认领、受限学习证据和无原始消息副本边界。
 
 - `RedisLobehubSsoStore` 把 ticket、nonce 和 grant 摘要限制在 `test-agent:lobehub-sso:*`，使用 Lua 原子消费、
   nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。

@@ -1,6 +1,8 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,6 +27,7 @@ import com.enterprise.testagent.model.gateway.ModelGatewayCaller;
 import com.enterprise.testagent.model.gateway.ModelGatewayForwarder;
 import com.enterprise.testagent.model.gateway.PreparedModelGatewayRequest;
 import com.enterprise.testagent.model.gateway.PreparedModelGatewayMultipartRequest;
+import com.enterprise.testagent.memory.MemoryModelHmacAuthenticator;
 import org.springframework.http.client.MultipartBodyBuilder;
 import java.time.Instant;
 import java.util.List;
@@ -132,6 +135,41 @@ class ModelGatewayControllerTest {
         assertThat(forwarder.forwardedCaller.userId()).isEqualTo("usr_workflow");
         assertThat(forwarder.forwardedCaller.unifiedAuthId()).isEqualTo("AUTH_WORKFLOW");
         assertThat(forwarder.forwardedCaller.sourceClient()).isEqualTo("workflow");
+    }
+
+    @Test
+    void memoryHmacIdentityIsBoundToBodyAndConfiguredModel() {
+        FakeSsoService sso = new FakeSsoService();
+        CapturingForwarder forwarder = new CapturingForwarder();
+        MemoryModelHmacAuthenticator hmac = mock(MemoryModelHmacAuthenticator.class);
+        MemoryModelHmacAuthenticator.Identity identity = new MemoryModelHmacAuthenticator.Identity(
+                "usr_memory", "AUTH_MEMORY", "run_memory", "session_memory", "operation_memory",
+                ModelCapability.CHAT);
+        when(hmac.supports(any(ServerWebExchange.class))).thenReturn(true);
+        when(hmac.authenticate(any(ServerWebExchange.class), any(byte[].class))).thenReturn(identity);
+        ModelGatewayController controller = new ModelGatewayController(
+                sso, new ModelGatewayCatalogService(new Providers(), new Models()), forwarder);
+        controller.setMemoryHmac(hmac);
+        WebTestClient client = WebTestClient.bindToController(controller)
+                .webFilter(new TraceIdWebFilter())
+                .controllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        client.post()
+                .uri(ModelGatewayController.BASE_PATH + "/chat/completions")
+                .header("X-Memory-Client-Id", "memory-service")
+                .header("X-Memory-Signature", "placeholder")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .bodyValue("{\"model\":\"enterprise-chat\",\"messages\":[]}")
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(hmac).authenticate(any(ServerWebExchange.class), aryEq(
+                "{\"model\":\"enterprise-chat\",\"messages\":[]}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        verify(hmac).requireModel(identity, "enterprise-chat");
+        assertThat(forwarder.forwardedCaller.userId()).isEqualTo("usr_memory");
+        assertThat(forwarder.forwardedCaller.unifiedAuthId()).isEqualTo("AUTH_MEMORY");
+        assertThat(forwarder.forwardedCaller.sourceClient()).isEqualTo("memory");
     }
 
     private static final class CapturingForwarder implements ModelGatewayForwarder {
