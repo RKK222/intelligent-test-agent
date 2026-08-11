@@ -8596,3 +8596,26 @@
 - 工作台显示“TestAgent 进程可用”，地址 `kakadeMacBook-Pro.local / 127.0.0.1:4104`；文件树恢复，运行态加载到 20 个 Skill 和 1 个 MCP，输入框和对话操作重新可用。
 - backend、frontend、opencode-manager 三个 screen 会话保持运行；Workflow 仍因 `.env.test` 缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 按既有 `--without-workflow` 模式未启动。
 - 后续从该通知中心 worktree 重启并复用原本机测试数据时，必须同时保留 `TESTAGENT` 和 `SYS_DATA_ROOT_DIR` 两个显式值，不能只设置后者。
+
+## 2026-08-11 - 将通知中心分支合并回 release 并切换运行态
+
+### Why
+
+- 用户要求把 `codex/user-notification-center` 的完整内容合并回当前 release，并从 release 工作区重新启动，确保后续验证不再依赖功能 worktree。
+
+### What
+
+- 在 `/Users/kaka/Desktop/intelligent-test-agent` 的 `codex/release-enterprise-20260801` 上以非快进方式合入通知中心提交 `2b8b497b4f6700c47a57014eb1b290bb6d1e4c6c`，生成 merge 提交 `7035e1e1f19339ef53ba60480cc0a920888c16eb`，无冲突；合并后功能分支是 release 的祖先且两者树内容一致。
+- 合并范围共 77 个文件、4200 行新增和 24 行删除，包含通知领域模块、MyBatis/Flyway 持久化、分享生命周期、HTTP/SSE、前端通知铃铛、测试和稳定文档；独立 worktree 的 `TESTAGENT`/`SYS_DATA_ROOT_DIR` 启动要求已经写入 `.agents/skills/restart/SKILL.md` 与 `docs/guides/ai-workflow.md`。
+- 未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未重命名、重排或改写已执行 migration。
+
+### How
+
+- 合并前确认 release 和功能 worktree 均干净、release 原提交为功能分支祖先，并检查差异不含环境文件或受保护源码；提交前再次回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记。
+- 从 release 使用 JDK 25、`test` profile、主工作区 `.env.test` 和 `--without-workflow` 完整构建：后端 22 个 Maven 模块 `clean package -Dmaven.test.skip=true` 成功，agent-web production build 成功；功能树在合并前已通过通知/分享后端定向测试、真实 PostgreSQL 18 套历史升级、前端 1926 passed / 1 skipped、15 项 typecheck 和三浏览器分享 E2E 42/42。
+- 首次重启虽然 readiness 返回 200，但监听 8080 的仍是功能 worktree 旧 JAR；按 PID 和实际命令路径确认后，仅停止该旧 screen/进程组，再复用已构建 release 产物重启，并二次核对监听进程路径，避免把其它 worktree 的健康响应误当作当前分支启动成功。
+
+### Result
+
+- backend、frontend、opencode-manager 均已由 `/Users/kaka/Desktop/intelligent-test-agent` 运行；后端 readiness 与前端为 HTTP 200，通知未认证请求为 401，OpenCode 4096/4104 `/global/config` 均为 200，且没有遗留重启脚本进程。
+- Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD`，按既有 `--without-workflow` 模式未启动；本次未推送远端。
