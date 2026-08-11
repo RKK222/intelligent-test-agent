@@ -339,20 +339,36 @@ function reduceEventOnly(
     if (!messageId) {
       return state;
     }
+    // 原生 revert 的 transient removed 可能先于 durable resend.started 到达。
+    // scheduled 已把源 USER 接管到替代 Run 时，只清除旧远端别名并保留页面锚点，
+    // 否则后续无正文 user envelope 会被忽略，紧随其后的 user text part 会误挂到上一条 assistant。
+    const pendingResendUser = removed?.role === "user"
+      && removed.runId === event.runId
+      && removed.resend?.replacementRunId === event.runId
+      ? detachResendUserAliases(removed, event.runId)
+      : undefined;
+    const retainedIdentities = new Set(pendingResendUser
+      ? [
+          pendingResendUser.id,
+          pendingResendUser.messageId,
+          pendingResendUser.platformMessageId,
+          pendingResendUser.remoteMessageId
+        ].filter((identity): identity is string => Boolean(identity))
+      : []);
     const nextScopes = { ...state.messageScopesById };
     if (removed !== undefined && removed.role !== "card") {
       [removed.id, removed.messageId, removed.platformMessageId, removed.remoteMessageId]
         .forEach((identity) => {
-          if (identity) delete nextScopes[identity];
+          if (identity && !retainedIdentities.has(identity)) delete nextScopes[identity];
         });
     } else {
       delete nextScopes[messageId];
     }
     return {
       ...state,
-      messages: state.messages.filter(
-        (message) => !messageIdentityMatches(message, messageId)
-      ),
+      messages: pendingResendUser
+        ? state.messages.map((message) => message === removed ? pendingResendUser : message)
+        : state.messages.filter((message) => !messageIdentityMatches(message, messageId)),
       messageScopesById: nextScopes,
       streamingTextByPartId: clearStreamingForParts(state.streamingTextByPartId, removed?.role === "assistant" ? removed.parts : undefined)
     };
@@ -602,13 +618,11 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
   const pendingReplacementUser = (
     message: Extract<AgentMessage, { role: "user" }>
   ): Extract<AgentMessage, { role: "user" }> => {
-    // OpenCode 会为替代轮次分配新消息 ID；旧平台/远端边界仅用于等待展示，受理后必须原位迁移。
-    const { messageId: _messageId, remoteMessageId: _remoteMessageId, platformMessageId: _platformMessageId, ...pendingUser } = message;
     const resend = startedMetadata
       ?? (message.resend
         ? { ...message.resend, status: text(event.payload.status) ?? "DISPATCHED" }
         : undefined);
-    return { ...pendingUser, runId: replacementRunId, resend };
+    return detachResendUserAliases(message, replacementRunId, resend);
   };
   const messages: AgentMessage[] = state.messages.flatMap((message): AgentMessage[] => {
     if (message.role === "card") {
@@ -664,6 +678,21 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
       [replacementRunId]: "RUNNING"
     }
   };
+}
+
+/** OpenCode 会为替代轮次分配新消息 ID；等待阶段仅保留 DOM 锚点，旧平台/远端别名必须清除。 */
+function detachResendUserAliases(
+  message: Extract<AgentMessage, { role: "user" }>,
+  replacementRunId: string,
+  resend: ResendMetadata | undefined = message.resend ?? undefined
+): Extract<AgentMessage, { role: "user" }> {
+  const {
+    messageId: _messageId,
+    remoteMessageId: _remoteMessageId,
+    platformMessageId: _platformMessageId,
+    ...pendingUser
+  } = message;
+  return { ...pendingUser, runId: replacementRunId, resend };
 }
 
 /**
@@ -1005,7 +1034,11 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
   }
   const delayedUserText = text(raw.text) ?? text(raw.content);
   const delayedUserPart = promptPartFromUserRaw(raw);
-  const delayedUserPartIndex = findUnlinkedUserByText(messages, delayedUserText);
+  // 替代 Run 的 text part 可能先于带 role 的 user envelope 到达；Run 边界比编辑前后文本更稳定。
+  const pendingResendUserIndex = findUnlinkedResendUser(messages, event.runId);
+  const delayedUserPartIndex = pendingResendUserIndex >= 0
+    ? pendingResendUserIndex
+    : findUnlinkedUserByText(messages, delayedUserText);
   if (delayedUserPartIndex >= 0) {
     const user = messages[delayedUserPartIndex];
     if (user.role === "user") {
