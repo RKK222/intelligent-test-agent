@@ -124,8 +124,9 @@ function ownerLabel(repository: AppSourceRepositorySummary) {
 
 .app-source-picker {
   position: fixed;
-  bottom: 38px;
-  left: 58px;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   width: min(420px, calc(100vw - 24px));
   max-height: min(560px, calc(100vh - 60px));

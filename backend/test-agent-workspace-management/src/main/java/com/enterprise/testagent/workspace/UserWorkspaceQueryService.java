@@ -5,10 +5,13 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
@@ -20,12 +23,20 @@ import org.springframework.stereotype.Service;
 public class UserWorkspaceQueryService {
 
     private final UserWorkspaceQueryRepository repository;
+    private final WorkspaceRepository workspaceRepository;
+    private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
     private final ManagedWorkspacePathResolver pathResolver;
 
     public UserWorkspaceQueryService(
             UserWorkspaceQueryRepository repository,
+            WorkspaceRepository workspaceRepository,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
             ManagedWorkspacePathResolver pathResolver) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.workspaceAccessAuthorizer = Objects.requireNonNull(
+                workspaceAccessAuthorizer,
+                "workspaceAccessAuthorizer must not be null");
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
     }
 
@@ -39,13 +50,31 @@ public class UserWorkspaceQueryService {
                 page.total());
     }
 
-    /** 详情查询与列表使用同一物理路径响应语义，避免前端把 personalworktree 逻辑值传给外部页面。 */
+    /**
+     * 详情查询与列表使用同一物理路径响应语义；首次打开源码快照尚无会话引用时，
+     * 仅允许通过现有 APP_SOURCE 权威鉴权的 Runtime Workspace 受控回退到工作区主表。
+     */
     public Workspace requireUserWorkspace(UserId userId, WorkspaceId workspaceId) {
-        return repository.findUserWorkspace(userId, workspaceId)
+        var direct = repository.findUserWorkspace(userId, workspaceId);
+        if (direct.isPresent()) {
+            return pathResolver.withResolvedRootPath(direct.get());
+        }
+
+        // 这里只借用分类结果；允许未映射项返回 STANDARD 后继续按 NOT_FOUND 收口，不授予任何 STANDARD 详情读取。
+        var kind = workspaceAccessAuthorizer.requireClassifiedFileAccess(userId, workspaceId, true);
+        if (kind != ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind.APP_SOURCE) {
+            throw workspaceNotFound(workspaceId);
+        }
+        return workspaceRepository.findById(workspaceId)
+                .filter(workspace -> workspace.status() == WorkspaceStatus.ACTIVE)
                 .map(pathResolver::withResolvedRootPath)
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.NOT_FOUND,
-                        "Workspace 不存在",
-                        Map.of("workspaceId", workspaceId.value())));
+                .orElseThrow(() -> workspaceNotFound(workspaceId));
+    }
+
+    private PlatformException workspaceNotFound(WorkspaceId workspaceId) {
+        return new PlatformException(
+                ErrorCode.NOT_FOUND,
+                "Workspace 不存在",
+                Map.of("workspaceId", workspaceId.value()));
     }
 }

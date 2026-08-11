@@ -9063,3 +9063,27 @@
 
 - 分享默认通过站内通知到达，备用 URL 退居次要操作；分享弹框可拉伸，通知已读/未读/失效在视觉与读屏语义上都可辨识。
 - 纯前端交互与文档调整，无 HTTP API、SSE 事件、DTO、数据库、SQL、鉴权或性能热路径变更；未修改 `.env*`、generated SDK 或 OpenCode 源码。并行工作区修改保持未暂存、未纳入本次提交。
+
+## 2026-08-11 - 修复应用源码管理位置与首次打开详情
+
+### Why
+
+- 应用级工作空间菜单点击应用代码库“管理”后，紧凑列表仍沿用旧工作区入口的左下角固定定位，与入口迁到顶部后的交互不一致。
+- 应用源码 `open` 已创建并返回 Runtime Workspace，但首次打开尚未产生 Session 引用；普通工作区详情查询只查个人或已有会话引用范围，随后请求详情时误报 `Workspace 不存在`。
+
+### What
+
+- `AppSourcePicker.vue` 改为固定在顶部上下文舱下方并水平居中，保持原有紧凑列表和管理流程不变。
+- `UserWorkspaceQueryService` 保留原个人/会话详情查询优先级；未命中时复用现有 `ConversationWorkspaceAccessAuthorizer` 的权威分类，仅允许已通过完整成员、generation、expiry、READY replica 与服务器绑定校验的 `APP_SOURCE` ACTIVE Workspace 回退主表，`STANDARD` 继续返回 `NOT_FOUND`。
+- 增加首次打开 APP_SOURCE 成功和 STANDARD 不越权两条后端单测，并在 Chromium 应用源码工作台用例中锁定弹框顶部位置；同步 workspace-management README、HTTP API、agent-web PACKAGE 和应用源码测试文档。
+
+### How
+
+- JDK 25 Maven 定向回归 `UserWorkspaceQueryServiceTest,AppSourceWorkspaceAccessTest` 通过；`test-agent-api -am package -DskipTests` 与启动脚本执行的 23 模块 `mvn clean package -Dmaven.test.skip=true` 均成功。
+- AppSourcePicker Vitest 3/3、agent-web typecheck、production build 通过；Chromium 应用源码快照完整工作台用例 1/1 通过，并验证弹框纵坐标位于顶部区间。
+- 按 `test` profile、根目录 `.env.test` 与 `--without-workflow` 启动当前代码：后端 readiness 8080、前端 3000、CORS 和 OpenCode 4097/4098 正常。既有独立发布栈继续占用 18080，导致新栈可选 XXL Job 管理进程端口冲突、聚合 health 为 DOWN；未擅自停止并行栈。
+
+### Result
+
+- 应用源码管理列表现在位于页面上方；首次打开已授权源码快照不再因尚无 Session 引用而被普通详情接口误判不存在，同时未扩大其它 Workspace 的读取范围。
+- HTTP URL、请求/响应字段和事件 wire 均未变；无数据库、SQL、migration、性能热路径或安全边界放宽，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。
