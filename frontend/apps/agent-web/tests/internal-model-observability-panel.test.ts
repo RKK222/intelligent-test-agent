@@ -1,5 +1,5 @@
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
-import { render, waitFor } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
@@ -82,7 +82,7 @@ const stats: InternalModelCallHourlyStat[] = [
   }
 ];
 
-function renderPanel() {
+function renderPanel(recordsTotal = 1) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });
@@ -95,7 +95,7 @@ function renderPanel() {
       traceId: "trace_probe"
     }]),
     listInternalModelCallRecords: vi.fn().mockResolvedValue({
-      items: [record], page: 1, size: 20, total: 1
+      items: [record], page: 1, size: 20, total: recordsTotal
     }),
     getInternalModelCallStats: vi.fn().mockResolvedValue(stats),
     getInternalModelTtftDistribution: vi.fn().mockResolvedValue({
@@ -123,6 +123,20 @@ function renderPanel() {
       plugins: [[VueQueryPlugin, { queryClient }]],
       provide: { api },
       stubs: {
+        ElPagination: {
+          props: ["currentPage", "pageSize", "pageSizes", "total"],
+          emits: ["current-change", "size-change"],
+          template: `
+            <div data-testid="records-pagination">
+              <span>total={{ total }}</span>
+              <span>page={{ currentPage }}</span>
+              <span>size={{ pageSize }}</span>
+              <span>options={{ pageSizes.join(',') }}</span>
+              <button type="button" @click="$emit('current-change', 2)">下一页</button>
+              <button type="button" @click="$emit('size-change', 50)">每页 50 条</button>
+            </div>
+          `
+        },
         ElTooltip: {
           props: ["content", "trigger"],
           template: `<span class="metric-tooltip-stub" :data-description="content" :data-trigger="Array.isArray(trigger) ? trigger.join(',') : trigger"><slot /></span>`
@@ -130,7 +144,7 @@ function renderPanel() {
       }
     }
   });
-  return { ...view, queryClient };
+  return { ...view, api, queryClient };
 }
 
 describe("InternalModelObservabilityPanel", () => {
@@ -183,6 +197,39 @@ describe("InternalModelObservabilityPanel", () => {
       expect(descriptions.some((description) => description.includes("没有返回实际回答的调用不参与"))).toBe(true);
       expect(descriptions.some((description) => description.includes("不是瞬时峰值"))).toBe(true);
     });
+    view.queryClient.clear();
+  });
+
+  it("uses the server total for pagination and reloads after page or size changes", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-07T10:30:00Z"));
+    const view = renderPanel(41);
+
+    await waitFor(() => {
+      expect(view.getByTestId("records-pagination").textContent).toContain("total=41");
+      expect(view.getByTestId("records-pagination").textContent).toContain("options=20,50,100");
+      expect(view.api.listInternalModelCallRecords).toHaveBeenCalledWith(expect.objectContaining({
+        page: 1,
+        size: 20
+      }));
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "下一页" }));
+    await waitFor(() => {
+      expect(view.api.listInternalModelCallRecords).toHaveBeenCalledWith(expect.objectContaining({
+        page: 2,
+        size: 20
+      }));
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "每页 50 条" }));
+    await waitFor(() => {
+      expect(view.api.listInternalModelCallRecords).toHaveBeenCalledWith(expect.objectContaining({
+        page: 1,
+        size: 50
+      }));
+    });
+    expect(view.getByTestId("records-pagination").textContent).toContain("page=1");
+    expect(view.getByTestId("records-pagination").textContent).toContain("size=50");
     view.queryClient.clear();
   });
 });

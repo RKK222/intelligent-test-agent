@@ -29,7 +29,8 @@ const filterSource = ref<InternalModelCallSource | "">("USER_CALL");
 const filterUcid = ref("");
 const customTimeRange = ref<[string, string] | null>(null);
 const page = ref(1);
-const pageSize = 20;
+const pageSize = ref(20);
+const pageSizeOptions = [20, 50, 100];
 const HOUR_MILLIS = 3_600_000;
 const selectedWindowHours = ref<number>(24);
 const showGlossary = ref(true);
@@ -204,7 +205,8 @@ const recordsQuery = useQuery({
     source: filterSource.value || null,
     from: queryWindow.value.from,
     to: queryWindow.value.to,
-    page: page.value
+    page: page.value,
+    size: pageSize.value
   }]),
   enabled: () => hasSuperAdmin.value,
   retry: false,
@@ -215,7 +217,7 @@ const recordsQuery = useQuery({
     from: queryWindow.value.from,
     to: queryWindow.value.to,
     page: page.value,
-    size: pageSize
+    size: pageSize.value
   })
 });
 
@@ -319,7 +321,8 @@ const records = computed(() => {
   const keyword = filterUcid.value.trim().toLowerCase();
   return list.filter((row) => row.ucid && row.ucid.toLowerCase().includes(keyword));
 });
-const recordsTotal = computed(() => records.value.length);
+// 分页总数必须使用服务端对完整结果集的计数，当前页最多只有 pageSize 条，不能据此判断总页数。
+const recordsTotal = computed(() => recordsQuery.data.value?.total ?? 0);
 // stats API 返回底层 outcome；页面按大类筛选，明细 API 使用相同大类，保证两块口径一致。
 const stats = computed(() => (statsQuery.data.value ?? []).filter((row) =>
   !filterOutcomeGroup.value || outcomeGroupOf(row.outcome) === filterOutcomeGroup.value
@@ -891,6 +894,11 @@ function applyFilters() {
 function onPageChange(next: number) {
   page.value = next;
 }
+
+function onPageSizeChange(next: number) {
+  pageSize.value = next;
+  page.value = 1;
+}
 </script>
 
 <template>
@@ -1163,9 +1171,11 @@ function onPageChange(next: number) {
             <el-pagination
               :current-page="page"
               :page-size="pageSize"
+              :page-sizes="pageSizeOptions"
               :total="recordsTotal"
-              layout="prev, pager, next, total"
+              layout="sizes, prev, pager, next, total"
               @current-change="onPageChange"
+              @size-change="onPageSizeChange"
             />
           </div>
         </section>
