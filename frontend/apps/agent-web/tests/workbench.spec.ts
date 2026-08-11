@@ -170,6 +170,7 @@ test("session share owner repairs historical collaborator resend attribution fro
 
 test("session share owner keeps one collaborator resend after compacted history and late native events", async ({ page }) => {
   const sessionMessageRequests: string[] = [];
+  const sessionTreeRequests: string[] = [];
   const activeRun = {
     runId: "run_owner_resend_replacement",
     sessionId: "ses_owner_resend_revision",
@@ -328,6 +329,7 @@ test("session share owner keeps one collaborator resend after compacted history 
     }],
     sessionMessagesBySessionId: messages,
     sessionMessageRequests,
+    sessionTreeRequests,
     sessionCollaborationShare: {
       shareId: "shr_owner_resend_revision",
       sharePath: "/s/shr_owner_resend_revision",
@@ -386,6 +388,8 @@ test("session share owner keeps one collaborator resend after compacted history 
       .__titleWatchRunStreams?.some((item) => item.runId === "run_owner_resend_replacement") ?? false
   )).toBe(true);
   const initialMessageRequestCount = sessionMessageRequests.length;
+  const initialSessionTreeRequestCount = sessionTreeRequests.length;
+  await startHistoryLoadingObservation(page);
 
   messages.ses_owner_resend_revision = [...compactedHistory, {
     messageId: "msg_owner_resend_new",
@@ -413,6 +417,8 @@ test("session share owner keeps one collaborator resend after compacted history 
   await expect(replacementTurn).toBeVisible();
   await expect(replacementTurn.locator(".oc-user-message__sender")).toHaveText("wr");
   await expect(replacementTurn.locator(".oc-user-message__bubble")).toHaveText("仅答复 123");
+  expect(sessionTreeRequests).toHaveLength(initialSessionTreeRequestCount);
+  expect(await historyLoadingObserved(page)).toBe(false);
 
   const nativeEventsReleased = await page.evaluate(() =>
     (window as Window & { __releaseRunEventBatch?: (releaseKey: string) => boolean })
@@ -898,8 +904,9 @@ test("session share refreshes a compacted summary when the session revision chan
   await expect(compaction).not.toContainText("这不是新的回答");
 });
 
-test("session share refreshes an edited resend while its replacement run is active", async ({ page }) => {
+test("session share synchronizes an edited resend in place when revision wins the persistence race", async ({ page }) => {
   const sessionMessageRequests: string[] = [];
+  const sessionTreeRequests: string[] = [];
   const activeRun = {
     runId: "run_shared_resend_replacement",
     sessionId: "ses_shared_resend_revision",
@@ -935,8 +942,23 @@ test("session share refreshes an edited resend while its replacement run is acti
     sessionUpdatedAt: "2026-08-10T03:00:00Z",
     generatedAt: "2026-08-10T03:00:01Z"
   })];
+  const earlierMessages = Array.from({ length: 12 }, (_, index) => ([{
+    messageId: `msg_shared_resend_history_user_${index}`,
+    sessionId: "ses_shared_resend_revision",
+    role: "USER",
+    content: `历史问题 ${index + 1}`,
+    createdAt: `2026-08-10T02:${String(index).padStart(2, "0")}:00Z`,
+    runId: `run_shared_resend_history_${index}`
+  }, {
+    messageId: `msg_shared_resend_history_answer_${index}`,
+    sessionId: "ses_shared_resend_revision",
+    role: "ASSISTANT",
+    content: `历史回答 ${index + 1}`,
+    createdAt: `2026-08-10T02:${String(index).padStart(2, "0")}:01Z`,
+    runId: `run_shared_resend_history_${index}`
+  }])).flat();
   const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {
-    ses_shared_resend_revision: [{
+    ses_shared_resend_revision: [...earlierMessages, {
       messageId: "msg_shared_resend_old",
       remoteMessageId: "msg_remote_shared_resend_old",
       sessionId: "ses_shared_resend_revision",
@@ -968,6 +990,17 @@ test("session share refreshes an edited resend while its replacement run is acti
     },
     run_shared_resend_replacement: activeRun
   };
+  await installAuthenticatedRunEventFetchStream(page, {
+    run_shared_resend_replacement: [{
+      releaseKey: "shared-resend-started-after-stale-refresh",
+      events: [{
+        eventId: "evt_shared_resend_started_after_stale_refresh",
+        seq: 1,
+        type: "run.resend.started",
+        payload: activeRun.resend
+      }]
+    }]
+  });
   await mockBackendApi(page, {
     authUser: { userId: "usr_reader", username: "观察者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
     workspaces: [{ ...workspace(), workspaceId: "wrk_shared_resend_revision", name: "共享重发工作区" }],
@@ -1013,6 +1046,7 @@ test("session share refreshes an edited resend while its replacement run is acti
     sessionShareRuntimeStates: runtimeStates,
     sessionMessagesBySessionId,
     sessionMessageRequests,
+    sessionTreeRequests,
     runsByRunId
   });
 
@@ -1020,20 +1054,16 @@ test("session share refreshes an edited resend while its replacement run is acti
   await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
   await expect.poll(() => sessionMessageRequests.length).toBeGreaterThanOrEqual(1);
   const initialMessageRequestCount = sessionMessageRequests.length;
+  const initialSessionTreeRequestCount = sessionTreeRequests.length;
+  await startHistoryLoadingObservation(page);
+  const scrollTopBeforeResend = await page.locator(".figma-chat-scroll").evaluate((element) => {
+    const viewport = element as HTMLElement;
+    viewport.scrollTop = Math.min(160, Math.max(0, viewport.scrollHeight - viewport.clientHeight));
+    return viewport.scrollTop;
+  });
+  expect(scrollTopBeforeResend).toBeGreaterThan(0);
 
-  sessionMessagesBySessionId.ses_shared_resend_revision = [{
-    messageId: "msg_shared_resend_new",
-    remoteMessageId: "msg_remote_shared_resend_new",
-    sessionId: "ses_shared_resend_revision",
-    role: "USER",
-    content: "仅答复 123",
-    senderUserId: "usr_wr",
-    senderUsername: "wr",
-    senderUnifiedAuthId: "wr",
-    sentBySharedUser: true,
-    createdAt: "2026-08-10T03:00:02Z",
-    runId: "run_shared_resend_replacement"
-  }];
+  // revision 可能先于替代 USER 消息写入平台；第一次 refresh 故意仍返回旧轮次。
   runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
     shareId: "shr_resend_revision",
     sessionId: "ses_shared_resend_revision",
@@ -1045,10 +1075,37 @@ test("session share refreshes an edited resend while its replacement run is acti
   }));
 
   await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
+  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
+
+  sessionMessagesBySessionId.ses_shared_resend_revision = [...earlierMessages, {
+    messageId: "msg_shared_resend_new",
+    remoteMessageId: "msg_remote_shared_resend_new",
+    sessionId: "ses_shared_resend_revision",
+    role: "USER",
+    content: "仅答复 123",
+    senderUserId: "usr_wr",
+    senderUsername: "wr",
+    senderUnifiedAuthId: "wr",
+    sentBySharedUser: true,
+    createdAt: "2026-08-10T03:00:02Z",
+    runId: "run_shared_resend_replacement",
+    resend: activeRun.resend
+  }];
+  const released = await page.evaluate(() =>
+    (window as Window & { __releaseRunEventBatch?: (releaseKey: string) => boolean })
+      .__releaseRunEventBatch?.("shared-resend-started-after-stale-refresh") ?? false
+  );
+  expect(released).toBe(true);
+
   await expect(page.getByText("仅答复 OK", { exact: true })).toHaveCount(0);
   await expect(page.getByText("仅答复 123", { exact: true })).toHaveCount(1);
   await expect(page.getByText("wr", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "停止执行" })).toBeVisible();
+  expect(sessionTreeRequests).toHaveLength(initialSessionTreeRequestCount);
+  expect(await historyLoadingObserved(page)).toBe(false);
+  await expect.poll(() => page.locator(".figma-chat-scroll").evaluate((element) =>
+    (element as HTMLElement).scrollTop
+  )).toBe(scrollTopBeforeResend);
 
   runsByRunId.run_shared_resend_replacement = {
     ...activeRun,
@@ -11659,6 +11716,30 @@ function sessionShareRuntimeState(overrides: Record<string, unknown> = {}) {
     generatedAt: "2026-08-09T01:00:00Z",
     ...overrides
   };
+}
+
+async function startHistoryLoadingObservation(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const observedWindow = window as Window & {
+      __historyLoadingObserved?: boolean;
+      __historyLoadingObserver?: MutationObserver;
+    };
+    observedWindow.__historyLoadingObserver?.disconnect();
+    observedWindow.__historyLoadingObserved = false;
+    const observer = new MutationObserver(() => {
+      if (document.querySelector(".figma-chat-history-loading")) {
+        observedWindow.__historyLoadingObserved = true;
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    observedWindow.__historyLoadingObserver = observer;
+  });
+}
+
+async function historyLoadingObserved(page: Page): Promise<boolean> {
+  return page.evaluate(() =>
+    (window as Window & { __historyLoadingObserved?: boolean }).__historyLoadingObserved === true
+  );
 }
 
 function sharedSessionListItem(overrides: Record<string, unknown> = {}) {

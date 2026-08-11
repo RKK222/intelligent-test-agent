@@ -190,6 +190,96 @@ describe("agent-chat runtime reducer", () => {
       .toBeLessThan(rows.findIndex((row) => row.type === "user-message"));
   });
 
+  it("keeps the source turn as an anchor when resend started arrives before the authoritative user message", () => {
+    const initial = {
+      ...createInitialAgentChatRuntimeState([{
+        id: "msg_source_user",
+        messageId: "msg_source_user",
+        platformMessageId: "msg_source_user",
+        remoteMessageId: "msg_remote_source_user",
+        role: "user",
+        text: "仅答复 OK",
+        runId: "run_source",
+        senderUserId: "usr_wr",
+        senderUsername: "wr",
+        sentBySharedUser: true,
+        createdAt: "2026-08-10T15:09:00Z"
+      }, {
+        id: "msg_source_answer",
+        messageId: "msg_source_answer",
+        role: "assistant",
+        text: "OK",
+        runId: "run_source",
+        createdAt: "2026-08-10T15:09:01Z"
+      }]),
+      todoUserMessageIdByRunId: { run_source: "msg_source_user" }
+    } satisfies AgentChatRuntimeState;
+    const resend = {
+      resendId: "resend_started_first",
+      sourceRunId: "run_source",
+      replacementRunId: "run_replacement",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "DISPATCHED",
+      executeAt: "2026-08-10T15:09:02Z",
+      requesterUserId: "usr_wr",
+      requesterUsername: "wr",
+      requestedBySharedUser: true
+    } as const;
+
+    const started = reduceAgentChatRuntime(initial, {
+      type: "event",
+      event: runEvent("run.resend.started", "run_replacement", resend)
+    });
+
+    expect(started.messages).toEqual([
+      expect.objectContaining({
+        id: "msg_source_user",
+        role: "user",
+        text: "仅答复 OK",
+        runId: "run_replacement"
+      })
+    ]);
+    const pendingAnchor = started.messages[0];
+    expect(pendingAnchor && "messageId" in pendingAnchor).toBe(false);
+    expect(pendingAnchor && "platformMessageId" in pendingAnchor).toBe(false);
+    expect(pendingAnchor && "remoteMessageId" in pendingAnchor).toBe(false);
+
+    const synchronized = reduceAgentChatRuntime(started, {
+      type: "run.resend.user.synchronized",
+      resend,
+      message: {
+        id: "msg_replacement_user",
+        messageId: "msg_replacement_user",
+        platformMessageId: "msg_replacement_user",
+        remoteMessageId: "msg_remote_replacement_user",
+        role: "user",
+        text: "仅答复 123",
+        runId: "run_replacement",
+        senderUserId: "usr_wr",
+        senderUsername: "wr",
+        sentBySharedUser: true,
+        createdAt: "2026-08-10T15:09:02Z"
+      }
+    });
+
+    expect(synchronized.messages).toEqual([
+      expect.objectContaining({
+        id: "msg_replacement_user",
+        platformMessageId: "msg_replacement_user",
+        remoteMessageId: "msg_remote_replacement_user",
+        role: "user",
+        text: "仅答复 123",
+        runId: "run_replacement",
+        senderUsername: "wr"
+      })
+    ]);
+    expect(synchronized.todoUserMessageIdByRunId.run_replacement).toBe("msg_replacement_user");
+    expect(synchronized.pendingTodoUserMessageId).toBe("msg_replacement_user");
+  });
+
   it("projects an automatic resend countdown on the scheduled source message", () => {
     const initial = {
       ...createInitialAgentChatRuntimeState([

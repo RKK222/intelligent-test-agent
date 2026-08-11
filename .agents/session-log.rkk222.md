@@ -8490,3 +8490,30 @@
 - 用户从远端目录树选择已提交的应用一级子目录后，即使目标服务器保留旧 feature 仓库，新建工作空间也会先安全追平远端再继续创建；本地有修改时返回明确冲突并保留现场。
 - 本次不改变 API/DTO/RunEvent，不涉及数据库结构、Flyway 文件、关系型 SQL、generated SDK、OpenCode 只读源码或 `.env*`；仅低频新建流程增加一次增量 fetch，既有副本兼容行为保持不变，也未新建分支。
 - backend、frontend、opencode-manager 当前已运行；Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动。
+
+## 2026-08-11 - 修复分享撤回重发刷新跳动
+
+### Why
+
+- 分享参与者撤回重发时，分享 revision 可能先于替代 USER 消息持久化到达；此前 revision 会立即整会话刷新并消耗一次性刷新机会，得到旧快照后 `run.resend.started` 无法再补拉，B 只能手工刷新才看到新消息。
+- 整会话刷新会清空并重建时间线、切换历史加载状态且触发滚动到底部，所以 A 撤回后 B 刷新成新消息的一瞬间，A/B 两个页面都会产生可见跳动。
+
+### What
+
+- `agent-chat` 新增 `run.resend.user.synchronized` 原位同步动作；即使观察端错过 scheduled/requested 事件，`run.resend.started` 也会把源 USER 留作替代 Run 锚点，权威 USER 到达后只替换该气泡并迁移 Todo 归属，不重置其余时间线。
+- `AgentWorkbench` 对活跃撤回重发改为按 replacementRunId 轻量补拉权威 USER，复用同一进行中请求并在 revision 早于持久化时进行最多 6 次、每次间隔 250ms 的短重试；revision 与 started 都可触发补偿，成功后有界去重。
+- 活跃重发不再调用整会话 `switchSession`，因此不请求会话树、不显示历史加载状态、不改变滚动位置；没有活跃 Run 的 compact revision 仍保留原有权威整会话刷新。
+- 增加 reducer 乱序回归和 A/B 分享 revision 先到、USER 后落库的 Playwright 回归，并同步 agent-web、agent-chat 包说明和会话场景测试文档。
+
+### How
+
+- TDD 先确认新 reducer 用例因 started 后丢失源 USER 而失败，再完成实现；`agent-chat` 全量 Vitest 10 个文件、186/186 通过，agent-web 滚动回归 20/20 通过，两个前端包 typecheck 和 agent-web production build 通过。
+- 六条相关 Chromium E2E 6/6 通过，覆盖所属人 compacted resend、分享成员编辑重发、compact 摘要刷新、revision/持久化竞态原位同步、所属人权威消息同步和共享 actor/子 Agent/历史增强保留；竞态用例同时断言会话树请求不增加、历史加载不出现且 scrollTop 不变。
+- 使用 JDK 25、`.env.test`、既有字节一致 Flyway compatibility location 和 `--without-workflow` 重启，21 个 Maven module 构建成功；backend readiness、frontend 与 opencode-manager 均健康，未修改环境文件或 Flyway 历史。
+- 在真实 `888888888`/`wr` 同一分享会话中，A 将 `仅答复 478` 撤回并改为 `仅答复 LIVE_RESEND_INPLACE_20260811_1408`；B 不刷新即看到新问题和最终答案。100ms 连续采样期间 A/B 均未出现历史加载，旧问题消失、B USER 总数保持 5，双端最终 USER 共用平台消息 ID `msg_abbf1a8c8550455992a3b7af91c642c3`。
+
+### Result
+
+- 分享撤回重发现在能在 revision 与持久化乱序下实时收敛；B 无需刷新，A/B 不再通过整会话重载切换新消息，自动化验证滚动位置保持不变。
+- 本次没有新增或变更 API、DTO、RunEvent 协议、数据库、Flyway、SQL、安全规则、generated SDK 或 OpenCode 只读源码；性能影响仅限活跃撤回竞态时最多 6 次单页消息补拉，成功即停止。
+- backend、frontend、opencode-manager 当前已运行；Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动，未新建分支。
