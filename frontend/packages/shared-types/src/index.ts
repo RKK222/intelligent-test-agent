@@ -1208,7 +1208,7 @@ export type CreateRunResendPayload = {
   expectedRunId?: string | null;
   contextToken: string;
   clientRequestId: string;
-  /** 所属人确认后的替代文本；未传时兼容为精确重放原始轮次。 */
+  /** 实际发送人确认后的替代文本；未传时兼容为精确重放原始轮次。 */
   editedPrompt?: string;
 };
 

@@ -14,7 +14,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 
 - `web.platform.WorkspaceController`、`web.platform.SessionController`、`web.platform.RunController`、`web.platform.TerminalController`：平台协议入口，普通 Workspace/Session 读取按当前认证用户归属校验；旧 `/api/...`、`/api/internal/platform/...` 和 Run 相关 `/api/internal/agent/{agentId}/...` URL 并行映射；SessionController 暴露消息列表和 active-run 恢复入口。
 - `web.platform.RunEventSseBackendRoutingWebFilter`、`web.platform.BackendSseForwarder`：RunEvent SSE 建连前按 Run 原始生产 Java 流式转发，保留 Authorization、trace、Last-Event-ID、query 和 `text/event-stream`，并复用 `X-Test-Agent-Backend-Routed` 防循环。
-- `web.platform.RunResendController`：会话所属人或持有 `canChat` 的源消息实际发送人，对最后一条根会话消息执行撤销重发的入口；接收远端边界、可选源 Run、上下文令牌、幂等键和可选修改文本，具体 actor/终态/边界/会话锁验证及可信远端 part 保留由应用服务完成。
+- `web.platform.RunResendController`：源消息实际发送人对最后一条根会话消息执行撤销重发的入口，分享发送人还必须持有 `canChat`；接收远端边界、可选源 Run、上下文令牌、幂等键和可选修改文本，具体 actor/终态/边界/会话锁验证及可信远端 part 保留由应用服务完成。
 - `web.platform.RunResendInternalDispatchController` / `HttpRunResendDispatchGateway`：使用精确内部路径、XXL token 和公共 Java 路由/转发器分发到固定目标服务器，不接受用户 token 豁免到其它路径。
 - `web.platform.RunControlBackendRoutingWebFilter`、`web.platform.BackendRoutingErrorWriter`：普通 Run 的两个 cancel 写入口严格路由到生产 Java；尚未投递且没有生产路由的 WAITING 重发替代 Run 留在入口 Java，经 owner 校验后只做共享状态 CAS 和解锁。其它归属解析或普通 HTTP 转发失败时直接写统一平台错误，禁止降级执行本机副作用。
 - `web.platform.PlatformOpencodeRuntimeController`：平台侧 opencode runtime 代理入口，只承载旧 `/api/...` 与 `/api/internal/platform/...` 路径，并把可选用户主体交给业务层决定用户进程或固定节点 fallback。

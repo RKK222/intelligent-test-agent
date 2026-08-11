@@ -174,7 +174,7 @@ class RunResendApplicationServiceTest {
     }
 
     @Test
-    void sharedOwnerCanEditLastMessageAndPreservesOtherReplayParts() {
+    void sharedSenderCanEditLastMessageAndPreservesOtherReplayParts() {
         when(runRepository.findById(SOURCE_RUN_ID)).thenReturn(Optional.of(
                 sourceRun().withMessageSender(SHARED_SENDER, "ucid_resend_shared", true)));
         when(runtime.loadReplayableTurn(any())).thenReturn(Mono.just(new AgentReplayableTurn(
@@ -192,7 +192,7 @@ class RunResendApplicationServiceTest {
                 "high")));
 
         RunResend result = service.createManual(
-                sharedContext(OWNER, true),
+                sharedContext(SHARED_SENDER, true),
                 "opencode",
                 SESSION_ID,
                 new CreateRunResendCommand(
@@ -203,8 +203,8 @@ class RunResendApplicationServiceTest {
                         "修改后的问题"),
                 "trace_resend_shared");
 
-        assertThat(result.requesterUserId()).isEqualTo(OWNER);
-        assertThat(result.requestedBySharedUser()).isFalse();
+        assertThat(result.requesterUserId()).isEqualTo(SHARED_SENDER);
+        assertThat(result.requestedBySharedUser()).isTrue();
         ArgumentCaptor<RunResendReplayInput> inputCaptor = ArgumentCaptor.forClass(RunResendReplayInput.class);
         verify(replayInputStore).save(inputCaptor.capture());
         RunResendReplayInput replayInput = inputCaptor.getValue();
@@ -227,6 +227,25 @@ class RunResendApplicationServiceTest {
                         && SHARED_SENDER.equals(run.messageSenderUserId())
                         && "ucid_resend_shared".equals(run.messageSenderUnifiedAuthId())
                         && run.messageSentBySharedUser()));
+    }
+
+    @Test
+    void ownerCannotEditSharedMembersLastMessage() {
+        CreateRunResendCommand command = new CreateRunResendCommand(
+                SOURCE_MESSAGE_ID,
+                SOURCE_RUN_ID,
+                "context_token_shared",
+                "request_resend_owner_denied");
+        when(runRepository.findById(SOURCE_RUN_ID)).thenReturn(Optional.of(
+                sourceRun().withMessageSender(SHARED_SENDER, "ucid_resend_shared", true)));
+
+        assertThatThrownBy(() -> service.createManual(
+                        OWNER, "opencode", SESSION_ID, command, "trace_resend_owner_denied"))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> {
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+                            assertThat(exception.getMessage()).contains("实际发送人");
+                        });
     }
 
     @Test

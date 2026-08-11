@@ -2015,7 +2015,7 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 
 权限边界：只读成员可以读取会话、消息、Run/SSE、文件树/正文、状态和 Diff；`canChat=true` 可以在固定 Session/Workspace 中发送、写文件、执行当前工作区 Git/终端/command/shell、compact/revert、回复 permission/question、提交反馈和管理自己的定时任务。分享管理、归档/删除、置顶、应用/工作区切换、持久 fork、设置、Agent 配置、源码/Hub、系统管理和服务器终端始终只属于所属人。所属人的当前权限是所有代操作的上限。
 
-停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人后来降为只读仍可停止。最后一条用户消息的撤回并重新发送只允许会话所属人或该消息的实际发送人；分享发送人还必须有 `canChat=true`，其它成员返回 `FORBIDDEN`。任一 Run 为 `PENDING/RUNNING/CANCELLING` 时，所有参与方的新发送都返回 `409 SESSION_BUSY`。
+停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人后来降为只读仍可停止。最后一条用户消息的撤回并重新发送只允许该消息的实际发送人；分享发送人还必须有 `canChat=true`，包括会话所属人在内的其它用户返回 `FORBIDDEN`。任一 Run 为 `PENDING/RUNNING/CANCELLING` 时，所有参与方的新发送都返回 `409 SESSION_BUSY`。
 
 旧 `/api/sessions/**` 和 `/api/workspaces/{workspaceId}/sessions` 已作废，返回 `410 API_GONE`。
 
@@ -3953,17 +3953,17 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 
 ### `POST /api/internal/agent/{agentId}/sessions/{sessionId}/resends`
 
-- 用途：由会话所属人或该消息的实际发送人，对当前根会话最后一条、已有远端 user message 边界且源 Run 已终态的消息执行“撤回并重新发送”。点击入口只让前端把上一条文本装入输入框；操作者修改并发送后，本接口同步预留新的
+- 用途：由该消息的实际发送人，对当前根会话最后一条、已有远端 user message 边界且源 Run 已终态的消息执行“撤回并重新发送”。点击入口只让前端把上一条文本装入输入框；操作者修改并发送后，本接口同步预留新的
   `PENDING` Run 和会话锁；实际 revert/dispatch 由统一恢复状态机执行。
-- 鉴权：必须登录。会话所属人可以操作最后一条合格消息；分享成员必须同时满足 `canChat=true` 且其 actor ID 等于源 Run 的 `messageSenderUserId`，其它成员返回 `FORBIDDEN`。服务端通过会话上下文重新验证执行所属人、实际发送人、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径、请求体或前端按钮。
+- 鉴权：必须登录，actor ID 必须等于源 Run 的 `messageSenderUserId`；旧 Run 缺少该字段时只回退其可信 `triggeredByUserId`。分享发送人还必须满足 `canChat=true`。会话所属人若不是实际发送人同样返回 `FORBIDDEN`。服务端通过会话上下文重新验证执行所属人、实际发送人、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径、请求体或前端按钮。
 - 请求：`expectedRemoteMessageId`、可选 `expectedRunId`、短期 `contextToken`、幂等 `clientRequestId`，以及可选、最长 20000 字符的 `editedPrompt`。缺少 `editedPrompt` 时保持旧客户端的原文精确重放；提供后只替换可信远端用户轮次中的第一个 `text` part（无文本时替换第一个 `subtask`，两者都无时在开头增加 `text`），继续保留原附件、Agent、模型、variant 和其它结构化 part。前端不得提交或重建附件正文。
 - 响应：`resendId/status/executeAt/resend/replacementRun`。`resend` 包含 `trigger/totalAttempt/automaticAttempt/automaticLimit/status`、
   源/替代 Run，以及可选 `requesterUserId/requesterUsername/requesterUnifiedAuthId/requestedBySharedUser` 真实发起人归因；姓名无法解析时可空。`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。
-- 错误：既非会话所属人也非源消息实际发送人，或分享发送人没有 `canChat` 时返回 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
+- 错误：不是源消息实际发送人，或分享发送人没有 `canChat` 时返回 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
 - traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、修改后文本、模型回答或供应商正文。修改后文本只随既有精确重放输入写入有限 TTL Redis，日志、审计和事件均不得记录。
 - 幂等：同一 owner + `clientRequestId` 返回同一替代 Run；同一 source Run、replacement Run 和会话活动锁均有数据库唯一约束。
-- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。接口返回替代 Run 后，调用方应立即用 `editedPrompt` 更新原用户气泡，并把该轮展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，同时隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识；服务端在同一提交中推进 Session 内容修订时间，所属人与分享参与方都应刷新权威消息，刷新期间缓冲并重放替代 Run 的实时事件。后到的权威 user 事件必须按替代 Run 原位接管，不得因新旧文本不同追加重复气泡。定时来源、附件展示及 `resend` 元数据在 ID 替换期间必须保留。
+- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。接口返回替代 Run 后，调用方应立即用 `editedPrompt` 更新原用户气泡，并把该轮展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，同时隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识；服务端在同一提交中推进 Session 内容修订时间，所属人与分享参与方都应刷新权威消息，刷新期间缓冲并重放替代 Run 的实时事件。后到的权威 user 事件必须按替代 Run 或持久消息的 `remoteMessageId` 原位接管，保留平台消息身份和实际发送人，不得在压缩历史的 assistant 回答之后追加重复气泡。定时来源、附件展示及 `resend` 元数据在 ID 替换期间必须保留。
 - 兼容性：接口、可选 `editedPrompt` 与所有 `resend` 字段均为 additive 新增；旧客户端不传修改文本时仍按原内容重放，缺失响应字段时按普通 Run/消息显示。
 - 对应测试：`RunResendControllerSessionShareTest`、`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendAutomaticServiceTest`、
   `MyBatisRunResendRepositoryIntegrationTest`、前端 reducer 和 `FigmaChatPanelTest`。

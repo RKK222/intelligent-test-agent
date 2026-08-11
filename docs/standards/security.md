@@ -65,7 +65,7 @@ Token 校验流程：
 2. 必须使用独立 `DelegatedOperationContext`，绝不替换、包装成所属人或覆盖真实 `AuthPrincipal`。上下文至少绑定真实 actor/统一认证号/用户名、执行所属人、share/version/session/workspace、`canChat`、有效期和 ownerAccess；所有 OpenCode、进程、Workspace、Git/SSH 操作只显式使用执行所属人，所有平台归因和审计只使用真实 actor。
 3. 分享授权严格限定一个 Session 及其创建时绑定的 Workspace，且上限为所属人当前真实权限。Workspace 改绑、会话归档、所属人停用、分享取消/过期、成员移除都必须 fail-closed；被分享人不需要成为工作区成员，但不能切换应用/Workspace、持久 fork、管理分享/会话、置顶、设置、Agent 配置、源码/Hub、系统管理或服务器终端。
 4. 只读成员只允许会话/消息/Run/SSE、文件树/正文、状态和 Diff 读取。`canChat=true` 才允许发送、文件写入、当前工作区 Git、工作区终端、command/shell、compact/revert、permission/question 回复、反馈和定时任务。服务端必须在每个入口判定，不能依赖前端隐藏按钮。
-5. 停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人降为只读后仍可停止。撤回并重新发送只允许会话所属人或最后 USER 消息的实际发送人；分享发送人必须仍有 `canChat=true`，其它成员不得改写他人的消息。请求可携带修改后的 `editedPrompt`，但只能写入既有有限 TTL 的 Redis 精确重放输入，不得进入控制表、RunEvent、审计或日志；原轮附件及其它结构化 part 必须由服务端从可信远端用户轮次恢复，不能相信前端重建。定时任务创建/改期要求 `canChat`，所属人和实际创建人可管理，降为只读的创建人只允许取消。
+5. 停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人降为只读后仍可停止。撤回并重新发送只允许最后 USER 消息的实际发送人；分享发送人必须仍有 `canChat=true`，包括会话所属人在内的其它用户不得改写他人的消息。请求可携带修改后的 `editedPrompt`，但只能写入既有有限 TTL 的 Redis 精确重放输入，不得进入控制表、RunEvent、审计或日志；原轮附件及其它结构化 part 必须由服务端从可信远端用户轮次恢复，不能相信前端重建。定时任务创建/改期要求 `canChat`，所属人和实际创建人可管理，降为只读的创建人只允许取消。
 6. 单 Session 发送必须同时取得 Redis 原子 active-session 占用和 PostgreSQL `runs.active_session_id` 唯一准入；任一失败都必须在发布 RunEvent、写可见消息或调用 OpenCode 前退出并返回 `SESSION_BUSY`。终态清空占用，存储异常 fail-closed，不允许降级 JVM 锁或 busy follow-up queue。
 7. 分享范围敏感读取和写入必须记录 actor、执行所属人、share/session/workspace/resource、结果、traceId；路径只能保存 SHA-256 摘要。审计禁止正文、明文路径、Token、终端输入、命令输出和第三方响应，默认保留 365 天。分享管理成功/失败和访问拒绝同样需要审计。
 8. `X-Test-Agent-Session-Share` 只允许跨 Java 公共 forwarder/SSE forwarder按原值透传，目标 Java 必须重新鉴权且仍使用所属人的进程路由；禁止自行扫描 Redis、使用本机降级、信任防循环头放行或新增 Java→Java 文件代理。CORS 只把该头加入受控允许列表，反向代理和日志必须脱敏。
@@ -369,7 +369,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
 ## 撤销重发安全边界
 
-- 浏览器手动入口必须重新校验登录 actor 是会话所属人或源消息实际发送人；分享发送人还必须有 `canChat=true`。同时校验可信 `contextToken`、根会话、最后远端 user message、终态 Run 和会话活动锁；
+- 浏览器手动入口必须重新校验登录 actor 是源消息实际发送人；分享发送人还必须有 `canChat=true`。会话所属人只有在其本人就是实际发送人时才能操作。同时校验可信 `contextToken`、根会话、最后远端 user message、终态 Run 和会话活动锁；
   `expectedRunId/expectedRemoteMessageId/clientRequestId` 都只是并发前置条件，不是授权事实源。
 - Java→Java 内部分发只对精确路径豁免用户 token，并使用既有 XXL access token 常量时间校验；跨服务器固定复用公共路由解析与
   HTTP 转发器，不允许浏览器指定目标后端或通过本机降级绕过目标服务器。

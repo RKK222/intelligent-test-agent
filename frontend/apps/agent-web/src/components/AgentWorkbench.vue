@@ -3758,12 +3758,13 @@ const resendableMessageId = computed(() => {
     }
   );
   if (!sourceMessage || sourceMessage.runId !== sourceRun.runId || !sourceMessage.remoteMessageId) return undefined;
-  if (shareMode.value) {
-    const access = shareAccess.value;
-    const actorIsSourceSender = Boolean(access?.actorUserId)
-      && runActorUserId(sourceRun) === access?.actorUserId;
-    if (access?.canChat !== true || (access.ownerAccess !== true && !actorIsSourceSender)) return undefined;
-  }
+  const actorUserId = shareMode.value
+    ? shareAccess.value?.actorUserId
+    : authStore.currentUser?.userId;
+  // 所属关系只决定 OpenCode 由谁执行，不能授权所属人改写其他参与者已经发送的问题。
+  const sourceSenderUserId = runActorUserId(sourceRun) ?? sourceMessage.senderUserId ?? undefined;
+  if (!actorUserId || (sourceSenderUserId ? sourceSenderUserId !== actorUserId : shareMode.value)) return undefined;
+  if (shareMode.value && shareAccess.value?.canChat !== true) return undefined;
   if (["WAITING", "REVERTING", "REVERTED"].includes(sourceMessage.resend?.status ?? "")) return undefined;
   return sourceMessage.remoteMessageId;
 });
@@ -8661,8 +8662,8 @@ function handleRetryRun() {
       kind: "info",
       title: "无权撤回重发",
       description: shareMode.value
-        ? "共享对话仅允许会话所属人或最后一条消息的实际发送人操作。"
-        : "仅支持会话最后一条已结束的用户消息。"
+        ? "共享对话仅允许最后一条消息的实际发送人在可对话状态下操作。"
+        : "仅消息实际发送人可以撤回最后一条已结束的用户消息。"
     };
     return;
   }

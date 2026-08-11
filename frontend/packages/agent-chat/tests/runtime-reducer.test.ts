@@ -34,38 +34,44 @@ describe("agent-chat runtime reducer", () => {
     }));
   });
 
-  it("does not let an owner-side raw resend event overwrite the delegated requester attribution", () => {
+  it("merges a late owner-side resend event into compacted persisted history without changing the sender", () => {
     const initial = createInitialAgentChatRuntimeState([{
+      id: "msg_compaction",
+      messageId: "msg_compaction",
+      role: "assistant",
+      text: "",
+      parts: [{ partId: "part_compaction", type: "compaction", auto: false }],
+      runId: "run_before_compaction",
+      createdAt: "2026-08-10T15:08:59Z"
+    }, {
       id: "msg_platform_resend",
       messageId: "msg_platform_resend",
+      platformMessageId: "msg_platform_resend",
       remoteMessageId: "msg_remote_resend",
       role: "user",
       text: "仅答复 123",
       runId: "run_resend",
       senderUserId: "usr_wr",
+      senderUnifiedAuthId: "wr",
       senderUsername: "wr",
       sentBySharedUser: true,
-      resend: {
-        resendId: "rsd_1",
-        trigger: "MANUAL",
-        totalAttempt: 1,
-        automaticAttempt: 0,
-        automaticLimit: 3,
-        status: "DISPATCHED",
-        executeAt: "2026-08-10T15:09:01Z",
-        sourceRunId: "run_source",
-        replacementRunId: "run_resend",
-        requesterUserId: "usr_wr",
-        requesterUsername: "wr",
-        requestedBySharedUser: true
-      },
       createdAt: "2026-08-10T15:09:01Z"
+    }, {
+      id: "msg_platform_answer",
+      messageId: "msg_platform_answer",
+      platformMessageId: "msg_platform_answer",
+      remoteMessageId: "msg_remote_answer",
+      role: "assistant",
+      text: "123",
+      runId: "run_resend",
+      createdAt: "2026-08-10T15:09:02Z"
     }]);
 
     const next = reduceAgentChatRuntime(initial, {
       type: "event",
       event: runEvent("message.updated", "run_resend", {
         senderUserId: "usr_owner",
+        senderUnifiedAuthId: "owner",
         senderUsername: "888888888",
         sentBySharedUser: false,
         message: {
@@ -73,6 +79,7 @@ describe("agent-chat runtime reducer", () => {
           role: "user",
           content: "仅答复 123",
           senderUserId: "usr_owner",
+          senderUnifiedAuthId: "owner",
           senderUsername: "888888888",
           sentBySharedUser: false
         }
@@ -81,7 +88,12 @@ describe("agent-chat runtime reducer", () => {
 
     expect(next.messages.filter((message) => message.role === "user")).toEqual([
       expect.objectContaining({
+        id: "msg_platform_resend",
+        messageId: "msg_platform_resend",
+        platformMessageId: "msg_platform_resend",
+        remoteMessageId: "msg_remote_resend",
         senderUserId: "usr_wr",
+        senderUnifiedAuthId: "wr",
         senderUsername: "wr",
         sentBySharedUser: true
       })

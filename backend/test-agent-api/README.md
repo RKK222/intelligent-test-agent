@@ -15,7 +15,7 @@
 - `web.platform` 承载平台自身接口，`web.agent` 承载 agent runtime 代理入口，`web.common` 承载 traceId、鉴权、限流、旧接口作废拦截和统一异常等入口支撑。
 - CORS allowed headers 包含前端可选的 `X-Test-Agent-Linux-Server-Id`、会话协作专用 `X-Test-Agent-Session-Share` 和排查专用 `X-Support-Access-Grant`。分享头只解析单个 Session/Workspace 的代操作上下文，不替换真实 `AuthPrincipal`；跨 Java HTTP/SSE 转发保留该头，目标 Java 必须重新鉴权。Linux Server 首跳提示在生产由 Nginx 静态白名单消费并在转发前删除；排查头只绑定限时排查授权，不参与用户路由。API 层仍执行既有权威路由与鉴权。
 - 会话消息、Run、夜间任务与重发 DTO additive 返回实际 actor 的用户 ID、可选当前姓名、统一认证号快照和代操作标记；同一响应页按用户 ID 缓存姓名查询，旧节点或目录无法解析时姓名保持可空。
-- 会话协作入口提供候选用户、所属人唯一分享设置、“分享给我”历史列表、分享访问上下文和单会话 runtime SSE；运行态帧包含可选 `sessionUpdatedAt` 内容修订时间，compact 成功会推进该值以触发其它参与方刷新消息。所属人管理接口不接受分享头授权；分享工作台中的会话、Run、定时任务、文件、Git、终端和反馈入口统一显式传递 `DelegatedOperationContext`，以所属人的进程和工作区执行并记录实际 actor。只读成员只能读取，`canChat=true` 才能写入；撤回并重新发送额外要求 actor 是源消息实际发送人，会话所属人仍可操作。归档、置顶、切换、持久 fork、设置、Agent 配置、源码/Hub、系统管理和服务器终端不会因分享放开。
+- 会话协作入口提供候选用户、所属人唯一分享设置、“分享给我”历史列表、分享访问上下文和单会话 runtime SSE；运行态帧包含可选 `sessionUpdatedAt` 内容修订时间，compact 成功会推进该值以触发其它参与方刷新消息。所属人管理接口不接受分享头授权；分享工作台中的会话、Run、定时任务、文件、Git、终端和反馈入口统一显式传递 `DelegatedOperationContext`，以所属人的进程和工作区执行并记录实际 actor。只读成员只能读取，`canChat=true` 才能写入；撤回并重新发送额外要求 actor 是源消息实际发送人，会话所属人只有在本人就是实际发送人时才能操作。归档、置顶、切换、持久 fork、设置、Agent 配置、源码/Hub、系统管理和服务器终端不会因分享放开。
 - 普通 Workspace HTTP 入口只保留查询和文件路由；服务器目录选择与创建仅通过超级管理员文件 WebSocket ticket 执行。
 - 普通与排查 Workspace 响应统一通过 `ManagedWorkspacePathResolver` 投影物理根目录：显式 `physicalRootPath` 与兼容 `rootPath` 返回同一绝对路径，数据库逻辑前缀不出 API，未托管相对路径在响应边界失败关闭。Workspace 文件 WebSocket 创建回包和托管运行态响应遵循同一契约。
 - `SupportAccessController` 暴露 `/api/internal/platform/system-management/support-access/**`：签发/撤销绑定当前登录会话的限时只读 grant、返回带来源的排查单号建议、目标切换、目标用户会话/工作区/消息读取、权威文件 route/ticket 和一年期审计查询。当前没有权威工单数据源时每次返回新的 `sai_` 单号；旧 `/grants/recent-incident` 仅为兼容别名，同样不读取历史授权。会话默认仅 ACTIVE，显式筛选才包含 ARCHIVED；工作区响应用公共 `BackendJavaRouteResolver` 标记 `ONLINE/OFFLINE/UNBOUND/UNKNOWN`，但不改写服务器归属。排查会话读取只在其权威工作区 Java ONLINE 时尝试 OpenCode，离线/未绑定/未知时直接使用 Redis/数据库历史，避免等待不可达远端。普通 Workspace/Session/文件入口已按当前用户归属收紧；排查文件 RPC 只允许列表/搜索/读取并拒绝 `.opencode`，成功正文在审计落库后才返回。
@@ -148,7 +148,7 @@
 
 新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。平台自身接口放 `web.platform`，agent 代理入口放 `web.agent`，横切入口支撑放 `web.common`。不得新增旧 `/api/...` runtime/workspace 入口；新 URL 必须同步记录到 `docs/api/http-api.md`。
 
-`RunResendController` 暴露 agent-scoped 最后一条消息撤销重发，只允许会话所属人或持有 `canChat` 的源消息实际发送人，并接受可选、最长 20000 字符的 `editedPrompt`；`RunResendInternalDispatchController` 仅接收带既有 XXL token 的
+`RunResendController` 暴露 agent-scoped 最后一条消息撤销重发，只允许源消息实际发送人操作；分享发送人还必须持有 `canChat`，并接受可选、最长 20000 字符的 `editedPrompt`；`RunResendInternalDispatchController` 仅接收带既有 XXL token 的
 精确 Java→Java 批量恢复请求，`HttpRunResendDispatchGateway` 固定复用公共路由解析器和转发器。`Run`、Session message 与
 runtime-state DTO 的 `resend` 均为可选 additive 字段，分享 runtime-state 额外 additive 返回 `sessionUpdatedAt`；旧客户端缺失时继续按普通运行展示。内部响应与事件不返回 prompt、回答或
 供应商正文。

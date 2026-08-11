@@ -117,14 +117,28 @@ test("session share owner workbench resolves collaborator names from the managed
     sessionMessagesBySessionId: {
       ses_1: [{
         messageId: "msg_collaborator_owner_view",
+        remoteMessageId: "msg_remote_collaborator_owner_view",
         sessionId: "ses_1",
         role: "USER",
         content: "协作者发出的消息",
         senderUserId: "usr_collaborator",
         senderUnifiedAuthId: "ucid_collaborator",
         sentBySharedUser: true,
-        createdAt: "2026-08-09T01:00:00Z"
+        createdAt: "2026-08-09T01:00:00Z",
+        runId: "run_collaborator_owner_view"
       }]
+    },
+    historyRun: {
+      runId: "run_collaborator_owner_view",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1234567890abcdef",
+      status: "SUCCEEDED",
+      triggeredByUserId: "usr_admin",
+      messageSenderUserId: "usr_collaborator",
+      messageSenderUnifiedAuthId: "ucid_collaborator",
+      messageSentBySharedUser: true,
+      createdAt: "2026-08-09T01:00:00Z",
+      updatedAt: "2026-08-09T01:00:01Z"
     }
   });
 
@@ -134,9 +148,10 @@ test("session share owner workbench resolves collaborator names from the managed
   const collaboratorTurn = page.locator('[data-oc-turn-id="msg_collaborator_owner_view"]');
   await expect(collaboratorTurn).toBeVisible({ timeout: 20_000 });
   await expect(collaboratorTurn.locator(".oc-user-message__sender")).toHaveText("协作者");
+  await expect(page.getByRole("button", { name: "撤销重发最后一条消息" })).toHaveCount(0);
 });
 
-test("session share owner refreshes the collaborator edited resend on started", async ({ page }) => {
+test("session share owner keeps one collaborator resend after compacted history and late native events", async ({ page }) => {
   const sessionMessageRequests: string[] = [];
   const activeRun = {
     runId: "run_owner_resend_replacement",
@@ -165,8 +180,39 @@ test("session share owner refreshes the collaborator edited resend on started", 
     createdAt: "2026-08-10T03:30:02Z",
     updatedAt: "2026-08-10T03:30:03Z"
   };
+  const compactedHistory: Array<Record<string, unknown>> = [{
+    messageId: "msg_owner_resend_compaction",
+    sessionId: "ses_owner_resend_revision",
+    role: "ASSISTANT",
+    content: "",
+    createdAt: "2026-08-10T03:29:58Z",
+    parts: [{
+      partId: "prt-owner-resend-compaction",
+      type: "compaction",
+      auto: false,
+      overflow: false
+    }]
+  }, {
+    messageId: "msg_owner_resend_compaction_envelope",
+    sessionId: "ses_owner_resend_revision",
+    role: "USER",
+    content: "",
+    createdAt: "2026-08-10T03:29:58.500Z",
+    parts: []
+  }, {
+    messageId: "msg_owner_resend_compaction_summary",
+    sessionId: "ses_owner_resend_revision",
+    role: "ASSISTANT",
+    content: "## Objective\n继续共享任务",
+    createdAt: "2026-08-10T03:29:59Z",
+    parts: [{
+      partId: "prt-owner-resend-compaction-summary",
+      type: "text",
+      text: "## Objective\n继续共享任务"
+    }]
+  }];
   const messages: Record<string, Array<Record<string, unknown>>> = {
-    ses_owner_resend_revision: [{
+    ses_owner_resend_revision: [...compactedHistory, {
       messageId: "msg_owner_resend_old",
       remoteMessageId: "msg_remote_owner_resend_old",
       sessionId: "ses_owner_resend_revision",
@@ -203,7 +249,42 @@ test("session share owner refreshes the collaborator edited resend on started", 
           automaticAttempt: 0,
           automaticLimit: 3,
           status: "DISPATCHED",
-          executeAt: "2026-08-10T03:30:02Z"
+          executeAt: "2026-08-10T03:30:02Z",
+          requesterUserId: "usr_wr",
+          requesterUsername: "wr",
+          requesterUnifiedAuthId: "wr",
+          requestedBySharedUser: true
+        }
+      }]
+    }, {
+      releaseKey: "owner-resend-late-native-events",
+      events: [{
+        eventId: "evt_owner_resend_answer",
+        seq: 8,
+        type: "message.updated",
+        payload: {
+          message: {
+            id: "msg_remote_owner_resend_answer",
+            role: "assistant",
+            content: "123"
+          }
+        }
+      }, {
+        eventId: "evt_owner_resend_late_user",
+        seq: 9,
+        type: "message.updated",
+        payload: {
+          senderUserId: "usr_admin",
+          senderUsername: "888888888",
+          sentBySharedUser: false,
+          message: {
+            id: "msg_remote_owner_resend_new",
+            role: "user",
+            content: "仅答复 123",
+            senderUserId: "usr_admin",
+            senderUsername: "888888888",
+            sentBySharedUser: false
+          }
         }
       }]
     }]
@@ -268,13 +349,14 @@ test("session share owner refreshes the collaborator edited resend on started", 
   await page.getByRole("button", { name: "会话列表" }).click();
   await historySessionButton(page, /所属人重发同步会话/).click();
   await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("compaction-part-prt-owner-resend-compaction")).toBeVisible();
   await expect.poll(async () => page.evaluate(() =>
     (window as Window & { __titleWatchRunStreams?: Array<{ runId: string }> })
       .__titleWatchRunStreams?.some((item) => item.runId === "run_owner_resend_replacement") ?? false
   )).toBe(true);
   const initialMessageRequestCount = sessionMessageRequests.length;
 
-  messages.ses_owner_resend_revision = [{
+  messages.ses_owner_resend_revision = [...compactedHistory, {
     messageId: "msg_owner_resend_new",
     remoteMessageId: "msg_remote_owner_resend_new",
     sessionId: "ses_owner_resend_revision",
@@ -299,6 +381,18 @@ test("session share owner refreshes the collaborator edited resend on started", 
   await expect(replacementTurn).toBeVisible();
   await expect(replacementTurn.locator(".oc-user-message__sender")).toHaveText("wr");
   await expect(replacementTurn.locator(".oc-user-message__bubble")).toHaveText("仅答复 123");
+
+  const nativeEventsReleased = await page.evaluate(() =>
+    (window as Window & { __releaseRunEventBatch?: (releaseKey: string) => boolean })
+      .__releaseRunEventBatch?.("owner-resend-late-native-events") ?? false
+  );
+  expect(nativeEventsReleased).toBe(true);
+
+  await expect(page.getByText("123", { exact: true })).toBeVisible();
+  await expect(page.getByText("仅答复 123", { exact: true })).toHaveCount(1);
+  await expect(page.locator('[data-oc-turn-id="msg_remote_owner_resend_new"]')).toHaveCount(0);
+  await expect(replacementTurn.locator(".oc-user-message__sender")).toHaveText("wr");
+  await expect(page.getByTestId("compaction-part-prt-owner-resend-compaction")).toBeVisible();
 });
 
 test("session share read-only workbench shows sender identity colors and fixed scope", async ({ page }) => {

@@ -30,7 +30,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/** 最后一条用户消息撤销重发入口；所属人/实际发送人、终态、远端边界与幂等均由统一应用服务复验。 */
+/** 最后一条用户消息撤销重发入口；实际发送人、终态、远端边界与幂等均由统一应用服务复验。 */
 @RestController
 public class RunResendController {
 

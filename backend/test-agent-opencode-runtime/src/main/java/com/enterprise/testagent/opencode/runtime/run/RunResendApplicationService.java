@@ -99,7 +99,7 @@ public class RunResendApplicationService {
         return createManualInternal(attribution, null, agentId, sessionId, command, traceId);
     }
 
-    /** 分享会话要求可对话；所属人或源消息的实际发送人可撤回重发。 */
+    /** 分享会话要求可对话；只有源消息的实际发送人可撤回重发。 */
     @Transactional
     public RunResend createManual(
             DelegatedOperationContext context,
@@ -327,17 +327,17 @@ public class RunResendApplicationService {
             Run sourceRun,
             SessionId sessionId) {
         UserId actor = requester.actualSenderUserId();
-        UserId sourceSender = sourceRun.messageSenderUserId();
-        if (!actor.equals(requester.executionOwnerUserId()) && !actor.equals(sourceSender)) {
+        UserId sourceSender = sourceSender(sourceRun, requester.executionOwnerUserId());
+        if (!actor.equals(sourceSender)) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
-                    "只有会话所属人或最后一条消息的实际发送人可以撤回并重新发送",
+                    "只有最后一条消息的实际发送人可以撤回并重新发送",
                     Map.of("sessionId", sessionId.value()));
         }
     }
 
     /**
-     * 用所属人确认后的新文本替换原轮次第一个可编辑文本，同时保留附件、Agent、模型和其它协议 part。
+     * 用实际发送人确认后的新文本替换原轮次第一个可编辑文本，同时保留附件、Agent、模型和其它协议 part。
      * 原消息没有 text 时优先修改 subtask prompt；两者都没有时在首位补一个 text part。
      */
     private AgentReplayableTurn withEditedPrompt(AgentReplayableTurn replayable, String editedPrompt) {
