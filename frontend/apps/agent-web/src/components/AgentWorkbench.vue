@@ -1547,7 +1547,7 @@ const sharedSessionsQuery = useQuery({
 const sharedSessionItems = computed<SharedSessionListItem[]>(() => sharedSessionsQuery.data.value?.items ?? []);
 
 const USER_NOTIFICATION_PAGE_SIZE = 20;
-const notificationFilter = ref<UserNotificationFilter>("ALL");
+const notificationFilter = ref<UserNotificationFilter>("UNREAD");
 const notificationItems = ref<UserNotification[]>([]);
 const notificationPage = ref(1);
 const notificationTotal = ref(0);

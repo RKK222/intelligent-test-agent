@@ -9110,3 +9110,26 @@
 
 - transient 删除与 durable started 任意交错时，替代用户问题都保持单一、原位归并，不再短暂落入上一条助手回复或在权威刷新后重复。
 - 仅调整前端 RunEvent 投影和测试文档；没有变更 HTTP API、RunEvent wire schema、DTO、数据库、SQL、migration、鉴权、环境文件、generated SDK 或 OpenCode 只读源码。企业环境需重新构建并部署前端制品后生效。
+
+## 2026-08-11 - 通知中心默认展示未读
+
+### Why
+
+- 用户要求打开站内通知时优先处理未读，“全部”作为后续查历史的次要筛选。
+
+### What
+
+- 复用既有 `UserNotificationFilter` 与同一分页请求，将 `UserNotificationCenter`、`FigmaShell`、`AgentWorkbench` 的默认值统一为 `UNREAD`，首次请求直接携带 `unreadOnly=true`。
+- 筛选标签调整为“未读 / 全部”；未读处理完后保持空态，用户切到第二个标签才查看已读和失效历史。
+- 同步 frontend/agent-web README 与用户手册，不新增组件、API 或本地筛选分支。
+
+### How
+
+- `UserNotificationCenter.test.ts` 3/3 通过，agent-web `vue-tsc` 通过；Chromium、Firefox、WebKit 通知专项 3/3 通过，覆盖默认 `unreadOnly=true`、标签顺序与切换“全部”后的已读展示。
+- agent-web 含用户手册的 production build 通过；仅保留既有超大 chunk 提示。
+- 使用 JDK 25、`test` profile、根目录 `.env.test` 和 `--without-workflow` 重启。前一独立 release 后端仍占用 18080/9999，导致当前 8080 的聚合 health 为 503；明确终止该旧独立 Screen 后再次重启，最终 health/readiness/liveness、前端均为 200，4097/4098 OpenCode 均为 200，且仅保留当前 backend/manager/frontend 三个 Screen。
+
+### Result
+
+- 通知面板现在默认只显示未读，“全部”排在后面；筛选切换继续复用后端分页能力。
+- 纯前端默认交互变更，无 HTTP API、SSE 事件、DTO、数据库、SQL、鉴权、性能热路径或向后兼容契约变更；未修改 `.env*`、generated SDK 或 OpenCode 源码。
