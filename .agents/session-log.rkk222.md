@@ -9133,3 +9133,24 @@
 
 - 通知面板现在默认只显示未读，“全部”排在后面；筛选切换继续复用后端分页能力。
 - 纯前端默认交互变更，无 HTTP API、SSE 事件、DTO、数据库、SQL、鉴权、性能热路径或向后兼容契约变更；未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-11 - 恢复任务完成后的耗时展示
+
+### Why
+
+- `TaskUsage` 仍保留并由工作台提供当前或终态 `duration`，但 `FigmaChatPanel` 后来的展示条件只读取 `totalDuration` 或 tokens；兼容调用方只带锁定 `duration` 时，任务结束后整行耗时会消失。
+
+### What
+
+- 任务消耗 footer 继续优先展示累计 `totalDuration`，缺失时复用既有 `duration` 作为兼容回退；展示条件同步识别该字段，不新增计时状态、接口或工具方法。
+- 将原有静态终态用例收紧为仅传 `duration`，断言任务结束后仍显示静态标记和耗时；同步 agent-web README 的兼容说明。
+
+### How
+
+- TDD 红灯确认旧实现会隐藏仅有 `duration` 的任务消耗，修复后定向用例通过；完整 `FigmaChatPanel` 测试 159 passed / 1 skipped，agent-web typecheck 与 production build 通过。
+- 以 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 5173 --strictPort` 启动实际前端目标，`http://127.0.0.1:5173/` 返回 HTTP 200；提交前已回顾全部 `.agents/session-log*.md`，并保留工作区中其它未提交后端修改不纳入本次提交。
+
+### Result
+
+- 已完成任务即使只提供锁定 `duration`，也会继续显示耗时；同时保留 `totalDuration / tokens` 现有主路径和累计语义。
+- 纯前端兼容性修复；未变更 HTTP API、RunEvent、DTO、数据库、SQL、migration、性能或安全边界，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。

@@ -4377,7 +4377,7 @@ describe("FigmaChatPanel", () => {
       props: {
         messages: [],
         running: false,
-        taskUsage: { duration: "1s", tokens: 19915 },
+        taskUsage: { duration: "1s" },
         processStatus: { status: "READY", initializable: false, message: "ready" }
       }
     });
@@ -4385,7 +4385,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-usage img").exists()).toBe(false);
     expect(wrapper.find(".figma-chat-usage-dot").exists()).toBe(true);
     expect(wrapper.text()).toContain("任务消耗");
-    expect(wrapper.text()).toContain("2.0w tokens");
+    expect(wrapper.text()).toContain("1s");
   });
 
   it("places context usage at the far left of the footer and preserves task usage", () => {
