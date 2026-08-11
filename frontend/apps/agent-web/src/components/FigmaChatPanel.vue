@@ -3787,7 +3787,8 @@ const hasTaskUsage = computed(
   () =>
     !!(
       props.taskUsage &&
-      (props.taskUsage.tokens !== undefined ||
+      (props.taskUsage.duration ||
+        props.taskUsage.tokens !== undefined ||
         props.taskUsage.totalDuration)
     )
 )
@@ -3829,6 +3830,11 @@ const displayTokens = computed<number | undefined>(
   () => props.taskUsage?.tokens ?? parsedTokens.value
 )
 
+// 累计耗时优先；兼容只提供当前/终态 duration 的既有调用方，避免任务结束后整行消失。
+const displayDuration = computed<string | undefined>(
+  () => props.taskUsage?.totalDuration ?? props.taskUsage?.duration
+)
+
 function formatTokens(n: number): string {
   if (n >= 10000) return `${(n / 10000).toFixed(1)}w`
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
@@ -3840,7 +3846,7 @@ const hasTaskUsageDisplay = computed(
     !!(
       props.taskUsage &&
       (displayTokens.value !== undefined ||
-        props.taskUsage.totalDuration)
+        displayDuration.value)
     )
 )
 
@@ -6220,10 +6226,10 @@ function onCompositionEnd() {
           <span v-else class="figma-chat-usage-dot" aria-hidden="true" />
           <span class="figma-chat-usage-label">任务消耗：</span>
           <span class="figma-chat-usage-value">
-            <template v-if="taskUsage?.totalDuration">
-              {{ taskUsage.totalDuration }}
+            <template v-if="displayDuration">
+              {{ displayDuration }}
             </template>
-            <template v-if="taskUsage?.totalDuration && displayTokens !== undefined">
+            <template v-if="displayDuration && displayTokens !== undefined">
               &nbsp;
             </template>
             <template v-if="displayTokens !== undefined">
