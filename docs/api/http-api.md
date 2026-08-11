@@ -3963,7 +3963,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
 - traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、修改后文本、模型回答或供应商正文。修改后文本只随既有精确重放输入写入有限 TTL Redis，日志、审计和事件均不得记录。
 - 幂等：同一 owner + `clientRequestId` 返回同一替代 Run；同一 source Run、replacement Run 和会话活动锁均有数据库唯一约束。
-- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。接口返回替代 Run 后，调用方应立即用 `editedPrompt` 更新原用户气泡，并把该轮展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，同时隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识；后到的权威 user 事件必须按替代 Run 原位接管，不得因新旧文本不同追加重复气泡。定时来源、附件展示及 `resend` 元数据在 ID 替换期间必须保留。
+- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。接口返回替代 Run 后，调用方应立即用 `editedPrompt` 更新原用户气泡，并把该轮展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，同时隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识；服务端在同一提交中推进 Session 内容修订时间，所属人与分享参与方都应刷新权威消息，刷新期间缓冲并重放替代 Run 的实时事件。后到的权威 user 事件必须按替代 Run 原位接管，不得因新旧文本不同追加重复气泡。定时来源、附件展示及 `resend` 元数据在 ID 替换期间必须保留。
 - 兼容性：接口、可选 `editedPrompt` 与所有 `resend` 字段均为 additive 新增；旧客户端不传修改文本时仍按原内容重放，缺失响应字段时按普通 Run/消息显示。
 - 对应测试：`RunResendControllerSessionShareTest`、`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendAutomaticServiceTest`、
   `MyBatisRunResendRepositoryIntegrationTest`、前端 reducer 和 `FigmaChatPanelTest`。

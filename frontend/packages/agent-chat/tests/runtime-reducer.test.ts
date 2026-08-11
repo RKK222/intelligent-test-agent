@@ -34,6 +34,60 @@ describe("agent-chat runtime reducer", () => {
     }));
   });
 
+  it("does not let an owner-side raw resend event overwrite the delegated requester attribution", () => {
+    const initial = createInitialAgentChatRuntimeState([{
+      id: "msg_platform_resend",
+      messageId: "msg_platform_resend",
+      remoteMessageId: "msg_remote_resend",
+      role: "user",
+      text: "仅答复 123",
+      runId: "run_resend",
+      senderUserId: "usr_wr",
+      senderUsername: "wr",
+      sentBySharedUser: true,
+      resend: {
+        resendId: "rsd_1",
+        trigger: "MANUAL",
+        totalAttempt: 1,
+        automaticAttempt: 0,
+        automaticLimit: 3,
+        status: "DISPATCHED",
+        executeAt: "2026-08-10T15:09:01Z",
+        sourceRunId: "run_source",
+        replacementRunId: "run_resend",
+        requesterUserId: "usr_wr",
+        requesterUsername: "wr",
+        requestedBySharedUser: true
+      },
+      createdAt: "2026-08-10T15:09:01Z"
+    }]);
+
+    const next = reduceAgentChatRuntime(initial, {
+      type: "event",
+      event: runEvent("message.updated", "run_resend", {
+        senderUserId: "usr_owner",
+        senderUsername: "888888888",
+        sentBySharedUser: false,
+        message: {
+          id: "msg_remote_resend",
+          role: "user",
+          content: "仅答复 123",
+          senderUserId: "usr_owner",
+          senderUsername: "888888888",
+          sentBySharedUser: false
+        }
+      })
+    });
+
+    expect(next.messages.filter((message) => message.role === "user")).toEqual([
+      expect.objectContaining({
+        senderUserId: "usr_wr",
+        senderUsername: "wr",
+        sentBySharedUser: true
+      })
+    ]);
+  });
+
   it("projects an automatic resend countdown on the scheduled source message", () => {
     const initial = {
       ...createInitialAgentChatRuntimeState([
@@ -2268,6 +2322,29 @@ describe("agent-chat runtime reducer", () => {
 
     expect(pending.status).toBe("PENDING");
     expect(pending.messages).toHaveLength(0);
+  });
+
+  it("clears an earlier run failure when a later run is restored from events", () => {
+    const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: runEvent("run.failed", "run_old_model", {
+        status: "FAILED",
+        error: { name: "Error", message: "Model not found: opencode/hy3-free" }
+      })
+    });
+
+    const created = reduceAgentChatRuntime(failed, {
+      type: "event",
+      event: runEvent("run.created", "run_current", { status: "PENDING" })
+    });
+    const succeeded = reduceAgentChatRuntime(created, {
+      type: "event",
+      event: runEvent("run.succeeded", "run_current", { status: "SUCCEEDED" })
+    });
+
+    expect(created.messages).toHaveLength(0);
+    expect(succeeded.status).toBe("SUCCEEDED");
+    expect(succeeded.messages).toHaveLength(0);
   });
 
   it("normalizes the eight extended part types via message.part.updated", () => {

@@ -246,6 +246,10 @@ class RunResendApplicationServiceTest {
 
         assertThat(result.requesterUserId()).isEqualTo(SHARED_SENDER);
         assertThat(result.requestedBySharedUser()).isTrue();
+        assertThat(RunResendApplicationService.eventPayload(result))
+                .containsEntry("requesterUserId", SHARED_SENDER.value())
+                .containsEntry("requesterUnifiedAuthId", "ucid_resend_shared")
+                .containsEntry("requestedBySharedUser", true);
         ArgumentCaptor<RunResendReplayInput> inputCaptor = ArgumentCaptor.forClass(RunResendReplayInput.class);
         verify(replayInputStore).save(inputCaptor.capture());
         assertThat(inputCaptor.getValue().prompt()).isEqualTo("发送人修改后的问题");

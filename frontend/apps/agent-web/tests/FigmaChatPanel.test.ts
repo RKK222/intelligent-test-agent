@@ -4577,6 +4577,61 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("任务完成");
   });
 
+  it("keeps a later successful run completed when the session still contains an older failure card", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u-old-failure",
+            messageId: "u-old-failure",
+            role: "user",
+            text: "旧轮次",
+            runId: "run_old_failure",
+            createdAt: "2026-07-27T02:26:33.000Z"
+          },
+          {
+            id: "event-old-failure",
+            role: "card",
+            cardType: "event",
+            title: "Run 执行失败",
+            payload: {
+              type: "run.failed",
+              runId: "run_old_failure",
+              error: { name: "UnknownError", message: "Model not found: opencode/hy3-free" }
+            },
+            createdAt: "2026-07-27T02:26:34.000Z"
+          },
+          {
+            id: "u-current-success",
+            messageId: "u-current-success",
+            role: "user",
+            text: "仅答复 123",
+            runId: "run_current_success",
+            createdAt: "2026-08-10T15:09:01.000Z"
+          },
+          {
+            id: "a-current-success",
+            messageId: "a-current-success",
+            role: "assistant",
+            text: "123",
+            runId: "run_current_success",
+            createdAt: "2026-08-10T15:09:02.000Z"
+          }
+        ],
+        running: true,
+        runtimeStatus: "RUNNING",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    await wrapper.setProps({ running: false, runtimeStatus: "SUCCEEDED" });
+
+    expect(wrapper.find(".figma-chat-retry-card").exists()).toBe(false);
+    expect(wrapper.text()).toContain("任务完成");
+    expect(wrapper.text()).not.toContain("任务失败");
+  });
+
   it("shows the real run failure message in the retry card", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

@@ -14,6 +14,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.persistence.mybatis.MyBatisRunResendRepository;
 import com.enterprise.testagent.persistence.mybatis.MyBatisRunResendDetailCleanup;
 import com.enterprise.testagent.persistence.mybatis.RunResendMapper;
+import com.enterprise.testagent.persistence.mybatis.RunSummaryMapper;
 import java.time.Instant;
 import java.util.UUID;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -39,6 +40,7 @@ class MyBatisRunResendRepositoryIntegrationTest {
     private SingleConnectionDataSource dataSource;
     private RunResendRepository repository;
     private RunResendMapper mapper;
+    private RunSummaryMapper summaryMapper;
     private JdbcTemplate jdbc;
 
     @BeforeEach
@@ -79,7 +81,9 @@ class MyBatisRunResendRepositoryIntegrationTest {
         factoryBean.setMapperLocations(new PathMatchingResourcePatternResolver()
                 .getResources("classpath*:mybatis/**/*.xml"));
         SqlSessionFactory factory = factoryBean.getObject();
-        mapper = new SqlSessionTemplate(factory).getMapper(RunResendMapper.class);
+        SqlSessionTemplate template = new SqlSessionTemplate(factory);
+        mapper = template.getMapper(RunResendMapper.class);
+        summaryMapper = template.getMapper(RunSummaryMapper.class);
         repository = new MyBatisRunResendRepository(mapper);
     }
 
@@ -128,7 +132,9 @@ class MyBatisRunResendRepositoryIntegrationTest {
                         + "values(?,?,?,?,?,?,?,?,?)",
                 "run_resend_source", "ses_remote_root", "ses_remote_root", false, "ROOT", "trace_resend", "{}", NOW, NOW);
 
-        new MyBatisRunResendDetailCleanup(mapper).purgeSourceRun(new RunId("run_resend_source"));
+        Instant contentRevision = NOW.plusSeconds(1);
+        new MyBatisRunResendDetailCleanup(mapper, summaryMapper)
+                .purgeSourceRun(new RunId("run_resend_source"), SESSION, contentRevision);
 
         assertThat(jdbc.queryForObject("select count(*) from runs where run_id='run_resend_source'", Long.class)).isEqualTo(1L);
         assertThat(jdbc.queryForObject("select count(*) from session_messages where run_id='run_resend_source'", Long.class)).isZero();
@@ -138,6 +144,9 @@ class MyBatisRunResendRepositoryIntegrationTest {
         assertThat(jdbc.queryForObject(
                 "select count(*) from ai_message_feedbacks where run_id='run_resend_source' and message_id is null",
                 Long.class)).isEqualTo(1L);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from sessions where session_id=? and updated_at=?",
+                Long.class, SESSION.value(), contentRevision)).isEqualTo(1L);
     }
 
     private RunResend waiting() {

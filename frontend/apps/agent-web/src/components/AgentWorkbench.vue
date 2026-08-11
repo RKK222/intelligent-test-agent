@@ -597,6 +597,26 @@ const historySwitchingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 let activeRunProbeSeq = 0;
 const runtimeStateRunReconciliations = new Set<string>();
+// 同一 resend.started 可能在历史刷新后的缓冲重放中再次出现；只允许它触发一次权威正文刷新。
+const refreshedAuthoritativeRunIds = new Set<string>();
+
+/**
+ * 同一个替代 Run 的 started 事件与分享 revision 可能先后到达，只允许其中一个触发权威正文刷新。
+ * 否则运行中的 message.updated 会在两次历史重放间被重复合并，造成共享页出现两个相同用户气泡。
+ */
+function reserveAuthoritativeRunRefresh(runId: string): boolean {
+  if (refreshedAuthoritativeRunIds.has(runId)) {
+    return false;
+  }
+  refreshedAuthoritativeRunIds.add(runId);
+  if (refreshedAuthoritativeRunIds.size > 100) {
+    const oldest = refreshedAuthoritativeRunIds.values().next();
+    if (!oldest.done) {
+      refreshedAuthoritativeRunIds.delete(oldest.value);
+    }
+  }
+  return true;
+}
 type HistorySwitchRunEventBuffer = {
   switchSeq: number;
   sessionId: string;
@@ -1597,9 +1617,11 @@ watch(
         if (
           sessionRevisionChanged
           && state.active
-          && !activeRun
           && session.value?.sessionId === state.sessionId
+          && (!activeRun || (activeRun.resend && reserveAuthoritativeRunRefresh(activeRun.runId)))
         ) {
+          // compact 没有 active Run，可按每次 revision 刷新；撤回重发只在带 resend 的替代 Run 首次 revision 时刷新，
+          // 后续正文增量继续走 SSE，避免 session.updated_at 连续变化造成重复历史重放。
           void switchSession(state.sessionId, {
             refreshSnapshot: true,
             completionFeedback: {
@@ -3739,7 +3761,7 @@ const resendableMessageId = computed(() => {
   if (shareMode.value) {
     const access = shareAccess.value;
     const actorIsSourceSender = Boolean(access?.actorUserId)
-      && sourceRun.messageSenderUserId === access?.actorUserId;
+      && runActorUserId(sourceRun) === access?.actorUserId;
     if (access?.canChat !== true || (access.ownerAccess !== true && !actorIsSourceSender)) return undefined;
   }
   if (["WAITING", "REVERTING", "REVERTED"].includes(sourceMessage.resend?.status ?? "")) return undefined;
@@ -3766,17 +3788,23 @@ const timelineRuntimeStatusForPanel = computed(() => {
     retryAfterSeconds: retryCountdownSeconds(status, nowTick.value, retryDeadlines.value)
   };
 });
+function runActorUserId(candidate: Run | null | undefined): string | undefined {
+  if (candidate?.resend?.requestedBySharedUser && candidate.resend.requesterUserId) {
+    return candidate.resend.requesterUserId;
+  }
+  return candidate?.messageSenderUserId ?? undefined;
+}
 const canStopRun = computed(() => Boolean(
   run.value
   && isRunBusyStatus(run.value.status)
   && !cancelRunMutation.isPending.value
-  && (!shareMode.value || run.value.messageSenderUserId === shareAccess.value?.actorUserId)
+  && (!shareMode.value || runActorUserId(run.value) === shareAccess.value?.actorUserId)
 ));
 const stopDisabledReason = computed(() => {
   if (cancelRunMutation.isPending.value) return "正在终止";
   if (!run.value) return "当前没有可终止的运行";
   if (!isRunBusyStatus(run.value.status)) return "当前运行已结束";
-  if (shareMode.value && run.value.messageSenderUserId !== shareAccess.value?.actorUserId) {
+  if (shareMode.value && runActorUserId(run.value) !== shareAccess.value?.actorUserId) {
     return "仅会话所属人或本次消息发送人可以停止";
   }
   return "";
@@ -8826,6 +8854,14 @@ function applyRunEventWorkbenchProjection(
       accumulatedTokens.value = 0;
       void refreshWorkspaceGitDiff();
       void refreshWorkspaceView();
+      if (
+        subscribedSessionId
+        && session.value?.sessionId === subscribedSessionId
+        && reserveAuthoritativeRunRefresh(replacementRunId)
+      ) {
+        // 所属人不会进入分享页订阅；以 started 事实主动读取平台权威消息，补回可能早于 SSE 接管的替代 user 事件。
+        void switchSession(subscribedSessionId, { refreshSnapshot: true });
+      }
     }
     if (event.type === "run.resend.failed") {
       feedback.value = {
@@ -8960,7 +8996,11 @@ function resendMetadataFromRunEvent(event: RunEvent): ResendMetadata | undefined
     status: text(event.payload.status) ?? (event.type === "run.resend.failed" ? "FAILED" : "WAITING"),
     executeAt,
     sourceRunId,
-    replacementRunId
+    replacementRunId,
+    requesterUserId: text(event.payload.requesterUserId),
+    requesterUsername: text(event.payload.requesterUsername),
+    requesterUnifiedAuthId: text(event.payload.requesterUnifiedAuthId),
+    requestedBySharedUser: event.payload.requestedBySharedUser === true
   };
 }
 

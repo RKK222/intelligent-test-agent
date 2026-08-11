@@ -136,6 +136,171 @@ test("session share owner workbench resolves collaborator names from the managed
   await expect(collaboratorTurn.locator(".oc-user-message__sender")).toHaveText("协作者");
 });
 
+test("session share owner refreshes the collaborator edited resend on started", async ({ page }) => {
+  const sessionMessageRequests: string[] = [];
+  const activeRun = {
+    runId: "run_owner_resend_replacement",
+    sessionId: "ses_owner_resend_revision",
+    workspaceId: "wrk_1234567890abcdef",
+    status: "RUNNING",
+    triggeredByUserId: "usr_admin",
+    messageSenderUserId: "usr_wr",
+    messageSenderUnifiedAuthId: "wr",
+    messageSentBySharedUser: true,
+    resend: {
+      resendId: "rsd_owner_resend_revision",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "DISPATCHED",
+      executeAt: "2026-08-10T03:30:02Z",
+      sourceRunId: "run_owner_resend_source",
+      replacementRunId: "run_owner_resend_replacement",
+      requesterUserId: "usr_wr",
+      requesterUsername: "wr",
+      requesterUnifiedAuthId: "wr",
+      requestedBySharedUser: true
+    },
+    createdAt: "2026-08-10T03:30:02Z",
+    updatedAt: "2026-08-10T03:30:03Z"
+  };
+  const messages: Record<string, Array<Record<string, unknown>>> = {
+    ses_owner_resend_revision: [{
+      messageId: "msg_owner_resend_old",
+      remoteMessageId: "msg_remote_owner_resend_old",
+      sessionId: "ses_owner_resend_revision",
+      role: "USER",
+      content: "仅答复 OK",
+      senderUserId: "usr_wr",
+      senderUsername: "wr",
+      senderUnifiedAuthId: "wr",
+      sentBySharedUser: true,
+      createdAt: "2026-08-10T03:30:00Z",
+      runId: "run_owner_resend_source"
+    }, {
+      messageId: "msg_owner_resend_old_answer",
+      sessionId: "ses_owner_resend_revision",
+      role: "ASSISTANT",
+      content: "OK",
+      createdAt: "2026-08-10T03:30:01Z",
+      runId: "run_owner_resend_source"
+    }]
+  };
+  await installAuthenticatedRunEventFetchStream(page, {
+    run_owner_resend_replacement: [{
+      releaseKey: "owner-resend-started",
+      events: [{
+        eventId: "evt_owner_resend_started",
+        seq: 7,
+        type: "run.resend.started",
+        payload: {
+          resendId: "rsd_owner_resend",
+          sourceRunId: "run_owner_resend_source",
+          replacementRunId: "run_owner_resend_replacement",
+          trigger: "MANUAL",
+          totalAttempt: 1,
+          automaticAttempt: 0,
+          automaticLimit: 3,
+          status: "DISPATCHED",
+          executeAt: "2026-08-10T03:30:02Z"
+        }
+      }]
+    }]
+  });
+  await mockBackendApi(page, {
+    sessions: [{
+      ...session(),
+      sessionId: "ses_owner_resend_revision",
+      title: "所属人重发同步会话"
+    }],
+    sessionMessagesBySessionId: messages,
+    sessionMessageRequests,
+    sessionCollaborationShare: {
+      shareId: "shr_owner_resend_revision",
+      sharePath: "/s/shr_owner_resend_revision",
+      sessionId: "ses_owner_resend_revision",
+      workspaceId: "wrk_1234567890abcdef",
+      ownerUserId: "usr_admin",
+      status: "ACTIVE",
+      expiresAt: "2026-08-16T00:00:00Z",
+      version: 1,
+      members: [{
+        userId: "usr_wr",
+        unifiedAuthId: "wr",
+        username: "wr",
+        canChat: true,
+        status: "ACTIVE",
+        sharedAt: "2026-08-10T03:00:00Z",
+        updatedAt: "2026-08-10T03:00:00Z",
+        removedAt: null
+      }],
+      createdAt: "2026-08-10T03:00:00Z",
+      updatedAt: "2026-08-10T03:00:00Z",
+      revokedAt: null
+    },
+    runtimeStateSummary: {
+      runningCount: 1,
+      questionCount: 0,
+      permissionCount: 0,
+      sessions: [{
+        sessionId: "ses_owner_resend_revision",
+        runId: "run_owner_resend_replacement",
+        runStatus: "RUNNING",
+        updatedAt: "2026-08-10T03:30:03Z"
+      }],
+      generatedAt: "2026-08-10T03:30:03Z"
+    },
+    activeRun,
+    runsByRunId: {
+      run_owner_resend_source: {
+        ...activeRun,
+        runId: "run_owner_resend_source",
+        status: "SUCCEEDED",
+        createdAt: "2026-08-10T03:30:00Z",
+        updatedAt: "2026-08-10T03:30:01Z"
+      },
+      run_owner_resend_replacement: activeRun
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "会话列表" }).click();
+  await historySessionButton(page, /所属人重发同步会话/).click();
+  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => page.evaluate(() =>
+    (window as Window & { __titleWatchRunStreams?: Array<{ runId: string }> })
+      .__titleWatchRunStreams?.some((item) => item.runId === "run_owner_resend_replacement") ?? false
+  )).toBe(true);
+  const initialMessageRequestCount = sessionMessageRequests.length;
+
+  messages.ses_owner_resend_revision = [{
+    messageId: "msg_owner_resend_new",
+    remoteMessageId: "msg_remote_owner_resend_new",
+    sessionId: "ses_owner_resend_revision",
+    role: "USER",
+    content: "仅答复 123",
+    senderUserId: "usr_wr",
+    senderUsername: "wr",
+    senderUnifiedAuthId: "wr",
+    sentBySharedUser: true,
+    createdAt: "2026-08-10T03:30:02Z",
+    runId: "run_owner_resend_replacement"
+  }];
+  const released = await page.evaluate(() =>
+    (window as Window & { __releaseRunEventBatch?: (releaseKey: string) => boolean })
+      .__releaseRunEventBatch?.("owner-resend-started") ?? false
+  );
+  expect(released).toBe(true);
+
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
+  await expect(page.getByText("仅答复 OK", { exact: true })).toHaveCount(0);
+  const replacementTurn = page.locator('[data-oc-turn-id="msg_owner_resend_new"]');
+  await expect(replacementTurn).toBeVisible();
+  await expect(replacementTurn.locator(".oc-user-message__sender")).toHaveText("wr");
+  await expect(replacementTurn.locator(".oc-user-message__bubble")).toHaveText("仅答复 123");
+});
+
 test("session share read-only workbench shows sender identity colors and fixed scope", async ({ page }) => {
   const shareHeaderRequests: Array<{ method: string; path: string; shareId: string }> = [];
   const sharedSession = {
@@ -597,6 +762,178 @@ test("session share refreshes a compacted summary when the session revision chan
   await expect(compaction).toContainText("继续共享任务");
   await expect(compaction).toContainText("下一步");
   await expect(compaction).not.toContainText("这不是新的回答");
+});
+
+test("session share refreshes an edited resend while its replacement run is active", async ({ page }) => {
+  const sessionMessageRequests: string[] = [];
+  const activeRun = {
+    runId: "run_shared_resend_replacement",
+    sessionId: "ses_shared_resend_revision",
+    workspaceId: "wrk_shared_resend_revision",
+    status: "RUNNING",
+    triggeredByUserId: "usr_owner",
+    messageSenderUserId: "usr_wr",
+    messageSenderUnifiedAuthId: "wr",
+    messageSentBySharedUser: true,
+    resend: {
+      resendId: "rsd_shared_resend_revision",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "DISPATCHED",
+      executeAt: "2026-08-10T03:00:02Z",
+      sourceRunId: "run_shared_resend_source",
+      replacementRunId: "run_shared_resend_replacement",
+      requesterUserId: "usr_wr",
+      requesterUsername: "wr",
+      requesterUnifiedAuthId: "wr",
+      requestedBySharedUser: true
+    },
+    createdAt: "2026-08-10T03:00:02Z",
+    updatedAt: "2026-08-10T03:00:03Z"
+  };
+  const runtimeStates: Array<Record<string, unknown>> = [sessionShareRuntimeState({
+    shareId: "shr_resend_revision",
+    sessionId: "ses_shared_resend_revision",
+    workspaceId: "wrk_shared_resend_revision",
+    canChat: true,
+    sessionUpdatedAt: "2026-08-10T03:00:00Z",
+    generatedAt: "2026-08-10T03:00:01Z"
+  })];
+  const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {
+    ses_shared_resend_revision: [{
+      messageId: "msg_shared_resend_old",
+      remoteMessageId: "msg_remote_shared_resend_old",
+      sessionId: "ses_shared_resend_revision",
+      role: "USER",
+      content: "仅答复 OK",
+      senderUserId: "usr_wr",
+      senderUsername: "wr",
+      senderUnifiedAuthId: "wr",
+      sentBySharedUser: true,
+      createdAt: "2026-08-10T03:00:00Z",
+      runId: "run_shared_resend_source"
+    }, {
+      messageId: "msg_shared_resend_old_answer",
+      remoteMessageId: "msg_remote_shared_resend_old_answer",
+      sessionId: "ses_shared_resend_revision",
+      role: "ASSISTANT",
+      content: "OK",
+      createdAt: "2026-08-10T03:00:01Z",
+      runId: "run_shared_resend_source"
+    }]
+  };
+  const runsByRunId: Record<string, Record<string, unknown>> = {
+    run_shared_resend_source: {
+      ...activeRun,
+      runId: "run_shared_resend_source",
+      status: "SUCCEEDED",
+      createdAt: "2026-08-10T03:00:00Z",
+      updatedAt: "2026-08-10T03:00:01Z"
+    },
+    run_shared_resend_replacement: activeRun
+  };
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_reader", username: "观察者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_resend_revision", name: "共享重发工作区" }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_shared_resend_revision",
+      workspaceId: "wrk_shared_resend_revision",
+      title: "共享重发同步会话"
+    }],
+    sessionShareAccess: sessionShareAccess({
+      shareId: "shr_resend_revision",
+      actorUserId: "usr_reader",
+      actorUnifiedAuthId: "ucid_reader",
+      actorUsername: "观察者",
+      executionOwnerUserId: "usr_owner",
+      sessionId: "ses_shared_resend_revision",
+      workspaceId: "wrk_shared_resend_revision",
+      canChat: true,
+      ownerAccess: false,
+      participants: [{
+        userId: "usr_owner",
+        unifiedAuthId: "DEV_888888888",
+        username: "888888888",
+        owner: true,
+        canChat: true,
+        status: "OWNER"
+      }, {
+        userId: "usr_wr",
+        unifiedAuthId: "wr",
+        username: "wr",
+        owner: false,
+        canChat: true,
+        status: "ACTIVE"
+      }, {
+        userId: "usr_reader",
+        unifiedAuthId: "ucid_reader",
+        username: "观察者",
+        owner: false,
+        canChat: true,
+        status: "ACTIVE"
+      }]
+    }),
+    sessionShareRuntimeStates: runtimeStates,
+    sessionMessagesBySessionId,
+    sessionMessageRequests,
+    runsByRunId
+  });
+
+  await page.goto("/s/shr_resend_revision", { waitUntil: "domcontentloaded" });
+  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThanOrEqual(1);
+  const initialMessageRequestCount = sessionMessageRequests.length;
+
+  sessionMessagesBySessionId.ses_shared_resend_revision = [{
+    messageId: "msg_shared_resend_new",
+    remoteMessageId: "msg_remote_shared_resend_new",
+    sessionId: "ses_shared_resend_revision",
+    role: "USER",
+    content: "仅答复 123",
+    senderUserId: "usr_wr",
+    senderUsername: "wr",
+    senderUnifiedAuthId: "wr",
+    sentBySharedUser: true,
+    createdAt: "2026-08-10T03:00:02Z",
+    runId: "run_shared_resend_replacement"
+  }];
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_resend_revision",
+    sessionId: "ses_shared_resend_revision",
+    workspaceId: "wrk_shared_resend_revision",
+    canChat: true,
+    activeRun,
+    sessionUpdatedAt: "2026-08-10T03:00:03Z",
+    generatedAt: "2026-08-10T03:00:04Z"
+  }));
+
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
+  await expect(page.getByText("仅答复 OK", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("仅答复 123", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("wr", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeVisible();
+
+  runsByRunId.run_shared_resend_replacement = {
+    ...activeRun,
+    status: "SUCCEEDED",
+    updatedAt: "2026-08-10T03:00:05Z"
+  };
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_resend_revision",
+    sessionId: "ses_shared_resend_revision",
+    workspaceId: "wrk_shared_resend_revision",
+    canChat: true,
+    activeRun: null,
+    sessionUpdatedAt: "2026-08-10T03:00:03Z",
+    generatedAt: "2026-08-10T03:00:06Z"
+  }));
+
+  await expect(page.getByRole("button", { name: "停止执行" })).toHaveCount(0);
+  await expect(page.getByText("生成中", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("仅答复 123", { exact: true })).toBeVisible();
 });
 
 test("session share participant receives the owner's authoritative user message without an empty bubble", async ({ page }) => {

@@ -899,6 +899,11 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
   return dedupeSessionMessages(messages).map((message) => {
     const role = message.role === "USER" ? "user" : "assistant";
     if (role === "user") {
+      // OpenCode 始终以会话所属人执行撤回替代轮次；平台 resend 元数据才是共享场景的实际操作人。
+      // 历史/分享刷新必须优先使用 requester，否则 wr 的消息会被错误染成所属人颜色。
+      const delegatedRequester = message.resend?.requestedBySharedUser === true
+        ? message.resend
+        : undefined;
       return {
         id: message.messageId,
         messageId: message.messageId,
@@ -907,10 +912,18 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
         runId: message.runId,
         ...(message.sourceType ? { sourceType: message.sourceType } : {}),
         ...(message.sourceRefId ? { sourceRefId: message.sourceRefId } : {}),
-        ...(message.senderUserId ? { senderUserId: message.senderUserId } : {}),
-        ...(message.senderUsername ? { senderUsername: message.senderUsername } : {}),
-        ...(message.senderUnifiedAuthId ? { senderUnifiedAuthId: message.senderUnifiedAuthId } : {}),
-        ...(message.sentBySharedUser !== undefined ? { sentBySharedUser: message.sentBySharedUser } : {}),
+        ...(delegatedRequester?.requesterUserId || message.senderUserId
+          ? { senderUserId: delegatedRequester?.requesterUserId ?? message.senderUserId }
+          : {}),
+        ...(delegatedRequester?.requesterUsername || message.senderUsername
+          ? { senderUsername: delegatedRequester?.requesterUsername ?? message.senderUsername }
+          : {}),
+        ...(delegatedRequester?.requesterUnifiedAuthId || message.senderUnifiedAuthId
+          ? { senderUnifiedAuthId: delegatedRequester?.requesterUnifiedAuthId ?? message.senderUnifiedAuthId }
+          : {}),
+        ...(delegatedRequester || message.sentBySharedUser !== undefined
+          ? { sentBySharedUser: delegatedRequester ? true : message.sentBySharedUser }
+          : {}),
         ...(message.resend ? { resend: message.resend } : {}),
         role: "user",
         text: message.content,

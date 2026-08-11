@@ -3553,8 +3553,11 @@ watch(
       stopRunTimer()
       if (!wasStopped.value) {
         const hasError = displayMessages.value.some((m) => m._error)
-        if (hasError || isRuntimeFailureStatus()) wasFailed.value = true
+        // 当前 Run 的权威终态优先于全会话历史消息；旧轮错误不能让后续成功轮次继续显示失败/重试。
+        if (isRuntimeFailureStatus()) wasFailed.value = true
         else if (isRuntimeStoppedStatus()) wasStopped.value = true
+        else if (isRuntimeSuccessStatus()) wasCompleted.value = true
+        else if (hasError) wasFailed.value = true
         else wasCompleted.value = true
       }
     }

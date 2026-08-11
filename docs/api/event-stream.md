@@ -892,14 +892,18 @@ LobeHub 登录票据签发、HMAC 兑换/撤销、Desktop/CLI 浏览器确认、
 
 ## 撤销重发事件
 
-- `run.resend.scheduled`：替代 Run 已预留并进入等待，payload 只包含 `resendId/sourceRunId/replacementRunId/trigger`、总次数、
-  自动次数、上限、状态和 `executeAt`。前端据此展示倒计时并锁定输入。
-- `run.resend.started`：OpenCode 已确认稳定替代 message ID 存在，且源 Run 的 PostgreSQL/Redis 可回放明细清理已提交。前端必须
-  原子移除源 Run 的 assistant/tool/Todo/Diff/失败卡/流式 overlay/child scope，再接管替代 Run SSE；该事件不表示替代 Run 已终态。
-- `run.resend.failed`：重发在安全可判定窗口失败；payload 仍只含身份、次数、状态和执行时间，不携带 prompt、回答、工具输出或
+- `run.resend.scheduled`：替代 Run 已预留并进入等待，payload 包含 `resendId/sourceRunId/replacementRunId/trigger`、总次数、
+  自动次数、上限、状态、`executeAt`，以及真实操作人 `requesterUserId/requesterUnifiedAuthId/requestedBySharedUser`。
+  `requesterUnifiedAuthId` 无值时省略；OpenCode 仍由会话所属人进程执行，前端必须以这组 requester 字段还原分享发送人、配色和停止权限，
+  不得用后续 OpenCode 原生 message 事件中的所属人覆盖。前端据此展示倒计时并锁定输入。
+- `run.resend.started`：OpenCode 已确认稳定替代 message ID 存在，且源 Run 的 PostgreSQL/Redis 可回放明细清理已提交；同一
+  PostgreSQL 事务已推进 Session 内容修订时间。前端必须原子移除源 Run 的 assistant/tool/Todo/Diff/失败卡/流式 overlay/child scope，
+  再接管替代 Run SSE，并刷新该 Session 的权威消息；刷新期间继续缓冲和重放实时事件。该事件不表示替代 Run 已终态。
+- `run.resend.failed`：重发在安全可判定窗口失败；payload 仍只含重发身份、真实操作人、次数、状态和执行时间，不携带 prompt、回答、工具输出或
   供应商响应正文。
 
-三个事件都是 additive；未知类型的旧前端按默认忽略策略继续工作。`session.status.retry` 仍仅表示 OpenCode 内部供应商重试，
+三个事件都是 additive；未知类型的旧前端按默认忽略策略继续工作。历史或分享恢复遇到后续 `run.created/run.started` 时应清理更早
+Run 的失败卡，不能把旧模型错误附加到当前成功回答。`session.status.retry` 仍仅表示 OpenCode 内部供应商重试，
 前端可以展示但不得用它触发平台撤销重发。自动入口只由 root `session.error` 派生的 `run.failed` 触发，transport failure 与
 `run.cancelled` 不触发。
 

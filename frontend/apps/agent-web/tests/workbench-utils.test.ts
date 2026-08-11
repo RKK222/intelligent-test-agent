@@ -1355,6 +1355,129 @@ describe("historical session restoration", () => {
     expect(state.messages.some((message) => message.role === "user" && message.text.includes("完整原文"))).toBe(false);
   });
 
+  it("does not restore an old failed-model card after a later run succeeds", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_platform",
+      sessions: [{ rootSessionId: "ses_remote", sessionId: "ses_remote", childSession: false }],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [{
+        type: "run.failed",
+        rootSessionId: "ses_remote",
+        sessionId: "ses_remote",
+        childSession: false,
+        payload: {
+          runId: "run_old_model",
+          occurredAt: "2026-07-27T02:26:34Z",
+          error: { name: "UnknownError", data: { message: "Model not found: opencode/hy3-free" } }
+        }
+      }, {
+        type: "run.created",
+        rootSessionId: "ses_remote",
+        sessionId: "ses_remote",
+        childSession: false,
+        payload: {
+          runId: "run_current",
+          occurredAt: "2026-08-10T15:09:01Z",
+          status: "PENDING"
+        }
+      }, {
+        type: "run.succeeded",
+        rootSessionId: "ses_remote",
+        sessionId: "ses_remote",
+        childSession: false,
+        payload: {
+          runId: "run_current",
+          occurredAt: "2026-08-10T15:09:08Z",
+          status: "SUCCEEDED"
+        }
+      }]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, [{
+      messageId: "msg_current_user",
+      sessionId: "ses_platform",
+      role: "USER",
+      content: "仅答复 123",
+      createdAt: "2026-08-10T15:09:01Z",
+      runId: "run_current"
+    }, {
+      messageId: "msg_current_answer",
+      sessionId: "ses_platform",
+      role: "ASSISTANT",
+      content: "123",
+      createdAt: "2026-08-10T15:09:02Z",
+      runId: "run_current"
+    }]);
+
+    expect(state.status).toBe("SUCCEEDED");
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages.some((message) => message.role === "card")).toBe(false);
+    expect(state.messages.map((message) => message.role === "card" ? message.title : message.text))
+      .toEqual(["仅答复 123", "123"]);
+  });
+
+  it("keeps one delegated resend prompt and attributes it to the actual requester after tree hydration", () => {
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_platform",
+      sessions: [{ rootSessionId: "ses_remote", sessionId: "ses_remote", childSession: false }],
+      messagesBySessionId: {
+        ses_remote: [{
+          rootSessionId: "ses_remote",
+          sessionId: "ses_remote",
+          isChildSession: false,
+          message: {
+            id: "msg_remote_resend",
+            messageId: "msg_remote_resend",
+            role: "user",
+            senderUserId: "usr_owner",
+            senderUsername: "888888888",
+            sentBySharedUser: false,
+            content: "仅答复 123"
+          }
+        }]
+      },
+      childSessionIdByTaskPartId: {},
+      events: []
+    };
+    const state = chatStateFromSessionTreeSnapshot(snapshot, [{
+      messageId: "msg_platform_resend",
+      remoteMessageId: "msg_remote_resend",
+      sessionId: "ses_platform",
+      role: "USER",
+      content: "仅答复 123",
+      createdAt: "2026-08-10T15:09:01Z",
+      runId: "run_resend",
+      senderUserId: "usr_owner",
+      senderUsername: "888888888",
+      sentBySharedUser: false,
+      resend: {
+        resendId: "rsd_1",
+        trigger: "MANUAL",
+        totalAttempt: 1,
+        automaticAttempt: 0,
+        automaticLimit: 3,
+        status: "DISPATCHED",
+        executeAt: "2026-08-10T15:09:01Z",
+        sourceRunId: "run_source",
+        replacementRunId: "run_resend",
+        requesterUserId: "usr_wr",
+        requesterUsername: "wr",
+        requesterUnifiedAuthId: "wr",
+        requestedBySharedUser: true
+      }
+    }]);
+
+    const userMessages = state.messages.filter((message) => message.role === "user");
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]).toMatchObject({
+      text: "仅答复 123",
+      senderUserId: "usr_wr",
+      senderUsername: "wr",
+      sentBySharedUser: true
+    });
+  });
+
   it("keeps multi-turn user text parts out of the previous assistant message", () => {
     const remoteSessionId = "ses_opencode_root";
     const turns = [

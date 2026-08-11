@@ -474,7 +474,11 @@ function reduceEventOnly(
     const runState = event.type === "run.started" || event.type === "run.created"
       ? runAlreadyAdoptedWithoutOwner ? state : bindTodoRun(state, event.runId)
       : state;
-    let messages = runState.messages;
+    // 分享参与方和历史恢复不会经过本页的 run.requested；新 Run 事实到达时同样清掉旧轮失败卡，
+    // 否则较早的“模型不可用”会在后续成功回答后仍被合并到时间线末尾并误导用户重试。
+    let messages = event.type === "run.created" || event.type === "run.started"
+      ? removeRunFailedCards(runState.messages)
+      : runState.messages;
     // run.failed 时追加错误卡片，并清理最近的空 assistant 消息
     if (event.type === "run.failed") {
       const errorInfo = extractErrorInfo(event.payload);
@@ -647,7 +651,11 @@ function resendMetadataFromEvent(event: RunEvent): ResendMetadata | undefined {
     status: text(event.payload.status) ?? (event.type === "run.resend.failed" ? "FAILED" : "WAITING"),
     executeAt,
     sourceRunId,
-    replacementRunId
+    replacementRunId,
+    requesterUserId: text(event.payload.requesterUserId),
+    requesterUsername: text(event.payload.requesterUsername),
+    requesterUnifiedAuthId: text(event.payload.requesterUnifiedAuthId),
+    requestedBySharedUser: event.payload.requestedBySharedUser === true
   };
 }
 
@@ -1051,14 +1059,23 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
         parts: existing?.role === "user" ? existing.parts : undefined,
         sourceType: existing?.role === "user" ? existing.sourceType : undefined,
         sourceRefId: existing?.role === "user" ? existing.sourceRefId : undefined,
-        senderUserId: text(raw.senderUserId) ?? text(payload.senderUserId)
-          ?? (existing?.role === "user" ? existing.senderUserId : undefined),
-        senderUsername: text(raw.senderUsername) ?? text(payload.senderUsername)
-          ?? (existing?.role === "user" ? existing.senderUsername : undefined),
-        senderUnifiedAuthId: text(raw.senderUnifiedAuthId) ?? text(payload.senderUnifiedAuthId)
-          ?? (existing?.role === "user" ? existing.senderUnifiedAuthId : undefined),
-        sentBySharedUser: booleanValue(raw.sentBySharedUser) ?? booleanValue(payload.sentBySharedUser)
-          ?? (existing?.role === "user" ? existing.sentBySharedUser : undefined),
+        // 撤回替代消息由所属人的 OpenCode 生成，原生事件会再次携带所属人；已有平台 requester 归因时不能被覆盖。
+        senderUserId: existing?.role === "user" && existing.resend?.requestedBySharedUser
+          ? existing.resend.requesterUserId ?? existing.senderUserId
+          : text(raw.senderUserId) ?? text(payload.senderUserId)
+            ?? (existing?.role === "user" ? existing.senderUserId : undefined),
+        senderUsername: existing?.role === "user" && existing.resend?.requestedBySharedUser
+          ? existing.resend.requesterUsername ?? existing.senderUsername
+          : text(raw.senderUsername) ?? text(payload.senderUsername)
+            ?? (existing?.role === "user" ? existing.senderUsername : undefined),
+        senderUnifiedAuthId: existing?.role === "user" && existing.resend?.requestedBySharedUser
+          ? existing.resend.requesterUnifiedAuthId ?? existing.senderUnifiedAuthId
+          : text(raw.senderUnifiedAuthId) ?? text(payload.senderUnifiedAuthId)
+            ?? (existing?.role === "user" ? existing.senderUnifiedAuthId : undefined),
+        sentBySharedUser: existing?.role === "user" && existing.resend?.requestedBySharedUser
+          ? true
+          : booleanValue(raw.sentBySharedUser) ?? booleanValue(payload.sentBySharedUser)
+            ?? (existing?.role === "user" ? existing.sentBySharedUser : undefined),
         resend: existing?.role === "user" ? existing.resend : undefined
       }
     : {

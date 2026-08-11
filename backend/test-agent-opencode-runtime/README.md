@@ -166,6 +166,6 @@ runtime 代理入口有认证用户时必须通过 `AgentRuntimeTargetResolver` 
 
 已注册的每分钟 `opencode-runtime.night-execution-dispatch` 在夜间任务扫描后继续扫描到期、已 revert 和过期租约记录，按持久化目标服务器经公共 Java 路由器分发；重发不另建 task key。
 WAITING 替代 Run 可复用现有 cancel 入口；等待期间 `NightExecutionSessionLockGuard` 同时阻止新 Run、消息、command、shell、archive、
-compact 和 share 等主会话写入口。替代消息受理后清理源 Run 的 PostgreSQL/Redis 明细并发布 `run.resend.started`，Run、反馈、
+compact 和 share 等主会话写入口。替代消息受理后在同一事务中清理源 Run 的 PostgreSQL 明细、推进 Session 内容修订时间，再清理 Redis 明细并发布 `run.resend.started`；重发事件携带真实 requester 身份，分享运行态据此刷新权威消息并保持分享发送人归属，Run、反馈、
 用量和关系保留。当前预留替代 Run 沿 `LEGACY_FULL` 明细链启动；源 Run 无论是 `LEGACY_FULL` 还是 `REDIS_SUMMARY` 都从远端
 权威用户轮次读取并重放，避免把摘要数据库当作 prompt 事实源。

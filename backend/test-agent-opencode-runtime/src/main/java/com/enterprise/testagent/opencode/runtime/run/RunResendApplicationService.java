@@ -414,16 +414,23 @@ public class RunResendApplicationService {
     }
 
     static Map<String, Object> eventPayload(RunResend resend) {
-        return Map.of(
-                "resendId", resend.resendId().value(),
-                "sourceRunId", resend.sourceRunId().value(),
-                "replacementRunId", resend.replacementRunId().value(),
-                "trigger", resend.trigger().name(),
-                "totalAttempt", resend.totalAttempt(),
-                "automaticAttempt", resend.automaticAttempt(),
-                "automaticLimit", resend.automaticLimit(),
-                "status", resend.status().name(),
-                "executeAt", resend.executeAt().toString());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("resendId", resend.resendId().value());
+        payload.put("sourceRunId", resend.sourceRunId().value());
+        payload.put("replacementRunId", resend.replacementRunId().value());
+        payload.put("trigger", resend.trigger().name());
+        payload.put("totalAttempt", resend.totalAttempt());
+        payload.put("automaticAttempt", resend.automaticAttempt());
+        payload.put("automaticLimit", resend.automaticLimit());
+        payload.put("status", resend.status().name());
+        payload.put("executeAt", resend.executeAt().toString());
+        // OpenCode 仍以所属人执行；事件必须同时携带真实操作人，前端才能维持共享配色和停止权限。
+        payload.put("requesterUserId", resend.requesterUserId().value());
+        if (resend.requesterUnifiedAuthId() != null) {
+            payload.put("requesterUnifiedAuthId", resend.requesterUnifiedAuthId());
+        }
+        payload.put("requestedBySharedUser", resend.requestedBySharedUser());
+        return Map.copyOf(payload);
     }
 
     private PlatformException conflict(String message, SessionId sessionId) {

@@ -8293,3 +8293,28 @@
 
 - 看板现可同时查看 TTFT 与 ITL/TPOT 的可靠五数分布，逐条明细也能解释单次 Token 输出节奏；没有准确 usage 的调用明确显示为空，不伪造统计。
 - 新增一个只读 HTTP API 和两个可空数据库字段；无 RunEvent 变更，既有超管鉴权、31 天查询上限、30 天明细保留、安全脱敏和旧记录兼容边界不变。未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-11 - 修复分享会话撤回重发的实时同步与状态污染
+
+### Why
+
+- 分享成员 wr 将“仅答复 OK”撤回并改为“仅答复 123”后，所属人页面仍显示旧正文和“思考中”，只有刷新才恢复；恢复时还会把历史 `hy3-free` 失败卡误挂到当前已成功回答，并曾出现重复用户气泡和发送人归属被所属人 OpenCode 覆盖。
+
+### What
+
+- 重发清理在同一 PostgreSQL 事务中删除源 Run 明细并推进 Session 修订时间；`run.resend.*` 事件补充真实 requester 身份，不再把所属人进程当成分享发送人。
+- 分享页与所属人普通工作台在替代 Run 活跃期也会读取权威正文，同一替代 Run 只允许一次刷新，期间实时事件缓冲后重放，避免旧正文、重复气泡和迟到事件。
+- reducer 在后续 `run.created/run.started` 到达时清除上一轮失败卡；聊天面板以当前 Run 明确终态优先于全会话历史错误，避免成功后误提示重试。
+- 同步 domain/runtime/persistence/frontend README、RunEvent 文档与 HTTP API 实现说明；未改 OpenCode 只读源码、generated SDK、`.env*` 或数据库结构。
+
+### How
+
+- JDK 25 下后端重发服务与 MyBatis 集成定向测试通过；前端 runtime reducer、工作台和聊天面板定向回归 335 passed / 1 skipped，agent-chat 与 agent-web typecheck 通过。
+- 会话分享 Playwright E2E 在 Chromium/Firefox/WebKit 共 39/39 通过；真实 wr/888888888 双用户按“仅答复 OK → 撤回改为仅答复 123”验证，新代码下双端都只有一条新 prompt 和一条 123，无重试卡、无思考中，所属人端正确显示发送人 wr。
+- 使用 `.env.test` / `test` profile、JDK 25 和 `--without-workflow` 重启 backend、opencode-manager、frontend；共享测试库已执行一个当前 checkout 缺失但在通知中心 checkout 存在的 migration，启动时仅以临时 filesystem location 挂载字节完全一致的原文，未执行 repair、未改历史表。Workflow 因本机未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 按现成脚本跳过。
+
+### Result
+
+- 撤回修改重发现在不需要刷新即可在双端收敛到新正文和当前终态，分享发送人配色/权限保持正确，历史不可用模型错误不再污染后续成功轮次。
+- 前端 `http://127.0.0.1:3000` 返回 200，后端 `http://127.0.0.1:8080/actuator/health/readiness` 为 `UP`；wr 页面输入后发送按钮可用，OpenCode 已恢复可用。
+- RunEvent payload 仅新增可向后兼容的 requester 字段；无新 HTTP URL、无数据库/Flyway 变更，无新 SQL，现有鉴权、性能与跨服务器路由边界不变。提交前已回顾全部 `.agents/session-log*.md`。

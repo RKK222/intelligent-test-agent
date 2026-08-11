@@ -254,7 +254,8 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
   到期/租约恢复查询和已提交源 Run 过滤；关系型 SQL 不写在 Java 中。
 - `RedisRunResendReplayInputStore` 只按 replacement Run 保存有限 TTL 的精确 text/file/agent/subtask 输入和模型选择，缺失时执行器
   必须在 revert 前失败；PostgreSQL 表、事件和日志都不保存 prompt 或回答。
-- `MyBatisRunResendDetailCleanup` 在替代消息确认受理后事务删除源 Run 的 session message、RunEvent 和 scope 明细，保留 Run、
-  feedback、usage 与重发关系；`RedisRunRuntimeStore.purgeDetailsAfterResend` 同步清理源 Run 运行态详情和索引。
+- `MyBatisRunResendDetailCleanup` 在替代消息确认受理后事务删除源 Run 的 session message、RunEvent 和 scope 明细，并复用
+  `RunSummaryMapper.touchSession` 原子推进 `sessions.updated_at` 内容修订；保留 Run、feedback、usage 与重发关系，
+  `RedisRunRuntimeStore.purgeDetailsAfterResend` 同步清理源 Run 运行态详情和索引。
 - `MyBatisRunResendRepositoryIntegrationTest` 覆盖 migration、幂等和锁；正式交付前仍须按 `docs/deployment/database.md` 在真实
   PostgreSQL 已部署基线上核对版本、checksum 和最终 JAR 字节。
