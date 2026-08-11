@@ -8466,3 +8466,27 @@
 - 普通未分享、无 compact 分享双端对话、真实子 Agent 三条链路通过。
 - 单纯手工 `/compact` 未通过：干净成功会话 `ses_a6564b19614545d1aca603dc466b0eb4` 先显示“正在压缩上下文”，约 30 秒后显示“压缩上下文失败”；后端 `compactSession` 在 30128ms 返回 `OPENCODE_TIMEOUT`。另一个独立会话也复现同类 30 秒超时，排除单条历史污染。
 - mock Playwright 的 compact 交互通过，但真实 OpenCode compact 超时，说明尚有运行时/模型链路问题未解决；不得把手工 compact 报为通过。Workflow 仍因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动。
+
+## 2026-08-11 - 新建工作空间前安全同步复用仓库
+
+### Why
+
+- 应用工作空间远端目录树通过远端 Git 读取，能够看到其他提交已新增的一级子目录；保存时服务器却会复用本机旧 feature 仓库，未追平远端就校验目录，因而误报“应用工作区目录不存在”。
+
+### What
+
+- 新建应用工作空间版本复用既有仓库时，先校验工作树干净，再执行 `fetch + pull --ff-only`，追平后才检查目标一级子目录。
+- 脏工作树、远端分叉或 Git 失败直接阻断，不自动 stash、reset 或覆盖文件；新 clone 不重复 pull，按固定 target commit 打开的既有副本不触发隐式同步。
+- 增加“远端拉取后目录出现”和“脏仓库拉取前拒绝”回归测试，并同步工作空间管理模块 README。
+
+### How
+
+- JDK 21 下 `ManagedWorkspaceApplicationServiceTest` 82/82 通过，工作空间管理模块 31 个测试类全量 Maven reactor 测试通过；JDK 25 下 `mvn clean package -Dmaven.test.skip=true` 的 21 个后端模块全部构建成功。
+- 使用 `.env.test` 和 `--without-workflow` 启动；共享测试库已有当前分支缺失的 Flyway `20260810170000`，只读复用既有原始 compatibility migration，并复核 SHA-256 为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`，未 repair、未修改历史表或环境文件。
+- 后端 health/readiness、前端 HTTP、登录 CORS 和 manager 管理的 OpenCode health 均通过，且没有遗留重启进程。
+
+### Result
+
+- 用户从远端目录树选择已提交的应用一级子目录后，即使目标服务器保留旧 feature 仓库，新建工作空间也会先安全追平远端再继续创建；本地有修改时返回明确冲突并保留现场。
+- 本次不改变 API/DTO/RunEvent，不涉及数据库结构、Flyway 文件、关系型 SQL、generated SDK、OpenCode 只读源码或 `.env*`；仅低频新建流程增加一次增量 fetch，既有副本兼容行为保持不变，也未新建分支。
+- backend、frontend、opencode-manager 当前已运行；Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动。

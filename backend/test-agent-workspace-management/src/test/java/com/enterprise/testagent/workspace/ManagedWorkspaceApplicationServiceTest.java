@@ -342,6 +342,74 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void workspaceCreatePullsReusedRepositoryBeforeCheckingExistingDirectory() throws Exception {
+        Path repoRoot = applicationRepoRoot();
+        Files.createDirectories(repoRoot.resolve(".git"));
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/old-workspace");
+        git.currentBranchValue = "feature_testagent_20260707";
+        git.directoryPathCreatedOnPull = "F-GCMS/remote-workspace";
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse response = service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "feature_testagent_20260707",
+                "F-GCMS/remote-workspace",
+                "远程新增工作区",
+                false,
+                null,
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_pull_reused_repo");
+
+        assertThat(response.directoryPath()).isEqualTo("F-GCMS/remote-workspace");
+        assertThat(Files.isDirectory(repoRoot.resolve("F-GCMS/remote-workspace"))).isTrue();
+        assertThat(git.clonedGitUrl).isNull();
+        assertThat(git.calls).containsSubsequence(
+                "clean:" + repoRoot,
+                "fetch:" + repoRoot,
+                "pull:" + repoRoot + ":feature_testagent_20260707");
+    }
+
+    @Test
+    void workspaceCreateRejectsDirtyReusedRepositoryBeforePull() throws Exception {
+        Path repoRoot = applicationRepoRoot();
+        Files.createDirectories(repoRoot.resolve(".git"));
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/old-workspace");
+        git.currentBranchValue = "feature_testagent_20260707";
+        git.worktreeClean = false;
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(true),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                git);
+
+        assertThatThrownBy(() -> service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "feature_testagent_20260707",
+                "F-GCMS/remote-workspace",
+                "脏仓库工作区",
+                false,
+                null,
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_dirty_reused_repo"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("未提交变更");
+                });
+
+        assertThat(git.calls).contains("clean:" + repoRoot);
+        assertThat(git.calls).noneMatch(call -> call.startsWith("fetch:") || call.startsWith("pull:"));
+    }
+
+    @Test
     void workspaceCreateFailureDeletesNewTemplateWithoutVersion() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -3361,6 +3429,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final List<PushCall> pushes = new ArrayList<>();
         private String clonedGitUrl;
         private String originUrlValue = "https://example.com/gcms.git";
+        private String directoryPathCreatedOnPull;
         private final List<OriginUpdate> originUpdates = new ArrayList<>();
         private final Set<Path> invalidHeadCommitRoots = new java.util.LinkedHashSet<>();
 
@@ -3627,6 +3696,13 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void pullFastForward(Path repoRoot, String branch, String privateKey) {
             calls.add("pull:" + repoRoot + ":" + branch);
+            if (directoryPathCreatedOnPull != null) {
+                try {
+                    Files.createDirectories(repoRoot.resolve(directoryPathCreatedOnPull));
+                } catch (Exception exception) {
+                    throw new RuntimeException(exception);
+                }
+            }
         }
 
         @Override
