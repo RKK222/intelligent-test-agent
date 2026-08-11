@@ -61,6 +61,24 @@ class InternalModelSseStreamObserverTest {
     }
 
     @Test
+    void readsExactOutputTokenCountFromUsageOnlyEvents() {
+        assertThat(observer.inspect(data("""
+                {"choices":[],"usage":{"completion_tokens":17}}
+                """))).satisfies(event -> {
+            assertThat(event.output()).isFalse();
+            assertThat(event.outputTokenCount()).isEqualTo(17L);
+        });
+        assertThat(observer.inspect(data("""
+                {"usage":{"output_tokens":9}}
+                """))).extracting(InternalModelSseStreamObserver.ObservedEvent::outputTokenCount)
+                .isEqualTo(9L);
+        assertThat(observer.inspect(data("""
+                {"choices":[],"usage":{"completion_tokens":-1}}
+                """))).extracting(InternalModelSseStreamObserver.ObservedEvent::outputTokenCount)
+                .isNull();
+    }
+
+    @Test
     void commentsCannotExtendFirstOutputDeadline() {
         Flux<ServerSentEvent<String>> comments = Flux.interval(Duration.ofMillis(20))
                 .map(ignored -> ServerSentEvent.<String>builder().comment("keepalive").build());

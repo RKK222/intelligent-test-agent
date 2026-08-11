@@ -817,6 +817,46 @@ export type SessionShareRuntimeState = {
   generatedAt: string;
 };
 
+/** 工作台通知首期只开放受控的会话分享动作，前端不得把通知目标解释为任意 URL。 */
+export type UserNotificationType = "SESSION_SHARED" | string;
+export type UserNotificationActionType = "SESSION_SHARE" | string;
+export type UserNotificationStatus = "ACTIVE" | "INVALIDATED" | string;
+export type UserNotificationChangeType = "SNAPSHOT" | "CREATED" | "READ" | "UPDATED" | "INVALIDATED";
+
+export type UserNotification = {
+  notificationId: string;
+  type: UserNotificationType;
+  actorUserId?: string | null;
+  title: string;
+  body: string;
+  actionType: UserNotificationActionType;
+  actionTargetId: string;
+  status: UserNotificationStatus;
+  invalidationReason?: string | null;
+  actionAvailable: boolean;
+  unread: boolean;
+  expiresAt?: string | null;
+  readAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UserNotificationPage = {
+  items: UserNotification[];
+  page: number;
+  size: number;
+  total: number;
+  unreadCount: number;
+};
+
+/** SSE 仅发送低敏变化信号，通知正文由分页接口读取。 */
+export type UserNotificationStreamUpdate = {
+  changeType: UserNotificationChangeType;
+  notificationId?: string | null;
+  unreadCount: number;
+  generatedAt: string;
+};
+
 export type ConversationSourceType = "MANUAL" | "SCHEDULED_TASK" | "SIDE_QUESTION" | string;
 
 export type SessionWorkspaceContext = {
@@ -1324,7 +1364,7 @@ export type CreateRunResendPayload = {
   expectedRunId?: string | null;
   contextToken: string;
   clientRequestId: string;
-  /** 所属人确认后的替代文本；未传时兼容为精确重放原始轮次。 */
+  /** 实际发送人确认后的替代文本；未传时兼容为精确重放原始轮次。 */
   editedPrompt?: string;
 };
 
@@ -2177,8 +2217,12 @@ export type InternalModelCallRecord = {
   firstByteMillis?: number | null;
   /** 首个包含模型输出的 SSE data 相对耗时；非流式或未收到有效输出 chunk 时为空。 */
   firstTokenMillis?: number | null;
+  /** 最后一个有效模型输出的到达耗时；用于计算 ITL/TPOT。 */
+  lastTokenMillis?: number | null;
   /** 从请求开始到收到 OpenAI 兼容正常收尾信号（[DONE] 或非空 finish_reason）；未完整结束或非流式时为空。 */
   streamCompleteMillis?: number | null;
+  /** 上游 usage 返回的准确输出 Token 数；没有可靠用量时为空。 */
+  outputTokenCount?: number | null;
   traceId: string;
   ucid?: string | null;
   startedAt: string;
@@ -2202,6 +2246,19 @@ export type InternalModelCallHourlyStat = {
   streamCompleteMillisMax?: number | null;
   streamCompleteCount?: number | null;
 };
+
+/** 单次调用时延的五数概括；具体样本资格由对应指标决定。 */
+export type InternalModelLatencyDistribution = {
+  sampleCount: number;
+  minimumMillis?: number | null;
+  firstQuartileMillis?: number | null;
+  medianMillis?: number | null;
+  thirdQuartileMillis?: number | null;
+  maximumMillis?: number | null;
+};
+
+/** TTFT 五数概括；保留别名兼容既有调用方。 */
+export type InternalModelTtftDistribution = InternalModelLatencyDistribution;
 
 /** 逐 provider 最近探活状态，供健康卡片直接读取。 */
 export type InternalModelProbeStatus = {

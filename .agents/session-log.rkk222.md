@@ -8316,3 +8316,676 @@
 - 只有会话所属人能撤回并修改上一条消息后重发；分享成员不再因自己是源消息发送人获得该权限。分享页面无需刷新即可退出旧 Run 的“思考中”并看到压缩后的摘要。
 - HTTP URL 和 RunEvent wire name 不变，只新增可选请求字段与分享 SSE data 字段，旧客户端不传/忽略时继续兼容；修改文本只进入既有有限 TTL Redis 精确重放输入，不进入控制表、事件、审计或日志。
 - 未新增 SQL、Flyway migration、数据库字段或索引，不修改 `.env*`、generated SDK 或 OpenCode 只读源码；新增的分享 SSE Session 修订读取复用既有单会话查询，不引入前端轮询。
+
+## 2026-08-10 - 为上下文压缩增加持续动效与完成反馈
+
+### Why
+
+- `/compact` 只在开始和结束时弹出短暂消息；OpenCode summarize 与消息刷新耗时较长时，中间没有常驻反馈，用户无法判断压缩是否仍在进行、何时完成。
+
+### What
+
+- `AgentWorkbench` 维护 compact 专用的 `running/success` 短生命周期状态：请求和当前会话消息刷新期间保持运行态，成功后保留勾选完成态 2.6 秒，失败立即收起并继续复用既有错误提示。
+- `FigmaChatPanel` 在输入框上方增加常驻状态条；进行中用三条上下文线局部收拢动画表达压缩，完成后原位切换勾选和明确文案。运行期间阻止普通发送、新建按钮和定时提交，避免与 Session 压缩并发。
+- 动画仅在 compact 状态节点存在时作用于局部 `transform/opacity`，没有恢复曾导致全树样式重算的全局继承动画；`prefers-reduced-motion: reduce` 下禁用动画和过渡。
+- 同步 agent-web README、内置用户手册和对话场景测试说明。
+
+### How
+
+- `FigmaChatPanel.test.ts` 157 项通过、1 项按设计跳过；agent-web typecheck 通过；agent-web production build（含用户手册 VitePress build）通过，仅保留既有大 chunk 提示。
+- Chromium Playwright 原生命令场景通过，实际断言运行态节点、三条动画线、编译后 keyframes、完成态和既有成功提示；`tools/verify-ai-docs.sh`、`git diff --check` 通过。
+- 首次浏览器回归误复用 3000 端口上 `intelligent-test-agent-memory-v1` 的旧 Vite；切回当前仓库后用同一用例复测通过。首次启动又发现旧 worktree 后端 PID 9927 占用 8080 且不响应 `SIGTERM`，精确停止该旧 screen/进程后，复用已构建 JAR，按 `.env.test`、`test` profile、`--without-workflow` 启动当前仓库三服务。
+- Backend health/readiness 均为 `UP`，Frontend 3000 返回 HTTP 200，登录 CORS 正确，当前监听 PID 的启动路径均属于本仓库；manager WebSocket 已连接。提交前回顾全部 `.agents/session-log*.md`，确认未覆盖其它开发者成果或残留合并标记。
+- 提交后 3000/8080 被 `intelligent-test-agent-memory-v1` 的另一组开发进程重新接管；未中断该 worktree，改在 4177 启动当前仓库 `agent-web`（进程 cwd 为本仓库），HTTP 返回 200，作为最终前端运行验收。标准端口的后端健康结果不再计入当前分支最终运行状态。
+
+### Result
+
+- 用户执行 `/compact` 后会持续看到压缩动效；压缩和消息刷新完成时状态条明确切换为完成态，无需通过刷新或猜测判断进度。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码；仅增加前端局部状态、交互门禁、样式、测试和稳定文档，旧客户端与后端兼容性不变。
+
+## 2026-08-10 - 修复分享发送人撤回编辑与历史回答生成态
+
+### Why
+
+- 用户进一步明确分享会话中的消息实际发送人也应能撤回、修改并重发自己的最后一条消息；上一轮将人工撤回收紧为仅会话所属人的产品判断已不符合最新需求。
+- resends API 返回替代 Run 后，reducer 只迁移 Run 归属而保留旧文本；权威 user 事件若携带编辑后的新文本，既有按文本相等归并又可能失败，导致旧文本继续显示或追加重复气泡。
+- OpenCode/历史快照中的 assistant text part 可能在 Run 终态后仍保留 `running`。此前组件只看 part 状态，旧回答在新一轮已可发送甚至已完成后仍持续显示“生成中”。
+
+### What
+
+- 后端人工撤回授权调整为“会话所属人，或源 Run 的实际消息发送人”；分享发送人还必须通过既有 `canChat` 校验，其它成员继续 `FORBIDDEN`，不能改写他人消息。HTTP 路径、请求/响应 DTO 和 RunEvent wire name 均未改变。
+- 前端分享入口复用权威 `Run.messageSenderUserId` 与当前 actor 判定。resends 返回后把 `editedPrompt` 交给既有 reducer，立即替换原用户气泡和首个 text part、保留附件等其它 part；`run.resend.started` 后的权威 user 事件按 replacement Run 原位接管，即使 assistant 先到或新旧文本不同也不重复。
+- assistant text 时间线行显式携带“是否为当前 busy 轮次”；只有该值为真且 part 自身为 `running/pending` 时展示轻量“生成中”，历史轮次和终态 Run 一律按最终 Markdown 渲染。
+- 同步 API、RunEvent、安全、OpenCode 规范、backend/frontend/agent-chat README/PACKAGE、测试场景和内置用户手册。
+
+### How
+
+- JDK 25 下 `RunResendApplicationServiceTest` 6 项通过，覆盖所属人、分享源消息发送人和无关成员；后端 `test-agent-api,test-agent-opencode-runtime -am -DskipTests package` 的 18 模块 reactor 构建成功。
+- agent-chat 全量 10 个测试文件、178 项通过；其中 reducer 覆盖编辑文本即时替换、附件保留、assistant 先到后的 replacement Run 归并，时间线覆盖历史轮次和终态残留 `running`。agent-chat 与 agent-web typecheck 均通过。
+- Chromium Playwright 5 项通过，覆盖分享发送人编辑重发、分享 active Run 消失后的终态对账和“生成中”收口、即时/历史/manual resend；agent-web production build（含 VitePress 用户手册）通过，仅保留既有大 chunk 提示。
+- `tools/verify-ai-docs.sh`、`git diff --check` 和本次改动文件的冲突标记扫描通过。提交前回顾全部 `.agents/session-log*.md`，确认未覆盖其他开发者成果或残留合并标记。
+
+### Result
+
+- 持有对话权限的分享成员现在可以撤回并修改自己发送的最后一条消息；会话所属人仍可操作，其它成员不能修改别人的消息。发送后页面立即显示新文本，后续权威事件不再恢复旧文本或产生双气泡。
+- 分享会话无需刷新即可在旧轮次或终态时移除回答卡中的“生成中”；新 Run 的工作状态仍按真实 busy 状态正常展示。
+- 本次变更涉及既有 HTTP 接口的鉴权行为放宽和前端状态投影；不新增 URL、DTO/事件字段、SQL、Flyway migration、数据库结构、轮询或持久缓存，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。修改文本仍只进入既有有限 TTL Redis 精确重放输入，不写控制表、事件、审计或日志。
+
+## 2026-08-10 - 压缩结果收为图标并调浅分享协作者气泡
+
+### Why
+
+- 上下文压缩完成后仍以整行 disclosure 展示，在短对话中反复占据大块空间，与已完成思考状态和搜索事件的图标语言不一致。
+- 分享工作台中其他参与者的 `#9A8EDE` 紫色气泡饱和且偏深，视觉权重高于助手正文。
+
+### What
+
+- `CompactionSummaryRow` 复用 `OcIconButton` 和历史完成态的 28px 图标尺寸，默认只展示 `Minimize2` 小图标；点击后图标保留，并在下方展开压缩方式、触发原因、语义说明和已翻译的续写摘要。
+- 压缩标记与紧邻摘要的既有投影、固定英文字段中文映射及原始协议内容保持不变；只替换展示壳和可访问的展开/收起语义。
+- 新增聊天主题 token `--ta-chat-other-user-bg`，默认值为低饱和浅紫 `#DED9F6`；其他参与者气泡通过该 token 展示，自己的 `#B2EDDF` 薄荷绿保持不变。
+- 同步 agent-web、agent-chat README，以及组件、归因和分享 Playwright 回归断言。
+
+### How
+
+- 定向 Vitest 2 个文件 159 项通过、1 项按设计跳过；前端全量 Vitest 123 个文件 1904 项通过、1 项跳过；全 workspace typecheck 和 agent-web production build 均通过，构建仅保留既有大 chunk 提示。
+- Chromium Playwright 两个分享场景通过，覆盖浅紫色 computed style、compact 修订同步、默认图标态和点击展开详情；保留 trace 截图并人工检查收起、展开和两种气泡颜色的实际布局。
+- 按 `.env.test`、JDK 25 和 `--without-workflow` 重启三服务；backend health/readiness 为 `UP`，frontend 返回 200，CORS 正确，manager WebSocket 已连接，监听路径均属于当前仓库。
+- 提交前回顾全部 `.agents/session-log*.md`。工作区同时存在另一组后端撤销重发 Controller/API 文档/测试改动，与本次文件无重叠，未修改、暂存或回滚。
+
+### Result
+
+- 压缩完成态现在与思考/搜索过程使用同一轻量图标层级，只有用户主动点击时才展开详情；分享协作者气泡明显变浅且仍能与自己的消息区分。
+- 本次仅修改前端展示、主题 token、测试和稳定 README；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，旧消息和旧后端兼容性不变。
+
+## 2026-08-10 - 修复分享成员撤销重发的生产服务装配
+
+### Why
+
+- 分享成员 `wr` 在可对话分享会话中撤销并修改自己的最后一条消息后，提交固定失败为 `RUNTIME_STATE_UNAVAILABLE: 会话分享服务未配置`；会话所属人不携带分享头，因此未触发同一故障。
+- 根因是 `RunResendController` 的双参测试兼容构造器被标记为 `@Autowired`，生产 Spring 装配始终绕过包含 `SessionCollaborationShareService` 的完整构造器，导致分享请求进入控制器时 `shareService` 为 null。
+
+### What
+
+- 将生产 `@Autowired` 移到包含分享服务的三参构造器，保留双参构造器仅供不涉及分享头的既有单元测试兼容；分享成员仍先走既有 `requireAccess(..., requireCanChat=true)`，未放宽权限或绕过实际发送人校验。
+- 新增 `RunResendControllerSessionShareTest`，用真实 `ApplicationContextRunner` 构造器选择和预注册业务单例锁定生产装配，并验证分享头在进入异步业务链前解析为代操作上下文。
+- 同步 `test-agent-api` README、HTTP API 对应测试和会话测试场景说明。
+
+### How
+
+- TDD 红灯在修复前精确复现“会话分享服务未配置”；修复后 JDK 25 定向测试 1 项通过，18 模块 Maven reactor 全部成功。扩大到 `test-agent-api -am` 的全测试时，相关 runtime/API 批次均通过，最终仅既有 `XxlJobMysqlMigrationTest` 因本机 Docker 中 MySQL 8.4 三次初始化超过连接窗口报错，随后停止无关剩余批次。
+- 按 `.env.test`、JDK 25 和 `--without-workflow` 完成 21 模块构建并重启 backend、opencode-manager、frontend；health/readiness 为 `UP`、CORS 正确、manager WebSocket 已连接，8080/3000 监听进程与 cwd 均属于当前仓库。
+- 真实登录分享成员 `wr`，进入“重新完成案例设计”，撤销“共享测试”并改为“仅答复 OK”后提交成功；POST `/resends` 返回成功，新 Run `run_8448ba49d6cb4f04932bcab55c584ab5` 最终 `SUCCEEDED`，成员页显示新文本和回复 `OK`，思考态与停止按钮正常收敛。
+- 提交前回顾全部 `.agents/session-log*.md`，确认近期其它工作没有覆盖本次 Controller/API 文档/测试文件；冲突标记与空白校验通过。
+
+### Result
+
+- 被分享成员现在可以正常撤销、修改并重发自己最后一条消息，不再要求刷新或报“会话分享服务未配置”；分享授权、`canChat`、源消息实际发送人和会话边界仍由原有服务端规则复验。
+- 本次修复只更正既有 Controller 的 Spring 装配并增加回归测试/文档，不新增或变更 HTTP URL、请求/响应 DTO、RunEvent、数据库/Flyway、关系型 SQL、性能链路或安全策略；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-10 - 将上下文压缩恢复为清晰的独立记录
+
+### Why
+
+- 上一版把压缩完成态收成了没有文字的 28px 图标；它虽然与历史思考图标同尺寸，但在实际时间线中位置和含义都不明显，用户容易误以为压缩按钮消失。
+- 用户进一步明确压缩必须与思考入口分离，可用独立分隔行或独立按钮展示，并在点击后查看具体摘要。
+
+### What
+
+- `CompactionSummaryRow` 改为独立的带文字按钮，自动和手动压缩分别显示“上下文已自动压缩”“上下文已手动压缩”，右侧细分隔线标明压缩发生的时间线位置；不复用或并入思考按钮。
+- 按钮保留压缩图标、展开箭头、键盘焦点和 `aria-expanded/aria-controls`；点击后继续在下方展示压缩方式、触发原因、中文字段映射、内部续写摘要和“不是新的回答”说明。
+- 同步 agent-chat、agent-web、用户手册和原生 Part/组件/分享会话回归断言；消息投影和协议原文保持不变。
+
+### How
+
+- 定向 Vitest 2 个文件 179 项通过、1 项跳过；前端全量 Vitest 123 个文件 1904 项通过、1 项跳过；共享会话 compact 修订 Chromium Playwright 1 项通过。
+- 全 workspace lint、typecheck 按近期日志记录的 VitePress 临时目录竞争要求串行复跑并通过；agent-web production build 和 `tools/verify-ai-docs.sh` 通过，构建仅保留既有大 chunk 提示。
+- 按 `.env.test`、JDK 25、`--without-workflow` 重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端 3000 返回 200，CORS 正确，manager 受管 OpenCode health 为 `HEALTHY`。浏览器接管本地 URL 被产品安全策略阻止，未绕过该限制，因此本次没有新增真实页面截图证据。
+- 提交前回顾全部 `.agents/session-log*.md`，确认前序分享撤回装配修复已独立提交，当前暂存范围不覆盖其它开发者成果；冲突标记和空白校验通过。
+
+### Result
+
+- 压缩完成后会在发生位置显示一条可直接识别、可点击的独立记录，不再像图标消失，也不会和思考状态共用按钮；详情仍默认折叠并按需展开。
+- 本次仅修改前端展示、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，旧消息与旧后端兼容性不变。
+
+## 2026-08-10 - 压缩摘要仅在独立按钮内按需展示
+
+### Why
+
+- 本地真实压缩消息经脱敏只读核对后，摘要 part 顺序为 `step-start → reasoning → text → step-finish`；时间线原先在 reasoning 处清空待配对状态，导致 text 摘要被当作普通助手正文平铺，即使压缩按钮处于收起态也仍可见。
+- OpenCode 还可能在 compaction 标记与摘要之间插入无正文或仅含系统 part 的 user envelope。用户要求时间线不显示“上下文压缩中”，只在摘要完成后保留唯一一条默认收起的压缩结果，点击后再展示摘要本身。
+
+### What
+
+- 抽取与 `UserMessageRow` 共用的用户消息可见性判定；compaction 待配对状态可跨不可见 user envelope 和摘要前的 reasoning part，遇到真实用户输入才终止，避免误吞下一轮正常回答。
+- `createTimelineRows` 过滤没有完整摘要或摘要 text 仍为 `pending/running` 的 compaction 行；压缩进行态继续只由输入区上方既有动效反馈，时间线在摘要落稳后才显示唯一结果。
+- `CompactionSummaryRow` 默认收起，结果行仅保留独立文字按钮、分隔线、展开箭头和固定字段中文映射；展开面板只渲染摘要本身，不再显示额外说明或平铺副本。
+- 新增真实 part 顺序、不可见系统包络、进行态不入时间线、下一轮隔离、默认收起和分享无刷新同步回归，并同步 agent-chat、agent-web、用户手册与会话测试文档。
+
+### How
+
+- 使用本地 PostgreSQL 对含 `Objective` 的近期消息只读查询 message 角色、时间和 part 类型，不输出摘要正文，确认真实结构含 reasoning；未修改数据库。
+- agent-chat 与 `FigmaChatPanel` 完整批次 11 个测试文件、340 项通过、1 项按设计跳过；agent-chat、agent-web 类型检查通过。补充“进行态不入时间线”后定向 5 项通过，冷重启后的 Chromium 分享 compact E2E 1 项通过。
+- 首次标准重启仍被既有 Workflow 密钥缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 拦截；未修改环境文件，改用脚本现成 `--without-workflow` 模式完成 21 模块后端构建和 backend/opencode-manager/frontend 冷重启。最终调整后再次冷重启，health/readiness 为 `UP`、3000 返回 200、受管 OpenCode 为 `HEALTHY`。
+- 应用内浏览器接管 localhost 被产品安全策略阻止，未绕过；真实浏览器行为由 Playwright Chromium E2E 验证。提交前回顾全部 `.agents/session-log*.md`，并执行 production build、AI 文档校验、冲突标记扫描和 `git diff --check`。
+
+### Result
+
+- 压缩进行态不再在时间线显示第二条记录；摘要完成后只出现一条默认收起的结果按钮，不再平铺 Objective 等正文，点击后才在按钮下方显示中文字段摘要。
+- 本次仅修改前端投影、展示、测试和稳定文档；不涉及 HTTP API、RunEvent wire、DTO、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，旧消息与旧后端保持兼容。
+
+## 2026-08-10 - 恢复分享成员的新建对话入口
+
+### Why
+
+- 分享工作台通过 `fixedSession` 隐藏了“新建对话”按钮，被分享成员只能停留在所属人的固定会话，无法直接开始自己的任务。
+
+### What
+
+- 固定分享会话保留“新建对话”按钮，并将提示明确为“退出分享并新建对话”；点击后返回当前用户自己的普通工作台，而不是在分享路由内重置并继续绑定所属人的 Session。
+- 新增组件与分享工作台 E2E 回归，同步 agent-web 工程说明、内置用户手册和会话测试场景。
+
+### How
+
+- `FigmaChatPanel.test.ts` 定向运行 158 项通过、1 项按设计跳过；agent-web typecheck 通过；分享只读工作台 Chromium Playwright 场景 1 项通过。
+- 使用本地账号 `wr` 进入真实分享链接，确认按钮可见；点击后 URL 返回 `/`、固定分享标识消失、本人工作台的新建对话入口保留。当前 frontend 3000 返回 200，backend health/readiness 为 `UP`。
+- `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md`，并保留同期上下文压缩改动，不回滚或混入本次提交。
+
+### Result
+
+- 被分享成员无需刷新或退出登录，即可从分享页直接进入自己的空白对话。
+- 本次仅调整前端路由交互、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能、安全、`.env*`、generated SDK 或 OpenCode 只读源码，普通工作台行为保持兼容。
+
+## 2026-08-10 - 稳定分享双用户专项 E2E
+
+### Why
+
+- 分享专项 E2E 中，会话历史主按钮与置顶按钮具有相同的可访问名称，导致严格定位偶发匹配两个元素；空 envelope 到平台正文的验证依赖固定延时，在 WebKit 下存在时序抖动；Firefox 中通知层可能短暂遮挡抽屉关闭按钮。
+
+### What
+
+- 复用既有 `historySessionButton` 精确定位三个分享历史入口，并沿用既有强制点击方式关闭被通知层遮挡的抽屉。
+- 扩展现有 RunEvent fetch stream 测试辅助器，支持手动释放事件批次并记录已发事件；先确认空 envelope 不展示，再释放所属人的权威正文，避免用浏览器定时器猜测顺序。
+
+### How
+
+- 使用 JDK 25、`.env.test` 和 `--without-workflow` 重启 backend、manager、frontend；health/readiness 均为 `UP`，frontend 返回 200，CORS 正确，manager WebSocket 已连接且受管 OpenCode 为 `HEALTHY`。
+- 三个问题场景在 Chromium、Firefox、WebKit 共 9 项通过；完整 `e2e:session-share` 33 项全部通过且无重试；agent-web typecheck 与 `git diff --check` 通过。
+- 用户明确聚焦分享双用户查看后，中止了 150 项通用 E2E；中止前发现的两个分享定位问题均已修复，另一个通用用例仅因中止而停止，不作为失败结论。
+- 提交前回顾全部 `.agents/session-log*.md`，保留同期压缩摘要与用户消息展示改动，不回退也不纳入本次提交。
+
+### Result
+
+- 分享所属人和被分享人两个视角的专项流程在三种浏览器中稳定通过，权威用户消息顺序不再依赖固定等待时间。
+- 本次仅修改 E2E 测试及测试辅助器；不涉及生产代码、HTTP API、RunEvent wire、DTO、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-10 - 修复 wr 本地 OpenCode 失效绑定
+
+### Why
+
+- wr 的 `ACTIVE` 用户进程绑定仍指向已离线的旧服务器 `192.168.100.115:4097`，对应进程已为 `FAILED`；当前本机稳定身份是 `kakadeMacBook-Pro.local`，因此状态与初始化请求在后端路由阶段返回 `OPENCODE_UNAVAILABLE`，没有进入本机 manager。
+
+### What
+
+- 在本地 `.env.test` 测试库中精确删除 wr/opencode 这一条旧 assignment，保留旧失败进程记录及其他用户绑定；随后以 wr 当前登录态调用正式“初始化进程”入口，由公共分配、预留和启动链路重新创建本机进程。
+
+### How
+
+- 删除前锁定并核对旧 binding 的 user/process/server/port/status，删除后确认 wr 绑定数为 0；未修改其他用户、旧进程记录或环境配置。
+- 正式初始化后，manager 在 4096 返回 `STARTED`，公共健康等待从短暂 `UNHEALTHY` 收敛为 `HEALTHY`；`/global/health` 返回 `healthy=true`、版本 `1.18.4`，`/global/config` 返回成功，端口 4096 由新 opencode PID 监听。
+- 数据库最终状态为 wr 新 binding `ACTIVE`、进程 `RUNNING`，服务器 `kakadeMacBook-Pro.local`、端口 4096；页面显示“TestAgent 进程可用”。提交前已回顾全部 `.agents/session-log*.md`。
+
+### Result
+
+- wr 的 OpenCode 已在本机重新分配并健康启动，可继续正常对话。
+- 本次是本地测试库的定点运行态修复，仅更新会话记录；未修改生产代码、HTTP API、RunEvent、数据库结构/Flyway、SQL mapper、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-10 - 增加 TTFT 箱线图与并排看板布局
+
+### Why
+
+- 单看平均 TTFT 和最大 TTFT 无法说明多数调用集中在哪个等待区间，也容易被少数慢请求影响判断；用户要求用竖向箱线图展示整体分布，并把调用结果分布、供应商请求量上下排列后放在箱线图旁边。
+
+### What
+
+- 新增受 `SUPER_ADMIN` 保护的 `GET /api/internal/platform/opencode-runtime/internal-model-observability/ttft-distribution`，沿用供应商、结果大类、来源和时间筛选，返回样本数、最小值、P25、中位数、P75、最大值。
+- 持久层通过 MyBatis XML 直接基于 `first_token_ms` 明细使用 PostgreSQL `percentile_cont` 计算分位数；只统计确实收到首个模型输出的调用，空样本返回 0 和空值，不从小时均值反推。
+- 前端新增竖向 ECharts 箱线图和说人话的说明/悬浮提示；调用结果分布与供应商请求量在左侧上下排列，箱线图在右侧占据对应整列，失败原因分类移到下方，窄屏自动改为单列。
+- 同步 domain、persistence、runtime、API、backend-api、shared-types、agent-web 的 README，以及 HTTP API、数据库、指标词汇表和本地测试说明。
+
+### How
+
+- H2 与真实 PostgreSQL 持久层测试共 10 项通过，覆盖 100/200/300/400 等样本的连续分位数和空样本；Controller 测试 3 项通过。前端组件与 API 客户端测试 109 项通过，agent-web/backend-api 类型检查和 agent-web production build 通过。
+- 使用 `.env.test`、JDK 25 和脚本现成的 `--without-workflow` 模式完成 21 模块构建并启动 backend、opencode-manager、frontend；标准 Workflow 模式因本机未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 被预检拦截，未修改环境文件。
+- 仅在本地测试库插入 7 条 `local-ttft-boxplot` 模拟调用，TTFT 为 120、180、240、320、450、700、1200ms；实际页面显示中间 50% 为 210–575ms、中位数 320ms，并通过应用内浏览器确认左右布局、竖向箱体和明细/聚合无重叠。
+- 提交前回顾全部 `.agents/session-log*.md`，并执行差异、冲突标记和空白校验；未覆盖同期 agent-chat 样式与 Playwright 临时文件。
+
+### Result
+
+- 看板现在既能查看 TTFT 的总体区间，又能在同一视野比较调用结果和供应商请求量；箱线图五个位置均来自当前筛选范围的真实调用明细。
+- 新增只读 HTTP API 和一次受 31 天最大查询窗口约束的数据库聚合查询；没有数据库结构/Flyway、RunEvent、安全策略或 OpenCode 兼容边界变更，未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-10 - 降低上下文压缩结果与摘要字号
+
+### Why
+
+- 压缩结果按钮视觉层级高于正常回答正文。源码原先使用 11px，但 agent-web 未分层的全局 `button` 规则把最终计算值覆盖为 14px/500；仅调整 token 数值无法在真实页面生效。
+- 展开摘要同时受到 `MarkdownView` 和全局标题、代码样式影响，正文、标题与代码需要按压缩辅助信息范围定向降级。
+
+### What
+
+- 新增 agent-chat 的 9px `--oc-text-2xs` 微型状态 token；压缩结果按钮最终固定为 9px/400、22px 高，图标、箭头、间距和内边距同步缩小。
+- 压缩摘要正文固定为 10px，标题为 1.08em，代码和表格为 0.92em；使用压缩组件作用域内的必要优先级覆盖，避免影响普通回答 Markdown。
+- 同步 agent-chat README，记录结果按钮和摘要的稳定视觉层级。
+
+### How
+
+- 定向 `FigmaChatPanel` 压缩摘要用例 1 项通过（其余 158 项按筛选跳过），agent-chat typecheck、agent-web production build、AI 文档校验和 `git diff --check` 通过。
+- Playwright CLI 在当前仓库真实 Vite 样式下读取最终计算值：按钮 9px/400、22px，摘要正文 10px、标题 10.8px、代码 9.2px。
+- 发现 3000 端口由兄弟 worktree `intelligent-test-agent-notification-center` 占用，未停止或改动对方进程；当前仓库改用 3001 独立启动并返回 200，后端 8080 保持健康。
+
+### Result
+
+- 上下文压缩结果和展开摘要都明显低于正常回答正文层级，且不再被 agent-web 全局按钮、标题或代码字号覆盖。
+- 本次仅修改 agent-chat 样式 token、组件样式和稳定 README；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、性能链路、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-11 - 增加 ITL/TPOT 明细与箱线图统计
+
+### Why
+
+- 用户要求按业界口径补齐 ITL/TPOT，并和 TTFT 一样用竖向箱线图展示；SSE 数据块不等于 Token，不能拿 chunk 数近似，否则企业供应商分块策略会直接污染指标。
+
+### What
+
+- 代理在每次流式调用中记录首个与最后一个有效模型输出到达时刻，并读取上游 `usage.completion_tokens`（兼容 `usage.output_tokens`）的准确输出 Token 数；单次 ITL/TPOT 为 `(最后输出时刻-首个输出时刻)/(输出 Token 数-1)`，只纳入至少 2 个输出 Token 的可靠样本，收尾信号等待不计入。
+- `internal_model_call_records` 通过 `V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 增加可空 `last_token_ms/output_token_count` 与非负、时序约束；既有历史记录保持空值。MyBatis XML 新增 ITL 五数分布查询，返回最小值、P25、中位数、P75、最大值。
+- 新增受 `SUPER_ADMIN` 保护的只读 `GET /api/internal/platform/opencode-runtime/internal-model-observability/itl-distribution`；明细增加 ITL/TPOT 列。看板左侧调用结果与供应商图上下排列，右侧 TTFT 与 ITL/TPOT 两个竖向箱线图上下排列，窄屏改为单列。
+- mock 模型成功流改为两段有效输出并返回准确 usage；同步 domain/runtime/persistence/agent-web README、HTTP API、数据库、指标词汇表和本地验证指南。
+
+### How
+
+- 前端组件与 API 客户端定向回归 110 项通过；JDK 25 下后端持久层、SSE observer、代理转发和 Controller 定向测试通过。H2、真实 PostgreSQL、完整迁移兼容测试此前均通过，源码与最终 Boot JAR 内新 migration SHA-256 一致。
+- 使用隔离 PostgreSQL 和 18081 后端启动，readiness 为 `UP`，Flyway 从空库依次执行 95 个 migration 并到达 `20260810234154`；插入 7 条仅用于验证的 mock 明细后，真实 API 返回 ITL 最小值 35ms、P25 50ms、中位数 65ms、P75 90ms、最大值 130ms。
+- 应用内浏览器在独立 5173 前端验收：四张图表两列、每列上下排列且程序化检查无重叠；明细 ITL 与箱线图数值一致。临时前端、18081 后端和隔离数据库容器均已停止并清理，未写入 Flyway 演示数据。
+- 标准 8080 被兄弟 worktree 的旧后端占用且其数据库含当前分支未知 migration，未停止对方进程、未执行 Flyway repair；agent-web production build 另被同期未提交的 `AgentWorkbench.vue` 类型错误拦截，本次相关 Vitest 已通过，且页面由 Vite 实际编译运行。提交前回顾全部 `.agents/session-log*.md`，不纳入同期重发、agent-chat 与其他前端改动。
+
+### Result
+
+- 看板现可同时查看 TTFT 与 ITL/TPOT 的可靠五数分布，逐条明细也能解释单次 Token 输出节奏；没有准确 usage 的调用明确显示为空，不伪造统计。
+- 新增一个只读 HTTP API 和两个可空数据库字段；无 RunEvent 变更，既有超管鉴权、31 天查询上限、30 天明细保留、安全脱敏和旧记录兼容边界不变。未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-11 - 修复分享会话撤回重发的实时同步与状态污染
+
+### Why
+
+- 分享成员 wr 将“仅答复 OK”撤回并改为“仅答复 123”后，所属人页面仍显示旧正文和“思考中”，只有刷新才恢复；恢复时还会把历史 `hy3-free` 失败卡误挂到当前已成功回答，并曾出现重复用户气泡和发送人归属被所属人 OpenCode 覆盖。
+
+### What
+
+- 重发清理在同一 PostgreSQL 事务中删除源 Run 明细并推进 Session 修订时间；`run.resend.*` 事件补充真实 requester 身份，不再把所属人进程当成分享发送人。
+- 分享页与所属人普通工作台在替代 Run 活跃期也会读取权威正文，同一替代 Run 只允许一次刷新，期间实时事件缓冲后重放，避免旧正文、重复气泡和迟到事件。
+- reducer 在后续 `run.created/run.started` 到达时清除上一轮失败卡；聊天面板以当前 Run 明确终态优先于全会话历史错误，避免成功后误提示重试。
+- 同步 domain/runtime/persistence/frontend README、RunEvent 文档与 HTTP API 实现说明；未改 OpenCode 只读源码、generated SDK、`.env*` 或数据库结构。
+
+### How
+
+- JDK 25 下后端重发服务与 MyBatis 集成定向测试通过；前端 runtime reducer、工作台和聊天面板定向回归 335 passed / 1 skipped，agent-chat 与 agent-web typecheck 通过。
+- 会话分享 Playwright E2E 在 Chromium/Firefox/WebKit 共 39/39 通过；真实 wr/888888888 双用户按“仅答复 OK → 撤回改为仅答复 123”验证，新代码下双端都只有一条新 prompt 和一条 123，无重试卡、无思考中，所属人端正确显示发送人 wr。
+- 使用 `.env.test` / `test` profile、JDK 25 和 `--without-workflow` 重启 backend、opencode-manager、frontend；共享测试库已执行一个当前 checkout 缺失但在通知中心 checkout 存在的 migration，启动时仅以临时 filesystem location 挂载字节完全一致的原文，未执行 repair、未改历史表。Workflow 因本机未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 按现成脚本跳过。
+
+### Result
+
+- 撤回修改重发现在不需要刷新即可在双端收敛到新正文和当前终态，分享发送人配色/权限保持正确，历史不可用模型错误不再污染后续成功轮次。
+- 前端 `http://127.0.0.1:3000` 返回 200，后端 `http://127.0.0.1:8080/actuator/health/readiness` 为 `UP`；wr 页面输入后发送按钮可用，OpenCode 已恢复可用。
+- RunEvent payload 仅新增可向后兼容的 requester 字段；无新 HTTP URL、无数据库/Flyway 变更，无新 SQL，现有鉴权、性能与跨服务器路由边界不变。提交前已回顾全部 `.agents/session-log*.md`。
+
+## 2026-08-11 - 修复可观测明细只能查看 20 条
+
+### Why
+
+- 明细接口已经返回完整记录总数，但前端误用当前页数组长度作为分页总数；默认页大小为 20 时，分页组件始终认为只有一页，无法继续查看后续记录。
+
+### What
+
+- 明细分页改用服务端 `PageResponse.total`，查询缓存键同时纳入页大小，确保翻页和切换每页条数都会读取正确数据。
+- 保留默认每页 20 条，新增 50/100 条选项；切换每页条数时回到第 1 页，避免原页码超出新范围。
+- 补充分页组件回归测试，并同步 `agent-web` 稳定 README。
+
+### How
+
+- 定向 Vitest 2/2 通过，覆盖总数 41、请求第 2 页以及切换到每页 50 条后重置第 1 页。
+- Vite development production bundle 构建通过；实际 Vite 服务在 `127.0.0.1:5174` 启动并返回 HTTP 200。
+- `agent-web` 类型检查中，本次测试代码没有新增错误；完整检查仍被同期未提交的 `packages/agent-chat/src/runtime-reducer.ts` 既有 `existing` 可能为空错误阻断，未越界修改该文件。
+
+### Result
+
+- 可观测明细现在可以按服务端完整总数翻页，并可按 20/50/100 条切换页大小，不再只能看到首批 20 条。
+- 本次仅调整前端分页状态、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-11 - 可观测时长统一使用秒
+
+### Why
+
+- 可观测页面此前对短耗时显示毫秒、长耗时显示秒，同一看板存在两种单位；用户要求统一用秒（s）计算和展示。
+
+### What
+
+- 复用既有时长格式化入口，把明细、Overview、供应商汇总和箱线图摘要统一换算为秒；ITL/TPOT 单次值直接按秒计算。
+- TTFT 与 ITL/TPOT 箱线图的数据、纵轴、刻度和悬浮提示统一使用秒，而非只替换显示文字。
+- 保留 API 的 `*Millis` 原始字段，避免破坏既有客户端；同步 agent-web README 和指标词汇表。
+
+### How
+
+- 定向 Vitest 2/2 通过，覆盖页面不再出现毫秒单位，并断言 TTFT、ITL/TPOT 箱线图实际输入为秒值。
+- Vite development 模式构建成功；最新代码重新启动在 `127.0.0.1:5174` 并返回 HTTP 200。
+- `agent-web` 完整类型检查仍被同期未提交的 `AgentWorkbench.vue.triggeredByUserId` 和 `agent-chat/runtime-reducer.ts` 空值错误阻断；本次文件未新增类型错误，未越界修改并行工作。
+
+### Result
+
+- 可观测页面所有时长均以秒（s）呈现，短延迟保留最多毫秒级小数精度，非零极短值不会误显示为 0。
+- 本次仅修改前端单位换算、图表、测试和稳定文档；不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、安全策略、`.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-11 - 修复压缩分享会话重发重复与越权
+
+### Why
+
+- 分享会话已压缩上下文时，成员 `wr` 撤回并改发问题后，拥有者 `888888888` 会看到一条正确的成员消息和一条错误归属给自己的重复消息。
+- 会话拥有者还能撤回成员 `wr` 实际发送的问题，越过了“仅实际发送人可修改”的权限边界。
+
+### What
+
+- `agent-chat` 统一按平台消息 ID、远端消息 ID 等稳定别名合并历史消息与晚到实时事件；命中持久化消息时保留平台身份和可信发送人归属。
+- 前端撤回入口与后端重发服务统一校验最后一条源消息的实际发送人；会话拥有者不再天然拥有成员消息的修改权，分享成员仍需具备 `canChat` 权限。
+- 补充压缩历史、助手事件先到、成员事件晚到、拥有者越权和成员正常重发等回归用例，并同步 API、事件流、安全、OpenCode、测试场景、前端包和用户手册文档。
+
+### How
+
+- 后端定向测试通过：`RunResendApplicationServiceTest` 7/7、`RunResendControllerSessionShareTest` 1/1。
+- 前端完整 Vitest 通过 1917 项、跳过 1 项；最终改动后定向 Vitest 176/176、`agent-chat` 与 `agent-web` 类型检查、生产构建均通过。
+- Playwright 三浏览器相关场景 9/9 通过；最终改动后 Chromium 两个关键场景 2/2 通过。
+- 使用 JDK 25 和 `.env.test` 完成 21 个 Maven module 打包；因本机缺少 Workflow Redis 密码，按既有兼容方式以 `--without-workflow` 启动。共享测试库已有当前分支缺失的 Flyway 版本，启动时只读挂载字节一致的原始 migration（SHA-256 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`），未 repair、未修改历史表或环境文件。
+- 后端健康与就绪、前端 HTTP、CORS 预检和 manager WebSocket/进程健康均通过；提交前已回顾全部 `.agents/session-log*.md` 近期记录并确认无合并标记。
+
+### Result
+
+- 压缩分享会话中，成员改发后的问题只保留一条且归属成员，助手答复正常显示；拥有者看不到撤回入口，直接调用接口也会被拒绝。
+- 本次收紧既有重发接口鉴权并修复 RunEvent 合并行为，不新增 API/事件字段，不涉及数据库结构、Flyway 变更、关系型 SQL、性能路径、generated SDK、OpenCode 只读源码或 `.env*`，也未新建分支。
+- 后端、前端和 manager 当前分别运行于 `127.0.0.1:8080`、`127.0.0.1:3000` 和本地 manager 端口；Workflow 因本机缺少密钥未启动。
+
+## 2026-08-11 - 补全分享重发归因与 compact 边界修复
+
+### Why
+
+- 上一轮交付遗漏了三条真实链路：预留替代 Run 的 wr 归因会在执行阶段再次被所属人覆盖，USER `session_messages` 仍按执行所属人落库，迟到的 compact Part 又可能用不同 message alias 被追加到“仅答复 123”之后。
+- 因此前虽有定向测试和一次重启，用户按同一真实场景仍能看到 `仅答复 123 / 123` 落进 compact 边界，并可能由所属人取得错误的回撤入口；上一条日志的完成结论不完整。
+
+### What
+
+- 预留重发 Run 在真正执行时保留重发状态机已确认的发送人，并让 USER 消息投影复用同一归因；新替代 Run 与 `session_messages` 均写为 `wr / shared=true`。
+- 手工重发的替代 Run 以当前实际请求者为发送人；历史污染记录在授权、Run DTO、消息 DTO 和前端展示中优先使用共享重发审计 requester，所属人不再继承成员问题的修改权。
+- `agent-chat` 对 `message.part.updated/delta` 增加稳定 `partId` 跨 message alias 原位合并；迟到 compact Part 只更新原历史位置，不再插入替代轮次。
+- 同步 runtime、API、agent-web、agent-chat README/PACKAGE、HTTP API、安全和会话测试说明；没有新增 URL、DTO 字段、RunEvent 类型、数据库结构或 SQL。
+
+### How
+
+- JDK 25 下 runtime/API 定向回归 93/93 通过；前端全量 Vitest 123 个文件、1918 passed / 1 skipped，compact/所属人关键 Chromium E2E 2/2，agent-web production build 通过。
+- 使用 `.env.test`、JDK 25、字节一致的既有 Flyway compatibility location 和 `--without-workflow` 重新构建并重启 backend、opencode-manager、frontend；后端 health/readiness、前端、manager 与所属人 OpenCode 端口均健康。
+- 真实 wr 分享页重新执行“仅答复 OK → 回撤改为仅答复 123”：实时完成后连续观察 12 秒，compact 始终只有 1 个且始终在替代轮次之前，OK 消失，最终答复为 123；刷新后 wr 保留自己的回撤入口。
+- PostgreSQL 与所属人 API 复核新替代 Run `run_144d915982fb40d3835f4cbb7a3fbbf9`：Run、USER 消息和 resend requester 均为 wr/shared；所属人读取到的最新消息发送人同样为 wr。
+
+### Result
+
+- `compact → 仅答复 123 → 123` 的历史边界在实时事件和刷新恢复两条路径上保持稳定，不再把替代问题或答案包进 compact，也不再产生旧 OK 或第二条远端别名气泡。
+- wr 的问题归属和回撤权限保持给 wr，888888888 不再获得该消息的回撤入口；历史已污染记录无需改库即可按 resend 审计兼容展示和鉴权。
+- Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动；核心 backend、frontend、manager 与 OpenCode 已验证运行。未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-11 - 增加超级管理员公共个人 worktree 定时补偿
+
+### Why
+
+- 企业用户在 OpenCode 进程初始化后才取得 `SUPER_ADMIN` 角色时，不会再触发初始化链路中的公共个人 worktree 准备，导致数据库和服务器均缺少 `public-{userId}`，公共 Agent 页面无法进入且刷新按钮灰显；现场已发现不止一个用户存在相同历史窗口。
+
+### What
+
+- 每台 Java 启动 30 秒后、此后默认每 10 分钟有界查询本服务器具有 ACTIVE OpenCode binding、用户状态为 ACTIVE、当前角色为 `SUPER_ADMIN` 且缺少同服 ACTIVE 稳定公共个人 worktree 的用户，单轮最多 50 人。
+- 补偿与新增 `SUPER_ADMIN` 手工接口复用同一服务器级 Redis 租约和既有稳定 worktree 创建程序；单个用户失败隔离，后续轮次继续重试。
+- 后台补偿只基于本机已初始化共享仓库 HEAD 创建 `public-{userId}`，不读取或冒用目标用户 SSH key、不访问远端 Git、不自动切换其当前运行配置。
+- 候选关系 SQL 只落在 `AgentConfigMapper.xml`，没有数据库结构或 Flyway migration；同步 domain、persistence、workspace、HTTP API 和包级稳定文档。
+
+### How
+
+- JDK 25 下定向执行 `MyBatisAgentConfigRepositoryIntegrationTest`、`AgentConfigApplicationServiceTest`、`AgentConfigControllerTest`，覆盖角色/binding/服务器/稳定分支筛选、历史 worktree 不阻断、默认周期、Redis 锁、本地无凭据创建和接口鉴权，三模块 Maven reactor 全部通过。
+- `mvn clean package -Dmaven.test.skip=true` 的 21 模块构建成功；使用 `.env.test` 与 `--without-workflow` 重启后，当前运行 JAR 已核对包含补偿方法和 MyBatis SQL，后端 readiness 为 `UP`，首次定时任务日志为 `COMPLETED`、候选数 0。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，保留共享测试库既有 Flyway compatibility 处理，不执行 repair、不修改历史表或环境文件。
+
+### Result
+
+- 后续角色补授等漏建场景最多等待一个补偿周期即可自动创建稳定公共个人 worktree；运维也可按目标服务器手工立即触发并获得逐用户安全结果摘要。
+- 新接口仅 `SUPER_ADMIN` 可调用并复用公共后端路由；无 RunEvent、数据库字段、Flyway、OpenCode 源码、generated SDK、前端或 `.env*` 变更，也未新建分支。
+
+## 2026-08-11 - 补测普通、分享、手工 compact 与子 Agent 对话
+
+### Why
+
+- 用户要求把“单纯手工 compact、无 compact 的普通对话并分享、普通未分享对话、调用子 Agent 对话”拆成独立真实场景补测，确认上一轮 compact 分享重发修复没有掩盖其它链路。
+
+### What
+
+- 使用 `888888888` 与 `wr` 新建专用真实会话，分别验证普通未分享问答、普通问答后分享并由 wr 继续对话、手工 `/compact`、父 Agent 通过 `task` 调用 `explore` 子 Agent。
+- 本次未修改业务代码、API、事件、数据库、配置或稳定文档；仅记录真实验证结论。
+
+### How
+
+- 发现此前另一次无 compatibility location 的启动使后端因缺失已执行 Flyway `20260810170000` 而退出；使用 JDK 25、`.env.test`、字节一致的既有 Flyway compatibility location、`--without-workflow` 重新构建并重启，21 个 Maven module 打包成功，后端 readiness 为 `UP`、前端返回 200。
+- 普通未分享会话精确得到 `NORMAL_UNSHARED_OK_20260811` 且无 compaction；普通分享会话精确得到 `SHARE_NO_COMPACT_BASE_OK_20260811`，分享给 wr 并授予可对话权限后，wr 精确得到 `SHARE_WR_REPLY_OK_20260811`，所属人实时同步看到 wr 问答，双端 compaction 数均为 0。
+- 子 Agent 会话出现可点击 `Explore` 卡片并完成；进入 child timeline 可见精确回复 `SUB_AGENT_CHILD_OK_20260811`、无可见聊天输入框，主时间线精确回复 `SUB_AGENT_PARENT_OK_20260811`。
+- 定向自动化通过：Playwright 的分享管理与原生 compact 命令 2/2；Vitest 的子 Agent 时间线 1/1。
+
+### Result
+
+- 普通未分享、无 compact 分享双端对话、真实子 Agent 三条链路通过。
+- 单纯手工 `/compact` 未通过：干净成功会话 `ses_a6564b19614545d1aca603dc466b0eb4` 先显示“正在压缩上下文”，约 30 秒后显示“压缩上下文失败”；后端 `compactSession` 在 30128ms 返回 `OPENCODE_TIMEOUT`。另一个独立会话也复现同类 30 秒超时，排除单条历史污染。
+- mock Playwright 的 compact 交互通过，但真实 OpenCode compact 超时，说明尚有运行时/模型链路问题未解决；不得把手工 compact 报为通过。Workflow 仍因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动。
+
+## 2026-08-11 - 新建工作空间前安全同步复用仓库
+
+### Why
+
+- 应用工作空间远端目录树通过远端 Git 读取，能够看到其他提交已新增的一级子目录；保存时服务器却会复用本机旧 feature 仓库，未追平远端就校验目录，因而误报“应用工作区目录不存在”。
+
+### What
+
+- 新建应用工作空间版本复用既有仓库时，先校验工作树干净，再执行 `fetch + pull --ff-only`，追平后才检查目标一级子目录。
+- 脏工作树、远端分叉或 Git 失败直接阻断，不自动 stash、reset 或覆盖文件；新 clone 不重复 pull，按固定 target commit 打开的既有副本不触发隐式同步。
+- 增加“远端拉取后目录出现”和“脏仓库拉取前拒绝”回归测试，并同步工作空间管理模块 README。
+
+### How
+
+- JDK 21 下 `ManagedWorkspaceApplicationServiceTest` 82/82 通过，工作空间管理模块 31 个测试类全量 Maven reactor 测试通过；JDK 25 下 `mvn clean package -Dmaven.test.skip=true` 的 21 个后端模块全部构建成功。
+- 使用 `.env.test` 和 `--without-workflow` 启动；共享测试库已有当前分支缺失的 Flyway `20260810170000`，只读复用既有原始 compatibility migration，并复核 SHA-256 为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`，未 repair、未修改历史表或环境文件。
+- 后端 health/readiness、前端 HTTP、登录 CORS 和 manager 管理的 OpenCode health 均通过，且没有遗留重启进程。
+
+### Result
+
+- 用户从远端目录树选择已提交的应用一级子目录后，即使目标服务器保留旧 feature 仓库，新建工作空间也会先安全追平远端再继续创建；本地有修改时返回明确冲突并保留现场。
+- 本次不改变 API/DTO/RunEvent，不涉及数据库结构、Flyway 文件、关系型 SQL、generated SDK、OpenCode 只读源码或 `.env*`；仅低频新建流程增加一次增量 fetch，既有副本兼容行为保持不变，也未新建分支。
+- backend、frontend、opencode-manager 当前已运行；Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动。
+
+## 2026-08-11 - 修复分享撤回重发刷新跳动
+
+### Why
+
+- 分享参与者撤回重发时，分享 revision 可能先于替代 USER 消息持久化到达；此前 revision 会立即整会话刷新并消耗一次性刷新机会，得到旧快照后 `run.resend.started` 无法再补拉，B 只能手工刷新才看到新消息。
+- 整会话刷新会清空并重建时间线、切换历史加载状态且触发滚动到底部，所以 A 撤回后 B 刷新成新消息的一瞬间，A/B 两个页面都会产生可见跳动。
+
+### What
+
+- `agent-chat` 新增 `run.resend.user.synchronized` 原位同步动作；即使观察端错过 scheduled/requested 事件，`run.resend.started` 也会把源 USER 留作替代 Run 锚点，权威 USER 到达后只替换该气泡并迁移 Todo 归属，不重置其余时间线。
+- `AgentWorkbench` 对活跃撤回重发改为按 replacementRunId 轻量补拉权威 USER，复用同一进行中请求并在 revision 早于持久化时进行最多 6 次、每次间隔 250ms 的短重试；revision 与 started 都可触发补偿，成功后有界去重。
+- 活跃重发不再调用整会话 `switchSession`，因此不请求会话树、不显示历史加载状态、不改变滚动位置；没有活跃 Run 的 compact revision 仍保留原有权威整会话刷新。
+- 增加 reducer 乱序回归和 A/B 分享 revision 先到、USER 后落库的 Playwright 回归，并同步 agent-web、agent-chat 包说明和会话场景测试文档。
+
+### How
+
+- TDD 先确认新 reducer 用例因 started 后丢失源 USER 而失败，再完成实现；`agent-chat` 全量 Vitest 10 个文件、186/186 通过，agent-web 滚动回归 20/20 通过，两个前端包 typecheck 和 agent-web production build 通过。
+- 六条相关 Chromium E2E 6/6 通过，覆盖所属人 compacted resend、分享成员编辑重发、compact 摘要刷新、revision/持久化竞态原位同步、所属人权威消息同步和共享 actor/子 Agent/历史增强保留；竞态用例同时断言会话树请求不增加、历史加载不出现且 scrollTop 不变。
+- 使用 JDK 25、`.env.test`、既有字节一致 Flyway compatibility location 和 `--without-workflow` 重启，21 个 Maven module 构建成功；backend readiness、frontend 与 opencode-manager 均健康，未修改环境文件或 Flyway 历史。
+- 在真实 `888888888`/`wr` 同一分享会话中，A 将 `仅答复 478` 撤回并改为 `仅答复 LIVE_RESEND_INPLACE_20260811_1408`；B 不刷新即看到新问题和最终答案。100ms 连续采样期间 A/B 均未出现历史加载，旧问题消失、B USER 总数保持 5，双端最终 USER 共用平台消息 ID `msg_abbf1a8c8550455992a3b7af91c642c3`。
+
+### Result
+
+- 分享撤回重发现在能在 revision 与持久化乱序下实时收敛；B 无需刷新，A/B 不再通过整会话重载切换新消息，自动化验证滚动位置保持不变。
+- 本次没有新增或变更 API、DTO、RunEvent 协议、数据库、Flyway、SQL、安全规则、generated SDK 或 OpenCode 只读源码；性能影响仅限活跃撤回竞态时最多 6 次单页消息补拉，成功即停止。
+- backend、frontend、opencode-manager 当前已运行；Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD` 未启动，未新建分支。
+
+## 2026-08-11 - 重启本地服务并确认跨服务器个人工作区根因
+
+### Why
+
+- 用户在分享页返回“新建对话”后，`wr` 首次发送报“工作空间与 agent 不在同一服务器”，并怀疑刚切换网络后本地服务仍沿用旧状态；同时需要确认企业多后台部署是否会遇到同类问题。
+
+### What
+
+- 本次未修改业务代码、API、事件、数据库、环境文件或稳定文档；仅完成三服务冷重启和只读诊断。
+- 重启后确认 `wr` 的唯一 ACTIVE 个人工作区 `wrk_6e620f37a7a648f6a3e34293789fa86a` 仍绑定旧 `linuxServerId=192.168.100.115`，物理根路径属于 `/Users/rina/...`；当前 ACTIVE Agent binding 为 `kakadeMacBook-Pro.local:4096`，因此不是刷新或本次网络切换可以安全回绑的同机目录。
+- 旧服务器最新后端心跳停在 2026-07-02，且没有个人工作区搬迁记录；自动搬迁只能由仍持有源 worktree 的源服务器发现、导出并传输，源服务器离线时不能在目标机伪造或强制改绑。
+
+### How
+
+- 使用 JDK 25、`.env.test`、`test` profile 和 `--without-workflow` 执行完整构建；21 个 Maven 模块和 agent-web production build 均成功。首次启动因共享测试库已执行但当前 checkout 缺失 `20260810170000` 而失败，未执行 Flyway repair 或改历史表。
+- 复用既有临时 compatibility location，并确认其中 migration 与通知中心 checkout 原文 SHA-256 同为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`；随后复用刚构建的产物完成 backend、opencode-manager、frontend 冷重启。
+- 后端 health/readiness 均为 `UP`，前端返回 HTTP 200，登录 CORS 正确；manager WebSocket 已连接，受管 4096/4104 OpenCode 均为 `HEALTHY`，无遗留重启脚本进程。
+
+### Result
+
+- 本地核心三服务当前可用；Workflow 因本机缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 按官方 `--without-workflow` 模式保持未启动。
+- 当前 `wr` 旧工作区的跨服务器冲突仍会保留，正确恢复方式是让旧 `192.168.100.115` 以原稳定身份和原磁盘重新上线完成搬迁，或在当前服务器新建个人工作区；不能通过重启、Flyway 操作或直接改 `linux_server_id` 绕过。
+- 企业多后台架构已提供稳定服务器身份、Java 间路由和个人 worktree 搬迁，但必须固定且唯一配置 `TEST_AGENT_LINUX_SERVER_ID`、配置可达的 `TEST_AGENT_SERVER_ADVERTISED_HOST`、保留与身份绑定的持久化本地盘，并在源服务器下线前完成排空/搬迁；当前前端仍会在搬迁窗口误把异服 recent 工作区当作可发送，这是需另行修复的产品缺陷。
+## 2026-08-10 - 新增工作台通用通知中心并接入会话分享
+
+### Why
+
+- 被分享人此前需要手工复制分享链接并输入地址，工作台缺少可实时发现、可追溯且不依赖外部渠道的通用站内通知入口。
+- 首期需要把会话分享生命周期接入通知，同时保持“成功访问分享后才已读”、服务端受控跳转、跨 Java 低敏广播和既有“分享给我”入口兼容。
+
+### What
+
+- 新增 `test-agent-notification` 模块与通知领域端口，提供创建/去重/更新/失效/已读、未读统计、事务提交后本机及跨节点变化、25 秒心跳、30 秒数据库校准和 90 天清理；HTTP/SSE 与 MyBatis 实现分别位于 API、persistence 模块。
+- 新增 `user_notifications` 及 migration `V20260810170000__user_notifications_create_notification_center.sql`，只保存受控 `SESSION_SHARE + shareId` 和安全标题/摘要快照；回填仅覆盖仍有效分享，并且只有严格晚于成员 `shared_at` 的成功读取审计才回填已读。migration 已在本机保留 PostgreSQL 执行，源码、persistence JAR、应用嵌套 JAR SHA-256 均冻结为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`。
+- 分享新增/重新加入/重新激活创建新通知，普通权限或有效期保存更新现有通知，移除/撤销/归档失效；通过通知、“分享给我”或旧链接鉴权成功后统一幂等已读，已读同步失败只记录低敏告警，不阻断已获授权的访问。
+- 前端顶栏新增工行红通知铃铛、角标和约 400px 面板，覆盖全部/未读、分页、加载/空态/错误/失效、键盘、Esc、点击外部关闭与焦点返回；有效分享在新标签页打开 `/s/{shareId}`，复制链接保留为备用。登录身份或工作台模式切换会使旧分页请求失效并清空旧快照，避免跨用户短暂回显。
+- 同步 shared-types、backend-api、event-stream-client 以及 HTTP、事件流、数据库、安全、模块依赖和前后端 README；未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+### How
+
+- 后端通知/runtime/API/MyBatis 定向测试通过：notification 7 项、runtime 24 项、API 3 项、persistence 12 项；真实 PostgreSQL 通知仓储/回填 1 项和全部已知 Flyway history 升级 18 项通过。`mvn clean package -DskipTests` 通过，migration 三处成品 SHA 一致。
+- 完整 `mvn clean package` 两次均被本机 Docker Desktop 冷启动/资源时序阻断：一次 MySQL Testcontainers 超过 120 秒，另一次 PostgreSQL 启动与既有并发模型用例超时；运行到的 persistence 129 项没有断言失败。没有通过延长业务断言、`repair` 或 `outOfOrder` 掩盖该环境失败。
+- 最终前端全量 Vitest 为 124 文件、1907 passed / 1 skipped；15 个 workspace typecheck、production build 通过，Chromium/Firefox/WebKit 分享专项 27/27 通过。构建仅保留既有 jsdom Canvas 提示和大 chunk 警告。
+- 原计划启动命令读取原工作区 `.env.test` 后，Workflow 初始化因数据库账号缺少 `CREATEROLE/CREATEDB` 被环境阻断；未修改环境或数据库权限。随后使用同一脚本 `--without-workflow` 从新 worktree 启动 backend、frontend、manager，health/readiness 均为 `UP`，前端 3000 返回 200，通知未登录为 401，CORS 与 manager WebSocket 正常。
+- 提交前回顾全部 `.agents/session-log*.md`，确认未改写已执行 migration、未覆盖其它提交者成果，也未发现冲突标记。
+
+### Result
+
+- 工作台通知中心及会话分享首期链路已实现并由模块、真实 PostgreSQL、前端单测、三浏览器 E2E、生产构建和本地运行态共同验证；广播异常时由初始快照与 30 秒数据库回源恢复，通知不携带任意 URL、分享正文或凭据。
+- 当前可验证地址为 `http://127.0.0.1:3000/`，后端为 `http://127.0.0.1:8080/`。本地没有可用的文档示例登录账号，因此未在真实本地库执行登录后的双用户手工流程；该流程已由三浏览器 E2E 覆盖。Workflow 仍因本地数据库管理权限不足未启动，核心通知服务不依赖 Workflow。
+- 当前 backend、frontend、opencode-manager 均由 `/Users/kaka/Desktop/intelligent-test-agent-notification-center` 运行；后端 health/readiness 与前端均为 HTTP 200，通知未认证请求正确返回 401，登录 CORS 预检正确。
+- manager 在重启窗口重新连接后无持续断线或解码循环；运行中后端已确认加载通知 mapper 与完整 Flyway 主链。端口 4104 的存量未受管健康探测仍返回 `PROCESS_NOT_MANAGED`，不影响本次三服务健康与通知接口。
+- Workflow 因 `/Users/kaka/Desktop/intelligent-test-agent/.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD`，按仓库官方 `--without-workflow` 模式保持未启动；未自动推送。
+
+## 2026-08-11 - 修复通知中心 worktree 的 OpenCode 启动失败
+
+### Why
+
+- 通知中心 worktree 重启后，用户初始化 TestAgent 进程在 `STARTING_PROCESS` 阶段持续返回 `OPENCODE_UNAVAILABLE / 公共 Agent 配置源目录不可用`，manager 未收到 `start` 命令。
+- 数据库 macOS 通用参数 `SYS_DATA_ROOT_DIR` 的历史值为 `$TESTAGENT/.testagent`；仅在启动命令设置 `SYS_DATA_ROOT_DIR` 仍不足以改变 Java 的 `$TESTAGENT` 引用解析，脚本默认把兼容变量 `TESTAGENT` 指向当前通知中心 worktree，导致公共配置被解析到只有服务器标识的新空目录。
+
+### What
+
+- 未修改业务代码、`.env.test`、数据库参数、generated SDK 或 OpenCode 源码；从通知中心 worktree 重启时显式设置 `TESTAGENT=/Users/kaka/Desktop/intelligent-test-agent` 与 `SYS_DATA_ROOT_DIR=/Users/kaka/Desktop/intelligent-test-agent/.testagent`，继续复用原测试环境的持久化 OpenCode session 和公共配置。
+- 保持 `TEST_AGENT_ROOT=/Users/kaka/Desktop/intelligent-test-agent-notification-center`，因此运行代码和构建产物仍来自通知中心 worktree，仅持久化数据根复用原测试环境。
+- 将独立 worktree 的完整启动命令、双变量原因和 Workflow 条件写入 `.agents/skills/restart/SKILL.md` 与 `docs/guides/ai-workflow.md`，不再只依赖会话日志交接。
+
+### How
+
+- 先以数据库初始化进度、backend trace 和 manager 日志交叉确认失败发生在 `OpencodeProcessConfigLinkService.switchToShared`，并核对新 worktree 的公共配置目录缺失、原数据根下 `opencode.jsonc/agents/skills/tools` 完整。
+- 使用 JDK 25、`test` profile、原 `.env.test`、`--skip-backend-build --skip-frontend-build --without-workflow` 重新启动 backend、opencode-manager 和 frontend；随后在真实本地工作台以用户 `888888888` 再次点击“启动进程”。
+- manager 对 4104 执行 `start` 返回 `STARTED`，公共状态查询在进程短暂预热后连续返回 `HEALTHY`；backend readiness、frontend、OpenCode `/global/health` 和 `/global/config` 均为 HTTP 200，4104 由 PID 54658 实际监听。
+
+### Result
+
+- 工作台显示“TestAgent 进程可用”，地址 `kakadeMacBook-Pro.local / 127.0.0.1:4104`；文件树恢复，运行态加载到 20 个 Skill 和 1 个 MCP，输入框和对话操作重新可用。
+- backend、frontend、opencode-manager 三个 screen 会话保持运行；Workflow 仍因 `.env.test` 缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 按既有 `--without-workflow` 模式未启动。
+- 后续从该通知中心 worktree 重启并复用原本机测试数据时，必须同时保留 `TESTAGENT` 和 `SYS_DATA_ROOT_DIR` 两个显式值，不能只设置后者。
+
+## 2026-08-11 - 将通知中心分支合并回 release 并切换运行态
+
+### Why
+
+- 用户要求把 `codex/user-notification-center` 的完整内容合并回当前 release，并从 release 工作区重新启动，确保后续验证不再依赖功能 worktree。
+
+### What
+
+- 在 `/Users/kaka/Desktop/intelligent-test-agent` 的 `codex/release-enterprise-20260801` 上以非快进方式合入通知中心提交 `2b8b497b4f6700c47a57014eb1b290bb6d1e4c6c`，生成 merge 提交 `7035e1e1f19339ef53ba60480cc0a920888c16eb`，无冲突；合并后功能分支是 release 的祖先且两者树内容一致。
+- 合并范围共 77 个文件、4200 行新增和 24 行删除，包含通知领域模块、MyBatis/Flyway 持久化、分享生命周期、HTTP/SSE、前端通知铃铛、测试和稳定文档；独立 worktree 的 `TESTAGENT`/`SYS_DATA_ROOT_DIR` 启动要求已经写入 `.agents/skills/restart/SKILL.md` 与 `docs/guides/ai-workflow.md`。
+- 未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未重命名、重排或改写已执行 migration。
+
+### How
+
+- 合并前确认 release 和功能 worktree 均干净、release 原提交为功能分支祖先，并检查差异不含环境文件或受保护源码；提交前再次回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记。
+- 从 release 使用 JDK 25、`test` profile、主工作区 `.env.test` 和 `--without-workflow` 完整构建：后端 22 个 Maven 模块 `clean package -Dmaven.test.skip=true` 成功，agent-web production build 成功；功能树在合并前已通过通知/分享后端定向测试、真实 PostgreSQL 18 套历史升级、前端 1926 passed / 1 skipped、15 项 typecheck 和三浏览器分享 E2E 42/42。
+- 首次重启虽然 readiness 返回 200，但监听 8080 的仍是功能 worktree 旧 JAR；按 PID 和实际命令路径确认后，仅停止该旧 screen/进程组，再复用已构建 release 产物重启，并二次核对监听进程路径，避免把其它 worktree 的健康响应误当作当前分支启动成功。
+
+### Result
+
+- backend、frontend、opencode-manager 均已由 `/Users/kaka/Desktop/intelligent-test-agent` 运行；后端 readiness 与前端为 HTTP 200，通知未认证请求为 401，OpenCode 4096/4104 `/global/config` 均为 200，且没有遗留重启脚本进程。
+- Workflow 因 `.env.test` 未配置 `WORKFLOW_DEV_REDIS_PASSWORD`，按既有 `--without-workflow` 模式未启动；本次未推送远端。
+
+## 2026-08-11 - 基于最新 release 重建企业增量包并补齐 Flyway 成品门禁
+
+### Why
+
+- 用户要求只基于当前本地最新 `codex/release-enterprise-20260801` 重新打企业增量包；开始时分支正在把本地通知中心提交 rebase 到远程 release，不能从冲突中间态构建。
+- rebase 后当前主链同时包含通知中心 `20260810170000` 与 ITL/TPOT `20260810234154`，两份 migration 已进入本机需保留 PostgreSQL history，但企业内层、外层和安装复验脚本尚未锁定它们的最终 JAR 字节。
+
+### What
+
+- 完成 release rebase，保留远程会话重发、工作空间等最新修复和本地通知中心 4 个提交；冲突中同时保留通知实时 E2E、历史重发归因回归及双方稳定文档，没有选择整侧覆盖。
+- `package-release.sh`、`package-two-backend-complete.sh`、`deploy-internal-release.sh` 新增通知中心和 Token 延迟输入 migration 的固定 SHA-256 门禁；`FlywayMigrationNamingTest` 同步冻结源码字节。
+- 企业 README、多后台执行单和数据库文档改为支持三种明确历史：从 `20260809110000` 首次增加四条、已部署会话分享后只增加后两条、四条都成功后的故障重部署不新增 history；任何部分、倒序、未知 checksum 或兼容链混入都停止。
+- 使用上一完整包中 checksum 通过的 `.4/.114/.2` 节点配置包，只重建当前 release 的后端、前端和内层发布物；worker runtime/toolbox 指纹未变并标记 `reuse`，Workflow/LobeHub 保持 `disabled`，未携带对应大制品。
+
+### How
+
+- 本机保留 PostgreSQL 只读确认 `20260810170000/-933121365`、`20260810234154/-1179183001` 均成功；真实 PostgreSQL 通知仓储 1/1、已知历史升级 18/18、migration 字节冻结 10/10、Spring Bean 装配 1/1 全部通过，默认 `outOfOrder=false`，未执行 repair 或改 history。
+- rebase 后 agent-web typecheck 通过，通知中心/FigmaShell Vitest 61/61、两条冲突相关 Chromium 分享 E2E 2/2 通过；正式打包再次通过后端装配、21 模块构建、前端 `vue-tsc` 和 Vite production build。
+- 首轮内外层 ZIP、三台节点包、ZIP CRC、内外层逐字节一致、组件清单及两份新 migration 的 persistence JAR 字节均通过；稳定组件 SHA-256：app JAR `4a80d55a2c0f054a0a44b8210b04b324a8aad554fe68aac32976b5f18c986c9b`，persistence JAR `00044a3d29bc971bdcea19454bf069dfd014599a4e2e7b35eaf06355a4812a10`，XXL integration JAR `d30f9f3c70bd870fb953a01a6d994a6880039fd467c2f3fee6ec41207eaf92f7`，前端归档 `70f212850cb367f07276f0a8d94f8cf4fe6ed9ae902cbfe5e6d78099a5214a10`，`opencode-models.json` `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
+
+### Result
+
+- 最终包由提交 `20deb0c6e` 的当前 release 内容重封：内层 `test-agent-internal-release.zip` SHA-256 为 `453a98163e53707bd34933e4078ebf6f78dbbec1ddf80c13a1f5e2e25d10db9a`，外层 `test-agent-two-backend-complete.zip` 为 `a7a50459e53c3e6cb623465cc1f36091c66b946b704ef06b9b974aaa311e0a5b`；外层内嵌内层与仓库 dist 逐字节一致。
+- 最终独立解包复验确认外层/内层 SHA 文件、两层 ZIP CRC、三台节点包 checksum、组件清单、`opencode-models.json`、部署手册、session log 和两份新 Flyway JAR 资源全部通过；固定名发布物位于 `deploy/internal/dist/`。
+- 本条最终 hash 是制品生成后的仓库追溯记录，不再据此重封 ZIP，否则 ZIP 自身 hash 会再次变化；包内已包含前一提交中的完整发布过程记录。
+- 本次未修改 migration SQL、生产 API/DTO/RunEvent、环境文件、generated SDK 或 OpenCode 只读源码；企业目标库完整 `flyway_schema_history` 仍必须在部署前取得，未取得前不把包描述为已获现场部署准入。
+
+## 2026-08-11 - 将最新 release 合入记忆分支并补齐迁移兼容
+
+### Why
+
+- 用户要求以本地最新 `codex/release-enterprise-20260801` 为基线重新合并记忆分支，随后再回合 release；最新 release 相比记忆分支已合入点新增 28 个提交、168 个文件，并加入版本更高的 `20260810234154` migration。
+- 已部署最新 release 的数据库若仍加载原记忆兼容版本 `20260810173117`，会在默认 `outOfOrder=false` 下拒绝升级，必须为该已执行历史增加严格递增的前向兼容路径。
+
+### What
+
+- 将 release 提交 `380f942343013d41fd46931fa5a8f6288d0d7988` 合入 `codex/qa-agent-memory-v1`；三个文档冲突同时保留通知中心、消息层穿透和最新重发权限语义，没有整侧覆盖业务代码。
+- 新增前向兼容 migration `V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`，仅在分享历史与 `20260810234154` 已执行、且旧记忆兼容版本未执行时选择；原 `20260810173117` 与新版本 SQL 字节一致，SHA-256 均为 `44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984`。兼容装配拒绝旧/新路径混用，不启用 `outOfOrder`、`repair` 或历史表改写。
+- 修复 `MyBatisUserNotificationRepositoryPostgresqlIntegrationTest` 使用固定过期时间导致 2026-08-11 后必然失败的问题：仅将测试通知有效期改为相对当前时钟的一天后，确定性审计时间保持不变；同步 persistence/app README、数据库部署文档和发布包 migration 字节门禁。
+
+### How
+
+- 真实 PostgreSQL 已知历史升级 20/20、Flyway 命名与字节冻结 10/10 通过；通知 PostgreSQL 用例首次准确暴露固定时间失效，修复后单测 1/1 通过。后端相关 notification/workspace/runtime/API 定向测试通过，JDK 25 下 23 模块 `mvn clean package -DskipTests` 成功。
+- 前端全量 Vitest 127 文件为 1944 passed / 1 skipped，agent-web typecheck 与含用户手册的 production build 通过；通知实时打开、已读和失效 Chromium E2E 1/1 通过。发布脚本与重启脚本 `bash -n`、AI 文档校验、暂存差异空白检查及两层 JAR migration 字节校验均通过。
+- 合并前将用户原有 6 个未提交前端文件安全存入 stash，未把它们纳入本次提交；提交后将恢复为未暂存状态。提交前回顾全部 `.agents/session-log*.md`，未发现需要覆盖的并行成果；未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+### Result
+
+- 记忆分支现兼容“尚未执行 token-latency migration 的 release 历史”和“已执行最新 release migration 的历史”两条严格递增升级链；API、RunEvent 与已有 migration 字节保持兼容。
+- 本条只记录 release 到 mem 的集成和验证；mem 回合 release、用户未提交改动恢复以及最终独立前后端启动由同一任务后续步骤完成。

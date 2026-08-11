@@ -1276,12 +1276,14 @@ PostgreSQL migration 与 XXL V9 则应全部成功且 checksum 不变；当前�
 
 | 表 | 口径与边界 |
 |---|---|
-| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/first_token_ms/stream_complete_ms/trace_id/ucid/started_at`。`first_byte_ms` 是响应头耗时，`first_token_ms` 是首个真实模型输出 SSE data 耗时，`stream_complete_ms` 是收到 `[DONE]` 或非空 `finish_reason` 的耗时；后二者在未达到对应协议阶段时为空。`duration_ms` 是端到端调用耗时，不等同于上游流完成耗时。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；`error_class` 只保存剥离 Reactor 包装后的异常类简名。索引 `(provider_id, started_at desc)`、`(outcome, started_at desc)`、`(started_at)`；保留 30 天。 |
+| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/first_token_ms/last_token_ms/stream_complete_ms/output_token_count/trace_id/ucid/started_at`。`first_token_ms`、`last_token_ms` 是首末有效输出到达耗时，`output_token_count` 是上游返回的准确输出 Token 数，三者共同计算 ITL/TPOT；`stream_complete_ms` 是收到 `[DONE]` 或非空 `finish_reason` 的耗时。TTFT 与 ITL/TPOT 箱线图在最长 31 天范围内直接从明细计算五数概括，不增加冗余聚合列。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；索引与 30 天保留策略不变。 |
 | `internal_model_call_stats_hourly` | 按 `(stat_hour, provider_id, model, endpoint, source, outcome)` 原子累加请求数、端到端耗时，以及首 token/流完成各自的 sum/max/count；两个耗时三元组只统计对应阶段存在的调用，可准确计算平均/最大值；小时聚合无法还原 P90/P95 或分布；`stat_hour` 由写入方截断到小时，保留 180 天。 |
 | `internal_model_probe_status` | 每 provider 一行的最近探活状态：`last_outcome/last_http_status/last_error_class/last_duration_ms/last_probed_at/last_success_at/consecutive_failures/trace_id/updated_at`；`consecutive_failures` 由 SQL 依据本次结果成功归零、失败 +1。 |
 
-写入 SQL 位于 `InternalModelObservabilityMapper.xml`：明细 insert 与小时聚合 upsert 在同一事务完成（PostgreSQL `ON CONFLICT` 双实现，H2 用 MERGE），探活状态 upsert 连续失败计数由数据库原子维护。明细与聚合保留期由 XXL 任务
+写入与查询 SQL 位于 `InternalModelObservabilityMapper.xml`：明细 insert 与小时聚合 upsert 在同一事务完成（PostgreSQL `ON CONFLICT` 双实现，H2 用 MERGE），TTFT 与 ITL/TPOT 五数概括使用数据库 `percentile_cont` 在明细上一次计算，探活状态 upsert 连续失败计数由数据库原子维护。`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 新增 `last_token_ms`、`output_token_count` 及非负/时序约束；既有记录保持空值，不伪造历史 ITL/TPOT。明细与聚合保留期由 XXL 任务
 `opencode-runtime.internal-model-observability-retention` 每日执行清理，不依赖 application 层逐条扫描。
+
+`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 已进入需要保留的真实 PostgreSQL 历史，原始 SHA-256 固定为 `f684bd5d323d3816fc7ae982eff7b45256763f467f540020af41753c04fb837b`。`FlywayMigrationNamingTest`、内层发布、外层封装和现场安装复验必须从 persistence JAR 读取该资源并保持同一字节；后续不得改名、改注释或改 SQL。
 
 ## V20260808143301 首 token 观测指标
 
@@ -1313,21 +1315,23 @@ migration 不写默认、测试或演示工具数据。全部运行期分页、�
 
 远程主链新增的会话分享迁移版本 `20260809170000`、`20260809170001` 低于上述个人库最高版本，不能直接倒序补跑。兼容装配会在精确匹配 QA Memory 扩展 history 后过滤两份低版本主 migration，并加载 `V20260810110001__session_shares_create_collaboration_share_after_qa_memory.sql` 与 `V20260810110002__session_messages_add_delegated_attribution_after_qa_memory.sql`；两份前向资源分别与对应主 migration 字节一致。只执行到 `20260809230000` 的中间态 history 会先顺序补齐 `20260810090000`，再执行三份 `20260810110000` 至 `20260810110002` 前向 migration。主/前向路径混用、缺少基础版本、未知 checksum 或不完整分享 history 均拒绝启动。
 
-反向合并也必须显式兼容：已执行 `20260809170000`/`20260809170001` 会话分享主链、但从未执行较低版本 QA Memory 的 release 数据库，不能倒序补跑 `20260809120000`。兼容装配会过滤三份 QA Memory 低版本主资源，并加载 `db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql`；该 migration 在一次 PostgreSQL 事务中按三份已冻结 SQL 的原始语义建立治理表、双 Embedding 字段和 Mem0 逻辑身份唯一约束，SHA-256 固定为 `44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984`。后续启动继续使用同一隔离 location；低版本 QA 主链与该补偿版本混用、补偿版本缺少会话分享主 history，均拒绝启动。
+反向合并也必须显式兼容：已执行 `20260809170000`/`20260809170001` 会话分享主链、但从未执行较低版本 QA Memory 的 release 数据库，不能倒序补跑 `20260809120000`。兼容装配会过滤三份 QA Memory 低版本主资源；若该库尚未执行 `20260810234154`，加载 `db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql`；若已执行 release 当前最高的 `20260810234154`，则加载更高版本 `db/migration-compat/qa-memory-after-token-latency-inputs/V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`，避免新补偿自身再次倒序。两份补偿 SQL 字节完全一致，均在一次 PostgreSQL 事务中按三份已冻结 SQL 的原始语义建立治理表、双 Embedding 字段和 Mem0 逻辑身份唯一约束，SHA-256 固定为 `44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984`。后续启动继续使用已经落库的原隔离 location；新旧补偿路径混用、低版本 QA 主链与任一补偿版本混用、补偿版本缺少对应 release history，均拒绝启动。
 
 空库或低于 `20260809120000` 的旧基线仍按“外部 API → QA Memory 基础 → 会话分享 → QA Memory 扩展”执行默认主链。已执行 QA Memory 基础、但尚未执行扩展的中间态可以先顺序执行会话分享主 migration，再继续执行 QA Memory 扩展；完整主链重启时允许两组低版本合法共存，不得误切到会话分享或 QA Memory 的高版本补偿路径。
 
 企业现网上一轮已部署平台源码提交为 `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`；两次现场启动日志均显示
 Flyway 已校验 92 条 migration、PostgreSQL 当前版本为 `20260809110000` 且无需迁移。该日志不能代替完整
-`flyway_schema_history`：下一次部署前仍须导出全部 `installed_rank/version/script/checksum/success`。正常企业主链
-只允许从该版本顺序新增 `20260809170000`、`20260809170001`，文件 SHA-256 分别为
-`b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`、
-`dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`；`20260810110001/02` 仅属于精确匹配的
-QA Memory 扩展兼容路径，不得混入正常企业主链。共享 XXL MySQL 本轮准入预期为 V1-V11 全部成功且不新增
-history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或只新增两条会话 migration 中的一条时
-必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
+`flyway_schema_history`：下一次部署前仍须导出全部 `installed_rank/version/script/checksum/success`。仍停留在该版本的
+企业库首次升级合并后的主链时，应依次新增 QA Memory 基础 `20260809120000`、会话分享 `20260809170000/01`、
+QA Memory 扩展 `20260809230000`/`20260810090000`、通知中心 `20260810170000` 和时延输入
+`20260810234154`。已经由 release 增量包执行到 `20260810234154`、但从未执行 QA Memory 的数据库，不再倒序
+加载上述三条 QA Memory 主 migration，而只新增隔离补偿 `20260811170050`；只执行到会话分享主链的旧 release
+历史则使用 `20260810173117`，再顺序执行其后的通知和时延输入 migration。两条 QA Memory 补偿不可混用，
+`20260810110001/02` 仅属于精确匹配的 QA Memory 扩展兼容路径，也不得混入正常企业主链。共享 XXL MySQL 本轮
+准入预期为 V1-V11 全部成功且不新增 history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或
+部分历史出现时必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
 
-正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
+正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移、通知中心和 Token 延迟输入 migration 的 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
 
 同一 migration 只写入四个生产必需且默认禁用/不可用的公共参数：
 
@@ -1735,3 +1739,22 @@ having count(*) > 1;
 ```
 
 上线顺序固定为：先备份并完成所有已知真实 PostgreSQL 基线升级验证，再发布含 migration 的全部后端节点，确认新旧请求均由能识别分享上下文的节点处理后，最后发布前端。滚动期间不得让新前端把分享头发给旧 Java。打包后还要解出 `test-agent-persistence-*.jar`，逐字节比对上述两个 migration 与已完成真实升级测试的源码。
+
+## V20260810170000 工作台通用通知中心
+
+`V20260810170000__user_notifications_create_notification_center.sql` 是开发期候选 migration，当前源码 SHA-256 为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`。在任何需保留数据库执行后，文件名和字节必须冻结；执行前仍要核对目标环境 `flyway_schema_history`，确认版本高于该环境已执行主链或已选择的隔离兼容链。
+
+migration 创建 `user_notifications`：
+
+- `notification_id` 和 `dedup_key` 分别唯一；接收人删除时级联清理，发送人删除时置空。
+- `type` 首期只允许 `SESSION_SHARED`，`action_type` 首期只允许 `SESSION_SHARE`；`action_target_id` 只保存内部 `shareId`，禁止任意 URL。
+- `ACTIVE/INVALIDATED` 与 `invalidation_reason/invalidated_at` 由约束保持一致；`read_at`、`expires_at`、创建/更新时间和 `trace_id` 用于未读、保留和审计关联。
+- 标题和摘要只保存通知展示快照，禁止消息正文、文件路径、Token、终端输入和第三方原始错误。
+
+回填只选择 `ACTIVE` 分享、`ACTIVE` 成员、`ACTIVE` 会话、`ACTIVE` 所属人且尚未到期的数据，并使用成员 `shared_at` 作为通知 `created_at`。若同一成员在本次 `shared_at` 之后已有成功 `READ_ACCESS_GRANTED` 审计，取其最大 `occurred_at` 回填 `read_at`；旧授权代际的访问审计不会误判新授权已读。过期、撤销、移除、已归档或所属人停用的分享不回填。回填去重键使用 `SESSION_SHARE:LEGACY:{shareId}:{recipientUserId}`，通知 ID 使用迁移内部稳定前缀，不与运行期 `ntf_` ID 冲突。
+
+运行期关系型访问全部通过 `UserNotificationMapper.xml`。未读查询不只检查通知行，还左连接当前分享、成员、会话和所属人事实；因此通知生命周期回写暂时失败时，已撤权分享仍不可点击且不计入未读。创建按 `dedup_key` 原子去重，普通分享设置更新只更新活动通知快照，重新加入或重新激活会失效旧代际并创建新行。每日任务删除严格早于 90 天边界的通知，失效或过期记录在保留期内继续作为历史展示。
+
+该版本高于 QA Memory 扩展兼容链的 `V20260810110000` 至 `V20260810110002`，通知本身无需复制第二份兼容 SQL：既有 `DatabaseMigrationCompatibilityCustomizer` 仍只过滤不适配的低版本主分享 migration，通知 migration 由主 location 在分享前向迁移之后顺序执行。反向把 QA Memory 合入已执行通知和 `V20260810234154` 的 release 数据库时，使用的是独立的 `V20260811170050` QA Memory 补偿，不是通知迁移副本。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 对每套已知已部署 history 升级到当前 HEAD 后统一断言 `user_notifications` 表和关键列存在；通知仓储 PostgreSQL 集成测试另覆盖空库、主分享基线、审计回填和查询口径。
+
+打包后必须分别从 persistence JAR 和最终应用 JAR 读取 `db/migration/V20260810170000__user_notifications_create_notification_center.sql`，与已测试源码计算 SHA-256；三者不一致不得发布。禁止通过 `repair`、`outOfOrder` 或手工修改 `flyway_schema_history` 处理冲突。

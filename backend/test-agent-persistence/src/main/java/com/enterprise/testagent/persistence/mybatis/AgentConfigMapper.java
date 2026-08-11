@@ -28,4 +28,9 @@ public interface AgentConfigMapper {
             @Param("createdByUserId") String createdByUserId,
             @Param("linuxServerId") String linuxServerId,
             @Param("status") String status);
+
+    /** 按目标服务器有界查询缺少公共个人 worktree 的 ACTIVE 超级管理员。 */
+    List<String> findMissingPublicWorktreeUserIds(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("limit") int limit);
 }

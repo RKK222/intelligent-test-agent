@@ -132,6 +132,7 @@ export type TimelineRow =
       userMessageId: string;
       messageId: string;
       partId: string;
+      busy: boolean;
       previousAssistantPart: boolean;
       showAssistantHeader: boolean;
     }

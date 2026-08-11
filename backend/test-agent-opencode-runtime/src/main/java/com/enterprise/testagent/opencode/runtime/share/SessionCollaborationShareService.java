@@ -22,6 +22,7 @@ import com.enterprise.testagent.domain.sessionshare.SharedSessionListItem;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
+import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import java.security.SecureRandom;
 import java.security.MessageDigest;
 import java.time.Clock;
@@ -36,11 +37,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** 会话协作分享管理、列表和访问上下文编排。 */
 @Service
 public class SessionCollaborationShareService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(SessionCollaborationShareService.class);
     private static final Duration AUDIT_RETENTION = Duration.ofDays(365);
 
     private final SessionShareRepository shareRepository;
@@ -48,6 +52,7 @@ public class SessionCollaborationShareService {
     private final UserRepository userRepository;
     private final Clock clock;
     private final SecureRandom secureRandom;
+    private UserNotificationApplicationService notificationService;
 
     /** 生产环境固定使用 UTC 时钟和 256 位 SecureRandom 分享标识。 */
     @Autowired
@@ -91,6 +96,8 @@ public class SessionCollaborationShareService {
         Instant now = clock.instant();
         List<SessionShareMembership> memberships = resolveMembers(actor, memberCommands, now);
         SessionShare existing = shareRepository.findBySessionId(sessionId).orElse(null);
+        boolean reactivated = existing != null
+                && (existing.status() == SessionShareStatus.REVOKED || !existing.activeAt(now));
         SessionShare result;
         String action;
         if (existing == null) {
@@ -107,17 +114,21 @@ public class SessionCollaborationShareService {
             if (expectedVersion == null || expectedVersion.longValue() != existing.version()) {
                 throw versionConflict(existing.version(), expectedVersion);
             }
-            result = existing.status() == SessionShareStatus.REVOKED || !existing.activeAt(now)
+            result = reactivated
                     ? existing.reactivate(expiresAt, memberships, now, traceId)
                     : existing.update(expiresAt, memberships, now, traceId);
             if (!shareRepository.update(result, expectedVersion)) {
                 throw versionConflict(existing.version(), expectedVersion);
             }
-            action = existing.status() == SessionShareStatus.REVOKED || !existing.activeAt(now)
+            action = reactivated
                     ? "SHARE_REACTIVATED"
                     : "SHARE_UPDATED";
         }
         appendAudit(result, actor, action, "SESSION", sessionId.value(), "SUCCESS", null, traceId, now);
+        if (notificationService != null) {
+            notificationService.syncSessionShare(
+                    existing, result, session.title(), findUsername(actor), reactivated, traceId);
+        }
         return result;
     }
 
@@ -142,6 +153,9 @@ public class SessionCollaborationShareService {
         }
         appendAudit(revoked, actor, "SHARE_REVOKED", "SESSION", sessionId.value(),
                 "SUCCESS", null, traceId, now);
+        if (notificationService != null) {
+            notificationService.invalidateSessionShare(revoked.shareId(), "REVOKED", traceId);
+        }
         return revoked;
     }
 
@@ -224,6 +238,9 @@ public class SessionCollaborationShareService {
             if (audit) {
                 appendAudit(share, actor, requireChat ? "WRITE_ACCESS_GRANTED" : "READ_ACCESS_GRANTED",
                         "SESSION", share.sessionId().value(), "SUCCESS", null, traceId, clock.instant());
+                if (!ownerAccess) {
+                    markNotificationRead(actor, share.shareId(), traceId);
+                }
             }
             return context;
         } catch (PlatformException failure) {
@@ -323,6 +340,25 @@ public class SessionCollaborationShareService {
                 RuntimeIdGenerator.sessionShareAuditEventId(), shareId, sessionId, workspaceId,
                 actor, executionOwner, action, resourceType, resourceId, sha256(resourcePath),
                 outcome, errorCode, traceId, clock.instant()));
+    }
+
+    /** 生产装配注入通用通知服务；手工构造的旧单元测试可继续只验证分享领域。 */
+    @Autowired(required = false)
+    void setNotificationService(UserNotificationApplicationService notificationService) {
+        this.notificationService = notificationService;
+    }
+
+    /** 通知已读失败不能把已成功的分享鉴权改写为失败。 */
+    private void markNotificationRead(UserId actor, SessionShareId shareId, String traceId) {
+        if (notificationService == null) {
+            return;
+        }
+        try {
+            notificationService.markSessionShareRead(actor, shareId, traceId);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("分享访问成功但通知已读更新失败 actorUserId={} traceId={}",
+                    actor.value(), traceId, exception);
+        }
     }
 
     private Session requireOwnedActiveSession(UserId actor, SessionId sessionId) {

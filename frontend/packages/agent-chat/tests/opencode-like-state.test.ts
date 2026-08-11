@@ -33,6 +33,84 @@ describe("opencode-like conversation state", () => {
     expect(rows.some((row) => row.type === "assistant-part" && row.partId === "part_summary")).toBe(false);
   });
 
+  it("keeps an in-progress compaction out of the timeline until its summary is complete", () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_1", "继续任务"),
+      assistantMessage("msg_compaction", [
+        { partId: "part_compaction", type: "compaction", auto: false, overflow: false }
+      ]),
+      assistantMessage("msg_summary", [
+        textPart("part_summary", "## Objective\n正在整理", "running")
+      ])
+    ];
+
+    const runningRows = createTimelineRows(createOpencodeLikeState({ messages }));
+    expect(runningRows.some((row) => row.type === "compaction-summary")).toBe(false);
+    expect(runningRows.some((row) => row.type === "assistant-part" && row.partId === "part_summary")).toBe(false);
+
+    const completedMessages = messages.map((message) => message.id !== "msg_summary"
+      ? message
+      : assistantMessage("msg_summary", [textPart("part_summary", "## Objective\n整理完成")])) as AgentMessage[];
+    const completedRows = createTimelineRows(createOpencodeLikeState({ messages: completedMessages }));
+    expect(completedRows).toContainEqual(expect.objectContaining({
+      type: "compaction-summary",
+      summaryRef: { messageId: "msg_summary", partId: "part_summary" }
+    }));
+  });
+
+  it("keeps the compaction summary grouped across an invisible native user envelope", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "继续任务"),
+        assistantMessage("msg_compaction", [
+          { partId: "part_compaction", type: "compaction", auto: false, overflow: false }
+        ]),
+        {
+          ...userMessage("msg_compaction_envelope", ""),
+          // 原生压缩包络可能保留系统 Agent part，但界面不会把它渲染成用户消息。
+          parts: [{ type: "agent", agentId: "build" }]
+        },
+        assistantMessage("msg_summary", [
+          { partId: "part_summary_step_start", type: "step-start" },
+          { partId: "part_summary_reasoning", type: "reasoning", text: "整理较早对话", status: "completed" },
+          textPart("part_summary", "## Objective\n继续完成当前任务\n## Next Move\n运行验证"),
+          { partId: "part_summary_step_finish", type: "step-finish", reason: "stop" }
+        ])
+      ]
+    });
+
+    const rows = createTimelineRows(state);
+
+    expect(rows.filter((row) => row.type === "compaction-summary")).toEqual([
+      expect.objectContaining({
+        type: "compaction-summary",
+        summaryRef: { messageId: "msg_summary", partId: "part_summary" }
+      })
+    ]);
+    expect(rows.some((row) => row.type === "assistant-part" && row.partId === "part_summary")).toBe(false);
+  });
+
+  it("does not consume a normal answer after a visible user message as a compaction summary", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "继续任务"),
+        assistantMessage("msg_compaction", [
+          { partId: "part_compaction", type: "compaction", auto: false, overflow: false }
+        ]),
+        userMessage("msg_user_2", "提出新的问题"),
+        assistantMessage("msg_answer", [textPart("part_answer", "这是新问题的正常回答")])
+      ]
+    });
+
+    const rows = createTimelineRows(state);
+    expect(rows.some((row) => row.type === "compaction-summary")).toBe(false);
+    expect(rows).toContainEqual(expect.objectContaining({
+      type: "assistant-part",
+      messageId: "msg_answer",
+      partId: "part_answer"
+    }));
+  });
+
   it("projects root process events into a work status row after text and diff output", () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),

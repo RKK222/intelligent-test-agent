@@ -1001,6 +1001,43 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".markdown-body")).toBeNull();
   });
 
+  it("does not keep a historical or terminal text part in generating state", async () => {
+    const historicalUser = { ...userMessage("msg_user_old", "上一轮"), runId: "run_old" };
+    const historicalAnswer = {
+      ...assistantMessage("msg_assistant_old", [textPart("part_old_running", "上一轮已输出", "running")]),
+      runId: "run_old"
+    };
+    const latestUser = { ...userMessage("msg_user_new", "新一轮"), runId: "run_new" };
+    const { getByText, queryByText, rerender } = render(OpencodeTimeline, {
+      props: {
+        state: createOpencodeLikeState({
+          messages: [historicalUser, historicalAnswer, latestUser],
+          running: true,
+          runStatusesByRunId: { run_old: "SUCCEEDED", run_new: "RUNNING" }
+        })
+      }
+    });
+
+    await waitMarkdown();
+    expect(getByText("上一轮已输出")).toBeTruthy();
+    expect(queryByText("生成中")).toBeNull();
+
+    await rerender({
+      state: createOpencodeLikeState({
+        messages: [latestUser, {
+          ...assistantMessage("msg_assistant_new", [textPart("part_new_stale", "本轮已完成", "running")]),
+          runId: "run_new"
+        }],
+        running: false,
+        runStatusesByRunId: { run_new: "SUCCEEDED" }
+      })
+    });
+
+    await waitMarkdown();
+    expect(getByText("本轮已完成")).toBeTruthy();
+    expect(queryByText("生成中")).toBeNull();
+  });
+
   it("does not add a synthetic working row in a running child timeline before text output starts", async () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_root", "分析前端结构"),

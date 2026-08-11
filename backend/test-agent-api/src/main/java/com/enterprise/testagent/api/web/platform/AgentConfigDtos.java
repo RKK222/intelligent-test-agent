@@ -40,6 +40,10 @@ final class AgentConfigDtos {
     record WorktreeRequest(String baseName, String branch, String operationId, String linuxServerId) {
     }
 
+    /** 超级管理员手工触发目标服务器缺失公共个人 worktree 的有界补偿。 */
+    record PublicWorktreeCompensationRequest(String linuxServerId) {
+    }
+
     /** 公共个人 worktree 保存后只热加载当前用户运行态。 */
     record PublicRuntimeReloadRequest(String worktreeId, String linuxServerId) {
     }

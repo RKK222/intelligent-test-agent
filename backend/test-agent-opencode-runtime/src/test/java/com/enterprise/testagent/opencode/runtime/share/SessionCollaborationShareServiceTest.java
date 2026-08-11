@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -23,6 +24,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.domain.user.UserStatus;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -54,6 +56,8 @@ class SessionCollaborationShareServiceTest {
     private UserRepository userRepository;
     @Mock
     private SecureRandom secureRandom;
+    @Mock
+    private UserNotificationApplicationService notificationService;
 
     private SessionCollaborationShareService service;
 
@@ -66,6 +70,7 @@ class SessionCollaborationShareServiceTest {
                 userRepository,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 secureRandom);
+        service.setNotificationService(notificationService);
         when(sessionRepository.findById(SESSION)).thenReturn(Optional.of(session()));
         when(userRepository.findByUserId(OWNER)).thenReturn(Optional.of(user(OWNER, "ucid-owner", "所属人", UserStatus.ACTIVE)));
         when(userRepository.findByUserId(MEMBER)).thenReturn(Optional.of(user(MEMBER, "ucid-member", "协作人", UserStatus.ACTIVE)));
@@ -100,6 +105,10 @@ class SessionCollaborationShareServiceTest {
         assertThat(updated.shareId()).isEqualTo(created.shareId());
         assertThat(updated.version()).isEqualTo(1);
         assertThat(updated.membership(MEMBER)).get().satisfies(member -> assertThat(member.canChat()).isFalse());
+        verify(notificationService).syncSessionShare(
+                null, created, "分享会话", "所属人", false, "trace_share_create");
+        verify(notificationService).syncSessionShare(
+                created, updated, "分享会话", "所属人", false, "trace_share_update");
     }
 
     @Test
@@ -139,6 +148,8 @@ class SessionCollaborationShareServiceTest {
         assertThat(context.workspaceId()).isEqualTo(WORKSPACE);
         assertThat(context.delegated()).isTrue();
         assertThat(context.canChat()).isTrue();
+        verify(notificationService).markSessionShareRead(
+                MEMBER, share.shareId(), "trace_share_access");
 
         SessionShare readOnlyShare = share(false, NOW.plus(Duration.ofDays(1)));
         when(shareRepository.findByShareId(readOnlyShare.shareId())).thenReturn(Optional.of(readOnlyShare));
@@ -157,6 +168,22 @@ class SessionCollaborationShareServiceTest {
             assertThat(event.actorUserId()).isEqualTo(MEMBER);
             assertThat(event.executionOwnerUserId()).isEqualTo(OWNER);
         });
+    }
+
+    @Test
+    void successfulShareAccessIsNotBlockedWhenNotificationReadUpdateFails() {
+        SessionShare share = share(true, NOW.plus(Duration.ofDays(1)));
+        when(shareRepository.findByShareId(share.shareId())).thenReturn(Optional.of(share));
+        doThrow(new IllegalStateException("notification unavailable"))
+                .when(notificationService)
+                .markSessionShareRead(MEMBER, share.shareId(), "trace_share_notification_failure");
+
+        DelegatedOperationContext context = service.requireAccess(
+                MEMBER, share.shareId(), false, "trace_share_notification_failure");
+
+        assertThat(context.actorUserId()).isEqualTo(MEMBER);
+        assertThat(context.delegated()).isTrue();
+        verify(shareRepository).appendAudit(any(SessionShareAuditEvent.class));
     }
 
     @Test
@@ -185,6 +212,8 @@ class SessionCollaborationShareServiceTest {
         ArgumentCaptor<SessionShare> captor = ArgumentCaptor.forClass(SessionShare.class);
         verify(shareRepository).update(captor.capture(), eq(0L));
         assertThat(captor.getValue().status().name()).isEqualTo("REVOKED");
+        verify(notificationService).invalidateSessionShare(
+                revoked.shareId(), "REVOKED", "trace_share_revoke");
     }
 
     private Session session() {

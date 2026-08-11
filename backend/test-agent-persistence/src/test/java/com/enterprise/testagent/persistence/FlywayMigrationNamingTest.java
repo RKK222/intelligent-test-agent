@@ -76,6 +76,12 @@ class FlywayMigrationNamingTest {
             "V20260810090000__enforce_qa_memory_identity.sql";
     private static final String APPLIED_QA_MEMORY_IDENTITY_SHA256 =
             "619f886b093c80c1e1f71569c5c44309fa4f8184dd2791c0cf1955beb77c9af3";
+    private static final String QA_MEMORY_AFTER_SESSION_SHARE_MIGRATION =
+            "V20260810173117__qa_memories_create_governance_after_session_share.sql";
+    private static final String QA_MEMORY_AFTER_TOKEN_LATENCY_MIGRATION =
+            "V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql";
+    private static final String QA_MEMORY_RELEASE_FORWARD_SHA256 =
+            "44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984";
     private static final String SESSION_SHARE_MAIN_MIGRATION =
             "V20260809170000__session_shares_create_collaboration_share.sql";
     private static final String SESSION_SHARE_FORWARD_MIGRATION =
@@ -88,6 +94,14 @@ class FlywayMigrationNamingTest {
             "V20260810110002__session_messages_add_delegated_attribution_after_qa_memory.sql";
     private static final String SESSION_SHARE_ATTRIBUTION_SHA256 =
             "dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5";
+    private static final String USER_NOTIFICATION_MIGRATION =
+            "V20260810170000__user_notifications_create_notification_center.sql";
+    private static final String USER_NOTIFICATION_SHA256 =
+            "4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9";
+    private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_MIGRATION =
+            "V20260810234154__internal_model_call_records_add_token_latency_inputs.sql";
+    private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_SHA256 =
+            "f684bd5d323d3816fc7ae982eff7b45256763f467f540020af41753c04fb837b";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -220,6 +234,14 @@ class FlywayMigrationNamingTest {
                 APPLIED_QA_MEMORY_IDENTITY_MIGRATION,
                 APPLIED_QA_MEMORY_IDENTITY_SHA256);
         assertMigrationSha256(
+                "db/migration-compat/qa-memory-after-session-share",
+                QA_MEMORY_AFTER_SESSION_SHARE_MIGRATION,
+                QA_MEMORY_RELEASE_FORWARD_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/qa-memory-after-token-latency-inputs",
+                QA_MEMORY_AFTER_TOKEN_LATENCY_MIGRATION,
+                QA_MEMORY_RELEASE_FORWARD_SHA256);
+        assertMigrationSha256(
                 "db/migration",
                 SESSION_SHARE_MAIN_MIGRATION,
                 SESSION_SHARE_SHA256);
@@ -235,6 +257,19 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/qa-memory-extended",
                 SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION,
                 SESSION_SHARE_ATTRIBUTION_SHA256);
+    }
+
+    @Test
+    void appliedNotificationAndTokenLatencyMigrationsRemainByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                USER_NOTIFICATION_MIGRATION,
+                USER_NOTIFICATION_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_MIGRATION,
+                INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_SHA256);
     }
 
     private static void assertMigrationSha256(

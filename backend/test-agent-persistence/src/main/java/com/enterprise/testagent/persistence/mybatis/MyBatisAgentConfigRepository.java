@@ -83,6 +83,18 @@ public class MyBatisAgentConfigRepository implements AgentConfigRepository {
                 .toList();
     }
 
+    @Override
+    public List<UserId> findMissingPublicWorktreeUsers(String linuxServerId, int limit) {
+        String normalizedServer = linuxServerId == null ? "" : linuxServerId.trim();
+        if (normalizedServer.isBlank()) {
+            return List.of();
+        }
+        int boundedLimit = Math.max(1, Math.min(limit, 200));
+        return mapper.findMissingPublicWorktreeUserIds(normalizedServer, boundedLimit).stream()
+                .map(UserId::new)
+                .toList();
+    }
+
     private AgentConfigOperationRow toRow(AgentConfigOperation operation) {
         return new AgentConfigOperationRow(
                 operation.operationId(),

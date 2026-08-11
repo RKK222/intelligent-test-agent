@@ -134,7 +134,7 @@ export function fixtureUiProbe(kind: PartKind, marker: string): FixtureUiProbe {
     // 未单列 RetryPart renderer 而把既有失败信息藏掉。
     retry: { uniqueText: `retry-${marker}`, timelineExpectation: "visible", rendererSelector: ".oc-retry-row", unknownSelector: ".oc-unknown-part" },
     // compaction 的唯一 DOM 锚点由真实 Part ID 组成；uniqueText 保留其真实 tail 字段用于证据检查。
-    compaction: { uniqueText: "上下文已压缩", timelineExpectation: "visible", rendererSelector: "[data-testid='compaction-part-{partId}']", unknownSelector: ".oc-unknown-part" }
+    compaction: { uniqueText: "上下文已自动压缩", timelineExpectation: "visible", rendererSelector: "[data-testid='compaction-part-{partId}']", unknownSelector: ".oc-unknown-part" }
   };
   return probes[kind];
 }

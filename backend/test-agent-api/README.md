@@ -15,7 +15,8 @@
 - `web.platform` 承载平台自身接口，`web.agent` 承载 agent runtime 代理入口，`web.common` 承载 traceId、鉴权、限流、旧接口作废拦截和统一异常等入口支撑。
 - CORS allowed headers 包含前端可选的 `X-Test-Agent-Linux-Server-Id`、会话协作专用 `X-Test-Agent-Session-Share` 和排查专用 `X-Support-Access-Grant`。分享头只解析单个 Session/Workspace 的代操作上下文，不替换真实 `AuthPrincipal`；跨 Java HTTP/SSE 转发保留该头，目标 Java 必须重新鉴权。Linux Server 首跳提示在生产由 Nginx 静态白名单消费并在转发前删除；排查头只绑定限时排查授权，不参与用户路由。API 层仍执行既有权威路由与鉴权。
 - 会话消息、Run、夜间任务与重发 DTO additive 返回实际 actor 的用户 ID、可选当前姓名、统一认证号快照和代操作标记；同一响应页按用户 ID 缓存姓名查询，旧节点或目录无法解析时姓名保持可空。
-- 会话协作入口提供候选用户、所属人唯一分享设置、“分享给我”历史列表、分享访问上下文和单会话 runtime SSE；运行态帧包含可选 `sessionUpdatedAt` 内容修订时间，compact 成功会推进该值以触发其它参与方刷新消息。所属人管理接口不接受分享头授权；分享工作台中的会话、Run、定时任务、文件、Git、终端和反馈入口统一显式传递 `DelegatedOperationContext`，以所属人的进程和工作区执行并记录实际 actor。只读成员只能读取，`canChat=true` 才能写入；所属人专属的归档、置顶、切换、持久 fork、撤回并重新发送、设置、Agent 配置、源码/Hub、系统管理和服务器终端不会因分享放开。
+- 会话协作入口提供候选用户、所属人唯一分享设置、“分享给我”历史列表、分享访问上下文和单会话 runtime SSE；运行态帧包含可选 `sessionUpdatedAt` 内容修订时间，compact 成功会推进该值以触发其它参与方刷新消息。所属人管理接口不接受分享头授权；分享工作台中的会话、Run、定时任务、文件、Git、终端和反馈入口统一显式传递 `DelegatedOperationContext`，以所属人的进程和工作区执行并记录实际 actor。只读成员只能读取，`canChat=true` 才能写入；撤回并重新发送额外要求 actor 是源消息实际发送人，会话所属人只有在本人就是实际发送人时才能操作。归档、置顶、切换、持久 fork、设置、Agent 配置、源码/Hub、系统管理和服务器终端不会因分享放开。
+- `UserNotificationController` 暴露当前用户通知分页、幂等已读和 fetch SSE。入口只从认证主体取得接收人，不接受客户端指定用户；DTO 只返回受控 `actionType/actionTargetId` 和安全标题/摘要，不返回去重键、数据库行 ID 或任意跳转 URL。SSE 首帧为 `user-notification.snapshot`，后续变化为 `user-notification.updated`，每 25 秒发送 heartbeat comment。
 - 普通 Workspace HTTP 入口只保留查询和文件路由；服务器目录选择与创建仅通过超级管理员文件 WebSocket ticket 执行。
 - 普通与排查 Workspace 响应统一通过 `ManagedWorkspacePathResolver` 投影物理根目录：显式 `physicalRootPath` 与兼容 `rootPath` 返回同一绝对路径，数据库逻辑前缀不出 API，未托管相对路径在响应边界失败关闭。Workspace 文件 WebSocket 创建回包和托管运行态响应遵循同一契约。
 - `SupportAccessController` 暴露 `/api/internal/platform/system-management/support-access/**`：签发/撤销绑定当前登录会话的限时只读 grant、返回带来源的排查单号建议、目标切换、目标用户会话/工作区/消息读取、权威文件 route/ticket 和一年期审计查询。当前没有权威工单数据源时每次返回新的 `sai_` 单号；旧 `/grants/recent-incident` 仅为兼容别名，同样不读取历史授权。会话默认仅 ACTIVE，显式筛选才包含 ARCHIVED；工作区响应用公共 `BackendJavaRouteResolver` 标记 `ONLINE/OFFLINE/UNBOUND/UNKNOWN`，但不改写服务器归属。排查会话读取只在其权威工作区 Java ONLINE 时尝试 OpenCode，离线/未绑定/未知时直接使用 Redis/数据库历史，避免等待不可达远端。普通 Workspace/Session/文件入口已按当前用户归属收紧；排查文件 RPC 只允许列表/搜索/读取并拒绝 `.opencode`，成功正文在审计落库后才返回。
@@ -52,7 +53,7 @@
 - 暴露超级管理员 XXL 一次性 SSO 票据 API，Controller 只做 `SUPER_ADMIN` 鉴权和 traceId；旧 scheduler-management 任意子路径统一返回 `410 API_GONE`。
 - 暴露当前用户批量单项 Session 幂等创建接口，以及定时执行时段和任务创建/查询/改期/取消/失败卡关闭 API；批量 Session 请求必须携带 `batchContext`。夜间创建 DTO 的可选 `batchContext` 只允许在省略 `sessionId` 时使用，可选 `scheduleMode` 缺失时按 `NIGHT_WINDOW`，旧请求行为不变；`ADMIN_CUSTOM` 创建和改期由 Controller 基于真实 `AuthPrincipal` 向应用层传递 `SUPER_ADMIN` 权限事实，owner 始终取认证主体。`NightExecutionDtos` 只把完整 prompt/parts 映射到应用命令，任务响应增加模式但仍仅返回安全截断预览，不回显完整输入。精确内部路径 `/api/internal/platform/opencode-runtime/night-execution/internal-dispatch` 仅接收目标 `linuxServerId` 和最多 50 个 `taskId`，使用标准 XXL access token 鉴权；分发网关必须先由公共 resolver 选出目标服务器上的精确 backendProcessId，再决定本机调用或统一 HTTP 转发。
 - `InternalModelTokenManagementController` 仅允许 `SUPER_ADMIN` 通过独立 API 记录外部 Token、改名/轮换和删除；响应类型只包含安全元数据。`InternalModelProviderManagementController` 在原供应商字段上返回 `tokenId/tokenName/tokenConfigured` 并接受 `tokenId/clearToken`，旧顶层 `authToken/tokenConfigured` 继续兼容。两类成功变更都复用既有刷新事件和跨 Java 广播。
-- `InternalModelProxyForwardingService` 对 2xx SSE 复用 runtime 的单次解析观测器，只让真实模型输出产生首 Token 延迟（TTFT）和刷新输出空闲截止时间，并把 `[DONE]` 或非空 `finish_reason` 作为正常收尾信号；收到 `[DONE]` 时仍主动取消异常保持的上游连接。调用明细分开记录响应头、TTFT、流完成和端到端耗时。转发前失败尚不能解析真实供应商或模型时使用稳定 `unknown` 维度，显式长度与分块传输的 `2 MiB` 超限都会记录 `REQUEST_INVALID`。`InternalModelObservabilityController` 仅向 `SUPER_ADMIN` 暴露结构化明细、小时聚合、探活状态和手动流式探活，明细同时支持兼容的精确 `outcome` 与五类 `outcomeGroup` 筛选，并保留 `ucid` 供页面展示用户 ID；接口不返回正文或 Token。
+- `InternalModelProxyForwardingService` 对 2xx SSE 复用 runtime 的单次解析观测器，只让真实模型输出产生首 Token 延迟（TTFT）和刷新输出空闲截止时间，并把 `[DONE]` 或非空 `finish_reason` 作为正常收尾信号；收到 `[DONE]` 时仍主动取消异常保持的上游连接。调用明细分开记录响应头、TTFT、流完成和端到端耗时。转发前失败尚不能解析真实供应商或模型时使用稳定 `unknown` 维度，显式长度与分块传输的 `2 MiB` 超限都会记录 `REQUEST_INVALID`。`InternalModelObservabilityController` 仅向 `SUPER_ADMIN` 暴露结构化明细、小时聚合、基于明细真实计算的 TTFT 五数概括、探活状态和手动流式探活；明细与 TTFT 分布支持五类 `outcomeGroup` 筛选，并保留 `ucid` 供页面展示用户 ID；接口不返回正文或 Token。
 - 暴露应用引用资产库 7 个内部 API，`ReferenceRepositoryController` 只做 `APP_ADMIN` 鉴权（`SUPER_ADMIN` 继承）、初始化/切换分支请求 DTO、包含可空 `repositoryPath` 的状态响应、traceId 和阻塞 Git/文件任务调度；列表、初始化、同步、受控分支切换、只读指针核验、状态、单层树的业务规则全部委托 workspace-management，不在 Controller 访问 Repository 或文件系统。
 - 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、关键字/角色/组织/部门组合筛选与分页参数、创建用户、手工用户名修正、单角色调整及显式/按筛选全选的批量角色请求转换；显式批量请求把缺省或 `null` 的 `allMatching` 兼容为 `false`，避免旧前端请求在反序列化阶段返回 400；改名请求不接收统一认证号，批量操作者从认证主体取得，用户创建、改名、角色替换、目标解析和 ROLE 字典校验委托 `test-agent-system-management`。
 - 暴露 AI Run 整体回复反馈 API：单查/写入按 `runId`，批量查询每次最多 100 个 Run；Controller 只读取当前登录用户和 traceId，成功状态、主对话与归属校验由 runtime 服务完成。旧 messageId API 保留兼容。
@@ -72,6 +73,7 @@
 ### 公共 Agent 配置发布
 
 - `AgentConfigController` 的 `POST /public/rollout/supersede` 只负责 `SUPER_ADMIN` 鉴权、共享运行副本恢复确认、请求 DTO 和 traceId 透传；`activeRolloutId` 作为业务层 CAS 前置条件，前端不能提交 `forceStop`。响应沿用 Agent 配置 operation DTO，状态轮询通过 `GET /public/rollout` 的可选替换审计字段和 `pendingTargets` 完成；用户明细只含内部 userId/username，不返回统一认证号。
+- `AgentConfigController` 的 `POST /public/worktrees/reconcile` 只允许 `SUPER_ADMIN`，按请求的 `linuxServerId` 复用公共后端路由程序，把手工补偿交给目标 Java 上与定时任务相同的服务器级 Redis 锁和幂等创建程序；响应只含内部 userId、worktreeId 与安全结果摘要。
 
 ### LobeHub 与企业模型入口
 
@@ -110,6 +112,7 @@
 - `AppSourceApiContextTest` 通过真实 Spring 组件注册和 test profile 的单 `*` CORS 配置验证应用源码 HTTP、ticket 和进度 WebSocket 的完整装配图，防止多构造器 handler 未显式注入或 wildcard Origin 解析不一致导致应用启动失败。
 - `RuntimeControllerTest` 覆盖 Workspace 查询、Session、Run、Diff、agent-scoped Run URL、当前用户 opencode 进程强状态、弱健康和初始化进度 GET、RunEvent SSE 恢复快照、Run/Session session-tree messages 和内部平台 URL；`RunControllerAuthorizationTest` 覆盖他人 Run 在详情、取消、Diff、SSE 与 Run 级 session-tree 入口统一返回 `FORBIDDEN`，且不触发后续读取或副作用。
 - `ConversationContextControllerTest` 覆盖已登录用户签发会话运行上下文、分享成员以所属人执行身份签发、opaque 响应 DTO、traceId 和匿名拒绝；`RuntimeControllerTest` 同时覆盖 Run 请求 `contextToken/clientRequestId` 的 DTO 透传。
+- `RunResendControllerSessionShareTest` 通过真实 Spring 构造器选择验证撤销重发入口会注入会话分享服务，并在分享头请求进入业务服务前解析 `DelegatedOperationContext`，防止测试兼容构造器被误用为生产装配入口。
 - `SessionRuntimeStateControllerTest` 覆盖当前登录用户运行态摘要、`permissionCount/PERMISSION` DTO、匿名拒绝、fetch SSE 首帧 snapshot、Run/question/permission 事件后的 updated 推送和无业务 data 的 comment 心跳；`PlatformErrorLogPolicyTest` 固化只有精确“请先初始化 TestAgent 进程”前置条件才允许日志降级。
 - `RuntimeManagementControllerTest` 覆盖运行管理 overview、按 `linuxServerId` 的后端指标历史主 API 和进程重启/停止 API 的 `SUPER_ADMIN` 成功、扩展后的服务器/Java/JVM 指标字段响应、跨 Java 后端路由优先于本地 manager gateway、manager 下属 opencode server 明细与归属及可空 `unifiedAuthId/managerStatus` 响应映射、旧载荷缺字段兼容、命令结果响应映射、用户名筛选/响应映射、`windowMinutes` 预设窗口、`hours` 兼容、历史参数默认值与上限、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId；`PublicAgentConfigRolloutManagementControllerTest` 覆盖离线发布成员退役的超管鉴权；`RuntimeManagementBackendRoutingServiceTest` 覆盖按容器归属服务器转发命令和路由头防循环。
 - `CommonParameterMemoryControllerTest`、`CommonParameterMemoryBackendRoutingServiceTest` 覆盖四个超管接口、同服务器多个 Java 精确聚合、当前/远端执行、部分失败、离线、超时、稳定排序和防二次转发；`BackendJavaRouteResolverTest` 覆盖按 `backendProcessId` 精确选择。
@@ -132,6 +135,7 @@
 - `PersonalWorkspaceRelocationTransferControllerTest` 覆盖内部 access token、权威搬迁授权、固定 Origin/源服务器绑定和 ticket 一次消费；`PersonalWorkspaceRelocationTransferWebSocketHandlerTest` 覆盖二进制分片、唯一完成帧、成功安全响应、无效 ticket 和连接提前结束时中止临时归档；`ApiTokenWebFilterTest` 固化仅两个精确内部路径豁免普通静态 API token，子路径不继承。
 - Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、公共个人 `runtime-reload` 离开 WebFlux 事件线程执行、文件 WebSocket route/ticket/op、文件读写改名复制移动删除权限、Git stage/unstage/discard/冲突操作鉴权、纠错替换的超管成功与非超管拒绝、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
+- `UserNotificationControllerTest` 覆盖当前用户分页隔离、幂等已读和通知 SSE 的 snapshot/updated 事件名。
 - `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull`、工作区 Git stage/unstage、冲突解决、最近使用接口，以及普通成员绕过 Agent API 提交 `.opencode/**` 时的拒绝。
 - `WorkspaceGitToolControllerTest`、`ApiTokenWebFilterTest` 覆盖专用 Tool 凭据入口的身份透传和精确过滤器例外；其它 API 路径仍要求原有用户或静态 Token。
 - `UiTestToolConfigControllerTest`、`ApiTokenWebFilterTest` 覆盖 UI Tool 无凭据只读响应、精确过滤器例外和相邻路径仍要求原有 Token。
@@ -139,7 +143,7 @@
 - `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单、`X-Test-Agent-Linux-Server-Id` / `X-Support-Access-Grant` 的 CORS 预检，以及企业显式浏览器白名单下搬迁内部 Origin 只允许精确 WebSocket 路径、浏览器 Origin 和子路径仍被拒绝。
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。
-- `InternalModelTokenManagementControllerTest` 覆盖 `SUPER_ADMIN` 鉴权、统一冲突错误和响应不泄露 Token；代理测试覆盖按 Provider ID 注入不同 Token、鉴权先于请求体聚合、`2 MiB` 定长及 chunked 上限、chunked 异步拒绝的单次观测、转发前未知维度，以及流式 JSON 完整性校验、role/伪心跳/畸形 data 不产生首 Token、无收尾信号的流中断、`[DONE]` 完成和 `finish_reason` 后 EOF 的企业网关兼容场景。`InternalModelObservabilityControllerTest` 固化 `outcomeGroup` 透传、流完成字段和 `ucid` 的 API 序列化。`ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 及内部模型 `authToken` 请求/响应字段脱敏。
+- `InternalModelTokenManagementControllerTest` 覆盖 `SUPER_ADMIN` 鉴权、统一冲突错误和响应不泄露 Token；代理测试覆盖按 Provider ID 注入不同 Token、鉴权先于请求体聚合、`2 MiB` 定长及 chunked 上限、chunked 异步拒绝的单次观测、转发前未知维度，以及流式 JSON 完整性校验、role/伪心跳/畸形 data 不产生首 Token、无收尾信号的流中断、`[DONE]` 完成和 `finish_reason` 后 EOF 的企业网关兼容场景。`InternalModelObservabilityControllerTest` 固化 `outcomeGroup` 透传、流完成字段、`ucid` 和 TTFT 五数概括的 API 序列化。`ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 及内部模型 `authToken` 请求/响应字段脱敏。
 - `LobehubSsoControllerTest`、`InternalModelCatalogManagementControllerTest`、`ModelGatewayControllerTest` 和
   `ApiLoggingSensitiveBodyTest` 覆盖身份边界、原始 body、固定端点、multipart、错误 envelope 与票据日志脱敏。
 
@@ -153,7 +157,7 @@
 
 新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。平台自身接口放 `web.platform`，agent 代理入口放 `web.agent`，横切入口支撑放 `web.common`。不得新增旧 `/api/...` runtime/workspace 入口；新 URL 必须同步记录到 `docs/api/http-api.md`。
 
-`RunResendController` 暴露 agent-scoped 最后一条消息撤销重发，只允许会话所属人，并接受可选、最长 20000 字符的 `editedPrompt`；`RunResendInternalDispatchController` 仅接收带既有 XXL token 的
+`RunResendController` 暴露 agent-scoped 最后一条消息撤销重发，只允许源消息实际发送人操作；分享发送人还必须持有 `canChat`，并接受可选、最长 20000 字符的 `editedPrompt`；`RunResendInternalDispatchController` 仅接收带既有 XXL token 的
 精确 Java→Java 批量恢复请求，`HttpRunResendDispatchGateway` 固定复用公共路由解析器和转发器。`Run`、Session message 与
 runtime-state DTO 的 `resend` 均为可选 additive 字段，分享 runtime-state 额外 additive 返回 `sessionUpdatedAt`；旧客户端缺失时继续按普通运行展示。内部响应与事件不返回 prompt、回答或
-供应商正文。
+供应商正文。共享人工重发的历史 Run/消息若曾被执行链错误写成所属人，DTO 映射以既有 `resend.requester*` 审计字段恢复实际发送人、姓名和代操作标记，不修改协议结构或数据库历史。

@@ -16,7 +16,7 @@ const OWN_MESSAGE_STYLE = {
 };
 
 const OTHER_MESSAGE_STYLE = {
-  backgroundColor: "#9A8EDE",
+  backgroundColor: "var(--ta-chat-other-user-bg, #DED9F6)",
   border: "none"
 };
 

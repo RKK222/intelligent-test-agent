@@ -38,6 +38,7 @@ export { permissionPresentation } from "./permission-presentation";
 export type { PermissionPresentation } from "./permission-presentation";
 export {
   displayTextFromUserPrompt,
+  hasVisibleUserMessageContent,
   promptPartsForUserDisplay,
   workspaceContextAttachmentsFromPromptParts,
   workspaceContextAttachmentsFromUserPrompt

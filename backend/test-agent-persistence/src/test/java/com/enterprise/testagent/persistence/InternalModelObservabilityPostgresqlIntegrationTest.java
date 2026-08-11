@@ -8,6 +8,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordQuery;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
 import com.enterprise.testagent.persistence.mybatis.InternalModelObservabilityMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelCallRecordRepository;
 import java.time.Instant;
@@ -71,6 +72,8 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 .load()
                 .migrate();
         assertThat(columnExists("internal_model_call_records", "stream_complete_ms")).isTrue();
+        assertThat(columnExists("internal_model_call_records", "last_token_ms")).isTrue();
+        assertThat(columnExists("internal_model_call_records", "output_token_count")).isTrue();
         assertThat(jdbc.sql("""
                         select success from flyway_schema_history
                         where version = '20260808143302'
@@ -141,6 +144,8 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 "trace_pg_stage_failure",
                 null,
                 STARTED_AT.plusSeconds(120));
@@ -167,6 +172,47 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 .satisfies(stat -> assertThat(stat.requestCount()).isEqualTo(1L));
     }
 
+    @Test
+    void calculatesTtftQuartilesWithPostgresqlPercentileCont() {
+        repository.record(distributionRecord(100L, 1));
+        repository.record(distributionRecord(200L, 2));
+        repository.record(distributionRecord(300L, 3));
+        repository.record(distributionRecord(400L, 4));
+
+        InternalModelLatencyDistribution distribution = repository.queryTtftDistribution(
+                "provider-pg-distribution",
+                java.util.List.of(InternalModelCallOutcome.SUCCESS),
+                InternalModelCallSource.USER_CALL,
+                STARTED_AT.minusSeconds(1),
+                STARTED_AT.plusSeconds(10));
+
+        assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.minimumMillis()).isEqualTo(100.0);
+        assertThat(distribution.firstQuartileMillis()).isEqualTo(175.0);
+        assertThat(distribution.medianMillis()).isEqualTo(250.0);
+        assertThat(distribution.thirdQuartileMillis()).isEqualTo(325.0);
+        assertThat(distribution.maximumMillis()).isEqualTo(400.0);
+    }
+
+    @Test
+    void calculatesItlQuartilesWithPostgresqlPercentileCont() {
+        repository.record(itlRecord(10L, 11));
+        repository.record(itlRecord(20L, 12));
+        repository.record(itlRecord(30L, 13));
+        repository.record(itlRecord(40L, 14));
+
+        InternalModelLatencyDistribution distribution = repository.queryItlDistribution(
+                "provider-pg-itl", java.util.List.of(InternalModelCallOutcome.SUCCESS),
+                InternalModelCallSource.USER_CALL, STARTED_AT, STARTED_AT.plusSeconds(30));
+
+        assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.minimumMillis()).isEqualTo(10.0);
+        assertThat(distribution.firstQuartileMillis()).isEqualTo(17.5);
+        assertThat(distribution.medianMillis()).isEqualTo(25.0);
+        assertThat(distribution.thirdQuartileMillis()).isEqualTo(32.5);
+        assertThat(distribution.maximumMillis()).isEqualTo(40.0);
+    }
+
     private static InternalModelCallRecord record(Long streamCompleteMillis) {
         return new InternalModelCallRecord(
                 null,
@@ -181,10 +227,45 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 150L,
                 10L,
                 40L,
+                40L,
                 streamCompleteMillis,
+                null,
                 "trace_pg",
                 "ucid_pg",
                 STARTED_AT);
+    }
+
+    private static InternalModelCallRecord distributionRecord(long firstTokenMillis, long offsetSeconds) {
+        return new InternalModelCallRecord(
+                null,
+                "provider-pg-distribution",
+                "model-pg",
+                "/chat/completions",
+                InternalModelCallSource.USER_CALL,
+                InternalModelCallOutcome.SUCCESS,
+                200,
+                null,
+                true,
+                1000L,
+                10L,
+                firstTokenMillis,
+                firstTokenMillis,
+                firstTokenMillis,
+                null,
+                "trace_pg_distribution_" + offsetSeconds,
+                "ucid_pg",
+                STARTED_AT.plusSeconds(offsetSeconds));
+    }
+
+    private static InternalModelCallRecord itlRecord(long itlMillis, long offsetSeconds) {
+        long firstTokenMillis = 100L;
+        long outputTokenCount = 11L;
+        long lastTokenMillis = firstTokenMillis + itlMillis * (outputTokenCount - 1);
+        return new InternalModelCallRecord(
+                null, "provider-pg-itl", "model-pg", "/chat/completions",
+                InternalModelCallSource.USER_CALL, InternalModelCallOutcome.SUCCESS, 200, null, true,
+                2000L, 10L, firstTokenMillis, lastTokenMillis, lastTokenMillis, outputTokenCount,
+                "trace_pg_itl_" + offsetSeconds, "ucid_pg", STARTED_AT.plusSeconds(offsetSeconds));
     }
 
     private static boolean columnExists(String tableName, String columnName) {

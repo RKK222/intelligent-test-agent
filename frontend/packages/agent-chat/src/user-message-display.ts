@@ -1,4 +1,4 @@
-import type { PromptPart } from "@test-agent/shared-types";
+import type { AgentMessage, PromptPart } from "@test-agent/shared-types";
 
 const CONTEXT_PROMPT_PREFIX = "用户问题：";
 const CONTEXT_PROMPT_MARKER = "以下是用户添加的工作区上下文：";
@@ -121,6 +121,20 @@ export function workspaceContextAttachmentsFromPromptParts(
     });
   }
   return uniqueWorkspaceContextAttachments(attachments);
+}
+
+/**
+ * 与 UserMessageRow 保持同一套可见性规则。
+ * OpenCode 压缩流程的 user envelope 可能只携带 agent/reference 等系统 part，这类消息必须保留在状态中但不能形成可见轮次边界。
+ */
+export function hasVisibleUserMessageContent(
+  message: Extract<AgentMessage, { role: "user" }>
+): boolean {
+  if (displayTextFromUserPrompt(message.text).trim()) {
+    return true;
+  }
+  const partContexts = workspaceContextAttachmentsFromPromptParts(message.parts);
+  return partContexts.length > 0 || workspaceContextAttachmentsFromUserPrompt(message.text).length > 0;
 }
 
 // opencode 实时 message.updated 与本地 optimistic user message 可能携带同一 file part，展示层按来源去重。

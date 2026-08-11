@@ -48,6 +48,7 @@ class RunResendExecutionServiceTest {
     private static final RunResendId RESEND_ID = new RunResendId("rsd_execution_service");
     private static final RunId SOURCE_RUN_ID = new RunId("run_execution_source");
     private static final RunId REPLACEMENT_RUN_ID = new RunId("run_execution_replacement");
+    private static final SessionId SESSION_ID = new SessionId("ses_execution_service");
 
     private RunResendRepository resendRepository;
     private RunResendReplayInputStore inputStore;
@@ -112,7 +113,7 @@ class RunResendExecutionServiceTest {
 
         assertThat(result.status()).isEqualTo(RunResendStatus.DISPATCHED);
         verify(runApplicationService, never()).startResendRun(any(), any(), any(), any(), any(), any());
-        verify(cleanupPort).purgeSourceRun(SOURCE_RUN_ID);
+        verify(cleanupPort).purgeSourceRun(SOURCE_RUN_ID, SESSION_ID, NOW);
     }
 
     @Test
@@ -127,7 +128,7 @@ class RunResendExecutionServiceTest {
         RunResend result = service.execute(RESEND_ID);
 
         assertThat(result.status()).isEqualTo(RunResendStatus.WAITING);
-        verify(cleanupPort).purgeSourceRun(SOURCE_RUN_ID);
+        verify(cleanupPort).purgeSourceRun(SOURCE_RUN_ID, SESSION_ID, NOW);
         verify(resendRepository, never()).deleteSessionLock(any(), any());
         verify(eventAppender, never()).append(any(), any());
     }
@@ -152,7 +153,7 @@ class RunResendExecutionServiceTest {
     private RunResend waiting() {
         return new RunResend(
                 RESEND_ID,
-                new SessionId("ses_execution_service"),
+                SESSION_ID,
                 new UserId("usr_execution_service"),
                 SOURCE_RUN_ID,
                 REPLACEMENT_RUN_ID,

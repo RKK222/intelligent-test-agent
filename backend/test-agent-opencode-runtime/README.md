@@ -6,8 +6,10 @@
 
 ## 主要职责
 
+- 会话协作分享在创建/成员重新加入/重新激活、普通设置更新、成员移除、撤销和会话归档后调用 `test-agent-notification` 同步通知生命周期；被分享人通过通知、“分享给我”或旧链接完成分享访问鉴权后，统一按 `shareId` 幂等标记已读。通知写入或已读同步异常只记录脱敏告警，不得阻断分享设置主事务之外的既有访问能力；通知查询还会联表复核分享事实，避免短暂同步失败形成可点击的过期授权。
+
 - 平台会话协作使用独立 `DelegatedOperationContext` 保留真实认证 actor、统一认证号、唯一分享 ID/版本和精确 Session/Workspace 范围，同时把 `executionOwnerUserId` 显式传给既有运行链路。OpenCode 请求、用户进程、工作区与 Git/SSH 身份始终属于会话所属人；消息、Run、夜间任务和重发分别保存实际发送人/创建人/发起人及代操作标记。分享权限永远不超过所属人的当前权限，分享过期、取消、移除或降权会关闭相关 SSE、文件 WebSocket 和终端，但不会自动取消已启动 Run。
-- 普通历史和普通 runtime-state 不把 `sent_by_shared_user=true` 当作被分享人的访问归因；分享会话只从独立列表进入。Run 启动同时竞争 Redis 原子会话占用与数据库 `active_session_id` 唯一约束，取得双重准入前不发布可见事件、不调用 OpenCode；终态释放占用，并发失败统一为 `SESSION_BUSY`。停止只允许所属人或该 Run 的实际消息发送人；最后一条消息的撤回并重新发送只允许会话所属人，普通分享成员即使是源消息发送人且仍有 `canChat` 也拒绝。
+- 普通历史和普通 runtime-state 不把 `sent_by_shared_user=true` 当作被分享人的访问归因；分享会话只从独立列表进入。Run 启动同时竞争 Redis 原子会话占用与数据库 `active_session_id` 唯一约束，取得双重准入前不发布可见事件、不调用 OpenCode；终态释放占用，并发失败统一为 `SESSION_BUSY`。停止只允许所属人或该 Run 的实际消息发送人；最后一条消息的撤回并重新发送只允许源消息实际发送人，分享发送人还必须保持 `canChat=true`，所属人不能改写其他参与者的问题。
 - 被分享人创建夜间任务时固化分享授权快照，并继续以会话所属人的进程和工作区执行；后续分享过期、取消、移除或降权不影响已排期任务。所属人和实际创建人可管理任务，降为只读的创建人仍可取消但不能改期；替代 Run 和消息继续保留源消息发送人归因。
 - Workspace 级 OpenCode 运行态代理（包括 Agent/Command 目录）在解析用户进程前复用 `ConversationWorkspaceAccessAuthorizer` 校验实时应用成员关系和个人工作区 owner；旧 workspaceId 不能让非成员读取或选择应用 `.opencode` 能力。无用户主体的 static-token/本地兼容链路仍保留固定节点行为。
 - Agent 配置 rollout 以 `config_scope=PUBLIC/APPLICATION/PERSONAL_APPLICATION` 区分流程，而不是新增 OpenCode 配置覆盖层：公共范围单独互斥，应用范围按版本 ID 互斥，不同应用发布不会再占用公共发布锁。公共范围由公共配置服务把全服务器共享运行副本同步到同一固定 commit，并原生 merge 本机全部公共个人 worktree；共享副本恢复确认随 rollout 持久化，个人冲突进入独立 `AWAITING_USER` 补偿且不占用主锁。应用范围由托管工作区服务先把指定 feature 提交投影到个人 worktree，再只登记同步成功用户的进程。脏工作区或合并冲突持久化为独立补偿任务，主 rollout 完成后仍会按 worktree 租约继续尝试；收敛后仅为该用户登记 dispose 目标。`PERSONAL_APPLICATION` 只用于个人 `git-pull` 已完成 Git merge 后的当前用户运行态重载：只登记发起用户所在服务器和本人进程，不同步 Git、不枚举服务器成员、不广播。三者复用同一进程身份核验、Session 空闲检查、用户消息闸门和 OpenCode 原生 `/global/dispose`。
@@ -88,7 +90,7 @@
 
 ## 内部模型调用可观测
 
-代理转发链路上对每次调用落结构化明细（`internal_model_call_records`）并小时聚合（`internal_model_call_stats_hourly`），按 `InternalModelCallOutcome` 保留连接/超时/流中断/HTTP 错误等精确原因，再由 `InternalModelCallOutcomeGroup` 归并为五个看板大类；转发前尚不能解析真实供应商或模型的失败使用稳定 `unknown` 维度，保证明细与聚合同事务落库。代理与探活共同复用 `InternalModelSseStreamObserver`，每个 chunk 只解析一次并先记录到达时刻；只有 OpenAI-compatible `choices` 中的 `content/reasoning_content/refusal/legacy text/工具输出` 算真实输出，注释、role/usage、伪心跳和畸形 data 均不能产生首 Token 或刷新截止时间。`firstByteMillis` 表示响应头到达，`firstTokenMillis` 按 Time to First Token（TTFT）表示首个有效 Token 到达，`streamCompleteMillis` 表示收到 `[DONE]` 或非空 `finish_reason`，`durationMillis` 仍是包含下游写出的端到端耗时；流必须同时有真实输出和两种正常收尾信号之一才记成功。小时聚合只展示可由 sum/count/max 准确还原的均值和最大值，不伪造 P90/P95 或分布；只记 traceId、耗时、状态与异常类简名，不存请求/响应正文或 Token。`InternalModelCallRecorder` 在 boundedElastic 上异步落库且失败静默，绝不影响转发主链路。`InternalModelProviderProbeService` 每 5 分钟（`opencode-runtime.internal-model-probe`）对启用 provider 发 `stream=true,max_tokens=1` 最小 chat 探测；`2xx` 非 SSE、空流、只有元数据或缺少两种正常收尾信号都不记成功，完成网络探测时把同一次真实端到端耗时写入状态的 `lastDurationMillis`。查询统计 API 支持按 `source=USER_CALL|PROBE` 隔离探活与真实调用，明细 API 另支持 `outcomeGroup` 大类筛选；精确原因和用户调用 `ucid` 继续随明细返回。`InternalModelObservabilityRetentionTaskHandler` 每日清理 30 天前明细与 180 天前聚合。查询/手动探活入口见 `InternalModelObservabilityController`（仅 `SUPER_ADMIN`）。
+代理转发链路上对每次调用落结构化明细（`internal_model_call_records`）并小时聚合（`internal_model_call_stats_hourly`），按 `InternalModelCallOutcome` 保留精确原因，再由 `InternalModelCallOutcomeGroup` 归并为五个看板大类。代理与探活共同复用 `InternalModelSseStreamObserver`，每个 SSE data 只解析一次；只有 OpenAI-compatible `choices` 中的正文、推理、拒绝、legacy text 或工具输出算真实输出，注释、role/usage、伪心跳和畸形 data 都不产生首 Token。`firstTokenMillis`/`lastTokenMillis` 记录首末有效输出到达，`outputTokenCount` 只取上游 usage 的准确值，ITL/TPOT 按 `(末输出-首输出)/(输出 Token 数-1)` 计算；缺少用量或少于 2 个输出 Token 时不统计，绝不以 chunk 数代替 Token 数。`streamCompleteMillis` 仍表示 `[DONE]` 或非空 `finish_reason` 到达，`durationMillis` 是端到端耗时。TTFT 与 ITL/TPOT 箱线图由 `InternalModelObservabilityQueryService` 在最长 31 天范围内基于明细查询真实最小值、P25、中位数、P75、最大值和样本数。Responses 适配请求会开启上游 usage；直接 Chat Completions 仅在调用方或供应商返回 usage 时形成 ITL/TPOT 样本。所有观测只记 traceId、耗时、状态、异常类简名和 Token 数，不存正文或 Token 内容。探活固定 `max_tokens=1`，因此不会进入 ITL/TPOT 样本。查询统计 API 支持按来源隔离，明细、TTFT 和 ITL/TPOT 分布 API 支持结果大类筛选；保留期与 `SUPER_ADMIN` 权限不变。
 
 ## 测试覆盖
 
@@ -134,6 +136,7 @@
 
 - `test-agent-common`。
 - `test-agent-domain`。
+- `test-agent-notification`，仅用于会话分享生命周期和访问成功已读同步。
 - `test-agent-event`。
 - `test-agent-agent-runtime`。
 - `test-agent-scheduler`，仅用于注册本模块业务定时任务，不把业务任务放入 scheduler 模块。
@@ -160,13 +163,13 @@ runtime 代理入口有认证用户时必须通过 `AgentRuntimeTargetResolver` 
 
 ## 最后一条消息撤销重发
 
-`RunResendApplicationService` 统一承接手动与定时自动入口：人工入口只允许会话所属人，普通分享成员即使发送了源消息也拒绝；服务先验证 owner、终态、最后远端 user message 和会话锁，再预留
+`RunResendApplicationService` 统一承接手动与定时自动入口：人工入口只允许源消息实际发送人，分享发送人还必须持有 `canChat`，包括会话所属人在内的其它用户不得改写他人消息；服务先验证执行所属人、实际 actor、终态、最后远端 user message 和会话锁，再预留
 `PENDING` 替代 Run，并把精确输入写入有限 TTL Redis。人工请求可携带可选 `editedPrompt`，服务端只替换可信远端用户轮次中的文本并保留原附件、Agent、模型、variant 和其它 part；修改文本不进入控制表、事件、审计或日志。自动入口仅观察 root `session.error` 派生失败，定时来源最多自动 3 次，
 等待 1/2/4 分钟；人工重发继承整条链的自动次数，不重置额度。`RunResendExecutionService` 按
-`WAITING → REVERTING → REVERTED → DISPATCHED` 恢复，稳定消息探测为未知时保持锁，明确未投递且 unrevert 成功才失败解锁。
+`WAITING → REVERTING → REVERTED → DISPATCHED` 恢复；执行替代 Run 时必须同时用预留锚点的实际发送人写入 Run 和 USER `session_messages` 投影，不能被 OpenCode 执行所属人覆盖。稳定消息探测为未知时保持锁，明确未投递且 unrevert 成功才失败解锁。历史替代 Run 若已被错误归属给所属人，后续人工权限判断以共享重发审计的 requester 恢复真实发送人。
 
 已注册的每分钟 `opencode-runtime.night-execution-dispatch` 在夜间任务扫描后继续扫描到期、已 revert 和过期租约记录，按持久化目标服务器经公共 Java 路由器分发；重发不另建 task key。
 WAITING 替代 Run 可复用现有 cancel 入口；等待期间 `NightExecutionSessionLockGuard` 同时阻止新 Run、消息、command、shell、archive、
-compact 和 share 等主会话写入口。替代消息受理后清理源 Run 的 PostgreSQL/Redis 明细并发布 `run.resend.started`，Run、反馈、
-用量和关系保留。当前预留替代 Run 沿 `LEGACY_FULL` 明细链启动；源 Run 无论是 `LEGACY_FULL` 还是 `REDIS_SUMMARY` 都从远端
+compact 和 share 等主会话写入口。替代消息受理后在同一事务中清理源 Run 的 PostgreSQL 明细、推进 Session 内容修订时间，再清理 Redis 明细并发布 `run.resend.started`；重发事件携带真实 requester 身份，分享运行态据此刷新权威消息并保持分享发送人归属，Run、反馈、
+用量和关系保留；历史消息/Run 响应也以共享 requester 修正旧错误归因，无需修改已执行数据库历史。当前预留替代 Run 沿 `LEGACY_FULL` 明细链启动；源 Run 无论是 `LEGACY_FULL` 还是 `REDIS_SUMMARY` 都从远端
 权威用户轮次读取并重放，避免把摘要数据库当作 prompt 事实源。

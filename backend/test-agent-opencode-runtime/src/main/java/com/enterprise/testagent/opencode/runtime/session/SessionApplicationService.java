@@ -27,6 +27,7 @@ import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
+import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import java.time.Instant;
 import java.util.Map;
 import java.util.List;
@@ -54,6 +55,7 @@ public class SessionApplicationService {
     private NightExecutionSessionLockGuard nightExecutionLockGuard;
     private RunResendRepository runResendRepository;
     private UserWorkspaceQueryRepository userWorkspaceQueryRepository;
+    private UserNotificationApplicationService notificationService;
 
     /**
      * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
@@ -354,6 +356,16 @@ public class SessionApplicationService {
         if (titleWatchService != null) {
             titleWatchService.cancelForSession(sessionId, traceId);
         }
+        if (notificationService != null) {
+            try {
+                notificationService.invalidateSessionSharesBySession(
+                        sessionId, "SESSION_ARCHIVED", traceId);
+            } catch (RuntimeException notificationFailure) {
+                // 会话已经归档；通知查询仍会按会话状态派生不可用，实时角标由周期校准收敛。
+                LOGGER.warn("会话归档成功但分享通知失效写入失败 sessionId={} traceId={}",
+                        sessionId.value(), traceId, notificationFailure);
+            }
+        }
         LOGGER.info("Session archived, sessionId={}, traceId={}", sessionId.value(), traceId);
         return archived;
     }
@@ -425,6 +437,12 @@ public class SessionApplicationService {
     @Autowired
     void setUserWorkspaceQueryRepository(UserWorkspaceQueryRepository userWorkspaceQueryRepository) {
         this.userWorkspaceQueryRepository = userWorkspaceQueryRepository;
+    }
+
+    /** 生产装配注入通知服务；兼容大量按构造器创建的会话单元测试。 */
+    @Autowired(required = false)
+    void setNotificationService(UserNotificationApplicationService notificationService) {
+        this.notificationService = notificationService;
     }
 
     private void requireNightExecutionUnlocked(SessionId sessionId) {

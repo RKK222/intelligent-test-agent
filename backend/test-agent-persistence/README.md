@@ -2,7 +2,7 @@
 
 - `V20260809110000__create_external_api_credentials.sql` 创建外部工具凭据与 scope 表，不写默认工具数据；`ExternalApiCredentialMapper.xml` / `MyBatisExternalApiCredentialRepository` 承载分页、整表加载、CRUD 和 scope 原子替换，数据库仅保存 RSA 密文、指纹和掩码提示。已执行 QA Memory 历史的个人库由 `DatabaseMigrationCompatibilityCustomizer` 加载原始字节兼容目录，并改走更高版本的外部 API 前向 migration。
 - `V20260809170000__session_shares_create_collaboration_share.sql` 与 `V20260809170001__session_messages_add_delegated_attribution.sql` 创建会话协作分享、成员、审计结构和代操作消息归属字段；已执行 `V20260809230000`/`V20260810090000` QA Memory 扩展历史的个人库不倒序执行这两版，而由 `db/migration-compat/qa-memory-extended` 保留已执行 SQL 原始字节并通过 `V20260810110001`/`V20260810110002` 的同字节前向副本补齐结构。
-- 已先执行会话分享主链但缺少较低版本 QA Memory 的 release 数据库，由 `db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql` 在一次 PostgreSQL 事务中复用三条已冻结 migration 的语义，建立相同的最终记忆治理结构；原始低版本继续保留给空库、旧基线和 QA Memory 个人历史，禁止 `outOfOrder` 或改写任一已执行文件。
+- 已先执行会话分享主链但缺少较低版本 QA Memory 的 release 数据库，在尚未执行 `V20260810234154` 时由 `db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql` 补齐；已执行该最新 release 迁移时改走更高的 `db/migration-compat/qa-memory-after-token-latency-inputs/V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`。两份 SQL 字节一致，均在一次 PostgreSQL 事务中复用三条已冻结 migration 的语义建立相同最终记忆治理结构；已落库路径保持原 location，原始低版本继续保留给空库、旧基线和 QA Memory 个人历史，禁止 `outOfOrder` 或改写任一已执行文件。
 
 - 用户管理组合分页查询和“全部检索结果”有界 ID 解析由 `UserManagementQueryMapper.xml` / `MyBatisUserManagementQueryRepository` 实现，支持用户关键字、角色（含未分配角色）、组织、研发部门和部门筛选，并可在 SQL 中排除当前操作者；未修改 users/user_roles 表结构，也没有新增 Flyway migration。
 
@@ -34,6 +34,8 @@
 
 ## 主要职责
 
+- 使用 `UserNotificationMapper.xml` 实现通用通知创建去重、快照更新、失效、接收人分页、未读统计、幂等已读和 90 天历史清理；通知列表实时联表校验分享、成员、会话、所属人和到期事实，失效授权不再可点击或计入未读。
+
 - `MyBatisSessionShareRepository` / `SessionShareMapper.xml` 持久化每个 Session 唯一且永久复用的 256 位随机分享 ID、全量成员更新与软移除历史、乐观锁版本、“分享给我”失效历史、最小用户目录和 365 天安全审计。审计只保存 actor、执行所属人、share/session/workspace/resource、结果、traceId 与可选路径 SHA-256，不保存消息/文件正文、明文路径、Token 或终端输入。
 - `MyBatisSessionMessageRepository` / `SessionMessageMapper.xml` 保存消息实际发送人、统一认证号和代操作标记，并复用既有 `(session_id, run_id, created_at, id)` 索引按精确 `sessionId + runId + USER` 读取运行输入；Run、夜间任务和重发 MyBatis mapper 同步保存实际 actor 归因。普通历史与普通 runtime-state SQL 显式排除分享发送者兜底，防止一次代发永久获得普通会话访问权。
 - `runs.active_session_id` 只在 `PENDING/RUNNING/CANCELLING` 期间占用，并以唯一索引作为跨节点并发发送最终裁决；终态写入必须原子清空。Redis `RunRuntimeStore` 同时提供原子 active-session 占用与 fencing，数据库和 Redis 任一准入失败都不得进入远端副作用。
@@ -53,6 +55,8 @@
 - 表和字段必须添加中文注释说明。
 
 ## 已有实现
+
+- `user_notifications`：只保存安全标题/摘要、受控 `action_type/action_target_id`、去重键、状态、已读/失效/到期时间和 traceId。`V20260810170000__user_notifications_create_notification_center.sql` 仅回填当前仍有效的分享成员；成员授权后的成功 `READ_ACCESS_GRANTED` 审计会直接回填 `read_at`。
 
 - `V1__create_core_tables.sql`：创建 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 核心表。
 - `V20260711120000__document_side_question_run_source.sql`：只更新三个 `source_type` 字段的允许值注释以包含 `SIDE_QUESTION`，不改结构、不写数据。
@@ -113,6 +117,7 @@
 - `JdbcAgentSessionBindingRepository`：实现按 `(sessionId, agentId)` 和 `(agentId, remoteSessionId)` 查询、upsert 通用远端 session 绑定。
 - `JdbcSessionMessageRepository`：实现会话消息保存、按远端 messageId 幂等查询、分页和计数。
 - `MyBatisConfigurationManagementRepository`：通过 `ConfigurationManagementMapper.xml` 实现配置管理表的应用只读查询、成员逻辑删除、仓库关联、版本库类型、版本库部署模式、版本库是否已有应用工作空间历史、工作空间和个人 SSH key 元数据持久化，是当前生产 Spring Bean。
+- `MyBatisAgentConfigRepository`：通过 `AgentConfigMapper.xml` 持久化 Agent 配置操作与 worktree，并按服务器有界联查 ACTIVE 用户、`SUPER_ADMIN` 角色、ACTIVE OpenCode binding 和缺失的 ACTIVE 公共个人 worktree，为后台补偿只返回内部 userId；查询不读取统一认证号或 SSH key。
 - `MyBatisAppSourceRepository`：通过 `AppSourceMapper.xml` 实现 slot `SELECT FOR UPDATE`/乐观 CAS、snapshot JSONB、replica 只在不存在时建档并以 generation+owner+lease+合法状态流转 fencing、活租约行锁下的步骤推进和整条稳定 attempt 重置、operation 类型感知的 stranded 扫描、延迟 cleanup 认领和 recent selection；DOWNLOAD/UPDATE 兼容按全副本终态恢复历史脏状态，RETRY 必须存在 SERVER steps 且全部终态、不得残留 `PENDING/RUNNING` 目标后才成为候选。旧 `RETRY_QUEUED` 可领取并在新 attempt 回填稳定步骤，终态步骤防回退。`hasRepositoryHistory` 同时检查 slot/snapshot/operation/cleanup，供配置管理冻结源码仓库磁盘身份。
 - AppSource `claimReplica` 在单条 MyBatis UPDATE 中匹配 exact repository/generation/operation/server、operation `PENDING/RUNNING` 和 SERVER timeline。普通 `PENDING/FAILED/STALE` 副本只有存在任一 `PENDING/RUNNING` 步骤才可领取；step code 故意不限，使过期 lease 可从任一中途步骤接管。仅过期 `RUNNING` 副本允许以已有任意状态 SERVER step 作为旧 attempt 恢复锚点，领取后仍由统一 attempt reset 清理终态时间线；终态 operation 的迟到 worker 不能重新制造 `RUNNING` 副本。
 - `JdbcConfigurationManagementRepository`：配置管理存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试和迁移窗口；其中 `repository_type` / `deployment_mode` 映射只为兼容新增非空列，后续配置管理 SQL 变更必须改 MyBatis XML。
@@ -166,6 +171,8 @@
 内部模型代理鉴权列改为企业中性命名时，两条已落库历史 migration 通过仅影响校验和的兼容注释保持原 Flyway checksum；`V20260716143000__rename_internal_model_auth_token_column` Java migration 按固定列位置识别历史列并重命名，新建数据库目标列已存在时幂等跳过。`V20260722180000__add_internal_model_token_definitions.sql` 新建数据库 identity 主键的 `internal_model_tokens`，给 Provider 增加 `RESTRICT` 外键，并把非空旧全局值迁移成单个共享“默认 Token”；旧单例表继续保留，但新运行时只读取联表快照。
 
 ## 测试覆盖
+
+- `MyBatisUserNotificationRepositoryIntegrationTest` 使用 H2 覆盖分页、未读、失效事实投影、已读和清理；`MyBatisUserNotificationRepositoryPostgresqlIntegrationTest` 使用真实 PostgreSQL/Testcontainers 覆盖空库迁移、已部署分享基线升级、审计已读回填和 MyBatis 查询。
 
 - 通用 H2 PostgreSQL 模式测试固定迁移到 `V20260715213000` 这一最后兼容基线；后续含 `timestamptz`、部分表达式索引和 `ON CONFLICT DO UPDATE` 的完整生产链由真实 PostgreSQL 集成测试与应用启动验证。旧 H2 用例只按 mapper 所需补列或单独执行可兼容 migration，历史 V17 本机种子改由 `src/test/resources/db/fixture` 注入；测试不会修改已发布 migration 及其 checksum，也不会依赖生产 migration 写入开发用户。
 - `MyBatisPersonalWorkspaceRelocationPostgresqlIntegrationTest` 在 PostgreSQL 16 上执行完整 Flyway 链，验证错配扫描、ACTIVE Run 阻断、租约状态、目标三表原子切换，以及 `CLEANUP_PENDING` 在连续换服时不被下一段搬迁覆盖；`MyBatisPersonalWorkspaceRelocationRepositoryTest` 固化 MyBatis XML 条件和目标更新顺序。
@@ -249,14 +256,14 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
   nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。
 - `InternalModelProviderModelMapper.xml` 覆盖保存公开模型并级联清理旧探测，按能力保存最近探测结果。
 - `ModelGatewayUsageDailyMapper.xml` 使用 PostgreSQL/H2 兼容 upsert 原子累加每日聚合，不先读后写。
-- `InternalModelObservabilityMapper.xml` 维护内部模型调用可观测：明细 insert 与小时聚合 upsert 同一事务，明细查询通过 MyBatis XML 的低基数 `outcome IN (...)` 支持看板结果大类筛选，探活状态 upsert 由 SQL 依据本次结果原子递增/归零连续失败计数；`V20260808143300__create_internal_model_observability.sql` 创建明细/小时聚合/探活状态三张表，后续 migration 分别增加首 Token 延迟（TTFT）与 `[DONE]` 流完成明细及各自小时 sum/max/count。`duration_ms` 保留端到端口径，`stream_complete_ms` 单独表达上游完整流耗时；所有表只存结构化字段，不保存请求/响应正文或 Token。
+- `InternalModelObservabilityMapper.xml` 维护内部模型调用可观测：明细 insert 与小时聚合 upsert 同一事务，明细查询通过 MyBatis XML 的低基数 `outcome IN (...)` 支持看板结果大类筛选；TTFT 直接对 `first_token_ms`、ITL/TPOT 对 `(last_token_ms-first_token_ms)/(output_token_count-1)` 使用 `percentile_cont` 计算五数概括，不搬运大量样本或从小时均值估算。`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 给明细增加末输出时刻和准确输出 Token 数，历史记录保持空值。所有表只存结构化字段，不保存请求/响应正文或 Token 内容。
 - `V20260730090000__add_lobehub_model_gateway.sql` 只创建上述平台表和四个生产必需公共参数；不触碰独立
   LobeHub ParadeDB，也不写测试/演示数据。
 - 已知历史若存在 `V20260801093854`、但缺少 `V20260730090000`，app 兼容装配会隐藏无法再顺序执行的
   旧候选文件。早期补偿 `V20260802173416` 已执行时只加载其原始资源；尚未补偿且 release
   `V20260803133000` 已执行时只加载更高的 `V20260803141754`；否则继续使用早期补偿。三份 migration 都由
   SHA-256 测试锁定；不启用 `outOfOrder`、不执行 `repair`、不修改 `flyway_schema_history`。
-- H2 集成测试覆盖完整 Flyway 和 mapper；PostgreSQL Testcontainers 测试覆盖模型网关并发累加，以及内部模型可观测从首 Token 延迟（TTFT）已部署基线升级到流完成 migration、PostgreSQL `ON CONFLICT` 聚合，并通过 Spring 事务代理验证转发前失败的 `unknown` 维度能同时写入明细与小时聚合。无 Docker时显式 skip，正式发布仍需在真实目标基线上运行。
+- H2 集成测试覆盖完整 Flyway、mapper、TTFT/ITL 五数概括、无准确用量排除和空样本；PostgreSQL Testcontainers 测试覆盖从首 Token 已部署基线升级到流完成与 ITL 原始量 migration、`ON CONFLICT` 聚合和两类 `percentile_cont` 四分位数。无 Docker 时显式 skip，正式发布仍需在真实目标基线上运行。
 - Redis Testcontainers 使用真实 Redis 5.0.14 让 8 个线程并发消费同一 ticket，锁定 Lua 只成功一次、nonce
   防重放、grant 轮换/撤销、TTL 上限和 `test-agent:lobehub-sso:*` 前缀隔离。
 
@@ -266,7 +273,8 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
   到期/租约恢复查询和已提交源 Run 过滤；关系型 SQL 不写在 Java 中。
 - `RedisRunResendReplayInputStore` 只按 replacement Run 保存有限 TTL 的精确 text/file/agent/subtask 输入和模型选择，缺失时执行器
   必须在 revert 前失败；PostgreSQL 表、事件和日志都不保存 prompt 或回答。
-- `MyBatisRunResendDetailCleanup` 在替代消息确认受理后事务删除源 Run 的 session message、RunEvent 和 scope 明细，保留 Run、
-  feedback、usage 与重发关系；`RedisRunRuntimeStore.purgeDetailsAfterResend` 同步清理源 Run 运行态详情和索引。
+- `MyBatisRunResendDetailCleanup` 在替代消息确认受理后事务删除源 Run 的 session message、RunEvent 和 scope 明细，并复用
+  `RunSummaryMapper.touchSession` 原子推进 `sessions.updated_at` 内容修订；保留 Run、feedback、usage 与重发关系，
+  `RedisRunRuntimeStore.purgeDetailsAfterResend` 同步清理源 Run 运行态详情和索引。
 - `MyBatisRunResendRepositoryIntegrationTest` 覆盖 migration、幂等和锁；正式交付前仍须按 `docs/deployment/database.md` 在真实
   PostgreSQL 已部署基线上核对版本、checksum 和最终 JAR 字节。

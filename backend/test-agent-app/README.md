@@ -33,7 +33,7 @@
 - XXL Admin lifecycle/health、Servlet 子上下文和 executor 由 `test-agent-xxl-job-integration` 装配；app 只提供配置与最终包依赖。
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
 - `config.ExternalApiCredentialStartupRunner`：在 Flyway 完成后严格整表加载外部 API 凭据；任何解密或数据校验失败都会阻止实例就绪，不使用未初始化或部分快照启动。
-- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析工具盒子、LobeHub、内部模型可观测、撤销重发、外部 API 凭据及 QA Memory 的已知迁移分叉。已执行 `V20260809120000`、`V20260809230000`、`V20260810090000` 的个人库会保留原始字节，并以 `V20260810110000` 至 `V20260810110002` 顺序补齐外部 API 和会话分享结构；已先执行 `V20260809170000`/`V20260809170001` 会话分享主链但缺少较低版本 QA Memory 的 release 历史，改由 `V20260810173117` 一次事务补齐相同最终记忆结构。正常顺序历史与空库继续使用主 migration。未知 checksum、路径混用或不完整 history 一律失败关闭，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
+- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析工具盒子、LobeHub、内部模型可观测、撤销重发、外部 API 凭据及 QA Memory 的已知迁移分叉。已执行 `V20260809120000`、`V20260809230000`、`V20260810090000` 的个人库会保留原始字节，并以 `V20260810110000` 至 `V20260810110002` 顺序补齐外部 API 和会话分享结构；已先执行会话分享主链但缺少较低版本 QA Memory 的 release 历史，在尚未执行 `V20260810234154` 时使用 `V20260810173117`，已执行该 release 最高版本时改用 `V20260811170050`，两条隔离补偿均以一次事务建立相同最终记忆结构。已落库路径后续继续按原 location 校验，正常顺序历史与空库继续使用主 migration。未知 checksum、路径混用或不完整 history 一律失败关闭，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
 - `config.LobehubDevelopmentBootstrapRunner`：仅在 `test/local` profile 且
   `TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true` 时装配；拒绝非回环平台 PostgreSQL，通过既有通用参数管理服务
   写入审计后配置本地聊天 origin、虚拟邮箱域和唯一 owner，最后才启用 `LOBEHUB_ENABLED`。多个可用超级管理员时

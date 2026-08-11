@@ -13,6 +13,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Clock3, FileText, RotateCcw, Scissors } from "lucide-vue-next";
 import {
   displayTextFromUserPrompt,
+  hasVisibleUserMessageContent,
   workspaceContextAttachmentsFromPromptParts,
   workspaceContextAttachmentsFromUserPrompt
 } from "../../../user-message-display";
@@ -44,7 +45,7 @@ const workspaceContexts = computed(() => {
   return partContexts.length ? partContexts : workspaceContextAttachmentsFromUserPrompt(props.message.text);
 });
 // 多人会话接管运行态时可能先收到 OpenCode 的空 user envelope；保留状态用于后续归并，但不渲染空气泡。
-const hasVisibleContent = computed(() => Boolean(displayText.value.trim()) || workspaceContexts.value.length > 0);
+const hasVisibleContent = computed(() => hasVisibleUserMessageContent(props.message));
 const resendWaiting = computed(() => props.message.resend?.status === "WAITING");
 const resendActive = computed(() => ["WAITING", "REVERTING", "REVERTED"].includes(props.message.resend?.status ?? ""));
 const resendCountdown = computed(() => {

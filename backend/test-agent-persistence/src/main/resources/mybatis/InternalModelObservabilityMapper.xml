@@ -18,7 +18,9 @@
             <arg column="duration_ms" javaType="java.lang.Long"/>
             <arg column="first_byte_ms" javaType="java.lang.Long"/>
             <arg column="first_token_ms" javaType="java.lang.Long"/>
+            <arg column="last_token_ms" javaType="java.lang.Long"/>
             <arg column="stream_complete_ms" javaType="java.lang.Long"/>
+            <arg column="output_token_count" javaType="java.lang.Long"/>
             <arg column="trace_id" javaType="java.lang.String"/>
             <arg column="ucid" javaType="java.lang.String"/>
             <arg column="started_at" javaType="java.time.Instant"/>
@@ -45,6 +47,17 @@
         </constructor>
     </resultMap>
 
+    <resultMap id="LatencyDistributionRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelLatencyDistributionRow">
+        <constructor>
+            <arg column="sample_count" javaType="java.lang.Long"/>
+            <arg column="minimum_ms" javaType="java.lang.Double"/>
+            <arg column="first_quartile_ms" javaType="java.lang.Double"/>
+            <arg column="median_ms" javaType="java.lang.Double"/>
+            <arg column="third_quartile_ms" javaType="java.lang.Double"/>
+            <arg column="maximum_ms" javaType="java.lang.Double"/>
+        </constructor>
+    </resultMap>
+
     <resultMap id="ProbeStatusRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelProbeStatusRow">
         <constructor>
             <arg column="provider_id" javaType="java.lang.String"/>
@@ -62,12 +75,12 @@
     <insert id="insertCallRecord" parameterType="com.enterprise.testagent.persistence.mybatis.InternalModelCallRecordRow">
         insert into internal_model_call_records(
             provider_id, model, endpoint, source, outcome, http_status, error_class,
-            streaming, duration_ms, first_byte_ms, first_token_ms, stream_complete_ms,
-            trace_id, ucid, started_at
+            streaming, duration_ms, first_byte_ms, first_token_ms, last_token_ms, stream_complete_ms,
+            output_token_count, trace_id, ucid, started_at
         ) values (
             #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome}, #{httpStatus}, #{errorClass},
-            #{streaming}, #{durationMillis}, #{firstByteMillis}, #{firstTokenMillis}, #{streamCompleteMillis},
-            #{traceId}, #{ucid}, #{startedAt}
+            #{streaming}, #{durationMillis}, #{firstByteMillis}, #{firstTokenMillis}, #{lastTokenMillis},
+            #{streamCompleteMillis}, #{outputTokenCount}, #{traceId}, #{ucid}, #{startedAt}
         )
     </insert>
 
@@ -169,8 +182,8 @@
 
     <select id="findCallRecords" resultMap="CallRecordRowMap">
         select id, provider_id, model, endpoint, source, outcome, http_status, error_class,
-               streaming, duration_ms, first_byte_ms, first_token_ms, stream_complete_ms,
-               trace_id, ucid, started_at
+               streaming, duration_ms, first_byte_ms, first_token_ms, last_token_ms, stream_complete_ms,
+               output_token_count, trace_id, ucid, started_at
         from internal_model_call_records
         <include refid="CallRecordWhere"/>
         order by started_at desc, id desc
@@ -194,6 +207,36 @@
         <if test="from != null">and stat_hour &gt;= #{from}</if>
         <if test="to != null">and stat_hour &lt; #{to}</if>
         order by stat_hour asc, provider_id asc, outcome asc
+    </select>
+
+    <select id="findTtftDistribution" resultMap="LatencyDistributionRowMap">
+        select count(*) as sample_count,
+               cast(min(first_token_ms) as double precision) as minimum_ms,
+               percentile_cont(0.25) within group (order by first_token_ms) as first_quartile_ms,
+               percentile_cont(0.50) within group (order by first_token_ms) as median_ms,
+               percentile_cont(0.75) within group (order by first_token_ms) as third_quartile_ms,
+               cast(max(first_token_ms) as double precision) as maximum_ms
+        from internal_model_call_records
+        <include refid="CallRecordWhere"/>
+        and first_token_ms is not null
+    </select>
+
+    <select id="findItlDistribution" resultMap="LatencyDistributionRowMap">
+        select count(*) as sample_count,
+               min(token_latency_ms) as minimum_ms,
+               percentile_cont(0.25) within group (order by token_latency_ms) as first_quartile_ms,
+               percentile_cont(0.50) within group (order by token_latency_ms) as median_ms,
+               percentile_cont(0.75) within group (order by token_latency_ms) as third_quartile_ms,
+               max(token_latency_ms) as maximum_ms
+        from (
+            select cast(last_token_ms - first_token_ms as double precision)
+                   / cast(output_token_count - 1 as double precision) as token_latency_ms
+            from internal_model_call_records
+            <include refid="CallRecordWhere"/>
+            and first_token_ms is not null
+            and last_token_ms is not null
+            and output_token_count &gt;= 2
+        ) eligible_token_latency_samples
     </select>
 
     <delete id="deleteCallRecordsBefore">

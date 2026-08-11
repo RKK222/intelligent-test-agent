@@ -2,7 +2,9 @@ import type {
   RunEvent,
   RunEventType,
   SessionRuntimeStateSummary,
-  SessionShareRuntimeState
+  SessionShareRuntimeState,
+  UserNotificationChangeType,
+  UserNotificationStreamUpdate
 } from "@test-agent/shared-types";
 
 export type RunEventStreamStatus = "connecting" | "open" | "closed" | "error";
@@ -17,6 +19,10 @@ export type SessionRuntimeStateSubscription = {
 };
 
 export type SessionShareRuntimeStateSubscription = {
+  close: () => void;
+};
+
+export type UserNotificationSubscription = {
   close: () => void;
 };
 
@@ -78,6 +84,15 @@ export type SessionShareRuntimeStateSubscribeOptions = {
   linuxServerId?: string | null;
   fetcher?: typeof fetch;
   onEvent: (event: SessionShareRuntimeState, meta: { eventName: string }) => void;
+  onStatus?: (status: SessionRuntimeStateStreamStatus) => void;
+  onError?: (error: unknown) => void;
+};
+
+export type UserNotificationSubscribeOptions = {
+  baseUrl?: string;
+  token?: string | null;
+  fetcher?: typeof fetch;
+  onEvent: (event: UserNotificationStreamUpdate, meta: { eventName: string }) => void;
   onStatus?: (status: SessionRuntimeStateStreamStatus) => void;
   onError?: (error: unknown) => void;
 };
@@ -415,6 +430,85 @@ export function subscribeSessionRuntimeState(
   };
 }
 
+/** 订阅当前登录用户的低敏通知变化信号；断流后按统一退避策略重新建立快照连接。 */
+export function subscribeUserNotifications(
+  options: UserNotificationSubscribeOptions
+): UserNotificationSubscription {
+  const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const fetcher = options.fetcher ?? fetch;
+  let closed = false;
+  let controller: AbortController | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resolveRetryWait: (() => void) | null = null;
+
+  void (async () => {
+    let failureCount = 0;
+    while (!closed) {
+      controller = new AbortController();
+      let receivedEvent = false;
+      options.onStatus?.("connecting");
+      try {
+        const headers = new Headers();
+        headers.set("Accept", "text/event-stream");
+        if (options.token?.trim()) {
+          headers.set("Authorization", `Bearer ${options.token.trim()}`);
+        }
+        const response = await fetcher(userNotificationEventsUrl(baseUrl), {
+          headers,
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`user notification stream failed: ${response.status}`);
+        }
+        if (!response.body) {
+          throw new Error("user notification stream has no body");
+        }
+        if (closed) return;
+        options.onStatus?.("open");
+        await readSseStream(response.body, (message) => {
+          if (closed || !isUserNotificationEvent(message.eventName)) return;
+          const parsed = parseUserNotificationStreamUpdate(message.data);
+          if (!parsed) return;
+          receivedEvent = true;
+          options.onEvent(parsed, { eventName: message.eventName });
+        });
+        if (closed) return;
+        throw new Error("user notification stream closed");
+      } catch (error) {
+        if (closed || controller.signal.aborted) return;
+        options.onStatus?.("error");
+        options.onError?.(error);
+        if (receivedEvent) failureCount = 0;
+        const delay = SESSION_RUNTIME_RECONNECT_DELAYS_MS[
+          Math.min(failureCount, SESSION_RUNTIME_RECONNECT_DELAYS_MS.length - 1)
+        ];
+        failureCount += 1;
+        await new Promise<void>((resolve) => {
+          resolveRetryWait = resolve;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            resolveRetryWait = null;
+            resolve();
+          }, delay);
+        });
+      }
+    }
+  })();
+
+  return {
+    close: () => {
+      if (closed) return;
+      closed = true;
+      controller?.abort();
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+      resolveRetryWait?.();
+      resolveRetryWait = null;
+      options.onStatus?.("closed");
+    }
+  };
+}
+
 /**
  * 订阅单个分享会话的运行与授权状态。收到 invalidated 后不再重连，避免失效链接持续探测。
  */
@@ -522,6 +616,10 @@ function sessionRuntimeStateEventsUrl(baseUrl: string) {
 
 function sessionShareRuntimeStateEventsUrl(baseUrl: string) {
   return `${baseUrl}/api/internal/platform/opencode-runtime/session-shares/runtime-state/events`;
+}
+
+function userNotificationEventsUrl(baseUrl: string) {
+  return `${baseUrl}/api/internal/platform/notification-center/notifications/events`;
 }
 
 /** 空值时不发头，保持首次进程查询和旧前端的 least_conn 行为。 */
@@ -680,6 +778,41 @@ function isSessionShareRuntimeStateEvent(eventName: string) {
     || eventName === "session-share.updated"
     || eventName === "session-share.invalidated"
     || eventName === "message";
+}
+
+function isUserNotificationEvent(eventName: string) {
+  return eventName === "user-notification.snapshot"
+    || eventName === "user-notification.updated"
+    || eventName === "message";
+}
+
+export function parseUserNotificationStreamUpdate(data: string): UserNotificationStreamUpdate | null {
+  try {
+    const value = JSON.parse(data) as Partial<UserNotificationStreamUpdate>;
+    const supported = new Set<UserNotificationChangeType>([
+      "SNAPSHOT",
+      "CREATED",
+      "READ",
+      "UPDATED",
+      "INVALIDATED"
+    ]);
+    if (!value.changeType
+      || !supported.has(value.changeType)
+      || typeof value.unreadCount !== "number"
+      || !Number.isFinite(value.unreadCount)
+      || value.unreadCount < 0
+      || typeof value.generatedAt !== "string") {
+      return null;
+    }
+    return {
+      changeType: value.changeType,
+      notificationId: typeof value.notificationId === "string" ? value.notificationId : null,
+      unreadCount: value.unreadCount,
+      generatedAt: value.generatedAt
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function parseSessionShareRuntimeState(data: string): SessionShareRuntimeState | null {

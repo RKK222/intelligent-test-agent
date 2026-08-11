@@ -264,11 +264,12 @@ public class RunResendExecutionService {
     }
 
     private RunResend commitStarted(RunResend reverted) {
-        cleanupPort.purgeSourceRun(reverted.sourceRunId());
+        Instant acceptedAt = clock.instant();
+        cleanupPort.purgeSourceRun(reverted.sourceRunId(), reverted.sessionId(), acceptedAt);
         if (runRuntimeStore != null) {
             runRuntimeStore.purgeDetailsAfterResend(reverted.sourceRunId());
         }
-        RunResend dispatched = reverted.markDispatched(clock.instant());
+        RunResend dispatched = reverted.markDispatched(acceptedAt);
         if (!resendRepository.saveIfStatus(dispatched, RunResendStatus.REVERTED)) {
             // 清理动作可幂等重放，但只有赢得状态迁移的执行者可以解锁并发布 started，避免重复接管事件。
             return resendRepository.findById(reverted.resendId()).orElse(reverted);
@@ -279,7 +280,7 @@ public class RunResendExecutionService {
                 dispatched.replacementRunId(),
                 RunEventType.RUN_RESEND_STARTED,
                 dispatched.traceId(),
-                clock.instant(),
+                acceptedAt,
                 RunResendApplicationService.eventPayload(dispatched)), RunStorageMode.LEGACY_FULL);
         return dispatched;
     }

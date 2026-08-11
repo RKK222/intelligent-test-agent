@@ -339,6 +339,25 @@ public class AgentConfigController {
                         RuntimeApiSupport.traceId(exchange))));
     }
 
+    /**
+     * 手工触发目标服务器缺失公共个人 worktree 补偿；目标 Java 与定时任务复用同一分布式锁和幂等程序。
+     */
+    @PostMapping("/public/worktrees/reconcile")
+    public ApiResponse<Object> reconcileMissingPublicWorktrees(
+            @RequestBody AgentConfigDtos.PublicWorktreeCompensationRequest request,
+            ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return routingService.forwardTargetForRequestedServer(request.linuxServerId())
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        request,
+                        new TypeReference<ApiResponse<Object>>() {}))
+                .orElseGet(() -> ok(exchange, service.reconcileMissingPublicWorktrees(
+                        request.linuxServerId(),
+                        RuntimeApiSupport.traceId(exchange))));
+    }
+
     @GetMapping("/public/worktrees")
     public ApiResponse<List<AgentConfigResponses.AgentConfigWorktreeOptionResponse>> publicWorktrees(
             @RequestParam(required = false) String linuxServerId,

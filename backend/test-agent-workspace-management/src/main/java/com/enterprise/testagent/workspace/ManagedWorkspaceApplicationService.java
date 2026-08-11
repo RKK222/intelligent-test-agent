@@ -773,6 +773,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 workspaceRoot,
                 privateKey,
                 effectiveGitUrl(repository, userId),
+                true,
                 createMissingDirectory,
                 userId);
         progress.step(WorkspaceCreateOperationStep.CREATING_RUNTIME_WORKSPACE);
@@ -3609,6 +3610,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             Path workspaceRoot,
             String privateKey,
             String effectiveGitUrl,
+            boolean syncExistingRepository,
             boolean createMissingDirectory,
             UserId userId) {
         try {
@@ -3638,6 +3640,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                             throw new PlatformException(ErrorCode.CONFLICT, "已有目录不是目标代码库分支", Map.of("path", repoRoot.toString()));
                         }
                         ensureInternalOrigin(repository, effectiveGitUrl, repoRoot, privateKey);
+                        if (syncExistingRepository && !createMissingDirectory) {
+                            synchronizeReusedApplicationRepoForWorkspaceCreation(repoRoot, branch, privateKey);
+                        }
                     }
                 }
             } else {
@@ -3663,6 +3668,26 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "创建应用版本工作区失败", Map.of("path", repoRoot.toString()), exception);
         }
+    }
+
+    /**
+     * 新建工作空间复用既有 feature 仓库时先安全追平远端，避免远端目录树可见但本地旧 HEAD 找不到目录。
+     * 工作树存在修改或远端无法快进时由现有 Git 错误直接阻断，禁止自动 stash、reset 或覆盖内容。
+     */
+    private void synchronizeReusedApplicationRepoForWorkspaceCreation(
+            Path repoRoot,
+            String branch,
+            String privateKey) {
+        if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "应用版本仓库存在未提交变更，无法在创建工作空间前同步远程分支",
+                    Map.of(
+                            "path", repoRoot.toString(),
+                            "blockingFiles", repositoryStatusPaths(repoRoot)));
+        }
+        gitWorkspaceService.fetch(repoRoot, privateKey);
+        gitWorkspaceService.pullFastForward(repoRoot, branch, privateKey);
     }
 
     /**
@@ -3780,6 +3805,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 workspaceRoot,
                 privateKey,
                 effectiveGitUrl(repository, userId),
+                false,
                 false,
                 userId);
         Optional<ApplicationWorkspaceVersionReplica> existing = managedWorkspaceRepository.findVersionReplica(

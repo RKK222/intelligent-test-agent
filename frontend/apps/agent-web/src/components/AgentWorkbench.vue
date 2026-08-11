@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, toRaw, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import {
@@ -28,6 +28,7 @@ import {
   subscribeRunEvents,
   subscribeSessionRuntimeState,
   subscribeSessionShareRuntimeState,
+  subscribeUserNotifications,
   type RunEventRawMessage
 } from "@test-agent/event-stream-client";
 import { BookOpenText, Boxes, BrainCircuit, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
@@ -71,6 +72,7 @@ import type {
   SessionShareAccess,
   SessionShareRuntimeState,
   SharedSessionListItem,
+  UserNotification,
   SessionMessage,
   SessionRuntimeState,
   SessionRuntimeStateSummary,
@@ -105,6 +107,7 @@ import {
   type ChatContextItem
 } from "../stores/chatContextStore";
 import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } from "./FigmaShell.vue";
+import type { UserNotificationFilter } from "./UserNotificationCenter.vue";
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import AppSourceDialog from "./AppSourceDialog.vue";
@@ -602,6 +605,11 @@ const historySwitchingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 let activeRunProbeSeq = 0;
 const runtimeStateRunReconciliations = new Set<string>();
+// 同一 resend.started 可能在 SSE 重连后重放；成功同步后不再重复读取，未落库时允许后续事件继续补偿。
+const refreshedAuthoritativeRunIds = new Set<string>();
+const authoritativeRunRefreshes = new Map<string, Promise<boolean>>();
+const AUTHORITATIVE_RESEND_USER_REFRESH_ATTEMPTS = 6;
+const AUTHORITATIVE_RESEND_USER_REFRESH_DELAY_MS = 250;
 type HistorySwitchRunEventBuffer = {
   switchSeq: number;
   sessionId: string;
@@ -998,6 +1006,77 @@ function dispatchChat(action: Parameters<typeof reduceAgentChatRuntime>[1]) {
   return next;
 }
 
+function rememberAuthoritativeRunRefresh(runId: string): void {
+  refreshedAuthoritativeRunIds.add(runId);
+  if (refreshedAuthoritativeRunIds.size > 100) {
+    const oldest = refreshedAuthoritativeRunIds.values().next();
+    if (!oldest.done) {
+      refreshedAuthoritativeRunIds.delete(oldest.value);
+    }
+  }
+}
+
+/**
+ * revision 可能早于替代 USER 持久化，started 也可能稍后重放。两条信号共用同一个轻量刷新任务：
+ * 只读取并原位替换该 USER，不切换 Session、不清空时间线，也不改变用户当前滚动位置。
+ */
+async function refreshAuthoritativeResendUser(
+  sessionId: string,
+  resend: ResendMetadata
+): Promise<boolean> {
+  const replacementRunId = resend.replacementRunId;
+  if (refreshedAuthoritativeRunIds.has(replacementRunId)) {
+    return true;
+  }
+  const pending = authoritativeRunRefreshes.get(replacementRunId);
+  if (pending) {
+    return pending;
+  }
+  const refresh = (async () => {
+    for (let attempt = 1; attempt <= AUTHORITATIVE_RESEND_USER_REFRESH_ATTEMPTS; attempt += 1) {
+      try {
+        const page = await api.listSessionMessages(sessionId, 1, 100, { refresh: true });
+        if (session.value?.sessionId !== sessionId) {
+          return false;
+        }
+        const persistedMessages = dedupeSessionMessages(page.items);
+        const authoritative = [...persistedMessages].reverse().find((message) =>
+          message.role === "USER" && message.runId === replacementRunId
+        );
+        if (authoritative) {
+          const projected = messagesFromSessionMessages([authoritative])[0];
+          if (projected?.role === "user") {
+            rememberPersistedMessageIdentities([authoritative]);
+            dispatchChat({
+              type: "run.resend.user.synchronized",
+              resend,
+              message: projected
+            });
+            rememberAuthoritativeRunRefresh(replacementRunId);
+            return true;
+          }
+        }
+      } catch {
+        // 平台消息同步与 Session revision 非事务提交；短暂读取失败和未落库都走同一重试窗口。
+      }
+      if (attempt < AUTHORITATIVE_RESEND_USER_REFRESH_ATTEMPTS) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, AUTHORITATIVE_RESEND_USER_REFRESH_DELAY_MS);
+        });
+      }
+    }
+    return false;
+  })();
+  authoritativeRunRefreshes.set(replacementRunId, refresh);
+  try {
+    return await refresh;
+  } finally {
+    if (authoritativeRunRefreshes.get(replacementRunId) === refresh) {
+      authoritativeRunRefreshes.delete(replacementRunId);
+    }
+  }
+}
+
 function requestChatRun(userMessageId: string) {
   const supersededRunId = run.value?.runId;
   supersededConversationRunId.value = supersededRunId ?? null;
@@ -1088,11 +1167,28 @@ const chatMessagesForPanel = computed<AgentMessage[]>(() =>
       const resend = belongsToCurrentResend
         ? currentResend
         : message.resend;
-      const senderUsername = message.senderUserId
-        ? shareParticipantNameByUserId.value.get(message.senderUserId)
+      // 兼容旧替代 Run 被执行所属人覆盖的历史数据；共享重发审计中的 requester
+      // 是后端确认过的实际发送人，展示和按钮权限都必须优先使用它。
+      const senderUserId = resend?.requestedBySharedUser
+        ? resend.requesterUserId ?? message.senderUserId
+        : message.senderUserId;
+      const senderUsername = senderUserId
+        ? shareParticipantNameByUserId.value.get(senderUserId)
         : undefined;
-      return platformMessageId || resend || senderUsername
-        ? { ...message, platformMessageId, resend, senderUsername: senderUsername ?? message.senderUsername }
+      return platformMessageId || resend || senderUsername || senderUserId !== message.senderUserId
+        ? {
+            ...message,
+            platformMessageId,
+            resend,
+            senderUserId,
+            senderUsername: resend?.requestedBySharedUser
+              ? resend.requesterUsername ?? senderUsername ?? message.senderUsername
+              : senderUsername ?? message.senderUsername,
+            senderUnifiedAuthId: resend?.requestedBySharedUser
+              ? resend.requesterUnifiedAuthId ?? message.senderUnifiedAuthId
+              : message.senderUnifiedAuthId,
+            sentBySharedUser: resend?.requestedBySharedUser ? true : message.sentBySharedUser
+          }
         : message;
     }
     return platformMessageId ? { ...message, platformMessageId } : message;
@@ -1459,6 +1555,131 @@ const sharedSessionsQuery = useQuery({
 });
 const sharedSessionItems = computed<SharedSessionListItem[]>(() => sharedSessionsQuery.data.value?.items ?? []);
 
+const USER_NOTIFICATION_PAGE_SIZE = 20;
+const notificationFilter = ref<UserNotificationFilter>("ALL");
+const notificationItems = ref<UserNotification[]>([]);
+const notificationPage = ref(1);
+const notificationTotal = ref(0);
+const notificationUnreadCount = ref(0);
+const notificationsLoading = ref(false);
+const notificationsLoadingMore = ref(false);
+const notificationsError = ref<string | null>(null);
+const notificationsHasMore = computed(() => notificationItems.value.length < notificationTotal.value);
+let notificationLoadSequence = 0;
+
+/** 通知正文始终从分页接口读取；SSE 仅作为低敏刷新信号和未读数快照。 */
+async function refreshUserNotifications() {
+  if (shareMode.value || !authStore.token) return;
+  const sequence = ++notificationLoadSequence;
+  notificationsLoading.value = true;
+  notificationsError.value = null;
+  try {
+    const result = await ordinaryApi.listUserNotifications(
+      1,
+      USER_NOTIFICATION_PAGE_SIZE,
+      notificationFilter.value === "UNREAD"
+    );
+    if (sequence !== notificationLoadSequence) return;
+    notificationItems.value = result.items;
+    notificationPage.value = result.page;
+    notificationTotal.value = result.total;
+    notificationUnreadCount.value = result.unreadCount;
+  } catch (error) {
+    if (sequence !== notificationLoadSequence) return;
+    notificationsError.value = error instanceof BackendApiError
+      ? error.message
+      : error instanceof Error ? error.message : "通知读取失败";
+  } finally {
+    if (sequence === notificationLoadSequence) notificationsLoading.value = false;
+  }
+}
+
+async function loadMoreUserNotifications() {
+  if (notificationsLoadingMore.value || !notificationsHasMore.value) return;
+  const sequence = notificationLoadSequence;
+  notificationsLoadingMore.value = true;
+  notificationsError.value = null;
+  try {
+    const nextPage = notificationPage.value + 1;
+    const result = await ordinaryApi.listUserNotifications(
+      nextPage,
+      USER_NOTIFICATION_PAGE_SIZE,
+      notificationFilter.value === "UNREAD"
+    );
+    if (sequence !== notificationLoadSequence) return;
+    const seen = new Set(notificationItems.value.map((item) => item.notificationId));
+    notificationItems.value = [
+      ...notificationItems.value,
+      ...result.items.filter((item) => !seen.has(item.notificationId))
+    ];
+    notificationPage.value = result.page;
+    notificationTotal.value = result.total;
+    notificationUnreadCount.value = result.unreadCount;
+  } catch (error) {
+    notificationsError.value = error instanceof BackendApiError
+      ? error.message
+      : error instanceof Error ? error.message : "加载更多通知失败";
+  } finally {
+    notificationsLoadingMore.value = false;
+  }
+}
+
+function handleNotificationFilter(filter: UserNotificationFilter) {
+  notificationFilter.value = filter;
+  notificationItems.value = [];
+  notificationPage.value = 1;
+  notificationTotal.value = 0;
+  void refreshUserNotifications();
+}
+
+/** 分享通知不提前调用通用已读接口，必须等新标签页鉴权访问成功后由后端统一标记。 */
+function handleOpenNotification(notification: UserNotification) {
+  if (!notification.actionAvailable || notification.actionType !== "SESSION_SHARE") return;
+  openSharedSession(notification.actionTargetId);
+}
+
+watch(
+  [() => authStore.token, shareMode],
+  ([token, isShare], _previous, onCleanup) => {
+    // 使旧身份尚未结束的分页请求失效，避免它们在清空后重新写入旧用户快照。
+    notificationLoadSequence += 1;
+    // 登录身份或工作台模式切换时先清空旧快照，避免短暂展示上一用户的通知。
+    notificationItems.value = [];
+    notificationPage.value = 1;
+    notificationTotal.value = 0;
+    notificationUnreadCount.value = 0;
+    notificationsLoading.value = false;
+    notificationsLoadingMore.value = false;
+    notificationsError.value = null;
+    if (!token || isShare) {
+      return;
+    }
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void refreshUserNotifications();
+      }, 80);
+    };
+    const subscription = subscribeUserNotifications({
+      baseUrl: apiBaseUrl,
+      token,
+      onEvent: (update) => {
+        notificationUnreadCount.value = update.unreadCount;
+        // UPDATED 可能不改变未读数；每个 30 秒快照也必须回源，才能补偿丢失的广播。
+        scheduleRefresh();
+      }
+    });
+    void refreshUserNotifications();
+    onCleanup(() => {
+      subscription.close();
+      if (refreshTimer) clearTimeout(refreshTimer);
+    });
+  },
+  { immediate: true }
+);
+
 function refreshSharedSessions() {
   if (!shareMode.value && !sharedSessionsQuery.isFetching.value) void sharedSessionsQuery.refetch();
 }
@@ -1624,20 +1845,21 @@ watch(
           && state.sessionUpdatedAt
           && previous.sessionUpdatedAt !== state.sessionUpdatedAt
         );
-        if (
-          sessionRevisionChanged
-          && state.active
-          && !activeRun
-          && session.value?.sessionId === state.sessionId
-        ) {
-          void switchSession(state.sessionId, {
-            refreshSnapshot: true,
-            completionFeedback: {
-              kind: "info",
-              title: "共享对话已更新",
-              description: "已同步其他参与者产生的上下文压缩或消息变更。"
-            }
-          });
+        if (sessionRevisionChanged && state.active && session.value?.sessionId === state.sessionId) {
+          if (activeRun?.resend) {
+            // 撤回重发只同步替代 USER；整段 switchSession 会让 A/B 时间线 reset 并强制滚动到底。
+            void refreshAuthoritativeResendUser(state.sessionId, activeRun.resend);
+          } else if (!activeRun) {
+            // compact 没有 active Run 和可原位归并的消息边界，继续按 revision 刷新权威历史。
+            void switchSession(state.sessionId, {
+              refreshSnapshot: true,
+              completionFeedback: {
+                kind: "info",
+                title: "共享对话已更新",
+                description: "已同步其他参与者产生的上下文压缩或消息变更。"
+              }
+            });
+          }
         }
         if (!state.active || previous?.version !== state.version || previous?.canChat !== state.canChat) {
           api.closeWorkspaceFileConnections(state.workspaceId);
@@ -3766,7 +3988,13 @@ const resendableMessageId = computed(() => {
     }
   );
   if (!sourceMessage || sourceMessage.runId !== sourceRun.runId || !sourceMessage.remoteMessageId) return undefined;
-  if (shareMode.value && shareAccess.value?.ownerAccess !== true) return undefined;
+  const actorUserId = shareMode.value
+    ? shareAccess.value?.actorUserId
+    : authStore.currentUser?.userId;
+  // 所属关系只决定 OpenCode 由谁执行，不能授权所属人改写其他参与者已经发送的问题。
+  const sourceSenderUserId = runActorUserId(sourceRun) ?? sourceMessage.senderUserId ?? undefined;
+  if (!actorUserId || (sourceSenderUserId ? sourceSenderUserId !== actorUserId : shareMode.value)) return undefined;
+  if (shareMode.value && shareAccess.value?.canChat !== true) return undefined;
   if (["WAITING", "REVERTING", "REVERTED"].includes(sourceMessage.resend?.status ?? "")) return undefined;
   return sourceMessage.remoteMessageId;
 });
@@ -3791,17 +4019,23 @@ const timelineRuntimeStatusForPanel = computed(() => {
     retryAfterSeconds: retryCountdownSeconds(status, nowTick.value, retryDeadlines.value)
   };
 });
+function runActorUserId(candidate: Run | null | undefined): string | undefined {
+  if (candidate?.resend?.requestedBySharedUser && candidate.resend.requesterUserId) {
+    return candidate.resend.requesterUserId;
+  }
+  return candidate?.messageSenderUserId ?? undefined;
+}
 const canStopRun = computed(() => Boolean(
   run.value
   && isRunBusyStatus(run.value.status)
   && !cancelRunMutation.isPending.value
-  && (!shareMode.value || run.value.messageSenderUserId === shareAccess.value?.actorUserId)
+  && (!shareMode.value || runActorUserId(run.value) === shareAccess.value?.actorUserId)
 ));
 const stopDisabledReason = computed(() => {
   if (cancelRunMutation.isPending.value) return "正在终止";
   if (!run.value) return "当前没有可终止的运行";
   if (!isRunBusyStatus(run.value.status)) return "当前运行已结束";
-  if (shareMode.value && run.value.messageSenderUserId !== shareAccess.value?.actorUserId) {
+  if (shareMode.value && runActorUserId(run.value) !== shareAccess.value?.actorUserId) {
     return "仅会话所属人或本次消息发送人可以停止";
   }
   return "";
@@ -4047,7 +4281,7 @@ async function retryLastRun(editedPrompt: string) {
       });
     }
     run.value = response.replacementRun;
-    dispatchChat({ type: "run.resend.requested", resend: response.resend });
+    dispatchChat({ type: "run.resend.requested", resend: response.resend, editedPrompt });
     // 用户轮次已接管到替代 Run，远端新消息 ID 会在 started 后原位替换旧边界。
     markConversationRunAdopted(response.replacementRun.runId, draft.sourceMessageId);
     rememberRunSession(response.replacementRun);
@@ -8681,8 +8915,8 @@ function handleRetryRun() {
       kind: "info",
       title: "无权撤回重发",
       description: shareMode.value
-        ? "共享对话仅允许会话所属人操作。"
-        : "仅支持会话最后一条已结束的用户消息。"
+        ? "共享对话仅允许最后一条消息的实际发送人在可对话状态下操作。"
+        : "仅消息实际发送人可以撤回最后一条已结束的用户消息。"
     };
     return;
   }
@@ -8874,6 +9108,10 @@ function applyRunEventWorkbenchProjection(
       accumulatedTokens.value = 0;
       void refreshWorkspaceGitDiff();
       void refreshWorkspaceView();
+      if (subscribedSessionId && session.value?.sessionId === subscribedSessionId && resend) {
+        // 所属人与分享参与人统一原位补齐平台 USER；revision 先到时复用同一 in-flight 任务。
+        void refreshAuthoritativeResendUser(subscribedSessionId, resend);
+      }
     }
     if (event.type === "run.resend.failed") {
       feedback.value = {
@@ -9008,7 +9246,11 @@ function resendMetadataFromRunEvent(event: RunEvent): ResendMetadata | undefined
     status: text(event.payload.status) ?? (event.type === "run.resend.failed" ? "FAILED" : "WAITING"),
     executeAt,
     sourceRunId,
-    replacementRunId
+    replacementRunId,
+    requesterUserId: text(event.payload.requesterUserId),
+    requesterUsername: text(event.payload.requesterUsername),
+    requesterUnifiedAuthId: text(event.payload.requesterUnifiedAuthId),
+    requestedBySharedUser: event.payload.requestedBySharedUser === true
   };
 }
 
@@ -10009,6 +10251,11 @@ function rememberCurrentRunAsBackgroundRuntimeState() {
 }
 
 function handleNewConversation() {
+  if (shareMode.value) {
+    // 分享路由固定绑定所属人的会话；新建对话必须先回到当前用户自己的工作台。
+    void router.push({ name: "workbench" });
+    return;
+  }
   invalidateConversationInteraction();
   rememberCurrentRunAsBackgroundRuntimeState();
   pendingSessionTitleRunId.value = null;
@@ -10039,6 +10286,28 @@ function handleNewConversation() {
 }
 
 const nativeCommandInFlight = ref(false);
+type CompactProgressStatus = "running" | "success";
+const compactProgressStatus = ref<CompactProgressStatus | null>(null);
+let compactProgressDismissTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearCompactProgressDismissTimer() {
+  if (compactProgressDismissTimer) {
+    clearTimeout(compactProgressDismissTimer);
+    compactProgressDismissTimer = null;
+  }
+}
+
+function dismissCompactProgressAfterSuccess() {
+  clearCompactProgressDismissTimer();
+  compactProgressDismissTimer = setTimeout(() => {
+    compactProgressStatus.value = null;
+    compactProgressDismissTimer = null;
+  }, 2600);
+}
+
+onBeforeUnmount(() => {
+  clearCompactProgressDismissTimer();
+});
 
 function nativeSessionActionAllowed(action: string, options: { allowBusy?: boolean } = {}): Session | null {
   const currentSession = session.value;
@@ -10077,6 +10346,7 @@ async function handleNativeTuiCommand(command: OpenCodeTuiCommandName) {
   if (!currentSession) return;
 
   nativeCommandInFlight.value = true;
+  let compactSucceeded = false;
   try {
     if (command === "rename") {
       const result = await ElMessageBox.prompt("请输入新的会话名称", "重命名会话", {
@@ -10102,19 +10372,33 @@ async function handleNativeTuiCommand(command: OpenCodeTuiCommandName) {
         feedback.value = { kind: "info", title: "无法压缩上下文", description: "请先选择包含供应商信息的模型。" };
         return;
       }
-      // 原生 summarize 会等待模型生成摘要；先给出可见反馈，避免长请求期间被误认为点击无效。
+      // 原生 summarize 会等待模型生成摘要；持久进度条覆盖整个长请求，完成后再原位收束为成功态。
+      clearCompactProgressDismissTimer();
+      compactProgressStatus.value = "running";
       feedback.value = { kind: "info", title: "正在压缩上下文", description: currentSession.title };
       await api.compactSession(currentSession.sessionId, { providerID, modelID });
+      const completionFeedback: Feedback = { kind: "success", title: "上下文已压缩", description: currentSession.title };
       await switchSession(currentSession.sessionId, {
         refreshSnapshot: true,
-        completionFeedback: { kind: "success", title: "上下文已压缩", description: currentSession.title }
+        completionFeedback
       });
+      // switchSession 会在消息刷新失败或被更新的会话选择作废时自行返回；只有它采用本次完成反馈才展示成功态。
+      if (toRaw(feedback.value) !== completionFeedback) return;
+      compactSucceeded = true;
+      compactProgressStatus.value = "success";
       return;
     }
   } catch (error) {
     if (command === "rename" && (error === "cancel" || error === "close")) return;
     feedback.value = errorFeedback(`${actionLabel}失败`, error);
   } finally {
+    if (command === "compact") {
+      if (compactSucceeded) {
+        dismissCompactProgressAfterSuccess();
+      } else {
+        compactProgressStatus.value = null;
+      }
+    }
     nativeCommandInFlight.value = false;
   }
 }
@@ -10284,6 +10568,13 @@ async function handleLogout() {
     :side-question-available="robotQuestionAvailable"
     :side-question-manual-mode="!session?.sessionId"
     :runtime-inventory="runtimeInventoryForShell"
+    :notifications="notificationItems"
+    :notification-unread-count="notificationUnreadCount"
+    :notification-filter="notificationFilter"
+    :notifications-loading="notificationsLoading"
+    :notifications-loading-more="notificationsLoadingMore"
+    :notifications-has-more="notificationsHasMore"
+    :notifications-error="notificationsError"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
@@ -10302,6 +10593,10 @@ async function handleLogout() {
     @close-robot-side-question="handleCloseRobotSideQuestion"
     @personal-runtime-reload="handlePersonalRuntimeReload"
     @open-help="openHelpCenter"
+    @notification-filter="handleNotificationFilter"
+    @refresh-notifications="refreshUserNotifications"
+    @load-more-notifications="loadMoreUserNotifications"
+    @open-notification="handleOpenNotification"
   >
     <template #activity>
       <nav v-if="!shareMode" class="figma-activity-nav" aria-label="工作台活动栏">
@@ -10814,6 +11109,7 @@ async function handleLogout() {
           :input-value="composerInputValue"
           :resend-editing="Boolean(resendEditDraft)"
           :resend-submitting="resendStarting"
+          :compact-status="compactProgressStatus"
           :night-tasks="nightTasks"
           :current-night-task="currentNightTask"
           :night-visible-failure="nightVisibleFailure"

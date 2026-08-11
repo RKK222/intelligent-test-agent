@@ -251,6 +251,11 @@ public final class RuntimeIdGenerator {
         return prefixed("ssa_");
     }
 
+    /** 生成用户站内通知 ID。 */
+    public static String userNotificationId() {
+        return prefixed("ntf_");
+    }
+
     /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */

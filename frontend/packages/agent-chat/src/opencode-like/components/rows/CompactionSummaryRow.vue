@@ -8,9 +8,9 @@ export type CompactionSummaryRowProps = {
 </script>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { ChevronDown, ChevronRight, Minimize2 } from "lucide-vue-next";
 import MarkdownView from "../../../MarkdownView.vue";
-import OcDisclosure from "../primitives/OcDisclosure.vue";
 
 const props = defineProps<CompactionSummaryRowProps>();
 
@@ -36,34 +36,48 @@ const displaySummary = computed(() => props.summary.split("\n").map((line) => {
   return `${match[1]}${bold}${translated}${bold}`;
 }).join("\n"));
 
-const modeLabel = computed(() => props.part.overflow
-  ? "超出窗口"
-  : props.part.auto ? "自动压缩" : "手动压缩");
+const triggerLabel = computed(() => props.part.auto || props.part.overflow
+  ? "上下文已自动压缩"
+  : "上下文已手动压缩");
+const expanded = ref(false);
+const detailId = computed(() => `oc-compaction-detail-${props.part.partId.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
 </script>
 
 <template>
-  <OcDisclosure
+  <section
     class="oc-compaction-summary"
-    title="上下文已压缩"
-    detail="较早的对话已整理为续写摘要"
-    :subtitle="modeLabel"
-    :default-open="false"
     :data-testid="`compaction-part-${part.partId}`"
   >
-    <div class="oc-compaction-summary__body">
-      <p>
-        这不是新的回答。系统用这份摘要替代较早的对话内容，让模型在有限上下文窗口内继续当前任务。
-      </p>
-      <p v-if="part.overflow" class="oc-compaction-summary__note">
-        本次由上下文接近容量上限触发。
-      </p>
+    <div class="oc-compaction-summary__summary">
+      <button
+        type="button"
+        class="oc-compaction-summary__trigger"
+        :class="{ 'is-expanded': expanded }"
+        :aria-label="expanded ? '收起上下文压缩详情' : '展开上下文压缩详情'"
+        :title="expanded ? '收起上下文压缩详情' : '展开上下文压缩详情'"
+        :aria-expanded="expanded"
+        :aria-controls="detailId"
+        @click="expanded = !expanded"
+      >
+        <Minimize2 class="oc-compaction-summary__icon" aria-hidden="true" />
+        <span class="oc-compaction-summary__label">{{ triggerLabel }}</span>
+        <ChevronDown v-if="expanded" class="oc-compaction-summary__chevron" aria-hidden="true" />
+        <ChevronRight v-else class="oc-compaction-summary__chevron" aria-hidden="true" />
+      </button>
+      <span class="oc-compaction-summary__rule" aria-hidden="true" />
+    </div>
+    <div
+      v-if="expanded"
+      :id="detailId"
+      class="oc-compaction-summary__panel"
+      role="region"
+      aria-label="上下文压缩详情"
+    >
       <MarkdownView
-        v-if="displaySummary.trim()"
         :source="displaySummary"
         :highlight="false"
         body-class="oc-compaction-summary__markdown"
       />
-      <p v-else class="oc-compaction-summary__empty">压缩摘要正在同步。</p>
     </div>
-  </OcDisclosure>
+  </section>
 </template>

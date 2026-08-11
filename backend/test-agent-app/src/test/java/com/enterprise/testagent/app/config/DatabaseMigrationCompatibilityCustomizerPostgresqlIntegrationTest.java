@@ -2,6 +2,7 @@ package com.enterprise.testagent.app.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collection;
 import javax.sql.DataSource;
@@ -56,6 +57,8 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static final String INTERNAL_MODEL_OBSERVABILITY_VERSION = "20260808143300";
     private static final String INTERNAL_MODEL_FIRST_TOKEN_VERSION = "20260808143301";
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_VERSION = "20260808143302";
+    private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION;
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION =
             DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION;
     private static final String INTERNAL_MODEL_OBSERVABILITY_OLD_RESOURCE =
@@ -104,6 +107,10 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION;
     private static final String QA_MEMORY_AFTER_SESSION_SHARE_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_AFTER_SESSION_SHARE_COMPATIBILITY_LOCATION;
+    private static final String QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION;
+    private static final String QA_MEMORY_AFTER_TOKEN_LATENCY_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.QA_MEMORY_AFTER_TOKEN_LATENCY_COMPATIBILITY_LOCATION;
     private static final String EXTERNAL_API_FORWARD_VERSION =
             DatabaseMigrationCompatibilityCustomizer.EXTERNAL_API_FORWARD_MIGRATION_VERSION;
     private static final String EXTERNAL_API_FORWARD_LOCATION =
@@ -123,7 +130,9 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
-            DockerImageName.parse("postgres:16-alpine"));
+            DockerImageName.parse("postgres:16-alpine"))
+            // 全历史迁移断言较重，允许 Docker Desktop 冷启动时完成镜像初始化。
+            .withStartupTimeout(Duration.ofMinutes(3));
 
     @Test
     void enterpriseBaselineUsesOnlyMainLocationAndMigratesInOrder() {
@@ -308,7 +317,8 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isTrue();
-            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
+            assertThat(applied(dataSource, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION)).isTrue();
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(7L);
         });
     }
 
@@ -352,7 +362,9 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isFalse();
             assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isFalse();
             assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isFalse();
+            assertThat(applied(dataSource, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION)).isTrue();
             assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(7L);
         });
 
         // 第二次启动必须继续解析已经落库的“批量前”补偿版本，不能因批量版本已存在误切到另一条路径。
@@ -461,6 +473,50 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         runBootFlyway(dataSource, flyway -> {
             assertThat(locationDescriptors(flyway)).contains(QA_MEMORY_AFTER_SESSION_SHARE_LOCATION);
             assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isTrue();
+            assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
+        });
+    }
+
+    @Test
+    void appliedLatestReleaseHistoryUsesHigherQaMemoryForwardMigration() {
+        DataSource dataSource = dataSource("release_token_latency_before_qa_memory");
+        // 复现 release 已执行通知中心与当前最高迁移、但尚未合入较低版本 QA Memory 的历史。
+        migrateWithoutResourceTo(
+                dataSource,
+                INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION,
+                QA_MEMORY_APPLIED_MAIN_RESOURCE,
+                QA_MEMORY_GENERALIZE_MAIN_RESOURCE,
+                QA_MEMORY_IDENTITY_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isTrue();
+        assertThat(applied(dataSource, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION)).isTrue();
+        assertThat(applied(dataSource, QA_MEMORY_APPLIED_VERSION)).isFalse();
+        assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isFalse();
+        assertThat(qaMemorySchemaTableCount(dataSource)).isZero();
+        assertUserNotificationSchema(dataSource);
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(QA_MEMORY_AFTER_TOKEN_LATENCY_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(
+                    QA_MEMORY_AFTER_SESSION_SHARE_LOCATION,
+                    QA_MEMORY_APPLIED_LOCATION,
+                    QA_MEMORY_EXTENDED_LOCATION);
+            assertThat(applied(dataSource, QA_MEMORY_APPLIED_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_GENERALIZE_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_IDENTITY_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isFalse();
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION)).isTrue();
+            assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
+            assertSessionShareSchema(dataSource);
+        });
+
+        // 后续启动必须继续解析新隔离 location，不能回退到较低的旧补偿版本。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(QA_MEMORY_AFTER_TOKEN_LATENCY_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(
+                    QA_MEMORY_AFTER_SESSION_SHARE_LOCATION);
+            assertThat(applied(dataSource, QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION)).isTrue();
             assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
         });
     }
@@ -690,6 +746,8 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         bootFlywayRunner(dataSource).run(context -> {
             assertThat(context).hasNotFailed().hasSingleBean(Flyway.class);
             assertions.accept(context.getBean(Flyway.class));
+            // 每套已知已部署 history 升级到当前 HEAD 后都必须具备通知中心结构。
+            assertUserNotificationSchema(dataSource);
         });
     }
 
@@ -712,7 +770,8 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isTrue();
             assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isTrue();
-            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
+            assertThat(applied(dataSource, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION)).isTrue();
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(7L);
         });
     }
 
@@ -899,6 +958,38 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         assertThat(attributionColumnCount).isEqualTo(4L);
     }
 
+    private static void assertUserNotificationSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name = 'user_notifications'
+                        """)
+                .query(Long.class)
+                .single();
+        Long actionColumnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and table_name = 'user_notifications'
+                          and column_name in (
+                              'notification_id',
+                              'recipient_user_id',
+                              'action_type',
+                              'action_target_id',
+                              'status',
+                              'read_at',
+                              'expires_at',
+                              'trace_id'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(1L);
+        assertThat(actionColumnCount).isEqualTo(8L);
+    }
+
     private static long qaMemorySchemaTableCount(DataSource dataSource) {
         return JdbcClient.create(dataSource)
                 .sql("""
@@ -920,7 +1011,7 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .single();
     }
 
-    /** 三张可观测表及首 token、流完成列必须在同一正常 Flyway 链中落地。 */
+    /** 三张可观测表及首 Token、流完成、ITL/TPOT 原始量必须在同一正常 Flyway 链中落地。 */
     private static long internalModelObservabilitySchemaObjectCount(DataSource dataSource) {
         JdbcClient jdbc = JdbcClient.create(dataSource);
         Long tableCount = jdbc.sql("""
@@ -940,7 +1031,12 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                         from information_schema.columns
                         where table_schema = current_schema()
                           and table_name = 'internal_model_call_records'
-                          and column_name in ('first_token_ms', 'stream_complete_ms')
+                          and column_name in (
+                              'first_token_ms',
+                              'stream_complete_ms',
+                              'last_token_ms',
+                              'output_token_count'
+                          )
                         """)
                 .query(Long.class)
                 .single();

@@ -97,6 +97,8 @@ import type {
   InternalModelCallSource,
   InternalModelCallRecord,
   InternalModelCallHourlyStat,
+  InternalModelLatencyDistribution,
+  InternalModelTtftDistribution,
   InternalModelProbeStatus,
   InternalModelProbeRunResult,
   InternalModelProviderManagementResponse,
@@ -184,6 +186,7 @@ import type {
   SessionShareCandidate,
   SharedSessionListItem,
   PutSessionCollaborationSharePayload,
+  UserNotificationPage,
   SideQuestionRequest,
   SideQuestionResponse,
   SideQuestionRunRequest,
@@ -459,6 +462,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const memoryBase = "/api/internal/platform/memory/v1";
   const memoryAdminBase = `${memoryBase}/admin`;
   const analyticsBase = "/api/internal/platform/analytics";
+  const notificationCenterBase = "/api/internal/platform/notification-center/notifications";
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
     `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/reference-repositories`;
@@ -2031,6 +2035,16 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<PageResponse<SharedSessionListItem>>(
         `${opencodeRuntimeBase}/session-shares${query({ page, size })}`
       ),
+    /** 通知目标是受控 actionTargetId；客户端不得把返回字段当成外部 URL。 */
+    listUserNotifications: (page = 1, size = 20, unreadOnly = false) =>
+      request<UserNotificationPage>(
+        `${notificationCenterBase}${query({ page, size, unreadOnly })}`
+      ),
+    markUserNotificationRead: (notificationId: string) =>
+      request<{ notificationId: string; read: boolean }>(
+        `${notificationCenterBase}/${encodeURIComponent(notificationId)}/read`,
+        { method: "POST" }
+      ),
     getSessionShareAccess: () =>
       request<SessionShareAccess>(`${opencodeRuntimeBase}/session-shares/access`),
     getSessionRuntimeState: async () =>
@@ -2360,6 +2374,36 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     } = {}) => request<InternalModelCallHourlyStat[]>(
       `${internalModelObservabilityBase}/stats${query({
         providerId: params.providerId,
+        source: params.source,
+        from: params.from,
+        to: params.to
+      })}`
+    ),
+    getInternalModelTtftDistribution: (params: {
+      providerId?: string | null;
+      outcomeGroup?: InternalModelCallOutcomeGroup | null;
+      source?: InternalModelCallSource | null;
+      from?: string | null;
+      to?: string | null;
+    } = {}) => request<InternalModelTtftDistribution>(
+      `${internalModelObservabilityBase}/ttft-distribution${query({
+        providerId: params.providerId,
+        outcomeGroup: params.outcomeGroup,
+        source: params.source,
+        from: params.from,
+        to: params.to
+      })}`
+    ),
+    getInternalModelItlDistribution: (params: {
+      providerId?: string | null;
+      outcomeGroup?: InternalModelCallOutcomeGroup | null;
+      source?: InternalModelCallSource | null;
+      from?: string | null;
+      to?: string | null;
+    } = {}) => request<InternalModelLatencyDistribution>(
+      `${internalModelObservabilityBase}/itl-distribution${query({
+        providerId: params.providerId,
+        outcomeGroup: params.outcomeGroup,
         source: params.source,
         from: params.from,
         to: params.to

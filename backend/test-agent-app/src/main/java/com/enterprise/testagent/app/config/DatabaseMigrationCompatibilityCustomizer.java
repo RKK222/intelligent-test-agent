@@ -50,6 +50,7 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     static final String INTERNAL_MODEL_OBSERVABILITY_VERSION = "20260808143300";
     static final String INTERNAL_MODEL_FIRST_TOKEN_VERSION = "20260808143301";
     static final String INTERNAL_MODEL_STREAM_COMPLETE_VERSION = "20260808143302";
+    static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION = "20260810234154";
     static final String INTERNAL_MODEL_LEGACY_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/internal-model-observability-legacy";
     static final String RUN_RESEND_MIGRATION_VERSION = "20260807190000";
@@ -74,6 +75,9 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     static final String QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION = "20260810173117";
     static final String QA_MEMORY_AFTER_SESSION_SHARE_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/qa-memory-after-session-share";
+    static final String QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION = "20260811170050";
+    static final String QA_MEMORY_AFTER_TOKEN_LATENCY_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/qa-memory-after-token-latency-inputs";
     static final String EXTERNAL_API_FORWARD_MIGRATION_VERSION = "20260810110000";
     static final String EXTERNAL_API_FORWARD_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/external-api-after-qa-memory";
@@ -158,6 +162,8 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                 appliedMigrations, INTERNAL_MODEL_FIRST_TOKEN_VERSION);
         boolean currentInternalModelStreamCompleteApplied = isMigrationApplied(
                 appliedMigrations, INTERNAL_MODEL_STREAM_COMPLETE_VERSION);
+        boolean internalModelTokenLatencyInputsApplied = isMigrationApplied(
+                appliedMigrations, INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_VERSION);
         boolean anyCurrentInternalModelMigrationApplied = currentInternalModelObservabilityApplied
                 || currentInternalModelFirstTokenApplied
                 || currentInternalModelStreamCompleteApplied;
@@ -270,6 +276,8 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                 appliedMigrations, SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION_VERSION);
         boolean qaMemoryAfterSessionShareForwardApplied = isMigrationApplied(
                 appliedMigrations, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION);
+        boolean qaMemoryAfterTokenLatencyForwardApplied = isMigrationApplied(
+                appliedMigrations, QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION);
         boolean qaMemoryExtendedHistory = qaMemoryGeneralizeMigrationApplied;
         if (sessionShareAttributionMigrationApplied && !sessionShareMigrationApplied) {
             throw new IllegalStateException(
@@ -297,18 +305,47 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             throw new IllegalStateException(
                     "检测到 QA Memory 扩展 history 与不完整的会话分享主 migration 混用，拒绝自动兼容；请核对 flyway_schema_history");
         }
-        if (qaMemoryAfterSessionShareForwardApplied && qaMemoryMigrationApplied) {
+        if (qaMemoryAfterSessionShareForwardApplied && qaMemoryAfterTokenLatencyForwardApplied) {
+            throw new IllegalStateException(
+                    "检测到 QA Memory release 顺序补偿 migration 新旧路径同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        boolean anyQaMemoryAfterReleaseForwardApplied =
+                qaMemoryAfterSessionShareForwardApplied || qaMemoryAfterTokenLatencyForwardApplied;
+        if (anyQaMemoryAfterReleaseForwardApplied && qaMemoryMigrationApplied) {
             throw new IllegalStateException(
                     "检测到 QA Memory 低版本主 migration 与 release 顺序补偿 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");
         }
-        if (qaMemoryAfterSessionShareForwardApplied && !sessionShareMigrationApplied) {
+        if (anyQaMemoryAfterReleaseForwardApplied && !sessionShareMigrationApplied) {
             throw new IllegalStateException(
                     "检测到 QA Memory release 顺序补偿 migration 缺少会话分享主 history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (qaMemoryAfterTokenLatencyForwardApplied && !internalModelTokenLatencyInputsApplied) {
+            throw new IllegalStateException(
+                    "检测到 QA Memory 最新 release 顺序补偿 migration 缺少内部模型时延输入 history，拒绝自动兼容；请核对 flyway_schema_history");
         }
         boolean needsSessionShareForwardCompatibility =
                 qaMemoryExtendedHistory && !anySessionShareMainMigrationApplied;
         boolean needsQaMemoryAfterSessionShareForwardCompatibility =
                 !qaMemoryMigrationApplied && sessionShareMigrationApplied;
+        String qaMemoryAfterReleaseForwardLocation = null;
+        String qaMemoryAfterReleaseForwardVersion = null;
+        if (qaMemoryAfterSessionShareForwardApplied) {
+            qaMemoryAfterReleaseForwardLocation =
+                    QA_MEMORY_AFTER_SESSION_SHARE_COMPATIBILITY_LOCATION;
+            qaMemoryAfterReleaseForwardVersion = QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION;
+        } else if (qaMemoryAfterTokenLatencyForwardApplied) {
+            qaMemoryAfterReleaseForwardLocation =
+                    QA_MEMORY_AFTER_TOKEN_LATENCY_COMPATIBILITY_LOCATION;
+            qaMemoryAfterReleaseForwardVersion = QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION;
+        } else if (needsQaMemoryAfterSessionShareForwardCompatibility) {
+            boolean forwardAfterTokenLatency = internalModelTokenLatencyInputsApplied;
+            qaMemoryAfterReleaseForwardLocation = forwardAfterTokenLatency
+                    ? QA_MEMORY_AFTER_TOKEN_LATENCY_COMPATIBILITY_LOCATION
+                    : QA_MEMORY_AFTER_SESSION_SHARE_COMPATIBILITY_LOCATION;
+            qaMemoryAfterReleaseForwardVersion = forwardAfterTokenLatency
+                    ? QA_MEMORY_AFTER_TOKEN_LATENCY_FORWARD_VERSION
+                    : QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION;
+        }
 
         List<String> locations = new ArrayList<>(Arrays.stream(configuration.getLocations())
                 .map(location -> location.getDescriptor())
@@ -343,8 +380,8 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         if (needsExternalApiForwardCompatibility) {
             addLocationIfAbsent(locations, EXTERNAL_API_FORWARD_COMPATIBILITY_LOCATION);
         }
-        if (needsQaMemoryAfterSessionShareForwardCompatibility) {
-            addLocationIfAbsent(locations, QA_MEMORY_AFTER_SESSION_SHARE_COMPATIBILITY_LOCATION);
+        if (qaMemoryAfterReleaseForwardLocation != null) {
+            addLocationIfAbsent(locations, qaMemoryAfterReleaseForwardLocation);
         }
         configuration.locations(locations.toArray(String[]::new));
 
@@ -439,7 +476,7 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         if (needsQaMemoryAfterSessionShareForwardCompatibility) {
             LOGGER.warn("检测到会话分享主 history 早于 QA Memory，启用 QA Memory 顺序补偿路径: missingVersion={}, forwardVersion={}",
                     QA_MEMORY_APPLIED_MIGRATION_VERSION,
-                    QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION);
+                    qaMemoryAfterReleaseForwardVersion);
         }
     }
 

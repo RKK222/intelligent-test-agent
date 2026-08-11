@@ -6,7 +6,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 
 ## 主要职责
 
-- 用户消息可选携带实际发送人、统一认证号、显示名和代操作标记。时间线以当前查看者为基准：自己的用户消息固定使用 `#B2EDDF`，所有其他人的用户消息统一使用 `#9A8EDE`，两者均无边框；只在消息属于他人时显示姓名，自己的消息不显示姓名，assistant 展示保持不变。分享工作台的停止按钮由调用方按所属人或实际发送人传入权限结果，撤回重发按钮则只对会话所属人传入；本包不自行推断授权。
+- 用户消息可选携带实际发送人、统一认证号、显示名和代操作标记。时间线以当前查看者为基准：自己的用户消息固定使用 `#B2EDDF`，所有其他人的用户消息统一使用浅紫 token `--ta-chat-other-user-bg`（默认 `#DED9F6`），两者均无边框；只在消息属于他人时显示姓名，自己的消息不显示姓名，assistant 展示保持不变。分享工作台的停止按钮由调用方按所属人或实际发送人传入权限结果；撤回重发按钮只由调用方在当前用户就是源消息实际发送人时传入，分享发送人还必须持有 `canChat`，本包不自行推断授权。
 - 展示用户/助手消息。`AssistantThread` 和 agent-web 的 `FigmaChatPanel` 主路径均复用 `OpencodeTimeline`，不再以旧气泡/结构化卡片作为主要正文渲染方式；用户气泡展示层优先读取 user message 的原生 `file` parts 展示本轮关联的工作区文件/选区 chip，只显示用户原始提问。乐观 user message 进入 Timeline 前会把 file part 收敛为路径、文件名和选区行号等展示元数据，不携带 `content`、内联 URL 或 `source.text`；模型请求仍使用完整 parts。历史旧消息若仍是前端序列化的工作区 `<context>` 文本，会降级解析为同样的 chip 且隐藏正文上下文块；用户与助手侧均不展示头像或名称/时间行，以极简消息来源布局匹配主时间线，用户问题仍保持右对齐，助手过程与回答使用完整可用宽度。
 - `UserMessageRow` 在 `AgentMessage.sourceType=SCHEDULED_TASK` 时展示“夜间定时执行”来源标签和北京时间的实际启动时间；旧消息缺少来源字段时保持原样。多人运行态接管可能先收到不含正文的 OpenCode user envelope，组件保留该消息供 reducer 后续按稳定 ID 归并，但在平台权威正文或工作区上下文到达前不渲染空气泡。
 - 右侧 Agent 面板的主路径始终展示当前会话时间线，不再提供 Chat/History 顶部 tab；会话选择和待执行任务由 `agent-web` 的独立非模态会话列表浮层承载，本包继续只负责紧凑消息流和受控 composer/runtime 展示。
@@ -15,7 +15,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - `OpencodeTimeline` 额外接受受控的 `forceToolDetailsOpen` 与 `showReasoning`：前者向工具分组和 disclosure 壳传递强制展开状态，后者同时控制 reasoning 行、assistant reasoning part 与工作状态 reasoning 摘要。它们用于承接 Web 的原生 `/details`、`/thinking` 命令，只改变展示投影，不改写消息或 RunEvent reducer 状态。
 - `opencode-like` 基于 RunEvent scope 区分主 Agent 与子 Agent 时间线：主视图过滤 child scoped 输出，仅展示 root 输出和 task 子 Agent 入口卡片；原生 pending task 先显示为不可点击“智能体 / 准备中”，收到 child discovery 或上层恢复出的 subagent 索引后转换为 `Explore + title` 可点击入口；pending permission 的 `sessionId` 精确匹配 child 时，在该 task “进行中”等状态文字前显示动态、可访问的铃铛，并行 child 互不影响；点击入口后切换到子 Agent 时间线，子视图隐藏输入框并只提供返回主 Agent 的提示及该 child 自己的权限交互卡。
 - 展示 message part timeline（text、reasoning、tool、file、retry 以及未知 part fallback）。旧 `card` 消息中的 Diff payload 会被收敛为 `diff-summary` 行；存量 `AgentCard`/`TimelineCard` 仅保留兼容，不作为主对话路径。
-- 上下文压缩标记与其后紧邻的内部续写摘要合并为一个标准 disclosure 行“上下文已压缩”，默认折叠；展开后明确说明它不是新的助手回答，并只在展示层把 `Objective / Important Details / Work State / Completed / Active / Blocked / Next Move / Relevant Files / (none)` 映射为“当前目标 / 关键信息 / 工作状态 / 已完成 / 进行中 / 阻塞项 / 下一步 / 相关文件 / 无”。原始消息内容和协议字段不改写。
+- 上下文压缩标记与其后的内部续写摘要合并为一条独立记录，不并入思考状态入口；OpenCode 在两者之间插入的无正文 user envelope，以及摘要消息自身的 `step-start → reasoning → text → step-finish` 过程 part，都不会打断归并，真实用户输入仍会终止待配对状态。压缩进行态只使用输入区上方的既有动效，时间线不显示中间记录；摘要完成后才新增带压缩图标的“上下文已自动压缩 / 上下文已手动压缩”结果按钮和细分隔线，按钮使用 9px 微型状态字号与 22px 紧凑高度，避免抢占正文层级；默认不平铺摘要，点击后只在按钮下方以 10px 辅助字号展开续写摘要。展示层把 `Objective / Important Details / Work State / Completed / Active / Blocked / Next Move / Relevant Files / (none)` 映射为“当前目标 / 关键信息 / 工作状态 / 已完成 / 进行中 / 阻塞项 / 下一步 / 相关文件 / 无”，原始消息内容和协议字段不改写。
 - `reasoning`、最终 `text`、工具调用和文件引用分块展示，避免把思考、工具日志和最终答复混入同一个气泡；同一用户回合内被多个 assistant message 拆开的真实思考状态会合并为一个过程行，默认折叠但在折叠头中保留一行实时摘要。
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的同类型工具会合并成一个默认折叠的工具组，但 task 与 question 始终按原始调用独立保留时间线位置。question 完成态显示“已回答”，展开后按问题顺序展示问题和回答；预置答案展示 label 与 description，单选、多选和自定义文本均按 OpenCode `metadata.answers` 配对，自定义答案直接以答案原文作为 label。读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
 - `diff-summary` 文件修改行默认折叠，折叠态在标题右侧展示全部文件的新增/删除行数汇总；汇总数字随文件变化刷新并短暂跳动反馈，点击标题展开文件列表，文件条目仍负责触发打开对应文件。
@@ -59,8 +59,8 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 
 ## 撤销重发投影
 
-用户消息行仅在调用方确认当前查看者是会话所属人、它是根会话最后一条、Run 已终态且具有远端边界时展示“撤销重发”。本包只发出入口动作；app 层先把上一条文本装入受控 composer 供所属人修改或取消，点击发送后才请求 resends API。定时来源读取可选 `resend` 元数据，
+用户消息行仅在调用方确认当前查看者是源消息实际发送人、它是根会话最后一条、Run 已终态且具有远端边界时展示“撤销重发”；分享发送人还必须持有 `canChat`。本包只发出入口动作；app 层先把上一条文本装入受控 composer 供操作者修改或取消，点击发送后才请求 resends API。定时来源读取可选 `resend` 元数据，
 展示“夜间定时执行 · 自动重发 n/3”或“手动重发”，WAITING 显示本地倒计时并隐藏按钮。重发 API 返回后，`run.resend.requested`
-立即把源用户轮次的展示所有权切到预留替代 Run，使工作状态 Dock 按 `PENDING` 展示运行中，并在派生时间线中立即隐藏源 Run 的回答、工具、Todo 和 Diff；源数据暂留在 reducer，回退前失败时可恢复。
-`run.resend.started` reducer 再一次性移除源 Run 的回答、工具卡、Todo、Diff、失败卡、流式 overlay 和 child scope，但保留该用户轮次作为替代 Run 的页面锚点，并清除旧消息标识，让后到的真实 user message 原位替换且保留定时来源与重发元数据；
+立即用 `editedPrompt` 更新原用户气泡，并把源用户轮次的展示所有权切到预留替代 Run，使工作状态 Dock 按 `PENDING` 展示运行中，在派生时间线中立即隐藏源 Run 的回答、工具、Todo 和 Diff；源数据暂留在 reducer，回退前失败时可恢复。
+`run.resend.started` reducer 再一次性移除源 Run 的回答、工具卡、Todo、Diff、失败卡、流式 overlay 和 child scope，但保留该用户轮次作为替代 Run 的页面锚点，并清除旧消息标识；观察方即使错过 scheduled/requested 前置事件，也会把源 USER 原位转换为替代 Run 锚点。app 层轻量读取到平台权威 USER 后通过 `run.resend.user.synchronized` 只迁移这一条消息的文本、发送人、平台/远端身份和 Todo owner，不 reset 整段 reducer；后到的真实 user message 继续按替代 Run 原位替换，即使 assistant 先到或新旧文本不同也不追加重复气泡，并保留附件展示、定时来源与重发元数据。历史恢复与实时事件使用不同 message alias 时，同一原生 Part 继续按 Session 内稳定 `partId` 原位更新；迟到的 compact Part 不得在替代用户轮次之后再追加一条压缩标记，压缩边界始终保持在该轮之前。assistant text part 的实时“生成中”还必须同时满足它属于当前 busy 轮次，历史/终态的残留 `running` 只按最终内容渲染；
 `session.status.retry` 只作为 OpenCode 原生供应商重试状态展示，不再触发前端自动取消或重复 startRun。

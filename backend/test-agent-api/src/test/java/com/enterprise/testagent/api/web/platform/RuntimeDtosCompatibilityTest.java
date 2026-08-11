@@ -7,6 +7,11 @@ import static org.mockito.Mockito.when;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
+import com.enterprise.testagent.domain.run.RunResend;
+import com.enterprise.testagent.domain.run.RunResendId;
+import com.enterprise.testagent.domain.run.RunResendPolicy;
+import com.enterprise.testagent.domain.run.RunResendStatus;
+import com.enterprise.testagent.domain.run.RunResendTrigger;
 import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.run.RunStorageMode;
 import com.enterprise.testagent.domain.session.SessionId;
@@ -59,6 +64,38 @@ class RuntimeDtosCompatibilityTest {
 
         assertThat(runResponse.messageSenderUsername()).isEqualTo("协作者");
         assertThat(messageResponse.senderUsername()).isEqualTo("协作者");
+    }
+
+    @Test
+    void sharedResendAuditRepairsHistoricalOwnerAttributionInRunAndMessageResponses() {
+        UserId owner = new UserId("usr_resend_dto_owner");
+        UserId requester = new UserId("usr_resend_dto_requester");
+        Run historicalRun = run().withMessageSender(owner, "ucid-owner", false);
+        SessionMessage historicalMessage = message().withSender(owner, "ucid-owner", false);
+        RunResend resend = new RunResend(
+                new RunResendId("rsd_resend_dto"), historicalRun.sessionId(), owner,
+                new RunId("run_resend_dto_source"), historicalRun.runId(),
+                "msg_resend_dto_source", "msg_resend_dto_replacement",
+                RunResendTrigger.MANUAL, 1, 0, RunResendPolicy.MAX_AUTOMATIC_ATTEMPTS,
+                RunResendStatus.DISPATCHED, NOW, "linux-resend-dto",
+                null, null, "request_resend_dto", "trace_resend_dto", null, NOW, NOW)
+                .withRequester(requester, "ucid-requester", true);
+
+        RuntimeDtos.RunResponse runResponse = RuntimeDtos.RunResponse.from(
+                historicalRun, null, null, null, resend,
+                userId -> userId.equals(requester) ? "wr" : "888888888");
+        RuntimeDtos.SessionMessageResponse messageResponse = RuntimeDtos.SessionMessageResponse.from(
+                historicalMessage, null, null, null, resend,
+                userId -> userId.equals(requester) ? "wr" : "888888888");
+
+        assertThat(runResponse.messageSenderUserId()).isEqualTo(requester.value());
+        assertThat(runResponse.messageSenderUsername()).isEqualTo("wr");
+        assertThat(runResponse.messageSenderUnifiedAuthId()).isEqualTo("ucid-requester");
+        assertThat(runResponse.messageSentBySharedUser()).isTrue();
+        assertThat(messageResponse.senderUserId()).isEqualTo(requester.value());
+        assertThat(messageResponse.senderUsername()).isEqualTo("wr");
+        assertThat(messageResponse.senderUnifiedAuthId()).isEqualTo("ucid-requester");
+        assertThat(messageResponse.sentBySharedUser()).isTrue();
     }
 
     @Test

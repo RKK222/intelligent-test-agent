@@ -367,6 +367,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `POST` | `/public/update-and-push` | 公共配置"提交并推送"复合操作：先 `fetch` 远端最新提交，再 stage/commit 本地变更，随后 merge `origin/{branch}` 并 push；`discardLocalChanges=true` 时先 `git reset --hard HEAD` 放弃受控仓库中的已跟踪修改。远端提交和 rollout 激活确认后即返回，服务器同步和进程排空在后台继续。 |
 | `POST` | `/file-ws-route` | 查询 Agent 配置文件 WebSocket 应连接的目标后端，body 包含 `scope`、`workspaceId?`、`worktreeId?`、`linuxServerId?`。 |
 | `POST` | `/public/worktrees` | 在请求指定且已初始化的 `linuxServerId` 上确保当前用户的长期公共配置 worktree；分支和目录按用户稳定命名、不包含应用版本，同一用户重复调用返回已有有效 worktree。目标服务器本地 Git 根目录未初始化时返回 `CONFLICT`，不在该接口 clone。 |
+| `POST` | `/public/worktrees/reconcile` | `SUPER_ADMIN` 手工触发目标服务器缺失公共个人 worktree 的有界补偿；body 为 `{ "linuxServerId": "test-agent-backend-122-233-30-114" }`，后端通过公共 Java 路由程序转到目标服务器，并与定时任务复用同一服务器级 Redis 锁和幂等创建程序。 |
 | `POST` | `/public/runtime-reload` | `SUPER_ADMIN` 保存本人公共个人 worktree 的 Agent/Skill 目录定义或 JSONC 后热加载本人。body 为 `{ "worktreeId": "agw_...", "linuxServerId": "linux-1" }`；后端按 worktree 归属路由，校验 owner/server，把本人受管公共配置软链接切到该 worktree 的 `opencode/` 并只调用本人进程 `/global/dispose`。不修改共享公共目录或其他用户；入口把同步等待 dispose 的调用调度到受控阻塞线程，禁止占用 WebFlux 事件线程。 |
 | `GET` | `/public/worktrees?linuxServerId=` | 查询当前用户在指定服务器上的有效 `ACTIVE` 公共配置 worktree；不会返回其他用户的 worktree。 |
 | `GET` | `/public/diff?worktreeId=` | 查询 Git 变更文件和 patch；后端复用公共 porcelain 解析与 diff 聚合，保留 Git 原始状态简写。响应额外返回 `publishPending`：porcelain clean、个人 HEAD 不是共享 HEAD 的旧版本且两者文件树不同时为 `true`，用于发布失败后跨页面重试；有未提交文件时仍优先展示正常变更流程。 |
@@ -378,6 +379,8 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `POST` | `/public/git-conflict/abort` | 取消公共配置未完成 merge。 |
 | `POST` | `/public/commit` | 提交当前暂存区。 |
 | `POST` | `/public/publish` | 在当前用户公共 worktree 中 fetch 并 merge `origin/{公共分支}`，把最终文件树投影为以远端当前提交为唯一父节点、由当前管理员企业身份签署的线性提交，避免长期个人分支的旧无效 committer 历史进入公共分支；远端 push 前建立持久化禁发任务，再以非强制 refspec 推送该固定提交。push 与 rollout 激活确认后即返回发布成功，请求线程不认领本机同步；成功后个人分支和发起服务器共享副本均重置到该干净提交。各服务器由广播或默认 5 秒补偿任务异步同步共享副本并登记本机 manager 进程，旧 Session 空闲后逐实例 dispose；某用户旧实例 dispose 后该用户立即恢复发送，个人 worktree 保持 `ACTIVE`。 |
+
+缺失公共个人 worktree 的定时补偿在每台 Java 启动 30 秒后首次执行，之后固定延迟 10 分钟；可分别通过 `test-agent.public-agent-config.worktree-compensation.initial-delay` 和 `test-agent.public-agent-config.worktree-compensation.delay` 覆盖。候选只包含本服务器具有 ACTIVE OpenCode binding、用户状态为 ACTIVE、当前角色为 `SUPER_ADMIN` 且不存在同服 ACTIVE 公共 worktree 的用户，单轮最多 50 人。任务只用本机已初始化共享仓库 HEAD 创建稳定 `public-{userId}` 分支与目录，不 fetch/pull、不解密或冒用目标用户 SSH key、不切换其当前运行配置；公共仓库未初始化或单个用户创建失败时记录安全摘要并在后续轮次重试。手工接口返回 `linuxServerId/status/candidateCount/processedCount/succeededCount/failedCount/items/message/completedAt`；`items` 只含内部 `userId`、状态、可选 `worktreeId/errorCode` 和安全消息。若同服任务已在运行，返回 `status=LOCKED`，不会并发建目录。
 
 工作空间级接口把同名能力挂在 `/workspaces/{workspaceId}/...`，其中 `diff/stage/unstage/discard/commit/publish/worktrees/status` 的语义与公共级一致；文件读写与上传必须通过文件 WebSocket。物理目录为当前运行态 Workspace 或指定 worktree 下的 `.opencode/`，但普通工作空间文件树不重复展示根级 `.opencode`。工作空间级 `diff` 返回同一 Git 根全部 Git 可见的 `.opencode/**` 用户配置，响应 path 会去掉 `.opencode/` 前缀；后端是该范围的唯一事实源，前端不得再枚举子目录。公共级和应用级根均支持按 OpenCode 模板创建 `agents/<name>.md`，或创建 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md`；前端同时保留普通文件、文件夹和上传入口。
 
@@ -2015,7 +2018,67 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 
 权限边界：只读成员可以读取会话、消息、Run/SSE、文件树/正文、状态和 Diff；`canChat=true` 可以在固定 Session/Workspace 中发送、写文件、执行当前工作区 Git/终端/command/shell、compact/revert、回复 permission/question、提交反馈和管理自己的定时任务。分享管理、归档/删除、置顶、应用/工作区切换、持久 fork、设置、Agent 配置、源码/Hub、系统管理和服务器终端始终只属于所属人。所属人的当前权限是所有代操作的上限。
 
-停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人后来降为只读仍可停止。最后一条用户消息的撤回并重新发送只允许会话所属人；普通分享成员即使是源消息发送人且仍有 `canChat` 也返回 `FORBIDDEN`。任一 Run 为 `PENDING/RUNNING/CANCELLING` 时，所有参与方的新发送都返回 `409 SESSION_BUSY`。
+停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人后来降为只读仍可停止。最后一条用户消息的撤回并重新发送只允许该消息的实际发送人；分享发送人还必须有 `canChat=true`，包括会话所属人在内的其它用户返回 `FORBIDDEN`。任一 Run 为 `PENDING/RUNNING/CANCELLING` 时，所有参与方的新发送都返回 `409 SESSION_BUSY`。
+
+#### 工作台通用通知中心 API
+
+通知中心只接受当前登录用户的 Bearer Token，接收人从 `AuthPrincipal` 取得，客户端不能查询或修改其他用户通知。首期只有会话分享产生通知；通知动作固定为服务端受控 `actionType=SESSION_SHARE` 和 `actionTargetId=shareId`，响应不提供任意 URL、去重键或数据库行 ID。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/internal/platform/notification-center/notifications?page=&size=&unreadOnly=` | 分页读取当前用户通知；`page` 默认 1、`size` 默认 50 并使用平台公共分页边界、`unreadOnly` 默认 false。 |
+| `POST` | `/api/internal/platform/notification-center/notifications/{notificationId}/read` | 当前接收人幂等标记通知已读；用于后续通用通知类型。未读的分享通知拒绝该入口，必须等分享访问成功。 |
+| `GET` | `/api/internal/platform/notification-center/notifications/events` | 当前用户通知变化 fetch SSE；稳定事件契约见 `docs/api/event-stream.md`。 |
+
+列表响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "notificationId": "ntf_...",
+        "type": "SESSION_SHARED",
+        "actorUserId": "usr_owner",
+        "title": "张三 向你分享了对话",
+        "body": "支付回归分析 · 可对话",
+        "actionType": "SESSION_SHARE",
+        "actionTargetId": "shr_...",
+        "status": "ACTIVE",
+        "invalidationReason": null,
+        "actionAvailable": true,
+        "unread": true,
+        "expiresAt": "2026-08-16T02:00:00Z",
+        "readAt": null,
+        "createdAt": "2026-08-10T02:00:00Z",
+        "updatedAt": "2026-08-10T02:00:00Z"
+      }
+    ],
+    "page": 1,
+    "size": 20,
+    "total": 1,
+    "unreadCount": 1
+  },
+  "traceId": "trace_..."
+}
+```
+
+`unreadCount` 始终表示当前用户全部通知中“未读、仍有效且未过期”的权威数量，不受当前页或 `unreadOnly` 筛选影响。列表会实时合并通知、分享、成员、会话和所属人事实：取消、成员移除、会话归档、到期或所属人停用即使通知失效回写暂时失败，也会返回 `actionAvailable=false`、`unread=false` 和稳定 `invalidationReason`。失效历史保留在全部列表但不可点击。
+
+分享通知必须在新标签页打开内部 `/s/{shareId}`，并继续使用当前用户自己的认证。只有 `/s/{shareId}` 分享访问鉴权成功后，后端才按 `recipientUserId + shareId` 幂等写入 `readAt`；从通知、“分享给我”或旧分享链接进入均采用同一规则。已读写入失败不阻断已获授权的分享访问，只记录不含标题、摘要或链接的脱敏告警。
+
+通用已读成功响应为：
+
+```json
+{
+  "success": true,
+  "data": { "notificationId": "ntf_...", "read": true },
+  "traceId": "trace_..."
+}
+```
+
+不存在或不属于当前接收人的通知统一返回 `404 NOT_FOUND`，不得泄露其他用户通知是否存在。重复已读仍返回成功，不重复产生变化；未读的 `SESSION_SHARE` 通知调用通用已读入口返回 `400 VALIDATION_ERROR`，防止绕过分享访问成功事实。
 
 旧 `/api/sessions/**` 和 `/api/workspaces/{workspaceId}/sessions` 已作废，返回 `410 API_GONE`。
 
@@ -3257,12 +3320,14 @@ Token 列表及写入响应只返回 `{tokenId,name,referencedProviderCount,crea
 |---|---|---|
 | `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/call-records` | 分页查询内部模型代理调用明细；过滤 `providerId/outcome/outcomeGroup/source/from/to`，`page` 从 1 起、`size` 上限 100，时间范围默认最近 24 小时、上限 31 天。`outcome` 保留精确原因筛选，`outcomeGroup` 用于看板大类筛选；两者同时提供时精确 `outcome` 优先。 |
 | `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/stats` | 查询小时级聚合统计；过滤 `providerId/source(USER_CALL|PROBE)/from/to`，返回按 `stat_hour` 升序的 `InternalModelCallHourlyStat[]`。默认不限制 source。 |
+| `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/ttft-distribution` | 查询 TTFT 五数概括；过滤 `providerId/outcomeGroup/source/from/to`，时间范围默认最近 24 小时、上限 31 天。只统计 `firstTokenMillis` 非空的调用，返回 `sampleCount/minimumMillis/firstQuartileMillis/medianMillis/thirdQuartileMillis/maximumMillis`。 |
+| `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/itl-distribution` | 查询 ITL/TPOT 五数概括；过滤项和返回字段与 TTFT 分布接口相同。只纳入首末输出时刻完整、准确输出 Token 数不少于 2 的调用，单次值为 `(lastTokenMillis-firstTokenMillis)/(outputTokenCount-1)`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/probe-status` | 查询逐 provider 最近探活状态（`lastOutcome/lastProbedAt/lastSuccessAt/consecutiveFailures`）。 |
 | `POST` | `/api/internal/platform/opencode-runtime/internal-model-observability/probe` | 手动触发探活；请求体 `{providerId}` 可空，为空时全量探活，同步返回逐 provider 探活结果。 |
 
-调用明细只含结构化字段：`providerId/model/endpoint/source(USER_CALL|PROBE)/outcome/httpStatus/errorClass/streaming/durationMillis/firstByteMillis/firstTokenMillis/streamCompleteMillis/traceId/ucid/startedAt`。请求在转发前因鉴权、供应商选择或请求体校验失败且尚不能取得真实供应商/模型时，对应维度使用稳定哨兵值 `unknown`，确保明细与小时聚合仍能同事务落库；分块传输和显式 `Content-Length` 的超限请求都记为 `REQUEST_INVALID`。页面在 `source=USER_CALL` 时直接展示 `ucid` 作为用户 ID，缺失时显示“未知用户”；`source=PROBE` 时显示“探活”。
+调用明细只含结构化字段：`providerId/model/endpoint/source(USER_CALL|PROBE)/outcome/httpStatus/errorClass/streaming/durationMillis/firstByteMillis/firstTokenMillis/lastTokenMillis/streamCompleteMillis/outputTokenCount/traceId/ucid/startedAt`。请求在转发前因鉴权、供应商选择或请求体校验失败且尚不能取得真实供应商/模型时，对应维度使用稳定哨兵值 `unknown`，确保明细与小时聚合仍能同事务落库；分块传输和显式 `Content-Length` 的超限请求都记为 `REQUEST_INVALID`。页面在 `source=USER_CALL` 时直接展示 `ucid` 作为用户 ID，缺失时显示“未知用户”；`source=PROBE` 时显示“探活”。
 
-`firstByteMillis` 是收到上游响应头的相对耗时；`firstTokenMillis` 按业界常用的 Time to First Token（TTFT）口径，记录从调用开始到首个包含模型输出字段的 SSE `data` 到达时间（如 `content`、`reasoning_content`、`refusal`、legacy `text` 或工具输出）；`streamCompleteMillis` 是收到 `[DONE]` 或 `choices[*].finish_reason` 非空的时间。注释、空事件、role/usage 元数据、非对象 data、`data: ping` 和畸形 JSON 均不计作模型输出，也不能刷新首输出或输出空闲截止时间。`durationMillis` 是代理调用端到端耗时，可能包含上游正常收尾后的下游写出与终态处理，不能替代上游流完成耗时。小时聚合分别用 `firstTokenMillisSum/Max/Count` 和 `streamCompleteMillisSum/Max/Count` 准确计算平均/最大值，但不提供 P90/P95 或耗时分布。
+`firstByteMillis` 是收到上游响应头的相对耗时；`firstTokenMillis` 按业界常用的 Time to First Token（TTFT）口径，记录从调用开始到首个包含模型输出字段的 SSE `data` 到达时间（如 `content`、`reasoning_content`、`refusal`、legacy `text` 或工具输出）；`lastTokenMillis` 是最后一个有效模型输出到达时间，`outputTokenCount` 是上游 `usage.completion_tokens`（兼容 `usage.output_tokens`）返回的准确输出 Token 数；`streamCompleteMillis` 是收到 `[DONE]` 或 `choices[*].finish_reason` 非空的时间。注释、空事件、role/usage 元数据、非对象 data、`data: ping` 和畸形 JSON 均不计作模型输出，也不能刷新首输出或输出空闲截止时间。`durationMillis` 是代理调用端到端耗时，可能包含上游正常收尾后的下游写出与终态处理，不能替代上游流完成耗时。小时聚合分别用 `firstTokenMillisSum/Max/Count` 和 `streamCompleteMillisSum/Max/Count` 准确计算平均/最大值，本身不能还原 P90/P95 或耗时分布；TTFT 与 ITL/TPOT 箱线图均由独立分布接口基于保留的单次调用明细计算真实最小值、P25、中位数、P75 和最大值。四分位数使用连续分位数插值，空样本返回 `sampleCount=0` 且五个耗时字段为 `null`，不会用 0 伪装成正常延迟。
 
 **不返回、不记录任何请求/响应正文、Token、密钥或错误文本**；`errorClass` 只保存剥离 Reactor 包装后的异常类简名。`outcome` 枚举取值：`SUCCESS/PROXY_AUTH_FAILED/PROVIDER_UNAVAILABLE/REQUEST_INVALID/UPSTREAM_CONNECT_FAILED/UPSTREAM_FIRST_RESPONSE_TIMEOUT/UPSTREAM_FIRST_EVENT_TIMEOUT/UPSTREAM_STREAM_IDLE_TIMEOUT/UPSTREAM_HTTP_ERROR/UPSTREAM_STREAM_INTERRUPTED/UPSTREAM_STREAM_FAILED/CLIENT_DISCONNECTED/UNKNOWN_ERROR`。看板把精确结果归并为五类：`SUCCESS`（成功）、`REQUEST_OR_CONFIGURATION`（请求或配置问题）、`UPSTREAM_FAILURE`（上游服务异常）、`CALLER_INTERRUPTED`（调用方中断）、`OTHER`（其他异常）；精确 `outcome` 仍保留在明细中说明具体原因。
 
@@ -4005,19 +4070,19 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 
 ### `POST /api/internal/agent/{agentId}/sessions/{sessionId}/resends`
 
-- 用途：由会话所属人对当前根会话最后一条、已有远端 user message 边界且源 Run 已终态的消息执行“撤回并重新发送”。点击入口只让前端把上一条文本装入输入框；所属人修改并发送后，本接口同步预留新的
+- 用途：由该消息的实际发送人，对当前根会话最后一条、已有远端 user message 边界且源 Run 已终态的消息执行“撤回并重新发送”。点击入口只让前端把上一条文本装入输入框；操作者修改并发送后，本接口同步预留新的
   `PENDING` Run 和会话锁；实际 revert/dispatch 由统一恢复状态机执行。
-- 鉴权：必须登录且必须是会话所属人；普通分享成员即使发送了源消息并持有 `canChat` 也返回 `FORBIDDEN`。服务端通过会话上下文重新验证 owner、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径或请求体。
+- 鉴权：必须登录，actor ID 必须等于源 Run 的实际发送人。源 Run 是共享人工重发生成的替代 Run 时，优先使用既有 `run_resends.requester_user_id` 审计纠正历史错误归因；否则使用 `messageSenderUserId`，旧 Run 缺少该字段时才回退可信 `triggeredByUserId`。分享发送人还必须满足 `canChat=true`。会话所属人若不是实际发送人同样返回 `FORBIDDEN`。服务端通过会话上下文重新验证执行所属人、实际发送人、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径、请求体或前端按钮。
 - 请求：`expectedRemoteMessageId`、可选 `expectedRunId`、短期 `contextToken`、幂等 `clientRequestId`，以及可选、最长 20000 字符的 `editedPrompt`。缺少 `editedPrompt` 时保持旧客户端的原文精确重放；提供后只替换可信远端用户轮次中的第一个 `text` part（无文本时替换第一个 `subtask`，两者都无时在开头增加 `text`），继续保留原附件、Agent、模型、variant 和其它结构化 part。前端不得提交或重建附件正文。
 - 响应：`resendId/status/executeAt/resend/replacementRun`。`resend` 包含 `trigger/totalAttempt/automaticAttempt/automaticLimit/status`、
-  源/替代 Run，以及可选 `requesterUserId/requesterUsername/requesterUnifiedAuthId/requestedBySharedUser` 真实发起人归因；姓名无法解析时可空。`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。
-- 错误：非 owner 为统一 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
+  源/替代 Run，以及可选 `requesterUserId/requesterUsername/requesterUnifiedAuthId/requestedBySharedUser` 真实发起人归因；姓名无法解析时可空。`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。共享人工重发的历史 Run/消息若曾被执行所属人覆盖，响应中的发送人字段以 requester 审计恢复，不要求修改客户端协议或数据库历史。
+- 错误：不是源消息实际发送人，或分享发送人没有 `canChat` 时返回 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
 - traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、修改后文本、模型回答或供应商正文。修改后文本只随既有精确重放输入写入有限 TTL Redis，日志、审计和事件均不得记录。
 - 幂等：同一 owner + `clientRequestId` 返回同一替代 Run；同一 source Run、replacement Run 和会话活动锁均有数据库唯一约束。
-- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。接口返回替代 Run 后，调用方应立即把源用户轮次的展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，并隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识，随后用替代 Run 的真实 user message ID 原位接管。定时来源及 `resend` 元数据在 ID 替换期间必须保留。
+- 页面接管：点击“撤销重发”后先进入可取消的受控编辑态，输入框预填上一条用户文本；修改内容并点击发送时才调用本接口，失败时保留编辑内容。接口返回替代 Run 后，调用方应立即用 `editedPrompt` 更新原用户气泡，并把该轮展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，同时隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识；服务端在同一提交中推进 Session 内容修订时间，所属人与分享参与方都应刷新权威消息，刷新期间缓冲并重放替代 Run 的实时事件。后到的权威 user 事件必须按替代 Run 或持久消息的 `remoteMessageId` 原位接管，保留平台消息身份和实际发送人，不得在压缩历史的 assistant 回答之后追加重复气泡。定时来源、附件展示及 `resend` 元数据在 ID 替换期间必须保留。
 - 兼容性：接口、可选 `editedPrompt` 与所有 `resend` 字段均为 additive 新增；旧客户端不传修改文本时仍按原内容重放，缺失响应字段时按普通 Run/消息显示。
-- 对应测试：`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendAutomaticServiceTest`、
+- 对应测试：`RunResendControllerSessionShareTest`、`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendAutomaticServiceTest`、
   `MyBatisRunResendRepositoryIntegrationTest`、前端 reducer 和 `FigmaChatPanelTest`。
 
 ### 内部恢复分发

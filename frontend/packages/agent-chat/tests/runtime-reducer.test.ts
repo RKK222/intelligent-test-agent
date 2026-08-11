@@ -34,6 +34,252 @@ describe("agent-chat runtime reducer", () => {
     }));
   });
 
+  it("merges a late owner-side resend event into compacted persisted history without changing the sender", () => {
+    const initial = createInitialAgentChatRuntimeState([{
+      id: "msg_compaction",
+      messageId: "msg_compaction",
+      role: "assistant",
+      text: "",
+      parts: [{ partId: "part_compaction", type: "compaction", auto: false }],
+      runId: "run_before_compaction",
+      createdAt: "2026-08-10T15:08:59Z"
+    }, {
+      id: "msg_platform_resend",
+      messageId: "msg_platform_resend",
+      platformMessageId: "msg_platform_resend",
+      remoteMessageId: "msg_remote_resend",
+      role: "user",
+      text: "仅答复 123",
+      runId: "run_resend",
+      senderUserId: "usr_wr",
+      senderUnifiedAuthId: "wr",
+      senderUsername: "wr",
+      sentBySharedUser: true,
+      createdAt: "2026-08-10T15:09:01Z"
+    }, {
+      id: "msg_platform_answer",
+      messageId: "msg_platform_answer",
+      platformMessageId: "msg_platform_answer",
+      remoteMessageId: "msg_remote_answer",
+      role: "assistant",
+      text: "123",
+      runId: "run_resend",
+      createdAt: "2026-08-10T15:09:02Z"
+    }]);
+
+    const next = reduceAgentChatRuntime(initial, {
+      type: "event",
+      event: runEvent("message.updated", "run_resend", {
+        senderUserId: "usr_owner",
+        senderUnifiedAuthId: "owner",
+        senderUsername: "888888888",
+        sentBySharedUser: false,
+        message: {
+          id: "msg_remote_resend",
+          role: "user",
+          content: "仅答复 123",
+          senderUserId: "usr_owner",
+          senderUnifiedAuthId: "owner",
+          senderUsername: "888888888",
+          sentBySharedUser: false
+        }
+      })
+    });
+
+    expect(next.messages.filter((message) => message.role === "user")).toEqual([
+      expect.objectContaining({
+        id: "msg_platform_resend",
+        messageId: "msg_platform_resend",
+        platformMessageId: "msg_platform_resend",
+        remoteMessageId: "msg_remote_resend",
+        senderUserId: "usr_wr",
+        senderUnifiedAuthId: "wr",
+        senderUsername: "wr",
+        sentBySharedUser: true
+      })
+    ]);
+  });
+
+  it("keeps a late compact part before an edited resend turn when its message alias changes", () => {
+    const initial = {
+      ...createInitialAgentChatRuntimeState([{
+        id: "msg_platform_compaction",
+        messageId: "msg_platform_compaction",
+        role: "assistant",
+        text: "",
+        parts: [{ partId: "part_compaction", type: "compaction", auto: false }],
+        createdAt: "2026-08-10T15:08:58Z"
+      }, {
+        id: "msg_compaction_summary",
+        messageId: "msg_compaction_summary",
+        role: "assistant",
+        text: "## Objective\n继续当前任务",
+        parts: [{ partId: "part_compaction_summary", type: "text", text: "## Objective\n继续当前任务" }],
+        createdAt: "2026-08-10T15:08:59Z"
+      }, {
+        id: "msg_source_user",
+        messageId: "msg_source_user",
+        role: "user",
+        text: "仅答复 OK",
+        runId: "run_source",
+        createdAt: "2026-08-10T15:09:00Z"
+      }, {
+        id: "msg_source_answer",
+        messageId: "msg_source_answer",
+        role: "assistant",
+        text: "OK",
+        parts: [{ partId: "part_source_answer", type: "text", text: "OK" }],
+        runId: "run_source",
+        createdAt: "2026-08-10T15:09:01Z"
+      }]),
+      todoUserMessageIdByRunId: { run_source: "msg_source_user" }
+    } satisfies AgentChatRuntimeState;
+    const resend = {
+      resendId: "resend_compacted",
+      sourceRunId: "run_source",
+      replacementRunId: "run_replacement",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "WAITING",
+      executeAt: "2026-08-10T15:09:02Z"
+    } as const;
+    const scheduled = reduceAgentChatRuntime(initial, {
+      type: "run.resend.requested",
+      resend,
+      editedPrompt: "仅答复 123"
+    });
+    const started = reduceAgentChatRuntime(scheduled, {
+      type: "event",
+      event: runEvent("run.resend.started", "run_replacement", {
+        ...resend,
+        status: "DISPATCHED"
+      })
+    });
+    const withLateCompaction = reduceAgentChatRuntime(started, {
+      type: "event",
+      event: runEvent("message.part.updated", "run_replacement", {
+        part: {
+          id: "part_compaction",
+          messageID: "msg_remote_compaction_envelope",
+          type: "compaction",
+          auto: false,
+          overflow: false
+        }
+      })
+    });
+    const completed = reduceAgentChatRuntime(withLateCompaction, {
+      type: "event",
+      event: runEvent("message.part.updated", "run_replacement", {
+        part: {
+          id: "part_replacement_answer",
+          messageID: "msg_replacement_answer",
+          type: "text",
+          text: "123"
+        }
+      })
+    });
+
+    expect(completed.messages.filter((message) => message.role === "assistant"
+      && message.parts?.some((part) => part.partId === "part_compaction"))).toHaveLength(1);
+    expect(completed.messages.findIndex((message) => message.id === "msg_platform_compaction"))
+      .toBeLessThan(completed.messages.findIndex((message) => message.role === "user" && message.runId === "run_replacement"));
+    const rows = createTimelineRows(createOpencodeLikeState({ messages: completed.messages }));
+    expect(rows.findIndex((row) => row.type === "compaction-summary"))
+      .toBeLessThan(rows.findIndex((row) => row.type === "user-message"));
+  });
+
+  it("keeps the source turn as an anchor when resend started arrives before the authoritative user message", () => {
+    const initial = {
+      ...createInitialAgentChatRuntimeState([{
+        id: "msg_source_user",
+        messageId: "msg_source_user",
+        platformMessageId: "msg_source_user",
+        remoteMessageId: "msg_remote_source_user",
+        role: "user",
+        text: "仅答复 OK",
+        runId: "run_source",
+        senderUserId: "usr_wr",
+        senderUsername: "wr",
+        sentBySharedUser: true,
+        createdAt: "2026-08-10T15:09:00Z"
+      }, {
+        id: "msg_source_answer",
+        messageId: "msg_source_answer",
+        role: "assistant",
+        text: "OK",
+        runId: "run_source",
+        createdAt: "2026-08-10T15:09:01Z"
+      }]),
+      todoUserMessageIdByRunId: { run_source: "msg_source_user" }
+    } satisfies AgentChatRuntimeState;
+    const resend = {
+      resendId: "resend_started_first",
+      sourceRunId: "run_source",
+      replacementRunId: "run_replacement",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "DISPATCHED",
+      executeAt: "2026-08-10T15:09:02Z",
+      requesterUserId: "usr_wr",
+      requesterUsername: "wr",
+      requestedBySharedUser: true
+    } as const;
+
+    const started = reduceAgentChatRuntime(initial, {
+      type: "event",
+      event: runEvent("run.resend.started", "run_replacement", resend)
+    });
+
+    expect(started.messages).toEqual([
+      expect.objectContaining({
+        id: "msg_source_user",
+        role: "user",
+        text: "仅答复 OK",
+        runId: "run_replacement"
+      })
+    ]);
+    const pendingAnchor = started.messages[0];
+    expect(pendingAnchor && "messageId" in pendingAnchor).toBe(false);
+    expect(pendingAnchor && "platformMessageId" in pendingAnchor).toBe(false);
+    expect(pendingAnchor && "remoteMessageId" in pendingAnchor).toBe(false);
+
+    const synchronized = reduceAgentChatRuntime(started, {
+      type: "run.resend.user.synchronized",
+      resend,
+      message: {
+        id: "msg_replacement_user",
+        messageId: "msg_replacement_user",
+        platformMessageId: "msg_replacement_user",
+        remoteMessageId: "msg_remote_replacement_user",
+        role: "user",
+        text: "仅答复 123",
+        runId: "run_replacement",
+        senderUserId: "usr_wr",
+        senderUsername: "wr",
+        sentBySharedUser: true,
+        createdAt: "2026-08-10T15:09:02Z"
+      }
+    });
+
+    expect(synchronized.messages).toEqual([
+      expect.objectContaining({
+        id: "msg_replacement_user",
+        platformMessageId: "msg_replacement_user",
+        remoteMessageId: "msg_remote_replacement_user",
+        role: "user",
+        text: "仅答复 123",
+        runId: "run_replacement",
+        senderUsername: "wr"
+      })
+    ]);
+    expect(synchronized.todoUserMessageIdByRunId.run_replacement).toBe("msg_replacement_user");
+    expect(synchronized.pendingTodoUserMessageId).toBe("msg_replacement_user");
+  });
+
   it("projects an automatic resend countdown on the scheduled source message", () => {
     const initial = {
       ...createInitialAgentChatRuntimeState([
@@ -165,7 +411,18 @@ describe("agent-chat runtime reducer", () => {
 
   it("atomically removes the superseded run projection when native resend starts", () => {
     const initial = createInitialAgentChatRuntimeState([
-      { id: "user-old", role: "user", text: "retry me", createdAt: "2026-08-07T00:00:00Z", runId: "run_old", sourceType: "SCHEDULED_TASK" },
+      {
+        id: "user-old",
+        role: "user",
+        text: "原问题",
+        parts: [
+          { type: "text", text: "原问题" },
+          { type: "file", path: "docs/login.md", name: "login.md" }
+        ],
+        createdAt: "2026-08-07T00:00:00Z",
+        runId: "run_old",
+        sourceType: "SCHEDULED_TASK"
+      },
       { id: "assistant-old", role: "assistant", text: "old answer", createdAt: "2026-08-07T00:00:01Z", runId: "run_old" },
       { id: "card-old", role: "card", cardType: "event", title: "failed", payload: { runId: "run_old" }, createdAt: "2026-08-07T00:00:02Z" }
     ]);
@@ -179,21 +436,30 @@ describe("agent-chat runtime reducer", () => {
       todoUserMessageIdByRunId: { run_old: "user-old", run_new: "user-old" }
     } as unknown as AgentChatRuntimeState;
 
-    const scheduled = reduceAgentChatRuntime(dirty, { type: "event", event: runEvent(
-      "run.resend.scheduled",
-      "run_new",
-      {
-        resendId: "resend_2",
-        sourceRunId: "run_old",
-        replacementRunId: "run_new",
-        trigger: "MANUAL",
-        totalAttempt: 1,
-        automaticAttempt: 0,
-        automaticLimit: 3,
-        status: "WAITING",
-        executeAt: "2026-08-07T00:01:00Z"
-      }
-    ) });
+    const resend = {
+      resendId: "resend_2",
+      sourceRunId: "run_old",
+      replacementRunId: "run_new",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "WAITING",
+      executeAt: "2026-08-07T00:01:00Z"
+    } as const;
+    const scheduled = reduceAgentChatRuntime(dirty, {
+      type: "run.resend.requested",
+      resend,
+      editedPrompt: "修改后的新问题"
+    });
+    expect(scheduled.messages[0]).toMatchObject({
+      role: "user",
+      text: "修改后的新问题",
+      parts: [
+        { type: "text", text: "修改后的新问题" },
+        { type: "file", path: "docs/login.md", name: "login.md" }
+      ]
+    });
     const next = reduceAgentChatRuntime(scheduled, { type: "event", event: runEvent(
       "run.resend.started",
       "run_new",
@@ -219,14 +485,21 @@ describe("agent-chat runtime reducer", () => {
     expect(next.pendingTodoUserMessageId).toBe("user-old");
     expect(next.todoUserMessageIdByRunId).toEqual({ run_new: "user-old" });
 
-    const rebound = reduceAgentChatRuntime(next, { type: "event", event: runEvent(
+    // assistant 可能先于替代 user 消息到达；随后仍应按 replacementRunId 原位接管旧气泡。
+    const assistantFirst = reduceAgentChatRuntime(next, { type: "event", event: runEvent(
       "message.updated",
       "run_new",
-      { message: { id: "msg_remote_new", role: "user", content: "retry me" } }
+      { message: { id: "msg_remote_answer", role: "assistant" } }
     ) });
-    expect(rebound.messages).toEqual([
+    const rebound = reduceAgentChatRuntime(assistantFirst, { type: "event", event: runEvent(
+      "message.updated",
+      "run_new",
+      { message: { id: "msg_remote_new", role: "user", content: "修改后的新问题" } }
+    ) });
+    expect(rebound.messages.filter((message) => message.role === "user")).toEqual([
       expect.objectContaining({
         id: "msg_remote_new",
+        text: "修改后的新问题",
         runId: "run_new",
         sourceType: "SCHEDULED_TASK",
         resend: expect.objectContaining({ resendId: "resend_2", trigger: "MANUAL" })
@@ -2241,6 +2514,29 @@ describe("agent-chat runtime reducer", () => {
 
     expect(pending.status).toBe("PENDING");
     expect(pending.messages).toHaveLength(0);
+  });
+
+  it("clears an earlier run failure when a later run is restored from events", () => {
+    const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: runEvent("run.failed", "run_old_model", {
+        status: "FAILED",
+        error: { name: "Error", message: "Model not found: opencode/hy3-free" }
+      })
+    });
+
+    const created = reduceAgentChatRuntime(failed, {
+      type: "event",
+      event: runEvent("run.created", "run_current", { status: "PENDING" })
+    });
+    const succeeded = reduceAgentChatRuntime(created, {
+      type: "event",
+      event: runEvent("run.succeeded", "run_current", { status: "SUCCEEDED" })
+    });
+
+    expect(created.messages).toHaveLength(0);
+    expect(succeeded.status).toBe("SUCCEEDED");
+    expect(succeeded.messages).toHaveLength(0);
   });
 
   it("normalizes the eight extended part types via message.part.updated", () => {

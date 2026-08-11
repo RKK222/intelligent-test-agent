@@ -61,6 +61,24 @@
 ./restart-dev-services.sh
 ```
 
+从独立 Git worktree 运行当前分支、但需要复用主工作区已经初始化的本机测试数据时，不能只把主工作区的 `.env.test` 作为 `--env-file` 传入。启动脚本会把兼容变量 `TESTAGENT` 默认设置为当前 worktree，而存量 macOS 测试库的 `SYS_DATA_ROOT_DIR` 通用参数可能仍保存为 `$TESTAGENT/.testagent`；此时用户进程会把公共配置解析到当前 worktree 的空目录并报“公共 Agent 配置源目录不可用”。使用下面的完整命令块，同时保留当前 worktree 作为代码根、主工作区作为持久化数据根：
+
+```bash
+test_agent_primary_root=/absolute/path/to/intelligent-test-agent
+test_agent_worktree_root=/absolute/path/to/feature-worktree
+cd "$test_agent_worktree_root"
+export JAVA_VERSION=25
+export JAVA_HOME=$(/usr/libexec/java_home -v "$JAVA_VERSION")
+export PATH="$JAVA_HOME/bin:$test_agent_worktree_root/.tmp/dev-bin:/opt/homebrew/opt/libpq/bin:$PATH"
+export TESTAGENT="$test_agent_primary_root"
+export SYS_DATA_ROOT_DIR="$TESTAGENT/.testagent"
+"$JAVA_HOME/bin/java" -version
+./restart-dev-services.sh --profile test \
+  --env-file "$test_agent_primary_root/.env.test"
+```
+
+不要显式把 `TEST_AGENT_ROOT` 改成主工作区；它应继续由脚本设置为当前 worktree，确保构建产物、运行 JAR 和日志都属于当前分支。`TESTAGENT` 负责 Java 对历史 `$TESTAGENT/...` 通用参数的展开，`SYS_DATA_ROOT_DIR` 负责启动脚本写入并让 manager 读取同一份 `.serverid/.serverhost`，两者必须指向同一数据根。只有当前 `.env.test` 确实缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 且本次不验证 Workflow 时，才在命令末尾显式追加 `--without-workflow` 并在交付说明中记录。
+
 LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。该模式要求同级
 `../lobehub-platform`，生成的密钥只写入 `.tmp/dev-services/lobehub-dev.env`，不修改任何 `.env.local`；开发

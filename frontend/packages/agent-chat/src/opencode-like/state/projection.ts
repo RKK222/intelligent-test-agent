@@ -1,6 +1,7 @@
 import { canonicalMessageId, groupRenderableParts } from "./part-utils";
 import { normalizeToolName } from "./tool-registry";
 import { workStatusEventDescriptor } from "./work-status";
+import { hasVisibleUserMessageContent } from "../../user-message-display";
 import type {
   OpencodeLikeConversationState,
   TimelineRow,
@@ -31,6 +32,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
   const aggregateWorkStatus = !state.activeSubagentSessionId;
   let latestWorkStatus: Extract<TimelineRow, { type: "work-status" }> | undefined;
   let latestDiffSummary: Extract<TimelineRow, { type: "diff-summary" }> | undefined;
+  let pendingCompactionIndex: number | undefined;
 
   const orphanAccumulator: AssistantRowAccumulator = {
     hasAssistantHeader: false,
@@ -51,9 +53,15 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
       });
     }
   }
+  pendingCompactionIndex = orphanAccumulator.pendingCompactionIndex;
 
   for (const [index, userMessage] of state.userMessages.entries()) {
     const userMessageId = canonicalMessageId(userMessage);
+    // OpenCode 会在 compaction 标记与摘要之间插入一条无正文 user envelope。
+    // 仅跨过这种不可见边界；真实用户输入必须终止配对，避免把下一轮回答误当成摘要。
+    if (hasVisibleUserMessageContent(userMessage)) {
+      pendingCompactionIndex = undefined;
+    }
     if (index > 0) {
       rows.push({ type: "turn-gap", key: `gap:${userMessageId}`, userMessageId });
     }
@@ -66,6 +74,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
       partIndex: 0,
       toolPartIndices: {},
       toolGroupIndices: {},
+      pendingCompactionIndex,
       workStatus: aggregateWorkStatus ? createWorkStatusAccumulator() : undefined
     };
     for (const assistantMessage of assistantMessages) {
@@ -83,6 +92,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
         });
       }
     }
+    pendingCompactionIndex = accumulator.pendingCompactionIndex;
 
     if (isLatestTurn(userMessageId, state) && state.diffFiles.length > 0) {
       latestDiffSummary = { type: "diff-summary", key: `diff:${userMessageId}`, userMessageId, files: state.diffFiles };
@@ -137,7 +147,20 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     rows.push(latestDiffSummary);
   }
 
-  return rows;
+  // 压缩进行态由 composer 上方的专用动效承担；时间线只保留摘要已落稳后的最终结果。
+  return rows.filter((row) => row.type !== "compaction-summary" || compactionSummaryReady(row, state));
+}
+
+function compactionSummaryReady(
+  row: Extract<TimelineRow, { type: "compaction-summary" }>,
+  state: OpencodeLikeConversationState
+): boolean {
+  if (!row.summaryRef) return false;
+  const part = state.partsByMessageId[row.summaryRef.messageId]
+    ?.find((candidate) => candidate.partId === row.summaryRef?.partId);
+  if (part?.type !== "text" || !part.text.trim()) return false;
+  const status = part.status?.toLowerCase();
+  return status !== "pending" && status !== "running";
 }
 
 // 当前后端会把同一次回答拆成多条 assistant message/part。
@@ -157,7 +180,6 @@ function appendAssistantGroupRow(
   // 会话级 running 只属于最新用户轮次，不能把已结束历史轮次重新投影为进行中。
   const busy = isActiveTurn(userMessageId, state) && state.running;
   if (group.type === "context-tool-group") {
-    accumulator.pendingCompactionIndex = undefined;
     const refs = group.refs.map((ref) => ({ messageId: assistantMessageId, partId: ref.partId }));
     if (aggregateWorkStatus && accumulator.workStatus) {
       for (const ref of refs) {
@@ -192,6 +214,8 @@ function appendAssistantGroupRow(
   }
 
   const part = state.partsByMessageId[assistantMessageId]?.find((candidate) => candidate.partId === group.partId);
+  // 原生压缩摘要通常按 step-start → reasoning → text → step-finish 到达。
+  // reasoning 等过程 part 不能提前打断配对；待配对状态只由下一段摘要正文消费，或在外层遇到可见用户消息时终止。
   if (part?.type === "text" && typeof accumulator.pendingCompactionIndex === "number") {
     const compactionRow = rows[accumulator.pendingCompactionIndex];
     if (compactionRow?.type === "compaction-summary") {
@@ -199,8 +223,8 @@ function appendAssistantGroupRow(
       accumulator.pendingCompactionIndex = undefined;
       return;
     }
+    accumulator.pendingCompactionIndex = undefined;
   }
-  accumulator.pendingCompactionIndex = undefined;
   if (part?.type === "compaction") {
     const showAssistantHeader = !accumulator.hasAssistantHeader;
     rows.push({
@@ -252,7 +276,8 @@ function appendAssistantGroupRow(
       appendSingleAssistantPartRow(rows, accumulator, {
         userMessageId,
         messageId: assistantMessageId,
-        partId: group.partId
+        partId: group.partId,
+        busy
       });
       return;
     }
@@ -293,7 +318,8 @@ function appendAssistantGroupRow(
     appendSingleAssistantPartRow(rows, accumulator, {
       userMessageId,
       messageId: assistantMessageId,
-      partId: group.partId
+      partId: group.partId,
+      busy
     });
     accumulator.toolPartIndices[toolKey] = rows.length - 1;
     return;
@@ -302,7 +328,8 @@ function appendAssistantGroupRow(
   appendSingleAssistantPartRow(rows, accumulator, {
     userMessageId,
     messageId: assistantMessageId,
-    partId: group.partId
+    partId: group.partId,
+    busy
   });
 }
 
@@ -354,6 +381,7 @@ function appendSingleAssistantPartRow(
     userMessageId: string;
     messageId: string;
     partId: string;
+    busy: boolean;
   }
 ): void {
   const showAssistantHeader = !accumulator.hasAssistantHeader;
@@ -363,6 +391,7 @@ function appendSingleAssistantPartRow(
     userMessageId: params.userMessageId,
     messageId: params.messageId,
     partId: params.partId,
+    busy: params.busy,
     previousAssistantPart: accumulator.partIndex > 0 || accumulator.hasAssistantHeader,
     showAssistantHeader
   });

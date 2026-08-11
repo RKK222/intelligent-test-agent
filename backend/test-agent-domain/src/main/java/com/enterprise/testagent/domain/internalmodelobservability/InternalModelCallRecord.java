@@ -6,8 +6,8 @@ import java.util.Objects;
 
 /**
  * 内部模型代理单次调用观测记录。{@code firstByteMillis} 表示响应头到达，
- * {@code firstTokenMillis} 表示首个包含模型输出的 SSE data，{@code streamCompleteMillis} 表示收到
- * OpenAI 兼容流 {@code [DONE]} 的时刻；只存结构化字段，禁止存请求/响应正文或错误文本。
+ * {@code firstTokenMillis}/{@code lastTokenMillis} 表示首个/最后一个模型输出到达，
+ * {@code outputTokenCount} 是上游返回的准确输出 Token 数；只存结构化字段，禁止存正文或错误文本。
  */
 public record InternalModelCallRecord(
         Long id,
@@ -22,7 +22,9 @@ public record InternalModelCallRecord(
         long durationMillis,
         Long firstByteMillis,
         Long firstTokenMillis,
+        Long lastTokenMillis,
         Long streamCompleteMillis,
+        Long outputTokenCount,
         String traceId,
         String ucid,
         Instant startedAt) {
@@ -45,17 +47,40 @@ public record InternalModelCallRecord(
         if (firstTokenMillis != null && firstTokenMillis < 0) {
             throw new IllegalArgumentException("firstTokenMillis must be >= 0");
         }
+        if (lastTokenMillis != null
+                && (firstTokenMillis == null || lastTokenMillis < firstTokenMillis)) {
+            throw new IllegalArgumentException(
+                    "lastTokenMillis requires firstTokenMillis and must be >= firstTokenMillis");
+        }
         if (streamCompleteMillis != null && streamCompleteMillis < 0) {
             throw new IllegalArgumentException("streamCompleteMillis must be >= 0");
         }
         if (streamCompleteMillis != null
-                && (firstTokenMillis == null || streamCompleteMillis < firstTokenMillis)) {
+                && (firstTokenMillis == null
+                        || streamCompleteMillis < firstTokenMillis
+                        || (lastTokenMillis != null && streamCompleteMillis < lastTokenMillis))) {
             throw new IllegalArgumentException(
-                    "streamCompleteMillis requires firstTokenMillis and must be >= firstTokenMillis");
+                    "streamCompleteMillis must not precede observed model output");
+        }
+        if (outputTokenCount != null && outputTokenCount < 0) {
+            throw new IllegalArgumentException("outputTokenCount must be >= 0");
         }
         traceId = traceId == null || traceId.isBlank() ? "" : traceId.trim();
         ucid = normalize(ucid);
         Objects.requireNonNull(startedAt, "startedAt must not be null");
+    }
+
+    /**
+     * ITL/TPOT 只使用完整且可信的样本；没有准确输出 Token 数时不以 SSE chunk 数代替。
+     */
+    public Double interTokenLatencyMillis() {
+        if (firstTokenMillis == null
+                || lastTokenMillis == null
+                || outputTokenCount == null
+                || outputTokenCount < 2) {
+            return null;
+        }
+        return (lastTokenMillis - firstTokenMillis) / (double) (outputTokenCount - 1);
     }
 
     private static String normalize(String value) {

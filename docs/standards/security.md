@@ -78,12 +78,22 @@ Token 校验流程：
 2. 必须使用独立 `DelegatedOperationContext`，绝不替换、包装成所属人或覆盖真实 `AuthPrincipal`。上下文至少绑定真实 actor/统一认证号/用户名、执行所属人、share/version/session/workspace、`canChat`、有效期和 ownerAccess；所有 OpenCode、进程、Workspace、Git/SSH 操作只显式使用执行所属人，所有平台归因和审计只使用真实 actor。
 3. 分享授权严格限定一个 Session 及其创建时绑定的 Workspace，且上限为所属人当前真实权限。Workspace 改绑、会话归档、所属人停用、分享取消/过期、成员移除都必须 fail-closed；被分享人不需要成为工作区成员，但不能切换应用/Workspace、持久 fork、管理分享/会话、置顶、设置、Agent 配置、源码/Hub、系统管理或服务器终端。
 4. 只读成员只允许会话/消息/Run/SSE、文件树/正文、状态和 Diff 读取。`canChat=true` 才允许发送、文件写入、当前工作区 Git、工作区终端、command/shell、compact/revert、permission/question 回复、反馈和定时任务。服务端必须在每个入口判定，不能依赖前端隐藏按钮。
-5. 停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人降为只读后仍可停止。撤回并重新发送只允许会话所属人；普通分享成员即使是最后 USER 消息发送人且仍有 `canChat` 也必须拒绝。请求可携带修改后的 `editedPrompt`，但只能写入既有有限 TTL 的 Redis 精确重放输入，不得进入控制表、RunEvent、审计或日志；原轮附件及其它结构化 part 必须由服务端从可信远端用户轮次恢复，不能相信前端重建。定时任务创建/改期要求 `canChat`，所属人和实际创建人可管理，降为只读的创建人只允许取消。
+5. 停止 Run 只允许所属人或该 Run 的实际消息发送人，发送人降为只读后仍可停止。撤回并重新发送只允许最后 USER 消息的实际发送人；分享发送人必须仍有 `canChat=true`，包括会话所属人在内的其它用户不得改写他人的消息。请求可携带修改后的 `editedPrompt`，但只能写入既有有限 TTL 的 Redis 精确重放输入，不得进入控制表、RunEvent、审计或日志；原轮附件及其它结构化 part 必须由服务端从可信远端用户轮次恢复，不能相信前端重建。定时任务创建/改期要求 `canChat`，所属人和实际创建人可管理，降为只读的创建人只允许取消。
 6. 单 Session 发送必须同时取得 Redis 原子 active-session 占用和 PostgreSQL `runs.active_session_id` 唯一准入；任一失败都必须在发布 RunEvent、写可见消息或调用 OpenCode 前退出并返回 `SESSION_BUSY`。终态清空占用，存储异常 fail-closed，不允许降级 JVM 锁或 busy follow-up queue。
 7. 分享范围敏感读取和写入必须记录 actor、执行所属人、share/session/workspace/resource、结果、traceId；路径只能保存 SHA-256 摘要。审计禁止正文、明文路径、Token、终端输入、命令输出和第三方响应，默认保留 365 天。分享管理成功/失败和访问拒绝同样需要审计。
 8. `X-Test-Agent-Session-Share` 只允许跨 Java 公共 forwarder/SSE forwarder按原值透传，目标 Java 必须重新鉴权且仍使用所属人的进程路由；禁止自行扫描 Redis、使用本机降级、信任防循环头放行或新增 Java→Java 文件代理。CORS 只把该头加入受控允许列表，反向代理和日志必须脱敏。
 9. 分享 runtime SSE、RunEvent SSE、文件 WebSocket 与 PTY 必须周期和/或逐操作刷新授权；版本变化、降权、移除、取消、到期后关闭旧连接并记录拒绝。授权失效不自动取消已经启动的 Run，也不能让旧连接继续产生副作用。
 10. 分享创建的定时任务必须固化授权快照，后续分享失效仍使用所属人的 Workspace/OpenCode 执行并保留原创建人归因。这是明确的延迟代操作授权，UI 必须在取消分享时提示待执行任务；任务快照不能被复用为其它 Session/Workspace 的访问凭据。
+
+## 用户站内通知安全
+
+1. 通知列表、已读和 SSE 必须使用当前用户 Bearer Token，接收人只取服务端 `AuthPrincipal.userId`。按通知 ID 已读还必须同时匹配接收人；不存在和不属于当前用户统一返回 `NOT_FOUND`，不得泄露其它用户通知是否存在。
+2. 通知动作只允许枚举化 `action_type + action_target_id`。首期 `SESSION_SHARE` 的目标只能是 `shareId`，浏览器必须自行映射到同源 `/s/{shareId}`；数据库、HTTP 和 SSE 均禁止保存或下发任意外部 URL、javascript/data scheme 或客户端自报跳转地址。
+3. `shareId` 仍不是认证凭据。通知点击不能提前取得分享权限或标记已读；只有 `/s/{shareId}` 完成真实登录用户、分享、成员、版本、有效期、Session/Workspace 和所属人校验后，才按接收人及 shareId 幂等已读。从通知、“分享给我”或旧链接进入必须走同一服务端入口。
+4. 标题和摘要只允许会话标题、发送人展示名、只读/可对话权限等有界安全快照；禁止消息正文、文件名/路径、Prompt、Token、终端输入/输出、第三方响应和异常堆栈。通知同步失败日志只记录低敏业务 ID 与 traceId，不回显标题、摘要或链接；已读同步失败不得阻断已经成功的分享访问。
+5. 未读和可点击状态必须实时合并通知、分享、成员、会话、所属人和到期事实，不能只信任历史通知行。撤销、移除、归档、到期或所属人停用后立即视为不可用且不计未读，即使失效通知回写或广播暂时失败也不能恢复授权。
+6. 通知变化只能在数据库事务提交后发布。用户级 SSE 只发送变化类型、可选通知 ID、未读数和生成时间；正文必须重新走当前用户分页 API。每 25 秒 heartbeat、30 秒数据库校准和断线重连都必须重新使用当前认证，SSE `id` 不是续传或授权凭据。
+7. 通知保存 90 天后由定时任务删除。迁移回填只允许仍有效的分享；只有发生在成员当前 `shared_at` 之后的成功 `READ_ACCESS_GRANTED` 审计可回填已读，过期、撤销、移除、归档或所属人停用数据不得回填。
 
 ## 限流
 
@@ -216,6 +226,7 @@ Token 校验流程：
 5. 公共 rollout 纠错替换只允许 `SUPER_ADMIN` 调用，并要求显式提交当前 `DRAINING` rolloutId、远端修正分支和非空审计原因；旧任务终态、新任务活动态与全部旧租约失效必须在同一数据库事务完成。强停标记只能由仓储按旧目标与新快照的用户、服务器、容器、端口、PID 和 manager 启动时间精确派生，业务入口不得接受前端自报 `forceStop`。执行时必须复用 `OpencodeProcessStopService` 的 tracked owned-stop 与停止后 health 确认；身份变化、旧 manager 不支持或结果不确定一律重试，禁止回退到仅按端口停止。响应和日志只返回 rollout 关系、计数、原因和安全错误，不返回 UCID、凭据、会话正文或内部配置内容。
 6. 日志只记录 `eventId`、`type`、`traceId`、`versionId`、`linuxServerId` 和错误码等低敏字段，不能输出私钥、token、完整路径中的敏感片段或原始第三方错误详情。
 7. 应用源码 `app-source.replica-requested` 只允许 repositoryId、generation 和目标服务器 ID，`app-source.cleanup-requested` 使用空 payload；SSH 私钥只在目标 worker 的 Git 命令期从操作人加密配置解析，clone、冻结提交 fetch、checkout 和提交校验复用同一临时凭据，禁止写入 snapshot、operation、step、广播、索引、错误响应、物化源码或日志。广播只负责唤醒，数据库租约、本机有界 dispatcher 及其启动/周期数据库补偿扫描才是执行与幂等事实源。应用源码物化、索引修复、打开和清理必须以可信配置根为边界逐段执行 `NOFOLLOW_LINKS` 校验，并在目录创建后、文件锁内或破坏性操作前复核，禁止祖先或目标符号链接把读写/删除重定向到托管根之外。
+8. `user-notification.changed` 只允许接收人内部 userId、变化类型和可选通知 ID；禁止 shareId、会话标题、通知摘要、用户名、URL 或权限正文。消费端按接收人只唤醒本机对应 SSE，正文和未读数从数据库重新读取；发布或消费失败不能回滚已提交分享/通知事务，漏消息由初始快照和 30 秒数据库校准恢复。
 
 ## PTY WebSocket 安全例外
 
@@ -382,7 +393,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
 ## 撤销重发安全边界
 
-- 浏览器手动入口必须重新校验登录 owner、可信 `contextToken`、根会话、最后远端 user message、终态 Run 和会话活动锁；
+- 浏览器手动入口必须重新校验登录 actor 是源消息实际发送人；源 Run 为共享人工重发替代 Run 时，必须以持久化 requester 审计纠正历史上可能被执行所属人覆盖的发送人归因。分享发送人还必须有 `canChat=true`，会话所属人只有在其本人就是实际发送人时才能操作。同时校验可信 `contextToken`、根会话、最后远端 user message、终态 Run 和会话活动锁；
   `expectedRunId/expectedRemoteMessageId/clientRequestId` 都只是并发前置条件，不是授权事实源。
 - Java→Java 内部分发只对精确路径豁免用户 token，并使用既有 XXL access token 常量时间校验；跨服务器固定复用公共路由解析与
   HTTP 转发器，不允许浏览器指定目标后端或通过本机降级绕过目标服务器。

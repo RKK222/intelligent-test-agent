@@ -8,6 +8,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordQuery;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -66,6 +67,41 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
     }
 
     @Override
+    public InternalModelLatencyDistribution queryTtftDistribution(
+            String providerId,
+            List<InternalModelCallOutcome> outcomes,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to) {
+        List<String> outcomeNames = outcomes == null ? List.of() : outcomes.stream().map(Enum::name).toList();
+        InternalModelLatencyDistributionRow row = mapper.findTtftDistribution(
+                providerId, outcomeNames, source == null ? null : source.name(), from, to);
+        return toDistribution(row);
+    }
+
+    @Override
+    public InternalModelLatencyDistribution queryItlDistribution(
+            String providerId,
+            List<InternalModelCallOutcome> outcomes,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to) {
+        List<String> outcomeNames = outcomes == null ? List.of() : outcomes.stream().map(Enum::name).toList();
+        return toDistribution(mapper.findItlDistribution(
+                providerId, outcomeNames, source == null ? null : source.name(), from, to));
+    }
+
+    private InternalModelLatencyDistribution toDistribution(InternalModelLatencyDistributionRow row) {
+        return new InternalModelLatencyDistribution(
+                row.sampleCount(),
+                row.minimumMillis(),
+                row.firstQuartileMillis(),
+                row.medianMillis(),
+                row.thirdQuartileMillis(),
+                row.maximumMillis());
+    }
+
+    @Override
     public int deleteRecordsBefore(Instant cutoff) {
         return mapper.deleteCallRecordsBefore(cutoff);
     }
@@ -89,7 +125,9 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 record.durationMillis(),
                 record.firstByteMillis(),
                 record.firstTokenMillis(),
+                record.lastTokenMillis(),
                 record.streamCompleteMillis(),
+                record.outputTokenCount(),
                 record.traceId(),
                 record.ucid(),
                 record.startedAt());
@@ -109,7 +147,9 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 row.durationMillis(),
                 row.firstByteMillis(),
                 row.firstTokenMillis(),
+                row.lastTokenMillis(),
                 row.streamCompleteMillis(),
+                row.outputTokenCount(),
                 row.traceId(),
                 row.ucid(),
                 row.startedAt());

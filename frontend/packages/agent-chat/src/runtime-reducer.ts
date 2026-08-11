@@ -41,7 +41,12 @@ export type AgentChatRuntimeState = {
 
 export type AgentChatRuntimeAction =
   | { type: "event"; event: RunEvent }
-  | { type: "run.resend.requested"; resend: ResendMetadata }
+  | { type: "run.resend.requested"; resend: ResendMetadata; editedPrompt?: string }
+  | {
+      type: "run.resend.user.synchronized";
+      resend: ResendMetadata;
+      message: Extract<AgentMessage, { role: "user" }>;
+    }
   | { type: "run.requested"; userMessageId?: string; supersededRunId?: string }
   | { type: "run.adopted"; runId: string; userMessageId?: string }
   | { type: "run.request.failed"; message?: string }
@@ -86,7 +91,10 @@ export function reduceAgentChatRuntime(
     return { ...state, runStatusesByRunId: { ...state.runStatusesByRunId, ...action.statuses } };
   }
   if (action.type === "run.resend.requested") {
-    return adoptResendReplacement(state, action.resend);
+    return adoptResendReplacement(state, action.resend, action.editedPrompt);
+  }
+  if (action.type === "run.resend.user.synchronized") {
+    return synchronizeAuthoritativeResendUser(state, action.resend, action.message);
   }
   if (action.type === "run.requested") {
     const userMessageId = action.userMessageId ?? state.pendingTodoUserMessageId ?? latestUserMessageId(state.messages);
@@ -326,17 +334,24 @@ function reduceEventOnly(
   if (event.type === "message.removed") {
     const messageId = text(event.payload.messageId) ?? text(event.payload.messageID) ?? text(event.payload.id);
     const removed = messageId
-      ? state.messages.find((message) => message.role !== "card" && (message.id === messageId || message.messageId === messageId))
+      ? state.messages.find((message) => messageIdentityMatches(message, messageId))
       : undefined;
     if (!messageId) {
       return state;
     }
     const nextScopes = { ...state.messageScopesById };
-    delete nextScopes[messageId];
+    if (removed !== undefined && removed.role !== "card") {
+      [removed.id, removed.messageId, removed.platformMessageId, removed.remoteMessageId]
+        .forEach((identity) => {
+          if (identity) delete nextScopes[identity];
+        });
+    } else {
+      delete nextScopes[messageId];
+    }
     return {
       ...state,
       messages: state.messages.filter(
-        (message) => message.id !== messageId && (message.role === "card" || message.messageId !== messageId)
+        (message) => !messageIdentityMatches(message, messageId)
       ),
       messageScopesById: nextScopes,
       streamingTextByPartId: clearStreamingForParts(state.streamingTextByPartId, removed?.role === "assistant" ? removed.parts : undefined)
@@ -474,7 +489,11 @@ function reduceEventOnly(
     const runState = event.type === "run.started" || event.type === "run.created"
       ? runAlreadyAdoptedWithoutOwner ? state : bindTodoRun(state, event.runId)
       : state;
-    let messages = runState.messages;
+    // 分享参与方和历史恢复不会经过本页的 run.requested；新 Run 事实到达时同样清掉旧轮失败卡，
+    // 否则较早的“模型不可用”会在后续成功回答后仍被合并到时间线末尾并误导用户重试。
+    let messages = event.type === "run.created" || event.type === "run.started"
+      ? removeRunFailedCards(runState.messages)
+      : runState.messages;
     // run.failed 时追加错误卡片，并清理最近的空 assistant 消息
     if (event.type === "run.failed") {
       const errorInfo = extractErrorInfo(event.payload);
@@ -526,7 +545,8 @@ function reduceResendStatus(state: AgentChatRuntimeState, event: RunEvent): Agen
 /** 等待阶段把现有用户轮次接管到替代 Run，使状态栏立即进入运行态；远端新 ID 到达前仍保留原气泡。 */
 function adoptResendReplacement(
   state: AgentChatRuntimeState,
-  metadata: ResendMetadata
+  metadata: ResendMetadata,
+  editedPrompt?: string
 ): AgentChatRuntimeState {
   const sourceUser = state.messages.find(
     (message) => message.role === "user" && message.runId === metadata.sourceRunId
@@ -536,7 +556,17 @@ function adoptResendReplacement(
   return {
     ...state,
     messages: state.messages.map((message) => message.role === "user" && message.runId === metadata.sourceRunId
-      ? { ...message, runId: metadata.replacementRunId, resend: metadata }
+      ? {
+          ...message,
+          runId: metadata.replacementRunId,
+          resend: metadata,
+          ...(editedPrompt === undefined
+            ? {}
+            : {
+                text: editedPrompt,
+                parts: replaceFirstPromptText(message.parts, editedPrompt)
+              })
+        }
       : message),
     status: "PENDING",
     runtimeStatus: { type: "busy" },
@@ -561,24 +591,43 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
   const replacementRunId = text(event.payload.replacementRunId) ?? event.runId;
   if (!sourceRunId) return state;
   const startedMetadata = resendMetadataFromEvent(event);
-  const sourceUserMessageId = state.todoUserMessageIdByRunId[sourceRunId];
-  const messages: AgentMessage[] = state.messages.filter((message) => {
-    if (message.role === "card") {
-      return text(message.payload.runId) !== sourceRunId
-        && text(message.payload.sourceRunId) !== sourceRunId;
-    }
-    return message.runId !== sourceRunId;
-  }).map((message): AgentMessage => {
-    if (message.role !== "user" || message.runId !== replacementRunId) {
-      return message;
-    }
+  const sourceUser = state.messages.find((message) => message.role === "user" && message.runId === sourceRunId);
+  const existingReplacementUser = state.messages.find(
+    (message) => message.role === "user" && message.runId === replacementRunId
+  );
+  const sourceUserMessageId = state.todoUserMessageIdByRunId[replacementRunId]
+    ?? (existingReplacementUser?.role === "user" ? existingReplacementUser.id : undefined)
+    ?? state.todoUserMessageIdByRunId[sourceRunId]
+    ?? (sourceUser?.role === "user" ? sourceUser.id : undefined);
+  const pendingReplacementUser = (
+    message: Extract<AgentMessage, { role: "user" }>
+  ): Extract<AgentMessage, { role: "user" }> => {
     // OpenCode 会为替代轮次分配新消息 ID；旧平台/远端边界仅用于等待展示，受理后必须原位迁移。
     const { messageId: _messageId, remoteMessageId: _remoteMessageId, platformMessageId: _platformMessageId, ...pendingUser } = message;
     const resend = startedMetadata
       ?? (message.resend
         ? { ...message.resend, status: text(event.payload.status) ?? "DISPATCHED" }
         : undefined);
-    return { ...pendingUser, resend };
+    return { ...pendingUser, runId: replacementRunId, resend };
+  };
+  const messages: AgentMessage[] = state.messages.flatMap((message): AgentMessage[] => {
+    if (message.role === "card") {
+      return text(message.payload.runId) === sourceRunId
+        || text(message.payload.sourceRunId) === sourceRunId
+        ? []
+        : [message];
+    }
+    if (message.role === "user" && message.runId === sourceRunId && !existingReplacementUser) {
+      // 分享观察方可能错过 scheduled/requested 事件；started 仍必须保留源 user 作为原位更新锚点。
+      return [pendingReplacementUser(message)];
+    }
+    if (message.runId === sourceRunId) {
+      return [];
+    }
+    if (message.role === "user" && message.runId === replacementRunId) {
+      return [pendingReplacementUser(message)];
+    }
+    return [message];
   });
   const retainedMessageIds = new Set(messages
     .filter((message) => message.role !== "card")
@@ -589,6 +638,9 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
   if (sourceUserMessageId) delete todoSnapshotsByUserMessageId[sourceUserMessageId];
   const todoUserMessageIdByRunId = { ...state.todoUserMessageIdByRunId };
   delete todoUserMessageIdByRunId[sourceRunId];
+  if (sourceUserMessageId) {
+    todoUserMessageIdByRunId[replacementRunId] = sourceUserMessageId;
+  }
   return {
     ...state,
     messages,
@@ -614,6 +666,85 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
   };
 }
 
+/**
+ * 平台权威 USER 消息只替换撤回轮次的单个锚点，不 reset 整段时间线。
+ * 这样既能迁移平台/远端身份，也不会触发历史 loading 和滚动到底。
+ */
+function synchronizeAuthoritativeResendUser(
+  state: AgentChatRuntimeState,
+  resend: ResendMetadata,
+  message: Extract<AgentMessage, { role: "user" }>
+): AgentChatRuntimeState {
+  const replacementRunId = resend.replacementRunId;
+  const replacementIndex = state.messages.findIndex((item) => item.role === "user" && (
+    item.runId === replacementRunId || item.resend?.replacementRunId === replacementRunId
+  ));
+  const existingIndex = replacementIndex >= 0
+    ? replacementIndex
+    : state.messages.findIndex((item) => item.role === "user" && item.runId === resend.sourceRunId);
+  const existing = existingIndex >= 0
+    ? state.messages[existingIndex] as Extract<AgentMessage, { role: "user" }>
+    : undefined;
+  const synchronized: Extract<AgentMessage, { role: "user" }> = {
+    ...existing,
+    ...message,
+    runId: replacementRunId,
+    parts: message.parts?.length ? message.parts : existing?.parts,
+    sourceType: message.sourceType ?? existing?.sourceType,
+    sourceRefId: message.sourceRefId ?? existing?.sourceRefId,
+    senderUserId: message.senderUserId ?? resend.requesterUserId ?? existing?.senderUserId,
+    senderUsername: message.senderUsername ?? resend.requesterUsername ?? existing?.senderUsername,
+    senderUnifiedAuthId: message.senderUnifiedAuthId
+      ?? resend.requesterUnifiedAuthId
+      ?? existing?.senderUnifiedAuthId,
+    sentBySharedUser: message.sentBySharedUser
+      ?? (resend.requestedBySharedUser === true ? true : existing?.sentBySharedUser),
+    resend: message.resend ?? existing?.resend ?? resend
+  };
+  let messages: AgentMessage[];
+  if (existingIndex >= 0) {
+    messages = replaceOrAppendMessage(state.messages, existingIndex, synchronized);
+  } else {
+    // assistant 可能先于平台 USER 快照到达；仍按同一 Run 把 USER 插回回答之前。
+    const firstReplacementAssistant = state.messages.findIndex(
+      (item) => item.role === "assistant" && item.runId === replacementRunId
+    );
+    messages = firstReplacementAssistant < 0
+      ? [...state.messages, synchronized]
+      : [
+          ...state.messages.slice(0, firstReplacementAssistant),
+          synchronized,
+          ...state.messages.slice(firstReplacementAssistant)
+        ];
+  }
+
+  const previousMessageId = existing?.id;
+  const authoritativeMessageId = synchronized.id;
+  const todoSnapshotsByUserMessageId = { ...state.todoSnapshotsByUserMessageId };
+  if (previousMessageId && previousMessageId !== authoritativeMessageId
+      && Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, previousMessageId)) {
+    todoSnapshotsByUserMessageId[authoritativeMessageId] = todoSnapshotsByUserMessageId[previousMessageId];
+    delete todoSnapshotsByUserMessageId[previousMessageId];
+  }
+  const todoUserMessageIdByRunId = Object.fromEntries(
+    Object.entries(state.todoUserMessageIdByRunId).map(([runId, userMessageId]) => [
+      runId,
+      previousMessageId && userMessageId === previousMessageId ? authoritativeMessageId : userMessageId
+    ])
+  );
+  todoUserMessageIdByRunId[replacementRunId] = authoritativeMessageId;
+  return {
+    ...state,
+    messages,
+    todoSnapshotsByUserMessageId,
+    todoUserMessageIdByRunId,
+    pendingTodoUserMessageId: state.pendingTodoUserMessageId === previousMessageId
+      || state.currentTodoRunId === replacementRunId
+      ? authoritativeMessageId
+      : state.pendingTodoUserMessageId
+  };
+}
+
 function resendMetadataFromEvent(event: RunEvent): ResendMetadata | undefined {
   const resendId = text(event.payload.resendId);
   const sourceRunId = text(event.payload.sourceRunId);
@@ -636,7 +767,11 @@ function resendMetadataFromEvent(event: RunEvent): ResendMetadata | undefined {
     status: text(event.payload.status) ?? (event.type === "run.resend.failed" ? "FAILED" : "WAITING"),
     executeAt,
     sourceRunId,
-    replacementRunId
+    replacementRunId,
+    requesterUserId: text(event.payload.requesterUserId),
+    requesterUsername: text(event.payload.requesterUsername),
+    requesterUnifiedAuthId: text(event.payload.requesterUnifiedAuthId),
+    requestedBySharedUser: event.payload.requestedBySharedUser === true
   };
 }
 
@@ -768,7 +903,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
   const partType = text(event.payload.partType) ?? text(event.payload.partKind);
   const delta = text(event.payload.delta) ?? text(event.payload.text) ?? "";
   const exactMessage = messages.find(
-    (message) => message.role !== "card" && (message.messageId === messageId || message.id === messageId)
+    (message) => messageIdentityMatches(message, messageId)
   );
   // slash command 会把展开后的技能正文作为远端 user part 推流；保留用户输入，不把它误建成 assistant 回复。
   if (exactMessage?.role === "user") {
@@ -791,9 +926,13 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
     }
   }
   const exact = findAssistantMessage(messages, messageId);
-  const lastIdx = exact.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
+  // 历史恢复会把原生 compaction user envelope 与后续摘要合成稳定展示消息，
+  // 因而迟到 part 事件的 messageId 可能与展示消息不同；partId 才是同一原生 Part 的稳定身份。
+  // 优先原位更新已有 Part，避免撤回重发时把旧 compact 标记再次追加到新用户轮次之后。
+  const partOwner = exact.message ? exact : findAssistantMessageByPartId(messages, partId);
+  const lastIdx = partOwner.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
-    exact.message ??
+    partOwner.message ??
     (lastIdx >= 0 ? (messages[lastIdx] as Extract<AgentMessage, { role: "assistant" }>) : undefined) ??
     ({
       id: messageId,
@@ -804,7 +943,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
       parts: [],
       runId: event.runId
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
-  const replaceIndex = exact.message ? exact.index : lastIdx;
+  const replaceIndex = partOwner.message ? partOwner.index : lastIdx;
 
   const parts = [...(assistant.parts ?? [])];
   const index = parts.findIndex((part) => part.partId === partId);
@@ -851,7 +990,7 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
     return messages;
   }
   const exactMessageIndex = messages.findIndex(
-    (message) => message.role !== "card" && (message.messageId === messageId || message.id === messageId)
+    (message) => messageIdentityMatches(message, messageId)
   );
   const exactMessage = exactMessageIndex >= 0 ? messages[exactMessageIndex] : undefined;
   if (exactMessage?.role === "user") {
@@ -893,9 +1032,12 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
     }
   }
   const exact = findAssistantMessage(messages, messageId);
-  const lastIdx = exact.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
+  // session-tree 历史可能已经按平台身份恢复同一 Part，而实时事件仍携带原生 envelope messageId。
+  // 使用全局唯一 partId 复用原位置，不能把 compact/工具等旧 Part 追加进当前替代轮次。
+  const partOwner = exact.message ? exact : findAssistantMessageByPartId(messages, partId);
+  const lastIdx = partOwner.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
-    exact.message ??
+    partOwner.message ??
     (lastIdx >= 0 ? (messages[lastIdx] as Extract<AgentMessage, { role: "assistant" }>) : undefined) ??
     ({
       id: messageId,
@@ -905,7 +1047,7 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
       createdAt: event.occurredAt,
       parts: []
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
-  const replaceIndex = exact.message ? exact.index : lastIdx;
+  const replaceIndex = partOwner.message ? partOwner.index : lastIdx;
   const part = normalizeMessagePart(raw, partId);
   const parts = [...(assistant.parts ?? [])];
   const partIdx = parts.findIndex((item) => item.partId === partId);
@@ -990,7 +1132,7 @@ function removePart(messages: AgentMessage[], event: RunEvent) {
     return messages;
   }
   return messages.map((message) => {
-    if (message.role !== "assistant" || message.messageId !== messageId) {
+    if (message.role !== "assistant" || !messageIdentityMatches(message, messageId)) {
       return message;
     }
     return { ...message, parts: (message.parts ?? []).filter((part) => part.partId !== partId) };
@@ -1002,11 +1144,17 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
   const messageId = text(raw.messageId) ?? text(raw.messageID) ?? text(raw.id) ?? `message-${event.seq}`;
   const role = text(raw.role) === "user" ? "user" : "assistant";
   const incomingText = text(raw.text) ?? text(raw.content);
-  let index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
+  let index = messages.findIndex((item) => messageIdentityMatches(item, messageId));
   if (role === "user" && index < 0 && !forceNewMessage) {
-    const pendingUserIndex = findLastUserInCurrentTurn(messages);
+    // 撤回重发会更换文本和远端消息 ID；用替代 Run 边界原位接管，不能再依赖新旧文本相等。
+    const pendingResendIndex = findUnlinkedResendUser(messages, event.runId);
+    const pendingUserIndex = pendingResendIndex >= 0 ? pendingResendIndex : findLastUserInCurrentTurn(messages);
     const pendingUser = pendingUserIndex >= 0 ? messages[pendingUserIndex] : undefined;
-    if (pendingUser?.role === "user" && (incomingText === undefined || pendingUser.text === incomingText)) {
+    if (pendingUser?.role === "user" && (
+      pendingResendIndex >= 0
+      || incomingText === undefined
+      || pendingUser.text === incomingText
+    )) {
       index = pendingUserIndex;
     } else if (incomingText === undefined) {
       // 远端可能在 assistant 后才补发 user 的 message.updated，再补发 text part。
@@ -1017,11 +1165,33 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
     }
   }
   const existing = index >= 0 ? messages[index] : undefined;
+  // 历史刷新后的平台消息以 platform messageId 为规范身份，实时事件则继续使用 remoteMessageId。
+  // 两者命中同一远端别名时必须保留平台身份，否则迟到事件会破坏反馈定位并再次产生重复气泡。
+  const matchedByRemoteAlias = existing !== undefined
+    && existing.role !== "card"
+    && existing.remoteMessageId === messageId
+    && existing.id !== messageId;
   const incomingTokens = normalizeAssistantTokenUsage(raw);
   const incomingModel = normalizeAssistantModel(raw);
+  const incomingSenderUserId = text(raw.senderUserId) ?? text(payload.senderUserId);
+  const incomingSenderUsername = text(raw.senderUsername) ?? text(payload.senderUsername);
+  const incomingSenderUnifiedAuthId = text(raw.senderUnifiedAuthId) ?? text(payload.senderUnifiedAuthId);
+  const incomingSentBySharedUser = booleanValue(raw.sentBySharedUser) ?? booleanValue(payload.sentBySharedUser);
+  const existingUser = existing?.role === "user" ? existing : undefined;
+  const preserveTrustedSender = Boolean(existingUser && (
+    existingUser.platformMessageId
+    || existingUser.resend?.requestedBySharedUser === true
+  ));
+  const trustedSenderUserId = existingUser
+    ? existingUser.resend?.requesterUserId ?? existingUser.senderUserId ?? undefined
+    : undefined;
+  const incomingMatchesTrustedSender = !trustedSenderUserId || incomingSenderUserId === trustedSenderUserId;
   const base = {
-    id: messageId,
-    messageId,
+    id: matchedByRemoteAlias ? existing.id : messageId,
+    messageId: matchedByRemoteAlias ? existing.messageId ?? existing.id : messageId,
+    ...(existing !== undefined && existing.role !== "card" && existing.platformMessageId
+      ? { platformMessageId: existing.platformMessageId }
+      : {}),
     remoteMessageId: messageId,
     runId: event.runId,
     text: role === "user" && incomingText ? displayTextFromUserPrompt(incomingText) : incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
@@ -1034,14 +1204,24 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
         parts: existing?.role === "user" ? existing.parts : undefined,
         sourceType: existing?.role === "user" ? existing.sourceType : undefined,
         sourceRefId: existing?.role === "user" ? existing.sourceRefId : undefined,
-        senderUserId: text(raw.senderUserId) ?? text(payload.senderUserId)
-          ?? (existing?.role === "user" ? existing.senderUserId : undefined),
-        senderUsername: text(raw.senderUsername) ?? text(payload.senderUsername)
-          ?? (existing?.role === "user" ? existing.senderUsername : undefined),
-        senderUnifiedAuthId: text(raw.senderUnifiedAuthId) ?? text(payload.senderUnifiedAuthId)
-          ?? (existing?.role === "user" ? existing.senderUnifiedAuthId : undefined),
-        sentBySharedUser: booleanValue(raw.sentBySharedUser) ?? booleanValue(payload.sentBySharedUser)
-          ?? (existing?.role === "user" ? existing.sentBySharedUser : undefined),
+        // 平台持久消息的发送人归因已经过后端确认。所属人 OpenCode 产生的迟到原生事件
+        // 只能补齐同一发送人的缺失字段，不能把分享发送人覆盖成执行所属人。
+        senderUserId: preserveTrustedSender
+          ? trustedSenderUserId ?? incomingSenderUserId
+          : incomingSenderUserId ?? existingUser?.senderUserId,
+        senderUsername: preserveTrustedSender
+          ? existingUser?.resend?.requesterUsername ?? existingUser?.senderUsername
+            ?? (incomingMatchesTrustedSender ? incomingSenderUsername : undefined)
+          : incomingSenderUsername ?? existingUser?.senderUsername,
+        senderUnifiedAuthId: preserveTrustedSender
+          ? existingUser?.resend?.requesterUnifiedAuthId ?? existingUser?.senderUnifiedAuthId
+            ?? (incomingMatchesTrustedSender ? incomingSenderUnifiedAuthId : undefined)
+          : incomingSenderUnifiedAuthId ?? existingUser?.senderUnifiedAuthId,
+        sentBySharedUser: preserveTrustedSender
+          ? (existingUser?.resend?.requestedBySharedUser === true
+            ? true
+            : existingUser?.sentBySharedUser ?? (incomingMatchesTrustedSender ? incomingSentBySharedUser : undefined))
+          : incomingSentBySharedUser ?? existingUser?.sentBySharedUser,
         resend: existing?.role === "user" ? existing.resend : undefined
       }
     : {
@@ -1106,11 +1286,34 @@ function normalizeAssistantModel(raw: Record<string, unknown>) {
 }
 
 function findAssistantMessage(messages: AgentMessage[], messageId: string) {
-  const index = messages.findIndex((message) => message.role === "assistant" && (message.messageId === messageId || message.id === messageId));
+  const index = messages.findIndex(
+    (message) => message.role === "assistant" && messageIdentityMatches(message, messageId)
+  );
   return {
     index,
     message: index >= 0 ? (messages[index] as Extract<AgentMessage, { role: "assistant" }>) : undefined
   };
+}
+
+/** 原生 Part ID 在一个 Session 内稳定唯一，可跨平台/远端 message alias 找回既有展示位置。 */
+function findAssistantMessageByPartId(messages: AgentMessage[], partId: string) {
+  const index = messages.findIndex(
+    (message) => message.role === "assistant" && message.parts?.some((part) => part.partId === partId)
+  );
+  return {
+    index,
+    message: index >= 0 ? (messages[index] as Extract<AgentMessage, { role: "assistant" }>) : undefined
+  };
+}
+
+/** 平台持久 ID、OpenCode 远端 ID 与实时投影 ID 都是同一消息的稳定别名。 */
+function messageIdentityMatches(message: AgentMessage, messageId: string): boolean {
+  return message.role !== "card" && [
+    message.id,
+    message.messageId,
+    message.platformMessageId,
+    message.remoteMessageId
+  ].includes(messageId);
 }
 
 // 从末尾往前找当前轮的 assistant 消息。如果先遇到 user 消息，
@@ -1141,6 +1344,25 @@ function findUnlinkedUserByText(messages: AgentMessage[], incomingText: string |
   return messages.findIndex(
     (message) => message.role === "user" && !message.messageId && (message.text === incomingText || message.text === displayText)
   );
+}
+
+// 撤回重发后的权威 user 事件可能晚于 assistant 事件到达；替代 Run 是比文本更稳定的归并边界。
+function findUnlinkedResendUser(messages: AgentMessage[], runId: string): number {
+  return messages.findIndex((message) => message.role === "user"
+    && !message.messageId
+    && message.runId === runId
+    && message.resend?.replacementRunId === runId);
+}
+
+/** 用编辑后的提问替换首个 text part，并保留附件、Agent 与引用 part。 */
+function replaceFirstPromptText(parts: PromptPart[] | undefined, editedPrompt: string): PromptPart[] {
+  const nextParts = [...(parts ?? [])];
+  const textIndex = nextParts.findIndex((part) => part.type === "text");
+  if (textIndex < 0) {
+    return [{ type: "text", text: editedPrompt }, ...nextParts];
+  }
+  nextParts[textIndex] = { type: "text", text: editedPrompt };
+  return nextParts;
 }
 
 // slash command 会被 opencode 展开成完整技能提示词；只用展开文本识别归属，用户气泡仍保留原始命令。

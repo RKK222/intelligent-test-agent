@@ -209,6 +209,7 @@ class RunApplicationServiceTest {
     @Test
     void reservedResendRunBypassesOnlyItsOwnSessionLock() {
         UserId userId = new UserId("usr_1234567890abcdef");
+        UserId sharedSender = new UserId("usr_shared_resend_sender");
         RunId replacementRunId = new RunId("run_resend1234567890");
         FakeRunRepository runs = new FakeRunRepository();
         runs.save(new Run(
@@ -218,16 +219,18 @@ class RunApplicationServiceTest {
                 RunStatus.PENDING,
                 NOW,
                 NOW,
-                "trace_resend_dispatch"));
+                "trace_resend_dispatch")
+                .withMessageSender(sharedSender, "ucid_shared_resend_sender", true));
         UserOpencodeProcessAssignmentService assignmentService =
                 org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
         org.mockito.Mockito.when(assignmentService.requireReadyProcess(
                         userId, "opencode", "trace_resend_dispatch"))
                 .thenReturn(new UserOpencodeProcessAssignment(
                         userProcessNode("node_resend123456789", "http://127.0.0.1:4096")));
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(), new FakeSessionRepository(session()), runs,
-                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                messages, new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(), new RunEventAppender(new FakeRunEventRepository()),
                 runtimeRegistry(new FakeOpencodeFacade()), new FakeAgentSessionBindingRepository(),
                 assignmentService);
@@ -247,6 +250,14 @@ class RunApplicationServiceTest {
                 "trace_resend_dispatch");
 
         assertThat(started.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(started.messageSenderUserId()).isEqualTo(sharedSender);
+        assertThat(started.messageSenderUnifiedAuthId()).isEqualTo("ucid_shared_resend_sender");
+        assertThat(started.messageSentBySharedUser()).isTrue();
+        assertThat(messages.saved).singleElement().satisfies(message -> {
+            assertThat(message.senderUserId()).isEqualTo(sharedSender);
+            assertThat(message.senderUnifiedAuthId()).isEqualTo("ucid_shared_resend_sender");
+            assertThat(message.sentBySharedUser()).isTrue();
+        });
         org.mockito.Mockito.verifyNoInteractions(guard);
     }
 

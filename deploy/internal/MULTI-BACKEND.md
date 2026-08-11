@@ -553,22 +553,31 @@ from flyway_schema_history
 order by installed_rank;
 ```
 
-PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；上一轮新增的 `20260807190000`、
+PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；已确认企业基线中的 `20260807190000`、
 `20260807230000`、`20260808143300`、`20260808143301`、`20260808143302`、`20260809110000`
 均已成功且 checksum 不变，其中 `V20260809110000__create_external_api_credentials.sql` 的文件 SHA-256
-必须为 `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。正常企业历史中不得已有本轮
-新增版本。第一台 `.4` 新 Java 只允许按顺序新增以下两条主迁移：
+必须为 `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。第一台 `.4` 新 Java 从
+`20260809110000` 基线首次升级时，只允许按顺序新增以下四条主迁移：
 
 - `V20260809170000__session_shares_create_collaboration_share.sql`，SHA-256
   `b0b04355fcfe64f3d22d8a8ff297fa62a30db9d97bf6bf82968588f5da72d0c9`；
 - `V20260809170001__session_messages_add_delegated_attribution.sql`，SHA-256
-  `dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`。
+  `dfb5d65b474416c28ec6131e95c7b9e7f744f9d2903c0bc4fcd0065632a4eee5`；
+- `V20260810170000__user_notifications_create_notification_center.sql`，SHA-256
+  `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`；
+- `V20260810234154__internal_model_call_records_add_token_latency_inputs.sql`，SHA-256
+  `f684bd5d323d3816fc7ae982eff7b45256763f467f540020af41753c04fb837b`。
+
+如果现场已经部署过只包含两条会话分享 migration 的上一增量包，则这两条必须同时成功且 checksum 与上面一致，
+本包首次启动只允许再新增 `20260810170000`、`20260810234154`。如果本包已经在首台成功启动后只是故障重部署，
+四条都必须成功且 checksum 不变，本次不得新增 history。两条会话 migration 只出现一条、通知/Token 延迟两条只
+出现一条、或 `20260810234154` 已存在但更低版本 `20260810170000` 缺失，都属于部分或倒序历史，必须停止发布。
 
 正常企业历史不得出现只用于已登记并行开发历史的兼容版本 `20260807130134`、`20260807203000`、
 `20260807222227`、`20260807229999`、`20260808143303`、`20260809120000`、`20260809230000`、
 `20260810090000` 或 `20260810110000` 至 `20260810110002`。特别是 `20260809120000` 已被另一分支的
-QA Memory migration 使用，不能与企业主链混同。发现上述版本、未知 checksum、未知更高版本或只执行了
-本轮两条中的一部分时必须停止发布并核对原始历史，禁止用 `repair`、`outOfOrder` 或手工改表规避。
+QA Memory migration 使用，不能与企业主链混同。发现上述兼容版本、未知 checksum、未知更高版本或上述任一
+部分历史时必须停止发布并核对原始历史，禁止用 `repair`、`outOfOrder` 或手工改表规避。
 
 虽然 LobeHub 服务和页面入口继续关闭，既有兼容 migration 创建的平台模型目录/聚合表和四个默认禁用参数仍必须
 保留，这是数据库兼容要求，不代表启用服务。
@@ -584,8 +593,8 @@ V10 注册每 5 分钟一次的内部模型探活，V11 注册每天 03:30 的�
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
-`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并确认 PostgreSQL 只新增上述两条
-会话 migration、XXL MySQL 没有新增 history；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
+`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并按部署前基线确认 PostgreSQL 只新增上述
+允许的四条或后两条 migration（故障重部署时不新增）、XXL MySQL 没有新增 history；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
 内部模型探活为每 5 分钟、可观测数据清理为每日 03:30，再部署 `.114`。共享数据库上 `.114` 启动只允许
 validate，不应再新增 history。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。

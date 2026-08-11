@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   KNOWN_RUN_EVENT_TYPES,
   parseRunEvent,
+  parseUserNotificationStreamUpdate,
   subscribeRunEvents,
   subscribeSessionShareRuntimeState,
   subscribeSessionRuntimeState,
+  subscribeUserNotifications,
   type EventSourceLike
 } from "../src";
 
@@ -557,6 +559,69 @@ describe("event-stream-client", () => {
       await vi.advanceTimersByTimeAsync(30_000);
       expect(fetcher).toHaveBeenCalledTimes(6);
       expect(statuses.at(-1)).toBe("closed");
+    } finally {
+      subscription.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("subscribes to low-sensitivity user notification snapshots with bearer auth", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(sseResponse([
+      "event: user-notification.snapshot\n",
+      'data: {"changeType":"SNAPSHOT","notificationId":null,"unreadCount":2,"generatedAt":"2026-08-10T09:00:00Z"}\n\n',
+      ": heartbeat\n\n",
+      "event: user-notification.updated\n",
+      'data: {"changeType":"CREATED","notificationId":"ntf_1","unreadCount":3,"generatedAt":"2026-08-10T09:00:01Z"}\n\n'
+    ]));
+    const received: Array<{ changeType: string; unreadCount: number; notificationId?: string | null }> = [];
+    const subscription = subscribeUserNotifications({
+      baseUrl: "http://api",
+      token: "notification_token",
+      fetcher,
+      onEvent: (event) => received.push(event)
+    });
+
+    await waitFor(() => received.length === 2);
+    subscription.close();
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/notification-center/notifications/events",
+      expect.objectContaining({ headers: expect.any(Headers), signal: expect.any(AbortSignal) })
+    );
+    const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer notification_token");
+    expect(headers.get("Accept")).toBe("text/event-stream");
+    expect(received).toEqual([
+      expect.objectContaining({ changeType: "SNAPSHOT", unreadCount: 2, notificationId: null }),
+      expect.objectContaining({ changeType: "CREATED", unreadCount: 3, notificationId: "ntf_1" })
+    ]);
+    expect(JSON.stringify(received)).not.toContain("actionTargetId");
+  });
+
+  it("rejects malformed notification signals and reconnects after an interrupted request", async () => {
+    expect(parseUserNotificationStreamUpdate("{bad")).toBeNull();
+    expect(parseUserNotificationStreamUpdate(JSON.stringify({
+      changeType: "CREATED",
+      unreadCount: -1,
+      generatedAt: "2026-08-10T09:00:00Z"
+    }))).toBeNull();
+
+    vi.useFakeTimers();
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("notification stream unavailable"));
+    const subscription = subscribeUserNotifications({
+      baseUrl: "http://api",
+      token: "notification_token",
+      fetcher,
+      onEvent: () => undefined
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      subscription.close();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(fetcher).toHaveBeenCalledTimes(2);
     } finally {
       subscription.close();
       vi.useRealTimers();

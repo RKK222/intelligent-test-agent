@@ -1885,6 +1885,23 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("new-conversation")).toEqual([[]]);
   });
 
+  it("keeps new conversation available in a fixed shared session", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        fixedSession: true,
+        processRequired: false
+      } as any
+    });
+
+    const newConversationButton = wrapper.get('button[aria-label="新建对话"]');
+    expect(newConversationButton.attributes("disabled")).toBeUndefined();
+
+    await newConversationButton.trigger("click");
+
+    expect(wrapper.emitted("new-conversation")).toEqual([[]]);
+  });
+
   it("blocks readonly messages but keeps native slash commands available", async () => {
     const readonlyReason = "你已不属于该会话所属应用，当前会话只读。";
     const wrapper = mount(FigmaChatPanel, {
@@ -2329,6 +2346,42 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.emitted("native-command")?.at(-1)).toEqual(["compact"]);
     expect((textarea.element as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("keeps compact progress visible, animates locally, and settles into a success state", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "继续处理任务",
+        compactStatus: "running",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    const progress = wrapper.get('[data-testid="compact-progress"]');
+    expect(progress.attributes("role")).toBe("status");
+    expect(progress.attributes("aria-live")).toBe("polite");
+    expect(progress.attributes("data-phase")).toBe("running");
+    expect(progress.text()).toContain("正在压缩上下文");
+    expect(progress.text()).toContain("完成后会自动刷新");
+    expect(progress.findAll(".figma-chat-compact-progress-line")).toHaveLength(3);
+    expect(wrapper.get('button[aria-label="发送"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[aria-label="发送"]').attributes("title")).toBe("上下文压缩完成后才能发送");
+
+    await wrapper.setProps({ compactStatus: "success" } as any);
+    const success = wrapper.get('[data-testid="compact-progress"]');
+    expect(success.attributes("data-phase")).toBe("success");
+    expect(success.text()).toContain("上下文压缩完成");
+    expect(success.text()).toContain("已整理为续写摘要");
+    expect(success.find(".figma-chat-compact-progress-check").exists()).toBe(true);
+    expect(wrapper.get('button[aria-label="发送"]').attributes("disabled")).toBeUndefined();
+
+    await wrapper.setProps({ compactStatus: null } as any);
+    expect(wrapper.find('[data-testid="compact-progress"]').exists()).toBe(false);
+
+    const source = readFileSync(resolve(__dirname, "../src/components/FigmaChatPanel.vue"), "utf8");
+    expect(source).toContain("@keyframes figma-chat-compact-fold");
+    expect(source).toContain(".figma-chat-compact-progress-line,\n  .figma-chat-compact-progress-check {\n    animation: none;");
   });
 
   it("does not show a question panel for ordinary numbered assistant output", () => {
@@ -4531,6 +4584,61 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("任务完成");
   });
 
+  it("keeps a later successful run completed when the session still contains an older failure card", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u-old-failure",
+            messageId: "u-old-failure",
+            role: "user",
+            text: "旧轮次",
+            runId: "run_old_failure",
+            createdAt: "2026-07-27T02:26:33.000Z"
+          },
+          {
+            id: "event-old-failure",
+            role: "card",
+            cardType: "event",
+            title: "Run 执行失败",
+            payload: {
+              type: "run.failed",
+              runId: "run_old_failure",
+              error: { name: "UnknownError", message: "Model not found: opencode/hy3-free" }
+            },
+            createdAt: "2026-07-27T02:26:34.000Z"
+          },
+          {
+            id: "u-current-success",
+            messageId: "u-current-success",
+            role: "user",
+            text: "仅答复 123",
+            runId: "run_current_success",
+            createdAt: "2026-08-10T15:09:01.000Z"
+          },
+          {
+            id: "a-current-success",
+            messageId: "a-current-success",
+            role: "assistant",
+            text: "123",
+            runId: "run_current_success",
+            createdAt: "2026-08-10T15:09:02.000Z"
+          }
+        ],
+        running: true,
+        runtimeStatus: "RUNNING",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    await wrapper.setProps({ running: false, runtimeStatus: "SUCCEEDED" });
+
+    expect(wrapper.find(".figma-chat-retry-card").exists()).toBe(false);
+    expect(wrapper.text()).toContain("任务完成");
+    expect(wrapper.text()).not.toContain("任务失败");
+  });
+
   it("shows the real run failure message in the retry card", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -4968,41 +5076,68 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("需要分析");
   });
 
-  it("groups and explains the native compaction summary in the standard disclosure style", async () => {
+  it("keeps a compacted summary hidden until its separate button is expanded", async () => {
+    const messages = [
+      {
+        id: "u-before-compaction", messageId: "u-before-compaction", role: "user", text: "继续任务",
+        createdAt: "2026-07-11T08:59:59.000Z"
+      },
+      {
+        id: "a-compaction", messageId: "a-compaction", role: "assistant", text: "",
+        parts: [{ partId: "prt-compaction", type: "compaction", auto: false, overflow: false, tailStartId: "msg-tail" }],
+        createdAt: "2026-07-11T09:00:00.000Z"
+      },
+      {
+        id: "u-compaction-envelope", messageId: "u-compaction-envelope", role: "user", text: "",
+        parts: [{ type: "agent", agentId: "build" }],
+        createdAt: "2026-07-11T09:00:00.500Z"
+      },
+      {
+        id: "a-summary", messageId: "a-summary", role: "assistant",
+        text: "## Objective\n继续当前目标任务\n## Work State\n### Completed\n(none)",
+        parts: [{
+          partId: "prt-summary-step-start", type: "step-start"
+        }, {
+          partId: "prt-summary-reasoning", type: "reasoning", text: "整理较早对话", status: "completed"
+        }, {
+          partId: "prt-summary", type: "text",
+          text: "## Objective\n继续当前目标任务\n## Work State\n### Completed\n(none)"
+        }, {
+          partId: "prt-summary-step-finish", type: "step-finish", reason: "stop"
+        }],
+        createdAt: "2026-07-11T09:00:01.000Z"
+      }
+    ];
     const wrapper = mount(FigmaChatPanel, {
       props: {
-        messages: [
-          {
-            id: "a-compaction", messageId: "a-compaction", role: "assistant", text: "",
-            parts: [{ partId: "prt-compaction", type: "compaction", auto: true, overflow: true, tailStartId: "msg-tail" }],
-            createdAt: "2026-07-11T09:00:00.000Z"
-          },
-          {
-            id: "a-summary", messageId: "a-summary", role: "assistant",
-            text: "## Objective\n继续当前任务\n## Work State\n### Completed\n(none)",
-            parts: [{
-              partId: "prt-summary", type: "text",
-              text: "## Objective\n继续当前任务\n## Work State\n### Completed\n(none)"
-            }],
-            createdAt: "2026-07-11T09:00:01.000Z"
-          }
-        ],
+        messages: messages.slice(0, 3),
         processStatus: { status: "READY", initializable: false, message: "ready" }
       } as any,
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
     await showFullTimeline(wrapper);
+    expect(wrapper.find('[data-testid="compaction-part-prt-compaction"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("上下文压缩中");
+
+    await wrapper.setProps({ messages: messages as any });
+
     const compaction = wrapper.get('[data-testid="compaction-part-prt-compaction"]');
-    expect(compaction.text()).toContain("上下文已压缩");
-    expect(compaction.text()).toContain("较早的对话已整理为续写摘要");
+    expect(compaction.find(".oc-compaction-summary__panel").exists()).toBe(false);
+    expect(compaction.get('button[aria-label="展开上下文压缩详情"]').attributes("aria-expanded")).toBe("false");
+    expect(compaction.text()).toContain("上下文已手动压缩");
     expect(compaction.text()).not.toContain("Objective");
-    await compaction.get("button").trigger("click");
-    expect(compaction.text()).toContain("这不是新的回答");
+    expect(wrapper.text()).not.toContain("继续当前目标任务");
+    expect(wrapper.findAll(".oc-text-part")).toHaveLength(0);
+    await compaction.get('button[aria-label="展开上下文压缩详情"]').trigger("click");
+    expect(compaction.get('button[aria-label="收起上下文压缩详情"]').attributes("aria-expanded")).toBe("true");
     expect(compaction.text()).toContain("当前目标");
+    expect(compaction.text()).toContain("继续当前目标任务");
     expect(compaction.text()).toContain("工作状态");
     expect(compaction.text()).toContain("已完成");
     expect(compaction.text()).toContain("无");
+    expect(compaction.text()).not.toContain("较早的对话已整理为续写摘要");
+    expect(compaction.text()).not.toContain("这不是新的回答");
     expect(compaction.text()).not.toContain("Objective");
   });
 

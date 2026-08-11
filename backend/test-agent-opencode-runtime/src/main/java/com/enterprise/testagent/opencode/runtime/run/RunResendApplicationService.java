@@ -99,7 +99,7 @@ public class RunResendApplicationService {
         return createManualInternal(attribution, null, agentId, sessionId, command, traceId);
     }
 
-    /** 分享会话只允许所属人撤回重发；普通成员即使发送了最后一条消息也不能操作。 */
+    /** 分享会话要求可对话；只有源消息的实际发送人可撤回重发。 */
     @Transactional
     public RunResend createManual(
             DelegatedOperationContext context,
@@ -110,12 +110,6 @@ public class RunResendApplicationService {
         Objects.requireNonNull(context, "context must not be null");
         context.requireChat();
         context.requireSession(sessionId);
-        if (!context.ownerAccess()) {
-            throw new PlatformException(
-                    ErrorCode.FORBIDDEN,
-                    "只有会话所属人可以撤回并重新发送上一条消息",
-                    Map.of("sessionId", sessionId.value()));
-        }
         return createManualInternal(
                 RunActorAttribution.from(context), context, agentId, sessionId, command, traceId);
     }
@@ -175,10 +169,11 @@ public class RunResendApplicationService {
             sourceRunId = sourceTurn.runId();
         }
         Run sourceRun = requireTerminalSourceRun(sourceRunId, sessionId);
+        RunResend previous = resendRepository.findByReplacementRunId(sourceRun.runId()).orElse(null);
         if (delegatedContext != null) {
             delegatedContext.requireWorkspace(sourceRun.workspaceId());
         }
-        requireManualRequester(attribution, sessionId);
+        requireManualRequester(attribution, sourceRun, previous, sessionId);
         AgentRuntime runtime = runtimeRegistry.require(resolvedAgentId);
         AgentReplayableTurn replayable;
         try {
@@ -197,7 +192,6 @@ public class RunResendApplicationService {
             throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "远端用户消息读取失败");
         }
         replayable = withEditedPrompt(replayable, command.editedPrompt());
-        RunResend previous = resendRepository.findByReplacementRunId(sourceRun.runId()).orElse(null);
         return reserve(
                 attribution,
                 resolvedAgentId,
@@ -230,6 +224,15 @@ public class RunResendApplicationService {
         Instant now = clock.instant();
         RunId replacementRunId = new RunId(RuntimeIdGenerator.runId());
         String replacementMessageId = runtimeRegistry.require(agentId).createDispatchMessageId();
+        UserId replacementSender = trigger == RunResendTrigger.MANUAL
+                ? requester.actualSenderUserId()
+                : sourceSender(sourceRun, owner);
+        String replacementSenderUnifiedAuthId = trigger == RunResendTrigger.MANUAL
+                ? requester.actualSenderUnifiedAuthId()
+                : sourceRun.messageSenderUnifiedAuthId();
+        boolean replacementSentBySharedUser = trigger == RunResendTrigger.MANUAL
+                ? requester.sentBySharedUser()
+                : sourceRun.messageSentBySharedUser();
         Run replacement = new Run(
                 replacementRunId,
                 sourceRun.sessionId(),
@@ -240,9 +243,9 @@ public class RunResendApplicationService {
                 traceId)
                 .withSource(sourceRun.sourceType(), sourceRun.sourceRefId(), owner)
                 .withMessageSender(
-                        sourceSender(sourceRun, owner),
-                        sourceRun.messageSenderUnifiedAuthId(),
-                        sourceRun.messageSentBySharedUser())
+                        replacementSender,
+                        replacementSenderUnifiedAuthId,
+                        replacementSentBySharedUser)
                 .withRuntimeSelection(replayable.agent(), modelId(replayable));
         RunResend resend = new RunResend(
                 new RunResendId(RuntimeIdGenerator.runResendId()),
@@ -330,18 +333,25 @@ public class RunResendApplicationService {
 
     private void requireManualRequester(
             RunActorAttribution requester,
+            Run sourceRun,
+            RunResend sourceResend,
             SessionId sessionId) {
         UserId actor = requester.actualSenderUserId();
-        if (!actor.equals(requester.executionOwnerUserId())) {
+        // 兼容修复前已经把替代 Run 误写成所属人的记录：共享重发审计中的 requester
+        // 才是该轮真实发送人，后续权限判断不能继续相信被污染的 Run 字段。
+        UserId sourceSender = sourceResend != null && sourceResend.requestedBySharedUser()
+                ? sourceResend.requesterUserId()
+                : sourceSender(sourceRun, requester.executionOwnerUserId());
+        if (!actor.equals(sourceSender)) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
-                    "只有会话所属人可以撤回并重新发送上一条消息",
+                    "只有最后一条消息的实际发送人可以撤回并重新发送",
                     Map.of("sessionId", sessionId.value()));
         }
     }
 
     /**
-     * 用所属人确认后的新文本替换原轮次第一个可编辑文本，同时保留附件、Agent、模型和其它协议 part。
+     * 用实际发送人确认后的新文本替换原轮次第一个可编辑文本，同时保留附件、Agent、模型和其它协议 part。
      * 原消息没有 text 时优先修改 subtask prompt；两者都没有时在首位补一个 text part。
      */
     private AgentReplayableTurn withEditedPrompt(AgentReplayableTurn replayable, String editedPrompt) {
@@ -418,16 +428,23 @@ public class RunResendApplicationService {
     }
 
     static Map<String, Object> eventPayload(RunResend resend) {
-        return Map.of(
-                "resendId", resend.resendId().value(),
-                "sourceRunId", resend.sourceRunId().value(),
-                "replacementRunId", resend.replacementRunId().value(),
-                "trigger", resend.trigger().name(),
-                "totalAttempt", resend.totalAttempt(),
-                "automaticAttempt", resend.automaticAttempt(),
-                "automaticLimit", resend.automaticLimit(),
-                "status", resend.status().name(),
-                "executeAt", resend.executeAt().toString());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("resendId", resend.resendId().value());
+        payload.put("sourceRunId", resend.sourceRunId().value());
+        payload.put("replacementRunId", resend.replacementRunId().value());
+        payload.put("trigger", resend.trigger().name());
+        payload.put("totalAttempt", resend.totalAttempt());
+        payload.put("automaticAttempt", resend.automaticAttempt());
+        payload.put("automaticLimit", resend.automaticLimit());
+        payload.put("status", resend.status().name());
+        payload.put("executeAt", resend.executeAt().toString());
+        // OpenCode 仍以所属人执行；事件必须同时携带真实操作人，前端才能维持共享配色和停止权限。
+        payload.put("requesterUserId", resend.requesterUserId().value());
+        if (resend.requesterUnifiedAuthId() != null) {
+            payload.put("requesterUnifiedAuthId", resend.requesterUnifiedAuthId());
+        }
+        payload.put("requestedBySharedUser", resend.requestedBySharedUser());
+        return Map.copyOf(payload);
     }
 
     private PlatformException conflict(String message, SessionId sessionId) {

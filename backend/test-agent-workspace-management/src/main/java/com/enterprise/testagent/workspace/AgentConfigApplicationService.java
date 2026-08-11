@@ -33,6 +33,7 @@ import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyn
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreeClaim;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
+import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -41,6 +42,8 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
+import com.enterprise.testagent.scheduler.ScheduledTaskLock;
+import com.enterprise.testagent.scheduler.ScheduledTaskLockLease;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.Reader;
 import java.net.URI;
@@ -48,12 +51,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -95,6 +101,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     private static final int MAX_DISPLAY_METADATA_CHARS = 64 * 1024;
     private static final Duration PREPARATION_RECOVERY_DELAY = Duration.ofMinutes(3);
     private static final Duration PREPARATION_ABORT_DELAY = Duration.ofMinutes(5);
+    private static final Duration PUBLIC_WORKTREE_COMPENSATION_LOCK_TTL = Duration.ofMinutes(5);
+    private static final int PUBLIC_WORKTREE_COMPENSATION_LIMIT = 50;
     /** 本地最终 commit 尚未产生；崩溃恢复不能把当前远端 HEAD 误当作本次发布结果。 */
     private static final String PENDING_EXPECTED_COMMIT = "PENDING_LOCAL_COMMIT";
     private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^aco_[A-Za-z0-9_-]{8,128}$");
@@ -132,6 +140,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     private ManagedWorkspaceApplicationService managedWorkspaceApplicationService;
     private PublicAgentConfigRolloutCoordinator publicConfigRolloutCoordinator;
     private PersonalAgentConfigRuntimeReloader personalRuntimeReloader;
+    private ScheduledTaskLock scheduledTaskLock;
 
     /** 应用配置发布复用托管 feature 版本的 HEAD 更新与广播链路。 */
     @Autowired
@@ -149,6 +158,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     @Autowired
     void setPersonalRuntimeReloader(PersonalAgentConfigRuntimeReloader reloader) {
         this.personalRuntimeReloader = Objects.requireNonNull(reloader, "reloader must not be null");
+    }
+
+    /** 缺失公共个人 worktree 的周期补偿复用 scheduler Redis 锁，禁止同服务器多 Java 并发建目录。 */
+    @Autowired
+    void setScheduledTaskLock(ScheduledTaskLock lock) {
+        this.scheduledTaskLock = Objects.requireNonNull(lock, "lock must not be null");
     }
 
     /**
@@ -1107,10 +1122,32 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                     "公共 Agent worktree 必须在目标服务器创建",
                     Map.of("targetLinuxServerId", linuxServerId.trim(), "currentLinuxServerId", serverIdentity.linuxServerId()));
         }
+        PublicConfig config = requireEnabledPublicConfig(userId);
+        String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+        return ensurePublicWorktree(
+                config,
+                normalizedBranch,
+                operationId,
+                userId,
+                traceId,
+                true);
+    }
+
+    /**
+     * 幂等创建当前服务器上的稳定公共个人 worktree。
+     *
+     * <p>用户交互入口继续用本人 SSH Key 刷新远端；后台补偿只基于已经初始化的本机共享仓库 HEAD
+     * 创建本地分支，不读取或冒用目标用户 SSH Key。</p>
+     */
+    private AgentConfigResponses.AgentConfigWorktreeResponse ensurePublicWorktree(
+            PublicConfig config,
+            String normalizedBranch,
+            String operationId,
+            UserId userId,
+            String traceId,
+            boolean refreshRemote) {
         String lockKey = serverIdentity.linuxServerId() + ":" + userId.value();
         synchronized (publicWorktreeLocks.computeIfAbsent(lockKey, ignored -> new Object())) {
-            PublicConfig config = requireEnabledPublicConfig(userId);
-            String normalizedBranch = requireText(branch, "分支不能为空", "branch");
             Optional<AgentConfigWorktree> existing = agentConfigRepository.findWorktrees(
                     AgentConfigScope.PUBLIC,
                     null,
@@ -1134,9 +1171,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                     normalizedBranch,
                     traceId);
             try {
-                String privateKey = decryptSingleSshKey(userId);
+                String privateKey = refreshRemote ? decryptSingleSshKey(userId) : null;
                 progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-                ensureExistingPublicRepositoryReady(config, normalizedBranch, privateKey);
+                if (refreshRemote) {
+                    ensureExistingPublicRepositoryReady(config, normalizedBranch, privateKey);
+                } else {
+                    requireInitializedLocalPublicRepository(config);
+                }
                 progress.step(AgentConfigOperationStep.CREATING_WORKTREE);
                 Path worktreeRoot = config.worktreeRoot().resolve(worktreeName).normalize();
                 ensureChild(config.worktreeRoot(), worktreeRoot, "worktreeName");
@@ -1169,6 +1210,20 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建公共 Agent worktree 失败");
                 throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建公共 Agent worktree 失败", Map.of(), exception);
             }
+        }
+    }
+
+    /** 后台补偿只能复用本机已初始化共享仓库，不执行 fetch、checkout、pull 或 SSH 解密。 */
+    private void requireInitializedLocalPublicRepository(PublicConfig config) {
+        AgentConfigResponses.PublicRepositoryStatusResponse repository = publicRepositoryStatus(config);
+        if (!repository.initialized()) {
+            String message = repository.message() == null || repository.message().isBlank()
+                    ? "当前服务器的公共配置仓库尚未初始化"
+                    : repository.message();
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    message,
+                    Map.of("linuxServerId", serverIdentity.linuxServerId()));
         }
     }
 
@@ -1242,6 +1297,180 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                     null,
                     targetServer,
                     "公共个人 worktree 准备失败，请稍后重试");
+        }
+    }
+
+    /**
+     * 手工或定时补偿当前服务器上缺失的超级管理员公共个人 worktree。
+     *
+     * <p>候选查询和目录创建均有界；同服务器多 Java 通过 Redis 锁互斥。单个用户失败不会中断其它用户，
+     * 且补偿只使用本机共享仓库 HEAD，不解密目标用户 SSH Key、不执行远端 Git。</p>
+     */
+    public AgentConfigResponses.PublicWorktreeCompensationResponse reconcileMissingPublicWorktrees(
+            String linuxServerId,
+            String traceId) {
+        String targetServer = requireText(linuxServerId, "服务器不能为空", "linuxServerId");
+        String normalizedTraceId = requireText(traceId, "traceId 不能为空", "traceId");
+        if (!serverIdentity.linuxServerId().equals(targetServer)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "公共个人 worktree 补偿必须在目标服务器执行",
+                    Map.of("targetLinuxServerId", targetServer, "currentLinuxServerId", serverIdentity.linuxServerId()));
+        }
+        ScheduledTaskLock lock = scheduledTaskLock;
+        if (lock == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "公共个人 worktree 补偿锁不可用");
+        }
+
+        Optional<ScheduledTaskLockLease> acquired;
+        try {
+            acquired = lock.acquire(publicWorktreeCompensationTaskKey(targetServer), PUBLIC_WORKTREE_COMPENSATION_LOCK_TTL);
+        } catch (RuntimeException exception) {
+            throw new PlatformException(
+                    ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                    "公共个人 worktree 补偿锁不可用",
+                    Map.of(),
+                    exception);
+        }
+        if (acquired.isEmpty()) {
+            return new AgentConfigResponses.PublicWorktreeCompensationResponse(
+                    targetServer,
+                    "LOCKED",
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(),
+                    "当前服务器的补偿任务正在执行",
+                    now());
+        }
+
+        List<AgentConfigResponses.PublicWorktreeCompensationItemResponse> items = new ArrayList<>();
+        List<UserId> candidates;
+        boolean lockLost = false;
+        try (ScheduledTaskLockLease lease = acquired.get()) {
+            candidates = agentConfigRepository.findMissingPublicWorktreeUsers(
+                    targetServer,
+                    PUBLIC_WORKTREE_COMPENSATION_LIMIT);
+            for (int index = 0; index < candidates.size(); index++) {
+                if (index > 0 && !lease.renew()) {
+                    lockLost = true;
+                    break;
+                }
+                UserId candidate = candidates.get(index);
+                try {
+                    AgentConfigResponses.AgentConfigWorktreeResponse worktree =
+                            createMissingPublicWorktreeFromLocalRepository(candidate, normalizedTraceId);
+                    items.add(new AgentConfigResponses.PublicWorktreeCompensationItemResponse(
+                            candidate.value(),
+                            "SUCCEEDED",
+                            worktree.worktreeId(),
+                            null,
+                            "公共个人 worktree 已创建或复用"));
+                } catch (PlatformException exception) {
+                    String message = safeErrorMessage(exception.getMessage());
+                    items.add(new AgentConfigResponses.PublicWorktreeCompensationItemResponse(
+                            candidate.value(),
+                            "FAILED",
+                            null,
+                            exception.errorCode().name(),
+                            message));
+                    LOGGER.warn(
+                            "event=agent_config_public_worktree_compensation_user_failed linuxServerId={} userId={} errorCode={} message={}",
+                            targetServer,
+                            candidate.value(),
+                            exception.errorCode(),
+                            message);
+                } catch (RuntimeException exception) {
+                    items.add(new AgentConfigResponses.PublicWorktreeCompensationItemResponse(
+                            candidate.value(),
+                            "FAILED",
+                            null,
+                            ErrorCode.INTERNAL_ERROR.name(),
+                            "公共个人 worktree 补偿失败"));
+                    LOGGER.warn(
+                            "event=agent_config_public_worktree_compensation_user_failed linuxServerId={} userId={} errorCode={} message={}",
+                            targetServer,
+                            candidate.value(),
+                            ErrorCode.INTERNAL_ERROR,
+                            exception.getClass().getSimpleName());
+                }
+            }
+        }
+
+        int succeeded = (int) items.stream().filter(item -> "SUCCEEDED".equals(item.status())).count();
+        int failed = items.size() - succeeded;
+        String status = lockLost ? "PARTIAL" : failed > 0 ? "COMPLETED_WITH_FAILURES" : "COMPLETED";
+        String message = lockLost
+                ? "补偿锁续租失败，剩余候选将在下一轮继续处理"
+                : failed > 0 ? "部分用户补偿失败，将由后续定时任务重试" : "补偿执行完成";
+        AgentConfigResponses.PublicWorktreeCompensationResponse response =
+                new AgentConfigResponses.PublicWorktreeCompensationResponse(
+                        targetServer,
+                        status,
+                        candidates.size(),
+                        items.size(),
+                        succeeded,
+                        failed,
+                        List.copyOf(items),
+                        message,
+                        now());
+        LOGGER.info(
+                "event=agent_config_public_worktree_compensation_completed linuxServerId={} status={} candidates={} processed={} succeeded={} failed={} traceId={}",
+                targetServer,
+                status,
+                candidates.size(),
+                items.size(),
+                succeeded,
+                failed,
+                normalizedTraceId);
+        return response;
+    }
+
+    /** 默认启动 30 秒后、此后每 10 分钟补偿一次；分布式锁保证同服务器只有一个 Java 执行。 */
+    @Scheduled(
+            initialDelayString = "${test-agent.public-agent-config.worktree-compensation.initial-delay:PT30S}",
+            fixedDelayString = "${test-agent.public-agent-config.worktree-compensation.delay:PT10M}")
+    void reconcileMissingPublicWorktreesScheduled() {
+        if (scheduledTaskLock == null) {
+            return;
+        }
+        try {
+            reconcileMissingPublicWorktrees(
+                    serverIdentity.linuxServerId(),
+                    "trace_" + java.util.UUID.randomUUID().toString().replace("-", ""));
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "event=agent_config_public_worktree_compensation_task_failed linuxServerId={} error={}",
+                    serverIdentity.linuxServerId(),
+                    exception.getClass().getSimpleName());
+        }
+    }
+
+    /** 从本机共享仓库创建稳定个人分支，不访问远端，也不切换用户正在使用的运行态配置。 */
+    private AgentConfigResponses.AgentConfigWorktreeResponse createMissingPublicWorktreeFromLocalRepository(
+            UserId userId,
+            String traceId) {
+        PublicConfig config = requireEnabledPublicConfig();
+        AgentConfigResponses.PublicRepositoryStatusResponse repository = publicRepositoryStatus(config);
+        if (!repository.initialized()) {
+            String message = repository.message() == null || repository.message().isBlank()
+                    ? "当前服务器的公共配置仓库尚未初始化"
+                    : repository.message();
+            throw new PlatformException(ErrorCode.CONFLICT, message, Map.of("linuxServerId", serverIdentity.linuxServerId()));
+        }
+        String branch = requireText(repository.currentBranch(), "当前服务器的公共配置仓库缺少有效分支", "branch");
+        return ensurePublicWorktree(config, branch, null, userId, traceId, false);
+    }
+
+    /** 使用服务器 ID 的稳定摘要构造 Redis 锁 key，避免 128 字符服务器 ID 超出任务 key 上限。 */
+    private ScheduledTaskKey publicWorktreeCompensationTaskKey(String linuxServerId) {
+        try {
+            String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(linuxServerId.getBytes(StandardCharsets.UTF_8)));
+            return new ScheduledTaskKey("agent-config.public-worktree-compensation." + digest.substring(0, 32));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
         }
     }
 

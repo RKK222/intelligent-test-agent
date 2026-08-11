@@ -279,6 +279,32 @@ data 字段：
 - 低频触发器作为兜底，避免本机实时触发丢失时状态长期不更新；用户已有 Redis 运行态 marker 时，每次摘要刷新只读取 Redis active 索引和 manifest，不轮询 PostgreSQL。未进入新链路的 legacy 用户继续使用现有只读 Repository。
 - 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 恢复正文，active-run 只作为上述流不可用时的单次 fallback。
 
+## 用户通知中心 fetch SSE
+
+`GET /api/internal/platform/notification-center/notifications/events` 是工作台通用通知变化通道。请求使用当前登录用户自己的 Bearer Token；接收人只取认证主体，客户端不能通过 query 或 header 指定其它用户。前端必须使用 `event-stream-client` 的 fetch SSE，以便携带 Authorization。
+
+事件类型：
+
+| event name | 说明 |
+|---|---|
+| `user-notification.snapshot` | 建连首帧及每 30 秒数据库校准快照；`changeType=SNAPSHOT`。 |
+| `user-notification.updated` | 创建、已读、快照更新或失效后的变化信号；`changeType` 分别为 `CREATED/READ/UPDATED/INVALIDATED`。 |
+
+data 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `changeType` | string | `SNAPSHOT/CREATED/READ/UPDATED/INVALIDATED`。 |
+| `notificationId` | string/null | 可精确标识单条变化时返回通知 ID；批量失效、按分享已读或校准快照可为 null。 |
+| `unreadCount` | number | 数据库重新计算的当前用户权威未读数。 |
+| `generatedAt` | string | 生成本次状态的 ISO-8601 时间，同时作为 SSE `id` 便于调试关联。 |
+
+SSE `id` 不表示 durable 游标，客户端不得持久化它或请求历史 replay。每 25 秒发送 `: heartbeat` comment；heartbeat 不含 event/data/id，client 必须忽略。断线后按 1、2、5、10、30 秒退避重新建连，并以新的 snapshot 恢复，不依赖 `Last-Event-ID`。
+
+数据库事务提交成功后才发布变化，回滚不得产生 SSE。当前 Java 先向本机该用户连接 fan-out，再复用通用 `ServerBroadcastPublisher` 唤醒其它 Java；内部广播只携带接收人 ID、可选通知 ID、变化类型和既有 trace/实例元数据，不携带标题、摘要、shareId、URL、消息正文或 Token。广播是低延迟增强，不是事实源；广播失败或断线由建连 snapshot 和 30 秒数据库校准恢复。
+
+SSE 只提供未读数和刷新信号，不承载通知正文。收到合法 snapshot/updated 后，工作台按需重新调用 `GET /api/internal/platform/notification-center/notifications` 取得权威分页；只有未读角标变化且面板未打开时可以只更新 `unreadCount`，不能从事件自行构造可点击动作。
+
 ## 分享会话运行态 fetch SSE
 
 `GET /api/internal/platform/opencode-runtime/session-shares/runtime-state/events` 是分享工作台专用的单会话状态流。请求使用当前登录用户自己的 Bearer Token，并携带 `X-Test-Agent-Session-Share`；它不进入普通用户历史 runtime-state，也不允许用分享消息归因扩大普通会话可见范围。
@@ -367,7 +393,7 @@ retry 字段：
 - `session.status.retry` 在右侧时间线展示原因和“重试中 N 秒后 - 第 X 次 / 共 3 次”。
 - 等待 retry 时前端运行态仍视为运行中，不出队 busy follow-up，不关闭 RunEvent SSE，也不显示失败卡。
 - 前端可按现有 60 秒口径展示 OpenCode 的 retry 等待状态，但倒计时只用于展示；不得在到期后取消 Run、重新 `startRun` 或本地伪造终态。后续消息、非 retry 状态或 `run.*` 终态到达后按真实事件收敛。
-- 失败卡片与最后一条用户消息的“撤销重发”只为会话所属人提供；点击后先把上一条文本装入输入框，所属人修改并发送时才调用平台 resends API。请求可携带 `editedPrompt`，但前端不得从本地草稿或历史 assistant 内容重建附件或其它结构化 part；后端重新验证远端最后用户边界，从原生用户轮次取得可信可重放输入，再仅替换文本。
+- 失败卡片与最后一条用户消息的“撤销重发”只为该消息的实际发送人提供；分享发送人还必须保持 `canChat=true`，会话所属人不能改写其他参与者的问题。点击后先把上一条文本装入输入框，操作者修改并发送时才调用平台 resends API。请求可携带 `editedPrompt`，但前端不得从本地草稿或历史 assistant 内容重建附件或其它结构化 part；后端重新验证远端最后用户边界，从原生用户轮次取得可信可重放输入，再仅替换文本。接口返回后前端立即显示新文本，后到 user 事件按替代 Run 或持久消息 `remoteMessageId` 原位接管；assistant text part 的 `running/pending` 只有在它属于当前仍 busy 的轮次时才展示“生成中”，历史轮次或终态 Run 不得被残留 part 状态重新点亮。
 - 后端 `run.succeeded/run.failed/run.cancelled` 仍是持久 Run 终态事实源；前端 retry 失败兜底只用于避免浏览器一直停留在运行中。
 
 ## `session.updated`
@@ -894,14 +920,18 @@ LobeHub 登录票据签发、HMAC 兑换/撤销、Desktop/CLI 浏览器确认、
 
 ## 撤销重发事件
 
-- `run.resend.scheduled`：替代 Run 已预留并进入等待，payload 只包含 `resendId/sourceRunId/replacementRunId/trigger`、总次数、
-  自动次数、上限、状态和 `executeAt`。前端据此展示倒计时并锁定输入。
-- `run.resend.started`：OpenCode 已确认稳定替代 message ID 存在，且源 Run 的 PostgreSQL/Redis 可回放明细清理已提交。前端必须
-  原子移除源 Run 的 assistant/tool/Todo/Diff/失败卡/流式 overlay/child scope，再接管替代 Run SSE；该事件不表示替代 Run 已终态。
-- `run.resend.failed`：重发在安全可判定窗口失败；payload 仍只含身份、次数、状态和执行时间，不携带 prompt、回答、工具输出或
+- `run.resend.scheduled`：替代 Run 已预留并进入等待，payload 包含 `resendId/sourceRunId/replacementRunId/trigger`、总次数、
+  自动次数、上限、状态、`executeAt`，以及真实操作人 `requesterUserId/requesterUnifiedAuthId/requestedBySharedUser`。
+  `requesterUnifiedAuthId` 无值时省略；OpenCode 仍由会话所属人进程执行，前端必须以这组 requester 字段还原分享发送人、配色和停止权限，
+  不得用后续 OpenCode 原生 message 事件中的所属人覆盖。前端据此展示倒计时并锁定输入。
+- `run.resend.started`：OpenCode 已确认稳定替代 message ID 存在，且源 Run 的 PostgreSQL/Redis 可回放明细清理已提交；同一
+  PostgreSQL 事务已推进 Session 内容修订时间。前端必须原子移除源 Run 的 assistant/tool/Todo/Diff/失败卡/流式 overlay/child scope，
+  再接管替代 Run SSE，并刷新该 Session 的权威消息；刷新期间继续缓冲和重放实时事件。该事件不表示替代 Run 已终态。
+- `run.resend.failed`：重发在安全可判定窗口失败；payload 仍只含重发身份、真实操作人、次数、状态和执行时间，不携带 prompt、回答、工具输出或
   供应商响应正文。
 
-三个事件都是 additive；未知类型的旧前端按默认忽略策略继续工作。`session.status.retry` 仍仅表示 OpenCode 内部供应商重试，
+三个事件都是 additive；未知类型的旧前端按默认忽略策略继续工作。历史或分享恢复遇到后续 `run.created/run.started` 时应清理更早
+Run 的失败卡，不能把旧模型错误附加到当前成功回答。`session.status.retry` 仍仅表示 OpenCode 内部供应商重试，
 前端可以展示但不得用它触发平台撤销重发。自动入口只由 root `session.error` 派生的 `run.failed` 触发，transport failure 与
 `run.cancelled` 不触发。
 

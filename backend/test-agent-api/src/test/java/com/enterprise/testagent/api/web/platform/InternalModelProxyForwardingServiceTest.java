@@ -109,7 +109,17 @@ class InternalModelProxyForwardingServiceTest {
         observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
                 .data("{\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}")
                 .build()));
-        assertThat(observation.toRecord().firstTokenMillis()).isNotNull();
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
+                .data("{\"choices\":[{\"delta\":{\"content\":\" world\"}}]}")
+                .build()));
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
+                .data("{\"choices\":[],\"usage\":{\"completion_tokens\":2}}")
+                .build()));
+        InternalModelCallRecord record = observation.toRecord();
+        assertThat(record.firstTokenMillis()).isNotNull();
+        assertThat(record.lastTokenMillis()).isGreaterThanOrEqualTo(record.firstTokenMillis());
+        assertThat(record.outputTokenCount()).isEqualTo(2L);
+        assertThat(record.interTokenLatencyMillis()).isNotNull().isGreaterThanOrEqualTo(0.0);
     }
 
     @Test

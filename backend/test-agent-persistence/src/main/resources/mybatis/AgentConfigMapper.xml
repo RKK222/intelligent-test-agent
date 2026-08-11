@@ -130,4 +130,40 @@
         </if>
         order by updated_at desc, worktree_id
     </select>
+
+    <!--
+      公共个人 worktree 补偿候选必须在数据库侧同时校验当前角色和当前 OpenCode binding；
+      只返回内部 userId，不查询统一认证号、SSH Key 或其它凭据字段。
+    -->
+    <select id="findMissingPublicWorktreeUserIds" resultType="java.lang.String">
+        select distinct u.user_id
+        from users u
+        join user_roles ur
+          on ur.user_id = u.user_id
+        join dictionaries d
+          on d.dict_id = ur.dict_id
+         and d.dict_key = 'ROLE'
+         and d.dict_value = 'SUPER_ADMIN'
+        join user_opencode_process_bindings b
+          on b.user_id = u.user_id
+         and lower(b.agent_id) = 'opencode'
+         and b.status = 'ACTIVE'
+         and b.linux_server_id = #{linuxServerId}
+        where u.status = 'ACTIVE'
+          and not exists (
+              select 1
+              from agent_config_worktrees w
+              where w.created_by_user_id = u.user_id
+                and w.scope = 'PUBLIC'
+                and w.status = 'ACTIVE'
+                and w.linux_server_id = b.linux_server_id
+                and w.worktree_name = concat(
+                    'public-',
+                    substring(regexp_replace(u.user_id, '[^A-Za-z0-9._-]', '-', 'g'), 1, 48)
+                )
+                and w.branch = w.worktree_name
+          )
+        order by u.user_id
+        limit #{limit}
+    </select>
 </mapper>

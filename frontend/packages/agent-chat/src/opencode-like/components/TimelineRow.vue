@@ -175,6 +175,7 @@ const compactionSummary = computed(() => {
   >
     <AssistantPartRow
       :part="assistantPart"
+      :busy="row.busy"
       :streaming-text-by-part-id="state.streamingTextByPartId"
       :previous-assistant-part="row.previousAssistantPart"
       :subagents-by-session-id="state.subagentsBySessionId"
