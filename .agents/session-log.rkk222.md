@@ -8787,3 +8787,23 @@
 
 - 已完成任务即使只提供锁定 `duration`，也会继续显示耗时；同时保留 `totalDuration / tokens` 现有主路径和累计语义。
 - 纯前端兼容性修复；未变更 HTTP API、RunEvent、DTO、数据库、SQL、migration、性能或安全边界，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-11 - 运营分析趋势与小时热力随视口适配
+
+### Why
+
+- 运营分析总览的趋势项最小宽度和小时热力 24 列方格都使用固定像素，导致宽屏留下大量空白、窄屏无法按内容区平滑缩放。
+
+### What
+
+- 趋势图复用现有时间点数据和原生 CSS Grid，按实际点数生成弹性列；少量数据填满内容区，高密度数据保留最小列宽及局部横向滚动。
+- 小时热力继续保持 24 小时语义列，方格随内容宽度缩放并保持正方形，2K/4K 下单格最大 64px，避免无限放大；同步 agent-web README 和组件回归测试。
+
+### How
+
+- 定向 Vitest 3/3 通过；使用真实 Vite + Chromium 在 640、1440、2560px 三档视口测量，页面无整页横向溢出，趋势稳定 7 列，热力稳定 24 列，方格约为 22、53、64px 且宽高一致。
+- 正式 Vite 入口运行在 `http://127.0.0.1:4179/`，根页面和运营分析组件模块均返回 HTTP 200。完整 agent-web production build 被同一工作树中并行修改的 `InternalModelObservabilityPanel.vue` 未定义符号阻断，本次未修改该文件。
+
+### Result
+
+- 趋势和小时热力已按实际可用宽度适配常见窄屏、桌面和 2K/4K 视口；无 HTTP API、事件、DTO、数据库、SQL、migration、安全或环境配置变更，未修改 generated SDK 和 OpenCode 只读源码。
