@@ -183,7 +183,7 @@ function errorMessage(error: unknown, fallback: string) {
 <template>
   <el-dialog
     :model-value="open"
-    width="680px"
+    width="min(680px, calc(100vw - 32px))"
     class="session-share-dialog"
     destroy-on-close
     :close-on-click-modal="false"
@@ -202,21 +202,6 @@ function errorMessage(error: unknown, fallback: string) {
     <div v-if="loading" class="session-share-dialog__state">正在读取分享设置…</div>
     <div v-else class="session-share-dialog__body">
       <p v-if="loadError" class="session-share-dialog__error">{{ loadError }}</p>
-
-      <section v-if="share" class="session-share-dialog__link-card">
-        <div>
-          <span class="session-share-dialog__eyebrow">备用分享链接</span>
-          <strong>{{ share.status === 'ACTIVE' ? '当前有效' : '已取消，可重新启用' }}</strong>
-        </div>
-        <div class="session-share-dialog__link-row">
-          <input :value="shareLink" readonly aria-label="唯一分享链接" />
-          <button type="button" @click="copyLink">
-            <Check v-if="copied" :size="15" />
-            <Copy v-else :size="15" />
-            {{ copied ? '已复制' : '复制' }}
-          </button>
-        </div>
-      </section>
 
       <section class="session-share-dialog__section">
         <div class="session-share-dialog__section-head">
@@ -301,6 +286,18 @@ function errorMessage(error: unknown, fallback: string) {
           :disabled="revoking || saving"
           @click="revokeShare"
         ><Trash2 :size="14" />{{ revoking ? '正在取消…' : '取消分享' }}</button>
+        <button
+          v-if="share"
+          type="button"
+          class="session-share-dialog__backup-link"
+          :aria-label="copied ? '备用分享链接已复制' : '复制备用分享链接'"
+          title="站内通知不可用时，可复制备用链接"
+          @click="copyLink"
+        >
+          <Check v-if="copied" :size="14" />
+          <Copy v-else :size="14" />
+          {{ copied ? '备用链接已复制' : '复制备用链接' }}
+        </button>
         <span class="session-share-dialog__footer-spacer" />
         <el-button @click="emit('close')">关闭</el-button>
         <el-button type="primary" :loading="saving" :disabled="loading" @click="saveShare">
@@ -312,6 +309,18 @@ function errorMessage(error: unknown, fallback: string) {
 </template>
 
 <style scoped>
+:global(.session-share-dialog) {
+  box-sizing: border-box;
+  display: flex;
+  min-width: min(520px, calc(100vw - 32px));
+  min-height: min(460px, calc(100vh - 48px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 48px);
+  flex-direction: column;
+  overflow: hidden;
+  resize: both;
+}
+:global(.session-share-dialog .el-dialog__body) { min-height: 0; flex: 1; overflow: auto; }
 .session-share-dialog__heading { display: flex; align-items: center; gap: 11px; }
 .session-share-dialog__heading h2, .session-share-dialog__heading p { margin: 0; }
 .session-share-dialog__heading h2 { color: #17223b; font-size: 18px; }
@@ -322,13 +331,7 @@ function errorMessage(error: unknown, fallback: string) {
 .session-share-dialog__error, .session-share-dialog__task-warning { margin: 0; border-radius: 8px; padding: 9px 11px; font-size: 12px; }
 .session-share-dialog__error { background: #fff0f0; color: #b42318; }
 .session-share-dialog__task-warning { background: #fff8e7; color: #8a4b08; }
-.session-share-dialog__link-card { display: grid; gap: 9px; border: 1px solid #e5e7eb; border-radius: 10px; background: #f8f9fa; padding: 12px; }
-.session-share-dialog__link-card > div:first-child { display: flex; justify-content: space-between; align-items: center; }
-.session-share-dialog__link-card strong { color: #6b7280; font-size: 12px; }
-.session-share-dialog__eyebrow { color: #475467; font-size: 12px; font-weight: 650; }
-.session-share-dialog__link-row { display: flex; gap: 8px; }
-.session-share-dialog__link-row input { min-width: 0; flex: 1; border: 1px solid #d1d5db; border-radius: 8px; background: white; padding: 8px 10px; color: #6b7280; }
-.session-share-dialog__link-row button, .session-share-dialog__expiry button, .session-share-dialog__candidates button, .session-share-dialog__revoke { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #cbd7f2; border-radius: 8px; background: white; color: #3159b8; padding: 7px 10px; cursor: pointer; }
+.session-share-dialog__expiry button, .session-share-dialog__candidates button, .session-share-dialog__revoke { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #cbd7f2; border-radius: 8px; background: white; color: #3159b8; padding: 7px 10px; cursor: pointer; }
 .session-share-dialog__section { display: grid; gap: 10px; }
 .session-share-dialog__section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .session-share-dialog__section-head h3, .session-share-dialog__section-head p { margin: 0; }
@@ -358,4 +361,10 @@ function errorMessage(error: unknown, fallback: string) {
 .session-share-dialog__footer { display: flex; width: 100%; align-items: center; gap: 8px; }
 .session-share-dialog__footer-spacer { flex: 1; }
 .session-share-dialog__revoke { border-color: #fecdca; color: #b42318; }
+.session-share-dialog__backup-link { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 7px; background: transparent; color: #667085; cursor: pointer; font-size: 12px; padding: 7px 8px; }
+.session-share-dialog__backup-link:hover, .session-share-dialog__backup-link:focus-visible { background: #f2f4f7; color: #344054; outline: none; }
+@media (max-width: 720px) {
+  :global(.session-share-dialog) { min-width: 0; resize: vertical; }
+  .session-share-dialog__footer { flex-wrap: wrap; }
+}
 </style>
