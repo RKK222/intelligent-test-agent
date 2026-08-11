@@ -280,6 +280,156 @@ describe("agent-chat runtime reducer", () => {
     expect(synchronized.pendingTodoUserMessageId).toBe("msg_replacement_user");
   });
 
+  it("keeps the replacement user anchor when native removals arrive before resend started", () => {
+    const initial = {
+      ...createInitialAgentChatRuntimeState([{
+        id: "msg_history_user",
+        messageId: "msg_history_user",
+        role: "user",
+        text: "测试",
+        runId: "run_history",
+        createdAt: "2026-08-11T10:58:00Z"
+      }, {
+        id: "msg_history_answer",
+        messageId: "msg_history_answer",
+        role: "assistant",
+        text: "请说明具体需要做什么。",
+        parts: [{ partId: "part_history_answer", type: "text", text: "请说明具体需要做什么。" }],
+        runId: "run_history",
+        createdAt: "2026-08-11T10:58:01Z"
+      }, {
+        id: "msg_platform_source",
+        messageId: "msg_platform_source",
+        platformMessageId: "msg_platform_source",
+        remoteMessageId: "msg_remote_source",
+        role: "user",
+        text: "仅答复OK",
+        runId: "run_source",
+        senderUserId: "usr_owner",
+        senderUsername: "王睿",
+        sentBySharedUser: false,
+        createdAt: "2026-08-11T10:59:58Z"
+      }, {
+        id: "msg_platform_source_answer",
+        messageId: "msg_platform_source_answer",
+        remoteMessageId: "msg_remote_source_answer",
+        role: "assistant",
+        text: "OK",
+        runId: "run_source",
+        createdAt: "2026-08-11T11:00:03Z"
+      }]),
+      todoUserMessageIdByRunId: { run_source: "msg_platform_source" }
+    } satisfies AgentChatRuntimeState;
+    const resend = {
+      resendId: "resend_removed_before_started",
+      sourceRunId: "run_source",
+      replacementRunId: "run_replacement",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "WAITING",
+      executeAt: "2026-08-11T11:00:20Z",
+      requesterUserId: "usr_owner",
+      requesterUsername: "王睿",
+      requestedBySharedUser: false
+    } as const;
+
+    const scheduled = reduceAgentChatRuntime(initial, {
+      type: "event",
+      event: runEvent("run.resend.scheduled", "run_replacement", resend)
+    });
+    const withoutSourceUser = reduceAgentChatRuntime(scheduled, {
+      type: "event",
+      event: runEvent("message.removed", "run_replacement", { messageID: "msg_remote_source" })
+    });
+    const withoutSourceAnswer = reduceAgentChatRuntime(withoutSourceUser, {
+      type: "event",
+      event: runEvent("message.removed", "run_replacement", { messageID: "msg_remote_source_answer" })
+    });
+    const started = reduceAgentChatRuntime(withoutSourceAnswer, {
+      type: "event",
+      event: runEvent("run.resend.started", "run_replacement", { ...resend, status: "DISPATCHED" })
+    });
+
+    expect(started.messages.filter((message) => message.role === "user" && message.runId === "run_replacement"))
+      .toEqual([expect.objectContaining({ id: "msg_platform_source", text: "仅答复OK" })]);
+    const pendingAnchor = started.messages.find((message) => message.role === "user" && message.runId === "run_replacement");
+    expect(pendingAnchor).not.toHaveProperty("messageId");
+    expect(pendingAnchor).not.toHaveProperty("platformMessageId");
+    expect(pendingAnchor).not.toHaveProperty("remoteMessageId");
+
+    // 现场顺序：先到不含正文的 USER envelope，再到 USER text part。
+    const withEnvelope = reduceAgentChatRuntime(started, {
+      type: "event",
+      event: runEvent("message.updated", "run_replacement", {
+        info: { id: "msg_remote_replacement", role: "user" }
+      })
+    });
+    const observedOrder = reduceAgentChatRuntime(withEnvelope, {
+      type: "event",
+      event: runEvent("message.part.updated", "run_replacement", {
+        part: {
+          id: "part_replacement_user",
+          messageID: "msg_remote_replacement",
+          type: "text",
+          text: "仅答复123"
+        }
+      })
+    });
+
+    expect(observedOrder.messages.find((message) => message.id === "msg_history_answer")).toMatchObject({
+      role: "assistant",
+      text: "请说明具体需要做什么。",
+      parts: [{ partId: "part_history_answer", type: "text", text: "请说明具体需要做什么。" }]
+    });
+    expect(observedOrder.messages.some((message) => message.role === "assistant"
+      && message.parts?.some((part) => part.type === "text" && part.text === "仅答复123"))).toBe(false);
+
+    // 更强的乱序：text part 早于 USER envelope 时也必须按 replacementRunId 接回同一用户锚点。
+    const partFirst = reduceAgentChatRuntime(started, {
+      type: "event",
+      event: runEvent("message.part.updated", "run_replacement", {
+        part: {
+          id: "part_replacement_user_first",
+          messageID: "msg_remote_replacement_first",
+          type: "text",
+          text: "仅答复123"
+        }
+      })
+    });
+    expect(partFirst.messages.filter((message) => message.role === "user" && message.runId === "run_replacement"))
+      .toEqual([expect.objectContaining({
+        id: "msg_remote_replacement_first",
+        remoteMessageId: "msg_remote_replacement_first",
+        text: "仅答复123"
+      })]);
+
+    const synchronized = reduceAgentChatRuntime(observedOrder, {
+      type: "run.resend.user.synchronized",
+      resend: { ...resend, status: "DISPATCHED" },
+      message: {
+        id: "msg_platform_replacement",
+        messageId: "msg_platform_replacement",
+        platformMessageId: "msg_platform_replacement",
+        remoteMessageId: "msg_remote_replacement",
+        role: "user",
+        text: "仅答复123",
+        runId: "run_replacement",
+        senderUserId: "usr_owner",
+        senderUsername: "王睿",
+        sentBySharedUser: false,
+        createdAt: "2026-08-11T11:01:00Z"
+      }
+    });
+    expect(synchronized.messages.filter((message) => message.role === "user" && message.runId === "run_replacement"))
+      .toEqual([expect.objectContaining({
+        id: "msg_platform_replacement",
+        remoteMessageId: "msg_remote_replacement",
+        text: "仅答复123"
+      })]);
+  });
+
   it("projects an automatic resend countdown on the scheduled source message", () => {
     const initial = {
       ...createInitialAgentChatRuntimeState([
