@@ -590,13 +590,14 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 
 企业后端采用 `test-agent-app.jar` 瘦启动器与 `dist/backend/lib/` 外置依赖。Flyway migration
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
-复验会锁定 PostgreSQL 主/兼容 migration（含通知中心与 ITL/TPOT 输入字段）和 XXL MySQL V10/V11 的 SHA-256，并分别比较发布包与安装后的
+复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型和体验工作区）和 XXL MySQL V10/V11 的 SHA-256，并分别比较发布包与安装后的
 persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
-当前上一轮已部署平台基线为 release 提交 `8a6955f8da40e8da4ae5caeb247e7eb782aa672b`；现场 Java 启动日志确认
-PostgreSQL 已校验 92 条 migration、当前版本为 `20260809110000`，XXL MySQL 本轮准入预期为 V1-V11
-全部成功。从已确认的 `20260809110000` 基线首次升级时，第一台 `.4` 只允许依次新增 PostgreSQL
-`20260809170000`、`20260809170001`、`20260810170000`、`20260810234154`；如果前两条已经由上一增量包完整执行，
-本包只允许新增后两条；四条都已执行的故障重部署不得新增 history。XXL MySQL 不得新增 history，`.114` 只做
+当前上一轮已部署平台包的业务源码提交为 `f10754e01ab8f846a8aa2430214bb39f4795623b`，内层 ZIP SHA-256 为
+`99f34a5652d5972dd4dbc1e9384026d1a1a78a8cc4bb1caa702a6c99cc000df5`；该包正常企业主链最高版本为
+`20260810234154`，XXL MySQL 准入预期为 V1-V11 全部成功。从该基线首次升级时，第一台 `.4` 只允许依次新增
+PostgreSQL `20260811170050`、`20260811213000`、`20260812104911`、`20260812144051`；四条都已执行的故障重部署
+不得新增 history。`20260811170050` 只是 QA Memory 已撤销后的历史顺序补偿，不代表重新启用长期记忆功能。
+XXL MySQL 不得新增 history，`.114` 只做
 validate。必须按多后台手册读取两套完整 `flyway_schema_history`，不能只凭
 提交号、启动日志或最高版本判断数据库历史一致。
 
@@ -606,8 +607,9 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 
 1. 从两台后台确认外部 `122.210.106.43:3306` 可达，两份 `backend.env` 使用同一个 JDBC 地址、账号密码和 XXL access token。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
-3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 只允许按现场已确认基线新增会话协作分享、
-   代操作归因、通知中心和 Token 延迟输入四条 migration 中尚未执行的连续后缀；任何部分、倒序或未知历史都停止。
+3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一包 `20260810234154` 基线只允许新增
+   QA 历史顺序补偿、通知处置类型、体验工作区结构和体验工作区默认目录四条 migration 的连续后缀；任何部分、
+   倒序或未知历史都停止。
    外部 XXL MySQL 必须保持 V1-V11 且不新增 history。随后确认 Admin health、搬迁任务
    每 30 分钟、闲置进程关闭每日 02:00、模型探活每 5 分钟和可观测清理
    每日 03:30 均正常。任一校验失败时不得继续 `.114` 和前端。

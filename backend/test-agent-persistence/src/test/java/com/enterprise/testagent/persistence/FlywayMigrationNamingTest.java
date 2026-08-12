@@ -98,6 +98,10 @@ class FlywayMigrationNamingTest {
             "V20260810170000__user_notifications_create_notification_center.sql";
     private static final String USER_NOTIFICATION_SHA256 =
             "4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9";
+    private static final String USER_NOTIFICATION_DISPOSE_MIGRATION =
+            "V20260811213000__user_notifications_expand_dispose_types.sql";
+    private static final String USER_NOTIFICATION_DISPOSE_SHA256 =
+            "00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c";
     private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_MIGRATION =
             "V20260810234154__internal_model_call_records_add_token_latency_inputs.sql";
     private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_SHA256 =
@@ -106,6 +110,14 @@ class FlywayMigrationNamingTest {
             "V20260809210000__common_parameters_add_experience_workspace.sql";
     private static final String APPLIED_EXPERIENCE_WORKSPACE_SHA256 =
             "c093695aac4305aed3caeb8fcec58f0731f1519527031f1775adaf8be86cf24a";
+    private static final String EXPERIENCE_WORKSPACE_FORWARD_MIGRATION =
+            "V20260812104911__common_parameters_add_experience_workspace_after_release.sql";
+    private static final String EXPERIENCE_WORKSPACE_FORWARD_SHA256 =
+            "a613f77fd42aea5f404dfb51bad5fe93c1f478d73bf131de8c9dc9931a27e5ea";
+    private static final String EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION =
+            "V20260812144051__common_parameters_default_experience_workspace.sql";
+    private static final String EXPERIENCE_WORKSPACE_DEFAULT_SHA256 =
+            "e07d560ac0652860ed8e8788b002df0881eface861998a20e4e83da85276bfcf";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -218,6 +230,10 @@ class FlywayMigrationNamingTest {
     void appliedQaMemoryAndExternalApiCompatibilityPathsRemainByteExact()
             throws IOException, NoSuchAlgorithmException {
         assertMigrationSha256(
+                "db/migration",
+                APPLIED_QA_MEMORY_MIGRATION,
+                APPLIED_QA_MEMORY_SHA256);
+        assertMigrationSha256(
                 "db/migration-compat/qa-memory-applied",
                 APPLIED_QA_MEMORY_MIGRATION,
                 APPLIED_QA_MEMORY_SHA256);
@@ -234,7 +250,15 @@ class FlywayMigrationNamingTest {
                 APPLIED_QA_MEMORY_GENERALIZE_MIGRATION,
                 APPLIED_QA_MEMORY_GENERALIZE_SHA256);
         assertMigrationSha256(
+                "db/migration",
+                APPLIED_QA_MEMORY_GENERALIZE_MIGRATION,
+                APPLIED_QA_MEMORY_GENERALIZE_SHA256);
+        assertMigrationSha256(
                 "db/migration-compat/qa-memory-extended",
+                APPLIED_QA_MEMORY_IDENTITY_MIGRATION,
+                APPLIED_QA_MEMORY_IDENTITY_SHA256);
+        assertMigrationSha256(
+                "db/migration",
                 APPLIED_QA_MEMORY_IDENTITY_MIGRATION,
                 APPLIED_QA_MEMORY_IDENTITY_SHA256);
         assertMigrationSha256(
@@ -270,6 +294,14 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/experience-workspace-applied",
                 APPLIED_EXPERIENCE_WORKSPACE_MIGRATION,
                 APPLIED_EXPERIENCE_WORKSPACE_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                EXPERIENCE_WORKSPACE_FORWARD_MIGRATION,
+                EXPERIENCE_WORKSPACE_FORWARD_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION,
+                EXPERIENCE_WORKSPACE_DEFAULT_SHA256);
     }
 
     @Test
@@ -279,6 +311,10 @@ class FlywayMigrationNamingTest {
                 "db/migration",
                 USER_NOTIFICATION_MIGRATION,
                 USER_NOTIFICATION_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                USER_NOTIFICATION_DISPOSE_MIGRATION,
+                USER_NOTIFICATION_DISPOSE_SHA256);
         assertMigrationSha256(
                 "db/migration",
                 INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_MIGRATION,

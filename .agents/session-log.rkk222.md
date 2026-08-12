@@ -9467,3 +9467,26 @@
 
 - 烧瓶入口现在是可逆双态开关，退出不会再依赖应用下拉；体验区既有本地 Git 和无 push 边界不变。
 - 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、性能、安全或环境配置，未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
+## 2026-08-12 - 企业增量包补齐最新 Flyway 制品闸门
+
+### Why
+
+- 用户要求基于上一已部署版本重新打企业增量包；当前 release 已加入 QA 历史顺序补偿、通知处置类型和体验工作区 migration，但内层打包、外层封装及节点安装脚本尚未全部锁定这些最新资源，存在包内 SQL 缺失或旧字节未被发布流程提前拦截的风险。
+
+### What
+
+- 三层发布脚本统一复用既有 JAR resource 校验程序，新增 QA 主链/两条 release 补偿、通知处置类型、旧体验候选 compatibility location、体验前向结构与默认目录 migration 的固定 SHA-256 校验。
+- `FlywayMigrationNamingTest` 同步锁定主目录 QA 三条资源、通知处置和体验新旧三条资源；没有改写任何 migration 文件。
+- 更新企业 README 和双后台手册，将上一已部署包记录为业务源码 `f10754e01ab8f846a8aa2430214bb39f4795623b`、内层 ZIP SHA-256 `99f34a5652d5972dd4dbc1e9384026d1a1a78a8cc4bb1caa702a6c99cc000df5`，并明确从 `20260810234154` 只允许连续新增 `20260811170050`、`20260811213000`、`20260812104911`、`20260812144051`。
+
+### How
+
+- Shell 语法、`git diff --check`、Flyway 字节锁和通用参数 migration 测试通过；真实 PostgreSQL `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 完整历史矩阵通过。
+- 体验工作区、通知、运营分析和后台 API 定向前端回归 192/192 通过，用户手册与 agent-web production build 成功；Spring Bean 构造器发布扫描通过。
+- 组件计划确认 worker runtime 指纹 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`、toolbox 指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040` 均为 `reuse`；Workflow 和 LobeHub 保持关闭。
+
+### Result
+
+- 企业增量发布现在会在构建、外层封装和安装三处拒绝最新 Flyway 资源缺失或字节不一致；QA Memory/Mem0 运行功能仍已撤销，保留的 QA migration 仅用于不可变历史兼容。
+- 本次不修改 `.env*`、generated SDK、OpenCode 只读源码或业务 migration；未新建分支。
