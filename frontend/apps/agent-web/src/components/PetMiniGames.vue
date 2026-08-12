@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { Bomb, Gamepad2, RotateCcw, X } from "lucide-vue-next";
+import PetGoldMinerGame from "./PetGoldMinerGame.vue";
 
-type GameKind = "tetris" | "minesweeper" | "sudoku" | "snake" | "pinball";
+type GameKind = "tetris" | "minesweeper" | "sudoku" | "snake" | "pinball" | "gold-miner";
+type GoldMinerExpose = {
+  dropHook: () => void;
+  togglePause: () => void;
+  resetGame: () => void;
+};
 type TetrisCell = string | null;
 type TetrisShape = {
   matrix: number[][];
@@ -36,13 +42,15 @@ type PinballBall = PinballPoint & {
   inLaunchLane: boolean;
   cooldowns: Record<string, number>;
 };
-type PinballBumper = PinballPoint & { radius: number; score: number; tone: "rose" | "teal" | "gold" };
+type PinballBumper = PinballPoint & { radius: number; score: number; label: string; tone: "rose" | "teal" | "gold" };
+type PinballImpact = PinballPoint & { id: number; tone: "signal" | "charge" | "jackpot" };
 
 const emit = defineEmits<{ (event: "close"): void }>();
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
 
 const activeGame = ref<GameKind | null>(null);
 const panel = ref<HTMLElement | null>(null);
+const goldMinerGame = ref<GoldMinerExpose | null>(null);
 
 const TETRIS_ROWS = 16;
 const TETRIS_COLUMNS = 10;
@@ -591,14 +599,15 @@ const PINBALL_SKILL_SHOT_MIN = 52;
 const PINBALL_SKILL_SHOT_MAX = 82;
 const PINBALL_EXTRA_BALL_SCORE = 15_000;
 const pinballBumpers: PinballBumper[] = [
-  { x: 90, y: 150, radius: 19, score: 120, tone: "rose" },
-  { x: 164, y: 132, radius: 21, score: 180, tone: "gold" },
-  { x: 225, y: 169, radius: 18, score: 240, tone: "teal" },
+  { x: 90, y: 150, radius: 19, score: 120, label: "SYNC", tone: "rose" },
+  { x: 164, y: 132, radius: 21, score: 180, label: "GAIN", tone: "gold" },
+  { x: 225, y: 169, radius: 18, score: 240, label: "BOOST", tone: "teal" },
 ];
 const pinballRolloverLanes = [
-  { x: 68, label: "A" },
-  { x: 145, label: "B" },
-  { x: 218, label: "C" },
+  { id: "mimo-m1", x: 52, label: "M" },
+  { id: "mimo-i", x: 104, label: "I" },
+  { id: "mimo-m2", x: 158, label: "M" },
+  { id: "mimo-o", x: 218, label: "O" },
 ] as const;
 const pinballDropTargetPositions = [112, 158, 204] as const;
 const pinballLeftPivot: PinballPoint = { x: 96, y: 360 };
@@ -629,9 +638,11 @@ const pinballCombo = ref(0);
 const pinballComboUntil = ref(0);
 const pinballNow = ref(Date.now());
 const pinballBallSaveUntil = ref(0);
-const pinballRolloverLights = ref([false, false, false]);
+const pinballRolloverLights = ref(pinballRolloverLanes.map(() => false));
 const pinballDropTargets = ref([false, false, false]);
 const pinballSpinnerTurns = ref(0);
+const pinballJackpot = ref(3_000);
+const pinballImpact = ref<PinballImpact | null>(null);
 const pinballSkillShotPending = ref(false);
 const pinballLastLaunchCharge = ref(0);
 const pinballMultiballActive = ref(false);
@@ -645,16 +656,20 @@ const pinballLeftPressed = ref(false);
 const pinballRightPressed = ref(false);
 let pinballFrameTimer: ReturnType<typeof setInterval> | null = null;
 let pinballChargeTimer: ReturnType<typeof setInterval> | null = null;
+let pinballImpactSequence = 0;
 
 const pinballMissionReady = computed(() =>
   pinballRolloverLights.value.every(Boolean) && pinballDropTargets.value.every(Boolean)
 );
 const pinballMissionText = computed(() => {
-  if (pinballMultiballActive.value) return `多球模式 · 场上 ${pinballBalls.value.length} 球`;
-  if (!pinballRolloverLights.value.every(Boolean)) return "任务 1 · 点亮 A / B / C 翻滚灯";
-  if (!pinballDropTargets.value.every(Boolean)) return "任务 2 · 击落三枚红色落靶";
-  return "球门已开启 · 命中右侧球门启动多球";
+  if (pinballMultiballActive.value) return `信号风暴 · ${pinballBalls.value.length} 球在线`;
+  if (!pinballRolloverLights.value.every(Boolean)) return "连接 M / I / M / O 四座中继";
+  if (!pinballDropTargets.value.every(Boolean)) return "中继上线 · 击落三枚放大器";
+  return "JACKPOT 就绪 · 命中红色核心";
 });
+const pinballMissionProgress = computed(() => (
+  pinballRolloverLights.value.filter(Boolean).length + pinballDropTargets.value.filter(Boolean).length
+));
 const pinballStatusText = computed(() => ({
   ready: "按住发射杆蓄力",
   running: pinballCallout.value,
@@ -700,7 +715,7 @@ function clearPinballTimers() {
 }
 
 function resetPinballMission() {
-  pinballRolloverLights.value = [false, false, false];
+  pinballRolloverLights.value = pinballRolloverLanes.map(() => false);
   pinballDropTargets.value = [false, false, false];
   pinballSpinnerTurns.value = 0;
 }
@@ -723,6 +738,8 @@ function resetPinball() {
   pinballMultiplier.value = 1;
   pinballExtraBallAwarded.value = false;
   pinballMultiballActive.value = false;
+  pinballJackpot.value = 3_000;
+  pinballImpact.value = null;
   resetPinballMission();
   servePinballBall("装球完成 · 对准技能发射区");
 }
@@ -767,8 +784,8 @@ function releasePinballCharge() {
 function cyclePinballRolloverLights(direction: "left" | "right") {
   const lights = [...pinballRolloverLights.value];
   pinballRolloverLights.value = direction === "left"
-    ? [lights[1]!, lights[2]!, lights[0]!]
-    : [lights[2]!, lights[0]!, lights[1]!];
+    ? [...lights.slice(1), lights[0]!]
+    : [lights.at(-1)!, ...lights.slice(0, -1)];
 }
 
 function setPinballFlipper(side: "left" | "right", pressed: boolean) {
@@ -776,7 +793,7 @@ function setPinballFlipper(side: "left" | "right", pressed: boolean) {
   const current = side === "left" ? pinballLeftPressed.value : pinballRightPressed.value;
   if (side === "left") pinballLeftPressed.value = pressed;
   else pinballRightPressed.value = pressed;
-  // 真实弹球机允许用挡板键平移顶部已亮灯，便于补齐 A/B/C。
+  // 真实弹球机允许用挡板键平移顶部已亮灯，给 MIMO 中继补灯留出主动操作空间。
   if (pressed && !current && pinballStatus.value === "running") cyclePinballRolloverLights(side);
 }
 
@@ -813,6 +830,14 @@ function awardPinballScore(baseScore: number, callout?: string, useCombo = false
     pinballLives.value += 1;
     pinballCallout.value = "达到 15000 分 · 奖励一球";
   }
+}
+
+function pulsePinballImpact(x: number, y: number, tone: PinballImpact["tone"] = "signal") {
+  pinballImpact.value = { id: ++pinballImpactSequence, x, y, tone };
+}
+
+function chargePinballJackpot(amount: number) {
+  pinballJackpot.value += amount;
 }
 
 function resolvePinballSegment(
@@ -874,6 +899,8 @@ function resolvePinballBumper(ball: PinballBall, bumper: PinballBumper, index: n
   if (!resolvePinballCircle(ball, bumper, bumper.radius, 150)) return;
   if (pinballHitAvailable(ball, `bumper-${index}`, 220)) {
     awardPinballScore(bumper.score, `碰撞器 ${index + 1}`, true);
+    chargePinballJackpot(80 + index * 20);
+    pulsePinballImpact(bumper.x, bumper.y, bumper.tone === "rose" ? "jackpot" : "charge");
   }
 }
 
@@ -883,8 +910,11 @@ function detectPinballFeatures(ball: PinballBall) {
     if (pinballLastLaunchCharge.value >= PINBALL_SKILL_SHOT_MIN && pinballLastLaunchCharge.value <= PINBALL_SKILL_SHOT_MAX) {
       awardPinballScore(2500, "SKILL SHOT");
       pinballMultiplier.value = Math.min(5, pinballMultiplier.value + 1);
+      chargePinballJackpot(500);
+      pulsePinballImpact(ball.x, ball.y, "jackpot");
     } else {
       awardPinballScore(250, "发射入台");
+      pulsePinballImpact(ball.x, ball.y, "signal");
     }
   }
 
@@ -894,16 +924,19 @@ function detectPinballFeatures(ball: PinballBall) {
       const nextLights = [...pinballRolloverLights.value];
       nextLights[laneIndex] = true;
       pinballRolloverLights.value = nextLights;
-      awardPinballScore(400, `${pinballRolloverLanes[laneIndex]!.label} 灯点亮`);
+      awardPinballScore(400, `${pinballRolloverLanes[laneIndex]!.label} 中继接通`);
+      chargePinballJackpot(150);
+      pulsePinballImpact(pinballRolloverLanes[laneIndex]!.x, 102, "signal");
       if (nextLights.every(Boolean)) {
         pinballMultiplier.value = Math.min(5, pinballMultiplier.value + 1);
-        pinballCallout.value = `ABC 完成 · 倍率升至 x${pinballMultiplier.value}`;
+        pinballCallout.value = `MIMO 中继上线 · 倍率升至 x${pinballMultiplier.value}`;
       }
     }
   }
 
   if (ball.previousY < 337 && ball.y >= 337 && (ball.x < 78 || ball.x > 238)) {
     awardPinballScore(300, "内道回球");
+    chargePinballJackpot(80);
   }
 }
 
@@ -917,7 +950,23 @@ function startPinballMultiball(ball: PinballBall) {
   );
   ball.vx = -150;
   ball.vy = -640;
-  awardPinballScore(5000, "MULTIBALL");
+  const payout = pinballJackpot.value;
+  awardPinballScore(payout, "JACKPOT · 信号风暴");
+  pinballJackpot.value += 1_500;
+  pulsePinballImpact(ball.x, ball.y, "jackpot");
+}
+
+function resolvePinballFlipper(ball: PinballBall, side: "left" | "right") {
+  const pressed = side === "left" ? pinballLeftPressed.value : pinballRightPressed.value;
+  const pivot = side === "left" ? pinballLeftPivot : pinballRightPivot;
+  const hit = resolvePinballSegment(ball, pivot, pinballFlipperTip(side), 7, 0.94);
+  if (!hit || !pressed || !pinballHitAvailable(ball, `flipper-${side}`, 150)) return;
+  // 挡板命中时给出明确的向上抽射，避免仅靠几何反弹产生“按了却没感觉”的手感。
+  ball.vx += side === "left" ? 135 : -135;
+  ball.vy = Math.min(ball.vy, -590);
+  chargePinballJackpot(40);
+  awardPinballScore(90, side === "left" ? "左翼反击" : "右翼反击", true);
+  pulsePinballImpact(ball.x, ball.y, "signal");
 }
 
 function resolvePinballPlayfield(ball: PinballBall) {
@@ -931,6 +980,8 @@ function resolvePinballPlayfield(ball: PinballBall) {
     && pinballHitAvailable(ball, "spinner", 120)) {
     pinballSpinnerTurns.value += 1;
     awardPinballScore(90, `旋转门 ${pinballSpinnerTurns.value} 转`);
+    chargePinballJackpot(25);
+    pulsePinballImpact(54, 216, "charge");
   }
 
   pinballDropTargetPositions.forEach((x, index) => {
@@ -940,41 +991,42 @@ function resolvePinballPlayfield(ball: PinballBall) {
       const nextTargets = [...pinballDropTargets.value];
       nextTargets[index] = true;
       pinballDropTargets.value = nextTargets;
-      awardPinballScore(650, `落靶 ${index + 1}`);
-      if (nextTargets.every(Boolean)) pinballCallout.value = "落靶全清 · 右侧球门已开启";
+      awardPinballScore(650, `放大器 ${index + 1} 击落`);
+      chargePinballJackpot(300);
+      pulsePinballImpact(x, 245, "charge");
+      if (nextTargets.every(Boolean)) pinballCallout.value = "放大器全清 · 红色核心已充能";
     }
   });
 
   if (resolvePinballSegment(ball, { x: 45, y: 286 }, { x: 85, y: 321 }, 5, 0.9, { x: 95, y: -145 })
     && pinballHitAvailable(ball, "left-sling", 260)) {
     awardPinballScore(180, "左弹射器", true);
+    chargePinballJackpot(60);
+    pulsePinballImpact(66, 305, "charge");
   }
   if (resolvePinballSegment(ball, { x: 271, y: 286 }, { x: 231, y: 321 }, 5, 0.9, { x: -95, y: -145 })
     && pinballHitAvailable(ball, "right-sling", 260)) {
     awardPinballScore(180, "右弹射器", true);
+    chargePinballJackpot(60);
+    pulsePinballImpact(250, 305, "charge");
   }
 
   if (resolvePinballCircle(ball, { x: 244, y: 236 }, 14, 110) && pinballHitAvailable(ball, "scoop", 800)) {
-    if (pinballMissionReady.value && !pinballMultiballActive.value) startPinballMultiball(ball);
-    else awardPinballScore(500, pinballMissionReady.value ? "球门锁球" : "球门未开放");
+    if (pinballMissionReady.value && !pinballMultiballActive.value) {
+      startPinballMultiball(ball);
+    } else if (pinballMultiballActive.value) {
+      const payout = pinballJackpot.value;
+      awardPinballScore(payout, "SUPER JACKPOT");
+      pinballJackpot.value += 2_000;
+      pulsePinballImpact(244, 236, "jackpot");
+    } else {
+      awardPinballScore(350, "核心尚未充能");
+      pulsePinballImpact(244, 236, "signal");
+    }
   }
 
-  resolvePinballSegment(
-    ball,
-    pinballLeftPivot,
-    pinballFlipperTip("left"),
-    6,
-    0.92,
-    pinballLeftPressed.value ? { x: 48, y: -175 } : undefined,
-  );
-  resolvePinballSegment(
-    ball,
-    pinballRightPivot,
-    pinballFlipperTip("right"),
-    6,
-    0.92,
-    pinballRightPressed.value ? { x: -48, y: -175 } : undefined,
-  );
+  resolvePinballFlipper(ball, "left");
+  resolvePinballFlipper(ball, "right");
 }
 
 function finishPinballMultiballIfNeeded() {
@@ -1014,7 +1066,8 @@ function drainPinballBall(ballId: number) {
     pinballCallout.value = `最终得分 ${pinballScore.value}`;
     return;
   }
-  resetPinballMission();
+  // 中继与放大器进度跨弹珠保留；失误会失去一球，但不会把整条任务链打回起点。
+  pinballSpinnerTurns.value = 0;
   servePinballBall(pinballStatus.value === "tilted" ? "TILT · 下一球" : `奖励分 ${earnedBonus} · 下一球`);
 }
 
@@ -1138,6 +1191,20 @@ function selectGame(game: GameKind) {
 }
 
 function onPanelKeydown(event: KeyboardEvent) {
+  if (activeGame.value === "gold-miner") {
+    const key = event.key.toLowerCase();
+    if ((event.key === " " || event.key === "ArrowDown") && !event.repeat) {
+      event.preventDefault();
+      goldMinerGame.value?.dropHook();
+    } else if (key === "p") {
+      event.preventDefault();
+      goldMinerGame.value?.togglePause();
+    } else if (key === "r") {
+      event.preventDefault();
+      goldMinerGame.value?.resetGame();
+    }
+    return;
+  }
   if (activeGame.value === "pinball") {
     const key = event.key.toLowerCase();
     if (event.key === "ArrowLeft" || key === "z") {
@@ -1230,7 +1297,7 @@ onBeforeUnmount(() => {
   <section
     ref="panel"
     class="pet-game-panel"
-    :class="{ 'is-embedded': props.embedded, 'is-pinball': activeGame === 'pinball' }"
+    :class="{ 'is-embedded': props.embedded, 'is-pinball': activeGame === 'pinball', 'is-miner': activeGame === 'gold-miner' }"
     data-testid="pet-mini-games"
     :role="props.embedded ? 'group' : 'dialog'"
     :aria-labelledby="props.embedded ? undefined : 'pet-game-title'"
@@ -1285,6 +1352,15 @@ onBeforeUnmount(() => {
         </span>
         <span><strong>桌面弹球</strong><small>按住蓄力 · 左右挡板救球</small></span>
       </button>
+      <button type="button" class="pet-game-choice is-miner" data-testid="pet-game-open-gold-miner" @click="selectGame('gold-miner')">
+        <span class="pet-game-choice-art miner-choice-art" aria-hidden="true">
+          <i class="miner-choice-rope" />
+          <i class="miner-choice-hook" />
+          <i class="miner-choice-gold" />
+          <i class="miner-choice-rock" />
+        </span>
+        <span><strong>黄金矿工</strong><small>摆钩抓金 · 重物可爆破</small></span>
+      </button>
     </div>
 
     <template v-else>
@@ -1294,6 +1370,7 @@ onBeforeUnmount(() => {
         <button type="button" :class="{ 'is-active': activeGame === 'sudoku' }" @click="selectGame('sudoku')">数独</button>
         <button type="button" :class="{ 'is-active': activeGame === 'snake' }" @click="selectGame('snake')">贪吃蛇</button>
         <button type="button" :class="{ 'is-active': activeGame === 'pinball' }" @click="selectGame('pinball')">弹球</button>
+        <button type="button" :class="{ 'is-active': activeGame === 'gold-miner' }" @click="selectGame('gold-miner')">矿工</button>
       </nav>
 
       <div v-if="activeGame === 'tetris'" class="pet-tetris" data-testid="pet-tetris">
@@ -1426,13 +1503,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-else class="pet-pinball" data-testid="pet-pinball">
+      <div v-else-if="activeGame === 'pinball'" class="pet-pinball" data-testid="pet-pinball">
         <div class="pet-game-status-row">
           <span>{{ pinballStatusText }}</span>
           <span data-testid="pet-pinball-score">分数 {{ pinballScore.toString().padStart(5, "0") }}</span>
           <button type="button" aria-label="重开桌面弹球" @click="resetPinball"><RotateCcw :size="13" /></button>
         </div>
         <div class="pet-pinball-feature-strip" aria-label="桌面弹球局内状态">
+          <span class="is-jackpot"><small>奖池</small><strong>{{ pinballJackpot }}</strong></span>
           <span><small>倍率</small><strong>×{{ pinballMultiplier }}</strong></span>
           <span :class="{ 'is-hot': pinballComboVisible }"><small>连击</small><strong>×{{ pinballComboVisible ? pinballCombo : 1 }}</strong></span>
           <span :class="{ 'is-hot': pinballBallSaveSeconds > 0 }"><small>救球</small><strong>{{ pinballBallSaveSeconds ? `${pinballBallSaveSeconds}s` : "—" }}</strong></span>
@@ -1445,7 +1523,7 @@ onBeforeUnmount(() => {
           aria-label="桌面弹球台，空格蓄力发射，左右方向键控制挡板，N 键晃台，P 键暂停"
         >
           <div class="pet-pinball-paper-score" aria-hidden="true">
-            <span>DESK No. 05 · HI {{ pinballHighScore.toString().padStart(5, "0") }}</span>
+            <span>MIMO SIGNAL LAB · HI {{ pinballHighScore.toString().padStart(5, "0") }}</span>
             <strong>{{ pinballScore.toString().padStart(5, "0") }}</strong>
           </div>
           <div class="pet-pinball-lives" aria-label="剩余弹珠">
@@ -1458,13 +1536,15 @@ onBeforeUnmount(() => {
             <small>× {{ pinballLives }}</small>
           </div>
           <div class="pet-pinball-mission-display" :class="{ 'is-ready': pinballMissionReady, 'is-multiball': pinballMultiballActive }">
-            <small>DESK RUN</small>
+            <small>RELAY // {{ pinballMissionProgress }}/7</small>
             <strong>{{ pinballMissionText }}</strong>
           </div>
+          <span class="pet-pinball-circuit is-left" aria-hidden="true"><i /><i /><i /></span>
+          <span class="pet-pinball-circuit is-right" aria-hidden="true"><i /><i /><i /></span>
           <div class="pet-pinball-rollovers" aria-label="顶部翻滚灯">
             <span
               v-for="(lane, index) in pinballRolloverLanes"
-              :key="lane.label"
+              :key="lane.id"
               :class="{ 'is-lit': pinballRolloverLights[index] }"
               :style="{ left: `${lane.x}px` }"
             >{{ lane.label }}</span>
@@ -1483,7 +1563,7 @@ onBeforeUnmount(() => {
             aria-hidden="true"
           >
             <i />
-            <small>+{{ bumper.score }}</small>
+            <small>{{ bumper.label }}</small>
           </span>
           <span
             v-for="(x, index) in pinballDropTargetPositions"
@@ -1492,18 +1572,26 @@ onBeforeUnmount(() => {
             :class="{ 'is-dropped': pinballDropTargets[index] }"
             :style="{ left: `${x}px` }"
             aria-hidden="true"
-          >{{ index + 1 }}</span>
+          >{{ ["A", "M", "P"][index] }}</span>
           <span class="pet-pinball-sling is-left" aria-hidden="true"><i>+180</i></span>
           <span class="pet-pinball-sling is-right" aria-hidden="true"><i>+180</i></span>
           <span class="pet-pinball-scoop" :class="{ 'is-ready': pinballMissionReady }" aria-hidden="true">
             <i />
-            <small>{{ pinballMissionReady ? "MULTI" : "LOCK" }}</small>
+            <small>{{ pinballMissionReady ? "JACKPOT" : "CORE" }}</small>
           </span>
           <span class="pet-pinball-inlane is-left" aria-hidden="true">IN</span>
           <span class="pet-pinball-inlane is-right" aria-hidden="true">IN</span>
           <span class="pet-pinball-flipper is-left" :class="{ 'is-pressed': pinballLeftPressed }" :style="pinballLeftFlipperStyle" aria-hidden="true" />
           <span class="pet-pinball-flipper is-right" :class="{ 'is-pressed': pinballRightPressed }" :style="pinballRightFlipperStyle" aria-hidden="true" />
           <span class="pet-pinball-drain" aria-hidden="true" />
+          <span
+            v-if="pinballImpact"
+            :key="pinballImpact.id"
+            class="pet-pinball-impact"
+            :class="`is-${pinballImpact.tone}`"
+            :style="{ left: `${pinballImpact.x}px`, top: `${pinballImpact.y}px` }"
+            aria-hidden="true"
+          />
           <span
             v-for="ball in pinballBalls"
             :key="ball.id"
@@ -1536,7 +1624,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="pet-pinball-ledger" aria-live="polite">
           <span>{{ pinballMissionText }}</span>
-          <span>奖励分 {{ pinballBonus }}</span>
+          <span>奖池 {{ pinballJackpot }} · 奖励 {{ pinballBonus }}</span>
         </div>
         <div class="pet-pinball-controls" aria-label="桌面弹球操作">
           <button
@@ -1563,6 +1651,12 @@ onBeforeUnmount(() => {
         </div>
         <p class="pet-pinball-help">空格蓄力 · Z/← 与 /→ 挡板 · N 晃台 · P 暂停</p>
       </div>
+
+      <PetGoldMinerGame
+        v-show="activeGame === 'gold-miner'"
+        ref="goldMinerGame"
+        :active="activeGame === 'gold-miner'"
+      />
     </template>
   </section>
 </template>
@@ -1804,10 +1898,6 @@ onBeforeUnmount(() => {
   background: #cf7684;
 }
 
-.pet-game-choice.is-pinball {
-  grid-column: 1 / -1;
-}
-
 .pinball-choice-art {
   position: relative;
   overflow: hidden;
@@ -1854,6 +1944,58 @@ onBeforeUnmount(() => {
 
 .pinball-choice-flipper.is-left { left: 5px; transform: rotate(16deg); }
 .pinball-choice-flipper.is-right { right: 5px; transform: rotate(-16deg); }
+
+.miner-choice-art {
+  position: relative;
+  overflow: hidden;
+  border: 3px solid #214f58;
+  background: linear-gradient(#214f58 0 28%, #b87541 29% 64%, #70483b 65%);
+}
+
+.miner-choice-art i {
+  position: absolute;
+  display: block;
+}
+
+.miner-choice-rope {
+  left: 15px;
+  top: 1px;
+  width: 1px;
+  height: 18px;
+  background: #f1dfb2;
+  transform: rotate(24deg);
+  transform-origin: top;
+}
+
+.miner-choice-hook {
+  left: 20px;
+  top: 16px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid #f1cf70;
+  border-bottom: 2px solid #f1cf70;
+  border-radius: 0 0 6px;
+  transform: rotate(18deg);
+}
+
+.miner-choice-gold {
+  left: 4px;
+  bottom: 3px;
+  width: 9px;
+  height: 7px;
+  border: 1px solid #70410d;
+  border-radius: 55% 45%;
+  background: #e6a92b;
+}
+
+.miner-choice-rock {
+  right: 3px;
+  bottom: 2px;
+  width: 10px;
+  height: 8px;
+  border-radius: 48% 60% 45% 55%;
+  background: #59514e;
+}
 
 .pet-game-tabs {
   gap: 4px;
@@ -2202,19 +2344,20 @@ onBeforeUnmount(() => {
   background: #f3f7f9;
 }
 
-.pet-game-panel.is-pinball:not(.is-embedded) {
+.pet-game-panel:is(.is-pinball, .is-miner):not(.is-embedded) {
   width: min(348px, calc(100vw - 16px));
 }
 
 .pet-pinball-feature-strip {
   display: grid;
   width: 316px;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 1.35fr repeat(4, 1fr);
   overflow: hidden;
   margin: 0 auto 6px;
-  border: 1px solid #d7d0c2;
+  border: 1px solid #526b80;
   border-radius: 8px;
-  background: #f8f4e9;
+  background: #10283c;
+  box-shadow: 0 3px 8px rgba(19, 42, 60, .16);
 }
 
 .pet-pinball-feature-strip > span {
@@ -2223,12 +2366,13 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   padding: 4px 2px;
-  border-right: 1px solid #e3dccf;
-  color: #6d6459;
+  border-right: 1px solid rgba(158, 184, 201, .24);
+  color: #d4e0e6;
 }
 
 .pet-pinball-feature-strip > span:last-child { border-right: 0; }
-.pet-pinball-feature-strip > span.is-hot { background: #fff0bd; color: #875933; }
+.pet-pinball-feature-strip > span.is-hot { background: #e5a63b; color: #172d3e; }
+.pet-pinball-feature-strip > span.is-jackpot { background: #7d3130; color: #ffe5b4; }
 .pet-pinball-feature-strip small { font-size: 7px; line-height: 9px; }
 .pet-pinball-feature-strip strong { font: 700 10px/12px var(--ta-font-mono, "Geist Mono", monospace); }
 
@@ -2239,16 +2383,18 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   overflow: hidden;
   margin: 0 auto;
-  border: 8px solid #6f4b32;
-  border-radius: 30px 30px 18px 18px;
+  border: 8px solid #243d53;
+  border-radius: 28px 28px 16px 16px;
   background:
-    linear-gradient(115deg, transparent 0 48%, rgba(237, 208, 139, .035) 49% 51%, transparent 52%),
-    radial-gradient(circle at 50% 43%, rgba(244, 225, 171, .08) 0 2px, transparent 3px),
-    linear-gradient(155deg, #315654 0%, #274a49 55%, #1f403f 100%);
+    linear-gradient(rgba(117, 164, 189, .06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(117, 164, 189, .05) 1px, transparent 1px),
+    radial-gradient(circle at 49% 39%, rgba(83, 170, 185, .17), transparent 47%),
+    linear-gradient(155deg, #183a57 0%, #102e49 58%, #0d253b 100%);
+  background-size: 23px 23px, 23px 23px, auto, auto;
   box-shadow:
-    inset 0 0 0 2px #c69b54,
-    inset 0 0 32px rgba(7, 24, 24, .5),
-    0 7px 13px rgba(72, 48, 31, .2);
+    inset 0 0 0 2px #aabcc7,
+    inset 0 0 35px rgba(3, 16, 29, .6),
+    0 8px 16px rgba(24, 47, 65, .23);
   font-family: var(--ta-font-mono, "Geist Mono", monospace);
   touch-action: none;
 }
@@ -2263,7 +2409,7 @@ onBeforeUnmount(() => {
 
 .pet-pinball-board::before {
   inset: 8px;
-  border: 1px solid rgba(236, 205, 134, .22);
+  border: 1px solid rgba(159, 195, 211, .26);
   border-radius: 20px 20px 10px 10px;
 }
 
@@ -2272,9 +2418,9 @@ onBeforeUnmount(() => {
   right: 48px;
   bottom: -52px;
   height: 114px;
-  border: 2px solid rgba(212, 175, 98, .48);
+  border: 2px solid rgba(119, 184, 199, .42);
   border-radius: 50%;
-  background: rgba(14, 39, 38, .58);
+  background: rgba(5, 24, 39, .68);
 }
 
 .pet-pinball-paper-score {
@@ -2283,20 +2429,19 @@ onBeforeUnmount(() => {
   left: 26px;
   top: 14px;
   display: flex;
-  min-width: 116px;
+  min-width: 126px;
   flex-direction: column;
   gap: 1px;
   padding: 4px 7px 3px;
-  border: 1px solid #b68c4b;
-  border-radius: 2px;
-  background: #f0e4c6;
-  box-shadow: 2px 3px 0 rgba(22, 45, 44, .3);
-  color: #65472f;
-  transform: rotate(-1.3deg);
+  border: 1px solid #567f95;
+  border-radius: 4px;
+  background: #091e30;
+  box-shadow: inset 0 0 8px rgba(64, 157, 174, .12), 0 2px 0 rgba(5, 17, 27, .32);
+  color: #7dabb9;
 }
 
 .pet-pinball-paper-score span { font-size: 6px; letter-spacing: .07em; }
-.pet-pinball-paper-score strong { color: #3f3830; font-size: 13px; letter-spacing: .14em; line-height: 14px; }
+.pet-pinball-paper-score strong { color: #f0b348; font-size: 13px; letter-spacing: .14em; line-height: 14px; text-shadow: 0 0 8px rgba(240, 179, 72, .28); }
 
 .pet-pinball-lives {
   position: absolute;
@@ -2306,16 +2451,16 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 3px;
-  color: #ead79e;
+  color: #bdd3dc;
 }
 
 .pet-pinball-lives > span {
   width: 7px;
   height: 7px;
-  border: 1px solid #c89b52;
+  border: 1px solid #b7cad2;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #fff9e8 0 18%, #b9c1bd 42%, #596b68 100%);
-  box-shadow: 0 1px 2px rgba(9, 25, 24, .55);
+  background: radial-gradient(circle at 35% 30%, #fff 0 18%, #c7d4d9 42%, #58778a 100%);
+  box-shadow: 0 1px 3px rgba(4, 17, 28, .65);
 }
 
 .pet-pinball-lives > span.is-spent { background: transparent; box-shadow: none; opacity: .35; }
@@ -2332,17 +2477,34 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 5px;
   min-height: 17px;
-  border: 1px solid rgba(220, 187, 112, .46);
+  border: 1px solid rgba(104, 177, 194, .48);
   border-radius: 4px;
-  background: rgba(15, 43, 41, .78);
-  color: #e9d49c;
+  background: rgba(7, 29, 46, .86);
+  color: #d8e8ed;
   text-align: center;
 }
 
-.pet-pinball-mission-display small { color: #9bb4ad; font-size: 5px; letter-spacing: .08em; }
+.pet-pinball-mission-display small { color: #69bcc7; font-size: 5px; letter-spacing: .08em; }
 .pet-pinball-mission-display strong { overflow: hidden; font-size: 6px; text-overflow: ellipsis; white-space: nowrap; }
-.pet-pinball-mission-display.is-ready { border-color: #f0ce76; box-shadow: 0 0 9px rgba(240, 206, 118, .28); }
-.pet-pinball-mission-display.is-multiball { background: #6e3e36; color: #fff0bd; }
+.pet-pinball-mission-display.is-ready { border-color: #f0b348; box-shadow: 0 0 11px rgba(240, 179, 72, .35); }
+.pet-pinball-mission-display.is-multiball { border-color: #e07b5d; background: #743236; color: #ffe3b2; }
+
+.pet-pinball-circuit {
+  position: absolute;
+  z-index: 1;
+  top: 110px;
+  width: 45px;
+  height: 135px;
+  border-top: 1px solid rgba(87, 184, 198, .32);
+  border-bottom: 1px solid rgba(87, 184, 198, .26);
+  pointer-events: none;
+}
+
+.pet-pinball-circuit.is-left { left: 19px; border-left: 1px solid rgba(87, 184, 198, .3); border-radius: 10px 0 0 10px; }
+.pet-pinball-circuit.is-right { right: 35px; border-right: 1px solid rgba(87, 184, 198, .3); border-radius: 0 10px 10px 0; }
+.pet-pinball-circuit i { position: absolute; width: 4px; height: 4px; border: 1px solid #5ba8b6; border-radius: 50%; background: #102e49; box-shadow: 0 0 5px rgba(87, 184, 198, .45); }
+.pet-pinball-circuit i:nth-child(1) { top: -3px; }.pet-pinball-circuit i:nth-child(2) { top: 49%; }.pet-pinball-circuit i:nth-child(3) { bottom: -3px; }
+.pet-pinball-circuit.is-left i { left: -3px; }.pet-pinball-circuit.is-right i { right: -3px; }
 
 .pet-pinball-rollovers {
   position: absolute;
@@ -2359,10 +2521,10 @@ onBeforeUnmount(() => {
   height: 14px;
   align-items: center;
   justify-content: center;
-  border: 1px solid #9b7a45;
+  border: 1px solid #587b91;
   border-radius: 3px 3px 10px 10px;
-  background: #183b39;
-  color: #8ca49e;
+  background: #0c263d;
+  color: #718fa0;
   font-size: 8px;
   transform: translateX(-50%);
 }
@@ -2372,14 +2534,15 @@ onBeforeUnmount(() => {
   top: 15px;
   width: 1px;
   height: 17px;
-  background: rgba(225, 194, 123, .46);
+  background: rgba(136, 180, 197, .42);
   content: "";
 }
 
 .pet-pinball-rollovers span.is-lit {
-  background: #d8a651;
-  color: #fff4cf;
-  box-shadow: 0 0 10px rgba(238, 196, 98, .65);
+  border-color: #f2bd58;
+  background: #df9f32;
+  color: #172f42;
+  box-shadow: 0 0 11px rgba(240, 179, 72, .7);
 }
 
 .pet-pinball-rail {
@@ -2389,9 +2552,9 @@ onBeforeUnmount(() => {
   top: 70px;
   width: 12px;
   height: 276px;
-  border-left: 3px solid #c49a54;
+  border-left: 3px solid #b7c7ce;
   border-radius: 14px 0 0 14px;
-  box-shadow: -2px 0 0 rgba(238, 210, 146, .22);
+  box-shadow: -2px 0 0 rgba(74, 143, 162, .25);
 }
 
 .pet-pinball-arch {
@@ -2401,8 +2564,8 @@ onBeforeUnmount(() => {
   top: 67px;
   width: 253px;
   height: 91px;
-  border-top: 3px solid rgba(201, 158, 81, .62);
-  border-right: 3px solid rgba(201, 158, 81, .62);
+  border-top: 3px solid rgba(187, 204, 211, .72);
+  border-right: 3px solid rgba(187, 204, 211, .72);
   border-radius: 50% 46% 0 0;
   transform: rotate(-1.5deg);
 }
@@ -2414,8 +2577,8 @@ onBeforeUnmount(() => {
   width: 7px;
   height: 66px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #8e6539, #e2c070 48%, #8e6539);
-  box-shadow: 0 0 0 2px rgba(20, 51, 49, .55);
+  background: linear-gradient(90deg, #4d6b7e, #d7e0e3 48%, #4d6b7e);
+  box-shadow: 0 0 0 2px rgba(6, 26, 42, .58);
 }
 
 .pet-pinball-post.is-left { left: 50px; transform: rotate(-34deg); }
@@ -2428,17 +2591,17 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  border: 4px solid #ead7a0;
+  border: 4px solid #dce5e7;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 0 2px #7c5a35, 0 4px 7px rgba(8, 27, 26, .4), inset 0 0 0 2px rgba(255, 255, 255, .3);
+  box-shadow: 0 0 0 2px #526f82, 0 4px 8px rgba(3, 18, 31, .5), inset 0 0 0 2px rgba(255, 255, 255, .28);
 }
 
-.pet-pinball-bumper.is-rose { background: #c8665a; }
-.pet-pinball-bumper.is-teal { background: #5da8a0; }
-.pet-pinball-bumper.is-gold { background: #c99f52; }
-.pet-pinball-bumper i { width: 30%; height: 30%; border-radius: 50%; background: rgba(255, 248, 222, .82); box-shadow: 0 0 7px rgba(255, 240, 183, .72); }
-.pet-pinball-bumper small { position: absolute; top: calc(100% + 6px); color: #ead8a7; font-size: 6px; text-shadow: 0 1px 1px #183735; }
+.pet-pinball-bumper.is-rose { background: #c95750; }
+.pet-pinball-bumper.is-teal { background: #48a8b2; }
+.pet-pinball-bumper.is-gold { background: #d39a35; }
+.pet-pinball-bumper i { width: 30%; height: 30%; border-radius: 50%; background: rgba(255, 255, 255, .88); box-shadow: 0 0 8px rgba(225, 247, 249, .75); }
+.pet-pinball-bumper small { position: absolute; top: calc(100% + 6px); color: #c8e1e7; font-size: 5px; letter-spacing: .08em; text-shadow: 0 1px 2px #071d30; }
 
 .pet-pinball-spinner {
   position: absolute;
@@ -2447,12 +2610,12 @@ onBeforeUnmount(() => {
   top: 190px;
   width: 17px;
   height: 51px;
-  border: 1px solid rgba(218, 180, 98, .48);
+  border: 1px solid rgba(97, 173, 188, .48);
   border-radius: 9px;
 }
 
-.pet-pinball-spinner i { position: absolute; left: 7px; top: 7px; width: 3px; height: 31px; border-radius: 99px; background: repeating-linear-gradient(#e4c473 0 5px, #835d32 5px 8px); }
-.pet-pinball-spinner small { position: absolute; left: -2px; bottom: -10px; color: #e0c57f; font-size: 5px; }
+.pet-pinball-spinner i { position: absolute; left: 7px; top: 7px; width: 3px; height: 31px; border-radius: 99px; background: repeating-linear-gradient(#f0b348 0 5px, #5f7380 5px 8px); }
+.pet-pinball-spinner small { position: absolute; left: -2px; bottom: -10px; color: #75b7c3; font-size: 5px; }
 
 .pet-pinball-drop-target {
   position: absolute;
@@ -2463,10 +2626,10 @@ onBeforeUnmount(() => {
   height: 13px;
   align-items: center;
   justify-content: center;
-  border: 2px solid #f0d59a;
+  border: 2px solid #ffd6b2;
   border-radius: 3px 3px 1px 1px;
-  background: #b95650;
-  box-shadow: 0 3px 0 #6c4230, 0 0 0 1px rgba(24, 52, 50, .65);
+  background: #c64f48;
+  box-shadow: 0 3px 0 #692d31, 0 0 0 1px rgba(7, 29, 46, .72);
   color: #fff1d2;
   font-size: 6px;
   transform: translateX(-50%);
@@ -2483,12 +2646,12 @@ onBeforeUnmount(() => {
   height: 0;
   border-top: 36px solid transparent;
   border-bottom: 8px solid transparent;
-  filter: drop-shadow(0 2px 1px rgba(12, 35, 33, .5));
+  filter: drop-shadow(0 2px 1px rgba(3, 19, 31, .55));
 }
 
-.pet-pinball-sling.is-left { left: 45px; border-left: 42px solid #d6ac5e; transform: rotate(-4deg); }
-.pet-pinball-sling.is-right { right: 45px; border-right: 42px solid #d6ac5e; transform: rotate(4deg); }
-.pet-pinball-sling i { position: absolute; top: -19px; color: #6d4d31; font-size: 5px; font-style: normal; }
+.pet-pinball-sling.is-left { left: 45px; border-left: 42px solid #58b3be; transform: rotate(-4deg); }
+.pet-pinball-sling.is-right { right: 45px; border-right: 42px solid #58b3be; transform: rotate(4deg); }
+.pet-pinball-sling i { position: absolute; top: -19px; color: #17384f; font-size: 5px; font-style: normal; }
 .pet-pinball-sling.is-left i { left: -36px; }
 .pet-pinball-sling.is-right i { right: -36px; }
 
@@ -2502,22 +2665,22 @@ onBeforeUnmount(() => {
   height: 30px;
   align-items: center;
   justify-content: center;
-  border: 2px solid #b48a4c;
+  border: 2px solid #9c5550;
   border-radius: 50%;
-  background: #102d2c;
-  box-shadow: inset 0 4px 6px #081c1b, 0 0 0 3px rgba(213, 176, 91, .18);
+  background: #391f2a;
+  box-shadow: inset 0 4px 7px #170f18, 0 0 0 3px rgba(203, 87, 77, .16);
 }
 
-.pet-pinball-scoop i { width: 12px; height: 12px; border-radius: 50%; background: #071817; }
-.pet-pinball-scoop small { position: absolute; bottom: -12px; color: #bca66e; font-size: 5px; }
-.pet-pinball-scoop.is-ready { border-color: #f1cb6c; box-shadow: 0 0 13px rgba(241, 203, 108, .7), inset 0 4px 6px #081c1b; }
-.pet-pinball-scoop.is-ready small { color: #ffe6a1; }
+.pet-pinball-scoop i { width: 12px; height: 12px; border-radius: 50%; background: #160e17; }
+.pet-pinball-scoop small { position: absolute; bottom: -12px; color: #d28579; font-size: 5px; }
+.pet-pinball-scoop.is-ready { border-color: #f0b348; box-shadow: 0 0 15px rgba(240, 179, 72, .76), inset 0 4px 6px #160e17; animation: pinball-core-ready 900ms ease-in-out infinite alternate; }
+.pet-pinball-scoop.is-ready small { color: #ffd993; }
 
 .pet-pinball-inlane {
   position: absolute;
   z-index: 2;
   top: 334px;
-  color: rgba(235, 206, 137, .7);
+  color: rgba(125, 190, 202, .72);
   font-size: 5px;
   writing-mode: vertical-rl;
 }
@@ -2532,33 +2695,36 @@ onBeforeUnmount(() => {
   width: 68px;
   height: 13px;
   box-sizing: border-box;
-  border: 2px solid #715135;
+  border: 2px solid #49697d;
   border-radius: 999px;
-  background: linear-gradient(180deg, #f2dd9f, #c69b50);
-  box-shadow: 0 3px 4px rgba(11, 31, 30, .42), inset 0 2px 1px rgba(255, 248, 217, .5);
+  background: linear-gradient(180deg, #e9f0f1, #90b3be);
+  box-shadow: 0 3px 5px rgba(3, 18, 30, .5), inset 0 2px 1px rgba(255, 255, 255, .62);
 }
 
-.pet-pinball-flipper::before { position: absolute; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: #754e32; content: ""; }
+.pet-pinball-flipper::before { position: absolute; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: #315267; content: ""; }
 .pet-pinball-flipper.is-left { left: 90px; transform-origin: 6px 6px; }
 .pet-pinball-flipper.is-left::before { left: 2px; }
 .pet-pinball-flipper.is-right { left: 158px; transform-origin: 62px 6px; }
 .pet-pinball-flipper.is-right::before { right: 2px; }
-.pet-pinball-flipper.is-pressed { background: linear-gradient(180deg, #fff0bd, #d7ad58); box-shadow: 0 0 8px rgba(241, 205, 118, .4), 0 3px 4px rgba(11, 31, 30, .42); }
+.pet-pinball-flipper.is-pressed { background: linear-gradient(180deg, #ffe6a5, #e7a83b); box-shadow: 0 0 11px rgba(240, 179, 72, .58), 0 3px 4px rgba(3, 18, 30, .5); }
 
 .pet-pinball-ball {
   position: absolute;
   z-index: 7;
   width: 12px;
   height: 12px;
-  border: 1px solid #655a45;
+  border: 1px solid #355163;
   border-radius: 50%;
-  background: radial-gradient(circle at 33% 28%, #fff 0 14%, #d9dfdc 26%, #7d8d89 65%, #344946 100%);
-  box-shadow: 1px 3px 4px rgba(8, 26, 25, .48);
+  background: radial-gradient(circle at 33% 28%, #fff 0 14%, #dce5e8 26%, #829aa6 65%, #2f495b 100%);
+  box-shadow: 0 0 7px rgba(116, 200, 211, .32), 1px 3px 4px rgba(3, 18, 30, .58);
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
-.pet-pinball-drain { position: absolute; z-index: 2; left: 119px; bottom: -2px; width: 78px; height: 17px; border-radius: 50% 50% 0 0; background: #112e2d; box-shadow: 0 -2px 0 #bc8e4c; }
+.pet-pinball-drain { position: absolute; z-index: 2; left: 119px; bottom: -2px; width: 78px; height: 17px; border-radius: 50% 50% 0 0; background: #071b2c; box-shadow: 0 -2px 0 #5c8798; }
+
+.pet-pinball-impact { position: absolute; z-index: 6; width: 17px; height: 17px; border: 2px solid #65c1cc; border-radius: 50%; transform: translate(-50%, -50%); animation: pinball-impact 360ms ease-out forwards; pointer-events: none; }
+.pet-pinball-impact.is-charge { border-color: #f0b348; }.pet-pinball-impact.is-jackpot { border-color: #f07e66; box-shadow: 0 0 9px rgba(240, 126, 102, .7); }
 
 .pet-pinball-plunger {
   position: absolute;
@@ -2573,15 +2739,15 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 3px;
   padding: 3px 2px;
-  border: 1px solid rgba(227, 200, 134, .42);
+  border: 1px solid rgba(129, 180, 196, .46);
   border-radius: 9px;
-  background: rgba(18, 48, 46, .72);
-  color: #ecd9a5;
+  background: rgba(7, 28, 44, .82);
+  color: #bcd9e0;
   cursor: ns-resize;
 }
 
 .pet-pinball-plunger:disabled { cursor: default; opacity: .45; }
-.pet-pinball-plunger:not(:disabled):focus-visible { outline: 2px solid #f1d58d; outline-offset: 2px; }
+.pet-pinball-plunger:not(:disabled):focus-visible { outline: 2px solid #f0b348; outline-offset: 2px; }
 
 .pet-pinball-plunger-track {
   position: relative;
@@ -2591,16 +2757,16 @@ onBeforeUnmount(() => {
   align-items: flex-end;
   justify-content: center;
   overflow: hidden;
-  border: 1px solid #9b743e;
+  border: 1px solid #638596;
   border-radius: 999px;
-  background: #173735;
+  background: #0a2235;
 }
 
-.pet-pinball-skill-zone { position: absolute; z-index: 2; inset: 9px 0 auto; height: 15px; border-top: 1px solid #82b9aa; border-bottom: 1px solid #82b9aa; background: rgba(100, 174, 157, .25); }
-.pet-pinball-plunger-track i { display: block; width: 7px; max-height: 50px; border-radius: 999px; background: repeating-linear-gradient(0deg, #e5c574 0 3px, #815b32 3px 5px); }
+.pet-pinball-skill-zone { position: absolute; z-index: 2; inset: 9px 0 auto; height: 15px; border-top: 1px solid #67c1c8; border-bottom: 1px solid #67c1c8; background: rgba(87, 184, 198, .24); }
+.pet-pinball-plunger-track i { display: block; width: 7px; max-height: 50px; border-radius: 999px; background: repeating-linear-gradient(0deg, #f0b348 0 3px, #586f7c 3px 5px); }
 .pet-pinball-plunger small { font-size: 6px; line-height: 8px; white-space: nowrap; }
 
-.pet-pinball-overlay { position: absolute; z-index: 10; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: rgba(19, 42, 41, .72); color: #f1e2b9; backdrop-filter: blur(1px); }
+.pet-pinball-overlay { position: absolute; z-index: 10; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: rgba(7, 25, 40, .78); color: #e2edf0; backdrop-filter: blur(2px); }
 .pet-pinball-overlay strong { font-family: var(--ta-font-sans, "Noto Sans SC", sans-serif); font-size: 22px; letter-spacing: .18em; }
 .pet-pinball-overlay span { font-size: 8px; }
 
@@ -2612,10 +2778,10 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin: 6px auto 0;
   padding: 5px 7px;
-  border: 1px dashed #c8b387;
+  border: 1px solid #718a9a;
   border-radius: 5px;
-  background: #fbf6e9;
-  color: #6e5a43;
+  background: #edf3f4;
+  color: #3e5a6d;
   font-size: 7px;
 }
 
@@ -2630,17 +2796,31 @@ onBeforeUnmount(() => {
   margin: 6px auto 0;
 }
 
-.pet-pinball-controls button { min-width: 0; height: 29px; padding: 0 4px; border: 1px solid #c9b38c; border-radius: 7px; background: #fffaf0; color: #654d37; cursor: pointer; font-size: 7px; font-weight: 650; }
-.pet-pinball-controls button.is-pause { border-color: #aab9b8; background: #eff4f2; color: #315451; }
-.pet-pinball-controls button.is-nudge { border-color: #d5c8b1; background: #f5f1e8; color: #786b5a; }
+.pet-pinball-controls button { min-width: 0; height: 29px; padding: 0 4px; border: 1px solid #91a7b4; border-radius: 7px; background: #f4f8f8; color: #35566a; cursor: pointer; font-size: 7px; font-weight: 650; }
+.pet-pinball-controls button:first-child,
+.pet-pinball-controls button:last-child { border-color: #5e9baa; background: #e2f0f1; color: #1f5b68; }
+.pet-pinball-controls button.is-pause { border-color: #d1a24b; background: #f6e8c7; color: #785319; }
+.pet-pinball-controls button.is-nudge { border-color: #aebcc4; background: #edf1f3; color: #647782; }
 .pet-pinball-controls button:hover,
-.pet-pinball-controls button:focus-visible { border-color: #9e7945; outline: none; background: #f7ebd2; }
+.pet-pinball-controls button:focus-visible { border-color: #3c7f90; outline: none; background: #dcecee; }
 
-.pet-pinball-help { margin: 5px 0 0; color: #8b8378; font-size: 7px; line-height: 10px; text-align: center; }
+.pet-pinball-help { margin: 5px 0 0; color: #71818b; font-size: 7px; line-height: 10px; text-align: center; }
+
+@keyframes pinball-impact {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(.35); }
+  to { opacity: 0; transform: translate(-50%, -50%) scale(2.15); }
+}
+
+@keyframes pinball-core-ready {
+  from { transform: scale(.96); }
+  to { transform: scale(1.04); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .pet-game-choice,
   .pet-pinball-drop-target { transition: none; }
+  .pet-pinball-impact,
+  .pet-pinball-scoop.is-ready { animation: none; }
   .pet-game-choice:hover,
   .pet-game-choice:focus-visible { transform: none; }
 }

@@ -9607,3 +9607,26 @@
 
 - 切回包含关联终态 Run 的历史会话后，任务消耗页脚会恢复最近一轮任务耗时，并与历史 Token 同时展示。
 - 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全或环境配置；未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
+## 2026-08-12 - 重构桌面弹球并新增黄金矿工
+
+### Why
+
+- 用户认为已有弹球目标感和操作反馈仍不够有趣，并要求在宠物游乐舱增加可完整游玩的黄金矿工。
+
+### What
+
+- 继续复用 `PetMiniGames.vue` 的既有入口、键盘路由、弹球物理和生命周期，将弹球改为深蓝信号台视觉，以“四座 M/I/M/O 中继 → 三枚放大器 → 红色核心 Jackpot”组织目标；进度跨弹珠保留，动态奖池由碰撞器、旋转门、弹射器与挡板命中持续充能，核心命中触发三球信号风暴或多球 Super Jackpot。
+- 挡板碰撞增加带冷却的主动向上抽射和击中波纹，保留坡度重力、弧形出槽、单向门、技能发射、救球、连击、倍率、奖励球、晃台和 TILT；既有“离槽后不能重新掉回发射槽”规则继续由 Chromium 场景覆盖。
+- 新增独立 `PetGoldMinerGame.vue`：45 秒摆钩关卡、方向下钩、圆形命中检测、按重量回收、金块/钻石/岩石/钱袋价值、两枚炸药、目标进度、成功/失败结算和递增关卡；切换到其它游戏时暂停计时但保留局内状态。六款游戏入口、键盘操作、组件测试、工作台 E2E 和 agent-web README 同步更新。
+
+### How
+
+- `PetGoldMinerGame` 与 `PetMiniGames` 定向 Vitest 2 个文件、11 项全部通过；Chromium 六游戏工作台场景 1/1 通过，实际验证中央大金块抓取后结算 ¥520、弹珠离开发射槽进入主球台、重力下落、挡板和 TILT。
+- agent-web 用户手册预构建、`vue-tsc` 与 production build 全部通过，仅保留既有大 chunk 警告；最新前端以 `corepack pnpm --dir frontend --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3024` 启动。
+- 应用内浏览器因本地 URL 安全策略未能补充截图，未绕过限制；最终可执行行为由项目 Playwright Chromium 场景验证。提交前回顾全部 `.agents/session-log*.md` 近期记录，并隔离任务外配置管理、migration、设置页和自动生成差异。
+
+### Result
+
+- 宠物游乐舱现有六款游戏；弹球的任务进度、主动挡板反馈和可增长奖池形成更明确的追分循环，黄金矿工具有计时、选择目标、重量风险、炸药取舍和连续关卡，不是静态演示。
+- 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全或环境配置；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。

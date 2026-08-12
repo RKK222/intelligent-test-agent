@@ -18,6 +18,7 @@ describe("PetMiniGames", () => {
     expect(wrapper.text()).toContain("数独");
     expect(wrapper.text()).toContain("贪吃蛇");
     expect(wrapper.text()).toContain("桌面弹球");
+    expect(wrapper.text()).toContain("黄金矿工");
     await wrapper.get('[data-testid="pet-game-open-tetris"]').trigger("click");
 
     expect(wrapper.find('[data-testid="pet-tetris"]').exists()).toBe(true);
@@ -126,6 +127,25 @@ describe("PetMiniGames", () => {
     wrapper.unmount();
   });
 
+  it("opens gold miner and routes keyboard controls to the swinging hook", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(PetMiniGames);
+    await wrapper.get('[data-testid="pet-game-open-gold-miner"]').trigger("click");
+
+    expect(wrapper.find('[data-testid="pet-gold-miner"]').exists()).toBe(true);
+    expect(wrapper.findAll(".pet-miner-item")).toHaveLength(8);
+    await vi.advanceTimersByTimeAsync(1_040);
+    await wrapper.trigger("keydown", { key: " " });
+    expect(wrapper.text()).toContain("钩索下探中");
+
+    await wrapper.trigger("keydown", { key: "p" });
+    expect(wrapper.text()).toContain("勘探暂停");
+    await wrapper.trigger("keydown", { key: "r" });
+    expect(wrapper.get('[data-testid="pet-miner-score"]').text()).toBe("¥0");
+    expect(wrapper.text()).toContain("第 1 层");
+    wrapper.unmount();
+  });
+
   it("runs the desktop pinball gravity, mission, ball-save, flipper, pause and tilt rules", async () => {
     vi.useFakeTimers();
     const wrapper = mount(PetMiniGames);
@@ -133,19 +153,20 @@ describe("PetMiniGames", () => {
 
     expect(wrapper.find('[data-testid="pet-pinball-board"]').exists()).toBe(true);
     expect(wrapper.findAll('.pet-pinball-bumper')).toHaveLength(3);
-    expect(wrapper.findAll('.pet-pinball-rollovers span')).toHaveLength(3);
+    expect(wrapper.findAll('.pet-pinball-rollovers span')).toHaveLength(4);
     expect(wrapper.findAll('.pet-pinball-drop-target')).toHaveLength(3);
     expect(wrapper.findAll('.pet-pinball-sling')).toHaveLength(2);
     expect(wrapper.find('.pet-pinball-spinner').exists()).toBe(true);
     expect(wrapper.find('.pet-pinball-scoop').exists()).toBe(true);
     expect(wrapper.findAll('.pet-pinball-lives > span:not(.is-spent)')).toHaveLength(3);
     expect(wrapper.text()).toContain("按住发射杆蓄力");
-    expect(wrapper.text()).toContain("任务 1 · 点亮 A / B / C 翻滚灯");
+    expect(wrapper.text()).toContain("连接 M / I / M / O 四座中继");
     const pinballSetup = (wrapper.vm as unknown as {
       $: { setupState: {
         pinballRolloverLights: boolean[];
         pinballDropTargets: boolean[];
         pinballScore: number;
+        pinballJackpot: number;
         pinballBalls: Array<{
           x: number;
           y: number;
@@ -171,7 +192,7 @@ describe("PetMiniGames", () => {
     expect(wrapper.get('.pet-pinball-ball').attributes("style")).not.toBe(ballBeforeLaunch);
     await vi.advanceTimersByTimeAsync(1000);
     expect(wrapper.get('[data-testid="pet-pinball-score"]').text()).not.toContain("00000");
-    expect(wrapper.findAll('.pet-pinball-feature-strip strong')[0]!.text()).toBe("×2");
+    expect(wrapper.findAll('.pet-pinball-feature-strip strong')[1]!.text()).toBe("×2");
     expect(pinballSetup.pinballBalls[0]!.x).toBeLessThan(270);
     expect(pinballSetup.pinballBalls[0]!.inLaunchLane).toBe(false);
     Object.assign(pinballSetup.pinballBalls[0]!, {
@@ -200,22 +221,26 @@ describe("PetMiniGames", () => {
     expect(wrapper.text()).toContain("BALL SAVE · 自动补球");
     expect(pinballSetup.pinballBalls[0]!.vy).toBeLessThan(-700);
 
-    pinballSetup.pinballRolloverLights = [true, true, true];
+    pinballSetup.pinballRolloverLights = [true, true, true, true];
     pinballSetup.pinballDropTargets = [true, true, true];
     Object.assign(pinballSetup.pinballBalls[0]!, { x: 244, y: 218, previousX: 244, previousY: 214, vx: 0, vy: 100 });
     await wrapper.vm.$nextTick();
     await vi.advanceTimersByTimeAsync(32);
     expect(wrapper.findAll('.pet-pinball-ball')).toHaveLength(3);
-    expect(wrapper.text()).toContain("多球模式 · 场上 3 球");
+    expect(wrapper.text()).toContain("信号风暴 · 3 球在线");
     expect(pinballSetup.pinballBalls.every((ball) => ball.vy < -500)).toBe(true);
+    expect(pinballSetup.pinballJackpot).toBeGreaterThan(3_000);
 
     pinballSetup.pinballScore = 14_999;
     Object.assign(pinballSetup.pinballBalls[0]!, { x: 90, y: 150, previousX: 90, previousY: 145, vx: 0, vy: 100 });
     await vi.advanceTimersByTimeAsync(16);
     expect(wrapper.findAll('.pet-pinball-lives > span:not(.is-spent)')).toHaveLength(4);
 
+    Object.assign(pinballSetup.pinballBalls[0]!, { x: 130, y: 343, previousX: 130, previousY: 341, vx: 0, vy: 100 });
     await wrapper.trigger("keydown", { key: "ArrowLeft" });
     expect(wrapper.get('.pet-pinball-flipper.is-left').classes()).toContain("is-pressed");
+    await vi.advanceTimersByTimeAsync(16);
+    expect(pinballSetup.pinballBalls[0]!.vy).toBeLessThan(-500);
     await wrapper.trigger("keyup", { key: "ArrowLeft" });
     expect(wrapper.get('.pet-pinball-flipper.is-left').classes()).not.toContain("is-pressed");
 
