@@ -2,6 +2,49 @@ import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import PetMiniGames from "../src/components/PetMiniGames.vue";
 
+function countSudokuSolutions(values: number[], limit = 2): number {
+  let solutionCount = 0;
+  const solve = () => {
+    if (solutionCount >= limit) return;
+    let targetIndex = -1;
+    let targetCandidates: number[] = [];
+    for (let index = 0; index < values.length; index += 1) {
+      if (values[index] !== 0) continue;
+      const row = Math.floor(index / 9);
+      const column = index % 9;
+      const used = new Set<number>();
+      for (let cursor = 0; cursor < 9; cursor += 1) {
+        used.add(values[row * 9 + cursor]!);
+        used.add(values[cursor * 9 + column]!);
+      }
+      const boxRow = Math.floor(row / 3) * 3;
+      const boxColumn = Math.floor(column / 3) * 3;
+      for (let rowOffset = 0; rowOffset < 3; rowOffset += 1) {
+        for (let columnOffset = 0; columnOffset < 3; columnOffset += 1) {
+          used.add(values[(boxRow + rowOffset) * 9 + boxColumn + columnOffset]!);
+        }
+      }
+      const candidates = Array.from({ length: 9 }, (_, candidate) => candidate + 1)
+        .filter((candidate) => !used.has(candidate));
+      if (targetIndex === -1 || candidates.length < targetCandidates.length) {
+        targetIndex = index;
+        targetCandidates = candidates;
+      }
+    }
+    if (targetIndex === -1) {
+      solutionCount += 1;
+      return;
+    }
+    for (const candidate of targetCandidates) {
+      values[targetIndex] = candidate;
+      solve();
+      values[targetIndex] = 0;
+    }
+  };
+  solve();
+  return solutionCount;
+}
+
 describe("PetMiniGames", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -35,6 +78,42 @@ describe("PetMiniGames", () => {
     await wrapper.get(".pet-tetris-controls button:last-child").trigger("click");
     expect(wrapper.text()).toContain("下落中");
 
+    wrapper.unmount();
+  });
+
+  it("uses a seven-bag and randomly raises the visible tetris pressure after a level-up", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const wrapper = mount(PetMiniGames);
+    await wrapper.get('[data-testid="pet-game-open-tetris"]').trigger("click");
+    const setup = (wrapper.vm as unknown as {
+      $: { setupState: {
+        tetrisBoard: Array<Array<string | null>>;
+        tetrisPiece: { matrix: number[][]; color: string; x: number; y: number } | null;
+        tetrisNextPiece: { matrix: number[][]; color: string } | null;
+        tetrisLines: number;
+        tetrisDifficultyLevel: number;
+        createTetrisShape: () => { color: string };
+        lockTetrisPiece: () => void;
+      } };
+    }).$.setupState;
+
+    const bagColors = [setup.tetrisPiece!.color, setup.tetrisNextPiece!.color];
+    for (let index = 0; index < 5; index += 1) bagColors.push(setup.createTetrisShape().color);
+    expect(new Set(bagColors).size).toBe(7);
+
+    setup.tetrisLines = 3;
+    setup.tetrisDifficultyLevel = 1;
+    setup.tetrisBoard = Array.from({ length: 16 }, (_, row) => (
+      row === 15 ? [...Array<string | null>(9).fill("cyan"), null] : Array<string | null>(10).fill(null)
+    ));
+    setup.tetrisPiece = { matrix: [[1]], color: "rose", x: 9, y: 15 };
+    setup.lockTetrisPiece();
+    await wrapper.vm.$nextTick();
+
+    expect(setup.tetrisLines).toBe(4);
+    expect(setup.tetrisDifficultyLevel).toBe(2);
+    expect(wrapper.get('[data-testid="pet-tetris-level"]').text()).toContain("随机档 2 · 等级 2");
     wrapper.unmount();
   });
 
@@ -73,14 +152,18 @@ describe("PetMiniGames", () => {
     const wrapper = mount(PetMiniGames);
 
     await wrapper.get('[data-testid="pet-game-open-minesweeper"]').trigger("click");
-    expect(wrapper.text()).toContain("难度 1");
+    expect(wrapper.text()).toContain("随机档 1");
     await wrapper.get('[aria-label="重开扫雷"]').trigger("click");
-    expect(wrapper.text()).toContain("难度 5");
+    expect(wrapper.text()).toContain("随机档 5");
 
     await wrapper.findAll('.pet-game-tabs button')[2]!.trigger("click");
-    expect(wrapper.text()).toContain("难度 1");
+    expect(wrapper.text()).toContain("随机档 1");
+    expect(wrapper.findAll('.pet-sudoku-cell[disabled]')).toHaveLength(42);
     await wrapper.get('[aria-label="重开数独"]').trigger("click");
-    expect(wrapper.text()).toContain("难度 5");
+    expect(wrapper.text()).toContain("随机档 5");
+    expect(wrapper.findAll('.pet-sudoku-cell[disabled]')).toHaveLength(30);
+    const hardestPuzzle = wrapper.findAll('.pet-sudoku-cell').map((cell) => Number(cell.text()) || 0);
+    expect(countSudokuSolutions(hardestPuzzle)).toBe(1);
   });
 
   it("supports sudoku selection, keyboard input, error checking and restart", async () => {
@@ -103,7 +186,7 @@ describe("PetMiniGames", () => {
     await wrapper.get('[aria-label="重开数独"]').trigger("click");
     expect(wrapper.findAll('.pet-sudoku-cell')[2]!.text()).toBe("");
     expect(wrapper.text()).toContain("选一格开始填写");
-    expect(wrapper.text()).toMatch(/难度 [1-5]/);
+    expect(wrapper.text()).toMatch(/随机档 [1-5]/);
   });
 
   it("runs and pauses snake with keyboard and compact controls", async () => {
@@ -129,6 +212,7 @@ describe("PetMiniGames", () => {
 
   it("opens gold miner and routes keyboard controls to the swinging hook", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const wrapper = mount(PetMiniGames);
     await wrapper.get('[data-testid="pet-game-open-gold-miner"]').trigger("click");
 
@@ -148,6 +232,7 @@ describe("PetMiniGames", () => {
 
   it("runs the desktop pinball gravity, mission, ball-save, flipper, pause and tilt rules", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const wrapper = mount(PetMiniGames);
     await wrapper.get('[data-testid="pet-game-open-pinball"]').trigger("click");
 
@@ -167,6 +252,8 @@ describe("PetMiniGames", () => {
         pinballDropTargets: boolean[];
         pinballScore: number;
         pinballJackpot: number;
+        pinballDifficultyLevel: number;
+        finishPinballMultiballIfNeeded: () => void;
         pinballBalls: Array<{
           x: number;
           y: number;
@@ -192,7 +279,7 @@ describe("PetMiniGames", () => {
     expect(wrapper.get('.pet-pinball-ball').attributes("style")).not.toBe(ballBeforeLaunch);
     await vi.advanceTimersByTimeAsync(1000);
     expect(wrapper.get('[data-testid="pet-pinball-score"]').text()).not.toContain("00000");
-    expect(wrapper.findAll('.pet-pinball-feature-strip strong')[1]!.text()).toBe("×2");
+    expect(wrapper.findAll('.pet-pinball-feature-strip strong')[2]!.text()).toBe("×2");
     expect(pinballSetup.pinballBalls[0]!.x).toBeLessThan(270);
     expect(pinballSetup.pinballBalls[0]!.inLaunchLane).toBe(false);
     Object.assign(pinballSetup.pinballBalls[0]!, {
@@ -230,6 +317,11 @@ describe("PetMiniGames", () => {
     expect(wrapper.text()).toContain("信号风暴 · 3 球在线");
     expect(pinballSetup.pinballBalls.every((ball) => ball.vy < -500)).toBe(true);
     expect(pinballSetup.pinballJackpot).toBeGreaterThan(3_000);
+    pinballSetup.pinballBalls = pinballSetup.pinballBalls.slice(0, 1);
+    pinballSetup.finishPinballMultiballIfNeeded();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('[data-testid="pet-pinball-difficulty"]').text()).toContain("Lv2");
+    expect(wrapper.text()).toContain("随机干扰升至 2 档");
 
     pinballSetup.pinballScore = 14_999;
     Object.assign(pinballSetup.pinballBalls[0]!, { x: 90, y: 150, previousX: 90, previousY: 145, vx: 0, vy: 100 });
