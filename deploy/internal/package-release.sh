@@ -24,8 +24,10 @@ PACKAGE_WORKFLOW=0
 PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
 PACKAGE_LOBEHUB=0
+PACKAGE_MEMORY=0
 WITH_WORKFLOW_IN_RELEASE=0
 WITH_LOBEHUB_IN_RELEASE=0
+WITH_MEMORY_IN_RELEASE=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
@@ -141,6 +143,8 @@ Options:
   --mysql-only            Package only the standalone MySQL image.
   --with-lobehub          Include the verified external LobeHub artifact set in a full release.
   --lobehub-only          Package only the verified LobeHub offline artifact set and operations kit.
+  --with-memory           Include independent Mem0/CPU/pgvector/VIP offline artifacts in a full release.
+  --memory-only           Package only the independent memory data-plane artifacts.
   --zip-only              Reassemble the release ZIP from current verified artifacts and component state.
   --include-all-components
                           Force worker runtime (Python/OpenCode Manager/Codex MCP) and toolbox into the ZIP.
@@ -277,6 +281,23 @@ while [[ $# -gt 0 ]]; do
       WITH_WORKFLOW_IN_RELEASE=1
       shift
       ;;
+    --with-memory)
+      WITH_MEMORY_IN_RELEASE=1
+      shift
+      ;;
+    --memory-only)
+      PACKAGE_MODE=memory-only
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
+      PACKAGE_MEMORY=1
+      shift
+      ;;
     --lobehub-only)
       PACKAGE_MODE=lobehub-only
       PACKAGE_BACKEND=0
@@ -352,6 +373,13 @@ if [[ "${WITH_LOBEHUB_IN_RELEASE}" -eq 1 ]]; then
     exit 2
   fi
   PACKAGE_LOBEHUB=1
+fi
+if [[ "${WITH_MEMORY_IN_RELEASE}" -eq 1 ]]; then
+  if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
+    echo "--with-memory can only be combined with the full or --zip-only release mode" >&2
+    exit 2
+  fi
+  PACKAGE_MEMORY=1
 fi
 
 load_dotenv() {
@@ -660,6 +688,31 @@ verify_release_xxl_flyway_migrations_jar() {
     "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
+}
+
+verify_memory_artifact_set() {
+  local directory="$1" required
+  for required in \
+    images/test-agent-memory-service_internal-linux-amd64.tar \
+    images/test-agent-embedding-bge-small-zh-v1.5_internal-linux-amd64.tar \
+    images/test-agent-pgvector_0.8.1-pg16_internal-linux-amd64.tar \
+    images/test-agent-memory-nginx_1.27.2_internal-linux-amd64.tar \
+    MODEL-IDENTITY.json LICENSES.txt release.env SHA256SUMS \
+    alembic/versions/20260809_01_shared_memory_control.py \
+    memory-docker.sh memory.env.example embedding.env.example; do
+    [[ -f "${directory}/${required}" ]] || {
+      echo "Required memory artifact is missing: ${directory}/${required}" >&2
+      exit 1
+    }
+  done
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${directory}" && sha256sum -c SHA256SUMS)
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${directory}" && shasum -a 256 -c SHA256SUMS)
+  else
+    echo "Neither sha256sum nor shasum is available for memory artifact verification" >&2
+    exit 1
+  fi
 }
 
 state_value() {
@@ -1337,6 +1390,9 @@ package_release_zip() {
   if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
     verify_lobehub_artifact_set "${OUTPUT_DIR}/lobehub"
   fi
+  if [[ "${PACKAGE_MEMORY}" -eq 1 ]]; then
+    verify_memory_artifact_set "${OUTPUT_DIR}/memory"
+  fi
 
   # 交付 zip 只放部署所需产物和脚本，避免把 deploy/internal/dist 自身递归打进去。
   mkdir -p "${staging_dir}/dist/backend"
@@ -1367,6 +1423,11 @@ package_release_zip() {
     mkdir -p "${staging_dir}/docs/deployment" "${staging_dir}/docs/architecture"
     cp -a "${ROOT_DIR}/docs/deployment/lobehub-offline.md" "${staging_dir}/docs/deployment/"
     cp -a "${ROOT_DIR}/docs/architecture/lobehub-integration.md" "${staging_dir}/docs/architecture/"
+  fi
+  if [[ "${PACKAGE_MEMORY}" -eq 1 ]]; then
+    mkdir -p "${staging_dir}/dist/memory" "${staging_dir}/docs/deployment"
+    cp -a "${OUTPUT_DIR}/memory/." "${staging_dir}/dist/memory/"
+    cp -a "${ROOT_DIR}/docs/deployment/qa-memory.md" "${staging_dir}/docs/deployment/"
   fi
 
   if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
@@ -1515,6 +1576,7 @@ TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE:-node:2
 TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE:-nginx:1.27.2-alpine3.20@sha256:d213b2a02ef4e7ec85882e8955343cdd08ab49d6548995ad18623f47017c65ee}"
 TEST_AGENT_XXL_JOB_MYSQL_IMAGE="${TEST_AGENT_XXL_JOB_MYSQL_IMAGE:-mysql:8.4}"
 TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${TEST_AGENT_LOBEHUB_ARTIFACT_DIR:-${ROOT_DIR}/lobehub-release-artifacts}"
+TEST_AGENT_MEMORY_BUILD_ENV_FILE="${TEST_AGENT_MEMORY_BUILD_ENV_FILE:-${SCRIPT_DIR}/memory/build.env.example}"
 if [[ "${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" != /* ]]; then
   TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${ROOT_DIR}/${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}"
 fi
@@ -1650,6 +1712,13 @@ if [[ "${PACKAGE_LOBEHUB}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
   package_lobehub_artifacts
 fi
 
+if [[ "${PACKAGE_MEMORY}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
+  "${SCRIPT_DIR}/package-memory-offline.sh" \
+    --env-file "${TEST_AGENT_MEMORY_BUILD_ENV_FILE}" \
+    --output-dir "${OUTPUT_DIR}" \
+    --platform "${PLATFORM}"
+fi
+
 if [[ "${PACKAGE_MODE}" == lobehub-only && "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   package_lobehub_zip
 fi
@@ -1702,6 +1771,9 @@ if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
 fi
 if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
   echo "  LobeHub verified artifacts: ${OUTPUT_DIR}/lobehub"
+fi
+if [[ "${PACKAGE_MEMORY}" -eq 1 ]]; then
+  echo "  memory data-plane artifacts: ${OUTPUT_DIR}/memory"
 fi
 if [[ "${PACKAGE_MODE}" == lobehub-only && "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  LobeHub offline zip: ${OUTPUT_DIR}/test-agent-lobehub-offline.zip"

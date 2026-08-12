@@ -24,6 +24,7 @@ OPENCODE_SCREEN_SESSION="test-agent-opencode"
 OPENCODE_MANAGER_SCREEN_SESSION="test-agent-opencode-manager"
 LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
 WORKFLOW_DEV_SCRIPT="${ROOT_DIR}/tools/workflow-dev-services.sh"
+MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
 
 profile="test"
 env_file=""
@@ -32,6 +33,7 @@ skip_frontend_build=false
 with_lobehub=false
 lobehub_mode="offline"
 with_workflow=true
+with_memory=false
 frontend_dependencies_checked=false
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
 BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
@@ -48,11 +50,11 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--without-workflow] [--with-lobehub] [--lobehub-mode offline|online] [--help]
+Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--without-workflow] [--with-memory] [--with-lobehub] [--lobehub-mode offline|online] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
-in dependency order: backend -> workflow API/Worker -> opencode-manager -> frontend -> optional LobeHub.
+in dependency order: optional memory data plane -> backend -> workflow API/Worker -> opencode-manager -> frontend -> optional LobeHub.
 
 Services managed by this script:
   backend           Spring Boot test-agent-app (java -jar, profile from --profile).
@@ -63,6 +65,7 @@ Services managed by this script:
                     manager runs, because the manager spawns opencode child processes.
   frontend          agent-web Vite dev server (corepack pnpm dev).
   workflow          Python workflow API/Worker; Analysis Runner is never started locally.
+  memory            Independent Mem0/BGE service and pgvector; started only with --with-memory.
   lobehub           Independent ../lobehub-platform fork plus dev-only ParadeDB/RustFS.
                     It is started only when --with-lobehub is explicitly supplied.
 
@@ -77,6 +80,7 @@ Defaults:
   manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
   LobeHub:         disabled unless --with-lobehub is supplied
   workflow:        enabled; use --without-workflow to retain the legacy three-service restart
+  memory:          disabled unless --with-memory is supplied
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager,
                    test-agent-workflow-api, test-agent-workflow-worker when screen is available
 
@@ -87,6 +91,8 @@ Options:
   --skip-backend-build   Restart backend without running Maven package first.
   --skip-frontend-build  Restart frontend without running pnpm build first.
   --without-workflow     Do not prepare, stop, or start the Python workflow control plane.
+  --with-memory          Opt in to local pgvector + fixed Mem0/BGE service on 15433/18888.
+                         Generated secrets stay under .tmp/dev-services/memory with mode 0600.
   --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
                          Reuses TEST_AGENT_REDIS_* with REDIS_PREFIX=lobehub:app;
                          the fork appends ':' so actual keys use lobehub:app:*.
@@ -101,6 +107,8 @@ Environment overrides:
   TESTAGENT                          Compatibility alias for existing local common parameters.
   TEST_AGENT_LOBEHUB_FORK_DIR        Independent fork directory; default is ../lobehub-platform.
   TEST_AGENT_WORKFLOW_*              Complete external Linux Runner settings override local placeholders.
+  TEST_AGENT_MEMORY_SERVICE_PORT      Local memory-service host port; default 18888.
+  TEST_AGENT_MEMORY_POSTGRES_PORT     Local memory pgvector host port; default 15433.
 USAGE
 }
 
@@ -152,6 +160,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --without-workflow)
       with_workflow=false
+      shift
+      ;;
+    --with-memory)
+      with_memory=true
       shift
       ;;
     --help|-h)
@@ -1035,6 +1047,20 @@ if [[ "${with_lobehub}" == "true" ]]; then
   load_env_file "${LOBEHUB_DEV_ENV_FILE}"
 fi
 
+if [[ "${with_memory}" == "true" ]]; then
+  [[ -x "${MEMORY_DEV_SCRIPT}" ]] || {
+    echo "QA memory development helper is missing or not executable: ${MEMORY_DEV_SCRIPT}" >&2
+    exit 1
+  }
+  export TEST_AGENT_DEV_LOG_DIR="${LOG_DIR}"
+  export TEST_AGENT_MEMORY_DEV_ENV_FILE="${TEST_AGENT_MEMORY_DEV_ENV_FILE:-${LOG_DIR}/memory/memory-dev.env}"
+  export TEST_AGENT_MEMORY_BACKEND_ENV_FILE="${TEST_AGENT_MEMORY_BACKEND_ENV_FILE:-${LOG_DIR}/memory/memory-backend.env}"
+  export TEST_AGENT_MEMORY_BACKEND_PORT="$(url_port "${backend_url}")"
+  "${MEMORY_DEV_SCRIPT}" prepare
+  # Java 只加载 enabled/url/api-key，不继承独立 pgvector 数据库密码。
+  load_env_file "${TEST_AGENT_MEMORY_BACKEND_ENV_FILE}"
+fi
+
 # 通用参数中的 $TEST_AGENT_ROOT 由 Java 进程展开；允许调用方显式覆盖以适配其他工作目录。
 # TESTAGENT 是早期本地测试库已使用的兼容别名，保留以避免公共配置路径下发给 manager 时变成字面量。
 export TEST_AGENT_ROOT="${TEST_AGENT_ROOT:-${ROOT_DIR}}"
@@ -1121,16 +1147,24 @@ echo "Sensitive environment values are loaded but not printed."
 echo "Builds run before stopping existing services; failed builds leave current services untouched."
 
 # 先统一构建：任一构建失败则直接退出，不会动到现有运行中的服务。
+if [[ "${with_memory}" == "true" ]]; then
+  "${MEMORY_DEV_SCRIPT}" build
+fi
 build_backend
 prepare_backend_runtime_jar
 build_opencode_manager
 build_frontend
 
-# 逐个服务「先 kill 原进程再启动」，按依赖顺序：后端 -> workflow -> opencode-manager -> 前端。
-# 后端最先：workflow和opencode-manager都需要平台能力，前端再连接两个控制面。
+# 逐个服务「先 kill 原进程再启动」，按依赖顺序：memory -> 后端 -> workflow -> opencode-manager -> 前端。
+# 平台进程中后端最先：workflow 和 opencode-manager 都需要平台能力，前端再连接两个控制面。
 
 if [[ "${with_workflow}" == "true" ]]; then
   "${WORKFLOW_DEV_SCRIPT}" stop
+fi
+
+# 0) 记忆数据面先完成 authenticated /ready；默认路径不探测、不停止已有记忆容器。
+if [[ "${with_memory}" == "true" ]]; then
+  "${MEMORY_DEV_SCRIPT}" start
 fi
 
 # 1) 后端
@@ -1177,6 +1211,10 @@ if [[ "${with_workflow}" == "true" ]]; then
 fi
 if [[ "${with_lobehub}" == "true" ]]; then
   echo "LobeHub:  ${LOBEHUB_DEV_APP_URL:-http://127.0.0.1:3210}"
+fi
+if [[ "${with_memory}" == "true" ]]; then
+  echo "Memory:   http://127.0.0.1:${TEST_AGENT_MEMORY_SERVICE_PORT:-18888}/memory-api/v1"
+  echo "Memory data: pgvector 127.0.0.1:${TEST_AGENT_MEMORY_POSTGRES_PORT:-15433}; settings ${TEST_AGENT_MEMORY_DEV_ENV_FILE}"
 fi
 echo "Process logs: ${LOG_DIR}"
 echo "Backend logs: ${BACKEND_APP_LOG_DIR}/backend.log, ${BACKEND_APP_LOG_DIR}/sse.log, ${BACKEND_APP_LOG_DIR}/error.log"

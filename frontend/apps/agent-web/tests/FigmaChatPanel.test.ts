@@ -3953,6 +3953,12 @@ describe("FigmaChatPanel", () => {
             updatedAt: "2026-06-25T09:02:00.000Z"
           }
         },
+        memoryUsageByRunId: {
+          [runId]: [
+            { runId, memoryId: "mem_1", scope: "PERSONAL_GLOBAL", rank: 1, tokenCount: 32, injectedAt: "2026-06-25T09:00:01.000Z" },
+            { runId, memoryId: "mem_2", scope: "TEAM_APPLICATION", rank: 2, tokenCount: 28, injectedAt: "2026-06-25T09:00:01.000Z" }
+          ]
+        },
         processStatus: { status: "READY", initializable: false, message: "ready" }
       },
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -3965,6 +3971,7 @@ describe("FigmaChatPanel", () => {
     const answerRow = timeline.get(".oc-text-part").element;
     const buttons = summary.findAll(".figma-chat-feedback-btn");
     expect(buttons).toHaveLength(2);
+    expect(summary.get(`[data-testid="run-memory-usage-${runId}"]`).text()).toContain("参考了 2 条记忆");
     expect(buttons[0].classes()).toContain("is-selected");
     expect(summary.get('[aria-label="展开已完成工作状态"]').attributes("aria-expanded")).toBe("false");
     expect(timeline.element.contains(summary.element)).toBe(true);

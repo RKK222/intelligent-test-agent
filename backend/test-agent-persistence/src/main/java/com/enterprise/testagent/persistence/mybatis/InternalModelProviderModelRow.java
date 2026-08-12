@@ -9,6 +9,7 @@ public record InternalModelProviderModelRow(
         String upstreamModelId,
         String displayName,
         Long contextLimit,
+        Integer embeddingDimension,
         boolean enabled,
         boolean capabilityChat,
         boolean capabilityTools,

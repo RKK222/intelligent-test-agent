@@ -56,7 +56,7 @@ packages/ui-kit
 packages/shared-types
 ```
 
-`apps/user-manual` 使用 VitePress 1.6 构建内置用户手册，输出到 `agent-web/public/help/` 并随主应用一起打包。手册使用浏览器本地全文索引，不依赖公网搜索、独立服务或数据库；`agent-web` 的 `dev` / `build` 会先自动构建手册。目录设计章节以标准工程目录为事实源，把开发已有与测试扩展合并为一棵可逐级展开的工程树；目录、Agent/workagent/Skill 名称、物理 Git、实现状态和职责统一在 `directory-mapping.md` 的 frontmatter 中维护，Vue 组件只负责展示。测试公共 Config 已存在的 Agent/workagent/Skill 使用真实名称并标记“已实现”，没有对应定义的规划项标记“未实现”并灰显；应用专属测试 Agent/workagent 归入测试设计、测试执行等具体活动，测试设计应用规约按测试对象类型展开；测试 Agent 下的公共规约和应用规约都属于测试范围，仅由 Git 标签区分测试公共与应用归属。`skills/` 以同级 `coding/`、`test/` 分别收口开发和测试 Skill。`docs/应用架构/` 合并开发应用关系与测试概述、应用场景说明书等场景测试资产，`docs/技术架构/` 只保留开发技术资产。目录名使用中性色，范围标签区分开发、测试、开发与测试、个人本地，Agent 形态标签区分 Agent/workagent，最右侧标签标明开发 AI Git、测试公共 AI Git、测试 AI Git 以及开发业务代码 Git。`agents/`、`skills/`、`docs/` 是多 Git 逻辑合并视图，不是新的物理仓库；页面同时说明 `spec`、稳定测试资产和建设责任，并只保留“整体目录”“内容与责任”两个视图。应用内 Help 固定章节清单必须同步注册对应 Markdown，保证首页入口、内嵌页面和宠物问答使用同一内容；宠物问答读取原始 Markdown 时会剥离仅供页面渲染的 frontmatter，只使用用户可见正文。
+`apps/user-manual` 使用 VitePress 1.6 构建内置用户手册，输出到 `agent-web/public/help/` 并随主应用一起打包。手册使用浏览器本地全文索引，不依赖公网搜索、独立服务或数据库；`agent-web` 的 `dev` / `build` 会先自动构建手册。长期记忆章节直接注册为应用内 Help 的独立主题，说明个人/团队记忆、证据和 Skill 提案，并供宠物问答使用同一 Markdown。目录设计章节以标准工程目录为事实源，把开发已有与测试扩展合并为一棵可逐级展开的工程树；目录、Agent/workagent/Skill 名称、物理 Git、实现状态和职责统一在 `directory-mapping.md` 的 frontmatter 中维护，Vue 组件只负责展示。测试公共 Config 已存在的 Agent/workagent/Skill 使用真实名称并标记“已实现”，没有对应定义的规划项标记“未实现”并灰显；应用专属测试 Agent/workagent 归入测试设计、测试执行等具体活动，测试设计应用规约按测试对象类型展开；测试 Agent 下的公共规约和应用规约都属于测试范围，仅由 Git 标签区分测试公共与应用归属。`skills/` 以同级 `coding/`、`test/` 分别收口开发和测试 Skill。`docs/应用架构/` 合并开发应用关系与测试概述、应用场景说明书等场景测试资产，`docs/技术架构/` 只保留开发技术资产。目录名使用中性色，范围标签区分开发、测试、开发与测试、个人本地，Agent 形态标签区分 Agent/workagent，最右侧标签标明开发 AI Git、测试公共 AI Git、测试 AI Git 以及开发业务代码 Git。`agents/`、`skills/`、`docs/` 是多 Git 逻辑合并视图，不是新的物理仓库；页面同时说明 `spec`、稳定测试资产和建设责任，并只保留“整体目录”“内容与责任”两个视图。应用内 Help 固定章节清单必须同步注册该 Markdown，保证首页入口、内嵌页面和宠物问答使用同一内容；宠物问答读取原始 Markdown 时会剥离仅供页面渲染的 frontmatter，只使用用户可见正文。
 
 `agent-web` 每次加载 Vite 配置时按北京时间生成 `VyyyyMMdd.HHmmss` 构建版本，并以只读编译常量固化到 bundle；设置弹窗左侧导航底部展示该版本。普通刷新或静态服务重启不会改变版本，只有重新构建前端产物才会变化。
 
@@ -83,7 +83,13 @@ packages/shared-types
 
 `apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent / Skill / MCP / Tool Hub。Agent 与 Skill 延续能力市场结构，包含远端能力概览、发现/分类目录、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；Skill 目录额外按日常工作（Worker）、测试（Test）、代码（Code）和其他筛选，测试细分测试设计、测试数据构造、测试执行、测试分析，代码细分白盒分析。用户推送默认进入“其他”，只有超级管理员可在详情页调整分类。MCP 与 Tool 复用顶部已加载的运行态目录，只读展示连接状态、工具标识和说明，不引入发布或引用语义。Hub 详情从左边缘拖拽调宽，支持页面内全屏。所有用户可读取远端精确快照，应用管理员可发布、引用、取消并重新引用，以及确认三方合并冲突；取消关系会立即退出应用引用库。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
 
-活动栏页面级入口使用稳定 URI：工作台 `/workbench`、工具箱 `/toolbox`、超级管理员控制台 `/system`、能力库 `/hub`，左下角设置弹窗使用 `/settings`。历史根路径 `/` 只作兼容入口并跳转到 `/workbench`；浏览器刷新、前进/后退和登录回跳均以命名路由恢复对应页面，工具箱、控制台与能力库继续共用沉浸式布局快照。通用问答 `/lobehub/launch` 和长程任务 `/workflow-chat` 保留既有发布开关与独立页面边界。
+活动栏页面级入口使用稳定 URI：工作台 `/workbench`、工具箱 `/toolbox`、记忆 `/memories`、超级管理员控制台 `/system`、能力库 `/hub`，左下角设置弹窗使用 `/settings`。历史根路径 `/` 只作兼容入口并跳转到 `/workbench`；浏览器刷新、前进/后退和登录回跳均以命名路由恢复对应页面，工具箱、记忆、控制台与能力库继续共用沉浸式布局快照。通用问答 `/lobehub/launch` 和长程任务 `/workflow-chat` 保留既有发布开关与独立页面边界。
+
+### 通用长期记忆中心
+
+`/memories` 是受登录保护的沉浸式路由，活动栏 `BrainCircuit` 入口与 `/toolbox`、`/system`、`/hub` 共用布局快照和浏览器前进/后退恢复。页面固定分为“我的记忆、团队记忆、Skill 提案”：个人记忆可选择全局或当前 Application 范围；团队记忆只能由用户从自己已生效的个人记忆手工提交，并由当前 Application 的 `APP_ADMIN` 审核，不从对话自动产生。Skill 提案审核通过后才生成可编辑 `SKILL.md`，实际文件、Git 和发布仍进入既有 Hub 流程。证据只保留 `sessionId`、`sessionTitle`、`runId` 和 `transcriptAvailable` 等安全引用，不复制对话正文；所有有权查看记忆的人都能看到对话标题和 ID，只有 Session 所有者才能打开 `/s/{sessionId}` 阅读完整原始对话。白名单未开放时页面显示无侵入空态，既有对话保持原行为。
+
+成功 Run 的完成摘要通过批量 HTTP 恢复实际注入记录，仅在记录非空时显示“参考了 N 条记忆”；不修改 RunEvent SSE，也不根据检索候选猜测使用情况。学习链路把当前会话的 USER/ASSISTANT 消息作为一次请求上下文，使用 Mem0 原生 `add(messages, infer=true)` 且不传自定义提示词；平台和 Mem0 独立库都不新建对话副本。系统管理“记忆能力”集中显示 Mem0 节点、固定 CHAT 模型、可空的企业 Embedding profile、固定 CPU BGE profile、双集合投影状态、积压数和灰度白名单。白名单通过平台用户目录搜索选择。页面复用 `--ta-shell-*` 主题变量，个人蓝、团队青、候选琥珀和冲突红只承担记忆治理语义；健康卡和配置区按嵌入面板宽度自动换列，在暗色、窄屏、Reduced Motion 和中栏布局下不产生横向滚动。
 
 应用源码快照的仓库、分支、目录树、物化、保留期调整、重试、打开、最近选择和持久化操作查询统一由 `packages/backend-api` 调用平台 workspace-management API；`listAppSourceTree` 保持节点数组语义，新的 `getAppSourceTreeSnapshot` 在同一 URL 上请求 `includeCommit=true` 并返回 `{targetCommit,nodes}`，调用方把该固定提交直接作为物化 `expectedTreeCommit`。选择项使用 `{path,type}`，下载状态固定为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。物化进度使用独立的一次性 ticket WebSocket；client 单次连接不自行重连，意外 `error/close` 会向调用方报告安全失败，工作台按有界退避串行执行“数据库 snapshot → 新 ticket → 新 WebSocket”。主动关闭只停止观察，不取消后台任务。保留期调整是同步 PATCH，不创建进度连接。`packages/shared-types` 保存严格判别的安全 DTO/envelope：成功帧必须完整包含 operation/operationId/traceId，失败帧必须包含 `FAILED` 与安全错误；runtime validator 拒绝畸形消息，业务回调异常不会被二次包装为消息格式错误。RunEvent union 不增加应用源码事件。
 

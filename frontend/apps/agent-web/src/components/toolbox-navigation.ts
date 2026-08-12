@@ -1,8 +1,8 @@
-export type WorkbenchCenterMode = "editor" | "diff" | "system" | "hub" | "toolbox";
-export type RoutedCenterMode = Extract<WorkbenchCenterMode, "system" | "hub" | "toolbox">;
+export type WorkbenchCenterMode = "editor" | "diff" | "system" | "hub" | "toolbox" | "memories";
+export type RoutedCenterMode = Extract<WorkbenchCenterMode, "system" | "hub" | "toolbox" | "memories">;
 export type NonRoutedCenterMode = Exclude<WorkbenchCenterMode, RoutedCenterMode>;
 
-const ROUTED_CENTER_MODES: readonly RoutedCenterMode[] = ["system", "hub", "toolbox"];
+const ROUTED_CENTER_MODES: readonly RoutedCenterMode[] = ["system", "hub", "toolbox", "memories"];
 
 /** 活动栏沉浸式页面使用同名路由，集中校验避免组件内散落字符串分支。 */
 export function routedCenterModeFromRouteName(routeName: unknown): RoutedCenterMode | null {
@@ -25,7 +25,7 @@ export type ImmersivePanelSnapshot = {
 };
 
 export function isImmersiveCenterMode(mode: WorkbenchCenterMode): boolean {
-  return mode === "system" || mode === "hub" || mode === "toolbox";
+  return mode === "system" || mode === "hub" || mode === "toolbox" || mode === "memories";
 }
 
 /** 沉浸式中心视图共用一次快照，互相切换时不覆盖用户进入前的面板状态。 */

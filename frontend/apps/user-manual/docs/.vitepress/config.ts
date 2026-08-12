@@ -52,6 +52,7 @@ export default defineConfig({
           { text: "引用配置", link: "/guide/reference-config" },
           { text: "开发与测试目录", link: "/guide/directory-mapping" },
           { text: "对话与上下文", link: "/guide/conversation" },
+          { text: "长期记忆", link: "/guide/memory" },
           { text: "Agent 与 Skill 配置", link: "/guide/agent-config" },
           { text: "常见问题与排查", link: "/guide/faq" }
         ]

@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.QaMemoryMapper">
+
+    <resultMap id="MemoryMap" type="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$MemoryRow">
+        <constructor>
+            <arg column="memory_id" javaType="java.lang.String"/>
+            <arg column="mem0_memory_id" javaType="java.lang.String"/>
+            <arg column="scope" javaType="java.lang.String"/>
+            <arg column="owner_user_id" javaType="java.lang.String"/>
+            <arg column="application_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="source" javaType="java.lang.String"/>
+            <arg column="task_types_csv" javaType="java.lang.String"/>
+            <arg column="display_summary" javaType="java.lang.String"/>
+            <arg column="confidence" javaType="java.math.BigDecimal"/>
+            <arg column="distinct_session_count" javaType="_int"/>
+            <arg column="distinct_user_count" javaType="_int"/>
+            <arg column="first_observed_at" javaType="java.time.Instant"/>
+            <arg column="last_observed_at" javaType="java.time.Instant"/>
+            <arg column="confirmed_at" javaType="java.time.Instant"/>
+            <arg column="superseded_by_memory_id" javaType="java.lang.String"/>
+            <arg column="created_by_user_id" javaType="java.lang.String"/>
+            <arg column="version" javaType="_long"/>
+            <arg column="vector_sync_status" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="MemoryColumns">
+        memory_id, mem0_memory_id, scope, owner_user_id, application_id, status, source,
+        task_types_csv, display_summary, confidence, distinct_session_count, distinct_user_count,
+        first_observed_at, last_observed_at, confirmed_at, superseded_by_memory_id,
+        created_by_user_id, version, vector_sync_status, created_at, updated_at
+    </sql>
+
+    <sql id="MemoryValues">
+        #{memoryId}, #{mem0MemoryId}, #{scope}, #{ownerUserId}, #{applicationId}, #{status}, #{source},
+        #{taskTypesCsv}, #{displaySummary}, #{confidence}, #{distinctSessionCount}, #{distinctUserCount},
+        #{firstObservedAt}, #{lastObservedAt}, #{confirmedAt}, #{supersededByMemoryId},
+        #{createdByUserId}, #{version}, #{vectorSyncStatus}, #{createdAt}, #{updatedAt}
+    </sql>
+
+    <select id="findMemory" resultMap="MemoryMap">
+        select <include refid="MemoryColumns"/> from qa_memories where memory_id = #{memoryId}
+    </select>
+    <select id="findMemoryForUpdate" resultMap="MemoryMap">
+        select <include refid="MemoryColumns"/> from qa_memories where memory_id = #{memoryId} for update
+    </select>
+    <select id="findMemoryByMem0Id" resultMap="MemoryMap">
+        select <include refid="MemoryColumns"/> from qa_memories where mem0_memory_id = #{mem0MemoryId}
+    </select>
+
+    <sql id="PersonalWhere">
+        owner_user_id = #{userId} and scope in ('PERSONAL_GLOBAL', 'PERSONAL_APPLICATION')
+        <if test="applicationId != null and applicationId != ''">
+            and (application_id is null or application_id = #{applicationId})
+        </if>
+        <if test="status != null and status != ''">and status = #{status}</if>
+    </sql>
+
+    <select id="listPersonal" resultMap="MemoryMap">
+        select <include refid="MemoryColumns"/> from qa_memories
+        where <include refid="PersonalWhere"/>
+        order by updated_at desc, memory_id asc limit #{limit} offset #{offset}
+    </select>
+    <select id="countPersonal" resultType="long">
+        select count(*) from qa_memories where <include refid="PersonalWhere"/>
+    </select>
+
+    <sql id="TeamWhere">
+        m.scope = 'TEAM_APPLICATION'
+        and exists (
+            select 1 from application_members am
+            where am.app_id = m.application_id and am.user_id = #{userId} and am.deleted_at is null
+        )
+        <if test="applicationId != null and applicationId != ''">and m.application_id = #{applicationId}</if>
+        <if test="status != null and status != ''">and m.status = #{status}</if>
+    </sql>
+
+    <select id="listTeam" resultMap="MemoryMap">
+        select <include refid="MemoryColumns"/> from qa_memories m
+        where <include refid="TeamWhere"/>
+        order by m.updated_at desc, m.memory_id asc limit #{limit} offset #{offset}
+    </select>
+    <select id="countTeam" resultType="long">
+        select count(*) from qa_memories m where <include refid="TeamWhere"/>
+    </select>
+
+    <insert id="insertMemory">
+        insert into qa_memories(
+            <include refid="MemoryColumns"/>
+        ) values (
+            <include refid="MemoryValues"/>
+        )
+    </insert>
+
+    <insert id="insertMemoryIfAbsentByMem0Id" databaseId="postgresql">
+        insert into qa_memories(
+            <include refid="MemoryColumns"/>
+        ) values (
+            <include refid="MemoryValues"/>
+        ) on conflict (mem0_memory_id) do nothing
+    </insert>
+    <insert id="insertMemoryIfAbsentByMem0Id">
+        insert into qa_memories(
+            <include refid="MemoryColumns"/>
+        )
+        select <include refid="MemoryValues"/>
+        where not exists (
+            select 1 from qa_memories where mem0_memory_id = #{mem0MemoryId}
+        )
+    </insert>
+
+    <update id="updateMemory">
+        update qa_memories set
+            mem0_memory_id = #{row.mem0MemoryId}, scope = #{row.scope},
+            owner_user_id = #{row.ownerUserId}, application_id = #{row.applicationId},
+            status = #{row.status}, task_types_csv = #{row.taskTypesCsv},
+            display_summary = #{row.displaySummary}, confidence = #{row.confidence},
+            distinct_session_count = #{row.distinctSessionCount}, distinct_user_count = #{row.distinctUserCount},
+            first_observed_at = #{row.firstObservedAt}, last_observed_at = #{row.lastObservedAt},
+            confirmed_at = #{row.confirmedAt}, superseded_by_memory_id = #{row.supersededByMemoryId},
+            version = #{row.version}, vector_sync_status = #{row.vectorSyncStatus}, updated_at = #{row.updatedAt}
+        where memory_id = #{row.memoryId} and version = #{expectedVersion}
+    </update>
+
+    <insert id="insertEvidence">
+        insert into qa_memory_evidence(
+            evidence_id, memory_id, run_id, session_id, observed_user_id, source, evidence_summary, observed_at
+        ) values (
+            #{evidenceId}, #{memoryId}, #{runId}, #{sessionId}, #{observedUserId}, #{source}, #{evidenceSummary}, #{observedAt}
+        )
+    </insert>
+    <select id="listEvidence" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$EvidenceRow">
+        select e.evidence_id, e.memory_id, e.run_id, e.session_id,
+               s.title as session_title, s.created_by_user_id as session_owner_user_id,
+               e.observed_user_id, e.source, e.evidence_summary, e.observed_at
+        from qa_memory_evidence e
+        left join sessions s on s.session_id = e.session_id
+        where e.memory_id = #{memoryId}
+        order by e.observed_at desc, e.evidence_id asc
+    </select>
+
+    <insert id="insertReview">
+        insert into qa_memory_reviews(
+            review_id, memory_id, application_id, submitted_by_user_id, reviewed_by_user_id,
+            decision, comment, submitted_at, reviewed_at
+        ) values (
+            #{reviewId}, #{memoryId}, #{applicationId}, #{submittedByUserId}, #{reviewedByUserId},
+            #{decision}, #{comment}, #{submittedAt}, #{reviewedAt}
+        )
+    </insert>
+    <select id="listReviews" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$ReviewRow">
+        select review_id, memory_id, application_id, submitted_by_user_id, reviewed_by_user_id,
+               decision, comment, submitted_at, reviewed_at
+        from qa_memory_reviews where memory_id = #{memoryId}
+        order by submitted_at desc, review_id asc
+    </select>
+
+    <select id="findApplicationIdByRuntimeWorkspace" resultType="string">
+        select mapped.app_id from (
+            select app_id, 1 as priority from personal_workspaces where runtime_workspace_id = #{workspaceId}
+            union all
+            select app_id, 2 as priority from application_workspace_versions where runtime_workspace_id = #{workspaceId}
+        ) mapped order by mapped.priority limit 1
+    </select>
+
+    <insert id="insertLearningJob" databaseId="postgresql">
+        insert into qa_memory_learning_outbox(
+            job_id, run_id, session_id, workspace_id, user_id, application_id, agent_id,
+            selected_model_id, status, attempts, available_at, claimed_by, lease_until,
+            last_error_code, created_at, updated_at
+        ) values (
+            #{jobId}, #{runId}, #{sessionId}, #{workspaceId}, #{userId}, #{applicationId}, #{agentId},
+            #{selectedModelId}, #{status}, #{attempts}, #{availableAt}, #{claimedBy}, #{leaseUntil},
+            #{lastErrorCode}, #{createdAt}, #{updatedAt}
+        ) on conflict (run_id) do nothing
+    </insert>
+    <insert id="insertLearningJob">
+        insert into qa_memory_learning_outbox(
+            job_id, run_id, session_id, workspace_id, user_id, application_id, agent_id,
+            selected_model_id, status, attempts, available_at, claimed_by, lease_until,
+            last_error_code, created_at, updated_at
+        )
+        select #{jobId}, #{runId}, #{sessionId}, #{workspaceId}, #{userId}, #{applicationId}, #{agentId},
+               #{selectedModelId}, #{status}, #{attempts}, #{availableAt}, #{claimedBy}, #{leaseUntil},
+               #{lastErrorCode}, #{createdAt}, #{updatedAt}
+        where not exists (select 1 from qa_memory_learning_outbox where run_id = #{runId})
+    </insert>
+    <select id="listClaimableLearningJobs" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$LearningJobRow">
+        select job_id, run_id, session_id, workspace_id, user_id, application_id, agent_id,
+               selected_model_id, status, attempts, available_at, claimed_by, lease_until,
+               last_error_code, created_at, updated_at
+        from qa_memory_learning_outbox
+        where available_at &lt;= #{now}
+          and (status = 'PENDING' or (status = 'PROCESSING' and lease_until &lt; #{now}))
+        order by available_at, created_at limit #{limit}
+    </select>
+    <update id="claimLearningJob">
+        update qa_memory_learning_outbox set status = 'PROCESSING', claimed_by = #{workerId},
+            lease_until = #{leaseUntil}, updated_at = #{now}
+        where job_id = #{jobId} and available_at &lt;= #{now}
+          and (status = 'PENDING' or (status = 'PROCESSING' and lease_until &lt; #{now}))
+    </update>
+    <select id="findLearningJob" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$LearningJobRow">
+        select job_id, run_id, session_id, workspace_id, user_id, application_id, agent_id,
+               selected_model_id, status, attempts, available_at, claimed_by, lease_until,
+               last_error_code, created_at, updated_at
+        from qa_memory_learning_outbox where job_id = #{jobId}
+    </select>
+    <update id="completeLearningJob">
+        update qa_memory_learning_outbox set status = 'COMPLETED', claimed_by = null, lease_until = null,
+            last_error_code = null, updated_at = #{now}
+        where job_id = #{jobId} and status = 'PROCESSING' and claimed_by = #{workerId}
+    </update>
+    <update id="retryLearningJob">
+        update qa_memory_learning_outbox set
+            status = case when attempts + 1 >= #{maxAttempts} then 'DEAD' else 'PENDING' end,
+            attempts = attempts + 1, available_at = #{availableAt}, claimed_by = null, lease_until = null,
+            last_error_code = #{errorCode}, updated_at = #{now}
+        where job_id = #{jobId} and status = 'PROCESSING' and claimed_by = #{workerId}
+    </update>
+    <select id="countLearningJobs" resultType="long">
+        select count(*) from qa_memory_learning_outbox where status = #{status}
+    </select>
+
+    <insert id="insertUsage" databaseId="postgresql">
+        insert into qa_memory_run_usage(
+            run_id, memory_id, user_id, application_id, scope, rank_index, token_count, injected_at
+        ) values (
+            #{runId}, #{memoryId}, #{userId}, #{applicationId}, #{scope}, #{rankIndex}, #{tokenCount}, #{injectedAt}
+        ) on conflict (run_id, memory_id) do nothing
+    </insert>
+    <insert id="insertUsage">
+        insert into qa_memory_run_usage(
+            run_id, memory_id, user_id, application_id, scope, rank_index, token_count, injected_at
+        )
+        select #{runId}, #{memoryId}, #{userId}, #{applicationId}, #{scope},
+               #{rankIndex}, #{tokenCount}, #{injectedAt}
+        where not exists (
+            select 1 from qa_memory_run_usage where run_id = #{runId} and memory_id = #{memoryId}
+        )
+    </insert>
+    <select id="listUsage" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$UsageRow">
+        select run_id, memory_id, user_id, application_id, scope, rank_index, token_count, injected_at
+        from qa_memory_run_usage where user_id = #{userId}
+        <choose>
+            <when test="runIds != null and !runIds.isEmpty()">
+                and run_id in
+                <foreach collection="runIds" item="runId" open="(" separator="," close=")">#{runId}</foreach>
+            </when>
+            <otherwise>and 1 = 0</otherwise>
+        </choose>
+        order by run_id, rank_index
+    </select>
+
+    <select id="findSkillProposal" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$SkillProposalRow">
+        select proposal_id, memory_id, application_id, title, skill_md_draft, status,
+               created_by_user_id, reviewed_by_user_id, published_asset_id, version, created_at, updated_at
+        from qa_memory_skill_proposals where proposal_id = #{proposalId}
+    </select>
+    <sql id="SkillProposalWhere">
+        exists (
+            select 1 from application_members am
+            where am.app_id = p.application_id and am.user_id = #{userId} and am.deleted_at is null
+        )
+        <if test="applicationId != null and applicationId != ''">and p.application_id = #{applicationId}</if>
+    </sql>
+    <select id="listSkillProposals" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$SkillProposalRow">
+        select p.proposal_id, p.memory_id, p.application_id, p.title, p.skill_md_draft, p.status,
+               p.created_by_user_id, p.reviewed_by_user_id, p.published_asset_id,
+               p.version, p.created_at, p.updated_at
+        from qa_memory_skill_proposals p join qa_memories m on m.memory_id = p.memory_id
+        where <include refid="SkillProposalWhere"/>
+        order by p.updated_at desc, p.proposal_id asc limit #{limit} offset #{offset}
+    </select>
+    <select id="countSkillProposals" resultType="long">
+        select count(*) from qa_memory_skill_proposals p join qa_memories m on m.memory_id = p.memory_id
+        where <include refid="SkillProposalWhere"/>
+    </select>
+    <insert id="insertSkillProposal">
+        insert into qa_memory_skill_proposals(
+            proposal_id, memory_id, application_id, title, skill_md_draft, status,
+            created_by_user_id, reviewed_by_user_id, published_asset_id, version, created_at, updated_at
+        ) values (
+            #{proposalId}, #{memoryId}, #{applicationId}, #{title}, #{skillMdDraft}, #{status},
+            #{createdByUserId}, #{reviewedByUserId}, #{publishedAssetId}, #{version}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+    <update id="updateSkillProposal">
+        update qa_memory_skill_proposals set title = #{row.title}, skill_md_draft = #{row.skillMdDraft},
+            status = #{row.status}, reviewed_by_user_id = #{row.reviewedByUserId},
+            published_asset_id = #{row.publishedAssetId}, version = #{row.version}, updated_at = #{row.updatedAt}
+        where proposal_id = #{row.proposalId} and version = #{expectedVersion}
+    </update>
+
+    <select id="isWhitelisted" resultType="boolean">
+        select case when count(*) > 0 then true else false end
+        from qa_memory_whitelist where user_id = #{userId} and enabled = true
+    </select>
+    <select id="listWhitelist" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$WhitelistRow">
+        select user_id, enabled, updated_by_user_id, created_at, updated_at
+        from qa_memory_whitelist order by updated_at desc, user_id limit #{limit} offset #{offset}
+    </select>
+    <select id="countWhitelist" resultType="long">select count(*) from qa_memory_whitelist</select>
+    <insert id="upsertWhitelist" databaseId="postgresql">
+        insert into qa_memory_whitelist(user_id, enabled, updated_by_user_id, created_at, updated_at)
+        values (#{userId}, #{enabled}, #{updatedByUserId}, #{createdAt}, #{updatedAt})
+        on conflict (user_id) do update set enabled = excluded.enabled,
+            updated_by_user_id = excluded.updated_by_user_id, updated_at = excluded.updated_at
+    </insert>
+    <insert id="upsertWhitelist">
+        merge into qa_memory_whitelist target
+        using (values (#{userId}, #{enabled}, #{updatedByUserId}, #{createdAt}, #{updatedAt}))
+            incoming(user_id, enabled, updated_by_user_id, created_at, updated_at)
+        on target.user_id = incoming.user_id
+        when matched then update set enabled = incoming.enabled,
+            updated_by_user_id = incoming.updated_by_user_id, updated_at = incoming.updated_at
+        when not matched then insert(user_id, enabled, updated_by_user_id, created_at, updated_at)
+            values(incoming.user_id, incoming.enabled, incoming.updated_by_user_id,
+                   incoming.created_at, incoming.updated_at)
+    </insert>
+    <delete id="removeWhitelist">delete from qa_memory_whitelist where user_id = #{userId}</delete>
+
+    <select id="loadSettings" resultType="com.enterprise.testagent.persistence.mybatis.QaMemoryRows$SettingsRow">
+        select primary_chat_model_id, primary_embedding_model_id, cpu_embedding_model_id,
+               version, updated_by_user_id, updated_at
+        from qa_memory_settings where setting_key = 'DEFAULT'
+    </select>
+    <update id="updateSettings">
+        update qa_memory_settings set primary_chat_model_id = #{row.primaryChatModelId},
+            primary_embedding_model_id = #{row.primaryEmbeddingModelId},
+            cpu_embedding_model_id = #{row.cpuEmbeddingModelId},
+            version = #{row.version}, updated_by_user_id = #{row.updatedByUserId}, updated_at = #{row.updatedAt}
+        where setting_key = 'DEFAULT' and version = #{expectedVersion}
+    </update>
+</mapper>

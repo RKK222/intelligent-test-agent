@@ -31,7 +31,7 @@ import {
   subscribeUserNotifications,
   type RunEventRawMessage
 } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
+import { BookOpenText, Boxes, BrainCircuit, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -50,6 +50,7 @@ import type {
   FileSearchResult,
   FileTreeEntry,
   ManagedApplication,
+  MemoryUsageView,
   MessagePart,
   PageResponse,
   PromptPart,
@@ -224,6 +225,7 @@ import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import { createSupportAccessShortcut } from "./support-access-shortcut";
 import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
+import MemoryCenter from "./MemoryCenter.vue";
 import {
   isRoutedCenterMode,
   routeCenterTransition,
@@ -713,6 +715,14 @@ async function selectActivityCenterMode(mode: WorkbenchCenterMode) {
   centerMode.value = mode;
 }
 
+async function toggleMemories() {
+  if (route.name === "memories") {
+    await selectActivityCenterMode(centerModeBeforeRoute.value);
+    return;
+  }
+  await selectActivityCenterMode("memories");
+}
+
 /** SUPER_ADMIN 可在工作台任意位置三击 Shift，直接进入仍需二次授权的问题排查页。 */
 async function openSupportAccessFromShortcut() {
   await selectActivityCenterMode("system");
@@ -1029,6 +1039,7 @@ onBeforeUnmount(() => {
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
 const runFeedbacks = ref<Record<string, AiRunFeedback | null>>({});
+const memoryUsageByRunId = ref<Record<string, MemoryUsageView[]>>({});
 const feedbackSubmitting = ref<Record<string, boolean>>({});
 const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
 const assistantSummaryMessageIdsByRunId = ref<Record<string, string>>({});
@@ -9829,7 +9840,7 @@ function applyRunEventWorkbenchProjection(
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "run";
@@ -9848,7 +9859,7 @@ function applyRunEventWorkbenchProjection(
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "session";
@@ -10427,7 +10438,7 @@ async function refreshWorkspaceGitDiff(options: {
     vcsDiffFiles.value = nextFiles;
     if (diffSource.value === "vcs") {
       diffFiles.value = nextFiles;
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterVcsRefresh(centerMode.value, diffSource.value, nextFiles);
       }
       if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
@@ -10962,6 +10973,7 @@ function handleNewConversation() {
   clearAutoRetryState();
   dispatchChat({ type: "reset" });
   runFeedbacks.value = {};
+  memoryUsageByRunId.value = {};
   feedbackSubmitting.value = {};
   platformMessageIdsByRemoteId.value = {};
   assistantSummaryMessageIdsByRunId.value = {};
@@ -11159,6 +11171,30 @@ async function loadFeedbacksForRunIds(
       dispatchChat({ type: "run.statuses.loaded", statuses });
     }
   }
+  await loadMemoryUsageForRunIds(runIds, expectedSessionId, interactionIsCurrent);
+}
+
+/** 记忆使用记录走批量 HTTP 恢复；白名单未开放或服务降级时静默保持无徽标。 */
+async function loadMemoryUsageForRunIds(
+  runIds: string[],
+  expectedSessionId?: string,
+  interactionIsCurrent: () => boolean = () => true
+) {
+  if (runIds.length === 0) return;
+  const loaded: Record<string, MemoryUsageView[]> = Object.fromEntries(runIds.map((runId) => [runId, []]));
+  try {
+    for (let index = 0; index < runIds.length; index += 200) {
+      const usages = await api.queryQaMemoryRunUsage(runIds.slice(index, index + 200));
+      for (const usage of usages) {
+        (loaded[usage.runId] ??= []).push(usage);
+      }
+    }
+  } catch {
+    return;
+  }
+  if (interactionIsCurrent() && (!expectedSessionId || session.value?.sessionId === expectedSessionId)) {
+    memoryUsageByRunId.value = { ...memoryUsageByRunId.value, ...loaded };
+  }
 }
 
 function handleSubmitFeedback(payload: AiRunFeedbackPayload & { runId: string }) {
@@ -11297,6 +11333,17 @@ async function handleLogout() {
           >
             <Wrench class="figma-activity-icon" :stroke-width="1.5" />
             <span class="figma-activity-text">工具箱</span>
+          </button>
+          <button
+            type="button"
+            :class="['figma-activity-btn figma-activity-btn--memories', centerMode === 'memories' && 'figma-activity-btn--active']"
+            aria-label="长期记忆"
+            title="记忆中心"
+            data-testid="memory-activity-button"
+            @click="toggleMemories"
+          >
+            <BrainCircuit class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">记忆</span>
           </button>
           <button
             v-if="canUseLobehub"
@@ -11472,6 +11519,13 @@ async function handleLogout() {
       <main class="managed-editor-main">
         <template v-if="centerMode === 'toolbox'">
           <ToolboxPanel />
+        </template>
+        <template v-else-if="centerMode === 'memories'">
+          <MemoryCenter
+            :selected-app-id="selectedAppId"
+            :can-manage-team="isAppAdmin"
+            @open-skill-hub="toggleAgentSkillHub"
+          />
         </template>
         <template v-else-if="centerMode === 'hub'">
           <AgentSkillHub
@@ -11809,6 +11863,7 @@ async function handleLogout() {
           :selected-provider="selectedProvider"
           :selected-model="selectedModel"
           :run-feedbacks="runFeedbacks"
+          :memory-usage-by-run-id="memoryUsageByRunId"
           :feedback-submitting="feedbackSubmitting"
           :run-statuses-by-run-id="chatState.runStatusesByRunId"
           :commands="commands"

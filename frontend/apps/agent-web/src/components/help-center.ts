@@ -5,6 +5,7 @@ import faqManual from "../../../user-manual/docs/guide/faq.md?raw";
 import featureOverviewManual from "../../../user-manual/docs/guide/feature-overview.md?raw";
 import firstTimeSetupManual from "../../../user-manual/docs/guide/first-time-setup.md?raw";
 import gettingStartedManual from "../../../user-manual/docs/guide/getting-started.md?raw";
+import memoryManual from "../../../user-manual/docs/guide/memory.md?raw";
 import processInitializationManual from "../../../user-manual/docs/guide/process-initialization.md?raw";
 import referenceConfigManual from "../../../user-manual/docs/guide/reference-config.md?raw";
 import settingsManual from "../../../user-manual/docs/guide/settings.md?raw";
@@ -20,6 +21,7 @@ export type HelpTopicId =
   | "reference-config"
   | "directory-mapping"
   | "conversation"
+  | "memory"
   | "agent-config"
   | "faq";
 
@@ -99,6 +101,13 @@ export const HELP_TOPICS: HelpTopic[] = [
     description: "@、#、附件与旁路问答",
     path: "guide/conversation.html",
     content: conversationManual
+  },
+  {
+    id: "memory",
+    label: "长期记忆",
+    description: "个人、团队记忆与 Skill 提案",
+    path: "guide/memory.html",
+    content: memoryManual
   },
   {
     id: "agent-config",

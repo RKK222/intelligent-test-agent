@@ -61,6 +61,10 @@ if [[ "${restart_help}" != *"--without-workflow"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document the workflow opt-out"
 fi
+if [[ "${restart_help}" != *"--with-memory"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document the opt-in QA memory data plane"
+fi
 if ! grep -Fq 'with_workflow=true' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must start the workflow control plane by default"
 fi
@@ -69,6 +73,28 @@ if ! grep -Fq '"${WORKFLOW_DEV_SCRIPT}" prepare' "${ROOT_DIR}/restart-dev-servic
 fi
 if ! grep -Fq 'with_lobehub=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must keep LobeHub disabled by default"
+fi
+if ! grep -Fq 'with_memory=false' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must keep QA memory disabled by default"
+fi
+MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
+MEMORY_DEV_COMPOSE="${ROOT_DIR}/deploy/dev/memory-compose.yml"
+[[ -x "${MEMORY_DEV_SCRIPT}" ]] || fail "QA memory development helper missing or not executable: ${MEMORY_DEV_SCRIPT}"
+[[ -f "${MEMORY_DEV_COMPOSE}" ]] || fail "QA memory development Compose file missing: ${MEMORY_DEV_COMPOSE}"
+run_check "QA memory dev service script bash syntax" bash -n "${MEMORY_DEV_SCRIPT}"
+run_check "QA memory dev service script help" bash "${MEMORY_DEV_SCRIPT}" --help
+run_check "QA memory dev service behavior" bash "${ROOT_DIR}/tools/memory-dev-services-test.sh"
+if grep -Eq 'image:.*:latest([^-]|$)' "${MEMORY_DEV_COMPOSE}"; then
+  fail "QA memory development dependencies must not use latest tags"
+fi
+if ! grep -Fq 'read_only: true' "${MEMORY_DEV_COMPOSE}" || ! grep -Fq 'cap_drop:' "${MEMORY_DEV_COMPOSE}"; then
+  fail "QA memory service container must keep the read-only and dropped-capability boundary"
+fi
+if grep -Fq 'source "${ENV_FILE}"' "${MEMORY_DEV_SCRIPT}"; then
+  fail "QA memory helper must parse generated dotenv as data instead of executing it"
+fi
+if ! grep -Fq 'load_env_file "${TEST_AGENT_MEMORY_BACKEND_ENV_FILE}"' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must load only the Java-safe memory dotenv"
 fi
 if ! grep -Fq 'screen -S "${screen_id}" -X quit' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must close cross-worktree screen sessions by their full identifier"
