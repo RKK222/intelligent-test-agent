@@ -9545,6 +9545,7 @@ test("pet mini games support tetris, minesweeper, sudoku, snake, pinball and gol
 
   await page.getByTestId("pet-game-open-tetris").click();
   await expect(page.getByTestId("pet-tetris").locator(".pet-tetris-cell")).toHaveCount(160);
+  await expect(page.getByTestId("pet-tetris-level")).toContainText("随机档 1");
   await page.getByRole("button", { name: "右移" }).click();
   await page.getByRole("button", { name: "旋转" }).click();
   await page.getByRole("button", { name: "直接落下" }).click();
@@ -9585,6 +9586,7 @@ test("pet mini games support tetris, minesweeper, sudoku, snake, pinball and gol
   await expect(pinball.locator(".pet-pinball-drop-target")).toHaveCount(3);
   await expect(pinball.locator(".pet-pinball-sling")).toHaveCount(2);
   await expect(pinball).toContainText("连接 M / I / M / O 四座中继");
+  await expect(pinball.getByTestId("pet-pinball-difficulty")).toContainText("Lv1");
   const launcher = pinball.getByRole("button", { name: "按住蓄力，松开发射弹珠" });
   await launcher.dispatchEvent("pointerdown", { pointerId: 1 });
   await page.waitForTimeout(100);
@@ -9614,10 +9616,11 @@ test("pet mini games support tetris, minesweeper, sudoku, snake, pinball and gol
   const miner = page.getByTestId("pet-gold-miner");
   await expect(miner.getByTestId("pet-miner-board")).toBeVisible();
   await expect(miner.locator(".pet-miner-item")).toHaveCount(8);
+  await expect(miner.getByTestId("pet-miner-difficulty")).toContainText("Lv1 · 重载矿脉");
   await page.waitForTimeout(1_040);
   await miner.getByRole("button", { name: "放下钩索" }).click();
   await expect(miner).toContainText(/钩索下探中|回收 大金块/);
-  await expect(miner.getByTestId("pet-miner-score")).toHaveText("¥520", { timeout: 2_000 });
+  await expect(miner.getByTestId("pet-miner-score")).toHaveText("¥541", { timeout: 2_000 });
   await expect(miner.locator(".pet-miner-item")).toHaveCount(7);
   await miner.getByRole("button", { name: "暂停黄金矿工" }).click();
   await expect(miner).toContainText("勘探暂停");

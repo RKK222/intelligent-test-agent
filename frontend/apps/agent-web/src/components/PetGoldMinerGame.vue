@@ -15,6 +15,14 @@ type MinerItem = {
   y: number;
   rotation: number;
 };
+type MinerChallenge = {
+  id: "heavy" | "rapid" | "short";
+  label: string;
+  swingSpeedStep: number;
+  timePenaltyStepMs: number;
+  weightStep: number;
+  valueStep: number;
+};
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true });
 
@@ -30,6 +38,13 @@ const MINER_SWING_SPEED = 54;
 const MINER_EXTEND_SPEED = 285;
 const MINER_EMPTY_RETRACT_SPEED = 380;
 const MINER_BASE_TARGET = 1_600;
+const MINER_MAX_DIFFICULTY = 5;
+
+const MINER_CHALLENGES: MinerChallenge[] = [
+  { id: "heavy", label: "重载矿脉", swingSpeedStep: 0, timePenaltyStepMs: 0, weightStep: 0.06, valueStep: 0.04 },
+  { id: "rapid", label: "急速摆钩", swingSpeedStep: 3, timePenaltyStepMs: 0, weightStep: 0, valueStep: 0.035 },
+  { id: "short", label: "短班加价", swingSpeedStep: 0, timePenaltyStepMs: 1_500, weightStep: 0, valueStep: 0.04 },
+];
 
 const MINER_LAYOUTS: Array<Array<Omit<MinerItem, "id">>> = [
   [
@@ -68,7 +83,10 @@ const minerSwingDirection = ref(1);
 const minerHookLength = ref(MINER_REST_LENGTH);
 const minerGrabbedItemId = ref<string | null>(null);
 const minerCallout = ref("摆钩中 · 看准金块再下钩");
+const minerDifficultyLevel = ref(1);
+const minerChallengeIndex = ref(0);
 let minerFrameTimer: ReturnType<typeof setInterval> | null = null;
+let minerChallengeInitialized = false;
 
 const minerGrabbedItem = computed(() => minerItems.value.find((item) => item.id === minerGrabbedItemId.value) ?? null);
 const minerSecondsLeft = computed(() => Math.max(0, Math.ceil(minerTimeLeftMs.value / 1000)));
@@ -78,6 +96,24 @@ const minerCanDynamite = computed(() => minerStatus.value === "retracting" && Bo
 const minerHookRadians = computed(() => minerHookAngle.value * Math.PI / 180);
 const minerHookX = computed(() => MINER_ORIGIN_X + Math.sin(minerHookRadians.value) * minerHookLength.value);
 const minerHookY = computed(() => MINER_ORIGIN_Y + Math.cos(minerHookRadians.value) * minerHookLength.value);
+const minerChallenge = computed(() => MINER_CHALLENGES[minerChallengeIndex.value] ?? MINER_CHALLENGES[0]!);
+const minerDifficultyStep = computed(() => minerDifficultyLevel.value);
+const minerSwingSpeed = computed(() => MINER_SWING_SPEED + minerChallenge.value.swingSpeedStep * minerDifficultyStep.value);
+const minerLevelDurationMs = computed(() => Math.max(
+  30_000,
+  MINER_LEVEL_MS - minerChallenge.value.timePenaltyStepMs * minerDifficultyStep.value,
+));
+const minerWeightMultiplier = computed(() => 1 + minerChallenge.value.weightStep * minerDifficultyStep.value);
+const minerValueMultiplier = computed(() => 1 + minerChallenge.value.valueStep * minerDifficultyStep.value);
+const minerChallengeDetail = computed(() => {
+  if (minerChallenge.value.id === "heavy") {
+    return `负重 +${Math.round((minerWeightMultiplier.value - 1) * 100)}% · 矿价 +${Math.round((minerValueMultiplier.value - 1) * 100)}%`;
+  }
+  if (minerChallenge.value.id === "rapid") {
+    return `摆速 +${minerChallenge.value.swingSpeedStep * minerDifficultyStep.value} · 矿价 +${Math.round((minerValueMultiplier.value - 1) * 100)}%`;
+  }
+  return `工期 -${Math.round((MINER_LEVEL_MS - minerLevelDurationMs.value) / 1000)}s · 矿价 +${Math.round((minerValueMultiplier.value - 1) * 100)}%`;
+});
 const minerStatusText = computed(() => {
   if (minerStatus.value === "paused") return "勘探暂停";
   if (minerStatus.value === "success") return "本层目标达成";
@@ -90,12 +126,31 @@ const minerStatusText = computed(() => {
 function createMinerItems(level: number): MinerItem[] {
   const layout = MINER_LAYOUTS[(level - 1) % MINER_LAYOUTS.length]!;
   const depthOffset = Math.min(10, Math.floor((level - 1) / MINER_LAYOUTS.length) * 3);
-  return layout.map((item, index) => ({
-    ...item,
-    id: `level-${level}-item-${index}`,
-    y: Math.min(MINER_HEIGHT - item.size / 2 - 8, item.y + depthOffset),
-    value: item.value + Math.max(0, level - 1) * (item.kind === "diamond" ? 70 : 25),
-  }));
+  return layout.map((item, index) => {
+    const levelValue = item.value + Math.max(0, level - 1) * (item.kind === "diamond" ? 70 : 25);
+    return {
+      ...item,
+      id: `level-${level}-item-${index}`,
+      y: Math.min(MINER_HEIGHT - item.size / 2 - 8, item.y + depthOffset),
+      weight: Number((item.weight * minerWeightMultiplier.value).toFixed(2)),
+      value: Math.round(levelValue * minerValueMultiplier.value),
+    };
+  });
+}
+
+function randomMinerDifficulty(max = MINER_MAX_DIFFICULTY): number {
+  return 1 + Math.floor(Math.random() * max);
+}
+
+function rollMinerChallenge(starting: boolean) {
+  minerDifficultyLevel.value = starting
+    ? randomMinerDifficulty(3)
+    : Math.min(MINER_MAX_DIFFICULTY, minerDifficultyLevel.value + randomMinerDifficulty(2));
+  const nextIndex = Math.floor(Math.random() * MINER_CHALLENGES.length);
+  // 进入下一层时尽量切换矿况，避免连续两层只看到数字变化。
+  minerChallengeIndex.value = !starting && nextIndex === minerChallengeIndex.value
+    ? (nextIndex + 1) % MINER_CHALLENGES.length
+    : nextIndex;
 }
 
 function clearMinerTimer() {
@@ -117,22 +172,24 @@ function resetMinerHook() {
   minerGrabbedItemId.value = null;
 }
 
-function startMinerLevel(level: number, keepScore: boolean) {
+function startMinerLevel(level: number, keepScore: boolean, runTimer = true) {
   minerLevel.value = level;
   if (!keepScore) minerScore.value = 0;
   minerLevelStartScore.value = minerScore.value;
   minerTarget.value = MINER_BASE_TARGET + (level - 1) * 1_050;
-  minerTimeLeftMs.value = MINER_LEVEL_MS;
+  minerTimeLeftMs.value = minerLevelDurationMs.value;
   minerDynamite.value = Math.min(4, 2 + Math.floor((level - 1) / 2));
   minerItems.value = createMinerItems(level);
   minerStatus.value = "aiming";
   minerResumeStatus.value = "aiming";
-  minerCallout.value = `第 ${level} 层 · 目标 ¥${minerTarget.value}`;
+  minerCallout.value = `第 ${level} 层 · ${minerChallenge.value.label}`;
   resetMinerHook();
-  startMinerTimer();
+  if (runTimer) startMinerTimer();
 }
 
 function resetMinerGame() {
+  rollMinerChallenge(true);
+  minerChallengeInitialized = true;
   startMinerLevel(1, false);
 }
 
@@ -142,6 +199,7 @@ function retryMinerLevel() {
 }
 
 function nextMinerLevel() {
+  rollMinerChallenge(false);
   startMinerLevel(minerLevel.value + 1, true);
 }
 
@@ -201,7 +259,7 @@ function stepMiner() {
 
   const deltaSeconds = MINER_FRAME_MS / 1000;
   if (minerStatus.value === "aiming") {
-    minerHookAngle.value += minerSwingDirection.value * MINER_SWING_SPEED * deltaSeconds;
+    minerHookAngle.value += minerSwingDirection.value * minerSwingSpeed.value * deltaSeconds;
     if (Math.abs(minerHookAngle.value) >= MINER_SWING_LIMIT) {
       minerHookAngle.value = Math.sign(minerHookAngle.value) * MINER_SWING_LIMIT;
       minerSwingDirection.value *= -1;
@@ -265,14 +323,23 @@ function minerItemStyle(item: MinerItem) {
   };
 }
 
+startMinerLevel(1, false, false);
+
 watch(() => props.active, (active) => {
-  if (active) startMinerTimer();
-  else clearMinerTimer();
+  if (!active) {
+    clearMinerTimer();
+    return;
+  }
+  if (!minerChallengeInitialized) {
+    rollMinerChallenge(true);
+    minerChallengeInitialized = true;
+    startMinerLevel(1, false);
+    return;
+  }
+  startMinerTimer();
 }, { immediate: true });
 
 onBeforeUnmount(clearMinerTimer);
-
-startMinerLevel(1, false);
 
 defineExpose({ dropHook: dropMinerHook, togglePause: toggleMinerPause, resetGame: resetMinerGame });
 </script>
@@ -285,6 +352,11 @@ defineExpose({ dropHook: dropMinerHook, togglePause: toggleMinerPause, resetGame
       <div><small>目标</small><strong>¥{{ minerTarget }}</strong></div>
       <div :class="{ 'is-urgent': minerSecondsLeft <= 10 }"><small>时间</small><strong>{{ minerSecondsLeft }}s</strong></div>
     </header>
+
+    <div class="pet-miner-challenge" data-testid="pet-miner-difficulty" aria-label="本层随机矿况">
+      <span><small>随机矿况</small><strong>Lv{{ minerDifficultyLevel }} · {{ minerChallenge.label }}</strong></span>
+      <em>{{ minerChallengeDetail }}</em>
+    </div>
 
     <div class="pet-miner-progress" :class="{ 'is-complete': minerTargetReached }" aria-label="关卡目标进度">
       <span :style="{ width: `${minerProgress}%` }" />
@@ -387,6 +459,25 @@ defineExpose({ dropHook: dropMinerHook, togglePause: toggleMinerPause, resetGame
 .pet-miner-instrument-row strong { font: 750 11px/13px var(--ta-font-mono, "Geist Mono", monospace); }
 .pet-miner-instrument-row .is-urgent { background: #a94032; color: #fff2dc; }
 .pet-miner-instrument-row .is-urgent small { color: #ffd6ba; }
+
+.pet-miner-challenge {
+  display: flex;
+  min-height: 27px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 7px;
+  border-right: 1px solid #b6c7c8;
+  border-left: 1px solid #b6c7c8;
+  background: #f7e6bd;
+  color: #6f511c;
+}
+
+.pet-miner-challenge span { display: flex; min-width: 0; flex-direction: column; }
+.pet-miner-challenge small { color: #8e713b; font-size: 6px; line-height: 8px; }
+.pet-miner-challenge strong { overflow: hidden; font-size: 8px; line-height: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pet-miner-challenge em { flex: 0 0 auto; color: #7a5120; font: 650 7px/10px var(--ta-font-mono, "Geist Mono", monospace); }
 
 .pet-miner-progress {
   position: relative;

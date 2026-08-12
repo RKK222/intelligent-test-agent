@@ -10,10 +10,12 @@ describe("PetGoldMinerGame", () => {
 
   it("swings, catches the centered gold and retracts according to its weight", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const wrapper = mount(PetGoldMinerGame, { props: { active: true } });
 
     expect(wrapper.findAll(".pet-miner-item")).toHaveLength(8);
     expect(wrapper.get('[data-testid="pet-miner-score"]').text()).toBe("¥0");
+    expect(wrapper.get('[data-testid="pet-miner-difficulty"]').text()).toContain("Lv1 · 重载矿脉");
 
     // 初始摆角从 -56° 开始，约 1.04 秒后对准中央的大金块。
     await vi.advanceTimersByTimeAsync(1_040);
@@ -24,16 +26,17 @@ describe("PetGoldMinerGame", () => {
     expect(wrapper.text()).toContain("回收 大金块");
     expect(wrapper.get(".pet-miner-item.is-grabbed").attributes("aria-label")).toContain("大金块");
 
-    // 大金块重量 3.2，回收明显慢于空钩，完成后才结算资金并移除矿物。
-    await vi.advanceTimersByTimeAsync(720);
-    expect(wrapper.get('[data-testid="pet-miner-score"]').text()).toBe("¥520");
+    // 重载矿脉同时增加重量和矿价，回收完成后才按本层补偿价结算。
+    await vi.advanceTimersByTimeAsync(760);
+    expect(wrapper.get('[data-testid="pet-miner-score"]').text()).toBe("¥541");
     expect(wrapper.findAll(".pet-miner-item")).toHaveLength(7);
-    expect(wrapper.text()).toContain("大金块 入账 +¥520");
+    expect(wrapper.text()).toContain("大金块 入账 +¥541");
     wrapper.unmount();
   });
 
   it("uses dynamite on a grabbed heavy item and pauses without consuming time", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const wrapper = mount(PetGoldMinerGame, { props: { active: true } });
 
     await vi.advanceTimersByTimeAsync(1_040);
@@ -57,6 +60,7 @@ describe("PetGoldMinerGame", () => {
 
   it("settles the level and advances with a higher target after reaching the quota", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const wrapper = mount(PetGoldMinerGame, { props: { active: true } });
     const setup = (wrapper.vm as unknown as {
       $: { setupState: { minerScore: number; minerTimeLeftMs: number } };
@@ -70,6 +74,7 @@ describe("PetGoldMinerGame", () => {
     await wrapper.get(".pet-miner-overlay button").trigger("click");
     expect(wrapper.text()).toContain("第 2 层");
     expect(wrapper.text()).toContain("¥2650");
+    expect(wrapper.get('[data-testid="pet-miner-difficulty"]').text()).toContain("Lv2 · 急速摆钩");
     expect(wrapper.findAll(".pet-miner-item")).toHaveLength(8);
     wrapper.unmount();
   });

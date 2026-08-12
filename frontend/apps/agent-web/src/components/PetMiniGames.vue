@@ -58,6 +58,16 @@ const TETRIS_BASE_TICK_MS = 460;
 const TETRIS_MIN_TICK_MS = 120;
 const TETRIS_LINES_PER_LEVEL = 4;
 const RANDOM_DIFFICULTY_LEVELS = 5;
+const RANDOM_STARTING_DIFFICULTY_LEVELS = 3;
+
+function randomDifficultyLevel(max = RANDOM_DIFFICULTY_LEVELS): number {
+  return 1 + Math.floor(Math.random() * max);
+}
+
+function randomDifficultyIncrease(): number {
+  return 1 + Math.floor(Math.random() * 2);
+}
+
 const TETROMINOES = [
   { color: "cyan", matrix: [[1, 1, 1, 1]] },
   { color: "yellow", matrix: [[1, 1], [1, 1]] },
@@ -79,10 +89,15 @@ const tetrisLines = ref(0);
 const tetrisRunning = ref(false);
 const tetrisGameOver = ref(false);
 const tetrisNextPiece = ref<TetrisShape | null>(null);
+const tetrisDifficultyLevel = ref(1);
+let tetrisBag: number[] = [];
 let tetrisTimer: ReturnType<typeof setInterval> | null = null;
 
 const tetrisLevel = computed(() => Math.min(10, 1 + Math.floor(tetrisLines.value / TETRIS_LINES_PER_LEVEL)));
-const tetrisTickMs = computed(() => Math.max(TETRIS_MIN_TICK_MS, TETRIS_BASE_TICK_MS - (tetrisLevel.value - 1) * 45));
+const tetrisTickMs = computed(() => Math.max(
+  TETRIS_MIN_TICK_MS,
+  TETRIS_BASE_TICK_MS - (tetrisLevel.value - 1) * 45 - (tetrisDifficultyLevel.value - 1) * 22,
+));
 const tetrisNextBoard = computed(() => tetrisNextPiece.value?.matrix ?? []);
 
 function clearTetrisTimer() {
@@ -96,7 +111,15 @@ function startTetrisTimer() {
 }
 
 function createTetrisShape(): TetrisShape {
-  const source = TETROMINOES[Math.floor(Math.random() * TETROMINOES.length)]!;
+  if (tetrisBag.length === 0) {
+    tetrisBag = Array.from({ length: TETROMINOES.length }, (_, index) => index);
+    // 采用七袋洗牌：一袋内七种方块各出现一次，避免纯随机导致某种关键块长期缺席。
+    for (let index = tetrisBag.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [tetrisBag[index], tetrisBag[swapIndex]] = [tetrisBag[swapIndex]!, tetrisBag[index]!];
+    }
+  }
+  const source = TETROMINOES[tetrisBag.pop()!]!;
   return {
     matrix: source.matrix.map((row) => [...row]),
     color: source.color,
@@ -142,7 +165,9 @@ function startTetris() {
   tetrisBoard.value = emptyTetrisBoard();
   tetrisScore.value = 0;
   tetrisLines.value = 0;
+  tetrisDifficultyLevel.value = randomDifficultyLevel(RANDOM_STARTING_DIFFICULTY_LEVELS);
   tetrisGameOver.value = false;
+  tetrisBag = [];
   tetrisNextPiece.value = createTetrisShape();
   tetrisRunning.value = true;
   spawnTetrisPiece();
@@ -205,8 +230,15 @@ function lockTetrisPiece() {
     ...remaining,
   ];
   if (cleared > 0) {
+    const previousLevel = tetrisLevel.value;
     tetrisLines.value += cleared;
     tetrisScore.value += [0, 100, 300, 500, 800][cleared] ?? cleared * 200;
+    if (tetrisLevel.value > previousLevel) {
+      tetrisDifficultyLevel.value = Math.min(
+        RANDOM_DIFFICULTY_LEVELS,
+        tetrisDifficultyLevel.value + randomDifficultyIncrease(),
+      );
+    }
   }
   spawnTetrisPiece();
   if (cleared > 0) startTetrisTimer();
@@ -261,7 +293,6 @@ function emptyMineBoard(): MineCell[] {
 const mineBoard = ref<MineCell[]>(emptyMineBoard());
 const minesInitialized = ref(false);
 const mineStatus = ref<"ready" | "playing" | "won" | "lost">("ready");
-const randomDifficultyLevel = () => 1 + Math.floor(Math.random() * RANDOM_DIFFICULTY_LEVELS);
 const mineLevel = ref(randomDifficultyLevel());
 const mineCount = computed(() => Math.min(MINE_MAX_COUNT, MINE_BASE_COUNT + (mineLevel.value - 1) * 2));
 const mineFlags = computed(() => mineBoard.value.filter((cell) => cell.flagged).length);
@@ -420,15 +451,17 @@ const SUDOKU_PUZZLE = [
   0, 0, 0, 4, 1, 9, 0, 0, 5,
   0, 0, 0, 0, 8, 0, 0, 7, 9,
 ] as const;
+const SUDOKU_EXTRA_GIVENS = [3, 5, 6, 7, 8, 10, 11, 15, 16, 17, 18, 21] as const;
 
 const sudokuLevel = ref(randomDifficultyLevel());
 
 function createSudokuBoard(level = sudokuLevel.value): SudokuCell[] {
-  const givenIndexes = SUDOKU_PUZZLE.flatMap((value, index) => value > 0 ? [index] : []);
-  const hiddenIndexes = new Set(givenIndexes.slice(0, Math.min(12, (level - 1) * 3)));
+  const extraGivenCount = Math.max(0, (RANDOM_DIFFICULTY_LEVELS - level) * 3);
+  const extraGivenIndexes = new Set<number>(SUDOKU_EXTRA_GIVENS.slice(0, extraGivenCount));
+  // 五档题面都建立在同一份唯一解题目上；低档只增加提示，避免删题后出现多解却只认固定答案。
   return SUDOKU_PUZZLE.map((value, index) => {
-    const given = value > 0 && !hiddenIndexes.has(index);
-    return { value: given ? value : 0, given, error: false };
+    const given = value > 0 || extraGivenIndexes.has(index);
+    return { value: given ? SUDOKU_SOLUTION[index]! : 0, given, error: false };
   });
 }
 
@@ -491,10 +524,14 @@ const snakeFood = ref<SnakePoint>({ x: 0, y: 0 });
 const snakeScore = ref(0);
 const snakeRunning = ref(false);
 const snakeGameOver = ref(false);
+const snakeDifficultyLevel = ref(1);
 let snakeTimer: ReturnType<typeof setInterval> | null = null;
 
 const snakeLevel = computed(() => Math.min(10, 1 + Math.floor(snakeScore.value / SNAKE_SCORE_PER_LEVEL)));
-const snakeTickMs = computed(() => Math.max(SNAKE_MIN_TICK_MS, SNAKE_BASE_TICK_MS - (snakeLevel.value - 1) * 20));
+const snakeTickMs = computed(() => Math.max(
+  SNAKE_MIN_TICK_MS,
+  SNAKE_BASE_TICK_MS - (snakeLevel.value - 1) * 20 - (snakeDifficultyLevel.value - 1) * 12,
+));
 
 function clearSnakeTimer() {
   if (snakeTimer) clearInterval(snakeTimer);
@@ -521,6 +558,7 @@ function startSnake() {
   snakeQueuedDirection.value = { x: 1, y: 0 };
   snakeFood.value = nextSnakeFood(initialBody);
   snakeScore.value = 0;
+  snakeDifficultyLevel.value = randomDifficultyLevel(RANDOM_STARTING_DIFFICULTY_LEVELS);
   snakeGameOver.value = false;
   snakeRunning.value = true;
   startSnakeTimer();
@@ -550,7 +588,14 @@ function stepSnake() {
   }
   const nextBody = [nextHead, ...snakeBody.value];
   if (eating) {
+    const previousLevel = snakeLevel.value;
     snakeScore.value += 1;
+    if (snakeLevel.value > previousLevel) {
+      snakeDifficultyLevel.value = Math.min(
+        RANDOM_DIFFICULTY_LEVELS,
+        snakeDifficultyLevel.value + randomDifficultyIncrease(),
+      );
+    }
     snakeFood.value = nextSnakeFood(nextBody);
     startSnakeTimer();
   } else {
@@ -649,6 +694,7 @@ const pinballMultiballActive = ref(false);
 const pinballExtraBallAwarded = ref(false);
 const pinballTiltWarnings = ref(0);
 const pinballLastNudgeAt = ref(0);
+const pinballDifficultyLevel = ref(1);
 const pinballCallout = ref("装球完成 · 对准技能发射区");
 const pinballStatus = ref<"ready" | "running" | "paused" | "tilted" | "gameover">("ready");
 const pinballCharging = ref(false);
@@ -657,6 +703,7 @@ const pinballRightPressed = ref(false);
 let pinballFrameTimer: ReturnType<typeof setInterval> | null = null;
 let pinballChargeTimer: ReturnType<typeof setInterval> | null = null;
 let pinballImpactSequence = 0;
+let pinballRoundInitialized = false;
 
 const pinballMissionReady = computed(() =>
   pinballRolloverLights.value.every(Boolean) && pinballDropTargets.value.every(Boolean)
@@ -685,6 +732,17 @@ const pinballBonus = computed(() => (
 const pinballBallSaveSeconds = computed(() => Math.max(0, Math.ceil(
   (pinballBallSaveUntil.value - pinballNow.value) / 1000
 )));
+const pinballGravity = computed(() => PINBALL_GRAVITY + (pinballDifficultyLevel.value - 1) * 35);
+const pinballBallSaveDurationSeconds = computed(() => Math.max(5, 10 - pinballDifficultyLevel.value));
+const pinballSkillShotMin = computed(() => PINBALL_SKILL_SHOT_MIN + (pinballDifficultyLevel.value - 1) * 3);
+const pinballSkillShotMax = computed(() => PINBALL_SKILL_SHOT_MAX - (pinballDifficultyLevel.value - 1) * 2);
+const pinballSkillZoneStyle = computed(() => ({
+  top: `${50 - pinballSkillShotMax.value * 0.5}px`,
+  height: `${(pinballSkillShotMax.value - pinballSkillShotMin.value) * 0.5}px`,
+}));
+const pinballDifficultyText = computed(() => (
+  `随机档 ${pinballDifficultyLevel.value} · 重力 ${pinballGravity.value} · 救球 ${pinballBallSaveDurationSeconds.value}s`
+));
 const pinballComboVisible = computed(() => pinballCombo.value > 1 && pinballComboUntil.value > pinballNow.value);
 const pinballLeftAngle = computed(() => pinballLeftPressed.value ? -26 : 18);
 const pinballRightAngle = computed(() => pinballRightPressed.value ? -26 : 18);
@@ -720,7 +778,7 @@ function resetPinballMission() {
   pinballSpinnerTurns.value = 0;
 }
 
-function servePinballBall(callout = "新球就位 · 9 秒救球") {
+function servePinballBall(callout?: string) {
   clearPinballTimers();
   pinballBalls.value = [createPinballBall()];
   pinballCharge.value = 0;
@@ -728,11 +786,13 @@ function servePinballBall(callout = "新球就位 · 9 秒救球") {
   pinballTiltWarnings.value = 0;
   pinballBallSaveUntil.value = 0;
   pinballSkillShotPending.value = false;
-  pinballCallout.value = callout;
+  pinballCallout.value = callout ?? `新球就位 · ${pinballBallSaveDurationSeconds.value} 秒救球`;
   pinballStatus.value = "ready";
 }
 
 function resetPinball() {
+  pinballDifficultyLevel.value = randomDifficultyLevel(RANDOM_STARTING_DIFFICULTY_LEVELS);
+  pinballRoundInitialized = true;
   pinballScore.value = 0;
   pinballLives.value = 3;
   pinballMultiplier.value = 1;
@@ -773,7 +833,7 @@ function releasePinballCharge() {
   pinballBalls.value = [ball];
   pinballLastLaunchCharge.value = charge;
   pinballSkillShotPending.value = true;
-  pinballBallSaveUntil.value = Date.now() + 9000;
+  pinballBallSaveUntil.value = Date.now() + pinballBallSaveDurationSeconds.value * 1000;
   pinballNow.value = Date.now();
   pinballCharge.value = 0;
   pinballCallout.value = "技能发射判定中";
@@ -907,7 +967,7 @@ function resolvePinballBumper(ball: PinballBall, bumper: PinballBumper, index: n
 function detectPinballFeatures(ball: PinballBall) {
   if (pinballSkillShotPending.value && ball.y < 68) {
     pinballSkillShotPending.value = false;
-    if (pinballLastLaunchCharge.value >= PINBALL_SKILL_SHOT_MIN && pinballLastLaunchCharge.value <= PINBALL_SKILL_SHOT_MAX) {
+    if (pinballLastLaunchCharge.value >= pinballSkillShotMin.value && pinballLastLaunchCharge.value <= pinballSkillShotMax.value) {
       awardPinballScore(2500, "SKILL SHOT");
       pinballMultiplier.value = Math.min(5, pinballMultiplier.value + 1);
       chargePinballJackpot(500);
@@ -942,7 +1002,7 @@ function detectPinballFeatures(ball: PinballBall) {
 
 function startPinballMultiball(ball: PinballBall) {
   pinballMultiballActive.value = true;
-  pinballBallSaveUntil.value = pinballNow.value + 7000;
+  pinballBallSaveUntil.value = pinballNow.value + Math.max(4, pinballBallSaveDurationSeconds.value - 2) * 1000;
   // 多球弹出速度与坡度重力配套，保证三球先散入上半场，而不是在球门旁原地回落。
   pinballBalls.value.push(
     createPinballBall(ball.x - 8, ball.y - 10, -230, -560),
@@ -1033,7 +1093,11 @@ function finishPinballMultiballIfNeeded() {
   if (!pinballMultiballActive.value || pinballBalls.value.length > 1) return;
   pinballMultiballActive.value = false;
   resetPinballMission();
-  pinballCallout.value = "多球结束 · 新任务已装填";
+  pinballDifficultyLevel.value = Math.min(
+    RANDOM_DIFFICULTY_LEVELS,
+    pinballDifficultyLevel.value + randomDifficultyIncrease(),
+  );
+  pinballCallout.value = `多球结束 · 随机干扰升至 ${pinballDifficultyLevel.value} 档`;
 }
 
 function drainPinballBall(ballId: number) {
@@ -1080,7 +1144,7 @@ function stepPinball() {
   pinballBalls.value.forEach((ball) => {
     ball.previousX = ball.x;
     ball.previousY = ball.y;
-    ball.vy += PINBALL_GRAVITY * deltaSeconds;
+    ball.vy += pinballGravity.value * deltaSeconds;
     ball.vx *= 0.999;
     ball.vy *= 0.999;
     const speed = Math.hypot(ball.vx, ball.vy);
@@ -1186,7 +1250,7 @@ function selectGame(game: GameKind) {
   activeGame.value = game;
   if (game === "tetris" && !tetrisPiece.value) startTetris();
   if (game === "snake" && snakeBody.value.length === 0) startSnake();
-  if (game === "pinball" && pinballLives.value <= 0) resetPinball();
+  if (game === "pinball" && (!pinballRoundInitialized || pinballLives.value <= 0)) resetPinball();
   void nextTick(() => panel.value?.focus());
 }
 
@@ -1376,7 +1440,7 @@ onBeforeUnmount(() => {
       <div v-if="activeGame === 'tetris'" class="pet-tetris" data-testid="pet-tetris">
         <div class="pet-game-status-row">
           <span>{{ tetrisStatus }}</span>
-          <span data-testid="pet-tetris-level">等级 {{ tetrisLevel }} · 速度 {{ tetrisTickMs }}ms</span>
+          <span data-testid="pet-tetris-level">随机档 {{ tetrisDifficultyLevel }} · 等级 {{ tetrisLevel }} · {{ tetrisTickMs }}ms</span>
           <span>分数 {{ tetrisScore }} · 消行 {{ tetrisLines }}</span>
         </div>
         <div class="pet-tetris-next" data-testid="pet-tetris-next" aria-label="下一个俄罗斯方块">
@@ -1416,7 +1480,7 @@ onBeforeUnmount(() => {
       <div v-else-if="activeGame === 'minesweeper'" class="pet-mines" data-testid="pet-minesweeper">
         <div class="pet-game-status-row">
           <span>{{ mineStatusText }}</span>
-          <span>难度 {{ mineLevel }} · 旗 {{ mineFlags }}/{{ mineCount }}</span>
+          <span>随机档 {{ mineLevel }} · 雷 {{ mineCount }} · 旗 {{ mineFlags }}</span>
           <button type="button" aria-label="重开扫雷" @click="resetMines"><RotateCcw :size="13" /></button>
         </div>
         <div class="pet-mine-board" role="grid" aria-label="扫雷棋盘">
@@ -1447,7 +1511,7 @@ onBeforeUnmount(() => {
       <div v-else-if="activeGame === 'sudoku'" class="pet-sudoku" data-testid="pet-sudoku">
         <div class="pet-game-status-row">
           <span>{{ sudokuStatusText }}</span>
-          <span>难度 {{ sudokuLevel }} · 剩余 {{ sudokuRemaining }} 格</span>
+          <span>随机档 {{ sudokuLevel }} · 剩余 {{ sudokuRemaining }} 格</span>
           <button type="button" aria-label="重开数独" @click="resetSudoku"><RotateCcw :size="13" /></button>
         </div>
         <div class="pet-sudoku-board" role="grid" aria-label="数独棋盘">
@@ -1482,7 +1546,8 @@ onBeforeUnmount(() => {
       <div v-else-if="activeGame === 'snake'" class="pet-snake" data-testid="pet-snake">
         <div class="pet-game-status-row">
           <span>{{ snakeStatusText }}</span>
-          <span>等级 {{ snakeLevel }} · 得分 {{ snakeScore }}</span>
+          <span>随机档 {{ snakeDifficultyLevel }} · 等级 {{ snakeLevel }} · {{ snakeTickMs }}ms</span>
+          <span>得分 {{ snakeScore }}</span>
           <button type="button" aria-label="重开贪吃蛇" @click="startSnake"><RotateCcw :size="13" /></button>
         </div>
         <div class="pet-snake-board" role="grid" aria-label="贪吃蛇棋盘">
@@ -1510,6 +1575,7 @@ onBeforeUnmount(() => {
           <button type="button" aria-label="重开桌面弹球" @click="resetPinball"><RotateCcw :size="13" /></button>
         </div>
         <div class="pet-pinball-feature-strip" aria-label="桌面弹球局内状态">
+          <span data-testid="pet-pinball-difficulty"><small>随机档</small><strong>Lv{{ pinballDifficultyLevel }}</strong></span>
           <span class="is-jackpot"><small>奖池</small><strong>{{ pinballJackpot }}</strong></span>
           <span><small>倍率</small><strong>×{{ pinballMultiplier }}</strong></span>
           <span :class="{ 'is-hot': pinballComboVisible }"><small>连击</small><strong>×{{ pinballComboVisible ? pinballCombo : 1 }}</strong></span>
@@ -1610,7 +1676,7 @@ onBeforeUnmount(() => {
             @pointercancel.prevent="releasePinballCharge"
           >
             <span class="pet-pinball-plunger-track" aria-hidden="true">
-              <em class="pet-pinball-skill-zone" />
+              <em class="pet-pinball-skill-zone" :style="pinballSkillZoneStyle" />
               <i :style="pinballLauncherStyle" />
             </span>
             <small>{{ pinballCharging ? `${pinballCharge}%` : "发射" }}</small>
@@ -1623,8 +1689,8 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="pet-pinball-ledger" aria-live="polite">
-          <span>{{ pinballMissionText }}</span>
-          <span>奖池 {{ pinballJackpot }} · 奖励 {{ pinballBonus }}</span>
+          <span>{{ pinballMissionText }} · 奖励 {{ pinballBonus }}</span>
+          <span>{{ pinballDifficultyText }}</span>
         </div>
         <div class="pet-pinball-controls" aria-label="桌面弹球操作">
           <button
@@ -2351,7 +2417,7 @@ onBeforeUnmount(() => {
 .pet-pinball-feature-strip {
   display: grid;
   width: 316px;
-  grid-template-columns: 1.35fr repeat(4, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   overflow: hidden;
   margin: 0 auto 6px;
   border: 1px solid #526b80;
