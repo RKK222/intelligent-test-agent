@@ -439,7 +439,7 @@
         select t.target_id, t.rollout_id, r.config_scope, t.user_id,
                t.linux_server_id, t.container_id, t.port, t.process_pid,
                t.process_started_at, t.base_url, t.retry_count,
-               t.lease_until, t.lease_token, t.trace_id, t.force_stop
+               t.lease_until, t.lease_token, r.trace_id, t.force_stop
         from public_agent_config_rollout_targets t
         join public_agent_config_rollouts r on r.rollout_id = t.rollout_id
         where t.linux_server_id = #{linuxServerId}

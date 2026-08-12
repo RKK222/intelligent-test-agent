@@ -2358,3 +2358,17 @@
   - 三项功能已完整接入既有鉴权、进程公共程序、跨节点路由、Run 取消和通知 SSE 边界；未新增 RunEvent 类型，旧分享通知、超级管理员和普通用户权限保持兼容。通知不保存任意 URL、原始异常、路径、密钥或第三方响应。
   - 本机 Docker/PostgreSQL 当前不可用，因此真实 PostgreSQL 空库、全部已知历史与 compatibility location 升级门禁尚未执行；发布前必须在可用环境补跑并核对目标库 `flyway_schema_history`，不能以 H2、JAR 字节校验或跳过用例替代。
   - 未修改 `.env*`、generated SDK 或 `opencode-source/`，未创建新分支，也未推送远端。
+
+### 2026-08-12 - 补跑 dispose 通知真实 PostgreSQL 门禁
+
+- Why:
+  - 前一轮因 Docker socket 不可用跳过了三个 PostgreSQL 用例，用户启动 Docker 后要求补齐通知仓储、rollout 仓储和全部已知 Flyway 历史升级验证。
+- What:
+  - 首轮真实 PostgreSQL 准确暴露 `findPendingTargetsByServer` 把 rollout 的 `trace_id` 误写为目标表 `t.trace_id`；目标表从未定义该列，同 Mapper 的正常认领查询一直使用 `r.trace_id`。仅将该列来源修正为所属 rollout，不改表结构、migration 或领域语义。
+- How:
+  - 保留现有真实 PostgreSQL 用例作为 RED，错误稳定为 PostgreSQL `column t.trace_id does not exist`；最小修复后单用例 1/1 转绿。
+  - 重新运行通知/rollout PostgreSQL 仓储测试 3/3、Spring Boot Flyway 空库与全部已知主链/compatibility 历史升级 20/20，均 0 skip；原功能 12 类后端回归 242/242、0 skip，最终 22 模块应用包构建成功。
+  - 修复后的 Mapper SHA-256 为 `fb0c79670f7723c1d38b0eca75785e85c1913529858953f9d5070c14cdeb6146`；通知基线与 dispose 枚举 migration 仍分别为 `4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9`、`00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c`，三者在源码、persistence JAR 和应用嵌套 JAR 中字节一致。
+- Result:
+  - 前一轮唯一未完成的真实 PostgreSQL 自动化门禁已经补齐，当前已知空库、历史主链和 compatibility location 均可升级到 HEAD；没有使用 `outOfOrder`、`repair` 或手工修改历史表。
+  - 本次不改变 API、RunEvent、数据库结构、安全或前端；未修改 `.env*`、generated SDK 或 `opencode-source/`，未创建新分支，也未推送远端。
