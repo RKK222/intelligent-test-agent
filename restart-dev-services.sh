@@ -32,7 +32,7 @@ skip_backend_build=false
 skip_frontend_build=false
 with_lobehub=false
 lobehub_mode="offline"
-with_workflow=true
+with_workflow=false
 with_memory=false
 frontend_dependencies_checked=false
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
@@ -50,7 +50,7 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--without-workflow] [--with-memory] [--with-lobehub] [--lobehub-mode offline|online] [--help]
+Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--with-workflow] [--without-workflow] [--with-memory] [--with-lobehub] [--lobehub-mode offline|online] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
@@ -79,7 +79,7 @@ Defaults:
   backend logs:    backend/logs/backend.log, backend/logs/sse.log, backend/logs/error.log
   manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
   LobeHub:         disabled unless --with-lobehub is supplied
-  workflow:        enabled; use --without-workflow to retain the legacy three-service restart
+  workflow:        disabled unless --with-workflow is supplied
   memory:          disabled unless --with-memory is supplied
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager,
                    test-agent-workflow-api, test-agent-workflow-worker when screen is available
@@ -90,7 +90,8 @@ Options:
   --log-dir              Service log directory. Relative paths are resolved from the repo root.
   --skip-backend-build   Restart backend without running Maven package first.
   --skip-frontend-build  Restart frontend without running pnpm build first.
-  --without-workflow     Do not prepare, stop, or start the Python workflow control plane.
+  --with-workflow        Opt in to the Python workflow API and Worker control plane.
+  --without-workflow     Explicitly keep Workflow disabled; retained for command compatibility.
   --with-memory          Opt in to local pgvector + fixed Mem0/BGE service on 15433/18888.
                          Generated secrets stay under .tmp/dev-services/memory with mode 0600.
   --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
@@ -157,6 +158,10 @@ while [[ $# -gt 0 ]]; do
       }
       lobehub_mode="$2"
       shift 2
+      ;;
+    --with-workflow)
+      with_workflow=true
+      shift
       ;;
     --without-workflow)
       with_workflow=false

@@ -88,6 +88,9 @@ class WorkspaceFileServiceTest {
         assertThat(externalRoot.resolve("created.txt")).doesNotExist();
         assertThat(externalRoot.resolve("created")).doesNotExist();
         assertThat(root.resolve(".git/config")).hasContent("git metadata");
+    }
+
+    @Test
     void serviceRejectsAbsoluteAndNormalizedTraversalPathsEvenWhenTheyResolveInsideRoot() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
         Files.writeString(root.resolve("secret.txt"), "secret");
@@ -452,7 +455,7 @@ class WorkspaceFileServiceTest {
 
         assertThatThrownBy(() -> service.moveFile(root.toString(), "suite", "alias/moved-suite"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
         assertThat(Files.isDirectory(root.resolve("suite"))).isTrue();
         assertThat(Files.readString(root.resolve("suite/case.md"))).isEqualTo("case");
     }
@@ -485,7 +488,7 @@ class WorkspaceFileServiceTest {
 
         assertThatThrownBy(() -> service.moveFile(root.toString(), "linked.txt", "target/linked.txt"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
 
         assumeTrue(isUnixLikePlatform());
         Path fifo = root.resolve("events.fifo");

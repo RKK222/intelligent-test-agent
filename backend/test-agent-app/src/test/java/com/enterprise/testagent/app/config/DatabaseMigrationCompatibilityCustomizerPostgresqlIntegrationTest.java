@@ -136,6 +136,15 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION;
     private static final String EXPERIENCE_WORKSPACE_MAIN_RESOURCE =
             "db/migration/V20260809210000__common_parameters_add_experience_workspace.sql";
+    private static final String LOCAL_CLIENT_RUNTIME_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION;
+    private static final String LOCAL_CLIENT_RUNTIME_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION;
+    private static final String LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_FORWARD_COMPATIBILITY_LOCATION;
+    private static final String LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE =
+            "db/migration/V20260811210453__local_client_credentials_create_runtime.sql";
+    private static final String CURRENT_MERGED_RELEASE_MAX_VERSION = "20260812144051";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -170,8 +179,11 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isTrue();
             assertThat(applied(dataSource, SESSION_SHARE_FORWARD_VERSION)).isFalse();
             assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isFalse();
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isTrue();
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isFalse();
             assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
             assertSessionShareSchema(dataSource);
+            assertLocalClientRuntimeSchema(dataSource);
         });
     }
 
@@ -729,6 +741,34 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         });
     }
 
+    @Test
+    void currentMergedReleaseHistoryAppliesLocalClientRuntimeThroughHigherForwardMigration() {
+        DataSource dataSource = dataSource("local_client_runtime_after_current_release");
+        // 复现 release 已执行体验工作区默认值，但尚未合入较低版本本地客户端 migration 的真实历史。
+        migrateWithoutResourceTo(
+                dataSource,
+                CURRENT_MERGED_RELEASE_MAX_VERSION,
+                LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isFalse();
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isFalse();
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue();
+            assertLocalClientRuntimeSchema(dataSource);
+        });
+
+        // 第二次启动必须继续从同一隔离 location 解析已执行前向版本。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue();
+            assertLocalClientRuntimeSchema(dataSource);
+        });
+    }
+
     /** 为每套历史创建独立 schema，避免测试之间共享 Flyway history。 */
     private static DataSource dataSource(String schema) {
         PGSimpleDataSource admin = postgresDataSource();
@@ -1093,6 +1133,39 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         assertThat(parameterCount).isEqualTo(1L);
         assertThat(parameterValue).isEqualTo("${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience");
         assertThat(indexCount).isEqualTo(1L);
+    }
+
+    private static void assertLocalClientRuntimeSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'local_client_credentials',
+                              'local_client_instances',
+                              'local_client_workspaces'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long runtimeColumnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and (
+                              (table_name = 'sessions'
+                                  and column_name in ('runtime_kind', 'local_client_instance_id'))
+                              or (table_name = 'runs'
+                                  and column_name in ('target_runtime_kind', 'target_local_client_instance_id'))
+                              or (table_name = 'night_execution_tasks'
+                                  and column_name in ('target_runtime_kind', 'target_local_client_instance_id'))
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(3L);
+        assertThat(runtimeColumnCount).isEqualTo(6L);
     }
 
     private static long qaMemorySchemaTableCount(DataSource dataSource) {

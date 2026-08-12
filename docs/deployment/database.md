@@ -1797,6 +1797,22 @@ migration 创建 `user_notifications`：
 Flyway 历史兼容规则在全部已知 PostgreSQL 基线执行升级，并核对最终 JAR 内 migration SHA-256；只验证
 空库不构成交付验证。
 
+release 的个人持久库已经执行到 `V20260812144051`，但从未执行 client 分支较低的
+`V20260811210453`。唯一 `DatabaseMigrationCompatibilityCustomizer` 会在该类 history 中过滤低版本主
+migration，并只加载隔离路径
+`db/migration-compat/local-client-runtime-after-release/V20260812202425__local_client_credentials_create_runtime_after_release.sql`；
+前向 migration 创建与主 migration 相同的表、字段、约束、索引和注释，不写业务数据。空库或尚未越过
+`20260811210453` 的正常主链仍执行原 migration；已经执行原 migration 的 client 历史继续按原字节校验，
+主路径与前向路径同时出现时失败关闭。两条路径均保持 `outOfOrder=false`，不执行 `repair`，不修改
+`flyway_schema_history`。
+
+主 migration SHA-256 固定为
+`b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970`，前向 migration SHA-256 固定为
+`168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026`；
+`FlywayMigrationNamingTest` 锁定两份源码字节，
+`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 用真实 PostgreSQL 覆盖正常主链、
+release 缺失低版本 migration 的升级和第二次启动解析。
+
 ## V20260811213000 Agent 配置 dispose 通知枚举扩展
 
 `V20260811213000__user_notifications_expand_dispose_types.sql` 只扩展既有 `user_notifications` 的两个 CHECK 约束，不新增表、列或业务数据。当前源码 SHA-256 为 `00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c`；任何需要保留的数据库执行后必须冻结文件名和字节。

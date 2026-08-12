@@ -9638,3 +9638,29 @@
 
 - 代码、协议、API、数据库、前端和内网 HTTP 分发主链路已实现并在 Apple Silicon 与真实 PostgreSQL 上部分验证；未修改 `.env*`、generated SDK 或 `opencode-source/opencode-1.18.4`，未 push。
 - 当前 worktree 没有独立 `.env.test`，且主 worktree 的 8080/3000 服务正在使用，未擅自停止或覆盖，因此没有在该 worktree 启动完整后台/前端/客户端三服务链路。缺少真实 ARM 麒麟设备，麒麟安装、systemd user、认证连接、文件 CRUD 和聊天修改文件的最终验收仍需在目标机执行，不能声明完整可交付。
+
+## 2026-08-12 - 整理 release、mem0 与 client 为 dev
+
+### Why
+
+- 用户要求直接推送 release，并把 release、mem0 和本地 OpenCode client 汇总为单一 `dev` 分支；`dev` 的 Workflow 与 LobeHub 必须默认关闭。
+- release、mem0 和 client 已形成三套提交历史及 Flyway 顺序，主、mem0 工作树还分别存在用户未提交文件，整理时不能覆盖或混入提交。
+
+### What
+
+- 将 `codex/release-enterprise-20260801` 直接推送到 `origin`，以其最新提交创建独立 `dev` worktree；通过非快进合并保留 mem0 与 client 的完整祖先关系，并恢复 release 曾撤销的 Mem0 实现、整合 client 实际差异。
+- 修正合并产生的 `SessionApplicationService` 重复方法和 `WorkspaceFileServiceTest` 嵌套语法/共享文件内核错误码断言；没有修改 OpenCode 只读源码或 generated SDK。
+- `restart-dev-services.sh` 将 Workflow 与 LobeHub 都设为默认关闭，分别只在显式 `--with-workflow`、`--with-lobehub` 时启用；Mem0 数据面保持既有 `--with-memory` 显式启用。脚本校验和后端/部署/AI 工作流文档同步更新。
+- 实际保留库启动发现 release 已执行到 `V20260812144051`、但缺少 client 的低版本 `V20260811210453`。复用唯一 `DatabaseMigrationCompatibilityCustomizer`，新增隔离的 `V20260812202425` 前向 migration；不启用 `outOfOrder`、不执行 `repair`、不改历史表，并用 SHA-256 测试锁定两条路径。
+
+### How
+
+- 后端完整 26 模块 `mvn package -DskipTests` 通过；Workspace 文件服务 40 项通过，client/Mem0/API 定向测试 48 passed / 1 skipped。新增迁移后 `FlywayMigrationNamingTest` 12/12、真实 PostgreSQL `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 24/24 通过。
+- 前端 agent-web typecheck、覆盖 release/client/mem0 交集的 7 个 Vitest 文件 255 passed / 1 skipped、9910 模块 production build 均通过；`tools/verify-dev-scripts.sh` 全部通过。
+- 使用 JDK 25、主工作区只读 `.env.test` 和共享数据根，从 dev 工作树执行 `./restart-dev-services.sh --profile test --env-file /Users/kaka/Desktop/intelligent-test-agent/.env.test --skip-frontend-build`，未传 Workflow、LobeHub 或 Mem0 启用参数。实际 PostgreSQL 从 `20260812144051` 正序应用到 `20260812202425`；backend health/readiness、frontend 3000、CORS 与 manager WebSocket/4098 OpenCode health 均通过。
+
+### Result
+
+- `dev` 同时包含 release、mem0、client 的提交历史与功能，默认启动不包含 Workflow、LobeHub 或 Mem0 数据面，按需通过显式参数开启；release 已同步 `origin`。
+- 本次新增数据库兼容装配与前向 migration，不新增另一套迁移器；API、RunEvent、安全协议均只承接三个来源分支已有的向后兼容扩展。稳定文档已同步。
+- 主工作树 `frontend/apps/agent-web/components.d.ts` 和 mem0 工作树 6 个用户未提交文件保持未暂存且未进入 dev；未修改任何 `.env*`。真实 ARM 麒麟设备上的 client 最终验收仍是 client 原分支的既有外部验证项，不影响本次分支整理与本机启动结论。

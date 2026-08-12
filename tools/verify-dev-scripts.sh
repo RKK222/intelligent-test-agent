@@ -59,14 +59,18 @@ if [[ "${restart_help}" != *"--lobehub-mode"* ]]; then
 fi
 if [[ "${restart_help}" != *"--without-workflow"* ]]; then
   echo "${restart_help}" >&2
-  fail "restart script help should document the workflow opt-out"
+  fail "restart script help should retain the workflow compatibility opt-out"
+fi
+if [[ "${restart_help}" != *"--with-workflow"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document the opt-in Workflow development mode"
 fi
 if [[ "${restart_help}" != *"--with-memory"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document the opt-in QA memory data plane"
 fi
-if ! grep -Fq 'with_workflow=true' "${ROOT_DIR}/restart-dev-services.sh"; then
-  fail "restart script must start the workflow control plane by default"
+if ! grep -Eq '^with_workflow=false$' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must keep Workflow disabled by default"
 fi
 if ! grep -Fq '"${WORKFLOW_DEV_SCRIPT}" prepare' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must prepare workflow settings before Java starts"

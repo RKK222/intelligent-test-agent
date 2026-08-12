@@ -77,7 +77,7 @@ export SYS_DATA_ROOT_DIR="$TESTAGENT/.testagent"
   --env-file "$test_agent_primary_root/.env.test"
 ```
 
-不要显式把 `TEST_AGENT_ROOT` 改成主工作区；它应继续由脚本设置为当前 worktree，确保构建产物、运行 JAR 和日志都属于当前分支。`TESTAGENT` 负责 Java 对历史 `$TESTAGENT/...` 通用参数的展开，`SYS_DATA_ROOT_DIR` 负责启动脚本写入并让 manager 读取同一份 `.serverid/.serverhost`，两者必须指向同一数据根。只有当前 `.env.test` 确实缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 且本次不验证 Workflow 时，才在命令末尾显式追加 `--without-workflow` 并在交付说明中记录。
+不要显式把 `TEST_AGENT_ROOT` 改成主工作区；它应继续由脚本设置为当前 worktree，确保构建产物、运行 JAR 和日志都属于当前分支。`TESTAGENT` 负责 Java 对历史 `$TESTAGENT/...` 通用参数的展开，`SYS_DATA_ROOT_DIR` 负责启动脚本写入并让 manager 读取同一份 `.serverid/.serverhost`，两者必须指向同一数据根。dev 分支默认不启动 Workflow；只有本次需要验证长程任务且已经准备 `WORKFLOW_DEV_REDIS_PASSWORD` 等独立配置时，才在命令末尾显式追加 `--with-workflow`。`--without-workflow` 仅为兼容既有命令保留。
 
 LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。该模式要求同级

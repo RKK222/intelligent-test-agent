@@ -105,6 +105,8 @@ Windows 开发人员若只需要 legacy guo profile，可直接使用已提交�
 
 该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录启动编排脚本，不属于 Java 进程配置。当前本地联调默认改用 `test` profile 和 `.env.test`；Windows 用户要连同一测试环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`，WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，仍可在 IDEA/PowerShell 中显式导入 `.env.test` 的数据库、Redis、模型和 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 等变量，并用 `-Dspring.profiles.active=test` 启动 Java 后端。
 
+dev 分支的一键重启默认不启动 Workflow；需要联调长程任务时显式增加 `--with-workflow`。`--without-workflow` 继续兼容已有命令，但与默认行为等价。
+
 需要同时联调 LobeHub 时，macOS/Linux 从仓库根目录显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。默认不启动 LobeHub；该模式从
 同级 `../lobehub-platform` 启动独立 dev server，开发密钥只写入 `.tmp/dev-services/lobehub-dev.env`，不修改
@@ -215,7 +217,7 @@ mvn test
 
 镜像构建、生产/测试 profile、dotenv、连接池和外部依赖配置见 `docs/deployment/backend.md`。
 
-平台数据库由 Spring Boot 唯一 Flyway Bean 按默认顺序迁移。工具盒子已知历史包括旧 `V20260727203500`、企业正式 `V20260728160800/-1966404877` 和当前版本的 `-74327385` 幂等误发变体：启动装配按已执行 version/checksum 选择隔离兼容资源；空库和企业正式历史只解析原始主 migration，未知 checksum 失败关闭，不使用 `outOfOrder`、`repair` 或手工历史表修改。
+平台数据库由 Spring Boot 唯一 Flyway Bean 按默认顺序迁移。工具盒子已知历史包括旧 `V20260727203500`、企业正式 `V20260728160800/-1966404877` 和当前版本的 `-74327385` 幂等误发变体；分支合并产生的 QA Memory、体验工作区和本地客户端低版本缺口也由同一装配按已执行 version/checksum 选择隔离兼容资源或更高前向 migration。空库和正常主链只解析原始 migration，未知 checksum 或主/前向路径混用失败关闭，不使用 `outOfOrder`、`repair` 或手工历史表修改。
 
 ## 后续 AI 编码指引
 

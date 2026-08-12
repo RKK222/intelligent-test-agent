@@ -649,6 +649,8 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 Bash 额外支持 `--with-memory`：它在平台进程前按“独立 pgvector → 独立 CPU BGE → Alembic → 三个无状态 Mem0 副本 → Nginx VIP”启动数据面，并等待带鉴权 readiness 返回 `rawMessageCount=0`。随机 API key、HMAC 和数据库密码只写入 `.tmp/dev-services/memory` 的 `0600` 文件，Java 不继承记忆库密码；默认路径不探测、停止或构建记忆容器。Windows PowerShell 入口 V1 不提供此开关。企业发布包另支持 `--memory-only/--with-memory`，详细命令、物理分离拓扑、端口和回滚见 `docs/deployment/qa-memory.md`。
 
+Workflow 同样默认不参与 dev 重启；Bash 只有显式增加 `--with-workflow` 时才准备并启动 Python API/Worker，同时为前端注入 `VITE_TEST_AGENT_WORKFLOW_ENABLED=true`。`--without-workflow` 仅保留为已有命令的兼容别名。Windows PowerShell 入口当前不编排 Workflow。
+
 LobeHub 默认不参与上述重启。Bash 显式增加 `--with-lobehub` 时才在三项平台服务之后启动同级
 `../lobehub-platform`、本地 ParadeDB/RustFS 和 `3210` dev server，并复用 Redis 的
 `REDIS_PREFIX=lobehub:app` 独立配置（fork 自动追加分隔冒号，实际 key 为 `lobehub:app:*`）。生成的 LobeHub 开发 secret 仅位于
