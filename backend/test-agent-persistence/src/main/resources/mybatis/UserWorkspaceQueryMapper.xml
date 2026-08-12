@@ -21,6 +21,11 @@
           and w.workspace_id not like 'wrk!_exp!_%' escape '!'
           and (
             exists (
+                select 1 from local_client_workspaces lcw
+                where lcw.workspace_id = w.workspace_id
+                  and lcw.user_id = #{userId}
+            )
+            or exists (
                 select 1 from personal_workspaces pw
                 where pw.runtime_workspace_id = w.workspace_id
                   and pw.user_id = #{userId}

@@ -333,6 +333,26 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.findComponent(WorkbenchFooter).props("workspaceKind")).toBe("EXPERIENCE");
   });
 
+  it("keeps local files writable while explicitly disabling Git and Agent configuration", () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_local",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: [],
+        canWrite: true,
+        workspaceGitEnabled: false,
+        agentConfigEnabled: false
+      }
+    });
+
+    expect(wrapper.find('button[aria-label="变更"]').exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="拉取远程"]').exists()).toBe(false);
+    expect(wrapper.findComponent(GitChangesPanel).exists()).toBe(false);
+    expect(wrapper.findComponent(AgentConfigPanel).exists()).toBe(false);
+    expect(wrapper.findComponent(FileExplorer).props("canWrite")).toBe(true);
+  });
+
   it("forwards workspace view node navigation without collapsing it to a path", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {

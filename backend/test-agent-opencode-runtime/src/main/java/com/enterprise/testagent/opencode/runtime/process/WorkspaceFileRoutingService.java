@@ -9,6 +9,12 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServer;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
@@ -47,6 +53,8 @@ public class WorkspaceFileRoutingService {
     private final ConversationContextStore conversationContextStore;
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
     private final AppSourceRepository appSourceRepository;
+    private LocalClientWorkspaceRepository localWorkspaceRepository;
+    private LocalClientConnectionStore localConnectionStore;
 
     /**
      * 生产构造器使用系统时钟。
@@ -181,6 +189,12 @@ public class WorkspaceFileRoutingService {
         workspaceAccessAuthorizer.requireFileAccess(userId, workspaceId, false);
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
+        LocalClientWorkspaceBinding localBinding = localWorkspaceRepository == null
+                ? null
+                : localWorkspaceRepository.findByWorkspaceId(workspaceId).orElse(null);
+        if (localBinding != null) {
+            return routeLocalWorkspace(userId, localBinding);
+        }
         UserOpencodeProcessFileRoutingAffinity process = assignmentService.fileRoutingAffinity(userId, agentId, traceId);
         String agentLinuxServerId = readyLinuxServerId(process, workspaceId.value());
         String workspaceLinuxServerId = workspace.linuxServerId() == null ? agentLinuxServerId : workspace.linuxServerId();
@@ -204,6 +218,80 @@ public class WorkspaceFileRoutingService {
                 WEB_SOCKET_PATH,
                 true,
                 null);
+    }
+
+    /**
+     * 目录选择器严格路由到持有指定客户端 generation 的 Java；上报 IP、端口不参与选择。
+     */
+    public WorkspaceFileRouteResponse routeLocalDirectoryPicker(
+            UserId userId,
+            LocalClientInstanceId clientInstanceId) {
+        LocalClientConnectionRoute route = requireLocalRoute(clientInstanceId, userId);
+        BackendJavaProcess backend = routeResolver.requireBackend(route.backendProcessId());
+        return new WorkspaceFileRouteResponse(
+                null,
+                null,
+                trimTrailingSlash(backend.listenUrl()),
+                WEB_SOCKET_PATH,
+                routeResolver.isCurrent(route.backendProcessId()),
+                null,
+                RuntimeKind.LOCAL_CLIENT,
+                clientInstanceId.value(),
+                route.connectionGeneration(),
+                null,
+                true);
+    }
+
+    /** 可选装配保持既有单元测试构造器不变；生产环境由 Spring 注入本地客户端仓储。 */
+    @Autowired(required = false)
+    void configureLocalClientRouting(
+            LocalClientWorkspaceRepository localWorkspaceRepository,
+            LocalClientConnectionStore localConnectionStore) {
+        this.localWorkspaceRepository = Objects.requireNonNull(
+                localWorkspaceRepository, "localWorkspaceRepository must not be null");
+        this.localConnectionStore = Objects.requireNonNull(
+                localConnectionStore, "localConnectionStore must not be null");
+    }
+
+    private WorkspaceFileRouteResponse routeLocalWorkspace(
+            UserId userId,
+            LocalClientWorkspaceBinding binding) {
+        if (!binding.userId().equals(userId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "无权访问其他用户的本地工作区");
+        }
+        LocalClientConnectionRoute route = requireLocalRoute(binding.clientInstanceId(), userId);
+        BackendJavaProcess backend = routeResolver.requireBackend(route.backendProcessId());
+        return new WorkspaceFileRouteResponse(
+                binding.workspaceId().value(),
+                null,
+                trimTrailingSlash(backend.listenUrl()),
+                WEB_SOCKET_PATH,
+                routeResolver.isCurrent(route.backendProcessId()),
+                null,
+                RuntimeKind.LOCAL_CLIENT,
+                binding.clientInstanceId().value(),
+                route.connectionGeneration(),
+                binding.rootDigest(),
+                true);
+    }
+
+    private LocalClientConnectionRoute requireLocalRoute(
+            LocalClientInstanceId clientInstanceId,
+            UserId userId) {
+        if (localConnectionStore == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "本地客户端路由服务未装配");
+        }
+        LocalClientConnectionRoute route = localConnectionStore.find(clientInstanceId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "本地客户端离线",
+                        Map.of("clientInstanceId", clientInstanceId.value())));
+        if (!route.userId().equals(userId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端不属于当前用户");
+        }
+        // requireBackend 会按 backendProcessId 精确解析在线 Java，禁止按服务器或上报地址降级。
+        routeResolver.requireBackend(route.backendProcessId());
+        return route;
     }
 
     /**

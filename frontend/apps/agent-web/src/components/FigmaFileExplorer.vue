@@ -40,6 +40,10 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   canMutateGit?: boolean;
   /** 是否允许编辑应用级 Agent/Skill/Rules/Templates 配置 */
   canManageAgentConfig?: boolean;
+  /** 本地客户端首版不开放浏览器 Git 面板。 */
+  workspaceGitEnabled?: boolean;
+  /** 本地客户端首版不开放 Agent 配置管理面板。 */
+  agentConfigEnabled?: boolean;
   /** 是否允许编辑公共 Git 中的 Agent/Skill 配置（仅超级管理员） */
   canManagePublicConfig?: boolean;
   /** 后端 base url，透传给 AgentConfigPanel/GitChangesPanel */
@@ -93,7 +97,10 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   appSourceRepositoriesError?: string | null;
 }>(), {
   // 旧调用方未传该新增能力时继续继承 canWrite，不能被 Boolean prop 的缺省 false 改成只读。
-  canMutateGit: undefined
+  canMutateGit: undefined,
+  // 新 capability 未随旧调用传入时必须保持原有服务器工作区能力，只有显式 false 才关闭。
+  workspaceGitEnabled: true,
+  agentConfigEnabled: true
 });
 
 const emit = defineEmits<{
@@ -329,12 +336,12 @@ function onResizeEnd() {
 }
 
 function refreshAgents() {
-  if (!managedWorkspaceMode.value) return;
+  if (!managedWorkspaceMode.value || props.agentConfigEnabled === false) return;
   agentConfigPanelRef.value?.refreshAll();
 }
 
 function refreshChanges() {
-  if (props.workspaceKind === "APP_SOURCE") return;
+  if (props.workspaceKind === "APP_SOURCE" || props.workspaceGitEnabled === false) return;
   gitChangesPanelRef.value?.refreshChanges();
 }
 
@@ -356,8 +363,8 @@ watch(tab, (nextTab) => {
   diffAutoRefreshTimer = window.setInterval(refreshChanges, DIFF_AUTO_REFRESH_INTERVAL_MS);
 });
 
-watch(() => props.workspaceKind, (kind) => {
-  if (kind === "APP_SOURCE" && tab.value === "changes") tab.value = "explorer";
+watch([() => props.workspaceKind, () => props.workspaceGitEnabled], ([kind, gitEnabled]) => {
+  if ((kind === "APP_SOURCE" || gitEnabled === false) && tab.value === "changes") tab.value = "explorer";
 });
 
 onUnmounted(stopDiffAutoRefresh);
@@ -416,7 +423,7 @@ defineExpose({
         <Search class="h-4 w-4 figma-fe-tab-icon--search" :stroke-width="1.5" />
       </button>
       <button
-        v-if="workspaceKind !== 'APP_SOURCE'"
+        v-if="workspaceKind !== 'APP_SOURCE' && workspaceGitEnabled !== false"
         type="button"
         :class="['ta-icon-tab', tab === 'changes' && 'is-active']"
         title="变更"
@@ -447,7 +454,7 @@ defineExpose({
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <GitChangesPanel
-        v-if="workspaceKind !== 'APP_SOURCE'"
+        v-if="workspaceKind !== 'APP_SOURCE' && workspaceGitEnabled !== false"
         v-show="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
@@ -556,7 +563,7 @@ defineExpose({
                     <span>刷新文件树</span>
                   </button>
                   <button
-                    v-if="managedWorkspaceMode"
+                    v-if="managedWorkspaceMode && workspaceGitEnabled !== false"
                     type="button"
                     class="figma-fe-more-menu-item"
                     aria-label="拉取远程"
@@ -638,7 +645,7 @@ defineExpose({
 
         <!-- Resizer divider: only show if both sections are expanded -->
         <div
-          v-if="managedWorkspaceMode && workspaceExpanded && agentsExpanded"
+          v-if="managedWorkspaceMode && agentConfigEnabled !== false && workspaceExpanded && agentsExpanded"
           class="figma-fe-resize-handle"
           @mousedown="onResizeStart"
           role="separator"
@@ -646,7 +653,7 @@ defineExpose({
         />
 
         <!-- Section 2: agents -->
-        <div v-if="managedWorkspaceMode" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
+        <div v-if="managedWorkspaceMode && agentConfigEnabled !== false" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
           <div class="figma-fe-section-header">
             <button
               type="button"

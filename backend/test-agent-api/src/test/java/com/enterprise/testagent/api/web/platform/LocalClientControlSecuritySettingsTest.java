@@ -1,0 +1,64 @@
+package com.enterprise.testagent.api.web.platform;
+
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.enterprise.testagent.common.error.PlatformException;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+
+class LocalClientControlSecuritySettingsTest {
+
+    @Test
+    void acceptsDirectSecureTransport() {
+        LocalClientControlSecuritySettings settings = settings(false);
+
+        assertThatCode(() -> settings.requireSecure(
+                        URI.create("wss://platform.example/ws"), new HttpHeaders(), remote("203.0.113.8")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void acceptsForwardedSecureTransportOnlyFromTrustedProxy() {
+        LocalClientControlSecuritySettings settings = settings(false);
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Forwarded-Proto", "https");
+
+        assertThatCode(() -> settings.requireSecure(
+                        URI.create("http://backend/model"), headers, remote("127.0.0.1")))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> settings.requireSecure(
+                        URI.create("http://backend/model"), headers, remote("203.0.113.8")))
+                .isInstanceOf(PlatformException.class);
+    }
+
+    @Test
+    void rejectsPlaintextAndInvalidTrustedProxyConfiguration() {
+        LocalClientControlSecuritySettings settings = settings(false);
+
+        assertThatThrownBy(() -> settings.requireSecure(
+                        URI.create("http://backend/model"), new HttpHeaders(), remote("127.0.0.1")))
+                .isInstanceOf(PlatformException.class);
+        assertThatThrownBy(() -> new LocalClientControlSecuritySettings(false, "proxy.example"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void explicitDevelopmentSwitchAllowsPlaintext() {
+        LocalClientControlSecuritySettings settings = settings(true);
+
+        assertThatCode(() -> settings.requireSecure(
+                        URI.create("http://127.0.0.1/ws"), new HttpHeaders(), remote("127.0.0.1")))
+                .doesNotThrowAnyException();
+    }
+
+    private static LocalClientControlSecuritySettings settings(boolean allowInsecure) {
+        return new LocalClientControlSecuritySettings(allowInsecure, "127.0.0.1,::1");
+    }
+
+    private static InetSocketAddress remote(String address) {
+        return new InetSocketAddress(address, 12345);
+    }
+}

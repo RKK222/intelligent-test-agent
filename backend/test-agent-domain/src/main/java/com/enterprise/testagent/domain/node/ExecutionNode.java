@@ -4,6 +4,7 @@ import com.enterprise.testagent.domain.support.DomainValidation;
 import java.time.Instant;
 import java.util.Set;
 import java.util.Objects;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 
 /**
  * 执行节点领域对象，只表达路由所需的节点状态和容量，不直接访问 opencode server。
@@ -19,7 +20,28 @@ public record ExecutionNode(
         Set<String> capabilities,
         Instant createdAt,
         Instant updatedAt,
-        String traceId) {
+        String traceId,
+        RuntimeKind runtimeKind,
+        String localClientInstanceId,
+        Long connectionGeneration) {
+
+    /** 兼容本地运行目标加入前的完整构造器与历史 JSON。 */
+    public ExecutionNode(
+            ExecutionNodeId executionNodeId,
+            String baseUrl,
+            ExecutionNodeStatus status,
+            int runningRuns,
+            int maxRuns,
+            int weight,
+            Instant lastHeartbeatAt,
+            Set<String> capabilities,
+            Instant createdAt,
+            Instant updatedAt,
+            String traceId) {
+        this(executionNodeId, baseUrl, status, runningRuns, maxRuns, weight,
+                lastHeartbeatAt, capabilities, createdAt, updatedAt, traceId,
+                RuntimeKind.SERVER_PROCESS, null, null);
+    }
 
     /**
      * 构造基础执行节点，使用默认权重、空能力集合和占位 traceId，主要用于测试和简单 seed 场景。
@@ -42,7 +64,10 @@ public record ExecutionNode(
                 Set.of(),
                 updatedAt,
                 updatedAt,
-                "trace_unspecified");
+                "trace_unspecified",
+                RuntimeKind.SERVER_PROCESS,
+                null,
+                null);
     }
 
     /**
@@ -69,6 +94,15 @@ public record ExecutionNode(
         createdAt = DomainValidation.requireInstant(createdAt, "createdAt");
         updatedAt = DomainValidation.requireInstant(updatedAt, "updatedAt");
         traceId = DomainValidation.requireText(traceId, "traceId");
+        runtimeKind = RuntimeKind.fromNullable(runtimeKind);
+        localClientInstanceId = normalizeOptional(localClientInstanceId);
+        if (runtimeKind == RuntimeKind.LOCAL_CLIENT) {
+            if (localClientInstanceId == null || connectionGeneration == null || connectionGeneration < 1) {
+                throw new IllegalArgumentException("local execution node requires client instance and generation");
+            }
+        } else if (localClientInstanceId != null || connectionGeneration != null) {
+            throw new IllegalArgumentException("server execution node must not carry local client target");
+        }
         if (updatedAt.isBefore(createdAt)) {
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
         }
@@ -86,5 +120,9 @@ public record ExecutionNode(
      */
     public boolean canAcceptRun() {
         return status == ExecutionNodeStatus.READY && availableCapacity() > 0;
+    }
+
+    private static String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

@@ -33,6 +33,9 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-agent-runtime` | 多 agent 运行时接口、registry、统一日志/指标包装和 opencode 适配器 |
 | `test-agent-workspace-management` | Workspace、文件、超级管理员服务器目录选择、同服务器共享体验目录及实时资格校验、git/diff、对话 Tool 到当前个人 workspace 的安全映射与 Git 编排、设置页初始版本工作区创建、应用版本工作区、个人工作区、个人拉取成功后的单用户运行态重载登记、Agent & Skill Hub 快照/发布/引用/更新、应用引用资产库多服务器副本、应用源码固定提交快照/副本/打开/清理、agent 和 skill 管理业务 |
+| `test-agent-workspace-filesystem` | 服务端与本地客户端共享的安全文件内核：真实根锚定、相对路径、符号链接防逃逸、原子移动和分片读写。 |
+| `test-agent-local-client-protocol` | `local-opencode-client.v1` 反向隧道帧、版本、分片和载荷契约。 |
+| `test-agent-local-client` | Java 21 用户级 ARM64 客户端，监管 loopback OpenCode、反向连接、文件 RPC 和模型中继。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、批量单项 Session 幂等创建、夜间异步执行和会话锁、Redis active/session scope 路由、含 question/permission 计数的用户级会话运行态摘要、每用户公共配置软链接/个人保存与发布 dispose、个人拉取应用 Agent 的当前用户持久化排空、opencode 进程启动环境与 manager 重连后的 ACTIVE 运行进程恢复、公共 Tool 用户作用域凭据、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
 | `test-agent-notification` | 通用用户站内通知生命周期、未读统计、事务提交后本机/跨 Java 实时变化、30 秒数据库校准和 90 天历史清理；首期由会话协作分享生产通知 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理，以及外部工具 API Key 生成、RSA 密文管理、JVM 注册表与跨 Java 刷新 |

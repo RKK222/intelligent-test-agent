@@ -15,7 +15,10 @@ import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
+import com.enterprise.testagent.domain.session.SessionRuntimeTarget;
+import com.enterprise.testagent.domain.session.SessionRuntimeTargetRepository;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextSessionRevocation;
 import com.enterprise.testagent.domain.run.RunId;
@@ -38,6 +41,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Session 应用服务，负责编排会话和平台消息持久化，Controller 不直接访问 Repository。
@@ -59,6 +63,8 @@ public class SessionApplicationService {
     private UserWorkspaceQueryRepository userWorkspaceQueryRepository;
     private UserNotificationApplicationService notificationService;
     private ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
+    private LocalClientWorkspaceRepository localClientWorkspaceRepository;
+    private SessionRuntimeTargetRepository sessionRuntimeTargetRepository;
 
     /**
      * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
@@ -182,6 +188,7 @@ public class SessionApplicationService {
     /**
      * 在指定 Workspace 下创建平台 Session，创建前先确认 Workspace 存在。
      */
+    @Transactional
     public Session createSession(WorkspaceId workspaceId, String title, String traceId) {
         return createSession(null, workspaceId, title, traceId);
     }
@@ -189,6 +196,7 @@ public class SessionApplicationService {
     /**
      * 在指定 Workspace 下创建当前用户的 Session，并记录创建人归因供运营统计使用。
      */
+    @Transactional
     public Session createSession(UserId userId, WorkspaceId workspaceId, String title, String traceId) {
         requireUserWorkspace(userId, workspaceId);
         if (workspaceRepository.findById(workspaceId).isEmpty()) {
@@ -207,9 +215,45 @@ public class SessionApplicationService {
         Session session = sessionRepository.save(userId == null
                 ? draft
                 : draft.withSource(ConversationSourceType.MANUAL, null, userId));
+        freezeRuntimeTarget(session, workspaceId);
         LOGGER.info("Session created, sessionId={}, workspaceId={}, title={}, traceId={}",
                 session.sessionId().value(), workspaceId.value(), title, traceId);
         return session;
+    }
+
+    /** 新会话与本地工作区实例绑定，后续断线或换代都不得转去服务端 OpenCode。 */
+    private void freezeRuntimeTarget(Session session, WorkspaceId workspaceId) {
+        if (sessionRuntimeTargetRepository == null) {
+            return;
+        }
+        var localBinding = localClientWorkspaceRepository == null
+                ? null
+                : localClientWorkspaceRepository.findByWorkspaceId(workspaceId).orElse(null);
+        sessionRuntimeTargetRepository.save(localBinding == null
+                ? SessionRuntimeTarget.server(session.sessionId())
+                : new SessionRuntimeTarget(
+                        session.sessionId(),
+                        com.enterprise.testagent.domain.runtime.RuntimeKind.LOCAL_CLIENT,
+                        localBinding.clientInstanceId()));
+    }
+
+    /** 可选装配保留既有纯单元测试构造器；生产环境始终冻结 session 运行目标。 */
+    @Autowired(required = false)
+    void configureRuntimeTargetRepositories(
+            LocalClientWorkspaceRepository localClientWorkspaceRepository,
+            SessionRuntimeTargetRepository sessionRuntimeTargetRepository) {
+        this.localClientWorkspaceRepository = Objects.requireNonNull(
+                localClientWorkspaceRepository, "localClientWorkspaceRepository must not be null");
+        this.sessionRuntimeTargetRepository = Objects.requireNonNull(
+                sessionRuntimeTargetRepository, "sessionRuntimeTargetRepository must not be null");
+    }
+
+    /** 历史 Session 缺少新字段时按服务端目标解释，保持旧数据可反序列化。 */
+    public SessionRuntimeTarget runtimeTarget(SessionId sessionId) {
+        return sessionRuntimeTargetRepository == null
+                ? SessionRuntimeTarget.server(sessionId)
+                : sessionRuntimeTargetRepository.findBySessionId(sessionId)
+                        .orElseGet(() -> SessionRuntimeTarget.server(sessionId));
     }
 
     /**

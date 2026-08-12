@@ -270,3 +270,11 @@ tools/dev-phase11-real-e2e.sh --start-services
 - 面板、toolbar、terminal、Diff、Agent timeline 和文件树必须保持稳定尺寸。Agent timeline 主路径使用 `packages/agent-chat/src/opencode-like` 的 `.oc-*` 时间线，把 reasoning 思考过程、上下文工具组、Skill/Tool 调用、文件引用、Diff 摘要与最终回答分块展示并保留独立滚动区域；`session.status.retry` 这类上游等待重试/限额状态必须转成 runtime retry 行展示，可按前端首次收到事件的时间显示固定 60 秒倒计时，但倒计时不产生任何 Run 副作用，不能停留在普通“思考中”；右侧 Agent 对话框继续消费全局 `--ta-*`/`--ta-chat-*` token，避免 hover、streaming 文本、warning、hunk 导航或状态徽标导致布局跳动。
 - 旧 `.figma-chat-*` 气泡消息循环、`AgentCard`/`TimelineCard` 和 `MessageParts` 旧 part 组件只作为作废兼容代码保留；新增对话展示能力必须落在 `packages/agent-chat/src/opencode-like`。
 - 真实三服务 E2E 尚无最新通过记录；当前只能认为 mock E2E 和单元测试覆盖了主流程，不能把真实联调标记为完成。
+
+## 本地 OpenCode 客户端
+
+个人设置页提供 client key 创建/复制/轮换/撤销、实例状态与生命周期控制、本地只读目录选择和 Workspace
+注册。明文 key 只在 API 方法局部变量中直接写剪贴板，不渲染、不进入 TanStack Query cache 或浏览器
+存储。头像菜单合并服务端和本地 OpenCode 实例，显示平台、上报/观察地址、端口、版本、状态和最后心跳。
+本地 Workspace 的 capability 明确关闭 terminal、Git 发布、Agent 配置、附件和协作分享；页面不能仅靠
+按钮隐藏代替后端约束。

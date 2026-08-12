@@ -10,6 +10,7 @@
 - `docs/guides/self-checklist.md`：完成前自检清单。
 - `docs/architecture/dependency-rules.md`：分层依赖与访问边界。
 - `docs/standards/opencode.md`：OpenCode 只读源码快照、平台适配和 generated SDK 边界。
+- `docs/architecture/local-opencode-client.md`：本地 OpenCode 反向隧道、fencing、文件安全和运行目标冻结。
 
 ## 技术栈与编码规范
 
@@ -57,6 +58,7 @@
 
 - `docs/deployment/backend.md`：后端 Java 进程容器部署。
 - `docs/deployment/opencode-upgrade-1.18.4.md`：OpenCode 1.18.4 / OpenAPI Generator 7.24.0 差异、影响、验证与回滚基线。
+- `docs/deployment/local-opencode-client.md`：ARM64 客户端签名打包、Nginx HTTP 分发、用户服务安装和风险。
 - `docs/deployment/codex-whitebox-mcp.md`：官方 Codex 0.145.0 MCP、企业 DeepSeek 路由、无审批夜间分析、原生参数风险、Linux 4.19 / Docker 18.09.7 预检与回滚。
 - `docs/deployment/frontend.md`：前端 Vue + Vite 生产构建与部署。
 - `docs/deployment/toolbox.md`：IT-Tools + OmniTools 的 193 项离线目录、派生源码、双后台共置容器、Nginx、增量发布与回滚。

@@ -4069,3 +4069,37 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 和常量时间比较；浏览器 token 过滤器只对该精确路径豁免。请求只包含目标 `linuxServerId` 和最多 50 个 `resendId`，入口通过
 `BackendJavaRouteResolver`、`BackendHttpForwarder` 固定路由到目标 Java，不扫描 Redis 路由快照、不本机降级。响应只有每条状态与
 安全错误码，不含 prompt、回答或供应商响应。
+# 本地 OpenCode 客户端 API
+
+以下接口均要求当前用户登录态；除连接 WebSocket 和内部撤销入口外，不接受 client key。所有响应继续使用
+统一 `ApiResponse<T>`，并携带或生成 traceId。
+
+| Method | Path | Request / Response | 约束 |
+|---|---|---|---|
+| `GET` | `/api/internal/platform/local-opencode-client/credentials/me` | 掩码、版本、状态和时间 | 不返回明文或密文；不存在时返回空视图。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me` | 创建当前用户唯一 key，返回掩码视图 | 明文通过后续 copy 取得；重复创建幂等返回现有视图。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me/copy` | `{clientKey, version}` | 强制 `no-store/no-cache/no-referrer`；调用记审计。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新掩码视图 | 原子提升版本，撤销全部连接与模型 grant。 |
+| `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant。 |
+| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户所有稳定实例及在线、generation、OpenCode 状态 | reported/observed 地址仅展示。 |
+| `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/opencode/commands` | `{action: START\|RESTART\|STOP\|STATUS}` | 复用公共启动/停止/状态服务；跨 Java 精确转发到持有 generation 的节点。 |
+| `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 只允许实例 owner；目标固定持有连接 Java。 |
+| `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 客户端先验证真实绝对目录，再事务性注册；离线失败。 |
+| `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
+| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map。 |
+
+本地目录选择器取得 route 后，继续调用既有
+`POST /api/internal/platform/workspace-management/file-ws/tickets`，ticket 请求使用
+`mode=directory-picker`、`localClientInstanceId` 和 `connectionGeneration`；随后连接既有 `/file/ws`，只允许
+`directory.list {absolutePath,limit}`。普通本地工作区文件 ticket 使用 `mode=workspace` 并冻结
+`runtimeKind=LOCAL_CLIENT`、实例 ID、generation 和 root digest。
+
+Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追加：
+
+- `runtimeKind` / `targetRuntimeKind`：`SERVER_PROCESS` 或 `LOCAL_CLIENT`；
+- `localClientInstanceId` / `targetLocalClientInstanceId`；
+- `localClientOnline`、`connectionGeneration`（仅适用响应）；
+- `capabilities`：明确指示 chat、fileManagement、nightExecution、terminal、gitPublish、agentConfig、
+  attachments、collaboration。
+
+旧调用不传 workspaceId 时仍选择服务端 OpenCode；本地实例离线或换代返回稳定冲突/不可用错误，不回退。

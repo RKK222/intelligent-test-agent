@@ -8,6 +8,8 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -61,6 +63,10 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
         jdbc.execute("alter table night_execution_tasks add column share_version_snapshot bigint");
         jdbc.execute("alter table night_execution_tasks add column share_expires_at_snapshot timestamptz");
         jdbc.execute("alter table night_execution_tasks add column can_chat_snapshot boolean");
+        jdbc.execute("alter table night_execution_tasks add column target_runtime_kind varchar(32) "
+                + "not null default 'SERVER_PROCESS'");
+        jdbc.execute("alter table night_execution_tasks add column target_local_client_instance_id varchar(128)");
+        jdbc.execute("alter table night_execution_tasks alter column target_linux_server_id drop not null");
         jdbc.update("insert into scheduled_tasks(task_key,name,cron_expression,enabled,lock_ttl_seconds,"
                         + "registration_status,trace_id,created_at,updated_at) values(?,?,?,?,?,?,?,?,?)",
                 "opencode-runtime.night-execution", "legacy night", "0 0/15 * * * ?", true, 300,
@@ -179,6 +185,24 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
     }
 
     @Test
+    void localClientTargetIsPersistedAndClaimedWithoutLinuxServerFallback() {
+        NightExecutionTask scheduled = localTask();
+        repository.save(scheduled);
+        Instant claimedAt = SLOT.plusSeconds(1);
+        NightExecutionTask dispatching = scheduled.startDispatch(
+                "nda_local_attempt", "bjp_local_owner", claimedAt.plusSeconds(300), claimedAt);
+
+        assertThat(repository.findById(scheduled.taskId())).contains(scheduled);
+        assertThat(repository.claimForDispatch(dispatching, "linux-night-1")).isTrue();
+        assertThat(repository.findById(scheduled.taskId())).get().satisfies(restored -> {
+            assertThat(restored.targetRuntimeKind()).isEqualTo(RuntimeKind.LOCAL_CLIENT);
+            assertThat(restored.targetLocalClientInstanceId())
+                    .isEqualTo(new LocalClientInstanceId("lci_night_repository"));
+            assertThat(restored.targetLinuxServerId()).isNull();
+        });
+    }
+
+    @Test
     void scheduledUpdatesUseStateVersionToRejectConcurrentOverwrite() {
         NightExecutionTask scheduled = task();
         repository.save(scheduled);
@@ -252,5 +276,16 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
                 SLOT, SLOT.plusSeconds(60), SLOT.plusSeconds(900), "linux-night-1",
                 null, null, 0, false, null, null, null, null, 0L,
                 null, null, null, null, "trace_custom_repo", NOW, NOW);
+    }
+
+    private NightExecutionTask localTask() {
+        return new NightExecutionTask(
+                new NightExecutionTaskId("net_local_repository"), USER, SESSION, WORKSPACE,
+                "request-local-1", "本地夜间执行", "生成本地回归测试", "{\"prompt\":\"生成本地回归测试\"}",
+                NightExecutionScheduleMode.NIGHT_WINDOW, NightExecutionTaskStatus.SCHEDULED,
+                SLOT, SLOT.plusSeconds(900), Instant.parse("2026-07-18T23:00:00Z"), null,
+                null, null, 0, false, null, null, null, null, 0L,
+                null, null, null, null, "trace_local_night_repo", NOW, NOW,
+                RuntimeKind.LOCAL_CLIENT, new LocalClientInstanceId("lci_night_repository"));
     }
 }

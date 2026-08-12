@@ -9,6 +9,10 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.session.Session;
@@ -54,6 +58,7 @@ public class NightExecutionDispatchService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Supplier<String> attemptIdSupplier;
+    private LocalClientConnectionStore localClientConnectionStore;
 
     @Autowired
     public NightExecutionDispatchService(
@@ -135,13 +140,18 @@ public class NightExecutionDispatchService {
             String targetLinuxServerId,
             NightExecutionTaskId taskId,
             String traceId) {
-        if (!backendIdentity.linuxServerId().equals(targetLinuxServerId)) {
+        LocalClientInstanceId targetLocalClient = localClientTarget(targetLinuxServerId);
+        if (targetLocalClient == null && !backendIdentity.linuxServerId().equals(targetLinuxServerId)) {
             return result(taskId, NightExecutionDispatchStatus.TARGET_MISMATCH, null, "TARGET_MISMATCH");
         }
         NightExecutionTask task = taskRepository.findById(taskId).orElse(null);
         if (task == null) return result(taskId, NightExecutionDispatchStatus.NOT_FOUND, null, null);
-        if (!task.targetLinuxServerId().equals(targetLinuxServerId)) {
+        if (!matchesTarget(task, targetLinuxServerId, targetLocalClient)) {
             return result(taskId, NightExecutionDispatchStatus.TARGET_MISMATCH, null, "TARGET_MISMATCH");
+        }
+        if (targetLocalClient != null && !currentLocalConnection(task, targetLocalClient)) {
+            return result(taskId, NightExecutionDispatchStatus.RETRYABLE_FAILURE, null,
+                    ErrorCode.LOCAL_CLIENT_DISCONNECTED.name());
         }
         if (task.status() == NightExecutionTaskStatus.DISPATCHED) {
             return result(taskId, NightExecutionDispatchStatus.ALREADY_STARTED,
@@ -174,7 +184,7 @@ public class NightExecutionDispatchService {
                 backendIdentity.backendProcessId(),
                 now.plus(NightExecutionDispatchLeaseGuard.LEASE_DURATION),
                 now);
-        if (!taskRepository.claimForDispatch(dispatching, targetLinuxServerId)) {
+        if (!taskRepository.claimForDispatch(dispatching, task.targetLinuxServerId())) {
             return result(taskId, NightExecutionDispatchStatus.IN_PROGRESS, null, null);
         }
         ScheduledRunMetadata metadata = new ScheduledRunMetadata(taskId.value(), attemptId);
@@ -188,16 +198,19 @@ public class NightExecutionDispatchService {
             NightExecutionRunInputSnapshot snapshot = readSnapshot(dispatching);
             Session session = requireSession(dispatching);
             requireWorkspace(dispatching, session);
-            Optional<String> binding = assignmentService.routingLinuxServerId(task.ownerUserId(), "opencode");
-            if (binding.isPresent() && !binding.orElseThrow().equals(targetLinuxServerId)) {
-                PlatformException mismatch = new PlatformException(ErrorCode.CONFLICT, "用户进程归属与固定目标服务器不一致");
-                lifecycleService.onRejected(metadata, mismatch);
-                return result(taskId, NightExecutionDispatchStatus.TARGET_MISMATCH, null, "TARGET_MISMATCH");
-            }
-            var process = assignmentService.initialize(task.ownerUserId(), "opencode", traceId);
-            if (process.status() != UserOpencodeProcessAvailability.READY
-                    || !targetLinuxServerId.equals(process.linuxServerId())) {
-                throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "TestAgent 进程启动后仍不可用");
+            if (targetLocalClient == null) {
+                Optional<String> binding = assignmentService.routingLinuxServerId(task.ownerUserId(), "opencode");
+                if (binding.isPresent() && !binding.orElseThrow().equals(targetLinuxServerId)) {
+                    PlatformException mismatch = new PlatformException(
+                            ErrorCode.CONFLICT, "用户进程归属与固定目标服务器不一致");
+                    lifecycleService.onRejected(metadata, mismatch);
+                    return result(taskId, NightExecutionDispatchStatus.TARGET_MISMATCH, null, "TARGET_MISMATCH");
+                }
+                var process = assignmentService.initialize(task.ownerUserId(), "opencode", traceId);
+                if (process.status() != UserOpencodeProcessAvailability.READY
+                        || !targetLinuxServerId.equals(process.linuxServerId())) {
+                    throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "TestAgent 进程启动后仍不可用");
+                }
             }
             var issued = contextService.bootstrap(task.ownerUserId(), "opencode", task.sessionId(), traceId);
             Instant runStartAt = clock.instant();
@@ -234,6 +247,45 @@ public class NightExecutionDispatchService {
             lifecycleService.onRejected(metadata, failure);
             return result(taskId, NightExecutionDispatchStatus.RETRYABLE_FAILURE, null, "INTERNAL_ERROR");
         }
+    }
+
+    private LocalClientInstanceId localClientTarget(String target) {
+        if (target == null || !target.startsWith("local:")) {
+            return null;
+        }
+        return new LocalClientInstanceId(target.substring("local:".length()));
+    }
+
+    private boolean matchesTarget(
+            NightExecutionTask task,
+            String requestedTarget,
+            LocalClientInstanceId requestedClient) {
+        if (requestedClient != null) {
+            return task.targetRuntimeKind() == RuntimeKind.LOCAL_CLIENT
+                    && requestedClient.equals(task.targetLocalClientInstanceId());
+        }
+        return task.targetRuntimeKind() == RuntimeKind.SERVER_PROCESS
+                && Objects.equals(task.targetLinuxServerId(), requestedTarget);
+    }
+
+    private boolean currentLocalConnection(
+            NightExecutionTask task,
+            LocalClientInstanceId clientInstanceId) {
+        if (localClientConnectionStore == null) {
+            return false;
+        }
+        LocalClientConnectionRoute route = localClientConnectionStore.find(clientInstanceId).orElse(null);
+        return route != null
+                && route.userId().equals(task.ownerUserId())
+                && route.backendProcessId().value().equals(backendIdentity.backendProcessId())
+                && route.processStatus()
+                        == com.enterprise.testagent.domain.localclient.LocalClientProcessStatus.RUNNING
+                && route.opencodeHealthy();
+    }
+
+    @Autowired(required = false)
+    void configureLocalClientConnections(LocalClientConnectionStore localClientConnectionStore) {
+        this.localClientConnectionStore = Objects.requireNonNull(localClientConnectionStore);
     }
 
     private NightExecutionRunInputSnapshot readSnapshot(NightExecutionTask task) throws JsonProcessingException {

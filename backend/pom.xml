@@ -26,6 +26,9 @@
         <module>test-agent-opencode-sdk-generated</module>
         <module>test-agent-opencode-client</module>
         <module>test-agent-agent-runtime</module>
+        <module>test-agent-local-client-protocol</module>
+        <module>test-agent-workspace-filesystem</module>
+        <module>test-agent-local-client</module>
         <module>test-agent-workspace-management</module>
         <module>test-agent-opencode-runtime</module>
         <module>test-agent-system-management</module>
@@ -174,6 +177,21 @@
             <dependency>
                 <groupId>com.enterprise.testagent</groupId>
                 <artifactId>test-agent-agent-runtime</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-local-client-protocol</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-workspace-filesystem</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-local-client</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

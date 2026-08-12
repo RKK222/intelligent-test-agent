@@ -14,6 +14,9 @@ import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.workspace.TrustedWorkspaceResolver;
 import com.enterprise.testagent.domain.workspace.TrustedWorkspaceResolution;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
@@ -44,6 +47,8 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     private final ConversationContextStore conversationContextStore;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
+    private LocalClientWorkspaceRepository localClientWorkspaceRepository;
+    private LocalClientConnectionStore localClientConnectionStore;
 
     /**
      * 构造 Workspace 应用服务，注入领域 Repository 端口和文件服务，避免 Controller 直接访问底层资源。
@@ -233,6 +238,11 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     @Override
     public TrustedWorkspaceResolution resolveTrustedWorkspace(WorkspaceId workspaceId, String traceId) {
         Workspace workspace = rawWorkspace(workspaceId);
+        if (localClientWorkspaceRepository != null
+                && localClientWorkspaceRepository.findByWorkspaceId(workspaceId).isPresent()) {
+            // 本地根目录只能由持有反向连接的客户端校验；后台 Java 禁止扫描或绑定该路径。
+            return new TrustedWorkspaceResolution(workspace, false);
+        }
         String currentLinuxServerId = serverIdentity.linuxServerId();
         if (workspace.linuxServerId() == null) {
             validateRootPath(resolvedRootPath(workspace));
@@ -263,6 +273,70 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         }
         validateRootPath(resolvedRootPath(workspace));
         return new TrustedWorkspaceResolution(workspaceForResponse(workspace), false);
+    }
+
+    /** 生产装配本地工作区识别端口，保留旧构造器供单元测试使用。 */
+    @Autowired(required = false)
+    void configureLocalClientWorkspace(
+            LocalClientWorkspaceRepository localClientWorkspaceRepository,
+            LocalClientConnectionStore localClientConnectionStore) {
+        this.localClientWorkspaceRepository = Objects.requireNonNull(
+                localClientWorkspaceRepository, "localClientWorkspaceRepository must not be null");
+        this.localClientConnectionStore = Objects.requireNonNull(
+                localClientConnectionStore, "localClientConnectionStore must not be null");
+    }
+
+    /** 为 HTTP 投影补充运行目标；本地在线状态只信任短 TTL 的当前 generation 路由。 */
+    public WorkspaceRuntimeMetadata runtimeMetadata(Workspace workspace) {
+        if (localClientWorkspaceRepository == null) {
+            return WorkspaceRuntimeMetadata.server();
+        }
+        return localClientWorkspaceRepository.findByWorkspaceId(workspace.workspaceId())
+                .map(binding -> new WorkspaceRuntimeMetadata(
+                        RuntimeKind.LOCAL_CLIENT,
+                        binding.clientInstanceId().value(),
+                        localClientConnectionStore != null
+                                && localClientConnectionStore.find(binding.clientInstanceId())
+                                        .filter(route -> route.userId().equals(binding.userId()))
+                                        .isPresent(),
+                        localCapabilities()))
+                .orElseGet(WorkspaceRuntimeMetadata::server);
+    }
+
+    private static Map<String, Boolean> localCapabilities() {
+        return Map.of(
+                "chat", true,
+                "fileManagement", true,
+                "nightExecution", true,
+                "terminal", false,
+                "gitPublish", false,
+                "agentConfig", false,
+                "attachments", false,
+                "collaboration", false);
+    }
+
+    /** 工作区 HTTP 响应使用的最小运行目标元数据。 */
+    public record WorkspaceRuntimeMetadata(
+            RuntimeKind runtimeKind,
+            String localClientInstanceId,
+            boolean online,
+            Map<String, Boolean> capabilities) {
+
+        public static WorkspaceRuntimeMetadata server() {
+            return new WorkspaceRuntimeMetadata(
+                    RuntimeKind.SERVER_PROCESS,
+                    null,
+                    true,
+                    Map.of(
+                            "chat", true,
+                            "fileManagement", true,
+                            "nightExecution", true,
+                            "terminal", true,
+                            "gitPublish", true,
+                            "agentConfig", true,
+                            "attachments", true,
+                            "collaboration", true));
+        }
     }
 
     private void abortWorkspaceMutation(

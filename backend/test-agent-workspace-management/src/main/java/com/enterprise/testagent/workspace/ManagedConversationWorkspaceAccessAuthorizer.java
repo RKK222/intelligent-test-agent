@@ -16,6 +16,7 @@ import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVers
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
@@ -45,6 +46,7 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
     private final WorkspaceRepository workspaceRepository;
     private final ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
     private final Clock clock;
+    private LocalClientWorkspaceRepository localClientWorkspaceRepository;
 
     public ManagedConversationWorkspaceAccessAuthorizer(
             ManagedWorkspaceRepository managedWorkspaceRepository,
@@ -146,6 +148,18 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
             // 历史体验 ID 也必须进入实时策略；策略失败时不能降级为普通非托管目录。
             experienceWorkspaceAccessAuthorizer.requireAccess(userId, workspaceId);
             return FileWorkspaceKind.EXPERIENCE;
+        }
+        if (localClientWorkspaceRepository != null) {
+            var localBinding = localClientWorkspaceRepository.findByWorkspaceId(workspaceId).orElse(null);
+            if (localBinding != null) {
+                if (!localBinding.userId().equals(userId)) {
+                    throw new PlatformException(
+                            ErrorCode.FORBIDDEN,
+                            "无权访问其他用户的本地工作区",
+                            Map.of("workspaceId", workspaceId.value()));
+                }
+                return FileWorkspaceKind.STANDARD;
+            }
         }
         Optional<ApplicationWorkspaceVersion> version =
                 managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspaceId);
@@ -257,5 +271,13 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
             throw new PlatformException(ErrorCode.FORBIDDEN, "当前用户已不是应用源码关联应用的有效成员");
         }
         return true;
+    }
+
+    /** 本地工作区归属通过独立绑定表校验，避免把它误判为可放行的历史非托管工作区。 */
+    @Autowired(required = false)
+    void configureLocalClientWorkspaceRepository(
+            LocalClientWorkspaceRepository localClientWorkspaceRepository) {
+        this.localClientWorkspaceRepository = Objects.requireNonNull(
+                localClientWorkspaceRepository, "localClientWorkspaceRepository must not be null");
     }
 }

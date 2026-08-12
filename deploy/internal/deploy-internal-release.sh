@@ -656,6 +656,10 @@ find_first_file() {
   find "${root}" -maxdepth 6 -type f -name "${name}" | sort | head -n 1
 }
 
+find_local_client_dist() {
+  find "$1" -maxdepth 6 -type d -path '*/dist/local-opencode-client' | sort | head -n 1
+}
+
 find_first_tar() {
   local root="$1"
   find "${root}" -maxdepth 6 -type f -name 'test-agent-opencode-worker*linux-amd64.tar' | sort | head -n 1
@@ -696,6 +700,7 @@ run_frontend_update() {
   local frontend_target="$1"
   local frontend_archive="$2"
   local deploy_internal_src="$3"
+  local local_client_dist="$4"
   local remote_deploy_tmp="${FRONTEND_ROOT}/deploy/internal.new"
 
   # 前端服务器只接收静态包和 deploy/internal 模板；不把后端 jar 或 worker 镜像传过去。
@@ -720,6 +725,8 @@ EOF
   fi
   ssh "${frontend_target}" "mkdir -p '${FRONTEND_ROOT}/dist' '${FRONTEND_ROOT}/deploy'"
   scp "${frontend_archive}" "${frontend_target}:${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
+  ssh "${frontend_target}" "rm -rf '${FRONTEND_ROOT}/dist/local-opencode-client.new'"
+  scp -r "${local_client_dist}" "${frontend_target}:${FRONTEND_ROOT}/dist/local-opencode-client.new"
 
   if [[ -d "${deploy_internal_src}" ]]; then
     ssh "${frontend_target}" "rm -rf '${remote_deploy_tmp}'"
@@ -747,6 +754,11 @@ if [[ -d "${FRONTEND_ROOT}/frontend" ]]; then
 fi
 
 tar -C "${FRONTEND_ROOT}" -xzf "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
+if [[ -d "${FRONTEND_ROOT}/dist/local-opencode-client" ]]; then
+  rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+  mv "${FRONTEND_ROOT}/dist/local-opencode-client" "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+fi
+mv "${FRONTEND_ROOT}/dist/local-opencode-client.new" "${FRONTEND_ROOT}/dist/local-opencode-client"
 bash "${FRONTEND_ROOT}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 curl -fsS "${FRONTEND_HEALTH_URL}" >/dev/null
 curl -fsS "${FRONTEND_URL}" >/dev/null
@@ -793,6 +805,7 @@ mkdir -p "${EXTRACT_DIR}"
 unzip -q "${ARCHIVE}" -d "${EXTRACT_DIR}"
 
 FRONTEND_ARCHIVE="$(find_first_file "${EXTRACT_DIR}" 'test-agent-frontend-dist.tar.gz')"
+LOCAL_CLIENT_DIST="$(find_local_client_dist "${EXTRACT_DIR}")"
 BACKEND_JAR="$(find_first_file "${EXTRACT_DIR}" 'test-agent-app.jar')"
 BACKEND_LIB_DIR="$(find "${EXTRACT_DIR}" -maxdepth 6 -type d -path '*/backend/lib' | sort | head -n 1)"
 PROGRAMS_ARCHIVE="$(find_first_file "${EXTRACT_DIR}" 'test-agent-programs.tar.gz')"
@@ -821,6 +834,9 @@ if [[ "${VALIDATE_ONLY}" -eq 0 && ( "${SKIP_WORKER}" -eq 0 || "${WORKER_RUNTIME_
 fi
 
 require_file "${FRONTEND_ARCHIVE}"
+require_file "${LOCAL_CLIENT_DIST}/install.sh"
+require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
+require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
 require_file "${BACKEND_JAR}"
 [[ -n "${BACKEND_LIB_DIR}" && -n "$(find "${BACKEND_LIB_DIR}" -maxdepth 1 -type f -name '*.jar' -print -quit)" ]] || {
   echo "backend external lib directory not found in archive" >&2
@@ -861,6 +877,7 @@ fi
 if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   log "Release archive validation passed"
   printf 'frontend archive: %s\n' "${FRONTEND_ARCHIVE}"
+  printf 'local client HTTP distribution: %s\n' "${LOCAL_CLIENT_DIST}"
   printf 'backend jar: %s\n' "${BACKEND_JAR}"
   printf 'backend lib: %s\n' "${BACKEND_LIB_DIR}"
   printf 'worker runtime component: %s\n' "${WORKER_COMPONENT_MODE}"
@@ -882,7 +899,7 @@ if [[ "${WORKER_RUNTIME_REUSE}" -eq 1 && "${SKIP_WORKER_EXPLICIT}" -eq 0 ]]; the
 fi
 
 if [[ "${SKIP_FRONTEND}" -eq 0 ]]; then
-  run_frontend_update "$(ssh_target)" "${FRONTEND_ARCHIVE}" "${DEPLOY_INTERNAL_SRC}"
+  run_frontend_update "$(ssh_target)" "${FRONTEND_ARCHIVE}" "${DEPLOY_INTERNAL_SRC}" "${LOCAL_CLIENT_DIST}"
 fi
 
 log "Install backend artifacts under ${INSTALL_ROOT}"

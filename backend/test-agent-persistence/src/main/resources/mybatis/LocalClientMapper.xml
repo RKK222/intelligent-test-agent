@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.LocalClientMapper">
+
+    <resultMap id="credentialRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientCredentialRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="encrypted_client_key" javaType="java.lang.String"/>
+            <arg column="client_key_fingerprint" javaType="java.lang.String"/>
+            <arg column="key_hint" javaType="java.lang.String"/>
+            <arg column="version" javaType="long"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="revoked_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="instanceRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientInstanceRow">
+        <constructor>
+            <arg column="client_instance_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="client_name" javaType="java.lang.String"/>
+            <arg column="platform" javaType="java.lang.String"/>
+            <arg column="architecture" javaType="java.lang.String"/>
+            <arg column="client_version" javaType="java.lang.String"/>
+            <arg column="opencode_version" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="last_connected_at" javaType="java.time.Instant"/>
+            <arg column="last_disconnected_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="workspaceRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientWorkspaceRow">
+        <constructor>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="client_instance_id" javaType="java.lang.String"/>
+            <arg column="normalized_root_path" javaType="java.lang.String"/>
+            <arg column="root_digest" javaType="java.lang.String"/>
+            <arg column="file_system_identity" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="credentialColumns">
+        user_id, encrypted_client_key, client_key_fingerprint, key_hint,
+        version, status, created_at, updated_at, revoked_at
+    </sql>
+
+    <sql id="instanceColumns">
+        client_instance_id, user_id, client_name, platform, architecture,
+        client_version, opencode_version, created_at, updated_at,
+        last_connected_at, last_disconnected_at
+    </sql>
+
+    <sql id="workspaceColumns">
+        workspace_id, user_id, client_instance_id, normalized_root_path,
+        root_digest, file_system_identity, created_at, updated_at
+    </sql>
+
+    <select id="lockCredentialUser" resultType="java.lang.String">
+        SELECT user_id FROM users WHERE user_id = #{userId} FOR UPDATE
+    </select>
+
+    <select id="findCredentialByUserId" resultMap="credentialRow">
+        SELECT <include refid="credentialColumns"/>
+        FROM local_client_credentials
+        WHERE user_id = #{userId}
+    </select>
+
+    <select id="findActiveCredentialByFingerprint" resultMap="credentialRow">
+        SELECT <include refid="credentialColumns"/>
+        FROM local_client_credentials
+        WHERE client_key_fingerprint = #{fingerprint} AND status = 'ACTIVE'
+    </select>
+
+    <insert id="upsertCredential">
+        INSERT INTO local_client_credentials(
+            user_id, encrypted_client_key, client_key_fingerprint, key_hint,
+            version, status, created_at, updated_at, revoked_at
+        ) VALUES (
+            #{userId}, #{encryptedClientKey}, #{clientKeyFingerprint}, #{keyHint},
+            #{version}, #{status}, #{createdAt}, #{updatedAt}, #{revokedAt}
+        )
+        ON CONFLICT (user_id) DO UPDATE SET
+            encrypted_client_key = EXCLUDED.encrypted_client_key,
+            client_key_fingerprint = EXCLUDED.client_key_fingerprint,
+            key_hint = EXCLUDED.key_hint,
+            version = EXCLUDED.version,
+            status = EXCLUDED.status,
+            updated_at = EXCLUDED.updated_at,
+            revoked_at = EXCLUDED.revoked_at
+    </insert>
+
+    <select id="findInstanceById" resultMap="instanceRow">
+        SELECT <include refid="instanceColumns"/>
+        FROM local_client_instances
+        WHERE client_instance_id = #{clientInstanceId}
+    </select>
+
+    <select id="findInstancesByUserId" resultMap="instanceRow">
+        SELECT <include refid="instanceColumns"/>
+        FROM local_client_instances
+        WHERE user_id = #{userId}
+        ORDER BY updated_at DESC, client_instance_id ASC
+    </select>
+
+    <insert id="upsertInstance">
+        INSERT INTO local_client_instances(
+            client_instance_id, user_id, client_name, platform, architecture,
+            client_version, opencode_version, created_at, updated_at,
+            last_connected_at, last_disconnected_at
+        ) VALUES (
+            #{clientInstanceId}, #{userId}, #{clientName}, #{platform}, #{architecture},
+            #{clientVersion}, #{opencodeVersion}, #{createdAt}, #{updatedAt},
+            #{lastConnectedAt}, #{lastDisconnectedAt}
+        )
+        ON CONFLICT (client_instance_id) DO UPDATE SET
+            client_name = EXCLUDED.client_name,
+            platform = EXCLUDED.platform,
+            architecture = EXCLUDED.architecture,
+            client_version = EXCLUDED.client_version,
+            opencode_version = EXCLUDED.opencode_version,
+            updated_at = EXCLUDED.updated_at,
+            last_connected_at = EXCLUDED.last_connected_at,
+            last_disconnected_at = EXCLUDED.last_disconnected_at
+        WHERE local_client_instances.user_id = EXCLUDED.user_id
+    </insert>
+
+    <update id="markInstanceDisconnected">
+        UPDATE local_client_instances
+        SET last_disconnected_at = #{disconnectedAt}, updated_at = #{disconnectedAt}
+        WHERE client_instance_id = #{clientInstanceId}
+          AND (last_disconnected_at IS NULL OR last_disconnected_at &lt; #{disconnectedAt})
+    </update>
+
+    <select id="findWorkspaceById" resultMap="workspaceRow">
+        SELECT <include refid="workspaceColumns"/>
+        FROM local_client_workspaces
+        WHERE workspace_id = #{workspaceId}
+    </select>
+
+    <select id="findWorkspacesByClientInstanceId" resultMap="workspaceRow">
+        SELECT <include refid="workspaceColumns"/>
+        FROM local_client_workspaces
+        WHERE client_instance_id = #{clientInstanceId}
+        ORDER BY created_at ASC, workspace_id ASC
+    </select>
+
+    <insert id="upsertWorkspace">
+        INSERT INTO local_client_workspaces(
+            workspace_id, user_id, client_instance_id, normalized_root_path,
+            root_digest, file_system_identity, created_at, updated_at
+        ) VALUES (
+            #{workspaceId}, #{userId}, #{clientInstanceId}, #{normalizedRootPath},
+            #{rootDigest}, #{fileSystemIdentity}, #{createdAt}, #{updatedAt}
+        )
+        ON CONFLICT (workspace_id) DO UPDATE SET
+            normalized_root_path = EXCLUDED.normalized_root_path,
+            root_digest = EXCLUDED.root_digest,
+            file_system_identity = EXCLUDED.file_system_identity,
+            updated_at = EXCLUDED.updated_at
+        WHERE local_client_workspaces.user_id = EXCLUDED.user_id
+          AND local_client_workspaces.client_instance_id = EXCLUDED.client_instance_id
+    </insert>
+
+    <delete id="deleteWorkspaceById">
+        DELETE FROM local_client_workspaces WHERE workspace_id = #{workspaceId}
+    </delete>
+</mapper>

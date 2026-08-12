@@ -14,6 +14,7 @@ import com.enterprise.testagent.domain.run.RunResendStatus;
 import com.enterprise.testagent.domain.run.RunResendTrigger;
 import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.run.RunStorageMode;
+import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageId;
@@ -41,6 +42,21 @@ class RuntimeDtosCompatibilityTest {
         assertThat(response.storageMode()).isNull();
         assertThat(response.clientRequestId()).isNull();
         assertThat(response.detailsAvailableUntil()).isNull();
+    }
+
+    @Test
+    void missingRuntimeTargetKeepsLegacyServerProcessResponse() {
+        RuntimeDtos.RunResponse runResponse = RuntimeDtos.RunResponse.from(run()).withRuntimeTarget(null);
+        RuntimeDtos.SessionResponse sessionResponse = RuntimeDtos.SessionResponse.from(new Session(
+                new SessionId("ses_runtime_compat"),
+                new WorkspaceId("wrk_runtime_compat"),
+                "兼容会话",
+                NOW)).withRuntimeTarget(null);
+
+        assertThat(runResponse.runtimeKind()).isEqualTo("SERVER_PROCESS");
+        assertThat(runResponse.localClientInstanceId()).isNull();
+        assertThat(sessionResponse.runtimeKind()).isEqualTo("SERVER_PROCESS");
+        assertThat(sessionResponse.localClientInstanceId()).isNull();
     }
 
     @Test

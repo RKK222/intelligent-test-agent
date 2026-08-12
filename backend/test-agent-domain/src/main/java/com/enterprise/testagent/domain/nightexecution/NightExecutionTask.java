@@ -1,6 +1,8 @@
 package com.enterprise.testagent.domain.nightexecution;
 
 import com.enterprise.testagent.domain.run.RunId;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
@@ -47,7 +49,9 @@ public record NightExecutionTask(
         SessionShareId shareIdSnapshot,
         Long shareVersionSnapshot,
         Instant shareExpiresAtSnapshot,
-        Boolean canChatSnapshot) {
+        Boolean canChatSnapshot,
+        RuntimeKind targetRuntimeKind,
+        LocalClientInstanceId targetLocalClientInstanceId) {
 
     public NightExecutionTask {
         Objects.requireNonNull(taskId); Objects.requireNonNull(ownerUserId); Objects.requireNonNull(sessionId);
@@ -63,7 +67,18 @@ public record NightExecutionTask(
         clientRequestId = required(clientRequestId, "clientRequestId");
         sessionTitle = required(sessionTitle, "sessionTitle");
         contentPreview = required(contentPreview, "contentPreview");
-        targetLinuxServerId = required(targetLinuxServerId, "targetLinuxServerId");
+        targetRuntimeKind = RuntimeKind.fromNullable(targetRuntimeKind);
+        targetLinuxServerId = optional(targetLinuxServerId);
+        if (targetRuntimeKind == RuntimeKind.LOCAL_CLIENT) {
+            if (targetLocalClientInstanceId == null || targetLinuxServerId != null) {
+                throw new IllegalArgumentException("local night task requires only local client target");
+            }
+        } else {
+            if (targetLocalClientInstanceId != null) {
+                throw new IllegalArgumentException("server night task must not carry local client target");
+            }
+            targetLinuxServerId = required(targetLinuxServerId, "targetLinuxServerId");
+        }
         dispatchAttemptId = optional(dispatchAttemptId);
         dispatchOwnerBackendProcessId = optional(dispatchOwnerBackendProcessId);
         creatorUserId = creatorUserId == null ? ownerUserId : creatorUserId;
@@ -118,7 +133,51 @@ public record NightExecutionTask(
                 scheduledTaskRunId, runId, rolloverCount, taskCreatedSession, dispatchStartedAt,
                 dispatchAttemptId, dispatchOwnerBackendProcessId, dispatchLeaseUntil, stateVersion,
                 dismissedAt, reservationReleasedAt, errorCode, errorMessage, traceId, createdAt, updatedAt,
-                ownerUserId, null, false, null, null, null, null);
+                ownerUserId, null, false, null, null, null, null,
+                RuntimeKind.SERVER_PROCESS, null);
+    }
+
+    /** 普通创建入口显式冻结服务器或本地客户端目标，创建人默认等于任务所属人。 */
+    public NightExecutionTask(
+            NightExecutionTaskId taskId,
+            UserId ownerUserId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            String clientRequestId,
+            String sessionTitle,
+            String contentPreview,
+            String runInputJson,
+            NightExecutionScheduleMode scheduleMode,
+            NightExecutionTaskStatus status,
+            Instant slotStart,
+            Instant slotEnd,
+            Instant windowEnd,
+            String targetLinuxServerId,
+            ScheduledTaskRunId scheduledTaskRunId,
+            RunId runId,
+            int rolloverCount,
+            boolean taskCreatedSession,
+            Instant dispatchStartedAt,
+            String dispatchAttemptId,
+            String dispatchOwnerBackendProcessId,
+            Instant dispatchLeaseUntil,
+            long stateVersion,
+            Instant dismissedAt,
+            Instant reservationReleasedAt,
+            String errorCode,
+            String errorMessage,
+            String traceId,
+            Instant createdAt,
+            Instant updatedAt,
+            RuntimeKind targetRuntimeKind,
+            LocalClientInstanceId targetLocalClientInstanceId) {
+        this(taskId, ownerUserId, sessionId, workspaceId, clientRequestId, sessionTitle, contentPreview,
+                runInputJson, scheduleMode, status, slotStart, slotEnd, windowEnd, targetLinuxServerId,
+                scheduledTaskRunId, runId, rolloverCount, taskCreatedSession, dispatchStartedAt,
+                dispatchAttemptId, dispatchOwnerBackendProcessId, dispatchLeaseUntil, stateVersion,
+                dismissedAt, reservationReleasedAt, errorCode, errorMessage, traceId, createdAt, updatedAt,
+                ownerUserId, null, false, null, null, null, null,
+                targetRuntimeKind, targetLocalClientInstanceId);
     }
 
     /** 兼容迁移前调用方；新增的投递租约字段使用空值，状态版本从零开始。 */
@@ -171,7 +230,8 @@ public record NightExecutionTask(
                 scheduledTaskRunId, runId, rolloverCount, taskCreatedSession, dispatchStartedAt,
                 dispatchAttemptId, dispatchOwnerBackendProcessId, dispatchLeaseUntil, stateVersion,
                 dismissedAt, reservationReleasedAt, errorCode, errorMessage, traceId, createdAt, updatedAt,
-                creator, unifiedAuthId, shared, shareId, shareVersion, shareExpiresAt, canChat);
+                creator, unifiedAuthId, shared, shareId, shareVersion, shareExpiresAt, canChat,
+                targetRuntimeKind, targetLocalClientInstanceId);
     }
 
     /** 构造持久投递认领；真正并发裁决由仓储按状态、版本和目标服务器执行 CAS。 */
@@ -236,8 +296,11 @@ public record NightExecutionTask(
         if (!newSlotStart.isBefore(newSlotEnd) || newSlotEnd.isAfter(newWindowEnd)) {
             throw new IllegalArgumentException("invalid rescheduled slot");
         }
+        String resolvedTargetLinuxServerId = targetRuntimeKind == RuntimeKind.LOCAL_CLIENT
+                ? null
+                : required(newTargetLinuxServerId, "targetLinuxServerId");
         return copy(NightExecutionTaskStatus.SCHEDULED, newSlotStart, newSlotEnd,
-                required(newTargetLinuxServerId, "targetLinuxServerId"), newWindowEnd, null, null,
+                resolvedTargetLinuxServerId, newWindowEnd, null, null,
                 rolloverCount, null, null, null, null, dismissedAt, null,
                 null, null, runInputJson, stateVersion + 1, now);
     }
@@ -303,7 +366,8 @@ public record NightExecutionTask(
                 nextStateVersion, nextDismissedAt, nextReservationReleasedAt, nextErrorCode,
                 nextErrorMessage, traceId, createdAt, now,
                 creatorUserId, creatorUnifiedAuthId, createdBySharedUser, shareIdSnapshot,
-                shareVersionSnapshot, shareExpiresAtSnapshot, canChatSnapshot);
+                shareVersionSnapshot, shareExpiresAtSnapshot, canChatSnapshot,
+                targetRuntimeKind, targetLocalClientInstanceId);
     }
 
     /** 测试定时不占用夜间容量，因此不能记录一个并未发生的容量释放动作。 */

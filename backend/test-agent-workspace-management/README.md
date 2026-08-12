@@ -94,3 +94,8 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 ## 后续 AI 编码指引
 
 新增与 workspace、文件、应用版本工作区、个人工作区、git、agent 或 skill 管理相关的业务逻辑时优先改这里；HTTP 入口只放在 `test-agent-api`。
+
+通用文件安全实现已经提取到 `test-agent-workspace-filesystem`，本模块依赖并复用该内核，不再拥有第二套
+路径/符号链接/原子移动实现。本地 Workspace 的根注册和反向 RPC 编排属于 runtime/client；本模块只在
+Workspace 查询响应中投影 runtime kind、实例 ID、在线状态和 capability。注销本地 Workspace 绝不删除
+用户磁盘目录。

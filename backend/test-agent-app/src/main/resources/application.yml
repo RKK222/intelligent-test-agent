@@ -71,6 +71,9 @@ management:
       enabled: true
 
 test-agent:
+  local-client:
+    allow-insecure-control: ${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:false}
+    trusted-proxy-addresses: ${TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES:127.0.0.1,::1}
   workflow-capability:
     hmac-secret: ${TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET:}
     runner-hmac-secret: ${TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET:}

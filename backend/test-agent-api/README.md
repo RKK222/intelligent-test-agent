@@ -158,3 +158,12 @@
 精确 Java→Java 批量恢复请求，`HttpRunResendDispatchGateway` 固定复用公共路由解析器和转发器。`Run`、Session message 与
 runtime-state DTO 的 `resend` 均为可选 additive 字段，分享 runtime-state 额外 additive 返回 `sessionUpdatedAt`；旧客户端缺失时继续按普通运行展示。内部响应与事件不返回 prompt、回答或
 供应商正文。共享人工重发的历史 Run/消息若曾被执行链错误写成所属人，DTO 映射以既有 `resend.requester*` 审计字段恢复实际发送人、姓名和代操作标记，不修改协议结构或数据库历史。
+
+## 本地 OpenCode 客户端入口
+
+`LocalClient*Controller` 和 `LocalClientConnectionWebSocketHandler` 承载当前用户 key、实例、生命周期、模型
+代理和反向 WSS 入口；`LocalWorkspaceController` 与现有文件 route/ticket/handler 承载本地目录选择和文件
+RPC。跨 Java 必须按连接记录的 backendProcessId/generation 复用公共 resolver/forwarder，Controller 不读取
+Redis 快照、不直接控制本地 supervisor。Workspace/Session/Run/夜间及统一 OpenCode 实例响应仅追加
+runtime/capability 字段，旧服务端路径保持兼容。完整契约见 `docs/api/http-api.md` 与
+`docs/api/event-stream.md`。

@@ -17,6 +17,7 @@ ENV_FILE_FROM_ARG=0
 PLATFORM="linux/amd64"
 PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
+PACKAGE_LOCAL_CLIENT=1
 PACKAGE_OPENCODE_WORKER=1
 PACKAGE_PYTHON_LIBS=0
 PACKAGE_WORKFLOW=0
@@ -113,6 +114,7 @@ Usage: deploy/internal/package-release.sh [options]
 Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
+  - signed Apple Silicon and ARM64 glibc local OpenCode client HTTP distribution
   - opencode-worker image and docker-loadable tar
   - optional independent Python third-party library bundle
   - optional Python workflow-service, Runner and analysis-task linux/amd64 image bundle with SBOMs
@@ -130,6 +132,7 @@ Options:
   --platform <platform>   Docker build platform for opencode-worker. Defaults to linux/amd64.
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.
+  --local-client-only     Package only the signed local OpenCode client HTTP distribution.
   --opencode-only         Package only the opencode worker image.
   --python-libs-only      Package only the independent Python third-party library bundle.
   --workflow-only         Package only the Python workflow/Runner/analysis image set.
@@ -189,6 +192,21 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_LOBEHUB=0
+      shift
+      ;;
+    --local-client-only)
+      PACKAGE_MODE=local-client-only
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_LOCAL_CLIENT=1
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
+      PACKAGE_MEMORY=0
+      PACKAGE_ZIP=0
       shift
       ;;
     --opencode-only)
@@ -314,6 +332,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only \
+  && "${PACKAGE_MODE}" != local-client-only ]]; then
+  PACKAGE_LOCAL_CLIENT=0
+fi
 
 # 可选能力采用显式 opt-in，并在参数解析后应用，保证选项先后顺序不改变最终交付范围。
 if [[ "${WITH_WORKFLOW_IN_RELEASE}" -eq 1 ]]; then
@@ -1260,7 +1283,10 @@ package_release_zip() {
   # 后端与前端每次交付；大体积 worker runtime 和 toolbox 只在指纹变化时加入。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
-    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"; do
+    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
+    "${OUTPUT_DIR}/local-opencode-client/install.sh" \
+    "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json" \
+    "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
@@ -1316,6 +1342,8 @@ package_release_zip() {
   mkdir -p "${staging_dir}/dist/backend"
   cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
+  mkdir -p "${staging_dir}/dist/local-opencode-client"
+  cp -a "${OUTPUT_DIR}/local-opencode-client/." "${staging_dir}/dist/local-opencode-client/"
   if [[ "${PACKAGE_WORKFLOW}" -eq 1 ]]; then
     cp -a "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
       "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
@@ -1378,6 +1406,10 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_WORKFLOW_ARCHIVE_SHA256=%s\n' "$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_ARCHIVE_SHA256 || printf none)"
     printf 'TEST_AGENT_RELEASE_LOBEHUB=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf included || printf disabled)"
     printf 'TEST_AGENT_RELEASE_LOBEHUB_VERSION=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && state_value "${OUTPUT_DIR}/lobehub/release.env" LOBEHUB_INTERNAL_VERSION || printf none)"
+    printf 'TEST_AGENT_RELEASE_MEMORY=%s\n' "$([[ "${PACKAGE_MEMORY}" -eq 1 ]] && printf included || printf disabled)"
+    printf 'TEST_AGENT_RELEASE_MEMORY_VERSION=%s\n' "$([[ "${PACKAGE_MEMORY}" -eq 1 ]] && state_value "${OUTPUT_DIR}/memory/release.env" TEST_AGENT_MEMORY_RELEASE_VERSION || printf none)"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=included\n'
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=%s\n' "$(awk -F'"' '$2 == "version" { print $4; exit }' "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json")"
   } >"${staging_dir}/deploy/internal/release-components.env"
   chmod 0644 "${staging_dir}/deploy/internal/release-components.env"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
@@ -1579,6 +1611,11 @@ if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
   package_frontend
 fi
 
+if [[ "${PACKAGE_LOCAL_CLIENT}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
+  "${SCRIPT_DIR}/package-local-opencode-client.sh" \
+    --output-dir "${OUTPUT_DIR}/local-opencode-client"
+fi
+
 if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then
   require_command docker
   build_opencode_worker_image
@@ -1632,6 +1669,9 @@ fi
 if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
   echo "  frontend dist: ${OUTPUT_DIR}/frontend"
   echo "  frontend archive: ${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
+fi
+if [[ "${PACKAGE_LOCAL_CLIENT}" -eq 1 ]]; then
+  echo "  local OpenCode client HTTP distribution: ${OUTPUT_DIR}/local-opencode-client"
 fi
 if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  opencode worker image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"

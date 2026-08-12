@@ -4,6 +4,7 @@ import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.support.DomainValidation;
@@ -30,7 +31,10 @@ public record ConversationRunContext(
         ExecutionNode executionNodeSnapshot,
         AgentSessionBinding bindingSnapshot,
         int contextVersion,
-        Instant expiresAt) {
+        Instant expiresAt,
+        RuntimeKind runtimeKind,
+        String localClientInstanceId,
+        Long connectionGeneration) {
 
     /**
      * 校验各快照之间的稳定绑定，防止把不同用户、服务器、进程或会话的数据拼成一个 token。
@@ -38,6 +42,7 @@ public record ConversationRunContext(
     public ConversationRunContext {
         Objects.requireNonNull(userId, "userId must not be null");
         agentId = DomainValidation.requireText(agentId, "agentId").trim().toLowerCase(Locale.ROOT);
+        runtimeKind = RuntimeKind.fromNullable(runtimeKind);
         processId = DomainValidation.requireText(processId, "processId");
         linuxServerId = DomainValidation.requireText(linuxServerId, "linuxServerId");
         Objects.requireNonNull(sessionSnapshot, "sessionSnapshot must not be null");
@@ -46,12 +51,28 @@ public record ConversationRunContext(
         if (!sessionSnapshot.workspaceId().equals(workspaceSnapshot.workspaceId())) {
             throw new IllegalArgumentException("session and workspace snapshot must match");
         }
-        if (workspaceSnapshot.linuxServerId() == null
-                || !workspaceSnapshot.linuxServerId().equals(linuxServerId)) {
-            throw new IllegalArgumentException("workspace and process linux server must match");
-        }
-        if (!executionNodeSnapshot.executionNodeId().value().equals("node_" + processId)) {
-            throw new IllegalArgumentException("execution node and process snapshot must match");
+        localClientInstanceId = normalizeOptional(localClientInstanceId);
+        if (runtimeKind == RuntimeKind.LOCAL_CLIENT) {
+            if (localClientInstanceId == null || connectionGeneration == null || connectionGeneration < 1) {
+                throw new IllegalArgumentException("local context requires client instance and generation");
+            }
+            if (processSnapshot != null
+                    || executionNodeSnapshot.runtimeKind() != RuntimeKind.LOCAL_CLIENT
+                    || !localClientInstanceId.equals(executionNodeSnapshot.localClientInstanceId())
+                    || !connectionGeneration.equals(executionNodeSnapshot.connectionGeneration())) {
+                throw new IllegalArgumentException("local context target and execution node must match");
+            }
+        } else {
+            if (localClientInstanceId != null || connectionGeneration != null) {
+                throw new IllegalArgumentException("server context must not carry local client target");
+            }
+            if (workspaceSnapshot.linuxServerId() == null
+                    || !workspaceSnapshot.linuxServerId().equals(linuxServerId)) {
+                throw new IllegalArgumentException("workspace and process linux server must match");
+            }
+            if (!executionNodeSnapshot.executionNodeId().value().equals("node_" + processId)) {
+                throw new IllegalArgumentException("execution node and process snapshot must match");
+            }
         }
         if (processSnapshot != null) {
             if (!processSnapshot.processId().value().equals(processId)
@@ -75,6 +96,24 @@ public record ConversationRunContext(
             throw new IllegalArgumentException("contextVersion must be greater than or equal to 1");
         }
         expiresAt = DomainValidation.requireInstant(expiresAt, "expiresAt");
+    }
+
+    /** 兼容本地运行目标加入前的完整构造器和历史 Redis JSON。 */
+    public ConversationRunContext(
+            UserId userId,
+            String agentId,
+            String processId,
+            String linuxServerId,
+            OpencodeServerProcess processSnapshot,
+            Session sessionSnapshot,
+            Workspace workspaceSnapshot,
+            ExecutionNode executionNodeSnapshot,
+            AgentSessionBinding bindingSnapshot,
+            int contextVersion,
+            Instant expiresAt) {
+        this(userId, agentId, processId, linuxServerId, processSnapshot, sessionSnapshot,
+                workspaceSnapshot, executionNodeSnapshot, bindingSnapshot, contextVersion, expiresAt,
+                RuntimeKind.SERVER_PROCESS, null, null);
     }
 
     /**
@@ -102,7 +141,10 @@ public record ConversationRunContext(
                 executionNodeSnapshot,
                 bindingSnapshot,
                 contextVersion,
-                expiresAt);
+                expiresAt,
+                RuntimeKind.SERVER_PROCESS,
+                null,
+                null);
     }
 
     public SessionId sessionId() {
@@ -140,6 +182,13 @@ public record ConversationRunContext(
                 executionNodeSnapshot,
                 bindingSnapshot,
                 contextVersion,
-                expiresAt);
+                expiresAt,
+                runtimeKind,
+                localClientInstanceId,
+                connectionGeneration);
+    }
+
+    private static String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystemException;
 import java.nio.file.FileVisitResult;
@@ -23,9 +24,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -106,6 +105,15 @@ public class WorkspaceFileService {
         }
         if (maxDirectoryEntries < 1) {
             throw new IllegalArgumentException("maxDirectoryEntries must be positive");
+        }
+        if (maxSearchResults < 1) {
+            throw new IllegalArgumentException("maxSearchResults must be positive");
+        }
+        if (maxSearchDepth < 0) {
+            throw new IllegalArgumentException("maxSearchDepth must not be negative");
+        }
+        if (searchTimeoutMillis < 1) {
+            throw new IllegalArgumentException("searchTimeoutMillis must be positive");
         }
         if (uploadChunkBytes < 1 || uploadChunkBytes > MAX_UPLOAD_CHUNK_BYTES) {
             throw new IllegalArgumentException("uploadChunkBytes must be between 1 and 4194304");
@@ -581,7 +589,9 @@ public class WorkspaceFileService {
      */
     public void moveFile(String rootPath, String sourcePath, String targetPath) {
         Path source = requireMovableSource(rootPath, sourcePath);
-        Path target = resolveInsideRoot(rootPath, targetPath);
+        // 移动流程需要先解析工作区内别名，才能保留“目录移入自身后代”的既有错误语义；
+        // 真正执行前仍会把源、目标父目录解析为真实路径并校验根目录边界。
+        Path target = resolveInsideRoot(rootPath, targetPath, false);
         if (source.equals(target)) {
             return;
         }
@@ -860,13 +870,15 @@ public class WorkspaceFileService {
      */
     private FileTreeEntryResponse entry(Path root, Path path) {
         try {
-            boolean directory = Files.isDirectory(path);
+            BasicFileAttributes attributes = Files.readAttributes(
+                    path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            boolean directory = attributes.isDirectory();
             return new FileTreeEntryResponse(
                     root.relativize(path).toString(),
                     path.getFileName().toString(),
                     directory,
-                    directory ? 0L : Files.size(path),
-                    Files.getLastModifiedTime(path).toInstant());
+                    directory ? 0L : attributes.size(),
+                    attributes.lastModifiedTime().toInstant());
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取目录项失败", Map.of("path", path.getFileName().toString()), exception);
         }
@@ -876,6 +888,10 @@ public class WorkspaceFileService {
      * 将相对路径解析到真实 root 内部；解析结果不在 root 下时拒绝访问，防止路径穿越。
      */
     private Path resolveInsideRoot(String rootPath, String relativePath) {
+        return resolveInsideRoot(rootPath, relativePath, true);
+    }
+
+    private Path resolveInsideRoot(String rootPath, String relativePath, boolean rejectSymbolicLinks) {
         Path root = rootRealPath(rootPath);
         String normalizedPath = normalizeRelativePath(relativePath);
         if (containsUploadTemporarySegment(normalizedPath)) {
@@ -894,22 +910,27 @@ public class WorkspaceFileService {
         if (!target.startsWith(root)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "文件路径超出工作区根目录", Map.of("path", safePath(relativePath)));
         }
-        requireNoSymbolicLinkTraversal(root, target, relativePath);
+        if (rejectSymbolicLinks) {
+            rejectSymbolicLinkComponents(root, target, relativePath);
+        }
         return target;
     }
 
     /**
-     * 拒绝末端和中间层符号链接，避免工作区内的普通别名落入外部目录或受控元数据目录。
-     * 根目录已解析为真实路径，因此这里只需逐段按 NOFOLLOW 语义检查用户提供的相对路径。
+     * 已存在的任意路径分段都不得是符号链接。读写、目录、搜索、复制和删除共享此失败关闭边界；
+     * 移动为兼容工作区内目录别名，改用真实路径根边界与 {@link SecureWorkspaceMover} 目录句柄校验。
      */
-    private void requireNoSymbolicLinkTraversal(Path root, Path target, String relativePath) {
+    private void rejectSymbolicLinkComponents(Path root, Path target, String relativePath) {
         Path current = root;
         for (Path segment : root.relativize(target)) {
             current = current.resolve(segment);
+            if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                break;
+            }
             if (Files.isSymbolicLink(current)) {
                 throw new PlatformException(
                         ErrorCode.FORBIDDEN,
-                        "文件路径不支持符号链接",
+                        "文件路径不允许包含符号链接",
                         Map.of("path", safePath(relativePath)));
             }
         }
@@ -934,7 +955,7 @@ public class WorkspaceFileService {
      */
     private Path requireMovableSource(String rootPath, String relativePath) {
         Path root = rootRealPath(rootPath);
-        Path source = resolveInsideRoot(rootPath, relativePath);
+        Path source = resolveInsideRoot(rootPath, relativePath, false);
         if (source.equals(root)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "禁止移动工作区根目录", Map.of("path", safePath(relativePath)));
         }
@@ -949,7 +970,7 @@ public class WorkspaceFileService {
                     Map.of("path", safePath(relativePath)));
         }
         try {
-            // 中间路径可以含有符号链接，但源条目的真实路径仍必须留在工作区 root 内。
+            // 移动允许工作区内部目录别名以保留既有语义；执行前仍需确认真实源未逃逸根目录。
             if (!source.toRealPath().startsWith(root)) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "文件路径超出工作区根目录", Map.of("path", safePath(relativePath)));
             }
@@ -989,7 +1010,9 @@ public class WorkspaceFileService {
             boolean rejectExternalRealParent,
             String targetExistsMessage) {
         Path root = rootRealPath(rootPath);
-        Path target = resolveInsideRoot(rootPath, relativePath);
+        Path target = rejectExternalRealParent
+                ? resolveInsideRoot(rootPath, relativePath, false)
+                : resolveInsideRoot(rootPath, relativePath);
         if (target.equals(root) || target.getFileName() == null) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目标文件路径不能为空", Map.of("path", safePath(relativePath)));
         }
@@ -1074,7 +1097,22 @@ public class WorkspaceFileService {
         if (relativePath == null || relativePath.isBlank()) {
             return "";
         }
-        return relativePath.replace('\\', '/');
+        String normalized = relativePath.replace('\\', '/');
+        if (normalized.startsWith("/") || Path.of(normalized).isAbsolute()) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "文件路径必须是工作区相对路径",
+                    Map.of("path", safePath(relativePath)));
+        }
+        for (String segment : normalized.split("/", -1)) {
+            if ("..".equals(segment)) {
+                throw new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "文件路径不允许目录穿越",
+                        Map.of("path", safePath(relativePath)));
+            }
+        }
+        return normalized;
     }
 
     /** 平台隐藏上传文件名为保留命名空间，不能由普通文件 RPC 读取或覆盖。 */
@@ -1126,20 +1164,9 @@ public class WorkspaceFileService {
         Path root = rootRealPath(rootPath);
         String normalizedQuery = query == null ? "" : query.trim().toLowerCase();
         List<FileSearchResultResponse> results = new ArrayList<>();
-
-        // 使用 CompletableFuture 实现超时保护
-        CompletableFuture<Void> searchFuture = CompletableFuture.runAsync(() -> {
-            searchDirectory(root, root, normalizedQuery, results, 0);
-        });
-
-        try {
-            searchFuture.get(searchTimeoutMillis, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException exception) {
-            // 超时后取消搜索，返回已收集的结果
-            searchFuture.cancel(true);
-        } catch (Exception exception) {
-            // 其他异常（中断、执行异常）也返回已收集的结果
-        }
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(searchTimeoutMillis);
+        // 在当前请求线程逐层检查截止时间，避免 Future.cancel 后目录扫描仍在后台继续。
+        searchDirectory(root, root, normalizedQuery, results, 0, deadlineNanos);
 
         // 按文件名排序
         results.sort(Comparator.comparing(FileSearchResultResponse::name));
@@ -1154,16 +1181,20 @@ public class WorkspaceFileService {
      * 递归搜索目录，收集匹配的文件。
      */
     private void searchDirectory(
-            Path root, Path directory, String query, List<FileSearchResultResponse> results, int depth) {
+            Path root,
+            Path directory,
+            String query,
+            List<FileSearchResultResponse> results,
+            int depth,
+            long deadlineNanos) {
         // 超过深度限制或结果已满，停止搜索
-        if (depth > maxSearchDepth || results.size() >= maxSearchResults) {
+        if (searchShouldStop(results, depth, deadlineNanos)) {
             return;
         }
-        try (var stream = Files.list(directory)) {
-            stream.forEach(path -> {
-                // 结果已满，停止处理
-                if (results.size() >= maxSearchResults) {
-                    return;
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(directory)) {
+            for (Path path : entries) {
+                if (searchShouldStop(results, depth, deadlineNanos)) {
+                    break;
                 }
                 // 搜索不得跟随符号链接，否则别名可能把外部目录或受控元数据带入结果。
                 if (Files.isSymbolicLink(path)) {
@@ -1171,26 +1202,36 @@ public class WorkspaceFileService {
                 }
                 String name = path.getFileName().toString();
                 if (isPlatformHiddenFile(path)) {
-                    return;
+                    continue;
                 }
                 // 跳过黑名单目录
-                if (Files.isDirectory(path) && BLACKLISTED_DIRECTORIES.contains(name)) {
-                    return;
+                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                        && BLACKLISTED_DIRECTORIES.contains(name)) {
+                    continue;
                 }
-                if (Files.isDirectory(path)) {
+                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
                     // 递归搜索子目录
-                    searchDirectory(root, path, query, results, depth + 1);
-                } else if (Files.isRegularFile(path)) {
+                    searchDirectory(root, path, query, results, depth + 1, deadlineNanos);
+                } else if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
                     // 匹配工作区相对路径，使对话 # 能按 01-需求/子条目结构检索真实文件。
                     String relativePath = root.relativize(path).toString().replace('\\', '/');
                     if (relativePath.toLowerCase().contains(query)) {
                         results.add(searchResultEntry(root, path));
                     }
                 }
-            });
+            }
         } catch (Exception exception) {
             // 目录读取失败，跳过该目录继续搜索其他目录
         }
+    }
+
+    /** 同时响应请求中断、搜索截止时间、深度和数量上限。 */
+    private boolean searchShouldStop(
+            List<FileSearchResultResponse> results, int depth, long deadlineNanos) {
+        return Thread.currentThread().isInterrupted()
+                || System.nanoTime() - deadlineNanos >= 0
+                || depth > maxSearchDepth
+                || results.size() >= maxSearchResults;
     }
 
     /**

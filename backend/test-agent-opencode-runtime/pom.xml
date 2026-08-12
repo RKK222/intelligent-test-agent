@@ -36,6 +36,10 @@
         </dependency>
         <dependency>
             <groupId>com.enterprise.testagent</groupId>
+            <artifactId>test-agent-local-client-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.enterprise.testagent</groupId>
             <artifactId>test-agent-scheduler</artifactId>
         </dependency>
         <dependency>

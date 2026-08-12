@@ -25,9 +25,17 @@ public class ExternalApiKeyGenerator {
     }
 
     public ExternalApiKeyMaterial generate() {
+        return generate(PREFIX);
+    }
+
+    /** 复用相同 256 位随机源生成指定版本前缀的内部凭据。 */
+    public ExternalApiKeyMaterial generate(String prefix) {
+        if (prefix == null || !prefix.matches("[a-z][a-z0-9_]{2,31}_")) {
+            throw new IllegalArgumentException("credential prefix is invalid");
+        }
         byte[] random = new byte[32];
         secureRandom.nextBytes(random);
-        String apiKey = PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+        String apiKey = prefix + Base64.getUrlEncoder().withoutPadding().encodeToString(random);
         return new ExternalApiKeyMaterial(apiKey, fingerprint(apiKey), keyHint(apiKey));
     }
 

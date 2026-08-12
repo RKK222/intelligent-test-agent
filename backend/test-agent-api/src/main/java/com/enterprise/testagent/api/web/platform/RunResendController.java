@@ -84,15 +84,17 @@ public class RunResendController {
                                     context, agentId, requestedSession, command, traceId);
                     Function<UserId, String> usernameLookup = RuntimeDtos.memoizedUsernameLookup(
                             shareService == null ? null : shareService::findUsername);
+                    var replacementRun = runService.getRun(resend.replacementRunId());
                     return ApiResponse.ok(Response.from(
                             resend,
                             RuntimeDtos.RunResponse.from(
-                                    runService.getRun(resend.replacementRunId()),
+                                    replacementRun,
                                     null,
                                     null,
                                     null,
                                     resend,
-                                    usernameLookup),
+                                    usernameLookup)
+                                    .withRuntimeTarget(runService.runtimeTarget(replacementRun.runId())),
                             usernameLookup), traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());

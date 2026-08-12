@@ -176,3 +176,13 @@ WAITING 替代 Run 可复用现有 cancel 入口；等待期间 `NightExecutionS
 compact 和 share 等主会话写入口。重发预约事务先创建替代 Run、持久化替代 USER、推进 Session 内容修订时间并写入 scheduled 事实；提交成功后，`SessionMessageRealtimeHub` 立即发布含 `sessionId/sourceRunId/replacementRunId/changeType/revision` 的安全变化信号，并复用通用服务器广播唤醒本机及其它 Java 上的分享运行态连接，不等待模型执行。执行器通过稳定远端消息号复用这条 USER；替代消息受理后再清理源 Run 的 PostgreSQL/Redis 明细并发布 `run.resend.started`。WAITING 取消或明确失败会删除未投递替代 USER、推进修订并广播 `RESEND_RESTORED`，前端按 source Run 精确读取完整 USER/ASSISTANT 轮次恢复；每秒状态检查继续作为鉴权和丢信号兜底。重发事件携带真实 requester 身份，分享运行态据此刷新权威消息并保持分享发送人归属，Run、反馈、
 用量和关系保留；历史消息/Run 响应也以共享 requester 修正旧错误归因，无需修改已执行数据库历史。当前预留替代 Run 沿 `LEGACY_FULL` 明细链启动；源 Run 无论是 `LEGACY_FULL` 还是 `REDIS_SUMMARY` 都从远端
 权威用户轮次读取并重放，避免把摘要数据库当作 prompt 事实源。
+
+## 本地客户端运行目标
+
+`RuntimeKind` 在 Workspace 创建、Session、Run context/manifest/node 和夜间任务中固定
+`SERVER_PROCESS` 或 `LOCAL_CLIENT`。本地目标由 `LocalClientConnectionStore` 的
+backendProcessId/generation 精确路由，生命周期仍从公共 startup/stop/status 服务进入，再委托
+`LocalClientLifecycleGateway`。OpenCode HTTP/SSE 使用隧道 transport；文件使用既有 route/ticket/RPC。
+离线或换代永不回退服务端 OpenCode，也不切换到其它客户端。运行中断连收敛为
+`LOCAL_CLIENT_DISCONNECTED`；未开始夜间任务只在当前窗口内等待同实例重连。本地
+execution node 另保存 `OFFLINE/local-client-anchor` 外键锚点，仅供旧关系表引用，绝不参与服务端节点路由。

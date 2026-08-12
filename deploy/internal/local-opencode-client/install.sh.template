@@ -1,0 +1,235 @@
+#!/usr/bin/env sh
+set -eu
+
+# 该脚本只接收非敏感下载地址；client key 只能交互写入 0600 私有文件。
+PUBLIC_KEY_BASE64="__PUBLIC_KEY_BASE64__"
+DOWNLOAD_BASE_URL="${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}"
+
+fail() {
+  printf 'local-opencode-client install failed: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    fail "sha256sum or shasum is required"
+  fi
+}
+
+manifest_value() {
+  key="$1"
+  awk -F'"' -v wanted="${key}" '$2 == wanted { print $4; exit }' "${MANIFEST_FILE}"
+}
+
+download_artifact() {
+  relative_path="$1"
+  expected_sha256="$2"
+  destination="$3"
+  case "${relative_path}" in
+    releases/*) ;;
+    *) fail "signed manifest contains an invalid artifact path" ;;
+  esac
+  curl -fsSL --proto '=http' "${DOWNLOAD_BASE_URL}/${relative_path}" -o "${destination}"
+  actual_sha256="$(sha256_file "${destination}")"
+  [ "${actual_sha256}" = "${expected_sha256}" ] \
+    || fail "SHA-256 mismatch for ${relative_path}"
+}
+
+read_secret_key() {
+  printf 'Client key (tack_v1_..., input hidden): ' >/dev/tty
+  saved_stty="$(stty -g </dev/tty)"
+  trap 'stty "${saved_stty}" </dev/tty 2>/dev/null || true' INT TERM EXIT
+  stty -echo </dev/tty
+  IFS= read -r CLIENT_KEY </dev/tty
+  stty "${saved_stty}" </dev/tty
+  trap cleanup INT TERM EXIT
+  printf '\n' >/dev/tty
+}
+
+cleanup() {
+  [ -z "${TEMP_DIR:-}" ] || rm -rf "${TEMP_DIR}"
+}
+
+require_command curl
+require_command openssl
+require_command tar
+require_command awk
+
+if [ -z "${DOWNLOAD_BASE_URL}" ]; then
+  printf 'HTTP download base URL (for example http://nginx/downloads/local-opencode-client): ' >/dev/tty
+  IFS= read -r DOWNLOAD_BASE_URL </dev/tty
+fi
+DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL%/}"
+case "${DOWNLOAD_BASE_URL}" in
+  http://*) ;;
+  *) fail "download base URL must use the configured internal HTTP channel" ;;
+esac
+
+os_name="$(uname -s)"
+machine_name="$(uname -m)"
+case "${os_name}:${machine_name}" in
+  Darwin:arm64)
+    PLATFORM="darwin-arm64"
+    JRE_PATH_KEY="darwinArm64JrePath"
+    JRE_SHA_KEY="darwinArm64JreSha256"
+    OPENCODE_PATH_KEY="darwinArm64OpencodePath"
+    OPENCODE_SHA_KEY="darwinArm64OpencodeSha256"
+    ;;
+  Linux:aarch64|Linux:arm64)
+    PLATFORM="linux-arm64-glibc"
+    JRE_PATH_KEY="linuxArm64GlibcJrePath"
+    JRE_SHA_KEY="linuxArm64GlibcJreSha256"
+    OPENCODE_PATH_KEY="linuxArm64GlibcOpencodePath"
+    OPENCODE_SHA_KEY="linuxArm64GlibcOpencodeSha256"
+    ;;
+  *) fail "unsupported platform ${os_name}/${machine_name}; only Apple Silicon and ARM64 glibc Linux are supported" ;;
+esac
+
+TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-local-client.XXXXXX")"
+trap cleanup INT TERM EXIT
+MANIFEST_FILE="${TEMP_DIR}/manifest.json"
+SIGNATURE_FILE="${TEMP_DIR}/manifest.json.sig"
+PUBLIC_KEY_FILE="${TEMP_DIR}/manifest-public.pem"
+curl -fsSL --proto '=http' "${DOWNLOAD_BASE_URL}/stable/manifest.json" -o "${MANIFEST_FILE}"
+curl -fsSL --proto '=http' "${DOWNLOAD_BASE_URL}/stable/manifest.json.sig" -o "${SIGNATURE_FILE}"
+printf '%s' "${PUBLIC_KEY_BASE64}" | openssl base64 -d -A >"${PUBLIC_KEY_FILE}"
+openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" -signature "${SIGNATURE_FILE}" "${MANIFEST_FILE}" >/dev/null \
+  || fail "manifest signature verification failed"
+
+VERSION="$(manifest_value version)"
+CLIENT_JAR_PATH="$(manifest_value clientJarPath)"
+CLIENT_JAR_SHA="$(manifest_value clientJarSha256)"
+JRE_PATH="$(manifest_value "${JRE_PATH_KEY}")"
+JRE_SHA="$(manifest_value "${JRE_SHA_KEY}")"
+OPENCODE_PATH="$(manifest_value "${OPENCODE_PATH_KEY}")"
+OPENCODE_SHA="$(manifest_value "${OPENCODE_SHA_KEY}")"
+case "${VERSION}" in
+  ''|*[!A-Za-z0-9._-]*) fail "signed manifest contains an invalid version" ;;
+esac
+for required_value in "${CLIENT_JAR_PATH}" "${CLIENT_JAR_SHA}" "${JRE_PATH}" "${JRE_SHA}" "${OPENCODE_PATH}" "${OPENCODE_SHA}"; do
+  [ -n "${required_value}" ] || fail "signed manifest is incomplete"
+done
+
+download_artifact "${CLIENT_JAR_PATH}" "${CLIENT_JAR_SHA}" "${TEMP_DIR}/test-agent-local-client.jar"
+download_artifact "${JRE_PATH}" "${JRE_SHA}" "${TEMP_DIR}/jre.tar.gz"
+download_artifact "${OPENCODE_PATH}" "${OPENCODE_SHA}" "${TEMP_DIR}/opencode.tar.gz"
+
+if [ "${os_name}" = Darwin ]; then
+  DEFAULT_BASE="${HOME}/Library/Application Support/TestAgent/local-opencode-client"
+  INSTALL_ROOT="${TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT:-${DEFAULT_BASE}/runtime}"
+  CONFIG_DIR="${TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR:-${DEFAULT_BASE}}"
+  STATE_DIR="${TEST_AGENT_LOCAL_CLIENT_STATE_DIR:-${DEFAULT_BASE}/state}"
+else
+  INSTALL_ROOT="${TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT:-${HOME}/.local/share/testagent/local-opencode-client}"
+  CONFIG_DIR="${TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR:-${HOME}/.config/testagent/local-opencode-client}"
+  STATE_DIR="${TEST_AGENT_LOCAL_CLIENT_STATE_DIR:-${HOME}/.local/state/testagent/local-opencode-client}"
+fi
+RELEASES_DIR="${INSTALL_ROOT}/releases"
+RELEASE_DIR="${RELEASES_DIR}/${VERSION}"
+STAGING_DIR="${RELEASES_DIR}/.${VERSION}.install.$$"
+umask 077
+mkdir -p "${RELEASES_DIR}" "${CONFIG_DIR}" "${STATE_DIR}"
+mkdir -p "${STAGING_DIR}"
+cp "${TEMP_DIR}/test-agent-local-client.jar" "${STAGING_DIR}/test-agent-local-client.jar"
+tar -C "${STAGING_DIR}" -xzf "${TEMP_DIR}/jre.tar.gz"
+tar -C "${STAGING_DIR}" -xzf "${TEMP_DIR}/opencode.tar.gz"
+[ -x "${STAGING_DIR}/jre/bin/java" ] || fail "JRE package does not contain jre/bin/java"
+[ -x "${STAGING_DIR}/opencode/bin/opencode" ] || fail "OpenCode package does not contain opencode/bin/opencode"
+
+if [ -d "${RELEASE_DIR}" ]; then
+  PREVIOUS_DIR="${RELEASES_DIR}/.${VERSION}.previous.$(date +%Y%m%d%H%M%S)"
+  mv "${RELEASE_DIR}" "${PREVIOUS_DIR}"
+  printf 'Previous same-version installation retained at %s\n' "${PREVIOUS_DIR}"
+fi
+mv "${STAGING_DIR}" "${RELEASE_DIR}"
+ln -s "releases/${VERSION}" "${INSTALL_ROOT}/.current.$$"
+mv -f "${INSTALL_ROOT}/.current.$$" "${INSTALL_ROOT}/current"
+
+if [ ! -f "${CONFIG_DIR}/client.key" ]; then
+  read_secret_key
+  case "${CLIENT_KEY}" in
+    tack_v1_*) ;;
+    *) fail "client key format is invalid" ;;
+  esac
+  printf '%s\n' "${CLIENT_KEY}" >"${CONFIG_DIR}/client.key"
+  chmod 0600 "${CONFIG_DIR}/client.key"
+  CLIENT_KEY=''
+fi
+
+SERVER_URL="${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}"
+if [ -z "${SERVER_URL}" ] && [ -f "${CONFIG_DIR}/client.properties" ]; then
+  SERVER_URL="$(awk -F= '$1 == "serverUrl" { print substr($0, index($0, "=") + 1); exit }' "${CONFIG_DIR}/client.properties")"
+fi
+if [ -z "${SERVER_URL}" ]; then
+  printf 'Platform HTTPS base URL (for example https://testagent.example): ' >/dev/tty
+  IFS= read -r SERVER_URL </dev/tty
+fi
+case "${SERVER_URL}" in
+  https://*) ALLOW_INSECURE=false ;;
+  http://*)
+    [ "${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}" = true ] \
+      || fail "control channel must use HTTPS/WSS"
+    ALLOW_INSECURE=true
+    ;;
+  *) fail "platform server URL is invalid" ;;
+esac
+
+{
+  printf 'serverUrl=%s\n' "${SERVER_URL%/}"
+  printf 'opencodeExecutable=%s/current/opencode/bin/opencode\n' "${INSTALL_ROOT}"
+  printf 'opencodeConfigDirectory=%s/opencode-config\n' "${CONFIG_DIR}"
+  printf 'opencodeDataDirectory=%s/opencode-data\n' "${STATE_DIR}"
+  printf 'portMin=4096\nportMax=4195\n'
+  printf 'allowInsecureControl=%s\n' "${ALLOW_INSECURE}"
+} >"${CONFIG_DIR}/client.properties"
+chmod 0600 "${CONFIG_DIR}/client.properties"
+
+mkdir -p "${STATE_DIR}/logs"
+if [ "${TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START:-false}" != true ]; then
+  if [ "${os_name}" = Darwin ]; then
+    LAUNCH_AGENT_DIR="${TEST_AGENT_LOCAL_CLIENT_LAUNCH_AGENT_DIR:-${HOME}/Library/LaunchAgents}"
+    PLIST_PATH="${LAUNCH_AGENT_DIR}/com.enterprise.testagent.local-opencode-client.plist"
+    mkdir -p "${LAUNCH_AGENT_DIR}"
+    # 默认安装路径由本脚本控制，不包含 XML 元字符；测试覆盖路径同样必须满足这一约束。
+    case "${INSTALL_ROOT}${STATE_DIR}" in *'&'*|*'<'*|*'>'*) fail "installation paths contain unsupported XML characters" ;; esac
+    {
+      printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+      printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+      printf '%s\n' '<plist version="1.0"><dict>'
+      printf '%s\n' '<key>Label</key><string>com.enterprise.testagent.local-opencode-client</string>'
+      printf '<key>ProgramArguments</key><array><string>%s/current/jre/bin/java</string><string>-jar</string><string>%s/current/test-agent-local-client.jar</string></array>\n' "${INSTALL_ROOT}" "${INSTALL_ROOT}"
+      printf '%s\n' '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>'
+      printf '<key>StandardOutPath</key><string>%s/logs/client.log</string>\n' "${STATE_DIR}"
+      printf '<key>StandardErrorPath</key><string>%s/logs/client-error.log</string>\n' "${STATE_DIR}"
+      printf '%s\n' '</dict></plist>'
+    } >"${PLIST_PATH}"
+    chmod 0600 "${PLIST_PATH}"
+    launchctl bootout "gui/$(id -u)" "${PLIST_PATH}" >/dev/null 2>&1 || true
+    launchctl bootstrap "gui/$(id -u)" "${PLIST_PATH}"
+  else
+    UNIT_DIR="${TEST_AGENT_LOCAL_CLIENT_SYSTEMD_USER_DIR:-${HOME}/.config/systemd/user}"
+    UNIT_PATH="${UNIT_DIR}/test-agent-local-opencode-client.service"
+    mkdir -p "${UNIT_DIR}"
+    case "${INSTALL_ROOT}" in *'"'*) fail "installation path contains an unsupported quote" ;; esac
+    {
+      printf '%s\n' '[Unit]' 'Description=Test Agent Local OpenCode Client' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]'
+      printf 'ExecStart="%s/current/jre/bin/java" -jar "%s/current/test-agent-local-client.jar"\n' "${INSTALL_ROOT}" "${INSTALL_ROOT}"
+      printf '%s\n' 'Restart=always' 'RestartSec=3' '' '[Install]' 'WantedBy=default.target'
+    } >"${UNIT_PATH}"
+    chmod 0600 "${UNIT_PATH}"
+    systemctl --user daemon-reload
+    systemctl --user enable --now test-agent-local-opencode-client.service
+  fi
+fi
+
+cleanup
+trap - INT TERM EXIT
+printf 'Installed local OpenCode client %s for %s under %s\n' "${VERSION}" "${PLATFORM}" "${INSTALL_ROOT}"

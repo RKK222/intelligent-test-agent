@@ -13,6 +13,8 @@
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
 - [Python长程任务离线部署](../../docs/deployment/workflow-offline.md)：独立workflow数据库/Redis ACL、三镜像、Runner受限网络、Nginx直达、验收和回滚。
+- [通用长期记忆部署](../../docs/deployment/qa-memory.md)：独立记忆 PostgreSQL、三副本 Mem0/VIP、独立 CPU BGE、双集合热备、离线包、灰度和真实浏览器验收。
+- [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：Apple Silicon/麒麟 ARM64 客户端签名打包、Nginx 明文 HTTP 分发、用户级安装、验收与回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 

@@ -31,5 +31,7 @@ public record RunPersistenceAnchorRow(
         String modelId,
         String messageSenderUserId,
         String messageSenderUnifiedAuthId,
-        Boolean messageSentBySharedUser) {
+        Boolean messageSentBySharedUser,
+        String targetRuntimeKind,
+        String targetLocalClientInstanceId) {
 }

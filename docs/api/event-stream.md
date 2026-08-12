@@ -938,3 +938,39 @@ Run 的失败卡，不能把旧模型错误附加到当前成功回答。`sessio
 ## manager 控制面补充
 
 manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字段。Java 启动用户 opencode server 时通过 `environment` 注入 `TEST_AGENT_INTERNAL_PROXY_API_KEY`、`TEST_AGENT_INTERNAL_PROXY_BASE_URL` 和 `ENTERPRISE_UCID`，通过 `configPath` 固定传入当前用户的受管公共配置软链接；manager 生成的 `startCommand` 按固定顺序展示 `HOME`、全部 XDG、`TMPDIR`、配置路径、代理 base URL、UCID 等非敏感值，`TEST_AGENT_INTERNAL_PROXY_API_KEY` 必须显示为 `<redacted>`。调用方即使在 `environment` 中提供同名 HOME/XDG/TMP/config 变量，也会被 manager 按 `sessionPath/configPath` 覆盖。
+# `local-opencode-client.v1` 反向 WebSocket 协议
+
+连接地址为 `/api/internal/platform/local-opencode-client/connections/ws`。客户端必须使用 WSS；只有本地测试
+配置可以显式放宽为 WS。JSON envelope 为：
+
+```json
+{
+  "protocolVersion": "local-opencode-client.v1",
+  "type": "HEARTBEAT",
+  "requestId": "lch_...",
+  "traceId": "trace_...",
+  "connectionGeneration": 42,
+  "payload": {}
+}
+```
+
+`REGISTER` 是唯一不带 generation 的正常帧，payload 带 client key、稳定实例 ID、名称、平台、架构、客户端
+版本、OpenCode 版本和展示地址。后台验证用户 key 后返回 `REGISTERED`，并保存持有
+`backendProcessId + generation`。同实例后认证连接立即替代旧连接。
+
+| 帧 | 方向 | 说明 |
+|---|---|---|
+| `REGISTER` / `REGISTERED` | client→server / server→client | 认证、generation 和初始短期模型 grant。 |
+| `HEARTBEAT` / `HEARTBEAT_ACK` | 双向 | 每 5 秒上报实际进程状态并刷新 15 秒 TTL。 |
+| `LIFECYCLE_COMMAND` / `LIFECYCLE_RESULT` | server→client→server | `START/RESTART/STOP/STATUS`，返回 PID、权威启动时间、loopback health。 |
+| `HTTP_REQUEST` / `HTTP_RESPONSE` | server→client→server | OpenCode 非流式 HTTP；认证、Host、Cookie 等敏感/逐跳头不透传。 |
+| `STREAM_OPEN/STREAM_CHUNK/STREAM_END` | client→server | OpenCode SSE/流式 HTTP；顺序分片并等待发送完成形成背压。 |
+| `FILE_REQUEST` / `FILE_RESPONSE` | server→client→server | directory picker、根注册和完整 Workspace 文件 RPC。 |
+| `BINARY_CHUNK` | 双向预留/传输 | Base64 数据的原始分片上限为 256 KiB。 |
+| `MODEL_GRANT` | server→client | 原子替换短 TTL 模型 grant，不下发平台模型 key。 |
+| `CANCEL` | 双向 | 按 targetRequestId 取消 HTTP/SSE、文件或生命周期请求。 |
+| `ERROR` | 双向 | 稳定 code、安全 message、retryable 和无敏感 details。 |
+
+每帧上限 2 MiB，requestId/traceId 最长 128 字符。认证后缺 generation、generation 非正数、版本不匹配、
+重复 requestId、超大分片或未知帧都失败关闭。断连时客户端取消全部未完成任务、清理临时上传并清空模型
+grant；服务端完成的 Run 不自动切换到服务端实例或其它本地实例。

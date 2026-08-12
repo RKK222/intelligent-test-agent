@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionDispatchBatchResult;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionDispatchGateway;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionDispatchService;
@@ -46,6 +48,34 @@ public class HttpNightExecutionDispatchGateway implements NightExecutionDispatch
         }
         NightExecutionInternalDispatchDtos.Request request = new NightExecutionInternalDispatchDtos.Request(
                 linuxServerId,
+                taskIds.stream().map(NightExecutionTaskId::value).toList());
+        return Mono.fromCallable(() -> {
+                    ApiResponse<NightExecutionInternalDispatchDtos.Response> response =
+                            forwarder.forwardSystemTyped(
+                                    backend,
+                                    NightExecutionInternalDispatchController.PATH,
+                                    request,
+                                    new TypeReference<>() { },
+                                    traceId,
+                                    properties.getAccessToken());
+                    return response.data().toDomain();
+                })
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @Override
+    public Mono<NightExecutionDispatchBatchResult> dispatchLocal(
+            LocalClientInstanceId clientInstanceId,
+            BackendProcessId backendProcessId,
+            List<NightExecutionTaskId> taskIds,
+            String traceId) {
+        BackendJavaProcess backend = routeResolver.requireBackend(backendProcessId);
+        String target = "local:" + clientInstanceId.value();
+        if (routeResolver.isCurrent(backendProcessId)) {
+            return localService.dispatchBatch(target, taskIds, traceId);
+        }
+        NightExecutionInternalDispatchDtos.Request request = new NightExecutionInternalDispatchDtos.Request(
+                target,
                 taskIds.stream().map(NightExecutionTaskId::value).toList());
         return Mono.fromCallable(() -> {
                     ApiResponse<NightExecutionInternalDispatchDtos.Response> response =

@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -75,6 +76,27 @@ class TerminalApplicationServiceTest {
                 .isInstanceOf(PlatformException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.CONFLICT);
+    }
+
+    @Test
+    void createTicketRejectsLocalRuntimeBeforeResolvingServerWorkspacePath() {
+        Fixture fixture = new Fixture(tempDir);
+        LocalRuntimeCapabilityGuard guard = org.mockito.Mockito.mock(LocalRuntimeCapabilityGuard.class);
+        org.mockito.Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "本地终端未开放"))
+                .when(guard)
+                .requireSessionSupported(
+                        new SessionId("ses_1234567890abcdef"),
+                        "terminal",
+                        "本地 OpenCode 工作区首版不开放浏览器终端");
+        fixture.service.configureLocalRuntimeCapabilityGuard(guard);
+
+        assertThatThrownBy(() -> fixture.service.createTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        new TerminalTicketRequest("wrk_1234567890abcdef", ".", null, 80, 24),
+                        "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.FORBIDDEN);
     }
 
     @Test
