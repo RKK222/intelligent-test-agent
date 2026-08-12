@@ -9214,16 +9214,26 @@ test("pet mini games support tetris, minesweeper, sudoku, snake and pinball inte
   const pinball = page.getByTestId("pet-pinball");
   await expect(pinball.getByTestId("pet-pinball-board")).toBeVisible();
   await expect(pinball.locator(".pet-pinball-bumper")).toHaveCount(3);
+  await expect(pinball.locator(".pet-pinball-rollovers span")).toHaveCount(3);
+  await expect(pinball.locator(".pet-pinball-drop-target")).toHaveCount(3);
+  await expect(pinball.locator(".pet-pinball-sling")).toHaveCount(2);
+  await expect(pinball).toContainText("任务 1 · 点亮 A / B / C 翻滚灯");
   const launcher = pinball.getByRole("button", { name: "按住蓄力，松开发射弹珠" });
   await launcher.dispatchEvent("pointerdown", { pointerId: 1 });
   await page.waitForTimeout(100);
   await launcher.dispatchEvent("pointerup", { pointerId: 1 });
-  await expect(pinball).toContainText("弹珠上桌");
+  await expect(pinball).toContainText("技能发射判定中");
+  await expect(pinball).toContainText(/救球\d+s/);
   await page.keyboard.down("ArrowLeft");
   await expect(pinball.locator(".pet-pinball-flipper.is-left")).toHaveClass(/is-pressed/);
   await page.keyboard.up("ArrowLeft");
   await pinball.getByRole("button", { name: "暂停" }).click();
   await expect(pinball).toContainText("已暂停");
+  await pinball.getByRole("button", { name: "继续" }).click();
+  await pinball.getByRole("button", { name: "向左晃台" }).click();
+  await pinball.getByRole("button", { name: "向右晃台" }).click();
+  await pinball.getByRole("button", { name: "向左晃台" }).click();
+  await expect(pinball).toContainText("TILT · 挡板失效");
 
   await page.getByRole("button", { name: "关闭宠物旁路问答" }).click();
   await expect(page.getByTestId("pet-mini-games")).toHaveCount(0);

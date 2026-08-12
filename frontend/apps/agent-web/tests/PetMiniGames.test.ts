@@ -126,26 +126,59 @@ describe("PetMiniGames", () => {
     wrapper.unmount();
   });
 
-  it("charges, launches and controls the desktop pinball table", async () => {
+  it("runs the desktop pinball launch, mission, ball-save, flipper, pause and tilt rules", async () => {
     vi.useFakeTimers();
     const wrapper = mount(PetMiniGames);
     await wrapper.get('[data-testid="pet-game-open-pinball"]').trigger("click");
 
     expect(wrapper.find('[data-testid="pet-pinball-board"]').exists()).toBe(true);
     expect(wrapper.findAll('.pet-pinball-bumper')).toHaveLength(3);
+    expect(wrapper.findAll('.pet-pinball-rollovers span')).toHaveLength(3);
+    expect(wrapper.findAll('.pet-pinball-drop-target')).toHaveLength(3);
+    expect(wrapper.findAll('.pet-pinball-sling')).toHaveLength(2);
+    expect(wrapper.find('.pet-pinball-spinner').exists()).toBe(true);
+    expect(wrapper.find('.pet-pinball-scoop').exists()).toBe(true);
     expect(wrapper.findAll('.pet-pinball-lives > span:not(.is-spent)')).toHaveLength(3);
     expect(wrapper.text()).toContain("按住发射杆蓄力");
+    expect(wrapper.text()).toContain("任务 1 · 点亮 A / B / C 翻滚灯");
 
     const ballBeforeLaunch = wrapper.get('.pet-pinball-ball').attributes("style");
     const launcher = wrapper.get('[aria-label="按住蓄力，松开发射弹珠"]');
     await launcher.trigger("pointerdown", { pointerId: 1 });
-    await vi.advanceTimersByTimeAsync(160);
+    await vi.advanceTimersByTimeAsync(400);
     expect(launcher.text()).toMatch(/\d+%/);
     await launcher.trigger("pointerup", { pointerId: 1 });
-    expect(wrapper.text()).toContain("弹珠上桌");
+    expect(wrapper.text()).toContain("技能发射判定中");
+    expect(wrapper.text()).toContain("救球9s");
 
     await vi.advanceTimersByTimeAsync(64);
     expect(wrapper.get('.pet-pinball-ball').attributes("style")).not.toBe(ballBeforeLaunch);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wrapper.get('[data-testid="pet-pinball-score"]').text()).not.toContain("00000");
+    expect(wrapper.findAll('.pet-pinball-feature-strip strong')[0]!.text()).toBe("×2");
+
+    const pinballSetup = (wrapper.vm as unknown as {
+      $: { setupState: {
+        pinballRolloverLights: boolean[];
+        pinballDropTargets: boolean[];
+        pinballScore: number;
+        pinballBalls: Array<{ x: number; y: number; previousX: number; previousY: number; vx: number; vy: number }>;
+      } };
+    }).$.setupState;
+    pinballSetup.pinballRolloverLights = [true, true, true];
+    pinballSetup.pinballDropTargets = [true, true, true];
+    Object.assign(pinballSetup.pinballBalls[0]!, { x: 244, y: 218, previousX: 244, previousY: 214, vx: 0, vy: 100 });
+    await wrapper.vm.$nextTick();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(wrapper.findAll('.pet-pinball-ball')).toHaveLength(3);
+    expect(wrapper.text()).toContain("多球模式 · 场上 3 球");
+
+    pinballSetup.pinballScore = 14_999;
+    Object.assign(pinballSetup.pinballBalls[0]!, { x: 90, y: 150, previousX: 90, previousY: 145, vx: 0, vy: 100 });
+    await vi.advanceTimersByTimeAsync(16);
+    expect(wrapper.text()).toContain("奖励一球");
+    expect(wrapper.findAll('.pet-pinball-lives > span:not(.is-spent)')).toHaveLength(4);
+
     await wrapper.trigger("keydown", { key: "ArrowLeft" });
     expect(wrapper.get('.pet-pinball-flipper.is-left').classes()).toContain("is-pressed");
     await wrapper.trigger("keyup", { key: "ArrowLeft" });
@@ -153,6 +186,12 @@ describe("PetMiniGames", () => {
 
     await wrapper.get('.pet-pinball-controls .is-pause').trigger("click");
     expect(wrapper.text()).toContain("已暂停");
+    await wrapper.get('.pet-pinball-controls .is-pause').trigger("click");
+    await wrapper.get('[aria-label="向左晃台"]').trigger("click");
+    await wrapper.get('[aria-label="向右晃台"]').trigger("click");
+    await wrapper.get('[aria-label="向左晃台"]').trigger("click");
+    expect(wrapper.text()).toContain("TILT · 挡板失效");
+    expect(wrapper.find('.pet-pinball-overlay').text()).toContain("本球奖励分已锁定");
     wrapper.unmount();
   });
 
