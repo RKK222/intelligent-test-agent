@@ -1668,6 +1668,48 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void experienceWorkspaceSupportsLocalStageCommitAndDiscardWithoutPush() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        UserId userId = new UserId("usr_experience");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_exp_local_git");
+        Path experienceRoot = Files.createDirectories(root.resolve("experience-local-git"));
+        Workspace workspace = new Workspace(
+                workspaceId,
+                "体验工作区",
+                experienceRoot.toString(),
+                WorkspaceStatus.ACTIVE,
+                Instant.now(),
+                Instant.now(),
+                "127.0.0.1",
+                "trace_experience_local_git");
+        workspaces.save(workspace);
+        ExperienceWorkspaceAccessAuthorizer authorizer = mock(ExperienceWorkspaceAccessAuthorizer.class);
+        when(authorizer.isExperienceWorkspace(workspaceId)).thenReturn(true);
+        when(authorizer.requireAccess(userId, workspaceId)).thenReturn(workspace);
+        service.setExperienceWorkspaceAccessAuthorizer(authorizer);
+        git.nextStatusPorcelain = " M notes.md\n";
+        git.nextHeadCommit = "commit_experience_local";
+
+        service.stageWorkspaceGitFiles(workspaceId.value(), List.of("notes.md"), userId);
+        ManagedWorkspaceResponses.WorkspaceGitCommitResponse committed = service.commitExperienceWorkspace(
+                workspaceId.value(), "docs: 更新体验说明", List.of("notes.md"), userId);
+        git.nextStatusPorcelain = " M draft.md\n";
+        service.discardWorkspaceGitFiles(workspaceId.value(), List.of("draft.md"), userId);
+
+        assertThat(git.stagedFiles).containsExactly("notes.md");
+        assertThat(git.committedOnlyFiles).containsExactly("notes.md");
+        assertThat(git.committedStagedMessage).isEqualTo("docs: 更新体验说明");
+        assertThat(git.restoredFiles).containsExactly("draft.md");
+        assertThat(committed.status()).isEqualTo("LOCAL_COMMITTED");
+        assertThat(committed.headCommit()).isEqualTo("commit_experience_local");
+        assertThat(git.pushes).isEmpty();
+    }
+
+    @Test
     void experienceWorkspaceGitDiffHidesProtectedNamespacesAndSymbolicLinks() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -3601,6 +3643,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
         private GitCommitIdentity committedStagedIdentity;
+        private List<String> committedOnlyFiles = List.of();
         private boolean commitStagedUpdatesHead;
         private Path materializedRepoRoot;
         private String materializedCommit;
@@ -3814,6 +3857,19 @@ class ManagedWorkspaceApplicationServiceTest {
                     this.targetContainedInHead = true;
                 }
             }
+        }
+
+        @Override
+        public void commitFilesOnly(
+                Path repoRoot,
+                List<String> files,
+                String message,
+                String privateKey,
+                GitCommitIdentity identity) {
+            this.committedOnlyFiles = List.copyOf(files);
+            this.committedStagedRepoRoot = repoRoot;
+            this.committedStagedMessage = message;
+            this.committedStagedIdentity = identity;
         }
 
         @Override

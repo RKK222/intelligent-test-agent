@@ -90,7 +90,7 @@ class MyBatisExperienceWorkspacePostgresqlIntegrationTest {
                         resultSet.getString("parameter_value"),
                         resultSet.getString("platform"),
                         resultSet.getBoolean("editable")))
-                .single()).containsExactly("UNCONFIGURED", "all", true);
+                .single()).containsExactly("${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience", "all", true);
         assertThat(jdbc.sql("""
                         select checksum from flyway_schema_history
                         where version = '20260812104911' and success = true

@@ -27,6 +27,21 @@ class GitWorkspaceServiceRealGitTest {
     Path tempDir;
 
     @Test
+    void initializesLocalRepositoryOnceWithoutRemoteOrOverwritingContent() throws Exception {
+        Path repo = tempDir.resolve("experience");
+        GitWorkspaceService service = new GitWorkspaceService();
+
+        service.initializeLocalRepository(repo, "README.md", "initial\n", TEST_IDENTITY);
+        Files.writeString(repo.resolve("README.md"), "user changed\n", StandardCharsets.UTF_8);
+        service.initializeLocalRepository(repo, "README.md", "replacement\n", TEST_IDENTITY);
+
+        assertThat(repo.resolve(".git")).isDirectory();
+        assertThat(Files.readString(repo.resolve("README.md"))).isEqualTo("user changed\n");
+        assertThat(git(repo, "rev-list", "--count", "HEAD").stdoutText().trim()).isEqualTo("1");
+        assertThat(git(repo, "remote").stdoutText()).isBlank();
+    }
+
+    @Test
     void gitWorkTreeRootRejectsParentRepositorySubdirectory() throws Exception {
         Path repo = initializeRepository();
         Path child = Files.createDirectories(repo.resolve("experience-child"));
@@ -55,6 +70,25 @@ class GitWorkspaceServiceRealGitTest {
         assertThat(git(repo, "show", "--name-only", "--pretty=format:", "HEAD").stdoutText().trim())
                 .isEqualTo("selected.txt");
         assertThat(service.statusPorcelain(repo)).contains(" M other.txt");
+    }
+
+    @Test
+    void commitFilesOnlyDoesNotIncludeOtherUsersStagedPaths() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "selected.txt", "base selected\n");
+        write(repo, "other.txt", "base other\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        write(repo, "selected.txt", "selected change\n");
+        write(repo, "other.txt", "other staged\n");
+        git(repo, "add", "--", "other.txt");
+
+        new GitWorkspaceService().commitFilesOnly(
+                repo, List.of("selected.txt"), "selected only", null, TEST_IDENTITY);
+
+        assertThat(git(repo, "show", "--name-only", "--pretty=format:", "HEAD").stdoutText().trim())
+                .isEqualTo("selected.txt");
+        assertThat(git(repo, "status", "--short").stdoutText()).contains("M  other.txt");
     }
 
     @Test

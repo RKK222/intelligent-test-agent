@@ -74,8 +74,10 @@ const props = withDefaults(defineProps<{
   /** 当前页面内存中的用户绑定服务器。 */
   routeLinuxServerId?: string;
   canWrite: boolean;
-  /** 普通文件可写与 Git index/commit 权限分离；体验区固定为 false。 */
+  /** 普通文件可写与 Git index/commit 权限分离。 */
   canMutateGit?: boolean;
+  /** 体验区使用服务器本地仓库，允许提交但不展示任何发布或 push 入口。 */
+  localOnlyGit?: boolean;
   /** 体验区只展示目录自身 Git 变更，不加载公共或应用 Agent 配置作用域。 */
   includeAgentScopes?: boolean;
   /** 应用级 Agent/Skill/Rules/Templates 的独立写权限。 */
@@ -116,6 +118,7 @@ const effectiveAgentConfigWorkspaceId = computed(() =>
   props.agentConfigWorkspaceId === undefined ? props.workspaceId : (props.agentConfigWorkspaceId || undefined)
 );
 const canMutateWorkspaceGit = computed(() => props.canMutateGit ?? props.canWrite);
+const canPushWorkspaceGit = computed(() => !props.localOnlyGit);
 const includeAgentScopes = computed(() => props.includeAgentScopes !== false);
 const pendingWorkspaceAgentPublish = ref<PendingWorkspaceAgentPublish | null>(null);
 const pendingPublicAgentPublish = ref<PendingPublicAgentPublish | null>(null);
@@ -654,6 +657,7 @@ const activeScopeItem = computed(() =>
 );
 const activeScopeMeta = computed(() => {
   if (activeDiffScope.value !== "PUBLIC") {
+    if (props.localOnlyGit) return "服务器本地共享仓库";
     return props.personalWorkspaceBranch
       ? `个人 worktree · ${props.personalWorkspaceBranch}`
       : "个人 worktree";
@@ -718,7 +722,9 @@ const hasWritableStagedChanges = computed(() =>
 );
 const hasPublishableStagedChanges = computed(() =>
   activeDiffScope.value === "WORKSPACE"
-    ? canMutateWorkspaceGit.value && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path))
+    ? canPushWorkspaceGit.value
+      && canMutateWorkspaceGit.value
+      && workspaceStaged.value.some((file) => !isLocalOnlySpecPath(file.path))
     : activeAgentStaged.value.some((file) => canWriteAgentScope(file.scope))
 );
 const workspaceStagedSpecCount = computed(() =>
@@ -728,6 +734,9 @@ const workspaceStagedPublishableCount = computed(() =>
   workspaceStaged.value.length - workspaceStagedSpecCount.value
 );
 const workspaceCommitHint = computed(() => {
+  if (activeDiffScope.value === "WORKSPACE" && props.localOnlyGit) {
+    return "体验工作区只建立本服务器提交，不会推送到远程。";
+  }
   if (activeDiffScope.value !== "WORKSPACE" || workspaceStagedSpecCount.value === 0) return "";
   if (workspaceStagedPublishableCount.value === 0) {
     return `${workspaceStagedSpecCount.value} 个 spec 文件默认只提交，不发布到应用。`;
@@ -1514,6 +1523,10 @@ function agentRunDiffFile(file: AgentPanelDiffFile): WorkspacePanelDiffFile {
 
 // Commit changes
 async function handleCommit(push = false) {
+  if (push && props.localOnlyGit) {
+    errorMessage.value = "体验工作区不提供远程推送。";
+    return;
+  }
   const retryingPublicAgentPublish = activeDiffScope.value === "PUBLIC"
     ? currentPendingPublicAgentPublish()
     : null;
@@ -1626,24 +1639,29 @@ async function handleCommit(push = false) {
 
     // 1. 应用工作空间先提交个人 worktree；推送时再从个人 HEAD 投影到 feature worktree。
     if (activeDiffScope.value === "WORKSPACE" && canMutateWorkspaceGit.value && workspaceStaged.value.length > 0) {
-      if (!props.personalWorkspaceId) {
+      if (!props.personalWorkspaceId && !props.localOnlyGit) {
         errorMessage.value = "当前不是个人 worktree，不能提交或发布应用变更。";
         progressMessage.value = "";
         committing.value = false;
         return;
       }
-      const personalWorkspaceId = props.personalWorkspaceId;
       progressMessage.value = "正在提交个人 worktree...";
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
       const files = workspaceStaged.value.map((file) => file.path);
       const publishableFiles = files.filter((file) => !isLocalOnlySpecPath(file));
       localOnlySpecFileCount = files.length - publishableFiles.length;
-      await api.commitPersonalWorkspace(personalWorkspaceId, {
-        commitMessage: msg,
-        files,
-        operationId: newOperationId()
-      });
+      if (props.localOnlyGit) {
+        if (!props.workspaceId) throw new Error("体验工作区 ID 不存在");
+        progressMessage.value = "正在建立体验工作区本地提交...";
+        await api.commitExperienceWorkspace(props.workspaceId, msg, files);
+      } else {
+        await api.commitPersonalWorkspace(props.personalWorkspaceId!, {
+          commitMessage: msg,
+          files,
+          operationId: newOperationId()
+        });
+      }
       if (push && publishableFiles.length > 0) {
         publishAttempted = true;
         progressMessage.value = "正在从个人 HEAD 投影并推送 feature 分支...";
@@ -1657,7 +1675,7 @@ async function handleCommit(push = false) {
         }
         const result = await (async () => {
           try {
-            return await api.publishPersonalWorkspace(personalWorkspaceId, {
+            return await api.publishPersonalWorkspace(props.personalWorkspaceId!, {
               commitMessage: msg,
               files: publishableFiles,
               operationId: publishOperationId
@@ -1684,7 +1702,9 @@ async function handleCommit(push = false) {
       } else {
         // 仅执行个人提交时，应用 feature 投影和远端推送保持未执行，进度只到本地提交。
         commitStep.value = 2;
-        progressMessage.value = "个人 worktree 提交成功（尚未推送）。";
+        progressMessage.value = props.localOnlyGit
+          ? "体验工作区本地提交成功（不提供推送）。"
+          : "个人 worktree 提交成功（尚未推送）。";
       }
       stagedWorkspacePaths.value.clear();
       await new Promise((resolve) => setTimeout(resolve, 500));

@@ -2,20 +2,18 @@ package com.enterprise.testagent.workspace;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
-import com.enterprise.testagent.common.git.GitCommandExecutor;
+import com.enterprise.testagent.common.git.GitCommitIdentity;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.configuration.CommonParameter;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
-import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceBinding;
@@ -31,8 +29,6 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
@@ -47,23 +43,15 @@ class ExperienceWorkspaceApplicationServiceTest {
     Path tempDir;
 
     private final CommonParameterValues parameterValues = Mockito.mock(CommonParameterValues.class);
-    private final ConfigurationManagementRepository configurationRepository =
-            Mockito.mock(ConfigurationManagementRepository.class);
     private final GitWorkspaceService gitWorkspaceService = Mockito.mock(GitWorkspaceService.class);
     private final FakeWorkspaceRepository workspaceRepository = new FakeWorkspaceRepository();
     private final FakeExperienceWorkspaceRepository experienceRepository =
             new FakeExperienceWorkspaceRepository(workspaceRepository);
 
-    @BeforeEach
-    void allowExperienceUser() {
-        when(configurationRepository.hasEnabledApplicationMembership(USER_ID)).thenReturn(false);
-    }
-
     @Test
     void openRegistersOneStableWorkspaceForSameServerAndDirectory() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("shared"));
         configured(root, "${SYS_DATA_ROOT_DIR}/experience");
-        when(gitWorkspaceService.isGitWorkTreeRoot(root.toRealPath())).thenReturn(true);
         ExperienceWorkspaceApplicationService service = service();
 
         Workspace first = service.open(USER_ID, "trace_first");
@@ -83,12 +71,10 @@ class ExperienceWorkspaceApplicationServiceTest {
         Path firstRoot = Files.createDirectories(tempDir.resolve("first"));
         Path secondRoot = Files.createDirectories(tempDir.resolve("second"));
         configured(firstRoot, firstRoot.toString());
-        when(gitWorkspaceService.isGitWorkTreeRoot(firstRoot.toRealPath())).thenReturn(true);
         ExperienceWorkspaceApplicationService service = service();
         Workspace oldWorkspace = service.open(USER_ID, "trace_first");
 
         configured(secondRoot, secondRoot.toString());
-        when(gitWorkspaceService.isGitWorkTreeRoot(secondRoot.toRealPath())).thenReturn(true);
         Workspace currentWorkspace = service.open(USER_ID, "trace_second");
 
         assertThat(currentWorkspace.workspaceId()).isNotEqualTo(oldWorkspace.workspaceId());
@@ -120,9 +106,6 @@ class ExperienceWorkspaceApplicationServiceTest {
                         Optional.of(secondRoot.toString()),
                         Optional.of(secondRoot.toString()),
                         Optional.of(secondRoot.toString()));
-        when(gitWorkspaceService.isGitWorkTreeRoot(firstRoot.toRealPath())).thenReturn(true);
-        when(gitWorkspaceService.isGitWorkTreeRoot(secondRoot.toRealPath())).thenReturn(true);
-
         Workspace opened = service().open(USER_ID, "trace_race");
 
         assertThat(opened.rootPath()).isEqualTo(secondRoot.toRealPath().toString());
@@ -131,21 +114,20 @@ class ExperienceWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void userWithEnabledApplicationMembershipCannotOpenOrReuseExperienceWorkspace() throws Exception {
+    void usersWithOrWithoutApplicationsShareTheSameServerWorkspace() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("shared"));
         configured(root, root.toString());
-        when(gitWorkspaceService.isGitWorkTreeRoot(root.toRealPath())).thenReturn(true);
-        when(configurationRepository.hasEnabledApplicationMembership(USER_ID)).thenReturn(true);
         ExperienceWorkspaceApplicationService service = service();
 
-        assertThatThrownBy(() -> service.open(USER_ID, "trace_denied"))
-                .isInstanceOfSatisfying(PlatformException.class,
-                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
-        assertThat(experienceRepository.registrations).isEmpty();
+        Workspace first = service.open(USER_ID, "trace_first_user");
+        Workspace second = service.open(new UserId("usr_with_applications"), "trace_second_user");
+
+        assertThat(second.workspaceId()).isEqualTo(first.workspaceId());
+        assertThat(experienceRepository.registrations).hasSize(1);
     }
 
     @Test
-    void unconfiguredOrNonGitDirectoryReturnsSafeUnavailableError() throws Exception {
+    void unconfiguredDirectoryReturnsSafeUnavailableError() {
         when(parameterValues.raw(
                         ExperienceWorkspaceApplicationService.PARAM_EXPERIENCE_WORKSPACE_DIR,
                         ParameterPlatform.current()))
@@ -158,45 +140,50 @@ class ExperienceWorkspaceApplicationServiceTest {
 
         assertSafeUnavailable(() -> service.open(USER_ID, "trace_unconfigured"));
 
+    }
+
+    @Test
+    void openAcceptsPlainDirectoryWithoutGitValidation() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("plain-directory"));
         configured(root, root.toString());
-        AtomicReference<String> redactedGitProbePath = new AtomicReference<>();
-        when(gitWorkspaceService.isGitWorkTreeRoot(root.toRealPath())).thenAnswer(invocation -> {
-            Path probedRoot = invocation.getArgument(0);
-            redactedGitProbePath.set(GitCommandExecutor.redactSensitiveText(probedRoot.toString()));
-            return false;
-        });
 
-        assertSafeUnavailable(() -> service.open(USER_ID, "trace_not_git"));
-        assertThat(redactedGitProbePath).hasValue("<redacted-local-path>");
-        verify(gitWorkspaceService, never()).originUrl(root.toRealPath());
-    }
-
-    @Test
-    void localGitRepositoryMayHaveRemoteBecauseExperienceNeverInspectsIt() throws Exception {
-        Path root = Files.createDirectories(tempDir.resolve("with-remote"));
-        configured(root, root.toString());
-        when(gitWorkspaceService.isGitWorkTreeRoot(root.toRealPath())).thenReturn(true);
-
-        Workspace workspace = service().open(USER_ID, "trace_remote_allowed");
+        Workspace workspace = service().open(USER_ID, "trace_plain_directory");
 
         assertThat(workspace.rootPath()).isEqualTo(root.toRealPath().toString());
-        verify(gitWorkspaceService, never()).originUrl(root.toRealPath());
+        verify(gitWorkspaceService, Mockito.never()).isGitWorkTreeRoot(root.toRealPath());
     }
 
     @Test
-    void repeatedAccessRechecksDatabaseAndDirectoryWithoutForkingGitAgain() throws Exception {
+    void startupCreatesDirectoryAndInitializesLocalRepositoryOnce() throws Exception {
+        Path root = tempDir.resolve("startup-created");
+        configured(root, root.toString());
+
+        service().initializeLocalRepository();
+
+        assertThat(root).isDirectory();
+        verify(gitWorkspaceService).initializeLocalRepository(
+                Mockito.eq(root.toRealPath()),
+                Mockito.eq("README.md"),
+                Mockito.contains("不提供远程推送"),
+                Mockito.any(GitCommitIdentity.class));
+    }
+
+    @Test
+    void repeatedAccessRechecksParameterAndDirectoryWithoutGitValidation() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("high-frequency"));
         configured(root, root.toString());
-        when(gitWorkspaceService.isGitWorkTreeRoot(root.toRealPath())).thenReturn(true);
         ExperienceWorkspaceApplicationService service = service();
         Workspace workspace = service.open(USER_ID, "trace_open");
 
         service.requireAccess(USER_ID, workspace.workspaceId());
         service.requireAccess(USER_ID, workspace.workspaceId());
 
-        verify(gitWorkspaceService, times(1)).isGitWorkTreeRoot(root.toRealPath());
-        verify(configurationRepository, times(4)).hasEnabledApplicationMembership(USER_ID);
+        verify(parameterValues, times(5)).raw(
+                ExperienceWorkspaceApplicationService.PARAM_EXPERIENCE_WORKSPACE_DIR,
+                ParameterPlatform.current());
+        verify(parameterValues, times(5)).resolvedValue(
+                ExperienceWorkspaceApplicationService.PARAM_EXPERIENCE_WORKSPACE_DIR,
+                ParameterPlatform.current());
     }
 
     private ExperienceWorkspaceApplicationService service() {
@@ -204,7 +191,6 @@ class ExperienceWorkspaceApplicationServiceTest {
                 experienceRepository,
                 workspaceRepository,
                 parameterValues,
-                configurationRepository,
                 new WorkspaceServerIdentity(SERVER_ID),
                 gitWorkspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));

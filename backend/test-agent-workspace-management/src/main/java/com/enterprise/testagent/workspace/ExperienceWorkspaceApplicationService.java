@@ -2,11 +2,11 @@ package com.enterprise.testagent.workspace;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.git.GitCommitIdentity;
 import com.enterprise.testagent.common.git.GitCommandExecutor;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.domain.configuration.CommonParameter;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
-import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
@@ -35,8 +35,8 @@ import org.springframework.stereotype.Service;
 /**
  * 平台体验工作区应用服务。
  *
- * <p>服务只接管管理员预先准备好的本地 Git 目录，不创建目录、不执行 git init，也不读取或修改 remote。
- * 同一服务器与真实路径生成稳定 Workspace ID，并在每次访问时重新核对用户资格与当前配置。
+ * <p>服务接管当前后端服务器的本地体验目录。启动时幂等初始化一个无 remote 的 Git 仓库，
+ * 同一服务器与真实路径生成稳定 Workspace ID，任何用户均可在任意时间进入。
  */
 @Service
 public class ExperienceWorkspaceApplicationService implements ExperienceWorkspaceAccessAuthorizer {
@@ -44,12 +44,20 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
     public static final String PARAM_EXPERIENCE_WORKSPACE_DIR = "OPENCODE_EXPERIENCE_WORKSPACE_DIR";
     private static final String UNCONFIGURED = "UNCONFIGURED";
     private static final String WORKSPACE_NAME = "体验工作区";
+    private static final String INITIAL_FILE = "README.md";
+    private static final String INITIAL_CONTENT = """
+            # MIMO 体验工作区
+
+            此目录由当前服务器上的体验用户共享，可自由修改并使用本地 Git 提交。
+            平台不提供远程推送，请勿存放密码、密钥、客户数据等敏感信息。
+            """;
+    private static final GitCommitIdentity INITIAL_COMMIT_IDENTITY =
+            new GitCommitIdentity("MIMO Test Agent", "mimo-test-agent@mails.icbc");
     private static final int OPEN_CONFIGURATION_RETRY_LIMIT = 3;
 
     private final ExperienceWorkspaceRepository experienceWorkspaceRepository;
     private final WorkspaceRepository workspaceRepository;
     private final CommonParameterValues commonParameterValues;
-    private final ConfigurationManagementRepository configurationRepository;
     private final WorkspaceServerIdentity serverIdentity;
     private final GitWorkspaceService gitWorkspaceService;
     private final Clock clock;
@@ -60,13 +68,11 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
             ExperienceWorkspaceRepository experienceWorkspaceRepository,
             WorkspaceRepository workspaceRepository,
             CommonParameterValues commonParameterValues,
-            ConfigurationManagementRepository configurationRepository,
             WorkspaceServerIdentity serverIdentity) {
         this(
                 experienceWorkspaceRepository,
                 workspaceRepository,
                 commonParameterValues,
-                configurationRepository,
                 serverIdentity,
                 new GitWorkspaceService(),
                 Clock.systemUTC());
@@ -77,7 +83,6 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
             ExperienceWorkspaceRepository experienceWorkspaceRepository,
             WorkspaceRepository workspaceRepository,
             CommonParameterValues commonParameterValues,
-            ConfigurationManagementRepository configurationRepository,
             WorkspaceServerIdentity serverIdentity,
             GitWorkspaceService gitWorkspaceService,
             Clock clock) {
@@ -85,8 +90,6 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
                 experienceWorkspaceRepository, "experienceWorkspaceRepository must not be null");
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
-        this.configurationRepository = Objects.requireNonNull(
-                configurationRepository, "configurationRepository must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.gitWorkspaceService = Objects.requireNonNull(gitWorkspaceService, "gitWorkspaceService must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
@@ -105,10 +108,10 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
 
     /** 测试及目标端内部入口；服务器身份已由调用方或当前服务固定。 */
     public synchronized Workspace open(UserId userId, String traceId) {
+        Objects.requireNonNull(userId, "userId must not be null");
         String linuxServerId = serverIdentity.linuxServerId();
         for (int attempt = 0; attempt < OPEN_CONFIGURATION_RETRY_LIMIT; attempt++) {
-            requireEligibleUser(userId);
-            ExperienceConfiguration configuration = requireCurrentConfiguration(true);
+            ExperienceConfiguration configuration = requireCurrentConfiguration();
             WorkspaceId workspaceId = stableWorkspaceId(linuxServerId, configuration.realRoot());
             var existing = experienceWorkspaceRepository.findCurrentByLinuxServerId(linuxServerId);
             if (existing.isEmpty()
@@ -131,7 +134,7 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
                 }
             }
             // 参数可能在目录探测或数据库登记期间被管理员改写；旧请求不得迟到覆盖新绑定。
-            ExperienceConfiguration verified = requireCurrentConfiguration(false);
+            ExperienceConfiguration verified = requireCurrentConfiguration();
             if (!configuration.equals(verified)) {
                 continue;
             }
@@ -149,7 +152,7 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
     }
 
     /**
-     * 实时校验当前体验绑定。参数换目录、用户加入应用、服务器变化或 Workspace 归档后立即拒绝旧访问。
+     * 实时校验当前体验绑定。参数换目录、服务器变化或 Workspace 归档后立即拒绝旧访问。
      */
     @Override
     public Workspace requireAccess(UserId userId, WorkspaceId workspaceId) {
@@ -157,10 +160,9 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
         if (!isExperienceWorkspace(workspaceId)) {
             throw forbiddenExperience();
         }
-        requireEligibleUser(userId);
-        // 高频 ticket/RPC 仍实时读取资格、参数、绑定、目录与 Workspace；Git 根探测只在 open 执行，
-        // 避免每个文件分片都派生一个 git 子进程。配置或真实路径变化仍会由下方事实比对立即拒绝。
-        ExperienceConfiguration configuration = requireCurrentConfiguration(false);
+        Objects.requireNonNull(userId, "userId must not be null");
+        // 高频 ticket/RPC 仍实时读取参数、绑定、目录与 Workspace；Git 仓库只在服务启动时初始化，不作为进入资格。
+        ExperienceConfiguration configuration = requireCurrentConfiguration();
         String linuxServerId = serverIdentity.linuxServerId();
         ExperienceWorkspaceBinding binding = experienceWorkspaceRepository
                 .findCurrentByLinuxServerId(linuxServerId)
@@ -177,14 +179,26 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
         return workspace.withRootPath(configuration.realRoot().toString());
     }
 
-    private void requireEligibleUser(UserId userId) {
-        Objects.requireNonNull(userId, "userId must not be null");
-        if (configurationRepository.hasEnabledApplicationMembership(userId)) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "已有所属应用，不能使用平台体验工作区");
+    /** 后端启动时创建本服务器的目录和无 remote Git 基线，已有用户内容不会被覆盖或重置。 */
+    public synchronized void initializeLocalRepository() {
+        ExperienceConfiguration configuration = requireConfiguredPath(true);
+        try (GitCommandExecutor.LogRedaction ignored =
+                GitCommandExecutor.redactSensitiveArguments(List.of(configuration.realRoot().toString()))) {
+            gitWorkspaceService.initializeLocalRepository(
+                    configuration.realRoot(),
+                    INITIAL_FILE,
+                    INITIAL_CONTENT,
+                    INITIAL_COMMIT_IDENTITY);
+        } catch (PlatformException exception) {
+            throw new IllegalStateException("体验工作区本地 Git 初始化失败", exception);
         }
     }
 
-    private ExperienceConfiguration requireCurrentConfiguration(boolean verifyGitRoot) {
+    private ExperienceConfiguration requireCurrentConfiguration() {
+        return requireConfiguredPath(false);
+    }
+
+    private ExperienceConfiguration requireConfiguredPath(boolean createDirectory) {
         ParameterPlatform platform = ParameterPlatform.current();
         CommonParameter parameter = commonParameterValues.raw(PARAM_EXPERIENCE_WORKSPACE_DIR, platform)
                 .orElseThrow(() -> unavailable("UNCONFIGURED"));
@@ -198,8 +212,13 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
         Path realRoot;
         try {
             Path configuredRoot = Path.of(resolvedValue.trim());
-            if (!configuredRoot.isAbsolute()
-                    || !Files.isDirectory(configuredRoot)
+            if (!configuredRoot.isAbsolute()) {
+                throw unavailable("DIRECTORY_UNAVAILABLE");
+            }
+            if (createDirectory) {
+                Files.createDirectories(configuredRoot);
+            }
+            if (!Files.isDirectory(configuredRoot)
                     || !Files.isReadable(configuredRoot)
                     || !Files.isWritable(configuredRoot)) {
                 throw unavailable("DIRECTORY_UNAVAILABLE");
@@ -207,15 +226,6 @@ public class ExperienceWorkspaceApplicationService implements ExperienceWorkspac
             realRoot = configuredRoot.toRealPath();
         } catch (InvalidPathException | IOException | SecurityException exception) {
             throw unavailable("DIRECTORY_UNAVAILABLE");
-        }
-        // Git 执行器通常会记录 -C 参数；体验目录属于管理员配置，探测日志必须隐藏物理路径。
-        if (verifyGitRoot) {
-            try (GitCommandExecutor.LogRedaction ignored =
-                    GitCommandExecutor.redactSensitiveArguments(List.of(realRoot.toString()))) {
-                if (!gitWorkspaceService.isGitWorkTreeRoot(realRoot)) {
-                    throw unavailable("NOT_GIT_WORK_TREE");
-                }
-            }
         }
         return new ExperienceConfiguration(rawValue, realRoot);
     }

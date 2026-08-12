@@ -322,6 +322,21 @@ public class ManagedWorkspaceController {
                 }));
     }
 
+    /** 体验工作区只在本服务器建立提交，该入口没有任何 push 或发布分支。 */
+    @PostMapping("/workspaces/{workspaceId}/git-commit")
+    public ApiResponse<Object> commitExperienceWorkspace(
+            @PathVariable String workspaceId,
+            @RequestBody ManagedWorkspaceDtos.WorkspaceGitCommitRequest request,
+            ServerWebExchange exchange) {
+        return ok(exchange, workspaceShareAction(
+                exchange, workspaceId, true, "EXPERIENCE_WORKSPACE_GIT_COMMIT",
+                (executionUser, context) -> {
+                    requireWorkspaceGitPathPermission(exchange, context, request.files());
+                    return service.commitExperienceWorkspace(
+                            workspaceId, request.commitMessage(), request.files(), executionUser);
+                }));
+    }
+
     @GetMapping("/workspaces/{workspaceId}/git-conflict")
     public ApiResponse<Object> getWorkspaceGitConflict(
             @PathVariable String workspaceId,

@@ -282,7 +282,7 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.emitted("returnManagedWorkspace")).toHaveLength(1);
   });
 
-  it("keeps experience files writable while showing local Git changes as read-only", () => {
+  it("keeps experience files and local Git writable while disabling remote publication", () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {
         workspaceId: "wrk_exp_shared",
@@ -291,7 +291,7 @@ describe("FigmaFileExplorer", () => {
         expandedDirectories: new Set<string>(),
         changedFiles: [],
         canWrite: true,
-        canMutateGit: false,
+        canMutateGit: true,
         workspaceKind: "EXPERIENCE"
       }
     });
@@ -300,7 +300,9 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.text()).toContain("请勿存放敏感数据");
     expect(wrapper.find('button[aria-label="变更"]').exists()).toBe(true);
     expect(wrapper.findComponent(FileExplorer).props("canWrite")).toBe(true);
-    expect(wrapper.findComponent(GitChangesPanel).props("canMutateGit")).toBe(false);
+    expect(wrapper.text()).toContain("本地 Git 可提交，不提供推送");
+    expect(wrapper.findComponent(GitChangesPanel).props("canMutateGit")).toBe(true);
+    expect(wrapper.findComponent(GitChangesPanel).props("localOnlyGit")).toBe(true);
     expect(wrapper.findComponent(GitChangesPanel).props("includeAgentScopes")).toBe(false);
     expect(wrapper.findComponent(AgentConfigPanel).exists()).toBe(false);
     expect(wrapper.find('button[aria-label="拉取远程"]').exists()).toBe(false);

@@ -440,7 +440,7 @@ defineExpose({
     <div v-else-if="experienceWorkspaceMode" class="experience-mode-banner" role="status">
       <strong>体验工作区</strong>
       <span>多人共享，可能同时修改相同文件</span>
-      <span>本地 Git 只读展示</span>
+      <span>本地 Git 可提交，不提供推送</span>
       <span class="is-warning">请勿存放敏感数据</span>
     </div>
 
@@ -461,6 +461,7 @@ defineExpose({
         :route-linux-server-id="routeLinuxServerId"
         :can-write="!!canWrite"
         :can-mutate-git="canMutateGit ?? !!canWrite"
+        :local-only-git="experienceWorkspaceMode"
         :include-agent-scopes="managedWorkspaceMode"
         :can-manage-agent-config="managedWorkspaceMode && (canManageAgentConfig ?? !!canWrite)"
         :can-manage-public-config="managedWorkspaceMode && (canManagePublicConfig ?? !!canWrite)"

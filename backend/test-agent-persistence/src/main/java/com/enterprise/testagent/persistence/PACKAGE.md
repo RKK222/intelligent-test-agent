@@ -17,6 +17,7 @@
 - `mybatis.ExternalApiCredentialMapper` / `mybatis/ExternalApiCredentialMapper.xml` / `mybatis.MyBatisExternalApiCredentialRepository`：外部 API 凭据分页、整表加载、CRUD 和 scope 原子替换；只映射 RSA 密文、SHA-256 指纹、掩码提示与安全元数据。
 - `mybatis.CommonParameterMapper` / `mybatis/CommonParameterMapper.xml`：通用参数 MyBatis 试点 SQL。
 - `mybatis.MyBatisCommonParameterRepository`：通用参数领域端口的生产 Bean。
+- `db/migration/V20260812144051__common_parameters_default_experience_workspace.sql`：只把体验目录仍为 `UNCONFIGURED` 的默认参数迁移为 `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience`，不覆盖自定义值；本机目录与 Git 初始化不属于 Flyway 职责。
 - `mybatis.InternalModelProviderMapper` / `mybatis/InternalModelProviderMapper.xml`：内部模型供应商、可复用 Token 定义、Provider 关联和一次联表运行快照的全部关系型 SQL。
 - `mybatis.MyBatisInternalModelProviderRepository` / `mybatis.MyBatisInternalModelTokenRepository`：内部模型供应商与 Token 定义领域端口的生产 Bean；普通返回模型不包含 Token 明文。
 - `mybatis.InternalModelObservabilityMapper` / `mybatis/InternalModelObservabilityMapper.xml` / `mybatis.MyBatisInternalModelCallRecordRepository`：内部模型结构化明细、小时聚合和探活状态实现；明细结果大类通过低基数 `outcome IN (...)` 过滤，关系型 SQL 只存在于 MyBatis XML。

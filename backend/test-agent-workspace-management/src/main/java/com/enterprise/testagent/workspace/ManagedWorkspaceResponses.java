@@ -485,6 +485,14 @@ public final class ManagedWorkspaceResponses {
             String applicationTargetCommit) {
     }
 
+    /** 按运行态 Workspace 执行的本地提交；该回包不承载任何远程推送语义。 */
+    public record WorkspaceGitCommitResponse(
+            String status,
+            String workspaceId,
+            String headCommit,
+            String message) {
+    }
+
     /**
      * Git 三方冲突内容。content 为 null 表示对应版本中不存在该文件。
      */

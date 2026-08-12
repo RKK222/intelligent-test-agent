@@ -4344,7 +4344,22 @@ test("experience offer precedes onboarding and declining restores the existing g
   await expect(page.getByText("这是你的工作面板", { exact: true })).toBeVisible();
 });
 
-test("experience workspace browses and edits files, starts chat, and keeps Git read-only", async ({ page }) => {
+test("users with applications can open the persistent experience entry at any time", async ({ page }) => {
+  await mockBackendApi(page, {
+    applications: [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }],
+    managedApplications: [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }],
+    authRoles: ["USER"]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await expect(page.getByRole("dialog").getByText("现在体验平台功能吗？", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: /应用：/ }).click();
+  await page.getByRole("option", { name: /平台体验/ }).click();
+  await expect(page.getByRole("dialog").getByText("现在体验平台功能吗？", { exact: true })).toBeVisible();
+});
+
+test("experience workspace browses and edits files, starts chat, and exposes local-only Git", async ({ page }) => {
   const experienceWorkspace = {
     ...workspace(),
     workspaceId: "wrk_exp_e2e_shared",
@@ -4385,7 +4400,7 @@ test("experience workspace browses and edits files, starts chat, and keeps Git r
   await page.getByRole("button", { name: "开始体验" }).click();
 
   await expect(page.locator(".experience-mode-banner")).toContainText("多人共享");
-  await expect(page.locator(".experience-mode-banner")).toContainText("本地 Git 只读展示");
+  await expect(page.locator(".experience-mode-banner")).toContainText("本地 Git 可提交，不提供推送");
   await expect.poll(() => experienceOpenRequests).toEqual([
     "POST /api/internal/platform/workspace-management/workspaces/experience/open"
   ]);
@@ -4405,8 +4420,9 @@ test("experience workspace browses and edits files, starts chat, and keeps Git r
   });
 
   await page.locator(".figma-file-explorer").getByRole("button", { name: "变更" }).click();
-  await expect(page.getByText("本地 Git 变更仅供查看；暂存、回退、提交、拉取和推送均已禁用。", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "全部暂存应用工作空间变更" })).toBeDisabled();
+  await expect(page.getByText("体验工作区只建立本服务器提交，不会推送到远程。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "全部暂存应用工作空间变更" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "提交并推送" })).toHaveCount(0);
   await expect.poll(() => gitDiffRequests).toContain(
     "GET /api/internal/platform/workspace-management/workspaces/wrk_exp_e2e_shared/git-diff"
   );

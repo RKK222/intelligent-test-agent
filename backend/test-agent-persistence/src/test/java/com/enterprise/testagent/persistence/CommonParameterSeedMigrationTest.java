@@ -96,4 +96,17 @@ class CommonParameterSeedMigrationTest {
                 "foreign key (workspace_id) references workspaces(workspace_id)");
         assertThat(sql).doesNotContain("insert into workspaces");
     }
+
+    @Test
+    void experienceWorkspaceDefaultMigrationOnlyReplacesHistoricalUnconfiguredValue() throws Exception {
+        String sql = Files.readString(Path.of(
+                "src/main/resources/db/migration/"
+                        + "V20260812144051__common_parameters_default_experience_workspace.sql"));
+
+        assertThat(sql).contains(
+                "'$' || '{SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience'",
+                "upper(trim(parameter_value)) = 'UNCONFIGURED'",
+                "parameter_english = 'OPENCODE_EXPERIENCE_WORKSPACE_DIR'");
+        assertThat(sql).doesNotContain("delete from", "insert into");
+    }
 }

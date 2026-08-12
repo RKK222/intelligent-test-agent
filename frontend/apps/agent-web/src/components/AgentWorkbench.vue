@@ -2532,7 +2532,7 @@ function experienceContinuationIsCurrent(generation: number, phase?: ExperienceC
 }
 
 function cancelExperienceWorkspaceFlow(
-  _reason: "DECLINED" | "PROCESS_CANCELLED" | "PROCESS_FAILED" | "OPEN_FAILED" | "APPLICATION_JOINED" | "UNMOUNT"
+  _reason: "DECLINED" | "PROCESS_CANCELLED" | "PROCESS_FAILED" | "OPEN_FAILED" | "WORKSPACE_SWITCHED" | "UNMOUNT"
 ) {
   experienceDialogOpen.value = false;
   experienceProcessConfirmationGeneration = null;
@@ -2549,8 +2549,7 @@ async function openExperienceWorkspaceForGeneration(generation: number) {
   const opening = beginExperienceWorkspaceOpen(experienceContinuation.value, generation);
   experienceContinuation.value = opening.state;
   if (!opening.shouldOpen) return;
-  const isCurrent = () => experienceContinuationIsCurrent(generation, "OPENING")
-    && managedApplications.value.length === 0;
+  const isCurrent = () => experienceContinuationIsCurrent(generation, "OPENING");
   try {
     const workspace = await api.openExperienceWorkspace();
     if (!isCurrent()) return;
@@ -2567,7 +2566,7 @@ async function openExperienceWorkspaceForGeneration(generation: number) {
     feedback.value = {
       kind: "info",
       title: "已进入体验工作区",
-      description: "目录由同机体验用户共享；普通文件可编辑，本地 Git 变更仅供查看。"
+      description: "目录由同机体验用户共享；普通文件可编辑，Git 可在本服务器提交但不提供推送。"
     };
   } catch (error) {
     if (!isCurrent()) return;
@@ -2589,8 +2588,7 @@ async function continueExperienceWorkspaceWhenReady(generation: number) {
       continueAfterReady: true,
       isCurrent: () => experienceInitializationConfirmationIsCurrent(
         experienceContinuation.value,
-        generation,
-        managedApplications.value.length
+        generation
       ),
       onCancelled: () => {
         if (experienceContinuationIsCurrent(generation, "WAITING_FOR_READY")) {
@@ -2615,6 +2613,20 @@ function startExperienceWorkspace() {
   experienceJourneyActive.value = true;
   experienceContinuation.value = requestExperienceContinuation(experienceContinuation.value);
   void continueExperienceWorkspaceWhenReady(experienceContinuation.value.generation);
+}
+
+function openExperienceWorkspaceDialog() {
+  if (shareMode.value) return;
+  if (selectedWorkspaceKind.value === "EXPERIENCE") {
+    feedback.value = {
+      kind: "info",
+      title: "已在体验工作区",
+      description: "当前使用的就是 OpenCode 所在服务器的本地体验目录。"
+    };
+    return;
+  }
+  experienceOfferPhase.value = "PROMPTING";
+  experienceDialogOpen.value = true;
 }
 
 function handleProcessStartupDialogClose() {
@@ -3330,32 +3342,6 @@ watch(
     if (!applications) return;
     const nextVisibleApplicationIds = new Set(applications.map((app) => app.appId));
     visibleManagedApplicationIds.value = nextVisibleApplicationIds;
-    if (applications.length > 0 && (
-      selectedWorkspaceKind.value === "EXPERIENCE"
-      || experienceJourneyActive.value
-      || experienceDialogOpen.value
-    )) {
-      const experienceWorkspaceId = selectedWorkspaceKind.value === "EXPERIENCE"
-        ? selectedWorkspaceId.value
-        : undefined;
-      if (experienceWorkspaceId) api.closeWorkspaceFileSocket(experienceWorkspaceId);
-      cancelExperienceWorkspaceFlow("APPLICATION_JOINED");
-      experienceOfferPhase.value = "RESOLVED";
-      appSelectionSeq += 1;
-      selectingAppId = undefined;
-      invalidateConversationInteraction();
-      teardownAppSourceInteractions();
-      resetWorkspaceState();
-      selectedWorkspaceId.value = undefined;
-      selectedAppId.value = undefined;
-      selectedWorkspaceKind.value = "MANAGED";
-      appSourceContext.value = null;
-      feedback.value = {
-        kind: "info",
-        title: "已退出体验工作区",
-        description: "你已加入应用，平台已关闭共享目录连接，请选择应用工作空间继续。"
-      };
-    }
     const currentAppId = selectedAppId.value;
     if (currentAppId && !nextVisibleApplicationIds.has(currentAppId)) {
       const revokedAppName = previousApplications?.find((app) => app.appId === currentAppId)?.appName ?? currentAppId;
@@ -6564,9 +6550,16 @@ async function handleSelectApp(appId: string) {
   }
   invalidateConversationInteraction();
   const leavingAppSource = selectedWorkspaceKind.value === "APP_SOURCE";
+  const leavingExperience = selectedWorkspaceKind.value === "EXPERIENCE";
+  if (leavingExperience && selectedWorkspaceId.value) {
+    api.closeWorkspaceFileSocket(selectedWorkspaceId.value);
+    cancelExperienceWorkspaceFlow("WORKSPACE_SWITCHED");
+  }
   teardownAppSourceInteractions();
   if (leavingAppSource) {
     void api.clearRecentAppSource().catch(() => undefined);
+  }
+  if (leavingAppSource || leavingExperience) {
     selectedWorkspaceKind.value = "MANAGED";
     appSourceContext.value = null;
   }
@@ -11021,6 +11014,7 @@ async function handleLogout() {
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
+    @open-experience="openExperienceWorkspaceDialog"
     @load-versions="handleLoadVersions"
     @select-version="handleSelectVersion"
     @open-app-source="openAppSourcePicker"
@@ -11156,7 +11150,7 @@ async function handleLogout() {
           :creating-version="creatingVersion"
           :pulling-personal-workspace="pullingPersonalWorkspace"
           :can-write="canWriteSelectedWorkspace"
-          :can-mutate-git="selectedWorkspaceKind === 'MANAGED' && canWriteSelectedWorkspace"
+          :can-mutate-git="selectedWorkspaceKind !== 'APP_SOURCE' && canWriteSelectedWorkspace"
           :can-undo="workspaceUndoStack.length > 0"
           :can-manage-agent-config="appSourceCapabilities.canPublishApplicationAgentConfig && isAppAdmin"
           :can-manage-public-config="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"

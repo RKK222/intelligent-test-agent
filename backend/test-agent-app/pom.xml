@@ -44,6 +44,10 @@
         </dependency>
         <dependency>
             <groupId>com.enterprise.testagent</groupId>
+            <artifactId>test-agent-workspace-management</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.enterprise.testagent</groupId>
             <artifactId>test-agent-system-management</artifactId>
         </dependency>
         <dependency>

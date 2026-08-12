@@ -85,7 +85,7 @@ Browser
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
 | `test-agent-app` | 唯一启动入口和可部署服务包，强制 WebFlux 主上下文并装配 XXL Admin 子上下文/executor；只放启动、装配、profile、migration、health 和日志。 |
 
-平台体验工作区按既有模块边界实现：`test-agent-api` 只提供无请求体 open Controller 并复用用户 TestAgent Java 路由；`test-agent-workspace-management` 负责目录校验、确定性身份、当前绑定与统一实时权限；`test-agent-opencode-runtime` 在 Session/Run/上下文入口复用该权限；`test-agent-persistence` 仅以 Flyway 和 MyBatis XML 保存通用参数与每服务器当前绑定。前端由 `packages/backend-api` 调用平台 API，`apps/agent-web` 维护 `EXPERIENCE` 选择语义和只读 Git 能力门禁。该链路不创建虚拟应用/版本/成员，不直连 OpenCode server，不新增文件 HTTP 代理或 RunEvent 类型。
+平台体验工作区按既有模块边界实现：`test-agent-api` 提供无请求体 open 与纯本地 git-commit Controller，并复用用户 TestAgent Java 路由；`test-agent-workspace-management` 负责启动期本机目录/Git 初始化、确定性身份、当前绑定、统一实时权限以及本地 stage/unstage/discard/冲突/commit；`test-agent-opencode-runtime` 在 Session/Run/上下文入口复用该权限；`test-agent-persistence` 仅以 Flyway 和 MyBatis XML 保存通用参数与每服务器当前绑定；`test-agent-app` 的 Runner 在业务可用前触发幂等初始化。前端由 `packages/backend-api` 调用平台 API，`apps/agent-web` 维护 `EXPERIENCE` 选择语义、本地 Git 交互和永久隐藏 push 的门禁。该链路不创建虚拟应用/版本/成员，不直连 OpenCode server，不新增文件 HTTP 代理或 RunEvent 类型。
 
 公共 Agent 卡死 rollout 的纠错编排仍沿用现有边界：`test-agent-workspace-management.AgentConfigApplicationService` 解析远端修正 commit 并广播新任务，`test-agent-opencode-runtime.PublicAgentConfigRolloutService` 负责原子替换协调、精确目标强停和排空，`test-agent-persistence` 的 MyBatis XML/Flyway 保存替换审计链与 `force_stop` 派生标记，`test-agent-api.AgentConfigController` 仅暴露 `SUPER_ADMIN` DTO/鉴权入口。停止进程必须继续复用 `OpencodeProcessStopService`，不在 workspace、API 或 persistence 层直接控制 manager。
 

@@ -11,6 +11,7 @@
 - `UserOpencodeMessageGate` 独立表达轻量发布门禁响应；`messageSendAllowed` 必填，其余原因和 rollout ID 保持可空以兼容开放状态。
 - `ExternalApiScope`、`ExternalApiCredential*` 类型固定系统管理的 scope、分页、CRUD 与一次性明文响应；列表不包含密文，`apiKey` 只允许由组件瞬时消费。
 - `WorkspaceView*` 类型表达工作区与引用目录的组合树、稳定节点身份、逻辑 locator、来源/只读/冲突和局部 warning；引用内容不复用可写 `FileTreeEntry.path` 作为唯一身份。`FileBinaryChunk` / `FileBinaryChunkRequest` 表达任意文件下载的原始字节分段与快照栅栏。
+- `WorkspaceGitCommitResult` 表达体验 Workspace 的 `LOCAL_COMMITTED` 本地提交结果；它不含 remote、push 或发布状态。
 - `AppSource*` 类型表达应用源码仓库、固定选择、远端树节点及 `{targetCommit,nodes}` 树快照、操作/服务器/步骤安全快照、打开结果、一次性进度 ticket 和 `snapshot/step/completed/failed` WebSocket envelope；下载状态严格为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。旧树节点数组类型继续保留，调用方可增量改用 `AppSourceTreeSnapshot`；响应新增信息保持可空/可选兼容，选中路径稳定使用 `{ path, type }`；该进度协议独立于 RunEvent，不向 RunEvent union 增加 wire name。
 
 ## 允许依赖

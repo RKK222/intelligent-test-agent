@@ -29,6 +29,7 @@ import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.ManagedAppli
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.PersonalWorkspacePublishPreviewResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRuntimeResponse;
+import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitCommitResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitConflictResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitMergeCompletionResponse;
 import java.time.Instant;
@@ -619,6 +620,31 @@ class ManagedWorkspaceControllerTest {
 
         verify(service).stageWorkspaceGitFiles("wks_123", List.of("src/Changed.java"), USER_ID);
         verify(service).unstageWorkspaceGitFiles("wks_123", List.of("src/Changed.java"), USER_ID);
+    }
+
+    @Test
+    void experienceWorkspaceCommitUsesWorkspaceEndpointWithoutPublish() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.commitExperienceWorkspace(
+                "wrk_exp_local", "docs: 更新说明", List.of("README.md"), USER_ID))
+                .thenReturn(new WorkspaceGitCommitResponse(
+                        "LOCAL_COMMITTED", "wrk_exp_local", "commit_local", "已本地提交"));
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/workspaces/wrk_exp_local/git-commit")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"commitMessage":"docs: 更新说明","files":["README.md"]}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("LOCAL_COMMITTED")
+                .jsonPath("$.data.headCommit").isEqualTo("commit_local");
+
+        verify(service).commitExperienceWorkspace(
+                "wrk_exp_local", "docs: 更新说明", List.of("README.md"), USER_ID);
     }
 
     @Test

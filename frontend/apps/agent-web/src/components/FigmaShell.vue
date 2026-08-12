@@ -176,6 +176,7 @@ const emit = defineEmits<{
   (e: "toggle-left-panel"): void;
   (e: "toggle-right-panel"): void;
   (e: "select-app", appId: string): void;
+  (e: "open-experience"): void;
   (e: "load-versions", templateId: string): void;
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
   (e: "open-app-source"): void;
@@ -299,6 +300,11 @@ function logout() {
 function selectApp(app: AppItem) {
   emit("select-app", app.id);
   closeAppMenu();
+}
+
+function openExperience() {
+  closeAppMenu();
+  emit("open-experience");
 }
 
 const availableWorkspaceTemplates = computed(() => props.appTemplates.filter((template) => template.enabled !== false));
@@ -2160,6 +2166,20 @@ function submitJoinApp() {
             <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': appMenuOpen }" />
           </button>
           <ul v-if="appMenuOpen" class="figma-app-menu-dropdown" role="listbox">
+            <li
+              :class="['figma-app-menu-item', workspaceKind === 'EXPERIENCE' && 'is-active']"
+              role="option"
+              :aria-selected="workspaceKind === 'EXPERIENCE'"
+              tabindex="0"
+              @mousedown.prevent="openExperience"
+            >
+              <div class="figma-app-menu-item-main">
+                <span class="figma-app-menu-item-name">平台体验</span>
+                <span class="figma-app-menu-item-desc">随时进入本服务器的共享体验工作区</span>
+              </div>
+              <span v-if="workspaceKind === 'EXPERIENCE'" class="figma-app-menu-item-check">✓</span>
+            </li>
+            <li class="figma-app-menu-divider" />
             <li
               v-for="app in apps"
               :key="app.id"

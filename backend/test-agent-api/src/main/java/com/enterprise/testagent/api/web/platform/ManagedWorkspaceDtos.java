@@ -26,6 +26,10 @@ final class ManagedWorkspaceDtos {
     record WorkspaceGitFilesRequest(List<String> files) {
     }
 
+    /** 体验工作区按运行态 Workspace 执行的纯本地 Git 提交。 */
+    record WorkspaceGitCommitRequest(String commitMessage, List<String> files) {
+    }
+
     record ResolveWorkspaceGitConflictRequest(String path, String resolution, String content) {
     }
 

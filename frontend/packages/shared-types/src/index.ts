@@ -3451,3 +3451,10 @@ export type WorkspaceGitMergeCompletion = {
   headCommit: string;
   applicationTargetCommit?: string | null;
 };
+
+export type WorkspaceGitCommitResult = {
+  status: "LOCAL_COMMITTED";
+  workspaceId: string;
+  headCommit: string;
+  message: string;
+};

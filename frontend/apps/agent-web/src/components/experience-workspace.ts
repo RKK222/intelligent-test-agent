@@ -7,9 +7,7 @@ export type ExperienceOfferInput = {
   offeredThisMount: boolean;
 };
 
-/**
- * 体验邀请只能依据一次成功的成员应用查询，加载中或失败都不能推断为“无所属应用”。
- */
+/** 无应用用户仍可收到一次自动邀请；存量用户通过常驻菜单主动进入，不被弹窗打断。 */
 export function experienceOfferDecision(input: ExperienceOfferInput): "WAIT" | "OFFER" | "SKIP" {
   if (!input.userId?.trim() || input.applicationsStatus !== "success") return "WAIT";
   if (input.offeredThisMount || input.applicationCount > 0) return "SKIP";
@@ -62,13 +60,11 @@ export function activateExperienceContinuation(
   return { ...current, phase: "ACTIVE" };
 }
 
-/** 确认框返回时再次校验代次和应用资格，迟到确认不得启动已取消的初始化。 */
+/** 确认框返回时再次校验代次，迟到确认不得启动已取消的初始化。 */
 export function experienceInitializationConfirmationIsCurrent(
   current: ExperienceContinuationState,
-  observedGeneration: number,
-  applicationCount: number
+  observedGeneration: number
 ): boolean {
   return current.generation === observedGeneration
-    && current.phase === "WAITING_FOR_READY"
-    && applicationCount === 0;
+    && current.phase === "WAITING_FOR_READY";
 }

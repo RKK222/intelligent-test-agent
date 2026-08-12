@@ -99,6 +99,41 @@ describe("backend-api", () => {
     expect(new Headers(init?.headers).get(LINUX_SERVER_ROUTE_HEADER)).toBe("linux-a");
   });
 
+  it("commits experience files locally without a push option", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        status: "LOCAL_COMMITTED",
+        workspaceId: "wrk_exp_shared",
+        headCommit: "abc123",
+        message: "体验工作区已建立本地提交"
+      }
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      routeLinuxServerId: () => "linux-a",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    const result = await client.commitExperienceWorkspace(
+      "wrk_exp_shared",
+      "docs: 更新说明",
+      ["README.md"]
+    );
+
+    expect(result.status).toBe("LOCAL_COMMITTED");
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url).toBe("http://api/api/internal/platform/workspace-management/workspaces/wrk_exp_shared/git-commit");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({
+      commitMessage: "docs: 更新说明",
+      files: ["README.md"]
+    }));
+    expect(new Headers(init?.headers).get(LINUX_SERVER_ROUTE_HEADER)).toBe("linux-a");
+  });
+
   it("uses the fixed API Key management routes and redacts revealed keys from raw exchanges", async () => {
     const exchanges: Array<Record<string, unknown>> = [];
     const apiKey = "taak_v1_must-not-enter-observer";

@@ -27,7 +27,7 @@ const emit = defineEmits<{
       <div class="experience-dialog-heading">
         <span class="experience-dialog-kicker">平台体验</span>
         <h2>现在体验平台功能吗？</h2>
-        <p>无需所属应用，直接打开体验工作区浏览文件、编辑内容并与 TestAgent 对话。</p>
+        <p>所有用户都可随时打开体验工作区，浏览文件、编辑内容并与 TestAgent 对话。</p>
       </div>
     </template>
 
@@ -35,14 +35,14 @@ const emit = defineEmits<{
       <UsersRound class="experience-shared-icon" :stroke-width="1.7" aria-hidden="true" />
       <div>
         <strong>这是同一台服务器上的多人共享目录</strong>
-        <span>其他体验用户可能同时修改相同文件，本地 Git 变更仅供查看。</span>
+        <span>其他体验用户可能同时修改相同文件，Git 提交也由同机用户共享。</span>
       </div>
     </div>
 
     <div class="experience-dialog-facts">
       <div>
         <GitBranch :stroke-width="1.6" aria-hidden="true" />
-        <span>平台不会创建远端仓库，也不会自动重置或清理目录。</span>
+        <span>平台只初始化本地 Git，可暂存和提交，不提供远程 push，也不会自动重置或清理目录。</span>
       </div>
       <div class="is-warning">
         <AlertTriangle :stroke-width="1.7" aria-hidden="true" />

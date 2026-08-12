@@ -9370,3 +9370,30 @@
 
 - Mem0 运行能力、入口与部署物已从本次提交范围撤销；历史 Flyway 资源和数据保持可恢复、可升级，后续代码及近期部署内容不随误合并回退消失。
 - 提交前已回顾全部 `.agents/session-log*.md`；共享工作区中并行出现的体验工作区、Git 提交和 migration 改动完整保留在未暂存区，不纳入本次提交。未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-12 - 平台体验区改为全员常驻并提供无 push 的本地 Git
+
+### Why
+
+- 用户最终确认体验区不再限制是否有应用或是否首次进入；每个后端服务器只维护本机一套共享目录，用户使用其 OpenCode 进程所在服务器的目录，后续修改不做跨服务器同步或启动重置。
+- 体验目录必须在每次后端启动时幂等保证存在 `.git` 和一个初始文件；Git 可暂存、回退、解决冲突和 commit，但平台不得提供 push。
+
+### What
+
+- 移除应用成员资格门禁并增加所有用户可见的常驻“平台体验”入口；加入应用不再退出体验，显式切换应用时才关闭体验文件连接。
+- 新增启动 Runner 和通用本地仓库初始化：默认目录为 `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience`，缺仓库时 `git init -b main` 并提交 `README.md`，已有 HEAD、文件和用户改动不覆盖、不重置、不创建 remote。
+- 体验区复用既有 Git diff、stage/unstage、discard 和冲突程序，新增仅提交指定路径的本地 commit API；前端隐藏 push/发布入口，后端不新增体验 push 接口，也不进入个人 worktree publish 链路。
+- 新增 `V20260812144051__common_parameters_default_experience_workspace.sql`，只把历史 `UNCONFIGURED` 默认值迁移为服务器本地目录，保留管理员自定义值；同步 HTTP API、事件流、数据库、部署、安全、模块图和各模块 README/PACKAGE。
+
+### How
+
+- 后端定向 Reactor 回归通过：真实 Git 17、workspace 服务 97、API 25、启动 Runner 1、迁移种子 7；H2 种子回归 8/8。真实 PostgreSQL 体验仓储 3/3，Flyway 当前主链、已执行旧体验历史和未知 checksum 失败关闭 3/3。
+- 前端 agent-web typecheck 通过；backend-api/体验状态/文件树/Git 面板 Vitest 180/180；独立端口 Chromium 验证“已有应用用户随时进入”和体验文件/对话/本地 Git 无 push 两个场景 2/2。
+- 使用 JDK 25、`.env.test` / `test` profile 完整构建并重启两次；因 `.env.test` 缺少 `WORKFLOW_DEV_REDIS_PASSWORD`，按研发规范显式使用 `--without-workflow`，未修改环境文件。backend health/readiness、frontend 3000、登录 CORS 和 manager WebSocket 均通过。
+- 实际目录已验证 `.git`、`README.md`、`main` 和初始提交存在，remote 数为 0、状态 clean；第二次启动前后 HEAD 与 README SHA-256 不变。提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记。
+
+### Result
+
+- 任意已登录用户可随时进入其 OpenCode 所在服务器的共享体验区；两台服务器按同一默认内容各自初始化，后续独立共享和修改。
+- 平台层面支持本地 Git commit 及除 push/发布外的既有 Git 操作。该边界不是 OS shell 沙箱：若用户通过开放的终端自行配置 remote，需由企业网络/主机策略继续约束外连。
+- 本次新增向后兼容 HTTP API 和前向 Flyway 数据迁移，不新增 RunEvent 类型或表结构，不修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。

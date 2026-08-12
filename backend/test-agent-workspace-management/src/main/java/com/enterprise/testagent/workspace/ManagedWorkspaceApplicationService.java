@@ -1592,14 +1592,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             List<String> files,
             UserId userId,
             String traceId) {
-        PersonalGitContext personal = personalGitContext(workspaceId, userId);
-        WorkspaceGitContext context = workspaceGitContext(personal.repoRoot(), personal.workspaceRoot(), personal.privateKey());
+        MutableWorkspaceGitContext mutable = mutableWorkspaceGitContext(workspaceId, userId);
+        WorkspaceGitContext context = workspaceGitContext(
+                mutable.repoRoot(), mutable.workspaceRoot(), mutable.privateKey());
         Path repoRoot = context.repoRoot();
         Path workspaceRoot = context.workspaceRoot();
         List<String> gitFiles = repoRelativeFiles(repoRoot, workspaceRoot, normalizeFiles(files));
         try {
             gitWorkspaceService.discardFiles(repoRoot, gitFiles, context.privateKey());
-            retryLatestFeatureMerge(personal.personal(), userId, traceId);
+            if (mutable.personal() != null) {
+                retryLatestFeatureMerge(mutable.personal(), userId, traceId);
+            }
         } catch (PlatformException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -1628,9 +1631,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             List<String> files,
             UserId userId,
             boolean stage) {
-        // 应用版本副本是发布端只读输入，普通 Git index 操作只能发生在个人 worktree。
-        PersonalGitContext personal = personalGitContext(workspaceId, userId);
-        WorkspaceGitContext context = workspaceGitContext(personal.repoRoot(), personal.workspaceRoot(), personal.privateKey());
+        // 应用版本副本仍是发布端只读输入；可变 Git 操作只允许个人 worktree 或本机体验仓库。
+        MutableWorkspaceGitContext mutable = mutableWorkspaceGitContext(workspaceId, userId);
+        WorkspaceGitContext context = workspaceGitContext(
+                mutable.repoRoot(), mutable.workspaceRoot(), mutable.privateKey());
         List<String> displayFiles = normalizeFiles(files);
         List<String> gitFiles = repoRelativeFiles(context.repoRoot(), context.workspaceRoot(), displayFiles);
         Set<String> conflicts = gitWorkspaceService.parseStatusPorcelain(
@@ -1709,6 +1713,32 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return new WorkspaceGitContext(repoRoot, workspaceRoot, privateKey, displayPathPrefix, pathspec);
     }
 
+    /** 体验仓库和个人 worktree 共用本地 Git 变更程序，应用版本副本仍不允许直接修改。 */
+    private MutableWorkspaceGitContext mutableWorkspaceGitContext(String workspaceId, UserId userId) {
+        Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
+        if (experienceWorkspaceAccessAuthorizer != null
+                && experienceWorkspaceAccessAuthorizer.isExperienceWorkspace(workspace.workspaceId())) {
+            Workspace current = experienceWorkspaceAccessAuthorizer.requireAccess(userId, workspace.workspaceId());
+            Path root = Path.of(current.rootPath()).toAbsolutePath().normalize();
+            return new MutableWorkspaceGitContext(root, root, null, null, true);
+        }
+        PersonalWorkspace personal = managedWorkspaceRepository
+                .findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "个人工作区不存在",
+                        Map.of("workspaceId", workspaceId)));
+        ensurePersonalOwner(personal, userId);
+        ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
+        CodeRepository repository = existingRepository(version.repositoryId());
+        return new MutableWorkspaceGitContext(
+                pathResolver.resolve(personal.repoRootPath()),
+                pathResolver.resolve(personal.workspaceRootPath()),
+                privateKeyFor(repository, userId),
+                personal,
+                false);
+    }
+
     /**
      * 读取个人 worktree 中单个冲突文件的 base/current/incoming 三方内容。
      */
@@ -1716,7 +1746,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String workspaceId,
             String path,
             UserId userId) {
-        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        MutableWorkspaceGitContext context = mutableWorkspaceGitContext(workspaceId, userId);
         String displayPath = normalizeFiles(List.of(path)).get(0);
         String gitFile = repoRelativeFiles(
                 context.repoRoot(),
@@ -1749,7 +1779,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String resolution,
             String content,
             UserId userId) {
-        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        MutableWorkspaceGitContext context = mutableWorkspaceGitContext(workspaceId, userId);
         String displayPath = normalizeFiles(List.of(path)).get(0);
         String gitFile = repoRelativeFiles(
                 context.repoRoot(),
@@ -1800,7 +1830,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
      * 取消个人 worktree 当前未完成的 merge。
      */
     public void abortWorkspaceGitConflict(String workspaceId, UserId userId) {
-        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        MutableWorkspaceGitContext context = mutableWorkspaceGitContext(workspaceId, userId);
         if (!gitWorkspaceService.isMergeInProgress(context.repoRoot())) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前没有可取消的 Git 合并", Map.of("workspaceId", workspaceId));
         }
@@ -1815,7 +1845,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String workspaceId,
             String resolution,
             UserId userId) {
-        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        MutableWorkspaceGitContext context = mutableWorkspaceGitContext(workspaceId, userId);
         if (!gitWorkspaceService.isMergeInProgress(context.repoRoot())) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前没有可解决的 Git 合并", Map.of("workspaceId", workspaceId));
         }
@@ -1843,7 +1873,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String workspaceId,
             UserId userId,
             String traceId) {
-        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        MutableWorkspaceGitContext context = mutableWorkspaceGitContext(workspaceId, userId);
         if (!gitWorkspaceService.isMergeInProgress(context.repoRoot())) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
@@ -1857,41 +1887,64 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     "仍有未解决的 Git 冲突",
                     Map.of("files", conflicts));
         }
-        ApplicationWorkspaceVersion version = existingVersion(context.personal().versionId());
-        String targetCommit = version.targetCommitHash();
-        String shortCommit = targetCommit == null
-                ? "unknown"
-                : targetCommit.substring(0, Math.min(12, targetCommit.length()));
+        String targetCommit = context.personal() == null
+                ? null
+                : existingVersion(context.personal().versionId()).targetCommitHash();
+        String commitMessage = context.experience()
+                ? "完成体验工作区本地合并"
+                : "合并应用 feature 更新 " + (targetCommit == null
+                        ? "unknown"
+                        : targetCommit.substring(0, Math.min(12, targetCommit.length())));
         gitWorkspaceService.commitStaged(
                 context.repoRoot(),
-                "合并应用 feature 更新 " + shortCommit,
+                commitMessage,
                 context.privateKey(),
                 gitCommitIdentity(userId));
         String headCommit = gitWorkspaceService.headCommit(context.repoRoot());
         // 若这是应用 Agent/Skill rollout 等待的最后一个冲突，立即尝试推进全局 dispose，
         // 同时保留 5 秒持久化定时补偿作为故障兜底。
-        synchronizeLocalApplicationConfigRollout();
+        if (!context.experience()) {
+            synchronizeLocalApplicationConfigRollout();
+        }
         return new ManagedWorkspaceResponses.WorkspaceGitMergeCompletionResponse(
                 "MERGED",
                 headCommit,
                 targetCommit);
     }
 
-    private PersonalGitContext personalGitContext(String workspaceId, UserId userId) {
-        Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
-        PersonalWorkspace personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId())
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.NOT_FOUND,
-                        "个人工作区不存在",
-                        Map.of("workspaceId", workspaceId)));
-        ensurePersonalOwner(personal, userId);
-        ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
-        CodeRepository repository = existingRepository(version.repositoryId());
-        return new PersonalGitContext(
-                pathResolver.resolve(personal.repoRootPath()),
-                pathResolver.resolve(personal.workspaceRootPath()),
-                privateKeyFor(repository, userId),
-                personal);
+    /**
+     * 体验工作区只建立本机提交，不读取 remote，也不进入个人 worktree 发布程序。
+     * 指定路径提交不会夹带共享 index 中其他用户已暂存的文件。
+     */
+    public ManagedWorkspaceResponses.WorkspaceGitCommitResponse commitExperienceWorkspace(
+            String workspaceId,
+            String commitMessage,
+            List<String> files,
+            UserId userId) {
+        MutableWorkspaceGitContext context = mutableWorkspaceGitContext(workspaceId, userId);
+        if (!context.experience()) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "该提交入口仅用于体验工作区",
+                    Map.of("workspaceId", workspaceId));
+        }
+        List<String> gitFiles = repoRelativeFiles(
+                context.repoRoot(), context.workspaceRoot(), normalizeFiles(files));
+        if (gitWorkspaceService.isMergeInProgress(context.repoRoot())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "体验工作区存在未完成合并，不能普通提交", Map.of());
+        }
+        gitWorkspaceService.commitFilesOnly(
+                context.repoRoot(),
+                gitFiles,
+                requireText(commitMessage, "提交说明不能为空", "commitMessage"),
+                null,
+                gitCommitIdentity(userId));
+        String headCommit = gitWorkspaceService.headCommit(context.repoRoot());
+        return new ManagedWorkspaceResponses.WorkspaceGitCommitResponse(
+                "LOCAL_COMMITTED",
+                workspaceId,
+                headCommit,
+                "体验工作区已建立本地提交");
     }
 
     private String conflictRawStatus(Path repoRoot, String gitFile) {
@@ -1935,11 +1988,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return current.endsWith("\n") ? current + incoming : current + "\n" + incoming;
     }
 
-    private record PersonalGitContext(
+    private record MutableWorkspaceGitContext(
             Path repoRoot,
             Path workspaceRoot,
             String privateKey,
-            PersonalWorkspace personal) {
+            PersonalWorkspace personal,
+            boolean experience) {
     }
 
     private record WorkspaceGitContext(

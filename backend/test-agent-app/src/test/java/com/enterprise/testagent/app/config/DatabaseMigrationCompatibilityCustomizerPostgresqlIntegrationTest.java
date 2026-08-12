@@ -1073,6 +1073,14 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                         """)
                 .query(Long.class)
                 .single();
+        String parameterValue = jdbc.sql("""
+                        select parameter_value
+                        from common_parameters
+                        where parameter_english = 'OPENCODE_EXPERIENCE_WORKSPACE_DIR'
+                          and platform = 'all'
+                        """)
+                .query(String.class)
+                .single();
         Long indexCount = jdbc.sql("""
                         select count(*)
                         from pg_indexes
@@ -1083,6 +1091,7 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .single();
         assertThat(tableCount).isEqualTo(1L);
         assertThat(parameterCount).isEqualTo(1L);
+        assertThat(parameterValue).isEqualTo("${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience");
         assertThat(indexCount).isEqualTo(1L);
     }
 

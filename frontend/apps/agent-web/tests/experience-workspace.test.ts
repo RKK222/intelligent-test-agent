@@ -8,10 +8,11 @@ import {
   requestExperienceContinuation
 } from "../src/components/experience-workspace";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
+import figmaShellSource from "../src/components/FigmaShell.vue?raw";
 import firstLoginGuideSource from "../src/components/FirstLoginGuide.vue?raw";
 
 describe("experience workspace flow", () => {
-  it("offers once only after both the user and an empty application list load successfully", () => {
+  it("keeps the automatic prompt for app-less users without making it the access gate", () => {
     const eligible = {
       userId: "usr_no_app",
       applicationsStatus: "success" as const,
@@ -22,11 +23,7 @@ describe("experience workspace flow", () => {
     expect(experienceOfferDecision(eligible)).toBe("OFFER");
     expect(experienceOfferDecision({ ...eligible, offeredThisMount: true })).toBe("SKIP");
     expect(experienceOfferDecision({ ...eligible, applicationCount: 1 })).toBe("SKIP");
-    const failedQuery = { ...eligible, applicationsStatus: "error" as const };
-    expect(experienceOfferDecision(failedQuery)).toBe("WAIT");
-    // 首次查询失败不能消耗本次挂载机会，后续重试成功且仍为空时应正常询问。
-    expect(experienceOfferDecision({ ...failedQuery, applicationsStatus: "success" })).toBe("OFFER");
-    expect(experienceOfferDecision({ ...eligible, applicationsStatus: "pending" })).toBe("WAIT");
+    expect(experienceOfferDecision({ ...eligible, applicationsStatus: "error" })).toBe("WAIT");
     expect(experienceOfferDecision({ ...eligible, userId: "" })).toBe("WAIT");
   });
 
@@ -42,16 +39,18 @@ describe("experience workspace flow", () => {
     expect(cancelled.generation).toBeGreaterThan(requested.generation);
     expect(cancelled.phase).toBe("IDLE");
     expect(beginExperienceWorkspaceOpen(cancelled, requested.generation).shouldOpen).toBe(false);
-    expect(experienceInitializationConfirmationIsCurrent(requested, requested.generation, 0)).toBe(true);
-    expect(experienceInitializationConfirmationIsCurrent(cancelled, requested.generation, 0)).toBe(false);
-    expect(experienceInitializationConfirmationIsCurrent(requested, requested.generation, 1)).toBe(false);
+    expect(experienceInitializationConfirmationIsCurrent(requested, requested.generation)).toBe(true);
+    expect(experienceInitializationConfirmationIsCurrent(cancelled, requested.generation)).toBe(false);
   });
 
-  it("keeps the experience prompt ahead of onboarding and cancels continuation on every authority loss", () => {
+  it("keeps a persistent experience entry and only cancels continuation on real flow loss", () => {
     expect(firstLoginGuideSource).toContain("enabled?: boolean");
     expect(agentWorkbenchSource).toContain(':enabled="firstLoginGuideEnabled"');
     expect(agentWorkbenchSource).toContain("cancelExperienceWorkspaceFlow(\"UNMOUNT\")");
-    expect(agentWorkbenchSource).toContain("cancelExperienceWorkspaceFlow(\"APPLICATION_JOINED\")");
+    expect(agentWorkbenchSource).toContain('@open-experience="openExperienceWorkspaceDialog"');
+    expect(figmaShellSource).toContain("随时进入本服务器的共享体验工作区");
+    expect(figmaShellSource).toContain('emit("open-experience")');
+    expect(agentWorkbenchSource).not.toContain("cancelExperienceWorkspaceFlow(\"APPLICATION_JOINED\")");
     expect(agentWorkbenchSource).toContain("cancelExperienceWorkspaceFlow(\"PROCESS_FAILED\")");
     expect(agentWorkbenchSource).toContain("beginExperienceWorkspaceOpen(");
     expect(agentWorkbenchSource).toContain("isCurrent: () => experienceInitializationConfirmationIsCurrent(");

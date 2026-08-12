@@ -215,6 +215,7 @@ import type {
   WorkspaceBackendServer,
   WorkspaceCreateOperation,
   WorkspaceDiff,
+  WorkspaceGitCommitResult,
   WorkspaceGitDiff,
   WorkspaceGitMergeCompletion,
   WorkspaceGitConflict,
@@ -1220,6 +1221,12 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-unstage`,
         { method: "POST", body: JSON.stringify({ files }) }
+      ),
+    /** 体验工作区只建立本服务器 Git 提交，不进入任何发布或 push 程序。 */
+    commitExperienceWorkspace: (workspaceId: string, commitMessage: string, files: string[]) =>
+      routedRequest<WorkspaceGitCommitResult>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-commit`,
+        { method: "POST", body: JSON.stringify({ commitMessage, files }) }
       ),
     getWorkspaceGitConflict: (workspaceId: string, path: string) =>
       routedRequest<WorkspaceGitConflict>(

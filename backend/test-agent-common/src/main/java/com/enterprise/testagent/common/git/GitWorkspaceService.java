@@ -8,6 +8,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -250,6 +251,90 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 幂等初始化一个只在本地使用的 Git 仓库。
+     *
+     * <p>已有仓库和已有提交均不会被重置；仅当仓库还没有 HEAD 时补齐初始文件并建立基线提交。
+     * 初始化过程不创建 remote，因此不会引入任何远程推送能力。
+     */
+    public void initializeLocalRepository(
+            Path repoRoot,
+            String initialFile,
+            String initialContent,
+            GitCommitIdentity identity) {
+        Objects.requireNonNull(repoRoot, "repoRoot must not be null");
+        Objects.requireNonNull(initialFile, "initialFile must not be null");
+        Objects.requireNonNull(initialContent, "initialContent must not be null");
+        Objects.requireNonNull(identity, "identity must not be null");
+        Path normalizedRoot = repoRoot.toAbsolutePath().normalize();
+        Path gitMetadata = normalizedRoot.resolve(".git");
+        try {
+            Files.createDirectories(normalizedRoot);
+            if (Files.exists(gitMetadata, LinkOption.NOFOLLOW_LINKS)
+                    && (!Files.isDirectory(gitMetadata, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(gitMetadata))) {
+                throw new PlatformException(
+                        com.enterprise.testagent.common.error.ErrorCode.GIT_UNAVAILABLE,
+                        "本地 Git 元数据路径非法");
+            }
+            if (!Files.exists(gitMetadata, LinkOption.NOFOLLOW_LINKS)) {
+                executor.execute(
+                        List.of("git", "-C", normalizedRoot.toString(), "init", "-b", "main"),
+                        null,
+                        DEFAULT_TIMEOUT);
+            }
+            if (!isGitWorkTreeRoot(normalizedRoot)) {
+                throw new PlatformException(
+                        com.enterprise.testagent.common.error.ErrorCode.GIT_UNAVAILABLE,
+                        "本地 Git 仓库初始化失败");
+            }
+            if (hasHeadCommit(normalizedRoot)) {
+                return;
+            }
+            Path seed = normalizedRoot.resolve(initialFile).normalize();
+            if (!seed.startsWith(normalizedRoot) || seed.equals(normalizedRoot)) {
+                throw new IllegalArgumentException("initialFile must stay inside repoRoot");
+            }
+            if (!Files.exists(seed, LinkOption.NOFOLLOW_LINKS)) {
+                Path parent = seed.getParent();
+                if (parent != null) {
+                    Files.createDirectories(parent);
+                }
+                Files.writeString(
+                        seed,
+                        initialContent,
+                        StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE_NEW,
+                        StandardOpenOption.WRITE);
+            }
+            String relativeSeed = normalizedRoot.relativize(seed).toString().replace('\\', '/');
+            stageFiles(normalizedRoot, List.of(relativeSeed), null);
+            commitStaged(normalizedRoot, "初始化体验工作区", null, identity);
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.GIT_UNAVAILABLE,
+                    "本地 Git 仓库初始化失败",
+                    Map.of(),
+                    exception);
+        }
+    }
+
+    /** 仓库是否已经建立 HEAD；使用 status 的初始分支标记，避免把空仓库记成 Git 失败告警。 */
+    public boolean hasHeadCommit(Path repoRoot) {
+        GitCommandResult status = executor.execute(
+                List.of(
+                        "git", "--no-optional-locks", "-C", repoRoot.toString(),
+                        "status", "--porcelain=v2", "--branch", "--untracked-files=no"),
+                null,
+                DEFAULT_TIMEOUT);
+        return status.stdoutText().lines()
+                .filter(line -> line.startsWith("# branch.oid "))
+                .map(line -> line.substring("# branch.oid ".length()).trim())
+                .anyMatch(oid -> !"(initial)".equals(oid));
+    }
+
+    /**
      * 读取本地仓库当前分支，用于接管已有磁盘目录时校验分支是否符合记录。
      */
     public String currentBranch(Path repoRoot) {
@@ -381,6 +466,25 @@ public class GitWorkspaceService {
                 withCommitIdentity(List.of("git", "-C", repoRoot.toString(), "commit", "-m", message), identity),
                 privateKey,
                 DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 只提交指定路径的当前工作树内容，不把共享 index 中其他人已暂存的文件带入本次提交。
+     */
+    public void commitFilesOnly(
+            Path repoRoot,
+            List<String> files,
+            String message,
+            String privateKey,
+            GitCommitIdentity identity) {
+        Objects.requireNonNull(identity, "identity must not be null");
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        ArrayList<String> command = new ArrayList<>(List.of(
+                "git", "-C", repoRoot.toString(), "commit", "--only", "-m", message, "--"));
+        command.addAll(files);
+        executor.execute(withCommitIdentity(List.copyOf(command), identity), privateKey, DEFAULT_TIMEOUT);
     }
 
     /**

@@ -32,6 +32,7 @@ const apiClientMock = vi.hoisted(() => ({
   commitPublicAgentConfig: vi.fn(),
   commitWorkspaceAgentConfig: vi.fn(),
   commitPersonalWorkspace: vi.fn(),
+  commitExperienceWorkspace: vi.fn(),
   publishPublicAgentConfig: vi.fn(),
   publishWorkspaceAgentConfig: vi.fn(),
   publishPersonalWorkspace: vi.fn(),
@@ -100,6 +101,12 @@ describe("GitChangesPanel", () => {
       message: "个人 worktree 已提交",
       remotePushed: false,
       headCommit: "personal_head"
+    });
+    apiClientMock.commitExperienceWorkspace.mockResolvedValue({
+      status: "LOCAL_COMMITTED",
+      workspaceId: "wrk_exp_local",
+      headCommit: "experience_head",
+      message: "体验工作区已建立本地提交"
     });
     apiClientMock.publishPersonalWorkspace.mockResolvedValue({
       status: "PUBLISHED",
@@ -1800,6 +1807,40 @@ describe("GitChangesPanel", () => {
     expect(view.getAllByText("SUCCEEDED")).toHaveLength(2);
     expect(view.getAllByRole("button", { name: "关闭" })
       .every((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
+  });
+
+  it("commits experience changes locally and never exposes push", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "README.md", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_exp_local",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canMutateGit: true,
+        localOnlyGit: true,
+        includeAgentScopes: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("README.md")).toBeTruthy();
+    expect(view.queryByRole("button", { name: "提交并推送" })).toBeNull();
+    await fireEvent.update(
+      view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."),
+      "docs: 更新体验说明"
+    );
+    await fireEvent.click(view.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => expect(apiClientMock.commitExperienceWorkspace).toHaveBeenCalledWith(
+      "wrk_exp_local",
+      "docs: 更新体验说明",
+      ["README.md"]
+    ));
+    expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
   });
 
   it("keeps failed application Agent files pending and retries without another local commit", async () => {
