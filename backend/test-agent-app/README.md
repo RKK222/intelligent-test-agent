@@ -79,6 +79,9 @@
 - `SpringBeanConstructorWiringTest` 扫描最终应用 `com.enterprise.testagent` 下的全部生产 Spring 组件，禁止多构造器 Bean 在既无显式注入构造器、又无无参构造器的情况下进入发布包，避免运行时回退到不存在的无参构造器。
 - `LobehubDevelopmentBootstrapRunnerTest` 使用真实内存参数仓储和通用参数管理服务，覆盖占位值替换、审计顺序、
   启用开关最后写入、owner/审计异常失败关闭、启动失败补偿模式，以及非回环 PostgreSQL 零写入拒绝。
+- `ConversationWorkspaceE2eDataFixtureTest` 仅由 `tools/seed-conversation-workspace-e2e-data.sh` 显式启用，复用既有
+  Repository 与 Redis Run 数据面，为本地测试用户幂等写入公开版本库配置、应用版本/个人工作空间、需求与详细设计材料，
+  以及普通、Skill、Agent、permission、subagent 等可见历史会话；不通过 Flyway 发布演示数据。
 
 ## 允许依赖
 

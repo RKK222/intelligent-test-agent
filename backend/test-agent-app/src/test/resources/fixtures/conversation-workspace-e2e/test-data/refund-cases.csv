@@ -1,0 +1,6 @@
+case_id,category,title,test_data,expected
+REFUND-001,正常,小额退款自动通过,"amount=88.00",状态进入PROCESSING并返回traceId
+REFUND-002,边界,退款金额为最小正数,"amount=0.01",请求受理且金额精度正确
+REFUND-003,幂等,重复提交相同幂等键,"idempotencyKey=refund-order-10001-001",返回同一退款单且渠道只调用一次
+REFUND-004,权限,读取其他用户退款单,"actor=other-user",返回FORBIDDEN且不泄露退款详情
+REFUND-005,恢复,支付渠道超时,"gateway=timeout",保持PROCESSING并由补偿任务查询最终状态
