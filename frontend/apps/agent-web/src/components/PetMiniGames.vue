@@ -33,6 +33,7 @@ type PinballBall = PinballPoint & {
   vy: number;
   previousX: number;
   previousY: number;
+  inLaunchLane: boolean;
   cooldowns: Record<string, number>;
 };
 type PinballBumper = PinballPoint & { radius: number; score: number; tone: "rose" | "teal" | "gold" };
@@ -579,10 +580,12 @@ const PINBALL_BALL_RADIUS = 6;
 const PINBALL_FRAME_MS = 16;
 // 420px 高球台需要明显的向下坡度：静止球约 0.8 秒穿过半场，甜区发射仍可越过顶部判定线。
 const PINBALL_GRAVITY = 680;
-const PINBALL_MAX_SPEED = 900;
-const PINBALL_LAUNCH_BASE_SPEED = 620;
-const PINBALL_LAUNCH_CHARGE_SPEED = 3;
-const PINBALL_AUTO_SERVE_SPEED = 760;
+const PINBALL_MAX_SPEED = 950;
+const PINBALL_LAUNCH_BASE_SPEED = 720;
+const PINBALL_LAUNCH_CHARGE_SPEED = 2.2;
+const PINBALL_AUTO_SERVE_SPEED = 820;
+const PINBALL_LAUNCH_RAIL_X = 270;
+const PINBALL_LAUNCH_GATE_X = PINBALL_LAUNCH_RAIL_X - PINBALL_BALL_RADIUS - 2;
 const PINBALL_FLIPPER_LENGTH = 62;
 const PINBALL_SKILL_SHOT_MIN = 52;
 const PINBALL_SKILL_SHOT_MAX = 82;
@@ -611,6 +614,7 @@ function createPinballBall(x = 289, y = 385, vx = 0, vy = 0): PinballBall {
     vy,
     previousX: x,
     previousY: y,
+    inLaunchLane: x > PINBALL_LAUNCH_RAIL_X,
     cooldowns: {},
   };
 }
@@ -918,7 +922,7 @@ function startPinballMultiball(ball: PinballBall) {
 
 function resolvePinballPlayfield(ball: PinballBall) {
   // 右侧发射导轨、两侧回球导轨和底部弹射三角共同形成主要物理边界。
-  resolvePinballSegment(ball, { x: 270, y: 76 }, { x: 270, y: 342 }, 2, 0.8);
+  resolvePinballSegment(ball, { x: PINBALL_LAUNCH_RAIL_X, y: 76 }, { x: PINBALL_LAUNCH_RAIL_X, y: 342 }, 2, 0.8);
   resolvePinballSegment(ball, { x: 30, y: 286 }, { x: 76, y: 348 }, 3, 0.78);
   resolvePinballSegment(ball, { x: 258, y: 286 }, { x: 240, y: 348 }, 3, 0.78);
   pinballBumpers.forEach((bumper, index) => resolvePinballBumper(ball, bumper, index));
@@ -1043,8 +1047,20 @@ function stepPinball() {
     }
     if (ball.y < PINBALL_BALL_RADIUS + 8) {
       ball.y = PINBALL_BALL_RADIUS + 8;
-      ball.vy = Math.abs(ball.vy) * 0.86;
-      if (ball.x > 270) ball.vx = -115;
+      if (ball.inLaunchLane && ball.x > PINBALL_LAUNCH_RAIL_X) {
+        // 发射槽顶部是弧形回转导轨：首次到顶后把弹珠送过单向门，而不是垂直弹回起点。
+        ball.inLaunchLane = false;
+        ball.x = PINBALL_LAUNCH_GATE_X - 4;
+        ball.vx = -240;
+        ball.vy = Math.max(120, Math.abs(ball.vy) * 0.32);
+      } else {
+        ball.vy = Math.abs(ball.vy) * 0.86;
+      }
+    }
+    if (!ball.inLaunchLane && ball.y < 76 && ball.x > PINBALL_LAUNCH_GATE_X) {
+      // 单向门只允许发射出球；主球台内的球从顶部回弹时不能重新掉进右侧发射槽。
+      ball.x = PINBALL_LAUNCH_GATE_X;
+      ball.vx = -Math.max(140, Math.abs(ball.vx) * 0.86);
     }
 
     if (pinballStatus.value === "running") {

@@ -141,6 +141,22 @@ describe("PetMiniGames", () => {
     expect(wrapper.findAll('.pet-pinball-lives > span:not(.is-spent)')).toHaveLength(3);
     expect(wrapper.text()).toContain("按住发射杆蓄力");
     expect(wrapper.text()).toContain("任务 1 · 点亮 A / B / C 翻滚灯");
+    const pinballSetup = (wrapper.vm as unknown as {
+      $: { setupState: {
+        pinballRolloverLights: boolean[];
+        pinballDropTargets: boolean[];
+        pinballScore: number;
+        pinballBalls: Array<{
+          x: number;
+          y: number;
+          previousX: number;
+          previousY: number;
+          vx: number;
+          vy: number;
+          inLaunchLane: boolean;
+        }>;
+      } };
+    }).$.setupState;
 
     const ballBeforeLaunch = wrapper.get('.pet-pinball-ball').attributes("style");
     const launcher = wrapper.get('[aria-label="按住蓄力，松开发射弹珠"]');
@@ -156,15 +172,21 @@ describe("PetMiniGames", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(wrapper.get('[data-testid="pet-pinball-score"]').text()).not.toContain("00000");
     expect(wrapper.findAll('.pet-pinball-feature-strip strong')[0]!.text()).toBe("×2");
+    expect(pinballSetup.pinballBalls[0]!.x).toBeLessThan(270);
+    expect(pinballSetup.pinballBalls[0]!.inLaunchLane).toBe(false);
+    Object.assign(pinballSetup.pinballBalls[0]!, {
+      x: 265,
+      y: 60,
+      previousX: 262,
+      previousY: 62,
+      vx: 180,
+      vy: -80,
+      inLaunchLane: false,
+    });
+    await vi.advanceTimersByTimeAsync(16);
+    expect(pinballSetup.pinballBalls[0]!.x).toBeLessThanOrEqual(262);
+    expect(pinballSetup.pinballBalls[0]!.vx).toBeLessThan(0);
 
-    const pinballSetup = (wrapper.vm as unknown as {
-      $: { setupState: {
-        pinballRolloverLights: boolean[];
-        pinballDropTargets: boolean[];
-        pinballScore: number;
-        pinballBalls: Array<{ x: number; y: number; previousX: number; previousY: number; vx: number; vy: number }>;
-      } };
-    }).$.setupState;
     Object.assign(pinballSetup.pinballBalls[0]!, { x: 160, y: 190, previousX: 160, previousY: 190, vx: 0, vy: 0 });
     const gravityStartY = pinballSetup.pinballBalls[0]!.y;
     await vi.advanceTimersByTimeAsync(160);

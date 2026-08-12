@@ -9227,6 +9227,8 @@ test("pet mini games support tetris, minesweeper, sudoku, snake and pinball inte
   const pinballBall = pinball.locator(".pet-pinball-ball").first();
   await page.waitForTimeout(1200);
   const fallingStartY = await pinballBall.evaluate((element) => Number.parseFloat(getComputedStyle(element).top));
+  const mainTableX = await pinballBall.evaluate((element) => Number.parseFloat(getComputedStyle(element).left));
+  expect(mainTableX).toBeLessThan(270);
   await page.waitForTimeout(200);
   const fallingEndY = await pinballBall.evaluate((element) => Number.parseFloat(getComputedStyle(element).top));
   expect(fallingEndY).toBeGreaterThan(fallingStartY + 10);
