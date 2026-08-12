@@ -33,6 +33,17 @@ const repositories: CodeRepositoryConfig[] = [
   }
 ];
 
+const automationRepository: CodeRepositoryConfig = {
+  ...repositories[1],
+  repositoryId: "repo_automation",
+  gitUrl: "https://gitee.com/mimo/automation.git",
+  name: "自动化代码库",
+  englishName: "automation",
+  repositoryType: "AUTOMATION_CODE_REPOSITORY",
+  repositoryTypeLabel: "自动化代码库",
+  standard: false
+};
+
 const repositoryTree: RepositoryTreeResponse = {
   nodes: [
     {
@@ -84,6 +95,7 @@ function createApi(): Partial<BackendApiClient> {
     listRepositories: vi.fn().mockResolvedValue({ items: repositories, page: 1, size: 100, total: repositories.length }),
     listRepositoryTypes: vi.fn().mockResolvedValue([
       { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" },
+      { typeCode: "AUTOMATION_CODE_REPOSITORY", typeLabel: "自动化代码库" },
       { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
       { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
     ]),
@@ -482,7 +494,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(within(branchSelect).queryByText("feature_testagent_20260707")).toBeNull();
   });
 
-  it("only offers linked test work repositories when creating a workspace", async () => {
+  it("only offers linked test work and automation repositories when creating a workspace", async () => {
     const api = createApi();
     const explicitlyNonTestStandardRepository: CodeRepositoryConfig = {
       ...repositories[1],
@@ -498,9 +510,18 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
       repositoryTypeLabel: null,
       standard: true
     };
+    const applicationAssetRepository: CodeRepositoryConfig = {
+      ...repositories[1],
+      repositoryId: "repo_asset",
+      name: "应用资产库",
+      repositoryType: "APPLICATION_ASSET_REPOSITORY",
+      repositoryTypeLabel: "应用资产库"
+    };
     api.listApplicationRepositories = vi.fn().mockResolvedValue([
       explicitlyNonTestStandardRepository,
       legacyTestRepository,
+      automationRepository,
+      applicationAssetRepository,
       repositories[1],
       repositories[0]
     ]);
@@ -513,12 +534,49 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     const repositorySelect = getByLabelText("选择已关联版本库");
     expect(within(repositorySelect).getByText("历史测试工作库(file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP)")).toBeTruthy();
     expect(within(repositorySelect).getByText("F-WRTESTAPP 本地测试库(file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP)")).toBeTruthy();
+    expect(within(repositorySelect).getByText("自动化代码库(https://gitee.com/mimo/automation.git)")).toBeTruthy();
     expect(within(repositorySelect).queryByText("显式应用代码库(https://gitee.com/mimo/demo.git)")).toBeNull();
     expect(within(repositorySelect).queryByText("MIMO 示例库(https://gitee.com/mimo/demo.git)")).toBeNull();
-    expect(getByTitle("只能关联类型为测试工作库的版本库。")).toBeTruthy();
+    expect(within(repositorySelect).queryByText("应用资产库(https://gitee.com/mimo/demo.git)")).toBeNull();
+    expect(getByTitle("只能选择测试工作库或自动化代码库。")).toBeTruthy();
     await waitFor(() => expect(api.listRepositoryBranches).toHaveBeenCalledWith("repo_legacy_test"));
     expect(api.listRepositoryBranches).not.toHaveBeenCalledWith("repo_explicit_non_test");
     expect(api.listRepositoryBranches).not.toHaveBeenCalledWith("repo_mimo");
+  });
+
+  it("creates an automation workspace from an arbitrary branch and existing directory with an explicit version", async () => {
+    const api = createApi();
+    api.listApplicationRepositories = vi.fn().mockResolvedValue([automationRepository]);
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["release/automation-v2"]);
+    api.getRepositoryTree = vi.fn().mockResolvedValue({
+      nodes: [{ name: "scripts", path: "scripts", type: "directory", children: [] }]
+    });
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("42345678-1234-1234-1234-123456789abc");
+    const { container, findByText, getByPlaceholderText, getByText, queryByPlaceholderText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+
+    expect(await findByText("自动化代码库版本")).toBeTruthy();
+    expect(queryByPlaceholderText("新增一级目录")).toBeNull();
+    const arbitraryBranchOption = Array.from(document.querySelectorAll("option"))
+      .find((option) => option.textContent === "release/automation-v2") as HTMLOptionElement;
+    expect(arbitraryBranchOption.disabled).toBe(false);
+
+    await fireEvent.click(getTreePathButton(container, "scripts"));
+    expect((getByText("保存") as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.update(getByPlaceholderText("选择日期"), "20260812");
+    await waitFor(() => expect((getByText("保存") as HTMLButtonElement).disabled).toBe(false));
+    await fireEvent.click(getByText("保存"));
+
+    await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", {
+      repositoryId: "repo_automation",
+      branch: "release/automation-v2",
+      directoryPath: "scripts",
+      workspaceName: "ai-test",
+      version: "20260812",
+      operationId: "wco_42345678123412341234123456789abc"
+    }));
   });
 
   it("disables invalid test-work-repository branches and exposes the immediate tooltip text", async () => {

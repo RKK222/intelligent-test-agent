@@ -673,6 +673,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     ? versionFromStandardBranch(normalizedBranch)
                     : normalizeNonStandardWorkspaceCreateVersion(version);
             validateWorkspaceCreateRules(application, repository, normalizedBranch, normalizedPath);
+            // 新增一级目录是测试工作库专属能力，防止绕过前端给自动化代码库伪造该标记。
+            if (Boolean.TRUE.equals(directoryNew) && !repository.standard()) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "只有测试工作库支持新增一级目录",
+                        Map.of("repositoryType", repository.repositoryType()));
+            }
             boolean createMissingDirectory = Boolean.TRUE.equals(directoryNew);
 
             progress.step(WorkspaceCreateOperationStep.SAVING_TEMPLATE);

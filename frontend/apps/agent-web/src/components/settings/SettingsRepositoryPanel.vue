@@ -10,13 +10,15 @@ import type {
 import { InfoFilled } from "@element-plus/icons-vue";
 
 const TEST_WORK_REPOSITORY_TYPE = "TEST_WORK_REPOSITORY";
+const AUTOMATION_CODE_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
 const APPLICATION_CODE_REPOSITORY_TYPE = "APPLICATION_CODE_REPOSITORY";
 const EXTERNAL_DEPLOYMENT_MODE = "EXTERNAL";
 const INTERNAL_DEPLOYMENT_MODE = "INTERNAL";
-const STANDARD_REPOSITORY_TOOLTIP = "测试工作库等价于原标准库，会按标准库分支规则创建工作空间。";
+const REPOSITORY_TYPE_TOOLTIP = "测试工作库按标准分支和目录规则创建工作空间；自动化代码库支持任意分支和已有目录，创建时需选择日期版本。";
 const REPOSITORY_ENGLISH_NAME_ERROR = "版本库英文名称只能使用字母、数字和连字符，长度 1 到 128，且不能以连字符开头或结尾";
 const DEFAULT_REPOSITORY_TYPES: RepositoryTypeOption[] = [
   { typeCode: TEST_WORK_REPOSITORY_TYPE, typeLabel: "测试工作库" },
+  { typeCode: AUTOMATION_CODE_REPOSITORY_TYPE, typeLabel: "自动化代码库" },
   { typeCode: APPLICATION_CODE_REPOSITORY_TYPE, typeLabel: "应用代码库" },
   { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
 ];
@@ -387,8 +389,8 @@ function focusEditNameInput() {
                 <el-select v-model="repoType" aria-label="版本库类型" placeholder="选择版本库类型" style="width: 160px" filterable>
                   <el-option v-for="type in repositoryTypes" :key="type.typeCode" :label="type.typeLabel" :value="type.typeCode" />
                 </el-select>
-                <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
-                  <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
+                <el-tooltip :content="REPOSITORY_TYPE_TOOLTIP" placement="top">
+                  <el-icon class="ta-help-icon" :title="REPOSITORY_TYPE_TOOLTIP" aria-label="版本库类型说明">
                     <InfoFilled />
                   </el-icon>
                 </el-tooltip>

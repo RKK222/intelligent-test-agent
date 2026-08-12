@@ -209,6 +209,7 @@ class ConfigurationManagementControllerTest {
         ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
         when(service.listRepositoryTypes()).thenReturn(List.of(
                 new RepositoryTypeOptionResponse(CodeRepositoryType.TEST_WORK_REPOSITORY.value(), "测试工作库"),
+                new RepositoryTypeOptionResponse(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(), "自动化代码库"),
                 new RepositoryTypeOptionResponse(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(), "应用代码库"),
                 new RepositoryTypeOptionResponse(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(), "应用资产库")));
         WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
@@ -220,18 +221,20 @@ class ConfigurationManagementControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data[0].typeCode").isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value())
-                .jsonPath("$.data[0].typeLabel").isEqualTo("测试工作库");
+                .jsonPath("$.data[0].typeLabel").isEqualTo("测试工作库")
+                .jsonPath("$.data[1].typeCode").isEqualTo(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value())
+                .jsonPath("$.data[1].typeLabel").isEqualTo("自动化代码库");
     }
 
     @Test
-    void createRepositoryAcceptsRepositoryTypeAndKeepsLegacyStandardInResponse() {
+    void createRepositoryAcceptsAutomationTypeAndKeepsLegacyStandardFalseInResponse() {
         ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
         when(service.createRepository(
                 eq("https://gitee.com/demo/repo.git"),
                 eq("演示库"),
                 eq("demo"),
-                eq(false),
-                eq(CodeRepositoryType.TEST_WORK_REPOSITORY.value()),
+                eq(true),
+                eq(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value()),
                 eq(CodeRepositoryDeploymentMode.INTERNAL.value())))
                 .thenReturn(new CodeRepositoryResponse(
                         "repo_123",
@@ -239,9 +242,9 @@ class ConfigurationManagementControllerTest {
                         "演示库",
                         "demo",
                         CodeRepositoryDeploymentMode.INTERNAL.value(),
-                        CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
-                        "测试工作库",
-                        true,
+                        CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                        "自动化代码库",
+                        false,
                         Instant.parse("2026-07-02T08:00:00Z"),
                         Instant.parse("2026-07-02T08:00:00Z")));
         WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
@@ -251,15 +254,15 @@ class ConfigurationManagementControllerTest {
                 .header("X-Trace-Id", TRACE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
-                        {"gitUrl":"https://gitee.com/demo/repo.git","name":"演示库","englishName":"demo","standard":false,"repositoryType":"TEST_WORK_REPOSITORY","deploymentMode":"INTERNAL"}
+                        {"gitUrl":"https://gitee.com/demo/repo.git","name":"演示库","englishName":"demo","standard":true,"repositoryType":"AUTOMATION_CODE_REPOSITORY","deploymentMode":"INTERNAL"}
                         """)
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.deploymentMode").isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value())
-                .jsonPath("$.data.repositoryType").isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value())
-                .jsonPath("$.data.repositoryTypeLabel").isEqualTo("测试工作库")
-                .jsonPath("$.data.standard").isEqualTo(true);
+                .jsonPath("$.data.repositoryType").isEqualTo(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value())
+                .jsonPath("$.data.repositoryTypeLabel").isEqualTo("自动化代码库")
+                .jsonPath("$.data.standard").isEqualTo(false);
     }
 
     @Test

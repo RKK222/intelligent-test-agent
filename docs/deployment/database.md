@@ -333,6 +333,8 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 - `APPLICATION_CODE_REPOSITORY`（应用代码库）
 - `APPLICATION_ASSET_REPOSITORY`（应用资产库）
 
+`V20260812204207` 增量新增 `AUTOMATION_CODE_REPOSITORY`（自动化代码库），并把字典顺序规范为测试工作库、自动化代码库、应用代码库、应用资产库。该版本在执行前由原计划时间戳顺延，以高于本机已执行的 `V20260812202425`；未修改任何已执行 migration。
+
 ### user_roles 用户角色对照表
 
 | 字段 | 说明 |
@@ -555,8 +557,18 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 
 - 历史 `standard=true` 的代码库回填为 `TEST_WORK_REPOSITORY`。
 - 历史 `standard=false` 的代码库无法自动区分代码或资产，统一回填为 `APPLICATION_CODE_REPOSITORY`。
-- 旧 `standard` 布尔列继续保留给工作空间分支规则等存量逻辑；新增版本库选择测试工作库时写 `standard=true`，选择应用代码库或应用资产库时写 `standard=false`。
+- 旧 `standard` 布尔列继续保留给工作空间分支规则等存量逻辑；新增版本库选择测试工作库时写 `standard=true`，选择自动化代码库、应用代码库或应用资产库时写 `standard=false`。
 - 字典种子属于生产必需基础字典，不包含测试、演示或个人开发数据。
+
+## V20260812204207 自动化代码库字典
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql` 只变更生产必需字典：
+
+| 表/字段 | 说明 |
+|---|---|
+| `dictionaries(REPOSITORY_TYPE)` | 幂等写入 `AUTOMATION_CODE_REPOSITORY` /“自动化代码库”，并设置四类版本库的 `sort_order` 为 1–4。 |
+
+该 migration 不新增表或字段，不改写 `code_repositories` 存量行；旧客户端的 `standard` 推导规则不变。
 
 ## V20260702180000 版本库部署模式字段
 

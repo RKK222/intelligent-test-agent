@@ -665,7 +665,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/repositories?page=&size=` | 分页查询代码库配置。 |
-| `GET` | `/repository-types` | 查询版本库类型下拉选项，来源 `dictionaries(REPOSITORY_TYPE)`；“测试工作库”固定排在第一项。 |
+| `GET` | `/repository-types` | 查询版本库类型下拉选项，来源 `dictionaries(REPOSITORY_TYPE)`；顺序为测试工作库、自动化代码库、应用代码库、应用资产库。 |
 | `GET` | `/repository-deployment-options` | 查询版本库部署模式选项、默认模式和当前用户内部 SSH 前缀。 |
 | `POST` | `/repositories` | 新增代码库配置。 |
 | `PATCH` | `/repositories/{repoId}` | 编辑中文名称、英文名称和版本库类型；旧客户端传 `standard` 时继续兼容。 |
@@ -697,6 +697,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 ```json
 [
   { "typeCode": "TEST_WORK_REPOSITORY", "typeLabel": "测试工作库" },
+  { "typeCode": "AUTOMATION_CODE_REPOSITORY", "typeLabel": "自动化代码库" },
   { "typeCode": "APPLICATION_CODE_REPOSITORY", "typeLabel": "应用代码库" },
   { "typeCode": "APPLICATION_ASSET_REPOSITORY", "typeLabel": "应用资产库" }
 ]
@@ -727,7 +728,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 }
 ```
 
-新客户端应显式传 `repositoryType`；当 `repositoryType` 与 `standard` 同时出现时，以 `repositoryType` 为准，后端把 `TEST_WORK_REPOSITORY` 派生为 `standard=true`，其余两类派生为 `standard=false`。旧客户端省略 `repositoryType` 时，仍按 `standard` 兼容推导。
+新客户端应显式传 `repositoryType`；当 `repositoryType` 与 `standard` 同时出现时，以 `repositoryType` 为准，后端把 `TEST_WORK_REPOSITORY` 派生为 `standard=true`，其余三类派生为 `standard=false`。旧客户端省略 `repositoryType` 时，仍按 `standard` 兼容推导。
 
 `CodeRepositoryResponse`：
 
@@ -753,7 +754,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - `INTERNAL` 模式下前端展示只读前缀 `ssh://{当前用户统一认证号}@`，用户输入后半段；后端保存和列表响应均只返回后半段。分支、目录、clone、fetch、pull、push 等 Git 操作会按当前操作人动态拼接 `ssh://{unifiedAuthId}@{gitUrl}`，并用当前用户 SSH key。
 - `INTERNAL` 模式下 `englishName` 为空时，后端按 Git 路径派生默认值：去掉可选 `.git`，把 `/` 替换为 `-` 并转小写，例如 `scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform` 派生为 `hzefficiencytools-interfaceplatform`。
 - `englishName` 为必填英文名称，仅允许字母、数字和连字符，长度 1 到 128，且不能以连字符开头或结尾；后端统一按小写保存，非空值唯一。历史数据可能为 `null`，但缺少英文名称的历史代码库不能再创建新的应用版本工作区。
-- `repositoryType` 由通用字典 `REPOSITORY_TYPE` 管理；在没有工作空间或类型专属历史时，测试工作库、应用代码库、应用资产库可互相修改。`standard` 是旧协议遗留的布尔兼容字段，只能区分测试工作库和“非测试工作库”，无法区分两种应用库，因此新请求不应把它当作类型输入。
+- `repositoryType` 由通用字典 `REPOSITORY_TYPE` 管理；在没有工作空间或类型专属历史时，四种版本库类型可互相修改。`standard` 是旧协议遗留的布尔兼容字段，只能区分测试工作库和“非测试工作库”，无法区分自动化代码库与两种应用库，因此新请求不应把它当作类型输入。
 - 版本库已被 `application_workspaces` 引用时，切换类型返回 `409 CONFLICT`；这是因为现有工作空间的分支、目录和版本规则已按原类型生成，仅更改配置会造成数据身份不一致。
 - 应用资产库首次初始化引用副本后，`englishName` 作为各服务器磁盘目录名冻结，且类型必须保持 `APPLICATION_ASSET_REPOSITORY`；应用代码库存在任意 app-source slot/snapshot/operation/cleanup 历史后，`englishName` 和 `APPLICATION_CODE_REPOSITORY` 类型同样冻结。试图改变这些磁盘身份均返回 `409 CONFLICT`。
 - HTTPS URL 不支持内嵌账号或 token；本期不做连通性校验。
@@ -819,11 +820,11 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - `operationId` 可选；前端传入时用于进度轮询，格式为 `wco_` 前缀加 8 到 128 位字母、数字、下划线或短横线。
 - `workspaceName` 为工作空间别名，前端默认传 `ai-test`；后端按去首尾空白后的精确字符串校验同一应用下不可重复。旧客户端不传时仍按 `directoryPath` 末段兜底。
 - 新建工作空间默认 `enabled=true`。`PATCH` 请求可传 `{"workspaceName":"新别名"}`、`{"enabled":false}` 或同时传入两个字段；空对象返回 `VALIDATION_ERROR`。停用只控制工作空间切换入口是否展示，不删除配置、版本、个人工作区或运行态数据。
-- 测试工作库必须选择形如 `feature_testagent_yyyyMMdd` 的分支，后端从分支名提取版本号；非测试工作库所有分支均可提交。
-- 测试工作库的 `directoryPath` 必须是当前应用同名根目录的一级子目录，例如 `F-COSS/W1` 可选，`F-COSS/W1/F1` 只能浏览不能作为工作空间；非测试工作库不套用该限制。
-- 非标准代码库必须传入 `version`，格式为 `yyyyMMdd`；标准代码库传入的 `version` 会被分支解析结果覆盖。
+- 测试工作库必须选择形如 `feature_testagent_yyyyMMdd` 的分支，后端从分支名提取版本号；自动化代码库允许任意已有分支。
+- 测试工作库的 `directoryPath` 必须是当前应用同名根目录的一级子目录，例如 `F-COSS/W1` 可选，`F-COSS/W1/F1` 只能浏览不能作为工作空间；自动化代码库可选择远端目录树中的任意已有目录。
+- 自动化代码库必须传入 `version`，格式为 `yyyyMMdd`；测试工作库传入的 `version` 会被分支解析结果覆盖。应用代码库和应用资产库不是该创建接口的工作空间候选。
 - 只有保存接口会触发 Git clone/fetch、分支 checkout 和本地目录准备；页面上的分支、远端树和新增目录操作均不落磁盘。
-- `directoryNew=true` 表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建 `.gitkeep`，以当前用户身份提交并 push 当前 feature 分支；push 未确认时创建失败，避免只在单台服务器留下 Git 无法复制的空目录。旧客户端不传该字段时行为不变。
+- `directoryNew=true` 只表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。自动化代码库不接受该能力，只能选择已有目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建 `.gitkeep`，以当前用户身份提交并 push 当前 feature 分支；push 未确认时创建失败，避免只在单台服务器留下 Git 无法复制的空目录。旧客户端不传该字段时行为不变。
 - 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。命中已有位置时返回原 `workspaceId`，按本次请求更新别名；若原模板已停用则同时重新启用，避免异步操作显示成功但模板仍不可见。别名仍需满足同应用唯一约束。
 - 本次请求新插入模板后，如果初始版本创建失败且数据库复核该模板仍没有任何版本，后端会补偿删除该新模板并保留 `workspace_create_operations` 失败审计；命中既有模板或版本已经持久化时不删除，避免失败请求误删历史配置或并发成功结果。补偿失败只记录日志并附加到原异常，不覆盖原始错误码和错误说明。
 - 创建前会按当前用户 READY 的 opencode 进程确定目标 `linuxServerId`，确保初始运行态工作区落在当前用户 agent 所在服务器。

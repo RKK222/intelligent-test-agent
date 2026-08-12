@@ -17,12 +17,14 @@ import { CirclePlus, Delete, InfoFilled, Link } from "@element-plus/icons-vue";
 
 const ADD_REPOSITORY_OPTION_VALUE = "__create_repository__";
 const TEST_WORK_REPOSITORY_TYPE = "TEST_WORK_REPOSITORY";
+const AUTOMATION_CODE_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
 const APPLICATION_CODE_REPOSITORY_TYPE = "APPLICATION_CODE_REPOSITORY";
 const STANDARD_REPOSITORY_TOOLTIP = "测试工作库等价于原标准库，会按标准库分支规则创建工作空间。";
 const TEST_WORK_BRANCH_RULE_TOOLTIP = "测试工作库的分支命名规则为：feature_testagent_yyyymmdd，yyyymmdd为投产日。";
 const DEFAULT_WORKSPACE_ALIAS = "ai-test";
 const DEFAULT_REPOSITORY_TYPES: RepositoryTypeOption[] = [
   { typeCode: TEST_WORK_REPOSITORY_TYPE, typeLabel: "测试工作库" },
+  { typeCode: AUTOMATION_CODE_REPOSITORY_TYPE, typeLabel: "自动化代码库" },
   { typeCode: APPLICATION_CODE_REPOSITORY_TYPE, typeLabel: "应用代码库" },
   { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
 ];
@@ -178,8 +180,8 @@ const availableRepositories = computed(() => {
   const linkedRepositoryIds = new Set(appRepositories.value.map((item) => item.repositoryId));
   return repositories.value.filter((item) => !linkedRepositoryIds.has(item.repositoryId));
 });
-// 创建工作空间只允许使用测试工作库；standard=true 兼容尚未补齐 repositoryType 的历史数据。
-const workspaceRepositories = computed(() => appRepositories.value.filter(isTestWorkRepository));
+// 工作空间入口支持测试工作库和自动化代码库；standard=true 仅兼容尚未补齐 repositoryType 的历史测试工作库。
+const workspaceRepositories = computed(() => appRepositories.value.filter(isWorkspaceRepository));
 const linkRepositoryId = ref("");
 const lastLinkRepositoryId = ref("");
 
@@ -204,7 +206,7 @@ let branchRequestToken = 0;
 let directoryRequestToken = 0;
 
 const selectedWorkspaceRepository = computed(() => workspaceRepositories.value.find((item) => item.repositoryId === workspaceRepositoryId.value) ?? null);
-const requiresWorkspaceVersion = computed(() => selectedWorkspaceRepository.value != null && !selectedWorkspaceRepository.value.standard);
+const requiresWorkspaceVersion = computed(() => isAutomationCodeRepository(selectedWorkspaceRepository.value));
 const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.steps ?? []);
 const customBranchError = ref("");
 const selectedAppName = computed(() => selectedApp.value?.appName ?? "");
@@ -688,7 +690,7 @@ async function createWorkspace() {
     return;
   }
   if (requiresWorkspaceVersion.value && !/^\d{8}$/.test(workspaceVersion.value ?? '')) {
-    errorMessage.value = "非标准库版本必须选择日期";
+    errorMessage.value = "自动化代码库版本必须选择日期";
     return;
   }
   const operationId = createWorkspaceOperationId();
@@ -823,6 +825,16 @@ function isTestWorkRepository(repository: CodeRepositoryConfig | null) {
     return repositoryType === TEST_WORK_REPOSITORY_TYPE;
   }
   return Boolean(repository?.standard);
+}
+
+/** 自动化代码库显式走非标准库工作空间规则，不借用旧 standard 兼容字段。 */
+function isAutomationCodeRepository(repository: CodeRepositoryConfig | null) {
+  return repository?.repositoryType?.trim() === AUTOMATION_CODE_REPOSITORY_TYPE;
+}
+
+/** 工作空间候选仅开放测试工作库和自动化代码库，应用代码库、应用资产库保持隐藏。 */
+function isWorkspaceRepository(repository: CodeRepositoryConfig | null) {
+  return isTestWorkRepository(repository) || isAutomationCodeRepository(repository);
 }
 
 function cloneTreeNode(node: RepositoryTreeNode): WorkspaceTreeNode {
@@ -1033,7 +1045,7 @@ onBeforeUnmount(() => {
               <label class="ta-form-field">
                 <span class="ta-form-label">
                   已关联版本库
-                  <el-tooltip content="只能关联类型为测试工作库的版本库。" placement="top">
+                  <el-tooltip content="只能选择测试工作库或自动化代码库。" placement="top">
                     <el-icon class="ta-form-label-hint-icon"><InfoFilled /></el-icon>
                   </el-tooltip>
                 </span>
@@ -1073,7 +1085,7 @@ onBeforeUnmount(() => {
                 <div v-if="workspaceAliasDuplicate" class="ta-branch-error">工作空间别名已存在</div>
               </label>
               <label v-if="requiresWorkspaceVersion" class="ta-form-field">
-                <span class="ta-form-label">非标准库版本</span>
+                <span class="ta-form-label">自动化代码库版本</span>
                 <el-date-picker
                   v-model="workspaceVersion"
                   type="date"

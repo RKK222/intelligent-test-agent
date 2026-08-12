@@ -71,6 +71,9 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
         new ResourceDatabasePopulator(
                         new ClassPathResource("db/migration/V20260723145200__add_application_workspace_enabled.sql"))
                 .execute(dataSource);
+        new ResourceDatabasePopulator(
+                        new ClassPathResource("db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"))
+                .execute(dataSource);
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
         ConfigurationManagementMapper mapper = new SqlSessionTemplate(sqlSessionFactory).getMapper(ConfigurationManagementMapper.class);
@@ -94,6 +97,7 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                 .list())
                 .containsExactly(
                         CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                        CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
                         CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
                         CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
 
@@ -114,24 +118,24 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
     }
 
     @Test
-    void repositoriesPersistRepositoryTypeThroughMyBatisXmlMapper() {
-        CodeRepository assetRepository = new CodeRepository(
-                new CodeRepositoryId("repo_asset"),
-                "git@gitee.com:demo/asset.git",
-                "资产库",
-                "assetrepo",
-                CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(),
+    void automationRepositoriesPersistRepositoryTypeThroughMyBatisXmlMapper() {
+        CodeRepository automationRepository = new CodeRepository(
+                new CodeRepositoryId("repo_automation"),
+                "git@gitee.com:demo/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
                 CodeRepositoryDeploymentMode.INTERNAL.value(),
                 true,
                 NOW,
                 NOW);
 
-        repository.saveRepository(assetRepository);
+        repository.saveRepository(automationRepository);
 
-        assertThat(repository.findRepositoryByEnglishName("assetrepo"))
+        assertThat(repository.findRepositoryByEnglishName("automation"))
                 .get()
                 .satisfies(saved -> {
-                    assertThat(saved.repositoryType()).isEqualTo(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
+                    assertThat(saved.repositoryType()).isEqualTo(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value());
                     assertThat(saved.deploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value());
                     assertThat(saved.standard()).isFalse();
                 });

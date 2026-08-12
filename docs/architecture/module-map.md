@@ -163,7 +163,7 @@ Workspace 的存储路径与物理路径边界由 `test-agent-domain/ManagedWork
 
 `apps/agent-web` 的 Git Changes 负责应用 Agent 与公共 Agent 当前作用域的逐文件和批量暂存；批量入口复用 `packages/backend-api` 既有 Agent stage 方法，不新增 API 或跨作用域状态。
 
-`apps/agent-web` 的版本库新增和编辑入口共用类型字典，并固定将“测试工作库”排在第一项；编辑通过 `packages/backend-api` 和 `packages/shared-types` 的可选 `repositoryType` 请求字段访问配置管理 PATCH API，旧 `standard` 只保留为后端协议兼容字段。
+`apps/agent-web` 的版本库新增和编辑入口共用类型字典，顺序为测试工作库、自动化代码库、应用代码库、应用资产库；编辑通过 `packages/backend-api` 和 `packages/shared-types` 的可选 `repositoryType` 请求字段访问配置管理 PATCH API，旧 `standard` 只保留为后端协议兼容字段。工作空间候选只包含测试工作库与自动化代码库：前者继续由标准分支和目录规则约束，后者复用非标准库的任意分支/已有目录/显式日期版本路径。
 
 ## 前端访问关系
 

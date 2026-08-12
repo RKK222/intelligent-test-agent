@@ -102,6 +102,7 @@
 - `V20260626090000__add_workspace_linux_server_id.sql`：为 `workspaces` 增加可空 `linux_server_id` 和索引，新增工作区写当前服务器，历史空值由业务层在同服务器文件 WebSocket ticket 校验成功后回填。
 - `V20260626150000__add_common_parameters_and_workspace_create_operations.sql`：创建通用参数表、初始化 Linux/Windows opencode 路径参数，为 `code_repositories` 增加可空唯一 `english_name`，并创建设置页工作空间创建进度表。
 - `V20260702153000__add_repository_type_to_code_repositories.sql`：初始化生产必需字典 `REPOSITORY_TYPE`，为 `code_repositories` 增加非空 `repository_type`，并按历史 `standard` 回填测试工作库或应用代码库。
+- `V20260812204207__dictionaries_add_automation_code_repository.sql`：新增生产必需字典项 `AUTOMATION_CODE_REPOSITORY`（自动化代码库），并把版本库类型顺序规范为测试工作库、自动化代码库、应用代码库、应用资产库，不改表结构或存量版本库数据。
 - `V20260702180000__add_code_repository_deployment_mode.sql`：为 `code_repositories` 增加非空 `deployment_mode`（`EXTERNAL`/`INTERNAL`，存量默认外部），并把 `english_name` 扩展到 128 字符。
 - `V20260703141000__create_run_session_scopes.sql`：创建 `run_session_scopes` 和 `run_session_scope_sessions`，并为 `run_events` 预留可空 session scope 与 `raw_event_id` 列；metadata 使用 `metadata_json text`，不使用 JSONB。
 - `V20260628231000__create_analytics_feedback_and_rollups.sql`：增加 Run 的 `agent_id/model_id` 快照、`ai_message_feedbacks`、hourly/daily 用户运营 rollup、Run 耗时直方图、水位、任务运行记录和 DB 锁表；不新增任何测试/演示数据。
@@ -198,7 +199,7 @@
 - RunEvent 覆盖 append-only seq 单调递增、并发追加唯一性、`runId + lastSeq` 增量读取、结构化 scope 列和 `(run_id, seq)` 唯一约束。
 - Session 覆盖远端 opencode 映射、全局搜索、置顶排序、工作区会话分页和归档过滤。
 - AgentSessionBinding 覆盖 upsert、按 agent 查询、远端 session 唯一约束和从旧 opencode 字段回填。
-- ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、版本库类型字典与 `repository_type` 回填、版本库部署模式 `deployment_mode` 默认值和 MyBatis XML 保存/读取、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。
+- ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、自动化代码库字典排序与 `repository_type` 往返、版本库部署模式 `deployment_mode` 默认值和 MyBatis XML 保存/读取、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。
 - ManagedWorkspace 覆盖 V9/V20260626120900 migration、版本工作区唯一性、每服务器副本 upsert、目标 commit、个人空间名称唯一性、最近使用偏好和同步审计保存。
 - OpencodeProcessManagement 覆盖 V14 migration、V17 loopback 种子清理、拓扑读写、历史用户进程与后端 Java 进程时间戳归一化、健康容器查询、运行管理拓扑列表、manager-backend 连接列表、opencode server 进程分页筛选、绑定关联查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - `MyBatisOpencodeProcessReservationLockPostgresqlIntegrationTest` 使用真实 PostgreSQL 覆盖用户/服务器 `FOR UPDATE` 锁顺序、首次 process/binding 原子预留、同用户并发单胜者、不同用户同服务器端口互斥，以及迁移双表 CAS 成功与冲突整笔回滚。

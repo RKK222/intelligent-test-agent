@@ -9731,3 +9731,26 @@
 
 - 宠物游乐舱现有六款游戏；弹球的任务进度、主动挡板反馈和可增长奖池形成更明确的追分循环，黄金矿工具有计时、选择目标、重量风险、炸药取舍和连续关卡，不是静态演示。
 - 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全或环境配置；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
+## 2026-08-12 - 新增自动化代码库版本库类型
+
+### Why
+
+- 配置管理需要新增“自动化代码库”，允许应用从任意已有分支和目录创建工作空间，并由管理员显式选择 `yyyyMMdd` 版本；测试工作库的标准分支、一级目录和新增目录规则必须保持不变。
+
+### What
+
+- 新增 `AUTOMATION_CODE_REPOSITORY` 领域枚举和系统字典，旧 `standard` 固定派生为 `false`；版本库 API、配置管理类型冻结和既有 DTO 继续复用，不新增路由或字段。
+- 设置页只把测试工作库和自动化代码库列为工作空间候选；自动化代码库支持任意分支、任意已有目录和日期版本，不显示也不接受测试工作库专属的 `directoryNew=true`。应用源码、应用资产和 Workflow 仍由既有精确类型守卫排除自动化代码库。
+- 同步配置管理、Workspace、持久化、前端包 README，以及 HTTP API、数据库、模块地图和用户手册。
+
+### How
+
+- 后端领域、配置管理、API、Workspace、H2/MyBatis 和 Flyway 命名测试通过；Workspace 定向回归 91/91、持久化回归 5/5、Flyway 命名 11/11，真实 PostgreSQL 兼容迁移 23/23，完整后端 `mvn -q clean package -DskipTests` 成功。
+- 前端设置页和 backend-api 定向 Vitest 3 个文件共 147 项通过，workspace typecheck、production build 和用户手册 build 成功；最终应用 JAR 内 migration 与源码 SHA-256 均为 `250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554`。
+- 原计划 migration `V20260812195822` 从未执行；发现 `.env.test` 本地库已执行另一开发分支的 `V20260812202425` 后，按迁移规则在执行前将本任务版本顺延为 `V20260812204207`。当前分支缺少已执行的 `V20260812202425` 原始 migration，未执行 `repair`、未改历史表，也未停止现有服务做已知会失败的重启。
+
+### Result
+
+- 自动化代码库的配置、工作空间规则、迁移、测试和文档已实现并完成代码级、构建级及真实 PostgreSQL 兼容验证；实际 HTTP/UI 创建流程因本地 Flyway 历史分叉仍未运行，交付状态为部分运行验证。
+- 本次只对既有 HTTP 响应增量增加类型编码，不变更 DTO 字段、RunEvent、表结构、性能或安全契约；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。

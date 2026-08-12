@@ -260,6 +260,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 - 用户级 Session History 复用既有 Session PATCH 能力支持置顶/取消置顶；列表按置顶组优先、组内更新时间倒序展示，置顶发生在已加载后续页时回到第一页重新对齐服务端分页。
 
+- 设置页版本库类型包含测试工作库、自动化代码库、应用代码库和应用资产库；创建工作空间时只展示测试工作库与自动化代码库。前者保留标准分支/一级目录规则，后者允许任意分支和任意已有目录、并显式选择 `yyyyMMdd` 版本。
+
 ## UI 与主题边界
 
 - 全局 theme token、Figma Web IDE 风格 activity rail、Dockview/Monaco 视觉适配、滚动条、panel chrome 和轻量动画由 `apps/agent-web/src/styles/globals.css` 承载；包内组件只消费这些 token，不在业务组件里复制整套主题。

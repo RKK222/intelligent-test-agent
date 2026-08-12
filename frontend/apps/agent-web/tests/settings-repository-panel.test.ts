@@ -36,6 +36,7 @@ function createApi(): Partial<BackendApiClient> {
   return {
     listRepositories: vi.fn().mockResolvedValue({ items: repositories, page: 1, size: 100, total: repositories.length }),
     listRepositoryTypes: vi.fn().mockResolvedValue([
+      { typeCode: "AUTOMATION_CODE_REPOSITORY", typeLabel: "自动化代码库" },
       { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
       { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" },
       { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" }
@@ -175,7 +176,7 @@ describe("SettingsRepositoryPanel settings", () => {
     expect(getByText("MIMO 示例库")).toBeTruthy();
   });
 
-  it("creates repositories in management tab", async () => {
+  it("creates automation repositories with legacy standard disabled", async () => {
     const api = createApi();
     const { findByText, getByLabelText, getByPlaceholderText, getByText, container } = renderPanel(api);
 
@@ -185,18 +186,18 @@ describe("SettingsRepositoryPanel settings", () => {
     expect(container.querySelector(".el-dialog-stub")).toBeTruthy();
 
     await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
-    await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
+    await fireEvent.update(getByPlaceholderText("中文名称"), "自动化代码库");
     await fireEvent.update(getByPlaceholderText("英文名称"), "NewRepo");
-    await fireEvent.update(getByLabelText("版本库类型"), "TEST_WORK_REPOSITORY");
+    await fireEvent.update(getByLabelText("版本库类型"), "AUTOMATION_CODE_REPOSITORY");
     await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
 
     await waitFor(() => expect(api.createRepository).toHaveBeenCalledWith({
       gitUrl: "https://gitee.com/mimo/new-repo.git",
-      name: "新增测试库",
+      name: "自动化代码库",
       englishName: "newrepo",
       deploymentMode: "EXTERNAL",
-      repositoryType: "TEST_WORK_REPOSITORY",
-      standard: true
+      repositoryType: "AUTOMATION_CODE_REPOSITORY",
+      standard: false
     }));
   });
 
@@ -209,7 +210,7 @@ describe("SettingsRepositoryPanel settings", () => {
     const labels = within(getByLabelText("版本库类型"))
       .getAllByRole("option")
       .map((option) => option.textContent);
-    expect(labels).toEqual(["测试工作库", "应用代码库", "应用资产库"]);
+    expect(labels).toEqual(["测试工作库", "自动化代码库", "应用代码库", "应用资产库"]);
   });
 
   it("rejects invalid repository english names before calling the backend", async () => {

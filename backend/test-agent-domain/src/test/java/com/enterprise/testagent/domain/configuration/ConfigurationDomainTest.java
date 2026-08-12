@@ -57,9 +57,19 @@ class ConfigurationDomainTest {
                 true,
                 NOW,
                 NOW);
+        CodeRepository automationCodeRepository = new CodeRepository(
+                new CodeRepositoryId("repo_automation"),
+                "git@example.com:demo/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                true,
+                NOW,
+                NOW);
 
         assertThat(testWorkRepository.standard()).isTrue();
         assertThat(applicationAssetRepository.standard()).isFalse();
+        assertThat(automationCodeRepository.standard()).isFalse();
     }
 
     @Test
