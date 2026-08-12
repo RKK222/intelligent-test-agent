@@ -16,6 +16,7 @@ import {
   publicConfigGateRefetchInterval,
   shouldRefreshRuntimeCatalogAfterMessageGate,
   chatStateFromSessionTreeSnapshot,
+  completedRunDurationMs,
   dedupeSessionMessages,
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
@@ -247,6 +248,26 @@ describe("scheduledRunTiming", () => {
       status: "FAILED",
       updatedAt: "2026-07-18T14:59:59Z"
     })).toBeNull();
+  });
+});
+
+describe("completedRunDurationMs", () => {
+  it("restores a completed manual run duration and rejects active or invalid timestamps", () => {
+    expect(completedRunDurationMs({
+      status: "SUCCEEDED",
+      createdAt: "2026-06-28T08:00:00Z",
+      updatedAt: "2026-06-28T08:01:00Z"
+    })).toBe(60_000);
+    expect(completedRunDurationMs({
+      status: "RUNNING",
+      createdAt: "2026-06-28T08:00:00Z",
+      updatedAt: "2026-06-28T08:01:00Z"
+    })).toBeUndefined();
+    expect(completedRunDurationMs({
+      status: "FAILED",
+      createdAt: "2026-06-28T08:01:00Z",
+      updatedAt: "2026-06-28T08:00:00Z"
+    })).toBeUndefined();
   });
 });
 

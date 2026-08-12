@@ -259,6 +259,7 @@ import {
   assistantSummaryMessageId,
   buildPromptParts,
   chatStateFromSessionTreeSnapshot,
+  completedRunDurationMs,
   dedupeSessionMessages,
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
@@ -4633,6 +4634,18 @@ function restoreScheduledRunTiming(value: Run | null | undefined): boolean {
   totalDurationMs.value = 0;
   lastDuration = undefined;
   return true;
+}
+
+/** 历史会话已取得关联 Run 详情时，用同一条权威记录恢复已锁定耗时。 */
+function restoreCompletedHistoryRunTiming(value: Run) {
+  const durationMs = completedRunDurationMs(value);
+  if (durationMs === undefined) {
+    return;
+  }
+  chatStartedAt.value = null;
+  totalDurationMs.value = durationMs;
+  lastDuration = formatDurationMs(durationMs);
+  nowTick.value = Date.now();
 }
 
 /** runtime-state 只有摘要；首次晚间 Run 需补读现有 Run 详情，取得真实 createdAt/sourceType。 */
@@ -10762,6 +10775,7 @@ async function switchSession(
           // runtime-state 已接管其它活动 Run 时，历史消息关联的旧终态只能补 Diff，不能抢走停止权限和 SSE 身份。
           run.value = runDetail;
           rememberRunSession(runDetail);
+          restoreCompletedHistoryRunTiming(runDetail);
         }
         const runFiles = (diffDetail.files ?? []).map((file) => ({
           ...file,

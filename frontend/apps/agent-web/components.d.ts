@@ -74,6 +74,7 @@ declare module 'vue' {
     OpencodePublicConfigManagementPanel: typeof import('./src/components/system/OpencodePublicConfigManagementPanel.vue')['default']
     PersonalWorkspacePullDialog: typeof import('./src/components/PersonalWorkspacePullDialog.vue')['default']
     PetCompanionAvatar: typeof import('./src/components/PetCompanionAvatar.vue')['default']
+    PetGoldMinerGame: typeof import('./src/components/PetGoldMinerGame.vue')['default']
     PetMiniGames: typeof import('./src/components/PetMiniGames.vue')['default']
     ReadonlyTranscript: typeof import('./src/components/ReadonlyTranscript.vue')['default']
     ReferenceConfigurationDialog: typeof import('./src/components/ReferenceConfigurationDialog.vue')['default']

@@ -110,6 +110,21 @@ export type ScheduledRunTiming = {
   completedDurationMs?: number;
 };
 
+/** 已结束 Run 的 createdAt/updatedAt 来自同一后端记录，可用于刷新或历史切换后的耗时恢复。 */
+export function completedRunDurationMs(
+  run: Pick<Run, "status" | "createdAt" | "updatedAt"> | null | undefined
+): number | undefined {
+  if (!run || !["SUCCEEDED", "FAILED", "CANCELLED"].includes(run.status)) {
+    return undefined;
+  }
+  const startedAtMs = Date.parse(run.createdAt);
+  const completedAtMs = Date.parse(run.updatedAt);
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(completedAtMs) || completedAtMs < startedAtMs) {
+    return undefined;
+  }
+  return completedAtMs - startedAtMs;
+}
+
 /**
  * 晚间任务可能在页面关闭期间执行，不能依赖浏览器内存里的开始时间。
  * 这里直接投影后端 Run 的 ISO 时间戳；时间差与 UTC/北京时间的展示时区无关。
@@ -127,16 +142,13 @@ export function scheduledRunTiming(
   if (["PENDING", "QUEUED", "RUNNING", "CANCELLING"].includes(run.status)) {
     return { startedAtMs };
   }
-  if (!["SUCCEEDED", "FAILED", "CANCELLED"].includes(run.status)) {
-    return null;
-  }
-  const completedAtMs = Date.parse(run.updatedAt);
-  if (!Number.isFinite(completedAtMs) || completedAtMs < startedAtMs) {
+  const completedDurationMs = completedRunDurationMs(run);
+  if (completedDurationMs === undefined) {
     return null;
   }
   return {
     startedAtMs,
-    completedDurationMs: completedAtMs - startedAtMs
+    completedDurationMs
   };
 }
 

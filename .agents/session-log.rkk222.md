@@ -9658,9 +9658,56 @@
 - 后端完整 26 模块 `mvn package -DskipTests` 通过；Workspace 文件服务 40 项通过，client/Mem0/API 定向测试 48 passed / 1 skipped。新增迁移后 `FlywayMigrationNamingTest` 12/12、真实 PostgreSQL `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 24/24 通过。
 - 前端 agent-web typecheck、覆盖 release/client/mem0 交集的 7 个 Vitest 文件 255 passed / 1 skipped、9910 模块 production build 均通过；`tools/verify-dev-scripts.sh` 全部通过。
 - 使用 JDK 25、主工作区只读 `.env.test` 和共享数据根，从 dev 工作树执行 `./restart-dev-services.sh --profile test --env-file /Users/kaka/Desktop/intelligent-test-agent/.env.test --skip-frontend-build`，未传 Workflow、LobeHub 或 Mem0 启用参数。实际 PostgreSQL 从 `20260812144051` 正序应用到 `20260812202425`；backend health/readiness、frontend 3000、CORS 与 manager WebSocket/4098 OpenCode health 均通过。
+- 最终远端核对期间 release 又新增 `80e5e4ff9` 历史对话耗时修复；将该提交及 release 中被早期 mem0 内容恢复覆盖的黄金矿工/弹球最新实现继续合入 dev。相关 Vitest 117/117、agent-web typecheck、9913 模块 production build 通过；历史切换 Chromium 首轮因页面冷启动未出现会话按钮而超时，自动重试通过，预热后关闭重试单跑 1/1 通过。
 
 ### Result
 
 - `dev` 同时包含 release、mem0、client 的提交历史与功能，默认启动不包含 Workflow、LobeHub 或 Mem0 数据面，按需通过显式参数开启；release 已同步 `origin`。
 - 本次新增数据库兼容装配与前向 migration，不新增另一套迁移器；API、RunEvent、安全协议均只承接三个来源分支已有的向后兼容扩展。稳定文档已同步。
 - 主工作树 `frontend/apps/agent-web/components.d.ts` 和 mem0 工作树 6 个用户未提交文件保持未暂存且未进入 dev；未修改任何 `.env*`。真实 ARM 麒麟设备上的 client 最终验收仍是 client 原分支的既有外部验证项，不影响本次分支整理与本机启动结论。
+
+## 2026-08-12 - 恢复历史对话任务耗时
+
+### Why
+
+- 上一轮只补了任务消耗组件对 `duration` 的兼容显示，但历史会话切换会主动清空耗时，随后取得关联 Run 详情时没有恢复；历史 `step-finish` 又能恢复 Token，因此用户仍然只看到 Token。
+
+### What
+
+- 复用 `switchSession` 为恢复 Run 状态与 Diff 已经发起的 `getRun(runId)` 请求，以同一条终态 Run 记录的 `createdAt/updatedAt` 恢复最近一轮已完成任务的锁定耗时，没有增加接口或网络请求。
+- 抽取 `completedRunDurationMs` 统一终态 Run 耗时校验，并让既有晚间任务耗时投影复用；活动状态、无效时间和逆序时间不参与历史恢复。
+- 扩展既有历史切换 Playwright 用例，同时构造 `step-finish` Token 与一分钟终态 Run，断言页脚共同显示 `1m 0s` 和 `1.2k tokens`；同步 agent-web README。
+
+### How
+
+- 修复前同一 Chromium 用例稳定得到 `1.2k tokens` 且缺少 `1m 0s`；修复后定向 Playwright 1/1 通过。
+- `workbench-utils` Vitest 106/106、`FigmaChatPanel` Vitest 159/159（另 1 skipped）、agent-web `vue-tsc` 与 production build 均通过；构建仅保留既有大 chunk 警告。
+- 前端以 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 5173 --strictPort` 启动，HTTP 返回 200。提交前回顾全部 `.agents/session-log*.md`，任务外配置管理、migration、设置页及自动生成差异均保持未暂存。
+
+### Result
+
+- 切回包含关联终态 Run 的历史会话后，任务消耗页脚会恢复最近一轮任务耗时，并与历史 Token 同时展示。
+- 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全或环境配置；未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
+## 2026-08-12 - 重构桌面弹球并新增黄金矿工
+
+### Why
+
+- 用户认为已有弹球目标感和操作反馈仍不够有趣，并要求在宠物游乐舱增加可完整游玩的黄金矿工。
+
+### What
+
+- 继续复用 `PetMiniGames.vue` 的既有入口、键盘路由、弹球物理和生命周期，将弹球改为深蓝信号台视觉，以“四座 M/I/M/O 中继 → 三枚放大器 → 红色核心 Jackpot”组织目标；进度跨弹珠保留，动态奖池由碰撞器、旋转门、弹射器与挡板命中持续充能，核心命中触发三球信号风暴或多球 Super Jackpot。
+- 挡板碰撞增加带冷却的主动向上抽射和击中波纹，保留坡度重力、弧形出槽、单向门、技能发射、救球、连击、倍率、奖励球、晃台和 TILT；既有“离槽后不能重新掉回发射槽”规则继续由 Chromium 场景覆盖。
+- 新增独立 `PetGoldMinerGame.vue`：45 秒摆钩关卡、方向下钩、圆形命中检测、按重量回收、金块/钻石/岩石/钱袋价值、两枚炸药、目标进度、成功/失败结算和递增关卡；切换到其它游戏时暂停计时但保留局内状态。六款游戏入口、键盘操作、组件测试、工作台 E2E 和 agent-web README 同步更新。
+
+### How
+
+- `PetGoldMinerGame` 与 `PetMiniGames` 定向 Vitest 2 个文件、11 项全部通过；Chromium 六游戏工作台场景 1/1 通过，实际验证中央大金块抓取后结算 ¥520、弹珠离开发射槽进入主球台、重力下落、挡板和 TILT。
+- agent-web 用户手册预构建、`vue-tsc` 与 production build 全部通过，仅保留既有大 chunk 警告；最新前端以 `corepack pnpm --dir frontend --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3024` 启动。
+- 应用内浏览器因本地 URL 安全策略未能补充截图，未绕过限制；最终可执行行为由项目 Playwright Chromium 场景验证。提交前回顾全部 `.agents/session-log*.md` 近期记录，并隔离任务外配置管理、migration、设置页和自动生成差异。
+
+### Result
+
+- 宠物游乐舱现有六款游戏；弹球的任务进度、主动挡板反馈和可增长奖池形成更明确的追分循环，黄金矿工具有计时、选择目标、重量风险、炸药取舍和连续关卡，不是静态演示。
+- 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全或环境配置；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
