@@ -9247,3 +9247,30 @@
 
 - 发送方和共享接收方在撤回重发预约、模型思考、流式输出及完成后均只保留一个替代 USER 气泡。
 - 本次仅修正前端投影兼容逻辑；无 HTTP API、RunEvent 线协议、DTO、数据库、SQL、migration、鉴权、安全或环境配置变更，未修改 generated SDK 和 OpenCode 只读源码。
+
+## 2026-08-12 - 基于当前本地 release 重新生成企业增量包
+
+### Why
+
+- 用户要求按当前工作区代码重新打包；本地 `codex/release-enterprise-20260801` 的源码 HEAD 为 `f10754e01ab8f846a8aa2430214bb39f4795623b`，相对上一成品新增共享会话重发实时同步、重复消息修复、通知筛选、运营图表和内部模型时延等已提交改动。
+- 当前本地分支相对远程为 ahead 10 / behind 32；本次按“当前代码”语义不拉取、不切换，工作区无未提交源码和冲突。
+
+### What
+
+- 重新构建后端、前端和内层发布 ZIP，并使用上一完整包中 checksum 通过的 `.4/.114/.2` 节点配置包重新封装固定名外层包。
+- worker runtime 指纹 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`、toolbox 指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040` 均未变化，按 `reuse` 不重复携带大制品；Workflow、LobeHub 保持 `disabled`。
+- 当前新增提交没有增加或改写 Flyway SQL；成品仍完整携带并冻结上一交付已验证的企业主链与兼容资源。
+
+### How
+
+- JDK 25 下后端从 `clean` 开始运行受影响测试：工作区查询 3、runtime 35、API 32、persistence 27、真实 PostgreSQL Flyway 已知历史升级 18、Spring 装配 1，全部通过且无跳过；Flyway 字节冻结 10 项包含在 persistence 结果中。
+- 首次未带 `clean` 的测试受另一个分支遗留 `target/classes/MemoryLearningEvidenceMapper.xml` 干扰，并在并行 worktree 占用 Docker 时出现 PostgreSQL 容器启动超时；确认源码不存在该 Mapper/Row 后清理当前 reactor target，待并行任务结束后完整重跑通过，未为构建残留修改业务代码。
+- 前端 15 个 workspace typecheck 全部通过；受影响 Vitest 7 个文件 376 passed / 1 skipped；正式打包再次通过 Spring 装配、21 模块后端构建、`vue-tsc` 和 Vite production build。
+- 独立解包复验通过外层/内层 SHA 文件、两层 ZIP CRC、三台节点包 checksum、外层内嵌内层逐字节一致、组件清单、`opencode-models.json`、稳定组件逐字节一致及最终 persistence JAR 的受保护 migration SHA。
+
+### Result
+
+- 内层 `test-agent-internal-release.zip` SHA-256 为 `99f34a5652d5972dd4dbc1e9384026d1a1a78a8cc4bb1caa702a6c99cc000df5`；外层 `test-agent-two-backend-complete.zip` 为 `e6b9133c023355e220e5b190ebf33c5d3be447d570c6231e944228fddeb60d56`。
+- 稳定组件 SHA-256：app JAR `83fa5c91cbedbfc82ec7a856bb93ca3be449c0234238cb742672f7dea3be0491`，persistence JAR `444536695c6707263cf8b1962721273e107f40a6fcffbf9b23b9be44343916be`，XXL integration JAR `fd4acf7b5d1660dcbaf20a86c8b9bc85d5fde5e02615b1921071b8af418037f6`，前端归档 `f4dd64aea469a241cd4cd17ac9abe6ffb86313076ce238a1c259b14b00c35b58`，`opencode-models.json` `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
+- 本次任务没有修改生产代码、API、事件、数据库、migration、配置模板、`.env*`、generated SDK 或 OpenCode 只读源码；仅新增发布追溯记录。目标企业库完整 `flyway_schema_history` 仍需在现场部署前取得并通过准入判断。
+- 本条记录在最终制品生成后提交，不再据此重封 ZIP，否则归档内 session log 与 ZIP hash 会形成递归变化；成品源码内容对应 `f10754e01`。
