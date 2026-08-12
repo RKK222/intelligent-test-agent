@@ -64,10 +64,12 @@ describe("experience workspace flow", () => {
     expect(firstLoginGuideSource).toContain("enabled?: boolean");
     expect(agentWorkbenchSource).toContain(':enabled="firstLoginGuideEnabled"');
     expect(agentWorkbenchSource).toContain("cancelExperienceWorkspaceFlow(\"UNMOUNT\")");
-    expect(agentWorkbenchSource).toContain('@open-experience="openExperienceWorkspaceDialog"');
+    expect(agentWorkbenchSource).toContain('@open-experience="toggleExperienceWorkspace"');
     expect(figmaShellSource).toContain('data-testid="experience-workspace-open"');
-    expect(figmaShellSource).toContain("'已在平台体验' : '进入平台体验'");
+    expect(figmaShellSource).toContain("'退出平台体验' : '进入平台体验'");
     expect(figmaShellSource).toContain('emit("open-experience")');
+    expect(agentWorkbenchSource).toContain("function leaveExperienceWorkspace()");
+    expect(agentWorkbenchSource).toContain("experienceReturnAppId");
     expect(figmaShellSource).not.toContain('<span class="figma-app-menu-item-name">平台体验</span>');
     expect(agentWorkbenchSource).not.toContain("cancelExperienceWorkspaceFlow(\"APPLICATION_JOINED\")");
     expect(agentWorkbenchSource).toContain("cancelExperienceWorkspaceFlow(\"PROCESS_FAILED\")");

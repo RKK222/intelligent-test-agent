@@ -148,7 +148,7 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[role="option"]').text()).not.toContain("平台体验");
 
     await wrapper.setProps({ workspaceKind: "EXPERIENCE" });
-    expect(experience.attributes("aria-label")).toBe("已在平台体验");
+    expect(experience.attributes("aria-label")).toBe("退出平台体验");
     expect(experience.attributes("aria-pressed")).toBe("true");
 
     await wrapper.setProps({ fixedWorkspace: true });

@@ -3354,6 +3354,15 @@ test("application source snapshot opens a logical workspace and enforces source 
       confirmReplace: true
     }
   });
+  await dialog.getByRole("button", { name: "关闭源码弹窗" }).click();
+
+  // 源码快照的统一“测试工作空间”返回入口在 recent 不含版本时，也应选择后端首个版本。
+  await sourceWorkspaceSwitch.click();
+  await page.getByRole("menu").getByRole("button", { name: "测试工作空间", exact: true }).click();
+  await expect(fileExplorer.getByText("源码快照", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "版本：2024年1月", exact: true })).toBeVisible();
+  await expect.poll(() => gitAccessRequests).toEqual(["awv_2024_01", "awv_2024_01"]);
+  await expect.poll(() => defaultPersonalRequests).toEqual(["awv_2024_01", "awv_2024_01"]);
 });
 
 test("a drifting lazy child invalidates every concurrent child until a real root snapshot reloads", async ({ page }) => {
@@ -4346,10 +4355,16 @@ test("experience offer precedes onboarding and declining restores the existing g
 
 test("users with applications can open the persistent experience entry at any time", async ({ page }) => {
   const experienceOpenRequests: string[] = [];
+  const gitAccessRequests: string[] = [];
+  const defaultPersonalRequests: string[] = [];
   await mockBackendApi(page, {
     applications: [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }],
     managedApplications: [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }],
     authRoles: ["USER"],
+    ...versionSelectionWorkspaceSetup(),
+    recentWorkspaces: { app_gcms: null },
+    gitAccessRequests,
+    defaultPersonalRequests,
     experienceWorkspace: {
       ...workspace(),
       workspaceId: "wrk_exp_remembered",
@@ -4372,9 +4387,12 @@ test("users with applications can open the persistent experience entry at any ti
   await page.waitForTimeout(200);
   await expect(page.locator(".experience-mode-banner")).toBeVisible();
 
-  await page.getByRole("button", { name: "应用：平台体验", exact: true }).click();
-  await page.getByRole("option", { name: /F-GCMS/ }).click();
+  // 再点一次烧瓶入口直接撤出体验区，并恢复进入前的应用工作区。
+  await page.getByRole("button", { name: "退出平台体验", exact: true }).click();
   await expect(page.getByRole("button", { name: "应用：F-GCMS", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "版本：2024年1月", exact: true })).toBeVisible();
+  await expect.poll(() => gitAccessRequests).toEqual(["awv_2024_01"]);
+  await expect.poll(() => defaultPersonalRequests).toEqual(["awv_2024_01"]);
 
   // 首次成功进入后只保留常驻入口，不再重复展示含“暂不体验”的说明弹窗。
   await page.getByRole("button", { name: "进入平台体验", exact: true }).click();
@@ -4465,6 +4483,13 @@ test("experience workspace browses and edits files, starts chat, and exposes loc
     workspaceId: "wrk_exp_e2e_shared",
     title: "体验区对话"
   });
+
+  // 没有任何应用也可以撤出；普通工作台回到未选择应用空态，入口可再次进入体验区。
+  await page.getByRole("button", { name: "退出平台体验", exact: true }).click();
+  await expect(page.locator(".experience-mode-banner")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "应用：未选择应用", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "进入平台体验", exact: true }).click();
+  await expect(page.locator(".experience-mode-banner")).toBeVisible();
 });
 
 test("revoking the selected application hides its retained workspace after membership refresh", async ({ page }) => {

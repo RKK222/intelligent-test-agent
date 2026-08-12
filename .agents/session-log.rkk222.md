@@ -9422,3 +9422,48 @@
 
 - 体验选择现在由显式 intent 保护，不再因文件或 Git 操作恰逢后台刷新而跳回传统工作区；首次成功进入后只保留常驻直接入口。
 - 当前服务运行于 `http://127.0.0.1:8080` 和 `http://127.0.0.1:3000`，可直接复验；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支或推送远端。
+
+## 2026-08-12 - 返回测试工作区时自动恢复默认版本
+
+### Why
+
+- 用户从应用源码或体验工作区回到测试工作区后，应用名和工作空间可以恢复，但 recent 缺少 `versionId`、没有已有 default worktree 或旧工作区详情未回填版本归属时，顶栏仍停在“请选择版本”，必须手工再选一次。
+
+### What
+
+- 非托管工作区返回时优先复用 per-app recent；没有可进入 recent 时，仅在返回语义下读取默认启用测试工作空间和后端排序首版本，并复用既有 Git 权限预检、`ensureDefaultPersonalWorkspace` 与托管切换流程。
+- `ensure-default` 已返回的应用/模板/版本上下文用于兼容补齐旧工作区详情缺失字段；应用切换时同步清理旧版本缓存，避免异步恢复后迟到清空新 `versionId`。普通首次选择应用仍保持无 recent 的空态约定。
+- Chromium 回归覆盖体验区撤出和源码区统一返回入口在无 recent 版本时自动落到 `2024年1月`，并断言 Git 预检与默认个人 worktree 请求均只走既有链路。
+
+### How
+
+- agent-web `vue-tsc`、两个定向 Chromium 场景和 `git diff --check` 通过；JDK 25 下以 `.env.test` 完整构建并重启 backend、opencode-manager、frontend。首次启动因缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 被阻断，按规范显式使用 `--without-workflow` 重试。
+- backend health/readiness 均为 UP，frontend 3000 返回 200，登录 CORS 预检返回允许源，manager WebSocket 已连接且最终健康检查为 `HEALTHY`。
+
+### Result
+
+- 从体验区或应用源码返回测试工作区不再要求重新选择版本；有 recent 时仍保持原选择，没有可进入 recent 时自动进入默认首版本。
+- 本次仅修改前端状态编排、回归测试和稳定说明；不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、性能、安全或环境配置，未修改 generated SDK、OpenCode 只读源码，也未新建分支。
+
+## 2026-08-12 - 体验烧瓶入口支持再次点击撤出
+
+### Why
+
+- 用户希望顶栏烧瓶按钮直接承担进入和撤出体验区，不再需要打开应用下拉后选择传统工作区。
+
+### What
+
+- 进入体验区前暂存当前应用；体验中烧瓶按钮改为“退出平台体验”，再次点击复用既有应用选择、文件连接关闭和切换代次恢复原应用工作区。
+- 原应用已不可用时按全局 recent 或首个可用应用降级；用户没有任何应用时清理体验 Workspace 状态并回到“未选择应用”普通空态，仍可再次点击进入。
+- 同步 frontend、agent-web、包级说明和前端规范；补充组件状态、恢复原应用和无应用退出后再次进入的回归覆盖。
+
+### How
+
+- 定向 Vitest 通过 2 个测试文件、64 个测试；定向 Chromium 通过应用源码返回、有应用体验切换和无应用体验切换 3 个场景；agent-web `vue-tsc` 和 `git diff --check` 通过。
+- 在真实本地页面登录验证“进入平台体验 → 退出平台体验”，再次点击后恢复 F-COSS / 本地-测试 / 20260618；backend 与 frontend 沿用当前已启动的本地测试服务。
+- 补充复核全量 Vitest 的失败项后，本次体验测试与两个 Markdown 测试定向复跑均通过；仍有 1 个任务外 `help-center.test.ts` 既有文案精确引号断言失败（正文是“超级管理员专属的用户管理”，测试要求中文引号），本次未修改用户手册或扩展修复范围。
+
+### Result
+
+- 烧瓶入口现在是可逆双态开关，退出不会再依赖应用下拉；体验区既有本地 Git 和无 push 边界不变。
+- 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、性能、安全或环境配置，未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。

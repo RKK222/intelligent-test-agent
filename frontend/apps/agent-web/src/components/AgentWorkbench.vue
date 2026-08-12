@@ -785,6 +785,8 @@ const experienceWorkspaceAcknowledged = ref(false);
 const experienceContinuation = ref<ExperienceContinuationState>(initialExperienceContinuation());
 let experienceOfferUserId: string | null = null;
 let experienceProcessConfirmationGeneration: number | null = null;
+// 体验区不绑定应用；进入前暂存当前应用，撤出时优先恢复原工作上下文。
+let experienceReturnAppId: string | undefined;
 const firstLoginGuideEnabled = computed(() =>
   experienceOfferPhase.value === "RESOLVED"
   && !experienceJourneyActive.value
@@ -1491,6 +1493,7 @@ watch(
       experienceDialogOpen.value = false;
       experienceOfferPhase.value = "WAITING";
       experienceJourneyActive.value = false;
+      experienceReturnAppId = undefined;
       experienceWorkspaceAcknowledged.value = hasAcknowledgedExperienceWorkspace(
         typeof window === "undefined" ? undefined : window.localStorage,
         userId
@@ -1684,13 +1687,13 @@ function ensureAppVersionsLoaded(templateId: string) {
   next.add(templateId);
   loadedTemplateIds.value = next;
 }
-// 切换应用时清空版本缓存，避免上一个应用的版本残留到新应用的菜单里。
+// 切换应用时同步清空版本缓存，避免异步恢复新工作区后迟到执行并抹掉刚回写的 versionId。
 watch(selectedAppId, () => {
   versionsByTemplateId.value = {};
   loadedTemplateIds.value = new Set();
   loadingVersionTemplateIds.value = new Set();
   currentVersionFromWorkspace.value = undefined;
-});
+}, { flush: "sync" });
 
 const sessionsQuery = useQuery({
   queryKey: ["sessions", "user-history", sessionSearchTrim, sessionHistoryPage],
@@ -2621,6 +2624,7 @@ async function continueExperienceWorkspaceWhenReady(generation: number) {
 
 function requestExperienceWorkspaceEntry() {
   if (experienceJourneyActive.value) return;
+  experienceReturnAppId = selectedAppId.value;
   // 用户已明确选择体验后，立即废弃旧应用/源码请求；迟到回包不得再覆盖体验区选择。
   appSelectionSeq += 1;
   selectingAppId = undefined;
@@ -2637,14 +2641,45 @@ function startExperienceWorkspace() {
   requestExperienceWorkspaceEntry();
 }
 
-function openExperienceWorkspaceDialog() {
+function leaveExperienceWorkspace() {
+  if (selectedWorkspaceKind.value !== "EXPERIENCE") return;
+  const apps = applicationCatalog.value;
+  const returnAppId =
+    experienceReturnAppId && apps.some((app) => app.appId === experienceReturnAppId)
+      ? experienceReturnAppId
+      : globalRecentAppId.value && apps.some((app) => app.appId === globalRecentAppId.value)
+        ? globalRecentAppId.value
+        : apps[0]?.appId;
+  experienceReturnAppId = undefined;
+  if (returnAppId) {
+    // 复用应用选择入口完成文件连接关闭、切换代次推进与默认工作区恢复。
+    void handleSelectApp(returnAppId);
+    return;
+  }
+
+  // 用户没有任何应用时仍允许撤出，回到普通工作台的未选择应用空态。
+  invalidateConversationInteraction();
+  if (selectedWorkspaceId.value) api.closeWorkspaceFileSocket(selectedWorkspaceId.value);
+  cancelExperienceWorkspaceFlow("WORKSPACE_SWITCHED");
+  appSelectionSeq += 1;
+  selectingAppId = undefined;
+  teardownAppSourceInteractions();
+  resetWorkspaceState();
+  selectedWorkspaceId.value = undefined;
+  selectedAppId.value = undefined;
+  selectedWorkspaceKind.value = "MANAGED";
+  appSourceContext.value = null;
+  feedback.value = {
+    kind: "info",
+    title: "已退出体验工作区",
+    description: "当前没有已加入的应用，工作台已回到未选择应用状态。"
+  };
+}
+
+function toggleExperienceWorkspace() {
   if (shareMode.value) return;
   if (selectedWorkspaceKind.value === "EXPERIENCE") {
-    feedback.value = {
-      kind: "info",
-      title: "已在体验工作区",
-      description: "当前使用的就是 OpenCode 所在服务器的本地体验目录。"
-    };
+    leaveExperienceWorkspace();
     return;
   }
   if (experienceWorkspaceAcknowledged.value) {
@@ -5913,7 +5948,7 @@ async function fallbackToManagedWorkspace(reason?: string) {
   appSourceContext.value = null;
   const appId = selectedAppId.value;
   const clearRecent = api.clearRecentAppSource().catch(() => undefined);
-  if (appId) await handleSelectApp(appId);
+  if (appId) await handleSelectApp(appId, { selectDefaultVersionWhenMissing: true });
   else trySelectDefaultApp();
   await clearRecent;
   if (reason) feedback.value = { kind: "info", title: "源码工作区已失效", description: reason };
@@ -6196,7 +6231,11 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
       feedback.value = { kind: "info", title: "已在该版本工作区", description: `${payload.version.version} (个人空间: default)` };
       return;
     }
-    const workspace = await api.getWorkspace(runtimeWorkspaceId);
+    // 兼容旧工作区详情未回填版本归属：ensure-default 回包已携带本次明确选择的权威版本上下文。
+    const workspace = mergeRecentRuntimeResponse(
+      await api.getWorkspace(runtimeWorkspaceId),
+      defaultPw.runtimeWorkspace
+    );
     if (!selectionIsCurrent()) return;
     const applied = await applyManagedWorkspace(workspace, selectionIsCurrent, {
       successTitle: "已切换应用版本",
@@ -6291,6 +6330,27 @@ async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: W
 // WorkbenchFooter / FigmaFileExplorer 上两级菜单展开模板时调用，触发版本懒加载。
 function handleLoadVersions(templateId: string) {
   ensureAppVersionsLoaded(templateId);
+}
+
+/**
+ * 从应用默认测试工作空间恢复后端排序首位版本，只供非托管工作区返回链路兜底。
+ * 普通首次选应用仍只读 recent，不会因为应用本身存在版本就自动创建个人 worktree。
+ */
+async function resolveDefaultManagedVersionForApp(
+  appId: string
+): Promise<{ template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion } | null> {
+  const templates = await queryClient.ensureQueryData<ApplicationWorkspaceTemplate[]>({
+    queryKey: ["managed-workspace", "app-templates", appId],
+    queryFn: () => api.listWorkspaceTemplates(appId)
+  });
+  const template = templates.find((item) => item.enabled !== false);
+  if (!template) return null;
+  const versions = await queryClient.ensureQueryData<ApplicationWorkspaceVersion[]>({
+    queryKey: ["managed-workspace", "app-versions", appId, template.workspaceId],
+    queryFn: () => api.listWorkspaceVersions(appId, template.workspaceId)
+  });
+  const version = versions[0];
+  return version ? { template, version } : null;
 }
 
 function refreshCurrentWorkspacePanels() {
@@ -6584,13 +6644,17 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
   }
 }
 
-async function handleSelectApp(appId: string) {
+async function handleSelectApp(
+  appId: string,
+  options: { selectDefaultVersionWhenMissing?: boolean } = {}
+) {
   if (selectingAppId === appId || !applicationCatalog.value.some((app) => app.appId === appId)) {
     return;
   }
   invalidateConversationInteraction();
   const leavingAppSource = selectedWorkspaceKind.value === "APP_SOURCE";
   const leavingExperience = selectedWorkspaceKind.value === "EXPERIENCE";
+  const selectDefaultVersionWhenMissing = options.selectDefaultVersionWhenMissing === true || leavingExperience;
   if (leavingExperience && selectedWorkspaceId.value) {
     api.closeWorkspaceFileSocket(selectedWorkspaceId.value);
     cancelExperienceWorkspaceFlow("WORKSPACE_SWITCHED");
@@ -6615,6 +6679,10 @@ async function handleSelectApp(appId: string) {
     && selectedAppId.value === appId
     && applicationCatalog.value.some((app) => app.appId === appId)
     && appSourceIntentIsCurrent(workspaceSelectionAuthority);
+  let defaultVersionSelection: {
+    template: ApplicationWorkspaceTemplate;
+    version: ApplicationWorkspaceVersion;
+  } | null = null;
   try {
     // 只有当前用户当前应用 recent 能反查到 versionId 时，才加载对应 default 私人 worktree。
     // 无历史时只切应用并保持工作区空态，footer 仍可新增版本或选择私人工作区。
@@ -6634,7 +6702,22 @@ async function handleSelectApp(appId: string) {
       }
       return;
     }
-    // 应用没有可用 recent/versionId 时保持空态，不回退到普通本机目录选择。
+    if (selectDefaultVersionWhenMissing) {
+      defaultVersionSelection = await resolveDefaultManagedVersionForApp(appId);
+      if (!selectionIsCurrent()) return;
+      if (defaultVersionSelection) {
+        const templateId = defaultVersionSelection.template.workspaceId;
+        const versions = queryClient.getQueryData<ApplicationWorkspaceVersion[]>([
+          "managed-workspace",
+          "app-versions",
+          appId,
+          templateId
+        ]) ?? [defaultVersionSelection.version];
+        versionsByTemplateId.value = { ...versionsByTemplateId.value, [templateId]: versions };
+        loadedTemplateIds.value = new Set([...loadedTemplateIds.value, templateId]);
+      }
+    }
+    // 普通选应用没有可用 recent/versionId 时保持空态；仅非托管返回链路使用上面的默认版本兜底。
   } catch (error) {
     const currentApp = applicationCatalog.value.find((app) => app.appId === appId);
     if (selectionIsCurrent()) {
@@ -6644,6 +6727,9 @@ async function handleSelectApp(appId: string) {
     if (selectionSeq === appSelectionSeq) {
       selectingAppId = undefined;
     }
+  }
+  if (defaultVersionSelection && selectionIsCurrent()) {
+    await handleSelectVersion(defaultVersionSelection);
   }
 }
 
@@ -11054,7 +11140,7 @@ async function handleLogout() {
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
-    @open-experience="openExperienceWorkspaceDialog"
+    @open-experience="toggleExperienceWorkspace"
     @load-versions="handleLoadVersions"
     @select-version="handleSelectVersion"
     @open-app-source="openAppSourcePicker"

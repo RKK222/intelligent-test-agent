@@ -2399,9 +2399,9 @@ function submitJoinApp() {
           type="button"
           :class="['figma-header-help', 'figma-header-experience', workspaceKind === 'EXPERIENCE' && 'is-open']"
           data-testid="experience-workspace-open"
-          :aria-label="workspaceKind === 'EXPERIENCE' ? '已在平台体验' : '进入平台体验'"
+          :aria-label="workspaceKind === 'EXPERIENCE' ? '退出平台体验' : '进入平台体验'"
           :aria-pressed="workspaceKind === 'EXPERIENCE'"
-          :title="workspaceKind === 'EXPERIENCE' ? '当前已在平台体验' : '平台体验'"
+          :title="workspaceKind === 'EXPERIENCE' ? '退出平台体验' : '进入平台体验'"
           @click.stop="openExperience"
         >
           <FlaskConical :size="19" :stroke-width="1.5" />
