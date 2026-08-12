@@ -719,15 +719,21 @@ function synchronizeAuthoritativeResendUser(
   message: Extract<AgentMessage, { role: "user" }>
 ): AgentChatRuntimeState {
   const replacementRunId = resend.replacementRunId;
-  const replacementIndex = state.messages.findIndex((item) => item.role === "user" && (
+  const existingIndex = state.messages.findIndex((item) => item.role === "user" && (
     item.runId === replacementRunId || item.resend?.replacementRunId === replacementRunId
   ));
-  const existingIndex = replacementIndex >= 0
-    ? replacementIndex
+  const anchorIndex = existingIndex >= 0
+    ? existingIndex
     : state.messages.findIndex((item) => item.role === "user" && item.runId === resend.sourceRunId);
-  const existing = existingIndex >= 0
-    ? state.messages[existingIndex] as Extract<AgentMessage, { role: "user" }>
+  const existing = anchorIndex >= 0
+    ? state.messages[anchorIndex] as Extract<AgentMessage, { role: "user" }>
     : undefined;
+  const replacedUserMessageIds = new Set(state.messages.flatMap((item, index) => item.role === "user" && (
+    index === anchorIndex
+    || item.runId === resend.sourceRunId
+    || item.runId === replacementRunId
+    || item.resend?.replacementRunId === replacementRunId
+  ) ? [item.id] : []));
   const synchronized: Extract<AgentMessage, { role: "user" }> = {
     ...existing,
     ...message,
@@ -745,8 +751,8 @@ function synchronizeAuthoritativeResendUser(
     resend: message.resend ?? existing?.resend ?? resend
   };
   let messages: AgentMessage[];
-  if (existingIndex >= 0) {
-    messages = replaceOrAppendMessage(state.messages, existingIndex, synchronized);
+  if (anchorIndex >= 0) {
+    messages = replaceOrAppendMessage(state.messages, anchorIndex, synchronized);
   } else {
     // assistant 可能先于平台 USER 快照到达；仍按同一 Run 把 USER 插回回答之前。
     const firstReplacementAssistant = state.messages.findIndex(
@@ -766,21 +772,32 @@ function synchronizeAuthoritativeResendUser(
       return text(item.payload.runId) !== resend.sourceRunId
         && text(item.payload.sourceRunId) !== resend.sourceRunId;
     }
+    // RunEvent 与 share 消息修订来自两条独立链路，乱序时可能都先投影一个替代 USER。
+    // 后端权威 USER 到达后，同一 replacementRunId 必须只保留当前同步对象。
+    if (item.role === "user" && (
+      item.runId === replacementRunId || item.resend?.replacementRunId === replacementRunId
+    )) {
+      return item === synchronized;
+    }
     return item.runId !== resend.sourceRunId;
   });
 
-  const previousMessageId = existing?.id;
   const authoritativeMessageId = synchronized.id;
   const todoSnapshotsByUserMessageId = { ...state.todoSnapshotsByUserMessageId };
-  if (previousMessageId && previousMessageId !== authoritativeMessageId
-      && Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, previousMessageId)) {
-    todoSnapshotsByUserMessageId[authoritativeMessageId] = todoSnapshotsByUserMessageId[previousMessageId];
+  for (const previousMessageId of replacedUserMessageIds) {
+    if (previousMessageId === authoritativeMessageId
+        || !Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, previousMessageId)) {
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, authoritativeMessageId)) {
+      todoSnapshotsByUserMessageId[authoritativeMessageId] = todoSnapshotsByUserMessageId[previousMessageId];
+    }
     delete todoSnapshotsByUserMessageId[previousMessageId];
   }
   const todoUserMessageIdByRunId = Object.fromEntries(
     Object.entries(state.todoUserMessageIdByRunId).map(([runId, userMessageId]) => [
       runId,
-      previousMessageId && userMessageId === previousMessageId ? authoritativeMessageId : userMessageId
+      replacedUserMessageIds.has(userMessageId) ? authoritativeMessageId : userMessageId
     ])
   );
   todoUserMessageIdByRunId[replacementRunId] = authoritativeMessageId;
@@ -789,7 +806,8 @@ function synchronizeAuthoritativeResendUser(
     messages,
     todoSnapshotsByUserMessageId,
     todoUserMessageIdByRunId,
-    pendingTodoUserMessageId: state.pendingTodoUserMessageId === previousMessageId
+    pendingTodoUserMessageId: (state.pendingTodoUserMessageId
+      && replacedUserMessageIds.has(state.pendingTodoUserMessageId))
       || state.currentTodoRunId === replacementRunId
       ? authoritativeMessageId
       : state.pendingTodoUserMessageId
@@ -1262,7 +1280,7 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
   let index = messages.findIndex((item) => messageIdentityMatches(item, messageId));
   if (role === "user" && index < 0 && !forceNewMessage) {
     // 撤回重发会更换文本和远端消息 ID；用替代 Run 边界原位接管，不能再依赖新旧文本相等。
-    const pendingResendIndex = findUnlinkedResendUser(messages, event.runId);
+    const pendingResendIndex = findResendUserForRun(messages, event.runId);
     const pendingUserIndex = pendingResendIndex >= 0 ? pendingResendIndex : findLastUserInCurrentTurn(messages);
     const pendingUser = pendingUserIndex >= 0 ? messages[pendingUserIndex] : undefined;
     if (pendingUser?.role === "user" && (
@@ -1461,7 +1479,14 @@ function findUnlinkedUserByText(messages: AgentMessage[], incomingText: string |
   );
 }
 
-// 撤回重发后的权威 user 事件可能晚于 assistant 事件到达；替代 Run 是比文本更稳定的归并边界。
+// 撤回重发的合成/原生 USER envelope 可能早于 started 到达；即使锚点仍带源消息 ID，也按替代 Run 接管。
+function findResendUserForRun(messages: AgentMessage[], runId: string): number {
+  return messages.findIndex((message) => message.role === "user"
+    && message.runId === runId
+    && message.resend?.replacementRunId === runId);
+}
+
+// 无角色的 part 只有在锚点尚未绑定 messageId 时才能按替代 Run 认作延迟 USER part，避免把 assistant part 挂到 USER。
 function findUnlinkedResendUser(messages: AgentMessage[], runId: string): number {
   return messages.findIndex((message) => message.role === "user"
     && !message.messageId
