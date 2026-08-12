@@ -9584,3 +9584,31 @@
 
 - 弹珠现在从发射槽到达顶部后会可靠进入主球台，离槽后不能从上方重新掉回发射槽；正常底部漏球、自动救球、三球多球和下坡重力规则保持不变。
 - 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、安全或环境配置；仅调整前端本地物理状态，不影响服务端性能与兼容性。未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+## 2026-08-12 - 按正确方向将最新 release 合入 mem0
+
+### Why
+
+- 用户澄清本次集成方向应为 `release → mem0`；此前把 mem0 合入 release 的本地操作方向相反。
+- 远端 release 已包含错误方向的合并提交 `4d5186104` 和其后的记录提交 `605899a4a`，同时又新增了 10 个业务提交，不能直接丢弃后续成果，也不能在未获授权时强推改写远端历史。
+
+### What
+
+- 先生成可恢复 bundle，再以错误合并前的 release `380f94234` 为基线，完整重放后续 10 个 release 提交；得到不包含 mem0 祖先 `c8cd006dc` 的纯净本地 release `f10754e01`。
+- 将该纯净 release 以非快进方式合入 `codex/qa-agent-memory-v1`（mem0）；唯一文本冲突位于本提交者会话记录，业务代码、API、前后端和稳定文档均自动合并，并保留双方有效记录。
+- 合并带入 release 最新的共享会话重发即时同步、通知中心、内部模型时延分布、工作区查询等代码及其 HTTP/SSE、模块、前端和测试文档；没有新增数据库结构或 Flyway migration。
+
+### How
+
+- 祖先与内容校验确认：纯净 release 含原基线及其后 10 个提交、mem0 不再是其祖先；错误历史与重放后历史的文件级 name-status 完全一致，安全 bundle 位于主工作区 `.tmp/git-safety/`。
+- JDK 25 定向后端测试在 21 模块通过（domain 1、workspace 3、runtime 35、memory 33、API 36、persistence 23），全后端 23 模块 `mvn clean package -DskipTests` 通过；AI 文档门禁通过。
+- 前端全仓 typecheck 和 production build 通过；完整 Vitest 为 1950 passed / 1 skipped / 1 个 editor 并发偶发失败，失败文件单独复跑 9/9 通过。Chromium 定向场景中通知实时同步、共享撤回重发、手工重发 3 项通过。
+- 另有 2 个存量 Chromium 用例稳定失败：mem0 首页已固定为 `/workbench` 但旧分享用例仍断言 `/`；固定 CHAT 下拉未声明 `clearable` 但旧记忆用例点击清除按钮。相关路由、组件和断言在合并前 mem0 `c8cd006dc` 已同时存在，本次未越界修复。
+- 使用主工作区只读 `.env.test`、JDK 25、共享 `TEST_AGENT_ROOT/TESTAGENT/SYS_DATA_ROOT_DIR`，从 mem0 工作树以 `--with-memory --without-workflow` 独立启动 backend、frontend 和 opencode-manager。backend health/readiness、frontend 3000、CORS、4097/4098 OpenCode 及 Memory VIP/CPU BGE/pgvector 均通过，Memory `rawMessageCount=0`。
+- 合并前属于用户的 6 个未提交前端文件通过独立 safety stash 原样恢复并继续保持未暂存；恢复后相关 Vitest 为 204 passed / 1 skipped，agent-web typecheck 和 4 个 Chromium 原生重发/只读命令场景均通过。
+
+### Result
+
+- 本地 release 已恢复为纯净 release 主线，最新 release 已按正确方向集成到 mem0；实际运行服务均来自 mem0 工作树。
+- 用户原有 6 个工作区改动未进入合并提交，已在最新 release 基线上恢复，可继续开发。
+- 远端 release 仍含错误方向历史，修正它需要明确授权后执行受保护的 `--force-with-lease`，本次没有推送或改写远端；Workflow 因本机缺少其独立 Redis 密钥未启动。
+- 未修改 `.env*`、generated SDK 或 OpenCode 只读源码；API/SSE 仅包含 release 已文档化的 additive 兼容扩展，数据库结构、安全边界和 migration 无变化。
