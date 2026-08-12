@@ -18,6 +18,8 @@
         schedule_mode as "scheduleMode", status,
         slot_start as "slotStart", slot_end as "slotEnd", window_end as "windowEnd",
         target_linux_server_id as "targetLinuxServerId", scheduled_task_run_id as "scheduledTaskRunId",
+        target_runtime_kind as "targetRuntimeKind",
+        target_local_client_instance_id as "targetLocalClientInstanceId",
         run_id as "runId", rollover_count as "rolloverCount", task_created_session as "taskCreatedSession",
         dispatch_started_at as "dispatchStartedAt", dispatch_attempt_id as "dispatchAttemptId",
         dispatch_owner_backend_process_id as "dispatchOwnerBackendProcessId",
@@ -37,6 +39,8 @@
         run_input_json=#{runInputJson}, schedule_mode=#{scheduleMode}, status=#{status},
         slot_start=#{slotStart}, slot_end=#{slotEnd},
         window_end=#{windowEnd}, target_linux_server_id=#{targetLinuxServerId},
+        target_runtime_kind=#{targetRuntimeKind},
+        target_local_client_instance_id=#{targetLocalClientInstanceId},
         scheduled_task_run_id=#{scheduledTaskRunId}, run_id=#{runId}, rollover_count=#{rolloverCount},
         task_created_session=#{taskCreatedSession}, dispatch_started_at=#{dispatchStartedAt},
         dispatch_attempt_id=#{dispatchAttemptId},
@@ -57,7 +61,12 @@
     <update id="claimTaskForDispatch" parameterType="map">
         update night_execution_tasks set <include refid="taskValues"/>
         where task_id=#{taskId} and status='SCHEDULED'
-        and target_linux_server_id=#{expectedTargetLinuxServerId}
+        and target_runtime_kind=#{expectedTargetRuntimeKind}
+        and ((#{expectedTargetRuntimeKind}='SERVER_PROCESS'
+                and target_linux_server_id=#{expectedTargetLinuxServerId})
+            or (#{expectedTargetRuntimeKind}='LOCAL_CLIENT'
+                and target_linux_server_id is null
+                and target_local_client_instance_id=#{expectedTargetLocalClientInstanceId}))
         and state_version=#{expectedStateVersion}
     </update>
     <update id="updateDispatchIfAttempt" parameterType="map">
@@ -78,6 +87,7 @@
         share_id_snapshot, share_version_snapshot, share_expires_at_snapshot, can_chat_snapshot,
         session_id, workspace_id, client_request_id, session_title, content_preview,
         run_input_json, schedule_mode, status, slot_start, slot_end, window_end, target_linux_server_id,
+        target_runtime_kind, target_local_client_instance_id,
         scheduled_task_run_id, run_id, rollover_count, task_created_session, dispatch_started_at,
         dispatch_attempt_id, dispatch_owner_backend_process_id, dispatch_lease_until, state_version,
         dismissed_at, reservation_released_at, error_code, error_message, trace_id, created_at, updated_at)
@@ -85,7 +95,8 @@
         #{shareIdSnapshot},#{shareVersionSnapshot},#{shareExpiresAtSnapshot},#{canChatSnapshot},
         #{sessionId},#{workspaceId},#{clientRequestId},#{sessionTitle},
         #{contentPreview},#{runInputJson},#{scheduleMode},#{status},#{slotStart},#{slotEnd},#{windowEnd},
-        #{targetLinuxServerId},#{scheduledTaskRunId},#{runId},#{rolloverCount},#{taskCreatedSession},
+        #{targetLinuxServerId},#{targetRuntimeKind},#{targetLocalClientInstanceId},
+        #{scheduledTaskRunId},#{runId},#{rolloverCount},#{taskCreatedSession},
         #{dispatchStartedAt},#{dispatchAttemptId},#{dispatchOwnerBackendProcessId},#{dispatchLeaseUntil},
         #{stateVersion},#{dismissedAt},#{reservationReleasedAt},#{errorCode},#{errorMessage},
         #{traceId},#{createdAt},#{updatedAt})

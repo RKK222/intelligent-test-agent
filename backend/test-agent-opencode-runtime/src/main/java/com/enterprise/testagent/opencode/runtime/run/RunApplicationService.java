@@ -42,6 +42,8 @@ import com.enterprise.testagent.domain.run.RunStorageMode;
 import com.enterprise.testagent.domain.run.RunRuntimeManifest;
 import com.enterprise.testagent.domain.run.RunRuntimeInput;
 import com.enterprise.testagent.domain.run.RunRuntimeStore;
+import com.enterprise.testagent.domain.run.RunRuntimeTarget;
+import com.enterprise.testagent.domain.run.RunRuntimeTargetRepository;
 import com.enterprise.testagent.domain.run.RunPersistenceAnchor;
 import com.enterprise.testagent.domain.run.RunSummaryPersistencePort;
 import com.enterprise.testagent.domain.run.RunStatus;
@@ -53,6 +55,7 @@ import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -61,6 +64,7 @@ import com.enterprise.testagent.event.RunEventAppender;
 import com.enterprise.testagent.event.RunEventLiveBus;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
@@ -177,6 +181,8 @@ public class RunApplicationService {
     private RunSummaryPersistencePort runSummaryPersistencePort;
     private RunTerminalProjectionService runTerminalProjectionService;
     private BackendInstanceIdentity backendInstanceIdentity;
+    private RunRuntimeTargetRepository runRuntimeTargetRepository;
+    private LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard;
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
     private RunOwnerLeaseSupervisor ownerLeaseSupervisor;
@@ -702,6 +708,26 @@ public class RunApplicationService {
                 coordinator, "coordinator must not be null");
     }
 
+    /** 读取 MyBatis 已随 Run 锚点原子冻结的目标，避免 Redis 丢失后误按服务端记录恢复。 */
+    @Autowired(required = false)
+    void configureRunRuntimeTargetRepository(RunRuntimeTargetRepository repository) {
+        this.runRuntimeTargetRepository = Objects.requireNonNull(repository);
+    }
+
+    /** capability 响应只用于界面展示；Run 入口仍需拒绝伪造的本地附件 part。 */
+    @Autowired(required = false)
+    void configureLocalRuntimeCapabilityGuard(LocalRuntimeCapabilityGuard guard) {
+        this.localRuntimeCapabilityGuard = Objects.requireNonNull(guard);
+    }
+
+    /** 关系型目标缺失代表旧服务端 Run；本地 Run 从不允许用该兼容值覆盖显式记录。 */
+    public RunRuntimeTarget runtimeTarget(RunId runId) {
+        return runRuntimeTargetRepository == null
+                ? new RunRuntimeTarget(runId, RuntimeKind.SERVER_PROCESS, null)
+                : runRuntimeTargetRepository.findByRunId(runId)
+                        .orElseGet(() -> new RunRuntimeTarget(runId, RuntimeKind.SERVER_PROCESS, null));
+    }
+
     /**
      * 创建兼容旧装配的服务实例，不显式传入快照服务时内部构造默认实现。
      */
@@ -1019,6 +1045,13 @@ public class RunApplicationService {
         Workspace workspace = conversationContext == null
                 ? findWorkspace(session.workspaceId())
                 : conversationContext.workspaceSnapshot();
+        if (localRuntimeCapabilityGuard != null
+                && input.parts().stream().anyMatch(this::isWorkspaceAttachment)) {
+            localRuntimeCapabilityGuard.requireWorkspaceSupported(
+                    workspace.workspaceId(),
+                    "attachments",
+                    "本地 OpenCode 工作区首版不开放聊天附件");
+        }
         ModelSelection modelSelection = resolveModelSelection(input.model());
         String opencodeAgent = resolveOpencodeAgent(input);
         Run pending = reservedRunId == null
@@ -1323,7 +1356,10 @@ public class RunApplicationService {
                 null,
                 now.plus(RunRuntimeStore.ACTIVE_TTL),
                 now,
-                now);
+                now,
+                context.runtimeKind(),
+                context.localClientInstanceId(),
+                context.connectionGeneration());
         boolean anchorInserted = false;
         try {
             runRuntimeStore.initialize(
@@ -1368,7 +1404,9 @@ public class RunApplicationService {
                     firstText(modelSelection.modelId(), input.model()),
                     running.messageSenderUserId(),
                     running.messageSenderUnifiedAuthId(),
-                    running.messageSentBySharedUser()));
+                    running.messageSentBySharedUser(),
+                    context.runtimeKind(),
+                    context.localClientInstanceId()));
             if (!inserted) {
                 // 锚点幂等冲突意味着本轮绝不会派发，必须清掉刚初始化的 Redis active/history 详情。
                 runRuntimeStore.discardBeforeDispatch(running.runId());
@@ -4356,6 +4394,11 @@ public class RunApplicationService {
             String traceId,
             Throwable error,
             RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
+        if (ErrorCode.LOCAL_CLIENT_DISCONNECTED.name().equals(platformErrorCode(error))) {
+            // 本地连接断开后不得由恢复器重订阅或重发可能修改文件的请求，直接以稳定原因码终止。
+            failRunFromStreamNow(agentId, run, storageMode, traceId, error, ownership);
+            return;
+        }
         if (isStreamingTransportError(error)) {
             scheduleRunFailureAfterTerminalGrace(
                     agentId, run, storageMode, traceId, error, "stream_transport", null);
@@ -4585,6 +4628,11 @@ public class RunApplicationService {
                 }
                 Instant occurredAt = Instant.now();
                 String safeMessage = safeStreamErrorMessage(error);
+                boolean localDisconnected =
+                        ErrorCode.LOCAL_CLIENT_DISCONNECTED.name().equals(platformErrorCode(error));
+                String terminalReason = localDisconnected
+                        ? ErrorCode.LOCAL_CLIENT_DISCONNECTED.name()
+                        : "TRANSPORT_ERROR";
                 if (ownership != null) {
                     ownerLeaseSupervisor.requireOwned(ownership);
                 }
@@ -4595,8 +4643,8 @@ public class RunApplicationService {
                                                 "name", error.getClass().getSimpleName(),
                                                 "message", safeMessage),
                                         "message", safeMessage),
-                                "TRANSPORT_ERROR",
-                                "STREAM_ERROR",
+                                terminalReason,
+                                localDisconnected ? "LOCAL_CLIENT_DISCONNECTED" : "STREAM_ERROR",
                                 safeMessage,
                                 false),
                         RunStorageMode.REDIS_SUMMARY,
@@ -4606,8 +4654,8 @@ public class RunApplicationService {
                 runTerminalProjectionService.project(
                         run.runId(),
                         RunStatus.FAILED,
-                        "TRANSPORT_ERROR",
-                        "STREAM_ERROR",
+                        terminalReason,
+                        localDisconnected ? "LOCAL_CLIENT_DISCONNECTED" : "STREAM_ERROR",
                         safeMessage,
                         false,
                         traceId);

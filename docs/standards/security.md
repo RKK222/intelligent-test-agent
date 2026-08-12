@@ -135,6 +135,22 @@ Token 校验流程：
 
 必须脱敏或禁止记录：
 
+- 本地客户端 `tack_v1_` client key、其数据库密文、模型 grant、本地随机模型 token、`client.key` 内容和
+  WebSocket REGISTER payload。设置页只显示掩码；copy 明文只能存在于后端方法局部变量和前端剪贴板
+  写入局部变量，禁止进入 DOM、Query cache、local/session storage、原始报文观察器或错误消息。
+- 本地绝对根路径不得进入普通审计、运行事件、指标或错误响应；审计只保存 SHA-256 root/path digest。
+  客户端 reported IP、observed address 和端口是状态信息，不得用作可信路由或授权依据。
+- client key 轮换/撤销必须同时 fencing 该用户所有连接和模型 grant。连接、文件 ticket、模型 grant、
+  HTTP/SSE 请求都必须绑定 `clientInstanceId + backendProcessId + connectionGeneration`，不允许跨代复用。
+- 生产控制面只允许 HTTPS/WSS。OpenCode 只能绑定 loopback，平台模型 key 永不下发；OpenCode 仅持有
+  随机本地 token，后台 grant 必须短 TTL 且可立即撤销。客户端 key 文件必须是当前用户所有的 `0600`，
+  禁止命令行参数和环境变量传 key。
+- 后台只允许直接 HTTPS/WSS URI，或信任代理源 IP 清单内的连接携带 `X-Forwarded-Proto: https|wss`；禁止
+  无条件信任客户端可伪造的 forwarded header。企业部署必须显式维护 Nginx 源 IP，明文控制开关仅限测试。
+- 内网 HTTP 下载不使用 client key。stable 清单必须签名，所有版本化制品必须按签名清单校验 SHA-256；
+  打包私钥不得进入仓库、企业 ZIP、Nginx 目录或客户端。由于 install.sh 也经同一 HTTP 取得，主动中间人
+  替换脚本与内嵌公钥的风险不能由清单签名消除，必须明确依赖网络 ACL 或未来可信 HTTPS/带外公钥。
+
 - Authorization、Cookie、API key、`X-Test-Agent-Api-Key`、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`ciphertext/encryptedApiKey/privateKey`、`X-Test-Agent-Session-Share`/shareId、`X-Support-Access-Grant`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。

@@ -10,6 +10,8 @@ import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
 import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAtomicMutationPort;
@@ -77,6 +79,7 @@ public class OpencodeProcessStartupService {
     private PublicAgentConfigPreviewSourceResolver publicPreviewSourceResolver;
     private OpencodeProcessStopService stopService;
     private WorkspaceGitToolTokenService workspaceGitToolTokenService;
+    private LocalClientLifecycleGateway localClientLifecycleGateway;
 
     /** 启动前选择用户有效公共个人配置或共享运行副本；方法注入保持既有测试构造器兼容。 */
     @Autowired
@@ -101,6 +104,13 @@ public class OpencodeProcessStartupService {
     void setWorkspaceGitToolTokenService(WorkspaceGitToolTokenService workspaceGitToolTokenService) {
         this.workspaceGitToolTokenService = Objects.requireNonNull(
                 workspaceGitToolTokenService, "workspaceGitToolTokenService must not be null");
+    }
+
+    /** LOCAL_CLIENT 目标仍通过本公共启动入口委托反向隧道，禁止业务层绕过。 */
+    @Autowired
+    void setLocalClientLifecycleGateway(LocalClientLifecycleGateway localClientLifecycleGateway) {
+        this.localClientLifecycleGateway = Objects.requireNonNull(
+                localClientLifecycleGateway, "localClientLifecycleGateway must not be null");
     }
 
     /**
@@ -381,6 +391,50 @@ public class OpencodeProcessStartupService {
      */
     public OpencodeServerProcess startAndVerify(OpencodeProcessStartupRequest request) {
         return startAndVerify(request, OpencodeProcessStartProgress.noop());
+    }
+
+    /**
+     * 自动启动或显式启动本地 OpenCode。启动成功必须同时具有客户端实际 PID、启动时间和 loopback health。
+     */
+    public LocalClientLifecycleResult startLocalClientAndVerify(
+            LocalClientInstanceId clientInstanceId,
+            long connectionGeneration,
+            String traceId) {
+        if (localClientLifecycleGateway == null) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地客户端生命周期网关未启用");
+        }
+        LocalClientLifecycleResult result = localClientLifecycleGateway.start(
+                clientInstanceId, connectionGeneration, traceId);
+        if (!result.success()
+                || result.processStatus() != LocalClientProcessStatus.RUNNING
+                || result.processId() == null
+                || result.processStartedAt() == null
+                || result.opencodePort() == null
+                || !result.opencodeHealthy()) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地 OpenCode 启动后健康校验未通过");
+        }
+        return result;
+    }
+
+    /** 显式重启复用同一公共启动语义，并以客户端实际启动时间作为唯一权威值。 */
+    public LocalClientLifecycleResult restartLocalClientAndVerify(
+            LocalClientInstanceId clientInstanceId,
+            long connectionGeneration,
+            String traceId) {
+        if (localClientLifecycleGateway == null) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地客户端生命周期网关未启用");
+        }
+        LocalClientLifecycleResult result = localClientLifecycleGateway.restart(
+                clientInstanceId, connectionGeneration, traceId);
+        if (!result.success()
+                || result.processStatus() != LocalClientProcessStatus.RUNNING
+                || result.processId() == null
+                || result.processStartedAt() == null
+                || result.opencodePort() == null
+                || !result.opencodeHealthy()) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地 OpenCode 重启后健康校验未通过");
+        }
+        return result;
     }
 
     /**

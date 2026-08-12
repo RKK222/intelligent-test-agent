@@ -3,6 +3,8 @@ package com.enterprise.testagent.api.web.platform;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
@@ -21,12 +23,16 @@ class AgentConfigFileRoutingService {
 
     private final AgentConfigApplicationService service;
     private final BackendJavaRouteResolver routeResolver;
+    private final LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard;
 
     AgentConfigFileRoutingService(
             AgentConfigApplicationService service,
-            BackendJavaRouteResolver routeResolver) {
+            BackendJavaRouteResolver routeResolver,
+            LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard) {
         this.service = Objects.requireNonNull(service, "service must not be null");
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
+        this.localRuntimeCapabilityGuard = Objects.requireNonNull(
+                localRuntimeCapabilityGuard, "localRuntimeCapabilityGuard must not be null");
     }
 
     /**
@@ -73,6 +79,10 @@ class AgentConfigFileRoutingService {
 
     private String workspaceLinuxServerId(AgentConfigDtos.FileRouteRequest request) {
         String workspaceId = requireText(request.workspaceId(), "workspaceId 不能为空", "workspaceId");
+        localRuntimeCapabilityGuard.requireWorkspaceSupported(
+                new WorkspaceId(workspaceId),
+                "agentConfig",
+                "本地 OpenCode 工作区首版不开放 Agent 配置管理");
         String resolved = service.workspaceAgentFilesLinuxServerId(workspaceId, normalizeOptional(request.worktreeId()));
         String requestedLinuxServerId = normalizeOptional(request.linuxServerId());
         if (requestedLinuxServerId != null && !requestedLinuxServerId.equals(resolved)) {

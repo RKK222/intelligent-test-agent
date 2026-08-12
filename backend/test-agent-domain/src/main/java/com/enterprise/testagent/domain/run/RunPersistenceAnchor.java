@@ -1,6 +1,7 @@
 package com.enterprise.testagent.domain.run;
 
 import com.enterprise.testagent.domain.session.ConversationSourceType;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.support.DomainValidation;
@@ -45,7 +46,49 @@ public record RunPersistenceAnchor(
         String modelId,
         UserId messageSenderUserId,
         String messageSenderUnifiedAuthId,
-        boolean messageSentBySharedUser) {
+        boolean messageSentBySharedUser,
+        RuntimeKind targetRuntimeKind,
+        String targetLocalClientInstanceId) {
+
+    /** 兼容本地运行目标加入前的完整锚点构造器。 */
+    public RunPersistenceAnchor(
+            RunId runId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            RunStatus status,
+            RunStorageMode storageMode,
+            long statusVersion,
+            String clientRequestId,
+            String producerLinuxServerId,
+            String executionNodeIdSnapshot,
+            String opencodeProcessIdSnapshot,
+            String rootRemoteSessionId,
+            String dispatchMessageId,
+            String scheduledDispatchAttemptId,
+            Instant scheduledDispatchLeaseUntil,
+            Instant scheduledDispatchAcceptedAt,
+            SessionMessageId assistantSummaryMessageId,
+            String traceId,
+            Instant createdAt,
+            Instant updatedAt,
+            Instant detailsExpiresAt,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            UserId triggeredByUserId,
+            String agentId,
+            String modelId,
+            UserId messageSenderUserId,
+            String messageSenderUnifiedAuthId,
+            boolean messageSentBySharedUser) {
+        this(runId, sessionId, workspaceId, status, storageMode, statusVersion,
+                clientRequestId, producerLinuxServerId, executionNodeIdSnapshot,
+                opencodeProcessIdSnapshot, rootRemoteSessionId, dispatchMessageId,
+                scheduledDispatchAttemptId, scheduledDispatchLeaseUntil,
+                scheduledDispatchAcceptedAt, assistantSummaryMessageId, traceId, createdAt,
+                updatedAt, detailsExpiresAt, sourceType, sourceRefId, triggeredByUserId,
+                agentId, modelId, messageSenderUserId, messageSenderUnifiedAuthId,
+                messageSentBySharedUser, RuntimeKind.SERVER_PROCESS, null);
+    }
 
     /** 兼容新增实际消息发送人归因前的完整锚点构造器。 */
     public RunPersistenceAnchor(
@@ -80,7 +123,8 @@ public record RunPersistenceAnchor(
                 scheduledDispatchAttemptId, scheduledDispatchLeaseUntil,
                 scheduledDispatchAcceptedAt, assistantSummaryMessageId, traceId, createdAt,
                 updatedAt, detailsExpiresAt, sourceType, sourceRefId, triggeredByUserId,
-                agentId, modelId, triggeredByUserId, null, false);
+                agentId, modelId, triggeredByUserId, null, false,
+                RuntimeKind.SERVER_PROCESS, null);
     }
 
     public RunPersistenceAnchor {
@@ -131,6 +175,12 @@ public record RunPersistenceAnchor(
         sourceRefId = optionalBounded(sourceRefId, "sourceRefId", 128);
         agentId = requiredBounded(agentId, "agentId", 64).toLowerCase(Locale.ROOT);
         modelId = optionalBounded(modelId, "modelId", 255);
+        targetRuntimeKind = RuntimeKind.fromNullable(targetRuntimeKind);
+        targetLocalClientInstanceId = optionalBounded(
+                targetLocalClientInstanceId, "targetLocalClientInstanceId", 128);
+        if ((targetRuntimeKind == RuntimeKind.LOCAL_CLIENT) != (targetLocalClientInstanceId != null)) {
+            throw new IllegalArgumentException("run runtime kind and local client target must match");
+        }
     }
 
     private static String requiredBounded(String value, String fieldName, int maxLength) {

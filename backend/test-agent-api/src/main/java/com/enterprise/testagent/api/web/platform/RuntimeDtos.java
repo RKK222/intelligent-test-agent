@@ -247,7 +247,11 @@ final class RuntimeDtos {
             String status,
             String linuxServerId,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String runtimeKind,
+            String localClientInstanceId,
+            boolean online,
+            Map<String, Boolean> capabilities) {
 
         /**
          * 从领域对象映射为 API 响应，避免直接暴露 domain 类型。
@@ -255,6 +259,17 @@ final class RuntimeDtos {
         static WorkspaceResponse from(
                 Workspace workspace,
                 ManagedWorkspacePathResolver pathResolver) {
+            return from(
+                    workspace,
+                    pathResolver,
+                    com.enterprise.testagent.workspace.WorkspaceApplicationService.WorkspaceRuntimeMetadata.server());
+        }
+
+        /** 本地工作区投影额外返回实例、在线状态和首版 capability。 */
+        static WorkspaceResponse from(
+                Workspace workspace,
+                ManagedWorkspacePathResolver pathResolver,
+                com.enterprise.testagent.workspace.WorkspaceApplicationService.WorkspaceRuntimeMetadata runtime) {
             Workspace resolved = pathResolver.withResolvedRootPathForResponse(workspace);
             return new WorkspaceResponse(
                     resolved.workspaceId().value(),
@@ -264,7 +279,11 @@ final class RuntimeDtos {
                     resolved.status().name(),
                     resolved.linuxServerId(),
                     resolved.createdAt(),
-                    resolved.updatedAt());
+                    resolved.updatedAt(),
+                    runtime.runtimeKind().name(),
+                    runtime.localClientInstanceId(),
+                    runtime.online(),
+                    runtime.capabilities());
         }
     }
 
@@ -312,7 +331,9 @@ final class RuntimeDtos {
             String sourceRefId,
             String shareStatus,
             Boolean isShared,
-            Boolean shareExpired) {
+            Boolean shareExpired,
+            String runtimeKind,
+            String localClientInstanceId) {
 
         /**
          * 从领域会话映射为 API 响应。
@@ -334,6 +355,8 @@ final class RuntimeDtos {
                     session.sourceRefId(),
                     null,
                     null,
+                    null,
+                    com.enterprise.testagent.domain.runtime.RuntimeKind.SERVER_PROCESS.name(),
                     null);
         }
 
@@ -362,7 +385,22 @@ final class RuntimeDtos {
                     session.sourceRefId(),
                     shareStatus,
                     isShared,
-                    shareExpired);
+                    shareExpired,
+                    com.enterprise.testagent.domain.runtime.RuntimeKind.SERVER_PROCESS.name(),
+                    null);
+        }
+
+        /** 在不改变旧 mapper 的前提下附加冻结的 Session 运行目标；缺失值沿用旧版服务端语义。 */
+        SessionResponse withRuntimeTarget(
+                com.enterprise.testagent.domain.session.SessionRuntimeTarget target) {
+            if (target == null) {
+                return this;
+            }
+            return new SessionResponse(
+                    sessionId, workspaceId, title, status, pinned, createdAt, updatedAt,
+                    workspaceContext, sourceType, sourceRefId, shareStatus, isShared, shareExpired,
+                    target.runtimeKind().name(),
+                    target.localClientInstanceId() == null ? null : target.localClientInstanceId().value());
         }
     }
 
@@ -544,7 +582,9 @@ final class RuntimeDtos {
             String messageSenderUsername,
             String messageSenderUnifiedAuthId,
             boolean messageSentBySharedUser,
-            ResendMetadataResponse resend) {
+            ResendMetadataResponse resend,
+            String runtimeKind,
+            String localClientInstanceId) {
 
         /**
          * 从旧领域运行对象映射为 API 响应；新存储元数据保持可空以兼容历史 Run。
@@ -610,7 +650,22 @@ final class RuntimeDtos {
                     username(usernameLookup, effectiveSender),
                     effectiveSenderUnifiedAuthId,
                     effectiveSentBySharedUser,
-                    ResendMetadataResponse.from(resend, usernameLookup));
+                    ResendMetadataResponse.from(resend, usernameLookup),
+                    com.enterprise.testagent.domain.runtime.RuntimeKind.SERVER_PROCESS.name(),
+                    null);
+        }
+
+        /** 附加数据库冻结的 Run 目标；旧装配或旧 mock 未提供目标时保持 SERVER_PROCESS。 */
+        RunResponse withRuntimeTarget(com.enterprise.testagent.domain.run.RunRuntimeTarget target) {
+            if (target == null) {
+                return this;
+            }
+            return new RunResponse(
+                    runId, sessionId, workspaceId, status, createdAt, updatedAt, tokens, costUsd,
+                    storageMode, clientRequestId, detailsAvailableUntil, sourceType, sourceRefId,
+                    messageSenderUserId, messageSenderUsername, messageSenderUnifiedAuthId,
+                    messageSentBySharedUser, resend, target.runtimeKind().name(),
+                    target.localClientInstanceId() == null ? null : target.localClientInstanceId().value());
         }
     }
 
@@ -1115,8 +1170,23 @@ final class RuntimeDtos {
     static PageResponse<WorkspaceResponse> workspacePage(
             PageResponse<Workspace> page,
             ManagedWorkspacePathResolver pathResolver) {
+        return workspacePage(
+                page,
+                pathResolver,
+                ignored -> com.enterprise.testagent.workspace.WorkspaceApplicationService.WorkspaceRuntimeMetadata.server());
+    }
+
+    /** 映射时逐工作区解析运行目标，避免 Controller 直接访问本地客户端 Repository。 */
+    static PageResponse<WorkspaceResponse> workspacePage(
+            PageResponse<Workspace> page,
+            ManagedWorkspacePathResolver pathResolver,
+            java.util.function.Function<Workspace,
+                    com.enterprise.testagent.workspace.WorkspaceApplicationService.WorkspaceRuntimeMetadata> runtimeResolver) {
         return new PageResponse<>(
-                page.items().stream().map(workspace -> WorkspaceResponse.from(workspace, pathResolver)).toList(),
+                page.items().stream()
+                        .map(workspace -> WorkspaceResponse.from(
+                                workspace, pathResolver, runtimeResolver.apply(workspace)))
+                        .toList(),
                 page.page(),
                 page.size(),
                 page.total());
@@ -1129,11 +1199,35 @@ final class RuntimeDtos {
         return new PageResponse<>(page.items().stream().map(SessionResponse::from).toList(), page.page(), page.size(), page.total());
     }
 
+    static PageResponse<SessionResponse> sessionPage(
+            PageResponse<Session> page,
+            java.util.function.Function<com.enterprise.testagent.domain.session.SessionId,
+                    com.enterprise.testagent.domain.session.SessionRuntimeTarget> targetResolver) {
+        return new PageResponse<>(
+                page.items().stream()
+                        .map(session -> SessionResponse.from(session)
+                                .withRuntimeTarget(targetResolver.apply(session.sessionId())))
+                        .toList(),
+                page.page(), page.size(), page.total());
+    }
+
     /**
      * 映射用户历史会话分页响应。
      */
     static PageResponse<SessionResponse> sessionHistoryPage(PageResponse<SessionHistoryItem> page) {
         return new PageResponse<>(page.items().stream().map(SessionResponse::from).toList(), page.page(), page.size(), page.total());
+    }
+
+    static PageResponse<SessionResponse> sessionHistoryPage(
+            PageResponse<SessionHistoryItem> page,
+            java.util.function.Function<com.enterprise.testagent.domain.session.SessionId,
+                    com.enterprise.testagent.domain.session.SessionRuntimeTarget> targetResolver) {
+        return new PageResponse<>(
+                page.items().stream()
+                        .map(item -> SessionResponse.from(item)
+                                .withRuntimeTarget(targetResolver.apply(item.session().sessionId())))
+                        .toList(),
+                page.page(), page.size(), page.total());
     }
 
     /**

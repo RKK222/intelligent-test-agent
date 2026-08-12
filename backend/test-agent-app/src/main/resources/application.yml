@@ -71,6 +71,9 @@ management:
       enabled: true
 
 test-agent:
+  local-client:
+    allow-insecure-control: ${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:false}
+    trusted-proxy-addresses: ${TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES:127.0.0.1,::1}
   memory:
     enabled: ${TEST_AGENT_MEMORY_ENABLED:false}
     service-url: ${TEST_AGENT_MEMORY_SERVICE_URL:http://127.0.0.1:18888}

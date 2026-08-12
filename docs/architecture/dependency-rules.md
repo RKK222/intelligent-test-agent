@@ -107,6 +107,20 @@ test-agent-event
   -> test-agent-domain
 ```
 
+本地客户端新增依赖链固定为：
+
+```text
+test-agent-local-client -> test-agent-local-client-protocol + test-agent-workspace-filesystem
+test-agent-api -> test-agent-opencode-runtime -> test-agent-local-client-protocol
+test-agent-workspace-management -> test-agent-workspace-filesystem
+```
+
+`test-agent-local-client` 不得依赖 `test-agent-api`、持久化或 generated SDK；协议模块不得依赖任何服务端
+业务模块。服务端与客户端文件操作都复用 `test-agent-workspace-filesystem`，禁止复制第二套路径校验。
+本地 OpenCode HTTP/SSE 必须通过 `OpencodeWebClientTransport` 接入现有门面，业务层不得按 runtime kind
+直接构造 HTTP 客户端。跨 Java 仍只使用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和
+`BackendSseForwarder`，连接地址上报不得参与路由或本机降级。
+
 `test-agent-app` 仍是唯一可部署 Spring Boot jar，但不承载业务逻辑。它强制启动 WebFlux 主上下文，并可为了启动、profile、migration、health、XXL 子上下文/executor 和 seed 依赖基础运行模块；平台 HTTP/SSE/WebSocket 入口属于 `test-agent-api`，XXL Servlet 页面入口只属于 integration 启动的子上下文。
 
 `workflow-service`、`runner-controller` 和 `analysis-task` 是 Java Maven 图之外的独立 Python/容器边界。Python 只能通过版本化 HTTP 端口调用 Java 的 workflow capabilities 和模型网关；Java 不能依赖 Python 包，也不能代理其浏览器 HTTP/SSE。只有 Runner 可挂 Docker Socket，API/Worker 和任务容器均禁止挂载。平台模型grant可到达Runner控制面，但只能经stdin进入任务容器内独立UID的回环relay；Codex/OpenCode进程只能持有短生命周期本地token，禁止直接依赖平台grant。

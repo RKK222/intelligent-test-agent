@@ -69,9 +69,12 @@ public class WorkspaceController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         var pageRequest = RuntimeApiSupport.pageRequest(page, size);
         var principal = AuthWebSupport.getAuthPrincipal(exchange);
-        return ApiResponse.ok(RuntimeDtos.workspacePage(userWorkspaceQueryService == null
-                ? workspaceService.listWorkspaces(pageRequest)
-                : userWorkspaceQueryService.listUserWorkspaces(principal.userId(), pageRequest), pathResolver), traceId);
+        return ApiResponse.ok(RuntimeDtos.workspacePage(
+                userWorkspaceQueryService == null
+                        ? workspaceService.listWorkspaces(pageRequest)
+                        : userWorkspaceQueryService.listUserWorkspaces(principal.userId(), pageRequest),
+                pathResolver,
+                workspaceService::runtimeMetadata), traceId);
     }
 
     /**
@@ -86,9 +89,11 @@ public class WorkspaceController {
         var principal = AuthWebSupport.getAuthPrincipal(exchange);
         WorkspaceId requested = new WorkspaceId(workspaceId);
         if (shareId == null || shareId.isBlank()) {
-            return ApiResponse.ok(RuntimeDtos.WorkspaceResponse.from(userWorkspaceQueryService == null
+            var workspace = userWorkspaceQueryService == null
                     ? workspaceService.getWorkspace(requested)
-                    : userWorkspaceQueryService.requireUserWorkspace(principal.userId(), requested), pathResolver), traceId);
+                    : userWorkspaceQueryService.requireUserWorkspace(principal.userId(), requested);
+            return ApiResponse.ok(RuntimeDtos.WorkspaceResponse.from(
+                    workspace, pathResolver, workspaceService.runtimeMetadata(workspace)), traceId);
         }
         if (shareService == null) {
             throw new com.enterprise.testagent.common.error.PlatformException(

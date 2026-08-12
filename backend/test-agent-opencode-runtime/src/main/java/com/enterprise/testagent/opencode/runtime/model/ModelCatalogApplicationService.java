@@ -5,6 +5,7 @@ import com.enterprise.testagent.agent.runtime.AgentRuntimeCommand;
 import com.enterprise.testagent.domain.model.AiModelConfig;
 import com.enterprise.testagent.domain.model.AiModelConfigRepository;
 import com.enterprise.testagent.domain.node.ExecutionNode;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -138,7 +139,10 @@ public class ModelCatalogApplicationService {
         String ucid = resolveCurrentUcid(userId);
         logInternalUcidHeader(traceId, userId, ucid);
         try {
-            runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/global/config", null, null, Map.of(), providerConfigPatch(ucid), traceId))
+            Map<String, Object> patch = node.runtimeKind() == RuntimeKind.LOCAL_CLIENT
+                    ? localClientProviderConfigPatch()
+                    : providerConfigPatch(ucid);
+            runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/global/config", null, null, Map.of(), patch, traceId))
                     .block();
         } catch (Exception exception) {
             LOGGER.warn("event=model_provider_sync_failed traceId={} providerId={} error={}",
@@ -320,6 +324,44 @@ public class ModelCatalogApplicationService {
                         "env", List.of(provider.getApiKeyEnv()),
                         "npm", "@ai-sdk/openai-compatible",
                         "api", stripTrailingSlash(provider.getBaseUrl()),
+                        "options", options,
+                        "models", models)));
+    }
+
+    /**
+     * 本地 OpenCode 只能看见 loopback relay 和随机本地 token 的环境变量引用；平台/上游密钥不得进隧道。
+     * UCID 由后台在校验 connection-bound grant 后按用户权威数据覆盖。
+     */
+    private Map<String, Object> localClientProviderConfigPatch() {
+        ModelCatalogProperties.Provider provider = properties.activeProvider();
+        Map<String, Object> models = new LinkedHashMap<>();
+        if ("internal".equals(properties.getSource())) {
+            for (AiModelConfig model : internalModels()) {
+                models.put(model.modelId(), toOpenCodeModelConfig(model));
+            }
+        } else {
+            for (Map<String, Object> model : externalModels()) {
+                String modelId = String.valueOf(model.get("id"));
+                models.put(modelId, toOpenCodeModelConfig(
+                        modelId, String.valueOf(model.getOrDefault("name", modelId))));
+            }
+        }
+        String proxyBaseUrl = "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}";
+        String localToken = "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}";
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("baseURL", proxyBaseUrl);
+        options.put("apiKey", localToken);
+        options.put("headers", Map.of(
+                "X-Enterprise-Model-Provider", provider.getProviderId()));
+        return Map.of(
+                "model", provider.getProviderId() + "/" + provider.getDefaultModel(),
+                "provider", Map.of(provider.getProviderId(), Map.of(
+                        "name", provider.getName(),
+                        "env", List.of(
+                                "TEST_AGENT_INTERNAL_PROXY_API_KEY",
+                                "TEST_AGENT_INTERNAL_PROXY_BASE_URL"),
+                        "npm", "@ai-sdk/openai-compatible",
+                        "api", proxyBaseUrl,
                         "options", options,
                         "models", models)));
     }

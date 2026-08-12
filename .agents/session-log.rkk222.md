@@ -9155,3 +9155,30 @@
 
 - 已完成任务即使只提供锁定 `duration`，也会继续显示耗时；同时保留 `totalDuration / tokens` 现有主路径和累计语义。
 - 纯前端兼容性修复；未变更 HTTP API、RunEvent、DTO、数据库、SQL、migration、性能或安全边界，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-12 - 新增 ARM64 本地 OpenCode 客户端与内网 HTTP 分发
+
+### Why
+
+- 需要允许用户通过独立 client key 将多个本地 ARM64 客户端接入平台，在本地用户权限内监管一个 OpenCode 1.18.4 进程并注册多个本地工作空间；浏览器仍只访问后台 Java，后台不能直接扫描用户磁盘。
+- 企业环境需要由 Nginx 通过内网明文 HTTP 分发 macOS Apple Silicon、麒麟 ARM 客户端，客户端安装时必须校验签名和固定版本依赖的 SHA-256。
+
+### What
+
+- 从提交 `18864a51b` 新建 `/Users/kaka/Desktop/intelligent-test-agent-local-opencode-client` worktree 和 `codex/local-opencode-client` 分支；主 worktree 的未提交后端、前端改动未复制、清理或暂存。
+- 新增 `test-agent-local-client-protocol`、`test-agent-workspace-filesystem`、`test-agent-local-client` 三个 Maven 模块，实现 `local-opencode-client.v1` 反向 WSS 协议、连接 generation fencing、心跳/取消/背压、OpenCode HTTP/SSE 与文件 RPC、本地模型中继、loopback 进程监管及稳定实例身份。
+- 后台新增单用户 client key 的创建/复制/轮换/撤销、客户端实例与连接路由、短期模型 grant、本地工作空间注册和文件 ticket；运行、会话、夜间任务及 OpenCode 路由增加向后兼容的 `RuntimeKind`/实例目标并禁止离线时回退服务端实例。关系型持久化全部使用 MyBatis XML，并新增 `V20260811210453__local_client_credentials_create_runtime.sql`。
+- 前端设置页增加密钥和实例管理、本地工作空间注册；头像菜单同时展示服务端和本地 OpenCode，按 capability 关闭本地首版不支持的终端、Git、Agent 配置、附件和协作入口。
+- 新增固定版本 Temurin JRE 21、OpenCode 1.18.4 的 ARM64 打包与签名清单、无 root 安装脚本、LaunchAgent/systemd user 服务及 Nginx `/downloads/local-opencode-client/` 配置；同步工程/模块 README、HTTP API、事件协议、数据库、安全、架构及部署文档。
+
+### How
+
+- 后端相关定向测试、客户端真实 supervisor 测试、跨 Java 精确路由、文件系统安全、生命周期、夜间任务、密钥/脱敏与兼容测试通过；修正 H2 夹具后持久层回归 297 passed / 19 skipped。真实 PostgreSQL 覆盖已知 Flyway 历史的 20 项升级测试通过，源码、持久层 JAR 和最终 Spring Boot JAR 内 migration SHA-256 均为 `b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970`。
+- `test-agent-app -am -DskipTests package` 和客户端 shaded JAR 构建通过，`java -jar ... --version` 输出 `test-agent-local-client 0.1.0`；真实 OpenCode 1.18.4 在 Apple Silicon Mac 上完成 loopback 启停、端口冲突、PID/启动时间和重启恢复验证。
+- 前端全量 Vitest 127 files、1946 passed / 1 skipped，workspace typecheck、lint、production build 通过；分发脚本完成签名、哈希和本机 HTTP 安装测试，Nginx 配置通过 `nginx -t` 及隐藏文件、目录索引、缓存策略反例校验。
+- 完整 Maven 回归确认三个基线问题与本次无关：H2 模型表夹具缺 `embedding_dimension`、PostgreSQL 模型用量并发用例在全量负载下 20 秒超时、分享用例固定 8 月 9 日过期时间；两个既有 MySQL 8.4 Testcontainers 场景在本机启动超过 120 秒。提交前已回顾全部 `.agents/session-log*.md` 并确认没有覆盖近期成果。
+
+### Result
+
+- 代码、协议、API、数据库、前端和内网 HTTP 分发主链路已实现并在 Apple Silicon 与真实 PostgreSQL 上部分验证；未修改 `.env*`、generated SDK 或 `opencode-source/opencode-1.18.4`，未 push。
+- 当前 worktree 没有独立 `.env.test`，且主 worktree 的 8080/3000 服务正在使用，未擅自停止或覆盖，因此没有在该 worktree 启动完整后台/前端/客户端三服务链路。缺少真实 ARM 麒麟设备，麒麟安装、systemd user、认证连接、文件 CRUD 和聊天修改文件的最终验收仍需在目标机执行，不能声明完整可交付。

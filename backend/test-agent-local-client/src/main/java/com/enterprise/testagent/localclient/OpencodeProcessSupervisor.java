@@ -1,0 +1,383 @@
+package com.enterprise.testagent.localclient;
+
+import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+/** 本地 OpenCode 监管器；PID、实际启动时间和可执行文件全部匹配后才允许停止。 */
+final class OpencodeProcessSupervisor {
+
+    private static final Duration HEALTH_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration HEALTH_POLL_INTERVAL = Duration.ofMillis(250);
+    private final LocalClientConfiguration configuration;
+    private final LocalClientStateStore stateStore;
+    private final LocalModelRelay modelRelay;
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(1))
+            .build();
+
+    OpencodeProcessSupervisor(
+            LocalClientConfiguration configuration,
+            LocalClientStateStore stateStore,
+            LocalModelRelay modelRelay) {
+        this.configuration = configuration;
+        this.stateStore = stateStore;
+        this.modelRelay = modelRelay;
+    }
+
+    synchronized LocalClientPayloads.LifecycleResult start(Integer preferredPort) {
+        LocalClientPayloads.LifecycleResult current = status();
+        if (current.success() && "RUNNING".equals(current.processStatus()) && current.opencodeHealthy()) {
+            return current;
+        }
+        if ("FAILED".equals(current.processStatus()) && current.processId() != null) {
+            return current;
+        }
+        if (current.processId() != null) {
+            // 已登记进程仍存活但 health 不健康时必须先按 PID/启动时间/命令身份停止，禁止另起孤儿进程。
+            LocalClientPayloads.LifecycleResult stopped = stop();
+            if (!stopped.success()) {
+                return stopped;
+            }
+        }
+        Path executable = requireExecutable();
+        List<Integer> ports = candidatePorts(preferredPort);
+        RuntimeException lastFailure = null;
+        for (int port : ports) {
+            if (!portAvailable(port)) {
+                continue;
+            }
+            try {
+                return startOnPort(executable, port);
+            } catch (RuntimeException exception) {
+                lastFailure = exception;
+            }
+        }
+        String message = lastFailure == null ? "没有可用的本地 OpenCode 端口" : "本地 OpenCode 启动失败";
+        return result(false, "FAILED", null, null, null, false, executable.toString(), message);
+    }
+
+    synchronized LocalClientPayloads.LifecycleResult restart(Integer preferredPort) {
+        LocalClientPayloads.LifecycleResult stopped = stop();
+        if (!stopped.success()) {
+            return stopped;
+        }
+        return start(preferredPort);
+    }
+
+    synchronized LocalClientPayloads.LifecycleResult stop() {
+        LocalClientPersistentState.ProcessState recorded = stateStore.read().process();
+        if (recorded == null) {
+            return result(true, "STOPPED", null, null, null, false, requireExecutable().toString(), "已停止");
+        }
+        ProcessHandle handle = ProcessHandle.of(recorded.processId()).orElse(null);
+        if (handle == null || !handle.isAlive()) {
+            if (healthy(recorded.port())) {
+                return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(), true,
+                        recorded.executable(), "原进程已退出但端口被其他进程占用");
+            }
+            clearProcess(recorded);
+            return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "已停止");
+        }
+        IdentityCheck identity = checkIdentity(handle, recorded);
+        if (!identity.matches()) {
+            return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(),
+                    healthy(recorded.port()), recorded.executable(), identity.message());
+        }
+        handle.destroy();
+        waitForExit(handle, Duration.ofSeconds(5));
+        if (handle.isAlive()) {
+            handle.destroyForcibly();
+            waitForExit(handle, Duration.ofSeconds(5));
+        }
+        if (handle.isAlive() || healthy(recorded.port())) {
+            return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(),
+                    healthy(recorded.port()), recorded.executable(), "本地 OpenCode 停止确认失败");
+        }
+        clearProcess(recorded);
+        return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "已停止");
+    }
+
+    synchronized LocalClientPayloads.LifecycleResult status() {
+        LocalClientPersistentState.ProcessState recorded = stateStore.read().process();
+        Path executable = requireExecutable();
+        if (recorded == null) {
+            return result(true, "STOPPED", null, null, null, false, executable.toString(), "未启动");
+        }
+        ProcessHandle handle = ProcessHandle.of(recorded.processId()).orElse(null);
+        if (handle == null || !handle.isAlive()) {
+            boolean portHealthy = healthy(recorded.port());
+            if (!portHealthy) {
+                clearProcess(recorded);
+                return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "进程已退出");
+            }
+            return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(), true,
+                    recorded.executable(), "记录进程已退出但端口身份不明");
+        }
+        IdentityCheck identity = checkIdentity(handle, recorded);
+        boolean health = healthy(recorded.port());
+        if (!identity.matches()) {
+            return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(), health,
+                    recorded.executable(), identity.message());
+        }
+        return result(
+                health,
+                health ? "RUNNING" : "UNHEALTHY",
+                recorded.processId(),
+                recorded.startedAt(),
+                recorded.port(),
+                health,
+                recorded.executable(),
+                health ? "运行中" : "进程存在但 loopback health 不健康");
+    }
+
+    private LocalClientPayloads.LifecycleResult startOnPort(Path executable, int port) {
+        Process process = null;
+        LocalClientPersistentState.ProcessState recorded = null;
+        try {
+            Files.createDirectories(configuration.opencodeConfigDirectory());
+            Files.createDirectories(configuration.opencodeDataDirectory());
+            Path dataParent = configuration.opencodeDataDirectory().toAbsolutePath().normalize().getParent();
+            Path logDirectory = (dataParent == null ? configuration.opencodeDataDirectory() : dataParent)
+                    .resolve("logs");
+            Files.createDirectories(logDirectory);
+            ProcessBuilder builder = new ProcessBuilder(
+                    executable.toString(),
+                    "serve",
+                    "--hostname", "127.0.0.1",
+                    "--port", Integer.toString(port),
+                    "--print-logs");
+            builder.environment().put("XDG_DATA_HOME", configuration.opencodeDataDirectory().toString());
+            builder.environment().put("OPENCODE_CONFIG_DIR", configuration.opencodeConfigDirectory().toString());
+            builder.environment().put("TEST_AGENT_INTERNAL_PROXY_BASE_URL", modelRelay.baseUrl());
+            builder.environment().put("TEST_AGENT_INTERNAL_PROXY_API_KEY", modelRelay.localToken());
+            builder.redirectErrorStream(true);
+            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logDirectory.resolve("opencode.log").toFile()));
+            process = builder.start();
+            ProcessHandle handle = process.toHandle();
+            Instant startedAt = handle.info().startInstant()
+                    .orElseThrow(() -> new IllegalStateException("ProcessHandle did not provide startInstant"));
+            recorded = new LocalClientPersistentState.ProcessState(
+                    handle.pid(), startedAt, executable.toString(), port);
+            persistProcess(recorded);
+            if (!waitForHealth(handle, port, HEALTH_TIMEOUT)) {
+                stopExact(recorded, handle);
+                throw new IllegalStateException("OpenCode loopback health did not become ready");
+            }
+            return result(true, "RUNNING", handle.pid(), startedAt, port, true,
+                    executable.toString(), "启动成功");
+        } catch (IOException exception) {
+            cleanupFailedStart(process, recorded);
+            throw new IllegalStateException("failed to launch OpenCode", exception);
+        } catch (RuntimeException exception) {
+            cleanupFailedStart(process, recorded);
+            throw exception;
+        }
+    }
+
+    /** 当前方法刚创建的 Process 对象可直接终止；成功持久化过的身份记录同时按期望值清除。 */
+    private void cleanupFailedStart(
+            Process process,
+            LocalClientPersistentState.ProcessState recorded) {
+        if (process != null && process.isAlive()) {
+            process.destroy();
+            waitForExit(process.toHandle(), Duration.ofSeconds(2));
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                waitForExit(process.toHandle(), Duration.ofSeconds(2));
+            }
+        }
+        if (recorded != null && (process == null || !process.isAlive())) {
+            clearProcess(recorded);
+        }
+    }
+
+    private void stopExact(LocalClientPersistentState.ProcessState recorded, ProcessHandle handle) {
+        IdentityCheck identity = checkIdentity(handle, recorded);
+        if (!identity.matches()) {
+            return;
+        }
+        handle.destroy();
+        waitForExit(handle, Duration.ofSeconds(2));
+        if (handle.isAlive()) {
+            handle.destroyForcibly();
+            waitForExit(handle, Duration.ofSeconds(2));
+        }
+        if (!handle.isAlive()) {
+            clearProcess(recorded);
+        }
+    }
+
+    private IdentityCheck checkIdentity(ProcessHandle handle, LocalClientPersistentState.ProcessState recorded) {
+        Instant actualStartedAt = handle.info().startInstant().orElse(null);
+        if (actualStartedAt == null || !actualStartedAt.equals(recorded.startedAt())) {
+            return new IdentityCheck(false, "PID 已被复用，拒绝控制当前进程");
+        }
+        String command = handle.info().command().orElse(null);
+        if (command == null) {
+            return new IdentityCheck(false, "无法确认进程可执行文件，拒绝控制");
+        }
+        try {
+            if (!Files.isSameFile(Path.of(command), Path.of(recorded.executable()))) {
+                return new IdentityCheck(false, "进程可执行文件与记录不一致，拒绝控制");
+            }
+        } catch (IOException exception) {
+            return new IdentityCheck(false, "进程可执行文件无法核验，拒绝控制");
+        }
+        String[] arguments = handle.info().arguments().orElse(new String[0]);
+        if (!hasArgument(arguments, "serve")
+                || !hasOption(arguments, "--hostname", "127.0.0.1")
+                || !hasOption(arguments, "--port", Integer.toString(recorded.port()))) {
+            return new IdentityCheck(false, "进程启动参数与本地 OpenCode 身份不一致，拒绝控制");
+        }
+        return new IdentityCheck(true, "identity verified");
+    }
+
+    private static boolean hasArgument(String[] arguments, String expected) {
+        for (String argument : arguments) {
+            if (expected.equalsIgnoreCase(argument)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasOption(String[] arguments, String option, String expectedValue) {
+        for (int index = 0; index + 1 < arguments.length; index++) {
+            if (option.equalsIgnoreCase(arguments[index]) && expectedValue.equals(arguments[index + 1])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean waitForHealth(ProcessHandle handle, int port, Duration timeout) {
+        Instant deadline = Instant.now().plus(timeout);
+        while (handle.isAlive() && Instant.now().isBefore(deadline)) {
+            if (healthy(port)) {
+                return true;
+            }
+            sleep(HEALTH_POLL_INTERVAL);
+        }
+        return handle.isAlive() && healthy(port);
+    }
+
+    private boolean healthy(int port) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + port + "/global/health"))
+                    .timeout(Duration.ofSeconds(1))
+                    .GET()
+                    .build();
+            int status = httpClient.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
+            return status >= 200 && status < 300;
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    private Path requireExecutable() {
+        try {
+            Path executable = configuration.opencodeExecutable().toRealPath();
+            if (!Files.isRegularFile(executable) || !Files.isExecutable(executable)) {
+                throw new IllegalStateException("OpenCode executable is not executable");
+            }
+            return executable;
+        } catch (IOException exception) {
+            throw new IllegalStateException("OpenCode executable cannot be resolved", exception);
+        }
+    }
+
+    private List<Integer> candidatePorts(Integer preferredPort) {
+        List<Integer> ports = new ArrayList<>();
+        if (preferredPort != null && preferredPort >= configuration.portMin() && preferredPort <= configuration.portMax()) {
+            ports.add(preferredPort);
+        }
+        LocalClientPersistentState.ProcessState previous = stateStore.read().process();
+        if (previous != null && !ports.contains(previous.port())) {
+            ports.add(previous.port());
+        }
+        for (int port = configuration.portMin(); port <= configuration.portMax(); port++) {
+            if (!ports.contains(port)) {
+                ports.add(port);
+            }
+        }
+        return ports;
+    }
+
+    private static boolean portAvailable(int port) {
+        try (ServerSocket socket = new ServerSocket()) {
+            // 探测 socket 本身不承载连接，允许地址复用可避免 macOS 在 close 后短暂保留候选端口，
+            // 导致紧接着启动的 OpenCode 错误地得到 EADDRINUSE。真实占用仍会让 bind 失败。
+            socket.setReuseAddress(true);
+            // OpenCode 明确监听 127.0.0.1，探测必须使用同一地址族，避免只检查 ::1 后误判端口可用。
+            socket.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port));
+            return true;
+        } catch (IOException exception) {
+            return false;
+        }
+    }
+
+    private void persistProcess(LocalClientPersistentState.ProcessState process) {
+        stateStore.update(state -> new LocalClientPersistentState(
+                state.clientInstanceId(), process, state.workspaces()));
+    }
+
+    private void clearProcess(LocalClientPersistentState.ProcessState expected) {
+        stateStore.update(state -> {
+            if (state.process() == null
+                    || state.process().processId() != expected.processId()
+                    || !state.process().startedAt().equals(expected.startedAt())) {
+                return state;
+            }
+            return new LocalClientPersistentState(state.clientInstanceId(), null, state.workspaces());
+        });
+    }
+
+    private static void waitForExit(ProcessHandle handle, Duration timeout) {
+        try {
+            handle.onExit().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (Exception ignored) {
+            // 调用方继续检查 isAlive，并决定是否强制终止或返回失败。
+        }
+    }
+
+    private static void sleep(Duration duration) {
+        try {
+            Thread.sleep(duration);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("OpenCode health wait interrupted", exception);
+        }
+    }
+
+    private static LocalClientPayloads.LifecycleResult result(
+            boolean success,
+            String status,
+            Long processId,
+            Instant processStartedAt,
+            Integer port,
+            boolean healthy,
+            String executable,
+            String message) {
+        return new LocalClientPayloads.LifecycleResult(
+                success, status, processId, processStartedAt, port, healthy, executable, message);
+    }
+
+    private record IdentityCheck(boolean matches, String message) {
+    }
+}

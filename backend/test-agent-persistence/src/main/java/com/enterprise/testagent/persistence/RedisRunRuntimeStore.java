@@ -2450,7 +2450,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 optionalText(fields, "attention"), optionalText(fields, "attentionEventId"),
                 optionalInstant(fields, "attentionAt"),
                 Instant.parse(text(fields, "detailsExpiresAt")),
-                base.createdAt(), Instant.parse(text(fields, "updatedAt")));
+                base.createdAt(), Instant.parse(text(fields, "updatedAt")),
+                base.targetRuntimeKind(), base.targetLocalClientInstanceId(),
+                base.targetConnectionGeneration());
     }
 
     private RunEvent event(RunEventDraft draft, long seq) {

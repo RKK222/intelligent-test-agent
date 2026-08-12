@@ -9,6 +9,8 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.enterprise.testagent.domain.session.SessionId;
@@ -64,6 +66,10 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
     public boolean claimForDispatch(NightExecutionTask task, String expectedTargetLinuxServerId) {
         Map<String, Object> values = params(task);
         values.put("expectedTargetLinuxServerId", expectedTargetLinuxServerId);
+        values.put("expectedTargetRuntimeKind", task.targetRuntimeKind().name());
+        values.put("expectedTargetLocalClientInstanceId", task.targetLocalClientInstanceId() == null
+                ? null
+                : task.targetLocalClientInstanceId().value());
         values.put("expectedStateVersion", task.stateVersion() - 1);
         return mapper.claimTaskForDispatch(values) == 1;
     }
@@ -226,7 +232,9 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
                 value(row, "creatorUserId", UserId::new), text(row, "creatorUnifiedAuthId"),
                 bool(row, "createdBySharedUser"), value(row, "shareIdSnapshot", SessionShareId::new),
                 optionalLong(row, "shareVersionSnapshot"), instant(row, "shareExpiresAtSnapshot"),
-                optionalBoolean(row, "canChatSnapshot"));
+                optionalBoolean(row, "canChatSnapshot"),
+                RuntimeKind.fromNullable(text(row, "targetRuntimeKind")),
+                value(row, "targetLocalClientInstanceId", LocalClientInstanceId::new));
     }
 
     private Map<String, Object> params(NightExecutionTask task) {
@@ -252,6 +260,10 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
         values.put("slotEnd", task.slotEnd());
         values.put("windowEnd", task.windowEnd());
         values.put("targetLinuxServerId", task.targetLinuxServerId());
+        values.put("targetRuntimeKind", task.targetRuntimeKind().name());
+        values.put("targetLocalClientInstanceId", task.targetLocalClientInstanceId() == null
+                ? null
+                : task.targetLocalClientInstanceId().value());
         values.put("scheduledTaskRunId", task.scheduledTaskRunId() == null ? null : task.scheduledTaskRunId().value());
         values.put("runId", task.runId() == null ? null : task.runId().value());
         values.put("rolloverCount", task.rolloverCount());

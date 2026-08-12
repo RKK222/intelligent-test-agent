@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.workspace.ManagedWorkspaceApplicationService;
@@ -41,6 +42,7 @@ public class ManagedWorkspaceController {
     private final ManagedWorkspaceApplicationService service;
     private final UserOpencodeProcessAssignmentService processAssignmentService;
     private final SessionCollaborationShareService shareService;
+    private LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard;
 
     public ManagedWorkspaceController(
             ManagedWorkspaceApplicationService service,
@@ -530,6 +532,12 @@ public class ManagedWorkspaceController {
             boolean requireChat,
             String auditAction,
             BiFunction<UserId, DelegatedOperationContext, Object> action) {
+        if (localRuntimeCapabilityGuard != null) {
+            localRuntimeCapabilityGuard.requireWorkspaceSupported(
+                    new WorkspaceId(workspaceId),
+                    "gitPublish",
+                    "本地 OpenCode 工作区首版不开放浏览器 Git 操作与发布");
+        }
         String traceId = RuntimeApiSupport.traceId(exchange);
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
         String shareId = exchange.getRequest().getHeaders().getFirst(SessionShareController.SHARE_HEADER);
@@ -561,6 +569,12 @@ public class ManagedWorkspaceController {
 
     private UserId userId(ServerWebExchange exchange) {
         return AuthWebSupport.getAuthPrincipal(exchange).userId();
+    }
+
+    /** capability 不是鉴权；直接调用 Git HTTP 入口时仍按本地绑定失败关闭。 */
+    @Autowired(required = false)
+    void configureLocalRuntimeCapabilityGuard(LocalRuntimeCapabilityGuard guard) {
+        this.localRuntimeCapabilityGuard = guard;
     }
 
     private String agentLinuxServerId(ServerWebExchange exchange) {

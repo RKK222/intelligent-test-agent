@@ -25,6 +25,9 @@ Browser
           -> test-agent-opencode-client
               -> test-agent-opencode-sdk-generated
                   -> opencode server pool
+      -> local client reverse-tunnel gateway
+          -> test-agent-local-client-protocol
+          -> user-owned test-agent-local-client -> loopback OpenCode / local filesystem
       -> test-agent-xxl-job-integration
           -> test-agent-xxl-job-admin-upstream
           -> isolated MySQL / XXL executors
@@ -44,6 +47,7 @@ Browser
 - `test-agent-app` 只承载启动、装配、profile、migration、health 和日志等运行入口，不承载业务逻辑。
 - `test-agent-agent-runtime` 是多 agent 选择、统一日志/指标包装和具体 agent 适配器边界。
 - `test-agent-opencode-client` 是业务代码访问 opencode server 的唯一门面。
+- 本地目标仍通过 `test-agent-opencode-client` 门面，但传输由 `OpencodeWebClientTransport` 切换为反向隧道；浏览器和业务层不直连客户端。
 - `test-agent-opencode-sdk-generated` 只保存生成代码，不承载业务逻辑。
 - XXL executor 注册不使用稳定 Linux 服务器亲和；夜间扫描取得任务后，由业务层按任务提交时固化的目标服务器通过公共 Java 路由分发。
 - Workspace 级 OpenCode 运行态目录由 `test-agent-opencode-runtime` 在目标解析前复用 `ConversationWorkspaceAccessAuthorizer` 校验应用成员与个人工作区 owner，不能只凭 workspaceId 读取其它应用的 `.opencode` 能力。
@@ -66,6 +70,9 @@ Browser
 | `test-agent-observability` | traceId、结构化日志、Micrometer 指标、观测性工具。 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
+| `test-agent-local-client-protocol` | 后台与本地客户端共享的 `local-opencode-client.v1` JSON 帧、256 KiB 分片、版本与大小校验，不依赖服务端领域。 |
+| `test-agent-workspace-filesystem` | 服务端和本地客户端复用的真实根锚定、相对路径、符号链接防逃逸、预览/搜索、原子移动及分片上传下载内核。 |
+| `test-agent-local-client` | Java 21 用户级客户端，负责 WSS 反向连接、稳定实例身份、loopback OpenCode 监管、文件 RPC 和模型中继。 |
 | `test-agent-notification` | 通用用户站内通知模型编排、分享通知去重/更新/失效/已读、未读统计、事务提交后本机与跨 Java 变化、30 秒数据库校准和 90 天历史清理；不承载 Controller、SQL 或页面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
 | `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/上传/复制/移动/删除、基于工作区 JSONC 与本机 READY 引用副本的只读组合文件视图、超级管理员服务器目录选择、git/diff、对话 Tool 到当前个人 workspace 的安全映射与 Git 编排、版本选择前按当前用户身份做 Git 只读访问预检、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、个人拉取成功后的单用户运行态重载登记、超级管理员按应用预览工作空间/版本/实际分支并按单分支或全应用刷新物理 feature 组、feature 固定提交向相关个人 worktree 的原生 Git merge（非重叠本地改动保留、覆盖风险待同步、真实冲突三方处理）、Agent & Skill Hub 远端精确提交快照/显式发布/固定依赖/两阶段引用与取消/更新三方合并、应用 Agent/Skill 发布 rollout、应用引用资产库的 generation/租约/本机有界即时调度/定向退避/补偿副本、应用源码固定提交的多服务器物化/启动与周期数据库补偿/打开/最近选择/索引保护/XXL 清理、受控分支切换、只读实际指针核验与安全目录树、agent 和 skill 管理业务。 |

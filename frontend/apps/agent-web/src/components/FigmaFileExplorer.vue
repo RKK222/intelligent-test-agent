@@ -18,7 +18,7 @@ import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe,
 import type { AppSourceWorkspaceContext, SelectedWorkspaceKind } from "./app-source-workspace";
 import { normalizePhysicalAbsolutePath } from "./physical-path";
 
-const props = defineProps<FileExplorerProps & {
+const props = withDefaults(defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
   /** 当前应用名，传递给 WorkbenchFooter 作为两级菜单首行提示 */
   appName?: string;
@@ -38,6 +38,10 @@ const props = defineProps<FileExplorerProps & {
   canWrite?: boolean;
   /** 是否允许编辑应用级 Agent/Skill/Rules/Templates 配置 */
   canManageAgentConfig?: boolean;
+  /** 本地客户端首版不开放浏览器 Git 面板。 */
+  workspaceGitEnabled?: boolean;
+  /** 本地客户端首版不开放 Agent 配置管理面板。 */
+  agentConfigEnabled?: boolean;
   /** 是否允许编辑公共 Git 中的 Agent/Skill 配置（仅超级管理员） */
   canManagePublicConfig?: boolean;
   /** 后端 base url，透传给 AgentConfigPanel/GitChangesPanel */
@@ -89,7 +93,11 @@ const props = defineProps<FileExplorerProps & {
   appSourceRepositories?: AppSourceRepositorySummary[];
   loadingAppSourceRepositories?: boolean;
   appSourceRepositoriesError?: string | null;
-}>();
+}>(), {
+  // 新 capability 未随旧调用传入时必须保持原有服务器工作区能力，只有显式 false 才关闭。
+  workspaceGitEnabled: true,
+  agentConfigEnabled: true
+});
 
 const emit = defineEmits<{
   toggleDirectory: [path: string];
@@ -322,11 +330,12 @@ function onResizeEnd() {
 }
 
 function refreshAgents() {
+  if (props.agentConfigEnabled === false) return;
   agentConfigPanelRef.value?.refreshAll();
 }
 
 function refreshChanges() {
-  if (props.workspaceKind === "APP_SOURCE") return;
+  if (props.workspaceKind === "APP_SOURCE" || props.workspaceGitEnabled === false) return;
   gitChangesPanelRef.value?.refreshChanges();
 }
 
@@ -348,8 +357,8 @@ watch(tab, (nextTab) => {
   diffAutoRefreshTimer = window.setInterval(refreshChanges, DIFF_AUTO_REFRESH_INTERVAL_MS);
 });
 
-watch(() => props.workspaceKind, (kind) => {
-  if (kind === "APP_SOURCE" && tab.value === "changes") tab.value = "explorer";
+watch([() => props.workspaceKind, () => props.workspaceGitEnabled], ([kind, gitEnabled]) => {
+  if ((kind === "APP_SOURCE" || gitEnabled === false) && tab.value === "changes") tab.value = "explorer";
 });
 
 onUnmounted(stopDiffAutoRefresh);
@@ -408,7 +417,7 @@ defineExpose({
         <Search class="h-4 w-4 figma-fe-tab-icon--search" :stroke-width="1.5" />
       </button>
       <button
-        v-if="workspaceKind !== 'APP_SOURCE'"
+        v-if="workspaceKind !== 'APP_SOURCE' && workspaceGitEnabled !== false"
         type="button"
         :class="['ta-icon-tab', tab === 'changes' && 'is-active']"
         title="变更"
@@ -433,7 +442,7 @@ defineExpose({
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <GitChangesPanel
-        v-if="workspaceKind !== 'APP_SOURCE'"
+        v-if="workspaceKind !== 'APP_SOURCE' && workspaceGitEnabled !== false"
         v-show="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
@@ -539,7 +548,7 @@ defineExpose({
                     <span>刷新文件树</span>
                   </button>
                   <button
-                    v-if="workspaceKind !== 'APP_SOURCE'"
+                    v-if="workspaceKind !== 'APP_SOURCE' && workspaceGitEnabled !== false"
                     type="button"
                     class="figma-fe-more-menu-item"
                     aria-label="拉取远程"
@@ -621,7 +630,7 @@ defineExpose({
 
         <!-- Resizer divider: only show if both sections are expanded -->
         <div
-          v-if="workspaceKind !== 'APP_SOURCE' && workspaceExpanded && agentsExpanded"
+          v-if="workspaceKind !== 'APP_SOURCE' && agentConfigEnabled !== false && workspaceExpanded && agentsExpanded"
           class="figma-fe-resize-handle"
           @mousedown="onResizeStart"
           role="separator"
@@ -629,7 +638,7 @@ defineExpose({
         />
 
         <!-- Section 2: agents -->
-        <div v-if="workspaceKind !== 'APP_SOURCE'" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
+        <div v-if="workspaceKind !== 'APP_SOURCE' && agentConfigEnabled !== false" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
           <div class="figma-fe-section-header">
             <button
               type="button"

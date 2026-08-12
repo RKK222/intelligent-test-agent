@@ -102,6 +102,22 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
+        @DisplayName("脱敏本地客户端明文 key、密文和本地模型 token")
+        void mask_localClientCredentials() {
+            String input = "{\"clientKey\":\"tack_v1_plaintext\","
+                    + "\"encryptedClientKey\":\"rsa-ciphertext\",\"localToken\":\"loopback-secret\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"clientKey\":\"***\""));
+            assertTrue(result.contains("\"encryptedClientKey\":\"***\""));
+            assertTrue(result.contains("\"localToken\":\"***\""));
+            assertFalse(result.contains("tack_v1_plaintext"));
+            assertFalse(result.contains("rsa-ciphertext"));
+            assertFalse(result.contains("loopback-secret"));
+        }
+
+        @Test
         @DisplayName("脱敏 Workflow 一次性票据、模型授权和加密私钥信封")
         void mask_workflowCredentials() {
             String input = "{\"ticketId\":\"wfcheckout-secret\",\"grantId\":\"wfgrantid-secret\","

@@ -90,17 +90,24 @@ public class ConversationContextController {
         return context.executionOwnerUserId();
     }
 
-    /**
-     * 对外仅返回 token、版本和过期时间，不泄露用户、路径、进程或节点绑定。
-     */
-    record ConversationContextResponse(String contextToken, int contextVersion, Instant expiresAt) {
+    /** 对外返回冻结目标标识，但不泄露用户、根路径、服务端进程或模型授权。 */
+    record ConversationContextResponse(
+            String contextToken,
+            int contextVersion,
+            Instant expiresAt,
+            String runtimeKind,
+            String localClientInstanceId,
+            Long connectionGeneration) {
 
         static ConversationContextResponse from(
                 ConversationContextApplicationService.IssuedConversationContext issued) {
             return new ConversationContextResponse(
                     issued.contextToken(),
                     issued.context().contextVersion(),
-                    issued.context().expiresAt());
+                    issued.context().expiresAt(),
+                    issued.context().runtimeKind().name(),
+                    issued.context().localClientInstanceId(),
+                    issued.context().connectionGeneration());
         }
     }
 }

@@ -278,3 +278,12 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
   `RedisRunRuntimeStore.purgeDetailsAfterResend` 同步清理源 Run 运行态详情和索引。
 - `MyBatisRunResendRepositoryIntegrationTest` 覆盖 migration、幂等和锁；正式交付前仍须按 `docs/deployment/database.md` 在真实
   PostgreSQL 已部署基线上核对版本、checksum 和最终 JAR 字节。
+
+## 本地客户端持久化
+
+`LocalClientMapper.xml` 保存用户唯一凭据、稳定实例和 Workspace 根绑定；
+`SessionRuntimeTargetMapper.xml`、`RunRuntimeTargetMapper.xml` 与扩展后的
+`NightExecutionTaskMapper.xml` 保存冻结目标。Redis 适配器只保存 15 秒连接路由和短 TTL 模型 grant，
+所有读写都校验 generation/fencing token。结构由
+`V20260811210453__local_client_credentials_create_runtime.sql` 创建，详见
+`docs/deployment/database.md`。

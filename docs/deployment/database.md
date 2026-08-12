@@ -1758,3 +1758,23 @@ migration 创建 `user_notifications`：
 该版本高于 QA Memory 扩展兼容链的 `V20260810110000` 至 `V20260810110002`，通知本身无需复制第二份兼容 SQL：既有 `DatabaseMigrationCompatibilityCustomizer` 仍只过滤不适配的低版本主分享 migration，通知 migration 由主 location 在分享前向迁移之后顺序执行。反向把 QA Memory 合入已执行通知和 `V20260810234154` 的 release 数据库时，使用的是独立的 `V20260811170050` QA Memory 补偿，不是通知迁移副本。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 对每套已知已部署 history 升级到当前 HEAD 后统一断言 `user_notifications` 表和关键列存在；通知仓储 PostgreSQL 集成测试另覆盖空库、主分享基线、审计回填和查询口径。
 
 打包后必须分别从 persistence JAR 和最终应用 JAR 读取 `db/migration/V20260810170000__user_notifications_create_notification_center.sql`，与已测试源码计算 SHA-256；三者不一致不得发布。禁止通过 `repair`、`outOfOrder` 或手工修改 `flyway_schema_history` 处理冲突。
+# V20260811210453 本地 OpenCode 客户端运行目标
+
+`V20260811210453__local_client_credentials_create_runtime.sql` 新增：
+
+| 表 | 用途与关键约束 |
+|---|---|
+| `local_client_credentials` | `user_id` 唯一；保存 RSA 密文、SHA-256 指纹、掩码、正版本和 `ACTIVE/REVOKED` 状态，不保存额外明文列。 |
+| `local_client_instances` | `lci_...` 稳定实例、owner、名称、平台/架构/版本和连接历史；`(client_instance_id,user_id)` 供工作区 owner 外键。 |
+| `local_client_workspaces` | Workspace、用户、实例、规范根路径、root digest 和文件系统身份；同用户/实例/root digest 唯一。 |
+
+`sessions` 增加 `runtime_kind/local_client_instance_id`，`runs` 增加
+`target_runtime_kind/target_local_client_instance_id`，`night_execution_tasks` 增加同名固定目标字段并允许
+服务端 ID 在本地目标时为空。CHECK 约束保证：服务端目标只能带 Linux 服务器且不能带本地实例；本地目标
+必须带实例且夜间任务不能同时带 Linux 服务器。默认值均为 `SERVER_PROCESS`，因此旧行和旧序列化数据保持
+兼容。
+
+所有新增业务 SQL 位于 `LocalClientMapper.xml`、`SessionRuntimeTargetMapper.xml`、
+`RunRuntimeTargetMapper.xml` 和扩展后的 `NightExecutionTaskMapper.xml`，未新增 JDBC SQL。发布前必须按
+Flyway 历史兼容规则在全部已知 PostgreSQL 基线执行升级，并核对最终 JAR 内 migration SHA-256；只验证
+空库不构成交付验证。

@@ -8,6 +8,8 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
 import com.enterprise.testagent.workspace.AgentConfigResponses;
 import java.util.List;
@@ -36,6 +38,7 @@ public class AgentConfigController {
     private final AgentConfigOperationTicketService ticketService;
     private final AgentConfigBackendRoutingService routingService;
     private final AgentConfigFileRoutingService fileRoutingService;
+    private LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard;
 
     public AgentConfigController(
             AgentConfigApplicationService service,
@@ -64,6 +67,7 @@ public class AgentConfigController {
     @GetMapping("/workspaces/{workspaceId}/status")
     public ApiResponse<Object> workspaceStatus(@PathVariable String workspaceId, ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        requireWorkspaceAgentConfigSupported(workspaceId);
         return ok(exchange, service.workspaceStatus(workspaceId, isSuperAdmin(principal)));
     }
 
@@ -494,6 +498,7 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.WorktreeRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        requireWorkspaceAgentConfigSupported(workspaceId);
         return ok(exchange, service.createWorkspaceWorktree(
                 workspaceId,
                 request.baseName(),
@@ -510,6 +515,7 @@ public class AgentConfigController {
             ServerWebExchange exchange) {
         // 差异读取对应用成员开放；提交、推送等写操作仍由 APP_ADMIN 校验。
         AuthWebSupport.getAuthPrincipal(exchange);
+        requireWorkspaceAgentConfigSupported(workspaceId);
         return ok(exchange, service.workspaceDiff(workspaceId, worktreeId));
     }
 
@@ -519,6 +525,7 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.StageRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        requireWorkspaceAgentConfigSupported(workspaceId);
         service.workspaceStage(workspaceId, request.files(), request.worktreeId(), principal.userId());
         return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
     }
@@ -529,6 +536,7 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.StageRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        requireWorkspaceAgentConfigSupported(workspaceId);
         service.workspaceUnstage(workspaceId, request.files(), request.worktreeId(), principal.userId());
         return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
     }
@@ -539,6 +547,7 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.StageRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        requireWorkspaceAgentConfigSupported(workspaceId);
         service.workspaceDiscard(workspaceId, request.files(), request.worktreeId(), principal.userId());
         return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
     }
@@ -549,6 +558,7 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.CommitRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        requireWorkspaceAgentConfigSupported(workspaceId);
         return ok(exchange, service.workspaceCommit(
                 workspaceId,
                 request.message(),
@@ -564,6 +574,7 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.PublishRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        requireWorkspaceAgentConfigSupported(workspaceId);
         return ok(exchange, service.workspacePublish(
                 workspaceId,
                 request.worktreeId(),
@@ -590,6 +601,21 @@ public class AgentConfigController {
 
     private boolean isSuperAdmin(AuthPrincipal principal) {
         return AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN);
+    }
+
+    /** 本地 capability 必须在 HTTP 入口兜底，不能只隐藏前端 Agent 配置区域。 */
+    @Autowired(required = false)
+    void configureLocalRuntimeCapabilityGuard(LocalRuntimeCapabilityGuard guard) {
+        this.localRuntimeCapabilityGuard = guard;
+    }
+
+    private void requireWorkspaceAgentConfigSupported(String workspaceId) {
+        if (localRuntimeCapabilityGuard != null) {
+            localRuntimeCapabilityGuard.requireWorkspaceSupported(
+                    new WorkspaceId(workspaceId),
+                    "agentConfig",
+                    "本地 OpenCode 工作区首版不开放 Agent 配置管理");
+        }
     }
 
     private ApiResponse<Object> ok(ServerWebExchange exchange, Object data) {

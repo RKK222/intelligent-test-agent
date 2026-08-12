@@ -186,6 +186,9 @@ export type MemoryWhitelistView = {
   updatedAt: string;
 };
 
+/** 运行目标类型；string 后缀保持旧前端对未来枚举值的兼容。 */
+export type RuntimeKind = "SERVER_PROCESS" | "LOCAL_CLIENT" | string;
+
 export type Workspace = {
   workspaceId: string;
   name: string;
@@ -221,6 +224,98 @@ export type Workspace = {
    * 工作区不属于任何应用版本时为 `null`。
    */
   applicationWorkspaceId?: string | null;
+  /** 本地客户端工作区由稳定实例承载，不对应服务端 process/binding。 */
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
+  online?: boolean;
+  capabilities?: Record<string, boolean>;
+};
+
+export type LocalClientCredentialStatus = "ACTIVE" | "REVOKED" | string;
+
+export type LocalClientCredential = {
+  exists: boolean;
+  maskedKey?: string | null;
+  version: number;
+  status?: LocalClientCredentialStatus | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+/** copy 是唯一携带明文 key 的响应；调用方必须立即写入剪贴板并丢弃引用。 */
+export type LocalClientPlaintextKey = { clientKey: string };
+
+export type LocalClientInstance = {
+  clientInstanceId: string;
+  clientName: string;
+  platform: string;
+  architecture: string;
+  clientVersion: string;
+  opencodeVersion: string;
+  online: boolean;
+  connectionGeneration: number;
+  reportedAddresses: string[];
+  observedRemoteAddress?: string | null;
+  opencodePort?: number | null;
+  processStatus: string;
+  opencodeHealthy: boolean;
+  processId?: number | null;
+  processStartedAt?: string | null;
+  lastHeartbeatAt?: string | null;
+  lastConnectedAt?: string | null;
+  lastDisconnectedAt?: string | null;
+  capabilities: Record<string, boolean>;
+};
+
+export type OpencodeEndpoint = {
+  runtimeKind: RuntimeKind;
+  endpointId: string;
+  displayName: string;
+  online: boolean;
+  processStatus: string;
+  platform?: string | null;
+  architecture?: string | null;
+  clientVersion?: string | null;
+  opencodeVersion?: string | null;
+  connectionGeneration: number;
+  reportedAddresses: string[];
+  observedRemoteAddress?: string | null;
+  port?: number | null;
+  healthy: boolean;
+  lastHeartbeatAt?: string | null;
+  linuxServerId?: string | null;
+  containerId?: string | null;
+  serviceAddress?: string | null;
+  capabilities: Record<string, boolean>;
+};
+
+export type LocalClientDirectoryEntry = {
+  name: string;
+  absolutePath: string;
+  directory: boolean;
+  symbolicLink: boolean;
+  readable: boolean;
+};
+
+export type LocalWorkspace = {
+  workspaceId: string;
+  name: string;
+  rootPath: string;
+  runtimeKind: RuntimeKind;
+  localClientInstanceId: string;
+  online: boolean;
+  capabilities: Record<string, boolean>;
+};
+
+export type LocalClientCommandResult = {
+  success: boolean;
+  processStatus: string;
+  processId?: number | null;
+  processStartedAt?: string | null;
+  opencodePort?: number | null;
+  opencodeHealthy: boolean;
+  executable?: string | null;
+  message: string;
 };
 
 export type WorkspaceDirectoryEntry = {
@@ -346,12 +441,17 @@ export type FileStatus = {
 };
 
 export type WorkspaceFileRoute = {
-  workspaceId: string;
-  linuxServerId: string;
+  workspaceId?: string | null;
+  linuxServerId?: string | null;
   baseUrl: string;
   webSocketPath: string;
   sameServer: boolean;
   message?: string | null;
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
+  connectionGeneration?: number | null;
+  rootDigest?: string | null;
+  online?: boolean;
 };
 
 export type WorkspaceBackendServer = {
@@ -369,6 +469,8 @@ export type WorkspaceFileSocketTicketRequest = {
   mode?: "workspace" | "directory-picker" | "agent-config" | string;
   scope?: AgentConfigScope;
   worktreeId?: string | null;
+  localClientInstanceId?: string | null;
+  connectionGeneration?: number | null;
 };
 
 export type WorkspaceFileSocketTicketResponse = {
@@ -709,6 +811,8 @@ export type Session = {
   shareExpired?: boolean | null;
   /** 是否已被分享 */
   isShared?: boolean | null;
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
 };
 
 /** 协作分享候选用户只暴露平台最小身份资料。 */
@@ -875,6 +979,9 @@ export type ConversationRunContext = {
   contextToken: string;
   contextVersion: number;
   expiresAt: string;
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
+  connectionGeneration?: number | null;
 };
 
 export type SessionRuntimeAttention = "QUESTION" | "PERMISSION" | string;
@@ -1000,6 +1107,8 @@ export type NightExecutionTask = {
   createdBySharedUser?: boolean;
   createdAt: string;
   updatedAt: string;
+  targetRuntimeKind?: RuntimeKind;
+  targetLocalClientInstanceId?: string | null;
 };
 
 export type NightExecutionTaskQueryResponse = PageResponse<NightExecutionTask> & {
@@ -1357,6 +1466,8 @@ export type Run = {
   messageSenderUnifiedAuthId?: string | null;
   messageSentBySharedUser?: boolean;
   resend?: ResendMetadata | null;
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
 };
 
 export type CreateRunResendPayload = {

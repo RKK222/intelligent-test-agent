@@ -116,6 +116,12 @@ import type {
   LoginRequest,
   LoginResponse,
   LobehubSsoTicket,
+  LocalClientCommandResult,
+  LocalClientCredential,
+  LocalClientDirectoryEntry,
+  LocalClientInstance,
+  LocalClientPlaintextKey,
+  LocalWorkspace,
   ManagedApplication,
   ManagedWorkspaceRuntime,
   MemoryAdminHealth,
@@ -140,6 +146,7 @@ import type {
   OpencodeRuntimeManagedProcessCommandResult,
   OpencodeRuntimeManagementUserProcessParams,
   OpencodeRuntimeProcess,
+  OpencodeEndpoint,
   OpencodeProcessStartOperation,
   UserOpencodeProcessHealth,
   UserOpencodeProcessHealthRequest,
@@ -448,6 +455,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const agentBase = `/api/internal/agent/${encodeURIComponent(agentId)}`;
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
+  const localClientBase = "/api/internal/platform/local-opencode-client";
   const agentConfigBase = `${workspaceManagementBase}/agent-config`;
   const agentSkillHubBase = `${workspaceManagementBase}/agent-skill-hub`;
   const opencodeRuntimeBase = "/api/internal/platform/opencode-runtime";
@@ -804,7 +812,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
           method: "POST",
           body: JSON.stringify({
             workspaceId,
-            linuxServerId: route.linuxServerId,
+            linuxServerId: route.linuxServerId ?? undefined,
             mode: "workspace"
           } satisfies WorkspaceFileSocketTicketRequest)
         }
@@ -859,6 +867,47 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     );
     const client = new WorkspaceFileSocketClient(
       toWebSocketUrl(server.baseUrl, ticket.webSocketUrl),
+      webSocketFactory,
+      () => {}
+    );
+    await client.ready();
+    return client;
+  }
+
+  /** 本地目录选择器先解析精确连接持有 Java，再在该 Java 上签发 generation 绑定 ticket。 */
+  async function createLocalDirectoryPickerClient(clientInstanceId: string): Promise<WorkspaceFileSocketClient> {
+    const normalizedClientInstanceId = clientInstanceId.trim();
+    if (!normalizedClientInstanceId) throw new Error("clientInstanceId is required");
+    const route = await request<WorkspaceFileRoute>(
+      `${workspaceManagementBase}/local-clients/${encodeURIComponent(normalizedClientInstanceId)}/directory-picker/file-ws-route`,
+      { method: "POST" }
+    );
+    if (route.runtimeKind !== "LOCAL_CLIENT"
+      || route.localClientInstanceId !== normalizedClientInstanceId
+      || !route.connectionGeneration) {
+      throw new BackendApiError(409, {
+        success: false,
+        code: "LOCAL_CLIENT_ROUTE_CHANGED",
+        message: "本地客户端连接路由已变化，请重试",
+        traceId: "",
+        retryable: true,
+        details: {}
+      });
+    }
+    const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+      route.baseUrl.replace(/\/$/, ""),
+      `${workspaceManagementBase}/file-ws/tickets`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "directory-picker",
+          localClientInstanceId: normalizedClientInstanceId,
+          connectionGeneration: route.connectionGeneration
+        } satisfies WorkspaceFileSocketTicketRequest)
+      }
+    );
+    const client = new WorkspaceFileSocketClient(
+      toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
       webSocketFactory,
       () => {}
     );
@@ -1075,6 +1124,48 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       ),
     listWorkspaces: (page = 1, size = 20) =>
       request<PageResponse<Workspace>>(`${workspaceManagementBase}/workspaces?page=${page}&size=${size}`),
+    getMyLocalClientCredential: () =>
+      request<LocalClientCredential>(`${localClientBase}/credentials/me`),
+    createMyLocalClientCredential: () =>
+      request<LocalClientCredential>(`${localClientBase}/credentials/me`, { method: "POST" }),
+    copyMyLocalClientCredential: () =>
+      request<LocalClientPlaintextKey>(`${localClientBase}/credentials/me/copy`, { method: "POST" }),
+    rotateMyLocalClientCredential: () =>
+      request<LocalClientCredential>(`${localClientBase}/credentials/me/rotate`, { method: "POST" }),
+    revokeMyLocalClientCredential: () =>
+      request<{ revoked: boolean }>(`${localClientBase}/credentials/me`, { method: "DELETE" }),
+    listMyLocalClientInstances: () =>
+      request<LocalClientInstance[]>(`${localClientBase}/instances/me`),
+    getMyOpencodeEndpoints: () =>
+      request<OpencodeEndpoint[]>(agentPath("/opencode-endpoints/me")),
+    commandLocalClientOpencode: (
+      clientInstanceId: string,
+      action: "START" | "RESTART" | "STOP" | "STATUS"
+    ) => request<LocalClientCommandResult>(
+      `${localClientBase}/instances/${encodeURIComponent(clientInstanceId)}/opencode/commands`,
+      { method: "POST", body: JSON.stringify({ action }) }
+    ),
+    listLocalClientDirectories: async (clientInstanceId: string, absolutePath: string) => {
+      const client = await createLocalDirectoryPickerClient(clientInstanceId);
+      try {
+        return await client.request<LocalClientDirectoryEntry[]>("directory.list", {
+          absolutePath,
+          limit: 1000
+        });
+      } finally {
+        client.close();
+      }
+    },
+    createLocalWorkspace: (payload: { clientInstanceId: string; name: string; rootPath: string }) =>
+      request<LocalWorkspace>(`${workspaceManagementBase}/local-workspaces`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    deleteLocalWorkspace: (workspaceId: string) =>
+      request<{ workspaceId: string; localDirectoryDeleted: boolean }>(
+        `${workspaceManagementBase}/local-workspaces/${encodeURIComponent(workspaceId)}`,
+        { method: "DELETE" }
+      ),
     getWorkspace: (workspaceId: string) => routedRequest<Workspace>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}`),
     listManagedApplications: () => request<ManagedApplication[]>(`${workspaceManagementBase}/applications`),
     /** 仅返回当前应用关联的 APPLICATION_ASSET_REPOSITORY。 */
@@ -3746,6 +3837,7 @@ const OBSERVED_SENSITIVE_KEYS = new Set([
   "cookie",
   "contexttoken",
   "ciphertext",
+  "clientkey",
   "encryptedapikey",
   "granttoken",
   "password",
@@ -3760,7 +3852,7 @@ const OBSERVED_SENSITIVE_KEYS = new Set([
 ]);
 
 function redactObservedSensitiveText(raw: string): string {
-  const keyPattern = /(["']?)\b(?:api[-_]?key|authorization|access[-_]?token|auth[-_]?token|ciphertext|cookie|context[-_]?token|encrypted[-_]?api[-_]?key|grant[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|support[-_]?access[-_]?grant|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
+  const keyPattern = /(["']?)\b(?:api[-_]?key|authorization|access[-_]?token|auth[-_]?token|ciphertext|client[-_]?key|cookie|context[-_]?token|encrypted[-_]?api[-_]?key|grant[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|support[-_]?access[-_]?grant|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;

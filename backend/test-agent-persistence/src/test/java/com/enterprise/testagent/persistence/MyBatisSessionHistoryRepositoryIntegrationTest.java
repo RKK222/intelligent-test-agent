@@ -60,6 +60,19 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         // 历史查询左连接 session_shares 派生分享状态，测试基线早于该表迁移，按分享仓库集成测试同样方式手动建表。
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260809170000__session_shares_create_collaboration_share.sql")).execute(dataSource);
+        // 用户工作区查询已支持本地客户端归属，旧 H2 基线只补齐该查询所需的映射表。
+        jdbcClient.sql("""
+                create table local_client_workspaces (
+                    workspace_id varchar(128) primary key,
+                    user_id varchar(128) not null,
+                    client_instance_id varchar(128) not null,
+                    normalized_root_path varchar(1024) not null,
+                    root_digest varchar(64) not null,
+                    file_system_identity varchar(512) not null,
+                    created_at timestamp with time zone not null,
+                    updated_at timestamp with time zone not null
+                )
+                """).update();
         seedData();
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
@@ -212,14 +225,17 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     void userWorkspaceQueryIncludesPersonalAndAttributedSessionWorkspacesOnly() {
         var page = workspaceQueryRepository.findUserWorkspaces(CURRENT_USER, new PageRequest(1, 30));
 
-        assertThat(page.total()).isEqualTo(4);
+        assertThat(page.total()).isEqualTo(5);
         assertThat(page.items())
                 .extracting(workspace -> workspace.workspaceId().value())
                 .containsExactlyInAnyOrder(
                         "wrk_history_personal",
                         "wrk_history_replica",
                         "wrk_history_unmanaged",
-                        "wrk_history_blank");
+                        "wrk_history_blank",
+                        "wrk_history_local");
+        assertThat(workspaceQueryRepository.findUserWorkspace(
+                CURRENT_USER, new WorkspaceId("wrk_history_local"))).isPresent();
         assertThat(workspaceQueryRepository.findUserWorkspace(
                 CURRENT_USER, new WorkspaceId("wrk_history_other"))).isEmpty();
     }
@@ -227,6 +243,7 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     private void seedData() {
         seedUsers();
         seedWorkspaces();
+        seedLocalClientWorkspace();
         seedApplicationContext();
         seedSessions();
         seedShares();
@@ -254,7 +271,21 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                     ('wrk_history_replica_base', 'replica base', '/tmp/replica-base', 'ACTIVE', 'trace_history', :now, :now),
                     ('wrk_history_unmanaged', '非托管工作区', '/tmp/unmanaged', 'ACTIVE', 'trace_history', :now, :now),
                     ('wrk_history_blank', '', '/tmp/blank', 'ACTIVE', 'trace_history', :now, :now),
+                    ('wrk_history_local', '本地客户端工作区', '/Users/test/local', 'ACTIVE', 'trace_history', :now, :now),
                     ('wrk_history_other', 'other runtime', '/tmp/other', 'ACTIVE', 'trace_history', :now, :now)
+                """)
+                .param("now", NOW)
+                .update();
+    }
+
+    private void seedLocalClientWorkspace() {
+        jdbcClient.sql("""
+                insert into local_client_workspaces(
+                    workspace_id, user_id, client_instance_id, normalized_root_path,
+                    root_digest, file_system_identity, created_at, updated_at)
+                values(
+                    'wrk_history_local', 'usr_history_current', 'lci_history', '/Users/test/local',
+                    'digest_history_local', 'file_key_history_local', :now, :now)
                 """)
                 .param("now", NOW)
                 .update();

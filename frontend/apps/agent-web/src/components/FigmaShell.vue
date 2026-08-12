@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
 import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
-import type { AppSourceRepositorySummary, UserNotification, UserOpencodeProcess } from "@test-agent/shared-types";
+import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import PetMiniGames from "./PetMiniGames.vue";
@@ -82,6 +82,8 @@ const props = withDefaults(
     currentUserName?: string;
     currentUserRoleLabels?: string[];
     opencodeProcessStatus?: UserOpencodeProcess | null;
+    opencodeEndpoints?: OpencodeEndpoint[];
+    opencodeEndpointsLoading?: boolean;
     opencodeProcessLoading?: boolean;
     opencodeProcessInitializing?: boolean;
     showProcessStatusInPet?: boolean;
@@ -129,6 +131,8 @@ const props = withDefaults(
     notificationsLoadingMore: false,
     notificationsHasMore: false,
     notificationsError: null,
+    opencodeEndpoints: () => [],
+    opencodeEndpointsLoading: false,
     showProcessStatusInPet: false,
     onboardingActive: false,
     sideQuestionAvailable: true,
@@ -587,6 +591,33 @@ const opencodeServiceDisplay = computed(() => {
   }
   return { tone: "unassigned", text: "待分配专属进程" };
 });
+
+function endpointStatusText(endpoint: OpencodeEndpoint) {
+  if (!endpoint.online) return "离线";
+  if (endpoint.healthy) return "运行中";
+  return endpoint.processStatus || "已连接";
+}
+
+function endpointPrimaryAddress(endpoint: OpencodeEndpoint) {
+  if (endpoint.runtimeKind === "SERVER_PROCESS") {
+    return endpoint.serviceAddress || endpoint.linuxServerId || "地址未解析";
+  }
+  const reported = endpoint.reportedAddresses?.find((address) => address.trim()) ?? "";
+  return reported || endpoint.observedRemoteAddress || "地址未上报";
+}
+
+function endpointPlatformText(endpoint: OpencodeEndpoint) {
+  if (endpoint.runtimeKind === "SERVER_PROCESS") return "服务端实例";
+  return [endpoint.platform, endpoint.architecture].filter(Boolean).join(" / ") || "本地客户端";
+}
+
+function endpointVersionText(endpoint: OpencodeEndpoint) {
+  if (endpoint.runtimeKind === "SERVER_PROCESS") return "平台托管";
+  const values = [];
+  if (endpoint.clientVersion) values.push(`客户端 ${endpoint.clientVersion}`);
+  if (endpoint.opencodeVersion) values.push(`OpenCode ${endpoint.opencodeVersion}`);
+  return values.join(" · ") || "版本未知";
+}
 
 type RobotProcessTone = "ready" | "needs-initialization" | "checking" | "error";
 
@@ -2579,8 +2610,25 @@ function submitJoinApp() {
               <UserRound class="figma-user-menu-icon" />
               <span class="figma-user-menu-name">{{ userName }}</span>
             </div>
+            <div v-if="!fixedWorkspace && (opencodeEndpoints?.length || opencodeEndpointsLoading)" class="figma-endpoint-list" aria-label="OpenCode 实例列表">
+              <div class="figma-endpoint-list-title">OpenCode 实例</div>
+              <div v-if="opencodeEndpointsLoading && !opencodeEndpoints?.length" class="figma-endpoint-empty">正在读取实例状态…</div>
+              <article v-for="endpoint in opencodeEndpoints" :key="`${endpoint.runtimeKind}:${endpoint.endpointId}`" class="figma-endpoint-card">
+                <span :class="['figma-endpoint-dot', endpoint.online && 'is-online', endpoint.online && !endpoint.healthy && 'is-warning']" aria-hidden="true" />
+                <div class="figma-endpoint-content">
+                  <div class="figma-endpoint-heading">
+                    <strong>{{ endpoint.displayName }}</strong>
+                    <span>{{ endpointStatusText(endpoint) }}</span>
+                  </div>
+                  <div>{{ endpointPlatformText(endpoint) }} · {{ endpointPrimaryAddress(endpoint) }}<template v-if="endpoint.port">:{{ endpoint.port }}</template></div>
+                  <div v-if="endpoint.observedRemoteAddress && endpoint.runtimeKind === 'LOCAL_CLIENT'">后台观察：{{ endpoint.observedRemoteAddress }}</div>
+                  <div>{{ endpointVersionText(endpoint) }}</div>
+                  <div v-if="endpoint.lastHeartbeatAt">心跳：{{ new Date(endpoint.lastHeartbeatAt).toLocaleString() }}</div>
+                </div>
+              </article>
+            </div>
             <div
-              v-if="!fixedWorkspace"
+              v-else-if="!fixedWorkspace"
               class="figma-user-menu-service"
               :class="`figma-user-menu-service--${opencodeServiceDisplay.tone}`"
               role="status"
@@ -4522,13 +4570,87 @@ function submitJoinApp() {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 168px;
+  min-width: 320px;
+  max-width: min(420px, calc(100vw - 24px));
   background: #fff;
   border: 1px solid #e4e4e7;
   border-radius: 8px;
   padding: 4px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   z-index: 40;
+}
+
+.figma-endpoint-list {
+  padding: 7px 6px 5px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.figma-endpoint-list-title {
+  margin: 0 4px 6px;
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.figma-endpoint-empty {
+  padding: 8px 5px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.figma-endpoint-card {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 7px;
+  border-radius: 7px;
+  background: #fafafa;
+}
+
+.figma-endpoint-card + .figma-endpoint-card { margin-top: 5px; }
+
+.figma-endpoint-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: #a1a1aa;
+}
+
+.figma-endpoint-dot.is-online { background: #22c55e; }
+.figma-endpoint-dot.is-warning { background: #f59e0b; }
+
+.figma-endpoint-content {
+  min-width: 0;
+  color: #71717a;
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.figma-endpoint-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+  color: #18181b;
+  font-size: 12px;
+}
+
+.figma-endpoint-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-endpoint-heading span {
+  flex-shrink: 0;
+  color: #71717a;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .figma-user-menu-summary,

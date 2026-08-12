@@ -10,6 +10,15 @@ import org.junit.jupiter.api.Test;
 class ExternalApiKeyGeneratorTest {
 
     @Test
+    void shouldGenerateLocalClientKeyWithDedicatedPrefix() {
+        ExternalApiKeyMaterial material = new ExternalApiKeyGenerator().generate("tack_v1_");
+
+        assertThat(material.apiKey()).startsWith("tack_v1_");
+        assertThat(material.fingerprint()).hasSize(64);
+        assertThat(material.keyHint()).startsWith("tack_v1_");
+    }
+
+    @Test
     void generatesVersionedThirtyTwoByteUrlSafeKey() {
         ExternalApiKeyGenerator generator = new ExternalApiKeyGenerator(new IncrementingSecureRandom());
 

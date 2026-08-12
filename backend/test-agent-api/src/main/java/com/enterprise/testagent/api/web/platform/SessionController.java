@@ -124,7 +124,7 @@ public class SessionController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.createSession(
+        return ApiResponse.ok(toSessionResponse(sessionService.createSession(
                 userId, new WorkspaceId(request.workspaceId()), request.title(), traceId)), traceId);
     }
 
@@ -139,8 +139,9 @@ public class SessionController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return ApiResponse.ok(RuntimeDtos.sessionHistoryPage(sessionService.listUserSessions(
-                userId, query, RuntimeApiSupport.pageRequest(page, size))), traceId);
+        return ApiResponse.ok(RuntimeDtos.sessionHistoryPage(
+                sessionService.listUserSessions(userId, query, RuntimeApiSupport.pageRequest(page, size)),
+                sessionService::runtimeTarget), traceId);
     }
 
     /**
@@ -154,8 +155,10 @@ public class SessionController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return ApiResponse.ok(RuntimeDtos.sessionPage(sessionService.listSessions(
-                userId, new WorkspaceId(workspaceId), RuntimeApiSupport.pageRequest(page, size))), traceId);
+        return ApiResponse.ok(RuntimeDtos.sessionPage(
+                sessionService.listSessions(
+                        userId, new WorkspaceId(workspaceId), RuntimeApiSupport.pageRequest(page, size)),
+                sessionService::runtimeTarget), traceId);
     }
 
     /**
@@ -173,7 +176,7 @@ public class SessionController {
         if (context != null) {
             context.requireSession(requested);
         }
-        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(context == null
+        return ApiResponse.ok(toSessionResponse(context == null
                 ? sessionService.getSession(userId, requested)
                 : sessionService.getSession(requested)), traceId);
     }
@@ -196,7 +199,8 @@ public class SessionController {
         RuntimeDtos.RunResponse response = runService == null
                 ? null
                 : (context == null ? runService.findActiveRun(userId, requested) : runService.findActiveRun(requested))
-                        .map(run -> RuntimeDtos.RunResponse.from(run, usernameLookup()))
+                        .map(run -> RuntimeDtos.RunResponse.from(run, usernameLookup())
+                                .withRuntimeTarget(runService.runtimeTarget(run.runId())))
                         .orElse(null);
         return ApiResponse.ok(response, traceId);
     }
@@ -211,7 +215,7 @@ public class SessionController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.updateSession(
+        return ApiResponse.ok(toSessionResponse(sessionService.updateSession(
                 userId, new SessionId(sessionId), request.title(), request.pinned(), traceId)), traceId);
     }
 
@@ -224,7 +228,7 @@ public class SessionController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(
+        return ApiResponse.ok(toSessionResponse(
                 sessionService.archiveSession(userId, new SessionId(sessionId), traceId)), traceId);
     }
 
@@ -356,6 +360,12 @@ public class SessionController {
 
     private boolean hasAgentId(String agentId) {
         return agentId != null && !agentId.isBlank();
+    }
+
+    private RuntimeDtos.SessionResponse toSessionResponse(
+            com.enterprise.testagent.domain.session.Session session) {
+        return RuntimeDtos.SessionResponse.from(session)
+                .withRuntimeTarget(sessionService.runtimeTarget(session.sessionId()));
     }
 
     private Function<UserId, String> usernameLookup() {

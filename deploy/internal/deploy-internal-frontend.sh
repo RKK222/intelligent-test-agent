@@ -116,6 +116,10 @@ find_first_file() {
   find "${root}" -maxdepth 6 -type f -name "${name}" | sort | head -n 1
 }
 
+find_local_client_dist() {
+  find "$1" -maxdepth 6 -type d -path '*/dist/local-opencode-client' | sort | head -n 1
+}
+
 require_command unzip
 require_command find
 require_command tar
@@ -133,6 +137,7 @@ unzip -q "${ARCHIVE}" -d "${EXTRACT_DIR}"
 FRONTEND_ARCHIVE="$(find_first_file "${EXTRACT_DIR}" 'test-agent-frontend-dist.tar.gz')"
 DEPLOY_FRONTEND_SCRIPT="$(find_first_file "${EXTRACT_DIR}" 'deploy-internal-frontend.sh')"
 CONFIGURE_NGINX_SCRIPT="$(find_first_file "${EXTRACT_DIR}" 'configure-nginx.sh')"
+LOCAL_CLIENT_DIST="$(find_local_client_dist "${EXTRACT_DIR}")"
 DEPLOY_INTERNAL_SRC=""
 if [[ -n "${DEPLOY_FRONTEND_SCRIPT}" ]]; then
   DEPLOY_INTERNAL_SRC="$(cd "$(dirname "${DEPLOY_FRONTEND_SCRIPT}")" && pwd)"
@@ -140,6 +145,9 @@ fi
 
 require_file "${FRONTEND_ARCHIVE}"
 require_file "${CONFIGURE_NGINX_SCRIPT}"
+require_file "${LOCAL_CLIENT_DIST}/install.sh"
+require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
+require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
 if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
   echo "deploy/internal directory not found in archive" >&2
   exit 1
@@ -149,6 +157,7 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   log "Frontend archive validation passed"
   printf 'frontend archive: %s\n' "${FRONTEND_ARCHIVE}"
   printf 'deploy internal: %s\n' "${DEPLOY_INTERNAL_SRC}"
+  printf 'local client HTTP distribution: %s\n' "${LOCAL_CLIENT_DIST}"
   if [[ "${KEEP_EXTRACT}" -eq 0 ]]; then
     rm -rf "${EXTRACT_DIR}"
   fi
@@ -161,6 +170,8 @@ log "Update frontend under ${FRONTEND_ROOT}"
 timestamp="$(date +%Y%m%d%H%M%S)"
 mkdir -p "${FRONTEND_ROOT}/frontend" "${FRONTEND_ROOT}/dist" "${FRONTEND_ROOT}/deploy"
 cp "${FRONTEND_ARCHIVE}" "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
+rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.new"
+cp -a "${LOCAL_CLIENT_DIST}" "${FRONTEND_ROOT}/dist/local-opencode-client.new"
 
 rm -rf "${FRONTEND_ROOT}/deploy/internal.new"
 cp -a "${DEPLOY_INTERNAL_SRC}" "${FRONTEND_ROOT}/deploy/internal.new"
@@ -176,6 +187,11 @@ if [[ -d "${FRONTEND_ROOT}/frontend" ]]; then
 fi
 
 tar -C "${FRONTEND_ROOT}" -xzf "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
+if [[ -d "${FRONTEND_ROOT}/dist/local-opencode-client" ]]; then
+  rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+  mv "${FRONTEND_ROOT}/dist/local-opencode-client" "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+fi
+mv "${FRONTEND_ROOT}/dist/local-opencode-client.new" "${FRONTEND_ROOT}/dist/local-opencode-client"
 bash "${FRONTEND_ROOT}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 curl -fsS "${FRONTEND_HEALTH_URL}" >/dev/null
 curl -fsS "${FRONTEND_URL}" >/dev/null

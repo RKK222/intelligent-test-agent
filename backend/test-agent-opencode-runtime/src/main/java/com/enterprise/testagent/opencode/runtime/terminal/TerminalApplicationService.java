@@ -15,6 +15,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -44,6 +45,7 @@ public class TerminalApplicationService {
     private final boolean serverTerminalEnabled;
     private final Path serverWorkingDirectory;
     private SessionCollaborationShareService shareService;
+    private LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard;
 
     /**
      * 创建 PTY ticket 应用服务，所有安全校验在签发 ticket 前完成。
@@ -167,6 +169,12 @@ public class TerminalApplicationService {
         if (session.status() == SessionStatus.ARCHIVED) {
             throw new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value()));
         }
+        if (localRuntimeCapabilityGuard != null) {
+            localRuntimeCapabilityGuard.requireSessionSupported(
+                    sessionId,
+                    "terminal",
+                    "本地 OpenCode 工作区首版不开放浏览器终端");
+        }
         if (!session.hasOpencodeSessionMapping()) {
             throw new PlatformException(ErrorCode.CONFLICT, "Session 尚未绑定远端运行上下文", Map.of("sessionId", sessionId.value()));
         }
@@ -252,6 +260,12 @@ public class TerminalApplicationService {
     @Autowired(required = false)
     void configureSessionShareService(SessionCollaborationShareService shareService) {
         this.shareService = shareService;
+    }
+
+    /** 本地会话即使具备远端映射也不得签发服务端 PTY ticket。 */
+    @Autowired(required = false)
+    void configureLocalRuntimeCapabilityGuard(LocalRuntimeCapabilityGuard guard) {
+        this.localRuntimeCapabilityGuard = guard;
     }
 
     /**

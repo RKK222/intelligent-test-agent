@@ -128,7 +128,9 @@ final class NightExecutionDtos {
             String creatorUnifiedAuthId,
             boolean createdBySharedUser,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String targetRuntimeKind,
+            String targetLocalClientInstanceId) {
 
         static TaskResponse from(NightExecutionTask task) {
             return from(task, null);
@@ -147,7 +149,10 @@ final class NightExecutionDtos {
                     task.errorCode(), task.errorMessage(), task.creatorUserId().value(),
                     usernameLookup == null ? null : usernameLookup.apply(task.creatorUserId()),
                     task.creatorUnifiedAuthId(), task.createdBySharedUser(),
-                    task.createdAt(), task.updatedAt());
+                    task.createdAt(), task.updatedAt(),
+                    task.targetRuntimeKind().name(),
+                    task.targetLocalClientInstanceId() == null
+                            ? null : task.targetLocalClientInstanceId().value());
         }
     }
 

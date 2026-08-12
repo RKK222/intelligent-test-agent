@@ -3,7 +3,13 @@ package com.enterprise.testagent.opencode.runtime.run;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.run.ConversationRunContext;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessProbeStatus;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStatusProbe;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStatusQueryService;
@@ -23,6 +29,8 @@ public class ConversationRunContextResolver {
     private final ConversationContextProperties properties;
     private final OpencodeProcessStatusQueryService statusQueryService;
     private final LegacyRunCompatibilityMetrics compatibilityMetrics;
+    private LocalClientConnectionStore localClientConnectionStore;
+    private BackendJavaRouteResolver backendJavaRouteResolver;
 
     @Autowired
     public ConversationRunContextResolver(
@@ -90,6 +98,10 @@ public class ConversationRunContextResolver {
         if (statusQueryService == null) {
             return Optional.of(context);
         }
+        if (context.runtimeKind() == RuntimeKind.LOCAL_CLIENT) {
+            requireCurrentLocalConnection(context);
+            return Optional.of(context);
+        }
         if (context.processSnapshot() == null) {
             throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "会话运行上下文缺少进程快照");
         }
@@ -106,5 +118,37 @@ public class ConversationRunContextResolver {
                     Map.of("processId", context.processId(), "healthStatus", probe.healthStatus()));
         }
         return Optional.of(context);
+    }
+
+    /** Run 启动前再次核对客户端、代次和连接所属 Java，禁止使用重连前的上下文。 */
+    private void requireCurrentLocalConnection(ConversationRunContext context) {
+        if (localClientConnectionStore == null || backendJavaRouteResolver == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "本地客户端连接校验未装配");
+        }
+        LocalClientConnectionRoute route = localClientConnectionStore
+                .find(new LocalClientInstanceId(context.localClientInstanceId()))
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.LOCAL_CLIENT_DISCONNECTED,
+                        "本地 OpenCode 客户端离线"));
+        boolean valid = route.userId().equals(context.userId())
+                && route.connectionGeneration() == context.connectionGeneration()
+                && backendJavaRouteResolver.isCurrent(route.backendProcessId())
+                && route.processStatus() == LocalClientProcessStatus.RUNNING
+                && route.opencodeHealthy();
+        if (!valid) {
+            contextService.invalidateProcess(context.processId());
+            throw new PlatformException(
+                    ErrorCode.LOCAL_CLIENT_DISCONNECTED,
+                    "本地 OpenCode 客户端连接已变化，请重新初始化会话");
+        }
+    }
+
+    /** 生产装配本地连接 fencing 校验；旧测试构造器保持不变。 */
+    @Autowired(required = false)
+    void configureLocalClientRuntime(
+            LocalClientConnectionStore localClientConnectionStore,
+            BackendJavaRouteResolver backendJavaRouteResolver) {
+        this.localClientConnectionStore = Objects.requireNonNull(localClientConnectionStore);
+        this.backendJavaRouteResolver = Objects.requireNonNull(backendJavaRouteResolver);
     }
 }

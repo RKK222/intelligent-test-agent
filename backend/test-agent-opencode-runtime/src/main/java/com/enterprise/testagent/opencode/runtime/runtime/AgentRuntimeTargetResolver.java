@@ -11,9 +11,18 @@ import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
+import com.enterprise.testagent.domain.node.ExecutionNodeId;
+import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRepository;
+import com.enterprise.testagent.domain.session.SessionRuntimeTargetRepository;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.user.UserId;
@@ -28,6 +37,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +60,10 @@ public class AgentRuntimeTargetResolver {
     private final UserOpencodeProcessAssignmentService userProcessAssignmentService;
     private final ManagedWorkspacePathResolver pathResolver;
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
+    private LocalClientWorkspaceRepository localClientWorkspaceRepository;
+    private LocalClientConnectionStore localClientConnectionStore;
+    private SessionRuntimeTargetRepository sessionRuntimeTargetRepository;
+    private BackendJavaRouteResolver backendJavaRouteResolver;
 
     /**
      * 注入 runtime 目标解析所需端口；用户进程服务仅在认证用户访问默认 opencode 时使用。
@@ -127,6 +142,16 @@ public class AgentRuntimeTargetResolver {
             // Agent/Command 等运行态目录同样会暴露应用 `.opencode` 内容，必须先校验实时成员关系。
             workspaceAccessAuthorizer.requireAccess(userId, resolvedWorkspaceId);
         }
+        if (resolvedWorkspaceId != null) {
+            Workspace workspace = findWorkspace(resolvedWorkspaceId);
+            LocalClientWorkspaceBinding binding = localBinding(resolvedWorkspaceId);
+            if (binding != null) {
+                return new WorkspaceRuntimeTarget(
+                        runtime,
+                        localExecutionNode(binding, userId, traceId),
+                        workspace.rootPath());
+            }
+        }
         ExecutionNode node = resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
                 .map(UserOpencodeProcessAssignment::node)
                 .orElseGet(this::routableNode);
@@ -145,6 +170,17 @@ public class AgentRuntimeTargetResolver {
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Session session = findSession(new SessionId(sessionId));
         Workspace workspace = findWorkspace(session.workspaceId());
+        com.enterprise.testagent.domain.session.SessionRuntimeTarget frozenTarget = sessionRuntimeTarget(session);
+        if (frozenTarget.runtimeKind() == RuntimeKind.LOCAL_CLIENT) {
+            LocalClientWorkspaceBinding binding = requireFrozenLocalBinding(session, frozenTarget);
+            ExecutionNode node = localExecutionNode(binding, userId, traceId);
+            AgentSessionBinding agentBinding = ensureAgentSession(
+                    resolvedAgentId, runtime, session, workspace, node, traceId);
+            return new SessionRuntimeTarget(runtime, node, workspace.rootPath(), agentBinding.remoteSessionId());
+        }
+        if (localBinding(session.workspaceId()) != null) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地会话运行目标缺失，禁止降级到服务端 OpenCode");
+        }
         Optional<UserOpencodeProcessAssignment> userAssignment =
                 resolveUserProcessAssignment(userId, resolvedAgentId, traceId);
         if (userAssignment.isPresent()) {
@@ -198,6 +234,15 @@ public class AgentRuntimeTargetResolver {
                                 "sessionId", sessionId.value(),
                                 "agentId", resolvedAgentId,
                                 "reason", "REMOTE_SESSION_MAPPING_MISSING")));
+        com.enterprise.testagent.domain.session.SessionRuntimeTarget frozenTarget = sessionRuntimeTarget(session);
+        if (frozenTarget.runtimeKind() == RuntimeKind.LOCAL_CLIENT) {
+            LocalClientWorkspaceBinding localBinding = requireFrozenLocalBinding(session, frozenTarget);
+            return new SessionRuntimeTarget(
+                    runtime,
+                    localExecutionNode(localBinding, null, traceId),
+                    workspace.rootPath(),
+                    binding.remoteSessionId());
+        }
         ExecutionNode node = executionNodeRepository.findById(binding.executionNodeId())
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
@@ -221,6 +266,118 @@ public class AgentRuntimeTargetResolver {
             throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "用户 opencode 进程管理未启用");
         }
         return Optional.of(userProcessAssignmentService.requireReadyProcess(userId, resolvedAgentId, traceId));
+    }
+
+    /** 生产环境装配本地工作区/session 冻结目标与精确 Java 路由；旧测试构造器保持不变。 */
+    @Autowired(required = false)
+    void configureLocalClientRuntime(
+            LocalClientWorkspaceRepository localClientWorkspaceRepository,
+            LocalClientConnectionStore localClientConnectionStore,
+            SessionRuntimeTargetRepository sessionRuntimeTargetRepository,
+            BackendJavaRouteResolver backendJavaRouteResolver) {
+        this.localClientWorkspaceRepository = Objects.requireNonNull(
+                localClientWorkspaceRepository, "localClientWorkspaceRepository must not be null");
+        this.localClientConnectionStore = Objects.requireNonNull(
+                localClientConnectionStore, "localClientConnectionStore must not be null");
+        this.sessionRuntimeTargetRepository = Objects.requireNonNull(
+                sessionRuntimeTargetRepository, "sessionRuntimeTargetRepository must not be null");
+        this.backendJavaRouteResolver = Objects.requireNonNull(
+                backendJavaRouteResolver, "backendJavaRouteResolver must not be null");
+    }
+
+    private com.enterprise.testagent.domain.session.SessionRuntimeTarget sessionRuntimeTarget(Session session) {
+        if (sessionRuntimeTargetRepository == null) {
+            return com.enterprise.testagent.domain.session.SessionRuntimeTarget.server(session.sessionId());
+        }
+        return sessionRuntimeTargetRepository.findBySessionId(session.sessionId())
+                .orElseGet(() -> com.enterprise.testagent.domain.session.SessionRuntimeTarget.server(session.sessionId()));
+    }
+
+    private LocalClientWorkspaceBinding requireFrozenLocalBinding(
+            Session session,
+            com.enterprise.testagent.domain.session.SessionRuntimeTarget target) {
+        LocalClientWorkspaceBinding binding = localBinding(session.workspaceId());
+        if (binding == null || !binding.clientInstanceId().equals(target.localClientInstanceId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地会话与工作区客户端绑定不一致");
+        }
+        return binding;
+    }
+
+    private LocalClientWorkspaceBinding localBinding(WorkspaceId workspaceId) {
+        return localClientWorkspaceRepository == null
+                ? null
+                : localClientWorkspaceRepository.findByWorkspaceId(workspaceId).orElse(null);
+    }
+
+    private ExecutionNode localExecutionNode(
+            LocalClientWorkspaceBinding binding,
+            UserId userId,
+            String traceId) {
+        if (userId != null && !binding.userId().equals(userId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "本地工作区不属于当前用户");
+        }
+        if (localClientConnectionStore == null || backendJavaRouteResolver == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "本地客户端运行路由未装配");
+        }
+        LocalClientConnectionRoute route = localClientConnectionStore.find(binding.clientInstanceId())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "本地客户端离线",
+                        Map.of("clientInstanceId", binding.clientInstanceId().value())));
+        if (!route.userId().equals(binding.userId())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端连接归属不一致");
+        }
+        if (!backendJavaRouteResolver.isCurrent(route.backendProcessId())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "请求未路由到本地客户端连接持有 Java",
+                    Map.of("backendProcessId", route.backendProcessId().value()));
+        }
+        if (route.processStatus() != LocalClientProcessStatus.RUNNING || !route.opencodeHealthy()) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地 OpenCode 尚未就绪");
+        }
+        Instant observedAt = route.lastHeartbeatAt();
+        ExecutionNodeId nodeId = new ExecutionNodeId(
+                "node_local_" + binding.clientInstanceId().value().substring("lci_".length()));
+        persistLocalNodeAnchor(nodeId, route, traceId);
+        return new ExecutionNode(
+                nodeId,
+                "http://local-opencode-client.invalid",
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                100,
+                observedAt,
+                Set.of("opencode", "local-client", "file-management"),
+                route.connectedAt(),
+                observedAt,
+                traceId,
+                RuntimeKind.LOCAL_CLIENT,
+                binding.clientInstanceId().value(),
+                route.connectionGeneration());
+    }
+
+    /**
+     * agent session binding、Session 旧映射和 routing decision 仍外键引用 execution_nodes。
+     * 保存 OFFLINE 锚点只用于关系完整性，不能被全局节点路由选中；真正本地目标始终来自冻结记录和 Redis generation。
+     */
+    private synchronized void persistLocalNodeAnchor(
+            ExecutionNodeId nodeId,
+            LocalClientConnectionRoute route,
+            String traceId) {
+        Instant observedAt = route.lastHeartbeatAt();
+        executionNodeRepository.save(new ExecutionNode(
+                nodeId,
+                "http://local-opencode-client.invalid",
+                ExecutionNodeStatus.OFFLINE,
+                0,
+                1,
+                0,
+                observedAt,
+                Set.of("local-client-anchor"),
+                route.connectedAt(),
+                observedAt,
+                traceId));
     }
 
     /**

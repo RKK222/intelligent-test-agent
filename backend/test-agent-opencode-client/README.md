@@ -68,3 +68,7 @@ opencode `session.diff` 保持映射为平台 `session.diff`，不在 client 层
 Facade 对外方法不得返回 generated SDK DTO，新增方法必须同步测试成功、超时、远端错误和 traceId 透传。`workspace` query 仅在后续接入真实 opencode workspace/control-plane 时传入；本地模式默认只传 `directory`。`prompt_async` 的 `text/file/agent` parts 必须通过 `OpencodePromptPart` 传入，generated union DTO 只允许留在本模块内部或用稳定 JSON 请求体替代。session messages 只能读取标准 `/session/{sessionID}/message`，不能改用只含切换事件的 `/api/session/{sessionID}/message`，并只能通过 facade 平台 DTO 输出；session 存在性校验只能读取 v2 `/api/session/{sessionID}` 并把 404 作为可恢复缺失处理。
 generated `SessionApi` 中存在和 model 同名的参数包装类时，必须在本模块内用 `ApiClient.invokeAPI` 做安全适配，不能手改 generated SDK。
 runtime facade 是 `test-agent-opencode-runtime` 访问 opencode 的唯一入口；`test-agent-api` Controller 和业务模块仍不得 import generated SDK。
+
+本地 OpenCode 不复制或修改 generated SDK。`GeneratedOpencodeSdkGateway` 通过
+`OpencodeWebClientTransport` 构造 transport-aware WebClient：服务端目标继续走普通 HTTP，本地目标由
+runtime 注入反向隧道 `ExchangeFunction`，并保持同一 DTO、错误和事件映射边界。

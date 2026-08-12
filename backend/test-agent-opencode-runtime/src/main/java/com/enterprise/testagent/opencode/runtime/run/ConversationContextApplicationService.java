@@ -12,6 +12,9 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -22,6 +25,8 @@ import com.enterprise.testagent.domain.workspace.TrustedWorkspaceResolution;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
+import com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
@@ -54,6 +59,9 @@ public class ConversationContextApplicationService {
     private final ConversationContextStore contextStore;
     private final Clock clock;
     private final Supplier<String> tokenFactory;
+    private LocalClientWorkspaceRepository localClientWorkspaceRepository;
+    private AgentRuntimeTargetResolver agentRuntimeTargetResolver;
+    private BackendJavaRouteResolver backendJavaRouteResolver;
 
     /**
      * 生产构造器使用 256-bit SecureRandom token 和 UTC 时钟。
@@ -172,6 +180,14 @@ public class ConversationContextApplicationService {
             // 自回绑已主动提升代次，本轮不尝试保存；全新租约会重新读取 Session、Workspace 和成员权限。
             return bootstrap(userId, normalizedAgentId, sessionId, traceId, false);
         }
+        LocalClientWorkspaceBinding localBinding = localClientWorkspaceRepository == null
+                ? null
+                : localClientWorkspaceRepository.findByWorkspaceId(session.workspaceId()).orElse(null);
+        if (localBinding != null) {
+            return issueLocalContext(
+                    userId, normalizedAgentId, session, trustedWorkspace, localBinding,
+                    issueLease, traceId);
+        }
         UserOpencodeProcessAssignment assignment =
                 assignmentService.requireReadyProcess(userId, normalizedAgentId, traceId);
         OpencodeServerProcess processSnapshot = requireProcessSnapshot(assignment);
@@ -216,6 +232,73 @@ public class ConversationContextApplicationService {
                     "会话运行上下文在签发期间已失效，请重试");
         }
         return new IssuedConversationContext(contextToken, context);
+    }
+
+    /** 本地上下文固定客户端实例和当前连接代次，不构造服务器进程快照。 */
+    private IssuedConversationContext issueLocalContext(
+            UserId userId,
+            String normalizedAgentId,
+            Session session,
+            Workspace trustedWorkspace,
+            LocalClientWorkspaceBinding localBinding,
+            ConversationContextIssueLease issueLease,
+            String traceId) {
+        if (!localBinding.userId().equals(userId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "本地工作区不属于当前用户");
+        }
+        if (agentRuntimeTargetResolver == null || backendJavaRouteResolver == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "本地客户端运行目标未装配");
+        }
+        AgentRuntimeTargetResolver.SessionRuntimeTarget target = agentRuntimeTargetResolver.sessionTarget(
+                normalizedAgentId, userId, session.sessionId().value(), traceId);
+        if (target.node().runtimeKind() != RuntimeKind.LOCAL_CLIENT
+                || !localBinding.clientInstanceId().value().equals(target.node().localClientInstanceId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地会话运行目标不一致");
+        }
+        AgentSessionBinding bindingSnapshot = bindingRepository
+                .findBySessionIdAndAgentId(session.sessionId(), normalizedAgentId)
+                .filter(binding -> binding.executionNodeId().equals(target.node().executionNodeId()))
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                        "本地 OpenCode 会话映射未保存"));
+        Instant expiresAt = clock.instant().plus(ConversationContextStore.CONTEXT_TTL);
+        String syntheticProcessId = "lcp_" + localBinding.clientInstanceId().value().substring("lci_".length());
+        ConversationRunContext context = new ConversationRunContext(
+                userId,
+                normalizedAgentId,
+                syntheticProcessId,
+                backendJavaRouteResolver.currentLinuxServerIdValue(),
+                null,
+                session,
+                trustedWorkspace,
+                target.node(),
+                bindingSnapshot,
+                CONTEXT_VERSION,
+                expiresAt,
+                RuntimeKind.LOCAL_CLIENT,
+                localBinding.clientInstanceId().value(),
+                target.node().connectionGeneration());
+        String contextToken = tokenFactory.get();
+        if (contextToken == null || contextToken.isBlank()) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "会话运行上下文签发失败");
+        }
+        if (!contextStore.saveIfCurrent(contextToken, context, issueLease)) {
+            throw new PlatformException(
+                    ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
+                    "会话运行上下文在签发期间已失效，请重试");
+        }
+        return new IssuedConversationContext(contextToken, context);
+    }
+
+    /** 生产装配本地工作区和精确 Java 路由；旧测试构造器保持不变。 */
+    @Autowired(required = false)
+    void configureLocalClientRuntime(
+            LocalClientWorkspaceRepository localClientWorkspaceRepository,
+            AgentRuntimeTargetResolver agentRuntimeTargetResolver,
+            BackendJavaRouteResolver backendJavaRouteResolver) {
+        this.localClientWorkspaceRepository = Objects.requireNonNull(localClientWorkspaceRepository);
+        this.agentRuntimeTargetResolver = Objects.requireNonNull(agentRuntimeTargetResolver);
+        this.backendJavaRouteResolver = Objects.requireNonNull(backendJavaRouteResolver);
     }
 
     private TrustedWorkspaceResolution trustedWorkspace(Session session, String traceId) {

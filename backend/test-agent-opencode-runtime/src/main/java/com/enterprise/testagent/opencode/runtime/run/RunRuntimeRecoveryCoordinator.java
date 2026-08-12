@@ -7,6 +7,7 @@ import com.enterprise.testagent.domain.run.RunRuntimeInput;
 import com.enterprise.testagent.domain.run.RunRuntimeManifest;
 import com.enterprise.testagent.domain.run.RunRuntimeStore;
 import com.enterprise.testagent.domain.run.RunStorageMode;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import java.time.Clock;
 import java.time.Duration;
@@ -140,6 +141,11 @@ public class RunRuntimeRecoveryCoordinator {
             String traceId,
             Counter counter) {
         if (manifest.storageMode() != RunStorageMode.REDIS_SUMMARY || !manifest.active()) {
+            counter.ineligibleSkippedCount++;
+            return;
+        }
+        if (manifest.targetRuntimeKind() == RuntimeKind.LOCAL_CLIENT) {
+            // 本地 Run 断连后禁止恢复或重发，原执行订阅负责落 LOCAL_CLIENT_DISCONNECTED 终态。
             counter.ineligibleSkippedCount++;
             return;
         }

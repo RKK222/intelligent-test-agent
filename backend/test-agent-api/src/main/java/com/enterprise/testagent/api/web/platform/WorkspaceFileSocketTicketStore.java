@@ -2,6 +2,7 @@ package com.enterprise.testagent.api.web.platform;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -108,6 +109,26 @@ class WorkspaceFileSocketTicketStore {
         if (origin == null || origin.isBlank()) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "文件 WebSocket 缺少 Origin");
         }
+        return ticket;
+    }
+
+    /** 本地 ticket 固定客户端实例、连接 generation 与根摘要，任一变化都会失效。 */
+    WorkspaceFileSocketTicket issueLocal(
+            String workspaceId,
+            String userId,
+            String mode,
+            String clientInstanceId,
+            long connectionGeneration,
+            String rootDigest,
+            boolean appAdmin,
+            String traceId) {
+        WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
+                ticketFactory.get(), workspaceId, null, null, false, false, appAdmin,
+                userId, mode, null, null, false, null, null, null, null,
+                traceId, clock.instant().plus(DEFAULT_TTL), null, null, null, null,
+                false, null, null, RuntimeKind.LOCAL_CLIENT, clientInstanceId,
+                connectionGeneration, rootDigest);
+        tickets.put(ticket.ticket(), ticket);
         return ticket;
     }
 

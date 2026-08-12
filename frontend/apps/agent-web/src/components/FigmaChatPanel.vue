@@ -821,6 +821,8 @@ const props =
     chatAttachments?: ComposerAttachment[]
     /** 工作区附件正在走分片上传；上传完成前禁止提交本轮消息。 */
     chatAttachmentsUploading?: boolean
+    /** 本地客户端首版关闭聊天附件入口；服务端仍会再次校验伪造请求。 */
+    attachmentsEnabled?: boolean
     /** permission.asked 投影出的待处理权限请求。 */
     permissions?: PermissionRequest[]
     /** question.asked 投影出的待处理提问请求。 */
@@ -868,6 +870,7 @@ const props =
     todoSnapshotsByUserMessageId: () => ({}),
     chatContexts: () => [],
     chatAttachments: () => [],
+    attachmentsEnabled: true,
     permissions: () => [],
     questions: () => [],
     messageScopesById: () => ({}),
@@ -2991,6 +2994,7 @@ function closeChangesDrawer() {
 }
 
 function openAttachmentDialog() {
+  if (!props.attachmentsEnabled) return
   attachmentDialogOpen.value = true
 }
 
@@ -2998,6 +3002,10 @@ function closeAttachmentDialog() {
   attachmentDialogOpen.value = false
   attachmentDragOver.value = false
 }
+
+watch(() => props.attachmentsEnabled, (enabled) => {
+  if (!enabled) closeAttachmentDialog()
+})
 
 function selectChatAttachmentFiles(files: FileList | File[]) {
   const selected = Array.from(files)
@@ -5937,7 +5945,7 @@ function onCompositionEnd() {
         <div class="figma-chat-card-actions">
           <!-- 左侧：附件上传 -->
           <el-tooltip
-            content="上传附件"
+            :content="attachmentsEnabled ? '上传附件' : '本地工作区首版不支持聊天附件'"
             placement="top"
             :show-after="0"
           >
@@ -5945,7 +5953,7 @@ function onCompositionEnd() {
               type="button"
               class="figma-chat-card-btn figma-chat-attachment-btn"
               aria-label="上传附件"
-              :disabled="composerInteractionBlocked || chatAttachmentsUploading || resendEditing"
+              :disabled="!attachmentsEnabled || composerInteractionBlocked || chatAttachmentsUploading || resendEditing"
               @click="openAttachmentDialog"
             >
               <Paperclip class="figma-chat-btn-icon figma-chat-icon--attachment" />

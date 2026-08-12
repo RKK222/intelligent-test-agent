@@ -17,6 +17,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
@@ -41,6 +43,17 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
     private static final int OPENCODE_RESPONSE_MAX_IN_MEMORY_SIZE = 16 * 1024 * 1024;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final List<OpencodeWebClientTransport> transports;
+
+    /** 兼容纯单元测试；生产构造器会注入本地隧道传输。 */
+    public GeneratedOpencodeSdkGateway() {
+        this(List.of());
+    }
+
+    @Autowired
+    public GeneratedOpencodeSdkGateway(List<OpencodeWebClientTransport> transports) {
+        this.transports = transports == null ? List.of() : List.copyOf(transports);
+    }
 
     /**
      * 调用 opencode health API，并把 generated 响应归一为平台健康结果。
@@ -720,7 +733,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
      * 为每次 gateway 调用创建带 baseUrl 和 traceId header 的 generated ApiClient。
      */
     private ApiClient apiClient(ExecutionNode node, String traceId) {
-        return new ApiClient(webClient())
+        return new ApiClient(webClient(node, traceId))
                 .setBasePath(node.baseUrl())
                 .addDefaultHeader(TraceConstants.TRACE_ID_HEADER, traceId);
     }
@@ -728,7 +741,13 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
     /**
      * opencode session message 快照会包含完整 tool/read/write parts；默认 256KB 缓冲会导致历史恢复失败。
      */
-    private WebClient webClient() {
+    private WebClient webClient(ExecutionNode node, String traceId) {
+        Objects.requireNonNull(node, "node must not be null");
+        for (OpencodeWebClientTransport transport : transports) {
+            if (transport.supports(node)) {
+                return transport.create(node, traceId, OPENCODE_RESPONSE_MAX_IN_MEMORY_SIZE);
+            }
+        }
         return ApiClient.buildWebClientBuilder(ApiClient.createDefaultMapper(null))
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(OPENCODE_RESPONSE_MAX_IN_MEMORY_SIZE))
                 .build();
