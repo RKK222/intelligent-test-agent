@@ -378,6 +378,39 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void collectReadOnlyDiffBoundsUntrackedFileContentAndTotalPatchMemory() throws Exception {
+        java.nio.file.Files.writeString(tempDir.resolve("small.txt"), "safe\n");
+        java.nio.file.Files.writeString(tempDir.resolve("oversized.txt"), "x".repeat(300 * 1024));
+        java.nio.file.Files.write(tempDir.resolve("binary.bin"), new byte[]{'a', 0, 'b'});
+        java.nio.file.Files.writeString(tempDir.resolve("too-many-lines.txt"), "line\n".repeat(4_001));
+        StringBuilder porcelain = new StringBuilder("?? small.txt\n?? oversized.txt\n?? binary.bin\n?? too-many-lines.txt\n");
+        for (int index = 0; index < 10; index++) {
+            String path = "bulk-" + index + ".txt";
+            java.nio.file.Files.writeString(tempDir.resolve(path), "p".repeat(128 * 1024));
+            porcelain.append("?? ").append(path).append('\n');
+        }
+        GitWorkspaceService service = new GitWorkspaceService(new RecordingExecutor(""));
+
+        List<GitWorkspaceService.GitDiffFile> files = service.collectDiffFilesReadOnly(
+                tempDir,
+                service.parseStatusPorcelain(porcelain.toString()));
+
+        assertThat(files).filteredOn(file -> file.path().equals("small.txt"))
+                .singleElement()
+                .satisfies(file -> assertThat(file.patch()).contains("+safe"));
+        assertThat(files).filteredOn(file -> file.path().equals("oversized.txt")
+                        || file.path().equals("binary.bin")
+                        || file.path().equals("too-many-lines.txt"))
+                .allSatisfy(file -> {
+                    assertThat(file.patch()).isEmpty();
+                    assertThat(file.additions()).isZero();
+                    assertThat(file.deletions()).isZero();
+                });
+        assertThat(files.stream().mapToInt(file -> file.patch().length()).sum())
+                .isLessThanOrEqualTo(1024 * 1024);
+    }
+
+    @Test
     void collectDiffFilesUsesExpectedDiffModeForStagedAddedAndUnstagedDeletedFiles() {
         RecordingExecutor executor = new RecordingExecutor("");
         executor.stdoutByCall.put(1, "diff --git a/src/New.java b/src/New.java\n--- /dev/null\n+++ b/src/New.java\n@@ -0,0 +1,2 @@\n+one\n+two\n");

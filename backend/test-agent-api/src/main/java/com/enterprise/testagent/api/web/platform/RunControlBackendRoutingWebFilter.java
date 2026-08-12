@@ -6,6 +6,7 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.opencode.runtime.run.RunEventSseRouteService;
 import com.enterprise.testagent.opencode.runtime.run.RunResendQueryService;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -20,10 +21,10 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * Run 写操作专用的跨 Java 路由过滤器。
+ * Run 实时读取与写操作专用的跨 Java 路由过滤器。
  *
- * <p>取消请求必须回到 Run 创建时的生产服务器执行。与允许本机回放的 SSE 不同，
- * 路由或转发失败会直接转换为统一平台错误，禁止随机入口 Java 继续执行取消副作用。
+ * <p>取消、Diff 和 session-tree 恢复必须回到 Run 创建时的生产服务器执行。与纯历史详情不同，
+ * 路由或转发失败会直接转换为统一平台错误，禁止随机入口 Java 访问错误的运行态或体验绑定。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 27)
@@ -33,6 +34,8 @@ class RunControlBackendRoutingWebFilter implements WebFilter {
     private static final String AGENT_PREFIX = "/api/internal/agent/";
     private static final String RUNS_SEGMENT = "/runs/";
     private static final String CANCEL_SUFFIX = "/cancel";
+    private static final List<String> GET_SUFFIXES = List.of("/diff", "/session-tree/messages");
+    private static final List<String> POST_SUFFIXES = List.of(CANCEL_SUFFIX, "/diff/accept", "/diff/reject");
 
     private final RunEventSseRouteService routeService;
     private final RunResendQueryService resendQueryService;
@@ -57,7 +60,7 @@ class RunControlBackendRoutingWebFilter implements WebFilter {
             return chain.filter(exchange);
         }
         // WAITING 替代 Run 尚未投递、也没有生产节点；它的取消只修改共享状态并释放会话锁。
-        if (resendQueryService.isWaitingReplacement(runId.orElseThrow())) {
+        if (isCancel(exchange) && resendQueryService.isWaitingReplacement(runId.orElseThrow())) {
             return chain.filter(exchange);
         }
         return Mono.fromCallable(() -> routeService.forwardTargetStrict(runId.get()))
@@ -89,21 +92,35 @@ class RunControlBackendRoutingWebFilter implements WebFilter {
     }
 
     private Optional<RunId> runId(ServerWebExchange exchange) {
-        if (!HttpMethod.POST.equals(exchange.getRequest().getMethod())) {
+        Optional<String> suffix = routeSuffix(exchange);
+        if (suffix.isEmpty()) {
             return Optional.empty();
         }
         // ROUTED_HEADER 可由外部客户端伪造，cancel 写路径必须每跳重新解析生产 Java；
         // 请求到达当前被选中的生产 Java 后，strict resolver 自然返回 empty，不依赖客户端头防循环。
-        return runIdFromPath(exchange.getRequest().getURI().getRawPath())
+        return runIdFromPath(exchange.getRequest().getURI().getRawPath(), suffix.orElseThrow())
                 .flatMap(this::parseRunId);
     }
 
-    private Optional<String> runIdFromPath(String path) {
-        Optional<String> platformRunId = runIdAfterPrefix(path, PLATFORM_RUN_PREFIX);
+    private Optional<String> routeSuffix(ServerWebExchange exchange) {
+        List<String> candidates;
+        if (HttpMethod.GET.equals(exchange.getRequest().getMethod())) {
+            candidates = GET_SUFFIXES;
+        } else if (HttpMethod.POST.equals(exchange.getRequest().getMethod())) {
+            candidates = POST_SUFFIXES;
+        } else {
+            return Optional.empty();
+        }
+        String path = exchange.getRequest().getURI().getRawPath();
+        return candidates.stream().filter(path::endsWith).findFirst();
+    }
+
+    private Optional<String> runIdFromPath(String path, String routeSuffix) {
+        Optional<String> platformRunId = runIdAfterPrefix(path, PLATFORM_RUN_PREFIX, routeSuffix);
         if (platformRunId.isPresent()) {
             return platformRunId;
         }
-        if (path == null || !path.startsWith(AGENT_PREFIX) || !path.endsWith(CANCEL_SUFFIX)) {
+        if (path == null || !path.startsWith(AGENT_PREFIX) || !path.endsWith(routeSuffix)) {
             return Optional.empty();
         }
         String suffix = path.substring(AGENT_PREFIX.length());
@@ -113,14 +130,19 @@ class RunControlBackendRoutingWebFilter implements WebFilter {
         }
         return cleanRunId(suffix.substring(
                 runsIndex + RUNS_SEGMENT.length(),
-                suffix.length() - CANCEL_SUFFIX.length()));
+                suffix.length() - routeSuffix.length()));
     }
 
-    private Optional<String> runIdAfterPrefix(String path, String prefix) {
-        if (path == null || !path.startsWith(prefix) || !path.endsWith(CANCEL_SUFFIX)) {
+    private Optional<String> runIdAfterPrefix(String path, String prefix, String routeSuffix) {
+        if (path == null || !path.startsWith(prefix) || !path.endsWith(routeSuffix)) {
             return Optional.empty();
         }
-        return cleanRunId(path.substring(prefix.length(), path.length() - CANCEL_SUFFIX.length()));
+        return cleanRunId(path.substring(prefix.length(), path.length() - routeSuffix.length()));
+    }
+
+    private boolean isCancel(ServerWebExchange exchange) {
+        return HttpMethod.POST.equals(exchange.getRequest().getMethod())
+                && exchange.getRequest().getURI().getRawPath().endsWith(CANCEL_SUFFIX);
     }
 
     private Optional<String> cleanRunId(String value) {

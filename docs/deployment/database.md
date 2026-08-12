@@ -1354,6 +1354,21 @@ ACL/pubsub 全路径测试。正式合并/企业打包前仍必须读取相关�
 LobeHub fork 使用独立 ParadeDB/PostgreSQL 17、独立账号、卷和自身 migration；平台 Flyway datasource 永远
 不得访问该库。详细安装和回滚见 `docs/deployment/lobehub-offline.md`。
 
+## V20260809210000 / V20260812104911 平台体验工作区
+
+平台体验工作区只增加生产必需的默认配置、当前绑定结构和高频资格查询索引：
+
+| 对象 | 用途与约束 |
+|---|---|
+| `common_parameters.OPENCODE_EXPERIENCE_WORKSPACE_DIR` | `platform=all`、`editable=true`、初始值 `UNCONFIGURED`；管理员部署后人工填写目录。migration 不写环境专属路径。 |
+| `experience_workspace_bindings` | `linux_server_id` 主键，每台服务器唯一指向当前 `workspace_id`；保存配置原值、最近 traceId、首次创建和更新时间。`workspace_id` 唯一且外键引用 `workspaces`。 |
+
+旧体验分支已在需要保留的个人 PostgreSQL 执行候选 `V20260809210000__common_parameters_add_experience_workspace.sql`，因此该文件以 SHA-256 `c093695aac4305aed3caeb8fcec58f0731f1519527031f1775adaf8be86cf24a` 原字节冻结在 `db/migration-compat/experience-workspace-applied`。当前 release 已执行到更高版本，主目录不再解析该候选；无旧候选 history 的数据库执行幂等前向 migration `V20260812104911__common_parameters_add_experience_workspace_after_release.sql`。已执行旧候选且 checksum 为 Flyway `-1300860043` 的数据库由唯一 `DatabaseMigrationCompatibilityCustomizer` 加载隔离 location 校验原文，并继续执行同一高版本前向 migration；未知 checksum 明确失败关闭。两条历史均保持 `outOfOrder=false`，不使用 `repair` 或第二套迁移器。
+
+migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示文件。运行期 SQL 全部位于 `ExperienceWorkspaceMapper.xml`：先按确定性 ID `ON CONFLICT DO NOTHING` 登记 `workspaces`，再以调用前读取的完整 binding 快照执行 compare-and-set；无绑定时只插入、已有绑定时只有 `workspace_id + configured_parameter_value + updated_at` 全部仍匹配才更新。两步由 `MyBatisExperienceWorkspaceRepository` 在同一事务内完成，CAS 失败由应用层从通用参数重新读取并重试，跨 Java 的旧配置请求不能迟到覆盖新绑定。参数换目录时旧 `workspaces` 行不删除、不改指，继续承载历史 Session/Run 外键；普通 Workspace 用户查询按转义后的字面 `wrk_exp_` 前缀排除历史体验记录。
+
+`MyBatisExperienceWorkspacePostgresqlIntegrationTest` 使用真实 PostgreSQL 从已部署基线 `V20260809120000` 升级到 HEAD，校验高版本前向 migration、参数和表结构，并发同服务器只产生一个当前绑定、不同服务器隔离、换目录保留旧 Workspace。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 另以真实 Spring Boot Flyway 覆盖当前 release history、已执行旧候选 history 和未知旧 checksum 三条路径；`FlywayMigrationNamingTest` 锁定旧文件原始 SHA-256。合并或企业打包前仍必须读取每个目标环境完整 `flyway_schema_history`，并验证源码、persistence JAR 与最终应用嵌套 JAR 中的 migration 字节一致；禁止 `outOfOrder`、`repair` 或手工改历史表。
+
 ## V20260628100000 通用参数修改日志表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260628100000__add_common_parameter_change_logs.sql` 创建通用参数修改日志表，用于记录每次参数值修改的审计信息：

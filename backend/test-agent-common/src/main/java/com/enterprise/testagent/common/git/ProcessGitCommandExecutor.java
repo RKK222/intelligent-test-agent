@@ -124,7 +124,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
                     "event=git_command_unavailable durationMs={} command={} error={}",
                     elapsedMillis(startedAt),
                     safeCommand,
-                    exception.toString());
+                    GitCommandExecutor.redactSensitiveText(exception.toString()));
             throw new PlatformException(
                     ErrorCode.GIT_UNAVAILABLE,
                     "Git 命令不可用",
@@ -182,7 +182,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
         if (argument == null || argument.isBlank()) {
             return argument;
         }
-        String value = argument.trim();
+        String value = GitCommandExecutor.redactSensitiveText(argument.trim());
         if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("ssh://")) {
             return maskUriUserInfo(value);
         }
@@ -191,7 +191,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
         if (at > 0 && colon > at + 1 && !value.substring(0, at).contains("/")) {
             return "***@" + value.substring(at + 1);
         }
-        return argument;
+        return value;
     }
 
     private static String maskUriUserInfo(String value) {
@@ -218,7 +218,8 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
                 .replace('\n', ' ')
                 .trim();
         text = URI_USER_INFO_PATTERN.matcher(text).replaceAll("$1***@");
-        return SSH_PRINCIPAL_PATTERN.matcher(text).replaceAll("***@$2");
+        return GitCommandExecutor.redactSensitiveText(
+                SSH_PRINCIPAL_PATTERN.matcher(text).replaceAll("***@$2"));
     }
 
     private static String shellQuote(String value) {

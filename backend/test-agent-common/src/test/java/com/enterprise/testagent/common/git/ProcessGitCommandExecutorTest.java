@@ -52,6 +52,37 @@ class ProcessGitCommandExecutorTest {
     }
 
     @Test
+    void scopedRedactionMasksExperienceWorkspacePathInCommandDetailsAndLogs() {
+        String sensitivePath = "/srv/platform/private-experience";
+        ProcessGitCommandExecutor executor = new ProcessGitCommandExecutor();
+
+        try (GitCommandExecutor.LogRedaction ignored =
+                        GitCommandExecutor.redactSensitiveArguments(List.of(sensitivePath));
+                CapturedGitLogger logs = CapturedGitLogger.attach()) {
+            assertThatThrownBy(() -> executor.execute(
+                            List.of(
+                                    "/bin/sh",
+                                    "-c",
+                                    "printf 'fatal: cannot change to " + sensitivePath + "' >&2; exit 128",
+                                    sensitivePath),
+                            null,
+                            Duration.ofSeconds(1)))
+                    .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                        assertThat(exception.details().get("command").toString())
+                                .contains("<redacted-local-path>")
+                                .doesNotContain(sensitivePath);
+                        assertThat(exception.details().get("stderr").toString())
+                                .contains("<redacted-local-path>")
+                                .doesNotContain(sensitivePath);
+                    });
+
+            assertThat(String.join("\n", logs.messages()))
+                    .contains("<redacted-local-path>")
+                    .doesNotContain(sensitivePath);
+        }
+    }
+
+    @Test
     void executeOutputsStartAndSuccessLogs() {
         ProcessGitCommandExecutor executor = new ProcessGitCommandExecutor();
 

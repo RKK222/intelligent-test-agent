@@ -68,6 +68,37 @@ describe("backend-api", () => {
     }
   });
 
+  it("opens the server-assigned experience workspace without a client-selected body", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        workspaceId: "wrk_exp_shared",
+        name: "体验工作区",
+        rootPath: "workspace:wrk_exp_shared",
+        status: "ACTIVE",
+        linuxServerId: "linux-a",
+        createdAt: "2026-08-09T00:00:00Z",
+        updatedAt: "2026-08-09T00:00:00Z"
+      }
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      routeLinuxServerId: () => "linux-a",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.openExperienceWorkspace();
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url).toBe("http://api/api/internal/platform/workspace-management/workspaces/experience/open");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeUndefined();
+    expect(new Headers(init?.headers).get(LINUX_SERVER_ROUTE_HEADER)).toBe("linux-a");
+  });
+
   it("uses the fixed API Key management routes and redacts revealed keys from raw exchanges", async () => {
     const exchanges: Array<Record<string, unknown>> = [];
     const apiKey = "taak_v1_must-not-enter-observer";

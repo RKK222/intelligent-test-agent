@@ -153,4 +153,61 @@ describe("TerminalPanel", () => {
     expect(view.queryByText(/PTY_TICKET_FAILED/)).toBeNull();
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
+
+  it("工作区失权时关闭现有终端并废弃迟到 ticket", async () => {
+    let resolveLateTicket!: (ticket: {
+      ticket: string;
+      expiresAt: string;
+      webSocketUrl: string;
+    }) => void;
+    const lateTicket = new Promise<{
+      ticket: string;
+      expiresAt: string;
+      webSocketUrl: string;
+    }>(resolve => {
+      resolveLateTicket = resolve;
+    });
+    const active = render(TerminalPanel, {
+      props: {
+        baseUrl: "https://console.example",
+        createTicket: vi.fn().mockResolvedValue({
+          ticket: "pty_active",
+          expiresAt: "2026-07-18T14:00:00Z",
+          webSocketUrl: "wss://console.example/terminal/ws?ticket=pty_active"
+        }),
+        WebSocketCtor: FakeWebSocket as any
+      }
+    });
+    await fireEvent.click(active.getByRole("button", { name: "连接终端" }));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    FakeWebSocket.instances[0].open();
+
+    await active.rerender({ disabled: true });
+
+    expect(FakeWebSocket.instances[0].sent.map(item => JSON.parse(item))).toContainEqual({
+      type: "close",
+      reason: "disabled"
+    });
+    expect(FakeWebSocket.instances[0].readyState).toBe(3);
+    active.unmount();
+
+    FakeWebSocket.instances = [];
+    const pending = render(TerminalPanel, {
+      props: {
+        baseUrl: "https://console.example",
+        createTicket: vi.fn().mockReturnValue(lateTicket),
+        WebSocketCtor: FakeWebSocket as any
+      }
+    });
+    await fireEvent.click(pending.getByRole("button", { name: "连接终端" }));
+    await pending.rerender({ disabled: true });
+    resolveLateTicket({
+      ticket: "pty_late",
+      expiresAt: "2026-07-18T14:00:00Z",
+      webSocketUrl: "wss://console.example/terminal/ws?ticket=pty_late"
+    });
+
+    await waitFor(() => expect(pending.getByText("closed")).toBeTruthy());
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
 });

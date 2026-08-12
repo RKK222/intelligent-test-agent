@@ -20,8 +20,8 @@ import org.springframework.stereotype.Component;
 /**
  * 在 Spring Boot 创建唯一 Flyway Bean 时解析历史迁移分叉。
  *
- * <p>工具盒子、LobeHub、内部模型可观测、撤销重发和 QA Memory 迁移均形成过已知历史分叉。兼容程序只按
- * 已应用版本与 checksum 选择原始字节或更高版本补偿资源；未知 checksum、不完整历史和混合路径
+ * <p>工具盒子、LobeHub、内部模型可观测、撤销重发、QA Memory 和体验工作区迁移均形成过已知历史分叉。
+ * 兼容程序只按已应用版本与 checksum 选择原始字节或更高版本补偿资源；未知 checksum、不完整历史和混合路径
  * 必须继续拒绝启动。
  */
 @Component
@@ -85,6 +85,11 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     static final String SESSION_SHARE_ATTRIBUTION_MIGRATION_VERSION = "20260809170001";
     static final String SESSION_SHARE_FORWARD_MIGRATION_VERSION = "20260810110001";
     static final String SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION_VERSION = "20260810110002";
+    static final String EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_VERSION = "20260809210000";
+    static final int EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_CHECKSUM = -1300860043;
+    static final String EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/experience-workspace-applied";
+    static final String EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_VERSION = "20260812104911";
 
     private static final String CURRENT_TOOLBOX_MIGRATION_FILE =
             "V20260728160800__create_toolbox_click_tracking.sql";
@@ -112,6 +117,8 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             "db/migration/V20260809230000__generalize_memory_and_embedding_profiles.sql";
     private static final String QA_MEMORY_IDENTITY_MAIN_RESOURCE =
             "db/migration/V20260810090000__enforce_qa_memory_identity.sql";
+    private static final String EXPERIENCE_WORKSPACE_APPLIED_MAIN_RESOURCE =
+            "db/migration/V20260809210000__common_parameters_add_experience_workspace.sql";
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(DatabaseMigrationCompatibilityCustomizer.class);
@@ -274,6 +281,17 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                 appliedMigrations, SESSION_SHARE_FORWARD_MIGRATION_VERSION);
         boolean sessionShareAttributionForwardMigrationApplied = isMigrationApplied(
                 appliedMigrations, SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION_VERSION);
+        boolean experienceWorkspaceMigrationApplied = isMigrationApplied(
+                appliedMigrations, EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_VERSION);
+        Integer experienceWorkspaceMigrationChecksum = appliedChecksum(
+                appliedMigrations, EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_VERSION);
+        if (experienceWorkspaceMigrationApplied
+                && !Objects.equals(
+                        experienceWorkspaceMigrationChecksum,
+                        EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_CHECKSUM)) {
+            throw new IllegalStateException(
+                    "检测到未知的体验工作区 migration checksum，拒绝自动兼容；请核对 flyway_schema_history");
+        }
         boolean qaMemoryAfterSessionShareForwardApplied = isMigrationApplied(
                 appliedMigrations, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION);
         boolean qaMemoryAfterTokenLatencyForwardApplied = isMigrationApplied(
@@ -383,6 +401,10 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         if (qaMemoryAfterReleaseForwardLocation != null) {
             addLocationIfAbsent(locations, qaMemoryAfterReleaseForwardLocation);
         }
+        if (experienceWorkspaceMigrationApplied) {
+            addLocationIfAbsent(
+                    locations, EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION);
+        }
         configuration.locations(locations.toArray(String[]::new));
 
         boolean legacyWithoutCurrentMigration = legacyMigrationApplied
@@ -419,6 +441,8 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             filteredMainResources.add(QA_MEMORY_GENERALIZE_MAIN_RESOURCE);
             filteredMainResources.add(QA_MEMORY_IDENTITY_MAIN_RESOURCE);
         }
+        // 旧体验工作区候选版本已进入个人持久库，只能从隔离路径按原字节解析；主链统一执行更高前向版本。
+        filteredMainResources.add(EXPERIENCE_WORKSPACE_APPLIED_MAIN_RESOURCE);
         if (!filteredMainResources.isEmpty()) {
             // Flyway 没有公开“排除单个 classpath migration”的配置入口；这里包装唯一默认扫描器，
             // 只隐藏与已知历史分叉不匹配的主目录副本，其余 SQL 和 Java migration 保持原样。
@@ -477,6 +501,12 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             LOGGER.warn("检测到会话分享主 history 早于 QA Memory，启用 QA Memory 顺序补偿路径: missingVersion={}, forwardVersion={}",
                     QA_MEMORY_APPLIED_MIGRATION_VERSION,
                     qaMemoryAfterReleaseForwardVersion);
+        }
+        if (experienceWorkspaceMigrationApplied) {
+            LOGGER.warn("检测到已执行的体验工作区 migration，启用原始字节兼容解析并继续执行高版本前向迁移: version={}, checksum={}, forwardVersion={}",
+                    EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_VERSION,
+                    experienceWorkspaceMigrationChecksum,
+                    EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_VERSION);
         }
     }
 

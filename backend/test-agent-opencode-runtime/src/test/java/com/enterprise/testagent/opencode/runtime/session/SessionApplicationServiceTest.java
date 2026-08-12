@@ -28,6 +28,8 @@ import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.session.SessionWorkspaceContext;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
@@ -96,6 +98,73 @@ class SessionApplicationServiceTest {
         assertThat(created.createdByUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
         assertThat(sessions.saved).singleElement().satisfies(saved ->
                 assertThat(saved.createdByUserId()).isEqualTo(new UserId("usr_1234567890abcdef")));
+    }
+
+    @Test
+    void createSessionAllowsCurrentExperienceWorkspaceOnlyThroughRealtimePolicy() {
+        UserId userId = new UserId("usr_experience");
+        WorkspaceId experienceId = new WorkspaceId("wrk_exp_current_workspace");
+        UserWorkspaceQueryRepository ordinaryWorkspaces = Mockito.mock(UserWorkspaceQueryRepository.class);
+        Mockito.when(ordinaryWorkspaces.findUserWorkspace(userId, experienceId)).thenReturn(Optional.empty());
+        ExperienceWorkspaceAccessAuthorizer experienceAuthorizer =
+                Mockito.mock(ExperienceWorkspaceAccessAuthorizer.class);
+        Mockito.when(experienceAuthorizer.isExperienceWorkspace(experienceId)).thenReturn(true);
+        Mockito.when(experienceAuthorizer.requireAccess(userId, experienceId)).thenReturn(workspace());
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        SessionApplicationService service = service(
+                new FakeWorkspaceRepository(true), sessions, new FakeMessageRepository());
+        service.setUserWorkspaceQueryRepository(ordinaryWorkspaces);
+        service.setExperienceWorkspaceAccessAuthorizer(experienceAuthorizer);
+
+        Session created = service.createSession(userId, experienceId, "体验会话", "trace_experience");
+
+        assertThat(created.workspaceId()).isEqualTo(experienceId);
+        verify(experienceAuthorizer).requireAccess(userId, experienceId);
+        verify(ordinaryWorkspaces, never()).findUserWorkspace(userId, experienceId);
+    }
+
+    @Test
+    void experienceSessionWritesRequireCurrentExperienceAccessButHistoryRemainsReadable() {
+        UserId userId = new UserId("usr_experience");
+        WorkspaceId experienceId = new WorkspaceId("wrk_exp_current_workspace");
+        Session experienceSession = new Session(
+                SESSION_ID,
+                experienceId,
+                "体验会话",
+                SessionStatus.ACTIVE,
+                NOW,
+                NOW,
+                "trace_experience");
+        FakeSessionRepository sessions = new FakeSessionRepository(experienceSession);
+        FakeMessageRepository messages = new FakeMessageRepository();
+        SessionHistoryRepository history = new FakeSessionHistoryRepository(new PageResponse<>(
+                List.of(new SessionHistoryItem(experienceSession, null)), 1, 30, 1));
+        ExperienceWorkspaceAccessAuthorizer experienceAuthorizer =
+                Mockito.mock(ExperienceWorkspaceAccessAuthorizer.class);
+        Mockito.when(experienceAuthorizer.isExperienceWorkspace(experienceId)).thenReturn(true);
+        Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(experienceAuthorizer)
+                .requireAccess(userId, experienceId);
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true), sessions, history, messages, null);
+        service.setExperienceWorkspaceAccessAuthorizer(experienceAuthorizer);
+
+        assertThat(service.getSession(userId, SESSION_ID)).isEqualTo(experienceSession);
+        assertThatThrownBy(() -> service.updateSession(
+                        userId, SESSION_ID, "changed", null, "trace_update"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.archiveSession(userId, SESSION_ID, "trace_archive"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.appendMessage(
+                        userId, SESSION_ID, SessionMessageRole.USER, "blocked", "trace_message"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(experienceAuthorizer, times(3)).requireAccess(userId, experienceId);
+        assertThat(sessions.saved).isEmpty();
+        assertThat(messages.saved).isEmpty();
     }
 
     @Test
@@ -371,6 +440,54 @@ class SessionApplicationServiceTest {
         service.listMessages(SESSION_ID, new PageRequest(1, 20), "trace_1234567890abcdef");
 
         verify(snapshotService).refreshSessionSnapshot(eq("opencode"), eq(activeSession), eq("trace_1234567890abcdef"));
+    }
+
+    @Test
+    void invalidExperienceHistoryReturnsDatabaseMessagesWithoutRemoteRefresh() {
+        UserId userId = new UserId("usr_experience");
+        WorkspaceId experienceId = new WorkspaceId("wrk_exp_current_workspace");
+        Session experienceSession = new Session(
+                SESSION_ID,
+                experienceId,
+                "体验会话",
+                SessionStatus.ACTIVE,
+                NOW,
+                NOW,
+                "trace_experience");
+        FakeMessageRepository messages = new FakeMessageRepository();
+        messages.save(new SessionMessage(
+                new SessionMessageId("msg_experience_snapshot_1234567890"),
+                SESSION_ID,
+                SessionMessageRole.ASSISTANT,
+                "数据库快照",
+                NOW,
+                "trace_experience"));
+        RunSessionMessageSnapshotService snapshotService = Mockito.mock(RunSessionMessageSnapshotService.class);
+        ExperienceWorkspaceAccessAuthorizer authorizer = Mockito.mock(ExperienceWorkspaceAccessAuthorizer.class);
+        Mockito.when(authorizer.isExperienceWorkspace(experienceId)).thenReturn(true);
+        Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(authorizer)
+                .requireAccess(userId, experienceId);
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                new FakeSessionRepository(experienceSession),
+                new FakeSessionHistoryRepository(new PageResponse<>(
+                        List.of(new SessionHistoryItem(experienceSession, null)), 1, 30, 1)),
+                messages,
+                snapshotService);
+        service.setExperienceWorkspaceAccessAuthorizer(authorizer);
+
+        PageResponse<SessionMessage> page = service.listMessages(
+                userId,
+                SESSION_ID,
+                new PageRequest(1, 20),
+                "trace_experience",
+                true);
+
+        assertThat(page.items()).extracting(SessionMessage::content).containsExactly("数据库快照");
+        assertThat(service.canUseLiveRuntime(userId, SESSION_ID)).isFalse();
+        verify(snapshotService, never()).refreshSessionSnapshot(eq("opencode"), eq(experienceSession), eq("trace_experience"));
+        verify(authorizer, times(2)).requireAccess(userId, experienceId);
     }
 
     @Test

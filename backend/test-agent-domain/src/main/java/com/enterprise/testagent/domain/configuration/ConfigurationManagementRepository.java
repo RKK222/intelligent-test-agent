@@ -21,6 +21,13 @@ public interface ConfigurationManagementRepository {
 
     List<ApplicationDefinition> findApplicationsByMember(UserId userId);
 
+    /**
+     * 判断用户是否仍属于任一已启用应用；体验工作区每次访问都用该权威条件重新校验资格。
+     */
+    default boolean hasEnabledApplicationMembership(UserId userId) {
+        return !findApplicationsByMember(userId).isEmpty();
+    }
+
     boolean isActiveMember(ApplicationId appId, UserId userId);
 
     List<ApplicationMember> findActiveMembers(ApplicationId appId);

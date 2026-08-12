@@ -1,7 +1,7 @@
 import type { AppSourceOpenResult, AppSourcePurpose, PersonalWorkspace } from "@test-agent/shared-types";
 import { BackendApiError } from "@test-agent/backend-api";
 
-export type SelectedWorkspaceKind = "MANAGED" | "APP_SOURCE";
+export type SelectedWorkspaceKind = "MANAGED" | "APP_SOURCE" | "EXPERIENCE";
 
 export type PersonalWorkspaceRuntimeContext = {
   personalWorkspaceId: string;
@@ -53,14 +53,14 @@ export function sourceContextFromOpen(result: AppSourceOpenResult): AppSourceWor
 
 /** 源码快照仍是普通可写 Workspace，但不具备任何 Git 发布或应用 Agent 发布能力。 */
 export function appSourceWorkspaceCapabilities(kind: SelectedWorkspaceKind) {
-  const sourceMode = kind === "APP_SOURCE";
+  const isolatedMode = kind === "APP_SOURCE" || kind === "EXPERIENCE";
   return {
     canWriteWorkspaceFiles: true,
     canUseSessionsAndRuns: true,
     canUseTerminal: true,
-    canUseGitPublication: !sourceMode,
-    canPublishApplicationAgentConfig: !sourceMode,
-    canSelectApplicationVersion: !sourceMode
+    canUseGitPublication: !isolatedMode,
+    canPublishApplicationAgentConfig: !isolatedMode,
+    canSelectApplicationVersion: !isolatedMode
   };
 }
 
@@ -72,7 +72,7 @@ export function ordinaryWorkspaceCanWrite(
   personalWorkspaceId?: string,
   workspaceId?: string
 ) {
-  return Boolean(workspaceId && (kind === "APP_SOURCE" || personalWorkspaceId));
+  return Boolean(workspaceId && (kind === "APP_SOURCE" || kind === "EXPERIENCE" || personalWorkspaceId));
 }
 
 export type DiffSaveCapability = {
@@ -88,7 +88,7 @@ export type DiffSaveCapability = {
  */
 export function diffFileCanWrite(capability: DiffSaveCapability) {
   if (capability.agentScope === null) return capability.ordinaryWorkspaceWritable;
-  if (capability.workspaceKind === "APP_SOURCE") return false;
+  if (capability.workspaceKind !== "MANAGED") return false;
   return capability.agentScope === "PUBLIC"
     ? capability.isSuperAdmin
     : capability.isAppAdmin;

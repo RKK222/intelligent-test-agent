@@ -1136,6 +1136,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 |---|---|---|
 | `GET` | `/api/internal/platform/workspace-management/workspaces` | 分页列出当前用户拥有或由其历史会话归因的工作区。 |
 | `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}` | 查询当前用户可访问的工作区详情。 |
+| `POST` | `/api/internal/platform/workspace-management/workspaces/experience/open` | 无所属应用用户打开当前 TestAgent 进程服务器上的共享体验工作区；无请求体。 |
 | `POST` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` | 查询当前工作区文件 WebSocket 应连接的目标后端。 |
 | `GET` | `/api/internal/platform/workspace-management/backend-servers` | 查询可用于服务器工作空间选择器的后端服务器。 |
 | `POST` | `/api/internal/platform/workspace-management/file-ws/tickets` | 在目标后端创建文件 WebSocket 一次性 ticket。 |
@@ -1164,6 +1165,18 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
   "updatedAt": "2026-06-19T00:00:00Z"
 }
 ```
+
+#### 平台体验工作区
+
+`POST /api/internal/platform/workspace-management/workspaces/experience/open` 不接收请求体，也不接受客户端指定路径、服务器或 Workspace ID。入口先要求当前用户 `opencode` TestAgent 进程为 READY，并沿用用户进程后端路由过滤器、`BackendJavaRouteResolver` 和 `BackendHttpForwarder` 到达进程所属服务器；目标 Java 再核对 assignment 的 `linuxServerId` 就是本服务器。成功响应使用上面的既有 `WorkspaceResponse`，Workspace 名称固定为“体验工作区”；`rootPath` 固定为逻辑定位符 `workspace:{workspaceId}`，`physicalRootPath` 为空，不回显管理员配置的物理目录。
+
+资格定义为用户不存在任何“`applications.enabled=true` 且 `application_members.deleted_at is null`”的应用；逻辑删除成员、只关联停用应用或完全无成员关系的用户可使用，`SUPER_ADMIN` 不绕过该条件。目标 Java 读取当前平台的通用参数 `OPENCODE_EXPERIENCE_WORKSPACE_DIR`：值不能是 `UNCONFIGURED`，解析后必须是存在、可读写的绝对目录，且 `git rev-parse --show-toplevel` 的真实路径严格等于该目录。父仓库的普通子目录不视为独立体验 Git 根。平台不创建目录、不执行 `git init`，也不检查或修改 Git remote；带 remote 的本地工作树可以打开。
+
+同一服务器和目录真实路径生成稳定 `wrk_exp_` Workspace ID；参数不变时并发调用幂等复用，参数换目录时生成新 ID 并更新该服务器当前绑定，旧 Workspace 仅保留历史 Session/Run 外键。打开过程使用数据库 compare-and-set 登记并在写入后复读配置，CAS 失败从通用参数重新开始，跨 Java 的旧读取不能迟到成为最终 current。普通工作区列表不返回任何当前或历史体验 Workspace。详情、Session 创建、Git 状态、文件 route/ticket/每条 RPC、Session runtime 目标、无 contextToken 兼容 Run、contextToken 每次滑动续期和会话上下文签发都会重新校验“用户仍无有效所属应用、Workspace 是本服务器当前绑定、ACTIVE、目录与当前参数一致”；任一事实变化后旧 ID 返回 `FORBIDDEN`，不会降级为非托管 Workspace。用户自己的历史会话列表仍沿用既有归因规则保留，但不能借历史 Session 访问旧目录或启动新 Run。
+
+体验目录的普通文件可通过既有文件 WebSocket 读写，继续拒绝根目录、`.git` 元数据和受控配置路径越权。每条体验文件 RPC 先重做实时资格与绑定校验，再拒绝任意层级 `.git`/`.opencode` 的直接读取、写入、状态、复制、移动和改名；列表、搜索和直接路径解析均不展示或跟随符号链接，根列表和搜索另过滤受控命名空间，`APP_ADMIN`/`SUPER_ADMIN` 不旁路。体验文件树只调用普通 `workspace.list/read/write`，应用引用 `workspace.view.*` 组合视图固定不开放。旧 `GET /api/internal/platform/opencode-runtime/fs/list|find|read` 对体验 ID 一律在实时校验后返回 `FORBIDDEN`，文件内容只允许走平台文件通道。OpenCode runtime 的 agent/command/reference/session、Run 实时/恢复事件、旁路问答和自动标题会递归把体验物理根替换为固定占位符，避免 Map key、数组、tool payload 或消息快照回显绝对路径。Workspace PTY 与体验 Run SSE 在建立后按固定短间隔重验并在撤权后主动关闭；Diff、Diff 决策与 session-tree 恢复严格路由到 Run 生产 Java。`GET /workspaces/{workspaceId}/git-diff` 只用于只读展示：状态和 patch 都限定到过滤后的精确相对 pathspec，省略任意层级且大小写不敏感的 `.git`/`.opencode` 与符号链接条目，禁用 optional locks、fsmonitor、untracked cache、external diff 和 textconv。单个 patch 最多 256 KiB 字符、整次聚合最多 1 MiB 字符；未跟踪文件只有在不超过 256 KiB/2000 行且为严格 UTF-8 非 NUL 文本时生成 patch，超限或二进制仍返回文件状态、空 patch 和零行数。OpenCode 通用 `/vcs/status|diff`、experimental worktree 的列表/创建/删除/reset 对体验 ID 全部拒绝，体验 Workspace 也不能调用个人 worktree 的 stage、unstage、discard、commit、pull、push、发布或冲突写入口。Git 状态失败不影响文件和对话，返回安全 `GIT_UNAVAILABLE`，不携带底层物理路径或异常原因链。
+
+未配置、目录不可用、非 Git、进程未就绪、目标服务器不可用或 assignment 不一致均返回统一安全错误和响应 `traceId`；响应 details 只允许稳定原因码，不回显配置值或物理路径。该接口是向后兼容的增量 HTTP 能力，不新增 RunEvent/SSE 类型。
 
 超级管理员服务器工作空间选择器通过文件 WebSocket `directory.list` 获取目标后端服务器上的一层目录，不暴露普通用户本机目录选择入口。响应 `WorkspaceDirectoryListResponse`：
 
@@ -1254,7 +1267,7 @@ WebSocket 客户端按不超过 256 KiB 的 binary frame 顺序发送归档，�
 ]
 ```
 
-`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 对托管工作区要求当前用户仍是所属应用的有效成员，并要求当前用户 opencode 进程服务器归属、workspace 和目标后端同服务器；找不到应用版本、副本或个人工作区映射的非托管 Workspace 默认拒绝文件访问，仅 `SUPER_ADMIN` 的服务器工作空间兼容入口可在 route、ticket 和 RPC 三层放行。签发优先使用轻量归属快照；当快照未 READY 时会复查当前用户 opencode 强状态，避免文件树与进程状态卡可用性不一致，但不会触发 `start` 命令；`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录；`mode=agent-config` 绑定 Agent 配置 scope/workspace/worktree，读取允许登录用户，公共 Git 写入仅 `SUPER_ADMIN`，应用级配置写入由 WebSocket handler 校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。普通用户写应用版本副本会返回只读错误；个人 worktree 普通文件仍可写，并可通过 `workspace.delete` 删除普通文件或递归删除目录树；删除不跟随符号链接，工作区根目录和任意层级 `.git` 元数据禁止删除。整个应用 `.opencode/**` 命名空间仅 APP_ADMIN 可写，不能通过 command/plugin/tool 或辅助源码目录绕过。路由、ticket 签发和每一条 workspace RPC 都重新校验托管成员关系，已退出应用的用户不能依赖旧 ticket 继续读取工作区或引用内容。
+`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 对托管工作区要求当前用户仍是所属应用的有效成员，并要求当前用户 opencode 进程服务器归属、workspace 和目标后端同服务器；找不到应用版本、副本或个人工作区映射的非托管 Workspace 默认拒绝文件访问，仅 `SUPER_ADMIN` 的服务器工作空间兼容入口可在 route、ticket 和 RPC 三层放行。签发优先使用轻量归属快照；当快照未 READY 时会复查当前用户 opencode 强状态，避免文件树与进程状态卡可用性不一致，但不会触发 `start` 命令；`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录；`mode=agent-config` 绑定 Agent 配置 scope/workspace/worktree，读取允许登录用户，公共 Git 写入仅 `SUPER_ADMIN`，应用级配置写入由 WebSocket handler 校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。体验 Workspace 不支持应用 Agent 配置：`scope=WORKSPACE` 携带任意 `wrk_exp_` ID 时先按当前用户、服务器、目录配置和最新绑定执行实时策略，随后固定返回 `FORBIDDEN`；历史或失效绑定同样不能降级为普通 Workspace，管理员角色不绕过。普通用户写应用版本副本会返回只读错误；个人 worktree 普通文件仍可写，并可通过 `workspace.delete` 删除普通文件或递归删除目录树；删除不跟随符号链接，工作区根目录和任意层级 `.git` 元数据禁止删除。整个应用 `.opencode/**` 命名空间仅 APP_ADMIN 可写，不能通过 command/plugin/tool 或辅助源码目录绕过。路由、ticket 签发和每一条 workspace RPC 都重新校验托管成员关系，已退出应用的用户不能依赖旧 ticket 继续读取工作区或引用内容。
 
 Agent 配置文件上传使用同一文件 WebSocket 上的 `agent-config.upload.begin/chunk/complete` 分片 RPC，主动取消时调用 `agent-config.upload.abort`。`begin` 请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId`、`path` 和本机文件 `size`，返回服务端生成的 `uploadId` 与 `chunkBytes`；后续分片和完成请求必须继续携带相同 scope/workspace/worktree 绑定。公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）。上传不设置应用层总大小上限，复用工作空间文件服务的重名、路径、分片顺序和声明大小校验，不覆盖同名条目；应用级路径以当前个人 worktree 的 `.opencode/` 为固定根，允许任意安全相对子路径，不枚举 OpenCode 子目录。旧 `agent-config.upload` 单帧 Base64 操作只为旧客户端保留，仍受预览大小上限约束。
 

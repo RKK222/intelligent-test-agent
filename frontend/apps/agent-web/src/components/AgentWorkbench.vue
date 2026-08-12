@@ -109,6 +109,7 @@ import {
 import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } from "./FigmaShell.vue";
 import type { UserNotificationFilter } from "./UserNotificationCenter.vue";
 import FirstLoginGuide from "./FirstLoginGuide.vue";
+import ExperienceWorkspaceDialog from "./ExperienceWorkspaceDialog.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import AppSourceDialog from "./AppSourceDialog.vue";
 import AppSourcePicker from "./AppSourcePicker.vue";
@@ -131,6 +132,17 @@ import {
   type PersonalWorkspaceRuntimeContext,
   type SelectedWorkspaceKind
 } from "./app-source-workspace";
+import {
+  activateExperienceContinuation,
+  beginExperienceWorkspaceOpen,
+  cancelExperienceContinuation,
+  experienceInitializationConfirmationIsCurrent,
+  experienceOfferDecision,
+  initialExperienceContinuation,
+  requestExperienceContinuation,
+  type ExperienceApplicationsStatus,
+  type ExperienceContinuationState
+} from "./experience-workspace";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FileUploadOverlay from "./FileUploadOverlay.vue";
 import {
@@ -178,6 +190,7 @@ import {
   workspaceViewAncestorDirectoryIds,
   workspaceViewContextIsCurrent,
   workspaceViewEntries,
+  workspaceFilesAsViewEntries,
   workspaceFileRefreshSettlements,
   workspaceViewRefreshTargets,
   type WorkspaceViewLoadTarget,
@@ -740,7 +753,12 @@ function handleHubChanged(paths: string[]) {
 }
 
 async function refreshHubUpdateCount() {
-  if (shareMode.value || !authStore.token || !selectedWorkspaceId.value) {
+  if (
+    shareMode.value
+    || !authStore.token
+    || !selectedWorkspaceId.value
+    || !appSourceCapabilities.value.canPublishApplicationAgentConfig
+  ) {
     hubUpdateCount.value = 0;
     return;
   }
@@ -765,6 +783,18 @@ onBeforeUnmount(() => {
 const selectedAppId = ref<string | undefined>(undefined);
 // 工作区语义不能再从 personalWorkspaceId 是否存在反推；源码快照也使用真实 Workspace。
 const selectedWorkspaceKind = ref<SelectedWorkspaceKind>("MANAGED");
+type ExperienceOfferPhase = "WAITING" | "PROMPTING" | "RESOLVED";
+const experienceOfferPhase = ref<ExperienceOfferPhase>("WAITING");
+const experienceDialogOpen = ref(false);
+const experienceJourneyActive = ref(false);
+const experienceContinuation = ref<ExperienceContinuationState>(initialExperienceContinuation());
+let experienceOfferUserId: string | null = null;
+let experienceProcessConfirmationGeneration: number | null = null;
+const firstLoginGuideEnabled = computed(() =>
+  experienceOfferPhase.value === "RESOLVED"
+  && !experienceJourneyActive.value
+  && selectedWorkspaceKind.value !== "EXPERIENCE"
+);
 const appSourceContext = ref<AppSourceWorkspaceContext | null>(null);
 const appSourceCapabilities = computed(() => appSourceWorkspaceCapabilities(selectedWorkspaceKind.value));
 const appSourcePickerOpen = ref(false);
@@ -977,6 +1007,10 @@ onMounted(() => {
   window.addEventListener("focus", refreshAppSourceAuthorizationOnFocus);
 });
 onBeforeUnmount(() => {
+  if (selectedWorkspaceKind.value === "EXPERIENCE" && selectedWorkspaceId.value) {
+    api.closeWorkspaceFileSocket(selectedWorkspaceId.value);
+  }
+  cancelExperienceWorkspaceFlow("UNMOUNT");
   invalidateConversationInteraction();
   clearTerminalRunEventSubscriptionHold();
   window.removeEventListener("keydown", onSupportAccessShortcutKeydown, true);
@@ -1234,7 +1268,7 @@ const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
 // 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
 const selectedWorkspace = computed(() => {
   // 分享模式的 session/workspace 已由后端精确授权，不依赖被分享人的应用成员关系。
-  if (shareMode.value) {
+  if (shareMode.value || selectedWorkspaceKind.value === "EXPERIENCE") {
     const fromList = workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
     if (fromList) return fromList;
     const snapshot = selectedWorkspaceSnapshot.value;
@@ -1357,6 +1391,42 @@ const managedApplicationsQuery = useQuery({
   refetchIntervalInBackground: false
 });
 const managedApplications = computed<ManagedApplication[]>(() => managedApplicationsQuery.data.value ?? []);
+const experienceApplicationsStatus = computed<ExperienceApplicationsStatus>(() => {
+  if (managedApplicationsQuery.isSuccess.value) return "success";
+  if (managedApplicationsQuery.isError.value) return "error";
+  return "pending";
+});
+
+watch(
+  [
+    () => authStore.currentUser?.userId?.trim() || null,
+    experienceApplicationsStatus,
+    () => managedApplicationsQuery.data.value?.length ?? 0
+  ],
+  ([userId, applicationsStatus, applicationCount]) => {
+    if (userId !== experienceOfferUserId) {
+      experienceOfferUserId = userId;
+      experienceDialogOpen.value = false;
+      experienceOfferPhase.value = "WAITING";
+      experienceJourneyActive.value = false;
+      experienceContinuation.value = cancelExperienceContinuation(experienceContinuation.value);
+    }
+    const decision = experienceOfferDecision({
+      userId,
+      applicationsStatus,
+      applicationCount,
+      offeredThisMount: experienceOfferPhase.value !== "WAITING"
+    });
+    if (decision === "WAIT") return;
+    if (decision === "OFFER") {
+      experienceOfferPhase.value = "PROMPTING";
+      experienceDialogOpen.value = true;
+      return;
+    }
+    if (experienceOfferPhase.value === "WAITING") experienceOfferPhase.value = "RESOLVED";
+  },
+  { immediate: true }
+);
 // 右上角切换菜单只展示当前用户已加入的托管应用；未加入应用仅进入"加入其他应用"弹窗。
 const applicationCatalog = computed<ManagedApplication[]>(() => managedApplications.value);
 // 全局最近工作区：跨应用维度维护「上一次进入的应用 + 工作区」组合。
@@ -2225,6 +2295,9 @@ async function refreshProcessStartupOperation(operationId: string) {
       void opencodeProcessQuery.refetch();
     } else if (operation.status === "FAILED") {
       stopProcessStartupPolling();
+      if (experienceContinuation.value.phase === "WAITING_FOR_READY") {
+        cancelExperienceWorkspaceFlow("PROCESS_FAILED");
+      }
     }
   } catch {
     // 初始化 POST 刚发出时 operation 可能尚未落库，短轮询继续等待下一次快照。
@@ -2283,7 +2356,10 @@ function beginInitializeOpencodeProcess() {
   initializeOpencodeProcessMutation.mutate(operationId);
 }
 
-async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: string): Promise<boolean> {
+async function confirmProcessInitializationBeforeWorkspaceAction(
+  actionLabel: string,
+  options: { continueAfterReady?: boolean; onCancelled?: () => void; isCurrent?: () => boolean } = {}
+): Promise<boolean> {
   if (opencodeProcessReady.value) {
     return true;
   }
@@ -2291,7 +2367,9 @@ async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: st
     feedback.value = {
       kind: "info",
       title: "TestAgent 进程正在初始化",
-      description: `初始化完成后请重新${actionLabel}。`
+      description: options.continueAfterReady
+        ? `初始化完成后将自动${actionLabel}。`
+        : `初始化完成后请重新${actionLabel}。`
     };
     return false;
   }
@@ -2320,11 +2398,12 @@ async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: st
       confirmButtonText: "我知道了",
       autofocus: false
     }).catch(() => undefined);
+    options.onCancelled?.();
     return false;
   }
   const startupAction = processStatus.serviceStatus === "NOT_RUNNING" ? "启动" : "初始化";
   const confirmed = await ElMessageBox.confirm(
-    `${actionLabel}前需要先${startupAction} TestAgent 专属进程。完成后请重新${actionLabel}，是否现在${startupAction}？`,
+    `${actionLabel}前需要先${startupAction} TestAgent 专属进程。${options.continueAfterReady ? `完成后将自动${actionLabel}` : `完成后请重新${actionLabel}`}，是否现在${startupAction}？`,
     `请先${startupAction} TestAgent 进程`,
     {
       type: "info",
@@ -2334,10 +2413,112 @@ async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: st
     }
   ).then(() => true).catch(() => false);
   if (!confirmed) {
+    options.onCancelled?.();
+    return false;
+  }
+  if (options.isCurrent && !options.isCurrent()) {
     return false;
   }
   beginInitializeOpencodeProcess();
   return false;
+}
+
+function experienceContinuationIsCurrent(generation: number, phase?: ExperienceContinuationState["phase"]) {
+  return experienceContinuation.value.generation === generation
+    && (!phase || experienceContinuation.value.phase === phase);
+}
+
+function cancelExperienceWorkspaceFlow(
+  _reason: "DECLINED" | "PROCESS_CANCELLED" | "PROCESS_FAILED" | "OPEN_FAILED" | "APPLICATION_JOINED" | "UNMOUNT"
+) {
+  experienceDialogOpen.value = false;
+  experienceProcessConfirmationGeneration = null;
+  experienceContinuation.value = cancelExperienceContinuation(experienceContinuation.value);
+  experienceJourneyActive.value = false;
+}
+
+function declineExperienceWorkspace() {
+  experienceOfferPhase.value = "RESOLVED";
+  cancelExperienceWorkspaceFlow("DECLINED");
+}
+
+async function openExperienceWorkspaceForGeneration(generation: number) {
+  const opening = beginExperienceWorkspaceOpen(experienceContinuation.value, generation);
+  experienceContinuation.value = opening.state;
+  if (!opening.shouldOpen) return;
+  const isCurrent = () => experienceContinuationIsCurrent(generation, "OPENING")
+    && managedApplications.value.length === 0;
+  try {
+    const workspace = await api.openExperienceWorkspace();
+    if (!isCurrent()) return;
+    appSelectionSeq += 1;
+    selectingAppId = undefined;
+    selectedAppId.value = undefined;
+    teardownAppSourceInteractions();
+    const applied = await switchWorkspace(workspace, {
+      kind: "EXPERIENCE",
+      isCurrent
+    });
+    if (!applied || !isCurrent()) return;
+    experienceContinuation.value = activateExperienceContinuation(experienceContinuation.value, generation);
+    feedback.value = {
+      kind: "info",
+      title: "已进入体验工作区",
+      description: "目录由同机体验用户共享；普通文件可编辑，本地 Git 变更仅供查看。"
+    };
+  } catch (error) {
+    if (!isCurrent()) return;
+    cancelExperienceWorkspaceFlow("OPEN_FAILED");
+    feedback.value = errorFeedback("打开体验工作区失败", error);
+  }
+}
+
+async function continueExperienceWorkspaceWhenReady(generation: number) {
+  if (!experienceContinuationIsCurrent(generation, "WAITING_FOR_READY")) return;
+  if (opencodeProcessReady.value) {
+    await openExperienceWorkspaceForGeneration(generation);
+    return;
+  }
+  if (experienceProcessConfirmationGeneration === generation) return;
+  experienceProcessConfirmationGeneration = generation;
+  try {
+    const ready = await confirmProcessInitializationBeforeWorkspaceAction("进入体验工作区", {
+      continueAfterReady: true,
+      isCurrent: () => experienceInitializationConfirmationIsCurrent(
+        experienceContinuation.value,
+        generation,
+        managedApplications.value.length
+      ),
+      onCancelled: () => {
+        if (experienceContinuationIsCurrent(generation, "WAITING_FOR_READY")) {
+          cancelExperienceWorkspaceFlow("PROCESS_CANCELLED");
+        }
+      }
+    });
+    if (ready && experienceContinuationIsCurrent(generation, "WAITING_FOR_READY")) {
+      await openExperienceWorkspaceForGeneration(generation);
+    }
+  } finally {
+    if (experienceProcessConfirmationGeneration === generation) {
+      experienceProcessConfirmationGeneration = null;
+    }
+  }
+}
+
+function startExperienceWorkspace() {
+  if (experienceOfferPhase.value !== "PROMPTING") return;
+  experienceOfferPhase.value = "RESOLVED";
+  experienceDialogOpen.value = false;
+  experienceJourneyActive.value = true;
+  experienceContinuation.value = requestExperienceContinuation(experienceContinuation.value);
+  void continueExperienceWorkspaceWhenReady(experienceContinuation.value.generation);
+}
+
+function handleProcessStartupDialogClose() {
+  processStartupDialogOpen.value = false;
+  if (experienceContinuation.value.phase === "WAITING_FOR_READY") {
+    cancelExperienceWorkspaceFlow("PROCESS_CANCELLED");
+  }
 }
 
 // 拆分就绪条件：不同能力依赖不同条件
@@ -2441,7 +2622,9 @@ const mcpToolsQuery = useQuery({
 });
 const vcsStatusQuery = useQuery({
   queryKey: ["runtime", "vcs", "status", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value)
+    && runtimeReady.value
+    && selectedWorkspaceKind.value !== "EXPERIENCE",
   queryFn: () => api.getVcsStatus(selectedWorkspaceIdRef.value!),
   retry: false,
   refetchInterval: OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS
@@ -3044,6 +3227,32 @@ watch(
     if (!applications) return;
     const nextVisibleApplicationIds = new Set(applications.map((app) => app.appId));
     visibleManagedApplicationIds.value = nextVisibleApplicationIds;
+    if (applications.length > 0 && (
+      selectedWorkspaceKind.value === "EXPERIENCE"
+      || experienceJourneyActive.value
+      || experienceDialogOpen.value
+    )) {
+      const experienceWorkspaceId = selectedWorkspaceKind.value === "EXPERIENCE"
+        ? selectedWorkspaceId.value
+        : undefined;
+      if (experienceWorkspaceId) api.closeWorkspaceFileSocket(experienceWorkspaceId);
+      cancelExperienceWorkspaceFlow("APPLICATION_JOINED");
+      experienceOfferPhase.value = "RESOLVED";
+      appSelectionSeq += 1;
+      selectingAppId = undefined;
+      invalidateConversationInteraction();
+      teardownAppSourceInteractions();
+      resetWorkspaceState();
+      selectedWorkspaceId.value = undefined;
+      selectedAppId.value = undefined;
+      selectedWorkspaceKind.value = "MANAGED";
+      appSourceContext.value = null;
+      feedback.value = {
+        kind: "info",
+        title: "已退出体验工作区",
+        description: "你已加入应用，平台已关闭共享目录连接，请选择应用工作空间继续。"
+      };
+    }
     const currentAppId = selectedAppId.value;
     if (currentAppId && !nextVisibleApplicationIds.has(currentAppId)) {
       const revokedAppName = previousApplications?.find((app) => app.appId === currentAppId)?.appName ?? currentAppId;
@@ -3092,7 +3301,7 @@ watch(selectedWorkspaceIdRef, (id, previous) => {
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
     void loadDirectory("", id);
-    if (selectedWorkspaceKind.value === "MANAGED") void refreshWorkspaceGitDiff();
+    if (selectedWorkspaceKind.value !== "APP_SOURCE") void refreshWorkspaceGitDiff();
   }
 }, { immediate: true });
 watch(currentPersonalWorkspaceId, (id, previous) => {
@@ -3153,6 +3362,14 @@ watch(opencodeProcessReady, (ready, previous) => {
     });
   }
 });
+watch(
+  [opencodeProcessReady, opencodeProcessStatus, () => opencodeProcessQuery.status.value],
+  () => {
+    const continuation = experienceContinuation.value;
+    if (continuation.phase !== "WAITING_FOR_READY") return;
+    void continueExperienceWorkspaceWhenReady(continuation.generation);
+  }
+);
 watch([() => selectedProvider.value, () => selectedModel.value, allModels], ([provider, model, data]) => {
   if (!provider || !model || String(model).startsWith(`${provider}/`)) {
     return;
@@ -3997,6 +4214,9 @@ const initializeOpencodeProcessMutation = useMutation({
       }
       failLocalProcessStartupOperation(error);
       stopProcessStartupPolling();
+      if (experienceContinuation.value.phase === "WAITING_FOR_READY") {
+        cancelExperienceWorkspaceFlow("PROCESS_FAILED");
+      }
       feedback.value = errorFeedback("初始化 TestAgent 进程失败", error);
     })();
   }
@@ -5719,7 +5939,7 @@ async function switchWorkspace(
   const isCurrent = options.isCurrent ?? (() => true);
   if (!isCurrent()) return false;
   const nextKind = options.kind ?? "MANAGED";
-  if (nextKind === "MANAGED" && selectedWorkspaceKind.value === "APP_SOURCE") {
+  if (nextKind !== "APP_SOURCE" && selectedWorkspaceKind.value === "APP_SOURCE") {
     // 切回托管版本或非应用个人工作区必须清独立 recent；失败也不能继续暴露旧源码能力。
     teardownAppSourceInteractions({ preserveWorkspaceSelectionIntent: true });
     void api.clearRecentAppSource().catch(() => undefined);
@@ -5727,8 +5947,8 @@ async function switchWorkspace(
     appSourceContext.value = null;
   }
   if (!isCurrent()) return false;
-  if (nextKind === "APP_SOURCE") {
-    // 源码快照没有托管 Git pull 能力；切换边界立即移除旧确认/结果弹窗。
+  if (nextKind !== "MANAGED") {
+    // 源码快照与体验区都没有托管 Git pull 能力；切换边界立即移除旧确认/结果弹窗。
     resetPersonalPullDialog();
   }
   if (!options.preserveConversationInteraction) {
@@ -6343,7 +6563,14 @@ async function loadDirectory(
   nextLoading.add(cacheKey);
   loadingPath.value = nextLoading;
   try {
-    const response = await api.listWorkspaceView(workspaceId, target.locator);
+    // 体验区只是普通共享目录，不构造应用/引用资产组合视图；服务端也固定拒绝其 COMPOSITE/REFERENCE RPC。
+    const response = selectedWorkspaceKind.value === "EXPERIENCE"
+      ? {
+          entries: workspaceFilesAsViewEntries(await api.listFiles(workspaceId, target.locator.path)),
+          warnings: [],
+          truncated: false
+        }
+      : await api.listWorkspaceView(workspaceId, target.locator);
     const entries = workspaceViewEntries(response.entries);
     if (!workspaceLoadIsCurrent(workspaceId, generation, selectedWorkspaceIdRef.value, workspaceLoadGeneration)) {
       return;
@@ -7013,6 +7240,30 @@ async function collectWorkspaceViewDownloadFiles(
   return finalizeWorkspaceDownloadFiles(files, collisionDetected);
 }
 
+/** 体验区目录下载沿用普通文件 RPC，不能退回应用引用组合视图。 */
+async function collectOrdinaryWorkspaceDownloadFiles(
+  workspaceId: string,
+  rootPath: string
+): Promise<ReturnType<typeof finalizeWorkspaceDownloadFiles>> {
+  const files: WorkspaceDownloadCandidate[] = [];
+  const directories = [rootPath];
+  while (directories.length > 0) {
+    const directory = directories.shift()!;
+    for (const entry of await api.listFiles(workspaceId, directory)) {
+      if (entry.type === "directory") {
+        directories.push(entry.path);
+        continue;
+      }
+      files.push({
+        path: relativeDownloadPath(entry.path, rootPath),
+        content: await readWorkspaceFileForDownload(workspaceId, entry.path),
+        source: "WORKSPACE"
+      });
+    }
+  }
+  return finalizeWorkspaceDownloadFiles(files, false);
+}
+
 async function handleDownloadEntry(entry: FileTreeEntry) {
   const workspace = selectedWorkspace.value;
   if (!workspace) return;
@@ -7025,14 +7276,16 @@ async function handleDownloadEntry(entry: FileTreeEntry) {
   downloadingEntryId.value = entryId;
   try {
     if (entry.type === "directory") {
-      const files = await collectWorkspaceViewDownloadFiles(
-        workspace.workspaceId,
-        viewEntry ?? {
-          path: entry.path,
-          locator: { kind: "WORKSPACE", path: entry.path },
-          collision: false
-        }
-      );
+      const files = selectedWorkspaceKind.value === "EXPERIENCE"
+        ? await collectOrdinaryWorkspaceDownloadFiles(workspace.workspaceId, entry.path)
+        : await collectWorkspaceViewDownloadFiles(
+            workspace.workspaceId,
+            viewEntry ?? {
+              path: entry.path,
+              locator: { kind: "WORKSPACE", path: entry.path },
+              collision: false
+            }
+          );
       if (!isCurrentDownload()) return;
       downloadBlob(
         createZipBlob(files),
@@ -7046,9 +7299,9 @@ async function handleDownloadEntry(entry: FileTreeEntry) {
       return;
     }
 
-    const content = viewEntry
-      ? await readWorkspaceViewFileForDownload(workspace.workspaceId, viewEntry.locator)
-      : await readWorkspaceFileForDownload(workspace.workspaceId, entry.path);
+    const content = selectedWorkspaceKind.value === "EXPERIENCE" || !viewEntry
+      ? await readWorkspaceFileForDownload(workspace.workspaceId, entry.path)
+      : await readWorkspaceViewFileForDownload(workspace.workspaceId, viewEntry.locator);
     if (!isCurrentDownload()) return;
     downloadBlob(createWorkspaceFileBlob(content), entry.name);
     feedback.value = { kind: "success", title: "文件已下载", description: entry.name };
@@ -9679,6 +9932,7 @@ function applyToolChangeToDiff(part: Extract<MessagePart, { type: "tool" }>, raw
 
 async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
   if (selectedWorkspaceKind.value === "APP_SOURCE" && (source === "vcs" || source === "agent")) return;
+  if (selectedWorkspaceKind.value === "EXPERIENCE" && source === "agent") return;
   diffSource.value = source;
   centerMode.value = "diff";
   try {
@@ -9844,6 +10098,7 @@ async function handleOpenDiff(payload: string | {
   file?: RunDiffFile;
 }) {
   if (selectedWorkspaceKind.value === "APP_SOURCE") return;
+  if (selectedWorkspaceKind.value === "EXPERIENCE" && typeof payload !== "string" && payload.source === "agent") return;
   if (typeof payload === "string") {
     await loadDiffSource("vcs");
     workbench.setSelectedDiffPath(payload);
@@ -10640,7 +10895,7 @@ async function handleLogout() {
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :can-play-pet-games="isSuperAdmin"
-    :can-manage-public-agent-config="isSuperAdmin"
+    :can-manage-public-agent-config="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
     :can-manage-workspace-agent-config="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
     :personal-runtime-reloading="personalRuntimeReloading"
     :runtime-busy="runtimeReloadBusy"
@@ -10649,7 +10904,7 @@ async function handleLogout() {
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
     :process-restarting="restartMyOpencodeProcessMutation.isPending.value"
     :show-process-status-in-pet="!shareMode"
-    :onboarding-active="firstLoginGuideActive"
+    :onboarding-active="firstLoginGuideActive && firstLoginGuideEnabled"
     :side-question-answer="robotSideQuestion.answer.value"
     :side-question-error="robotSideQuestion.error.value"
     :side-question-loading="robotSideQuestion.loading.value"
@@ -10761,6 +11016,7 @@ async function handleLogout() {
             <span class="figma-activity-text">控制台</span>
           </button>
           <button
+            v-if="selectedWorkspaceKind === 'MANAGED'"
             type="button"
             :class="['figma-activity-btn figma-activity-btn--hub hub-activity-button', centerMode === 'hub' && 'figma-activity-btn--active']"
             aria-label="Agent、Skill、MCP 与 Tool Hub"
@@ -10812,6 +11068,7 @@ async function handleLogout() {
           :creating-version="creatingVersion"
           :pulling-personal-workspace="pullingPersonalWorkspace"
           :can-write="canWriteSelectedWorkspace"
+          :can-mutate-git="selectedWorkspaceKind === 'MANAGED' && canWriteSelectedWorkspace"
           :can-undo="workspaceUndoStack.length > 0"
           :can-manage-agent-config="appSourceCapabilities.canPublishApplicationAgentConfig && isAppAdmin"
           :can-manage-public-config="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
@@ -10827,7 +11084,7 @@ async function handleLogout() {
           :agent-config-revision="agentConfigRevision"
           :personal-runtime-reloading="personalRuntimeReloading"
           :runtime-busy="runtimeReloadBusy"
-          :show-server-workspace-switch="isSuperAdmin"
+          :show-server-workspace-switch="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
           :show-reference-configuration="selectedWorkspaceKind === 'MANAGED' && showReferenceConfiguration"
           :workspace-kind="selectedWorkspaceKind"
           :app-source-context="appSourceContext"
@@ -10951,7 +11208,7 @@ async function handleLogout() {
             :loading-templates="loadingAppTemplates"
             :loading-versions="loadingAppVersions"
             :creating-version="creatingVersion"
-            :show-server-workspace-switch="isSuperAdmin"
+            :show-server-workspace-switch="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
             :workspace-kind="selectedWorkspaceKind"
             show-save
             @save="() => diffViewerRef?.handleSave()"
@@ -10991,7 +11248,7 @@ async function handleLogout() {
           :loading-templates="loadingAppTemplates"
           :loading-versions="loadingAppVersions"
           :creating-version="creatingVersion"
-          :show-server-workspace-switch="isSuperAdmin"
+          :show-server-workspace-switch="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
           :workspace-kind="selectedWorkspaceKind"
           :markdown-preview="markdownPreview"
           :markdown-preview-mode="markdownPreviewMode"
@@ -11446,10 +11703,18 @@ async function handleLogout() {
     ref="firstLoginGuideRef"
     :user-id="authStore.currentUser?.userId"
     :app-admin="isAppAdmin"
+    :enabled="firstLoginGuideEnabled"
     @prepare="prepareFirstLoginGuide"
     @settings-step="handleFirstLoginGuideSettingsStep"
     @dismiss="dismissFirstLoginGuide"
     @finish="finishFirstLoginGuide"
+  />
+
+  <ExperienceWorkspaceDialog
+    :open="experienceDialogOpen"
+    :opening="experienceContinuation.phase === 'OPENING'"
+    @decline="declineExperienceWorkspace"
+    @start="startExperienceWorkspace"
   />
 
   <OpencodeProcessStartupDialog
@@ -11457,7 +11722,7 @@ async function handleLogout() {
     :open="processStartupDialogOpen"
     :action-label="processStartupActionLabel"
     :operation="processStartupOperation"
-    @close="processStartupDialogOpen = false"
+    @close="handleProcessStartupDialogClose"
   />
 
   <SessionShareDialog

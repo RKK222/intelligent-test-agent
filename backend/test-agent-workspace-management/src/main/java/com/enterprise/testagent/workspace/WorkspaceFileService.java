@@ -819,6 +819,21 @@ public class WorkspaceFileService {
      * 组合视图需要在多来源归并后统一应用上限，因此允许调用方多取一项用于精确判断 truncated。
      */
     public List<FileTreeEntryResponse> listDirectory(String rootPath, String relativePath, int limit) {
+        return listDirectory(rootPath, relativePath, limit, false);
+    }
+
+    /**
+     * Agent 配置树保留既有“展示链接名称但不读取链接目标元数据”的兼容语义；普通 Workspace 不使用此入口。
+     */
+    List<FileTreeEntryResponse> listDirectoryIncludingSymbolicLinks(String rootPath, String relativePath) {
+        return listDirectory(rootPath, relativePath, maxDirectoryEntries, true);
+    }
+
+    private List<FileTreeEntryResponse> listDirectory(
+            String rootPath,
+            String relativePath,
+            int limit,
+            boolean includeSymbolicLinks) {
         if (limit < 1) {
             throw new IllegalArgumentException("limit must be positive");
         }
@@ -828,7 +843,9 @@ public class WorkspaceFileService {
             throw new PlatformException(ErrorCode.NOT_FOUND, "目录不存在", Map.of("path", safePath(relativePath)));
         }
         try (var stream = Files.list(directory)) {
-            return stream.filter(path -> !isPlatformHiddenFile(path))
+            // 不展示符号链接本身，避免泄露外部目录别名或受控目录别名；后续路径解析仍逐段拒绝跟随。
+            return stream.filter(path -> includeSymbolicLinks || !Files.isSymbolicLink(path))
+                    .filter(path -> !isPlatformHiddenFile(path))
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .limit(limit)
                     .map(path -> entry(root, path))
@@ -877,7 +894,25 @@ public class WorkspaceFileService {
         if (!target.startsWith(root)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "文件路径超出工作区根目录", Map.of("path", safePath(relativePath)));
         }
+        requireNoSymbolicLinkTraversal(root, target, relativePath);
         return target;
+    }
+
+    /**
+     * 拒绝末端和中间层符号链接，避免工作区内的普通别名落入外部目录或受控元数据目录。
+     * 根目录已解析为真实路径，因此这里只需逐段按 NOFOLLOW 语义检查用户提供的相对路径。
+     */
+    private void requireNoSymbolicLinkTraversal(Path root, Path target, String relativePath) {
+        Path current = root;
+        for (Path segment : root.relativize(target)) {
+            current = current.resolve(segment);
+            if (Files.isSymbolicLink(current)) {
+                throw new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "文件路径不支持符号链接",
+                        Map.of("path", safePath(relativePath)));
+            }
+        }
     }
 
     /**
@@ -1015,13 +1050,20 @@ public class WorkspaceFileService {
         try {
             Path root = Path.of(rootPath).toRealPath();
             if (!Files.isDirectory(root)) {
-                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作区根目录不存在", Map.of("rootPath", rootPath));
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "工作区根目录不存在",
+                        Map.of("reason", "ROOT_UNAVAILABLE"));
             }
             return root;
         } catch (PlatformException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作区根目录不存在", Map.of("rootPath", rootPath), exception);
+            // 根路径来自服务端配置；错误响应和异常 cause 都不能回显其物理值。
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "工作区根目录不存在",
+                    Map.of("reason", "ROOT_UNAVAILABLE"));
         }
     }
 
@@ -1121,6 +1163,10 @@ public class WorkspaceFileService {
             stream.forEach(path -> {
                 // 结果已满，停止处理
                 if (results.size() >= maxSearchResults) {
+                    return;
+                }
+                // 搜索不得跟随符号链接，否则别名可能把外部目录或受控元数据带入结果。
+                if (Files.isSymbolicLink(path)) {
                     return;
                 }
                 String name = path.getFileName().toString();

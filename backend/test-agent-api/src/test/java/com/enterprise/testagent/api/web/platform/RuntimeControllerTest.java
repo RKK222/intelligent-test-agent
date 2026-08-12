@@ -980,6 +980,10 @@ class RuntimeControllerTest {
                         eq(new UserId("usr_1234567890abcdef")),
                         eq(sessionId)))
                 .thenReturn(session("Session tree", false, SessionStatus.ACTIVE));
+        when(sessionService.canUseLiveRuntime(
+                        eq(new UserId("usr_1234567890abcdef")),
+                        eq(sessionId)))
+                .thenReturn(true);
         WebTestClient client = WebTestClient.bindToController(new SessionController(
                         sessionService,
                         null,

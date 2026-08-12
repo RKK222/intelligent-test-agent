@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -11,10 +12,13 @@ import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.session.Session;
+import com.enterprise.testagent.domain.session.ConversationSourceType;
+import com.enterprise.testagent.domain.session.SessionHistoryRepository;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
@@ -127,6 +131,65 @@ class TerminalApplicationServiceTest {
     }
 
     @Test
+    void authenticatedExperienceTerminalRechecksOwnerAndWorkspaceWhenTicketIsConsumed() {
+        UserId owner = new UserId("usr_experience_owner");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        Session session = experienceSession(owner, workspaceId);
+        WorkspaceRepository workspaces = org.mockito.Mockito.mock(WorkspaceRepository.class);
+        SessionRepository sessions = org.mockito.Mockito.mock(SessionRepository.class);
+        ConversationWorkspaceAccessAuthorizer authorizer =
+                org.mockito.Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        when(workspaces.findById(workspaceId)).thenReturn(Optional.of(experienceWorkspace(workspaceId)));
+        when(sessions.findById(session.sessionId())).thenReturn(Optional.of(session));
+        TerminalApplicationService service = userTerminalService(workspaces, sessions, authorizer);
+
+        TerminalTicketResponse response = service.createTicket(
+                owner,
+                session.sessionId(),
+                new TerminalTicketRequest(workspaceId.value(), ".", null, 80, 24),
+                "trace_experience");
+        TerminalTicket ticket = service.consumeTicket(
+                session.sessionId(), response.ticket(), "http://localhost:3000", "trace_ws");
+
+        assertThat(ticket.userId()).isEqualTo(owner);
+        verify(authorizer, times(2)).requireAccess(owner, workspaceId);
+        assertThatThrownBy(() -> service.createTicket(
+                        new UserId("usr_other"),
+                        session.sessionId(),
+                        new TerminalTicketRequest(workspaceId.value(), ".", null, 80, 24),
+                        "trace_other"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+    }
+
+    @Test
+    void experienceTerminalTicketFailsWhenAccessIsRevokedBeforeUpgrade() {
+        UserId owner = new UserId("usr_experience_owner");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        Session session = experienceSession(owner, workspaceId);
+        WorkspaceRepository workspaces = org.mockito.Mockito.mock(WorkspaceRepository.class);
+        SessionRepository sessions = org.mockito.Mockito.mock(SessionRepository.class);
+        ConversationWorkspaceAccessAuthorizer authorizer =
+                org.mockito.Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        when(workspaces.findById(workspaceId)).thenReturn(Optional.of(experienceWorkspace(workspaceId)));
+        when(sessions.findById(session.sessionId())).thenReturn(Optional.of(session));
+        org.mockito.Mockito.doNothing()
+                .doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(authorizer).requireAccess(owner, workspaceId);
+        TerminalApplicationService service = userTerminalService(workspaces, sessions, authorizer);
+        TerminalTicketResponse response = service.createTicket(
+                owner,
+                session.sessionId(),
+                new TerminalTicketRequest(workspaceId.value(), ".", null, 80, 24),
+                "trace_experience");
+
+        assertThatThrownBy(() -> service.consumeTicket(
+                        session.sessionId(), response.ticket(), "http://localhost:3000", "trace_ws"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
     void createServerTicketRequiresExactConfirmationAndIssuesServerShellTarget() {
         TerminalApplicationService service = serverService(true);
 
@@ -161,6 +224,56 @@ class TerminalApplicationServiceTest {
                 .isInstanceOf(PlatformException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.TERMINAL_UNAVAILABLE);
+    }
+
+    private Session experienceSession(UserId owner, WorkspaceId workspaceId) {
+        return new Session(
+                new SessionId("ses_1234567890abcdef"),
+                workspaceId,
+                "体验会话",
+                SessionStatus.ACTIVE,
+                NOW,
+                NOW,
+                "trace_experience",
+                "ses_remote1234567890abcdef",
+                new ExecutionNodeId("node_1234567890abcdef"))
+                .withSource(ConversationSourceType.MANUAL, null, owner);
+    }
+
+    private Workspace experienceWorkspace(WorkspaceId workspaceId) {
+        return new Workspace(
+                workspaceId,
+                "体验工作区",
+                tempDir.toString(),
+                WorkspaceStatus.ACTIVE,
+                NOW,
+                NOW,
+                "server-a",
+                "trace_experience");
+    }
+
+    private TerminalApplicationService userTerminalService(
+            WorkspaceRepository workspaces,
+            SessionRepository sessions,
+            ConversationWorkspaceAccessAuthorizer authorizer) {
+        BackendInstanceIdentity identity = new BackendInstanceIdentity() {
+            @Override public String instanceId() { return "backend-a"; }
+            @Override public String linuxServerId() { return "server-a"; }
+            @Override public String backendProcessId() { return "bjp_a"; }
+            @Override public String listenUrl() { return "http://127.0.0.1:8080"; }
+        };
+        return new TerminalApplicationService(
+                workspaces,
+                sessions,
+                new TerminalTicketStore(Clock.fixed(NOW, ZoneOffset.UTC), () -> "pty_user1234567890"),
+                new TerminalTicketRateLimiter(Clock.fixed(NOW, ZoneOffset.UTC), 10, java.time.Duration.ofMinutes(1)),
+                org.mockito.Mockito.mock(TerminalAuditLogger.class),
+                com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
+                identity,
+                false,
+                tempDir,
+                org.mockito.Mockito.mock(SessionHistoryRepository.class),
+                authorizer);
     }
 
     private TerminalApplicationService serverService(boolean enabled) {

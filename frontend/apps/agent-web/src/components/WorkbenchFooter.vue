@@ -152,7 +152,7 @@ const visibleAppSourceRepositories = computed(() => props.appSourceRepositories 
 // 模板列表尚未加载或为空时仍展示入口，用于直接暴露当前个人 worktree 分支；
 // 点击后菜单会展示加载/空态，不影响用户识别当前实际改动分支。
 const useCascadeMenu = computed(() =>
-  props.workspaceKind !== "APP_SOURCE" && (
+  (props.workspaceKind ?? "MANAGED") === "MANAGED" && (
   templates.value.length > 0 ||
   Boolean(props.appName) ||
   Boolean(props.personalWorkspaceBranch) ||
@@ -162,7 +162,8 @@ const useCascadeMenu = computed(() =>
 // 应用代码库与应用测试工作空间共用同一个入口；服务器工作空间属于超级管理员能力，
 // 必须继续使用独立按钮，不能混入应用级工作空间菜单。
 const useWorkspaceSwitchMenu = computed(() =>
-  useCascadeMenu.value || props.showAppSource === true || props.workspaceKind === "APP_SOURCE"
+  props.workspaceKind !== "EXPERIENCE"
+    && (useCascadeMenu.value || props.showAppSource === true || props.workspaceKind === "APP_SOURCE")
 );
 
 // ===== 两级菜单弹出状态 =====
@@ -190,7 +191,7 @@ const createVersionBranches = ref<string[]>([]);
 const createVersionLoadingBranches = ref(false);
 
 function openCreateVersionDialog(template: AppWorkspaceTemplate) {
-  if (props.workspaceKind === "APP_SOURCE") return;
+  if (props.workspaceKind && props.workspaceKind !== "MANAGED") return;
   createVersionTarget.value = template;
   createVersionValue.value = "";
   createVersionBranch.value = "";
@@ -209,14 +210,14 @@ function openCreateVersionDialog(template: AppWorkspaceTemplate) {
   closeMenu();
   // 下一帧再开 dialog：保证前一次 closeMenu() 触发的 v-if 卸载先完成，避免和 dialog 共存出现 stacking 问题。
   void nextTick(() => {
-    if (props.workspaceKind === "APP_SOURCE") return;
+    if (props.workspaceKind && props.workspaceKind !== "MANAGED") return;
     createVersionOpen.value = true;
   });
 }
 
 function confirmCreateVersion() {
   const target = createVersionTarget.value;
-  if (props.workspaceKind === "APP_SOURCE" || !target || !createVersionValue.value) return;
+  if ((props.workspaceKind && props.workspaceKind !== "MANAGED") || !target || !createVersionValue.value) return;
   // value-format 是 "YYYYMMDD"，直接使用日期字符串作为版本号（yyyyMMdd）。
   // 非标准库需要同时传递分支。
   const version = createVersionValue.value.replaceAll("-", "");
@@ -234,7 +235,7 @@ function cancelCreateVersion() {
 }
 
 watch(() => props.workspaceKind, (workspaceKind) => {
-  if (workspaceKind !== "APP_SOURCE") return;
+  if (!workspaceKind || workspaceKind === "MANAGED") return;
   createVersionOpen.value = false;
   createVersionTarget.value = null;
 });
@@ -334,6 +335,7 @@ const hoveredTemplate = computed<AppWorkspaceTemplate | null>(() => {
 });
 
 const triggerLabel = computed(() => {
+  if (props.workspaceKind === "EXPERIENCE") return "体验工作区";
   if (selectedVersion.value && selectedTemplate.value) {
     return `${selectedTemplate.value.workspaceName} / ${selectedVersion.value.version}`;
   }
@@ -519,6 +521,13 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
 <template>
   <footer class="ta-workbench-footer">
     <div class="ta-workbench-footer-left">
+      <span
+        v-if="!showSave && workspaceKind === 'EXPERIENCE'"
+        class="ta-workbench-experience-label"
+        title="同机用户共享目录，本地 Git 仅供查看"
+      >
+        体验工作区 · 多人共享
+      </span>
       <button
         v-if="!showSave && workspaceKind === 'APP_SOURCE' && !useWorkspaceSwitchMenu"
         type="button"
@@ -912,6 +921,18 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.ta-workbench-experience-label {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid #cbd9eb;
+  border-radius: 999px;
+  background: #f4f8fd;
+  color: #3d5f88;
+  font-weight: 600;
 }
 
 .ta-workbench-footer-middle {

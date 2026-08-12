@@ -34,6 +34,7 @@ let resizeObserver: ResizeObserver | null = null;
 let resizeFrame: number | null = null;
 let lastObservedWidth = -1;
 let lastObservedHeight = -1;
+let connectionGeneration = 0;
 
 const connecting = computed(() => snapshot.value.status === "connecting");
 const open = computed(() => snapshot.value.status === "open");
@@ -69,12 +70,22 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  connectionGeneration++;
   resizeObserver?.disconnect();
   if (resizeFrame !== null) {
     cancelAnimationFrame(resizeFrame);
   }
   sessionRef.value?.close("unmount");
   xtermRef.value?.dispose();
+});
+
+watch(() => props.disabled, (disabled) => {
+  if (!disabled) return;
+  // Workspace 失权或切换时立即废弃待签发 ticket，并主动关闭仍在使用旧目录的 PTY。
+  connectionGeneration++;
+  sessionRef.value?.close("disabled");
+  sessionRef.value = null;
+  snapshot.value = { ...initialSnapshot, status: "closed" };
 });
 
 /**
@@ -99,6 +110,7 @@ function scheduleFit(width = host.value?.clientWidth, height = host.value?.clien
 
 async function connect() {
   if (props.disabled || connecting.value || open.value) return;
+  const generation = ++connectionGeneration;
   sessionRef.value?.close("reconnect");
   snapshot.value = { status: "connecting", output: "" };
   xtermRef.value?.clear();
@@ -107,6 +119,10 @@ async function connect() {
     fitAddonRef.value?.fit();
     const terminal = xtermRef.value;
     const ticket = await props.createTicket();
+    if (generation !== connectionGeneration || props.disabled) {
+      snapshot.value = { ...initialSnapshot, status: "closed" };
+      return;
+    }
     const nextSession = createTerminalSession({
       baseUrl: props.baseUrl,
       ticket,
@@ -128,6 +144,7 @@ async function connect() {
     sessionRef.value = nextSession;
     snapshot.value = nextSession.snapshot();
   } catch (error) {
+    if (generation !== connectionGeneration) return;
     if (error instanceof Error && error.name === "AbortError") {
       snapshot.value = { ...initialSnapshot };
       return;
@@ -141,8 +158,10 @@ async function connect() {
 }
 
 function close() {
+  connectionGeneration++;
   sessionRef.value?.close("user");
-  snapshot.value = sessionRef.value?.snapshot() ?? { ...initialSnapshot, status: "closed" };
+  sessionRef.value = null;
+  snapshot.value = { ...initialSnapshot, status: "closed" };
 }
 
 watch(() => props.disabled, (disabled) => {

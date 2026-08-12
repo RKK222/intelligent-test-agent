@@ -507,6 +507,12 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesExperienceWorkspaceOpenToTheUsersBoundBackend() {
+        assertRequestIsForwarded(
+                "/api/internal/platform/workspace-management/workspaces/experience/open");
+    }
+
+    @Test
     void routesSideQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
         assertRequestIsForwarded(
                 "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs");

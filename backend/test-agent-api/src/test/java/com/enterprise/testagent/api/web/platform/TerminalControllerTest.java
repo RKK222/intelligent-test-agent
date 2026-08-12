@@ -27,10 +27,13 @@ import org.springframework.mock.web.server.MockServerWebExchange;
 
 class TerminalControllerTest {
 
+    private static final UserId USER_ID = new UserId("usr_1234567890abcdef");
+
     @Test
     void createTicketReturnsUnifiedResponse() {
         TerminalApplicationService service = org.mockito.Mockito.mock(TerminalApplicationService.class);
         when(service.createTicket(
+                        eq(USER_ID),
                         eq(new SessionId("ses_1234567890abcdef")),
                         eq(new TerminalTicketRequest("wrk_1234567890abcdef", ".", null, 80, 24)),
                         eq("trace_1234567890abcdef")))
@@ -38,9 +41,7 @@ class TerminalControllerTest {
                         "pty_1234567890abcdef",
                         Instant.parse("2026-06-19T00:01:00Z"),
                         "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef"));
-        WebTestClient client = WebTestClient.bindToController(new TerminalController(service, webSocketUrlFactory()))
-                .webFilter(new TraceIdWebFilter())
-                .build();
+        WebTestClient client = authenticatedClient(new TerminalController(service, webSocketUrlFactory()));
 
         client.post()
                 .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/tickets")
@@ -61,6 +62,7 @@ class TerminalControllerTest {
     void createTicketAlsoExposesInternalPlatformTerminalUrl() {
         TerminalApplicationService service = org.mockito.Mockito.mock(TerminalApplicationService.class);
         when(service.createTicket(
+                        eq(USER_ID),
                         eq(new SessionId("ses_1234567890abcdef")),
                         eq(new TerminalTicketRequest("wrk_1234567890abcdef", ".", null, 80, 24)),
                         eq("trace_1234567890abcdef")))
@@ -68,9 +70,7 @@ class TerminalControllerTest {
                         "pty_1234567890abcdef",
                         Instant.parse("2026-06-19T00:01:00Z"),
                         "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef"));
-        WebTestClient client = WebTestClient.bindToController(new TerminalController(service, webSocketUrlFactory()))
-                .webFilter(new TraceIdWebFilter())
-                .build();
+        WebTestClient client = authenticatedClient(new TerminalController(service, webSocketUrlFactory()));
 
         client.post()
                 .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/tickets")
@@ -120,5 +120,22 @@ class TerminalControllerTest {
         BackendInstanceIdentity identity = org.mockito.Mockito.mock(BackendInstanceIdentity.class);
         when(identity.listenUrl()).thenReturn("http://122.233.30.114:8080");
         return new CurrentBackendWebSocketUrlFactory(identity);
+    }
+
+    private WebTestClient authenticatedClient(TerminalController controller) {
+        return WebTestClient.bindToController(controller)
+                .webFilter((exchange, chain) -> {
+                    exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, new AuthPrincipal(
+                            "token",
+                            USER_ID,
+                            "tester",
+                            "AUTH_TEST",
+                            List.of(Dictionary.ROLE_USER),
+                            Instant.now(),
+                            Instant.now().plusSeconds(3600)));
+                    return chain.filter(exchange);
+                })
+                .webFilter(new TraceIdWebFilter())
+                .build();
     }
 }

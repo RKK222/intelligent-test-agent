@@ -47,15 +47,20 @@ import com.enterprise.testagent.domain.run.RunSummaryPersistencePort;
 import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
+import com.enterprise.testagent.domain.session.SessionHistoryRepository;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
+import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.event.RunEventAppender;
 import com.enterprise.testagent.event.RunEventLiveBus;
@@ -65,6 +70,7 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssi
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
+import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
@@ -183,6 +189,8 @@ public class RunApplicationService {
     private RunRuntimeLossConvergenceScheduler runtimeLossScheduler;
     private NightExecutionSessionLockGuard nightExecutionLockGuard;
     private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
+    private ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
+    private SessionHistoryRepository sessionHistoryRepository;
     private List<ScheduledRunLifecycleObserver> scheduledRunLifecycleObservers = List.of();
     private RunDispatchAcceptanceProbe runDispatchAcceptanceProbe;
     private List<RunRootSessionErrorObserver> rootSessionErrorObservers = List.of();
@@ -702,6 +710,20 @@ public class RunApplicationService {
                 coordinator, "coordinator must not be null");
     }
 
+    /** 无上下文 token 的兼容入口也必须执行当前工作区资格校验。 */
+    @Autowired
+    void configureWorkspaceAccessAuthorizer(ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
+        this.workspaceAccessAuthorizer = Objects.requireNonNull(
+                workspaceAccessAuthorizer, "workspaceAccessAuthorizer must not be null");
+    }
+
+    /** 旧会话可能缺少创建人字段，生产环境按既有历史归因规则确认调用用户。 */
+    @Autowired
+    void configureSessionHistoryRepository(SessionHistoryRepository sessionHistoryRepository) {
+        this.sessionHistoryRepository = Objects.requireNonNull(
+                sessionHistoryRepository, "sessionHistoryRepository must not be null");
+    }
+
     /**
      * 创建兼容旧装配的服务实例，不显式传入快照服务时内部构造默认实现。
      */
@@ -1000,15 +1022,18 @@ public class RunApplicationService {
                 input.sessionId().value(),
                 traceId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
-        UserOpencodeProcessAssignment userProcessAssignment = conversationContext == null
-                ? resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
-                : null;
         Instant now = Instant.now();
         SessionId sessionId = input.sessionId();
         String prompt = input.effectivePrompt();
         Session session = conversationContext == null
                 ? findSession(sessionId)
                 : conversationContext.sessionSnapshot();
+        if (conversationContext == null) {
+            requireAuthenticatedLegacyRunAccess(userId, session);
+        }
+        UserOpencodeProcessAssignment userProcessAssignment = conversationContext == null
+                ? resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
+                : null;
         // 新上下文已经缓存 binding 快照，首次远端会话可由“无 binding”判断，避免为标题监听额外查询消息表。
         boolean firstUserRun = conversationContext == null
                 ? isFirstUserRun(sessionId)
@@ -1235,18 +1260,19 @@ public class RunApplicationService {
             markLegacyScheduledDispatchAccepted(scheduledClaim, source, running.runId());
             return running;
         } catch (PlatformException exception) {
+            PlatformException safeException = sanitizeExperienceException(workspace, exception);
             renewLegacyScheduledDispatchClaim(scheduledClaim, source, pending.runId());
             LOGGER.error("Run failed to start, runId={}, errorCode={}, traceId={}",
                     pending.runId().value(),
-                    exception.errorCode().name(),
+                    safeException.errorCode().name(),
                     traceId);
             Run failed = runRepository.save(pending.fail(Instant.now()));
             append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(),
-                    Map.of("errorCode", exception.errorCode().name()), storageMode);
+                    Map.of("errorCode", safeException.errorCode().name()), storageMode);
             snapshotService.persistRunSnapshot(resolvedAgentId, failed, traceId);
             runSessionScopeRouter.finishRun(failed.runId());
             markLegacyScheduledDispatchAccepted(scheduledClaim, source, failed.runId());
-            throw exception;
+            throw safeException;
         }
     }
 
@@ -1499,6 +1525,7 @@ public class RunApplicationService {
                 // 旧 owner 失去 fencing 后不得把仍由新 owner 执行的 Run 误写为失败。
                 throw new PlatformException(ErrorCode.CONFLICT, "Run owner lease 已转移");
             } catch (PlatformException exception) {
+                PlatformException safeException = sanitizeExperienceException(workspace, exception);
                 handleRedisSummaryStartupFailure(
                         resolvedAgentId,
                         runtime,
@@ -1508,12 +1535,13 @@ public class RunApplicationService {
                         workspace,
                         dispatchMessageId,
                         traceId,
-                        exception.errorCode().name(),
-                        exception.getMessage(),
+                        safeException.errorCode().name(),
+                        safeException.getMessage(),
                         ownership,
                         exception);
-                throw exception;
+                throw safeException;
             } catch (RuntimeException exception) {
+                String safeMessage = safeWorkspaceErrorMessage(workspace, exception);
                 handleRedisSummaryStartupFailure(
                         resolvedAgentId,
                         runtime,
@@ -1524,9 +1552,12 @@ public class RunApplicationService {
                         dispatchMessageId,
                         traceId,
                         "START_FAILED",
-                        safeStreamErrorMessage(exception),
+                        safeMessage,
                         ownership,
                         exception);
+                if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspace.workspaceId())) {
+                    throw new PlatformException(ErrorCode.INTERNAL_ERROR, "体验工作区运行启动失败");
+                }
                 throw exception;
             } finally {
                 if (ownership != null && !subscriptionHandedOff) {
@@ -2074,6 +2105,31 @@ public class RunApplicationService {
         return conversationContextResolver.resolve(userId, agentId, input, traceId).orElse(null);
     }
 
+    /**
+     * 兼容无 token 请求仅保留协议兼容，不豁免会话归因与工作区实时鉴权。
+     * 体验参数改配、用户加入应用或成员撤权都会在创建 Run 记录前失败关闭。
+     */
+    private void requireAuthenticatedLegacyRunAccess(UserId userId, Session session) {
+        if (userId == null) {
+            return;
+        }
+        boolean visible = session.status() == SessionStatus.ACTIVE;
+        if (visible && session.createdByUserId() != null) {
+            visible = session.createdByUserId().equals(userId);
+        } else if (visible && sessionHistoryRepository != null) {
+            visible = sessionHistoryRepository.findUserSession(userId, session.sessionId()).isPresent();
+        }
+        if (!visible) {
+            throw new PlatformException(
+                    ErrorCode.NOT_FOUND,
+                    "Session 不存在",
+                    Map.of("sessionId", session.sessionId().value()));
+        }
+        if (workspaceAccessAuthorizer != null) {
+            workspaceAccessAuthorizer.requireAccess(userId, session.workspaceId());
+        }
+    }
+
     private void recordRootSessionScope(
             String agentId,
             Run run,
@@ -2574,6 +2630,35 @@ public class RunApplicationService {
         return run;
     }
 
+    /**
+     * 远端恢复、SSE、取消与 diff 副作用在历史归因之外，还必须复核当前 Workspace 权限。
+     * 纯数据库 Run 详情仍可使用 {@link #requireRunAccess(UserId, RunId)} 保留历史只读视图。
+     */
+    public void requireLiveRunAccess(UserId userId, RunId runId) {
+        requireRunAccess(userId, runId);
+        WorkspaceId workspaceId = workspaceIdForRun(runId);
+        if (workspaceAccessAuthorizer != null) {
+            workspaceAccessAuthorizer.requireAccess(userId, workspaceId);
+        }
+    }
+
+    /** 仅体验 Run 需要为长连接启动固定间隔的实时 Workspace 资格复核。 */
+    public boolean isExperienceRun(RunId runId) {
+        return ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspaceIdForRun(runId));
+    }
+
+    private WorkspaceId workspaceIdForRun(RunId runId) {
+        if (runRuntimeStore != null) {
+            WorkspaceId runtimeWorkspaceId = runRuntimeStore.findManifest(runId)
+                    .map(RunRuntimeManifest::workspaceId)
+                    .orElse(null);
+            if (runtimeWorkspaceId != null) {
+                return runtimeWorkspaceId;
+            }
+        }
+        return getRun(runId).workspaceId();
+    }
+
     /** 越权统一使用不携带 Run 元数据的安全错误，避免通过差异响应枚举归属。 */
     private PlatformException forbiddenRunAccess() {
         return new PlatformException(ErrorCode.FORBIDDEN, "无权访问该 Run");
@@ -3052,8 +3137,12 @@ public class RunApplicationService {
                 "isChildSession", false);
         LinkedHashMap<String, Object> messagePayload = new LinkedHashMap<>(scope);
         messagePayload.put("message", Map.copyOf(message));
-        publishTransient(new RunEventDraft(
-                run.runId(), RunEventType.MESSAGE_UPDATED, traceId, occurredAt, Map.copyOf(messagePayload)), storageMode, ownership);
+        publishTransient(sanitizeExperienceEvent(run.workspaceId(), new RunEventDraft(
+                run.runId(),
+                RunEventType.MESSAGE_UPDATED,
+                traceId,
+                occurredAt,
+                Map.copyOf(messagePayload))), storageMode, ownership);
         for (Map<String, Object> originalPart : finalMessage.parts()) {
             LinkedHashMap<String, Object> part = new LinkedHashMap<>(originalPart);
             if (messageId != null) {
@@ -3070,8 +3159,12 @@ public class RunApplicationService {
                 partPayload.put("messageID", messageId);
                 partPayload.put("messageId", messageId);
             }
-            publishTransient(new RunEventDraft(
-                    run.runId(), RunEventType.MESSAGE_PART_UPDATED, traceId, occurredAt, Map.copyOf(partPayload)), storageMode, ownership);
+            publishTransient(sanitizeExperienceEvent(run.workspaceId(), new RunEventDraft(
+                    run.runId(),
+                    RunEventType.MESSAGE_PART_UPDATED,
+                    traceId,
+                    occurredAt,
+                    Map.copyOf(partPayload))), storageMode, ownership);
         }
     }
 
@@ -3098,8 +3191,16 @@ public class RunApplicationService {
         if (runRuntimeStore != null && runRuntimeStore.hasUserRuntimeState(userId)) {
             return runRuntimeStore.findActiveBySession(sessionId)
                     .filter(manifest -> userId.equals(manifest.userId()))
-                    .map(this::runtimeRun);
+                    .map(manifest -> {
+                        if (workspaceAccessAuthorizer != null) {
+                            workspaceAccessAuthorizer.requireAccess(userId, manifest.workspaceId());
+                        }
+                        return runtimeRun(manifest);
+                    });
         }
+        Session session = findSession(sessionId);
+        // legacy fallback 会触发远端 reconcile，必须先 fail-closed 校验 ACTIVE、归因和实时体验绑定。
+        requireAuthenticatedLegacyRunAccess(userId, session);
         return findActiveRun(sessionId);
     }
 
@@ -3615,7 +3716,8 @@ public class RunApplicationService {
      * 追加平台 RunEvent，统一封装 RunEventDraft 构造。
      */
     private void append(RunId runId, RunEventType type, String traceId, Instant occurredAt, Map<String, Object> payload) {
-        RunEventDraft draft = new RunEventDraft(runId, type, traceId, occurredAt, payload);
+        RunEventDraft draft = sanitizeExperienceEventForRun(
+                new RunEventDraft(runId, type, traceId, occurredAt, payload));
         recordRuntimeActivity(draft);
         runEventAppender.append(draft);
     }
@@ -3638,7 +3740,8 @@ public class RunApplicationService {
             Map<String, Object> payload,
             RunStorageMode storageMode,
             RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
-        RunEventDraft draft = new RunEventDraft(runId, type, traceId, occurredAt, payload);
+        RunEventDraft draft = sanitizeExperienceEventForRun(
+                new RunEventDraft(runId, type, traceId, occurredAt, payload));
         recordRuntimeActivity(draft);
         runEventAppender.append(draft, storageMode, ownerLeaseIfPresent(ownership));
     }
@@ -3886,10 +3989,14 @@ public class RunApplicationService {
             RunEventDraft draft,
             RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         RunEventDraft eventDraft = withUserMessageAttribution(
-                originalRun, synchronizeRootSessionTitle(originalRun, draft));
+                originalRun,
+                synchronizeRootSessionTitle(
+                        originalRun,
+                        sanitizeExperienceEvent(workspace, draft)));
         if (eventDraft.type() == RunEventType.RUN_SUCCEEDED && isTitleWatchPending(originalRun.runId())) {
             eventDraft = withPendingPlatformSessionTitle(eventDraft);
         }
+        eventDraft = sanitizeExperienceEvent(workspace, eventDraft);
         recordRuntimeActivity(eventDraft);
         if (eventDraft.type() == RunEventType.RUN_SUCCEEDED || eventDraft.type() == RunEventType.RUN_FAILED) {
             RunStatus terminalStatus = eventDraft.type() == RunEventType.RUN_SUCCEEDED
@@ -3988,6 +4095,49 @@ public class RunApplicationService {
         return new RunEventDraft(
                 draft.runId(), draft.type(), draft.traceId(), draft.occurredAt(),
                 Map.copyOf(payload), draft.scopeContext());
+    }
+
+    private RunEventDraft sanitizeExperienceEvent(WorkspaceId workspaceId, RunEventDraft draft) {
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspaceId)) {
+            return draft;
+        }
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在"));
+        return sanitizeExperienceEvent(workspace, draft);
+    }
+
+    /** 本地启动/传输错误等不经过 OpenCode stream 的事件也必须走同一体验投影边界。 */
+    private RunEventDraft sanitizeExperienceEventForRun(RunEventDraft draft) {
+        WorkspaceId workspaceId = null;
+        if (runRuntimeStore != null) {
+            workspaceId = runRuntimeStore.findManifest(draft.runId())
+                    .map(RunRuntimeManifest::workspaceId)
+                    .orElse(null);
+        }
+        if (workspaceId == null) {
+            workspaceId = runRepository.findById(draft.runId())
+                    .map(Run::workspaceId)
+                    .orElse(null);
+        }
+        // anchor-only 恢复会在 Run 聚合回填前追加固定状态事件；该 payload 不含远端内容。
+        return workspaceId == null ? draft : sanitizeExperienceEvent(workspaceId, draft);
+    }
+
+    /** 体验 Run 进入持久化或 live bus 前递归投影全部 payload，包含 tool input/output 与错误详情。 */
+    @SuppressWarnings("unchecked")
+    private RunEventDraft sanitizeExperienceEvent(Workspace workspace, RunEventDraft draft) {
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspace.workspaceId())) {
+            return draft;
+        }
+        Map<String, Object> safePayload = (Map<String, Object>) ExperienceWorkspacePathRedactor.redact(
+                draft.payload(), workspace.rootPath());
+        return new RunEventDraft(
+                draft.runId(),
+                draft.type(),
+                draft.traceId(),
+                draft.occurredAt(),
+                safePayload,
+                draft.scopeContext());
     }
 
     /** 只接受 OpenCode mapper 从根 session.error 派生的失败事实；观察者失败不回滚 Run 终态。 */
@@ -4578,13 +4728,13 @@ public class RunApplicationService {
             RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         boolean terminalPersisted = false;
         try {
+            String safeMessage = safeRunErrorMessage(run, error);
             if (storageMode == RunStorageMode.REDIS_SUMMARY) {
                 RunRuntimeManifest manifest = runRuntimeStore.findManifest(run.runId()).orElse(null);
                 if (manifest == null || manifest.status().isTerminal()) {
                     return false;
                 }
                 Instant occurredAt = Instant.now();
-                String safeMessage = safeStreamErrorMessage(error);
                 if (ownership != null) {
                     ownerLeaseSupervisor.requireOwned(ownership);
                 }
@@ -4625,8 +4775,8 @@ public class RunApplicationService {
                             Map.of(
                                     "error", Map.of(
                                             "name", error.getClass().getSimpleName(),
-                                            "message", safeStreamErrorMessage(error)),
-                                    "message", safeStreamErrorMessage(error)));
+                                            "message", safeMessage),
+                                    "message", safeMessage));
                     snapshotService.persistRunSnapshot(agentId, savedRun, traceId);
                 }
             }
@@ -4666,6 +4816,37 @@ public class RunApplicationService {
             return firstLine;
         }
         return firstLine.substring(0, 300);
+    }
+
+    private String safeWorkspaceErrorMessage(Workspace workspace, Throwable error) {
+        String safeMessage = safeStreamErrorMessage(error);
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspace.workspaceId())) {
+            return safeMessage;
+        }
+        return ExperienceWorkspacePathRedactor.redactText(safeMessage, workspace.rootPath());
+    }
+
+    private String safeRunErrorMessage(Run run, Throwable error) {
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(run.workspaceId())) {
+            return safeStreamErrorMessage(error);
+        }
+        return workspaceRepository.findById(run.workspaceId())
+                .map(workspace -> safeWorkspaceErrorMessage(workspace, error))
+                .orElse("体验工作区运行失败");
+    }
+
+    /** 体验启动错误返回前移除物理根与原始 cause，统一异常日志也无法回溯出真实目录。 */
+    @SuppressWarnings("unchecked")
+    private PlatformException sanitizeExperienceException(Workspace workspace, PlatformException exception) {
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspace.workspaceId())) {
+            return exception;
+        }
+        Map<String, Object> safeDetails = (Map<String, Object>) ExperienceWorkspacePathRedactor.redact(
+                exception.details(), workspace.rootPath());
+        return new PlatformException(
+                exception.errorCode(),
+                ExperienceWorkspacePathRedactor.redactText(exception.getMessage(), workspace.rootPath()),
+                safeDetails);
     }
 
     /**

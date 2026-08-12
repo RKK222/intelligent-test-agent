@@ -120,6 +120,101 @@ class RunApplicationServiceTest {
     private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
 
     @Test
+    void authenticatedLegacyRunRechecksCurrentWorkspaceAccessBeforeResolvingProcess() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        Session ownedSession = session().withSource(ConversationSourceType.MANUAL, null, userId);
+        UserOpencodeProcessAssignmentService assignmentService =
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer authorizer =
+                org.mockito.Mockito.mock(
+                        com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer.class);
+        org.mockito.Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(authorizer)
+                .requireAccess(userId, ownedSession.workspaceId());
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(ownedSession),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()),
+                new FakeAgentSessionBindingRepository(),
+                assignmentService);
+        service.configureWorkspaceAccessAuthorizer(authorizer);
+
+        assertThatThrownBy(() -> service.startRun(
+                        userId,
+                        StartRunInput.ofPrompt(ownedSession.sessionId(), "run the tests"),
+                        "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        org.mockito.Mockito.verify(assignmentService, org.mockito.Mockito.never())
+                .requireReadyProcess(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void liveRunAndActiveRunFallbackRecheckOwnerAndCurrentExperienceAccess() {
+        UserId owner = new UserId("usr_1234567890abcdef");
+        UserId other = new UserId("usr_other_1234567890");
+        WorkspaceId experienceWorkspaceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        Session ownedSession = new Session(
+                new SessionId("ses_1234567890abcdef"),
+                experienceWorkspaceId,
+                "体验会话",
+                SessionStatus.ACTIVE,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef").withSource(ConversationSourceType.MANUAL, null, owner);
+        FakeRunRepository runs = new FakeRunRepository();
+        Run run = new Run(
+                new RunId("run_live_auth_1234567890"),
+                ownedSession.sessionId(),
+                experienceWorkspaceId,
+                RunStatus.RUNNING,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef").withSource(ConversationSourceType.MANUAL, null, owner);
+        runs.save(run);
+        com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer authorizer =
+                org.mockito.Mockito.mock(
+                        com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer.class);
+        org.mockito.Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(authorizer)
+                .requireAccess(owner, experienceWorkspaceId);
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(ownedSession),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()),
+                new FakeAgentSessionBindingRepository());
+        service.configureWorkspaceAccessAuthorizer(authorizer);
+
+        assertThatThrownBy(() -> service.requireLiveRunAccess(owner, run.runId()))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.findActiveRun(other, ownedSession.sessionId()))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+        assertThatThrownBy(() -> service.findActiveRun(owner, ownedSession.sessionId()))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        org.mockito.Mockito.verify(authorizer, org.mockito.Mockito.times(2))
+                .requireAccess(owner, experienceWorkspaceId);
+        org.mockito.Mockito.verify(authorizer, org.mockito.Mockito.never())
+                .requireAccess(other, experienceWorkspaceId);
+    }
+
+    @Test
     void serviceRejectsNewOpencodeRunWhilePublicConfigIsDraining() {
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),

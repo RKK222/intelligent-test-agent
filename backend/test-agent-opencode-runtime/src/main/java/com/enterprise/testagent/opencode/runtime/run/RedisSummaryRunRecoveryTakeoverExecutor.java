@@ -15,7 +15,9 @@ import com.enterprise.testagent.domain.run.RunRuntimeStore;
 import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.run.RunStorageMode;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.event.RunEventAppender;
+import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
 import java.util.Objects;
 import java.util.Optional;
 import java.time.Instant;
@@ -112,13 +114,15 @@ public class RedisSummaryRunRecoveryTakeoverExecutor implements RunRecoveryTakeo
         RunOwnerLeaseSupervisor.OwnershipHandle ownership = adopted.orElseThrow();
         AgentRuntime runtime = runtimes.require(manifest.agentId());
         RunEventScopeContext rootScope = RunEventScopeContext.root(manifest.runId(), manifest.rootRemoteSessionId());
+        String workspaceRootPath = input.orElseThrow().workspaceRootPath();
         runtime.streamRunEvents(new AgentStreamEventsCommand(
                         node.orElseThrow(),
                         manifest.runId(),
                         manifest.rootRemoteSessionId(),
-                        input.orElseThrow().workspaceRootPath(),
+                        workspaceRootPath,
                         null,
                         traceId))
+                .map(draft -> sanitizeExperienceEvent(manifest, workspaceRootPath, draft))
                 .concatMap(draft -> Mono.fromCallable(() -> {
                             leases.requireOwned(ownership);
                             return scopeRouter.route(
@@ -280,6 +284,26 @@ public class RedisSummaryRunRecoveryTakeoverExecutor implements RunRecoveryTakeo
         } else {
             eventAppender.publishTransient(sanitized, RunStorageMode.REDIS_SUMMARY, ownership.lease());
         }
+    }
+
+    /** 接管链与主订阅使用同一体验 payload 投影边界，Redis 与 live bus 都不保存物理根。 */
+    @SuppressWarnings("unchecked")
+    private RunEventDraft sanitizeExperienceEvent(
+            RunRuntimeManifest manifest,
+            String workspaceRootPath,
+            RunEventDraft draft) {
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(manifest.workspaceId())) {
+            return draft;
+        }
+        Map<String, Object> safePayload = (Map<String, Object>) ExperienceWorkspacePathRedactor.redact(
+                draft.payload(), workspaceRootPath);
+        return new RunEventDraft(
+                draft.runId(),
+                draft.type(),
+                draft.traceId(),
+                draft.occurredAt(),
+                safePayload,
+                draft.scopeContext());
     }
 
     private boolean terminal(RunEventDraft draft) {

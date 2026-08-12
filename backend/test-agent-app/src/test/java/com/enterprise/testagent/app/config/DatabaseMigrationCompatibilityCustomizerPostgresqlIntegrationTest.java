@@ -127,6 +127,15 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             "db/migration/V20260809170000__session_shares_create_collaboration_share.sql";
     private static final String SESSION_SHARE_ATTRIBUTION_MAIN_RESOURCE =
             "db/migration/V20260809170001__session_messages_add_delegated_attribution.sql";
+    private static final String EXPERIENCE_WORKSPACE_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_VERSION;
+    private static final String EXPERIENCE_WORKSPACE_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_VERSION;
+    private static final String CURRENT_RELEASE_MAX_VERSION = "20260811213000";
+    private static final String EXPERIENCE_WORKSPACE_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION;
+    private static final String EXPERIENCE_WORKSPACE_MAIN_RESOURCE =
+            "db/migration/V20260809210000__common_parameters_add_experience_workspace.sql";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -664,6 +673,62 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         });
     }
 
+    @Test
+    void currentReleaseHistoryAppliesExperienceWorkspaceThroughHigherForwardMigration() {
+        DataSource dataSource = dataSource("experience_workspace_after_current_release");
+        migrateWithoutResourceTo(
+                dataSource,
+                CURRENT_RELEASE_MAX_VERSION,
+                EXPERIENCE_WORKSPACE_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, EXPERIENCE_WORKSPACE_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).doesNotContain(EXPERIENCE_WORKSPACE_LOCATION);
+            assertThat(applied(dataSource, EXPERIENCE_WORKSPACE_VERSION)).isFalse();
+            assertThat(applied(dataSource, EXPERIENCE_WORKSPACE_FORWARD_VERSION)).isTrue();
+            assertExperienceWorkspaceSchema(dataSource);
+        });
+    }
+
+    @Test
+    void appliedExperienceWorkspaceHistoryKeepsOriginalBytesAndRunsIdempotentForwardMigration() {
+        DataSource dataSource = dataSource("experience_workspace_applied_branch");
+        migrateTo(
+                dataSource,
+                EXPERIENCE_WORKSPACE_VERSION,
+                MAIN_LOCATION,
+                EXPERIENCE_WORKSPACE_LOCATION);
+
+        assertThat(applied(dataSource, EXPERIENCE_WORKSPACE_VERSION)).isTrue();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(EXPERIENCE_WORKSPACE_LOCATION);
+            assertThat(applied(dataSource, EXPERIENCE_WORKSPACE_VERSION)).isTrue();
+            assertThat(applied(dataSource, EXPERIENCE_WORKSPACE_FORWARD_VERSION)).isTrue();
+            assertExperienceWorkspaceSchema(dataSource);
+        });
+    }
+
+    @Test
+    void unknownExperienceWorkspaceChecksumStillFailsClosed() {
+        DataSource dataSource = dataSource("experience_workspace_unknown_checksum");
+        migrateTo(
+                dataSource,
+                EXPERIENCE_WORKSPACE_VERSION,
+                MAIN_LOCATION,
+                EXPERIENCE_WORKSPACE_LOCATION);
+        overwriteAppliedChecksum(dataSource, EXPERIENCE_WORKSPACE_VERSION, 987654321);
+
+        bootFlywayRunner(dataSource).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure())
+                    .hasStackTraceContaining("检测到未知的体验工作区 migration checksum");
+        });
+    }
+
     /** 为每套历史创建独立 schema，避免测试之间共享 Flyway history。 */
     private static DataSource dataSource(String schema) {
         PGSimpleDataSource admin = postgresDataSource();
@@ -988,6 +1053,37 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .single();
         assertThat(tableCount).isEqualTo(1L);
         assertThat(actionColumnCount).isEqualTo(8L);
+    }
+
+    private static void assertExperienceWorkspaceSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name = 'experience_workspace_bindings'
+                        """)
+                .query(Long.class)
+                .single();
+        Long parameterCount = jdbc.sql("""
+                        select count(*)
+                        from common_parameters
+                        where parameter_english = 'OPENCODE_EXPERIENCE_WORKSPACE_DIR'
+                          and platform = 'all'
+                        """)
+                .query(Long.class)
+                .single();
+        Long indexCount = jdbc.sql("""
+                        select count(*)
+                        from pg_indexes
+                        where schemaname = current_schema()
+                          and indexname = 'idx_application_members_active_user'
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(1L);
+        assertThat(parameterCount).isEqualTo(1L);
+        assertThat(indexCount).isEqualTo(1L);
     }
 
     private static long qaMemorySchemaTableCount(DataSource dataSource) {

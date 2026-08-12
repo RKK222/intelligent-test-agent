@@ -102,16 +102,18 @@ public class TerminalController {
             @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
         TerminalTicketRequest resolved = request == null ? new TerminalTicketRequest(null, null, null, null, null) : request;
+        var principal = AuthWebSupport.getAuthPrincipal(exchange);
         DelegatedOperationContext context = shareId == null || shareId.isBlank()
                 ? null
                 : shareContext(
-                        AuthWebSupport.getAuthPrincipal(exchange).userId(),
+                        principal.userId(),
                         shareId,
                         RuntimeApiSupport.traceId(exchange));
         return blockingResponse(exchange, traceId -> terminalTicketResponse(
                 sessionId,
                 context == null
-                        ? terminalService.createTicket(new SessionId(sessionId), resolved, traceId)
+                        ? terminalService.createTicket(
+                                principal.userId(), new SessionId(sessionId), resolved, traceId)
                         : terminalService.createTicket(context, resolved, traceId)));
     }
 

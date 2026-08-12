@@ -2,8 +2,11 @@ package com.enterprise.testagent.common.git;
 
 import com.enterprise.testagent.common.error.PlatformException;
 import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -24,6 +27,10 @@ public class GitWorkspaceService {
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration PUSH_TIMEOUT = Duration.ofSeconds(120);
     private static final Duration BUNDLE_TIMEOUT = Duration.ofMinutes(5);
+    private static final int READ_ONLY_UNTRACKED_PATCH_MAX_BYTES = 256 * 1024;
+    private static final int READ_ONLY_UNTRACKED_PATCH_MAX_LINES = 2_000;
+    private static final int READ_ONLY_PATCH_MAX_FILE_CHARS = 256 * 1024;
+    private static final int READ_ONLY_PATCH_MAX_TOTAL_CHARS = 1024 * 1024;
     private static final Pattern RELOCATION_REF = Pattern.compile(
             "^refs/test-agent/relocations/[A-Za-z0-9_-]{8,128}/(head|stash)$");
 
@@ -221,6 +228,23 @@ public class GitWorkspaceService {
                     DEFAULT_TIMEOUT);
             return "true".equalsIgnoreCase(result.stdoutText().trim());
         } catch (PlatformException exception) {
+            return false;
+        }
+    }
+
+    /**
+     * 判断目录自身是否为 Git 工作树根；父仓库中的普通子目录不能作为独立共享工作区接管。
+     */
+    public boolean isGitWorkTreeRoot(Path repoRoot) {
+        try {
+            Path expected = repoRoot.toRealPath();
+            GitCommandResult result = executor.execute(
+                    List.of("git", "-C", expected.toString(), "rev-parse", "--path-format=absolute", "--show-toplevel"),
+                    null,
+                    DEFAULT_TIMEOUT);
+            String topLevel = result.stdoutText().trim();
+            return !topLevel.isBlank() && Path.of(topLevel).toRealPath().equals(expected);
+        } catch (Exception exception) {
             return false;
         }
     }
@@ -832,6 +856,28 @@ public class GitWorkspaceService {
         return result.stdoutText();
     }
 
+    /** 返回不会获取可选锁、刷新 index stat/fsmonitor 或写入 untracked cache 的 porcelain 状态。 */
+    public String statusPorcelainReadOnly(Path repoRoot) {
+        GitCommandResult result = executor.execute(
+                List.of(
+                        "git",
+                        "--no-optional-locks",
+                        "-c",
+                        "core.quotepath=false",
+                        "-c",
+                        "core.untrackedCache=false",
+                        "-c",
+                        "core.fsmonitor=false",
+                        "-C",
+                        repoRoot.toString(),
+                        "status",
+                        "--porcelain",
+                        "--untracked-files=all"),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText();
+    }
+
     /**
      * 返回指定 pathspec 下的 porcelain 状态，并展开未跟踪目录中的每个文件。
      * 工作区 Diff 依赖文件级结果计算数量和执行定点 stage/discard，不能把目录压缩成一条状态。
@@ -969,6 +1015,127 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 为平台只读 Git 视图收集指定条目的 Diff。
+     *
+     * <p>命令只携带调用方已授权的精确 pathspec，并禁用 external diff/textconv，避免仓库本地配置
+     * 把受控目录内容拼进其它文件的 patch；同时不获取可选锁或启用会写缓存的 Git 能力。</p>
+     */
+    public List<GitDiffFile> collectDiffFilesReadOnly(Path repoRoot, List<GitStatusEntry> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return List.of();
+        }
+        List<String> stagedFiles = entries.stream()
+                .filter(entry -> !entry.untrackedFile() && entry.staged())
+                .map(GitStatusEntry::path)
+                .toList();
+        List<String> unstagedFiles = entries.stream()
+                .filter(entry -> !entry.untrackedFile() && entry.needsUnstagedDiff())
+                .map(GitStatusEntry::path)
+                .toList();
+        Map<String, String> stagedDiffs = readOnlyDiffMap(repoRoot, stagedFiles, true);
+        Map<String, String> unstagedDiffs = readOnlyDiffMap(repoRoot, unstagedFiles, false);
+
+        List<GitDiffFile> files = new ArrayList<>();
+        ReadOnlyPatchBudget patchBudget = new ReadOnlyPatchBudget();
+        for (GitStatusEntry entry : entries) {
+            DiffAccumulator accumulator = new DiffAccumulator();
+            if (entry.untrackedFile()) {
+                appendNewFilePatchReadOnly(entry.path(), repoRoot.resolve(entry.path()), accumulator, patchBudget);
+            } else {
+                if (entry.staged()) {
+                    appendReadOnlyDiff(
+                            repoRoot,
+                            entry.path(),
+                            true,
+                            stagedDiffs.get(entry.path()),
+                            accumulator,
+                            patchBudget);
+                }
+                if (entry.needsUnstagedDiff()) {
+                    appendReadOnlyDiff(
+                            repoRoot,
+                            entry.path(),
+                            false,
+                            unstagedDiffs.get(entry.path()),
+                            accumulator,
+                            patchBudget);
+                }
+            }
+            files.add(new GitDiffFile(
+                    entry.path(),
+                    entry.rawStatus(),
+                    entry.status(),
+                    entry.staged(),
+                    accumulator.patch(),
+                    accumulator.additions,
+                    accumulator.deletions));
+        }
+        return List.copyOf(files);
+    }
+
+    /** 执行禁用可选锁、external diff 与 textconv 的精确 pathspec Diff。 */
+    public String diffReadOnly(Path repoRoot, List<String> files, boolean staged) {
+        if (files == null || files.isEmpty()) {
+            return "";
+        }
+        ArrayList<String> command = new ArrayList<>(List.of(
+                "git",
+                "--no-optional-locks",
+                "-c",
+                "core.quotepath=false",
+                "-c",
+                "core.untrackedCache=false",
+                "-c",
+                "core.fsmonitor=false",
+                "-C",
+                repoRoot.toString(),
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv"));
+        if (staged) {
+            command.add("--cached");
+        }
+        command.add("--");
+        command.addAll(files);
+        return executor.execute(command, null, DEFAULT_TIMEOUT).stdoutText();
+    }
+
+    private Map<String, String> readOnlyDiffMap(Path repoRoot, List<String> files, boolean staged) {
+        if (files.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            return parseFullDiff(diffReadOnly(repoRoot, files, staged));
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+    }
+
+    private void appendReadOnlyDiff(
+            Path repoRoot,
+            String file,
+            boolean staged,
+            String batchDiff,
+            DiffAccumulator accumulator,
+            ReadOnlyPatchBudget patchBudget) {
+        if (batchDiff != null && !batchDiff.isBlank()) {
+            patchBudget.append(accumulator, batchDiff);
+            return;
+        }
+        if (patchBudget.exhausted()) {
+            return;
+        }
+        try {
+            String output = diffReadOnly(repoRoot, List.of(file), staged);
+            if (output != null && !output.isBlank()) {
+                patchBudget.append(accumulator, output);
+            }
+        } catch (Exception ignored) {
+            // 单文件只读 diff 失败不影响其它文件状态展示。
+        }
+    }
+
+    /**
      * 解析 Git 完整 Diff 输出以提取每个文件的 Diff 片段。
      */
     public Map<String, String> parseFullDiff(String diffOutput) {
@@ -1099,6 +1266,67 @@ public class GitWorkspaceService {
         } catch (Exception exception) {
             // 单个未跟踪文件读取失败只降级该文件 patch，不影响整批 diff 展示。
         }
+    }
+
+    /**
+     * 体验区未跟踪文件只生成有界文本 patch。超大、多行、二进制或并发变化文件仍保留状态，
+     * 但不把正文复制进 JVM 堆与 HTTP 响应。
+     */
+    private void appendNewFilePatchReadOnly(
+            String gitPath,
+            Path filePath,
+            DiffAccumulator accumulator,
+            ReadOnlyPatchBudget patchBudget) {
+        if (patchBudget.exhausted() || !Files.isRegularFile(filePath, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        try {
+            if (Files.size(filePath) > READ_ONLY_UNTRACKED_PATCH_MAX_BYTES) {
+                return;
+            }
+            byte[] bytes;
+            try (var input = Files.newInputStream(filePath)) {
+                bytes = input.readNBytes(READ_ONLY_UNTRACKED_PATCH_MAX_BYTES + 1);
+            }
+            if (bytes.length > READ_ONLY_UNTRACKED_PATCH_MAX_BYTES || containsNul(bytes)) {
+                return;
+            }
+            String content = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+            List<String> lines = content.lines()
+                    .limit(READ_ONLY_UNTRACKED_PATCH_MAX_LINES + 1L)
+                    .toList();
+            if (lines.size() > READ_ONLY_UNTRACKED_PATCH_MAX_LINES) {
+                return;
+            }
+            StringBuilder diff = new StringBuilder(Math.min(
+                    READ_ONLY_PATCH_MAX_FILE_CHARS,
+                    content.length() + gitPath.length() + 64));
+            diff.append("--- /dev/null\n");
+            diff.append("+++ b/").append(gitPath).append('\n');
+            diff.append("@@ -0,0 +1,").append(lines.size()).append(" @@\n");
+            for (String line : lines) {
+                diff.append('+').append(line).append('\n');
+                if (diff.length() > READ_ONLY_PATCH_MAX_FILE_CHARS) {
+                    return;
+                }
+            }
+            patchBudget.append(accumulator, diff.toString());
+        } catch (Exception ignored) {
+            // 文件并发变化、解码或读取失败时只省略 patch，状态列表仍可返回。
+        }
+    }
+
+    private static boolean containsNul(byte[] bytes) {
+        for (byte value : bytes) {
+            if (value == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static int countDiffAdditions(String diff) {
@@ -1683,6 +1911,31 @@ public class GitWorkspaceService {
 
         private String patch() {
             return patch.toString();
+        }
+
+        private int patchLength() {
+            return patch.length();
+        }
+    }
+
+    /** 单文件和整次只读 Diff 共用预算，防止多文件分别命中上限后聚合放大。 */
+    private static final class ReadOnlyPatchBudget {
+        private int remainingChars = READ_ONLY_PATCH_MAX_TOTAL_CHARS;
+
+        private boolean append(DiffAccumulator accumulator, String diff) {
+            int separatorChars = accumulator.patchLength() == 0 ? 0 : 1;
+            int appendedChars = separatorChars + diff.length();
+            if (appendedChars > remainingChars
+                    || accumulator.patchLength() + appendedChars > READ_ONLY_PATCH_MAX_FILE_CHARS) {
+                return false;
+            }
+            accumulator.append(diff);
+            remainingChars -= appendedChars;
+            return true;
+        }
+
+        private boolean exhausted() {
+            return remainingChars <= 0;
         }
     }
 

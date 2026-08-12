@@ -306,9 +306,14 @@ public class SessionController {
                     } else {
                         sessionService.getSession(currentSessionId);
                     }
+                    UserId executionOwner = context == null ? userId : context.executionOwnerUserId();
+                    boolean liveRuntimeAvailable = sessionService.canUseLiveRuntime(executionOwner, currentSessionId);
                     RunHistoryRecoveryResult recovery = messageRecoveryService == null
                             ? RunHistoryRecoveryResult.full(
                                     List.of(), null, RunHistoryRecoverySource.OPENCODE)
+                            : !liveRuntimeAvailable
+                                    ? messageRecoveryService.recoverPersistedSessionTreeHistory(
+                                            currentSessionId, traceId).block(Duration.ofSeconds(30))
                             : (hasAgentId(agentId)
                                     ? messageRecoveryService.recoverSessionTreeHistory(
                                             agentId, currentSessionId, traceId)

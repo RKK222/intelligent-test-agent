@@ -387,13 +387,21 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     private Retry retrySpec(String operation, String nodeId) {
         return Retry.fixedDelay(maxRetries, retryBackoff)
                 .filter(this::isRetryable)
-                .doBeforeRetry(signal -> LOGGER.warn(
-                        "Opencode call retrying, operation={}, nodeId={}, attempt={}/{}, error={}",
-                        operation,
-                        nodeId,
-                        signal.totalRetries() + 1,
-                        maxRetries,
-                        signal.failure().getMessage()));
+                .doBeforeRetry(signal -> {
+                    Throwable failure = unwrapRetry(signal.failure());
+                    Integer status = failure instanceof WebClientResponseException exception
+                            ? exception.getStatusCode().value()
+                            : null;
+                    // WebClient 异常 message 可能含带 directory query 的完整 URI，只记录稳定分类。
+                    LOGGER.warn(
+                            "Opencode call retrying, operation={}, nodeId={}, attempt={}/{}, failureType={}, httpStatus={}",
+                            operation,
+                            nodeId,
+                            signal.totalRetries() + 1,
+                            maxRetries,
+                            failure.getClass().getSimpleName(),
+                            status);
+                });
     }
 
     /**
@@ -444,8 +452,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                     operation, node.executionNodeId().value(), node.baseUrl());
             return platformException(ErrorCode.OPENCODE_UNAVAILABLE, operation, node, null, current);
         }
-        LOGGER.error("Opencode call error, operation={}, nodeId={}, baseUrl={}, error={}",
-                operation, node.executionNodeId().value(), node.baseUrl(), current.getMessage());
+        // 未知异常 message 也可能携带请求 URI；日志只保留异常类型和稳定调用上下文。
+        LOGGER.error("Opencode call error, operation={}, nodeId={}, baseUrl={}, failureType={}",
+                operation, node.executionNodeId().value(), node.baseUrl(), current.getClass().getSimpleName());
         return platformException(ErrorCode.OPENCODE_BAD_GATEWAY, operation, node, null, current);
     }
 

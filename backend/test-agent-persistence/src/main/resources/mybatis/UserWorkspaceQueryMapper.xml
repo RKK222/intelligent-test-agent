@@ -18,6 +18,7 @@
 
     <sql id="UserWorkspaceWhere">
         where w.status = 'ACTIVE'
+          and w.workspace_id not like 'wrk!_exp!_%' escape '!'
           and (
             exists (
                 select 1 from personal_workspaces pw

@@ -14,6 +14,8 @@
 
 公共或应用 Agent/Skill 发布进入存量 Session 排空期时，`/processes/me` 按当前用户返回 `messageSendAllowed=false` 和阻断原因。应用发布先把固定 feature commit 原生 merge 到各服务器相关个人 worktree；存在 dirty 或冲突时不覆盖个人内容，持久化 rollout 保持 retry，相关个人 worktree 全部包含目标 commit 后才登记 dispose 用户并进入排空。前端只在被阻断期间每 5 秒刷新状态，该用户旧 opencode target dispose 后下一轮立即恢复为 true。聊天面板禁用发送与新会话按钮、输入框展示排空提示，后端所有新 opencode 消息入口仍以同一持久化用户级门禁为准。
 
+工作台显式支持 `MANAGED / APP_SOURCE / EXPERIENCE` 三种工作区语义。当前用户与成员应用列表都成功加载且应用为空时，每次工作台挂载只询问一次是否进入平台体验；拒绝不持久化并恢复原空态和首登引导，应用查询失败保持等待且不消耗本次邀请，后续重试成功为空时仍会询问。体验区复用文件树、编辑器、搜索、终端与对话；文件树和下载只走普通 `workspace.list/read/write` WebSocket RPC，不请求应用引用 `workspace.view.*` 组合视图。普通文件可写，本地 Git 只读展示且不轮询 OpenCode 通用 VCS；应用版本、个人 worktree、发布、pull/push、stage、回退及应用 Agent 配置入口均关闭。初始化 TestAgent 后的自动续接使用页面内一次性代次；确认框返回后还会重新检查该代次和应用数，取消、失败、卸载或成员轮询发现已加入应用时立即失效，迟到确认不会启动进程，并关闭体验文件连接和终端。
+
 ## 技术栈
 
 - Vue 3

@@ -97,6 +97,15 @@
         order by a.app_name, a.app_id
     </select>
 
+    <select id="countEnabledApplicationMembership" resultType="long">
+        select count(*)
+        from application_members m
+        join applications a on a.app_id = m.app_id
+        where m.user_id = #{userId}
+          and m.deleted_at is null
+          and a.enabled = true
+    </select>
+
     <select id="countActiveMember" resultType="long">
         select count(*)
         from application_members

@@ -30,9 +30,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
-import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -148,7 +148,14 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
                 .map(WebSocketMessage::getPayloadAsText)
                 .map(codec::decode)
                 .doOnNext(ignored -> activity.tryEmitNext(System.nanoTime()))
-                .concatMap(message -> handleClientMessage(ticket, session, activeTerminal, message, inputRateLimiter, controlMessages, terminalClosed))
+                .concatMap(message -> handleClientMessage(
+                        ticket,
+                        session,
+                        activeTerminal,
+                        message,
+                        inputRateLimiter,
+                        controlMessages,
+                        terminalClosed))
                 .onErrorResume(TerminalConnectionClosed.class, ignored -> Mono.empty())
                 .doFinally(ignored -> {
                     controlMessages.tryEmitComplete();
@@ -163,26 +170,36 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
                 .map(session::textMessage));
         Mono<Void> main = Mono.when(inbound, outbound);
         Mono<Void> timeout = timeout(ticket, session, activeTerminal, controlMessages, terminalClosed, activity);
-        Mono<Void> authorization = ticket.sharedSession()
-                ? Flux.interval(Duration.ofSeconds(1))
-                        .publishOn(Schedulers.boundedElastic())
-                        .doOnNext(ignored -> terminalService.revalidateSharedTicket(ticket))
-                        .then()
-                        .onErrorResume(PlatformException.class, failure -> {
-                            recordSharedFailure(ticket, "TERMINAL_AUTHORIZATION", failure.errorCode().name());
-                            controlMessages.tryEmitNext(TerminalServerMessage.error(
-                                    failure.errorCode().name(), failure.getMessage()));
-                            controlMessages.tryEmitComplete();
-                            return closeTerminal(activeTerminal, terminalClosed)
-                                    .then(session.close())
-                                    .then(Mono.error(new TerminalConnectionClosed()));
-                        })
-                : Mono.never();
-        return Mono.firstWithSignal(main, timeout, authorization)
+        Mono<Void> accessRevocation = accessRevocation(
+                ticket, session, activeTerminal, controlMessages, terminalClosed);
+        return Mono.firstWithSignal(main, timeout, accessRevocation)
                 .onErrorResume(TerminalConnectionClosed.class, ignored -> Mono.empty())
                 .doFinally(ignored -> {
                     activeLease.close();
                     closeTerminal(activeTerminal, terminalClosed).subscribe();
+                });
+    }
+
+    /** Workspace PTY 独立于键盘输入每秒复核一次，撤权后即使只有持续输出也会关闭。 */
+    private Mono<Void> accessRevocation(
+            TerminalTicket ticket,
+            WebSocketSession session,
+            TerminalProcessSession terminal,
+            Sinks.Many<TerminalServerMessage> controlMessages,
+            AtomicBoolean terminalClosed) {
+        if (ticket.serverShell()) return Mono.never();
+        return Flux.interval(Duration.ofSeconds(1))
+                .concatMap(ignored -> Mono.fromRunnable(() -> terminalService.requireTicketAccess(ticket))
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .then()
+                .onErrorResume(PlatformException.class, exception -> {
+                    recordSharedFailure(ticket, "TERMINAL_AUTHORIZATION", exception.errorCode().name());
+                    controlMessages.tryEmitNext(TerminalServerMessage.error(
+                            exception.errorCode().name(), "terminal access revoked"));
+                    controlMessages.tryEmitComplete();
+                    return closeTerminal(terminal, terminalClosed)
+                            .then(session.close())
+                            .then(Mono.error(new TerminalConnectionClosed()));
                 });
     }
 

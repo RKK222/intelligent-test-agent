@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -35,6 +36,7 @@ import com.enterprise.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
@@ -55,6 +57,8 @@ class RunControllerAuthorizationTest {
         RunMessageRecoveryService recoveryService = mock(RunMessageRecoveryService.class);
         doThrow(new PlatformException(ErrorCode.FORBIDDEN, "无权访问该 Run"))
                 .when(runService).requireRunAccess(OTHER_USER, RUN_ID);
+        doThrow(new PlatformException(ErrorCode.FORBIDDEN, "无权访问该 Run"))
+                .when(runService).requireLiveRunAccess(OTHER_USER, RUN_ID);
         when(runService.getRun(RUN_ID)).thenReturn(run());
         when(runService.cancelRun(eq(RUN_ID), any())).thenReturn(run());
         when(runService.storageMetadata(RUN_ID)).thenReturn(Optional.empty());
@@ -111,7 +115,7 @@ class RunControllerAuthorizationTest {
         org.mockito.Mockito.doAnswer(ignored -> {
             assertThat(Thread.currentThread().getName()).contains("boundedElastic");
             return null;
-        }).when(runService).requireRunAccess(OTHER_USER, RUN_ID);
+        }).when(runService).requireLiveRunAccess(OTHER_USER, RUN_ID);
         when(runService.eventStorageMode(RUN_ID)).thenReturn(RunStorageMode.REDIS_SUMMARY);
         when(eventStreamService.streamAfterWithSnapshot(eq(RUN_ID), any(), any(), any(Integer.class), any()))
                 .thenReturn(Flux.empty());
@@ -135,6 +139,44 @@ class RunControllerAuthorizationTest {
                 .expectStatus().isOk();
 
         verify(eventStreamService).streamAfterWithSnapshot(eq(RUN_ID), any(), any(), eq(100), any());
+    }
+
+    @Test
+    void experienceSsePeriodicallyRechecksAccessWithoutWaitingForEvents() {
+        RunApplicationService runService = mock(RunApplicationService.class);
+        RunEventSseStreamService eventStreamService = mock(RunEventSseStreamService.class);
+        AtomicInteger authorizationCount = new AtomicInteger();
+        org.mockito.Mockito.doAnswer(ignored -> {
+            if (authorizationCount.incrementAndGet() > 1) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效");
+            }
+            return null;
+        }).when(runService).requireLiveRunAccess(OTHER_USER, RUN_ID);
+        when(runService.isExperienceRun(RUN_ID)).thenReturn(true);
+        when(runService.eventStorageMode(RUN_ID)).thenReturn(RunStorageMode.REDIS_SUMMARY);
+        when(eventStreamService.streamAfterWithSnapshot(eq(RUN_ID), any(), any(), any(Integer.class), any()))
+                .thenReturn(Flux.never());
+        WebTestClient client = WebTestClient.bindToController(new RunController(
+                        runService,
+                        null,
+                        eventStreamService))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter((exchange, chain) -> {
+                    exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, new AuthPrincipal(
+                            "token", OTHER_USER, "other", "other", List.of("APP_ADMIN"),
+                            NOW, NOW.plusSeconds(3600)));
+                    return chain.filter(exchange);
+                })
+                .build();
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/runs/" + RUN_ID.value() + "/events")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody().isEmpty();
+
+        verify(runService, atLeast(2)).requireLiveRunAccess(OTHER_USER, RUN_ID);
     }
 
     private static void assertForbidden(WebTestClient client, String method, String uri) {

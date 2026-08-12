@@ -279,10 +279,12 @@ public class RunController {
         String resumeEventId = lastEventId != null ? lastEventId : lastEventIdQuery;
         RunId currentRunId = new RunId(runId);
         String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId currentUserId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         // Redis/legacy 归属读取属于阻塞调用；延迟到 boundedElastic 执行，且仍严格先于首帧与任何恢复读取。
         return Flux.defer(() -> {
                     DelegatedOperationContext sharedContext = requireRunAccessContext(
                             exchange, currentRunId, shareId, false, false, traceId);
+                    boolean experienceRun = sharedContext == null && runService.isExperienceRun(currentRunId);
                     boolean redisSummary = runService.eventStorageMode(currentRunId) == RunStorageMode.REDIS_SUMMARY;
                     Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = messageRecoveryService == null || redisSummary
                             ? Flux.empty()
@@ -290,17 +292,29 @@ public class RunController {
                                     ? messageRecoveryService.recover(agentId, currentRunId, traceId)
                                     : messageRecoveryService.recover(currentRunId, traceId))
                                     .map(sseMapper::toTransientSse);
-                    Flux<ServerSentEvent<RunEventSsePayload>> events = eventStreamService.streamAfterWithSnapshot(
+                    Flux<ServerSentEvent<RunEventSsePayload>> stream = eventStreamService.streamAfterWithSnapshot(
                             currentRunId,
                             resumeEventId,
                             DEFAULT_POLL_INTERVAL,
                             DEFAULT_BATCH_LIMIT,
                             snapshotEvents);
-                    return sharedContext == null
-                            ? events
-                            : events.takeUntilOther(sharedAccessInvalidation(sharedContext, traceId));
+                    if (sharedContext != null) {
+                        return stream.takeUntilOther(sharedAccessInvalidation(sharedContext, traceId));
+                    }
+                    return experienceRun
+                            ? stream.takeUntilOther(experienceRunAccessRevocation(currentUserId, currentRunId))
+                            : stream;
                 })
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /** 体验 SSE 不依赖新事件或客户端重连，每秒独立复核一次，撤权后主动结束旧连接。 */
+    private Mono<Void> experienceRunAccessRevocation(UserId userId, RunId runId) {
+        return Flux.interval(Duration.ofSeconds(1))
+                .concatMap(ignored -> Mono.fromRunnable(() -> runService.requireLiveRunAccess(userId, runId))
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .then()
+                .onErrorResume(RuntimeException.class, ignored -> Mono.empty());
     }
 
     /**
@@ -386,7 +400,7 @@ public class RunController {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         DelegatedOperationContext context = shareContext(userId, shareId, requireChat, traceId);
         if (context == null) {
-            runService.requireRunAccess(userId, currentRunId);
+            runService.requireLiveRunAccess(userId, currentRunId);
         } else if (requireStopPermission) {
             runService.requireRunStopAccess(context, currentRunId);
         } else {

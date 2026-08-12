@@ -28,6 +28,7 @@ import com.enterprise.testagent.domain.session.SessionRuntimeStateSummary;
 import com.enterprise.testagent.domain.session.SessionWorkspaceContext;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import jakarta.validation.constraints.AssertTrue;
@@ -255,6 +256,18 @@ final class RuntimeDtos {
         static WorkspaceResponse from(
                 Workspace workspace,
                 ManagedWorkspacePathResolver pathResolver) {
+            if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspace.workspaceId())) {
+                // 体验目录由管理员在各后端人工配置，成功响应同样只返回逻辑定位符，避免泄露物理路径。
+                return new WorkspaceResponse(
+                        workspace.workspaceId().value(),
+                        workspace.name(),
+                        "workspace:" + workspace.workspaceId().value(),
+                        null,
+                        workspace.status().name(),
+                        workspace.linuxServerId(),
+                        workspace.createdAt(),
+                        workspace.updatedAt());
+            }
             Workspace resolved = pathResolver.withResolvedRootPathForResponse(workspace);
             return new WorkspaceResponse(
                     resolved.workspaceId().value(),

@@ -329,6 +329,39 @@ class TerminalWebSocketHandlerTest {
         assertThat(registry.isActive(new SessionId("ses_1234567890abcdef"))).isFalse();
     }
 
+    @Test
+    void periodicallyClosesRevokedTerminalEvenWhenClientSendsNoFrames() {
+        TerminalTicket ticket = ticket("ses_1234567890abcdef");
+        TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalProcessSession terminal = Mockito.mock(TerminalProcessSession.class);
+        when(terminalService.consumeTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        "pty_1234567890abcdef",
+                        "http://localhost:3000",
+                        "trace_1234567890abcdef"))
+                .thenReturn(ticket);
+        Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "体验资格已失效"))
+                .when(terminalService).requireTicketAccess(ticket);
+        when(processFactory.start(ticket)).thenReturn(terminal);
+        when(terminal.output()).thenReturn(Flux.interval(Duration.ofMillis(50))
+                .map(index -> TerminalServerMessage.output("running", index.intValue() + 1)));
+        when(terminal.close()).thenReturn(Mono.empty());
+        FakeWebSocketSession session = FakeWebSocketSession.allowedUntilClose(
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+
+        handler(terminalService, processFactory, registry)
+                .handle(session)
+                .block(Duration.ofSeconds(2));
+
+        assertThat(session.closed()).isTrue();
+        assertThat(session.sentText()).isNotEmpty();
+        verify(terminalService).requireTicketAccess(ticket);
+        verify(terminal).close();
+        assertThat(registry.isActive(new SessionId("ses_1234567890abcdef"))).isFalse();
+    }
+
     private TerminalWebSocketHandler handler(
             TerminalApplicationService terminalService,
             TerminalProcessFactory processFactory,

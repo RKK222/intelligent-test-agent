@@ -24,6 +24,10 @@ import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionRepository;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -63,6 +67,7 @@ public class RunSessionMessageSnapshotService {
     private final AgentSessionBindingRepository agentSessionBindingRepository;
     private final RunSessionScopeRepository runSessionScopeRepository;
     private final ObjectMapper objectMapper;
+    private WorkspaceRepository workspaceRepository;
 
     /**
      * 注入快照刷新所需端口。该服务只使用 agent facade 投影，不直接依赖 generated SDK。
@@ -85,6 +90,12 @@ public class RunSessionMessageSnapshotService {
         this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
         this.runSessionScopeRepository = runSessionScopeRepository;
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+    }
+
+    /** 体验消息持久化前需要按 Workspace 物理根递归脱敏；旧测试装配可保持未注入。 */
+    @Autowired(required = false)
+    void configureWorkspaceRepository(WorkspaceRepository workspaceRepository) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
     }
 
     /** 兼容不需要 scope 交叉校验的独立测试和旧装配。 */
@@ -154,13 +165,23 @@ public class RunSessionMessageSnapshotService {
             }
             return true;
         } catch (RuntimeException exception) {
-            LOGGER.warn(
-                    "Failed to refresh agent session snapshot, sessionId={}, runId={}, agentId={}, traceId={}",
-                    session.sessionId().value(),
-                    run == null ? null : run.runId().value(),
-                    resolvedAgentId,
-                    traceId,
-                    exception);
+            if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(session.workspaceId())) {
+                // 体验错误链可能包含物理 cwd；日志只记录稳定标识，不输出 message/cause。
+                LOGGER.warn(
+                        "Failed to refresh experience session snapshot, sessionId={}, runId={}, agentId={}, traceId={}",
+                        session.sessionId().value(),
+                        run == null ? null : run.runId().value(),
+                        resolvedAgentId,
+                        traceId);
+            } else {
+                LOGGER.warn(
+                        "Failed to refresh agent session snapshot, sessionId={}, runId={}, agentId={}, traceId={}",
+                        session.sessionId().value(),
+                        run == null ? null : run.runId().value(),
+                        resolvedAgentId,
+                        traceId,
+                        exception);
+            }
             return false;
         }
     }
@@ -211,7 +232,7 @@ public class RunSessionMessageSnapshotService {
             }
             cursor = nextCursor;
         }
-        return upsertAssistantMessages(agentId, session.sessionId(), null, projectedMessages, traceId);
+        return upsertAssistantMessages(agentId, session, null, projectedMessages, traceId);
     }
 
     /** Run 终态快照只投影本轮消息；无法证明归属时保留既有数据库状态。 */
@@ -249,7 +270,7 @@ public class RunSessionMessageSnapshotService {
         if (selection == null) {
             return null;
         }
-        return upsertAssistantMessages(agentId, session.sessionId(), run, selection.messages(), traceId);
+        return upsertAssistantMessages(agentId, session, run, selection.messages(), traceId);
     }
 
     /** 从最新页向前查找 Run user 锚点，重复 cursor、超限和歧义一律返回未解析。 */
@@ -304,14 +325,14 @@ public class RunSessionMessageSnapshotService {
 
     private SnapshotUsage upsertAssistantMessages(
             String agentId,
-            SessionId sessionId,
+            Session session,
             Run run,
             List<AgentSessionMessage> projectedMessages,
             String traceId) {
         SnapshotUsage runUsage = SnapshotUsage.empty();
         Instant runUsageAt = null;
         for (AgentSessionMessage message : projectedMessages) {
-            Optional<SnapshotUsage> usage = upsertAssistantMessage(agentId, sessionId, run, message, traceId);
+            Optional<SnapshotUsage> usage = upsertAssistantMessage(agentId, session, run, message, traceId);
             Instant messageCreatedAt = projectedCreatedAt(message).orElse(Instant.now());
             if (usage.isPresent() && usage.get().hasValue()
                     && (runUsageAt == null || messageCreatedAt.isAfter(runUsageAt))) {
@@ -344,25 +365,28 @@ public class RunSessionMessageSnapshotService {
 
     private Optional<SnapshotUsage> upsertAssistantMessage(
             String agentId,
-            SessionId sessionId,
+            Session session,
             Run run,
             AgentSessionMessage projected,
             String traceId) {
-        if (!isAssistant(projected.message())) {
+        AgentSessionMessage safeProjected = redactExperienceMessage(session, projected);
+        SessionId sessionId = session.sessionId();
+        if (!isAssistant(safeProjected.message())) {
             return Optional.empty();
         }
-        String serializedParts = partsJson(projected.parts()).orElse(null);
-        Optional<String> projectedContent = content(projected);
+        String serializedParts = partsJson(safeProjected.parts()).orElse(null);
+        Optional<String> projectedContent = content(safeProjected);
         if (projectedContent.isEmpty() && serializedParts == null) {
             return Optional.empty();
         }
-        String remoteMessageId = firstText(projected.message(), "messageID", "messageId", "id")
-                .orElseGet(() -> syntheticRemoteMessageId(sessionId, projected, projectedContent.orElse(""), serializedParts));
+        String remoteMessageId = firstText(safeProjected.message(), "messageID", "messageId", "id")
+                .orElseGet(() -> syntheticRemoteMessageId(
+                        sessionId, safeProjected, projectedContent.orElse(""), serializedParts));
         Optional<SessionMessage> existing = sessionMessageRepository.findBySessionIdAndRemoteMessageId(sessionId, remoteMessageId);
         Instant now = Instant.now();
         Instant createdAt = existing.map(SessionMessage::createdAt)
-                .orElseGet(() -> projectedCreatedAt(projected).orElse(now));
-        SnapshotUsage usage = usage(projected);
+                .orElseGet(() -> projectedCreatedAt(safeProjected).orElse(now));
+        SnapshotUsage usage = usage(safeProjected);
         SessionMessage message = new SessionMessage(
                 existing.map(SessionMessage::messageId).orElseGet(() -> new SessionMessageId(RuntimeIdGenerator.messageId())),
                 sessionId,
@@ -379,6 +403,25 @@ public class RunSessionMessageSnapshotService {
                 now);
         sessionMessageRepository.save(message);
         return Optional.of(usage);
+    }
+
+    /** 体验 assistant content 与 part JSON 在生成指纹和入库前统一投影，数据库中不保留物理根。 */
+    private AgentSessionMessage redactExperienceMessage(Session session, AgentSessionMessage projected) {
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(session.workspaceId())) {
+            return projected;
+        }
+        if (workspaceRepository == null) {
+            throw new IllegalStateException("workspaceRepository must be provided for experience snapshot");
+        }
+        Workspace workspace = workspaceRepository.findById(session.workspaceId())
+                .orElseThrow(() -> new IllegalStateException("experience workspace is unavailable"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> safeMessage = (Map<String, Object>) ExperienceWorkspacePathRedactor.redact(
+                projected.message(), workspace.rootPath());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> safeParts = (List<Map<String, Object>>) (List<?>)
+                ExperienceWorkspacePathRedactor.redact(projected.parts(), workspace.rootPath());
+        return new AgentSessionMessage(safeMessage, safeParts);
     }
 
     private String syntheticRemoteMessageId(

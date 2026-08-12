@@ -10,6 +10,7 @@ import {
   workspaceViewAncestorDirectoryIds,
   workspaceViewContextIsCurrent,
   workspaceViewEntries,
+  workspaceFilesAsViewEntries,
   workspaceViewRefreshTargets
 } from "../src/components/workspaceViewState";
 import * as workspaceViewState from "../src/components/workspaceViewState";
@@ -31,6 +32,24 @@ function directory(id: string, path: string): WorkspaceViewEntry {
 }
 
 describe("workspace view state", () => {
+  it("projects ordinary experience files without a composite or reference locator", () => {
+    expect(workspaceFilesAsViewEntries([{
+      path: "docs/guide.md",
+      name: "guide.md",
+      type: "file",
+      size: 12,
+      modifiedAt: "2026-08-09T00:00:00Z"
+    }])).toEqual([expect.objectContaining({
+      id: "workspace:docs/guide.md",
+      path: "docs/guide.md",
+      source: "WORKSPACE",
+      locator: { kind: "WORKSPACE", path: "docs/guide.md" },
+      workspacePath: "docs/guide.md",
+      readonly: false,
+      referenceAliases: []
+    })]);
+  });
+
   it("restores merged reference ancestors from stable node ids", () => {
     const entries = {
       "": [{ id: "mixed:docs", type: "directory" as const }],

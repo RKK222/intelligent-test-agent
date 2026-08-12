@@ -180,13 +180,61 @@ class RunControlBackendRoutingWebFilterTest {
     }
 
     @Test
-    void ignoresNonCancelRunPaths() {
+    void forwardsDiffMutationToProductionBackend() {
+        RunEventSseRouteService routeService = mock(RunEventSseRouteService.class);
+        BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
+        BackendJavaProcess target = backend();
+        when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenReturn(Optional.of(target));
+        when(forwarder.forwardRaw(any(), eq(target))).thenReturn(Mono.empty());
+        RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
+                routeService, queryService(), forwarder, errorWriter());
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/runs/" + RUN_ID + "/diff/accept")
+                .build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        verify(routeService).forwardTargetStrict(new RunId(RUN_ID));
+        verify(forwarder).forwardRaw(exchange, target);
+    }
+
+    @Test
+    void forwardsSessionTreeReadToProductionBackend() {
+        RunEventSseRouteService routeService = mock(RunEventSseRouteService.class);
+        BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
+        BackendJavaProcess target = backend();
+        when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenReturn(Optional.of(target));
+        when(forwarder.forwardRaw(any(), eq(target))).thenReturn(Mono.empty());
+        RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
+                routeService, queryService(), forwarder, errorWriter());
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                .get("/api/internal/platform/opencode-runtime/runs/" + RUN_ID + "/session-tree/messages")
+                .build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        verify(routeService).forwardTargetStrict(new RunId(RUN_ID));
+        verify(forwarder).forwardRaw(exchange, target);
+    }
+
+    @Test
+    void keepsPureHistoricalRunDetailsLocal() {
         RunEventSseRouteService routeService = mock(RunEventSseRouteService.class);
         BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
                 routeService, queryService(), forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
-                .post("/api/internal/agent/opencode/runs/" + RUN_ID + "/diff/accept")
+                .get("/api/internal/platform/opencode-runtime/runs/" + RUN_ID)
                 .build());
         AtomicBoolean chainCalled = new AtomicBoolean(false);
 

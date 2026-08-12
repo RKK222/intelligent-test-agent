@@ -102,6 +102,10 @@ class FlywayMigrationNamingTest {
             "V20260810234154__internal_model_call_records_add_token_latency_inputs.sql";
     private static final String INTERNAL_MODEL_TOKEN_LATENCY_INPUTS_SHA256 =
             "f684bd5d323d3816fc7ae982eff7b45256763f467f540020af41753c04fb837b";
+    private static final String APPLIED_EXPERIENCE_WORKSPACE_MIGRATION =
+            "V20260809210000__common_parameters_add_experience_workspace.sql";
+    private static final String APPLIED_EXPERIENCE_WORKSPACE_SHA256 =
+            "c093695aac4305aed3caeb8fcec58f0731f1519527031f1775adaf8be86cf24a";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -257,6 +261,15 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/qa-memory-extended",
                 SESSION_SHARE_ATTRIBUTION_FORWARD_MIGRATION,
                 SESSION_SHARE_ATTRIBUTION_SHA256);
+    }
+
+    @Test
+    void appliedExperienceWorkspaceMigrationRemainsByteExactInCompatibilityLocation()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration-compat/experience-workspace-applied",
+                APPLIED_EXPERIENCE_WORKSPACE_MIGRATION,
+                APPLIED_EXPERIENCE_WORKSPACE_SHA256);
     }
 
     @Test

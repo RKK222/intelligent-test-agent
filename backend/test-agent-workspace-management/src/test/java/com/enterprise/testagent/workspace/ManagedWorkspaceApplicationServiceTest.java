@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.git.GitCommitIdentity;
+import com.enterprise.testagent.common.git.GitCommandExecutor;
 import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.pagination.PageRequest;
@@ -59,6 +60,7 @@ import com.enterprise.testagent.domain.user.UserStatus;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
@@ -1628,6 +1630,119 @@ class ManagedWorkspaceApplicationServiceTest {
             assertThat(file.path()).isEqualTo("docs/app.md");
             assertThat(file.patch()).contains("+new");
         });
+    }
+
+    @Test
+    void experienceWorkspaceGitDiffUsesRealtimePolicyAndSharedRootReadOnly() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        UserId userId = new UserId("usr_experience");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_exp_shared_git");
+        Path experienceRoot = Files.createDirectories(root.resolve("experience"));
+        Workspace workspace = new Workspace(
+                workspaceId,
+                "体验工作区",
+                experienceRoot.toString(),
+                WorkspaceStatus.ACTIVE,
+                Instant.now(),
+                Instant.now(),
+                "127.0.0.1",
+                "trace_experience");
+        workspaces.save(workspace);
+        ExperienceWorkspaceAccessAuthorizer authorizer = mock(ExperienceWorkspaceAccessAuthorizer.class);
+        when(authorizer.isExperienceWorkspace(workspaceId)).thenReturn(true);
+        when(authorizer.requireAccess(userId, workspaceId)).thenReturn(workspace);
+        service.setExperienceWorkspaceAccessAuthorizer(authorizer);
+        git.nextStatusPorcelain = "";
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                workspaceId.value(), userId);
+
+        assertThat(diff.files()).isEmpty();
+        assertThat(git.statusRepoRoot).isEqualTo(experienceRoot);
+        assertThat(git.redactedStatusRepoRoot).isEqualTo("<redacted-local-path>");
+        verify(authorizer).requireAccess(userId, workspaceId);
+    }
+
+    @Test
+    void experienceWorkspaceGitDiffHidesProtectedNamespacesAndSymbolicLinks() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        UserId userId = new UserId("usr_experience_protected_diff");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_exp_protected_diff");
+        Path experienceRoot = Files.createDirectories(root.resolve("experience-protected-diff"));
+        Path outsideSecret = Files.writeString(root.resolve("outside-secret.txt"), "outside-secret");
+        Files.createSymbolicLink(experienceRoot.resolve("secret-link.txt"), outsideSecret);
+        Workspace workspace = new Workspace(
+                workspaceId,
+                "体验工作区",
+                experienceRoot.toString(),
+                WorkspaceStatus.ACTIVE,
+                Instant.now(),
+                Instant.now(),
+                "127.0.0.1",
+                "trace_experience_protected_diff");
+        workspaces.save(workspace);
+        ExperienceWorkspaceAccessAuthorizer authorizer = mock(ExperienceWorkspaceAccessAuthorizer.class);
+        when(authorizer.isExperienceWorkspace(workspaceId)).thenReturn(true);
+        when(authorizer.requireAccess(userId, workspaceId)).thenReturn(workspace);
+        service.setExperienceWorkspaceAccessAuthorizer(authorizer);
+        git.nextStatusPorcelain = """
+                 M notes.md
+                 M .opencode/config.json
+                ?? nested/.OPENCODE/secret.md
+                ?? secret-link.txt
+                R  .opencode/old.md -> exposed.md
+                """;
+        git.diffByFile.put(
+                "notes.md",
+                "diff --git a/notes.md b/notes.md\n@@ -1 +1 @@\n-old\n+new\n");
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                workspaceId.value(), userId);
+
+        assertThat(diff.files()).extracting(ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse::path)
+                .containsExactly("notes.md");
+        assertThat(diff.files().getFirst().patch()).contains("+new").doesNotContain("outside-secret");
+    }
+
+    @Test
+    void experienceWorkspaceGitDiffFailureDoesNotExposePhysicalPath() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        UserId userId = new UserId("usr_experience");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_exp_shared_git_failure");
+        Path experienceRoot = Files.createDirectories(root.resolve("experience-failure"));
+        Workspace workspace = new Workspace(
+                workspaceId,
+                "体验工作区",
+                experienceRoot.toString(),
+                WorkspaceStatus.ACTIVE,
+                Instant.now(),
+                Instant.now(),
+                "127.0.0.1",
+                "trace_experience_failure");
+        workspaces.save(workspace);
+        ExperienceWorkspaceAccessAuthorizer authorizer = mock(ExperienceWorkspaceAccessAuthorizer.class);
+        when(authorizer.isExperienceWorkspace(workspaceId)).thenReturn(true);
+        when(authorizer.requireAccess(userId, workspaceId)).thenReturn(workspace);
+        service.setExperienceWorkspaceAccessAuthorizer(authorizer);
+        git.statusFailure = new IllegalStateException("cannot read " + experienceRoot);
+
+        assertThatThrownBy(() -> service.getWorkspaceGitDiff(workspaceId.value(), userId))
+                .isInstanceOf(PlatformException.class)
+                .hasMessage("获取体验工作区 Git 变更失败")
+                .hasMessageNotContaining(experienceRoot.toString())
+                .hasNoCause();
     }
 
     @Test
@@ -3480,7 +3595,9 @@ class ManagedWorkspaceApplicationServiceTest {
         private Path stagedFilesRepoRoot;
         private List<String> stagedFiles = List.of();
         private Path statusRepoRoot;
+        private String redactedStatusRepoRoot;
         private String statusPathspec;
+        private RuntimeException statusFailure;
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
         private GitCommitIdentity committedStagedIdentity;
@@ -3792,14 +3909,27 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public String statusPorcelain(Path repoRoot) {
             this.statusRepoRoot = repoRoot;
+            this.redactedStatusRepoRoot = GitCommandExecutor.redactSensitiveText(repoRoot.toString());
             this.statusPathspec = null;
+            if (statusFailure != null) {
+                throw statusFailure;
+            }
             return nextRepoStatusPorcelain == null ? nextStatusPorcelain : nextRepoStatusPorcelain;
+        }
+
+        @Override
+        public String statusPorcelainReadOnly(Path repoRoot) {
+            return statusPorcelain(repoRoot);
         }
 
         @Override
         public String statusPorcelain(Path repoRoot, String pathspec) {
             this.statusRepoRoot = repoRoot;
+            this.redactedStatusRepoRoot = GitCommandExecutor.redactSensitiveText(repoRoot.toString());
             this.statusPathspec = pathspec;
+            if (statusFailure != null) {
+                throw statusFailure;
+            }
             return nextStatusPorcelain;
         }
 
@@ -3807,6 +3937,14 @@ class ManagedWorkspaceApplicationServiceTest {
         public String diff(Path repoRoot, String file, boolean staged) {
             this.lastDiffFile = file;
             return diffByFileAndStage.getOrDefault(file + "|" + staged, diffByFile.getOrDefault(file, ""));
+        }
+
+        @Override
+        public String diffReadOnly(Path repoRoot, List<String> files, boolean staged) {
+            return files.stream()
+                    .map(file -> diff(repoRoot, file, staged))
+                    .filter(output -> output != null && !output.isBlank())
+                    .collect(java.util.stream.Collectors.joining("\n"));
         }
     }
 

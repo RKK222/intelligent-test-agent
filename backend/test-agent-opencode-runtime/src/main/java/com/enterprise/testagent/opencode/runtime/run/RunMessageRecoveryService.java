@@ -31,7 +31,12 @@ import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionRepository;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.event.RunEventSsePayload;
+import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -75,6 +80,7 @@ public class RunMessageRecoveryService {
     private final RunRuntimeStore runRuntimeStore;
     private final RunSummaryPersistencePort runSummaryPersistencePort;
     private final SessionMessageRepository sessionMessageRepository;
+    private WorkspaceRepository workspaceRepository;
 
     /**
      * 创建消息恢复服务，平台 USER 锚点与 scope/locator 锚点会交叉校验后再投影。
@@ -99,6 +105,12 @@ public class RunMessageRecoveryService {
         this.runRuntimeStore = runRuntimeStore;
         this.runSummaryPersistencePort = runSummaryPersistencePort;
         this.sessionMessageRepository = sessionMessageRepository;
+    }
+
+    /** OpenCode 消息恢复需要按体验 Workspace 根路径投影响应；旧测试构造器可保持未注入。 */
+    @Autowired(required = false)
+    void configureWorkspaceRepository(WorkspaceRepository workspaceRepository) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
     }
 
     /** 兼容既有装配路径；新增 USER 锚点仓储缺失时仅允许旧 Run 的严格时间窗恢复。 */
@@ -197,8 +209,9 @@ public class RunMessageRecoveryService {
         return Mono.fromCallable(() -> recoverHistorySync(resolvedAgentId, runId, traceId))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
-                    LOGGER.warn("Failed to recover run history, agentId={}, runId={}, traceId={}",
-                            resolvedAgentId, runId.value(), traceId, error);
+                    LOGGER.warn(
+                            "Failed to recover run history, agentId={}, runId={}, traceId={}, exceptionType={}",
+                            resolvedAgentId, runId.value(), traceId, error.getClass().getSimpleName());
                     return Mono.just(RunHistoryRecoveryResult.empty());
                 });
     }
@@ -239,8 +252,9 @@ public class RunMessageRecoveryService {
                         recoverOpenCodeRunSync(agentId, runId, traceId, false).orElse(List.of()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
-                    LOGGER.warn("Failed to recover legacy Run SSE snapshot, agentId={}, runId={}, traceId={}",
-                            agentId, runId.value(), traceId, error);
+                    LOGGER.warn(
+                            "Failed to recover legacy Run SSE snapshot, agentId={}, runId={}, traceId={}, exceptionType={}",
+                            agentId, runId.value(), traceId, error.getClass().getSimpleName());
                     return Mono.just(List.of());
                 })
                 .flatMapMany(Flux::fromIterable);
@@ -310,8 +324,9 @@ public class RunMessageRecoveryService {
                         recoverOpenCodeSessionSync(agentId, sessionId, traceId, false).orElse(List.of()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
-                    LOGGER.warn("Failed to recover legacy Session snapshot, agentId={}, sessionId={}, traceId={}",
-                            agentId, sessionId.value(), traceId, error);
+                    LOGGER.warn(
+                            "Failed to recover legacy Session snapshot, agentId={}, sessionId={}, traceId={}, exceptionType={}",
+                            agentId, sessionId.value(), traceId, error.getClass().getSimpleName());
                     return Mono.just(List.of());
                 })
                 .flatMapMany(Flux::fromIterable);
@@ -333,8 +348,9 @@ public class RunMessageRecoveryService {
         return Mono.fromCallable(() -> recoverSessionTreeHistorySync(resolvedAgentId, sessionId, traceId, true))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
-                    LOGGER.warn("Failed to recover session tree history, agentId={}, sessionId={}, traceId={}",
-                            resolvedAgentId, sessionId.value(), traceId, error);
+                    LOGGER.warn(
+                            "Failed to recover session tree history, agentId={}, sessionId={}, traceId={}, exceptionType={}",
+                            resolvedAgentId, sessionId.value(), traceId, error.getClass().getSimpleName());
                     return Mono.just(RunHistoryRecoveryResult.empty());
                 });
     }
@@ -351,8 +367,9 @@ public class RunMessageRecoveryService {
         return Mono.fromCallable(() -> recoverSessionTreeHistorySync(agentId, sessionId, traceId, false))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
-                    LOGGER.warn("Failed to recover persisted session tree history, sessionId={}, traceId={}",
-                            sessionId.value(), traceId, error);
+                    LOGGER.warn(
+                            "Failed to recover persisted session tree history, sessionId={}, traceId={}, exceptionType={}",
+                            sessionId.value(), traceId, error.getClass().getSimpleName());
                     return Mono.just(RunHistoryRecoveryResult.empty());
                 });
     }
@@ -618,8 +635,9 @@ public class RunMessageRecoveryService {
             }
             return recoverOpenCodeRunSync(agentId, runId, traceId, true);
         } catch (RuntimeException exception) {
-            LOGGER.warn("OpenCode run history unavailable, agentId={}, runId={}, traceId={}",
-                    agentId, runId.value(), traceId, exception);
+            LOGGER.warn(
+                    "OpenCode run history unavailable, agentId={}, runId={}, traceId={}, exceptionType={}",
+                    agentId, runId.value(), traceId, exception.getClass().getSimpleName());
             return Optional.empty();
         }
     }
@@ -648,7 +666,8 @@ public class RunMessageRecoveryService {
                 List.of(SnapshotSessionScope.root(locator.rootRemoteSessionId())),
                 true,
                 RunTurnContext.anchored(locator.dispatchMessageId(), null, null),
-                summaryUserAttribution(runId)));
+                summaryUserAttribution(runId),
+                experienceDirectory(runId)));
     }
 
     /**
@@ -686,7 +705,8 @@ public class RunMessageRecoveryService {
                 runScopes(runId, binding.remoteSessionId()),
                 includeUser,
                 RunTurnContext.fromPlatformAnchor(platformAnchor, run.createdAt(), run.updatedAt()),
-                UserMessageAttribution.from(run)));
+                UserMessageAttribution.from(run),
+                experienceDirectory(session)));
     }
 
     private Optional<List<RunEventSsePayload>> recoverOpenCodeSession(
@@ -696,8 +716,9 @@ public class RunMessageRecoveryService {
         try {
             return recoverOpenCodeSessionSync(agentId, sessionId, traceId, true);
         } catch (RuntimeException exception) {
-            LOGGER.warn("OpenCode session history unavailable, agentId={}, sessionId={}, traceId={}",
-                    agentId, sessionId.value(), traceId, exception);
+            LOGGER.warn(
+                    "OpenCode session history unavailable, agentId={}, sessionId={}, traceId={}, exceptionType={}",
+                    agentId, sessionId.value(), traceId, exception.getClass().getSimpleName());
             return Optional.empty();
         }
     }
@@ -729,7 +750,8 @@ public class RunMessageRecoveryService {
                 historyScopes(binding.remoteSessionId()),
                 includeUser,
                 null,
-                null));
+                null,
+                experienceDirectory(session)));
     }
 
     private RunHistoryRecoveryResult recoverRunSummaries(RunId runId, String traceId) {
@@ -1007,7 +1029,8 @@ public class RunMessageRecoveryService {
             List<SnapshotSessionScope> scopes,
             boolean includeUser,
             RunTurnContext runTurnContext,
-            UserMessageAttribution defaultUserAttribution) {
+            UserMessageAttribution defaultUserAttribution,
+            String experienceDirectory) {
         if (runTurnContext != null && runTurnContext.conflicted()) {
             return List.of();
         }
@@ -1042,7 +1065,7 @@ public class RunMessageRecoveryService {
             }
             events.addAll(toSnapshotEvents(
                     snapshotRunId, traceId, messages, scopedSession, includeUser,
-                    defaultUserAttribution));
+                    defaultUserAttribution, experienceDirectory));
             for (SnapshotSessionScope discovered : discoverChildScopesFromMessages(scopedSession, messages)) {
                 if (!scopesBySessionId.containsKey(discovered.sessionId())) {
                     scopesBySessionId.put(discovered.sessionId(), discovered);
@@ -1175,11 +1198,13 @@ public class RunMessageRecoveryService {
             List<AgentSessionMessage> messages,
             SnapshotSessionScope scopedSession,
             boolean includeUser,
-            UserMessageAttribution defaultUserAttribution) {
+            UserMessageAttribution defaultUserAttribution,
+            String experienceDirectory) {
         Instant occurredAt = Instant.now();
         List<RunEventSsePayload> events = new ArrayList<>();
         for (AgentSessionMessage message : messages) {
-            Map<String, Object> messagePayload = normalizeMessage(message.message());
+            Map<String, Object> messagePayload = redactPayload(
+                    normalizeMessage(message.message()), experienceDirectory);
             String role = text(messagePayload.get("role"));
             if (!"assistant".equalsIgnoreCase(role) && !(includeUser && "user".equalsIgnoreCase(role))) {
                 // legacy SSE 已有平台 user 消息，只回放 assistant；历史 API 则保留 OpenCode 完整 user/assistant。
@@ -1204,7 +1229,8 @@ public class RunMessageRecoveryService {
                     occurredAt,
                     Map.copyOf(messageEventPayload)));
             for (Map<String, Object> part : message.parts()) {
-                Map<String, Object> partPayload = normalizePart(part, messageId);
+                Map<String, Object> partPayload = redactPayload(
+                        normalizePart(part, messageId), experienceDirectory);
                 LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
                 appendScopePayload(payload, scopedSession);
                 String partMessageId = text(partPayload.get("messageID"));
@@ -1306,6 +1332,49 @@ public class RunMessageRecoveryService {
                             message.senderUserId(), message.senderUnifiedAuthId(),
                             message.sentBySharedUser());
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> redactPayload(Map<String, Object> payload, String experienceDirectory) {
+        return experienceDirectory == null
+                ? payload
+                : (Map<String, Object>) ExperienceWorkspacePathRedactor.redact(payload, experienceDirectory);
+    }
+
+    /** 从 Run/Session 权威归属解析体验物理根；缺少事实时拒绝恢复，避免把未投影内容返回。 */
+    private String experienceDirectory(RunId runId) {
+        if (workspaceRepository == null) {
+            return null;
+        }
+        if (runRuntimeStore != null) {
+            Optional<RunRuntimeManifest> manifest = runRuntimeStore.findManifest(runId);
+            if (manifest.isPresent()) {
+                // Redis 清单本就属于 locator 恢复的稳定事实，避免退回关系库破坏低频恢复边界。
+                return experienceDirectory(manifest.orElseThrow().workspaceId());
+            }
+        }
+        Run run = runRepository.findById(runId).orElse(null);
+        if (run != null) {
+            Session session = sessionRepository.findById(run.sessionId()).orElse(null);
+            return session == null ? null : experienceDirectory(session);
+        }
+        return null;
+    }
+
+    private String experienceDirectory(Session session) {
+        return experienceDirectory(session.workspaceId());
+    }
+
+    private String experienceDirectory(WorkspaceId workspaceId) {
+        if (!ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspaceId)) {
+            return null;
+        }
+        if (workspaceRepository == null) {
+            throw new IllegalStateException("workspaceRepository must be provided for experience recovery");
+        }
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new IllegalStateException("experience workspace is unavailable"));
+        return workspace.rootPath();
     }
 
     /**

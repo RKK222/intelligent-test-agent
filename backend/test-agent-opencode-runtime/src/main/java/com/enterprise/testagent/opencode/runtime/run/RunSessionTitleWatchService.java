@@ -11,7 +11,9 @@ import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionTitleUpdateRepository;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.event.RunEventAppender;
+import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -139,7 +141,8 @@ public class RunSessionTitleWatchService {
         Optional<String> title = sessionUpdatedTitle(draft.payload())
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
-                .filter(value -> !OpencodeSessionTitlePolicy.isDefaultTitle(value));
+                .filter(value -> !OpencodeSessionTitlePolicy.isDefaultTitle(value))
+                .map(value -> redactExperienceTitle(token.orElseThrow(), value));
         if (title.isEmpty()) {
             return draft;
         }
@@ -159,7 +162,7 @@ public class RunSessionTitleWatchService {
             return draft;
         }
         registry.close(token.get());
-        return withSynchronizedTitle(draft, title.get(), wasWaiting);
+        return withSynchronizedTitle(redactExperienceDraft(token.orElseThrow(), draft), title.get(), wasWaiting);
     }
 
     /**
@@ -237,7 +240,8 @@ public class RunSessionTitleWatchService {
             if (result == null) {
                 return Optional.empty();
             }
-            return remoteSessionTitle(result.body());
+            return remoteSessionTitle(result.body())
+                    .map(title -> redactExperienceTitle(token, title));
         } catch (RuntimeException exception) {
             // 404、runtime 超时和短暂断连都只意味着本次标题不可用，不能逆转已经成功的 Run。
             return Optional.empty();
@@ -247,6 +251,43 @@ public class RunSessionTitleWatchService {
     /** 当前 Run 是否仍具有可转入 TITLE_WAIT 的首轮监听令牌。 */
     public Optional<RunSessionTitleWatchRegistry.TitleWatchToken> tokenForRun(RunId runId) {
         return registry.findByRunId(runId);
+    }
+
+    /** title agent 的事件与补偿读取都在 CAS 前投影体验物理根，Session 历史不会保存真实目录。 */
+    private String redactExperienceTitle(
+            RunSessionTitleWatchRegistry.TitleWatchToken token,
+            String title) {
+        if (sessionRepository == null) {
+            return title;
+        }
+        boolean experience = sessionRepository.findById(token.sessionId())
+                .map(session -> ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(session.workspaceId()))
+                .orElse(false);
+        return experience
+                ? ExperienceWorkspacePathRedactor.redactText(title, token.directory())
+                : title;
+    }
+
+    @SuppressWarnings("unchecked")
+    private RunEventDraft redactExperienceDraft(
+            RunSessionTitleWatchRegistry.TitleWatchToken token,
+            RunEventDraft draft) {
+        boolean experience = sessionRepository != null
+                && sessionRepository.findById(token.sessionId())
+                .map(session -> ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(session.workspaceId()))
+                .orElse(false);
+        if (!experience) {
+            return draft;
+        }
+        Map<String, Object> safePayload = (Map<String, Object>) ExperienceWorkspacePathRedactor.redact(
+                draft.payload(), token.directory());
+        return new RunEventDraft(
+                draft.runId(),
+                draft.type(),
+                draft.traceId(),
+                draft.occurredAt(),
+                safePayload,
+                draft.scopeContext());
     }
 
     /** 当前 token 仍处于可恢复的标题等待阶段。 */

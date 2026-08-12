@@ -17,7 +17,12 @@ import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVers
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -157,6 +162,29 @@ class ManagedConversationWorkspaceAccessAuthorizerTest {
         authorizer.requireFileAccess(USER_ID, WORKSPACE_ID, true);
         verify(configurationRepository, never()).findApplication(APP_ID);
         verify(configurationRepository, never()).isActiveMember(APP_ID, USER_ID);
+    }
+
+    @Test
+    void experienceWorkspaceAlwaysUsesRealtimeExperiencePolicyAndNeverFallsBackToUnmanaged() {
+        WorkspaceId experienceId = new WorkspaceId("wrk_exp_1234567890abcdef");
+        ExperienceWorkspaceAccessAuthorizer experienceAuthorizer = mock(ExperienceWorkspaceAccessAuthorizer.class);
+        when(experienceAuthorizer.isExperienceWorkspace(experienceId)).thenReturn(true);
+        when(experienceAuthorizer.requireAccess(USER_ID, experienceId)).thenReturn(mock(Workspace.class));
+        ManagedConversationWorkspaceAccessAuthorizer experienceAware =
+                new ManagedConversationWorkspaceAccessAuthorizer(
+                        managedRepository,
+                        configurationRepository,
+                        null,
+                        mock(WorkspaceRepository.class),
+                        experienceAuthorizer,
+                        Clock.systemUTC());
+
+        FileWorkspaceKind kind = experienceAware.requireClassifiedFileAccess(
+                USER_ID, experienceId, false);
+
+        org.assertj.core.api.Assertions.assertThat(kind).isEqualTo(FileWorkspaceKind.EXPERIENCE);
+        verify(experienceAuthorizer).requireAccess(USER_ID, experienceId);
+        verify(managedRepository, never()).findVersionByRuntimeWorkspace(experienceId);
     }
 
     private static ApplicationDefinition application(boolean enabled) {

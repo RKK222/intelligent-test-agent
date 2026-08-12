@@ -129,6 +129,58 @@ class RunSessionTitleWatchRegistryTest {
     }
 
     @Test
+    void experienceNativeTitleIsRedactedBeforeSessionCasAndEventProjection() {
+        RunSessionTitleWatchRegistry registry = new RunSessionTitleWatchRegistry();
+        SessionTitleUpdateRepository titleUpdates = mock(SessionTitleUpdateRepository.class);
+        SessionRepository sessions = mock(SessionRepository.class);
+        RunSessionTitleWatchService service = new RunSessionTitleWatchService(
+                registry,
+                titleUpdates,
+                mock(RunEventAppender.class),
+                new RunEventPersistencePolicy(),
+                sessions);
+        RunSessionTitleWatchRegistry.TitleWatchToken token = service.registerFirstRun(
+                SESSION_ID,
+                RUN_ID,
+                runtime(),
+                node(),
+                "/physical/experience",
+                null,
+                REMOTE_SESSION_ID,
+                "首条消息临时标题");
+        service.enterTitleWait(token);
+        when(sessions.findById(SESSION_ID)).thenReturn(Optional.of(new Session(
+                        SESSION_ID,
+                        new WorkspaceId("wrk_exp_1234567890abcdef"),
+                        "首条消息临时标题",
+                        SessionStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        TRACE_ID)
+                .attachOpencodeSession(REMOTE_SESSION_ID, node().executionNodeId(), NOW, TRACE_ID)));
+        when(titleUpdates.updateTitleIfCurrent(
+                        eq(SESSION_ID),
+                        eq("首条消息临时标题"),
+                        eq("Review <experience-workspace>/docs"),
+                        any(),
+                        eq(TRACE_ID)))
+                .thenReturn(true);
+
+        RunEventDraft synchronizedDraft = service.synchronizeNativeTitle(
+                rootSessionUpdated("Review /physical/experience/docs"));
+
+        verify(titleUpdates).updateTitleIfCurrent(
+                eq(SESSION_ID),
+                eq("首条消息临时标题"),
+                eq("Review <experience-workspace>/docs"),
+                any(),
+                eq(TRACE_ID));
+        assertThat(synchronizedDraft.payload().toString())
+                .contains("<experience-workspace>")
+                .doesNotContain("/physical/experience");
+    }
+
+    @Test
     void completedTitleAgentMessageReadsTheFrozenRemoteSessionBeforeRouting() {
         RunSessionTitleWatchRegistry registry = new RunSessionTitleWatchRegistry();
         SessionTitleUpdateRepository titleUpdates = mock(SessionTitleUpdateRepository.class);

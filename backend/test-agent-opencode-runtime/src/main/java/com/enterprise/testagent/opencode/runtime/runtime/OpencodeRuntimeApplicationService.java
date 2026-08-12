@@ -13,6 +13,8 @@ import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
@@ -20,6 +22,7 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssi
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
 import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
+import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -264,28 +267,28 @@ public class OpencodeRuntimeApplicationService {
      * 读取 opencode 文件列表，path 缺省时使用当前目录。
      */
     public Object fsList(String workspaceId, String path, String traceId) {
-        return get(workspaceLocation(workspaceId, traceId), "/file", query("path", path == null || path.isBlank() ? "." : path), traceId);
+        return get(runtimeFileLocation(workspaceId, traceId), "/file", query("path", path == null || path.isBlank() ? "." : path), traceId);
     }
 
     /**
      * 调用 opencode 文件搜索 API。
      */
     public Object fsFind(String workspaceId, String query, String traceId) {
-        return get(workspaceLocation(workspaceId, traceId), "/find/file", query("query", query), traceId);
+        return get(runtimeFileLocation(workspaceId, traceId), "/find/file", query("query", query), traceId);
     }
 
     /**
      * 读取 opencode workspace 文件内容。
      */
     public Object fsRead(String workspaceId, String path, String traceId) {
-        return get(workspaceLocation(workspaceId, traceId), "/file/content", query("path", path), traceId);
+        return get(runtimeFileLocation(workspaceId, traceId), "/file/content", query("path", path), traceId);
     }
 
     /**
      * 读取远端 VCS 状态。
      */
     public Object vcsStatus(String workspaceId, String traceId) {
-        return get(workspaceLocation(workspaceId, traceId), "/vcs/status", Map.of(), traceId);
+        return get(runtimeVcsLocation(workspaceId, traceId), "/vcs/status", Map.of(), traceId);
     }
 
     /**
@@ -297,7 +300,16 @@ public class OpencodeRuntimeApplicationService {
         if (context != null) {
             query.put("context", Integer.toString(context));
         }
-        return get(workspaceLocation(workspaceId, traceId), "/vcs/diff", query, traceId);
+        return get(runtimeVcsLocation(workspaceId, traceId), "/vcs/diff", query, traceId);
+    }
+
+    /** 体验 Git 只能走平台只读实现，禁止 OpenCode 普通 status/diff 触发 index 或外部 helper。 */
+    private AgentRuntimeTargetResolver.RuntimeTarget runtimeVcsLocation(String workspaceId, String traceId) {
+        AgentRuntimeTargetResolver.RuntimeTarget location = workspaceLocation(workspaceId, traceId);
+        if (experienceRuntimeTarget(location)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区不支持该 Git 操作");
+        }
+        return location;
     }
 
     /**
@@ -408,28 +420,49 @@ public class OpencodeRuntimeApplicationService {
      * 查询 opencode experimental worktree 列表。
      */
     public Object listWorktrees(String workspaceId, String traceId) {
-        return get(workspaceLocation(workspaceId, traceId), "/experimental/worktree", Map.of(), traceId);
+        return get(nonExperienceWorkspaceLocation(workspaceId, traceId), "/experimental/worktree", Map.of(), traceId);
     }
 
     /**
      * 创建 worktree；workspaceId 只用于平台路由，不透传为额外策略。
      */
     public Object createWorktree(Map<String, Object> body, String traceId) {
-        return post(workspaceLocation(text(safeBody(body).get("workspaceId")), traceId), "/experimental/worktree", safeBody(body), traceId);
+        Map<String, Object> forwarded = worktreeBody(body);
+        return post(
+                nonExperienceWorkspaceLocation(requiredWorktreeWorkspaceId(body), traceId),
+                "/experimental/worktree",
+                forwarded,
+                traceId);
     }
 
     /**
      * 删除 worktree。
      */
     public Object removeWorktree(Map<String, Object> body, String traceId) {
-        return delete(workspaceLocation(text(safeBody(body).get("workspaceId")), traceId), "/experimental/worktree", safeBody(body), traceId);
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location =
+                nonExperienceWorkspaceLocation(requiredWorktreeWorkspaceId(body), traceId);
+        Map<String, Object> forwarded = worktreeBody(body);
+        requireListedWorktree(location, requiredWorktreeDirectory(forwarded), traceId);
+        return delete(
+                location,
+                "/experimental/worktree",
+                forwarded,
+                traceId);
     }
 
     /**
      * 重置 worktree。
      */
     public Object resetWorktree(Map<String, Object> body, String traceId) {
-        return post(workspaceLocation(text(safeBody(body).get("workspaceId")), traceId), "/experimental/worktree/reset", safeBody(body), traceId);
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location =
+                nonExperienceWorkspaceLocation(requiredWorktreeWorkspaceId(body), traceId);
+        Map<String, Object> forwarded = worktreeBody(body);
+        requireListedWorktree(location, requiredWorktreeDirectory(forwarded), traceId);
+        return post(
+                location,
+                "/experimental/worktree/reset",
+                forwarded,
+                traceId);
     }
 
     /**
@@ -852,17 +885,44 @@ public class OpencodeRuntimeApplicationService {
      * 统一调用 AgentRuntime runtime 方法，并把 JsonNode projection 转回普通 Java 对象。
      */
     private Object call(AgentRuntimeTargetResolver.RuntimeTarget location, String method, String path, Map<String, String> query, Object body, String traceId) {
-        AgentRuntimeResult result = location.runtime().runtime(new AgentRuntimeCommand(
-                        location.node(),
-                        method,
-                        path,
-                        location.directory(),
-                        null,
-                        query,
-                        body,
-                        traceId))
-                .block();
-        return objectMapper.convertValue(result.body(), Object.class);
+        try {
+            AgentRuntimeResult result = location.runtime().runtime(new AgentRuntimeCommand(
+                            location.node(),
+                            method,
+                            path,
+                            location.directory(),
+                            null,
+                            query,
+                            body,
+                            traceId))
+                    .block();
+            Object response = objectMapper.convertValue(result.body(), Object.class);
+            return experienceRuntimeTarget(location)
+                    ? ExperienceWorkspacePathRedactor.redact(response, location.directory())
+                    : response;
+        } catch (PlatformException exception) {
+            if (!experienceRuntimeTarget(location)) {
+                throw exception;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> safeDetails = (Map<String, Object>) redactExperienceDirectory(
+                    exception.details(), location.directory());
+            // 不保留带物理路径的原异常为 cause，避免异常日志再次打印未脱敏消息。
+            throw new PlatformException(
+                    exception.errorCode(),
+                    redactExperienceDirectory(exception.getMessage(), location.directory()).toString(),
+                    safeDetails);
+        }
+    }
+
+    private boolean experienceRuntimeTarget(AgentRuntimeTargetResolver.RuntimeTarget location) {
+        return location != null
+                && ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(location.workspaceId());
+    }
+
+    /** 兼容本服务既有调用点，统一委托共享递归脱敏器。 */
+    private Object redactExperienceDirectory(Object value, String directory) {
+        return ExperienceWorkspacePathRedactor.redact(value, directory);
     }
 
     /**
@@ -958,6 +1018,35 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
+     * 体验工作区的文件能力只开放平台 WebSocket 通道；旧 runtime 文件接口会返回绝对路径，必须在转发前关闭。
+     * 先解析目标以执行实时体验资格校验，再按稳定 ID 命名空间拒绝，管理员或 static token 均不能绕过。
+     */
+    private AgentRuntimeTargetResolver.WorkspaceRuntimeTarget runtimeFileLocation(String workspaceId, String traceId) {
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = workspaceLocation(workspaceId, traceId);
+        WorkspaceId resolvedWorkspaceId = workspaceId == null || workspaceId.isBlank()
+                ? null
+                : new WorkspaceId(workspaceId);
+        if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(resolvedWorkspaceId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区文件只能通过平台文件通道访问");
+        }
+        return location;
+    }
+
+    /** 体验区不建立个人 worktree，列举和变更接口都在转发前关闭。 */
+    private AgentRuntimeTargetResolver.WorkspaceRuntimeTarget nonExperienceWorkspaceLocation(
+            String workspaceId,
+            String traceId) {
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = workspaceLocation(workspaceId, traceId);
+        WorkspaceId resolvedWorkspaceId = workspaceId == null || workspaceId.isBlank()
+                ? null
+                : new WorkspaceId(workspaceId);
+        if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(resolvedWorkspaceId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "体验工作区不支持个人 worktree");
+        }
+        return location;
+    }
+
+    /**
      * 构造 session 级 runtime target，要求平台 Session 已绑定远端 agent session 和节点。
      */
     private AgentRuntimeTargetResolver.SessionRuntimeTarget sessionLocation(String sessionId, String traceId) {
@@ -1028,6 +1117,45 @@ public class OpencodeRuntimeApplicationService {
      */
     private Map<String, Object> safeBody(Map<String, Object> body) {
         return body == null ? Map.of() : body;
+    }
+
+    /** worktree mutation 必须绑定受权平台 Workspace，平台路由字段不会透传给 OpenCode。 */
+    private String requiredWorktreeWorkspaceId(Map<String, Object> body) {
+        String workspaceId = text(safeBody(body).get("workspaceId"));
+        if (workspaceId == null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "worktree 操作必须指定 workspaceId");
+        }
+        return workspaceId;
+    }
+
+    private Map<String, Object> worktreeBody(Map<String, Object> body) {
+        Map<String, Object> forwarded = new LinkedHashMap<>(safeBody(body));
+        forwarded.remove("workspaceId");
+        return forwarded;
+    }
+
+    private String requiredWorktreeDirectory(Map<String, Object> body) {
+        String directory = text(body.get("directory"));
+        if (directory == null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "worktree 操作必须指定已登记目录");
+        }
+        return directory;
+    }
+
+    /**
+     * remove/reset 只接受目标项目实时 worktree 列表返回的精确目录，禁止把任意物理路径交给
+     * OpenCode 的递归删除兼容分支。
+     */
+    private void requireListedWorktree(
+            AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location,
+            String directory,
+            String traceId) {
+        Object listed = get(location, "/experimental/worktree", Map.of(), traceId);
+        boolean registered = listed instanceof List<?> items && items.stream().anyMatch(item ->
+                item instanceof Map<?, ?> worktree && directory.equals(text(worktree.get("directory"))));
+        if (!registered) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "worktree 目录未登记或已失效");
+        }
     }
 
     private String text(Object value) {
