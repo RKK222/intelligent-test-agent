@@ -71,6 +71,8 @@ test("session share management and received list preserve one link and inactive 
 
   const dialog = page.locator(".session-share-dialog");
   await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCSS("resize", "both");
+  await expect(dialog.getByRole("button", { name: "复制备用分享链接" })).toHaveCount(0);
   await expect(dialog.getByText("当前会话有 1 个待执行定时任务；分享失效后仍将按原计划执行。")).toBeVisible();
   await dialog.getByRole("button", { name: /协作者/ }).click();
   await dialog.locator(".session-share-dialog__permission-switch .el-switch__core").click();
@@ -81,7 +83,8 @@ test("session share management and received list preserve one link and inactive 
   expect(sharePutRequests[0]?.expectedVersion).toBeNull();
   expect(sharePutRequests[0]?.members).toEqual([{ userId: "usr_collaborator", canChat: true }]);
   await expect(page.getByText("已通知被分享人，分享设置已保存")).toBeVisible();
-  await expect(dialog.getByLabel("唯一分享链接")).toHaveValue(/\/s\/shr_e2e_unique$/);
+  await expect(dialog.getByLabel("唯一分享链接")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "复制备用分享链接" })).toBeVisible();
 
   await dialog.getByRole("button", { name: "取消分享" }).click();
   await expect(page.getByText(/取消分享不会取消任务/)).toBeVisible();
@@ -98,6 +101,7 @@ test("session share notification appears in real time, opens a new tab, then ref
   const invalidatedGate = new Promise<void>((resolve) => { releaseInvalidated = resolve; });
   const notificationReadRequests: string[] = [];
   const notificationEventRequests: string[] = [];
+  const notificationListRequests: boolean[] = [];
   const activeNotification = {
     notificationId: "ntf_share_live",
     type: "SESSION_SHARED",
@@ -126,6 +130,7 @@ test("session share notification appears in real time, opens a new tab, then ref
     userNotificationUnreadCount: 0,
     userNotificationReadRequests: notificationReadRequests,
     userNotificationEventRequests: notificationEventRequests,
+    userNotificationListRequests: notificationListRequests,
     userNotificationEvents: [
       { gate: createdGate, changeType: "CREATED", notificationId: "ntf_share_live", unreadCount: 1 },
       { gate: readGate, changeType: "READ", notificationId: "ntf_share_live", unreadCount: 0 },
@@ -145,6 +150,7 @@ test("session share notification appears in real time, opens a new tab, then ref
   const trigger = page.getByTestId("notification-center-trigger");
   await expect(trigger).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".user-notification-center__badge")).toHaveCount(0);
+  await expect.poll(() => notificationListRequests.at(-1)).toBe(true);
 
   notificationCapture.userNotifications = [activeNotification];
   notificationCapture.userNotificationUnreadCount = 1;
@@ -152,8 +158,15 @@ test("session share notification appears in real time, opens a new tab, then ref
   await expect(page.locator(".user-notification-center__badge")).toHaveText("1");
 
   await trigger.click();
+  const filterTabs = page.getByRole("tab");
+  await expect(filterTabs).toHaveCount(2);
+  await expect(filterTabs.nth(0)).toHaveText(/未读/);
+  await expect(filterTabs.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(filterTabs.nth(1)).toHaveText("全部");
   const activeItem = page.getByRole("button", { name: /张敏 向你分享了对话.*在新标签页打开/ });
   await expect(activeItem).toBeVisible();
+  const notificationItem = page.locator(".user-notification-center__item").filter({ hasText: "张敏 向你分享了对话" });
+  await expect(notificationItem).toHaveAttribute("data-read-state", "unread");
   await expect(page.getByText("支付回归问题定位", { exact: true })).toBeVisible();
   await expect(page.getByText("可对话", { exact: true })).toBeVisible();
   const sourceUrl = page.url();
@@ -177,7 +190,11 @@ test("session share notification appears in real time, opens a new tab, then ref
   notificationCapture.userNotificationUnreadCount = 0;
   releaseRead();
   await expect(page.locator(".user-notification-center__badge")).toHaveCount(0);
-  await expect(page.locator(".user-notification-center__item")).not.toHaveClass(/is-unread/);
+  await expect(page.getByText("未读消息已经处理完", { exact: true })).toBeVisible();
+  await filterTabs.nth(1).click();
+  await expect.poll(() => notificationListRequests.at(-1)).toBe(false);
+  await expect(notificationItem).toBeVisible();
+  await expect(notificationItem).toHaveAttribute("data-read-state", "read");
 
   notificationCapture.userNotifications = [{
     ...activeNotification,
@@ -191,6 +208,7 @@ test("session share notification appears in real time, opens a new tab, then ref
   releaseInvalidated();
   const invalidItem = page.getByRole("button", { name: /张敏 向你分享了对话.*分享已失效/ });
   await expect(invalidItem).toBeDisabled();
+  await expect(notificationItem).toHaveAttribute("data-read-state", "read");
   await expect(page.getByText("分享已失效", { exact: true })).toBeVisible();
   await expect.poll(() => notificationEventRequests.length).toBeGreaterThanOrEqual(3);
 });
@@ -1063,14 +1081,14 @@ test("session share refreshes a compacted summary when the session revision chan
   await expect(compaction).not.toContainText("这不是新的回答");
 });
 
-test("session share synchronizes an edited resend in place when revision wins the persistence race", async ({ page }) => {
+test("session share synchronizes an edited resend before model execution and restores cancellation", async ({ page }) => {
   const sessionMessageRequests: string[] = [];
   const sessionTreeRequests: string[] = [];
   const activeRun = {
     runId: "run_shared_resend_replacement",
     sessionId: "ses_shared_resend_revision",
     workspaceId: "wrk_shared_resend_revision",
-    status: "RUNNING",
+    status: "PENDING",
     triggeredByUserId: "usr_owner",
     messageSenderUserId: "usr_wr",
     messageSenderUnifiedAuthId: "wr",
@@ -1081,7 +1099,7 @@ test("session share synchronizes an edited resend in place when revision wins th
       totalAttempt: 1,
       automaticAttempt: 0,
       automaticLimit: 3,
-      status: "DISPATCHED",
+      status: "WAITING",
       executeAt: "2026-08-10T03:00:02Z",
       sourceRunId: "run_shared_resend_source",
       replacementRunId: "run_shared_resend_replacement",
@@ -1116,8 +1134,7 @@ test("session share synchronizes an edited resend in place when revision wins th
     createdAt: `2026-08-10T02:${String(index).padStart(2, "0")}:01Z`,
     runId: `run_shared_resend_history_${index}`
   }])).flat();
-  const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {
-    ses_shared_resend_revision: [...earlierMessages, {
+  const originalMessages: Array<Record<string, unknown>> = [...earlierMessages, {
       messageId: "msg_shared_resend_old",
       remoteMessageId: "msg_remote_shared_resend_old",
       sessionId: "ses_shared_resend_revision",
@@ -1137,7 +1154,9 @@ test("session share synchronizes an edited resend in place when revision wins th
       content: "OK",
       createdAt: "2026-08-10T03:00:01Z",
       runId: "run_shared_resend_source"
-    }]
+    }];
+  const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {
+    ses_shared_resend_revision: originalMessages
   };
   const runsByRunId: Record<string, Record<string, unknown>> = {
     run_shared_resend_source: {
@@ -1149,17 +1168,6 @@ test("session share synchronizes an edited resend in place when revision wins th
     },
     run_shared_resend_replacement: activeRun
   };
-  await installAuthenticatedRunEventFetchStream(page, {
-    run_shared_resend_replacement: [{
-      releaseKey: "shared-resend-started-after-stale-refresh",
-      events: [{
-        eventId: "evt_shared_resend_started_after_stale_refresh",
-        seq: 1,
-        type: "run.resend.started",
-        payload: activeRun.resend
-      }]
-    }]
-  });
   await mockBackendApi(page, {
     authUser: { userId: "usr_reader", username: "观察者", unifiedAuthId: "ucid_reader", roles: ["USER"] },
     workspaces: [{ ...workspace(), workspaceId: "wrk_shared_resend_revision", name: "共享重发工作区" }],
@@ -1222,20 +1230,7 @@ test("session share synchronizes an edited resend in place when revision wins th
   });
   expect(scrollTopBeforeResend).toBeGreaterThan(0);
 
-  // revision 可能先于替代 USER 消息写入平台；第一次 refresh 故意仍返回旧轮次。
-  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
-    shareId: "shr_resend_revision",
-    sessionId: "ses_shared_resend_revision",
-    workspaceId: "wrk_shared_resend_revision",
-    canChat: true,
-    activeRun,
-    sessionUpdatedAt: "2026-08-10T03:00:03Z",
-    generatedAt: "2026-08-10T03:00:04Z"
-  }));
-
-  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
-  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
-
+  // 重发预约事务提交后立刻提供替代 USER；此时模型尚未开始，也没有任何思考或正文流事件。
   sessionMessagesBySessionId.ses_shared_resend_revision = [...earlierMessages, {
     messageId: "msg_shared_resend_new",
     remoteMessageId: "msg_remote_shared_resend_new",
@@ -1250,11 +1245,27 @@ test("session share synchronizes an edited resend in place when revision wins th
     runId: "run_shared_resend_replacement",
     resend: activeRun.resend
   }];
-  const released = await page.evaluate(() =>
-    (window as Window & { __releaseRunEventBatch?: (releaseKey: string) => boolean })
-      .__releaseRunEventBatch?.("shared-resend-started-after-stale-refresh") ?? false
-  );
-  expect(released).toBe(true);
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_resend_revision",
+    sessionId: "ses_shared_resend_revision",
+    workspaceId: "wrk_shared_resend_revision",
+    canChat: true,
+    activeRun,
+    sessionUpdatedAt: "2026-08-10T03:00:03Z",
+    messageChange: {
+      sessionId: "ses_shared_resend_revision",
+      sourceRunId: "run_shared_resend_source",
+      replacementRunId: "run_shared_resend_replacement",
+      changeType: "RESEND_RESERVED",
+      revision: "2026-08-10T03:00:03Z"
+    },
+    generatedAt: "2026-08-10T03:00:04Z"
+  }));
+
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(initialMessageRequestCount);
+  expect(sessionMessageRequests.slice(initialMessageRequestCount)).toEqual([
+    "/api/internal/platform/opencode-runtime/sessions/ses_shared_resend_revision/messages/runs/run_shared_resend_replacement/user"
+  ]);
 
   await expect(page.getByText("仅答复 OK", { exact: true })).toHaveCount(0);
   await expect(page.getByText("仅答复 123", { exact: true })).toHaveCount(1);
@@ -1262,14 +1273,17 @@ test("session share synchronizes an edited resend in place when revision wins th
   await expect(page.getByRole("button", { name: "停止执行" })).toBeVisible();
   expect(sessionTreeRequests).toHaveLength(initialSessionTreeRequestCount);
   expect(await historyLoadingObserved(page)).toBe(false);
-  await expect.poll(() => page.locator(".figma-chat-scroll").evaluate((element) =>
+  await expect.poll(async () => Math.abs(await page.locator(".figma-chat-scroll").evaluate((element) =>
     (element as HTMLElement).scrollTop
-  )).toBe(scrollTopBeforeResend);
+  ) - scrollTopBeforeResend)).toBeLessThanOrEqual(12);
 
+  const messageRequestCountBeforeCancellation = sessionMessageRequests.length;
+  sessionMessagesBySessionId.ses_shared_resend_revision = originalMessages;
   runsByRunId.run_shared_resend_replacement = {
     ...activeRun,
-    status: "SUCCEEDED",
-    updatedAt: "2026-08-10T03:00:05Z"
+    status: "CANCELLED",
+    resend: { ...activeRun.resend, status: "CANCELLED" },
+    updatedAt: "2026-08-10T03:00:04Z"
   };
   runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
     shareId: "shr_resend_revision",
@@ -1277,13 +1291,47 @@ test("session share synchronizes an edited resend in place when revision wins th
     workspaceId: "wrk_shared_resend_revision",
     canChat: true,
     activeRun: null,
-    sessionUpdatedAt: "2026-08-10T03:00:03Z",
-    generatedAt: "2026-08-10T03:00:06Z"
+    sessionUpdatedAt: "2026-08-10T03:00:04Z",
+    messageChange: {
+      sessionId: "ses_shared_resend_revision",
+      sourceRunId: "run_shared_resend_source",
+      replacementRunId: "run_shared_resend_replacement",
+      changeType: "RESEND_RESTORED",
+      revision: "2026-08-10T03:00:04Z"
+    },
+    generatedAt: "2026-08-10T03:00:05Z"
   }));
-
+  await expect.poll(() => sessionMessageRequests.length).toBeGreaterThan(messageRequestCountBeforeCancellation);
+  expect(sessionMessageRequests.slice(messageRequestCountBeforeCancellation)).toContain(
+    "/api/internal/platform/opencode-runtime/sessions/ses_shared_resend_revision/messages/runs/run_shared_resend_source"
+  );
+  await expect(page.getByText("仅答复 123", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
+  await expect(page.getByText("OK", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "停止执行" })).toHaveCount(0);
   await expect(page.getByText("生成中", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("仅答复 123", { exact: true })).toBeVisible();
+
+  // 跨节点迟到的旧预约通知不得越过恢复修订，也不能触发一次全历史刷新。
+  const messageRequestCountBeforeStaleSignal = sessionMessageRequests.length;
+  runtimeStates.splice(0, runtimeStates.length, sessionShareRuntimeState({
+    shareId: "shr_resend_revision",
+    sessionId: "ses_shared_resend_revision",
+    workspaceId: "wrk_shared_resend_revision",
+    canChat: true,
+    activeRun: null,
+    sessionUpdatedAt: "2026-08-10T03:00:04Z",
+    messageChange: {
+      sessionId: "ses_shared_resend_revision",
+      sourceRunId: "run_shared_resend_source",
+      replacementRunId: "run_shared_resend_replacement",
+      changeType: "RESEND_RESERVED",
+      revision: "2026-08-10T03:00:03Z"
+    },
+    generatedAt: "2026-08-10T03:00:06Z"
+  }));
+  await page.waitForTimeout(1_200);
+  expect(sessionMessageRequests).toHaveLength(messageRequestCountBeforeStaleSignal);
+  await expect(page.getByText("仅答复 OK", { exact: true })).toBeVisible();
 });
 
 test("session share participant receives the owner's authoritative user message without an empty bubble", async ({ page }) => {
@@ -3202,6 +3250,9 @@ test("application source snapshot opens a logical workspace and enforces source 
   const fileExplorer = page.locator(".figma-file-explorer");
   await openAppSourceFromWorkspaceSwitch(page);
   const picker = page.getByRole("dialog", { name: "应用源码" });
+  const pickerBox = await picker.boundingBox();
+  expect(pickerBox?.y).toBeGreaterThanOrEqual(40);
+  expect(pickerBox?.y).toBeLessThan(100);
   await expect(picker).toContainText("团队可用");
   await expect(picker).toContainText("李四 · UCID-1002");
   await expect(picker).not.toContainText("尚未下载库");
@@ -7413,31 +7464,46 @@ test("manual resend keeps the user turn, shows running status, and replaces the 
     status: "DISPATCHED",
     executeAt: "2026-08-07T08:02:00Z"
   };
+  // 生产现场中预约 USER 的平台合成事件早于 run.resend.started，且原锚点仍带源消息别名。
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(1, "run.resend.started", resendPayload),
+    ...event(1, "message.updated", {
+      message: {
+        id: "msg_remote_replacement",
+        role: "user",
+        content: "重新检查登录流程",
+        platformMessageId: "msg_platform_replacement"
+      }
+    }),
     runId: "run_resend_replacement"
   }, "ses_1"]);
+  await expect(page.locator(".oc-user-message")).toHaveCount(1);
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(2, "message.updated", {
+    ...event(2, "run.resend.started", resendPayload),
+    runId: "run_resend_replacement"
+  }, "ses_1"]);
+  await expect(page.locator(".oc-user-message")).toHaveCount(1);
+  await callAgentWorkbenchHandler(page, "handleRunEvent", [{
+    ...event(3, "message.updated", {
       message: { id: "msg_remote_replacement", role: "user", content: "重新检查登录流程" }
     }),
     runId: "run_resend_replacement"
   }, "ses_1"]);
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(3, "message.updated", {
+    ...event(4, "message.updated", {
       message: { id: "msg_remote_new_answer", role: "assistant" }
     }),
     runId: "run_resend_replacement"
   }, "ses_1"]);
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(4, "message.part.updated", {
+    ...event(5, "message.part.updated", {
       messageID: "msg_remote_new_answer",
       part: { id: "part_resend_answer", messageID: "msg_remote_new_answer", type: "text", text: "新回答已经接管页面" }
     }),
     runId: "run_resend_replacement"
   }, "ses_1"]);
+  await expect(page.getByText("新回答已经接管页面")).toBeVisible();
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(5, "run.succeeded", {}),
+    ...event(6, "run.succeeded", {}),
     runId: "run_resend_replacement"
   }, "ses_1"]);
 
@@ -10197,6 +10263,7 @@ async function mockBackendApi(
     userNotificationUnreadCount?: number;
     userNotificationReadRequests?: string[];
     userNotificationEventRequests?: string[];
+    userNotificationListRequests?: boolean[];
     userNotificationEvents?: Array<{
       gate?: Promise<void>;
       eventName?: "user-notification.snapshot" | "user-notification.updated";
@@ -10833,6 +10900,7 @@ async function mockBackendApi(
       const pageNumber = Number(url.searchParams.get("page") ?? "1");
       const size = Number(url.searchParams.get("size") ?? "20");
       const unreadOnly = url.searchParams.get("unreadOnly") === "true";
+      capture.userNotificationListRequests?.push(unreadOnly);
       const allItems = capture.userNotifications ?? [];
       const filtered = unreadOnly ? allItems.filter((item) => item.unread === true) : allItems;
       const offset = Math.max(0, (pageNumber - 1) * size);
@@ -11825,6 +11893,30 @@ async function mockBackendApi(
         childSessionIdByTaskPartId: {},
         events: []
       }));
+      return;
+    }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages\/runs\/[^/]+\/user$/.test(url.pathname)) {
+      capture.sessionMessageRequests?.push(`${url.pathname}${url.search}`);
+      const match = url.pathname.match(/\/sessions\/([^/]+)\/messages\/runs\/([^/]+)\/user$/);
+      const sessionId = match?.[1] ?? "ses_history";
+      const runId = match?.[2] ?? "run_unknown";
+      const message = (capture.sessionMessagesBySessionId?.[sessionId] ?? capture.sessionMessages ?? [])
+        .find((item) => item.role === "USER" && item.runId === runId);
+      await route.fulfill(message
+        ? json(message)
+        : { status: 404, ...jsonFailure("NOT_FOUND", "Run 用户消息不存在") });
+      return;
+    }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages\/runs\/[^/]+$/.test(url.pathname)) {
+      capture.sessionMessageRequests?.push(`${url.pathname}${url.search}`);
+      const match = url.pathname.match(/\/sessions\/([^/]+)\/messages\/runs\/([^/]+)$/);
+      const sessionId = match?.[1] ?? "ses_history";
+      const runId = match?.[2] ?? "run_unknown";
+      const messages = (capture.sessionMessagesBySessionId?.[sessionId] ?? capture.sessionMessages ?? [])
+        .filter((item) => item.runId === runId);
+      await route.fulfill(messages.length > 0
+        ? json(messages)
+        : { status: 404, ...jsonFailure("NOT_FOUND", "Run 会话消息不存在") });
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages$/.test(url.pathname)) {

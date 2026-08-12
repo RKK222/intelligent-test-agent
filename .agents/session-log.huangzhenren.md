@@ -2409,3 +2409,18 @@
 - Result:
   - 平台体验工作区与 release 的分享、通知和运行态能力已组合在同一 merge 结果中；API、事件与数据库均采用增量兼容方式，体验共享 shell/Agent 不提供用户级 OS 隔离的既有风险保持不变。
   - 提交前已回顾全部 `.agents/session-log*.md` 近期记录；本次不新建分支、不推送远端，完整测试中的三项既有基线失败已如实保留为后续独立修复事项。
+
+### 2026-08-12 - 推送前合入远端 release 最新提交
+
+- Why:
+  - 用户要求推送当前 release；首次 push 被远端拒绝，因为同名分支在上次 fetch 后新增 11 个提交，本地与远端分别 ahead 4 / behind 11，不能强制覆盖远端历史。
+- What:
+  - 将远端 `af4c60352` 合入当前分支，保留共享会话撤回重发提交后同步与乱序归并、通知默认未读/已读状态、应用源码首次打开、模型时延指标和企业增量包记录。
+  - 8 个冲突按语义合并：体验 Workspace 实时鉴权与 APP_SOURCE 首次打开回退共存；dispose `NONE/RESTART_OWN_PROCESS` 受控动作与通知未读/已读/失效图标共存；共享类型同时保留 `SessionMessageChangeIdentity` 和 dispose 通知联合；README、API 与模块图同步保留双方稳定说明。
+  - 未新增或修改 Flyway SQL，未修改 `.env*`、generated SDK 或 `opencode-source/`。
+- How:
+  - 后端受影响 21 模块定向 reactor 通过：workspace 4、runtime 115、API 34、persistence 13 项均为 0 failure / 0 error；最终 22 模块 `mvn -pl test-agent-app -am -DskipTests package` 成功。
+  - 前端通知中心、共享会话 reducer 与聊天面板 240 passed / 1 skipped，agent-web typecheck 和 production build 通过；构建仅保留既有大 chunk 提示。
+  - 冲突解决后执行 AI 文档、空白、冲突标记、目标提交祖先关系和最终远端一致性检查；体验旧/新 migration 继续在源码、persistence JAR 和应用内嵌 JAR 保持逐字节一致。
+- Result:
+  - 当前分支同时包含本地体验工作区与远端 11 个最新 release 提交，可用普通 fast-forward push 更新远端，不需要 force push；本次只创建安全合并提交，不重写双方历史。

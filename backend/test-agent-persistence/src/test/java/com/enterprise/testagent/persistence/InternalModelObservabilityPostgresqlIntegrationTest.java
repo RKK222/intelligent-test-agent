@@ -187,6 +187,7 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 STARTED_AT.plusSeconds(10));
 
         assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.averageMillis()).isEqualTo(250.0);
         assertThat(distribution.minimumMillis()).isEqualTo(100.0);
         assertThat(distribution.firstQuartileMillis()).isEqualTo(175.0);
         assertThat(distribution.medianMillis()).isEqualTo(250.0);
@@ -206,6 +207,7 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 InternalModelCallSource.USER_CALL, STARTED_AT, STARTED_AT.plusSeconds(30));
 
         assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.averageMillis()).isEqualTo(25.0);
         assertThat(distribution.minimumMillis()).isEqualTo(10.0);
         assertThat(distribution.firstQuartileMillis()).isEqualTo(17.5);
         assertThat(distribution.medianMillis()).isEqualTo(25.0);

@@ -102,6 +102,8 @@ const timeseries = computed(() => timeseriesQuery.data.value ?? []);
 const peaks = computed(() => peaksQuery.data.value);
 const maxTrendRun = computed(() => Math.max(1, ...timeseries.value.map(item => item.runCount)));
 const maxHeatmap = computed(() => Math.max(1, ...(peaks.value?.heatmap ?? []).map(item => item.activeUsers + item.runCount + item.userMessageCount)));
+// 列数跟随实际时间点，少量数据填满容器；高密度数据仍由 CSS 最小列宽保留横向滚动。
+const trendGridStyle = computed(() => ({ "--ta-trend-columns": String(Math.max(timeseries.value.length, 1)) }));
 const freshnessText = computed(() => {
   const freshness = overview.value?.freshness;
   if (!freshness?.generatedAt) return "暂无统计时间";
@@ -248,7 +250,7 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
       <section class="ta-panel">
         <h3>趋势</h3>
         <div v-if="timeseries.length === 0" class="ta-empty">暂无数据</div>
-        <div v-else class="ta-trend">
+        <div v-else class="ta-trend" :style="trendGridStyle">
           <div v-for="point in timeseries" :key="point.bucketStart" class="ta-trend-item">
             <div class="ta-trend-bar" :style="{ height: trendHeight(point) }" />
             <small>{{ new Date(point.bucketStart).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) }}</small>
@@ -515,34 +517,45 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
   text-align: center;
 }
 .ta-trend {
+  display: grid;
+  grid-template-columns: repeat(var(--ta-trend-columns), minmax(34px, 1fr));
   align-items: flex-end;
-  gap: 7px;
+  gap: clamp(4px, 0.6vw, 10px);
+  width: 100%;
   min-height: 122px;
   overflow-x: auto;
+  box-sizing: border-box;
 }
 .ta-trend-item {
   display: grid;
   grid-template-rows: 80px 18px 18px;
   justify-items: center;
-  min-width: 34px;
+  min-width: 0;
   color: #6b7280;
   font-size: 11px;
 }
 .ta-trend-bar {
   align-self: end;
-  width: 16px;
+  width: clamp(12px, 45%, 22px);
   border-radius: 4px 4px 0 0;
   background: #2563eb;
 }
 .ta-heatmap {
   display: grid;
-  grid-template-columns: repeat(24, 14px);
-  gap: 4px;
+  grid-template-columns: repeat(24, minmax(8px, 1fr));
+  gap: clamp(2px, 0.35vw, 6px);
+  width: 100%;
   margin-bottom: 10px;
+  overflow-x: auto;
+  box-sizing: border-box;
 }
 .ta-heatmap-cell {
-  width: 14px;
-  height: 14px;
+  width: 100%;
+  max-width: 64px;
+  min-width: 0;
+  height: auto;
+  aspect-ratio: 1;
+  justify-self: center;
   border-radius: 3px;
 }
 .ta-peak-list,

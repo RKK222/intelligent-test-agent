@@ -86,6 +86,14 @@
         limit 1
     </select>
 
+    <select id="findBySessionAndRun" resultMap="SessionMessageRowMap">
+        select <include refid="Columns"/>
+        from session_messages
+        where session_id = #{sessionId}
+          and run_id = #{runId}
+        order by created_at asc, id asc
+    </select>
+
     <select id="findBySession" resultMap="SessionMessageRowMap">
         select <include refid="Columns"/>
         from session_messages

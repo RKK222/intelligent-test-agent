@@ -92,7 +92,7 @@
 
 ## 内部模型调用可观测
 
-代理转发链路上对每次调用落结构化明细（`internal_model_call_records`）并小时聚合（`internal_model_call_stats_hourly`），按 `InternalModelCallOutcome` 保留精确原因，再由 `InternalModelCallOutcomeGroup` 归并为五个看板大类。代理与探活共同复用 `InternalModelSseStreamObserver`，每个 SSE data 只解析一次；只有 OpenAI-compatible `choices` 中的正文、推理、拒绝、legacy text 或工具输出算真实输出，注释、role/usage、伪心跳和畸形 data 都不产生首 Token。`firstTokenMillis`/`lastTokenMillis` 记录首末有效输出到达，`outputTokenCount` 只取上游 usage 的准确值，ITL/TPOT 按 `(末输出-首输出)/(输出 Token 数-1)` 计算；缺少用量或少于 2 个输出 Token 时不统计，绝不以 chunk 数代替 Token 数。`streamCompleteMillis` 仍表示 `[DONE]` 或非空 `finish_reason` 到达，`durationMillis` 是端到端耗时。TTFT 与 ITL/TPOT 箱线图由 `InternalModelObservabilityQueryService` 在最长 31 天范围内基于明细查询真实最小值、P25、中位数、P75、最大值和样本数。Responses 适配请求会开启上游 usage；直接 Chat Completions 仅在调用方或供应商返回 usage 时形成 ITL/TPOT 样本。所有观测只记 traceId、耗时、状态、异常类简名和 Token 数，不存正文或 Token 内容。探活固定 `max_tokens=1`，因此不会进入 ITL/TPOT 样本。查询统计 API 支持按来源隔离，明细、TTFT 和 ITL/TPOT 分布 API 支持结果大类筛选；保留期与 `SUPER_ADMIN` 权限不变。
+代理转发链路上对每次调用落结构化明细（`internal_model_call_records`）并小时聚合（`internal_model_call_stats_hourly`），按 `InternalModelCallOutcome` 保留精确原因，再由 `InternalModelCallOutcomeGroup` 归并为五个看板大类。代理与探活共同复用 `InternalModelSseStreamObserver`，每个 SSE data 只解析一次；只有 OpenAI-compatible `choices` 中的正文、推理、拒绝、legacy text 或工具输出算真实输出，注释、role/usage、伪心跳和畸形 data 都不产生首 Token。`firstTokenMillis`/`lastTokenMillis` 记录首末有效输出到达，`outputTokenCount` 只取上游 usage 的准确值，ITL/TPOT 按 `(末输出-首输出)/(输出 Token 数-1)` 计算；缺少用量或少于 2 个输出 Token 时不统计，绝不以 chunk 数代替 Token 数。`streamCompleteMillis` 仍表示 `[DONE]` 或非空 `finish_reason` 到达，`durationMillis` 是端到端耗时。TTFT 与 ITL/TPOT 分布由 `InternalModelObservabilityQueryService` 在最长 31 天范围内基于全量明细查询平均值、真实最小值、P25、中位数、P75、最大值和样本数，不受页面明细分页影响；页面按模型厂商分别绘制箱体，ITL Overview 使用同一全量查询的平均值和最大值。Responses 适配请求会开启上游 usage；直接 Chat Completions 仅在调用方或供应商返回 usage 时形成 ITL/TPOT 样本。所有观测只记 traceId、耗时、状态、异常类简名和 Token 数，不存正文或 Token 内容。探活固定 `max_tokens=1`，因此不会进入 ITL/TPOT 样本。查询统计 API 支持按来源隔离，明细、TTFT 和 ITL/TPOT 分布 API 支持结果大类筛选；保留期与 `SUPER_ADMIN` 权限不变。
 
 ## 测试覆盖
 
@@ -168,10 +168,10 @@ runtime 代理入口有认证用户时必须通过 `AgentRuntimeTargetResolver` 
 `RunResendApplicationService` 统一承接手动与定时自动入口：人工入口只允许源消息实际发送人，分享发送人还必须持有 `canChat`，包括会话所属人在内的其它用户不得改写他人消息；服务先验证执行所属人、实际 actor、终态、最后远端 user message 和会话锁，再预留
 `PENDING` 替代 Run，并把精确输入写入有限 TTL Redis。人工请求可携带可选 `editedPrompt`，服务端只替换可信远端用户轮次中的文本并保留原附件、Agent、模型、variant 和其它 part；修改文本不进入控制表、事件、审计或日志。自动入口仅观察 root `session.error` 派生失败，定时来源最多自动 3 次，
 等待 1/2/4 分钟；人工重发继承整条链的自动次数，不重置额度。`RunResendExecutionService` 按
-`WAITING → REVERTING → REVERTED → DISPATCHED` 恢复；执行替代 Run 时必须同时用预留锚点的实际发送人写入 Run 和 USER `session_messages` 投影，不能被 OpenCode 执行所属人覆盖。稳定消息探测为未知时保持锁，明确未投递且 unrevert 成功才失败解锁。历史替代 Run 若已被错误归属给所属人，后续人工权限判断以共享重发审计的 requester 恢复真实发送人。
+`WAITING → REVERTING → REVERTED → DISPATCHED` 恢复；预约时必须用实际发送人写入 Run 和 USER `session_messages` 投影，执行替代 Run 时按稳定远端消息号校验并复用，不能被 OpenCode 执行所属人覆盖或重复插入。稳定消息探测为未知时保持锁，明确未投递且 unrevert 成功才失败解锁。历史替代 Run 若已被错误归属给所属人，后续人工权限判断以共享重发审计的 requester 恢复真实发送人。
 
 已注册的每分钟 `opencode-runtime.night-execution-dispatch` 在夜间任务扫描后继续扫描到期、已 revert 和过期租约记录，按持久化目标服务器经公共 Java 路由器分发；重发不另建 task key。
 WAITING 替代 Run 可复用现有 cancel 入口；等待期间 `NightExecutionSessionLockGuard` 同时阻止新 Run、消息、command、shell、archive、
-compact 和 share 等主会话写入口。替代消息受理后在同一事务中清理源 Run 的 PostgreSQL 明细、推进 Session 内容修订时间，再清理 Redis 明细并发布 `run.resend.started`；重发事件携带真实 requester 身份，分享运行态据此刷新权威消息并保持分享发送人归属，Run、反馈、
+compact 和 share 等主会话写入口。重发预约事务先创建替代 Run、持久化替代 USER、推进 Session 内容修订时间并写入 scheduled 事实；提交成功后，`SessionMessageRealtimeHub` 立即发布含 `sessionId/sourceRunId/replacementRunId/changeType/revision` 的安全变化信号，并复用通用服务器广播唤醒本机及其它 Java 上的分享运行态连接，不等待模型执行。执行器通过稳定远端消息号复用这条 USER；替代消息受理后再清理源 Run 的 PostgreSQL/Redis 明细并发布 `run.resend.started`。WAITING 取消或明确失败会删除未投递替代 USER、推进修订并广播 `RESEND_RESTORED`，前端按 source Run 精确读取完整 USER/ASSISTANT 轮次恢复；每秒状态检查继续作为鉴权和丢信号兜底。重发事件携带真实 requester 身份，分享运行态据此刷新权威消息并保持分享发送人归属，Run、反馈、
 用量和关系保留；历史消息/Run 响应也以共享 requester 修正旧错误归因，无需修改已执行数据库历史。当前预留替代 Run 沿 `LEGACY_FULL` 明细链启动；源 Run 无论是 `LEGACY_FULL` 还是 `REDIS_SUMMARY` 都从远端
 权威用户轮次读取并重放，避免把摘要数据库当作 prompt 事实源。

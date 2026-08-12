@@ -318,9 +318,9 @@ SSE 只提供未读数和刷新信号，不承载通知正文。会话分享和 
 | `session-share.updated` | active Run、`canChat`、版本、有效期或 Session 内容修订时间发生变化。 |
 | `session-share.invalidated` | 分享过期、取消、成员移除、会话归档或其它授权失效的末帧；发送后服务端关闭连接。 |
 
-data 使用 `active/reason/shareId/version/sessionId/workspaceId/canChat/expiresAt/sessionUpdatedAt/activeRun/generatedAt`。`sessionUpdatedAt` 是平台 Session 内容修订时间；compact 成功后即使 active Run 不变也会推进该值并产生 `session-share.updated`，分享工作台据此重新读取消息，无需刷新页面。`activeRun` 为空表示当前没有 `PENDING/RUNNING/CANCELLING` Run；非空时字段与 HTTP `RunResponse` 一致。若上一帧存在 active Run、后续帧消失，前端必须按精确 `runId` 查询 Run 详情并应用权威终态，不能仅清空本地 Run 后继续显示“思考中”。失效末帧固定 `active=false`、`canChat=false`、`activeRun=null`，`reason` 使用 `EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED` 或稳定平台错误码。无变化时每 25 秒发送标准 heartbeat comment。
+data 使用 `active/reason/shareId/version/sessionId/workspaceId/canChat/expiresAt/sessionUpdatedAt/messageChange/activeRun/generatedAt`。`sessionUpdatedAt` 是平台 Session 内容修订时间；compact 成功后即使 active Run 不变也会推进该值并产生 `session-share.updated`，分享工作台据此重新读取消息，无需刷新页面。撤回重发在预约事务内创建替代 Run、持久化替代 USER 并推进修订号，提交成功后立即发布后端会话消息变化信号，不等待 `run.resend.started` 或模型流。内部跨服务器广播携带 `sessionId/sourceRunId/replacementRunId/changeType/revision`（兼容保留 `runId=replacementRunId`）以及 trace/实例元数据，不携带 prompt、回答或工具输出；公开 SSE 在对应帧的可选 `messageChange` 中透传同一组安全归并身份。`changeType` 为 `RESEND_RESERVED`、`RESEND_STARTED` 或 `RESEND_RESTORED`：前两者按 `replacementRunId` 调用精确 USER 查询，恢复类型按 `sourceRunId` 调用精确完整轮次查询。客户端必须按 Session 维护已见 `revision` 水位并去重，拒绝迟到的较低修订；异步权威读取返回时也要再次校验当前水位，避免慢请求越过后到的恢复通知。取消或明确失败会删除未投递的替代 USER、推进新修订并发送 `RESEND_RESTORED`，客户端据此恢复源 USER 与 ASSISTANT；所有查询均读取已提交数据库投影，不扫描历史分页，也不使用本地计时器等待模型流。`activeRun` 为空表示当前没有 `PENDING/RUNNING/CANCELLING` Run；非空时字段与 HTTP `RunResponse` 一致。若上一帧存在 active Run、后续帧消失，前端必须按精确 `runId` 查询 Run 详情并应用权威终态，不能仅清空本地 Run 后继续显示“思考中”。失效末帧固定 `active=false`、`canChat=false`、`activeRun=null`、`messageChange=null`，`reason` 使用 `EXPIRED/REVOKED/REMOVED/SESSION_ARCHIVED` 或稳定平台错误码。无变化时每 25 秒发送标准 heartbeat comment。
 
-服务端至少每秒重新校验登录用户状态、share/version、成员状态、有效期、精确 Session/Workspace 和权限。分享设置更新会提升版本；旧连接收到更新或失效后不得继续用旧权限执行。RunEvent SSE、文件 WebSocket 和 PTY 终端也各自周期或逐操作重新鉴权，成员移除、降权、取消或到期时关闭连接；已经启动的 Run 不因此自动取消。
+服务端在后端会话消息变化时立即重新读取状态，并至少每秒重新校验登录用户状态、share/version、成员状态、有效期、精确 Session/Workspace 和权限；周期检查同时兜底广播丢失或跨节点短暂不可用。分享设置更新会提升版本；旧连接收到更新或失效后不得继续用旧权限执行。RunEvent SSE、文件 WebSocket 和 PTY 终端也各自周期或逐操作重新鉴权，成员移除、降权、取消或到期时关闭连接；已经启动的 Run 不因此自动取消。
 
 分享工作台发送前先使用同一分享头签发会话运行上下文：服务端保留真实 actor 鉴权，但上下文绑定会话所属人的进程与执行身份；该 HTTP 签发过程不新增 SSE 事件。随后工作台订阅当前 Run 的既有 RunEvent SSE，并在跨 Java 转发时保留分享头。RunEvent 的 USER `message.updated`（包括 `run.snapshot.reset`、Session tree 和断线恢复投影）在 payload 顶层及 message 对象中以 additive 字段补充：
 
@@ -927,7 +927,8 @@ LobeHub 登录票据签发、HMAC 兑换/撤销、Desktop/CLI 浏览器确认、
   不得用后续 OpenCode 原生 message 事件中的所属人覆盖。前端据此展示倒计时并锁定输入。
 - `run.resend.started`：OpenCode 已确认稳定替代 message ID 存在，且源 Run 的 PostgreSQL/Redis 可回放明细清理已提交；同一
   PostgreSQL 事务已推进 Session 内容修订时间。前端必须原子移除源 Run 的 assistant/tool/Todo/Diff/失败卡/流式 overlay/child scope，
-  再接管替代 Run SSE，并刷新该 Session 的权威消息；刷新期间继续缓冲和重放实时事件。该事件不表示替代 Run 已终态。
+  再接管替代 Run SSE。服务端随后发布后端会话消息变化信号；所属人与分享参与方收到状态更新后，从平台数据库快照单次同步该 Session 的
+  权威 USER，刷新期间继续缓冲和重放实时事件。该事件不表示替代 Run 已终态。
 - `run.resend.failed`：重发在安全可判定窗口失败；payload 仍只含重发身份、真实操作人、次数、状态和执行时间，不携带 prompt、回答、工具输出或
   供应商响应正文。
 

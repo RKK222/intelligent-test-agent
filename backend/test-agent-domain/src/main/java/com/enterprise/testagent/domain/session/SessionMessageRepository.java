@@ -3,6 +3,8 @@ package com.enterprise.testagent.domain.session;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.run.RunId;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -47,6 +49,27 @@ public interface SessionMessageRepository {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * 按会话与 Run 精确读取完整轮次，供撤回重发失败后恢复源 USER/ASSISTANT 投影。
+     *
+     * <p>默认实现只用于兼容旧仓储和测试替身；生产 MyBatis 仓储使用关系库精确查询。</p>
+     */
+    default List<SessionMessage> findBySessionIdAndRunId(SessionId sessionId, RunId runId) {
+        List<SessionMessage> matches = new ArrayList<>();
+        for (int page = 1; page <= 20; page++) {
+            PageResponse<SessionMessage> response = findBySessionId(
+                    sessionId,
+                    new PageRequest(page, PageRequest.MAX_SIZE));
+            matches.addAll(response.items().stream()
+                    .filter(message -> runId.equals(message.runId()))
+                    .toList());
+            if (response.items().isEmpty() || (long) page * PageRequest.MAX_SIZE >= response.total()) {
+                return List.copyOf(matches);
+            }
+        }
+        return List.copyOf(matches);
     }
 
     /**

@@ -216,6 +216,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
                 T0.plusSeconds(10));
 
         assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.averageMillis()).isEqualTo(250.0);
         assertThat(distribution.minimumMillis()).isEqualTo(100.0);
         assertThat(distribution.firstQuartileMillis()).isEqualTo(175.0);
         assertThat(distribution.medianMillis()).isEqualTo(250.0);
@@ -233,6 +234,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
                 T0.minusSeconds(1), T0.plusSeconds(1));
 
         assertThat(distribution.sampleCount()).isZero();
+        assertThat(distribution.averageMillis()).isNull();
         assertThat(distribution.minimumMillis()).isNull();
         assertThat(distribution.firstQuartileMillis()).isNull();
         assertThat(distribution.medianMillis()).isNull();
@@ -255,6 +257,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
                 T0.minusSeconds(1), T0.plusSeconds(10));
 
         assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.averageMillis()).isEqualTo(25.0);
         assertThat(distribution.minimumMillis()).isEqualTo(10.0);
         assertThat(distribution.firstQuartileMillis()).isEqualTo(17.5);
         assertThat(distribution.medianMillis()).isEqualTo(25.0);

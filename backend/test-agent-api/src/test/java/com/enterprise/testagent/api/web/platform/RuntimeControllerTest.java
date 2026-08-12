@@ -50,6 +50,9 @@ import com.enterprise.testagent.domain.run.TokenUsage;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionHistoryItem;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.session.SessionMessage;
+import com.enterprise.testagent.domain.session.SessionMessageId;
+import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.session.SessionWorkspaceContext;
 import com.enterprise.testagent.domain.user.UserId;
@@ -1167,6 +1170,75 @@ class RuntimeControllerTest {
                 any(),
                 eq("trace_1234567890abcdef"),
                 eq(false));
+    }
+
+    @Test
+    void sessionControllerReadsAuthoritativeUserMessageByRunWithoutPaging() {
+        SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
+        SessionId sessionId = new SessionId("ses_1234567890abcdef");
+        RunId runId = new RunId("run_replacement123456");
+        SessionMessage message = new SessionMessage(
+                new SessionMessageId("msg_replacement123456"), sessionId,
+                SessionMessageRole.USER, "edited prompt", NOW,
+                "trace_1234567890abcdef", runId, null, "msg_remote_replacement",
+                null, null, null, NOW);
+        when(service.getUserMessageForRun(
+                new UserId("usr_1234567890abcdef"), sessionId, runId)).thenReturn(message);
+        WebTestClient client = WebTestClient.bindToController(new SessionController(service))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/messages/runs/run_replacement123456/user")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.messageId").isEqualTo("msg_replacement123456")
+                .jsonPath("$.data.runId").isEqualTo("run_replacement123456")
+                .jsonPath("$.data.content").isEqualTo("edited prompt");
+
+        verify(service).getUserMessageForRun(
+                new UserId("usr_1234567890abcdef"), sessionId, runId);
+    }
+
+    @Test
+    void sessionControllerReadsCompleteAuthoritativeTurnByRunWithoutPaging() {
+        SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
+        SessionId sessionId = new SessionId("ses_1234567890abcdef");
+        RunId runId = new RunId("run_source123456789");
+        SessionMessage user = new SessionMessage(
+                new SessionMessageId("msg_source_user123456"), sessionId,
+                SessionMessageRole.USER, "original prompt", NOW,
+                "trace_1234567890abcdef", runId, null, "msg_remote_source_user",
+                null, null, null, NOW);
+        SessionMessage assistant = new SessionMessage(
+                new SessionMessageId("msg_source_answer1234"), sessionId,
+                SessionMessageRole.ASSISTANT, "original answer", NOW.plusSeconds(1),
+                "trace_1234567890abcdef", runId, null, "msg_remote_source_answer",
+                null, null, null, NOW.plusSeconds(1));
+        when(service.listMessagesForRun(
+                new UserId("usr_1234567890abcdef"), sessionId, runId))
+                .thenReturn(List.of(user, assistant));
+        WebTestClient client = WebTestClient.bindToController(new SessionController(service))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/messages/runs/run_source123456789")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.length()").isEqualTo(2)
+                .jsonPath("$.data[0].role").isEqualTo("USER")
+                .jsonPath("$.data[1].role").isEqualTo("ASSISTANT")
+                .jsonPath("$.data[1].content").isEqualTo("original answer");
+
+        verify(service).listMessagesForRun(
+                new UserId("usr_1234567890abcdef"), sessionId, runId);
     }
 
     private static org.springframework.web.server.WebFilter authenticatedUserFilter() {

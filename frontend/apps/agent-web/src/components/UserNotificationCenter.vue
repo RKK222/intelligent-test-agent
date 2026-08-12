@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import {
-  AlertTriangle,
   Bell,
-  CheckCircle2,
-  CircleSlash2,
+  CircleOff,
   ExternalLink,
   Inbox,
   LoaderCircle,
-  MessageSquareShare,
+  Mail,
+  MailOpen,
   RefreshCw,
 } from 'lucide-vue-next'
 import type { UserNotification } from '@test-agent/shared-types'
 
 export type UserNotificationFilter = 'ALL' | 'UNREAD'
+type NotificationVisualState = 'UNREAD' | 'READ' | 'INACTIVE'
 
 const props = withDefaults(defineProps<{
   notifications?: UserNotification[]
@@ -26,7 +26,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   notifications: () => [],
   unreadCount: 0,
-  filter: 'ALL',
+  filter: 'UNREAD',
   loading: false,
   loadingMore: false,
   hasMore: false,
@@ -159,9 +159,9 @@ function notificationActionLabel(notification: UserNotification) {
 function notificationAriaLabel(notification: UserNotification) {
   // 会话分享保留既有“新标签页打开”语义，避免类型扩展改变辅助技术和自动化定位契约。
   if (notificationKind(notification) === 'SESSION_SHARE' && notification.actionAvailable) {
-    return `${notification.title}，在新标签页打开`
+    return `${notification.title}，${notificationVisualLabel(notification)}，在新标签页打开`
   }
-  return `${notification.title}，${notificationActionLabel(notification)}`
+  return `${notification.title}，${notificationVisualLabel(notification)}，${notificationActionLabel(notification)}`
 }
 
 function permissionLabel(notification: UserNotification) {
@@ -178,6 +178,23 @@ function invalidationLabel(notification: UserNotification) {
   if (notification.status === 'INVALIDATED') return '分享已失效'
   if (notification.expiresAt && Date.parse(notification.expiresAt) <= Date.now()) return '分享已过期'
   return '暂不可打开'
+}
+
+/**
+ * 已失效或过期但从未打开的通知不能伪装成“已读”；这类记录使用独立停用图标。
+ * 有效通知沿用后端 unread，已成功访问的历史通知则以 readAt 展示打开信封。
+ */
+function notificationVisualState(notification: UserNotification): NotificationVisualState {
+  if (notification.unread) return 'UNREAD'
+  if (notification.readAt) return 'READ'
+  return 'INACTIVE'
+}
+
+function notificationVisualLabel(notification: UserNotification) {
+  const state = notificationVisualState(notification)
+  if (state === 'UNREAD') return '未读通知'
+  if (state === 'READ') return '已读通知'
+  return '已失效通知'
 }
 
 function formatTime(value: string) {
@@ -254,17 +271,17 @@ onBeforeUnmount(() => {
         <button
           type="button"
           role="tab"
-          :aria-selected="filter === 'ALL'"
-          :class="{ 'is-active': filter === 'ALL' }"
-          @click="selectFilter('ALL')"
-        >全部</button>
-        <button
-          type="button"
-          role="tab"
           :aria-selected="filter === 'UNREAD'"
           :class="{ 'is-active': filter === 'UNREAD' }"
           @click="selectFilter('UNREAD')"
         >未读 <span v-if="unreadCount > 0">{{ badgeText }}</span></button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="filter === 'ALL'"
+          :class="{ 'is-active': filter === 'ALL' }"
+          @click="selectFilter('ALL')"
+        >全部</button>
       </div>
 
       <div class="user-notification-center__content" role="tabpanel" :aria-busy="loading">
@@ -290,9 +307,11 @@ onBeforeUnmount(() => {
             :class="[
               'user-notification-center__item',
               notification.unread && 'is-unread',
+              notificationVisualState(notification) === 'READ' && 'is-read',
               `is-${notificationKind(notification).toLowerCase().replaceAll('_', '-')}`,
               shouldDimNotification(notification) && 'is-invalid'
             ]"
+            :data-read-state="notificationVisualState(notification).toLowerCase()"
             role="listitem"
           >
             <button
@@ -302,13 +321,15 @@ onBeforeUnmount(() => {
               :aria-label="notificationAriaLabel(notification)"
               @click="openNotification(notification)"
             >
-              <span class="user-notification-center__item-icon">
-                <MessageSquareShare v-if="notificationKind(notification) === 'SESSION_SHARE'" :size="17" />
-                <LoaderCircle v-else-if="notificationKind(notification) === 'DISPOSE_PENDING'" :size="17" />
-                <CheckCircle2 v-else-if="notificationKind(notification) === 'DISPOSE_SUCCEEDED'" :size="17" />
-                <AlertTriangle v-else-if="notificationKind(notification) === 'DISPOSE_FAILED'" :size="17" />
-                <CircleSlash2 v-else-if="notificationKind(notification) === 'DISPOSE_SUPERSEDED'" :size="17" />
-                <Inbox v-else :size="17" />
+              <span
+                class="user-notification-center__item-icon"
+                :data-notification-state="notificationVisualState(notification).toLowerCase()"
+                :title="notificationVisualLabel(notification)"
+              >
+                <Mail v-if="notificationVisualState(notification) === 'UNREAD'" :size="17" aria-hidden="true" />
+                <MailOpen v-else-if="notificationVisualState(notification) === 'READ'" :size="17" aria-hidden="true" />
+                <CircleOff v-else :size="17" aria-hidden="true" />
+                <span class="user-notification-center__sr-only">{{ notificationVisualLabel(notification) }}</span>
               </span>
               <span class="user-notification-center__item-main">
                 <span class="user-notification-center__item-heading">
@@ -385,20 +406,21 @@ onBeforeUnmount(() => {
 .user-notification-center__item > button:focus-visible { box-shadow: inset 0 0 0 2px rgb(200 22 29 / 25%); }
 .user-notification-center__item.is-invalid > button { cursor: default; opacity: .62; }
 .user-notification-center__item.is-invalid > button:hover { background: transparent; }
-.user-notification-center__item-icon { display: grid; width: 34px; height: 34px; place-content: center; border-radius: 9px; background: #fdf2f2; color: #991b1b; }
-.user-notification-center__item.is-dispose-pending .user-notification-center__item-icon { background: #fff7ed; color: #c2410c; }
-.user-notification-center__item.is-dispose-succeeded .user-notification-center__item-icon { background: #f0fdf4; color: #15803d; }
-.user-notification-center__item.is-dispose-failed .user-notification-center__item-icon { background: #fef2f2; color: #b91c1c; }
-.user-notification-center__item.is-dispose-superseded .user-notification-center__item-icon { background: #f4f4f5; color: #71717a; }
+.user-notification-center__item-icon { display: grid; width: 34px; height: 34px; place-content: center; border-radius: 9px; transition: background-color .14s ease, color .14s ease; }
+.user-notification-center__item-icon[data-notification-state='unread'] { background: #fdf2f2; color: #991b1b; }
+.user-notification-center__item-icon[data-notification-state='read'] { background: #f1f3f5; color: #667085; }
+.user-notification-center__item-icon[data-notification-state='inactive'] { background: #f3f4f6; color: #9ca3af; }
 .user-notification-center__item-main { display: grid; min-width: 0; gap: 4px; }
 .user-notification-center__item-heading { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 8px; }
 .user-notification-center__item-heading strong { min-width: 0; overflow: hidden; color: #1f2937; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.user-notification-center__item.is-read .user-notification-center__item-heading strong { color: #4b5563; font-weight: 550; }
 .user-notification-center__item-heading time { flex: 0 0 auto; color: #9ca3af; font-size: 10px; font-weight: 400; }
 .user-notification-center__session-title { overflow: hidden; color: #4b5563; font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .user-notification-center__meta { display: flex; min-width: 0; align-items: center; gap: 7px; color: #9ca3af; font-size: 10px; }
 .user-notification-center__meta em { flex: 0 0 auto; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-style: normal; padding: 2px 5px; }
 .user-notification-center__meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-notification-center__open-icon { align-self: center; color: #9ca3af; }
+.user-notification-center__sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
 .user-notification-center__footer { display: flex; min-height: 40px; align-items: center; justify-content: center; border-top: 1px solid #eceff3; background: #fff; color: #9ca3af; font-size: 10px; padding: 7px 12px; }
 .user-notification-center__footer button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: #991b1b; cursor: pointer; font-size: 11px; font-weight: 600; padding: 5px 10px; }
 .user-notification-center__footer button:focus-visible { border-radius: 5px; outline: 2px solid rgb(200 22 29 / 25%); }

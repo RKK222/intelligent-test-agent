@@ -8965,7 +8965,6 @@
 - 最终独立解包复验确认外层/内层 SHA 文件、两层 ZIP CRC、三台节点包 checksum、组件清单、`opencode-models.json`、部署手册、session log 和两份新 Flyway JAR 资源全部通过；固定名发布物位于 `deploy/internal/dist/`。
 - 本条最终 hash 是制品生成后的仓库追溯记录，不再据此重封 ZIP，否则 ZIP 自身 hash 会再次变化；包内已包含前一提交中的完整发布过程记录。
 - 本次未修改 migration SQL、生产 API/DTO/RunEvent、环境文件、generated SDK 或 OpenCode 只读源码；企业目标库完整 `flyway_schema_history` 仍必须在部署前取得，未取得前不把包描述为已获现场部署准入。
-
 ## 2026-08-11 - 将最新 release 合入记忆分支并补齐迁移兼容
 
 ### Why
@@ -9013,3 +9012,265 @@
 - 后端 health/readiness 均为 `UP`，前端 HTTP 200，3100 CORS 预检成功，通知与记忆平台入口未登录均为 401；manager WebSocket 已连接 18081，4097/4098 `/global/config` 均为 HTTP 200。
 - 三个独立 screen 为 `test-agent-release-backend-independent`、`test-agent-release-frontend-independent`、`test-agent-release-opencode-manager-independent`；进程日志位于 `.tmp/dev-services-release-independent/`，业务后端日志仍按既有配置写入 `backend/logs/`。
 - 本次未推送远端，未修改环境文件、generated SDK 或 OpenCode 只读源码；数据库只执行 Flyway validate，当前保留库已在 `20260810234154` 且无需新迁移。
+
+## 2026-08-11 - 将共享会话撤回重发消息改为后端提交后同步
+
+### Why
+
+- 共享会话撤回重发原先由前端在 Session revision 或 `run.resend.started` 到达后执行最多 6 次、每次间隔 250ms 的消息刷新；信号可能早于平台消息持久化，实时效果依赖本地计时器和数据库竞争结果。
+- 当前会话消息同步应由后端提交边界驱动，前端只消费已提交事实，不能猜测落库时机。
+
+### What
+
+- 新增 `SessionMessageRealtimeHub`：在后端事实提交成功后发布只含 `sessionId/runId/traceId/occurredAt` 的安全变化信号，本机直接 fan-out，并复用现有 `ServerBroadcastPublisher` 唤醒其它 Java；不广播 prompt、回答或工具输出。
+- `RunResendExecutionService` 仅在源 Run 清理、重发状态 CAS、锁/输入清理和 `run.resend.started` 事实均成功后发布变化；`SessionShareController` 将该信号合入既有分享 runtime SSE，1 秒检查继续作为鉴权和丢信号恢复兜底。
+- `AgentWorkbench` 移除 6 次延时重试，收到后端状态或 RunEvent 信号后只调用一次消息分页接口并指定 `refresh=false`，原位替换替代 USER，不重载历史树、不清空时间线或改变滚动位置。
+- 同步 runtime/API/agent-chat README、HTTP API、事件流和会话场景测试文档；未新增 URL、DTO、外部 SSE 事件名、数据库字段或 migration。
+
+### How
+
+- JDK 25 Maven 定向回归通过：`SessionMessageRealtimeHubTest` 2 项、`RunResendExecutionServiceTest` 4 项、`SessionShareControllerTest` 5 项，共 11 项；覆盖提交/回滚、跨 Java 过滤、CAS 失败不广播和后端信号即时唤醒 SSE。
+- `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；Chromium 用例 `session share synchronizes an edited resend after the backend commits its message change` 1/1 通过，并断言仅请求一次 `refresh=false`、不加载历史树且滚动位置不变。
+- 使用 JDK 25、`test` profile、`.env.test` 和 `--without-workflow` 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow`：23 个后端模块完整打包成功，Spring 装配、后端 readiness `8080` 和前端 `3000` 均正常；未修改环境文件。
+
+### Result
+
+- 共享会话撤回重发的权威 USER 现在由后端提交后信号驱动同步，不再受前端重试窗口和落库竞争影响；跨节点广播失败时仍由周期检查与 SSE 重连恢复。
+- 本次不涉及数据库结构、SQL、外部 API/DTO/RunEvent wire schema、性能敏感正文广播或鉴权放宽；未修改 generated SDK、OpenCode 源码和用户已有的通知/弹框/工作空间未提交改动。
+
+## 2026-08-11 - 弱化分享链接并增强通知已读辨识
+
+### Why
+
+- 对话分享已有工作台站内通知主链路，分享者不应再被大块链接输入框引导到手工复制；备用链接仅应作容灾入口。
+- 分享成员较多时弹框需要按屏幕空间调整；通知列表需通过图标直接区分已读、未读和失效状态。
+
+### What
+
+- `SessionShareDialog.vue` 移除突出的完整 URL 输入区，仅在分享成功后于底部提供低强调“复制备用分享链接”；复用既有剪贴板工具和分享地址派生逻辑。
+- 分享弹框支持右下角双向拉伸，并以视口最小/最大高度、body 内滚动和移动端仅纵向拉伸保证可用性。
+- `UserNotificationCenter.vue` 使用闭合信封/展开信封/禁用图标区分未读、已读、失效，同步增加状态 `aria-label`、隐藏文字和稳定的测试属性；“失效但从未访问”不伪装成已读。
+- 同步 agent-web README/PACKAGE、前端规范、模块图、会话场景测试文档和用户手册。
+
+### How
+
+- 通知组件定向 Vitest 3/3 通过；Chromium、Firefox、WebKit 会话分享专项 E2E 6/6 通过，覆盖弹框拉伸、备用链接弱化和通知未读→已读→失效表现。
+- 前端全量 `lint`、`typecheck`、production `build` 通过；Vitest 127 个文件、1944 passed / 1 skipped。用户手册构建也通过。
+- 用 JDK 25、`test` profile、根目录 `.env.test` 与 `--without-workflow` 从当前 release 工作区重启；后端 readiness 8080、前端 3000 均为 HTTP 200，通知接口未登录返回 401，OpenCode 4097/4098 `/global/config` 均为 200。启动时发现并收敛一个不持有子进程的重复 manager，最终仅保留一套健康进程树。
+
+### Result
+
+- 分享默认通过站内通知到达，备用 URL 退居次要操作；分享弹框可拉伸，通知已读/未读/失效在视觉与读屏语义上都可辨识。
+- 纯前端交互与文档调整，无 HTTP API、SSE 事件、DTO、数据库、SQL、鉴权或性能热路径变更；未修改 `.env*`、generated SDK 或 OpenCode 源码。并行工作区修改保持未暂存、未纳入本次提交。
+
+## 2026-08-11 - 修复应用源码管理位置与首次打开详情
+
+### Why
+
+- 应用级工作空间菜单点击应用代码库“管理”后，紧凑列表仍沿用旧工作区入口的左下角固定定位，与入口迁到顶部后的交互不一致。
+- 应用源码 `open` 已创建并返回 Runtime Workspace，但首次打开尚未产生 Session 引用；普通工作区详情查询只查个人或已有会话引用范围，随后请求详情时误报 `Workspace 不存在`。
+
+### What
+
+- `AppSourcePicker.vue` 改为固定在顶部上下文舱下方并水平居中，保持原有紧凑列表和管理流程不变。
+- `UserWorkspaceQueryService` 保留原个人/会话详情查询优先级；未命中时复用现有 `ConversationWorkspaceAccessAuthorizer` 的权威分类，仅允许已通过完整成员、generation、expiry、READY replica 与服务器绑定校验的 `APP_SOURCE` ACTIVE Workspace 回退主表，`STANDARD` 继续返回 `NOT_FOUND`。
+- 增加首次打开 APP_SOURCE 成功和 STANDARD 不越权两条后端单测，并在 Chromium 应用源码工作台用例中锁定弹框顶部位置；同步 workspace-management README、HTTP API、agent-web PACKAGE 和应用源码测试文档。
+
+### How
+
+- JDK 25 Maven 定向回归 `UserWorkspaceQueryServiceTest,AppSourceWorkspaceAccessTest` 通过；`test-agent-api -am package -DskipTests` 与启动脚本执行的 23 模块 `mvn clean package -Dmaven.test.skip=true` 均成功。
+- AppSourcePicker Vitest 3/3、agent-web typecheck、production build 通过；Chromium 应用源码快照完整工作台用例 1/1 通过，并验证弹框纵坐标位于顶部区间。
+- 按 `test` profile、根目录 `.env.test` 与 `--without-workflow` 启动当前代码：后端 readiness 8080、前端 3000、CORS 和 OpenCode 4097/4098 正常。既有独立发布栈继续占用 18080，导致新栈可选 XXL Job 管理进程端口冲突、聚合 health 为 DOWN；未擅自停止并行栈。
+
+### Result
+
+- 应用源码管理列表现在位于页面上方；首次打开已授权源码快照不再因尚无 Session 引用而被普通详情接口误判不存在，同时未扩大其它 Workspace 的读取范围。
+- HTTP URL、请求/响应字段和事件 wire 均未变；无数据库、SQL、migration、性能热路径或安全边界放宽，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-11 - 修复分享会话撤回重发乱序消息归并
+
+### Why
+
+- 企业部署的原始输出显示，分享会话含 compact 历史时，OpenCode 原生 `message.removed` 可能先于 durable `run.resend.started` 到达；旧 reducer 会提前删除已经交给替代 Run 的 USER 锚点。
+- 后续不含正文的 USER envelope 被忽略，紧随其后的 USER text part 因找不到稳定归属而误挂到上一条 assistant，权威消息刷新后页面又出现正确用户气泡，形成一瞬间错位和重复。
+
+### What
+
+- `runtime-reducer.ts` 在 removed 命中已绑定 replacement Run 的 USER 时，仅清除旧平台/远端消息别名并保留原位锚点；`run.resend.started` 复用同一别名迁移程序。
+- USER text part 在 role envelope 之前到达时，优先按 `replacementRunId` 接回未绑定的重发 USER，再回退文本匹配，禁止合入上一轮 assistant。
+- 新增包含 compact 历史、源 USER/ASSISTANT 删除早于 started、空 envelope、part 提前及平台权威同步的 reducer 回归；同步 `agent-chat/src/PACKAGE.md` 稳定说明。
+
+### How
+
+- `runtime-reducer.test.ts` 74/74 通过，`agent-chat` typecheck 通过；完整包测试为 186 passed / 1 个既有 `MarkdownView` 标题断言失败，本次未修改 Markdown 路径。
+- agent-web production build 通过；Chromium 的分享 + compact + 撤回重发 + 延迟原生事件回归 1/1 通过。
+- 使用 JDK 25、`test` profile、`.env.test` 与 `--without-workflow` 重启本地服务，后端 readiness 与前端均为 HTTP 200；真实 `Test message` 页面确认 `仅答复123` 仅出现一次，位于 USER 气泡且不在 assistant Markdown 中。
+
+### Result
+
+- transient 删除与 durable started 任意交错时，替代用户问题都保持单一、原位归并，不再短暂落入上一条助手回复或在权威刷新后重复。
+- 仅调整前端 RunEvent 投影和测试文档；没有变更 HTTP API、RunEvent wire schema、DTO、数据库、SQL、migration、鉴权、环境文件、generated SDK 或 OpenCode 只读源码。企业环境需重新构建并部署前端制品后生效。
+
+## 2026-08-11 - 通知中心默认展示未读
+
+### Why
+
+- 用户要求打开站内通知时优先处理未读，“全部”作为后续查历史的次要筛选。
+
+### What
+
+- 复用既有 `UserNotificationFilter` 与同一分页请求，将 `UserNotificationCenter`、`FigmaShell`、`AgentWorkbench` 的默认值统一为 `UNREAD`，首次请求直接携带 `unreadOnly=true`。
+- 筛选标签调整为“未读 / 全部”；未读处理完后保持空态，用户切到第二个标签才查看已读和失效历史。
+- 同步 frontend/agent-web README 与用户手册，不新增组件、API 或本地筛选分支。
+
+### How
+
+- `UserNotificationCenter.test.ts` 3/3 通过，agent-web `vue-tsc` 通过；Chromium、Firefox、WebKit 通知专项 3/3 通过，覆盖默认 `unreadOnly=true`、标签顺序与切换“全部”后的已读展示。
+- agent-web 含用户手册的 production build 通过；仅保留既有超大 chunk 提示。
+- 使用 JDK 25、`test` profile、根目录 `.env.test` 和 `--without-workflow` 重启。前一独立 release 后端仍占用 18080/9999，导致当前 8080 的聚合 health 为 503；明确终止该旧独立 Screen 后再次重启，最终 health/readiness/liveness、前端均为 200，4097/4098 OpenCode 均为 200，且仅保留当前 backend/manager/frontend 三个 Screen。
+
+### Result
+
+- 通知面板现在默认只显示未读，“全部”排在后面；筛选切换继续复用后端分页能力。
+- 纯前端默认交互变更，无 HTTP API、SSE 事件、DTO、数据库、SQL、鉴权、性能热路径或向后兼容契约变更；未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-11 - 恢复任务完成后的耗时展示
+
+### Why
+
+- `TaskUsage` 仍保留并由工作台提供当前或终态 `duration`，但 `FigmaChatPanel` 后来的展示条件只读取 `totalDuration` 或 tokens；兼容调用方只带锁定 `duration` 时，任务结束后整行耗时会消失。
+
+### What
+
+- 任务消耗 footer 继续优先展示累计 `totalDuration`，缺失时复用既有 `duration` 作为兼容回退；展示条件同步识别该字段，不新增计时状态、接口或工具方法。
+- 将原有静态终态用例收紧为仅传 `duration`，断言任务结束后仍显示静态标记和耗时；同步 agent-web README 的兼容说明。
+
+### How
+
+- TDD 红灯确认旧实现会隐藏仅有 `duration` 的任务消耗，修复后定向用例通过；完整 `FigmaChatPanel` 测试 159 passed / 1 skipped，agent-web typecheck 与 production build 通过。
+- 以 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 5173 --strictPort` 启动实际前端目标，`http://127.0.0.1:5173/` 返回 HTTP 200；提交前已回顾全部 `.agents/session-log*.md`，并保留工作区中其它未提交后端修改不纳入本次提交。
+
+### Result
+
+- 已完成任务即使只提供锁定 `duration`，也会继续显示耗时；同时保留 `totalDuration / tokens` 现有主路径和累计语义。
+- 纯前端兼容性修复；未变更 HTTP API、RunEvent、DTO、数据库、SQL、migration、性能或安全边界，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-11 - 运营分析趋势与小时热力随视口适配
+
+### Why
+
+- 运营分析总览的趋势项最小宽度和小时热力 24 列方格都使用固定像素，导致宽屏留下大量空白、窄屏无法按内容区平滑缩放。
+
+### What
+
+- 趋势图复用现有时间点数据和原生 CSS Grid，按实际点数生成弹性列；少量数据填满内容区，高密度数据保留最小列宽及局部横向滚动。
+- 小时热力继续保持 24 小时语义列，方格随内容宽度缩放并保持正方形，2K/4K 下单格最大 64px，避免无限放大；同步 agent-web README 和组件回归测试。
+
+### How
+
+- 定向 Vitest 3/3 通过；使用真实 Vite + Chromium 在 640、1440、2560px 三档视口测量，页面无整页横向溢出，趋势稳定 7 列，热力稳定 24 列，方格约为 22、53、64px 且宽高一致。
+- 正式 Vite 入口运行在 `http://127.0.0.1:4179/`，根页面和运营分析组件模块均返回 HTTP 200。完整 agent-web production build 被同一工作树中并行修改的 `InternalModelObservabilityPanel.vue` 未定义符号阻断，本次未修改该文件。
+
+### Result
+
+- 趋势和小时热力已按实际可用宽度适配常见窄屏、桌面和 2K/4K 视口；无 HTTP API、事件、DTO、数据库、SQL、migration、安全或环境配置变更，未修改 generated SDK 和 OpenCode 只读源码。
+
+## 2026-08-11 - 内部模型时延按厂商对比并补全 ITL Overview
+
+### Why
+
+- TTFT 与 ITL/TPOT 原先把不同模型厂商合成一个箱体，无法看出厂商差异；ITL/TPOT 又沿用了秒单位，且新指标没有出现在 Overview。
+- 明细列表默认只展示 20 条，必须明确保证聚合指标和图表不会拿当前页数据计算。
+
+### What
+
+- 两张竖向箱线图复用既有分布接口，按当前全量统计中的 Provider 分别查询并绘制，一个厂商一个箱体；TTFT 保持秒，ITL/TPOT 在明细、Overview、箱线图、坐标轴和提示中统一使用毫秒。
+- 分布响应兼容性新增 `averageMillis`，MyBatis XML 直接对全量合格明细计算平均值；Overview 新增 Avg ITL/TPOT 与 Max ITL/TPOT，不读取当前页明细。
+- 前端回归加入两个厂商和不同分布，并在当前页只有 1 条时断言 Overview 仍展示后端 540 次全量聚合；测试指南补充全量翻页和独立 Python 连续分位数复算方法。
+
+### How
+
+- 前端定向 Vitest 2/2、agent-web typecheck、development Vite build 通过；后端 domain/API/H2 persistence 定向测试 13/13 通过，JDK 25 全后端 package 通过，AI 文档校验通过。
+- PostgreSQL Testcontainers 用例在本机等待 Docker 容器期间持续无输出，人工终止，未把该项记作通过；同一 `avg`/`percentile_cont` SQL 已由 H2 定向测试和后端编译覆盖，生产 PostgreSQL 用例保留新增平均值断言。
+- 正式 Vite 入口运行于 `http://127.0.0.1:5174/` 并返回 200；Playwright 未登录访问会跳转企业统一认证，当前机器访问内网站点返回 502，因此无法取得真实登录态看板截图。
+
+### Result
+
+- 看板现在能直接比较每个模型厂商的 TTFT 与 ITL/TPOT 分布，并在 Overview 查看全量可靠 ITL 的平均值与最大值；明细分页只影响列表。
+- API 仅新增可忽略的响应字段，无 URL、事件或数据库结构变化；未新增 migration，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-11 - 修复共享会话撤回重发需等待模型流才同步
+
+### Why
+
+- 重发创建阶段只预留替代 Run 和 Redis 输入，平台 USER 直到模型执行入口才落库；共享变化信号又在 `run.resend.started` 后发布，观察方只能等思考或流式输出出现后才看到修改后的问题。
+- 取消或明确投递失败后没有对应的已提交消息通知，观察方也无法可靠恢复源 USER/ASSISTANT；跨节点迟到通知还可能覆盖较新的恢复状态。
+
+### What
+
+- 重发预约事务内原子创建替代 Run、持久化实际发送人归因的 USER、写入 scheduled 事实并推进 Session 修订；事务提交后立即广播 `sessionId/sourceRunId/replacementRunId/changeType/revision`，模型执行只按稳定远端消息号复用投影。
+- 分享 runtime SSE additive 暴露不含正文的 `messageChange`；新增按 Session + Run 精确读取替代 USER 和完整源轮次的两个鉴权 HTTP 接口。取消或明确失败删除未投递替代 USER、推进修订并发送 `RESEND_RESTORED`。
+- 前端按 replacement Run 原位同步 USER，恢复时按 source Run 原位还原 USER/ASSISTANT；按 Session 维护修订水位并在异步响应返回时二次校验，拒绝迟到旧通知。同步更新 API、事件、后端模块、前端和测试文档。
+
+### How
+
+- JDK 25 下受影响后端模块从干净构建通过 147 项测试，最终增量复跑仍为 runtime 110、API 32、persistence 5 全通过；前端相关 Vitest 207 项、全仓 typecheck 通过。
+- Chromium 共享场景覆盖 12 轮长历史、模型未启动时即时同步、取消恢复、无历史 loading/滚动跳变及迟到旧修订，连续 3/3 通过。
+- 首次按 `.env.test` 启动被既有工作流密钥文件缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 阻断；按项目规范在本次不验证 Workflow 的前提下使用 `--without-workflow` 重启。后端 health/readiness 为 UP、前端 3000 返回 200、CORS 正常，manager WebSocket 与 4097/4098 OpenCode 恢复健康且无解码/重连循环错误。
+- 提交前已回顾全部 `.agents/session-log*.md`，未发现冲突或合并标记；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+### Result
+
+- 共享参与者在重发事务提交后即可看到修改后的 USER，不再依赖模型思考或流式输出；取消和明确失败会恢复原轮次，重复及乱序通知不会回滚较新界面状态。
+- HTTP/SSE 仅做 additive 扩展并复用既有分享鉴权；未修改数据库结构或 Flyway migration，新增查询通过 MyBatis XML 使用现有 Run 索引，不在通知中传播消息正文。
+
+## 2026-08-12 - 修复撤回重发运行中重复用户消息
+
+### Why
+
+- 现场原始输出证明，预约阶段合成的替代 USER `message.updated` 会比 `run.resend.started` 早约 23 秒到达；此时前端替代轮次锚点仍保留源消息别名，旧归并条件无法命中并追加了第二条 USER。
+- 运行结束后的后端历史只返回一条 USER，确认问题发生在发送方和共享接收方复用的前端实时投影，不是数据库重复落库。
+
+### What
+
+- USER 事件在 `run.resend.started` 前即可按 `replacementRunId` 复用已迁移的替代轮次锚点；权威 USER 同步时统一折叠同一替代 Run 下的候选消息，并迁移 Todo owner 和快照映射。
+- 未携带消息类型的迟到 part 仍只允许命中无远端消息号的锚点，避免 ASSISTANT part 误挂到 USER。
+- 新增贴合现场事件顺序的 reducer 回归，以及发送方、共享接收方在模型开始前和运行完成后的单 USER 断言；同步包 README 和对话场景测试文档。
+
+### How
+
+- 相关 Vitest 3 个文件 209 项通过，Chromium 重发/共享同步 Playwright 2 项通过，全前端 typecheck、lint 和 `git diff --check` 通过。
+- JDK 25 后端 23 个模块 `mvn clean package -Dmaven.test.skip=true` 通过；使用 `.env.test` 和 `--without-workflow` 启动实际服务，后端 health/readiness 为 UP、前端 3000 返回 200、CORS 正常，manager 与 4097/4098 OpenCode 进程恢复健康。
+- 首次完整启动仍被本机 Workflow 密钥缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 阻断，本次功能不涉及 Workflow，故按项目文档排除该服务；提交前已回顾全部 `.agents/session-log*.md`，未发现与本次文件范围冲突。
+
+### Result
+
+- 发送方和共享接收方在撤回重发预约、模型思考、流式输出及完成后均只保留一个替代 USER 气泡。
+- 本次仅修正前端投影兼容逻辑；无 HTTP API、RunEvent 线协议、DTO、数据库、SQL、migration、鉴权、安全或环境配置变更，未修改 generated SDK 和 OpenCode 只读源码。
+
+## 2026-08-12 - 基于当前本地 release 重新生成企业增量包
+
+### Why
+
+- 用户要求按当前工作区代码重新打包；本地 `codex/release-enterprise-20260801` 的源码 HEAD 为 `f10754e01ab8f846a8aa2430214bb39f4795623b`，相对上一成品新增共享会话重发实时同步、重复消息修复、通知筛选、运营图表和内部模型时延等已提交改动。
+- 当前本地分支相对远程为 ahead 10 / behind 32；本次按“当前代码”语义不拉取、不切换，工作区无未提交源码和冲突。
+
+### What
+
+- 重新构建后端、前端和内层发布 ZIP，并使用上一完整包中 checksum 通过的 `.4/.114/.2` 节点配置包重新封装固定名外层包。
+- worker runtime 指纹 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`、toolbox 指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040` 均未变化，按 `reuse` 不重复携带大制品；Workflow、LobeHub 保持 `disabled`。
+- 当前新增提交没有增加或改写 Flyway SQL；成品仍完整携带并冻结上一交付已验证的企业主链与兼容资源。
+
+### How
+
+- JDK 25 下后端从 `clean` 开始运行受影响测试：工作区查询 3、runtime 35、API 32、persistence 27、真实 PostgreSQL Flyway 已知历史升级 18、Spring 装配 1，全部通过且无跳过；Flyway 字节冻结 10 项包含在 persistence 结果中。
+- 首次未带 `clean` 的测试受另一个分支遗留 `target/classes/MemoryLearningEvidenceMapper.xml` 干扰，并在并行 worktree 占用 Docker 时出现 PostgreSQL 容器启动超时；确认源码不存在该 Mapper/Row 后清理当前 reactor target，待并行任务结束后完整重跑通过，未为构建残留修改业务代码。
+- 前端 15 个 workspace typecheck 全部通过；受影响 Vitest 7 个文件 376 passed / 1 skipped；正式打包再次通过 Spring 装配、21 模块后端构建、`vue-tsc` 和 Vite production build。
+- 独立解包复验通过外层/内层 SHA 文件、两层 ZIP CRC、三台节点包 checksum、外层内嵌内层逐字节一致、组件清单、`opencode-models.json`、稳定组件逐字节一致及最终 persistence JAR 的受保护 migration SHA。
+
+### Result
+
+- 内层 `test-agent-internal-release.zip` SHA-256 为 `99f34a5652d5972dd4dbc1e9384026d1a1a78a8cc4bb1caa702a6c99cc000df5`；外层 `test-agent-two-backend-complete.zip` 为 `e6b9133c023355e220e5b190ebf33c5d3be447d570c6231e944228fddeb60d56`。
+- 稳定组件 SHA-256：app JAR `83fa5c91cbedbfc82ec7a856bb93ca3be449c0234238cb742672f7dea3be0491`，persistence JAR `444536695c6707263cf8b1962721273e107f40a6fcffbf9b23b9be44343916be`，XXL integration JAR `fd4acf7b5d1660dcbaf20a86c8b9bc85d5fde5e02615b1921071b8af418037f6`，前端归档 `f4dd64aea469a241cd4cd17ac9abe6ffb86313076ce238a1c259b14b00c35b58`，`opencode-models.json` `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
+- 本次任务没有修改生产代码、API、事件、数据库、migration、配置模板、`.env*`、generated SDK 或 OpenCode 只读源码；仅新增发布追溯记录。目标企业库完整 `flyway_schema_history` 仍需在现场部署前取得并通过准入判断。
+- 本条记录在最终制品生成后提交，不再据此重封 ZIP，否则归档内 session log 与 ZIP hash 会形成递归变化；成品源码内容对应 `f10754e01`。

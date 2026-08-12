@@ -146,7 +146,7 @@ Skill Hub 的事项分类以逻辑资产持久化：应用推送 Skill 复用 `a
 
 批量生成子条目测试案例不新增工作区目录协议：`apps/agent-web` 的弹层直接消费输入 `#` 已有的 `workspaceRequirementCandidates`，仍由 `AgentWorkbench` 通过四阶段 `searchFiles()` 聚合。前端局部上下文构建和最多四路编排不写当前输入附件；`packages/backend-api` 只新增批量 Session 方法并为夜间任务透传可选 `batchContext`。后端由 `test-agent-api` 暴露单项 Session HTTP DTO，`test-agent-opencode-runtime` 负责用户级幂等创建和定时事务归因，`test-agent-domain` 定义归因端口，`test-agent-persistence` 以专用 MyBatis XML 和 Flyway 保存 Session 字段、唯一索引与事务锁。每项仍使用既有 RunEvent SSE，不新增事件或统一运营报表。
 
-工作台通知中心由 `packages/shared-types` 定义通知分页和变化 DTO，`packages/backend-api` 只负责列表/通用已读 HTTP，`packages/event-stream-client` 负责带 Bearer 的通知 fetch SSE 与退避重连，`apps/agent-web` 组合铃铛、筛选、分页、可访问性和受控动作映射。页面只把 `SESSION_SHARE + shareId` 映射到同源 `/s/{shareId}` 新标签页，`RESTART_OWN_PROCESS` 只调用当前用户进程重启，`NONE` 仍可未读和标记已读；未知类型/动作失败关闭，禁止消费任意 URL。分享访问成功后的已读事实仍由后端分享业务统一确认。
+工作台通知中心由 `packages/shared-types` 定义通知分页和变化 DTO，`packages/backend-api` 只负责列表/通用已读 HTTP，`packages/event-stream-client` 负责带 Bearer 的通知 fetch SSE 与退避重连，`apps/agent-web` 组合铃铛、筛选、分页、可访问性和受控动作映射。列表复用 `unread/readAt/actionAvailable` 显示未读闭合信封、已读打开信封和未读取即失效的停用图标；分享管理弹框仅在页脚保留低强调备用链接并允许受视口约束的 CSS 双向拉伸。页面只把 `SESSION_SHARE + shareId` 映射到同源 `/s/{shareId}` 新标签页，`RESTART_OWN_PROCESS` 只调用当前用户进程重启，`NONE` 仍可未读和标记已读；未知类型/动作失败关闭，禁止消费任意 URL。分享访问成功后的已读事实仍由后端分享业务统一确认。
 
 | 包 | 职责 |
 |---|---|

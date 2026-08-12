@@ -30,6 +30,7 @@ import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.List;
 import java.util.Objects;
@@ -500,8 +501,12 @@ public class SessionApplicationService {
         }
         PageResponse<SessionMessage> page = sessionMessageRepository.findBySessionId(sessionId, pageRequest);
         if (runResendRepository == null) return page;
-        java.util.Set<RunId> suppressed = java.util.Set.copyOf(
+        java.util.Set<RunId> suppressed = new HashSet<>(
                 runResendRepository.findDispatchedSourceRunIds(sessionId));
+        // WAITING/REVERTING/REVERTED 已有后端替代 USER，历史读取必须隐藏源轮次，避免刷新时出现双气泡。
+        runResendRepository.findActiveBySession(sessionId)
+                .map(com.enterprise.testagent.domain.run.RunResend::sourceRunId)
+                .ifPresent(suppressed::add);
         if (suppressed.isEmpty()) return page;
         List<SessionMessage> visible = page.items().stream()
                 .filter(message -> message.runId() == null || !suppressed.contains(message.runId()))
@@ -544,6 +549,41 @@ public class SessionApplicationService {
             // 参数换目录、加入应用或服务器变化后，历史读取降级到已持久化快照，绝不触发远端访问。
             return false;
         }
+    }
+
+    /** 按替代 Run 精确读取平台 USER，供共享实时同步绕过历史分页和远端快照刷新。 */
+    public SessionMessage getUserMessageForRun(SessionId sessionId, RunId runId) {
+        getSession(sessionId);
+        return sessionMessageRepository.findUserBySessionIdAndRunId(sessionId, runId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "Run 用户消息不存在",
+                        Map.of("sessionId", sessionId.value(), "runId", runId.value())));
+    }
+
+    /** 当前用户版本先按历史归属隐藏越权差异，再执行同一精确消息查询。 */
+    public SessionMessage getUserMessageForRun(UserId userId, SessionId sessionId, RunId runId) {
+        getSession(userId, sessionId);
+        return getUserMessageForRun(sessionId, runId);
+    }
+
+    /** 按 Run 精确读取完整轮次；不触发远端刷新，也不受当前重发的历史隐藏规则影响。 */
+    public List<SessionMessage> listMessagesForRun(SessionId sessionId, RunId runId) {
+        getSession(sessionId);
+        List<SessionMessage> messages = sessionMessageRepository.findBySessionIdAndRunId(sessionId, runId);
+        if (messages.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.NOT_FOUND,
+                    "Run 会话消息不存在",
+                    Map.of("sessionId", sessionId.value(), "runId", runId.value()));
+        }
+        return messages;
+    }
+
+    /** 当前用户版本先校验会话归属，再执行同一精确轮次查询。 */
+    public List<SessionMessage> listMessagesForRun(UserId userId, SessionId sessionId, RunId runId) {
+        getSession(userId, sessionId);
+        return listMessagesForRun(sessionId, runId);
     }
 
     private void requireUserWorkspace(UserId userId, WorkspaceId workspaceId) {

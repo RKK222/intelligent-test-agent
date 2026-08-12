@@ -1,8 +1,9 @@
 package com.enterprise.testagent.domain.internalmodelobservability;
 
-/** 由单次调用明细计算出的时延五数概括，供箱线图展示。 */
+/** 由单次调用明细计算出的平均值与五数概括，供总览指标和箱线图共用。 */
 public record InternalModelLatencyDistribution(
         long sampleCount,
+        Double averageMillis,
         Double minimumMillis,
         Double firstQuartileMillis,
         Double medianMillis,
@@ -14,17 +15,21 @@ public record InternalModelLatencyDistribution(
             throw new IllegalArgumentException("sampleCount must be >= 0");
         }
         if (sampleCount == 0) {
+            averageMillis = null;
             minimumMillis = null;
             firstQuartileMillis = null;
             medianMillis = null;
             thirdQuartileMillis = null;
             maximumMillis = null;
-        } else if (minimumMillis == null
+        } else if (averageMillis == null
+                || minimumMillis == null
                 || firstQuartileMillis == null
                 || medianMillis == null
                 || thirdQuartileMillis == null
                 || maximumMillis == null
                 || minimumMillis < 0
+                || averageMillis < minimumMillis
+                || averageMillis > maximumMillis
                 || minimumMillis > firstQuartileMillis
                 || firstQuartileMillis > medianMillis
                 || medianMillis > thirdQuartileMillis

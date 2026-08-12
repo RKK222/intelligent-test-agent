@@ -50,6 +50,7 @@
     <resultMap id="LatencyDistributionRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelLatencyDistributionRow">
         <constructor>
             <arg column="sample_count" javaType="java.lang.Long"/>
+            <arg column="average_ms" javaType="java.lang.Double"/>
             <arg column="minimum_ms" javaType="java.lang.Double"/>
             <arg column="first_quartile_ms" javaType="java.lang.Double"/>
             <arg column="median_ms" javaType="java.lang.Double"/>
@@ -211,6 +212,7 @@
 
     <select id="findTtftDistribution" resultMap="LatencyDistributionRowMap">
         select count(*) as sample_count,
+               cast(avg(first_token_ms) as double precision) as average_ms,
                cast(min(first_token_ms) as double precision) as minimum_ms,
                percentile_cont(0.25) within group (order by first_token_ms) as first_quartile_ms,
                percentile_cont(0.50) within group (order by first_token_ms) as median_ms,
@@ -223,6 +225,7 @@
 
     <select id="findItlDistribution" resultMap="LatencyDistributionRowMap">
         select count(*) as sample_count,
+               avg(token_latency_ms) as average_ms,
                min(token_latency_ms) as minimum_ms,
                percentile_cont(0.25) within group (order by token_latency_ms) as first_quartile_ms,
                percentile_cont(0.50) within group (order by token_latency_ms) as median_ms,

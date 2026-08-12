@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Activity, BookOpen, ChevronDown, ChevronUp, Clock, ExternalLink, FileText, Filter, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
 import * as echarts from "echarts";
@@ -147,7 +147,7 @@ const glossaryItems: GlossaryItem[] = [
   {
     abbr: "ITL / TPOT",
     name: "Inter-Token Latency / Time Per Output Token",
-    desc: "Token 输出间隔：模型开始回答后，后续每个 Token 平均要等多久；至少输出 2 个 Token 且供应商返回准确用量时才统计。"
+    desc: "Token 输出间隔：模型开始回答后，后续每个 Token 平均要等多久，页面按毫秒展示；至少输出 2 个 Token 且供应商返回准确用量时才统计。"
   },
   { abbr: "SCT", name: "Stream Completion Time", desc: "流式完成时间：发起请求到流式响应正常结束的总耗时。" },
   { abbr: "E2E", name: "End-to-End Latency", desc: "端到端延迟：发起请求到接收到完整响应或异常终止的总端到端时长。" },
@@ -170,7 +170,9 @@ const metricHelp = {
   totalDuration: "把每一次调用的耗时相加。多次调用可能同时进行，所以它不等于实际经过的钟表时间。",
   rps: "当前小时和之前 23 个小时段内，总请求数除以从最早整点到本次加载或刷新时刻的秒数。它反映平均请求负载，不是瞬时峰值。",
   firstToken: "首 Token 延迟（TTFT）：从发起调用到模型开始返回实际回答的等待时间；非流式调用或没有实际回答时显示“—”。",
-  interTokenLatency: "ITL / TPOT：模型开始回答后，后续每个输出 Token 平均间隔多久。至少输出 2 个 Token 且供应商返回准确用量时才显示；不会把数据块数量当作 Token 数。",
+  interTokenLatency: "ITL / TPOT：模型开始回答后，后续每个输出 Token 平均间隔多久，页面按毫秒展示。至少输出 2 个 Token 且供应商返回准确用量时才显示；不会把数据块数量当作 Token 数。",
+  avgInterTokenLatency: "平均 ITL / TPOT：把当前范围内每次可靠的 Token 输出间隔相加，再除以可靠样本数；按毫秒展示。没有准确输出 Token 数的调用不参与。",
+  maxInterTokenLatency: "最大 ITL / TPOT：当前范围内最慢的一次可靠 Token 输出间隔；按毫秒展示。没有准确输出 Token 数的调用不参与。",
   avgFirstToken: "平均首 Token 延迟（TTFT）：只统计模型确实开始回答的流式调用，没有返回实际回答的调用不参与。",
   maxFirstToken: "最大首 Token 延迟（TTFT）：只比较模型确实开始回答的流式调用。",
   streamComplete: "从发起调用到流式回答正常结束所用的时间；它以完整结束信号为准，不等同于最后一个 Token 到达时间。",
@@ -183,8 +185,8 @@ const metricHelp = {
 
 const chartHelp = {
   hourlyTrend: "按小时查看请求数和请求成功率如何变化；选择结果大类后只展示该类请求数。",
-  ttftDistribution: "查看模型开始回答前的等待时间分布。箱体表示中间一半的调用，箱内竖线表示中位数，两端表示当前范围内最短和最长的等待时间。",
-  itlDistribution: "查看模型开始回答后的输出节奏。箱体表示中间一半的调用，箱内横线表示中位数，两端表示当前范围内最快和最慢的平均 Token 间隔。",
+  ttftDistribution: "按模型厂商比较开始回答前的等待时间。每个厂商一个箱体：箱体表示该厂商中间一半的调用，箱内横线表示中位数，两端表示最短和最长等待时间。",
+  itlDistribution: "按模型厂商比较开始回答后的输出节奏。每个厂商一个箱体：箱体表示该厂商中间一半的调用，箱内横线表示中位数，两端表示最快和最慢的平均 Token 间隔。",
   successComposition: "把当前筛选范围内的调用分成成功和错误两类，展示各自所占比例。",
   failureBreakdown: "只看异常调用，归并为请求或配置问题、上游服务异常、调用方中断和其他异常。",
   providerVolume: "按供应商汇总当前筛选范围内的调用次数，用来比较各供应商实际承载的调用量。"
@@ -239,27 +241,63 @@ const statsQuery = useQuery({
   })
 });
 
-const ttftDistributionQuery = useQuery({
-  queryKey: computed(() => ["internal-model-observability-ttft-distribution", {
-    providerId: filterProviderId.value || null,
-    outcomeGroup: filterOutcomeGroup.value || null,
-    source: filterSource.value || null,
-    from: queryWindow.value.from,
-    to: queryWindow.value.to
-  }]),
-  enabled: () => hasSuperAdmin.value,
-  retry: false,
-  queryFn: () => api.getInternalModelTtftDistribution({
-    providerId: filterProviderId.value || null,
-    outcomeGroup: filterOutcomeGroup.value || null,
-    source: filterSource.value || null,
-    from: queryWindow.value.from,
-    to: queryWindow.value.to
-  })
+/** 箱线图按当前统计结果中的 Provider 分组；选中单一 Provider 时仍保留同一查询路径。 */
+const distributionProviderIds = computed(() => {
+  if (filterProviderId.value) return [filterProviderId.value];
+  const providerIds = new Set<string>();
+  for (const row of statsQuery.data.value ?? []) {
+    if (!filterOutcomeGroup.value || outcomeGroupOf(row.outcome) === filterOutcomeGroup.value) {
+      providerIds.add(row.providerId);
+    }
+  }
+  return [...providerIds].sort();
 });
 
-const itlDistributionQuery = useQuery({
-  queryKey: computed(() => ["internal-model-observability-itl-distribution", {
+const ttftDistributionQueries = useQueries({
+  queries: computed(() => distributionProviderIds.value.map((providerId) => ({
+    queryKey: ["internal-model-observability-ttft-distribution", {
+      providerId,
+      outcomeGroup: filterOutcomeGroup.value || null,
+      source: filterSource.value || null,
+      from: queryWindow.value.from,
+      to: queryWindow.value.to
+    }],
+    enabled: () => hasSuperAdmin.value,
+    retry: false,
+    queryFn: () => api.getInternalModelTtftDistribution({
+      providerId,
+      outcomeGroup: filterOutcomeGroup.value || null,
+      source: filterSource.value || null,
+      from: queryWindow.value.from,
+      to: queryWindow.value.to
+    })
+  })))
+});
+
+const itlDistributionQueries = useQueries({
+  queries: computed(() => distributionProviderIds.value.map((providerId) => ({
+    queryKey: ["internal-model-observability-itl-distribution", {
+      providerId,
+      outcomeGroup: filterOutcomeGroup.value || null,
+      source: filterSource.value || null,
+      from: queryWindow.value.from,
+      to: queryWindow.value.to
+    }],
+    enabled: () => hasSuperAdmin.value,
+    retry: false,
+    queryFn: () => api.getInternalModelItlDistribution({
+      providerId,
+      outcomeGroup: filterOutcomeGroup.value || null,
+      source: filterSource.value || null,
+      from: queryWindow.value.from,
+      to: queryWindow.value.to
+    })
+  })))
+});
+
+/** Overview 使用全范围分布接口的准确均值与最大值，不能从当前页明细推算。 */
+const itlOverviewQuery = useQuery({
+  queryKey: computed(() => ["internal-model-observability-itl-overview", {
     providerId: filterProviderId.value || null,
     outcomeGroup: filterOutcomeGroup.value || null,
     source: filterSource.value || null,
@@ -297,11 +335,14 @@ async function refreshAll() {
   await Promise.all([
     recordsQuery.refetch(),
     statsQuery.refetch(),
-    ttftDistributionQuery.refetch(),
-    itlDistributionQuery.refetch(),
+    itlOverviewQuery.refetch(),
     probeStatusQuery.refetch()
   ]);
   await nextTick();
+  await Promise.all([
+    ...ttftDistributionQueries.value.map((query) => query.refetch()),
+    ...itlDistributionQueries.value.map((query) => query.refetch())
+  ]);
   renderCharts();
 }
 
@@ -329,12 +370,11 @@ const stats = computed(() => (statsQuery.data.value ?? []).filter((row) =>
   !filterOutcomeGroup.value || outcomeGroupOf(row.outcome) === filterOutcomeGroup.value
 ));
 
-const emptyLatencyDistribution: InternalModelLatencyDistribution = { sampleCount: 0 };
-const ttftDistribution = computed(() => ttftDistributionQuery.data.value ?? emptyLatencyDistribution);
-const itlDistribution = computed(() => itlDistributionQuery.data.value ?? emptyLatencyDistribution);
-
-/** 只有后端返回完整、单调的五数概括时才绘图，并在进入图表前统一换算为秒。 */
-function toBoxDataSeconds(distribution: InternalModelLatencyDistribution): [number, number, number, number, number] | null {
+/** 只有后端返回完整、单调的五数概括时才绘图，并在进入图表前换算成目标单位。 */
+function toBoxValues(
+  distribution: InternalModelLatencyDistribution,
+  divisor: number
+): [number, number, number, number, number] | null {
   const values = [
     distribution.minimumMillis,
     distribution.firstQuartileMillis,
@@ -350,17 +390,42 @@ function toBoxDataSeconds(distribution: InternalModelLatencyDistribution): [numb
     return null;
   }
   return [minimum, firstQuartile, median, thirdQuartile, maximum]
-    .map((millis) => millis / MILLISECONDS_PER_SECOND) as [number, number, number, number, number];
+    .map((millis) => millis / divisor) as [number, number, number, number, number];
 }
 
-const ttftBoxData = computed(() => toBoxDataSeconds(ttftDistribution.value));
-const itlBoxData = computed(() => toBoxDataSeconds(itlDistribution.value));
+type ProviderLatencyBox = {
+  providerId: string;
+  sampleCount: number;
+  values: [number, number, number, number, number];
+};
+
+const ttftBoxData = computed<ProviderLatencyBox[]>(() => distributionProviderIds.value.flatMap((providerId, index) => {
+  const distribution = ttftDistributionQueries.value[index]?.data;
+  const values = distribution ? toBoxValues(distribution, MILLISECONDS_PER_SECOND) : null;
+  return distribution && values ? [{ providerId, sampleCount: distribution.sampleCount, values }] : [];
+}));
+
+const itlBoxData = computed<ProviderLatencyBox[]>(() => distributionProviderIds.value.flatMap((providerId, index) => {
+  const distribution = itlDistributionQueries.value[index]?.data;
+  const values = distribution ? toBoxValues(distribution, 1) : null;
+  return distribution && values ? [{ providerId, sampleCount: distribution.sampleCount, values }] : [];
+}));
+
+const ttftDistributionLoading = computed(() =>
+  statsQuery.isLoading.value || ttftDistributionQueries.value.some((query) => query.isPending)
+);
+const itlDistributionLoading = computed(() =>
+  statsQuery.isLoading.value || itlDistributionQueries.value.some((query) => query.isPending)
+);
+const ttftDistributionError = computed(() => ttftDistributionQueries.value.some((query) => query.isError));
+const itlDistributionError = computed(() => itlDistributionQueries.value.some((query) => query.isError));
 
 const observabilityFetching = computed(() =>
   recordsQuery.isFetching.value
     || statsQuery.isFetching.value
-    || ttftDistributionQuery.isFetching.value
-    || itlDistributionQuery.isFetching.value
+    || itlOverviewQuery.isFetching.value
+    || ttftDistributionQueries.value.some((query) => query.isFetching)
+    || itlDistributionQueries.value.some((query) => query.isFetching)
 );
 
 const showRateMetrics = computed(() => !filterOutcomeGroup.value);
@@ -463,7 +528,7 @@ const failureBreakdown = computed<Array<{ group: InternalModelCallOutcomeGroup; 
     .sort((a, b) => b.count - a.count);
 });
 
-/** 全局总览指标：只使用小时聚合可准确还原的计数、均值、最大值与 TTFT 均值。 */
+/** 全局总览指标：小时聚合负责请求类指标，明细分布查询负责可靠的 ITL 均值和最大值。 */
 const overallMetrics = computed(() => {
   let totalRequests = 0;
   let successCount = 0;
@@ -506,6 +571,7 @@ const overallMetrics = computed(() => {
   );
   const rps = totalRequests / windowSeconds;
   const providerCount = new Set(stats.value.map((row) => row.providerId)).size;
+  const itlDistribution = itlOverviewQuery.data.value;
   return {
     totalRequests, successCount, failureCount, successRate, failureRate,
     avgDuration, maxDuration,
@@ -514,6 +580,9 @@ const overallMetrics = computed(() => {
     streamCompleteAvg,
     streamCompleteMax: streamCompleteCount > 0 ? streamCompleteMillisMax : null,
     streamCompleteCount,
+    interTokenLatencyAvg: itlDistribution?.averageMillis ?? null,
+    interTokenLatencyMax: itlDistribution?.maximumMillis ?? null,
+    interTokenLatencyCount: itlDistribution?.sampleCount ?? 0,
     totalDurationMillis,
     rps, providerCount
   };
@@ -627,49 +696,59 @@ function ensureChart(el: HTMLDivElement, holder: { current: echarts.ECharts | nu
   return holder.current;
 }
 
-function renderLatencyBox(
+/** 一个供应商绘制一个箱体，避免不同厂商的时延被合并后掩盖差异。 */
+function renderLatencyBoxes(
   el: HTMLDivElement | null,
   chart: echarts.ECharts | null,
-  data: [number, number, number, number, number] | null,
-  distribution: InternalModelLatencyDistribution,
+  boxes: ProviderLatencyBox[],
   label: string,
+  unit: "s" | "ms",
   color: string,
   background: string
 ): echarts.ECharts | null {
-  if (!data || !el || el.clientWidth <= 0) {
+  if (!boxes.length || !el || el.clientWidth <= 0) {
     chart?.dispose();
     return null;
   }
   const instance = ensureChart(el, { current: chart });
-  const [minimum, firstQuartile, median, thirdQuartile, maximum] = data;
   instance?.setOption({
     animation: false,
     tooltip: {
       trigger: "item",
-      formatter: () => [
-        `<strong>${label} 分布（${distribution.sampleCount} 次）</strong>`,
-        `最短：${formatSeconds(minimum)}`,
-        `25% 的调用不超过：${formatSeconds(firstQuartile)}`,
-        `中位数：${formatSeconds(median)}`,
-        `75% 的调用不超过：${formatSeconds(thirdQuartile)}`,
-        `最长：${formatSeconds(maximum)}`
-      ].join("<br/>")
+      formatter: (params: { dataIndex?: number }) => {
+        const box = boxes[params.dataIndex ?? -1];
+        if (!box) return "";
+        const [minimum, firstQuartile, median, thirdQuartile, maximum] = box.values;
+        return [
+          `<strong>${escapeTooltipHtml(box.providerId)} · ${label}（${box.sampleCount} 次）</strong>`,
+          `最短：${formatLatencyValue(minimum, unit)}`,
+          `25% 的调用不超过：${formatLatencyValue(firstQuartile, unit)}`,
+          `中位数：${formatLatencyValue(median, unit)}`,
+          `75% 的调用不超过：${formatLatencyValue(thirdQuartile, unit)}`,
+          `最长：${formatLatencyValue(maximum, unit)}`
+        ].join("<br/>");
+      }
     },
-    grid: { top: 18, left: 82, right: 30, bottom: 36 },
-    xAxis: { type: "category", data: ["全部调用"], axisTick: { show: false } },
+    grid: { top: 18, left: 82, right: 30, bottom: boxes.length > 3 ? 72 : 48 },
+    xAxis: {
+      type: "category",
+      data: boxes.map((box) => box.providerId),
+      axisTick: { show: false },
+      axisLabel: { interval: 0, rotate: boxes.length > 3 ? 20 : 0 }
+    },
     yAxis: {
       type: "value",
-      name: `${label} (s)`,
+      name: `${label} (${unit})`,
       min: 0,
       scale: true,
-      axisLabel: { formatter: (value: number) => formatSeconds(value) }
+      axisLabel: { formatter: (value: number) => formatLatencyValue(value, unit) }
     },
     series: [{
       name: label,
       type: "boxplot",
       layout: "vertical",
       boxWidth: [40, 90],
-      data: [[minimum, firstQuartile, median, thirdQuartile, maximum]],
+      data: boxes.map((box) => box.values),
       itemStyle: { color: background, borderColor: color, borderWidth: 2 }
     }]
   }, true);
@@ -713,11 +792,11 @@ function renderCharts() {
       ]
     }, true);
   }
-  ttftChart = renderLatencyBox(
-    ttftChartEl.value, ttftChart, ttftBoxData.value, ttftDistribution.value, "TTFT", "#2563eb", "#dbeafe"
+  ttftChart = renderLatencyBoxes(
+    ttftChartEl.value, ttftChart, ttftBoxData.value, "TTFT", "s", "#2563eb", "#dbeafe"
   );
-  itlChart = renderLatencyBox(
-    itlChartEl.value, itlChart, itlBoxData.value, itlDistribution.value, "ITL / TPOT", "#7c3aed", "#ede9fe"
+  itlChart = renderLatencyBoxes(
+    itlChartEl.value, itlChart, itlBoxData.value, "ITL / TPOT", "ms", "#7c3aed", "#ede9fe"
   );
   if (showRateMetrics.value && pieChartEl.value && pieChartEl.value.clientWidth > 0) {
     pieChart = ensureChart(pieChartEl.value, { current: pieChart });
@@ -796,7 +875,7 @@ onBeforeUnmount(() => {
 });
 
 // 数据变动后 post-flush 触发重新渲染，确保在新 DOM 或过滤数据更新后重绘图表
-watch([() => stats.value, () => ttftDistribution.value, () => itlDistribution.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
+watch([() => stats.value, () => ttftBoxData.value, () => itlBoxData.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
   void nextTick(renderCharts);
 }, { deep: true, flush: "post" });
 
@@ -818,7 +897,7 @@ const outcomeText: Record<InternalModelCallOutcome, string> = {
 
 const outcomeDetailLabel = (outcome: InternalModelCallOutcome) => outcomeText[outcome] ?? "未知错误";
 
-/** 页面所有时长统一展示为秒；接口保留毫秒字段，集中在此处完成兼容换算。 */
+/** E2E、TTFT、SCT 使用秒展示；接口保留毫秒字段，集中在此处完成兼容换算。 */
 function formatDuration(millis: number | null | undefined): string {
   if (millis === null || millis === undefined || !Number.isFinite(millis) || millis < 0) return "-";
   return formatSeconds(millis / MILLISECONDS_PER_SECOND);
@@ -833,8 +912,31 @@ function formatSeconds(seconds: number | null | undefined): string {
   return `${rounded}s`;
 }
 
+/** ITL / TPOT 使用毫秒展示，保留小数以免丢失单次 Token 间隔精度。 */
+function formatMilliseconds(millis: number | null | undefined): string {
+  if (millis === null || millis === undefined || !Number.isFinite(millis) || millis < 0) return "-";
+  const precision = millis > 0 && millis < 0.001 ? 6 : 3;
+  const rounded = Number(millis.toFixed(precision));
+  if (millis > 0 && rounded === 0) return "<0.000001ms";
+  return `${rounded}ms`;
+}
+
+function formatLatencyValue(value: number | null | undefined, unit: "s" | "ms"): string {
+  return unit === "s" ? formatSeconds(value) : formatMilliseconds(value);
+}
+
+/** ECharts tooltip 使用 HTML 渲染，供应商标识只作为文本展示。 */
+function escapeTooltipHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 /** 只按业界口径计算可靠样本：首末输出间隔除以后续 Token 数。 */
-function interTokenLatencySeconds(row: {
+function interTokenLatencyMillis(row: {
   firstTokenMillis?: number | null;
   lastTokenMillis?: number | null;
   outputTokenCount?: number | null;
@@ -852,7 +954,7 @@ function interTokenLatencySeconds(row: {
     || last < first) {
     return null;
   }
-  return (last - first) / (count - 1) / MILLISECONDS_PER_SECOND;
+  return (last - first) / (count - 1);
 }
 
 /** 低流量不压成 0.00，高流量保持两位小数。 */
@@ -927,7 +1029,7 @@ function onPageSizeChange(next: number) {
             <ChevronDown :size="13" />
           </button>
         </div>
-        <span class="ta-imob-sub">默认查看当前 {{ selectedWindowHours }} 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有时长统一使用秒（s），英文缩写见页首对照指南。</span>
+        <span class="ta-imob-sub">默认查看当前 {{ selectedWindowHours }} 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有指标和图表都使用当前筛选范围内的全量记录，不受明细分页影响。E2E、TTFT、SCT 使用秒（s），ITL / TPOT 使用毫秒（ms），英文缩写见页首对照指南。</span>
 
         <!-- 页首 AIPerf / 业界指标英文缩写对照指南 (Glossary) -->
         <div v-if="showGlossary" class="ta-imob-glossary-card">
@@ -1144,7 +1246,7 @@ function onPageSizeChange(next: number) {
               <template #header>
                 <MetricHelpLabel label="ITL / TPOT" :description="metricHelp.interTokenLatency" />
               </template>
-              <template #default="{ row }">{{ formatSeconds(interTokenLatencySeconds(row)) }}</template>
+              <template #default="{ row }">{{ formatMilliseconds(interTokenLatencyMillis(row)) }}</template>
             </el-table-column>
             <el-table-column label="SCT" min-width="170">
               <template #header>
@@ -1191,7 +1293,7 @@ function onPageSizeChange(next: number) {
 
         <section class="ta-imob-section ta-imob-metrics-section">
           <h4 class="ta-imob-section-title">聚合指标</h4>
-          <div v-loading="statsQuery.isLoading.value" class="ta-imob-stats">
+          <div v-loading="statsQuery.isLoading.value || itlOverviewQuery.isLoading.value" class="ta-imob-stats">
             <!-- 全局总览指标 -->
             <div v-if="overallMetrics.totalRequests !== undefined" class="ta-imob-overview">
               <h4 class="ta-imob-overview-title">Overview</h4>
@@ -1247,6 +1349,14 @@ function onPageSizeChange(next: number) {
                   <MetricHelpLabel class="ta-imob-overview-label" label="Max TTFT" :description="metricHelp.maxFirstToken" />
                 </div>
                 <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ formatMilliseconds(overallMetrics.interTokenLatencyAvg) }}</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Avg ITL / TPOT" :description="metricHelp.avgInterTokenLatency" />
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ formatMilliseconds(overallMetrics.interTokenLatencyMax) }}</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Max ITL / TPOT" :description="metricHelp.maxInterTokenLatency" />
+                </div>
+                <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteAvg) }}</span>
                   <MetricHelpLabel class="ta-imob-overview-label" label="Avg SCT" :description="metricHelp.avgStreamComplete" />
                 </div>
@@ -1288,42 +1398,48 @@ function onPageSizeChange(next: number) {
                 </div>
 
                 <div class="ta-imob-latency-box-stack">
-                  <div v-loading="ttftDistributionQuery.isLoading.value" class="ta-imob-chart-card ta-imob-box-card">
+                  <div v-loading="ttftDistributionLoading" class="ta-imob-chart-card ta-imob-box-card">
                     <div class="ta-imob-box-title-row">
                       <h4 class="ta-imob-overview-title">
-                        <MetricHelpLabel label="TTFT 分布（箱线图）" :description="chartHelp.ttftDistribution" />
+                        <MetricHelpLabel label="TTFT 厂商对比（箱线图）" :description="chartHelp.ttftDistribution" />
                       </h4>
-                      <div v-if="ttftBoxData" class="ta-imob-box-summary">
-                        <span>中间 50%：{{ formatSeconds(ttftBoxData[1]) }}–{{ formatSeconds(ttftBoxData[3]) }}</span>
-                        <span>中位数：{{ formatSeconds(ttftBoxData[2]) }}</span>
-                        <span>样本：{{ ttftDistribution.sampleCount }} 次</span>
+                      <div v-if="ttftBoxData.length" class="ta-imob-box-summary">
+                        <div v-for="box in ttftBoxData" :key="box.providerId" class="ta-imob-box-summary-item">
+                          <strong>{{ box.providerId }}</strong>
+                          <span>中间 50%：{{ formatSeconds(box.values[1]) }}–{{ formatSeconds(box.values[3]) }}</span>
+                          <span>中位数：{{ formatSeconds(box.values[2]) }}</span>
+                          <span>样本：{{ box.sampleCount }} 次</span>
+                        </div>
                       </div>
                     </div>
-                    <div v-if="ttftDistributionQuery.isError.value" class="ta-imob-chart-empty">
+                    <div v-if="ttftDistributionError && !ttftBoxData.length" class="ta-imob-chart-empty">
                       TTFT 分布加载失败，请刷新重试
                     </div>
-                    <div v-else-if="ttftBoxData" ref="ttftChartEl" class="ta-imob-chart ta-imob-chart-box" />
-                    <div v-else-if="!ttftDistributionQuery.isLoading.value" class="ta-imob-chart-empty">
+                    <div v-else-if="ttftBoxData.length" ref="ttftChartEl" class="ta-imob-chart ta-imob-chart-box" />
+                    <div v-else-if="!ttftDistributionLoading" class="ta-imob-chart-empty">
                       当前筛选范围没有可用于统计的 TTFT
                     </div>
                   </div>
 
-                  <div v-loading="itlDistributionQuery.isLoading.value" class="ta-imob-chart-card ta-imob-box-card">
+                  <div v-loading="itlDistributionLoading" class="ta-imob-chart-card ta-imob-box-card">
                     <div class="ta-imob-box-title-row">
                       <h4 class="ta-imob-overview-title">
-                        <MetricHelpLabel label="ITL / TPOT 分布（箱线图）" :description="chartHelp.itlDistribution" />
+                        <MetricHelpLabel label="ITL / TPOT 厂商对比（箱线图）" :description="chartHelp.itlDistribution" />
                       </h4>
-                      <div v-if="itlBoxData" class="ta-imob-box-summary">
-                        <span>中间 50%：{{ formatSeconds(itlBoxData[1]) }}–{{ formatSeconds(itlBoxData[3]) }}</span>
-                        <span>中位数：{{ formatSeconds(itlBoxData[2]) }}</span>
-                        <span>样本：{{ itlDistribution.sampleCount }} 次</span>
+                      <div v-if="itlBoxData.length" class="ta-imob-box-summary">
+                        <div v-for="box in itlBoxData" :key="box.providerId" class="ta-imob-box-summary-item">
+                          <strong>{{ box.providerId }}</strong>
+                          <span>中间 50%：{{ formatMilliseconds(box.values[1]) }}–{{ formatMilliseconds(box.values[3]) }}</span>
+                          <span>中位数：{{ formatMilliseconds(box.values[2]) }}</span>
+                          <span>样本：{{ box.sampleCount }} 次</span>
+                        </div>
                       </div>
                     </div>
-                    <div v-if="itlDistributionQuery.isError.value" class="ta-imob-chart-empty">
+                    <div v-if="itlDistributionError && !itlBoxData.length" class="ta-imob-chart-empty">
                       ITL / TPOT 分布加载失败，请刷新重试
                     </div>
-                    <div v-else-if="itlBoxData" ref="itlChartEl" class="ta-imob-chart ta-imob-chart-box" />
-                    <div v-else-if="!itlDistributionQuery.isLoading.value" class="ta-imob-chart-empty">
+                    <div v-else-if="itlBoxData.length" ref="itlChartEl" class="ta-imob-chart ta-imob-chart-box" />
+                    <div v-else-if="!itlDistributionLoading" class="ta-imob-chart-empty">
                       当前范围没有可靠的 ITL / TPOT 样本
                     </div>
                   </div>
@@ -1427,7 +1543,7 @@ function onPageSizeChange(next: number) {
                 <td><code>ITL / TPOT</code></td>
                 <td>Inter-Token Latency / Time Per Output Token</td>
                 <td>Token 输出间隔 / 单 Token 耗时</td>
-                <td>已统计（首末输出间隔 ÷ 后续 Token 数；至少 2 个输出 Token 且供应商返回准确用量）</td>
+                <td>已统计，按毫秒展示（首末输出间隔 ÷ 后续 Token 数；至少 2 个输出 Token 且供应商返回准确用量）</td>
               </tr>
               <tr>
                 <td><code>SCT</code></td>
@@ -1833,11 +1949,20 @@ function onPageSizeChange(next: number) {
 }
 .ta-imob-box-summary {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   justify-content: flex-end;
-  gap: 6px 14px;
+  gap: 6px;
   color: #475569;
   font-size: 12px;
+}
+.ta-imob-box-summary-item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 12px;
+}
+.ta-imob-box-summary-item strong {
+  color: #1e293b;
 }
 .ta-imob-chart-empty {
   display: flex;

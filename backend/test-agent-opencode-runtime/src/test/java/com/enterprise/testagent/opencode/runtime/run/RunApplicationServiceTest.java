@@ -323,6 +323,11 @@ class RunApplicationServiceTest {
                 .thenReturn(new UserOpencodeProcessAssignment(
                         userProcessNode("node_resend123456789", "http://127.0.0.1:4096")));
         FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        messages.save(RunApplicationService.newUserMessageProjection(
+                session().sessionId(), replacementRunId, "resend", List.of(), userId,
+                RUNTIME_DISPATCH_MESSAGE_ID, "trace_resend_dispatch", NOW,
+                ConversationSourceType.MANUAL, null,
+                new RunActorAttribution(userId, sharedSender, "ucid_shared_resend_sender", true)));
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(), new FakeSessionRepository(session()), runs,
                 messages, new FakeExecutionNodeRepository(),
