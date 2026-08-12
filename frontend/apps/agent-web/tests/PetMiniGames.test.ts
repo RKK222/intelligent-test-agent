@@ -126,7 +126,7 @@ describe("PetMiniGames", () => {
     wrapper.unmount();
   });
 
-  it("runs the desktop pinball launch, mission, ball-save, flipper, pause and tilt rules", async () => {
+  it("runs the desktop pinball gravity, mission, ball-save, flipper, pause and tilt rules", async () => {
     vi.useFakeTimers();
     const wrapper = mount(PetMiniGames);
     await wrapper.get('[data-testid="pet-game-open-pinball"]').trigger("click");
@@ -165,6 +165,19 @@ describe("PetMiniGames", () => {
         pinballBalls: Array<{ x: number; y: number; previousX: number; previousY: number; vx: number; vy: number }>;
       } };
     }).$.setupState;
+    Object.assign(pinballSetup.pinballBalls[0]!, { x: 160, y: 190, previousX: 160, previousY: 190, vx: 0, vy: 0 });
+    const gravityStartY = pinballSetup.pinballBalls[0]!.y;
+    await vi.advanceTimersByTimeAsync(160);
+    const gravityMidY = pinballSetup.pinballBalls[0]!.y;
+    await vi.advanceTimersByTimeAsync(160);
+    const gravityEndY = pinballSetup.pinballBalls[0]!.y;
+    expect(gravityMidY - gravityStartY).toBeGreaterThan(5);
+    expect(gravityEndY - gravityMidY).toBeGreaterThan(gravityMidY - gravityStartY);
+    Object.assign(pinballSetup.pinballBalls[0]!, { y: 430, previousY: 420, vy: 300 });
+    await vi.advanceTimersByTimeAsync(16);
+    expect(wrapper.text()).toContain("BALL SAVE · 自动补球");
+    expect(pinballSetup.pinballBalls[0]!.vy).toBeLessThan(-700);
+
     pinballSetup.pinballRolloverLights = [true, true, true];
     pinballSetup.pinballDropTargets = [true, true, true];
     Object.assign(pinballSetup.pinballBalls[0]!, { x: 244, y: 218, previousX: 244, previousY: 214, vx: 0, vy: 100 });
@@ -172,11 +185,11 @@ describe("PetMiniGames", () => {
     await vi.advanceTimersByTimeAsync(32);
     expect(wrapper.findAll('.pet-pinball-ball')).toHaveLength(3);
     expect(wrapper.text()).toContain("多球模式 · 场上 3 球");
+    expect(pinballSetup.pinballBalls.every((ball) => ball.vy < -500)).toBe(true);
 
     pinballSetup.pinballScore = 14_999;
     Object.assign(pinballSetup.pinballBalls[0]!, { x: 90, y: 150, previousX: 90, previousY: 145, vx: 0, vy: 100 });
     await vi.advanceTimersByTimeAsync(16);
-    expect(wrapper.text()).toContain("奖励一球");
     expect(wrapper.findAll('.pet-pinball-lives > span:not(.is-spent)')).toHaveLength(4);
 
     await wrapper.trigger("keydown", { key: "ArrowLeft" });

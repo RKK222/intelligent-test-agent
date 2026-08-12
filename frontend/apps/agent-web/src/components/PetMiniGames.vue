@@ -577,8 +577,12 @@ const PINBALL_WIDTH = 316;
 const PINBALL_HEIGHT = 420;
 const PINBALL_BALL_RADIUS = 6;
 const PINBALL_FRAME_MS = 16;
-const PINBALL_GRAVITY = 178;
-const PINBALL_MAX_SPEED = 610;
+// 420px 高球台需要明显的向下坡度：静止球约 0.8 秒穿过半场，甜区发射仍可越过顶部判定线。
+const PINBALL_GRAVITY = 680;
+const PINBALL_MAX_SPEED = 900;
+const PINBALL_LAUNCH_BASE_SPEED = 620;
+const PINBALL_LAUNCH_CHARGE_SPEED = 3;
+const PINBALL_AUTO_SERVE_SPEED = 760;
 const PINBALL_FLIPPER_LENGTH = 62;
 const PINBALL_SKILL_SHOT_MIN = 52;
 const PINBALL_SKILL_SHOT_MAX = 82;
@@ -744,7 +748,7 @@ function releasePinballCharge() {
   clearPinballChargeTimer();
   const ball = pinballBalls.value[0] ?? createPinballBall();
   ball.vx = -8;
-  ball.vy = -265 - charge * 2.5;
+  ball.vy = -PINBALL_LAUNCH_BASE_SPEED - charge * PINBALL_LAUNCH_CHARGE_SPEED;
   pinballBalls.value = [ball];
   pinballLastLaunchCharge.value = charge;
   pinballSkillShotPending.value = true;
@@ -902,12 +906,13 @@ function detectPinballFeatures(ball: PinballBall) {
 function startPinballMultiball(ball: PinballBall) {
   pinballMultiballActive.value = true;
   pinballBallSaveUntil.value = pinballNow.value + 7000;
+  // 多球弹出速度与坡度重力配套，保证三球先散入上半场，而不是在球门旁原地回落。
   pinballBalls.value.push(
-    createPinballBall(ball.x - 8, ball.y - 10, -190, -275),
-    createPinballBall(ball.x + 8, ball.y - 8, 185, -300),
+    createPinballBall(ball.x - 8, ball.y - 10, -230, -560),
+    createPinballBall(ball.x + 8, ball.y - 8, 225, -610),
   );
-  ball.vx = -120;
-  ball.vy = -330;
+  ball.vx = -150;
+  ball.vy = -640;
   awardPinballScore(5000, "MULTIBALL");
 }
 
@@ -984,7 +989,8 @@ function drainPinballBall(ballId: number) {
   }
 
   if (pinballStatus.value !== "tilted" && pinballBallSaveUntil.value > pinballNow.value) {
-    const savedBall = createPinballBall(289, 385, -10, -420);
+    // 自动救球要重新越过发射导轨顶部，不能受增强后的重力影响而在导轨内反复落回。
+    const savedBall = createPinballBall(289, 385, -10, -PINBALL_AUTO_SERVE_SPEED);
     pinballBalls.value = [savedBall];
     pinballBallSaveUntil.value = 0;
     pinballCallout.value = "BALL SAVE · 自动补球";

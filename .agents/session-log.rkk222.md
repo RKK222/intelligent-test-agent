@@ -9538,3 +9538,26 @@
 
 - 桌面弹球已形成可重复推进的技能发射、翻滚灯、落靶、多球和球末奖励流程，指针与空格、Z/左键、斜杠/右键、N、P 键均可操作；复杂规则具有自动化断言，不依赖后端或服务端状态。
 - 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全、兼容性或环境配置；未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
+## 2026-08-12 - 校准桌面弹球下坡重力
+
+### Why
+
+- 用户实玩后反馈弹珠没有重力；轨迹回归确认旧参数下静止球前 160ms 只下落约 2.5px，视觉上接近漂浮。
+
+### What
+
+- 继续复用 `PetMiniGames.vue` 既有 16ms 物理循环，将 316×420 球台的下坡重力从 178 调整为 680，并同步重标定最高速度、蓄力发射初速、自动救球回射和多球散射速度，避免只增强重力后破坏技能发射、救球或多球玩法。
+- 组件测试新增两段连续 160ms 的下落加速断言，并验证自动救球能越过发射导轨、三球多球均向上散开；Chromium 工作台回归直接读取弹珠渲染纵坐标，确认越过最高点后 200ms 内明显回落。
+- frontend、agent-web README 与包级说明同步明确球台坡度重力；没有新增组件、物理引擎、接口或持久化路径。
+
+### How
+
+- 旧参数先由定向 Vitest 稳定复现 RED（首段下落 2.496px，小于 5px）；修正后 `PetMiniGames` 7/7、agent-web `vue-tsc`、3025 端口 Chromium 工作台回归 1/1 和 production build 均通过。
+- E2E 与 production build 并发时会争用用户手册 `.vitepress/.temp` 并产生临时模块缺失，因此最终按顺序重跑并全部通过；构建仅保留既有大 chunk 提示。
+- 最新前端以 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3024` 启动，HTTP/原生 Playwright 页面探测返回 200。
+
+### Result
+
+- 弹珠现在有肉眼可见的持续向下加速度，弱发射会快速回落，正常蓄力可越过顶部，自动救球和多球仍能重新进入上半场。
+- 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、安全或环境配置；仅调整前端本地物理参数，不影响服务端性能与兼容性。未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。

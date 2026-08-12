@@ -9224,6 +9224,12 @@ test("pet mini games support tetris, minesweeper, sudoku, snake and pinball inte
   await launcher.dispatchEvent("pointerup", { pointerId: 1 });
   await expect(pinball).toContainText("技能发射判定中");
   await expect(pinball).toContainText(/救球\d+s/);
+  const pinballBall = pinball.locator(".pet-pinball-ball").first();
+  await page.waitForTimeout(1200);
+  const fallingStartY = await pinballBall.evaluate((element) => Number.parseFloat(getComputedStyle(element).top));
+  await page.waitForTimeout(200);
+  const fallingEndY = await pinballBall.evaluate((element) => Number.parseFloat(getComputedStyle(element).top));
+  expect(fallingEndY).toBeGreaterThan(fallingStartY + 10);
   await page.keyboard.down("ArrowLeft");
   await expect(pinball.locator(".pet-pinball-flipper.is-left")).toHaveClass(/is-pressed/);
   await page.keyboard.up("ArrowLeft");
