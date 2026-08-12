@@ -48,7 +48,7 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 | 文件安全 | 根目录及祖先/目标符号链接 fail closed；`.testagent-appsource-index.json` 不出现在列表/搜索且所有外部读写操作拒绝；缺失或损坏索引按数据库摘要原子修复；文件 ticket 和每条 RPC 都重新校验成员、generation、expiry、READY replica 和服务器 affinity。 |
 | API 与观察 | TEAM 按 repository 任一当前启用关联应用成员跨 app 观察，PERSONAL 保留 owner/成员管理员边界，GET/ticket/WS 每次实时复核撤权/解除关联/禁用；首次打开尚无 Session 引用时，Workspace 详情只对权威分类为 APP_SOURCE 的 ACTIVE 记录受控回退，STANDARD 仍不得越过用户查询范围；tree 旧数组与 `includeCommit=true` envelope 兼容；列表 additive 返回 `acceptedAt/maxRetentionHours`，PATCH retention 使用 generation 乐观校验；ticket 一次性、60 秒、容量有界并绑定 operation/user/JVM/精确 Origin；重连首帧来自数据库 snapshot，断开观察不取消后台 operation，payload 不含物理路径、凭据或原始 Git stderr；WebSocket wire 不变。 |
 | 前端并发与大树 | 明确 `MANAGED/APP_SOURCE`、全仓库四步选择、默认 48 小时、服务端 168 小时上限、当前 generation 直接调整保留期、四态颜色与 owner；“管理”打开的紧凑源码列表固定在顶部上下文舱下方，不得回退到左下角；未过期 generation 的续期用例必须固定系统时间，不能让写死的到期日随真实日期推进而漂移；分支选择支持输入检索和虚拟滚动，Teleported 下拉层高于源码弹框遮罩，输入后可用回车选中首个匹配项，分支响应不等待目录树才解除 loading；远端树只渲染已展开层，1000 个折叠后代不进入 DOM，目录勾选压缩为单个 `DIRECTORY` exact path；source selection/tree/progress 分别使用 authority/epoch，迟到请求和旧 socket 帧不能覆盖新选择；250ms 至 4s 有界退避，CONNECTING 可由 AbortSignal 释放。 |
-| 能力与兼容 | 应用源码普通文件可写；APP_SOURCE Run Diff 的普通源码路径必须产生 Workspace 文件写，PUBLIC/WORKSPACE Agent 配置路径则在 DiffViewer `writable`、父组件 handler 和 mutation 门禁被阻止，并且必须产生零条 `agent-config.write`。Git、应用 Agent/Skill/Hub 发布、宠物配置重载和版本选择禁用；recent 的确定性失效清除与暂时错误保留；旧前端可忽略 additive 字段，旧 tree 方法保持数组。 |
+| 能力与兼容 | 应用源码普通文件可写；APP_SOURCE Run Diff 的普通源码路径必须产生 Workspace 文件写，PUBLIC/WORKSPACE Agent 配置路径则在 DiffViewer `writable`、父组件 handler 和 mutation 门禁被阻止，并且必须产生零条 `agent-config.write`。Git、应用 Agent/Skill/Hub 发布、宠物配置重载和新增应用版本禁用；顶部选择既有测试工作空间必须作为退出 APP_SOURCE 的显式导航，复用托管工作区权限与 recent 流程直接切换，不要求先点击左下角返回；recent 的确定性失效清除与暂时错误保留；旧前端可忽略 additive 字段，旧 tree 方法保持数组。 |
 | 清理 | XXL V6 恰好注册第八条每分钟 `workspace-management.app-source-cleanup`；每服务器数据库租约、generation fence 和文件锁阻止旧清理误删新副本；离线任务保留，成功后归档 Runtime Workspace，失败安全退避。 |
 
 ## 多服务器人工验收
@@ -61,6 +61,7 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 6. 把一台服务器停机至快照过期，确认在线服务器由每分钟 XXL 唤醒完成清理并归档 Workspace，离线服务器 cleanup 保持待处理；恢复该服务器后再次触发，确认旧源码、generation staging 和多次更新遗留的标准 UUID backup 均被清理，不删除随后建立的新 generation、当前 target、其它仓库目录、非 UUID `.backup` 或 `.backup.tmp` 等相似名称。
 7. 在进度连接的 250ms/500ms/1s 退避窗口快速切换应用、仓库和托管工作区，确认旧 snapshot、step、terminal、tree 和 recent 响应都不能覆盖当前选择，且浏览器中不存在遗留 timer/socket。
 8. 使用至少 500 条分支和包含 1000 个以上后代节点的代码库，确认分支框可输入子串检索、下拉选项不被源码弹框遮挡，并可在输入后用回车选中首个匹配分支、触发对应目录树刷新；分支返回后即使根目录请求仍在进行，分支框也保持可用。根目录初始只显示当前层，勾选父目录后后代显示为已包含，提交 payload 只含该父目录一条 `DIRECTORY` 路径，连续勾选不出现明显卡顿。
+9. 在源码快照中展开顶部“工作空间”，直接选择一个已有测试工作空间，确认先执行版本库访问预检与默认个人工作区解析，再切回 `MANAGED`、清理 recent source 并显示测试工作区文件树；全过程不操作左下角“返回应用工作区”。
 
 ## 分支成功但目录超时排查
 

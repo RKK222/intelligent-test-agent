@@ -3120,6 +3120,8 @@ test("switching to an application without recent workspace clears the previous f
 test("application source snapshot opens a logical workspace and enforces source capabilities", async ({ page }) => {
   const appSourceRequests: string[] = [];
   const clearedRecentAppSource: string[] = [];
+  const gitAccessRequests: string[] = [];
+  const defaultPersonalRequests: string[] = [];
   const appSourceMaterializationRequests: Array<{ key: string; payload: Record<string, unknown> }> = [];
   const gitDiffRequests: string[] = [];
   const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
@@ -3136,14 +3138,26 @@ test("application source snapshot opens a logical workspace and enforces source 
     name: "F-GCMS 源码快照 generation 10",
     rootPath: "/srv/test-agent/app-source/repo-code/generation-10"
   };
+  const managedWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_personal_default",
+    name: "default",
+    rootPath: "/Users/huang/workspace/personal-default",
+    appId: "app_gcms",
+    versionId: "awv_2024_01",
+    applicationWorkspaceId: "awp_main"
+  };
   await mockBackendApi(page, {
     appSourceRequests,
     clearedRecentAppSource,
+    gitAccessRequests,
+    defaultPersonalRequests,
+    ...versionSelectionWorkspaceSetup(),
     gitDiffRequests,
     appSourceMaterializationRequests,
     fileWriteRequests,
     fileContents: { "tests/checkout.spec.ts": "export const sourceGeneration = 9;" },
-    workspaces: [workspace(), sourceWorkspace, updatedSourceWorkspace],
+    workspaces: [workspace(), managedWorkspace, sourceWorkspace, updatedSourceWorkspace],
     appSourceRepositories: {
       app_gcms: [
         {
@@ -3304,10 +3318,14 @@ test("application source snapshot opens a logical workspace and enforces source 
     }
   ]));
 
-  await fileExplorer.locator(".app-source-mode-banner").getByRole("button", { name: "返回应用工作区" }).click();
+  // 源码快照中直接从顶部选择测试工作空间，不再要求先操作左下角“返回应用工作区”。
+  await page.getByTestId("header-workspace-selector").click();
+  await page.getByRole("option").filter({ hasText: "F-GCMS 主服务" }).click();
   await expect(fileExplorer.getByRole("button", { name: "变更" })).toBeVisible();
   await expect(fileExplorer.getByText("源码快照", { exact: true })).toHaveCount(0);
-  expect(clearedRecentAppSource).toEqual(["DELETE"]);
+  await expect.poll(() => gitAccessRequests).toEqual(["awv_2024_01"]);
+  await expect.poll(() => defaultPersonalRequests).toEqual(["awv_2024_01"]);
+  await expect.poll(() => clearedRecentAppSource).toEqual(["DELETE"]);
 
   await openAppSourceManagementForRepository(page, "尚未下载库");
   const dialog = page.getByRole("dialog", { name: "下载应用源码" });

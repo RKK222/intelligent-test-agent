@@ -9274,3 +9274,27 @@
 - 稳定组件 SHA-256：app JAR `83fa5c91cbedbfc82ec7a856bb93ca3be449c0234238cb742672f7dea3be0491`，persistence JAR `444536695c6707263cf8b1962721273e107f40a6fcffbf9b23b9be44343916be`，XXL integration JAR `fd4acf7b5d1660dcbaf20a86c8b9bc85d5fde5e02615b1921071b8af418037f6`，前端归档 `f4dd64aea469a241cd4cd17ac9abe6ffb86313076ce238a1c259b14b00c35b58`，`opencode-models.json` `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`。
 - 本次任务没有修改生产代码、API、事件、数据库、migration、配置模板、`.env*`、generated SDK 或 OpenCode 只读源码；仅新增发布追溯记录。目标企业库完整 `flyway_schema_history` 仍需在现场部署前取得并通过准入判断。
 - 本条记录在最终制品生成后提交，不再据此重封 ZIP，否则归档内 session log 与 ZIP hash 会形成递归变化；成品源码内容对应 `f10754e01`。
+
+## 2026-08-12 - 应用源码快照支持从顶部直切测试工作空间
+
+### Why
+
+- 顶部“工作空间”菜单在源码快照中已经列出测试工作空间，但 `AgentWorkbench` 仍以 APP_SOURCE 禁止版本选择为由拒绝事件，用户只能先点击左下角“返回应用工作区”再切换。
+- 企业现场确认“管理”弹层仍在左下角是包含该修复的前端未发布成功，不是企业浏览器缓存或样式覆盖。
+
+### What
+
+- 顶部选择既有测试工作空间改为“离开源码快照”的显式导航，复用既有 managed intent、Git 权限预检、默认个人工作区、recent 清理和 `switchWorkspace` 流程；源码模式下新增应用版本仍保持禁用。
+- Chromium 场景改为在源码文件编辑后直接操作顶部菜单，并断言 Git 访问检查、默认个人工作区解析、源码 recent 清理及测试工作区能力恢复。
+- 同步 agent-web README、包说明和应用源码验收文档；现场截图中的 Hub 更新角标 409 另行定位为源码 Workspace ID 被传给仅接受个人测试工作区的统计接口，异常已被前端捕获，不阻断本次管理或切换流程，但能力库角标/当前应用更新页会受影响，本次只按用户要求完成影响诊断，未扩展修复范围。
+
+### How
+
+- 定向 Vitest 15 passed；Chromium 应用源码工作台场景 1 passed；前端全量 127 个测试文件、1951 passed / 1 skipped；全仓 typecheck 和 production build 通过，`git diff --check` 通过。
+- 按 `.env.test` 完整重启被本机工作流密钥缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 阻断；未修改或替换环境文件。已有 test profile 服务继续健康：backend health/readiness 200 UP、frontend 3000 返回 200、CORS 正常，manager 当前 4097/4098 health 均为 HEALTHY。
+- 提交前回顾全部 `.agents/session-log*.md`，未发现与本次文件范围冲突；未修改 `.env*`、API、RunEvent、数据库、SQL、migration、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+### Result
+
+- 用户现在可从应用代码库源码快照顶部直接选择测试工作空间，不再依赖左下角返回动作；管理弹层顶部定位沿用前一提交，企业环境需成功发布包含该提交的前端制品后生效。
+- 本次是纯前端导航逻辑和测试/文档变更，向后兼容；没有新增接口、事件或持久化结构。

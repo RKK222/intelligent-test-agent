@@ -6135,10 +6135,8 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
 // 切换到某个应用版本：先只读校验当前用户对关联 Git 版本库的访问权限，再通过
 // ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区。同一用户同一版本复用 default 空间，避免重复创建。
 async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
-  if (!appSourceCapabilities.value.canSelectApplicationVersion) {
-    feedback.value = { kind: "info", title: "源码快照不能切换应用版本", description: "请先返回应用工作区。" };
-    return;
-  }
+  // 顶部显式选择测试工作空间代表“离开源码快照”，不是在 APP_SOURCE 内执行版本操作；
+  // 后续 managed intent 与 switchWorkspace 会统一失效源码请求、清理 recent 并切回 MANAGED。
   if (!await confirmProcessInitializationBeforeWorkspaceAction("切换应用版本")) {
     return;
   }
