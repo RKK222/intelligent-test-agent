@@ -902,12 +902,6 @@ LobeHub 登录票据签发、HMAC 兑换/撤销、Desktop/CLI 浏览器确认、
 和 Workspace 事件保留在独立 fork 与独立数据库中。fork 的 loopback 定时调度 POST 及 `/api/workflows/*`
 离线拒绝同样不创建平台事件，也不进入平台 SSE。
 
-## 独立工作流 AG-UI 受控例外
-
-`GET /workflow-api/v1/conversations/{conversationId}/events` 由 Python 原生输出 AG-UI SSE，Nginx 同源直达，不经过 Java、RunEvent、`test-agent-event` 或 `event-stream-client`。平台 Session/Run/Event 表不保存、镜像或聚合这些事件。
-
-`workflow-api-client` 使用可携带 Authorization 与 `Last-Event-ID` 的 fetch SSE。durable 事件按会话单调序号持久化；网络中断、429 或 5xx 后保留最后 durable 游标重连，401/403、确定性 4xx 和协议错误则终止。断线后先接收 `STATE_SNAPSHOT`、`MESSAGES_SNAPSHOT`，再补发游标后的 durable 事件，Token 文本 delta 可为 transient。SSE 每30秒重新读取平台 Redis 精确 Token 键，登出、过期或撤销后立即以认证错误事件结束连接。完整类型、幂等和兼容规则见 `docs/api/workflow-ag-ui.md`。
-
 ## 兼容性
 
 1. 新增事件字段必须保持旧前端可忽略。

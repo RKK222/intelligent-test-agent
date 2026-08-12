@@ -382,19 +382,11 @@ verify_release_xxl_flyway_migrations_jar "${TMP_ROOT}/test-agent-xxl-job-integra
 release_component_manifest="$(unzip -p "${RELEASE_ARCHIVE}" deploy/internal/release-components.env 2>/dev/null || true)"
 worker_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_WORKER_RUNTIME)"
 toolbox_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_TOOLBOX)"
-workflow_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_WORKFLOW)"
 lobehub_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_LOBEHUB)"
 # 没有组件清单的历史发布包按全量包处理，保持旧交付物可重新封装。
 worker_component_mode="${worker_component_mode:-included}"
 toolbox_component_mode="${toolbox_component_mode:-included}"
-# 旧包按实际条目推导可选能力；当前包必须通过清单明确 included/disabled。
-if [[ -z "${workflow_component_mode}" ]]; then
-  if grep -Fx 'dist/test-agent-workflow-offline.tar.gz' <<<"${release_listing}" >/dev/null; then
-    workflow_component_mode=included
-  else
-    workflow_component_mode=disabled
-  fi
-fi
+# 旧包按实际条目推导 LobeHub 能力；当前包必须通过清单明确 included/disabled。
 if [[ -z "${lobehub_component_mode}" ]]; then
   if grep -F 'dist/lobehub/' <<<"${release_listing}" >/dev/null; then
     lobehub_component_mode=included
@@ -408,10 +400,6 @@ fi
 }
 [[ "${toolbox_component_mode}" == included || "${toolbox_component_mode}" == reuse ]] || {
   echo "Invalid toolbox component mode: ${toolbox_component_mode}" >&2
-  exit 1
-}
-[[ "${workflow_component_mode}" == included || "${workflow_component_mode}" == disabled ]] || {
-  echo "Invalid Workflow component mode: ${workflow_component_mode}" >&2
   exit 1
 }
 [[ "${lobehub_component_mode}" == included || "${lobehub_component_mode}" == disabled ]] || {
@@ -443,13 +431,6 @@ else
   require_archive_absent "${release_listing}" dist/test-agent-toolbox-source.tar.gz.sha256
   require_archive_absent "${release_listing}" dist/toolbox-catalog-v1.json
   require_archive_absent "${release_listing}" dist/toolbox-catalog-v1.json.sha256
-fi
-if [[ "${workflow_component_mode}" == included ]]; then
-  require_archive_entry "${release_listing}" dist/test-agent-workflow-offline.tar.gz
-  require_archive_entry "${release_listing}" dist/test-agent-workflow-offline.tar.gz.sha256
-else
-  require_archive_absent "${release_listing}" dist/test-agent-workflow-offline.tar.gz
-  require_archive_absent "${release_listing}" dist/test-agent-workflow-offline.tar.gz.sha256
 fi
 if [[ "${lobehub_component_mode}" == disabled ]]; then
   require_archive_prefix_absent "${release_listing}" dist/lobehub/
@@ -597,9 +578,6 @@ validate_mysql_cluster_config() {
   grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' "${frontend}"
   grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120' "${frontend}"
   grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' "${frontend}"
-  if [[ "${workflow_component_mode}" == disabled ]]; then
-    grep -Fxq 'TEST_AGENT_NGINX_WORKFLOW_UPSTREAM=' "${frontend}"
-  fi
 
   backend_password="$(sed -n 's/^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=//p' "${backend_4}")"
   backend_token="$(sed -n 's/^TEST_AGENT_XXL_JOB_ACCESS_TOKEN=//p' "${backend_4}")"
@@ -651,10 +629,6 @@ normalize_frontend_node_archive() {
     '122.233.30.4:18120,122.233.30.114:18120'
   replace_or_append_env_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM \
     '122.233.30.4:18121,122.233.30.114:18121'
-  if [[ "${workflow_component_mode}" == disabled ]]; then
-    # 当前 release 未交付 Python 服务时强制留空，configure-nginx.sh 会生成显式 503。
-    replace_or_append_env_value "${nginx_env}" TEST_AGENT_NGINX_WORKFLOW_UPSTREAM ''
-  fi
   target="${TMP_ROOT}/$(basename "${source}")"
   archive_create_tar_gz "${target}" "${node_root}" "${node_dir}"
   chmod 0600 "${target}"

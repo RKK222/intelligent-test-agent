@@ -23,7 +23,6 @@
 3. 工作区文件和 Agent 配置文件的目录列表、读取、写入、上传、复制和移动只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。超级管理员排查读取必须使用独立 support route/ticket/RPC 和内存 grant，不能复用普通连接或角色绕过；其文件树必须同时设置 `canWrite=false`、`canAttach=false`、`canDownload=false`。工作区拖动只允许可写纯 `WORKSPACE` 文件/目录作为源；只读、纯 `REFERENCE` 和 `MIXED` 条目不可拖。合法目录或根空白区为蓝色落点；当前父目录、自身、被拖目录的后代、文件行、纯引用目录和只读目录必须拒绝，带 `workspacePath` 的 `MIXED` 目录可作为工作区侧落点接收工作区条目。移动成功后 app 层必须先迁移整棵已打开子文件、活动/Diff/展开/请求路径，再按迁移后的 `workspacePath` 补齐祖先并逐层认领组合视图新稳定 ID；无快照的加载中 tab 必须在刷新新代次建立后再补读，最后刷新 Git Diff。反向移动撤销复用同一顺序。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
 4. API 请求、响应、错误类型必须与 `docs/api/http-api.md` 一致；新增或变更 API 必须同步 `docs/api/http-api.md` 和 `docs/architecture/module-map.md`。
 5. 前端调试用原始报文查看器只能通过 `backend-api` 的可选 observer 捕获浏览器可访问的请求体和响应文本，不得记录 `Authorization`、Cookie 等敏感请求头，不得新增后端持久化或绕过平台后端直连 opencode；展示、筛选和下载按发生时间倒序派生时不得改变有界缓存的原始采集顺序。
-6. 独立长程任务是唯一受控例外：`/workflow-chat` 只能通过 `packages/workflow-api-client` 同源访问 Python `/workflow-api/v1/**`，不得经过 `backend-api`、Java 或页面内手拼 URL。Bearer 沿用平台既有内存/sessionStorage，不能复制到新的持久化状态。本地Vite必须为该前缀配置直达Python的代理，不能让SPA fallback接管；客户端必须校验JSON成功信封，并将HTML、纯文本或畸形JSON收敛为不回显正文的安全错误。
 
 ## RunEvent SSE
 
@@ -33,7 +32,6 @@
 4. 事件类型和字段变更必须同步 `docs/api/event-stream.md`。SSE 契约以该文件为单一事实源。
 5. 原始 SSE 调试回调只能保存浏览器 `EventSource` 暴露的 `MessageEvent.data`、事件名和 `lastEventId` 等前端可见字段；它不是完整 HTTP wire bytes，也不得替代 RunEvent 契约文档。
 6. `run.snapshot.reset` 是 transient 恢复事件，不设置 SSE `id`。event client 不得从 payload `seq/eventId` 或 `snapshot.runtimeVersion` 推导 durable 游标；reducer 必须先清空当前 Run 运行投影，再按 `snapshot.events` 顺序重放，空/缺失/未知字段安全兼容。页面若维护 reducer 外的 Diff、通知或工具跟随状态，必须在 reset 时同步清理并重放，且不得重复触发用户通知。
-7. Python工作流原生AG-UI不属于RunEvent；必须由 `workflow-api-client` 使用fetch SSE携带Authorization和`Last-Event-ID`。`workflow-chat` reducer对snapshot替换、durable重放、重复toolCall和未知事件保持幂等，离开路由时取消请求和重连定时器。
 
 ## 组件与状态
 
@@ -61,7 +59,6 @@
 6. `test-runner` 负责测试运行视图，测试状态来源必须是后端 API 或 RunEvent SSE。
 7. `terminal` 负责 ticket WebSocket 连接、输入、resize、关闭和输出渲染，不创建 ticket、不直连 opencode server。
 8. 文件搜索只过滤已加载文件树的文件名，不在前端自行扫描工作区，也不绕过后端新增搜索能力。
-9. `workflow-api-client` 只负责独立Python协议与fetch SSE；`workflow-chat` 只负责TDesign Chat、输入卡、进度和报告展示。新建空对话必须直接展示固定场景结构化输入卡，不得为了显示表单先发送自然语言意图请求。两者不得依赖 `backend-api`、`event-stream-client`、OpenCode SDK或工作台内部状态。
 
 ## UI 与交互
 
@@ -166,8 +163,6 @@ corepack pnpm e2e:real
 6. `diff-viewer` 的 Diff 展示、接受、拒绝和结果反馈。
 7. `agent-chat` 的消息发送、实时输出、用户气泡、reasoning/text 分离、任务分解、Skill/Tool 分类展示、sticky scroll、TimelineCard 折叠卡片和默认展开规则。
 8. `test-runner` 的启动、取消、重试和状态变化。
-9. `workflow-api-client` 的同源URL、Authorization、Python错误、成功信封、HTML/纯文本错误收敛、fetch SSE、`Last-Event-ID`、重连与取消订阅。
-10. `workflow-chat` 的AG-UI快照/重放、结构化输入、取消、报告版本、局部重分析和超级管理员跨用户入口。
 
 ### 改动对应测试
 
@@ -175,7 +170,6 @@ corepack pnpm e2e:real
 - 改 RunEvent SSE：补 agent-scoped URL、连接、断线、`Last-Event-ID`、重复事件、乱序事件和取消订阅测试。
 - 改工作台/文件树/编辑器/Diff/对话/测试面板：按对应交互场景补回归测试。
 - 改超级管理员共享控制面：组件测试必须覆盖角色可见性、确认交互、部分失败结果展示；backend-api 测试还要断言请求不误带用户进程服务器路由头。
-- 改独立工作流：分别补 `workflow-api-client` 协议测试与 `workflow-chat` reducer/组件测试，禁止用平台RunEvent mock代替AG-UI。
 
 ### Mock 原则
 

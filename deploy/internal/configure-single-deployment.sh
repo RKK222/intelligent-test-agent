@@ -192,9 +192,7 @@ render_backend_template() {
   local proxy_key="$6"
   local xxl_mysql_password="$7"
   local xxl_access_token="$8"
-  local workflow_capability_secret="$9"
-  local workflow_runner_secret="${10}"
-  local lobehub_hmac_secret="${11}"
+  local lobehub_hmac_secret="$9"
   local line key value
 
   : >"${output}"
@@ -211,8 +209,6 @@ render_backend_template() {
       TEST_AGENT_API_TOKEN) value="${api_token}" ;;
       TEST_AGENT_OPENCODE_MANAGER_TOKEN) value="${manager_token}" ;;
       TEST_AGENT_INTERNAL_PROXY_API_KEY) value="${proxy_key}" ;;
-      TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET) value="${workflow_capability_secret}" ;;
-      TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET) value="${workflow_runner_secret}" ;;
       TEST_AGENT_LOBEHUB_HMAC_SECRET) value="${lobehub_hmac_secret}" ;;
       # 当前现场同时支持域名和 IP 的 9996 入口，前端使用同源 API。
       TEST_AGENT_CORS_ALLOWED_ORIGINS) value="http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996" ;;
@@ -260,7 +256,7 @@ render_docker_template() {
 configure_backend() {
   local timestamp config_dir backend_tmp docker_tmp
   local db_password redis_password api_token backend_manager_token docker_manager_token manager_token proxy_key
-  local xxl_mysql_password xxl_access_token workflow_capability_secret workflow_runner_secret lobehub_hmac_secret
+  local xxl_mysql_password xxl_access_token lobehub_hmac_secret
 
   require_file "${BACKEND_TEMPLATE}"
   require_file "${DOCKER_TEMPLATE}"
@@ -276,8 +272,6 @@ configure_backend() {
   proxy_key="$(env_value "${BACKEND_ENV}" TEST_AGENT_INTERNAL_PROXY_API_KEY)"
   xxl_mysql_password="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_MYSQL_PASSWORD)"
   xxl_access_token="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_ACCESS_TOKEN)"
-  workflow_capability_secret="$(env_value "${BACKEND_ENV}" TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET)"
-  workflow_runner_secret="$(env_value "${BACKEND_ENV}" TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET)"
   lobehub_hmac_secret="$(env_value "${BACKEND_ENV}" TEST_AGENT_LOBEHUB_HMAC_SECRET)"
 
   [[ -n "${db_password}" ]] || {
@@ -316,10 +310,9 @@ configure_backend() {
   docker_tmp="$(mktemp "${config_dir}/.docker.env.new.XXXXXX")"
   trap 'rm -f "${backend_tmp:-}" "${docker_tmp:-}"' EXIT
 
-  # 当前 release 禁用 Workflow/LobeHub；存量配置有值时原样保留，没有值时显式留空，不能把模板占位符写入生产文件。
+  # 当前 release 默认禁用 LobeHub；存量配置有值时原样保留，没有值时显式留空，不能把模板占位符写入生产文件。
   render_backend_template "${backend_tmp}" "${db_password}" "${redis_password}" "${api_token}" "${manager_token}" \
-    "${proxy_key}" "${xxl_mysql_password}" "${xxl_access_token}" "${workflow_capability_secret}" \
-    "${workflow_runner_secret}" "${lobehub_hmac_secret}"
+    "${proxy_key}" "${xxl_mysql_password}" "${xxl_access_token}" "${lobehub_hmac_secret}"
   render_docker_template "${docker_tmp}" "${manager_token}"
 
   if grep -q 'REPLACE_' "${backend_tmp}" "${docker_tmp}"; then

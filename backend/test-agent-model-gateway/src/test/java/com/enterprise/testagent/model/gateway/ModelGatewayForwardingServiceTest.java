@@ -17,7 +17,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.Unpooled;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -45,16 +44,6 @@ import reactor.core.publisher.Flux;
 class ModelGatewayForwardingServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-07-30T07:00:00Z");
-
-    @Test
-    void allowsWorkflowLongContextModelToWarmUpWithoutSlowingInteractiveCalls() {
-        assertThat(ModelGatewayForwardingService.firstResponseTimeout(
-                        new ModelGatewayCaller("usr_workflow", "AUTH_WORKFLOW", "workflow")))
-                .isEqualTo(Duration.ofSeconds(120));
-        assertThat(ModelGatewayForwardingService.firstResponseTimeout(
-                        new ModelGatewayCaller("usr_lobehub", "AUTH_LOBEHUB", "lobehub")))
-                .isEqualTo(Duration.ofSeconds(30));
-    }
 
     @Test
     void rewritesPublicModelInjectsTrustedIdentityAndAggregatesUsage() {

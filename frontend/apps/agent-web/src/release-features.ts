@@ -1,6 +1,5 @@
 export type ReleaseFeatureFlags = Readonly<{
   lobehub: boolean;
-  workflow: boolean;
 }>;
 
 /**
@@ -12,8 +11,7 @@ function enabled(raw: string | undefined): boolean {
 
 export function resolveReleaseFeatureFlags(env: ImportMetaEnv): ReleaseFeatureFlags {
   return Object.freeze({
-    lobehub: enabled(env.VITE_TEST_AGENT_LOBEHUB_ENABLED),
-    workflow: enabled(env.VITE_TEST_AGENT_WORKFLOW_ENABLED)
+    lobehub: enabled(env.VITE_TEST_AGENT_LOBEHUB_ENABLED)
   });
 }
 
@@ -26,9 +24,6 @@ export function isReleaseFeaturePathEnabled(
 ): boolean {
   if (pathname === "/lobehub/launch") {
     return features.lobehub;
-  }
-  if (pathname === "/workflow-chat") {
-    return features.workflow;
   }
   return true;
 }

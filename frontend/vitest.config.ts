@@ -45,13 +45,7 @@ export default defineConfig({
       "@test-agent/agent-chat": fileURLToPath(pkgSrc("agent-chat")),
       "@test-agent/terminal": fileURLToPath(pkgSrc("terminal")),
       "@test-agent/test-runner": fileURLToPath(pkgSrc("test-runner")),
-      "@test-agent/workbench-shell": fileURLToPath(pkgSrc("workbench-shell")),
-      "@test-agent/workflow-api-client": fileURLToPath(pkgSrc("workflow-api-client")),
-      "@test-agent/workflow-chat": fileURLToPath(pkgSrc("workflow-chat")),
-      "@tdesign-vue-next/chat": fileURLToPath(new URL(
-        "./packages/workflow-chat/node_modules/@tdesign-vue-next/chat/es/index.mjs",
-        import.meta.url,
-      ))
+      "@test-agent/workbench-shell": fileURLToPath(pkgSrc("workbench-shell"))
     }
   }
 });

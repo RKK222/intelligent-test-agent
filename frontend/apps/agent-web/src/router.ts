@@ -64,11 +64,6 @@ export const router = createRouter({
       component: () => import("./views/LobehubLaunchView.vue"),
     },
     {
-      path: "/workflow-chat",
-      name: "workflow-chat",
-      component: () => import("./views/WorkflowChatView.vue"),
-    },
-    {
       path: "/s/:shareId",
       name: "transcript",
       component: () => import("./views/SharedWorkbenchView.vue"),
@@ -133,7 +128,6 @@ function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlag
     || /^\/hub\/?$/.test(pathname)
     || /^\/settings\/?$/.test(pathname)
     || (pathname === "/lobehub/launch" && features.lobehub)
-    || (pathname === "/workflow-chat" && features.workflow)
     || /^\/s\/[^/]+$/.test(pathname);
 }
 

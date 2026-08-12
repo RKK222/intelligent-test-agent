@@ -49,7 +49,6 @@
 - Redis 会话运行上下文、Run 运行数据面、限流、幂等和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。用户级 OpenCode dispose 闸门与 `active:user`、`runtime-user` marker 使用同一 `{userId}` slot：普通 dispose 先清理过期 active 成员并原子确认空闲，个人重启维护租约允许已有活动 Run 但与 dispose 使用同一互斥键；两类租约都按 token 续租/释放，新 Run 在同一 Lua 中先检查闸门再登记 active/marker。
 - `RedisTokenStore` 在保存平台 Token 时同步写入 SHA-256 session marker，并使用相同绝对过期时间；删除、刷新或过期清理 Token 时同步删除 marker。原始 Token 不进入 marker key/value，XXL 只持有 digest。
 - `RedisSupportAccessGrantStore` 以 Lua 原子轮换/撤销同一平台登录会话的当前排查授权，只保存 `sessionDigest/grantTokenDigest` 与有界 payload，TTL 与 grant 到期时间一致；查找时同时校验 token key 和 session 当前摘要，不降级 JVM 内存。
-- `RedisWorkflowCapabilityStore` 在 `test-agent:workflow-capability:*` 前缀保存HMAC nonce摘要、一次性checkout ticket摘要和短期model grant摘要；Lua保证消费/续期/撤销原子性。取消run先写撤销墓碑再撤销现存grant，并使并发签发或刷新失败。该适配不保存Python conversation/task/report/event，也不新增关系型SQL或Flyway migration。
 
 ## 建表规范
 

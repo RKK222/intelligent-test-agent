@@ -110,7 +110,7 @@ deploy/internal/package-release.sh --python-libs-only \
   --output-dir deploy/internal/dist
 ```
 
-当前 release 不启用 Workflow 和 LobeHub，命令中不得添加 `--with-workflow` 或 `--with-lobehub`。默认包必须满足：组件清单两项均为 `disabled`、无两套运行制品、前端无入口且深链接回到工作台、前端节点 `TEST_AGENT_NGINX_WORKFLOW_UPSTREAM=`。部署脚本会把空 upstream 渲染为 `/workflow-api/` 显式 503，不回落到 Java 或 SPA。
+当前 release 默认不启用 LobeHub，命令中不得添加 `--with-lobehub`。默认包必须满足：组件清单中的 LobeHub 为 `disabled`、无 LobeHub 运行制品、前端无入口且深链接回到工作台。
 
 空值是有意配置：前端统一使用同源相对 `/api`，所以从域名打开时请求域名，从 IP 打开时请求 IP。不得固定成其中任一 origin，否则另一个入口会重新产生跨域或名称解析问题。
 

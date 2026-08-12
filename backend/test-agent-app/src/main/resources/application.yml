@@ -71,17 +71,6 @@ management:
       enabled: true
 
 test-agent:
-  workflow-capability:
-    hmac-secret: ${TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET:}
-    runner-hmac-secret: ${TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET:}
-    runner-id: ${TEST_AGENT_WORKFLOW_RUNNER_ID:runner-default}
-    runner-public-key: ${TEST_AGENT_WORKFLOW_RUNNER_PUBLIC_KEY:}
-    runner-public-key-path: ${TEST_AGENT_WORKFLOW_RUNNER_PUBLIC_KEY_PATH:}
-    hmac-clock-skew: ${TEST_AGENT_WORKFLOW_HMAC_CLOCK_SKEW:30s}
-    nonce-ttl: ${TEST_AGENT_WORKFLOW_NONCE_TTL:60s}
-    checkout-ticket-ttl: ${TEST_AGENT_WORKFLOW_CHECKOUT_TICKET_TTL:2m}
-    model-grant-ttl: ${TEST_AGENT_WORKFLOW_MODEL_GRANT_TTL:5m}
-    model-gateway-url: ${TEST_AGENT_WORKFLOW_MODEL_GATEWAY_URL:}
   lobehub:
     hmac-secret: ${TEST_AGENT_LOBEHUB_HMAC_SECRET:}
     client-id: ${TEST_AGENT_LOBEHUB_CLIENT_ID:lobehub}

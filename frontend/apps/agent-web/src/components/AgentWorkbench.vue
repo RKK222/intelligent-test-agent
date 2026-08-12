@@ -31,7 +31,7 @@ import {
   subscribeUserNotifications,
   type RunEventRawMessage
 } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
+import { BookOpenText, Boxes, FileWarning, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -394,7 +394,6 @@ type RawOutputEntry = {
 
 const isSuperAdmin = computed(() => !shareMode.value && authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const canUseLobehub = computed(() => releaseFeatures.lobehub && isSuperAdmin.value);
-const canUseWorkflow = computed(() => releaseFeatures.workflow && isSuperAdmin.value);
 const isAppAdmin = computed(() =>
   !shareMode.value && (isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true)
 );
@@ -414,11 +413,6 @@ async function openLobehub() {
   } finally {
     lobehubLaunching.value = false;
   }
-}
-
-async function openWorkflowChat() {
-  if (!canUseWorkflow.value) return;
-  await router.push({ name: "workflow-chat" });
 }
 
 function firstLoginGuideStorageKey(userId: string) {
@@ -11213,18 +11207,6 @@ async function handleLogout() {
           >
             <MessageSquare class="figma-activity-icon" :stroke-width="1.5" />
             <span class="figma-activity-text">问答</span>
-          </button>
-          <button
-            v-if="canUseWorkflow"
-            type="button"
-            class="figma-activity-btn figma-activity-btn--workflow"
-            aria-label="长程任务工作台"
-            title="长任务"
-            data-testid="workflow-chat-activity-button"
-            @click="openWorkflowChat"
-          >
-            <GitCompareArrows class="figma-activity-icon" :stroke-width="1.5" />
-            <span class="figma-activity-text">长任务</span>
           </button>
           <button
             v-if="isAppAdmin"

@@ -26,8 +26,6 @@
     "@test-agent/test-runner": "workspace:*",
     "@test-agent/ui-kit": "workspace:*",
     "@test-agent/workbench-shell": "workspace:*",
-    "@test-agent/workflow-api-client": "workspace:*",
-    "@test-agent/workflow-chat": "workspace:*",
     "dayjs": "1.11.21",
     "dockview-vue": "6.6.1",
     "echarts": "^6.1.0",

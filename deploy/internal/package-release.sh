@@ -19,11 +19,9 @@ PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
 PACKAGE_PYTHON_LIBS=0
-PACKAGE_WORKFLOW=0
 PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
 PACKAGE_LOBEHUB=0
-WITH_WORKFLOW_IN_RELEASE=0
 WITH_LOBEHUB_IN_RELEASE=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
@@ -115,7 +113,6 @@ Build enterprise internal delivery artifacts:
   - frontend dist files and tar.gz
   - opencode-worker image and docker-loadable tar
   - optional independent Python third-party library bundle
-  - optional Python workflow-service, Runner and analysis-task linux/amd64 image bundle with SBOMs
   - pinned IT-Tools and OmniTools images, checksums and complete modified source
   - repository session logs under .agents/
 
@@ -132,8 +129,6 @@ Options:
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
   --python-libs-only      Package only the independent Python third-party library bundle.
-  --workflow-only         Package only the Python workflow/Runner/analysis image set.
-  --with-workflow         Include the workflow bundle and enable its frontend entry in a full release.
   --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
   --with-lobehub          Include the verified external LobeHub artifact set in a full release.
@@ -173,7 +168,6 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
-      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_LOBEHUB=0
@@ -185,7 +179,6 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=1
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
-      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_LOBEHUB=0
@@ -197,7 +190,6 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=1
       PACKAGE_PYTHON_LIBS=0
-      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_LOBEHUB=0
@@ -209,19 +201,6 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=1
-      PACKAGE_WORKFLOW=0
-      PACKAGE_TOOLBOX=0
-      PACKAGE_MYSQL_IMAGE=0
-      PACKAGE_LOBEHUB=0
-      shift
-      ;;
-    --workflow-only)
-      PACKAGE_MODE=workflow-only
-      PACKAGE_BACKEND=0
-      PACKAGE_FRONTEND=0
-      PACKAGE_OPENCODE_WORKER=0
-      PACKAGE_PYTHON_LIBS=0
-      PACKAGE_WORKFLOW=1
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_LOBEHUB=0
@@ -233,7 +212,6 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
-      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=1
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_LOBEHUB=0
@@ -245,7 +223,6 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
-      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=1
       PACKAGE_LOBEHUB=0
@@ -255,17 +232,12 @@ while [[ $# -gt 0 ]]; do
       WITH_LOBEHUB_IN_RELEASE=1
       shift
       ;;
-    --with-workflow)
-      WITH_WORKFLOW_IN_RELEASE=1
-      shift
-      ;;
     --lobehub-only)
       PACKAGE_MODE=lobehub-only
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
-      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_LOBEHUB=1
@@ -277,7 +249,6 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
-      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_ZIP_ONLY=1
@@ -316,13 +287,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 可选能力采用显式 opt-in，并在参数解析后应用，保证选项先后顺序不改变最终交付范围。
-if [[ "${WITH_WORKFLOW_IN_RELEASE}" -eq 1 ]]; then
-  if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
-    echo "--with-workflow can only be combined with the full or --zip-only release mode" >&2
-    exit 2
-  fi
-  PACKAGE_WORKFLOW=1
-fi
 if [[ "${WITH_LOBEHUB_IN_RELEASE}" -eq 1 ]]; then
   if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
     echo "--with-lobehub can only be combined with the full or --zip-only release mode" >&2
@@ -849,13 +813,11 @@ package_backend() {
 
 package_frontend() {
   local frontend_dir="${OUTPUT_DIR}/frontend"
-  local workflow_enabled lobehub_enabled
-  workflow_enabled="$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && printf true || printf false)"
+  local lobehub_enabled
   lobehub_enabled="$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf true || printf false)"
   echo "Building frontend dist"
   (cd "${ROOT_DIR}/frontend" && corepack pnpm install --frozen-lockfile && \
     VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}" \
-    VITE_TEST_AGENT_WORKFLOW_ENABLED="${workflow_enabled}" \
     VITE_TEST_AGENT_LOBEHUB_ENABLED="${lobehub_enabled}" \
     corepack pnpm --filter @test-agent/agent-web build)
 
@@ -920,56 +882,6 @@ build_opencode_worker_image() {
     ls -lh "${tar_path}"
     write_worker_artifact_state
   fi
-}
-
-package_workflow_images() {
-  local tools_id workflow_version build_env workflow_output archive
-  [[ "${PLATFORM}" == "linux/amd64" ]] || {
-    echo "Python workflow artifacts only support linux/amd64" >&2
-    exit 1
-  }
-  if ! docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null 2>&1; then
-    local worker_tar
-    worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
-    [[ -f "${worker_tar}" ]] || {
-      echo "Workflow analysis image requires the verified OpenCode worker image or tar: ${worker_tar}" >&2
-      exit 1
-    }
-    docker load -i "${worker_tar}" >/dev/null
-  fi
-  tools_id="$(docker image inspect --format '{{.Id}}' "${TEST_AGENT_OPENCODE_WORKER_IMAGE}")"
-  workflow_version="${TEST_AGENT_WORKFLOW_RELEASE_VERSION:-$(TZ=Asia/Shanghai date '+V%Y%m%d.%H%M%S')}"
-  workflow_output="${OUTPUT_DIR}/workflow"
-  mkdir -p "${workflow_output}"
-  build_env="$(mktemp "${OUTPUT_DIR}/.workflow-build.XXXXXX")"
-  chmod 0600 "${build_env}"
-  {
-    printf 'TEST_AGENT_WORKFLOW_RELEASE_VERSION=%s\n' "${workflow_version}"
-    printf 'TEST_AGENT_WORKFLOW_PYTHON_IMAGE=%s\n' "${TEST_AGENT_WORKFLOW_PYTHON_IMAGE}"
-    printf 'TEST_AGENT_WORKFLOW_UV_IMAGE=%s\n' "${TEST_AGENT_WORKFLOW_UV_IMAGE}"
-    printf 'TEST_AGENT_WORKFLOW_SYFT_IMAGE=%s\n' "${TEST_AGENT_WORKFLOW_SYFT_IMAGE}"
-    printf 'TEST_AGENT_ANALYSIS_TOOLS_IMAGE=%s\n' "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
-    printf 'TEST_AGENT_ANALYSIS_TOOLS_IMAGE_ID=%s\n' "${tools_id}"
-    printf 'TEST_AGENT_WORKFLOW_SERVICE_TAG=test-agent-workflow-service\n'
-    printf 'TEST_AGENT_RUNNER_CONTROLLER_TAG=test-agent-runner-controller\n'
-    printf 'TEST_AGENT_ANALYSIS_TASK_TAG=test-agent-analysis-task\n'
-  } >"${build_env}"
-  "${SCRIPT_DIR}/package-workflow-offline.sh" \
-    --env-file "${build_env}" \
-    --output-dir "${workflow_output}" \
-    --platform "${PLATFORM}"
-  rm -f "${build_env}"
-  archive="${workflow_output}/test-agent-workflow-offline-${workflow_version}.tar.gz"
-  [[ -f "${archive}" && -f "${archive}.sha256" ]] || {
-    echo "Workflow offline archive was not generated" >&2
-    exit 1
-  }
-  cp -a "${archive}" "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz"
-  cp -a "${archive}.sha256" "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256"
-  {
-    printf 'TEST_AGENT_WORKFLOW_RELEASE_VERSION=%s\n' "${workflow_version}"
-    printf 'TEST_AGENT_WORKFLOW_ARCHIVE_SHA256=%s\n' "$(sha256_file "${archive}")"
-  } >"${OUTPUT_DIR}/.workflow-artifact.env"
 }
 
 build_toolbox_image() {
@@ -1266,17 +1178,6 @@ package_release_zip() {
       exit 1
     fi
   done
-  if [[ "${PACKAGE_WORKFLOW}" -eq 1 ]]; then
-    for required_artifact in \
-      "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
-      "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
-      "${OUTPUT_DIR}/.workflow-artifact.env"; do
-      if [[ ! -f "${required_artifact}" ]]; then
-        echo "Required workflow release artifact not found: ${required_artifact}" >&2
-        exit 1
-      fi
-    done
-  fi
   persistence_jar="$(find_unique_persistence_jar "${OUTPUT_DIR}/backend/lib")"
   verify_release_flyway_migrations_jar "${persistence_jar}" "Release ZIP input persistence JAR"
   xxl_job_integration_jar="$(find_unique_xxl_job_integration_jar "${OUTPUT_DIR}/backend/lib")"
@@ -1316,11 +1217,6 @@ package_release_zip() {
   mkdir -p "${staging_dir}/dist/backend"
   cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
-  if [[ "${PACKAGE_WORKFLOW}" -eq 1 ]]; then
-    cp -a "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
-      "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
-      "${staging_dir}/dist/"
-  fi
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${worker_tar}" "${staging_dir}/dist/"
   fi
@@ -1373,9 +1269,6 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX=%s\n' "${TOOLBOX_COMPONENT_MODE}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
-    printf 'TEST_AGENT_RELEASE_WORKFLOW=%s\n' "$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && printf included || printf disabled)"
-    printf 'TEST_AGENT_RELEASE_WORKFLOW_VERSION=%s\n' "$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_RELEASE_VERSION || printf none)"
-    printf 'TEST_AGENT_RELEASE_WORKFLOW_ARCHIVE_SHA256=%s\n' "$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_ARCHIVE_SHA256 || printf none)"
     printf 'TEST_AGENT_RELEASE_LOBEHUB=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf included || printf disabled)"
     printf 'TEST_AGENT_RELEASE_LOBEHUB_VERSION=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && state_value "${OUTPUT_DIR}/lobehub/release.env" LOBEHUB_INTERNAL_VERSION || printf none)"
   } >"${staging_dir}/deploy/internal/release-components.env"
@@ -1474,9 +1367,6 @@ if [[ "${OUTPUT_DIR_FROM_ARG}" -eq 0 && -n "${TEST_AGENT_IMAGE_OUTPUT_DIR:-}" &&
 fi
 
 TEST_AGENT_OPENCODE_WORKER_IMAGE="${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}"
-TEST_AGENT_WORKFLOW_PYTHON_IMAGE="${TEST_AGENT_WORKFLOW_PYTHON_IMAGE:-ghcr.io/astral-sh/uv:0.8.14-python3.12-bookworm-slim@sha256:b748a09ec61c993083278020a84e16f0c81485c5349b30c64dd29d6a22da7462}"
-TEST_AGENT_WORKFLOW_UV_IMAGE="${TEST_AGENT_WORKFLOW_UV_IMAGE:-ghcr.io/astral-sh/uv:0.8.14@sha256:f3660c56d5b08d6c516360981bedc439f499b9bf37f46a216018da3777a74011}"
-TEST_AGENT_WORKFLOW_SYFT_IMAGE="${TEST_AGENT_WORKFLOW_SYFT_IMAGE:-ghcr.io/anchore/syft:v1.30.0@sha256:bd5357d2cd087f03af748dac24df48bfbc1723080d78f75f69aca1f2d429060e}"
 TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE:-test-agent/it-tools:2024.10.22-7ca5933-platform.2}"
 TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE:-test-agent/omni-tools:0.6.0-platform.1}"
 TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE:-node:20.18.0-alpine3.20@sha256:a1d39fe127e43881c6770abf2f0843c955607fb56eb9b45bf6f103c992c5442a}"
@@ -1558,12 +1448,6 @@ if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
   require_digest_pinned_image "TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}"
   require_digest_pinned_image "TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
 fi
-if [[ "${PACKAGE_WORKFLOW}" -eq 1 ]]; then
-  require_digest_pinned_image "TEST_AGENT_WORKFLOW_PYTHON_IMAGE" "${TEST_AGENT_WORKFLOW_PYTHON_IMAGE}"
-  require_digest_pinned_image "TEST_AGENT_WORKFLOW_UV_IMAGE" "${TEST_AGENT_WORKFLOW_UV_IMAGE}"
-  require_digest_pinned_image "TEST_AGENT_WORKFLOW_SYFT_IMAGE" "${TEST_AGENT_WORKFLOW_SYFT_IMAGE}"
-fi
-
 echo "Using env file: ${ENV_FILE}"
 echo "Output dir: ${OUTPUT_DIR}"
 echo "Platform: ${PLATFORM}"
@@ -1591,12 +1475,6 @@ if [[ "${PACKAGE_PYTHON_LIBS}" -eq 1 ]]; then
       --image "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" \
       --output-dir "${OUTPUT_DIR}" \
       --platform "${PLATFORM}"
-fi
-
-if [[ "${PACKAGE_WORKFLOW}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
-  && "${PACKAGE_MODE}" != zip-only ]]; then
-  require_command docker
-  package_workflow_images
 fi
 
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
@@ -1644,10 +1522,6 @@ fi
 if [[ "${PACKAGE_PYTHON_LIBS}" -eq 1 ]]; then
   echo "  Python libraries: ${OUTPUT_DIR}/test-agent-python-libs-py313-linux-amd64.tar.gz"
   echo "  Python libraries checksum: ${OUTPUT_DIR}/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256"
-fi
-if [[ "${PACKAGE_WORKFLOW}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
-  echo "  workflow offline archive: ${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz"
-  echo "  workflow checksum: ${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256"
 fi
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  IT-Tools image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"

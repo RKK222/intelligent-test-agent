@@ -1,9 +1,6 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
@@ -18,8 +15,6 @@ import com.enterprise.testagent.integration.lobehub.LobehubModelIdentity;
 import com.enterprise.testagent.integration.lobehub.LobehubSsoRedeemResult;
 import com.enterprise.testagent.integration.lobehub.LobehubSsoService;
 import com.enterprise.testagent.integration.lobehub.LobehubSsoTicketIssue;
-import com.enterprise.testagent.integration.workflow.WorkflowCapabilityApplicationService;
-import com.enterprise.testagent.integration.workflow.WorkflowModelIdentity;
 import com.enterprise.testagent.model.gateway.ModelGatewayCatalogService;
 import com.enterprise.testagent.model.gateway.ModelGatewayCaller;
 import com.enterprise.testagent.model.gateway.ModelGatewayForwarder;
@@ -98,40 +93,6 @@ class ModelGatewayControllerTest {
         assertThat(forwarder.multipartPrepared).isTrue();
         assertThat(forwarder.forwardedCaller.userId()).isEqualTo("usr_lobehub");
         assertThat(forwarder.forwardedCaller.unifiedAuthId()).isEqualTo("AUTH_LOBEHUB");
-    }
-
-    @Test
-    void workflowGrantUsesWorkflowAuthenticationAndKeepsTheSourceIdentity() {
-        FakeSsoService sso = new FakeSsoService();
-        WorkflowCapabilityApplicationService workflow = mock(WorkflowCapabilityApplicationService.class);
-        when(workflow.authenticateModelGrant("wfg_short_lived"))
-                .thenReturn(new WorkflowModelIdentity(
-                        "usr_workflow",
-                        "AUTH_WORKFLOW",
-                        "workflow-model-gateway"));
-        CapturingForwarder forwarder = new CapturingForwarder();
-        WebTestClient client = WebTestClient.bindToController(new ModelGatewayController(
-                        sso,
-                        workflow,
-                        new ModelGatewayCatalogService(new Providers(), new Models()),
-                        forwarder))
-                .webFilter(new TraceIdWebFilter())
-                .controllerAdvice(new GlobalExceptionHandler())
-                .build();
-
-        client.post()
-                .uri(ModelGatewayController.BASE_PATH + "/chat/completions")
-                .header("Authorization", "Bearer wfg_short_lived")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                .bodyValue("{\"model\":\"enterprise-chat\",\"messages\":[]}")
-                .exchange()
-                .expectStatus().isOk();
-
-        verify(workflow).authenticateModelGrant("wfg_short_lived");
-        assertThat(sso.authenticatedGrant).isNull();
-        assertThat(forwarder.forwardedCaller.userId()).isEqualTo("usr_workflow");
-        assertThat(forwarder.forwardedCaller.unifiedAuthId()).isEqualTo("AUTH_WORKFLOW");
-        assertThat(forwarder.forwardedCaller.sourceClient()).isEqualTo("workflow");
     }
 
     private static final class CapturingForwarder implements ModelGatewayForwarder {

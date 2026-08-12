@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-08-13 - 从 release 分支移除独立 Workflow 能力
+
+### Why
+
+- 用户确认独立 Workflow 能力永久下线，并要求所有长期分支同时删除代码、部署资产、测试和稳定文档；LobeHub 保持可选交付能力。
+
+### What
+
+- 删除 Python Workflow、Runner、分析任务工程，以及 Java capability/Redis 状态、前端路由与 workspace 包。
+- 清理企业打包、Nginx、本地启动、API/事件/数据库/安全/模块文档中的 Workflow 契约；保留 release 当前业务改动和 LobeHub 资产。
+
+### How
+
+- 以 main 的清理提交作为删除清单，在 release 冲突中保留 release 最新非 Workflow 内容；同步修复部署测试夹具的完整 Flyway 资源装配，并恢复与排查授权相关、但被清理提交误带掉的会话所属校验。
+- 执行静态残留扫描、前后端构建、定向测试和部署脚本门禁；LobeHub 资产单独盘点，确认未随 Workflow 删除。
+
+### Result
+
+- release 形成不含独立 Workflow、仍保留 72 个受控 LobeHub 资产的交付基线；未修改 `.env*`、generated SDK、OpenCode 只读源码或已执行 migration 字节。
+
 ### 2026-08-08 - 优化超级管理员内部模型调用可观测页面布局与精细化调整
 
 ### Why

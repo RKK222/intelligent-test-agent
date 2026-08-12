@@ -3344,7 +3344,7 @@ function rawOutputBody(entry: RawOutputEntry) {
   return entry.body || '（空报文体）'
 }
 
-// 生成原始输出导出文件名用的本地时间戳（普通 Vue 组件可用 new Date，Workflow 脚本限制不适用）。
+// 生成原始输出导出文件名用的本地时间戳（普通 Vue 组件可直接使用 new Date）。
 function formatRawOutputStamp() {
   const pad = (n: number) => n.toString().padStart(2, '0')
   const now = new Date()

@@ -53,7 +53,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 - `AgentConfigApplicationService.supersedePublicConfigRollout` 只处理公共发布纠错的 Git 编排：校验共享运行副本恢复风险、使用当前超级管理员 SSH key 解析远端修正分支 commit，再把精确旧 rolloutId、修正 commit 和必填原因交给 `PublicAgentConfigRolloutCoordinator` 原子替换并广播新 rollout。该模块不直接更新 rollout 表、不接受前端自报强停目标，也不控制 manager。
 
-- 自动化代码库复用非标准库创建路径：允许任意已有分支和远端目录树中的任意已有目录，并要求请求显式传入 `yyyyMMdd` 版本；不接受测试工作库专属的 `directoryNew=true` 新增一级目录能力，也不进入应用源码、应用资产或 Workflow checkout 专属链路。
+- 自动化代码库复用非标准库创建路径：允许任意已有分支和远端目录树中的任意已有目录，并要求请求显式传入 `yyyyMMdd` 版本；不接受测试工作库专属的 `directoryNew=true` 新增一级目录能力，也不进入应用源码或应用资产专属链路。
 
 ## Agent & Skill Hub
 

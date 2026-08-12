@@ -28,8 +28,6 @@ printf '%s\n' \
   'TEST_AGENT_API_TOKEN=' \
   'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret-must-not-print' \
   'TEST_AGENT_INTERNAL_PROXY_API_KEY=proxy-secret-must-not-print' \
-  'TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET=workflow-capability-secret-must-not-print' \
-  'TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET=runner-platform-secret-must-not-print' \
   'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=xxl-mysql-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_ACCESS_TOKEN=xxl-access-secret-must-not-print' \
@@ -45,10 +43,6 @@ bash "${CONFIGURE_SCRIPT}" backend \
   --backend-template "${ROOT_DIR}/deploy/internal/backend.env.example" \
   --docker-template "${ROOT_DIR}/deploy/internal/env.example" \
   >/dev/null
-grep -Fxq 'TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET=workflow-capability-secret-must-not-print' \
-  "${CONFIG_114}/backend.env"
-grep -Fxq 'TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET=runner-platform-secret-must-not-print' \
-  "${CONFIG_114}/backend.env"
 grep -Fxq 'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
   "${CONFIG_114}/backend.env"
 # 当前双后台现场每台 worker 固定发布 1000 个同号端口；通用单后台模板仍保留较小默认值。
@@ -91,19 +85,19 @@ mkdir -p "${JAR_ROOT}/BOOT-INF/classes" "${EMPTY_ROOT}" "${PROGRAMS_RUNTIME}/nod
 printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.key"
 (cd "${JAR_ROOT}" && zip -qr "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" .)
 PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
-mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260805132000__create_support_access_audit.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806143000__classify_skill_hub_assets.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806190000__persist_public_skill_hub_snapshots.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806190500__classify_public_skill_hub_snapshots.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+mkdir -p "${PERSISTENCE_JAR_ROOT}/db"
+cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration" \
+  "${PERSISTENCE_JAR_ROOT}/db/"
+cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration-compat" \
+  "${PERSISTENCE_JAR_ROOT}/db/"
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
+XXL_JAR_ROOT="${TMP_ROOT}/xxl-jar-root"
+mkdir -p "${XXL_JAR_ROOT}/xxl-job/db"
+cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration" \
+  "${XXL_JAR_ROOT}/xxl-job/db/"
+(cd "${XXL_JAR_ROOT}" && zip -qr \
+  "${RELEASE_ROOT}/dist/backend/lib/test-agent-xxl-job-integration-0.1.0-SNAPSHOT.jar" .)
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz" .
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" \
   "${PROGRAMS_RUNTIME}/package.json"

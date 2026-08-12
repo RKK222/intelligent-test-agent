@@ -102,10 +102,10 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
-        @DisplayName("脱敏 Workflow 一次性票据、模型授权和加密私钥信封")
-        void mask_workflowCredentials() {
-            String input = "{\"ticketId\":\"wfcheckout-secret\",\"grantId\":\"wfgrantid-secret\","
-                    + "\"grant\":\"wfgrant-secret\",\"encryptedPrivateKey\":\"TAEC1.secret-envelope\"}";
+        @DisplayName("脱敏一次性票据、模型授权和加密私钥")
+        void mask_delegatedCredentials() {
+            String input = "{\"ticketId\":\"ticket-secret\",\"grantId\":\"grant-id-secret\","
+                    + "\"grant\":\"grant-secret\",\"encryptedPrivateKey\":\"encrypted-key\"}";
 
             String result = SensitiveDataMasker.mask(input);
 
@@ -113,9 +113,9 @@ class SensitiveDataMaskerTest {
             assertTrue(result.contains("\"grantId\":\"***\""));
             assertTrue(result.contains("\"grant\":\"***\""));
             assertTrue(result.contains("\"encryptedPrivateKey\":\"***\""));
-            assertFalse(result.contains("wfcheckout-secret"));
-            assertFalse(result.contains("wfgrant-secret"));
-            assertFalse(result.contains("TAEC1.secret-envelope"));
+            assertFalse(result.contains("ticket-secret"));
+            assertFalse(result.contains("grant-secret"));
+            assertFalse(result.contains("encrypted-key"));
         }
 
         @Test
@@ -204,37 +204,6 @@ class SensitiveDataMaskerTest {
             String input = "This is plain text";
             String result = SensitiveDataMasker.mask(input);
             assertEquals(input, result);
-        }
-    }
-
-    @Nested
-    @DisplayName("maskPath 方法测试")
-    class MaskPathTest {
-
-        @Test
-        @DisplayName("隐藏 Workflow 路径中的 checkout ticket 和 model grant")
-        void maskPath_workflowCredentials() {
-            assertEquals(
-                    "/api/internal/workflow-capabilities/v1/checkout-tickets/***/consume",
-                    SensitiveDataMasker.maskPath(
-                            "/api/internal/workflow-capabilities/v1/checkout-tickets/wfcheckout-secret/consume"));
-            assertEquals(
-                    "/api/internal/workflow-capabilities/v1/model-grants/***/refresh",
-                    SensitiveDataMasker.maskPath(
-                            "/api/internal/workflow-capabilities/v1/model-grants/wfgrantid-secret/refresh"));
-            assertEquals(
-                    "/api/internal/workflow-capabilities/v1/model-grants/***/revoke",
-                    SensitiveDataMasker.maskPath(
-                            "/api/internal/workflow-capabilities/v1/model-grants/wfgrantid-secret/revoke"));
-        }
-
-        @Test
-        @DisplayName("不改写没有凭据路径参数的固定路由")
-        void maskPath_keepsFixedRoutes() {
-            assertEquals(
-                    "/api/internal/workflow-capabilities/v1/model-grants/revoke-run",
-                    SensitiveDataMasker.maskPath(
-                            "/api/internal/workflow-capabilities/v1/model-grants/revoke-run"));
         }
     }
 

@@ -63,7 +63,6 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration WORKFLOW_FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(120);
     private static final Duration FIRST_EVENT_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration STREAM_IDLE_TIMEOUT = Duration.ofSeconds(120);
     private static final int MAX_USAGE_CAPTURE_BYTES = 1024 * 1024;
@@ -244,7 +243,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
 
         // 只限制响应头到达时间，不能给完整 SSE 生命周期设置总时长上限。
         Mono<Void> responseHeaderTimeout = responseHeadersReady.asMono()
-                .timeout(firstResponseTimeout(caller))
+                .timeout(FIRST_RESPONSE_TIMEOUT)
                 .onErrorMap(ignored -> new PlatformException(
                         ErrorCode.OPENCODE_TIMEOUT, "企业模型供应商响应超时"))
                 .then(Mono.never());
@@ -256,13 +255,6 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
                 .onErrorResume(error -> Mono.defer(() -> recordUsage(
                                 endpoint, publicModelId, resolvedModel, caller, capture, false, startedAt))
                         .then(Mono.error(error)));
-    }
-
-    /** workflow长上下文模型允许更长冷启动；交互式LobeHub仍保持30秒快速失败。 */
-    static Duration firstResponseTimeout(ModelGatewayCaller caller) {
-        return "workflow".equals(caller.sourceClient())
-                ? WORKFLOW_FIRST_RESPONSE_TIMEOUT
-                : FIRST_RESPONSE_TIMEOUT;
     }
 
     private void copyPart(MultipartBodyBuilder builder, String name, Part part) {

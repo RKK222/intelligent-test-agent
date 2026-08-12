@@ -77,7 +77,7 @@ export SYS_DATA_ROOT_DIR="$TESTAGENT/.testagent"
   --env-file "$test_agent_primary_root/.env.test"
 ```
 
-不要显式把 `TEST_AGENT_ROOT` 改成主工作区；它应继续由脚本设置为当前 worktree，确保构建产物、运行 JAR 和日志都属于当前分支。`TESTAGENT` 负责 Java 对历史 `$TESTAGENT/...` 通用参数的展开，`SYS_DATA_ROOT_DIR` 负责启动脚本写入并让 manager 读取同一份 `.serverid/.serverhost`，两者必须指向同一数据根。只有当前 `.env.test` 确实缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 且本次不验证 Workflow 时，才在命令末尾显式追加 `--without-workflow` 并在交付说明中记录。
+不要显式把 `TEST_AGENT_ROOT` 改成主工作区；它应继续由脚本设置为当前 worktree，确保构建产物、运行 JAR 和日志都属于当前分支。`TESTAGENT` 负责 Java 对历史 `$TESTAGENT/...` 通用参数的展开，`SYS_DATA_ROOT_DIR` 负责启动脚本写入并让 manager 读取同一份 `.serverid/.serverhost`，两者必须指向同一数据根。
 
 LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。该模式要求同级
@@ -95,16 +95,7 @@ origin 校验拒绝。参数初始化或 fork readiness 失败时会审计并补
 生成设置仍只写入 `.tmp/dev-services/lobehub-dev.env`。完成在线联调后，企业交付验收必须重新以默认
 `offline` 模式启动。
 
-Workflow 使用独立的 `test_agent_workflow` PostgreSQL 数据库。数据库尚不存在时，首次执行重启脚本所用的
-`TEST_AGENT_TEST_DB_USERNAME` 必须具备本地 `CREATEROLE` 和 `CREATEDB` 权限；初始化完成后，helper 会先用
-`.tmp/dev-services/workflow/` 中稳定保存的 owner/runtime 密钥验证既有角色并直接复用，后续重启不再要求平台
-数据库账号拥有建库或建角色权限。
-
-在 macOS 安装 GNU Screen 时，Workflow API 与 Worker 会分别托管在
-`test-agent-workflow-api`、`test-agent-workflow-worker` 会话中，避免重启命令所在终端退出后两个进程随进程组被回收；
-PID 文件仍用于校验进程身份，停止时只处理匹配的 Python 工作流进程和对应会话。
-
-脚本默认使用 `test` profile、读取 `.env.test`、先编译后端和自研前端，再按「后端 → opencode-manager → 前端」逐个 kill 旧进程并启动新进程。前端构建和 dev server 启动前会检查 `frontend/node_modules/.modules.yaml` 是否落后于 `pnpm-lock.yaml`、workspace 配置或各包 `package.json`，过期时自动执行 `corepack pnpm install --frozen-lockfile`。后端构建完成后会校验 Maven `target` JAR，并复制为 `.tmp/dev-services/backend-runtime/` 下本次启动专属的不可变副本；Java 只运行该副本，避免并行企业打包或其它 Maven 构建覆盖 `target` 后破坏 Spring Boot 的按需类加载。后端 Java 进程同时会清空 JVM 代理系统属性，避免本机系统代理影响 PostgreSQL JDBC 与 Redis 直连。停止 opencode-manager 时会同步清理其 state 目录中记录的用户 `opencode serve` 子进程、端口池内残留监听进程和 `.tmp/dev-services/opencode-manager-state/processes/*.json`，避免重启后旧端口状态继续占用；新 manager 注册时，后端会在开放控制连接前冻结数据库仍为 `RUNNING/STARTING` 且 binding 为 `ACTIVE` 的原用户进程，完整配置应用并发送首个心跳后自动恢复，显式停止、失败、非活跃或无主进程不会恢复。工作流 helper 会解析 macOS venv 的 Python 符号链接后再校验 API/Worker PID，避免 `ps` 显示真实解释器路径时误判 Worker 启动失败。需要连接 `local` 或 `guo` 环境时显式传入 `--profile local|guo` 和对应 dotenv 文件。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
+脚本默认使用 `test` profile、读取 `.env.test`、先编译后端和自研前端，再按「后端 → opencode-manager → 前端」逐个 kill 旧进程并启动新进程。前端构建和 dev server 启动前会检查 `frontend/node_modules/.modules.yaml` 是否落后于 `pnpm-lock.yaml`、workspace 配置或各包 `package.json`，过期时自动执行 `corepack pnpm install --frozen-lockfile`。后端构建完成后会校验 Maven `target` JAR，并复制为 `.tmp/dev-services/backend-runtime/` 下本次启动专属的不可变副本；Java 只运行该副本，避免并行企业打包或其它 Maven 构建覆盖 `target` 后破坏 Spring Boot 的按需类加载。后端 Java 进程同时会清空 JVM 代理系统属性，避免本机系统代理影响 PostgreSQL JDBC 与 Redis 直连。停止 opencode-manager 时会同步清理其 state 目录中记录的用户 `opencode serve` 子进程、端口池内残留监听进程和 `.tmp/dev-services/opencode-manager-state/processes/*.json`，避免重启后旧端口状态继续占用；新 manager 注册时，后端会在开放控制连接前冻结数据库仍为 `RUNNING/STARTING` 且 binding 为 `ACTIVE` 的原用户进程，完整配置应用并发送首个心跳后自动恢复，显式停止、失败、非活跃或无主进程不会恢复。需要连接 `local` 或 `guo` 环境时显式传入 `--profile local|guo` 和对应 dotenv 文件。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
 
 Windows 需要联调当前 test 环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`；脚本同样只解析 dotenv 的 `KEY=VALUE` 行，不执行文件内容，并按后端、opencode-manager、前端顺序重启。WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，可用 IDEA Run Configuration，但必须把 `.env.test` 中的数据库、Redis、模型和 manager token 环境变量配置进去并使用 `-Dspring.profiles.active=test`；已提交的 `TestAgentApplication guo` 只服务 legacy guo profile。
 
@@ -115,9 +106,6 @@ tools/verify-dev-scripts.sh
 ```
 
 后端单独启动可用 `tools/dev-backend-run.sh [--profile test|guo] [--env-file <path>]`；脚本只解析 `KEY=VALUE` 行，不执行 dotenv 内容，并同样清空后端 JVM 代理系统属性。
-
-macOS 下工作流 helper 会结合 venv 符号链接解析结果和 Python 自报的 sys.executable 校验 API/Worker PID，
-兼容 ps 显示 Python.app 启动器路径的情况，避免把实际运行中的 Worker 误判为启动失败。
 
 ## 8. 自检与提交
 

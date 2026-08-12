@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-中立的企业模型接入模块。上游调用方是 `test-agent-api` 的 LobeHub/Workflow 模型网关与既有 OpenCode 内部模型代理；
+中立的企业模型接入模块。上游调用方是 `test-agent-api` 的 LobeHub 模型网关与既有 OpenCode 内部模型代理；
 目录、探测、供应商密钥和每日用量通过 domain 端口取得或保存。
 
 ## 主要职责
@@ -12,8 +12,8 @@
 - `ModelCapabilityProbeService` 对九项能力使用固定最小样本和对应固定端点，统一覆盖可信 Authorization、UCID
   与 trace header；网络和非 2xx 只返回安全失败结果。
 - `ModelGatewayForwardingService` 支持 JSON、SSE 与 transcription multipart，执行能力门禁、流式取消、分阶段
-  timeout、固定上游错误、usage 有界提取和每日增量。连接超时为10秒；交互式LobeHub响应头等待30秒，
-  Workflow长上下文请求允许120秒冷启动；首个响应块与后续空闲仍分别限制为30秒和120秒。
+  timeout、固定上游错误、usage 有界提取和每日增量。连接超时为10秒；LobeHub响应头等待30秒，
+  首个响应块与后续空闲仍分别限制为30秒和120秒。
 - `OpenAiUpstreamSupport` 统一安全拼接 base URL、清除客户端同名可信 Header、注入供应商 Token/UCID/trace，
   以及过滤响应 hop-by-hop/sensitive header；既有 OpenCode proxy 复用它，但 Responses 转换仍留在原入口。
 

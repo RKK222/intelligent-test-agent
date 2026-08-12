@@ -191,21 +191,6 @@ class ApiLoggingAspectTest {
         }
 
         @Test
-        @DisplayName("Workflow 一次性票据路径只记录固定路由形状")
-        void requestPath_masksWorkflowTicket() {
-            MockServerWebExchange exchange = MockServerWebExchange.from(
-                    MockServerHttpRequest.post(
-                                    "/api/internal/workflow-capabilities/v1/checkout-tickets/wfcheckout-secret/consume")
-                            .build());
-
-            String path = aspect.requestPath(exchange);
-
-            assertEquals(
-                    "/api/internal/workflow-capabilities/v1/checkout-tickets/***/consume",
-                    path);
-        }
-
-        @Test
         @DisplayName("null exchange 返回 unknown")
         void requestPath_nullExchange() {
             String path = aspect.requestPath(null);
