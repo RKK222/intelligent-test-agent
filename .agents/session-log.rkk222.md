@@ -9489,4 +9489,6 @@
 ### Result
 
 - 企业增量发布现在会在构建、外层封装和安装三处拒绝最新 Flyway 资源缺失或字节不一致；QA Memory/Mem0 运行功能仍已撤销，保留的 QA migration 仅用于不可变历史兼容。
-- 本次不修改 `.env*`、generated SDK、OpenCode 只读源码或业务 migration；未新建分支。
+- 以提交 `48745138b57d504831a8b0727c87e133f5b4269a` 完成最终封包：内层 `test-agent-internal-release.zip` SHA-256 为 `eb5d2607551628c100b36b0f14ad66f7ce0bd91fe48ee81616858bae8a8b9ab3`，固定三节点外层 `test-agent-two-backend-complete.zip` SHA-256 为 `6f3bfcf92bba6147594bf5f3d19f28fb637e30296d48bb38a236d26de32f6e75`；两份 checksum 校验和 ZIP 完整性检查通过，外层内嵌内层字节一致。
+- 应用 JAR、前端归档、persistence JAR 与 `models.json` 的 SHA-256 分别为 `c879445f0cd5692bc320fb2565ae29234bbee148a5ab1d4be4b802eb52f12298`、`e26819798f7af496f534daf4cfe121aee9cacda1c83c5c67ba50012802620265`、`9bb5538bd5846e74ee1874e1937d628580aa1507c6070b58d6d7344ed2b97e3b`、`edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`；worker/toolbox 复用上一已部署版本，Workflow/LobeHub 继续关闭。
+- 本次不修改 `.env*`、generated SDK、OpenCode 只读源码或业务 migration；未新建分支。打包期间并行出现的未提交 `PetMiniGames.vue` 弹珠游戏改动晚于本次制品构建，已原样保留在工作区且未纳入发布包、暂存区或提交。
