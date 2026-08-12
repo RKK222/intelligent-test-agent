@@ -9223,3 +9223,27 @@
 
 - 共享参与者在重发事务提交后即可看到修改后的 USER，不再依赖模型思考或流式输出；取消和明确失败会恢复原轮次，重复及乱序通知不会回滚较新界面状态。
 - HTTP/SSE 仅做 additive 扩展并复用既有分享鉴权；未修改数据库结构或 Flyway migration，新增查询通过 MyBatis XML 使用现有 Run 索引，不在通知中传播消息正文。
+
+## 2026-08-12 - 修复撤回重发运行中重复用户消息
+
+### Why
+
+- 现场原始输出证明，预约阶段合成的替代 USER `message.updated` 会比 `run.resend.started` 早约 23 秒到达；此时前端替代轮次锚点仍保留源消息别名，旧归并条件无法命中并追加了第二条 USER。
+- 运行结束后的后端历史只返回一条 USER，确认问题发生在发送方和共享接收方复用的前端实时投影，不是数据库重复落库。
+
+### What
+
+- USER 事件在 `run.resend.started` 前即可按 `replacementRunId` 复用已迁移的替代轮次锚点；权威 USER 同步时统一折叠同一替代 Run 下的候选消息，并迁移 Todo owner 和快照映射。
+- 未携带消息类型的迟到 part 仍只允许命中无远端消息号的锚点，避免 ASSISTANT part 误挂到 USER。
+- 新增贴合现场事件顺序的 reducer 回归，以及发送方、共享接收方在模型开始前和运行完成后的单 USER 断言；同步包 README 和对话场景测试文档。
+
+### How
+
+- 相关 Vitest 3 个文件 209 项通过，Chromium 重发/共享同步 Playwright 2 项通过，全前端 typecheck、lint 和 `git diff --check` 通过。
+- JDK 25 后端 23 个模块 `mvn clean package -Dmaven.test.skip=true` 通过；使用 `.env.test` 和 `--without-workflow` 启动实际服务，后端 health/readiness 为 UP、前端 3000 返回 200、CORS 正常，manager 与 4097/4098 OpenCode 进程恢复健康。
+- 首次完整启动仍被本机 Workflow 密钥缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 阻断，本次功能不涉及 Workflow，故按项目文档排除该服务；提交前已回顾全部 `.agents/session-log*.md`，未发现与本次文件范围冲突。
+
+### Result
+
+- 发送方和共享接收方在撤回重发预约、模型思考、流式输出及完成后均只保留一个替代 USER 气泡。
+- 本次仅修正前端投影兼容逻辑；无 HTTP API、RunEvent 线协议、DTO、数据库、SQL、migration、鉴权、安全或环境配置变更，未修改 generated SDK 和 OpenCode 只读源码。

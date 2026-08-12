@@ -7318,31 +7318,46 @@ test("manual resend keeps the user turn, shows running status, and replaces the 
     status: "DISPATCHED",
     executeAt: "2026-08-07T08:02:00Z"
   };
+  // 生产现场中预约 USER 的平台合成事件早于 run.resend.started，且原锚点仍带源消息别名。
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(1, "run.resend.started", resendPayload),
+    ...event(1, "message.updated", {
+      message: {
+        id: "msg_remote_replacement",
+        role: "user",
+        content: "重新检查登录流程",
+        platformMessageId: "msg_platform_replacement"
+      }
+    }),
     runId: "run_resend_replacement"
   }, "ses_1"]);
+  await expect(page.locator(".oc-user-message")).toHaveCount(1);
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(2, "message.updated", {
+    ...event(2, "run.resend.started", resendPayload),
+    runId: "run_resend_replacement"
+  }, "ses_1"]);
+  await expect(page.locator(".oc-user-message")).toHaveCount(1);
+  await callAgentWorkbenchHandler(page, "handleRunEvent", [{
+    ...event(3, "message.updated", {
       message: { id: "msg_remote_replacement", role: "user", content: "重新检查登录流程" }
     }),
     runId: "run_resend_replacement"
   }, "ses_1"]);
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(3, "message.updated", {
+    ...event(4, "message.updated", {
       message: { id: "msg_remote_new_answer", role: "assistant" }
     }),
     runId: "run_resend_replacement"
   }, "ses_1"]);
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(4, "message.part.updated", {
+    ...event(5, "message.part.updated", {
       messageID: "msg_remote_new_answer",
       part: { id: "part_resend_answer", messageID: "msg_remote_new_answer", type: "text", text: "新回答已经接管页面" }
     }),
     runId: "run_resend_replacement"
   }, "ses_1"]);
+  await expect(page.getByText("新回答已经接管页面")).toBeVisible();
   await callAgentWorkbenchHandler(page, "handleRunEvent", [{
-    ...event(5, "run.succeeded", {}),
+    ...event(6, "run.succeeded", {}),
     runId: "run_resend_replacement"
   }, "ses_1"]);
 
