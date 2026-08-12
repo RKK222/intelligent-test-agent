@@ -10,6 +10,6 @@ class InternalModelLatencyDistributionTest {
     void rejectsNegativeLatencyValues() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new InternalModelLatencyDistribution(1, -1.0, 0.0, 0.0, 0.0, 0.0));
+                () -> new InternalModelLatencyDistribution(1, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0));
     }
 }

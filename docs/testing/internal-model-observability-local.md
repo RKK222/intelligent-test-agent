@@ -126,10 +126,65 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 
 `outcomeGroup` 可选 `SUCCESS/REQUEST_OR_CONFIGURATION/UPSTREAM_FAILURE/CALLER_INTERRUPTED/OTHER`。返回项仍保留精确 `outcome` 供排障；用户调用的 `ucid` 会在页面“来源 / 用户 ID”列直接展示，探活记录则显示“探活”。如需核对单一底层原因，仍可使用兼容参数 `outcome=UPSTREAM_HTTP_ERROR`。
 
+## 6. 独立复算，判断看板有没有算错
+
+验证时先固定与页面完全相同的 `providerId/outcomeGroup/source/from/to`，再按下面的方法核对。不要只下载第 1 页：明细接口单页最多 100 条，必须翻页直到累计条数等于返回的 `total`。页面的明细分页只用于展示，Overview、供应商卡片和图表都使用全量数据。
+
+把所有页的 `items` 合并到一个 JSON 数组文件（例如 `all-call-records.json`），然后运行下面的纯 Python 复算。它没有复用后端 SQL，可作为独立交叉检查：
+
+```bash
+python3 - all-call-records.json <<'PY'
+import json, math, statistics, sys
+
+rows = json.load(open(sys.argv[1], encoding="utf-8"))
+
+def percentile_cont(values, p):
+    values = sorted(values)
+    if not values:
+        return None
+    rank = (len(values) - 1) * p
+    low, high = math.floor(rank), math.ceil(rank)
+    return values[low] + (values[high] - values[low]) * (rank - low)
+
+def summary(values):
+    return {
+        "sampleCount": len(values),
+        "averageMillis": statistics.fmean(values) if values else None,
+        "minimumMillis": min(values) if values else None,
+        "firstQuartileMillis": percentile_cont(values, 0.25),
+        "medianMillis": percentile_cont(values, 0.50),
+        "thirdQuartileMillis": percentile_cont(values, 0.75),
+        "maximumMillis": max(values) if values else None,
+    }
+
+for provider_id in sorted({row["providerId"] for row in rows}):
+    provider_rows = [row for row in rows if row["providerId"] == provider_id]
+    ttft = [row["firstTokenMillis"] for row in provider_rows
+            if isinstance(row.get("firstTokenMillis"), (int, float))]
+    itl = []
+    for row in provider_rows:
+        first, last, count = (row.get("firstTokenMillis"), row.get("lastTokenMillis"),
+                              row.get("outputTokenCount"))
+        if (isinstance(first, (int, float)) and isinstance(last, (int, float))
+                and isinstance(count, int) and count >= 2 and last >= first):
+            itl.append((last - first) / (count - 1))
+    print(json.dumps({"providerId": provider_id, "TTFT": summary(ttft), "ITL_TPOT": summary(itl)},
+                     ensure_ascii=False, indent=2))
+PY
+```
+
+核对标准：
+
+- `REQ` 应等于全量数组长度，而不是当前页条数；`SR/FR` 分别按 `outcome == SUCCESS` 与非成功条数计算。
+- E2E 使用每条 `durationMillis`；TTFT 只取非空 `firstTokenMillis`；SCT 只取非空 `streamCompleteMillis`。
+- ITL/TPOT 只接受首末输出时间完整且 `outputTokenCount >= 2` 的记录，单条按 `(last-first)/(count-1)` 计算，单位为毫秒。
+- 脚本结果应与同一筛选条件下每个厂商分布接口的 `sampleCount/averageMillis/min/P25/P50/P75/max` 一致；浮点数允许极小的显示舍入差异。
+- 最强的回归检查是准备两个厂商、每个厂商至少 4 个确定样本，再确认页面出现两个独立箱体。前端自动化测试还会在“当前页只有 1 条、服务端总量为 41 条”的情况下断言 Overview 仍读取全量聚合结果。
+
 ## 验证结论
 
 - **插桩→分类→落库**：由 `InternalModelSseStreamObserverTest` 固化真实输出、伪心跳与两种收尾信号语义；`InternalModelProxyForwardingServiceTest` 覆盖首 token、`[DONE]`、`finish_reason` 后 EOF 和无收尾信号的流中断；`InternalModelProviderProbeServiceTest` 用本地 HttpServer 覆盖两种完整 SSE、空 200、超时、500 与连接拒绝。
-- **查询/探活 API**：由 `InternalModelObservabilityControllerTest` 固化 TTFT、ITL/TPOT 五数概括的筛选和返回字段；H2 持久化集成测试验证四分位数、准确用量筛选与空样本，PostgreSQL Testcontainers 测试验证生产数据库的 `percentile_cont` 结果。
+- **查询/探活 API**：由 `InternalModelObservabilityControllerTest` 固化 TTFT、ITL/TPOT 平均值与五数概括的筛选和返回字段；H2 持久化集成测试验证平均值、四分位数、准确用量筛选与空样本，PostgreSQL Testcontainers 测试验证生产数据库的 `avg` 与 `percentile_cont` 结果。
 - **本指南**用真实 HTTP 链路串起上述各层，作为部署前的人工交互复现，不替代真实企业端点验收。
 
 ## 已知边界

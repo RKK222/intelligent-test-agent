@@ -47,6 +47,12 @@ export type AgentChatRuntimeAction =
       resend: ResendMetadata;
       message: Extract<AgentMessage, { role: "user" }>;
     }
+  | {
+      type: "run.resend.source.restored";
+      sourceRunId: string;
+      replacementRunId: string;
+      messages: AgentMessage[];
+    }
   | { type: "run.requested"; userMessageId?: string; supersededRunId?: string }
   | { type: "run.adopted"; runId: string; userMessageId?: string }
   | { type: "run.request.failed"; message?: string }
@@ -95,6 +101,14 @@ export function reduceAgentChatRuntime(
   }
   if (action.type === "run.resend.user.synchronized") {
     return synchronizeAuthoritativeResendUser(state, action.resend, action.message);
+  }
+  if (action.type === "run.resend.source.restored") {
+    return restoreAuthoritativeResendSource(
+      state,
+      action.sourceRunId,
+      action.replacementRunId,
+      action.messages
+    );
   }
   if (action.type === "run.requested") {
     const userMessageId = action.userMessageId ?? state.pendingTodoUserMessageId ?? latestUserMessageId(state.messages);
@@ -339,20 +353,36 @@ function reduceEventOnly(
     if (!messageId) {
       return state;
     }
+    // 原生 revert 的 transient removed 可能先于 durable resend.started 到达。
+    // scheduled 已把源 USER 接管到替代 Run 时，只清除旧远端别名并保留页面锚点，
+    // 否则后续无正文 user envelope 会被忽略，紧随其后的 user text part 会误挂到上一条 assistant。
+    const pendingResendUser = removed?.role === "user"
+      && removed.runId === event.runId
+      && removed.resend?.replacementRunId === event.runId
+      ? detachResendUserAliases(removed, event.runId)
+      : undefined;
+    const retainedIdentities = new Set(pendingResendUser
+      ? [
+          pendingResendUser.id,
+          pendingResendUser.messageId,
+          pendingResendUser.platformMessageId,
+          pendingResendUser.remoteMessageId
+        ].filter((identity): identity is string => Boolean(identity))
+      : []);
     const nextScopes = { ...state.messageScopesById };
     if (removed !== undefined && removed.role !== "card") {
       [removed.id, removed.messageId, removed.platformMessageId, removed.remoteMessageId]
         .forEach((identity) => {
-          if (identity) delete nextScopes[identity];
+          if (identity && !retainedIdentities.has(identity)) delete nextScopes[identity];
         });
     } else {
       delete nextScopes[messageId];
     }
     return {
       ...state,
-      messages: state.messages.filter(
-        (message) => !messageIdentityMatches(message, messageId)
-      ),
+      messages: pendingResendUser
+        ? state.messages.map((message) => message === removed ? pendingResendUser : message)
+        : state.messages.filter((message) => !messageIdentityMatches(message, messageId)),
       messageScopesById: nextScopes,
       streamingTextByPartId: clearStreamingForParts(state.streamingTextByPartId, removed?.role === "assistant" ? removed.parts : undefined)
     };
@@ -602,13 +632,11 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
   const pendingReplacementUser = (
     message: Extract<AgentMessage, { role: "user" }>
   ): Extract<AgentMessage, { role: "user" }> => {
-    // OpenCode 会为替代轮次分配新消息 ID；旧平台/远端边界仅用于等待展示，受理后必须原位迁移。
-    const { messageId: _messageId, remoteMessageId: _remoteMessageId, platformMessageId: _platformMessageId, ...pendingUser } = message;
     const resend = startedMetadata
       ?? (message.resend
         ? { ...message.resend, status: text(event.payload.status) ?? "DISPATCHED" }
         : undefined);
-    return { ...pendingUser, runId: replacementRunId, resend };
+    return detachResendUserAliases(message, replacementRunId, resend);
   };
   const messages: AgentMessage[] = state.messages.flatMap((message): AgentMessage[] => {
     if (message.role === "card") {
@@ -666,6 +694,21 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
   };
 }
 
+/** OpenCode 会为替代轮次分配新消息 ID；等待阶段仅保留 DOM 锚点，旧平台/远端别名必须清除。 */
+function detachResendUserAliases(
+  message: Extract<AgentMessage, { role: "user" }>,
+  replacementRunId: string,
+  resend: ResendMetadata | undefined = message.resend ?? undefined
+): Extract<AgentMessage, { role: "user" }> {
+  const {
+    messageId: _messageId,
+    remoteMessageId: _remoteMessageId,
+    platformMessageId: _platformMessageId,
+    ...pendingUser
+  } = message;
+  return { ...pendingUser, runId: replacementRunId, resend };
+}
+
 /**
  * 平台权威 USER 消息只替换撤回轮次的单个锚点，不 reset 整段时间线。
  * 这样既能迁移平台/远端身份，也不会触发历史 loading 和滚动到底。
@@ -676,15 +719,21 @@ function synchronizeAuthoritativeResendUser(
   message: Extract<AgentMessage, { role: "user" }>
 ): AgentChatRuntimeState {
   const replacementRunId = resend.replacementRunId;
-  const replacementIndex = state.messages.findIndex((item) => item.role === "user" && (
+  const existingIndex = state.messages.findIndex((item) => item.role === "user" && (
     item.runId === replacementRunId || item.resend?.replacementRunId === replacementRunId
   ));
-  const existingIndex = replacementIndex >= 0
-    ? replacementIndex
+  const anchorIndex = existingIndex >= 0
+    ? existingIndex
     : state.messages.findIndex((item) => item.role === "user" && item.runId === resend.sourceRunId);
-  const existing = existingIndex >= 0
-    ? state.messages[existingIndex] as Extract<AgentMessage, { role: "user" }>
+  const existing = anchorIndex >= 0
+    ? state.messages[anchorIndex] as Extract<AgentMessage, { role: "user" }>
     : undefined;
+  const replacedUserMessageIds = new Set(state.messages.flatMap((item, index) => item.role === "user" && (
+    index === anchorIndex
+    || item.runId === resend.sourceRunId
+    || item.runId === replacementRunId
+    || item.resend?.replacementRunId === replacementRunId
+  ) ? [item.id] : []));
   const synchronized: Extract<AgentMessage, { role: "user" }> = {
     ...existing,
     ...message,
@@ -702,8 +751,8 @@ function synchronizeAuthoritativeResendUser(
     resend: message.resend ?? existing?.resend ?? resend
   };
   let messages: AgentMessage[];
-  if (existingIndex >= 0) {
-    messages = replaceOrAppendMessage(state.messages, existingIndex, synchronized);
+  if (anchorIndex >= 0) {
+    messages = replaceOrAppendMessage(state.messages, anchorIndex, synchronized);
   } else {
     // assistant 可能先于平台 USER 快照到达；仍按同一 Run 把 USER 插回回答之前。
     const firstReplacementAssistant = state.messages.findIndex(
@@ -717,19 +766,38 @@ function synchronizeAuthoritativeResendUser(
           ...state.messages.slice(firstReplacementAssistant)
         ];
   }
+  // 预约事务已经让平台历史以替代 USER 为准；同步同一修订时立即隐藏源回答，不能等模型 started。
+  messages = messages.filter((item) => {
+    if (item.role === "card") {
+      return text(item.payload.runId) !== resend.sourceRunId
+        && text(item.payload.sourceRunId) !== resend.sourceRunId;
+    }
+    // RunEvent 与 share 消息修订来自两条独立链路，乱序时可能都先投影一个替代 USER。
+    // 后端权威 USER 到达后，同一 replacementRunId 必须只保留当前同步对象。
+    if (item.role === "user" && (
+      item.runId === replacementRunId || item.resend?.replacementRunId === replacementRunId
+    )) {
+      return item === synchronized;
+    }
+    return item.runId !== resend.sourceRunId;
+  });
 
-  const previousMessageId = existing?.id;
   const authoritativeMessageId = synchronized.id;
   const todoSnapshotsByUserMessageId = { ...state.todoSnapshotsByUserMessageId };
-  if (previousMessageId && previousMessageId !== authoritativeMessageId
-      && Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, previousMessageId)) {
-    todoSnapshotsByUserMessageId[authoritativeMessageId] = todoSnapshotsByUserMessageId[previousMessageId];
+  for (const previousMessageId of replacedUserMessageIds) {
+    if (previousMessageId === authoritativeMessageId
+        || !Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, previousMessageId)) {
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(todoSnapshotsByUserMessageId, authoritativeMessageId)) {
+      todoSnapshotsByUserMessageId[authoritativeMessageId] = todoSnapshotsByUserMessageId[previousMessageId];
+    }
     delete todoSnapshotsByUserMessageId[previousMessageId];
   }
   const todoUserMessageIdByRunId = Object.fromEntries(
     Object.entries(state.todoUserMessageIdByRunId).map(([runId, userMessageId]) => [
       runId,
-      previousMessageId && userMessageId === previousMessageId ? authoritativeMessageId : userMessageId
+      replacedUserMessageIds.has(userMessageId) ? authoritativeMessageId : userMessageId
     ])
   );
   todoUserMessageIdByRunId[replacementRunId] = authoritativeMessageId;
@@ -738,10 +806,71 @@ function synchronizeAuthoritativeResendUser(
     messages,
     todoSnapshotsByUserMessageId,
     todoUserMessageIdByRunId,
-    pendingTodoUserMessageId: state.pendingTodoUserMessageId === previousMessageId
+    pendingTodoUserMessageId: (state.pendingTodoUserMessageId
+      && replacedUserMessageIds.has(state.pendingTodoUserMessageId))
       || state.currentTodoRunId === replacementRunId
       ? authoritativeMessageId
       : state.pendingTodoUserMessageId
+  };
+}
+
+/** 取消或投递失败后，用后端按 sourceRun 精确返回的完整轮次原位替换临时替代轮次。 */
+function restoreAuthoritativeResendSource(
+  state: AgentChatRuntimeState,
+  sourceRunId: string,
+  replacementRunId: string,
+  sourceMessages: AgentMessage[]
+): AgentChatRuntimeState {
+  if (sourceMessages.length === 0) return state;
+  const belongsToResend = (message: AgentMessage) => {
+    if (message.role === "card") {
+      return text(message.payload.runId) === sourceRunId
+        || text(message.payload.runId) === replacementRunId
+        || text(message.payload.sourceRunId) === sourceRunId;
+    }
+    return message.runId === sourceRunId
+      || message.runId === replacementRunId
+      || (message.role === "user" && message.resend?.replacementRunId === replacementRunId);
+  };
+  const anchor = state.messages.findIndex(belongsToResend);
+  const insertionIndex = anchor < 0
+    ? state.messages.length
+    : state.messages.slice(0, anchor).filter((message) => !belongsToResend(message)).length;
+  const retained = state.messages.filter((message) => !belongsToResend(message));
+  const messages = [
+    ...retained.slice(0, insertionIndex),
+    ...sourceMessages,
+    ...retained.slice(insertionIndex)
+  ];
+  const restored = createInitialAgentChatRuntimeState(messages);
+  const runStatusesByRunId = { ...state.runStatusesByRunId };
+  delete runStatusesByRunId[replacementRunId];
+  const todoUserMessageIdByRunId = { ...state.todoUserMessageIdByRunId };
+  delete todoUserMessageIdByRunId[replacementRunId];
+  const restoredUser = sourceMessages.find(
+    (message): message is Extract<AgentMessage, { role: "user" }> => message.role === "user"
+  );
+  if (restoredUser) {
+    todoUserMessageIdByRunId[sourceRunId] = restoredUser.id;
+  }
+  return {
+    ...state,
+    messages,
+    permissions: [],
+    questions: [],
+    todos: restored.todos,
+    todoSnapshotsByUserMessageId: {
+      ...state.todoSnapshotsByUserMessageId,
+      ...restored.todoSnapshotsByUserMessageId
+    },
+    todoUserMessageIdByRunId,
+    pendingTodoUserMessageId: undefined,
+    currentTodoRunId: undefined,
+    streamingTextByPartId: {},
+    diff: undefined,
+    status: undefined,
+    runtimeStatus: undefined,
+    runStatusesByRunId
   };
 }
 
@@ -1005,7 +1134,11 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
   }
   const delayedUserText = text(raw.text) ?? text(raw.content);
   const delayedUserPart = promptPartFromUserRaw(raw);
-  const delayedUserPartIndex = findUnlinkedUserByText(messages, delayedUserText);
+  // 替代 Run 的 text part 可能先于带 role 的 user envelope 到达；Run 边界比编辑前后文本更稳定。
+  const pendingResendUserIndex = findUnlinkedResendUser(messages, event.runId);
+  const delayedUserPartIndex = pendingResendUserIndex >= 0
+    ? pendingResendUserIndex
+    : findUnlinkedUserByText(messages, delayedUserText);
   if (delayedUserPartIndex >= 0) {
     const user = messages[delayedUserPartIndex];
     if (user.role === "user") {
@@ -1147,7 +1280,7 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
   let index = messages.findIndex((item) => messageIdentityMatches(item, messageId));
   if (role === "user" && index < 0 && !forceNewMessage) {
     // 撤回重发会更换文本和远端消息 ID；用替代 Run 边界原位接管，不能再依赖新旧文本相等。
-    const pendingResendIndex = findUnlinkedResendUser(messages, event.runId);
+    const pendingResendIndex = findResendUserForRun(messages, event.runId);
     const pendingUserIndex = pendingResendIndex >= 0 ? pendingResendIndex : findLastUserInCurrentTurn(messages);
     const pendingUser = pendingUserIndex >= 0 ? messages[pendingUserIndex] : undefined;
     if (pendingUser?.role === "user" && (
@@ -1346,7 +1479,14 @@ function findUnlinkedUserByText(messages: AgentMessage[], incomingText: string |
   );
 }
 
-// 撤回重发后的权威 user 事件可能晚于 assistant 事件到达；替代 Run 是比文本更稳定的归并边界。
+// 撤回重发的合成/原生 USER envelope 可能早于 started 到达；即使锚点仍带源消息 ID，也按替代 Run 接管。
+function findResendUserForRun(messages: AgentMessage[], runId: string): number {
+  return messages.findIndex((message) => message.role === "user"
+    && message.runId === runId
+    && message.resend?.replacementRunId === runId);
+}
+
+// 无角色的 part 只有在锚点尚未绑定 messageId 时才能按替代 Run 认作延迟 USER part，避免把 assistant part 挂到 USER。
 function findUnlinkedResendUser(messages: AgentMessage[], runId: string): number {
   return messages.findIndex((message) => message.role === "user"
     && !message.messageId

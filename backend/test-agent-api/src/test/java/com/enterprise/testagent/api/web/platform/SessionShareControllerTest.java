@@ -9,12 +9,14 @@ import static org.mockito.Mockito.when;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
-import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunStatus;
+import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.sessionshare.SessionShare;
 import com.enterprise.testagent.domain.sessionshare.SessionShareCandidate;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
@@ -22,11 +24,12 @@ import com.enterprise.testagent.domain.sessionshare.SessionShareMembership;
 import com.enterprise.testagent.domain.sessionshare.SessionShareStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChange;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChangeType;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
-import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
-import com.enterprise.testagent.common.error.ErrorCode;
-import com.enterprise.testagent.common.error.PlatformException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -35,6 +38,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
 /** 会话协作分享 HTTP 契约、认证主体与分享头测试。 */
@@ -161,6 +165,66 @@ class SessionShareControllerTest {
                     org.assertj.core.api.Assertions.assertThat(event.event())
                             .isEqualTo("session-share.invalidated");
                     org.assertj.core.api.Assertions.assertThat(event.data().reason()).isEqualTo("REVOKED");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void runtimeStreamPublishesCommittedSessionMessageChangeWithoutWaitingForPolling() {
+        SessionCollaborationShareService service = mock(SessionCollaborationShareService.class);
+        RunApplicationService runService = mock(RunApplicationService.class);
+        SessionMessageRealtimeHub realtimeHub = mock(SessionMessageRealtimeHub.class);
+        Sinks.Many<SessionMessageChange> changes = Sinks.many().unicast().onBackpressureBuffer();
+        when(service.requireAccess(USER, SHARE_ID, false, TRACE_ID)).thenReturn(context());
+        when(service.refreshAccess(USER, SHARE_ID, TRACE_ID)).thenReturn(context());
+        when(service.sessionUpdatedAt(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(NOW, NOW.plusSeconds(1));
+        when(runService.findActiveRun(SESSION)).thenReturn(Optional.of(new Run(
+                new RunId("run_share_message_change"), SESSION, WORKSPACE, RunStatus.RUNNING,
+                NOW, NOW, TRACE_ID)));
+        when(realtimeHub.events(SESSION)).thenReturn(changes.asFlux());
+        SessionShareController controller = new SessionShareController(service, runService, realtimeHub);
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                .get("/api/internal/platform/opencode-runtime/session-shares/runtime-state/events")
+                .header("X-Trace-Id", TRACE_ID)
+                .header(SessionShareController.SHARE_HEADER, SHARE_ID.value())
+                .build());
+        exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, new AuthPrincipal(
+                "token", USER, "ucid-controller", "当前用户", List.of(), NOW, NOW.plusSeconds(3600)));
+
+        StepVerifier.create(controller.runtimeStateEvents(SHARE_ID.value(), exchange)
+                        .filter(event -> event.data() != null)
+                        .take(2))
+                .assertNext(event -> {
+                    org.assertj.core.api.Assertions.assertThat(event.event())
+                            .isEqualTo("session-share.snapshot");
+                    org.assertj.core.api.Assertions.assertThat(event.data().sessionUpdatedAt())
+                            .isEqualTo(NOW);
+                })
+                .then(() -> changes.tryEmitNext(new SessionMessageChange(
+                        SESSION,
+                        new RunId("run_share_message_source"),
+                        new RunId("run_share_message_change"),
+                        SessionMessageChangeType.RESEND_RESERVED,
+                        NOW.plusSeconds(1),
+                        TRACE_ID,
+                        NOW.plusSeconds(1))))
+                .assertNext(event -> {
+                    org.assertj.core.api.Assertions.assertThat(event.event())
+                            .isEqualTo("session-share.updated");
+                    org.assertj.core.api.Assertions.assertThat(event.data().sessionUpdatedAt())
+                            .isEqualTo(NOW.plusSeconds(1));
+                    org.assertj.core.api.Assertions.assertThat(event.data().messageChange())
+                            .satisfies(change -> {
+                                org.assertj.core.api.Assertions.assertThat(change.sourceRunId())
+                                        .isEqualTo("run_share_message_source");
+                                org.assertj.core.api.Assertions.assertThat(change.replacementRunId())
+                                        .isEqualTo("run_share_message_change");
+                                org.assertj.core.api.Assertions.assertThat(change.changeType())
+                                        .isEqualTo("RESEND_RESERVED");
+                                org.assertj.core.api.Assertions.assertThat(change.revision())
+                                        .isEqualTo(NOW.plusSeconds(1));
+                            });
                 })
                 .verifyComplete();
     }

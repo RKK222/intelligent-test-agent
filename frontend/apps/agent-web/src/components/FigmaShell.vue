@@ -124,7 +124,7 @@ const props = withDefaults(
     helpCenterOpen: false,
     notifications: () => [],
     notificationUnreadCount: 0,
-    notificationFilter: "ALL",
+    notificationFilter: "UNREAD",
     notificationsLoading: false,
     notificationsLoadingMore: false,
     notificationsHasMore: false,

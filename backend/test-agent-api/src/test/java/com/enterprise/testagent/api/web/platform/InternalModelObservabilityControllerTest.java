@@ -114,7 +114,7 @@ class InternalModelObservabilityControllerTest {
                         eq(InternalModelCallSource.USER_CALL),
                         any(),
                         any()))
-                .thenReturn(new InternalModelLatencyDistribution(4, 100.0, 175.0, 250.0, 325.0, 400.0));
+                .thenReturn(new InternalModelLatencyDistribution(4, 250.0, 100.0, 175.0, 250.0, 325.0, 400.0));
         WebTestClient client = client(queryService, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
@@ -126,6 +126,7 @@ class InternalModelObservabilityControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.sampleCount").isEqualTo(4)
+                .jsonPath("$.data.averageMillis").isEqualTo(250.0)
                 .jsonPath("$.data.minimumMillis").isEqualTo(100.0)
                 .jsonPath("$.data.firstQuartileMillis").isEqualTo(175.0)
                 .jsonPath("$.data.medianMillis").isEqualTo(250.0)
@@ -142,7 +143,7 @@ class InternalModelObservabilityControllerTest {
                         eq(InternalModelCallSource.USER_CALL),
                         any(),
                         any()))
-                .thenReturn(new InternalModelLatencyDistribution(3, 20.0, 30.0, 40.0, 50.0, 60.0));
+                .thenReturn(new InternalModelLatencyDistribution(3, 40.0, 20.0, 30.0, 40.0, 50.0, 60.0));
         WebTestClient client = client(queryService, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
@@ -153,6 +154,7 @@ class InternalModelObservabilityControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.sampleCount").isEqualTo(3)
+                .jsonPath("$.data.averageMillis").isEqualTo(40.0)
                 .jsonPath("$.data.medianMillis").isEqualTo(40.0);
     }
 

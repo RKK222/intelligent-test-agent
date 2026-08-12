@@ -7,6 +7,7 @@ import com.enterprise.testagent.domain.sessionshare.SessionShareMembership;
 import com.enterprise.testagent.domain.sessionshare.SessionShareParticipant;
 import com.enterprise.testagent.domain.sessionshare.SharedSessionListItem;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
+import com.enterprise.testagent.opencode.runtime.session.SessionMessageRealtimeHub.SessionMessageChange;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -163,17 +164,20 @@ final class SessionShareDtos {
             Instant expiresAt,
             RuntimeDtos.RunResponse activeRun,
             Instant sessionUpdatedAt,
+            SessionMessageChangeResponse messageChange,
             Instant generatedAt) {
 
         static SessionShareRuntimeStateResponse active(
                 DelegatedOperationContext context,
                 RuntimeDtos.RunResponse activeRun,
                 Instant sessionUpdatedAt,
+                SessionMessageChange messageChange,
                 Instant generatedAt) {
             return new SessionShareRuntimeStateResponse(
                     true, null, context.shareId().value(), context.shareVersion(),
                     context.sessionId().value(), context.workspaceId().value(), context.canChat(),
-                    context.expiresAt(), activeRun, sessionUpdatedAt, generatedAt);
+                    context.expiresAt(), activeRun, sessionUpdatedAt,
+                    SessionMessageChangeResponse.from(messageChange), generatedAt);
         }
 
         static SessionShareRuntimeStateResponse invalid(
@@ -183,7 +187,26 @@ final class SessionShareDtos {
             return new SessionShareRuntimeStateResponse(
                     false, reason, previous.shareId().value(), previous.shareVersion(),
                     previous.sessionId().value(), previous.workspaceId().value(), false,
-                    previous.expiresAt(), null, null, generatedAt);
+                    previous.expiresAt(), null, null, null, generatedAt);
+        }
+    }
+
+    /** 消息变化只透传归并身份和修订号，正文仍由受鉴权的消息接口读取。 */
+    record SessionMessageChangeResponse(
+            String sessionId,
+            String sourceRunId,
+            String replacementRunId,
+            String changeType,
+            Instant revision) {
+
+        static SessionMessageChangeResponse from(SessionMessageChange change) {
+            if (change == null) return null;
+            return new SessionMessageChangeResponse(
+                    change.sessionId().value(),
+                    change.sourceRunId().value(),
+                    change.replacementRunId().value(),
+                    change.changeType().name(),
+                    change.revision());
         }
     }
 

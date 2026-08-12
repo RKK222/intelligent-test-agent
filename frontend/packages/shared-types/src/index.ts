@@ -814,7 +814,17 @@ export type SessionShareRuntimeState = {
   activeRun?: Run | null;
   /** 会话正文修订锚点；共享参与者据此刷新压缩后的远端消息快照。 */
   sessionUpdatedAt?: string | null;
+  /** 提交后的安全归并身份；消息正文仍需通过会话消息接口读取。 */
+  messageChange?: SessionMessageChangeIdentity | null;
   generatedAt: string;
+};
+
+export type SessionMessageChangeIdentity = {
+  sessionId: string;
+  sourceRunId: string;
+  replacementRunId: string;
+  changeType: "RESEND_RESERVED" | "RESEND_STARTED" | "RESEND_RESTORED";
+  revision: string;
 };
 
 /** 工作台通知首期只开放受控的会话分享动作，前端不得把通知目标解释为任意 URL。 */
@@ -2247,9 +2257,11 @@ export type InternalModelCallHourlyStat = {
   streamCompleteCount?: number | null;
 };
 
-/** 单次调用时延的五数概括；具体样本资格由对应指标决定。 */
+/** 单次调用时延的平均值与五数概括；具体样本资格由对应指标决定。 */
 export type InternalModelLatencyDistribution = {
   sampleCount: number;
+  /** 兼容旧版后端：缺失时总览平均值显示为空，不使用中位数冒充平均值。 */
+  averageMillis?: number | null;
   minimumMillis?: number | null;
   firstQuartileMillis?: number | null;
   medianMillis?: number | null;
