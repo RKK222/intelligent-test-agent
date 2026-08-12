@@ -12,7 +12,6 @@ import com.enterprise.testagent.model.gateway.ModelGatewayCaller;
 import com.enterprise.testagent.model.gateway.ModelGatewayCatalogService;
 import com.enterprise.testagent.model.gateway.ModelGatewayForwarder;
 import com.enterprise.testagent.model.gateway.ModelGatewayModelView;
-import com.enterprise.testagent.memory.MemoryModelHmacAuthenticator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +39,6 @@ public class ModelGatewayController {
     private final WorkflowCapabilityApplicationService workflowCapabilities;
     private final ModelGatewayCatalogService catalogService;
     private final ModelGatewayForwarder forwardingService;
-    private MemoryModelHmacAuthenticator memoryHmac;
 
     @Autowired
     public ModelGatewayController(
@@ -78,7 +76,7 @@ public class ModelGatewayController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    /** JSON 模态统一使用公开模型 ID；HMAC 必须在读取原始正文后校验 body digest。 */
+    /** JSON 模态统一使用公开模型 ID；委托鉴权和目录快照均先于请求体聚合。 */
     @PostMapping(path = {
             BASE_PATH + "/chat/completions",
             BASE_PATH + "/responses",
@@ -89,26 +87,22 @@ public class ModelGatewayController {
     }, consumes = MediaType.APPLICATION_JSON_VALUE)
     public Mono<Void> proxyJson(ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
-        long length = exchange.getRequest().getHeaders().getContentLength();
-        if (length > MAX_JSON_REQUEST_BODY_BYTES) {
-            return Mono.error(payloadTooLarge());
-        }
-        return readBody(exchange)
-                .flatMap(body -> Mono.fromCallable(() -> authenticate(exchange, body))
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .flatMap(identity -> Mono.fromCallable(() -> forwardingService.prepare(exchange, body))
-                                .subscribeOn(Schedulers.boundedElastic())
-                                .flatMap(prepared -> {
-                                    if (identity.memoryIdentity() != null) {
-                                        memoryHmac.requireModel(identity.memoryIdentity(), prepared.publicModelId());
-                                    }
-                                    return forwardingService.forward(
-                                            exchange,
-                                            prepared,
-                                            new ModelGatewayCaller(
-                                                    identity.userId(), identity.unifiedAuthId(), identity.source()),
-                                            traceId);
-                                })));
+        return Mono.fromCallable(() -> authenticate(exchange))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(identity -> {
+                    long length = exchange.getRequest().getHeaders().getContentLength();
+                    if (length > MAX_JSON_REQUEST_BODY_BYTES) {
+                        return Mono.error(payloadTooLarge());
+                    }
+                    return readBody(exchange)
+                            .flatMap(body -> Mono.fromCallable(() -> forwardingService.prepare(exchange, body))
+                                    .subscribeOn(Schedulers.boundedElastic()))
+                            .flatMap(prepared -> forwardingService.forward(
+                                    exchange,
+                                    prepared,
+                                    new ModelGatewayCaller(identity.userId(), identity.unifiedAuthId(), identity.source()),
+                                    traceId));
+                });
     }
 
     /** multipart 由 WebFlux 写入受限临时文件后流式转发，平台不持久化音频内容。 */
@@ -128,31 +122,16 @@ public class ModelGatewayController {
     }
 
     private GatewayIdentity authenticate(ServerWebExchange exchange) {
-        return authenticate(exchange, new byte[0]);
-    }
-
-    private GatewayIdentity authenticate(ServerWebExchange exchange, byte[] body) {
-        if (memoryHmac != null && memoryHmac.supports(exchange)) {
-            MemoryModelHmacAuthenticator.Identity identity = memoryHmac.authenticate(exchange, body);
-            return new GatewayIdentity(
-                    identity.userId(), identity.unifiedAuthId(), "memory", identity);
-        }
         String grant = AuthWebSupport.extractBearerToken(exchange);
         if (grant != null && grant.startsWith("wfg_")) {
             if (workflowCapabilities == null) {
                 throw new PlatformException(ErrorCode.UNAUTHENTICATED, "workflow模型委托不可用");
             }
             WorkflowModelIdentity identity = workflowCapabilities.authenticateModelGrant(grant);
-            return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "workflow", null);
+            return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "workflow");
         }
         LobehubModelIdentity identity = ssoService.authenticateModelGrant(grant);
-        return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "lobehub", null);
-    }
-
-    /** 可选方法注入保持关闭记忆能力的装配和既有 Controller 单元测试稳定。 */
-    @Autowired(required = false)
-    void setMemoryHmac(MemoryModelHmacAuthenticator memoryHmac) {
-        this.memoryHmac = memoryHmac;
+        return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "lobehub");
     }
 
     private Mono<byte[]> readBody(ServerWebExchange exchange) {
@@ -188,11 +167,7 @@ public class ModelGatewayController {
                 model.capabilities().stream().map(capability -> capability.name().toLowerCase()).sorted().toList());
     }
 
-    private record GatewayIdentity(
-            String userId,
-            String unifiedAuthId,
-            String source,
-            MemoryModelHmacAuthenticator.Identity memoryIdentity) {
+    private record GatewayIdentity(String userId, String unifiedAuthId, String source) {
     }
 
     /** OpenAI 模型目录外壳，保持企业适配器可直接消费。 */

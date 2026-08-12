@@ -2,8 +2,6 @@
 
 本文档是 SSE 和平台事件流的稳定入口。新增或修改事件类型必须更新本文件。
 
-通用长期记忆 V1 不新增事件类型；聊天中的“参考了 N 条记忆”通过 `/api/internal/platform/memory/v1/run-usage/query` 批量恢复。原生 Mem0 学习、双 collection 投影、团队审核和证据 Session/Run 引用都不进入 RunEvent，避免改变既有回放与兼容边界。
-
 ## 文档模板
 
 每个事件类型必须记录：

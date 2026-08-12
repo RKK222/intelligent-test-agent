@@ -14,7 +14,6 @@ public record InternalModelProviderModel(
         String upstreamModelId,
         String displayName,
         Long contextLimit,
-        Integer embeddingDimension,
         boolean enabled,
         Set<ModelCapability> declaredCapabilities,
         Set<ModelCapability> probedCapabilities,
@@ -30,9 +29,6 @@ public record InternalModelProviderModel(
         if (contextLimit != null && contextLimit <= 0) {
             throw new IllegalArgumentException("contextLimit must be positive");
         }
-        if (embeddingDimension != null && embeddingDimension <= 0) {
-            throw new IllegalArgumentException("embeddingDimension must be positive");
-        }
         declaredCapabilities = immutableCapabilities(declaredCapabilities);
         probedCapabilities = immutableCapabilities(probedCapabilities);
         if (!declaredCapabilities.containsAll(probedCapabilities)) {
@@ -40,22 +36,6 @@ public record InternalModelProviderModel(
         }
         Objects.requireNonNull(createdAt, "createdAt must not be null");
         Objects.requireNonNull(updatedAt, "updatedAt must not be null");
-    }
-
-    public InternalModelProviderModel(
-            String providerId,
-            String modelId,
-            String upstreamModelId,
-            String displayName,
-            Long contextLimit,
-            boolean enabled,
-            Set<ModelCapability> declaredCapabilities,
-            Set<ModelCapability> probedCapabilities,
-            Instant lastProbedAt,
-            Instant createdAt,
-            Instant updatedAt) {
-        this(providerId, modelId, upstreamModelId, displayName, contextLimit, null, enabled,
-                declaredCapabilities, probedCapabilities, lastProbedAt, createdAt, updatedAt);
     }
 
     /** 只有启用且至少一项已探测能力的模型才可进入网关目录。 */

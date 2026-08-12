@@ -33,19 +33,6 @@ Token 校验流程：
 - 鉴权失败返回统一错误格式，错误码 `UNAUTHENTICATED`，不得回显 token。
 - Actuator health 不使用占位 token，生产暴露范围后续单独收敛。
 
-## 通用长期记忆安全
-
-1. 浏览器只能访问 `/api/internal/platform/memory/v1/**`。Java 到 memory-service 使用至少 32 字节的 `X-Memory-Service-Key`，该 key 只认证调用服务，不能替代登录用户、白名单、owner、Application 成员或角色校验；前端、URL、日志、错误正文和镜像层不得得到该 key。
-2. Mem0 到 Java 模型网关只允许固定 `/chat/completions` 与 `/embeddings` HMAC 入口。签名必须覆盖方法、固定路径、body SHA-256、client/user/run/session/operation、timestamp、nonce、capability 和 embedding input type；默认时钟偏差 30 秒，nonce 在 Redis 中原子消费并保留 2 分钟。缺失、过期、重放、body/身份不一致统一失败关闭；记忆开关启用但 HMAC secret 不合规时 Java 必须启动失败，不能延迟到首个回调才暴露错误。
-3. HMAC 只允许管理设置中的固定 CHAT 模型，以及已配置企业 Embedding 或固定 CPU profile；调用者不能提交供应商、上游 URL或 Token。Java 到 CPU 服务复用内部模型供应商 API key，不把 key 转交 Mem0。模型网关错误不得回显供应商 URL、凭据、prompt、answer 或原始响应。
-4. 原始 USER/ASSISTANT 只允许从现有 Session 事实源瞬时进入一次 `Mem0.add(messages,infer=true)` 请求；memory-service 不保存 message history，readiness 必须报告 `rawMessageCount=0`。metadata 任意层级禁止 `messages/transcript/rawConversation/prompt/answer/assistantMessage/userMessage`；记忆库、outbox、容器文件和日志不得建立原始对话副本。
-5. 平台证据只保存有界摘要和 `sessionId/sessionTitle/runId`。授权记忆查看者可见标题和 ID，但完整 transcript 仍由既有 `/s/{sessionId}` owner 校验控制；团队成员、`APP_ADMIN` 或 `SUPER_ADMIN` 都不能仅凭记忆权限旁路 Session owner。`transcriptAvailable` 必须由后端实时派生，前端隐藏链接不是授权边界。记忆正文保存原文且不做语义封禁，但注入 Run system context 时必须按不可信数据处理并转义提示词容器边界，正文不能闭合 `<long_term_memory>` 或伪造结构节点。
-6. 个人原生记忆默认只属于当前用户与 Application；手工提升全局必须由 owner 发起。团队记忆只能由当前成员手工提交并由 `APP_ADMIN` 审核，自动学习不得写团队 scope。成员退出后团队查询、审核和 Run 注入立即失效。
-7. 不同 embedding model/dimension/fingerprint 必须使用不同 collection。逻辑版本、幂等、投影和 outbox 全部在独立共享 PostgreSQL；Mem0 副本只读根文件系统、无本地数据 mount。数据库账号、service key、HMAC secret、CPU API key 分别最小授权，不能复用平台用户 Token。
-8. Run 前记忆检索总预算 2 秒，所有 profile 不可用时 fail-open 为空记忆，不得为可用性放宽鉴权、使用其它用户数据、本地缓存正文或直连模型。fail-open 日志只记录 traceId、Run ID、耗时、profile 身份和安全错误码。
-9. `/health` 只作 liveness；业务和发布门禁必须使用带 key 的 `/ready`，同时验证共享库、profile、投影积压和 `rawMessageCount=0`。管理健康数据不返回数据库连接串、内网模型地址或密钥。
-10. 企业配置文件必须是 `0600` 非符号链接普通文件；构建与发布脚本不得 `source` 敏感 dotenv、回显 secret 或使用 `latest` 镜像。BGE 权重只在外网构建阶段下载并通过模型身份清单锁定，企业运行时禁止访问 Hugging Face。
-
 ## 会话运行上下文安全
 
 1. `contextToken` 是 256 位安全随机生成的 opaque token，只用于引用后端已解析的可信会话运行上下文，不能替代用户 Bearer Token、权限校验或 Session 归属校验。

@@ -99,19 +99,8 @@ public class InternalModelCatalogManagementApplicationService implements Interna
             String upstreamModelId,
             String displayName,
             Long contextLimit,
-            Integer embeddingDimension,
             Boolean enabled,
             Set<ModelCapability> capabilities) {
-
-        public ModelItem(
-                String modelId,
-                String upstreamModelId,
-                String displayName,
-                Long contextLimit,
-                Boolean enabled,
-                Set<ModelCapability> capabilities) {
-            this(modelId, upstreamModelId, displayName, contextLimit, null, enabled, capabilities);
-        }
 
         private InternalModelProviderModel toDomain(
                 String providerId,
@@ -135,15 +124,6 @@ public class InternalModelCatalogManagementApplicationService implements Interna
             if (contextLimit != null && contextLimit <= 0) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "contextLimit 必须为正数");
             }
-            if (normalizedCapabilities.contains(ModelCapability.EMBEDDING)) {
-                if (embeddingDimension == null || embeddingDimension <= 0) {
-                    throw new PlatformException(ErrorCode.VALIDATION_ERROR,
-                            "声明 EMBEDDING 能力时必须配置正数 embeddingDimension");
-                }
-            } else if (embeddingDimension != null) {
-                throw new PlatformException(ErrorCode.VALIDATION_ERROR,
-                        "只有 EMBEDDING 模型可以配置 embeddingDimension");
-            }
             InternalModelProviderModel previous = existing.get(normalizedModelId);
             return new InternalModelProviderModel(
                     providerId,
@@ -151,7 +131,6 @@ public class InternalModelCatalogManagementApplicationService implements Interna
                     requireText(upstreamModelId, "upstreamModelId", MAX_MODEL_TEXT_LENGTH),
                     requireText(displayName, "displayName", MAX_MODEL_TEXT_LENGTH),
                     contextLimit,
-                    embeddingDimension,
                     enabled == null || enabled,
                     normalizedCapabilities,
                     Set.of(),

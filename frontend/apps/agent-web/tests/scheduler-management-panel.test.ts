@@ -238,53 +238,6 @@ describe("scheduler management panel", () => {
     expect(view.getByTitle("XXL-JOB 定时任务管理")).toBeTruthy();
     view.queryClient.clear();
   });
-
-  it("opens the generic memory health and rollout panel from system management", async () => {
-    const backendApi = api({
-      getQaMemoryAdminHealth: vi.fn().mockResolvedValue({
-        enabled: true,
-        memoryService: {
-          available: true,
-          status: "UP",
-          version: "2.0.17",
-          profiles: [{
-            profileKey: "cpu:bge-small-zh-v1.5:512:fixed",
-            provider: "CPU",
-            model: "memory-bge-small-zh-v1.5",
-            dimension: 512,
-            fingerprint: "fixed",
-            collection: "memory_cpu_v1",
-            primary: true,
-            available: true
-          }],
-          projectionBacklog: { pending: 0, processing: 0, dead: 0 }
-        },
-        primaryChatModelId: "enterprise/chat",
-        primaryEmbeddingModelId: null,
-        cpuEmbeddingModelId: "memory-bge-small-zh-v1.5",
-        queuePending: 0,
-        queueProcessing: 0,
-        queueDead: 0
-      }),
-      getQaMemorySettings: vi.fn().mockResolvedValue({
-        primaryChatModelId: "enterprise/chat",
-        primaryEmbeddingModelId: null,
-        cpuEmbeddingModelId: "memory-bge-small-zh-v1.5",
-        version: 1,
-        updatedByUserId: "usr_admin",
-        updatedAt: "2026-08-09T00:00:00Z"
-      }),
-      listQaMemoryWhitelist: vi.fn().mockResolvedValue({ items: [], page: 1, size: 100, total: 0 })
-    });
-    const view = renderWithApi(SystemManagementPanel, backendApi);
-
-    await fireEvent.click(view.getByText("记忆能力", { selector: ".ta-system-menu-text" }));
-
-    expect(await view.findByTestId("memory-admin-panel")).toBeTruthy();
-    expect((await view.findByTestId("memory-health-mem0")).textContent).toContain("就绪");
-    view.queryClient.clear();
-  });
-
   it("reveals the support panel only after the global super-admin gesture requests it without changing identity", async () => {
     const backendApi = api();
     const view = renderWithApi(SystemManagementPanel, backendApi);

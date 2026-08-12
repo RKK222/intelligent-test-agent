@@ -9345,3 +9345,28 @@
 
 - 运营分析默认即可看到约一个月的完整趋势轴，用户可一键扩大到 90/180 天；无活动日期显示为零，热力图始终保持完整 7×24 坐标。
 - 本次仅调整既有查询接口的默认范围和返回补零行为，不新增 URL、DTO 字段、RunEvent 或数据库/SQL/migration；最多 500 点、日粒度最多 180 天等既有限制保持不变，向后兼容。
+
+## 2026-08-12 - 撤销误合入的 Mem0 长期记忆能力
+
+### Why
+
+- `4d5186104` 合入的 Mem0 长期记忆属于误合并，用户要求撤销或保证启动完全忽略，同时明确不能丢失 huangzhenren 后续提交和近期部署成果。
+- 已执行的 QA Memory/Flyway 历史可能存在于个人库和企业库，不能通过删除、改名或改写 migration 来回退，否则会破坏既有 `flyway_schema_history` 和后续升级兼容。
+
+### What
+
+- 撤销 Java 记忆模块、领域模型、治理 API、前端记忆中心与管理页、Mem0/Embedding 独立服务、开发编排、离线制品和发布入口；平台启动脚本不再识别、探测或启动这些服务。
+- 保留工作台、工具箱、系统管理、Hub、设置等稳定路由，以及体验工作区、应用 Git/进程重启通知、发布校验和近期用户手册/运营分析等后续成果。
+- QA Memory 主 migration、兼容副本、checksum 校验、既有表和数据全部保留，只作为已执行数据库历史兼容，不再被业务运行链读取或写入；同步后端、前端、API、部署、数据库和用户手册文档。
+
+### How
+
+- `tools/verify-dev-scripts.sh`、`tools/verify-ai-docs.sh`、变更脚本 `bash -n`、前端 workspace typecheck 与 production build 通过；后端定向 Reactor 21 个模块构建成功，相关 108 项测试通过。
+- 前端全量 Vitest 为 1950 passed / 1 skipped / 1 个既有 Help 文案断言失败；Chromium 稳定路由场景受当前体验引导弹层和根路径基线行为影响未通过，均未扩展修改无关功能。
+- 真实 PostgreSQL 兼容测试 23 项中 9 项通过、14 项被共享工作区并行新增但未提交的 `V20260812144051__common_parameters_default_experience_workspace.sql` 阻断，统一原因为缺少 `${SYS_DATA_ROOT_DIR}` Flyway placeholder；本次未修改任何已跟踪 migration，也未把该并行文件纳入提交。
+- 从提交态独立 worktree 使用 JDK 25 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow`：22 个后端模块 `clean package` 成功，backend health/readiness 为 UP、frontend 3000 返回 200、登录 CORS 为 200，manager WebSocket 已连接；进程与启动脚本均无 Mem0/Embedding/pgvector。未排除 Workflow 的首次启动被本机 PostgreSQL 初始化权限阻断，本次功能不涉及该服务。
+
+### Result
+
+- Mem0 运行能力、入口与部署物已从本次提交范围撤销；历史 Flyway 资源和数据保持可恢复、可升级，后续代码及近期部署内容不随误合并回退消失。
+- 提交前已回顾全部 `.agents/session-log*.md`；共享工作区中并行出现的体验工作区、Git 提交和 migration 改动完整保留在未暂存区，不纳入本次提交。未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。

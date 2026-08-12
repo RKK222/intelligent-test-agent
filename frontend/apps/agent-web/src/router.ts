@@ -44,11 +44,6 @@ export const router = createRouter({
       component: () => import("./views/WorkbenchView.vue"),
     },
     {
-      path: "/memories",
-      name: "memories",
-      component: () => import("./views/WorkbenchView.vue"),
-    },
-    {
       path: "/system",
       name: "system",
       component: () => import("./views/WorkbenchView.vue"),
@@ -134,7 +129,6 @@ function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlag
   return pathname === "/"
     || /^\/workbench\/?$/.test(pathname)
     || /^\/toolbox\/?$/.test(pathname)
-    || /^\/memories\/?$/.test(pathname)
     || /^\/system\/?$/.test(pathname)
     || /^\/hub\/?$/.test(pathname)
     || /^\/settings\/?$/.test(pathname)

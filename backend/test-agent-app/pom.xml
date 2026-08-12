@@ -60,10 +60,6 @@
         </dependency>
         <dependency>
             <groupId>com.enterprise.testagent</groupId>
-            <artifactId>test-agent-memory</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.enterprise.testagent</groupId>
             <artifactId>test-agent-xxl-job-integration</artifactId>
         </dependency>
         <dependency>

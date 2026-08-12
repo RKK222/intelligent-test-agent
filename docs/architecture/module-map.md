@@ -77,7 +77,6 @@ Browser
 | `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/result、Redis 全局锁与旧运行记录清理；不再启动 runner 或创建/执行 `USER_PLAN`，全部周期任务由 XXL adapter 调用业务 handler。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界；当前承载 IT-Tools/OmniTools 版本化离线目录、193 项目录校验、热门 Top 10 和用户/工具 30 秒点击计数服务，以及按统一认证号读取既有用户 SSH Key 并输出 TAEK1 加密信封。 |
 | `test-agent-model-gateway` | 中立的企业模型目录投影、能力探测、OpenAI-compatible 请求准备/流式转发、上游错误脱敏和每日聚合调用；同时提供 OpenCode 内部代理复用的 URL/可信 Header/响应头安全支持，不承载 Controller 或 SQL。 |
-| `test-agent-memory` | 通用长期记忆业务边界；承载个人/团队治理、官方风格 Mem0 REST 端口、证据安全引用、学习 Outbox、2 秒 fail-open 检索和 Skill 提案，不保存聊天正文、不直连记忆 PostgreSQL。 |
 | `test-agent-xxl-job-admin-upstream` | 未做业务修改的 XXL-JOB Admin 3.4.2 源码与资源普通 JAR；只允许整体上游升级。 |
 | `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、平台 advertised host 地址派生、由本机 Admin readiness 门控且不阻塞主服务的 executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、含 `X-Test-Agent-Linux-Server-Id` 的 CORS 边界、RunEvent SSE 按生产 Java 流式转发入口、用户通知分页/已读/fetch SSE、夜间时段/任务 HTTP 入口、工具盒子目录/点击 HTTP 入口、带 `permissionCount/PERMISSION` 的用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图、Agent 配置文件及 Hub 制品/引用操作）、应用源码仓库/物化/打开/最近选择/持久化操作快照 HTTP 入口及独立一次性 ticket 进度 WebSocket、Agent & Skill Hub 浏览/发布/更新 HTTP 入口、应用引用资产库 7 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史、XXL 一次性 SSO 票据和显式 JVM 内存参数跨 Java 查询/刷新入口、trace Web 入口。 |
@@ -138,9 +137,7 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 
 活动栏底部 `Boxes` 入口的前端 Hub 统一表示 Agent、Skill、MCP、Tool：Agent/Skill 继续调用平台 Hub API 管理远端资产，MCP/Tool 只复用 `apps/agent-web` 已加载的 OpenCode 运行态目录，不新增服务端资产类型。顶部资源摘要另保留 Plugin 计数；顶部摘要与 Hub 详情面板都支持拖拽调宽和页面内全屏。
 
-活动栏 `BrainCircuit` 入口和 `/memories` 路由由 `apps/agent-web` 组合通用记忆中心：`MemoryCenter.vue` 负责个人/团队/Skill 提案治理与含 Session 标题/ID 的证据 rail，`MemoryAdminPanel.vue` 负责 Mem0 多节点、企业/CPU profile、投影积压、模型设置和白名单，`FigmaChatPanel.vue` 只显示 `run-usage/query` 恢复的真实注入数量。`packages/backend-api` 是页面访问 `/api/internal/platform/memory/v1` 的唯一入口；前端不直连 memory-service、不复制原始聊天、不扩展 RunEvent。
-
-`apps/agent-web/router.ts` 与 `AgentWorkbench.vue` 共同维护活动栏 URI：`/workbench`、`/toolbox`、`/memories`、`/system`、`/hub` 和 `/settings` 分别对应工作台、工具箱、记忆中心、超级管理员控制台、能力库和设置弹窗，`/` 只兼容跳转到 `/workbench`。`toolbox-navigation.ts` 复用同一沉浸式布局状态机，路由名是刷新、登录回跳和浏览器历史恢复的权威来源；组件内后台状态不能覆盖当前路由页面。
+`apps/agent-web/router.ts` 与 `AgentWorkbench.vue` 共同维护活动栏 URI：`/workbench`、`/toolbox`、`/system`、`/hub` 和 `/settings` 分别对应工作台、工具箱、超级管理员控制台、能力库和设置弹窗，`/` 只兼容跳转到 `/workbench`。`toolbox-navigation.ts` 复用同一沉浸式布局状态机，路由名是刷新、登录回跳和浏览器历史恢复的权威来源；组件内后台状态不能覆盖当前路由页面。
 
 Skill Hub 的事项分类以逻辑资产持久化：应用推送 Skill 复用 `agent_skill_hub_assets`，公共 Git Skill 使用 `agent_skill_hub_builtin_classifications`，首次入库默认 `OTHER`，后续修订或 commit 不覆盖分类；`test-agent-workspace-management` 校验 `WORKER/TEST/CODE/OTHER` 与受控二级事项组合，`test-agent-persistence` 通过 `AgentSkillHubMapper.xml` 筛选并审计分类者，`test-agent-api` 仅向 `SUPER_ADMIN` 开放分类 mutation。公共 Agent/Skill 由 `AgentSkillHubApplicationService` 定时用共享仓库现有 Git 身份刷新当前分支远端引用并按精确 commit 对账，修订元数据写入公共快照表、正文复用内容寻址 artifact 表，查询链路只读数据库。前端 `AgentSkillHub.vue` 复用同一目录/详情链路提供两级筛选和详情内管理，不新增独立分类服务或客户端直连。
 

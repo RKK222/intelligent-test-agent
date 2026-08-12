@@ -14,7 +14,6 @@ describe("login redirect", () => {
     expect(resolveLoginRedirect("/s/ses_123?mode=readonly")).toBe("/s/ses_123?mode=readonly");
     expect(resolveLoginRedirect("/toolbox?source=omni-tools")).toBe("/toolbox?source=omni-tools");
     expect(resolveLoginRedirect("/toolbox/?source=it-tools")).toBe("/toolbox/?source=it-tools");
-    expect(resolveLoginRedirect("/memories?tab=team")).toBe("/memories?tab=team");
     expect(resolveLoginRedirect("/system?tab=runtime")).toBe("/system?tab=runtime");
     expect(resolveLoginRedirect("/hub?kind=skill")).toBe("/hub?kind=skill");
     expect(resolveLoginRedirect("/settings?menu=personal")).toBe("/settings?menu=personal");
