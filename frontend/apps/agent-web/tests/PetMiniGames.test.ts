@@ -17,6 +17,7 @@ describe("PetMiniGames", () => {
     expect(wrapper.text()).toContain("扫雷");
     expect(wrapper.text()).toContain("数独");
     expect(wrapper.text()).toContain("贪吃蛇");
+    expect(wrapper.text()).toContain("桌面弹球");
     await wrapper.get('[data-testid="pet-game-open-tetris"]').trigger("click");
 
     expect(wrapper.find('[data-testid="pet-tetris"]').exists()).toBe(true);
@@ -122,6 +123,36 @@ describe("PetMiniGames", () => {
     await wrapper.get(".pet-snake-controls button:last-child").trigger("click");
     expect(wrapper.text()).toContain("已暂停");
 
+    wrapper.unmount();
+  });
+
+  it("charges, launches and controls the desktop pinball table", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(PetMiniGames);
+    await wrapper.get('[data-testid="pet-game-open-pinball"]').trigger("click");
+
+    expect(wrapper.find('[data-testid="pet-pinball-board"]').exists()).toBe(true);
+    expect(wrapper.findAll('.pet-pinball-bumper')).toHaveLength(3);
+    expect(wrapper.findAll('.pet-pinball-lives > span:not(.is-spent)')).toHaveLength(3);
+    expect(wrapper.text()).toContain("按住发射杆蓄力");
+
+    const ballBeforeLaunch = wrapper.get('.pet-pinball-ball').attributes("style");
+    const launcher = wrapper.get('[aria-label="按住蓄力，松开发射弹珠"]');
+    await launcher.trigger("pointerdown", { pointerId: 1 });
+    await vi.advanceTimersByTimeAsync(160);
+    expect(launcher.text()).toMatch(/\d+%/);
+    await launcher.trigger("pointerup", { pointerId: 1 });
+    expect(wrapper.text()).toContain("弹珠上桌");
+
+    await vi.advanceTimersByTimeAsync(64);
+    expect(wrapper.get('.pet-pinball-ball').attributes("style")).not.toBe(ballBeforeLaunch);
+    await wrapper.trigger("keydown", { key: "ArrowLeft" });
+    expect(wrapper.get('.pet-pinball-flipper.is-left').classes()).toContain("is-pressed");
+    await wrapper.trigger("keyup", { key: "ArrowLeft" });
+    expect(wrapper.get('.pet-pinball-flipper.is-left').classes()).not.toContain("is-pressed");
+
+    await wrapper.get('.pet-pinball-controls .is-pause').trigger("click");
+    expect(wrapper.text()).toContain("已暂停");
     wrapper.unmount();
   });
 

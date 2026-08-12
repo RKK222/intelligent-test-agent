@@ -9492,3 +9492,26 @@
 - 以提交 `48745138b57d504831a8b0727c87e133f5b4269a` 完成最终封包：内层 `test-agent-internal-release.zip` SHA-256 为 `eb5d2607551628c100b36b0f14ad66f7ce0bd91fe48ee81616858bae8a8b9ab3`，固定三节点外层 `test-agent-two-backend-complete.zip` SHA-256 为 `6f3bfcf92bba6147594bf5f3d19f28fb637e30296d48bb38a236d26de32f6e75`；两份 checksum 校验和 ZIP 完整性检查通过，外层内嵌内层字节一致。
 - 应用 JAR、前端归档、persistence JAR 与 `models.json` 的 SHA-256 分别为 `c879445f0cd5692bc320fb2565ae29234bbee148a5ab1d4be4b802eb52f12298`、`e26819798f7af496f534daf4cfe121aee9cacda1c83c5c67ba50012802620265`、`9bb5538bd5846e74ee1874e1937d628580aa1507c6070b58d6d7344ed2b97e3b`、`edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`；worker/toolbox 复用上一已部署版本，Workflow/LobeHub 继续关闭。
 - 本次不修改 `.env*`、generated SDK、OpenCode 只读源码或业务 migration；未新建分支。打包期间并行出现的未提交 `PetMiniGames.vue` 弹珠游戏改动晚于本次制品构建，已原样保留在工作区且未纳入发布包、暂存区或提交。
+
+## 2026-08-12 - 宠物游乐舱新增桌面弹球
+
+### Why
+
+- 用户要求在当前项目的既有小游戏中再增加一个桌面弹球，并保持原有宠物浮层入口与权限边界。
+
+### What
+
+- 直接扩展 `PetMiniGames.vue` 既有纯前端游戏容器，新增带木框、黄铜导轨、纸张计分牌的桌面弹球；支持按住蓄力、松开发射、左右挡板、三枚弹珠、三组碰撞计分、暂停和重开。
+- 弹球物理、蓄力与按键状态只保存在组件内存，切换游戏、关闭浮层或卸载组件时清理计时器；继续复用 `SUPER_ADMIN` 小游戏入口，不新增活动栏按钮、接口或持久化。
+- `PetMiniGames.test.ts` 增加蓄力发射、弹珠位移、挡板键盘与暂停回归；`workbench.spec.ts` 将弹球纳入五游戏连续切换的 Chromium 场景。同步 frontend、agent-web README 与包级说明。
+
+### How
+
+- `PetMiniGames` 定向 Vitest 7/7 通过；独立 3017 端口 Chromium 工作台回归 1/1 通过，并用真实 390px 宠物浮层截图检查球台、状态栏和控制区无溢出或遮挡。
+- agent-web `vue-tsc`、用户手册与 production build 通过；构建仅保留既有大 chunk 警告。最终前端以 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3018` 启动，HTTP 返回 200。
+- 提交前回顾全部 `.agents/session-log*.md`，确认上一条增量包记录已明确保留本次并行弹球改动；任务外自动生成差异 `frontend/apps/agent-web/components.d.ts` 未纳入本次提交。
+
+### Result
+
+- 宠物游乐舱现提供俄罗斯方块、扫雷、数独、贪吃蛇和桌面弹球五款游戏，弹球同时支持鼠标/触控指针与键盘操作。
+- 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全或环境配置；未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。

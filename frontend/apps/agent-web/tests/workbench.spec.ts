@@ -9160,7 +9160,7 @@ test("pet drag continues after the pointer leaves the robot hit area", async ({ 
   await expect.poll(async () => robot.evaluate((element) => Number.parseFloat((element as HTMLElement).style.top))).toBeGreaterThan(start.y);
 });
 
-test("pet mini games support tetris, minesweeper, sudoku and snake interactions", async ({ page }) => {
+test("pet mini games support tetris, minesweeper, sudoku, snake and pinball interactions", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.onboarding.v2:usr_admin", "seen");
   });
@@ -9209,6 +9209,21 @@ test("pet mini games support tetris, minesweeper, sudoku and snake interactions"
   await page.getByRole("button", { name: "贪吃蛇向上" }).click();
   await page.getByTestId("pet-snake").getByRole("button", { name: "暂停" }).click();
   await expect(page.getByTestId("pet-snake")).toContainText("已暂停");
+
+  await page.getByRole("button", { name: "弹球", exact: true }).click();
+  const pinball = page.getByTestId("pet-pinball");
+  await expect(pinball.getByTestId("pet-pinball-board")).toBeVisible();
+  await expect(pinball.locator(".pet-pinball-bumper")).toHaveCount(3);
+  const launcher = pinball.getByRole("button", { name: "按住蓄力，松开发射弹珠" });
+  await launcher.dispatchEvent("pointerdown", { pointerId: 1 });
+  await page.waitForTimeout(100);
+  await launcher.dispatchEvent("pointerup", { pointerId: 1 });
+  await expect(pinball).toContainText("弹珠上桌");
+  await page.keyboard.down("ArrowLeft");
+  await expect(pinball.locator(".pet-pinball-flipper.is-left")).toHaveClass(/is-pressed/);
+  await page.keyboard.up("ArrowLeft");
+  await pinball.getByRole("button", { name: "暂停" }).click();
+  await expect(pinball).toContainText("已暂停");
 
   await page.getByRole("button", { name: "关闭宠物旁路问答" }).click();
   await expect(page.getByTestId("pet-mini-games")).toHaveCount(0);

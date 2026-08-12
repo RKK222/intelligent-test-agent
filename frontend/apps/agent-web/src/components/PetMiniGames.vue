@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { Bomb, Gamepad2, RotateCcw, X } from "lucide-vue-next";
 
-type GameKind = "tetris" | "minesweeper" | "sudoku" | "snake";
+type GameKind = "tetris" | "minesweeper" | "sudoku" | "snake" | "pinball";
 type TetrisCell = string | null;
 type TetrisShape = {
   matrix: number[][];
@@ -26,6 +26,9 @@ type SudokuCell = {
   error: boolean;
 };
 type SnakePoint = { x: number; y: number };
+type PinballPoint = { x: number; y: number };
+type PinballBall = PinballPoint & { vx: number; vy: number };
+type PinballBumper = PinballPoint & { radius: number; score: number; tone: "rose" | "teal" | "gold" };
 
 const emit = defineEmits<{ (event: "close"): void }>();
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
@@ -563,6 +566,254 @@ const snakeStatusText = computed(() => {
   return snakeRunning.value ? "正在觅食" : "已暂停";
 });
 
+const PINBALL_WIDTH = 274;
+const PINBALL_HEIGHT = 326;
+const PINBALL_BALL_RADIUS = 6;
+const PINBALL_FRAME_MS = 16;
+const PINBALL_GRAVITY = 185;
+const PINBALL_MAX_SPEED = 560;
+const PINBALL_FLIPPER_LENGTH = 52;
+const pinballBumpers: PinballBumper[] = [
+  { x: 82, y: 92, radius: 18, score: 120, tone: "rose" },
+  { x: 169, y: 77, radius: 20, score: 180, tone: "gold" },
+  { x: 133, y: 151, radius: 17, score: 240, tone: "teal" },
+];
+const pinballLeftPivot: PinballPoint = { x: 84, y: 274 };
+const pinballRightPivot: PinballPoint = { x: 190, y: 274 };
+const pinballBall = ref<PinballBall>({ x: 249, y: 294, vx: 0, vy: 0 });
+const pinballScore = ref(0);
+const pinballLives = ref(3);
+const pinballCharge = ref(0);
+const pinballStatus = ref<"ready" | "running" | "paused" | "gameover">("ready");
+const pinballCharging = ref(false);
+const pinballLeftPressed = ref(false);
+const pinballRightPressed = ref(false);
+let pinballFrameTimer: ReturnType<typeof setInterval> | null = null;
+let pinballChargeTimer: ReturnType<typeof setInterval> | null = null;
+
+const pinballStatusText = computed(() => ({
+  ready: "按住发射杆蓄力",
+  running: "弹珠上桌",
+  paused: "已暂停",
+  gameover: "三枚弹珠用完了",
+}[pinballStatus.value]));
+const pinballBallStyle = computed(() => ({
+  left: `${pinballBall.value.x}px`,
+  top: `${pinballBall.value.y}px`,
+}));
+const pinballLeftAngle = computed(() => pinballLeftPressed.value ? -24 : 18);
+const pinballRightAngle = computed(() => pinballRightPressed.value ? -24 : 18);
+const pinballLeftFlipperStyle = computed(() => ({ transform: `rotate(${pinballLeftAngle.value}deg)` }));
+const pinballRightFlipperStyle = computed(() => ({ transform: `rotate(${-pinballRightAngle.value}deg)` }));
+const pinballLauncherStyle = computed(() => ({ height: `${Math.max(8, pinballCharge.value * 0.62)}px` }));
+
+function clearPinballFrameTimer() {
+  if (pinballFrameTimer) clearInterval(pinballFrameTimer);
+  pinballFrameTimer = null;
+}
+
+function clearPinballChargeTimer() {
+  if (pinballChargeTimer) clearInterval(pinballChargeTimer);
+  pinballChargeTimer = null;
+  pinballCharging.value = false;
+}
+
+function clearPinballTimers() {
+  clearPinballFrameTimer();
+  clearPinballChargeTimer();
+  pinballLeftPressed.value = false;
+  pinballRightPressed.value = false;
+}
+
+function servePinballBall() {
+  clearPinballTimers();
+  pinballBall.value = { x: 249, y: 294, vx: 0, vy: 0 };
+  pinballCharge.value = 0;
+  pinballStatus.value = "ready";
+}
+
+function resetPinball() {
+  pinballScore.value = 0;
+  pinballLives.value = 3;
+  servePinballBall();
+}
+
+function startPinballFrameTimer() {
+  clearPinballFrameTimer();
+  if (pinballStatus.value === "running") {
+    pinballFrameTimer = setInterval(stepPinball, PINBALL_FRAME_MS);
+  }
+}
+
+function beginPinballCharge(event?: PointerEvent) {
+  if (pinballStatus.value !== "ready" || pinballCharging.value) return;
+  const target = event?.currentTarget as (HTMLElement & { setPointerCapture?: (pointerId: number) => void }) | null;
+  if (target && typeof event?.pointerId === "number") target.setPointerCapture?.(event.pointerId);
+  clearPinballChargeTimer();
+  pinballCharge.value = Math.max(18, pinballCharge.value);
+  pinballCharging.value = true;
+  pinballChargeTimer = setInterval(() => {
+    pinballCharge.value = Math.min(100, pinballCharge.value + 3);
+  }, PINBALL_FRAME_MS);
+}
+
+function releasePinballCharge() {
+  if (pinballStatus.value !== "ready" || !pinballCharging.value) return;
+  const charge = Math.max(18, pinballCharge.value);
+  clearPinballChargeTimer();
+  // 发射力度同时影响向上速度与轻微左偏，让弹珠越过右侧导轨后自然进入桌面。
+  pinballBall.value = {
+    ...pinballBall.value,
+    vx: -24 - charge * 0.42,
+    vy: -245 - charge * 2.25,
+  };
+  pinballCharge.value = 0;
+  pinballStatus.value = "running";
+  startPinballFrameTimer();
+}
+
+function setPinballFlipper(side: "left" | "right", pressed: boolean) {
+  if (side === "left") pinballLeftPressed.value = pressed;
+  else pinballRightPressed.value = pressed;
+}
+
+function pinballFlipperTip(side: "left" | "right"): PinballPoint {
+  const pivot = side === "left" ? pinballLeftPivot : pinballRightPivot;
+  const angle = (side === "left" ? pinballLeftAngle.value : pinballRightAngle.value) * Math.PI / 180;
+  return side === "left"
+    ? { x: pivot.x + Math.cos(angle) * PINBALL_FLIPPER_LENGTH, y: pivot.y + Math.sin(angle) * PINBALL_FLIPPER_LENGTH }
+    : { x: pivot.x - Math.cos(angle) * PINBALL_FLIPPER_LENGTH, y: pivot.y + Math.sin(angle) * PINBALL_FLIPPER_LENGTH };
+}
+
+function resolvePinballSegment(
+  start: PinballPoint,
+  end: PinballPoint,
+  padding: number,
+  restitution: number,
+  kick: PinballPoint = { x: 0, y: 0 },
+): boolean {
+  const segmentX = end.x - start.x;
+  const segmentY = end.y - start.y;
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+  const ball = pinballBall.value;
+  const projection = segmentLengthSquared === 0 ? 0 : Math.max(0, Math.min(1,
+    ((ball.x - start.x) * segmentX + (ball.y - start.y) * segmentY) / segmentLengthSquared,
+  ));
+  const closestX = start.x + projection * segmentX;
+  const closestY = start.y + projection * segmentY;
+  const distanceX = ball.x - closestX;
+  const distanceY = ball.y - closestY;
+  const distance = Math.hypot(distanceX, distanceY);
+  const minimumDistance = PINBALL_BALL_RADIUS + padding;
+  if (distance >= minimumDistance) return false;
+
+  const normalX = distance > 0.001 ? distanceX / distance : 0;
+  const normalY = distance > 0.001 ? distanceY / distance : -1;
+  ball.x = closestX + normalX * minimumDistance;
+  ball.y = closestY + normalY * minimumDistance;
+  const approachSpeed = ball.vx * normalX + ball.vy * normalY;
+  if (approachSpeed < 0) {
+    ball.vx -= (1 + restitution) * approachSpeed * normalX;
+    ball.vy -= (1 + restitution) * approachSpeed * normalY;
+  }
+  ball.vx += kick.x;
+  ball.vy += kick.y;
+  return true;
+}
+
+function resolvePinballBumper(bumper: PinballBumper) {
+  const ball = pinballBall.value;
+  const deltaX = ball.x - bumper.x;
+  const deltaY = ball.y - bumper.y;
+  const distance = Math.hypot(deltaX, deltaY);
+  const minimumDistance = PINBALL_BALL_RADIUS + bumper.radius;
+  if (distance >= minimumDistance) return;
+  const normalX = distance > 0.001 ? deltaX / distance : 0;
+  const normalY = distance > 0.001 ? deltaY / distance : -1;
+  const approachSpeed = ball.vx * normalX + ball.vy * normalY;
+  ball.x = bumper.x + normalX * minimumDistance;
+  ball.y = bumper.y + normalY * minimumDistance;
+  if (approachSpeed < 0) {
+    ball.vx -= 1.85 * approachSpeed * normalX;
+    ball.vy -= 1.85 * approachSpeed * normalY;
+  }
+  ball.vx += normalX * 145;
+  ball.vy += normalY * 145;
+  pinballScore.value += bumper.score;
+}
+
+function losePinball() {
+  pinballLives.value -= 1;
+  if (pinballLives.value <= 0) {
+    clearPinballTimers();
+    pinballStatus.value = "gameover";
+    return;
+  }
+  servePinballBall();
+}
+
+function stepPinball() {
+  if (pinballStatus.value !== "running") return;
+  const deltaSeconds = PINBALL_FRAME_MS / 1000;
+  const ball = pinballBall.value;
+  ball.vy += PINBALL_GRAVITY * deltaSeconds;
+  ball.vx *= 0.999;
+  ball.vy *= 0.999;
+  const speed = Math.hypot(ball.vx, ball.vy);
+  if (speed > PINBALL_MAX_SPEED) {
+    ball.vx = ball.vx / speed * PINBALL_MAX_SPEED;
+    ball.vy = ball.vy / speed * PINBALL_MAX_SPEED;
+  }
+  ball.x += ball.vx * deltaSeconds;
+  ball.y += ball.vy * deltaSeconds;
+
+  if (ball.x < PINBALL_BALL_RADIUS + 8) {
+    ball.x = PINBALL_BALL_RADIUS + 8;
+    ball.vx = Math.abs(ball.vx) * 0.86;
+  } else if (ball.x > PINBALL_WIDTH - PINBALL_BALL_RADIUS - 8) {
+    ball.x = PINBALL_WIDTH - PINBALL_BALL_RADIUS - 8;
+    ball.vx = -Math.abs(ball.vx) * 0.86;
+  }
+  if (ball.y < PINBALL_BALL_RADIUS + 8) {
+    ball.y = PINBALL_BALL_RADIUS + 8;
+    ball.vy = Math.abs(ball.vy) * 0.86;
+  }
+
+  // 右侧黄铜导轨保留真实发射通道，只允许弹珠从导轨顶部切入主桌面。
+  resolvePinballSegment({ x: 231, y: 66 }, { x: 231, y: 252 }, 2, 0.78);
+  pinballBumpers.forEach(resolvePinballBumper);
+  resolvePinballSegment(
+    pinballLeftPivot,
+    pinballFlipperTip("left"),
+    5,
+    0.9,
+    pinballLeftPressed.value ? { x: 44, y: -150 } : undefined,
+  );
+  resolvePinballSegment(
+    pinballRightPivot,
+    pinballFlipperTip("right"),
+    5,
+    0.9,
+    pinballRightPressed.value ? { x: -44, y: -150 } : undefined,
+  );
+
+  if (ball.y > PINBALL_HEIGHT + PINBALL_BALL_RADIUS) losePinball();
+}
+
+function togglePinballPause() {
+  if (pinballStatus.value === "gameover") {
+    resetPinball();
+    return;
+  }
+  if (pinballStatus.value === "ready") {
+    beginPinballCharge();
+    releasePinballCharge();
+    return;
+  }
+  pinballStatus.value = pinballStatus.value === "running" ? "paused" : "running";
+  startPinballFrameTimer();
+}
+
 function selectGame(game: GameKind) {
   if (activeGame.value === "tetris" && game !== "tetris" && tetrisRunning.value) {
     tetrisRunning.value = false;
@@ -572,13 +823,35 @@ function selectGame(game: GameKind) {
     snakeRunning.value = false;
     clearSnakeTimer();
   }
+  if (activeGame.value === "pinball" && game !== "pinball") {
+    if (pinballStatus.value === "running") pinballStatus.value = "paused";
+    clearPinballTimers();
+  }
   activeGame.value = game;
   if (game === "tetris" && !tetrisPiece.value) startTetris();
   if (game === "snake" && snakeBody.value.length === 0) startSnake();
+  if (game === "pinball" && pinballLives.value <= 0) resetPinball();
   void nextTick(() => panel.value?.focus());
 }
 
 function onPanelKeydown(event: KeyboardEvent) {
+  if (activeGame.value === "pinball") {
+    const key = event.key.toLowerCase();
+    if (event.key === "ArrowLeft" || key === "z") {
+      event.preventDefault();
+      setPinballFlipper("left", true);
+    } else if (event.key === "ArrowRight" || key === "/") {
+      event.preventDefault();
+      setPinballFlipper("right", true);
+    } else if (event.key === " " && !event.repeat) {
+      event.preventDefault();
+      beginPinballCharge();
+    } else if (key === "p") {
+      event.preventDefault();
+      togglePinballPause();
+    }
+    return;
+  }
   if (activeGame.value === "snake") {
     const directions: Record<string, SnakePoint> = {
       ArrowLeft: { x: -1, y: 0 },
@@ -618,15 +891,32 @@ function onPanelKeydown(event: KeyboardEvent) {
   if (event.key.toLowerCase() === "p") toggleTetrisPause();
 }
 
+function onPanelKeyup(event: KeyboardEvent) {
+  if (activeGame.value !== "pinball") return;
+  const key = event.key.toLowerCase();
+  if (event.key === "ArrowLeft" || key === "z") {
+    event.preventDefault();
+    setPinballFlipper("left", false);
+  } else if (event.key === "ArrowRight" || key === "/") {
+    event.preventDefault();
+    setPinballFlipper("right", false);
+  } else if (event.key === " ") {
+    event.preventDefault();
+    releasePinballCharge();
+  }
+}
+
 function closePanel() {
   clearTetrisTimer();
   clearSnakeTimer();
+  clearPinballTimers();
   emit("close");
 }
 
 onBeforeUnmount(() => {
   clearTetrisTimer();
   clearSnakeTimer();
+  clearPinballTimers();
 });
 </script>
 
@@ -640,6 +930,7 @@ onBeforeUnmount(() => {
     :aria-labelledby="props.embedded ? undefined : 'pet-game-title'"
     tabindex="-1"
     @keydown="onPanelKeydown"
+    @keyup="onPanelKeyup"
     @pointerdown.stop
     @click.stop
   >
@@ -679,6 +970,15 @@ onBeforeUnmount(() => {
         </span>
         <span><strong>贪吃蛇</strong><small>方向键移动 · 吃点得分</small></span>
       </button>
+      <button type="button" class="pet-game-choice is-pinball" data-testid="pet-game-open-pinball" @click="selectGame('pinball')">
+        <span class="pet-game-choice-art pinball-choice-art" aria-hidden="true">
+          <i class="pinball-choice-bumper" />
+          <i class="pinball-choice-ball" />
+          <i class="pinball-choice-flipper is-left" />
+          <i class="pinball-choice-flipper is-right" />
+        </span>
+        <span><strong>桌面弹球</strong><small>按住蓄力 · 左右挡板救球</small></span>
+      </button>
     </div>
 
     <template v-else>
@@ -687,6 +987,7 @@ onBeforeUnmount(() => {
         <button type="button" :class="{ 'is-active': activeGame === 'minesweeper' }" @click="selectGame('minesweeper')">扫雷</button>
         <button type="button" :class="{ 'is-active': activeGame === 'sudoku' }" @click="selectGame('sudoku')">数独</button>
         <button type="button" :class="{ 'is-active': activeGame === 'snake' }" @click="selectGame('snake')">贪吃蛇</button>
+        <button type="button" :class="{ 'is-active': activeGame === 'pinball' }" @click="selectGame('pinball')">弹球</button>
       </nav>
 
       <div v-if="activeGame === 'tetris'" class="pet-tetris" data-testid="pet-tetris">
@@ -795,7 +1096,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-else class="pet-snake" data-testid="pet-snake">
+      <div v-else-if="activeGame === 'snake'" class="pet-snake" data-testid="pet-snake">
         <div class="pet-game-status-row">
           <span>{{ snakeStatusText }}</span>
           <span>等级 {{ snakeLevel }} · 得分 {{ snakeScore }}</span>
@@ -816,6 +1117,93 @@ onBeforeUnmount(() => {
           <button type="button" aria-label="贪吃蛇向下" @click="setSnakeDirection(0, 1)">↓</button>
           <button type="button" aria-label="贪吃蛇向右" @click="setSnakeDirection(1, 0)">→</button>
           <button type="button" class="is-wide" @click="toggleSnakePause">{{ snakeRunning ? "暂停" : snakeGameOver ? "重开" : "继续" }}</button>
+        </div>
+      </div>
+
+      <div v-else class="pet-pinball" data-testid="pet-pinball">
+        <div class="pet-game-status-row">
+          <span>{{ pinballStatusText }}</span>
+          <span data-testid="pet-pinball-score">分数 {{ pinballScore.toString().padStart(5, "0") }}</span>
+          <button type="button" aria-label="重开桌面弹球" @click="resetPinball"><RotateCcw :size="13" /></button>
+        </div>
+        <div
+          class="pet-pinball-board"
+          data-testid="pet-pinball-board"
+          role="application"
+          aria-label="桌面弹球台，空格蓄力发射，左右方向键控制挡板，P 键暂停"
+        >
+          <div class="pet-pinball-paper-score" aria-hidden="true">
+            <span>DESK No. 05</span>
+            <strong>{{ pinballScore.toString().padStart(5, "0") }}</strong>
+          </div>
+          <div class="pet-pinball-lives" aria-label="剩余弹珠">
+            <span
+              v-for="life in 3"
+              :key="life"
+              :class="{ 'is-spent': life > pinballLives }"
+              aria-hidden="true"
+            />
+            <small>× {{ pinballLives }}</small>
+          </div>
+          <span class="pet-pinball-rail" aria-hidden="true" />
+          <span class="pet-pinball-arch" aria-hidden="true" />
+          <span class="pet-pinball-post is-left" aria-hidden="true" />
+          <span class="pet-pinball-post is-right" aria-hidden="true" />
+          <span
+            v-for="(bumper, index) in pinballBumpers"
+            :key="index"
+            class="pet-pinball-bumper"
+            :class="`is-${bumper.tone}`"
+            :style="{ left: `${bumper.x}px`, top: `${bumper.y}px`, width: `${bumper.radius * 2}px`, height: `${bumper.radius * 2}px` }"
+            aria-hidden="true"
+          >
+            <i />
+            <small>+{{ bumper.score }}</small>
+          </span>
+          <span class="pet-pinball-flipper is-left" :class="{ 'is-pressed': pinballLeftPressed }" :style="pinballLeftFlipperStyle" aria-hidden="true" />
+          <span class="pet-pinball-flipper is-right" :class="{ 'is-pressed': pinballRightPressed }" :style="pinballRightFlipperStyle" aria-hidden="true" />
+          <span class="pet-pinball-drain" aria-hidden="true" />
+          <span class="pet-pinball-ball" :style="pinballBallStyle" aria-hidden="true" />
+          <button
+            type="button"
+            class="pet-pinball-plunger"
+            aria-label="按住蓄力，松开发射弹珠"
+            :aria-pressed="pinballCharging"
+            :disabled="pinballStatus !== 'ready'"
+            @pointerdown.prevent="beginPinballCharge"
+            @pointerup.prevent="releasePinballCharge"
+            @pointercancel.prevent="releasePinballCharge"
+          >
+            <span class="pet-pinball-plunger-track" aria-hidden="true">
+              <i :style="pinballLauncherStyle" />
+            </span>
+            <small>{{ pinballCharging ? `${pinballCharge}%` : "发射" }}</small>
+          </button>
+          <div v-if="pinballStatus === 'paused' || pinballStatus === 'gameover'" class="pet-pinball-overlay" role="status">
+            <strong>{{ pinballStatus === "gameover" ? "收工" : "暂停" }}</strong>
+            <span>{{ pinballStatus === "gameover" ? `本局 ${pinballScore} 分` : "按 P 或继续返回球台" }}</span>
+          </div>
+        </div>
+        <div class="pet-pinball-controls" aria-label="桌面弹球操作">
+          <button
+            type="button"
+            aria-label="抬起左挡板"
+            @pointerdown.prevent="setPinballFlipper('left', true)"
+            @pointerup.prevent="setPinballFlipper('left', false)"
+            @pointercancel.prevent="setPinballFlipper('left', false)"
+            @pointerleave="setPinballFlipper('left', false)"
+          >Z / ← 左挡板</button>
+          <button type="button" class="is-pause" @click="togglePinballPause">
+            {{ pinballStatus === "running" ? "暂停" : pinballStatus === "gameover" ? "重开" : pinballStatus === "ready" ? "快速发射" : "继续" }}
+          </button>
+          <button
+            type="button"
+            aria-label="抬起右挡板"
+            @pointerdown.prevent="setPinballFlipper('right', true)"
+            @pointerup.prevent="setPinballFlipper('right', false)"
+            @pointercancel.prevent="setPinballFlipper('right', false)"
+            @pointerleave="setPinballFlipper('right', false)"
+          >右挡板 → /</button>
         </div>
       </div>
     </template>
@@ -1058,6 +1446,57 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: #cf7684;
 }
+
+.pet-game-choice.is-pinball {
+  grid-column: 1 / -1;
+}
+
+.pinball-choice-art {
+  position: relative;
+  overflow: hidden;
+  border: 3px solid #76543a;
+  background: #315451;
+  box-shadow: inset 0 0 0 1px #c59a53;
+}
+
+.pinball-choice-bumper,
+.pinball-choice-ball,
+.pinball-choice-flipper {
+  position: absolute;
+  display: block;
+}
+
+.pinball-choice-bumper {
+  left: 9px;
+  top: 5px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #f2e0af;
+  border-radius: 50%;
+  background: #c8665a;
+  box-shadow: 9px 5px 0 -1px #caa15a;
+}
+
+.pinball-choice-ball {
+  right: 3px;
+  top: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff8e7;
+  box-shadow: 0 0 0 1px #b99352;
+}
+
+.pinball-choice-flipper {
+  bottom: 5px;
+  width: 11px;
+  height: 3px;
+  border-radius: 999px;
+  background: #e9d18f;
+}
+
+.pinball-choice-flipper.is-left { left: 5px; transform: rotate(16deg); }
+.pinball-choice-flipper.is-right { right: 5px; transform: rotate(-16deg); }
 
 .pet-game-tabs {
   gap: 4px;
@@ -1404,6 +1843,367 @@ onBeforeUnmount(() => {
   border-color: #8ea5b7;
   outline: none;
   background: #f3f7f9;
+}
+
+.pet-pinball-board {
+  position: relative;
+  width: 274px;
+  height: 326px;
+  box-sizing: border-box;
+  overflow: hidden;
+  margin: 0 auto;
+  border: 8px solid #6f4b32;
+  border-radius: 28px 28px 17px 17px;
+  background:
+    radial-gradient(circle at 50% 43%, rgba(244, 225, 171, .09) 0 2px, transparent 3px),
+    linear-gradient(155deg, #315654 0%, #274a49 55%, #1f403f 100%);
+  box-shadow:
+    inset 0 0 0 2px #c69b54,
+    inset 0 0 28px rgba(7, 24, 24, .45),
+    0 7px 13px rgba(72, 48, 31, .2);
+  font-family: var(--ta-font-mono, "Geist Mono", monospace);
+  touch-action: none;
+}
+
+.pet-pinball-board::before,
+.pet-pinball-board::after {
+  position: absolute;
+  z-index: 0;
+  content: "";
+  pointer-events: none;
+}
+
+.pet-pinball-board::before {
+  inset: 8px;
+  border: 1px solid rgba(236, 205, 134, .22);
+  border-radius: 18px 18px 9px 9px;
+}
+
+.pet-pinball-board::after {
+  left: 33px;
+  right: 43px;
+  bottom: -42px;
+  height: 92px;
+  border: 2px solid rgba(212, 175, 98, .48);
+  border-radius: 50%;
+  background: rgba(14, 39, 38, .55);
+}
+
+.pet-pinball-paper-score {
+  position: absolute;
+  z-index: 2;
+  left: 27px;
+  top: 15px;
+  display: flex;
+  min-width: 82px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px 3px;
+  border: 1px solid #b68c4b;
+  border-radius: 2px;
+  background: #f0e4c6;
+  box-shadow: 2px 3px 0 rgba(22, 45, 44, .3);
+  color: #65472f;
+  transform: rotate(-1.5deg);
+}
+
+.pet-pinball-paper-score span {
+  font-size: 6px;
+  letter-spacing: .08em;
+}
+
+.pet-pinball-paper-score strong {
+  color: #3f3830;
+  font-size: 12px;
+  letter-spacing: .12em;
+  line-height: 13px;
+}
+
+.pet-pinball-lives {
+  position: absolute;
+  z-index: 2;
+  right: 30px;
+  top: 18px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: #ead79e;
+}
+
+.pet-pinball-lives > span {
+  width: 7px;
+  height: 7px;
+  border: 1px solid #c89b52;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff9e8 0 18%, #b9c1bd 42%, #596b68 100%);
+  box-shadow: 0 1px 2px rgba(9, 25, 24, .55);
+}
+
+.pet-pinball-lives > span.is-spent {
+  background: transparent;
+  box-shadow: none;
+  opacity: .35;
+}
+
+.pet-pinball-lives small {
+  margin-left: 2px;
+  font-size: 7px;
+}
+
+.pet-pinball-rail {
+  position: absolute;
+  z-index: 1;
+  left: 222px;
+  top: 56px;
+  width: 9px;
+  height: 188px;
+  border-left: 3px solid #c49a54;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -2px 0 0 rgba(238, 210, 146, .22);
+}
+
+.pet-pinball-arch {
+  position: absolute;
+  z-index: 1;
+  left: 17px;
+  top: 47px;
+  width: 215px;
+  height: 72px;
+  border-top: 3px solid rgba(201, 158, 81, .62);
+  border-right: 3px solid rgba(201, 158, 81, .62);
+  border-radius: 50% 46% 0 0;
+  transform: rotate(-2deg);
+}
+
+.pet-pinball-post {
+  position: absolute;
+  z-index: 1;
+  top: 214px;
+  width: 7px;
+  height: 53px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #8e6539, #e2c070 48%, #8e6539);
+  box-shadow: 0 0 0 2px rgba(20, 51, 49, .55);
+}
+
+.pet-pinball-post.is-left { left: 48px; transform: rotate(-29deg); }
+.pet-pinball-post.is-right { right: 52px; transform: rotate(29deg); }
+
+.pet-pinball-bumper {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 4px solid #ead7a0;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 0 0 2px #7c5a35,
+    0 4px 7px rgba(8, 27, 26, .4),
+    inset 0 0 0 2px rgba(255, 255, 255, .3);
+}
+
+.pet-pinball-bumper.is-rose { background: #c8665a; }
+.pet-pinball-bumper.is-teal { background: #5da8a0; }
+.pet-pinball-bumper.is-gold { background: #c99f52; }
+
+.pet-pinball-bumper i {
+  width: 30%;
+  height: 30%;
+  border-radius: 50%;
+  background: rgba(255, 248, 222, .82);
+  box-shadow: 0 0 7px rgba(255, 240, 183, .72);
+}
+
+.pet-pinball-bumper small {
+  position: absolute;
+  top: calc(100% + 6px);
+  color: #ead8a7;
+  font-size: 6px;
+  letter-spacing: .03em;
+  text-shadow: 0 1px 1px #183735;
+}
+
+.pet-pinball-flipper {
+  position: absolute;
+  z-index: 4;
+  top: 268px;
+  width: 58px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid #715135;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f2dd9f, #c69b50);
+  box-shadow: 0 3px 4px rgba(11, 31, 30, .42), inset 0 2px 1px rgba(255, 248, 217, .5);
+}
+
+.pet-pinball-flipper::before {
+  position: absolute;
+  top: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #754e32;
+  content: "";
+}
+
+.pet-pinball-flipper.is-left {
+  left: 78px;
+  transform-origin: 6px 6px;
+}
+
+.pet-pinball-flipper.is-left::before { left: 2px; }
+
+.pet-pinball-flipper.is-right {
+  left: 138px;
+  transform-origin: 52px 6px;
+}
+
+.pet-pinball-flipper.is-right::before { right: 2px; }
+
+.pet-pinball-flipper.is-pressed {
+  background: linear-gradient(180deg, #fff0bd, #d7ad58);
+  box-shadow: 0 0 8px rgba(241, 205, 118, .4), 0 3px 4px rgba(11, 31, 30, .42);
+}
+
+.pet-pinball-ball {
+  position: absolute;
+  z-index: 6;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #655a45;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%, #fff 0 14%, #d9dfdc 26%, #7d8d89 65%, #344946 100%);
+  box-shadow: 1px 3px 4px rgba(8, 26, 25, .48);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.pet-pinball-drain {
+  position: absolute;
+  z-index: 2;
+  left: 93px;
+  bottom: -2px;
+  width: 72px;
+  height: 16px;
+  border-radius: 50% 50% 0 0;
+  background: #112e2d;
+  box-shadow: 0 -2px 0 #bc8e4c;
+}
+
+.pet-pinball-plunger {
+  position: absolute;
+  z-index: 7;
+  right: 6px;
+  bottom: 9px;
+  display: flex;
+  width: 27px;
+  height: 65px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 3px 2px;
+  border: 1px solid rgba(227, 200, 134, .42);
+  border-radius: 9px;
+  background: rgba(18, 48, 46, .72);
+  color: #ecd9a5;
+  cursor: ns-resize;
+}
+
+.pet-pinball-plunger:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+.pet-pinball-plunger:not(:disabled):focus-visible {
+  outline: 2px solid #f1d58d;
+  outline-offset: 2px;
+}
+
+.pet-pinball-plunger-track {
+  position: relative;
+  display: flex;
+  width: 8px;
+  height: 44px;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #9b743e;
+  border-radius: 999px;
+  background: #173735;
+}
+
+.pet-pinball-plunger-track i {
+  display: block;
+  width: 6px;
+  max-height: 42px;
+  border-radius: 999px;
+  background: repeating-linear-gradient(0deg, #e5c574 0 3px, #815b32 3px 5px);
+}
+
+.pet-pinball-plunger small {
+  font-size: 6px;
+  line-height: 8px;
+  white-space: nowrap;
+}
+
+.pet-pinball-overlay {
+  position: absolute;
+  z-index: 9;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: rgba(19, 42, 41, .68);
+  color: #f1e2b9;
+  backdrop-filter: blur(1px);
+}
+
+.pet-pinball-overlay strong {
+  font-family: var(--ta-font-sans, "Noto Sans SC", sans-serif);
+  font-size: 19px;
+  letter-spacing: .16em;
+}
+
+.pet-pinball-overlay span { font-size: 8px; }
+
+.pet-pinball-controls {
+  display: grid;
+  width: 274px;
+  grid-template-columns: 1fr 68px 1fr;
+  gap: 5px;
+  margin: 8px auto 0;
+}
+
+.pet-pinball-controls button {
+  min-width: 0;
+  height: 28px;
+  padding: 0 5px;
+  border: 1px solid #c9b38c;
+  border-radius: 7px;
+  background: #fffaf0;
+  color: #654d37;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.pet-pinball-controls button.is-pause {
+  border-color: #aab9b8;
+  background: #eff4f2;
+  color: #315451;
+}
+
+.pet-pinball-controls button:hover,
+.pet-pinball-controls button:focus-visible {
+  border-color: #9e7945;
+  outline: none;
+  background: #f7ebd2;
 }
 
 @media (prefers-reduced-motion: reduce) {
