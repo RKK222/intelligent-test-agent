@@ -12,15 +12,12 @@
 - [Redis 5 升级 + 双后台平台全量执行手册](FULL-UPGRADE-RUNBOOK.md)：按当前现场路径和 `.20 → .4 → .114 → .2` 顺序整合完整命令、成功条件、页面配置、脏数据边界与回滚。
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
-- [Python长程任务离线部署](../../docs/deployment/workflow-offline.md)：独立workflow数据库/Redis ACL、三镜像、Runner受限网络、Nginx直达、验收和回滚。
 - [通用长期记忆部署](../../docs/deployment/qa-memory.md)：独立记忆 PostgreSQL、三副本 Mem0/VIP、独立 CPU BGE、双集合热备、离线包、灰度和真实浏览器验收。
 - [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：Apple Silicon/麒麟 ARM64 客户端签名打包、Nginx 明文 HTTP 分发、用户级安装、验收与回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
-独立长程任务使用 `package-workflow-offline.sh` 单独生成固定 `linux/amd64` 的 workflow-service、runner-controller、analysis-task 镜像tar及SBOM/许可证/锁文件/SHA256。它不并入Java JAR，也不使用Docker Compose；控制节点与分析节点由 `workflow/workflow-docker.sh` 分别管理。Nginx设置 `TEST_AGENT_NGINX_WORKFLOW_UPSTREAM` 后把 `/workflow-api/` 直接转发Python，禁止落入Java upstream。正式发布顺序固定为“workflow数据库与Redis只读ACL → Java窄能力/模型网关 → Python API/Worker → Runner/受限网络 → 前端与Nginx”。
-
-当前 release 分支的企业包明确不启用 Workflow 和 LobeHub：默认打包命令不携带两者运行制品，组件清单写入 `disabled`，前端隐藏入口并拒绝两个深链接；前端节点的 `TEST_AGENT_NGINX_WORKFLOW_UPSTREAM` 强制留空，`/workflow-api/` 预期返回 503。上述两套独立部署文档仅供后续单独启用评审，本次部署不得使用 `--with-workflow`、`--with-lobehub`，也不得启动相应服务。
+当前 release 分支的企业包默认不启用 LobeHub：默认打包命令不携带其运行制品，组件清单写入 `disabled`，前端隐藏入口并拒绝深链接。需要启用时必须按 LobeHub 独立部署文档重新评审并显式使用 `--with-lobehub`。
 
 ## 共同前提
 
@@ -197,7 +194,7 @@ cd /Users/kaka/Desktop/intelligent-test-agent
 deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
 
-当前 release 必须使用上述默认命令，不添加 `--with-workflow` 或 `--with-lobehub`。打包后应从 `release-components.env` 复核两项均为 `disabled`，且 ZIP 中不存在 `dist/test-agent-workflow-offline.tar.gz` 和 `dist/lobehub/`。
+当前 release 必须使用上述默认命令，不添加 `--with-lobehub`。打包后应从 `release-components.env` 复核 LobeHub 为 `disabled`，且 ZIP 中不存在 `dist/lobehub/`。
 
 后端打包前会强制运行 `SpringBeanConstructorWiringTest`，扫描全部生产 Spring Bean；发现多构造器 Bean 既没有无参构造器、也没有显式注入构造器时立即终止打包，避免只能在企业环境启动阶段暴露装配错误。其它测试仍按发布前自检要求单独执行。
 
@@ -637,7 +634,6 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 - Java：[backend.env.example](backend.env.example)
 - worker/构建：[env.example](env.example)
 - 前端 Nginx：[nginx.env.example](nginx.env.example)、[configure-nginx.sh](configure-nginx.sh)
-- Python workflow：[workflow/build.env.example](workflow/build.env.example)、[workflow/workflow.env.example](workflow/workflow.env.example)、[workflow/java-capability.env.example](workflow/java-capability.env.example)、[package-workflow-offline.sh](package-workflow-offline.sh)
 - XXL MySQL：当前生产直接使用外部实例；[mysql.env.example](mysql.env.example) 和 [deploy-xxl-job-mysql.sh](deploy-xxl-job-mysql.sh) 仅作为其它隔离环境的容器备用方案
 
 当前企业浏览器入口固定为 HTTP，因此 Java 模板显式设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`；基础应用默认仍为 `true`，HTTPS 环境不得复制该例外。两台后台必须保持一致，诊断脚本会输出脱敏的 `COOKIE_SECURE` 状态并拒绝缺失或错误值。

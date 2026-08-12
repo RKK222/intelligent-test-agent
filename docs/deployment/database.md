@@ -35,14 +35,6 @@
 
 批量归因查询、写入和 PostgreSQL 事务级 advisory lock 全部位于 `BatchSessionAttributionMapper.xml`；锁键由当前用户和 `itemRequestId` 组成，Session 业务键固定使用 `session_id`，不得与内部 bigint `id` 混用。夜间任务在既有事务内完成新 Session、归因、容量、任务和会话锁写入，任一失败整体回滚。真实 PostgreSQL 测试覆盖完整空库迁移、默认值、检查/唯一约束、索引和同键并发串行化；正式合并或企业打包前仍须重新对照相关个人本地库和目标环境 `flyway_schema_history`。版本冲突时，只有从未在任何需要保留的数据库执行的 migration 可以顺延；已经执行的版本必须保留原始字节并按本文件的合并期兼容规则处理。
 
-## Python workflow 独立 PostgreSQL
-
-长程任务使用同一 PostgreSQL 集群中的独立 `test_agent_workflow` 数据库和最小权限账号，与平台主库及 XXL MySQL 完全隔离。业务表由 `workflow-service/migrations/` 的 Alembic 管理，LangGraph checkpoint 表由独立 `testagent-workflow checkpoint-setup` 命令初始化；不扫描 Java Flyway location、不写平台 `flyway_schema_history`，也不受 Java MyBatis XML 规则约束。
-
-业务库保存 `conversations/messages/tasks/task_repositories/runs/durable_events/analyzer_results/report_versions/workspace_leases/audit_logs/transactional_outbox`。活动run部分唯一约束保证同一会话只有一个 `QUEUED/RUNNING/WAITING_INPUT`；Worker通过 `FOR UPDATE SKIP LOCKED`、租约和心跳认领任务。源码、容器和工具原始日志不写数据库，48小时工作区过期由数据库租约驱动Runner清理，失败状态持久化为 `CLEANUP_FAILED` 并重试。
-
-建库、迁移账号、备份、发布顺序和回滚见 `docs/deployment/workflow-offline.md`。平台 Java migration不得创建、修改或兼容这些Python业务表。
-
 ## XXL-JOB 独立 MySQL migration
 
 XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration`，平台主 Flyway 的 `classpath:db/migration` 不会扫描该独立顶层目录。

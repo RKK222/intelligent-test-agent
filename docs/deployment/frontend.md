@@ -21,7 +21,7 @@ corepack pnpm build
 
 企业内当前部署不单独手工执行本节命令，统一在联网 Mac 上使用 `deploy/internal/package-release.sh` 生成 `test-agent-frontend-dist.tar.gz` 和完整 `test-agent-internal-release.zip`。`VITE_TEST_AGENT_API_BASE_URL` 是编译期值；当前域名 `http://mimo.sdc.cs.icbc:9996` 与 IP `http://122.233.30.2:9996` 双入口包必须执行 `VITE_TEST_AGENT_API_BASE_URL="" deploy/internal/package-release.sh --output-dir deploy/internal/dist`，使请求保持当前页面同源，不能把内网服务器 `/data/testagent/config/docker.env` 当作 Mac 默认配置文件。部署入口见 `deploy/internal/README.md`：单后台按 `deploy/internal/SINGLE-BACKEND.md`，多后台按 `deploy/internal/MULTI-BACKEND.md`。两种模式都只在 `122.233.30.2:/data/testagent/frontend` 部署一份静态资源；`/data/testagent/config/nginx.env` 分别声明单个或多个 Java endpoint，前端部署脚本自动渲染、校验和 reload 实体 Nginx。Hub 等同源文件 ticket 可以返回 `/api/...` 相对路径，前端会按当前页面协议和 origin 转成绝对 `ws://` / `wss://`；多后台跨 Java 的 PTY、工作区文件和 Agent 配置进度连接仍按目标 Java 地址建连，浏览器网段必须能访问每台 Java `:8080`。
 
-当前 release 的 `VITE_TEST_AGENT_WORKFLOW_ENABLED` 与 `VITE_TEST_AGENT_LOBEHUB_ENABLED` 均由打包脚本注入为 `false`。构建产物不展示两个入口，登录回跳拒绝 `/workflow-chat` 和 `/lobehub/launch`，已登录用户直接访问也会回到工作台。后续启用必须重新审批运行制品，并使用对应显式打包参数重新构建前端；只修改 Nginx 或数据库参数不能打开入口。
+当前 release 的 `VITE_TEST_AGENT_LOBEHUB_ENABLED` 由打包脚本注入为 `false`。构建产物不展示通用问答入口，登录回跳拒绝 `/lobehub/launch`，已登录用户直接访问也会回到工作台。后续启用必须重新审批运行制品，并使用 `--with-lobehub` 重新构建前端；只修改 Nginx 或数据库参数不能打开入口。
 
 企业内完整 ZIP 和 SHA-256 校验文件统一上传到每台目标服务器的 `/data/0709/`，固定为 `test-agent-internal-release.zip` 和 `test-agent-internal-release.zip.sha256`；部署前在该目录执行 `sha256sum -c test-agent-internal-release.zip.sha256`。如果后端服务器能免密直连前端服务器，可在后端执行 `/data/testagent/deploy/internal/deploy-internal-release.sh --archive /data/0709/test-agent-internal-release.zip`，脚本会用 `scp` 分发前端包到 `122.233.30.2`。如果现场统一登录策略导致 `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`，把同一份 ZIP 和校验文件放到 `122.233.30.2:/data/0709/`，在前端机本地执行 `deploy/internal/deploy-internal-frontend.sh --archive /data/0709/test-agent-internal-release.zip`，后端节点部署时统一加 `--skip-frontend`。`/data/0709/` 只存放上传交付物，前端静态资源仍安装到 `/data/testagent/frontend`。
 
@@ -50,7 +50,6 @@ FRONTEND_OPENCODE_REAL_API_BASE_URL=http://127.0.0.1:8080 corepack pnpm e2e:real
 
 ```bash
 VITE_TEST_AGENT_API_BASE_URL=https://<frontend-entry>   # agent-web backend-api 的统一 base URL；同域部署可留空走 /api
-VITE_TEST_AGENT_WORKFLOW_ENABLED=false                  # 仅显式 true 时开放长程任务入口和路由
 VITE_TEST_AGENT_LOBEHUB_ENABLED=false                   # 仅显式 true 时开放通用问答入口和路由
 ```
 
@@ -70,7 +69,7 @@ npx serve apps/agent-web/dist -l 3000
 ```
 
 或通过反向代理把静态资源指向 `dist/`、把 `/api` 转发到 `test-agent-app`。SPA 路由（`/`、`/toolbox`、
-`/s/:sessionId`，以及仅在相应构建开关开启时的 `/lobehub/launch`、`/workflow-chat`）需配置 history fallback，所有非静态路径回退到 `dist/index.html`；两个
+`/s/:sessionId`，以及仅在构建开关开启时的 `/lobehub/launch`）需配置 history fallback，所有非静态路径回退到 `dist/index.html`；两个
 `/toolbox/apps/...` 前缀必须先代理到后台工具实例，不能被 history fallback 吞掉。生产监听端口由外部 Web
 server 决定。
 

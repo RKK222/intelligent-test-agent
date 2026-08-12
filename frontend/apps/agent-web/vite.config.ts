@@ -9,7 +9,6 @@ import {
   createToolboxDevProxyOptions,
   toolboxSuiteRootGuard
 } from "./toolbox-dev-proxy";
-import { createWorkflowDevProxyOptions } from "./workflow-dev-proxy";
 
 // 统一通过 import.meta.url 解析 workspace 包源码，避免硬编码绝对路径
 const pkgSrc = (name: string): string =>
@@ -91,18 +90,13 @@ export default defineConfig({
       "@test-agent/agent-chat": pkgSrc("agent-chat"),
       "@test-agent/terminal": pkgSrc("terminal"),
       "@test-agent/test-runner": pkgSrc("test-runner"),
-      "@test-agent/workbench-shell": pkgSrc("workbench-shell"),
-      "@test-agent/workflow-api-client": pkgSrc("workflow-api-client"),
-      "@test-agent/workflow-chat": pkgSrc("workflow-chat")
+      "@test-agent/workbench-shell": pkgSrc("workbench-shell")
     }
   },
   server: {
     host: devServerHost,
     port: 3000,
     proxy: {
-      ...createWorkflowDevProxyOptions(
-        process.env.TEST_AGENT_WORKFLOW_API_URL ?? "http://127.0.0.1:8090"
-      ),
       ...createToolboxDevProxyOptions({
         itToolsTarget:
           process.env.TEST_AGENT_TOOLBOX_IT_TOOLS_URL ?? "http://127.0.0.1:18120",

@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-08-12 - 从主线移除独立 Workflow 能力
+
+### Why
+
+- 用户确认独立 Workflow/长程任务能力永久不再需要，并要求代码、部署、测试和稳定文档在所有分支中一并清理；LobeHub 仍需完整保留。
+
+### What
+
+- 删除根目录 Workflow、Runner、分析任务工程，Java capability/Redis 状态、前端长程任务路由与两个 workspace 包，同时移除本地启动、企业打包、Nginx、离线部署脚本及对应测试。
+- 清理 HTTP/事件/数据库/安全/模块图、后端与前端 README/PACKAGE 中的旧契约；LobeHub 登录、模型网关、客户端、离线调度及其上游 `/api/workflows/*` 禁用规则保持不变。
+
+### How
+
+- JDK 25 下完成后端打包和定向测试；完成前端全量测试、类型检查、生产构建与预览冒烟，并执行开发脚本、内部 Nginx、增量包、双后台完整包和 AI 文档门禁。
+- 全量 Maven 测试仅在本机 Docker 的 `mysql:8.4` Testcontainers 三次启动后无法建立 JDBC 连接处失败；以无测试全量打包和相关模块定向测试补充验证。
+
+### Result
+
+- 形成不含独立 Workflow、仍保留 LobeHub 的清理基线；未新增或修改平台数据库/Flyway/MyBatis SQL、generated SDK、OpenCode 源码或 `.env*`。
+
 ### 2026-08-08 - 优化超级管理员内部模型调用可观测页面布局与精细化调整
 
 ### Why

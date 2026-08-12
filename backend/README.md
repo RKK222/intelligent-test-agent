@@ -20,14 +20,12 @@
 
 OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行为参考，严格禁止修改；平台适配必须通过 `test-agent-opencode-client`、运行时业务或其他本项目模块实现。
 
-独立长程任务由根目录 `workflow-service/` 的 Python 服务承载。Java 只提供 HMAC 鉴权的仓库授权、一次性 checkout ticket、短期模型 grant 和超级管理员复核能力，不代理 `/workflow-api/**`，也不创建、保存或查询工作流 conversation、message、task、run、report、event。
-
 ## 模块说明
 
 | 模块 | 作用 |
 |---|---|
 | `test-agent-common` | 公共基础模型与工具 |
-| `test-agent-domain` | 纯领域模型与状态机，包括 Run 运行数据面、会话 `QUESTION/PERMISSION` 待关注摘要、应用源码快照、Agent & Skill Hub 领域端口、workflow checkout/model grant 窄能力端口、opencode 用户进程管理拓扑模型和运营分析/反馈领域端口 |
+| `test-agent-domain` | 纯领域模型与状态机，包括 Run 运行数据面、会话 `QUESTION/PERMISSION` 待关注摘要、应用源码快照、Agent & Skill Hub 领域端口、opencode 用户进程管理拓扑模型和运营分析/反馈领域端口 |
 | `test-agent-observability` | 日志、trace、指标等观测性封装 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
@@ -41,13 +39,13 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理，以及外部工具 API Key 生成、RSA 密文管理、JVM 注册表与跨 Java 刷新 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库及已有应用源码历史的英文名/类型冻结、应用工作空间、个人 SSH key、可审计通用参数配置管理，以及显式 JVM 内存参数的本机注册/诊断状态 |
 | `test-agent-scheduler` | XXL adapter 复用的任务 handler/context/result、Redis 全局锁和旧运行记录清理；不再启动 PostgreSQL runner 或创建 `USER_PLAN` |
-| `test-agent-integration` | 非 opencode 外部系统联动业务边界；承载版本化工具盒子、LobeHub 联动、Python workflow 共享能力的实时授权/HMAC 编排，以及外部用户 SSH Key 查询与 TAEK1 加密封装 |
+| `test-agent-integration` | 非 opencode 外部系统联动业务边界；承载版本化工具盒子、LobeHub 联动，以及外部用户 SSH Key 查询与 TAEK1 加密封装 |
 | `test-agent-model-gateway` | 中立企业模型目录、能力探测、OpenAI-compatible 流式代理、上游错误脱敏和每日用量聚合，并向既有 OpenCode 内部代理提供共享安全支持 |
 | `test-agent-memory` | 通用长期记忆编排：个人/团队治理、官方风格 Mem0 REST、学习 Outbox、2 秒 fail-open 检索、证据引用和 Skill 提案；不保存聊天正文、不直连记忆库 |
 | `test-agent-xxl-job-admin-upstream` | 原样保存 XXL-JOB Admin 3.4.2 源码/资源与 GPL-3.0 许可证，不承载平台补丁 |
 | `test-agent-xxl-job-integration` | 独立 Servlet Admin 子上下文、MySQL Flyway、Admin readiness 就绪后延迟启动的 executor、周期任务 adapter、平台一次性 SSO、JIT 用户和 XXL health |
-| `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合、通知中心分页/已读/用户级 SSE、应用源码快照/持久化进度入口、Python workflow 白名单能力入口和统一异常入口 |
-| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括用户通知与分享有效性投影、外部 API 凭据/Scope、每服务器体验 Workspace 当前绑定、Redis Run manifest/Stream/snapshot/active 索引、workflow nonce/ticket/grant 临时状态、应用源码 slot/snapshot/replica/operation/step/cleanup/recent、Agent & Skill Hub 制品与引用状态、opencode 用户进程管理、scheduler/夜间任务、引用资产、工具点击、AI 反馈和运营分析 rollup |
+| `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合、通知中心分页/已读/用户级 SSE、应用源码快照/持久化进度入口和统一异常入口 |
+| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括用户通知与分享有效性投影、外部 API 凭据/Scope、每服务器体验 Workspace 当前绑定、Redis Run manifest/Stream/snapshot/active 索引、应用源码 slot/snapshot/replica/operation/step/cleanup/recent、Agent & Skill Hub 制品与引用状态、opencode 用户进程管理、scheduler/夜间任务、引用资产、工具点击、AI 反馈和运营分析 rollup |
 | `test-agent-event` | 按 storage mode 分流的 RunEvent 追加、SSE、Redis/数据库回放，以及用户级运行态刷新所需的全局事件触发流 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
@@ -104,8 +102,6 @@ Windows 开发人员若只需要 legacy guo profile，可直接使用已提交�
 3. 使用 JDK 21+ 启动。
 
 该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录启动编排脚本，不属于 Java 进程配置。当前本地联调默认改用 `test` profile 和 `.env.test`；Windows 用户要连同一测试环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`，WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，仍可在 IDEA/PowerShell 中显式导入 `.env.test` 的数据库、Redis、模型和 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 等变量，并用 `-Dspring.profiles.active=test` 启动 Java 后端。
-
-dev 分支的一键重启默认不启动 Workflow；需要联调长程任务时显式增加 `--with-workflow`。`--without-workflow` 继续兼容已有命令，但与默认行为等价。
 
 需要同时联调 LobeHub 时，macOS/Linux 从仓库根目录显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。默认不启动 LobeHub；该模式从

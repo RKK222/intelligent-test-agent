@@ -16,8 +16,6 @@
 
 - `backend/README.md`：后端多模块总览与技术栈。
 - `frontend/README.md`：前端工程总览与技术栈（技术栈版本以本文件为单一来源）。
-- `workflow-service/README.md`：独立 Python 长程任务控制面、固定流程和数据边界。
-- `runner-controller/README.md`、`analysis-task/README.md`：分析节点控制面与非特权任务镜像边界。
 - `docs/standards/backend.md`：后端编码、测试、性能、错误处理、可观测性、数据变更规范。
 - `docs/standards/frontend.md`：前端编码、性能、测试规范。
 - `docs/standards/metrics-glossary.md`：NVIDIA AIPerf / AI Perf Metrics Reference 英文缩写与性能指标对照指南。
@@ -38,8 +36,6 @@
 - `docs/api/http-api.md`：HTTP API 路径、方法、请求/响应、错误码、traceId。
 - `docs/api/external-api.md`：外部 API Key 管理、用户 SSH Key 查询及 TAEK1 跨语言解密契约。
 - `docs/api/event-stream.md`：RunEvent SSE 事件类型、字段、续传规则（单一事实源）。
-- `docs/api/workflow-api.md`：浏览器直连 Python 的 `/workflow-api/v1/**` 与 Java 窄能力接口。
-- `docs/api/workflow-ag-ui.md`：独立工作流原生 AG-UI SSE、快照和断点续传协议。
 
 ## 对话场景造数
 
@@ -66,7 +62,6 @@
 - `docs/deployment/qa-memory.md`：通用长期记忆、多节点 Mem0、独立 CPU BGE/pgvector、离线交付、端到端验收与回滚。
 - `docs/deployment/lobehub-client-build.md`：LobeHub Windows/Linux 原生客户端构建、Authenticode、Linux 双人审批与证据汇集。
 - `docs/deployment/lobehub-fork-transfer.md`：LobeHub 独立 fork 的最小 ref Git Bundle、企业 Git 导入、校验和回滚。
-- `docs/deployment/workflow-offline.md`：Python 工作流、Runner、分析任务镜像、Redis ACL、独立数据库与 Nginx 直连部署。
 - `deploy/internal/SINGLE-BACKEND.md`：企业内单 Java 后台 + 单 worker 离线部署。
 - `deploy/internal/MULTI-BACKEND.md`：企业内两个或更多 Java/worker 节点部署与跨节点验收。
 - `deploy/internal/REDIS-OFFLINE.md`：当前本地 Redis 7.4.9 的独立 linux/amd64 离线封包、企业 Redis 5.0 停写备份、升级验证与回滚。

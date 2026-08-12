@@ -23,7 +23,6 @@ FRONTEND_SCREEN_SESSION="test-agent-frontend"
 OPENCODE_SCREEN_SESSION="test-agent-opencode"
 OPENCODE_MANAGER_SCREEN_SESSION="test-agent-opencode-manager"
 LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
-WORKFLOW_DEV_SCRIPT="${ROOT_DIR}/tools/workflow-dev-services.sh"
 MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
 
 profile="test"
@@ -32,7 +31,6 @@ skip_backend_build=false
 skip_frontend_build=false
 with_lobehub=false
 lobehub_mode="offline"
-with_workflow=false
 with_memory=false
 frontend_dependencies_checked=false
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
@@ -50,11 +48,11 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--with-workflow] [--without-workflow] [--with-memory] [--with-lobehub] [--lobehub-mode offline|online] [--help]
+Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--with-memory] [--with-lobehub] [--without-lobehub] [--lobehub-mode offline|online] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
-in dependency order: optional memory data plane -> backend -> workflow API/Worker -> opencode-manager -> frontend -> optional LobeHub.
+in dependency order: optional memory data plane -> backend -> opencode-manager -> frontend -> optional LobeHub.
 
 Services managed by this script:
   backend           Spring Boot test-agent-app (java -jar, profile from --profile).
@@ -64,7 +62,6 @@ Services managed by this script:
                     Standalone `opencode serve` is NOT started separately when the
                     manager runs, because the manager spawns opencode child processes.
   frontend          agent-web Vite dev server (corepack pnpm dev).
-  workflow          Python workflow API/Worker; Analysis Runner is never started locally.
   memory            Independent Mem0/BGE service and pgvector; started only with --with-memory.
   lobehub           Independent ../lobehub-platform fork plus dev-only ParadeDB/RustFS.
                     It is started only when --with-lobehub is explicitly supplied.
@@ -79,10 +76,9 @@ Defaults:
   backend logs:    backend/logs/backend.log, backend/logs/sse.log, backend/logs/error.log
   manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
   LobeHub:         disabled unless --with-lobehub is supplied
-  workflow:        disabled unless --with-workflow is supplied
   memory:          disabled unless --with-memory is supplied
-  screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager,
-                   test-agent-workflow-api, test-agent-workflow-worker when screen is available
+  screen sessions: test-agent-backend, test-agent-frontend and test-agent-opencode-manager
+                   when screen is available
 
 Options:
   --profile              test or local; default is test. local 默认读取 .env.local。
@@ -90,11 +86,10 @@ Options:
   --log-dir              Service log directory. Relative paths are resolved from the repo root.
   --skip-backend-build   Restart backend without running Maven package first.
   --skip-frontend-build  Restart frontend without running pnpm build first.
-  --with-workflow        Opt in to the Python workflow API and Worker control plane.
-  --without-workflow     Explicitly keep Workflow disabled; retained for command compatibility.
   --with-memory          Opt in to local pgvector + fixed Mem0/BGE service on 15433/18888.
                          Generated secrets stay under .tmp/dev-services/memory with mode 0600.
   --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
+  --without-lobehub      Explicitly keep LobeHub disabled; this is already the dev default.
                          Reuses TEST_AGENT_REDIS_* with REDIS_PREFIX=lobehub:app;
                          the fork appends ':' so actual keys use lobehub:app:*.
   --lobehub-mode         offline (default) keeps platform SSO and enterprise network policy;
@@ -107,7 +102,6 @@ Environment overrides:
   TEST_AGENT_ROOT                    Project root used by common parameter path expansion.
   TESTAGENT                          Compatibility alias for existing local common parameters.
   TEST_AGENT_LOBEHUB_FORK_DIR        Independent fork directory; default is ../lobehub-platform.
-  TEST_AGENT_WORKFLOW_*              Complete external Linux Runner settings override local placeholders.
   TEST_AGENT_MEMORY_SERVICE_PORT      Local memory-service host port; default 18888.
   TEST_AGENT_MEMORY_POSTGRES_PORT     Local memory pgvector host port; default 15433.
 USAGE
@@ -151,6 +145,10 @@ while [[ $# -gt 0 ]]; do
       with_lobehub=true
       shift
       ;;
+    --without-lobehub)
+      with_lobehub=false
+      shift
+      ;;
     --lobehub-mode)
       [[ $# -ge 2 ]] || {
         echo "--lobehub-mode requires offline or online." >&2
@@ -158,14 +156,6 @@ while [[ $# -gt 0 ]]; do
       }
       lobehub_mode="$2"
       shift 2
-      ;;
-    --with-workflow)
-      with_workflow=true
-      shift
-      ;;
-    --without-workflow)
-      with_workflow=false
-      shift
       ;;
     --with-memory)
       with_memory=true
@@ -860,7 +850,6 @@ build_frontend() {
   echo "Building frontend: corepack pnpm build"
   # 页面入口与实际启动的可选服务共用同一开关，避免服务关闭后仍能从路由直达。
   (cd "${FRONTEND_DIR}" && \
-    VITE_TEST_AGENT_WORKFLOW_ENABLED="${with_workflow}" \
     VITE_TEST_AGENT_LOBEHUB_ENABLED="${with_lobehub}" \
     corepack pnpm build)
 }
@@ -1016,14 +1005,13 @@ start_frontend() {
   : >"${LOG_DIR}/frontend.log"
   if command -v screen >/dev/null 2>&1; then
     local frontend_cmd
-    printf -v frontend_cmd 'cd %q && export HOST=%q PORT=%q VITE_TEST_AGENT_API_BASE_URL=%q VITE_TEST_AGENT_WORKFLOW_ENABLED=%q VITE_TEST_AGENT_LOBEHUB_ENABLED=%q TEST_AGENT_XXL_JOB_ADMIN_URL=%q && exec corepack pnpm dev >>%q 2>&1' \
-      "${FRONTEND_DIR}" "${frontend_host}" "${frontend_port}" "${backend_url}" "${with_workflow}" "${with_lobehub}" "${TEST_AGENT_XXL_JOB_ADMIN_URL:-http://127.0.0.1:18080}" "${LOG_DIR}/frontend.log"
+    printf -v frontend_cmd 'cd %q && export HOST=%q PORT=%q VITE_TEST_AGENT_API_BASE_URL=%q VITE_TEST_AGENT_LOBEHUB_ENABLED=%q TEST_AGENT_XXL_JOB_ADMIN_URL=%q && exec corepack pnpm dev >>%q 2>&1' \
+      "${FRONTEND_DIR}" "${frontend_host}" "${frontend_port}" "${backend_url}" "${with_lobehub}" "${TEST_AGENT_XXL_JOB_ADMIN_URL:-http://127.0.0.1:18080}" "${LOG_DIR}/frontend.log"
     screen -dmS "${FRONTEND_SCREEN_SESSION}" bash -lc "${frontend_cmd}"
   else
     (
       cd "${FRONTEND_DIR}"
       HOST="${frontend_host}" PORT="${frontend_port}" VITE_TEST_AGENT_API_BASE_URL="${backend_url}" \
-        VITE_TEST_AGENT_WORKFLOW_ENABLED="${with_workflow}" \
         VITE_TEST_AGENT_LOBEHUB_ENABLED="${with_lobehub}" \
         TEST_AGENT_XXL_JOB_ADMIN_URL="${TEST_AGENT_XXL_JOB_ADMIN_URL:-http://127.0.0.1:18080}" \
         nohup corepack pnpm dev >>"${LOG_DIR}/frontend.log" 2>&1 &
@@ -1124,17 +1112,6 @@ require_command curl
 require_command java
 require_command mvn
 
-if [[ "${with_workflow}" == "true" ]]; then
-  [[ -x "${WORKFLOW_DEV_SCRIPT}" ]] || {
-    echo "Workflow development helper is missing or not executable: ${WORKFLOW_DEV_SCRIPT}" >&2
-    exit 1
-  }
-  export TEST_AGENT_DEV_LOG_DIR="${LOG_DIR}"
-  export TEST_AGENT_BASE_URL="${backend_url}"
-  "${WORKFLOW_DEV_SCRIPT}" prepare
-  load_env_file "${TEST_AGENT_WORKFLOW_DEV_ENV_FILE:-${LOG_DIR}/workflow/workflow-dev.env}"
-fi
-
 seed_demo_workspaces
 
 # 清理旧的日志文件，避免日志累积过大
@@ -1160,12 +1137,8 @@ prepare_backend_runtime_jar
 build_opencode_manager
 build_frontend
 
-# 逐个服务「先 kill 原进程再启动」，按依赖顺序：memory -> 后端 -> workflow -> opencode-manager -> 前端。
-# 平台进程中后端最先：workflow 和 opencode-manager 都需要平台能力，前端再连接两个控制面。
-
-if [[ "${with_workflow}" == "true" ]]; then
-  "${WORKFLOW_DEV_SCRIPT}" stop
-fi
+# 逐个服务「先 kill 原进程再启动」，按依赖顺序：memory -> 后端 -> opencode-manager -> 前端。
+# 后端最先：opencode-manager 需要平台能力，前端最后连接控制面。
 
 # 0) 记忆数据面先完成 authenticated /ready；默认路径不探测、不停止已有记忆容器。
 if [[ "${with_memory}" == "true" ]]; then
@@ -1177,21 +1150,16 @@ stop_backend_service
 cleanup_stale_backend_runtime_jars
 start_backend
 
-# 2) Python工作流控制面。Analysis Runner只能由合规Linux节点单独提供，本脚本永不本地启动。
-if [[ "${with_workflow}" == "true" ]]; then
-  "${WORKFLOW_DEV_SCRIPT}" start
-fi
-
-# 3) opencode-manager（Go 管理进程）。非本地环境 should_start_opencode_manager 为 false 时自动跳过，
+# 2) opencode-manager（Go 管理进程）。非本地环境 should_start_opencode_manager 为 false 时自动跳过，
 #    start_opencode_manager 内部也会跳过；stop 步骤仍会清理残留 manager 与 standalone opencode serve。
 stop_opencode_manager_service
 start_opencode_manager
 
-# 4) 前端
+# 3) 前端
 stop_frontend_service
 start_frontend
 
-# 5) LobeHub 明确按需启动；默认路径不探测、不停止，也不改变既有开发环境。
+# 4) LobeHub 明确按需启动；dev 默认路径不探测、不停止，也不改变既有开发环境。
 if [[ "${with_lobehub}" == "true" ]]; then
   if "${LOBEHUB_DEV_SCRIPT}" restart; then
     :
@@ -1210,10 +1178,6 @@ fi
 echo "Restart complete."
 echo "Backend:  ${backend_url}"
 echo "Frontend: ${frontend_url}"
-if [[ "${with_workflow}" == "true" ]]; then
-  echo "Workflow: http://127.0.0.1:8090/workflow-api/v1"
-  echo "Workflow logs: ${LOG_DIR}/workflow/workflow-api.log, ${LOG_DIR}/workflow/workflow-worker.log"
-fi
 if [[ "${with_lobehub}" == "true" ]]; then
   echo "LobeHub:  ${LOBEHUB_DEV_APP_URL:-http://127.0.0.1:3210}"
 fi
@@ -1228,8 +1192,5 @@ if should_start_opencode_manager; then
 fi
 if command -v screen >/dev/null 2>&1; then
   screen_sessions="${BACKEND_SCREEN_SESSION}, ${OPENCODE_MANAGER_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
-  if [[ "${with_workflow}" == "true" ]]; then
-    screen_sessions+=", test-agent-workflow-api, test-agent-workflow-worker"
-  fi
   echo "Screen:   ${screen_sessions}"
 fi

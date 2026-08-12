@@ -28,8 +28,6 @@ printf '%s\n' \
   'TEST_AGENT_API_TOKEN=' \
   'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret-must-not-print' \
   'TEST_AGENT_INTERNAL_PROXY_API_KEY=proxy-secret-must-not-print' \
-  'TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET=workflow-capability-secret-must-not-print' \
-  'TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET=runner-platform-secret-must-not-print' \
   'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=xxl-mysql-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_ACCESS_TOKEN=xxl-access-secret-must-not-print' \
@@ -45,10 +43,6 @@ bash "${CONFIGURE_SCRIPT}" backend \
   --backend-template "${ROOT_DIR}/deploy/internal/backend.env.example" \
   --docker-template "${ROOT_DIR}/deploy/internal/env.example" \
   >/dev/null
-grep -Fxq 'TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET=workflow-capability-secret-must-not-print' \
-  "${CONFIG_114}/backend.env"
-grep -Fxq 'TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET=runner-platform-secret-must-not-print' \
-  "${CONFIG_114}/backend.env"
 grep -Fxq 'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
   "${CONFIG_114}/backend.env"
 # 当前双后台现场每台 worker 固定发布 1000 个同号端口；通用单后台模板仍保留较小默认值。

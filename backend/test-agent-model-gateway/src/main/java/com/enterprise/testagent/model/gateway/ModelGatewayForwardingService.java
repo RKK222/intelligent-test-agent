@@ -64,7 +64,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration WORKFLOW_FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(120);
+    private static final Duration MEMORY_FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(120);
     private static final Duration FIRST_EVENT_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration STREAM_IDLE_TIMEOUT = Duration.ofSeconds(120);
     private static final int MAX_USAGE_CAPTURE_BYTES = 1024 * 1024;
@@ -259,10 +259,10 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
                         .then(Mono.error(error)));
     }
 
-    /** workflow长上下文模型允许更长冷启动；交互式LobeHub仍保持30秒快速失败。 */
+    /** 记忆模型允许更长冷启动；交互式 LobeHub 仍保持 30 秒快速失败。 */
     static Duration firstResponseTimeout(ModelGatewayCaller caller) {
-        return "workflow".equals(caller.sourceClient()) || "memory".equals(caller.sourceClient())
-                ? WORKFLOW_FIRST_RESPONSE_TIMEOUT
+        return "memory".equals(caller.sourceClient())
+                ? MEMORY_FIRST_RESPONSE_TIMEOUT
                 : FIRST_RESPONSE_TIMEOUT;
     }
 
@@ -492,7 +492,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
                 contentType,
                 accept);
         // 只有通过 HMAC 身份进入的记忆 embedding 请求可以把已签名的输入类型转发给
-        // 独立 CPU BGE；浏览器、workflow 与其它客户端不能伪造该模型语义。
+        // 独立 CPU BGE；浏览器与其它客户端不能伪造该模型语义。
         if ("memory".equals(caller.sourceClient()) && "/embeddings".equals(endpoint)) {
             String inputType = exchange.getRequest().getHeaders()
                     .getFirst(EMBEDDING_INPUT_TYPE_HEADER);

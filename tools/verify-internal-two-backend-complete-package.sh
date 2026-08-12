@@ -74,9 +74,6 @@ printf '%s\n' \
   'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=fixture-worker' \
   'TEST_AGENT_RELEASE_TOOLBOX=included' \
   'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=fixture-toolbox' \
-  'TEST_AGENT_RELEASE_WORKFLOW=disabled' \
-  'TEST_AGENT_RELEASE_WORKFLOW_VERSION=none' \
-  'TEST_AGENT_RELEASE_WORKFLOW_ARCHIVE_SHA256=none' \
   'TEST_AGENT_RELEASE_LOBEHUB=disabled' \
   'TEST_AGENT_RELEASE_LOBEHUB_VERSION=none' \
   >"${RELEASE_ROOT}/deploy/internal/release-components.env"
@@ -194,7 +191,6 @@ grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233
   <<<"${frontend_nginx_env}"
 grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' \
   <<<"${frontend_nginx_env}"
-grep -Fxq 'TEST_AGENT_NGINX_WORKFLOW_UPSTREAM=' <<<"${frontend_nginx_env}"
 if grep -Fq 'TEST_AGENT_NGINX_TERMINAL_ROUTES=' <<<"${frontend_nginx_env}"; then
   echo "Complete package unexpectedly retained the legacy terminal route key" >&2
   exit 1

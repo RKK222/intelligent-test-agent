@@ -273,7 +273,7 @@ public class ApiLoggingAspect {
      */
     String requestPath(ServerWebExchange exchange) {
         if (exchange == null) return "unknown";
-        return SensitiveDataMasker.maskPath(exchange.getRequest().getPath().value());
+        return exchange.getRequest().getPath().value();
     }
 
     /**

@@ -22,14 +22,12 @@ describe("login redirect", () => {
 
   it("rejects disabled release feature routes by default", () => {
     expect(resolveLoginRedirect("/lobehub/launch")).toBe("/workbench");
-    expect(resolveLoginRedirect("/workflow-chat")).toBe("/workbench");
     expect(resolveLoginRedirect("/lobehub/launch?returnUrl=https://evil.example#ticket")).toBe("/workbench");
   });
 
   it("keeps explicitly enabled release feature routes", () => {
-    const enabledFeatures = { lobehub: true, workflow: true };
+    const enabledFeatures = { lobehub: true };
     expect(resolveLoginRedirect("/lobehub/launch", enabledFeatures)).toBe("/lobehub/launch");
-    expect(resolveLoginRedirect("/workflow-chat", enabledFeatures)).toBe("/workflow-chat");
     expect(resolveLoginRedirect("/lobehub/launch?returnUrl=https://evil.example#ticket"))
       .toBe("/workbench");
     expect(resolveLoginRedirect(

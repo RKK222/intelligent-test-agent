@@ -55,7 +55,6 @@
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
 - 本地 Spring Boot 可执行 JAR 以 runtime scope 打包 PostgreSQL JDBC 驱动；企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖。驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
 - `application.yml`：`test-agent.xxl-job.enabled` 默认 `true`；MySQL、access token、Admin/executor 端口和地址使用 `TEST_AGENT_XXL_JOB_*` 注入。readiness group 明确不包含 `xxlJobAdmin`。
-- `application.yml`：`test-agent.workflow-capability.*` 绑定独立workflow/Runner HMAC、Runner身份/公钥、票据与grant时限。密钥必须由部署环境注入且至少32字节；Java只装配窄能力接口，不启动Python API/Worker/Runner。
 - `application.yml`：`test-agent.memory.*` 集中绑定独立 memory-service、2 秒检索总预算、原生学习超时、TopK、上下文预算以及 Mem0→Java HMAC。不存在 QA 分类、隐式偏好置信度或自定义抽取提示词配置。`TEST_AGENT_MEMORY_ENABLED` 默认为 `false`；即使运行数据面，空白名单也不学习或注入。Java 只获得 memory-service URL/key，不获得独立 pgvector 密码。部署见 `docs/deployment/qa-memory.md`。
 - 标准夜间执行每个 15 分钟时段容量不绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在运行态 Flyway 完成后严格加载，缺失或非法会让应用启动失败。支持精确分钟测试定时后，分发改由 XXL 每分钟触发，补偿仍每 5 分钟触发。
 - 运营分析等周期 handler 不再由旧 runner 注册；任务定义由 XXL MySQL 版本 SQL 初始化，启停、Cron、手动触发和日志在 XXL 页面维护。

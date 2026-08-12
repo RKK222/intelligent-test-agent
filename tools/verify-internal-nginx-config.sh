@@ -43,7 +43,6 @@ write_env() {
   {
     printf 'TEST_AGENT_NGINX_MODE=%s\n' "${mode}"
     printf 'TEST_AGENT_NGINX_BACKENDS=%s\n' "${backends}"
-    printf 'TEST_AGENT_NGINX_WORKFLOW_UPSTREAM=127.0.0.1:8090\n'
     printf 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=%s\n' "${admins}"
     printf 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120\n'
     printf 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121\n'
@@ -99,15 +98,6 @@ grep -A7 -F 'location ^~ /downloads/local-opencode-client/ {' "${CONF_PATH}" \
   | grep -Fq 'autoindex off;'
 test "$(grep -nF 'location ^~ /downloads/local-opencode-client/' "${CONF_PATH}" | head -n 1 | cut -d: -f1)" -lt \
   "$(grep -nF 'location / {' "${CONF_PATH}" | head -n 1 | cut -d: -f1)"
-grep -Fq 'upstream test_agent_workflow_python {' "${CONF_PATH}"
-grep -Fq 'server 127.0.0.1:8090 max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
-grep -Fq 'location ^~ /workflow-api/ {' "${CONF_PATH}"
-grep -Fq 'proxy_pass http://test_agent_workflow_python;' "${CONF_PATH}"
-if awk '/location \^~ \/workflow-api\//,/^    }/' "${CONF_PATH}" \
-    | grep -Fq 'test_agent_backend'; then
-  echo "Workflow API was unexpectedly routed through Java" >&2
-  exit 1
-fi
 test "$(grep -nF 'location ^~ /toolbox/apps/it-tools/' "${CONF_PATH}" | cut -d: -f1)" -lt \
   "$(grep -nF 'location / {' "${CONF_PATH}" | head -n 1 | cut -d: -f1)"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
@@ -183,7 +173,6 @@ chmod +x "${CUSTOM_ROOT}/sbin/nginx"
 {
   printf 'TEST_AGENT_NGINX_MODE=single\n'
   printf 'TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080\n'
-  printf 'TEST_AGENT_NGINX_WORKFLOW_UPSTREAM=\n'
   printf 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080\n'
   printf 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=10.20.30.40:18120\n'
   printf 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=10.20.30.40:18121\n'
@@ -201,8 +190,6 @@ TEST_AGENT_NGINX_TEST_CALL_LOG="${CUSTOM_CALL_LOG}" \
 grep -Fq -- "-p ${CUSTOM_ROOT}/ -c ${CUSTOM_MAIN_CONF} -t" "${CUSTOM_CALL_LOG}"
 grep -Fq -- "-p ${CUSTOM_ROOT}/ -c ${CUSTOM_MAIN_CONF} -T" "${CUSTOM_CALL_LOG}"
 grep -Fq -- "-p ${CUSTOM_ROOT}/ -c ${CUSTOM_MAIN_CONF} -s reload" "${CUSTOM_CALL_LOG}"
-grep -A2 -F 'location ^~ /workflow-api/ {' "${CUSTOM_CONF_PATH}" | grep -Fq 'return 503;'
-
 write_env single '122.233.30.4:8080,122.233.30.114:8080'
 if PATH="${FAKE_BIN}:${PATH}" bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${ENV_FILE}" --validate-only; then
   echo "single mode unexpectedly accepted multiple backends" >&2

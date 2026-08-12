@@ -22,7 +22,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 分享消息以当前查看者为基准使用固定两色：自己的用户气泡为 `#B2EDDF`，所有其他人的用户气泡统一使用浅紫 token `--ta-chat-other-user-bg`（默认 `#DED9F6`），两者均无边框；别人的用户气泡显示姓名，自己的不显示，姓名由分享访问上下文的参与者目录解析。多人页面以平台 `session_messages` 用户输入为正文权威源：分享 runtime-state 发现活动 Run 后立即订阅 RunEvent SSE，先恢复平台消息并按远端 message ID 与 OpenCode envelope 原位归并；空 envelope 不展示，断线重放也不重复生成气泡。后续帧中 active Run 消失时保留本地 Run 身份并按精确 `runId` 拉取终态，不能只清空 Run 导致持续“思考中”；`sessionUpdatedAt` 变化且当前无活动 Run 时重新读取消息，使 compact 结果无需刷新页面即可同步。重发的 `messageChange` 在预约提交后按 replacement Run 精确读取 USER，取消/失败时按 source Run 精确读取完整 USER/ASSISTANT 并原位恢复；前端按 Session 维护修订水位，并在异步读取返回时二次校验，拒绝迟到旧通知覆盖新状态。两条路径都不切换 Session、不重载历史树，也不触发 history loading 或滚动到底。分享模式禁用 busy follow-up 队列，任一活动 Run 都立即禁用所有参与方输入，后端唯一约束仍是最终裁决。
 - 定时异步执行交互由 `AgentWorkbench` 与 `FigmaChatPanel` 组合：输入框发送按钮左侧提供定时图标，普通用户点击后加载北京时间 21:00 至次日 07:00 的 15 分钟容量时段并默认选中后端推荐值；超级管理员还可切换“测试时间”，使用 1/3/5 分钟快捷值或显式按 `Asia/Shanghai` 解析的 `datetime-local` 选择未来 24 小时内的完整分钟。创建面板每次打开仍默认夜间模式，提交前按当前时间重新校验；自定义改期保持原模式，角色移除后隐藏调整入口但保留取消。新对话草稿成功提交后才清空输入。主对话始终展示当前会话内容；“会话列表”以 Teleport 非模态抽屉覆盖对话栏左侧编辑区，内部提供“会话 / 待执行任务”页签，选择会话或任务后保持打开，当前会话高亮，再次点击“会话列表”、关闭按钮、Esc 或收起右栏时关闭。待执行页逐页收齐全部待执行项，并展示内容、时间、创建时间和状态，自定义任务显示“测试定时”和单个精确时间，旧响应缺少模式时按夜间范围展示。当前 Session 存在 `SCHEDULED/DISPATCHING` 任务时禁用普通发送但保留“新建对话”。切换到待执行页签时立即查询，页面另按每 30 秒及窗口重新聚焦刷新；夜间容量冲突会重取最新时段。成功投递后复用现有 Session/Run/RunEvent 展示，并以来源标签和北京时间实际启动时间区分。
 
-- 提供 `/985211` 登录页、`/workbench` 工作台、`/toolbox` 离线工具箱、`/memories` 通用长期记忆中心、`/system` 管理控制台（`APP_ADMIN` 仅应用 Git，`SUPER_ADMIN` 全量）、`/hub` 能力库、`/settings` 设置弹窗、可选 `/lobehub/launch` 通用问答交接、可选 `/workflow-chat` 独立长程任务对话和 `/s/[shareId]` 协作分享工作台（vue-router 客户端路由；旧 Session ID 仅对会话所属人兼容），历史根路径 `/` 兼容跳转到 `/workbench`，未知路径进入 404 页面。活动栏命名路由是中心页面权威状态，刷新、登录回跳和浏览器前进/后退恢复对应页面；设置从活动栏打开时关闭会返回原页面，直接深链关闭则回到工作台。两个可选入口分别要求构建期 `VITE_TEST_AGENT_LOBEHUB_ENABLED=true`、`VITE_TEST_AGENT_WORKFLOW_ENABLED=true` 且用户为超级管理员；缺失或其它值时入口隐藏、登录回跳拒绝、直接访问回到工作台。当前 release 企业包两项均为 `false`。启用后的工作流新建空对话直接展示结构化仓库/分支输入卡，页面懒加载 `workflow-chat` 与 TDesign 样式，并通过 `workflow-api-client` 直连同源 Python。
+- 提供 `/985211` 登录页、`/workbench` 工作台、`/toolbox` 离线工具箱、`/memories` 通用长期记忆中心、`/system` 管理控制台（`APP_ADMIN` 仅应用 Git，`SUPER_ADMIN` 全量）、`/hub` 能力库、`/settings` 设置弹窗、可选 `/lobehub/launch` 通用问答交接和 `/s/[shareId]` 协作分享工作台（vue-router 客户端路由；旧 Session ID 仅对会话所属人兼容），历史根路径 `/` 兼容跳转到 `/workbench`，未知路径进入 404 页面。活动栏命名路由是中心页面权威状态，刷新、登录回跳和浏览器前进/后退恢复对应页面；设置从活动栏打开时关闭会返回原页面，直接深链关闭则回到工作台。LobeHub 入口要求构建期 `VITE_TEST_AGENT_LOBEHUB_ENABLED=true` 且用户为超级管理员；缺失或其它值时入口隐藏、登录回跳拒绝、直接访问回到工作台。当前 dev 企业包默认关闭，可按需显式启用。
 - 组合 dockview-vue 三栏布局和底部运行面板。
 - 对话输入 `/` 时，候选面板固定按“技能 → OpenCode 原生能力 → 项目命令”分区展示；技能仍来自原生 `/command` 的 `source=skill` 目录。企业工作台只保留 `/sessions`（含 `/continue`）、`/new`（含 `/clear`）、`/models`、`/compact`（含 `/summarize`）和 `/rename` 五组原生命令，其他 OpenCode TUI 名称不再进入原生命令保留命名空间；若运行态目录下发同名 Skill 或项目命令，仍按动态命令展示和执行。原生命令先于普通消息发送门禁解析，因此在普通消息不可发送时仍能输入，再由具体处理器校验权限和运行态。`/sessions` 打开会话列表，`/new` 新建对话，`/models` 打开受 Provider 白名单约束的模型面板，`/compact` 在输入框上方持续展示局部收拢动效并按企业长请求窗口等待 OpenCode summarize 与消息刷新完成，期间阻止新消息和定时提交；成功后同一状态条切换为勾选完成态并短暂停留，系统启用“减少动态效果”时关闭动画。`/rename` 复用平台既有 Session 更新接口修改当前标题且不因当前 Run 忙碌而禁用；压缩仍要求当前 Run 空闲。压缩标记与内部续写摘要合并为独立的“上下文已自动压缩 / 上下文已手动压缩”文字按钮和分隔线，不与思考入口合并；中间的无正文原生消息及摘要前的 reasoning part 都不会导致摘要被当作普通回答平铺。压缩进行态不进入时间线，摘要完成后才显示唯一结果按钮，点击后仅展开中文摘要。候选项点击会阻止全局下拉关闭事件。输入 `!command` 继续复用既有 Session shell API 并刷新消息投影。
 - 组合 36px 顶栏、48px activity rail、紧凑左侧文件面板、中间编辑器和右侧 Agent 面板；顶栏与三栏之间的 8px 间隔复用现有弹框常见的浅雾蓝画布，活动栏融入画布，三栏分别使用纯白底、8px 圆角、发丝边框与轻阴影形成独立悬浮面板。三栏顶部、工作区/Agent 目录加载态和中间无文件预览态同样保持纯白，当前文件标签以 2px 工行红上沿标识。外围 Logo 直接使用用户确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形；导航和选中态继续使用纯白/浅雾蓝/工行红 `--ta-shell-*` token，中间编辑器和右侧对话内部保持原样；Run/Terminal 默认隐藏在底部抽屉中，通过 activity rail 打开。
@@ -166,7 +166,6 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 卡片使用原生新标签链接打开 `/toolbox/apps/it-tools/<route>` 或 `/toolbox/apps/omni-tools/<route>`，普通点击、键盘激活和中键均生成一次 `eventId` 后异步上报；失败不得 `preventDefault`、弹窗或回退到套件首页，成功则更新本地累计和热门排序。
 - 进入沉浸式工具盒子前保存左、右和底部面板可见性，离开时按快照精确恢复；工具盒子激活期间运行态事件和 SSE 导航不得把页面劫持回编辑器。
 - Vite 开发服务器默认把两个工具前缀代理到 `http://127.0.0.1:18120/18121`，可分别用 `TEST_AGENT_TOOLBOX_IT_TOOLS_URL`、`TEST_AGENT_TOOLBOX_OMNI_TOOLS_URL` 覆盖；代理剥离公开前缀，精确套件根路径返回 `308 /toolbox`，生产仍使用前端 Nginx。
-- Vite开发服务器把`/workflow-api/**`直接代理到独立Python，默认目标为`http://127.0.0.1:8090`，可用`TEST_AGENT_WORKFLOW_API_URL`覆盖；Python未启动时页面显示稳定的服务不可用诊断，不能让SPA `index.html`落入JSON解析链。该代理只用于开发，生产仍由Nginx直达Python且不经过Java。
 
 `tests/toolbox-panel.test.ts` 覆盖 14 个标签常驻、数量联动、分类过滤不改变计数、零数量状态、隐藏标题、搜索/筛选、热门与零点击空态、原生新标签属性、普通/中键上报和失败不阻断；`tests/toolbox-navigation.test.ts` 与 `tests/login-redirect.test.ts` 覆盖全部活动栏沉浸式命名路由、布局状态机和登录回跳，`tests/toolbox-dev-proxy.test.ts` 锁定本地代理目标、路径改写与根路径守卫，`tests/workbench.spec.ts` 真实桌面 Chromium 场景覆盖 `/workbench` 根兼容跳转、工作台/工具箱/记忆/控制台/能力库/设置 URI、左右面板恢复、前进/后退和深链接刷新。
 
@@ -194,7 +193,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 启用时 `/lobehub/launch` 是聊天域名会话失效时唯一回跳入口；登录 guard 会保存这一固定路径，认证完成后在当前标签
   换票。页面不读取 return URL，也不检查或同步 LobeHub Session。
 - `tests/lobehub-launch.test.ts` 覆盖同步开窗、弹窗自身隐藏 POST、固定 consume path、无 URL/存储泄漏和失败清理；
-  `tests/release-features.test.ts` 与 `tests/login-redirect.test.ts` 覆盖开关失败关闭、当前 release 默认拒绝两个可选路由，以及显式启用后的认证恢复。
+  `tests/release-features.test.ts` 与 `tests/login-redirect.test.ts` 覆盖开关失败关闭、当前 release 默认拒绝 LobeHub 可选路由，以及显式启用后的认证恢复。
 
 - 会话置顶回归由 `tests/workbench.spec.ts` 的 `history drawer pins and unpins sessions through the existing session update API` 覆盖 PATCH 请求和即时重排；`tests/FigmaChatPanel.test.ts` 覆盖独立按钮的无障碍标签、置顶/取消置顶事件与请求中禁用态，`tests/workbench-utils.test.ts` 覆盖置顶分组排序。
 
@@ -202,7 +201,6 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 - 不直接拼接后端 URL。
 - 不直连 opencode server。
-- 工作流HTTP/AG-UI不得经 `backend-api`、`event-stream-client` 或Java转发。
 - 不把通用业务组件堆在 app 内，必须下沉到 packages。
 - `/s/[shareId]` 必须使用平台 Session Share 授权，不得接 opencode 公网 share API；旧 Session ID 兼容入口只允许会话所属人访问。
 - 通知动作不得信任后端或页面传入任意 URL；只接受 `SESSION_SHARE`、`NONE` 和 `RESTART_OWN_PROCESS`。分享动作由页面对 `shareId` 做内部路由编码，点击前不调用通用已读接口；`NONE` 通知可计入未读并标记已读但不显示动作；`RESTART_OWN_PROCESS` 只调用当前用户重启接口。未知类型或动作失败关闭。
@@ -210,8 +208,6 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 ## 验证
 
 `tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、标记已读、失败重启动作、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸和弱化后的备用链接入口；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单个人重启以及固定分享工作台隐藏。
-
-`packages/workflow-api-client/tests/client.test.ts` 覆盖同源请求、Authorization、Python错误、HTML fallback/纯文本网关错误收敛与带 `Last-Event-ID` 的fetch SSE；`tests/workflow-dev-proxy.test.ts`锁定开发态`/workflow-api/**`直达Python；`packages/workflow-chat/tests` 覆盖AG-UI快照/重放、输入卡、报告版本和局部重分析；`tests/login-redirect.test.ts` 覆盖 `/workflow-chat` 登录保护。
 
 `tests/xxl-job-management-panel.test.ts` 覆盖隐藏表单 POST/URL 无票据、刷新重签、403/503、票据或平台会话失效、登出清空 iframe，以及横向 shell 装饰幂等、只读账号、错误页跳过和菜单滚动；`tests/support-access-shortcut.test.ts` 覆盖三击 Shift、两秒窗口、左右 Shift 兼容、捕获阶段注册、其它按键打断、长按去重和角色失效重置，`tests/support-access-panel.test.ts` 覆盖唯一排查单号请求、重复触发/撤销后换号、登录资料延迟到达、迟到响应隔离、归档筛选、离线工作区禁用、Session/Trace 上下文以及 assistant text part 通过首页时间线展示，`tests/scheduler-management-panel.test.ts` 覆盖系统管理导航、问题排查全局手势请求/激活代次与 actor/target 身份提示，以及公共配置卡死 rollout 的分支/原因/二次确认/纠错请求回归。
 

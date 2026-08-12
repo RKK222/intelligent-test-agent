@@ -5188,7 +5188,6 @@ function submitJoinApp() {
 :deep(.figma-activity-btn--toolbox .figma-activity-icon) { color: #fb8c00; }
 :deep(.figma-activity-btn--memories .figma-activity-icon) { color: #4f6bed; }
 :deep(.figma-activity-btn--qa .figma-activity-icon) { color: #1e88e5; }
-:deep(.figma-activity-btn--workflow .figma-activity-icon) { color: #8e24aa; }
 :deep(.figma-activity-btn--system .figma-activity-icon) { color: #43a047; }
 :deep(.figma-activity-btn--hub .figma-activity-icon) { color: #00acc1; }
 :deep(.figma-activity-btn--settings .figma-activity-icon) { color: #546e7a; }
@@ -5220,13 +5219,6 @@ function submitJoinApp() {
   color: #1565c0;
 }
 :deep(.figma-activity-btn--qa.figma-activity-btn--active::before) { background: #1e88e5; }
-
-:deep(.figma-activity-btn--workflow:hover),
-:deep(.figma-activity-btn--workflow.figma-activity-btn--active) {
-  background: #f3e5f5;
-  color: #6a1b9a;
-}
-:deep(.figma-activity-btn--workflow.figma-activity-btn--active::before) { background: #8e24aa; }
 
 :deep(.figma-activity-btn--system:hover),
 :deep(.figma-activity-btn--system.figma-activity-btn--active) {
