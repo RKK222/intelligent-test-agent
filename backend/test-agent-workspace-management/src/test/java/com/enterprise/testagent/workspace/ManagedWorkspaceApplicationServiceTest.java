@@ -27,6 +27,7 @@ import com.enterprise.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.CommonParameter;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
@@ -341,6 +342,84 @@ class ManagedWorkspaceApplicationServiceTest {
                 "fetch:" + applicationRepoRoot(),
                 "pull:" + applicationRepoRoot() + ":feature_testagent_20260707",
                 "push:" + applicationRepoRoot() + ":feature_testagent_20260707:false");
+    }
+
+    @Test
+    void automationRepositoryWorkspaceAcceptsArbitraryBranchDirectoryAndExplicitVersion() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "https://example.com/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                true,
+                Instant.now(),
+                Instant.now());
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true, repository, List.of());
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("scripts/e2e");
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse response =
+                service.createApplicationWorkspaceWithInitialVersion(
+                        "app_gcms",
+                        "repo_1",
+                        "release/automation-v2",
+                        "scripts/e2e",
+                        "自动化测试",
+                        false,
+                        "20260812",
+                        null,
+                        new UserId("usr_1"),
+                        "127.0.0.1",
+                        "trace_automation_workspace");
+
+        assertThat(repository.standard()).isFalse();
+        assertThat(response.branch()).isEqualTo("release/automation-v2");
+        assertThat(response.directoryPath()).isEqualTo("scripts/e2e");
+        assertThat(response.initialVersion().version()).isEqualTo("20260812");
+        assertThat(git.clonedBranch).isEqualTo("release/automation-v2");
+    }
+
+    @Test
+    void automationRepositoryWorkspaceRejectsTestRepositoryDirectoryCreationFlag() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "https://example.com/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                Instant.now(),
+                Instant.now());
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true, repository, List.of());
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("scripts/e2e"));
+
+        assertThatThrownBy(() -> service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "release/automation-v2",
+                "scripts/e2e",
+                "自动化测试",
+                true,
+                "20260812",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_automation_directory_new"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.getMessage()).isEqualTo("只有测试工作库支持新增一级目录");
+                });
     }
 
     @Test

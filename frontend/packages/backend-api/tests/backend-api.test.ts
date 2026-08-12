@@ -2341,6 +2341,7 @@ describe("backend-api", () => {
       traceId: "trace_fixed",
       data: [
         { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" },
+        { typeCode: "AUTOMATION_CODE_REPOSITORY", typeLabel: "自动化代码库" },
         { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
         { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
       ]
@@ -2349,6 +2350,7 @@ describe("backend-api", () => {
 
     await expect(client.listRepositoryTypes()).resolves.toEqual([
       { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" },
+      { typeCode: "AUTOMATION_CODE_REPOSITORY", typeLabel: "自动化代码库" },
       { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
       { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
     ]);

@@ -212,7 +212,7 @@ class ConfigurationManagementApplicationServiceTest {
     }
 
     @Test
-    void createRepositoryUsesRepositoryTypeAsTheSourceOfLegacyStandard() {
+    void createAutomationRepositoryUsesRepositoryTypeAsTheSourceOfLegacyStandard() {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 repository,
@@ -222,23 +222,23 @@ class ConfigurationManagementApplicationServiceTest {
                 sshKeyFixtures.encryptionService(),
                 org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
                 noReferenceRepositoryState());
-        when(repository.findRepositoryByGitUrl("https://gitee.com/demo/asset.git")).thenReturn(Optional.empty());
-        when(repository.findRepositoryByEnglishName("asset")).thenReturn(Optional.empty());
-        when(repository.saveRepository(argThat(saved -> "asset".equals(saved.englishName()))))
+        when(repository.findRepositoryByGitUrl("https://gitee.com/demo/automation.git")).thenReturn(Optional.empty());
+        when(repository.findRepositoryByEnglishName("automation")).thenReturn(Optional.empty());
+        when(repository.saveRepository(argThat(saved -> "automation".equals(saved.englishName()))))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         ConfigurationManagementResponses.CodeRepositoryResponse response = service.createRepository(
-                "https://gitee.com/demo/asset.git",
-                "资产库",
-                "Asset",
+                "https://gitee.com/demo/automation.git",
+                "自动化代码库",
+                "Automation",
                 true,
-                CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value());
 
-        assertThat(response.repositoryType()).isEqualTo(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
-        assertThat(response.repositoryTypeLabel()).isEqualTo("应用资产库");
+        assertThat(response.repositoryType()).isEqualTo(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value());
+        assertThat(response.repositoryTypeLabel()).isEqualTo("自动化代码库");
         assertThat(response.standard()).isFalse();
         verify(repository).saveRepository(argThat(saved ->
-                CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value().equals(saved.repositoryType())
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value().equals(saved.repositoryType())
                         && !saved.standard()));
     }
 
@@ -291,6 +291,7 @@ class ConfigurationManagementApplicationServiceTest {
                 .extracting(ConfigurationManagementResponses.RepositoryTypeOptionResponse::typeCode)
                 .containsExactly(
                         CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                        CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
                         CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
                         CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
     }
@@ -299,8 +300,9 @@ class ConfigurationManagementApplicationServiceTest {
     void listRepositoryTypesAlwaysPrioritizesTestWorkRepository() {
         DictionaryRepository dictionaryRepository = org.mockito.Mockito.mock(DictionaryRepository.class);
         when(dictionaryRepository.findByDictKey(Dictionary.DICT_KEY_REPOSITORY_TYPE)).thenReturn(List.of(
-                dictionary(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(), "应用代码库", 1),
-                dictionary(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(), "应用资产库", 2),
+                dictionary(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(), "应用代码库", 3),
+                dictionary(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(), "自动化代码库", 2),
+                dictionary(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(), "应用资产库", 4),
                 dictionary(CodeRepositoryType.TEST_WORK_REPOSITORY.value(), "测试工作库", 99)));
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
@@ -315,6 +317,7 @@ class ConfigurationManagementApplicationServiceTest {
                 .extracting(ConfigurationManagementResponses.RepositoryTypeOptionResponse::typeCode)
                 .containsExactly(
                         CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                        CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
                         CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
                         CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
     }
@@ -503,13 +506,13 @@ class ConfigurationManagementApplicationServiceTest {
     void updateRepositoryRejectsTypeChangeAfterCreatingApplicationWorkspace() {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
         CodeRepository current = new CodeRepository(
-                new CodeRepositoryId("repo_test_work"),
-                "https://gitee.com/demo/test-work.git",
-                "测试工作库",
-                "test-work",
-                CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                new CodeRepositoryId("repo_automation"),
+                "https://gitee.com/demo/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
                 CodeRepositoryDeploymentMode.EXTERNAL.value(),
-                true,
+                false,
                 NOW,
                 NOW);
         when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
@@ -1035,8 +1038,9 @@ class ConfigurationManagementApplicationServiceTest {
         DictionaryRepository dictionaryRepository = org.mockito.Mockito.mock(DictionaryRepository.class);
         List<Dictionary> dictionaries = List.of(
                 dictionary(CodeRepositoryType.TEST_WORK_REPOSITORY.value(), "测试工作库", 1),
-                dictionary(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(), "应用代码库", 2),
-                dictionary(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(), "应用资产库", 3));
+                dictionary(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(), "自动化代码库", 2),
+                dictionary(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(), "应用代码库", 3),
+                dictionary(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(), "应用资产库", 4));
         when(dictionaryRepository.findByDictKey(Dictionary.DICT_KEY_REPOSITORY_TYPE)).thenReturn(dictionaries);
         for (Dictionary dictionary : dictionaries) {
             when(dictionaryRepository.findByDictKeyAndValue(Dictionary.DICT_KEY_REPOSITORY_TYPE, dictionary.dictValue()))
