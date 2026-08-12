@@ -9584,3 +9584,26 @@
 
 - 弹珠现在从发射槽到达顶部后会可靠进入主球台，离槽后不能从上方重新掉回发射槽；正常底部漏球、自动救球、三球多球和下坡重力规则保持不变。
 - 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、安全或环境配置；仅调整前端本地物理状态，不影响服务端性能与兼容性。未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
+## 2026-08-12 - 恢复历史对话任务耗时
+
+### Why
+
+- 上一轮只补了任务消耗组件对 `duration` 的兼容显示，但历史会话切换会主动清空耗时，随后取得关联 Run 详情时没有恢复；历史 `step-finish` 又能恢复 Token，因此用户仍然只看到 Token。
+
+### What
+
+- 复用 `switchSession` 为恢复 Run 状态与 Diff 已经发起的 `getRun(runId)` 请求，以同一条终态 Run 记录的 `createdAt/updatedAt` 恢复最近一轮已完成任务的锁定耗时，没有增加接口或网络请求。
+- 抽取 `completedRunDurationMs` 统一终态 Run 耗时校验，并让既有晚间任务耗时投影复用；活动状态、无效时间和逆序时间不参与历史恢复。
+- 扩展既有历史切换 Playwright 用例，同时构造 `step-finish` Token 与一分钟终态 Run，断言页脚共同显示 `1m 0s` 和 `1.2k tokens`；同步 agent-web README。
+
+### How
+
+- 修复前同一 Chromium 用例稳定得到 `1.2k tokens` 且缺少 `1m 0s`；修复后定向 Playwright 1/1 通过。
+- `workbench-utils` Vitest 106/106、`FigmaChatPanel` Vitest 159/159（另 1 skipped）、agent-web `vue-tsc` 与 production build 均通过；构建仅保留既有大 chunk 警告。
+- 前端以 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 5173 --strictPort` 启动，HTTP 返回 200。提交前回顾全部 `.agents/session-log*.md`，任务外配置管理、migration、设置页及自动生成差异均保持未暂存。
+
+### Result
+
+- 切回包含关联终态 Run 的历史会话后，任务消耗页脚会恢复最近一轮任务耗时，并与历史 Token 同时展示。
+- 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全或环境配置；未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。

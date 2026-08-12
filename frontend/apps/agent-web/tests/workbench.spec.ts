@@ -7040,6 +7040,13 @@ test("switching history restores assistant documents and the file changes summar
             name: "登录测试报告.md",
             path: "docs/登录测试报告.md",
             mimeType: "text/markdown"
+          },
+          {
+            id: "part_usage",
+            messageID: "msg_assistant",
+            type: "step-finish",
+            reason: "stop",
+            tokens: { total: 1_234 }
           }
         ]
       }
@@ -7109,6 +7116,25 @@ test("switching history restores assistant documents and the file changes summar
               mimeType: "text/markdown"
             }
           }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_history",
+          sessionId: "ses_history",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_history",
+            sessionId: "ses_history",
+            messageId: "remote_assistant",
+            messageID: "remote_assistant",
+            part: {
+              id: "part_usage",
+              messageID: "remote_assistant",
+              type: "step-finish",
+              reason: "stop",
+              tokens: { total: 1_234 }
+            }
+          }
         }
       ]
     },
@@ -7141,6 +7167,8 @@ test("switching history restores assistant documents and the file changes summar
   await expect.poll(() => sessionMessageRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_history/messages?page=1&size=100&refresh=false");
   await expect(page.getByText("测试报告已生成")).toBeVisible();
   await expect(page.getByRole("button", { name: "停止执行" })).toHaveCount(0);
+  await expect(page.locator(".figma-chat-usage-value")).toContainText("1m 0s");
+  await expect(page.locator(".figma-chat-usage-value")).toContainText("1.2k tokens");
   const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
   await composer.fill("继续追问测试报告");
   await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
