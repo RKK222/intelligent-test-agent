@@ -14,7 +14,9 @@
 
 公共或应用 Agent/Skill 发布进入存量 Session 排空期时，`/processes/me` 按当前用户返回 `messageSendAllowed=false` 和阻断原因。应用发布先把固定 feature commit 原生 merge 到各服务器相关个人 worktree；存在 dirty 或冲突时不覆盖个人内容，持久化 rollout 保持 retry，相关个人 worktree 全部包含目标 commit 后才登记 dispose 用户并进入排空。前端只在被阻断期间每 5 秒刷新状态，该用户旧 opencode target dispose 后下一轮立即恢复为 true。聊天面板禁用发送与新会话按钮、输入框展示排空提示，后端所有新 opencode 消息入口仍以同一持久化用户级门禁为准。
 
-工作台显式支持 `MANAGED / APP_SOURCE / EXPERIENCE` 三种工作区语义。当前用户与成员应用列表都成功加载且应用为空时，每次工作台挂载只自动询问一次是否进入平台体验；拒绝不持久化并恢复原空态和首登引导。所有用户还可从应用菜单常驻入口随时进入，不受应用成员关系或首次访问限制。体验区复用文件树、编辑器、搜索、终端与对话；文件树和下载只走普通 `workspace.list/read/write` WebSocket RPC，不请求应用引用 `workspace.view.*` 组合视图。普通文件可写，本地 Git 支持 diff、stage/unstage、回退、冲突处理和 commit，但不展示 push/发布，也不轮询 OpenCode 通用 VCS；应用版本、个人 worktree、pull 和应用 Agent 配置入口仍关闭。初始化 TestAgent 后的自动续接使用页面内一次性代次；确认框返回后只重新检查该代次，取消、失败或卸载会立即失效，迟到确认不会启动进程。用户主动选择应用时才关闭体验文件连接并切回托管工作区。
+工作台显式支持 `MANAGED / APP_SOURCE / EXPERIENCE` 三种工作区语义。当前用户与成员应用列表都成功加载且应用为空时，每次工作台挂载只自动询问一次是否进入平台体验；拒绝不持久化并恢复原空态和首登引导。所有用户还可从顶栏用户手册左侧的烧瓶图标常驻入口随时进入，不受应用成员关系或首次访问限制；应用下拉只承载真实应用，避免重复入口。体验区复用文件树、编辑器、搜索、终端与对话；文件树和下载只走普通 `workspace.list/read/write` WebSocket RPC，不请求应用引用 `workspace.view.*` 组合视图。普通文件可写，本地 Git 支持 diff、stage/unstage、回退、冲突处理和 commit，但不展示 push/发布，也不轮询 OpenCode 通用 VCS；应用版本、个人 worktree、pull 和应用 Agent 配置入口仍关闭。初始化 TestAgent 后的自动续接使用页面内一次性代次；确认框返回后只重新检查该代次，取消、失败或卸载会立即失效，迟到确认不会启动进程。用户主动选择应用时才关闭体验文件连接并切回托管工作区。
+
+首次成功打开体验工作区后，前端按登录用户在浏览器中记忆“已知晓共享目录说明”；后续点击常驻入口直接进入，不再展示含“暂不体验”的说明弹窗。体验意图从用户点击时起即失效旧应用选择和源码恢复请求，成员应用的窗口聚焦/定时刷新、源码 recent 校验、文件双击和 Git index 操作都不得把 `EXPERIENCE` 切回托管工作区。文件树“…”中的刷新和拉取动作点击后立即收起菜单；刷新已在进行时只收起、不重复发请求。
 
 ## 技术栈
 

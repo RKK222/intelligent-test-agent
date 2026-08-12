@@ -138,7 +138,9 @@ import {
   cancelExperienceContinuation,
   experienceInitializationConfirmationIsCurrent,
   experienceOfferDecision,
+  hasAcknowledgedExperienceWorkspace,
   initialExperienceContinuation,
+  markExperienceWorkspaceAcknowledged,
   requestExperienceContinuation,
   type ExperienceApplicationsStatus,
   type ExperienceContinuationState
@@ -779,6 +781,7 @@ type ExperienceOfferPhase = "WAITING" | "PROMPTING" | "RESOLVED";
 const experienceOfferPhase = ref<ExperienceOfferPhase>("WAITING");
 const experienceDialogOpen = ref(false);
 const experienceJourneyActive = ref(false);
+const experienceWorkspaceAcknowledged = ref(false);
 const experienceContinuation = ref<ExperienceContinuationState>(initialExperienceContinuation());
 let experienceOfferUserId: string | null = null;
 let experienceProcessConfirmationGeneration: number | null = null;
@@ -1488,13 +1491,18 @@ watch(
       experienceDialogOpen.value = false;
       experienceOfferPhase.value = "WAITING";
       experienceJourneyActive.value = false;
+      experienceWorkspaceAcknowledged.value = hasAcknowledgedExperienceWorkspace(
+        typeof window === "undefined" ? undefined : window.localStorage,
+        userId
+      );
       experienceContinuation.value = cancelExperienceContinuation(experienceContinuation.value);
     }
     const decision = experienceOfferDecision({
       userId,
       applicationsStatus,
       applicationCount,
-      offeredThisMount: experienceOfferPhase.value !== "WAITING"
+      offeredThisMount: experienceOfferPhase.value !== "WAITING",
+      acknowledgedPreviously: experienceWorkspaceAcknowledged.value
     });
     if (decision === "WAIT") return;
     if (decision === "OFFER") {
@@ -2563,6 +2571,11 @@ async function openExperienceWorkspaceForGeneration(generation: number) {
     });
     if (!applied || !isCurrent()) return;
     experienceContinuation.value = activateExperienceContinuation(experienceContinuation.value, generation);
+    experienceWorkspaceAcknowledged.value = true;
+    markExperienceWorkspaceAcknowledged(
+      typeof window === "undefined" ? undefined : window.localStorage,
+      authStore.currentUser?.userId
+    );
     feedback.value = {
       kind: "info",
       title: "已进入体验工作区",
@@ -2606,13 +2619,22 @@ async function continueExperienceWorkspaceWhenReady(generation: number) {
   }
 }
 
-function startExperienceWorkspace() {
-  if (experienceOfferPhase.value !== "PROMPTING") return;
+function requestExperienceWorkspaceEntry() {
+  if (experienceJourneyActive.value) return;
+  // 用户已明确选择体验后，立即废弃旧应用/源码请求；迟到回包不得再覆盖体验区选择。
+  appSelectionSeq += 1;
+  selectingAppId = undefined;
+  teardownAppSourceInteractions();
   experienceOfferPhase.value = "RESOLVED";
   experienceDialogOpen.value = false;
   experienceJourneyActive.value = true;
   experienceContinuation.value = requestExperienceContinuation(experienceContinuation.value);
   void continueExperienceWorkspaceWhenReady(experienceContinuation.value.generation);
+}
+
+function startExperienceWorkspace() {
+  if (experienceOfferPhase.value !== "PROMPTING") return;
+  requestExperienceWorkspaceEntry();
 }
 
 function openExperienceWorkspaceDialog() {
@@ -2623,6 +2645,10 @@ function openExperienceWorkspaceDialog() {
       title: "已在体验工作区",
       description: "当前使用的就是 OpenCode 所在服务器的本地体验目录。"
     };
+    return;
+  }
+  if (experienceWorkspaceAcknowledged.value) {
+    requestExperienceWorkspaceEntry();
     return;
   }
   experienceOfferPhase.value = "PROMPTING";
@@ -3321,7 +3347,12 @@ async function recoverActiveRunForSession(
 // 选择默认应用：优先使用「全局最近工作区」所属应用；没有可用全局 recent 时降级到已加入应用的第一项。
 // 这里仅负责选应用，是否加载工作区继续由 per-app recent + 已存在 default 私人工作区决定。
 function trySelectDefaultApp() {
-  if (selectedAppId.value) return;
+  // 体验区没有应用 ID；应用成员列表的 focus/定时刷新不能把它误判为“尚未选应用”。
+  if (
+    selectedAppId.value
+    || selectedWorkspaceKind.value === "EXPERIENCE"
+    || experienceJourneyActive.value
+  ) return;
   const apps = applicationCatalog.value;
   if (apps.length === 0 || !globalRecentLoaded.value) return;
   if (!appSourceRecoveryChecked) {
@@ -3444,7 +3475,12 @@ watch(opencodeProcessReady, (ready, previous) => {
   if (selectedWorkspaceId.value) {
     void refreshWorkspaceView(selectedWorkspaceId.value);
   }
-  if (selectedAppId.value && !selectedWorkspaceId.value && !retryingWorkspaceAfterOpencodeReady) {
+  if (
+    selectedAppId.value
+    && !selectedWorkspaceId.value
+    && !experienceJourneyActive.value
+    && !retryingWorkspaceAfterOpencodeReady
+  ) {
     retryingWorkspaceAfterOpencodeReady = true;
     void handleSelectApp(selectedAppId.value).finally(() => {
       retryingWorkspaceAfterOpencodeReady = false;
@@ -5948,7 +5984,11 @@ async function recoverRecentAppSource(force = false) {
 }
 
 function refreshAppSourceAuthorizationOnFocus() {
-  if (appSourceRecoveryChecked) void recoverRecentAppSource(true);
+  if (
+    appSourceRecoveryChecked
+    && selectedWorkspaceKind.value !== "EXPERIENCE"
+    && !experienceJourneyActive.value
+  ) void recoverRecentAppSource(true);
 }
 
 async function refreshWorkspaceViewAfterReferenceSaved() {

@@ -2167,20 +2167,6 @@ function submitJoinApp() {
           </button>
           <ul v-if="appMenuOpen" class="figma-app-menu-dropdown" role="listbox">
             <li
-              :class="['figma-app-menu-item', workspaceKind === 'EXPERIENCE' && 'is-active']"
-              role="option"
-              :aria-selected="workspaceKind === 'EXPERIENCE'"
-              tabindex="0"
-              @mousedown.prevent="openExperience"
-            >
-              <div class="figma-app-menu-item-main">
-                <span class="figma-app-menu-item-name">平台体验</span>
-                <span class="figma-app-menu-item-desc">随时进入本服务器的共享体验工作区</span>
-              </div>
-              <span v-if="workspaceKind === 'EXPERIENCE'" class="figma-app-menu-item-check">✓</span>
-            </li>
-            <li class="figma-app-menu-divider" />
-            <li
               v-for="app in apps"
               :key="app.id"
               :class="['figma-app-menu-item', app.id === selectedApp?.id && 'is-active']"
@@ -2408,6 +2394,18 @@ function submitJoinApp() {
       </div>
 
       <div class="figma-header-right">
+        <button
+          v-if="!fixedWorkspace"
+          type="button"
+          :class="['figma-header-help', 'figma-header-experience', workspaceKind === 'EXPERIENCE' && 'is-open']"
+          data-testid="experience-workspace-open"
+          :aria-label="workspaceKind === 'EXPERIENCE' ? '已在平台体验' : '进入平台体验'"
+          :aria-pressed="workspaceKind === 'EXPERIENCE'"
+          :title="workspaceKind === 'EXPERIENCE' ? '当前已在平台体验' : '平台体验'"
+          @click.stop="openExperience"
+        >
+          <FlaskConical :size="19" :stroke-width="1.5" />
+        </button>
         <button
           type="button"
           :class="['figma-header-help', helpCenterOpen && 'is-open']"

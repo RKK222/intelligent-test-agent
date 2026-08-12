@@ -199,15 +199,15 @@ function closeWorkspaceMoreMenu() {
 }
 
 function pullCurrentPersonalWorkspace() {
+  closeWorkspaceMoreMenu();
   if (!props.personalWorkspaceId || props.pullingPersonalWorkspace) return;
   emit("pullPersonalWorkspace", props.personalWorkspaceId);
-  closeWorkspaceMoreMenu();
 }
 
 function refreshWorkspaceFileTree() {
+  closeWorkspaceMoreMenu();
   if (!props.workspaceId || props.loadingPath?.has("")) return;
   emit("refresh");
-  closeWorkspaceMoreMenu();
 }
 
 function openRootActions() {
@@ -545,7 +545,7 @@ defineExpose({
                     type="button"
                     class="figma-fe-more-menu-item"
                     aria-label="刷新文件树"
-                    :disabled="!workspaceId || loadingPath?.has('')"
+                    :disabled="!workspaceId"
                     @click="refreshWorkspaceFileTree"
                   >
                     <RefreshCw

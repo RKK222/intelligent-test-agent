@@ -4345,18 +4345,42 @@ test("experience offer precedes onboarding and declining restores the existing g
 });
 
 test("users with applications can open the persistent experience entry at any time", async ({ page }) => {
+  const experienceOpenRequests: string[] = [];
   await mockBackendApi(page, {
     applications: [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }],
     managedApplications: [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }],
-    authRoles: ["USER"]
+    authRoles: ["USER"],
+    experienceWorkspace: {
+      ...workspace(),
+      workspaceId: "wrk_exp_remembered",
+      name: "体验工作区",
+      rootPath: "/srv/test-agent/experience"
+    },
+    experienceOpenRequests
   });
 
   await gotoWorkbench(page, { selectConversation: false });
 
   await expect(page.getByRole("dialog").getByText("现在体验平台功能吗？", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: /应用：/ }).click();
-  await page.getByRole("option", { name: /平台体验/ }).click();
+  await page.getByRole("button", { name: "进入平台体验", exact: true }).click();
   await expect(page.getByRole("dialog").getByText("现在体验平台功能吗？", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "开始体验" }).click();
+  await expect(page.locator(".experience-mode-banner")).toBeVisible();
+
+  // focus 会同时刷新成员应用与源码 recent，任何迟到响应都不能把体验区切回托管工作区。
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForTimeout(200);
+  await expect(page.locator(".experience-mode-banner")).toBeVisible();
+
+  await page.getByRole("button", { name: "应用：平台体验", exact: true }).click();
+  await page.getByRole("option", { name: /F-GCMS/ }).click();
+  await expect(page.getByRole("button", { name: "应用：F-GCMS", exact: true })).toBeVisible();
+
+  // 首次成功进入后只保留常驻入口，不再重复展示含“暂不体验”的说明弹窗。
+  await page.getByRole("button", { name: "进入平台体验", exact: true }).click();
+  await expect(page.getByRole("dialog").getByText("现在体验平台功能吗？", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".experience-mode-banner")).toBeVisible();
+  await expect.poll(() => experienceOpenRequests).toHaveLength(2);
 });
 
 test("experience workspace browses and edits files, starts chat, and exposes local-only Git", async ({ page }) => {
@@ -4407,6 +4431,12 @@ test("experience workspace browses and edits files, starts chat, and exposes loc
   await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_exp_e2e_shared", path: "" });
   await expect.poll(() => fileOperations).toContain("workspace.list");
   expect(fileOperations).not.toContain("workspace.view.list");
+
+  await page.getByLabel("更多工作空间操作").click();
+  const refreshWorkspaceTree = page.getByRole("button", { name: "刷新文件树", exact: true });
+  await expect(refreshWorkspaceTree).toBeVisible();
+  await refreshWorkspaceTree.click();
+  await expect(refreshWorkspaceTree).toBeHidden();
 
   await page.getByRole("button", { name: /^package\.json/ }).click();
   await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 10_000 });

@@ -73,14 +73,38 @@ describe("FigmaFileExplorer", () => {
     });
 
     expect(wrapper.find('summary[aria-label="更多工作空间操作"]').exists()).toBe(true);
+    const menu = wrapper.get("details.figma-fe-more-menu");
+    (menu.element as HTMLDetailsElement).open = true;
     await wrapper.get('button[aria-label="刷新文件树"]').trigger("click");
     expect(wrapper.emitted("refresh")).toHaveLength(1);
+    expect((menu.element as HTMLDetailsElement).open).toBe(false);
 
+    (menu.element as HTMLDetailsElement).open = true;
     const pullButton = wrapper.get('button[aria-label="拉取远程"]');
     await pullButton.trigger("click");
 
     expect(wrapper.emitted("pullPersonalWorkspace")).toEqual([["pws_current"]]);
+    expect((menu.element as HTMLDetailsElement).open).toBe(false);
     expect(wrapper.findComponent(GitChangesPanel).exists()).toBe(true);
+  });
+
+  it("closes the workspace more menu even when refresh is already running", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: [],
+        loadingPath: new Set([""])
+      }
+    });
+    const menu = wrapper.get("details.figma-fe-more-menu");
+    (menu.element as HTMLDetailsElement).open = true;
+
+    await wrapper.get('button[aria-label="刷新文件树"]').trigger("click");
+
+    expect(wrapper.emitted("refresh")).toBeUndefined();
+    expect((menu.element as HTMLDetailsElement).open).toBe(false);
   });
 
   it("disables remote pull in the workspace more menu while a pull is running", () => {

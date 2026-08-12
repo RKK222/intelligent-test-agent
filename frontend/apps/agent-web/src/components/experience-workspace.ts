@@ -1,16 +1,53 @@
 export type ExperienceApplicationsStatus = "pending" | "success" | "error";
 
+const EXPERIENCE_WORKSPACE_ACKNOWLEDGEMENT_VERSION = "v1";
+
+type ExperienceWorkspaceStorage = Pick<Storage, "getItem" | "setItem">;
+
+function experienceWorkspaceAcknowledgementKey(userId: string) {
+  return `test-agent.experience-workspace.${EXPERIENCE_WORKSPACE_ACKNOWLEDGEMENT_VERSION}:${userId}`;
+}
+
+/** 体验说明按用户记忆；本地存储不可用时退化为本次会话继续展示，不阻断进入。 */
+export function hasAcknowledgedExperienceWorkspace(
+  storage: Pick<ExperienceWorkspaceStorage, "getItem"> | undefined,
+  userId: string | undefined | null
+): boolean {
+  const normalizedUserId = userId?.trim();
+  if (!storage || !normalizedUserId) return false;
+  try {
+    return storage.getItem(experienceWorkspaceAcknowledgementKey(normalizedUserId)) === "acknowledged";
+  } catch {
+    return false;
+  }
+}
+
+/** 仅在服务端工作区已成功打开后落记忆，避免一次失败尝试永久跳过共享目录说明。 */
+export function markExperienceWorkspaceAcknowledged(
+  storage: Pick<ExperienceWorkspaceStorage, "setItem"> | undefined,
+  userId: string | undefined | null
+): void {
+  const normalizedUserId = userId?.trim();
+  if (!storage || !normalizedUserId) return;
+  try {
+    storage.setItem(experienceWorkspaceAcknowledgementKey(normalizedUserId), "acknowledged");
+  } catch {
+    // 浏览器禁用本地存储时仅影响后续是否重复提示。
+  }
+}
+
 export type ExperienceOfferInput = {
   userId?: string | null;
   applicationsStatus: ExperienceApplicationsStatus;
   applicationCount: number;
   offeredThisMount: boolean;
+  acknowledgedPreviously: boolean;
 };
 
 /** 无应用用户仍可收到一次自动邀请；存量用户通过常驻菜单主动进入，不被弹窗打断。 */
 export function experienceOfferDecision(input: ExperienceOfferInput): "WAIT" | "OFFER" | "SKIP" {
   if (!input.userId?.trim() || input.applicationsStatus !== "success") return "WAIT";
-  if (input.offeredThisMount || input.applicationCount > 0) return "SKIP";
+  if (input.offeredThisMount || input.acknowledgedPreviously || input.applicationCount > 0) return "SKIP";
   return "OFFER";
 }
 

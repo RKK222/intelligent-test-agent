@@ -80,6 +80,7 @@ describe("FigmaShell", () => {
     expect(figmaShellSource).toMatch(/\.figma-header-help > svg\s*\{[^}]*display: block/s);
     expect(figmaShellSource).toMatch(/\.figma-header-help:active,[\s\S]*?\.figma-header-help\.is-open\s*\{[^}]*background: var\(--ta-shell-accent-soft, #fdf2f2\);[^}]*color: var\(--ta-shell-accent-strong, #991b1b\)/s);
     expect(figmaShellSource).toContain('<BookOpen :size="20" :stroke-width="1.5" />');
+    expect(figmaShellSource).toContain('<FlaskConical :size="19" :stroke-width="1.5" />');
     expect(figmaShellSource).toMatch(/\.figma-runtime-inventory-summary\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: transparent/s);
     expect(figmaShellSource).toContain('data-testid="header-workspace-selector"');
     expect(figmaShellSource).toContain('data-testid="header-version-selector"');
@@ -125,7 +126,36 @@ describe("FigmaShell", () => {
     expect(wrapper.emitted("open-help")?.[0]).toEqual(["getting-started"]);
   });
 
-  it("places the notification bell after the manual and hides it in the fixed share workbench", async () => {
+  it("places the platform experience icon beside the manual instead of duplicating it in the app menu", async () => {
+    const wrapper = mountShell({
+      props: {
+        apps: [{ id: "app_coss", name: "F-COSS", description: "已启用" }],
+        selectedAppId: "app_coss"
+      }
+    });
+    const right = wrapper.get(".figma-header-right");
+    const experience = right.get('[data-testid="experience-workspace-open"]');
+    const help = right.get('[data-testid="help-center-open"]');
+    const children = Array.from(right.element.children);
+
+    expect(children.indexOf(experience.element) + 1).toBe(children.indexOf(help.element));
+    expect(experience.attributes("aria-label")).toBe("进入平台体验");
+    expect(experience.attributes("aria-pressed")).toBe("false");
+    await experience.trigger("click");
+    expect(wrapper.emitted("open-experience")).toHaveLength(1);
+
+    await wrapper.get(".figma-app-menu-trigger").trigger("click");
+    expect(wrapper.find('[role="option"]').text()).not.toContain("平台体验");
+
+    await wrapper.setProps({ workspaceKind: "EXPERIENCE" });
+    expect(experience.attributes("aria-label")).toBe("已在平台体验");
+    expect(experience.attributes("aria-pressed")).toBe("true");
+
+    await wrapper.setProps({ fixedWorkspace: true });
+    expect(wrapper.find('[data-testid="experience-workspace-open"]').exists()).toBe(false);
+  });
+
+  it("places the notification bell after the experience and manual icons and hides it in the fixed share workbench", async () => {
     const wrapper = mountShell({
       props: {
         notificationUnreadCount: 2,
@@ -133,11 +163,13 @@ describe("FigmaShell", () => {
       },
     });
     const right = wrapper.get('.figma-header-right');
+    const experience = right.get('[data-testid="experience-workspace-open"]');
     const help = right.get('[data-testid="help-center-open"]');
     const bell = right.get('[data-testid="notification-center-trigger"]');
     const inventory = right.get('[data-testid="runtime-inventory-summary"]');
     const children = Array.from(right.element.children);
 
+    expect(children.indexOf(experience.element) + 1).toBe(children.indexOf(help.element));
     expect(children.indexOf(help.element)).toBeLessThan(children.indexOf(bell.element.parentElement!));
     expect(children.indexOf(bell.element.parentElement!)).toBeLessThan(children.indexOf(inventory.element.parentElement!));
     expect(bell.text()).toContain('2');
@@ -145,6 +177,7 @@ describe("FigmaShell", () => {
     expect(wrapper.emitted('refresh-notifications')).toHaveLength(1);
 
     await wrapper.setProps({ fixedWorkspace: true });
+    expect(wrapper.find('[data-testid="experience-workspace-open"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="notification-center-trigger"]').exists()).toBe(false);
   });
 

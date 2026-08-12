@@ -9397,3 +9397,28 @@
 - 任意已登录用户可随时进入其 OpenCode 所在服务器的共享体验区；两台服务器按同一默认内容各自初始化，后续独立共享和修改。
 - 平台层面支持本地 Git commit 及除 push/发布外的既有 Git 操作。该边界不是 OS shell 沙箱：若用户通过开放的终端自行配置 remote，需由企业网络/主机策略继续约束外连。
 - 本次新增向后兼容 HTTP API 和前向 Flyway 数据迁移，不新增 RunEvent 类型或表结构，不修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
+## 2026-08-12 - 修复体验区误跳回与重复提示
+
+### Why
+
+- 用户反馈体验区的“刷新文件树”菜单点击后不收起，新建文件双击或 Git 暂存期间又经常跳回原应用工作区；首次成功体验后再次进入仍重复展示“暂不体验”。
+- 根因是体验工作区主动清空 `selectedAppId` 后，成员应用 focus/定时刷新和源码 recent 恢复仍会把它误判为“未选择应用”，触发默认应用补选并覆盖体验选择。
+
+### What
+
+- 体验入口在用户点击时立即推进应用选择代次并失效旧源码 intent；体验等待期和活动期阻断默认应用补选、进程 READY 托管重试与 focus 源码恢复，迟到响应不能再切回 `MANAGED`。
+- 体验 Workspace 真正成功打开后才按用户写入浏览器本地知晓标记；后续从顶栏用户手册左侧的烧瓶图标直接打开，应用下拉移除重复入口，不再显示含“暂不体验”的说明弹窗，失败尝试和本地存储不可用仍安全退化。
+- 文件树“…”中的刷新与拉取先关闭原生 `details` 再判断是否发请求；刷新已经进行时也能点击收起，但不会重复刷新。
+- 同步前端工程 README、agent-web README/PACKAGE、前端规范和模块图；未修改 HTTP API、RunEvent、数据库、SQL、migration、安全边界或后端业务代码。
+
+### How
+
+- 定向 Vitest 覆盖体验状态、文件树与顶栏入口；Chromium 工作台回归覆盖 focus 刷新保持体验选择、首次成功后的直接重入、顶栏图标入口和刷新菜单收起；agent-web typecheck 与 production build 均通过。
+- 在真实本地页面验证：刷新菜单收起、双击 `测试.md` 保持平台体验、unstage/stage 后仍在体验区、切回 F-COSS 后再次进入无弹窗；服务重启后重新登录复查同样直接进入。
+- 按 JDK 25、`.env.test`、`test` profile 完整构建并重启；首次被缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 拦截后按规范使用 `--without-workflow`，backend health/readiness、frontend 3000、登录 CORS 和 manager WebSocket 均通过。提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突或残留合并标记。
+
+### Result
+
+- 体验选择现在由显式 intent 保护，不再因文件或 Git 操作恰逢后台刷新而跳回传统工作区；首次成功进入后只保留常驻直接入口。
+- 当前服务运行于 `http://127.0.0.1:8080` 和 `http://127.0.0.1:3000`，可直接复验；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支或推送远端。
