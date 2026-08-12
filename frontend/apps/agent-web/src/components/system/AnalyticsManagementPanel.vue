@@ -18,12 +18,14 @@ import type {
 const api = inject<BackendApiClient>("api")!;
 
 type TabKey = "overview" | "users" | "organizations" | "satisfaction" | "exceptions";
+type RangePreset = "7" | "30" | "90" | "180" | "custom";
 
 const activeTab = ref<TabKey>("overview");
 const now = new Date();
-const defaultStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+const defaultStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 const startTime = ref(toLocalInput(defaultStart));
 const endTime = ref(toLocalInput(now));
+const rangePreset = ref<RangePreset>("30");
 const granularity = ref<"hour" | "day" | "week" | "month">("day");
 const organization = ref("");
 const rdDepartment = ref("");
@@ -136,6 +138,20 @@ function refresh() {
   void exceptionsQuery.refetch();
 }
 
+/** 快捷范围复用现有开始/结束参数，不增加第二套查询状态。 */
+function applyRangePreset() {
+  if (rangePreset.value === "custom") return;
+  const rangeEnd = new Date();
+  const days = Number(rangePreset.value);
+  startTime.value = toLocalInput(new Date(rangeEnd.getTime() - days * 24 * 60 * 60 * 1000));
+  endTime.value = toLocalInput(rangeEnd);
+  granularity.value = "day";
+}
+
+function markCustomRange() {
+  rangePreset.value = "custom";
+}
+
 async function exportCsv(type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions") {
   const blob = await api.exportAnalyticsCsv(type, params.value);
   const url = URL.createObjectURL(blob);
@@ -172,6 +188,7 @@ function formatDuration(value: number | null | undefined) {
 }
 
 function trendHeight(point: AnalyticsTimeSeriesPoint) {
+  if (point.runCount === 0) return "0px";
   return `${Math.max(6, Math.round((point.runCount / maxTrendRun.value) * 72))}px`;
 }
 
@@ -199,8 +216,17 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
     </header>
 
     <div class="ta-analytics-filters">
-      <label>开始<input v-model="startTime" type="datetime-local" /></label>
-      <label>结束<input v-model="endTime" type="datetime-local" /></label>
+      <label>快速范围
+        <select v-model="rangePreset" aria-label="快速范围" @change="applyRangePreset">
+          <option value="7">最近 7 天</option>
+          <option value="30">最近 30 天</option>
+          <option value="90">最近 90 天</option>
+          <option value="180">最近 180 天</option>
+          <option value="custom">自定义</option>
+        </select>
+      </label>
+      <label>开始<input v-model="startTime" type="datetime-local" @change="markCustomRange" /></label>
+      <label>结束<input v-model="endTime" type="datetime-local" @change="markCustomRange" /></label>
       <label>粒度
         <select v-model="granularity">
           <option value="hour">小时</option>
@@ -248,7 +274,10 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
       </div>
 
       <section class="ta-panel">
-        <h3>趋势</h3>
+        <div class="ta-panel-heading">
+          <h3>趋势</h3>
+          <span>{{ timeseries.length }} 个时间点</span>
+        </div>
         <div v-if="timeseries.length === 0" class="ta-empty">暂无数据</div>
         <div v-else class="ta-trend" :style="trendGridStyle">
           <div v-for="point in timeseries" :key="point.bucketStart" class="ta-trend-item">
@@ -260,7 +289,10 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
       </section>
 
       <section class="ta-panel">
-        <h3>小时热力</h3>
+        <div class="ta-panel-heading">
+          <h3>小时热力</h3>
+          <span>7 天 × 24 小时</span>
+        </div>
         <div v-if="!peaks?.heatmap?.length" class="ta-empty">暂无数据</div>
         <div v-else class="ta-heatmap">
           <div
@@ -510,6 +542,20 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
 .ta-panel h3 {
   margin: 0 0 10px;
   font-size: 14px;
+}
+.ta-panel-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.ta-panel-heading h3 {
+  margin: 0;
+}
+.ta-panel-heading span {
+  color: #6b7280;
+  font-size: 12px;
 }
 .ta-empty {
   padding: 28px;

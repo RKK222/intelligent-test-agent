@@ -32,6 +32,7 @@ public class AnalyticsQueryService {
     private static final int MAX_TOP_N = 100;
     private static final int MAX_PAGE_SIZE = 100;
     private static final int MAX_POINTS = 500;
+    private static final int DEFAULT_RANGE_DAYS = 30;
 
     private final AnalyticsRepository repository;
 
@@ -58,7 +59,7 @@ public class AnalyticsQueryService {
             Integer pageSize,
             String sort) {
         Instant end = endTime == null ? Instant.now() : endTime;
-        Instant start = startTime == null ? end.minus(7, ChronoUnit.DAYS) : startTime;
+        Instant start = startTime == null ? end.minus(DEFAULT_RANGE_DAYS, ChronoUnit.DAYS) : startTime;
         if (!start.isBefore(end)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "startTime 必须早于 endTime");
         }
@@ -158,6 +159,7 @@ public class AnalyticsQueryService {
             Instant bucket = bucket(row, filter.granularity());
             grouped.computeIfAbsent(bucket, ignored -> new BucketTotals()).add(row);
         }
+        fillMissingTimeBuckets(grouped, filter);
         return grouped.entrySet().stream()
                 .map(entry -> entry.getValue().toPoint(entry.getKey()))
                 .toList();
@@ -181,7 +183,7 @@ public class AnalyticsQueryService {
                 filter.sort());
         Map<Instant, BucketTotals> grouped = new TreeMap<>();
         for (AnalyticsModels.ActivityRollupRow row : repository.queryRollups(hourly)) {
-            grouped.computeIfAbsent(row.bucketStart(), ignored -> new BucketTotals()).add(row);
+            grouped.computeIfAbsent(bucket(row, AnalyticsModels.Granularity.HOUR), ignored -> new BucketTotals()).add(row);
         }
         List<AnalyticsModels.PeakPoint> peakPeriods = grouped.entrySet().stream()
                 .map(entry -> entry.getValue().toPeak(entry.getKey()))
@@ -190,6 +192,12 @@ public class AnalyticsQueryService {
                 .limit(hourly.topN())
                 .toList();
         Map<String, HeatmapTotals> heatmap = new LinkedHashMap<>();
+        // 固定补齐周一至周日的 24 小时，避免无活动时段被省略后破坏热力图坐标语义。
+        for (int dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek++) {
+            for (int hour = 0; hour < 24; hour++) {
+                heatmap.put(dayOfWeek + ":" + hour, new HeatmapTotals(dayOfWeek, hour));
+            }
+        }
         grouped.forEach((bucket, totals) -> {
             int dayOfWeek = bucket.atZone(ZoneOffset.UTC).getDayOfWeek().getValue();
             int hour = bucket.atZone(ZoneOffset.UTC).getHour();
@@ -372,6 +380,10 @@ public class AnalyticsQueryService {
         Instant base = row.bucketStart() != null
                 ? row.bucketStart()
                 : row.activityDate().atStartOfDay().toInstant(ZoneOffset.UTC);
+        return bucket(base, granularity);
+    }
+
+    private Instant bucket(Instant base, AnalyticsModels.Granularity granularity) {
         return switch (granularity) {
             case HOUR -> base.truncatedTo(ChronoUnit.HOURS);
             case DAY -> base.atZone(ZoneOffset.UTC).toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC);
@@ -379,6 +391,29 @@ public class AnalyticsQueryService {
                     .with(java.time.DayOfWeek.MONDAY)
                     .atStartOfDay().toInstant(ZoneOffset.UTC);
             case MONTH -> base.atZone(ZoneOffset.UTC).toLocalDate()
+                    .withDayOfMonth(1)
+                    .atStartOfDay().toInstant(ZoneOffset.UTC);
+        };
+    }
+
+    /**
+     * 在已校验的最多 500 个时间桶内补零，使趋势轴反映完整查询范围而不是仅展示有活动的日期。
+     */
+    private void fillMissingTimeBuckets(Map<Instant, BucketTotals> grouped, AnalyticsModels.Filter filter) {
+        Instant cursor = bucket(filter.startTime(), filter.granularity());
+        while (cursor.isBefore(filter.endTime())) {
+            grouped.computeIfAbsent(cursor, ignored -> new BucketTotals());
+            cursor = nextBucket(cursor, filter.granularity());
+        }
+    }
+
+    private Instant nextBucket(Instant current, AnalyticsModels.Granularity granularity) {
+        return switch (granularity) {
+            case HOUR -> current.plus(1, ChronoUnit.HOURS);
+            case DAY -> current.plus(1, ChronoUnit.DAYS);
+            case WEEK -> current.plus(7, ChronoUnit.DAYS);
+            case MONTH -> current.atZone(ZoneOffset.UTC).toLocalDate()
+                    .plusMonths(1)
                     .withDayOfMonth(1)
                     .atStartOfDay().toInstant(ZoneOffset.UTC);
         };

@@ -94,9 +94,17 @@ const trend: AnalyticsTimeSeriesPoint[] = [{
   cancellationRate: 0
 }];
 
+const completeHeatmap = Array.from({ length: 168 }, (_, index) => ({
+  dayOfWeek: Math.floor(index / 24) + 1,
+  hourOfDay: index % 24,
+  activeUsers: 0,
+  runCount: 0,
+  userMessageCount: 0
+}));
+
 const peaks: AnalyticsPeaks = {
   peakPeriods: [],
-  heatmap: [],
+  heatmap: completeHeatmap,
   freshness: overview.freshness
 };
 
@@ -151,7 +159,8 @@ describe("analytics management panel", () => {
     expect(await view.findByText("活跃用户")).toBeTruthy();
     expect((await view.findAllByText("token 使用量")).length).toBeGreaterThanOrEqual(1);
     expect(await view.findByText("小时热力")).toBeTruthy();
-    expect(await view.findByText("暂无数据")).toBeTruthy();
+    expect(await view.findByText("7 天 × 24 小时")).toBeTruthy();
+    expect(view.container.querySelectorAll(".ta-heatmap-cell")).toHaveLength(168);
     expect(view.container.textContent ?? "").not.toMatch(/成本|费用|花费|costUsd/i);
     view.queryClient.clear();
   });
@@ -164,16 +173,34 @@ describe("analytics management panel", () => {
     ]);
     vi.mocked(backendApi.getAnalyticsPeaks).mockResolvedValue({
       ...peaks,
-      heatmap: [
-        { dayOfWeek: 1, hourOfDay: 8, activeUsers: 2, runCount: 3, userMessageCount: 5 },
-        { dayOfWeek: 1, hourOfDay: 9, activeUsers: 3, runCount: 4, userMessageCount: 6 }
-      ]
+      heatmap: completeHeatmap.map(point => point.dayOfWeek === 1 && point.hourOfDay === 8
+        ? { ...point, activeUsers: 2, runCount: 3, userMessageCount: 5 }
+        : point)
     });
     const view = renderPanel(backendApi);
 
     await waitFor(() => expect(view.container.querySelectorAll(".ta-trend-item")).toHaveLength(2));
     expect(view.container.querySelector<HTMLElement>(".ta-trend")?.style.getPropertyValue("--ta-trend-columns")).toBe("2");
-    expect(view.container.querySelectorAll(".ta-heatmap-cell")).toHaveLength(2);
+    expect(view.container.querySelectorAll(".ta-heatmap-cell")).toHaveLength(168);
+    view.queryClient.clear();
+  });
+
+  it("defaults to thirty days and supports wider preset ranges", async () => {
+    const backendApi = api();
+    const view = renderPanel(backendApi);
+
+    await waitFor(() => expect(backendApi.getAnalyticsTimeseries).toHaveBeenCalled());
+    const initialParams = vi.mocked(backendApi.getAnalyticsTimeseries).mock.calls[0]?.[0];
+    expect(new Date(initialParams?.endTime ?? 0).getTime() - new Date(initialParams?.startTime ?? 0).getTime())
+      .toBe(30 * 24 * 60 * 60 * 1000);
+
+    await fireEvent.update(view.getByLabelText("快速范围"), "90");
+    await waitFor(() => {
+      const calls = vi.mocked(backendApi.getAnalyticsTimeseries).mock.calls;
+      const latest = calls.at(-1)?.[0];
+      expect(new Date(latest?.endTime ?? 0).getTime() - new Date(latest?.startTime ?? 0).getTime())
+        .toBe(90 * 24 * 60 * 60 * 1000);
+    });
     view.queryClient.clear();
   });
 

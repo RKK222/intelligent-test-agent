@@ -9322,3 +9322,26 @@
 
 - 用户可从系统手册导航直接查到长期记忆完整操作，也能通过内嵌 Help 和宠物问答使用同一份说明；原有章节已与当前工作台行为对齐。
 - 本次不新增或变更 HTTP API、RunEvent、DTO、数据库、SQL、migration、鉴权、安全和性能逻辑；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+## 2026-08-12 - 扩大运营分析趋势范围并补齐热力数据
+
+### Why
+
+- 运营分析前端默认只查询最近 7 天，后端趋势与小时热力又只返回存在 rollup 数据的桶，导致趋势天数少、无活动日期断档，热力图也只出现零散格点。
+
+### What
+
+- 前后端默认查询范围统一扩大为最近 30 天，前端新增 7/30/90/180 天快捷范围并保留自定义时间。
+- 趋势查询在服务层补齐范围内的零值时间桶；小时热力固定返回周一至周日、每天 0–23 时的 168 个格点，峰值排行仍只包含真实活动时段。
+- 同步 runtime、agent-web README 与 HTTP API 文档，并补充后端服务和前端组件回归测试。
+
+### How
+
+- 后端 `AnalyticsQueryServiceTest` 6 项、前端运营分析组件 4 项、agent-web typecheck 和 production build 全部通过；JDK 25 下完整后端 clean package 成功。
+- 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；因本机缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 按启动规范使用 `--without-workflow`，backend health/readiness、frontend 3000、登录 CORS 和 manager 健康检查均通过。
+- 提交前回顾全部 `.agents/session-log*.md`，保留并行的用户手册修改，不纳入本次提交；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未新建分支。
+
+### Result
+
+- 运营分析默认即可看到约一个月的完整趋势轴，用户可一键扩大到 90/180 天；无活动日期显示为零，热力图始终保持完整 7×24 坐标。
+- 本次仅调整既有查询接口的默认范围和返回补零行为，不新增 URL、DTO 字段、RunEvent 或数据库/SQL/migration；最多 500 点、日粒度最多 180 天等既有限制保持不变，向后兼容。

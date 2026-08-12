@@ -241,7 +241,7 @@ Base URL：`/api/internal/platform/opencode-runtime`。该能力只写满意度�
 
 Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`，普通管理员和匿名用户分别返回 `FORBIDDEN`、`UNAUTHENTICATED`。查询接口只读 rollup 表；失败或延迟时通过响应中的 `freshness.status=STALE|FAILED` 标记最近成功数据，不在 API 请求时扫描原始事实宽表。
 
-通用 query 参数：`startTime`、`endTime`、`granularity=hour|day|week|month`、`organization`、`rdDepartment`、`department`、`userId`、`agentId`、`model`、`workspaceId`、`topN`、`page`、`pageSize`、`sort`。约束：`topN<=100`，`pageSize<=100`，趋势点数 `<=500`；`hour` 粒度最多 48 小时，`day` 粒度最多 180 天。
+通用 query 参数：`startTime`、`endTime`、`granularity=hour|day|week|month`、`organization`、`rdDepartment`、`department`、`userId`、`agentId`、`model`、`workspaceId`、`topN`、`page`、`pageSize`、`sort`。未传时间时默认最近 30 天；约束：`topN<=100`，`pageSize<=100`，趋势点数 `<=500`；`hour` 粒度最多 48 小时，`day` 粒度最多 180 天。`timeseries` 会为查询范围内无活动的时间桶返回零值点，`peaks.heatmap` 固定按周一至周日、每天 0–23 时返回 168 个格点，避免稀疏事实改变坐标语义。
 
 | 方法 | 路径 | 用途 | 响应 |
 |---|---|---|---|

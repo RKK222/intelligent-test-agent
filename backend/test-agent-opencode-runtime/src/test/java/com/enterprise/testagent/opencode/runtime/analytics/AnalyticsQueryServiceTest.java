@@ -70,6 +70,50 @@ class AnalyticsQueryServiceTest {
     }
 
     @Test
+    void defaultsToThirtyDaysAndFillsMissingTrendBuckets() {
+        AnalyticsQueryService service = new AnalyticsQueryService(new FakeAnalyticsRepository(List.of(row())));
+
+        AnalyticsModels.Filter defaultFilter = service.filter(null, END, "day", null, null, null, null, null, null, null, 10, 1, 20, null);
+        AnalyticsModels.Filter threeDayFilter = service.filter(
+                START,
+                START.plus(3, ChronoUnit.DAYS),
+                "day",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                10,
+                1,
+                20,
+                null);
+
+        assertThat(defaultFilter.startTime()).isEqualTo(END.minus(30, ChronoUnit.DAYS));
+        assertThat(service.timeseries(threeDayFilter))
+                .extracting(AnalyticsModels.TimeSeriesPoint::bucketStart, AnalyticsModels.TimeSeriesPoint::runCount)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(START, 2L),
+                        org.assertj.core.groups.Tuple.tuple(START.plus(1, ChronoUnit.DAYS), 0L),
+                        org.assertj.core.groups.Tuple.tuple(START.plus(2, ChronoUnit.DAYS), 0L));
+    }
+
+    @Test
+    void peaksAlwaysReturnsSevenByTwentyFourHeatmap() {
+        AnalyticsQueryService service = new AnalyticsQueryService(new FakeAnalyticsRepository(List.of(row())));
+        AnalyticsModels.Filter filter = service.filter(START, END, "day", null, null, null, null, null, null, null, 10, 1, 20, null);
+
+        AnalyticsModels.Peaks peaks = service.peaks(filter);
+
+        assertThat(peaks.heatmap()).hasSize(168);
+        assertThat(peaks.heatmap().getFirst()).isEqualTo(new AnalyticsModels.HeatmapPoint(1, 0, 0, 0, 0));
+        assertThat(peaks.heatmap())
+                .filteredOn(point -> point.dayOfWeek() == 7 && point.hourOfDay() == 0)
+                .containsExactly(new AnalyticsModels.HeatmapPoint(7, 0, 1, 2, 3));
+    }
+
+    @Test
     void csvExportsDoNotExposeCostFields() {
         AnalyticsQueryService service = new AnalyticsQueryService(new FakeAnalyticsRepository(List.of(row())));
         AnalyticsModels.Filter filter = service.filter(START, END, "day", null, null, null, null, null, null, null, 10, 1, 20, null);
