@@ -2,6 +2,27 @@
 
 本项目的对话场景数据放在测试 fixture 和 mock API 中，不写入 Flyway，也不依赖某个本地用户的历史 Session。这样重启服务、切换 worktree 或清理本地数据库后仍可重复构造。
 
+## 本地可见 E2E 测试数据
+
+需要在真实“应用 / 工作空间 / 对话历史”页面验收时，在仓库根目录执行：
+
+```bash
+./tools/seed-conversation-workspace-e2e-data.sh
+```
+
+脚本默认读取 `.env.test`，为 `usr_test_dev` 幂等写入以下数据：
+
+- 应用“E2E 开源项目质量验证”，配置 Spring PetClinic、Playwright、Vue Core 三个公开版本库；只保存远端地址，不下载源码。
+- 应用版本工作空间“Spring PetClinic 退款验证工作空间 / e2e-20260812”，本地轻量工作树位于 `.tmp/conversation-workspace-e2e/workspace`。
+- 工作空间内包含退款需求、详细设计、CSV 案例、示例 Skill 和示例 Agent，可直接检查目录树、文件读取和配置发现。
+- 7 个以 `[E2E]` 开头的历史会话，覆盖普通对话、需求分析、详细设计评审、Skill 调用、Agent 调用、permission 等待和 subagent 卡片/子会话。
+
+可通过 `TEST_AGENT_E2E_ENV_FILE`、`TEST_AGENT_E2E_USER_ID` 和 `TEST_AGENT_E2E_LINUX_SERVER_ID`
+覆盖环境文件、目标用户和目标 Java 服务器身份；服务器身份默认取本机 `hostname`。造数入口是显式启用的
+`ConversationWorkspaceE2eDataFixtureTest`，只调用既有 Repository 和 Redis Run 数据面，不在 Flyway 写入演示数据。
+permission 会话保存的是用于验证历史恢复、待处理提示和授权卡片的模拟 pending 快照；由于真实 OpenCode
+permission request 属于进程内存态，该固定数据不能用于验证“允许/拒绝”回包，完整决策链仍须按下文真实 prompt 新建 Run。
+
 ## 场景清单
 
 | 场景 | 可重复入口 | 覆盖内容 |

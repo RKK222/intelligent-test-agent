@@ -9631,6 +9631,30 @@
 - 宠物游乐舱现有六款游戏；弹球的任务进度、主动挡板反馈和可增长奖池形成更明确的追分循环，黄金矿工具有计时、选择目标、重量风险、炸药取舍和连续关卡，不是静态演示。
 - 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、性能、安全或环境配置；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
 
+## 2026-08-12 - 补充对话与工作空间可见 E2E 测试数据
+
+### Why
+
+- 本地真实页面缺少可重复验收的应用版本库、需求/详细设计材料，以及普通、Skill、Agent、permission、subagent 等历史对话数据；现有 mock 场景不能直接用于应用和工作空间页面联调。
+
+### What
+
+- 新增显式启用的 `ConversationWorkspaceE2eDataFixtureTest` 与根目录造数脚本，复用既有 Repository 和 Redis Run 数据面，为 `usr_test_dev` 幂等写入 1 个应用、Spring PetClinic/Playwright/Vue Core 3 个公开版本库、应用版本/个人工作空间和 7 类 `[E2E]` 历史会话。
+- 新增本地轻量工作空间模板，包含订单退款需求、详细设计、CSV 案例、示例 Skill 和示例 Agent；公开版本库只保存地址，不下载远端源码，演示数据不进入 Flyway。
+- 同步 `test-agent-app` README 与对话场景测试文档，明确执行命令、覆盖范围及模拟 permission 不能回复真实 OpenCode 内存请求的边界。
+
+### How
+
+- 造数脚本在 `.env.test` 指向的真实 PostgreSQL/Redis 上重复执行，均为 1/1 passed；固定 ID 保持 1 个 E2E 应用、3 个 E2E 版本库和 7 个会话，工作空间记录同步写入当前稳定服务器 ID，验证幂等性。`tools/verify-ai-docs.sh`、脚本语法、差异空白与冲突标记检查通过。
+- JDK 25 完整后端 `mvn clean package -Dmaven.test.skip=true` 成功。当前工作树按 `.env.test`、`test` profile 和 `--without-workflow` 启动时，Flyway 因测试库已执行但当前工作树未解析的 `V20260812202425` 失败关闭；遵循数据库规则未执行 `repair`、未改历史表，也未伪造兼容迁移。
+- 使用当前 `.env.test` 恢复 `/Users/kaka/Desktop/intelligent-test-agent-dev` 的既有构建，后端健康与就绪探针均为 `UP`、前端返回 200。通过应用内浏览器实测应用/工作空间/版本上下文、全部 7 个 `[E2E]` 会话、普通消息、等待授权卡片、subagent 卡片及子会话结论均可见；文件树因该用户专属 OpenCode 进程未启动而未完成在线读取，未为造数任务额外启动进程。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目，任务外配置管理、migration、设置页、宠物游戏和自动生成文件差异保持原有暂存或未暂存状态，不纳入本次提交。
+
+### Result
+
+- 可重复造数能力及测试数据已实现并通过真实存储与主要页面链路验证；需求、详细设计、CSV、Skill、Agent 等文件已复制到本地 Git 工作空间并由夹具断言存在。仅工作空间文件树的在线读取因专属 OpenCode 进程未运行而属于部分验证；当前工作树自身的完整启动仍需数据库所有者恢复 `V20260812202425` 原始迁移或提供明确兼容方案。
+- 本次未新增或变更 HTTP API、RunEvent 类型、数据库结构、生产 SQL、安全或性能契约；只写入本地测试数据，未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
 ## 2026-08-12 - 为六款宠物游戏加入公平随机难度
 
 ### Why
