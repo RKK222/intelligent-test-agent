@@ -98,6 +98,9 @@ describe("help center", () => {
     expect(prompt).toContain("适用场景");
     expect(prompt).toContain("使用前配置");
     expect(prompt).toContain("自动化代码库可以单独建立工作空间");
+    expect(prompt).toContain("页面顶部中间的“应用”");
+    expect(prompt).toContain("工作空间：当前名称");
+    expect(prompt).toContain("文件树左下角的双向箭头");
     expect(prompt).toContain("本地提交，但不提供远程推送或发布");
     expect(prompt).toContain("VITE_CACHE_DATA_URL");
     expect(prompt).toContain("当前游戏入口只对超级管理员显示");
