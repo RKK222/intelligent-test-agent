@@ -18,6 +18,7 @@ BACKEND_RUNTIME_JAR=""
 BACKEND_APP_LOG_DIR="${BACKEND_DIR}/logs"
 LOG_DIR="${ROOT_DIR}/.tmp/dev-services"
 OPENCODE_MANAGER_RUNTIME_STATE_DIR=""
+OPENCODE_OUTBOUND_HTTPS_PROXY=""
 BACKEND_SCREEN_SESSION="test-agent-backend"
 FRONTEND_SCREEN_SESSION="test-agent-frontend"
 OPENCODE_SCREEN_SESSION="test-agent-opencode"
@@ -98,6 +99,7 @@ Options:
 
 Environment overrides:
   TEST_AGENT_START_OPENCODE_MANAGER  auto|true|false. Set false to skip the Go manager.
+  TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY  auto|true|false. On macOS, auto reuses the static system HTTPS proxy for OpenCode only.
   TEST_AGENT_OPENCODE_MANAGER_TOKEN  Shared secret between manager and backend. Defaults to local-manager-token.
   TEST_AGENT_ROOT                    Project root used by common parameter path expansion.
   TESTAGENT                          Compatibility alias for existing local common parameters.
@@ -250,6 +252,81 @@ load_env_file() {
 
     export "${key}=${value}"
   done < "${file}"
+}
+
+# Bun 不会读取 macOS 的系统代理配置。仅为 OpenCode 出站 HTTPS 请求解析一个代理地址，
+# 不导出到当前脚本，避免 Maven、前端构建以及后端数据库/Redis 连接被意外改道。
+resolve_opencode_outbound_https_proxy() {
+  local use_system_proxy proxy_settings enabled host port
+
+  OPENCODE_OUTBOUND_HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-}}"
+  if [[ -n "${OPENCODE_OUTBOUND_HTTPS_PROXY}" ]]; then
+    echo "Using explicit HTTPS proxy environment for OpenCode outbound requests."
+    return
+  fi
+
+  use_system_proxy="${TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY:-auto}"
+  case "${use_system_proxy}" in
+    false|FALSE|0|no|NO)
+      return
+      ;;
+    auto|"")
+      [[ "$(uname -s)" == "Darwin" ]] || return
+      ;;
+    true|TRUE|1|yes|YES)
+      ;;
+    *)
+      echo "Invalid TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY: ${use_system_proxy}" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$(uname -s)" != "Darwin" ]] || ! command -v scutil >/dev/null 2>&1; then
+    if [[ "${use_system_proxy}" != "auto" && -n "${use_system_proxy}" ]]; then
+      echo "TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY is enabled, but macOS scutil is unavailable." >&2
+    fi
+    return
+  fi
+
+  proxy_settings="$(scutil --proxy 2>/dev/null || true)"
+  enabled="$(awk '$1 == "HTTPSEnable" && $2 == ":" { print $3; exit }' <<<"${proxy_settings}")"
+  host="$(awk '$1 == "HTTPSProxy" && $2 == ":" { print $3; exit }' <<<"${proxy_settings}")"
+  port="$(awk '$1 == "HTTPSPort" && $2 == ":" { print $3; exit }' <<<"${proxy_settings}")"
+
+  # 部分系统只维护 HTTP proxy，但它同样可以通过 CONNECT 承载 HTTPS。
+  if [[ "${enabled}" != "1" || -z "${host}" || -z "${port}" ]]; then
+    enabled="$(awk '$1 == "HTTPEnable" && $2 == ":" { print $3; exit }' <<<"${proxy_settings}")"
+    host="$(awk '$1 == "HTTPProxy" && $2 == ":" { print $3; exit }' <<<"${proxy_settings}")"
+    port="$(awk '$1 == "HTTPPort" && $2 == ":" { print $3; exit }' <<<"${proxy_settings}")"
+  fi
+
+  if [[ "${enabled}" != "1" || ! "${host}" =~ ^[A-Za-z0-9._:-]+$ || ! "${port}" =~ ^[0-9]+$ ]] ||
+    ((port < 1 || port > 65535)); then
+    if [[ "${use_system_proxy}" != "auto" && -n "${use_system_proxy}" ]]; then
+      echo "No valid static macOS HTTP(S) proxy is enabled for OpenCode." >&2
+    fi
+    return
+  fi
+
+  if [[ "${host}" == *:* && "${host}" != \[*\] ]]; then
+    host="[${host}]"
+  fi
+  OPENCODE_OUTBOUND_HTTPS_PROXY="http://${host}:${port}"
+  echo "Using macOS system proxy for OpenCode outbound HTTPS requests (${host}:${port})."
+}
+
+opencode_proxy_export_prefix() {
+  if [[ -n "${OPENCODE_OUTBOUND_HTTPS_PROXY}" ]]; then
+    printf 'export HTTPS_PROXY=%q https_proxy=%q && ' \
+      "${OPENCODE_OUTBOUND_HTTPS_PROXY}" "${OPENCODE_OUTBOUND_HTTPS_PROXY}"
+  fi
+}
+
+apply_opencode_proxy_environment() {
+  if [[ -n "${OPENCODE_OUTBOUND_HTTPS_PROXY}" ]]; then
+    export HTTPS_PROXY="${OPENCODE_OUTBOUND_HTTPS_PROXY}"
+    export https_proxy="${OPENCODE_OUTBOUND_HTTPS_PROXY}"
+  fi
 }
 
 # 匹配所有 worktree 中由本地开发脚本启动的 target JAR 与不可变运行副本。
@@ -926,13 +1003,15 @@ start_opencode() {
   echo "Starting opencode ${version:-unknown} on ${TEST_AGENT_OPENCODE_BASE_URL}. Logs: ${LOG_DIR}/opencode.log"
   : >"${LOG_DIR}/opencode.log"
   if command -v screen >/dev/null 2>&1; then
-    local opencode_cmd
-    printf -v opencode_cmd 'cd %q && exec %q serve --hostname %q --port %q --cors %q --cors %q --print-logs >>%q 2>&1' \
-      "${ROOT_DIR}" "${bin}" "${host}" "${port}" "http://localhost:${frontend_port}" "http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode.log"
+    local opencode_cmd proxy_export
+    proxy_export="$(opencode_proxy_export_prefix)"
+    printf -v opencode_cmd 'cd %q && %sexec %q serve --hostname %q --port %q --cors %q --cors %q --print-logs >>%q 2>&1' \
+      "${ROOT_DIR}" "${proxy_export}" "${bin}" "${host}" "${port}" "http://localhost:${frontend_port}" "http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode.log"
     screen -dmS "${OPENCODE_SCREEN_SESSION}" bash -lc "${opencode_cmd}"
   else
     (
       cd "${ROOT_DIR}"
+      apply_opencode_proxy_environment
       nohup "${bin}" serve --hostname "${host}" --port "${port}" \
         --cors "http://localhost:${frontend_port}" --cors "http://127.0.0.1:${frontend_port}" --print-logs \
         >>"${LOG_DIR}/opencode.log" 2>&1 &
@@ -967,9 +1046,10 @@ start_opencode_manager() {
   echo "opencode-manager app logs: ${manager_state_dir}/logs/manager.log, ${manager_state_dir}/logs/manager-error.log"
   : >"${LOG_DIR}/opencode-manager.log"
   if command -v screen >/dev/null 2>&1; then
-    local manager_cmd
-    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_BIN=%q SYS_DATA_ROOT_DIR=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
-      "${ROOT_DIR}" "${backend_port}" "${port_start}" "${port_end}" "${manager_state_dir}" "${bin}" "${SYS_DATA_ROOT_DIR}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode-manager.log"
+    local manager_cmd proxy_export
+    proxy_export="$(opencode_proxy_export_prefix)"
+    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_BIN=%q SYS_DATA_ROOT_DIR=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && %sexec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
+      "${ROOT_DIR}" "${backend_port}" "${port_start}" "${port_end}" "${manager_state_dir}" "${bin}" "${SYS_DATA_ROOT_DIR}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${proxy_export}" "${LOG_DIR}/opencode-manager.log"
     screen -dmS "${OPENCODE_MANAGER_SCREEN_SESSION}" bash -lc "${manager_cmd}"
   else
     (
@@ -984,6 +1064,7 @@ start_opencode_manager() {
       export OPENCODE_ALLOWED_CORS="http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}"
       export OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
       export OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
+      apply_opencode_proxy_environment
       nohup ./opencode-manager/bin/opencode-manager run >>"${LOG_DIR}/opencode-manager.log" 2>&1 &
       echo "$!" >"${LOG_DIR}/opencode-manager.pid"
     )
@@ -1066,6 +1147,7 @@ derive_frontend_runtime_settings
 apply_frontend_origin_defaults
 apply_detected_runtime_ip_defaults
 apply_manager_backend_port_defaults
+resolve_opencode_outbound_https_proxy
 prepare_manager_server_identity_files
 export SPRING_PROFILES_ACTIVE="${profile}"
 
