@@ -122,6 +122,10 @@ class FlywayMigrationNamingTest {
             "V20260812202425__local_client_credentials_create_runtime_after_release.sql";
     private static final String LOCAL_CLIENT_RUNTIME_FORWARD_SHA256 =
             "168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026";
+    private static final String AUTOMATION_CODE_REPOSITORY_MIGRATION =
+            "V20260812204207__dictionaries_add_automation_code_repository.sql";
+    private static final String AUTOMATION_CODE_REPOSITORY_SHA256 =
+            "250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -315,6 +319,10 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/local-client-runtime-applied",
                 LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION,
                 LOCAL_CLIENT_RUNTIME_FORWARD_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                AUTOMATION_CODE_REPOSITORY_MIGRATION,
+                AUTOMATION_CODE_REPOSITORY_SHA256);
     }
 
     @Test

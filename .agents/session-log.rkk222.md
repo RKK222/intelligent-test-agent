@@ -9869,3 +9869,25 @@
 
 - 同一自动化代码库在 10 分钟内重复切换不再反复等待远端权限探测；真实 clone/fetch/push 仍由 Git 远端实时鉴权，远端单独撤销权限时预检最迟在缓存到期后的下一次请求体现。
 - 页面级自动化可进入 F-COSS/ai-test，但测试账号的用户 OpenCode 文件路由曾返回既有 503，因此本轮切换性能以真实 HTTP 权限预检计时为准；release 修复后续仍需按分支规范同步回 dev。
+
+## 2026-08-13 - 重打 release 企业包并补齐最新 Flyway 制品锁
+
+### Why
+
+- 用户要求基于当前 `release` 重新生成企业双后台固定包；相对上一轮制品，release 已新增自动化代码库字典 migration，并增加仅用于校验 dev 已执行本地客户端历史的 compatibility resource。
+- 既有打包、外层封装和节点安装脚本尚未锁定这两条最新资源，不能仅依赖编译成功判断最终企业 JAR 字节正确。
+
+### What
+
+- 复用三套脚本既有 `verify_release_flyway_resource`，锁定 `V20260812202425` compatibility resource 和正常企业主链 `V20260812204207` 的路径与 SHA-256；同步 `FlywayMigrationNamingTest`。
+- 更新多后台部署说明：从已知企业基线首次升级只允许连续新增五条 migration，正常企业历史不得出现只供共享开发库兼容的本地客户端版本。
+- 本轮 `.4` 使用的 `opencode-models.json` 已核对为 Qwen provider/model 排在首位；该文件只决定目录顺序，不把两台公共 `opencode.jsonc` 的默认 DeepSeek 配置误当作同一职责修改。
+
+### How
+
+- Bash 语法、AI 文档、差异空白检查、Flyway 字节锁和自动化代码库字典集成测试通过；真实 PostgreSQL 全部已知历史兼容矩阵通过，未使用 `outOfOrder`、`repair` 或手工改历史表。
+- 最终内外层 ZIP、组件清单、包内 migration/models 字节与 SHA-256 在封包后补记到本条 Result。
+
+### Result
+
+- 待本轮正式封包和最终制品复核后补充；当前不修改任何 migration 字节，不新增 API、RunEvent、服务、节点、端口、强制配置、generated SDK 或 OpenCode 源码。
