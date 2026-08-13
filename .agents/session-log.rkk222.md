@@ -10166,4 +10166,7 @@
 
 ### Result
 
-- 待本轮正式封包和最终制品复核后补充；当前不修改任何 migration 字节，不新增 API、RunEvent、服务、节点、端口、强制配置、generated SDK 或 OpenCode 源码。
+- 企业包源码提交为 `193cc1d5daf95d40d52ea3ce0075698309e633e8`；内层包 SHA-256 为 `16681980542e2e23e4b8fd8ce3f752a8c41af0dfda14e2a0ce42d0c9a6216cd8`，外层双后台完整包 SHA-256 为 `69127cd4472cbe92f0f0db6d14ce052fadd417f6bd24aaacb81822f49a395e7a`，外层内嵌包与独立内层包字节一致。
+- 后端 app JAR、persistence JAR、前端 tar 和 `opencode-models.json` 的 SHA-256 分别为 `319d335e87416f45945dab44ecfd7e1e31dafa8aae395a6cc7a7efc8e7157a55`、`ef6c42d698927f44d6c3228b9076e17bf39de3b63d1b45d6067d3d8dc5c83af5`、`33651d154531a72f375c31d09ef2ef612490ac8b6512ae29a3c4f67c5d80fcb0` 和 `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`；模型目录首项为 `enterprise-qwen/Qwen3.6-27B`，本轮只要求 `.4` 使用该文件，未改变 `.114` 或公共配置中的会话默认模型。
+- Worker runtime 与 toolbox 命中已验证复用指纹，LobeHub 为 disabled，Workflow 无运行制品；外层完整包及校验文件已复制到 `/Users/kaka/Desktop/mimoagent/0709/`，`shasum -a 256 -c` 与 `unzip -tq` 均通过。
+- 当前不修改任何 migration 字节，不新增 API、RunEvent、服务、节点、端口、强制配置、generated SDK 或 OpenCode 源码。
