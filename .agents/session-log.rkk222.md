@@ -10289,6 +10289,29 @@
 - 中文及含空格的固定提交路径不会再被 Git 展示转义污染，发布即时索引和既有每 2 分钟本机快照对账均可正常生成 SkillHub 快照。
 - 本次不改变 HTTP API、RunEvent、数据库、migration、性能边界、安全权限、环境配置、generated SDK 或 OpenCode 源码；企业现场需部署包含该修复的新后端，已成功推送的 Skill 无需再次 push。
 
+## 2026-08-13 - 修复中文 Skill 推送成功后未进入 SkillHub
+
+### Why
+
+- 企业 F-SLB 的中文 Skill 已成功推送 feature 分支，但 SkillHub 未展示；现网定时对账日志持续出现 `git show <commit>:"<中文转义路径>"` 文件不存在。
+- `GitWorkspaceService.listFilesAtCommit()` 使用换行格式读取 `git ls-tree`，Git 默认 quotepath 会把非 ASCII 路径转换为带引号的 C 风格展示文本，后续 blob 读取把该展示文本误当成真实路径。
+
+### What
+
+- 复用既有固定提交枚举入口，将 `git ls-tree` 改为 `-z` NUL 分隔并按 UTF-8 原样解析，不新增 Hub 索引器、补偿任务、API、数据库或配置。
+- 在真实临时 Git 仓库提交 `SLB快速检索环境应用所有端口策略/SKILL.md`，回归验证中文路径原样枚举和固定提交 blob 读取；同步 common README 与包说明。
+
+### How
+
+- JDK 25 下 `GitWorkspaceServiceRealGitTest` 18/18、common 全量 102/102、`AgentSkillHubApplicationServiceTest` 14/14 通过。
+- `test-agent-workspace-management` 及上游六模块跳过测试打包成功；`git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；`GitWorkspaceService.java` 中并行存在 SCM 身份改动，本次只暂存 NUL 路径枚举修复，避免夹带他人工作。
+
+### Result
+
+- 中文及含空格的固定提交路径不会再被 Git 展示转义污染，发布即时索引和既有每 2 分钟本机快照对账均可正常生成 SkillHub 快照。
+- 本次不改变 HTTP API、RunEvent、数据库、migration、性能边界、安全权限、环境配置、generated SDK 或 OpenCode 源码；企业现场需部署包含该修复的新后端，已成功推送的 Skill 无需再次 push。
+
 ## 2026-08-13 - 回归修复 Workspace 运行态标识
 
 ### Why

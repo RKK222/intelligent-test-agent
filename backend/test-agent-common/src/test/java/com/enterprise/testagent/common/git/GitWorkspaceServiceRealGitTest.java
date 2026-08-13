@@ -238,6 +238,32 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void listsAndReadsChineseSkillFilesAtExactCommitWithoutQuotedPathLeakage() throws Exception {
+        Path repo = initializeRepository();
+        String skillRoot = "F-SLB/F-SLB-CONSOLE/.opencode/skills/SLB快速检索环境应用所有端口策略";
+        Files.createDirectories(repo.resolve(skillRoot));
+        write(repo, skillRoot + "/.gitkeep", "");
+        write(repo, skillRoot + "/SKILL.md", "---\nname: slb-port-policy\n---\n中文说明\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "add chinese skill");
+        String commit = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        List<String> files = service.listFilesAtCommit(
+                repo,
+                commit,
+                "F-SLB/F-SLB-CONSOLE/.opencode");
+
+        assertThat(files).containsExactly(
+                skillRoot + "/.gitkeep",
+                skillRoot + "/SKILL.md");
+        assertThat(new String(
+                service.readFileAtCommit(repo, commit, skillRoot + "/SKILL.md"),
+                StandardCharsets.UTF_8))
+                .isEqualTo("---\nname: slb-port-policy\n---\n中文说明\n");
+    }
+
+    @Test
     void createsLinearPublicationCommitWithoutPollutedPersonalHistory() throws Exception {
         Path repo = initializeRepository();
         Path remote = tempDir.resolve("public-agent.git");
