@@ -544,6 +544,41 @@ ensure_backend_service() {
   systemctl enable "${BACKEND_SERVICE}"
 }
 
+ensure_experience_workspace_content() {
+  local service_user service_group service_uid current_uid
+  local -a runuser_args=()
+
+  service_user="$(systemctl show "${BACKEND_SERVICE}" --property=User --value 2>/dev/null || true)"
+  service_group="$(systemctl show "${BACKEND_SERVICE}" --property=Group --value 2>/dev/null || true)"
+  service_user="${service_user:-root}"
+  service_uid="$(id -u "${service_user}" 2>/dev/null || true)"
+  current_uid="$(id -u)"
+  if [[ -z "${service_uid}" ]]; then
+    echo "Backend systemd user does not exist: ${service_user}" >&2
+    exit 1
+  fi
+
+  if [[ "${service_uid}" == "${current_uid}" ]]; then
+    bash "${INSTALL_ROOT}/deploy/internal/ensure-experience-workspace-content.sh" \
+      --workspace-dir "${INSTALL_ROOT}/data/agent-opencode/workspace/experience"
+    return
+  fi
+  if [[ "${current_uid}" != "0" ]]; then
+    echo "Deployment user cannot switch to backend systemd user: ${service_user}" >&2
+    exit 1
+  fi
+
+  require_command runuser
+  runuser_args=(--user "${service_user}")
+  if [[ -n "${service_group}" ]]; then
+    runuser_args+=(--group "${service_group}")
+  fi
+  # 以 Java systemd 运行身份创建文件，避免 root 部署后体验区变成只读。
+  runuser "${runuser_args[@]}" -- \
+    bash "${INSTALL_ROOT}/deploy/internal/ensure-experience-workspace-content.sh" \
+      --workspace-dir "${INSTALL_ROOT}/data/agent-opencode/workspace/experience"
+}
+
 validate_existing_backend_service() {
   local backend_env="$1"
   local expected_jar="${INSTALL_ROOT}/dist/backend/test-agent-app.jar"
@@ -858,6 +893,10 @@ if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
 fi
 require_file "${DEPLOY_INTERNAL_SRC}/ensure-opencode-runtime-gitignore.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-runtime.gitignore"
+require_file "${DEPLOY_INTERNAL_SRC}/ensure-experience-workspace-content.sh"
+require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/README.md"
+require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/docs/应用架构/测试概述.md"
+require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/spec/I000001-用户登录体验/04-测试/S000001-账号密码登录/041-测试设计/测试案例.md"
 require_file "${DEPLOY_INTERNAL_SRC}/deploy-python-libs.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/verify-python-libs.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-node-runtime.package.json"
@@ -919,6 +958,7 @@ chmod +x \
   "${INSTALL_ROOT}/deploy/internal/deploy-python-libs.sh" \
   "${INSTALL_ROOT}/deploy/internal/verify-python-libs.sh" \
   "${INSTALL_ROOT}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
+  "${INSTALL_ROOT}/deploy/internal/ensure-experience-workspace-content.sh" \
   "${INSTALL_ROOT}/deploy/internal/verify-opencode-tool-runtime.sh" \
   || true
 
@@ -933,6 +973,7 @@ ensure_backend_service
 log "Stop backend service and replace jar"
 systemctl stop "${BACKEND_SERVICE}"
 stop_expected_backend_orphans
+ensure_experience_workspace_content
 if [[ -f "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" ]]; then
   cp -a "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.bak.${timestamp}"
 fi

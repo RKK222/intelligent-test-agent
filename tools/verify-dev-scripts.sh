@@ -37,6 +37,9 @@ fi
 run_check "dev backend script bash syntax" bash -n "${ROOT_DIR}/tools/dev-backend-run.sh"
 run_check "backend runtime staging script bash syntax" bash -n "${ROOT_DIR}/tools/stage-backend-runtime-jar.sh"
 run_check "internal worker docker script bash syntax" bash -n "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh"
+run_check "experience workspace content script bash syntax" bash -n "${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh"
+run_check "experience workspace content script help" bash "${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh" --help
+run_check "experience workspace content behavior" bash "${ROOT_DIR}/tools/verify-experience-workspace-content.sh"
 
 restart_help="$(sh "${ROOT_DIR}/restart-dev-services.sh" --help)"
 if [[ "${restart_help}" != *"backend profile: test"* ]]; then

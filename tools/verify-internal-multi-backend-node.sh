@@ -133,6 +133,8 @@ cp "${ROOT_DIR}/deploy/internal/deploy-python-libs.sh" "${RELEASE_ROOT}/deploy/i
 cp "${ROOT_DIR}/tools/verify-python-libs.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/ensure-opencode-runtime-gitignore.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp -R "${ROOT_DIR}/deploy/internal/experience-workspace-template" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/verify-opencode-tool-runtime.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/configure-nginx.sh" "${RELEASE_ROOT}/deploy/internal/"
