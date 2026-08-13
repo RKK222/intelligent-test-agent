@@ -400,6 +400,22 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 - `application_workspaces` 不复用、不引用运行态 `workspaces`，后续使用场景再决定如何衔接。
 - SSH 私钥只保存 AES-GCM 密文和 nonce，API 不返回明文或密文；加密密钥由部署环境配置。
 
+## V20260813190929 用户 SCM Git 姓名证据
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260813190929__user_scm_git_identities_create.sql` 创建 `user_scm_git_identities`，把企业 SCM 提交姓名与可能追加同名数字后缀的平台 `users.username` 分离：
+
+| 字段 | 说明 |
+|---|---|
+| `user_id` | 主键并外键引用 `users.user_id`，用户删除时级联删除。 |
+| `git_name` | SCM 登记的提交姓名，去首尾空白后长度 1–128。 |
+| `source` | `ACCEPTED_COMMIT_HISTORY` 或优先级更高的 `REMOTE_REJECTION`。 |
+| `evidence_commit` | 可空的已接受提交或右控拒绝提交短/完整哈希。 |
+| `evidence_at` / `verified_at` | 证据发生时间与平台核验时间。 |
+
+补偿查询只联查 `ACTIVE` 用户和唯一 `user_ssh_keys` 行，按 `user_id` 游标分页 500 条，不使用高 offset。历史证据使用单条批量 `INSERT ... ON CONFLICT`，只允许更新更旧的 `ACCEPTED_COMMIT_HISTORY`；`REMOTE_REJECTION` 不会被定时历史扫描覆盖。表不保存 SSH 私钥、Token、邮箱或统一认证号副本，邮箱继续由 `users.unified_auth_id` 按固定域实时生成。本 migration 只增加生产结构，不写用户或演示数据。
+
+升级与回滚：部署前必须按既有流程留存目标库 `flyway_schema_history(version, checksum, success)`；新版本首次启动执行建表。代码回滚后该孤立表可保留，不影响旧版本读取；需要物理回收时必须先备份并在停机窗口显式处理，禁止修改已执行 migration 或 `flyway_schema_history`。
+
 ## V8 默认开发用户超级管理员授权
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V8__grant_default_user_super_admin.sql` 为本地默认前端用户 `888888888` 幂等授予 `SUPER_ADMIN` 角色。

@@ -74,11 +74,18 @@ public class ConfigurationManagementApplicationService {
     private final String defaultRepositoryDeploymentMode;
     private ConversationContextStore conversationContextStore;
     private AppSourceRepositoryHistory appSourceRepositoryHistory = repositoryId -> false;
+    private ScmGitIdentitySyncDispatcher scmGitIdentitySyncDispatcher;
 
     /** 成员撤权后按用户失效运行上下文；测试构造路径可不注入。 */
     @Autowired(required = false)
     void setConversationContextStore(ConversationContextStore conversationContextStore) {
         this.conversationContextStore = conversationContextStore;
+    }
+
+    /** SSH Key 落库后异步触发 SCM 姓名定向校准，不延长接口响应。 */
+    @Autowired(required = false)
+    void setScmGitIdentitySyncDispatcher(ScmGitIdentitySyncDispatcher dispatcher) {
+        this.scmGitIdentitySyncDispatcher = dispatcher;
     }
 
     /** 测试构造路径可替换源码历史端口；生产构造器要求显式注入。 */
@@ -597,7 +604,11 @@ public class ConfigurationManagementApplicationService {
                 encryptedAesKey,
                 encryptionNonce,
                 Instant.now());
-        return sshKeyResponse(configurationRepository.saveSshKey(sshKey));
+        SshKeyResponse response = sshKeyResponse(configurationRepository.saveSshKey(sshKey));
+        if (scmGitIdentitySyncDispatcher != null) {
+            scmGitIdentitySyncDispatcher.request(userId);
+        }
+        return response;
     }
 
     public void deleteSshKey(UserId userId, String sshKeyId) {

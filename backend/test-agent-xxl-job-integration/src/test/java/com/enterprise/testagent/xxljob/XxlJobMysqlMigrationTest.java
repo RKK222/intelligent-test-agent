@@ -47,7 +47,7 @@ class XxlJobMysqlMigrationTest {
     }
 
     @Test
-    void initializesExecutorAndTenPlatformTasksWithoutLocalAdmin() throws Exception {
+    void initializesExecutorAndPlatformTasksWithoutLocalAdmin() throws Exception {
         try (Connection connection = DriverManager.getConnection(
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
@@ -56,11 +56,11 @@ class XxlJobMysqlMigrationTest {
             assertThat(singleInt(statement, "select count(*) from xxl_job_group where app_name='test-agent-backend' and address_type=0 and address_list is null"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key is not null"))
-                    .isEqualTo(12);
+                    .isEqualTo(13);
             assertThat(singleInt(statement, "select count(*) from xxl_job_user"))
                     .isZero();
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_route_strategy='ROUND' and executor_block_strategy='DISCARD_LATER' and misfire_strategy='DO_NOTHING' and executor_fail_retry_count=0"))
-                    .isEqualTo(12);
+                    .isEqualTo(13);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.night-execution-dispatch' and schedule_conf='0 0/1 * * * ? *' and trigger_status=1"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.app-source-cleanup' and schedule_conf='0 0/1 * * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
@@ -68,6 +68,8 @@ class XxlJobMysqlMigrationTest {
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.personal-workspace-relocation' and schedule_conf='0 0/30 * * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.inactive-user-process-cleanup' and schedule_conf='0 0 2 * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
+                    .isEqualTo(1);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='configuration-management.scm-git-name-sync' and schedule_conf='0 10 4 * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_param like '%executionAffinity%' or executor_param like '%linuxServerId%'"))
                     .isZero();
@@ -104,7 +106,7 @@ class XxlJobMysqlMigrationTest {
                 schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
             assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
-                    .isEqualTo(11);
+                    .isEqualTo(12);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.personal-workspace-relocation' and schedule_conf='0 0/30 * * * ? *' and trigger_next_time=0"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.inactive-user-process-cleanup' and schedule_conf='0 0 2 * * ? *'"))
@@ -112,6 +114,8 @@ class XxlJobMysqlMigrationTest {
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.internal-model-probe' and schedule_conf='0 */5 * * * ? *'"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.internal-model-observability-retention' and schedule_conf='0 30 3 * * ? *'"))
+                    .isEqualTo(1);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='configuration-management.scm-git-name-sync' and schedule_conf='0 10 4 * * ? *'"))
                     .isEqualTo(1);
         }
     }
@@ -137,9 +141,9 @@ class XxlJobMysqlMigrationTest {
                 schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
             assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
-                    .isEqualTo(11);
-            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key is not null"))
                     .isEqualTo(12);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key is not null"))
+                    .isEqualTo(13);
         }
     }
 

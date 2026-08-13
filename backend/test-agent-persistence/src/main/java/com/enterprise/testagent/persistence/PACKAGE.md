@@ -97,6 +97,7 @@
 - `db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql`：LobeHub 主 migration 缺失历史的早期顺序补偿原文；已执行的库继续按该资源校验。
 - `db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql`：release rollout migration 已执行且早期补偿未执行时使用的更高版本补偿，避免倒序迁移。
 - `db/migration/V20260810170000__user_notifications_create_notification_center.sql`：创建通知表并仅回填当前有效分享；成员授权后的成功读取审计回填已读，过期/撤销/移除/归档不进入通知历史。
+- `db/migration/V20260813190929__user_scm_git_identities_create.sql`：创建用户 SCM Git 姓名和证据表；MyBatis XML 负责 SSH Key 用户游标分页、批量历史证据写入和右控证据优先级保护。
 - `db/migration/V20260728210000__index_in_flight_app_source_operations.sql`：为周期恢复增加 status 前导的 operation 排序索引，避免历史终态数据导致每实例全表扫描。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现；Run 运行数据面不得新增 PostgreSQL 或 JVM 内存降级实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。

@@ -313,7 +313,7 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
 | `GIT_TIMEOUT` | 504 | Git 操作超时 |
 
-Git 命令返回 `GIT_UNAVAILABLE` 或 `GIT_TIMEOUT` 时，错误 `details` 可能包含 `gitFailureType` 和 `gitFailureHint`，用于区分认证失败、仓库不可访问、网络连接失败、分支不存在、worktree 冲突、超时或未知失败；`gitFailureHint` 是可展示给管理员的安全排查提示，`stderr`、`command`、`timeoutMillis` 和 `durationMillis` 仅用于后端排查，不应在普通 UI 中直接展示。`command` 会隐藏 SSH/HTTP URL 中的用户名或 token。
+Git 命令返回 `GIT_UNAVAILABLE` 或 `GIT_TIMEOUT` 时，错误 `details` 可能包含 `gitFailureType` 和 `gitFailureHint`，用于区分认证失败、仓库不可访问、网络连接失败、分支不存在、worktree 冲突、超时或未知失败；企业 SCM 右控明确返回提交姓名不一致时还会包含 `gitFailureReason=SCM_IDENTITY_MISMATCH`，但不会包含期望姓名、实际姓名、邮箱或原始右控报文。`gitFailureHint` 是可展示给管理员的安全排查提示，`stderr`、`command`、`timeoutMillis` 和 `durationMillis` 仅用于后端排查，不应在普通 UI 中直接展示。`command` 会隐藏 SSH/HTTP URL 中的用户名或 token。平台会在右控报文与本次统一认证邮箱、实际提交姓名完全吻合时保存 SCM 登记姓名、重建提交并仅重试一次；不会通过删除末尾数字猜测姓名。
 
 ## TraceId 规则
 

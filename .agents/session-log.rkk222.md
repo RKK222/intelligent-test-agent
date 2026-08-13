@@ -10151,3 +10151,27 @@
 
 - release 内置用户手册的所有稳定章节与每周新功能均已图文结合，自动化代码库、设置、进程、引用配置等关键路径可直接对照入口和配置界面操作。
 - 本次只修改静态手册、图片和测试，不涉及 HTTP API、RunEvent、数据库、migration、性能、安全权限、兼容性、环境配置、generated SDK 或 OpenCode 源码；游戏相关文字、入口、配置和截图仍永久禁止进入手册。
+
+## 2026-08-13 - 校准企业 SCM Git 提交姓名并补偿存量用户
+
+### Why
+
+- F-SLB 某用户的平台展示名因同名追加数字，Git 提交被企业右控以“邮箱对应姓名不一致”拒绝；不能通过删除末尾数字猜测 SCM 姓名，也不能依赖现场 token、psql 或 jq。
+- SSH Key 新增和存量用户都需要从已有可信证据校准独立 Git 姓名，并控制仓库历史扫描对磁盘和数据库的影响。
+
+### What
+
+- 新增独立 `user_scm_git_identities` 证据表和 MyBatis XML 仓储；右控拒绝证据优先于已接受提交历史，平台 `users.username` 保持原语义。
+- Git push 严格解析固定右控报文，逐项核对统一认证邮箱和本次提交姓名后保存期望姓名、重建提交并只重试一次；覆盖应用普通文件、目录占位、应用/公共 Agent 与 Skill 发布，不做尾号猜测。
+- SSH Key 保存后通过有界单线程队列异步定向扫描；XXL 每天 04:10 触发全量补偿，每仓库只读取一次本地 `origin` 跟踪历史（最多 50,000 条），用户按 500 条游标分页并批量 upsert，不执行 fetch 或远端调用。
+
+### How
+
+- JDK 25 定向回归通过：真实 Git 25 项、身份解析 2 项、配置/补偿任务 34 项、H2 migration/MyBatis 与 Flyway 字节锁 14 项；22 模块跳过测试完整打包成功，应用 JAR 可解压。
+- 本机真实 PostgreSQL 从既有 `20260812204207` 历史成功执行 `V20260813190929`，Flyway 记录 success，表 8 列及约束可见；migration SHA-256 `fd434d47...` 已锁定，源码、persistence JAR 与应用内嵌 JAR 字节一致。
+- Testcontainers PostgreSQL/MySQL 用例因本机 Docker socket 不可用被跳过；真实启动在 migration 成功后受既有必填 `TEST_AGENT_TCDS_BASE_URL` 未配置阻塞，未修改 `.env.test` 绕过。
+
+### Result
+
+- release 已具备独立 SCM Git 姓名、右控自校准单次重试、SSH Key 即时异步补偿和存量定时复核；错误详情与日志不暴露姓名、邮箱、统一认证号或右控原文。
+- 本次新增 PostgreSQL 表和 XXL 任务，不变更 HTTP URL、DTO、RunEvent、部署节点、端口、强制环境变量、generated SDK 或 OpenCode 源码；完整 MySQL migration 与应用健康启动仍需在有 Docker/TCDS 配置的环境复验，release 修复后仍需同步回 dev。

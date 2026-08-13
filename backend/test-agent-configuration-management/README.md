@@ -56,6 +56,8 @@
 ## 主要接口
 
 - `ConfigurationManagementApplicationService`：配置管理编排服务。
+- SSH Key 保存成功后由单线程、有界 256 项的异步队列按统一认证邮箱扫描本机应用仓库的 `origin` 跟踪历史，不延长接口响应；队列过载或单仓库失败由每日 04:10 的 XXL `configuration-management.scm-git-name-sync` 全量任务补偿。
+- 全量 SCM 姓名补偿对每个应用仓库只执行一次不联网的本地 `git log`（最多 50,000 条匹配提交），再按 500 个 SSH Key 用户一页游标查询和批量写库，避免用户数乘仓库数的 Git 命令放大；已有姓名也会复核，但已由右控拒绝确认的姓名不会被历史提交覆盖。
 - 工作空间更新接口支持按字段修改 `workspaceName` 和 `enabled`；停用只记录配置状态，模板切换入口的过滤由 workspace-management 负责。
 - `createApplication()` 校验应用 ID/名称非空和数据库字段长度，拒绝重复 ID，并通过 MyBatis 配置管理仓储写入默认启用的应用定义；API 层只允许 `SUPER_ADMIN` 调用。
 - 代码库新增/编辑会校验 `englishName` 为字母、数字、连字符 1 到 128 位，首尾不能是连字符，非空唯一，并统一小写；内部模式创建时 `englishName` 为空会从 Git 路径派生（去掉 `.git`，`/` 替换为 `-`）。新增和新客户端编辑都优先使用 `repositoryType`，仅 `TEST_WORK_REPOSITORY` 写旧 `standard=true`，自动化代码库、应用代码库和应用资产库都写 `standard=false`，旧客户端编辑时未传 `repositoryType` 仍按 `standard` 兼容推导；历史数据允许英文名为空，但后续创建应用版本工作区会被 workspace-management 拒绝。编辑时通过 MyBatis `ConfigurationManagementMapper.xml` 只读检查应用工作空间历史，通过 `ReferenceRepositoryRepository` 检查引用初始化状态，并通过 `AppSourceRepositoryHistory` 检查 slot/snapshot/operation/cleanup 任一历史；身份守卫只拒绝类型/磁盘身份变化，不阻止中文名称更新，也不在配置模块执行副本 Git 或状态写入。

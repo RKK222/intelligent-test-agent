@@ -7,6 +7,7 @@ import com.enterprise.testagent.common.git.GitCommitIdentity;
 import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.GitWorkspaceService.GitStatusEntry;
+import com.enterprise.testagent.common.git.ScmGitIdentityRejectedException;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.broadcast.ServerBroadcastEvent;
@@ -173,6 +174,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private PublicAgentConfigRolloutCoordinator agentConfigRolloutCoordinator;
     private AgentSkillHubPushIndexer agentSkillHubPushIndexer;
     private ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
+    private ScmGitIdentityResolver scmGitIdentityResolver;
 
     /**
      * 可选注入运行上下文端口；测试构造器无需感知 Redis，实现仍保持模块只依赖 domain。
@@ -198,6 +200,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     @Autowired(required = false)
     void setExperienceWorkspaceAccessAuthorizer(ExperienceWorkspaceAccessAuthorizer authorizer) {
         this.experienceWorkspaceAccessAuthorizer = authorizer;
+    }
+
+    /** SCM 姓名校准为可选方法注入，保持既有测试构造器兼容。 */
+    @Autowired(required = false)
+    void setScmGitIdentityResolver(ScmGitIdentityResolver resolver) {
+        this.scmGitIdentityResolver = resolver;
     }
 
     /**
@@ -2401,7 +2409,19 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 userId,
                 traceId);
         try {
-            gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
+            try {
+                gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
+            } catch (ScmGitIdentityRejectedException rejection) {
+                GitCommitIdentity corrected = correctedGitIdentity(userId, commitIdentity, rejection)
+                        .orElseThrow(() -> rejection);
+                preparedHead = gitWorkspaceService.amendHeadCommitIdentity(
+                        prepared.repoRoot(), privateKey, corrected);
+                if (rolloutId != null && agentConfigRolloutCoordinator != null) {
+                    agentConfigRolloutCoordinator.recordExpectedCommit(rolloutId, preparedHead);
+                }
+                // 右控纠正只能重试一次；再次失败按原发布回滚与闸门中止路径处理。
+                gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
+            }
         } catch (RuntimeException exception) {
             if (rolloutId != null && prepared.headCommit() != null && !prepared.headCommit().isBlank()) {
                 gitWorkspaceService.resetHardToCommit(prepared.repoRoot(), prepared.headCommit());
@@ -4071,7 +4091,19 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             }
         }
         // 上一次操作可能已经本地提交但在 push 阶段失败；无条件重试 push 可安全补偿这种历史中间态。
-        gitWorkspaceService.push(repoRoot, branch, false, privateKey);
+        try {
+            gitWorkspaceService.push(repoRoot, branch, false, privateKey);
+        } catch (ScmGitIdentityRejectedException rejection) {
+            GitCommitIdentity attempted = gitCommitIdentity(userId);
+            GitCommitIdentity corrected = correctedGitIdentity(userId, attempted, rejection)
+                    .orElseThrow(() -> rejection);
+            String sourceHead = gitWorkspaceService.headCommit(repoRoot);
+            String remoteHead = gitWorkspaceService.resolveCommit(repoRoot, "origin/" + branch);
+            String correctedHead = gitWorkspaceService.createLinearCommitFromTree(
+                    repoRoot, sourceHead, remoteHead, "创建应用工作空间目录", corrected);
+            gitWorkspaceService.resetHardToCommit(repoRoot, correctedHead);
+            gitWorkspaceService.push(repoRoot, branch, false, privateKey);
+        }
     }
 
     private boolean isIncompleteApplicationClone(Path repoRoot) {
@@ -5095,8 +5127,20 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
      * 将当前平台用户转换为 Git 单次提交身份；身份不会写入共享仓库配置。
      */
     private GitCommitIdentity gitCommitIdentity(UserId userId) {
+        if (scmGitIdentityResolver != null) {
+            return scmGitIdentityResolver.resolve(userId);
+        }
         User user = existingUser(userId);
         return GitCommitIdentity.forPlatformUser(user.username(), user.unifiedAuthId());
+    }
+
+    private Optional<GitCommitIdentity> correctedGitIdentity(
+            UserId userId,
+            GitCommitIdentity attempted,
+            ScmGitIdentityRejectedException rejection) {
+        return scmGitIdentityResolver == null
+                ? Optional.empty()
+                : scmGitIdentityResolver.learnFromRejection(userId, attempted, rejection);
     }
 
     private String privateKeyFor(CodeRepository repository, UserId userId) {
