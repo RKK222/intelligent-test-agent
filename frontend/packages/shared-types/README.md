@@ -1,5 +1,7 @@
 # @test-agent/shared-types
 
+需求导入公共类型只描述应用、父子条目编号/名称、选择命令与脱敏结果；不得加入 TCDS token、文档 URL、统一认证号或物理工作区路径。普通 Workspace 的 `rootPath` 为 `workspace:{workspaceId}` 逻辑定位符，`physicalRootPath` 可空且新响应固定为空。
+
 新增 `ExternalApiScope`、scope option、凭据安全列表/分页、新建/编辑 payload 和一次性明文响应类型。列表模型只有 `keyHint`，不定义数据库密文；`apiKey` 只存在于新建、查看和轮换的瞬时响应类型。
 
 ## 工程定位
@@ -16,7 +18,7 @@
 - 定义 `ToolboxCatalogResponse`、`ToolboxTool` 与 `ToolboxClickResponse`，表达版本化离线目录、双语名称/说明、固定分类、来源版本、同源深链接、累计点击和可空热门排名；点击请求的 `eventId` 由页面每次打开动作生成，不包含客户端时间或用户身份。
 - 定义应用源码列表、固定提交选择、物化/保留期调整/重试/打开、持久化操作和独立进度 WebSocket DTO；列表以可选 additive 字段携带 `acceptedAt/maxRetentionHours`，续期 payload 使用 expected generation。`AppSourceProgressEvent` 是严格判别联合，`snapshot` 可承载任一合法状态，`step` 只承载 `PENDING/RUNNING`，`completed` 只承载 `SUCCEEDED/PARTIAL_FAILED`，持久化 `failed` 的内外状态都固定为 `FAILED`，失败分支必须携带非空安全错误。
 
-- 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Session、SessionMessage、Run 和 AgentMessage 可选携带 `sourceType/sourceRefId`，用于兼容并展示 `SCHEDULED_TASK` 来源。Workspace 可选携带 `linuxServerId` 和显式物理绝对路径 `physicalRootPath`，滚动升级期间旧后端缺失该字段时只允许回退到绝对 `rootPath`，不得把逻辑前缀或相对路径用于复制和外部页面。`Session.workspaceContext` 可选携带历史会话所属 `appId/appName/applicationWorkspaceId/workspaceName/versionId/version`，旧后端或单会话详情缺失时前端必须兼容 `null/undefined`。
+- 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Session、SessionMessage、Run 和 AgentMessage 可选携带 `sourceType/sourceRefId`，用于兼容并展示 `SCHEDULED_TASK` 来源。Workspace 可选携带 `linuxServerId`；普通接口的 `rootPath` 是 `workspace:{workspaceId}`，`physicalRootPath` 固定为空，调用方不得回退拼接绝对路径。`Session.workspaceContext` 可选携带历史会话所属 `appId/appName/applicationWorkspaceId/workspaceName/versionId/version`，旧后端或单会话详情缺失时前端必须兼容 `null/undefined`。
 - 定义 `SessionShareAccess`、`SharedSessionListItem`、分享设置/成员/候选用户和分享 runtime-state 类型。消息、Run、夜间任务、重发元数据及前端消息投影以可选字段携带实际 actor userId、当前平台姓名、统一认证号和代操作标记；页面优先使用 `SessionShareAccess.participants` 的安全最小目录保持历史成员姓名稳定，并以 DTO 姓名兜底。全部字段保持 additive，普通客户端和滚动升级旧节点可忽略或缺失。
 - 定义 `SupportAccessGrantRequest`、`SupportAccessGrant`、带 `WORK_ORDER/GENERATED` 可选来源的 `SupportAccessIncidentSuggestion`、`SupportAccessTarget`、`SupportAccessAuditEvent` 和查询类型；令牌仅用于页面内存，不属于可持久化用户偏好，目标会话历史表示元数据沿用既有 Session tree 类型并兼容 `LEGACY`，排查工作区可选携带 `backendAvailability/backendLastHeartbeatAt`。Session-tree 事件的可选 `traceId` 用于滚动发布兼容和授权排查页关联日志。
 - 定义 `NightExecutionScheduleMode`、`NightExecutionSlotsResponse`、`NightExecutionTask`、`NightExecutionTaskQueryResponse`，表达 `NIGHT_WINDOW/ADMIN_CUSTOM`、北京时间夜间窗口、15 分钟容量时段、待执行任务和当前会话可见失败卡；任务的 `scheduleMode` 保持可选以兼容旧后端响应，响应不包含完整 prompt/parts。

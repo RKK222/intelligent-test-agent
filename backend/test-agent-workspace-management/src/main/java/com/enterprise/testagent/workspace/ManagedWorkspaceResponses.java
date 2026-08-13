@@ -49,7 +49,10 @@ public final class ManagedWorkspaceResponses {
             String versionId,
             String applicationWorkspaceId) {
 
-        /** 兼容既有内部构造调用；稳定 HTTP 响应新增 physicalRootPath，不改变旧 rootPath 物理路径语义。 */
+        /**
+         * 兼容既有内部构造调用。仅供测试或内部适配构造完整对象；对外响应必须通过 {@link #from(Workspace)}
+         * 生成逻辑工作区标识，并清空物理路径。
+         */
         public WorkspaceRuntimeResponse(
                 String workspaceId,
                 String name,
@@ -61,11 +64,12 @@ public final class ManagedWorkspaceResponses {
                 String appId,
                 String versionId,
                 String applicationWorkspaceId) {
+            // rootPath 仅为旧调用签名占位，禁止把调用方传入的物理路径投影到响应。
             this(
                     workspaceId,
                     name,
-                    rootPath,
-                    rootPath,
+                    "workspace:" + workspaceId,
+                    null,
                     status,
                     linuxServerId,
                     createdAt,
@@ -88,8 +92,8 @@ public final class ManagedWorkspaceResponses {
             return new WorkspaceRuntimeResponse(
                     workspace.workspaceId().value(),
                     workspace.name(),
-                    workspace.rootPath(),
-                    workspace.rootPath(),
+                    "workspace:" + workspace.workspaceId().value(),
+                    null,
                     workspace.status().name(),
                     workspace.linuxServerId(),
                     workspace.createdAt(),

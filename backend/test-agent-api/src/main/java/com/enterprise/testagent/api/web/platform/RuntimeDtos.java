@@ -271,32 +271,16 @@ final class RuntimeDtos {
                 Workspace workspace,
                 ManagedWorkspacePathResolver pathResolver,
                 com.enterprise.testagent.workspace.WorkspaceApplicationService.WorkspaceRuntimeMetadata runtime) {
-            if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspace.workspaceId())) {
-                // 体验目录由管理员在各后端人工配置，成功响应同样只返回逻辑定位符，避免泄露物理路径。
-                return new WorkspaceResponse(
-                        workspace.workspaceId().value(),
-                        workspace.name(),
-                        "workspace:" + workspace.workspaceId().value(),
-                        null,
-                        workspace.status().name(),
-                        workspace.linuxServerId(),
-                        workspace.createdAt(),
-                        workspace.updatedAt(),
-                        runtime.runtimeKind().name(),
-                        runtime.localClientInstanceId(),
-                        runtime.online(),
-                        runtime.capabilities());
-            }
-            Workspace resolved = pathResolver.withResolvedRootPathForResponse(workspace);
+            // 普通 API 只暴露稳定逻辑定位符；真实路径仅能通过受控文件 RPC 按单文件即时解析。
             return new WorkspaceResponse(
-                    resolved.workspaceId().value(),
-                    resolved.name(),
-                    resolved.rootPath(),
-                    resolved.rootPath(),
-                    resolved.status().name(),
-                    resolved.linuxServerId(),
-                    resolved.createdAt(),
-                    resolved.updatedAt(),
+                    workspace.workspaceId().value(),
+                    workspace.name(),
+                    "workspace:" + workspace.workspaceId().value(),
+                    null,
+                    workspace.status().name(),
+                    workspace.linuxServerId(),
+                    workspace.createdAt(),
+                    workspace.updatedAt(),
                     runtime.runtimeKind().name(),
                     runtime.localClientInstanceId(),
                     runtime.online(),

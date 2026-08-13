@@ -192,10 +192,10 @@ export type MemoryWhitelistView = {
 export type Workspace = {
   workspaceId: string;
   name: string;
-  /** 兼容旧客户端的物理根路径；新代码应优先读取 physicalRootPath。 */
+  /** 稳定逻辑定位符，普通响应固定为 workspace:{workspaceId}。 */
   rootPath: string;
-  /** 后端明确解析的物理绝对路径；旧后端响应可缺失。 */
-  physicalRootPath?: string;
+  /** 普通响应不再返回物理路径，兼容字段为空。 */
+  physicalRootPath?: string | null;
   status: string;
   linuxServerId?: string | null;
   /** 排查只读列表中的目标 Java 路由状态；旧后端和普通工作区接口可缺失。 */
@@ -321,12 +321,52 @@ export type LocalClientCommandResult = {
 export type WorkspaceDirectoryEntry = {
   name: string;
   path: string;
+  /** 超级管理员目录选择器直接标记已注册目录，不依赖普通 Workspace 响应比对绝对路径。 */
+  existingWorkspaceId?: string | null;
 };
 
 export type WorkspaceDirectoryList = {
   path: string;
   parentPath: string | null;
+  existingWorkspaceId?: string | null;
   entries: WorkspaceDirectoryEntry[];
+};
+
+export type RequirementImportApplication = {
+  appName: string;
+  appShortName: string;
+};
+
+export type RequirementImportSubItem = {
+  itemNo: string;
+  itemName: string;
+};
+
+export type RequirementImportItem = RequirementImportSubItem & {
+  children: RequirementImportSubItem[];
+};
+
+export type RequirementImportCommand = {
+  workspaceId: string;
+  appShortName: string;
+  editionId: string;
+  selectedSubItemNos: string[];
+  requestId: string;
+};
+
+export type RequirementImportFailure = {
+  fileName: string;
+  code: string;
+  message: string;
+};
+
+export type RequirementImportResult = {
+  status: "SUCCEEDED" | "PARTIAL" | "FAILED";
+  createdDirectories: number;
+  importedFiles: number;
+  overwrittenFiles: number;
+  failedFiles: number;
+  failures: RequirementImportFailure[];
 };
 
 export type FileTreeEntry = {

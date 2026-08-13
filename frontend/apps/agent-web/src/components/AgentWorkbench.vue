@@ -5249,10 +5249,10 @@ async function resolvePersonalWorkspaceRuntimeContext(
 function cacheWorkspace(workspace: Workspace) {
   queryClient.setQueryData<PageResponse<Workspace>>(["workspaces"], (old) => {
     const previousItems = old?.items ?? [];
-    const existed = previousItems.some((item) => item.workspaceId === workspace.workspaceId || sameWorkspaceLocation(item, workspace));
+    const existed = previousItems.some((item) => item.workspaceId === workspace.workspaceId || sameWorkspaceIdentity(item, workspace));
     const items = [
       workspace,
-      ...previousItems.filter((item) => item.workspaceId !== workspace.workspaceId && !sameWorkspaceLocation(item, workspace))
+      ...previousItems.filter((item) => item.workspaceId !== workspace.workspaceId && !sameWorkspaceIdentity(item, workspace))
     ];
     return {
       items,
@@ -5263,11 +5263,11 @@ function cacheWorkspace(workspace: Workspace) {
   });
 }
 
-function sameWorkspaceLocation(left: Workspace, right: Workspace) {
-  const leftPhysicalPath = workspacePhysicalRootPath(left);
-  const rightPhysicalPath = workspacePhysicalRootPath(right);
-  return Boolean(leftPhysicalPath)
-    && leftPhysicalPath === rightPhysicalPath
+/** 工作区去重只使用稳定业务身份，禁止再用服务端物理目录做浏览器侧匹配。 */
+function sameWorkspaceIdentity(left: Workspace, right: Workspace) {
+  return Boolean(left.versionId)
+    && left.versionId === right.versionId
+    && (left.applicationWorkspaceId ?? "") === (right.applicationWorkspaceId ?? "")
     && (left.linuxServerId ?? "") === (right.linuxServerId ?? "");
 }
 
@@ -6263,7 +6263,7 @@ async function switchWorkspace(
 // 根据当前选中的 workspace 匹配出对应的应用版本（用于两级菜单高亮）。
 // 优先使用「最近工作区」接口直接回写的 versionId（重新登录或换电脑登录时不需要等模板 versions 异步加载），
 // 同时按需触发对应模板 versions 的预加载，确保 WorkbenchFooter.selectedTemplate 能找到匹配、按钮显示当前工作区。
-// 回退到精确匹配运行时 Workspace ID 与根路径，用于 versionId 缺失的旧数据。
+// 旧数据只按运行时 Workspace ID 匹配；普通响应不再携带可用于比对的绝对根路径。
 function syncCurrentVersionFromWorkspace(workspace: Workspace) {
   if (workspace.versionId) {
     currentVersionFromWorkspace.value = workspace.versionId;
@@ -6274,10 +6274,7 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
   }
   const entries = Object.values(versionsByTemplateId.value);
   for (const list of entries) {
-    const hit = list.find((version) =>
-      version.runtimeWorkspace?.workspaceId === workspace.workspaceId ||
-      version.workspaceRootPath === workspacePhysicalRootPath(workspace)
-    );
+    const hit = list.find((version) => version.runtimeWorkspace?.workspaceId === workspace.workspaceId);
     if (hit) {
       currentVersionFromWorkspace.value = hit.versionId;
       return;
@@ -6846,18 +6843,19 @@ async function handleSelectApp(
   }
 }
 
-async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBackendServer; path: string }) {
+async function selectServerWorkspaceDirectory(payload: {
+  server: WorkspaceBackendServer;
+  path: string;
+  existingWorkspaceId?: string;
+}) {
   const selectionAuthority = beginManagedWorkspaceIntent();
   const selectionIsCurrent = () => appSourceIntentIsCurrent(selectionAuthority);
   invalidateConversationInteraction();
   serverWorkspacePickerLoading.value = true;
   try {
-    const existing = workspaces.value.find(
-      (item) => workspacePhysicalRootPath(item) === payload.path
-        && item.linuxServerId === payload.server.linuxServerId
-    );
-    const workspace =
-      existing ??
+    const workspace = payload.existingWorkspaceId
+      ? await api.getWorkspace(payload.existingWorkspaceId)
+      :
       (await api.createServerWorkspace(payload.server, {
         name: workspaceNameFromPath(payload.path),
         rootPath: payload.path
@@ -11434,7 +11432,6 @@ async function handleLogout() {
           ref="fileExplorerRef"
           class="managed-workspace-files"
           :workspace-name="selectedWorkspace?.name ?? '未选择工作区'"
-          :workspace-root-path="selectedWorkspacePhysicalRootPath"
           :entries-by-directory="entriesByDirectory"
           :expanded-directories="expandedDirectories"
           :active-path="activeWorkspaceViewNodeId"
@@ -11479,8 +11476,6 @@ async function handleLogout() {
           :search-keyword="searchKeyword"
           :file-tree-error="fileTreeError"
           :workspace-view-warnings="workspaceViewWarnings"
-          :user-id="authStore.currentUser?.userId"
-          :backend-java-server-ip="opencodeProcessStatus?.backendJavaServerIp"
           @toggle-directory="toggleDirectory"
           @toggle-view-directory="toggleWorkspaceViewDirectory"
           @open-file="openFile"
@@ -11580,7 +11575,6 @@ async function handleLogout() {
           </div>
           <WorkbenchFooter
             :write-path="selectedDiffPath"
-            :workspace-root-path="selectedWorkspacePhysicalRootPath"
             :dirty="isDiffDirty"
             :saving="saveDiffFileMutation.isPending.value"
             :readonly="!canSaveSelectedDiffFile"
@@ -11618,8 +11612,8 @@ async function handleLogout() {
           :active-path="activePath"
           :breadcrumb-path="breadcrumbDisplay"
           :write-path="activeTab?.path"
+          :workspace-id="selectedWorkspace?.workspaceId"
           :copy-path="activeTabCopyPath"
-          :workspace-root-path="selectedWorkspacePhysicalRootPath"
           :updated-at="activeTab ? Date.now() / 1000 : undefined"
           :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
           :readonly="!!activeTab?.readonly"

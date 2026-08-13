@@ -10240,3 +10240,28 @@
 
 - 用户可从手册首页、顶部导航、侧栏或应用内 Help 直接打开“每周新功能”，按“想做什么”快速定位本周能力，再进入稳定专题查看完整规则。
 - 本次不新增 API、RunEvent、数据库、migration、部署节点、强制配置或安全权限；未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 安全内置 TCDS 需求导入并收敛工作区路径暴露
+
+### Why
+
+- 旧“小地球”依赖仓库外 iframe/9900 服务并在 URL 中传递物理根路径、用户和后端地址；安全扫描同时发现普通 Workspace 响应、文件 WebSocket 握手及框架参数错误存在路径或请求信息暴露风险。
+- TCDS 基础地址需由部署环境注入，不在代码维护主机白名单；浏览器不得获得 TCDS token、文档签名 URL或参与目标物理路径计算。
+
+### What
+
+- 新增登录守卫下的同源 `/workspace-requirement-import` 页面和精确 `origin/source` 的 iframe 协议；新增需求应用/子条目 HTTP API，以及 `workspace.requirement-import` 文件 RPC。服务端以登录主体重新查询授权应用、条目和文档，生成受控 `spec/` 目录并转换 Word、Excel、PowerPoint、文本和 Markdown。
+- 抽象公共 `TcdsGateway`，统一存量用户查询与新导入能力；`test-agent.third-party-api.base-url` 改为必填 `${TEST_AGENT_TCDS_BASE_URL}`，限定 HTTP/HTTPS、连接/请求超时、三次重定向、单文件/总量和文档数上限，不记录或返回 token、签名 URL 与正文。
+- 普通、最近和支持访问的 Workspace 响应改用 `workspace:{workspaceId}` 逻辑标识并清空物理路径；绝对路径复制改为用户点击后逐文件 `workspace.resolve-physical-path` RPC。文件 ticket 增加服务端统一认证上下文，upgrade 前预检、upgrade 时原子消费，无效/过期/复用统一脱敏 401；参数异常统一映射安全错误。
+- 同步 HTTP/文件事件、安全、部署、模块地图、模块 README/PACKAGE、环境变量示例、内部部署脚本、用户手册和专项安全复测记录；未修改个人 `.env.test`、数据库、Flyway、RunEvent、generated SDK 或 OpenCode 源码。
+
+### How
+
+- 后端计划内模块全量测试通过；TCDS 配置/网关专项 8 项、导入/转换/ticket/filter/RPC/错误专项 57 项通过，22 模块 `mvn clean package -DskipTests` 成功。
+- 前端全量测试 1942 passed / 1 skipped，typecheck 和 production build 通过；部署脚本 Bash 语法、差异空白和旧 9900/外部 iframe 调用扫描通过。
+- 以显式 `TEST_AGENT_TCDS_BASE_URL` 和 `.env.test` 执行真实重启；前端 `127.0.0.1:3000` 返回 200，但后端因本机 PostgreSQL `127.0.0.1:15432` 未运行而失败，未为绕过阻塞修改环境配置。
+
+### Result
+
+- 内置需求导入、安全文件写入和路径收敛已实现并通过自动化测试与构建；新增必填部署变量和 `rootPath` 语义要求前后端及部署配置同批发布、同批回滚。
+- 真实 TCDS 查询、目录生成、重复覆盖、部分失败、文件树刷新及原扫描 HTTP/WS 请求重放尚未验证，须在测试 PostgreSQL 恢复后补跑；旧 9900 服务本轮未停用。

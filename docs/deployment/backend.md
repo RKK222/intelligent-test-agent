@@ -14,6 +14,12 @@ Java 前必须从每个后台节点验证 Redis TCP。值为 `0` 时，Docker DN
 
 个人离线开发备用依赖只能通过本地开发脚本启动，不能作为研发测试或生产部署拓扑。
 
+## TCDS 必填地址与同批发布
+
+所有 Java 节点必须显式配置 `TEST_AGENT_TCDS_BASE_URL`，值为部署网络内可达的 HTTP/HTTPS 绝对基础地址，例如 `http://tcds.example.internal`。应用不提供生产默认值、不维护文档存储域名白名单；企业内外网隔离由部署网络策略负责。缺失、相对地址或其它协议会使 Spring 启动失败，错误不回显实际地址。
+
+本变更同时改变普通 Workspace `rootPath/physicalRootPath` 语义和前端 iframe 路由，必须按“全部 Java 节点配置变量并升级 → 验证目录 API/文件 WebSocket → 升级前端”的顺序同批发布。回滚时先回滚前端，再回滚全部 Java；旧 Java 需要恢复旧配置和旧路径响应语义，不能长期混跑。旧 9900 服务只在新版本完成真实 TCDS 查询、重复覆盖、部分失败和文件树刷新验收后由运维另行停用，本仓库不再调用该端口。
+
 生产 Java 固定从交付 JAR 的 `classpath:rsa-private.key` 读取 PKCS8 PEM RSA 私钥，用于解开数据库 `user_ssh_keys` 中每条记录的临时 AES 密钥；外置 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 已废除。共享同一数据库的全部 Java 必须部署同一 JAR，升级前后不得替换内置密钥，否则既有 SSH key 密文无法解密。企业交付 JAR/ZIP 因包含平台私钥，必须按密钥交付物限制访问、复制和留存。
 
 外部 API 凭据也使用同一内置 RSA 私钥执行 RSA-OAEP/SHA-256 入库加解密。应用在 Flyway 完成后严格加载全部工具凭据，任何密文、指纹、工具编码或 scope 校验失败都会让该 Java 启动失败并阻止就绪；运行期刷新失败保留上一份有效不可变快照。多 Java 部署必须连接同一 PostgreSQL/Redis，并设置 `TEST_AGENT_SERVER_BROADCAST_ENABLED=true`，使管理事务提交后的 `external-api-credential.refresh-requested` 空载荷广播低延迟触发整表重载；每 60 秒补偿刷新用于收敛漏消息。

@@ -411,6 +411,12 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         fileService.writeContent(workspace.rootPath(), path, content);
     }
 
+    /** 单次解析工作区内现有文件物理路径，供受控文件 WebSocket RPC 使用。 */
+    public String resolvePhysicalFilePath(WorkspaceId workspaceId, String path) {
+        Workspace workspace = getWorkspace(workspaceId);
+        return fileService.resolvePhysicalFilePath(workspace.rootPath(), path);
+    }
+
     /**
      * 上传 Base64 文件内容到工作区新路径；二进制解码、大小和冲突校验由文件服务统一处理。
      */

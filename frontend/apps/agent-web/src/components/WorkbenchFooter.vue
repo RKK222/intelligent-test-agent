@@ -10,7 +10,7 @@ import type {
 import type { BackendApiClient } from "@test-agent/backend-api";
 import { copyTextToClipboard } from "@test-agent/ui-kit";
 import type { SelectedWorkspaceKind } from "./app-source-workspace";
-import { resolvePhysicalFilePath } from "./physical-path";
+import { normalizePhysicalAbsolutePath } from "./physical-path";
 
 export type PreviewMode = "off" | "full" | "split";
 
@@ -25,10 +25,10 @@ export type AppWorkspaceVersion = ApplicationWorkspaceVersion;
 const props = defineProps<{
   /** 写入路径（编辑器模式显示） */
   writePath?: string;
+  /** 普通工作区通过文件 WebSocket 按单文件即时解析物理路径。 */
+  workspaceId?: string;
   /** 已由上层解析的真实复制路径，优先于工作区根目录拼接结果。 */
   copyPath?: string;
-  /** 当前工作区绝对根目录，用于生成可复制的文件绝对路径 */
-  workspaceRootPath?: string;
   /** 最近一次更新时间（秒或 ISO 字符串均可） */
   updatedAt?: string | number;
   /** 是否存在未保存改动 */
@@ -126,17 +126,24 @@ const displayFilename = computed(() => {
 });
 
 const copyPathText = computed(() => {
-  // 物理文件操作统一失败关闭；相对路径和内部 tab 路由不再作为复制兜底。
-  return resolvePhysicalFilePath({
-    explicitPath: props.copyPath,
-    workspaceRootPath: props.workspaceRootPath,
-    filePath: props.writePath
-  }) ?? "";
+  // Agent 配置等专用入口仍可传显式绝对路径；普通工作区必须点击后向服务端解析。
+  return normalizePhysicalAbsolutePath(props.copyPath) ?? "";
 });
 
+const canCopyPath = computed(() => Boolean(copyPathText.value || (props.workspaceId && props.writePath)));
+
 async function copyPath(textToCopy: string) {
-  if (!textToCopy) return;
-  if (await copyTextToClipboard(textToCopy)) {
+  let resolved = textToCopy;
+  try {
+    if (!resolved && props.workspaceId && props.writePath) {
+      resolved = await api.resolveWorkspacePhysicalPath(props.workspaceId, props.writePath);
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "解析文件路径失败");
+    return;
+  }
+  if (!resolved) return;
+  if (await copyTextToClipboard(resolved)) {
     ElMessage.success("路径已复制到剪贴板");
   } else {
     ElMessage.error("复制路径失败，请手动复制");
@@ -804,10 +811,10 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
       <template v-else-if="showSave">
         <span class="ta-workbench-footer-path">
           <button
-            v-if="copyPathText"
+            v-if="canCopyPath"
             type="button"
             class="ta-workbench-footer-copy-path"
-            :title="copyPathText"
+            title="复制绝对文件路径"
             @click="copyPath(copyPathText)"
           >
             复制路径

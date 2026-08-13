@@ -117,7 +117,7 @@ test-agent:
     dev-email-domain: ${TEST_AGENT_LOBEHUB_DEV_EMAIL_DOMAIN:lobehub.local}
     dev-target-enabled: ${TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED:true}
   third-party-api:
-    base-url: http://tcds-prod.sdc.icbc
+    base-url: ${TEST_AGENT_TCDS_BASE_URL}
   deployment:
     mode: ${TEST_AGENT_DEPLOYMENT_MODE:external}
   security:

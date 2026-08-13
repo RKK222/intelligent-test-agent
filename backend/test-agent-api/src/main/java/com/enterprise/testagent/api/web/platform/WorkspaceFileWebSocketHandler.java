@@ -21,6 +21,7 @@ import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceViewLocator;
 import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientWorkspaceFileGateway;
+import com.enterprise.testagent.workspace.RequirementImportApplicationService;
 import com.enterprise.testagent.system.supportaccess.SupportAccessAuthorization;
 import java.net.URI;
 import java.util.Arrays;
@@ -68,6 +69,13 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private final Set<String> allowedOrigins;
     private final boolean allowAnyOrigin;
     private LocalClientWorkspaceFileGateway localClientFileGateway;
+    private RequirementImportApplicationService requirementImportService;
+
+    /** 需求导入为可选 setter 注入，保持既有 handler 单元测试构造器兼容。 */
+    @Autowired
+    void setRequirementImportService(RequirementImportApplicationService requirementImportService) {
+        this.requirementImportService = requirementImportService;
+    }
 
     /**
      * 装配文件 WebSocket handler 依赖和 Origin 白名单。
@@ -348,6 +356,8 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     workspaceService.createDirectory(workspaceId, path);
                     yield null;
                 }
+                case "workspace.resolve-physical-path" -> resolvePhysicalPath(ticket, params);
+                case "workspace.requirement-import" -> importRequirements(ticket, params);
                 case "workspace.view.list" -> workspaceViewService.list(
                         workspaceId(ticket, params),
                         viewLocator(params));
@@ -819,6 +829,35 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             WorkspaceFileSocketTicket ticket,
             WorkspaceId workspaceId) {
         return ticketService.authorizeWorkspaceRpc(ticket, workspaceId);
+    }
+
+    private String resolvePhysicalPath(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        if (ticket.supportReadOnly() || ticket.sharedSession() || ticket.appSourceWorkspace()
+                || ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspaceId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前会话不允许解析物理路径");
+        }
+        return workspaceService.resolvePhysicalFilePath(workspaceId, requiredText(params, "path"));
+    }
+
+    private Object importRequirements(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        if (ticket.supportReadOnly() || ticket.sharedSession() || ticket.appSourceWorkspace()
+                || ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspaceId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前工作区不允许导入需求");
+        }
+        if (requirementImportService == null || ticket.unifiedAuthId() == null || ticket.unifiedAuthId().isBlank()) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "需求导入服务不可用");
+        }
+        requireWorkspaceWrite(ticket, workspaceId, "spec");
+        return requirementImportService.importRequirements(
+                ticket.unifiedAuthId(),
+                new RequirementImportApplicationService.ImportCommand(
+                        workspaceId.value(),
+                        requiredText(params, "appShortName"),
+                        requiredText(params, "editionId"),
+                        requiredStringList(params, "selectedSubItemNos"),
+                        requiredText(params, "requestId")));
     }
 
     private WorkspaceViewLocator viewLocator(JsonNode params) {
@@ -1432,6 +1471,21 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private String text(JsonNode node, String field) {
         JsonNode value = node == null ? null : node.get(field);
         return value == null || value.isNull() ? null : value.asText();
+    }
+
+    private List<String> requiredStringList(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        if (value == null || !value.isArray() || value.isEmpty()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 不能为空");
+        }
+        List<String> values = new java.util.ArrayList<>();
+        value.forEach(item -> {
+            if (!item.isTextual() || item.asText().isBlank()) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 包含无效值");
+            }
+            values.add(item.asText().trim());
+        });
+        return List.copyOf(values);
     }
 
     private long requiredNonNegativeLong(JsonNode node, String field) {

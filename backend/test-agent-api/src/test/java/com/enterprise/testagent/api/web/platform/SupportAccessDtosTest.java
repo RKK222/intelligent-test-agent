@@ -30,8 +30,10 @@ class SupportAccessDtosTest {
                 .isEqualTo("UNBOUND");
         assertThat(response("server-unknown", Map.of(), false).backendAvailability())
                 .isEqualTo("UNKNOWN");
-        assertThat(response("server-online", Map.of("server-online", online), true).physicalRootPath())
-                .isEqualTo("/tmp/support");
+        SupportAccessDtos.WorkspaceResponse response = response(
+                "server-online", Map.of("server-online", online), true);
+        assertThat(response.rootPath()).isEqualTo("workspace:wrk_support_status");
+        assertThat(response.physicalRootPath()).isNull();
     }
 
     private SupportAccessDtos.WorkspaceResponse response(

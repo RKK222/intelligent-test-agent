@@ -69,6 +69,11 @@ export const router = createRouter({
       component: () => import("./views/LobehubLaunchView.vue"),
     },
     {
+      path: "/workspace-requirement-import",
+      name: "workspace-requirement-import",
+      component: () => import("./views/RequirementImportView.vue"),
+    },
+    {
       path: "/s/:shareId",
       name: "transcript",
       component: () => import("./views/SharedWorkbenchView.vue"),
@@ -133,6 +138,7 @@ function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlag
     || /^\/system\/?$/.test(pathname)
     || /^\/hub\/?$/.test(pathname)
     || /^\/settings\/?$/.test(pathname)
+    || pathname === "/workspace-requirement-import"
     || (pathname === "/lobehub/launch" && features.lobehub)
     || /^\/s\/[^/]+$/.test(pathname);
 }

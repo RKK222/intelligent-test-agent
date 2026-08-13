@@ -970,3 +970,7 @@ manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字�
 每帧上限 2 MiB，requestId/traceId 最长 128 字符。认证后缺 generation、generation 非正数、版本不匹配、
 重复 requestId、超大分片或未知帧都失败关闭。断连时客户端取消全部未完成任务、清理临时上传并清空模型
 grant；服务端完成的 Run 不自动切换到服务端实例或其它本地实例。
+
+# 需求导入的实时边界
+
+需求导入不新增或修改 `RunEvent`/SSE 事件。目录查询使用普通 HTTP，文件写入复用一次性 ticket 保护的文件 WebSocket RPC `workspace.requirement-import`；完成后 iframe 仅向同源父窗口发送脱敏汇总，父页面刷新文件树。该消息不是服务端事件，不进入事件流持久化或重放。

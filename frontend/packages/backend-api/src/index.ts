@@ -246,6 +246,10 @@ import type {
   WorkspaceSyncResult,
   WorkspaceBranchPreference,
   WorkspaceDirectoryList,
+  RequirementImportApplication,
+  RequirementImportItem,
+  RequirementImportCommand,
+  RequirementImportResult,
   WorkspaceFileRoute,
   WorkspaceFileSocketTicketRequest,
   WorkspaceFileSocketTicketResponse,
@@ -463,6 +467,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
   const localClientBase = "/api/internal/platform/local-opencode-client";
+  const requirementImportBase = "/api/v1/requirement-import";
   const agentConfigBase = `${workspaceManagementBase}/agent-config`;
   const agentSkillHubBase = `${workspaceManagementBase}/agent-skill-hub`;
   const opencodeRuntimeBase = "/api/internal/platform/opencode-runtime";
@@ -1524,6 +1529,18 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       workspaceFileRpc<void>(workspaceId, "workspace.delete", { path }),
     createDirectory: (workspaceId: string, path: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.mkdir", { path }),
+    resolveWorkspacePhysicalPath: (workspaceId: string, path: string) =>
+      workspaceFileRpc<string>(workspaceId, "workspace.resolve-physical-path", { path }),
+    listRequirementImportApplications: () =>
+      request<RequirementImportApplication[]>(`${requirementImportBase}/applications`),
+    listRequirementImportItems: (appShortName: string, editionId: string) =>
+      request<RequirementImportItem[]>(`${requirementImportBase}/sub-items${query({ appShortName, editionId })}`),
+    importWorkspaceRequirements: (command: RequirementImportCommand) =>
+      workspaceFileRpc<RequirementImportResult>(
+        command.workspaceId,
+        "workspace.requirement-import",
+        command as unknown as Record<string, unknown>
+      ),
     searchFiles: async (workspaceId: string, query: string) => {
       const results = await workspaceFileRpc<BackendFileSearchResult[]>(workspaceId, "workspace.search", { query });
       return results.map((result) => ({
