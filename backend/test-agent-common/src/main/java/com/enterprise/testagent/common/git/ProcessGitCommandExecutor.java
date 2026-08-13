@@ -13,6 +13,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -88,6 +89,18 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
             int exit = process.exitValue();
             if (exit != 0) {
                 String rawStderr = new String(stderr.toByteArray(), StandardCharsets.UTF_8);
+                Optional<ScmGitIdentityRejectedException> identityRejection =
+                        ScmGitIdentityRejectedException.parse(rawStderr, safeCommand, exit);
+                if (identityRejection.isPresent()) {
+                    LOGGER.warn(
+                            "event=git_command_failed durationMs={} exitCode={} failureType={} failureReason={} command={}",
+                            elapsedMillis(startedAt),
+                            exit,
+                            "REMOTE_REJECTED",
+                            "SCM_IDENTITY_MISMATCH",
+                            safeCommand);
+                    throw identityRejection.get();
+                }
                 String stderrText = safeStderr(rawStderr);
                 GitCommandFailure failure = GitCommandFailureClassifier.classify(command, rawStderr);
                 LOGGER.warn(

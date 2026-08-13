@@ -10,6 +10,7 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -375,6 +376,81 @@ public class GitWorkspaceService {
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText().trim();
+    }
+
+    /**
+     * 顺序读取本地 origin 跟踪引用中的最近提交者证据；不执行 fetch，也不访问网络。
+     * 调用方必须设置有界 maxCount，并在多个仓库间串行调度，避免夜间任务放大磁盘压力。
+     */
+    public List<GitCommitterIdentityEvidence> acceptedCommitterIdentities(Path repoRoot, int maxCount) {
+        if (maxCount < 1 || maxCount > 50_000) {
+            throw new IllegalArgumentException("maxCount must be between 1 and 50000");
+        }
+        String output = executor.execute(
+                List.of(
+                        "git", "-c", "log.showSignature=false", "-C", repoRoot.toString(),
+                        "log", "--remotes=origin", "--date-order", "--regexp-ignore-case",
+                        "--committer=@mails\\.icbc", "--max-count=" + maxCount,
+                        "--format=%H%x1f%ct%x1f%cn%x1f%ce%x1e"),
+                null,
+                DEFAULT_TIMEOUT).stdoutText();
+        return parseCommitterEvidence(output);
+    }
+
+    /** 只查一个统一认证邮箱的最近已接受提交，用于 SSH Key 新增后的低频即时校准。 */
+    public Optional<GitCommitterIdentityEvidence> latestAcceptedCommitterIdentity(
+            Path repoRoot,
+            String email) {
+        String normalizedEmail = Objects.requireNonNull(email, "email must not be null").trim();
+        if (normalizedEmail.isEmpty() || normalizedEmail.indexOf('\r') >= 0 || normalizedEmail.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("email is invalid");
+        }
+        String output = executor.execute(
+                List.of(
+                        "git", "-c", "log.showSignature=false", "-C", repoRoot.toString(),
+                        "log", "--remotes=origin", "--fixed-strings", "--committer=" + normalizedEmail,
+                        "--max-count=1", "--format=%H%x1f%ct%x1f%cn%x1f%ce%x1e"),
+                null,
+                DEFAULT_TIMEOUT).stdoutText();
+        return parseCommitterEvidence(output).stream()
+                .filter(evidence -> normalizedEmail.equalsIgnoreCase(evidence.email()))
+                .findFirst();
+    }
+
+    /** 仅改写当前 HEAD 的作者/提交者身份，供右控拒绝后的单次受控重试使用。 */
+    public String amendHeadCommitIdentity(Path repoRoot, String privateKey, GitCommitIdentity identity) {
+        Objects.requireNonNull(identity, "identity must not be null");
+        executor.execute(
+                withCommitIdentity(
+                        List.of("git", "-C", repoRoot.toString(), "commit", "--amend", "--no-edit", "--reset-author"),
+                        identity),
+                privateKey,
+                DEFAULT_TIMEOUT);
+        return headCommit(repoRoot);
+    }
+
+    private List<GitCommitterIdentityEvidence> parseCommitterEvidence(String output) {
+        if (output == null || output.isBlank()) {
+            return List.of();
+        }
+        List<GitCommitterIdentityEvidence> evidence = new ArrayList<>();
+        for (String record : output.split("\\u001e")) {
+            String normalized = record.strip();
+            if (normalized.isEmpty()) {
+                continue;
+            }
+            String[] fields = normalized.split("\\u001f", -1);
+            if (fields.length != 4) {
+                continue;
+            }
+            try {
+                evidence.add(new GitCommitterIdentityEvidence(
+                        fields[2], fields[3], Instant.ofEpochSecond(Long.parseLong(fields[1])), fields[0]));
+            } catch (IllegalArgumentException ignored) {
+                // 单条历史提交元数据异常时跳过，不让补偿任务中断其它用户和仓库。
+            }
+        }
+        return List.copyOf(evidence);
     }
 
     /**

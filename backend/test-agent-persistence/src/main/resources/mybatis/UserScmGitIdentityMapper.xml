@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.UserScmGitIdentityMapper">
+
+    <resultMap id="IdentityMap" type="com.enterprise.testagent.persistence.mybatis.UserScmGitIdentityRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="git_name" javaType="java.lang.String"/>
+            <arg column="source" javaType="java.lang.String"/>
+            <arg column="evidence_commit" javaType="java.lang.String"/>
+            <arg column="evidence_at" javaType="java.time.Instant"/>
+            <arg column="verified_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="CandidateMap" type="com.enterprise.testagent.persistence.mybatis.UserScmGitIdentityCandidateRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="unified_auth_id" javaType="java.lang.String"/>
+            <arg column="git_name" javaType="java.lang.String"/>
+            <arg column="source" javaType="java.lang.String"/>
+            <arg column="evidence_commit" javaType="java.lang.String"/>
+            <arg column="evidence_at" javaType="java.time.Instant"/>
+            <arg column="verified_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findByUserId" resultMap="IdentityMap">
+        select user_id, git_name, source, evidence_commit, evidence_at, verified_at
+        from user_scm_git_identities
+        where user_id = #{userId}
+    </select>
+
+    <select id="findSyncCandidatesAfter" resultMap="CandidateMap">
+        select u.user_id, u.unified_auth_id,
+               i.git_name, i.source, i.evidence_commit, i.evidence_at, i.verified_at
+        from users u
+        join user_ssh_keys k on k.user_id = u.user_id
+        left join user_scm_git_identities i on i.user_id = u.user_id
+        where u.status = 'ACTIVE'
+          and (#{afterUserId} is null or u.user_id &gt; #{afterUserId})
+        order by u.user_id
+        limit #{limit}
+    </select>
+
+    <insert id="upsertAccepted" databaseId="postgresql">
+        insert into user_scm_git_identities as current_identity(
+            user_id, git_name, source, evidence_commit, evidence_at, verified_at, created_at, updated_at
+        ) values
+        <foreach collection="rows" item="row" separator=",">
+            (#{row.userId}, #{row.gitName}, #{row.source}, #{row.evidenceCommit},
+             #{row.evidenceAt}, #{row.verifiedAt}, #{now}, #{now})
+        </foreach>
+        on conflict (user_id) do update set
+            git_name = excluded.git_name,
+            source = excluded.source,
+            evidence_commit = excluded.evidence_commit,
+            evidence_at = excluded.evidence_at,
+            verified_at = excluded.verified_at,
+            updated_at = excluded.updated_at
+        where current_identity.source = 'ACCEPTED_COMMIT_HISTORY'
+          and (
+              (current_identity.evidence_at, coalesce(current_identity.evidence_commit, ''))
+                  &lt; (excluded.evidence_at, coalesce(excluded.evidence_commit, ''))
+              or (
+                  current_identity.evidence_at = excluded.evidence_at
+                  and coalesce(current_identity.evidence_commit, '') = coalesce(excluded.evidence_commit, '')
+                  and current_identity.git_name &lt;&gt; excluded.git_name
+              )
+          )
+    </insert>
+
+    <!-- H2 PostgreSQL mode 不支持 ON CONFLICT；测试使用同优先级语义的 MERGE。 -->
+    <insert id="upsertAccepted" databaseId="h2">
+        merge into user_scm_git_identities target
+        using (values
+            <foreach collection="rows" item="row" separator=",">
+                (cast(#{row.userId} as varchar(128)), cast(#{row.gitName} as varchar(128)),
+                 cast(#{row.source} as varchar(32)), cast(#{row.evidenceCommit} as varchar(64)),
+                 cast(#{row.evidenceAt} as timestamp), cast(#{row.verifiedAt} as timestamp),
+                 cast(#{now} as timestamp), cast(#{now} as timestamp))
+            </foreach>
+        ) incoming(user_id, git_name, identity_source, evidence_commit,
+                   evidence_at, verified_at, created_at, updated_at)
+        on target.user_id = incoming.user_id
+        when matched and target.source = 'ACCEPTED_COMMIT_HISTORY'
+             and (target.evidence_at &lt; incoming.evidence_at
+                  or (target.evidence_at = incoming.evidence_at
+                      and (coalesce(target.evidence_commit, '') &lt; coalesce(incoming.evidence_commit, '')
+                           or (coalesce(target.evidence_commit, '') = coalesce(incoming.evidence_commit, '')
+                               and target.git_name &lt;&gt; incoming.git_name))))
+          then update set git_name = incoming.git_name, source = incoming.identity_source,
+               evidence_commit = incoming.evidence_commit, evidence_at = incoming.evidence_at,
+               verified_at = incoming.verified_at, updated_at = incoming.updated_at
+        when not matched then insert (
+            user_id, git_name, source, evidence_commit, evidence_at, verified_at, created_at, updated_at
+        ) values (
+            incoming.user_id, incoming.git_name, incoming.identity_source, incoming.evidence_commit,
+            incoming.evidence_at, incoming.verified_at, incoming.created_at, incoming.updated_at
+        )
+    </insert>
+
+    <insert id="upsertRemoteRejection" databaseId="postgresql">
+        insert into user_scm_git_identities(
+            user_id, git_name, source, evidence_commit, evidence_at, verified_at, created_at, updated_at
+        ) values (
+            #{row.userId}, #{row.gitName}, #{row.source}, #{row.evidenceCommit},
+            #{row.evidenceAt}, #{row.verifiedAt}, #{now}, #{now}
+        )
+        on conflict (user_id) do update set
+            git_name = excluded.git_name, source = excluded.source,
+            evidence_commit = excluded.evidence_commit, evidence_at = excluded.evidence_at,
+            verified_at = excluded.verified_at, updated_at = excluded.updated_at
+    </insert>
+
+    <insert id="upsertRemoteRejection" databaseId="h2">
+        merge into user_scm_git_identities(
+            user_id, git_name, source, evidence_commit, evidence_at, verified_at, created_at, updated_at
+        ) key(user_id) values (
+            #{row.userId}, #{row.gitName}, #{row.source}, #{row.evidenceCommit},
+            #{row.evidenceAt}, #{row.verifiedAt}, #{now}, #{now}
+        )
+    </insert>
+</mapper>

@@ -71,6 +71,8 @@ class XxlJobMysqlMigrationTest {
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.inactive-user-process-cleanup' and schedule_conf='0 0 2 * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
                     .isEqualTo(1);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='configuration-management.scm-git-name-sync' and schedule_conf='0 10 4 * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
+                    .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_param like '%executionAffinity%' or executor_param like '%linuxServerId%'"))
                     .isZero();
         }
@@ -116,6 +118,8 @@ class XxlJobMysqlMigrationTest {
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.internal-model-observability-retention' and schedule_conf='0 30 3 * * ? *'"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.analytics-ingestion' and schedule_conf='0 * * * * ? *'"))
+                    .isEqualTo(1);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='configuration-management.scm-git-name-sync' and schedule_conf='0 10 4 * * ? *'"))
                     .isEqualTo(1);
         }
     }

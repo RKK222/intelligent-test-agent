@@ -130,6 +130,10 @@ class FlywayMigrationNamingTest {
             "V20260812204207__dictionaries_add_automation_code_repository.sql";
     private static final String AUTOMATION_CODE_REPOSITORY_SHA256 =
             "250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554";
+    private static final String USER_SCM_GIT_IDENTITIES_MIGRATION =
+            "V20260813190929__user_scm_git_identities_create.sql";
+    private static final String USER_SCM_GIT_IDENTITIES_SHA256 =
+            "fd434d47d40c9fd71c987bd6512ba6897e33fe2e1db67299ff01514b4941c92e";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -357,6 +361,15 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/local-client-runtime-after-release",
                 LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION,
                 LOCAL_CLIENT_RUNTIME_FORWARD_SHA256);
+    }
+
+    @Test
+    void appliedUserScmGitIdentityMigrationRemainsByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                USER_SCM_GIT_IDENTITIES_MIGRATION,
+                USER_SCM_GIT_IDENTITIES_SHA256);
     }
 
     private static void assertMigrationSha256(

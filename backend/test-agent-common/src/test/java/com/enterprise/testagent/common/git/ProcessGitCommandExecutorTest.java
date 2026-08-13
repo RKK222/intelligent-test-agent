@@ -5,10 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.Test;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
@@ -16,6 +17,8 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.Configuration;
 import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ProcessGitCommandExecutorTest {
 
@@ -127,6 +130,38 @@ class ProcessGitCommandExecutorTest {
                     .contains("failureType=AUTHENTICATION_FAILED")
                     .contains("stderr=***@scm-share.sdc.cs.enterprise: Permission denied (publickey).")
                     .doesNotContain("001177621");
+        }
+    }
+
+    @Test
+    void parsesScmIdentityMismatchWithoutLeakingIdentityIntoDetailsOrLogs(@TempDir Path tempDir) throws Exception {
+        ProcessGitCommandExecutor executor = new ProcessGitCommandExecutor();
+        String stderr = "remote: server internel error(right-control): commit:644d15a提交失败, "
+                + "客户端提交者邮箱123456789@mails.icbc对应的姓名应为测试用户,"
+                + "您的提交者姓名为测试用户1,校验不一致, 请在客户端修正后重新提交!";
+        Path stderrFile = tempDir.resolve("scm-stderr.txt");
+        Files.writeString(stderrFile, stderr);
+
+        try (CapturedGitLogger logs = CapturedGitLogger.attach()) {
+            assertThatThrownBy(() -> executor.execute(
+                    List.of("/bin/sh", "-c", "cat \"$1\" >&2; exit 1", "sh", stderrFile.toString()),
+                    null,
+                    Duration.ofSeconds(1)))
+                    .isInstanceOfSatisfying(ScmGitIdentityRejectedException.class, exception -> {
+                        assertThat(exception.expectedName()).isEqualTo("测试用户");
+                        assertThat(exception.actualName()).isEqualTo("测试用户1");
+                        assertThat(exception.email()).isEqualTo("123456789@mails.icbc");
+                        assertThat(exception.evidenceCommit()).isEqualTo("644d15a");
+                        assertThat(exception.details())
+                                .containsEntry("gitFailureReason", "SCM_IDENTITY_MISMATCH")
+                                .doesNotContainKeys("stderr");
+                        assertThat(exception.details().toString())
+                                .doesNotContain("测试用户", "123456789");
+                    });
+
+            assertThat(String.join("\n", logs.messages()))
+                    .contains("failureReason=SCM_IDENTITY_MISMATCH")
+                    .doesNotContain("测试用户", "123456789");
         }
     }
 

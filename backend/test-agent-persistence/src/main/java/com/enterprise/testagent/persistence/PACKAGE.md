@@ -99,6 +99,7 @@
 - `db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql`：会话分享主链已执行、但尚未执行 release 最新时延输入 migration 时使用的 QA Memory 顺序补偿；已落库后继续按原始字节解析。
 - `db/migration-compat/qa-memory-after-token-latency-inputs/V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`：release 已执行 `V20260810234154` 时使用的更高 QA Memory 顺序补偿；与前一补偿 SQL 字节一致，只允许兼容装配按 history 二选一加载。
 - `db/migration/V20260810170000__user_notifications_create_notification_center.sql`：创建通知表并仅回填当前有效分享；成员授权后的成功读取审计回填已读，过期/撤销/移除/归档不进入通知历史。
+- `db/migration/V20260813190929__user_scm_git_identities_create.sql`：创建用户 SCM Git 姓名和证据表；MyBatis XML 负责 SSH Key 用户游标分页、批量历史证据写入和右控证据优先级保护。
 - `db/migration/V20260728210000__index_in_flight_app_source_operations.sql`：为周期恢复增加 status 前导的 operation 排序索引，避免历史终态数据导致每实例全表扫描。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现；Run 运行数据面不得新增 PostgreSQL 或 JVM 内存降级实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。
