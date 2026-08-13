@@ -9,6 +9,18 @@ import {
   stripMarkdownFrontmatter
 } from "../src/components/help-center";
 
+// 用户手册只记录工作能力；游戏内容即使已上线，也必须由整本扫描阻止进入。
+const userManualDocuments = import.meta.glob("../../user-manual/docs/**/*.md", {
+  eager: true,
+  import: "default",
+  query: "?raw"
+}) as Record<string, string>;
+
+const forbiddenGameContentPatterns = [
+  /游戏|游乐舱|桌面弹球|黄金矿工|俄罗斯方块|扫雷|数独|贪吃蛇/,
+  /\b(?:game|games|gaming|pinball|tetris|minesweeper|sudoku)\b/i
+];
+
 const dialogStub = {
   props: ["modelValue"],
   emits: ["update:modelValue"],
@@ -91,9 +103,18 @@ describe("help center", () => {
     expect(prompt).toContain("文件树左下角的双向箭头");
     expect(prompt).toContain("本地提交，但不提供远程推送或发布");
     expect(prompt).toContain("VITE_CACHE_DATA_URL");
-    expect(prompt).toContain("当前游戏入口只对超级管理员显示");
+    expect(prompt).not.toMatch(forbiddenGameContentPatterns[0]!);
     expect(prompt).not.toContain("长期记忆");
     expect(prompt.length).toBeLessThan(6_700);
+  });
+
+  it("permanently keeps game content out of every user manual document", () => {
+    expect(Object.keys(userManualDocuments).length).toBeGreaterThan(0);
+    for (const [documentPath, content] of Object.entries(userManualDocuments)) {
+      for (const pattern of forbiddenGameContentPatterns) {
+        expect(content, `${documentPath} 不得包含游戏内容：${pattern}`).not.toMatch(pattern);
+      }
+    }
   });
 
   it("keeps the directory chapter synchronized with the embedded Help navigation", async () => {
