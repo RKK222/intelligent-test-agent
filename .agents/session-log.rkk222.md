@@ -9720,3 +9720,21 @@
 
 - 自动化代码库的配置、工作空间规则、迁移、测试和文档已实现并完成代码级、构建级及真实 PostgreSQL 兼容验证；实际 HTTP/UI 创建流程因本地 Flyway 历史分叉仍未运行，交付状态为部分运行验证。
 - 本次只对既有 HTTP 响应增量增加类型编码，不变更 DTO 字段、RunEvent、表结构、性能或安全契约；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+
+## 2026-08-13 - 同步 release 前端组件类型声明
+
+### Why
+
+- release 已新增黄金矿工组件并不再通过自动导入使用 Element Plus Drawer，自动生成的 Vue 全局组件声明需要与当前源码扫描结果一致。
+
+### What
+
+- 从 `components.d.ts` 移除未自动导入的 `ElDrawer` 全局声明，新增 `PetGoldMinerGame` 组件声明；显式导入 Drawer 的现有页面不受影响。
+
+### How
+
+- 核对 `PetMiniGames.vue` 对黄金矿工组件的显式引用，以及系统参数页面对 `ElDrawer` 的显式导入；提交前回顾全部 `.agents/session-log*.md` 近期条目并执行差异空白检查。
+
+### Result
+
+- Vue 组件类型声明与 release 当前源码一致；本次不涉及 API、RunEvent、数据库、部署、安全、环境配置、generated SDK 或 OpenCode 源码。
