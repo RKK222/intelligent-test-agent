@@ -9881,7 +9881,7 @@
 
 - 复用三套脚本既有 `verify_release_flyway_resource`，锁定 `V20260812202425` compatibility resource 和正常企业主链 `V20260812204207` 的路径与 SHA-256；同步 `FlywayMigrationNamingTest`。
 - 更新多后台部署说明：从已知企业基线首次升级只允许连续新增五条 migration，正常企业历史不得出现只供共享开发库兼容的本地客户端版本。
-- 本轮 `.4` 使用的 `opencode-models.json` 已核对为 Qwen provider/model 排在首位；该文件只决定目录顺序，不把两台公共 `opencode.jsonc` 的默认 DeepSeek 配置误当作同一职责修改。
+- 本轮初次只核对了 `opencode-models.json` 的 JSON 键顺序，误判 Qwen 为真实目录首项；后续按 OpenCode 1.18.4 的 `release_date` 倒序实现复查确认旧快照实际仍是 DeepSeek 优先，旧结论由下一条灰度修正记录取代。
 
 ### How
 
@@ -9891,6 +9891,32 @@
 ### Result
 
 - 企业包源码提交为 `193cc1d5daf95d40d52ea3ce0075698309e633e8`；内层包 SHA-256 为 `16681980542e2e23e4b8fd8ce3f752a8c41af0dfda14e2a0ce42d0c9a6216cd8`，外层双后台完整包 SHA-256 为 `69127cd4472cbe92f0f0db6d14ce052fadd417f6bd24aaacb81822f49a395e7a`，外层内嵌包与独立内层包字节一致。
-- 后端 app JAR、persistence JAR、前端 tar 和 `opencode-models.json` 的 SHA-256 分别为 `319d335e87416f45945dab44ecfd7e1e31dafa8aae395a6cc7a7efc8e7157a55`、`ef6c42d698927f44d6c3228b9076e17bf39de3b63d1b45d6067d3d8dc5c83af5`、`33651d154531a72f375c31d09ef2ef612490ac8b6512ae29a3c4f67c5d80fcb0` 和 `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`；模型目录首项为 `enterprise-qwen/Qwen3.6-27B`，本轮只要求 `.4` 使用该文件，未改变 `.114` 或公共配置中的会话默认模型。
+- 后端 app JAR、persistence JAR、前端 tar 和旧 `opencode-models.json` 的 SHA-256 分别为 `319d335e87416f45945dab44ecfd7e1e31dafa8aae395a6cc7a7efc8e7157a55`、`ef6c42d698927f44d6c3228b9076e17bf39de3b63d1b45d6067d3d8dc5c83af5`、`33651d154531a72f375c31d09ef2ef612490ac8b6512ae29a3c4f67c5d80fcb0` 和 `edfa12f1a95da0954f72303e52934efea088b6f64cd834e8447f6e670e88bf86`；旧模型文件虽把 Qwen 键写在前面，但其日期早于 DeepSeek，外层包 `69127cd4...` 不满足 `.4` 的 Qwen 目录优先灰度，已由后续新包替代。
 - Worker runtime 与 toolbox 命中已验证复用指纹，LobeHub 为 disabled，Workflow 无运行制品；外层完整包及校验文件已复制到 `/Users/kaka/Desktop/mimoagent/0709/`，`shasum -a 256 -c` 与 `unzip -tq` 均通过。
 - 当前不修改任何 migration 字节，不新增 API、RunEvent、服务、节点、端口、强制配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 修正 `.4` 千问优先灰度并重封企业包
+
+### Why
+
+- OpenCode 1.18.4 的 `/api/model` 按 models.dev `release_date` 倒序返回；旧快照中 Qwen 为 `2026-08-05`、DeepSeek 为 `2026-08-06`，因此 JSON 键顺序不能让 Qwen 优先。
+- 灰度边界明确为只替换 `.4` 的活动模型文件并重启其 worker；`.114` 必须保留现网模型文件和 worker，不能因发布门禁改变 worker 指纹或阻断旧快照正常重启。
+
+### What
+
+- 将本次快照的 Qwen 排序日期调整为 `2026-08-07`，高于 DeepSeek 的 `2026-08-06`；公共 `opencode.jsonc` 的默认模型、小模型和 `code_analysis` 仍保持 DeepSeek，不扩大为默认模型切换。
+- 新增只在 Mac 封包阶段调用的 `verify-opencode-model-priority.sh`，以正反用例锁定 Qwen 时间优先级；worker 常规 `validate-opencode-models.sh` 保持原字节和原指纹，允许 `.114` 灰度保留旧快照。
+- 同步企业部署、双后台和 OpenCode 1.18.4 文档，明确 `.4/.114` 分别留存模型 SHA、只在 `.4` 复制新文件和重启 worker。
+
+### How
+
+- Bash 语法、开发脚本总门禁、AI 文档、差异空白、模型结构/公共配置一致性、Qwen 优先正例及 DeepSeek 优先反例均通过；组件规划确认 worker runtime 指纹仍为 `50f56c54...` 且模式为 `reuse`。
+- 尝试用只读 OpenCode 1.18.4 源码直接启动 `/api/model`，因上游快照缺少 `babel-plugin-jsx-dom-expressions` 未能运行；未联网补依赖或修改只读源码。排序结论直接核对上游 models.dev 日期转换和 Catalog 倒序实现，并由封包门禁覆盖。
+- 复用上一轮已通过前后端编译及真实 PostgreSQL 全历史矩阵的 app/persistence/frontend 制品，以修正提交 `57e211de48a5507fb8d1689e1c8f86fd96563032` 重新封装内外层包；所有 Flyway 资源重新通过包内 SHA 锁，不修改 migration 字节。
+
+### Result
+
+- 新 `opencode-models.json` SHA-256 为 `6a510be17a7b0616f128fad130773c3fb6ad7a3d4d7881ec59f2873e17cbc44c`；包内 Qwen/DeepSeek 日期分别为 `2026-08-07`、`2026-08-06`。
+- 内层 ZIP SHA-256 为 `7af9c20e57a809258b0acd4672189b5ca875dde3f1a7208f770414a57d234b53`，外层双后台完整包 SHA-256 为 `95b3dc3b3bd03059aba059b845b6407b86db0616e5c4614681aeca972c48ccd7`，外层内嵌 ZIP 与独立内层 ZIP 字节一致；中转目录副本通过 SHA 和 `unzip -tq`。
+- app JAR、persistence JAR 和前端 tar 仍为 `319d335e...`、`ef6c42d6...`、`33651d15...`；数据库和前端代码相对上一轮包没有变化。Worker runtime 与 toolbox 均为 `reuse`，LobeHub disabled，Workflow 无运行制品。
+- 现场执行必须先部署 `.4` Java 并确认 Flyway，再仅在 `.4` 备份/替换模型文件和重启 worker；`.114` 部署 Java 后只核对模型 SHA 未变化，最后部署 `.2` 前端。
