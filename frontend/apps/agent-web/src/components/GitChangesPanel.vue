@@ -251,6 +251,7 @@ const commitStep = ref(0);
 const executedCommands = ref<string[]>([]);
 const hasLivePublishCommand = ref(false);
 const publishResultConfirmed = ref(false);
+const publishProgressUnavailable = ref(false);
 const workspaceMergeInProgress = ref(false);
 const workspaceApplicationUpdatePending = ref(false);
 const workspaceApplicationTargetCommit = ref<string | null>(null);
@@ -402,6 +403,12 @@ function applyPublishExecution(step: string | null | undefined, commands?: strin
 }
 
 function applyPublishProgressEvent(event: AgentConfigProgressEvent) {
+  // 实时进度是发布 HTTP 请求的旁路展示能力；连接失败不能冒充 Git 发布失败。
+  // 此时继续等待 HTTP 权威结果，并阻止用户因短暂 FAILED 误判而重复提交。
+  if (event.errorCode === "WEBSOCKET_ERROR") {
+    publishProgressUnavailable.value = true;
+    return;
+  }
   // HTTP 发布响应已经确认终态后，进度 WebSocket 可能仍有延迟 command 事件到达；
   // 此时不能再让旧 RUNNING 事件把成功弹框回退到运行中。
   if (publishResultConfirmed.value) {
@@ -1581,6 +1588,7 @@ async function handleCommit(push = false) {
   executedCommands.value = [];
   hasLivePublishCommand.value = false;
   publishResultConfirmed.value = false;
+  publishProgressUnavailable.value = false;
   commitRequestedPush.value = push;
   if (commitBatchCompleted.value) {
     commitResultSummary.value = null;
@@ -1672,6 +1680,7 @@ async function handleCommit(push = false) {
           publishProgressSocket = await api.connectAgentConfigProgress(publishOperationId, applyPublishProgressEvent);
         } catch {
           publishProgressSocket = null;
+          publishProgressUnavailable.value = true;
         }
         const result = await (async () => {
           try {
@@ -1798,6 +1807,7 @@ async function handleCommit(push = false) {
           publishProgressSocket = await api.connectAgentConfigProgress(pushOpId, applyPublishProgressEvent);
         } catch {
           publishProgressSocket = null;
+          publishProgressUnavailable.value = true;
         }
         const result = await (async () => {
           try {
@@ -1860,6 +1870,7 @@ async function handleCommit(push = false) {
     }
   } finally {
     committing.value = false;
+    publishProgressUnavailable.value = false;
   }
 }
 
@@ -1885,6 +1896,9 @@ async function runAgentOperation<T>(
     });
   } catch {
     socket = null;
+    if (trackPublishProgress) {
+      publishProgressUnavailable.value = true;
+    }
   }
   try {
     const result = await action();
@@ -2638,6 +2652,13 @@ defineExpose({
         </ol>
 
         <!-- Command Log Console -->
+        <div
+          v-if="publishProgressUnavailable && committing"
+          class="mx-4 mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs leading-normal text-amber-800"
+          role="status"
+        >
+          暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果。
+        </div>
         <div class="px-4 py-3 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20">
           <div class="text-xs font-semibold text-zinc-500 mb-2 uppercase tracking-wider">当前步骤执行的 Git 命令</div>
           <div class="bg-zinc-950 dark:bg-black text-zinc-300 font-mono text-xs p-3 rounded-lg overflow-y-auto max-h-[160px] space-y-1.5 leading-relaxed border border-zinc-900 shadow-inner">

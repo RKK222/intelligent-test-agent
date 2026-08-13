@@ -1932,6 +1932,61 @@ describe("GitChangesPanel", () => {
     expect(apiClientMock.publishPersonalWorkspace.mock.calls[0][1].operationId).toMatch(/^aco_/);
   });
 
+  it("keeps publishing when the progress websocket is unavailable", async () => {
+    let resolvePublish: ((value: unknown) => void) | undefined;
+    apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: (event: {
+      type: string;
+      status: string;
+      errorCode: string;
+      errorMessage: string;
+    }) => void) => {
+      handler({
+        type: "failed",
+        status: "FAILED",
+        errorCode: "WEBSOCKET_ERROR",
+        errorMessage: "Agent 配置进度连接失败"
+      });
+      throw new Error("Agent 配置进度连接失败");
+    });
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockReturnValueOnce(new Promise((resolve) => {
+      resolvePublish = resolve;
+    }));
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("selected.ts")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: progress channel");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText("暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果。")).toBeTruthy();
+    expect(view.getByText("RUNNING")).toBeTruthy();
+    expect(view.queryByText("FAILED")).toBeNull();
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(1);
+
+    resolvePublish?.({
+      status: "PUBLISHED",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: [],
+      message: "发布成功",
+      remotePushed: true,
+      currentStep: "COMPLETED",
+      executedCommands: [],
+      headCommit: "commit_published"
+    });
+
+    expect(await view.findByText("提交并推送成功！")).toBeTruthy();
+    expect(view.queryByText("暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果。")).toBeNull();
+  });
+
   it("keeps the latest live git command when publish result contains command history", async () => {
     let progressHandler: ((event: { currentStep?: string; command?: string; status?: string }) => void) | undefined;
     let resolvePublish: ((value: unknown) => void) | undefined;

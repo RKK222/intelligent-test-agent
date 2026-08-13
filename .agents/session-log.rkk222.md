@@ -10407,3 +10407,26 @@
 
 - release 已具备独立 SCM Git 姓名、右控自校准单次重试、SSH Key 即时异步补偿和存量定时复核；错误详情与日志不暴露姓名、邮箱、统一认证号或右控原文。
 - 本次新增 PostgreSQL 表和 XXL 任务，不变更 HTTP URL、DTO、RunEvent、部署节点、端口、强制环境变量、generated SDK 或 OpenCode 源码；完整 MySQL migration 与应用健康启动仍需在有 Docker/TCDS 配置的环境复验，release 修复后仍需同步回 dev。
+
+## 2026-08-13 - 修复个人 worktree 发布进度连接误报失败
+
+### Why
+
+- 个人 worktree 提交并推送时，实时进度 WebSocket 在 3 秒内建连失败会先把第 3 步标成 `FAILED`，但发布 HTTP 请求仍继续执行，随后页面又回到 `RUNNING`，造成用户误判和重复提交风险。
+
+### What
+
+- `GitChangesPanel` 将 `WEBSOCKET_ERROR` 仅作为实时进度不可用状态，不再写入 Git 发布失败；弹框提示“暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果”。
+- 保持 `commitPersonalWorkspace`、`publishPersonalWorkspace` 及后端暂存、提交、投影、拉取、推送流程不变；最终成功或失败继续以发布 HTTP 响应为准，HTTP 收敛后清理降级提示。
+- 补充组件回归测试，锁定进度连接先失败时发布 HTTP 仍只调用一次、步骤保持运行态且成功响应正常收敛。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/git-changes-panel.test.ts --reporter=verbose` 通过，42/42。
+- `corepack pnpm typecheck` 通过；`git diff --check` 通过。
+- 本机 Vite 前端继续运行于 `http://127.0.0.1:3000`，已确认实际服务模块包含新提示与降级状态；后端 readiness 为 `UP`。
+
+### Result
+
+- 实时进度通道故障不再伪装成业务失败，也不会取消或重复发起提交推送；真实后端失败仍沿用原错误响应和失败步骤展示。
+- 本次仅修改前端组件、测试、README 和本会话记录，不变更 HTTP API、RunEvent、数据库、部署、安全权限、公共 Agent 业务语义、环境配置、generated SDK 或 OpenCode 源码。
