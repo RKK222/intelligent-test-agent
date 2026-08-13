@@ -10,6 +10,9 @@ hero:
       text: 快速开始
       link: /guide/getting-started
     - theme: alt
+      text: 每周新功能
+      link: /guide/weekly-updates
+    - theme: alt
       text: 功能总览
       link: /guide/feature-overview
     - theme: alt
@@ -17,6 +20,8 @@ hero:
       link: /guide/faq
 
 features:
+  - title: 每周了解新功能
+    details: 从自己的使用场景出发，查看本周新增了什么、入口在哪里、怎么操作，以及需要留意的权限和数据边界。
   - title: 先选中 workspace
     details: 解释应用和 workspace 的区别，说明为什么只选应用时左侧文件树仍然是空白。
   - title: 操作路径可检索

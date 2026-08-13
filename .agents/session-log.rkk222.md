@@ -9886,3 +9886,28 @@
 
 - VPN 开启状态下，本轮真实模型对话未复现 `unknown certificate verification error`；仍观察到上游连接偶发 `socket connection was closed unexpectedly`，SDK 重试后主对话成功，属于 VPN 节点或外部链路的剩余稳定性风险。
 - 本次未修改 `.env*`、API、RunEvent、数据库、migration、generated SDK 或 OpenCode 只读源码，也未降低安全校验。
+
+## 2026-08-13 - 用户手册新增每周新功能板块
+
+### Why
+
+- 用户需要从使用者视角按周了解最新功能的适用场景、入口和操作方法，而不是继续从功能总览和多个专题中自行拼接信息。
+- 当前 `release` 已开放平台体验、自动化代码库、会话通知协作、测试资料批量跳转和宠物新游戏；周更内容必须严格以交付分支事实为准，不能混入仅在 `dev` 的长期记忆等能力。
+
+### What
+
+- 新增“每周新功能”稳定章节，并注册到 VitePress 顶部导航、侧栏、手册首页和应用内 Help；首期按 2026-08-10 至 2026-08-16 汇总五类用户场景、步骤和权限/数据边界。
+- `help-center.ts` 直接复用同一 Markdown 作为宠物问答资料；`release` 以 5600 字有界上下文锁定不包含长期记忆，回合 `dev` 后保留长期记忆并将周更上下文调整为 7000 字。
+- 同步用户手册、frontend 和 agent-web README/PACKAGE；功能总览校正宠物游戏入口仅超级管理员可见，以及当前六款游戏名称。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/help-center.test.ts --reporter=verbose`：12/12 通过。
+- `corepack pnpm --filter @test-agent/agent-web typecheck` 与 `corepack pnpm --filter @test-agent/user-manual build` 通过。
+- 实际以 `corepack pnpm --filter @test-agent/user-manual dev` 启动手册，`/help/`、周更页及三个关联专题均返回 HTTP 200，生成 HTML 包含导航、场景、操作步骤和正确内部链接。
+
+### Result
+
+- 用户可从手册首页、顶部导航、侧栏或应用内 Help 直接打开“每周新功能”，按“想做什么”快速定位本周能力，再进入稳定专题查看完整规则。
+- `release` 周更保持当前交付能力，`dev` 周更额外说明按账号开放的长期记忆，分支同步没有覆盖 `dev` 专属章节。
+- 本次不新增 API、RunEvent、数据库、migration、部署节点、强制配置或安全权限；未修改 `.env*`、generated SDK 或 OpenCode 源码。
