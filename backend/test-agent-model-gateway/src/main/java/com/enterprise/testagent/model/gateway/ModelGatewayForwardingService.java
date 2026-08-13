@@ -503,7 +503,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
         } else {
             headers.remove(EMBEDDING_INPUT_TYPE_HEADER);
         }
-        // 不复制 Authorization、provider、UCID 或其它客户端 Header。
+        // 不复制 Authorization、Auth-Token、provider、UCID 或其它客户端 Header。
     }
 
     private void copySafeResponseHeaders(HttpHeaders target, HttpHeaders source) {

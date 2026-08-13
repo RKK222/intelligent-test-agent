@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -63,8 +64,12 @@ class InternalModelProviderProbeServiceTest {
 
     @Test
     void probeSucceedsAndRecordsDetailAndStatus() throws IOException {
+        AtomicReference<String> authTokenHeader = new AtomicReference<>();
+        AtomicReference<String> authorizationHeader = new AtomicReference<>();
         upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         upstream.createContext("/chat/completions", exchange -> {
+            authTokenHeader.set(exchange.getRequestHeaders().getFirst("Auth-Token"));
+            authorizationHeader.set(exchange.getRequestHeaders().getFirst("Authorization"));
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
             exchange.sendResponseHeaders(200, 0);
             try (OutputStream output = exchange.getResponseBody()) {
@@ -85,6 +90,8 @@ class InternalModelProviderProbeServiceTest {
         var result = service.probeAll("trace_probe");
 
         assertThat(result.allSucceeded()).isTrue();
+        assertThat(authTokenHeader.get()).isEqualTo(MODEL_TOKEN);
+        assertThat(authorizationHeader.get()).isNull();
         var outcome = result.outcomes().get(PROVIDER_ID);
         assertThat(outcome.outcome()).isEqualTo(InternalModelCallOutcome.SUCCESS);
         assertThat(outcome.httpStatus()).isEqualTo(200);
