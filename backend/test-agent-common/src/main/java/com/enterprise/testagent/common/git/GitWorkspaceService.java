@@ -1526,16 +1526,17 @@ public class GitWorkspaceService {
 
     /**
      * 列出指定提交和目录前缀下的普通 Git blob 路径。Hub 只从已 push 的不可变提交取材，
-     * 不读取可能继续变化的工作树。
+     * 不读取可能继续变化的工作树。使用 NUL 分隔读取原始 UTF-8 路径，避免 Git 默认
+     * quotepath 把中文文件名转换成带引号的 C 风格展示文本，导致后续按提交读取 blob 失败。
      */
     public List<String> listFilesAtCommit(Path repoRoot, String commit, String pathPrefix) {
         String prefix = pathPrefix == null ? "" : pathPrefix.replace('\\', '/');
-        return executor.execute(
-                        List.of("git", "-C", repoRoot.toString(), "ls-tree", "-r", "--name-only", commit, "--", prefix),
+        byte[] output = executor.execute(
+                        List.of("git", "-C", repoRoot.toString(), "ls-tree", "-r", "--name-only", "-z", commit, "--", prefix),
                         null,
                         DEFAULT_TIMEOUT)
-                .stdoutText().lines()
-                .map(String::trim)
+                .stdoutBytes();
+        return java.util.Arrays.stream(new String(output, StandardCharsets.UTF_8).split("\\u0000", -1))
                 .filter(path -> !path.isEmpty())
                 .toList();
     }
