@@ -1,0 +1,15 @@
+entity: user_account
+description: 体验应用的用户账户
+fields:
+  - name: username
+    type: varchar(64)
+    required: true
+  - name: password_hash
+    type: varchar(255)
+    required: true
+  - name: failed_login_count
+    type: integer
+    default: 0
+  - name: locked_until
+    type: datetime
+    nullable: true

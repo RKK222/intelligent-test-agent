@@ -1391,9 +1391,13 @@ package_release_zip() {
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
   for required_artifact in \
     "${staging_dir}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
-    "${staging_dir}/deploy/internal/opencode-runtime.gitignore"; do
+    "${staging_dir}/deploy/internal/opencode-runtime.gitignore" \
+    "${staging_dir}/deploy/internal/ensure-experience-workspace-content.sh" \
+    "${staging_dir}/deploy/internal/experience-workspace-template/README.md" \
+    "${staging_dir}/deploy/internal/experience-workspace-template/docs/应用架构/测试概述.md" \
+    "${staging_dir}/deploy/internal/experience-workspace-template/spec/I000001-用户登录体验/04-测试/S000001-账号密码登录/041-测试设计/测试案例.md"; do
     if [[ ! -f "${required_artifact}" ]]; then
-      echo "Required OpenCode Git ignore deployment artifact not found: ${required_artifact}" >&2
+      echo "Required deployment artifact not found: ${required_artifact}" >&2
       exit 1
     fi
   done

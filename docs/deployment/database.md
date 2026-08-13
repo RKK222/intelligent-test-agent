@@ -1373,7 +1373,7 @@ LobeHub fork 使用独立 ParadeDB/PostgreSQL 17、独立账号、卷和自身 m
 
 旧体验分支已在需要保留的个人 PostgreSQL 执行候选 `V20260809210000__common_parameters_add_experience_workspace.sql`，因此该文件以 SHA-256 `c093695aac4305aed3caeb8fcec58f0731f1519527031f1775adaf8be86cf24a` 原字节冻结在 `db/migration-compat/experience-workspace-applied`。当前 release 已执行到更高版本，主目录不再解析该候选；无旧候选 history 的数据库执行幂等前向 migration `V20260812104911__common_parameters_add_experience_workspace_after_release.sql`。已执行旧候选且 checksum 为 Flyway `-1300860043` 的数据库由唯一 `DatabaseMigrationCompatibilityCustomizer` 加载隔离 location 校验原文，并继续执行同一高版本前向 migration；未知 checksum 明确失败关闭。两条历史均保持 `outOfOrder=false`，不使用 `repair` 或第二套迁移器。
 
-`V20260812144051__common_parameters_default_experience_workspace.sql` 不变更表结构，也不写演示 Workspace 或用户数据；它只迁移生产必需的默认参数。目录、`.git`、README 和初始提交由各 Java 启动 Runner 在本机幂等创建，不由 Flyway 操作文件系统。
+`V20260812144051__common_parameters_default_experience_workspace.sql` 不变更表结构，也不写演示 Workspace 或用户数据；它只迁移生产必需的默认参数。标准 `docs/spec` 虚构示例是随发布包交付的独立文件模板，由开发/部署 Shell 在 Java 启动前仅补齐缺失文件；Java Runner 只保留目录、`.git` 和 README 的最小兜底。两者都在本机操作，不由 Flyway 操作文件系统。
 
 migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示文件。运行期 SQL 全部位于 `ExperienceWorkspaceMapper.xml`：先按确定性 ID `ON CONFLICT DO NOTHING` 登记 `workspaces`，再以调用前读取的完整 binding 快照执行 compare-and-set；无绑定时只插入、已有绑定时只有 `workspace_id + configured_parameter_value + updated_at` 全部仍匹配才更新。两步由 `MyBatisExperienceWorkspaceRepository` 在同一事务内完成，CAS 失败由应用层从通用参数重新读取并重试，跨 Java 的旧配置请求不能迟到覆盖新绑定。参数换目录时旧 `workspaces` 行不删除、不改指，继续承载历史 Session/Run 外键；普通 Workspace 用户查询按转义后的字面 `wrk_exp_` 前缀排除历史体验记录。
 

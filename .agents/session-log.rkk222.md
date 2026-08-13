@@ -10335,3 +10335,27 @@
 
 - 运行态文件、会话、Run、最近偏好、需求导入与前端缓存继续以 `Workspace.workspaceId` 为唯一主键；模板/版本/个人记录 ID 只承担各自领域语义，不再替代运行态标识。
 - 本次不新增 API、RunEvent、数据库、migration、部署变量或运行服务，未修改 `.env*`、generated SDK 或 OpenCode 源码；真实登录与 TCDS 端到端复测仍受测试 PostgreSQL 未运行阻塞。
+
+## 2026-08-13 - 用随包模板补齐体验工作区内容
+
+### Why
+
+- 体验工作区只有最小 README，用户无法直接体验标准 `docs/` 稳定资料和 TCDS `spec/` 需求至测试过程目录。
+- 示例正文不应硬编码在 Java 服务中，升级存量目录也不能覆盖用户已有文件、提交历史或 Git index。
+
+### What
+
+- 新增 `deploy/internal/experience-workspace-template/` 独立文件模板，覆盖七类 `docs/` 资料与当前 TCDS 导入实现一致的 `spec/{父条目编号-名称}/01-需求` 至 `04-测试` 虚构登录示例。
+- 新增 `ensure-experience-workspace-content.sh`：逐文件仅补缺失项，拒绝符号链接/非普通目标；无 HEAD 时只提交模板路径，已有 HEAD 时新文件保留为未跟踪变更。
+- 本地重启与企业部署共用该脚本；发布 ZIP 强制携带脚本和模板，企业节点以 systemd Java 运行用户创建内容。Java 仅保留目录、Git 和 README 的最小直接启动兜底。
+
+### How
+
+- `tools/verify-experience-workspace-content.sh` 验证新仓库单基线提交、无 remote、不夹带用户暂存文件，以及存量仓库只补缺失文件、不覆盖 README、不改 HEAD/index 和重复执行幂等。
+- `tools/verify-dev-scripts.sh`、`tools/verify-internal-multi-backend-node.sh`、`tools/verify-internal-incremental-components.sh`、Shell 语法和 `git diff --check` 均通过；JDK 25 后端 22 模块跳过测试完整打包成功。
+- 按 `.env.test`/`test` profile 执行真实重启，模板补齐入口成功执行；后端因本机 PostgreSQL `127.0.0.1:15432` 拒绝连接未进入 readiness，未替换 `.env.test` 或绕过依赖。
+
+### Result
+
+- 体验内容改为可直接维护的随包文件，标准部署/重启自动补缺失项且保留存量用户内容；不新增服务、端口、中间件、强制配置或数据库 migration。
+- 本次只同步既有体验 API 的初始化行为说明，不变更 HTTP/RunEvent/DTO 契约、安全权限、generated SDK、`.env*` 或 OpenCode 源码；真实三服务健康验收仍受本机 PostgreSQL 未运行阻塞。

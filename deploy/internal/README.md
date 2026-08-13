@@ -589,6 +589,17 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
   programs/
 ```
 
+### 体验工作区示例补齐
+
+发布包保留 `deploy/internal/experience-workspace-template/` 作为独立文件模板，不把文档正文写入 Java 或 Shell heredoc。后端部署在 Java 启动前自动执行：
+
+```bash
+bash /data/testagent/deploy/internal/ensure-experience-workspace-content.sh \
+  --workspace-dir /data/testagent/data/agent-opencode/workspace/experience
+```
+
+脚本逐文件检查，只复制缺失项，不覆盖用户已有内容。没有 Git HEAD 时仅为模板路径创建一个无 remote 基线提交；已有 HEAD 时不修改历史和 index，新补文件保留为本地未跟踪变更。标准部署会读取 systemd `User`/`Group` 并以同一 Java 运行身份执行，避免 root 创建的文件导致体验区只读。如果通用参数 `OPENCODE_EXPERIENCE_WORKSPACE_DIR` 使用非默认绝对路径，运维必须在启动该节点 Java 前以 Java 运行身份用同一命令将 `--workspace-dir` 替换为实际路径；脚本不读取数据库参数，也不新增 `backend.env` 配置。
+
 企业交付 JAR/ZIP 包含平台 RSA 私钥，必须按密钥交付物限制读取、复制和留存；替换内置密钥会让既有数据库 SSH key 密文无法解密，除非用户重新保存 SSH key。
 
 企业后端采用 `test-agent-app.jar` 瘦启动器与 `dist/backend/lib/` 外置依赖。Flyway migration
