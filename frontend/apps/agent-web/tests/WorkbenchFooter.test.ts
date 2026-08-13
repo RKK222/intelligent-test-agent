@@ -516,6 +516,19 @@ describe("WorkbenchFooter", () => {
     expect(relativeAgent.find(".ta-workbench-footer-copy-path").exists()).toBe(false);
   });
 
+  it("does not expose physical path resolution for a workspace without an authorized runtime id", () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        writePath: "src/main.ts",
+        workspaceId: "wrk-source",
+        workspaceKind: "APP_SOURCE"
+      }
+    });
+
+    expect(wrapper.find(".ta-workbench-footer-copy-path").exists()).toBe(false);
+  });
+
   it("renders locate button when writePath is defined, and emits locate on click", async () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {

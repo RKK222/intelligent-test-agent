@@ -119,11 +119,13 @@ import {
   appSourcePurposeUpdateAllowed,
   appSourceRecoveryFailureInvalidatesRecent,
   appSourceTreeAuthorityMatches,
+  cacheRuntimeWorkspace,
   appSourceWorkspaceCapabilities,
   claimAppSourceTerminalOperation,
   diffFileCanWrite,
   ordinaryWorkspaceCanWrite,
   personalWorkspaceRuntimeContext,
+  physicalPathResolutionWorkspaceId,
   sourceContextFromOpen,
   type AppSourceProgressAuthority,
   type AppSourceIntentAuthority,
@@ -205,6 +207,8 @@ import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
 import { type PreviewMode } from "./WorkbenchFooter.vue";
 import {
+  normalizeWorkspaceRelativeEntries,
+  normalizeWorkspaceRelativePath,
   normalizePhysicalAbsolutePath,
   workspacePhysicalRootPath
 } from "./physical-path";
@@ -5152,11 +5156,7 @@ async function resolvePersonalWorkspaceRuntimeContext(
 function cacheWorkspace(workspace: Workspace) {
   queryClient.setQueryData<PageResponse<Workspace>>(["workspaces"], (old) => {
     const previousItems = old?.items ?? [];
-    const existed = previousItems.some((item) => item.workspaceId === workspace.workspaceId || sameWorkspaceIdentity(item, workspace));
-    const items = [
-      workspace,
-      ...previousItems.filter((item) => item.workspaceId !== workspace.workspaceId && !sameWorkspaceIdentity(item, workspace))
-    ];
+    const { items, existed } = cacheRuntimeWorkspace(previousItems, workspace);
     return {
       items,
       page: old?.page ?? 1,
@@ -5164,14 +5164,6 @@ function cacheWorkspace(workspace: Workspace) {
       total: old ? old.total + (existed ? 0 : 1) : items.length
     };
   });
-}
-
-/** 工作区去重只使用稳定业务身份，禁止再用服务端物理目录做浏览器侧匹配。 */
-function sameWorkspaceIdentity(left: Workspace, right: Workspace) {
-  return Boolean(left.versionId)
-    && left.versionId === right.versionId
-    && (left.applicationWorkspaceId ?? "") === (right.applicationWorkspaceId ?? "")
-    && (left.linuxServerId ?? "") === (right.linuxServerId ?? "");
 }
 
 function workspaceNameFromPath(path: string) {
@@ -9729,10 +9721,10 @@ function applyRunEventWorkbenchProjection(
     // 两种格式都按 path 累加去重，避免后到的单文件事件把前面已累加的多个文件覆盖。
     // 归一化路径后再合并：opencode 部分场景会把 file 写成 "a/src/App.vue" 或带盘符的
     // 绝对路径，与 inferDiffFromToolPart 推断出来的相对路径必须落到同一个 key。
-    const files = diffFilesFromPayload(event.payload).map((f) => ({
-      ...f,
-      path: normalizeWorkspacePath(f.path) || f.path
-    }));
+    const files = normalizeWorkspaceRelativeEntries(
+      diffFilesFromPayload(event.payload),
+      selectedWorkspacePhysicalRootPath.value
+    );
     if (files.length) {
       if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
@@ -9748,10 +9740,10 @@ function applyRunEventWorkbenchProjection(
   } else if (event.type === "session.diff") {
     // 历史事件类型。当前 OpencodeRunEventMapper 已将 session.diff 映射为 diff.proposed，
     // 这里保留以兼容后端直接转发该类型事件的场景。
-    const files = diffFilesFromPayload(event.payload).map((f) => ({
-      ...f,
-      path: normalizeWorkspacePath(f.path) || f.path
-    }));
+    const files = normalizeWorkspaceRelativeEntries(
+      diffFilesFromPayload(event.payload),
+      selectedWorkspacePhysicalRootPath.value
+    );
     if (files.length) {
       if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
@@ -9896,20 +9888,20 @@ async function refreshPersistedFeedbackIdentities(runId: string, sessionId: stri
 // - 去掉 workspace 根路径（兼容根路径带不带尾斜杠）
 // - 折叠前导 ./ 与重复斜杠
 function normalizeWorkspacePath(raw: string): string {
-  const rootPath = selectedWorkspacePhysicalRootPath.value ?? "";
-  let p = raw.replace(/^([ab])\//, "").replace(/\\/g, "/");
-  const normalizedRoot = rootPath.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (normalizedRoot) {
-    if (p === normalizedRoot) {
-      p = "";
-    } else if (p.startsWith(`${normalizedRoot}/`)) {
-      p = p.slice(normalizedRoot.length + 1);
+  return normalizeWorkspaceRelativePath(raw, selectedWorkspacePhysicalRootPath.value) ?? "";
+}
+
+function resolvablePhysicalPathWorkspaceId(path?: string, agentSource = false): string | undefined {
+  if (!path) return undefined;
+  return physicalPathResolutionWorkspaceId(
+    selectedWorkspaceKind.value,
+    selectedWorkspace.value?.workspaceId,
+    {
+      shared: shareMode.value,
+      reference: isReferenceFilePath(path),
+      agent: agentSource || isAgentFilePath(path)
     }
-  }
-  while (p.startsWith("./")) p = p.slice(2);
-  p = p.replace(/\/+$/, "");
-  p = p.replace(/\/+/g, "/");
-  return p;
+  );
 }
 
 // 从 tool part 的 input 提取文件路径，并归一化为 workspace 相对路径。
@@ -10179,8 +10171,8 @@ function applyToolChangeToDiff(part: Extract<MessagePart, { type: "tool" }>, raw
   if (!inferred) {
     return;
   }
-  const relPath = normalizeWorkspacePath(inferred.path) || normalizeWorkspacePath(rawPath) || inferred.path;
-  if (!relPath || relPath.startsWith("/")) {
+  const relPath = normalizeWorkspacePath(inferred.path) || normalizeWorkspacePath(rawPath);
+  if (!relPath) {
     return;
   }
   diffFiles.value = mergeDiffFiles(diffFiles.value, [{ ...inferred, path: relPath }]);
@@ -10581,10 +10573,10 @@ async function switchSession(
     rememberPersistedMessageIdentities(persistedMessages);
     // 先以分页消息渲染正文，树快照和 Todo 作为后续增强；避免大历史树把首屏卡住。
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
-    const restoredFiles = diffFilesFromSessionMessages(persistedMessages).map((file) => ({
-      ...file,
-      path: normalizeWorkspacePath(file.path) || file.path
-    }));
+    const restoredFiles = normalizeWorkspaceRelativeEntries(
+      diffFilesFromSessionMessages(persistedMessages),
+      selectedWorkspacePhysicalRootPath.value
+    );
     diffFiles.value = restoredFiles;
     replayHistorySwitchRunEvents(liveRunEvents);
     // 视觉 loading 只等待数据库正文；实时 interaction 校准继续后台完成，发送锁仍由 switching 状态持有。
@@ -10658,10 +10650,10 @@ async function switchSession(
           rememberRunSession(runDetail);
           restoreCompletedHistoryRunTiming(runDetail);
         }
-        const runFiles = (diffDetail.files ?? []).map((file) => ({
-          ...file,
-          path: normalizeWorkspacePath(file.path) || file.path
-        }));
+        const runFiles = normalizeWorkspaceRelativeEntries(
+          diffDetail.files ?? [],
+          selectedWorkspacePhysicalRootPath.value
+        );
         // RunEvent 可能已在历史详情请求期间补入实时 Diff；以当前投影为基线合并，不能退回旧快照。
         diffFiles.value = mergeDiffFiles(diffFiles.value, runFiles);
       } catch (runErr) {
@@ -11398,6 +11390,7 @@ async function handleLogout() {
           </div>
           <WorkbenchFooter
             :write-path="selectedDiffPath"
+            :workspace-id="resolvablePhysicalPathWorkspaceId(selectedDiffPath, diffSource === 'agent')"
             :dirty="isDiffDirty"
             :saving="saveDiffFileMutation.isPending.value"
             :readonly="!canSaveSelectedDiffFile"
@@ -11435,7 +11428,7 @@ async function handleLogout() {
           :active-path="activePath"
           :breadcrumb-path="breadcrumbDisplay"
           :write-path="activeTab?.path"
-          :workspace-id="selectedWorkspace?.workspaceId"
+          :workspace-id="resolvablePhysicalPathWorkspaceId(activeTab?.path)"
           :copy-path="activeTabCopyPath"
           :updated-at="activeTab ? Date.now() / 1000 : undefined"
           :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"

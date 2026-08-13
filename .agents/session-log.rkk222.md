@@ -10033,3 +10033,50 @@
 
 - 内置需求导入、安全文件写入和路径收敛已实现并通过自动化测试与构建；新增必填部署变量和 `rootPath` 语义要求前后端及部署配置同批发布、同批回滚。
 - 真实 TCDS 查询、目录生成、重复覆盖、部分失败、文件树刷新及原扫描 HTTP/WS 请求重放尚未验证，须在测试 PostgreSQL 恢复后补跑；旧 9900 服务本轮未停用。
+
+## 2026-08-13 - 修复中文 Skill 推送成功后未进入 SkillHub
+
+### Why
+
+- 企业 F-SLB 的中文 Skill 已成功推送 feature 分支，但 SkillHub 未展示；现网定时对账日志持续出现 `git show <commit>:"<中文转义路径>"` 文件不存在。
+- `GitWorkspaceService.listFilesAtCommit()` 使用换行格式读取 `git ls-tree`，Git 默认 quotepath 会把非 ASCII 路径转换为带引号的 C 风格展示文本，后续 blob 读取把该展示文本误当成真实路径。
+
+### What
+
+- 复用既有固定提交枚举入口，将 `git ls-tree` 改为 `-z` NUL 分隔并按 UTF-8 原样解析，不新增 Hub 索引器、补偿任务、API、数据库或配置。
+- 在真实临时 Git 仓库提交 `SLB快速检索环境应用所有端口策略/SKILL.md`，回归验证中文路径原样枚举和固定提交 blob 读取；同步 common README 与包说明。
+
+### How
+
+- JDK 25 下 `GitWorkspaceServiceRealGitTest` 18/18、common 全量 102/102、`AgentSkillHubApplicationServiceTest` 14/14 通过。
+- `test-agent-workspace-management` 及上游六模块跳过测试打包成功；`git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；`GitWorkspaceService.java` 中并行存在 SCM 身份改动，本次只暂存 NUL 路径枚举修复，避免夹带他人工作。
+
+### Result
+
+- 中文及含空格的固定提交路径不会再被 Git 展示转义污染，发布即时索引和既有每 2 分钟本机快照对账均可正常生成 SkillHub 快照。
+- 本次不改变 HTTP API、RunEvent、数据库、migration、性能边界、安全权限、环境配置、generated SDK 或 OpenCode 源码；企业现场需部署包含该修复的新后端，已成功推送的 Skill 无需再次 push。
+
+## 2026-08-13 - 回归修复 Workspace 运行态标识
+
+### Why
+
+- `workspaceId` 经多轮语义调整后，需要重新检查运行态 Workspace、应用模板、应用版本和个人 worktree 标识是否混用；物理根路径从普通响应移除后，也要确认文件与 Diff 路由没有退回绝对路径。
+- 复查发现前端缓存用 `versionId + applicationWorkspaceId + linuxServerId` 辅助去重，会误删同版本、同模板、同服务器下不同运行态 `workspaceId` 的个人 worktree；普通 Diff 未传运行态 ID，且非法绝对 Diff 路径仍有回退原值的入口。
+
+### What
+
+- Workspace 缓存只按精确运行态 `workspaceId` 替换，保留同版本的 default 与自定义个人 worktree；新增前缀回归锁定 `wrk_ / awp_ / awv_ / psw_` 四类 ID 边界。
+- 普通托管编辑器和 Diff 按精确 `workspaceId` 开放逐文件物理路径解析，分享、支持、体验、源码快照、引用和 Agent 文件继续失败关闭。
+- 工具事件、实时/历史 Diff 与 Run 详情统一过滤绝对 Unix/Windows、URI 和越界路径，移除归一化失败后回退原始宿主机路径的分支；同步安全复测记录。
+
+### How
+
+- 后端 Workspace/runtime/API 相关 19 模块测试通过，API 模块 565 项通过；ID 前缀专项 2/2 通过。22 模块本地启动前打包成功。
+- 前端全量 124 文件、1949 passed / 1 skipped，类型检查和 production build 通过；Workspace 定向 Chromium 9/9 通过，覆盖普通文件、切换竞态、最近个人 worktree、源码快照、体验空间和 Diff。
+- 全套 Chromium 运行到 103 项通过时，另有既有 `/workbench` 路由断言与首次引导弹窗遮挡失败，未将整套计为通过。`.env.test` 真实启动时前端 3000 返回 200，后端仍因 PostgreSQL `127.0.0.1:15432` 拒绝连接失败。
+
+### Result
+
+- 运行态文件、会话、Run、最近偏好、需求导入与前端缓存继续以 `Workspace.workspaceId` 为唯一主键；模板/版本/个人记录 ID 只承担各自领域语义，不再替代运行态标识。
+- 本次不新增 API、RunEvent、数据库、migration、部署变量或运行服务，未修改 `.env*`、generated SDK 或 OpenCode 源码；真实登录与 TCDS 端到端复测仍受测试 PostgreSQL 未运行阻塞。
