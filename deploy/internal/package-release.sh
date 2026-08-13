@@ -1427,6 +1427,8 @@ mkdir -p "${OUTPUT_DIR}"
 bash "${SCRIPT_DIR}/validate-opencode-models.sh" \
   "${SCRIPT_DIR}/opencode-models.json" \
   "${SCRIPT_DIR}/opencode.jsonc.example"
+bash "${SCRIPT_DIR}/verify-opencode-model-priority.sh" \
+  "${SCRIPT_DIR}/opencode-models.json"
 if [[ -z "${COMPONENT_STATE_FILE}" ]]; then
   COMPONENT_STATE_FILE="${OUTPUT_DIR}/.release-component-state.env"
 fi
