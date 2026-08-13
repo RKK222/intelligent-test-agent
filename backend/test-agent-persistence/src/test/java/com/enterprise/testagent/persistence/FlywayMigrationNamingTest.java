@@ -313,6 +313,15 @@ class FlywayMigrationNamingTest {
     }
 
     @Test
+    void appliedLocalClientRuntimeMigrationRemainsByteExactInCompatibilityLocation()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration-compat/local-client-runtime-applied",
+                LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION,
+                LOCAL_CLIENT_RUNTIME_FORWARD_SHA256);
+    }
+
+    @Test
     void appliedNotificationAndTokenLatencyMigrationsRemainByteExact()
             throws IOException, NoSuchAlgorithmException {
         assertMigrationSha256(

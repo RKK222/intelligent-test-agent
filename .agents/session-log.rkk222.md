@@ -10014,3 +10014,23 @@
 ### Result
 
 - Vue 组件类型声明与 release 当前源码一致；本次不涉及 API、RunEvent、数据库、部署、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 兼容 release 读取已执行的本地客户端迁移历史
+
+### Why
+
+- `.env.test` 的共享 PostgreSQL 已由 dev 执行 `V20260812202425`，而 release 按产品边界不包含本地客户端主链，Flyway 因无法解析已执行版本而拒绝启动。
+
+### What
+
+- 在唯一 `DatabaseMigrationCompatibilityCustomizer` 中仅对 history 已存在 `V20260812202425` 的数据库加载原始字节隔离目录；release 空库和正常升级不扫描、不执行该 SQL，也不装配本地客户端 API 或服务。
+- 锁定隔离 SQL 的 SHA-256，补充真实 PostgreSQL 已执行路径与未知 checksum 失败关闭用例，并同步 app README 和数据库部署文档。
+
+### How
+
+- 与 dev 已执行资源逐字节比对，源码和 persistence JAR SHA-256 均为 `168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026`；Flyway 字节锁定测试 12/12、AI 文档校验和 22 模块跳过测试打包通过。
+- 真实 PostgreSQL Testcontainers 套件因本机 amd64 PostgreSQL 冷启动超过日志等待窗口报容器启动超时，容器随后自行 ready；改由当前 `.env.test` 的真实已执行 history 启动 release 作为运行验证，不使用 `outOfOrder`、`repair` 或手工修改历史表。
+
+### Result
+
+- release 可校验共享开发库中的客户端历史，但仍不发布客户端运行能力；本次只扩展数据库历史兼容装配和文档，不新增 API、RunEvent、业务表迁移或环境配置。

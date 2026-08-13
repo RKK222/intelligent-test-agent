@@ -769,6 +769,23 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         });
     }
 
+    @Test
+    void unknownLocalClientRuntimeChecksumStillFailsClosed() {
+        DataSource dataSource = dataSource("local_client_runtime_unknown_checksum");
+        migrateWithoutResourceTo(
+                dataSource,
+                CURRENT_MERGED_RELEASE_MAX_VERSION,
+                LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE);
+        runBootFlyway(dataSource, flyway ->
+                assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue());
+        overwriteAppliedChecksum(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION, 987654321);
+
+        bootFlywayRunner(dataSource).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).hasStackTraceContaining("checksum");
+        });
+    }
+
     /** 为每套历史创建独立 schema，避免测试之间共享 Flyway history。 */
     private static DataSource dataSource(String schema) {
         PGSimpleDataSource admin = postgresDataSource();

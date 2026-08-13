@@ -34,7 +34,7 @@
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
 - `config.ExternalApiCredentialStartupRunner`：在 Flyway 完成后严格整表加载外部 API 凭据；任何解密或数据校验失败都会阻止实例就绪，不使用未初始化或部分快照启动。
 - `config.ExperienceWorkspaceStartupRunner`：在 Flyway 与通用参数加载后调用 workspace-management，幂等创建本服务器体验目录、`.git`、README 和初始提交；已有内容不重置，初始化失败阻止实例就绪。
-- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析工具盒子、LobeHub、内部模型可观测、撤销重发、外部 API 凭据、QA Memory 及体验工作区的已知迁移分叉。已执行 `V20260809120000`、`V20260809230000`、`V20260810090000` 的个人库会保留原始字节，并以 `V20260810110000` 至 `V20260810110002` 顺序补齐外部 API 和会话分享结构；已先执行会话分享主链但缺少较低版本 QA Memory 的 release 历史，在尚未执行 `V20260810234154` 时使用 `V20260810173117`，已执行该 release 最高版本时改用 `V20260811170050`，两条隔离补偿均以一次事务建立相同最终记忆结构。已执行体验候选 `V20260809210000/-1300860043` 的个人库从 `db/migration-compat/experience-workspace-applied` 解析冻结原文，随后与未执行候选的 release 历史共同执行幂等前向版本 `V20260812104911`。已落库路径后续继续按原 location 校验，正常顺序历史与空库继续使用主 migration。未知 checksum、路径混用或不完整 history 一律失败关闭，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
+- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析工具盒子、LobeHub、内部模型可观测、撤销重发、外部 API 凭据、QA Memory、体验工作区及本地客户端的已知迁移分叉。已执行 `V20260809120000`、`V20260809230000`、`V20260810090000` 的个人库会保留原始字节，并以 `V20260810110000` 至 `V20260810110002` 顺序补齐外部 API 和会话分享结构；已先执行会话分享主链但缺少较低版本 QA Memory 的 release 历史，在尚未执行 `V20260810234154` 时使用 `V20260810173117`，已执行该 release 最高版本时改用 `V20260811170050`，两条隔离补偿均以一次事务建立相同最终记忆结构。已执行体验候选 `V20260809210000/-1300860043` 的个人库从 `db/migration-compat/experience-workspace-applied` 解析冻结原文，随后与未执行候选的 release 历史共同执行幂等前向版本 `V20260812104911`。release 历史若已越过较低版本本地客户端 migration，则从 `db/migration-compat/local-client-runtime-after-release` 执行或校验冻结的 `V20260812202425` 前向版本。已落库路径后续继续按原 location 校验，正常顺序历史与空库继续使用主 migration。未知 checksum、路径混用或不完整 history 一律失败关闭，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
 - `config.LobehubDevelopmentBootstrapRunner`：仅在 `test/local` profile 且
   `TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true` 时装配；拒绝非回环平台 PostgreSQL，通过既有通用参数管理服务
   写入审计后配置本地聊天 origin、虚拟邮箱域和唯一 owner，最后才启用 `LOBEHUB_ENABLED`。多个可用超级管理员时
@@ -73,7 +73,7 @@
 - `RedisHealthIndicatorTest` 覆盖 Redis 必需依赖的 TCP 健康检查。
 - `LoggingFrameworkBindingTest` 覆盖运行态使用 Log4j2 作为 SLF4J 实际绑定。
 - `WebClientConfigTest` 覆盖运行态提供可构建的 `WebClient.Builder`。
-- `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 验证企业顺序基线、工具盒子/LobeHub/内部模型/撤销重发分叉、QA Memory 完整与中间态个人历史、已执行会话分享但缺少 QA Memory 的 release 历史，以及体验工作区候选已执行/未执行两套历史都能升级到当前版本；未知 checksum 失败关闭，所有路径均未启用 `outOfOrder`。
+- `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 验证企业顺序基线、工具盒子/LobeHub/内部模型/撤销重发分叉、QA Memory 完整与中间态个人历史、已执行会话分享但缺少 QA Memory 的 release 历史、体验工作区候选已执行/未执行历史，以及 release 对已执行本地客户端版本的只校验兼容；未知 checksum 失败关闭，所有路径均未启用 `outOfOrder`。
 - `ExperienceWorkspaceStartupRunnerTest` 覆盖启动阶段只委托统一体验初始化程序，避免在 app 层复制 Git 逻辑。
 - `TestAgentApplicationTest` 覆盖即使 classpath 含 Servlet 依赖，平台主应用仍强制为 Reactive 并使用北京时间；integration 模块覆盖 Admin 独立端口、真实 MySQL Flyway、SSO 与故障退避。
 - `SpringBeanConstructorWiringTest` 扫描最终应用 `com.enterprise.testagent` 下的全部生产 Spring 组件，禁止多构造器 Bean 在既无显式注入构造器、又无无参构造器的情况下进入发布包，避免运行时回退到不存在的无参构造器。

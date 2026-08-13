@@ -1379,6 +1379,8 @@ migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示�
 
 `MyBatisExperienceWorkspacePostgresqlIntegrationTest` 使用真实 PostgreSQL 从已部署基线 `V20260809120000` 升级到 HEAD，校验高版本前向 migration、参数和表结构，并发同服务器只产生一个当前绑定、不同服务器隔离、换目录保留旧 Workspace。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 另以真实 Spring Boot Flyway 覆盖当前 release history、已执行旧候选 history 和未知旧 checksum 三条路径；`FlywayMigrationNamingTest` 锁定旧文件原始 SHA-256。合并或企业打包前仍必须读取每个目标环境完整 `flyway_schema_history`，并验证源码、persistence JAR 与最终应用嵌套 JAR 中的 migration 字节一致；禁止 `outOfOrder`、`repair` 或手工改历史表。
 
+共享开发库可能已经由 dev 执行本地客户端前向 migration `V20260812202425__local_client_credentials_create_runtime_after_release.sql`。release 不发布本地客户端 API、服务或默认主 migration；只有 history 已存在该版本时，唯一 `DatabaseMigrationCompatibilityCustomizer` 才加载隔离目录 `db/migration-compat/local-client-runtime-applied` 中 SHA-256 为 `168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026` 的原始字节用于 Flyway 校验。未执行该版本的 release 数据库不会扫描或执行该 SQL，因此不会新增本地客户端结构；未知 checksum 仍由 Flyway 失败关闭，不使用 `outOfOrder`、`repair` 或手工修改 history。
+
 ## V20260628100000 通用参数修改日志表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260628100000__add_common_parameter_change_logs.sql` 创建通用参数修改日志表，用于记录每次参数值修改的审计信息：
