@@ -2,6 +2,8 @@
 
 左侧 Agent 配置树分为公共配置和应用配置。公共配置来自独立的公共 Git，应用配置来自应用 Git。公共配置使用公共个人 worktree；应用配置与 workspace 文件共用当前版本、当前用户的个人 worktree，只按目录和权限分开展示、提交。
 
+![工作台左侧 Agents 区同时展示公共级和应用级配置，并在编辑器打开应用 Agent 文件](./images/operations/agent-config-tree.png)
+
 ## 公共配置
 
 公共配置由超级管理员按服务器维护，包含平台统一的 Agent、Skill、模型和供应商配置。只有超级管理员可以创建公共 worktree、修改文件、暂存、提交和推送；应用管理员与普通用户直接从已初始化服务器的共享公共副本只读查看允许展示的 `agents/` 和 `skills/` 内容，不需要公共 Git 仓库权限，也不要求先初始化个人 TestAgent 进程。公共级“更多操作”内提供“创建公共 worktree”和“切换公共 worktree”：创建会在所选服务器确保当前用户固定的 `public-{用户ID}` 分支和个人 worktree，已存在时直接挂载，不创建任意命名分支，也不能切换他人的 worktree。

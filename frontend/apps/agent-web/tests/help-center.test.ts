@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import HelpCenterDialog from "../src/components/HelpCenterDialog.vue";
 import {
   buildManualQuestionPrompt,
+  HELP_TOPICS,
   helpTopicById,
   helpDocumentUrl,
   normalizeHelpTopic,
@@ -15,6 +16,11 @@ const userManualDocuments = import.meta.glob("../../user-manual/docs/**/*.md", {
   import: "default",
   query: "?raw"
 }) as Record<string, string>;
+
+const manualOperationImages = import.meta.glob(
+  "../../user-manual/docs/guide/images/operations/*.{png,jpg,jpeg,webp}",
+  { eager: true, import: "default", query: "?url" }
+) as Record<string, string>;
 
 const forbiddenGameContentPatterns = [
   /游戏|游乐舱|桌面弹球|黄金矿工|俄罗斯方块|扫雷|数独|贪吃蛇/,
@@ -125,6 +131,25 @@ describe("help center", () => {
     for (const [documentPath, content] of Object.entries(userManualDocuments)) {
       for (const pattern of forbiddenGameContentPatterns) {
         expect(content, `${documentPath} 不得包含游戏内容：${pattern}`).not.toMatch(pattern);
+      }
+    }
+  });
+
+  it("keeps every embedded manual chapter illustrated with an existing operation image", () => {
+    const existingImageSources = new Set(
+      Object.keys(manualOperationImages).map((imagePath) =>
+        `./images/operations/${imagePath.split("/").at(-1)}`
+      )
+    );
+
+    for (const topic of HELP_TOPICS) {
+      const imageSources = Array.from(
+        topic.content.matchAll(/!\[[^\]\r\n]+\]\((\.\/images\/operations\/[^)\s]+\.(?:png|jpe?g|webp))\)/gi),
+        (match) => match[1]!
+      );
+      expect(imageSources.length, `${topic.path} 至少需要一张操作截图`).toBeGreaterThan(0);
+      for (const imageSource of imageSources) {
+        expect(existingImageSources, `${topic.path} 引用了不存在的截图 ${imageSource}`).toContain(imageSource);
       }
     }
   });

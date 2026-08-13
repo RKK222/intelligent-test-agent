@@ -1036,6 +1036,8 @@ directoryMapping:
 
 本页按当前已经落地的工作区和权限实现说明目录归属。页面把公共能力、应用能力和个人过程资产组合成一棵工程树，但物理上只有公共 Git 与应用 Git，不会为逻辑目录再创建第三套仓库。
 
+![在帮助中心逐级展开开发与测试目录树](./images/operations/directory-mapping.png)
+
 > 后续调整目录、Agent/workagent/Skill 名称、Git 归属或建设职责时，只修改本文件顶部的 `directoryMapping` 数据；`DirectoryMapping.vue` 仅负责通用展示和展开交互。
 
 <DirectoryMapping />
