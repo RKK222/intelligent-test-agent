@@ -10223,3 +10223,27 @@
 
 - Java 到企业 AI 网关现统一发送 `Auth-Token: <供应商关联 Token>`，确保 `ucid` 在企业上游生效；内部代理 Bearer 只保留在 OpenCode → Java 边界，`ucid` 与 traceId 注入链路、流式请求体、响应处理和可观测记录逻辑未改。
 - 本次不变更 HTTP 路径、DTO、RunEvent、数据库、migration、端口、部署拓扑、强制环境变量、generated SDK 或 OpenCode 源码；企业节点需要重新打包并部署后端应用才能生效。
+
+## 2026-08-14 - 修复提交推送进度误报并完成四类 Git 端到端验收
+
+### Why
+
+- 个人及公共 worktree 的提交推送弹框会出现先失败再转圈、成功后步骤仍为 `PENDING`、远端分支/commit 无证据等问题；用户切换工作空间或 Diff Tab 时还可能让进行中的操作误用新上下文。
+- 公共发布会把日期型或手工命名的历史 worktree 纳入补偿，造成远端已成功但 rollout 长期 `PENDING`，需要同时验证公共 Agent 对现有工作区和 dispose 的真实影响。
+
+### What
+
+- 前端在操作开始时冻结 workspace、个人/公共 worktree、分支、暂存文件和作用域；结果按单次操作统计，推送类操作只有确认远端成功才显示成功，并展示后端返回的远端分支与 commit。
+- Agent 配置进度 WebSocket 与现有文件/应用源码通道对齐显式 `*` 的 CORS 语义，一次性 ticket 仍为必需；无 `operationId` 的握手失败只降级实时进度，真实业务失败仍按 operationId 终止。
+- 后端为个人工作区发布响应补充 `remoteBranch`，公共操作持久化 branch；公共 rollout 跳过不再可复用的旧命名 worktree，并把既有相应任务安全标记为 `ABANDONED/WORKTREE_NO_LONGER_REUSABLE`。
+
+### How
+
+- 定向后端 158 项、进度 WebSocket 2 项和前端 Git 面板 48 项通过；前端全量 typecheck、production build，以及后端 22 模块 `clean package` 通过。
+- 使用内网 GitLab 私有仓库实际验证：测试个人本地提交 `24565915e8847736e66d15195841021d26aa6d34` 且远端不前进；测试应用 feature 推送 `f3f6760477aa7dcf59c0c1780bd46b1deb0c773a`；自动化个人本地提交 `9a45b196ab4d31a994fb57c95469026abaef3f03` 且远端不前进。
+- 从 `http://127.0.0.1:3000` 一步式提交并推送公共 Agent 到 `d2c941e50854cba7be43bddf516dfc5af2246321`；远端、共享副本、稳定个人 worktree 一致，rollout `acr_da1a7ff67b7a4be0b73dbd81ba7d13a5` 完成，dispose=1、pending=0、worktreePending=0。
+
+### Result
+
+- 四类 Git 链路均由真实平台和隔离远端完成验收；进度弹框不再先失败后转圈，发布成功会给出可独立核验的远端分支与 commit，切换 Tab 不会改变正在执行的目标。
+- 本地 test 数据库的公共 Agent Git 参数临时指向内网专用验收仓库；未修改 `.env*`、OpenCode 源码、generated SDK、数据库结构或 migration。本次只有 additive `remoteBranch` DTO 兼容扩展，不改变 RunEvent；release 修复后仍需按长期分支策略同步回 dev。

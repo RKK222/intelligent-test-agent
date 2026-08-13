@@ -527,6 +527,7 @@ public final class ManagedWorkspaceResponses {
             String message,
             boolean remotePushed,
             String headCommit,
+            String remoteBranch,
             List<String> executedCommands,
             String currentStep) {
 
@@ -538,7 +539,19 @@ public final class ManagedWorkspaceResponses {
                 String message,
                 boolean remotePushed,
                 String headCommit) {
-            this(status, personalWorkspaceId, versionId, conflictFiles, message, remotePushed, headCommit, List.of(), null);
+            this(status, personalWorkspaceId, versionId, conflictFiles, message, remotePushed, headCommit, null, List.of(), null);
+        }
+
+        public PersonalWorkspacePublishResponse(
+                String status,
+                String personalWorkspaceId,
+                String versionId,
+                List<String> conflictFiles,
+                String message,
+                boolean remotePushed,
+                String headCommit,
+                String remoteBranch) {
+            this(status, personalWorkspaceId, versionId, conflictFiles, message, remotePushed, headCommit, remoteBranch, List.of(), null);
         }
 
         public PersonalWorkspacePublishResponse withExecution(List<String> executedCommands, String currentStep) {
@@ -550,6 +563,7 @@ public final class ManagedWorkspaceResponses {
                     message,
                     remotePushed,
                     headCommit,
+                    remoteBranch,
                     executedCommands,
                     currentStep);
         }

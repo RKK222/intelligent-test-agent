@@ -3353,6 +3353,7 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(result.status()).isEqualTo("PUBLISHED");
         assertThat(result.remotePushed()).isTrue();
         assertThat(result.headCommit()).isEqualTo("commit_merged");
+        assertThat(result.remoteBranch()).isEqualTo(version.branch());
         assertThat(result.versionId()).isEqualTo(version.versionId());
         // 发布不合并个人分支，而是把个人 HEAD 的白名单文件投影到 feature worktree。
         assertThat(git.mergeCalls).isEmpty();

@@ -267,11 +267,20 @@ const effectiveApplicationUpdateBlockingFiles = computed(() =>
     : workspaceApplicationUpdateBlockingFiles.value
 );
 const commitRequestedPush = ref(false);
+const commitRemoteRequired = ref(false);
+type CommitOperationSnapshot = {
+  scope: DiffScope;
+  label: string;
+  meta: string;
+};
+const commitOperationSnapshot = ref<CommitOperationSnapshot | null>(null);
 type CommitResultSummary = {
   committedFiles: number;
   pushedFiles: number;
   localOnlySpecFiles: number;
   hadRemotePush: boolean;
+  remoteBranch?: string | null;
+  remoteCommit?: string | null;
   scopes: Array<{
     scope: DiffScope;
     label: string;
@@ -282,7 +291,11 @@ type CommitResultSummary = {
   }>;
 };
 const commitResultSummary = ref<CommitResultSummary | null>(null);
-const commitBatchCompleted = ref(true);
+const commitExecutionSucceeded = computed(() =>
+  !committing.value
+  && !errorMessage.value
+  && commitStep.value >= (commitRemoteRequired.value ? 5 : 2)
+);
 
 type PublishGitStep =
   | "PREPARE_REMOTE"
@@ -397,15 +410,18 @@ function applyPublishExecution(step: string | null | undefined, commands?: strin
   const currentStepCommands = commandsForStep(commands, step);
   // 发布接口返回的是整条 Git 流程的历史命令。进度弹框只展示当前步骤的具体命令，
   // 因此兜底展示当前/失败步骤最后一条，避免成功后一次性把所有命令刷到面板。
-  executedCommands.value = currentStepCommands.length > 0
-    ? [currentStepCommands[currentStepCommands.length - 1]]
-    : [];
+  const terminalPushCommand = step === "COMPLETED"
+    ? [...(commands ?? [])].reverse().find((command) => ` ${command.toLowerCase()} `.includes(" push "))
+    : undefined;
+  const command = terminalPushCommand ?? currentStepCommands[currentStepCommands.length - 1];
+  executedCommands.value = command ? [command] : [];
 }
 
 function applyPublishProgressEvent(event: AgentConfigProgressEvent) {
   // 实时进度是发布 HTTP 请求的旁路展示能力；连接失败不能冒充 Git 发布失败。
   // 此时继续等待 HTTP 权威结果，并阻止用户因短暂 FAILED 误判而重复提交。
-  if (event.errorCode === "WEBSOCKET_ERROR") {
+  // upgrade 阶段的安全拒绝帧没有 operationId，也属于通道故障；真实业务失败事件始终绑定 operationId。
+  if (event.errorCode === "WEBSOCKET_ERROR" || (event.type === "failed" && !event.operationId)) {
     publishProgressUnavailable.value = true;
     return;
   }
@@ -631,32 +647,26 @@ function commitScopeLabel(scope: DiffScope): string {
 
 function resetCommitBatch() {
   commitResultSummary.value = null;
-  commitBatchCompleted.value = true;
+  commitOperationSnapshot.value = null;
 }
 
 function recordCommitResult(
   scope: DiffScope,
-  result: Pick<CommitResultSummary, "committedFiles" | "pushedFiles" | "localOnlySpecFiles" | "hadRemotePush">
+  result: Pick<CommitResultSummary, "committedFiles" | "pushedFiles" | "localOnlySpecFiles" | "hadRemotePush" | "remoteBranch" | "remoteCommit">
 ) {
-  const scopes = [...(commitResultSummary.value?.scopes ?? [])];
-  const index = scopes.findIndex((item) => item.scope === scope);
-  const previous = index >= 0 ? scopes[index] : null;
-  const nextScope = {
+  // 结果只描述当前这一次操作，不能跨 Tab 累加；否则用户会把上一次 workspace 推送
+  // 误认为当前公共 Agent 已经推送成功。
+  const currentScope = {
     scope,
     label: commitScopeLabel(scope),
-    committedFiles: (previous?.committedFiles ?? 0) + result.committedFiles,
-    pushedFiles: (previous?.pushedFiles ?? 0) + result.pushedFiles,
-    localOnlySpecFiles: (previous?.localOnlySpecFiles ?? 0) + result.localOnlySpecFiles,
-    hadRemotePush: (previous?.hadRemotePush ?? false) || result.hadRemotePush
+    committedFiles: result.committedFiles,
+    pushedFiles: result.pushedFiles,
+    localOnlySpecFiles: result.localOnlySpecFiles,
+    hadRemotePush: result.hadRemotePush
   };
-  if (index >= 0) scopes[index] = nextScope;
-  else scopes.push(nextScope);
   commitResultSummary.value = {
-    committedFiles: scopes.reduce((total, item) => total + item.committedFiles, 0),
-    pushedFiles: scopes.reduce((total, item) => total + item.pushedFiles, 0),
-    localOnlySpecFiles: scopes.reduce((total, item) => total + item.localOnlySpecFiles, 0),
-    hadRemotePush: scopes.some((item) => item.hadRemotePush),
-    scopes
+    ...result,
+    scopes: [currentScope]
   };
 }
 const activeScopeItem = computed(() =>
@@ -673,6 +683,14 @@ const activeScopeMeta = computed(() => {
     ? `公共个人 worktree · ${workbench.publicWorktree.branch}`
     : "公共个人 worktree";
 });
+
+function commitScopeMeta(scope: DiffScope, personalBranch?: string, publicBranch?: string): string {
+  if (scope !== "PUBLIC") {
+    if (props.localOnlyGit) return "服务器本地共享仓库";
+    return personalBranch ? `个人 worktree · ${personalBranch}` : "个人 worktree";
+  }
+  return publicBranch ? `公共个人 worktree · ${publicBranch}` : "公共个人 worktree";
+}
 const activeAgentUnstaged = computed<AgentPanelDiffFile[]>(() =>
   activeDiffScope.value === "PUBLIC" ? publicAgentUnstaged.value : workspaceAgentUnstaged.value
 );
@@ -1539,6 +1557,14 @@ async function handleCommit(push = false) {
     : null;
   if (committing.value || (!hasWritableStagedChanges.value && !retryingPublicAgentPublish)) return;
   const operationScope = activeDiffScope.value;
+  // 一次提交从校验到 HTTP 终态必须绑定同一份上下文。用户可以关闭弹框或切换 Tab，
+  // 但这些界面动作不能改变正在执行的 workspace、worktree、文件白名单或后续发布分支。
+  const operationWorkspaceId = props.workspaceId;
+  const operationPersonalWorkspaceId = props.personalWorkspaceId;
+  const operationPublicWorktreeId = workbench.publicWorktree?.worktreeId;
+  const operationPublicBranch = workbench.publicWorktree?.branch;
+  const operationWorkspaceStaged = [...workspaceStaged.value];
+  const operationAgentStaged = [...activeAgentStaged.value];
   const retryingWorkspaceAgentPublish = operationScope === "AGENT_WORKSPACE"
     ? currentPendingWorkspaceAgentPublish()
     : null;
@@ -1547,17 +1573,17 @@ async function handleCommit(push = false) {
     progressMessage.value = "";
     return;
   }
-  if (activeDiffScope.value === "WORKSPACE" && canMutateWorkspaceGit.value && hasWorkspaceConflicts.value) {
+  if (operationScope === "WORKSPACE" && canMutateWorkspaceGit.value && hasWorkspaceConflicts.value) {
     errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
     progressMessage.value = "";
     return;
   }
-  if (activeDiffScope.value === "PUBLIC" && hasBlockingAgentConflicts.value) {
+  if (operationScope === "PUBLIC" && hasBlockingAgentConflicts.value) {
     errorMessage.value = "公共 Agent 个人 worktree 存在合并冲突，请先解决冲突文件后再提交并推送。";
     progressMessage.value = "";
     return;
   }
-  if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceAgentConflicts.value.length > 0) {
+  if (operationScope === "AGENT_WORKSPACE" && workspaceAgentConflicts.value.length > 0) {
     errorMessage.value = "应用 Agent 所在的个人 worktree 存在合并冲突，请先解决后再提交并推送。";
     progressMessage.value = "";
     return;
@@ -1568,17 +1594,17 @@ async function handleCommit(push = false) {
     return;
   }
 
-  const plannedCommittedFileCount = activeDiffScope.value === "WORKSPACE"
-    ? workspaceStaged.value.length
+  const plannedCommittedFileCount = operationScope === "WORKSPACE"
+    ? operationWorkspaceStaged.length
     : retryingWorkspaceAgentPublish
       ? retryingWorkspaceAgentPublish.diffFiles.length
-      : activeAgentStaged.value.filter((file) => canWriteAgentScope(file.scope)).length;
-  const plannedLocalOnlySpecFileCount = activeDiffScope.value === "WORKSPACE"
+      : operationAgentStaged.filter((file) => canWriteAgentScope(file.scope)).length;
+  const plannedLocalOnlySpecFileCount = operationScope === "WORKSPACE"
     ? workspaceStagedSpecCount.value
     : 0;
   const plannedPushedFileCount = push
-    ? activeDiffScope.value === "WORKSPACE"
-      ? workspaceStagedPublishableCount.value
+    ? operationScope === "WORKSPACE"
+      ? operationWorkspaceStaged.filter((file) => !isLocalOnlySpecPath(file.path)).length
       : plannedCommittedFileCount
     : 0;
 
@@ -1590,16 +1616,21 @@ async function handleCommit(push = false) {
   publishResultConfirmed.value = false;
   publishProgressUnavailable.value = false;
   commitRequestedPush.value = push;
-  if (commitBatchCompleted.value) {
-    commitResultSummary.value = null;
-    commitBatchCompleted.value = false;
-  }
+  commitRemoteRequired.value = push && (plannedPushedFileCount > 0 || Boolean(retryingPublicAgentPublish));
+  commitResultSummary.value = null;
+  commitOperationSnapshot.value = {
+    scope: operationScope,
+    label: commitScopeLabel(operationScope),
+    meta: commitScopeMeta(operationScope, props.personalWorkspaceBranch, operationPublicBranch)
+  };
   showCommitProgressDialog.value = false;
   commitStep.value = 0;
   let publishAttempted = false;
   let remotePublishCompleted = false;
   let localOnlySpecFileCount = 0;
   let publicLocalCommitCompleted = false;
+  let remoteBranch: string | null | undefined;
+  let remoteCommit: string | null | undefined;
 
   try {
     if (workbench.useMockTestData) {
@@ -1622,9 +1653,9 @@ async function handleCommit(push = false) {
       }
       commitStep.value = 5; // Success
       
-      if (activeDiffScope.value === "WORKSPACE") {
+      if (operationScope === "WORKSPACE") {
         stagedWorkspacePaths.value.clear();
-      } else if (activeDiffScope.value === "PUBLIC") {
+      } else if (operationScope === "PUBLIC") {
         publicAgentDiffs.value.forEach((file) => { file.staged = false; });
       } else {
         workspaceAgentDiffs.value.forEach((file) => { file.staged = false; });
@@ -1635,7 +1666,9 @@ async function handleCommit(push = false) {
         committedFiles: plannedCommittedFileCount,
         pushedFiles: plannedPushedFileCount,
         localOnlySpecFiles: plannedLocalOnlySpecFileCount,
-        hadRemotePush: push && plannedPushedFileCount > 0
+        hadRemotePush: push && plannedPushedFileCount > 0,
+        remoteBranch: null,
+        remoteCommit: null
       });
       progressMessage.value = push ? "提交并推送成功！(测试数据)" : "提交成功！(测试数据)";
       setTimeout(() => {
@@ -1646,8 +1679,8 @@ async function handleCommit(push = false) {
     }
 
     // 1. 应用工作空间先提交个人 worktree；推送时再从个人 HEAD 投影到 feature worktree。
-    if (activeDiffScope.value === "WORKSPACE" && canMutateWorkspaceGit.value && workspaceStaged.value.length > 0) {
-      if (!props.personalWorkspaceId && !props.localOnlyGit) {
+    if (operationScope === "WORKSPACE" && canMutateWorkspaceGit.value && operationWorkspaceStaged.length > 0) {
+      if (!operationPersonalWorkspaceId && !props.localOnlyGit) {
         errorMessage.value = "当前不是个人 worktree，不能提交或发布应用变更。";
         progressMessage.value = "";
         committing.value = false;
@@ -1656,15 +1689,15 @@ async function handleCommit(push = false) {
       progressMessage.value = "正在提交个人 worktree...";
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
-      const files = workspaceStaged.value.map((file) => file.path);
+      const files = operationWorkspaceStaged.map((file) => file.path);
       const publishableFiles = files.filter((file) => !isLocalOnlySpecPath(file));
       localOnlySpecFileCount = files.length - publishableFiles.length;
       if (props.localOnlyGit) {
-        if (!props.workspaceId) throw new Error("体验工作区 ID 不存在");
+        if (!operationWorkspaceId) throw new Error("体验工作区 ID 不存在");
         progressMessage.value = "正在建立体验工作区本地提交...";
-        await api.commitExperienceWorkspace(props.workspaceId, msg, files);
+        await api.commitExperienceWorkspace(operationWorkspaceId, msg, files);
       } else {
-        await api.commitPersonalWorkspace(props.personalWorkspaceId!, {
+        await api.commitPersonalWorkspace(operationPersonalWorkspaceId!, {
           commitMessage: msg,
           files,
           operationId: newOperationId()
@@ -1684,7 +1717,7 @@ async function handleCommit(push = false) {
         }
         const result = await (async () => {
           try {
-            return await api.publishPersonalWorkspace(props.personalWorkspaceId!, {
+            return await api.publishPersonalWorkspace(operationPersonalWorkspaceId!, {
               commitMessage: msg,
               files: publishableFiles,
               operationId: publishOperationId
@@ -1703,6 +1736,8 @@ async function handleCommit(push = false) {
         }
         publishResultConfirmed.value = true;
         remotePublishCompleted = true;
+        remoteBranch = result.remoteBranch;
+        remoteCommit = result.headCommit;
         commitStep.value = 5;
         progressMessage.value = "已从个人 HEAD 投影并推送到应用 feature 分支！";
       } else if (push && localOnlySpecFileCount > 0) {
@@ -1721,16 +1756,16 @@ async function handleCommit(push = false) {
 
     // 2. Commit Agent PUBLIC changes
     const publicStagedCount = canWriteAgentScope("PUBLIC")
-      ? publicAgentDiffs.value.filter((f) => f.staged).length
+      ? operationAgentStaged.filter((f) => f.staged).length
       : 0;
-    if (activeDiffScope.value === "PUBLIC" && (publicStagedCount > 0 || retryingPublicAgentPublish)) {
+    if (operationScope === "PUBLIC" && (publicStagedCount > 0 || retryingPublicAgentPublish)) {
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
       if (!retryingPublicAgentPublish) {
         progressMessage.value = "正在提交公共 Agent 配置...";
         const opId = newOperationId();
         await runAgentOperation(
-          () => api.commitPublicAgentConfig({ message: msg, worktreeId: workbench.publicWorktree?.worktreeId, operationId: opId }),
+          () => api.commitPublicAgentConfig({ message: msg, worktreeId: operationPublicWorktreeId, operationId: opId }),
           "提交公共 Agent 配置",
           opId
         );
@@ -1739,11 +1774,11 @@ async function handleCommit(push = false) {
       commitStep.value = 2;
       if (push) {
         publishAttempted = true;
-        const publicWorktreeId = workbench.publicWorktree?.worktreeId;
+        const publicWorktreeId = operationPublicWorktreeId;
         if (!retryingPublicAgentPublish && publicWorktreeId) {
           rememberPendingPublicAgentPublish(
             publicWorktreeId,
-            publicAgentDiffs.value
+            operationAgentStaged
               .filter((file) => file.staged)
               .map((file) => ({ ...file, scope: "PUBLIC" as const }))
           );
@@ -1752,26 +1787,32 @@ async function handleCommit(push = false) {
           ? "正在重新发布已完成本地提交的公共 Agent 配置..."
           : "正在发布公共 Agent 配置...";
         const pushOpId = newOperationId();
-        await runAgentOperation(
-          () => api.publishPublicAgentConfig(workbench.publicWorktree?.worktreeId, pushOpId),
+        const result = await runAgentOperation(
+          () => api.publishPublicAgentConfig(operationPublicWorktreeId, pushOpId),
           "发布公共 Agent 配置",
           pushOpId,
           true
         );
         commitStep.value = 5;
         remotePublishCompleted = true;
+        remoteBranch = result && typeof result === "object" && "branch" in result
+          ? (result as { branch?: string | null }).branch
+          : null;
+        remoteCommit = result && typeof result === "object" && "commitHash" in result
+          ? (result as { commitHash?: string | null }).commitHash
+          : null;
         clearPendingPublicAgentPublish();
       }
     }
 
     // 3. 应用 Agent 与普通文件共用个人 worktree，只是按 `.opencode` 路径隔离提交范围。
     const workspaceStagedPanelFiles = canWriteAgentScope("WORKSPACE")
-      ? [...workspaceAgentStaged.value]
+      ? operationAgentStaged.filter((file) => file.scope === "WORKSPACE")
       : [];
     const workspaceStagedFiles = retryingWorkspaceAgentPublish?.files
       ?? workspaceStagedPanelFiles.map((file) => workspaceAgentPersonalPath(file.path));
-    if (activeDiffScope.value === "AGENT_WORKSPACE" && workspaceStagedFiles.length > 0) {
-      if (!props.personalWorkspaceId) {
+    if (operationScope === "AGENT_WORKSPACE" && workspaceStagedFiles.length > 0) {
+      if (!operationPersonalWorkspaceId) {
         errorMessage.value = "当前不是个人 worktree，不能提交或发布应用 Agent。";
         progressMessage.value = "";
         committing.value = false;
@@ -1783,14 +1824,14 @@ async function handleCommit(push = false) {
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
       if (!retryingWorkspaceAgentPublish) {
-        await api.commitPersonalWorkspace(props.personalWorkspaceId, {
+        await api.commitPersonalWorkspace(operationPersonalWorkspaceId, {
           commitMessage: msg,
           files: workspaceStagedFiles,
           operationId: newOperationId()
         });
         if (push) {
           rememberPendingWorkspaceAgentPublish(
-            props.personalWorkspaceId,
+            operationPersonalWorkspaceId,
             workspaceStagedFiles,
             workspaceStagedPanelFiles
           );
@@ -1811,7 +1852,7 @@ async function handleCommit(push = false) {
         }
         const result = await (async () => {
           try {
-            return await api.publishPersonalWorkspace(props.personalWorkspaceId!, {
+            return await api.publishPersonalWorkspace(operationPersonalWorkspaceId, {
               commitMessage: msg,
               files: workspaceStagedFiles,
               operationId: pushOpId
@@ -1828,6 +1869,8 @@ async function handleCommit(push = false) {
         }
         publishResultConfirmed.value = true;
         remotePublishCompleted = true;
+        remoteBranch = result.remoteBranch;
+        remoteCommit = result.headCommit;
         clearPendingWorkspaceAgentPublish();
         commitStep.value = 5;
       }
@@ -1838,7 +1881,9 @@ async function handleCommit(push = false) {
       committedFiles: plannedCommittedFileCount,
       pushedFiles: remotePublishCompleted ? plannedPushedFileCount : 0,
       localOnlySpecFiles: plannedLocalOnlySpecFileCount,
-      hadRemotePush: remotePublishCompleted
+      hadRemotePush: remotePublishCompleted,
+      remoteBranch,
+      remoteCommit
     });
     if (push && localOnlySpecFileCount > 0) {
       progressMessage.value = remotePublishCompleted
@@ -1848,7 +1893,6 @@ async function handleCommit(push = false) {
       progressMessage.value = push ? "提交并推送成功！" : "提交成功！";
     }
     await refreshChanges();
-    commitBatchCompleted.value = totalChangedFileCount.value === 0;
     setTimeout(() => {
       progressMessage.value = "";
     }, 2000);
@@ -2606,7 +2650,8 @@ defineExpose({
             <h2 class="text-sm font-bold text-zinc-900 dark:text-zinc-100">{{ commitRequestedPush ? '提交并推送进度' : '提交进度' }}</h2>
             <p v-if="committing" class="text-xs text-zinc-500">正在处理中...</p>
             <p v-else-if="errorMessage" class="text-xs text-red-600 font-medium">执行失败</p>
-            <p v-else class="text-xs text-green-600 font-medium">执行成功</p>
+            <p v-else-if="commitExecutionSucceeded" class="text-xs text-green-600 font-medium">执行成功</p>
+            <p v-else class="text-xs text-amber-600 font-medium">执行未完成</p>
           </div>
           <button type="button" class="ta-process-startup-close" aria-label="关闭" @click="showCommitProgressDialog = false">
             <X :size="16" />
@@ -2677,14 +2722,15 @@ defineExpose({
         <div v-else-if="progressMessage && !committing" class="mx-4 my-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-left text-xs text-green-700">
           {{ progressMessage }}
         </div>
-        <div v-if="commitResultSummary && !committing && !errorMessage" class="git-result-summary mx-4 my-3" aria-label="本轮累计结果">
-          <strong>本轮累计结果</strong>
+        <div v-if="commitResultSummary && !committing && !errorMessage" class="git-result-summary mx-4 my-3" aria-label="本次操作结果">
+          <strong>本次操作结果</strong>
           <div class="git-result-summary-items">
             <span>本地提交 <b>{{ commitResultSummary.committedFiles }}</b> 个文件</span>
             <span v-if="commitResultSummary.hadRemotePush">远端推送 <b>{{ commitResultSummary.pushedFiles }}</b> 个文件</span>
             <span v-if="commitResultSummary.localOnlySpecFiles > 0">默认只提交 <b>{{ commitResultSummary.localOnlySpecFiles }}</b> 个 spec 文件</span>
           </div>
-          <p class="git-result-summary-note">连续处理多个 Tab 时自动累计，全部差异清空后结束本轮。</p>
+          <p v-if="commitResultSummary.remoteBranch" class="git-result-summary-note">远端分支：{{ commitResultSummary.remoteBranch }}</p>
+          <p v-if="commitResultSummary.remoteCommit" class="git-result-summary-note">远端 commit：{{ commitResultSummary.remoteCommit }}</p>
           <div class="git-result-scope-list">
             <div v-for="scope in commitResultSummary.scopes" :key="scope.scope" class="git-result-scope-row">
               <strong>{{ scope.label }}</strong>
@@ -2697,7 +2743,7 @@ defineExpose({
 
         <footer class="ta-process-startup-footer">
           <span>
-            {{ activeScopeItem.label }} · {{ activeScopeMeta }}
+            {{ commitOperationSnapshot?.label ?? activeScopeItem.label }} · {{ commitOperationSnapshot?.meta ?? activeScopeMeta }}
             <small v-if="committing">关闭窗口不会中止当前操作</small>
           </span>
           <button type="button" @click="showCommitProgressDialog = false">关闭</button>
