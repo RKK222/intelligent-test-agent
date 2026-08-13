@@ -10056,3 +10056,25 @@
 
 - 三条长期分支职责明确：main 为干净基线，release 为无需 Mem0/客户端附加服务即可部署的交付线，dev 为大功能集成线；release 当前本地服务已启动。
 - 本次未修改 `.env*`、generated SDK、OpenCode 只读源码或 Flyway 已执行字节；除既有 migration 历史兼容外，不新增 API、RunEvent、数据库结构、安全或性能契约。
+
+## 2026-08-13 - 固化 dev 与 release 后续开发边界
+
+### Why
+
+- 用户明确后续影响部署、需要新增节点或运行服务的大功能统一在 `dev` 开发，`release` 只维护 Bug 和现有拓扑可承载的小功能，需要把这项长期决策写入 AI 必读规范。
+
+### What
+
+- 在 `AGENTS.md`、研发工作流和完成前自检清单中统一定义 `dev`、`release`、`main` 的职责、判定条件和合并门禁；边界不清时默认选择 `dev`。
+- 明确 release 修复必须同步回 dev，从 dev 提升到 release 只能按已批准功能选择性合入，禁止整体带入未交付节点、服务、migration 或配置。
+- 更新文档索引，使后续开发者在进入编码流程前即可看到分支策略。
+
+### How
+
+- 复用现有 `AGENTS.md`、`docs/guides/ai-workflow.md` 和 `docs/guides/self-checklist.md` 作为规范单一入口，没有新增重复的分支说明文件。
+- 运行 AI 文档校验、差异空白与冲突标记检查，并回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 后续开发具备明确的分流规则：部署演进和新节点功能进入 dev，release 只承载兼容当前部署的修复与小功能，main 保持稳定基线。
+- 本次只修改研发流程文档，不涉及代码、API、事件、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
