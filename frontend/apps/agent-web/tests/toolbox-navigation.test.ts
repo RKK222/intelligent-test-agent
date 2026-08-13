@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  initialImmersivePanels,
   routeCenterTransition,
   routedCenterModeFromRouteName,
   transitionImmersivePanels,
@@ -72,5 +73,26 @@ describe("toolbox navigation", () => {
       rightOpen: false,
       bottomOpen: true
     });
+  });
+
+  it("starts direct immersive routes with the surrounding workbench panels closed", () => {
+    const initial: ImmersivePanelSnapshot = {
+      leftOpen: true,
+      rightOpen: true,
+      bottomOpen: false,
+      savedLeftOpen: true,
+      savedRightOpen: true,
+      savedBottomOpen: false
+    };
+
+    expect(initialImmersivePanels(initial, "system")).toEqual({
+      leftOpen: false,
+      rightOpen: false,
+      bottomOpen: false,
+      savedLeftOpen: true,
+      savedRightOpen: true,
+      savedBottomOpen: false
+    });
+    expect(initialImmersivePanels(initial, null)).toEqual(initial);
   });
 });

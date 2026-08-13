@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -28,6 +28,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AnalyticsQueryService {
+
+    public static final ZoneId ANALYTICS_ZONE = ZoneId.of("Asia/Shanghai");
 
     private static final int MAX_TOP_N = 100;
     private static final int MAX_PAGE_SIZE = 100;
@@ -63,9 +65,15 @@ public class AnalyticsQueryService {
         if (!start.isBefore(end)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "startTime 必须早于 endTime");
         }
-        long days = Duration.between(start, end).toDays();
-        if (days > 366) {
+        Duration range = Duration.between(start, end);
+        long days = range.toDays();
+        if (range.compareTo(Duration.ofDays(366)) > 0) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "查询时间范围不能超过 366 天");
+        }
+        if (blankToNull(agentId) != null || blankToNull(model) != null || blankToNull(workspaceId) != null) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "agentId、model、workspaceId 已停止支持，请使用能力运营页查看 Agent/Skill/Tool");
         }
         AnalyticsModels.Granularity granularity = granularity(granularityValue, start, end);
         validateGranularity(start, end, granularity);
@@ -86,13 +94,144 @@ public class AnalyticsQueryService {
                 blankToNull(rdDepartment),
                 blankToNull(department),
                 blankToNull(userId),
-                blankToNull(agentId),
-                blankToNull(model),
-                blankToNull(workspaceId),
+                null,
+                null,
+                null,
                 resolvedTopN,
                 resolvedPage,
                 resolvedPageSize,
                 blankToNull(sort));
+    }
+
+    public AnalyticsModels.FilterOptions filterOptions(AnalyticsModels.Filter filter) {
+        return new AnalyticsModels.FilterOptions(
+                repository.organizations(),
+                repository.rdDepartments(filter.organization()),
+                repository.departments(filter.organization(), filter.rdDepartment()),
+                freshness());
+    }
+
+    /** 总用户取 ClickHouse 最新用户维度快照，活跃与深度用户由所选时间内的行为事实判定。 */
+    public AnalyticsModels.Funnel funnel(AnalyticsModels.Filter filter) {
+        Map<String, FunnelUser> users = new LinkedHashMap<>();
+        for (AnalyticsModels.ActivityRollupRow row : repository.queryRollups(filter)) {
+            users.computeIfAbsent(row.userId(), ignored -> new FunnelUser()).add(row);
+        }
+        long total = repository.countRegisteredUsers(filter);
+        long active = users.values().stream().filter(FunnelUser::active).count();
+        long deep = users.values().stream().filter(FunnelUser::deep).count();
+        return new AnalyticsModels.Funnel(
+                total,
+                active,
+                deep,
+                ratio(active, total),
+                ratio(deep, active),
+                "活跃用户：所选时间内至少发送 1 条用户消息",
+                "深度用户：活跃用户中，至少 2 个自然日有使用且累计至少 5 条用户消息",
+                freshness());
+    }
+
+    /**
+     * 热力图按上海自然日逐小时补零，避免把 UTC 日期直接展示给运营人员。
+     */
+    public AnalyticsModels.HourlyHeatmap hourlyHeatmap(
+            AnalyticsModels.Filter filter,
+            AnalyticsModels.HeatmapMetric metric) {
+        if (Duration.between(filter.startTime(), filter.endTime()).compareTo(Duration.ofDays(90)) > 0) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "小时热力图时间范围不能超过 90 天");
+        }
+        LocalDate firstDate = filter.startTime().atZone(ANALYTICS_ZONE).toLocalDate();
+        LocalDate lastDate = filter.endTime().minusNanos(1).atZone(ANALYTICS_ZONE).toLocalDate();
+        List<LocalDate> dates = firstDate.datesUntil(lastDate.plusDays(1)).toList();
+        Map<String, Long> values = new HashMap<>();
+        AnalyticsModels.Filter hourly = hourlyFilter(filter);
+        for (AnalyticsModels.ActivityRollupRow row : repository.queryRollups(hourly)) {
+            if (row.bucketStart() == null) {
+                continue;
+            }
+            var local = row.bucketStart().atZone(ANALYTICS_ZONE);
+            long value = switch (metric) {
+                case USER_MESSAGES -> row.userMessageCount();
+                case PRIMARY_TOKENS -> row.tokensTotal();
+                case CACHE_TOKENS -> row.tokensCacheRead() + row.tokensCacheWrite();
+            };
+            values.merge(local.toLocalDate() + ":" + local.getHour(), value, Long::sum);
+        }
+        List<AnalyticsModels.HourlyHeatmapPoint> points = new ArrayList<>(dates.size() * 24);
+        for (LocalDate date : dates) {
+            for (int hour = 0; hour < 24; hour++) {
+                points.add(new AnalyticsModels.HourlyHeatmapPoint(
+                        date, hour, values.getOrDefault(date + ":" + hour, 0L)));
+            }
+        }
+        return new AnalyticsModels.HourlyHeatmap(metric, dates, points, freshness());
+    }
+
+    /**
+     * 日人均 Token 以“用户在某个自然日确实产生过 Token”的人天为分母。
+     */
+    public AnalyticsModels.TokenOperations tokenOperations(AnalyticsModels.Filter filter) {
+        Map<String, TokenUserTotals> users = new LinkedHashMap<>();
+        Map<LocalDate, TokenDailyTotals> daily = new TreeMap<>();
+        Set<String> activeUsers = new java.util.HashSet<>();
+        for (AnalyticsModels.ActivityRollupRow row : repository.queryRollups(filter)) {
+            if (row.userMessageCount() > 0) {
+                activeUsers.add(row.userId());
+            }
+            LocalDate date = activityDate(row);
+            if (tokenActive(row)) {
+                users.computeIfAbsent(row.userId(), ignored -> new TokenUserTotals(row)).add(row, date);
+                daily.computeIfAbsent(date, ignored -> new TokenDailyTotals()).add(row);
+            }
+        }
+        long total = users.values().stream().mapToLong(TokenUserTotals::totalTokens).sum();
+        long primary = users.values().stream().mapToLong(TokenUserTotals::primaryTokens).sum();
+        long cacheRead = users.values().stream().mapToLong(TokenUserTotals::cacheReadTokens).sum();
+        long cacheWrite = users.values().stream().mapToLong(TokenUserTotals::cacheWriteTokens).sum();
+        long personDays = users.values().stream().mapToLong(TokenUserTotals::tokenDays).sum();
+        long repeatUsers = users.values().stream().filter(user -> user.tokenDays() >= 2).count();
+        List<TokenUserTotals> ordered = users.values().stream()
+                .sorted(Comparator.comparingLong(TokenUserTotals::totalTokens).reversed())
+                .toList();
+        double[] quartiles = quartiles(ordered.stream().mapToDouble(TokenUserTotals::tokensPerTokenDay).sorted().toArray());
+        return new AnalyticsModels.TokenOperations(
+                total,
+                primary,
+                cacheRead,
+                cacheWrite,
+                users.size(),
+                activeUsers.size(),
+                ratio(users.size(), activeUsers.size()),
+                personDays,
+                ratio(total, personDays),
+                repeatUsers,
+                ratio(repeatUsers, users.size()),
+                daily.entrySet().stream().map(entry -> entry.getValue().toRow(entry.getKey())).toList(),
+                ordered.stream().limit(filter.topN()).map(user -> user.toRow(quartiles)).toList(),
+                freshness());
+    }
+
+    public AnalyticsModels.Capabilities capabilities(AnalyticsModels.Filter filter) {
+        long activeUsers = repository.queryRollups(filter).stream()
+                .filter(row -> row.userMessageCount() > 0)
+                .map(AnalyticsModels.ActivityRollupRow::userId)
+                .distinct()
+                .count();
+        List<AnalyticsModels.CapabilityUsage> rows = repository.capabilityUsage(filter).stream()
+                .map(row -> new AnalyticsModels.CapabilityUsage(
+                        row.type(), row.name(), row.invocationCount(), row.userCount(),
+                        ratio(row.userCount(), activeUsers), row.succeededCount(), row.failedCount(), row.incompleteCount()))
+                .sorted(Comparator.comparingLong(AnalyticsModels.CapabilityUsage::userCount).reversed()
+                        .thenComparing(Comparator.comparingLong(AnalyticsModels.CapabilityUsage::invocationCount).reversed()))
+                .toList();
+        return new AnalyticsModels.Capabilities(activeUsers, rows, freshness());
+    }
+
+    private AnalyticsModels.Filter hourlyFilter(AnalyticsModels.Filter filter) {
+        return new AnalyticsModels.Filter(
+                filter.startTime(), filter.endTime(), AnalyticsModels.Granularity.HOUR,
+                filter.organization(), filter.rdDepartment(), filter.department(), filter.userKeyword(),
+                null, null, null, filter.topN(), filter.page(), filter.pageSize(), filter.sort());
     }
 
     public AnalyticsModels.Overview overview(AnalyticsModels.Filter filter) {
@@ -173,10 +312,10 @@ public class AnalyticsQueryService {
                 filter.organization(),
                 filter.rdDepartment(),
                 filter.department(),
-                filter.userId(),
-                filter.agentId(),
-                filter.model(),
-                filter.workspaceId(),
+                filter.userKeyword(),
+                null,
+                null,
+                null,
                 Math.min(filter.topN(), 5),
                 filter.page(),
                 filter.pageSize(),
@@ -199,8 +338,8 @@ public class AnalyticsQueryService {
             }
         }
         grouped.forEach((bucket, totals) -> {
-            int dayOfWeek = bucket.atZone(ZoneOffset.UTC).getDayOfWeek().getValue();
-            int hour = bucket.atZone(ZoneOffset.UTC).getHour();
+            int dayOfWeek = bucket.atZone(ANALYTICS_ZONE).getDayOfWeek().getValue();
+            int hour = bucket.atZone(ANALYTICS_ZONE).getHour();
             heatmap.computeIfAbsent(dayOfWeek + ":" + hour, ignored -> new HeatmapTotals(dayOfWeek, hour))
                     .add(totals);
         });
@@ -264,8 +403,42 @@ public class AnalyticsQueryService {
             case "organizations" -> csvOrganizations(filter);
             case "feedback" -> csvFeedback(filter);
             case "exceptions" -> csvExceptions(filter);
+            case "funnel" -> csvFunnel(filter);
+            case "token-operations" -> csvTokenOperations(filter);
+            case "capabilities" -> csvCapabilities(filter);
             default -> csvOverview(filter);
         };
+    }
+
+    private String csvFunnel(AnalyticsModels.Filter filter) {
+        AnalyticsModels.Funnel funnel = funnel(filter);
+        StringBuilder builder = new StringBuilder("stage,userCount,conversionRate,definition\n");
+        row(builder, "total", funnel.totalUsers(), 1, "当前全部平台用户");
+        row(builder, "active", funnel.activeUsers(), funnel.activeRate(), funnel.activeDefinition());
+        row(builder, "deep", funnel.deepUsers(), funnel.deepRate(), funnel.deepDefinition());
+        return builder.toString();
+    }
+
+    private String csvTokenOperations(AnalyticsModels.Filter filter) {
+        AnalyticsModels.TokenOperations result = tokenOperations(filter);
+        StringBuilder builder = new StringBuilder(
+                "userId,username,organization,rdDepartment,department,totalTokens,primaryTokens,cacheReadTokens,cacheWriteTokens,tokenDays,tokensPerTokenDay,intensityBand\n");
+        for (AnalyticsModels.TokenUserRow row : result.users()) {
+            row(builder, row.userId(), row.username(), row.organization(), row.rdDepartment(), row.department(),
+                    row.totalTokens(), row.primaryTokens(), row.cacheReadTokens(), row.cacheWriteTokens(), row.tokenDays(),
+                    row.tokensPerTokenDay(), row.intensityBand());
+        }
+        return builder.toString();
+    }
+
+    private String csvCapabilities(AnalyticsModels.Filter filter) {
+        StringBuilder builder = new StringBuilder(
+                "type,name,usageRate,userCount,invocationCount,succeededCount,failedCount,incompleteCount\n");
+        for (AnalyticsModels.CapabilityUsage row : capabilities(filter).rows()) {
+            row(builder, row.type(), row.name(), row.usageRate(), row.userCount(), row.invocationCount(),
+                    row.succeededCount(), row.failedCount(), row.incompleteCount());
+        }
+        return builder.toString();
     }
 
     private String csvOverview(AnalyticsModels.Filter filter) {
@@ -352,9 +525,13 @@ public class AnalyticsQueryService {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "granularity 必须是 hour/day/week/month");
             }
         }
-        return Duration.between(start, end).toHours() <= 48
-                ? AnalyticsModels.Granularity.HOUR
-                : AnalyticsModels.Granularity.DAY;
+        Duration duration = Duration.between(start, end);
+        if (duration.toHours() <= 48) {
+            return AnalyticsModels.Granularity.HOUR;
+        }
+        return duration.toDays() <= 90
+                ? AnalyticsModels.Granularity.DAY
+                : AnalyticsModels.Granularity.WEEK;
     }
 
     private void validateGranularity(Instant start, Instant end, AnalyticsModels.Granularity granularity) {
@@ -368,8 +545,8 @@ public class AnalyticsQueryService {
         if (granularity == AnalyticsModels.Granularity.HOUR && duration.toHours() > 48) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "超过 48 小时必须使用 day/week/month 粒度");
         }
-        if (granularity == AnalyticsModels.Granularity.DAY && duration.toDays() > 180) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "超过 180 天必须使用 week/month 粒度");
+        if (granularity == AnalyticsModels.Granularity.DAY && duration.toDays() > 90) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "超过 90 天必须使用 week/month 粒度");
         }
         if (points > MAX_POINTS) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "趋势点数超过 500，请提高统计粒度");
@@ -379,20 +556,20 @@ public class AnalyticsQueryService {
     private Instant bucket(AnalyticsModels.ActivityRollupRow row, AnalyticsModels.Granularity granularity) {
         Instant base = row.bucketStart() != null
                 ? row.bucketStart()
-                : row.activityDate().atStartOfDay().toInstant(ZoneOffset.UTC);
+                : row.activityDate().atStartOfDay(ANALYTICS_ZONE).toInstant();
         return bucket(base, granularity);
     }
 
     private Instant bucket(Instant base, AnalyticsModels.Granularity granularity) {
         return switch (granularity) {
             case HOUR -> base.truncatedTo(ChronoUnit.HOURS);
-            case DAY -> base.atZone(ZoneOffset.UTC).toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC);
-            case WEEK -> base.atZone(ZoneOffset.UTC).toLocalDate()
+            case DAY -> base.atZone(ANALYTICS_ZONE).toLocalDate().atStartOfDay(ANALYTICS_ZONE).toInstant();
+            case WEEK -> base.atZone(ANALYTICS_ZONE).toLocalDate()
                     .with(java.time.DayOfWeek.MONDAY)
-                    .atStartOfDay().toInstant(ZoneOffset.UTC);
-            case MONTH -> base.atZone(ZoneOffset.UTC).toLocalDate()
+                    .atStartOfDay(ANALYTICS_ZONE).toInstant();
+            case MONTH -> base.atZone(ANALYTICS_ZONE).toLocalDate()
                     .withDayOfMonth(1)
-                    .atStartOfDay().toInstant(ZoneOffset.UTC);
+                    .atStartOfDay(ANALYTICS_ZONE).toInstant();
         };
     }
 
@@ -412,10 +589,10 @@ public class AnalyticsQueryService {
             case HOUR -> current.plus(1, ChronoUnit.HOURS);
             case DAY -> current.plus(1, ChronoUnit.DAYS);
             case WEEK -> current.plus(7, ChronoUnit.DAYS);
-            case MONTH -> current.atZone(ZoneOffset.UTC).toLocalDate()
+            case MONTH -> current.atZone(ANALYTICS_ZONE).toLocalDate()
                     .plusMonths(1)
                     .withDayOfMonth(1)
-                    .atStartOfDay().toInstant(ZoneOffset.UTC);
+                    .atStartOfDay(ANALYTICS_ZONE).toInstant();
         };
     }
 
@@ -449,14 +626,38 @@ public class AnalyticsQueryService {
     }
 
     private static boolean active(AnalyticsModels.ActivityRollupRow row) {
-        return row.userMessageCount() > 0
-                || row.runCount() > 0
-                || row.positiveFeedbackCount() + row.negativeFeedbackCount() > 0
-                || row.diffAcceptedCount() + row.diffRejectedCount() > 0;
+        return row.userMessageCount() > 0;
     }
 
     private static Double ratio(long numerator, long denominator) {
         return denominator == 0 ? null : numerator * 1.0d / denominator;
+    }
+
+    private static boolean tokenActive(AnalyticsModels.ActivityRollupRow row) {
+        return row.tokensTotal() + row.tokensCacheRead() + row.tokensCacheWrite() > 0;
+    }
+
+    private static LocalDate activityDate(AnalyticsModels.ActivityRollupRow row) {
+        return row.activityDate() != null
+                ? row.activityDate()
+                : row.bucketStart().atZone(ANALYTICS_ZONE).toLocalDate();
+    }
+
+    private static double[] quartiles(double[] values) {
+        if (values.length == 0) {
+            return new double[] {0, 0, 0};
+        }
+        return new double[] {percentile(values, 0.25d), percentile(values, 0.5d), percentile(values, 0.75d)};
+    }
+
+    private static double percentile(double[] values, double percentile) {
+        double index = percentile * (values.length - 1);
+        int lower = (int) Math.floor(index);
+        int upper = (int) Math.ceil(index);
+        if (lower == upper) {
+            return values[lower];
+        }
+        return values[lower] + (values[upper] - values[lower]) * (index - lower);
     }
 
     private static String blankToNull(String value) {
@@ -566,6 +767,126 @@ public class AnalyticsQueryService {
 
         long sustainedUsers() {
             return users.values().stream().filter(UserTotals::sustained).count();
+        }
+    }
+
+    private static final class FunnelUser {
+        private final Set<LocalDate> messageDates = new java.util.HashSet<>();
+        private long userMessageCount;
+
+        void add(AnalyticsModels.ActivityRollupRow row) {
+            userMessageCount += row.userMessageCount();
+            if (row.userMessageCount() > 0) {
+                messageDates.add(activityDate(row));
+            }
+        }
+
+        boolean active() {
+            return userMessageCount > 0;
+        }
+
+        boolean deep() {
+            return active() && messageDates.size() >= 2 && userMessageCount >= 5;
+        }
+    }
+
+    private static final class TokenDailyTotals {
+        private final Set<String> users = new java.util.HashSet<>();
+        private long primaryTokens;
+        private long cacheReadTokens;
+        private long cacheWriteTokens;
+
+        void add(AnalyticsModels.ActivityRollupRow row) {
+            users.add(row.userId());
+            primaryTokens += row.tokensTotal();
+            cacheReadTokens += row.tokensCacheRead();
+            cacheWriteTokens += row.tokensCacheWrite();
+        }
+
+        AnalyticsModels.TokenDailyPoint toRow(LocalDate date) {
+            return new AnalyticsModels.TokenDailyPoint(
+                    date,
+                    totalTokens(),
+                    primaryTokens,
+                    cacheReadTokens,
+                    cacheWriteTokens,
+                    users.size(),
+                    ratio(totalTokens(), users.size()));
+        }
+
+        long totalTokens() {
+            return primaryTokens + cacheReadTokens + cacheWriteTokens;
+        }
+    }
+
+    private static final class TokenUserTotals {
+        private final String userId;
+        private final String username;
+        private final String organization;
+        private final String rdDepartment;
+        private final String department;
+        private final Set<LocalDate> dates = new java.util.HashSet<>();
+        private long primaryTokens;
+        private long cacheReadTokens;
+        private long cacheWriteTokens;
+
+        TokenUserTotals(AnalyticsModels.ActivityRollupRow row) {
+            this.userId = row.userId();
+            this.username = row.username();
+            this.organization = row.organization();
+            this.rdDepartment = row.rdDepartment();
+            this.department = row.department();
+        }
+
+        void add(AnalyticsModels.ActivityRollupRow row, LocalDate date) {
+            dates.add(date);
+            primaryTokens += row.tokensTotal();
+            cacheReadTokens += row.tokensCacheRead();
+            cacheWriteTokens += row.tokensCacheWrite();
+        }
+
+        long primaryTokens() {
+            return primaryTokens;
+        }
+
+        long totalTokens() {
+            return primaryTokens + cacheReadTokens + cacheWriteTokens;
+        }
+
+        long cacheReadTokens() {
+            return cacheReadTokens;
+        }
+
+        long cacheWriteTokens() {
+            return cacheWriteTokens;
+        }
+
+        long tokenDays() {
+            return dates.size();
+        }
+
+        double tokensPerTokenDay() {
+            return dates.isEmpty() ? 0.0d : totalTokens() * 1.0d / dates.size();
+        }
+
+        AnalyticsModels.TokenUserRow toRow(double[] quartiles) {
+            double average = tokensPerTokenDay();
+            String band = average <= quartiles[0] ? "LIGHT"
+                    : average <= quartiles[1] ? "EXPLORING"
+                    : average <= quartiles[2] ? "REGULAR" : "POWER";
+            return new AnalyticsModels.TokenUserRow(
+                    userId,
+                    username,
+                    organization,
+                    rdDepartment,
+                    department,
+                    totalTokens(),
+                    primaryTokens,
+                    cacheReadTokens,
+                    cacheWriteTokens,
+                    dates.size(),
+                    average,
+                    band);
         }
     }
 
@@ -755,7 +1076,7 @@ public class AnalyticsQueryService {
         }
 
         boolean deep() {
-            return runCount >= 3 || userMessageCount >= 5 || diffAccepted > 0 || positiveFeedback + negativeFeedback > 0;
+            return userMessageCount >= 5 && activeDates.size() >= 2;
         }
 
         boolean sustained() {
@@ -798,7 +1119,7 @@ public class AnalyticsQueryService {
             if (row.activityDate() != null) {
                 return row.activityDate();
             }
-            return row.bucketStart().atZone(ZoneOffset.UTC).toLocalDate();
+            return row.bucketStart().atZone(ANALYTICS_ZONE).toLocalDate();
         }
 
         private static String valueOr(String current, String candidate) {

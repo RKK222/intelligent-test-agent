@@ -1259,10 +1259,7 @@ export type AnalyticsQueryParams = {
   organization?: string;
   rdDepartment?: string;
   department?: string;
-  userId?: string;
-  agentId?: string;
-  model?: string;
-  workspaceId?: string;
+  user?: string;
   topN?: number;
   page?: number;
   pageSize?: number;
@@ -1273,6 +1270,103 @@ export type AnalyticsFreshness = {
   generatedAt?: string | null;
   status: "FRESH" | "STALE" | "FAILED" | string;
   message?: string | null;
+  coverageStart?: string | null;
+  coverageEnd?: string | null;
+  attributionMode?: string | null;
+};
+
+export type AnalyticsFilterOption = { value: string; label: string };
+
+export type AnalyticsFilterOptions = {
+  organizations: AnalyticsFilterOption[];
+  rdDepartments: AnalyticsFilterOption[];
+  departments: AnalyticsFilterOption[];
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsFunnel = {
+  totalUsers: number;
+  activeUsers: number;
+  deepUsers: number;
+  activeRate?: number | null;
+  deepRate?: number | null;
+  activeDefinition: string;
+  deepDefinition: string;
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsHeatmapMetric = "USER_MESSAGES" | "PRIMARY_TOKENS" | "CACHE_TOKENS";
+
+export type AnalyticsHourlyHeatmapPoint = {
+  date: string;
+  hourOfDay: number;
+  value: number;
+};
+
+export type AnalyticsHourlyHeatmap = {
+  metric: AnalyticsHeatmapMetric;
+  dates: string[];
+  points: AnalyticsHourlyHeatmapPoint[];
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsTokenDailyPoint = {
+  date: string;
+  totalTokens: number;
+  primaryTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  tokenUsers: number;
+  tokensPerUser?: number | null;
+};
+
+export type AnalyticsTokenUserRow = {
+  userId: string;
+  username?: string | null;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+  totalTokens: number;
+  primaryTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  tokenDays: number;
+  tokensPerTokenDay?: number | null;
+  intensityBand: string;
+};
+
+export type AnalyticsTokenOperations = {
+  totalTokens: number;
+  primaryTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  tokenUsers: number;
+  activeUsers: number;
+  tokenUserRate?: number | null;
+  tokenActivePersonDays: number;
+  dailyTokensPerUser?: number | null;
+  repeatTokenUsers: number;
+  repeatTokenUserRate?: number | null;
+  daily: AnalyticsTokenDailyPoint[];
+  users: AnalyticsTokenUserRow[];
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsCapabilityUsage = {
+  type: "AGENT" | "SKILL" | "TOOL" | string;
+  name: string;
+  invocationCount: number;
+  userCount: number;
+  usageRate?: number | null;
+  succeededCount: number;
+  failedCount: number;
+  incompleteCount: number;
+};
+
+export type AnalyticsCapabilities = {
+  activeUsers: number;
+  rows: AnalyticsCapabilityUsage[];
+  freshness: AnalyticsFreshness;
 };
 
 export type AnalyticsOverview = {

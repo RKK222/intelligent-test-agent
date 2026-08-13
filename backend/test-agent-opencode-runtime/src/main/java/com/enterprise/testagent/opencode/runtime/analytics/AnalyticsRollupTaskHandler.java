@@ -5,12 +5,14 @@ import com.enterprise.testagent.scheduler.ScheduledTaskContext;
 import com.enterprise.testagent.scheduler.ScheduledTaskHandler;
 import com.enterprise.testagent.scheduler.ScheduledTaskResult;
 import java.time.Duration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
  * 将运营分析汇总注册到统一定时任务框架，由框架负责计划、互斥和运行审计。
  */
 @Component
+@ConditionalOnProperty(name = "test-agent.analytics.clickhouse.enabled", havingValue = "true")
 public class AnalyticsRollupTaskHandler implements ScheduledTaskHandler {
 
     static final ScheduledTaskKey TASK_KEY = new ScheduledTaskKey("opencode-runtime.analytics-rollup");

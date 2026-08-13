@@ -487,6 +487,10 @@ workspace PTY 和 Agent 配置进度仍返回签发 Java 地址。标准生产�
 | `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | 部署 Redis 地址，绑定到 Spring 标准 `spring.data.redis.*` | Redis 是系统必需依赖；用户 Token、会话运行上下文、用户进程运行管理、manager 控制面和 scheduler 均使用同一 Redis。 |
 | `TEST_AGENT_REDIS_SUMMARY_ENABLED` | `false` | 绑定 `test-agent.redis-summary.enabled`；默认关闭 Redis summary 新运行模式。 |
 | `TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE` | `0` | 绑定 `test-agent.redis-summary.rollout-percentage`；取值 0 到 100，默认不选择新模式 Run。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED` | 企业部署 `true`，应用默认 `false` | 启用 ClickHouse 运营事件消费、汇总和只读查询；需要独立专机，完整步骤见 `deploy/internal/CLICKHOUSE-ANALYTICS.md`。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_URL/USERNAME/PASSWORD` | 受控专机 JDBC 配置 | 两台 Java 使用同一最小权限账号；密码不得进入仓库、日志或命令行。ClickHouse 不可用时业务写不阻塞，运营查询返回明确 503。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED` | `false` | 一次性历史回填开关，只允许一个 Java 节点短期开启；必须同时设置明确 UTC start，可选 end。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS` | `false` | 不可逆第二阶段清理门禁；仅在已有 `VERIFIED`、备份和页面验收后与 backfill 开关同时短期开启。 |
 | `TEST_AGENT_LEGACY_RUN_WITHOUT_CONTEXT_ENABLED` | `true` | 绑定 `test-agent.redis-summary.legacy-run-without-context-enabled`；兼容期允许旧客户端不携带 `contextToken`，每次兼容调用递增 `legacy_run_without_context_total`。该指标连续 7 天为 0 后关闭；关闭后缺 token 不自动查询数据库。 |
 | `TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL` | `5s` | 后端实例写入 Redis Java 快照的间隔。 |
 | `TEST_AGENT_BACKEND_STALE_AFTER` | `10s` | Java/manager Redis 快照 TTL；不再作为数据库心跳回退窗口使用。 |
@@ -500,6 +504,7 @@ workspace PTY 和 Agent 配置进度仍返回签发 Java 地址。标准生产�
 | scheduler.run-retention-cleanup XXL cron | `0 0 8 * * ? *` | 北京时间 08:00 清理 PostgreSQL `scheduled_task_runs` 中超过 7 天的已结束记录；活动状态始终保留。 |
 | legacy stale active Run 收敛 XXL cron | `0 0/5 * * * ? *` | 每 5 分钟只扫描 `storage_mode=LEGACY_FULL` 的数据库 active Run；`REDIS_SUMMARY` 不进入该 SQL 或旧事件写入链路。 |
 | 运营分析汇总 XXL cron | `0 0/5 * * * ? *` | 任务 key 为 `opencode-runtime.analytics-rollup`；管理员可在 XXL 页面覆盖 Cron。旧专用环境变量已删除。 |
+| 运营分析入库 XXL cron | `0 0/1 * * * ? *` | 任务 key 为 `opencode-runtime.analytics-ingestion`；每轮最多消费 500 条 PostgreSQL/Redis 脱敏事件，失败一分钟后重试。 |
 | Run 无活动超时阈值 | `2h` | legacy 按 `runs.updated_at`；`REDIS_SUMMARY` 启动时和每 30 秒按本服务器 Redis manifest 的 `updatedAt` 扫描，无 attention 才由公共路由、owner lease/fencing 程序 best-effort cancel 并写安全终态摘要。 |
 | opencode 输出活跃 Redis TTL | `30m` | `test-agent:run-output-activity:{runId}` 存在表示 30 分钟内仍有用户可见输出，收敛时跳过。 |
 | opencode pending ask Redis 状态 | 无固定 TTL | `test-agent:run-pending-ask:{runId}` 存在表示最新状态仍等待用户处理 `permission.asked/question.asked`，不通过数据库 RunEvent 反查；收到 reply/reject 或 Run 终态后清理。 |

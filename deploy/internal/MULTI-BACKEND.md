@@ -545,8 +545,8 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 企业现网上一轮已经部署完成的平台包业务源码提交为
 `f10754e01ab8f846a8aa2430214bb39f4795623b`，内层 ZIP SHA-256 为
 `99f34a5652d5972dd4dbc1e9384026d1a1a78a8cc4bb1caa702a6c99cc000df5`。正常 PostgreSQL 企业主链最高版本为
-`20260810234154`；这只能作为已知基线，不能代替本轮部署前的完整 history。XXL MySQL 的准入预期为 V1-V11
-全部成功。部署前必须分别由数据库管理员导出
+`20260810234154`；这只能作为已知基线，不能代替本轮部署前的完整 history。XXL MySQL 的部署前基线预期为 V1-V11
+全部成功，本轮只允许追加 V12。部署前必须分别由数据库管理员导出
 平台 PostgreSQL 与 XXL MySQL 的完整历史，不能只留最近 20 条：
 
 ```sql
@@ -578,19 +578,21 @@ PostgreSQL 正常现网路径必须满足：所有记录 `success=true`，且上
 保留，这是数据库兼容要求，不代表启用服务。
 
 XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后的准入历史应为 V1-V11 全部成功且
-checksum 不变，本轮不新增 XXL migration。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
+checksum 不变，本轮只新增 V12。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
 `665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47`，V11 的 Flyway checksum 为
-`-1863356225`、文件 SHA-256 为 `03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236`。
-V10 注册每 5 分钟一次的内部模型探活，V11 注册每天 03:30 的可观测数据清理。失败记录、未知 checksum、
-未知更高版本、缺少 V1-V11 任一版本或本轮启动后新增 history 时都必须停止发布。
+`-1863356225`、文件 SHA-256 为 `03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236`；
+V12 的 Flyway checksum 为 `-1848714734`、文件 SHA-256 为
+`70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`。
+V10 注册每 5 分钟内部模型探活，V11 注册每天 03:30 可观测数据清理，V12 注册每分钟 ClickHouse 运营入库。失败记录、未知 checksum、
+未知更高版本、缺少 V1-V12 任一版本或首台启动后新增 V12 之外的 history 时都必须停止发布。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
 `repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并按部署前基线确认 PostgreSQL 只新增上述
-允许的四条连续 migration（故障重部署时不新增）、XXL MySQL 没有新增 history；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
-内部模型探活为每 5 分钟、可观测数据清理为每日 03:30，再部署 `.114`。共享数据库上 `.114` 启动只允许
+允许的四条连续 migration（故障重部署时不新增）、XXL MySQL 只新增 V12；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
+内部模型探活为每 5 分钟、可观测数据清理为每日 03:30、ClickHouse 入库为每分钟，再部署 `.114`。共享数据库上 `.114` 启动只允许
 validate，不应再新增 history。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
@@ -1078,7 +1080,7 @@ ACTIVE binding，用户再次使用时由公共启动程序按原归属恢复。
 ```sql
 select version, description, checksum, success
 from flyway_schema_history
-where version in ('7', '8', '9', '10', '11')
+where version in ('7', '8', '9', '10', '11', '12')
 order by installed_rank;
 
 select platform_task_key, schedule_conf, trigger_status
@@ -1087,14 +1089,15 @@ where platform_task_key in (
     'workspace-management.personal-workspace-relocation',
     'opencode-runtime.inactive-user-process-cleanup',
     'opencode-runtime.internal-model-probe',
-    'opencode-runtime.internal-model-observability-retention'
+    'opencode-runtime.internal-model-observability-retention',
+    'opencode-runtime.analytics-ingestion'
 )
 order by platform_task_key;
 ```
 
-预期 V7-V9 保持原 checksum，V10/V11 首次成功且 checksum 分别为 `1539433813`、`-1863356225`；
+预期 V7-V9 保持原 checksum，V10/V11 保持既有 checksum，V12 首次成功且 checksum 为 `-1848714734`；
 搬迁任务为 `0 0/30 * * * ? *`，闲置进程关闭为 `0 0 2 * * ? *`，内部模型探活为
-`0 */5 * * * ? *`，可观测数据清理为 `0 30 3 * * ? *`，四条均 `trigger_status=1`。任一条件不满足时
+`0 */5 * * * ? *`，可观测数据清理为 `0 30 3 * * ? *`，ClickHouse 入库为 `0 * * * * ? *`，五条均 `trigger_status=1`。任一条件不满足时
 保持 `.114` 和 `.2` 未部署。
 
 ## 11. 故障定位与回滚

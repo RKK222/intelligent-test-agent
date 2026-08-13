@@ -52,4 +52,20 @@ public interface AnalyticsRepository {
     PageResponse<AnalyticsModels.ExceptionDetail> exceptionDetails(AnalyticsModels.Filter filter);
 
     List<AnalyticsModels.OrganizationUsageRow> organizationRows(AnalyticsModels.Filter filter, String dimension);
+
+    default List<AnalyticsModels.CapabilityUsageRow> capabilityUsage(AnalyticsModels.Filter filter) {
+        return List.of();
+    }
+
+    default List<AnalyticsModels.FilterOption> organizations() {
+        return List.of();
+    }
+
+    default List<AnalyticsModels.FilterOption> rdDepartments(String organization) {
+        return List.of();
+    }
+
+    default List<AnalyticsModels.FilterOption> departments(String organization, String rdDepartment) {
+        return List.of();
+    }
 }

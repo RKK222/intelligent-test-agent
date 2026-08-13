@@ -91,6 +91,11 @@
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback/me` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/overview` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/filter-options` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/funnel` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/hourly-heatmap` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/token-operations` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/capabilities` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/timeseries` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/peaks` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/users` | 无旧 URL |
@@ -234,12 +239,17 @@ Base URL：`/api/internal/platform/opencode-runtime`。该能力只写满意度�
 
 ## 运营分析 API
 
-Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`，普通管理员和匿名用户分别返回 `FORBIDDEN`、`UNAUTHENTICATED`。查询接口只读 rollup 表；失败或延迟时通过响应中的 `freshness.status=STALE|FAILED` 标记最近成功数据，不在 API 请求时扫描原始事实宽表。
+Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`，普通管理员和匿名用户分别返回 `FORBIDDEN`、`UNAUTHENTICATED`。开启 `TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED=true` 后，全部运营指标、明细和筛选项只从 ClickHouse 查询；API 请求不扫描 PostgreSQL 业务事实或旧汇总表，也不在 ClickHouse 故障时静默降级。不可查询时统一返回 `503 ANALYTICS_UNAVAILABLE`；可查询但入库延迟时通过 `freshness.status=STALE|FAILED` 标记最近成功状态。
 
-通用 query 参数：`startTime`、`endTime`、`granularity=hour|day|week|month`、`organization`、`rdDepartment`、`department`、`userId`、`agentId`、`model`、`workspaceId`、`topN`、`page`、`pageSize`、`sort`。未传时间时默认最近 30 天；约束：`topN<=100`，`pageSize<=100`，趋势点数 `<=500`；`hour` 粒度最多 48 小时，`day` 粒度最多 180 天。`timeseries` 会为查询范围内无活动的时间桶返回零值点，`peaks.heatmap` 固定按周一至周日、每天 0–23 时返回 168 个格点，避免稀疏事实改变坐标语义。
+通用 query 参数：`startTime`、`endTime`、`granularity=hour|day|week|month`、`organization`、`rdDepartment`、`department`、`user`、`topN`、`page`、`pageSize`、`sort`。`user` 对用户 ID 和用户名做大小写不敏感的包含匹配；机构、研发部和部门应使用 `/filter-options` 返回的级联选项。未传时间时默认最近 30 天，最长 366 天；`topN<=100`，`pageSize<=100`，趋势点数 `<=500`，`hour` 粒度最多 48 小时，`day` 粒度最多 180 天。旧参数 `agentId/model/workspaceId` 在一个兼容周期内保留解析但只要非空就返回 `VALIDATION_ERROR`，不再参与筛选。`timeseries` 会补齐无活动时间桶；旧 `/peaks` 仍返回周一至周日、每天 0–23 时的 168 个聚合格点。
 
 | 方法 | 路径 | 用途 | 响应 |
 |---|---|---|---|
+| `GET` | `/filter-options` | 机构、研发部、部门级联下拉选项及 freshness | `AnalyticsFilterOptions` |
+| `GET` | `/funnel` | 总用户、活跃用户、深度用户漏斗及口径说明 | `AnalyticsFunnel` |
+| `GET` | `/hourly-heatmap?metric=USER_MESSAGES|PRIMARY_TOKENS|CACHE_TOKENS` | 按上海自然日逐日返回 0–23 时完整格点，最多 90 天 | `AnalyticsHourlyHeatmap` |
+| `GET` | `/token-operations` | 总 Token、主 Token、缓存 Token、Token 使用人数/覆盖率、人天日均、复用率、日趋势和用户强度分层 | `AnalyticsTokenOperations` |
+| `GET` | `/capabilities` | Agent、Skill、Tool 的去重调用数、使用人数、使用率和结果分布 | `AnalyticsCapabilities` |
 | `GET` | `/overview` | 用户规模、漏斗、使用强度、Run 结果、满意度、Diff 采纳、token 强度与 freshness | `AnalyticsOverview` |
 | `GET` | `/timeseries` | 按 hour/day/week/month 聚合趋势 | `AnalyticsTimeSeriesPoint[]` |
 | `GET` | `/peaks` | 峰值时段和小时热力 | `AnalyticsPeaks` |
@@ -247,11 +257,13 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `GET` | `/organizations?groupBy=organization|rdDepartment|department` | 组织维度排行 | `AnalyticsOrganizationUsageRow[]` |
 | `GET` | `/satisfaction` | 满意率、反馈覆盖率、负反馈原因分布和反馈明细 | `AnalyticsSatisfaction` |
 | `GET` | `/exceptions` | 失败/取消 Run 明细，不返回 prompt 或 assistant 原文 | `PageResponse<AnalyticsExceptionDetail>` |
-| `GET` | `/export?type=overview|timeseries|users|organizations|feedback|exceptions` | CSV 导出；不导出 prompt 原文、assistant 原文或 cost/costUsd 字段 | `text/csv` |
+| `GET` | `/export?type=overview|timeseries|users|organizations|feedback|exceptions|funnel|token-operations|capabilities` | CSV 导出；不导出 prompt、回答、反馈评论或 cost/costUsd 字段 | `text/csv` |
 
-核心口径：满意率为 `positive/(positive+negative)`，无反馈时为 `null`；反馈覆盖率为 `(positive+negative)/assistantMessageCount`；Diff 采纳率为 `diffAccepted/diffProposed`，无 proposed 时为 `null`；p95 耗时基于 `analytics_run_duration_histogram_hourly` 近似计算；token 仅包含 input/output/reasoning/total，不统计、不展示、不导出费用字段。
+核心口径：总用户是 ClickHouse 最新用户维度快照中当前未删除的全部平台用户，不受所选时间影响；活跃用户是所选时间内至少发送 1 条用户消息的人；深度用户是活跃用户中至少 2 个上海自然日有使用且累计至少 5 条用户消息的人。主 Token 为 `input+output+reasoning`，总 Token 为主 Token 加缓存 read/write；日人均 Token 的分母只包含当天产生任意主或缓存 Token 的用户人天。Token 使用率为 Token 用户数/活跃用户数，复用率为至少 2 个自然日有 Token 的用户数/Token 用户数，用户强度按每 Token 活跃日总 Token 的四分位数分层。能力使用率为调用该能力的去重用户数/同期活跃用户数；Agent 主 Run、`task` 子 Agent、`skill` 和其它 Tool 分开统计，开始态与终态按 `runId+scopeId+callId` 去重，未看到终态的调用计入 `incompleteCount`。
 
-对应测试：`AnalyticsControllerTest`、`AnalyticsQueryServiceTest`、`analytics-management-panel.test.ts`。
+满意率为 `positive/(positive+negative)`，无反馈时为 `null`；反馈覆盖率为 `(positive+negative)/assistantMessageCount`；Diff 采纳率为 `diffAccepted/diffProposed`，无 proposed 时为 `null`；p95 耗时基于 ClickHouse 小时直方图近似计算。运营数据不统计、不展示、不导出费用字段。
+
+对应测试：`AnalyticsControllerTest`、`AnalyticsQueryServiceTest`、`AnalyticsOperationsQueryServiceTest`、`ClickHouseAnalyticsIntegrationTest`、`analytics-management-panel.test.ts`。
 
 ## 统一响应
 
@@ -308,6 +320,7 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `OPENCODE_UNAVAILABLE` | 503 | opencode 服务不可用 |
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
 | `RUNTIME_STATE_UNAVAILABLE` | 503 | 运行态存储不可用 |
+| `ANALYTICS_UNAVAILABLE` | 503 | 运营分析存储不可用 |
 | `NIGHT_EXECUTION_UNAVAILABLE` | 503 | 夜间执行功能不可用 |
 | `EXTERNAL_API_UNAVAILABLE` | 503 | 外部 API 认证服务不可用 |
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |

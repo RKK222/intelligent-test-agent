@@ -106,6 +106,9 @@
 - `V20260702180000__add_code_repository_deployment_mode.sql`：为 `code_repositories` 增加非空 `deployment_mode`（`EXTERNAL`/`INTERNAL`，存量默认外部），并把 `english_name` 扩展到 128 字符。
 - `V20260703141000__create_run_session_scopes.sql`：创建 `run_session_scopes` 和 `run_session_scope_sessions`，并为 `run_events` 预留可空 session scope 与 `raw_event_id` 列；metadata 使用 `metadata_json text`，不使用 JSONB。
 - `V20260628231000__create_analytics_feedback_and_rollups.sql`：增加 Run 的 `agent_id/model_id` 快照、`ai_message_feedbacks`、hourly/daily 用户运营 rollup、Run 耗时直方图、水位、任务运行记录和 DB 锁表；不新增任何测试/演示数据。
+- `V20260813143000__analytics_event_outbox_create_pipeline.sql`：新增脱敏运营事务 outbox、Redis 运营 stream 检查点和 ClickHouse 回填/清理门禁，并为旧汇总表补齐缓存 Token 字段；这些 PostgreSQL 表只保存临时投递或控制状态。
+- `db/migration-postgresql/V20260813143001__analytics_event_outbox_install_triggers.sql`：仅 PostgreSQL 装配的触发器，捕获登录、Session、消息、Run、工具/子 Agent、Diff 和反馈的低敏计数与归属快照，不复制正文、工具参数、反馈评论或费用；outbox 写入失败会回滚同一业务事务，禁止静默漏数。
+- `db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql`：由独立 checksum migrator 创建 ClickHouse 原始事件、活动/能力/反馈事实、小时/日汇总与 freshness；事实 TTL 两年，汇总不设 TTL。
 - `V20260708200000__add_user_session_history_indexes.sql`：为用户级历史会话列表增加 `sessions.created_by_user_id`、`runs.triggered_by_user_id` 和 `session_messages.sender_user_id` 归因查询索引，不写入任何数据。
 - `V20260710143000__add_run_summary_persistence.sql`：为 `runs` 增加新模式、幂等、生产路由、终态、详情期限、Diff 与远端定位控制面字段；为 `session_messages` 增加摘要形态、版本、状态和幂等键。历史行默认 `LEGACY_FULL/RAW_LEGACY`，不迁移或删除旧原文。
 - `SocketOpencodeProcessManagerGateway` 是唯一生产装配，本地和生产都走 manager WebSocket；本地开箱即用状态必须由真实 manager/backend 心跳注册承载，不再由 V17 seed、`gateway-mode=local` 或 `local-direct` 承载。
@@ -124,7 +127,7 @@
 - `JdbcConfigurationManagementRepository`：配置管理存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试和迁移窗口；其中 `repository_type` / `deployment_mode` 映射只为兼容新增非空列，后续配置管理 SQL 变更必须改 MyBatis XML。
 - `MyBatisCommonParameterRepository`：当前 MyBatis 试点实现，按参数英文名和平台读取、列出并更新通用参数；SQL 位于 `src/main/resources/mybatis/CommonParameterMapper.xml`。
 - `MyBatisAiRunFeedbackRepository`：通过 `AiRunFeedbackMapper.xml` 实现 Run 反馈保存与 `(user_id, run_id)` 单查/批查，新记录不写 `message_id`；`MyBatisAiMessageFeedbackRepository` 保留历史消息兼容。
-- `MyBatisAnalyticsRepository`：通过 `AnalyticsMapper.xml` 实现原始事实读取、hourly/daily rollup 写入、直方图、水位/锁、用户/组织/满意度/异常明细查询；Diff 事实按 storageMode 双读 legacy 事件与新模式 Run 计数，排除 shadow 事件双计数；看板查询只读 rollup 表，不返回 prompt、assistant 原文或费用字段。
+- `MyBatisAnalyticsRepository`：旧 PostgreSQL 运营仓储仅保留用于迁移追溯和既有单元测试，不再注册为运行时 Bean；`UnavailableAnalyticsRepository` 在 ClickHouse 未启用时让运营 API 明确返回 `ANALYTICS_UNAVAILABLE`，禁止静默读取旧汇总。`AnalyticsMapper.xml` 继续承载任务锁和历史迁移所需 SQL。
 - `MyBatisToolboxClickRepository`：通过 `ToolboxClickMapper.xml` 先按全局 `eventId` 幂等插入永久明细，再原子竞争用户/工具 30 秒窗口；竞争成功者原子递增累计并把该明细标记为 counted。PostgreSQL 使用 `ON CONFLICT`，H2 PostgreSQL 模式使用 `MERGE`，业务代码不包含 JDBC SQL。
 - `MyBatisDatabaseIdentityMaintenanceRepository`：通过 `DatabaseIdentityMapper.xml` 实现 identity 运维护口，查询 `pg_sequences` 当前值与 `max(id)`、执行 `ALTER TABLE ... RESTART WITH`；SQL 注入防护依赖白名单表名与服务层校验。
 - `MyBatisRunSessionScopeRepository`：通过 `RunSessionScopeMapper.xml` 保存 Run root scope 和当前 Run root/child session 清单，供 SSE/HTTP snapshot 按当前 Run 子树恢复消息，并支持按 `root_session_id` 汇总 Session 历史树；mapper 中 `MERGE ... USING (VALUES ...)` 的时间参数显式 cast 为 `timestamp`，避免 PostgreSQL 将未定型参数推断为 `text`。
@@ -189,7 +192,8 @@
 - `MyBatisRunEventRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 RunEvent MyBatis XML append、scope 列写入、`raw_event_id=NULL` 语义和 seq 单调分配。
 - `MyBatisInternalModelProviderRepositoryIntegrationTest` 覆盖旧全局 Token 迁移为共享定义、Provider 关联保存、改名/轮换保持关系、引用删除受阻、解除引用后删除，以及名称更新时保留外部 Token 原值。
 - `MyBatisSessionTitleUpdateRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Session 标题 XML 条件更新成功与预期标题不匹配时不覆盖新标题。
-- 运营分析原始事实扫描按 `storage_mode` 双读：legacy Diff 只读 `run_events`，`REDIS_SUMMARY` 只读 `runs.diff_*_count`，即使灰度期间残留 shadow 事件也不重复计数；新模式 USER/ASSISTANT 数量只读取 `content_kind=SUMMARY` 的终态摘要，残留 RAW shadow 消息同样排除。相关 XML 通过持久化模块编译、Flyway 集成和运行时服务单测覆盖；`AnalyticsQueryServiceTest` 固化空分母、满意率、采纳率、p95 和 CSV 字段口径。
+- 运营事实写入按 `storage_mode` 分流：legacy 业务表由 PostgreSQL 触发器写临时 outbox；`REDIS_SUMMARY` durable Lua 在同一 Run hash slot 追加脱敏运营 stream，再由按 Run 检查点消费。用户新增、修改和删除另生成只含用户 ID、名称、组织与状态的维度快照/墓碑事件。三路均幂等写入 ClickHouse，成功后删除 PostgreSQL outbox 或推进 Redis 检查点。历史回填先补全部用户维度，再按 storage mode 排除 shadow 重复，只使用带稳定业务 ID 的明细来源恢复登录、会话状态、消息、Run 结果和 Token，避免旧聚合与明细双计；所有运营查询只读 ClickHouse，不在请求链路扫描 PostgreSQL 业务事实或旧汇总。
+- `ClickHouseAnalyticsIntegrationTest` 使用真实 ClickHouse 锁定 migration checksum、事件版本替换、用户维度人数与下拉、维度事件不污染活动事实、北京时间日桶、Skill 名归一和真实子 Agent 名；`AnalyticsEventOutboxPostgresqlIntegrationTest` 使用真实 PostgreSQL 锁定同事务/回滚、成功投递删除、脱敏用户维度、实时终态/历史回填的完整计数与 Token、Run 耗时和子 Agent 字段；`RedisRunRuntimeStoreIntegrationTest` 锁定运营 stream 脱敏字段与 TTL。
 - `PersistenceSqlConventionTest` 固化持久层 SQL 规则：存量 JDBC 文件只允许留在白名单，MyBatis mapper 不得使用注解 SQL。
 - `MyBatisPublicAgentConfigRolloutRepositoryTest` 固化目标认领生成用户/trace/lease token/force-stop 快照，并验证过期 lease 不能把目标误写为重试或已 dispose；同时检查个人拉取门禁只通过 `PERSONAL_APPLICATION + initiated_by_user_id` 命中发起用户，并校验未排空用户明细映射。`MyBatisPublicAgentConfigRolloutPostgresqlIntegrationTest` 在 PostgreSQL 16/Testcontainers 上执行完整 Flyway 链，验证旧/新 rollout 原子双向关联、旧租约封存、唯一活动门禁、只有六维进程身份完全匹配的新目标派生 `force_stop=true`，以及状态查询返回对应 username/forceStop 诊断。
 - `MyBatisReferenceRepositoryRepositoryIntegrationTest` 使用真实 Flyway + MyBatis 覆盖两表、并发初始化/推进 generation 单胜者、同服务器租约互斥与续租、过期 token/generation 写回拒绝、离线 `DEFERRED`/恢复和状态游标分页；`MyBatisReferenceRepositoryPostgresqlIntegrationTest` 覆盖 PostgreSQL 方言下的副本 upsert、认领和总体状态写回。

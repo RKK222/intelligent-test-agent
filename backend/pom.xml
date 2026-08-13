@@ -59,10 +59,17 @@
         <xxl-job.version>3.4.2</xxl-job.version>
         <xxl-sso.version>2.4.0</xxl-sso.version>
         <start-class>com.enterprise.testagent.app.TestAgentApplication</start-class>
+        <clickhouse-jdbc.version>0.9.8</clickhouse-jdbc.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.clickhouse</groupId>
+                <artifactId>clickhouse-jdbc</artifactId>
+                <version>${clickhouse-jdbc.version}</version>
+                <classifier>all</classifier>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-starter-webflux</artifactId>

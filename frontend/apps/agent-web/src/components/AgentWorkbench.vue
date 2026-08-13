@@ -227,6 +227,7 @@ import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
 import MemoryCenter from "./MemoryCenter.vue";
 import {
+  initialImmersivePanels,
   isRoutedCenterMode,
   routeCenterTransition,
   routedCenterModeFromRouteName,
@@ -571,7 +572,7 @@ const diffFiles = ref<RunDiffFile[]>([]);
 const vcsDiffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
-const centerMode = ref<WorkbenchCenterMode>("editor");
+const centerMode = ref<WorkbenchCenterMode>(routedCenterModeFromRouteName(route.name) ?? "editor");
 const supportAccessRequested = ref(false);
 const supportAccessShortcut = createSupportAccessShortcut();
 const centerModeBeforeHub = ref<Exclude<WorkbenchCenterMode, "hub">>("editor");
@@ -646,12 +647,20 @@ const ignoredRunIds = ref<Set<string>>(new Set());
 const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
-const bottomDrawerOpen = ref(false);
-const leftPanelOpen = ref(true);
-const rightPanelOpen = ref(true);
-const savedLeftPanelOpen = ref(true);
-const savedRightPanelOpen = ref(true);
-const savedBottomDrawerOpen = ref(false);
+const initialPanelSnapshot = initialImmersivePanels({
+  bottomOpen: false,
+  leftOpen: true,
+  rightOpen: true,
+  savedLeftOpen: true,
+  savedRightOpen: true,
+  savedBottomOpen: false
+}, routedCenterModeFromRouteName(route.name));
+const bottomDrawerOpen = ref(initialPanelSnapshot.bottomOpen);
+const leftPanelOpen = ref(initialPanelSnapshot.leftOpen);
+const rightPanelOpen = ref(initialPanelSnapshot.rightOpen);
+const savedLeftPanelOpen = ref(initialPanelSnapshot.savedLeftOpen);
+const savedRightPanelOpen = ref(initialPanelSnapshot.savedRightOpen);
+const savedBottomDrawerOpen = ref(initialPanelSnapshot.savedBottomOpen);
 let restoringRoutedCenterMode = false;
 
 function clearRunEventSseFeedback() {
@@ -797,6 +806,7 @@ const firstLoginGuideEnabled = computed(() =>
   experienceOfferPhase.value === "RESOLVED"
   && !experienceJourneyActive.value
   && selectedWorkspaceKind.value !== "EXPERIENCE"
+  && !isRoutedCenterMode(centerMode.value)
 );
 const appSourceContext = ref<AppSourceWorkspaceContext | null>(null);
 const appSourceCapabilities = computed(() => appSourceWorkspaceCapabilities(selectedWorkspaceKind.value));

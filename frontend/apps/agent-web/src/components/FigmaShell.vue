@@ -5363,6 +5363,23 @@ function submitJoinApp() {
   }
 }
 
+@media (max-width: 600px) {
+  .figma-header {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .figma-title-group,
+  .figma-header-center,
+  .figma-header-experience,
+  .figma-runtime-inventory-wrapper {
+    display: none;
+  }
+
+  .figma-header-right {
+    grid-column: 2;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .figma-context-rail,
   .figma-app-menu-trigger,

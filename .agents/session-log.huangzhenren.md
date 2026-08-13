@@ -2424,3 +2424,20 @@
   - 冲突解决后执行 AI 文档、空白、冲突标记、目标提交祖先关系和最终远端一致性检查；体验旧/新 migration 继续在源码、persistence JAR 和应用内嵌 JAR 保持逐字节一致。
 - Result:
   - 当前分支同时包含本地体验工作区与远端 11 个最新 release 提交，可用普通 fast-forward push 更新远端，不需要 force push；本次只创建安全合并提交，不重写双方历史。
+
+### 2026-08-14 - 运营分析全面迁移 ClickHouse 并增强用户、Token 与能力运营
+
+- Why:
+  - 运营分析需要按日期与小时查看消息/Token 热力，按总用户、活跃用户、深度用户形成可解释漏斗，并从成本视角转为使用覆盖、重复使用和强度分析；查询条件同时要收敛为时间、组织级联和用户模糊搜索。
+  - Agent、Skill、Tool 的调用需要按用户归因并计算使用率，全部运营查询事实必须落在 ClickHouse；该功能新增中间件节点和离线部署路径，按长期分支规则落在 `dev`。
+- What:
+  - 新增 filter-options、funnel、hourly-heatmap、token-operations、capabilities 五组超级管理员 API；旧 `agentId/model/workspaceId` 非空时明确拒绝。前端运营台新增用户漏斗及口径、日期×24 小时热力、Token 覆盖/重复/人均/强度和 Agent/Skill/Tool 使用率，并优化 `/system` 深链接沉浸布局与窄屏顶栏。
+  - PostgreSQL 业务写通过同事务低敏 outbox 捕获用户维度、登录、Session、消息、Run、工具、子 Agent、Diff 和反馈；Redis Summary 在同槽 Lua 中写有限 TTL 的低敏 Stream。XXL 周期任务幂等消费到 ClickHouse 事实表、用户维度、小时/日汇总和 freshness，查询端没有 PostgreSQL 降级；ClickHouse 未配置时返回 `ANALYTICS_UNAVAILABLE`。
+  - 新增 ClickHouse 26.3.17.56 linux/amd64 企业离线包、独立配置/部署/校验脚本、后端连接参数和迁移 checksum 门禁；同步 API、事件、数据库、部署、安全、模块图、测试说明及各模块 README。
+- How:
+  - 后端 23 模块定向 reactor 中运营相关 39 项全部通过，包含真实 PostgreSQL 9 项、真实 ClickHouse 2 项；真实 Redis 脱敏运营 Stream 新增用例 1/1 通过。PostgreSQL outbox 写失败回滚业务事务，普通工具标题、正文、工具输入输出、反馈评论和费用不进入运营事件。
+  - 前端运营与路由 12/12、类型检查、production build 通过；Playwright 在 1440×1000 和 390×844 验证 `/system` 直达时左右工作面板自动关闭、页面与顶栏均无横向溢出或元素重叠。最终 Spring Boot 24 模块打包、Shell 语法、ClickHouse 部署脚本和离线包校验通过。
+  - PostgreSQL 触发器迁移源码与最终 JAR SHA-256 为 `399e8db352ded3f12d5b5a91fe8a07f6242a9aafc07caa8c28589614a43dc50e`；ClickHouse DDL 为 `1a1d4d77b2d92f6f97a864da7a20b6d5f040807d15f2eef940410c10e7e7a7f7`，均与部署脚本固定值一致。
+- Result:
+  - 运营数据查询现只读 ClickHouse，具备可观测 freshness、可重试 outbox、历史回填与校验后清理旧 PostgreSQL 汇总表的切换门禁；HTTP API 增量新增，无 RunEvent/SSE 类型变化，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+  - 全量 Maven 基线仍有两个任务外已知失败：H2 模型网关 fixture 缺 `embedding_dimension`，以及固定日期的分享会话已过期；Redis 全类 10 项中另有一个旧综合用例在同 Session 活跃 Run 未终结时初始化第二个 Run，被现有互斥约束拒绝。新增范围的定向测试和真实存储门禁均已通过。

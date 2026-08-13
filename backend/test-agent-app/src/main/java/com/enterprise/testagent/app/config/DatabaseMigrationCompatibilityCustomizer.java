@@ -5,6 +5,8 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.sql.Connection;
+import java.sql.SQLException;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationVersion;
@@ -27,6 +29,9 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class DatabaseMigrationCompatibilityCustomizer implements FlywayConfigurationCustomizer {
+
+    private static final String POSTGRESQL_MIGRATION_LOCATION =
+            "classpath:db/migration-postgresql";
 
     static final String LEGACY_TOOLBOX_MIGRATION_VERSION = "20260727203500";
     static final String LEGACY_TOOLBOX_MIGRATION_LOCATION =
@@ -387,6 +392,9 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         List<String> locations = new ArrayList<>(Arrays.stream(configuration.getLocations())
                 .map(location -> location.getDescriptor())
                 .toList());
+        if (isPostgresql(configuration)) {
+            addLocationIfAbsent(locations, POSTGRESQL_MIGRATION_LOCATION);
+        }
         if (legacyMigrationApplied) {
             addLocationIfAbsent(locations, LEGACY_TOOLBOX_MIGRATION_LOCATION);
         }
@@ -580,6 +588,15 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     private void addLocationIfAbsent(List<String> locations, String location) {
         if (!locations.contains(location)) {
             locations.add(location);
+        }
+    }
+
+    /** PostgreSQL 专属迁移承载触发器等 H2 无法解析的生产语法。 */
+    private boolean isPostgresql(FluentConfiguration configuration) {
+        try (Connection connection = configuration.getDataSource().getConnection()) {
+            return "PostgreSQL".equalsIgnoreCase(connection.getMetaData().getDatabaseProductName());
+        } catch (SQLException exception) {
+            throw new IllegalStateException("读取 Flyway 数据库类型失败", exception);
         }
     }
 

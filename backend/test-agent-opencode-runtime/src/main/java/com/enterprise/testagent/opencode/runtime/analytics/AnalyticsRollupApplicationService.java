@@ -7,7 +7,7 @@ import com.enterprise.testagent.domain.analytics.AnalyticsRepository;
 import java.net.InetAddress;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -17,15 +17,18 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 /**
  * 运营分析异步汇总服务：按有限窗口重建小时/日汇总，避免主链路同步统计写放大。
  */
 @Service
+@ConditionalOnProperty(name = "test-agent.analytics.clickhouse.enabled", havingValue = "true")
 public class AnalyticsRollupApplicationService {
 
     public static final String JOB_NAME = "analytics-rollup";
+    private static final ZoneId ANALYTICS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final Logger LOGGER = LoggerFactory.getLogger(AnalyticsRollupApplicationService.class);
     private static final long[] DURATION_BUCKETS = {
             1_000L, 3_000L, 5_000L, 10_000L, 30_000L, 60_000L, 120_000L, 300_000L, Long.MAX_VALUE
@@ -49,8 +52,8 @@ public class AnalyticsRollupApplicationService {
         Instant now = Instant.now();
         Instant windowStart = now.minus(2, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
         Instant windowEnd = now.plus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
-        LocalDate dailyStart = now.minus(7, ChronoUnit.DAYS).atZone(ZoneOffset.UTC).toLocalDate();
-        LocalDate dailyEnd = now.atZone(ZoneOffset.UTC).toLocalDate();
+        LocalDate dailyStart = now.minus(7, ChronoUnit.DAYS).atZone(ANALYTICS_ZONE).toLocalDate();
+        LocalDate dailyEnd = now.atZone(ANALYTICS_ZONE).toLocalDate();
         if (effectiveStopRequested.getAsBoolean()) {
             return new Result(false, true, windowStart, windowEnd, dailyStart, dailyEnd);
         }
@@ -128,11 +131,11 @@ public class AnalyticsRollupApplicationService {
      * 由小时表生成日表，避免每日查询重新扫描原始大表。
      */
     public void rebuildDailyFromHourly(LocalDate startInclusive, LocalDate endInclusive, String traceId) {
-        Instant start = startInclusive.atStartOfDay().toInstant(ZoneOffset.UTC);
-        Instant end = endInclusive.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC);
+        Instant start = startInclusive.atStartOfDay(ANALYTICS_ZONE).toInstant();
+        Instant end = endInclusive.plusDays(1).atStartOfDay(ANALYTICS_ZONE).toInstant();
         Map<ActivityKey, ActivityAccumulator> grouped = new LinkedHashMap<>();
         for (AnalyticsModels.ActivityRollupRow row : repository.loadHourly(start, end)) {
-            LocalDate date = row.bucketStart().atZone(ZoneOffset.UTC).toLocalDate();
+            LocalDate date = row.bucketStart().atZone(ANALYTICS_ZONE).toLocalDate();
             ActivityKey key = ActivityKey.from(date, row);
             grouped.computeIfAbsent(key, ignored -> ActivityAccumulator.from(date, row))
                     .add(row);
@@ -277,6 +280,8 @@ public class AnalyticsRollupApplicationService {
         private long tokensInput;
         private long tokensOutput;
         private long tokensReasoning;
+        private long tokensCacheRead;
+        private long tokensCacheWrite;
         private long durationTotalMs;
         private long durationRunCount;
         private Instant firstActivityAt;
@@ -370,6 +375,8 @@ public class AnalyticsRollupApplicationService {
             tokensInput += row.tokensInput();
             tokensOutput += row.tokensOutput();
             tokensReasoning += row.tokensReasoning();
+            tokensCacheRead += row.tokensCacheRead();
+            tokensCacheWrite += row.tokensCacheWrite();
             markActivity(row.occurredAt());
         }
 
@@ -396,6 +403,8 @@ public class AnalyticsRollupApplicationService {
             tokensInput += row.tokensInput();
             tokensOutput += row.tokensOutput();
             tokensReasoning += row.tokensReasoning();
+            tokensCacheRead += row.tokensCacheRead();
+            tokensCacheWrite += row.tokensCacheWrite();
             durationTotalMs += row.durationTotalMs();
             durationRunCount += row.durationRunCount();
             markActivity(row.firstActivityAt());
@@ -449,6 +458,8 @@ public class AnalyticsRollupApplicationService {
                     tokensInput,
                     tokensOutput,
                     tokensReasoning,
+                    tokensCacheRead,
+                    tokensCacheWrite,
                     tokensInput + tokensOutput + tokensReasoning,
                     durationTotalMs,
                     durationRunCount,

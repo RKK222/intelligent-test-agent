@@ -28,6 +28,22 @@ export function isImmersiveCenterMode(mode: WorkbenchCenterMode): boolean {
   return mode === "system" || mode === "hub" || mode === "toolbox" || mode === "memories";
 }
 
+/** 深链接首屏没有 editor -> immersive 的 watch 过渡，需要按当前路由主动建立同一份面板快照。 */
+export function initialImmersivePanels(
+  state: ImmersivePanelSnapshot,
+  routeMode: RoutedCenterMode | null
+): ImmersivePanelSnapshot {
+  if (!routeMode) return state;
+  return {
+    leftOpen: false,
+    rightOpen: false,
+    bottomOpen: false,
+    savedLeftOpen: state.leftOpen,
+    savedRightOpen: state.rightOpen,
+    savedBottomOpen: state.bottomOpen
+  };
+}
+
 /** 沉浸式中心视图共用一次快照，互相切换时不覆盖用户进入前的面板状态。 */
 export function transitionImmersivePanels(
   state: ImmersivePanelSnapshot,

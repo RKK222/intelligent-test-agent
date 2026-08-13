@@ -28,6 +28,7 @@ public enum ErrorCode {
     OPENCODE_TIMEOUT(504, "TestAgent 服务超时"),
     RUNTIME_STATE_UNAVAILABLE(503, "运行态存储不可用"),
     MEMORY_UNAVAILABLE(503, "长期记忆服务不可用"),
+    ANALYTICS_UNAVAILABLE(503, "运营分析服务不可用"),
     MEMORY_TIMEOUT(504, "长期记忆服务超时"),
     GIT_UNAVAILABLE(503, "Git 服务不可用"),
     GIT_TIMEOUT(504, "Git 操作超时");

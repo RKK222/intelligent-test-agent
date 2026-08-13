@@ -39,12 +39,18 @@ import type {
   RunFeedbackState,
   AddSshKeyPayload,
   AnalyticsExceptionDetail,
+  AnalyticsCapabilities,
+  AnalyticsFilterOptions,
+  AnalyticsFunnel,
+  AnalyticsHeatmapMetric,
+  AnalyticsHourlyHeatmap,
   AnalyticsOrganizationUsageRow,
   AnalyticsOverview,
   AnalyticsPeaks,
   AnalyticsQueryParams,
   AnalyticsSatisfaction,
   AnalyticsTimeSeriesPoint,
+  AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
   ApplicationWorkspaceTemplate,
   BatchContext,
@@ -2350,6 +2356,16 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<null>(`${externalApiCredentialBase}/${encodeURIComponent(credentialId)}`, { method: "DELETE" }),
     getAnalyticsOverview: (params: AnalyticsQueryParams = {}) =>
       request<AnalyticsOverview>(`${analyticsBase}/overview${query({ ...params })}`),
+    getAnalyticsFilterOptions: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsFilterOptions>(`${analyticsBase}/filter-options${query({ ...params })}`),
+    getAnalyticsFunnel: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsFunnel>(`${analyticsBase}/funnel${query({ ...params })}`),
+    getAnalyticsHourlyHeatmap: (params: AnalyticsQueryParams = {}, metric: AnalyticsHeatmapMetric = "USER_MESSAGES") =>
+      request<AnalyticsHourlyHeatmap>(`${analyticsBase}/hourly-heatmap${query({ ...params, metric })}`),
+    getAnalyticsTokenOperations: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsTokenOperations>(`${analyticsBase}/token-operations${query({ ...params })}`),
+    getAnalyticsCapabilities: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsCapabilities>(`${analyticsBase}/capabilities${query({ ...params })}`),
     getAnalyticsTimeseries: (params: AnalyticsQueryParams = {}) =>
       request<AnalyticsTimeSeriesPoint[]>(`${analyticsBase}/timeseries${query({ ...params })}`),
     getAnalyticsPeaks: (params: AnalyticsQueryParams = {}) =>
@@ -2362,7 +2378,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<AnalyticsSatisfaction>(`${analyticsBase}/satisfaction${query({ ...params })}`),
     getAnalyticsExceptions: (params: AnalyticsQueryParams = {}) =>
       request<PageResponse<AnalyticsExceptionDetail>>(`${analyticsBase}/exceptions${query({ ...params })}`),
-    exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions", params: AnalyticsQueryParams = {}) =>
+    exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions" | "funnel" | "token-operations" | "capabilities", params: AnalyticsQueryParams = {}) =>
       requestCsv(`${analyticsBase}/export${query({ ...params, type })}`),
     createXxlJobSsoTicket: () =>
       request<XxlJobSsoTicket>(`${xxlJobBase}/sso-tickets`, { method: "POST" }),

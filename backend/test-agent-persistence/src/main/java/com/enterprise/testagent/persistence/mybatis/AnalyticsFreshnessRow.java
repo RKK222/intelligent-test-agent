@@ -10,5 +10,8 @@ public record AnalyticsFreshnessRow(
         Instant watermarkAt,
         Instant generatedAt,
         String status,
-        String message) {
+        String message,
+        Instant coverageStart,
+        Instant coverageEnd,
+        String attributionMode) {
 }

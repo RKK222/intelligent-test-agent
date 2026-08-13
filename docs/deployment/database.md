@@ -64,10 +64,13 @@ XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backe
 | `V7__register_personal_workspace_relocation_task.sql` | 注册每分钟个人工作区跨服务器搬迁广播任务。 |
 | `V8__schedule_personal_workspace_relocation_every_thirty_minutes.sql` | 保留 V7 原始字节，把既有搬迁任务 Cron 更新为每 30 分钟并触发下一次时间重算。 |
 | `V9__register_inactive_user_process_cleanup_task.sql` | 注册每天北京时间 02:00 执行的十五天未使用用户 OpenCode 进程关闭广播任务。 |
+| `V10__register_internal_model_probe_task.sql` | 注册每 5 分钟内部模型供应商探活。 |
+| `V11__register_internal_model_observability_retention_task.sql` | 注册每天 03:30 内部模型观测明细/汇总清理。 |
+| `V12__register_analytics_clickhouse_ingestion_task.sql` | 注册每分钟 ClickHouse 脱敏运营事实入库。 |
 
-V3-V9 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
+V3-V12 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
 
-所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V9 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
+所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V12 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
 
 PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审计，不再产生新的 PostgreSQL scheduler 运行。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免旧 runner 删除后留下永久活动记录。XXL 运行日志独立留在 MySQL，默认保留 30 天。
 
@@ -1332,7 +1335,8 @@ QA Memory 扩展 `20260809230000`/`20260810090000`、通知中心 `2026081017000
 加载上述三条 QA Memory 主 migration，而只新增隔离补偿 `20260811170050`；只执行到会话分享主链的旧 release
 历史则使用 `20260810173117`，再顺序执行其后的通知和时延输入 migration。两条 QA Memory 补偿不可混用，
 `20260810110001/02` 仅属于精确匹配的 QA Memory 扩展兼容路径，也不得混入正常企业主链。共享 XXL MySQL 本轮
-准入预期为 V1-V11 全部成功且不新增 history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或
+从已执行 V1-V11 的基线只允许新增 `V12__register_analytics_clickhouse_ingestion_task.sql`，Flyway checksum 为
+`-1848714734`、SHA-256 为 `70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或
 部分历史出现时必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
 
 正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移、通知中心和 Token 延迟输入 migration 的 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
@@ -1402,9 +1406,9 @@ migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示�
 - 修改参数值时自动写入日志，无需人工干预。
 - 日志表只追加，不提供删除接口，满足审计要求。
 
-## V20260628231000 运营分析反馈与汇总表
+## V20260628231000 运营分析反馈与旧汇总表
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260628231000__create_analytics_feedback_and_rollups.sql` 为 AI 回复反馈和运营分析 rollup 增加以下结构。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260628231000__create_analytics_feedback_and_rollups.sql` 为 AI 回复反馈和首版 PostgreSQL 运营 rollup 增加以下结构。反馈仍是业务事实；本节中的 PostgreSQL 运营汇总表只作为 ClickHouse 切换前兼容和回滚来源，新版 API 不再查询这些表。
 
 ### runs 归因扩展
 
@@ -1441,7 +1445,7 @@ migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示�
 
 ### analytics_user_activity_hourly / analytics_user_activity_daily
 
-运营分析 API 只读 hourly/daily rollup 表，不在请求链路扫描原始事实宽表。
+旧版运营分析 API 只读 PostgreSQL hourly/daily rollup 表；新版 API 已改为只读 ClickHouse 同名逻辑汇总。
 
 | 主要字段 | 说明 |
 |---|---|
@@ -1474,6 +1478,37 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 - 新增表和可空字段，不破坏历史数据；历史 Run 的 `agent_id/model_id` 为空时 rollup 使用 `__none__` 维度。
 - 会话创建人、Run 触发人、用户消息发送人由业务层逐步补齐；历史空值按 session 创建人或 `__unknown__` 兜底。
 - 主链路只写事实表，统计刷新由后台定时任务执行；失败时保留最近成功 rollup 并标记 freshness。
+
+## V20260813143000 ClickHouse 运营投递控制表
+
+`V20260813143000__analytics_event_outbox_create_pipeline.sql` 新增以下 PostgreSQL 控制结构，并为旧小时/日表补齐缓存 Token 字段。它们只承担可靠投递、消费进度和切换门禁，不作为运营查询库。
+
+| 表 | 说明 |
+|---|---|
+| `analytics_event_outbox` | 与业务写同事务生成的脱敏临时事件；ClickHouse 确认写入后立即删除，失败时保留并退避重试。 |
+| `analytics_redis_outbox_checkpoints` | 按 Run 保存 `REDIS_SUMMARY` 同槽运营 stream 的最后消费 ID。 |
+| `analytics_clickhouse_cutovers` | 保存回填窗口、源/目标计数、`VERIFIED` 状态和旧汇总清理门禁。 |
+
+`V20260813143001__analytics_event_outbox_install_triggers.sql` 位于独立 `db/migration-postgresql` location，只在 PostgreSQL 方言下装配业务表触发器；H2 不解析 PostgreSQL `jsonb/plpgsql`。触发器捕获用户维度新增/修改/删除、登录、Session、消息、Run、工具、子 Agent、Diff 与反馈，只写用户/组织快照、业务 ID、计数、Token、能力名和状态；用户删除写 `DELETED` 墓碑，不复制密码、统一认证号、消息正文、回答、普通工具标题、工具输入输出、反馈评论或费用。outbox 写入与业务写处于同一事务，触发器异常会使业务事务回滚，禁止静默形成统计缺口；ClickHouse 投递失败则保留 outbox 并退避重试，只形成运营数据延迟。
+
+两个 migration 都是尚未进入稳定环境的开发期候选。合入交付分支前，集成人必须按本文件总则收集个人库、稳定库和企业库的 `flyway_schema_history`；如果任一需保留数据库已经执行，则版本、文件名和字节必须锁定，不得重排或改写。
+
+## ClickHouse V20260813150000 运营事实与汇总
+
+ClickHouse 使用独立 `ClickHouseSchemaMigrator` 执行 `db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql`。DDL 全部可幂等重放，并在 `analytics_schema_history` 锁定版本与 SHA-256；同版本 checksum 不一致时 Java 拒绝启动。该迁移不接入平台唯一 PostgreSQL Flyway，也不创建第二套关系库迁移器。
+
+| 表 | 生命周期与用途 |
+|---|---|
+| `analytics_ingestion_events` | 脱敏原始运营事件；`ReplacingMergeTree(event version)` 幂等，TTL 2 年。 |
+| `analytics_activity_facts` | 用户活动、消息、Run、Token、Diff 计数事实；物化视图生成，TTL 2 年。 |
+| `analytics_user_dimensions` | 每个用户最新脱敏维度与删除墓碑；漏斗基数、组织人数和级联下拉直接查询，不设 TTL。 |
+| `analytics_capability_facts` | Agent、Skill、Tool 调用事实；子 Agent 使用 `session.child.discovered` 的真实 Agent 名，排除泛化 `task` 工具；TTL 2 年。 |
+| `analytics_feedback_facts` | 满意/不满意及原因码事实，不保存评论；TTL 2 年。 |
+| `analytics_user_activity_hourly/daily` | 北京时间小时/日用户汇总，保留用户与组织快照，不设 TTL。 |
+| `analytics_run_duration_histogram_hourly` | 兼容直方图汇总；新版查询可直接使用 ClickHouse 精确分位数，不设 TTL。 |
+| `analytics_rollup_watermarks` | 入库/回填 freshness、覆盖窗口与状态，不设 TTL。 |
+
+实时链路由 XXL `opencode-runtime.analytics-ingestion` 每分钟最多投递 500 条，再由 `opencode-runtime.analytics-rollup` 每 5 分钟刷新最近窗口。历史回填先读取全量用户维度，再按自然日读取 PostgreSQL 业务历史，以 `backfill-v1:` 稳定 ID 写入登录、会话状态、用户/助手消息、Run 结果与 Token、能力调用、Diff 和反馈完整事实；行为只走稳定明细来源，不再叠加旧聚合原始查询。源事件数与 ClickHouse 活动事实、用户维度事实数量之和完全一致后才写 `VERIFIED`。旧 PostgreSQL 汇总必须在备份与页面验收后，通过单节点第二阶段开关清理，禁止手工提前删除。所有运营查询，包括漏斗基数、组织人数和级联筛选项，都只读 ClickHouse。完整配置、专机部署、验收与回滚见 `deploy/internal/CLICKHOUSE-ANALYTICS.md`。
 
 ## V20260626210000 数据库表和字段中文注释
 

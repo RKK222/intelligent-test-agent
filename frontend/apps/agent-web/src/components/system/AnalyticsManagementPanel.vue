@@ -1,97 +1,119 @@
 <script setup lang="ts">
-import { computed, inject, ref } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import { useQuery } from "@tanstack/vue-query";
-import { Download, RefreshCw } from "lucide-vue-next";
+import { Download, RefreshCw, Search } from "lucide-vue-next";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
+  AnalyticsCapabilities,
+  AnalyticsExceptionDetail,
+  AnalyticsFunnel,
+  AnalyticsHeatmapMetric,
+  AnalyticsHourlyHeatmap,
+  AnalyticsOrganizationUsageRow,
   AnalyticsOverview,
   AnalyticsQueryParams,
-  AnalyticsTimeSeriesPoint,
-  AnalyticsPeaks,
   AnalyticsSatisfaction,
+  AnalyticsTimeSeriesPoint,
+  AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
-  AnalyticsOrganizationUsageRow,
-  AnalyticsExceptionDetail,
   PageResponse
 } from "@test-agent/shared-types";
 
 const api = inject<BackendApiClient>("api")!;
 
-type TabKey = "overview" | "users" | "organizations" | "satisfaction" | "exceptions";
-type RangePreset = "7" | "30" | "90" | "180" | "custom";
+type TabKey = "overview" | "users" | "token" | "capabilities" | "organizations" | "satisfaction" | "exceptions";
+type RangePreset = "7" | "30" | "90" | "custom";
+type CapabilityType = "ALL" | "AGENT" | "SKILL" | "TOOL";
 
 const activeTab = ref<TabKey>("overview");
 const now = new Date();
-const defaultStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-const startTime = ref(toLocalInput(defaultStart));
+const startTime = ref(toLocalInput(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)));
 const endTime = ref(toLocalInput(now));
 const rangePreset = ref<RangePreset>("30");
 const granularity = ref<"hour" | "day" | "week" | "month">("day");
 const organization = ref("");
 const rdDepartment = ref("");
 const department = ref("");
-const userId = ref("");
-const workspaceId = ref("");
-const agentId = ref("");
-const model = ref("");
-const sort = ref("active");
+const userKeyword = ref("");
+const heatmapMetric = ref<AnalyticsHeatmapMetric>("USER_MESSAGES");
+const capabilityType = ref<CapabilityType>("ALL");
 
 const params = computed<AnalyticsQueryParams>(() => ({
   startTime: fromLocalInput(startTime.value),
   endTime: fromLocalInput(endTime.value),
   granularity: granularity.value,
-  organization: organization.value.trim() || undefined,
-  rdDepartment: rdDepartment.value.trim() || undefined,
-  department: department.value.trim() || undefined,
-  userId: userId.value.trim() || undefined,
-  workspaceId: workspaceId.value.trim() || undefined,
-  agentId: agentId.value.trim() || undefined,
-  model: model.value.trim() || undefined,
-  topN: 10,
+  organization: organization.value || undefined,
+  rdDepartment: rdDepartment.value || undefined,
+  department: department.value || undefined,
+  user: userKeyword.value.trim() || undefined,
+  topN: 20,
   page: 1,
   pageSize: 20,
-  sort: sort.value
+  sort: "active"
 }));
+const heatmapRangeSupported = computed(() => {
+  const start = new Date(params.value.startTime ?? "").getTime();
+  const end = new Date(params.value.endTime ?? "").getTime();
+  return Number.isFinite(start) && Number.isFinite(end) && start < end
+    && end - start <= 90 * 24 * 60 * 60 * 1000;
+});
 
 const overviewQuery = useQuery<AnalyticsOverview, Error>({
   queryKey: computed(() => ["analytics-overview", params.value]),
   retry: false,
   queryFn: () => api.getAnalyticsOverview(params.value)
 });
-
+const optionsQuery = useQuery({
+  queryKey: computed(() => ["analytics-filter-options", params.value.organization, params.value.rdDepartment]),
+  retry: false,
+  queryFn: () => api.getAnalyticsFilterOptions(params.value)
+});
+const funnelQuery = useQuery<AnalyticsFunnel, Error>({
+  queryKey: computed(() => ["analytics-funnel", params.value]),
+  retry: false,
+  queryFn: () => api.getAnalyticsFunnel(params.value)
+});
+const heatmapQuery = useQuery<AnalyticsHourlyHeatmap, Error>({
+  queryKey: computed(() => ["analytics-hourly-heatmap", params.value, heatmapMetric.value]),
+  enabled: () => activeTab.value === "overview" && heatmapRangeSupported.value,
+  retry: false,
+  queryFn: () => api.getAnalyticsHourlyHeatmap(params.value, heatmapMetric.value)
+});
 const timeseriesQuery = useQuery<AnalyticsTimeSeriesPoint[], Error>({
   queryKey: computed(() => ["analytics-timeseries", params.value]),
   retry: false,
   queryFn: () => api.getAnalyticsTimeseries(params.value)
 });
-
-const peaksQuery = useQuery<AnalyticsPeaks, Error>({
-  queryKey: computed(() => ["analytics-peaks", params.value]),
-  retry: false,
-  queryFn: () => api.getAnalyticsPeaks(params.value)
-});
-
 const usersQuery = useQuery<PageResponse<AnalyticsUserUsageRow>, Error>({
   queryKey: computed(() => ["analytics-users", params.value]),
   enabled: () => activeTab.value === "users",
   retry: false,
   queryFn: () => api.getAnalyticsUsers(params.value)
 });
-
+const tokenQuery = useQuery<AnalyticsTokenOperations, Error>({
+  queryKey: computed(() => ["analytics-token-operations", params.value]),
+  enabled: () => activeTab.value === "token",
+  retry: false,
+  queryFn: () => api.getAnalyticsTokenOperations(params.value)
+});
+const capabilitiesQuery = useQuery<AnalyticsCapabilities, Error>({
+  queryKey: computed(() => ["analytics-capabilities", params.value]),
+  enabled: () => activeTab.value === "capabilities",
+  retry: false,
+  queryFn: () => api.getAnalyticsCapabilities(params.value)
+});
 const organizationsQuery = useQuery<AnalyticsOrganizationUsageRow[], Error>({
   queryKey: computed(() => ["analytics-organizations", params.value]),
   enabled: () => activeTab.value === "organizations",
   retry: false,
   queryFn: () => api.getAnalyticsOrganizations({ ...params.value, groupBy: "department" })
 });
-
 const satisfactionQuery = useQuery<AnalyticsSatisfaction, Error>({
   queryKey: computed(() => ["analytics-satisfaction", params.value]),
   enabled: () => activeTab.value === "satisfaction",
   retry: false,
   queryFn: () => api.getAnalyticsSatisfaction(params.value)
 });
-
 const exceptionsQuery = useQuery<PageResponse<AnalyticsExceptionDetail>, Error>({
   queryKey: computed(() => ["analytics-exceptions", params.value]),
   enabled: () => activeTab.value === "exceptions",
@@ -100,59 +122,77 @@ const exceptionsQuery = useQuery<PageResponse<AnalyticsExceptionDetail>, Error>(
 });
 
 const overview = computed(() => overviewQuery.data.value);
+const funnel = computed(() => funnelQuery.data.value);
 const timeseries = computed(() => timeseriesQuery.data.value ?? []);
-const peaks = computed(() => peaksQuery.data.value);
+const heatmap = computed(() => heatmapQuery.data.value);
 const maxTrendRun = computed(() => Math.max(1, ...timeseries.value.map(item => item.runCount)));
-const maxHeatmap = computed(() => Math.max(1, ...(peaks.value?.heatmap ?? []).map(item => item.activeUsers + item.runCount + item.userMessageCount)));
-// 列数跟随实际时间点，少量数据填满容器；高密度数据仍由 CSS 最小列宽保留横向滚动。
+const maxHeatmap = computed(() => Math.max(1, ...(heatmap.value?.points ?? []).map(item => item.value)));
 const trendGridStyle = computed(() => ({ "--ta-trend-columns": String(Math.max(timeseries.value.length, 1)) }));
+const capabilityRows = computed(() => (capabilitiesQuery.data.value?.rows ?? [])
+  .filter(row => capabilityType.value === "ALL" || row.type === capabilityType.value));
 const freshnessText = computed(() => {
   const freshness = overview.value?.freshness;
   if (!freshness?.generatedAt) return "暂无统计时间";
   const status = freshness.status === "FRESH" ? "最新" : freshness.status === "FAILED" ? "失败" : "可能延迟";
   return `${status} · ${new Date(freshness.generatedAt).toLocaleString("zh-CN")}`;
 });
-
 const summaryCards = computed(() => {
   const item = overview.value;
   return [
-    { label: "活跃用户", value: item?.activeUsers ?? 0, extra: formatRate(item?.activeRate) },
-    { label: "有效使用用户", value: item?.validUsers ?? 0, extra: `深度 ${item?.deepUsers ?? 0}` },
-    { label: "新建会话", value: item?.sessionCount ?? 0, extra: `活跃会话 ${item?.activeSessionCount ?? 0}` },
     { label: "用户消息", value: item?.userMessageCount ?? 0, extra: `AI 回复 ${item?.assistantMessageCount ?? 0}` },
-    { label: "Run 启动", value: item?.runCount ?? 0, extra: formatRate(item?.successRate) },
-    { label: "满意率", value: formatRate(item?.satisfactionRate), extra: `反馈 ${((item?.positiveFeedbackCount ?? 0) + (item?.negativeFeedbackCount ?? 0))}` },
+    { label: "Run 启动", value: item?.runCount ?? 0, extra: `成功率 ${formatRate(item?.successRate)}` },
+    { label: "满意率", value: formatRate(item?.satisfactionRate), extra: `反馈 ${(item?.positiveFeedbackCount ?? 0) + (item?.negativeFeedbackCount ?? 0)}` },
     { label: "Diff 采纳率", value: formatRate(item?.diffAcceptanceRate), extra: `生成 ${item?.diffProposedCount ?? 0}` },
     { label: "p95 耗时", value: formatDuration(item?.p95DurationMs), extra: `平均 ${formatDuration(item?.averageDurationMs)}` },
-    { label: "token 使用量", value: formatNumber(item?.totalTokens ?? 0), extra: `人均 ${formatNumber(item?.tokensPerUser)}` }
+    { label: "主 Token 使用量", value: formatNumber(item?.totalTokens ?? 0), extra: `Run 均 ${formatNumber(item?.tokensPerRun)}` }
   ];
 });
 
+watch(organization, () => {
+  rdDepartment.value = "";
+  department.value = "";
+});
+watch(rdDepartment, () => {
+  department.value = "";
+});
+
 function refresh() {
+  void optionsQuery.refetch();
   void overviewQuery.refetch();
+  void funnelQuery.refetch();
+  if (heatmapRangeSupported.value) void heatmapQuery.refetch();
   void timeseriesQuery.refetch();
-  void peaksQuery.refetch();
   void usersQuery.refetch();
+  void tokenQuery.refetch();
+  void capabilitiesQuery.refetch();
   void organizationsQuery.refetch();
   void satisfactionQuery.refetch();
   void exceptionsQuery.refetch();
 }
 
-/** 快捷范围复用现有开始/结束参数，不增加第二套查询状态。 */
 function applyRangePreset() {
   if (rangePreset.value === "custom") return;
   const rangeEnd = new Date();
   const days = Number(rangePreset.value);
   startTime.value = toLocalInput(new Date(rangeEnd.getTime() - days * 24 * 60 * 60 * 1000));
   endTime.value = toLocalInput(rangeEnd);
-  granularity.value = "day";
+  granularity.value = days <= 2 ? "hour" : days <= 90 ? "day" : "week";
 }
 
 function markCustomRange() {
   rangePreset.value = "custom";
 }
 
-async function exportCsv(type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions") {
+function exportType(): "overview" | "users" | "organizations" | "feedback" | "exceptions" | "token-operations" | "capabilities" {
+  if (activeTab.value === "satisfaction") return "feedback";
+  if (activeTab.value === "token") return "token-operations";
+  if (activeTab.value === "capabilities") return "capabilities";
+  if (activeTab.value === "overview") return "overview";
+  return activeTab.value;
+}
+
+async function exportCsv() {
+  const type = exportType();
   const blob = await api.exportAnalyticsCsv(type, params.value);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -160,6 +200,21 @@ async function exportCsv(type: "overview" | "timeseries" | "users" | "organizati
   link.download = `analytics-${type}.csv`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function funnelWidth(value: number | undefined) {
+  const total = Math.max(funnel.value?.totalUsers ?? 0, 1);
+  return `${Math.max(34, ((value ?? 0) / total) * 100)}%`;
+}
+
+function heatmapColor(value: number) {
+  if (value === 0) return "#f1f3f6";
+  const alpha = 0.18 + Math.min(0.82, value / maxHeatmap.value * 0.82);
+  return `rgba(190, 31, 48, ${alpha})`;
+}
+
+function capabilityLabel(type: string) {
+  return type === "AGENT" ? "Agent" : type === "SKILL" ? "Skill" : type === "TOOL" ? "Tool" : type;
 }
 
 function toLocalInput(date: Date) {
@@ -188,12 +243,7 @@ function formatDuration(value: number | null | undefined) {
 }
 
 function trendHeight(point: AnalyticsTimeSeriesPoint) {
-  if (point.runCount === 0) return "0px";
-  return `${Math.max(6, Math.round((point.runCount / maxTrendRun.value) * 72))}px`;
-}
-
-function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
-  return Math.max(0.08, Math.min(0.95, (activeUsers + runs + messages) / maxHeatmap.value));
+  return point.runCount === 0 ? "0px" : `${Math.max(6, Math.round((point.runCount / maxTrendRun.value) * 72))}px`;
 }
 </script>
 
@@ -205,434 +255,160 @@ function heatmapAlpha(activeUsers: number, runs: number, messages: number) {
         <p>{{ freshnessText }}</p>
       </div>
       <div class="ta-analytics-header-actions">
-        <button type="button" class="ta-icon-btn" title="刷新" @click="refresh">
-          <RefreshCw :size="16" />
-        </button>
-        <button type="button" class="ta-export-btn" @click="exportCsv(activeTab === 'satisfaction' ? 'feedback' : activeTab === 'overview' ? 'overview' : activeTab)">
-          <Download :size="15" />
-          <span>导出 CSV</span>
-        </button>
+        <button type="button" class="ta-icon-btn" title="刷新" aria-label="刷新" @click="refresh"><RefreshCw :size="16" /></button>
+        <button type="button" class="ta-export-btn" @click="exportCsv"><Download :size="15" /><span>导出 CSV</span></button>
       </div>
     </header>
 
     <div class="ta-analytics-filters">
       <label>快速范围
         <select v-model="rangePreset" aria-label="快速范围" @change="applyRangePreset">
-          <option value="7">最近 7 天</option>
-          <option value="30">最近 30 天</option>
-          <option value="90">最近 90 天</option>
-          <option value="180">最近 180 天</option>
-          <option value="custom">自定义</option>
+          <option value="7">最近 7 天</option><option value="30">最近 30 天</option>
+          <option value="90">最近 90 天</option><option value="custom">自定义</option>
         </select>
       </label>
       <label>开始<input v-model="startTime" type="datetime-local" @change="markCustomRange" /></label>
       <label>结束<input v-model="endTime" type="datetime-local" @change="markCustomRange" /></label>
-      <label>粒度
-        <select v-model="granularity">
-          <option value="hour">小时</option>
-          <option value="day">天</option>
-          <option value="week">周</option>
-          <option value="month">月</option>
-        </select>
+      <label>机构
+        <select v-model="organization"><option value="">全部机构</option><option v-for="item in optionsQuery.data.value?.organizations ?? []" :key="item.value" :value="item.value">{{ item.label }}</option></select>
       </label>
-      <label>机构<input v-model="organization" placeholder="organization" /></label>
-      <label>研发部<input v-model="rdDepartment" placeholder="rdDepartment" /></label>
-      <label>部门<input v-model="department" placeholder="department" /></label>
-      <label>用户<input v-model="userId" placeholder="userId" /></label>
-      <label>agent<input v-model="agentId" placeholder="agentId" /></label>
-      <label>model<input v-model="model" placeholder="model" /></label>
-      <label>workspace<input v-model="workspaceId" placeholder="workspaceId" /></label>
-      <label>排序
-        <select v-model="sort">
-          <option value="active">活跃</option>
-          <option value="runs">Run</option>
-          <option value="successRate">成功率</option>
-          <option value="satisfactionRate">满意率</option>
-          <option value="diffAcceptanceRate">采纳率</option>
-          <option value="cancelRate">取消率</option>
-          <option value="negativeFeedback">负反馈</option>
-          <option value="tokenUsage">token 使用量</option>
-        </select>
+      <label>研发部
+        <select v-model="rdDepartment"><option value="">全部研发部</option><option v-for="item in optionsQuery.data.value?.rdDepartments ?? []" :key="item.value" :value="item.value">{{ item.label }}</option></select>
       </label>
+      <label>部门
+        <select v-model="department"><option value="">全部部门</option><option v-for="item in optionsQuery.data.value?.departments ?? []" :key="item.value" :value="item.value">{{ item.label }}</option></select>
+      </label>
+      <label class="ta-search-label">用户<span class="ta-search"><Search :size="14" /><input v-model="userKeyword" aria-label="用户" placeholder="姓名或用户 ID" /></span></label>
     </div>
 
-    <div class="ta-analytics-tabs">
-      <button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">总览</button>
-      <button :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">用户分析</button>
+    <nav class="ta-analytics-tabs" aria-label="运营分析视图">
+      <button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">使用总览</button>
+      <button :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">用户运营</button>
+      <button :class="{ active: activeTab === 'token' }" @click="activeTab = 'token'">Token 运营</button>
+      <button :class="{ active: activeTab === 'capabilities' }" @click="activeTab = 'capabilities'">能力使用</button>
       <button :class="{ active: activeTab === 'organizations' }" @click="activeTab = 'organizations'">组织分析</button>
-      <button :class="{ active: activeTab === 'satisfaction' }" @click="activeTab = 'satisfaction'">满意度分析</button>
+      <button :class="{ active: activeTab === 'satisfaction' }" @click="activeTab = 'satisfaction'">满意度</button>
       <button :class="{ active: activeTab === 'exceptions' }" @click="activeTab = 'exceptions'">异常 Run</button>
-    </div>
+    </nav>
 
-    <div v-if="activeTab === 'overview'" class="ta-analytics-main">
+    <main v-if="activeTab === 'overview'" class="ta-analytics-main">
       <div class="ta-card-grid">
-        <article v-for="card in summaryCards" :key="card.label" class="ta-metric-card">
-          <span>{{ card.label }}</span>
-          <strong>{{ card.value }}</strong>
-          <small>{{ card.extra }}</small>
-        </article>
+        <article v-for="card in summaryCards" :key="card.label" class="ta-metric-card"><span>{{ card.label }}</span><strong>{{ card.value }}</strong><small>{{ card.extra }}</small></article>
       </div>
 
-      <section class="ta-panel">
+      <div class="ta-overview-grid">
+        <section class="ta-panel ta-funnel-panel">
+          <div class="ta-panel-heading"><h3>用户使用漏斗</h3><span>{{ formatRate(funnel?.deepRate) }} 活跃转深度</span></div>
+          <div class="ta-funnel">
+            <div class="ta-funnel-stage total" :style="{ width: funnelWidth(funnel?.totalUsers) }"><span>总用户数</span><strong>{{ funnel?.totalUsers ?? 0 }}</strong></div>
+            <div class="ta-funnel-stage active" :style="{ width: funnelWidth(funnel?.activeUsers) }"><span>活跃用户数</span><strong>{{ funnel?.activeUsers ?? 0 }}</strong></div>
+            <div class="ta-funnel-stage deep" :style="{ width: funnelWidth(funnel?.deepUsers) }"><span>深度用户数</span><strong>{{ funnel?.deepUsers ?? 0 }}</strong></div>
+          </div>
+          <div class="ta-definitions"><p>{{ funnel?.activeDefinition }}</p><p>{{ funnel?.deepDefinition }}</p></div>
+        </section>
+
+        <section class="ta-panel">
+          <div class="ta-panel-heading"><h3>Run 趋势</h3><span>{{ timeseries.length }} 个时间点</span></div>
+          <div v-if="timeseries.length === 0" class="ta-empty">暂无数据</div>
+          <div v-else class="ta-trend" :style="trendGridStyle">
+            <div v-for="point in timeseries" :key="point.bucketStart" class="ta-trend-item"><div class="ta-trend-bar" :style="{ height: trendHeight(point) }" /><small>{{ new Date(point.bucketStart).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) }}</small><span>{{ point.runCount }}</span></div>
+          </div>
+        </section>
+      </div>
+
+      <section class="ta-panel ta-heatmap-panel">
         <div class="ta-panel-heading">
-          <h3>趋势</h3>
-          <span>{{ timeseries.length }} 个时间点</span>
+          <h3>小时热力</h3><span>{{ heatmap?.dates.length ?? 0 }} 天 × 24 小时</span>
+          <div class="ta-segmented" aria-label="热力指标">
+            <button v-for="item in [{ value: 'USER_MESSAGES', label: '用户消息' }, { value: 'PRIMARY_TOKENS', label: '主 Token' }, { value: 'CACHE_TOKENS', label: '缓存 Token' }]" :key="item.value" :class="{ active: heatmapMetric === item.value }" @click="heatmapMetric = item.value as AnalyticsHeatmapMetric">{{ item.label }}</button>
+          </div>
         </div>
-        <div v-if="timeseries.length === 0" class="ta-empty">暂无数据</div>
-        <div v-else class="ta-trend" :style="trendGridStyle">
-          <div v-for="point in timeseries" :key="point.bucketStart" class="ta-trend-item">
-            <div class="ta-trend-bar" :style="{ height: trendHeight(point) }" />
-            <small>{{ new Date(point.bucketStart).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) }}</small>
-            <span>{{ point.runCount }}</span>
+        <div v-if="!heatmapRangeSupported" class="ta-empty">小时热力图最多支持 90 天</div>
+        <div v-else class="ta-heatmap-scroll">
+          <div class="ta-heatmap-row ta-heatmap-hours"><span /> <small v-for="hour in 24" :key="hour">{{ String(hour - 1).padStart(2, '0') }}</small></div>
+          <div v-for="date in heatmap?.dates ?? []" :key="date" class="ta-heatmap-row">
+            <strong>{{ date.slice(5) }}</strong>
+            <span v-for="point in (heatmap?.points ?? []).filter(item => item.date === date)" :key="`${date}-${point.hourOfDay}`" class="ta-heatmap-cell" :style="{ backgroundColor: heatmapColor(point.value) }" :title="`${date} ${point.hourOfDay}:00 · ${formatNumber(point.value)}`" />
           </div>
         </div>
       </section>
+    </main>
 
-      <section class="ta-panel">
-        <div class="ta-panel-heading">
-          <h3>小时热力</h3>
-          <span>7 天 × 24 小时</span>
-        </div>
-        <div v-if="!peaks?.heatmap?.length" class="ta-empty">暂无数据</div>
-        <div v-else class="ta-heatmap">
-          <div
-            v-for="point in peaks.heatmap"
-            :key="`${point.dayOfWeek}-${point.hourOfDay}`"
-            class="ta-heatmap-cell"
-            :style="{ backgroundColor: `rgba(37, 99, 235, ${heatmapAlpha(point.activeUsers, point.runCount, point.userMessageCount)})` }"
-            :title="`周${point.dayOfWeek} ${point.hourOfDay}:00 活跃${point.activeUsers} Run${point.runCount} 消息${point.userMessageCount}`"
-          />
-        </div>
-        <div class="ta-peak-list">
-          <div v-for="peak in peaks?.peakPeriods ?? []" :key="peak.bucketStart">
-            <strong>{{ new Date(peak.bucketStart).toLocaleString('zh-CN') }}</strong>
-            <span>活跃 {{ peak.activeUsers }}</span>
-            <span>Run {{ peak.runCount }}</span>
-            <span>满意率 {{ formatRate(peak.satisfactionRate) }}</span>
-            <span>取消率 {{ formatRate(peak.cancellationRate) }}</span>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <div v-else-if="activeTab === 'users'" class="ta-panel">
-      <h3>用户使用明细</h3>
-      <table class="ta-table">
-        <thead><tr><th>用户</th><th>机构</th><th>研发部</th><th>部门</th><th>登录</th><th>会话</th><th>消息</th><th>Run</th><th>成功率</th><th>满意率</th><th>采纳率</th><th>token 使用量</th></tr></thead>
-        <tbody>
-          <tr v-for="row in usersQuery.data.value?.items ?? []" :key="row.userId">
-            <td>{{ row.username || row.userId }}</td>
-            <td>{{ row.organization || '-' }}</td>
-            <td>{{ row.rdDepartment || '-' }}</td>
-            <td>{{ row.department || '-' }}</td>
-            <td>{{ row.loginCount }}</td>
-            <td>{{ row.activeSessionCount }}</td>
-            <td>{{ row.userMessageCount }}</td>
-            <td>{{ row.runCount }}</td>
-            <td>{{ formatRate(row.successRate) }}</td>
-            <td>{{ formatRate(row.satisfactionRate) }}</td>
-            <td>{{ formatRate(row.diffAcceptanceRate) }}</td>
-            <td>{{ formatNumber(row.totalTokens) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div v-else-if="activeTab === 'organizations'" class="ta-panel">
-      <h3>组织排行</h3>
-      <table class="ta-table">
-        <thead><tr><th>维度</th><th>名称</th><th>登录用户</th><th>活跃用户</th><th>深度用户</th><th>Run</th><th>成功率</th><th>满意率</th><th>采纳率</th><th>负反馈</th></tr></thead>
-        <tbody>
-          <tr v-for="row in organizationsQuery.data.value ?? []" :key="`${row.dimension}-${row.name}`">
-            <td>{{ row.dimension }}</td>
-            <td>{{ row.name }}</td>
-            <td>{{ row.loginUsers }}</td>
-            <td>{{ row.activeUsers }}</td>
-            <td>{{ row.deepUsers }}</td>
-            <td>{{ row.runCount }}</td>
-            <td>{{ formatRate(row.successRate) }}</td>
-            <td>{{ formatRate(row.satisfactionRate) }}</td>
-            <td>{{ formatRate(row.diffAcceptanceRate) }}</td>
-            <td>{{ row.negativeFeedbackCount }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div v-else-if="activeTab === 'satisfaction'" class="ta-panel">
-      <h3>满意度与反馈明细</h3>
-      <div class="ta-reason-list">
-        <span v-for="(count, reason) in satisfactionQuery.data.value?.negativeReasonCounts ?? {}" :key="reason">
-          {{ reason }} · {{ count }}
-        </span>
+    <section v-else-if="activeTab === 'token'" class="ta-stack">
+      <div class="ta-card-grid">
+        <article class="ta-metric-card"><span>总 Token 使用量</span><strong>{{ formatNumber(tokenQuery.data.value?.totalTokens) }}</strong><small>含主 Token 与缓存读写</small></article>
+        <article class="ta-metric-card"><span>日人均 Token</span><strong>{{ formatNumber(tokenQuery.data.value?.dailyTokensPerUser) }}</strong><small>仅统计有 Token 使用的人天</small></article>
+        <article class="ta-metric-card"><span>Token 使用率</span><strong>{{ formatRate(tokenQuery.data.value?.tokenUserRate) }}</strong><small>{{ tokenQuery.data.value?.tokenUsers ?? 0 }} / {{ tokenQuery.data.value?.activeUsers ?? 0 }} 人</small></article>
+        <article class="ta-metric-card"><span>重复使用率</span><strong>{{ formatRate(tokenQuery.data.value?.repeatTokenUserRate) }}</strong><small>至少 2 个 Token 使用日</small></article>
+        <article class="ta-metric-card"><span>缓存 Token</span><strong>{{ formatNumber((tokenQuery.data.value?.cacheReadTokens ?? 0) + (tokenQuery.data.value?.cacheWriteTokens ?? 0)) }}</strong><small>读 {{ formatNumber(tokenQuery.data.value?.cacheReadTokens) }} · 写 {{ formatNumber(tokenQuery.data.value?.cacheWriteTokens) }}</small></article>
       </div>
-      <table class="ta-table">
-        <thead><tr><th>时间</th><th>用户</th><th>组织</th><th>会话</th><th>Run</th><th>历史消息</th><th>反馈</th><th>原因</th><th>备注</th></tr></thead>
-        <tbody>
-          <tr v-for="row in satisfactionQuery.data.value?.feedbackDetails.items ?? []" :key="row.feedbackId">
-            <td>{{ new Date(row.createdAt).toLocaleString('zh-CN') }}</td>
-            <td>{{ row.username || row.userId }}</td>
-            <td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td>
-            <td>{{ row.sessionId }}</td>
-            <td>{{ row.runId || '-' }}</td>
-            <td>{{ row.messageId || '-' }}</td>
-            <td>{{ row.rating === 'POSITIVE' ? '满意' : '不满意' }}</td>
-            <td>{{ row.reasonCode || '-' }}</td>
-            <td>{{ row.comment || '-' }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+      <div class="ta-two-columns">
+        <section class="ta-panel"><h3>每日 Token 使用</h3><table class="ta-table"><thead><tr><th>日期</th><th>使用用户</th><th>总 Token</th><th>日人均</th><th>主 Token</th><th>缓存读/写</th></tr></thead><tbody><tr v-for="row in tokenQuery.data.value?.daily ?? []" :key="row.date"><td>{{ row.date }}</td><td>{{ row.tokenUsers }}</td><td>{{ formatNumber(row.totalTokens) }}</td><td>{{ formatNumber(row.tokensPerUser) }}</td><td>{{ formatNumber(row.primaryTokens) }}</td><td>{{ formatNumber(row.cacheReadTokens) }} / {{ formatNumber(row.cacheWriteTokens) }}</td></tr></tbody></table></section>
+        <section class="ta-panel"><h3>用户使用排行</h3><table class="ta-table"><thead><tr><th>用户</th><th>使用强度</th><th>Token 日</th><th>总 Token</th><th>Token 日均</th></tr></thead><tbody><tr v-for="row in tokenQuery.data.value?.users ?? []" :key="row.userId"><td>{{ row.username || row.userId }}</td><td><span class="ta-band">{{ row.intensityBand }}</span></td><td>{{ row.tokenDays }}</td><td>{{ formatNumber(row.totalTokens) }}</td><td>{{ formatNumber(row.tokensPerTokenDay) }}</td></tr></tbody></table></section>
+      </div>
+    </section>
 
-    <div v-else class="ta-panel">
-      <h3>异常 Run 明细</h3>
-      <table class="ta-table">
-        <thead><tr><th>时间</th><th>Run</th><th>用户</th><th>组织</th><th>workspace</th><th>agent</th><th>model</th><th>状态</th></tr></thead>
-        <tbody>
-          <tr v-for="row in exceptionsQuery.data.value?.items ?? []" :key="row.runId">
-            <td>{{ new Date(row.updatedAt).toLocaleString('zh-CN') }}</td>
-            <td>{{ row.runId }}</td>
-            <td>{{ row.username || row.userId }}</td>
-            <td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td>
-            <td>{{ row.workspaceId }}</td>
-            <td>{{ row.agentId || '-' }}</td>
-            <td>{{ row.modelId || '-' }}</td>
-            <td>{{ row.status }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <section v-else-if="activeTab === 'capabilities'" class="ta-panel">
+      <div class="ta-panel-heading"><div><h3>Agent / Skill / Tool 使用率</h3><span>分母：{{ capabilitiesQuery.data.value?.activeUsers ?? 0 }} 个活跃用户</span></div><div class="ta-segmented"><button v-for="type in ['ALL', 'AGENT', 'SKILL', 'TOOL'] as CapabilityType[]" :key="type" :class="{ active: capabilityType === type }" @click="capabilityType = type">{{ type === 'ALL' ? '全部' : capabilityLabel(type) }}</button></div></div>
+      <table class="ta-table"><thead><tr><th>类型</th><th>名称</th><th>使用率</th><th>使用用户</th><th>调用次数</th><th>成功</th><th>失败</th><th>未完成</th></tr></thead><tbody><tr v-for="row in capabilityRows" :key="`${row.type}-${row.name}`"><td><span class="ta-type">{{ capabilityLabel(row.type) }}</span></td><td>{{ row.name }}</td><td class="ta-rate">{{ formatRate(row.usageRate) }}</td><td>{{ row.userCount }}</td><td>{{ row.invocationCount }}</td><td>{{ row.succeededCount }}</td><td>{{ row.failedCount }}</td><td>{{ row.incompleteCount }}</td></tr></tbody></table>
+    </section>
+
+    <section v-else-if="activeTab === 'users'" class="ta-panel"><h3>用户使用明细</h3><table class="ta-table"><thead><tr><th>用户</th><th>机构</th><th>研发部</th><th>部门</th><th>登录</th><th>会话</th><th>消息</th><th>Run</th><th>成功率</th><th>满意率</th><th>Token</th></tr></thead><tbody><tr v-for="row in usersQuery.data.value?.items ?? []" :key="row.userId"><td>{{ row.username || row.userId }}</td><td>{{ row.organization || '-' }}</td><td>{{ row.rdDepartment || '-' }}</td><td>{{ row.department || '-' }}</td><td>{{ row.loginCount }}</td><td>{{ row.activeSessionCount }}</td><td>{{ row.userMessageCount }}</td><td>{{ row.runCount }}</td><td>{{ formatRate(row.successRate) }}</td><td>{{ formatRate(row.satisfactionRate) }}</td><td>{{ formatNumber(row.totalTokens) }}</td></tr></tbody></table></section>
+
+    <section v-else-if="activeTab === 'organizations'" class="ta-panel"><h3>组织排行</h3><table class="ta-table"><thead><tr><th>维度</th><th>名称</th><th>登录用户</th><th>活跃用户</th><th>深度用户</th><th>Run</th><th>成功率</th><th>满意率</th><th>Token</th></tr></thead><tbody><tr v-for="row in organizationsQuery.data.value ?? []" :key="`${row.dimension}-${row.name}`"><td>{{ row.dimension }}</td><td>{{ row.name }}</td><td>{{ row.loginUsers }}</td><td>{{ row.activeUsers }}</td><td>{{ row.deepUsers }}</td><td>{{ row.runCount }}</td><td>{{ formatRate(row.successRate) }}</td><td>{{ formatRate(row.satisfactionRate) }}</td><td>{{ formatNumber(row.totalTokens) }}</td></tr></tbody></table></section>
+
+    <section v-else-if="activeTab === 'satisfaction'" class="ta-panel"><h3>满意度与反馈明细</h3><div class="ta-reason-list"><span v-for="(count, reason) in satisfactionQuery.data.value?.negativeReasonCounts ?? {}" :key="reason">{{ reason }} · {{ count }}</span></div><table class="ta-table"><thead><tr><th>时间</th><th>用户</th><th>组织</th><th>会话</th><th>Run</th><th>反馈</th><th>原因</th><th>备注</th></tr></thead><tbody><tr v-for="row in satisfactionQuery.data.value?.feedbackDetails.items ?? []" :key="row.feedbackId"><td>{{ new Date(row.createdAt).toLocaleString('zh-CN') }}</td><td>{{ row.username || row.userId }}</td><td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td><td>{{ row.sessionId }}</td><td>{{ row.runId || '-' }}</td><td>{{ row.rating === 'POSITIVE' ? '满意' : '不满意' }}</td><td>{{ row.reasonCode || '-' }}</td><td>{{ row.comment || '-' }}</td></tr></tbody></table></section>
+
+    <section v-else class="ta-panel"><h3>异常 Run 明细</h3><table class="ta-table"><thead><tr><th>时间</th><th>Run</th><th>用户</th><th>组织</th><th>状态</th></tr></thead><tbody><tr v-for="row in exceptionsQuery.data.value?.items ?? []" :key="row.runId"><td>{{ new Date(row.updatedAt).toLocaleString('zh-CN') }}</td><td>{{ row.runId }}</td><td>{{ row.username || row.userId }}</td><td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td><td>{{ row.status }}</td></tr></tbody></table></section>
   </section>
 </template>
 
 <style scoped>
-.ta-analytics {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  padding: 16px;
-  gap: 12px;
-  overflow: auto;
-  background: #f7f8fa;
-  color: #1f2937;
-}
-.ta-analytics-header,
-.ta-analytics-header-actions,
-.ta-analytics-tabs,
-.ta-analytics-filters,
-.ta-card-grid,
-.ta-trend,
-.ta-peak-list,
-.ta-reason-list {
-  display: flex;
-  align-items: center;
-}
-.ta-analytics-header {
-  justify-content: space-between;
-  gap: 12px;
-}
-.ta-analytics-header h2 {
-  margin: 0;
-  font-size: 18px;
-}
-.ta-analytics-header p {
-  margin: 4px 0 0;
-  color: #6b7280;
-  font-size: 12px;
-}
-.ta-analytics-header-actions {
-  gap: 8px;
-}
-.ta-icon-btn,
-.ta-export-btn {
-  height: 32px;
-  border: 1px solid #dfe3ea;
-  border-radius: 6px;
-  background: #fff;
-  color: #374151;
-  cursor: pointer;
-}
-.ta-icon-btn {
-  width: 32px;
-}
-.ta-export-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-}
-.ta-analytics-filters {
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #fff;
-}
-.ta-analytics-filters label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #4b5563;
-  font-size: 12px;
-}
-.ta-analytics-filters input,
-.ta-analytics-filters select {
-  height: 28px;
-  min-width: 110px;
-  border: 1px solid #dfe3ea;
-  border-radius: 5px;
-  padding: 0 8px;
-  font-size: 12px;
-}
-.ta-analytics-tabs {
-  gap: 6px;
-}
-.ta-analytics-tabs button {
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid #dfe3ea;
-  border-radius: 6px;
-  background: #fff;
-  color: #4b5563;
-  cursor: pointer;
-}
-.ta-analytics-tabs button.active {
-  border-color: #2563eb;
-  background: #e8f0ff;
-  color: #1d4ed8;
-}
-.ta-analytics-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
-.ta-card-grid {
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.ta-metric-card {
-  width: 172px;
-  min-height: 86px;
-  padding: 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #fff;
-}
-.ta-metric-card span,
-.ta-metric-card small {
-  display: block;
-  color: #6b7280;
-  font-size: 12px;
-}
-.ta-metric-card strong {
-  display: block;
-  margin: 8px 0 6px;
-  font-size: 22px;
-  color: #111827;
-}
-.ta-panel {
-  padding: 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #fff;
-  overflow: auto;
-}
-.ta-panel h3 {
-  margin: 0 0 10px;
-  font-size: 14px;
-}
-.ta-panel-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.ta-panel-heading h3 {
-  margin: 0;
-}
-.ta-panel-heading span {
-  color: #6b7280;
-  font-size: 12px;
-}
-.ta-empty {
-  padding: 28px;
-  color: #9ca3af;
-  text-align: center;
-}
-.ta-trend {
-  display: grid;
-  grid-template-columns: repeat(var(--ta-trend-columns), minmax(34px, 1fr));
-  align-items: flex-end;
-  gap: clamp(4px, 0.6vw, 10px);
-  width: 100%;
-  min-height: 122px;
-  overflow-x: auto;
-  box-sizing: border-box;
-}
-.ta-trend-item {
-  display: grid;
-  grid-template-rows: 80px 18px 18px;
-  justify-items: center;
-  min-width: 0;
-  color: #6b7280;
-  font-size: 11px;
-}
-.ta-trend-bar {
-  align-self: end;
-  width: clamp(12px, 45%, 22px);
-  border-radius: 4px 4px 0 0;
-  background: #2563eb;
-}
-.ta-heatmap {
-  display: grid;
-  grid-template-columns: repeat(24, minmax(8px, 1fr));
-  gap: clamp(2px, 0.35vw, 6px);
-  width: 100%;
-  margin-bottom: 10px;
-  overflow-x: auto;
-  box-sizing: border-box;
-}
-.ta-heatmap-cell {
-  width: 100%;
-  max-width: 64px;
-  min-width: 0;
-  height: auto;
-  aspect-ratio: 1;
-  justify-self: center;
-  border-radius: 3px;
-}
-.ta-peak-list,
-.ta-reason-list {
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.ta-peak-list div,
-.ta-reason-list span {
-  display: inline-flex;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: #f3f4f6;
-  color: #4b5563;
-  font-size: 12px;
-}
-.ta-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.ta-table th,
-.ta-table td {
-  padding: 8px;
-  border-bottom: 1px solid #edf0f4;
-  text-align: left;
-  white-space: nowrap;
-}
-.ta-table th {
-  color: #6b7280;
-  font-weight: 600;
-}
+.ta-analytics { display:flex; flex-direction:column; height:100%; min-height:0; padding:16px; gap:12px; overflow:auto; background:#f5f7fa; color:#202630; }
+.ta-analytics-header,.ta-analytics-header-actions,.ta-analytics-tabs,.ta-analytics-filters,.ta-card-grid,.ta-panel-heading,.ta-reason-list { display:flex; align-items:center; }
+.ta-analytics-header { justify-content:space-between; gap:12px; }
+.ta-analytics-header h2 { margin:0; font-size:19px; letter-spacing:0; }
+.ta-analytics-header p { margin:4px 0 0; color:#687386; font-size:12px; }
+.ta-analytics-header-actions { gap:8px; }
+.ta-icon-btn,.ta-export-btn { height:32px; border:1px solid #d7dce3; border-radius:5px; background:#fff; color:#374151; cursor:pointer; }
+.ta-icon-btn { display:grid; width:32px; place-items:center; }
+.ta-export-btn { display:inline-flex; align-items:center; gap:6px; padding:0 10px; }
+.ta-analytics-filters { flex-wrap:wrap; gap:9px 14px; padding:10px 12px; border-block:1px solid #dfe3e8; background:#fff; }
+.ta-analytics-filters label { display:inline-flex; align-items:center; gap:6px; color:#505b6b; font-size:12px; }
+.ta-analytics-filters input,.ta-analytics-filters select { height:30px; min-width:126px; box-sizing:border-box; border:1px solid #d5dae2; border-radius:4px; padding:0 8px; background:#fff; color:#28313d; font-size:12px; }
+.ta-search { display:inline-flex; align-items:center; gap:4px; height:30px; padding-left:7px; border:1px solid #d5dae2; border-radius:4px; color:#8a94a3; }
+.ta-search input { min-width:150px; height:28px; padding-left:0; border:0; outline:0; }
+.ta-analytics-tabs { flex-wrap:wrap; gap:3px; border-bottom:1px solid #d8dde5; }
+.ta-analytics-tabs button { height:34px; padding:0 12px; border:0; border-bottom:2px solid transparent; background:transparent; color:#596577; cursor:pointer; }
+.ta-analytics-tabs button.active { border-bottom-color:#bd1f31; color:#a41729; font-weight:600; }
+.ta-analytics-main,.ta-stack { display:grid; min-width:0; gap:12px; }
+.ta-card-grid { min-width:0; flex-wrap:wrap; gap:8px; }
+.ta-metric-card { flex:1 1 145px; min-width:140px; min-height:82px; box-sizing:border-box; padding:11px 12px; border:1px solid #e0e4e9; border-radius:6px; background:#fff; }
+.ta-metric-card span,.ta-metric-card small { display:block; color:#687386; font-size:12px; }
+.ta-metric-card strong { display:block; margin:7px 0 5px; color:#171d26; font-size:21px; letter-spacing:0; }
+.ta-overview-grid,.ta-two-columns { display:grid; grid-template-columns:minmax(320px,.8fr) minmax(420px,1.2fr); gap:12px; }
+.ta-panel { min-width:0; padding:12px; border:1px solid #e0e4e9; border-radius:6px; background:#fff; overflow:auto; }
+.ta-panel h3 { margin:0 0 10px; font-size:14px; letter-spacing:0; }
+.ta-panel-heading { justify-content:space-between; gap:12px; margin-bottom:10px; }
+.ta-panel-heading h3 { margin:0; }
+.ta-panel-heading span { color:#737e8e; font-size:12px; }
+.ta-funnel { display:flex; flex-direction:column; align-items:center; gap:5px; min-height:168px; justify-content:center; }
+.ta-funnel-stage { display:flex; align-items:center; justify-content:space-between; min-width:46%; height:45px; box-sizing:border-box; gap:8px; padding:0 12px; border-radius:4px; color:#fff; transition:width .2s ease; }
+.ta-funnel-stage.total { background:#44546a; }.ta-funnel-stage.active { background:#227c78; }.ta-funnel-stage.deep { background:#bd1f31; }
+.ta-funnel-stage span { min-width:0; font-size:12px; line-height:1.2; }.ta-funnel-stage strong { flex-shrink:0; font-size:18px; }
+.ta-definitions { padding-top:8px; border-top:1px solid #edf0f3; color:#687386; font-size:11px; }.ta-definitions p { margin:4px 0; }
+.ta-empty { padding:28px; color:#98a1ae; text-align:center; }
+.ta-trend { display:grid; grid-template-columns:repeat(var(--ta-trend-columns),minmax(34px,1fr)); align-items:flex-end; gap:clamp(4px,.6vw,10px); min-height:180px; overflow-x:auto; }
+.ta-trend-item { display:grid; grid-template-rows:112px 18px 18px; justify-items:center; min-width:0; color:#737e8e; font-size:11px; }
+.ta-trend-bar { align-self:end; width:clamp(12px,45%,22px); border-radius:3px 3px 0 0; background:#227c78; }
+.ta-heatmap-panel { overflow:hidden; }.ta-panel-heading .ta-segmented { margin-left:auto; }
+.ta-segmented { display:inline-flex; border:1px solid #d4d9e0; border-radius:5px; overflow:hidden; }
+.ta-segmented button { height:28px; padding:0 9px; border:0; border-right:1px solid #d4d9e0; background:#fff; color:#596577; font-size:11px; cursor:pointer; }.ta-segmented button:last-child { border-right:0; }.ta-segmented button.active { background:#2d3745; color:#fff; }
+.ta-heatmap-scroll { width:100%; min-width:0; overflow-x:auto; }.ta-heatmap-row { display:grid; min-width:760px; grid-template-columns:72px repeat(24,minmax(18px,1fr)); gap:3px; align-items:center; margin-bottom:3px; }
+.ta-heatmap-row > strong { color:#596577; font-size:11px; font-weight:500; }.ta-heatmap-hours small { color:#8993a1; font-size:9px; text-align:center; }
+.ta-heatmap-cell { width:100%; aspect-ratio:1.25; min-height:14px; border-radius:2px; }
+.ta-reason-list { flex-wrap:wrap; gap:6px; margin-bottom:8px; }.ta-reason-list span,.ta-band,.ta-type { display:inline-block; padding:3px 6px; border-radius:4px; background:#eef1f4; color:#4c5868; font-size:11px; }
+.ta-type { background:#e8f2f1; color:#176b67; }.ta-rate { color:#a41729; font-weight:600; }
+.ta-table { width:100%; border-collapse:collapse; font-size:12px; }.ta-table th,.ta-table td { padding:8px; border-bottom:1px solid #edf0f3; text-align:left; white-space:nowrap; }.ta-table th { color:#697486; font-weight:600; background:#fafbfc; }
+@media (max-width:900px) { .ta-overview-grid,.ta-two-columns { grid-template-columns:1fr; }.ta-analytics { padding:10px; }.ta-analytics-header { align-items:flex-start; }.ta-analytics-filters { align-items:flex-start; }.ta-search-label { width:100%; }.ta-search { flex:1; }.ta-search input { width:100%; }.ta-panel-heading { align-items:flex-start; flex-wrap:wrap; } }
 </style>

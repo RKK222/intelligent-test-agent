@@ -72,6 +72,14 @@ Token 校验流程：
 9. `safe_error_message` 必须经过同一敏感模式清洗并限制长度；任何数据库异常、终态重试或 Redis 故障不得把 prompt、回答、parts、原始事件、Redis value 或第三方响应正文写入 PostgreSQL/日志。稳定 `assistantSummaryMessageId` 只作为平台消息业务 ID，不是鉴权凭据。
 10. Run 恢复必须先经过公共后端路由选择并取得 15 秒 owner lease；续租、释放和终态投影必须校验同一 fencing token。dispatch 探测只能使用 Redis 中的可信节点快照查询 OpenCode，会话查询失败或未穷尽统一视为 UNKNOWN，禁止盲目重发 prompt；恢复日志不得记录第三方响应、异常 message 或堆栈中的原始内容。
 
+## 运营分析数据安全
+
+1. ClickHouse 只允许保存运营计数、业务 ID、用户/组织归属快照、Token 数、Agent/Skill/Tool 名和调用状态。禁止保存 prompt、用户/assistant 正文、reasoning、附件内容、工具输入输出、反馈评论、密钥、Token 单价或费用。
+2. PostgreSQL `analytics_event_outbox` 是与业务写同事务的临时投递记录，ClickHouse 确认接收后必须删除；Redis 运营 stream 必须与 Run key 同槽、设置有限 TTL，并只保留白名单字段。两者均不得成为第二份会话正文存储。
+3. 运营 API 只允许 `SUPER_ADMIN`，服务端仍必须鉴权；前端菜单隐藏不是权限边界。ClickHouse 故障时返回统一 `ANALYTICS_UNAVAILABLE`，不得为可用性回退扫描 PostgreSQL 原始消息或 RunEvent。
+4. ClickHouse 使用独立最小权限账号，端口只向平台 Java 节点开放；密码从受控环境配置注入，不得出现在仓库、日志、错误、URL、前端构建物或普通运维命令历史。离线包包含随机密码时按 `0600` 密钥交付物管理。
+5. 用户与组织归属按事件发生时快照保存；历史回填无法恢复事件时归属时，使用当前主数据并显式标记 `CURRENT_ORG_BACKFILL`。页面和导出不得把这种近似归因伪装成历史精确快照。
+
 ## 会话协作分享安全
 
 1. 分享链接必须使用至少 256 位安全随机 `shareId`，但 shareId 不是登录凭据。每个请求都必须先校验真实 Bearer Token 对应的有效 `AuthPrincipal`，再校验所属人/成员、分享状态、有效期、版本和精确 Session/Workspace；禁止匿名访问、仅凭 URL 访问或把 shareId 写入 Cookie/本地持久化认证状态。

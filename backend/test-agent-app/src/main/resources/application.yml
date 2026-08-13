@@ -71,6 +71,17 @@ management:
       enabled: true
 
 test-agent:
+  analytics:
+    clickhouse:
+      enabled: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED:false}
+      url: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_URL:}
+      username: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME:default}
+      password: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD:}
+      backfill:
+        enabled: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED:false}
+        start: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_START:}
+        end: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_END:}
+        cleanup-legacy-rollups: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS:false}
   local-client:
     allow-insecure-control: ${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:false}
     trusted-proxy-addresses: ${TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES:127.0.0.1,::1}

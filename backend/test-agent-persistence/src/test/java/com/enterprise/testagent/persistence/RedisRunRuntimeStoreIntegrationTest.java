@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -40,6 +41,70 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 class RedisRunRuntimeStoreIntegrationTest {
 
     private static final Instant NOW = Instant.parse("2026-07-10T08:00:00Z");
+
+    @Test
+    void writesSanitizedCapabilityEventToExpiringAnalyticsStream() {
+        String configuredPort = System.getProperty("test.redis.port");
+        Assumptions.assumeTrue(configuredPort != null && !configuredPort.isBlank());
+        RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(
+                "127.0.0.1", Integer.parseInt(configuredPort));
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(configuration);
+        connectionFactory.afterPropertiesSet();
+        connectionFactory.start();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+        RedisRunRuntimeStore store = new RedisRunRuntimeStore(
+                redis, new ObjectMapper().registerModule(new JavaTimeModule()), Clock.fixed(NOW, ZoneOffset.UTC));
+        RunRuntimeManifest manifest = manifest("run_redis_analytics", RunStatus.RUNNING);
+        String streamKey = "test-agent:run:{run_redis_analytics}:analytics-outbox";
+        try {
+            store.initialize(manifest, input(manifest.runId()));
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.TOOL_STARTED, "trace_analytics", NOW.plusMillis(1),
+                    Map.of(
+                            "sessionId", "remote-session-redis-runtime",
+                            "callId", "call-1",
+                            "toolName", "skill",
+                            "title", "playwright",
+                            "content", "绝不能进入运营流的正文 secret-redis")));
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.SESSION_CHILD_DISCOVERED, "trace_analytics", NOW.plusMillis(2),
+                    Map.of(
+                            "sessionId", "child-session",
+                            "parentSessionId", "remote-session-redis-runtime",
+                            "taskCallId", "call-task",
+                            "agentName", "review",
+                            "title", "检查接口实现")));
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.TOOL_STARTED, "trace_analytics", NOW.plusMillis(3),
+                    Map.of("callId", "call-bash", "toolName", "bash", "title", "cat /sensitive/path")));
+
+            var records = redis.opsForStream().range(streamKey, Range.unbounded());
+            assertThat(records).hasSize(3);
+            String skillEvent = String.valueOf(records.getFirst().getValue().get("event"));
+            assertThat(skillEvent)
+                    .contains("\"eventType\":\"TOOL_STARTED\"")
+                    .contains("\"callId\":\"call-1\"")
+                    .contains("\"title\":\"playwright\"")
+                    .doesNotContain("正文", "secret-redis", "content");
+            String childAgentEvent = String.valueOf(records.get(1).getValue().get("event"));
+            assertThat(childAgentEvent)
+                    .contains("\"eventType\":\"SESSION_CHILD_DISCOVERED\"")
+                    .contains("\"parentSessionId\":\"remote-session-redis-runtime\"")
+                    .contains("\"taskCallId\":\"call-task\"")
+                    .contains("\"agentName\":\"review\"")
+                    .doesNotContain("检查接口实现", "title");
+            String genericToolEvent = String.valueOf(records.getLast().getValue().get("event"));
+            assertThat(genericToolEvent)
+                    .contains("\"toolName\":\"bash\"")
+                    .doesNotContain("sensitive", "title");
+            assertThat(redis.getExpire(streamKey)).isPositive();
+        } finally {
+            redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+            connectionFactory.destroy();
+        }
+    }
 
     @Test
     void atomicallyAppendsConcurrentEventsMaintainsIndexesAndResetsOnCapacity() {
