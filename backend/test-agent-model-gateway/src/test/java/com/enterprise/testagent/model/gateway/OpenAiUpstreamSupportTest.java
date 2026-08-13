@@ -14,6 +14,7 @@ class OpenAiUpstreamSupportTest {
     void injectsOnlyTrustedIdentityAndBuildsNormalizedTarget() {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth("browser-token");
+        headers.set(OpenAiUpstreamSupport.AUTH_TOKEN_HEADER, "browser-auth-token");
         headers.set(OpenAiUpstreamSupport.PROVIDER_HEADER, "client-provider");
         headers.set(OpenAiUpstreamSupport.UCID_HEADER, "client-ucid");
 
@@ -25,7 +26,8 @@ class OpenAiUpstreamSupportTest {
                 MediaType.APPLICATION_JSON,
                 List.of(MediaType.TEXT_EVENT_STREAM));
 
-        assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer provider-token");
+        assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION)).isNull();
+        assertThat(headers.getFirst(OpenAiUpstreamSupport.AUTH_TOKEN_HEADER)).isEqualTo("provider-token");
         assertThat(headers.getFirst(OpenAiUpstreamSupport.PROVIDER_HEADER)).isNull();
         assertThat(headers.getFirst(OpenAiUpstreamSupport.UCID_HEADER)).isEqualTo("AUTH_001");
         assertThat(headers.getFirst(TraceConstants.TRACE_ID_HEADER)).isEqualTo("trace_gateway");

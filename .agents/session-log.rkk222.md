@@ -10198,3 +10198,26 @@
 
 - 实时进度通道故障不再伪装成业务失败，也不会取消或重复发起提交推送；真实后端失败仍沿用原错误响应和失败步骤展示。
 - 本次仅修改前端组件、测试、README 和本会话记录，不变更 HTTP API、RunEvent、数据库、部署、安全权限、公共 Agent 业务语义、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 修正企业 AI 上游鉴权请求头
+
+### Why
+
+- 企业现场直接调用 AI 网关时，`Auth-Token: <供应商关联 Token>` 可以成功返回流式响应；部署代码却按 OpenAI 常见方式发送 `Authorization: Bearer <token>`，造成实际代理调用与已验证协议不一致。
+
+### What
+
+- 复用 `OpenAiUpstreamSupport` 统一把真实代理、LobeHub 模型网关和能力探测的上游鉴权改为 `Auth-Token` 原值，并在覆盖可信请求头前同时删除客户端传入的 `Authorization` 与 `Auth-Token`。
+- 将内部模型定时/手工探活切换到相同的 `Auth-Token` 协议；OpenCode 子进程访问 Java 内部代理的 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}` 保持不变。
+- 补充代理、模型网关、能力探测和真实本地 HTTP 探活回归，并同步模块 README、HTTP API 与企业单/多后台部署文档。
+
+### How
+
+- JDK 25 下 5 个请求头定向测试通过，其中 `InternalModelProviderProbeServiceTest` 使用真实本地 HTTP Server 验证上游收到 `Auth-Token` 且未收到 `Authorization`。
+- 受影响的 `test-agent-model-gateway`、`test-agent-opencode-runtime`、`test-agent-api` 三模块全量测试通过；上游依赖跳过测试安装及相关模块打包成功，`git diff --check` 通过。
+- 整个 `-am` 测试在任务外 `test-agent-xxl-job-integration` 的既有匿名测试内部类加载问题处失败，报错为 `NoClassDefFoundError`，未将其误报为通过。
+
+### Result
+
+- Java 到企业 AI 网关现统一发送 `Auth-Token: <供应商关联 Token>`，`ucid` 与 traceId 注入链路未改，流式请求体、响应处理和可观测记录逻辑未改。
+- 本次不变更 HTTP 路径、DTO、RunEvent、数据库、migration、端口、部署拓扑、强制环境变量、generated SDK 或 OpenCode 源码；企业节点需要重新打包并部署后端应用才能生效。

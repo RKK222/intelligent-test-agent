@@ -547,7 +547,7 @@ deepseek-prod
 | 共享数据库内部供应商 | `qwen-prod`、`deepseek-prod` 均启用，`baseUrl=http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`，全局 token 已配置 | 保存或点击“刷新 Java 内存”；不需要重启用户进程 |
 | 用户进程环境 | Java 启动进程时注入内部代理 key、同节点 Java 代理地址和该用户的 `ENTERPRISE_UCID` | 停止并通过运行管理重新启动用户进程 |
 
-`enterprise-qwen` / `enterprise-deepseek` 只用于 OpenCode 模型目录；`qwen-prod` / `deepseek-prod` 只用于 Java 路由，二者不能互换。上游模型 token 由 Java 作为 `Authorization: Bearer <token>` 注入，不在 `backend.env`、`docker.env` 或 `opencode.jsonc` 中再配 `Auth-Token`。每个用户的 UCID 来自用户表，由 Java 逐进程注入，不需要也不能为所有用户共用一个 env 文件。
+`enterprise-qwen` / `enterprise-deepseek` 只用于 OpenCode 模型目录；`qwen-prod` / `deepseek-prod` 只用于 Java 路由，二者不能互换。上游模型 Token 由 Java 作为 `Auth-Token: <token>` 注入，不在 `backend.env`、`docker.env` 或 `opencode.jsonc` 中重复配置。OpenCode 到 Java 内部代理的 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}` 是另一层鉴权，不能替代上游 `Auth-Token`。每个用户的 UCID 来自用户表，由 Java 逐进程注入，不需要也不能为所有用户共用一个 env 文件。
 
 更新公共配置后，要在运行管理中重启已有用户 OpenCode 进程；只重启 Java 不会让已运行的 OpenCode 重新读取公共配置。供应商地址、启用状态或 token 变化后先点击“刷新 Java 内存”；单后台广播异常时可直接重启 Java 重新加载数据库快照。
 

@@ -11,6 +11,7 @@ public final class OpenAiUpstreamSupport {
 
     public static final String PROVIDER_HEADER = "X-Enterprise-Model-Provider";
     public static final String UCID_HEADER = "ucid";
+    public static final String AUTH_TOKEN_HEADER = "Auth-Token";
 
     private OpenAiUpstreamSupport() {
     }
@@ -28,9 +29,11 @@ public final class OpenAiUpstreamSupport {
         Objects.requireNonNull(headers, "headers must not be null");
         headers.remove(PROVIDER_HEADER);
         headers.remove(HttpHeaders.AUTHORIZATION);
+        headers.remove(AUTH_TOKEN_HEADER);
         headers.remove(UCID_HEADER);
         headers.remove(TraceConstants.TRACE_ID_HEADER);
-        headers.setBearerAuth(requireText(providerToken, "providerToken"));
+        // 企业内部 AI 网关使用 Auth-Token 原值鉴权，不接受 OpenAI 常见的 Bearer 头。
+        headers.set(AUTH_TOKEN_HEADER, requireText(providerToken, "providerToken"));
         headers.setContentType(Objects.requireNonNull(contentType, "contentType must not be null"));
         headers.setAccept(accept == null || accept.isEmpty()
                 ? List.of(MediaType.APPLICATION_JSON)

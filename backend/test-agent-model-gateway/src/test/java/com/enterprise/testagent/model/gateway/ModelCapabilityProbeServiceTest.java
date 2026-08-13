@@ -56,8 +56,9 @@ class ModelCapabilityProbeServiceTest {
         assertThat(result.capability()).isEqualTo(ModelCapability.CHAT);
         assertThat(captured.get().url().toString())
                 .isEqualTo("http://models.internal/v1/chat/completions");
-        assertThat(captured.get().headers().getFirst(HttpHeaders.AUTHORIZATION))
-                .isEqualTo("Bearer provider-secret");
+        assertThat(captured.get().headers().getFirst(HttpHeaders.AUTHORIZATION)).isNull();
+        assertThat(captured.get().headers().getFirst(OpenAiUpstreamSupport.AUTH_TOKEN_HEADER))
+                .isEqualTo("provider-secret");
         assertThat(captured.get().headers().getFirst("ucid")).isEqualTo("AUTH_ADMIN");
         assertThat(models.saved).isEqualTo(new ModelProbeResult(
                 "provider-a", "enterprise-chat", ModelCapability.CHAT, true, NOW));
