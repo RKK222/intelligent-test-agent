@@ -9842,3 +9842,25 @@
 
 - 后续开发具备明确的分流规则：部署演进和新节点功能进入 dev，release 只承载兼容当前部署的修复与小功能，main 保持稳定基线。
 - 本次只修改研发流程文档，不涉及代码、API、事件、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 修复自动化代码库首页分组与工作区刷新
+
+### Why
+
+- 自动化代码库创建成功后仍混在“测试工作空间”分组，无法像应用代码库一样独立识别；顶部选择器又提前乐观显示目标版本，同版本重选时直接返回，导致顶部已变化而左侧目录没有实时刷新。
+
+### What
+
+- 工作空间模板响应增量返回关联版本库 `repositoryType`，前端顶部和左下角入口分别展示“应用代码库 / 自动化代码库 / 测试工作空间”；旧后端缺少该字段时继续归入原测试工作空间分组。
+- 顶部工作空间和版本显示改为以父层实际完成的选择为事实源；重选当前版本时重新读取 Workspace 快照，并主动刷新左侧组合目录和 Git diff。
+- 同步 workspace、shared-types、agent-web README/PACKAGE，以及 HTTP API、模块地图和用户手册；未新增路由、DTO、数据库字段或事件类型。
+
+### How
+
+- 后端 `ManagedWorkspaceApplicationServiceTest` 92/92，前端 FigmaShell/WorkbenchFooter 定向 Vitest 78/78，两个 Chromium 工作台场景各 1/1，全 workspace typecheck、production build 和 22 模块跳过测试打包均通过。
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 在 JDK 25 下重启 backend、manager 和 frontend；backend health 为 UP，前端返回 200。真实测试账号 API 返回自动化模板类型，真实 Chromium 页面可见独立分组，重选 `ai-test` 后捕获到新的 `workspace.view.list` 请求且左侧目录已渲染。
+
+### Result
+
+- 自动化代码库在首页两个工作空间入口均独立展示，顶部上下文与左侧文件树在实际切换完成后同步更新，同版本重选也会重新拉取目录。
+- 本次只增量扩展既有 HTTP 响应并修复前端状态同步；不涉及 RunEvent、数据库、migration、性能、安全、环境配置、generated SDK 或 OpenCode 源码，未新建分支或推送远端。

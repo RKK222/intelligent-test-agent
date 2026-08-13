@@ -6279,7 +6279,7 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
 // 切换到某个应用版本：先只读校验当前用户对关联 Git 版本库的访问权限，再通过
 // ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区。同一用户同一版本复用 default 空间，避免重复创建。
 async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
-  // 顶部显式选择测试工作空间代表“离开源码快照”，不是在 APP_SOURCE 内执行版本操作；
+  // 顶部显式选择托管工作空间代表“离开源码快照”，不是在 APP_SOURCE 内执行版本操作；
   // 后续 managed intent 与 switchWorkspace 会统一失效源码请求、清理 recent 并切回 MANAGED。
   if (!await confirmProcessInitializationBeforeWorkspaceAction("切换应用版本")) {
     return;
@@ -6320,17 +6320,26 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
       feedback.value = { kind: "error", title: "该版本未关联运行态工作区", description: "请先在平台侧初始化版本。" };
       return;
     }
-    if (runtimeWorkspaceId === selectedWorkspaceId.value) {
-      rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
-      feedback.value = { kind: "info", title: "已在该版本工作区", description: `${payload.version.version} (个人空间: default)` };
-      return;
-    }
-    // 兼容旧工作区详情未回填版本归属：ensure-default 回包已携带本次明确选择的权威版本上下文。
+    // 无论是否切换 Workspace id，都取一次后端最新快照；同版本重选也要刷新目录，
+    // 避免顶部选择已经完成而左侧仍停留在旧的目录缓存。
     const workspace = mergeRecentRuntimeResponse(
       await api.getWorkspace(runtimeWorkspaceId),
       defaultPw.runtimeWorkspace
     );
     if (!selectionIsCurrent()) return;
+    if (runtimeWorkspaceId === selectedWorkspaceId.value) {
+      rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
+      cacheWorkspace(workspace);
+      selectedWorkspaceSnapshot.value = workspace;
+      syncCurrentVersionFromWorkspace(workspace);
+      await refreshWorkspaceView(runtimeWorkspaceId);
+      if (!selectionIsCurrent()) return;
+      await refreshWorkspaceGitDiff();
+      if (!selectionIsCurrent()) return;
+      feedback.value = { kind: "info", title: "已在该版本工作区", description: `${payload.version.version} (个人空间: default)` };
+      return;
+    }
+    // 兼容旧工作区详情未回填版本归属：ensure-default 回包已携带本次明确选择的权威版本上下文。
     const applied = await applyManagedWorkspace(workspace, selectionIsCurrent, {
       successTitle: "已切换应用版本",
       successDescription: `${payload.template.workspaceName} · ${payload.version.version} (个人空间: default)`

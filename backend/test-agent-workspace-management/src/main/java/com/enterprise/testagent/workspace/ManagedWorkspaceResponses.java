@@ -109,9 +109,13 @@ public final class ManagedWorkspaceResponses {
             String branch,
             boolean enabled,
             boolean standard,
+            String repositoryType,
             Instant createdAt,
             Instant updatedAt) {
-        public static WorkspaceTemplateResponse from(ApplicationWorkspace workspace, boolean standard) {
+        public static WorkspaceTemplateResponse from(
+                ApplicationWorkspace workspace,
+                boolean standard,
+                String repositoryType) {
             return new WorkspaceTemplateResponse(
                     workspace.workspaceId().value(),
                     workspace.appId().value(),
@@ -121,6 +125,7 @@ public final class ManagedWorkspaceResponses {
                     workspace.branch(),
                     workspace.enabled(),
                     standard,
+                    repositoryType,
                     workspace.createdAt(),
                     workspace.updatedAt());
         }

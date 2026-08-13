@@ -367,16 +367,20 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     public List<ManagedWorkspaceResponses.WorkspaceTemplateResponse> listTemplates(String appId, UserId userId) {
         ApplicationId applicationId = existingMemberApp(appId, userId, "workspace-templates").appId();
-        Map<String, Boolean> standardByRepoId = configurationRepository.findRepositoriesByApplication(applicationId).stream()
+        Map<String, CodeRepository> repositoryById = configurationRepository.findRepositoriesByApplication(applicationId).stream()
                 .collect(Collectors.toMap(
                         repo -> repo.repositoryId().value(),
-                        CodeRepository::standard));
+                        repo -> repo));
         return configurationRepository.findWorkspaces(applicationId).stream()
                 // 停用只影响工作空间切换入口，不删除模板、版本或个人工作区数据。
                 .filter(ApplicationWorkspace::enabled)
-                .map(workspace -> ManagedWorkspaceResponses.WorkspaceTemplateResponse.from(
-                        workspace,
-                        standardByRepoId.getOrDefault(workspace.repositoryId().value(), false)))
+                .map(workspace -> {
+                    CodeRepository repository = repositoryById.get(workspace.repositoryId().value());
+                    return ManagedWorkspaceResponses.WorkspaceTemplateResponse.from(
+                            workspace,
+                            repository != null && repository.standard(),
+                            repository == null ? null : repository.repositoryType());
+                })
                 .toList();
     }
 

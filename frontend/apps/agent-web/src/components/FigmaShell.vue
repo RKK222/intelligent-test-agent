@@ -211,8 +211,6 @@ const runtimeInventoryOpen = ref(false);
 const runtimeInventoryFullscreen = ref(false);
 const runtimeInventoryWidth = ref(520);
 const runtimeInventoryResizing = ref(false);
-const headerWorkspaceTemplateId = ref<string | null>(null);
-const headerVersionId = ref<string | null>(null);
 const pendingHeaderDefaultVersionTemplateId = ref<string | null>(null);
 
 function toggleLeftPanel() {
@@ -312,6 +310,13 @@ function openExperience() {
 }
 
 const availableWorkspaceTemplates = computed(() => props.appTemplates.filter((template) => template.enabled !== false));
+const automationWorkspaceTemplates = computed(() => availableWorkspaceTemplates.value.filter(
+  (template) => template.repositoryType === "AUTOMATION_CODE_REPOSITORY"
+));
+// 旧后端没有 repositoryType；未显式标记为自动化库时继续落入原测试工作空间分组。
+const testWorkspaceTemplates = computed(() => availableWorkspaceTemplates.value.filter(
+  (template) => template.repositoryType !== "AUTOMATION_CODE_REPOSITORY"
+));
 const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
 const selectedAppSourceRepository = computed(() => visibleAppSourceRepositories.value.find(
   (repository) => repository.repositoryId === props.selectedAppSourceRepositoryId
@@ -319,18 +324,19 @@ const selectedAppSourceRepository = computed(() => visibleAppSourceRepositories.
 const headerWorkspaceTemplate = computed(() => {
   if ((props.workspaceKind ?? "MANAGED") !== "MANAGED") return null;
   const templates = availableWorkspaceTemplates.value;
-  return templates.find((template) => template.workspaceId === headerWorkspaceTemplateId.value)
-    ?? templates.find((template) => template.workspaceId === props.selectedWorkspaceTemplateId)
+  return templates.find((template) => template.workspaceId === props.selectedWorkspaceTemplateId)
     ?? templates.find((template) => template.versions?.some((version) => version.versionId === props.selectedVersionId))
     ?? templates[0]
     ?? null;
 });
 const headerWorkspaceVersion = computed(() => {
   const versions = headerWorkspaceTemplate.value?.versions ?? [];
-  return versions.find((version) => version.versionId === headerVersionId.value)
-    ?? versions.find((version) => version.versionId === props.selectedVersionId)
+  return versions.find((version) => version.versionId === props.selectedVersionId)
     ?? null;
 });
+const headerWorkspaceIsAutomation = computed(() =>
+  headerWorkspaceTemplate.value?.repositoryType === "AUTOMATION_CODE_REPOSITORY"
+);
 const headerWorkspaceLabel = computed(() => {
   if (props.workspaceKind === "EXPERIENCE") return "体验工作区";
   if (props.workspaceKind === "APP_SOURCE") {
@@ -350,26 +356,14 @@ function defaultHeaderVersion(template: AppWorkspaceTemplate) {
   return template.versions?.[0] ?? null;
 }
 
-function syncHeaderWorkspaceTemplate() {
-  const templates = availableWorkspaceTemplates.value;
-  const selected = templates.find((template) => template.workspaceId === props.selectedWorkspaceTemplateId)
-    ?? templates.find((template) => template.versions?.some((version) => version.versionId === props.selectedVersionId))
-    ?? templates[0];
-  headerWorkspaceTemplateId.value = selected?.workspaceId ?? null;
-  headerVersionId.value = props.selectedVersionId ?? null;
+function resetPendingHeaderWorkspaceSelection() {
   pendingHeaderDefaultVersionTemplateId.value = null;
 }
 
 watch(
-  () => [props.selectedAppId, props.selectedWorkspaceTemplateId, props.selectedVersionId],
-  syncHeaderWorkspaceTemplate,
-  { immediate: true }
+  () => props.selectedAppId,
+  resetPendingHeaderWorkspaceSelection
 );
-watch(availableWorkspaceTemplates, (templates) => {
-  if (templates.some((template) => template.workspaceId === headerWorkspaceTemplateId.value)) return;
-  syncHeaderWorkspaceTemplate();
-  pendingHeaderDefaultVersionTemplateId.value = null;
-}, { deep: true });
 
 watch(availableWorkspaceTemplates, (templates) => {
   const templateId = pendingHeaderDefaultVersionTemplateId.value;
@@ -382,8 +376,6 @@ watch(availableWorkspaceTemplates, (templates) => {
 }, { deep: true });
 
 function selectHeaderWorkspace(template: AppWorkspaceTemplate) {
-  headerWorkspaceTemplateId.value = template.workspaceId;
-  headerVersionId.value = null;
   closeWorkspaceMenu();
   if (!template.versions) {
     pendingHeaderDefaultVersionTemplateId.value = template.workspaceId;
@@ -398,7 +390,6 @@ function selectHeaderWorkspace(template: AppWorkspaceTemplate) {
 function selectHeaderVersion(version: AppWorkspaceVersion, explicitTemplate?: AppWorkspaceTemplate) {
   const template = explicitTemplate ?? headerWorkspaceTemplate.value;
   if (!template) return;
-  headerVersionId.value = version.versionId;
   emit("select-version", { template, version });
   closeVersionMenu();
 }
@@ -2236,7 +2227,7 @@ function submitJoinApp() {
           >
             <span class="figma-context-menu-key">工作空间</span>
             <CodeXml
-              v-if="workspaceKind === 'APP_SOURCE'"
+              v-if="workspaceKind === 'APP_SOURCE' || headerWorkspaceIsAutomation"
               class="figma-context-trigger-type-icon figma-context-icon--app-source"
               aria-hidden="true"
             />
@@ -2328,7 +2319,37 @@ function submitJoinApp() {
               <li class="figma-app-menu-divider" role="presentation" />
             </template>
 
-            <li class="figma-context-menu-section-title is-test-workspace" role="presentation">
+            <li
+              v-if="automationWorkspaceTemplates.length > 0"
+              class="figma-context-menu-section-title"
+              role="presentation"
+            >
+              <span class="figma-context-menu-section-label">
+                <CodeXml class="figma-context-menu-type-icon" aria-hidden="true" />
+                自动化代码库
+              </span>
+            </li>
+            <li
+              v-for="template in automationWorkspaceTemplates"
+              :key="template.workspaceId"
+              :class="['figma-app-menu-item', template.workspaceId === headerWorkspaceTemplate?.workspaceId && 'is-active']"
+              role="option"
+              :aria-selected="template.workspaceId === headerWorkspaceTemplate?.workspaceId"
+              tabindex="0"
+              @mousedown.prevent="selectHeaderWorkspace(template)"
+            >
+              <CodeXml class="figma-context-menu-type-icon" aria-hidden="true" />
+              <div class="figma-app-menu-item-main">
+                <span class="figma-app-menu-item-name">{{ template.workspaceName }}</span>
+                <span class="figma-app-menu-item-desc">{{ template.branch }}</span>
+              </div>
+              <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
+            </li>
+            <li
+              v-if="testWorkspaceTemplates.length > 0 || availableWorkspaceTemplates.length === 0"
+              class="figma-context-menu-section-title is-test-workspace"
+              role="presentation"
+            >
               <span class="figma-context-menu-section-label">
                 <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
                 测试工作空间
@@ -2349,7 +2370,7 @@ function submitJoinApp() {
               暂无测试工作空间
             </li>
             <li
-              v-for="template in availableWorkspaceTemplates"
+              v-for="template in testWorkspaceTemplates"
               :key="template.workspaceId"
               :class="['figma-app-menu-item', template.workspaceId === headerWorkspaceTemplate?.workspaceId && 'is-active']"
               role="option"

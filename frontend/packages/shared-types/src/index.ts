@@ -3229,6 +3229,8 @@ export type ManagedWorkspaceRuntime = Workspace;
 
 export type ApplicationWorkspaceTemplate = ApplicationWorkspaceConfig & {
   standard: boolean;
+  /** 新后端返回关联版本库类型；可选以兼容滚动升级期间的旧响应。 */
+  repositoryType?: string | null;
 };
 
 export type ApplicationWorkspaceVersion = {

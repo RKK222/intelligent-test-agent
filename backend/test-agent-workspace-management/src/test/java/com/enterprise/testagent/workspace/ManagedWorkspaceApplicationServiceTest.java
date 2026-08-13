@@ -951,6 +951,34 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void workspaceSwitchTemplatesExposeAutomationRepositoryType() {
+        Instant now = Instant.parse("2026-08-13T00:00:00Z");
+        CodeRepository automationRepository = new CodeRepository(
+                new CodeRepositoryId("repo_automation"),
+                "https://example.com/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                now,
+                now);
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(true, automationRepository, List.of()),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        assertThat(service.listTemplates("app_gcms", new UserId("usr_1")))
+                .singleElement()
+                .satisfies(template -> {
+                    assertThat(template.standard()).isFalse();
+                    assertThat(template.repositoryType())
+                            .isEqualTo(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value());
+                });
+    }
+
+    @Test
     void recentWorkspaceForbiddenIncludesLoadingContext() {
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
