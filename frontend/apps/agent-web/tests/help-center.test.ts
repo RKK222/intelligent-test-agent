@@ -96,8 +96,10 @@ describe("help center", () => {
 
     expect(prompt).toContain("【当前章节】每周新功能");
     expect(prompt).toContain("适用场景");
+    expect(prompt).toContain("使用前配置");
     expect(prompt).toContain("自动化代码库可以单独建立工作空间");
     expect(prompt).toContain("本地提交，但不提供远程推送或发布");
+    expect(prompt).toContain("VITE_CACHE_DATA_URL");
     expect(prompt).toContain("当前游戏入口只对超级管理员显示");
     expect(prompt).toContain("长期记忆会在新任务中自动复用经验");
     expect(prompt.length).toBeLessThan(8_100);

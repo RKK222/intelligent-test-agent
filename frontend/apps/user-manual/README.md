@@ -19,7 +19,7 @@ corepack pnpm --filter @test-agent/user-manual build
 ## 内容边界
 
 - `docs/guide/`：用户可见的稳定操作说明，也是帮助中心宠物问答的事实来源。
-- `docs/guide/weekly-updates.md`：按自然周把当前分支已开放的新功能置顶汇总；每项从用户场景、操作入口、使用步骤和权限/数据边界说明，并链接回稳定专题。同步到其它分支时必须按对应分支的真实能力增删内容。
+- `docs/guide/weekly-updates.md`：按自然周把当前分支已开放的新功能置顶汇总；每项从用户场景、使用前配置、操作入口、使用步骤、操作截图和权限/数据边界说明，并链接回稳定专题。截图统一放在 `docs/guide/images/weekly-updates/`，使用脱敏的真实组件状态和明确替代文本；同步到其它分支时必须按对应分支的真实能力增删内容。
 - `docs/guide/feature-overview.md`：按真实工作台入口汇总文件与编辑器、通知、对话协作、长期记忆、Git、Agent/Skill、Hub、引用配置和帮助能力，并链接到各专题章节。
 - `docs/guide/first-time-setup.md`：首次使用的角色、SSH、应用、工作空间和进程准备顺序；操作入口必须与当前权限和页面文案一致。
 - `docs/guide/settings.md`：按普通用户与应用管理员权限说明设置弹窗中的 SSH、应用成员、版本库关联和工作空间操作；不展开超级管理员专属的用户管理流程。
