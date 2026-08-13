@@ -51,13 +51,15 @@ describe("help center", () => {
     expect(helpDocumentUrl("settings")).toBe("/help/guide/settings.html");
     expect(helpDocumentUrl("directory-mapping")).toBe("/help/guide/directory-mapping.html");
     expect(helpDocumentUrl("reference-config")).toBe("/help/guide/reference-config.html");
+    expect(helpDocumentUrl("weekly-updates")).toBe("/help/guide/weekly-updates.html");
     expect(normalizeHelpTopic("unknown")).toBe("getting-started");
   });
 
-  it("keeps current features, reference configuration and merged FAQ troubleshooting in embedded Help", async () => {
+  it("keeps weekly updates, current features, reference configuration and merged FAQ troubleshooting in embedded Help", async () => {
     const wrapper = mountHelpCenter();
     const topicLabels = wrapper.findAll(".ta-help-center-topic").map((button) => button.text());
 
+    expect(topicLabels.some((label) => label.includes("每周新功能"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("功能总览"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("引用配置"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("常见问题与排查"))).toBe(true);
@@ -74,6 +76,18 @@ describe("help center", () => {
     expect(prompt).toContain("为什么没有主对话");
     expect(prompt).toContain("对话输入框发不出去");
     expect(prompt).toContain("traceId");
+    expect(prompt.length).toBeLessThan(6_700);
+  });
+
+  it("grounds weekly feature questions in user scenarios and release-safe boundaries", () => {
+    const prompt = buildManualQuestionPrompt("weekly-updates", "这周自动化代码库怎么用？");
+
+    expect(prompt).toContain("【当前章节】每周新功能");
+    expect(prompt).toContain("适用场景");
+    expect(prompt).toContain("自动化代码库可以单独建立工作空间");
+    expect(prompt).toContain("本地提交，但不提供远程推送或发布");
+    expect(prompt).toContain("当前游戏入口只对超级管理员显示");
+    expect(prompt).not.toContain("长期记忆");
     expect(prompt.length).toBeLessThan(6_700);
   });
 
@@ -180,6 +194,6 @@ describe("help center", () => {
     expect(settings).toContain("应用与版本库关联");
     expect(settings).toContain("工作空间管理");
     expect(settings).toContain("08“版本库管理”、09“应用人员管理”、10“应用与版本库关联”、11“工作空间管理”");
-    expect(settings).toContain("超级管理员专属的“用户管理”");
+    expect(settings).toContain("页面不会把超级管理员专属的用户管理");
   });
 });
