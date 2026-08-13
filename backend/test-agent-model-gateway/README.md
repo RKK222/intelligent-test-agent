@@ -15,7 +15,8 @@
   timeout、固定上游错误、usage 有界提取和每日增量。连接超时为10秒；交互式LobeHub响应头等待30秒，
   Memory 抽取请求允许120秒冷启动；首个响应块与后续空闲仍分别限制为30秒和120秒。
 - `OpenAiUpstreamSupport` 统一安全拼接 base URL、清除客户端同名可信 Header，以 `Auth-Token` 注入供应商 Token，
-  并注入 UCID/trace，
+  并注入 UCID/trace；企业上游的 `Authorization: Bearer` 模式只能完成鉴权、不会让 UCID 生效，
+  因此平台调用固定使用 `Auth-Token`，
   以及过滤响应 hop-by-hop/sensitive header；既有 OpenCode proxy 复用它，但 Responses 转换仍留在原入口。
 
 ## 允许依赖

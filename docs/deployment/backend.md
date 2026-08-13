@@ -887,7 +887,7 @@ TEST_AGENT_INTERNAL_PROXY_BASE_URL=http://<same-node-java>/api/internal/platform
 ENTERPRISE_UCID=<current-user-unified-auth-id>
 ```
 
-`ENTERPRISE_OPENAI_AUTH_TOKEN` 不再通过 Java 环境变量提供；超级管理员在前端“系统管理 → 配置管理 → 内部模型供应商”记录外部系统提供的可复用 Token，并为每个 `providerId/name/baseUrl/enabled/sortOrder` 选择 Token。Token 明文保存在 `internal_model_tokens.token_value`，前端只展示名称、引用数和逐 Provider 配置状态，不回显原值。Java 调用企业 AI 上游时固定使用 `Auth-Token: <供应商关联 Token>`，不会发送 Bearer `Authorization`；OpenCode 子进程访问 Java 内部代理时仍使用独立的 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`，两种凭据和协议不能混用。旧 `internal_model_proxy_settings` 仅为滚动升级兼容保留。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 公共配置样例”；114 单后端可直接使用 `deploy/internal/opencode.jsonc.example`。所有 Java 节点完成后端升级前不得开放不同 Provider Token 的页面操作。
+`ENTERPRISE_OPENAI_AUTH_TOKEN` 不再通过 Java 环境变量提供；超级管理员在前端“系统管理 → 配置管理 → 内部模型供应商”记录外部系统提供的可复用 Token，并为每个 `providerId/name/baseUrl/enabled/sortOrder` 选择 Token。Token 明文保存在 `internal_model_tokens.token_value`，前端只展示名称、引用数和逐 Provider 配置状态，不回显原值。企业 AI 上游自身支持两种方式：`Authorization: Bearer <供应商关联 Token>` 可以完成鉴权，但 `ucid` 不生效；只有 `Auth-Token: <供应商关联 Token>` 会让同一请求的 `ucid` 生效。因此 Java 调用企业 AI 上游固定使用 `Auth-Token`，不会发送上游 Bearer `Authorization`。OpenCode 子进程访问 Java 内部代理时仍使用独立的 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；这个 Bearer 只校验 Java 代理调用方，Java 会在转发前删除它，不能替代上游 `Auth-Token`。旧 `internal_model_proxy_settings` 仅为滚动升级兼容保留。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 公共配置样例”；114 单后端可直接使用 `deploy/internal/opencode.jsonc.example`。所有 Java 节点完成后端升级前不得开放不同 Provider Token 的页面操作。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|

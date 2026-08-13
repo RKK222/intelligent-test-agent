@@ -32,7 +32,7 @@ public final class OpenAiUpstreamSupport {
         headers.remove(AUTH_TOKEN_HEADER);
         headers.remove(UCID_HEADER);
         headers.remove(TraceConstants.TRACE_ID_HEADER);
-        // 企业内部 AI 网关使用 Auth-Token 原值鉴权，不接受 OpenAI 常见的 Bearer 头。
+        // 企业网关的 Bearer 模式不会让 UCID 生效，平台必须使用 Auth-Token 原值鉴权。
         headers.set(AUTH_TOKEN_HEADER, requireText(providerToken, "providerToken"));
         headers.setContentType(Objects.requireNonNull(contentType, "contentType must not be null"));
         headers.setAccept(accept == null || accept.isEmpty()
