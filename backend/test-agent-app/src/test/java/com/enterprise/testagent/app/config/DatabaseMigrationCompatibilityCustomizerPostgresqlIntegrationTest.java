@@ -136,6 +136,10 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION;
     private static final String EXPERIENCE_WORKSPACE_MAIN_RESOURCE =
             "db/migration/V20260809210000__common_parameters_add_experience_workspace.sql";
+    private static final String LOCAL_CLIENT_RUNTIME_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION;
+    private static final String LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION;
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -726,6 +730,42 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(context).hasFailed();
             assertThat(context.getStartupFailure())
                     .hasStackTraceContaining("检测到未知的体验工作区 migration checksum");
+        });
+    }
+
+    @Test
+    void appliedLocalClientRuntimeHistoryKeepsOriginalBytesWithoutPublishingClientToCleanRelease() {
+        DataSource dataSource = dataSource("local_client_runtime_applied_only");
+        migrateTo(dataSource, CURRENT_RELEASE_MAX_VERSION, MAIN_LOCATION);
+        migrateTo(
+                dataSource,
+                LOCAL_CLIENT_RUNTIME_FORWARD_VERSION,
+                MAIN_LOCATION,
+                LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION);
+
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue();
+        });
+    }
+
+    @Test
+    void unknownLocalClientRuntimeChecksumStillFailsClosed() {
+        DataSource dataSource = dataSource("local_client_runtime_unknown_checksum");
+        migrateTo(dataSource, CURRENT_RELEASE_MAX_VERSION, MAIN_LOCATION);
+        migrateTo(
+                dataSource,
+                LOCAL_CLIENT_RUNTIME_FORWARD_VERSION,
+                MAIN_LOCATION,
+                LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION);
+        overwriteAppliedChecksum(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION, 987654321);
+
+        bootFlywayRunner(dataSource).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).hasStackTraceContaining("checksum");
         });
     }
 

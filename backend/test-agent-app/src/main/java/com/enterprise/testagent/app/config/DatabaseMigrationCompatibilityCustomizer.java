@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
 /**
  * 在 Spring Boot 创建唯一 Flyway Bean 时解析历史迁移分叉。
  *
- * <p>工具盒子、LobeHub、内部模型可观测、撤销重发、QA Memory 和体验工作区迁移均形成过已知历史分叉。
+ * <p>工具盒子、LobeHub、内部模型可观测、撤销重发、QA Memory、体验工作区和本地客户端迁移均形成过已知历史分叉。
  * 兼容程序只按已应用版本与 checksum 选择原始字节或更高版本补偿资源；未知 checksum、不完整历史和混合路径
  * 必须继续拒绝启动。
  */
@@ -90,6 +90,9 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     static final String EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/experience-workspace-applied";
     static final String EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_VERSION = "20260812104911";
+    static final String LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION = "20260812202425";
+    static final String LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/local-client-runtime-applied";
 
     private static final String CURRENT_TOOLBOX_MIGRATION_FILE =
             "V20260728160800__create_toolbox_click_tracking.sql";
@@ -292,6 +295,8 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             throw new IllegalStateException(
                     "检测到未知的体验工作区 migration checksum，拒绝自动兼容；请核对 flyway_schema_history");
         }
+        boolean localClientRuntimeForwardMigrationApplied = isMigrationApplied(
+                appliedMigrations, LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
         boolean qaMemoryAfterSessionShareForwardApplied = isMigrationApplied(
                 appliedMigrations, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION);
         boolean qaMemoryAfterTokenLatencyForwardApplied = isMigrationApplied(
@@ -405,6 +410,11 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             addLocationIfAbsent(
                     locations, EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION);
         }
+        if (localClientRuntimeForwardMigrationApplied) {
+            // release 不发布本地客户端能力，仅为已经执行该 dev migration 的数据库保留原始校验字节。
+            addLocationIfAbsent(
+                    locations, LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION);
+        }
         configuration.locations(locations.toArray(String[]::new));
 
         boolean legacyWithoutCurrentMigration = legacyMigrationApplied
@@ -507,6 +517,10 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                     EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_VERSION,
                     experienceWorkspaceMigrationChecksum,
                     EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_VERSION);
+        }
+        if (localClientRuntimeForwardMigrationApplied) {
+            LOGGER.warn("检测到已执行的本地客户端顺序补偿 migration，仅启用原始字节兼容解析，不装配客户端运行能力: version={}",
+                    LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
         }
     }
 

@@ -118,6 +118,10 @@ class FlywayMigrationNamingTest {
             "V20260812144051__common_parameters_default_experience_workspace.sql";
     private static final String EXPERIENCE_WORKSPACE_DEFAULT_SHA256 =
             "e07d560ac0652860ed8e8788b002df0881eface861998a20e4e83da85276bfcf";
+    private static final String LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION =
+            "V20260812202425__local_client_credentials_create_runtime_after_release.sql";
+    private static final String LOCAL_CLIENT_RUNTIME_FORWARD_SHA256 =
+            "168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -302,6 +306,15 @@ class FlywayMigrationNamingTest {
                 "db/migration",
                 EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION,
                 EXPERIENCE_WORKSPACE_DEFAULT_SHA256);
+    }
+
+    @Test
+    void appliedLocalClientRuntimeMigrationRemainsByteExactInCompatibilityLocation()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration-compat/local-client-runtime-applied",
+                LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION,
+                LOCAL_CLIENT_RUNTIME_FORWARD_SHA256);
     }
 
     @Test
