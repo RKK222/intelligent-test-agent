@@ -2,6 +2,8 @@
 
 TestAgent 专属进程负责执行对话、Agent、Skill 和工具调用。它与应用工作区不是同一个概念：进程提供执行能力，工作区提供文件和 Git 上下文。
 
+![小宠物提示尚未分配 TestAgent 专属进程，并提供初始化进程和查看操作手册入口](./images/operations/process-initialization.png)
+
 首次完整使用前，先确认角色、个人 SSH Key、应用成员关系和工作空间已经准备好，具体步骤见[首次使用前准备](./first-time-setup.md)。SSH 并非进程启动本身的技术依赖，但缺少 SSH 会让后续分支、目录、clone、pull 和 push 失败。
 
 ## 先看懂按钮文案

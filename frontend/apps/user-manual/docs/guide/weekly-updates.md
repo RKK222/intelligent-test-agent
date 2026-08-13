@@ -17,7 +17,7 @@
 
 **使用前配置：** 普通用户无需加入应用，也无需自己配置目录；只要登录后本人的 TestAgent 进程可用即可。首次进入时如果进程尚未启动，按页面提示初始化。平台管理员通常无需改默认值；只有需要把体验目录放到指定磁盘时，才在通用参数中配置 `OPENCODE_EXPERIENCE_WORKSPACE_DIR`，并确认目标目录可写。
 
-![首次进入平台体验时的共享目录与敏感数据提醒](./images/weekly-updates/experience-entry.png)
+![首次进入平台体验时的共享目录与敏感数据提醒](./images/operations/experience-entry.png)
 
 **怎么用：**
 
@@ -29,7 +29,7 @@
 
 进入后，左侧会固定显示“体验工作区”“多人共享”和“本地 Git 可提交，不提供推送”，可以据此确认自己没有误入正式应用工作区。
 
-![平台体验工作区中的共享范围和本地 Git 提示](./images/weekly-updates/experience-workspace.png)
+![平台体验工作区中的共享范围和本地 Git 提示](./images/operations/experience-workspace.png)
 
 ::: warning 先看清共享边界
 体验目录和本地 Git 由同一台服务器上的体验用户共享，其他人可能同时修改相同文件。这里可以建立本地提交，但不提供远程推送或发布。不要存放密码、Token、SSH Key、客户数据等敏感内容。
@@ -49,7 +49,7 @@
 4. 等顶部“工作空间”“版本”和左侧文件树都更新后，再开始编辑或对话。从源码快照也可以直接按上述步骤切换，不需要先返回测试工作空间。
 5. 也可以点击文件树左下角的双向箭头：在“自动化代码库”下把鼠标移到工作空间名称上，再点击右侧出现的日期版本。
 
-![页面顶部中间的工作空间入口及展开后的自动化代码库分组](./images/weekly-updates/automation-workspace-switch.png)
+![页面顶部中间的工作空间入口及展开后的自动化代码库分组](./images/operations/automation-workspace-switch.png)
 
 **使用前配置（应用管理员或超级管理员）：**
 
@@ -59,9 +59,9 @@
 4. 继续点击“工作空间管理”，在“已关联版本库”中选中该自动化代码库；依次选择分支、填写工作空间别名、选择“自动化代码库版本”日期，并在目录树中点击一个已有目录。
 5. 点击表单下方“保存”，等待“保存工作空间配置”“下载代码”“创建运行态工作区”等进度全部成功。普通用户随后刷新工作台，就能从顶部“工作空间”入口选择它。
 
-![版本库管理中已经登记为自动化代码库的仓库](./images/weekly-updates/automation-repository-config.png)
+![版本库管理中已经登记为自动化代码库的仓库](./images/operations/automation-repository-config.png)
 
-![工作空间管理中的自动化代码库、分支、日期版本和目录树配置](./images/weekly-updates/automation-workspace-config.png)
+![工作空间管理中的自动化代码库、分支、日期版本和目录树配置](./images/operations/automation-workspace-config.png)
 
 自动化代码库允许选择远端树中的任意已有目录，但不能在该表单中新建目录；文件也不能作为工作空间。完整字段和权限见[设置与权限内操作](./settings.md)与[应用版本与个人工作区](./workspace.md)。
 
@@ -80,9 +80,9 @@
 3. 被分享人会在顶部通知铃铛中收到提醒；点击有效通知会在新标签页打开会话，成功进入后通知才变为已读。
 4. 没看到通知时，可从“会话列表 → 分享给我”查找。需要收回权限时，由分享人再次打开分享设置并取消分享。
 
-![会话分享时配置成员、可对话权限和三天有效期](./images/weekly-updates/session-share-config.png)
+![会话分享时配置成员、可对话权限和三天有效期](./images/operations/session-share-config.png)
 
-![被分享人在通知中心收到可点击的会话通知](./images/weekly-updates/notification-center.png)
+![被分享人在通知中心收到可点击的会话通知](./images/operations/notification-center.png)
 
 “可对话”成员使用的仍是分享人的会话和工作区，页面会记录实际操作人；同一条分享会话同时只能执行一个任务。完整协作边界见[对话与上下文](./conversation.md#把会话分享给同事)。
 
@@ -98,6 +98,6 @@
 2. 点击工作空间标题右侧带数量的纸飞机按钮“缓存并跳转”。
 3. 新标签页打开后继续处理；原文件不会被移动、改名或删除。
 
-![在测试设计目录中多选两份资料后出现数量为二的纸飞机按钮](./images/weekly-updates/multi-select-materials.png)
+![在测试设计目录中多选两份资料后出现数量为二的纸飞机按钮](./images/operations/multi-select-materials.png)
 
 测试设计只支持文件，测试执行支持文件和目录。一次建议只选择同一类资料；路径中的 `S-数字` 子条目编号会一并带过去。更多限制见[应用版本与个人工作区](./workspace.md#把测试资料带到外部页面)。
