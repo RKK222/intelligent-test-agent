@@ -10100,3 +10100,25 @@
 
 - 自动化代码库在首页两个工作空间入口均独立展示，顶部上下文与左侧文件树在实际切换完成后同步更新，同版本重选也会重新拉取目录。
 - 本次只增量扩展既有 HTTP 响应并修复前端状态同步；不涉及 RunEvent、数据库、migration、性能、安全、环境配置、generated SDK 或 OpenCode 源码，未新建分支或推送远端。
+
+## 2026-08-13 - 修复 VPN 下 OpenCode 间歇证书校验失败
+
+### Why
+
+- macOS 已启用本地 VPN/系统代理时，Java 的数据库与 Redis 直连和 manager 的 VPN 端口识别已有隔离，但 OpenCode 使用的 Bun 子进程没有继承系统 HTTPS 代理，仍可能经 TUN 假地址访问模型服务并间歇报 `unknown certificate verification error`。
+
+### What
+
+- 本地启动脚本在没有显式 `HTTPS_PROXY`/`https_proxy` 时自动读取 macOS 静态 HTTPS 代理，必要时回退到可承载 CONNECT 的 HTTP 代理，并仅传给 opencode-manager 及其 OpenCode 子进程；显式环境变量优先，`TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY=false` 可关闭自动探测。
+- 保持 Maven、前端构建和 Java 后端不继承该代理，不关闭或放宽 TLS 证书校验；同步研发启动文档。另为既有自动化代码库提交补齐一处测试模板 `repositoryType`，恢复 release 前端类型构建。
+
+### How
+
+- 通过 Bash 语法、差异空白检查，JDK 25 后端 22 模块跳过测试完整打包，以及 agent-web 的 Vue 类型检查和 Vite 生产构建。
+- 以 `test` profile 重启 release，验证 backend health/readiness、frontend、CORS 和 manager/OpenCode 进程；进程环境确认代理只进入 manager/OpenCode，Java 后端未继承。
+- 在真实用户 OpenCode 端口连续发起 3 次 `mimo-v2.5-free` 对话，3/3 返回预期内容，新日志未再出现证书校验错误。
+
+### Result
+
+- VPN 开启状态下，本轮真实模型对话未复现 `unknown certificate verification error`；仍观察到上游连接偶发 `socket connection was closed unexpectedly`，SDK 重试后主对话成功，属于 VPN 节点或外部链路的剩余稳定性风险。
+- 本次未修改 `.env*`、API、RunEvent、数据库、migration、generated SDK 或 OpenCode 只读源码，也未降低安全校验。
