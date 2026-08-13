@@ -9821,3 +9821,24 @@
 
 - 自动化代码库的配置、工作空间规则、迁移、测试和文档已实现并完成代码级、构建级及真实 PostgreSQL 兼容验证；实际 HTTP/UI 创建流程因本地 Flyway 历史分叉仍未运行，交付状态为部分运行验证。
 - 本次只对既有 HTTP 响应增量增加类型编码，不变更 DTO 字段、RunEvent、表结构、性能或安全契约；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+## 2026-08-13 - 固化 dev 与 release 后续开发边界
+
+### Why
+
+- 用户明确后续影响部署、需要新增节点或运行服务的大功能统一在 `dev` 开发，`release` 只维护 Bug 和现有拓扑可承载的小功能，需要把这项长期决策写入 AI 必读规范。
+
+### What
+
+- 在 `AGENTS.md`、研发工作流和完成前自检清单中统一定义 `dev`、`release`、`main` 的职责、判定条件和合并门禁；边界不清时默认选择 `dev`。
+- 明确 release 修复必须同步回 dev，从 dev 提升到 release 只能按已批准功能选择性合入，禁止整体带入未交付节点、服务、migration 或配置。
+- 更新文档索引，使后续开发者在进入编码流程前即可看到分支策略。
+
+### How
+
+- 复用现有 `AGENTS.md`、`docs/guides/ai-workflow.md` 和 `docs/guides/self-checklist.md` 作为规范单一入口，没有新增重复的分支说明文件。
+- 运行 AI 文档校验、差异空白与冲突标记检查，并回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 后续开发具备明确的分流规则：部署演进和新节点功能进入 dev，release 只承载兼容当前部署的修复与小功能，main 保持稳定基线。
+- 本次只修改研发流程文档，不涉及代码、API、事件、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
