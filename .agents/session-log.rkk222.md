@@ -9758,3 +9758,25 @@
 ### Result
 
 - release 可校验共享开发库中的客户端历史，但仍不发布客户端运行能力；本次只扩展数据库历史兼容装配和文档，不新增 API、RunEvent、业务表迁移或环境配置。
+
+## 2026-08-13 - 收敛 main、release、dev 分支边界
+
+### Why
+
+- 用户要求统一去掉分支名中不一致的 `codex/` 前缀，并把可独立部署的自动化代码库、宠物游戏和 E2E 造数保留在 release，把 Mem0 与本地客户端等大功能收敛到 dev；独立 Workflow 从所有保留分支永久删除。
+
+### What
+
+- release 保留独立部署基线和可选 LobeHub，默认不启动 LobeHub；dev 合入 release、Mem0 与本地客户端，Mem0/LobeHub 默认均关闭；main、release、dev 和本地客户端分支均删除独立 Workflow 的代码、部署资产、测试与稳定文档。
+- 提交 Vue 自动组件声明，并为 release 增加仅解析共享库既有客户端 migration 历史的隔离兼容装配；空 release 数据库不会执行客户端 migration，也不发布客户端服务。
+- 已合入 release/dev 的临时功能分支按提交祖先或等价正式提交核对后收敛；仍有本地工作树改动的 Apple 预览和 Mem0 工作区保留，且不覆盖其未提交内容。
+
+### How
+
+- release 前端类型检查、生产构建、定向测试，后端完整打包、Flyway 字节锁和 AI 文档校验通过；真实 `.env.test` 已执行历史由 release 成功校验，backend health/readiness、frontend 和 manager 均健康。
+- 逐分支检查独立 Workflow 路径和标识，检查 release/dev 的祖先关系、等价功能提交和 LobeHub 资产；Mem0 的 6 个本地文件先用专用 stash 保护，快进到 dev 后恢复，并手工合并唯一同文件冲突。
+
+### Result
+
+- 三条长期分支职责明确：main 为干净基线，release 为无需 Mem0/客户端附加服务即可部署的交付线，dev 为大功能集成线；release 当前本地服务已启动。
+- 本次未修改 `.env*`、generated SDK、OpenCode 只读源码或 Flyway 已执行字节；除既有 migration 历史兼容外，不新增 API、RunEvent、数据库结构、安全或性能契约。
