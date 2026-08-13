@@ -56,13 +56,14 @@ curl -N -X POST http://127.0.0.1:19070/chat/completions \
 
 ## 3. 触发一次真实转发（验证代理插桩明细）
 
-用内部代理 API key 直接打代理端点（等价于 opencode 子进程的调用），`X-Enterprise-Model-Provider` 指定上面配置的 providerId：
+用内部代理 API key 直接打代理端点（等价于 opencode 子进程的调用），`X-Enterprise-Model-Provider` 指定上面配置的 providerId。这里的 `Authorization: Bearer` 只鉴权 Java 内部代理，不是上游供应商鉴权；真实转发时 Java 会删除它并改用上游 `Auth-Token`，因为企业上游的供应商 Bearer 模式不会让 `ucid` 生效：
 
 ```bash
 # 从 backend.env 读取代理 key（本地默认空则省略 Authorization）
 curl -N -X POST http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions \
   -H "Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}" \
   -H "X-Enterprise-Model-Provider: local-mock" \
+  -H "ucid: local-observability-user" \
   -H "Content-Type: application/json" \
   -d '{"model":"mock-model","messages":[{"role":"user","content":"hi"}],"stream":true}'
 ```

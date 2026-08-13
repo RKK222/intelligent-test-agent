@@ -141,6 +141,12 @@ require_text "docs/standards/security.md" "用户专属 opencode server 默认�
 require_text "backend/README.md" "Maven multi-module"
 require_text "backend/test-agent-app/README.md" ".env.local"
 require_text "docs/api/http-api.md" "所有对外 API 新增或变更都必须更新本文件"
+require_text "docs/api/http-api.md" '`Authorization: Bearer <供应商关联 Token>`'
+require_text "docs/api/http-api.md" '`ucid` 不生效'
+require_text "docs/api/http-api.md" '`Auth-Token: <供应商关联 Token>`'
+require_text "docs/api/http-api.md" '`ucid` 生效'
+require_text "deploy/internal/SINGLE-BACKEND.md" '只有后者会让同一请求的 `ucid` 生效'
+require_text "deploy/internal/MULTI-BACKEND.md" '只有 `Auth-Token: <供应商关联 Token>` 会让同一请求的 `ucid` 生效'
 require_text "docs/api/event-stream.md" "Last-Event-ID"
 require_text "docs/standards/frontend.md" "完全自研"
 require_text "docs/standards/frontend.md" "不得直连 opencode server"
