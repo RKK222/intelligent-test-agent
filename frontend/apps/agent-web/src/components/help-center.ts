@@ -49,7 +49,7 @@ export const HELP_TOPICS: HelpTopic[] = [
   {
     id: "weekly-updates",
     label: "每周新功能",
-    description: "最新能力、适用场景与操作方法",
+    description: "最新能力、使用前配置与操作方法",
     path: "guide/weekly-updates.html",
     content: weeklyUpdatesManual
   },
