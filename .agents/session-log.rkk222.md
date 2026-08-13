@@ -9996,3 +9996,21 @@
 ### Result
 
 - dev 与 release 的通用手册截图保持同步，dev 专属长期记忆内容没有被覆盖；本次不涉及 API、事件、数据库、部署或安全契约。
+
+## 2026-08-13 - 同步 release 前端组件类型声明
+
+### Why
+
+- release 已新增黄金矿工组件并不再通过自动导入使用 Element Plus Drawer，自动生成的 Vue 全局组件声明需要与当前源码扫描结果一致。
+
+### What
+
+- 从 `components.d.ts` 移除未自动导入的 `ElDrawer` 全局声明，新增 `PetGoldMinerGame` 组件声明；显式导入 Drawer 的现有页面不受影响。
+
+### How
+
+- 核对 `PetMiniGames.vue` 对黄金矿工组件的显式引用，以及系统参数页面对 `ElDrawer` 的显式导入；提交前回顾全部 `.agents/session-log*.md` 近期条目并执行差异空白检查。
+
+### Result
+
+- Vue 组件类型声明与 release 当前源码一致；本次不涉及 API、RunEvent、数据库、部署、安全、环境配置、generated SDK 或 OpenCode 源码。
