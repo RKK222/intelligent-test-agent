@@ -130,12 +130,15 @@ const copyPathText = computed(() => {
   return normalizePhysicalAbsolutePath(props.copyPath) ?? "";
 });
 
-const canCopyPath = computed(() => Boolean(copyPathText.value || (props.workspaceId && props.writePath)));
+const canResolveWorkspacePath = computed(() =>
+  (props.workspaceKind ?? "MANAGED") === "MANAGED" && Boolean(props.workspaceId && props.writePath)
+);
+const canCopyPath = computed(() => Boolean(copyPathText.value || canResolveWorkspacePath.value));
 
 async function copyPath(textToCopy: string) {
   let resolved = textToCopy;
   try {
-    if (!resolved && props.workspaceId && props.writePath) {
+    if (!resolved && canResolveWorkspacePath.value && props.workspaceId && props.writePath) {
       resolved = await api.resolveWorkspacePhysicalPath(props.workspaceId, props.writePath);
     }
   } catch (error) {

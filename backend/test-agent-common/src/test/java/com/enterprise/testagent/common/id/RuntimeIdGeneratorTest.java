@@ -9,6 +9,9 @@ class RuntimeIdGeneratorTest {
     @Test
     void generatedRuntimeIdsUseStablePrefixesAndCompactUuidBody() {
         assertThat(RuntimeIdGenerator.workspaceId()).matches("wrk_[0-9a-f]{32}");
+        assertThat(RuntimeIdGenerator.applicationWorkspaceId()).matches("awp_[0-9a-f]{32}");
+        assertThat(RuntimeIdGenerator.applicationWorkspaceVersionId()).matches("awv_[0-9a-f]{32}");
+        assertThat(RuntimeIdGenerator.personalWorkspaceId()).matches("psw_[0-9a-f]{32}");
         assertThat(RuntimeIdGenerator.sessionId()).matches("ses_[0-9a-f]{32}");
         assertThat(RuntimeIdGenerator.runId()).matches("run_[0-9a-f]{32}");
         assertThat(RuntimeIdGenerator.messageId()).matches("msg_[0-9a-f]{32}");

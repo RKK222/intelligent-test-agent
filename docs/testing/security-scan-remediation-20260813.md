@@ -26,3 +26,12 @@
 - 使用 `TEST_AGENT_TCDS_BASE_URL=<部署地址> ./restart-dev-services.sh --profile test --env-file .env.test --skip-backend-build --skip-frontend-build` 做真实启动时，前端可在 `http://127.0.0.1:3000` 返回 200；后端因本机测试 PostgreSQL `127.0.0.1:15432` 未运行而启动失败。未修改 `.env.test`，也未停用旧 9900 服务。
 
 受上述数据库阻塞影响，本轮未能在真实登录会话重放普通 Workspace HTTP 响应、未授权 WebSocket upgrade 和完整 TCDS 导入请求；对应控制链已由上述单元/组件测试覆盖，待测试数据库恢复后仍需执行真实查询、重复覆盖、部分失败、文件树刷新及原扫描请求重放。
+
+## Workspace ID 全链路回归
+
+- 运行态 `Workspace.workspaceId` 继续固定使用 `wrk_`，与应用模板 `applicationWorkspaceId=awp_`、应用版本 `versionId=awv_`、个人工作区 `personalWorkspaceId=psw_` 分离。前端缓存、文件 WebSocket、会话/Run、最近工作区和需求导入均只把运行态 `workspaceId` 当作文件与会话路由主键；模板和版本 ID 只用于菜单归属及高亮。
+- 修复同一应用版本、同一模板、同一服务器下多个个人 worktree 被 `versionId + applicationWorkspaceId + linuxServerId` 误判为同一缓存项的问题。缓存现在只按精确 `workspaceId` 替换，同版本的 `default` 与自定义 worktree 可以同时保留。
+- 普通托管工作区的编辑器和 Diff 重新传递精确运行态 `workspaceId`，用户点击时通过 `workspace.resolve-physical-path` 解析单文件绝对路径；分享会话、支持访问、体验空间、源码快照、引用文件和 Agent 文件均不开放该解析入口。
+- 取消物理根路径下发后，工具事件中的绝对 Unix/Windows 路径、URI 形态和越界路径一律失败关闭，不能被当作工作区相对路径发送到文件 WebSocket；后端生成的可信相对 Diff 路径仍正常刷新文件树和编辑器。
+- `mvn -pl test-agent-workspace-management,test-agent-opencode-runtime,test-agent-api -am test`：19 个相关模块通过，`test-agent-api` 565 项通过；覆盖 Workspace、个人 worktree、最近偏好、文件 route/ticket/RPC、会话/Run、分享、支持、体验和需求导入调用链。
+- `corepack pnpm test`：124 个测试文件、1949 项通过、1 项按既有条件跳过；`corepack pnpm typecheck` 与 `corepack pnpm build` 通过。9 条 Workspace 定向 Playwright 用例全部通过，覆盖普通文件、切换竞态、最近个人 worktree、源码快照、体验空间和 Diff；全套 Playwright 另有与本改动无关的既有路由断言和引导弹窗遮挡失败，未把整套浏览器测试记为通过。
