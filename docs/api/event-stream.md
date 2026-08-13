@@ -932,3 +932,6 @@ Run 的失败卡，不能把旧模型错误附加到当前成功回答。`sessio
 ## manager 控制面补充
 
 manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字段。Java 启动用户 opencode server 时通过 `environment` 注入 `TEST_AGENT_INTERNAL_PROXY_API_KEY`、`TEST_AGENT_INTERNAL_PROXY_BASE_URL` 和 `ENTERPRISE_UCID`，通过 `configPath` 固定传入当前用户的受管公共配置软链接；manager 生成的 `startCommand` 按固定顺序展示 `HOME`、全部 XDG、`TMPDIR`、配置路径、代理 base URL、UCID 等非敏感值，`TEST_AGENT_INTERNAL_PROXY_API_KEY` 必须显示为 `<redacted>`。调用方即使在 `environment` 中提供同名 HOME/XDG/TMP/config 变量，也会被 manager 按 `sessionPath/configPath` 覆盖。
+# 需求导入的实时边界
+
+需求导入不新增或修改 `RunEvent`/SSE 事件。目录查询使用普通 HTTP，文件写入复用一次性 ticket 保护的文件 WebSocket RPC `workspace.requirement-import`；完成后 iframe 仅向同源父窗口发送脱敏汇总，父页面刷新文件树。该消息不是服务端事件，不进入事件流持久化或重放。

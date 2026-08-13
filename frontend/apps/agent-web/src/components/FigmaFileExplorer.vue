@@ -16,10 +16,8 @@ import type { AgentConfigMutation, AgentFileLoadRequest, PublicWorktreeMountRequ
 import GitChangesPanel from "./GitChangesPanel.vue";
 import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe, MoreHorizontal, Plane, Plus, RefreshCw, Search } from "lucide-vue-next";
 import type { AppSourceWorkspaceContext, SelectedWorkspaceKind } from "./app-source-workspace";
-import { normalizePhysicalAbsolutePath } from "./physical-path";
 
 const props = withDefaults(defineProps<FileExplorerProps & {
-  workspaceRootPath?: string;
   /** 当前应用名，传递给 WorkbenchFooter 作为两级菜单首行提示 */
   appName?: string;
   /** 归属当前应用的工作空间模板列表（应用→工作空间级） */
@@ -80,10 +78,6 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   fileTreeError?: string | null;
   /** 引用副本局部不可用时保留有效树，同时展示可恢复警告。 */
   workspaceViewWarnings?: WorkspaceViewWarning[];
-  /** 当前用户 ID，用于拼接 iframe URL */
-  userId?: string;
-  /** 后端 Java 服务器 IP 地址，用于构建 iframe URL */
-  backendJavaServerIp?: string;
   /** 源码快照模式只关闭 Git/Agent 发布能力，普通文件 WebSocket 写入继续开放。 */
   workspaceKind?: SelectedWorkspaceKind;
   appSourceContext?: AppSourceWorkspaceContext | null;
@@ -189,6 +183,7 @@ let dragStartHeight = 0;
 
 const iframeDialogVisible = ref(false);
 const iframeRef = ref<HTMLIFrameElement | null>(null);
+const iframeRequestId = ref("");
 const fileExplorerRef = ref<InstanceType<typeof FileExplorer> | null>(null);
 const workspaceMoreMenuRef = ref<HTMLDetailsElement | null>(null);
 
@@ -215,52 +210,16 @@ function openRootActions() {
   fileExplorerRef.value?.openRootActions();
 }
 
-const iframeUrl = computed(() => {
-  const baseUrl = import.meta.env.VITE_IFRAME_URL ?? "";
-  const workspacePath = normalizePhysicalAbsolutePath(props.workspaceRootPath);
-  if (!baseUrl || !workspacePath) return "";
-  
-  const now = new Date();
-  const version = `${now.getFullYear()}年${now.getMonth() + 1}月`;
-  
-  const params = new URLSearchParams();
-  if (props.userId) {
-    params.append("userId", props.userId);
-  }
-  if (props.appName) {
-    params.append("appName", props.appName);
-  }
-  params.append("version", version);
-  params.append("workspacePath", workspacePath);
-
-  let backendUrl = props.backendJavaServerIp ?? null;
-  if (!backendUrl) {
-    backendUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? null;
-  }
-  if(backendUrl){
-    params.append("backendUrl", backendUrl);
-  }
-  
-  const paramsStr = params.toString();
-  if (!paramsStr) return baseUrl;
-  
-  const hashIndex = baseUrl.indexOf("#");
-  if (hashIndex === -1) {
-    const url = new URL(baseUrl);
-    url.search = paramsStr;
-    return url.toString();
-  }
-  
-  const baseWithoutHash = baseUrl.substring(0, hashIndex);
-  let hash = baseUrl.substring(hashIndex);
-  const trimmedHash = hash.replace(/\?$/, "");
-  const hashHasQuery = trimmedHash.includes("?");
-  const separator = hashHasQuery ? "&" : "?";
-  return `${baseWithoutHash}${trimmedHash}${separator}${paramsStr}`;
-});
+const iframeUrl = computed(() => new URL("/workspace-requirement-import", window.location.origin).toString());
+const requirementImportAvailable = computed(() => Boolean(
+  props.workspaceId && props.canWrite && managedWorkspaceMode.value
+));
 
 function openIframeDialog() {
-  if (!iframeUrl.value) return;
+  if (!requirementImportAvailable.value) return;
+  iframeRequestId.value = typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `requirement-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   iframeDialogVisible.value = true;
 }
 
@@ -269,19 +228,23 @@ function closeIframeDialog() {
 }
 
 function handleIframeMessage(event: MessageEvent) {
-  try {
-    const data = event.data;
-    if (data && typeof data.type === "string") {
-      console.log("[FigmaFileExplorer] Received postMessage:", data);
-      
-      if (data.type === "FUNC_DISPATCH" && data.payload === "workspace_reload") {
-        console.log('更新工作空间：',data)
-        emit("refresh");
-        closeIframeDialog();
-      }
-    }
-  } catch (e) {
-    console.error("[FigmaFileExplorer] Failed to parse postMessage:", e);
+  if (event.origin !== window.location.origin || event.source !== iframeRef.value?.contentWindow) return;
+  const data = event.data as Record<string, unknown> | null;
+  if (data?.type === "ITA_REQUIREMENT_IMPORT_READY" && props.workspaceId) {
+    const now = new Date();
+    iframeRef.value?.contentWindow?.postMessage({
+      type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+      workspaceId: props.workspaceId,
+      defaultAppName: props.appName,
+      defaultVersion: `${now.getFullYear()}年${now.getMonth() + 1}月`,
+      requestId: iframeRequestId.value
+    }, window.location.origin);
+    return;
+  }
+  if (data?.type === "ITA_REQUIREMENT_IMPORT_COMPLETE" && data.requestId === iframeRequestId.value) {
+    const result = data.result as { status?: string } | undefined;
+    if (result?.status === "SUCCEEDED" || result?.status === "PARTIAL") emit("refresh");
+    if (result?.status === "SUCCEEDED") closeIframeDialog();
   }
 }
 
@@ -524,10 +487,10 @@ defineExpose({
                 v-if="tab === 'explorer' && managedWorkspaceMode"
                 type="button"
                 class="figma-fe-section-action-btn"
-                :title="iframeUrl ? '打开外部页面' : '工作区物理路径不可用'"
-                aria-label="打开外部页面"
+                :title="requirementImportAvailable ? '从 TCDS 导入需求' : '当前工作区不可导入需求'"
+                aria-label="从 TCDS 导入需求"
                 data-onboarding="workspace-reference"
-                :disabled="!workspaceId || !iframeUrl"
+                :disabled="!requirementImportAvailable"
                 @click="openIframeDialog"
               >
                 <Globe class="h-3.5 w-3.5 figma-fe-action-icon--globe" :stroke-width="1.5" />
@@ -594,7 +557,6 @@ defineExpose({
               ref="fileExplorerRef"
               :key="workspaceId"
               :workspace-name="workspaceName"
-              :workspace-root-path="workspaceRootPath"
               :entries-by-directory="entriesByDirectory"
               :expanded-directories="expandedDirectories"
               :active-path="activePath"
@@ -725,7 +687,7 @@ defineExpose({
       <div v-if="iframeDialogVisible" class="figma-fe-iframe-overlay" @click="closeIframeDialog">
         <div class="figma-fe-iframe-dialog" @click.stop>
           <div class="figma-fe-iframe-header">
-            <span class="figma-fe-iframe-title">外部页面</span>
+            <span class="figma-fe-iframe-title">导入 TCDS 需求</span>
             <button
               type="button"
               class="figma-fe-iframe-close"
@@ -741,7 +703,7 @@ defineExpose({
               ref="iframeRef"
               :src="iframeUrl"
               class="figma-fe-iframe"
-              title="外部页面"
+              title="导入 TCDS 需求"
               sandbox="allow-scripts allow-same-origin allow-forms"
             />
           </div>

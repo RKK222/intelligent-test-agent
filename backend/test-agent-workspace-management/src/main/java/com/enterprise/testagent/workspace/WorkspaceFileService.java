@@ -148,6 +148,21 @@ public class WorkspaceFileService {
     }
 
     /**
+     * 按一次用户点击解析单个现有普通文件的真实路径；统一复用越界和符号链接校验。
+     */
+    public String resolvePhysicalFilePath(String rootPath, String relativePath) {
+        Path target = resolveInsideRoot(rootPath, relativePath);
+        if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在");
+        }
+        try {
+            return target.toRealPath(LinkOption.NOFOLLOW_LINKS).toString();
+        } catch (IOException exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "解析文件路径失败", Map.of(), exception);
+        }
+    }
+
+    /**
      * 分段读取超大 UTF-8 文件；不限制最终预览总量，每次只在固定内存中读取一段。
      */
     public FilePreviewChunkResponse readContentChunk(

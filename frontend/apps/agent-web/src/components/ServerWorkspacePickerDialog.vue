@@ -36,7 +36,7 @@ const emit = defineEmits<{
   close: [];
   selectServer: [server: WorkspaceBackendServer];
   navigate: [path: string];
-  select: [payload: { server: WorkspaceBackendServer; path: string }];
+  select: [payload: { server: WorkspaceBackendServer; path: string; existingWorkspaceId?: string }];
 }>();
 
 const selectedServer = computed(() => props.servers.find((server) => server.linuxServerId === props.selectedServerId));
@@ -534,7 +534,11 @@ const breadcrumbs = computed(() => {
                 size="sm"
                 class="h-8 shrink-0 text-[12px] font-medium"
                 :disabled="loading || serverMismatch || !directory || !selectedServer"
-                @click="directory && selectedServer && emit('select', { server: selectedServer, path: directory.path })"
+                @click="directory && selectedServer && emit('select', {
+                  server: selectedServer,
+                  path: directory.path,
+                  existingWorkspaceId: directory.existingWorkspaceId ?? undefined
+                })"
               >
                 使用当前目录
               </Button>

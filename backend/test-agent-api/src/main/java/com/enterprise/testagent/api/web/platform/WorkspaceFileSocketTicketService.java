@@ -130,9 +130,11 @@ class WorkspaceFileSocketTicketService {
                     workspaceId,
                     currentLinuxServerId,
                     null,
+                    false,
                     superAdmin,
                     appAdmin,
                     principal.userId().value(),
+                    principal.unifiedAuthId(),
                     mode,
                     agentConfigScope(request),
                     normalizeOptional(request.worktreeId()),
@@ -140,8 +142,8 @@ class WorkspaceFileSocketTicketService {
         }
         if (MODE_AGENT_SKILL_HUB.equals(mode)) {
             return response(ticketStore.issue(
-                    null, currentLinuxServerId, null, superAdmin, appAdmin, principal.userId().value(),
-                    mode, "HUB", null, traceId));
+                    null, currentLinuxServerId, null, false, superAdmin, appAdmin, principal.userId().value(),
+                    principal.unifiedAuthId(), mode, "HUB", null, traceId));
         }
         if (MODE_WORKSPACE.equals(mode)) {
             String workspaceId = requiredWorkspaceId(request);
@@ -163,6 +165,7 @@ class WorkspaceFileSocketTicketService {
                     superAdmin,
                     appAdmin,
                     principal.userId().value(),
+                    principal.unifiedAuthId(),
                     mode,
                     null,
                     null,
@@ -181,6 +184,11 @@ class WorkspaceFileSocketTicketService {
 
     WorkspaceFileSocketTicket consume(String ticket, String origin) {
         return ticketStore.consume(ticket, origin);
+    }
+
+    /** upgrade 前只检查 ticket 是否有效，实际升级时再由 consume 原子消费。 */
+    void validate(String ticket, String origin) {
+        ticketStore.validate(ticket, origin);
     }
 
     /** 在目标 Java 上签发排查专用只读文件 ticket。 */

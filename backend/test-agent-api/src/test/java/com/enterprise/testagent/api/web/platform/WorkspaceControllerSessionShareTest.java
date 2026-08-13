@@ -68,7 +68,8 @@ class WorkspaceControllerSessionShareTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.workspaceId").isEqualTo(workspaceId.value())
-                .jsonPath("$.data.physicalRootPath").isEqualTo("/srv/workspace");
+                .jsonPath("$.data.rootPath").isEqualTo("workspace:" + workspaceId.value())
+                .jsonPath("$.data.physicalRootPath").doesNotExist();
 
         verify(userQuery, never()).requireUserWorkspace(actor, workspaceId);
         verify(shareService).recordOperation(

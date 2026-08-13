@@ -1148,14 +1148,14 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 
 `WorkspaceResponse`：
 
-列表和详情响应新增显式 `physicalRootPath`，始终是服务端解析后的物理绝对路径；兼容字段 `rootPath` 保持同一物理值，避免旧前端失效。数据库中的 `personalworktree:`、`appworkspace:`、`appsource:` 逻辑值只用于跨服务器重新解析，不得直接返回给前端；历史绝对路径保持兼容，无法识别的相对路径在响应边界失败关闭，禁止按 Java 当前工作目录补成伪绝对路径。普通文件操作仍只使用 `workspaceId` 走文件 WebSocket；两个路径字段仅供复制路径或与同服务器受控外部页面交接目录等物理路径场景使用。
+列表、详情、最近工作区和排查响应均不返回物理根目录：兼容字段 `rootPath` 固定为 `workspace:{workspaceId}`，`physicalRootPath` 固定为 `null`。数据库中的 `personalworktree:`、`appworkspace:`、`appsource:` 逻辑值与历史绝对路径只在目标 Java 内部解析，不得直接返回浏览器。普通文件操作、需求导入和文件树刷新只使用 `workspaceId` 走文件 WebSocket；用户主动复制单个普通文件路径时，才允许调用 `workspace.resolve-physical-path` 即时解析，分享、排查、体验空间和源码快照均拒绝该操作。
 
 ```json
 {
   "workspaceId": "wrk_...",
   "name": "demo",
-  "rootPath": "/absolute/workspace/path",
-  "physicalRootPath": "/absolute/workspace/path",
+  "rootPath": "workspace:wrk_...",
+  "physicalRootPath": null,
   "linuxServerId": "127.0.0.1",
   "status": "ACTIVE",
   "createdAt": "2026-06-19T00:00:00Z",
@@ -1542,7 +1542,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 
 ### 应用版本工作区 API
 
-Base URL：`/api/internal/platform/workspace-management`。该能力把配置管理中的应用工作空间模板落为托管 Git 目录，并同步创建运行态 `workspaces` 记录。新建或显式修复的托管路径在数据库中保存逻辑值：应用版本/副本使用 `appworkspace:<versionSegment>/<repositoryEnglishName>[/<templateDirectory>]`，个人 worktree 使用 `personalworktree:<versionSegment>/<userId>/<repositoryEnglishName>/<branch>[/<templateDirectory>]`；使用时分别基于通用参数 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 解析为当前服务器物理路径。响应里的 `repoRootPath`、`workspaceRootPath`、`runtimeWorkspace.rootPath` 对托管工作区均为解析后的当前服务器物理路径；历史 Unix/Windows 绝对路径只兼容读取，不批量迁移。旧的手动目录注册 `/api/workspaces` 已作废，返回 `410 API_GONE`。
+Base URL：`/api/internal/platform/workspace-management`。该能力把配置管理中的应用工作空间模板落为托管 Git 目录，并同步创建运行态 `workspaces` 记录。新建或显式修复的托管路径在数据库中保存逻辑值：应用版本/副本使用 `appworkspace:<versionSegment>/<repositoryEnglishName>[/<templateDirectory>]`，个人 worktree 使用 `personalworktree:<versionSegment>/<userId>/<repositoryEnglishName>/<branch>[/<templateDirectory>]`；使用时分别基于通用参数 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 在目标 Java 内解析。历史 Unix/Windows 绝对路径只兼容内部读取，不批量迁移。嵌套的 `runtimeWorkspace.rootPath` 固定返回 `workspace:{workspaceId}` 且 `physicalRootPath=null`；旧的手动目录注册 `/api/workspaces` 已作废，返回 `410 API_GONE`。
 
 鉴权：
 
@@ -1690,7 +1690,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "runtimeWorkspace": {
     "workspaceId": "wrk_...",
     "name": "F-GCMS-20260707",
-    "rootPath": "/data/.testagent/agent-opencode/workspace/appworkspace/20260707/demo/F-GCMS/workspace",
+    "rootPath": "workspace:wrk_...",
+    "physicalRootPath": null,
     "status": "ACTIVE",
     "linuxServerId": "10.8.0.12",
     "createdAt": "2026-06-23T00:00:00Z",
@@ -1753,7 +1754,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 }
 ```
 
-个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{userId}_{workspaceName}`，其中 `workspaceName` 会安全化为 Git/path 可用片段。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{version}/{userId}/{repository.englishName}/{应用版本分支}_{userId}_{workspaceName}`，新记录入库保存 `personalworktree:` 逻辑路径，响应返回解析后的当前服务器物理路径。前端展示 `workspaceName` 和当前 worktree 分支。同一用户在同一应用版本下 `workspaceName` 唯一。
+个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{userId}_{workspaceName}`，其中 `workspaceName` 会安全化为 Git/path 可用片段。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{version}/{userId}/{repository.englishName}/{应用版本分支}_{userId}_{workspaceName}`，新记录入库保存 `personalworktree:` 逻辑路径，响应中的运行态工作区只返回逻辑 `workspace:{workspaceId}`。前端展示 `workspaceName` 和当前 worktree 分支。同一用户在同一应用版本下 `workspaceName` 唯一。
 
 同步请求体：
 
@@ -1792,7 +1793,8 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
   "runtimeWorkspace": {
     "workspaceId": "wrk_...",
     "name": "default",
-    "rootPath": "/data/.testagent/personal-worktrees/...",
+    "rootPath": "workspace:wrk_...",
+    "physicalRootPath": null,
     ...
   }
 }
@@ -1928,7 +1930,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 - 工作台顶部和左下角共用当前应用（`selectedAppId`）的 `GET /applications/{appId}/workspace-templates` 数据，按 `repositoryType` 将自动化代码库与测试工作空间独立分组，只显示已启用配置的 `workspaceName`。顶部上下文以实际完成的 workspace/version 切换为事实源，不在左侧目录加载前乐观显示新选择；重选当前版本会主动刷新目录和 Git diff。设置页关闭后会刷新该查询；若被停用的是当前已打开工作空间，不强制退出或清空当前状态，只在后续菜单中隐藏。版本创建、最近使用、运行态切换和会话逻辑保持原有行为。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
 - 点击版本或提交新增版本时先检查当前用户 TestAgent 专属进程是否 READY；只有强状态明确为 `NEEDS_INITIALIZATION` 且 `initializable=true` 才弹初始化/启动确认框，确认后复用既有进度弹窗，初始化完成后提示用户重新执行原操作。状态仍在查询、明确 `UNAVAILABLE`，或强状态为 READY 但弱健康尚未通过时不提供初始化按钮，只提示等待或当前不可用并刷新状态。在进程真正就绪之前不调用 Git 预检、版本创建或 default ensure，也不提前失效当前会话交互。进程就绪后，点击版本先调用 `GET /workspace-versions/{versionId}/git-access` 做只读权限预检；只有 `accessible=true` 才调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好并触发工作台切换。无仓库权限时前端展示对应版本库名称和申请指引，不创建 worktree。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
-- 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
+- 当前版本匹配规则只使用服务端稳定身份：优先使用最近工作区返回的 `versionId`，旧数据回退时仅按 `runtimeWorkspace.workspaceId` 精确匹配；禁止用根路径匹配。
 - 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 
 应用级"默认工作空间"解析规则（前端 `handleSelectApp` + `pickDefaultWorkspaceForApp`）：
@@ -4067,3 +4069,21 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 和常量时间比较；浏览器 token 过滤器只对该精确路径豁免。请求只包含目标 `linuxServerId` 和最多 50 个 `resendId`，入口通过
 `BackendJavaRouteResolver`、`BackendHttpForwarder` 固定路由到目标 Java，不扫描 Redis 路由快照、不本机降级。响应只有每条状态与
 安全错误码，不含 prompt、回答或供应商响应。
+# TCDS 需求导入（同源页面）
+
+> 本节接口由受登录守卫保护的 `/workspace-requirement-import` 页面使用。浏览器不接收 TCDS token、文档 URL、物理根路径或后端主机地址。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/requirement-import/applications` | 按当前登录主体的 `unifiedAuthId` 返回全部 TCDS 授权应用。 |
+| `GET` | `/api/v1/requirement-import/sub-items?appShortName=...&editionId=...` | 返回指定应用和月份版本的父子条目，不返回文档下载地址。 |
+
+应用项为 `{appName, appShortName}`；父条目为 `{itemNo, itemName, children:[{itemNo,itemName}]}`。Controller 不直接访问外部客户端，TCDS 访问和目录投影由应用服务完成。
+
+实际写入使用既有文件 WebSocket route/ticket：
+
+- `workspace.requirement-import` 请求仅包含 `{workspaceId, appShortName, editionId, selectedSubItemNos, requestId}`。服务端重新查询授权、名称、文档类型和 URL，拒绝共享只读、支持访问、体验工作区和源码快照。
+- 返回 `{status, createdDirectories, importedFiles, overwrittenFiles, failedFiles, failures}`，其中 `status` 为 `SUCCEEDED | PARTIAL | FAILED`，失败原因不含 URL、token、响应正文或绝对路径。
+- 不同来源规范化到同一目标文件时整单以稳定错误码 `PATH_COLLISION` 拒绝，响应只包含工作区相对目标路径；同一来源重复导入仍按覆盖语义处理。
+- `workspace.resolve-physical-path` 请求为 `{workspaceId,path}`，只在用户点击复制时解析一个现有普通文件；越界和符号链接失败关闭，分享、支持访问、体验和源码快照均拒绝。
+- 普通工作区、最近工作区和支持访问响应的 `rootPath` 固定为 `workspace:{workspaceId}`，`physicalRootPath` 为 `null`。超级管理员目录选择器响应以 `existingWorkspaceId` 标记已注册目录。

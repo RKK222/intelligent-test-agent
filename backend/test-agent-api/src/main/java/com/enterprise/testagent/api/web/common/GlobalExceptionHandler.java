@@ -39,7 +39,7 @@ public class GlobalExceptionHandler {
 
     /**
      * 处理参数绑定、校验和非法参数异常，统一映射为 VALIDATION_ERROR。
-     * 优先使用异常自身的消息，仅在消息为空时回退到默认错误说明。
+     * 不回显框架异常原文，避免 Host、请求头或内部类型出现在响应中。
      */
     @ExceptionHandler({
             ServerWebInputException.class,
@@ -51,38 +51,12 @@ public class GlobalExceptionHandler {
             Exception exception,
             ServerWebExchange exchange) {
         String traceId = traceIdFrom(exchange);
-        String message = extractValidationMessage(exception);
         ApiErrorResponse response = ApiErrorResponse.of(
                 ErrorCode.VALIDATION_ERROR,
-                firstNonBlank(message, ErrorCode.VALIDATION_ERROR.defaultMessage()),
+                "请求参数无效",
                 traceId,
                 Map.of());
         return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.httpStatus()).body(response);
-    }
-
-    /**
-     * 从各类验证异常中提取面向用户的安全错误信息。
-     */
-    private String extractValidationMessage(Exception exception) {
-        String rawMessage = exception.getMessage();
-        if (rawMessage != null && !rawMessage.isBlank()) {
-            // 精简 Spring 框架的长堆栈信息，只返回用户关心的字段错误
-            return rawMessage.lines()
-                    .filter(line -> !line.startsWith("org.") && !line.startsWith("\tat "))
-                    .findFirst()
-                    .orElse(rawMessage.lines().findFirst().orElse(rawMessage));
-        }
-        return null;
-    }
-
-    /**
-     * 返回第一个非空非空白字符串。
-     */
-    private static String firstNonBlank(String first, String fallback) {
-        if (first != null && !first.isBlank()) {
-            return first;
-        }
-        return fallback;
     }
 
     /**
