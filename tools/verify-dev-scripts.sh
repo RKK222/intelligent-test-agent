@@ -503,6 +503,15 @@ fi
 bash "${ROOT_DIR}/deploy/internal/validate-opencode-models.sh" \
   "${ROOT_DIR}/deploy/internal/opencode-models.json" \
   "${ROOT_DIR}/deploy/internal/opencode.jsonc.example"
+bash "${ROOT_DIR}/deploy/internal/verify-opencode-model-priority.sh" \
+  "${ROOT_DIR}/deploy/internal/opencode-models.json"
+deepseek_first_models_file="${tmp_dir}/deepseek-first-opencode-models.json"
+jq '.["enterprise-qwen"].models["Qwen3.6-27B"].release_date = "2026-08-05"' \
+  "${ROOT_DIR}/deploy/internal/opencode-models.json" >"${deepseek_first_models_file}"
+if bash "${ROOT_DIR}/deploy/internal/verify-opencode-model-priority.sh" \
+  "${deepseek_first_models_file}" >/dev/null 2>&1; then
+  fail "OpenCode models validator should reject a catalog that sorts DeepSeek before Qwen"
+fi
 drifted_public_config="${tmp_dir}/drifted-opencode.jsonc"
 jq '.provider["enterprise-deepseek"].models["DeepSeek-V4-Flash-W8A8"].limit.context = 65536' \
   "${ROOT_DIR}/deploy/internal/opencode.jsonc.example" >"${drifted_public_config}"
