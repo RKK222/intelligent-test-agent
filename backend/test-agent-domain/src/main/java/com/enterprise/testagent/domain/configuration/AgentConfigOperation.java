@@ -82,6 +82,26 @@ public record AgentConfigOperation(
                 now);
     }
 
+    /**
+     * 发布开始后才从受控共享仓库解析到目标分支时，补齐同一次操作的远端证据。
+     */
+    public AgentConfigOperation withBranch(String branch, Instant now) {
+        return new AgentConfigOperation(
+                operationId,
+                scope,
+                workspaceId,
+                action,
+                status,
+                currentStep,
+                errorCode,
+                errorMessage,
+                traceId,
+                branch,
+                commitHash,
+                createdAt,
+                now);
+    }
+
     public AgentConfigOperation succeeded(String commitHash, Instant now) {
         return new AgentConfigOperation(
                 operationId,

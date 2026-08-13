@@ -399,7 +399,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 
 公共 Git 刷新以远端分支解析出的 commit hash 为唯一目标，不把发起服务器当前 HEAD 当作目标。请求先聚合各服务器只读状态；共享运行副本存在 staged、unstaged 或 untracked 内容且未明确确认时返回 HTTP 409，安全 details 包含 `linuxServerIds`、`repositoryKind=SHARED_RUNTIME` 和 `discardLocalChangesAllowed=true`，且此时不会建立 rollout 或修改工作树。确认后先取得公共全局锁，再由各服务器 worker 将共享运行副本恢复并清理到目标 commit。确认只作用于共享运行副本；个人 worktree 永不 stash/reset/clean，而是执行原生 `git merge --no-edit <targetCommit>`，非重叠 staged、unstaged、untracked 内容原样保留。Git 判定会覆盖本地文件或产生真实冲突时，该 worktree 进入独立 `AWAITING_USER` 补偿，不能阻塞其它 worktree、共享副本或主 rollout。
 
-公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有有效公共个人 worktree；个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。每个服务器明细还以 additive 可选字段 `pendingTargets` 返回最多 200 个未进入 `DISPOSED/ABANDONED` 的目标，包含 `targetId/userId/username/containerId/port/processPid/processStartedAt/status/retryCount/nextRetryAt/lastError/forceStop/updatedAt`，按强制停止优先、下次重试时间和创建时间排序；不返回统一认证号、Session 内容或凭据。前端据此定位卡住用户，并按目标已有 `containerId + port` 复用运行管理停止 API，不新增专用停止入口。
+公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有当前稳定命名的有效公共个人 worktree；日期型或手工命名的历史 worktree 保留磁盘和数据库记录，但不再挂载、登记发布补偿或形成永久 `PENDING`，已存在的相应补偿任务会转为 `ABANDONED/WORKTREE_NO_LONGER_REUSABLE`。个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。每个服务器明细还以 additive 可选字段 `pendingTargets` 返回最多 200 个未进入 `DISPOSED/ABANDONED` 的目标，包含 `targetId/userId/username/containerId/port/processPid/processStartedAt/status/retryCount/nextRetryAt/lastError/forceStop/updatedAt`，按强制停止优先、下次重试时间和创建时间排序；不返回统一认证号、Session 内容或凭据。前端据此定位卡住用户，并按目标已有 `containerId + port` 复用运行管理停止 API，不新增专用停止入口。
 
 所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过 dispose、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，对这个用户专属 opencode 进程只调用一次 `POST /global/dispose`；明确返回布尔 `true` 才把目标置为 `DISPOSED`。该用户的全部目标完成后立即恢复发送，下一次请求重新创建 Instance 并加载已同步的 `opencode.jsonc`、Agent 和 Skill；不等待其他用户。manager 已明确确认目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在 dispose 完成前只阻止该用户发送。
 
@@ -420,6 +420,8 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 新批次登记目标时，只有用户、服务器、容器、端口、PID 和 manager 权威启动时间都与旧批次未排空目标一致的进程才标记 `forceStop=true`。这类目标跳过 `/session/status` 和会话空闲等待，复用 `OpencodeProcessStopService` 再次校验平台进程代次，以权威 UCID + PID 向本机 manager 下发 owned stop；manager 在普通终止超时后升级到强制终止，后端还需确认该实例 health 已不可达才写 `DISPOSED`。身份已变化、manager 快照不可用或停止结果不确定时继续重试，禁止按端口盲停替换实例。新批次中的其它进程仍走普通空闲检测与 `/global/dispose`。`GET /public/rollout` 以可选 additive 字段返回 `supersedesRolloutId`、`supersededByRolloutId` 和 `supersedeReason`，旧客户端可忽略。
 
 长操作进度：
+
+Agent 配置进度 WebSocket 与平台其它文件/进度 WebSocket 共用 `test-agent.security.cors-allowed-origins`。配置为精确列表时在消费一次性 ticket 前校验 Origin；本地 test profile 显式配置单值 `*` 时接受当前浏览器 Origin，但不会放宽一次性 ticket、operationId 绑定或过期校验。进度通道失败只影响旁路展示，提交/发布业务终态始终由对应 HTTP 响应和远端提交证据决定。
 
 | 方法/路径 | 用途 |
 |---|---|
@@ -1918,6 +1920,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
   "message": "已从个人 HEAD 投影并推送 feature 分支: abc123...",
   "remotePushed": true,
   "headCommit": "abc123...",
+  "remoteBranch": "main",
   "executedCommands": ["git fetch", "git checkout", "git commit", "git push"],
   "currentStep": "COMPLETED"
 }

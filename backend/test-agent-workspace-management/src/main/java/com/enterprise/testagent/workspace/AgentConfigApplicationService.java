@@ -1728,6 +1728,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                     config,
                     PublicRepositorySyncTarget.PERSONAL_WORKTREE);
             String branch = gitWorkspaceService.currentBranch(sharedRepoRoot);
+            progress.branch(branch);
             String previousCommitHash = gitWorkspaceService.headCommit(sharedRepoRoot);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
             gitWorkspaceService.fetch(personalRepoRoot, privateKey);
@@ -2025,6 +2026,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 null,
                 serverIdentity.linuxServerId(),
                 AgentConfigWorktreeStatus.ACTIVE)) {
+            // 日期型或手工命名的历史公共 worktree 已明确不再挂载，不能继续登记为永久重试任务。
+            // 它们的磁盘内容和数据库记录仍保留，只有当前用户稳定命名的 worktree 参与发布收敛。
+            if (!isReusablePublicWorktree(worktree, worktree.createdBy())) {
+                continue;
+            }
             String reason = mergeTargetIntoPublicWorktree(worktree, config, targetCommit, privateKey, identity);
             if (reason != null) {
                 pending.add(new PublicAgentConfigWorktreePending(
@@ -2102,6 +2108,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                     || !claim.userId().equals(worktree.createdBy().value())
                     || !serverIdentity.linuxServerId().equals(worktree.linuxServerId())) {
                 publicConfigRolloutCoordinator.abandonPublicWorktree(claim, "WORKTREE_NO_LONGER_ELIGIBLE");
+                return;
+            }
+            if (!isReusablePublicWorktree(worktree, worktree.createdBy())) {
+                publicConfigRolloutCoordinator.abandonPublicWorktree(claim, "WORKTREE_NO_LONGER_REUSABLE");
                 return;
             }
             UserId owner = worktree.createdBy();
@@ -3382,6 +3392,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         private void step(AgentConfigOperationStep step) {
             operation = agentConfigRepository.saveOperation(operation.step(step, now()));
             publish("step", operation);
+        }
+
+        private void branch(String branch) {
+            operation = agentConfigRepository.saveOperation(operation.withBranch(branch, now()));
+            publish("snapshot", operation);
         }
 
         private AgentConfigResponses.AgentConfigOperationResponse succeeded(String commitHash) {

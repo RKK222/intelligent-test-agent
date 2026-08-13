@@ -3735,6 +3735,8 @@ export type PublishPersonalWorkspaceResult = {
   message: string;
   remotePushed?: boolean;
   headCommit?: string | null;
+  /** 实际推送的应用 feature 分支；仅远端发布成功时返回。 */
+  remoteBranch?: string | null;
   executedCommands?: string[];
   currentStep?: "PREPARE_REMOTE" | "PROJECT_HEAD" | "COMMIT_FEATURE" | "PUSH_REMOTE" | "COMPLETED"
     | "COMMIT_LOCAL" | "MERGE_PERSONAL" | "MERGE_APPLICATION" | string | null;

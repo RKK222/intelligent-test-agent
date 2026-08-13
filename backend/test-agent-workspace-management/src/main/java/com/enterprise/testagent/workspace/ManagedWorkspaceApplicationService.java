@@ -2452,7 +2452,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         progress.step("COMPLETED");
         return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                 "PUBLISHED", personalWorkspaceId, version.versionId().value(), List.of(),
-                "已从个人 HEAD 投影并推送 feature 分支: " + headCommit, true, headCommit);
+                "已从个人 HEAD 投影并推送 feature 分支: " + headCommit,
+                true,
+                headCommit,
+                applicationBranch);
     }
 
     private void indexHubAfterSuccessfulPush(

@@ -338,3 +338,16 @@ docker logs <backend-container> 2>&1 | grep -E \
 | 可观测性 | 通过：每个 Git 案例核对 ref/HEAD/index，每个热加载案例用 R1→R2 同进程复查。 | 平台若增加 rollout 状态 API，应把 target、pending user 和最后一次 dispose 结果作为首选证据。 |
 | 数据隔离 | 通过：可执行 push 只指向 `.tmp` 本地 bare remote；真实 worktree 造数默认未提交且不 push。 | 使用真实平台正式发布案例前，执行人必须再次确认远程 URL 和测试 feature。 |
 | 回归与清理 | 通过：fixture 可直接删除；真实个人数据按唯一 tag 选择性回退，不处理其他用户 Diff。 | 执行结束在测试记录中保存 fixture README、关键 ref 和热加载前后清单作为证据。 |
+
+## 9. 本地平台真实端到端记录（2026-08-14）
+
+本轮在 `release` 的本地 test profile 和内网 GitLab 专用私有仓库上，通过平台 HTTP API 执行了四条链路；仓库仅用于验收，没有使用团队公共业务分支。浏览器同时登录 `http://127.0.0.1:3000`，确认工作台能加载对应测试应用和自动化工作区。
+
+| 链路 | 平台结果 | Git/运行态事实 |
+| --- | --- | --- |
+| 测试工作区个人 worktree 本地提交 | `LOCAL_COMMITTED`、`remotePushed=false` | 个人提交先生成 `24565915e8847736e66d15195841021d26aa6d34`；远端 feature 当时仍为 `bb3694cd455c6d3bd83f56954c96881666dfcd7d`，证明没有误推个人分支。后续应用发布反向同步后个人 HEAD 合入发布提交属于预期。 |
+| 测试工作区应用 worktree 提交推送 | `PUBLISHED`、`remotePushed=true`、`remoteBranch=feature_testagent_20260813` | 响应、应用副本 HEAD 和远端 feature 均为 `f3f6760477aa7dcf59c0c1780bd46b1deb0c773a`。 |
+| 自动化版本库个人 worktree 本地提交 | `LOCAL_COMMITTED`、`remotePushed=false` | 个人 HEAD 为 `9a45b196ab4d31a994fb57c95469026abaef3f03`；远端 `main` 保持 `ef1eeed2bd9781d7c5d83a477f559f4bcee0e908`。 |
+| 公共 Agent 提交并推送 | `SUCCEEDED`、远端分支 `master` | 修复并重启后从 `3000` 页面直接点击一次“提交并推送”，五步实时进度均为 `SUCCEEDED`，结果明确展示本地提交/远端推送各 1 个文件和远端 commit `d2c941e50854cba7be43bddf516dfc5af2246321`。最终远端 `master`、共享副本和稳定个人 worktree三者一致；rollout `acr_da1a7ff67b7a4be0b73dbd81ba7d13a5` 为 `COMPLETED`，`targetDisposed=1`、`targetPending=0`、`worktreePending=0`、`lastError=null`。dispose 后页面消息门禁重新开放。 |
+
+公共链路还保留一个日期型历史 worktree 用于兼容验证。重启后的旧补偿任务被安全终止；再次发布时该历史记录没有进入新 rollout，稳定 worktree 正常同步，证明不会再出现界面成功但后台长期保留 `PENDING` 的状态。UI 首轮复测发现本地 test profile 的 CORS 单值 `*` 未被 Agent 配置进度 WebSocket 识别，通道先返回无 `operationId` 的 `FORBIDDEN/origin denied`，而发布 HTTP 仍继续并最终成功；现已与文件、应用源码进度 WebSocket 对齐通配配置语义，并让前端将无 operationId 的握手拒绝只标记为“实时进度不可用”。使用新产物重启后三次页面发布（包含失败恢复和一步式提交推送）均未再出现来源拒绝、先失败后转圈或成功但无远端证据。
