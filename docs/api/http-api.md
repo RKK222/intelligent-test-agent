@@ -1719,7 +1719,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`GET /workspace-versions/{versionId}/git-access` 无请求体。后端复用当前登录用户唯一 SSH key、内部版本库统一认证号拼接和公共 Git 命令执行器，通过 `git ls-remote --heads` 做只读预检；不会 clone、fetch、创建 worktree 或写入最近使用偏好。成功响应示例：
+`GET /workspace-versions/{versionId}/git-access` 无请求体。后端复用当前登录用户唯一 SSH key、内部版本库统一认证号拼接和公共 Git 命令执行器，通过 `git ls-remote --heads` 做只读预检；不会 clone、fetch、创建 worktree 或写入最近使用偏好。应用成员关系仍在每次请求中实时校验；同一 Java 只对“用户 + 版本库 + 有效 URL 摘要 + SSH key ID/指纹”的成功预检缓存 10 分钟并合并同键并发请求，URL 或 key 身份变化立即重检，失败和基础设施异常不缓存。缓存有 4096 项上限且不保存私钥明文；远端直接撤销仓库成员权限时，最迟在缓存到期后的下一次预检中体现，真正 Git 操作仍由远端实时鉴权。成功响应示例：
 
 ```json
 {

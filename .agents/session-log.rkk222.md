@@ -10122,3 +10122,26 @@
 
 - VPN 开启状态下，本轮真实模型对话未复现 `unknown certificate verification error`；仍观察到上游连接偶发 `socket connection was closed unexpectedly`，SDK 重试后主对话成功，属于 VPN 节点或外部链路的剩余稳定性风险。
 - 本次未修改 `.env*`、API、RunEvent、数据库、migration、generated SDK 或 OpenCode 只读源码，也未降低安全校验。
+
+## 2026-08-13 - 缓存工作空间 Git 权限成功结果
+
+### Why
+
+- 工作空间每次切换版本都会重新执行远端 `git ls-remote --heads` 权限探测；在 Gitee 等外部链路上单次通常需要数秒，导致已验证版本库的重复切换明显变慢。
+
+### What
+
+- 在工作空间应用服务中增加进程内 Git 权限成功缓存和并发单飞：同一用户、版本库、有效仓库地址及 SSH 密钥身份的成功结果复用 10 分钟，失败结果不缓存，容量上限为 4096 条。
+- 每次请求仍实时校验平台成员关系并重新读取版本库和 SSH 密钥元数据；成员撤销、仓库地址变化或平台 SSH 密钥记录变化立即绕过旧缓存。缓存键只保留仓库地址摘要和密钥 ID/指纹，不保存私钥明文。
+- 同步 workspace README、HTTP API、模块地图和安全规范；未新增或修改路由、DTO、事件、数据库字段或 migration。
+
+### How
+
+- JDK 25 下定向运行工作空间服务测试 97/97，通过 599 秒命中、600 秒过期、仓库地址和密钥变化、平台成员撤销、失败不缓存及并发成功探测合并等覆盖。
+- AI 文档校验、差异空白检查、后端 22 模块完整打包、前端类型检查和生产构建均通过；使用 `./restart-dev-services.sh --profile test --env-file .env.test` 重启 release 本地服务，backend readiness 为 UP，frontend 返回 200。
+- 对真实 Bytebase 自动化代码库权限接口计时：冷请求 2.355 秒，紧随其后的缓存请求 0.029 秒，均返回 `accessible=true`。
+
+### Result
+
+- 同一自动化代码库在 10 分钟内重复切换不再反复等待远端权限探测；真实 clone/fetch/push 仍由 Git 远端实时鉴权，远端单独撤销权限时预检最迟在缓存到期后的下一次请求体现。
+- 页面级自动化可进入 F-COSS/ai-test，但测试账号的用户 OpenCode 文件路由曾返回既有 503，因此本轮切换性能以真实 HTTP 权限预检计时为准；release 修复后续仍需按分支规范同步回 dev。

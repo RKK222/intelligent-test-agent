@@ -64,10 +64,14 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -75,6 +79,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -110,6 +117,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private static final String PENDING_APPLICATION_COMMIT = "PENDING_APPLICATION_COMMIT";
     private static final Duration CONFIG_ROLLOUT_RECOVERY_DELAY = Duration.ofMinutes(3);
     private static final Duration CONFIG_ROLLOUT_ABORT_DELAY = Duration.ofMinutes(5);
+    private static final Duration GIT_ACCESS_SUCCESS_TTL = Duration.ofMinutes(10);
+    private static final int MAX_GIT_ACCESS_SUCCESS_CACHE_ENTRIES = 4096;
     private static final ServerBroadcastPublisher NOOP_BROADCAST_PUBLISHER = event -> { };
     private static final CommonParameterValues EMPTY_PARAMETER_VALUES = new CommonParameterValues() {
         @Override
@@ -154,8 +163,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
     private final AgentConfigProgressSink progressSink;
+    private final Clock clock;
     private final String broadcastInstanceId;
     private final Object defaultPersonalWorkspaceLock = new Object();
+    private final Object gitAccessSuccessCacheMaintenanceLock = new Object();
+    private final Map<GitAccessCacheKey, Instant> gitAccessSuccessCache = new ConcurrentHashMap<>();
+    private final Map<GitAccessCacheKey, CompletableFuture<Void>> gitAccessProbesInFlight = new ConcurrentHashMap<>();
     private ConversationContextStore conversationContextStore;
     private PublicAgentConfigRolloutCoordinator agentConfigRolloutCoordinator;
     private AgentSkillHubPushIndexer agentSkillHubPushIndexer;
@@ -302,6 +315,35 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 AgentConfigProgressSink.NOOP);
     }
 
+    /** 测试构造器：在既有 fake Git 注入入口上增加可控时钟。 */
+    ManagedWorkspaceApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            CommonParameterValues commonParameterValues,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            WorkspaceRepository workspaceRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyEncryptionService sshKeyEncryptionService,
+            WorkspaceServerIdentity serverIdentity,
+            ServerBroadcastPublisher broadcastPublisher,
+            Clock clock) {
+        this(
+                configurationRepository,
+                commonParameterValues,
+                NOOP_OPERATION_REPOSITORY,
+                managedWorkspaceRepository,
+                workspaceRepository,
+                userRepository,
+                gitRemoteService,
+                gitWorkspaceService,
+                sshKeyEncryptionService,
+                serverIdentity,
+                broadcastPublisher,
+                AgentConfigProgressSink.NOOP,
+                clock);
+    }
+
     ManagedWorkspaceApplicationService(
             ConfigurationManagementRepository configurationRepository,
             CommonParameterValues commonParameterValues,
@@ -342,6 +384,37 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
             AgentConfigProgressSink progressSink) {
+        this(
+                configurationRepository,
+                commonParameterValues,
+                workspaceCreateOperationRepository,
+                managedWorkspaceRepository,
+                workspaceRepository,
+                userRepository,
+                gitRemoteService,
+                gitWorkspaceService,
+                sshKeyEncryptionService,
+                serverIdentity,
+                broadcastPublisher,
+                progressSink,
+                Clock.systemUTC());
+    }
+
+    /** 测试入口允许注入时钟，生产固定使用 UTC 系统时钟。 */
+    ManagedWorkspaceApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            CommonParameterValues commonParameterValues,
+            WorkspaceCreateOperationRepository workspaceCreateOperationRepository,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            WorkspaceRepository workspaceRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyEncryptionService sshKeyEncryptionService,
+            WorkspaceServerIdentity serverIdentity,
+            ServerBroadcastPublisher broadcastPublisher,
+            AgentConfigProgressSink progressSink,
+            Clock clock) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.pathResolver = new ManagedWorkspacePathResolver(this.commonParameterValues);
@@ -356,6 +429,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.broadcastPublisher = Objects.requireNonNull(broadcastPublisher, "broadcastPublisher must not be null");
         this.progressSink = progressSink == null ? AgentConfigProgressSink.NOOP : progressSink;
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.broadcastInstanceId = this.broadcastPublisher.instanceId();
     }
 
@@ -410,9 +484,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 version.version()));
         CodeRepository repository = existingRepository(version.repositoryId());
         try {
-            gitRemoteService.listBranches(
-                    effectiveGitUrl(repository, userId),
-                    privateKeyFor(repository, userId));
+            GitAccessProbe probe = gitAccessProbe(repository, userId);
+            if (!hasFreshGitAccessSuccess(probe.cacheKey())) {
+                probeGitAccessOnce(probe);
+            }
             return gitRepositoryAccessResponse(version, repository, true, null);
         } catch (PlatformException exception) {
             if (exception.errorCode() == ErrorCode.FORBIDDEN) {
@@ -425,6 +500,114 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 return gitRepositoryAccessResponse(version, repository, false, "REPOSITORY_PERMISSION_REQUIRED");
             }
             throw exception;
+        }
+    }
+
+    /**
+     * 同一 JVM 内对当前用户、版本库地址和 SSH key 身份做成功结果短缓存。
+     * 成员关系仍在进入本方法前实时校验；失败结果不缓存，避免权限开通后继续命中旧拒绝。
+     */
+    private void probeGitAccessOnce(GitAccessProbe probe) {
+        CompletableFuture<Void> candidate = new CompletableFuture<>();
+        CompletableFuture<Void> existing = gitAccessProbesInFlight.putIfAbsent(probe.cacheKey(), candidate);
+        if (existing != null) {
+            awaitGitAccessProbe(existing);
+            return;
+        }
+        try {
+            if (!hasFreshGitAccessSuccess(probe.cacheKey())) {
+                String privateKey = probe.sshKey() == null ? null : decryptSshKey(probe.sshKey());
+                gitRemoteService.listBranches(probe.effectiveGitUrl(), privateKey);
+                rememberGitAccessSuccess(probe.cacheKey());
+            }
+            candidate.complete(null);
+        } catch (RuntimeException | Error failure) {
+            candidate.completeExceptionally(failure);
+            throw failure;
+        } finally {
+            gitAccessProbesInFlight.remove(probe.cacheKey(), candidate);
+        }
+    }
+
+    /** 等待同键探测并保留原始平台异常类型，确保调用方继续使用既有错误映射。 */
+    private void awaitGitAccessProbe(CompletableFuture<Void> inFlight) {
+        try {
+            inFlight.join();
+        } catch (CompletionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw exception;
+        }
+    }
+
+    private boolean hasFreshGitAccessSuccess(GitAccessCacheKey cacheKey) {
+        Instant expiresAt = gitAccessSuccessCache.get(cacheKey);
+        Instant now = clock.instant();
+        if (expiresAt != null && expiresAt.isAfter(now)) {
+            return true;
+        }
+        if (expiresAt != null) {
+            gitAccessSuccessCache.remove(cacheKey, expiresAt);
+        }
+        return false;
+    }
+
+    /** 只在远端访问成功后写入，并通过固定容量避免高基数用户/仓库组合无限增长。 */
+    private void rememberGitAccessSuccess(GitAccessCacheKey cacheKey) {
+        synchronized (gitAccessSuccessCacheMaintenanceLock) {
+            Instant now = clock.instant();
+            gitAccessSuccessCache.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
+            if (!gitAccessSuccessCache.containsKey(cacheKey)
+                    && gitAccessSuccessCache.size() >= MAX_GIT_ACCESS_SUCCESS_CACHE_ENTRIES) {
+                gitAccessSuccessCache.entrySet().stream()
+                        .min(Map.Entry.comparingByValue())
+                        .ifPresent(entry -> gitAccessSuccessCache.remove(entry.getKey(), entry.getValue()));
+            }
+            gitAccessSuccessCache.put(cacheKey, now.plus(GIT_ACCESS_SUCCESS_TTL));
+        }
+    }
+
+    /**
+     * 每次请求都重新读取用户、仓库和 SSH key 元数据；缓存键不保存私钥明文。
+     * URL 或 key 记录/指纹变化会自然形成新键并强制重新访问远端。
+     */
+    private GitAccessProbe gitAccessProbe(CodeRepository repository, UserId userId) {
+        String effectiveGitUrl = effectiveGitUrl(repository, userId);
+        if (!repository.internalDeployment() && !requiresSshKey(repository.gitUrl())) {
+            return new GitAccessProbe(
+                    new GitAccessCacheKey(
+                            userId.value(),
+                            repository.repositoryId().value(),
+                            sha256Identity(effectiveGitUrl),
+                            null,
+                            null),
+                    effectiveGitUrl,
+                    null);
+        }
+        UserSshKey sshKey = currentSshKey(userId);
+        return new GitAccessProbe(
+                new GitAccessCacheKey(
+                        userId.value(),
+                        repository.repositoryId().value(),
+                        sha256Identity(effectiveGitUrl),
+                        sshKey.sshKeyId().value(),
+                        sshKey.fingerprint()),
+                effectiveGitUrl,
+                sshKey);
+    }
+
+    /** URL 只以不可逆摘要进入内存缓存键，避免凭据型 URL 被长时间保留。 */
+    private String sha256Identity(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
         }
     }
 
@@ -4920,10 +5103,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         if (!repository.internalDeployment() && !requiresSshKey(repository.gitUrl())) {
             return null;
         }
-        UserSshKey sshKey = configurationRepository.findSshKeys(userId).stream()
+        return decryptSshKey(currentSshKey(userId));
+    }
+
+    private UserSshKey currentSshKey(UserId userId) {
+        return configurationRepository.findSshKeys(userId).stream()
                 .findFirst()
                 .orElseThrow(() -> new PlatformException(ErrorCode.FORBIDDEN, "当前用户未配置 SSH key"));
+    }
 
+    private String decryptSshKey(UserSshKey sshKey) {
         if (sshKey.encryptedAesKey() == null || sshKey.encryptedAesKey().isBlank()) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR,
                     "SSH key 使用的旧版加密格式，请重新添加",
@@ -5227,6 +5416,21 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     private static String sanitizeBranchPart(String value) {
         return sanitizePathPart(value);
+    }
+
+    /** 成功缓存只保存非敏感身份摘要，不保存 SSH 私钥明文。 */
+    private record GitAccessCacheKey(
+            String userId,
+            String repositoryId,
+            String gitUrlSha256,
+            String sshKeyId,
+            String sshKeyFingerprint) {
+    }
+
+    private record GitAccessProbe(
+            GitAccessCacheKey cacheKey,
+            String effectiveGitUrl,
+            UserSshKey sshKey) {
     }
 
     private static final class WorkspaceCreateProgress {
