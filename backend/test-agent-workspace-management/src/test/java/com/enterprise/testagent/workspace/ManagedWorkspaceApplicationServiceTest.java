@@ -67,12 +67,19 @@ import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -145,6 +152,175 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void versionGitAccessCheckCachesOnlySuccessfulRemoteProbeForTenMinutes() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_cache");
+        AtomicInteger probes = new AtomicInteger();
+        GitRemoteService remote = new GitRemoteService() {
+            @Override
+            public List<String> listBranches(String gitUrl, String privateKey) {
+                probes.incrementAndGet();
+                return List.of("feature_testagent_20260707");
+            }
+        };
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-13T00:00:00Z"));
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                configuration, managed, workspaces, git, remote, clock);
+
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        assertThat(probes).hasValue(1);
+
+        clock.advanceSeconds(599);
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        assertThat(probes).hasValue(1);
+
+        clock.advanceSeconds(1);
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        assertThat(probes).hasValue(2);
+    }
+
+    @Test
+    void versionGitAccessCheckChangesCacheIdentityWhenSshKeyChanges() {
+        UserId userId = new UserId("usr_1");
+        UserSshKey firstKey = sshKeyFixtures.encryptedSshKey(
+                new SshKeyId("ssh_first"), userId, "first", PRIVATE_KEY, Instant.parse("2026-08-13T00:00:00Z"));
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "ssh://git@example.com/team/gcms.git",
+                "gcms/gcms",
+                "gcms",
+                true,
+                Instant.now(),
+                Instant.now());
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true, repository, List.of(firstKey));
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, userId, "trace_version_access_key_cache");
+        AtomicInteger probes = new AtomicInteger();
+        GitRemoteService remote = countingRemote(probes);
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                configuration, managed, workspaces, git, remote, Clock.systemUTC());
+
+        service.checkVersionGitAccess(version.versionId(), userId);
+        service.checkVersionGitAccess(version.versionId(), userId);
+        assertThat(probes).hasValue(1);
+
+        UserSshKey replacementKey = sshKeyFixtures.encryptedSshKey(
+                new SshKeyId("ssh_replacement"),
+                userId,
+                "replacement",
+                PRIVATE_KEY + "replacement",
+                Instant.parse("2026-08-13T00:01:00Z"));
+        configuration.replaceSshKeys(List.of(replacementKey));
+        service.checkVersionGitAccess(version.versionId(), userId);
+        assertThat(probes).hasValue(2);
+    }
+
+    @Test
+    void versionGitAccessCheckChangesCacheIdentityWhenRepositoryUrlChanges() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_url_cache");
+        AtomicInteger probes = new AtomicInteger();
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                configuration, managed, workspaces, git, countingRemote(probes), Clock.systemUTC());
+
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        assertThat(probes).hasValue(1);
+
+        CodeRepository changedUrl = new CodeRepository(
+                configuration.repository.repositoryId(),
+                "https://mirror.example.com/gcms.git",
+                configuration.repository.name(),
+                configuration.repository.englishName(),
+                configuration.repository.repositoryType(),
+                configuration.repository.deploymentMode(),
+                configuration.repository.standard(),
+                configuration.repository.createdAt(),
+                Instant.now());
+        configuration.replaceRepository(changedUrl);
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        assertThat(probes).hasValue(2);
+    }
+
+    @Test
+    void versionGitAccessCheckStillRejectsRevokedMemberDuringSuccessCacheWindow() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_member_cache");
+        AtomicInteger probes = new AtomicInteger();
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                configuration, managed, workspaces, git, countingRemote(probes), Clock.systemUTC());
+
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        configuration.setMember(false);
+
+        assertThatThrownBy(() -> service.checkVersionGitAccess(version.versionId(), new UserId("usr_1")))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThat(probes).hasValue(1);
+    }
+
+    @Test
+    void concurrentVersionGitAccessChecksShareOneSuccessfulRemoteProbe() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_concurrent");
+        AtomicInteger probes = new AtomicInteger();
+        CountDownLatch probeStarted = new CountDownLatch(1);
+        CountDownLatch releaseProbe = new CountDownLatch(1);
+        GitRemoteService remote = new GitRemoteService() {
+            @Override
+            public List<String> listBranches(String gitUrl, String privateKey) {
+                probes.incrementAndGet();
+                probeStarted.countDown();
+                try {
+                    if (!releaseProbe.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("probe release timeout");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                return List.of("feature_testagent_20260707");
+            }
+        };
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                configuration, managed, workspaces, git, remote, Clock.systemUTC());
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> service.checkVersionGitAccess(version.versionId(), new UserId("usr_1")));
+            assertThat(probeStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            var second = executor.submit(() -> service.checkVersionGitAccess(version.versionId(), new UserId("usr_1")));
+            releaseProbe.countDown();
+            assertThat(first.get(5, TimeUnit.SECONDS).accessible()).isTrue();
+            assertThat(second.get(5, TimeUnit.SECONDS).accessible()).isTrue();
+        }
+        assertThat(probes).hasValue(1);
+    }
+
+    @Test
     void versionGitAccessCheckMapsAuthenticationFailureToPermissionApplication() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -153,9 +329,11 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
                 "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_denied");
+        AtomicInteger probes = new AtomicInteger();
         GitRemoteService deniedRemote = new GitRemoteService() {
             @Override
             public List<String> listBranches(String gitUrl, String privateKey) {
+                probes.incrementAndGet();
                 throw new PlatformException(
                         ErrorCode.GIT_UNAVAILABLE,
                         "Git 远端认证失败",
@@ -171,6 +349,9 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(response.accessible()).isFalse();
         assertThat(response.reason()).isEqualTo("REPOSITORY_PERMISSION_REQUIRED");
         assertThat(response.repositoryName()).isEqualTo("gcms/gcms");
+
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        assertThat(probes).hasValue(2);
     }
 
     @Test
@@ -3619,6 +3800,17 @@ class ManagedWorkspaceApplicationServiceTest {
             FakeWorkspaceRepository workspaces,
             FakeGitWorkspaceService git,
             GitRemoteService gitRemoteService) {
+        return serviceWithGitRemote(
+                configuration, managed, workspaces, git, gitRemoteService, Clock.systemUTC());
+    }
+
+    private ManagedWorkspaceApplicationService serviceWithGitRemote(
+            FakeConfigurationRepository configuration,
+            FakeManagedWorkspaceRepository managed,
+            FakeWorkspaceRepository workspaces,
+            FakeGitWorkspaceService git,
+            GitRemoteService gitRemoteService,
+            Clock clock) {
         return new ManagedWorkspaceApplicationService(
                 configuration,
                 commonParameters(),
@@ -3629,7 +3821,18 @@ class ManagedWorkspaceApplicationServiceTest {
                 git,
                 sshKeyFixtures.encryptionService(),
                 new WorkspaceServerIdentity("127.0.0.1"),
-                new RecordingBroadcastPublisher());
+                new RecordingBroadcastPublisher(),
+                clock);
+    }
+
+    private GitRemoteService countingRemote(AtomicInteger probes) {
+        return new GitRemoteService() {
+            @Override
+            public List<String> listBranches(String gitUrl, String privateKey) {
+                probes.incrementAndGet();
+                return List.of("feature_testagent_20260707");
+            }
+        };
     }
 
     private Path applicationRepoRoot() {
@@ -3692,6 +3895,33 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void publish(ServerBroadcastEvent event) {
             events.add(event);
+        }
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant now;
+
+        private MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        private void advanceSeconds(long seconds) {
+            now = now.plusSeconds(seconds);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return zone.equals(ZoneOffset.UTC) ? this : Clock.fixed(now, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
         }
     }
 
@@ -4121,10 +4351,10 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     private static final class FakeConfigurationRepository implements ConfigurationManagementRepository {
-        private final boolean member;
+        private boolean member;
         private final ApplicationDefinition app;
-        private final CodeRepository repository;
-        private final List<UserSshKey> sshKeys;
+        private CodeRepository repository;
+        private List<UserSshKey> sshKeys;
         private final ApplicationWorkspace workspace;
         private final List<ApplicationWorkspace> savedWorkspaces = new ArrayList<>();
         private final List<ApplicationWorkspaceId> deletedWorkspaceIds = new ArrayList<>();
@@ -4246,6 +4476,18 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override public Optional<UserSshKey> findSshKey(UserId userId, SshKeyId sshKeyId) { return Optional.empty(); }
         @Override public UserSshKey saveSshKey(UserSshKey sshKey) { return sshKey; }
         @Override public void deleteSshKey(UserId userId, SshKeyId sshKeyId) {}
+
+        private void setMember(boolean member) {
+            this.member = member;
+        }
+
+        private void replaceSshKeys(List<UserSshKey> sshKeys) {
+            this.sshKeys = List.copyOf(sshKeys);
+        }
+
+        private void replaceRepository(CodeRepository repository) {
+            this.repository = repository;
+        }
     }
 
     private static final class FakeManagedWorkspaceRepository implements ManagedWorkspaceRepository {
