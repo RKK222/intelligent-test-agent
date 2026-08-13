@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-08-13 - 按部署边界整合 release 到 dev
+
+### Why
+
+- 用户确认自动化代码库、宠物游戏和 E2E 数据等无需新增服务即可部署的能力保留在 release；Mem0、embedding 和本地 OpenCode client 等大功能先只进入 dev，并默认关闭。
+
+### What
+
+- dev 依次吸收 release 最新的自动化代码库、宠物随机难度和对话/工作空间 E2E 数据提交，并记录清理后的 release 为合并父节点。
+- dev 保留既有 memory-service、embedding-service、本地客户端和 LobeHub 资产，独立 Workflow 继续保持删除状态。
+
+### How
+
+- 对三个 release 业务提交逐个 cherry-pick，以避免删除 Workflow 时的历史重命名检测误删 memory/embedding；确认树内容后使用 ours 合并记录 release 完整祖先关系。
+- 通过精确残留扫描、分支祖先检查、默认开关检查、前后端构建和相关回归测试验证组合结果。
+
+### Result
+
+- release 可独立部署且无需启动 Mem0/embedding/client；dev 同时包含 release、Mem0 和 client 历史，LobeHub 与 memory 默认关闭。
+
 ### 2026-08-12 - 从主线移除独立 Workflow 能力
 
 ### Why
