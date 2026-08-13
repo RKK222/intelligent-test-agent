@@ -12123,6 +12123,7 @@ function versionSelectionWorkspaceSetup() {
         workspaceName: "F-GCMS 主服务",
         appId: "app_gcms",
         repositoryId: "repo_1",
+        repositoryType: "TEST_WORK_REPOSITORY",
         defaultBranch: "main",
         createdAt: "2026-06-24T00:00:00Z",
         updatedAt: "2026-06-24T00:00:00Z"
