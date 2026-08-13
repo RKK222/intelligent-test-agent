@@ -145,6 +145,13 @@ async function copyPath(textToCopy: string) {
 
 // 双端过滤保证旧后端响应仍可使用：只有显式停用的配置不展示。
 const templates = computed(() => (props.templates ?? []).filter((template) => template.enabled !== false));
+const automationTemplates = computed(() => templates.value.filter(
+  (template) => template.repositoryType === "AUTOMATION_CODE_REPOSITORY"
+));
+// repositoryType 为新增响应字段；旧后端返回仍按原菜单语义归入测试工作空间。
+const testTemplates = computed(() => templates.value.filter(
+  (template) => template.repositoryType !== "AUTOMATION_CODE_REPOSITORY"
+));
 // 当前应用关联的版本库全部在菜单中直列：已下载项打开快照，未下载项以灰色入口进入管理页。
 const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
 
@@ -159,7 +166,7 @@ const useCascadeMenu = computed(() =>
   Boolean(props.loadingTemplates))
 );
 
-// 应用代码库与应用测试工作空间共用同一个入口；服务器工作空间属于超级管理员能力，
+// 应用代码库、自动化代码库与应用测试工作空间共用同一个入口；服务器工作空间属于超级管理员能力，
 // 必须继续使用独立按钮，不能混入应用级工作空间菜单。
 const useWorkspaceSwitchMenu = computed(() =>
   props.workspaceKind !== "EXPERIENCE"
@@ -553,7 +560,7 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
           type="button"
           class="ta-workbench-footer-branch"
           data-onboarding="workspace-selector"
-          aria-label="切换应用代码库或测试工作空间"
+          aria-label="切换应用代码库、自动化代码库或测试工作空间"
           :title="triggerTitle"
           :aria-expanded="menuOpen"
           aria-haspopup="menu"
@@ -647,10 +654,35 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
                 </li>
               </ul>
             </template>
-            <div v-if="useCascadeMenu" class="ta-workbench-cascade-section-title">测试工作空间</div>
-            <ul v-if="useCascadeMenu" class="ta-workbench-cascade-list" role="none">
+            <div v-if="automationTemplates.length > 0" class="ta-workbench-cascade-section-title">自动化代码库</div>
+            <ul v-if="automationTemplates.length > 0" class="ta-workbench-cascade-list" role="none">
               <li
-                v-for="template in templates"
+                v-for="template in automationTemplates"
+                :key="template.workspaceId"
+                :class="[
+                  'ta-workbench-cascade-item',
+                  hoveredTemplateId === template.workspaceId && 'is-hovered',
+                  template.versions?.some((v) => v.versionId === selectedVersionId) && 'is-selected'
+                ]"
+                role="menuitem"
+                :aria-haspopup="true"
+                @mouseenter="onTemplateEnter(template, $event)"
+                @mouseleave="onTemplateLeave"
+              >
+                <CodeXml
+                  class="ta-workbench-footer-icon ta-workbench-cascade-workspace-icon"
+                  aria-hidden="true"
+                />
+                <div class="ta-workbench-cascade-item-main">
+                  <span class="ta-workbench-cascade-item-name">{{ template.workspaceName }}</span>
+                </div>
+                <span class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
+              </li>
+            </ul>
+            <div v-if="testTemplates.length > 0" class="ta-workbench-cascade-section-title">测试工作空间</div>
+            <ul v-if="testTemplates.length > 0" class="ta-workbench-cascade-list" role="none">
+              <li
+                v-for="template in testTemplates"
                 :key="template.workspaceId"
                 :class="[
                   'ta-workbench-cascade-item',

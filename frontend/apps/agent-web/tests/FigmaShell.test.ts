@@ -1094,9 +1094,16 @@ describe("FigmaShell", () => {
       .find((item) => item.text().includes("批量回归"));
     expect(workspaceBItem).toBeTruthy();
     await workspaceBItem!.trigger("mousedown");
+    // 顶部显示以父层实际完成的切换为准，避免菜单先显示新工作区而左侧仍是旧目录。
+    expect(workspaceButton.text()).toContain("核心服务");
+    expect(versionButton.text()).toContain("20260701");
+    expect(wrapper.emitted("select-version")?.[0]?.[0]).toEqual({ template: workspaceB, version: latestWorkspaceBVersion });
+    await wrapper.setProps({
+      selectedWorkspaceTemplateId: workspaceB.workspaceId,
+      selectedVersionId: latestWorkspaceBVersion.versionId
+    } as any);
     expect(workspaceButton.text()).toContain("批量回归");
     expect(versionButton.text()).toContain("20260715");
-    expect(wrapper.emitted("select-version")?.[0]?.[0]).toEqual({ template: workspaceB, version: latestWorkspaceBVersion });
 
     await versionButton.trigger("click");
     const versionBItem = wrapper.findAll(".figma-version-menu-wrapper .figma-app-menu-item")
@@ -1117,14 +1124,20 @@ describe("FigmaShell", () => {
       appTemplates: [workspaceA, workspaceB, { ...workspaceC, versions: [latestWorkspaceCVersion] }]
     } as any);
     await wrapper.vm.$nextTick();
-    expect(versionButton.text()).toContain("20260731");
+    expect(versionButton.text()).toContain("20260715");
     expect(wrapper.emitted("select-version")?.[2]?.[0]).toEqual({
       template: expect.objectContaining({ workspaceId: "workspace-c" }),
       version: latestWorkspaceCVersion
     });
+    await wrapper.setProps({
+      selectedWorkspaceTemplateId: workspaceC.workspaceId,
+      selectedVersionId: latestWorkspaceCVersion.versionId
+    } as any);
+    expect(workspaceButton.text()).toContain("待加载空间");
+    expect(versionButton.text()).toContain("20260731");
   });
 
-  it("groups app code repositories and test workspaces in the header workspace menu", async () => {
+  it("groups app code repositories, automation repositories, and test workspaces in the header workspace menu", async () => {
     const downloadedRepository = {
       repositoryId: "repo-code",
       name: "应用代码库",
@@ -1160,11 +1173,19 @@ describe("FigmaShell", () => {
       enabled: true,
       versions: [{ versionId: "version-test", version: "20260731", branch: "feature/test" }]
     };
+    const automationWorkspace = {
+      ...testWorkspace,
+      workspaceId: "workspace-automation",
+      workspaceName: "接口自动化",
+      repositoryType: "AUTOMATION_CODE_REPOSITORY",
+      branch: "main",
+      versions: [{ versionId: "version-automation", version: "20260813", branch: "main" }]
+    };
     const wrapper = mountShell({
       props: {
         showAppSource: true,
         appSourceRepositories: [downloadedRepository, notDownloadedRepository, unavailableRepository],
-        appTemplates: [testWorkspace],
+        appTemplates: [testWorkspace, automationWorkspace],
         selectedWorkspaceTemplateId: testWorkspace.workspaceId,
         selectedVersionId: "version-test"
       } as any
@@ -1177,7 +1198,8 @@ describe("FigmaShell", () => {
     const sectionTitles = wrapper.findAll(".figma-context-menu-section-title");
     expect(sectionTitles[0].text()).toContain("应用代码库");
     expect(sectionTitles[0].text()).toContain("管理");
-    expect(sectionTitles[1].text()).toBe("测试工作空间");
+    expect(sectionTitles[1].text()).toBe("自动化代码库");
+    expect(sectionTitles[2].text()).toBe("测试工作空间");
     expect(sectionTitles.every((title) => title.find(".figma-context-menu-type-icon").exists())).toBe(true);
     expect(wrapper.get('[aria-label="管理尚未拉取源码"]').classes()).toContain("is-not-downloaded");
     expect(wrapper.get('[aria-label="管理尚未拉取源码"]').attributes("disabled")).toBeUndefined();
@@ -1185,6 +1207,8 @@ describe("FigmaShell", () => {
     expect(wrapper.get('[aria-label="打开副本未就绪源码"]').attributes("title")).toBe("当前服务器副本未就绪");
     expect(wrapper.findAll(".figma-workspace-menu-wrapper .figma-app-menu-item")
       .some((item) => item.text().includes("测试工作空间"))).toBe(true);
+    expect(wrapper.findAll(".figma-workspace-menu-wrapper .figma-app-menu-item")
+      .some((item) => item.text().includes("接口自动化"))).toBe(true);
 
     await wrapper.get('[aria-label="管理尚未拉取源码"]').trigger("mousedown");
     expect(wrapper.emitted("manage-app-source-repository")?.[0]).toEqual([notDownloadedRepository]);

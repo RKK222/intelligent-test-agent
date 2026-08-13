@@ -3147,12 +3147,23 @@ test("application source snapshot opens a logical workspace and enforces source 
     versionId: "awv_2024_01",
     applicationWorkspaceId: "awp_main"
   };
+  const managedSelection = versionSelectionWorkspaceSetup();
+  managedSelection.workspaceTemplates.app_gcms.push({
+    workspaceId: "awp_automation",
+    workspaceName: "接口自动化",
+    appId: "app_gcms",
+    repositoryId: "repo_automation",
+    repositoryType: "AUTOMATION_CODE_REPOSITORY",
+    defaultBranch: "main",
+    createdAt: "2026-08-13T00:00:00Z",
+    updatedAt: "2026-08-13T00:00:00Z"
+  });
   await mockBackendApi(page, {
     appSourceRequests,
     clearedRecentAppSource,
     gitAccessRequests,
     defaultPersonalRequests,
-    ...versionSelectionWorkspaceSetup(),
+    ...managedSelection,
     gitDiffRequests,
     appSourceMaterializationRequests,
     fileWriteRequests,
@@ -3276,7 +3287,7 @@ test("application source snapshot opens a logical workspace and enforces source 
   await expect(fileExplorer.getByText("无 Git", { exact: true })).toBeVisible();
   await expect(fileExplorer.getByRole("button", { name: "变更" })).toHaveCount(0);
   await expect(fileExplorer.getByText("Agents", { exact: true })).toHaveCount(0);
-  const sourceWorkspaceSwitch = fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" });
+  const sourceWorkspaceSwitch = fileExplorer.getByRole("button", { name: "切换应用代码库、自动化代码库或测试工作空间" });
   await expect(sourceWorkspaceSwitch).toBeVisible();
   await sourceWorkspaceSwitch.click();
   await expect(page.getByRole("menu").locator(".ta-workbench-cascade-source-title").getByText("应用代码库", { exact: true }))
@@ -3320,6 +3331,8 @@ test("application source snapshot opens a logical workspace and enforces source 
 
   // 源码快照中直接从顶部选择测试工作空间，不再要求先操作左下角“返回应用工作区”。
   await page.getByTestId("header-workspace-selector").click();
+  await expect(page.locator(".figma-context-menu-section-title").filter({ hasText: "自动化代码库" })).toBeVisible();
+  await expect(page.getByRole("option").filter({ hasText: "接口自动化" })).toBeVisible();
   await page.getByRole("option").filter({ hasText: "F-GCMS 主服务" }).click();
   await expect(fileExplorer.getByRole("button", { name: "变更" })).toBeVisible();
   await expect(fileExplorer.getByText("源码快照", { exact: true })).toHaveCount(0);
@@ -4182,6 +4195,37 @@ test("starting a managed version immediately invalidates a source open that has 
   await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toHaveCount(0);
   await expect(page.locator(".figma-file-explorer").getByRole("button", { name: "变更" })).toBeVisible();
   expect(fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId).toBe("wrk_personal_default");
+});
+
+test("reselecting the current managed version refreshes the left file tree", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const personalWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_personal_default",
+    name: "default",
+    rootPath: "/Users/huang/workspace/personal-default",
+    appId: "app_gcms",
+    versionId: "awv_20260715",
+    applicationWorkspaceId: "awp_1"
+  };
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    fileRequests,
+    workspaces: [workspace(), personalWorkspace]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await expect.poll(() => fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId)
+    .toBe("wrk_personal_default");
+  fileRequests.length = 0;
+
+  await callAgentWorkbenchHandler(page, "handleSelectVersion", [{
+    template: agentWorkspaceSetup().workspaceTemplates.app_gcms[0],
+    version: agentWorkspaceSetup().workspaceVersions["app_gcms:awp_1"][0]
+  }]);
+
+  await expect.poll(() => fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId)
+    .toBe("wrk_personal_default");
 });
 
 test("DiffViewer save emit reaches the managed Agent writer behind the capability guard", async ({ page }) => {
@@ -11952,21 +11996,21 @@ async function openAgentsPanel(page: Page) {
 /** 通过统一工作空间入口打开源码管理弹窗，覆盖首次下载和更新等管理流程。 */
 async function openAppSourceFromWorkspaceSwitch(page: Page) {
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" }).click();
+  await fileExplorer.getByRole("button", { name: "切换应用代码库、自动化代码库或测试工作空间" }).click();
   await page.getByRole("menu").getByRole("button", { name: "管理应用代码库" }).click();
 }
 
 /** 菜单直列源码版本库；点击指定版本库必须直接打开，不经过源码选择弹窗。 */
 async function openAppSourceRepositoryFromWorkspaceSwitch(page: Page, repositoryName: string) {
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" }).click();
+  await fileExplorer.getByRole("button", { name: "切换应用代码库、自动化代码库或测试工作空间" }).click();
   await page.getByRole("menu").getByRole("button", { name: `打开${repositoryName}源码` }).click();
 }
 
 /** 未下载版本库在菜单中保持灰色可点击，点击后直接进入并选中对应管理项。 */
 async function openAppSourceManagementForRepository(page: Page, repositoryName: string) {
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" }).click();
+  await fileExplorer.getByRole("button", { name: "切换应用代码库、自动化代码库或测试工作空间" }).click();
   await page.getByRole("menu").getByRole("button", { name: `管理${repositoryName}源码` }).click();
 }
 

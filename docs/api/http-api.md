@@ -1558,7 +1558,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/git-refresh-scopes` | 应用管理员查询有权管理且已形成实际 feature 分支组的应用及其工作空间、版本和分支；超级管理员查询全量。 |
 | `POST` | `/applications/{appId}/git-refresh` | 应用管理员按授权应用刷新全部物理 feature 仓库组，并触发相关个人 worktree 与应用 Agent 配置安全收敛。 |
 | `POST` | `/applications/{appId}/git-refresh-groups` | 应用管理员按 `repositoryId + version + branch` 精确刷新授权应用的一个物理 feature 仓库组及其关联 worktree。 |
-| `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
+| `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置；每项增量返回关联版本库 `repositoryType`，旧 `standard` 字段继续保留。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
 | `POST` | `/workspace-versions/{versionId}/git-pull` | 已停用的版本级拉取兼容入口；返回 `VALIDATION_ERROR`，不会修改共享版本、个人 worktree 或触发广播。 |
@@ -1921,9 +1921,11 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 
 `currentStep` 取值为 `PREPARE_REMOTE`、`PROJECT_HEAD`、`COMMIT_FEATURE`、`PUSH_REMOTE`、`COMPLETED`。本地提交响应的 `status=LOCAL_COMMITTED`、`remotePushed=false`；发布响应只有 feature 分支 `git push` 成功并读取发布后的 HEAD 后才返回 `status=PUBLISHED`、`remotePushed=true`。前端未收到 `remotePushed=true` 时不得展示推送成功。发布接口抛出统一错误时，`details.failedStep` 和 `details.executedCommands` 会尽量返回失败前已进入的 Git 阶段和已执行命令。
 
+`GET /applications/{appId}/workspace-templates` 的每个模板在既有字段上增量返回 `repositoryType`，例如自动化代码库为 `AUTOMATION_CODE_REPOSITORY`；`standard` 继续按旧兼容语义返回且自动化代码库固定为 `false`。滚动升级期间前端允许旧后端缺少 `repositoryType`，并按原测试工作空间分组展示。
+
 前端两级菜单（应用工作空间→版本）使用说明：
 
-- 工作台左下角的"应用工作空间"按钮按当前应用（`selectedAppId`）查询 `GET /applications/{appId}/workspace-templates`，渲染第一级菜单（只显示已启用配置的 `workspaceName`，不显示 `directoryPath` / `branch`）。设置页关闭后会刷新该查询；若被停用的是当前已打开工作空间，不强制退出或清空当前状态，只在后续菜单中隐藏。版本创建、最近使用、运行态切换和会话逻辑保持原有行为。
+- 工作台顶部和左下角共用当前应用（`selectedAppId`）的 `GET /applications/{appId}/workspace-templates` 数据，按 `repositoryType` 将自动化代码库与测试工作空间独立分组，只显示已启用配置的 `workspaceName`。顶部上下文以实际完成的 workspace/version 切换为事实源，不在左侧目录加载前乐观显示新选择；重选当前版本会主动刷新目录和 Git diff。设置页关闭后会刷新该查询；若被停用的是当前已打开工作空间，不强制退出或清空当前状态，只在后续菜单中隐藏。版本创建、最近使用、运行态切换和会话逻辑保持原有行为。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
 - 点击版本或提交新增版本时先检查当前用户 TestAgent 专属进程是否 READY；只有强状态明确为 `NEEDS_INITIALIZATION` 且 `initializable=true` 才弹初始化/启动确认框，确认后复用既有进度弹窗，初始化完成后提示用户重新执行原操作。状态仍在查询、明确 `UNAVAILABLE`，或强状态为 READY 但弱健康尚未通过时不提供初始化按钮，只提示等待或当前不可用并刷新状态。在进程真正就绪之前不调用 Git 预检、版本创建或 default ensure，也不提前失效当前会话交互。进程就绪后，点击版本先调用 `GET /workspace-versions/{versionId}/git-access` 做只读权限预检；只有 `accessible=true` 才调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好并触发工作台切换。无仓库权限时前端展示对应版本库名称和申请指引，不创建 worktree。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
