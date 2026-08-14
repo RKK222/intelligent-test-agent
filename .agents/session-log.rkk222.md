@@ -10247,3 +10247,25 @@
 
 - 四类 Git 链路均由真实平台和隔离远端完成验收；进度弹框不再先失败后转圈，发布成功会给出可独立核验的远端分支与 commit，切换 Tab 不会改变正在执行的目标。
 - 本地 test 数据库的公共 Agent Git 参数临时指向内网专用验收仓库；未修改 `.env*`、OpenCode 源码、generated SDK、数据库结构或 migration。本次只有 additive `remoteBranch` DTO 兼容扩展，不改变 RunEvent；release 修复后仍需按长期分支策略同步回 dev。
+
+## 2026-08-14 - TCDS 需求导入页恢复原始 Vue 紧凑样式
+
+### Why
+
+- 用户要求去掉需求导入页无用装饰，视觉恢复到提供的 `indexNew.vue` 初始风格，同时保持全选和多选功能不变。
+
+### What
+
+- `RequirementImportView.vue` 去掉内嵌页重复的眉题、大标题、胶囊计数、圆角卡片、双列子项和装饰动效，恢复白底、顶部紧凑筛选、单列目录与底部蓝色“生成”按钮。
+- 保留既有同源上下文、筛选、全选当前结果、父项批量选择、子项多选、100 项上限和导入回调；新增组件测试锁定全选、半选与父项重新全选状态。
+- 同步 `frontend/apps/agent-web/README.md` 的稳定页面说明。
+
+### How
+
+- 专项 Vitest 3/3、agent-web typecheck 和 production build 通过；构建只保留既有大 chunk 提示。
+- 在 `http://127.0.0.1:3017/workspace-requirement-import` 启动真实 Vite 页面并用浏览器 mock 数据核对：选择两个子项后计数为 2、生成按钮可用、父项和全选均为半选；视觉截图确认页面为原始 Vue 风格的白底紧凑单列表格。
+- 提交前回顾全部 `.agents/session-log*.md` 并隔离工作树中其他未提交改动；未修改 `.env*`、API、RunEvent、数据库、部署、安全、generated SDK 或 OpenCode 源码，也未新建分支。
+
+### Result
+
+- TCDS 需求导入页装饰已收敛，全选、多选和导入业务行为保持兼容；真实前端已启动验证并在核对后停止。
