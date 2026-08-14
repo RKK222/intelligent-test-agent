@@ -10444,3 +10444,25 @@
 
 - 版本和应用可输入筛选，条目区域不再超出 iframe；历史 Office 文件不再仅因扩展名与真实容器不一致而转换失败，错误页也不会被误写为 Markdown。
 - 这是现有部署拓扑内的 `release` 修复，不影响公共 Agent、既有 Git diff/提交推送链路或工作区 ID 语义；真实 TCDS 授权数据仍需用户在企业会话中最终验收，并按分支策略同步回 `dev`。
+
+## 2026-08-14 - 重新打包 TCDS 需求导入修复企业包
+
+### Why
+
+- 用户要求基于当前本地 `release` 重新打企业包；相对上一制品，源码新增 `9b1151ed0` 的 TCDS 需求导入筛选布局与历史 Office 文档转换修复。
+
+### What
+
+- 制品源码提交固定为 `9b1151ed05b0e2acbbbd8ac8ecf08eda646a5bc7`；内层发布 ZIP SHA-256 为 `76a15ab3e7f0a3f3c0e1033216150c89774516cc3df3073c00eba8b36b74224c`，外层完整包为 `c69a1d629ff09772edfbcca9fc329d840812e98650d496cc08d7f4d0ec32677a`。
+- 后端 app JAR 为 `721e4f02d60d1c703dbd6699b0d5d7454280fb5ce1eddb35509e1476a1f4c0ae`，persistence JAR 为 `18ec9098e26bf80d3b85ad93aa653eab6943bad0560104b9da9dac2a1b88a11c`，XXL integration JAR 为 `5057bad68fd9e7ef5f68cdc869b486a20047527fe5b92ae26fff7e8730cc5901`，前端归档为 `662636c468ac3fa5ae00599dae6a20d430101b7a0b75608a4ad26cee2eacb0d1`。
+
+### How
+
+- JDK 25 后端构建、Spring 构造器装配、前端用户手册、`vue-tsc` 与 Vite production build 通过；需求导入后端定向测试 9/9、前端全量 Vitest 1980 passed / 1 skipped。
+- worker runtime 指纹继续为 `50f56c...`、toolbox 指纹继续为 `35447d...`，两者均为 `reuse`；内层包未携带 worker/programs 制品，LobeHub 为 `disabled`。
+- 内外层 ZIP、外层内嵌内层逐字节一致、内层 `--validate-only`、最终 JAR 全部受保护 Flyway 资源和两台 TCDS 精确地址均验证通过；未修改任何 migration 字节。
+
+### Result
+
+- 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/` 并再次通过校验，部署仍按 `.4 → .114 → .2`，不加载或重启 manager/worker，也不替换两台活动的 `opencode-models.json`。
+- 本轮没有新增 API、事件、数据库结构、Flyway SQL、配置项或部署拓扑；真实企业 TCDS 授权数据和历史 Office 文件仍需现场业务验收。
