@@ -12,17 +12,20 @@ import com.enterprise.testagent.domain.tcds.TcdsGateway;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -133,6 +136,42 @@ class TcdsHttpGatewayTest {
                     assertThat(exception.getMessage()).isEqualTo("TCDS 文档重定向次数过多");
                 });
         assertThat(requests).hasValue(4);
+    }
+
+    @Test
+    void sendsToolIdToSameOriginDocumentRequestsWithoutLeakingToExternalStorage() throws Exception {
+        List<HttpRequest> requests = new CopyOnWriteArrayList<>();
+        HttpClient client = mock(HttpClient.class);
+        when(client.send(
+                        any(HttpRequest.class),
+                        org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+                .thenAnswer(invocation -> {
+                    requests.add(invocation.getArgument(0));
+                    @SuppressWarnings("unchecked")
+                    HttpResponse<InputStream> response = mock(HttpResponse.class);
+                    boolean redirect = requests.size() == 1;
+                    when(response.statusCode()).thenReturn(redirect ? 302 : 200);
+                    when(response.body()).thenReturn(new ByteArrayInputStream(
+                            (redirect ? "" : "ok").getBytes(StandardCharsets.UTF_8)));
+                    when(response.headers()).thenReturn(HttpHeaders.of(
+                            redirect
+                                    ? Map.of("Location", List.of("https://objects.internal/files/b"))
+                                    : Map.of(),
+                            (name, value) -> true));
+                    return response;
+                });
+        TcdsProperties properties = new TcdsProperties();
+        properties.setBaseUrl("http://tcds.internal:9080/gateway/");
+        TcdsHttpGateway gateway = new TcdsHttpGateway(properties, client, new ObjectMapper());
+
+        gateway.download(new TcdsGateway.Document(
+                "same-origin.txt", URI.create("http://tcds.internal:9080/files/a"), "3"), 20);
+
+        assertThat(requests).hasSize(2);
+        assertThat(requests.get(1).uri()).isEqualTo(URI.create("https://objects.internal/files/b"));
+        assertThat(requests.get(0).headers().firstValue("toolId"))
+                .contains("66f36bfa5c1c6105572b0118880261d6");
+        assertThat(requests.get(1).headers().firstValue("toolId")).isEmpty();
     }
 
     @Test
