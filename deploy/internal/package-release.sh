@@ -31,6 +31,7 @@ PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
 PACKAGE_MODE=full
 INCLUDE_ALL_COMPONENTS=0
+WORKER_RUNTIME_BASELINE_FILE=""
 COMPONENT_PLAN_ONLY=0
 COMPONENT_STATE_FILE=""
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
@@ -160,6 +161,9 @@ Options:
   --include-all-components
                           Force worker runtime (Python/OpenCode Manager/Codex MCP) and toolbox into the ZIP.
                           Use for first installation, disaster recovery or a new build machine.
+  --worker-runtime-baseline-file <path>
+                          Re-register a previously deployed worker runtime as the reuse baseline.
+                          The file must pin its source commit, release SHA-256 and worker fingerprint.
   --component-state-file <path>
                           Persistent component fingerprint state. Default: <output-dir>/.release-component-state.env.
   --component-plan-only   Print include/reuse decisions and fingerprints without building or packaging.
@@ -311,6 +315,10 @@ while [[ $# -gt 0 ]]; do
       INCLUDE_ALL_COMPONENTS=1
       shift
       ;;
+    --worker-runtime-baseline-file)
+      WORKER_RUNTIME_BASELINE_FILE="$2"
+      shift 2
+      ;;
     --component-state-file)
       COMPONENT_STATE_FILE="$2"
       shift 2
@@ -342,6 +350,16 @@ done
 if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only \
   && "${PACKAGE_MODE}" != local-client-only ]]; then
   PACKAGE_LOCAL_CLIENT=0
+fi
+
+if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" && "${INCLUDE_ALL_COMPONENTS}" -eq 1 ]]; then
+  echo "--worker-runtime-baseline-file cannot be combined with --include-all-components" >&2
+  exit 2
+fi
+if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" \
+  && "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
+  echo "--worker-runtime-baseline-file can only be combined with the full or --zip-only release mode" >&2
+  exit 2
 fi
 
 # 可选能力采用显式 opt-in，并在参数解析后应用，保证选项先后顺序不改变最终交付范围。
@@ -774,6 +792,7 @@ plan_release_components() {
   local previous_worker previous_toolbox worker_config toolbox_config
   local current_release current_manifest current_worker_mode current_worker_fingerprint
   local current_toolbox_mode current_toolbox_fingerprint
+  local baseline_version baseline_source_commit baseline_release_sha256 baseline_worker_fingerprint
   worker_config="schema=2|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|python=${PYTHON_VERSION}|pythonSourceSize=${PYTHON_SOURCE_SIZE}|pythonSourceSha=${PYTHON_SOURCE_SHA256}|pythonSourceBase=${PYTHON_SOURCE_BASE_URL}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
   toolbox_config="schema=1|platform=${PLATFORM}|it=${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}|omni=${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}|node=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}|nginx=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
 
@@ -834,6 +853,48 @@ plan_release_components() {
   fi
   [[ "${PACKAGE_MODE}" != opencode-only ]] || WORKER_COMPONENT_MODE=included
   [[ "${PACKAGE_MODE}" != toolbox-only ]] || TOOLBOX_COMPONENT_MODE=included
+
+  WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
+  WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
+  if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" ]]; then
+    [[ -f "${WORKER_RUNTIME_BASELINE_FILE}" ]] || {
+      echo "Worker runtime baseline file not found: ${WORKER_RUNTIME_BASELINE_FILE}" >&2
+      exit 1
+    }
+    baseline_version="$(state_value "${WORKER_RUNTIME_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_VERSION)"
+    baseline_source_commit="$(state_value "${WORKER_RUNTIME_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT)"
+    baseline_release_sha256="$(state_value "${WORKER_RUNTIME_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256)"
+    baseline_worker_fingerprint="$(state_value "${WORKER_RUNTIME_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+    [[ "${baseline_version}" == 1 ]] || {
+      echo "Unsupported worker runtime baseline version: ${baseline_version:-<empty>}" >&2
+      exit 1
+    }
+    [[ "${baseline_source_commit}" =~ ^[0-9a-f]{40}$ ]] || {
+      echo "Invalid worker runtime baseline source commit" >&2
+      exit 1
+    }
+    git -C "${ROOT_DIR}" cat-file -e "${baseline_source_commit}^{commit}" 2>/dev/null || {
+      echo "Worker runtime baseline source commit is not available locally: ${baseline_source_commit}" >&2
+      exit 1
+    }
+    [[ "${baseline_release_sha256}" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "Invalid worker runtime baseline release SHA-256" >&2
+      exit 1
+    }
+    [[ "${baseline_worker_fingerprint}" == "${WORKER_RUNTIME_FINGERPRINT}" ]] || {
+      echo "Previously deployed worker runtime fingerprint differs from current build inputs" >&2
+      exit 1
+    }
+    WORKER_COMPONENT_MODE=reuse
+    WORKER_RUNTIME_BASELINE_SOURCE_COMMIT="${baseline_source_commit}"
+    WORKER_RUNTIME_BASELINE_RELEASE_SHA256="${baseline_release_sha256}"
+    printf 'worker runtime baseline source commit: %s\n' "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}"
+    printf 'worker runtime baseline release sha256: %s\n' "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
+  fi
 
   printf 'worker runtime component: %s\n' "${WORKER_COMPONENT_MODE}"
   printf 'worker runtime fingerprint: %s\n' "${WORKER_RUNTIME_FINGERPRINT}"
@@ -1386,6 +1447,12 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_COMPONENT_MANIFEST_VERSION=1\n'
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME=%s\n' "${WORKER_COMPONENT_MODE}"
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
+    if [[ -n "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}" ]]; then
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=%s\n' \
+        "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}"
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=%s\n' \
+        "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
+    fi
     printf 'TEST_AGENT_RELEASE_TOOLBOX=%s\n' "${TOOLBOX_COMPONENT_MODE}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
     printf 'TEST_AGENT_RELEASE_LOBEHUB=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf included || printf disabled)"
@@ -1557,6 +1624,8 @@ mkdir -p "$(dirname "${COMPONENT_STATE_FILE}")"
 WORKER_COMPONENT_MODE=reuse
 TOOLBOX_COMPONENT_MODE=reuse
 WORKER_RUNTIME_FINGERPRINT=""
+WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
+WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
 TOOLBOX_FINGERPRINT=""
 if [[ "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only \
   || "${PACKAGE_MODE}" == opencode-only || "${PACKAGE_MODE}" == toolbox-only \
