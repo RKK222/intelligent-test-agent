@@ -30,18 +30,22 @@ public class TcdsHttpGateway implements TcdsGateway {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TcdsHttpGateway.class);
     private static final String TOKEN_HEADER = "token";
-    private static final String TOOL_ID_HEADER = "toolId";
-    // 沿用现有 TCDS 用户查询客户端的非敏感工具标识，避免重构后改变内部接口鉴权契约。
-    private static final String TOOL_ID = "66f36bfa5c1c6105572b0118880261d6";
     private static final long MAX_JSON_BYTES = 10L * 1024 * 1024;
     private static final int MAX_REDIRECTS = 3;
 
-    private final URI baseUri;
+    private final TcdsHttpRequestFactory requestFactory;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     public TcdsHttpGateway(TcdsProperties properties, HttpClient httpClient, ObjectMapper objectMapper) {
-        this.baseUri = requireBaseUri(properties == null ? null : properties.getBaseUrl());
+        this(new TcdsHttpRequestFactory(properties), httpClient, objectMapper);
+    }
+
+    TcdsHttpGateway(
+            TcdsHttpRequestFactory requestFactory,
+            HttpClient httpClient,
+            ObjectMapper objectMapper) {
+        this.requestFactory = Objects.requireNonNull(requestFactory, "requestFactory must not be null");
         this.httpClient = Objects.requireNonNull(httpClient, "httpClient must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
     }
@@ -220,9 +224,7 @@ public class TcdsHttpGateway implements TcdsGateway {
 
     /** TCDS 同源请求统一携带 toolId；重定向到对象存储后不向其它源透传该 header。 */
     private HttpRequest.Builder requestBuilder(URI uri) {
-        HttpRequest.Builder request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(30));
-        if (sameOrigin(baseUri, uri)) request.header(TOOL_ID_HEADER, TOOL_ID);
-        return request;
+        return requestFactory.request(uri, Duration.ofSeconds(30));
     }
 
     private JsonNode sendJson(HttpRequest request) {
@@ -276,19 +278,7 @@ public class TcdsHttpGateway implements TcdsGateway {
     }
 
     private URI resolve(String pathAndQuery) {
-        return baseUri.resolve(pathAndQuery.startsWith("/") ? pathAndQuery.substring(1) : pathAndQuery);
-    }
-
-    private static URI requireBaseUri(String raw) {
-        if (isBlank(raw)) throw new IllegalStateException("TEST_AGENT_TCDS_BASE_URL 未配置");
-        try {
-            URI uri = URI.create(raw.trim());
-            requireHttpUri(uri, "TEST_AGENT_TCDS_BASE_URL 必须是 HTTP/HTTPS 绝对地址");
-            String normalized = uri.toString().endsWith("/") ? uri.toString() : uri + "/";
-            return URI.create(normalized);
-        } catch (PlatformException | IllegalArgumentException exception) {
-            throw new IllegalStateException("TEST_AGENT_TCDS_BASE_URL 配置无效");
-        }
+        return requestFactory.resolve(pathAndQuery);
     }
 
     private static URI requireHttpUri(URI uri, String message) {
@@ -300,17 +290,6 @@ public class TcdsHttpGateway implements TcdsGateway {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, message);
         }
         return uri;
-    }
-
-    private static boolean sameOrigin(URI left, URI right) {
-        return left.getScheme().equalsIgnoreCase(right.getScheme())
-                && left.getHost().equalsIgnoreCase(right.getHost())
-                && effectivePort(left) == effectivePort(right);
-    }
-
-    private static int effectivePort(URI uri) {
-        if (uri.getPort() >= 0) return uri.getPort();
-        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
     private static byte[] readBounded(InputStream input, long maxBytes, String message) throws Exception {

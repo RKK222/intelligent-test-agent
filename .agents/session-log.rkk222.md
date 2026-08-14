@@ -10293,3 +10293,28 @@
 
 - release 当前后台默认地址、全部固定 TCDS JSON 接口和同源文档请求 header 已满足现场契约，跨域对象存储不泄露 header，环境覆盖保持兼容；未新增 API、DTO、RunEvent、数据库、migration、服务、端口或强制配置。
 - 有效登录用户下的真实授权目录、重复覆盖、部分失败和文件树刷新仍需企业会话验收；release 修复后仍需按长期分支策略同步回 dev。
+
+## 2026-08-14 - 合入案例远程维护并统一 TCDS toolId
+
+### Why
+
+- 远端 `release` 的案例维护功能新增 `getTaskTypes` 与 `createGraphCase` 两条 TCDS 请求，但前者没有携带现场要求的 `toolId`，两者还各自硬编码了不含 `:9080` 的生产地址。
+- 合并远端提交时需保留本地 `release` 已有的体验工作区、会话消息和个人进程重启客户端能力，不能让自动合并静默删除既有 API。
+
+### What
+
+- 新增包内 `TcdsHttpRequestFactory`，由 `TcdsHttpGateway` 与 `TcdsCaseMaintenanceService` 共同复用部署地址、HTTP 超时和同源 `toolId: 66f36bfa5c1c6105572b0118880261d6` 注入；任务类型与案例维护均通过 `${TEST_AGENT_TCDS_BASE_URL:http://tcds-prod.sdc.icbc:9080}` 访问。
+- 案例维护服务改为 Spring 显式装配并复用统一 `HttpClient`；测试分别锁定 GET、POST 和校验失败前的任务类型请求都携带精确 header 与 `:9080` 端口。
+- 语义合并远端案例维护弹窗、Markdown 解析、平台 API 与日志脱敏能力，并恢复自动合并丢失的体验工作区打开/关闭/提交、Run 消息查询和个人进程重启 6 项既有前端客户端方法。
+- 同步 integration/API/前端 README 与 PACKAGE，以及 HTTP API、部署、安全和模块图；未修改 `.env*`、RunEvent、数据库、migration、generated SDK 或 OpenCode 源码。
+
+### How
+
+- JDK 25 定向 Maven reactor 通过：TCDS 网关/案例维护/装配 16 项、TCDS Controller 与 API 日志 25 项、应用配置绑定 15 项，共 56 项，0 失败。
+- 前端案例维护、编辑器入口和 backend-api 定向 Vitest 137/137，通过全 workspace typecheck、用户手册与 agent-web production build；构建仅保留既有大 chunk 提示。
+- `tools/verify-ai-docs.sh`、`git diff --check` 和冲突标记复核通过；提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 案例远程维护的全部 TCDS 后台调用现在与需求导入链路共用同一地址和同源 header 规则；浏览器仍只调用平台 API，跨域对象存储不会收到内部 `toolId`。
+- 这是现有部署拓扑内的 `release` 修复，HTTP API 为新增平台入口，既有 API/DTO/事件和客户端调用保持兼容；真实 TCDS 业务权限与数据写入仍需在有效企业会话中验收，并按分支策略同步回 `dev`。

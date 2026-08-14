@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
+import com.enterprise.testagent.api.web.common.ApiRequestLogSummary;
 import com.enterprise.testagent.api.web.common.ExternalApiWebSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
@@ -15,6 +16,7 @@ import com.enterprise.testagent.domain.externalapi.ExternalApiCredentialId;
 import com.enterprise.testagent.domain.externalapi.ExternalApiPrincipal;
 import com.enterprise.testagent.domain.externalapi.ExternalApiScope;
 import com.enterprise.testagent.domain.user.UserId;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.List;
@@ -257,6 +259,18 @@ class ApiLoggingAspectTest {
             String body = aspect.extractRequestBody(null);
             assertEquals("", body);
         }
+
+        @Test
+        @DisplayName("安全摘要请求不记录完整正文")
+        void extractRequestBody_safeSummary() throws Exception {
+            String body = aspect.extractRequestBody(new Object[]{new TestSummaryRequest("案例正文不得记录")});
+
+            ObjectMapper objectMapper = new ObjectMapper();
+            assertEquals(
+                    objectMapper.readTree("{\"itemNo\":\"S20260703-000081\",\"caseCount\":2}"),
+                    objectMapper.readTree(body));
+            assertTrue(!body.contains("案例正文不得记录"));
+        }
     }
 
     @Nested
@@ -339,6 +353,13 @@ class ApiLoggingAspectTest {
 
     static class TestController {
         public void testMethod() {
+        }
+    }
+
+    record TestSummaryRequest(String content) implements ApiRequestLogSummary {
+        @Override
+        public Object apiRequestLogSummary() {
+            return Map.of("itemNo", "S20260703-000081", "caseCount", 2);
         }
     }
 }

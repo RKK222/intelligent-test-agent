@@ -22,7 +22,23 @@ public class TcdsIntegrationConfig {
     }
 
     @Bean
-    TcdsHttpGateway tcdsGateway(TcdsProperties properties, HttpClient tcdsHttpClient, ObjectMapper objectMapper) {
-        return new TcdsHttpGateway(properties, tcdsHttpClient, objectMapper);
+    TcdsHttpRequestFactory tcdsHttpRequestFactory(TcdsProperties properties) {
+        return new TcdsHttpRequestFactory(properties);
+    }
+
+    @Bean
+    TcdsHttpGateway tcdsGateway(
+            TcdsHttpRequestFactory requestFactory,
+            HttpClient tcdsHttpClient,
+            ObjectMapper objectMapper) {
+        return new TcdsHttpGateway(requestFactory, tcdsHttpClient, objectMapper);
+    }
+
+    @Bean
+    TcdsCaseMaintenanceService tcdsCaseMaintenanceService(
+            TcdsHttpRequestFactory requestFactory,
+            HttpClient tcdsHttpClient,
+            ObjectMapper objectMapper) {
+        return new TcdsCaseMaintenanceService(requestFactory, tcdsHttpClient, objectMapper);
     }
 }
