@@ -1271,7 +1271,47 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
-    void sharedWorkspaceCannotImportRequirements() {
+    void listsRequirementImportStateThroughTheAuthorizedWorkspaceSocket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        RequirementImportApplicationService importService = Mockito.mock(RequirementImportApplicationService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        WorkspaceFileSocketTicket ticket = workspaceTicket(workspaceId.value(), "u001");
+        when(ticketService.consume("wft_workspace", "http://localhost:3000")).thenReturn(ticket);
+        when(importService.listWorkspaceItems("u001", workspaceId.value(), "APP-A", "2026年8月"))
+                .thenReturn(List.of(new RequirementImportApplicationService.ItemOption(
+                        "I-01",
+                        "登录需求",
+                        List.of(new RequirementImportApplicationService.SubItemOption(
+                                "SI-01", "登录校验", true)),
+                        true)));
+        WorkspaceFileWebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        handler.setRequirementImportService(importService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_items","op":"workspace.requirement-import-items","params":{"workspaceId":"wrk_1234567890abcdef","appShortName":"APP-A","editionId":"2026年8月"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message)
+                        .contains("\"type\":\"result\"", "\"itemNo\":\"SI-01\"", "\"imported\":true")
+                        .doesNotContain("documentUrl", "physicalRootPath"));
+        verify(workspaceService).requireWorkspaceWriteAccess(
+                workspaceId, new UserId("usr_1234567890abcdef"), false);
+        verify(importService).listWorkspaceItems("u001", workspaceId.value(), "APP-A", "2026年8月");
+    }
+
+    @Test
+    void sharedWorkspaceCannotReadImportStateOrImportRequirements() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         RequirementImportApplicationService importService = Mockito.mock(RequirementImportApplicationService.class);
@@ -1286,15 +1326,21 @@ class WorkspaceFileWebSocketHandlerTest {
         handler.setRequirementImportService(importService);
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
                 "/api/internal/platform/workspace-management/file/ws?ticket=wft_shared",
-                List.of("""
+                List.of(
+                        """
+                        {"id":"req_items","op":"workspace.requirement-import-items","params":{"workspaceId":"wrk_1234567890abcdef","appShortName":"APP-A","editionId":"2026年8月"}}
+                        """,
+                        """
                         {"id":"req_import","op":"workspace.requirement-import","params":{"workspaceId":"wrk_1234567890abcdef","appShortName":"APP-A","editionId":"2026年8月","selectedSubItemNos":["SI-01"],"requestId":"browser-1"}}
                         """));
 
         handler.handle(session).block();
 
-        assertThat(session.sentText()).singleElement().satisfies(message ->
+        assertThat(session.sentText()).hasSize(2).allSatisfy(message ->
                 assertThat(message).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
         verify(importService, never()).importRequirements(Mockito.anyString(), Mockito.any());
+        verify(importService, never()).listWorkspaceItems(
+                Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.anyString());
     }
 
     @Test

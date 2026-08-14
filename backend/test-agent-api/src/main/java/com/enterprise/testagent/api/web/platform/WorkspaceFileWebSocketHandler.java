@@ -357,6 +357,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     yield null;
                 }
                 case "workspace.resolve-physical-path" -> resolvePhysicalPath(ticket, params);
+                case "workspace.requirement-import-items" -> requirementImportItems(ticket, params);
                 case "workspace.requirement-import" -> importRequirements(ticket, params);
                 case "workspace.view.list" -> workspaceViewService.list(
                         workspaceId(ticket, params),
@@ -858,6 +859,23 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                         requiredText(params, "editionId"),
                         requiredStringList(params, "selectedSubItemNos"),
                         requiredText(params, "requestId")));
+    }
+
+    private Object requirementImportItems(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        if (ticket.supportReadOnly() || ticket.sharedSession() || ticket.appSourceWorkspace()
+                || ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(workspaceId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前工作区不允许读取需求导入状态");
+        }
+        if (requirementImportService == null || ticket.unifiedAuthId() == null || ticket.unifiedAuthId().isBlank()) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "需求导入服务不可用");
+        }
+        requireWorkspaceWrite(ticket, workspaceId, "spec");
+        return requirementImportService.listWorkspaceItems(
+                ticket.unifiedAuthId(),
+                workspaceId.value(),
+                requiredText(params, "appShortName"),
+                requiredText(params, "editionId"));
     }
 
     private WorkspaceViewLocator viewLocator(JsonNode params) {

@@ -67,6 +67,36 @@ class RequirementImportApplicationServiceTest {
     }
 
     @Test
+    void restoresImportedStatusFromTheSameNormalizedWorkspaceDirectories() {
+        TcdsGateway gateway = mock(TcdsGateway.class);
+        WorkspaceApplicationService workspace = mock(WorkspaceApplicationService.class);
+        var imported = new TcdsGateway.RequirementSubItem("SI-01", "登录/校验", List.of());
+        var pending = new TcdsGateway.RequirementSubItem("SI-02", "会话 续期", List.of());
+        when(gateway.listRequirementItems("u001", "PSN", "2026年8月"))
+                .thenReturn(List.of(new TcdsGateway.RequirementItem(
+                        "I-01", "登录需求", List.of(imported, pending))));
+        when(workspace.fileStatus(any(WorkspaceId.class), anyString())).thenAnswer(invocation -> {
+            String path = invocation.getArgument(1);
+            boolean exists = path.equals("spec/I-01-登录需求")
+                    || path.equals("spec/I-01-登录需求/01-需求/SI-01-登录校验");
+            return new FileStatusResponse(path, exists, exists, 0, null);
+        });
+        RequirementImportApplicationService service = new RequirementImportApplicationService(gateway, workspace);
+
+        var result = service.listWorkspaceItems("u001", "wrk_1", "PSN", "2026年8月");
+
+        assertThat(result).singleElement().satisfies(parent -> {
+            assertThat(parent.imported()).isTrue();
+            assertThat(parent.children()).extracting(
+                    RequirementImportApplicationService.SubItemOption::itemNo,
+                    RequirementImportApplicationService.SubItemOption::imported)
+                    .containsExactly(
+                            org.assertj.core.groups.Tuple.tuple("SI-01", true),
+                            org.assertj.core.groups.Tuple.tuple("SI-02", false));
+        });
+    }
+
+    @Test
     void overwritesExistingDocumentWithoutDeletingOtherFiles() {
         TcdsGateway gateway = mock(TcdsGateway.class);
         WorkspaceApplicationService workspace = mock(WorkspaceApplicationService.class);

@@ -4251,6 +4251,7 @@ Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追
 
 实际写入使用既有文件 WebSocket route/ticket：
 
+- `workspace.requirement-import-items` 请求仅包含 `{workspaceId, appShortName, editionId}`，返回父子条目 `{itemNo,itemName,imported,children}`；`imported` 只表示与导入相同规范化规则生成的父目录或子条目 `01-需求` 目录已经存在。该状态不禁用选择，用户仍可覆盖更新或重试部分失败；共享、支持访问、体验工作区和源码快照拒绝调用。
 - `workspace.requirement-import` 请求仅包含 `{workspaceId, appShortName, editionId, selectedSubItemNos, requestId}`。服务端重新查询授权、名称、文档类型和 URL，拒绝共享只读、支持访问、体验工作区和源码快照。
 - 返回 `{status, createdDirectories, importedFiles, overwrittenFiles, failedFiles, failures}`，其中 `status` 为 `SUCCEEDED | PARTIAL | FAILED`，失败原因不含 URL、token、响应正文或绝对路径。
 - 不同来源规范化到同一目标文件时整单以稳定错误码 `PATH_COLLISION` 拒绝，响应只包含工作区相对目标路径；同一来源重复导入仍按覆盖语义处理。

@@ -1531,6 +1531,12 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<RequirementImportApplication[]>(`${requirementImportBase}/applications`),
     listRequirementImportItems: (appShortName: string, editionId: string) =>
       request<RequirementImportItem[]>(`${requirementImportBase}/sub-items${query({ appShortName, editionId })}`),
+    listWorkspaceRequirementImportItems: (workspaceId: string, appShortName: string, editionId: string) =>
+      workspaceFileRpc<RequirementImportItem[]>(
+        workspaceId,
+        "workspace.requirement-import-items",
+        { appShortName, editionId }
+      ),
     importWorkspaceRequirements: (command: RequirementImportCommand) =>
       workspaceFileRpc<RequirementImportResult>(
         command.workspaceId,
