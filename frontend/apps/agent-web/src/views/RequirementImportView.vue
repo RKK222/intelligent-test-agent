@@ -175,6 +175,22 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
 
 <template>
   <main class="requirement-import-page">
+    <Transition name="import-mask">
+      <div
+        v-if="importing"
+        class="importing-mask"
+        role="status"
+        aria-live="polite"
+        aria-label="正在生成需求目录和文档"
+      >
+        <div class="importing-card">
+          <span class="importing-spinner" aria-hidden="true" />
+          <strong>正在生成需求目录和文档</strong>
+          <span>请保持当前窗口打开，完成后会自动刷新文件树。</span>
+        </div>
+      </div>
+    </Transition>
+
     <section class="filters" aria-label="需求筛选">
       <label class="filter-field">
         <span class="filter-label">版本：</span>
@@ -287,6 +303,7 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
 
 <style scoped>
 .requirement-import-page {
+  position: relative;
   box-sizing: border-box;
   display: flex;
   height: 100vh;
@@ -297,6 +314,78 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
   color: #606266;
   background: #fff;
   font: 14px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
+
+.importing-mask {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(245 247 250 / 82%);
+  backdrop-filter: blur(2px);
+}
+
+.importing-card {
+  display: grid;
+  min-width: min(320px, calc(100vw - 48px));
+  justify-items: center;
+  gap: 8px;
+  padding: 22px 26px;
+  border: 1px solid #dcdfe6;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(31 45 61 / 14%);
+  color: #606266;
+  text-align: center;
+}
+
+.importing-card strong {
+  color: #303133;
+  font-size: 15px;
+}
+
+.importing-card span:last-child {
+  color: #909399;
+  font-size: 12px;
+}
+
+.importing-spinner {
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  border: 3px solid #d9ecff;
+  border-top-color: #409eff;
+  border-radius: 50%;
+  animation: requirement-import-spin 0.8s linear infinite;
+}
+
+.import-mask-enter-active,
+.import-mask-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.import-mask-enter-from,
+.import-mask-leave-to {
+  opacity: 0;
+}
+
+@keyframes requirement-import-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .importing-spinner {
+    animation-duration: 1.6s;
+  }
+
+  .import-mask-enter-active,
+  .import-mask-leave-active {
+    transition: none;
+  }
 }
 
 .filters,

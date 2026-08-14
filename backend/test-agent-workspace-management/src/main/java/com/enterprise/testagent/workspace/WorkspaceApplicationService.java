@@ -337,12 +337,6 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         fileService.writeContent(workspace.rootPath(), path, content);
     }
 
-    /** 受信业务流程写入有界二进制附件；浏览器文件操作不开放该内部入口。 */
-    void writeBinaryFile(WorkspaceId workspaceId, String path, byte[] content, long maxBytes) {
-        Workspace workspace = getWorkspace(workspaceId);
-        fileService.writeBinaryContent(workspace.rootPath(), path, content, maxBytes);
-    }
-
     /** 单次解析工作区内现有文件物理路径，供受控文件 WebSocket RPC 使用。 */
     public String resolvePhysicalFilePath(WorkspaceId workspaceId, String path) {
         Workspace workspace = getWorkspace(workspaceId);

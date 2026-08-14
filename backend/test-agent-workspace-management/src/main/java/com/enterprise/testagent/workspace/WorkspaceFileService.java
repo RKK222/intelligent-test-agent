@@ -257,37 +257,6 @@ public class WorkspaceFileService {
     }
 
     /**
-     * 写入受业务上限约束的二进制附件；与文本写入共用根目录、符号链接和保留路径校验，并允许幂等覆盖。
-     * 该入口仅供同模块受信业务流程使用，浏览器上传仍必须走既有分片协议。
-     */
-    void writeBinaryContent(String rootPath, String relativePath, byte[] content, long maxBytes) {
-        if (maxBytes < 1) {
-            throw new IllegalArgumentException("maxBytes must be positive");
-        }
-        byte[] bytes = content == null ? new byte[0] : content.clone();
-        if (bytes.length > maxBytes) {
-            throw new PlatformException(
-                    ErrorCode.PAYLOAD_TOO_LARGE,
-                    "二进制附件超过大小限制",
-                    Map.of("path", safePath(relativePath), "maxBytes", maxBytes));
-        }
-        Path target = resolveInsideRoot(rootPath, relativePath);
-        try {
-            Path parent = target.getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
-            Files.write(target, bytes);
-        } catch (Exception exception) {
-            throw new PlatformException(
-                    ErrorCode.INTERNAL_ERROR,
-                    "写入二进制附件失败",
-                    Map.of("path", safePath(relativePath)),
-                    exception);
-        }
-    }
-
-    /**
      * 兼容旧客户端的一次性 Base64 上传；新客户端应使用 beginUpload 分片上传。
      * 旧操作仍受预览大小约束，避免单条 WebSocket 消息重新占用无界内存。
      */

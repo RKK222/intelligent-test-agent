@@ -172,6 +172,50 @@ describe("RequirementImportView", () => {
     wrapper.unmount();
   });
 
+  it("blocks repeated interaction with an animated mask while generation is running", async () => {
+    let resolveImport!: (result: {
+      status: "SUCCEEDED";
+      createdDirectories: number;
+      importedFiles: number;
+      overwrittenFiles: number;
+      failedFiles: number;
+      failures: never[];
+    }) => void;
+    importRequirements.mockImplementationOnce(() => new Promise((resolve) => { resolveImport = resolve; }));
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_mask"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalled());
+    await wrapper.get('.child-row input[type="checkbox"]').setValue(true);
+    await wrapper.get("footer button").trigger("click");
+
+    await vi.waitFor(() => expect(importRequirements).toHaveBeenCalledTimes(1));
+    expect(wrapper.get(".importing-mask").attributes("role")).toBe("status");
+    expect(wrapper.get(".importing-mask").text()).toContain("正在生成需求目录和文档");
+    expect(wrapper.find(".importing-spinner").exists()).toBe(true);
+    expect(wrapper.get("footer button").attributes("disabled")).toBeDefined();
+
+    resolveImport({
+      status: "SUCCEEDED",
+      createdDirectories: 6,
+      importedFiles: 1,
+      overwrittenFiles: 0,
+      failedFiles: 0,
+      failures: []
+    });
+    await vi.waitFor(() => expect(wrapper.find(".importing-mask").exists()).toBe(false));
+    expect(wrapper.text()).toContain("导入成功");
+    wrapper.unmount();
+  });
+
   it("keeps select-all, parent selection, and child multi-selection behavior", async () => {
     const wrapper = mountView();
     window.dispatchEvent(new MessageEvent("message", {

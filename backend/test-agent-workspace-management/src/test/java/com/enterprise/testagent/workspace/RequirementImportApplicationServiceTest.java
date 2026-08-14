@@ -19,17 +19,12 @@ import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
-import org.apache.poi.util.Units;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 class RequirementImportApplicationServiceTest {
-
-    private static final byte[] ONE_PIXEL_PNG = Base64.getDecoder().decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
 
     @Test
     void requeriesTrustedMetadataAndKeepsSuccessfulDocumentsOnPartialFailure() {
@@ -189,49 +184,6 @@ class RequirementImportApplicationServiceTest {
                 any(WorkspaceId.class),
                 org.mockito.ArgumentMatchers.endsWith("/历史设计.md"),
                 org.mockito.ArgumentMatchers.eq("旧链路压平的设计正文\n"));
-        verify(workspace, never()).writeBinaryFile(
-                any(WorkspaceId.class), anyString(), any(byte[].class), anyLong());
-    }
-
-    @Test
-    void writesDocxPicturesAsSiblingAttachmentsReferencedByMarkdown() throws Exception {
-        byte[] docx;
-        try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            document.createParagraph().createRun().addPicture(
-                    new java.io.ByteArrayInputStream(ONE_PIXEL_PNG),
-                    org.apache.poi.xwpf.usermodel.Document.PICTURE_TYPE_PNG,
-                    "architecture.png",
-                    Units.toEMU(1),
-                    Units.toEMU(1));
-            document.write(output);
-            docx = output.toByteArray();
-        }
-        TcdsGateway gateway = mock(TcdsGateway.class);
-        WorkspaceApplicationService workspace = mock(WorkspaceApplicationService.class);
-        var design = new TcdsGateway.Document("系统设计.docx", URI.create("https://docs.internal/design"), "1");
-        var child = new TcdsGateway.RequirementSubItem("SI-01", "登录", List.of(design));
-        when(gateway.listApplications("u001")).thenReturn(List.of(new TcdsGateway.Application("个人金融", "PSN")));
-        when(gateway.listRequirementItems("u001", "PSN", "2026年8月"))
-                .thenReturn(List.of(new TcdsGateway.RequirementItem("I-01", "登录", List.of(child))));
-        when(gateway.download(design, RequirementImportApplicationService.MAX_DOCUMENT_BYTES))
-                .thenReturn(new TcdsGateway.DownloadedDocument(docx, "application/octet-stream"));
-        when(workspace.fileStatus(any(WorkspaceId.class), anyString()))
-                .thenAnswer(invocation -> new FileStatusResponse(invocation.getArgument(1), false, false, 0, null));
-        RequirementImportApplicationService service = new RequirementImportApplicationService(gateway, workspace);
-
-        var result = service.importRequirements("u001", new RequirementImportApplicationService.ImportCommand(
-                "wrk_1", "PSN", "2026年8月", List.of("SI-01"), "request-image"));
-
-        assertThat(result.status()).isEqualTo("SUCCEEDED");
-        verify(workspace).writeFile(
-                any(WorkspaceId.class),
-                org.mockito.ArgumentMatchers.endsWith("/系统设计.md"),
-                org.mockito.ArgumentMatchers.contains("![architecture.png](系统设计.assets/image-001.png)"));
-        verify(workspace).writeBinaryFile(
-                any(WorkspaceId.class),
-                org.mockito.ArgumentMatchers.endsWith("/系统设计.assets/image-001.png"),
-                org.mockito.ArgumentMatchers.eq(ONE_PIXEL_PNG),
-                org.mockito.ArgumentMatchers.eq(RequirementImportApplicationService.MAX_DOCUMENT_BYTES));
     }
 
     @Test
