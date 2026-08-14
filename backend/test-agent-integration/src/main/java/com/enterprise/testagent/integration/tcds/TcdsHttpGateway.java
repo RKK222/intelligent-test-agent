@@ -137,8 +137,7 @@ public class TcdsHttpGateway implements TcdsGateway {
         if (maxBytes < 1) throw new IllegalArgumentException("maxBytes must be positive");
         URI current = requireHttpUri(document.uri(), "TCDS 文档地址无效");
         for (int redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
-            HttpRequest request = HttpRequest.newBuilder(current)
-                    .timeout(Duration.ofSeconds(30))
+            HttpRequest request = requestBuilder(current)
                     .header("Accept", "*/*")
                     .GET()
                     .build();
@@ -200,20 +199,15 @@ public class TcdsHttpGateway implements TcdsGateway {
                 suffix.append(encode(entry.getKey())).append('=').append(encode(entry.getValue()));
             }
         }
-        HttpRequest.Builder request = HttpRequest.newBuilder(resolve(suffix.toString()))
-                .timeout(Duration.ofSeconds(30))
-                .header(TOOL_ID_HEADER, TOOL_ID)
-                .GET();
+        HttpRequest.Builder request = requestBuilder(resolve(suffix.toString())).GET();
         if (!isBlank(token)) request.header(TOKEN_HEADER, token);
         return sendJson(request.build());
     }
 
     private JsonNode postJson(String path, Object body, String token) {
         try {
-            HttpRequest.Builder request = HttpRequest.newBuilder(resolve(path))
-                    .timeout(Duration.ofSeconds(30))
+            HttpRequest.Builder request = requestBuilder(resolve(path))
                     .header("Content-Type", "application/json")
-                    .header(TOOL_ID_HEADER, TOOL_ID)
                     .POST(HttpRequest.BodyPublishers.ofByteArray(objectMapper.writeValueAsBytes(body)));
             if (!isBlank(token)) request.header(TOKEN_HEADER, token);
             return sendJson(request.build());
@@ -222,6 +216,13 @@ public class TcdsHttpGateway implements TcdsGateway {
         } catch (Exception exception) {
             throw upstream("TCDS 请求构造失败");
         }
+    }
+
+    /** TCDS 同源请求统一携带 toolId；重定向到对象存储后不向其它源透传该 header。 */
+    private HttpRequest.Builder requestBuilder(URI uri) {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(30));
+        if (sameOrigin(baseUri, uri)) request.header(TOOL_ID_HEADER, TOOL_ID);
+        return request;
     }
 
     private JsonNode sendJson(HttpRequest request) {
@@ -299,6 +300,17 @@ public class TcdsHttpGateway implements TcdsGateway {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, message);
         }
         return uri;
+    }
+
+    private static boolean sameOrigin(URI left, URI right) {
+        return left.getScheme().equalsIgnoreCase(right.getScheme())
+                && left.getHost().equalsIgnoreCase(right.getHost())
+                && effectivePort(left) == effectivePort(right);
+    }
+
+    private static int effectivePort(URI uri) {
+        if (uri.getPort() >= 0) return uri.getPort();
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
     private static byte[] readBounded(InputStream input, long maxBytes, String message) throws Exception {
