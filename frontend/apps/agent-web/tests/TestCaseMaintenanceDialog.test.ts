@@ -1,6 +1,7 @@
 import { defineComponent, h } from "vue";
 import { mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
+import { ElMessage } from "element-plus";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import TestCaseMaintenanceDialog from "../src/components/TestCaseMaintenanceDialog.vue";
 
 const ElDialogStub = defineComponent({
@@ -91,7 +92,10 @@ function mountDialog(overrides: Record<string, unknown> = {}) {
 }
 
 describe("TestCaseMaintenanceDialog", () => {
-  afterEach(() => { document.body.innerHTML = ""; });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = "";
+  });
 
   it("displays the complete task type names returned by TCDS", () => {
     const wrapper = mountDialog();
@@ -114,10 +118,34 @@ describe("TestCaseMaintenanceDialog", () => {
       && row.taskTypes.includes("3"))).toBe(true);
   });
 
-  it("does not confirm while any case has no task type", async () => {
+  it("only validates and submits selected cases", async () => {
     const wrapper = mountDialog();
+    await wrapper.get('input[aria-label="选择案例 案例二"]').setValue(false);
+    await wrapper.get('select[aria-label="案例 案例一 的任务类型"]').setValue(["3"]);
     await wrapper.findAll("button").find((button) => button.text() === "确定")!.trigger("click");
+
+    const submitted = wrapper.emitted("confirm")?.[0]?.[0] as Array<{ name: string; taskTypes: string[] }>;
+    expect(submitted).toEqual([expect.objectContaining({ name: "案例一", taskTypes: ["3"] })]);
+  });
+
+  it("asks for a case type when a selected case has no type", async () => {
+    const warning = vi.spyOn(ElMessage, "warning");
+    const wrapper = mountDialog();
+    await wrapper.get('input[aria-label="选择案例 案例二"]').setValue(false);
+    await wrapper.findAll("button").find((button) => button.text() === "确定")!.trigger("click");
+
     expect(wrapper.emitted("confirm")).toBeUndefined();
+    expect(warning).toHaveBeenCalledWith("请选择案例类型");
+  });
+
+  it("does not confirm when no case is selected", async () => {
+    const warning = vi.spyOn(ElMessage, "warning");
+    const wrapper = mountDialog();
+    await wrapper.get('input[aria-label="选择全部案例"]').setValue(false);
+    await wrapper.findAll("button").find((button) => button.text() === "确定")!.trigger("click");
+
+    expect(wrapper.emitted("confirm")).toBeUndefined();
+    expect(warning).toHaveBeenCalledWith("请选择案例");
   });
 
   it("disables task type actions while loading", () => {

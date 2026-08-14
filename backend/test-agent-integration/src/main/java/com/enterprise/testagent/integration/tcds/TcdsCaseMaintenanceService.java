@@ -5,16 +5,23 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -31,8 +38,22 @@ public class TcdsCaseMaintenanceService {
     private static final int MAX_TASK_TYPE_COUNT = 100;
     private static final int MAX_TASK_TYPE_NAME_LENGTH = 128;
     private static final int MAX_TASK_TYPE_VALUE_LENGTH = 32;
-    private static final String TASK_TYPE_NAME_SUFFIX = "测试任务";
-
+    private static final int MAX_LOG_CASE_COUNT = 20;
+    private static final int MAX_LOG_PAYLOAD_LENGTH = 8 * 1024;
+    private static final int LOG_DIGEST_LENGTH = 16;
+    private static final String REDACTED = "[REDACTED]";
+    /** TCDS 展示枚举与 createGraphCase 业务枚举并非统一后缀关系，必须按已确认 code 精确转换。 */
+    private static final Map<String, TaskTypeMapping> TASK_TYPE_MAPPINGS_BY_VALUE = Map.ofEntries(
+            Map.entry("0", new TaskTypeMapping("自定义测试任务", "自定义")),
+            Map.entry("1", new TaskTypeMapping("安全测试任务", "安全")),
+            Map.entry("2", new TaskTypeMapping("业务风险防控测试任务", "业务风险防控")),
+            Map.entry("3", new TaskTypeMapping("功能测试任务", "功能测试")),
+            Map.entry("4", new TaskTypeMapping("验收测试任务", "验收")),
+            Map.entry("5", new TaskTypeMapping("准入测试任务", "准入")),
+            Map.entry("6", new TaskTypeMapping("灰度测试任务", "灰度")),
+            Map.entry("7", new TaskTypeMapping("投产验证测试任务", "投产验证")),
+            Map.entry("8", new TaskTypeMapping("非功能性测试任务", "非功能性")),
+            Map.entry("11", new TaskTypeMapping("验收准入测试任务", "验收准入")));
     private final TcdsHttpRequestFactory requestFactory;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -60,7 +81,10 @@ public class TcdsCaseMaintenanceService {
             try (InputStream responseBody = response.body()) {
                 taskTypes = parseTaskTypes(response.statusCode(), responseBody);
             }
-            LOGGER.info("TCDS task types loaded, taskTypeCount={}, traceId={}", taskTypes.size(), normalizedTraceId);
+            LOGGER.info(
+                    "TCDS task types loaded, taskTypeCount={}, traceId={}",
+                    taskTypes.size(),
+                    normalizedTraceId);
             return taskTypes;
         } catch (PlatformException exception) {
             throw exception;
@@ -89,7 +113,7 @@ public class TcdsCaseMaintenanceService {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "案例列表不能为空");
         }
         Set<String> allowedTaskTypes = getTaskTypes(normalizedTraceId).stream()
-                .map(option -> toCaseTaskType(option.name()))
+                .map(option -> toCaseTaskType(option.name(), option.value()))
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         validateCaseTaskTypes(cases, allowedTaskTypes);
 
@@ -100,15 +124,35 @@ public class TcdsCaseMaintenanceService {
                 normalizedUserId,
                 cases.stream().map(UpstreamCase::from).toList());
         try {
+            byte[] serializedRequest = objectMapper.writeValueAsBytes(requestBody);
+            LOGGER.info(
+                    "event=tcds_create_graph_case_request operation=createGraphCase itemNo={} caseCount={} "
+                            + "traceId={} payload={}",
+                    normalizedItemNo,
+                    cases.size(),
+                    normalizedTraceId,
+                    safeRequestLogPayload(normalizedItemNo, cases));
             HttpRequest request = requestFactory.request(CREATE_GRAPH_CASE_PATH, REQUEST_TIMEOUT)
                     .header("Accept", "application/json")
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(objectMapper.writeValueAsBytes(requestBody)))
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(serializedRequest))
                     .build();
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            try (InputStream responseBody = response.body()) {
-                verifyMaintenanceResponse(response.statusCode(), responseBody);
+            InputStream rawResponseBody = response.body();
+            byte[] responseBytes = null;
+            if (rawResponseBody != null) {
+                try (InputStream responseBody = rawResponseBody) {
+                    responseBytes = readBoundedResponse(responseBody);
+                }
             }
+            LOGGER.info(
+                    "event=tcds_create_graph_case_response operation=createGraphCase itemNo={} httpStatus={} "
+                            + "traceId={} payload={}",
+                    normalizedItemNo,
+                    response.statusCode(),
+                    normalizedTraceId,
+                    safeResponseLogPayload(response.statusCode(), responseBytes));
+            verifyMaintenanceResponse(response.statusCode(), responseBytes);
             LOGGER.info(
                     "TCDS case maintenance succeeded, itemNo={}, caseCount={}, traceId={}",
                     normalizedItemNo,
@@ -147,7 +191,7 @@ public class TcdsCaseMaintenanceService {
             }
             String name = normalizedUpstreamText(item.get("name"), MAX_TASK_TYPE_NAME_LENGTH);
             String value = normalizedUpstreamText(item.get("value"), MAX_TASK_TYPE_VALUE_LENGTH);
-            String caseTaskType = toCaseTaskType(name);
+            String caseTaskType = toCaseTaskType(name, value);
             if (name == null || value == null || caseTaskType == null
                     || !values.add(value) || !caseTaskTypes.add(caseTaskType)) {
                 throw unavailable("TCDS 任务类型服务响应格式无效", null);
@@ -157,16 +201,16 @@ public class TcdsCaseMaintenanceService {
         return List.copyOf(options);
     }
 
-    /** getTaskTypes 的展示名只删除末尾精确后缀，所得名称直接用于 createGraphCase。 */
-    private static String toCaseTaskType(String upstreamName) {
-        if (upstreamName == null || !upstreamName.endsWith(TASK_TYPE_NAME_SUFFIX)) {
+    /** 同时校验上游 value 与完整展示名，防止未知枚举或错配名称进入 createGraphCase。 */
+    private static String toCaseTaskType(String upstreamName, String upstreamValue) {
+        if (upstreamName == null || upstreamValue == null) {
             return null;
         }
-        String taskType = upstreamName.substring(0, upstreamName.length() - TASK_TYPE_NAME_SUFFIX.length()).trim();
-        if (taskType.isBlank() || taskType.contains(",") || taskType.contains("，")) {
+        TaskTypeMapping mapping = TASK_TYPE_MAPPINGS_BY_VALUE.get(upstreamValue.trim());
+        if (mapping == null || !mapping.upstreamName().equals(upstreamName.trim())) {
             return null;
         }
-        return taskType;
+        return mapping.caseTaskType();
     }
 
     /** 提交前使用同一时刻的实时任务类型集合校验浏览器传入的业务名称。 */
@@ -182,7 +226,7 @@ public class TcdsCaseMaintenanceService {
         }
     }
 
-    private void verifyMaintenanceResponse(int statusCode, InputStream responseBody) throws IOException {
+    private void verifyMaintenanceResponse(int statusCode, byte[] responseBody) throws IOException {
         JsonNode root = readResponseRoot(statusCode, responseBody, "TCDS 案例维护");
         if (root.path("code").intValue() != 0) {
             throw new PlatformException(ErrorCode.CONFLICT, safeBusinessMessage(root.path("msg").asText("")));
@@ -191,14 +235,16 @@ public class TcdsCaseMaintenanceService {
 
     /** 对两个 TCDS 接口统一执行 HTTP、响应体大小、JSON 根节点和业务码字段校验。 */
     private JsonNode readResponseRoot(int statusCode, InputStream responseBody, String operation) throws IOException {
+        return readResponseRoot(statusCode, responseBody == null ? null : readBoundedResponse(responseBody), operation);
+    }
+
+    private JsonNode readResponseRoot(int statusCode, byte[] body, String operation) throws IOException {
         if (statusCode < 200 || statusCode >= 300) {
             throw unavailable(operation + "服务暂不可用", null);
         }
-        if (responseBody == null) {
+        if (body == null) {
             throw unavailable(operation + "服务响应格式无效", null);
         }
-        // 只读取上限再多一个字节，避免异常上游响应在进入业务校验前占用无界内存。
-        byte[] body = responseBody.readNBytes(MAX_RESPONSE_BYTES + 1);
         if (body.length == 0 || body.length > MAX_RESPONSE_BYTES) {
             throw unavailable(operation + "服务响应格式无效", null);
         }
@@ -211,6 +257,184 @@ public class TcdsCaseMaintenanceService {
             throw unavailable(operation + "服务响应格式无效", null);
         }
         return root;
+    }
+
+    /** 只读取上限再多一个字节，既标识超限响应，也避免异常上游占用无界内存。 */
+    private static byte[] readBoundedResponse(InputStream responseBody) throws IOException {
+        return responseBody.readNBytes(MAX_RESPONSE_BYTES + 1);
+    }
+
+    /**
+     * 生成 createGraphCase 请求的安全日志报文。认证号完全删除，案例正文只保留长度和摘要，
+     * 同时限制案例预览数量和整条日志大小，避免日志成为业务数据副本。
+     */
+    String safeRequestLogPayload(String itemNo, List<TcdsCaseInput> cases)
+            throws JsonProcessingException {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("aiFlag", "1");
+        payload.put("method", "文本理解生成法");
+        payload.put("itemNo", safeLogText(itemNo, 128));
+        payload.put("userId", REDACTED);
+        payload.put("caseCount", cases.size());
+        ArrayNode caseList = payload.putArray("caseList");
+        cases.stream().limit(MAX_LOG_CASE_COUNT).forEach(input -> {
+            ObjectNode caseNode = caseList.addObject();
+            caseNode.set("name", sensitiveTextSummary(input.name()));
+            caseNode.set("step", sensitiveTextSummary(input.step()));
+            caseNode.set("data", sensitiveTextSummary(input.data()));
+            caseNode.set("expect", sensitiveTextSummary(input.expect()));
+            caseNode.set("dataDependencies", sensitiveTextSummary(""));
+            caseNode.put("isAICase", "是");
+            caseNode.put("isUpdate", "否");
+            caseNode.put("caseFlag", "2");
+            caseNode.put("taskType", safeLogText(input.taskType(), 512));
+        });
+        if (cases.size() > MAX_LOG_CASE_COUNT) {
+            payload.put("omittedCaseCount", cases.size() - MAX_LOG_CASE_COUNT);
+        }
+        return boundedLogPayload(payload, requestLogFallback(itemNo, cases.size()));
+    }
+
+    /**
+     * 生成 createGraphCase 响应的安全日志报文。业务码和有界消息用于诊断，data 及未知正文只记录元数据摘要。
+     */
+    String safeResponseLogPayload(int statusCode, byte[] body) throws IOException {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("httpStatus", statusCode);
+        if (body == null) {
+            payload.put("bodyState", "missing");
+            return objectMapper.writeValueAsString(payload);
+        }
+        payload.put("bodyBytesRead", body.length);
+        if (body.length > MAX_RESPONSE_BYTES) {
+            payload.put("bodyState", "oversized");
+            payload.put("bodyPrefixSha256", shortSha256(body));
+            return objectMapper.writeValueAsString(payload);
+        }
+        payload.put("bodySha256", shortSha256(body));
+        if (body.length == 0) {
+            payload.put("bodyState", "empty");
+            return objectMapper.writeValueAsString(payload);
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            if (root == null || !root.isObject()) {
+                payload.put("bodyState", "invalid_root");
+                return objectMapper.writeValueAsString(payload);
+            }
+            JsonNode code = root.get("code");
+            if (code != null && code.canConvertToInt()) {
+                payload.put("code", code.intValue());
+            } else {
+                payload.put("codeState", "invalid");
+            }
+            JsonNode msg = root.get("msg");
+            if (msg != null && msg.isTextual()) {
+                payload.put("msg", safeUpstreamMessage(msg.textValue()));
+            }
+            if (root.has("data")) {
+                payload.set("data", responseDataSummary(root.get("data")));
+            }
+            payload.put("bodyState", "parsed");
+            return boundedLogPayload(payload, responseLogFallback(statusCode, body, code, msg));
+        } catch (JsonProcessingException exception) {
+            payload.put("bodyState", "invalid_json");
+            return objectMapper.writeValueAsString(payload);
+        }
+    }
+
+    private ObjectNode requestLogFallback(String itemNo, int caseCount) {
+        ObjectNode fallback = objectMapper.createObjectNode();
+        fallback.put("aiFlag", "1");
+        fallback.put("method", "文本理解生成法");
+        fallback.put("itemNo", safeLogText(itemNo, 128));
+        fallback.put("userId", REDACTED);
+        fallback.put("caseCount", caseCount);
+        fallback.put("payloadState", "truncated");
+        return fallback;
+    }
+
+    private ObjectNode responseLogFallback(int statusCode, byte[] body, JsonNode code, JsonNode msg) {
+        ObjectNode fallback = objectMapper.createObjectNode();
+        fallback.put("httpStatus", statusCode);
+        fallback.put("bodyBytesRead", body.length);
+        fallback.put("bodySha256", shortSha256(body));
+        if (code != null && code.canConvertToInt()) {
+            fallback.put("code", code.intValue());
+        }
+        if (msg != null && msg.isTextual()) {
+            fallback.put("msg", safeUpstreamMessage(msg.textValue()));
+        }
+        fallback.put("payloadState", "truncated");
+        return fallback;
+    }
+
+    private String boundedLogPayload(ObjectNode payload, ObjectNode fallback) throws JsonProcessingException {
+        String serialized = objectMapper.writeValueAsString(payload);
+        byte[] serializedBytes = serialized.getBytes(StandardCharsets.UTF_8);
+        if (serializedBytes.length <= MAX_LOG_PAYLOAD_LENGTH) {
+            return serialized;
+        }
+        fallback.put("payloadBytes", serializedBytes.length);
+        fallback.put("payloadSha256", shortSha256(serializedBytes));
+        return objectMapper.writeValueAsString(fallback);
+    }
+
+    private ObjectNode sensitiveTextSummary(String value) {
+        String normalized = value == null ? "" : value;
+        byte[] bytes = normalized.getBytes(StandardCharsets.UTF_8);
+        ObjectNode summary = objectMapper.createObjectNode();
+        summary.put("length", normalized.length());
+        summary.put("bytes", bytes.length);
+        summary.put("sha256", shortSha256(bytes));
+        return summary;
+    }
+
+    private ObjectNode responseDataSummary(JsonNode data) throws JsonProcessingException {
+        ObjectNode summary = objectMapper.createObjectNode();
+        if (data == null || data.isNull()) {
+            summary.put("type", "null");
+            return summary;
+        }
+        if (data.isArray()) {
+            summary.put("type", "array");
+            summary.put("size", data.size());
+        } else if (data.isObject()) {
+            summary.put("type", "object");
+            summary.put("fieldCount", data.size());
+        } else if (data.isTextual()) {
+            summary.put("type", "string");
+            summary.put("length", data.textValue().length());
+        } else {
+            summary.put("type", data.getNodeType().name().toLowerCase(java.util.Locale.ROOT));
+        }
+        summary.put("sha256", shortSha256(objectMapper.writeValueAsBytes(data)));
+        return summary;
+    }
+
+    private static String shortSha256(byte[] value) {
+        try {
+            String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+            return digest.substring(0, LOG_DIGEST_LENGTH);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("JVM 不支持 SHA-256", exception);
+        }
+    }
+
+    private static String safeLogText(String value, int maxLength) {
+        String normalized = value == null ? "" : value.replaceAll("[\\p{Cntrl}]", " ").trim();
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
+    }
+
+    /** 上游业务消息可保留用于排障，但其中常见凭据赋值、Bearer 值和长数字身份必须再次脱敏。 */
+    private static String safeUpstreamMessage(String value) {
+        String normalized = safeLogText(value, 200);
+        normalized = TcdsHttpRequestFactory.redactToolId(normalized);
+        normalized = normalized.replaceAll("(?i)Bearer\\s+[^\\s,;]+", "Bearer " + REDACTED);
+        normalized = normalized.replaceAll(
+                "(?i)(authorization|cookie|token|password|secret|toolId)\\s*[:=]\\s*[^\\s,;]+",
+                "$1=" + REDACTED);
+        return normalized.replaceAll("(?<!\\d)\\d{6,}(?!\\d)", REDACTED);
     }
 
     /** 上游枚举仅接受有界、无控制字符的文本，避免异常数据进入页面。 */
@@ -247,6 +471,9 @@ public class TcdsCaseMaintenanceService {
 
     private static PlatformException unavailable(String message, Throwable cause) {
         return new PlatformException(ErrorCode.EXTERNAL_API_UNAVAILABLE, message, java.util.Map.of(), cause);
+    }
+
+    private record TaskTypeMapping(String upstreamName, String caseTaskType) {
     }
 
     private record UpstreamRequest(

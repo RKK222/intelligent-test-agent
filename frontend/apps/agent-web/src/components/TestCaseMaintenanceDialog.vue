@@ -69,11 +69,16 @@ function applyBatchTaskTypes() {
 
 function confirm() {
   if (props.taskTypesLoading || props.taskTypesError || props.taskTypeOptions.length === 0) return;
-  if (hasMissingTaskTypes(rows.value)) {
-    ElMessage.warning("请选择任务类型");
+  const selectedRows = rows.value.filter((_, index) => selectedIndexes.value.has(index));
+  if (selectedRows.length === 0) {
+    ElMessage.warning("请选择案例");
     return;
   }
-  emit("confirm", rows.value.map((row) => ({ ...row, taskTypes: [...row.taskTypes] })));
+  if (hasMissingTaskTypes(selectedRows)) {
+    ElMessage.warning("请选择案例类型");
+    return;
+  }
+  emit("confirm", selectedRows.map((row) => ({ ...row, taskTypes: [...row.taskTypes] })));
 }
 
 function requestClose() {

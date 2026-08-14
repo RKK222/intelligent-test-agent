@@ -35,17 +35,24 @@ const EXTENDED_CASE_TABLE_HEADERS = [
   "备注"
 ] as const;
 
-const TASK_TYPE_NAME_SUFFIX = "测试任务";
+const TASK_TYPE_MAPPINGS_BY_VALUE = new Map<string, { name: string; requestName: string }>([
+  ["0", { name: "自定义测试任务", requestName: "自定义" }],
+  ["1", { name: "安全测试任务", requestName: "安全" }],
+  ["2", { name: "业务风险防控测试任务", requestName: "业务风险防控" }],
+  ["3", { name: "功能测试任务", requestName: "功能测试" }],
+  ["4", { name: "验收测试任务", requestName: "验收" }],
+  ["5", { name: "准入测试任务", requestName: "准入" }],
+  ["6", { name: "灰度测试任务", requestName: "灰度" }],
+  ["7", { name: "投产验证测试任务", requestName: "投产验证" }],
+  ["8", { name: "非功能性测试任务", requestName: "非功能性" }],
+  ["11", { name: "验收准入测试任务", requestName: "验收准入" }]
+]);
 
-/** createGraphCase 使用任务类型展示名去掉固定后缀后的业务名称。 */
-function toTaskTypeRequestName(name: string): string {
-  const normalized = name.trim();
-  if (!normalized.endsWith(TASK_TYPE_NAME_SUFFIX)) throw new Error("任务类型无效");
-  const requestName = normalized.slice(0, -TASK_TYPE_NAME_SUFFIX.length).trim();
-  if (!requestName || requestName.includes(",") || requestName.includes("，")) {
-    throw new Error("任务类型无效");
-  }
-  return requestName;
+/** 同时校验 TCDS 的 value 与展示名，按确认的枚举 code 生成 createGraphCase 业务名称。 */
+function toTaskTypeRequestName(option: TcdsTaskTypeOption): string {
+  const mapping = TASK_TYPE_MAPPINGS_BY_VALUE.get(option.value.trim());
+  if (!mapping || option.name.trim() !== mapping.name) throw new Error("任务类型无效");
+  return mapping.requestName;
 }
 
 function buildTaskTypeRequestNames(options: TcdsTaskTypeOption[]): Map<string, string> {
@@ -53,7 +60,7 @@ function buildTaskTypeRequestNames(options: TcdsTaskTypeOption[]): Map<string, s
   const uniqueNames = new Set<string>();
   for (const option of options) {
     const value = option.value.trim();
-    const requestName = toTaskTypeRequestName(option.name);
+    const requestName = toTaskTypeRequestName(option);
     if (!value || requestNames.has(value) || !uniqueNames.add(requestName)) {
       throw new Error("任务类型无效");
     }
@@ -184,7 +191,7 @@ export function buildTcdsTestCaseMaintenancePayload(input: {
 }): TcdsTestCaseMaintenancePayload {
   const itemNo = input.itemNo.trim();
   if (!itemNo) throw new Error("无法识别需求子条目编号");
-  if (hasMissingTaskTypes(input.cases)) throw new Error("请选择任务类型");
+  if (hasMissingTaskTypes(input.cases)) throw new Error("请选择案例类型");
   const taskTypeRequestNames = buildTaskTypeRequestNames(input.taskTypeOptions);
 
   return {

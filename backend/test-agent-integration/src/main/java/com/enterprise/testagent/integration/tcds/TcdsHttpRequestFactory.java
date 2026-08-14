@@ -40,6 +40,11 @@ final class TcdsHttpRequestFactory {
         return request;
     }
 
+    /** 日志消息若意外包含固定 toolId，只返回脱敏占位符，避免业务服务复制该常量。 */
+    static String redactToolId(String value) {
+        return Objects.requireNonNullElse(value, "").replace(TOOL_ID, "[REDACTED]");
+    }
+
     private static URI requireBaseUri(String raw) {
         if (raw == null || raw.isBlank()) {
             throw new IllegalStateException("TEST_AGENT_TCDS_BASE_URL 未配置");

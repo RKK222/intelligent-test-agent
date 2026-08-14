@@ -10514,3 +10514,27 @@
 - 原始 DOCX 不再是文本抽取，可保留上述 Word 结构；图片通过安全工作区文件服务写盘并使用相对 Markdown 引用。上游只提供已压平文本时继续可导入，但已丢失的 Word 样式无法从纯文本还原。
 - 结构化渲染前后使用的是同一条“OOXML → 旧 DOC → 可读文本”回退链；本轮无需修改生产转换逻辑，只用回归测试锁定旧链路可导入的压平文本不会因发布新渲染器而退化。
 - 本次不新增 HTTP/RPC/RunEvent 接口、数据库/Flyway、部署变量或依赖，不修改 `.env*`、generated SDK 或 OpenCode 源码；公共 Agent、工作区 ID 及 Git diff/提交/推送链路未变更。
+
+## 2026-08-14 - 合并远程 release 的 TCDS 案例日志增强
+
+### Why
+
+- 用户要求拉取远程 `release` 后重新打企业包；远程新增提交 `9ee0ff643078d93b298060b0bf553f83073ab967`，本地同时保留需求导入状态、Word 结构化转换和纯文本兼容修复。
+- 远程 TCDS 实现基于旧地址装配，直接合并会重新写死生产地址并绕过当前统一 `TcdsHttpRequestFactory`，与企业 `:9080` 地址契约冲突。
+
+### What
+
+- 保留统一 `TEST_AGENT_TCDS_BASE_URL`、共享 `toolId` 注入和所有 profile 实时请求语义，吸收远程确认的 10 项 `name/value -> taskType` 精确映射、仅提交勾选案例及 `createGraphCase` 请求/响应脱敏诊断日志。
+- 日志不复制固定 `toolId` 常量；请求正文只保留有界长度和 SHA-256 短摘要，响应 `data` 只保留类型、数量和摘要，非法、空或超限正文不记录原文。
+- 同步 integration、前端、HTTP API 和安全文档；未修改数据库、Flyway、RunEvent、环境配置、部署拓扑、generated SDK 或 OpenCode 源码。
+
+### How
+
+- JDK 25 下 TCDS 配置/服务与需求文档转换/导入定向测试 27/27 通过；前端案例维护定向 Vitest 16/16、全 workspace typecheck、用户手册和 agent-web production build 通过。
+- 冲突标记、`git diff --check` 均通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，确认继续保留 `.4` Qwen 灰度、`.114` 现网模型及 worker/manager 不重启边界。
+- 对比上一企业包源码 `9b1151ed05b0e2acbbbd8ac8ecf08eda646a5bc7`，Flyway migration 文件无变化。
+
+### Result
+
+- 当前 `release` 同时包含远程 TCDS 日志/任务类型增强和本地三项需求导入修复，TCDS 地址仍由企业部署配置统一控制。
+- 真实企业 TCDS 任务类型、案例维护和 Office 下载仍需现场验收；本地自动化没有替代企业网络验证。
