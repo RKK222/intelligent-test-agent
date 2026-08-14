@@ -210,7 +210,8 @@ function openRootActions() {
   fileExplorerRef.value?.openRootActions();
 }
 
-const iframeUrl = computed(() => new URL("/workspace-requirement-import", window.location.origin).toString());
+// 独立 HTML 入口只加载需求导入所需的 Vue 与 backend-api，避免 iframe 再启动整套工作台。
+const iframeUrl = computed(() => new URL("/workspace-requirement-import/", window.location.origin).toString());
 const requirementImportAvailable = computed(() => Boolean(
   props.workspaceId && props.canWrite && managedWorkspaceMode.value
 ));
@@ -245,6 +246,12 @@ function handleIframeMessage(event: MessageEvent) {
     const result = data.result as { status?: string } | undefined;
     if (result?.status === "SUCCEEDED" || result?.status === "PARTIAL") emit("refresh");
     if (result?.status === "SUCCEEDED") closeIframeDialog();
+    return;
+  }
+  if (data?.type === "ITA_REQUIREMENT_IMPORT_AUTH_REQUIRED") {
+    closeIframeDialog();
+    const handler = (window as unknown as Record<string, unknown>).__handleUnauthorized;
+    if (typeof handler === "function") handler();
   }
 }
 

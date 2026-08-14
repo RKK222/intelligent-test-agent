@@ -113,18 +113,26 @@ export default defineConfig({
     target: "chrome108",
     cssTarget: "chrome108",
     rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        requirementImport: fileURLToPath(new URL("./workspace-requirement-import/index.html", import.meta.url))
+      },
       output: {
         // 代码分割策略：将大型第三方库独立分 chunk，优化缓存和首屏加载
         // 注意：Monaco Editor 不放入 manualChunks，让 Vite 的 ?worker 语法自然拆分 Workers
         manualChunks(id) {
           // Vue 生态核心
-          if (id.includes("vue/dist") || id.includes("vue-router") || id.includes("pinia")) {
+          if (
+            id.includes("vue/dist")
+            || id.includes("/node_modules/vue/")
+            || id.includes("/node_modules/@vue/")
+            || id.includes("vue-router")
+            || id.includes("pinia")
+          ) {
             return "vue-vendor";
           }
-          // Element Plus UI 库
-          if (id.includes("element-plus") || id.includes("@element-plus/icons-vue")) {
-            return "element-plus";
-          }
+          // Element Plus 与 Vue Query 交给 Rollup 按入口依赖图拆分，避免轻量 iframe
+          // 被公共手工 chunk 反向带入完整 UI 与查询库。
           // Markdown 相关
           if (id.includes("markdown-it") || id.includes("highlight.js") || id.includes("marked")) {
             return "markdown";
@@ -132,10 +140,6 @@ export default defineConfig({
           // 布局/面板管理
           if (id.includes("dockview-vue")) {
             return "dockview";
-          }
-          // 数据请求管理
-          if (id.includes("@tanstack/vue-query")) {
-            return "query";
           }
           // Monaco Editor 不配置，让 ?worker 语法自然拆分 Workers
         }

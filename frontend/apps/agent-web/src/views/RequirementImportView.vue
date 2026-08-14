@@ -21,6 +21,7 @@ const api = createBackendApiClient({
 const context = ref<ImportContext | null>(null);
 const applications = ref<RequirementImportApplication[]>([]);
 const selectedApp = ref("");
+const selectedAppInput = ref("");
 const selectedVersion = ref("");
 const items = ref<RequirementImportItem[]>([]);
 const selected = ref(new Set<string>());
@@ -31,6 +32,18 @@ const importing = ref(false);
 const errorMessage = ref("");
 const result = ref<RequirementImportResult | null>(null);
 let itemRequestSequence = 0;
+
+function applicationLabel(application: RequirementImportApplication): string {
+  return `${application.appName}（${application.appShortName}）`;
+}
+
+function resolveApplication(raw: string): RequirementImportApplication | undefined {
+  const normalized = raw.trim();
+  return applications.value.find((application) =>
+    application.appShortName === normalized
+    || application.appName === normalized
+    || applicationLabel(application) === normalized);
+}
 
 const versions = computed(() => {
   const now = new Date();
@@ -87,10 +100,11 @@ async function loadApplications() {
   try {
     applications.value = await api.listRequirementImportApplications();
     const expected = context.value?.defaultAppName?.trim();
-    selectedApp.value = applications.value.find((application) =>
-      application.appName === expected || application.appShortName === expected)?.appShortName
-      ?? applications.value[0]?.appShortName
-      ?? "";
+    const application = applications.value.find((candidate) =>
+      candidate.appName === expected || candidate.appShortName === expected)
+      ?? applications.value[0];
+    selectedApp.value = application?.appShortName ?? "";
+    selectedAppInput.value = application ? applicationLabel(application) : "";
     selectedVersion.value = versions.value.includes(context.value?.defaultVersion ?? "")
       ? context.value!.defaultVersion!
       : versions.value[3];
@@ -101,6 +115,32 @@ async function loadApplications() {
     loadingApplications.value = false;
   }
   // 应用目录返回后立即释放筛选控件；条目请求较慢时用户仍可切换，迟到请求由 sequence 丢弃。
+  await loadItems();
+}
+
+async function applyApplicationInput() {
+  const application = resolveApplication(selectedAppInput.value);
+  if (!application) {
+    selectedApp.value = "";
+    items.value = [];
+    selected.value = new Set();
+    result.value = null;
+    errorMessage.value = "请选择当前用户有权访问的 TCDS 应用";
+    return;
+  }
+  selectedApp.value = application.appShortName;
+  selectedAppInput.value = applicationLabel(application);
+  await loadItems();
+}
+
+async function applyVersionInput() {
+  if (!versions.value.includes(selectedVersion.value)) {
+    items.value = [];
+    selected.value = new Set();
+    result.value = null;
+    errorMessage.value = "请选择当前月份前后 3 个月内的版本";
+    return;
+  }
   await loadItems();
 }
 
@@ -194,36 +234,40 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
     <section class="filters" aria-label="需求筛选">
       <label class="filter-field">
         <span class="filter-label">版本：</span>
-        <el-select
+        <input
           v-model="selectedVersion"
-          class="filter-control"
+          class="filter-control filter-input"
+          type="text"
+          list="requirement-import-versions"
           aria-label="TCDS 版本"
-          filterable
+          autocomplete="off"
           :disabled="importing"
-          @change="loadItems"
-        >
-          <el-option v-for="version in versions" :key="version" :label="version" :value="version" />
-        </el-select>
+          @change="applyVersionInput"
+        />
+        <datalist id="requirement-import-versions">
+          <option v-for="version in versions" :key="version" :value="version" />
+        </datalist>
       </label>
       <label class="filter-field">
         <span class="filter-label">应用：</span>
-        <el-select
-          v-model="selectedApp"
-          class="filter-control"
+        <input
+          v-model="selectedAppInput"
+          class="filter-control filter-input"
+          type="text"
+          list="requirement-import-applications"
           aria-label="TCDS 应用"
           placeholder="请选择应用"
-          filterable
-          :loading="loadingApplications"
+          autocomplete="off"
           :disabled="importing || applications.length === 0"
-          @change="loadItems"
-        >
-          <el-option
+          @change="applyApplicationInput"
+        />
+        <datalist id="requirement-import-applications">
+          <option
             v-for="application in applications"
             :key="application.appShortName"
-            :label="`${application.appName}（${application.appShortName}）`"
-            :value="application.appShortName"
+            :value="applicationLabel(application)"
           />
-        </el-select>
+        </datalist>
       </label>
       <label class="filter-field search">
         <span class="filter-label">条目信息：</span>
@@ -324,7 +368,6 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
   place-items: center;
   padding: 24px;
   background: rgb(245 247 250 / 82%);
-  backdrop-filter: blur(2px);
 }
 
 .importing-card {
@@ -422,14 +465,13 @@ footer {
   flex: 1;
 }
 
-.filter-field :deep(.el-select) {
-  width: 100%;
-}
-
-.filter-field :deep(.el-select__wrapper),
+.filter-input,
 .search-control {
   box-sizing: border-box;
+  width: 100%;
+  height: 28px;
   min-height: 28px;
+  padding: 0 10px;
   border: 1px solid #dcdfe6;
   border-radius: 4px;
   outline: none;
@@ -440,15 +482,16 @@ footer {
 }
 
 .search-control {
-  width: 100%;
-  height: 28px;
-  padding: 0 10px;
+  appearance: none;
 }
 
+.filter-input:focus,
 .search-control:focus {
   border-color: #409eff;
+  box-shadow: 0 0 0 1px rgb(64 158 255 / 16%);
 }
 
+.filter-input:disabled,
 .search-control:disabled {
   cursor: not-allowed;
   background: #f5f7fa;

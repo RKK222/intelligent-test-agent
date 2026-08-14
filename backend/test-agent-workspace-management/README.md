@@ -8,7 +8,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 ## 主要职责
 
-- `RequirementImportApplicationService` 重新查询 TCDS 授权目录和文档元数据，将受支持的 Office/文本内容转换为 Markdown，并只通过既有工作区文件服务在 `spec/` 下幂等写入；同一服务使用与导入一致的安全目录规范化返回父子条目“已导入/未导入”状态，已导入项仍可覆盖重试；选择上限、下载容量、路径规范化、碰撞和逐文件失败都在服务端执行。
+- `RequirementImportApplicationService` 重新查询 TCDS 授权目录和文档元数据，将受支持的 Office/文本内容转换为 Markdown，并只通过既有工作区文件服务在 `spec/` 下幂等写入；同一服务使用与导入一致的安全目录规范化返回父子条目“已导入/未导入”状态，批量状态查询只解析一次工作区元数据，各相对路径仍逐一经过公共文件服务校验，已导入项仍可覆盖重试；选择上限、下载容量、路径规范化、碰撞和逐文件失败都在服务端执行。
 
 公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在任何远端 push 或工作树修改前，先通过 `PublicAgentConfigRolloutCoordinator` 建立 `PREPARING` 持久化禁发任务；远端提交确认后才转为 `DRAINING` 并广播 `rolloutId`。push 回包不确定时会 fetch 验证远端是否已包含目标提交；发起 Java 退出时，同服务器补偿任务按远端事实恢复 PREPARING。每台服务器通过数据库租约认领同步任务，复用发起用户已加密保存的 SSH key 刷新 origin、fetch、checkout/reset 共享运行副本到明确 commit，再把同一 commit 原生 merge 到本机所有有效公共个人 worktree。非重叠 staged/unstaged/untracked 内容保留；覆盖风险或冲突写入独立公共 worktree 补偿任务，不阻塞共享副本、其它用户或主 rollout。发布请求在远端提交确认、rollout 激活并广播后立即返回，不在 HTTP 请求线程认领或执行本机同步；本机和其它服务器均由广播消费者或 5 秒持久化补偿程序异步推进。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本；公共“拉取”以远端分支 commit 为全服务器唯一目标，不再绑定某一服务器或只处理当前管理员。公共发布不会再推送长期个人分支的整段历史，而是把合并后的最终文件树投影为以当前远端提交为唯一父节点、由当前管理员企业身份签署的线性提交，避免旧的无效 committer 污染新发布。
 

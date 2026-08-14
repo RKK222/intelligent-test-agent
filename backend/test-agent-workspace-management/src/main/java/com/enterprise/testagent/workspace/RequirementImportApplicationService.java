@@ -76,19 +76,34 @@ public class RequirementImportApplicationService {
             String appShortName,
             String editionId,
             WorkspaceId workspaceId) {
-        return tcdsGateway.listRequirementItems(
+        List<RequirementItem> items = tcdsGateway.listRequirementItems(
                         required(unifiedAuthId, "unifiedAuthId"),
                         required(appShortName, "appShortName"),
-                        required(editionId, "editionId"))
-                .stream()
-                .map(item -> itemOption(item, workspaceId))
+                        required(editionId, "editionId"));
+        Map<String, FileStatusResponse> statuses = workspaceId == null
+                ? Map.of()
+                : workspaceService.fileStatuses(workspaceId, importStatusPaths(items));
+        return items.stream()
+                .map(item -> itemOption(item, workspaceId != null, statuses))
                 .toList();
     }
 
-    private ItemOption itemOption(RequirementItem item, WorkspaceId workspaceId) {
-        String parent = segment(item.itemNo() + "-" + item.itemName(), "父条目目录");
-        String root = "spec/" + parent;
-        Boolean imported = workspaceId == null ? null : workspaceService.fileStatus(workspaceId, root).exists();
+    private Collection<String> importStatusPaths(List<RequirementItem> items) {
+        Set<String> paths = new LinkedHashSet<>();
+        for (RequirementItem item : items) {
+            String root = parentRoot(item);
+            paths.add(root);
+            item.children().forEach(child -> paths.add(subItemRoot(root, child)));
+        }
+        return paths;
+    }
+
+    private ItemOption itemOption(
+            RequirementItem item,
+            boolean includeImportStatus,
+            Map<String, FileStatusResponse> statuses) {
+        String root = parentRoot(item);
+        Boolean imported = includeImportStatus ? imported(statuses, root) : null;
         return new ItemOption(
                 item.itemNo(),
                 item.itemName(),
@@ -96,14 +111,22 @@ public class RequirementImportApplicationService {
                         .map(child -> new SubItemOption(
                                 child.itemNo(),
                                 child.itemName(),
-                                workspaceId == null ? null : workspaceService.fileStatus(
-                                                workspaceId,
-                                                root + "/01-需求/" + segment(
-                                                        child.itemNo() + "-" + child.itemName(),
-                                                        "子条目目录"))
-                                        .exists()))
+                                includeImportStatus ? imported(statuses, subItemRoot(root, child)) : null))
                         .toList(),
                 imported);
+    }
+
+    private String parentRoot(RequirementItem item) {
+        return "spec/" + segment(item.itemNo() + "-" + item.itemName(), "父条目目录");
+    }
+
+    private String subItemRoot(String parentRoot, RequirementSubItem child) {
+        return parentRoot + "/01-需求/" + segment(child.itemNo() + "-" + child.itemName(), "子条目目录");
+    }
+
+    private boolean imported(Map<String, FileStatusResponse> statuses, String path) {
+        FileStatusResponse status = statuses.get(path);
+        return status != null && status.exists();
     }
 
     /**
