@@ -169,29 +169,21 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
 
 <template>
   <main class="requirement-import-page">
-    <header>
-      <div>
-        <p class="eyebrow">TCDS · 内部需求</p>
-        <h1>导入到测试工作空间</h1>
-      </div>
-      <span class="selection-count">已选 {{ selected.size }} / 100</span>
-    </header>
-
-    <section class="filters">
-      <label>应用
+    <section class="filters" aria-label="需求筛选">
+      <label class="filter-field">版本：
+        <select v-model="selectedVersion" :disabled="loadingApplications || importing" @change="loadItems">
+          <option v-for="version in versions" :key="version" :value="version">{{ version }}</option>
+        </select>
+      </label>
+      <label class="filter-field">应用：
         <select v-model="selectedApp" :disabled="loadingApplications || importing" @change="loadItems">
           <option v-for="application in applications" :key="application.appShortName" :value="application.appShortName">
             {{ application.appName }}（{{ application.appShortName }}）
           </option>
         </select>
       </label>
-      <label>版本
-        <select v-model="selectedVersion" :disabled="loadingApplications || importing" @change="loadItems">
-          <option v-for="version in versions" :key="version" :value="version">{{ version }}</option>
-        </select>
-      </label>
-      <label class="search">筛选
-        <input v-model="keyword" type="search" placeholder="输入父项、子项编号或名称" />
+      <label class="filter-field search">条目信息：
+        <input v-model="keyword" type="search" placeholder="按名字/ID 搜索" />
       </label>
     </section>
 
@@ -207,7 +199,7 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
           />
           全选当前筛选结果
         </label>
-        <span>{{ filteredNumbers.length }} 个可选子项</span>
+        <span>已选 {{ selected.size }} / 100，当前 {{ filteredNumbers.length }} 个可选子项</span>
       </div>
 
       <p v-if="!context" class="empty">正在等待工作空间上下文…</p>
@@ -252,41 +244,282 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
     </div>
 
     <footer>
-      <span>目录将写入当前工作空间的 <code>spec/</code>，不会删除其它文件。</span>
       <button :disabled="!context || selected.size === 0 || selected.size > 100 || importing" @click="submitImport">
-        {{ importing ? "正在导入…" : `导入 ${selected.size} 个子项` }}
+        {{ importing ? "正在生成…" : "生成" }}
       </button>
     </footer>
   </main>
 </template>
 
 <style scoped>
-.requirement-import-page { min-height: 100vh; box-sizing: border-box; padding: 28px; color: #18181b; background: #f7f7f5; font: 14px/1.5 Inter, "PingFang SC", sans-serif; }
-header, .filters, .catalog-toolbar, footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-h1 { margin: 2px 0 0; font-size: 24px; letter-spacing: -.02em; }
-.eyebrow { margin: 0; color: #8a1c2c; font-size: 11px; font-weight: 700; letter-spacing: .12em; }
-.selection-count { padding: 6px 11px; border-radius: 999px; background: #fff; border: 1px solid #ddd; }
-.filters { margin: 22px 0 14px; align-items: end; }
-.filters label { display: grid; gap: 6px; color: #52525b; font-size: 12px; font-weight: 600; }
-.filters .search { flex: 1; }
-select, input[type="search"] { height: 38px; min-width: 190px; padding: 0 11px; border: 1px solid #d4d4d8; border-radius: 8px; background: white; color: #18181b; }
-input[type="search"] { width: 100%; box-sizing: border-box; }
-.catalog { min-height: 330px; max-height: calc(100vh - 310px); overflow: auto; border: 1px solid #ddd; border-radius: 12px; background: #fff; }
-.catalog-toolbar { position: sticky; top: 0; z-index: 1; padding: 12px 16px; border-bottom: 1px solid #e4e4e7; background: rgba(255,255,255,.96); color: #71717a; }
-.check-label { display: flex; align-items: center; gap: 9px; cursor: pointer; }
-.parent-item + .parent-item { border-top: 1px solid #eee; }
-.parent-row { padding: 13px 16px; background: #fafafa; }
-.children { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: #eee; }
-.child-row { min-height: 42px; padding: 8px 16px 8px 42px; background: #fff; }
-code { color: #7f1d2d; font: 12px ui-monospace, SFMono-Regular, monospace; }
-.empty { padding: 90px 20px; text-align: center; color: #71717a; }
-.notice { margin-top: 12px; padding: 11px 14px; border-radius: 9px; border: 1px solid #bfdbfe; background: #eff6ff; }
-.notice.error, .notice.failed { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
-.notice.partial { border-color: #fde68a; background: #fffbeb; color: #92400e; }
-.notice.succeeded { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
-.notice ul { margin: 7px 0 0; padding-left: 20px; }
-footer { margin-top: 16px; color: #71717a; }
-button { min-width: 150px; height: 40px; border: 0; border-radius: 9px; background: #7f1d2d; color: white; font-weight: 700; cursor: pointer; }
-button:disabled { cursor: not-allowed; opacity: .45; }
-@media (max-width: 760px) { .filters { align-items: stretch; flex-direction: column; } .filters label, select { width: 100%; } .children { grid-template-columns: 1fr; } }
+.requirement-import-page {
+  box-sizing: border-box;
+  display: flex;
+  height: 100vh;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px;
+  color: #606266;
+  background: #fff;
+  font: 14px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
+
+.filters,
+.catalog-toolbar,
+footer {
+  display: flex;
+  align-items: center;
+}
+
+.filters {
+  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 8px;
+}
+
+.filter-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #606266;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.filter-field.search {
+  flex: 1;
+}
+
+select,
+input[type="search"] {
+  box-sizing: border-box;
+  height: 28px;
+  min-width: 200px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  outline: none;
+  background: #fff;
+  color: #606266;
+  font: inherit;
+  transition: border-color 0.2s;
+}
+
+select {
+  padding: 0 28px 0 10px;
+}
+
+input[type="search"] {
+  width: 100%;
+  padding: 0 10px;
+}
+
+select:focus,
+input[type="search"]:focus {
+  border-color: #409eff;
+}
+
+select:disabled,
+input[type="search"]:disabled {
+  cursor: not-allowed;
+  background: #f5f7fa;
+  color: #c0c4cc;
+}
+
+.catalog {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #ebeef5;
+  background: #fff;
+}
+
+.catalog-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid #ebeef5;
+  background: #f5f7fa;
+  color: #909399;
+  font-size: 12px;
+}
+
+.check-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.check-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: #409eff;
+}
+
+.check-label:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.parent-item {
+  border-bottom: 1px solid #ebeef5;
+}
+
+.parent-item:last-child {
+  border-bottom: 0;
+}
+
+.parent-row {
+  min-height: 34px;
+  padding: 0 12px;
+  color: #303133;
+}
+
+.parent-row strong,
+.child-row code {
+  flex: 0 0 auto;
+  color: inherit;
+  font: inherit;
+}
+
+.parent-row span,
+.child-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.children {
+  border-top: 1px solid #ebeef5;
+}
+
+.child-row {
+  min-height: 34px;
+  padding: 0 12px 0 40px;
+  border-bottom: 1px solid #f2f3f5;
+  background: #fff;
+}
+
+.child-row:last-child {
+  border-bottom: 0;
+}
+
+.child-row:hover {
+  background: #f5f7fa;
+}
+
+.empty {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 20px;
+  color: #909399;
+  text-align: center;
+}
+
+.notice {
+  max-height: 92px;
+  flex-shrink: 0;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #b3d8ff;
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.notice.error,
+.notice.failed {
+  border-color: #fbc4c4;
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
+.notice.partial {
+  border-color: #f5dab1;
+  background: #fdf6ec;
+  color: #e6a23c;
+}
+
+.notice.succeeded {
+  border-color: #c2e7b0;
+  background: #f0f9eb;
+  color: #67c23a;
+}
+
+.notice ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
+footer {
+  flex-shrink: 0;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+button {
+  min-width: 64px;
+  height: 28px;
+  padding: 0 15px;
+  border: 1px solid #409eff;
+  border-radius: 4px;
+  background: #409eff;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: #66b1ff;
+  background: #66b1ff;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (max-width: 760px) {
+  .requirement-import-page {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  .filters {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .filter-field,
+  .filter-field select {
+    width: 100%;
+  }
+
+  .filter-field {
+    justify-content: space-between;
+  }
+
+  .catalog {
+    min-height: 300px;
+  }
+
+  .catalog-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 12px;
+  }
+}
 </style>

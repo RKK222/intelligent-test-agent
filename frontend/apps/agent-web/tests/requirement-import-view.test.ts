@@ -105,4 +105,35 @@ describe("RequirementImportView", () => {
     expect(wrapper.text()).toContain("部分文档导入失败");
     wrapper.unmount();
   });
+
+  it("keeps select-all, parent selection, and child multi-selection behavior", async () => {
+    const wrapper = mount(RequirementImportView);
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_selection"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalled());
+    const selectAll = wrapper.get('.catalog-toolbar input[type="checkbox"]');
+    const parent = wrapper.get('.parent-row input[type="checkbox"]');
+    const children = wrapper.findAll('.child-row input[type="checkbox"]');
+
+    expect(children).toHaveLength(2);
+    await selectAll.setValue(true);
+    expect(wrapper.text()).toContain("已选 2 / 100");
+    expect(children.every((checkbox) => (checkbox.element as HTMLInputElement).checked)).toBe(true);
+
+    await children[0].setValue(false);
+    expect((selectAll.element as HTMLInputElement).indeterminate).toBe(true);
+    expect((parent.element as HTMLInputElement).indeterminate).toBe(true);
+
+    await parent.setValue(true);
+    expect(children.every((checkbox) => (checkbox.element as HTMLInputElement).checked)).toBe(true);
+    wrapper.unmount();
+  });
 });
