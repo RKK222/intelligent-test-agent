@@ -79,6 +79,7 @@ vi.mock("@test-agent/workbench-shell", async () => {
 describe("GitChangesPanel", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.sessionStorage.clear();
     apiClientMock.getVcsDiffFiles.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceGitDiff.mockResolvedValue({ files: [] });
     apiClientMock.discardWorkspaceGitFiles.mockResolvedValue(undefined);
@@ -165,6 +166,7 @@ describe("GitChangesPanel", () => {
 
   afterEach(() => {
     cleanup();
+    window.sessionStorage.clear();
     vi.clearAllMocks();
     vi.restoreAllMocks();
   });
@@ -1997,6 +1999,102 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(view.queryByLabelText("opencode.jsonc")).toBeNull());
   });
 
+  it("keeps failed workspace files pending and retries without another local commit", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "docs/retry.md", status: "modified", rawStatus: "M ", staged: true, patch: "@@ -1 +1 @@\n-old\n+new", additions: 1, deletions: 1 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace
+      .mockRejectedValueOnce(new BackendApiError(503, {
+        success: false,
+        code: "GIT_UNAVAILABLE",
+        message: "Git 远端网络连接失败",
+        traceId: "trace_workspace_retry",
+        retryable: true,
+        details: {
+          failedStep: "PUSH_REMOTE",
+          gitFailureHint: "请检查后端服务器到 Git 远端的网络。",
+          localCommitRetained: true,
+          remoteCommitState: "NOT_REACHED",
+          publishRecoveryAction: "RETRY_NOW"
+        }
+      }))
+      .mockResolvedValueOnce({
+        status: "PUBLISHED",
+        personalWorkspaceId: "psw_default",
+        versionId: "awv_1",
+        conflictFiles: [],
+        message: "已推送",
+        remotePushed: true,
+        headCommit: "commit_retried",
+        remoteBranch: "feature_testagent_20260717"
+      });
+    const props = {
+      workspaceId: "wrk_1234567890abcdef",
+      personalWorkspaceId: "psw_default",
+      apiBaseUrl: "http://api",
+      canWrite: true
+    };
+    const view = render(GitChangesPanel, { props, global: { plugins: [createPinia()] } });
+
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: retry workspace");
+    await fireEvent.click(await view.findByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText("待推送")).toBeTruthy();
+    expect(await view.findByText(/已确认远端未包含本次提交/)).toBeTruthy();
+    expect(view.getByRole("button", { name: "重新推送" })).toBeTruthy();
+    expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledTimes(1);
+
+    await fireEvent.click(view.getByRole("button", { name: "重新推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(2));
+    expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledTimes(1);
+    expect(apiClientMock.publishPersonalWorkspace.mock.calls[1][1]).toMatchObject({
+      commitMessage: "fix: retry workspace",
+      files: ["docs/retry.md"]
+    });
+    expect(await view.findByText("提交并推送成功！")).toBeTruthy();
+  });
+
+  it("restores a failed workspace publish after remount in the same browser tab", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "docs/refresh-retry.md", status: "modified", rawStatus: "M ", staged: true, patch: "patch", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockRejectedValueOnce(new BackendApiError(503, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 操作超时",
+      traceId: "trace_refresh_retry",
+      retryable: true,
+      details: {
+        gitFailureHint: "请检查 Git 网络连通性。",
+        localCommitRetained: true,
+        remoteCommitState: "UNKNOWN",
+        publishRecoveryAction: "RETRY_NOW"
+      }
+    }));
+    const props = {
+      workspaceId: "wrk_1234567890abcdef",
+      personalWorkspaceId: "psw_default",
+      apiBaseUrl: "http://api",
+      canWrite: true
+    };
+    const first = render(GitChangesPanel, { props, global: { plugins: [createPinia()] } });
+    await fireEvent.update(first.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: survive refresh");
+    await fireEvent.click(await first.findByRole("button", { name: "提交并推送" }));
+    expect(await first.findByText("待推送")).toBeTruthy();
+    first.unmount();
+
+    const second = render(GitChangesPanel, { props, global: { plugins: [createPinia()] } });
+
+    expect(await second.findByText("refresh-retry.md")).toBeTruthy();
+    expect(second.getByText("待推送")).toBeTruthy();
+    expect(second.getByRole("button", { name: "重新推送" })).toBeTruthy();
+  });
+
   it("shows the currently running git command from publish progress events", async () => {
     let progressHandler: ((event: { currentStep?: string; command?: string; status?: string }) => void) | undefined;
     apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: typeof progressHandler) => {
@@ -2082,6 +2180,58 @@ describe("GitChangesPanel", () => {
 
     expect(await view.findByText("提交并推送成功！")).toBeTruthy();
     expect(view.queryByText("暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果。")).toBeNull();
+  });
+
+  it("keeps the authoritative HTTP failure after a websocket failure event", async () => {
+    apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: (event: {
+      type: string;
+      operationId: string;
+      currentStep: string;
+      status: string;
+      errorCode: string;
+      errorMessage: string;
+    }) => void) => {
+      handler({
+        type: "failed",
+        operationId: "aco_network_failure",
+        currentStep: "PUSH_REMOTE",
+        status: "FAILED",
+        errorCode: "GIT_UNAVAILABLE",
+        errorMessage: "Git 仓库不可访问"
+      });
+      return { close: vi.fn() };
+    });
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/network.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockRejectedValueOnce(new BackendApiError(503, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 仓库不可访问",
+      traceId: "trace_network_diagnostic",
+      retryable: true,
+      details: {
+        failedStep: "PUSH_REMOTE",
+        gitFailureHint: "请检查后端服务器到 Git 远端的网络、DNS 和 SSH 端口连通性。",
+        localCommitRetained: true,
+        remoteCommitState: "UNKNOWN",
+        publishRecoveryAction: "RETRY_NOW"
+      }
+    }));
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+    await fireEvent.update(await view.findByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: network failure");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText(/trace_network_diagnostic/)).toBeTruthy();
+    expect(view.getByText(/可点击“重新推送”执行幂等核验/)).toBeTruthy();
+    expect(view.getByText("执行失败")).toBeTruthy();
+    expect(view.queryByText("执行未完成")).toBeNull();
   });
 
   it("treats a websocket handshake rejection as unavailable progress instead of a git failure", async () => {

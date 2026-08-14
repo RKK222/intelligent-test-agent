@@ -36,6 +36,7 @@ import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
@@ -3512,6 +3513,9 @@ class ManagedWorkspaceApplicationServiceTest {
                 "trace_default");
 
         git.nextHeadCommit = "commit_merged_retry";
+        git.nextRemoteCommit = "commit_base";
+        git.remoteFastForward = false;
+        git.targetContainedInHead = false;
 
         ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
@@ -3528,6 +3532,163 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.mergeCalls).isEmpty();
         assertThat(git.materializedRepoRoot).isEqualTo(applicationRepoRoot());
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_retry");
+    }
+
+    @Test
+    void publishPersonalWorkspaceTreatsLostPushResponseAsSuccessWhenRemoteContainsCommit() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextStatusPorcelain = "M F-GCMS/workspace/README.md\n";
+        git.nextHeadCommit = "commit_pushed_despite_response_loss";
+        git.nextRemoteCommit = "commit_base";
+        git.remoteCommitAfterPushFailure = "commit_pushed_despite_response_loss";
+        git.pushFailure = new PlatformException(
+                ErrorCode.GIT_UNAVAILABLE,
+                "Git 远端网络连接失败",
+                Map.of("gitFailureType", "NETWORK_UNAVAILABLE"));
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: response loss",
+                List.of("README.md"),
+                new UserId("usr_1"),
+                "trace_publish");
+
+        assertThat(result.status()).isEqualTo("PUBLISHED");
+        assertThat(result.remotePushed()).isTrue();
+        assertThat(result.headCommit()).isEqualTo("commit_pushed_despite_response_loss");
+        assertThat(git.pushes).hasSize(1);
+    }
+
+    @Test
+    void retryApplicationAgentPublishReusesPreparingRollout() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextStatusPorcelain = "";
+        git.nextHeadCommit = "commit_application_agent_pending";
+        git.nextRemoteCommit = "commit_base";
+        git.remoteFastForward = false;
+        git.targetContainedInHead = false;
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutPreparation preparation = new PublicAgentConfigRolloutPreparation(
+                "acr_existing",
+                AgentConfigRolloutScope.APPLICATION,
+                version.versionId(),
+                version.branch(),
+                "commit_application_agent_pending",
+                "commit_base",
+                "usr_1",
+                "127.0.0.1",
+                "trace_original",
+                Instant.now());
+        when(coordinator.preparing("127.0.0.1", AgentConfigRolloutScope.APPLICATION))
+                .thenReturn(Optional.of(preparation));
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: retry application agent",
+                List.of(".opencode/agents/reviewer.md"),
+                new UserId("usr_1"),
+                "trace_retry");
+
+        assertThat(result.status()).isEqualTo("PUBLISHED");
+        verify(coordinator, org.mockito.Mockito.never()).prepareApplication(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+        verify(coordinator).activate("acr_existing", "commit_application_agent_pending");
+    }
+
+    @Test
+    void retryAfterLostHttpResponseDoesNotCreateDuplicateApplicationAgentRollout() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextStatusPorcelain = "";
+        git.nextHeadCommit = "commit_already_remote";
+        git.nextRemoteCommit = "commit_already_remote";
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: idempotent response retry",
+                List.of(".opencode/agents/reviewer.md"),
+                new UserId("usr_1"),
+                "trace_retry");
+
+        assertThat(result.status()).isEqualTo("PUBLISHED");
+        assertThat(git.pushes).isEmpty();
+        verify(coordinator, org.mockito.Mockito.never()).prepareApplication(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void publishPersonalWorkspaceReturnsRetryFactsWhenRemoteDoesNotContainCommit() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.nextStatusPorcelain = "M F-GCMS/workspace/README.md\n";
+        git.nextHeadCommit = "commit_local_only";
+        git.pushFailure = new PlatformException(
+                ErrorCode.GIT_UNAVAILABLE,
+                "Git 远端网络连接失败",
+                Map.of(
+                        "gitFailureType", "NETWORK_UNAVAILABLE",
+                        "gitFailureHint", "请检查后端服务器到 Git 远端的网络。"));
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextRemoteCommit = "commit_remote_before_push";
+        git.remoteFastForward = false;
+        git.targetContainedInHead = false;
+
+        assertThatThrownBy(() -> service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: retry facts",
+                List.of("README.md"),
+                new UserId("usr_1"),
+                "trace_publish"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.details()).containsEntry("localCommitRetained", true);
+                    assertThat(exception.details()).containsEntry("remoteCommitState", "NOT_REACHED");
+                    assertThat(exception.details()).containsEntry("publishRecoveryAction", "RETRY_NOW");
+                    assertThat(exception.details()).containsEntry("failedStep", "PUSH_REMOTE");
+                });
     }
 
     @Test
@@ -4002,6 +4163,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private GitCommitIdentity committedStagedIdentity;
         private List<String> committedOnlyFiles = List.of();
         private boolean commitStagedUpdatesHead;
+        private Boolean stagedChanges;
         private Path materializedRepoRoot;
         private String materializedCommit;
         private List<String> materializedFiles = List.of();
@@ -4023,6 +4185,8 @@ class ManagedWorkspaceApplicationServiceTest {
         private boolean mergeInProgress;
         private final Map<Integer, String> conflictStageContents = new java.util.HashMap<>();
         private final List<PushCall> pushes = new ArrayList<>();
+        private RuntimeException pushFailure;
+        private String remoteCommitAfterPushFailure;
         private String clonedGitUrl;
         private String originUrlValue = "https://example.com/gcms.git";
         private String directoryPathCreatedOnPull;
@@ -4217,6 +4381,15 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public boolean hasStagedChanges(Path repoRoot, String privateKey) {
+            if (stagedChanges != null) {
+                return stagedChanges;
+            }
+            boolean createsWorkspaceDirectory = stagedFiles.stream().anyMatch(path -> path.endsWith("/.gitkeep"));
+            return !nextStatusPorcelain.isBlank() || commitStagedUpdatesHead || createsWorkspaceDirectory;
+        }
+
+        @Override
         public void commitFilesOnly(
                 Path repoRoot,
                 List<String> files,
@@ -4294,6 +4467,12 @@ class ManagedWorkspaceApplicationServiceTest {
             this.pushedBranch = branch;
             this.pushedForce = force;
             this.pushedRepoRoot = repoRoot;
+            if (pushFailure != null) {
+                if (remoteCommitAfterPushFailure != null) {
+                    nextRemoteCommit = remoteCommitAfterPushFailure;
+                }
+                throw pushFailure;
+            }
         }
 
         @Override

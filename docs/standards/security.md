@@ -222,7 +222,8 @@ Token 校验流程：
 8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
 9. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
 10. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
-11. 分享工作区文件 ticket 必须额外绑定 share/version、真实 actor、执行所属人、固定 session/workspace、`canChat` 和分享到期时间；路由使用执行所属人的进程服务器。每条 RPC 和连接级定时监视都必须刷新分享授权，读写按当前 `canChat` 分流，失效时中止未完成上传、记录路径摘要审计并关闭连接。分享 ticket 禁止执行 `agent-config.*`、`directory.*`、`workspace.create` 或 Hub 操作，也禁止通过普通用户 affinity 获得其它 Workspace。
+11. Git 网络/权限/超时错误面向用户只展示稳定错误码、后端脱敏提示、可恢复状态和 traceId；前端不得拼接原始命令、stderr、远端 URL 或凭据。Git 命令超时必须终止 Git 及其 SSH 等后代进程，不能在请求失败后留下后台连接；浏览器待推送恢复只保存逻辑 ID、相对文件白名单和提交说明，不保存 patch、文件正文或物理路径。
+12. 分享工作区文件 ticket 必须额外绑定 share/version、真实 actor、执行所属人、固定 session/workspace、`canChat` 和分享到期时间；路由使用执行所属人的进程服务器。每条 RPC 和连接级定时监视都必须刷新分享授权，读写按当前 `canChat` 分流，失效时中止未完成上传、记录路径摘要审计并关闭连接。分享 ticket 禁止执行 `agent-config.*`、`directory.*`、`workspace.create` 或 Hub 操作，也禁止通过普通用户 affinity 获得其它 Workspace。
 
 ## 个人工作区搬迁 WebSocket 安全例外
 

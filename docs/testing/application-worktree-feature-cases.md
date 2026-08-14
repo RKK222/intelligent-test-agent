@@ -159,10 +159,13 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 公共保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` → `POST /agent-config/public/runtime-reload` → `PersonalAgentConfigRuntimeReloadService` | Controller 把同步等待 dispose 的本地调用或跨服务器转发调度到 `boundedElastic`，避免在 WebFlux 事件线程调用 `block()`；随后校验 worktree owner/服务器，原子切换 `{sessionPath}/.testagent-runtime/current-public-config` 到本人公共 worktree，再只调用本人进程 `/global/dispose` |
 | 应用保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` | 当前用户在个人 worktree 保存后直接调用 `disposeGlobal()`；OpenCode 下一次按请求 directory 重读该个人 worktree `.opencode` |
 | 公共发布热加载 | `PublicAgentConfigRolloutService` 的 PUBLIC scope | 各服务器共享 Git 副本固定提交同步后，逐进程等待全部 Session 空闲，恢复共享配置链接并调用 `/global/dispose`；升级前直接读取共享路径的旧进程兼容只 dispose |
+| 发布失败恢复 | `GitChangesPanel` + `ManagedWorkspaceApplicationService` | 本地提交成功后网络失败保留待推送白名单；刷新可幂等重试且不重复 commit。后端按远端包含/未包含/未知三态处理 feature 临时提交，未知状态保留 PREPARING 闸门；用户可只清除浏览器提醒，管理员仍可按 traceId 排查 |
 
 兼容接口 `POST /personal-workspaces/{id}/sync-from-application` 不再逐文件复制，也不接受 `force` 覆盖个人内容；`files: []` 是“合并整个固定 feature commit”的合法请求，旧客户端传非空路径时只校验格式，不以路径缩小合并范围。
 
 同一 `appId + repositoryId + version + branch` 的多个应用工作空间版本共用物理 feature 仓库和目标提交；测试需覆盖历史 target 不一致自动收敛、新增目录 `.gitkeep` 提交并 push、历史个人记录指向仓库根时修复到模板子目录，以及子目录仍缺失时拒绝回退到仓库根。设置页初始版本失败补偿必须覆盖三种边界：本次新模板且无版本时删除、既有模板失败时保留、版本已经持久化后再失败时保留；还需覆盖快速切换两个版本库后先发请求迟到，分支下拉只保留最后所选版本库的响应。
+
+真实 UI 回归必须至少覆盖：测试工作区个人 worktree 本地提交、测试工作区应用 worktree 提交并推送、自动化版本库个人 worktree 本地提交、公共 Agent 推送与 rollout target `DISPOSED`；另一提交者推进同一远端后的非冲突 merge、add/add 冲突、中止合并、采用远程并完成 merge；确定性断网和偶发 SSH 断连后的重复重试；无应用成员用户看不到目标应用，且非 `SUPER_ADMIN` 不出现公共提交/推送入口。失败弹框必须展示稳定错误码、脱敏 `gitFailureHint` 和 traceId，不能只停在转圈或“执行未完成”。
 
 ## 5. 可重复测试数据
 

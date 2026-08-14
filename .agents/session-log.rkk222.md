@@ -10525,3 +10525,28 @@
 
 - release 当前后台默认地址、全部固定 TCDS JSON 接口和同源文档请求 header 已满足现场契约，跨域对象存储不泄露 header，环境覆盖保持兼容；未新增 API、DTO、RunEvent、数据库、migration、服务、端口或强制配置。
 - 有效登录用户下的真实授权目录、重复覆盖、部分失败和文件树刷新仍需企业会话验收；release 修复后仍需按长期分支策略同步回 dev。
+
+## 2026-08-14 - 补全 Git 推送不确定状态恢复与多权限 UI 端到端验收
+
+### Why
+
+- workspace 与公共 Agent 的“一步提交并推送”会在 Git/SSH 超时、HTTP 回包丢失或进度 WebSocket 迟到时出现本地已提交但页面仍转圈、步骤停在 `PENDING`、远端事实不明且刷新后无法继续的问题。
+- 平台同时存在普通 workspace、应用 Agent、公共 Agent、自动化仓库、`spec/**` 本地资产、多用户远端并发与不同 Git 权限，不能把单条成功链路作为验收结论。
+
+### What
+
+- workspace 与应用 Agent 在本地提交成功后保存当前 Tab 的待推送逻辑上下文，刷新后可复用原文件白名单幂等“重新推送”，不重复创建本地提交；用户可只清除浏览器提醒，已完成的本地提交不回退。公共 Agent 继续以后端 `publishPending` 为权威事实。
+- 应用 feature 发布改用 index 与 HEAD 的真实差异判断是否需要 commit；push 异常后按远端已包含、确认未包含、无法确认三态收敛，分别继续成功、回退 feature 临时提交并允许立即重试、或保留 PREPARING 闸门交给后台核验。错误只返回稳定恢复状态与 traceId，不向页面暴露 URL、命令或 stderr。
+- Git 超时现在终止顶层 Git 及其 SSH 等后代进程。拉取失败弹框展示错误码、脱敏提示和 traceId；延迟进度事件不能覆盖 HTTP 终态。同步更新 common/workspace/frontend README、HTTP API、安全规范和应用 worktree 测试说明。
+
+### How
+
+- 定向通过 Git 执行器 7 项、真实 Git 20 项、应用发布服务 101 项，以及前端 Git/错误恢复 4 个文件 168 项；前端 typecheck、production build 与后端 22 模块跳过测试完整打包通过。指定后端 reactor 19 个模块全量测试成功，其中 workspace 448 项、API 567 项，全部 0 failure/0 error。
+- 从 `http://127.0.0.1:3000` 完成 UI 级真实验收：自动化个人 worktree 和测试 workspace `spec/**` 只建立本地提交；普通 workspace 与应用 Agent 推送到 feature；公共 Agent 推送、共享同步与 rollout target `DISPOSED`；另一提交者推进远端后的非冲突合并、add/add 冲突、取消合并、采用远端并完成 merge；普通用户应用过滤与公共管理入口隐藏。
+- 使用拒绝连接地址验证确定性断网错误，页面返回 `GIT_UNAVAILABLE`、脱敏 `gitFailureHint` 和 traceId；Gitee SSH 偶发断连后重试成功。复现并修复 Git 超时遗留 SSH 子进程；最终无残留 Git/SSH 发布进程。测试仓库 URL、原 feature/个人/public 分支、物理 worktree 目录和数据库 target commit 已恢复，端到端证据保留在被测仓库本地 `codex-e2e-*` 分支。
+- Docker 恢复后按 `.env.test`/`test` profile/JDK 25 用最终产物重启 backend、manager 与 frontend；health/readiness 为 `UP`、3000 返回 200、登录 CORS 正确、manager WebSocket 已连接且进程 health 最终 `HEALTHY`。重新登录 UI 后三个 Git 作用域均为 0，无待推送、冲突或无效 commit 提示。
+
+### Result
+
+- `release` 上四类 Git 链路、多人冲突、权限隔离、网络失败、刷新恢复和 dispose 已完成真实 UI 端到端验证；网络抖动不再把“本地提交成功”伪装成全失败，也不会因盲目重试重复 commit。
+- 本次不新增 HTTP URL、DTO 或 RunEvent 类型，不改数据库结构/migration、部署拓扑、`.env*`、generated SDK 或 OpenCode 源码；只扩充既有错误 details 的稳定可选字段与前端展示。Gitee SSH 仍可能受外部网络偶发断连影响，但页面保留可重试入口和管理员可关联的 traceId。

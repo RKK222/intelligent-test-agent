@@ -73,6 +73,21 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void hasStagedChangesDistinguishesCleanIndexFromStagedContent() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "tracked.txt", "base\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        GitWorkspaceService service = new GitWorkspaceService();
+
+        assertThat(service.hasStagedChanges(repo, null)).isFalse();
+
+        write(repo, "tracked.txt", "changed\n");
+        git(repo, "add", "--", "tracked.txt");
+        assertThat(service.hasStagedChanges(repo, null)).isTrue();
+    }
+
+    @Test
     void commitFilesOnlyDoesNotIncludeOtherUsersStagedPaths() throws Exception {
         Path repo = initializeRepository();
         write(repo, "selected.txt", "base selected\n");

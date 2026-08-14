@@ -1541,6 +1541,26 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 判断 index 相对 HEAD 是否存在真实变更。发布重试必须先调用该方法，不能依赖
+     * `git commit` 的空提交 stderr 文案，因为不同 Git/语言环境下文案并不稳定。
+     */
+    public boolean hasStagedChanges(Path repoRoot, String privateKey) {
+        try {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "diff", "--cached", "--quiet", "--exit-code"),
+                    privateKey,
+                    DEFAULT_TIMEOUT);
+            return false;
+        } catch (PlatformException exception) {
+            Object exitCode = exception.details().get("exitCode");
+            if (exitCode instanceof Number number && number.intValue() == 1) {
+                return true;
+            }
+            throw exception;
+        }
+    }
+
+    /**
      * 从指定提交把白名单文件投影到目标 worktree 的工作树和索引。
      *
      * <p>发布流程使用个人 worktree 的不可变 HEAD 作为 sourceCommit，目标只能是应用
