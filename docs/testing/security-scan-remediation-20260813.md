@@ -2,7 +2,7 @@
 
 ## 已整改
 
-- 小地球固定加载登录守卫下的同源 `/workspace-requirement-import`，父子窗口同时校验精确 `origin/source`，`postMessage` 使用 `window.location.origin`，URL 不再携带用户 ID、后端 IP、物理根路径或 token。
+- 小地球固定加载登录守卫下的同源独立入口 `/workspace-requirement-import/`，父子窗口同时校验精确 `origin/source`，`postMessage` 使用 `window.location.origin`，URL 不再携带用户 ID、后端 IP、物理根路径或 token。
 - 浏览器只查询本项目 `/api/v1/requirement-import/**`，写入只走现有文件 WebSocket route/ticket/RPC。服务端重新查询 TCDS 授权、名称、文档类型与 URL，不接受浏览器提供的路径或下载地址。
 - TCDS 默认使用现场确认的企业局域网入口 `http://tcds-prod.sdc.icbc:9080`，允许 `TEST_AGENT_TCDS_BASE_URL` 覆盖；固定接口和 TCDS 同源文档请求统一携带现场 `toolId` header，重定向到跨域对象存储后不透传该 header。TCDS 文档地址限定 HTTP/HTTPS、10 秒连接、30 秒请求、最多 3 次重定向、20 MiB 单文件和 200 MiB 单次总量。正式日志不记录 token、文档 URL、签名参数或正文。
 - 普通、最近及支持访问 Workspace 响应不再返回物理根目录；`rootPath=workspace:{workspaceId}`、`physicalRootPath=null`。复制绝对路径改为点击后单文件 RPC，目录选择器由专用响应标记 `existingWorkspaceId`。
@@ -60,3 +60,10 @@
 - 取消物理根路径下发后，工具事件中的绝对 Unix/Windows 路径、URI 形态和越界路径一律失败关闭，不能被当作工作区相对路径发送到文件 WebSocket；后端生成的可信相对 Diff 路径仍正常刷新文件树和编辑器。
 - `mvn -pl test-agent-workspace-management,test-agent-opencode-runtime,test-agent-api -am test`：19 个相关模块通过，`test-agent-api` 565 项通过；覆盖 Workspace、个人 worktree、最近偏好、文件 route/ticket/RPC、会话/Run、分享、支持、体验和需求导入调用链。
 - `corepack pnpm test`：124 个测试文件、1949 项通过、1 项按既有条件跳过；`corepack pnpm typecheck` 与 `corepack pnpm build` 通过。9 条 Workspace 定向 Playwright 用例全部通过，覆盖普通文件、切换竞态、最近个人 worktree、源码快照、体验空间和 Diff；全套 Playwright 另有与本改动无关的既有路由断言和引导弹窗遮挡失败，未把整套浏览器测试记为通过。
+
+## 2026-08-14 TCDS 导入页面性能复核
+
+- `/workspace-requirement-import/` 改为 Vite 独立 HTML 入口，主路由只兼容跳转，不再让 iframe 重复启动工作台。生产入口不再预加载 Element Plus、Monaco 或 `AgentWorkbench`，只加载 Vue、平台接口客户端和导入页资源。
+- 版本与应用使用原生可输入候选框，避免为三个筛选控件引入 Element Plus 全量 JS/CSS；筛选区继续使用受宽度约束的网格。生成蒙版保留旋转动画和重复操作阻断，但移除背景模糊，避免长文档生成期间额外占用 GPU。
+- `workspace.requirement-import-items` 批量检查父子目录状态：一次取得工作区元数据，各相对路径仍逐一经过公共文件服务的越界与符号链接校验，避免大量条目重复查询工作区。
+- 3000 端口真实登录页面热启动点击到弹窗出现约 0.4 秒，iframe 首屏可立即交互；本机 TCDS 请求仍约 1.7 秒后返回服务不可用，该网络等待不阻塞弹窗渲染，真实授权条目列表仍需企业网络可用时复测。

@@ -218,6 +218,7 @@ describe("FigmaFileExplorer", () => {
     expect(button.attributes("disabled")).toBeUndefined();
     expect(button.attributes("title")).toBe("从 TCDS 导入需求");
     expect(fileExplorerSource).not.toContain("VITE_IFRAME_URL");
+    expect(fileExplorerSource).toContain('new URL("/workspace-requirement-import/", window.location.origin)');
     expect(fileExplorerSource).toContain("event.origin !== window.location.origin");
     expect(fileExplorerSource).toContain("event.source !== iframeRef.value?.contentWindow");
     expect(fileExplorerSource).not.toContain("postMessage({type:'FUNC_DISPATCH'");

@@ -3,6 +3,7 @@ package com.enterprise.testagent.workspace;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -19,6 +20,7 @@ import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.List;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
@@ -76,11 +78,15 @@ class RequirementImportApplicationServiceTest {
         when(gateway.listRequirementItems("u001", "PSN", "2026年8月"))
                 .thenReturn(List.of(new TcdsGateway.RequirementItem(
                         "I-01", "登录需求", List.of(imported, pending))));
-        when(workspace.fileStatus(any(WorkspaceId.class), anyString())).thenAnswer(invocation -> {
-            String path = invocation.getArgument(1);
-            boolean exists = path.equals("spec/I-01-登录需求")
-                    || path.equals("spec/I-01-登录需求/01-需求/SI-01-登录校验");
-            return new FileStatusResponse(path, exists, exists, 0, null);
+        when(workspace.fileStatuses(any(WorkspaceId.class), anyCollection())).thenAnswer(invocation -> {
+            Collection<String> paths = invocation.getArgument(1);
+            return paths.stream().collect(java.util.stream.Collectors.toMap(
+                    path -> path,
+                    path -> {
+                        boolean exists = path.equals("spec/I-01-登录需求")
+                                || path.equals("spec/I-01-登录需求/01-需求/SI-01-登录校验");
+                        return new FileStatusResponse(path, exists, exists, 0, null);
+                    }));
         });
         RequirementImportApplicationService service = new RequirementImportApplicationService(gateway, workspace);
 
@@ -95,6 +101,8 @@ class RequirementImportApplicationServiceTest {
                             org.assertj.core.groups.Tuple.tuple("SI-01", true),
                             org.assertj.core.groups.Tuple.tuple("SI-02", false));
         });
+        verify(workspace).fileStatuses(any(WorkspaceId.class), anyCollection());
+        verify(workspace, never()).fileStatus(any(WorkspaceId.class), anyString());
     }
 
     @Test

@@ -10816,3 +10816,29 @@
 
 - Word 导入恢复到结构化渲染改造前的轻量兼容语义，不会因文档名为 DOC/DOCX 但内容已压平而拒绝导入；不再生成图片附件或额外样式转换结果，降低现场压平长文本的处理负担。
 - 生成过程现在有清晰蒙版动画，完成或失败后由既有 `finally` 自动解除。真实企业 TCDS 数据的体感和最终导入结果仍需用户在现有企业登录会话中复测。
+
+## 2026-08-14 - 收敛小地球导入页打开与条目加载卡顿
+
+### Why
+
+- 用户反馈 Word 转换回退后页面仍卡，且打开“小地球”本身也会卡顿。运行时确认 iframe 仍通过主 SPA 路由启动，生产入口会额外预加载 Element Plus、Vue Query 和工作台共享依赖；条目状态查询还会为每个父子条目重复解析工作区元数据。
+- 生成蒙版使用 `backdrop-filter: blur(2px)`，长文档生成期间会增加不必要的 GPU 合成开销。
+
+### What
+
+- 新增 `/workspace-requirement-import/` 独立 Vite HTML 入口，只挂载需求导入 Vue 页面和 `backend-api`；父工作台固定加载该同源地址，旧无尾斜杠主路由仅做兼容跳转。独立入口复用同一 `sessionStorage` 登录态，401 通过精确同源消息交给父工作台统一处理。
+- 版本、应用改为原生可输入候选框，移除导入页对 Element Plus 的运行时依赖；生产入口不再预加载 Element Plus、Vue Query、Monaco 或 `AgentWorkbench`。生成蒙版保留旋转动画与操作阻断，但移除背景模糊。
+- `WorkspaceApplicationService.fileStatuses` 一次解析工作区元数据并批量返回状态；`RequirementImportApplicationService` 预先生成受控父子相对目录后一次调用，各路径仍逐一经过公共文件服务的越界和符号链接校验。
+- 同步 agent-web/workspace README、HTTP API、模块图和安全复测说明；未修改 `.env*`、HTTP/WebSocket/RunEvent 契约、数据库、Flyway、公共 Agent、Workspace ID 或 Git diff/提交推送链路。
+
+### How
+
+- 前端需求导入与文件树定向 Vitest 25/25、agent-web typecheck 和 production build 通过；独立入口构建资源约为页面脚本 8.6 KiB、接口客户端 65 KiB、Vue 运行时 127 KiB，不含 Element Plus、Vue Query、Monaco 和工作台主包。
+- JDK 25 下 `RequirementImportApplicationServiceTest` 与 `WorkspaceApplicationServiceTest` 15/15 通过；22 模块 `mvn clean package -Dmaven.test.skip=true` 成功，`git diff --check` 通过。
+- 使用主工作区 `.env.test`、`test` profile 和 JDK 25 启动当前 release worktree；8080 health/readiness 为 `UP`、3000 返回 200、登录 CORS 正确，manager WebSocket 已连接且进程健康为 `HEALTHY`。
+- 真实登录页面热启动点击到弹窗出现约 0.4 秒；iframe 主区、筛选区、条目区均满足 `scrollWidth == clientWidth`，搜索框未越界。当前本机 TCDS 约 1.7 秒返回服务不可用，未执行真实授权目录和文档导入。
+
+### Result
+
+- 小地球不再在 iframe 内重复启动完整工作台，打开后先渲染可交互页面，再异步等待 TCDS；大量条目加载不再重复读取工作区元数据，生成阶段也不再使用背景模糊。
+- 真实企业授权列表、生成蒙版和最终导入仍需用户在企业网络可用的登录会话中复测；当前本机只完成同源 UI、布局、构建产物、服务健康和自动化回归验证。

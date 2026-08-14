@@ -1,41 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { mount } from "@vue/test-utils";
-import { defineComponent, h } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RequirementImportView from "../src/views/RequirementImportView.vue";
 
 const listApplications = vi.fn();
 const listItems = vi.fn();
 const importRequirements = vi.fn();
-
-const ElSelectStub = defineComponent({
-  name: "ElSelect",
-  inheritAttrs: false,
-  props: { modelValue: String, disabled: Boolean, loading: Boolean },
-  emits: ["update:modelValue", "change"],
-  setup(props, { attrs, emit, slots }) {
-    return () => h("select", {
-      ...attrs,
-      value: props.modelValue,
-      disabled: props.disabled,
-      "data-loading": String(props.loading),
-      onChange: (event: Event) => {
-        const value = (event.target as HTMLSelectElement).value;
-        emit("update:modelValue", value);
-        emit("change", value);
-      }
-    }, slots.default?.());
-  }
-});
-
-const ElOptionStub = defineComponent({
-  name: "ElOption",
-  props: { label: String, value: String },
-  setup(props) {
-    return () => h("option", { value: props.value }, props.label);
-  }
-});
 
 vi.mock("@test-agent/backend-api", () => ({
   createBackendApiClient: () => ({
@@ -48,9 +19,7 @@ vi.mock("@test-agent/backend-api", () => ({
 describe("RequirementImportView", () => {
   const postMessage = vi.fn();
 
-  const mountView = () => mount(RequirementImportView, {
-    global: { stubs: { ElSelect: ElSelectStub, ElOption: ElOptionStub } }
-  });
+  const mountView = () => mount(RequirementImportView);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -264,18 +233,20 @@ describe("RequirementImportView", () => {
     }));
 
     await vi.waitFor(() => expect(listItems).toHaveBeenCalledTimes(1));
-    const versionSelect = wrapper.get('select[aria-label="TCDS 版本"]');
-    const applicationSelect = wrapper.get('select[aria-label="TCDS 应用"]');
-    expect(versionSelect.attributes("disabled")).toBeUndefined();
-    expect(applicationSelect.attributes("disabled")).toBeUndefined();
+    const versionInput = wrapper.get('input[aria-label="TCDS 版本"]');
+    const applicationInput = wrapper.get('input[aria-label="TCDS 应用"]');
+    expect(versionInput.attributes("disabled")).toBeUndefined();
+    expect(applicationInput.attributes("disabled")).toBeUndefined();
 
-    await applicationSelect.setValue("APP-B");
+    await applicationInput.setValue("应用乙（APP-B）");
+    await applicationInput.trigger("change");
     await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", expect.any(String)));
-    const currentVersion = (versionSelect.element as HTMLSelectElement).value;
-    const anotherVersion = versionSelect.findAll("option")
-      .find((option) => (option.element as HTMLOptionElement).value !== currentVersion)!;
-    const nextVersion = (anotherVersion.element as HTMLOptionElement).value;
-    await versionSelect.setValue(nextVersion);
+    const currentVersion = (versionInput.element as HTMLInputElement).value;
+    const nextVersion = wrapper.findAll('#requirement-import-versions option')
+      .map((option) => option.attributes("value"))
+      .find((version) => version !== currentVersion)!;
+    await versionInput.setValue(nextVersion);
+    await versionInput.trigger("change");
     await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", nextVersion));
 
     resolveItems([]);
@@ -289,5 +260,6 @@ describe("RequirementImportView", () => {
     expect(source).toMatch(/\.filter-field\s*\{[^}]*min-width: 0;/s);
     expect(source).toMatch(/\.filter-control\s*\{[^}]*min-width: 0;[^}]*flex: 1;/s);
     expect(source).toMatch(/\.catalog\s*\{[^}]*box-sizing: border-box;[^}]*width: 100%;[^}]*min-width: 0;/s);
+    expect(source).not.toContain("backdrop-filter");
   });
 });

@@ -20,6 +20,7 @@ import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -98,6 +99,28 @@ class WorkspaceApplicationServiceTest {
     }
 
     @Test
+    void batchFileStatusResolvesWorkspaceOnlyOnce() {
+        FakeWorkspaceRepository repository = new FakeWorkspaceRepository();
+        Workspace workspace = repository.save(new Workspace(
+                new WorkspaceId("wrk_batch_status"),
+                "Demo",
+                root.toString(),
+                java.time.Instant.parse("2026-06-20T00:00:00Z")));
+        WorkspaceApplicationService service = new WorkspaceApplicationService(repository, new WorkspaceFileService());
+        service.writeFile(workspace.workspaceId(), "spec/item/requirement.md", "content");
+        repository.findByIdCalls = 0;
+
+        Map<String, FileStatusResponse> statuses = service.fileStatuses(
+                workspace.workspaceId(),
+                List.of("spec/item", "spec/item/requirement.md", "spec/missing"));
+
+        assertThat(statuses.get("spec/item").directory()).isTrue();
+        assertThat(statuses.get("spec/item/requirement.md").exists()).isTrue();
+        assertThat(statuses.get("spec/missing").exists()).isFalse();
+        assertThat(repository.findByIdCalls).isEqualTo(1);
+    }
+
+    @Test
     void serviceRenamesWorkspaceFileThroughRegisteredWorkspaceRoot() throws Exception {
         FakeWorkspaceRepository repository = new FakeWorkspaceRepository();
         Workspace workspace = repository.save(new Workspace(
@@ -169,6 +192,7 @@ class WorkspaceApplicationServiceTest {
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {
 
         private final List<Workspace> saved = new ArrayList<>();
+        private int findByIdCalls;
 
         @Override
         public Workspace save(Workspace workspace) {
@@ -178,6 +202,7 @@ class WorkspaceApplicationServiceTest {
 
         @Override
         public Optional<Workspace> findById(WorkspaceId workspaceId) {
+            findByIdCalls++;
             return saved.stream().filter(workspace -> workspace.workspaceId().equals(workspaceId)).findFirst();
         }
 

@@ -1,0 +1,14 @@
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  color: #606266;
+  background: #fff;
+  font: 14px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
