@@ -4,7 +4,7 @@
 
 - 小地球固定加载登录守卫下的同源 `/workspace-requirement-import`，父子窗口同时校验精确 `origin/source`，`postMessage` 使用 `window.location.origin`，URL 不再携带用户 ID、后端 IP、物理根路径或 token。
 - 浏览器只查询本项目 `/api/v1/requirement-import/**`，写入只走现有文件 WebSocket route/ticket/RPC。服务端重新查询 TCDS 授权、名称、文档类型与 URL，不接受浏览器提供的路径或下载地址。
-- `TEST_AGENT_TCDS_BASE_URL` 为必填部署变量；固定接口相对解析，TCDS 文档地址限定 HTTP/HTTPS、10 秒连接、30 秒请求、最多 3 次重定向、20 MiB 单文件和 200 MiB 单次总量。正式日志不记录 token、文档 URL、签名参数或正文。
+- TCDS 默认使用现场确认的企业局域网入口 `http://tcds-prod.sdc.icbc:9080`，允许 `TEST_AGENT_TCDS_BASE_URL` 覆盖；固定接口相对解析并统一携带现场 `toolId` header。TCDS 文档地址限定 HTTP/HTTPS、10 秒连接、30 秒请求、最多 3 次重定向、20 MiB 单文件和 200 MiB 单次总量。正式日志不记录 token、文档 URL、签名参数或正文。
 - 普通、最近及支持访问 Workspace 响应不再返回物理根目录；`rootPath=workspace:{workspaceId}`、`physicalRootPath=null`。复制绝对路径改为点击后单文件 RPC，目录选择器由专用响应标记 `existingWorkspaceId`。
 - 文件 WebSocket upgrade 前非消费式预检 ticket，实际 upgrade 时原子消费；缺失、过期、复用或缺少 Origin 统一返回脱敏 401。框架参数异常统一为 `VALIDATION_ERROR / 请求参数无效`，不回显 Host、IP、请求头或原始异常。
 
@@ -26,6 +26,13 @@
 - 使用 `TEST_AGENT_TCDS_BASE_URL=<部署地址> ./restart-dev-services.sh --profile test --env-file .env.test --skip-backend-build --skip-frontend-build` 做真实启动时，前端可在 `http://127.0.0.1:3000` 返回 200；后端因本机测试 PostgreSQL `127.0.0.1:15432` 未运行而启动失败。未修改 `.env.test`，也未停用旧 9900 服务。
 
 受上述数据库阻塞影响，本轮未能在真实登录会话重放普通 Workspace HTTP 响应、未授权 WebSocket upgrade 和完整 TCDS 导入请求；对应控制链已由上述单元/组件测试覆盖，待测试数据库恢复后仍需执行真实查询、重复覆盖、部分失败、文件树刷新及原扫描请求重放。
+
+## 2026-08-14 TCDS 现场契约复核
+
+- 应用默认地址与本地、企业部署模板已统一为 `http://tcds-prod.sdc.icbc:9080`，仍允许 `TEST_AGENT_TCDS_BASE_URL` 覆盖；浏览器继续只请求平台同源 API。
+- JDK 25 下 `TcdsHttpGatewayTest` 与 `TcdsIntegrationConfigTest` 共 8 项、`TestAgentRuntimePropertiesBindingTest` 15 项通过；网关测试逐条断言登录、应用、子条目、兜底文档元数据和用户查询均携带精确 `toolId`。
+- 使用 `.env.test`/`test` profile 完整重启成功，后端 health/readiness 为 `UP`，前端 200，登录 CORS 正确，manager 最终 health 为 `HEALTHY`。
+- 本机到 `tcds-prod.sdc.icbc:9080` 的 TCP 连接成功；无真实统一认证号的只读 HTTP 探针被上游直接断开，未取得 HTTP 状态，因此真实授权目录和文档导入仍需在有效登录会话中验收，不能用伪用户探针替代。
 
 ## Workspace ID 全链路回归
 

@@ -14,9 +14,9 @@ Java 前必须从每个后台节点验证 Redis TCP。值为 `0` 时，Docker DN
 
 个人离线开发备用依赖只能通过本地开发脚本启动，不能作为研发测试或生产部署拓扑。
 
-## TCDS 必填地址与同批发布
+## TCDS 内网地址与同批发布
 
-所有 Java 节点必须显式配置 `TEST_AGENT_TCDS_BASE_URL`，值为部署网络内可达的 HTTP/HTTPS 绝对基础地址，例如 `http://tcds.example.internal`。应用不提供生产默认值、不维护文档存储域名白名单；企业内外网隔离由部署网络策略负责。缺失、相对地址或其它协议会使 Spring 启动失败，错误不回显实际地址。
+应用默认使用现场确认的企业局域网基础地址 `http://tcds-prod.sdc.icbc:9080`；所有 Java 节点仍应在 `backend.env` 显式配置相同的 `TEST_AGENT_TCDS_BASE_URL`，便于部署审计和后续环境切换。覆盖值必须是 HTTP/HTTPS 绝对地址，相对地址或其它协议会使 Spring 启动失败，错误不回显实际地址。所有固定 TCDS 后台接口请求统一携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`；企业内外网隔离由部署网络策略负责。
 
 本变更同时改变普通 Workspace `rootPath/physicalRootPath` 语义和前端 iframe 路由，必须按“全部 Java 节点配置变量并升级 → 验证目录 API/文件 WebSocket → 升级前端”的顺序同批发布。回滚时先回滚前端，再回滚全部 Java；旧 Java 需要恢复旧配置和旧路径响应语义，不能长期混跑。旧 9900 服务只在新版本完成真实 TCDS 查询、重复覆盖、部分失败和文件树刷新验收后由运维另行停用，本仓库不再调用该端口。
 

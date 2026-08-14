@@ -10269,3 +10269,27 @@
 ### Result
 
 - TCDS 需求导入页装饰已收敛，全选、多选和导入业务行为保持兼容；真实前端已启动验证并在核对后停止。
+
+## 2026-08-14 - 固化 TCDS 内网地址与后台 toolId 契约
+
+### Why
+
+- 小地球需求导入从旧 iframe 改为平台后台调用后，需要确认现场 `http://tcds-prod.sdc.icbc:9080` 与 `toolId: 66f36bfa5c1c6105572b0118880261d6` 是否覆盖全部 TCDS 后台接口。
+- 现有统一网关已经复用固定 header，但昨天的安全收敛把地址改成必填环境变量，仓库模板仍是占位地址，且测试没有逐条锁定 header。
+
+### What
+
+- `application.yml` 将现场局域网地址作为默认值并保留 `TEST_AGENT_TCDS_BASE_URL` 覆盖；本地与企业 `backend.env` 模板同步同一地址。
+- 不新增 TCDS 客户端或并行请求路径，继续复用 `TcdsHttpGateway.getJson/postJson`；网关测试对登录、用户、应用、子条目和文档元数据请求统一断言精确 `toolId`。
+- 同步后端与 integration README、HTTP API、部署、安全和安全扫描复核文档；浏览器仍只访问平台同源 API，不接触 TCDS token、header 或下载地址。
+
+### How
+
+- JDK 25 定向 Maven reactor 通过：TCDS 网关/装配 8 项、应用配置绑定 15 项，0 失败；后端 22 模块跳过测试完整打包成功。
+- 按 `.env.test`/`test` profile 运行标准重启，后端 health/readiness 为 `UP`，前端 200，CORS 正确，manager 最终 health 为 `HEALTHY`。
+- `tcds-prod.sdc.icbc:9080` TCP 连通；携带精确 `toolId` 的无真实用户只读 HTTP 探针被上游直接断开，未返回 HTTP 状态。
+
+### Result
+
+- release 当前后台默认地址和全部固定 TCDS JSON 接口 header 已满足现场契约，环境覆盖保持兼容；未新增 API、DTO、RunEvent、数据库、migration、服务、端口或强制配置。
+- 有效登录用户下的真实授权目录、重复覆盖、部分失败和文件树刷新仍需企业会话验收；release 修复后仍需按长期分支策略同步回 dev。

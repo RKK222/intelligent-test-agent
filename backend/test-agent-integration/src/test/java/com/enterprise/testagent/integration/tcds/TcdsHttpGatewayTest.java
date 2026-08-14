@@ -54,6 +54,9 @@ class TcdsHttpGatewayTest {
         List<String> requests = new CopyOnWriteArrayList<>();
         start(exchange -> {
             requests.add(exchange.getRequestURI().toString());
+            assertThat(exchange.getRequestHeaders().getFirst("toolId"))
+                    .as("每个 TCDS 后台接口请求都必须携带现场约定的 toolId")
+                    .isEqualTo("66f36bfa5c1c6105572b0118880261d6");
             String path = exchange.getRequestURI().getPath();
             if (path.endsWith("/loginByUserId")) {
                 json(exchange, "{\"code\":\"0\",\"data\":{\"token\":\"secret-token\"}}");
