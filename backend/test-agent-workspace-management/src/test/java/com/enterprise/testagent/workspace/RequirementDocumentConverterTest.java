@@ -5,25 +5,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.math.BigInteger;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import org.apache.poi.util.Units;
-import org.apache.poi.xwpf.usermodel.XWPFAbstractNum;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
-import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTAbstractNum;
-import org.openxmlformats.schemas.wordprocessingml.x2006.main.STNumberFormat;
 import org.junit.jupiter.api.Test;
 
 class RequirementDocumentConverterTest {
-
-    private static final byte[] ONE_PIXEL_PNG = Base64.getDecoder().decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
 
     @Test
     void convertsUtf8Gb18030AndDocxToMarkdown() throws Exception {
@@ -51,21 +41,17 @@ class RequirementDocumentConverterTest {
 
     @Test
     void keepsFlattenedWordTextCompatibleAcrossLegacyNamesAndMediaTypes() {
-        var flattenedDoc = RequirementDocumentConverter.convert(
+        String flattenedDoc = RequirementDocumentConverter.toMarkdown(
                 "历史需求.doc",
                 "application/octet-stream",
-                "旧链路导出的纯文本需求".getBytes(StandardCharsets.UTF_8),
-                "历史需求.assets");
-        var flattenedDocx = RequirementDocumentConverter.convert(
+                "旧链路导出的纯文本需求".getBytes(StandardCharsets.UTF_8));
+        String flattenedDocx = RequirementDocumentConverter.toMarkdown(
                 "历史设计.docx",
                 "application/msword",
-                "旧链路导出的传统编码设计".getBytes(Charset.forName("GB18030")),
-                "历史设计.assets");
+                "旧链路导出的传统编码设计".getBytes(Charset.forName("GB18030")));
 
-        assertThat(flattenedDoc.markdown()).isEqualTo("旧链路导出的纯文本需求\n");
-        assertThat(flattenedDoc.attachments()).isEmpty();
-        assertThat(flattenedDocx.markdown()).isEqualTo("旧链路导出的传统编码设计\n");
-        assertThat(flattenedDocx.attachments()).isEmpty();
+        assertThat(flattenedDoc).isEqualTo("旧链路导出的纯文本需求\n");
+        assertThat(flattenedDocx).isEqualTo("旧链路导出的传统编码设计\n");
     }
 
     @Test
@@ -119,96 +105,4 @@ class RequirementDocumentConverterTest {
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.EXTERNAL_API_UNAVAILABLE));
     }
 
-    @Test
-    void rendersDocxStructureFormattingTablesLinksListsAndImages() throws Exception {
-        byte[] docx;
-        try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            var heading = document.createParagraph();
-            heading.setStyle("Heading2");
-            heading.createRun().setText("接口设计");
-            var outlineHeading = document.createParagraph();
-            outlineHeading.getCTP().addNewPPr().addNewOutlineLvl().setVal(BigInteger.ZERO);
-            outlineHeading.createRun().setText("自定义大纲标题");
-
-            var formatted = document.createParagraph();
-            var bold = formatted.createRun();
-            bold.setBold(true);
-            bold.setText("粗体");
-            formatted.createRun().setText("、");
-            var italic = formatted.createRun();
-            italic.setItalic(true);
-            italic.setText("斜体");
-            formatted.createRun().setText("、");
-            var strike = formatted.createRun();
-            strike.setStrikeThrough(true);
-            strike.setText("删除");
-            formatted.createRun().setText("，详见");
-            formatted.createHyperlinkRun("https://example.internal/spec").setText("接口规范");
-            formatted.createRun().setText("，");
-            formatted.createHyperlinkRun("javascript:alert(1)").setText("不安全链接");
-            var lineBreak = formatted.createRun();
-            lineBreak.setText("第一行");
-            lineBreak.addBreak();
-            lineBreak.setText("第二行", 1);
-
-            CTAbstractNum abstractNum = CTAbstractNum.Factory.newInstance();
-            abstractNum.setAbstractNumId(BigInteger.ZERO);
-            var bulletLevel = abstractNum.addNewLvl();
-            bulletLevel.setIlvl(BigInteger.ZERO);
-            bulletLevel.addNewNumFmt().setVal(STNumberFormat.BULLET);
-            var level = abstractNum.addNewLvl();
-            level.setIlvl(BigInteger.ONE);
-            level.addNewNumFmt().setVal(STNumberFormat.DECIMAL);
-            BigInteger abstractId = document.createNumbering().addAbstractNum(new XWPFAbstractNum(abstractNum));
-            BigInteger numId = document.getNumbering().addNum(abstractId);
-            var list = document.createParagraph();
-            list.setNumID(numId);
-            list.setNumILvl(BigInteger.ONE);
-            list.createRun().setText("嵌套步骤");
-            var bullet = document.createParagraph();
-            bullet.setNumID(numId);
-            bullet.setNumILvl(BigInteger.ZERO);
-            bullet.createRun().setText("无序检查项");
-
-            var table = document.createTable(2, 2);
-            table.getRow(0).getCell(0).setText("字段");
-            table.getRow(0).getCell(1).setText("说明");
-            table.getRow(1).getCell(0).setText("name");
-            table.getRow(1).getCell(1).setText("名称");
-
-            var pictureParagraph = document.createParagraph();
-            pictureParagraph.createRun().addPicture(
-                    new ByteArrayInputStream(ONE_PIXEL_PNG),
-                    org.apache.poi.xwpf.usermodel.Document.PICTURE_TYPE_PNG,
-                    "diagram.png",
-                    Units.toEMU(1),
-                    Units.toEMU(1));
-
-            document.createParagraph().setPageBreak(true);
-            document.write(output);
-            docx = output.toByteArray();
-        }
-
-        var converted = RequirementDocumentConverter.convert(
-                "设计.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                docx, "设计.assets");
-
-        assertThat(converted.markdown())
-                .contains("## 接口设计")
-                .contains("# 自定义大纲标题")
-                .contains("**粗体**", "*斜体*", "~~删除~~")
-                .contains("[接口规范](https://example.internal/spec)")
-                .contains("不安全链接")
-                .doesNotContain("javascript:")
-                .contains("第一行  \n第二行")
-                .contains("  1. 嵌套步骤")
-                .contains("- 无序检查项")
-                .contains("| 字段 | 说明 |", "| --- | --- |", "| name | 名称 |")
-                .contains("![diagram.png](设计.assets/image-001.png)")
-                .contains("---");
-        assertThat(converted.attachments()).singleElement().satisfies(attachment -> {
-            assertThat(attachment.relativePath()).isEqualTo("设计.assets/image-001.png");
-            assertThat(attachment.content()).isEqualTo(ONE_PIXEL_PNG);
-        });
-    }
 }

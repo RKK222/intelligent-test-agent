@@ -10792,3 +10792,27 @@
 
 - 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c` 与 `unzip -t`。
 - 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`。
+
+## 2026-08-14 - 回退 Word 结构化转换并补生成蒙版
+
+### Why
+
+- 用户现场反馈导入并生成 Word Markdown 后工作台明显变卡；样本文档 `/Users/kaka/Desktop/qr-decode/out/需求子条目S20260629-001347设计文档.md` 只有 49 行但最长单行约 1450 字符，确认 TCDS 返回的多数内容本身已压平，结构化渲染和图片附件不能还原已丢失格式，反而增加转换与编辑器渲染开销。
+- 生成期间页面只有按钮禁用，没有明确的等待反馈，用户容易重复操作或误判为卡死。
+
+### What
+
+- 删除独立 `WordToMarkdownRenderer`、图片附件导出及 workspace 模块内部二进制写入入口，恢复 DOCX 按段落/表格文本输出和旧 DOC 的 HWPF 文本提取；继续保留 `.doc` 名称承载 DOCX、Word 扩展名实际返回 UTF-8/GB18030 纯文本、跨 Office 容器、错误包络拒绝、路径/容量限制和覆盖导入兼容性。
+- 需求导入页在生成期间增加覆盖 iframe 内容区的状态蒙版、轻量旋转动画和明确提示，同时阻断重复交互；为减少动态效果的系统偏好保留降级样式。
+- 同步 workspace、agent-web README、HTTP API 和安全复测说明；未修改 `.env*`、HTTP/RPC/RunEvent 契约、数据库、Flyway、公共 Agent、工作区 ID 或 Git diff/提交推送链路。
+
+### How
+
+- JDK 21 下转换/导入/文件服务定向测试 50/50，通过 workspace-management 受影响 reactor 453/453；后端相关模块 package 和完整 22 模块启动前打包成功。
+- agent-web typecheck、需求导入定向 Vitest 7/7 和 production build 通过，覆盖蒙版显示、重复交互阻断和完成后自动关闭。
+- 使用主工作区 `.env.test`、`test` profile 和 JDK 25 启动当前 release worktree；8080 health/readiness 均为 `UP`、3000 返回 200、登录 CORS 正常，manager WebSocket 已连接且无解码或重连循环。浏览器确认受保护导入路由会正确跳转登录页，本机无企业登录态，未冒用身份执行真实 TCDS 导入。
+
+### Result
+
+- Word 导入恢复到结构化渲染改造前的轻量兼容语义，不会因文档名为 DOC/DOCX 但内容已压平而拒绝导入；不再生成图片附件或额外样式转换结果，降低现场压平长文本的处理负担。
+- 生成过程现在有清晰蒙版动画，完成或失败后由既有 `finally` 自动解除。真实企业 TCDS 数据的体感和最终导入结果仍需用户在现有企业登录会话中复测。

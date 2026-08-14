@@ -16,6 +16,7 @@ import org.apache.poi.hslf.usermodel.HSLFShape;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
 import org.apache.poi.hslf.usermodel.HSLFTextShape;
 import org.apache.poi.hwpf.HWPFDocument;
+import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
@@ -26,6 +27,8 @@ import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFShape;
 import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,7 +43,7 @@ final class RequirementDocumentConverter {
 
     /** 未知扩展名必须显式失败，禁止把任意二进制误写为 Markdown。 */
     static String toMarkdown(String fileName, byte[] content) {
-        return convert(fileName, "application/octet-stream", content, "assets").markdown();
+        return toMarkdown(fileName, "application/octet-stream", content);
     }
 
     /**
@@ -48,26 +51,15 @@ final class RequirementDocumentConverter {
      * 内容类型只用于拒绝登录页或 JSON 错误包络，不信任它来决定目标文件名。
      */
     static String toMarkdown(String fileName, String contentType, byte[] content) {
-        return convert(fileName, contentType, content, "assets").markdown();
-    }
-
-    /**
-     * 转换文档并返回 Markdown 与相对附件；附件目录由已规范化的目标 Markdown 文件名派生，不能来自 TCDS 输入。
-     */
-    static ConvertedDocument convert(
-            String fileName,
-            String contentType,
-            byte[] content,
-            String attachmentDirectory) {
         String extension = extension(fileName);
         String mediaType = mediaType(contentType);
         rejectErrorEnvelope(extension, mediaType, content);
         try {
             return switch (extension) {
-                case "md", "markdown", "txt" -> converted(decodeText(content));
-                case "doc", "docx" -> word(content, mediaType, attachmentDirectory);
-                case "xls", "xlsx" -> converted(workbook(content));
-                case "ppt", "pptx" -> converted(powerpoint(content));
+                case "md", "markdown", "txt" -> decodeText(content);
+                case "doc", "docx" -> word(content, mediaType);
+                case "xls", "xlsx" -> workbook(content);
+                case "ppt", "pptx" -> powerpoint(content);
                 default -> throw new PlatformException(
                         ErrorCode.VALIDATION_ERROR,
                         "不支持的 TCDS 文档格式",
@@ -91,17 +83,17 @@ final class RequirementDocumentConverter {
         }
     }
 
-    private static ConvertedDocument word(byte[] content, String mediaType, String attachmentDirectory) throws Exception {
+    private static String word(byte[] content, String mediaType) throws Exception {
         Exception openXmlFailure;
         try {
-            return wordOpenXml(content, attachmentDirectory);
+            return wordOpenXml(content);
         } catch (Exception exception) {
             openXmlFailure = exception;
         }
         try {
-            return word97(content, attachmentDirectory);
+            return word97(content);
         } catch (Exception legacyFailure) {
-            if (isTextMediaType(mediaType) || looksLikeText(content)) return converted(decodeText(content));
+            if (isTextMediaType(mediaType) || looksLikeText(content)) return decodeText(content);
             legacyFailure.addSuppressed(openXmlFailure);
             throw legacyFailure;
         }
@@ -122,28 +114,30 @@ final class RequirementDocumentConverter {
         }
     }
 
-    private static ConvertedDocument word97(byte[] content, String attachmentDirectory) throws Exception {
-        try (HWPFDocument document = new HWPFDocument(new ByteArrayInputStream(content))) {
-            return converted(WordToMarkdownRenderer.render(document, attachmentDirectory));
+    private static String word97(byte[] content) throws Exception {
+        try (HWPFDocument document = new HWPFDocument(new ByteArrayInputStream(content));
+             WordExtractor extractor = new WordExtractor(document)) {
+            return normalize(extractor.getText());
         }
     }
 
-    private static ConvertedDocument wordOpenXml(byte[] content, String attachmentDirectory) throws Exception {
+    private static String wordOpenXml(byte[] content) throws Exception {
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(content))) {
-            return converted(WordToMarkdownRenderer.render(document, attachmentDirectory));
+            StringBuilder markdown = new StringBuilder();
+            for (XWPFParagraph paragraph : document.getParagraphs()) {
+                appendLine(markdown, paragraph.getText());
+            }
+            for (XWPFTable table : document.getTables()) {
+                table.getRows().forEach(row -> {
+                    List<String> cells = row.getTableCells().stream()
+                            .map(cell -> escapeCell(cell.getText()))
+                            .toList();
+                    appendLine(markdown, "| " + String.join(" | ", cells) + " |");
+                });
+                markdown.append('\n');
+            }
+            return normalize(markdown.toString());
         }
-    }
-
-    private static ConvertedDocument converted(String markdown) {
-        return new ConvertedDocument(markdown, List.of());
-    }
-
-    private static ConvertedDocument converted(WordToMarkdownRenderer.RenderedWord rendered) {
-        return new ConvertedDocument(
-                rendered.markdown(),
-                rendered.attachments().stream()
-                        .map(attachment -> new Attachment(attachment.relativePath(), attachment.content()))
-                        .toList());
     }
 
     private static String workbook(byte[] content) throws Exception {
@@ -307,24 +301,4 @@ final class RequirementDocumentConverter {
                 : fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
-    /** 转换结果中的附件路径相对于目标 Markdown 所在目录。 */
-    record ConvertedDocument(String markdown, List<Attachment> attachments) {
-        ConvertedDocument {
-            markdown = markdown == null ? "" : markdown;
-            attachments = attachments == null ? List.of() : List.copyOf(attachments);
-        }
-    }
-
-    /** 二进制附件内容防御性复制，避免调用方修改已校验内容。 */
-    record Attachment(String relativePath, byte[] content) {
-        Attachment {
-            relativePath = relativePath == null ? "" : relativePath;
-            content = content == null ? new byte[0] : content.clone();
-        }
-
-        @Override
-        public byte[] content() {
-            return content.clone();
-        }
-    }
 }
