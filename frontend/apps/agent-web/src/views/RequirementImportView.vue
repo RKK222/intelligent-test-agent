@@ -109,13 +109,17 @@ async function loadItems() {
   result.value = null;
   errorMessage.value = "";
   const sequence = ++itemRequestSequence;
-  if (!selectedApp.value || !selectedVersion.value) {
+  if (!context.value || !selectedApp.value || !selectedVersion.value) {
     items.value = [];
     return;
   }
   loadingItems.value = true;
   try {
-    const loaded = await api.listRequirementImportItems(selectedApp.value, selectedVersion.value);
+    const loaded = await api.listWorkspaceRequirementImportItems(
+      context.value.workspaceId,
+      selectedApp.value,
+      selectedVersion.value
+    );
     if (sequence === itemRequestSequence) items.value = loaded;
   } catch (error) {
     if (sequence === itemRequestSequence) {
@@ -239,7 +243,10 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
             @change="toggleParent(item, $event)"
           />
           <strong>{{ item.itemNo }}</strong>
-          <span>{{ item.itemName }}</span>
+          <span class="item-name">{{ item.itemName }}</span>
+          <span v-if="item.imported !== null && item.imported !== undefined" class="import-status" :class="{ imported: item.imported }">
+            {{ item.imported ? "已导入" : "未导入" }}
+          </span>
         </label>
         <div class="children">
           <label v-for="child in item.children" :key="child.itemNo" class="child-row check-label">
@@ -250,7 +257,10 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
               @change="toggleChild(child.itemNo, $event)"
             />
             <code>{{ child.itemNo }}</code>
-            <span>{{ child.itemName }}</span>
+            <span class="item-name">{{ child.itemName }}</span>
+            <span v-if="child.imported !== null && child.imported !== undefined" class="import-status" :class="{ imported: child.imported }">
+              {{ child.imported ? "已导入" : "未导入" }}
+            </span>
           </label>
         </div>
       </article>
@@ -428,11 +438,30 @@ footer {
   font: inherit;
 }
 
-.parent-row span,
-.child-row span {
+.parent-row .item-name,
+.child-row .item-name {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.import-status {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid #f3d19e;
+  border-radius: 3px;
+  background: #fdf6ec;
+  color: #b88230;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.import-status.imported {
+  border-color: #b3e19d;
+  background: #f0f9eb;
+  color: #529b2e;
 }
 
 .children {

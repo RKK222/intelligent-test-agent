@@ -40,7 +40,7 @@ const ElOptionStub = defineComponent({
 vi.mock("@test-agent/backend-api", () => ({
   createBackendApiClient: () => ({
     listRequirementImportApplications: listApplications,
-    listRequirementImportItems: listItems,
+    listWorkspaceRequirementImportItems: listItems,
     importWorkspaceRequirements: importRequirements
   })
 }));
@@ -63,9 +63,10 @@ describe("RequirementImportView", () => {
       {
         itemNo: "I-01",
         itemName: "登录需求",
+        imported: true,
         children: [
-          { itemNo: "SI-01", itemName: "登录校验" },
-          { itemNo: "SI-02", itemName: "会话续期" }
+          { itemNo: "SI-01", itemName: "登录校验", imported: true },
+          { itemNo: "SI-02", itemName: "会话续期", imported: false }
         ]
       }
     ]);
@@ -117,7 +118,11 @@ describe("RequirementImportView", () => {
       }
     }));
 
-    await vi.waitFor(() => expect(listItems).toHaveBeenCalledWith("APP-B", expect.stringMatching(/^\d{4}年\d{1,2}月$/)));
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledWith(
+      "wrk_1",
+      "APP-B",
+      expect.stringMatching(/^\d{4}年\d{1,2}月$/)
+    ));
     await wrapper.get('input[type="search"]').setValue("SI-01");
     const visibleCheckboxes = wrapper.findAll('.child-row input[type="checkbox"]');
     expect(visibleCheckboxes).toHaveLength(1);
@@ -138,6 +143,32 @@ describe("RequirementImportView", () => {
       result: expect.objectContaining({ status: "PARTIAL" })
     }), window.location.origin);
     expect(wrapper.text()).toContain("部分文档导入失败");
+    wrapper.unmount();
+  });
+
+  it("shows imported state without disabling repeated selection", async () => {
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_imported_state"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalled());
+    const importedRow = wrapper.findAll(".child-row")
+      .find((row) => row.text().includes("SI-01"))!;
+    const pendingRow = wrapper.findAll(".child-row")
+      .find((row) => row.text().includes("SI-02"))!;
+
+    expect(importedRow.text()).toContain("已导入");
+    expect(pendingRow.text()).toContain("未导入");
+    expect(importedRow.get('input[type="checkbox"]').attributes("disabled")).toBeUndefined();
+    await importedRow.get('input[type="checkbox"]').setValue(true);
+    expect(wrapper.text()).toContain("已选 1 / 100");
     wrapper.unmount();
   });
 
@@ -195,13 +226,13 @@ describe("RequirementImportView", () => {
     expect(applicationSelect.attributes("disabled")).toBeUndefined();
 
     await applicationSelect.setValue("APP-B");
-    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("APP-B", expect.any(String)));
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", expect.any(String)));
     const currentVersion = (versionSelect.element as HTMLSelectElement).value;
     const anotherVersion = versionSelect.findAll("option")
       .find((option) => (option.element as HTMLOptionElement).value !== currentVersion)!;
     const nextVersion = (anotherVersion.element as HTMLOptionElement).value;
     await versionSelect.setValue(nextVersion);
-    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("APP-B", nextVersion));
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", nextVersion));
 
     resolveItems([]);
     wrapper.unmount();

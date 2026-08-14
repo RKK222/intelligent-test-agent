@@ -52,18 +52,58 @@ public class RequirementImportApplicationService {
 
     /** 返回不含 token 和文档 URL 的父子条目目录。 */
     public List<ItemOption> listItems(String unifiedAuthId, String appShortName, String editionId) {
+        return listItemOptions(unifiedAuthId, appShortName, editionId, null);
+    }
+
+    /**
+     * 通过已完成逐 RPC 鉴权的文件 WebSocket 返回目录及导入状态；状态只读取工作区相对目录。
+     * 已导入条目仍可再次选择，重复导入继续使用既有覆盖语义。
+     */
+    public List<ItemOption> listWorkspaceItems(
+            String unifiedAuthId,
+            String workspaceId,
+            String appShortName,
+            String editionId) {
+        return listItemOptions(
+                unifiedAuthId,
+                appShortName,
+                editionId,
+                new WorkspaceId(required(workspaceId, "workspaceId")));
+    }
+
+    private List<ItemOption> listItemOptions(
+            String unifiedAuthId,
+            String appShortName,
+            String editionId,
+            WorkspaceId workspaceId) {
         return tcdsGateway.listRequirementItems(
                         required(unifiedAuthId, "unifiedAuthId"),
                         required(appShortName, "appShortName"),
                         required(editionId, "editionId"))
                 .stream()
-                .map(item -> new ItemOption(
-                        item.itemNo(),
-                        item.itemName(),
-                        item.children().stream()
-                                .map(child -> new SubItemOption(child.itemNo(), child.itemName()))
-                                .toList()))
+                .map(item -> itemOption(item, workspaceId))
                 .toList();
+    }
+
+    private ItemOption itemOption(RequirementItem item, WorkspaceId workspaceId) {
+        String parent = segment(item.itemNo() + "-" + item.itemName(), "父条目目录");
+        String root = "spec/" + parent;
+        Boolean imported = workspaceId == null ? null : workspaceService.fileStatus(workspaceId, root).exists();
+        return new ItemOption(
+                item.itemNo(),
+                item.itemName(),
+                item.children().stream()
+                        .map(child -> new SubItemOption(
+                                child.itemNo(),
+                                child.itemName(),
+                                workspaceId == null ? null : workspaceService.fileStatus(
+                                                workspaceId,
+                                                root + "/01-需求/" + segment(
+                                                        child.itemNo() + "-" + child.itemName(),
+                                                        "子条目目录"))
+                                        .exists()))
+                        .toList(),
+                imported);
     }
 
     /**
@@ -315,13 +355,20 @@ public class RequirementImportApplicationService {
     public record ApplicationOption(String appName, String appShortName) {
     }
 
-    public record ItemOption(String itemNo, String itemName, List<SubItemOption> children) {
+    public record ItemOption(String itemNo, String itemName, List<SubItemOption> children, Boolean imported) {
+        public ItemOption(String itemNo, String itemName, List<SubItemOption> children) {
+            this(itemNo, itemName, children, null);
+        }
+
         public ItemOption {
             children = children == null ? List.of() : List.copyOf(children);
         }
     }
 
-    public record SubItemOption(String itemNo, String itemName) {
+    public record SubItemOption(String itemNo, String itemName, Boolean imported) {
+        public SubItemOption(String itemNo, String itemName) {
+            this(itemNo, itemName, null);
+        }
     }
 
     public record ImportCommand(

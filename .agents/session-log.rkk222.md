@@ -10466,3 +10466,25 @@
 
 - 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/` 并再次通过校验，部署仍按 `.4 → .114 → .2`，不加载或重启 manager/worker，也不替换两台活动的 `opencode-models.json`。
 - 本轮没有新增 API、事件、数据库结构、Flyway SQL、配置项或部署拓扑；真实企业 TCDS 授权数据和历史 Office 文件仍需现场业务验收。
+
+## 2026-08-14 - 恢复 TCDS 已导入条目状态展示
+
+### Why
+
+- 旧版需求导入页会展示父子条目的“已导入/未导入”状态，但内置同源页面迁移时只保留了重复选择和覆盖导入语义，状态提示丢失，用户无法区分已落盘目录与待导入条目。
+
+### What
+
+- 新增受既有文件 WebSocket ticket、逐 RPC 鉴权和工作区写权限保护的 `workspace.requirement-import-items`，后端按导入使用的同一套路径规范化规则检查父目录和子条目 `01-需求` 目录是否存在。
+- 导入页恢复父子条目“已导入/未导入”标记；已导入项不禁用，继续允许覆盖更新和部分失败重试。状态查询不返回物理路径、文档 URL 或 TCDS token。
+- 同步 API、事件流、workspace、backend-api 和 agent-web 文档；未修改数据库、Flyway、RunEvent、环境配置、公共 Agent 或 Git diff/提交推送流程。
+
+### How
+
+- 前端需求导入定向 Vitest 6/6、agent-web typecheck 和 production build 通过；仅含本次暂存内容的独立快照后端 workspace/API 定向测试合计 46/46 通过，覆盖规范化目录状态、合法 RPC、共享会话拒绝和敏感字段不返回。
+- JDK 25 下完成 22 模块跳过测试打包，并用主工作区 `.env.test` / `test` profile 启动 release worktree；8080 health/readiness 为 `UP`，3000 页面返回 200，manager 未出现解码、重连或致命错误。
+
+### Result
+
+- 已恢复旧版可见状态，同时保持旧版允许重新选择的行为；用户可明确判断条目是否已导入，并继续执行覆盖导入。
+- 本地账号无法取得企业 TCDS 授权目录，真实企业目录的 UI 状态仍需在用户企业会话中验收；release 工作区中另一批尚未提交的 Word 图片附件改动未纳入本次提交。

@@ -262,6 +262,7 @@ export type RequirementImportApplication = {
 export type RequirementImportSubItem = {
   itemNo: string;
   itemName: string;
+  imported?: boolean | null;
 };
 
 export type RequirementImportItem = RequirementImportSubItem & {
