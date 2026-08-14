@@ -94,12 +94,14 @@ async function loadApplications() {
     selectedVersion.value = versions.value.includes(context.value?.defaultVersion ?? "")
       ? context.value!.defaultVersion!
       : versions.value[3];
-    await loadItems();
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "TCDS 应用加载失败";
+    return;
   } finally {
     loadingApplications.value = false;
   }
+  // 应用目录返回后立即释放筛选控件；条目请求较慢时用户仍可切换，迟到请求由 sequence 丢弃。
+  await loadItems();
 }
 
 async function loadItems() {
@@ -170,20 +172,42 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
 <template>
   <main class="requirement-import-page">
     <section class="filters" aria-label="需求筛选">
-      <label class="filter-field">版本：
-        <select v-model="selectedVersion" :disabled="loadingApplications || importing" @change="loadItems">
-          <option v-for="version in versions" :key="version" :value="version">{{ version }}</option>
-        </select>
+      <label class="filter-field">
+        <span class="filter-label">版本：</span>
+        <el-select
+          v-model="selectedVersion"
+          class="filter-control"
+          aria-label="TCDS 版本"
+          filterable
+          :disabled="importing"
+          @change="loadItems"
+        >
+          <el-option v-for="version in versions" :key="version" :label="version" :value="version" />
+        </el-select>
       </label>
-      <label class="filter-field">应用：
-        <select v-model="selectedApp" :disabled="loadingApplications || importing" @change="loadItems">
-          <option v-for="application in applications" :key="application.appShortName" :value="application.appShortName">
-            {{ application.appName }}（{{ application.appShortName }}）
-          </option>
-        </select>
+      <label class="filter-field">
+        <span class="filter-label">应用：</span>
+        <el-select
+          v-model="selectedApp"
+          class="filter-control"
+          aria-label="TCDS 应用"
+          placeholder="请选择应用"
+          filterable
+          :loading="loadingApplications"
+          :disabled="importing || applications.length === 0"
+          @change="loadItems"
+        >
+          <el-option
+            v-for="application in applications"
+            :key="application.appShortName"
+            :label="`${application.appName}（${application.appShortName}）`"
+            :value="application.appShortName"
+          />
+        </el-select>
       </label>
-      <label class="filter-field search">条目信息：
-        <input v-model="keyword" type="search" placeholder="按名字/ID 搜索" />
+      <label class="filter-field search">
+        <span class="filter-label">条目信息：</span>
+        <input v-model="keyword" class="filter-control search-control" type="search" placeholder="按名字/ID 搜索" />
       </label>
     </section>
 
@@ -274,13 +298,15 @@ footer {
 
 .filters {
   flex-shrink: 0;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.4fr) minmax(180px, 1fr);
   gap: 18px;
   margin-bottom: 8px;
 }
 
 .filter-field {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   color: #606266;
@@ -288,47 +314,53 @@ footer {
   white-space: nowrap;
 }
 
-.filter-field.search {
+.filter-label {
+  flex: 0 0 auto;
+}
+
+.filter-control {
+  min-width: 0;
   flex: 1;
 }
 
-select,
-input[type="search"] {
+.filter-field :deep(.el-select) {
+  width: 100%;
+}
+
+.filter-field :deep(.el-select__wrapper),
+.search-control {
   box-sizing: border-box;
-  height: 28px;
-  min-width: 200px;
+  min-height: 28px;
   border: 1px solid #dcdfe6;
   border-radius: 4px;
   outline: none;
   background: #fff;
   color: #606266;
   font: inherit;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-select {
-  padding: 0 28px 0 10px;
-}
-
-input[type="search"] {
+.search-control {
   width: 100%;
+  height: 28px;
   padding: 0 10px;
 }
 
-select:focus,
-input[type="search"]:focus {
+.search-control:focus {
   border-color: #409eff;
 }
 
-select:disabled,
-input[type="search"]:disabled {
+.search-control:disabled {
   cursor: not-allowed;
   background: #f5f7fa;
   color: #c0c4cc;
 }
 
 .catalog {
+  box-sizing: border-box;
+  width: 100%;
   min-height: 0;
+  min-width: 0;
   flex: 1;
   overflow: auto;
   border: 1px solid #ebeef5;
@@ -336,6 +368,8 @@ input[type="search"]:disabled {
 }
 
 .catalog-toolbar {
+  box-sizing: border-box;
+  width: 100%;
   position: sticky;
   top: 0;
   z-index: 1;
@@ -369,6 +403,9 @@ input[type="search"]:disabled {
 }
 
 .parent-item {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   border-bottom: 1px solid #ebeef5;
 }
 
@@ -377,6 +414,8 @@ input[type="search"]:disabled {
 }
 
 .parent-row {
+  box-sizing: border-box;
+  width: 100%;
   min-height: 34px;
   padding: 0 12px;
   color: #303133;
@@ -397,10 +436,15 @@ input[type="search"]:disabled {
 }
 
 .children {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   border-top: 1px solid #ebeef5;
 }
 
 .child-row {
+  box-sizing: border-box;
+  width: 100%;
   min-height: 34px;
   padding: 0 12px 0 40px;
   border-bottom: 1px solid #f2f3f5;
@@ -498,12 +542,11 @@ button:disabled {
 
   .filters {
     align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     gap: 6px;
   }
 
-  .filter-field,
-  .filter-field select {
+  .filter-field {
     width: 100%;
   }
 

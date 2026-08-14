@@ -1,10 +1,41 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { mount } from "@vue/test-utils";
+import { defineComponent, h } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RequirementImportView from "../src/views/RequirementImportView.vue";
 
 const listApplications = vi.fn();
 const listItems = vi.fn();
 const importRequirements = vi.fn();
+
+const ElSelectStub = defineComponent({
+  name: "ElSelect",
+  inheritAttrs: false,
+  props: { modelValue: String, disabled: Boolean, loading: Boolean },
+  emits: ["update:modelValue", "change"],
+  setup(props, { attrs, emit, slots }) {
+    return () => h("select", {
+      ...attrs,
+      value: props.modelValue,
+      disabled: props.disabled,
+      "data-loading": String(props.loading),
+      onChange: (event: Event) => {
+        const value = (event.target as HTMLSelectElement).value;
+        emit("update:modelValue", value);
+        emit("change", value);
+      }
+    }, slots.default?.());
+  }
+});
+
+const ElOptionStub = defineComponent({
+  name: "ElOption",
+  props: { label: String, value: String },
+  setup(props) {
+    return () => h("option", { value: props.value }, props.label);
+  }
+});
 
 vi.mock("@test-agent/backend-api", () => ({
   createBackendApiClient: () => ({
@@ -16,6 +47,10 @@ vi.mock("@test-agent/backend-api", () => ({
 
 describe("RequirementImportView", () => {
   const postMessage = vi.fn();
+
+  const mountView = () => mount(RequirementImportView, {
+    global: { stubs: { ElSelect: ElSelectStub, ElOption: ElOptionStub } }
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -41,7 +76,7 @@ describe("RequirementImportView", () => {
   });
 
   it("announces ready and ignores context from a different origin or source", async () => {
-    const wrapper = mount(RequirementImportView);
+    const wrapper = mountView();
     expect(postMessage).toHaveBeenCalledWith(
       { type: "ITA_REQUIREMENT_IMPORT_READY" },
       window.location.origin
@@ -70,7 +105,7 @@ describe("RequirementImportView", () => {
       failedFiles: 1,
       failures: [{ fileName: "设计说明.bin", code: "VALIDATION_ERROR", message: "不支持的 TCDS 文档格式" }]
     });
-    const wrapper = mount(RequirementImportView);
+    const wrapper = mountView();
     window.dispatchEvent(new MessageEvent("message", {
       origin: window.location.origin,
       source: window.parent,
@@ -107,7 +142,7 @@ describe("RequirementImportView", () => {
   });
 
   it("keeps select-all, parent selection, and child multi-selection behavior", async () => {
-    const wrapper = mount(RequirementImportView);
+    const wrapper = mountView();
     window.dispatchEvent(new MessageEvent("message", {
       origin: window.location.origin,
       source: window.parent,
@@ -135,5 +170,49 @@ describe("RequirementImportView", () => {
     await parent.setValue(true);
     expect(children.every((checkbox) => (checkbox.element as HTMLInputElement).checked)).toBe(true);
     wrapper.unmount();
+  });
+
+  it("keeps version and application selectors usable while a catalog request is pending", async () => {
+    let resolveItems!: (items: unknown[]) => void;
+    listItems
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveItems = resolve; }))
+      .mockResolvedValue([]);
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_filters"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledTimes(1));
+    const versionSelect = wrapper.get('select[aria-label="TCDS 版本"]');
+    const applicationSelect = wrapper.get('select[aria-label="TCDS 应用"]');
+    expect(versionSelect.attributes("disabled")).toBeUndefined();
+    expect(applicationSelect.attributes("disabled")).toBeUndefined();
+
+    await applicationSelect.setValue("APP-B");
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("APP-B", expect.any(String)));
+    const currentVersion = (versionSelect.element as HTMLSelectElement).value;
+    const anotherVersion = versionSelect.findAll("option")
+      .find((option) => (option.element as HTMLOptionElement).value !== currentVersion)!;
+    const nextVersion = (anotherVersion.element as HTMLOptionElement).value;
+    await versionSelect.setValue(nextVersion);
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("APP-B", nextVersion));
+
+    resolveItems([]);
+    wrapper.unmount();
+  });
+
+  it("constrains all three filters and catalog rows to the iframe width", () => {
+    const source = readFileSync(resolve(process.cwd(), "apps/agent-web/src/views/RequirementImportView.vue"), "utf8");
+
+    expect(source).toMatch(/\.filters\s*\{[^}]*display: grid;[^}]*grid-template-columns: minmax\(180px, 0\.8fr\) minmax\(240px, 1\.4fr\) minmax\(180px, 1fr\);/s);
+    expect(source).toMatch(/\.filter-field\s*\{[^}]*min-width: 0;/s);
+    expect(source).toMatch(/\.filter-control\s*\{[^}]*min-width: 0;[^}]*flex: 1;/s);
+    expect(source).toMatch(/\.catalog\s*\{[^}]*box-sizing: border-box;[^}]*width: 100%;[^}]*min-width: 0;/s);
   });
 });
