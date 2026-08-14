@@ -10391,3 +10391,29 @@
 
 - 可交付文件为固定名 `test-agent-two-backend-complete.zip` 与 `.sha256`，大小约 128 MiB；企业内从中转机 `~/Desktop/mimoagent/0709` 校验并按 `.4 → .114 → .2` 顺序部署。
 - 数据库只允许从上一包 PostgreSQL `20260812204207` / XXL V11 基线分别新增 `20260813190929/-297528120` 与 V12/`-211900485`；任何失败、未知 checksum 或未知更高版本均停止，不使用 repair/outOfOrder/手改历史表。
+
+## 2026-08-14 - 基于已部署灰度包恢复 worker reuse 指纹门禁
+
+### Why
+
+- 新一轮平台增量包在后台配置安装后、Java 停止前被 worker runtime 指纹门禁拦截；上一轮 `.4` 模型灰度已经成功，manager/worker 实际不需要加载镜像或重启。
+- 原 `reuse` 只接受目标机已有状态文件中的精确指纹，无法处理“runtime 已先部署成功、组件状态门禁后引入或记录缺失”的存量节点；直接跳过门禁会失去既有安全检查。
+
+### What
+
+- `package-release.sh` 新增显式 `--worker-runtime-baseline-file`，baseline 固定上一轮源码提交、内层 release SHA-256 和 worker 指纹；封包只在 baseline 指纹与本轮构建输入完全相同时保留 `reuse`，仍不携带 programs/worker 镜像。
+- `deploy-internal-release.sh` 在普通目标指纹不匹配时，只接受格式完整的随包已部署 baseline；先复用既有 Manager/OpenCode/Codex 与 Tool runtime 检查并只读确认 worker 容器健康，全部通过后才原子补写组件状态，再继续原 `reuse` 流程。
+- 增加 `release-baselines/20260813-qwen-gray.env`，记录已部署灰度源码 `57e211de...`、内层 release `7af9c20e...` 和 worker 指纹 `50f56c...`；`deploy-backend-node.sh` 后续写 toolbox 指纹时保留这些审计字段。
+- 同步企业 README 与双后台部署手册，并增加封包、旧门禁严格失败、可信 baseline 健康后恢复和自动节点状态保留回归。
+
+### How
+
+- 在独立 detached worktree 对已部署源码 `57e211de48a5507fb8d1689e1c8f86fd96563032` 执行组件计划，重新计算 worker 指纹为 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`，与当前 release 完全一致。
+- `verify-internal-incremental-components.sh`、`verify-internal-multi-backend-node.sh`、`verify-internal-auto-node-deploy.sh`、`verify-internal-two-backend-complete-package.sh`、`verify-ai-docs.sh`、相关 Shell `bash -n` 和 `git diff --check` 均通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，确认上一灰度、当前失败包、Flyway 和模型灰度边界一致；未修改 `.env*`、OpenCode 源码、generated SDK 或 migration 字节。
+
+### Result
+
+- 指纹门禁仍默认严格失败；只有本轮显式携带的已部署 baseline 可恢复缺失/旧状态，并且恢复前必须通过真实 runtime 与容器健康检查。
+- 恢复动作只更新 `/data/testagent/config/release-component-state.env`，不执行 `docker load`、不重启 manager/worker、不替换活动的 `opencode-models.json`；`.4` 的 Qwen 灰度和 `.114` 的现网模型继续分别保留。
+- 本次只修改发布脚本、回归、文档和非敏感基线元数据，不涉及 API、事件、数据库结构、Flyway SQL、性能、安全边界或部署拓扑变化；最终企业包需从本次提交重新构建并记录新哈希。

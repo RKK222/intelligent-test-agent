@@ -23,6 +23,8 @@ SKIP_FRONTEND=0
 SKIP_WORKER=0
 SKIP_WORKER_EXPLICIT=0
 WORKER_RUNTIME_REUSE=0
+WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
+WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
 KEEP_EXTRACT=0
 VALIDATE_ONLY=0
 SYSTEMD_UNIT_DIR="${TEST_AGENT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
@@ -430,11 +432,19 @@ manifest_value() {
 write_installed_component_fingerprint() {
   local key="$1" value="$2"
   local state_file="${INSTALL_ROOT}/config/release-component-state.env"
-  local worker_fingerprint toolbox_fingerprint tmp
+  local worker_fingerprint toolbox_fingerprint baseline_source_commit baseline_release_sha256 tmp
   worker_fingerprint="$(manifest_value "${state_file}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
   toolbox_fingerprint="$(manifest_value "${state_file}" TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT)"
+  baseline_source_commit="$(manifest_value "${state_file}" \
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT)"
+  baseline_release_sha256="$(manifest_value "${state_file}" \
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256)"
   case "${key}" in
-    TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT) worker_fingerprint="${value}" ;;
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)
+      worker_fingerprint="${value}"
+      baseline_source_commit="${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}"
+      baseline_release_sha256="${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
+      ;;
     TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT) toolbox_fingerprint="${value}" ;;
     *) echo "Unsupported installed component key: ${key}" >&2; exit 1 ;;
   esac
@@ -443,6 +453,10 @@ write_installed_component_fingerprint() {
   {
     printf 'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1\n'
     [[ -z "${worker_fingerprint}" ]] || printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${worker_fingerprint}"
+    [[ -z "${baseline_source_commit}" ]] || \
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=%s\n' "${baseline_source_commit}"
+    [[ -z "${baseline_release_sha256}" ]] || \
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=%s\n' "${baseline_release_sha256}"
     [[ -z "${toolbox_fingerprint}" ]] || printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${toolbox_fingerprint}"
   } >"${tmp}"
   chmod 0600 "${tmp}"
@@ -450,15 +464,20 @@ write_installed_component_fingerprint() {
 }
 
 verify_reused_worker_runtime() {
-  local state health installed_fingerprint
+  local state health installed_fingerprint adopt_baseline=0
   installed_fingerprint="$(manifest_value \
     "${INSTALL_ROOT}/config/release-component-state.env" \
     TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
-  [[ -n "${WORKER_COMPONENT_FINGERPRINT}" \
-    && "${installed_fingerprint}" == "${WORKER_COMPONENT_FINGERPRINT}" ]] || {
-    echo "Incremental release worker runtime fingerprint does not match the installed component; deploy a full component package" >&2
-    exit 1
-  }
+  if [[ -z "${WORKER_COMPONENT_FINGERPRINT}" \
+    || "${installed_fingerprint}" != "${WORKER_COMPONENT_FINGERPRINT}" ]]; then
+    if [[ "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ \
+      && "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+      adopt_baseline=1
+    else
+      echo "Incremental release worker runtime fingerprint does not match the installed component; deploy a full component package" >&2
+      exit 1
+    fi
+  fi
   require_file "${INSTALL_ROOT}/programs/bin/opencode-manager"
   require_file "${INSTALL_ROOT}/programs/opencode/bin/opencode"
   require_file "${INSTALL_ROOT}/programs/codex/bin/codex-official"
@@ -470,6 +489,12 @@ verify_reused_worker_runtime() {
     echo "Incremental release reuses worker runtime, but existing worker is not healthy" >&2
     exit 1
   }
+  if [[ "${adopt_baseline}" -eq 1 ]]; then
+    write_installed_component_fingerprint \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_COMPONENT_FINGERPRINT}"
+    printf 'Recovered installed worker runtime fingerprint from deployed release baseline: source_commit=%s release_sha256=%s\n' \
+      "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}" "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
+  fi
   printf 'Existing worker runtime verified for reuse: OpenCode Manager, Codex MCP and container are present\n'
 }
 
@@ -857,6 +882,10 @@ fi
 COMPONENT_MANIFEST="${EXTRACT_DIR}/deploy/internal/release-components.env"
 WORKER_COMPONENT_MODE="$(manifest_value "${COMPONENT_MANIFEST}" TEST_AGENT_RELEASE_WORKER_RUNTIME)"
 WORKER_COMPONENT_FINGERPRINT="$(manifest_value "${COMPONENT_MANIFEST}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+WORKER_RUNTIME_BASELINE_SOURCE_COMMIT="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT)"
+WORKER_RUNTIME_BASELINE_RELEASE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256)"
 WORKER_COMPONENT_MODE="${WORKER_COMPONENT_MODE:-included}"
 [[ "${WORKER_COMPONENT_MODE}" == included || "${WORKER_COMPONENT_MODE}" == reuse ]] || {
   echo "Invalid TEST_AGENT_RELEASE_WORKER_RUNTIME: ${WORKER_COMPONENT_MODE}" >&2
@@ -865,6 +894,14 @@ WORKER_COMPONENT_MODE="${WORKER_COMPONENT_MODE:-included}"
 if [[ "${WORKER_COMPONENT_MODE}" == reuse ]]; then
   WORKER_RUNTIME_REUSE=1
   SKIP_WORKER=1
+fi
+if [[ -n "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}" ]]; then
+  [[ "${WORKER_COMPONENT_MODE}" == reuse \
+    && "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ \
+    && "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Invalid worker runtime deployed baseline metadata" >&2
+    exit 1
+  }
 fi
 if [[ "${VALIDATE_ONLY}" -eq 0 && ( "${SKIP_WORKER}" -eq 0 || "${WORKER_RUNTIME_REUSE}" -eq 1 ) ]]; then
   require_command docker

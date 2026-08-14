@@ -123,6 +123,14 @@ Python 的 pandas、Excel、Word 和 JSON 第三方库是第三个、完全独�
 
 首次构建、指纹状态丢失或组件变化时，清单为 `included`；未变化时为 `reuse`，内层 ZIP 不再重复携带该组件的大文件。必须持续使用同一个输出目录，或用 `--component-state-file <稳定路径>` 保存基线。新装机、扩容新节点、灾备恢复和状态不可信的交付必须加 `--include-all-components`；增量包只允许升级已有且组件健康的 `.4/.114`，不能用于空机器。迁移到该机制后的第一次构建也应使用全量命令建立可信基线；部署成功后每台后台会把实际安装指纹写入 `/data/testagent/config/release-component-state.env`，后续复用时会同时校验指纹和健康状态：
 
+若 `.4/.114` 的上一轮灰度已确认部署成功，但当时尚未登记组件状态，可用 `--worker-runtime-baseline-file` 重新登记门禁。baseline 同时固定上一轮源码提交、内层 release SHA-256 和 worker 指纹；封包时必须与本轮 worker 构建输入一致。节点部署仍会先检查 Manager/OpenCode/Codex、Tool runtime 和现有 worker 健康，全部通过后才补写 `/data/testagent/config/release-component-state.env`。该动作不加载镜像、不重启 manager/worker，也不替换 `.4` 与 `.114` 各自活动的模型清单。
+
+```bash
+deploy/internal/package-release.sh \
+  --worker-runtime-baseline-file deploy/internal/release-baselines/20260813-qwen-gray.env \
+  --output-dir deploy/internal/dist
+```
+
 ```bash
 VITE_TEST_AGENT_API_BASE_URL="" \
   deploy/internal/package-release.sh --include-all-components \

@@ -226,6 +226,14 @@ deploy/internal/package-release.sh --python-libs-only \
 
 首次构建、状态文件丢失或对应源码/版本/基础镜像指纹变化时，组件标记为 `included`，脚本重新构建并放入 ZIP；指纹未变化时标记为 `reuse`，ZIP 不再携带对应大文件。`--zip-only` 只允许复用带当前指纹戳的已验证制品，源码已变化但没有重新构建时会失败，不能把旧 tar 伪装成新组件。必须持续复用同一个输出目录，或通过 `--component-state-file <稳定路径>` 显式保存基线。迁移到本机制后第一次必须做全量部署：后台会把实际安装成功的组件指纹写入 `/data/testagent/config/release-component-state.env`；后续 `reuse` 包要求清单指纹与目标机指纹相同且组件健康，缺失或不一致都会停止部署。
 
+若组件状态门禁晚于现场 runtime 部署、但上一轮 release 已明确成功，可用受控 baseline 文件恢复门禁，而不是重载或重启 worker。baseline 必须固定上一轮源码提交、内层 release SHA-256 和 worker 指纹；打包时还会要求该指纹与本轮构建输入完全一致。目标机仅在 Manager/OpenCode/Codex 文件、Tool runtime 和 worker 容器健康全部通过后，才原子补写状态文件，随后继续普通 `reuse` 流程；不会执行 `docker load`、不会重启 manager/worker，也不会替换活动的 `opencode-models.json`。该能力不能用于 runtime 真实变化、来源不明或现场健康失败的情况。
+
+```bash
+deploy/internal/package-release.sh \
+  --worker-runtime-baseline-file deploy/internal/release-baselines/20260813-qwen-gray.env \
+  --output-dir deploy/internal/dist
+```
+
 新装机、灾备全量包或状态不可信时强制携带全部组件：
 
 ```bash

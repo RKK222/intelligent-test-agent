@@ -66,13 +66,23 @@ verify_reused_toolbox() {
 
 write_installed_toolbox_fingerprint() {
   local state_file="${INSTALL_ROOT}/config/release-component-state.env"
-  local worker_fingerprint tmp
+  local worker_fingerprint worker_baseline_source_commit worker_baseline_release_sha256 tmp
   worker_fingerprint="$(state_file_value "${state_file}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+  worker_baseline_source_commit="$(state_file_value "${state_file}" \
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT)"
+  worker_baseline_release_sha256="$(state_file_value "${state_file}" \
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256)"
   mkdir -p "$(dirname "${state_file}")"
   tmp="$(mktemp "${state_file}.new.XXXXXX")"
   {
     printf 'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1\n'
     [[ -z "${worker_fingerprint}" ]] || printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${worker_fingerprint}"
+    [[ -z "${worker_baseline_source_commit}" ]] || \
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=%s\n' \
+        "${worker_baseline_source_commit}"
+    [[ -z "${worker_baseline_release_sha256}" ]] || \
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=%s\n' \
+        "${worker_baseline_release_sha256}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${toolbox_component_fingerprint}"
   } >"${tmp}"
   chmod 0600 "${tmp}"
