@@ -2383,51 +2383,72 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 applicationFiles,
                 privateKey);
         progress.step("COMMIT_FEATURE");
-        try {
+        boolean featureCommitCreated = gitWorkspaceService.hasStagedChanges(prepared.repoRoot(), privateKey);
+        if (featureCommitCreated) {
             gitWorkspaceService.commitStaged(
                     prepared.repoRoot(),
                     requireText(commitMessage, "提交说明不能为空", "commitMessage"),
                     privateKey,
                     commitIdentity);
-        } catch (PlatformException exception) {
-            if (!exception.getMessage().contains("nothing to commit")
-                    && !exception.getMessage().contains("nothing added")) {
-                throw exception;
-            }
         }
 
         // 只推送应用版本 feature 分支。Agent 配置发布先建立持久化闸门，避免其它用户在共享层切换中继续发消息。
         progress.step("PUSH_REMOTE");
         String applicationBranch = version.branch();
         String preparedHead = gitWorkspaceService.headCommit(prepared.repoRoot());
-        String rolloutId = prepareApplicationConfigRolloutIfNeeded(
-                publishFiles,
-                version,
-                applicationBranch,
-                preparedHead,
-                prepared.headCommit(),
-                userId,
-                traceId);
+        // 浏览器可能在服务端已经完成 push 后丢失 HTTP 回包。重试时投影不会产生新提交，
+        // 先以远端包含关系确认事实，避免重复建立应用 Agent rollout/dispose。
+        Boolean remoteAlreadyContained = !featureCommitCreated
+                ? remoteContainsApplicationCommit(prepared.repoRoot(), applicationBranch, preparedHead, privateKey)
+                : Boolean.FALSE;
+        String rolloutId = Boolean.TRUE.equals(remoteAlreadyContained)
+                ? null
+                : prepareApplicationConfigRolloutIfNeeded(
+                        publishFiles,
+                        version,
+                        applicationBranch,
+                        preparedHead,
+                        prepared.headCommit(),
+                        userId,
+                        traceId);
         try {
-            try {
-                gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
-            } catch (ScmGitIdentityRejectedException rejection) {
-                GitCommitIdentity corrected = correctedGitIdentity(userId, commitIdentity, rejection)
-                        .orElseThrow(() -> rejection);
-                preparedHead = gitWorkspaceService.amendHeadCommitIdentity(
-                        prepared.repoRoot(), privateKey, corrected);
-                if (rolloutId != null && agentConfigRolloutCoordinator != null) {
-                    agentConfigRolloutCoordinator.recordExpectedCommit(rolloutId, preparedHead);
+            if (!Boolean.TRUE.equals(remoteAlreadyContained)) {
+                try {
+                    gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
+                } catch (ScmGitIdentityRejectedException rejection) {
+                    GitCommitIdentity corrected = correctedGitIdentity(userId, commitIdentity, rejection)
+                            .orElseThrow(() -> rejection);
+                    preparedHead = gitWorkspaceService.amendHeadCommitIdentity(
+                            prepared.repoRoot(), privateKey, corrected);
+                    if (rolloutId != null && agentConfigRolloutCoordinator != null) {
+                        agentConfigRolloutCoordinator.recordExpectedCommit(rolloutId, preparedHead);
+                    }
+                    // 右控纠正只能重试一次；再次失败按原发布回滚与闸门中止路径处理。
+                    gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
                 }
-                // 右控纠正只能重试一次；再次失败按原发布回滚与闸门中止路径处理。
-                gitWorkspaceService.push(prepared.repoRoot(), applicationBranch, false, privateKey);
             }
         } catch (RuntimeException exception) {
-            if (rolloutId != null && prepared.headCommit() != null && !prepared.headCommit().isBlank()) {
-                gitWorkspaceService.resetHardToCommit(prepared.repoRoot(), prepared.headCommit());
+            Boolean remoteContainsPreparedHead = remoteContainsApplicationCommit(
+                    prepared.repoRoot(), applicationBranch, preparedHead, privateKey);
+            if (Boolean.TRUE.equals(remoteContainsPreparedHead)) {
+                // push 回包丢失不等于远端失败；以远端分支已包含目标提交为成功事实继续收敛。
+                LOGGER.warn(
+                        "event=application_push_response_uncertain_remote_confirmed versionId={} branch={} commitHash={}",
+                        version.versionId().value(),
+                        applicationBranch,
+                        preparedHead);
+            } else {
+                if (Boolean.FALSE.equals(remoteContainsPreparedHead)) {
+                    if (rolloutId != null && prepared.headCommit() != null && !prepared.headCommit().isBlank()) {
+                        gitWorkspaceService.resetHardToCommit(prepared.repoRoot(), prepared.headCommit());
+                    }
+                    abortApplicationConfigRollout(rolloutId, "APPLICATION_PUSH_NOT_REACHED_REMOTE");
+                }
+                throw publishRecoveryException(
+                        exception,
+                        remoteContainsPreparedHead,
+                        rolloutId != null);
             }
-            abortApplicationConfigRollout(rolloutId, "APPLICATION_PUSH_FAILED");
-            throw exception;
         }
         Instant now = Instant.now();
         String headCommit = gitWorkspaceService.headCommit(prepared.repoRoot());
@@ -2456,6 +2477,47 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 true,
                 headCommit,
                 applicationBranch);
+    }
+
+    /** null 表示远端核验本身失败；Agent rollout 保留 PREPARING 交给持久化补偿，不得误回滚。 */
+    private Boolean remoteContainsApplicationCommit(
+            Path repoRoot,
+            String branch,
+            String expectedCommit,
+            String privateKey) {
+        try {
+            gitWorkspaceService.fetch(repoRoot, privateKey);
+            String remoteRef = "origin/" + branch;
+            String remoteCommit = gitWorkspaceService.resolveCommit(repoRoot, remoteRef);
+            return expectedCommit.equals(remoteCommit)
+                    || gitWorkspaceService.isAncestor(repoRoot, expectedCommit, remoteRef);
+        } catch (RuntimeException verificationException) {
+            LOGGER.warn(
+                    "event=application_push_remote_verify_failed branch={} commitHash={} errorType={}",
+                    branch,
+                    expectedCommit,
+                    verificationException.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    private PlatformException publishRecoveryException(
+            RuntimeException exception,
+            Boolean remoteContainsPreparedHead,
+            boolean rolloutPending) {
+        PlatformException platform = exception instanceof PlatformException value
+                ? value
+                : new PlatformException(ErrorCode.GIT_UNAVAILABLE, "Git 远端推送失败", Map.of(), exception);
+        Map<String, Object> details = new java.util.LinkedHashMap<>(platform.details());
+        details.put("localCommitRetained", true);
+        if (Boolean.FALSE.equals(remoteContainsPreparedHead)) {
+            details.put("remoteCommitState", "NOT_REACHED");
+            details.put("publishRecoveryAction", "RETRY_NOW");
+        } else {
+            details.put("remoteCommitState", "UNKNOWN");
+            details.put("publishRecoveryAction", rolloutPending ? "WAIT_FOR_RECOVERY" : "RETRY_NOW");
+        }
+        return new PlatformException(platform.errorCode(), platform.getMessage(), details, platform);
     }
 
     private void indexHubAfterSuccessfulPush(
@@ -2568,6 +2630,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String traceId) {
         if (agentConfigRolloutCoordinator == null || !containsApplicationAgentConfig(files)) {
             return null;
+        }
+        Optional<PublicAgentConfigRolloutPreparation> existing = agentConfigRolloutCoordinator
+                .preparing(serverIdentity.linuxServerId(), AgentConfigRolloutScope.APPLICATION)
+                .filter(preparation -> version.versionId().value().equals(preparation.scopeKey()))
+                .filter(preparation -> branch.equals(preparation.branch()))
+                .filter(preparation -> expectedCommit.equals(preparation.expectedCommitHash()));
+        if (existing.isPresent()) {
+            // push 结果未知时 PREPARING 会持久化。相同版本、分支和提交的人工重试必须复用原轮次，
+            // 否则既会被“已有活跃发布”阻断，也可能重复 dispose 其它用户进程。
+            return existing.get().rolloutId();
         }
         return agentConfigRolloutCoordinator.prepareApplication(
                 version.versionId().value(),
@@ -3050,6 +3122,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
         if (executedCommands != null && !executedCommands.isEmpty()) {
             details.put("executedCommands", List.copyOf(executedCommands));
+        }
+        if (failedStep != null && !failedStep.isBlank()) {
+            // 发布只读取个人 HEAD，不会回退个人提交；即使 feature 准备失败，用户仍可安全重试同一文件白名单。
+            details.putIfAbsent("localCommitRetained", true);
+            if (!"PUSH_REMOTE".equals(failedStep)) {
+                details.putIfAbsent("remoteCommitState", "NOT_ATTEMPTED");
+                details.putIfAbsent("publishRecoveryAction", "RETRY_NOW");
+            }
         }
         return new PlatformException(exception.errorCode(), exception.getMessage(), details, exception);
     }

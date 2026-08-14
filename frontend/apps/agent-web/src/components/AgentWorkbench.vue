@@ -6377,6 +6377,7 @@ type PersonalPullDialogState = {
   result: PersonalWorkspacePullDialogResult | null;
   errorTitle: string;
   errorDescription: string;
+  errorTraceId: string;
 };
 
 const personalPullDialog = ref<PersonalPullDialogState>({
@@ -6386,7 +6387,8 @@ const personalPullDialog = ref<PersonalPullDialogState>({
   pullResult: null,
   result: null,
   errorTitle: "",
-  errorDescription: ""
+  errorDescription: "",
+  errorTraceId: ""
 });
 
 function resetPersonalPullDialog() {
@@ -6397,7 +6399,8 @@ function resetPersonalPullDialog() {
     pullResult: null,
     result: null,
     errorTitle: "",
-    errorDescription: ""
+    errorDescription: "",
+    errorTraceId: ""
   };
 }
 
@@ -6519,7 +6522,8 @@ function handlePullPersonalWorkspace(personalWorkspaceId: string) {
     pullResult: null,
     result: null,
     errorTitle: "",
-    errorDescription: ""
+    errorDescription: "",
+    errorTraceId: ""
   };
   if (skipConfirm) void executePersonalWorkspacePull(personalWorkspaceId);
 }
@@ -6533,6 +6537,7 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string) {
     personalPullDialog.value.phase = "FAILED";
     personalPullDialog.value.errorTitle = "当前个人工作区已变化";
     personalPullDialog.value.errorDescription = "请关闭弹框，在当前工作区重新点击“拉取远程”。";
+    personalPullDialog.value.errorTraceId = "";
     return;
   }
   pullingPersonalWorkspace.value = true;
@@ -6581,6 +6586,7 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string) {
     personalPullDialog.value.phase = "FAILED";
     personalPullDialog.value.errorTitle = failure.title;
     personalPullDialog.value.errorDescription = failure.description ?? "请检查提示后重试。";
+    personalPullDialog.value.errorTraceId = failure.traceId ?? "";
     feedback.value = failure;
   } finally {
     pullingPersonalWorkspace.value = false;
@@ -11833,6 +11839,7 @@ async function handleLogout() {
     :result="personalPullDialog.result"
     :error-title="personalPullDialog.errorTitle"
     :error-description="personalPullDialog.errorDescription"
+    :error-trace-id="personalPullDialog.errorTraceId"
     @confirm="confirmPersonalPull"
     @cancel="cancelPersonalPullDialog"
     @close="closePersonalPullDialog"

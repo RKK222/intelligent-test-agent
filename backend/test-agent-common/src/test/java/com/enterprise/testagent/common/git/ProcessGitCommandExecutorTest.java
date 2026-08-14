@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
@@ -39,6 +40,40 @@ class ProcessGitCommandExecutorTest {
                             .containsEntry("gitFailureType", "TIMEOUT")
                             .containsEntry("timeoutMillis", 10L);
                 });
+    }
+
+    @Test
+    void timeoutTerminatesDescendantProcess(@TempDir Path tempDir) throws Exception {
+        ProcessGitCommandExecutor executor = new ProcessGitCommandExecutor();
+        Path childPidFile = tempDir.resolve("child.pid");
+
+        assertThatThrownBy(() -> executor.execute(
+                        List.of(
+                                "/bin/sh",
+                                "-c",
+                                "sleep 30 & child=$!; printf '%s' \"$child\" > \"$1\"; wait \"$child\"",
+                                "sh",
+                                childPidFile.toString()),
+                        null,
+                        Duration.ofMillis(100)))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.GIT_TIMEOUT));
+
+        long childPid = Long.parseLong(Files.readString(childPidFile));
+        boolean childStopped = waitUntilStopped(childPid, Duration.ofSeconds(2));
+        assertThat(childStopped).as("超时后 shell 启动的子进程应被一并终止").isTrue();
+    }
+
+    private static boolean waitUntilStopped(long pid, Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+                TimeUnit.MILLISECONDS.sleep(20);
+                continue;
+            }
+            return true;
+        }
+        return !ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
     }
 
     @Test

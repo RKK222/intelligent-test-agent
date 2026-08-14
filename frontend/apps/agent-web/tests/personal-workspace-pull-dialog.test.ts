@@ -118,4 +118,17 @@ describe("PersonalWorkspacePullDialog", () => {
     expect(wrapper.text()).toContain("无需 dispose");
     expect(wrapper.text()).toContain("没有文件需要更新");
   });
+
+  it("shows the backend trace id for an actionable pull failure", () => {
+    const wrapper = mountDialog({
+      phase: "FAILED",
+      errorTitle: "拉取远程失败",
+      errorDescription: "GIT_UNAVAILABLE: Git 仓库不可访问；请检查仓库权限和网络连通性。",
+      errorTraceId: "trace_pull_network_failure"
+    });
+
+    expect(wrapper.text()).toContain("GIT_UNAVAILABLE");
+    expect(wrapper.text()).toContain("请检查仓库权限和网络连通性");
+    expect(wrapper.text()).toContain("traceId: trace_pull_network_failure");
+  });
 });

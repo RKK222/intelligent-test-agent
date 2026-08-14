@@ -65,7 +65,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
             Thread err = pump(process.getErrorStream(), stderr, MAX_STDERR_BYTES);
             boolean finished = process.waitFor(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS);
             if (!finished) {
-                process.destroyForcibly();
+                terminateProcessTree(process);
                 long durationMs = elapsedMillis(startedAt);
                 LOGGER.warn(
                         "event=git_command_timeout durationMs={} timeoutMs={} failureType={} failureHint={} command={}",
@@ -181,6 +181,55 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
         });
         thread.start();
         return thread;
+    }
+
+    /**
+     * Git 经常再启动 ssh 等子进程。只终止顶层 git 会让 ssh 继续占用临时私钥和网络连接，
+     * 既造成后台残留进程，也会让管理员误以为已超时的发布仍在执行，因此必须连同后代一并回收。
+     */
+    private static void terminateProcessTree(Process process) {
+        List<ProcessHandle> descendants = process.descendants().toList();
+        descendants.reversed().forEach(ProcessGitCommandExecutor::destroyQuietly);
+        destroyQuietly(process.toHandle());
+        awaitTermination(descendants, Duration.ofMillis(500));
+        descendants.reversed().forEach(ProcessGitCommandExecutor::destroyForciblyQuietly);
+        destroyForciblyQuietly(process.toHandle());
+        awaitTermination(descendants, Duration.ofSeconds(1));
+    }
+
+    private static void destroyQuietly(ProcessHandle handle) {
+        try {
+            if (handle.isAlive()) {
+                handle.destroy();
+            }
+        } catch (Exception ignored) {
+            // 超时恢复路径只做尽力回收，原始超时错误仍需稳定返回调用方。
+        }
+    }
+
+    private static void destroyForciblyQuietly(ProcessHandle handle) {
+        try {
+            if (handle.isAlive()) {
+                handle.destroyForcibly();
+            }
+        } catch (Exception ignored) {
+            // 同上，不能让清理失败覆盖 Git 超时诊断。
+        }
+    }
+
+    private static void awaitTermination(List<ProcessHandle> descendants, Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        for (ProcessHandle handle : descendants) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                return;
+            }
+            try {
+                handle.onExit().get(remaining, TimeUnit.NANOSECONDS);
+            } catch (Exception ignored) {
+                // 后续 destroyForcibly 继续兜底。
+            }
+        }
     }
 
     private static long elapsedMillis(long startedAt) {

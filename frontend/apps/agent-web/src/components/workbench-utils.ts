@@ -742,10 +742,13 @@ function countPatchStats(patch: string): { additions: number; deletions: number 
 export function errorFeedback(title: string, error: unknown, fallbackContext: Record<string, unknown> = {}): Feedback {
   if (error instanceof BackendApiError) {
     const loadingContext = formatLoadingContext(error.details, fallbackContext);
+    const failureHint = displayValue(error.details.gitFailureHint)
+      ?? displayValue(error.details.failureHint);
     return {
       kind: "error",
       title,
-      description: [`${error.code}: ${error.message}`, loadingContext].filter(Boolean).join("；"),
+      // 只展示后端已经脱敏的诊断提示，不把命令、stderr 或远端地址重新带回页面。
+      description: [`${error.code}: ${error.message}`, failureHint, loadingContext].filter(Boolean).join("；"),
       traceId: error.traceId
     };
   }

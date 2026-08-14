@@ -56,6 +56,7 @@ import {
   workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
 import type { FileTreeEntry } from "@test-agent/shared-types";
+import { BackendApiError } from "@test-agent/backend-api";
 
 function file(path: string, additions: number, deletions: number, status = "modified"): RunDiffFile {
   return { path, patch: "", additions, deletions, status };
@@ -71,6 +72,27 @@ function toolPart(input: Record<string, unknown>, overrides: Partial<Extract<Mes
     ...overrides
   };
 }
+
+describe("errorFeedback", () => {
+  it("includes only the backend safe Git hint and keeps traceId separately", () => {
+    const feedback = workbenchUtils.errorFeedback("拉取远程失败", new BackendApiError(503, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 仓库不可访问",
+      traceId: "trace_pull_network_failure",
+      retryable: true,
+      details: {
+        gitFailureHint: "请检查仓库地址、访问权限以及服务器到远端的网络连通性。",
+        executedCommands: ["git fetch secret-host"]
+      }
+    }));
+
+    expect(feedback.description).toContain("GIT_UNAVAILABLE: Git 仓库不可访问");
+    expect(feedback.description).toContain("请检查仓库地址、访问权限以及服务器到远端的网络连通性");
+    expect(feedback.description).not.toContain("secret-host");
+    expect(feedback.traceId).toBe("trace_pull_network_failure");
+  });
+});
 
 describe("filterWorkspaceRootEntries", () => {
   it("hides .opencode only from the workspace root", () => {

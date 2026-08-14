@@ -1725,6 +1725,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `POST /personal-workspaces/{personalWorkspaceId}/git-pull` 无请求体，只允许个人工作区 owner 调用。后端在当前用户位于该应用的整棵个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；应用 workspace 文件和应用 Agent 文件使用相同规则。未完成 merge 会直接返回 `CONFLICT`；普通 unstaged、staged 或 untracked 改动不再先行阻止，Git 能安全合并时保留原改动并完成拉取。只有 Git 判定本地文件会被覆盖时返回 `CONFLICT`、`details.reason=LOCAL_CHANGES`，并在 `files/blockingFiles` 中列出实际阻塞文件。全程不 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/runtimeReloadStatus/runtimeReloadId/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
 
+拉取或发布遇到网络、仓库或权限异常时，统一错误继续返回稳定 `code/message/traceId`；Git details 只允许返回后端脱敏的 `gitFailureHint`、失败阶段及可恢复状态，不返回 Git URL、命令、stderr 或密钥。前端拉取结果弹框必须同时展示错误码、脱敏提示和 traceId，用户关闭后可原地重新发起拉取；已有个人提交、未完成 merge 和已解决的 index 均不得因展示错误而自动 reset。
+
 ### 对话工作区 Git Tool
 
 `POST /api/internal/agent/opencode/workspace-git-tool` 仅供公共 `workspace-git` Tool 从当前用户 OpenCode 进程回调。请求使用进程启动时注入的七天有效专用 Bearer 凭据；该凭据只被本端点接受，不能替代用户登录 Token，也不能调用其它平台 API。当前个人 workspace 由请求中的远端 `sessionId` 经既有 agent session binding 反查，接口不接受客户端指定 workspace ID。
