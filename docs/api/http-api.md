@@ -4131,9 +4131,24 @@ Mem0 对 `POST /api/internal/platform/model-gateway/v1/chat/completions|embeddin
 }
 ```
 
-- `subItemTypes` 必须是非空数组且不超过 100 项；每项 `name/value` 必须是非空有界文本，`value` 不得重复。`name` 必须以“测试任务”结尾，删除该末尾精确后缀后的非空业务名称也不得重复。`property`、`itemTypes`、`conceptType`、`editionType` 和上游 `msg` 不进入成功响应。
+- `subItemTypes` 必须是非空数组且不超过 100 项；每项 `name/value` 必须是非空有界文本，`value` 不得重复，且必须同时命中下表中的受控对应关系。未知 `value`、名称错配或转换后业务名称重复均视为响应无效。`property`、`itemTypes`、`conceptType`、`editionType` 和上游 `msg` 不进入成功响应。
 - TCDS 非 `code=0`、缺字段、空列表、重复值、超限、非 2xx、超时或非法 JSON 统一返回 `503 EXTERNAL_API_UNAVAILABLE`，不向浏览器透传上游正文。
-- 前端在加载期间禁止选择、批量修改和确认；失败保留弹窗并提供重试，不回退本地固定快照。
+- 前端在加载期间禁止选择、批量修改和确认；失败保留弹窗并提供重试，不回退本地固定快照。所有 Spring profile（包括 `local`）均实时访问 TCDS，不提供代码内固定输出；案例维护 `createGraphCase` 同样始终真实调用。
+
+`getTaskTypes` 与 `createGraphCase.taskType` 的固定对应关系如下；前端下拉框展示完整 `name`，提交时使用最后一列：
+
+| `value` | 前端展示 `name` | `createGraphCase.taskType` |
+| --- | --- | --- |
+| `0` | 自定义测试任务 | 自定义 |
+| `1` | 安全测试任务 | 安全 |
+| `2` | 业务风险防控测试任务 | 业务风险防控 |
+| `3` | 功能测试任务 | 功能测试 |
+| `4` | 验收测试任务 | 验收 |
+| `5` | 准入测试任务 | 准入 |
+| `6` | 灰度测试任务 | 灰度 |
+| `7` | 投产验证测试任务 | 投产验证 |
+| `8` | 非功能性测试任务 | 非功能性 |
+| `11` | 验收准入测试任务 | 验收准入 |
 
 #### 提交案例维护
 
@@ -4148,7 +4163,7 @@ Mem0 对 `POST /api/internal/platform/model-gateway/v1/chat/completions|embeddin
       "step": "1. 准备数据\n2. 发起交易",
       "data": "金额=100",
       "expect": "交易成功",
-      "taskType": "准入,功能"
+      "taskType": "准入,功能测试"
     }
   ]
 }
@@ -4156,10 +4171,10 @@ Mem0 对 `POST /api/internal/platform/model-gateway/v1/chat/completions|embeddin
 
 - `itemNo` 必填、最长 128 字符。
 - `caseList` 至少一项、最多 500 项；每个 Markdown 案例对应一个对象。
-- `name` 必填且最长 1024 字符；`step/data/expect` 允许空字符串且各自最长 65535 字符。`taskType` 使用本次 `getTaskTypes` 中所选 `value` 对应的 `name` 删除末尾精确后缀“测试任务”后的业务名称；不维护固定类型表。同一案例选择多个类型时按选择顺序使用英文逗号连接，例如 `准入测试任务/功能测试任务` 生成 `准入,功能`，不接受数字编码、中文逗号、缺少该后缀或删除后为空的名称。
+- `name` 必填且最长 1024 字符；`step/data/expect` 允许空字符串且各自最长 65535 字符。`taskType` 使用上表中本次所选 `name/value` 对应的业务名称；同一案例选择多个类型时按选择顺序使用英文逗号连接，例如 `准入测试任务/功能测试任务` 生成 `准入,功能测试`，不接受数字编码、中文逗号、未知值或错配名称。
 - 客户端不得提交 `userId`、上游 URL、请求头、`aiFlag/method/dataDependencies/isAICase/isUpdate/caseFlag`。后端从认证主体取得 `userId`，固定生产 TCDS 地址和 `toolId`，并分别补齐 `1/文本理解生成法/空字符串/是/否/2`。
 
-后端收到提交后会再次调用实时 `getTaskTypes`，按同一后缀规则生成当前允许集合并逐项校验，再调用 `createGraphCase`；类型已下线或客户端篡改返回 `400 VALIDATION_ERROR`，任务类型查询异常返回 `503 EXTERNAL_API_UNAVAILABLE`。成功返回统一 envelope，`data=null`。TCDS 返回 `code=0` 后才视为成功；非零业务码映射为 `409 CONFLICT` 并只返回长度受限、已清理控制字符的业务消息；连接、超时、非 2xx、空响应、超限响应和非法 JSON 统一映射为 `503 EXTERNAL_API_UNAVAILABLE`，不向浏览器回显上游地址、响应正文或堆栈。API 访问日志只记录 `itemNo/caseCount`，不记录四列案例正文。未认证返回 `401 UNAUTHENTICATED`，参数错误返回 `400 VALIDATION_ERROR`。成功和错误响应都携带当前 `traceId`。
+后端收到提交后会再次调用实时 `getTaskTypes`，按同一受控映射生成当前允许集合并逐项校验，再调用 `createGraphCase`；类型已下线或客户端篡改返回 `400 VALIDATION_ERROR`，任务类型查询异常（包括上游返回未知或错配枚举）返回 `503 EXTERNAL_API_UNAVAILABLE`。成功返回统一 envelope，`data=null`。TCDS 返回 `code=0` 后才视为成功；非零业务码映射为 `409 CONFLICT` 并只返回长度受限、已清理控制字符的业务消息；连接、超时、非 2xx、空响应、超限响应和非法 JSON 统一映射为 `503 EXTERNAL_API_UNAVAILABLE`，不向浏览器回显上游地址、响应正文或堆栈。API 访问日志只记录 `itemNo/caseCount`，不记录四列案例正文；integration 上游日志通过 `event=tcds_create_graph_case_request|tcds_create_graph_case_response` 与 `traceId` 关联调用。请求日志中的 `userId` 固定为 `[REDACTED]`，不记录 `toolId`，`name/step/data/expect/dataDependencies` 只记录字符数、字节数和 SHA-256 短摘要，最多预览 20 条案例且整条日志不超过 8 KiB。响应日志记录 HTTP 状态、业务 `code` 和清理控制字符且最长 200 字符的 `msg`；`data` 及其它正文不写原值，只记录类型、数量和 SHA-256 短摘要，空、非法或超限正文记录安全状态。未认证返回 `401 UNAUTHENTICATED`，参数错误返回 `400 VALIDATION_ERROR`。成功和错误响应都携带当前 `traceId`。
 
 兼容性：任务类型查询是新增只读入口，原案例维护路径和请求/响应保持兼容；不新增数据库字段、Flyway migration、RunEvent、SSE 或 WebSocket。生产 Java 所在网络必须能够访问两个 TCDS 地址；浏览器不需要 TCDS CORS，也不会产生 HTTPS 页面到 HTTP TCDS 的 mixed-content 请求。
 

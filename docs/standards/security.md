@@ -139,8 +139,8 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 
 1. 浏览器只能通过 `backend-api` 调用 `/api/internal/platform/integration/tcds/task-types` 和 `/api/internal/platform/integration/tcds/test-cases`，不得直连 TCDS HTTP 地址，避免跨域、mixed content 和客户端暴露固定工具标识。
 2. 任务类型与案例维护生产地址、案例维护 `toolId`、设计方法和其它固定业务字段必须由 `test-agent-integration` 常量组装，不接受 URL、请求头、固定字段或 `userId` 客户端覆盖，禁止复用旧 `/api/proxy/call` 形成 SSRF/任意代理。
-3. 任务类型查询只向浏览器返回经过数量、长度、控制字符和重复值校验的 `subItemTypes.name/value`；`name` 必须以“测试任务”结尾，删除末尾后缀后的非空业务名称也必须唯一。不得透传完整上游响应，也不得在失败时降级为可能过期的前端快照。
-4. `userId` 只取当前 `AuthPrincipal.unifiedAuthId`；案例提交前必须再次实时查询 TCDS，按 `name` 删除末尾“测试任务”的规则逐项校验业务名称，不得使用代码内固定白名单，多值只接受英文逗号分隔。日志只记录任务类型数量或 `itemNo`、案例数量和 traceId，不记录案例正文、TCDS 响应正文或固定 `toolId`。
+3. 任务类型查询只向浏览器返回经过数量、长度、控制字符和重复值校验的 `subItemTypes.name/value`；两者必须同时命中 API 文档中的 10 项受控映射，未知 `value`、名称错配或转换后业务名称重复均失败关闭。不得透传完整上游响应，也不得在失败时降级为可能过期的前端快照。仅 Spring `local` profile 可使用代码内同一映射的 10 项 `subItemTypes` 模拟值且不发出任务类型 GET；该分支不得覆盖其它 profile，也不得模拟 `createGraphCase`。
+4. `userId` 只取当前 `AuthPrincipal.unifiedAuthId`；案例提交前必须再次实时查询 TCDS，按受控 `name/value -> taskType` 映射逐项校验业务名称，多值只接受英文逗号分隔。`createGraphCase` 上游请求日志必须把 `userId` 完全删除且不得记录固定 `toolId`；案例 `name/step/data/expect/dataDependencies` 只允许记录长度和 SHA-256 短摘要，安全枚举和固定字段可保留。响应日志只允许记录 HTTP 状态、有界业务 `code/msg` 及 `data` 类型、数量和摘要，禁止记录 `data` 原值、未知响应正文或非法 JSON 原文。请求预览最多 20 条案例，单条安全报文日志最大 8 KiB；所有日志携带 traceId。
 5. 后端 HTTP client 禁止跟随重定向，并设置连接/请求超时与响应体上限；案例维护上游非零业务码只允许返回受限安全消息，任务类型查询和网络、协议、解析错误统一收敛为平台错误，不暴露地址、响应正文或异常堆栈。
 
 1. `/api/external/v1/**` 必须由独立外部认证过滤器强制认证；只有精确 `/api/external/v1` 根及其 `/` 子路径可以绕过旧用户 JWT 和静态 `TEST_AGENT_API_TOKEN` 过滤器，相邻路径不得继承。用户 Bearer Token、Cookie、静态 Token 或前端菜单都不能替代 `X-Test-Agent-Tool-Code` 与 `X-Test-Agent-Api-Key`。

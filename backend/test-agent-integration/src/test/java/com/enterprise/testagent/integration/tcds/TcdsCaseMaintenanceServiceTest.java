@@ -39,7 +39,7 @@ class TcdsCaseMaintenanceServiceTest {
 
     private static final String TASK_TYPES_RESPONSE = """
             {"code":0,"msg":"请求成功","data":{"subItemTypes":[
-              {"name":"探索性测试任务","value":"12"},
+              {"name":"准入测试任务","value":"5"},
               {"name":"功能测试任务","value":"3"}
             ]}}
             """;
@@ -71,7 +71,8 @@ class TcdsCaseMaintenanceServiceTest {
                 "{\"code\":0,\"data\":{\"subItemTypes\":[]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"准入测试任务\",\"value\":\"5\"},{\"name\":\"重复\",\"value\":\"5\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"准入\",\"value\":\"5\"}]}}",
-                "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"测试任务\",\"value\":\"5\"}]}}",
+                "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"安全测试任务\",\"value\":\"5\"}]}}",
+                "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"探索性测试任务\",\"value\":\"12\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"准入测试任务\",\"value\":\"5\"},{\"name\":\"准入测试任务\",\"value\":\"6\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"非法\\n名称\",\"value\":\"5\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"缺少值\"}]}}")) {
@@ -86,7 +87,7 @@ class TcdsCaseMaintenanceServiceTest {
     }
 
     @Test
-    void buildsFixedProductionRequestWithDynamicCommaSeparatedTaskTypeNames() throws Exception {
+    void buildsFixedProductionRequestWithMappedCommaSeparatedTaskTypeNames() throws Exception {
         RecordingHttpClient httpClient = new RecordingHttpClient(
                 200,
                 TASK_TYPES_RESPONSE,
@@ -96,7 +97,7 @@ class TcdsCaseMaintenanceServiceTest {
         service.maintain(
                 "S20260703-000081",
                 "555033606",
-                List.of(input("案例一", "探索性,功能")),
+                List.of(input("案例一", "准入,功能测试")),
                 "trace_tcds_case");
 
         HttpRequest request = httpClient.request;
@@ -112,7 +113,7 @@ class TcdsCaseMaintenanceServiceTest {
         assertThat(body.path("itemNo").asText()).isEqualTo("S20260703-000081");
         assertThat(body.path("userId").asText()).isEqualTo("555033606");
         assertThat(body.path("caseList").size()).isEqualTo(1);
-        assertThat(body.path("caseList").get(0).path("taskType").asText()).isEqualTo("探索性,功能");
+        assertThat(body.path("caseList").get(0).path("taskType").asText()).isEqualTo("准入,功能测试");
         assertThat(body.path("caseList").get(0).path("caseFlag").asText()).isEqualTo("2");
         assertThat(body.path("caseList").get(0).path("dataDependencies").asText()).isEmpty();
         assertThat(body.path("caseList").get(0).path("isAICase").asText()).isEqualTo("是");
@@ -126,7 +127,7 @@ class TcdsCaseMaintenanceServiceTest {
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE, "{\"code\":3,\"msg\":\"业务异常\"}"));
 
         assertThatThrownBy(() -> service.maintain(
-                "S20260703-000081", "555033606", List.of(input("案例一", "探索性")), "trace_tcds_case"))
+                "S20260703-000081", "555033606", List.of(input("案例一", "准入")), "trace_tcds_case"))
                 .isInstanceOfSatisfying(PlatformException.class, error -> {
                     assertThat(error.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(error.getMessage()).isEqualTo("业务异常");
@@ -139,7 +140,7 @@ class TcdsCaseMaintenanceServiceTest {
         TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(objectMapper, httpClient);
 
         assertThatThrownBy(() -> service.maintain(
-                "S20260703-000081", "555033606", List.of(input("案例一", "准入")), "trace_tcds_case"))
+                "S20260703-000081", "555033606", List.of(input("案例一", "安全")), "trace_tcds_case"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         error -> assertThat(error.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
         assertThat(httpClient.request.uri()).isEqualTo(URI.create("http://tcds-prod.sdc.icbc/task/getTaskTypes"));
@@ -160,9 +161,85 @@ class TcdsCaseMaintenanceServiceTest {
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE, oversizedBody));
 
         assertThatThrownBy(() -> service.maintain(
-                "S20260703-000081", "555033606", List.of(input("案例一", "探索性")), "trace_tcds_case"))
+                "S20260703-000081", "555033606", List.of(input("案例一", "准入")), "trace_tcds_case"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         error -> assertThat(error.errorCode()).isEqualTo(ErrorCode.EXTERNAL_API_UNAVAILABLE));
+    }
+
+    @Test
+    void buildsDiagnosticRequestLogWithoutAuthenticationOrCaseContent() throws Exception {
+        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
+                objectMapper,
+                new RecordingHttpClient(200, TASK_TYPES_RESPONSE));
+
+        String payload = service.safeRequestLogPayload(
+                "S20260703-000081",
+                List.of(new TcdsCaseInput(
+                        "敏感案例名称",
+                        "敏感步骤\n第二行",
+                        "敏感测试数据",
+                        "敏感预期结果",
+                        "准入,功能测试")));
+        JsonNode root = objectMapper.readTree(payload);
+
+        assertThat(root.path("aiFlag").asText()).isEqualTo("1");
+        assertThat(root.path("method").asText()).isEqualTo("文本理解生成法");
+        assertThat(root.path("itemNo").asText()).isEqualTo("S20260703-000081");
+        assertThat(root.path("userId").asText()).isEqualTo("[REDACTED]");
+        assertThat(root.path("caseCount").asInt()).isEqualTo(1);
+        assertThat(root.path("caseList").get(0).path("step").path("length").asInt()).isEqualTo(8);
+        assertThat(root.path("caseList").get(0).path("step").path("sha256").asText()).hasSize(16);
+        assertThat(root.path("caseList").get(0).path("taskType").asText()).isEqualTo("准入,功能测试");
+        assertThat(payload)
+                .doesNotContain(
+                        "555033606",
+                        "66f36bfa5c1c6105572b0118880261d6",
+                        "敏感案例名称",
+                        "敏感步骤",
+                        "敏感测试数据",
+                        "敏感预期结果");
+    }
+
+    @Test
+    void buildsDiagnosticResponseLogWithoutUpstreamDataContent() throws Exception {
+        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
+                objectMapper,
+                new RecordingHttpClient(200, TASK_TYPES_RESPONSE));
+        byte[] response = """
+                {"code":3,"msg":"无权限\\n请联系管理员 token=secret-value 555033606","data":{"token":"sensitive-token","detail":"敏感返回"}}
+                """.getBytes(StandardCharsets.UTF_8);
+
+        String payload = service.safeResponseLogPayload(200, response);
+        JsonNode root = objectMapper.readTree(payload);
+
+        assertThat(root.path("httpStatus").asInt()).isEqualTo(200);
+        assertThat(root.path("code").asInt()).isEqualTo(3);
+        assertThat(root.path("msg").asText())
+                .isEqualTo("无权限 请联系管理员 token=[REDACTED] [REDACTED]");
+        assertThat(root.path("bodyState").asText()).isEqualTo("parsed");
+        assertThat(root.path("data").path("type").asText()).isEqualTo("object");
+        assertThat(root.path("data").path("fieldCount").asInt()).isEqualTo(2);
+        assertThat(root.path("data").path("sha256").asText()).hasSize(16);
+        assertThat(payload).doesNotContain("secret-value", "555033606", "sensitive-token", "敏感返回");
+    }
+
+    @Test
+    void reportsInvalidAndOversizedResponseBodiesWithoutLoggingTheirContent() throws Exception {
+        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
+                objectMapper,
+                new RecordingHttpClient(200, TASK_TYPES_RESPONSE));
+
+        String invalid = service.safeResponseLogPayload(
+                502,
+                "上游原始错误正文".getBytes(StandardCharsets.UTF_8));
+        String oversized = service.safeResponseLogPayload(
+                200,
+                "敏感".repeat(512 * 1024).getBytes(StandardCharsets.UTF_8));
+
+        assertThat(objectMapper.readTree(invalid).path("bodyState").asText()).isEqualTo("invalid_json");
+        assertThat(invalid).doesNotContain("上游原始错误正文");
+        assertThat(objectMapper.readTree(oversized).path("bodyState").asText()).isEqualTo("oversized");
+        assertThat(oversized).doesNotContain("敏感");
     }
 
     private static TcdsCaseInput input(String name, String taskType) {
