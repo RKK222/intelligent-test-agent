@@ -10600,3 +10600,26 @@
 
 - 企业包从构建、外层封装到安装后都会拒绝缺失或字节不匹配的两条新 migration，两台后台节点包的 TCDS 地址固定一致。
 - 每日 04:10 的 SCM Git 姓名补偿首次扫描不再因 PostgreSQL 空参数类型推断失败；数据库变更仍只有已提交的新增表与 V12 任务，本次没有新增 migration。
+
+## 2026-08-14 - 记录 TCDS/SCM 大版本企业增量包
+
+### Why
+
+- 用户要求以当前本地 `release` 重新打企业包，本轮相对上一包包含需求导入、TCDS 案例维护、Git 发布恢复、SCM 姓名校准等较大改动，需要记录可追溯源码、制品哈希和逐机验收基线。
+
+### What
+
+- 制品源码提交固定为 `ad37bfe7675eca62f9b9a2d4d4518bb90889384c`；内层发布 ZIP SHA-256 为 `34b5b8d82d17acd78ea100684d0c68b6261dcc713f87b90b770f5b08a047c102`，外层完整包 SHA-256 为 `2fef802357ad060b715ef0d36f8f93022c8e702ba20bb6eee7a7a84dcf61129c`。
+- 后端 app JAR 为 `6aa6b398205d965bef02e08878f3e152ca216548a3fe8a744dffa6961a020047`，persistence JAR 为 `0eba3f1b6f1b3372398d07ba8975f122f1c840cd8c73b1423c2382188f0ad8e3`，XXL integration JAR 为 `aa6d2df6f7821e6b3b44ff9ea0b13613060bc255a02f6ce93def5b1700eaa366`，前端归档为 `23e6bb2d6bc6eff6ffbb21accaf678bf04b6761ab36995b136750363b13588ca`。
+- models 快照 SHA-256 保持 `6a510be17a7b0616f128fad130773c3fb6ad7a3d4d7881ec59f2873e17cbc44c`；Qwen 日期 `2026-08-07` 高于 DeepSeek `2026-08-06`，继续仅按既有灰度要求在 `.4` 安装，`.114` 保留现网模型文件。
+
+### How
+
+- JDK 25 完成后端构建，agent-web production build 成功；worker runtime 指纹 `50f56c...`、toolbox 指纹 `35447d...` 均判定 `reuse`，LobeHub 标记 `disabled`，Workflow 运行制品不存在。
+- 内层 `--validate-only`、内外层 ZIP SHA、外层内嵌内层 SHA、全部新旧 Flyway 资源、RSA 资源、节点包结构均通过；两台后台节点包均确认 `TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080` 和相同 CORS，未输出任何密钥。
+- 外层包复制到 `/Users/kaka/Desktop/mimoagent/0709/` 后重新执行 SHA 校验通过；用最终构建产物重启本地 backend、manager、frontend，不启用 LobeHub，health/readiness 为 `UP`、前端 200、manager WebSocket 已连接且进程 health 收敛为 `HEALTHY`。
+
+### Result
+
+- 可交付文件为固定名 `test-agent-two-backend-complete.zip` 与 `.sha256`，大小约 128 MiB；企业内从中转机 `~/Desktop/mimoagent/0709` 校验并按 `.4 → .114 → .2` 顺序部署。
+- 数据库只允许从上一包 PostgreSQL `20260812204207` / XXL V11 基线分别新增 `20260813190929/-297528120` 与 V12/`-211900485`；任何失败、未知 checksum 或未知更高版本均停止，不使用 repair/outOfOrder/手改历史表。
