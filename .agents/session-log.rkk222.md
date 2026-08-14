@@ -10864,3 +10864,25 @@
 
 - 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c` 与 `unzip -t`。
 - 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库只允许 validate 且 history 零新增。
+
+## 2026-08-14 - 同步 dev 并完成基础端到端验收
+
+### Why
+
+- 用户要求先合入最新 `release`，准备 dev 所需数据库与记忆服务，再启动 dev 代码并实际验证对话和文件附件。
+
+### What
+
+- 拉取 `origin/release` 并合入当前 `dev`，合并提交为 `5bb9601935bebc6f33b3980333a801f7bc1c4a01`，无冲突。
+- 核验既有平台 PostgreSQL 的 Flyway 历史；为避免覆盖原有记忆库，初始化新的 dev 专用 pgvector 卷 `test-agent-memory-dev-pgvector-v2-20260814`，完成 Alembic 升级并保留旧卷。
+- 以 JDK 25、`.env.test` 和 `test` profile 启动 backend、opencode-manager、frontend 及记忆服务；未修改 `.env*` 或业务源码。
+
+### How
+
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --with-memory` 构建并启动当前 dev；后端 `http://127.0.0.1:8080/actuator/health` 返回 `UP`，记忆 API 与 embedding 服务的鉴权就绪检查通过。
+- 通过真实浏览器登录工作台，第一轮要求仅返回标识文本，界面显示 `DEV_CHAT_OK_20260814` 且 Run 为 `SUCCEEDED`；上传 27 B 文本附件后，第二轮要求读取附件，界面返回 `DEV_ATTACHMENT_OK_20260814` 且 Run 为 `SUCCEEDED`。
+
+### Result
+
+- dev 已在 `http://127.0.0.1:3000` 运行，基础对话与聊天附件到工作区、模型读取附件的完整链路均已实际验证。
+- 本次无 API、RunEvent、数据库结构、安全、generated SDK 或 OpenCode 源码变更；仅新增本机运行态数据库卷和被清理的浏览器验收产物。浏览器运行态资源轮询仍有既有 400 控制台记录，但未阻断本次两次 Run 成功。
