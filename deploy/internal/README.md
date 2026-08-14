@@ -604,14 +604,13 @@ bash /data/testagent/deploy/internal/ensure-experience-workspace-content.sh \
 
 企业后端采用 `test-agent-app.jar` 瘦启动器与 `dist/backend/lib/` 外置依赖。Flyway migration
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
-复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型、体验工作区和运营 outbox）以及 XXL MySQL V10/V11/V12 的 SHA-256，并分别比较发布包与安装后的
+复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型、体验工作区、运营 outbox 和 SCM Git 姓名证据）以及 XXL MySQL V10/V11/两套已执行 V12 历史资源的 SHA-256，并分别比较发布包与安装后的
 persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
-当前上一轮已部署平台包的业务源码提交为 `f10754e01ab8f846a8aa2430214bb39f4795623b`，内层 ZIP SHA-256 为
-`99f34a5652d5972dd4dbc1e9384026d1a1a78a8cc4bb1caa702a6c99cc000df5`；该包正常企业主链最高版本为
-`20260810234154`，XXL MySQL 部署前基线预期为 V1-V11 全部成功，本轮只允许追加 V12。从该基线首次升级时，第一台 `.4` 只允许依次新增
-PostgreSQL `20260811170050`、`20260811213000`、`20260812104911`、`20260812144051`；四条都已执行的故障重部署
-不得新增 history。`20260811170050` 只是 QA Memory 已撤销后的历史顺序补偿，不代表重新启用长期记忆功能。
-XXL MySQL 只允许新增 `V12__register_analytics_clickhouse_ingestion_task.sql`，`.114` 只做
+当前上一轮已部署平台包的业务源码提交为 `57e211de48a5507fb8d1689e1c8f86fd96563032`，内层 ZIP SHA-256 为
+`7af9c20e57a809258b0acd4672189b5ca875dde3f1a7208f770414a57d234b53`；该包正常企业主链最高版本为
+`20260812204207`，XXL MySQL 准入预期为 V1-V11 全部成功。从该基线首次升级时，第一台 `.4` 只允许新增
+PostgreSQL `20260813190929` 和发布清单登记的 dev 前向 migration；XXL MySQL 必须按已执行 V12 分支选择兼容 location，
+并通过更高版本补齐 ClickHouse 每分钟入库和每日 04:10 SCM Git 姓名补偿。故障重部署不得新增 history，`.114` 只做
 validate。必须按多后台手册读取两套完整 `flyway_schema_history`，不能只凭
 提交号、启动日志或最高版本判断数据库历史一致。
 
@@ -621,12 +620,11 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 
 1. 从两台后台确认外部 `122.210.106.43:3306` 可达，两份 `backend.env` 使用同一个 JDBC 地址、账号密码和 XXL access token。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
-3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一包 `20260810234154` 基线只允许新增
-   QA 历史顺序补偿、通知处置类型、体验工作区结构和体验工作区默认目录四条 migration 的连续后缀；任何部分、
-   倒序或未知历史都停止。
-   外部 XXL MySQL 必须从 V1-V11 连续升级到 V12，且不得出现其它 history。随后确认 Admin health、搬迁任务
+3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一包 `20260812204207` 基线只允许新增
+   `20260813190929` 和发布清单登记的 dev 前向 migration；外部 XXL MySQL 从 V1-V11 或已登记 V12 分支按兼容装配升级；任何失败、倒序、未知版本或 checksum 都停止。
+   随后确认 Admin health、搬迁任务
    每 30 分钟、闲置进程关闭每日 02:00、模型探活每 5 分钟和可观测清理
-   每日 03:30、ClickHouse 运营入库每分钟均正常。任一校验失败时不得继续 `.114` 和前端。
+   每日 03:30、ClickHouse 运营入库每分钟及 SCM Git 姓名补偿每日 04:10 均正常。任一校验失败时不得继续 `.114` 和前端。
 4. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
 5. 导入 worker 镜像、解压 programs。
 6. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。

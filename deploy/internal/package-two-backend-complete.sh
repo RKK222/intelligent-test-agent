@@ -86,12 +86,16 @@ LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-clien
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256="168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE="db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256="250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554"
+USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE="db/migration/V20260813190929__user_scm_git_identities_create.sql"
+USER_SCM_GIT_IDENTITIES_MIGRATION_SHA256="fd434d47d40c9fd71c987bd6512ba6897e33fe2e1db67299ff01514b4941c92e"
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_internal_model_probe_task.sql"
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
 XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_analytics_clickhouse_ingestion_task.sql"
 XXL_ANALYTICS_INGESTION_MIGRATION_SHA256="70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0"
+XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_scm_git_name_sync_task.sql"
+XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256="2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739"
 
 usage() {
   cat <<'USAGE'
@@ -284,6 +288,8 @@ verify_release_flyway_migrations_jar() {
     "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" \
     "${AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE}" "${AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE}" "${USER_SCM_GIT_IDENTITIES_MIGRATION_SHA256}"
 }
 
 verify_release_xxl_flyway_migrations_jar() {
@@ -294,6 +300,8 @@ verify_release_xxl_flyway_migrations_jar() {
     "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" \
     "${XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE}" "${XXL_ANALYTICS_INGESTION_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE}" "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256}"
 }
 
 # SHA 文件必须指向同目录的实际文件名，避免误校验同目录中的历史版本。
@@ -543,6 +551,8 @@ normalize_backend_node_archive() {
   toolbox_env="${node_root}/${node_dir}/config/toolbox.env"
 
   replace_or_append_env_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
+    'http://tcds-prod.sdc.icbc:9080'
   replace_or_append_env_value "${backend_env}" TEST_AGENT_MAX_PREVIEW_BYTES 5242880
   replace_or_append_env_value "${backend_env}" TEST_AGENT_UPLOAD_CHUNK_BYTES 262144
   replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_BACKEND_PORT 8080
@@ -599,6 +609,8 @@ validate_mysql_cluster_config() {
   grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root' "${backend_114}"
   grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_4}"
   grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_114}"
+  grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_4}"
+  grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_114}"
   grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' "${frontend}"
   grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120' "${frontend}"
   grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' "${frontend}"

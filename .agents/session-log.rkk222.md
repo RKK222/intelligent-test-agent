@@ -10550,3 +10550,53 @@
 
 - `release` 上四类 Git 链路、多人冲突、权限隔离、网络失败、刷新恢复和 dispose 已完成真实 UI 端到端验证；网络抖动不再把“本地提交成功”伪装成全失败，也不会因盲目重试重复 commit。
 - 本次不新增 HTTP URL、DTO 或 RunEvent 类型，不改数据库结构/migration、部署拓扑、`.env*`、generated SDK 或 OpenCode 源码；只扩充既有错误 details 的稳定可选字段与前端展示。Gitee SSH 仍可能受外部网络偶发断连影响，但页面保留可重试入口和管理员可关联的 traceId。
+
+## 2026-08-14 - 合入案例远程维护并统一 TCDS toolId
+
+### Why
+
+- 远端 `release` 的案例维护功能新增 `getTaskTypes` 与 `createGraphCase` 两条 TCDS 请求，但前者没有携带现场要求的 `toolId`，两者还各自硬编码了不含 `:9080` 的生产地址。
+- 合并远端提交时需保留本地 `release` 已有的体验工作区、会话消息和个人进程重启客户端能力，不能让自动合并静默删除既有 API。
+
+### What
+
+- 新增包内 `TcdsHttpRequestFactory`，由 `TcdsHttpGateway` 与 `TcdsCaseMaintenanceService` 共同复用部署地址、HTTP 超时和同源 `toolId: 66f36bfa5c1c6105572b0118880261d6` 注入；任务类型与案例维护均通过 `${TEST_AGENT_TCDS_BASE_URL:http://tcds-prod.sdc.icbc:9080}` 访问。
+- 案例维护服务改为 Spring 显式装配并复用统一 `HttpClient`；测试分别锁定 GET、POST 和校验失败前的任务类型请求都携带精确 header 与 `:9080` 端口。
+- 语义合并远端案例维护弹窗、Markdown 解析、平台 API 与日志脱敏能力，并恢复自动合并丢失的体验工作区打开/关闭/提交、Run 消息查询和个人进程重启 6 项既有前端客户端方法。
+- 同步 integration/API/前端 README 与 PACKAGE，以及 HTTP API、部署、安全和模块图；未修改 `.env*`、RunEvent、数据库、migration、generated SDK 或 OpenCode 源码。
+
+### How
+
+- JDK 25 定向 Maven reactor 通过：TCDS 网关/案例维护/装配 16 项、TCDS Controller 与 API 日志 25 项、应用配置绑定 15 项，共 56 项，0 失败。
+- 前端案例维护、编辑器入口和 backend-api 定向 Vitest 137/137，通过全 workspace typecheck、用户手册与 agent-web production build；构建仅保留既有大 chunk 提示。
+- `tools/verify-ai-docs.sh`、`git diff --check` 和冲突标记复核通过；提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 案例远程维护的全部 TCDS 后台调用现在与需求导入链路共用同一地址和同源 header 规则；浏览器仍只调用平台 API，跨域对象存储不会收到内部 `toolId`。
+- 这是现有部署拓扑内的 `release` 修复，HTTP API 为新增平台入口，既有 API/DTO/事件和客户端调用保持兼容；真实 TCDS 业务权限与数据写入仍需在有效企业会话中验收，并按分支策略同步回 `dev`。
+
+## 2026-08-14 - 补齐企业包 Flyway/TCDS 门禁并修复 SCM 姓名游标
+
+### Why
+
+- 本轮 `release` 相对上一企业包新增 PostgreSQL `V20260813190929` 和 XXL MySQL `V12`，但内层打包、外层封装和目标机安装后校验仍只锁定到 `20260812204207` / V11，旧依赖 JAR 可能漏检。
+- SCM Git 姓名补偿的首屏游标 SQL 使用空参数 OR 表达式，真实 PostgreSQL 无法推断参数类型；原 H2 回归未覆盖该数据库差异。
+- 两台企业后台节点包必须统一使用现场 TCDS 地址 `http://tcds-prod.sdc.icbc:9080`，不能仅校验配置非空。
+
+### What
+
+- 三层企业发布脚本新增 PostgreSQL `20260813190929` 与 XXL V12 的文件名/SHA-256 字节锁，外层封装在临时节点副本中写入并复核精确 TCDS 地址，逐机部署脚本也拒绝其它地址。
+- `UserScmGitIdentityMapper.xml` 复用现有 MyBatis 动态游标模式，首屏不生成 `user_id > afterUserId`，后续页才绑定非空游标；真实 PostgreSQL 测试同时锁定首屏与末页。
+- 企业多后台手册更新上一包基线、两套 Flyway 允许增量、checksum、停止条件和 V12 任务验收；持久层 README 同步 PostgreSQL 空游标兼容说明。
+
+### How
+
+- 将本机仅用于 Testcontainers 的 `postgres:16-alpine`、`mysql:8.4` 切换为 arm64 原生镜像，避免 amd64 仿真超过容器启动等待窗口；企业 worker linux/amd64 制品不受影响。
+- JDK 25 下真实 PostgreSQL 兼容矩阵 25/25、SCM MyBatis PostgreSQL 1/1、Flyway 文件命名/字节锁 13/13 通过；真实 MySQL 8.4 空库、V8→V12 与并发初始化 4/4 通过。
+- 四个 Shell 脚本 `bash -n`、`git diff --check` 通过；未修改 migration 原始字节、`.env*`、generated SDK 或 OpenCode 源码。
+
+### Result
+
+- 企业包从构建、外层封装到安装后都会拒绝缺失或字节不匹配的两条新 migration，两台后台节点包的 TCDS 地址固定一致。
+- 每日 04:10 的 SCM Git 姓名补偿首次扫描不再因 PostgreSQL 空参数类型推断失败；数据库变更仍只有已提交的新增表与 V12 任务，本次没有新增 migration。
