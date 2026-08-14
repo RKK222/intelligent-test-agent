@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.user.UserScmGitIdentityRepository;
 import com.enterprise.testagent.domain.user.UserScmGitIdentitySource;
 import com.enterprise.testagent.persistence.mybatis.MyBatisUserScmGitIdentityRepository;
 import com.enterprise.testagent.persistence.mybatis.UserScmGitIdentityMapper;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Properties;
@@ -60,7 +61,7 @@ class MyBatisUserScmGitIdentityPostgresqlIntegrationTest {
                         values (:userId, '123456789', '测试用户1', 'hash', 'ACTIVE', :now, :now)
                         """)
                 .param("userId", USER_ID.value())
-                .param("now", FIRST)
+                .param("now", Timestamp.from(FIRST))
                 .update();
         jdbc.sql("""
                         insert into user_ssh_keys(
@@ -69,7 +70,7 @@ class MyBatisUserScmGitIdentityPostgresqlIntegrationTest {
                         ) values ('ssh_scm_git_identity', :userId, 'work', 'fingerprint', 'cipher', 'nonce', 'aes', :now)
                         """)
                 .param("userId", USER_ID.value())
-                .param("now", FIRST)
+                .param("now", Timestamp.from(FIRST))
                 .update();
         repository = repository(dataSource);
     }
@@ -80,6 +81,7 @@ class MyBatisUserScmGitIdentityPostgresqlIntegrationTest {
                 .singleElement()
                 .extracting(UserScmGitIdentityCandidate::unifiedAuthId)
                 .isEqualTo("123456789");
+        assertThat(repository.findSyncCandidatesAfter(USER_ID.value(), 500)).isEmpty();
 
         assertThat(repository.upsertAcceptedCommitIdentities(List.of(identity(
                 "历史姓名", UserScmGitIdentitySource.ACCEPTED_COMMIT_HISTORY, FIRST, "1111111"))))

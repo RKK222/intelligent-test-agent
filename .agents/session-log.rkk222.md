@@ -10343,3 +10343,28 @@
 
 - 案例远程维护的全部 TCDS 后台调用现在与需求导入链路共用同一地址和同源 header 规则；浏览器仍只调用平台 API，跨域对象存储不会收到内部 `toolId`。
 - 这是现有部署拓扑内的 `release` 修复，HTTP API 为新增平台入口，既有 API/DTO/事件和客户端调用保持兼容；真实 TCDS 业务权限与数据写入仍需在有效企业会话中验收，并按分支策略同步回 `dev`。
+
+## 2026-08-14 - 补齐企业包 Flyway/TCDS 门禁并修复 SCM 姓名游标
+
+### Why
+
+- 本轮 `release` 相对上一企业包新增 PostgreSQL `V20260813190929` 和 XXL MySQL `V12`，但内层打包、外层封装和目标机安装后校验仍只锁定到 `20260812204207` / V11，旧依赖 JAR 可能漏检。
+- SCM Git 姓名补偿的首屏游标 SQL 使用空参数 OR 表达式，真实 PostgreSQL 无法推断参数类型；原 H2 回归未覆盖该数据库差异。
+- 两台企业后台节点包必须统一使用现场 TCDS 地址 `http://tcds-prod.sdc.icbc:9080`，不能仅校验配置非空。
+
+### What
+
+- 三层企业发布脚本新增 PostgreSQL `20260813190929` 与 XXL V12 的文件名/SHA-256 字节锁，外层封装在临时节点副本中写入并复核精确 TCDS 地址，逐机部署脚本也拒绝其它地址。
+- `UserScmGitIdentityMapper.xml` 复用现有 MyBatis 动态游标模式，首屏不生成 `user_id > afterUserId`，后续页才绑定非空游标；真实 PostgreSQL 测试同时锁定首屏与末页。
+- 企业多后台手册更新上一包基线、两套 Flyway 允许增量、checksum、停止条件和 V12 任务验收；持久层 README 同步 PostgreSQL 空游标兼容说明。
+
+### How
+
+- 将本机仅用于 Testcontainers 的 `postgres:16-alpine`、`mysql:8.4` 切换为 arm64 原生镜像，避免 amd64 仿真超过容器启动等待窗口；企业 worker linux/amd64 制品不受影响。
+- JDK 25 下真实 PostgreSQL 兼容矩阵 25/25、SCM MyBatis PostgreSQL 1/1、Flyway 文件命名/字节锁 13/13 通过；真实 MySQL 8.4 空库、V8→V12 与并发初始化 4/4 通过。
+- 四个 Shell 脚本 `bash -n`、`git diff --check` 通过；未修改 migration 原始字节、`.env*`、generated SDK 或 OpenCode 源码。
+
+### Result
+
+- 企业包从构建、外层封装到安装后都会拒绝缺失或字节不匹配的两条新 migration，两台后台节点包的 TCDS 地址固定一致。
+- 每日 04:10 的 SCM Git 姓名补偿首次扫描不再因 PostgreSQL 空参数类型推断失败；数据库变更仍只有已提交的新增表与 V12 任务，本次没有新增 migration。
