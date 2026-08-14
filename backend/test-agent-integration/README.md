@@ -6,7 +6,7 @@
 
 ## 当前能力
 
-- `TcdsHttpGateway` 统一实现用户、授权应用、需求子条目、文档元数据和受限下载；基础地址只从必填部署变量 `TEST_AGENT_TCDS_BASE_URL` 注入，固定接口用 `URI.resolve` 构造。文档 URL 只接受重新查询的 TCDS 响应，限定 HTTP/HTTPS、10 秒连接、30 秒请求、3 次重定向及调用方容量上限，日志不记录 token、签名 URL 或正文。
+- `TcdsHttpGateway` 统一实现用户、授权应用、需求子条目、文档元数据和受限下载；基础地址默认使用企业局域网 `http://tcds-prod.sdc.icbc:9080`，允许 `TEST_AGENT_TCDS_BASE_URL` 覆盖，固定接口用 `URI.resolve` 构造。登录、用户、应用、子条目和文档元数据请求统一携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`；文档 URL 只接受重新查询的 TCDS 响应，限定 HTTP/HTTPS、10 秒连接、30 秒请求、3 次重定向及调用方容量上限，日志不记录 token、签名 URL 或正文。
 - 从 `src/main/resources/toolbox/catalog-v1.json` 加载锁定 IT-Tools / OmniTools 的版本化离线目录，启动时校验 193 项的稳定 ID、深链接、双语字段、分类和顺序。
 - `ToolboxCatalogService` 通过显式生产构造器注入点击仓储，合并累计点击投影，并按累计数、最后计数时间和目录顺序计算正点击 Top 10。
 - 点击只信任当前登录用户、服务端时钟和 traceId；`eventId` 幂等、用户/工具 30 秒窗口竞争和累计原子更新由领域仓储端口完成。

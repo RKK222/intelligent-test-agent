@@ -4,7 +4,7 @@
 
 企业交付模板默认设置 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true`，并要求 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<前端入口>`；应用本身在缺少该显式配置时仍保持关闭。上线时确认 systemd Java 的 `User=` 就是期望的运维用户，终端只继承该用户权限，不使用 `sudo` 或额外授权。标准入口的前端 `nginx.env` 必须开启 TLS、配置证书路径，并以 `linuxServerId=host:port` 填写统一的 `TEST_AGENT_NGINX_SERVER_ROUTES`。旧 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 只用于升级兼容，新配置不得与新键并存。当前现场明确选择 HTTP、不能使用 HTTPS，因此单后台和 `.4 + .114` 多后台都按对应文档显式允许 `ws://`，并接受登录数据和终端内容明文传输、浏览器网段必须直达各 Java `:8080` 的风险；该现场例外不改变通用 WSS 安全默认。
 
-所有 Java 节点还必须在 `backend.env` 显式填写同一个 `TEST_AGENT_TCDS_BASE_URL` HTTP/HTTPS 绝对地址。该值由部署环境注入，代码不维护主机白名单或生产默认值；缺失或非法时 Java 失败启动。升级时先为全部节点补齐变量，再升级全部 Java 和前端；回滚时先回滚前端，再回滚全部 Java，禁止长期混跑新旧 `rootPath` 语义。旧 9900 服务仅在同源需求导入完成真实查询、目录写入、重复覆盖、部分失败和文件树刷新验收后由运维另行停用。
+应用默认使用企业局域网 TCDS 入口 `http://tcds-prod.sdc.icbc:9080`，所有 Java 节点仍必须在 `backend.env` 显式填写同一个 `TEST_AGENT_TCDS_BASE_URL` HTTP/HTTPS 绝对地址，便于部署审计和环境切换；非法覆盖值会使 Java 启动失败。全部 TCDS 后台接口请求统一携带现场约定的 `toolId` header。升级时先为全部节点核对变量，再升级全部 Java 和前端；回滚时先回滚前端，再回滚全部 Java，禁止长期混跑新旧 `rootPath` 语义。旧 9900 服务仅在同源需求导入完成真实查询、目录写入、重复覆盖、部分失败和文件树刷新验收后由运维另行停用。
 
 请选择对应文档：
 

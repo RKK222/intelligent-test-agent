@@ -4192,7 +4192,7 @@ Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追
 | `GET` | `/api/v1/requirement-import/applications` | 按当前登录主体的 `unifiedAuthId` 返回全部 TCDS 授权应用。 |
 | `GET` | `/api/v1/requirement-import/sub-items?appShortName=...&editionId=...` | 返回指定应用和月份版本的父子条目，不返回文档下载地址。 |
 
-应用项为 `{appName, appShortName}`；父条目为 `{itemNo, itemName, children:[{itemNo,itemName}]}`。Controller 不直接访问外部客户端，TCDS 访问和目录投影由应用服务完成。
+应用项为 `{appName, appShortName}`；父条目为 `{itemNo, itemName, children:[{itemNo,itemName}]}`。Controller 不直接访问外部客户端，TCDS 访问和目录投影由应用服务完成。浏览器只请求平台同源 API；后端访问 TCDS 登录、用户、应用、子条目和文档元数据接口时统一携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`。
 
 实际写入使用既有文件 WebSocket route/ticket：
 

@@ -43,6 +43,19 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void tcdsUsesConfirmedIntranetAddressByDefaultAndAllowsDeploymentOverride() {
+        profileContextRunner.run(context -> assertThat(context.getEnvironment()
+                        .getProperty("test-agent.third-party-api.base-url"))
+                .isEqualTo("http://tcds-prod.sdc.icbc:9080"));
+
+        profileContextRunner
+                .withPropertyValues("TEST_AGENT_TCDS_BASE_URL=https://tcds-override.internal")
+                .run(context -> assertThat(context.getEnvironment()
+                                .getProperty("test-agent.third-party-api.base-url"))
+                        .isEqualTo("https://tcds-override.internal"));
+    }
+
+    @Test
     void xxlAdminDatasourceDefaultsDoNotLeakIntoPlatformContext() {
         profileContextRunner
                 .withPropertyValues(
