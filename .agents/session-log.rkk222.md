@@ -10488,3 +10488,27 @@
 
 - 已恢复旧版可见状态，同时保持旧版允许重新选择的行为；用户可明确判断条目是否已导入，并继续执行覆盖导入。
 - 本地账号无法取得企业 TCDS 授权目录，真实企业目录的 UI 状态仍需在用户企业会话中验收；release 工作区中另一批尚未提交的 Word 图片附件改动未纳入本次提交。
+
+## 2026-08-14 - 完善 Word 结构化 Markdown 转换
+
+### Why
+
+- TCDS Word 导入仅通过 `paragraph.getText()` 抽取文本，用户实际产物的标题、段落、列表和表格被压成超长行，内嵌图片也没有附件引用。
+- 旧 `folderManager` 也主要是文本抽取，只能保留 DOC/DOCX 容器兼容思路，不能继续沿用转换质量。
+
+### What
+
+- 新增 `WordToMarkdownRenderer`：DOCX 按正文元素原顺序渲染 Heading/大纲标题、Run 加粗/斜体/删除线、分层有序/无序列表、受控超链接、Markdown 表格、硬换行、分隔线和内嵌图片；旧 DOC 由 HWPF 尽力保留标题、列表、基础字符样式和可提取图片。
+- 图片写入 Markdown 同级 `{文档名}.assets/image-NNN.{ext}`，并通过现有工作区安全路径校验的模块内部二进制写入入口幂等覆盖；Markdown 与附件合计继续受 20 MiB 单文档上限约束。
+- 按用户最终决策保留 Word 扩展名实际返回文本时的兼容导入；可解析 DOCX/DOC 容器始终优先走结构化渲染。同步 workspace README、HTTP API 语义和安全复测文档。
+
+### How
+
+- JDK 25 定向转换/导入/文件服务测试 51/51 通过，覆盖标题与大纲级别、行内样式、安全/不安全链接、分层列表、表格、图片引用与字节、覆盖写入、路径穿越和容量限制；受影响 reactor 干净全量 77 个套件/622 项全部通过。
+- 22 模块 `mvn clean package -Dmaven.test.skip=true` 成功。使用根目录 `.env.test` / `test` profile 启动 release worktree；期间两次被主工作区并行重启抢占 8080，等待并行任务结束后重新启动并等待 20 秒，health/readiness 均为 `UP`、3000 为 200、登录 CORS 正常、manager 无重连循环。
+- UI 级登录、工作台和同源导入 iframe 打开成功；当前本机 TCDS 返回“服务暂不可用”，因此未执行真实企业 Word 下载与导入。
+
+### Result
+
+- 原始 DOCX 不再是文本抽取，可保留上述 Word 结构；图片通过安全工作区文件服务写盘并使用相对 Markdown 引用。上游只提供已压平文本时继续可导入，但已丢失的 Word 样式无法从纯文本还原。
+- 本次不新增 HTTP/RPC/RunEvent 接口、数据库/Flyway、部署变量或依赖，不修改 `.env*`、generated SDK 或 OpenCode 源码；公共 Agent、工作区 ID 及 Git diff/提交/推送链路未变更。
