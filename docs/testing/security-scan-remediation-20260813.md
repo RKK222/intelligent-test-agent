@@ -40,6 +40,12 @@
 - `TcdsCaseMaintenanceServiceTest` 锁定任务类型查询、案例写入和写入前实时校验三条调用路径的地址与 header；与原网关、装配、Controller、日志脱敏和应用配置测试合计 56 项通过。前端案例维护、编辑器入口与 backend-api 定向测试 137 项通过，全 workspace typecheck 和 production build 通过。
 - 浏览器仍只访问平台同源 `/api/internal/platform/integration/tcds/**`；案例四列正文不进入 API 访问日志，跨域对象存储下载不继承 `toolId`。真实任务类型和案例写入需要有效企业登录主体，自动化测试未向生产 TCDS 写入数据。
 
+## 2026-08-14 TCDS 导入交互与文档兼容复核
+
+- 版本、应用改为可输入过滤的选择器；应用目录加载完成后立即解除筛选禁用，条目请求未完成时仍可切换，旧请求继续由请求代次隔离。筛选区使用 `minmax(0, ...)` 网格，输入框、目录和父子行均限制为 iframe 宽度。
+- 文档转换兼容 TCDS 历史数据中 `.doc` 名称承载 DOCX 内容、`.ppt` 名称承载 PPTX 内容以及旧 Word 文本内容；HTML/JSON 错误包络即使 HTTP 状态为 200 也拒绝写入。失败日志不记录文件名、地址、签名参数、token 或正文。
+- `RequirementDocumentConverterTest` 与 `RequirementImportApplicationServiceTest` 共 9 项通过，其中服务层用 DOCX 字节和 `.doc` 元数据完成可信重查、转换与工作区写入；`requirement-import-view.test.ts` 5 项通过。真实 TCDS 文档下载仍需在有效企业登录会话中复测。
+
 ## Workspace ID 全链路回归
 
 - 运行态 `Workspace.workspaceId` 继续固定使用 `wrk_`，与应用模板 `applicationWorkspaceId=awp_`、应用版本 `versionId=awv_`、个人工作区 `personalWorkspaceId=psw_` 分离。前端缓存、文件 WebSocket、会话/Run、最近工作区和需求导入均只把运行态 `workspaceId` 当作文件与会话路由主键；模板和版本 ID 只用于菜单归属及高亮。

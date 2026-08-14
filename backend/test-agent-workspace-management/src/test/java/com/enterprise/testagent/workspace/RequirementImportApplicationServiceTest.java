@@ -15,9 +15,11 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.tcds.TcdsGateway;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -91,6 +93,38 @@ class RequirementImportApplicationServiceTest {
         verify(workspace, times(6)).createDirectory(any(WorkspaceId.class), anyString());
         verify(workspace).writeFile(any(WorkspaceId.class), anyString(), org.mockito.ArgumentMatchers.eq("新正文\n"));
         verify(workspace, never()).deleteFile(any(WorkspaceId.class), anyString());
+    }
+
+    @Test
+    void importsDocxContentReturnedUnderLegacyDocName() throws Exception {
+        byte[] docx;
+        try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            document.createParagraph().createRun().setText("历史设计正文");
+            document.write(output);
+            docx = output.toByteArray();
+        }
+        TcdsGateway gateway = mock(TcdsGateway.class);
+        WorkspaceApplicationService workspace = mock(WorkspaceApplicationService.class);
+        var design = new TcdsGateway.Document("需求子条目设计文档.doc", URI.create("https://docs.internal/design"), "1");
+        var child = new TcdsGateway.RequirementSubItem("SI-01", "登录", List.of(design));
+        when(gateway.listApplications("u001")).thenReturn(List.of(new TcdsGateway.Application("个人金融", "PSN")));
+        when(gateway.listRequirementItems("u001", "PSN", "2026年8月"))
+                .thenReturn(List.of(new TcdsGateway.RequirementItem("I-01", "登录", List.of(child))));
+        when(gateway.download(design, RequirementImportApplicationService.MAX_DOCUMENT_BYTES))
+                .thenReturn(new TcdsGateway.DownloadedDocument(docx, "application/octet-stream"));
+        when(workspace.fileStatus(any(WorkspaceId.class), anyString()))
+                .thenAnswer(invocation -> new FileStatusResponse(invocation.getArgument(1), false, false, 0, null));
+        RequirementImportApplicationService service = new RequirementImportApplicationService(gateway, workspace);
+
+        var result = service.importRequirements("u001", new RequirementImportApplicationService.ImportCommand(
+                "wrk_1", "PSN", "2026年8月", List.of("SI-01"), "request-doc"));
+
+        assertThat(result.status()).isEqualTo("SUCCEEDED");
+        assertThat(result.importedFiles()).isEqualTo(1);
+        verify(workspace).writeFile(
+                any(WorkspaceId.class),
+                org.mockito.ArgumentMatchers.endsWith("/需求子条目设计文档.md"),
+                org.mockito.ArgumentMatchers.contains("历史设计正文"));
     }
 
     @Test

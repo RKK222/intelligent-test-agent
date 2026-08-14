@@ -116,7 +116,7 @@ public class RequirementImportApplicationService {
                     throw new PlatformException(ErrorCode.PAYLOAD_TOO_LARGE, "TCDS 单次导入总量超过 200 MiB");
                 }
                 String markdown = RequirementDocumentConverter.toMarkdown(
-                        planned.document().fileName(), downloaded.content());
+                        planned.document().fileName(), downloaded.contentType(), downloaded.content());
                 if (markdown.getBytes(StandardCharsets.UTF_8).length > MAX_DOCUMENT_BYTES) {
                     throw new PlatformException(ErrorCode.PAYLOAD_TOO_LARGE, "转换后的 Markdown 超过单文件大小限制");
                 }

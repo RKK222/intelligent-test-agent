@@ -7,6 +7,7 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
@@ -29,6 +30,13 @@ class RequirementDocumentConverterTest {
             docx = output.toByteArray();
         }
         assertThat(RequirementDocumentConverter.toMarkdown("需求.docx", docx)).contains("Word 需求");
+        assertThat(RequirementDocumentConverter.toMarkdown(
+                "历史名称.doc", "application/octet-stream", docx))
+                .as("TCDS 历史数据可能以 .doc 名称返回 DOCX 内容")
+                .contains("Word 需求");
+        assertThat(RequirementDocumentConverter.toMarkdown(
+                "纯文本旧文档.doc", "text/plain; charset=UTF-8", "文本需求".getBytes(StandardCharsets.UTF_8)))
+                .contains("文本需求");
     }
 
     @Test
@@ -59,5 +67,26 @@ class RequirementDocumentConverterTest {
         }
         assertThat(RequirementDocumentConverter.toMarkdown("设计.pptx", pptx))
                 .contains("## 幻灯片 1", "方案说明");
+        assertThat(RequirementDocumentConverter.toMarkdown(
+                "历史名称.ppt", "application/octet-stream", pptx))
+                .contains("## 幻灯片 1", "方案说明");
+    }
+
+    @Test
+    void rejectsSuccessfulHtmlOrJsonErrorEnvelopeInsteadOfWritingItAsMarkdown() {
+        assertThatThrownBy(() -> RequirementDocumentConverter.toMarkdown(
+                "设计.doc",
+                "text/html; charset=UTF-8",
+                "<html><body>login</body></html>".getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.EXTERNAL_API_UNAVAILABLE);
+                    assertThat(exception.getMessage()).isEqualTo("TCDS 文档下载内容无效");
+                });
+        assertThatThrownBy(() -> RequirementDocumentConverter.toMarkdown(
+                "设计.doc",
+                "application/octet-stream",
+                "{\"code\":\"401\",\"error\":\"expired\"}".getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.EXTERNAL_API_UNAVAILABLE));
     }
 }

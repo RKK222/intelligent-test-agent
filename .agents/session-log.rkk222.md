@@ -10420,3 +10420,27 @@
 - 最终企业包源码提交为 `731b2f1ae9f78aa0d4ef71af3727515f756ebeed`；内层 ZIP SHA-256 为 `35687eb1035faa217fee1ad6e54f11cc35f66bd6fcdf898b186ef63b1c0fdbea`，外层完整包为 `1734a0f30eff5eb78a6da3e6c4a09005161daee636481de0a135539838216700`。
 - 后端 app JAR 为 `8767313d4a96f7332efd1481e2ecd01833e3f508b9c498aeaabc2641eb15ebbf`，persistence JAR 为 `aa502bceb9457b22b1abfa24f328b6b33a9b8922aa5a958f02d8dbc28f1b3c2b`，XXL integration JAR 为 `e2aacd9f6221bf68abdebac2125dc15d872ed559d10280bad943e03218f7390d`，前端归档为 `9679040a4f98cefee02252f3928568987eb2528098317346f4cdaa06224471a9`。
 - 最终独立校验确认外层 checksum、两层 ZIP、外层内嵌内层逐字节一致、`--validate-only`、全部受保护 Flyway 资源、两台 TCDS 精确地址和 worker 制品缺失门禁均通过；发布清单为 worker/toolbox `reuse`、LobeHub `disabled`。
+
+## 2026-08-14 - 修复 TCDS 需求导入筛选布局与历史文档转换
+
+### Why
+
+- 同源需求导入 iframe 的版本、应用仍是不可输入检索的原生选择框，初次条目请求较慢时还会持续禁用；三列筛选器和条目目录缺少收缩边界，在窄 iframe 中会横向溢出。
+- TCDS 历史文档可能出现 `.doc/.ppt` 文件名与实际 DOCX/PPTX 容器不一致，现有转换器严格按扩展名选择解析器，导致每次导入稳定返回“TCDS 文档转换失败”。
+
+### What
+
+- 版本和应用改为复用 Element Plus 的可检索 `el-select`；应用目录加载完成即释放控件，迟到条目请求继续由既有 sequence 防竞态。筛选区改为可收缩网格，搜索框、目录、父子条目统一限制在 iframe 宽度内。
+- Word 和 PowerPoint 转换按实际容器依次尝试 OOXML/旧格式解析，Word 历史纯文本再走受控文本兜底；下载响应的 content type 传入转换器，Office 文件遇到 HTML/JSON 错误页时明确拒绝，日志只保留格式、脱敏媒体类型和异常类别。
+- 同步 workspace 与前端模块 README、扫描复测文档；未修改 `.env*`、HTTP API、RunEvent、数据库、migration、generated SDK 或 OpenCode 源码。
+
+### How
+
+- 前端定向 Vitest 5/5、agent-web typecheck 和 production build 通过；真实 iframe 验证版本可输入检索，筛选区与条目目录 `scrollWidth == clientWidth`，搜索框右边界未越出容器。
+- JDK 25 下文档转换与导入服务定向 Maven 测试 9/9，通过完整后端跳过测试打包；使用根目录 `.env.test` / `test` profile 启动 release worktree 的 backend、manager、frontend，8080 health/readiness 为 `UP`，3000 页面与登录 CORS 正常。
+- 本地测试账号无法取得企业 TCDS 授权应用，因此真实企业文档下载未执行；兼容路径由实际 DOCX/PPTX 二进制伪装旧扩展名及服务级工作区写入测试覆盖。
+
+### Result
+
+- 版本和应用可输入筛选，条目区域不再超出 iframe；历史 Office 文件不再仅因扩展名与真实容器不一致而转换失败，错误页也不会被误写为 Markdown。
+- 这是现有部署拓扑内的 `release` 修复，不影响公共 Agent、既有 Git diff/提交推送链路或工作区 ID 语义；真实 TCDS 授权数据仍需用户在企业会话中最终验收，并按分支策略同步回 `dev`。
