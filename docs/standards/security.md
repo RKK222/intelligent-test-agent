@@ -111,6 +111,14 @@ Token 校验流程：
 
 ## 外部 API Key 与 SSH Key 安全边界
 
+TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 API Key：
+
+1. 浏览器只能通过 `backend-api` 调用 `/api/internal/platform/integration/tcds/task-types` 和 `/api/internal/platform/integration/tcds/test-cases`，不得直连 TCDS HTTP 地址，避免跨域、mixed content 和客户端暴露固定工具标识。
+2. 任务类型与案例维护生产地址、案例维护 `toolId`、设计方法和其它固定业务字段必须由 `test-agent-integration` 常量组装，不接受 URL、请求头、固定字段或 `userId` 客户端覆盖，禁止复用旧 `/api/proxy/call` 形成 SSRF/任意代理。
+3. 任务类型查询只向浏览器返回经过数量、长度、控制字符和重复值校验的 `subItemTypes.name/value`；`name` 必须以“测试任务”结尾，删除末尾后缀后的非空业务名称也必须唯一。不得透传完整上游响应，也不得在失败时降级为可能过期的前端快照。
+4. `userId` 只取当前 `AuthPrincipal.unifiedAuthId`；案例提交前必须再次实时查询 TCDS，按 `name` 删除末尾“测试任务”的规则逐项校验业务名称，不得使用代码内固定白名单，多值只接受英文逗号分隔。日志只记录任务类型数量或 `itemNo`、案例数量和 traceId，不记录案例正文、TCDS 响应正文或固定 `toolId`。
+5. 后端 HTTP client 禁止跟随重定向，并设置连接/请求超时与响应体上限；案例维护上游非零业务码只允许返回受限安全消息，任务类型查询和网络、协议、解析错误统一收敛为平台错误，不暴露地址、响应正文或异常堆栈。
+
 1. `/api/external/v1/**` 必须由独立外部认证过滤器强制认证；只有精确 `/api/external/v1` 根及其 `/` 子路径可以绕过旧用户 JWT 和静态 `TEST_AGENT_API_TOKEN` 过滤器，相邻路径不得继承。用户 Bearer Token、Cookie、静态 Token 或前端菜单都不能替代 `X-Test-Agent-Tool-Code` 与 `X-Test-Agent-Api-Key`。
 2. API Key 只能由平台使用 32 字节安全随机数生成，格式固定为 `taak_v1_` 加无填充 Base64URL。数据库只保存 RSA-OAEP/SHA-256 密文、SHA-256 指纹和掩码提示；认证在 JVM 不可变快照中按 `toolCode` O(1) 查询，并用 `MessageDigest.isEqual` 常量时间比较。未知、停用和错误 Key 必须统一为 `UNAUTHENTICATED`，禁止泄露工具存在性或启用状态。
 3. 新建、查看和轮换只允许实时 `SUPER_ADMIN`，响应必须 `no-store/no-cache`；列表不得返回明文或数据库密文。前端明文只允许存在于当前弹窗组件内存，请求结束后清除 mutation 数据，关闭或卸载立即清空，禁止写 localStorage/sessionStorage、TanStack Query cache、URL、原始交换观察器或错误提示。

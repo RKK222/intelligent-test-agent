@@ -70,6 +70,139 @@ export type ToolboxClickResult = {
   incremented: boolean;
 };
 
+/** 当前编辑器解析出的 TCDS 案例；固定业务字段和 userId 由后端补齐。 */
+export type TcdsTestCaseMaintenancePayload = {
+  itemNo: string;
+  caseList: Array<{
+    name: string;
+    step: string;
+    data: string;
+    expect: string;
+    taskType: string;
+  }>;
+};
+
+/** 平台从 TCDS 实时读取的任务类型选项。 */
+export type TcdsTaskTypeOption = {
+  name: string;
+  value: string;
+};
+
+export type MemoryScope = "PERSONAL_GLOBAL" | "PERSONAL_APPLICATION" | "TEAM_APPLICATION";
+export type MemoryStatus =
+  | "CANDIDATE"
+  | "PENDING_CONFIRMATION"
+  | "ACTIVE"
+  | "PAUSED"
+  | "CONFLICTED"
+  | "REJECTED"
+  | "SUPERSEDED";
+export type MemorySource =
+  | "MANUAL"
+  | "NATIVE"
+  | "TEAM_PROPOSAL";
+
+/** Mem0 正文不可用时 content 只承载治理摘要，contentAvailable 明确标识降级。 */
+export type MemoryView = {
+  memoryId: string;
+  scope: MemoryScope;
+  ownerUserId?: string | null;
+  applicationId?: string | null;
+  status: MemoryStatus;
+  source: MemorySource;
+  content: string;
+  contentAvailable: boolean;
+  displaySummary: string;
+  version: number;
+  confirmedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MemoryEvidenceView = {
+  evidenceId: string;
+  memoryId: string;
+  runId?: string | null;
+  sessionId?: string | null;
+  sessionTitle?: string | null;
+  transcriptAvailable: boolean;
+  source: MemorySource;
+  summary: string;
+  observedAt: string;
+};
+
+export type MemoryUsageView = {
+  runId: string;
+  memoryId: string;
+  scope: MemoryScope;
+  rank: number;
+  tokenCount: number;
+  injectedAt: string;
+};
+
+export type MemorySkillProposalStatus = "PENDING_REVIEW" | "DRAFT" | "REJECTED" | "PUBLISHED" | "ARCHIVED";
+export type MemorySkillProposalView = {
+  proposalId: string;
+  memoryId: string;
+  applicationId: string;
+  title: string;
+  skillMdDraft: string;
+  status: MemorySkillProposalStatus;
+  createdByUserId: string;
+  reviewedByUserId?: string | null;
+  publishedAssetId?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EmbeddingProfileHealth = {
+  profileKey: string;
+  provider: string;
+  model: string;
+  dimension: number;
+  fingerprint: string;
+  collection: string;
+  primary: boolean;
+  available: boolean;
+};
+
+export type MemoryProjectionBacklog = { pending: number; processing: number; dead: number };
+export type MemoryServiceHealth = {
+  available: boolean;
+  status: string;
+  version?: string | null;
+  profiles: EmbeddingProfileHealth[];
+  projectionBacklog: MemoryProjectionBacklog;
+};
+export type MemoryAdminHealth = {
+  enabled: boolean;
+  memoryService: MemoryServiceHealth;
+  primaryChatModelId?: string | null;
+  primaryEmbeddingModelId?: string | null;
+  cpuEmbeddingModelId: string;
+  queuePending: number;
+  queueProcessing: number;
+  queueDead: number;
+};
+
+export type MemorySettingsView = {
+  primaryChatModelId?: string | null;
+  primaryEmbeddingModelId?: string | null;
+  cpuEmbeddingModelId: string;
+  version: number;
+  updatedByUserId: string;
+  updatedAt: string;
+};
+
+export type MemoryWhitelistView = {
+  userId: string;
+  enabled: boolean;
+  updatedByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Workspace = {
   workspaceId: string;
   name: string;

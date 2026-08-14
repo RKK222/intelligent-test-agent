@@ -20,6 +20,7 @@
 - `LobehubDevelopmentOwnerResolver` 只供显式 `test/local` 开发启动使用：优先校验显式或已有 owner；仍为占位值时，
   只从状态正常、部门非空的超级管理员中选择唯一候选，零个或多个候选均失败关闭。
 - `ExternalUserSshKeyApplicationService` 只查询状态正常用户的现有 SSH Key，复用平台解密校验后立即交给 `ExternalSshKeyEnvelopeService`；后者按 TAEK1 使用 API Key、HKDF-SHA256、AES-256-GCM 和绑定 traceId 的 AAD 加密，私钥明文不离开方法局部。该服务同时保留生产构造器与包内可测试构造器，生产构造器必须显式标记为 Spring 注入入口，并由容器装配测试锁定，避免多构造器场景回退到不存在的无参构造器。
+- `TcdsCaseMaintenanceService` 使用固定生产地址实时 GET TCDS `getTaskTypes`，只提取有界且不重复的 `subItemTypes.name/value`；`name` 必须以“测试任务”结尾，删除该末尾后缀后的非空业务名称也不得重复。同一服务在案例提交前重新查询实时类型并逐项校验，再使用固定生产地址和固定 `toolId` 调用案例维护接口，不维护固定类型表。统一认证号只取平台认证主体，设计方法、AI 标识、案例来源、修改标识和空数据依赖由服务端补齐。客户端只能查询受控任务类型或提交需求子条目编号、Markdown 四列案例内容和当前受支持的任务类型，不能把该能力退化为任意 URL/请求头代理。
 
 ## 允许依赖
 
@@ -45,6 +46,7 @@
 
 `RunnerPublicKeyEncryptionServiceTest` 覆盖超过RSA-OAEP明文上限的真实长度私钥可由版本化混合信封往返解密。
 `ExternalSshKeyEnvelopeServiceTest` 固化 TAEK1 测试向量并覆盖错误 Key/AAD/密文篡改；`ExternalUserSshKeyApplicationServiceTest` 覆盖 scope、用户状态、404 收敛、旧格式 409 和无明文响应。
+`TcdsCaseMaintenanceServiceTest` 锁定任务类型无请求体 GET、`subItemTypes` 提取、名称后缀转换与非法/重复响应拒绝，以及案例提交前实时校验、生产地址、固定 `toolId`、服务端报文补齐、同案例多任务类型英文逗号连接和 TCDS 业务异常收敛。
 `LobehubSsoApplicationServiceTest` 覆盖停用/空部门、票据时限、同名部门规范化、角色、grant 轮换与用户实时
 状态，以及启用但仍为占位配置时不持久化票据；`LobehubHmacAuthenticatorTest` 覆盖签名伪造、时钟边界与
 溢出、nonce 重放及原始 body 绑定；`LobehubDevelopmentOwnerResolverTest` 覆盖唯一自动候选、显式 owner 和

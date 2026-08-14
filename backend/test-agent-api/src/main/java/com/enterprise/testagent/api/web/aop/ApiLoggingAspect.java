@@ -2,6 +2,7 @@ package com.enterprise.testagent.api.web.aop;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
+import com.enterprise.testagent.api.web.common.ApiRequestLogSummary;
 import com.enterprise.testagent.api.web.common.ExternalApiWebSupport;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.observability.TraceLogContext;
@@ -197,7 +198,10 @@ public class ApiLoggingAspect {
                 return "[file:" + ((FilePart) arg).filename() + "]";
             }
             try {
-                String json = OBJECT_MAPPER.writeValueAsString(arg);
+                Object logValue = arg instanceof ApiRequestLogSummary summarized
+                        ? summarized.apiRequestLogSummary()
+                        : arg;
+                String json = OBJECT_MAPPER.writeValueAsString(logValue);
                 return SensitiveDataMasker.mask(json);
             } catch (Exception e) {
                 // 序列化失败，返回类型名

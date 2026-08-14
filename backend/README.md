@@ -140,7 +140,7 @@ cp .env.local.example .env.local
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 历史兼容项。前端对话框模型/供应商目录已统一走 opencode 原生 `/api/model`、`/api/provider`，不再从数据库模型目录读取。 |
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |
-| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。 |
+| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。`local` profile 未配置时按本次 JVM 启动生成临时随机值且不落盘；其它 profile 仍要求显式配置或使用自身受控测试默认值。 |
 | `TEST_AGENT_LOBEHUB_HMAC_SECRET` | LobeHub 服务兑换/撤销共享 HMAC secret，至少 32 字节；不得进入公共参数或日志。 |
 | `TEST_AGENT_LOBEHUB_CLIENT_ID` / `TEST_AGENT_LOBEHUB_TICKET_TTL` / `TEST_AGENT_LOBEHUB_GRANT_TTL` | 模型委托 client 与票据/委托生命周期；默认 `lobehub/60s/30d`。 |
 | `TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW` / `TEST_AGENT_LOBEHUB_NONCE_TTL` | 服务 HMAC 时钟偏差和 nonce 防重放窗口；默认 `60s/120s`。 |
