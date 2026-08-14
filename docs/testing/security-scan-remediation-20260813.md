@@ -43,8 +43,15 @@
 ## 2026-08-14 TCDS 导入交互与文档兼容复核
 
 - 版本、应用改为可输入过滤的选择器；应用目录加载完成后立即解除筛选禁用，条目请求未完成时仍可切换，旧请求继续由请求代次隔离。筛选区使用 `minmax(0, ...)` 网格，输入框、目录和父子行均限制为 iframe 宽度。
-- 文档转换兼容 TCDS 历史数据中 `.doc` 名称承载 DOCX 内容、`.ppt` 名称承载 PPTX 内容以及旧 Word 文本内容；HTML/JSON 错误包络即使 HTTP 状态为 200 也拒绝写入。失败日志不记录文件名、地址、签名参数、token 或正文。
+- 文档转换兼容 TCDS 历史数据中 `.doc` 名称承载 DOCX 内容、`.ppt` 名称承载 PPTX 内容以及 Word 扩展名返回的文本内容；HTML/JSON 错误包络即使 HTTP 状态为 200 也拒绝写入。失败日志不记录文件名、地址、签名参数、token 或正文。
 - `RequirementDocumentConverterTest` 与 `RequirementImportApplicationServiceTest` 共 9 项通过，其中服务层用 DOCX 字节和 `.doc` 元数据完成可信重查、转换与工作区写入；`requirement-import-view.test.ts` 5 项通过。真实 TCDS 文档下载仍需在有效企业登录会话中复测。
+
+## 2026-08-14 Word 结构化 Markdown 与图片附件复核
+
+- 新增 `WordToMarkdownRenderer`：DOCX 按 `IBodyElement` 原始顺序渲染段落和表格，覆盖 Heading 1-6、Run 加粗/斜体/删除线、分层有序/无序列表、HTTP/HTTPS/mailto/锚点链接、带表头分隔行的 Markdown 表格、硬换行、分页/段落下边框分隔线和内嵌图片。旧 DOC 使用 HWPF 尽力保留样式标题、列表、基础字符样式、分隔线和可提取图片，不承诺与 DOCX 同等保真度。
+- Word 下载内容为可读 DOCX/DOC 容器时必须使用结构化渲染；仅当上游已返回文本时保留文本兼容导入，不用该退化路径替代可解析 Word 容器的格式转换。
+- 图片不编码进 Markdown 或 URL：转换器只生成 `{文档名}.assets/image-NNN.{ext}` 相对路径和受控字节，导入服务再次逐段校验后通过现有 `WorkspaceFileService` 写入；允许重复导入覆盖同名附件，不删除其它既有文件，Markdown 与附件合计受 20 MiB 上限保护。
+- 结构化 DOCX 自动化覆盖标题、三种行内样式、链接、两类列表及层级、表格、换行、分隔线和图片引用/附件写入；另用 macOS `textutil` 生成真实 Compound Document File V2 `.doc` 做人工自动化探针，确认 HWPF 旧格式路径可读取并保留标题、列表标记和基础样式。真实 TCDS 文档仍需有效企业会话最终复测。
 
 ## Workspace ID 全链路回归
 

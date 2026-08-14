@@ -34,6 +34,25 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
+    void serviceWritesAndOverwritesBoundedBinaryAttachmentsInsideWorkspaceRoot() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(4, 1000);
+
+        service.writeBinaryContent(root.toString(), "docs/design.assets/image-001.png", new byte[] {1, 2}, 8);
+        service.writeBinaryContent(root.toString(), "docs/design.assets/image-001.png", new byte[] {3, 4, 5}, 8);
+
+        assertThat(Files.readAllBytes(root.resolve("docs/design.assets/image-001.png")))
+                .containsExactly(3, 4, 5);
+        assertThatThrownBy(() -> service.writeBinaryContent(
+                root.toString(), "../outside.bin", new byte[] {1}, 8))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.writeBinaryContent(
+                root.toString(), "docs/too-large.bin", new byte[] {1, 2, 3}, 2))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.PAYLOAD_TOO_LARGE));
+    }
+
+    @Test
     void serviceRejectsPathTraversalOutsideWorkspaceRoot() {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
 

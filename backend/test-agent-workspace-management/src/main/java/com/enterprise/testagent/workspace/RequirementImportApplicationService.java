@@ -155,13 +155,35 @@ public class RequirementImportApplicationService {
                 if (downloadedBytes > MAX_IMPORT_BYTES) {
                     throw new PlatformException(ErrorCode.PAYLOAD_TOO_LARGE, "TCDS 单次导入总量超过 200 MiB");
                 }
-                String markdown = RequirementDocumentConverter.toMarkdown(
-                        planned.document().fileName(), downloaded.contentType(), downloaded.content());
-                if (markdown.getBytes(StandardCharsets.UTF_8).length > MAX_DOCUMENT_BYTES) {
-                    throw new PlatformException(ErrorCode.PAYLOAD_TOO_LARGE, "转换后的 Markdown 超过单文件大小限制");
+                String attachmentDirectory = attachmentDirectory(planned.targetPath());
+                RequirementDocumentConverter.ConvertedDocument converted = RequirementDocumentConverter.convert(
+                        planned.document().fileName(),
+                        downloaded.contentType(),
+                        downloaded.content(),
+                        attachmentDirectory);
+                long convertedBytes = converted.markdown().getBytes(StandardCharsets.UTF_8).length;
+                if (convertedBytes > MAX_DOCUMENT_BYTES) {
+                    throw new PlatformException(
+                            ErrorCode.PAYLOAD_TOO_LARGE,
+                            "转换后的 Markdown 及附件超过单文件大小限制");
+                }
+                for (RequirementDocumentConverter.Attachment attachment : converted.attachments()) {
+                    convertedBytes += attachment.content().length;
+                    if (convertedBytes > MAX_DOCUMENT_BYTES) {
+                        throw new PlatformException(
+                                ErrorCode.PAYLOAD_TOO_LARGE,
+                                "转换后的 Markdown 及附件超过单文件大小限制");
+                    }
+                }
+                for (RequirementDocumentConverter.Attachment attachment : converted.attachments()) {
+                    workspaceService.writeBinaryFile(
+                            workspaceId,
+                            attachmentTargetPath(planned.targetPath(), attachment.relativePath()),
+                            attachment.content(),
+                            MAX_DOCUMENT_BYTES);
                 }
                 boolean existed = workspaceService.fileStatus(workspaceId, planned.targetPath()).exists();
-                workspaceService.writeFile(workspaceId, planned.targetPath(), markdown);
+                workspaceService.writeFile(workspaceId, planned.targetPath(), converted.markdown());
                 if (existed) overwrittenFiles++;
                 else importedFiles++;
             } catch (PlatformException exception) {
@@ -318,6 +340,29 @@ public class RequirementImportApplicationService {
         int dot = safe.lastIndexOf('.');
         String base = dot > 0 ? safe.substring(0, dot) : safe;
         return segment(base, "文档名称") + ".md";
+    }
+
+    /** 图片附件使用目标 Markdown 的安全文件名派生，避免原始 TCDS 文件名参与附件路径。 */
+    private static String attachmentDirectory(String markdownPath) {
+        int slash = markdownPath.lastIndexOf('/');
+        String fileName = slash < 0 ? markdownPath : markdownPath.substring(slash + 1);
+        String base = fileName.endsWith(".md") ? fileName.substring(0, fileName.length() - 3) : fileName;
+        return base + ".assets";
+    }
+
+    /** 转换器只返回相对附件路径；这里再次逐段校验后再拼到 Markdown 的同级目录。 */
+    private static String attachmentTargetPath(String markdownPath, String attachmentPath) {
+        String relative = required(attachmentPath, "attachmentPath").replace('\\', '/');
+        if (relative.startsWith("/") || relative.endsWith("/")) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Word 图片附件路径无效");
+        }
+        for (String pathSegment : relative.split("/", -1)) {
+            if (pathSegment.isBlank() || ".".equals(pathSegment) || "..".equals(pathSegment)) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Word 图片附件路径无效");
+            }
+        }
+        int slash = markdownPath.lastIndexOf('/');
+        return slash < 0 ? relative : markdownPath.substring(0, slash + 1) + relative;
     }
 
     /** 路径段采用确定性规范化；不允许路径分隔符、控制字符或 Windows 保留字符进入目标路径。 */
