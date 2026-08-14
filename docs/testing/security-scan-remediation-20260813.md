@@ -44,7 +44,7 @@
 
 - 版本、应用改为可输入过滤的选择器；应用目录加载完成后立即解除筛选禁用，条目请求未完成时仍可切换，旧请求继续由请求代次隔离。筛选区使用 `minmax(0, ...)` 网格，输入框、目录和父子行均限制为 iframe 宽度。
 - 文档转换兼容 TCDS 历史数据中 `.doc` 名称承载 DOCX 内容、`.ppt` 名称承载 PPTX 内容以及 Word 扩展名返回的文本内容；HTML/JSON 错误包络即使 HTTP 状态为 200 也拒绝写入。失败日志不记录文件名、地址、签名参数、token 或正文。
-- `RequirementDocumentConverterTest` 与 `RequirementImportApplicationServiceTest` 共 9 项通过，其中服务层用 DOCX 字节和 `.doc` 元数据完成可信重查、转换与工作区写入；`requirement-import-view.test.ts` 5 项通过。真实 TCDS 文档下载仍需在有效企业登录会话中复测。
+- `RequirementDocumentConverterTest` 与 `RequirementImportApplicationServiceTest` 回归覆盖 DOCX 字节使用 `.doc` 元数据，以及 `.doc/.docx` 名称实际返回 UTF-8/GB18030 纯文本、`text/plain`/`application/octet-stream`/`application/msword` 媒体类型的兼容路径；服务层完成可信重查、转换与工作区写入，纯文本回退不生成附件。`requirement-import-view.test.ts` 5 项通过。真实 TCDS 文档下载仍需在有效企业登录会话中复测。
 
 ## 2026-08-14 Word 结构化 Markdown 与图片附件复核
 

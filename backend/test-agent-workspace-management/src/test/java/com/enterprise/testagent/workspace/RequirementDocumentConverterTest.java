@@ -50,6 +50,25 @@ class RequirementDocumentConverterTest {
     }
 
     @Test
+    void keepsFlattenedWordTextCompatibleAcrossLegacyNamesAndMediaTypes() {
+        var flattenedDoc = RequirementDocumentConverter.convert(
+                "历史需求.doc",
+                "application/octet-stream",
+                "旧链路导出的纯文本需求".getBytes(StandardCharsets.UTF_8),
+                "历史需求.assets");
+        var flattenedDocx = RequirementDocumentConverter.convert(
+                "历史设计.docx",
+                "application/msword",
+                "旧链路导出的传统编码设计".getBytes(Charset.forName("GB18030")),
+                "历史设计.assets");
+
+        assertThat(flattenedDoc.markdown()).isEqualTo("旧链路导出的纯文本需求\n");
+        assertThat(flattenedDoc.attachments()).isEmpty();
+        assertThat(flattenedDocx.markdown()).isEqualTo("旧链路导出的传统编码设计\n");
+        assertThat(flattenedDocx.attachments()).isEmpty();
+    }
+
+    @Test
     void rejectsUnknownBinaryFormat() {
         assertThatThrownBy(() -> RequirementDocumentConverter.toMarkdown("secret.bin", new byte[] {1, 2, 3}))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->

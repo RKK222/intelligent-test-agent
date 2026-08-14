@@ -17,6 +17,7 @@ import com.enterprise.testagent.domain.tcds.TcdsGateway;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
@@ -160,6 +161,36 @@ class RequirementImportApplicationServiceTest {
                 any(WorkspaceId.class),
                 org.mockito.ArgumentMatchers.endsWith("/需求子条目设计文档.md"),
                 org.mockito.ArgumentMatchers.contains("历史设计正文"));
+    }
+
+    @Test
+    void importsFlattenedTextReturnedUnderWordNameWithoutRequiringAWordContainer() {
+        TcdsGateway gateway = mock(TcdsGateway.class);
+        WorkspaceApplicationService workspace = mock(WorkspaceApplicationService.class);
+        var design = new TcdsGateway.Document("历史设计.docx", URI.create("https://docs.internal/design"), "1");
+        var child = new TcdsGateway.RequirementSubItem("SI-01", "登录", List.of(design));
+        when(gateway.listApplications("u001")).thenReturn(List.of(new TcdsGateway.Application("个人金融", "PSN")));
+        when(gateway.listRequirementItems("u001", "PSN", "2026年8月"))
+                .thenReturn(List.of(new TcdsGateway.RequirementItem("I-01", "登录", List.of(child))));
+        when(gateway.download(design, RequirementImportApplicationService.MAX_DOCUMENT_BYTES))
+                .thenReturn(new TcdsGateway.DownloadedDocument(
+                        "旧链路压平的设计正文".getBytes(Charset.forName("GB18030")),
+                        "application/octet-stream"));
+        when(workspace.fileStatus(any(WorkspaceId.class), anyString()))
+                .thenAnswer(invocation -> new FileStatusResponse(invocation.getArgument(1), false, false, 0, null));
+        RequirementImportApplicationService service = new RequirementImportApplicationService(gateway, workspace);
+
+        var result = service.importRequirements("u001", new RequirementImportApplicationService.ImportCommand(
+                "wrk_1", "PSN", "2026年8月", List.of("SI-01"), "request-flat-word"));
+
+        assertThat(result.status()).isEqualTo("SUCCEEDED");
+        assertThat(result.importedFiles()).isEqualTo(1);
+        verify(workspace).writeFile(
+                any(WorkspaceId.class),
+                org.mockito.ArgumentMatchers.endsWith("/历史设计.md"),
+                org.mockito.ArgumentMatchers.eq("旧链路压平的设计正文\n"));
+        verify(workspace, never()).writeBinaryFile(
+                any(WorkspaceId.class), anyString(), any(byte[].class), anyLong());
     }
 
     @Test
