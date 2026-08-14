@@ -10610,3 +10610,25 @@
 
 - 小地球不再在 iframe 内重复启动完整工作台，打开后先渲染可交互页面，再异步等待 TCDS；大量条目加载不再重复读取工作区元数据，生成阶段也不再使用背景模糊。
 - 真实企业授权列表、生成蒙版和最终导入仍需用户在企业网络可用的登录会话中复测；当前本机只完成同源 UI、布局、构建产物、服务健康和自动化回归验证。
+
+## 2026-08-14 - 重打需求导入性能优化企业包
+
+### Why
+
+- 用户要求基于当前 `release` 再次生成企业完整包；当前分支已经包含 Word 转换回退和 TCDS 需求导入独立轻量入口优化。
+
+### What
+
+- 制品源码提交固定为 `c8b6762fafcc61734d31826a377abdd29c120ccc`；内层发布 ZIP SHA-256 为 `54c137f003cec4002128e070572c084809efef3678da03d0da2aa6d1421f92de`，外层完整包为 `e6fa8205347f591331a994eb1b274fbc7ad0b7387030a382f5a9e3969ab0b934`。
+- 后端 app JAR 为 `bb8433e6d37f36d27d37337a5a31eb9b46543dee6f9a3e392fcc5108e0ec22db`，persistence JAR 为 `f7b0c40687e5cc561a979c3e53662eb17260d0e771277b61ccb16f53a6b0f1dd`，XXL integration JAR 为 `ced90daf6ba37673830a84346725ee332d959865cb3d84a9b3895d1bd2949ea6`，前端归档为 `237b440068b3b8753770680595e4e7cc1705e8fcb33fee2a325ae170ac8d4e7d`。
+
+### How
+
+- 显式以 `VITE_TEST_AGENT_WORKFLOW_ENABLED=false`、`VITE_TEST_AGENT_LOBEHUB_ENABLED=false` 构建；worker 指纹仍为 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`，toolbox 指纹仍为 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`，两者均为 `reuse`。
+- 内外层 ZIP、外层内嵌内层逐字节一致、内层 `--validate-only`、最终 JAR 受保护 Flyway 资源、两台 TCDS 精确地址、worker 大制品缺失门禁和 `frontend/workspace-requirement-import/index.html` 独立入口均通过。
+- 对比上一包源码 `d9d5da7e7e95a41ff2813e06636feac093930cbd` 没有 migration 或部署脚本变化；提交前回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c` 与 `unzip -t`。
+- 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库只允许 validate 且 history 零新增。
