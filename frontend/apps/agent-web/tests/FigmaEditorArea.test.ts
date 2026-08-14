@@ -175,4 +175,25 @@ describe("FigmaEditorArea", () => {
     expect(wrapper.getComponent({ name: "WorkbenchFooter" }).props("workspaceKind"))
       .toBe("APP_SOURCE");
   });
+
+  it("shows cache-and-navigate for test design and execution tabs", async () => {
+    const specialTabs = [
+      { id: "041", path: "spec/S1/041-测试设计/案例.md", title: "案例.md", content: "设计", savedContent: "设计" },
+      { id: "042", path: "spec/S1/042-测试执行/结果.json", title: "结果.json", content: "{}", savedContent: "{}" },
+      { id: "other", path: "docs/说明.md", title: "说明.md", content: "说明", savedContent: "说明" }
+    ];
+    const wrapper = mount(FigmaEditorArea, {
+      props: { tabs: specialTabs, activePath: specialTabs[0].path },
+      global: { stubs: { WorkbenchFooter: true } }
+    });
+
+    const planeButtons = wrapper.findAll('button[aria-label="缓存并跳转"]');
+    expect(planeButtons).toHaveLength(2);
+    await planeButtons[0].trigger("click");
+    await planeButtons[1].trigger("click");
+    expect(wrapper.emitted("cacheAndNavigate")).toEqual([
+      [specialTabs[0].path],
+      [specialTabs[1].path]
+    ]);
+  });
 });

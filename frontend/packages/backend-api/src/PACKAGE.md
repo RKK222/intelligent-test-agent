@@ -8,6 +8,7 @@
 
 - `createRunResend(agentId, sessionId, payload)`：调用统一撤销重发 API，传递最后远端消息边界、可选源 Run、上下文令牌、客户端幂等键和可选修改文本，返回预留替代 Run 及 additive `resend` 元数据。
 - `listExternalApiScopes/listExternalApiCredentials/create/update/reveal/rotate/deleteExternalApiCredential`：超级管理员 API Key 管理 client；`rawExchangeObserver` 对 `apiKey/ciphertext/encryptedApiKey` 强制脱敏，调用方不得缓存一次性明文响应。
+- `getTcdsTaskTypes()` / `maintainTcdsTestCases(payload)`：普通登录用户案例维护 client；分别固定访问 `/api/internal/platform/integration/tcds/task-types` 与 `/api/internal/platform/integration/tcds/test-cases`，浏览器不直连 TCDS，只提交 `itemNo/caseList`，也不暴露 TCDS 地址、`toolId` 或可伪造的 `userId`。
 
 - `index.ts` 的 `createBatchItemSession` 为每个批量条目幂等创建独立 Session；`CreateNightExecutionTaskPayload.batchContext` 为可选兼容字段，携带时调用方必须省略 `sessionId`。两条链路都复用现有用户 OpenCode 路由提示，不新增工作区文件 HTTP 代理。
 - `index.ts` 的通用记忆 client 固定访问 `/api/internal/platform/memory/v1`（管理端为 `/admin`），承载个人/团队治理、含 Session 标题/ID 的证据、Run usage、Skill 提案、双 profile 健康/设置和白名单；团队提案可选传本人 `sourceMemoryId`，修改请求透传 `expectedVersion`。浏览器不调用 memory-service、不读取他人原始聊天，也不新增 RunEvent。

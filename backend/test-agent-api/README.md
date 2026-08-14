@@ -30,6 +30,7 @@
 - 暴露配置管理接口，Controller 只委托 configuration-management 业务服务；新建应用只允许 `SUPER_ADMIN`，应用成员、版本库和工作区管理校验 `APP_ADMIN` 且 `SUPER_ADMIN` 继承该能力。版本库类型下拉增量返回 `AUTOMATION_CODE_REPOSITORY`，其它部署模式、`repositoryType`、远端树和工作空间 DTO 仍只做协议转换，旧 `standard` 兼容派生、版本库类型历史守卫、内部模式 SSH 前缀、远端树过滤和别名唯一校验由业务服务处理。工作空间 PATCH DTO 可选透传 `workspaceName/enabled`，至少需要一个字段。设置页保存应用工作空间接口会读取当前用户 READY opencode 进程的 Linux 服务器并委托 workspace-management 创建初始版本工作区，进度通过 `workspace-create-operations/{operationId}` HTTP 轮询查询；分支和远端树加载接口不触发 clone。
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - `ToolboxController` 暴露登录用户目录 `GET /api/internal/platform/toolbox/tools` 和点击 `POST /api/internal/platform/toolbox/tools/{toolId}/clicks`；不校验角色，客户端只提供 `eventId`，用户、服务端时间和 traceId 由入口取得后委托 `test-agent-integration`。工具静态页面不经过本 Controller。
+- `TcdsCaseMaintenanceController` 暴露登录用户任务类型查询 `GET /api/internal/platform/integration/tcds/task-types` 和案例维护 `POST /api/internal/platform/integration/tcds/test-cases`。查询只返回 TCDS `subItemTypes` 中校验后的 `name/value`；维护请求只提交需求子条目和 Markdown 案例，每个案例的多个任务类型使用实时 `name` 删除末尾“测试任务”后的业务名称并以英文逗号连接。Controller 使用认证主体统一认证号并把两类阻塞内网调用调度到 `boundedElastic`，实时类型校验、固定生产地址、`toolId` 和上游业务字段委托 `test-agent-integration`。请求 DTO 使用 `ApiRequestLogSummary` 只向访问日志暴露 `itemNo/caseCount`，四列正文不落日志。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO；Session、SessionMessage、Run 可选返回 `sourceType/sourceRefId`，用于区分夜间定时执行来源。
 - `RuntimeDtos` 的 Session-tree 事件映射保留每个恢复事件的原始 `traceId`，供授权排查页关联日志；字段为响应增量，不改变既有 reducer `payload`。
 - runtime Controller 只读取可选认证主体并传入 `test-agent-opencode-runtime`，有用户主体时由业务层使用用户专属 opencode 进程，无用户主体时保持 static-token 兼容 fallback。
@@ -119,6 +120,7 @@
 - `RuntimeManagementControllerTest` 覆盖运行管理 overview、按 `linuxServerId` 的后端指标历史主 API 和进程重启/停止 API 的 `SUPER_ADMIN` 成功、扩展后的服务器/Java/JVM 指标字段响应、跨 Java 后端路由优先于本地 manager gateway、manager 下属 opencode server 明细与归属及可空 `unifiedAuthId/managerStatus` 响应映射、旧载荷缺字段兼容、命令结果响应映射、用户名筛选/响应映射、`windowMinutes` 预设窗口、`hours` 兼容、历史参数默认值与上限、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId；`PublicAgentConfigRolloutManagementControllerTest` 覆盖离线发布成员退役的超管鉴权；`RuntimeManagementBackendRoutingServiceTest` 覆盖按容器归属服务器转发命令和路由头防循环。
 - `CommonParameterMemoryControllerTest`、`CommonParameterMemoryBackendRoutingServiceTest` 覆盖四个超管接口、同服务器多个 Java 精确聚合、当前/远端执行、部分失败、离线、超时、稳定排序和防二次转发；`BackendJavaRouteResolverTest` 覆盖按 `backendProcessId` 精确选择。
 - `XxlJobSsoTicketControllerTest` 覆盖票据签发的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝；`SchedulerManagementControllerTest` 覆盖旧路径任意后缀统一返回 `410 API_GONE`。
+- `TcdsCaseMaintenanceControllerTest` 覆盖登录用户实时查询任务类型、认证主体统一认证号、两任务类型对象透传、统一成功响应、匿名拒绝和任务类型格式校验。
 - `BatchSessionControllerTest` 覆盖批量 Session 的认证、DTO 映射和非法上下文；`NightExecutionControllerTest`、`NightExecutionDtosTest` 覆盖认证、旧请求默认模式、批量上下文与 `sessionId` 互斥、超级管理员权限事实透传、创建/查询 DTO、输入校验、安全响应和统一错误；`UserOpencodeBackendRoutingWebFilterTest` 覆盖定时任务创建、改期、取消和失败卡关闭按用户 binding 路由。
 - `UserManagementControllerTest` 覆盖用户管理 API 的 `SUPER_ADMIN` 组合筛选查询、创建、手工用户名修正及统一认证号保持、单人角色调整、旧前端缺省 `allMatching` 的显式批量角色兼容、按筛选全选批量角色命令映射、角色列表和非超管/匿名拒绝。
 - `AiRunFeedbackControllerTest` 覆盖登录用户提交、查询和批量读取 Run 反馈；`AiMessageFeedbackControllerTest` 覆盖旧消息接口兼容与匿名拒绝。

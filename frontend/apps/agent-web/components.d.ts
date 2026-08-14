@@ -98,6 +98,7 @@ declare module 'vue' {
     SupportAccessPanel: typeof import('./src/components/system/SupportAccessPanel.vue')['default']
     SystemManagementPanel: typeof import('./src/components/system/SystemManagementPanel.vue')['default']
     SystemManagementWrapper: typeof import('./src/components/SystemManagementWrapper.vue')['default']
+    TestCaseMaintenanceDialog: typeof import('./src/components/TestCaseMaintenanceDialog.vue')['default']
     ToolboxPanel: typeof import('./src/components/ToolboxPanel.vue')['default']
     UserNotificationCenter: typeof import('./src/components/UserNotificationCenter.vue')['default']
     WorkbenchFooter: typeof import('./src/components/WorkbenchFooter.vue')['default']

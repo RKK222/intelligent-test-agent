@@ -50,8 +50,9 @@
 
 ## 运行配置
 
-- `application.yml` 是默认、本地和企业生产的唯一运行配置；所有差异由 dotenv 或系统环境变量提供，不再保留 `local`、`guo`、`prod` profile。
+- `application.yml` 是默认和企业生产的基础运行配置；`application-local.yml` 只为本地开发补充内部模型代理的启动期随机鉴权值，`application-test.yml` 提供测试环境配置，其余差异由 dotenv 或系统环境变量提供。
 - 根目录 `restart-dev-services.sh` 默认读取 `.env.test` 并以 `test` profile 一键重启；本地直接使用 `tools/dev-backend-run.sh --env-file .env.local`，不设置 Spring profile。
+- Windows 本地一键入口使用 `local` profile；未显式设置 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 时，每次 Java 启动生成临时随机值并注入其创建的用户 OpenCode 子进程，不写回 `.env.local`。显式配置仍优先，非 `local` profile 不使用该兜底。
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
 - 本地 Spring Boot 可执行 JAR 以 runtime scope 打包 PostgreSQL JDBC 驱动；企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖。驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
 - `application.yml`：`test-agent.xxl-job.enabled` 默认 `true`；MySQL、access token、Admin/executor 端口和地址使用 `TEST_AGENT_XXL_JOB_*` 注入。readiness group 明确不包含 `xxlJobAdmin`。

@@ -221,6 +221,8 @@ import type {
   TerminalTicketResponse,
   ToolboxCatalog,
   ToolboxClickResult,
+  TcdsTestCaseMaintenancePayload,
+  TcdsTaskTypeOption,
   TodoItem,
   DeleteUsersResult,
   SyncUsersFromTcdsResult,
@@ -237,7 +239,6 @@ import type {
   WorkspaceBackendServer,
   WorkspaceCreateOperation,
   WorkspaceDiff,
-  WorkspaceGitCommitResult,
   WorkspaceGitDiff,
   WorkspaceGitMergeCompletion,
   WorkspaceGitConflict,
@@ -479,6 +480,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const systemManagementBase = "/api/internal/platform/system-management";
   const externalApiCredentialBase = `${systemManagementBase}/api-keys`;
   const toolboxBase = "/api/internal/platform/toolbox";
+  const tcdsIntegrationBase = "/api/internal/platform/integration/tcds";
   const memoryBase = "/api/internal/platform/memory/v1";
   const memoryAdminBase = `${memoryBase}/admin`;
   const analyticsBase = "/api/internal/platform/analytics";
@@ -1335,12 +1337,6 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-unstage`,
         { method: "POST", body: JSON.stringify({ files }) }
       ),
-    /** 体验工作区只建立本服务器 Git 提交，不进入任何发布或 push 程序。 */
-    commitExperienceWorkspace: (workspaceId: string, commitMessage: string, files: string[]) =>
-      routedRequest<WorkspaceGitCommitResult>(
-        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-commit`,
-        { method: "POST", body: JSON.stringify({ commitMessage, files }) }
-      ),
     getWorkspaceGitConflict: (workspaceId: string, path: string) =>
       routedRequest<WorkspaceGitConflict>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict${query({ path })}`
@@ -2196,14 +2192,6 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<PageResponse<SessionMessage>>(
         `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages${query({ page, size, refresh: options.refresh })}`
       ),
-    getSessionUserMessageForRun: (sessionId: string, runId: string) =>
-      routedRequest<SessionMessage>(
-        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages/runs/${encodeURIComponent(runId)}/user`
-      ),
-    listSessionMessagesForRun: (sessionId: string, runId: string) =>
-      routedRequest<SessionMessage[]>(
-        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages/runs/${encodeURIComponent(runId)}`
-      ),
     getNightExecutionSlots: () =>
       routedRequest<NightExecutionSlots>(`${opencodeRuntimeBase}/night-execution/slots`),
     createNightExecutionTask: (payload: CreateNightExecutionTaskPayload) =>
@@ -2303,13 +2291,6 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<UserOpencodeProcess>(agentPath("/processes/me/initialize"), {
         method: "POST",
         ...(operationId ? { body: JSON.stringify({ operationId }) } : {}),
-        timeoutMs: 120000
-      }),
-    /** 重启始终由后端按当前用户 binding 路由；confirmRunning 只确认取消活动 Run，不参与目标选择。 */
-    restartMyOpencodeProcess: (confirmRunning = false) =>
-      routedRequest<UserOpencodeProcess>(agentPath("/processes/me/restart"), {
-        method: "POST",
-        body: JSON.stringify({ confirmRunning }),
         timeoutMs: 120000
       }),
     getOpencodeProcessStartOperation: (operationId: string) =>
@@ -2837,6 +2818,17 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<ToolboxClickResult>(`${toolboxBase}/tools/${encodeURIComponent(toolId)}/clicks`, {
         method: "POST",
         body: JSON.stringify({ eventId })
+      }),
+
+    /** 通过平台后端受控调用生产 TCDS，浏览器不直连内网 HTTP 地址。 */
+    getTcdsTaskTypes: () =>
+      request<TcdsTaskTypeOption[]>(`${tcdsIntegrationBase}/task-types`),
+
+    /** 通过平台后端受控调用生产 TCDS，浏览器不直连内网 HTTP 地址。 */
+    maintainTcdsTestCases: (payload: TcdsTestCaseMaintenancePayload) =>
+      request<void>(`${tcdsIntegrationBase}/test-cases`, {
+        method: "POST",
+        body: JSON.stringify(payload)
       }),
 
     // ---- 认证相关 API ----

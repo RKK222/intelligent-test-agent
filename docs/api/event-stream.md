@@ -875,6 +875,10 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 
 工具盒子目录查询和点击上报都是普通 HTTP API，不创建 Run、Session 或 RunEvent，也不进入用户级 session-runtime SSE。点击成功后的累计与热门排名由当前页面本地更新，刷新时重新查询 `GET /api/internal/platform/toolbox/tools`；其它已打开页面不承诺实时同步。首版不提供点击趋势、明细查询、收藏或目录管理事件。后续如需跨页面实时刷新，必须另行设计稳定事件契约，不能复用 `tool.*`、`analytics.*` 或 opencode raw event。
 
+## TCDS 案例维护不新增事件
+
+`GET /api/internal/platform/integration/tcds/task-types` 与 `POST /api/internal/platform/integration/tcds/test-cases` 都是同步普通 HTTP API。案例维护成功后，前端继续执行既有缓存并跳转流程；平台不创建 Session、Run、RunEvent、用户级 runtime-state 事件、SSE 或 WebSocket 消息。TCDS 请求正文和响应正文不得进入事件流，失败只通过当前 HTTP 统一错误响应返回。
+
 ## UI 测试执行不新增事件
 
 `ui_test_execute` Tool 每次执行前通过同节点 Java 的只读配置接口读取超级管理员维护的

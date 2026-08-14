@@ -73,6 +73,24 @@ export type ToolboxClickResult = {
 /** 运行目标类型；string 后缀保持旧前端对未来枚举值的兼容。 */
 export type RuntimeKind = "SERVER_PROCESS" | "LOCAL_CLIENT" | string;
 
+/** 当前编辑器解析出的 TCDS 案例；固定业务字段和 userId 由后端补齐。 */
+export type TcdsTestCaseMaintenancePayload = {
+  itemNo: string;
+  caseList: Array<{
+    name: string;
+    step: string;
+    data: string;
+    expect: string;
+    taskType: string;
+  }>;
+};
+
+/** 平台从 TCDS 实时读取的任务类型选项。 */
+export type TcdsTaskTypeOption = {
+  name: string;
+  value: string;
+};
+
 export type MemoryScope = "PERSONAL_GLOBAL" | "PERSONAL_APPLICATION" | "TEAM_APPLICATION";
 export type MemoryStatus =
   | "CANDIDATE"
