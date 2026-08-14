@@ -76,6 +76,7 @@ import type {
   SessionMessage,
   SessionRuntimeState,
   SessionRuntimeStateSummary,
+  TcdsTaskTypeOption,
   OpencodeProcessStartOperation,
   UserOpencodeProcess,
   Workspace,
@@ -218,6 +219,12 @@ import PersonalWorkspacePullDialog, {
   type PersonalWorkspacePullDialogResult,
   type PersonalWorkspacePullDisposeStatus
 } from "./PersonalWorkspacePullDialog.vue";
+import TestCaseMaintenanceDialog from "./TestCaseMaintenanceDialog.vue";
+import {
+  buildTcdsTestCaseMaintenancePayload,
+  parseMarkdownTestCases,
+  type TestCaseMaintenanceDraft
+} from "./test-case-maintenance";
 import ReferenceConfigurationDialog from "./ReferenceConfigurationDialog.vue";
 import { canShowReferenceConfiguration } from "./reference-configuration-access";
 import SettingsDialog from "./settings/SettingsDialog.vue";
@@ -8414,8 +8421,132 @@ type SingleResponse = {
   };
 };
 
-async function handleCacheAndNavigate(path: string, type: "file" | "directory") {
+type TestCaseMaintenanceSource = {
+  path: string;
+  fileName: string;
+  content: string;
+  itemNo: string;
+  cases: TestCaseMaintenanceDraft[];
+};
+
+const testCaseMaintenanceSource = ref<TestCaseMaintenanceSource | null>(null);
+const testCaseMaintenanceSubmitting = ref(false);
+const testCaseMaintenanceTaskTypes = ref<TcdsTaskTypeOption[]>([]);
+const testCaseMaintenanceTaskTypesLoading = ref(false);
+const testCaseMaintenanceTaskTypesError = ref("");
+let testCaseMaintenanceTaskTypesRequestId = 0;
+
+/** 每次打开或重试都实时读取 TCDS，代次校验避免迟到响应覆盖新弹窗。 */
+async function loadTestCaseMaintenanceTaskTypes() {
+  if (!testCaseMaintenanceSource.value) return;
+  const requestId = ++testCaseMaintenanceTaskTypesRequestId;
+  testCaseMaintenanceTaskTypes.value = [];
+  testCaseMaintenanceTaskTypesLoading.value = true;
+  testCaseMaintenanceTaskTypesError.value = "";
+  try {
+    const options = await api.getTcdsTaskTypes();
+    if (requestId !== testCaseMaintenanceTaskTypesRequestId || !testCaseMaintenanceSource.value) return;
+    testCaseMaintenanceTaskTypes.value = options;
+  } catch (error) {
+    if (requestId !== testCaseMaintenanceTaskTypesRequestId || !testCaseMaintenanceSource.value) return;
+    console.error("加载 TCDS 任务类型失败", error);
+    testCaseMaintenanceTaskTypesError.value = error instanceof Error
+      ? error.message
+      : "加载任务类型失败";
+  } finally {
+    if (requestId === testCaseMaintenanceTaskTypesRequestId) {
+      testCaseMaintenanceTaskTypesLoading.value = false;
+    }
+  }
+}
+
+function openTestCaseMaintenance(path: string) {
+  const tab = tabs.value.find((candidate) => candidate.path === path);
+  if (!tab) {
+    ElMessage.error("未找到当前编辑器内容");
+    return;
+  }
+  const itemNo = extractItemNo(path);
+  if (!itemNo) {
+    ElMessage.error("无法识别需求子条目编号");
+    return;
+  }
+
+  try {
+    const cases = parseMarkdownTestCases(tab.content).map((testCase) => ({ ...testCase, taskTypes: [] }));
+    testCaseMaintenanceSource.value = {
+      path,
+      fileName: fileNameOf(path),
+      content: tab.content,
+      itemNo,
+      cases
+    };
+    void loadTestCaseMaintenanceTaskTypes();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "解析 Markdown 案例失败");
+  }
+}
+
+function closeTestCaseMaintenance() {
+  if (!testCaseMaintenanceSubmitting.value) {
+    testCaseMaintenanceTaskTypesRequestId += 1;
+    testCaseMaintenanceSource.value = null;
+    testCaseMaintenanceTaskTypes.value = [];
+    testCaseMaintenanceTaskTypesLoading.value = false;
+    testCaseMaintenanceTaskTypesError.value = "";
+  }
+}
+
+async function handleEditorCacheAndNavigate(path: string) {
+  if (path.includes("测试设计")) {
+    openTestCaseMaintenance(path);
+    return;
+  }
+  await handleCacheAndNavigate(path, "file");
+}
+
+async function submitTestCaseMaintenance(cases: TestCaseMaintenanceDraft[]) {
+  const source = testCaseMaintenanceSource.value;
+  if (!source || testCaseMaintenanceSubmitting.value) return;
+
+  let request: ReturnType<typeof buildTcdsTestCaseMaintenancePayload>;
+  try {
+    request = buildTcdsTestCaseMaintenancePayload({
+      cases,
+      itemNo: source.itemNo,
+      taskTypeOptions: testCaseMaintenanceTaskTypes.value
+    });
+  } catch (error) {
+    ElMessage.warning(error instanceof Error ? error.message : "请选择任务类型");
+    return;
+  }
+
+  // 确认点击时立即占用新标签页，避免维护与缓存两个异步请求结束后被浏览器拦截。
+  const jumpWindow = window.open("about:blank", "_blank");
+  if (jumpWindow) jumpWindow.opener = null;
+  testCaseMaintenanceSubmitting.value = true;
+  try {
+    await api.maintainTcdsTestCases(request);
+
+    testCaseMaintenanceSource.value = null;
+    ElMessage.success("案例维护成功，正在跳转");
+    await handleCacheAndNavigate(source.path, "file", { content: source.content, jumpWindow });
+  } catch (error) {
+    jumpWindow?.close();
+    console.error("维护案例失败", error);
+    ElMessage.error(error instanceof Error ? error.message : "维护案例失败");
+  } finally {
+    testCaseMaintenanceSubmitting.value = false;
+  }
+}
+
+async function handleCacheAndNavigate(
+  path: string,
+  type: "file" | "directory",
+  options: { content?: string; jumpWindow?: Window | null } = {}
+) {
   if (!selectedWorkspace.value) {
+    options.jumpWindow?.close();
     return;
   }
   const workspaceId = selectedWorkspace.value.workspaceId;
@@ -8425,6 +8556,7 @@ async function handleCacheAndNavigate(path: string, type: "file" | "directory") 
   const cacheDataUrl = import.meta.env.VITE_CACHE_DATA_URL ?? "";
 
   if (!cacheDataUrl) {
+    options.jumpWindow?.close();
     ElMessage.error("缓存数据地址未配置");
     return;
   }
@@ -8444,8 +8576,8 @@ async function handleCacheAndNavigate(path: string, type: "file" | "directory") 
     } else {
       if (path.includes("测试设计")) {
         cacheType = "md";
-        const fileContent = await api.readFile(workspaceId, path);
-        files = [{ title: fileNameOf(path), content: fileContent.content }];
+        const content = options.content ?? (await api.readFile(workspaceId, path)).content;
+        files = [{ title: fileNameOf(path), content }];
       } else if (path.includes("测试执行")) {
         cacheType = "json";
         const fileContent = await api.readFile(workspaceId, path);
@@ -8483,11 +8615,17 @@ async function handleCacheAndNavigate(path: string, type: "file" | "directory") 
     console.log("============请求后台=====================", result);
 
     if (result.data?.jumpUrl) {
-      window.open(result.data.jumpUrl, "_blank", "noopener,noreferrer");
+      if (options.jumpWindow && !options.jumpWindow.closed) {
+        options.jumpWindow.location.replace(result.data.jumpUrl);
+      } else {
+        window.open(result.data.jumpUrl, "_blank", "noopener,noreferrer");
+      }
     } else {
+      options.jumpWindow?.close();
       ElMessage.error("获取跳转地址失败");
     }
   } catch (error) {
+    options.jumpWindow?.close();
     console.error("缓存数据并跳转失败", error);
     ElMessage.error(error instanceof Error ? error.message : "缓存数据并跳转失败");
   }
@@ -11464,7 +11602,7 @@ async function handleLogout() {
           @open-server-workspace-picker="openServerWorkspacePicker"
           @update:markdown-preview="(value: boolean) => { if (!value) markdownPreviewMode = 'off'; else if (markdownPreviewMode === 'off') markdownPreviewMode = 'split'; }"
           @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
-          @cache-and-navigate="(path: string) => handleCacheAndNavigate(path, 'file')"
+          @cache-and-navigate="handleEditorCacheAndNavigate"
         >
           <div
             class="relative h-full min-h-0"
@@ -11843,6 +11981,21 @@ async function handleLogout() {
     @confirm="confirmPersonalPull"
     @cancel="cancelPersonalPullDialog"
     @close="closePersonalPullDialog"
+  />
+
+  <TestCaseMaintenanceDialog
+    v-if="!shareMode && testCaseMaintenanceSource"
+    :open="true"
+    :file-name="testCaseMaintenanceSource.fileName"
+    :item-no="testCaseMaintenanceSource.itemNo"
+    :cases="testCaseMaintenanceSource.cases"
+    :task-type-options="testCaseMaintenanceTaskTypes"
+    :task-types-loading="testCaseMaintenanceTaskTypesLoading"
+    :task-types-error="testCaseMaintenanceTaskTypesError"
+    :submitting="testCaseMaintenanceSubmitting"
+    @close="closeTestCaseMaintenance"
+    @confirm="submitTestCaseMaintenance"
+    @retry-task-types="loadTestCaseMaintenanceTaskTypes"
   />
 
   <ServerWorkspacePickerDialog

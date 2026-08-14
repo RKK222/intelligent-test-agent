@@ -118,6 +118,15 @@ import type {
   LobehubSsoTicket,
   ManagedApplication,
   ManagedWorkspaceRuntime,
+  MemoryAdminHealth,
+  MemoryEvidenceView,
+  MemoryScope,
+  MemorySettingsView,
+  MemorySkillProposalView,
+  MemoryStatus,
+  MemoryUsageView,
+  MemoryView,
+  MemoryWhitelistView,
   ModelInfo,
   NightExecutionScheduleMode,
   NightExecutionSlots,
@@ -199,6 +208,8 @@ import type {
   TerminalTicketResponse,
   ToolboxCatalog,
   ToolboxClickResult,
+  TcdsTestCaseMaintenancePayload,
+  TcdsTaskTypeOption,
   TodoItem,
   DeleteUsersResult,
   SyncUsersFromTcdsResult,
@@ -456,6 +467,9 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const systemManagementBase = "/api/internal/platform/system-management";
   const externalApiCredentialBase = `${systemManagementBase}/api-keys`;
   const toolboxBase = "/api/internal/platform/toolbox";
+  const tcdsIntegrationBase = "/api/internal/platform/integration/tcds";
+  const memoryBase = "/api/internal/platform/memory/v1";
+  const memoryAdminBase = `${memoryBase}/admin`;
   const analyticsBase = "/api/internal/platform/analytics";
   const notificationCenterBase = "/api/internal/platform/notification-center/notifications";
   const commonParameterBase = `${configurationBase}/common-parameters`;
@@ -2584,6 +2598,131 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         }
       ),
 
+    // ---- 通用长期记忆 API ----
+
+    getQaMemoryAvailability: () =>
+      request<{ enabled: boolean }>(`${memoryBase}/availability`),
+    listPersonalMemories: (params: {
+      applicationId?: string;
+      status?: MemoryStatus;
+      page?: number;
+      size?: number;
+    } = {}) => request<PageResponse<MemoryView>>(`${memoryBase}/personal${query(params)}`),
+    createPersonalMemory: (payload: {
+      scope: Extract<MemoryScope, "PERSONAL_GLOBAL" | "PERSONAL_APPLICATION">;
+      applicationId?: string | null;
+      content: string;
+    }) => request<MemoryView>(`${memoryBase}/personal`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+    listTeamMemories: (params: {
+      applicationId?: string;
+      status?: MemoryStatus;
+      page?: number;
+      size?: number;
+    } = {}) => request<PageResponse<MemoryView>>(`${memoryBase}/team${query(params)}`),
+    createTeamMemoryProposal: (payload: {
+      applicationId: string;
+      content: string;
+      sourceMemoryId?: string;
+    }) => request<MemoryView>(`${memoryBase}/team/proposals`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+    reviewTeamMemory: (memoryId: string, payload: {
+      decision: "APPROVE" | "REJECT";
+      comment?: string;
+      expectedVersion: number;
+    }) => request<MemoryView>(`${memoryBase}/team/${encodeURIComponent(memoryId)}/reviews`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+    getQaMemory: (memoryId: string) =>
+      request<MemoryView>(`${memoryBase}/memories/${encodeURIComponent(memoryId)}`),
+    updateQaMemory: (memoryId: string, payload: {
+      content?: string;
+      expectedVersion: number;
+    }) => request<MemoryView>(`${memoryBase}/memories/${encodeURIComponent(memoryId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+    promotePersonalMemoryGlobal: (memoryId: string, expectedVersion: number) =>
+      request<MemoryView>(`${memoryBase}/personal/${encodeURIComponent(memoryId)}/promote-global`, {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion })
+      }),
+    pausePersonalMemory: (memoryId: string, expectedVersion: number) =>
+      request<MemoryView>(`${memoryBase}/personal/${encodeURIComponent(memoryId)}/pause`, {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion })
+      }),
+    archiveQaMemory: (memoryId: string, expectedVersion: number) =>
+      request<MemoryView>(
+        `${memoryBase}/memories/${encodeURIComponent(memoryId)}${query({ expectedVersion })}`,
+        { method: "DELETE" }
+      ),
+    listQaMemoryEvidence: (memoryId: string) =>
+      request<MemoryEvidenceView[]>(`${memoryBase}/memories/${encodeURIComponent(memoryId)}/evidence`),
+    queryQaMemoryRunUsage: (runIds: string[]) =>
+      request<MemoryUsageView[]>(`${memoryBase}/run-usage/query`, {
+        method: "POST",
+        body: JSON.stringify({ runIds })
+      }),
+    createMemorySkillProposal: (payload: {
+      memoryId: string;
+      applicationId: string;
+      title?: string;
+    }) => request<MemorySkillProposalView>(`${memoryBase}/skill-proposals`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+    listMemorySkillProposals: (params: { applicationId?: string; page?: number; size?: number } = {}) =>
+      request<PageResponse<MemorySkillProposalView>>(`${memoryBase}/skill-proposals${query(params)}`),
+    updateMemorySkillProposal: (proposalId: string, payload: {
+      title?: string;
+      skillMdDraft: string;
+      expectedVersion: number;
+    }) => request<MemorySkillProposalView>(
+      `${memoryBase}/skill-proposals/${encodeURIComponent(proposalId)}`,
+      { method: "PATCH", body: JSON.stringify(payload) }
+    ),
+    reviewMemorySkillProposal: (proposalId: string, decision: "APPROVE" | "REJECT", expectedVersion: number) =>
+      request<MemorySkillProposalView>(
+        `${memoryBase}/skill-proposals/${encodeURIComponent(proposalId)}/reviews`,
+        { method: "POST", body: JSON.stringify({ decision, expectedVersion }) }
+      ),
+    linkPublishedMemorySkill: (proposalId: string, publishedAssetId: string, expectedVersion: number) =>
+      request<MemorySkillProposalView>(
+        `${memoryBase}/skill-proposals/${encodeURIComponent(proposalId)}/published-asset`,
+        { method: "POST", body: JSON.stringify({ publishedAssetId, expectedVersion }) }
+      ),
+    archiveMemorySkillProposal: (proposalId: string, expectedVersion: number) =>
+      request<MemorySkillProposalView>(
+        `${memoryBase}/skill-proposals/${encodeURIComponent(proposalId)}${query({ expectedVersion })}`,
+        { method: "DELETE" }
+      ),
+
+    getQaMemoryAdminHealth: () => request<MemoryAdminHealth>(`${memoryAdminBase}/health`),
+    getQaMemorySettings: () => request<MemorySettingsView>(`${memoryAdminBase}/settings`),
+    updateQaMemorySettings: (payload: {
+      primaryChatModelId?: string | null;
+      primaryEmbeddingModelId?: string | null;
+      expectedVersion: number;
+    }) => request<MemorySettingsView>(`${memoryAdminBase}/settings`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+    listQaMemoryWhitelist: (page = 1, size = 50) =>
+      request<PageResponse<MemoryWhitelistView>>(`${memoryAdminBase}/whitelist${query({ page, size })}`),
+    enableQaMemoryUser: (userId: string) =>
+      request<MemoryWhitelistView>(`${memoryAdminBase}/whitelist`, {
+        method: "POST",
+        body: JSON.stringify({ userId })
+      }),
+    disableQaMemoryUser: (userId: string) =>
+      request<void>(`${memoryAdminBase}/whitelist/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+
     // ---- 工具盒子 API ----
 
     /** 获取固定版本、可完全离线运行的工具目录及热门排名。 */
@@ -2594,6 +2733,17 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<ToolboxClickResult>(`${toolboxBase}/tools/${encodeURIComponent(toolId)}/clicks`, {
         method: "POST",
         body: JSON.stringify({ eventId })
+      }),
+
+    /** 通过平台后端受控调用生产 TCDS，浏览器不直连内网 HTTP 地址。 */
+    getTcdsTaskTypes: () =>
+      request<TcdsTaskTypeOption[]>(`${tcdsIntegrationBase}/task-types`),
+
+    /** 通过平台后端受控调用生产 TCDS，浏览器不直连内网 HTTP 地址。 */
+    maintainTcdsTestCases: (payload: TcdsTestCaseMaintenancePayload) =>
+      request<void>(`${tcdsIntegrationBase}/test-cases`, {
+        method: "POST",
+        body: JSON.stringify(payload)
       }),
 
     // ---- 认证相关 API ----

@@ -16,7 +16,7 @@ Java 前必须从每个后台节点验证 Redis TCP。值为 `0` 时，Docker DN
 
 ## TCDS 内网地址与同批发布
 
-应用默认使用现场确认的企业局域网基础地址 `http://tcds-prod.sdc.icbc:9080`；所有 Java 节点仍应在 `backend.env` 显式配置相同的 `TEST_AGENT_TCDS_BASE_URL`，便于部署审计和后续环境切换。覆盖值必须是 HTTP/HTTPS 绝对地址，相对地址或其它协议会使 Spring 启动失败，错误不回显实际地址。所有固定 TCDS 后台接口请求统一携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`；企业内外网隔离由部署网络策略负责。
+应用默认使用现场确认的企业局域网基础地址 `http://tcds-prod.sdc.icbc:9080`；所有 Java 节点仍应在 `backend.env` 显式配置相同的 `TEST_AGENT_TCDS_BASE_URL`，便于部署审计和后续环境切换。覆盖值必须是 HTTP/HTTPS 绝对地址，相对地址或其它协议会使 Spring 启动失败，错误不回显实际地址。登录、用户、需求导入、任务类型和案例维护等全部 TCDS 同源请求统一通过共享请求构造器携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`；企业内外网隔离由部署网络策略负责。
 
 本变更同时改变普通 Workspace `rootPath/physicalRootPath` 语义和前端 iframe 路由，必须按“全部 Java 节点配置变量并升级 → 验证目录 API/文件 WebSocket → 升级前端”的顺序同批发布。回滚时先回滚前端，再回滚全部 Java；旧 Java 需要恢复旧配置和旧路径响应语义，不能长期混跑。旧 9900 服务只在新版本完成真实 TCDS 查询、重复覆盖、部分失败和文件树刷新验收后由运维另行停用，本仓库不再调用该端口。
 
@@ -653,7 +653,11 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 仓库根目录的 `restart-dev-services.sh` 是 macOS/Linux/WSL/Git Bash 平台服务一键重启入口，Windows PowerShell 使用同级 `restart-dev-services.ps1`：二者默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。脚本不再识别或启动 Mem0、Embedding 或独立 pgvector 服务。脚本启动后端 Java 进程时同样清空 JVM 代理系统属性，确保测试库和 Redis 使用直连网络。test profile 下脚本默认启动本机 Go `opencode-manager`；其它 profile 在 `TEST_AGENT_OPENCODE_BASE_URL` 指向 loopback 或默认路由网卡探测到的本机 IPv4 时默认启动 manager。manager 以 `run` 长运行模式启动，不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。脚本会导出 `TEST_AGENT_ROOT`，并把早期本地测试库使用的兼容别名 `TESTAGENT` 默认设置为相同项目根目录，确保 `$TEST_AGENT_ROOT/...` 与既有 `$TESTAGENT/...` 通用参数路径都能在 Java 进程中展开后再下发给 manager。停止 manager 时，脚本会读取 `.tmp/dev-services/opencode-manager-state/processes/*.json` 中的 pid，并扫描端口池 `4096..4105` 内的 `opencode serve --port ...` 监听，统一停止残留用户进程后删除 state JSON，避免重启后旧进程或旧 state 导致端口被判定为已托管。脚本不再注入 server-ip-file 路径；Java 和 Go manager 都按 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 约定写读服务器身份与可访问地址。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，Bash 显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`，PowerShell 对应传入 `-Profile local -EnvFile .env.local` 或 `-Profile guo -EnvFile .env.guo`。
 
+`local` profile 未提供 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 时，Spring 在本次 JVM 启动期生成临时随机值，供 Java 与其创建的用户 OpenCode 子进程共同使用；该值不写回 `.env.local`，进程重启后自动轮换。显式环境值仍优先。`test` profile 继续使用受控测试默认值；默认/生产 profile 缺失时仍在用户进程启动前失败关闭，不能依赖本地兜底。
+
 LobeHub 默认不参与上述重启。Bash 显式增加 `--with-lobehub` 时才在三项平台服务之后启动同级
+`local` profile 未提供 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 时，Spring 在本次 JVM 启动期生成临时随机值，供 Java 与其创建的用户 OpenCode 子进程共同使用；该值不写回 `.env.local`，进程重启后自动轮换。显式环境值仍优先。`test` profile 继续使用受控测试默认值；默认/生产 profile 缺失时仍在用户进程启动前失败关闭，不能依赖本地兜底。
+
 `../lobehub-platform`、本地 ParadeDB/RustFS 和 `3210` dev server，并复用 Redis 的
 `REDIS_PREFIX=lobehub:app` 独立配置（fork 自动追加分隔冒号，实际 key 为 `lobehub:app:*`）。生成的 LobeHub 开发 secret 仅位于
 `.tmp/dev-services/lobehub-dev.env`（0600），不修改 `.env.local/.env.test`；不带参数时脚本也不探测或停止
@@ -892,7 +896,7 @@ ENTERPRISE_UCID=<current-user-unified-auth-id>
 | `test-agent.model-catalog.external.api-key` | 空 | 外部模型密钥的 yml 直配值；本地 IDEA 启动优先使用该值，未配置时回退到 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 指向的环境变量。 |
 | `TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL` | 空 | 外部模式同步给 opencode 的默认模型，例如 `deepseek-v4-pro`。旧 `TEST_AGENT_BAILIAN_DEFAULT_MODEL` 仍作为兼容兜底。 |
 | `MODELSTUDIO_API_KEY` | 空 | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置的 `modelstudio` provider、`https://coding.dashscope.aliyuncs.com/v1` base URL 和 `qwen3.5-plus` 默认模型。 |
-| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | 空 | 内部模型代理鉴权 apikey，Java 校验 opencode 子进程请求并注入用户 opencode server 环境；敏感，不得写入日志或 startCommand 明文。 |
+| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | 空；`local` 启动期随机值 | 内部模型代理鉴权 apikey，Java 校验 opencode 子进程请求并注入用户 opencode server 环境；敏感，不得写入日志或 startCommand 明文。生产必须显式配置，随机兜底仅对 `local` profile 生效。 |
 
 ## 独立 UI 测试平台配置
 

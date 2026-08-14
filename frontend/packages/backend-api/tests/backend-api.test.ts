@@ -432,6 +432,67 @@ describe("backend-api", () => {
     }
   });
 
+  it("maintains TCDS test cases through the ordinary platform API", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: null
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token",
+      routeLinuxServerId: () => "server-a",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+    const payload = {
+      itemNo: "S20260703-000081",
+      caseList: [
+        { name: "案例一", step: "步骤", data: "数据", expect: "预期", taskType: "准入,功能" }
+      ]
+    };
+
+    await expect(client.maintainTcdsTestCases(payload)).resolves.toBeNull();
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/integration/tcds/test-cases"
+    );
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetcher.mock.calls[0]?.[1]?.body).toBe(JSON.stringify(payload));
+    const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer token");
+    expect(headers.get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+  });
+
+  it("loads TCDS task types through the ordinary platform API", async () => {
+    const taskTypes = [
+      { name: "准入测试任务", value: "5" },
+      { name: "功能测试任务", value: "3" }
+    ];
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: taskTypes
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token",
+      routeLinuxServerId: () => "server-a",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getTcdsTaskTypes()).resolves.toEqual(taskTypes);
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/integration/tcds/task-types"
+    );
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBeUndefined();
+    const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer token");
+    expect(headers.get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+  });
+
   it("filters OpenCode 1.18.4 catalogs without reordering their native results", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = String(input);

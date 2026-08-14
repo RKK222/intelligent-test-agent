@@ -4045,6 +4045,59 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 对应测试：`ToolboxControllerTest`、`ToolboxCatalogServiceTest`、`ToolboxCatalogContractTest`、`MyBatisToolboxClickRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发/用户删除测试。
 
+### TCDS 案例维护
+
+`GET /api/internal/platform/integration/tcds/task-types` 与 `POST /api/internal/platform/integration/tcds/test-cases` 都要求平台登录，不校验额外角色。两个入口只用于 `041-测试设计` 当前编辑器案例维护，不是通用 HTTP 代理。
+
+#### 实时查询任务类型
+
+前端每次打开案例维护弹窗时调用 `GET /api/internal/platform/integration/tcds/task-types`。平台 Java 使用无请求体 `GET` 通过统一部署基础地址访问 TCDS `getTaskTypes`，并与其它 TCDS 请求一致携带固定 `toolId: 66f36bfa5c1c6105572b0118880261d6`，只投影 `data.subItemTypes` 中校验后的 `name/value`：
+
+```json
+{
+  "success": true,
+  "traceId": "trace_tcds_task_types",
+  "data": [
+    { "name": "准入测试任务", "value": "5" },
+    { "name": "功能测试任务", "value": "3" }
+  ]
+}
+```
+
+- `subItemTypes` 必须是非空数组且不超过 100 项；每项 `name/value` 必须是非空有界文本，`value` 不得重复。`name` 必须以“测试任务”结尾，删除该末尾精确后缀后的非空业务名称也不得重复。`property`、`itemTypes`、`conceptType`、`editionType` 和上游 `msg` 不进入成功响应。
+- TCDS 非 `code=0`、缺字段、空列表、重复值、超限、非 2xx、超时或非法 JSON 统一返回 `503 EXTERNAL_API_UNAVAILABLE`，不向浏览器透传上游正文。
+- 前端在加载期间禁止选择、批量修改和确认；失败保留弹窗并提供重试，不回退本地固定快照。
+
+#### 提交案例维护
+
+`POST /api/internal/platform/integration/tcds/test-cases` 请求体：
+
+```json
+{
+  "itemNo": "S20260703-000081",
+  "caseList": [
+    {
+      "name": "全字段长度正常提交交易",
+      "step": "1. 准备数据\n2. 发起交易",
+      "data": "金额=100",
+      "expect": "交易成功",
+      "taskType": "准入,功能"
+    }
+  ]
+}
+```
+
+- `itemNo` 必填、最长 128 字符。
+- `caseList` 至少一项、最多 500 项；每个 Markdown 案例对应一个对象。
+- `name` 必填且最长 1024 字符；`step/data/expect` 允许空字符串且各自最长 65535 字符。`taskType` 使用本次 `getTaskTypes` 中所选 `value` 对应的 `name` 删除末尾精确后缀“测试任务”后的业务名称；不维护固定类型表。同一案例选择多个类型时按选择顺序使用英文逗号连接，例如 `准入测试任务/功能测试任务` 生成 `准入,功能`，不接受数字编码、中文逗号、缺少该后缀或删除后为空的名称。
+- 客户端不得提交 `userId`、上游 URL、请求头、`aiFlag/method/dataDependencies/isAICase/isUpdate/caseFlag`。后端从认证主体取得 `userId`，通过 `TEST_AGENT_TCDS_BASE_URL` 对应的统一基础地址和共享请求构造器固定 `toolId`，并分别补齐 `1/文本理解生成法/空字符串/是/否/2`。
+
+后端收到提交后会再次调用实时 `getTaskTypes`，按同一后缀规则生成当前允许集合并逐项校验，再调用 `createGraphCase`；类型已下线或客户端篡改返回 `400 VALIDATION_ERROR`，任务类型查询异常返回 `503 EXTERNAL_API_UNAVAILABLE`。成功返回统一 envelope，`data=null`。TCDS 返回 `code=0` 后才视为成功；非零业务码映射为 `409 CONFLICT` 并只返回长度受限、已清理控制字符的业务消息；连接、超时、非 2xx、空响应、超限响应和非法 JSON 统一映射为 `503 EXTERNAL_API_UNAVAILABLE`，不向浏览器回显上游地址、响应正文或堆栈。API 访问日志只记录 `itemNo/caseCount`，不记录四列案例正文。未认证返回 `401 UNAUTHENTICATED`，参数错误返回 `400 VALIDATION_ERROR`。成功和错误响应都携带当前 `traceId`。
+
+兼容性：任务类型查询是新增只读入口，原案例维护路径和请求/响应保持兼容；不新增数据库字段、Flyway migration、RunEvent、SSE 或 WebSocket。生产 Java 所在网络必须能够访问统一配置的 TCDS 基础地址；浏览器不需要 TCDS CORS，也不会产生 HTTPS 页面到 HTTP TCDS 的 mixed-content 请求。
+
+对应测试：`TcdsCaseMaintenanceControllerTest`、`TcdsCaseMaintenanceServiceTest`、`backend-api.test.ts` 和工作台案例维护组件测试。
+
 ### 健康检查
 
 Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring Boot/Druid 数据源；固定 opencode node yml 配置已作废，不再作为 Actuator health 来源；Redis 是系统必需依赖，健康检查会做 TCP 连通探测。

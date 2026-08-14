@@ -42,6 +42,8 @@ class TcdsIntegrationConfigTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(TcdsGateway.class);
                     assertThat(context).hasSingleBean(TcdsHttpGateway.class);
+                    assertThat(context).hasSingleBean(TcdsHttpRequestFactory.class);
+                    assertThat(context).hasSingleBean(TcdsCaseMaintenanceService.class);
                 });
     }
 
