@@ -10648,4 +10648,7 @@
 
 - 指纹门禁仍默认严格失败；只有本轮显式携带的已部署 baseline 可恢复缺失/旧状态，并且恢复前必须通过真实 runtime 与容器健康检查。
 - 恢复动作只更新 `/data/testagent/config/release-component-state.env`，不执行 `docker load`、不重启 manager/worker、不替换活动的 `opencode-models.json`；`.4` 的 Qwen 灰度和 `.114` 的现网模型继续分别保留。
-- 本次只修改发布脚本、回归、文档和非敏感基线元数据，不涉及 API、事件、数据库结构、Flyway SQL、性能、安全边界或部署拓扑变化；最终企业包需从本次提交重新构建并记录新哈希。
+- 本次只修改发布脚本、回归、文档和非敏感基线元数据，不涉及 API、事件、数据库结构、Flyway SQL、性能、安全边界或部署拓扑变化。
+- 最终企业包源码提交为 `731b2f1ae9f78aa0d4ef71af3727515f756ebeed`；内层 ZIP SHA-256 为 `35687eb1035faa217fee1ad6e54f11cc35f66bd6fcdf898b186ef63b1c0fdbea`，外层完整包为 `1734a0f30eff5eb78a6da3e6c4a09005161daee636481de0a135539838216700`。
+- 后端 app JAR 为 `8767313d4a96f7332efd1481e2ecd01833e3f508b9c498aeaabc2641eb15ebbf`，persistence JAR 为 `aa502bceb9457b22b1abfa24f328b6b33a9b8922aa5a958f02d8dbc28f1b3c2b`，XXL integration JAR 为 `e2aacd9f6221bf68abdebac2125dc15d872ed559d10280bad943e03218f7390d`，前端归档为 `9679040a4f98cefee02252f3928568987eb2528098317346f4cdaa06224471a9`。
+- 最终独立校验确认外层 checksum、两层 ZIP、外层内嵌内层逐字节一致、`--validate-only`、全部受保护 Flyway 资源、两台 TCDS 精确地址和 worker 制品缺失门禁均通过；发布清单为 worker/toolbox `reuse`、LobeHub `disabled`。
