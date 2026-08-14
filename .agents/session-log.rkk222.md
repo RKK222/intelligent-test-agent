@@ -10505,10 +10505,12 @@
 ### How
 
 - JDK 25 定向转换/导入/文件服务测试 51/51 通过，覆盖标题与大纲级别、行内样式、安全/不安全链接、分层列表、表格、图片引用与字节、覆盖写入、路径穿越和容量限制；受影响 reactor 干净全量 77 个套件/622 项全部通过。
+- 用户进一步明确“Word 文件名实际返回压平文本时不能报错”后，补充 `.doc/.docx`、UTF-8/GB18030、`text/plain`/`application/octet-stream`/`application/msword` 的转换器与完整导入服务回归；定向 14/14、workspace-management 受影响 reactor 684/684 通过，纯文本回退不生成图片附件。
 - 22 模块 `mvn clean package -Dmaven.test.skip=true` 成功。使用根目录 `.env.test` / `test` profile 启动 release worktree；期间两次被主工作区并行重启抢占 8080，等待并行任务结束后重新启动并等待 20 秒，health/readiness 均为 `UP`、3000 为 200、登录 CORS 正常、manager 无重连循环。
 - UI 级登录、工作台和同源导入 iframe 打开成功；当前本机 TCDS 返回“服务暂不可用”，因此未执行真实企业 Word 下载与导入。
 
 ### Result
 
 - 原始 DOCX 不再是文本抽取，可保留上述 Word 结构；图片通过安全工作区文件服务写盘并使用相对 Markdown 引用。上游只提供已压平文本时继续可导入，但已丢失的 Word 样式无法从纯文本还原。
+- 结构化渲染前后使用的是同一条“OOXML → 旧 DOC → 可读文本”回退链；本轮无需修改生产转换逻辑，只用回归测试锁定旧链路可导入的压平文本不会因发布新渲染器而退化。
 - 本次不新增 HTTP/RPC/RunEvent 接口、数据库/Flyway、部署变量或依赖，不修改 `.env*`、generated SDK 或 OpenCode 源码；公共 Agent、工作区 ID 及 Git diff/提交/推送链路未变更。
