@@ -174,3 +174,16 @@ cd /data/0709/test-agent-clickhouse-offline
 - PostgreSQL outbox 与业务写同事务；ClickHouse 故障只造成运营数据延迟，不反向失败业务事务。
 - Redis Summary Run 使用同槽 `analytics-outbox` stream，候选 Run 来自 PostgreSQL 活动/近期终态索引，不执行 Redis `SCAN`；实际发送人由 Run 权威字段补齐。
 - 历史组织维度采用回填时当前用户归属，并以 `CURRENT_ORG_BACKFILL` 标识；新事件采用事件发生时快照。
+
+## 10. 本地 dev 联调
+
+企业专机部署脚本不用于开发机。macOS/Linux 在仓库根目录执行：
+
+```bash
+./restart-dev-services.sh --profile test --env-file .env.test --with-clickhouse
+```
+
+需要同时验证通用记忆时追加 `--with-memory`。本地 helper 固定使用 ClickHouse 26.3.17.56，只把 HTTP 暴露到
+`127.0.0.1:18123`，数据保存在 `test-agent-clickhouse-dev-data-v1` Docker volume。随机密码、自定义用户配置和
+后端 JDBC dotenv 位于 `.tmp/dev-services/clickhouse`，权限为 `0600`，不会写入 `.env.test` 或仓库。可单独执行
+`tools/clickhouse-dev-services.sh status|stop|restart`；`stop` 只停止容器，不删除数据卷。

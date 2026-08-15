@@ -25,6 +25,7 @@ OPENCODE_SCREEN_SESSION="test-agent-opencode"
 OPENCODE_MANAGER_SCREEN_SESSION="test-agent-opencode-manager"
 LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
 MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
+CLICKHOUSE_DEV_SCRIPT="${ROOT_DIR}/tools/clickhouse-dev-services.sh"
 EXPERIENCE_WORKSPACE_CONTENT_SCRIPT="${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh"
 
 profile="test"
@@ -34,6 +35,7 @@ skip_frontend_build=false
 with_lobehub=false
 lobehub_mode="offline"
 with_memory=false
+with_clickhouse=false
 frontend_dependencies_checked=false
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
 BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
@@ -50,11 +52,11 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--with-memory] [--with-lobehub] [--without-lobehub] [--lobehub-mode offline|online] [--help]
+Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--with-memory] [--with-clickhouse] [--with-lobehub] [--without-lobehub] [--lobehub-mode offline|online] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
-in dependency order: optional memory data plane -> backend -> opencode-manager -> frontend -> optional LobeHub.
+in dependency order: optional ClickHouse/memory data planes -> backend -> opencode-manager -> frontend -> optional LobeHub.
 
 Services managed by this script:
   backend           Spring Boot test-agent-app (java -jar, profile from --profile).
@@ -65,6 +67,7 @@ Services managed by this script:
                     manager runs, because the manager spawns opencode child processes.
   frontend          agent-web Vite dev server (corepack pnpm dev).
   memory            Independent Mem0/BGE service and pgvector; started only with --with-memory.
+  clickhouse        Independent operational analytics database; started only with --with-clickhouse.
   lobehub           Independent ../lobehub-platform fork plus dev-only ParadeDB/RustFS.
                     It is started only when --with-lobehub is explicitly supplied.
 
@@ -79,6 +82,7 @@ Defaults:
   manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
   LobeHub:         disabled unless --with-lobehub is supplied
   memory:          disabled unless --with-memory is supplied
+  ClickHouse:      disabled unless --with-clickhouse is supplied
   screen sessions: test-agent-backend, test-agent-frontend and test-agent-opencode-manager
                    when screen is available
 
@@ -90,6 +94,8 @@ Options:
   --skip-frontend-build  Restart frontend without running pnpm build first.
   --with-memory          Opt in to local pgvector + fixed Mem0/BGE service on 15433/18888.
                          Generated secrets stay under .tmp/dev-services/memory with mode 0600.
+  --with-clickhouse      Opt in to ClickHouse 26.3.17.56 on loopback port 18123.
+                         Generated secrets stay under .tmp/dev-services/clickhouse with mode 0600.
   --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
   --without-lobehub      Explicitly keep LobeHub disabled; this is already the dev default.
                          Reuses TEST_AGENT_REDIS_* with REDIS_PREFIX=lobehub:app;
@@ -107,6 +113,8 @@ Environment overrides:
   TEST_AGENT_LOBEHUB_FORK_DIR        Independent fork directory; default is ../lobehub-platform.
   TEST_AGENT_MEMORY_SERVICE_PORT      Local memory-service host port; default 18888.
   TEST_AGENT_MEMORY_POSTGRES_PORT     Local memory pgvector host port; default 15433.
+  TEST_AGENT_CLICKHOUSE_DEV_PORT      Local ClickHouse HTTP port; default 18123.
+  TEST_AGENT_CLICKHOUSE_DEV_VOLUME    Dedicated versioned Docker volume name.
 USAGE
 }
 
@@ -162,6 +170,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-memory)
       with_memory=true
+      shift
+      ;;
+    --with-clickhouse)
+      with_clickhouse=true
       shift
       ;;
     --help|-h)
@@ -1136,6 +1148,20 @@ if [[ "${with_memory}" == "true" ]]; then
   load_env_file "${TEST_AGENT_MEMORY_BACKEND_ENV_FILE}"
 fi
 
+if [[ "${with_clickhouse}" == "true" ]]; then
+  [[ -x "${CLICKHOUSE_DEV_SCRIPT}" ]] || {
+    echo "ClickHouse development helper is missing or not executable: ${CLICKHOUSE_DEV_SCRIPT}" >&2
+    exit 1
+  }
+  export TEST_AGENT_DEV_LOG_DIR="${LOG_DIR}"
+  export TEST_AGENT_CLICKHOUSE_DEV_ENV_FILE="${TEST_AGENT_CLICKHOUSE_DEV_ENV_FILE:-${LOG_DIR}/clickhouse/clickhouse-dev.env}"
+  export TEST_AGENT_CLICKHOUSE_BACKEND_ENV_FILE="${TEST_AGENT_CLICKHOUSE_BACKEND_ENV_FILE:-${LOG_DIR}/clickhouse/clickhouse-backend.env}"
+  export TEST_AGENT_CLICKHOUSE_USERS_CONFIG_FILE="${TEST_AGENT_CLICKHOUSE_USERS_CONFIG_FILE:-${LOG_DIR}/clickhouse/clickhouse-users.xml}"
+  "${CLICKHOUSE_DEV_SCRIPT}" prepare
+  # Java 只加载 ClickHouse JDBC 配置；本地数据库密码不进入仓库或主 dotenv。
+  load_env_file "${TEST_AGENT_CLICKHOUSE_BACKEND_ENV_FILE}"
+fi
+
 # 通用参数中的 $TEST_AGENT_ROOT 由 Java 进程展开；允许调用方显式覆盖以适配其他工作目录。
 # TESTAGENT 是早期本地测试库已使用的兼容别名，保留以避免公共配置路径下发给 manager 时变成字面量。
 export TEST_AGENT_ROOT="${TEST_AGENT_ROOT:-${ROOT_DIR}}"
@@ -1215,15 +1241,21 @@ echo "Builds run before stopping existing services; failed builds leave current 
 if [[ "${with_memory}" == "true" ]]; then
   "${MEMORY_DEV_SCRIPT}" build
 fi
+if [[ "${with_clickhouse}" == "true" ]]; then
+  "${CLICKHOUSE_DEV_SCRIPT}" pull
+fi
 build_backend
 prepare_backend_runtime_jar
 build_opencode_manager
 build_frontend
 
-# 逐个服务「先 kill 原进程再启动」，按依赖顺序：memory -> 后端 -> opencode-manager -> 前端。
+# 逐个服务「先 kill 原进程再启动」，按依赖顺序：ClickHouse/memory -> 后端 -> opencode-manager -> 前端。
 # 后端最先：opencode-manager 需要平台能力，前端最后连接控制面。
 
-# 0) 记忆数据面先完成 authenticated /ready；默认路径不探测、不停止已有记忆容器。
+# 0) 可选数据面先完成鉴权 readiness；默认路径不探测、不停止已有容器。
+if [[ "${with_clickhouse}" == "true" ]]; then
+  "${CLICKHOUSE_DEV_SCRIPT}" start
+fi
 if [[ "${with_memory}" == "true" ]]; then
   "${MEMORY_DEV_SCRIPT}" start
 fi
@@ -1269,6 +1301,9 @@ fi
 if [[ "${with_memory}" == "true" ]]; then
   echo "Memory:   http://127.0.0.1:${TEST_AGENT_MEMORY_SERVICE_PORT:-18888}/memory-api/v1"
   echo "Memory data: pgvector 127.0.0.1:${TEST_AGENT_MEMORY_POSTGRES_PORT:-15433}; settings ${TEST_AGENT_MEMORY_DEV_ENV_FILE}"
+fi
+if [[ "${with_clickhouse}" == "true" ]]; then
+  echo "ClickHouse: http://127.0.0.1:${TEST_AGENT_CLICKHOUSE_DEV_PORT:-18123}; settings ${TEST_AGENT_CLICKHOUSE_DEV_ENV_FILE}"
 fi
 echo "Process logs: ${LOG_DIR}"
 echo "Backend logs: ${BACKEND_APP_LOG_DIR}/backend.log, ${BACKEND_APP_LOG_DIR}/sse.log, ${BACKEND_APP_LOG_DIR}/error.log"

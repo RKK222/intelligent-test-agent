@@ -8,6 +8,7 @@ import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 /**
@@ -15,10 +16,13 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
  * WebFlux 环境下 MyBatis 自动配置不会触发，需要手动配置 SqlSessionFactory。
  */
 @Configuration
-@MapperScan("com.enterprise.testagent.persistence.mybatis")
+@MapperScan(
+        basePackages = "com.enterprise.testagent.persistence.mybatis",
+        sqlSessionFactoryRef = "sqlSessionFactory")
 public class MyBatisPersistenceConfig {
 
     @Bean
+    @Primary
     public SqlSessionFactory sqlSessionFactory(DataSource dataSource) throws Exception {
         SqlSessionFactoryBean factoryBean = new SqlSessionFactoryBean();
         factoryBean.setDataSource(dataSource);

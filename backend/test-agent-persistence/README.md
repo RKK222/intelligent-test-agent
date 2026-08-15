@@ -36,6 +36,9 @@
 
 ## 主要职责
 
+- PostgreSQL 普通 mapper 通过 `MyBatisPersistenceConfig` 显式绑定主 `sqlSessionFactory`；启用独立
+  `clickHouseSqlSessionFactory` 后不会依赖按类型推断，避免两个 MyBatis 工厂造成普通 mapper 装配歧义。
+
 - 使用 `UserNotificationMapper.xml` 实现通用通知创建去重、按 dedupKey 条件状态更新、失效、接收人分页、未读统计、幂等已读和 90 天历史清理；通知有效与动作可用分别派生，`NONE` 仍可未读但不可执行。分享通知实时联表校验分享、成员、会话、所属人和到期事实，失效授权不再可点击或计入未读。
 
 - `MyBatisSessionShareRepository` / `SessionShareMapper.xml` 持久化每个 Session 唯一且永久复用的 256 位随机分享 ID、全量成员更新与软移除历史、乐观锁版本、“分享给我”失效历史、最小用户目录和 365 天安全审计。审计只保存 actor、执行所属人、share/session/workspace/resource、结果、traceId 与可选路径 SHA-256，不保存消息/文件正文、明文路径、Token 或终端输入。

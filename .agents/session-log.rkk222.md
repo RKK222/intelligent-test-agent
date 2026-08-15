@@ -10886,3 +10886,26 @@
 
 - dev 已在 `http://127.0.0.1:3000` 运行，基础对话与聊天附件到工作区、模型读取附件的完整链路均已实际验证。
 - 本次无 API、RunEvent、数据库结构、安全、generated SDK 或 OpenCode 源码变更；仅新增本机运行态数据库卷和被清理的浏览器验收产物。浏览器运行态资源轮询仍有既有 400 控制台记录，但未阻断本次两次 Run 成功。
+
+## 2026-08-15 - 补齐 dev ClickHouse 并核验本地客户端形态
+
+### Why
+
+- 前一轮 dev 验收只启动了 PostgreSQL、Redis、XXL MySQL 和 Memory，遗漏了已经进入 `dev` 的运营分析 ClickHouse；用户同时确认“客户端”是安装在用户电脑上的本地客户端，而不是运营分析 Web 页面。
+
+### What
+
+- 新增 opt-in 的 `tools/clickhouse-dev-services.sh` 和 `restart-dev-services.sh --with-clickhouse`：固定使用 ClickHouse 26.3.17.56，只监听 `127.0.0.1:18123`，保留版本化数据卷，随机凭据和 Java JDBC dotenv 只写入 `.tmp/dev-services/clickhouse` 的 `0600` 文件，不修改 `.env.test`。
+- 修复启用 ClickHouse 后 PostgreSQL 普通 mapper 与 `clickHouseSqlSessionFactory` 的装配歧义：普通 mapper 显式绑定主 `sqlSessionFactory`，并增加双工厂上下文回归测试；同步 backend、persistence、部署、ClickHouse 和 AI 工作流文档。
+- 核验现有本地客户端为 Java 21 用户级后台服务：macOS 由 LaunchAgent、ARM Linux 由 user systemd 托管，浏览器“个人设置”负责 client key、在线实例、OpenCode 启停和本地工作区注册；当前仓库没有已经生成的正式签名分发目录，本机页面也没有已认证客户端实例。
+
+### How
+
+- ClickHouse helper Bash 语法、dev 脚本全量静态校验和 `git diff --check` 通过；双 MyBatis 工厂定向测试 1/1 通过。真实启动完成 schema migration，14 个分析表/物化视图可见，运营分析 `overview/filter-options/funnel/hourly-heatmap/timeseries` 五个浏览器请求均返回 200。
+- 本地客户端 reactor 116 项通过、1 项按环境跳过，其中客户端模块 7 项通过、1 项跳过；制品签名、SHA-256、darwin-arm64 安装器和伪造清单拒绝测试通过。正式分发仍需仓库外签名私钥、真实上游归档以及 Apple Silicon/麒麟 ARM 实机验收。
+- 全数据面首次稳定性检查遇到 Docker Desktop 4.20.1 `dockerd` 空指针 panic，导致所有容器和后端退出；恢复 Docker 后停止本次启动的 Memory 数据面，只保留核心 PostgreSQL/Redis/XXL MySQL 与 ClickHouse，再次启动 backend、manager、frontend 成功并持续通过 readiness。该问题不是应用 OOM，系统日志明确记录 dockerd panic。
+
+### Result
+
+- dev 当前运行于 `http://127.0.0.1:3000`，后端 readiness 为 `UP`，ClickHouse 26.3.17.56 及运营分析查询链路可用；Memory 本轮为规避旧 Docker daemon panic 已停止，数据卷保留。
+- 本地客户端能力和打包链路存在，但当前形态不是带窗口的桌面 GUI，也没有可直接下发的正式签名包或已连接实例；不能把自动化安装器测试表述为本地客户端真实端到端交付完成。

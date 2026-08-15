@@ -95,6 +95,11 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -pl test-agent-app
 
 `tools/dev-backend-run.sh` 和仓库根目录的 `restart-dev-services.sh` 启动后端 Java 进程时，会先把 Maven `target` 中的可执行 JAR 校验并复制为 `.tmp/dev-services/backend-runtime/` 下本次启动专属的不可变副本，再清空 JVM 的 HTTP/HTTPS/FTP/SOCKS 代理系统属性后运行；可执行 JAR 以 runtime scope 携带 PostgreSQL JDBC 驱动。这样企业打包或其它 Maven 构建即使覆盖 `target`，也不会破坏运行中 Spring Boot 对尚未加载类的读取。直接使用 Maven 或 IDEA 启动时，如果本机开启了全局 SOCKS/HTTP 代理，需要在 VM options 中显式清空同类 `-D*proxy*` 参数。
 
+需要联调运营分析时，macOS/Linux 从仓库根目录显式增加 `--with-clickhouse`。该模式启动固定版本
+ClickHouse 26.3.17.56，HTTP 只监听 `127.0.0.1:18123`，数据保存在版本化 Docker volume；随机密码和 Java
+JDBC 配置只写入 `.tmp/dev-services/clickhouse` 的 `0600` 文件，不修改 `.env.test`。Java 启动时会执行既有
+ClickHouse schema migration。默认启动路径不探测、停止或配置 ClickHouse。
+
 Windows 开发人员若只需要 legacy guo profile，可直接使用已提交的 IDEA 运行配置 `TestAgentApplication guo`：
 
 1. 用 IDEA 导入 `backend/pom.xml`。

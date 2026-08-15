@@ -62,11 +62,18 @@ if [[ "${restart_help}" != *"--with-memory"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document the opt-in QA memory data plane"
 fi
+if [[ "${restart_help}" != *"--with-clickhouse"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document the opt-in ClickHouse data plane"
+fi
 if ! grep -Fq 'with_lobehub=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must keep LobeHub disabled by default"
 fi
 if ! grep -Fq 'with_memory=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must keep QA memory disabled by default"
+fi
+if ! grep -Fq 'with_clickhouse=false' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must keep ClickHouse disabled by default"
 fi
 MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
 MEMORY_DEV_COMPOSE="${ROOT_DIR}/deploy/dev/memory-compose.yml"
@@ -86,6 +93,19 @@ if grep -Fq 'source "${ENV_FILE}"' "${MEMORY_DEV_SCRIPT}"; then
 fi
 if ! grep -Fq 'load_env_file "${TEST_AGENT_MEMORY_BACKEND_ENV_FILE}"' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must load only the Java-safe memory dotenv"
+fi
+CLICKHOUSE_DEV_SCRIPT="${ROOT_DIR}/tools/clickhouse-dev-services.sh"
+[[ -x "${CLICKHOUSE_DEV_SCRIPT}" ]] || fail "ClickHouse development helper missing or not executable: ${CLICKHOUSE_DEV_SCRIPT}"
+run_check "ClickHouse dev service script bash syntax" bash -n "${CLICKHOUSE_DEV_SCRIPT}"
+run_check "ClickHouse dev service script help" bash "${CLICKHOUSE_DEV_SCRIPT}" --help
+if grep -Fq 'source "${ENV_FILE}"' "${CLICKHOUSE_DEV_SCRIPT}"; then
+  fail "ClickHouse helper must parse generated dotenv as data instead of executing it"
+fi
+if ! grep -Fq '127.0.0.1:${port}:8123' "${CLICKHOUSE_DEV_SCRIPT}"; then
+  fail "ClickHouse development port must stay bound to loopback"
+fi
+if ! grep -Fq 'load_env_file "${TEST_AGENT_CLICKHOUSE_BACKEND_ENV_FILE}"' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must load only the Java-safe ClickHouse dotenv"
 fi
 if ! grep -Fq 'screen -S "${screen_id}" -X quit' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must close cross-worktree screen sessions by their full identifier"
