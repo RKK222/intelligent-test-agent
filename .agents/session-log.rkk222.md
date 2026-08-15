@@ -10909,3 +10909,27 @@
 
 - dev 当前运行于 `http://127.0.0.1:3000`，后端 readiness 为 `UP`，ClickHouse 26.3.17.56 及运营分析查询链路可用；Memory 本轮为规避旧 Docker daemon panic 已停止，数据卷保留。
 - 本地客户端能力和打包链路存在，但当前形态不是带窗口的桌面 GUI，也没有可直接下发的正式签名包或已连接实例；不能把自动化安装器测试表述为本地客户端真实端到端交付完成。
+
+## 2026-08-15 - 修复记忆证据原始对话入口与结构化消息展示
+
+### Why
+
+- 记忆证据中的 `/s/{sessionId}` 与后续协作分享 `/s/{shareId}` 共用路由后，普通 `ses_` 会话 ID 被分享入口接管并跳回工作台，导致“打开原始对话”看不到对应原文；链接也在当前记忆页内跳转。
+- 用户提供的真实会话有 7 条消息，全部包含结构化 parts，其中 5 条 assistant 消息的 `content` 为空；旧只读页只渲染 `content`，恢复路由后仍会漏掉过程正文。
+
+### What
+
+- 记忆证据链接增加 `target="_blank"` 与 `noopener noreferrer`；`/s/{id}` 按强类型前缀分流，`ses_` 直接进入所属人只读 transcript，`shr_` 继续走既有分享访问解析和完整分享工作台，分享所属人重定向语义不变。
+- 只读 transcript 复用 `messagesFromSessionMessages` 和 OpenCode 时间线渲染 `content` 与结构化 parts，不再生成空白 assistant 卡片；非所属人仍由既有 Session/messages 鉴权阻止读取。
+- 更新 agent-web README/PACKAGE、前端规范和记忆 QA 文档，并补充路由、链接属性、结构化 parts、分享隔离与真实记忆弹窗回归。
+
+### How
+
+- 定向 Vitest 2 文件 10/10、agent-web typecheck、记忆 Chromium 回归和分享隔离 Chromium 回归均通过；agent-web 用户手册与 production build 通过，仅保留既有大 chunk 提示。
+- 使用本地真实账号与用户给出的 `ses_08771dbe04a24c66b989c71a2cee2e24` 验证：关联 Run 为 `SUCCEEDED`，Session/messages 接口均返回 200，只读页保持精确 URL、标题与时间线加载成功，未出现分享无效页或空消息页。
+- 本地服务依赖恢复后 backend health/readiness 为 `UP`、前端 `http://127.0.0.1:3000` 返回 200；提交前回顾全部 `.agents/session-log*.md` 近期条目并检查冲突标记。
+
+### Result
+
+- 记忆中心点击“打开原始对话”会保留当前页面并在新标签页展示所属人的完整只读时间线；`shr_` 分享链接继续保持原权限和工作台行为。
+- 纯前端路由、渲染与文档变更；未修改 API、RunEvent、数据库/Flyway、部署变量、`.env*`、generated SDK 或 OpenCode 源码，也未新建分支。

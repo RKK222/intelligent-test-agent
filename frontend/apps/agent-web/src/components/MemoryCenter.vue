@@ -623,7 +623,13 @@ function showActionError(error: unknown, fallback: string) {
               <strong>{{ item.sessionTitle || "未命名对话" }}</strong>
               <p>{{ item.summary }}</p>
               <small>会话 ID {{ item.sessionId || "—" }} · Run ID {{ item.runId || "—" }} · {{ formatTime(item.observedAt) }}</small>
-              <a v-if="item.transcriptAvailable && item.sessionId" class="evidence-session-link" :href="sessionHref(item.sessionId)">打开原始对话</a>
+              <a
+                v-if="item.transcriptAvailable && item.sessionId"
+                class="evidence-session-link"
+                :href="sessionHref(item.sessionId)"
+                target="_blank"
+                rel="noopener noreferrer"
+              >打开原始对话</a>
               <span v-else class="evidence-session-unavailable">仅会话所有者可打开原始对话</span>
             </div>
           </article>

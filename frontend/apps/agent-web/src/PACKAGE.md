@@ -10,10 +10,10 @@
 - `main.ts`：应用入口，装配 Pinia、`@tanstack/vue-query` 的 `VueQueryPlugin` 和 vue-router。
 - `App.vue`：根组件，渲染 `<RouterView />`。
 - `release-features.ts`：集中解析 LobeHub 编译期开关；只接受显式 `true`，并为入口、登录回跳和路由守卫提供同一事实源。当前 dev 默认关闭。
-- `router.ts`：SPA 客户端路由，`/985211` 登录页、`/workbench` 工作台、`/toolbox` 离线工具箱、`/memories` 记忆中心、`/system` 超级管理员控制台、`/hub` 能力库、`/settings` 设置弹窗、受发布开关保护的 `/lobehub/launch`、`/s/:sessionId` 只读 transcript，以及未知路径 404 页面；历史根路径 `/` 兼容跳转到 `/workbench`。
+- `router.ts`、`session-share-route.ts`：SPA 客户端路由，`/985211` 登录页、`/workbench` 工作台、`/toolbox` 离线工具箱、`/memories` 记忆中心、`/system` 超级管理员控制台、`/hub` 能力库、`/settings` 设置弹窗、受发布开关保护的 `/lobehub/launch`，并在 `/s/:id` 下按 `ses_`/`shr_` 前缀分别进入只读 transcript 或分享工作台；未知路径进入 404 页面，历史根路径 `/` 兼容跳转到 `/workbench`。
 - `views/LoginView.vue`：登录页入口，登录成功后只跳回 SPA 内已知页面，非法 redirect 回退到工作台。
 - `views/WorkbenchView.vue`：工作台首页入口。
-- `views/TranscriptView.vue`：只读 transcript 页面入口，复用平台 session/messages API。
+- `views/TranscriptView.vue`、`components/ReadonlyTranscript.vue`：只读 transcript 页面入口，复用平台 session/messages API、工作台历史消息归一化与 OpenCode 时间线，确保正文位于结构化 `parts` 时仍可展示完整原始对话。
 - `components/system/SupportAccessPanel.vue`：超级管理员问题排查面板；隐藏快捷键仅显示入口，授权表单要求后端提供的排查单号、原因、5–240 分钟期限和只读确认。页面保持操作者身份不变，在内存中保存并轮换 grant，按目标用户读取会话、历史表示、工作区和文件预览；当前管理员资料延迟到达时仍补请求排查单号，撤销/到期/重复触发会清理上一轮表单上下文并生成新号，输入框只读避免循环复用历史号码。会话复用首页 `chatStateFromSessionTreeSnapshot + OpencodeTimeline` 展示 message part、工具、Todo 和子 Agent，assistant 空 envelope 不再生成空卡片，输入区固定只读；不可收缩的吸顶“排查标识”栏用中文标签和等宽字体持续展示并复制 Session ID、最近 Trace ID 和全部唯一 Trace。会话可显式包含软删除 ARCHIVED，旧正文显示 LEGACY，工作区展示公共路由在线状态且非 ONLINE 禁用文件入口。页面样式复用平台字体、画布、边框和品牌红 token；离开页面或角色失效时撤销并清空授权，文件树固定关闭写入、加入对话和下载能力。
 - `SupportAccessPanel` 的目标用户入口固定在顶部状态栏，使用 Element Plus 远程可搜索下拉匹配姓名、用户 ID 和统一认证号；不再渲染左右用户列表栏，目标切换继续复用既有 `selectSupportAccessTarget` 审计链路。
 - `components/ToolboxPanel.vue`：所有登录用户可见的沉浸式离线工具目录；移除可见 Hero，仅保留无障碍标题。搜索、来源和 14 个带实时数量的固定分类标签绑定组件自身滚动容器吸顶；计数只按搜索与来源计算，分类选择只过滤卡片，热门 Top 10 不受筛选影响。移动端标签单行横向滚动，工具卡片保持原生新标签打开和静默点击上报。

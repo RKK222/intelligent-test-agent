@@ -33,7 +33,7 @@ flowchart LR
 | 派生记忆正文、逻辑 ID、版本、幂等、投影状态/outbox、Mem0 history、向量集合 | 独立记忆 PostgreSQL/pgvector | 不与平台库共库；Java 不直连 |
 | BGE 权重和推理 | 独立 CPU Embedding 镜像/容器 | 不打进 Mem0 镜像；运行时不访问 Hugging Face |
 
-证据只保存 `sessionId`、`sessionTitle`、`runId`、最多 200 字摘要和时间。所有授权查看者可见标题和 ID；只有 Session owner 能通过既有 `/s/{sessionId}` 打开原始对话。团队成员不能凭团队记忆读取别人的原文。
+证据只保存 `sessionId`、`sessionTitle`、`runId`、最多 200 字摘要和时间。所有授权查看者可见标题和 ID；只有 Session owner 能通过既有 `/s/{sessionId}` 在新标签页打开只读原始对话，`/s/{shareId}` 仍由 `shr_` 前缀进入分享工作台。团队成员不能凭团队记忆读取别人的原文。
 
 ## 通用学习与检索
 

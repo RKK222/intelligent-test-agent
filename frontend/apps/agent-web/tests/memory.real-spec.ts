@@ -133,9 +133,13 @@ test.describe("通用记忆真实浏览器端到端", () => {
     await expect(page.getByTestId("memory-detail-drawer")).not.toContainText(rawTranscriptMarker);
     await expectLegacyMemoryApiGone(page);
 
+    const transcriptPagePromise = page.waitForEvent("popup");
     await page.getByRole("link", { name: "打开原始对话" }).click();
-    await expect(page).toHaveURL(new RegExp(`/s/${escapeRegex(learned.sessionId)}(?:$|[?#])`));
-    await expect(page.getByText(rawTranscriptMarker, { exact: false })).toBeVisible({ timeout: 60_000 });
+    const transcriptPage = await transcriptPagePromise;
+    await expect(transcriptPage).toHaveURL(new RegExp(`/s/${escapeRegex(learned.sessionId)}(?:$|[?#])`));
+    await expect(transcriptPage.getByText(rawTranscriptMarker, { exact: false })).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/memories$/);
+    await transcriptPage.close();
 
     await openWorkbench(page);
     await page.getByRole("button", { name: "新建对话" }).click();
@@ -268,7 +272,7 @@ test.describe("通用记忆真实浏览器端到端", () => {
 
       // 再验证真实深链接也不会把所有者原文渲染给团队成员。
       await memberPage.goto(learned.sessionHref, { waitUntil: "domcontentloaded" });
-      await expect(memberPage.locator(".figma-app")).toBeVisible({ timeout: 60_000 });
+      await expect(memberPage.getByTestId("readonly-transcript")).toBeVisible({ timeout: 60_000 });
       await expect(memberPage.getByText(rawTranscriptMarker, { exact: false })).toHaveCount(0);
     } finally {
       await memberContext.close();

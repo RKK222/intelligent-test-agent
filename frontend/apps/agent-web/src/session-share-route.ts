@@ -1,30 +1,27 @@
-import type { Session, SessionShareAccess } from "@test-agent/shared-types";
+import type { SessionShareAccess } from "@test-agent/shared-types";
 
 type ShareAccessReader = { getSessionShareAccess: () => Promise<SessionShareAccess> };
-type SessionReader = { getSession: (sessionId: string) => Promise<Session> };
 
 export type SessionShareEntry =
+  | { kind: "transcript"; sessionId: string }
   | { kind: "shared"; access: SessionShareAccess }
   | { kind: "owner"; sessionId: string }
   | { kind: "invalid"; error: unknown };
 
-/** 先按唯一 shareId 解析；失败时仅为兼容旧 /s/{sessionId} 尝试所属人会话。 */
+/** Session ID 直接进入所属人只读原文；其余 ID 才按唯一 shareId 解析分享工作台。 */
 export async function resolveSessionShareEntry(
   pathId: string,
-  sharedApi: ShareAccessReader,
-  ordinaryApi: SessionReader
+  sharedApi: ShareAccessReader
 ): Promise<SessionShareEntry> {
+  if (pathId.startsWith("ses_")) {
+    return { kind: "transcript", sessionId: pathId };
+  }
   try {
     const access = await sharedApi.getSessionShareAccess();
     return access.ownerAccess
       ? { kind: "owner", sessionId: access.sessionId }
       : { kind: "shared", access };
   } catch (shareError) {
-    try {
-      const legacySession = await ordinaryApi.getSession(pathId);
-      return { kind: "owner", sessionId: legacySession.sessionId };
-    } catch {
-      return { kind: "invalid", error: shareError };
-    }
+    return { kind: "invalid", error: shareError };
   }
 }

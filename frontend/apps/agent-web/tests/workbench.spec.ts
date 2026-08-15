@@ -4865,7 +4865,33 @@ test("ordinary user opens generic memories, inspects the source conversation and
       source: "NATIVE",
       summary: "用户连续三个会话要求覆盖边界条件",
       observedAt: "2026-08-08T00:00:00Z"
-    }]
+    }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_e2e_1",
+      title: "边界条件偏好讨论"
+    }],
+    sessionMessagesBySessionId: {
+      ses_e2e_1: [{
+        messageId: "msg_memory_transcript_user",
+        sessionId: "ses_e2e_1",
+        role: "USER",
+        content: "请覆盖登录接口的异常场景和边界条件",
+        createdAt: "2026-08-08T00:00:00Z"
+      }, {
+        messageId: "msg_memory_transcript_assistant",
+        sessionId: "ses_e2e_1",
+        role: "ASSISTANT",
+        content: "",
+        parts: [{
+          partId: "part_memory_transcript_assistant",
+          type: "text",
+          text: "已补充空值、超长输入和重复提交场景。",
+          status: "completed"
+        }],
+        createdAt: "2026-08-08T00:00:01Z"
+      }]
+    }
   });
 
   await gotoWorkbench(page, { selectConversation: false });
@@ -4889,7 +4915,10 @@ test("ordinary user opens generic memories, inspects the source conversation and
   await expect(page.getByText("用户连续三个会话要求覆盖边界条件")).toBeVisible();
   await expect(page.getByText("边界条件偏好讨论")).toBeVisible();
   await expect(page.getByText(/会话 ID ses_e2e_1 · Run ID run_e2e_1/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "打开原始对话" })).toHaveAttribute("href", "/s/ses_e2e_1");
+  const transcriptLink = page.getByRole("link", { name: "打开原始对话" });
+  await expect(transcriptLink).toHaveAttribute("href", "/s/ses_e2e_1");
+  await expect(transcriptLink).toHaveAttribute("target", "_blank");
+  await expect(transcriptLink).toHaveAttribute("rel", "noopener noreferrer");
   await expect(page.getByTestId("memory-evidence-rail").getByText("使用", { exact: true })).toBeVisible();
   await expect.poll(async () => Math.round((await page.locator(".memory-detail-drawer").boundingBox())?.x ?? -1)).toBe(760);
   await page.screenshot({ path: testInfo.outputPath("memory-center-desktop.png"), fullPage: true });
@@ -4922,6 +4951,16 @@ test("ordinary user opens generic memories, inspects the source conversation and
   await expect(page.locator(".memory-detail-drawer")).toBeHidden();
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // 直接访问与新标签页相同的 Session URL，验证它进入只读原文而不是分享工作台或普通工作台。
+  await page.goto("/s/ses_e2e_1", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("readonly-transcript")).toBeVisible();
+  await expect(page.getByText("边界条件偏好讨论", { exact: true })).toBeVisible();
+  await expect(page.getByText("请覆盖登录接口的异常场景和边界条件", { exact: true })).toBeVisible();
+  await expect(page.getByText("已补充空值、超长输入和重复提交场景。", { exact: true })).toBeVisible();
+  await expect(page.getByText("无法打开分享会话")).toHaveCount(0);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/memories$/);
   await page.goBack();
   await expect(page).toHaveURL(/\/workbench$/);
   await expect(leftPanel).toHaveCSS("width", initialLeftWidth);

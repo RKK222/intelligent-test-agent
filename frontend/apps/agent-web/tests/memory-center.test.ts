@@ -113,7 +113,10 @@ describe("MemoryCenter", () => {
     expect(await view.findByTestId("memory-evidence-rail")).toBeTruthy();
     expect(view.getByText("登录体验讨论")).toBeTruthy();
     expect(view.getByText(/会话 ID ses_1 · Run ID run_1/)).toBeTruthy();
-    expect(view.getByRole("link", { name: "打开原始对话" }).getAttribute("href")).toBe("/s/ses_1");
+    const transcriptLink = view.getByRole("link", { name: "打开原始对话" });
+    expect(transcriptLink.getAttribute("href")).toBe("/s/ses_1");
+    expect(transcriptLink.getAttribute("target")).toBe("_blank");
+    expect(transcriptLink.getAttribute("rel")).toBe("noopener noreferrer");
     expect(view.getByText("使用", { selector: "strong" })).toBeTruthy();
 
     await fireEvent.click(view.getByRole("button", { name: "提升为个人全局" }));
