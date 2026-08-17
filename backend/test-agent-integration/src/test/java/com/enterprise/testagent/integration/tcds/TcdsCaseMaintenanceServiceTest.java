@@ -50,14 +50,16 @@ class TcdsCaseMaintenanceServiceTest {
         RecordingHttpClient httpClient = new RecordingHttpClient(200, """
                 {"code":0,"msg":"请求成功","data":{"subItemTypes":[
                   {"property":"需求子条目测试任务任务类型","name":"准入测试任务","value":"5"},
-                  {"property":"需求子条目测试任务任务类型","name":"功能测试任务","value":"3"}
+                  {"property":"需求子条目测试任务任务类型","name":"功能测试任务","value":"3"},
+                  {"property":"需求子条目测试任务任务类型","name":"探索性测试任务","value":"12"}
                 ]}}
                 """);
         TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(objectMapper, httpClient);
 
         assertThat(service.getTaskTypes("trace_tcds_task_types")).containsExactly(
                 new TcdsTaskTypeOption("准入测试任务", "5"),
-                new TcdsTaskTypeOption("功能测试任务", "3"));
+                new TcdsTaskTypeOption("功能测试任务", "3"),
+                new TcdsTaskTypeOption("探索性测试任务", "12"));
         assertThat(httpClient.request.uri()).isEqualTo(URI.create("http://tcds-prod.sdc.icbc/task/getTaskTypes"));
         assertThat(httpClient.request.method()).isEqualTo("GET");
         assertThat(httpClient.request.bodyPublisher()).isEmpty();
@@ -70,10 +72,9 @@ class TcdsCaseMaintenanceServiceTest {
                 "{\"code\":3,\"msg\":\"失败\"}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"准入测试任务\",\"value\":\"5\"},{\"name\":\"重复\",\"value\":\"5\"}]}}",
-                "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"准入\",\"value\":\"5\"}]}}",
-                "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"安全测试任务\",\"value\":\"5\"}]}}",
-                "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"探索性测试任务\",\"value\":\"12\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"准入测试任务\",\"value\":\"5\"},{\"name\":\"准入测试任务\",\"value\":\"6\"}]}}",
+                "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"非法,名称\",\"value\":\"5\"}]}}",
+                "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"非法，名称\",\"value\":\"5\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"非法\\n名称\",\"value\":\"5\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"缺少值\"}]}}")) {
             TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
@@ -87,7 +88,7 @@ class TcdsCaseMaintenanceServiceTest {
     }
 
     @Test
-    void buildsFixedProductionRequestWithMappedCommaSeparatedTaskTypeNames() throws Exception {
+    void buildsFixedProductionRequestWithFullCommaSeparatedTaskTypeNames() throws Exception {
         RecordingHttpClient httpClient = new RecordingHttpClient(
                 200,
                 TASK_TYPES_RESPONSE,
@@ -97,7 +98,7 @@ class TcdsCaseMaintenanceServiceTest {
         service.maintain(
                 "S20260703-000081",
                 "555033606",
-                List.of(input("案例一", "准入,功能测试")),
+                List.of(input("案例一", "准入测试任务,功能测试任务")),
                 "trace_tcds_case");
 
         HttpRequest request = httpClient.request;
@@ -113,7 +114,8 @@ class TcdsCaseMaintenanceServiceTest {
         assertThat(body.path("itemNo").asText()).isEqualTo("S20260703-000081");
         assertThat(body.path("userId").asText()).isEqualTo("555033606");
         assertThat(body.path("caseList").size()).isEqualTo(1);
-        assertThat(body.path("caseList").get(0).path("taskType").asText()).isEqualTo("准入,功能测试");
+        assertThat(body.path("caseList").get(0).path("taskType").asText())
+                .isEqualTo("准入测试任务,功能测试任务");
         assertThat(body.path("caseList").get(0).path("caseFlag").asText()).isEqualTo("2");
         assertThat(body.path("caseList").get(0).path("dataDependencies").asText()).isEmpty();
         assertThat(body.path("caseList").get(0).path("isAICase").asText()).isEqualTo("是");
@@ -127,7 +129,7 @@ class TcdsCaseMaintenanceServiceTest {
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE, "{\"code\":3,\"msg\":\"业务异常\"}"));
 
         assertThatThrownBy(() -> service.maintain(
-                "S20260703-000081", "555033606", List.of(input("案例一", "准入")), "trace_tcds_case"))
+                "S20260703-000081", "555033606", List.of(input("案例一", "准入测试任务")), "trace_tcds_case"))
                 .isInstanceOfSatisfying(PlatformException.class, error -> {
                     assertThat(error.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(error.getMessage()).isEqualTo("业务异常");
@@ -140,7 +142,7 @@ class TcdsCaseMaintenanceServiceTest {
         TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(objectMapper, httpClient);
 
         assertThatThrownBy(() -> service.maintain(
-                "S20260703-000081", "555033606", List.of(input("案例一", "安全")), "trace_tcds_case"))
+                "S20260703-000081", "555033606", List.of(input("案例一", "安全测试任务")), "trace_tcds_case"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         error -> assertThat(error.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
         assertThat(httpClient.request.uri()).isEqualTo(URI.create("http://tcds-prod.sdc.icbc/task/getTaskTypes"));
@@ -148,7 +150,7 @@ class TcdsCaseMaintenanceServiceTest {
 
     @Test
     void rejectsInvalidTaskTypeSeparatorBeforeCallingTcds() {
-        assertThatThrownBy(() -> input("案例一", "准入，功能测试"))
+        assertThatThrownBy(() -> input("案例一", "准入测试任务，功能测试任务"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         error -> assertThat(error.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
     }
@@ -161,7 +163,7 @@ class TcdsCaseMaintenanceServiceTest {
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE, oversizedBody));
 
         assertThatThrownBy(() -> service.maintain(
-                "S20260703-000081", "555033606", List.of(input("案例一", "准入")), "trace_tcds_case"))
+                "S20260703-000081", "555033606", List.of(input("案例一", "准入测试任务")), "trace_tcds_case"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         error -> assertThat(error.errorCode()).isEqualTo(ErrorCode.EXTERNAL_API_UNAVAILABLE));
     }
@@ -179,7 +181,7 @@ class TcdsCaseMaintenanceServiceTest {
                         "敏感步骤\n第二行",
                         "敏感测试数据",
                         "敏感预期结果",
-                        "准入,功能测试")));
+                        "准入测试任务,功能测试任务")));
         JsonNode root = objectMapper.readTree(payload);
 
         assertThat(root.path("aiFlag").asText()).isEqualTo("1");
@@ -189,7 +191,8 @@ class TcdsCaseMaintenanceServiceTest {
         assertThat(root.path("caseCount").asInt()).isEqualTo(1);
         assertThat(root.path("caseList").get(0).path("step").path("length").asInt()).isEqualTo(8);
         assertThat(root.path("caseList").get(0).path("step").path("sha256").asText()).hasSize(16);
-        assertThat(root.path("caseList").get(0).path("taskType").asText()).isEqualTo("准入,功能测试");
+        assertThat(root.path("caseList").get(0).path("taskType").asText())
+                .isEqualTo("准入测试任务,功能测试任务");
         assertThat(payload)
                 .doesNotContain(
                         "555033606",

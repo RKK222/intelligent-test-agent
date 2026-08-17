@@ -166,10 +166,10 @@ status=99
         step: "发起交易",
         data: "金额=100",
         expect: "交易成功",
-        taskTypes: ["5", "3", "5"]
+        taskTypes: ["12", "3", "12"]
       }],
       taskTypeOptions: [
-        { name: "准入测试任务", value: "5" },
+        { name: "探索性测试任务", value: "12" },
         { name: "功能测试任务", value: "3" }
       ]
     });
@@ -182,7 +182,7 @@ status=99
           step: "发起交易",
           data: "金额=100",
           expect: "交易成功",
-          taskType: "准入,功能测试"
+          taskType: "探索性测试任务,功能测试任务"
         }
       ]
     });
@@ -201,22 +201,21 @@ status=99
     })).toThrow("任务类型无效");
   });
 
-  it("rejects unknown or mismatched task type mappings", () => {
+  it("rejects duplicate or ambiguous names returned by task types", () => {
     const baseInput = {
       itemNo: "S20260703-000081",
       cases: [{ name: "案例", step: "", data: "", expect: "", taskTypes: ["5"] }]
     };
     expect(() => buildTcdsTestCaseMaintenancePayload({
       ...baseInput,
-      taskTypeOptions: [{ name: "准入", value: "5" }]
+      taskTypeOptions: [{ name: "准入,测试任务", value: "5" }]
     })).toThrow("任务类型无效");
     expect(() => buildTcdsTestCaseMaintenancePayload({
       ...baseInput,
-      taskTypeOptions: [{ name: "安全测试任务", value: "5" }]
-    })).toThrow("任务类型无效");
-    expect(() => buildTcdsTestCaseMaintenancePayload({
-      ...baseInput,
-      taskTypeOptions: [{ name: "探索性测试任务", value: "12" }]
+      taskTypeOptions: [
+        { name: "准入测试任务", value: "5" },
+        { name: "准入测试任务", value: "6" }
+      ]
     })).toThrow("任务类型无效");
   });
 
