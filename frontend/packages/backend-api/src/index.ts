@@ -127,6 +127,7 @@ import type {
   LocalClientDirectoryEntry,
   LocalClientInstance,
   LocalClientPlaintextKey,
+  LocalClientRolloutUser,
   LocalWorkspace,
   ManagedApplication,
   ManagedWorkspaceRuntime,
@@ -1150,6 +1151,20 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<{ revoked: boolean }>(`${localClientBase}/credentials/me`, { method: "DELETE" }),
     listMyLocalClientInstances: () =>
       request<LocalClientInstance[]>(`${localClientBase}/instances/me`),
+    listLocalClientRolloutUsers: (page = 1, size = 50) =>
+      request<PageResponse<LocalClientRolloutUser>>(
+        `${localClientBase}/admin/rollout-users${query({ page, size })}`
+      ),
+    enableLocalClientRolloutUser: (userId: string) =>
+      request<LocalClientRolloutUser>(`${localClientBase}/admin/rollout-users`, {
+        method: "POST",
+        body: JSON.stringify({ userId })
+      }),
+    disableLocalClientRolloutUser: (userId: string) =>
+      request<void>(
+        `${localClientBase}/admin/rollout-users/${encodeURIComponent(userId)}`,
+        { method: "DELETE" }
+      ),
     getMyOpencodeEndpoints: () =>
       request<OpencodeEndpoint[]>(agentPath("/opencode-endpoints/me")),
     commandLocalClientOpencode: (

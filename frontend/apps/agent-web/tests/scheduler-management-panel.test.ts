@@ -170,6 +170,7 @@ function api(overrides: Partial<BackendApiClient> = {}) {
     listApplicationGitRefreshScopes: vi.fn().mockResolvedValue([applicationScope]),
     refreshApplicationGit: vi.fn().mockResolvedValue(applicationRefreshResult),
     refreshApplicationGitGroup: vi.fn().mockResolvedValue(applicationRefreshResult),
+    listLocalClientRolloutUsers: vi.fn().mockResolvedValue({ items: [], page: 1, size: 200, total: 0 }),
     ...overrides
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -282,6 +283,18 @@ describe("scheduler management panel", () => {
 
     expect(await view.findByTestId("memory-admin-panel")).toBeTruthy();
     expect((await view.findByTestId("memory-health-mem0")).textContent).toContain("就绪");
+    view.queryClient.clear();
+  });
+
+  it("exposes local client rollout management to super administrators", async () => {
+    const backendApi = api();
+    const view = renderWithApi(SystemManagementPanel, backendApi);
+
+    await fireEvent.click(view.getByText("本地客户端灰度", { selector: ".ta-system-menu-text" }));
+
+    expect(await view.findByTestId("local-client-rollout-panel")).toBeTruthy();
+    expect(await view.findByText("当前没有灰度用户，下载入口对所有用户隐藏")).toBeTruthy();
+    expect(backendApi.listLocalClientRolloutUsers).toHaveBeenCalledWith(1, 200);
     view.queryClient.clear();
   });
 
@@ -417,6 +430,7 @@ describe("scheduler management panel", () => {
     expect(await view.findByRole("heading", { name: "应用 Git 刷新" })).toBeTruthy();
     expect(view.queryByText("定时任务管理", { selector: ".ta-system-menu-text" })).toBeNull();
     expect(view.queryByText("运行管理", { selector: ".ta-system-menu-text" })).toBeNull();
+    expect(view.queryByText("本地客户端灰度", { selector: ".ta-system-menu-text" })).toBeNull();
     expect(view.queryByText("TestAgent公共配置管理")).toBeNull();
     expect(backendApi.listApplicationGitRefreshScopes).toHaveBeenCalledTimes(1);
     view.queryClient.clear();

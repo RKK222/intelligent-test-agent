@@ -126,6 +126,10 @@ class FlywayMigrationNamingTest {
             "V20260812202425__local_client_credentials_create_runtime_after_release.sql";
     private static final String LOCAL_CLIENT_RUNTIME_FORWARD_SHA256 =
             "168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026";
+    private static final String LOCAL_CLIENT_ROLLOUT_MIGRATION =
+            "V20260817193414__local_client_rollout_users_create.sql";
+    private static final String LOCAL_CLIENT_ROLLOUT_SHA256 =
+            "88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba";
     private static final String AUTOMATION_CODE_REPOSITORY_MIGRATION =
             "V20260812204207__dictionaries_add_automation_code_repository.sql";
     private static final String AUTOMATION_CODE_REPOSITORY_SHA256 =
@@ -370,6 +374,15 @@ class FlywayMigrationNamingTest {
                 "db/migration",
                 USER_SCM_GIT_IDENTITIES_MIGRATION,
                 USER_SCM_GIT_IDENTITIES_SHA256);
+    }
+
+    @Test
+    void localClientRolloutMigrationRemainsByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                LOCAL_CLIENT_ROLLOUT_MIGRATION,
+                LOCAL_CLIENT_ROLLOUT_SHA256);
     }
 
     private static void assertMigrationSha256(

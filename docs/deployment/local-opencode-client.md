@@ -80,7 +80,12 @@ curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/mani
 
 ## 用户安装
 
-先到“个人设置 → 本地 OpenCode 客户端”创建并复制 client key，再点击右上角头像，在 OpenCode 实例列表
+客户端下载入口默认隐藏。超级管理员先进入“系统管理 → 本地客户端灰度”，搜索平台用户并按 userId 加入名单；
+名单变更由后端写入数据库，目标用户刷新页面后生效，不需要重启 Java 或前端。移出名单只隐藏入口，不卸载
+已有客户端，也不撤销该用户已创建的 client key。灰度名单不参与 Nginx 制品鉴权；内网下载仍由网络 ACL
+控制。
+
+灰度用户先到“个人设置 → 本地 OpenCode 客户端”创建并复制 client key，再点击右上角头像，在 OpenCode 实例列表
 下方选择“下载本地客户端”。统一入口 `/downloads/local-opencode-client/installer` 按 User-Agent 返回：
 
 - Apple Silicon macOS：`TestAgent-Local-Client-macOS-arm64.pkg`，双击后使用系统 Installer。

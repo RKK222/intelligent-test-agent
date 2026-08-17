@@ -1280,7 +1280,22 @@ describe("FigmaShell", () => {
   });
 
   it("emits process restart from the avatar menu, shows pending state and hides it in shared workspaces", async () => {
-    const wrapper = mountShell({ props: { currentUserName: "developer" } });
+    const wrapper = mountShell({
+      props: {
+        currentUserName: "developer",
+        opencodeEndpoints: [{
+          runtimeKind: "SERVER_PROCESS",
+          endpointId: "server-opencode",
+          displayName: "服务端 OpenCode",
+          online: true,
+          processStatus: "RUNNING",
+          connectionGeneration: 0,
+          reportedAddresses: [],
+          healthy: true,
+          capabilities: { localClientDownload: true }
+        }]
+      }
+    });
 
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
     const downloadLink = wrapper.get('[data-testid="download-local-client"]');
@@ -1303,6 +1318,27 @@ describe("FigmaShell", () => {
     await wrapper.setProps({ fixedWorkspace: true });
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="restart-own-process"]').exists()).toBe(false);
+  });
+
+  it("hides the local client download by default when the backend capability is absent or false", async () => {
+    const wrapper = mountShell({ props: { currentUserName: "developer" } });
+    await wrapper.get(".figma-user-avatar-btn").trigger("click");
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
+
+    await wrapper.setProps({
+      opencodeEndpoints: [{
+        runtimeKind: "SERVER_PROCESS",
+        endpointId: "server-opencode",
+        displayName: "服务端 OpenCode",
+        online: true,
+        processStatus: "RUNNING",
+        connectionGeneration: 0,
+        reportedAddresses: [],
+        healthy: true,
+        capabilities: { localClientDownload: false }
+      }]
+    });
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
   });
 
   it("replaces the installer entry with registered local OpenCode health", async () => {

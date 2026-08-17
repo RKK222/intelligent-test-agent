@@ -12,12 +12,15 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvai
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.enterprise.testagent.system.management.localclient.LocalClientInstanceApplicationService;
 import com.enterprise.testagent.system.management.localclient.LocalClientInstanceResponses;
+import com.enterprise.testagent.system.management.localclient.LocalClientRolloutApplicationService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
@@ -29,16 +32,19 @@ import reactor.core.scheduler.Schedulers;
 @RestController
 public class UserOpencodeEndpointController {
 
-    private static final Map<String, Boolean> SERVER_CAPABILITIES = serverCapabilities();
+    private static final Logger log = LoggerFactory.getLogger(UserOpencodeEndpointController.class);
 
     private final UserOpencodeProcessAssignmentService processAssignmentService;
     private final LocalClientInstanceApplicationService localClientInstanceService;
+    private final LocalClientRolloutApplicationService localClientRolloutService;
 
     public UserOpencodeEndpointController(
             UserOpencodeProcessAssignmentService processAssignmentService,
-            LocalClientInstanceApplicationService localClientInstanceService) {
+            LocalClientInstanceApplicationService localClientInstanceService,
+            LocalClientRolloutApplicationService localClientRolloutService) {
         this.processAssignmentService = Objects.requireNonNull(processAssignmentService);
         this.localClientInstanceService = Objects.requireNonNull(localClientInstanceService);
+        this.localClientRolloutService = Objects.requireNonNull(localClientRolloutService);
     }
 
     /** 只读查询不会启动任一进程；服务端实例始终排在本地实例之前。 */
@@ -54,14 +60,26 @@ public class UserOpencodeEndpointController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return Mono.fromCallable(() -> {
                     List<EndpointView> endpoints = new ArrayList<>();
-                    endpoints.add(server(processAssignmentService.status(userId, normalizedAgentId, traceId)));
+                    endpoints.add(server(
+                            processAssignmentService.status(userId, normalizedAgentId, traceId),
+                            localClientDownloadAllowed(userId, traceId)));
                     localClientInstanceService.list(userId).stream().map(EndpointView::local).forEach(endpoints::add);
                     return ApiResponse.ok(List.copyOf(endpoints), traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    private static EndpointView server(UserOpencodeProcessStatusResponse response) {
+    /** 灰度存储异常时只隐藏下载入口，不影响用户查看和使用已有 OpenCode 实例。 */
+    private boolean localClientDownloadAllowed(UserId userId, String traceId) {
+        try {
+            return localClientRolloutService.isDownloadAllowed(userId);
+        } catch (RuntimeException exception) {
+            log.warn("Local client rollout lookup failed; download entry hidden, traceId={}", traceId, exception);
+            return false;
+        }
+    }
+
+    private static EndpointView server(UserOpencodeProcessStatusResponse response, boolean localClientDownloadAllowed) {
         boolean online = response.status() == UserOpencodeProcessAvailability.READY;
         return new EndpointView(
                 RuntimeKind.SERVER_PROCESS,
@@ -82,10 +100,10 @@ public class UserOpencodeEndpointController {
                 response.linuxServerId(),
                 response.containerId(),
                 response.serviceAddress(),
-                SERVER_CAPABILITIES);
+                serverCapabilities(localClientDownloadAllowed));
     }
 
-    private static Map<String, Boolean> serverCapabilities() {
+    private static Map<String, Boolean> serverCapabilities(boolean localClientDownloadAllowed) {
         Map<String, Boolean> values = new LinkedHashMap<>();
         values.put("chat", true);
         values.put("fileManagement", true);
@@ -95,6 +113,7 @@ public class UserOpencodeEndpointController {
         values.put("agentConfig", true);
         values.put("attachments", true);
         values.put("collaboration", true);
+        values.put("localClientDownload", localClientDownloadAllowed);
         return Map.copyOf(values);
     }
 

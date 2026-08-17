@@ -32,6 +32,17 @@ flowchart LR
 - `GeneratedOpencodeSdkGateway` 通过可注入的 `OpencodeWebClientTransport` 选择传输。服务端目标仍使用
   HTTP；本地目标使用隧道提供的 `WebClient ExchangeFunction`。generated SDK 和 OpenCode 源码不修改。
 
+## 下载入口灰度
+
+客户端下载入口默认对所有用户隐藏。`SUPER_ADMIN` 在系统管理中按平台 userId 维护
+`local_client_rollout_users`；只允许加入存在且可登录的用户，移出时保留操作人和时间。普通用户的
+`opencode-endpoints/me` 响应只在服务端实例 capability 中追加 `localClientDownload` 布尔值，前端仅在值
+严格为 true 时展示下载入口。旧 Java 缺字段、数据库查询失败或名单为空都失败关闭为隐藏。
+
+该名单只控制 UI 可见性，不扩大认证权限：Nginx HTTP 制品仍按内网 ACL 提供，客户端连接仍必须使用有效
+`tack_v1_` key 通过 HTTPS/WSS 认证。移出名单不会撤销 key 或断开已安装客户端；需要停用客户端时仍使用
+凭据撤销入口。
+
 ## 连接协议与 fencing
 
 客户端只主动连接 `/api/internal/platform/local-opencode-client/connections/ws`。首帧 `REGISTER` 带

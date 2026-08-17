@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from "vue";
-import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, Settings2, SlidersHorizontal } from "lucide-vue-next";
+import { Activity, BarChart3, BrainCircuit, CalendarClock, Download, Fingerprint, KeyRound, Network, Radar, Settings2, SlidersHorizontal } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
 import ScheduledTaskManagementPanel from "./ScheduledTaskManagementPanel.vue";
@@ -12,6 +12,7 @@ import InternalModelObservabilityPanel from "./InternalModelObservabilityPanel.v
 import SupportAccessPanel from "./SupportAccessPanel.vue";
 import MemoryAdminPanel from "./MemoryAdminPanel.vue";
 import ApiKeyManagementPanel from "./ApiKeyManagementPanel.vue";
+import LocalClientRolloutPanel from "./LocalClientRolloutPanel.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -22,7 +23,7 @@ const emit = defineEmits<{
   supportAccessOpened: [];
 }>();
 
-type SystemMenuKey = "scheduler" | "runtime" | "params" | "apiKeys" | "internalModels" | "internalModelObservability" | "memory" | "config" | "analytics" | "support";
+type SystemMenuKey = "scheduler" | "runtime" | "params" | "apiKeys" | "internalModels" | "internalModelObservability" | "memory" | "localClientRollout" | "config" | "analytics" | "support";
 type SystemMenuItem = { key: SystemMenuKey; label: string; icon: Component };
 
 const activeKey = ref<SystemMenuKey>(props.currentUser?.roles?.includes("SUPER_ADMIN") === true ? "scheduler" : "config");
@@ -40,6 +41,7 @@ const items: SystemMenuItem[] = [
   { key: "internalModels", label: "内部模型供应商", icon: Network },
   { key: "internalModelObservability", label: "内部模型可观测", icon: Radar },
   { key: "memory", label: "记忆能力", icon: BrainCircuit },
+  { key: "localClientRollout", label: "本地客户端灰度", icon: Download },
   { key: "config", label: "配置管理", icon: Settings2 },
   { key: "analytics", label: "运营分析", icon: BarChart3 }
 ];
@@ -107,6 +109,7 @@ watch(hasSuperAdmin, (allowed) => {
         <InternalModelProviderPanel v-else-if="activeKey === 'internalModels'" :current-user="currentUser" />
         <InternalModelObservabilityPanel v-else-if="activeKey === 'internalModelObservability'" :current-user="currentUser" />
         <MemoryAdminPanel v-else-if="activeKey === 'memory'" />
+        <LocalClientRolloutPanel v-else-if="activeKey === 'localClientRollout'" />
         <ConfigurationManagementPanel v-else-if="activeKey === 'config'" :current-user="currentUser" />
         <AnalyticsManagementPanel v-else-if="activeKey === 'analytics'" />
         <SupportAccessPanel

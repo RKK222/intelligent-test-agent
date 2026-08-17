@@ -4218,11 +4218,14 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新掩码视图 | 原子提升版本，撤销全部连接与模型 grant。 |
 | `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant。 |
 | `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户所有稳定实例及在线、generation、OpenCode 状态 | reported/observed 地址仅展示。 |
+| `GET` | `/api/internal/platform/local-opencode-client/admin/rollout-users?page={page}&size={size}` | 本地客户端下载灰度用户分页 | 仅 `SUPER_ADMIN`；只返回启用记录和最近操作人/时间。 |
+| `POST` | `/api/internal/platform/local-opencode-client/admin/rollout-users` | `{userId}` → 灰度用户 | 仅 `SUPER_ADMIN`；目标必须是存在且可登录的平台用户，重复添加幂等启用。 |
+| `DELETE` | `/api/internal/platform/local-opencode-client/admin/rollout-users/{userId}` | 空响应 | 仅 `SUPER_ADMIN`；关闭下载入口但保留数据库审计记录，不撤销已安装客户端或 client key。 |
 | `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/opencode/commands` | `{action: START\|RESTART\|STOP\|STATUS}` | 复用公共启动/停止/状态服务；跨 Java 精确转发到持有 generation 的节点。 |
 | `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 只允许实例 owner；目标固定持有连接 Java。 |
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 客户端先验证真实绝对目录，再事务性注册；离线失败。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
-| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map。 |
+| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map；服务端实例的 `localClientDownload=true` 表示当前用户位于下载灰度名单。缺字段、查询失败或值为 false 时前端必须隐藏。 |
 
 本地目录选择器取得 route 后，继续调用既有
 `POST /api/internal/platform/workspace-management/file-ws/tickets`，ticket 请求使用
@@ -4241,6 +4244,9 @@ Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追
   配置。
 
 旧调用不传 workspaceId 时仍选择服务端 OpenCode；本地实例离线或换代返回稳定冲突/不可用错误，不回退。
+客户端下载入口默认对所有用户隐藏，只能由超级管理员在系统管理中按平台 `userId` 加入灰度名单。该名单只
+控制网页下载入口，不是客户端 WSS 鉴权、制品下载鉴权或 client key 生命周期的一部分；即使前端被篡改，后端
+连接认证仍必须校验有效 client key。
 
 ## 本地工作区受保护 Agent/Skill API
 

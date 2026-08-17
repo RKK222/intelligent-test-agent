@@ -1870,6 +1870,20 @@ migration，并只加载隔离路径
 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 用真实 PostgreSQL 覆盖正常主链、
 release 缺失低版本 migration 的升级和第二次启动解析。
 
+## V20260817193414 本地客户端下载灰度用户
+
+`V20260817193414__local_client_rollout_users_create.sql` 新增 `local_client_rollout_users`。`user_id` 是引用
+`users(user_id)` 的主键，`enabled` 默认 true；`updated_by_user_id`、`created_at`、`updated_at` 保留最近
+启用或移出灰度名单的操作人和时间。表中没有 client key、客户端实例、IP、端口或本地路径。
+
+名单为空时客户端下载入口对所有用户隐藏。启用使用 `LocalClientMapper.xml` 的 PostgreSQL
+`ON CONFLICT` 幂等写入；移出名单只把 `enabled` 更新为 false，不删除审计行；查询和计数只读取
+`enabled=true`。H2 集成测试覆盖 MyBatis fallback，正式合并和发布仍须在每套已知 PostgreSQL
+`flyway_schema_history` 上验证升级到 HEAD，并核对源码、persistence JAR 和最终应用 JAR 内 migration
+字节一致。该 migration 不写任何灰度用户数据，因此升级后不会自动向任何用户展示入口。
+源码 SHA-256 固定为 `88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba`，
+`FlywayMigrationNamingTest` 锁定文件名和字节。
+
 ## V20260811213000 Agent 配置 dispose 通知枚举扩展
 
 `V20260811213000__user_notifications_expand_dispose_types.sql` 只扩展既有 `user_notifications` 的两个 CHECK 约束，不新增表、列或业务数据。当前源码 SHA-256 为 `00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c`；任何需要保留的数据库执行后必须冻结文件名和字节。

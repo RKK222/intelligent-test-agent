@@ -35,4 +35,21 @@ public interface LocalClientMapper {
     int upsertWorkspace(LocalClientWorkspaceRow row);
 
     int deleteWorkspaceById(@Param("workspaceId") String workspaceId);
+
+    boolean isRolloutEnabled(@Param("userId") String userId);
+
+    LocalClientRolloutRow findRolloutByUserId(@Param("userId") String userId);
+
+    List<LocalClientRolloutRow> findEnabledRolloutPage(
+            @Param("offset") long offset,
+            @Param("limit") int limit);
+
+    long countEnabledRollout();
+
+    int upsertRollout(LocalClientRolloutRow row);
+
+    int disableRollout(
+            @Param("userId") String userId,
+            @Param("updatedByUserId") String updatedByUserId,
+            @Param("updatedAt") Instant updatedAt);
 }

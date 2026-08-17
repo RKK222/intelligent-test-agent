@@ -263,6 +263,15 @@ export type LocalClientCredential = {
 /** copy 是唯一携带明文 key 的响应；调用方必须立即写入剪贴板并丢弃引用。 */
 export type LocalClientPlaintextKey = { clientKey: string };
 
+/** 超级管理员维护的本地客户端下载灰度用户；禁用记录不出现在列表响应中。 */
+export type LocalClientRolloutUser = {
+  userId: string;
+  enabled: boolean;
+  updatedByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type LocalClientInstance = {
   clientInstanceId: string;
   clientName: string;

@@ -616,6 +616,12 @@ const localClientEndpoints = computed(() =>
   props.opencodeEndpoints.filter(endpoint => endpoint.runtimeKind === "LOCAL_CLIENT")
 );
 
+/** 下载入口只认后端服务端实例返回的灰度 capability；缺字段和旧节点均默认隐藏。 */
+const localClientDownloadAllowed = computed(() =>
+  props.opencodeEndpoints.some(endpoint =>
+    endpoint.runtimeKind === "SERVER_PROCESS" && endpoint.capabilities?.localClientDownload === true)
+);
+
 /** 以平台注册实例为安装完成依据；多台本地设备时汇总健康数量，不依赖浏览器下载记录。 */
 const localClientHealthDisplay = computed(() => {
   const endpoints = localClientEndpoints.value;
@@ -2732,7 +2738,7 @@ function submitJoinApp() {
               <span class="figma-user-menu-service-text">{{ localClientHealthDisplay.text }}</span>
             </div>
             <a
-              v-else-if="!fixedWorkspace"
+              v-else-if="!fixedWorkspace && localClientDownloadAllowed"
               class="figma-user-menu-item"
               role="menuitem"
               data-testid="download-local-client"
