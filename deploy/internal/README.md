@@ -10,12 +10,12 @@
 
 - [单后台部署](SINGLE-BACKEND.md)：一个 Java 后端和一个 `opencode-worker`，当前现场示例为 `122.233.30.114`；包含可整文件替换的生产配置。
 - [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 各自的完整配置、部署、验收，以及个人工作区/Agent 跨服务器错配统计 SQL、准确路径和自动搬迁排障。
-- [ClickHouse 运营分析部署](CLICKHOUSE-ANALYTICS.md)：独立 ClickHouse 专机离线包、双后台配置、历史回填、两阶段旧汇总清理、验收和回滚。
+- [ClickHouse 运营分析部署](CLICKHOUSE-ANALYTICS.md)：ClickHouse 离线包、当前 `.147` 平台 PG 共置部署、双后台配置、历史回填、两阶段旧汇总清理、验收和回滚。
 - [Redis 7.4.9 独立离线升级](REDIS-OFFLINE.md)：将当前本地 Redis 版本和配置单独封包，用于企业 Redis 5.0 的受控备份、升级、验证与回滚；不修改业务代码，也不并入日常平台包。
 - [Redis 5 升级 + 双后台平台全量执行手册](FULL-UPGRADE-RUNBOOK.md)：按当前现场路径和 `.20 → .4 → .114 → .2` 顺序整合完整命令、成功条件、页面配置、脏数据边界与回滚。
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
-- [通用长期记忆部署](../../docs/deployment/qa-memory.md)：独立记忆 PostgreSQL、三副本 Mem0/VIP、独立 CPU BGE、双集合热备、离线包、灰度和真实浏览器验收。
+- [通用长期记忆部署](../../docs/deployment/qa-memory.md)：当前 `.134` 记忆 PostgreSQL 与 `.160` Mem0/VIP/CPU BGE 拓扑，以及扩容到多副本后的双集合热备、离线包、灰度和真实浏览器验收。
 - [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：Apple Silicon PKG/麒麟 ARM64 DEB 双击安装、签名打包、Nginx 分发、用户级首次配置、验收与回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
@@ -31,7 +31,7 @@
 - worker 构建会自动检查 Python `3.13.14`、pip/venv/常用标准库与脚本工具、Codex 版本、摘要、官方 MCP 契约和失败关闭；启用分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本按十进制解析 `18.09.7`，并用镜像内的 `/bin/true` 和真实 Codex/bubblewrap 验证 namespace、指定 cwd、源码读取、原生 read-only 拒写、Git 不变与续写；不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收。完整说明见 `docs/deployment/codex-whitebox-mcp.md`。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
 - 当前企业 Linux 目标机不预装宿主机 `psql`、`jq`、`rg`。部署与排障命令不得把这三个命令作为前提：PostgreSQL 只读检查优先使用对应数据库容器内的 `psql`，JSON/文本检查使用随包脚本、`grep`、`sed`、`awk` 或镜像内工具。不得为了部署临时联网安装这些命令。
-- 通用记忆的 `deploy/dev/memory-compose.yml` 只用于个人开发。企业启用时使用 `package-release.sh --memory-only|--with-memory` 生成四个独立镜像 tar；记忆 PostgreSQL、CPU BGE、Mem0 副本/VIP 和 Java 均部署在各自节点，不把 BGE、数据库或 Mem0 并入 Java/worker 容器。
+- 通用记忆的 `deploy/dev/memory-compose.yml` 只用于个人开发。企业启用时使用 `package-release.sh --memory-only|--with-memory` 生成四个独立镜像 tar；数据库、BGE、Mem0/VIP 和 Java 始终使用隔离容器或进程，不把任何记忆组件并入 Java/worker 容器。当前首次试部署把记忆数据库放在 `.134`，把 BGE、Mem0 和 VIP 共置在 `.160`。
 - Redis 仍是独立共享基础设施，不随平台 ZIP 部署；只有明确执行 Redis 专项升级时，才使用固定名 `test-agent-redis-offline.zip`。
 - `.20` 通过 Docker `-p 6379:6379` 提供共享 Redis 时必须持久化 `net.ipv4.ip_forward=1`；Redis `deploy/verify` 脚本会提前拒绝值为 `0` 的宿主机。容器本机 `healthy` 后仍必须从 `.4`、`.114` 分别验证 `.20:6379`，跨机超时不得通过反复重启 Java 处理。
 - Java 读取 `/data/testagent/config/backend.env`。

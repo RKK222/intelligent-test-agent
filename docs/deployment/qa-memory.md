@@ -161,15 +161,26 @@ deploy/internal/package-release.sh --memory-only
 
 企业目标机不预装宿主机 `psql`、`jq`、`rg`，本流程不依赖它们。`verify-db` 固定使用 pgvector 容器内的 `psql` 做带账号密码的 `select 1`；镜像与配置检查使用 `SHA256SUMS`、随包脚本和系统自带 `grep/sed/awk`。不得为了部署临时联网安装这些工具。
 
-当前 `.134 + .160` 首次试部署采用收敛拓扑：`.134` 只放 ClickHouse；`.160` 暂时共置独立记忆 pgvector、CPU BGE、一个 Mem0 副本和 VIP。它仍是四个隔离容器，不与平台 PostgreSQL、Java 或 worker 合并。为保留克隆服务器上 `5432` 的 PG 进程和全部残留数据，记忆库使用全新目录 `/data/testagent/memory/postgres-v1` 和宿主端口 `15433`；Mem0 副本使用 `18889`，VIP 使用 `18888`，BGE 使用 `18989`。扩大灰度或进入正式容量前，按本章标准拓扑拆分节点并增加 Mem0 副本。
+当前首次试部署按现场指定拆为两个记忆节点：`.134` 只承载独立记忆 PostgreSQL/pgvector，`.160` 承载一个无状态 Mem0 副本、VIP 和 CPU BGE。BGE 放在 `.160`，避免它的 CPU/内存负载与 `.134` 数据库争抢资源，并减少 Mem0 数据面到推理服务的节点数量；如果 `.160` 预检没有至少 4 个可用 CPU 线程、6 GiB 可用内存和 5 GiB 可用磁盘，则停止部署并重新评估 BGE 专机，不把它回迁到 `.134` 挤占数据库。四个角色仍是隔离容器，不与平台 PostgreSQL、Java 或 worker 合并。
 
-在 `.160` 解压前只读预检；发现目标端口已有真实服务或新目录非空时停止确认，不删除旧 PG 数据：
+为保留两台克隆服务器上的原 PG 进程、`5432` 和全部残留数据，`.134` 的新记忆库固定使用全新目录 `/data/testagent/memory/postgres-v1` 与宿主端口 `15433`；`.160` 的 Mem0 副本使用 `18889`，VIP 使用 `18888`，BGE 使用 `18989`。首次试部署只有一个 Mem0 副本，尚不具备副本高可用；扩大灰度或正式容量前必须增加第二个 Mem0 节点，并把 VIP 改为多 upstream。
+
+当前节点分工如下：
+
+| 节点 | 角色 | 端口 | 持久数据 |
+|---|---|---:|---|
+| `122.233.30.134` | 独立记忆 PostgreSQL/pgvector | `15433` | `/data/testagent/memory/postgres-v1` |
+| `122.233.30.160` | Mem0 副本 | `18889` | 无本地业务数据 |
+| `122.233.30.160` | Mem0 VIP | `18888` | 无 |
+| `122.233.30.160` | CPU BGE | `18989` | 模型已内置镜像，无运行时下载 |
+
+在 `.134` 解压前只读预检；发现 `15433` 已有真实服务或新目录非空时停止确认，不删除旧 PG 数据：
 
 ```bash
 uname -m
 docker version --format 'docker={{.Server.Version}}'
 docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
-ss -lnt 2>/dev/null | grep -E ':(5432|15433|18888|18889|18989)[[:space:]]' || true
+ss -lnt 2>/dev/null | grep -E ':(5432|15433)[[:space:]]' || true
 find /data /var/lib -maxdepth 4 -type f -name PG_VERSION -print 2>/dev/null
 if [ -d /data/testagent/memory/postgres-v1 ] && [ -n "$(find /data/testagent/memory/postgres-v1 -mindepth 1 -print -quit 2>/dev/null)" ]; then
   echo 'STOP: /data/testagent/memory/postgres-v1 已有内容，先确认归属'
@@ -178,12 +189,25 @@ fi
 df -h /data
 ```
 
+在 `.160` 解压前只读预检；保留克隆 PG 的 `5432` 和残留数据，`18888/18889/18989` 任一已占用或资源不满足就停止：
+
+```bash
+uname -m
+docker version --format 'docker={{.Server.Version}}'
+docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+ss -lnt 2>/dev/null | grep -E ':(5432|18888|18889|18989)[[:space:]]' || true
+find /data /var/lib -maxdepth 4 -type f -name PG_VERSION -print 2>/dev/null
+nproc
+free -h
+df -h /data
+```
+
 当前收敛拓扑的 `memory.env` 至少覆盖下列非密钥值；三项 memory 运行密钥仍使用各自不少于 32 字符的随机值，并让 service API key、模型网关 HMAC 与两台 Java `backend.env` 完全一致。BGE 的 API key 另在 `embedding.env` 生成，不交给 Java：
 
 ```dotenv
-TEST_AGENT_MEMORY_DB_BIND_ADDRESS=122.233.30.160
+TEST_AGENT_MEMORY_DB_BIND_ADDRESS=122.233.30.134
 TEST_AGENT_MEMORY_DB_HOST_PORT=15433
-TEST_AGENT_MEMORY_SERVICE_DATABASE_URL=postgresql://testagent_memory:<与DB_PASSWORD相同>@122.233.30.160:15433/testagent_memory
+TEST_AGENT_MEMORY_SERVICE_DATABASE_URL=postgresql://testagent_memory:<与DB_PASSWORD相同>@122.233.30.134:15433/testagent_memory
 TEST_AGENT_MEMORY_SERVICE_MODEL_GATEWAY_URL=http://122.233.30.2:9996/api/internal/platform/model-gateway/v1
 TEST_AGENT_MEMORY_NODE_ID=node-160-1
 TEST_AGENT_MEMORY_BIND_ADDRESS=122.233.30.160
@@ -193,7 +217,15 @@ TEST_AGENT_MEMORY_VIP_HOST_PORT=18888
 TEST_AGENT_MEMORY_UPSTREAMS=122.233.30.160:18889
 ```
 
-`.160` 启动记忆库时显式使用新目录，防止后续脚本默认值变化或误指向克隆 PG 数据：
+`.134` 与 `.160` 使用同一份 `memory.env`，这样数据库账号密码、Mem0 service key 和模型网关 HMAC 不会漂移。`.160` 的 `embedding.env` 至少覆盖：
+
+```dotenv
+TEST_AGENT_EMBEDDING_BIND_ADDRESS=122.233.30.160
+TEST_AGENT_EMBEDDING_HOST_PORT=18989
+TEST_AGENT_EMBEDDING_TORCH_THREADS=4
+```
+
+`.134` 启动记忆库时显式使用新目录，防止后续脚本默认值变化或误指向克隆 PG 数据：
 
 ```bash
 TEST_AGENT_MEMORY_POSTGRES_DATA_DIR=/data/testagent/memory/postgres-v1 \
@@ -205,11 +237,24 @@ U 盘完整包先进入企业中转机 `~/Desktop/mimoagent/0709`，执行 SHA-2
 
 | 目标 | 产物目录 |
 |---|---|
-| `<memory-db-node>:/data/0709` | pgvector 镜像、Alembic、部署脚本 |
-| `<embedding-node>:/data/0709` | CPU BGE 镜像、身份清单、部署脚本 |
-| 每个 `<memory-node>:/data/0709` | memory-service 镜像、配置模板、部署脚本 |
+| `.134:/data/0709/memory` | pgvector 镜像、Alembic、配置模板、部署脚本 |
+| `.160:/data/0709/memory` | Mem0、CPU BGE、VIP 镜像、身份清单、配置模板、部署脚本 |
 | `.4/.114:/data/0709` | Java JAR/worker 和 backend 配置 |
 | `.2:/data/0709` | 前端/Nginx 包 |
+
+当前机器：企业内部中转机。记忆离线目录必须完整复制，两台目标机都用包内 `SHA256SUMS` 校验，不从企业网拉镜像：
+
+```bash
+cd ~/Desktop/mimoagent/0709/memory
+sha256sum -c SHA256SUMS
+cd ~/Desktop/mimoagent/0709
+ssh root@122.233.30.134 'install -d -m 0755 /data/0709'
+scp -r memory root@122.233.30.134:/data/0709/
+ssh root@122.233.30.160 'install -d -m 0755 /data/0709'
+scp -r memory root@122.233.30.160:/data/0709/
+```
+
+成功条件：中转机全部文件显示 `OK`，两次 `scp` 都成功。目标机已有 `/data/0709/memory` 时先停止，不能把新旧目录混合覆盖。
 
 外置配置固定为：
 
@@ -219,36 +264,50 @@ U 盘完整包先进入企业中转机 `~/Desktop/mimoagent/0709`，执行 SHA-2
 /data/testagent/config/embedding.env
 ```
 
-三者必须是非符号链接普通文件、mode `0600`，不得含占位符、重复 key、命令替换或 CRLF。每个物理节点只执行自己的 role 命令：
+三者必须是非符号链接普通文件、mode `0600`，不得含占位符、重复 key、命令替换或 CRLF。先在 `.160` 生成并人工核对一份 `memory.env`，再通过 `scp` 原样复制到 `.134`；不要把真实数据库密码、service key、HMAC 或 BGE API key 发回聊天或写入命令行。两台机器分别执行以下角色命令。
+
+当前机器：`122.233.30.134` 记忆数据库节点：
 
 ```bash
-TEST_AGENT_MEMORY_ARTIFACT_DIR=/data/0709/memory deploy/internal/memory-docker.sh verify-artifacts
-deploy/internal/memory-docker.sh validate-memory-config
-deploy/internal/memory-docker.sh validate-embedding-config
-
-# memory DB node
-deploy/internal/memory-docker.sh load-db
-deploy/internal/memory-docker.sh start-db
-deploy/internal/memory-docker.sh verify-db
-
-# embedding node
-deploy/internal/memory-docker.sh load-embedding
-deploy/internal/memory-docker.sh start-embedding
-deploy/internal/memory-docker.sh verify-embedding
-
-# 只执行一次
-deploy/internal/memory-docker.sh load-memory
-deploy/internal/memory-docker.sh migrate
-
-# 每个 Mem0 node 使用不同 TEST_AGENT_MEMORY_NODE_ID
-deploy/internal/memory-docker.sh start-memory
-deploy/internal/memory-docker.sh verify-memory
-
-# VIP node
-deploy/internal/memory-docker.sh load-vip
-deploy/internal/memory-docker.sh start-vip
-deploy/internal/memory-docker.sh verify-vip
+cd /data/0709/memory
+TEST_AGENT_MEMORY_ARTIFACT_DIR=/data/0709/memory ./memory-docker.sh verify-artifacts
+./memory-docker.sh validate-memory-config
+./memory-docker.sh load-db
+TEST_AGENT_MEMORY_POSTGRES_DATA_DIR=/data/testagent/memory/postgres-v1 \
+  ./memory-docker.sh start-db
+./memory-docker.sh verify-db
+./memory-docker.sh status
 ```
+
+成功条件：`verify-db` 输出 `Memory PostgreSQL authenticated role and database are ready.`，只新增 `test-agent-memory-postgres` 容器，原克隆 PG 容器/进程及 `5432` 保持不变。随后从 `.160` 执行 `nc -vz 122.233.30.134 15433`，跨机不通就停止。
+
+当前机器：`122.233.30.160` Mem0/VIP/BGE 节点：
+
+```bash
+cd /data/0709/memory
+TEST_AGENT_MEMORY_ARTIFACT_DIR=/data/0709/memory ./memory-docker.sh verify-artifacts
+./memory-docker.sh validate-memory-config
+./memory-docker.sh validate-embedding-config
+nc -vz 122.233.30.134 15433
+
+./memory-docker.sh load-embedding
+./memory-docker.sh start-embedding
+./memory-docker.sh verify-embedding
+
+./memory-docker.sh load-memory
+./memory-docker.sh migrate
+./memory-docker.sh start-memory
+./memory-docker.sh verify-memory
+
+./memory-docker.sh load-vip
+./memory-docker.sh start-vip
+./memory-docker.sh verify-vip
+./memory-docker.sh status
+```
+
+成功条件：BGE readiness 显示固定 512 维模型；Alembic 到 `20260809_01`；Mem0 与 VIP 均显示 `rawMessageCount=0`。`.160` 只新增 `test-agent-memory-embedding`、`test-agent-memory-node-160-1`、`test-agent-memory-vip`，不启动记忆 PostgreSQL 容器。
+
+上述命令只验证数据面。随后还必须在系统管理中新增 CPU 模型供应商：base URL 为 `http://122.233.30.160:18989/v1`，Token 使用 `embedding.env` 中的 API key；模型 ID 为 `memory-bge-small-zh-v1.5`，上游模型 ID 为 `BAAI/bge-small-zh-v1.5`，能力为 `EMBEDDING`，`embeddingDimension=512`。两台 Java 的 `backend.env` 继续指向 `http://122.233.30.160:18888`，service key 与 HMAC 必须和同一份 `memory.env` 一致。
 
 固定发布顺序：
 

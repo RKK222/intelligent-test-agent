@@ -11199,3 +11199,25 @@
 
 - 代码层面的 600 秒超时和 App/LaunchAgent 路径分裂已修复并通过真实制品结构验证；修复包位于 `~/Downloads/TestAgent-Local-Client-macOS-arm64-pkgfix.pkg`，仍是无 Developer ID 签名的开发包，不能冒充正式交付。
 - 不变更 HTTP API、事件、数据库/Flyway、客户端协议、安全凭据、generated SDK 或 OpenCode 只读源码；实际系统级安装成功状态尚待一次管理员授权的 Installer 验证。
+
+## 2026-08-17 - 纠正企业 ClickHouse 与记忆节点拓扑
+
+### Why
+
+- 现场进一步明确 ClickHouse 应共置到原平台 PostgreSQL 节点，两台新增克隆服务器都属于记忆链路；其中 `.134` 承载记忆数据库，`.160` 承载 Mem0，上一版 `.134:8123 + .160` 全记忆共置命令不能继续使用。
+
+### What
+
+- ClickHouse 改为部署到原平台 PG 节点 `122.233.30.147:8123`，固定使用独立 `/data/testagent/clickhouse`，保留平台 PG 的 `5432`、进程和全部数据。
+- 记忆数据面改为 `.134:15433` 独立 pgvector 与 `.160:18889/18888/18989` Mem0/VIP/CPU BGE；BGE 与 Mem0 共置以避免和数据库争抢 CPU/内存，并增加 `.160` 的 CPU、内存、磁盘预检门禁。
+- 企业中转机、`.134`、`.160` 的完整分发和分角色启动命令写入稳定文档；部署命令继续复用现有 `memory-docker.sh`，没有新增平行脚本。离线包测试锁定 `.147` ClickHouse、`.134` 记忆数据库和 `.160` Mem0 拓扑。
+
+### How
+
+- `tools/verify-ai-docs.sh`、`deploy/internal/tests/memory-offline-package-test.sh`、`tools/verify-internal-clickhouse-deploy.sh`、`tools/verify-internal-clickhouse-package.sh` 和 `git diff --check` 全部通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，没有覆盖其他提交者成果；当前修正提交将作为后续重建记忆离线包的 revision。
+
+### Result
+
+- 源码侧部署拓扑、具体命令与回归门禁已纠正；上一版 `.134` 部署 ClickHouse、`.160` 启动记忆数据库的命令明确作废。
+- 本阶段不修改 HTTP API、RunEvent、数据库结构/Flyway、generated SDK、OpenCode 源码或 `.env*`。最终 linux/amd64 制品仍需按本提交重建并做容器启动验证后才能交付；企业真实节点尚未写入。

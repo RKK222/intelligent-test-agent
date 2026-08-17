@@ -1,19 +1,19 @@
 # ClickHouse 运营分析离线部署与切换
 
-本手册用于在企业网络新增一个独立 x86_64 ClickHouse 进程，固定使用 ClickHouse 26.3.17.56，承载平台全部运营用户维度、行为事实、小时/日汇总、Token 使用与 Agent/Skill/Tool 调用统计。平台业务库仍使用 PostgreSQL；PostgreSQL 只保留业务主数据、临时事务 outbox、Redis 消费检查点、回填切换记录和任务锁，不作为任何运营查询来源。ClickHouse 优先使用专机；当前 `.134 + .160` 首次试部署允许把 ClickHouse 容器放在由 PostgreSQL 服务器克隆得到的 `.134`，但必须继续保留原 PostgreSQL 的 `5432` 和残留数据目录，ClickHouse 只使用 `8123` 与 `/data/testagent/clickhouse`，资源或端口不满足时停止而不是清理旧数据。
+本手册用于在企业网络新增一个独立 x86_64 ClickHouse 进程，固定使用 ClickHouse 26.3.17.56，承载平台全部运营用户维度、行为事实、小时/日汇总、Token 使用与 Agent/Skill/Tool 调用统计。平台业务库仍使用 PostgreSQL；PostgreSQL 只保留业务主数据、临时事务 outbox、Redis 消费检查点、回填切换记录和任务锁，不作为任何运营查询来源。当前首次试部署按现场指定把 ClickHouse 容器共置在原平台 PostgreSQL 节点 `122.233.30.147`，但必须继续保留 PostgreSQL 的 `5432`、进程和全部数据目录；ClickHouse 只使用 `8123` 与 `/data/testagent/clickhouse`，资源或端口不满足时停止，不得为部署 ClickHouse 清理或迁移原 PG 数据。
 
 本交付不使用 Docker Compose。ClickHouse 节点只运行一个 `--restart unless-stopped` 容器，数据落在 `/data/testagent/clickhouse/data`，日志落在 `/data/testagent/clickhouse/log`。原始运营事实 TTL 为 2 年，汇总表不设置 TTL。外网打包按多架构索引 digest `sha256:422be85a...fcb3` 固定上游，并直接导出 linux/amd64 archive，避免 Apple Silicon 本地 arm64 tag 污染交付物。
 
 ## 1. 地址与目录
 
-先确定 `CLICKHOUSE_HOST`，它必须是未分配给 `.20/.4/.114/.2` 的 x86_64 Linux 服务器或经容量评估的 PostgreSQL 共置服务器。当前试部署取 `CLICKHOUSE_HOST=122.233.30.134`。防火墙只允许 `122.233.30.4` 和 `122.233.30.114` 访问 `8123/tcp`，不得把端口暴露到用户网段。
+先确定 `CLICKHOUSE_HOST`。当前试部署固定取原平台 PostgreSQL 节点 `CLICKHOUSE_HOST=122.233.30.147`。防火墙只允许 `122.233.30.4` 和 `122.233.30.114` 访问 `8123/tcp`，不得把端口暴露到用户网段。由于它与平台 PG 共用宿主机，部署前必须额外确认 CPU、内存和 `/data` 容量；资源不足时停止并重新申请专机，不能挤占 PostgreSQL 已有容量。
 
 | 机器 | 固定目录 | 用途 |
 |---|---|---|
 | 外网 Mac 构建机 | `deploy/internal/dist` | 拉取 linux/amd64 镜像并生成离线包 |
 | 企业内部中转机 | `~/Desktop/mimoagent/0709` | U 盘校验与分发；不使用 `/data/0709` |
-| ClickHouse 专机 | `/data/0709` | 接收、校验和解压离线包 |
-| ClickHouse 专机 | `/data/testagent/clickhouse` | 持久数据与日志 |
+| `.147` 平台 PG/ClickHouse 共置节点 | `/data/0709` | 接收、校验和解压离线包 |
+| `.147` 平台 PG/ClickHouse 共置节点 | `/data/testagent/clickhouse` | ClickHouse 独立持久数据与日志 |
 | 两台 Java 后端 | `/data/testagent/config/backend.env` | ClickHouse JDBC 配置与回填开关 |
 
 ## 2. 外网 Mac 打包
@@ -56,18 +56,18 @@ deploy/internal/package-clickhouse-offline.sh \
 cd ~/Desktop/mimoagent/0709
 sha256sum -c test-agent-clickhouse-offline.zip.sha256
 unzip -t test-agent-clickhouse-offline.zip
-ssh root@CLICKHOUSE_HOST 'install -d -m 0755 /data/0709'
+ssh root@122.233.30.147 'install -d -m 0755 /data/0709'
 scp test-agent-clickhouse-offline.zip test-agent-clickhouse-offline.zip.sha256 \
-  root@CLICKHOUSE_HOST:/data/0709/
+  root@122.233.30.147:/data/0709/
 ```
 
 成功条件：SHA 为 `OK`，ZIP 无损坏。中转机不创建 `/data/0709`。
 
-## 4. ClickHouse 专机部署
+## 4. `.147` 平台 PG/ClickHouse 共置节点部署
 
-当前机器：`CLICKHOUSE_HOST`。
+当前机器：`122.233.30.147`。
 
-企业目标机不预装 `psql`、`jq`、`rg`，本流程不依赖它们。解压前先用系统自带命令只读确认克隆 PostgreSQL 与目标目录；`5432` 有监听或发现 PG 数据都不影响 ClickHouse，但 `8123` 已监听、目标目录非空或磁盘容量不足时必须停止确认，不能删除原数据：
+企业目标机不预装 `psql`、`jq`、`rg`，本流程不依赖它们。解压前先用系统自带命令只读确认现有 PostgreSQL 与目标目录；本节点预期 `5432` 已监听且能发现 PG 数据，二者都必须保留。若 `8123` 已监听、目标目录非空、内存或磁盘容量不足，必须停止确认，不能删除原数据：
 
 ```bash
 uname -m
@@ -75,6 +75,7 @@ docker version --format 'docker={{.Server.Version}}'
 docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 ss -lnt 2>/dev/null | grep -E ':(5432|8123)[[:space:]]' || true
 find /data /var/lib -maxdepth 4 -type f -name PG_VERSION -print 2>/dev/null
+free -h
 if [ -d /data/testagent/clickhouse ] && [ -n "$(find /data/testagent/clickhouse -mindepth 1 -print -quit 2>/dev/null)" ]; then
   echo 'STOP: /data/testagent/clickhouse 已有内容，先确认归属'
   exit 1
@@ -82,7 +83,7 @@ fi
 df -h /data
 ```
 
-成功条件：`uname -m` 为 `x86_64`，Docker 可用，`8123` 没有既有监听，目标目录为空或不存在，`/data` 容量满足保留两年运营事实的评估。现有 `5432`、PG 进程和 `PG_VERSION` 文件全部保留。
+成功条件：`uname -m` 为 `x86_64`，Docker 可用，`5432` 的平台 PG 保持原状，`8123` 没有既有监听，目标目录为空或不存在，内存与 `/data` 容量满足 PostgreSQL 和两年运营事实的共同容量评估。现有 PG 进程和 `PG_VERSION` 文件全部保留。
 
 ```bash
 cd /data/0709
@@ -119,13 +120,13 @@ docker ps --filter name=test-agent-clickhouse
 
 ## 5. 双后端连接预检
 
-把包内 `config/backend-clickhouse.env` 的 `REPLACE_CLICKHOUSE_HOST` 替换为专机 IP，然后将同一组配置合并到 `.4` 和 `.114` 的 `/data/testagent/config/backend.env`。不要 `source` 整个 dotenv；按现有部署脚本的 dotenv 读取方式更新。两台机器分别验证：
+把包内 `config/backend-clickhouse.env` 的 `REPLACE_CLICKHOUSE_HOST` 替换为 `122.233.30.147`，然后将同一组配置合并到 `.4` 和 `.114` 的 `/data/testagent/config/backend.env`。不要 `source` 整个 dotenv；按现有部署脚本的 dotenv 读取方式更新。两台机器分别验证：
 
 ```bash
-nc -vz CLICKHOUSE_HOST 8123
+nc -vz 122.233.30.147 8123
 curl -fsS -u 'testagent_analytics:REPLACE_WITH_BUNDLE_PASSWORD' \
   --data-binary 'select version(), currentDatabase()' \
-  'http://CLICKHOUSE_HOST:8123/?database=testagent_analytics'
+  'http://122.233.30.147:8123/?database=testagent_analytics'
 ```
 
 必须返回版本 `26.3.17.56` 和数据库 `testagent_analytics`。密码不要写入 shell history；现场应从受控 0600 配置读取后执行等价检查。

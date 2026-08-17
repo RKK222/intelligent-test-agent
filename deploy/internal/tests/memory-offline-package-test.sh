@@ -17,6 +17,14 @@ grep -Fq '*.pyc' "${ROOT_DIR}/embedding-service/.dockerignore"
 grep -Fq -- '--user 101:101 --cap-drop ALL' "${ROOT_DIR}/deploy/internal/memory-docker.sh"
 grep -Fq 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1' \
   "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq '`122.233.30.134` | 独立记忆 PostgreSQL/pgvector' \
+  "${ROOT_DIR}/docs/deployment/qa-memory.md"
+grep -Fq '`122.233.30.160` | Mem0 副本' \
+  "${ROOT_DIR}/docs/deployment/qa-memory.md"
+grep -Fq 'TEST_AGENT_MEMORY_DB_BIND_ADDRESS=122.233.30.134' \
+  "${ROOT_DIR}/docs/deployment/qa-memory.md"
+! grep -Fq 'TEST_AGENT_MEMORY_DB_BIND_ADDRESS=122.233.30.160' \
+  "${ROOT_DIR}/docs/deployment/qa-memory.md"
 if grep -Fq 'docker pull --platform "${PLATFORM}" "${PGVECTOR_SOURCE_IMAGE}"' \
   "${ROOT_DIR}/deploy/internal/package-memory-offline.sh"; then
   echo "offline package can collide with an existing Mac arm64 infrastructure image" >&2
