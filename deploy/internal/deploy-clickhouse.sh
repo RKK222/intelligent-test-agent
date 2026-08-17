@@ -75,7 +75,7 @@ validate_config() {
   [[ "${DATA_ROOT}" =~ ^/[A-Za-z0-9._/-]+$ && "${LOG_ROOT}" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
     echo "ClickHouse data/log roots must be absolute paths" >&2; exit 1;
   }
-  (( ${#PASSWORD} >= 32 )) || { echo "ClickHouse password must contain at least 32 characters" >&2; exit 1; }
+  (( ${#PASSWORD} >= 8 )) || { echo "ClickHouse password must contain at least 8 characters" >&2; exit 1; }
   digest="$(printf '%s' "${PASSWORD}" | openssl dgst -sha256 | awk '{print $NF}')"
   grep -Fq "<password_sha256_hex>${digest}</password_sha256_hex>" "${USERS_CONFIG_FILE}" || {
     echo "ClickHouse password and users config digest do not match" >&2; exit 1;

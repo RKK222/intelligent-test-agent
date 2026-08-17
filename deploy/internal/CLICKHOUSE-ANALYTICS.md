@@ -1,12 +1,12 @@
 # ClickHouse 运营分析离线部署与切换
 
-本手册用于在企业网络新增一台独立 x86_64 ClickHouse 服务器，固定使用 ClickHouse 26.3.17.56，承载平台全部运营用户维度、行为事实、小时/日汇总、Token 使用与 Agent/Skill/Tool 调用统计。平台业务库仍使用 PostgreSQL；PostgreSQL 只保留业务主数据、临时事务 outbox、Redis 消费检查点、回填切换记录和任务锁，不作为任何运营查询来源。
+本手册用于在企业网络新增一个独立 x86_64 ClickHouse 进程，固定使用 ClickHouse 26.3.17.56，承载平台全部运营用户维度、行为事实、小时/日汇总、Token 使用与 Agent/Skill/Tool 调用统计。平台业务库仍使用 PostgreSQL；PostgreSQL 只保留业务主数据、临时事务 outbox、Redis 消费检查点、回填切换记录和任务锁，不作为任何运营查询来源。ClickHouse 优先使用专机；当前 `.134 + .160` 首次试部署允许把 ClickHouse 容器放在由 PostgreSQL 服务器克隆得到的 `.134`，但必须继续保留原 PostgreSQL 的 `5432` 和残留数据目录，ClickHouse 只使用 `8123` 与 `/data/testagent/clickhouse`，资源或端口不满足时停止而不是清理旧数据。
 
-本交付不使用 Docker Compose。ClickHouse 专机只运行一个 `--restart unless-stopped` 容器，数据落在 `/data/testagent/clickhouse/data`，日志落在 `/data/testagent/clickhouse/log`。原始运营事实 TTL 为 2 年，汇总表不设置 TTL。
+本交付不使用 Docker Compose。ClickHouse 节点只运行一个 `--restart unless-stopped` 容器，数据落在 `/data/testagent/clickhouse/data`，日志落在 `/data/testagent/clickhouse/log`。原始运营事实 TTL 为 2 年，汇总表不设置 TTL。外网打包按多架构索引 digest `sha256:422be85a...fcb3` 固定上游，并直接导出 linux/amd64 archive，避免 Apple Silicon 本地 arm64 tag 污染交付物。
 
 ## 1. 地址与目录
 
-先确定 `CLICKHOUSE_HOST`，它必须是未分配给 `.20/.4/.114/.2` 的独立 x86_64 Linux 服务器。防火墙只允许 `122.233.30.4` 和 `122.233.30.114` 访问 `8123/tcp`，不得把端口暴露到用户网段。
+先确定 `CLICKHOUSE_HOST`，它必须是未分配给 `.20/.4/.114/.2` 的 x86_64 Linux 服务器或经容量评估的 PostgreSQL 共置服务器。当前试部署取 `CLICKHOUSE_HOST=122.233.30.134`。防火墙只允许 `122.233.30.4` 和 `122.233.30.114` 访问 `8123/tcp`，不得把端口暴露到用户网段。
 
 | 机器 | 固定目录 | 用途 |
 |---|---|---|
@@ -24,6 +24,14 @@
 deploy/internal/package-clickhouse-offline.sh
 tools/verify-internal-clickhouse-package.sh
 tools/verify-internal-clickhouse-deploy.sh
+```
+
+默认生成 `testagent_analytics` 用户和随机 64 位十六进制密码。仅在已经用防火墙限制来源的内网试部署中，可用环境变量生成更易手工输入的账号密码；密码不会打印到日志，仍只写入 `0600` 交付配置，不能把真实值提交到 Git：
+
+```bash
+TEST_AGENT_CLICKHOUSE_PACKAGE_USERNAME=ck \
+TEST_AGENT_CLICKHOUSE_PACKAGE_PASSWORD='<8-64位URL安全字符>' \
+  deploy/internal/package-clickhouse-offline.sh
 ```
 
 输出固定为：
@@ -58,6 +66,23 @@ scp test-agent-clickhouse-offline.zip test-agent-clickhouse-offline.zip.sha256 \
 ## 4. ClickHouse 专机部署
 
 当前机器：`CLICKHOUSE_HOST`。
+
+企业目标机不预装 `psql`、`jq`、`rg`，本流程不依赖它们。解压前先用系统自带命令只读确认克隆 PostgreSQL 与目标目录；`5432` 有监听或发现 PG 数据都不影响 ClickHouse，但 `8123` 已监听、目标目录非空或磁盘容量不足时必须停止确认，不能删除原数据：
+
+```bash
+uname -m
+docker version --format 'docker={{.Server.Version}}'
+docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+ss -lnt 2>/dev/null | grep -E ':(5432|8123)[[:space:]]' || true
+find /data /var/lib -maxdepth 4 -type f -name PG_VERSION -print 2>/dev/null
+if [ -d /data/testagent/clickhouse ] && [ -n "$(find /data/testagent/clickhouse -mindepth 1 -print -quit 2>/dev/null)" ]; then
+  echo 'STOP: /data/testagent/clickhouse 已有内容，先确认归属'
+  exit 1
+fi
+df -h /data
+```
+
+成功条件：`uname -m` 为 `x86_64`，Docker 可用，`8123` 没有既有监听，目标目录为空或不存在，`/data` 容量满足保留两年运营事实的评估。现有 `5432`、PG 进程和 `PG_VERSION` 文件全部保留。
 
 ```bash
 cd /data/0709

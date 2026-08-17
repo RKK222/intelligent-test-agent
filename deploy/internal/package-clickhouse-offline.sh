@@ -8,14 +8,20 @@ OUTPUT_DIR="${SCRIPT_DIR}/dist"
 BUNDLE_NAME="test-agent-clickhouse-offline"
 VERSION="26.3.17.56"
 IMAGE="test-agent-clickhouse:${VERSION}"
-SOURCE_IMAGE="clickhouse/clickhouse-server:${VERSION}"
+SOURCE_IMAGE="clickhouse/clickhouse-server:${VERSION}@sha256:422be85ae7344058369cdd366ac0efea9daa8428b55c9cf50258e83a7d12fcb3"
 IMAGE_TAR=""
+PINNED_IMAGE_DOCKERFILE="${SCRIPT_DIR}/memory/PinnedImage.Dockerfile"
 
 usage() {
   cat <<'USAGE'
 Usage: package-clickhouse-offline.sh [options]
 
 Build the standalone ClickHouse 26.3.17.56 linux/amd64 offline bundle.
+
+Optional environment variables:
+  TEST_AGENT_CLICKHOUSE_PACKAGE_USERNAME  Generated bundle username.
+  TEST_AGENT_CLICKHOUSE_PACKAGE_PASSWORD  Generated bundle password. If omitted,
+                                          a random 64-hex-character password is used.
 
 Options:
   --image-tar <path>   Reuse a Docker-loadable test-agent-clickhouse image tar.
@@ -40,10 +46,11 @@ sha256_digest() {
   else shasum -a 256 "$1" | awk '{print $1}'; fi
 }
 
-for command_name in zip unzip tar awk openssl; do require_command "${command_name}"; done
+for command_name in zip unzip tar awk openssl python3; do require_command "${command_name}"; done
 for required in CLICKHOUSE-ANALYTICS.md deploy-clickhouse.sh clickhouse.env.example clickhouse-users.xml.example; do
   require_file "${SCRIPT_DIR}/${required}"
 done
+require_file "${PINNED_IMAGE_DOCKERFILE}"
 
 mkdir -p "${OUTPUT_DIR}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-clickhouse-offline.XXXXXX")"
@@ -52,37 +59,70 @@ trap cleanup EXIT
 
 if [[ -z "${IMAGE_TAR}" ]]; then
   require_command docker
-  docker pull --platform linux/amd64 "${SOURCE_IMAGE}" >/dev/null
-  docker tag "${SOURCE_IMAGE}" "${IMAGE}"
-  [[ "$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "${IMAGE}")" == "linux/amd64" ]] || {
-    echo "ClickHouse image must be linux/amd64" >&2; exit 1;
-  }
+  docker buildx version >/dev/null
   IMAGE_TAR="${TMP_ROOT}/test-agent-clickhouse_${VERSION}-linux-amd64.tar"
-  docker save -o "${IMAGE_TAR}" "${IMAGE}"
+  # 直接导出 amd64 docker archive，避免 Apple Silicon 本地 image store 中同 tag 的
+  # arm64 镜像覆盖或阻止 amd64 变体加载。
+  docker buildx build --platform linux/amd64 --provenance=false \
+    --build-arg "SOURCE_IMAGE=${SOURCE_IMAGE}" -t "${IMAGE}" \
+    --output "type=docker,dest=${IMAGE_TAR}" \
+    -f "${PINNED_IMAGE_DOCKERFILE}" "${SCRIPT_DIR}/memory"
 else
   require_file "${IMAGE_TAR}"
 fi
 
-manifest_json="$(tar -xOf "${IMAGE_TAR}" manifest.json)"
-grep -Fq "test-agent-clickhouse:${VERSION}" <<<"${manifest_json}" || {
-  echo "ClickHouse image tar does not contain ${IMAGE}" >&2; exit 1;
-}
+python3 - "${IMAGE_TAR}" "${IMAGE}" <<'PY'
+import json
+import sys
+import tarfile
+
+archive_path, expected_tag = sys.argv[1:]
+with tarfile.open(archive_path) as archive:
+    manifest = json.load(archive.extractfile("manifest.json"))
+    matches = [item for item in manifest if expected_tag in item.get("RepoTags", [])]
+    if len(matches) != 1:
+        raise SystemExit(f"ClickHouse image tar does not contain exactly one {expected_tag}")
+    config = json.load(archive.extractfile(matches[0]["Config"]))
+if config.get("os") != "linux" or config.get("architecture") != "amd64":
+    raise SystemExit(
+        "ClickHouse image tar must be linux/amd64, got "
+        f"{config.get('os')}/{config.get('architecture')}"
+    )
+PY
 
 BUNDLE_ROOT="${TMP_ROOT}/${BUNDLE_NAME}"
 mkdir -p "${BUNDLE_ROOT}/config"
 install -m 0644 "${SCRIPT_DIR}/CLICKHOUSE-ANALYTICS.md" "${BUNDLE_ROOT}/START-HERE.md"
 install -m 0755 "${SCRIPT_DIR}/deploy-clickhouse.sh" "${BUNDLE_ROOT}/deploy-clickhouse.sh"
 
-password="$(openssl rand -hex 32)"
+username="${TEST_AGENT_CLICKHOUSE_PACKAGE_USERNAME:-testagent_analytics}"
+password="${TEST_AGENT_CLICKHOUSE_PACKAGE_PASSWORD:-}"
+[[ "${username}" =~ ^[A-Za-z][A-Za-z0-9_]{1,31}$ ]] || {
+  echo "ClickHouse package username must contain 2-32 letters, digits or underscores" >&2
+  exit 1
+}
+if [[ -z "${password}" ]]; then
+  password="$(openssl rand -hex 32)"
+else
+  [[ "${password}" =~ ^[A-Za-z0-9._~-]{8,64}$ ]] || {
+    echo "Explicit ClickHouse package password must contain 8-64 URL-safe characters" >&2
+    exit 1
+  }
+fi
 password_sha256="$(printf '%s' "${password}" | openssl dgst -sha256 | awk '{print $NF}')"
-awk -v password="${password}" '{gsub(/REPLACE_CLICKHOUSE_PASSWORD/, password); print}' \
+awk -v username="${username}" -v password="${password}" '
+  /^TEST_AGENT_CLICKHOUSE_USERNAME=/ { print "TEST_AGENT_CLICKHOUSE_USERNAME=" username; next }
+  { gsub(/REPLACE_CLICKHOUSE_PASSWORD/, password); print }
+' \
   "${SCRIPT_DIR}/clickhouse.env.example" >"${BUNDLE_ROOT}/config/clickhouse.env"
-awk -v digest="${password_sha256}" '{gsub(/REPLACE_CLICKHOUSE_PASSWORD_SHA256/, digest); print}' \
+awk -v username="${username}" -v digest="${password_sha256}" '
+  { gsub(/testagent_analytics/, username); gsub(/REPLACE_CLICKHOUSE_PASSWORD_SHA256/, digest); print }
+' \
   "${SCRIPT_DIR}/clickhouse-users.xml.example" >"${BUNDLE_ROOT}/config/clickhouse-users.xml"
 printf '%s\n' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED=true' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://REPLACE_CLICKHOUSE_HOST:8123/testagent_analytics' \
-  'TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME=testagent_analytics' \
+  "TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME=${username}" \
   "TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=${password}" \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED=false' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_START=2025-01-01T00:00:00Z' \

@@ -11152,3 +11152,27 @@
 
 - 服务端 OpenCode 已恢复可用，前端通过本地 Java 的跨节点路由可准确访问服务器实例，不会回退到旧 Mac 进程。
 - 本次仅执行开发环境公共配置、当前快照数据与运行进程修复；没有修改 HTTP API、事件、数据库结构/Flyway、代码、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-17 - 打包 `.134 + .160` 运营与记忆中间件离线制品
+
+### Why
+
+- dev 的运营分析、原生本地客户端和通用记忆准备进入企业试部署；新增的 `.134/.160` 是 PostgreSQL 克隆机，必须保留现有 `5432` 和残留数据，同时企业宿主机明确没有 `psql`、`jq`、`rg`。
+- Apple Silicon 本机已有同 tag arm64 ClickHouse，原 `docker pull --platform` 会发生本地镜像架构污染并在 Docker Hub registry 校验阶段 EOF，不能据此产出可部署 tar。
+
+### What
+
+- ClickHouse 26.3.17.56 改为按固定多架构 index digest 通过 buildx 直接导出 linux/amd64 archive，并从 archive config 强制校验 OS/架构；打包支持受控内网试部署显式账号密码，默认仍使用随机 64 位十六进制密码。自定义用户补充 loopback 白名单，使目标机本机 verify 与远端 `.4/.114` 白名单同时成立。
+- 部署文档固定首次收敛拓扑：`.134:8123` 运行 ClickHouse；`.160` 用全新 `/data/testagent/memory/postgres-v1` 和 `15433/18889/18888/18989` 共置 pgvector、单 Mem0 副本、VIP、CPU BGE，原克隆 PG 进程、`5432` 和数据目录不删除。企业命令不依赖宿主 `psql/jq/rg`，数据库校验使用容器内 `psql`。
+- `backend.env.example` 补齐默认关闭的通用记忆 URL、service key、HMAC、超时、检索和学习参数；客户端分发本身不新增中间件镜像。
+
+### How
+
+- ClickHouse 脚本/夹具校验和 AI 文档校验通过；最终 ZIP SHA-256 为 `84406aa69a932e7a900e9d5323c41af15dd2dcc8fd7a70cd84acfcd3388c3819`。包内 tar 重新 load 后以 amd64 仿真启动，实际完成版本查询、自定义用户认证和 `testagent_analytics` 建库。
+- 记忆四个最终 tar 全量 `SHA256SUMS` 通过；SHA-256 分别为 memory-service `ec413598...a013`、embedding `db2087d9...c940`、pgvector `dbf156d7...c27e`、VIP Nginx `7291e71f...7486`。从最终 tar 重新 load 后依次启动 pgvector、CPU BGE、Alembic、Mem0、VIP，验证数据库认证 `select 1`、BGE 固定 revision/512 维/归一化、Alembic head、Mem0/VIP `rawMessageCount=0`，随后按角色停止临时容器。
+- 当前 Mac 到 `.134/.160` 的 22 端口在服务端 SSH banner 前主动断开；5432 与其它探测端口只能建立 TCP 后无应用响应，不能替代企业中转机/堡垒机上的目标宿主预检，因此未远程写入服务器。
+
+### Result
+
+- 外网 Mac 的 ClickHouse ZIP 与记忆四镜像目录已具备可传输、校验和离线启动条件；无运行时依赖下载。企业现场仍必须先执行只读端口、目录、架构、Docker 和容量预检，任一目标端口被占用或新数据目录非空即停止，不能清理克隆 PG。
+- 本次只改变部署脚本、配置模板、测试和稳定部署文档；不修改 HTTP API、RunEvent、平台 PostgreSQL/Flyway、generated SDK、OpenCode 源码或 `.env*`，未新建分支、未推送远端。真实 `.134/.160` 部署与企业网络跨机验收尚未完成。

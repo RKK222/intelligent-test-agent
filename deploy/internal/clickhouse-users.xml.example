@@ -9,6 +9,8 @@
         <testagent_analytics>
             <password_sha256_hex>REPLACE_CLICKHOUSE_PASSWORD_SHA256</password_sha256_hex>
             <networks>
+                <ip>127.0.0.1</ip>
+                <ip>::1</ip>
                 <ip>122.233.30.4</ip>
                 <ip>122.233.30.114</ip>
             </networks>

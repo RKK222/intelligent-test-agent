@@ -159,6 +159,48 @@ deploy/internal/package-release.sh --memory-only
 
 记忆 PostgreSQL 必须绑定可被 Mem0 节点访问的具体内网 IP；若使用模板中的 `0.0.0.0`，主机防火墙必须把 5432 来源限制为 Mem0 节点。不能保留 `127.0.0.1` 后却让独立 Mem0 节点连远程库。
 
+企业目标机不预装宿主机 `psql`、`jq`、`rg`，本流程不依赖它们。`verify-db` 固定使用 pgvector 容器内的 `psql` 做带账号密码的 `select 1`；镜像与配置检查使用 `SHA256SUMS`、随包脚本和系统自带 `grep/sed/awk`。不得为了部署临时联网安装这些工具。
+
+当前 `.134 + .160` 首次试部署采用收敛拓扑：`.134` 只放 ClickHouse；`.160` 暂时共置独立记忆 pgvector、CPU BGE、一个 Mem0 副本和 VIP。它仍是四个隔离容器，不与平台 PostgreSQL、Java 或 worker 合并。为保留克隆服务器上 `5432` 的 PG 进程和全部残留数据，记忆库使用全新目录 `/data/testagent/memory/postgres-v1` 和宿主端口 `15433`；Mem0 副本使用 `18889`，VIP 使用 `18888`，BGE 使用 `18989`。扩大灰度或进入正式容量前，按本章标准拓扑拆分节点并增加 Mem0 副本。
+
+在 `.160` 解压前只读预检；发现目标端口已有真实服务或新目录非空时停止确认，不删除旧 PG 数据：
+
+```bash
+uname -m
+docker version --format 'docker={{.Server.Version}}'
+docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+ss -lnt 2>/dev/null | grep -E ':(5432|15433|18888|18889|18989)[[:space:]]' || true
+find /data /var/lib -maxdepth 4 -type f -name PG_VERSION -print 2>/dev/null
+if [ -d /data/testagent/memory/postgres-v1 ] && [ -n "$(find /data/testagent/memory/postgres-v1 -mindepth 1 -print -quit 2>/dev/null)" ]; then
+  echo 'STOP: /data/testagent/memory/postgres-v1 已有内容，先确认归属'
+  exit 1
+fi
+df -h /data
+```
+
+当前收敛拓扑的 `memory.env` 至少覆盖下列非密钥值；三项 memory 运行密钥仍使用各自不少于 32 字符的随机值，并让 service API key、模型网关 HMAC 与两台 Java `backend.env` 完全一致。BGE 的 API key 另在 `embedding.env` 生成，不交给 Java：
+
+```dotenv
+TEST_AGENT_MEMORY_DB_BIND_ADDRESS=122.233.30.160
+TEST_AGENT_MEMORY_DB_HOST_PORT=15433
+TEST_AGENT_MEMORY_SERVICE_DATABASE_URL=postgresql://testagent_memory:<与DB_PASSWORD相同>@122.233.30.160:15433/testagent_memory
+TEST_AGENT_MEMORY_SERVICE_MODEL_GATEWAY_URL=http://122.233.30.2:9996/api/internal/platform/model-gateway/v1
+TEST_AGENT_MEMORY_NODE_ID=node-160-1
+TEST_AGENT_MEMORY_BIND_ADDRESS=122.233.30.160
+TEST_AGENT_MEMORY_HOST_PORT=18889
+TEST_AGENT_MEMORY_VIP_BIND_ADDRESS=122.233.30.160
+TEST_AGENT_MEMORY_VIP_HOST_PORT=18888
+TEST_AGENT_MEMORY_UPSTREAMS=122.233.30.160:18889
+```
+
+`.160` 启动记忆库时显式使用新目录，防止后续脚本默认值变化或误指向克隆 PG 数据：
+
+```bash
+TEST_AGENT_MEMORY_POSTGRES_DATA_DIR=/data/testagent/memory/postgres-v1 \
+  deploy/internal/memory-docker.sh start-db
+deploy/internal/memory-docker.sh verify-db
+```
+
 U 盘完整包先进入企业中转机 `~/Desktop/mimoagent/0709`，执行 SHA-256 校验后再分发：
 
 | 目标 | 产物目录 |
