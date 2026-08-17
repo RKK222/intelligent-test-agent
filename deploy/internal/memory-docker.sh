@@ -263,7 +263,8 @@ start_db() {
   image="$(required_value "${MEMORY_ENV_FILE}" TEST_AGENT_MEMORY_PGVECTOR_IMAGE)"
   bind="$(required_value "${MEMORY_ENV_FILE}" TEST_AGENT_MEMORY_DB_BIND_ADDRESS)"
   port="$(required_value "${MEMORY_ENV_FILE}" TEST_AGENT_MEMORY_DB_HOST_PORT)"
-  docker run -d --name "${DB_CONTAINER}" --restart unless-stopped \
+  # 企业现场明确批准使用 privileged 兼容 Docker 18.09 的旧 seccomp/runc。
+  docker run -d --privileged --name "${DB_CONTAINER}" --restart unless-stopped \
     --env-file "${env_file}" -p "${bind}:${port}:5432" \
     -v "${POSTGRES_DATA_DIR}:/var/lib/postgresql/data" "${image}" >/dev/null
   echo "Started independent memory PostgreSQL container ${DB_CONTAINER}."
@@ -296,7 +297,7 @@ start_embedding() {
   image="$(required_value "${EMBEDDING_ENV_FILE}" TEST_AGENT_EMBEDDING_IMAGE)"
   bind="$(required_value "${EMBEDDING_ENV_FILE}" TEST_AGENT_EMBEDDING_BIND_ADDRESS)"
   port="$(required_value "${EMBEDDING_ENV_FILE}" TEST_AGENT_EMBEDDING_HOST_PORT)"
-  docker run -d --name "${EMBEDDING_CONTAINER}" --restart unless-stopped \
+  docker run -d --privileged --name "${EMBEDDING_CONTAINER}" --restart unless-stopped \
     --read-only --tmpfs /tmp:rw,noexec,nosuid,size=256m \
     --cap-drop ALL --security-opt no-new-privileges \
     --env-file "${env_file}" -p "${bind}:${port}:18989" "${image}" >/dev/null
@@ -335,7 +336,7 @@ migrate() {
   require_command docker
   image="$(required_value "${MEMORY_ENV_FILE}" TEST_AGENT_MEMORY_SERVICE_IMAGE)"
   env_file="$(memory_runtime_env)"
-  docker run --rm --name test-agent-memory-migrate --read-only \
+  docker run --rm --privileged --name test-agent-memory-migrate --read-only \
     --tmpfs /tmp:rw,noexec,nosuid,size=64m \
     --cap-drop ALL --security-opt no-new-privileges --env-file "${env_file}" \
     --entrypoint alembic "${image}" -c /opt/test-agent-memory/alembic.ini upgrade head
@@ -352,7 +353,7 @@ start_memory() {
   env_file="$(memory_runtime_env)"
   bind="$(required_value "${MEMORY_ENV_FILE}" TEST_AGENT_MEMORY_BIND_ADDRESS)"
   port="$(required_value "${MEMORY_ENV_FILE}" TEST_AGENT_MEMORY_HOST_PORT)"
-  docker run -d --name "${name}" --restart unless-stopped \
+  docker run -d --privileged --name "${name}" --restart unless-stopped \
     --read-only --tmpfs /tmp:rw,noexec,nosuid,size=256m \
     --cap-drop ALL --security-opt no-new-privileges \
     --env-file "${env_file}" -p "${bind}:${port}:18888" "${image}" >/dev/null
@@ -405,7 +406,7 @@ start_vip() {
     printf '  }\n}\n'
   } >"${config}"
   chmod 0644 "${config}"
-  docker run -d --name "${VIP_CONTAINER}" --restart unless-stopped --read-only \
+  docker run -d --privileged --name "${VIP_CONTAINER}" --restart unless-stopped --read-only \
     --user 101:101 --cap-drop ALL --security-opt no-new-privileges \
     --tmpfs /var/cache/nginx:rw,noexec,nosuid,nodev,size=32m,uid=101,gid=101,mode=0700 \
     --tmpfs /var/run:rw,noexec,nosuid,nodev,size=1m,uid=101,gid=101,mode=0700 \

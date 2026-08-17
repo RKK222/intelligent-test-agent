@@ -15,6 +15,16 @@ grep -Fq -- "--exclude='__pycache__/'" "${ROOT_DIR}/deploy/internal/package-memo
 grep -Fq '*.pyc' "${ROOT_DIR}/memory-service/.dockerignore"
 grep -Fq '*.pyc' "${ROOT_DIR}/embedding-service/.dockerignore"
 grep -Fq -- '--user 101:101 --cap-drop ALL' "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq 'docker run -d --privileged --name "${DB_CONTAINER}"' \
+  "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq 'docker run -d --privileged --name "${EMBEDDING_CONTAINER}"' \
+  "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq 'docker run --rm --privileged --name test-agent-memory-migrate' \
+  "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq 'docker run -d --privileged --name "${name}"' \
+  "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq 'docker run -d --privileged --name "${VIP_CONTAINER}"' \
+  "${ROOT_DIR}/deploy/internal/memory-docker.sh"
 grep -Fq 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1' \
   "${ROOT_DIR}/deploy/internal/memory-docker.sh"
 grep -Fq 'Memory PostgreSQL did not become ready within 120 seconds.' \
@@ -26,6 +36,8 @@ grep -Fq 'Memory endpoint did not become ready within 120 seconds' \
 grep -Fq '`122.233.30.134` | 独立记忆 PostgreSQL/pgvector' \
   "${ROOT_DIR}/docs/deployment/qa-memory.md"
 grep -Fq '`122.233.30.160` | Mem0 副本' \
+  "${ROOT_DIR}/docs/deployment/qa-memory.md"
+grep -Fq 'memory-docker.sh.bak-before-privileged' \
   "${ROOT_DIR}/docs/deployment/qa-memory.md"
 grep -Fq 'TEST_AGENT_MEMORY_DB_BIND_ADDRESS=122.233.30.134' \
   "${ROOT_DIR}/docs/deployment/qa-memory.md"

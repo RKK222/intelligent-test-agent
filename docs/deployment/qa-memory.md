@@ -155,6 +155,33 @@ deploy/internal/package-release.sh --memory-only
 
 所有 Docker base/infrastructure image 使用 linux/amd64 digest；禁止 `latest`。BGE 权重必须已经位于 embedding 镜像，现场 readiness 的 model/revision/dimension/normalized 不完全匹配即停止发布。
 
+当前企业基线 Docker 18.09 的默认 seccomp 对 Bookworm、Alpine 3.20 及其它新用户态系统调用存在 `EPERM` 兼容风险。按现场明确批准，`memory-docker.sh` 使用 `--privileged` 启动 pgvector、Alembic job、Mem0、VIP 和 BGE 五种入口。该例外不修改 Docker daemon，不改变克隆机上原 PG 容器；Mem0、Alembic、BGE、VIP 的非 root 用户、只读根、受限 tmpfs 和只读配置挂载仍保留，但 `--privileged` 会显著放宽设备、capability 及系统调用隔离，不能把这些剩余参数描述成等价沙箱。宿主 Docker/runc/libseccomp 升级并完成逐镜像实机回归后应移除该例外。
+
+两台企业机已经有完整 `/data/0709/memory` 时无需重新传输四个镜像 tar。分别备份并原地修改脚本；以下五个替换只匹配旧启动行，重复执行不会重复添加参数：
+
+```bash
+cd /data/0709/memory
+if ! grep -Fq -- '--privileged' memory-docker.sh; then
+  test ! -e memory-docker.sh.bak-before-privileged || {
+    echo 'STOP: backup already exists but script is not patched'
+    exit 1
+  }
+  cp -p memory-docker.sh memory-docker.sh.bak-before-privileged
+  sed -i \
+    -e 's/docker run -d --name "${DB_CONTAINER}"/docker run -d --privileged --name "${DB_CONTAINER}"/' \
+    -e 's/docker run -d --name "${EMBEDDING_CONTAINER}"/docker run -d --privileged --name "${EMBEDDING_CONTAINER}"/' \
+    -e 's/docker run --rm --name test-agent-memory-migrate/docker run --rm --privileged --name test-agent-memory-migrate/' \
+    -e 's/docker run -d --name "${name}"/docker run -d --privileged --name "${name}"/' \
+    -e 's/docker run -d --name "${VIP_CONTAINER}"/docker run -d --privileged --name "${VIP_CONTAINER}"/' \
+    memory-docker.sh
+fi
+bash -n memory-docker.sh
+test "$(grep -c -- '--privileged' memory-docker.sh)" -eq 5
+grep -n -- '--privileged' memory-docker.sh
+```
+
+最后一条必须显示五个启动入口；数量不是 5 就停止，不启动任何角色。
+
 ## 企业分发与启动
 
 记忆 PostgreSQL 必须绑定可被 Mem0 节点访问的具体内网 IP；若使用模板中的 `0.0.0.0`，主机防火墙必须把 5432 来源限制为 Mem0 节点。不能保留 `127.0.0.1` 后却让独立 Mem0 节点连远程库。
@@ -179,6 +206,7 @@ deploy/internal/package-release.sh --memory-only
 ```bash
 uname -m
 docker version --format 'docker={{.Server.Version}}'
+docker info --format 'security={{.SecurityOptions}}'
 docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 ss -lnt 2>/dev/null | grep -E ':(5432|15433)[[:space:]]' || true
 find /data /var/lib -maxdepth 4 -type f -name PG_VERSION -print 2>/dev/null
@@ -194,6 +222,7 @@ df -h /data
 ```bash
 uname -m
 docker version --format 'docker={{.Server.Version}}'
+docker info --format 'security={{.SecurityOptions}}'
 docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 ss -lnt 2>/dev/null | grep -E ':(5432|18888|18889|18989)[[:space:]]' || true
 find /data /var/lib -maxdepth 4 -type f -name PG_VERSION -print 2>/dev/null
@@ -409,7 +438,7 @@ Java 日志；企业停启 hook 同样由发布人员注入 SSH/编排命令，�
 - 浏览器把明确标注为“一次性、非偏好”的随机原始对话 marker 写入 Session；记忆控制/history、每个向量
   collection、Mem0/CPU/VIP 运行时文件系统和日志中均不得出现该 marker。投影还必须无缺行、越版本、积压或死信；
   collection 内同一 `logicalMemoryId` 只能有一个向量且实际维度匹配名称。Mem0 与 CPU Embedding 容器必须以非 root、
-  只读根文件系统、无本地数据 mount、`no-new-privileges` 和 `cap_drop=ALL` 运行；VIP 固定 `101:101`，只挂载只读 Nginx 配置。
+  只读根文件系统、无本地数据 mount、`no-new-privileges` 和 `cap_drop=ALL` 运行；VIP 固定 `101:101`，只挂载只读 Nginx 配置。当前 Docker 18.09 现场按明确批准额外使用 `--privileged`；验收必须从 `docker inspect` 核实该事实并按高权限容器管理，不能把非 root/只读根等剩余参数视为等价隔离。
 - 数据面日志不得出现 memory service key、HMAC secret、Embedding API key 或记忆 PostgreSQL 密码；Alembic 必须保持单一预期 head。
 - 平台审计确认原始聊天只存在既有 Session 事实表，没有第二份消息镜像。
 - 易用性门禁在真实后端页面以 640 CSS px 验证等效 1280px 屏幕 200% 缩放，无记忆中心横向溢出；三个页签必须可按 Tab/Enter 操作，详情可用 Escape 关闭，并启用 Reduced Motion。组件回归另行覆盖加载失败后的显式重试、拒绝原因、2000 字输入边界和 HTML-like 内容只按文本渲染。

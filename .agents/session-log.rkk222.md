@@ -11303,3 +11303,27 @@
 
 - 本地页面现已返回修复版，用户可以重新下载并执行系统 Installer；现有用户目录客户端保持 PID `60264` 运行，未重启 Java、worker、manager 或数据库。
 - 本次只切换本机忽略跟踪的开发制品目录，没有上传企业 `.2` 的 `/data/testagent/dist/local-opencode-client/`，也没有修改 API、事件、数据库/Flyway、配置文件或源码。
+
+## 2026-08-17 - 兼容企业 Docker 18.09 的中间件 privileged 启动
+
+### Why
+
+- `.147` 修复 IPv4 forwarding 与 Docker NAT 链后，ClickHouse 已能创建容器，但 26.3.17.56 在解析 `UTC` 时因旧 Docker seccomp/runc 对 `/usr/share/zoneinfo` 相关新系统调用返回 `EPERM` 而重启。
+- pgvector、Bookworm Python Mem0/BGE 与 Alpine 3.20 VIP 使用同一批 Docker 18.09 企业宿主，也存在相同系统调用兼容风险；现场负责人明确批准这些新增中间件统一使用 `--privileged`。
+
+### What
+
+- 继续复用 `deploy-clickhouse.sh` 和 `memory-docker.sh`，分别给 ClickHouse，以及记忆 pgvector、Alembic、Mem0、BGE、VIP 五类入口增加 `--privileged`；不修改 daemon，也不改变平台 PG 或克隆机遗留 PG 容器。
+- 更新 ClickHouse、通用记忆、企业部署入口和安全规范，明确 privileged 会显著放宽设备、capability、seccomp/AppArmor 隔离；保留非 root、只读根、受限 tmpfs 等参数，但不把它们表述为等价沙箱。
+- 回归测试锁定六类启动入口都带 privileged。用户明确不重新拷贝大型镜像包，现场改为备份并原地修改已解压脚本，继续复用已校验的镜像 tar、配置和数据目录。
+
+### How
+
+- `bash -n`、ClickHouse 部署/封包测试、memory 离线包测试、AI 文档校验和 `git diff --check` 通过；本机缺少 `shellcheck` 命令，该项未执行。
+- 对提交前旧版脚本以管道实际执行文档中的 `sed` 替换：ClickHouse 精确生成一个 privileged 入口，memory 精确生成五个入口，两份结果均通过 `bash -n`。
+- 在 Docker 24.0.2 上用现有最终 linux/amd64 镜像实际执行 privileged smoke：ClickHouse 返回 `UTC / 26.3.17.56`，pgvector 返回 PostgreSQL `16.12`，Mem0/BGE 完成时区路径解析和线程创建，VIP 返回 Nginx `1.27.2`。Mac 为 arm64，以上通过仿真完成，不能替代企业 Docker 18.09 实机验收。
+
+### Result
+
+- 仓库后续重新封装时会自动带上 privileged 启动参数；本次没有重建或替换 `deploy/internal/dist` 中的大型离线镜像制品。
+- 不修改 HTTP API、RunEvent、数据库结构/Flyway、generated SDK、OpenCode 源码、凭据或 `.env*`。企业 `.147/.134/.160` 的原地脚本修改和真实启动仍由现场按逐机命令执行，任一 readiness 失败即停止后续节点。

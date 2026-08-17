@@ -299,6 +299,12 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
+## 企业旧 Docker 的中间件 seccomp 兼容例外
+
+1. 当前 Linux 4.19 / Docker 18.09.7 节点运行 ClickHouse 26.3、Bookworm Python/pgvector 或 Alpine 3.20 镜像时，旧默认 seccomp 可能把新系统调用返回为 `EPERM`，导致时区解析、线程创建或镜像入口失败。经现场负责人明确批准，交付脚本使用 `--privileged` 启动 ClickHouse、独立记忆 pgvector、Alembic、Mem0、CPU BGE 和记忆 VIP 容器。
+2. 该例外不得写入 Docker daemon 全局默认，不得扩大到共置平台 PostgreSQL、克隆机遗留容器或其它业务容器。非 root、只读根、最小 mount、端口 ACL 和密钥文件权限继续保留，但不得宣称它们抵消了 privileged 带来的设备、capability、seccomp/AppArmor 隔离放宽；这些容器必须按高权限工作负载限制宿主访问和运维人员范围。
+3. 外网 Mac 的现代 Docker 启动验证只能证明制品功能，不能替代每台旧 Docker 企业宿主验证。宿主 Docker、runc 和 libseccomp 完成受控升级后，必须逐镜像移除 `--privileged` 实启并通过 readiness，才能取消例外；不能只按版本号推断兼容。
+
 ## 官方 Codex MCP 安全边界
 
 1. 公共配置通过中性名称 `code_analysis` 注册本地 MCP。使用者必须仍是当前应用有效成员；普通成员、应用管理员和已加入应用的 `SUPER_ADMIN` 权限相同，超级管理员不得旁路成员校验。

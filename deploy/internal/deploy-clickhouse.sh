@@ -125,6 +125,7 @@ chown 101:101 "${DATA_ROOT}" "${LOG_ROOT}"
 installed_config="/data/testagent/config/clickhouse-users.xml"
 install -m 0600 "${USERS_CONFIG_FILE}" "${installed_config}"
 docker run -d \
+  --privileged \
   --name "${CONTAINER}" \
   --hostname "${CONTAINER}" \
   --restart unless-stopped \

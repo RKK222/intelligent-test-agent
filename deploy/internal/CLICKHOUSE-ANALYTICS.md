@@ -2,7 +2,7 @@
 
 本手册用于在企业网络新增一个独立 x86_64 ClickHouse 进程，固定使用 ClickHouse 26.3.17.56，承载平台全部运营用户维度、行为事实、小时/日汇总、Token 使用与 Agent/Skill/Tool 调用统计。平台业务库仍使用 PostgreSQL；PostgreSQL 只保留业务主数据、临时事务 outbox、Redis 消费检查点、回填切换记录和任务锁，不作为任何运营查询来源。当前首次试部署按现场指定把 ClickHouse 容器共置在原平台 PostgreSQL 节点 `122.233.30.147`，但必须继续保留 PostgreSQL 的 `5432`、进程和全部数据目录；ClickHouse 只使用 `8123` 与 `/data/testagent/clickhouse`，资源或端口不满足时停止，不得为部署 ClickHouse 清理或迁移原 PG 数据。
 
-本交付不使用 Docker Compose。ClickHouse 节点只运行一个 `--restart unless-stopped` 容器，数据落在 `/data/testagent/clickhouse/data`，日志落在 `/data/testagent/clickhouse/log`。原始运营事实 TTL 为 2 年，汇总表不设置 TTL。外网打包按多架构索引 digest `sha256:422be85a...fcb3` 固定上游，并直接导出 linux/amd64 archive，避免 Apple Silicon 本地 arm64 tag 污染交付物。
+本交付不使用 Docker Compose。ClickHouse 节点只运行一个 `--restart unless-stopped` 容器，数据落在 `/data/testagent/clickhouse/data`，日志落在 `/data/testagent/clickhouse/log`。原始运营事实 TTL 为 2 年，汇总表不设置 TTL。外网打包按多架构索引 digest `sha256:422be85a...fcb3` 固定上游，并直接导出 linux/amd64 archive，避免 Apple Silicon 本地 arm64 tag 污染交付物。当前现场 Docker 18.09 的默认 seccomp 会把新镜像使用的系统调用返回为 `EPERM`；按现场明确批准，交付脚本固定使用 `--privileged` 启动 ClickHouse。该例外不修改 Docker daemon，也不改变共置 PostgreSQL 容器的启动参数，但会显著放宽 ClickHouse 容器对宿主的权限。
 
 ## 1. 地址与目录
 
@@ -72,6 +72,7 @@ scp test-agent-clickhouse-offline.zip test-agent-clickhouse-offline.zip.sha256 \
 ```bash
 uname -m
 docker version --format 'docker={{.Server.Version}}'
+docker info --format 'security={{.SecurityOptions}}'
 docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 ss -lnt 2>/dev/null | grep -E ':(5432|8123)[[:space:]]' || true
 find /data /var/lib -maxdepth 4 -type f -name PG_VERSION -print 2>/dev/null
@@ -106,7 +107,7 @@ sha256sum -c test-agent-clickhouse_26.3.17.56-linux-amd64.tar.sha256
   deploy
 ```
 
-脚本会校验 linux/amd64 架构、镜像版本、密码摘要、持久目录和数据库存在性。本机认证与建库使用容器内 `clickhouse-client`，不依赖宿主安装客户端，也不因 Docker DNAT 把宿主回环来源改写成网桥地址而扩大用户白名单。首次部署成功后执行：
+脚本会校验 linux/amd64 架构、镜像版本、密码摘要、持久目录和数据库存在性，并以现场批准的 `--privileged` 创建 ClickHouse 容器。本机认证与建库使用容器内 `clickhouse-client`，不依赖宿主安装客户端，也不因 Docker DNAT 把宿主回环来源改写成网桥地址而扩大用户白名单。首次部署成功后执行：
 
 ```bash
 ./deploy-clickhouse.sh \
@@ -176,6 +177,36 @@ TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS=true
 ## 8. 故障与回滚
 
 ClickHouse 不可用时，业务登录、消息、Run 和反馈写入不阻塞；PostgreSQL outbox 保留未发布事件并每分钟重试。运营查询明确返回 `503 ANALYTICS_UNAVAILABLE`，不会偷偷回退到 PostgreSQL 扫描。
+
+如果日志出现以下错误，说明容器已经越过端口映射阶段，但旧 Docker seccomp 把 ClickHouse 读取时区目录所需的新系统调用返回为 `EPERM`：
+
+```text
+Could not determine time zone from TZ variable value: 'UTC'
+filesystem error: in weakly_canonical: Operation not permitted ["/usr/share/zoneinfo/"]
+```
+
+先执行 `docker stop test-agent-clickhouse` 停止重启循环，换用内含 `--privileged` 启动参数的新包，再通过
+`--replace-existing deploy` 重新创建当前 ClickHouse 容器。不得把 daemon 全局改成 unconfined，也不得删除
+`/data/testagent/clickhouse/data`。宿主 Docker、runc 与 libseccomp 完成受控升级并在真实节点以非 privileged
+方式回归全部离线镜像后，才可移除该例外。
+
+已经把旧包解压到 `.147` 时无需重新传输约 251 MiB 镜像。先备份并原地更新唯一启动行；命令可重复执行，发现既有备份但脚本仍未修改时会停止，避免覆盖恢复点：
+
+```bash
+cd /data/0709/test-agent-clickhouse-offline
+if ! grep -Fq -- '--privileged' deploy-clickhouse.sh; then
+  test ! -e deploy-clickhouse.sh.bak-before-privileged || {
+    echo 'STOP: backup already exists but script is not patched'
+    exit 1
+  }
+  cp -p deploy-clickhouse.sh deploy-clickhouse.sh.bak-before-privileged
+  sed -i 's/^docker run -d \\$/docker run -d --privileged \\/' deploy-clickhouse.sh
+fi
+bash -n deploy-clickhouse.sh
+grep -n -A 2 '^docker run -d' deploy-clickhouse.sh
+```
+
+预期显示 `docker run -d --privileged \`。若没有显示，停止，不要执行 deploy。
 
 清理旧汇总前的回滚：
 
