@@ -10957,3 +10957,26 @@
 
 - 页面可见性与后端学习/检索共用同一用户灰度名单，超级管理员仍是唯一名单维护者；授权结果按用户隔离并在页面聚焦时复核，无法确认时失败关闭。
 - 仅复用既有 HTTP API 和数据库结构；未变更 API/RunEvent/DTO、数据库/Flyway、部署拓扑、generated SDK 或 OpenCode 源码。平台当前以本地 PostgreSQL/Redis 运行在 `http://127.0.0.1:3000`，Memory 数据面仍保持停止，避免为页面灰度验证额外启动大模型容器。
+
+## 2026-08-17 - dev 依赖迁移到 192.168.8.100
+
+### Why
+
+- 用户要求本机后续只启动前端和后端，PostgreSQL、Redis、XXL MySQL、ClickHouse 与 OpenCode 全部使用局域网服务器 `192.168.8.100`，同时保留 TUN 公网代理并让该网段直连。
+
+### What
+
+- 在 Ubuntu 服务器补齐 Docker/Compose、JDK 21、Maven、Go、Node/pnpm、OpenCode、Git/SSH 和常用诊断工具；复制本机 SSH 身份与 known_hosts，验证 Gitee/GitHub SSH 和仓库 fetch 可用。服务器 dev worktree 保持可向 `origin/dev` 快进。
+- 将本机 PostgreSQL 16 的 `testagent` 数据恢复到服务器隔离库 `testagent_dev`，保留服务器原库和同步前数据卷；服务器持续运行 PostgreSQL、Redis、XXL MySQL、ClickHouse 26.3.17.56，以及 OpenCode 所需的后台 Java 控制面和 manager，远端前端保持停止。OpenCode 端口池按用户初始化按需拉起，不预置无主进程。
+- 本机忽略文件 `.env.test` 已改为访问服务器依赖并关闭本机 OpenCode/manager；本机旧 `test-agent-*` 数据容器和 memory mock 已停止，只保留 backend/frontend。Clash Verge/Mihomo 的持久配置和运行配置增加 `192.168.8.0/24` DIRECT 与 TUN route exclusion，TUN 继续启用。
+
+### How
+
+- PostgreSQL 恢复后逐条核对 108 条成功 Flyway history、0 条失败；本机端到端校验得到 PostgreSQL `testagent_dev:108`、Redis `PONG`、ClickHouse `testagent_analytics / 26.3.17.56`、XXL MySQL 端口可达。
+- 服务器 PostgreSQL/Redis/XXL MySQL/ClickHouse 容器健康，远端控制后端 readiness 为 `UP`，manager WebSocket 已连接，服务器 3000 端口停止；本机后端 readiness 为 `UP`、前端 3000 返回 200，进程清单仅有 `test-agent-backend` 和 `test-agent-frontend`。
+- 当前工作区另有未提交的受保护 Agent 开发代码，其中 `ProtectedAgentFileGrantService` 的双构造器未指定 Spring 注入构造器；为避免覆盖在途改动，本轮运行使用当前已提交 `a7316a344` 的干净后端 JAR 验证环境，未修改该代码。
+
+### Result
+
+- dev 运行拓扑已切换为“本机 frontend/backend → `192.168.8.100` 全部数据与 OpenCode 依赖”，本机与服务器均已实际启动/探测；服务器数据卷、同步 dump 和同步前备份保留。
+- 本轮只修改忽略的 `.env.test` 和仓库外的 Clash/服务器环境，未修改 API、RunEvent、数据库结构/Flyway、generated SDK 或 OpenCode 源码。当前 `origin/dev` 仍落后本机已提交 dev 63 个提交，服务器 worktree 落后本机 2 个已提交变更；相关提交推到 origin 后服务器可正常 fast-forward pull。
