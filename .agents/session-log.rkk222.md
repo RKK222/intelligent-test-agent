@@ -11077,3 +11077,28 @@
 
 - 小地球不再按月份范围或应用目录限制输入，应用和版本均可自由选择/输入；空值仍在前端拒绝，TCDS token、文档地址和工作区写入安全边界不变。
 - 本次不改变 HTTP/WebSocket 请求结构、RunEvent、数据库、Flyway、部署配置、公共 Agent、Workspace ID 或 Git diff/提交推送链路。真实 TCDS 条目结果和完整导入仍需在 PostgreSQL 与企业网络恢复后复测。
+
+## 2026-08-17 - 重打小地球自由选择企业包
+
+### Why
+
+- 用户要求再次重打企业包；当前本地 `release` 已包含提交 `def19cea5` 的小地球应用与版本自由选择修复，该提交尚未进入上一份 `95a7a9385` 制品。
+
+### What
+
+- 制品源码提交固定为 `def19cea51096a2ab4109b04b15972094f5af310`；内层发布 ZIP SHA-256 为 `804fb683e3c8971727de411442d87344484ef6edbc315a76ee207a45f1f09406`，外层完整包为 `b04e4892d3220f28ebc575c42d8f8e099c79770715bbfbe7f3124899187256af`。
+- 后端 app JAR 为 `ba9a1eba7f5c27528923d7d2a9a9b1f7d7c15904905b62ad4e5e8dbd495074ae`，persistence JAR 为 `3bae650c8fa7c07c39f8a4878b35a48d23a96d9a161c353125be04050c6b895e`，XXL integration JAR 为 `4bf2c59f8c13e2662e30751361531fded0b9cf6fc5c4ce8ba7c6875b7256e481`，前端归档为 `95780f16b958632bbce10e5e0642670cbc8e2e39b4e83a33c9a0039b982e30e7`。
+- 相比上一包新增小地球应用/版本可自由输入与搜索：月份范围和 TCDS 应用目录只作为候选建议，不再作为前端硬限制。
+
+### How
+
+- JDK 25 下后端 `RequirementImportApplicationServiceTest` 7/7、前端需求导入与文件树定向 Vitest 30/30 通过；正式生产构建成功并生成独立 `workspace-requirement-import` 入口。
+- 显式关闭 workflow/LobeHub；worker runtime 指纹 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`、toolbox 指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040` 均继续 `reuse`。
+- 外层 ZIP、内嵌内层逐字节一致、三份节点包 SHA、内层 `--validate-only`、最终 JAR 受保护 Flyway 资源、两台 TCDS 精确地址和 worker 大制品缺失门禁均通过；对比上一包源码 `95a7a93859550fdfbf309e14a5cdea1220cf282e` 没有 migration 或 `deploy/internal` 变化。
+- 提交前已回顾全部 `.agents/session-log*.md` 近期记录，未发现会覆盖或丢弃其他提交者成果的冲突。
+
+### Result
+
+- 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c`、`unzip -t` 和内外层逐字节比较。
+- 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库预期 Flyway history 零新增。
+- 真实企业 TCDS 的目录外应用、目录外版本查询及完整文档导入仍需现场验收。
