@@ -11169,7 +11169,7 @@
 ### How
 
 - ClickHouse 脚本/夹具校验和 AI 文档校验通过；最终 ZIP SHA-256 为 `84406aa69a932e7a900e9d5323c41af15dd2dcc8fd7a70cd84acfcd3388c3819`。包内 tar 重新 load 后以 amd64 仿真启动，实际完成版本查询、自定义用户认证和 `testagent_analytics` 建库。
-- 记忆四个最终 tar 全量 `SHA256SUMS` 通过；SHA-256 分别为 memory-service `ec413598...a013`、embedding `db2087d9...c940`、pgvector `dbf156d7...c27e`、VIP Nginx `7291e71f...7486`。从最终 tar 重新 load 后依次启动 pgvector、CPU BGE、Alembic、Mem0、VIP，验证数据库认证 `select 1`、BGE 固定 revision/512 维/归一化、Alembic head、Mem0/VIP `rawMessageCount=0`，随后按角色停止临时容器。
+- 记忆四个提交绑定版最终 tar 全量 `SHA256SUMS` 通过，`release.env` revision 为 `eed95c039c76c5ed0a6f7eaa27edb2edbda4b7ef`；SHA-256 分别为 memory-service `98f3c8b0...cf80`、embedding `2190a366...e1ff`、pgvector `01802c80...ce06`、VIP Nginx `7886e103...ca63`。从最终 tar 重新 load 后依次启动 pgvector、CPU BGE、Alembic、Mem0、VIP，验证数据库认证 `select 1`、BGE 固定 revision/512 维/归一化、Alembic head、Mem0/VIP `rawMessageCount=0`，随后按角色停止临时容器。
 - 当前 Mac 到 `.134/.160` 的 22 端口在服务端 SSH banner 前主动断开；5432 与其它探测端口只能建立 TCP 后无应用响应，不能替代企业中转机/堡垒机上的目标宿主预检，因此未远程写入服务器。
 
 ### Result
