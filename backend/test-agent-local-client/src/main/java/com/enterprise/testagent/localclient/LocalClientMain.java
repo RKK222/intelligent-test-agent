@@ -27,6 +27,9 @@ public final class LocalClientMain {
         System.setProperty("apple.awt.UIElement", "true");
         Files.createDirectories(LocalClientPaths.logsDirectory());
         System.setProperty("testagent.localclient.logDir", LocalClientPaths.logsDirectory().toString());
+        if (!LocalClientFirstRunSetup.ensureConfigured()) {
+            return;
+        }
         LocalClientConfiguration configuration = LocalClientConfiguration.load();
         String clientKey = LocalClientCredentialFile.read();
         LocalClientStateStore stateStore = new LocalClientStateStore();

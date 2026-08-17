@@ -1,13 +1,16 @@
-# 本地 OpenCode 客户端打包与内网 HTTP 安装
+# 本地 OpenCode 客户端原生安装包与内网分发
 
 ## 制品范围
 
 首版只发布 `darwin-arm64` 和 `linux-arm64-glibc`。每个版本包含跨平台 Java 客户端 JAR、Temurin JRE
 21.0.9+10、OpenCode 1.18.4，以及签名的稳定清单。打包脚本固定校验四个上游归档的 SHA-256，再把目录
-结构规范化为 `jre/bin/java` 和 `opencode/bin/opencode`。
+结构规范化为 `jre/bin/java` 和 `opencode/bin/opencode`。面向普通用户额外生成 macOS PKG 和麒麟 ARM64
+DEB；`install.sh` 只作为无桌面环境和运维排障兜底。
 
 ```text
 deploy/internal/dist/local-opencode-client/
+├── TestAgent-Local-Client-macOS-arm64.pkg
+├── TestAgent-Local-Client-Kylin-arm64.deb
 ├── install.sh
 ├── stable/
 │   ├── manifest.json
@@ -32,6 +35,10 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
 
 export TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY=/secure/local-client-signing-private.pem
 export TEST_AGENT_LOCAL_CLIENT_VERSION=0.1.0
+# 生产 Mac 构建机应配置真实 Developer ID；没有证书时只会产出不可作为正式交付的 unsigned PKG。
+export TEST_AGENT_LOCAL_CLIENT_MACOS_APPLICATION_IDENTITY='Developer ID Application: ...'
+export TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY='Developer ID Installer: ...'
+export TEST_AGENT_LOCAL_CLIENT_MACOS_NOTARY_PROFILE='testagent-notary'
 deploy/internal/package-release.sh --local-client-only
 ```
 
@@ -39,6 +46,9 @@ deploy/internal/package-release.sh --local-client-only
 `dist/local-opencode-client/`。`--zip-only` 要求该目录已存在且清单完整。离线构建可以通过
 `TEST_AGENT_LOCAL_CLIENT_*_ARCHIVE` 指向四个已经审批和预下载的归档；脚本仍使用固定 SHA-256 校验。
 可在显式 env 文件中覆盖 URL/SHA，但变更必须重新完成来源、许可证和 ARM 实机验证。
+`TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL` 和 `TEST_AGENT_LOCAL_CLIENT_DEFAULT_WEB_URL` 可为原生首次启动
+向导预填同一部署的 HTTPS 地址；跨部署复用制品时保持为空。只有 localhost 开发包允许同时设置
+`TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP=true`。
 
 ## 前端 Nginx 部署
 
@@ -49,7 +59,7 @@ deploy/internal/package-release.sh --local-client-only
 ```
 
 `gateway.conf.template` 暴露 `/downloads/local-opencode-client/`，关闭目录索引与符号链接，拒绝隐藏路径。
-`install.sh` 和 `stable/*` 使用 `Cache-Control: no-store`；`releases/*` 使用一年 immutable 缓存。该下载
+原生安装包、`install.sh` 和 `stable/*` 使用 `Cache-Control: no-store`；`releases/*` 使用一年 immutable 缓存。该下载
 位置不校验 client key，访问范围由企业网络 ACL 控制。`TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT` 配置一个
 只暴露下载路径、其余请求均返回 404 的独立明文 HTTP server；它不得与 HTTPS 业务网关端口重复。安装器
 只接受明确的 `http://` 下载基址。示例现场使用 HTTPS 443 作为业务入口、HTTP 80 作为制品入口。
@@ -62,16 +72,32 @@ deploy/internal/package-release.sh --local-client-only
 
 ```bash
 curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/install.sh | head
+curl -fsSI -A 'Mozilla/5.0 (Macintosh)' http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/installer
+curl -fsSI -A 'Mozilla/5.0 (X11; Linux aarch64)' http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/installer
 curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/manifest.json
 curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/manifest.json.sig -o /tmp/manifest.json.sig
 ```
 
 ## 用户安装
 
-先点击右上角头像，在 OpenCode 实例列表下方选择“下载本地客户端”，再到“个人设置 → 本地 OpenCode
-客户端”创建并复制 client key。该入口下载 `/downloads/local-opencode-client/install.sh`；生产由 Nginx 提供，
-dev server 默认从 `deploy/internal/dist/local-opencode-client/` 只读提供，必要时可用
-`TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录。下载脚本可以先落盘审阅，再执行：
+先到“个人设置 → 本地 OpenCode 客户端”创建并复制 client key，再点击右上角头像，在 OpenCode 实例列表
+下方选择“下载本地客户端”。统一入口 `/downloads/local-opencode-client/installer` 按 User-Agent 返回：
+
+- Apple Silicon macOS：`TestAgent-Local-Client-macOS-arm64.pkg`，双击后使用系统 Installer。
+- ARM64 glibc 麒麟：`TestAgent-Local-Client-Kylin-arm64.deb`，双击后使用麒麟软件安装器。
+
+原生包内已经包含 JRE、OpenCode 和客户端 JAR。安装完成后首次启动向导要求填写平台服务地址、打开网页地址
+并粘贴 client key；key 只进入密码框和当前用户的 `0600` 文件，不进入命令行、环境变量或安装日志。客户端
+向平台注册后，头像菜单原下载位置切换为“本地 OpenCode 健康/异常/离线”；是否安装以服务端实例记录为准，
+不使用浏览器下载记录猜测。
+
+macOS 安装 `/Applications/TestAgent Local Client.app` 和系统级 LaunchAgent 定义，实际客户端仍以登录用户
+运行；麒麟安装到 `/opt/testagent/local-opencode-client`，通过全局启用的 systemd user unit 在登录用户会话
+运行，并提供应用菜单入口。安装器会尽力启动当前活动桌面用户；桌面会话总线暂不可用时，从应用菜单启动
+“TestAgent 本地客户端”或重新登录即可进入首次向导。
+
+生产由 Nginx 提供，dev server 默认从 `deploy/internal/dist/local-opencode-client/` 只读提供，必要时可用
+`TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录。无桌面环境仍可审阅并执行兜底脚本：
 
 ```bash
 curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/install.sh -o /tmp/install-local-opencode-client.sh
@@ -81,9 +107,9 @@ TEST_AGENT_LOCAL_CLIENT_WEB_URL=https://PLATFORM \
   sh /tmp/install-local-opencode-client.sh
 ```
 
-脚本从 `/dev/tty` 隐藏读取 key，不接受 key 命令行参数或环境变量。它先验证内嵌公钥对应的
+兜底脚本从 `/dev/tty` 隐藏读取 key，不接受 key 命令行参数或环境变量。它先验证内嵌公钥对应的
 `manifest.json.sig`，再逐一验证 JAR/JRE/OpenCode SHA-256，最后安装到用户目录并原子切换 `current`。
-macOS 创建 `~/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist`；麒麟 ARM 创建
+兜底脚本在 macOS 创建 `~/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist`；麒麟 ARM 创建
 `~/.config/systemd/user/test-agent-local-opencode-client.service`。两者均以登录用户运行且不需要 root。
 `TEST_AGENT_LOCAL_CLIENT_WEB_URL` 省略时默认等于 `SERVER_URL`；只有本地开发显式启用不安全控制开关时才
 允许使用 HTTP。macOS 和提供 Java SystemTray 的麒麟桌面显示宠物托盘；无图形会话或不支持托盘时客户端
@@ -141,17 +167,21 @@ deploy/internal/tests/local-opencode-client-package-test.sh
 tools/verify-internal-nginx-config.sh
 ```
 
-然后必须分别在 Apple Silicon Mac 和真实 ARM64 glibc 麒麟机上从 Nginx 明文 HTTP 地址执行安装，
-验证用户服务启动、WSS 认证、OpenCode 1.18.4 loopback 健康、本地工作区注册、聊天修改文件、
+然后必须分别在 Apple Silicon Mac 和真实 ARM64 glibc 麒麟机上从网页下载并双击 PKG/DEB，验证系统安装器、
+首次桌面向导、用户服务启动、WSS 认证、OpenCode 1.18.4 loopback 健康、菜单下载入口切换为健康度、
+本地工作区注册、聊天修改文件、
 分片 CRUD、托盘状态与全部菜单动作以及客户端重启恢复。没有完成真实麒麟 ARM 流程时，发布验收只能记为
 “部分验证”。
 
 ## 回滚与风险
 
-每个版本位于独立 `releases/{version}`，回滚时把 `current` 原子指回已验证版本并重启用户服务；Nginx
-端回滚 stable 清单时必须同时回滚对应签名，版本化制品不可原地替换。
+命令行安装的每个版本位于独立 `releases/{version}`，回滚时把 `current` 原子指回已验证版本并重启用户
+服务。原生 PKG/DEB 回滚必须重新安装已留存的上一版系统包，再重启对应用户服务；Nginx 端切换安装包时
+必须同步回滚 stable 清单和签名，版本化制品不可原地替换。
 
-当前部署明确使用无需认证的内网明文 HTTP。签名和 SHA-256 能发现传输损坏，但安装脚本本身也从同一
-明文链路取得，主动中间人可以同时替换脚本、内嵌公钥和全部制品。这是保留的部署风险，只能由网络 ACL、
-受控发布链路或改用可信 HTTPS/带外固定公钥消除。client key、控制隧道和模型请求仍必须使用 HTTPS/WSS；
-只有显式测试开关才允许不安全控制地址，生产禁止开启。
+当前部署明确使用无需认证的内网明文 HTTP。签名清单记录 PKG/DEB SHA-256，但浏览器在启动安装器前不会
+自动核对该清单；主动中间人仍可能替换下载内容。正式 macOS PKG 必须使用 Developer ID Installer 签名，
+按网络条件完成 notarization 并 stapler；当前构建机没有身份时脚本只产出带明确警告的 unsigned 开发包，
+不得冒充正式双击交付。麒麟 DEB 依赖受控发布链路、网络 ACL 和带外清单校验，未来应迁移到可信 HTTPS 或
+签名软件源。client key、控制隧道和模型请求仍必须使用 HTTPS/WSS；只有显式测试开关才允许不安全控制地址，
+生产禁止开启。

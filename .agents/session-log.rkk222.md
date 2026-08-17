@@ -11102,3 +11102,29 @@
 - 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c`、`unzip -t` 和内外层逐字节比较。
 - 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库预期 Flyway history 零新增。
 - 真实企业 TCDS 的目录外应用、目录外版本查询及完整文档导入仍需现场验收。
+
+## 2026-08-17 - 本地客户端改为双击安装并展示 OpenCode 健康度
+
+### Why
+
+- 用户不应在网页下载 Shell 脚本后再进入终端安装；Apple Silicon macOS 和 ARM 麒麟都需要可直接双击的原生安装包。
+- 客户端完成注册后，原下载位置应该变为本地 OpenCode 健康度，而不是继续诱导重复下载。
+
+### What
+
+- 分发程序新增 `TestAgent-Local-Client-macOS-arm64.pkg` 和 `TestAgent-Local-Client-Kylin-arm64.deb`；两包都内置 JRE、OpenCode、客户端 JAR 和宠物图标，macOS 安装 LaunchAgent，麒麟安装 systemd user unit 与桌面入口。原 `install.sh` 仅作 CLI 兜底。
+- 原生包首次启动使用 Swing 向导填写平台地址、网页地址和客户端密钥，密钥只写入用户私有 `0600` 文件；麒麟尚无图形会话时正常退出，避免 systemd 反复重启。
+- 页面的单一 `/installer` 入口按 User-Agent 返回 macOS PKG 或麒麟 DEB；平台一旦存在 `LOCAL_CLIENT` 注册实例，原位置改为健康、部分健康、异常或离线状态。状态复用现有 endpoint 数据，没有新增轮询。
+- Nginx、增量/完整发布门禁、配置示例、前后端 README、用户手册、本地客户端部署与安全文档已同步。
+
+### How
+
+- JDK 25 下本地客户端 reactor 共 122 项测试通过、1 项桌面条件跳过，其中客户端模块 13 项通过；首次配置覆盖私有文件权限与 HTTP 安全拒绝。
+- `FigmaShell.test.ts` 61/61、agent-web typecheck、用户手册和生产构建通过；安装包测试、真实 Nginx 语法流程、增量组件与双后台部署夹具均通过。
+- 最新 dev 制品版本为 `0.1.0-dev-native`，PKG SHA-256 为 `484d4878801bf2e9c03783bc549ec6cb091beaca30a9789561da0db4cce1ee6f`，DEB 为 `1bd03d9ef1d67ab41152218d20427cdee4562a519a223d90a054398884433bb9`；实测 Vite 路由返回正确 302、MIME 和下载文件名。
+- 按最新 `.env.test`/`test` 配置完成 26 模块后端构建并启动 backend/frontend；随后 `192.168.8.100` PostgreSQL/MySQL 网段返回 `NoRouteToHost`，readiness 为 DOWN，页面登录因此返回服务器内部错误。
+
+### Result
+
+- macOS 和麒麟的下载、原生包内容、自启配置与页面健康度切换逻辑已实现并通过自动化和本机制品校验；不变更 HTTP API、RunEvent、数据库/Flyway、generated SDK 或 OpenCode 只读源码。
+- 当前 macOS dev PKG 因本机没有 Developer ID 证书而未签名/公证；打包脚本已支持应用签名、安装器签名与 notary profile，正式交付仍需注入企业凭据。真实 ARM 麒麟双击安装、托盘、WSS 和聊天/文件端到端尚未验证；页面真实健康状态交互待数据库网络恢复后补验。

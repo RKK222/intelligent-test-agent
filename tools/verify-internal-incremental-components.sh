@@ -33,6 +33,8 @@ printf 'frontend\n' >"${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
 # zip-only 测试复用已生成制品，显式补齐本地客户端分发目录，避免把构建阶段误当作封装阶段。
 mkdir -p "${OUTPUT_DIR}/local-opencode-client/stable"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${OUTPUT_DIR}/local-opencode-client/install.sh"
+printf 'fixture pkg\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg"
+printf 'fixture deb\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
 printf '{\n  "version": "fixture-local-client"\n}\n' \
   >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json"
 printf 'fixture signature\n' >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"

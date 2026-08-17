@@ -85,20 +85,30 @@ mkdir -p "${JAR_ROOT}/BOOT-INF/classes" "${EMPTY_ROOT}" "${PROGRAMS_RUNTIME}/nod
 printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.key"
 (cd "${JAR_ROOT}" && zip -qr "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" .)
 PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
-mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260805132000__create_support_access_audit.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806143000__classify_skill_hub_assets.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806190000__persist_public_skill_hub_snapshots.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806190500__classify_public_skill_hub_snapshots.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+mkdir -p "${PERSISTENCE_JAR_ROOT}/db"
+cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/." \
+  "${PERSISTENCE_JAR_ROOT}/db/"
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
+XXL_JAR_ROOT="${TMP_ROOT}/xxl-jar-root"
+mkdir -p "${XXL_JAR_ROOT}/xxl-job/db"
+cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/." \
+  "${XXL_JAR_ROOT}/xxl-job/db/"
+(cd "${XXL_JAR_ROOT}" && zip -qr \
+  "${RELEASE_ROOT}/dist/backend/lib/test-agent-xxl-job-integration-0.1.0-SNAPSHOT.jar" .)
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz" .
+# 多后台节点预校验与正式发布共用本地客户端制品门禁，夹具必须覆盖完整目录形态。
+mkdir -p "${RELEASE_ROOT}/dist/local-opencode-client/stable"
+printf '#!/usr/bin/env bash\nexit 0\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/install.sh"
+printf 'fixture pkg\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg"
+printf 'fixture deb\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+printf '{\n  "version": "fixture-local-client"\n}\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/stable/manifest.json"
+printf 'fixture signature\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/stable/manifest.json.sig"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" \
   "${PROGRAMS_RUNTIME}/package.json"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \

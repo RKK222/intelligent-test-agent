@@ -12,6 +12,12 @@ SIGNING_KEY="${TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY:-}"
 PUBLIC_KEY="${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-}"
 CLIENT_JAR="${TEST_AGENT_LOCAL_CLIENT_JAR:-}"
 SKIP_BUILD=0
+DEFAULT_SERVER_URL="${TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL:-}"
+DEFAULT_WEB_URL="${TEST_AGENT_LOCAL_CLIENT_DEFAULT_WEB_URL:-${DEFAULT_SERVER_URL}}"
+ALLOW_INSECURE_SETUP="${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP:-false}"
+MACOS_APPLICATION_IDENTITY="${TEST_AGENT_LOCAL_CLIENT_MACOS_APPLICATION_IDENTITY:-}"
+MACOS_INSTALLER_IDENTITY="${TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY:-}"
+MACOS_NOTARY_PROFILE="${TEST_AGENT_LOCAL_CLIENT_MACOS_NOTARY_PROFILE:-}"
 
 JRE_DARWIN_URL="${TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_URL:-https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.9%2B10/OpenJDK21U-jre_aarch64_mac_hotspot_21.0.9_10.tar.gz}"
 JRE_DARWIN_SHA="${TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_SHA256:-1f7f6506b598e85d7d8ff8b36563d98657d2d81b16bfca3cd242d7906cfbd11b}"
@@ -31,8 +37,9 @@ usage() {
 Usage: deploy/internal/package-local-opencode-client.sh [options]
 
 Build the signed local OpenCode client HTTP distribution for Apple Silicon and
-ARM64 glibc Linux. A signing private key is mandatory and is never copied into
-the resulting artifacts.
+ARM64 glibc Linux. The output includes double-clickable macOS PKG and Kylin DEB
+installers. A signing private key is mandatory and is never copied into the
+resulting artifacts.
 
 Options:
   --output-dir <path>   Output directory. Default: deploy/internal/dist/local-opencode-client.
@@ -78,6 +85,265 @@ esac
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || { echo "Required command not found: $1" >&2; exit 1; }
+}
+
+validate_default_url() {
+  local name="$1" value="$2"
+  [[ -z "${value}" ]] && return
+  case "${value}" in
+    http://*|https://*) ;;
+    *) echo "${name} must use http:// or https://" >&2; exit 2 ;;
+  esac
+  case "${value}" in
+    *[!A-Za-z0-9._:/%+-]*) echo "${name} contains unsupported characters" >&2; exit 2 ;;
+  esac
+}
+
+numeric_package_version() {
+  if [[ "${VERSION}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    printf '%s.%s.%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+  else
+    printf '0.1.0'
+  fi
+}
+
+write_native_launcher() {
+  local destination="$1" resource_root_expression="$2"
+  cat >"${destination}" <<EOF
+#!/usr/bin/env sh
+set -eu
+RESOURCE_ROOT=${resource_root_expression}
+exec "\${RESOURCE_ROOT}/jre/bin/java" \
+  "-Dtestagent.localclient.packagedOpencodeExecutable=\${RESOURCE_ROOT}/opencode/bin/opencode" \
+  "-Dtestagent.localclient.defaultServerUrl=${DEFAULT_SERVER_URL}" \
+  "-Dtestagent.localclient.defaultWebUrl=${DEFAULT_WEB_URL}" \
+  "-Dtestagent.localclient.allowInsecureSetup=${ALLOW_INSECURE_SETUP}" \
+  -jar "\${RESOURCE_ROOT}/test-agent-local-client.jar"
+EOF
+  chmod 0755 "${destination}"
+}
+
+build_macos_installer() {
+  local release_dir="$1" destination="$2" package_version app_root payload_root scripts_root iconset unsigned_pkg
+  [[ "$(uname -s)" == Darwin ]] || {
+    echo "macOS PKG creation requires the documented external Mac build host" >&2
+    exit 1
+  }
+  require_command pkgbuild
+  require_command sips
+  require_command iconutil
+  package_version="$(numeric_package_version)"
+  payload_root="${TEMP_DIR}/native-macos/payload"
+  scripts_root="${TEMP_DIR}/native-macos/scripts"
+  app_root="${payload_root}/Applications/TestAgent Local Client.app"
+  mkdir -p "${app_root}/Contents/MacOS" "${app_root}/Contents/Resources" \
+    "${payload_root}/Library/LaunchAgents" "${scripts_root}"
+  tar -C "${app_root}/Contents/Resources" -xzf "${release_dir}/temurin-jre21-darwin-arm64.tar.gz"
+  tar -C "${app_root}/Contents/Resources" -xzf "${release_dir}/opencode-1.18.4-darwin-arm64.tar.gz"
+  cp "${release_dir}/test-agent-local-client.jar" "${app_root}/Contents/Resources/test-agent-local-client.jar"
+  write_native_launcher \
+    "${app_root}/Contents/MacOS/TestAgentLocalClient" \
+    '"$(CDPATH= cd -- "$(dirname -- "$0")/../Resources" && pwd)"'
+  cat >"${app_root}/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleDisplayName</key><string>TestAgent 本地客户端</string>
+  <key>CFBundleExecutable</key><string>TestAgentLocalClient</string>
+  <key>CFBundleIconFile</key><string>TestAgentLocalClient</string>
+  <key>CFBundleIdentifier</key><string>com.enterprise.testagent.local-opencode-client</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>TestAgent Local Client</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>${package_version}</string>
+  <key>CFBundleVersion</key><string>${package_version}</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+EOF
+  iconset="${TEMP_DIR}/native-macos/TestAgentLocalClient.iconset"
+  mkdir -p "${iconset}"
+  for specification in '16 icon_16x16.png' '32 icon_16x16@2x.png' \
+    '32 icon_32x32.png' '64 icon_32x32@2x.png' '128 icon_128x128.png' \
+    '256 icon_128x128@2x.png' '256 icon_256x256.png' '512 icon_256x256@2x.png' \
+    '512 icon_512x512.png' '1024 icon_512x512@2x.png'; do
+    set -- ${specification}
+    sips -z "$1" "$1" "${ROOT_DIR}/frontend/apps/agent-web/src/assets/pets/radar-bunny.png" \
+      --out "${iconset}/$2" >/dev/null
+  done
+  iconutil -c icns "${iconset}" -o "${app_root}/Contents/Resources/TestAgentLocalClient.icns"
+  cat >"${payload_root}/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.enterprise.testagent.local-opencode-client</string>
+  <key>ProgramArguments</key><array><string>/Applications/TestAgent Local Client.app/Contents/MacOS/TestAgentLocalClient</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+</dict></plist>
+EOF
+  chmod 0644 "${payload_root}/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist"
+  cat >"${scripts_root}/preinstall" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+console_uid="$(/usr/bin/stat -f '%u' /dev/console 2>/dev/null || true)"
+case "${console_uid}" in ''|*[!0-9]*) exit 0 ;; esac
+[ "${console_uid}" -ge 500 ] || exit 0
+/bin/launchctl bootout "gui/${console_uid}/com.enterprise.testagent.local-opencode-client" >/dev/null 2>&1 || true
+EOF
+  cat >"${scripts_root}/postinstall" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+plist_path="/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist"
+console_uid="$(/usr/bin/stat -f '%u' /dev/console 2>/dev/null || true)"
+case "${console_uid}" in ''|*[!0-9]*) exit 0 ;; esac
+[ "${console_uid}" -ge 500 ] || exit 0
+/bin/launchctl bootstrap "gui/${console_uid}" "${plist_path}" >/dev/null 2>&1 \
+  || /bin/launchctl asuser "${console_uid}" /usr/bin/open -a "TestAgent Local Client" >/dev/null 2>&1 \
+  || true
+/bin/launchctl kickstart -k "gui/${console_uid}/com.enterprise.testagent.local-opencode-client" >/dev/null 2>&1 || true
+EOF
+  chmod 0755 "${scripts_root}/preinstall" "${scripts_root}/postinstall"
+  if [[ -n "${MACOS_APPLICATION_IDENTITY}" ]]; then
+    require_command codesign
+    codesign --force --deep --options runtime --timestamp \
+      --sign "${MACOS_APPLICATION_IDENTITY}" "${app_root}"
+  fi
+  unsigned_pkg="${TEMP_DIR}/native-macos/TestAgent-Local-Client-unsigned.pkg"
+  pkgbuild --root "${payload_root}" --scripts "${scripts_root}" \
+    --identifier com.enterprise.testagent.local-opencode-client \
+    --version "${package_version}" --install-location / "${unsigned_pkg}" >/dev/null
+  if [[ -n "${MACOS_INSTALLER_IDENTITY}" ]]; then
+    require_command productsign
+    productsign --sign "${MACOS_INSTALLER_IDENTITY}" --timestamp \
+      "${unsigned_pkg}" "${destination}" >/dev/null
+  else
+    cp "${unsigned_pkg}" "${destination}"
+    echo "WARNING: macOS PKG is unsigned; configure TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY for delivery" >&2
+  fi
+  if [[ -n "${MACOS_NOTARY_PROFILE}" ]]; then
+    [[ -n "${MACOS_INSTALLER_IDENTITY}" ]] || {
+      echo "macOS notarization requires TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY" >&2
+      exit 1
+    }
+    xcrun notarytool submit "${destination}" --keychain-profile "${MACOS_NOTARY_PROFILE}" --wait
+    xcrun stapler staple "${destination}"
+  fi
+}
+
+create_deb_tar() {
+  local output="$1" base_dir="$2"
+  shift 2
+  local -a ownership_flags=()
+  if tar --version 2>&1 | grep -qi 'bsdtar'; then
+    ownership_flags=(--uid 0 --gid 0 --uname root --gname root --no-mac-metadata --no-xattrs --no-acls --no-fflags)
+  else
+    ownership_flags=(--owner=0 --group=0 --numeric-owner)
+  fi
+  COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 \
+    tar "${ownership_flags[@]}" -C "${base_dir}" -czf "${output}" "$@"
+}
+
+build_kylin_installer() {
+  local release_dir="$1" destination="$2" package_version payload_root control_root work_root installed_size
+  require_command ar
+  destination="$(cd "$(dirname "${destination}")" && pwd)/$(basename "${destination}")"
+  package_version="$(numeric_package_version)"
+  work_root="${TEMP_DIR}/native-kylin"
+  payload_root="${work_root}/payload"
+  control_root="${work_root}/control"
+  mkdir -p "${payload_root}/opt/testagent/local-opencode-client" \
+    "${payload_root}/usr/lib/systemd/user" \
+    "${payload_root}/usr/share/applications" \
+    "${payload_root}/usr/share/icons/hicolor/512x512/apps" \
+    "${control_root}"
+  tar -C "${payload_root}/opt/testagent/local-opencode-client" \
+    -xzf "${release_dir}/temurin-jre21-linux-arm64-glibc.tar.gz"
+  tar -C "${payload_root}/opt/testagent/local-opencode-client" \
+    -xzf "${release_dir}/opencode-1.18.4-linux-arm64-glibc.tar.gz"
+  cp "${release_dir}/test-agent-local-client.jar" \
+    "${payload_root}/opt/testagent/local-opencode-client/test-agent-local-client.jar"
+  mkdir -p "${payload_root}/opt/testagent/local-opencode-client/bin"
+  write_native_launcher \
+    "${payload_root}/opt/testagent/local-opencode-client/bin/test-agent-local-client" \
+    '"/opt/testagent/local-opencode-client"'
+  cp "${ROOT_DIR}/frontend/apps/agent-web/src/assets/pets/radar-bunny.png" \
+    "${payload_root}/usr/share/icons/hicolor/512x512/apps/test-agent-local-client.png"
+  cat >"${payload_root}/usr/lib/systemd/user/test-agent-local-opencode-client.service" <<'EOF'
+[Unit]
+Description=TestAgent Local OpenCode Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/testagent/local-opencode-client/bin/test-agent-local-client
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+  cat >"${payload_root}/usr/share/applications/test-agent-local-opencode-client.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=TestAgent 本地客户端
+Comment=连接 TestAgent 平台与本地工作区
+Exec=/opt/testagent/local-opencode-client/bin/test-agent-local-client
+Icon=test-agent-local-client
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=false
+EOF
+  installed_size="$(du -sk "${payload_root}" | awk '{print $1}')"
+  cat >"${control_root}/control" <<EOF
+Package: test-agent-local-client
+Version: ${package_version}
+Section: utils
+Priority: optional
+Architecture: arm64
+Maintainer: TestAgent Platform Team
+Depends: libc6 (>= 2.28), systemd
+Installed-Size: ${installed_size}
+Description: TestAgent local OpenCode client
+ Connects the TestAgent platform to an authorized local workspace.
+EOF
+  cat >"${control_root}/postinst" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+systemctl --global enable test-agent-local-opencode-client.service >/dev/null 2>&1 || true
+command -v loginctl >/dev/null 2>&1 || exit 0
+active_session="$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null || true)"
+[ -n "${active_session}" ] || exit 0
+active_uid="$(loginctl show-session "${active_session}" -p User --value 2>/dev/null || true)"
+case "${active_uid}" in ''|*[!0-9]*) exit 0 ;; esac
+[ -S "/run/user/${active_uid}/bus" ] || exit 0
+active_user="$(getent passwd "${active_uid}" | awk -F: '{print $1}')"
+[ -n "${active_user}" ] || exit 0
+runuser -u "${active_user}" -- env \
+  XDG_RUNTIME_DIR="/run/user/${active_uid}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${active_uid}/bus" \
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+runuser -u "${active_user}" -- env \
+  XDG_RUNTIME_DIR="/run/user/${active_uid}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${active_uid}/bus" \
+  systemctl --user enable --now test-agent-local-opencode-client.service >/dev/null 2>&1 || true
+EOF
+  cat >"${control_root}/prerm" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+[ "${1:-}" = remove ] || exit 0
+systemctl --global disable test-agent-local-opencode-client.service >/dev/null 2>&1 || true
+EOF
+  chmod 0755 "${control_root}/postinst" "${control_root}/prerm"
+  printf '2.0\n' >"${work_root}/debian-binary"
+  create_deb_tar "${work_root}/control.tar.gz" "${control_root}" .
+  create_deb_tar "${work_root}/data.tar.gz" "${payload_root}" .
+  (
+    cd "${work_root}"
+    rm -f "${destination}"
+    ar -rc "${destination}" debian-binary control.tar.gz data.tar.gz
+  )
 }
 
 sha256_file() {
@@ -149,6 +415,18 @@ require_command curl
 require_command tar
 require_command unzip
 require_command find
+validate_default_url TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL "${DEFAULT_SERVER_URL}"
+validate_default_url TEST_AGENT_LOCAL_CLIENT_DEFAULT_WEB_URL "${DEFAULT_WEB_URL}"
+case "${ALLOW_INSECURE_SETUP}" in true|false) ;; *)
+  echo "TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP must be true or false" >&2
+  exit 2
+esac
+if [[ "${DEFAULT_SERVER_URL}" == http://* || "${DEFAULT_WEB_URL}" == http://* ]]; then
+  [[ "${ALLOW_INSECURE_SETUP}" == true ]] || {
+    echo "HTTP native-installer defaults require TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP=true" >&2
+    exit 2
+  }
+fi
 [[ -n "${SIGNING_KEY}" && -f "${SIGNING_KEY}" ]] || {
   echo "TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY or --signing-key is required" >&2
   exit 1
@@ -188,6 +466,12 @@ JRE_DARWIN_OUTPUT_SHA="$(sha256_file "${RELEASE_DIR}/temurin-jre21-darwin-arm64.
 JRE_LINUX_OUTPUT_SHA="$(sha256_file "${RELEASE_DIR}/temurin-jre21-linux-arm64-glibc.tar.gz")"
 OPENCODE_DARWIN_OUTPUT_SHA="$(sha256_file "${RELEASE_DIR}/opencode-1.18.4-darwin-arm64.tar.gz")"
 OPENCODE_LINUX_OUTPUT_SHA="$(sha256_file "${RELEASE_DIR}/opencode-1.18.4-linux-arm64-glibc.tar.gz")"
+MACOS_INSTALLER="${OUTPUT_DIR}/TestAgent-Local-Client-macOS-arm64.pkg"
+KYLIN_INSTALLER="${OUTPUT_DIR}/TestAgent-Local-Client-Kylin-arm64.deb"
+build_macos_installer "${RELEASE_DIR}" "${MACOS_INSTALLER}"
+build_kylin_installer "${RELEASE_DIR}" "${KYLIN_INSTALLER}"
+MACOS_INSTALLER_SHA="$(sha256_file "${MACOS_INSTALLER}")"
+KYLIN_INSTALLER_SHA="$(sha256_file "${KYLIN_INSTALLER}")"
 MANIFEST="${STABLE_DIR}/manifest.json"
 {
   printf '{\n'
@@ -203,7 +487,11 @@ MANIFEST="${STABLE_DIR}/manifest.json"
   printf '  "linuxArm64GlibcJrePath": "releases/%s/temurin-jre21-linux-arm64-glibc.tar.gz",\n' "${VERSION}"
   printf '  "linuxArm64GlibcJreSha256": "%s",\n' "${JRE_LINUX_OUTPUT_SHA}"
   printf '  "linuxArm64GlibcOpencodePath": "releases/%s/opencode-1.18.4-linux-arm64-glibc.tar.gz",\n' "${VERSION}"
-  printf '  "linuxArm64GlibcOpencodeSha256": "%s"\n' "${OPENCODE_LINUX_OUTPUT_SHA}"
+  printf '  "linuxArm64GlibcOpencodeSha256": "%s",\n' "${OPENCODE_LINUX_OUTPUT_SHA}"
+  printf '  "darwinArm64InstallerPath": "TestAgent-Local-Client-macOS-arm64.pkg",\n'
+  printf '  "darwinArm64InstallerSha256": "%s",\n' "${MACOS_INSTALLER_SHA}"
+  printf '  "linuxArm64GlibcInstallerPath": "TestAgent-Local-Client-Kylin-arm64.deb",\n'
+  printf '  "linuxArm64GlibcInstallerSha256": "%s"\n' "${KYLIN_INSTALLER_SHA}"
   printf '}\n'
 } >"${MANIFEST}"
 openssl dgst -sha256 -sign "${SIGNING_KEY}" -out "${STABLE_DIR}/manifest.json.sig" "${MANIFEST}"
@@ -229,6 +517,7 @@ chmod 0755 "${OUTPUT_DIR}/install.sh"
   done >SHA256SUMS
 )
 archive_strip_file_metadata "${OUTPUT_DIR}/install.sh" "${STABLE_DIR}/manifest.json" \
-  "${STABLE_DIR}/manifest.json.sig" "${RELEASE_DIR}"/*
+  "${STABLE_DIR}/manifest.json.sig" "${MACOS_INSTALLER}" "${KYLIN_INSTALLER}" "${RELEASE_DIR}"/*
 printf 'Local client HTTP distribution: %s\n' "${OUTPUT_DIR}"
 printf 'Release version: %s\n' "${VERSION}"
+printf 'Double-click installers: %s, %s\n' "${MACOS_INSTALLER}" "${KYLIN_INSTALLER}"

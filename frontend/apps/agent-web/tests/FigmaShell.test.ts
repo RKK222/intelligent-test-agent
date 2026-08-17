@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { mount } from "@vue/test-utils";
+import type { OpencodeEndpoint } from "@test-agent/shared-types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import FigmaShell from "../src/components/FigmaShell.vue";
 
@@ -1284,8 +1285,8 @@ describe("FigmaShell", () => {
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
     const downloadLink = wrapper.get('[data-testid="download-local-client"]');
     expect(downloadLink.text()).toContain("下载本地客户端");
-    expect(downloadLink.attributes("href")).toBe("/downloads/local-opencode-client/install.sh");
-    expect(downloadLink.attributes("download")).toBe("test-agent-local-client-install.sh");
+    expect(downloadLink.attributes("href")).toBe("/downloads/local-opencode-client/installer");
+    expect(downloadLink.attributes("download")).toBeUndefined();
     const restartButton = wrapper.get('[data-testid="restart-own-process"]');
     expect(restartButton.attributes("disabled")).toBeUndefined();
     await restartButton.trigger("click");
@@ -1298,6 +1299,43 @@ describe("FigmaShell", () => {
     await wrapper.setProps({ fixedWorkspace: true });
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="restart-own-process"]').exists()).toBe(false);
+  });
+
+  it("replaces the installer entry with registered local OpenCode health", async () => {
+    const wrapper = mountShell({
+      props: {
+        currentUserName: "developer",
+        opencodeEndpoints: [{
+          runtimeKind: "LOCAL_CLIENT",
+          endpointId: "local-client-1",
+          displayName: "本机 OpenCode",
+          online: true,
+          processStatus: "RUNNING",
+          platform: "darwin",
+          architecture: "arm64",
+          clientVersion: "0.1.0",
+          opencodeVersion: "1.18.4",
+          connectionGeneration: 1,
+          reportedAddresses: ["127.0.0.1"],
+          port: 4098,
+          healthy: true,
+          capabilities: {}
+        }]
+      }
+    });
+
+    await wrapper.get(".figma-user-avatar-btn").trigger("click");
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("本地 OpenCode 健康");
+
+    await wrapper.setProps({
+      opencodeEndpoints: [{
+        ...(wrapper.props("opencodeEndpoints") as OpencodeEndpoint[])[0],
+        online: false,
+        healthy: false
+      }]
+    });
+    expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("离线");
   });
 
   it("opens the focused side-question input directly when the process and main session are ready", async () => {

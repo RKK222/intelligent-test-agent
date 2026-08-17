@@ -1341,6 +1341,8 @@ package_release_zip() {
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
     "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
     "${OUTPUT_DIR}/local-opencode-client/install.sh" \
+    "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg" \
+    "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" \
     "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json" \
     "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"; do
     if [[ ! -f "${required_artifact}" ]]; then

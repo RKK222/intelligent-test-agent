@@ -66,6 +66,8 @@ const localClientDistributionRoot = resolve(
 
 const localClientContentType = (filePath: string): string => {
   if (filePath.endsWith(".tar.gz")) return "application/gzip";
+  if (filePath.endsWith(".pkg")) return "application/vnd.apple.installer+xml";
+  if (filePath.endsWith(".deb")) return "application/vnd.debian.binary-package";
   if (extname(filePath) === ".json") return "application/json; charset=utf-8";
   if (extname(filePath) === ".sh") return "text/x-shellscript; charset=utf-8";
   return "application/octet-stream";
@@ -100,6 +102,17 @@ const localClientDistributionRoute = (): Plugin => ({
         response.end("Not Found");
         return;
       }
+      if (segments.length === 1 && segments[0] === "installer") {
+        const userAgent = request.headers["user-agent"] ?? "";
+        const installerName = /Macintosh|Mac OS X/i.test(userAgent)
+          ? "TestAgent-Local-Client-macOS-arm64.pkg"
+          : "TestAgent-Local-Client-Kylin-arm64.deb";
+        response.statusCode = 302;
+        response.setHeader("Location", `/downloads/local-opencode-client/${installerName}`);
+        response.setHeader("Cache-Control", "no-store");
+        response.end();
+        return;
+      }
 
       const filePath = resolve(localClientDistributionRoot, ...segments);
       const relativePath = relative(localClientDistributionRoot, filePath);
@@ -128,6 +141,9 @@ const localClientDistributionRoute = (): Plugin => ({
         );
         if (relativePath === "install.sh") {
           response.setHeader("Content-Disposition", 'attachment; filename="test-agent-local-client-install.sh"');
+        } else if (relativePath === "TestAgent-Local-Client-macOS-arm64.pkg"
+          || relativePath === "TestAgent-Local-Client-Kylin-arm64.deb") {
+          response.setHeader("Content-Disposition", `attachment; filename="${relativePath}"`);
         }
         if (request.method === "HEAD") {
           response.end();

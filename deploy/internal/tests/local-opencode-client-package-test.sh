@@ -53,26 +53,50 @@ if "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
   exit 1
 fi
 
-TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_ARCHIVE="${TEST_ROOT}/jre-darwin.tar.gz" \
-TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_SHA256="$(sha256_file "${TEST_ROOT}/jre-darwin.tar.gz")" \
-TEST_AGENT_LOCAL_CLIENT_JRE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/jre-linux.tar.gz" \
-TEST_AGENT_LOCAL_CLIENT_JRE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jre-linux.tar.gz")" \
-TEST_AGENT_LOCAL_CLIENT_OPENCODE_DARWIN_ARM64_ARCHIVE="${TEST_ROOT}/opencode-darwin.zip" \
-TEST_AGENT_LOCAL_CLIENT_OPENCODE_DARWIN_ARM64_SHA256="$(sha256_file "${TEST_ROOT}/opencode-darwin.zip")" \
-TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
-TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
-  "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
-    --output-dir "${TEST_ROOT}/dist/local-opencode-client" \
-    --version 0.1.0-test \
-    --signing-key "${TEST_ROOT}/signing-private.pem" \
-    --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
-    --skip-build
+(
+  cd "${TEST_ROOT}"
+  TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_ARCHIVE="${TEST_ROOT}/jre-darwin.tar.gz" \
+  TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_SHA256="$(sha256_file "${TEST_ROOT}/jre-darwin.tar.gz")" \
+  TEST_AGENT_LOCAL_CLIENT_JRE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/jre-linux.tar.gz" \
+  TEST_AGENT_LOCAL_CLIENT_JRE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jre-linux.tar.gz")" \
+  TEST_AGENT_LOCAL_CLIENT_OPENCODE_DARWIN_ARM64_ARCHIVE="${TEST_ROOT}/opencode-darwin.zip" \
+  TEST_AGENT_LOCAL_CLIENT_OPENCODE_DARWIN_ARM64_SHA256="$(sha256_file "${TEST_ROOT}/opencode-darwin.zip")" \
+  TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
+  TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
+    "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
+      --output-dir dist/local-opencode-client \
+      --version 0.1.0-test \
+      --signing-key "${TEST_ROOT}/signing-private.pem" \
+      --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
+      --skip-build
+)
 
 PUBLIC_KEY="${TEST_ROOT}/signing-public.pem"
 openssl pkey -in "${TEST_ROOT}/signing-private.pem" -pubout -out "${PUBLIC_KEY}" >/dev/null
 openssl dgst -sha256 -verify "${PUBLIC_KEY}" \
   -signature "${TEST_ROOT}/dist/local-opencode-client/stable/manifest.json.sig" \
   "${TEST_ROOT}/dist/local-opencode-client/stable/manifest.json" >/dev/null
+(cd "${TEST_ROOT}/dist/local-opencode-client" && \
+  test "$(sha256_file TestAgent-Local-Client-macOS-arm64.pkg)" = \
+    "$(awk -F'"' '$2 == "darwinArm64InstallerSha256" { print $4; exit }' stable/manifest.json)" && \
+  test "$(sha256_file TestAgent-Local-Client-Kylin-arm64.deb)" = \
+    "$(awk -F'"' '$2 == "linuxArm64GlibcInstallerSha256" { print $4; exit }' stable/manifest.json)")
+PKG_EXPANDED="${TEST_ROOT}/pkg-expanded"
+pkgutil --expand-full \
+  "${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg" \
+  "${PKG_EXPANDED}"
+test -x "$(find "${PKG_EXPANDED}" -type f -path \
+  '*/Payload/Applications/TestAgent Local Client.app/Contents/MacOS/TestAgentLocalClient' | head -n 1)"
+DEB_EXPANDED="${TEST_ROOT}/deb-expanded"
+mkdir -p "${DEB_EXPANDED}"
+(
+  cd "${DEB_EXPANDED}"
+  ar -x "${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+  test "$(printf '%s\n' debian-binary control.tar.gz data.tar.gz)" = "$(ar -t "${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb")"
+  tar -tzf data.tar.gz | grep -q './opt/testagent/local-opencode-client/bin/test-agent-local-client'
+  tar -tzf data.tar.gz | grep -q './usr/lib/systemd/user/test-agent-local-opencode-client.service'
+  tar -tzf data.tar.gz | grep -q './usr/share/applications/test-agent-local-opencode-client.desktop'
+)
 (cd "${TEST_ROOT}/dist/local-opencode-client/releases/0.1.0-test" && \
   if command -v sha256sum >/dev/null 2>&1; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi)
 

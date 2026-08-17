@@ -167,9 +167,11 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
   禁止命令行参数和环境变量传 key。
 - 后台只允许直接 HTTPS/WSS URI，或信任代理源 IP 清单内的连接携带 `X-Forwarded-Proto: https|wss`；禁止
   无条件信任客户端可伪造的 forwarded header。企业部署必须显式维护 Nginx 源 IP，明文控制开关仅限测试。
-- 内网 HTTP 下载不使用 client key。stable 清单必须签名，所有版本化制品必须按签名清单校验 SHA-256；
-  打包私钥不得进入仓库、企业 ZIP、Nginx 目录或客户端。由于 install.sh 也经同一 HTTP 取得，主动中间人
-  替换脚本与内嵌公钥的风险不能由清单签名消除，必须明确依赖网络 ACL 或未来可信 HTTPS/带外公钥。
+- 内网 HTTP 下载不使用 client key。stable 清单必须签名，版本化制品以及 macOS PKG/麒麟 DEB 的 SHA-256
+  必须进入签名清单；打包私钥不得进入仓库、企业 ZIP、Nginx 目录或客户端。生产 macOS PKG 还必须使用
+  Developer ID Installer 签名并按网络条件完成 notarization；DEB 由受控发布链路和签名清单校验。由于
+  install.sh 和原生安装包仍可能经明文 HTTP 取得，主动中间人替换下载内容的风险不能只靠同源清单消除，
+  必须依赖网络 ACL、可信 HTTPS 或带外固定校验。
 - 本地客户端托盘不得展示 prompt、绝对路径、请求体、client key 或模型 grant。日志下载只能由用户本机
   主动触发，只允许读取 state 日志目录中受控命名的客户端日志，限制文件数和单文件字节数，并排除配置、
   OpenCode 日志及工作区内容；导出失败不得退化为打包整个 state 或 config 目录。

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
-import { BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
 import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
@@ -610,6 +610,27 @@ const opencodeServiceDisplay = computed(() => {
     return { tone: "stopped", text: target ? `未运行(${target})` : "未运行" };
   }
   return { tone: "unassigned", text: "待分配专属进程" };
+});
+
+const localClientEndpoints = computed(() =>
+  props.opencodeEndpoints.filter(endpoint => endpoint.runtimeKind === "LOCAL_CLIENT")
+);
+
+/** 以平台注册实例为安装完成依据；多台本地设备时汇总健康数量，不依赖浏览器下载记录。 */
+const localClientHealthDisplay = computed(() => {
+  const endpoints = localClientEndpoints.value;
+  if (!endpoints.length) {
+    return props.opencodeEndpointsLoading
+      ? { tone: "checking", text: "正在检查本地客户端…" }
+      : null;
+  }
+  const healthyCount = endpoints.filter(endpoint => endpoint.online && endpoint.healthy).length;
+  const onlineCount = endpoints.filter(endpoint => endpoint.online).length;
+  const suffix = endpoints.length > 1 ? `（${healthyCount}/${endpoints.length}）` : "";
+  if (healthyCount === endpoints.length) return { tone: "healthy", text: `本地 OpenCode 健康${suffix}` };
+  if (healthyCount > 0) return { tone: "warning", text: `本地 OpenCode 部分健康${suffix}` };
+  if (onlineCount > 0) return { tone: "warning", text: "本地 OpenCode 异常" };
+  return { tone: "offline", text: "本地 OpenCode 离线" };
 });
 
 function endpointStatusText(endpoint: OpencodeEndpoint) {
@@ -2700,13 +2721,22 @@ function submitJoinApp() {
               <span class="figma-user-menu-service-dot" aria-hidden="true" />
               <span class="figma-user-menu-service-text" :title="opencodeServiceDisplay.text">{{ opencodeServiceDisplay.text }}</span>
             </div>
+            <div
+              v-if="!fixedWorkspace && localClientHealthDisplay"
+              class="figma-user-menu-service figma-local-client-health"
+              :class="`figma-local-client-health--${localClientHealthDisplay.tone}`"
+              role="status"
+              data-testid="local-client-health"
+            >
+              <Activity class="figma-user-menu-icon" />
+              <span class="figma-user-menu-service-text">{{ localClientHealthDisplay.text }}</span>
+            </div>
             <a
-              v-if="!fixedWorkspace"
+              v-else-if="!fixedWorkspace"
               class="figma-user-menu-item"
               role="menuitem"
               data-testid="download-local-client"
-              href="/downloads/local-opencode-client/install.sh"
-              download="test-agent-local-client-install.sh"
+              href="/downloads/local-opencode-client/installer"
               @click="userMenuOpen = false"
             >
               <Download class="figma-user-menu-icon" />
@@ -4827,6 +4857,19 @@ function submitJoinApp() {
 .figma-user-menu-service--checking .figma-user-menu-service-dot,
 .figma-user-menu-service--unassigned .figma-user-menu-service-dot {
   background: #a1a1aa;
+}
+
+.figma-local-client-health--healthy {
+  color: #15803d;
+}
+
+.figma-local-client-health--warning {
+  color: #b45309;
+}
+
+.figma-local-client-health--offline,
+.figma-local-client-health--checking {
+  color: var(--ta-shell-muted);
 }
 
 .figma-user-menu-summary {

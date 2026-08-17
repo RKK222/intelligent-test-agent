@@ -146,6 +146,8 @@ fi
 require_file "${FRONTEND_ARCHIVE}"
 require_file "${CONFIGURE_NGINX_SCRIPT}"
 require_file "${LOCAL_CLIENT_DIST}/install.sh"
+require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-macOS-arm64.pkg"
+require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
 require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
 require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
 if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
