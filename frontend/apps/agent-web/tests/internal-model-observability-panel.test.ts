@@ -213,16 +213,25 @@ function renderPanel(recordsTotal = 1) {
       provide: { api },
       stubs: {
         ElPopover: {
-          template: `<div><slot name="reference" /><slot /></div>`
+          props: ["visible", "trigger"],
+          template: `<div data-testid="time-popover-stub" :data-visible="String(visible)" :data-trigger="trigger"><slot name="reference" /><slot /></div>`
         },
         ElDatePicker: {
+          props: {
+            teleported: { type: Boolean, default: true }
+          },
           emits: ["update:modelValue", "change"],
           template: `
-            <div>
+            <div data-testid="date-picker-stub" :data-teleported="String(teleported)">
               <button type="button" data-testid="partial-time" @click="$emit('update:modelValue', ['2026-08-01 00:00:00', '']); $emit('change', ['2026-08-01 00:00:00', ''])">只选开始时间</button>
               <button type="button" data-testid="complete-time" @click="$emit('update:modelValue', ['2026-08-01 00:00:00', '2026-08-01 02:00:00']); $emit('change', ['2026-08-01 00:00:00', '2026-08-01 02:00:00'])">选完整时间</button>
             </div>
           `
+        },
+        ElDialog: {
+          props: ["modelValue", "title"],
+          emits: ["update:modelValue"],
+          template: `<section v-if="modelValue" role="dialog" :aria-label="title"><slot /></section>`
         },
         ElSelect: {
           props: ["modelValue", "placeholder"],
@@ -289,11 +298,23 @@ describe("InternalModelObservabilityPanel", () => {
     expect(view.getByText("公开性能参考（方向性对标）")).toBeTruthy();
     expect(view.getByText("Qwen3.6 27B Reasoning")).toBeTruthy();
     expect(view.getByText("DeepSeek V4 Flash Reasoning Max")).toBeTruthy();
+    expect(view.getByRole("button", { name: "方法说明（离线）" })).toBeTruthy();
+    expect(view.getAllByRole("button", { name: /数据源（离线快照/ })).toHaveLength(2);
     expect(view.container.querySelectorAll(".ta-imob-chart-box")).toHaveLength(3);
     const comparison = view.container.querySelector(".ta-imob-chart-comparison");
     expect(comparison?.querySelector(".ta-imob-chart-stack")).toBeTruthy();
     expect(comparison?.querySelectorAll(".ta-imob-latency-box-stack > .ta-imob-box-card")).toHaveLength(3);
     expect(comparison?.querySelectorAll(".ta-imob-chart-stack > .ta-imob-chart-card")).toHaveLength(2);
+    expect(comparison?.querySelector(".ta-imob-business-chart-stack")).toBeTruthy();
+
+    await fireEvent.click(view.getByRole("button", { name: "方法说明（离线）" }));
+    expect(view.getByRole("dialog", { name: "公开性能参考 · 离线方法说明" })).toBeTruthy();
+    expect(view.getByText(/无需访问外网/)).toBeTruthy();
+    expect(view.getByText("对标方法")).toBeTruthy();
+
+    await fireEvent.click(view.getAllByRole("button", { name: /数据源（离线快照/ })[0]!);
+    expect(view.getByRole("dialog", { name: "Qwen3.6 27B Reasoning · 公开数据源离线快照" })).toBeTruthy();
+    expect(view.getByText("公开实测 Output TPS")).toBeTruthy();
 
     await waitFor(() => {
       const ttftOption = [...chartOptions].reverse().find((option) =>
@@ -405,6 +426,8 @@ describe("InternalModelObservabilityPanel", () => {
     await waitFor(() => expect(view.getByTestId("records-pagination").textContent).toContain("total=41"));
     const initialCalls = vi.mocked(view.api.listInternalModelCallRecords).mock.calls.length;
 
+    expect(view.getByTestId("time-popover-stub").dataset.trigger).toBe("click");
+    expect(view.getByTestId("date-picker-stub").dataset.teleported).toBe("false");
     await fireEvent.click(view.getByTestId("partial-time"));
     await Promise.resolve();
     expect(vi.mocked(view.api.listInternalModelCallRecords).mock.calls).toHaveLength(initialCalls);
@@ -418,6 +441,7 @@ describe("InternalModelObservabilityPanel", () => {
         to: expectedTo,
         page: 1
       }));
+      expect(view.getByTestId("time-popover-stub").dataset.visible).toBe("false");
     });
 
     await fireEvent.update(view.getByRole("listbox", { name: "按用户" }), "user-10086");

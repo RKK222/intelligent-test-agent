@@ -191,6 +191,8 @@ PY
 - 脚本结果应与同一筛选条件下每个厂商分布接口的 `sampleCount/average/min/P25/P50/P75/max` 一致；浮点数允许极小的显示舍入差异。
 - 最强的回归检查是准备两个厂商、每个厂商至少 4 个确定样本，再确认页面出现两个独立箱体。前端自动化测试还会在“当前页只有 1 条、服务端总量为 41 条”的情况下断言 Overview 仍读取全量聚合结果。
 
+页面交互还需核对：打开时间筛选后点击自定义日期框并只选择开始端点，父弹层和日期面板都应继续显示且不发查询；选择完整区间后才收起并刷新。公开性能参考的“方法说明（离线）”和每张卡片的“数据源（离线快照）”应直接打开页面内弹窗，不依赖企业网络访问外站。调用结果分布与供应商请求量对比应各自独占整行，桌面端图表高度为 340px，窄屏不少于 300px。
+
 ## 验证结论
 
 - **插桩→分类→落库**：由 `InternalModelSseStreamObserverTest` 固化真实输出、伪心跳与两种收尾信号语义；`InternalModelProxyForwardingServiceTest` 覆盖首 token、`[DONE]`、`finish_reason` 后 EOF 和无收尾信号的流中断；`InternalModelProviderProbeServiceTest` 用本地 HttpServer 覆盖两种完整 SSE、空 200、超时、500 与连接拒绝。

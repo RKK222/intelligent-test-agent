@@ -37,6 +37,7 @@ const HOUR_MILLIS = 3_600_000;
 const selectedWindowHours = ref<number>(24);
 const showGlossary = ref(true);
 const showDocDialog = ref(false);
+const showBenchmarkDialog = ref(false);
 
 const windowHourOptions = [
   { label: "最近 1 小时", value: 1 },
@@ -509,6 +510,9 @@ type PublicPerformanceBenchmark = {
   sourceUrl: string;
 };
 
+const PUBLIC_BENCHMARK_CHECKED_AT = "2026-08-17";
+const PUBLIC_BENCHMARK_METHODOLOGY_URL = "https://artificialanalysis.ai/methodology/";
+
 // 公开数据会随测试方法和版本变化，固定标注核验日期，且不把公开同类中位数包装成行业标准。
 const publicPerformanceBenchmarks: PublicPerformanceBenchmark[] = [
   {
@@ -530,6 +534,23 @@ const publicPerformanceBenchmarks: PublicPerformanceBenchmark[] = [
     sourceUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash/"
   }
 ];
+
+const benchmarkDialogSource = ref<PublicPerformanceBenchmark | null>(null);
+const benchmarkDialogTitle = computed(() => benchmarkDialogSource.value
+  ? `${benchmarkDialogSource.value.modelName} · 公开数据源离线快照`
+  : "公开性能参考 · 离线方法说明");
+
+/** 企业内网无法访问外部站点时，直接在本地弹窗展示已固化的方法说明。 */
+function openBenchmarkMethodology() {
+  benchmarkDialogSource.value = null;
+  showBenchmarkDialog.value = true;
+}
+
+/** 数据源按钮打开指定模型的本地快照，外网原文只保留为可选追溯入口。 */
+function openBenchmarkSource(benchmark: PublicPerformanceBenchmark) {
+  benchmarkDialogSource.value = benchmark;
+  showBenchmarkDialog.value = true;
+}
 
 function normalizeModelName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -1280,6 +1301,8 @@ function onPageSizeChange(next: number) {
                 type="button"
                 class="ta-imob-time-picker-btn"
                 :class="{ 'is-custom': isCustomTime }"
+                aria-label="选择统计时间范围"
+                :aria-expanded="timePopoverVisible"
               >
                 <Clock :size="12" />
                 <span class="ta-imob-time-btn-text">{{ timeDisplayLabel }}</span>
@@ -1287,7 +1310,7 @@ function onPageSizeChange(next: number) {
               </button>
             </template>
 
-            <div class="ta-imob-time-popover-panel">
+            <div class="ta-imob-time-popover-panel" @click.stop>
               <div class="ta-imob-time-section-head">快捷时间窗口</div>
               <div class="ta-imob-time-presets">
                 <button
@@ -1308,6 +1331,7 @@ function onPageSizeChange(next: number) {
               <el-date-picker
                 v-model="customTimeRange"
                 type="datetimerange"
+                :teleported="false"
                 size="small"
                 range-separator="至"
                 start-placeholder="开始时间"
@@ -1573,9 +1597,9 @@ function onPageSizeChange(next: number) {
                   <h4 class="ta-imob-overview-title">公开性能参考（方向性对标）</h4>
                   <p>公开同类中位数不是行业标准。公开测试会做 Token 口径归一化，本页内部数据使用供应商原生 Token，并受硬件、量化和并发影响，仅用于定位差距。</p>
                 </div>
-                <a href="https://artificialanalysis.ai/methodology/" target="_blank" rel="noopener noreferrer">
-                  方法说明 <ExternalLink :size="12" />
-                </a>
+                <button type="button" class="ta-imob-benchmark-link" @click="openBenchmarkMethodology">
+                  <BookOpen :size="12" /> 方法说明（离线）
+                </button>
               </div>
               <div class="ta-imob-benchmark-grid">
                 <article v-for="benchmark in benchmarkComparisons" :key="benchmark.modelName" class="ta-imob-benchmark-card">
@@ -1591,9 +1615,9 @@ function onPageSizeChange(next: number) {
                     <span>公开实测 TTFT <strong>{{ formatDuration(benchmark.testedTtftMillis) }}</strong></span>
                     <span>同类中位 TTFT <strong>{{ formatDuration(benchmark.peerMedianTtftMillis) }}</strong></span>
                   </div>
-                  <a :href="benchmark.sourceUrl" target="_blank" rel="noopener noreferrer">
-                    数据源（核验于 2026-08-17） <ExternalLink :size="11" />
-                  </a>
+                  <button type="button" class="ta-imob-benchmark-link" @click="openBenchmarkSource(benchmark)">
+                    <FileText :size="11" /> 数据源（离线快照，核验于 {{ PUBLIC_BENCHMARK_CHECKED_AT }}）
+                  </button>
                 </article>
               </div>
             </div>
@@ -1611,9 +1635,9 @@ function onPageSizeChange(next: number) {
                 <div ref="trendChartEl" class="ta-imob-chart ta-imob-chart-trend" />
               </div>
 
-              <!-- 左侧两张业务图、右侧性能箱线图均纵向排列，保持对照关系和视觉平衡。 -->
+              <!-- 两张业务图独占整行并增高；性能箱线图继续纵向排列，保证标题和坐标轴可读。 -->
               <div class="ta-imob-chart-comparison">
-                <div class="ta-imob-chart-stack">
+                <div class="ta-imob-chart-stack ta-imob-business-chart-stack">
                   <div v-if="showRateMetrics" class="ta-imob-chart-card">
                     <h4 class="ta-imob-overview-title">
                       <MetricHelpLabel label="调用结果分布" :description="chartHelp.successComposition" />
@@ -1755,6 +1779,70 @@ function onPageSizeChange(next: number) {
           </div>
         </section>
       </div>
+
+      <!-- 公开对标数据固化为离线弹窗，企业内网无需访问 Artificial Analysis 即可查看。 -->
+      <el-dialog
+        v-model="showBenchmarkDialog"
+        :title="benchmarkDialogTitle"
+        width="760px"
+        append-to-body
+      >
+        <div class="ta-imob-doc-content ta-imob-benchmark-dialog">
+          <p class="ta-imob-doc-lead">
+            以下说明与数值已固化在当前页面，无需访问外网。公开数据只作方向性对标，不代表统一行业标准。
+          </p>
+
+          <template v-if="benchmarkDialogSource">
+            <table class="ta-imob-doc-table">
+              <tbody>
+                <tr><th>模型</th><td>{{ benchmarkDialogSource.modelName }}</td></tr>
+                <tr><th>公开实测 Output TPS</th><td>{{ formatTps(benchmarkDialogSource.testedOutputTps) }}</td></tr>
+                <tr><th>公开同类中位 Output TPS</th><td>{{ formatTps(benchmarkDialogSource.peerMedianOutputTps) }}</td></tr>
+                <tr><th>公开实测 TTFT</th><td>{{ formatDuration(benchmarkDialogSource.testedTtftMillis) }}</td></tr>
+                <tr><th>公开同类中位 TTFT</th><td>{{ formatDuration(benchmarkDialogSource.peerMedianTtftMillis) }}</td></tr>
+                <tr><th>核验日期</th><td>{{ PUBLIC_BENCHMARK_CHECKED_AT }}</td></tr>
+              </tbody>
+            </table>
+            <p>
+              数据来源：Artificial Analysis 对应模型公开页面。外网可用时可追溯
+              <a :href="benchmarkDialogSource.sourceUrl" target="_blank" rel="noopener noreferrer" class="ta-imob-external-link">
+                原始模型页面 <ExternalLink :size="11" />
+              </a>；企业内网验收以本弹窗快照为准。
+            </p>
+          </template>
+
+          <template v-else>
+            <h4>对标方法</h4>
+            <ul class="ta-imob-benchmark-method-list">
+              <li>公开实测值与同类中位数取自 Artificial Analysis 在核验日期展示的模型页面。</li>
+              <li>Output TPS 表示首个输出 Token 之后的持续生成速度；TTFT 表示等待首个输出 Token 的时间。</li>
+              <li>公开平台会统一测试口径；本页内部值使用企业供应商返回的原生 Token 数，不能当作同硬件、同量化、同并发条件下的严格排名。</li>
+              <li>判断优化效果时，应优先比较同一内部模型、同一环境、同一负载下的历史趋势。</li>
+            </ul>
+            <h4>当前固化快照</h4>
+            <table class="ta-imob-doc-table">
+              <thead>
+                <tr><th>模型</th><th>实测 TPS</th><th>同类中位 TPS</th><th>实测 TTFT</th><th>同类中位 TTFT</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="benchmark in publicPerformanceBenchmarks" :key="benchmark.modelName">
+                  <td>{{ benchmark.modelName }}</td>
+                  <td>{{ formatTps(benchmark.testedOutputTps) }}</td>
+                  <td>{{ formatTps(benchmark.peerMedianOutputTps) }}</td>
+                  <td>{{ formatDuration(benchmark.testedTtftMillis) }}</td>
+                  <td>{{ formatDuration(benchmark.peerMedianTtftMillis) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              外网可用时可追溯
+              <a :href="PUBLIC_BENCHMARK_METHODOLOGY_URL" target="_blank" rel="noopener noreferrer" class="ta-imob-external-link">
+                Artificial Analysis 方法原文 <ExternalLink :size="11" />
+              </a>。
+            </p>
+          </template>
+        </div>
+      </el-dialog>
 
       <!-- 性能指标规范定义 (离线指南弹窗) -->
       <el-dialog
@@ -2163,15 +2251,24 @@ function onPageSizeChange(next: number) {
   font-size: 12px;
   line-height: 1.6;
 }
-.ta-imob-benchmark-heading a,
-.ta-imob-benchmark-card a {
+.ta-imob-benchmark-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #c2410c;
   font-size: 12px;
   text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
+}
+.ta-imob-benchmark-link:hover,
+.ta-imob-benchmark-link:focus-visible {
+  color: #9a3412;
+  text-decoration: underline;
+  outline: none;
 }
 .ta-imob-benchmark-grid {
   display: grid;
@@ -2211,6 +2308,19 @@ function onPageSizeChange(next: number) {
   color: #292524;
   font-size: 13px;
 }
+.ta-imob-benchmark-dialog h4 {
+  margin: 16px 0 8px;
+  color: #292524;
+  font-size: 14px;
+}
+.ta-imob-benchmark-method-list {
+  margin: 0;
+  padding-left: 20px;
+  color: #57534e;
+}
+.ta-imob-benchmark-method-list li + li {
+  margin-top: 6px;
+}
 .ta-imob-charts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -2228,13 +2338,13 @@ function onPageSizeChange(next: number) {
 .ta-imob-chart-comparison {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   gap: 12px;
 }
 .ta-imob-chart-stack {
   display: grid;
-  grid-auto-rows: minmax(0, 1fr);
+  grid-auto-rows: auto;
   gap: 12px;
   min-width: 0;
 }
@@ -2255,9 +2365,9 @@ function onPageSizeChange(next: number) {
   height: 240px;
 }
 .ta-imob-chart-stack .ta-imob-chart {
-  flex: 1;
-  height: auto;
-  min-height: 200px;
+  flex: none;
+  height: 340px;
+  min-height: 340px;
 }
 .ta-imob-chart-trend {
   height: 260px;
@@ -2300,8 +2410,9 @@ function onPageSizeChange(next: number) {
   font-size: 13px;
 }
 @media (max-width: 960px) {
-  .ta-imob-chart-comparison {
-    grid-template-columns: minmax(0, 1fr);
+  .ta-imob-chart-stack .ta-imob-chart {
+    height: 300px;
+    min-height: 300px;
   }
   .ta-imob-chart-box {
     min-height: 240px;
@@ -2528,6 +2639,12 @@ function onPageSizeChange(next: number) {
 }
 .ta-imob-time-popover-panel {
   padding: 4px 2px;
+}
+.ta-imob-time-popover-panel :deep(.el-date-editor) {
+  position: relative;
+}
+.ta-imob-time-popover-panel :deep(.el-picker__popper) {
+  z-index: 1;
 }
 .ta-imob-time-section-head {
   font-size: 11px;

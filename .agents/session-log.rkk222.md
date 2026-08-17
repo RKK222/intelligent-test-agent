@@ -10804,3 +10804,27 @@
 - 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并通过最终 `sha256sum -c`、`unzip -t` 和内外层逐字节比较。
 - 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库预期 Flyway history 零新增。
 - 案例表头滚动视觉、小地球真实 TCDS 导入、定向文件树展开及生产可观测 TPS/UCID 数据仍需企业现场验收。
+
+## 2026-08-17 - 修复可观测日期弹层并提供离线对标说明
+
+### Why
+
+- 自定义时间的日期面板默认 Teleport 到 `body`，父级 Popover 会把第一次日期点击误判为外部点击而关闭；Artificial Analysis 方法和数据源在企业内网无法访问；调用结果分布和供应商请求量对比被压在半宽列中且高度不足。
+
+### What
+
+- 保留现有时间筛选状态和完整区间校验，只把嵌套 `el-date-picker` 设置为不 Teleport，并阻止内部点击冒泡；父级 Popover 仍保持原生点击外部关闭行为。
+- 方法说明和每个模型的数据源入口改为页面内离线弹窗，固化核验日期、实测值、同类中位数、方法边界和外网可选追溯链接。
+- 调用结果分布与供应商请求量对比改为各自独占整行，桌面端图表高 340px、窄屏 300px；同步 agent-web README 和本地验收文档。
+
+### How
+
+- 可观测组件定向 Vitest 3/3、agent-web `vue-tsc`、用户手册与 Chrome 108 目标生产构建全部通过。
+- 在 release 前端 3001 端口用真实 Chromium 和受控 API 响应点击验证：只选第一个日期后父弹层与日期面板继续显示且明细请求数不变；方法说明和数据源离线弹窗均打开；两张业务图实测均为 `1218 x 340px`，控制台无错误。
+- 按 `.env.test`/`test` profile 执行完整重启，22 模块跳过测试打包成功；随后 release 后端因 Redis 连接被关闭而启动失败，且 8080 readiness 来自并行启动的主工作区 JAR，未把该结果记为 release 后端启动成功。release Vite 仍在 3001 独立运行供页面验收。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；未修改 `.env*`、HTTP API、RunEvent、数据库、Flyway、generated SDK 或 OpenCode 源码。
+
+### Result
+
+- 自定义日期首击不再关闭；公开方法和数据无需企业外网即可查看；两张业务图具备整行可读空间。
+- 本次为现有 release 拓扑内的前端交互修复，向后兼容；尚未同步到并行开发中的 dev 工作树，也未重新生成企业发布包。
