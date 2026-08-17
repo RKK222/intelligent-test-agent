@@ -1243,7 +1243,13 @@ class WorkspaceFileWebSocketHandlerTest {
         when(ticketService.consume("wft_workspace", "http://localhost:3000")).thenReturn(ticket);
         when(importService.importRequirements(Mockito.eq("u001"), Mockito.any()))
                 .thenReturn(new RequirementImportApplicationService.ImportResult(
-                        "SUCCEEDED", 6, 1, 0, 0, List.of()));
+                        "SUCCEEDED",
+                        6,
+                        1,
+                        0,
+                        0,
+                        List.of(),
+                        List.of("spec/I-01-登录需求")));
         WorkspaceFileWebSocketHandler handler = new WorkspaceFileWebSocketHandler(
                 ticketService,
                 workspaceService,
@@ -1261,7 +1267,12 @@ class WorkspaceFileWebSocketHandlerTest {
         handler.handle(session).block();
 
         assertThat(session.sentText()).singleElement().satisfies(message ->
-                assertThat(message).contains("\"type\":\"result\"", "\"status\":\"SUCCEEDED\""));
+                assertThat(message)
+                        .contains(
+                                "\"type\":\"result\"",
+                                "\"status\":\"SUCCEEDED\"",
+                                "\"workspaceRelativeDisplayPaths\":[\"spec/I-01-登录需求\"]")
+                        .doesNotContain("physicalRootPath"));
         verify(workspaceService).requireWorkspaceWriteAccess(
                 workspaceId, new UserId("usr_1234567890abcdef"), false);
         var command = org.mockito.ArgumentCaptor.forClass(RequirementImportApplicationService.ImportCommand.class);

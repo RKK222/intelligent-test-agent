@@ -290,6 +290,8 @@ export type RequirementImportResult = {
   overwrittenFiles: number;
   failedFiles: number;
   failures: RequirementImportFailure[];
+  /** 后端按可信 TCDS 名称生成的工作区相对父目录；仅供文件树有限刷新和展开。 */
+  workspaceRelativeDisplayPaths?: string[];
 };
 
 export type FileTreeEntry = {

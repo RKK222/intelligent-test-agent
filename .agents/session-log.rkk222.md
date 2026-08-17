@@ -10754,3 +10754,28 @@
 
 - 可观测页面现可按全量 PG 明细准确查看 Output TPS 并与公开参考做有边界说明的对照；自定义日期首击不再跳掉，用户筛选后的明细与总页数保持一致。
 - 功能位于现有 release 部署拓扑内，API 为加法兼容变更；无新部署节点、必需配置、数据库迁移或安全数据暴露。release 修复尚未同步到当前有并行未提交改动的 dev 工作树，后续应按提交哈希安全 cherry-pick。
+
+## 2026-08-17 - 需求导入完成后定向刷新文件树
+
+### Why
+
+- 小地球导入成功后原链路立即关闭弹窗并刷新文件树，不能保证新目录已加载和可见；若恢复整棵 `spec` 的历史展开状态，又会产生大量文件 RPC 并加重页面卡顿。
+
+### What
+
+- `workspace.requirement-import` 结果新增加法字段 `workspaceRelativeDisplayPaths`，只返回后端按可信 TCDS 父条目规范化得到的 `spec/{父条目}` 工作区相对展示路径，不返回物理根路径或文档地址。
+- `SUCCEEDED/PARTIAL` 后 iframe 保持生成蒙版，父工作台先只刷新根节点，再复用 `expandPathToFile(path, true)` 逐层加载并展开 `spec` 和本批次父条目；不恢复其它历史展开目录，不递归展开父条目下的子树。
+- 父工作台完成后以精确同源消息确认：`SUCCEEDED` 再关闭弹窗，`PARTIAL` 解除蒙版并保留失败明细；刷新失败保留弹窗并提示用户手动刷新。父端再次校验路径必须是两段 `spec/...` 相对目录。
+- 同步 workspace/API/shared-types/backend-api/agent-web README、HTTP API、事件流和安全复测说明；未修改 RunEvent、数据库、Flyway、部署变量、公共 Agent、Workspace ID 或 Git 提交推送链路。
+
+### How
+
+- JDK 25 下运行 `RequirementImportApplicationServiceTest` 与 `WorkspaceFileWebSocketHandlerTest`，共 45/45 通过；22 模块跳过测试打包成功。
+- 需求导入页与文件树组件定向 Vitest 2 个文件 33/33 通过；全 workspace `corepack pnpm typecheck` 和 agent-web production build 通过，仅保留既有大 chunk 提示；`tools/verify-ai-docs.sh`、`git diff --check` 通过。
+- 使用当前 `release` 工作树代码和项目根 `.env.test`/`test` profile 完整重启；backend health/readiness 为 UP，前端 3000 返回 200，登录 CORS 正常。`.env.test` 禁用本地 manager，启动脚本按配置跳过该进程。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目，确认没有覆盖模型 TPS、TCDS 完整任务类型、体验工作区或公共 Agent/Git 链路成果。
+
+### Result
+
+- 导入结果写入完成与文件树可见完成现在是两个明确阶段；页面只请求根目录、`spec` 和本次父条目目录，既自动定位本批次内容，又不会递归展开整个 `spec`。
+- WebSocket 返回字段为向后兼容的加法变化；旧前端可忽略，新前端在字段缺失时仍可刷新根节点。真实企业 TCDS 文档导入仍需在企业网络现场复测。

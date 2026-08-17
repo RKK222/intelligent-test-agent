@@ -65,6 +65,7 @@ import type {
   NightExecutionTaskQueryResponse,
   PersonalWorkspaceGitPullResult,
   ProviderInfo,
+  RequirementImportResult,
   ResendMetadata,
   Session,
   SessionCollaborationShare,
@@ -6371,6 +6372,72 @@ function refreshCurrentWorkspacePanels() {
   void refreshWorkspaceGitDiff();
 }
 
+/**
+ * 导入结果只接受后端给出的 spec 一级父条目相对路径，既阻止路径越界，也限制展开深度和 RPC 数量。
+ */
+function requirementImportParentDisplayPaths(result: RequirementImportResult): string[] {
+  const paths = result.workspaceRelativeDisplayPaths;
+  if (paths === undefined) return [];
+  const unique = new Set<string>();
+  for (const path of paths) {
+    const segments = path.split("/");
+    if (
+      path !== path.trim()
+      || path.includes("\\")
+      || segments.length !== 2
+      || segments[0] !== "spec"
+      || segments.some((segment) => !segment || segment === "." || segment === "..")
+    ) {
+      throw new Error("需求导入展示路径不合法");
+    }
+    unique.add(path);
+  }
+  return [...unique];
+}
+
+/** 导入完成后只重载根目录和本批次父条目，避免重放整棵 spec 展开状态。 */
+async function handleRequirementImportComplete(payload: {
+  workspaceId: string;
+  requestId: string;
+  result: RequirementImportResult;
+}) {
+  const finish = (success: boolean) => fileExplorerRef.value?.completeRequirementImportRefresh({
+    requestId: payload.requestId,
+    status: payload.result.status,
+    success
+  });
+  try {
+    if (selectedWorkspace.value?.workspaceId !== payload.workspaceId) {
+      throw new Error("需求导入工作区已切换");
+    }
+    const displayPaths = requirementImportParentDisplayPaths(payload.result);
+    await refreshWorkspaceView(payload.workspaceId, { targets: [ROOT_WORKSPACE_VIEW_TARGET] });
+    if (
+      selectedWorkspace.value?.workspaceId !== payload.workspaceId
+      || entriesByDirectory.value[ROOT_WORKSPACE_VIEW_TARGET.id] === undefined
+    ) {
+      throw new Error("需求导入文件树根目录刷新失败");
+    }
+    for (const path of displayPaths) {
+      if (!await expandPathToFile(path, true)) {
+        throw new Error("需求导入父条目展开失败");
+      }
+    }
+    // 等待展开状态实际提交到文件树 DOM，再通知 iframe 解除蒙版或关闭。
+    await nextTick();
+    // 保留原完成链路中的 Git Diff 更新，但不让它阻塞文件树完成确认。
+    void refreshWorkspaceGitDiff();
+    finish(true);
+  } catch {
+    feedback.value = {
+      kind: "error",
+      title: "需求已导入，文件树刷新失败",
+      description: "请关闭导入弹窗后点击工作空间菜单中的“刷新文件树”。"
+    };
+    finish(false);
+  }
+}
+
 // 「+新增版本」流程：把 yyyyMMdd 和后端所需的 branch（非标准库）传给 createWorkspaceVersion。
 // 成功后失效该模板下的版本查询，让 useQueries 重新拉取；同时把新版本切到工作区。
 const creatingVersion = ref(false);
@@ -10147,25 +10214,28 @@ function refreshParentDirectory(relPath: string) {
 }
 
 // 展开文件树到目标文件：把所有祖先目录加入 expandedDirectories 并按需懒加载。
-async function expandPathToFile(relPath: string) {
+async function expandPathToFile(relPath: string, targetIsDirectory = false): Promise<boolean> {
   if (!relPath || relPath.startsWith("/")) {
-    return;
+    return false;
   }
   const segments = relPath.split("/").filter(Boolean);
-  if (segments.length <= 1) {
-    return;
+  const directoryCount = targetIsDirectory ? segments.length : segments.length - 1;
+  if (directoryCount <= 0) {
+    return true;
   }
   const next = new Set(expandedDirectories.value);
   let acc = "";
-  for (let i = 0; i < segments.length - 1; i += 1) {
+  for (let i = 0; i < directoryCount; i += 1) {
     acc = acc ? `${acc}/${segments[i]}` : segments[i];
     const target = resolveWorkspaceViewLoadTarget(acc, workspaceViewDirectoryById);
-    if (!target) return;
+    if (!target) return false;
     next.add(target.id);
     expandedDirectories.value = new Set(next);
     if (!entriesByDirectory.value[target.id]) await loadDirectory(target);
+    if (entriesByDirectory.value[target.id] === undefined) return false;
   }
   expandedDirectories.value = next;
+  return true;
 }
 
 /** 引用 tab 使用精确叶子节点反向展开，避免合并路径或同名文件定位到工作区副本。 */
@@ -11450,6 +11520,7 @@ async function handleLogout() {
           @add-view-file-context="addWorkspaceViewFileToChatContext"
           @open-diff="handleOpenDiff"
           @refresh="refreshCurrentWorkspacePanels"
+          @requirement-import-complete="handleRequirementImportComplete"
           @changes-refreshed="(payload) => refreshWorkspaceGitDiff({
             reloadOpenFiles: payload?.reloadOpenFiles ?? true,
             paths: payload?.paths,

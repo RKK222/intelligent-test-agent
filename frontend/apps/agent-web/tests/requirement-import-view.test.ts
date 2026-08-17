@@ -73,7 +73,8 @@ describe("RequirementImportView", () => {
       importedFiles: 1,
       overwrittenFiles: 0,
       failedFiles: 1,
-      failures: [{ fileName: "设计说明.bin", code: "VALIDATION_ERROR", message: "不支持的 TCDS 文档格式" }]
+      failures: [{ fileName: "设计说明.bin", code: "VALIDATION_ERROR", message: "不支持的 TCDS 文档格式" }],
+      workspaceRelativeDisplayPaths: ["spec/I-01-登录需求"]
     });
     const wrapper = mountView();
     window.dispatchEvent(new MessageEvent("message", {
@@ -109,8 +110,18 @@ describe("RequirementImportView", () => {
     expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "ITA_REQUIREMENT_IMPORT_COMPLETE",
       requestId: "req_1",
-      result: expect.objectContaining({ status: "PARTIAL" })
+      result: expect.objectContaining({
+        status: "PARTIAL",
+        workspaceRelativeDisplayPaths: ["spec/I-01-登录需求"]
+      })
     }), window.location.origin);
+    expect(wrapper.find(".importing-mask").exists()).toBe(true);
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: { type: "ITA_REQUIREMENT_IMPORT_TREE_REFRESHED", requestId: "req_1", success: true }
+    }));
+    await vi.waitFor(() => expect(wrapper.find(".importing-mask").exists()).toBe(false));
     expect(wrapper.text()).toContain("部分文档导入失败");
     wrapper.unmount();
   });
@@ -180,6 +191,22 @@ describe("RequirementImportView", () => {
       failedFiles: 0,
       failures: []
     });
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "ITA_REQUIREMENT_IMPORT_COMPLETE",
+      requestId: "req_mask"
+    }), window.location.origin));
+    expect(wrapper.find(".importing-mask").exists()).toBe(true);
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: { type: "ITA_REQUIREMENT_IMPORT_TREE_REFRESHED", requestId: "other_request", success: true }
+    }));
+    expect(wrapper.find(".importing-mask").exists()).toBe(true);
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: { type: "ITA_REQUIREMENT_IMPORT_TREE_REFRESHED", requestId: "req_mask", success: true }
+    }));
     await vi.waitFor(() => expect(wrapper.find(".importing-mask").exists()).toBe(false));
     expect(wrapper.text()).toContain("导入成功");
     wrapper.unmount();

@@ -4154,7 +4154,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 
 - `workspace.requirement-import-items` 请求仅包含 `{workspaceId, appShortName, editionId}`，返回父子条目 `{itemNo,itemName,imported,children}`；`imported` 只表示与导入相同规范化规则生成的父目录或子条目 `01-需求` 目录已经存在。服务端只解析一次工作区元数据，再逐一通过公共文件服务检查受控相对目录；该状态不禁用选择，用户仍可覆盖更新或重试部分失败；共享、支持访问、体验工作区和源码快照拒绝调用。
 - `workspace.requirement-import` 请求仅包含 `{workspaceId, appShortName, editionId, selectedSubItemNos, requestId}`。服务端重新查询授权、名称、文档类型和 URL，拒绝共享只读、支持访问、体验工作区和源码快照。
-- 返回 `{status, createdDirectories, importedFiles, overwrittenFiles, failedFiles, failures}`，其中 `status` 为 `SUCCEEDED | PARTIAL | FAILED`，失败原因不含 URL、token、响应正文或绝对路径。
+- 返回 `{status, createdDirectories, importedFiles, overwrittenFiles, failedFiles, failures, workspaceRelativeDisplayPaths}`，其中 `status` 为 `SUCCEEDED | PARTIAL | FAILED`；`workspaceRelativeDisplayPaths` 只包含本批次按可信 TCDS 名称规范化后的 `spec/{父条目}` 工作区相对展示目录，不含物理根路径。失败原因不含 URL、token、响应正文或绝对路径。
 - 不同来源规范化到同一目标文件时整单以稳定错误码 `PATH_COLLISION` 拒绝，响应只包含工作区相对目标路径；同一来源重复导入仍按覆盖语义处理。
 - Word 恢复轻量文本抽取：DOCX 按段落顺序输出正文并把表格行输出为 Markdown 行，旧 DOC 使用 HWPF 文本提取；不生成 Word 行内样式、列表层级或图片附件。继续兼容 `.doc` 名称承载 DOCX，以及 Word 扩展名实际返回 UTF-8/GB18030 文本；单个转换后的 Markdown 不得超过 20 MiB。
 - `workspace.resolve-physical-path` 请求为 `{workspaceId,path}`，只在用户点击复制时解析一个现有普通文件；越界和符号链接失败关闭，分享、支持访问、体验和源码快照均拒绝。

@@ -5,6 +5,7 @@ import type {
   AppSourceRepositorySummary,
   FileSearchResult,
   FileTreeEntry,
+  RequirementImportResult,
   RunDiffFile,
   WorkspaceViewEntry,
   WorkspaceViewWarning
@@ -118,6 +119,11 @@ const emit = defineEmits<{
     workspaceId?: string;
   }];
   refresh: [];
+  "requirement-import-complete": [payload: {
+    workspaceId: string;
+    requestId: string;
+    result: RequirementImportResult;
+  }];
   // 选择某个应用版本后由父组件切换运行态 Workspace
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
   // 要求按需懒加载某模板下的版本列表
@@ -228,6 +234,21 @@ function closeIframeDialog() {
   iframeDialogVisible.value = false;
 }
 
+/** 文件树定向刷新完成后再释放 iframe 蒙版；完整成功只在此时关闭弹窗。 */
+function completeRequirementImportRefresh(payload: {
+  requestId: string;
+  status: RequirementImportResult["status"];
+  success: boolean;
+}) {
+  if (payload.requestId !== iframeRequestId.value) return;
+  iframeRef.value?.contentWindow?.postMessage({
+    type: "ITA_REQUIREMENT_IMPORT_TREE_REFRESHED",
+    requestId: payload.requestId,
+    success: payload.success
+  }, window.location.origin);
+  if (payload.success && payload.status === "SUCCEEDED") closeIframeDialog();
+}
+
 function handleIframeMessage(event: MessageEvent) {
   if (event.origin !== window.location.origin || event.source !== iframeRef.value?.contentWindow) return;
   const data = event.data as Record<string, unknown> | null;
@@ -243,9 +264,17 @@ function handleIframeMessage(event: MessageEvent) {
     return;
   }
   if (data?.type === "ITA_REQUIREMENT_IMPORT_COMPLETE" && data.requestId === iframeRequestId.value) {
-    const result = data.result as { status?: string } | undefined;
-    if (result?.status === "SUCCEEDED" || result?.status === "PARTIAL") emit("refresh");
-    if (result?.status === "SUCCEEDED") closeIframeDialog();
+    const result = data.result as RequirementImportResult | undefined;
+    if (
+      props.workspaceId
+      && (result?.status === "SUCCEEDED" || result?.status === "PARTIAL")
+    ) {
+      emit("requirement-import-complete", {
+        workspaceId: props.workspaceId,
+        requestId: iframeRequestId.value,
+        result
+      });
+    }
     return;
   }
   if (data?.type === "ITA_REQUIREMENT_IMPORT_AUTH_REQUIRED") {
@@ -359,7 +388,8 @@ watch(
 
 defineExpose({
   refreshAll,
-  refreshChanges
+  refreshChanges,
+  completeRequirementImportRefresh
 });
 </script>
 

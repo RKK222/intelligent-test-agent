@@ -15,6 +15,12 @@ type ImportContext = {
   requestId: string;
 };
 
+type ImportTreeRefreshResult = {
+  type: "ITA_REQUIREMENT_IMPORT_TREE_REFRESHED";
+  requestId: string;
+  success: boolean;
+};
+
 const api = createBackendApiClient({
   baseUrl: import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080"
 });
@@ -296,27 +302,43 @@ async function submitImport() {
       requestId: context.value.requestId,
       result: response
     }, window.location.origin);
+    // 成功和部分成功都要等父工作台完成定向文件树刷新；FAILED 没有可展开的成功结果。
+    if (response.status === "FAILED") importing.value = false;
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "需求导入失败";
-  } finally {
     importing.value = false;
   }
 }
 
-function receiveContext(event: MessageEvent) {
+function receiveParentMessage(event: MessageEvent) {
   if (event.origin !== window.location.origin || event.source !== window.parent) return;
-  const data = event.data as Partial<ImportContext> | null;
-  if (data?.type !== "ITA_REQUIREMENT_IMPORT_CONTEXT" || !data.workspaceId || !data.requestId) return;
+  const data = event.data as Record<string, unknown> | null;
+  if (data?.type === "ITA_REQUIREMENT_IMPORT_TREE_REFRESHED") {
+    const refresh = data as Partial<ImportTreeRefreshResult>;
+    if (!context.value || refresh.requestId !== context.value.requestId) return;
+    importing.value = false;
+    if (!refresh.success) {
+      errorMessage.value = "需求已写入，但文件树刷新失败；请关闭弹窗后手动刷新文件树。";
+    }
+    return;
+  }
+  if (
+    data?.type !== "ITA_REQUIREMENT_IMPORT_CONTEXT"
+    || typeof data.workspaceId !== "string"
+    || !data.workspaceId
+    || typeof data.requestId !== "string"
+    || !data.requestId
+  ) return;
   context.value = data as ImportContext;
   void loadApplications();
 }
 
 onMounted(() => {
-  window.addEventListener("message", receiveContext);
+  window.addEventListener("message", receiveParentMessage);
   window.parent.postMessage({ type: "ITA_REQUIREMENT_IMPORT_READY" }, window.location.origin);
 });
 
-onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
+onBeforeUnmount(() => window.removeEventListener("message", receiveParentMessage));
 </script>
 
 <template>

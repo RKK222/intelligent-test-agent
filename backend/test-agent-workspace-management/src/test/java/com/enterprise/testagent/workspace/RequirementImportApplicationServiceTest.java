@@ -50,6 +50,7 @@ class RequirementImportApplicationServiceTest {
         assertThat(result.status()).isEqualTo("PARTIAL");
         assertThat(result.importedFiles()).isEqualTo(1);
         assertThat(result.failedFiles()).isEqualTo(1);
+        assertThat(result.workspaceRelativeDisplayPaths()).containsExactly("spec/I-01-登录需求");
         ArgumentCaptor<String> path = ArgumentCaptor.forClass(String.class);
         verify(workspace).writeFile(any(WorkspaceId.class), path.capture(), anyString());
         assertThat(path.getValue()).isEqualTo("spec/I-01-登录需求/01-需求/SI-01-登录校验/需求文档/需求说明.md");
@@ -129,6 +130,7 @@ class RequirementImportApplicationServiceTest {
         assertThat(result.status()).isEqualTo("SUCCEEDED");
         assertThat(result.importedFiles()).isZero();
         assertThat(result.overwrittenFiles()).isEqualTo(1);
+        assertThat(result.workspaceRelativeDisplayPaths()).containsExactly("spec/I-01-登录");
         verify(workspace, times(6)).createDirectory(any(WorkspaceId.class), anyString());
         verify(workspace).writeFile(any(WorkspaceId.class), anyString(), org.mockito.ArgumentMatchers.eq("新正文\n"));
         verify(workspace, never()).deleteFile(any(WorkspaceId.class), anyString());

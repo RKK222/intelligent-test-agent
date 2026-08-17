@@ -224,6 +224,84 @@ describe("FigmaFileExplorer", () => {
     expect(fileExplorerSource).not.toContain("postMessage({type:'FUNC_DISPATCH'");
   });
 
+  it("waits for the targeted workspace refresh before closing a successful requirement import", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        canWrite: true,
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      },
+      global: {
+        stubs: { Teleport: false }
+      }
+    });
+
+    try {
+      await wrapper.get('button[aria-label="从 TCDS 导入需求"]').trigger("click");
+      const iframe = document.body.querySelector("iframe.figma-fe-iframe") as HTMLIFrameElement;
+      expect(iframe).not.toBeNull();
+      const iframePostMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: window.location.origin,
+        source: iframe.contentWindow,
+        data: { type: "ITA_REQUIREMENT_IMPORT_READY" }
+      }));
+      await wrapper.vm.$nextTick();
+      const context = iframePostMessage.mock.calls
+        .map(([message]) => message as Record<string, unknown>)
+        .find((message) => message.type === "ITA_REQUIREMENT_IMPORT_CONTEXT")!;
+      const requestId = String(context.requestId);
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: window.location.origin,
+        source: iframe.contentWindow,
+        data: {
+          type: "ITA_REQUIREMENT_IMPORT_COMPLETE",
+          requestId,
+          result: {
+            status: "SUCCEEDED",
+            createdDirectories: 6,
+            importedFiles: 1,
+            overwrittenFiles: 0,
+            failedFiles: 0,
+            failures: [],
+            workspaceRelativeDisplayPaths: ["spec/I-01-登录需求"]
+          }
+        }
+      }));
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.emitted("requirement-import-complete")).toEqual([[
+        expect.objectContaining({
+          workspaceId: "wrk_personal",
+          requestId,
+          result: expect.objectContaining({ workspaceRelativeDisplayPaths: ["spec/I-01-登录需求"] })
+        })
+      ]]);
+      expect(document.body.querySelector("iframe.figma-fe-iframe")).not.toBeNull();
+
+      wrapper.vm.completeRequirementImportRefresh({ requestId, status: "SUCCEEDED", success: true });
+      await wrapper.vm.$nextTick();
+      expect(iframePostMessage).toHaveBeenCalledWith({
+        type: "ITA_REQUIREMENT_IMPORT_TREE_REFRESHED",
+        requestId,
+        success: true
+      }, window.location.origin);
+      expect(document.body.querySelector("iframe.figma-fe-iframe")).toBeNull();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("refreshes only the imported parent display paths instead of replaying the expanded spec tree", () => {
+    expect(agentWorkbenchSource).toContain(
+      "await refreshWorkspaceView(payload.workspaceId, { targets: [ROOT_WORKSPACE_VIEW_TARGET] })"
+    );
+    expect(agentWorkbenchSource).toContain("if (!await expandPathToFile(path, true))");
+    expect(agentWorkbenchSource).toContain('@requirement-import-complete="handleRequirementImportComplete"');
+  });
+
   it("shows the total diff count reported by all three change scopes", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {

@@ -1,6 +1,6 @@
 # @test-agent/shared-types
 
-需求导入公共类型只描述应用、父子条目编号/名称、选择命令与脱敏结果；不得加入 TCDS token、文档 URL、统一认证号或物理工作区路径。普通 Workspace 的 `rootPath` 为 `workspace:{workspaceId}` 逻辑定位符，`physicalRootPath` 可空且新响应固定为空。
+需求导入公共类型只描述应用、父子条目编号/名称、选择命令与脱敏结果；结果中的可选 `workspaceRelativeDisplayPaths` 只允许承载后端生成的 `spec/{父条目}` 工作区相对展示路径，供文件树有限刷新与展开。不得加入 TCDS token、文档 URL、统一认证号或物理工作区路径。普通 Workspace 的 `rootPath` 为 `workspace:{workspaceId}` 逻辑定位符，`physicalRootPath` 可空且新响应固定为空。
 
 新增 `ExternalApiScope`、scope option、凭据安全列表/分页、新建/编辑 payload 和一次性明文响应类型。列表模型只有 `keyHint`，不定义数据库密文；`apiKey` 只存在于新建、查看和轮换的瞬时响应类型。
 

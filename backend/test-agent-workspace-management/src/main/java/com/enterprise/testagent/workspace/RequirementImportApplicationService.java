@@ -206,11 +206,13 @@ public class RequirementImportApplicationService {
                 importedFiles,
                 overwrittenFiles,
                 failures.size(),
-                List.copyOf(failures));
+                List.copyOf(failures),
+                List.copyOf(plan.workspaceRelativeDisplayPaths()));
     }
 
     private ImportPlan buildPlan(String unifiedAuthId, List<SelectedSubItem> selectedItems) {
         Set<String> directories = new LinkedHashSet<>();
+        Set<String> workspaceRelativeDisplayPaths = new LinkedHashSet<>();
         Map<String, String> directoryOwners = new LinkedHashMap<>();
         List<PlannedDocument> documents = new ArrayList<>();
         List<ImportFailure> failures = new ArrayList<>();
@@ -220,6 +222,8 @@ public class RequirementImportApplicationService {
             String parent = segment(selected.parent().itemNo() + "-" + selected.parent().itemName(), "父条目目录");
             String child = segment(selected.child().itemNo() + "-" + selected.child().itemName(), "子条目目录");
             String root = "spec/" + parent;
+            // 只把本批次父条目目录作为脱敏展示路径返回，前端据此有限展开，不推断 TCDS 名称。
+            workspaceRelativeDisplayPaths.add(root);
             String requirementDirectory = root + "/01-需求/" + child + "/需求文档";
             String designDirectory = root + "/02-设计/" + child + "/开发文档";
             String source = selected.parent().itemNo() + ":" + selected.child().itemNo();
@@ -252,7 +256,7 @@ public class RequirementImportApplicationService {
                         Map.of("maxDocuments", MAX_DOCUMENTS));
             }
         }
-        return new ImportPlan(directories, documents, failures);
+        return new ImportPlan(directories, documents, failures, workspaceRelativeDisplayPaths);
     }
 
     private static void addDirectory(
@@ -411,9 +415,24 @@ public class RequirementImportApplicationService {
             int importedFiles,
             int overwrittenFiles,
             int failedFiles,
-            List<ImportFailure> failures) {
+            List<ImportFailure> failures,
+            List<String> workspaceRelativeDisplayPaths) {
+        /** 滚动升级兼容旧测试与内部调用方；旧构造形态不返回可展开路径。 */
+        public ImportResult(
+                String status,
+                int createdDirectories,
+                int importedFiles,
+                int overwrittenFiles,
+                int failedFiles,
+                List<ImportFailure> failures) {
+            this(status, createdDirectories, importedFiles, overwrittenFiles, failedFiles, failures, List.of());
+        }
+
         public ImportResult {
             failures = failures == null ? List.of() : List.copyOf(failures);
+            workspaceRelativeDisplayPaths = workspaceRelativeDisplayPaths == null
+                    ? List.of()
+                    : List.copyOf(workspaceRelativeDisplayPaths);
         }
     }
 
@@ -426,6 +445,7 @@ public class RequirementImportApplicationService {
     private record ImportPlan(
             Set<String> directories,
             List<PlannedDocument> documents,
-            List<ImportFailure> failures) {
+            List<ImportFailure> failures,
+            Set<String> workspaceRelativeDisplayPaths) {
     }
 }
