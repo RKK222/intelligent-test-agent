@@ -23,9 +23,11 @@ const applications = ref<RequirementImportApplication[]>([]);
 const selectedApp = ref("");
 const selectedAppInput = ref("");
 const selectedVersion = ref("");
+const selectedVersionInput = ref("");
 const items = ref<RequirementImportItem[]>([]);
 const selected = ref(new Set<string>());
 const keyword = ref("");
+const selectedOnly = ref(false);
 const loadingApplications = ref(false);
 const loadingItems = ref(false);
 const importing = ref(false);
@@ -56,6 +58,11 @@ const versions = computed(() => {
   });
 });
 
+const versionOptions = computed(() => [...new Set([
+  selectedVersion.value.trim(),
+  ...versions.value
+].filter(Boolean))]);
+
 const filteredApplications = computed(() => {
   const query = selectedAppInput.value.trim().toLocaleLowerCase();
   // 聚焦或主动展开时始终展示全量建议；仅在用户开始键入后按新输入过滤。
@@ -65,18 +72,23 @@ const filteredApplications = computed(() => {
 });
 
 const filteredItems = computed(() => {
-  const query = keyword.value.trim().toLocaleLowerCase();
-  if (!query) return items.value;
+  const tokens = keyword.value.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean);
   return items.value.flatMap((item) => {
-    const parentMatches = `${item.itemNo} ${item.itemName}`.toLocaleLowerCase().includes(query);
-    const children = parentMatches
-      ? item.children
-      : item.children.filter((child) => `${child.itemNo} ${child.itemName}`.toLocaleLowerCase().includes(query));
+    const parentText = `${item.itemNo} ${item.itemName}`.toLocaleLowerCase();
+    const parentMatches = tokens.length > 0 && tokens.every((token) => parentText.includes(token));
+    const children = item.children.filter((child) => {
+      if (selectedOnly.value && !selected.value.has(child.itemNo)) return false;
+      if (tokens.length === 0 || parentMatches) return true;
+      const childText = `${parentText} ${child.itemNo} ${child.itemName}`.toLocaleLowerCase();
+      return tokens.every((token) => childText.includes(token));
+    });
     return children.length > 0 ? [{ ...item, children }] : [];
   });
 });
 
 const filteredNumbers = computed(() => filteredItems.value.flatMap((item) => item.children.map((child) => child.itemNo)));
+const totalItemCount = computed(() => items.value.reduce((count, item) => count + item.children.length, 0));
+const hasItemFilter = computed(() => keyword.value.trim().length > 0 || selectedOnly.value);
 const allFilteredSelected = computed(() => filteredNumbers.value.length > 0
   && filteredNumbers.value.every((number) => selected.value.has(number)));
 const someFilteredSelected = computed(() => filteredNumbers.value.some((number) => selected.value.has(number))
@@ -105,6 +117,15 @@ function toggleChild(number: string, event: Event) {
   replaceSelection([number], (event.target as HTMLInputElement).checked);
 }
 
+function clearItemFilters() {
+  keyword.value = "";
+  selectedOnly.value = false;
+}
+
+function selectCurrentInput(event: FocusEvent) {
+  (event.target as HTMLInputElement).select();
+}
+
 async function loadApplications() {
   loadingApplications.value = true;
   errorMessage.value = "";
@@ -113,6 +134,7 @@ async function loadApplications() {
   selectedAppInput.value = expected ?? "";
   // 前后 3 个月仅作为输入建议；TCDS 的历史或未来版本仍允许按原值查询。
   selectedVersion.value = context.value?.defaultVersion?.trim() || versions.value[3];
+  selectedVersionInput.value = selectedVersion.value;
   let applicationLoadError = "";
   try {
     applications.value = await api.listRequirementImportApplications();
@@ -155,14 +177,18 @@ async function applyApplicationInput() {
 
 async function applyVersionInput() {
   versionMenuOpen.value = false;
-  selectedVersion.value = selectedVersion.value.trim();
-  if (!selectedVersion.value) {
+  const rawVersion = selectedVersionInput.value.trim();
+  if (!rawVersion) {
+    selectedVersion.value = "";
+    selectedVersionInput.value = "";
     items.value = [];
     selected.value = new Set();
     result.value = null;
     errorMessage.value = "请输入 TCDS 版本";
     return;
   }
+  selectedVersion.value = rawVersion;
+  selectedVersionInput.value = rawVersion;
   await loadItems();
 }
 
@@ -176,13 +202,20 @@ async function selectApplication(application: RequirementImportApplication) {
 
 async function selectVersion(version: string) {
   selectedVersion.value = version;
+  selectedVersionInput.value = version;
   versionMenuOpen.value = false;
   await loadItems();
 }
 
-function openApplicationMenu() {
+function openVersionMenu(event: FocusEvent) {
+  versionMenuOpen.value = true;
+  selectCurrentInput(event);
+}
+
+function openApplicationMenu(event?: FocusEvent) {
   applicationSearchActive.value = false;
   applicationMenuOpen.value = true;
+  if (event) selectCurrentInput(event);
 }
 
 function filterApplicationSuggestions() {
@@ -196,6 +229,18 @@ function toggleApplicationMenu() {
     return;
   }
   openApplicationMenu();
+}
+
+function cancelVersionInput() {
+  selectedVersionInput.value = selectedVersion.value;
+  versionMenuOpen.value = false;
+}
+
+function cancelApplicationInput() {
+  const application = applications.value.find((candidate) => candidate.appShortName === selectedApp.value);
+  selectedAppInput.value = application ? applicationLabel(application) : selectedApp.value;
+  applicationSearchActive.value = false;
+  applicationMenuOpen.value = false;
 }
 
 function closeMenuAfterFocusLeaves(menu: "version" | "application", event: FocusEvent) {
@@ -297,7 +342,7 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
         <span class="filter-label">版本：</span>
         <div class="filter-control combobox">
           <input
-            v-model="selectedVersion"
+            v-model="selectedVersionInput"
             class="filter-input"
             type="text"
             role="combobox"
@@ -307,11 +352,11 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
             placeholder="可输入任意 TCDS 版本"
             autocomplete="off"
             :disabled="importing"
-            @focus="versionMenuOpen = true"
+            @focus="openVersionMenu"
             @input="versionMenuOpen = true"
             @change="applyVersionInput"
             @keydown.enter.prevent="applyVersionInput"
-            @keydown.esc="versionMenuOpen = false"
+            @keydown.esc="cancelVersionInput"
           />
           <button
             class="combobox-toggle"
@@ -327,8 +372,16 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
             role="listbox"
             aria-label="版本快捷选项"
           >
-            <li v-for="version in versions" :key="version" role="option" :aria-selected="version === selectedVersion">
-              <button type="button" @click="selectVersion(version)">{{ version }}</button>
+            <li
+              v-for="version in versionOptions"
+              :key="version"
+              role="option"
+              :aria-selected="version === selectedVersion"
+            >
+              <button type="button" @click="selectVersion(version)">
+                <span>{{ version }}</span>
+                <small v-if="version === selectedVersion">当前</small>
+              </button>
             </li>
           </ul>
         </div>
@@ -351,7 +404,7 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
             @input="filterApplicationSuggestions"
             @change="applyApplicationInput"
             @keydown.enter.prevent="applyApplicationInput"
-            @keydown.esc="applicationMenuOpen = false"
+            @keydown.esc="cancelApplicationInput"
           />
           <button
             class="combobox-toggle"
@@ -374,7 +427,8 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
               :aria-selected="application.appShortName === selectedApp"
             >
               <button type="button" @click="selectApplication(application)">
-                {{ applicationLabel(application) }}
+                <span>{{ application.appName }}</span>
+                <code>{{ application.appShortName }}</code>
               </button>
             </li>
             <li v-if="filteredApplications.length === 0" class="dropdown-empty">没有匹配建议，可直接输入</li>
@@ -382,29 +436,48 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
         </div>
       </div>
       <label class="filter-field search">
-        <span class="filter-label">条目信息：</span>
-        <input v-model="keyword" class="filter-control search-control" type="search" placeholder="按名字/ID 搜索" />
+        <span class="filter-label">子条目：</span>
+        <input
+          v-model="keyword"
+          class="filter-control search-control"
+          type="search"
+          aria-label="筛选需求子条目"
+          placeholder="名称或编号，空格分隔"
+          @keydown.esc="keyword = ''"
+        />
       </label>
     </section>
 
     <section class="catalog" :aria-busy="loadingApplications || loadingItems">
       <div class="catalog-toolbar">
-        <label class="check-label">
-          <input
-            type="checkbox"
-            :checked="allFilteredSelected"
-            :indeterminate.prop="someFilteredSelected"
-            :disabled="filteredNumbers.length === 0 || importing"
-            @change="toggleAll"
-          />
-          全选当前筛选结果
-        </label>
-        <span>已选 {{ selected.size }} / 100，当前 {{ filteredNumbers.length }} 个可选子项</span>
+        <div class="toolbar-actions">
+          <label class="check-label select-all-toggle">
+            <input
+              type="checkbox"
+              :checked="allFilteredSelected"
+              :indeterminate.prop="someFilteredSelected"
+              :disabled="filteredNumbers.length === 0 || importing"
+              @change="toggleAll"
+            />
+            全选当前结果
+          </label>
+          <label class="check-label selected-only-toggle">
+            <input v-model="selectedOnly" type="checkbox" aria-label="仅显示已选子条目" :disabled="importing" />
+            仅看已选
+          </label>
+          <button v-if="hasItemFilter" class="toolbar-link" type="button" :disabled="importing" @click="clearItemFilters">
+            清空筛选
+          </button>
+        </div>
+        <span class="catalog-summary">已选 {{ selected.size }} / 100 · 显示 {{ filteredNumbers.length }} / {{ totalItemCount }}</span>
       </div>
 
       <p v-if="!context" class="empty">正在等待工作空间上下文…</p>
-      <p v-else-if="loadingApplications || loadingItems" class="empty">正在读取 TCDS 授权目录…</p>
-      <p v-else-if="filteredItems.length === 0" class="empty">当前条件下没有可导入条目</p>
+      <p v-else-if="loadingApplications || loadingItems" class="empty">正在读取 TCDS 条目…</p>
+      <p v-else-if="items.length === 0" class="empty">当前应用和版本没有可导入子条目</p>
+      <p v-else-if="filteredItems.length === 0" class="empty">
+        {{ selectedOnly ? "没有符合当前搜索条件的已选子条目" : "没有匹配的子条目，请调整名称或编号" }}
+      </p>
       <article v-for="item in filteredItems" v-else :key="item.itemNo" class="parent-item">
         <label class="parent-row check-label">
           <input
@@ -641,7 +714,11 @@ footer {
 
 .filter-dropdown button {
   box-sizing: border-box;
+  display: flex;
   width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 6px 10px;
   overflow: hidden;
   border: 0;
@@ -652,6 +729,20 @@ footer {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.filter-dropdown button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-dropdown button code,
+.filter-dropdown button small {
+  flex: 0 0 auto;
+  color: #909399;
+  font: inherit;
+  font-size: 11px;
 }
 
 .filter-dropdown button:hover,
@@ -699,13 +790,44 @@ footer {
   position: sticky;
   top: 0;
   z-index: 1;
+  gap: 12px;
   justify-content: space-between;
-  min-height: 32px;
-  padding: 0 12px;
+  min-height: 36px;
+  padding: 4px 12px;
   border-bottom: 1px solid #ebeef5;
   background: #f5f7fa;
   color: #909399;
   font-size: 12px;
+}
+
+.toolbar-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+
+.selected-only-toggle {
+  color: #606266;
+}
+
+.toolbar-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #409eff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.toolbar-link:disabled {
+  color: #c0c4cc;
+  cursor: not-allowed;
+}
+
+.catalog-summary {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .check-label {

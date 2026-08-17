@@ -198,7 +198,7 @@ describe("RequirementImportView", () => {
     }));
 
     await vi.waitFor(() => expect(listItems).toHaveBeenCalled());
-    const selectAll = wrapper.get('.catalog-toolbar input[type="checkbox"]');
+    const selectAll = wrapper.get('.select-all-toggle input[type="checkbox"]');
     const parent = wrapper.get('.parent-row input[type="checkbox"]');
     const children = wrapper.findAll('.child-row input[type="checkbox"]');
 
@@ -238,6 +238,13 @@ describe("RequirementImportView", () => {
     expect(versionInput.attributes("disabled")).toBeUndefined();
     expect(applicationInput.attributes("disabled")).toBeUndefined();
 
+    await versionInput.trigger("focus");
+    expect((versionInput.element as HTMLInputElement).selectionStart).toBe(0);
+    expect((versionInput.element as HTMLInputElement).selectionEnd).toBe((versionInput.element as HTMLInputElement).value.length);
+    await applicationInput.trigger("focus");
+    expect((applicationInput.element as HTMLInputElement).selectionStart).toBe(0);
+    expect((applicationInput.element as HTMLInputElement).selectionEnd).toBe((applicationInput.element as HTMLInputElement).value.length);
+
     await applicationInput.setValue("应用乙（APP-B）");
     await applicationInput.trigger("change");
     await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", expect.any(String)));
@@ -274,6 +281,12 @@ describe("RequirementImportView", () => {
     expect((versionInput.element as HTMLInputElement).value).toBe("2023年12月");
     expect((applicationInput.element as HTMLInputElement).value).toBe("APP-OUTSIDE-CATALOG");
 
+    await versionInput.trigger("focus");
+    const versionOptions = wrapper.findAll('#requirement-import-version-options [role="option"]');
+    expect(versionOptions).toHaveLength(8);
+    expect(versionOptions[0].text()).toContain("2023年12月");
+    expect(versionOptions[0].text()).toContain("当前");
+
     await applicationInput.trigger("focus");
     expect(wrapper.findAll('#requirement-import-application-options [role="option"]')).toHaveLength(2);
 
@@ -303,6 +316,12 @@ describe("RequirementImportView", () => {
 
     await versionInput.trigger("focus");
     expect(wrapper.findAll('#requirement-import-version-options [role="option"]')).toHaveLength(7);
+    const currentVersion = (versionInput.element as HTMLInputElement).value;
+    const anotherVersion = wrapper.findAll('#requirement-import-version-options button')
+      .find((button) => !button.text().includes(currentVersion))!;
+    const chosenVersion = anotherVersion.text();
+    await anotherVersion.trigger("click");
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-A", chosenVersion));
 
     await applicationInput.trigger("focus");
     expect(wrapper.findAll('#requirement-import-application-options [role="option"]')).toHaveLength(2);
@@ -314,6 +333,62 @@ describe("RequirementImportView", () => {
       "APP-B",
       (versionInput.element as HTMLInputElement).value
     ));
+    wrapper.unmount();
+  });
+
+  it("filters sub-items by parent or child tokens, preserves selection, and supports selected-only view", async () => {
+    listItems.mockResolvedValueOnce([
+      {
+        itemNo: "I-01",
+        itemName: "登录需求",
+        children: [
+          { itemNo: "SI-01", itemName: "登录校验" },
+          { itemNo: "SI-02", itemName: "会话续期" }
+        ]
+      },
+      {
+        itemNo: "I-02",
+        itemName: "支付需求",
+        children: [
+          { itemNo: "SI-03", itemName: "支付确认" }
+        ]
+      }
+    ]);
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_item_filters"
+      }
+    }));
+
+    await vi.waitFor(() => expect(wrapper.findAll(".child-row")).toHaveLength(3));
+    const searchInput = wrapper.get('input[aria-label="筛选需求子条目"]');
+
+    await searchInput.setValue("登录 SI-01");
+    expect(wrapper.findAll(".child-row")).toHaveLength(1);
+    expect(wrapper.get(".child-row").text()).toContain("SI-01");
+    await wrapper.get('.child-row input[type="checkbox"]').setValue(true);
+
+    await searchInput.setValue("登录");
+    expect(wrapper.findAll(".child-row")).toHaveLength(2);
+    await searchInput.setValue("");
+    expect(wrapper.text()).toContain("已选 1 / 100 · 显示 3 / 3");
+
+    await wrapper.get('input[aria-label="仅显示已选子条目"]').setValue(true);
+    expect(wrapper.findAll(".child-row")).toHaveLength(1);
+    expect(wrapper.get(".child-row").text()).toContain("SI-01");
+
+    await searchInput.setValue("会话");
+    expect(wrapper.text()).toContain("没有符合当前搜索条件的已选子条目");
+    await wrapper.get("button.toolbar-link").trigger("click");
+    expect((searchInput.element as HTMLInputElement).value).toBe("");
+    expect((wrapper.get('input[aria-label="仅显示已选子条目"]').element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.findAll(".child-row")).toHaveLength(3);
+    expect(wrapper.text()).toContain("已选 1 / 100");
     wrapper.unmount();
   });
 
