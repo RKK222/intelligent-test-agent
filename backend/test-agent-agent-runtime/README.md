@@ -44,3 +44,7 @@
 `AgentRuntime` 提供中立的 `loadReplayableTurn/revertTurn/unrevertTurn/probeMessage` 能力。OpenCode 适配器从远端倒序消息中只接受
 最后一条 user message，保留 text/file/agent/subtask、model、agent、variant，并复用既有 revert、unrevert 和 prompt/command
 协议；稳定替代 message ID 由运行时创建。该能力不暴露 OpenCode generated DTO，也不得通过修改只读源码快照或 generated SDK 实现。
+
+`AgentRuntimeRegistry.isRegistered` 用于区分历史 Run 中的平台运行时 ID 与 OpenCode 内置角色名。受保护
+OpenCode 适配器注册为独立 `protected-opencode` 运行时后，取消、Diff、恢复和终态快照可按 Run 中保存的真实
+运行时选择，未知 `build/plan` 等角色仍回退默认 `opencode`，不得把任意字符串当成已注册运行时。

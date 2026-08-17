@@ -1,3 +1,5 @@
+import { createReadStream, lstatSync } from "node:fs";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
@@ -57,6 +59,89 @@ const manualIndexRoute = (): Plugin => ({
   }
 });
 
+const localClientDistributionRoot = resolve(
+  process.env.TEST_AGENT_LOCAL_CLIENT_DIST_DIR?.trim()
+    || fileURLToPath(new URL("../../../deploy/internal/dist/local-opencode-client", import.meta.url))
+);
+
+const localClientContentType = (filePath: string): string => {
+  if (filePath.endsWith(".tar.gz")) return "application/gzip";
+  if (extname(filePath) === ".json") return "application/json; charset=utf-8";
+  if (extname(filePath) === ".sh") return "text/x-shellscript; charset=utf-8";
+  return "application/octet-stream";
+};
+
+/**
+ * dev 只读复用正式客户端分发目录，不把 JRE/OpenCode 大制品复制进前端 bundle。
+ * 未打包或路径非法时直接 404，避免 Vite SPA fallback 把 index.html 伪装成安装脚本。
+ */
+const localClientDistributionRoute = (): Plugin => ({
+  name: "test-agent-local-client-distribution-route",
+  configureServer(server) {
+    server.middlewares.use("/downloads/local-opencode-client", (request, response) => {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        response.statusCode = 405;
+        response.setHeader("Allow", "GET, HEAD");
+        response.end("Method Not Allowed");
+        return;
+      }
+
+      let pathname: string;
+      try {
+        pathname = decodeURIComponent((request.url ?? "/").split("?", 1)[0] ?? "/");
+      } catch {
+        response.statusCode = 400;
+        response.end("Bad Request");
+        return;
+      }
+      const segments = pathname.split("/").filter(Boolean);
+      if (!segments.length || segments.some(segment => segment === "." || segment === ".." || segment.startsWith("."))) {
+        response.statusCode = 404;
+        response.end("Not Found");
+        return;
+      }
+
+      const filePath = resolve(localClientDistributionRoot, ...segments);
+      const relativePath = relative(localClientDistributionRoot, filePath);
+      if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+        response.statusCode = 404;
+        response.end("Not Found");
+        return;
+      }
+
+      try {
+        const stat = lstatSync(filePath);
+        if (!stat.isFile() || stat.isSymbolicLink()) {
+          response.statusCode = 404;
+          response.end("Not Found");
+          return;
+        }
+        response.statusCode = 200;
+        response.setHeader("Content-Type", localClientContentType(filePath));
+        response.setHeader("Content-Length", String(stat.size));
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader(
+          "Cache-Control",
+          relativePath.startsWith("releases/")
+            ? "public, max-age=31536000, immutable"
+            : "no-store"
+        );
+        if (relativePath === "install.sh") {
+          response.setHeader("Content-Disposition", 'attachment; filename="test-agent-local-client-install.sh"');
+        }
+        if (request.method === "HEAD") {
+          response.end();
+          return;
+        }
+        createReadStream(filePath).on("error", () => response.destroy()).pipe(response);
+      } catch {
+        response.statusCode = 404;
+        response.end("Not Found");
+      }
+    });
+  }
+});
+
 export default defineConfig({
   define: {
     "import.meta.env.VITE_TEST_AGENT_BUILD_VERSION": JSON.stringify(buildVersion)
@@ -67,6 +152,7 @@ export default defineConfig({
   plugins: [
     toolboxSuiteRootGuard(),
     manualIndexRoute(),
+    localClientDistributionRoute(),
     vue(),
     tailwindcss(),
     AutoImport({

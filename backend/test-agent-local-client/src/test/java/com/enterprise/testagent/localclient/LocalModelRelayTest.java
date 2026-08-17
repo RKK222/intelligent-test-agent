@@ -33,6 +33,7 @@ class LocalModelRelayTest {
         upstream.start();
         LocalClientConfiguration configuration = new LocalClientConfiguration(
                 URI.create("http://127.0.0.1:" + upstream.getAddress().getPort()),
+                URI.create("http://127.0.0.1:" + upstream.getAddress().getPort()),
                 "test-client",
                 temporaryDirectory.resolve("opencode"),
                 temporaryDirectory.resolve("config"),

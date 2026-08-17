@@ -24,7 +24,8 @@ flowchart LR
 - `test-agent-workspace-filesystem` 是服务端和客户端共用的安全文件内核。它承载相对路径约束、真实根
   锚定、符号链接防逃逸、无覆盖原子移动、预览、搜索及分片上传下载。
 - `test-agent-local-client` 是 Java 21 可执行 JAR，负责用户级配置、稳定实例 ID、反向连接、进程监管、
-  文件 RPC 和 loopback 模型中继。
+  文件 RPC、loopback 模型中继和用户级系统托盘。托盘复用现有连接对象的重连入口、活动请求表及心跳状态，
+  不创建旁路连接或额外 OpenCode health 轮询。
 - `test-agent-system-management` 管理每用户唯一 client key 和客户端实例；`test-agent-opencode-runtime`
   管理连接路由、生命周期、Workspace/Session/Run 固定目标及隧道传输；`test-agent-api` 只承载入口、
   鉴权、DTO 和跨 Java 公共转发；`test-agent-persistence` 仅通过 MyBatis XML/Flyway 保存关系数据。
@@ -88,8 +89,53 @@ workspace/session 在 path、query 或请求体中的入口都先解析本地目
 内同一实例重连后执行；窗口结束为 `WINDOW_EXPIRED`。Run 已开始后断连终止为
 `LOCAL_CLIENT_DISCONNECTED`，不自动重跑，避免对本地文件产生重复修改。
 
+## 受保护 Agent/Skill 的服务器执行
+
+本地工作区的 Agent 目录会在原生 OpenCode Agent 之后追加当前用户可见的已发布 Hub Agent，选择 ID 使用
+`protected:{revisionId}` opaque 句柄。目录响应只有名称、说明、不可变修订 ID 和内容 SHA-256，不返回
+`AGENT.md`、`SKILL.md` 或其它制品正文。公共内置 Agent 对应系统级受保护资产；应用 Hub 已发布 Agent 继续
+沿用应用成员可见性和管理员发布边界。个人可修改配置仍留在本地 OpenCode，不冒充受保护资产。
+
+```text
+平台已发布 Agent/Skill 修订
+          │ 服务器解析正文、冻结 revision + SHA-256
+          ▼
+服务器 OpenCode（隔离空目录）
+          │ short-lived MCP grant
+          ▼
+当前 Java ── WSS FILE_REQUEST ── 本地客户端 ── 用户授权目录
+```
+
+受保护 Run 仍先校验网页签发的本地 `contextToken`，但只复用其中的用户、Session、Workspace、客户端实例和
+generation 身份，不复用本地执行节点或本地绝对路径。Run 强制路由 `SERVER_PROCESS`，服务器 OpenCode 使用
+每用户/Session 的 mode `0700` 隔离目录；其原生 bash/read/write/glob/grep 等文件工具被关闭，只能调用平台
+`local_files_*` MCP。MCP 再通过既有本地文件 WSS route/generation/root digest 调用安全内核，不新增 HTTP 文件
+代理，也不把 Agent/Skill 正文同步到客户端配置目录。
+
+文件 grant 只驻留签发 Java 的有界内存，Redis/数据库不保存明文 Token；每次调用重新检查 Run 未终态、
+Workspace 绑定、连接 generation、root digest 和持有 Java，任一变化立即失败关闭。Skill 附件资源留在 grant
+中供服务器模型只读使用。`run.created.payload.protectedAgent` 只记录 Agent/Skill 的 assetId、revisionId 和
+SHA-256，便于审计复现，不记录提示词、文件正文或 grant。
+
+该能力不增加客户端轮询：Agent 目录只随页面请求解析，文件鉴权只在模型真实调用工具时执行。托盘仍复用
+原 5 秒心跳快照；受保护文件调用共享现有 WSS 背压和客户端 64 项活动请求上限。
+
 ## 兼容性
 
 新增响应字段都追加为可选字段；旧 Session、Run、manifest、execution node 和夜间记录缺少 runtime 字段
 时反序列化为 `SERVER_PROCESS`。未携带 workspaceId 的既有 OpenCode API 保持服务端目标语义。本地专属
-能力通过 capability 字段显式关闭终端、Git 发布、Agent 配置、附件和分享，前端不能仅凭在线状态推断。
+能力通过 capability 字段显式关闭终端、Git 发布、Agent 配置、附件和分享；
+`protectedAgentExecution=true` 只表示可选择服务器受保护 Agent，不改变 `agentConfig=false`，前端不能仅凭
+在线状态推断。
+
+## 桌面托盘与资源约束
+
+macOS 和提供 Java SystemTray 的麒麟 ARM 桌面显示客户端托盘；不支持托盘或无图形会话时降级为后台服务，
+协议和本地文件能力不受影响。托盘复用 Web 端 `radar-bunny.png`，显示连接状态，并提供打开网页、重连、
+查看/下载客户端日志、会话进度和退出动作。`webUrl` 与控制面的 `serverUrl` 分离，便于开发环境分别使用
+前端和后台端口；两者生产都必须为 HTTPS。
+
+会话进度来自当前连接最多 64 个有界活动请求，只展示操作类型、数量和耗时，不展示 prompt、路径或请求体。
+托盘定时刷新只复制内存快照，状态不变时不重绘；OpenCode 状态复用原有 5 秒心跳结果，不新增健康探测。
+客户端日志由 JVM 自行滚动到 state 目录，导出限制为最多 20 个客户端日志、每文件末尾 10 MiB，明确排除
+密钥、配置、OpenCode 日志与工作区文件。

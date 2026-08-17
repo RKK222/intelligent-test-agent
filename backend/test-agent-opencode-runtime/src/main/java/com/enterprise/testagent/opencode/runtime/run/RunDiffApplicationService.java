@@ -123,9 +123,9 @@ public class RunDiffApplicationService {
      * 查询指定 agent 的 Run 当前 Diff，响应格式保持平台统一模型。
      */
     public RunDiffResponse getDiff(String agentId, RunId runId, String traceId) {
-        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
-        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = findRun(runId);
+        String resolvedAgentId = runtimeAgentId(agentId, run);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         DiffDetails details = diffDetails(run.runId());
         return getDiff(resolvedAgentId, runtime, run, details, traceId);
     }
@@ -175,9 +175,9 @@ public class RunDiffApplicationService {
      * 接受指定 agent 的当前 Run Diff，只追加平台接受事件。
      */
     public RunDiffActionResponse acceptDiff(String agentId, RunId runId, String traceId) {
-        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
-        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = findRun(runId);
+        String resolvedAgentId = runtimeAgentId(agentId, run);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         DiffDetails details = diffDetails(runId);
         RunDiffResponse diff = getDiff(resolvedAgentId, runtime, run, details, traceId);
         appendActionEvent(
@@ -202,9 +202,9 @@ public class RunDiffApplicationService {
      * 拒绝指定 agent 的当前 Run Diff。
      */
     public RunDiffActionResponse rejectDiff(String agentId, RunId runId, String traceId) {
-        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
-        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = findRun(runId);
+        String resolvedAgentId = runtimeAgentId(agentId, run);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         DiffDetails details = diffDetails(run.runId());
         List<RunEventDraft> events = details.events();
         Optional<RunDetailsLocator> locator = detailsLocator(details, runId);
@@ -260,6 +260,17 @@ public class RunDiffApplicationService {
     private Run findRun(RunId runId) {
         return runRepository.findById(runId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Run 不存在", Map.of("runId", runId.value())));
+    }
+
+    /** 旧网页固定使用 opencode URL；Run 已冻结非默认平台 runtime 时按 Run 恢复。 */
+    private String runtimeAgentId(String requestedAgentId, Run run) {
+        String requested = agentRuntimeRegistry.normalize(requestedAgentId);
+        String stored = agentRuntimeRegistry.normalize(run.agentId());
+        if (agentRuntimeRegistry.defaultAgentId().equals(requested)
+                && agentRuntimeRegistry.isRegistered(stored)) {
+            return stored;
+        }
+        return requested;
     }
 
     /**

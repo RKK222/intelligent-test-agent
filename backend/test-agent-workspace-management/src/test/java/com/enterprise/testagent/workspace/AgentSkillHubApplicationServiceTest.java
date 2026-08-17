@@ -190,6 +190,19 @@ class AgentSkillHubApplicationServiceTest {
         var page = service.listAssets("AGENT", null, 1, 100, new UserId("usr_1"));
 
         assertThat(page.total()).isEqualTo(1);
+        var protectedCatalog = service.listCatalog(
+                new UserId("usr_1"), new WorkspaceId("wrk_protected_catalog"));
+        assertThat(protectedCatalog).singleElement().satisfies(item -> {
+            assertThat(item.selectionId()).startsWith("protected:");
+            assertThat(item.displayName()).isEqualTo("评审专家");
+            assertThat(item.toString()).doesNotContain("# Reviewer", "AGENT.md");
+            var definition = service.resolve(
+                    new UserId("usr_1"),
+                    new WorkspaceId("wrk_protected_catalog"),
+                    item.revisionId());
+            assertThat(definition.agentFiles()).containsEntry("AGENT.md", "---\ndescription: Reviewer（评审专家）。\n---\n# Reviewer");
+            assertThat(definition.skills()).isEmpty();
+        });
         assertThat(page.items()).singleElement().satisfies(asset -> {
             assertThat(asset.builtin()).isTrue();
             assertThat(asset.displayName()).isEqualTo("评审专家");

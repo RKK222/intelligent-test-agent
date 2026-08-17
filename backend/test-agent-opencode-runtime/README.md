@@ -187,3 +187,17 @@ backendProcessId/generation 精确路由，生命周期仍从公共 startup/stop
 离线或换代永不回退服务端 OpenCode，也不切换到其它客户端。运行中断连收敛为
 `LOCAL_CLIENT_DISCONNECTED`；未开始夜间任务只在当前窗口内等待同实例重连。本地
 execution node 另保存 `OFFLINE/local-client-anchor` 外键锚点，仅供旧关系表引用，绝不参与服务端节点路由。
+
+## 受保护 Agent/Skill 运行
+
+本模块注册 `protected-opencode` 服务器运行时。本地工作区 Agent 目录只追加 Hub 的 opaque 已发布修订选择；
+Run 仍用默认 opencode 的 `contextToken` 校验本地 Workspace 和连接 generation，但执行节点强制为
+`SERVER_PROCESS`。`ProtectedAgentExecutionService` 在服务器隔离目录装配冻结的 Agent/Skill 系统上下文和
+短期 MCP grant，关闭服务器原生文件/终端工具，再由 `ProtectedAgentMcpService` 经既有 WSS 文件网关访问
+用户授权目录。`ProtectedOpencodeAgentRuntime` 用 Redis 保存远端 Session 到服务器目录映射，所有带 directory
+的后续调用重新取该映射，缺失时失败关闭或重建，绝不回退本地绝对路径。
+
+受保护 Run 固定 `LEGACY_FULL`，`run.created` 只审计 revision/SHA-256。grant 明文只存在于签发 Java，调用时
+逐次检查 Run、Workspace、客户端实例、持有 Java、generation 和 root digest。Agent/Skill 正文、MCP
+Authorization、文件参数和结果不得进入通用日志、RunEvent 或客户端目录。对应测试覆盖目录 opaque 投影、
+服务器路由、system/tool 参数、MCP 初始化与文件调用、连接换代失效和服务器目录重写。

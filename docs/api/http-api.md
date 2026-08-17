@@ -4249,9 +4249,50 @@ Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追
 - `localClientInstanceId` / `targetLocalClientInstanceId`；
 - `localClientOnline`、`connectionGeneration`（仅适用响应）；
 - `capabilities`：明确指示 chat、fileManagement、nightExecution、terminal、gitPublish、agentConfig、
-  attachments、collaboration。
+  attachments、collaboration、protectedAgentExecution。`protectedAgentExecution=true` 不改变
+  `agentConfig=false`；前者表示可在网页选择服务器受保护 Agent，后者仍表示客户端不接收或编辑平台 Agent
+  配置。
 
 旧调用不传 workspaceId 时仍选择服务端 OpenCode；本地实例离线或换代返回稳定冲突/不可用错误，不回退。
+
+## 本地工作区受保护 Agent/Skill API
+
+`GET /api/internal/platform/opencode-runtime/agents?workspaceId={localWorkspaceId}` 在已认证且目标为
+`LOCAL_CLIENT` 时，把当前用户可见的已发布 Hub Agent 追加到原生目录。受保护项使用以下 additive 投影；
+`id/agentId` 必须作为 opaque 值原样回传，客户端不得解析或持久化其中正文：
+
+```json
+{
+  "id": "protected:hub_rev_...",
+  "agentId": "protected:hub_rev_...",
+  "name": "合规审查",
+  "mode": "primary",
+  "description": "服务器执行",
+  "protected": true,
+  "revisionId": "hub_rev_...",
+  "contentSha256": "..."
+}
+```
+
+随后仍调用既有 `POST /api/internal/agent/opencode/runs`，把该 opaque 值放在请求 `agent` 字段。后台必须先按
+默认 `opencode` 校验 `contextToken` 的本地实例、Workspace 和 generation，再把 Run 运行时固定为
+`protected-opencode` 并只路由服务器节点。受保护运行固定使用 `LEGACY_FULL` 审计链，不支持原生 `command`
+模式；服务器隔离目录不得返回网页。本地客户端离线、换代或服务器节点不可用时失败关闭，不回退本地或其它
+客户端。
+
+`POST /api/internal/platform/protected-agent/mcp` 是服务器 OpenCode 专用的 stateless Streamable HTTP MCP
+JSON-RPC 入口，不使用平台 `ApiResponse` envelope，也不接受用户登录 Token。Authorization 必须是本次 Run
+签发的短期 `Bearer pag_...`；普通 API Token filter 只对该精确路径放行，子路径不继承。支持
+`initialize`、`ping`、`tools/list`、`tools/call` 和 notification，notification 返回 HTTP `202` 空 body。
+工具白名单为：
+
+- 本地 WSS 文件：`list_directory/search_files/read_file/file_status/write_file/create_directory/copy_path/`
+  `move_path/rename_path/delete_path`；
+- 服务器只读 Skill 资源：`list_skill_resources/read_skill_resource`。
+
+所有本地工具调用都复用已有 `FILE_REQUEST`、连接 generation、Workspace root digest 和路径安全内核。MCP
+请求/响应在通用 API 日志中只记录 JSON-RPC method、id、是否有 params/result/error；Authorization、相对
+路径、写入内容、读取结果、Agent/Skill 正文和 grant 均不得进入日志。
 
 # TCDS 需求导入（同源页面）
 

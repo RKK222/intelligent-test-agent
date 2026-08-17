@@ -41,6 +41,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunOwnerLeaseSupervisor`：统一维护本机 owner handle 的 5 秒续租信号；fencing 被其它 owner 取得时正常完成 `lost` 只停止旧订阅，Redis/运行态异常时以原错误终止 `lost`，让 Run 启动订阅和恢复订阅调度 30 秒安全收敛。
 - `run.RunMessageRecoveryService`：为 Run/Session HTTP 历史按 Redis → OpenCode → PostgreSQL 双摘要恢复，Session 上游没有可展示正文时再有界读取旧 `session_messages` 正文并标记 LEGACY；空 Redis/OpenCode 快照不截断兜底，排查入口可显式跳过离线服务器 OpenCode。结果携带完整度、可回放性和详情到期时间。Run 级 OpenCode 来源因果裁剪到目标轮，Session 级来源保持全量多轮，legacy SSE 兼容方法只输出目标轮 assistant。
 - `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射；平台配置 GET 使用实例级 `/config` 读取包含 `OPENCODE_CONFIG_DIR` 的合并有效配置，Agent 标准 global config 兼容路径继续使用 `/global/config`。
+- `protectedagent.*`：受保护 Hub Agent/Skill 的服务器执行边界；负责服务器隔离目录、短期文件 grant、stateless MCP 工具、Redis 远端 Session 目录映射和 `protected-opencode` directory 重写。它只通过既有本地文件 WSS 网关访问授权目录，不下载制品到客户端，不新增 HTTP 文件代理。
 - `internalmodel.observability.InternalModelObservabilityQueryService`：统一内部模型可观测查询的时间与分页上限，把五类 `outcomeGroup` 展开为稳定精确结果集合后交给领域仓储；兼容精确 `outcome` 查询，且精确条件优先。
 - `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run；临时 fork 仅接收用户问题并禁用工具，通过本轮 assistant 事件流输出增量，消息快照补偿漏失终态，最后以事务 CAS 写唯一终态。
 - `runtime.SideQuestionOrphanCleanupTaskHandler` / `runtime.SideQuestionOrphanCleanupService`：复用 scheduler 每 5 分钟回收超过 10 分钟的旁路 fork；按内部映射使用原节点，404 幂等，无映射时记录潜在泄漏窗口并收敛平台 Run。
@@ -69,6 +70,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `night.*` 测试必须覆盖北京时间夜间窗口、15 分钟推荐/容量、超级管理员白天精确分钟与 24 小时边界、自定义模式容量隔离、幂等提交、单会话锁、固定目标批量路由、attempt 认领、租约续期、普通 Run 受理、稳定 Run 锚点恢复、心跳失联、模式对应窗口结束后的最终失败和 30 天清理。
 - `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新、消息追加默认 role 和消息列表数据库 fallback。
 - `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤、permission/question body 兼容、旁路事件隔离、终态竞态和孤儿清理。
+- `protectedagent.*` 测试必须覆盖 opaque 目录项、受保护修订/Skill 冻结、服务器节点强路由、原生工具关闭、MCP notification、WSS 文件调用、grant 换代失效、目录映射缺失和日志摘要不泄露正文。
 - `process.*` 测试必须覆盖用户进程分配、并发预留单胜者、原端口恢复与明确冲突迁移、公共状态查询、公共启动/owned-stop 健康确认、通用参数路径读取、引用目录启动环境的目标平台解析/覆盖/缺失兼容、workspace 文件路由的实时应用成员校验、manager 控制面命令路由、后端心跳注册和含可空 UCID/manager 状态的运行管理快照聚合。
 - `terminal.*` 测试必须覆盖 ticket 签发/消费/过期、active session 互斥、输入输出限流、WebSocket envelope 和进程适配。
 

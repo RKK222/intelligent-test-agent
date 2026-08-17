@@ -167,4 +167,22 @@ class ApiTokenWebFilterTest {
         filter.filter(adjacent, currentExchange -> Mono.empty()).block();
         assertThat(adjacent.getResponse().getStatusCode().value()).isEqualTo(401);
     }
+
+    @Test
+    void filterExemptsOnlyExactProtectedAgentMcpPath() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+        String path = "/api/internal/platform/protected-agent/mcp";
+        MockServerWebExchange exact = MockServerWebExchange.from(MockServerHttpRequest.post(path));
+        final boolean[] called = {false};
+
+        filter.filter(exact, currentExchange -> {
+            called[0] = true;
+            return Mono.empty();
+        }).block();
+
+        MockServerWebExchange child = MockServerWebExchange.from(MockServerHttpRequest.post(path + "/extra"));
+        filter.filter(child, currentExchange -> Mono.empty()).block();
+        assertThat(called[0]).isTrue();
+        assertThat(child.getResponse().getStatusCode().value()).isEqualTo(401);
+    }
 }

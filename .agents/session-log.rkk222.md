@@ -11003,3 +11003,29 @@
 
 - 新旧配置通知都会使用普通用户可理解的中文表达，不修改通知类型、受控动作、已读规则或实时刷新机制。
 - 本次不变更 HTTP API、RunEvent、DTO、数据库/Flyway、性能、安全、部署拓扑、`.env*`、generated SDK 或 OpenCode 源码；未新建分支。
+
+## 2026-08-17 - 本地客户端托盘、受保护 Agent 与页面下载入口
+
+### Why
+
+- 用户要求在 Apple Silicon macOS 和麒麟 ARM 本地客户端补齐低开销托盘，并通过服务器运行受保护 Agent/Skill、受限访问用户授权的本地目录；随后指定在右上角头像菜单的 OpenCode 实例与重启入口之间直接提供客户端下载。
+- 受保护提示词和 Skill 正文一旦完整下载到用户机器便无法防读防改，因此需要保留在服务器执行，只把不可变修订句柄和摘要提供给网页，把本地目录访问收敛到已有 WSS 文件 RPC。
+
+### What
+
+- 本地客户端复用 Web 端宠物资产实现 SystemTray，展示在线状态，并提供打开网页、重连、查看/下载受限客户端日志、会话进度和正常退出；launchd/systemd 只在异常退出时恢复。托盘只读取既有连接快照，状态未变化不重绘，不增加健康探测。
+- Hub 已发布 Agent 以 `protected:{revisionId}` 进入本地工作区 Agent 目录；运行时固定 Agent/Skill revision 与 SHA-256，在服务器 OpenCode 隔离目录执行，禁用原生本地文件工具，并通过单 Run、单用户、单 Workspace、单客户端 generation 的短期 MCP grant 调用本地 WSS 文件工具。Agent/Skill 正文不写入客户端配置目录。
+- 右上角头像菜单在 OpenCode 实例列表下方增加“下载本地客户端”；生产复用既有 Nginx `/downloads/local-opencode-client/`，dev server 只读提供忽略的签名制品目录，非法/隐藏路径直接 404，JRE/OpenCode 大制品不进入前端 bundle。
+- 同步 runtime、API、local-client、workspace 模块 README/PACKAGE，以及 HTTP API、RunEvent、架构、部署、安全、前端 README 和用户手册；没有数据库/Flyway、generated SDK 或 OpenCode 源码修改。
+
+### How
+
+- 后端受影响链路定向测试共 34 项通过；本地客户端单元测试 11 项通过、1 项按桌面条件跳过；正式签名分发包完成清单签名、五项制品 SHA-256、JAR 托盘资源和安装器校验，版本为 `0.1.0-dev-e2e`。
+- `FigmaShell.test.ts` 60/60、agent-web typecheck 和 development build 通过；dev 下载路由实际返回 200，HTTP 下载脚本与分发源 SHA-256 同为 `470a11a9fcc9f5bc8210cfbf81723308239ddbad00f0fc7280aa382a0ab400f2`，隐藏路径返回 404。
+- 按最新 `.env.test` / `test` profile 使用 JDK 25 完成 26 模块后端构建并重启；backend readiness 与 frontend 3000 均通过。真实 Chromium 登录后确认入口位于指定位置，点击下载得到 `test-agent-local-client-install.sh`，下载文件摘要一致。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，保留当前 dev 已提交的记忆灰度、局域网依赖迁移和通知文案成果，未覆盖 release 工作树中尚未提交的内部模型观测改动。
+
+### Result
+
+- macOS/Kylin 共用托盘、受保护远程 Agent 文件链路和网页下载入口已实现并通过自动化、构建、签名制品、真实启动与 macOS Chromium 下载验证；页面与客户端状态采集没有新增后台轮询压力。
+- 当前签名使用本轮临时 dev 私钥，分发目录被 Git 忽略，只用于本机自测；上线仍需换企业私钥重新打包，并在真实 Apple Silicon 与 ARM64 glibc 麒麟机完成安装、WSS、聊天/文件写入和全部托盘动作验收。真实麒麟 ARM 未验证前只能标记为部分验证。

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
-import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
 import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
@@ -2700,6 +2700,18 @@ function submitJoinApp() {
               <span class="figma-user-menu-service-dot" aria-hidden="true" />
               <span class="figma-user-menu-service-text" :title="opencodeServiceDisplay.text">{{ opencodeServiceDisplay.text }}</span>
             </div>
+            <a
+              v-if="!fixedWorkspace"
+              class="figma-user-menu-item"
+              role="menuitem"
+              data-testid="download-local-client"
+              href="/downloads/local-opencode-client/install.sh"
+              download="test-agent-local-client-install.sh"
+              @click="userMenuOpen = false"
+            >
+              <Download class="figma-user-menu-icon" />
+              <span>下载本地客户端</span>
+            </a>
             <button
               v-if="!fixedWorkspace"
               type="button"
@@ -4826,6 +4838,7 @@ function submitJoinApp() {
 .figma-user-menu-item {
   margin-top: 4px;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .figma-user-menu-item:hover,

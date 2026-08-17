@@ -1282,6 +1282,10 @@ describe("FigmaShell", () => {
     const wrapper = mountShell({ props: { currentUserName: "developer" } });
 
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
+    const downloadLink = wrapper.get('[data-testid="download-local-client"]');
+    expect(downloadLink.text()).toContain("下载本地客户端");
+    expect(downloadLink.attributes("href")).toBe("/downloads/local-opencode-client/install.sh");
+    expect(downloadLink.attributes("download")).toBe("test-agent-local-client-install.sh");
     const restartButton = wrapper.get('[data-testid="restart-own-process"]');
     expect(restartButton.attributes("disabled")).toBeUndefined();
     await restartButton.trigger("click");
@@ -1292,6 +1296,7 @@ describe("FigmaShell", () => {
     expect(wrapper.get('[data-testid="restart-own-process"]').text()).toContain("正在重启");
 
     await wrapper.setProps({ fixedWorkspace: true });
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="restart-own-process"]').exists()).toBe(false);
   });
 

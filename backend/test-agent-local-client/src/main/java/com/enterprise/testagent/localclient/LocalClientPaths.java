@@ -1,5 +1,6 @@
 package com.enterprise.testagent.localclient;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
 
@@ -39,6 +40,16 @@ final class LocalClientPaths {
                 ? userHome.resolve(".local/state")
                 : Path.of(xdgState).toAbsolutePath().normalize();
         return stateHome.resolve("testagent/local-opencode-client");
+    }
+
+    static Path logsDirectory() {
+        return stateDirectory().resolve("logs");
+    }
+
+    static Path downloadsDirectory() {
+        Path userHome = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
+        Path downloads = userHome.resolve("Downloads");
+        return Files.isDirectory(downloads) ? downloads : userHome;
     }
 
     static boolean isMac() {

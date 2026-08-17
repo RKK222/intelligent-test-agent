@@ -11,6 +11,7 @@ import java.util.Properties;
 /** 安装脚本写入的非敏感客户端配置；client key 必须放在独立私有文件。 */
 record LocalClientConfiguration(
         URI serverBaseUri,
+        URI webBaseUri,
         String clientName,
         Path opencodeExecutable,
         Path opencodeConfigDirectory,
@@ -28,6 +29,7 @@ record LocalClientConfiguration(
         }
         URI serverUri = URI.create(required(properties, "serverUrl"));
         boolean allowInsecure = Boolean.parseBoolean(properties.getProperty("allowInsecureControl", "false"));
+        URI webUri = URI.create(properties.getProperty("webUrl", serverUri.toString()).trim());
         int portMin = integer(properties, "portMin", 4096);
         int portMax = integer(properties, "portMax", 4195);
         if (portMin < 1024 || portMax > 65535 || portMin > portMax) {
@@ -43,6 +45,7 @@ record LocalClientConfiguration(
         String defaultName = System.getProperty("user.name", "user") + "@" + hostname();
         return new LocalClientConfiguration(
                 normalizeBaseUri(serverUri),
+                normalizeWebUri(webUri, allowInsecure),
                 properties.getProperty("clientName", defaultName).trim(),
                 executable,
                 opencodeConfig,
@@ -54,6 +57,7 @@ record LocalClientConfiguration(
 
     LocalClientConfiguration {
         Objects.requireNonNull(serverBaseUri, "serverBaseUri must not be null");
+        Objects.requireNonNull(webBaseUri, "webBaseUri must not be null");
         String scheme = serverBaseUri.getScheme();
         if (!"https".equalsIgnoreCase(scheme)
                 && !(allowInsecureControl && "http".equalsIgnoreCase(scheme))) {
@@ -61,6 +65,14 @@ record LocalClientConfiguration(
         }
         if (serverBaseUri.getUserInfo() != null) {
             throw new IllegalArgumentException("serverUrl must not contain user information");
+        }
+        String webScheme = webBaseUri.getScheme();
+        if (!"https".equalsIgnoreCase(webScheme)
+                && !(allowInsecureControl && "http".equalsIgnoreCase(webScheme))) {
+            throw new IllegalArgumentException("webUrl must use https unless explicitly allowing http");
+        }
+        if (webBaseUri.getUserInfo() != null) {
+            throw new IllegalArgumentException("webUrl must not contain user information");
         }
         if (clientName == null || clientName.isBlank() || clientName.length() > 255) {
             throw new IllegalArgumentException("clientName is invalid");
@@ -90,6 +102,16 @@ record LocalClientConfiguration(
             throw new IllegalArgumentException("serverUrl is invalid");
         }
         return URI.create(uri.getScheme() + "://" + uri.getRawAuthority());
+    }
+
+    private static URI normalizeWebUri(URI uri, boolean allowInsecure) {
+        URI normalized = normalizeBaseUri(uri);
+        String scheme = normalized.getScheme();
+        if (!"https".equalsIgnoreCase(scheme)
+                && !(allowInsecure && "http".equalsIgnoreCase(scheme))) {
+            throw new IllegalArgumentException("webUrl must use https unless explicitly allowing http");
+        }
+        return normalized;
     }
 
     private static String required(Properties properties, String key) {

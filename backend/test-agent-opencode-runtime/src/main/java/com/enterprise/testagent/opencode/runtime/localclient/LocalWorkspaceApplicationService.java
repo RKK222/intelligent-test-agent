@@ -257,6 +257,7 @@ public class LocalWorkspaceApplicationService {
         values.put("terminal", false);
         values.put("gitPublish", false);
         values.put("agentConfig", false);
+        values.put("protectedAgentExecution", true);
         values.put("attachments", false);
         values.put("collaboration", false);
         return Map.copyOf(values);

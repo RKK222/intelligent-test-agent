@@ -151,7 +151,8 @@ public class AgentRuntimeTargetResolver {
                 return new WorkspaceRuntimeTarget(
                         runtime,
                         localExecutionNode(binding, userId, traceId),
-                        workspace.rootPath());
+                        workspace.rootPath(),
+                        workspace.workspaceId());
             }
         }
         ExecutionNode node = resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
@@ -437,6 +438,20 @@ public class AgentRuntimeTargetResolver {
             Workspace workspace,
             ExecutionNode node,
             String traceId) {
+        return ensureAgentSession(agentId, runtime, session, workspace, node, workspaceRoot(workspace), traceId);
+    }
+
+    /**
+     * 受保护 Agent 可显式指定服务器隔离目录；普通调用继续使用上方工作区根目录重载。
+     */
+    public AgentSessionBinding ensureAgentSession(
+            String agentId,
+            AgentRuntime runtime,
+            Session session,
+            Workspace workspace,
+            ExecutionNode node,
+            String executionDirectory,
+            String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         Optional<AgentSessionBinding> existing = findAgentBinding(resolvedAgentId, session, traceId);
         if (existing.isPresent() && existing.get().executionNodeId().equals(node.executionNodeId())) {
@@ -456,7 +471,7 @@ public class AgentRuntimeTargetResolver {
         try {
             created = runtime.createSession(new AgentCreateSessionCommand(
                             node,
-                            workspaceRoot(workspace),
+                            executionDirectory,
                             null,
                             null,
                             traceId))

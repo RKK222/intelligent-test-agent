@@ -170,6 +170,21 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 - 内网 HTTP 下载不使用 client key。stable 清单必须签名，所有版本化制品必须按签名清单校验 SHA-256；
   打包私钥不得进入仓库、企业 ZIP、Nginx 目录或客户端。由于 install.sh 也经同一 HTTP 取得，主动中间人
   替换脚本与内嵌公钥的风险不能由清单签名消除，必须明确依赖网络 ACL 或未来可信 HTTPS/带外公钥。
+- 本地客户端托盘不得展示 prompt、绝对路径、请求体、client key 或模型 grant。日志下载只能由用户本机
+  主动触发，只允许读取 state 日志目录中受控命名的客户端日志，限制文件数和单文件字节数，并排除配置、
+  OpenCode 日志及工作区内容；导出失败不得退化为打包整个 state 或 config 目录。
+- 受保护 Agent/Skill 正文、系统提示词和编排只允许在服务器不可变制品与单 Run 模型上下文中出现，不得进入
+  Agent 目录响应、本地客户端配置目录、WSS 注册/心跳、RunEvent、审计正文或浏览器缓存。只要向用户电脑
+  下载完整正文，就不能声称用户不可读取；签名只能检出篡改，不能提供保密性。
+- 受保护文件 MCP grant 必须至少 32 字节随机，Redis/数据库只允许保存必要映射而不得保存 grant 明文；当前
+  实现仅在签发 Java 有界内存保存 SHA-256 指纹。每次工具调用重新校验 Run 未终态、userId、Workspace、
+  clientInstanceId、backendProcessId、generation 和 root digest，任一不一致立即删除授权并返回统一未认证。
+- 服务器 OpenCode 的受保护目录必须与用户本地绝对路径分离，原生 bash/read/write/edit/glob/grep/task 等能力
+  默认关闭。本地文件只能通过现有 WSS `FILE_REQUEST` 和安全内核的相对路径操作；MCP 不得新增任意 HTTP
+  文件代理、终端或任意操作名。写入、移动、重命名和删除继续受 OpenCode permission 结果约束。
+- 受保护 MCP Controller 的通用请求日志只记录 JSON-RPC method/id/params 是否存在，响应只记录 result/error
+  是否存在。Authorization、文件路径、写入正文、读取结果和 Skill 资源不得序列化到 API 日志；错误只返回
+  稳定平台消息，不能回显底层路径或文件内容。
 
 - Authorization、Cookie、API key、`X-Test-Agent-Api-Key`、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`ciphertext/encryptedApiKey/privateKey`、`X-Test-Agent-Session-Share`/shareId、`X-Support-Access-Grant`、XXL SSO ticket 和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
 - 用户输入中的敏感内容。

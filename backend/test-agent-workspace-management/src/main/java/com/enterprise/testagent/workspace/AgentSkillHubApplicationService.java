@@ -26,6 +26,8 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import com.enterprise.testagent.domain.hub.AgentSkillHubPushIndexer;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
+import com.enterprise.testagent.domain.hub.ProtectedAgentDefinitionResolver;
+import com.enterprise.testagent.domain.hub.ProtectedAgentSelection;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
@@ -72,7 +74,7 @@ import org.springframework.stereotype.Service;
  * Agent & Skill Hub 应用服务：从远端固定提交生成不可变制品，管理显式发布、依赖、引用和三方更新。
  */
 @Service
-public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer {
+public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer, ProtectedAgentDefinitionResolver {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentSkillHubApplicationService.class);
     private static final String ENCODING = "GZIP_JSON_V1";
@@ -284,6 +286,133 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     public AgentSkillHubResponses.PageResponse<AgentSkillHubResponses.AssetResponse> listAssets(
             String type, String keyword, int page, int size, UserId userId) {
         return listAssets(type, null, null, keyword, false, page, size, null, userId);
+    }
+
+    /**
+     * 把当前用户可见的已发布 Agent 投影成运行目录项；目录项只有不可变修订 ID 和摘要，不返回正文。
+     */
+    @Override
+    public List<ProtectedAgentDefinitionResolver.CatalogItem> listCatalog(UserId userId, WorkspaceId workspaceId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(workspaceId, "workspaceId must not be null");
+        List<ProtectedAgentDefinitionResolver.CatalogItem> items = new ArrayList<>();
+        publicBuiltinSnapshots(AssetType.AGENT, null, null, null).stream()
+                .map(this::protectedCatalogItem)
+                .forEach(items::add);
+        repository.listAssets(AssetType.AGENT, null, null, null, userId.value(), null, false, 0, MAX_PAGE_SIZE)
+                .stream()
+                .filter(summary -> summary.publishedRevision() != null && !summary.publishedRevision().deleted())
+                .map(summary -> protectedCatalogItem(summary.asset(), summary.publishedRevision()))
+                .forEach(items::add);
+        return items.stream()
+                .sorted(Comparator.comparing(ProtectedAgentDefinitionResolver.CatalogItem::displayName)
+                        .thenComparing(ProtectedAgentDefinitionResolver.CatalogItem::revisionId))
+                .toList();
+    }
+
+    /**
+     * 解析已发布 Agent 及发布时冻结的 Skill 修订。数据库资产必须仍是当前发布修订，防止伪造 pushed 修订。
+     */
+    @Override
+    public ProtectedAgentDefinitionResolver.Definition resolve(
+            UserId userId,
+            WorkspaceId workspaceId,
+            String revisionId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(workspaceId, "workspaceId must not be null");
+        if (isBuiltinRevisionId(revisionId)) {
+            BuiltinRevision revision = requireBuiltinRevision(revisionId);
+            if (revision.assetType() != AssetType.AGENT) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "受保护运行只能选择 Agent 修订");
+            }
+            return new ProtectedAgentDefinitionResolver.Definition(
+                    revision.assetId(),
+                    revision.technicalId(),
+                    revision.revisionId(),
+                    revision.artifactSha256(),
+                    revision.contentSha256(),
+                    firstText(revision.displayName(), revision.technicalId()),
+                    textFiles(requireBuiltinArtifact(revision)),
+                    List.of());
+        }
+        Revision revision = requireRevision(revisionId);
+        Asset asset = requireAsset(revision.assetId());
+        if (asset.assetType() != AssetType.AGENT
+                || !revision.revisionId().equals(asset.latestPublishedRevisionId())
+                || revision.deleted()
+                || !isVisiblePublishedAsset(asset, revision, userId)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "受保护 Agent 修订不存在或不可用");
+        }
+        List<ProtectedAgentDefinitionResolver.SkillDefinition> skills = repository.findDependencies(revision.revisionId())
+                .stream()
+                .map(this::protectedSkill)
+                .toList();
+        return new ProtectedAgentDefinitionResolver.Definition(
+                asset.assetId(),
+                asset.technicalId(),
+                revision.revisionId(),
+                revision.artifactSha256(),
+                revision.contentSha256(),
+                firstText(revision.displayName(), asset.technicalId()),
+                textFiles(requireArtifact(revision)),
+                skills);
+    }
+
+    private boolean isVisiblePublishedAsset(Asset asset, Revision revision, UserId userId) {
+        return repository.listAssets(
+                        AssetType.AGENT, null, null, asset.technicalId(), userId.value(), null, false, 0, MAX_PAGE_SIZE)
+                .stream()
+                .anyMatch(summary -> summary.asset().assetId().equals(asset.assetId())
+                        && summary.publishedRevision() != null
+                        && summary.publishedRevision().revisionId().equals(revision.revisionId()));
+    }
+
+    private ProtectedAgentDefinitionResolver.SkillDefinition protectedSkill(Dependency dependency) {
+        Asset skillAsset = requireAsset(dependency.dependencyAssetId());
+        Revision skillRevision = requireRevision(dependency.dependencyRevisionId());
+        if (skillAsset.assetType() != AssetType.SKILL
+                || !skillAsset.assetId().equals(skillRevision.assetId())
+                || skillRevision.deleted()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "受保护 Agent 的 Skill 依赖已失效");
+        }
+        return new ProtectedAgentDefinitionResolver.SkillDefinition(
+                skillAsset.assetId(),
+                skillAsset.technicalId(),
+                skillRevision.revisionId(),
+                skillRevision.artifactSha256(),
+                skillRevision.contentSha256(),
+                firstText(skillRevision.displayName(), skillAsset.technicalId()),
+                textFiles(requireArtifact(skillRevision)));
+    }
+
+    private ProtectedAgentDefinitionResolver.CatalogItem protectedCatalogItem(BuiltinRevision revision) {
+        return new ProtectedAgentDefinitionResolver.CatalogItem(
+                ProtectedAgentSelection.catalogId(revision.revisionId()),
+                revision.revisionId(),
+                firstText(revision.displayName(), revision.technicalId()),
+                revision.description(),
+                revision.contentSha256());
+    }
+
+    private ProtectedAgentDefinitionResolver.CatalogItem protectedCatalogItem(Asset asset, Revision revision) {
+        return new ProtectedAgentDefinitionResolver.CatalogItem(
+                ProtectedAgentSelection.catalogId(revision.revisionId()),
+                revision.revisionId(),
+                firstText(revision.displayName(), asset.technicalId()),
+                revision.description(),
+                revision.contentSha256());
+    }
+
+    /** 受保护运行只物化文本资产；二进制附件继续由不可变制品摘要审计，但不会进入模型上下文。 */
+    private Map<String, String> textFiles(Artifact artifact) {
+        Map<String, String> files = new LinkedHashMap<>();
+        for (ArtifactFile file : decode(artifact).files()) {
+            byte[] bytes = Base64.getDecoder().decode(file.contentBase64());
+            if (isUtf8(bytes)) {
+                files.put(file.path(), new String(bytes, StandardCharsets.UTF_8));
+            }
+        }
+        return Map.copyOf(files);
     }
 
     public AgentSkillHubResponses.AssetDetailResponse getAsset(
@@ -1349,6 +1478,9 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         return value.getBytes(StandardCharsets.UTF_8);
     }
     private String mediaType(String path) { return path.toLowerCase(Locale.ROOT).endsWith(".md") ? "text/markdown" : "text/plain"; }
+    private String firstText(String first, String fallback) {
+        return first == null || first.isBlank() ? fallback : first.trim();
+    }
     private String join(String left, String right) { return (left == null ? "" : left) + (right == null ? "" : right); }
     private byte[] readBytes(Path path) { try { return Files.readAllBytes(path); } catch (Exception e) { throw new IllegalStateException(e); } }
     private String writeJson(Object value) { try { return objectMapper.writeValueAsString(value); } catch (Exception e) { throw new IllegalStateException(e); } }

@@ -48,6 +48,19 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- 复用 Web 端宠物资产，避免客户端维护第二份二进制副本。 -->
+            <resource>
+                <directory>${project.basedir}/../../frontend/apps/agent-web/src/assets/pets</directory>
+                <includes>
+                    <include>radar-bunny.png</include>
+                </includes>
+                <targetPath>com/enterprise/testagent/localclient/tray</targetPath>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

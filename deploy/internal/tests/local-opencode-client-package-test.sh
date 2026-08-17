@@ -100,6 +100,7 @@ case "$(uname -s):$(uname -m)" in
     chmod 0600 "${TEST_ROOT}/install/config/client.key"
     TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL="http://127.0.0.1:${HTTP_PORT}" \
     TEST_AGENT_LOCAL_CLIENT_SERVER_URL=https://platform.example.internal \
+    TEST_AGENT_LOCAL_CLIENT_WEB_URL=https://web.example.internal \
     TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${TEST_ROOT}/install/runtime" \
     TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install/config" \
     TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install/state" \
@@ -109,6 +110,9 @@ case "$(uname -s):$(uname -m)" in
     test -x "${TEST_ROOT}/install/runtime/current/opencode/bin/opencode"
     test "$(stat -f '%Lp' "${TEST_ROOT}/install/config/client.key" 2>/dev/null \
       || stat -c '%a' "${TEST_ROOT}/install/config/client.key")" = 600
+    grep -qx 'webUrl=https://web.example.internal' "${TEST_ROOT}/install/config/client.properties"
+    grep -q 'SuccessfulExit' "${TEST_ROOT}/dist/local-opencode-client/install.sh"
+    grep -q 'Restart=on-failure' "${TEST_ROOT}/dist/local-opencode-client/install.sh"
     ;;
   *)
     printf 'Installer execution skipped on unsupported test host %s/%s\n' "$(uname -s)" "$(uname -m)"

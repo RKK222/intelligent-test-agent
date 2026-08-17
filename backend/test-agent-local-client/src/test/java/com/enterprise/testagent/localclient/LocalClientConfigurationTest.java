@@ -20,8 +20,24 @@ class LocalClientConfigurationTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void appliesTheSameTransportPolicyToWebUrl() {
+        assertThatThrownBy(() -> new LocalClientConfiguration(
+                URI.create("https://platform.example"),
+                URI.create("http://127.0.0.1:3000"),
+                "configuration-test",
+                PLACEHOLDER.resolve("opencode"),
+                PLACEHOLDER.resolve("config"),
+                PLACEHOLDER.resolve("data"),
+                4096,
+                4195,
+                false))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     private static LocalClientConfiguration configuration(URI serverUri, boolean allowInsecure) {
         return new LocalClientConfiguration(
+                serverUri,
                 serverUri,
                 "configuration-test",
                 PLACEHOLDER.resolve("opencode"),

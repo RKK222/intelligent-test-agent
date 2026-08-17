@@ -20,6 +20,7 @@ import com.enterprise.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
+import com.enterprise.testagent.domain.hub.ProtectedAgentSelection;
 import com.enterprise.testagent.domain.event.RunEventDraft;
 import com.enterprise.testagent.domain.event.RunEventScopeContext;
 import com.enterprise.testagent.domain.event.RunSessionScope;
@@ -72,6 +73,8 @@ import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLock
 import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.protectedagent.ProtectedAgentExecutionService;
+import com.enterprise.testagent.opencode.runtime.protectedagent.ProtectedOpencodeAgentRuntime;
 import com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
@@ -203,6 +206,7 @@ public class RunApplicationService {
     private RunResendCancellationService resendCancellationService;
     private List<AgentRunSystemPromptContributor> runSystemPromptContributors = List.of();
     private List<AgentRootRunTerminalObserver> rootRunTerminalObservers = List.of();
+    private ProtectedAgentExecutionService protectedAgentExecutionService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -1034,14 +1038,23 @@ public class RunApplicationService {
                 && nightExecutionLockGuard != null) {
             nightExecutionLockGuard.requireUnlocked(input.sessionId());
         }
-        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        boolean protectedSelection = ProtectedAgentSelection.isProtected(input.agent());
+        String requestedRuntimeAgentId = protectedSelection
+                ? ProtectedOpencodeAgentRuntime.AGENT_ID
+                : agentId;
+        String resolvedAgentId = agentRuntimeRegistry.normalize(requestedRuntimeAgentId);
         if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(resolvedAgentId)) {
             publicConfigMessageGate.requireAllowed(userId);
         }
         if (userRuntimeDisposeCoordinator != null) {
             userRuntimeDisposeCoordinator.requireNotDisposing(userId, traceId);
         }
-        ConversationRunContext conversationContext = resolveConversationContext(userId, resolvedAgentId, input, traceId);
+        // 网页 contextToken 仍按会话原本的本地 opencode 目标签发；受保护运行只复用其身份、Workspace
+        // 和连接 generation 校验，绝不复用其中的本地执行节点或 agent binding。
+        String contextAgentId = protectedSelection
+                ? agentRuntimeRegistry.defaultAgentId()
+                : resolvedAgentId;
+        ConversationRunContext conversationContext = resolveConversationContext(userId, contextAgentId, input, traceId);
         LOGGER.info("Run starting, userId={}, agentId={}, sessionId={}, traceId={}",
                 userId != null ? userId.value() : "anonymous",
                 resolvedAgentId,
@@ -1057,11 +1070,15 @@ public class RunApplicationService {
         if (conversationContext == null) {
             requireAuthenticatedLegacyRunAccess(userId, session);
         }
-        UserOpencodeProcessAssignment userProcessAssignment = conversationContext == null
+        UserOpencodeProcessAssignment userProcessAssignment = protectedSelection
+                ? null
+                : conversationContext == null
                 ? resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
                 : null;
         // 新上下文已经缓存 binding 快照，首次远端会话可由“无 binding”判断，避免为标题监听额外查询消息表。
-        boolean firstUserRun = conversationContext == null
+        boolean firstUserRun = protectedSelection
+                ? false
+                : conversationContext == null
                 ? isFirstUserRun(sessionId)
                 : conversationContext.bindingSnapshot() == null;
         if (sessionTitleWatchService != null) {
@@ -1078,7 +1095,7 @@ public class RunApplicationService {
                     "本地 OpenCode 工作区首版不开放聊天附件");
         }
         ModelSelection modelSelection = resolveModelSelection(input.model());
-        String opencodeAgent = resolveOpencodeAgent(input);
+        String opencodeAgent = protectedSelection ? DEFAULT_OPENCODE_AGENT : resolveOpencodeAgent(input);
         Run pending = reservedRunId == null
                 ? new Run(
                         new RunId(RuntimeIdGenerator.runId()),
@@ -1109,10 +1126,26 @@ public class RunApplicationService {
                         pending.messageSenderUnifiedAuthId(),
                         pending.messageSentBySharedUser())
                 : attribution;
-        pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
+        pending = pending.withRuntimeSelection(
+                protectedSelection ? resolvedAgentId : opencodeAgent,
+                firstText(modelSelection.modelId(), input.model()));
+        ProtectedAgentExecutionService.ExecutionContext protectedContext = null;
+        if (protectedSelection) {
+            if (userId == null || protectedAgentExecutionService == null) {
+                throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "受保护 Agent 运行服务未装配");
+            }
+            if (input.command() != null) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "受保护 Agent 不支持原生命令模式");
+            }
+            protectedContext = protectedAgentExecutionService.prepare(userId, pending, session, workspace, input.agent());
+        }
         RunStorageMode storageMode = runStorageModeSelector == null
                 ? RunStorageMode.LEGACY_FULL
                 : runStorageModeSelector.select(userId, input, conversationContext);
+        // 受保护修订审计和文件授权当前固定走关系型 durable 事件，不允许运行中切换到摘要模式。
+        if (protectedSelection) {
+            storageMode = RunStorageMode.LEGACY_FULL;
+        }
         // 预留 Run 已有关系型 PENDING 锚点；当前版本沿 legacy 明细链启动，避免重复插入摘要锚点。
         if (reservedRunId != null) {
             storageMode = RunStorageMode.LEGACY_FULL;
@@ -1169,12 +1202,19 @@ public class RunApplicationService {
             userMessageCreated = true;
         }
         if (userMessageCreated) {
+            Map<String, Object> createdPayload = new LinkedHashMap<>();
+            createdPayload.put("status", RunStatus.PENDING.name());
+            if (protectedContext != null) {
+                createdPayload.put("protectedAgent", protectedContext.auditPayload());
+            }
             append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
-                    Map.of("status", RunStatus.PENDING.name()), storageMode);
+                    Map.copyOf(createdPayload), storageMode);
         }
 
         try {
-            AgentRoutingTarget target = userProcessAssignment == null
+            AgentRoutingTarget target = protectedSelection
+                    ? resolveServerAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
+                    : userProcessAssignment == null
                     ? (conversationContext == null
                             ? resolveAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
                             : conversationContextTarget(conversationContext, pending.runId(), now, traceId))
@@ -1185,7 +1225,11 @@ public class RunApplicationService {
                     target.decision().reason().name(),
                     traceId);
             routingDecisionRepository.save(target.decision());
-            AgentSessionBinding binding = conversationContext != null
+            if (protectedContext != null) {
+                protectedAgentExecutionService.configureMcp(protectedContext, runtime, target.node(), traceId);
+            }
+            AgentSessionBinding binding = !protectedSelection
+                            && conversationContext != null
                             && conversationContext.bindingSnapshot() != null
                     ? conversationContext.bindingSnapshot()
                     : runtimeTargetResolver.ensureAgentSession(
@@ -1194,6 +1238,9 @@ public class RunApplicationService {
                             session,
                             workspace,
                             target.node(),
+                            protectedContext == null
+                                    ? workspaceRootPath(workspace)
+                                    : protectedContext.serverDirectory(),
                             traceId);
             RunSessionTitleWatchRegistry.TitleWatchToken titleWatchToken = registerFirstRunTitleWatch(
                     resolvedAgentId,
@@ -1258,19 +1305,24 @@ public class RunApplicationService {
                 throw new RunOwnershipLostException("legacy Scheduled Run 远端接收状态暂不可确认");
             }
             List<AgentPromptPart> promptParts = toAgentPromptParts(input, workspace);
+            String contributedSystemPrompt = systemPrompt(running, prompt, input.command() != null, traceId);
+            String effectiveSystemPrompt = protectedContext == null
+                    ? contributedSystemPrompt
+                    : combineSystemPrompt(protectedContext.systemPrompt(), contributedSystemPrompt);
             AgentStartRunCommand command = new AgentStartRunCommand(
                     target.node(),
                     binding.remoteSessionId(),
-                    workspaceRootPath(workspace),
+                    protectedContext == null ? workspaceRootPath(workspace) : protectedContext.serverDirectory(),
                     null,
                     prompt,
                     promptParts,
                     dispatchMessageId,
                     opencodeAgent,
-                    systemPrompt(running, prompt, input.command() != null, traceId),
+                    effectiveSystemPrompt,
                     modelSelection.providerId(),
                     modelSelection.modelId(),
                     input.variant(),
+                    protectedContext == null ? Map.of() : protectedContext.toolPermissions(),
                     input.command(),
                     commandArguments(input, promptParts),
                     traceId);
@@ -2825,7 +2877,7 @@ public class RunApplicationService {
         String candidate = agentRuntimeRegistry.normalize(run.agentId());
         // Run.agentId 可能是 OpenCode 内置 build/plan 角色，而平台只注册 opencode runtime；
         // 不再用 require(candidate) 探测未知角色，避免每轮重启补偿扫描制造 NOT_FOUND 错误日志。
-        return agentRuntimeRegistry.defaultAgentId().equals(candidate)
+        return agentRuntimeRegistry.isRegistered(candidate)
                 ? candidate
                 : agentRuntimeRegistry.defaultAgentId();
     }
@@ -3282,15 +3334,21 @@ public class RunApplicationService {
         }
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         LOGGER.info("Run cancellation requested, runId={}, agentId={}, traceId={}", runId.value(), resolvedAgentId, traceId);
-        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         if (runRuntimeStore != null) {
             Optional<RunRuntimeManifest> runtimeManifest = runRuntimeStore.findManifest(runId)
                     .filter(manifest -> manifest.storageMode() == RunStorageMode.REDIS_SUMMARY);
             if (runtimeManifest.isPresent()) {
+                AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
                 return cancelRedisSummaryRun(resolvedAgentId, runtime, runtimeManifest.orElseThrow(), traceId);
             }
         }
         Run run = getRun(runId);
+        String storedRuntimeAgentId = runtimeAgentIdForRun(run);
+        if (agentRuntimeRegistry.defaultAgentId().equals(resolvedAgentId)
+                && !agentRuntimeRegistry.defaultAgentId().equals(storedRuntimeAgentId)) {
+            resolvedAgentId = storedRuntimeAgentId;
+        }
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         if (run.status().isTerminal()) {
             LOGGER.warn("Cannot cancel terminal run, runId={}, status={}, traceId={}", runId.value(), run.status().name(), traceId);
             throw new PlatformException(
@@ -3576,6 +3634,12 @@ public class RunApplicationService {
         this.runSystemPromptContributors = contributors == null ? List.of() : List.copyOf(contributors);
     }
 
+    /** 受保护运行服务保持可选 setter，避免扩张大量历史单元测试构造器。 */
+    @Autowired(required = false)
+    void setProtectedAgentExecutionService(ProtectedAgentExecutionService service) {
+        this.protectedAgentExecutionService = Objects.requireNonNull(service, "service must not be null");
+    }
+
     /** 根 Run 终态观察者只能执行后处理，失败不能改变已提交的终态。 */
     @Autowired(required = false)
     void setRootRunTerminalObservers(List<AgentRootRunTerminalObserver> observers) {
@@ -3602,6 +3666,13 @@ public class RunApplicationService {
             }
         }
         return additions.isEmpty() ? null : String.join("\n\n", additions);
+    }
+
+    private String combineSystemPrompt(String protectedPrompt, String contributedPrompt) {
+        if (contributedPrompt == null || contributedPrompt.isBlank()) {
+            return protectedPrompt;
+        }
+        return protectedPrompt + "\n\n[平台运行上下文]\n" + contributedPrompt;
     }
 
     private void notifyRootRunTerminalObservers(RunId runId, RunStatus status, String traceId) {
@@ -3767,6 +3838,39 @@ public class RunApplicationService {
                         ErrorCode.OPENCODE_UNAVAILABLE,
                         "路由节点不存在",
                         Map.of("nodeId", decision.executionNodeId().value())));
+        return new AgentRoutingTarget(node, decision);
+    }
+
+    /** 受保护 Agent 的 sticky 和首次路由都只接受服务器进程，禁止误选本地客户端投影节点。 */
+    private AgentRoutingTarget resolveServerAgentTarget(
+            String agentId,
+            Session session,
+            RunId runId,
+            Instant now,
+            String traceId) {
+        Optional<AgentSessionBinding> binding = runtimeTargetResolver.findAgentBinding(agentId, session, traceId);
+        if (binding.isPresent()) {
+            ExecutionNode node = executionNodeRepository.findById(binding.get().executionNodeId())
+                    .filter(candidate -> candidate.runtimeKind() == RuntimeKind.SERVER_PROCESS)
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.OPENCODE_UNAVAILABLE,
+                            "受保护 Agent 绑定的服务器节点不存在"));
+            if (!node.canAcceptRun()) {
+                throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "受保护 Agent 绑定的服务器节点不可用");
+            }
+            return new AgentRoutingTarget(
+                    node,
+                    new RoutingDecision(runId, node.executionNodeId(), RoutingReason.STICKY_SESSION, now, traceId));
+        }
+        List<ExecutionNode> serverNodes = executionNodeRepository.findRoutableNodes(ROUTING_CANDIDATE_LIMIT).stream()
+                .filter(node -> node.runtimeKind() == RuntimeKind.SERVER_PROCESS)
+                .toList();
+        RoutingDecision decision = executionNodeRouter.route(runId, serverNodes, now, traceId);
+        ExecutionNode node = executionNodeRepository.findById(decision.executionNodeId())
+                .filter(candidate -> candidate.runtimeKind() == RuntimeKind.SERVER_PROCESS)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "受保护 Agent 路由的服务器节点不存在"));
         return new AgentRoutingTarget(node, decision);
     }
 

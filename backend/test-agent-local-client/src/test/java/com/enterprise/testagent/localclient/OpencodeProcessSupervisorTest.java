@@ -101,6 +101,7 @@ class OpencodeProcessSupervisorTest {
     private LocalClientConfiguration configuration(Path executable, int portMin, int portMax) {
         return new LocalClientConfiguration(
                 URI.create("https://127.0.0.1:65534"),
+                URI.create("https://127.0.0.1:65534"),
                 "supervisor-test",
                 executable,
                 temporaryDirectory.resolve("opencode-config"),

@@ -97,6 +97,7 @@ class AgentRuntimeTargetResolverLocalClientTest {
                 resolver.workspaceTarget("opencode", userId, workspaceId.value(), "trace_local_runtime");
 
         assertThat(target.directory()).isEqualTo("/Users/test/workspace");
+        assertThat(target.workspaceId()).isEqualTo(workspaceId);
         assertThat(target.node().runtimeKind()).isEqualTo(RuntimeKind.LOCAL_CLIENT);
         assertThat(target.node().localClientInstanceId()).isEqualTo(clientInstanceId.value());
         assertThat(target.node().connectionGeneration()).isEqualTo(7L);

@@ -217,7 +217,14 @@ public class ApiLoggingAspect {
     private String serializeResponse(Object result) {
         if (result == null) return "null";
         try {
-            String json = OBJECT_MAPPER.writeValueAsString(result);
+            Object logValue = result;
+            if (result instanceof ResponseEntity<?> response
+                    && response.getBody() instanceof ApiRequestLogSummary summarized) {
+                logValue = summarized.apiRequestLogSummary();
+            } else if (result instanceof ApiRequestLogSummary summarized) {
+                logValue = summarized.apiRequestLogSummary();
+            }
+            String json = OBJECT_MAPPER.writeValueAsString(logValue);
             return SensitiveDataMasker.mask(json);
         } catch (Exception e) {
             return "[" + result.getClass().getSimpleName() + "]";

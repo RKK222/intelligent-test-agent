@@ -36,6 +36,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -70,10 +71,18 @@ final class LocalClientConnection implements AutoCloseable {
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().name("local-client-heartbeat-", 0).factory());
     private final Map<String, Future<?>> operations = new ConcurrentHashMap<>();
+    private final Map<String, LocalClientRuntimeSnapshot.ActiveOperation> operationProgress = new ConcurrentHashMap<>();
     private final AtomicReference<WebSocket> webSocket = new AtomicReference<>();
     private final AtomicLong generation = new AtomicLong();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicReference<ScheduledFuture<?>> heartbeatTask = new AtomicReference<>();
+    private final AtomicReference<ConnectionListener> activeListener = new AtomicReference<>();
+    private final Semaphore reconnectSignal = new Semaphore(0);
+    private final AtomicReference<LocalClientRuntimeSnapshot.ConnectionState> connectionState =
+            new AtomicReference<>(LocalClientRuntimeSnapshot.ConnectionState.OFFLINE);
+    private final AtomicReference<Instant> connectedAt = new AtomicReference<>();
+    private final AtomicReference<String> lastFailure = new AtomicReference<>();
+    private final AtomicReference<LocalClientPayloads.LifecycleResult> processStatus = new AtomicReference<>();
 
     LocalClientConnection(
             LocalClientConfiguration configuration,
@@ -93,7 +102,9 @@ final class LocalClientConnection implements AutoCloseable {
     void runForever() {
         long backoffSeconds = 1;
         while (!closed.get() && !Thread.currentThread().isInterrupted()) {
+            connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.CONNECTING);
             ConnectionListener listener = new ConnectionListener();
+            activeListener.set(listener);
             try {
                 WebSocket socket = httpClient.newWebSocketBuilder()
                         .connectTimeout(Duration.ofSeconds(10))
@@ -107,16 +118,45 @@ final class LocalClientConnection implements AutoCloseable {
                 }
             } catch (RuntimeException exception) {
                 if (!closed.get()) {
+                    lastFailure.set(exception.getClass().getSimpleName());
                     LOGGER.warn("local_client_connection_failed server={} retrySeconds={}",
                             configuration.serverBaseUri(), backoffSeconds);
                 }
             } finally {
+                activeListener.compareAndSet(listener, null);
                 disconnected();
             }
             if (!closed.get()) {
-                sleep(Duration.ofSeconds(backoffSeconds));
-                backoffSeconds = Math.min(30, backoffSeconds * 2);
+                boolean reconnectRequested = waitForReconnect(Duration.ofSeconds(backoffSeconds));
+                backoffSeconds = reconnectRequested ? 1 : Math.min(30, backoffSeconds * 2);
             }
+        }
+    }
+
+    LocalClientRuntimeSnapshot runtimeSnapshot() {
+        return new LocalClientRuntimeSnapshot(
+                connectionState.get(),
+                connectedAt.get(),
+                lastFailure.get(),
+                processStatus.get(),
+                List.copyOf(operationProgress.values()));
+    }
+
+    /** 中断当前连接并唤醒同一重连循环，不创建旁路连接。 */
+    void reconnect() {
+        if (closed.get()) {
+            return;
+        }
+        connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.CONNECTING);
+        reconnectSignal.drainPermits();
+        reconnectSignal.release();
+        WebSocket socket = webSocket.get();
+        if (socket != null) {
+            socket.abort();
+        }
+        ConnectionListener listener = activeListener.get();
+        if (listener != null) {
+            listener.closedFuture().complete(null);
         }
     }
 
@@ -129,6 +169,9 @@ final class LocalClientConnection implements AutoCloseable {
                 throw new IllegalStateException("registered frame generation is invalid");
             }
             generation.set(registered.connectionGeneration());
+            connectedAt.set(Instant.now());
+            lastFailure.set(null);
+            connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.ONLINE);
             modelRelay.updateGrant(registered.modelGrant());
             startHeartbeat();
             LOGGER.info("local_client_registered clientInstanceId={} generation={}",
@@ -170,16 +213,20 @@ final class LocalClientConnection implements AutoCloseable {
                 sendError(frame, exception);
             } finally {
                 operations.remove(frame.requestId());
+                operationProgress.remove(frame.requestId());
             }
         }, null);
         Future<?> previous = operations.putIfAbsent(frame.requestId(), future);
         if (previous != null) {
             throw new IllegalStateException("duplicate server requestId");
         }
+        operationProgress.put(frame.requestId(), new LocalClientRuntimeSnapshot.ActiveOperation(
+                frame.requestId(), frame.type(), Instant.now()));
         try {
             operationExecutor.execute(future);
         } catch (RuntimeException exception) {
             operations.remove(frame.requestId(), future);
+            operationProgress.remove(frame.requestId());
             throw exception;
         }
     }
@@ -194,6 +241,7 @@ final class LocalClientConnection implements AutoCloseable {
             case "STATUS" -> supervisor.status();
             default -> throw new IllegalArgumentException("unsupported lifecycle action");
         };
+        processStatus.set(result);
         sendResponse(frame, LocalClientFrameType.LIFECYCLE_RESULT, result);
     }
 
@@ -263,6 +311,7 @@ final class LocalClientConnection implements AutoCloseable {
     private void handleCancel(LocalClientFrame frame) {
         LocalClientPayloads.Cancel cancel = codec.payload(frame, LocalClientPayloads.Cancel.class);
         Future<?> future = operations.remove(cancel.targetRequestId());
+        operationProgress.remove(cancel.targetRequestId());
         if (future != null) {
             future.cancel(true);
         }
@@ -292,6 +341,7 @@ final class LocalClientConnection implements AutoCloseable {
                 status = new LocalClientPayloads.LifecycleResult(
                         false, "FAILED", null, null, null, false, null, "状态检查失败");
             }
+            processStatus.set(status);
             sendFrame(new LocalClientFrame(
                     LocalClientProtocol.VERSION,
                     LocalClientFrameType.HEARTBEAT,
@@ -382,7 +432,12 @@ final class LocalClientConnection implements AutoCloseable {
         }
         operations.forEach((id, future) -> future.cancel(true));
         operations.clear();
+        operationProgress.clear();
         fileRpcHandler.abortAll();
+        connectedAt.set(null);
+        if (!closed.get()) {
+            connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.OFFLINE);
+        }
     }
 
     private static void copyHeaders(Map<String, List<String>> headers, HttpRequest.Builder builder) {
@@ -447,11 +502,12 @@ final class LocalClientConnection implements AutoCloseable {
         return prefix + UUID.randomUUID().toString().replace("-", "");
     }
 
-    private static void sleep(Duration duration) {
+    private boolean waitForReconnect(Duration duration) {
         try {
-            Thread.sleep(duration);
+            return reconnectSignal.tryAcquire(duration.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
+            return true;
         }
     }
 
@@ -460,9 +516,15 @@ final class LocalClientConnection implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.STOPPING);
+        reconnectSignal.release();
         WebSocket socket = webSocket.getAndSet(null);
         if (socket != null) {
             socket.sendClose(WebSocket.NORMAL_CLOSURE, "CLIENT_SHUTDOWN");
+        }
+        ConnectionListener listener = activeListener.get();
+        if (listener != null) {
+            listener.closedFuture().complete(null);
         }
         disconnected();
         inboundExecutor.close();

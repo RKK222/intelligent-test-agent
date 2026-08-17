@@ -13,10 +13,13 @@ import static org.mockito.Mockito.when;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.enterprise.testagent.agent.runtime.AgentRuntime;
+import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
 import com.enterprise.testagent.agent.runtime.OpencodeAgentRuntime;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
+import com.enterprise.testagent.domain.hub.ProtectedAgentDefinitionResolver;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -26,6 +29,7 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -168,6 +172,52 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.path()).isEqualTo("/agent");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(result).isInstanceOf(List.class);
+    }
+
+    @Test
+    void authenticatedLocalWorkspaceCatalogAddsOnlyOpaqueProtectedSelections() {
+        UserId userId = new UserId("usr_protectedcatalog1234567890");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_protectedcatalog1234567890");
+        AgentRuntime runtime = org.mockito.Mockito.mock(AgentRuntime.class);
+        AgentRuntimeTargetResolver targetResolver = org.mockito.Mockito.mock(AgentRuntimeTargetResolver.class);
+        ProtectedAgentDefinitionResolver definitions = org.mockito.Mockito.mock(ProtectedAgentDefinitionResolver.class);
+        when(runtime.agentId()).thenReturn("opencode");
+        when(runtime.runtime(any())).thenReturn(Mono.just(new AgentRuntimeResult(
+                objectMapper.valueToTree(List.of(Map.of("id", "build", "name", "Build"))))));
+        when(targetResolver.workspaceTarget("opencode", userId, workspaceId.value(), "trace_protected_catalog"))
+                .thenReturn(new AgentRuntimeTargetResolver.WorkspaceRuntimeTarget(
+                        runtime,
+                        localClientNode(),
+                        "/Users/test/workspace",
+                        workspaceId));
+        when(definitions.listCatalog(userId, workspaceId)).thenReturn(List.of(
+                new ProtectedAgentDefinitionResolver.CatalogItem(
+                        "protected:hub_rev_agent_1",
+                        "hub_rev_agent_1",
+                        "合规审查",
+                        "服务器执行",
+                        "sha256-agent")));
+        OpencodeRuntimeApplicationService service = new OpencodeRuntimeApplicationService(
+                new AgentRuntimeRegistry(List.of(runtime)), targetResolver, objectMapper, null);
+        service.configureProtectedAgentDefinitionResolver(definitions);
+
+        Object result = service.withUser(
+                userId,
+                () -> service.listAgents(workspaceId.value(), "trace_protected_catalog"));
+
+        assertThat(result).isInstanceOf(List.class);
+        assertThat((List<?>) result).hasSize(2);
+        assertThat((List<?>) result).anySatisfy(item -> assertThat(item)
+                .isEqualTo(Map.of(
+                        "id", "protected:hub_rev_agent_1",
+                        "agentId", "protected:hub_rev_agent_1",
+                        "name", "合规审查",
+                        "mode", "primary",
+                        "description", "服务器执行",
+                        "protected", true,
+                        "revisionId", "hub_rev_agent_1",
+                        "contentSha256", "sha256-agent")));
+        assertThat(result.toString()).doesNotContain("AGENT.md", "系统提示词", "SKILL.md");
     }
 
     @Test
@@ -1148,6 +1198,24 @@ class OpencodeRuntimeApplicationServiceTest {
                     NOW,
                     "trace_1234567890abcdef");
         }
+    }
+
+    private static ExecutionNode localClientNode() {
+        return new ExecutionNode(
+                new ExecutionNodeId("node_localprotected1234567890"),
+                "http://127.0.0.1:4096",
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                100,
+                NOW,
+                Set.of("chat", "protected-agent-execution"),
+                NOW,
+                NOW,
+                "trace_protected_catalog",
+                RuntimeKind.LOCAL_CLIENT,
+                "lci_protectedcatalog1234567890",
+                7L);
     }
 
     private static final class FakeAgentSessionBindingRepository implements AgentSessionBindingRepository {

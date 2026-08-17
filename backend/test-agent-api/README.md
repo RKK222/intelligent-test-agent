@@ -175,3 +175,9 @@ RPC。跨 Java 必须按连接记录的 backendProcessId/generation 复用公共
 Redis 快照、不直接控制本地 supervisor。Workspace/Session/Run/夜间及统一 OpenCode 实例响应仅追加
 runtime/capability 字段，旧服务端路径保持兼容。完整契约见 `docs/api/http-api.md` 与
 `docs/api/event-stream.md`。
+
+`ProtectedAgentMcpController` 仅承载服务器 OpenCode 的精确 stateless MCP JSON-RPC 入口。它从 HTTP exchange
+读取短期 Bearer grant，保持 MCP 原始 wire body，不使用平台 `ApiResponse` envelope；notification 显式返回
+`202` 空 body。请求和响应 DTO 实现安全日志摘要，通用日志切面遇到 `ResponseEntity` 也只序列化摘要，禁止
+记录 Authorization、文件参数/内容或 Skill 正文。`ApiTokenWebFilter` 只豁免该精确路径，相邻子路径仍按原
+鉴权拒绝。`ProtectedAgentMcpControllerTest`、`ApiLoggingAspectTest` 和 `ApiTokenWebFilterTest` 固化上述边界。

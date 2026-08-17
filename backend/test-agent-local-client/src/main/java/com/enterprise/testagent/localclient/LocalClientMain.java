@@ -2,6 +2,7 @@ package com.enterprise.testagent.localclient;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import java.nio.file.Files;
 import java.util.Arrays;
 
 /** 本地 OpenCode 客户端入口；client key 永远不接受命令行参数。 */
@@ -22,6 +23,10 @@ public final class LocalClientMain {
             throw new IllegalArgumentException("unsupported command line arguments");
         }
 
+        // macOS 菜单栏客户端不应额外占用 Dock；日志属性必须在日志框架初始化前设置。
+        System.setProperty("apple.awt.UIElement", "true");
+        Files.createDirectories(LocalClientPaths.logsDirectory());
+        System.setProperty("testagent.localclient.logDir", LocalClientPaths.logsDirectory().toString());
         LocalClientConfiguration configuration = LocalClientConfiguration.load();
         String clientKey = LocalClientCredentialFile.read();
         LocalClientStateStore stateStore = new LocalClientStateStore();
@@ -32,14 +37,19 @@ public final class LocalClientMain {
                     configuration, stateStore, modelRelay);
             LocalClientFileRpcHandler fileRpcHandler = new LocalClientFileRpcHandler(
                     workspaceRegistry, objectMapper);
-            try (LocalClientConnection connection = new LocalClientConnection(
+            LocalClientConnection connection = new LocalClientConnection(
                     configuration,
                     clientKey,
                     stateStore,
                     supervisor,
                     modelRelay,
-                    fileRpcHandler)) {
-                Runtime.getRuntime().addShutdownHook(new Thread(connection::close, "local-client-shutdown"));
+                    fileRpcHandler);
+            LocalClientTray tray = LocalClientTray.install(configuration, connection);
+            try (connection; tray) {
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    tray.close();
+                    connection.close();
+                }, "local-client-shutdown"));
                 connection.runForever();
             }
         }

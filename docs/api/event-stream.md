@@ -53,7 +53,7 @@
 
 | wire name | 说明 |
 |---|---|
-| `run.created` | Run 已创建；前端据其 `runId` 绑定当前根用户消息。`REDIS_SUMMARY` 仍可额外携带 `storageMode/clientRequestId/assistantSummaryMessageId` 供摘要定位兼容。 |
+| `run.created` | Run 已创建；前端据其 `runId` 绑定当前根用户消息。`REDIS_SUMMARY` 仍可额外携带 `storageMode/clientRequestId/assistantSummaryMessageId` 供摘要定位兼容；受保护 Agent Run 可额外携带 `protectedAgent` 修订审计摘要。 |
 | `run.started` | Run 已开始执行。 |
 | `run.cancelling` | Run 正在取消。 |
 | `run.succeeded` | Run 成功结束。 |
@@ -100,6 +100,12 @@
 `permission.asked` 的原生请求标识可能位于顶层 `id`，回复可能使用 `requestID`；平台按顶层 `requestId/requestID/id/permissionId/questionId` 兼容匹配，不能误取嵌套 option 的 `id`。前端 `PermissionRequest` 优先保留 `patterns[]`，回退旧 `pattern`；展示标题默认“需要权限”，已知权限说明与 OpenCode 1.18.4 中文文案一致，未知权限仍只展示通用标题和路径，不暴露内部 permission type 或 request id。路径只出现在已授权用户的交互卡中，不进入铃铛通知文案或日志。
 
 task part 指向新 session 时，`parentSessionId` 必须等于发起该 task 的 session，而不是固定 root。root task 建立 child，child task 建立 grandchild；task part 本身仍归属于发起它的 scope。当前运行基线强制 `subagent_depth=2`，前端按精确 `sessionId` 隔离 root、child 和 grandchild 时间线，SSE 字段结构不变。
+
+受保护 Agent Run 的 `run.created.payload.protectedAgent` 是 additive 审计字段，结构为
+`{runtimeAgentId,assetId,revisionId,contentSha256,skills[]}`；`skills[]` 每项只有
+`assetId/revisionId/contentSha256`。它固定对应本次服务器执行实际解析的不可变修订，用于审计和复现。
+payload 禁止包含 Agent/Skill 正文、系统提示词、MCP grant、本地路径或文件内容。受保护运行仍沿用既有
+RunEvent 类型、SSE 续传、permission/question 和终态语义，不新增事件名；旧前端可以忽略该字段。
 
 ## `run.snapshot.reset`
 

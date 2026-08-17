@@ -68,12 +68,16 @@ curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/mani
 
 ## 用户安装
 
-先在“个人设置 → 本地 OpenCode 客户端”创建并复制 client key。下载脚本可以先落盘审阅，再执行：
+先点击右上角头像，在 OpenCode 实例列表下方选择“下载本地客户端”，再到“个人设置 → 本地 OpenCode
+客户端”创建并复制 client key。该入口下载 `/downloads/local-opencode-client/install.sh`；生产由 Nginx 提供，
+dev server 默认从 `deploy/internal/dist/local-opencode-client/` 只读提供，必要时可用
+`TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录。下载脚本可以先落盘审阅，再执行：
 
 ```bash
 curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/install.sh -o /tmp/install-local-opencode-client.sh
 TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL=http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client \
 TEST_AGENT_LOCAL_CLIENT_SERVER_URL=https://PLATFORM \
+TEST_AGENT_LOCAL_CLIENT_WEB_URL=https://PLATFORM \
   sh /tmp/install-local-opencode-client.sh
 ```
 
@@ -81,6 +85,10 @@ TEST_AGENT_LOCAL_CLIENT_SERVER_URL=https://PLATFORM \
 `manifest.json.sig`，再逐一验证 JAR/JRE/OpenCode SHA-256，最后安装到用户目录并原子切换 `current`。
 macOS 创建 `~/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist`；麒麟 ARM 创建
 `~/.config/systemd/user/test-agent-local-opencode-client.service`。两者均以登录用户运行且不需要 root。
+`TEST_AGENT_LOCAL_CLIENT_WEB_URL` 省略时默认等于 `SERVER_URL`；只有本地开发显式启用不安全控制开关时才
+允许使用 HTTP。macOS 和提供 Java SystemTray 的麒麟桌面显示宠物托盘；无图形会话或不支持托盘时客户端
+继续作为后台服务运行。托盘正常退出后 launchd/systemd 不立即重启，异常退出仍会自动恢复；下次登录会
+按已启用的用户服务重新启动。
 
 常用检查：
 
@@ -92,10 +100,37 @@ tail -f "$HOME/Library/Application Support/TestAgent/local-opencode-client/state
 # 麒麟 ARM
 systemctl --user status test-agent-local-opencode-client
 journalctl --user -u test-agent-local-opencode-client -f
+tail -f "$HOME/.local/state/testagent/local-opencode-client/logs/client.log"
 ```
+
+麒麟的 `journalctl` 用于补充查看 systemd 服务事件；托盘“查看日志/下载日志”直接使用客户端自行写入的
+`~/.local/state/testagent/local-opencode-client/logs/`，不依赖 journal。下载 ZIP 只收集客户端滚动日志，
+最多 20 个文件、每个文件最多末尾 10 MiB，不包含 `client.key`、`client.properties`、OpenCode 日志或
+工作区内容。托盘“会话进度”只展示当前操作类型、数量与耗时。
 
 轮换 key 后，同一用户所有设备都必须把新值写入各自 `client.key`（权限保持 `0600`）并重启用户服务。
 撤销 key 会立即断开全部设备。
+
+## 受保护 Agent/Skill 运行要求
+
+该链路复用现有服务器 OpenCode 节点、Redis、Java 回调地址和本地客户端 WSS，不新增客户端进程或外部
+中间件。至少保证：
+
+- 当前 Java 的监听地址可被同服务器 OpenCode 访问；MCP 回调固定为
+  `/api/internal/platform/protected-agent/mcp`，不经过浏览器登录 Token。
+- 存在可路由的 `SERVER_PROCESS` OpenCode 节点。本地客户端在线不等于服务器执行节点可用，服务器节点缺失
+  时受保护 Run 必须返回不可用，不能回退本地 OpenCode。
+- Redis 可保存受保护远端 Session 到服务器隔离目录的七天映射；映射缺失时重建远端 Session，禁止使用本地
+  绝对路径兜底。
+- `TEST_AGENT_PROTECTED_AGENT_WORK_ROOT` 可选覆盖隔离目录根，默认使用 JVM 临时目录下
+  `test-agent-protected-agent`。运行用户必须可创建目录并支持逐级拒绝符号链接；POSIX 目录会收紧为 `0700`。
+- 受保护文件 grant 只驻留签发 Java 内存且最长四小时。Java 重启、Run 终态、客户端重连换代或 Workspace
+  重绑后，旧 MCP 调用预期失败；浏览器应以普通 Run 失败/重试流程处理，不复用旧 grant。
+
+上线验收应在一个已发布 Hub Agent 中冻结至少一个 Skill，确认网页目录只出现 revision/SHA 摘要；运行时
+服务器 OpenCode 能通过 `local_files_read_file` 读取授权目录，并在用户确认权限后写入文件；客户端目录中不
+出现 Agent/Skill 正文。后台 API 日志、RunEvent 和客户端日志均不得出现 MCP Authorization、prompt 或文件
+内容。
 
 ## 发布验证
 
@@ -108,7 +143,8 @@ tools/verify-internal-nginx-config.sh
 
 然后必须分别在 Apple Silicon Mac 和真实 ARM64 glibc 麒麟机上从 Nginx 明文 HTTP 地址执行安装，
 验证用户服务启动、WSS 认证、OpenCode 1.18.4 loopback 健康、本地工作区注册、聊天修改文件、
-分片 CRUD 以及客户端重启恢复。没有完成真实麒麟 ARM 流程时，发布验收只能记为“部分验证”。
+分片 CRUD、托盘状态与全部菜单动作以及客户端重启恢复。没有完成真实麒麟 ARM 流程时，发布验收只能记为
+“部分验证”。
 
 ## 回滚与风险
 

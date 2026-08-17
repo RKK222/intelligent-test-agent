@@ -56,6 +56,8 @@ public class ApiTokenWebFilter implements WebFilter {
     private static final String LOCAL_CLIENT_MODEL_PROXY_ROOT_PATH =
             "/api/internal/platform/local-opencode-client/model-proxy/v1";
     private static final String LOCAL_CLIENT_MODEL_PROXY_PATH = LOCAL_CLIENT_MODEL_PROXY_ROOT_PATH + "/";
+    private static final String PROTECTED_AGENT_MCP_PATH =
+            "/api/internal/platform/protected-agent/mcp";
 
     private final String apiToken;
     private final ObjectMapper objectMapper;
@@ -100,6 +102,7 @@ public class ApiTokenWebFilter implements WebFilter {
                 || path.equals(LOCAL_CLIENT_INTERNAL_REVOKE_PATH)
                 || path.equals(LOCAL_CLIENT_MODEL_PROXY_ROOT_PATH)
                 || path.startsWith(LOCAL_CLIENT_MODEL_PROXY_PATH)
+                || path.equals(PROTECTED_AGENT_MCP_PATH)
                 || apiToken == null) {
             return chain.filter(exchange);
         }

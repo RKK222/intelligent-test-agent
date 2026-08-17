@@ -279,5 +279,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 个人设置页提供 client key 创建/复制/轮换/撤销、实例状态与生命周期控制、本地只读目录选择和 Workspace
 注册。明文 key 只在 API 方法局部变量中直接写剪贴板，不渲染、不进入 TanStack Query cache 或浏览器
 存储。头像菜单合并服务端和本地 OpenCode 实例，显示平台、上报/观察地址、端口、版本、状态和最后心跳。
+实例列表下方的“下载本地客户端”直接下载签名分发目录中的 `install.sh`；生产由 Nginx 同源下载路由提供，
+dev server 只读暴露 `deploy/internal/dist/local-opencode-client/`，也可用
+`TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录，不会把 JRE/OpenCode 大制品打入前端 bundle。
 本地 Workspace 的 capability 明确关闭 terminal、Git 发布、Agent 配置、附件和协作分享；页面不能仅靠
 按钮隐藏代替后端约束。
