@@ -11176,3 +11176,26 @@
 
 - 外网 Mac 的 ClickHouse ZIP 与记忆四镜像目录已具备可传输、校验和离线启动条件；无运行时依赖下载。企业现场仍必须先执行只读端口、目录、架构、Docker 和容量预检，任一目标端口被占用或新数据目录非空即停止，不能清理克隆 PG。
 - 本次只改变部署脚本、配置模板、测试和稳定部署文档；不修改 HTTP API、RunEvent、平台 PostgreSQL/Flyway、generated SDK、OpenCode 源码或 `.env*`，未新建分支、未推送远端。真实 `.134/.160` 部署与企业网络跨机验收尚未完成。
+
+## 2026-08-17 - 修复 macOS PKG 安装超时与 App 错误重定位
+
+### Why
+
+- 无签名 PKG 经手工放行后仍在 `postinstall` 阶段等待 600 秒并以 `PKInstallErrorDomain Code=112` 失败；安装日志同时显示 App 被历史用户目录安装记录重定位到 `~/Applications`，而系统 LaunchAgent 固定访问 `/Applications`。
+
+### What
+
+- macOS PKG 使用 `pkgbuild --analyze` 生成 component plist，并显式关闭 `BundleIsRelocatable`，保证系统安装固定落到 `/Applications`。
+- `postinstall` 只执行一次带标准输入隔离的 `launchctl bootstrap`，移除可能长期阻塞 PackageKit 的 `kickstart/open`；从用户目录版升级时精确移除同 label 的旧用户 LaunchAgent，不删除配置、工作空间或用户目录版本制品。
+- 安装脚本在非根目标卷验证时跳过当前桌面会话操作；制品测试新增重定位、阻塞命令和目标卷保护断言，同步更新本地客户端部署文档。
+
+### How
+
+- 从 `/var/log/install.log` 复核失败脚本被 PackageKit 在 600 秒超时后终止；运行 `bash -n`、`shellcheck` 和 `deploy/internal/tests/local-opencode-client-package-test.sh` 均通过。
+- 使用真实 Apple Silicon JRE、OpenCode 1.18.4 和客户端 JAR 重建 `0.1.0-dev-native-pkgfix`，展开后的 `PackageInfo` 为 `<relocate/>`，postinstall 不含 `kickstart/open`；修复版 PKG SHA-256 为 `fae60d7ba17fb19412f5d303627ca6e87c4bc061125e8a4c50d6ad422ba7ca72`。
+- 无密码 sudo 无法在隔离 APFS 卷执行 root-auth PKG，真实 `/Applications` 安装仍需用户在系统 Installer 中输入管理员密码；当前机器已切回用户目录 LaunchAgent，Java PID `60264` 运行正常。
+
+### Result
+
+- 代码层面的 600 秒超时和 App/LaunchAgent 路径分裂已修复并通过真实制品结构验证；修复包位于 `~/Downloads/TestAgent-Local-Client-macOS-arm64-pkgfix.pkg`，仍是无 Developer ID 签名的开发包，不能冒充正式交付。
+- 不变更 HTTP API、事件、数据库/Flyway、客户端协议、安全凭据、generated SDK 或 OpenCode 只读源码；实际系统级安装成功状态尚待一次管理员授权的 Installer 验证。

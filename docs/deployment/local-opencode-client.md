@@ -93,8 +93,12 @@ curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/mani
 
 macOS 安装 `/Applications/TestAgent Local Client.app` 和系统级 LaunchAgent 定义，实际客户端仍以登录用户
 运行；麒麟安装到 `/opt/testagent/local-opencode-client`，通过全局启用的 systemd user unit 在登录用户会话
-运行，并提供应用菜单入口。安装器会尽力启动当前活动桌面用户；桌面会话总线暂不可用时，从应用菜单启动
-“TestAgent 本地客户端”或重新登录即可进入首次向导。
+运行，并提供应用菜单入口。macOS PKG 固定把 App 安装到 `/Applications`，禁止 Installer 根据历史安装记录
+重定位到用户目录；安装后只通过一次 `launchctl bootstrap` 尝试载入当前桌面用户，不在 `postinstall` 中执行
+可能长期阻塞 PackageKit 的 `kickstart` 或 `open`。从兜底脚本升级到 PKG 时，安装器会移除当前桌面用户下
+同 label 的旧用户级 LaunchAgent，避免下次登录同时加载系统级和用户级定义；不会删除用户配置、工作空间或
+兜底脚本保存的版本目录。桌面会话暂不可用时，从应用菜单启动“TestAgent 本地客户端”或重新登录即可进入
+首次向导。
 
 生产由 Nginx 提供，dev server 默认从 `deploy/internal/dist/local-opencode-client/` 只读提供，必要时可用
 `TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录。无桌面环境仍可审阅并执行兜底脚本：

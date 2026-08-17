@@ -87,6 +87,20 @@ pkgutil --expand-full \
   "${PKG_EXPANDED}"
 test -x "$(find "${PKG_EXPANDED}" -type f -path \
   '*/Payload/Applications/TestAgent Local Client.app/Contents/MacOS/TestAgentLocalClient' | head -n 1)"
+if sed -n '/<relocate>/,/<\/relocate>/p' "${PKG_EXPANDED}/PackageInfo" | grep -q '<bundle '; then
+  echo "macOS PKG unexpectedly allows the app bundle to be relocated" >&2
+  exit 1
+fi
+if grep -Eq 'launchctl kickstart|/usr/bin/open' "${PKG_EXPANDED}/Scripts/postinstall"; then
+  echo "macOS PKG postinstall unexpectedly starts a blocking fallback command" >&2
+  exit 1
+fi
+grep -q 'launchctl bootstrap' "${PKG_EXPANDED}/Scripts/postinstall"
+grep -q '</dev/null' "${PKG_EXPANDED}/Scripts/postinstall"
+grep -q 'Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist' \
+  "${PKG_EXPANDED}/Scripts/postinstall"
+grep -q 'target_volume=' "${PKG_EXPANDED}/Scripts/preinstall"
+grep -q 'target_volume=' "${PKG_EXPANDED}/Scripts/postinstall"
 DEB_EXPANDED="${TEST_ROOT}/deb-expanded"
 mkdir -p "${DEB_EXPANDED}"
 (

@@ -124,12 +124,13 @@ EOF
 }
 
 build_macos_installer() {
-  local release_dir="$1" destination="$2" package_version app_root payload_root scripts_root iconset unsigned_pkg
+  local release_dir="$1" destination="$2" package_version app_root payload_root scripts_root iconset component_plist unsigned_pkg
   [[ "$(uname -s)" == Darwin ]] || {
     echo "macOS PKG creation requires the documented external Mac build host" >&2
     exit 1
   }
   require_command pkgbuild
+  require_command plutil
   require_command sips
   require_command iconutil
   package_version="$(numeric_package_version)"
@@ -187,6 +188,8 @@ EOF
   cat >"${scripts_root}/preinstall" <<'EOF'
 #!/usr/bin/env sh
 set -eu
+target_volume="${3:-/}"
+[ "${target_volume}" = / ] || exit 0
 console_uid="$(/usr/bin/stat -f '%u' /dev/console 2>/dev/null || true)"
 case "${console_uid}" in ''|*[!0-9]*) exit 0 ;; esac
 [ "${console_uid}" -ge 500 ] || exit 0
@@ -195,14 +198,23 @@ EOF
   cat >"${scripts_root}/postinstall" <<'EOF'
 #!/usr/bin/env sh
 set -eu
+target_volume="${3:-/}"
+[ "${target_volume}" = / ] || exit 0
 plist_path="/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist"
 console_uid="$(/usr/bin/stat -f '%u' /dev/console 2>/dev/null || true)"
 case "${console_uid}" in ''|*[!0-9]*) exit 0 ;; esac
 [ "${console_uid}" -ge 500 ] || exit 0
+console_user="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
+case "${console_user}" in ''|root|loginwindow|*[!A-Za-z0-9._-]*) console_user='' ;; esac
+if [ -n "${console_user}" ]; then
+  console_home="$(/usr/bin/dscl . -read "/Users/${console_user}" NFSHomeDirectory 2>/dev/null \
+    | /usr/bin/awk '{$1=""; sub(/^ /, ""); print}' || true)"
+  case "${console_home}" in
+    /*) /bin/rm -f "${console_home}/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist" ;;
+  esac
+fi
 /bin/launchctl bootstrap "gui/${console_uid}" "${plist_path}" >/dev/null 2>&1 \
-  || /bin/launchctl asuser "${console_uid}" /usr/bin/open -a "TestAgent Local Client" >/dev/null 2>&1 \
-  || true
-/bin/launchctl kickstart -k "gui/${console_uid}/com.enterprise.testagent.local-opencode-client" >/dev/null 2>&1 || true
+  </dev/null || true
 EOF
   chmod 0755 "${scripts_root}/preinstall" "${scripts_root}/postinstall"
   if [[ -n "${MACOS_APPLICATION_IDENTITY}" ]]; then
@@ -210,8 +222,15 @@ EOF
     codesign --force --deep --options runtime --timestamp \
       --sign "${MACOS_APPLICATION_IDENTITY}" "${app_root}"
   fi
+  # 禁止 Installer 根据历史 LaunchServices 记录把 App 重定位到用户目录，否则系统 LaunchAgent
+  # 仍会访问 /Applications，最终出现安装成功但客户端无法启动的分裂状态。
+  component_plist="${TEMP_DIR}/native-macos/components.plist"
+  pkgbuild --analyze --root "${payload_root}" "${component_plist}" >/dev/null
+  plutil -replace '0.BundleIsRelocatable' -bool NO "${component_plist}"
+  plutil -replace '0.BundleHasStrictIdentifier' -bool YES "${component_plist}"
   unsigned_pkg="${TEMP_DIR}/native-macos/TestAgent-Local-Client-unsigned.pkg"
   pkgbuild --root "${payload_root}" --scripts "${scripts_root}" \
+    --component-plist "${component_plist}" \
     --identifier com.enterprise.testagent.local-opencode-client \
     --version "${package_version}" --install-location / "${unsigned_pkg}" >/dev/null
   if [[ -n "${MACOS_INSTALLER_IDENTITY}" ]]; then
