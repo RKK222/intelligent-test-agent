@@ -15,6 +15,8 @@ sed "s/REPLACE_CLICKHOUSE_PASSWORD_SHA256/${digest}/" \
   | grep -Fq 'ClickHouse configuration validation passed'
 grep -Fq -- '--ulimit nofile=262144:262144' "${SCRIPT}"
 grep -Fq -- '--privileged' "${SCRIPT}"
+grep -Fq 'chown 101:101 "${installed_config}"' "${SCRIPT}"
+! grep -Fq 'CLICKHOUSE_RUN_AS_ROOT=1' "${SCRIPT}"
 grep -Fq 'Loaded ClickHouse image is not linux/amd64' "${SCRIPT}"
 grep -Fq '/var/lib/clickhouse' "${SCRIPT}"
 grep -Fq -- '--user "${USERNAME}" --password "${PASSWORD}"' "${SCRIPT}"

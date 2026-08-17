@@ -42,6 +42,8 @@ grep -Fq 'ClickHouse 26.3.17.56' "${bundle}/START-HERE.md"
 grep -Fq 'CLICKHOUSE_HOST=122.233.30.147' "${bundle}/START-HERE.md"
 grep -Fq 'Docker 18.09' "${bundle}/START-HERE.md"
 grep -Fq -- '--privileged' "${bundle}/deploy-clickhouse.sh"
+grep -Fq 'chown 101:101 "${installed_config}"' "${bundle}/deploy-clickhouse.sh"
+! grep -Fq 'CLICKHOUSE_RUN_AS_ROOT=1' "${bundle}/deploy-clickhouse.sh"
 grep -Fq 'deploy-clickhouse.sh.bak-before-privileged' "${bundle}/START-HERE.md"
 ! grep -Fq 'CLICKHOUSE_HOST=122.233.30.134' "${bundle}/START-HERE.md"
 printf 'ClickHouse offline package verification passed\n'

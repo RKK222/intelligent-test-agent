@@ -124,6 +124,8 @@ install -d -m 0750 "${DATA_ROOT}" "${LOG_ROOT}" /data/testagent/config
 chown 101:101 "${DATA_ROOT}" "${LOG_ROOT}"
 installed_config="/data/testagent/config/clickhouse-users.xml"
 install -m 0600 "${USERS_CONFIG_FILE}" "${installed_config}"
+# ClickHouse 最终以镜像内 UID 101 运行；0600 配置必须由同一 UID 持有。
+chown 101:101 "${installed_config}"
 docker run -d \
   --privileged \
   --name "${CONTAINER}" \

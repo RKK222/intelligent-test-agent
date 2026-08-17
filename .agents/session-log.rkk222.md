@@ -11353,3 +11353,28 @@
 - Key 页面 500 已在真实服务修复；重新下载并安装新 PKG 后，首次向导存在可见应用入口，完成配置后入口转为菜单栏兔子图标。
 - 本地 test profile 启动日志确认 PostgreSQL 为 `192.168.8.100:15432/testagent_dev`，XXL MySQL 为 `192.168.8.100:13306/xxl_job`。本次未修改 `.env*`、HTTP API、事件或数据库结构/Flyway，也未修改 generated SDK/OpenCode 源码。
 - 开发 PKG 仍无 Apple Developer ID 签名，只完成项目清单签名与哈希校验；Gatekeeper 风险保持为既有开发约束，不能声明企业正式签名交付。
+
+## 2026-08-17 - 修复企业 ClickHouse 进程与数据目录用户冲突
+
+### Why
+
+- 企业 `.147` 上 ClickHouse 为兼容 Docker 18.09 已使用 `--privileged`，现场临时加入 `CLICKHOUSE_RUN_AS_ROOT=1` 后，进程有效用户变成 root，而既有数据目录仍属于镜像内 clickhouse 用户（UID 101）。
+- ClickHouse 因进程用户与数据所有者不一致报 Code 430 `MISMATCHING_USERS_FOR_PROCESS_AND_DATA`；该问题与 PostgreSQL 容器端口映射无关。
+
+### What
+
+- 保留经用户批准的 `--privileged`，明确禁止再设置 `CLICKHOUSE_RUN_AS_ROOT=1`；ClickHouse 继续以镜像内 UID/GID 101 运行。
+- 部署时将安装后的 `clickhouse-users.xml` 设置为 `101:101` 和 `0600`，使受保护的凭据配置与 ClickHouse 进程用户一致；数据、日志目录继续由 UID/GID 101 持有。
+- 部署与离线封包回归测试锁定配置所有者修复和 root 环境变量禁用，并同步 ClickHouse 企业部署手册与安全规范中的现场原地修复命令和 Code 430 排查说明。
+
+### How
+
+- `bash -n`、ClickHouse 部署/封包测试和 `git diff --check` 通过。
+- 在 Docker 24.0.2 上以最终 linux/amd64 镜像实际执行 `--privileged` 且不设置 root 环境变量的 smoke；ClickHouse 查询返回 `26.3.17.56 UTC`，容器为 running/privileged，`/proc/1/status` 的 UID/GID 均为 101；精确临时容器和卷已清理。
+- 企业 `.134` 的记忆 PostgreSQL 已通过本机 verify（PostgreSQL 16.12、`testagent_memory`）；`.160` 仅完成四类镜像加载，配置文件尚未放置，且 `.160 -> .134:15433` 仍超时，因此记忆服务尚未启动验收。
+
+### Result
+
+- 仓库脚本已避免再次制造 root/UID 101 冲突，企业 `.147` 可直接原地修改现有小脚本，不需要重拷大型镜像包或清空 ClickHouse 数据。
+- 企业 `.147` 尚需现场执行原地修复、重建精确容器并完成 verify；`.160` 还需补齐配置和跨机网络后才能启动。不得把本机验证表述为企业实机完成。
+- 本次不修改 HTTP API、RunEvent、平台数据库结构/Flyway、generated SDK、OpenCode 源码、凭据值或 `.env*`。

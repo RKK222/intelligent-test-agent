@@ -2,7 +2,7 @@
 
 本手册用于在企业网络新增一个独立 x86_64 ClickHouse 进程，固定使用 ClickHouse 26.3.17.56，承载平台全部运营用户维度、行为事实、小时/日汇总、Token 使用与 Agent/Skill/Tool 调用统计。平台业务库仍使用 PostgreSQL；PostgreSQL 只保留业务主数据、临时事务 outbox、Redis 消费检查点、回填切换记录和任务锁，不作为任何运营查询来源。当前首次试部署按现场指定把 ClickHouse 容器共置在原平台 PostgreSQL 节点 `122.233.30.147`，但必须继续保留 PostgreSQL 的 `5432`、进程和全部数据目录；ClickHouse 只使用 `8123` 与 `/data/testagent/clickhouse`，资源或端口不满足时停止，不得为部署 ClickHouse 清理或迁移原 PG 数据。
 
-本交付不使用 Docker Compose。ClickHouse 节点只运行一个 `--restart unless-stopped` 容器，数据落在 `/data/testagent/clickhouse/data`，日志落在 `/data/testagent/clickhouse/log`。原始运营事实 TTL 为 2 年，汇总表不设置 TTL。外网打包按多架构索引 digest `sha256:422be85a...fcb3` 固定上游，并直接导出 linux/amd64 archive，避免 Apple Silicon 本地 arm64 tag 污染交付物。当前现场 Docker 18.09 的默认 seccomp 会把新镜像使用的系统调用返回为 `EPERM`；按现场明确批准，交付脚本固定使用 `--privileged` 启动 ClickHouse。该例外不修改 Docker daemon，也不改变共置 PostgreSQL 容器的启动参数，但会显著放宽 ClickHouse 容器对宿主的权限。
+本交付不使用 Docker Compose。ClickHouse 节点只运行一个 `--restart unless-stopped` 容器，数据落在 `/data/testagent/clickhouse/data`，日志落在 `/data/testagent/clickhouse/log`。原始运营事实 TTL 为 2 年，汇总表不设置 TTL。外网打包按多架构索引 digest `sha256:422be85a...fcb3` 固定上游，并直接导出 linux/amd64 archive，避免 Apple Silicon 本地 arm64 tag 污染交付物。当前现场 Docker 18.09 的默认 seccomp 会把新镜像使用的系统调用返回为 `EPERM`；按现场明确批准，交付脚本固定使用 `--privileged` 启动 ClickHouse。该例外不修改 Docker daemon，也不改变共置 PostgreSQL 容器的启动参数，但会显著放宽 ClickHouse 容器对宿主的权限。容器进程仍由官方入口降权为 UID/GID `101:101`；持久目录和 `0600` 用户配置统一归该 UID/GID 所有，禁止额外设置 `CLICKHOUSE_RUN_AS_ROOT=1`，否则 ClickHouse 会因进程用户与数据所有者不一致而退出。
 
 ## 1. 地址与目录
 
@@ -107,7 +107,7 @@ sha256sum -c test-agent-clickhouse_26.3.17.56-linux-amd64.tar.sha256
   deploy
 ```
 
-脚本会校验 linux/amd64 架构、镜像版本、密码摘要、持久目录和数据库存在性，并以现场批准的 `--privileged` 创建 ClickHouse 容器。本机认证与建库使用容器内 `clickhouse-client`，不依赖宿主安装客户端，也不因 Docker DNAT 把宿主回环来源改写成网桥地址而扩大用户白名单。首次部署成功后执行：
+脚本会校验 linux/amd64 架构、镜像版本、密码摘要、持久目录和数据库存在性，并以现场批准的 `--privileged` 创建 ClickHouse 容器；数据、日志和 `0600` 用户配置均归镜像内 UID/GID `101:101` 所有，进程不以 root 运行。本机认证与建库使用容器内 `clickhouse-client`，不依赖宿主安装客户端，也不因 Docker DNAT 把宿主回环来源改写成网桥地址而扩大用户白名单。首次部署成功后执行：
 
 ```bash
 ./deploy-clickhouse.sh \
@@ -190,7 +190,7 @@ filesystem error: in weakly_canonical: Operation not permitted ["/usr/share/zone
 `/data/testagent/clickhouse/data`。宿主 Docker、runc 与 libseccomp 完成受控升级并在真实节点以非 privileged
 方式回归全部离线镜像后，才可移除该例外。
 
-已经把旧包解压到 `.147` 时无需重新传输约 251 MiB 镜像。先备份并原地更新唯一启动行；命令可重复执行，发现既有备份但脚本仍未修改时会停止，避免覆盖恢复点：
+已经把旧包解压到 `.147` 时无需重新传输约 251 MiB 镜像。先备份并原地补齐 `--privileged` 和 `0600` 配置文件所有者，同时移除排障期间可能加入的 root 运行变量；命令可重复执行，发现既有备份但脚本仍未正确修改时会停止，避免覆盖恢复点：
 
 ```bash
 cd /data/0709/test-agent-clickhouse-offline
@@ -202,11 +202,25 @@ if ! grep -Fq -- '--privileged' deploy-clickhouse.sh; then
   cp -p deploy-clickhouse.sh deploy-clickhouse.sh.bak-before-privileged
   sed -i 's/^docker run -d \\$/docker run -d --privileged \\/' deploy-clickhouse.sh
 fi
+sed -i '/CLICKHOUSE_RUN_AS_ROOT=1/d' deploy-clickhouse.sh
+if ! grep -Fq 'chown 101:101 "${installed_config}"' deploy-clickhouse.sh; then
+  sed -i '/^install -m 0600 "${USERS_CONFIG_FILE}" "${installed_config}"$/a chown 101:101 "${installed_config}"' \
+    deploy-clickhouse.sh
+fi
 bash -n deploy-clickhouse.sh
-grep -n -A 2 '^docker run -d' deploy-clickhouse.sh
+test "$(grep -c 'chown 101:101 "${installed_config}"' deploy-clickhouse.sh)" -eq 1
+test "$(grep -c 'CLICKHOUSE_RUN_AS_ROOT=1' deploy-clickhouse.sh)" -eq 0
+grep -n -B 3 -A 3 '^docker run -d' deploy-clickhouse.sh
 ```
 
-预期显示 `docker run -d --privileged \`。若没有显示，停止，不要执行 deploy。
+预期显示 `docker run -d --privileged \`，并且其上方存在一次 `chown 101:101 "${installed_config}"`，没有 `CLICKHOUSE_RUN_AS_ROOT=1`。任一条件不满足时停止，不要执行 deploy。
+
+如果排障日志出现下面的错误，说明进程被强制改为 root，但数据仍属于官方 clickhouse 用户；不要递归把数据改为 root，也不要删除或重新初始化数据，按上面的原地脚本修复恢复 UID/GID `101:101` 后重新创建容器：
+
+```text
+Code: 430. Effective user of the process (root) does not match the owner of the data (clickhouse).
+MISMATCHING_USERS_FOR_PROCESS_AND_DATA
+```
 
 清理旧汇总前的回滚：
 
