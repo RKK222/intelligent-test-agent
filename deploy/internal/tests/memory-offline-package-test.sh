@@ -39,6 +39,10 @@ grep -Fq '`122.233.30.160` | Mem0 副本' \
   "${ROOT_DIR}/docs/deployment/qa-memory.md"
 grep -Fq 'memory-docker.sh.bak-before-privileged' \
   "${ROOT_DIR}/docs/deployment/qa-memory.md"
+grep -Fq 'SHA256SUMS.bak-before-privileged' \
+  "${ROOT_DIR}/docs/deployment/qa-memory.md"
+grep -Fq 'memory_script_sha256="$(sha256sum memory-docker.sh' \
+  "${ROOT_DIR}/docs/deployment/qa-memory.md"
 grep -Fq 'TEST_AGENT_MEMORY_DB_BIND_ADDRESS=122.233.30.134' \
   "${ROOT_DIR}/docs/deployment/qa-memory.md"
 ! grep -Fq 'TEST_AGENT_MEMORY_DB_BIND_ADDRESS=122.233.30.160' \

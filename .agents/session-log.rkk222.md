@@ -11321,6 +11321,7 @@
 
 - `bash -n`、ClickHouse 部署/封包测试、memory 离线包测试、AI 文档校验和 `git diff --check` 通过；本机缺少 `shellcheck` 命令，该项未执行。
 - 对提交前旧版脚本以管道实际执行文档中的 `sed` 替换：ClickHouse 精确生成一个 privileged 入口，memory 精确生成五个入口，两份结果均通过 `bash -n`。
+- memory 包的 `SHA256SUMS` 同时覆盖部署脚本；原地修改命令会备份原清单、只重算并替换 `memory-docker.sh` 唯一条目，再全量校验其余镜像和文件，避免后续 `load-*` 因脚本 SHA 变化失败或跳过镜像完整性检查。
 - 在 Docker 24.0.2 上用现有最终 linux/amd64 镜像实际执行 privileged smoke：ClickHouse 返回 `UTC / 26.3.17.56`，pgvector 返回 PostgreSQL `16.12`，Mem0/BGE 完成时区路径解析和线程创建，VIP 返回 Nginx `1.27.2`。Mac 为 arm64，以上通过仿真完成，不能替代企业 Docker 18.09 实机验收。
 
 ### Result

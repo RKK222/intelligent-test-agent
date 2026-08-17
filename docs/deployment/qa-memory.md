@@ -161,6 +161,9 @@ deploy/internal/package-release.sh --memory-only
 
 ```bash
 cd /data/0709/memory
+if [ ! -e SHA256SUMS.bak-before-privileged ]; then
+  cp -p SHA256SUMS SHA256SUMS.bak-before-privileged
+fi
 if ! grep -Fq -- '--privileged' memory-docker.sh; then
   test ! -e memory-docker.sh.bak-before-privileged || {
     echo 'STOP: backup already exists but script is not patched'
@@ -178,9 +181,14 @@ fi
 bash -n memory-docker.sh
 test "$(grep -c -- '--privileged' memory-docker.sh)" -eq 5
 grep -n -- '--privileged' memory-docker.sh
+test "$(grep -c '  memory-docker.sh$' SHA256SUMS)" -eq 1
+memory_script_sha256="$(sha256sum memory-docker.sh | awk '{print $1}')"
+sed -i "s#^[0-9a-f]\\{64\\}  memory-docker.sh\$#${memory_script_sha256}  memory-docker.sh#" SHA256SUMS
+unset memory_script_sha256
+sha256sum -c SHA256SUMS
 ```
 
-最后一条必须显示五个启动入口；数量不是 5 就停止，不启动任何角色。
+`grep` 必须显示五个启动入口，最后的完整清单校验必须全部为 `OK`；任一条件不满足就停止，不启动任何角色。原始脚本和原始清单分别保留在两个 `*.bak-before-privileged` 文件中，四个镜像 tar 及其 SHA 不会改变。
 
 ## 企业分发与启动
 
