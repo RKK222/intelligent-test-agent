@@ -11128,3 +11128,27 @@
 
 - macOS 和麒麟的下载、原生包内容、自启配置与页面健康度切换逻辑已实现并通过自动化和本机制品校验；不变更 HTTP API、RunEvent、数据库/Flyway、generated SDK 或 OpenCode 只读源码。
 - 当前 macOS dev PKG 因本机没有 Developer ID 证书而未签名/公证；打包脚本已支持应用签名、安装器签名与 notary profile，正式交付仍需注入企业凭据。真实 ARM 麒麟双击安装、托盘、WSS 和聊天/文件端到端尚未验证；页面真实健康状态交互待数据库网络恢复后补验。
+
+## 2026-08-17 - 恢复开发用户服务端 OpenCode 实例
+
+### Why
+
+- 默认开发用户仍绑定已退出的 `kakadeMacBook-Pro.local:4098` 历史进程，平台按稳定绑定失败关闭，无法自动降级或迁移到在线服务器。
+- `dev-192-168-8-100` 的 Java 与 manager 虽在线，但公共配置仓库误停留在只有 README 的 `main` 分支，缺少 `opencode/opencode.jsonc`，无法承载新的用户进程。
+
+### What
+
+- 通过现有公共配置管理 API 将服务器公共配置仓库初始化到包含 OpenCode 配置的 `master` 分支，状态恢复为 `READY`。
+- 确认历史 PID、4098 监听均不存在且没有 Run 快照引用后，先将两张进程表完整备份到本机 `.tmp`，再按运维文档在单事务内精确删除该用户唯一的废弃 binding/process。
+- 通过现有用户进程初始化 API 重新分配，生成进程 `ocp_3d436d6dc9de45a995b4e416efc666a9`，固定到 `dev-192-168-8-100:4096`。
+
+### How
+
+- 从浏览器实际使用的本地 Java 调用状态与实例列表 API，均返回 `READY/RUNNING`、`online=true`、`healthy=true`，路由目标为 `192.168.8.100:4096`。
+- 服务器 manager state、数据库与 `ps/ss` 一致记录 PID `936040` 和权威启动时间；`/global/health`、`/global/config` 均返回 HTTP 200，后续 manager health 持续为 `HEALTHY`。
+- 收尾前回顾全部 `.agents/session-log*.md` 近期记录；保留工作区中新出现的 PowerPoint 临时文件，不暂存、不删除、不覆盖。
+
+### Result
+
+- 服务端 OpenCode 已恢复可用，前端通过本地 Java 的跨节点路由可准确访问服务器实例，不会回退到旧 Mac 进程。
+- 本次仅执行开发环境公共配置、当前快照数据与运行进程修复；没有修改 HTTP API、事件、数据库结构/Flyway、代码、环境配置、generated SDK 或 OpenCode 源码。
