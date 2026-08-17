@@ -241,15 +241,155 @@ describe("RequirementImportView", () => {
     await applicationInput.setValue("应用乙（APP-B）");
     await applicationInput.trigger("change");
     await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", expect.any(String)));
-    const currentVersion = (versionInput.element as HTMLInputElement).value;
-    const nextVersion = wrapper.findAll('#requirement-import-versions option')
-      .map((option) => option.attributes("value"))
-      .find((version) => version !== currentVersion)!;
-    await versionInput.setValue(nextVersion);
+    const arbitraryVersion = "2024年1月";
+    await versionInput.setValue(arbitraryVersion);
     await versionInput.trigger("change");
-    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", nextVersion));
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", arbitraryVersion));
 
     resolveItems([]);
+    wrapper.unmount();
+  });
+
+  it("preserves arbitrary parent application and version values and keeps the version when the application changes", async () => {
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        defaultAppName: "APP-OUTSIDE-CATALOG",
+        defaultVersion: "2023年12月",
+        requestId: "req_arbitrary_version"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledWith(
+      "wrk_1",
+      "APP-OUTSIDE-CATALOG",
+      "2023年12月"
+    ));
+    const versionInput = wrapper.get('input[aria-label="TCDS 版本"]');
+    const applicationInput = wrapper.get('input[aria-label="TCDS 应用"]');
+    expect((versionInput.element as HTMLInputElement).value).toBe("2023年12月");
+    expect((applicationInput.element as HTMLInputElement).value).toBe("APP-OUTSIDE-CATALOG");
+
+    await applicationInput.trigger("focus");
+    expect(wrapper.findAll('#requirement-import-application-options [role="option"]')).toHaveLength(2);
+
+    await applicationInput.setValue("应用乙（APP-B）");
+    await applicationInput.trigger("change");
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", "2023年12月"));
+    expect((versionInput.element as HTMLInputElement).value).toBe("2023年12月");
+    wrapper.unmount();
+  });
+
+  it("shows every quick version and TCDS application suggestion even when inputs already have values", async () => {
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        defaultAppName: "APP-A",
+        requestId: "req_dropdowns"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledTimes(1));
+    const versionInput = wrapper.get('input[aria-label="TCDS 版本"]');
+    const applicationInput = wrapper.get('input[aria-label="TCDS 应用"]');
+
+    await versionInput.trigger("focus");
+    expect(wrapper.findAll('#requirement-import-version-options [role="option"]')).toHaveLength(7);
+
+    await applicationInput.trigger("focus");
+    expect(wrapper.findAll('#requirement-import-application-options [role="option"]')).toHaveLength(2);
+    const applicationB = wrapper.findAll('#requirement-import-application-options button')
+      .find((button) => button.text().includes("APP-B"))!;
+    await applicationB.trigger("click");
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith(
+      "wrk_1",
+      "APP-B",
+      (versionInput.element as HTMLInputElement).value
+    ));
+    wrapper.unmount();
+  });
+
+  it("accepts an arbitrary non-empty application value outside the TCDS suggestions", async () => {
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_arbitrary_application"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledTimes(1));
+    const applicationInput = wrapper.get('input[aria-label="TCDS 应用"]');
+    const currentVersion = (wrapper.get('input[aria-label="TCDS 版本"]').element as HTMLInputElement).value;
+    await applicationInput.setValue("CUSTOM-APP");
+    await applicationInput.trigger("change");
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith(
+      "wrk_1",
+      "CUSTOM-APP",
+      currentVersion
+    ));
+    expect(wrapper.text()).not.toContain("请选择当前用户有权访问");
+    wrapper.unmount();
+  });
+
+  it("keeps arbitrary application input available when TCDS returns no suggestions", async () => {
+    listApplications.mockResolvedValueOnce([]);
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_empty_application_catalog"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listApplications).toHaveBeenCalledTimes(1));
+    const applicationInput = wrapper.get('input[aria-label="TCDS 应用"]');
+    expect(applicationInput.attributes("disabled")).toBeUndefined();
+    await applicationInput.setValue("CUSTOM-APP-WITHOUT-SUGGESTIONS");
+    await applicationInput.trigger("change");
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledWith(
+      "wrk_1",
+      "CUSTOM-APP-WITHOUT-SUGGESTIONS",
+      expect.any(String)
+    ));
+    wrapper.unmount();
+  });
+
+  it("requires only a non-empty version before querying TCDS", async () => {
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_empty_version"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledTimes(1));
+    const versionInput = wrapper.get('input[aria-label="TCDS 版本"]');
+    await versionInput.setValue("   ");
+    await versionInput.trigger("change");
+
+    expect(listItems).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("请输入 TCDS 版本");
     wrapper.unmount();
   });
 

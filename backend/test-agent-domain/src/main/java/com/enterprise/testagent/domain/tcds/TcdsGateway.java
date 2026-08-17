@@ -12,7 +12,7 @@ public interface TcdsGateway {
     /** 按统一认证号查询用户资料；认证登录允许在 TCDS 不可用时按既有逻辑降级。 */
     Optional<UserProfile> findUser(String unifiedAuthId);
 
-    /** 查询当前用户在 TCDS 中有权访问的全部应用。 */
+    /** 查询 TCDS 按当前用户返回的应用目录；调用方可将其作为输入建议。 */
     List<Application> listApplications(String unifiedAuthId);
 
     /** 按应用和版本查询需求父条目及子条目。 */

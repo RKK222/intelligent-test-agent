@@ -42,9 +42,9 @@
 
 ## 2026-08-14 TCDS 导入交互与文档兼容复核
 
-- 版本、应用改为可输入过滤的选择器；应用目录加载完成后立即解除筛选禁用，条目请求未完成时仍可切换，旧请求继续由请求代次隔离。筛选区使用 `minmax(0, ...)` 网格，输入框、目录和父子行均限制为 iframe 宽度。
+- 版本、应用改为项目内可控的可输入选择器，避免原生 `datalist` 按当前值过滤后误隐藏其它选项；版本候选保留当前月份前后 3 个月作为快捷建议，但任意非空 TCDS 版本都可查询，切换应用不重置版本；TCDS 应用目录也只作搜索和快捷建议，任意非空应用名称或简称都可查询，父页面传入的目录外应用保持原值。应用目录加载完成后立即解除筛选禁用，条目请求未完成时仍可切换，旧请求继续由请求代次隔离。筛选区使用 `minmax(0, ...)` 网格，输入框、目录和父子行均限制为 iframe 宽度。
 - 文档转换兼容 TCDS 历史数据中 `.doc` 名称承载 DOCX 内容、`.ppt` 名称承载 PPTX 内容以及 Word 扩展名返回的文本内容；HTML/JSON 错误包络即使 HTTP 状态为 200 也拒绝写入。失败日志不记录文件名、地址、签名参数、token 或正文。
-- `RequirementDocumentConverterTest` 与 `RequirementImportApplicationServiceTest` 回归覆盖 DOCX 字节使用 `.doc` 元数据，以及 `.doc/.docx` 名称实际返回 UTF-8/GB18030 纯文本、`text/plain`/`application/octet-stream`/`application/msword` 媒体类型的兼容路径；服务层完成可信重查、转换与工作区写入，纯文本回退不生成附件。`requirement-import-view.test.ts` 5 项通过。真实 TCDS 文档下载仍需在有效企业登录会话中复测。
+- `RequirementDocumentConverterTest` 与 `RequirementImportApplicationServiceTest` 回归覆盖 DOCX 字节使用 `.doc` 元数据，以及 `.doc/.docx` 名称实际返回 UTF-8/GB18030 纯文本、`text/plain`/`application/octet-stream`/`application/msword` 媒体类型的兼容路径；服务层完成可信重查、转换与工作区写入，纯文本回退不生成附件。`requirement-import-view.test.ts` 12 项通过，包含目录外父页面应用/版本、手工输入、空应用建议和全量建议展开。真实 TCDS 文档下载仍需在有效企业登录会话中复测。
 
 ## 2026-08-14 Word 轻量转换回退复核
 
@@ -64,6 +64,6 @@
 ## 2026-08-14 TCDS 导入页面性能复核
 
 - `/workspace-requirement-import/` 改为 Vite 独立 HTML 入口，主路由只兼容跳转，不再让 iframe 重复启动工作台。生产入口不再预加载 Element Plus、Monaco 或 `AgentWorkbench`，只加载 Vue、平台接口客户端和导入页资源。
-- 版本与应用使用原生可输入候选框，避免为三个筛选控件引入 Element Plus 全量 JS/CSS；筛选区继续使用受宽度约束的网格。生成蒙版保留旋转动画和重复操作阻断，但移除背景模糊，避免长文档生成期间额外占用 GPU。
+- 版本与应用使用页面内轻量可输入下拉框，避免原生候选过滤问题，也不为三个筛选控件引入 Element Plus 全量 JS/CSS；筛选区继续使用受宽度约束的网格。生成蒙版保留旋转动画和重复操作阻断，但移除背景模糊，避免长文档生成期间额外占用 GPU。
 - `workspace.requirement-import-items` 批量检查父子目录状态：一次取得工作区元数据，各相对路径仍逐一经过公共文件服务的越界与符号链接校验，避免大量条目重复查询工作区。
 - 3000 端口真实登录页面热启动点击到弹窗出现约 0.4 秒，iframe 首屏可立即交互；本机 TCDS 请求仍约 1.7 秒后返回服务不可用，该网络等待不阻塞弹窗渲染，真实授权条目列表仍需企业网络可用时复测。

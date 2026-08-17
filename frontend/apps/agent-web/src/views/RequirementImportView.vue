@@ -31,6 +31,9 @@ const loadingItems = ref(false);
 const importing = ref(false);
 const errorMessage = ref("");
 const result = ref<RequirementImportResult | null>(null);
+const versionMenuOpen = ref(false);
+const applicationMenuOpen = ref(false);
+const applicationSearchActive = ref(false);
 let itemRequestSequence = 0;
 
 function applicationLabel(application: RequirementImportApplication): string {
@@ -51,6 +54,14 @@ const versions = computed(() => {
     const date = new Date(now.getFullYear(), now.getMonth() + index - 3, 1);
     return `${date.getFullYear()}年${date.getMonth() + 1}月`;
   });
+});
+
+const filteredApplications = computed(() => {
+  const query = selectedAppInput.value.trim().toLocaleLowerCase();
+  // 聚焦或主动展开时始终展示全量建议；仅在用户开始键入后按新输入过滤。
+  if (!applicationSearchActive.value || !query || resolveApplication(selectedAppInput.value)) return applications.value;
+  return applications.value.filter((application) =>
+    `${application.appName} ${application.appShortName}`.toLocaleLowerCase().includes(query));
 });
 
 const filteredItems = computed(() => {
@@ -97,51 +108,101 @@ function toggleChild(number: string, event: Event) {
 async function loadApplications() {
   loadingApplications.value = true;
   errorMessage.value = "";
+  const expected = context.value?.defaultAppName?.trim();
+  selectedApp.value = expected ?? "";
+  selectedAppInput.value = expected ?? "";
+  // 前后 3 个月仅作为输入建议；TCDS 的历史或未来版本仍允许按原值查询。
+  selectedVersion.value = context.value?.defaultVersion?.trim() || versions.value[3];
+  let applicationLoadError = "";
   try {
     applications.value = await api.listRequirementImportApplications();
-    const expected = context.value?.defaultAppName?.trim();
     const application = applications.value.find((candidate) =>
-      candidate.appName === expected || candidate.appShortName === expected)
-      ?? applications.value[0];
-    selectedApp.value = application?.appShortName ?? "";
-    selectedAppInput.value = application ? applicationLabel(application) : "";
-    selectedVersion.value = versions.value.includes(context.value?.defaultVersion ?? "")
-      ? context.value!.defaultVersion!
-      : versions.value[3];
+      candidate.appName === expected || candidate.appShortName === expected);
+    const fallback = applications.value[0];
+    // 父页面传入的应用不要求命中目录，保持旧页面原样查询 TCDS 的兼容行为。
+    selectedApp.value = application?.appShortName ?? expected ?? fallback?.appShortName ?? "";
+    selectedAppInput.value = application
+      ? applicationLabel(application)
+      : expected ?? (fallback ? applicationLabel(fallback) : "");
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "TCDS 应用加载失败";
-    return;
+    // 应用目录只是建议，加载失败时仍允许用父页面值或手工输入继续查询。
+    applicationLoadError = error instanceof Error ? error.message : "TCDS 应用建议加载失败，可直接输入";
   } finally {
     loadingApplications.value = false;
   }
   // 应用目录返回后立即释放筛选控件；条目请求较慢时用户仍可切换，迟到请求由 sequence 丢弃。
   await loadItems();
+  if (applicationLoadError && !errorMessage.value) errorMessage.value = applicationLoadError;
 }
 
 async function applyApplicationInput() {
-  const application = resolveApplication(selectedAppInput.value);
-  if (!application) {
+  applicationMenuOpen.value = false;
+  applicationSearchActive.value = false;
+  const rawApplication = selectedAppInput.value.trim();
+  if (!rawApplication) {
     selectedApp.value = "";
     items.value = [];
     selected.value = new Set();
     result.value = null;
-    errorMessage.value = "请选择当前用户有权访问的 TCDS 应用";
+    errorMessage.value = "请输入 TCDS 应用名称或简称";
     return;
   }
-  selectedApp.value = application.appShortName;
-  selectedAppInput.value = applicationLabel(application);
+  const application = resolveApplication(selectedAppInput.value);
+  selectedApp.value = application?.appShortName ?? rawApplication;
+  selectedAppInput.value = application ? applicationLabel(application) : rawApplication;
   await loadItems();
 }
 
 async function applyVersionInput() {
-  if (!versions.value.includes(selectedVersion.value)) {
+  versionMenuOpen.value = false;
+  selectedVersion.value = selectedVersion.value.trim();
+  if (!selectedVersion.value) {
     items.value = [];
     selected.value = new Set();
     result.value = null;
-    errorMessage.value = "请选择当前月份前后 3 个月内的版本";
+    errorMessage.value = "请输入 TCDS 版本";
     return;
   }
   await loadItems();
+}
+
+async function selectApplication(application: RequirementImportApplication) {
+  selectedApp.value = application.appShortName;
+  selectedAppInput.value = applicationLabel(application);
+  applicationMenuOpen.value = false;
+  applicationSearchActive.value = false;
+  await loadItems();
+}
+
+async function selectVersion(version: string) {
+  selectedVersion.value = version;
+  versionMenuOpen.value = false;
+  await loadItems();
+}
+
+function openApplicationMenu() {
+  applicationSearchActive.value = false;
+  applicationMenuOpen.value = true;
+}
+
+function filterApplicationSuggestions() {
+  applicationSearchActive.value = true;
+  applicationMenuOpen.value = true;
+}
+
+function toggleApplicationMenu() {
+  if (applicationMenuOpen.value) {
+    applicationMenuOpen.value = false;
+    return;
+  }
+  openApplicationMenu();
+}
+
+function closeMenuAfterFocusLeaves(menu: "version" | "application", event: FocusEvent) {
+  const field = event.currentTarget as HTMLElement;
+  if (event.relatedTarget instanceof Node && field.contains(event.relatedTarget)) return;
+  if (menu === "version") versionMenuOpen.value = false;
+  else applicationMenuOpen.value = false;
 }
 
 async function loadItems() {
@@ -232,43 +293,94 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveContext));
     </Transition>
 
     <section class="filters" aria-label="需求筛选">
-      <label class="filter-field">
+      <div class="filter-field" @focusout="closeMenuAfterFocusLeaves('version', $event)">
         <span class="filter-label">版本：</span>
-        <input
-          v-model="selectedVersion"
-          class="filter-control filter-input"
-          type="text"
-          list="requirement-import-versions"
-          aria-label="TCDS 版本"
-          autocomplete="off"
-          :disabled="importing"
-          @change="applyVersionInput"
-        />
-        <datalist id="requirement-import-versions">
-          <option v-for="version in versions" :key="version" :value="version" />
-        </datalist>
-      </label>
-      <label class="filter-field">
-        <span class="filter-label">应用：</span>
-        <input
-          v-model="selectedAppInput"
-          class="filter-control filter-input"
-          type="text"
-          list="requirement-import-applications"
-          aria-label="TCDS 应用"
-          placeholder="请选择应用"
-          autocomplete="off"
-          :disabled="importing || applications.length === 0"
-          @change="applyApplicationInput"
-        />
-        <datalist id="requirement-import-applications">
-          <option
-            v-for="application in applications"
-            :key="application.appShortName"
-            :value="applicationLabel(application)"
+        <div class="filter-control combobox">
+          <input
+            v-model="selectedVersion"
+            class="filter-input"
+            type="text"
+            role="combobox"
+            aria-label="TCDS 版本"
+            aria-controls="requirement-import-version-options"
+            :aria-expanded="versionMenuOpen"
+            placeholder="可输入任意 TCDS 版本"
+            autocomplete="off"
+            :disabled="importing"
+            @focus="versionMenuOpen = true"
+            @input="versionMenuOpen = true"
+            @change="applyVersionInput"
+            @keydown.enter.prevent="applyVersionInput"
+            @keydown.esc="versionMenuOpen = false"
           />
-        </datalist>
-      </label>
+          <button
+            class="combobox-toggle"
+            type="button"
+            aria-label="展开版本快捷选项"
+            :disabled="importing"
+            @click="versionMenuOpen = !versionMenuOpen"
+          >⌄</button>
+          <ul
+            v-if="versionMenuOpen"
+            id="requirement-import-version-options"
+            class="filter-dropdown"
+            role="listbox"
+            aria-label="版本快捷选项"
+          >
+            <li v-for="version in versions" :key="version" role="option" :aria-selected="version === selectedVersion">
+              <button type="button" @click="selectVersion(version)">{{ version }}</button>
+            </li>
+          </ul>
+        </div>
+      </div>
+      <div class="filter-field" @focusout="closeMenuAfterFocusLeaves('application', $event)">
+        <span class="filter-label">应用：</span>
+        <div class="filter-control combobox">
+          <input
+            v-model="selectedAppInput"
+            class="filter-input"
+            type="text"
+            role="combobox"
+            aria-label="TCDS 应用"
+            aria-controls="requirement-import-application-options"
+            :aria-expanded="applicationMenuOpen"
+            placeholder="可输入或选择 TCDS 应用"
+            autocomplete="off"
+            :disabled="importing"
+            @focus="openApplicationMenu"
+            @input="filterApplicationSuggestions"
+            @change="applyApplicationInput"
+            @keydown.enter.prevent="applyApplicationInput"
+            @keydown.esc="applicationMenuOpen = false"
+          />
+          <button
+            class="combobox-toggle"
+            type="button"
+            aria-label="展开 TCDS 应用建议"
+            :disabled="importing"
+            @click="toggleApplicationMenu"
+          >⌄</button>
+          <ul
+            v-if="applicationMenuOpen"
+            id="requirement-import-application-options"
+            class="filter-dropdown application-options"
+            role="listbox"
+            aria-label="TCDS 应用建议"
+          >
+            <li
+              v-for="application in filteredApplications"
+              :key="application.appShortName"
+              role="option"
+              :aria-selected="application.appShortName === selectedApp"
+            >
+              <button type="button" @click="selectApplication(application)">
+                {{ applicationLabel(application) }}
+              </button>
+            </li>
+            <li v-if="filteredApplications.length === 0" class="dropdown-empty">没有匹配建议，可直接输入</li>
+          </ul>
+        </div>
+      </div>
       <label class="filter-field search">
         <span class="filter-label">条目信息：</span>
         <input v-model="keyword" class="filter-control search-control" type="search" placeholder="按名字/ID 搜索" />
@@ -465,6 +577,11 @@ footer {
   flex: 1;
 }
 
+.combobox {
+  position: relative;
+  display: flex;
+}
+
 .filter-input,
 .search-control {
   box-sizing: border-box;
@@ -479,6 +596,73 @@ footer {
   color: #606266;
   font: inherit;
   transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.combobox .filter-input {
+  padding-right: 30px;
+}
+
+.combobox-toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 26px;
+}
+
+.combobox-toggle:disabled {
+  cursor: not-allowed;
+}
+
+.filter-dropdown {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: min(240px, calc(100vh - 96px));
+  margin: 0;
+  padding: 4px 0;
+  overflow: auto;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgb(31 45 61 / 14%);
+  list-style: none;
+}
+
+.filter-dropdown button {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #606266;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-dropdown button:hover,
+.filter-dropdown [aria-selected="true"] button {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.dropdown-empty {
+  padding: 6px 10px;
+  color: #909399;
 }
 
 .search-control {
