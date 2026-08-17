@@ -202,6 +202,9 @@ function renderWithApi(
         SupportAccessPanel: {
           props: ["currentUser", "activationSequence"],
           template: `<div data-testid="support-access-panel" :data-activation-sequence="activationSequence">只读排查授权面板</div>`
+        },
+        SettingsUserManagementPanel: {
+          template: `<div data-testid="unified-user-management-panel">账号、权限与用户能力灰度</div>`
         }
       },
       provide: { api: backendApi }
@@ -286,15 +289,14 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
-  it("exposes local client rollout management to super administrators", async () => {
+  it("exposes one user-management page for account, permission and rollout controls", async () => {
     const backendApi = api();
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
-    await fireEvent.click(view.getByText("本地客户端灰度", { selector: ".ta-system-menu-text" }));
+    await fireEvent.click(view.getByText("用户管理", { selector: ".ta-system-menu-text" }));
 
-    expect(await view.findByTestId("local-client-rollout-panel")).toBeTruthy();
-    expect(await view.findByText("当前没有灰度用户，下载入口对所有用户隐藏")).toBeTruthy();
-    expect(backendApi.listLocalClientRolloutUsers).toHaveBeenCalledWith(1, 200);
+    expect(await view.findByTestId("unified-user-management-panel")).toBeTruthy();
+    expect(view.queryByText("本地客户端灰度", { selector: ".ta-system-menu-text" })).toBeNull();
     view.queryClient.clear();
   });
 
@@ -431,6 +433,7 @@ describe("scheduler management panel", () => {
     expect(view.queryByText("定时任务管理", { selector: ".ta-system-menu-text" })).toBeNull();
     expect(view.queryByText("运行管理", { selector: ".ta-system-menu-text" })).toBeNull();
     expect(view.queryByText("本地客户端灰度", { selector: ".ta-system-menu-text" })).toBeNull();
+    expect(view.queryByText("用户管理", { selector: ".ta-system-menu-text" })).toBeNull();
     expect(view.queryByText("TestAgent公共配置管理")).toBeNull();
     expect(backendApi.listApplicationGitRefreshScopes).toHaveBeenCalledTimes(1);
     view.queryClient.clear();

@@ -3033,7 +3033,7 @@ API Key 管理基础路径为 `/api/internal/platform/system-management/api-keys
 
 ### system-management 用户管理 API
 
-用户管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。当前创建用户能力用于研发测试便捷造号，创建时使用默认密码 `123456`，前端不传密码字段。当前不包含普通用户发起审批通知流，角色调整由超级管理员直接操作。
+用户管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。当前创建用户能力用于研发测试便捷造号，创建时使用默认密码 `123456`，前端不传密码字段。当前不包含普通用户发起审批通知流，角色调整由超级管理员直接操作。前端在独立“系统管理 → 用户管理”页组合本节账号 API、记忆白名单 API 与本地客户端 rollout API，在同一用户行维护两类灰度；记忆模型和抽取策略仍是平台全局配置，不按用户重复保存。
 
 Base URL：`/api/internal/platform/system-management`
 
@@ -4244,7 +4244,7 @@ Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追
   配置。
 
 旧调用不传 workspaceId 时仍选择服务端 OpenCode；本地实例离线或换代返回稳定冲突/不可用错误，不回退。
-客户端下载入口默认对所有用户隐藏，只能由超级管理员在系统管理中按平台 `userId` 加入灰度名单。该名单只
+客户端下载入口默认对所有用户隐藏，只能由超级管理员在“系统管理 → 用户管理”中按平台 `userId` 打开客户端灰度。该名单只
 控制网页下载入口，不是客户端 WSS 鉴权、制品下载鉴权或 client key 生命周期的一部分；即使前端被篡改，后端
 连接认证仍必须校验有效 client key。
 

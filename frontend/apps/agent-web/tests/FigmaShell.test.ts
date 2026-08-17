@@ -1341,11 +1341,21 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
   });
 
-  it("replaces the installer entry with registered local OpenCode health", async () => {
+  it("keeps the installer entry visible when a rollout user already has registered local OpenCode", async () => {
     const wrapper = mountShell({
       props: {
         currentUserName: "developer",
         opencodeEndpoints: [{
+          runtimeKind: "SERVER_PROCESS",
+          endpointId: "server-opencode",
+          displayName: "服务端 OpenCode",
+          online: true,
+          processStatus: "RUNNING",
+          connectionGeneration: 0,
+          reportedAddresses: [],
+          healthy: true,
+          capabilities: { localClientDownload: true }
+        }, {
           runtimeKind: "LOCAL_CLIENT",
           endpointId: "local-client-1",
           displayName: "本机 OpenCode",
@@ -1365,15 +1375,14 @@ describe("FigmaShell", () => {
     });
 
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
-    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("本地 OpenCode 健康");
 
+    const currentEndpoints = wrapper.props("opencodeEndpoints") as OpencodeEndpoint[];
     await wrapper.setProps({
-      opencodeEndpoints: [{
-        ...(wrapper.props("opencodeEndpoints") as OpencodeEndpoint[])[0],
-        online: false,
-        healthy: false
-      }]
+      opencodeEndpoints: currentEndpoints.map((endpoint) => endpoint.runtimeKind === "LOCAL_CLIENT"
+        ? { ...endpoint, online: false, healthy: false }
+        : endpoint)
     });
     expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("离线");
   });

@@ -43,12 +43,94 @@ const selectedUsers = ref<UserManagementUser[]>([]);
 const deleting = ref(false);
 const syncingTcds = ref(false);
 const updatingUsername = ref(false);
+const rolloutLoading = ref(false);
+const rolloutError = ref("");
+const memoryRolloutUserIds = ref<Set<string>>(new Set());
+const localClientRolloutUserIds = ref<Set<string>>(new Set());
+const rolloutUpdatingKeys = ref<Set<string>>(new Set());
 
 const loading = ref(false);
 const errorMessage = ref("");
 const operationBusy = computed(
   () => loading.value || savingRoles.value || deleting.value || syncingTcds.value || updatingUsername.value
 );
+
+/** 独立控制台页面统一刷新账号、角色和两类用户灰度，避免局部刷新后状态不一致。 */
+async function refreshUserGovernance() {
+  await Promise.all([loadUsers(), loadRoles(), loadRolloutAssignments()]);
+}
+
+/** 分页读取完整灰度名单，避免用户数量超过单页后把已开通用户误显示为关闭。 */
+async function collectRolloutUserIds(
+  loader: (page: number, size: number) => Promise<{ items: Array<{ userId: string }>; total: number }>
+) {
+  const pageSize = 100;
+  const ids = new Set<string>();
+  let currentPage = 1;
+  let pageCount = 1;
+  do {
+    const result = await loader(currentPage, pageSize);
+    result.items.forEach((item) => ids.add(item.userId));
+    pageCount = Math.max(1, Math.ceil(result.total / pageSize));
+    currentPage += 1;
+  } while (currentPage <= pageCount);
+  return ids;
+}
+
+async function loadRolloutAssignments() {
+  rolloutLoading.value = true;
+  rolloutError.value = "";
+  try {
+    const [memoryIds, localClientIds] = await Promise.all([
+      collectRolloutUserIds((nextPage, nextSize) => api.listQaMemoryWhitelist(nextPage, nextSize)),
+      collectRolloutUserIds((nextPage, nextSize) => api.listLocalClientRolloutUsers(nextPage, nextSize))
+    ]);
+    memoryRolloutUserIds.value = memoryIds;
+    localClientRolloutUserIds.value = localClientIds;
+  } catch (error) {
+    rolloutError.value = error instanceof Error ? error.message : "用户能力灰度状态加载失败";
+  } finally {
+    rolloutLoading.value = false;
+  }
+}
+
+function rolloutUpdating(userId: string, capability: "memory" | "localClient") {
+  return rolloutUpdatingKeys.value.has(`${capability}:${userId}`);
+}
+
+async function updateRollout(
+  row: UserManagementUser,
+  capability: "memory" | "localClient",
+  enabled: boolean
+) {
+  const key = `${capability}:${row.userId}`;
+  if (rolloutUpdatingKeys.value.has(key)) return;
+  rolloutUpdatingKeys.value = new Set(rolloutUpdatingKeys.value).add(key);
+  rolloutError.value = "";
+  try {
+    if (capability === "memory") {
+      if (enabled) await api.enableQaMemoryUser(row.userId);
+      else await api.disableQaMemoryUser(row.userId);
+      const next = new Set(memoryRolloutUserIds.value);
+      enabled ? next.add(row.userId) : next.delete(row.userId);
+      memoryRolloutUserIds.value = next;
+      ElMessage.success(enabled ? "已为用户开放记忆能力" : "已关闭用户的记忆能力");
+    } else {
+      if (enabled) await api.enableLocalClientRolloutUser(row.userId);
+      else await api.disableLocalClientRolloutUser(row.userId);
+      const next = new Set(localClientRolloutUserIds.value);
+      enabled ? next.add(row.userId) : next.delete(row.userId);
+      localClientRolloutUserIds.value = next;
+      ElMessage.success(enabled ? "已为用户开放本地客户端下载" : "已关闭用户的本地客户端下载");
+    }
+  } catch (error) {
+    rolloutError.value = error instanceof Error ? error.message : "用户能力灰度更新失败";
+  } finally {
+    const next = new Set(rolloutUpdatingKeys.value);
+    next.delete(key);
+    rolloutUpdatingKeys.value = next;
+  }
+}
 
 // 新增用户表单
 const form = ref<CreateUserPayload>({
@@ -353,7 +435,7 @@ async function reloadAfterDelete(deletedCount: number) {
   const remaining = Math.max(0, total.value - deletedCount);
   const lastPage = Math.max(1, Math.ceil(remaining / size.value));
   page.value = Math.min(page.value, lastPage);
-  await loadUsers();
+  await Promise.all([loadUsers(), loadRolloutAssignments()]);
 }
 
 async function editUsername(row: UserManagementUser) {
@@ -490,17 +572,25 @@ async function syncSelectedUsersFromTcds() {
 
 onMounted(() => {
   if (hasPermission.value) {
-    loadUsers();
-    loadRoles();
+    void refreshUserGovernance();
   }
 });
 </script>
 
 <template>
-  <div class="ta-user-mgmt">
+  <div class="ta-user-mgmt" data-testid="unified-user-management-panel">
     <el-alert v-if="!hasPermission" type="error" :closable="false" show-icon title="无权限" description="仅超级管理员可使用用户管理功能。" />
     <template v-else>
+      <header class="ta-user-mgmt__header">
+        <div>
+          <span class="ta-user-mgmt__eyebrow">USER GOVERNANCE</span>
+          <h2>用户管理</h2>
+          <p>统一维护平台账号、用户名、角色、组织信息及用户级能力灰度。</p>
+        </div>
+        <el-button :loading="operationBusy || rolloutLoading" @click="refreshUserGovernance">刷新</el-button>
+      </header>
       <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" />
+      <el-alert v-if="rolloutError" :title="rolloutError" type="error" :closable="false" show-icon class="ta-error" />
 
       <!-- 用户列表 -->
       <section class="ta-section ta-section-primary">
@@ -509,7 +599,7 @@ onMounted(() => {
           :closable="false"
           show-icon
           title="存量用户处理说明"
-          description="可筛选“未分配角色”后选择当前页或全部检索结果；角色修改一次批量提交，保存后会撤销相关用户的旧 Token，用户需重新登录。手工修改用户名后，后续 TCDS 同步会覆盖该值。"
+          description="账号、用户名、角色和用户级能力灰度统一在此维护。记忆模型与抽取策略是全局配置，只需在“记忆能力”页保存一次；这里仅决定哪些用户可以使用记忆或下载本地客户端。"
         />
         <div class="ta-list-header">
           <h4 class="ta-section-title">用户列表</h4>
@@ -645,6 +735,28 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column prop="status" label="状态" width="90" />
+          <el-table-column label="记忆灰度" width="118">
+            <template #default="{ row }">
+              <el-switch
+                :model-value="memoryRolloutUserIds.has(row.userId)"
+                :loading="rolloutLoading || rolloutUpdating(row.userId, 'memory')"
+                :disabled="rolloutLoading || rolloutUpdating(row.userId, 'memory') || (row.status !== 'ACTIVE' && !memoryRolloutUserIds.has(row.userId))"
+                :aria-label="`切换 ${row.username} 的记忆灰度`"
+                @change="(enabled: string | number | boolean) => updateRollout(row, 'memory', enabled === true)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="客户端灰度" width="126">
+            <template #default="{ row }">
+              <el-switch
+                :model-value="localClientRolloutUserIds.has(row.userId)"
+                :loading="rolloutLoading || rolloutUpdating(row.userId, 'localClient')"
+                :disabled="rolloutLoading || rolloutUpdating(row.userId, 'localClient') || (row.status !== 'ACTIVE' && !localClientRolloutUserIds.has(row.userId))"
+                :aria-label="`切换 ${row.username} 的客户端灰度`"
+                @change="(enabled: string | number | boolean) => updateRollout(row, 'localClient', enabled === true)"
+              />
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="250" fixed="right">
             <template #default="{ row }">
               <div class="ta-row-actions">
@@ -765,6 +877,34 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 100%;
+  padding: 24px;
+  overflow: auto;
+  box-sizing: border-box;
+  background: #f7f8fa;
+}
+.ta-user-mgmt__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.ta-user-mgmt__header h2 {
+  margin: 3px 0 5px;
+  color: #111827;
+  font-size: 22px;
+  line-height: 1.35;
+}
+.ta-user-mgmt__header p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+.ta-user-mgmt__eyebrow {
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
 }
 .ta-section {
   display: flex;

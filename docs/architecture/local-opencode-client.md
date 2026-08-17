@@ -34,7 +34,7 @@ flowchart LR
 
 ## 下载入口灰度
 
-客户端下载入口默认对所有用户隐藏。`SUPER_ADMIN` 在系统管理中按平台 userId 维护
+客户端下载入口默认对所有用户隐藏。`SUPER_ADMIN` 在“系统管理 → 用户管理”中按平台 userId 维护
 `local_client_rollout_users`；只允许加入存在且可登录的用户，移出时保留操作人和时间。普通用户的
 `opencode-endpoints/me` 响应只在服务端实例 capability 中追加 `localClientDownload` 布尔值，前端仅在值
 严格为 true 时展示下载入口。旧 Java 缺字段、数据库查询失败或名单为空都失败关闭为隐藏。

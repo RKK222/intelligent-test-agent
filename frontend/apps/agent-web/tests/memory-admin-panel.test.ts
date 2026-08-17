@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/vue";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import MemoryAdminPanel from "../src/components/system/MemoryAdminPanel.vue";
@@ -139,7 +139,7 @@ describe("MemoryAdminPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("shows readiness, dual profiles, projection backlog and whitelist", async () => {
+  it("shows global readiness and model strategy without per-user rollout controls", async () => {
     const backendApi = api();
     const view = render(MemoryAdminPanel, { global: { provide: { api: backendApi } } });
 
@@ -150,7 +150,9 @@ describe("MemoryAdminPanel", () => {
     expect(view.getByTestId("memory-health-chat").textContent).toContain("infer=true");
     expect(view.getByTestId("memory-health-queue").textContent).toContain("2 待处理");
     expect(view.getByTestId("memory-health-projection").textContent).toContain("3 待投影");
-    expect(view.getByText("usr_tester")).toBeTruthy();
+    expect(view.queryByText("usr_tester")).toBeNull();
+    expect(view.queryByText("灰度用户")).toBeNull();
+    expect(backendApi.listQaMemoryWhitelist).not.toHaveBeenCalled();
     expect(view.queryByText("fixed-revision")).toBeNull();
 
     await fireEvent.click(view.getByRole("button", { name: "查看技术信息" }));
@@ -189,24 +191,7 @@ describe("MemoryAdminPanel", () => {
     expect(view.container.querySelector(".memory-model-select .el-select__clear")).toBeNull();
   });
 
-  it("adds a whitelist entry by selecting a searchable platform user", async () => {
-    const backendApi = api();
-    const view = render(MemoryAdminPanel, { global: { provide: { api: backendApi } } });
-    await view.findByTestId("memory-health-mem0");
-
-    await fireEvent.click(view.getByTestId("add-memory-whitelist-user"));
-    const dialog = await view.findByRole("dialog", { name: "添加灰度用户" });
-    const userSelect = within(dialog).getByRole("combobox", { name: "选择灰度用户" });
-    await fireEvent.update(userSelect, "88");
-    await waitFor(() => expect(backendApi.listUsers).toHaveBeenCalledWith({ keyword: "88", page: 1, size: 30 }));
-    const userOption = await waitFor(() => view.getByRole("option", { name: /测试用户.*AUTH88.*usr_88/ }));
-    await fireEvent.click(userOption);
-    await fireEvent.click(within(dialog).getByRole("button", { name: "确认添加" }));
-
-    await waitFor(() => expect(backendApi.enableQaMemoryUser).toHaveBeenCalledWith("usr_88"));
-  });
-
-  it("shows a stable management error and reloads health, settings and whitelist on retry", async () => {
+  it("shows a stable management error and reloads global health and settings on retry", async () => {
     const backendApi = api();
     vi.mocked(backendApi.getQaMemoryAdminHealth)
       .mockRejectedValueOnce(new Error("memory vip timeout"))
@@ -233,6 +218,6 @@ describe("MemoryAdminPanel", () => {
     expect((await view.findByTestId("memory-health-mem0")).textContent).toContain("就绪");
     expect(backendApi.getQaMemoryAdminHealth).toHaveBeenCalledTimes(2);
     expect(backendApi.getQaMemorySettings).toHaveBeenCalledTimes(2);
-    expect(backendApi.listQaMemoryWhitelist).toHaveBeenCalledTimes(2);
+    expect(backendApi.listQaMemoryWhitelist).not.toHaveBeenCalled();
   });
 });

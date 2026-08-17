@@ -2738,7 +2738,7 @@ function submitJoinApp() {
               <span class="figma-user-menu-service-text">{{ localClientHealthDisplay.text }}</span>
             </div>
             <a
-              v-else-if="!fixedWorkspace && localClientDownloadAllowed"
+              v-if="!fixedWorkspace && localClientDownloadAllowed"
               class="figma-user-menu-item"
               role="menuitem"
               data-testid="download-local-client"

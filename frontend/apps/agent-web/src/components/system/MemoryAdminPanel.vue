@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage } from "element-plus";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   InternalModelProviderModel,
   MemoryAdminHealth,
-  MemorySettingsView,
-  MemoryWhitelistView,
-  UserManagementUser
+  MemorySettingsView
 } from "@test-agent/shared-types";
 import {
   BrainCircuit,
@@ -18,11 +16,8 @@ import {
   Database,
   LoaderCircle,
   MessageSquareText,
-  Plus,
   RefreshCw,
-  Save,
-  Trash2,
-  UsersRound
+  Save
 } from "lucide-vue-next";
 
 const api = inject<BackendApiClient>("api")!;
@@ -33,7 +28,6 @@ const saving = ref(false);
 const error = ref("");
 const health = ref<MemoryAdminHealth | null>(null);
 const settings = ref<MemorySettingsView | null>(null);
-const whitelist = ref<MemoryWhitelistView[]>([]);
 const chatModelId = ref<string | null>("");
 const enterpriseEmbeddingModelId = ref<string | null>("");
 const chatModels = ref<ChatModelOption[]>([]);
@@ -41,14 +35,7 @@ const embeddingModels = ref<ChatModelOption[]>([]);
 const chatModelsLoading = ref(false);
 const chatModelsError = ref("");
 const technicalDetailsOpen = ref(false);
-const whitelistDialogOpen = ref(false);
-const whitelistUsers = ref<UserManagementUser[]>([]);
-const whitelistUsersLoading = ref(false);
-const whitelistUserError = ref("");
-const selectedWhitelistUserId = ref("");
-const addingWhitelistUser = ref(false);
 let chatModelRequest = 0;
-let whitelistUserSearchRequest = 0;
 
 type ChatModelOption = InternalModelProviderModel & {
   providerName: string;
@@ -70,14 +57,12 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [healthView, settingsView, whitelistPage] = await Promise.all([
+    const [healthView, settingsView] = await Promise.all([
       api.getQaMemoryAdminHealth(),
-      api.getQaMemorySettings(),
-      api.listQaMemoryWhitelist(1, 100)
+      api.getQaMemorySettings()
     ]);
     health.value = healthView;
     settings.value = settingsView;
-    whitelist.value = whitelistPage.items;
     chatModelId.value = settingsView.primaryChatModelId ?? "";
     enterpriseEmbeddingModelId.value = settingsView.primaryEmbeddingModelId ?? "";
   } catch {
@@ -167,75 +152,6 @@ async function saveSettings() {
   }
 }
 
-function openWhitelistDialog() {
-  selectedWhitelistUserId.value = "";
-  whitelistUserError.value = "";
-  whitelistDialogOpen.value = true;
-  void loadWhitelistUsers();
-}
-
-/** 搜索平台用户时只保留可登录且尚未加入白名单的用户，并丢弃过期请求结果。 */
-async function loadWhitelistUsers(keyword = "") {
-  const requestId = ++whitelistUserSearchRequest;
-  whitelistUsersLoading.value = true;
-  whitelistUserError.value = "";
-  try {
-    const page = await api.listUsers({ keyword: keyword.trim(), page: 1, size: 30 });
-    if (requestId !== whitelistUserSearchRequest) return;
-    const enabledUserIds = new Set(whitelist.value.map((user) => user.userId));
-    whitelistUsers.value = page.items.filter((user) =>
-      user.status === "ACTIVE" && !enabledUserIds.has(user.userId));
-  } catch (caught) {
-    if (requestId === whitelistUserSearchRequest) {
-      whitelistUsers.value = [];
-      whitelistUserError.value = caught instanceof Error ? caught.message : "用户目录加载失败";
-    }
-  } finally {
-    if (requestId === whitelistUserSearchRequest) whitelistUsersLoading.value = false;
-  }
-}
-
-function whitelistUserOptionLabel(user: UserManagementUser) {
-  return `${user.username} · ${user.unifiedAuthId || "无统一认证号"} · ${user.userId}`;
-}
-
-async function addWhitelistUser() {
-  if (!selectedWhitelistUserId.value) return;
-  addingWhitelistUser.value = true;
-  try {
-    await api.enableQaMemoryUser(selectedWhitelistUserId.value);
-    ElMessage.success("用户已加入记忆灰度名单");
-    whitelistDialogOpen.value = false;
-    await load();
-  } catch (caught) {
-    whitelistUserError.value = caught instanceof Error ? caught.message : "添加失败";
-  } finally {
-    addingWhitelistUser.value = false;
-  }
-}
-
-async function removeWhitelistUser(user: MemoryWhitelistView) {
-  try {
-    await ElMessageBox.confirm(`确定停止为 ${user.userId} 提供记忆能力吗？已有记忆不会被删除。`, "移出灰度名单", {
-      type: "warning",
-      confirmButtonText: "移出",
-      cancelButtonText: "取消"
-    });
-  } catch {
-    return;
-  }
-  try {
-    await api.disableQaMemoryUser(user.userId);
-    ElMessage.success("用户已移出记忆灰度名单");
-    await load();
-  } catch (caught) {
-    ElMessage.error(caught instanceof Error ? caught.message : "移除失败");
-  }
-}
-
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
-}
 </script>
 
 <template>
@@ -244,7 +160,7 @@ function formatTime(value: string) {
       <div>
         <div class="memory-admin__eyebrow"><BrainCircuit :size="15" /> MEMORY CONTROL</div>
         <h2 id="memory-admin-title">记忆能力</h2>
-        <p>检查 Mem0 多节点、双 Embedding profile、原生抽取 CHAT 模型和投影积压，并按用户灰度开放。</p>
+        <p>检查 Mem0、Embedding、原生抽取模型和投影积压；这里的策略是全局配置，保存一次即对所有已开通用户生效。</p>
       </div>
       <button type="button" :disabled="loading" @click="refreshAll"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新</button>
     </header>
@@ -385,70 +301,8 @@ function formatTime(value: string) {
           <button class="memory-admin-primary" type="button" :disabled="saving" @click="saveSettings"><Save :size="15" />{{ saving ? "保存中" : "保存策略" }}</button>
         </section>
 
-        <section class="memory-admin-card">
-          <div class="memory-admin-card__title">
-            <div><small>ROLLOUT</small><h3>灰度用户</h3></div>
-            <button type="button" data-testid="add-memory-whitelist-user" @click="openWhitelistDialog"><Plus :size="15" />添加用户</button>
-          </div>
-          <p class="memory-admin-card__description">记忆总开关启用后，只有名单中的用户会看到“记忆”入口并可打开记忆中心，同时参与学习与检索；未授权用户直达页面会返回工作台。</p>
-          <div v-if="whitelist.length" class="memory-whitelist">
-            <article v-for="user in whitelist" :key="user.userId">
-              <span class="memory-user-icon"><UsersRound :size="16" /></span>
-              <div><strong>{{ user.userId }}</strong><small>{{ formatTime(user.updatedAt) }} 更新</small></div>
-              <span class="memory-enabled">已启用</span>
-              <button type="button" :aria-label="`移出 ${user.userId}`" @click="removeWhitelistUser(user)"><Trash2 :size="15" /></button>
-            </article>
-          </div>
-          <div v-else class="memory-whitelist-empty"><UsersRound :size="24" /><strong>尚未指定灰度用户</strong><span>记忆入口不会向任何用户开放。</span></div>
-        </section>
       </div>
     </template>
-
-    <el-dialog
-      v-model="whitelistDialogOpen"
-      class="memory-user-dialog"
-      title="添加灰度用户"
-      width="min(520px, calc(100vw - 32px))"
-      append-to-body
-      :close-on-click-modal="!addingWhitelistUser"
-      :close-on-press-escape="!addingWhitelistUser"
-    >
-      <p class="memory-user-dialog__description">记忆能力默认不开放。请选择需要显示入口并允许打开记忆中心的平台用户，系统会提交该用户的真实 ID。</p>
-      <el-select
-        v-model="selectedWhitelistUserId"
-        aria-label="选择灰度用户"
-        class="memory-user-select"
-        filterable
-        remote
-        reserve-keyword
-        :remote-method="loadWhitelistUsers"
-        :loading="whitelistUsersLoading"
-        :disabled="addingWhitelistUser"
-        :fit-input-width="true"
-        placement="bottom-start"
-        popper-class="memory-user-select-popper"
-        placeholder="输入姓名、用户 ID 或统一认证号"
-        no-data-text="没有可添加的用户"
-      >
-        <el-option
-          v-for="user in whitelistUsers"
-          :key="user.userId"
-          :label="whitelistUserOptionLabel(user)"
-          :value="user.userId"
-        >
-          <div class="memory-user-option">
-            <strong>{{ user.username }}</strong>
-            <span>{{ user.unifiedAuthId || '无统一认证号' }}</span>
-            <code>{{ user.userId }}</code>
-          </div>
-        </el-option>
-      </el-select>
-      <p v-if="whitelistUserError" class="memory-dialog-error" role="alert">{{ whitelistUserError }}</p>
-      <template #footer>
-        <el-button :disabled="addingWhitelistUser" @click="whitelistDialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="addingWhitelistUser" :disabled="!selectedWhitelistUserId" @click="addWhitelistUser">确认添加</el-button>
-      </template>
-    </el-dialog>
   </section>
 </template>
 
@@ -527,23 +381,6 @@ function formatTime(value: string) {
 .embedding-details dd { overflow: hidden; margin: 3px 0 0; font: 600 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .embedding-details small { display: block; margin-top: 5px; color: var(--memory-muted); font-size: 8px; line-height: 1.45; }
 .memory-admin .memory-admin-primary { border-color: var(--memory-blue); background: var(--memory-blue); color: #fff; }
-.memory-whitelist { display: grid; gap: 6px; max-height: 310px; overflow: auto; }
-.memory-whitelist article { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto 32px; align-items: center; gap: 9px; padding: 8px; border: 1px solid var(--memory-border); border-radius: 6px; }
-.memory-user-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--memory-hover); color: var(--memory-blue); }
-.memory-whitelist article div { display: grid; min-width: 0; }
-.memory-whitelist article strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.memory-whitelist article small { color: var(--memory-soft); font-size: 9px; }
-.memory-enabled { border-radius: 999px; padding: 2px 7px; background: color-mix(in srgb, var(--memory-team) 14%, transparent); color: var(--memory-team); font-size: 9px; font-weight: 700; }
-.memory-whitelist article button { width: 30px; min-height: 30px; padding: 0; border: 0; color: var(--memory-soft); }
-.memory-whitelist article button:hover { color: #c2414b; }
-.memory-whitelist-empty { display: flex; min-height: 190px; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--memory-border-strong); border-radius: 7px; color: var(--memory-soft); }
-.memory-whitelist-empty strong { color: var(--memory-text); font-size: 12px; }
-.memory-whitelist-empty span { font-size: 10px; }
-.memory-user-dialog__description { margin: -4px 0 14px; color: var(--el-text-color-regular, #6b7280); font-size: 12px; line-height: 1.65; }
-.memory-user-select { width: 100%; }
-:global(.memory-user-dialog .el-dialog__body) { min-height: 220px; }
-:global(.memory-user-select-popper .el-select-dropdown__wrap) { max-height: min(120px, 24vh); }
-.memory-dialog-error { margin: 9px 0 0; color: #c2414b; font-size: 11px; }
 .spinning { animation: memory-admin-spin .9s linear infinite; }
 @keyframes memory-admin-spin { to { transform: rotate(360deg); } }
 :global(.dark .memory-admin) {

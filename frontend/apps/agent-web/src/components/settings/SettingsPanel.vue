@@ -4,7 +4,6 @@ import type { CurrentUser } from "@test-agent/shared-types";
 import SettingsAppWorkspacePanel from "./SettingsAppWorkspacePanel.vue";
 import SettingsRepositoryPanel from "./SettingsRepositoryPanel.vue";
 import SettingsPersonalPanel from "./SettingsPersonalPanel.vue";
-import SettingsUserManagementPanel from "./SettingsUserManagementPanel.vue";
 
 type PanelDef = { title: string; component: Component };
 
@@ -25,8 +24,7 @@ const emit = defineEmits<{
 const panels: Record<string, PanelDef> = {
   appWorkspace: { title: "应用管理", component: SettingsAppWorkspacePanel },
   repository: { title: "版本库管理", component: SettingsRepositoryPanel },
-  personal: { title: "个人设置", component: SettingsPersonalPanel },
-  userManagement: { title: "用户管理", component: SettingsUserManagementPanel }
+  personal: { title: "个人设置", component: SettingsPersonalPanel }
 };
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
@@ -34,7 +32,6 @@ const hasAppAdmin = computed(() => hasSuperAdmin.value || props.currentUser?.rol
 
 const effectiveKey = computed(() => {
   if (hasAppAdmin.value) {
-    if (props.activeKey === "userManagement" && !hasSuperAdmin.value) return "appWorkspace";
     return panels[props.activeKey] ? props.activeKey : "appWorkspace";
   }
   return "personal";

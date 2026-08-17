@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import { Setting, User, UserFilled, Folder } from "@element-plus/icons-vue";
+import { Setting, User, Folder } from "@element-plus/icons-vue";
 import type { CurrentUser } from "@test-agent/shared-types";
 
-type MenuKey = "appWorkspace" | "repository" | "personal" | "userManagement";
+type MenuKey = "appWorkspace" | "repository" | "personal";
 
 const props = defineProps<{
   activeKey: MenuKey;
@@ -21,7 +21,7 @@ function onboardingTarget(key: MenuKey) {
   if (key === "appWorkspace") return "settings-app-workspace";
   if (key === "repository") return "settings-repository";
   if (key === "personal") return "settings-personal";
-  return "settings-user-management";
+  return "settings-personal";
 }
 
 const items = computed<MenuItem[]>(() => {
@@ -34,10 +34,6 @@ const items = computed<MenuItem[]>(() => {
     );
   }
   menuItems.push({ key: "personal", label: "个人设置", icon: User });
-  // 用户管理仅超级管理员可见
-  if (roles.includes("SUPER_ADMIN")) {
-    menuItems.push({ key: "userManagement", label: "用户管理", icon: UserFilled });
-  }
   return menuItems;
 });
 </script>
