@@ -279,7 +279,7 @@ TEST_AGENT_MEMORY_POSTGRES_DATA_DIR=/data/testagent/memory/postgres-v1 \
 ./memory-docker.sh status
 ```
 
-成功条件：`verify-db` 输出 `Memory PostgreSQL authenticated role and database are ready.`，只新增 `test-agent-memory-postgres` 容器，原克隆 PG 容器/进程及 `5432` 保持不变。随后从 `.160` 执行 `nc -vz 122.233.30.134 15433`，跨机不通就停止。
+成功条件：`verify-db` 最长等待 120 秒并输出 `Memory PostgreSQL authenticated role and database are ready.`，只新增 `test-agent-memory-postgres` 容器，原克隆 PG 容器/进程及 `5432` 保持不变。随后从 `.160` 执行 `nc -vz 122.233.30.134 15433`，跨机不通就停止。
 
 当前机器：`122.233.30.160` Mem0/VIP/BGE 节点：
 
@@ -305,7 +305,7 @@ nc -vz 122.233.30.134 15433
 ./memory-docker.sh status
 ```
 
-成功条件：BGE readiness 显示固定 512 维模型；Alembic 到 `20260809_01`；Mem0 与 VIP 均显示 `rawMessageCount=0`。`.160` 只新增 `test-agent-memory-embedding`、`test-agent-memory-node-160-1`、`test-agent-memory-vip`，不启动记忆 PostgreSQL 容器。
+成功条件：BGE 校验最长等待 180 秒并显示固定 512 维模型；Alembic 到 `20260809_01`；Mem0 与 VIP 校验各最长等待 120 秒并显示 `rawMessageCount=0`。`.160` 只新增 `test-agent-memory-embedding`、`test-agent-memory-node-160-1`、`test-agent-memory-vip`，不启动记忆 PostgreSQL 容器。
 
 上述命令只验证数据面。随后还必须在系统管理中新增 CPU 模型供应商：base URL 为 `http://122.233.30.160:18989/v1`，Token 使用 `embedding.env` 中的 API key；模型 ID 为 `memory-bge-small-zh-v1.5`，上游模型 ID 为 `BAAI/bge-small-zh-v1.5`，能力为 `EMBEDDING`，`embeddingDimension=512`。两台 Java 的 `backend.env` 继续指向 `http://122.233.30.160:18888`，service key 与 HMAC 必须和同一份 `memory.env` 一致。
 

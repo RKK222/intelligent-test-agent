@@ -17,6 +17,12 @@ grep -Fq '*.pyc' "${ROOT_DIR}/embedding-service/.dockerignore"
 grep -Fq -- '--user 101:101 --cap-drop ALL' "${ROOT_DIR}/deploy/internal/memory-docker.sh"
 grep -Fq 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1' \
   "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq 'Memory PostgreSQL did not become ready within 120 seconds.' \
+  "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq 'CPU embedding did not expose the fixed model identity within 180 seconds.' \
+  "${ROOT_DIR}/deploy/internal/memory-docker.sh"
+grep -Fq 'Memory endpoint did not become ready within 120 seconds' \
+  "${ROOT_DIR}/deploy/internal/memory-docker.sh"
 grep -Fq '`122.233.30.134` | 独立记忆 PostgreSQL/pgvector' \
   "${ROOT_DIR}/docs/deployment/qa-memory.md"
 grep -Fq '`122.233.30.160` | Mem0 副本' \

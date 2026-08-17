@@ -11222,6 +11222,26 @@
 - 源码侧部署拓扑、具体命令与回归门禁已纠正；上一版 `.134` 部署 ClickHouse、`.160` 启动记忆数据库的命令明确作废。
 - 本阶段不修改 HTTP API、RunEvent、数据库结构/Flyway、generated SDK、OpenCode 源码或 `.env*`。最终 linux/amd64 制品仍需按本提交重建并做容器启动验证后才能交付；企业真实节点尚未写入。
 
+## 2026-08-17 - 修复记忆离线角色首次启动校验竞态
+
+### Why
+
+- 从拓扑修正后的最终 tar 启动 `.134` 数据库角色时，`start-db` 刚返回就执行 `verify-db`，PostgreSQL 尚未监听，现场执行单会因正常冷启动竞态失败；BGE、Mem0 和 VIP 同样存在首次启动紧接单次 readiness 的风险。
+
+### What
+
+- 继续复用现有 `memory-docker.sh`，只把四类单次校验改为有界等待：数据库 120 秒、BGE 180 秒、Mem0/VIP 120 秒；超时明确失败，数据库和 BGE附带对应容器末尾日志，不做无限重试或联网下载。
+- 稳定部署文档同步标明等待上限，离线包测试锁定三类超时错误，避免后续退回首次冷启动竞态。
+
+### How
+
+- `bash -n deploy/internal/memory-docker.sh`、`shellcheck deploy/internal/memory-docker.sh`、`deploy/internal/tests/memory-offline-package-test.sh`、`tools/verify-ai-docs.sh` 和 `git diff --check` 全部通过。
+- 当前修正提交将作为再次重建记忆离线包的 revision；重建后必须从最终 tar 重新跑完 pgvector、BGE、Alembic、Mem0 与 VIP。
+
+### Result
+
+- 现场首次冷启动不再需要操作者猜测等待时间或手工重试，超过明确上限仍失败关闭；不改变镜像、端口、数据目录、API、事件、数据库结构/Flyway、安全密钥格式或 `.env*`。
+
 ## 2026-08-17 - 将 macOS PKG 修复版切换到本地下载页面
 
 ### Why

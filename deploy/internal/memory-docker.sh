@@ -270,11 +270,20 @@ start_db() {
 }
 
 verify_db() {
-  docker exec "${DB_CONTAINER}" sh -ec '
-    PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 \
-      -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "select 1"
-  ' | grep -qx 1
-  echo "Memory PostgreSQL authenticated role and database are ready."
+  local attempt
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    if docker exec "${DB_CONTAINER}" sh -ec '
+      PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 \
+        -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "select 1"
+    ' 2>/dev/null | grep -qx 1; then
+      echo "Memory PostgreSQL authenticated role and database are ready."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Memory PostgreSQL did not become ready within 120 seconds." >&2
+  docker logs --tail 80 "${DB_CONTAINER}" >&2 || true
+  return 1
 }
 
 start_embedding() {
@@ -295,18 +304,23 @@ start_embedding() {
 }
 
 verify_embedding() {
-  local api_key port body
+  local api_key port body attempt
   require_command curl
   api_key="$(required_value "${EMBEDDING_ENV_FILE}" TEST_AGENT_EMBEDDING_API_KEY)"
   port="$(required_value "${EMBEDDING_ENV_FILE}" TEST_AGENT_EMBEDDING_HOST_PORT)"
-  body="$(printf 'header = "Authorization: Bearer %s"\n' "${api_key}" \
-    | curl -fsS --max-time 10 --config - "http://127.0.0.1:${port}/ready")"
-  [[ "${body}" == *'"status":"UP"'* && "${body}" == *'"dimension":512'* \
-    && "${body}" == *'7999e1d3359715c523056ef9478215996d62a620'* ]] || {
-      echo "CPU embedding readiness identity mismatch" >&2
-      exit 1
-    }
-  echo "CPU embedding is ready with the fixed 512-dimensional model."
+  for ((attempt = 1; attempt <= 90; attempt++)); do
+    body="$(printf 'header = "Authorization: Bearer %s"\n' "${api_key}" \
+      | curl -fsS --max-time 10 --config - "http://127.0.0.1:${port}/ready" 2>/dev/null || true)"
+    if [[ "${body}" == *'"status":"UP"'* && "${body}" == *'"dimension":512'* \
+      && "${body}" == *'7999e1d3359715c523056ef9478215996d62a620'* ]]; then
+      echo "CPU embedding is ready with the fixed 512-dimensional model."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "CPU embedding did not expose the fixed model identity within 180 seconds." >&2
+  docker logs --tail 80 "${EMBEDDING_CONTAINER}" >&2 || true
+  return 1
 }
 
 memory_runtime_env() {
@@ -346,16 +360,20 @@ start_memory() {
 }
 
 verify_memory_url() {
-  local url="$1" api_key body
+  local url="$1" api_key body attempt
   require_command curl
   api_key="$(required_value "${MEMORY_ENV_FILE}" TEST_AGENT_MEMORY_SERVICE_API_KEY)"
-  body="$(printf 'header = "X-Memory-Service-Key: %s"\n' "${api_key}" \
-    | curl -fsS --max-time 10 --config - "${url}/ready")"
-  [[ "${body}" == *'"status":"UP"'* && "${body}" == *'"rawMessageCount":0'* ]] || {
-    echo "Memory readiness failed or raw conversation storage was detected" >&2
-    exit 1
-  }
-  echo "Memory endpoint is ready and reports rawMessageCount=0."
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    body="$(printf 'header = "X-Memory-Service-Key: %s"\n' "${api_key}" \
+      | curl -fsS --max-time 10 --config - "${url}/ready" 2>/dev/null || true)"
+    if [[ "${body}" == *'"status":"UP"'* && "${body}" == *'"rawMessageCount":0'* ]]; then
+      echo "Memory endpoint is ready and reports rawMessageCount=0."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Memory endpoint did not become ready within 120 seconds or reported raw messages." >&2
+  return 1
 }
 
 start_vip() {
