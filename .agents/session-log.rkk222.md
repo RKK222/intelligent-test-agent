@@ -11242,6 +11242,26 @@
 
 - 现场首次冷启动不再需要操作者猜测等待时间或手工重试，超过明确上限仍失败关闭；不改变镜像、端口、数据目录、API、事件、数据库结构/Flyway、安全密钥格式或 `.env*`。
 
+## 2026-08-17 - 收口 ClickHouse 本机验证的 Docker DNAT 差异
+
+### Why
+
+- 最终 ClickHouse linux/amd64 tar 在 Docker Desktop 仿真启动成功，但宿主经映射端口访问时来源被改写为网桥地址，原部署脚本的回环 HTTP 验证触发用户 IP 白名单 403；不能为通过本机验证而放宽 ClickHouse 网络白名单。
+
+### What
+
+- 部署脚本继续复用同一容器和用户配置，把本机版本、认证、建库和数据库存在性检查改为容器内 `clickhouse-client`；`.4/.114` 到 `.147:8123` 的跨机 HTTP 验证继续保留，网络白名单不扩大。
+- ClickHouse 稳定部署文档和脚本回归测试同步更新，明确宿主不需要安装 ClickHouse 客户端，也不依赖 Docker DNAT 保留回环来源。
+
+### How
+
+- `bash -n`、`shellcheck`、`tools/verify-internal-clickhouse-deploy.sh`、`tools/verify-internal-clickhouse-package.sh`、`tools/verify-ai-docs.sh` 和 `git diff --check` 全部通过。
+- 从修正前最终 tar 运行的同一固定镜像已通过容器内 `ck` 用户认证，返回 `26.3.17.56 / testagent_analytics`；脚本修正提交后仍需重新封装最终 ZIP。
+
+### Result
+
+- ClickHouse 本机校验不再受 Docker 网桥来源地址影响，远端访问权限仍只开放给 `.4/.114`；不修改分析 API、ClickHouse DDL、平台 PostgreSQL/Flyway、事件或业务代码。
+
 ## 2026-08-17 - 将 macOS PKG 修复版切换到本地下载页面
 
 ### Why

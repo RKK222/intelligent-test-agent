@@ -16,5 +16,7 @@ sed "s/REPLACE_CLICKHOUSE_PASSWORD_SHA256/${digest}/" \
 grep -Fq -- '--ulimit nofile=262144:262144' "${SCRIPT}"
 grep -Fq 'Loaded ClickHouse image is not linux/amd64' "${SCRIPT}"
 grep -Fq '/var/lib/clickhouse' "${SCRIPT}"
+grep -Fq -- '--user "${USERNAME}" --password "${PASSWORD}"' "${SCRIPT}"
+! grep -Fq 'http://127.0.0.1:${HOST_PORT}' "${SCRIPT}"
 ! grep -Fq -- '--env-file "${ENV_FILE}"' "${SCRIPT}"
 printf 'ClickHouse deploy script verification passed\n'

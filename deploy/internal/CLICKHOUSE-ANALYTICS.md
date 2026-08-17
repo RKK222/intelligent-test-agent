@@ -106,7 +106,7 @@ sha256sum -c test-agent-clickhouse_26.3.17.56-linux-amd64.tar.sha256
   deploy
 ```
 
-脚本会校验 linux/amd64 架构、镜像版本、密码摘要、持久目录和数据库存在性。首次部署成功后执行：
+脚本会校验 linux/amd64 架构、镜像版本、密码摘要、持久目录和数据库存在性。本机认证与建库使用容器内 `clickhouse-client`，不依赖宿主安装客户端，也不因 Docker DNAT 把宿主回环来源改写成网桥地址而扩大用户白名单。首次部署成功后执行：
 
 ```bash
 ./deploy-clickhouse.sh \

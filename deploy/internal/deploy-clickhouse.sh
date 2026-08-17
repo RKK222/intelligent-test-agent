@@ -89,11 +89,14 @@ verify_container() {
   [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null || true)" == "true" ]] || {
     echo "ClickHouse container is not running" >&2; exit 1;
   }
-  version="$(docker exec "${CONTAINER}" clickhouse-client --query 'select version()')"
+  # 宿主经 Docker DNAT 访问映射端口时，来源地址不保证仍是 127.0.0.1；
+  # 本机校验在容器内完成，远端连通性继续由 .4/.114 按白名单独立验证。
+  version="$(docker exec "${CONTAINER}" clickhouse-client \
+    --user "${USERNAME}" --password "${PASSWORD}" --query 'select version()')"
   [[ "${version}" == "26.3.17.56" ]] || { echo "Unexpected ClickHouse version: ${version}" >&2; exit 1; }
-  curl --fail --silent --show-error --user "${USERNAME}:${PASSWORD}" \
-    --data-binary "select count() from system.databases where name='${DATABASE}'" \
-    "http://127.0.0.1:${HOST_PORT}/" | grep -Fxq '1'
+  docker exec "${CONTAINER}" clickhouse-client \
+    --user "${USERNAME}" --password "${PASSWORD}" \
+    --query "select count() from system.databases where name='${DATABASE}'" | grep -Fxq '1'
   printf 'ClickHouse verification passed: container=%s version=%s database=%s\n' \
     "${CONTAINER}" "${version}" "${DATABASE}"
 }
@@ -107,7 +110,7 @@ case "${ACTION}" in
   verify) verify_container; exit 0 ;;
 esac
 
-require_command docker; require_command curl; require_file "${IMAGE_TAR}"
+require_command docker; require_file "${IMAGE_TAR}"
 docker load -i "${IMAGE_TAR}" >/dev/null
 [[ "$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "${IMAGE}")" == "linux/amd64" ]] || {
   echo "Loaded ClickHouse image is not linux/amd64" >&2; exit 1;
@@ -137,6 +140,7 @@ for attempt in $(seq 1 90); do
   [[ "${attempt}" -lt 90 ]] || { docker logs --tail 120 "${CONTAINER}" >&2; exit 1; }
   sleep 1
 done
-curl --fail --silent --show-error --user "${USERNAME}:${PASSWORD}" \
-  --data-binary "create database if not exists ${DATABASE}" "http://127.0.0.1:${HOST_PORT}/" >/dev/null
+docker exec "${CONTAINER}" clickhouse-client \
+  --user "${USERNAME}" --password "${PASSWORD}" \
+  --query "create database if not exists ${DATABASE}"
 verify_container
