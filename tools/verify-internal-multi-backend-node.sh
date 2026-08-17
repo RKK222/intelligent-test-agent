@@ -29,6 +29,11 @@ printf '%s\n' \
   'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret-must-not-print' \
   'TEST_AGENT_INTERNAL_PROXY_API_KEY=proxy-secret-must-not-print' \
   'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
+  'TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://122.233.30.147:8123/testagent_analytics' \
+  'TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME=ck' \
+  'TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=clickhouse-secret-must-not-print' \
+  'TEST_AGENT_MEMORY_SERVICE_API_KEY=memory-service-secret-must-not-print' \
+  'TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=memory-hmac-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=xxl-mysql-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_ACCESS_TOKEN=xxl-access-secret-must-not-print' \
   >"${CONFIG_114}/backend.env"
@@ -86,19 +91,29 @@ printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.ke
 (cd "${JAR_ROOT}" && zip -qr "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" .)
 PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
 mkdir -p "${PERSISTENCE_JAR_ROOT}/db"
-cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration" \
-  "${PERSISTENCE_JAR_ROOT}/db/"
-cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration-compat" \
+cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/." \
   "${PERSISTENCE_JAR_ROOT}/db/"
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 XXL_JAR_ROOT="${TMP_ROOT}/xxl-jar-root"
 mkdir -p "${XXL_JAR_ROOT}/xxl-job/db"
-cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration" \
+cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/." \
   "${XXL_JAR_ROOT}/xxl-job/db/"
 (cd "${XXL_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-xxl-job-integration-0.1.0-SNAPSHOT.jar" .)
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz" .
+# 多后台节点预校验与正式发布共用本地客户端制品门禁，夹具必须覆盖完整目录形态。
+mkdir -p "${RELEASE_ROOT}/dist/local-opencode-client/stable"
+printf '#!/usr/bin/env bash\nexit 0\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/install.sh"
+printf 'fixture pkg\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg"
+printf 'fixture deb\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+printf '{\n  "version": "fixture-local-client"\n}\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/stable/manifest.json"
+printf 'fixture signature\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/stable/manifest.json.sig"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" \
   "${PROGRAMS_RUNTIME}/package.json"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \

@@ -35,6 +35,7 @@ write_env() {
   local mode="$1"
   local backends="$2"
   local additional_listen_ports="${3:-}"
+  local local_client_download_port="${4:-8081}"
   local admins="122.233.30.114:18080"
   if [[ "${mode}" == "multi" ]]; then
     admins="122.233.30.4:18080,122.233.30.114:18080"
@@ -46,6 +47,7 @@ write_env() {
     printf 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120\n'
     printf 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121\n'
     printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
+    printf 'TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT=%s\n' "${local_client_download_port}"
     printf 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=%s\n' "${additional_listen_ports}"
     printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
     printf 'TEST_AGENT_NGINX_CONF_PATH=%s\n' "${CONF_PATH}"
@@ -58,8 +60,20 @@ run_configure() {
   bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${ENV_FILE}"
 }
 
+run_real_nginx_syntax_check() {
+  local image="${TEST_AGENT_NGINX_TEST_IMAGE:-nginx:1.27.2-alpine3.20}"
+  if ! command -v docker >/dev/null 2>&1 || ! docker image inspect "${image}" >/dev/null 2>&1; then
+    printf 'Skip real Nginx syntax check: local Docker image %s is unavailable\n' "${image}"
+    return
+  fi
+  docker run --rm \
+    -v "${CONF_PATH}:/etc/nginx/conf.d/test-agent-gateway.conf:ro" \
+    "${image}" nginx -t
+}
+
 write_env single '122.233.30.114:8080'
 run_configure
+run_real_nginx_syntax_check
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'location /xxl-job-admin/ {' "${CONF_PATH}"
@@ -71,8 +85,27 @@ grep -Fq 'location ^~ /toolbox/apps/it-tools/ {' "${CONF_PATH}"
 grep -Fq 'location ^~ /toolbox/apps/omni-tools/ {' "${CONF_PATH}"
 grep -Fq 'location = /api/internal/agent/opencode/ui-test-tool/config {' "${CONF_PATH}"
 grep -A1 -F 'location = /api/internal/agent/opencode/ui-test-tool/config {' "${CONF_PATH}" | grep -Fq 'return 404;'
+grep -Fq 'location = /downloads/local-opencode-client/install.sh {' "${CONF_PATH}"
+grep -Fq 'location = /downloads/local-opencode-client/installer {' "${CONF_PATH}"
+grep -Fq 'location = /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg {' "${CONF_PATH}"
+grep -Fq 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {' "${CONF_PATH}"
+grep -Fq 'location = /downloads/local-opencode-client/stable/manifest.json {' "${CONF_PATH}"
+grep -Fq 'location ^~ /downloads/local-opencode-client/releases/ {' "${CONF_PATH}"
+grep -Fq 'listen 8081;' "${CONF_PATH}"
+test "$(grep -Fc 'listen 8081;' "${CONF_PATH}")" = 1
+test "$(grep -Fc 'location = /downloads/local-opencode-client/install.sh {' "${CONF_PATH}")" = 2
+test "$(grep -Fc 'location = /downloads/local-opencode-client/installer {' "${CONF_PATH}")" = 2
+test "$(grep -Fc 'location = /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg {' "${CONF_PATH}")" = 2
+test "$(grep -Fc 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {' "${CONF_PATH}")" = 2
+awk '/listen 8081;/,/^}/' "${CONF_PATH}" | grep -A1 -F 'location / {' | grep -Fq 'return 404;'
+grep -A8 -F 'location ^~ /downloads/local-opencode-client/releases/ {' "${CONF_PATH}" \
+  | grep -Fq 'Cache-Control "public, max-age=31536000, immutable"'
+grep -A7 -F 'location ^~ /downloads/local-opencode-client/ {' "${CONF_PATH}" \
+  | grep -Fq 'autoindex off;'
+test "$(grep -nF 'location ^~ /downloads/local-opencode-client/' "${CONF_PATH}" | head -n 1 | cut -d: -f1)" -lt \
+  "$(grep -nF 'location / {' "${CONF_PATH}" | head -n 1 | cut -d: -f1)"
 test "$(grep -nF 'location ^~ /toolbox/apps/it-tools/' "${CONF_PATH}" | cut -d: -f1)" -lt \
-  "$(grep -nF 'location / {' "${CONF_PATH}" | cut -d: -f1)"
+  "$(grep -nF 'location / {' "${CONF_PATH}" | head -n 1 | cut -d: -f1)"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
 test "$(grep -Fc 'backup max_fails=2' "${CONF_PATH}")" = 2
 
@@ -150,6 +183,7 @@ chmod +x "${CUSTOM_ROOT}/sbin/nginx"
   printf 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=10.20.30.40:18120\n'
   printf 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=10.20.30.40:18121\n'
   printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
+  printf 'TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT=8081\n'
   printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
   printf 'TEST_AGENT_NGINX_CONF_PATH=%s\n' "${CUSTOM_CONF_PATH}"
   printf 'TEST_AGENT_NGINX_BIN=%s\n' "${CUSTOM_ROOT}/sbin/nginx"
@@ -171,6 +205,12 @@ fi
 write_env multi '122.233.30.4:8080,122.233.30.114:8080' '9996,80'
 if PATH="${FAKE_BIN}:${PATH}" bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${ENV_FILE}" --validate-only; then
   echo "duplicate additional listen port was unexpectedly accepted" >&2
+  exit 1
+fi
+
+write_env single '122.233.30.114:8080' '' '80'
+if PATH="${FAKE_BIN}:${PATH}" bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${ENV_FILE}" --validate-only; then
+  echo "download port unexpectedly overlapped the gateway" >&2
   exit 1
 fi
 

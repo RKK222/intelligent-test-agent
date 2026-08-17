@@ -16,7 +16,8 @@ import java.util.Map;
 /** 在固定内存上限内读取一段 UTF-8 文件，供工作区与引用视图复用。 */
 final class Utf8FilePreviewReader {
 
-    static final int CHUNK_BYTES = 512 * 1024;
+    /** 反向隧道与浏览器 RPC 统一使用 256 KiB 原始分片，避免 Base64 JSON 帧过大。 */
+    static final int CHUNK_BYTES = 256 * 1024;
     private static final int UTF8_BOUNDARY_LOOKAHEAD_BYTES = 3;
 
     private Utf8FilePreviewReader() {

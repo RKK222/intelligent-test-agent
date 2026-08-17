@@ -21,6 +21,7 @@
 - 用受控 `actionType + actionTargetId` 表达通知动作，禁止保存任意 URL。
 - 首次分享、重新加入或分享重新激活时创建新通知；普通设置更新只更新当前通知快照；成员移除、撤销和会话归档使当前通知失效。
 - dispose 按 `AGENT_CONFIG_DISPOSE:{rolloutId}:{userId}` 单行去重，采用“条件更新 → 幂等插入 → 并发重试更新”；相同状态不修改已读/更新时间或广播，真实变化清空已读并发布 `UPDATED`。失败状态只开放 `RESTART_OWN_PROCESS`，其它状态使用 `NONE`，目标只保存 rolloutId。
+- 配置状态通知使用“正在更新、更新成功、更新失败、本次更新已结束”等用户文案，不向页面暴露 dispose、rollout 或进程缓存等内部概念。
 - 未读口径固定为 `readAt` 为空、通知有效且未过期；分享的当前状态还要实时合并分享、成员、会话和所属人事实。
 - 分享访问鉴权成功后按 `recipientUserId + shareId` 幂等已读。该同步失败只记录脱敏告警，不阻断分享访问。
 - 数据库事务提交成功后才向本机连接和 `ServerBroadcastPublisher` 发布变化；跨节点 payload 只包含接收人 ID、通知 ID、变化类型和既有广播元数据。

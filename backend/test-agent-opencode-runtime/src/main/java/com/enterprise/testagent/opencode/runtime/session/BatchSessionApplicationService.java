@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.session.BatchSessionAttributionRepository;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.session.SessionRuntimeTarget;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.util.Map;
@@ -72,5 +73,10 @@ public class BatchSessionApplicationService {
     private Session findExisting(UserId userId, String itemRequestId) {
         SessionId sessionId = attributionRepository.findSessionId(userId, itemRequestId).orElse(null);
         return sessionId == null ? null : sessionService.getSession(userId, sessionId, true);
+    }
+
+    /** HTTP 响应复用会话服务的向后兼容目标解析。 */
+    public SessionRuntimeTarget runtimeTarget(SessionId sessionId) {
+        return sessionService.runtimeTarget(sessionId);
     }
 }

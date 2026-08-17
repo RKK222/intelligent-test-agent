@@ -69,6 +69,11 @@ public class AgentRuntimeRegistry {
         return runtime;
     }
 
+    /** 只读判断运行时是否已注册，供历史 Run 中“OpenCode 角色名/平台运行时 ID”消歧。 */
+    public boolean isRegistered(String agentId) {
+        return runtimes.containsKey(normalize(agentId));
+    }
+
     /**
      * 规范化 URL agent 标志，空值回退到默认 opencode。
      */

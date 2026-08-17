@@ -3,6 +3,7 @@ package com.enterprise.testagent.opencode.runtime.run;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
@@ -84,6 +85,10 @@ public class RunEventSseRouteService {
         if (runRuntimeStore != null) {
             var manifest = runRuntimeStore.findManifest(runId);
             if (manifest.isPresent()) {
+                String backendProcessId = manifest.get().backendProcessId();
+                if (backendProcessId != null && !backendProcessId.isBlank()) {
+                    return forwardTarget(new BackendProcessId(backendProcessId));
+                }
                 return forwardTarget(manifest.get().producerLinuxServerId());
             }
         }
@@ -100,6 +105,12 @@ public class RunEventSseRouteService {
         LinuxServerId targetServerId = new LinuxServerId(linuxServerId);
         return routeResolver.remoteTarget(targetServerId)
                 .map(routeResolver::requireBackend);
+    }
+
+    private Optional<BackendJavaProcess> forwardTarget(BackendProcessId backendProcessId) {
+        return routeResolver.isCurrent(backendProcessId)
+                ? Optional.empty()
+                : Optional.of(routeResolver.requireBackend(backendProcessId));
     }
 
     private PlatformException unavailableRoute(RunId runId, String reason) {

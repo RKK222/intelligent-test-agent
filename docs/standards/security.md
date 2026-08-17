@@ -33,6 +33,19 @@ Token 校验流程：
 - 鉴权失败返回统一错误格式，错误码 `UNAUTHENTICATED`，不得回显 token。
 - Actuator health 不使用占位 token，生产暴露范围后续单独收敛。
 
+## 通用长期记忆安全
+
+1. 浏览器只能访问 `/api/internal/platform/memory/v1/**`。Java 到 memory-service 使用至少 32 字节的 `X-Memory-Service-Key`，该 key 只认证调用服务，不能替代登录用户、白名单、owner、Application 成员或角色校验；前端、URL、日志、错误正文和镜像层不得得到该 key。
+2. Mem0 到 Java 模型网关只允许固定 `/chat/completions` 与 `/embeddings` HMAC 入口。签名必须覆盖方法、固定路径、body SHA-256、client/user/run/session/operation、timestamp、nonce、capability 和 embedding input type；默认时钟偏差 30 秒，nonce 在 Redis 中原子消费并保留 2 分钟。缺失、过期、重放、body/身份不一致统一失败关闭；记忆开关启用但 HMAC secret 不合规时 Java 必须启动失败，不能延迟到首个回调才暴露错误。
+3. HMAC 只允许管理设置中的固定 CHAT 模型，以及已配置企业 Embedding 或固定 CPU profile；调用者不能提交供应商、上游 URL或 Token。Java 到 CPU 服务复用内部模型供应商 API key，不把 key 转交 Mem0。模型网关错误不得回显供应商 URL、凭据、prompt、answer 或原始响应。
+4. 原始 USER/ASSISTANT 只允许从现有 Session 事实源瞬时进入一次 `Mem0.add(messages,infer=true)` 请求；memory-service 不保存 message history，readiness 必须报告 `rawMessageCount=0`。metadata 任意层级禁止 `messages/transcript/rawConversation/prompt/answer/assistantMessage/userMessage`；记忆库、outbox、容器文件和日志不得建立原始对话副本。
+5. 平台证据只保存有界摘要和 `sessionId/sessionTitle/runId`。授权记忆查看者可见标题和 ID，但完整 transcript 仍由既有 `/s/{sessionId}` owner 校验控制；团队成员、`APP_ADMIN` 或 `SUPER_ADMIN` 都不能仅凭记忆权限旁路 Session owner。`transcriptAvailable` 必须由后端实时派生，前端隐藏链接不是授权边界。记忆正文保存原文且不做语义封禁，但注入 Run system context 时必须按不可信数据处理并转义提示词容器边界，正文不能闭合 `<long_term_memory>` 或伪造结构节点。
+6. 个人原生记忆默认只属于当前用户与 Application；手工提升全局必须由 owner 发起。团队记忆只能由当前成员手工提交并由 `APP_ADMIN` 审核，自动学习不得写团队 scope。成员退出后团队查询、审核和 Run 注入立即失效。
+7. 不同 embedding model/dimension/fingerprint 必须使用不同 collection。逻辑版本、幂等、投影和 outbox 全部在独立共享 PostgreSQL；Mem0 副本只读根文件系统、无本地数据 mount。数据库账号、service key、HMAC secret、CPU API key 分别最小授权，不能复用平台用户 Token。
+8. Run 前记忆检索总预算 2 秒，所有 profile 不可用时 fail-open 为空记忆，不得为可用性放宽鉴权、使用其它用户数据、本地缓存正文或直连模型。fail-open 日志只记录 traceId、Run ID、耗时、profile 身份和安全错误码。
+9. `/health` 只作 liveness；业务和发布门禁必须使用带 key 的 `/ready`，同时验证共享库、profile、投影积压和 `rawMessageCount=0`。管理健康数据不返回数据库连接串、内网模型地址或密钥。
+10. 企业配置文件必须是 `0600` 非符号链接普通文件；构建与发布脚本不得 `source` 敏感 dotenv、回显 secret 或使用 `latest` 镜像。BGE 权重只在外网构建阶段下载并通过模型身份清单锁定，企业运行时禁止访问 Hugging Face。
+
 ## 会话运行上下文安全
 
 1. `contextToken` 是 256 位安全随机生成的 opaque token，只用于引用后端已解析的可信会话运行上下文，不能替代用户 Bearer Token、权限校验或 Session 归属校验。
@@ -58,6 +71,14 @@ Token 校验流程：
 8. 新模式 PostgreSQL 只允许保存无原文 Run 锚点和终态 USER/ASSISTANT 双摘要。摘要生成必须确定性删除 `<context>`、reasoning、工具输入输出、附件正文、data URL、控制字符、私钥、Bearer/JWT/常见云密钥和 secret 赋值；USER/ASSISTANT 分别限制 512/2000 Unicode 字符，失败只写固定 `FALLBACK`，不得把原文当降级内容。
 9. `safe_error_message` 必须经过同一敏感模式清洗并限制长度；任何数据库异常、终态重试或 Redis 故障不得把 prompt、回答、parts、原始事件、Redis value 或第三方响应正文写入 PostgreSQL/日志。稳定 `assistantSummaryMessageId` 只作为平台消息业务 ID，不是鉴权凭据。
 10. Run 恢复必须先经过公共后端路由选择并取得 15 秒 owner lease；续租、释放和终态投影必须校验同一 fencing token。dispatch 探测只能使用 Redis 中的可信节点快照查询 OpenCode，会话查询失败或未穷尽统一视为 UNKNOWN，禁止盲目重发 prompt；恢复日志不得记录第三方响应、异常 message 或堆栈中的原始内容。
+
+## 运营分析数据安全
+
+1. ClickHouse 只允许保存运营计数、业务 ID、用户/组织归属快照、Token 数、Agent/Skill/Tool 名和调用状态。禁止保存 prompt、用户/assistant 正文、reasoning、附件内容、工具输入输出、反馈评论、密钥、Token 单价或费用。
+2. PostgreSQL `analytics_event_outbox` 是与业务写同事务的临时投递记录，ClickHouse 确认接收后必须删除；Redis 运营 stream 必须与 Run key 同槽、设置有限 TTL，并只保留白名单字段。两者均不得成为第二份会话正文存储。
+3. 运营 API 只允许 `SUPER_ADMIN`，服务端仍必须鉴权；前端菜单隐藏不是权限边界。ClickHouse 故障时返回统一 `ANALYTICS_UNAVAILABLE`，不得为可用性回退扫描 PostgreSQL 原始消息或 RunEvent。
+4. ClickHouse 使用独立最小权限账号，端口只向平台 Java 节点开放；密码从受控环境配置注入，不得出现在仓库、日志、错误、URL、前端构建物或普通运维命令历史。离线包包含随机密码时按 `0600` 密钥交付物管理。
+5. 用户与组织归属按事件发生时快照保存；历史回填无法恢复事件时归属时，使用当前主数据并显式标记 `CURRENT_ORG_BACKFILL`。页面和导出不得把这种近似归因伪装成历史精确快照。
 
 ## 会话协作分享安全
 
@@ -134,7 +155,43 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、`X-Test-Agent-Api-Key`、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`ciphertext/encryptedApiKey/privateKey`、`X-Test-Agent-Session-Share`/shareId、`X-Support-Access-Grant`、XXL SSO ticket、LobeHub ticket/model grant 和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
+- 本地客户端 `tack_v1_` client key、其数据库密文、模型 grant、本地随机模型 token、`client.key` 内容和
+  WebSocket REGISTER payload。设置页只显示掩码；copy 明文只能存在于后端方法局部变量和前端剪贴板
+  写入局部变量，禁止进入 DOM、Query cache、local/session storage、原始报文观察器或错误消息。
+- 本地绝对根路径不得进入普通审计、运行事件、指标或错误响应；审计只保存 SHA-256 root/path digest。
+  客户端 reported IP、observed address 和端口是状态信息，不得用作可信路由或授权依据。
+- client key 轮换/撤销必须同时 fencing 该用户所有连接和模型 grant。连接、文件 ticket、模型 grant、
+  HTTP/SSE 请求都必须绑定 `clientInstanceId + backendProcessId + connectionGeneration`，不允许跨代复用。
+- 生产控制面只允许 HTTPS/WSS。OpenCode 只能绑定 loopback，平台模型 key 永不下发；OpenCode 仅持有
+  随机本地 token，后台 grant 必须短 TTL 且可立即撤销。客户端 key 文件必须是当前用户所有的 `0600`，
+  禁止命令行参数和环境变量传 key。
+- 后台只允许直接 HTTPS/WSS URI，或信任代理源 IP 清单内的连接携带 `X-Forwarded-Proto: https|wss`；禁止
+  无条件信任客户端可伪造的 forwarded header。企业部署必须显式维护 Nginx 源 IP，明文控制开关仅限测试。
+- 内网 HTTP 下载不使用 client key。stable 清单必须签名，版本化制品以及 macOS PKG/麒麟 DEB 的 SHA-256
+  必须进入签名清单；打包私钥不得进入仓库、企业 ZIP、Nginx 目录或客户端。生产 macOS PKG 还必须使用
+  Developer ID Installer 签名并按网络条件完成 notarization；DEB 由受控发布链路和签名清单校验。由于
+  install.sh 和原生安装包仍可能经明文 HTTP 取得，主动中间人替换下载内容的风险不能只靠同源清单消除，
+  必须依赖网络 ACL、可信 HTTPS 或带外固定校验。
+- 网页下载入口默认隐藏，只允许 `SUPER_ADMIN` 通过受认证管理 API 按已存在且可登录的 userId 加入灰度
+  名单。普通用户只接收 `localClientDownload` 布尔 capability；缺字段、存储异常和值为 false 均隐藏。
+  灰度名单不替代 Nginx ACL、制品签名或 client key 认证，前端显示与否不得作为任何后端授权依据。
+- 本地客户端托盘不得展示 prompt、绝对路径、请求体、client key 或模型 grant。日志下载只能由用户本机
+  主动触发，只允许读取 state 日志目录中受控命名的客户端日志，限制文件数和单文件字节数，并排除配置、
+  OpenCode 日志及工作区内容；导出失败不得退化为打包整个 state 或 config 目录。
+- 受保护 Agent/Skill 正文、系统提示词和编排只允许在服务器不可变制品与单 Run 模型上下文中出现，不得进入
+  Agent 目录响应、本地客户端配置目录、WSS 注册/心跳、RunEvent、审计正文或浏览器缓存。只要向用户电脑
+  下载完整正文，就不能声称用户不可读取；签名只能检出篡改，不能提供保密性。
+- 受保护文件 MCP grant 必须至少 32 字节随机，Redis/数据库只允许保存必要映射而不得保存 grant 明文；当前
+  实现仅在签发 Java 有界内存保存 SHA-256 指纹。每次工具调用重新校验 Run 未终态、userId、Workspace、
+  clientInstanceId、backendProcessId、generation 和 root digest，任一不一致立即删除授权并返回统一未认证。
+- 服务器 OpenCode 的受保护目录必须与用户本地绝对路径分离，原生 bash/read/write/edit/glob/grep/task 等能力
+  默认关闭。本地文件只能通过现有 WSS `FILE_REQUEST` 和安全内核的相对路径操作；MCP 不得新增任意 HTTP
+  文件代理、终端或任意操作名。写入、移动、重命名和删除继续受 OpenCode permission 结果约束。
+- 受保护 MCP Controller 的通用请求日志只记录 JSON-RPC method/id/params 是否存在，响应只记录 result/error
+  是否存在。Authorization、文件路径、写入正文、读取结果和 Skill 资源不得序列化到 API 日志；错误只返回
+  稳定平台消息，不能回显底层路径或文件内容。
+
+- Authorization、Cookie、API key、`X-Test-Agent-Api-Key`、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`ciphertext/encryptedApiKey/privateKey`、`X-Test-Agent-Session-Share`/shareId、`X-Support-Access-Grant`、XXL SSO ticket 和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。
@@ -244,6 +301,12 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 10. 分享成员只能在 `canChat=true` 时创建固定会话/工作区的 workspace terminal ticket；ticket 必须绑定 share/version、真实 actor、执行所属人和到期时间，PTY 使用所属人的进程、工作区和操作系统身份。upgrade 后至少每秒及每次 input 重新校验授权，降权、移除、取消或到期立即关闭 PTY；分享权限永远不能创建服务器终端。
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
+
+## 企业旧 Docker 的中间件 seccomp 兼容例外
+
+1. 当前 Linux 4.19 / Docker 18.09.7 节点运行 ClickHouse 26.3、Bookworm Python/pgvector 或 Alpine 3.20 镜像时，旧默认 seccomp 可能把新系统调用返回为 `EPERM`，导致时区解析、线程创建或镜像入口失败。经现场负责人明确批准，交付脚本使用 `--privileged` 启动 ClickHouse、独立记忆 pgvector、Alembic、Mem0、CPU BGE 和记忆 VIP 容器。
+2. 该例外不得写入 Docker daemon 全局默认，不得扩大到共置平台 PostgreSQL、克隆机遗留容器或其它业务容器。非 root、只读根、最小 mount、端口 ACL 和密钥文件权限继续保留，但不得宣称它们抵消了 privileged 带来的设备、capability、seccomp/AppArmor 隔离放宽；这些容器必须按高权限工作负载限制宿主访问和运维人员范围。ClickHouse 继续由官方入口降权为 UID/GID `101:101`，其 `0600` 用户配置和持久目录必须归同一 UID/GID 所有；禁止通过 `CLICKHOUSE_RUN_AS_ROOT=1` 绕过文件所有权，否则既扩大权限，又会触发 ClickHouse 的进程用户/数据所有者一致性保护。
+3. 外网 Mac 的现代 Docker 启动验证只能证明制品功能，不能替代每台旧 Docker 企业宿主验证。宿主 Docker、runc 和 libseccomp 完成受控升级后，必须逐镜像移除 `--privileged` 实启并通过 readiness，才能取消例外；不能只按版本号推断兼容。
 
 ## 官方 Codex MCP 安全边界
 
@@ -362,7 +425,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   并执行独立 clone、内外两层 SHA-256 校验；生成器必须扫描 fork 增量全部可达 blob/commit/tag 和当前 tag，
   命中高置信私钥/token 格式时失败关闭。转运包不携带 Git 配置、企业 Git URL 或 credential helper 数据；历史
   扫描不能替代企业 Git 持续 secret scanning。企业管理员推送后必须只读复核远端 branch/tag commit。
-- 企业离线版必须在代理与 LobeHub router 两层拒绝 LobeHub 上游的 `/api/workflows/*`，不得配置 QStash。定时任务只允许单一 app
+- 企业离线版必须在代理与工作流 router 两层拒绝 `/api/workflows/*`，不得配置 QStash。定时任务只允许单一 app
   实例使用至少 32 字节的独立 `ENTERPRISE_INTERNAL_SCHEDULER_SECRET` 调用 loopback 内部入口，并强制
   `AGENT_RUNTIME_MODE=local`；该密钥不得进入浏览器、日志或进程命令行，queue 模式必须失败关闭。
 - 当前企业现场纯 HTTP 会使表单票据、Session Cookie 和服务端委托暴露于同网段窃听与劫持风险。网络隔离、

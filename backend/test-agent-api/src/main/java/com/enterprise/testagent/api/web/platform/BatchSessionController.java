@@ -32,11 +32,13 @@ public class BatchSessionController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         RuntimeDtos.BatchContextRequest batch = request.batchContext();
-        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(service.create(
+        var session = service.create(
                 userId,
                 new WorkspaceId(request.workspaceId()),
                 request.title(),
                 new BatchContext(batch.batchId(), batch.itemRequestId()),
-                traceId)), traceId);
+                traceId);
+        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(session)
+                .withRuntimeTarget(service.runtimeTarget(session.sessionId())), traceId);
     }
 }

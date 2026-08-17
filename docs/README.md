@@ -10,6 +10,7 @@
 - `docs/guides/self-checklist.md`：完成前自检清单。
 - `docs/architecture/dependency-rules.md`：分层依赖与访问边界。
 - `docs/standards/opencode.md`：OpenCode 只读源码快照、平台适配和 generated SDK 边界。
+- `docs/architecture/local-opencode-client.md`：本地 OpenCode 反向隧道、fencing、文件安全和运行目标冻结。
 
 ## 技术栈与编码规范
 
@@ -53,10 +54,13 @@
 
 - `docs/deployment/backend.md`：后端 Java 进程容器部署。
 - `docs/deployment/opencode-upgrade-1.18.4.md`：OpenCode 1.18.4 / OpenAPI Generator 7.24.0 差异、影响、验证与回滚基线。
+- `docs/deployment/local-opencode-client.md`：ARM64 客户端签名打包、Nginx HTTP 分发、用户服务安装和风险。
 - `docs/deployment/codex-whitebox-mcp.md`：官方 Codex 0.145.0 MCP、企业 DeepSeek 路由、无审批夜间分析、原生参数风险、Linux 4.19 / Docker 18.09.7 预检与回滚。
 - `docs/deployment/frontend.md`：前端 Vue + Vite 生产构建与部署。
+- `deploy/internal/CLICKHOUSE-ANALYTICS.md`：运营分析 ClickHouse 专机的离线打包、部署、回填、验收、清理和回滚。
 - `docs/deployment/toolbox.md`：IT-Tools + OmniTools 的 193 项离线目录、派生源码、双后台共置容器、Nginx、增量发布与回滚。
 - `docs/deployment/lobehub-offline.md`：LobeHub/ParadeDB/RustFS 独立离线制品、安装、Redis ACL、启动、验收和回滚。
+- `docs/deployment/qa-memory.md`：通用长期记忆、多节点 Mem0、独立 CPU BGE/pgvector、离线交付、端到端验收与回滚。
 - `docs/deployment/lobehub-client-build.md`：LobeHub Windows/Linux 原生客户端构建、Authenticode、Linux 双人审批与证据汇集。
 - `docs/deployment/lobehub-fork-transfer.md`：LobeHub 独立 fork 的最小 ref Git Bundle、企业 Git 导入、校验和回滚。
 - `deploy/internal/SINGLE-BACKEND.md`：企业内单 Java 后台 + 单 worker 离线部署。

@@ -6,6 +6,12 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind;
@@ -15,6 +21,7 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvai
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
@@ -47,6 +54,9 @@ class WorkspaceFileSocketTicketService {
     private final SupportAccessApplicationService supportAccessService;
     private final UserWorkspaceQueryService userWorkspaceQueryService;
     private SessionCollaborationShareService shareService;
+    private LocalClientWorkspaceRepository localWorkspaceRepository;
+    private LocalClientConnectionStore localConnectionStore;
+    private BackendJavaRouteResolver backendRouteResolver;
 
     WorkspaceFileSocketTicketService(
             WorkspaceApplicationService workspaceService,
@@ -92,6 +102,9 @@ class WorkspaceFileSocketTicketService {
         boolean superAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN);
         boolean appAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN);
         String currentLinuxServerId = workspaceService.currentLinuxServerId();
+        LocalClientWorkspaceBinding localBinding = MODE_WORKSPACE.equals(mode)
+                ? localBinding(request)
+                : null;
         if (request.linuxServerId() != null && !request.linuxServerId().isBlank()
                 && !currentLinuxServerId.equals(request.linuxServerId().trim())) {
             throw new PlatformException(
@@ -100,6 +113,9 @@ class WorkspaceFileSocketTicketService {
                     Map.of("targetLinuxServerId", request.linuxServerId(), "currentLinuxServerId", currentLinuxServerId));
         }
         if (context != null) {
+            if (localBinding != null) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "本地工作区首版不开放协作分享");
+            }
             if (!principal.userId().equals(context.actorUserId()) || !MODE_WORKSPACE.equals(mode)) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "分享模式只允许当前会话的工作区文件操作");
             }
@@ -151,6 +167,22 @@ class WorkspaceFileSocketTicketService {
                     principal.userId(),
                     new WorkspaceId(workspaceId),
                     false);
+            if (localBinding != null) {
+                if (!localBinding.userId().equals(principal.userId())) {
+                    throw new PlatformException(ErrorCode.FORBIDDEN, "无权访问其他用户的本地工作区");
+                }
+                LocalClientConnectionRoute route = requireCurrentLocalRoute(
+                        localBinding.clientInstanceId(), principal.userId(), request.connectionGeneration());
+                return response(ticketStore.issueLocal(
+                        workspaceId,
+                        principal.userId().value(),
+                        mode,
+                        localBinding.clientInstanceId().value(),
+                        route.connectionGeneration(),
+                        localBinding.rootDigest(),
+                        appAdmin,
+                        traceId));
+            }
             UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal.userId(), traceId);
             String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY
                     ? process.linuxServerId()
@@ -173,6 +205,20 @@ class WorkspaceFileSocketTicketService {
         }
         if (!MODE_DIRECTORY_PICKER.equals(mode)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "文件 WebSocket ticket 模式无效", Map.of("mode", mode));
+        }
+        if (request.localClientInstanceId() != null && !request.localClientInstanceId().isBlank()) {
+            LocalClientInstanceId clientInstanceId = new LocalClientInstanceId(request.localClientInstanceId().trim());
+            LocalClientConnectionRoute route = requireCurrentLocalRoute(
+                    clientInstanceId, principal.userId(), request.connectionGeneration());
+            return response(ticketStore.issueLocal(
+                    null,
+                    principal.userId().value(),
+                    mode,
+                    clientInstanceId.value(),
+                    route.connectionGeneration(),
+                    null,
+                    appAdmin,
+                    traceId));
         }
         UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal.userId(), traceId);
         String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY ? process.linuxServerId() : null;
@@ -236,6 +282,9 @@ class WorkspaceFileSocketTicketService {
                 || ticket.workspaceId() == null
                 || !ticket.workspaceId().equals(workspaceId.value())) {
             throw workspaceRpcDenied();
+        }
+        if (ticket.localClient()) {
+            return authorizeLocalWorkspaceRpc(ticket, workspaceId);
         }
         if (ticket.supportReadOnly()) {
             requireSupportServices();
@@ -365,6 +414,82 @@ class WorkspaceFileSocketTicketService {
     @Autowired(required = false)
     void configureSessionShareService(SessionCollaborationShareService shareService) {
         this.shareService = shareService;
+    }
+
+    /** 生产环境装配本地客户端精确连接路由；保留既有轻量单元测试构造路径。 */
+    @Autowired(required = false)
+    void configureLocalClientServices(
+            LocalClientWorkspaceRepository localWorkspaceRepository,
+            LocalClientConnectionStore localConnectionStore,
+            BackendJavaRouteResolver backendRouteResolver) {
+        this.localWorkspaceRepository = Objects.requireNonNull(
+                localWorkspaceRepository, "localWorkspaceRepository must not be null");
+        this.localConnectionStore = Objects.requireNonNull(
+                localConnectionStore, "localConnectionStore must not be null");
+        this.backendRouteResolver = Objects.requireNonNull(
+                backendRouteResolver, "backendRouteResolver must not be null");
+    }
+
+    private SupportAccessAuthorization authorizeLocalWorkspaceRpc(
+            WorkspaceFileSocketTicket ticket,
+            WorkspaceId workspaceId) {
+        if (ticket.supportReadOnly() || ticket.sharedSession()
+                || localWorkspaceRepository == null || localConnectionStore == null
+                || backendRouteResolver == null || ticket.userId() == null) {
+            throw workspaceRpcDenied();
+        }
+        UserId userId = new UserId(ticket.userId());
+        LocalClientWorkspaceBinding binding = localWorkspaceRepository.findByWorkspaceId(workspaceId)
+                .orElseThrow(this::workspaceRpcDenied);
+        if (!binding.userId().equals(userId)
+                || !binding.clientInstanceId().value().equals(ticket.localClientInstanceId())
+                || !Objects.equals(binding.rootDigest(), ticket.rootDigest())) {
+            throw workspaceRpcDenied();
+        }
+        LocalClientConnectionRoute route = localConnectionStore.find(binding.clientInstanceId())
+                .orElseThrow(this::workspaceRpcDenied);
+        if (!route.userId().equals(userId)
+                || route.connectionGeneration() != ticket.connectionGeneration()
+                || !backendRouteResolver.isCurrent(route.backendProcessId())) {
+            throw workspaceRpcDenied();
+        }
+        workspaceAccessAuthorizer.requireClassifiedFileAccess(userId, workspaceId, false);
+        return null;
+    }
+
+    private LocalClientWorkspaceBinding localBinding(WorkspaceFileSocketDtos.TicketRequest request) {
+        if (localWorkspaceRepository == null) {
+            return null;
+        }
+        return localWorkspaceRepository.findByWorkspaceId(new WorkspaceId(requiredWorkspaceId(request)))
+                .orElse(null);
+    }
+
+    private LocalClientConnectionRoute requireCurrentLocalRoute(
+            LocalClientInstanceId clientInstanceId,
+            UserId userId,
+            Long requestedGeneration) {
+        if (localConnectionStore == null || backendRouteResolver == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "本地客户端路由服务未装配");
+        }
+        LocalClientConnectionRoute route = localConnectionStore.find(clientInstanceId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "本地客户端离线",
+                        Map.of("clientInstanceId", clientInstanceId.value())));
+        if (!route.userId().equals(userId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端不属于当前用户");
+        }
+        if (requestedGeneration != null && requestedGeneration.longValue() != route.connectionGeneration()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地客户端连接已换代，请重新路由");
+        }
+        if (!backendRouteResolver.isCurrent(route.backendProcessId())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "本地文件 ticket 必须在连接持有 Java 签发",
+                    Map.of("backendProcessId", route.backendProcessId().value()));
+        }
+        return route;
     }
 
     private void requireReadyAgentOnCurrentServer(

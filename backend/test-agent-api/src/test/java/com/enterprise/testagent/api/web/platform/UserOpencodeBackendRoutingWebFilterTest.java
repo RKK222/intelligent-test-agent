@@ -6,6 +6,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
@@ -25,7 +30,10 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatS
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationRunContext;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.session.SessionRuntimeTarget;
+import com.enterprise.testagent.domain.session.SessionRuntimeTargetRepository;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -73,6 +81,98 @@ class UserOpencodeBackendRoutingWebFilterTest {
 
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
     private static final UserId USER_ID = new UserId("usr_1234567890abcdef");
+
+    @Test
+    void routesLocalSessionToExactBackendProcessOnSameServer() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        LocalClientWorkspaceRepository localWorkspaces = Mockito.mock(LocalClientWorkspaceRepository.class);
+        LocalClientConnectionStore connections = Mockito.mock(LocalClientConnectionStore.class);
+        SessionRuntimeTargetRepository sessionTargets = Mockito.mock(SessionRuntimeTargetRepository.class);
+        SessionId sessionId = new SessionId("ses_local_route_1234567890");
+        LocalClientInstanceId clientInstanceId = new LocalClientInstanceId("lci_local_route_1234567890");
+        BackendProcessId holderProcessId = new BackendProcessId("bjp_local_holder_1234567890");
+        Mockito.when(sessionTargets.findBySessionId(sessionId)).thenReturn(Optional.of(
+                new SessionRuntimeTarget(sessionId, RuntimeKind.LOCAL_CLIENT, clientInstanceId)));
+        Mockito.when(connections.find(clientInstanceId)).thenReturn(Optional.of(new LocalClientConnectionRoute(
+                clientInstanceId,
+                USER_ID,
+                holderProcessId,
+                9,
+                "127.0.0.1",
+                List.of("192.0.2.20"),
+                4096,
+                LocalClientProcessStatus.RUNNING,
+                4567L,
+                NOW,
+                true,
+                NOW,
+                NOW)));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingService routingService = new UserOpencodeBackendRoutingService(
+                assignmentService,
+                new WorkspaceServerIdentity("10.8.0.21"),
+                heartbeatStore(List.of(backend(
+                        holderProcessId.value(), "10.8.0.21", "http://127.0.0.1:18081", NOW))),
+                new ObjectMapper().findAndRegisterModules(),
+                httpClient);
+        routingService.configureLocalClientRouting(localWorkspaces, connections, sessionTargets);
+        UserOpencodeBackendRoutingWebFilter filter = new UserOpencodeBackendRoutingWebFilter(routingService);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/platform/opencode-runtime/sessions/" + sessionId.value() + "/command")
+                .body("{}"));
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(ignored -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).singleElement().satisfies(request ->
+                assertThat(request.uri().toString()).isEqualTo(
+                        "http://127.0.0.1:18081/api/internal/platform/opencode-runtime/sessions/"
+                                + sessionId.value() + "/command"));
+        Mockito.verifyNoInteractions(assignmentService);
+    }
+
+    @Test
+    void localSessionOfflineFailsWithoutServerFallback() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        LocalClientWorkspaceRepository localWorkspaces = Mockito.mock(LocalClientWorkspaceRepository.class);
+        LocalClientConnectionStore connections = Mockito.mock(LocalClientConnectionStore.class);
+        SessionRuntimeTargetRepository sessionTargets = Mockito.mock(SessionRuntimeTargetRepository.class);
+        SessionId sessionId = new SessionId("ses_local_offline_1234567890");
+        LocalClientInstanceId clientInstanceId = new LocalClientInstanceId("lci_local_offline_1234567890");
+        Mockito.when(sessionTargets.findBySessionId(sessionId)).thenReturn(Optional.of(
+                new SessionRuntimeTarget(sessionId, RuntimeKind.LOCAL_CLIENT, clientInstanceId)));
+        Mockito.when(connections.find(clientInstanceId)).thenReturn(Optional.empty());
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingService routingService = new UserOpencodeBackendRoutingService(
+                assignmentService,
+                new WorkspaceServerIdentity("10.8.0.21"),
+                heartbeatStore("server-b"),
+                new ObjectMapper().findAndRegisterModules(),
+                httpClient);
+        routingService.configureLocalClientRouting(localWorkspaces, connections, sessionTargets);
+        UserOpencodeBackendRoutingWebFilter filter = new UserOpencodeBackendRoutingWebFilter(routingService);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/platform/opencode-runtime/sessions/" + sessionId.value() + "/command")
+                .body("{}"));
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(ignored -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).isEmpty();
+        assertThat(exchange.getResponse().getStatusCode().value())
+                .isEqualTo(ErrorCode.LOCAL_CLIENT_DISCONNECTED.httpStatus());
+        assertThat(exchange.getResponse().getBodyAsString().block())
+                .contains("\"code\":\"LOCAL_CLIENT_DISCONNECTED\"");
+        Mockito.verifyNoInteractions(assignmentService);
+    }
 
     @Test
     void routesUnboundInitializationToLeastLoadedRemoteServer() {

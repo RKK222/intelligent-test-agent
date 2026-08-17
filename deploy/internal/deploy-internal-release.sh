@@ -87,6 +87,12 @@ EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_RESOURCE="db/migration/V20260812104911__c
 EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_SHA256="a613f77fd42aea5f404dfb51bad5fe93c1f478d73bf131de8c9dc9931a27e5ea"
 EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION_RESOURCE="db/migration/V20260812144051__common_parameters_default_experience_workspace.sql"
 EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION_SHA256="e07d560ac0652860ed8e8788b002df0881eface861998a20e4e83da85276bfcf"
+ANALYTICS_OUTBOX_MIGRATION_RESOURCE="db/migration/V20260813143000__analytics_event_outbox_create_pipeline.sql"
+ANALYTICS_OUTBOX_MIGRATION_SHA256="bd286b1d992e6ff715393fb39bbb47a7d44dfe425c3b4ea6571f62e74eed0eb1"
+ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE="db/migration-postgresql/V20260813143001__analytics_event_outbox_install_triggers.sql"
+ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256="399e8db352ded3f12d5b5a91fe8a07f6242a9aafc07caa8c28589614a43dc50e"
+ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql"
+ANALYTICS_CLICKHOUSE_MIGRATION_SHA256="1a1d4d77b2d92f6f97a864da7a20b6d5f040807d15f2eef940410c10e7e7a7f7"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-applied/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256="168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE="db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"
@@ -97,6 +103,8 @@ XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
+XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_analytics_clickhouse_ingestion_task.sql"
+XXL_ANALYTICS_INGESTION_MIGRATION_SHA256="70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0"
 XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_scm_git_name_sync_task.sql"
 XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256="2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739"
 RELEASE_PERSISTENCE_JAR=""
@@ -406,6 +414,12 @@ verify_release_flyway_migrations_jar() {
   verify_release_flyway_resource "${jar}" "${label}" \
     "${EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION_RESOURCE}" "${EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
+    "${ANALYTICS_OUTBOX_MIGRATION_RESOURCE}" "${ANALYTICS_OUTBOX_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE}" "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE}" "${ANALYTICS_CLICKHOUSE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
     "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE}" "${AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256}"
@@ -419,6 +433,8 @@ verify_release_xxl_flyway_migrations_jar() {
     "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE}" "${XXL_ANALYTICS_INGESTION_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE}" "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256}"
 }
@@ -732,6 +748,10 @@ find_first_file() {
   find "${root}" -maxdepth 6 -type f -name "${name}" | sort | head -n 1
 }
 
+find_local_client_dist() {
+  find "$1" -maxdepth 6 -type d -path '*/dist/local-opencode-client' | sort | head -n 1
+}
+
 find_first_tar() {
   local root="$1"
   find "${root}" -maxdepth 6 -type f -name 'test-agent-opencode-worker*linux-amd64.tar' | sort | head -n 1
@@ -772,6 +792,7 @@ run_frontend_update() {
   local frontend_target="$1"
   local frontend_archive="$2"
   local deploy_internal_src="$3"
+  local local_client_dist="$4"
   local remote_deploy_tmp="${FRONTEND_ROOT}/deploy/internal.new"
 
   # 前端服务器只接收静态包和 deploy/internal 模板；不把后端 jar 或 worker 镜像传过去。
@@ -796,6 +817,8 @@ EOF
   fi
   ssh "${frontend_target}" "mkdir -p '${FRONTEND_ROOT}/dist' '${FRONTEND_ROOT}/deploy'"
   scp "${frontend_archive}" "${frontend_target}:${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
+  ssh "${frontend_target}" "rm -rf '${FRONTEND_ROOT}/dist/local-opencode-client.new'"
+  scp -r "${local_client_dist}" "${frontend_target}:${FRONTEND_ROOT}/dist/local-opencode-client.new"
 
   if [[ -d "${deploy_internal_src}" ]]; then
     ssh "${frontend_target}" "rm -rf '${remote_deploy_tmp}'"
@@ -823,6 +846,11 @@ if [[ -d "${FRONTEND_ROOT}/frontend" ]]; then
 fi
 
 tar -C "${FRONTEND_ROOT}" -xzf "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
+if [[ -d "${FRONTEND_ROOT}/dist/local-opencode-client" ]]; then
+  rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+  mv "${FRONTEND_ROOT}/dist/local-opencode-client" "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+fi
+mv "${FRONTEND_ROOT}/dist/local-opencode-client.new" "${FRONTEND_ROOT}/dist/local-opencode-client"
 bash "${FRONTEND_ROOT}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 curl -fsS "${FRONTEND_HEALTH_URL}" >/dev/null
 curl -fsS "${FRONTEND_URL}" >/dev/null
@@ -869,6 +897,7 @@ mkdir -p "${EXTRACT_DIR}"
 unzip -q "${ARCHIVE}" -d "${EXTRACT_DIR}"
 
 FRONTEND_ARCHIVE="$(find_first_file "${EXTRACT_DIR}" 'test-agent-frontend-dist.tar.gz')"
+LOCAL_CLIENT_DIST="$(find_local_client_dist "${EXTRACT_DIR}")"
 BACKEND_JAR="$(find_first_file "${EXTRACT_DIR}" 'test-agent-app.jar')"
 BACKEND_LIB_DIR="$(find "${EXTRACT_DIR}" -maxdepth 6 -type d -path '*/backend/lib' | sort | head -n 1)"
 PROGRAMS_ARCHIVE="$(find_first_file "${EXTRACT_DIR}" 'test-agent-programs.tar.gz')"
@@ -909,6 +938,11 @@ if [[ "${VALIDATE_ONLY}" -eq 0 && ( "${SKIP_WORKER}" -eq 0 || "${WORKER_RUNTIME_
 fi
 
 require_file "${FRONTEND_ARCHIVE}"
+require_file "${LOCAL_CLIENT_DIST}/install.sh"
+require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-macOS-arm64.pkg"
+require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
+require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
+require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
 require_file "${BACKEND_JAR}"
 [[ -n "${BACKEND_LIB_DIR}" && -n "$(find "${BACKEND_LIB_DIR}" -maxdepth 1 -type f -name '*.jar' -print -quit)" ]] || {
   echo "backend external lib directory not found in archive" >&2
@@ -953,6 +987,7 @@ fi
 if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   log "Release archive validation passed"
   printf 'frontend archive: %s\n' "${FRONTEND_ARCHIVE}"
+  printf 'local client HTTP distribution: %s\n' "${LOCAL_CLIENT_DIST}"
   printf 'backend jar: %s\n' "${BACKEND_JAR}"
   printf 'backend lib: %s\n' "${BACKEND_LIB_DIR}"
   printf 'worker runtime component: %s\n' "${WORKER_COMPONENT_MODE}"
@@ -974,7 +1009,7 @@ if [[ "${WORKER_RUNTIME_REUSE}" -eq 1 && "${SKIP_WORKER_EXPLICIT}" -eq 0 ]]; the
 fi
 
 if [[ "${SKIP_FRONTEND}" -eq 0 ]]; then
-  run_frontend_update "$(ssh_target)" "${FRONTEND_ARCHIVE}" "${DEPLOY_INTERNAL_SRC}"
+  run_frontend_update "$(ssh_target)" "${FRONTEND_ARCHIVE}" "${DEPLOY_INTERNAL_SRC}" "${LOCAL_CLIENT_DIST}"
 fi
 
 log "Install backend artifacts under ${INSTALL_ROOT}"

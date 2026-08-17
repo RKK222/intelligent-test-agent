@@ -303,6 +303,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             redis.call('XADD', KEYS[2], tostring(seq) .. '-0', 'draft', ARGV[1])
             redis.call('XADD', KEYS[3], tostring(runtimeVersion) .. '-0',
               'draft', ARGV[1], 'durable', '1', 'seq', tostring(seq))
+            if ARGV[41] ~= '' then
+              redis.call('XADD', KEYS[11], tostring(runtimeVersion) .. '-0', 'event', ARGV[41])
+            end
             local count = redis.call('HINCRBY', KEYS[1], 'durableEventCount', 1)
             local runtimeCount = redis.call('HINCRBY', KEYS[1], 'runtimeEventCount', 1)
             local streamBytes = redis.call('HINCRBY', KEYS[1], 'streamBytes', string.len(ARGV[1]) * 2)
@@ -608,7 +611,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             end
             redis.call('HSET', KEYS[1], 'snapshotBytes', tostring(snapshotBytes))
             redis.call('SADD', KEYS[6], KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6], KEYS[7],
-              KEYS[9], KEYS[10])
+              KEYS[9], KEYS[10], KEYS[11])
             for _, key in ipairs(redis.call('SMEMBERS', KEYS[6])) do redis.call('PEXPIRE', key, ttl) end
             redis.call('PEXPIRE', KEYS[6], ttl)
             return cjson.encode({seq=seq,runtimeVersion=runtimeVersion,ignored=0,truncated=truncated,
@@ -2474,7 +2477,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 optionalText(fields, "attention"), optionalText(fields, "attentionEventId"),
                 optionalInstant(fields, "attentionAt"),
                 Instant.parse(text(fields, "detailsExpiresAt")),
-                base.createdAt(), Instant.parse(text(fields, "updatedAt")));
+                base.createdAt(), Instant.parse(text(fields, "updatedAt")),
+                base.targetRuntimeKind(), base.targetLocalClientInstanceId(),
+                base.targetConnectionGeneration());
     }
 
     private RunEvent event(RunEventDraft draft, long seq) {
@@ -2627,7 +2632,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 inputKey(runId),
                 ownerLeaseKey(runId),
                 pendingAttentionKey(runId),
-                pendingAttentionOrderKey(runId));
+                pendingAttentionOrderKey(runId),
+                analyticsOutboxKey(runId));
     }
 
     private Object[] operationArguments(
@@ -2683,8 +2689,53 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 attention.requestKey() == null ? "" : attention.requestKey(),
                 Long.toString(nonSnapshotDetailBudgetBytes()),
                 Integer.toString(maxPendingAttentionEntries()),
-                attention.legacyRequestKey() == null ? "" : attention.legacyRequestKey()
+                attention.legacyRequestKey() == null ? "" : attention.legacyRequestKey(),
+                durable ? analyticsEventJson(draft) : ""
         };
+    }
+
+    /** 运营 stream 仅保留调用标识、状态和计数，不复制消息正文或模型内容。 */
+    private String analyticsEventJson(RunEventDraft draft) {
+        if (!Set.of(
+                        RunEventType.RUN_STARTED,
+                        RunEventType.RUN_SUCCEEDED,
+                        RunEventType.RUN_FAILED,
+                        RunEventType.RUN_CANCELLED,
+                        RunEventType.TOOL_STARTED,
+                        RunEventType.TOOL_FINISHED,
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.DIFF_PROPOSED,
+                        RunEventType.DIFF_ACCEPTED,
+                        RunEventType.DIFF_REJECTED)
+                .contains(draft.type())) {
+            return "";
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("eventType", draft.type().wireName().toUpperCase().replace('.', '_'));
+        payload.put("runId", draft.runId().value());
+        payload.put("occurredAt", draft.occurredAt().toString());
+        copyAnalyticsText(draft.payload(), payload, "sessionId", "sessionID");
+        copyAnalyticsText(draft.payload(), payload, "parentSessionId");
+        copyAnalyticsText(draft.payload(), payload, "callId", "callID");
+        copyAnalyticsText(draft.payload(), payload, "taskCallId");
+        copyAnalyticsText(draft.payload(), payload, "toolName", "tool");
+        if ("skill".equalsIgnoreCase(String.valueOf(payload.get("toolName")))) {
+            copyAnalyticsText(draft.payload(), payload, "title");
+        }
+        copyAnalyticsText(draft.payload(), payload, "agentName", "agent");
+        copyAnalyticsText(draft.payload(), payload, "status");
+        return write(payload);
+    }
+
+    private void copyAnalyticsText(
+            Map<String, Object> source,
+            Map<String, Object> target,
+            String targetKey,
+            String... sourceKeys) {
+        List<String> keys = new ArrayList<>();
+        keys.add(targetKey);
+        keys.addAll(List.of(sourceKeys));
+        firstText(source, keys.toArray(String[]::new)).ifPresent(value -> target.put(targetKey, value));
     }
 
     /** 终态事件的恢复元数据只使用显式安全字段；旧调用方缺字段时按事件类型给出稳定默认值。 */
@@ -3169,6 +3220,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     private String snapshotOrderKey(RunId runId) { return runPrefix(runId) + "snapshot:order"; }
     private String pendingAttentionKey(RunId runId) { return runPrefix(runId) + "pending-attention"; }
     private String pendingAttentionOrderKey(RunId runId) { return runPrefix(runId) + "pending-attention:order"; }
+    private String analyticsOutboxKey(RunId runId) { return runPrefix(runId) + "analytics-outbox"; }
     private String registryKey(RunId runId) { return runPrefix(runId) + "keys"; }
     private String ownerLeaseKey(RunId runId) { return runPrefix(runId) + "owner-lease"; }
     private String scopeKey(RunId runId) { return runPrefix(runId) + "scope"; }

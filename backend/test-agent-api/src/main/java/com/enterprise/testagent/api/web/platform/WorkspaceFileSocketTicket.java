@@ -1,5 +1,6 @@
 package com.enterprise.testagent.api.web.platform;
 
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import java.time.Instant;
 
 /**
@@ -31,9 +32,22 @@ record WorkspaceFileSocketTicket(
         boolean shareCanChat,
         Instant shareExpiresAt,
         String shareSessionId,
+        RuntimeKind runtimeKind,
+        String localClientInstanceId,
+        Long connectionGeneration,
+        String rootDigest,
         String unifiedAuthId) {
 
-    /** 兼容统一认证标识加入前的完整构造路径。 */
+    WorkspaceFileSocketTicket {
+        runtimeKind = RuntimeKind.fromNullable(runtimeKind);
+        if (runtimeKind == RuntimeKind.LOCAL_CLIENT
+                && (localClientInstanceId == null || localClientInstanceId.isBlank()
+                || connectionGeneration == null || connectionGeneration < 1)) {
+            throw new IllegalArgumentException("local client ticket requires instance and generation");
+        }
+    }
+
+    /** 兼容本地运行目标和统一认证标识加入前的完整 ticket 构造器。 */
     WorkspaceFileSocketTicket(
             String ticket,
             String workspaceId,
@@ -65,7 +79,82 @@ record WorkspaceFileSocketTicket(
                 supportGrantId, supportGrantTokenDigest, supportActorSessionDigest,
                 supportTargetUserId, traceId, expiresAt, shareId, shareVersion,
                 shareActorUserId, executionOwnerUserId, shareCanChat, shareExpiresAt,
-                shareSessionId, null);
+                shareSessionId, RuntimeKind.SERVER_PROCESS, null, null, null, null);
+    }
+
+    /** 兼容仅绑定统一认证标识的服务端 ticket 构造路径。 */
+    WorkspaceFileSocketTicket(
+            String ticket,
+            String workspaceId,
+            String linuxServerId,
+            String agentLinuxServerId,
+            boolean appSourceWorkspace,
+            boolean superAdmin,
+            boolean appAdmin,
+            String userId,
+            String mode,
+            String scope,
+            String worktreeId,
+            boolean supportReadOnly,
+            String supportGrantId,
+            String supportGrantTokenDigest,
+            String supportActorSessionDigest,
+            String supportTargetUserId,
+            String traceId,
+            Instant expiresAt,
+            String shareId,
+            Long shareVersion,
+            String shareActorUserId,
+            String executionOwnerUserId,
+            boolean shareCanChat,
+            Instant shareExpiresAt,
+            String shareSessionId,
+            String unifiedAuthId) {
+        this(ticket, workspaceId, linuxServerId, agentLinuxServerId, appSourceWorkspace,
+                superAdmin, appAdmin, userId, mode, scope, worktreeId, supportReadOnly,
+                supportGrantId, supportGrantTokenDigest, supportActorSessionDigest,
+                supportTargetUserId, traceId, expiresAt, shareId, shareVersion,
+                shareActorUserId, executionOwnerUserId, shareCanChat, shareExpiresAt,
+                shareSessionId, RuntimeKind.SERVER_PROCESS, null, null, null, unifiedAuthId);
+    }
+
+    /** 兼容仅绑定本地运行目标、尚未绑定统一认证标识的构造路径。 */
+    WorkspaceFileSocketTicket(
+            String ticket,
+            String workspaceId,
+            String linuxServerId,
+            String agentLinuxServerId,
+            boolean appSourceWorkspace,
+            boolean superAdmin,
+            boolean appAdmin,
+            String userId,
+            String mode,
+            String scope,
+            String worktreeId,
+            boolean supportReadOnly,
+            String supportGrantId,
+            String supportGrantTokenDigest,
+            String supportActorSessionDigest,
+            String supportTargetUserId,
+            String traceId,
+            Instant expiresAt,
+            String shareId,
+            Long shareVersion,
+            String shareActorUserId,
+            String executionOwnerUserId,
+            boolean shareCanChat,
+            Instant shareExpiresAt,
+            String shareSessionId,
+            RuntimeKind runtimeKind,
+            String localClientInstanceId,
+            Long connectionGeneration,
+            String rootDigest) {
+        this(ticket, workspaceId, linuxServerId, agentLinuxServerId, appSourceWorkspace,
+                superAdmin, appAdmin, userId, mode, scope, worktreeId, supportReadOnly,
+                supportGrantId, supportGrantTokenDigest, supportActorSessionDigest,
+                supportTargetUserId, traceId, expiresAt, shareId, shareVersion,
+                shareActorUserId, executionOwnerUserId, shareCanChat, shareExpiresAt,
+                shareSessionId, runtimeKind, localClientInstanceId, connectionGeneration, rootDigest, null);
     }
 
     /** 兼容尚未绑定 Session 字段的测试与旧 JVM 内构造路径。 */
@@ -163,5 +252,9 @@ record WorkspaceFileSocketTicket(
 
     boolean sharedSession() {
         return shareId != null;
+    }
+
+    boolean localClient() {
+        return runtimeKind == RuntimeKind.LOCAL_CLIENT;
     }
 }

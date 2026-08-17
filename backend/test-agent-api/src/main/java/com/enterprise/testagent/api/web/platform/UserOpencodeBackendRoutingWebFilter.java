@@ -36,12 +36,13 @@ class UserOpencodeBackendRoutingWebFilter implements WebFilter {
             return chain.filter(exchange);
         }
         Mono<Mono<Void>> routeAction = routingService.resolveRoute(exchange, principal.get())
-                .map(resolution -> resolution.linuxServerId()
-                        .map(linuxServerId -> routingService.forward(
-                                resolution.exchange(),
-                                principal.get(),
-                                linuxServerId))
-                        .orElseGet(() -> chain.filter(resolution.exchange())));
+                .map(resolution -> resolution.backendProcessId()
+                        .map(backendProcessId -> routingService.forward(
+                                resolution.exchange(), principal.get(), backendProcessId))
+                        .orElseGet(() -> resolution.linuxServerId()
+                                .map(linuxServerId -> routingService.forward(
+                                        resolution.exchange(), principal.get(), linuxServerId))
+                                .orElseGet(() -> chain.filter(resolution.exchange()))));
         return routeAction
                 .onErrorResume(
                         com.enterprise.testagent.common.error.PlatformException.class,

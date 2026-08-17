@@ -44,6 +44,10 @@
         </dependency>
         <dependency>
             <groupId>com.enterprise.testagent</groupId>
+            <artifactId>test-agent-local-client-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.enterprise.testagent</groupId>
             <artifactId>test-agent-system-management</artifactId>
         </dependency>
         <dependency>
@@ -65,6 +69,10 @@
         <dependency>
             <groupId>com.enterprise.testagent</groupId>
             <artifactId>test-agent-model-gateway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.enterprise.testagent</groupId>
+            <artifactId>test-agent-memory</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

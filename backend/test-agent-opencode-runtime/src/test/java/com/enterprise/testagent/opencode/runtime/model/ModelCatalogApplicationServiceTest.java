@@ -10,6 +10,7 @@ import com.enterprise.testagent.domain.model.AiModelConfigRepository;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -159,6 +160,28 @@ class ModelCatalogApplicationServiceTest {
     }
 
     @Test
+    void localClientProviderConfigUsesOnlyLoopbackRelayEnvironmentReferences() {
+        ModelCatalogProperties properties = new ModelCatalogProperties();
+        properties.setSource("internal");
+        properties.getInternal().setApiKey("platform-secret-must-not-leave-backend");
+        FakeModelRepository repository = new FakeModelRepository();
+        ModelCatalogApplicationService service = new ModelCatalogApplicationService(
+                properties, repository, objectMapper);
+        service.seedInternalModelsAfterStartup();
+        RecordingRuntime runtime = new RecordingRuntime();
+
+        service.syncProviderConfig(runtime, localNode(), "trace_local_model_test");
+
+        assertThat(runtime.command).isNotNull();
+        assertThat(runtime.command.body()).asString()
+                .contains("{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}")
+                .contains("{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}")
+                .contains("X-Enterprise-Model-Provider=enterprise-openai")
+                .doesNotContain("platform-secret-must-not-leave-backend")
+                .doesNotContain("Auth-Token");
+    }
+
+    @Test
     void opencodeSourceLeavesModelCatalogUnmanaged() {
         ModelCatalogProperties properties = new ModelCatalogProperties();
         properties.setSource("opencode");
@@ -220,6 +243,25 @@ class ModelCatalogApplicationServiceTest {
                 0,
                 1,
                 now);
+    }
+
+    private ExecutionNode localNode() {
+        Instant now = Instant.now();
+        return new ExecutionNode(
+                new ExecutionNodeId("node_local_model_test"),
+                "http://local-client.invalid",
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                100,
+                now,
+                Set.of("chat"),
+                now,
+                now,
+                "trace_local_node",
+                RuntimeKind.LOCAL_CLIENT,
+                "lci_1234567890abcdef",
+                7L);
     }
 
     private static class RecordingRuntime implements AgentRuntime {

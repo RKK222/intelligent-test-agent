@@ -193,6 +193,11 @@ render_backend_template() {
   local xxl_mysql_password="$7"
   local xxl_access_token="$8"
   local lobehub_hmac_secret="$9"
+  local analytics_clickhouse_url="${10}"
+  local analytics_clickhouse_username="${11}"
+  local analytics_clickhouse_password="${12}"
+  local memory_service_api_key="${13}"
+  local memory_model_gateway_hmac_secret="${14}"
   local line key value
 
   : >"${output}"
@@ -210,6 +215,11 @@ render_backend_template() {
       TEST_AGENT_OPENCODE_MANAGER_TOKEN) value="${manager_token}" ;;
       TEST_AGENT_INTERNAL_PROXY_API_KEY) value="${proxy_key}" ;;
       TEST_AGENT_LOBEHUB_HMAC_SECRET) value="${lobehub_hmac_secret}" ;;
+      TEST_AGENT_ANALYTICS_CLICKHOUSE_URL) value="${analytics_clickhouse_url}" ;;
+      TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME) value="${analytics_clickhouse_username}" ;;
+      TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD) value="${analytics_clickhouse_password}" ;;
+      TEST_AGENT_MEMORY_SERVICE_API_KEY) value="${memory_service_api_key}" ;;
+      TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET) value="${memory_model_gateway_hmac_secret}" ;;
       # 当前现场同时支持域名和 IP 的 9996 入口，前端使用同源 API。
       TEST_AGENT_CORS_ALLOWED_ORIGINS) value="http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996" ;;
       TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL) value="" ;;
@@ -257,6 +267,8 @@ configure_backend() {
   local timestamp config_dir backend_tmp docker_tmp
   local db_password redis_password api_token backend_manager_token docker_manager_token manager_token proxy_key
   local xxl_mysql_password xxl_access_token lobehub_hmac_secret
+  local analytics_clickhouse_url analytics_clickhouse_username analytics_clickhouse_password
+  local memory_service_api_key memory_model_gateway_hmac_secret
 
   require_file "${BACKEND_TEMPLATE}"
   require_file "${DOCKER_TEMPLATE}"
@@ -273,6 +285,12 @@ configure_backend() {
   xxl_mysql_password="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_MYSQL_PASSWORD)"
   xxl_access_token="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_ACCESS_TOKEN)"
   lobehub_hmac_secret="$(env_value "${BACKEND_ENV}" TEST_AGENT_LOBEHUB_HMAC_SECRET)"
+  analytics_clickhouse_url="$(env_value "${BACKEND_ENV}" TEST_AGENT_ANALYTICS_CLICKHOUSE_URL)"
+  analytics_clickhouse_username="$(env_value "${BACKEND_ENV}" TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME)"
+  analytics_clickhouse_password="$(env_value "${BACKEND_ENV}" TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD)"
+  memory_service_api_key="$(env_value "${BACKEND_ENV}" TEST_AGENT_MEMORY_SERVICE_API_KEY)"
+  memory_model_gateway_hmac_secret="$(env_value "${BACKEND_ENV}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET)"
+  analytics_clickhouse_username="${analytics_clickhouse_username:-testagent_analytics}"
 
   [[ -n "${db_password}" ]] || {
     echo "TEST_AGENT_DB_PASSWORD is missing from ${BACKEND_ENV}" >&2
@@ -299,6 +317,14 @@ configure_backend() {
     echo "TEST_AGENT_XXL_JOB_ACCESS_TOKEN is missing from ${BACKEND_ENV}" >&2
     exit 1
   }
+  [[ -n "${analytics_clickhouse_url}" ]] || {
+    echo "TEST_AGENT_ANALYTICS_CLICKHOUSE_URL is missing from ${BACKEND_ENV}" >&2
+    exit 1
+  }
+  [[ -n "${analytics_clickhouse_password}" ]] || {
+    echo "TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD is missing from ${BACKEND_ENV}" >&2
+    exit 1
+  }
 
   config_dir="$(dirname "${BACKEND_ENV}")"
   [[ "$(dirname "${DOCKER_ENV}")" == "${config_dir}" ]] || {
@@ -312,7 +338,9 @@ configure_backend() {
 
   # 当前 release 默认禁用 LobeHub；存量配置有值时原样保留，没有值时显式留空，不能把模板占位符写入生产文件。
   render_backend_template "${backend_tmp}" "${db_password}" "${redis_password}" "${api_token}" "${manager_token}" \
-    "${proxy_key}" "${xxl_mysql_password}" "${xxl_access_token}" "${lobehub_hmac_secret}"
+    "${proxy_key}" "${xxl_mysql_password}" "${xxl_access_token}" "${lobehub_hmac_secret}" \
+    "${analytics_clickhouse_url}" "${analytics_clickhouse_username}" "${analytics_clickhouse_password}" \
+    "${memory_service_api_key}" "${memory_model_gateway_hmac_secret}"
   render_docker_template "${docker_tmp}" "${manager_token}"
 
   if grep -q 'REPLACE_' "${backend_tmp}" "${docker_tmp}"; then

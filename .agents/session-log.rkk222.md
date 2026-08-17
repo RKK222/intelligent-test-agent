@@ -89,6 +89,111 @@
 
 - release 形成不含独立 Workflow、仍保留 72 个受控 LobeHub 资产的交付基线；未修改 `.env*`、generated SDK、OpenCode 只读源码或已执行 migration 字节。
 
+### 2026-08-13 - 永久从用户手册排除游戏内容
+
+### Why
+
+- 用户明确要求游戏相关内容永远不得进入用户手册，不能只删除当前周更章节后依赖人工记忆。
+
+### What
+
+- 从每周新功能和功能总览中删除游戏入口、适用场景、配置、操作步骤与权限说明，并删除三张对应操作截图。
+- 在用户手册内容边界中增加永久禁入规则；帮助中心测试扫描整本用户手册 Markdown，同时拦截中英文游戏关键词，防止后续在其它章节重新加入。
+- 保留宠物问答、伙伴选择等非游戏说明，也不修改产品中的游戏实现或研发文档。
+
+### How
+
+- 审计 `frontend/apps/user-manual/docs/` 全部 Markdown 和周更图片资源，复用现有帮助中心测试覆盖手册事实源，没有新增独立校验链路。
+- 执行帮助中心 Vitest、用户手册 VitePress 构建、agent-web 类型检查、运行页关键词扫描、截图引用与数量校验。
+
+### Result
+
+- 用户手册正文已无游戏内容；保留的每项周更工作功能仍有用户场景、使用前配置、操作步骤和至少一张截图，后续误加入游戏内容会被自动化测试阻断。
+- 未变更 API、事件、数据库、性能、安全、兼容性、部署拓扑或环境配置。
+
+### 2026-08-13 - 补齐自动化代码库工作空间点击入口
+
+### Why
+
+- 用户指出每周新功能只写了“找到自动化代码库分组”，没有说明入口位置和逐层点击方法，已有截图也未包含顶部工作空间按钮。
+
+### What
+
+- 在自动化代码库周更说明中增加“入口在哪”，写明顶部“应用 → 工作空间 → 版本”和文件树左下角双向箭头两个入口。
+- 普通用户步骤细化到具体按钮和日期版本切换；管理员步骤细化到左下角设置、个人设置、版本库管理、应用关联、工作空间保存的逐层点击路径，并补充分组不显示时的排查方法。
+- 用既有 Playwright 工作台场景重截完整页面，截图同时展示顶部入口、展开后的自动化代码库分组和左下角备用入口；帮助中心测试锁定关键入口文案。
+
+### How
+
+- 复用 `FigmaShell` 顶部工作空间选择、`WorkbenchFooter` 左下角双向箭头以及 `SettingsMenu`/现有管理面板的真实按钮文案，没有新增页面或入口。
+- 执行自动化代码库相关 Playwright 场景、帮助中心 Vitest、VitePress 手册构建、agent-web 类型检查、图片引用和 `git diff --check`，并在运行中的 release 手册复核更新后正文。
+
+### Result
+
+- 用户现在可以直接按手册从工作台找到并进入自动化代码库，也能按管理员路径完成前置配置；未变更 API、事件、数据库、安全、性能或部署拓扑。
+
+### 2026-08-13 - 每周新功能补充配置说明与操作截图
+
+### Why
+
+- 用户要求每周新功能除用户场景和操作步骤外，补充使用前配置，并加入可直接对照页面的操作截图，同时同步 release 与 dev 用户手册。
+
+### What
+
+- release 每周新功能的五项能力逐项补充普通用户与管理员配置边界，并加入平台体验、自动化工作空间、会话分享、资料多选和宠物游戏共 11 张脱敏截图；dev 额外补充长期记忆用户页与管理员配置页 2 张截图。
+- 帮助中心入口文案与问答上下文测试同步要求“使用前配置”，用户手册维护规范明确截图目录、真实组件状态和替代文本要求。
+
+### How
+
+- 复用项目既有 Playwright 工作台 mock 场景渲染真实前端组件并截图，截图生成后还原临时测试改动；执行帮助中心 Vitest、用户手册 VitePress 构建、agent-web 类型检查、图片引用检查和 `git diff --check`。
+- release 构建后的手册由 `127.0.0.1:3001/help/` 提供静态服务，并在应用内浏览器复核章节导航、配置正文、图片替代文本和页面布局；dev 同步执行帮助中心测试、手册构建和类型检查。
+
+### Result
+
+- release 与 dev 手册均可按周查看各自已开放新功能的适用场景、使用前配置、操作步骤、截图和权限边界；dev 保留独有的长期记忆说明，未变更 API、事件、数据库、安全策略或部署拓扑。
+- 本地真实登录环境因 PostgreSQL `127.0.0.1:15432` 未启动而不可用，操作截图因此使用项目现有 E2E 数据渲染，不包含真实账号、仓库或客户数据。
+- dev 长期记忆普通用户 Playwright 场景首次超时后重试通过；管理员完整场景在清空模型下拉的既有 `.el-select__clear` 定位处两次超时，专用截图路径在此前稳定状态通过。该问题不影响本次文档构建，但完整管理员场景未计为通过。
+
+### 2026-08-13 - 按部署边界整合 release 到 dev
+
+### Why
+
+- 用户确认自动化代码库、宠物游戏和 E2E 数据等无需新增服务即可部署的能力保留在 release；Mem0、embedding 和本地 OpenCode client 等大功能先只进入 dev，并默认关闭。
+
+### What
+
+- dev 依次吸收 release 最新的自动化代码库、宠物随机难度和对话/工作空间 E2E 数据提交，并记录清理后的 release 为合并父节点。
+- dev 保留既有 memory-service、embedding-service、本地客户端和 LobeHub 资产，独立 Workflow 继续保持删除状态。
+
+### How
+
+- 对三个 release 业务提交逐个 cherry-pick，以避免删除 Workflow 时的历史重命名检测误删 memory/embedding；确认树内容后使用 ours 合并记录 release 完整祖先关系。
+- 通过精确残留扫描、分支祖先检查、默认开关检查、前后端构建和相关回归测试验证组合结果。
+
+### Result
+
+- release 可独立部署且无需启动 Mem0/embedding/client；dev 同时包含 release、Mem0 和 client 历史，LobeHub 与 memory 默认关闭。
+
+### 2026-08-12 - 从主线移除独立 Workflow 能力
+
+### Why
+
+- 用户确认独立 Workflow/长程任务能力永久不再需要，并要求代码、部署、测试和稳定文档在所有分支中一并清理；LobeHub 仍需完整保留。
+
+### What
+
+- 删除根目录 Workflow、Runner、分析任务工程，Java capability/Redis 状态、前端长程任务路由与两个 workspace 包，同时移除本地启动、企业打包、Nginx、离线部署脚本及对应测试。
+- 清理 HTTP/事件/数据库/安全/模块图、后端与前端 README/PACKAGE 中的旧契约；LobeHub 登录、模型网关、客户端、离线调度及其上游 `/api/workflows/*` 禁用规则保持不变。
+
+### How
+
+- JDK 25 下完成后端打包和定向测试；完成前端全量测试、类型检查、生产构建与预览冒烟，并执行开发脚本、内部 Nginx、增量包、双后台完整包和 AI 文档门禁。
+- 全量 Maven 测试仅在本机 Docker 的 `mysql:8.4` Testcontainers 三次启动后无法建立 JDBC 连接处失败；以无测试全量打包和相关模块定向测试补充验证。
+
+### Result
+
+- 形成不含独立 Workflow、仍保留 LobeHub 的清理基线；未新增或修改平台数据库/Flyway/MyBatis SQL、generated SDK、OpenCode 源码或 `.env*`。
+
 ### 2026-08-08 - 优化超级管理员内部模型调用可观测页面布局与精细化调整
 
 ### Why
@@ -9668,6 +9773,87 @@
 
 - 弹珠现在从发射槽到达顶部后会可靠进入主球台，离槽后不能从上方重新掉回发射槽；正常底部漏球、自动救球、三球多球和下坡重力规则保持不变。
 - 本次不涉及 HTTP API、RunEvent、DTO、数据库、SQL、migration、后端、安全或环境配置；仅调整前端本地物理状态，不影响服务端性能与兼容性。未修改 generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+## 2026-08-12 - 按正确方向将最新 release 合入 mem0
+
+### Why
+
+- 用户澄清本次集成方向应为 `release → mem0`；此前把 mem0 合入 release 的本地操作方向相反。
+- 远端 release 已包含错误方向的合并提交 `4d5186104` 和其后的记录提交 `605899a4a`，同时又新增了 10 个业务提交，不能直接丢弃后续成果，也不能在未获授权时强推改写远端历史。
+
+### What
+
+- 先生成可恢复 bundle，再以错误合并前的 release `380f94234` 为基线，完整重放后续 10 个 release 提交；得到不包含 mem0 祖先 `c8cd006dc` 的纯净本地 release `f10754e01`。
+- 将该纯净 release 以非快进方式合入 `codex/qa-agent-memory-v1`（mem0）；唯一文本冲突位于本提交者会话记录，业务代码、API、前后端和稳定文档均自动合并，并保留双方有效记录。
+- 合并带入 release 最新的共享会话重发即时同步、通知中心、内部模型时延分布、工作区查询等代码及其 HTTP/SSE、模块、前端和测试文档；没有新增数据库结构或 Flyway migration。
+
+### How
+
+- 祖先与内容校验确认：纯净 release 含原基线及其后 10 个提交、mem0 不再是其祖先；错误历史与重放后历史的文件级 name-status 完全一致，安全 bundle 位于主工作区 `.tmp/git-safety/`。
+- JDK 25 定向后端测试在 21 模块通过（domain 1、workspace 3、runtime 35、memory 33、API 36、persistence 23），全后端 23 模块 `mvn clean package -DskipTests` 通过；AI 文档门禁通过。
+- 前端全仓 typecheck 和 production build 通过；完整 Vitest 为 1950 passed / 1 skipped / 1 个 editor 并发偶发失败，失败文件单独复跑 9/9 通过。Chromium 定向场景中通知实时同步、共享撤回重发、手工重发 3 项通过。
+- 另有 2 个存量 Chromium 用例稳定失败：mem0 首页已固定为 `/workbench` 但旧分享用例仍断言 `/`；固定 CHAT 下拉未声明 `clearable` 但旧记忆用例点击清除按钮。相关路由、组件和断言在合并前 mem0 `c8cd006dc` 已同时存在，本次未越界修复。
+- 使用主工作区只读 `.env.test`、JDK 25、共享 `TEST_AGENT_ROOT/TESTAGENT/SYS_DATA_ROOT_DIR`，从 mem0 工作树以 `--with-memory --without-workflow` 独立启动 backend、frontend 和 opencode-manager。backend health/readiness、frontend 3000、CORS、4097/4098 OpenCode 及 Memory VIP/CPU BGE/pgvector 均通过，Memory `rawMessageCount=0`。
+- 合并前属于用户的 6 个未提交前端文件通过独立 safety stash 原样恢复并继续保持未暂存；恢复后相关 Vitest 为 204 passed / 1 skipped，agent-web typecheck 和 4 个 Chromium 原生重发/只读命令场景均通过。
+
+### Result
+
+- 本地 release 已恢复为纯净 release 主线，最新 release 已按正确方向集成到 mem0；实际运行服务均来自 mem0 工作树。
+- 用户原有 6 个工作区改动未进入合并提交，已在最新 release 基线上恢复，可继续开发。
+- 远端 release 仍含错误方向历史，修正它需要明确授权后执行受保护的 `--force-with-lease`，本次没有推送或改写远端；Workflow 因本机缺少其独立 Redis 密钥未启动。
+- 未修改 `.env*`、generated SDK 或 OpenCode 只读源码；API/SSE 仅包含 release 已文档化的 additive 兼容扩展，数据库结构、安全边界和 migration 无变化。
+## 2026-08-12 - 新增 ARM64 本地 OpenCode 客户端与内网 HTTP 分发
+
+### Why
+
+- 需要允许用户通过独立 client key 将多个本地 ARM64 客户端接入平台，在本地用户权限内监管一个 OpenCode 1.18.4 进程并注册多个本地工作空间；浏览器仍只访问后台 Java，后台不能直接扫描用户磁盘。
+- 企业环境需要由 Nginx 通过内网明文 HTTP 分发 macOS Apple Silicon、麒麟 ARM 客户端，客户端安装时必须校验签名和固定版本依赖的 SHA-256。
+
+### What
+
+- 从提交 `18864a51b` 新建 `/Users/kaka/Desktop/intelligent-test-agent-local-opencode-client` worktree 和 `codex/local-opencode-client` 分支；主 worktree 的未提交后端、前端改动未复制、清理或暂存。
+- 新增 `test-agent-local-client-protocol`、`test-agent-workspace-filesystem`、`test-agent-local-client` 三个 Maven 模块，实现 `local-opencode-client.v1` 反向 WSS 协议、连接 generation fencing、心跳/取消/背压、OpenCode HTTP/SSE 与文件 RPC、本地模型中继、loopback 进程监管及稳定实例身份。
+- 后台新增单用户 client key 的创建/复制/轮换/撤销、客户端实例与连接路由、短期模型 grant、本地工作空间注册和文件 ticket；运行、会话、夜间任务及 OpenCode 路由增加向后兼容的 `RuntimeKind`/实例目标并禁止离线时回退服务端实例。关系型持久化全部使用 MyBatis XML，并新增 `V20260811210453__local_client_credentials_create_runtime.sql`。
+- 前端设置页增加密钥和实例管理、本地工作空间注册；头像菜单同时展示服务端和本地 OpenCode，按 capability 关闭本地首版不支持的终端、Git、Agent 配置、附件和协作入口。
+- 新增固定版本 Temurin JRE 21、OpenCode 1.18.4 的 ARM64 打包与签名清单、无 root 安装脚本、LaunchAgent/systemd user 服务及 Nginx `/downloads/local-opencode-client/` 配置；同步工程/模块 README、HTTP API、事件协议、数据库、安全、架构及部署文档。
+
+### How
+
+- 后端相关定向测试、客户端真实 supervisor 测试、跨 Java 精确路由、文件系统安全、生命周期、夜间任务、密钥/脱敏与兼容测试通过；修正 H2 夹具后持久层回归 297 passed / 19 skipped。真实 PostgreSQL 覆盖已知 Flyway 历史的 20 项升级测试通过，源码、持久层 JAR 和最终 Spring Boot JAR 内 migration SHA-256 均为 `b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970`。
+- `test-agent-app -am -DskipTests package` 和客户端 shaded JAR 构建通过，`java -jar ... --version` 输出 `test-agent-local-client 0.1.0`；真实 OpenCode 1.18.4 在 Apple Silicon Mac 上完成 loopback 启停、端口冲突、PID/启动时间和重启恢复验证。
+- 前端全量 Vitest 127 files、1946 passed / 1 skipped，workspace typecheck、lint、production build 通过；分发脚本完成签名、哈希和本机 HTTP 安装测试，Nginx 配置通过 `nginx -t` 及隐藏文件、目录索引、缓存策略反例校验。
+- 完整 Maven 回归确认三个基线问题与本次无关：H2 模型表夹具缺 `embedding_dimension`、PostgreSQL 模型用量并发用例在全量负载下 20 秒超时、分享用例固定 8 月 9 日过期时间；两个既有 MySQL 8.4 Testcontainers 场景在本机启动超过 120 秒。提交前已回顾全部 `.agents/session-log*.md` 并确认没有覆盖近期成果。
+
+### Result
+
+- 代码、协议、API、数据库、前端和内网 HTTP 分发主链路已实现并在 Apple Silicon 与真实 PostgreSQL 上部分验证；未修改 `.env*`、generated SDK 或 `opencode-source/opencode-1.18.4`，未 push。
+- 当前 worktree 没有独立 `.env.test`，且主 worktree 的 8080/3000 服务正在使用，未擅自停止或覆盖，因此没有在该 worktree 启动完整后台/前端/客户端三服务链路。缺少真实 ARM 麒麟设备，麒麟安装、systemd user、认证连接、文件 CRUD 和聊天修改文件的最终验收仍需在目标机执行，不能声明完整可交付。
+
+## 2026-08-12 - 整理 release、mem0 与 client 为 dev
+
+### Why
+
+- 用户要求直接推送 release，并把 release、mem0 和本地 OpenCode client 汇总为单一 `dev` 分支；`dev` 的 Workflow 与 LobeHub 必须默认关闭。
+- release、mem0 和 client 已形成三套提交历史及 Flyway 顺序，主、mem0 工作树还分别存在用户未提交文件，整理时不能覆盖或混入提交。
+
+### What
+
+- 将 `codex/release-enterprise-20260801` 直接推送到 `origin`，以其最新提交创建独立 `dev` worktree；通过非快进合并保留 mem0 与 client 的完整祖先关系，并恢复 release 曾撤销的 Mem0 实现、整合 client 实际差异。
+- 修正合并产生的 `SessionApplicationService` 重复方法和 `WorkspaceFileServiceTest` 嵌套语法/共享文件内核错误码断言；没有修改 OpenCode 只读源码或 generated SDK。
+- `restart-dev-services.sh` 将 Workflow 与 LobeHub 都设为默认关闭，分别只在显式 `--with-workflow`、`--with-lobehub` 时启用；Mem0 数据面保持既有 `--with-memory` 显式启用。脚本校验和后端/部署/AI 工作流文档同步更新。
+- 实际保留库启动发现 release 已执行到 `V20260812144051`、但缺少 client 的低版本 `V20260811210453`。复用唯一 `DatabaseMigrationCompatibilityCustomizer`，新增隔离的 `V20260812202425` 前向 migration；不启用 `outOfOrder`、不执行 `repair`、不改历史表，并用 SHA-256 测试锁定两条路径。
+
+### How
+
+- 后端完整 26 模块 `mvn package -DskipTests` 通过；Workspace 文件服务 40 项通过，client/Mem0/API 定向测试 48 passed / 1 skipped。新增迁移后 `FlywayMigrationNamingTest` 12/12、真实 PostgreSQL `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 24/24 通过。
+- 前端 agent-web typecheck、覆盖 release/client/mem0 交集的 7 个 Vitest 文件 255 passed / 1 skipped、9910 模块 production build 均通过；`tools/verify-dev-scripts.sh` 全部通过。
+- 使用 JDK 25、主工作区只读 `.env.test` 和共享数据根，从 dev 工作树执行 `./restart-dev-services.sh --profile test --env-file /Users/kaka/Desktop/intelligent-test-agent/.env.test --skip-frontend-build`，未传 Workflow、LobeHub 或 Mem0 启用参数。实际 PostgreSQL 从 `20260812144051` 正序应用到 `20260812202425`；backend health/readiness、frontend 3000、CORS 与 manager WebSocket/4098 OpenCode health 均通过。
+- 最终远端核对期间 release 又新增 `80e5e4ff9` 历史对话耗时修复；将该提交及 release 中被早期 mem0 内容恢复覆盖的黄金矿工/弹球最新实现继续合入 dev。相关 Vitest 117/117、agent-web typecheck、9913 模块 production build 通过；历史切换 Chromium 首轮因页面冷启动未出现会话按钮而超时，自动重试通过，预热后关闭重试单跑 1/1 通过。
+
+### Result
+
+- `dev` 同时包含 release、mem0、client 的提交历史与功能，默认启动不包含 Workflow、LobeHub 或 Mem0 数据面，按需通过显式参数开启；release 已同步 `origin`。
+- 本次新增数据库兼容装配与前向 migration，不新增另一套迁移器；API、RunEvent、安全协议均只承接三个来源分支已有的向后兼容扩展。稳定文档已同步。
+- 主工作树 `frontend/apps/agent-web/components.d.ts` 和 mem0 工作树 6 个用户未提交文件保持未暂存且未进入 dev；未修改任何 `.env*`。真实 ARM 麒麟设备上的 client 最终验收仍是 client 原分支的既有外部验证项，不影响本次分支整理与本机启动结论。
 
 ## 2026-08-12 - 恢复历史对话任务耗时
 
@@ -9784,6 +9970,116 @@
 
 - 自动化代码库的配置、工作空间规则、迁移、测试和文档已实现并完成代码级、构建级及真实 PostgreSQL 兼容验证；实际 HTTP/UI 创建流程因本地 Flyway 历史分叉仍未运行，交付状态为部分运行验证。
 - 本次只对既有 HTTP 响应增量增加类型编码，不变更 DTO 字段、RunEvent、表结构、性能或安全契约；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未新建分支或推送远端。
+## 2026-08-13 - 固化 dev 与 release 后续开发边界
+
+### Why
+
+- 用户明确后续影响部署、需要新增节点或运行服务的大功能统一在 `dev` 开发，`release` 只维护 Bug 和现有拓扑可承载的小功能，需要把这项长期决策写入 AI 必读规范。
+
+### What
+
+- 在 `AGENTS.md`、研发工作流和完成前自检清单中统一定义 `dev`、`release`、`main` 的职责、判定条件和合并门禁；边界不清时默认选择 `dev`。
+- 明确 release 修复必须同步回 dev，从 dev 提升到 release 只能按已批准功能选择性合入，禁止整体带入未交付节点、服务、migration 或配置。
+- 更新文档索引，使后续开发者在进入编码流程前即可看到分支策略。
+
+### How
+
+- 复用现有 `AGENTS.md`、`docs/guides/ai-workflow.md` 和 `docs/guides/self-checklist.md` 作为规范单一入口，没有新增重复的分支说明文件。
+- 运行 AI 文档校验、差异空白与冲突标记检查，并回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 后续开发具备明确的分流规则：部署演进和新节点功能进入 dev，release 只承载兼容当前部署的修复与小功能，main 保持稳定基线。
+- 本次只修改研发流程文档，不涉及代码、API、事件、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 修复自动化代码库首页分组与工作区刷新
+
+### Why
+
+- 自动化代码库创建成功后仍混在“测试工作空间”分组，无法像应用代码库一样独立识别；顶部选择器又提前乐观显示目标版本，同版本重选时直接返回，导致顶部已变化而左侧目录没有实时刷新。
+
+### What
+
+- 工作空间模板响应增量返回关联版本库 `repositoryType`，前端顶部和左下角入口分别展示“应用代码库 / 自动化代码库 / 测试工作空间”；旧后端缺少该字段时继续归入原测试工作空间分组。
+- 顶部工作空间和版本显示改为以父层实际完成的选择为事实源；重选当前版本时重新读取 Workspace 快照，并主动刷新左侧组合目录和 Git diff。
+- 同步 workspace、shared-types、agent-web README/PACKAGE，以及 HTTP API、模块地图和用户手册；未新增路由、DTO、数据库字段或事件类型。
+
+### How
+
+- 后端 `ManagedWorkspaceApplicationServiceTest` 92/92，前端 FigmaShell/WorkbenchFooter 定向 Vitest 78/78，两个 Chromium 工作台场景各 1/1，全 workspace typecheck、production build 和 22 模块跳过测试打包均通过。
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 在 JDK 25 下重启 backend、manager 和 frontend；backend health 为 UP，前端返回 200。真实测试账号 API 返回自动化模板类型，真实 Chromium 页面可见独立分组，重选 `ai-test` 后捕获到新的 `workspace.view.list` 请求且左侧目录已渲染。
+
+### Result
+
+- 自动化代码库在首页两个工作空间入口均独立展示，顶部上下文与左侧文件树在实际切换完成后同步更新，同版本重选也会重新拉取目录。
+- 本次只增量扩展既有 HTTP 响应并修复前端状态同步；不涉及 RunEvent、数据库、migration、性能、安全、环境配置、generated SDK 或 OpenCode 源码，未新建分支或推送远端。
+
+## 2026-08-13 - 修复 VPN 下 OpenCode 间歇证书校验失败
+
+### Why
+
+- macOS 已启用本地 VPN/系统代理时，Java 的数据库与 Redis 直连和 manager 的 VPN 端口识别已有隔离，但 OpenCode 使用的 Bun 子进程没有继承系统 HTTPS 代理，仍可能经 TUN 假地址访问模型服务并间歇报 `unknown certificate verification error`。
+
+### What
+
+- 本地启动脚本在没有显式 `HTTPS_PROXY`/`https_proxy` 时自动读取 macOS 静态 HTTPS 代理，必要时回退到可承载 CONNECT 的 HTTP 代理，并仅传给 opencode-manager 及其 OpenCode 子进程；显式环境变量优先，`TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY=false` 可关闭自动探测。
+- 保持 Maven、前端构建和 Java 后端不继承该代理，不关闭或放宽 TLS 证书校验；同步研发启动文档。另为既有自动化代码库提交补齐一处测试模板 `repositoryType`，恢复 release 前端类型构建。
+
+### How
+
+- 通过 Bash 语法、差异空白检查，JDK 25 后端 22 模块跳过测试完整打包，以及 agent-web 的 Vue 类型检查和 Vite 生产构建。
+- 以 `test` profile 重启 release，验证 backend health/readiness、frontend、CORS 和 manager/OpenCode 进程；进程环境确认代理只进入 manager/OpenCode，Java 后端未继承。
+- 在真实用户 OpenCode 端口连续发起 3 次 `mimo-v2.5-free` 对话，3/3 返回预期内容，新日志未再出现证书校验错误。
+
+### Result
+
+- VPN 开启状态下，本轮真实模型对话未复现 `unknown certificate verification error`；仍观察到上游连接偶发 `socket connection was closed unexpectedly`，SDK 重试后主对话成功，属于 VPN 节点或外部链路的剩余稳定性风险。
+- 本次未修改 `.env*`、API、RunEvent、数据库、migration、generated SDK 或 OpenCode 只读源码，也未降低安全校验。
+
+## 2026-08-13 - 用户手册新增每周新功能板块
+
+### Why
+
+- 用户需要从使用者视角按周了解最新功能的适用场景、入口和操作方法，而不是继续从功能总览和多个专题中自行拼接信息。
+- 当前 `release` 已开放平台体验、自动化代码库、会话通知协作、测试资料批量跳转和宠物新游戏；周更内容必须严格以交付分支事实为准，不能混入仅在 `dev` 的长期记忆等能力。
+
+### What
+
+- 新增“每周新功能”稳定章节，并注册到 VitePress 顶部导航、侧栏、手册首页和应用内 Help；首期按 2026-08-10 至 2026-08-16 汇总五类用户场景、步骤和权限/数据边界。
+- `help-center.ts` 直接复用同一 Markdown 作为宠物问答资料；`release` 以 5600 字有界上下文锁定不包含长期记忆，回合 `dev` 后保留长期记忆并将周更上下文调整为 7000 字。
+- 同步用户手册、frontend 和 agent-web README/PACKAGE；功能总览校正宠物游戏入口仅超级管理员可见，以及当前六款游戏名称。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/help-center.test.ts --reporter=verbose`：12/12 通过。
+- `corepack pnpm --filter @test-agent/agent-web typecheck` 与 `corepack pnpm --filter @test-agent/user-manual build` 通过。
+- 实际以 `corepack pnpm --filter @test-agent/user-manual dev` 启动手册，`/help/`、周更页及三个关联专题均返回 HTTP 200，生成 HTML 包含导航、场景、操作步骤和正确内部链接。
+
+### Result
+
+- 用户可从手册首页、顶部导航、侧栏或应用内 Help 直接打开“每周新功能”，按“想做什么”快速定位本周能力，再进入稳定专题查看完整规则。
+- `release` 周更保持当前交付能力，`dev` 周更额外说明按账号开放的长期记忆，分支同步没有覆盖 `dev` 专属章节。
+- 本次不新增 API、RunEvent、数据库、migration、部署节点、强制配置或安全权限；未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 同步稳定用户手册操作截图到 dev
+
+### Why
+
+- release 已补齐稳定用户手册截图，dev 需要同步相同质量要求，同时保留本分支专属的长期记忆章节和周更内容。
+
+### What
+
+- 同步 12 个 release 章节的操作截图和图片存在性守护测试；将周更图片统一迁入 `images/operations/`。
+- 保留 dev 长期记忆能力的两张原有截图，并为独立的 `memory.md` 稳定章节补充记忆中心操作图。
+
+### How
+
+- 解决 README、功能总览和会话日志冲突时保留 dev 的长期记忆说明；图片目录冲突按 Git 提示迁入统一操作图目录。
+- 帮助中心测试 15/15、agent-web typecheck、VitePress build 和 `git diff --check` 通过；3002 端口的 13/13 个 dev 章节页面均渲染至少一张操作图，并继续整本拦截游戏内容。
+
+### Result
+
+- dev 与 release 的通用手册截图保持同步，dev 专属长期记忆内容没有被覆盖；本次不涉及 API、事件、数据库、部署或安全契约。
 
 ## 2026-08-13 - 同步 release 前端组件类型声明
 
@@ -10633,6 +10929,171 @@
 - 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c` 与 `unzip -t`。
 - 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库只允许 validate 且 history 零新增。
 
+## 2026-08-14 - 同步 dev 并完成基础端到端验收
+
+### Why
+
+- 用户要求先合入最新 `release`，准备 dev 所需数据库与记忆服务，再启动 dev 代码并实际验证对话和文件附件。
+
+### What
+
+- 拉取 `origin/release` 并合入当前 `dev`，合并提交为 `5bb9601935bebc6f33b3980333a801f7bc1c4a01`，无冲突。
+- 核验既有平台 PostgreSQL 的 Flyway 历史；为避免覆盖原有记忆库，初始化新的 dev 专用 pgvector 卷 `test-agent-memory-dev-pgvector-v2-20260814`，完成 Alembic 升级并保留旧卷。
+- 以 JDK 25、`.env.test` 和 `test` profile 启动 backend、opencode-manager、frontend 及记忆服务；未修改 `.env*` 或业务源码。
+
+### How
+
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --with-memory` 构建并启动当前 dev；后端 `http://127.0.0.1:8080/actuator/health` 返回 `UP`，记忆 API 与 embedding 服务的鉴权就绪检查通过。
+- 通过真实浏览器登录工作台，第一轮要求仅返回标识文本，界面显示 `DEV_CHAT_OK_20260814` 且 Run 为 `SUCCEEDED`；上传 27 B 文本附件后，第二轮要求读取附件，界面返回 `DEV_ATTACHMENT_OK_20260814` 且 Run 为 `SUCCEEDED`。
+
+### Result
+
+- dev 已在 `http://127.0.0.1:3000` 运行，基础对话与聊天附件到工作区、模型读取附件的完整链路均已实际验证。
+- 本次无 API、RunEvent、数据库结构、安全、generated SDK 或 OpenCode 源码变更；仅新增本机运行态数据库卷和被清理的浏览器验收产物。浏览器运行态资源轮询仍有既有 400 控制台记录，但未阻断本次两次 Run 成功。
+
+## 2026-08-15 - 补齐 dev ClickHouse 并核验本地客户端形态
+
+### Why
+
+- 前一轮 dev 验收只启动了 PostgreSQL、Redis、XXL MySQL 和 Memory，遗漏了已经进入 `dev` 的运营分析 ClickHouse；用户同时确认“客户端”是安装在用户电脑上的本地客户端，而不是运营分析 Web 页面。
+
+### What
+
+- 新增 opt-in 的 `tools/clickhouse-dev-services.sh` 和 `restart-dev-services.sh --with-clickhouse`：固定使用 ClickHouse 26.3.17.56，只监听 `127.0.0.1:18123`，保留版本化数据卷，随机凭据和 Java JDBC dotenv 只写入 `.tmp/dev-services/clickhouse` 的 `0600` 文件，不修改 `.env.test`。
+- 修复启用 ClickHouse 后 PostgreSQL 普通 mapper 与 `clickHouseSqlSessionFactory` 的装配歧义：普通 mapper 显式绑定主 `sqlSessionFactory`，并增加双工厂上下文回归测试；同步 backend、persistence、部署、ClickHouse 和 AI 工作流文档。
+- 核验现有本地客户端为 Java 21 用户级后台服务：macOS 由 LaunchAgent、ARM Linux 由 user systemd 托管，浏览器“个人设置”负责 client key、在线实例、OpenCode 启停和本地工作区注册；当前仓库没有已经生成的正式签名分发目录，本机页面也没有已认证客户端实例。
+
+### How
+
+- ClickHouse helper Bash 语法、dev 脚本全量静态校验和 `git diff --check` 通过；双 MyBatis 工厂定向测试 1/1 通过。真实启动完成 schema migration，14 个分析表/物化视图可见，运营分析 `overview/filter-options/funnel/hourly-heatmap/timeseries` 五个浏览器请求均返回 200。
+- 本地客户端 reactor 116 项通过、1 项按环境跳过，其中客户端模块 7 项通过、1 项跳过；制品签名、SHA-256、darwin-arm64 安装器和伪造清单拒绝测试通过。正式分发仍需仓库外签名私钥、真实上游归档以及 Apple Silicon/麒麟 ARM 实机验收。
+- 全数据面首次稳定性检查遇到 Docker Desktop 4.20.1 `dockerd` 空指针 panic，导致所有容器和后端退出；恢复 Docker 后停止本次启动的 Memory 数据面，只保留核心 PostgreSQL/Redis/XXL MySQL 与 ClickHouse，再次启动 backend、manager、frontend 成功并持续通过 readiness。该问题不是应用 OOM，系统日志明确记录 dockerd panic。
+
+### Result
+
+- dev 当前运行于 `http://127.0.0.1:3000`，后端 readiness 为 `UP`，ClickHouse 26.3.17.56 及运营分析查询链路可用；Memory 本轮为规避旧 Docker daemon panic 已停止，数据卷保留。
+- 本地客户端能力和打包链路存在，但当前形态不是带窗口的桌面 GUI，也没有可直接下发的正式签名包或已连接实例；不能把自动化安装器测试表述为本地客户端真实端到端交付完成。
+
+## 2026-08-15 - 修复记忆证据原始对话入口与结构化消息展示
+
+### Why
+
+- 记忆证据中的 `/s/{sessionId}` 与后续协作分享 `/s/{shareId}` 共用路由后，普通 `ses_` 会话 ID 被分享入口接管并跳回工作台，导致“打开原始对话”看不到对应原文；链接也在当前记忆页内跳转。
+- 用户提供的真实会话有 7 条消息，全部包含结构化 parts，其中 5 条 assistant 消息的 `content` 为空；旧只读页只渲染 `content`，恢复路由后仍会漏掉过程正文。
+
+### What
+
+- 记忆证据链接增加 `target="_blank"` 与 `noopener noreferrer`；`/s/{id}` 按强类型前缀分流，`ses_` 直接进入所属人只读 transcript，`shr_` 继续走既有分享访问解析和完整分享工作台，分享所属人重定向语义不变。
+- 只读 transcript 复用 `messagesFromSessionMessages` 和 OpenCode 时间线渲染 `content` 与结构化 parts，不再生成空白 assistant 卡片；非所属人仍由既有 Session/messages 鉴权阻止读取。
+- 更新 agent-web README/PACKAGE、前端规范和记忆 QA 文档，并补充路由、链接属性、结构化 parts、分享隔离与真实记忆弹窗回归。
+
+### How
+
+- 定向 Vitest 2 文件 10/10、agent-web typecheck、记忆 Chromium 回归和分享隔离 Chromium 回归均通过；agent-web 用户手册与 production build 通过，仅保留既有大 chunk 提示。
+- 使用本地真实账号与用户给出的 `ses_08771dbe04a24c66b989c71a2cee2e24` 验证：关联 Run 为 `SUCCEEDED`，Session/messages 接口均返回 200，只读页保持精确 URL、标题与时间线加载成功，未出现分享无效页或空消息页。
+- 本地服务依赖恢复后 backend health/readiness 为 `UP`、前端 `http://127.0.0.1:3000` 返回 200；提交前回顾全部 `.agents/session-log*.md` 近期条目并检查冲突标记。
+
+### Result
+
+- 记忆中心点击“打开原始对话”会保留当前页面并在新标签页展示所属人的完整只读时间线；`shr_` 分享链接继续保持原权限和工作台行为。
+- 纯前端路由、渲染与文档变更；未修改 API、RunEvent、数据库/Flyway、部署变量、`.env*`、generated SDK 或 OpenCode 源码，也未新建分支。
+
+## 2026-08-17 - 记忆中心按用户灰度开放
+
+### Why
+
+- 用户要求记忆功能默认不对全员展示，只允许超级管理员指定的少量用户看到入口并打开页面；未授权用户即使输入 `/memories` 也不能进入。
+
+### What
+
+- 复用既有 `qa_memory_whitelist`、`GET /memory/v1/availability` 和超级管理员白名单管理接口作为唯一事实源，没有新增第二套灰度配置。
+- 前端新增按登录 Token 隔离的记忆访问状态，工作台仅向已授权用户显示“记忆”入口；`/memories` 在挂载页面前强制刷新服务端授权，查询失败、未授权或授权被撤销时均返回工作台。
+- 系统管理将“用户白名单”统一调整为“灰度用户”，明确名单同时控制页面入口、记忆学习和检索；同步前后端 README、HTTP API、部署 QA 文档和用户手册，并更新真实 Chromium 管理页截图。
+
+### How
+
+- 前端灰度 Store、记忆中心和管理面板定向 Vitest 16/16，agent-web typecheck、用户手册与生产 build 均通过；Chromium 覆盖已授权访问、未授权隐藏入口/直达拦截和超级管理员增删灰度用户 3/3 通过。
+- JDK 25 下 `QaMemoryApplicationServiceTest` 12/12、`QaMemoryControllerTest` 5/5 通过，受影响 22 模块 reactor 为 `BUILD SUCCESS`；`git diff --check` 通过。
+- 首次按 `.env.test`、`test` profile 启动时，外部 PostgreSQL 与 Redis 均返回 `NoRouteToHostException`；按用户要求改用项目本地 PostgreSQL 16 和 Redis 7.4.9，通过 `.tmp/dev-services` 下 `0600` 的一次性 dotenv 覆盖连接并关闭无需联调的远端 XXL Admin，未修改 `.env*`。
+- 本地 PostgreSQL 完成全部 107 条 Flyway 历史校验并补齐 70 条迁移；真实 `health/readiness` 均为 `UP`、前端 3000 返回 200、登录 CORS 正常。超级管理员真实 API 增删 `usr_test_dev` 灰度名单并完成清理；本次运行未启动 Memory 数据面且总开关为 false，因此真实 availability 保持 false，授权为 true 的页面路径由 Chromium 自动化覆盖。
+
+### Result
+
+- 页面可见性与后端学习/检索共用同一用户灰度名单，超级管理员仍是唯一名单维护者；授权结果按用户隔离并在页面聚焦时复核，无法确认时失败关闭。
+- 仅复用既有 HTTP API 和数据库结构；未变更 API/RunEvent/DTO、数据库/Flyway、部署拓扑、generated SDK 或 OpenCode 源码。平台当前以本地 PostgreSQL/Redis 运行在 `http://127.0.0.1:3000`，Memory 数据面仍保持停止，避免为页面灰度验证额外启动大模型容器。
+
+## 2026-08-17 - dev 依赖迁移到 192.168.8.100
+
+### Why
+
+- 用户要求本机后续只启动前端和后端，PostgreSQL、Redis、XXL MySQL、ClickHouse 与 OpenCode 全部使用局域网服务器 `192.168.8.100`，同时保留 TUN 公网代理并让该网段直连。
+
+### What
+
+- 在 Ubuntu 服务器补齐 Docker/Compose、JDK 21、Maven、Go、Node/pnpm、OpenCode、Git/SSH 和常用诊断工具；复制本机 SSH 身份与 known_hosts，验证 Gitee/GitHub SSH 和仓库 fetch 可用。服务器 dev worktree 保持可向 `origin/dev` 快进。
+- 将本机 PostgreSQL 16 的 `testagent` 数据恢复到服务器隔离库 `testagent_dev`，保留服务器原库和同步前数据卷；服务器持续运行 PostgreSQL、Redis、XXL MySQL、ClickHouse 26.3.17.56，以及 OpenCode 所需的后台 Java 控制面和 manager，远端前端保持停止。OpenCode 端口池按用户初始化按需拉起，不预置无主进程。
+- 本机忽略文件 `.env.test` 已改为访问服务器依赖并关闭本机 OpenCode/manager；本机旧 `test-agent-*` 数据容器和 memory mock 已停止，只保留 backend/frontend。Clash Verge/Mihomo 的持久配置和运行配置增加 `192.168.8.0/24` DIRECT 与 TUN route exclusion，TUN 继续启用。
+
+### How
+
+- PostgreSQL 恢复后逐条核对 108 条成功 Flyway history、0 条失败；本机端到端校验得到 PostgreSQL `testagent_dev:108`、Redis `PONG`、ClickHouse `testagent_analytics / 26.3.17.56`、XXL MySQL 端口可达。
+- 服务器 PostgreSQL/Redis/XXL MySQL/ClickHouse 容器健康，远端控制后端 readiness 为 `UP`，manager WebSocket 已连接，服务器 3000 端口停止；本机后端 readiness 为 `UP`、前端 3000 返回 200，进程清单仅有 `test-agent-backend` 和 `test-agent-frontend`。
+- 当前工作区另有未提交的受保护 Agent 开发代码，其中 `ProtectedAgentFileGrantService` 的双构造器未指定 Spring 注入构造器；为避免覆盖在途改动，本轮运行使用当前已提交 `a7316a344` 的干净后端 JAR 验证环境，未修改该代码。
+
+### Result
+
+- dev 运行拓扑已切换为“本机 frontend/backend → `192.168.8.100` 全部数据与 OpenCode 依赖”，本机与服务器均已实际启动/探测；服务器数据卷、同步 dump 和同步前备份保留。
+- 本轮只修改忽略的 `.env.test` 和仓库外的 Clash/服务器环境，未修改 API、RunEvent、数据库结构/Flyway、generated SDK 或 OpenCode 源码。当前 `origin/dev` 仍落后本机已提交 dev 63 个提交，服务器 worktree 落后本机 2 个已提交变更；相关提交推到 origin 后服务器可正常 fast-forward pull。
+
+## 2026-08-17 - 配置通知改为用户易懂文案
+
+### Why
+
+- 通知中心把配置更新结果表述为“Agent 配置已生效”和“已应用到 TestAgent 进程”，暴露了 Agent、dispose、rollout 和进程等内部概念，普通用户难以理解；已有通知又把标题和正文快照保存在数据库中，只改后端无法改善历史记录。
+
+### What
+
+- 后端四种配置通知统一改为“正在更新、更新成功、更新失败、本次更新已结束”的用户文案，失败提示改为重启智能体。
+- 前端按受控通知类型统一展示同一套标题、正文、状态和动作名称，因此数据库中的旧通知也会立即显示新文案；未知通知与会话分享继续使用原始安全展示逻辑。
+- 同步通知模块 README、agent-web README 和用户手册，并补齐后端四态文案及前端旧记录兼容回归。
+
+### How
+
+- JDK 25 下 `UserNotificationApplicationServiceTest` 9/9 通过；前端全量 Vitest 130 个文件、2008 passed / 1 skipped，agent-web typecheck 通过。
+- `restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 完成 26 模块后端构建和本地服务重启；最终后端 health/readiness 均为 `UP`，前端 3000 返回 200，登录 CORS 预检正常。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并保留工作区中本地客户端、受保护 Agent 和客户端下载入口等并行未提交改动；只暂存本次通知文案相关文件。
+
+### Result
+
+- 新旧配置通知都会使用普通用户可理解的中文表达，不修改通知类型、受控动作、已读规则或实时刷新机制。
+- 本次不变更 HTTP API、RunEvent、DTO、数据库/Flyway、性能、安全、部署拓扑、`.env*`、generated SDK 或 OpenCode 源码；未新建分支。
+
+## 2026-08-17 - 本地客户端托盘、受保护 Agent 与页面下载入口
+
+### Why
+
+- 用户要求在 Apple Silicon macOS 和麒麟 ARM 本地客户端补齐低开销托盘，并通过服务器运行受保护 Agent/Skill、受限访问用户授权的本地目录；随后指定在右上角头像菜单的 OpenCode 实例与重启入口之间直接提供客户端下载。
+- 受保护提示词和 Skill 正文一旦完整下载到用户机器便无法防读防改，因此需要保留在服务器执行，只把不可变修订句柄和摘要提供给网页，把本地目录访问收敛到已有 WSS 文件 RPC。
+
+### What
+
+- 本地客户端复用 Web 端宠物资产实现 SystemTray，展示在线状态，并提供打开网页、重连、查看/下载受限客户端日志、会话进度和正常退出；launchd/systemd 只在异常退出时恢复。托盘只读取既有连接快照，状态未变化不重绘，不增加健康探测。
+- Hub 已发布 Agent 以 `protected:{revisionId}` 进入本地工作区 Agent 目录；运行时固定 Agent/Skill revision 与 SHA-256，在服务器 OpenCode 隔离目录执行，禁用原生本地文件工具，并通过单 Run、单用户、单 Workspace、单客户端 generation 的短期 MCP grant 调用本地 WSS 文件工具。Agent/Skill 正文不写入客户端配置目录。
+- 右上角头像菜单在 OpenCode 实例列表下方增加“下载本地客户端”；生产复用既有 Nginx `/downloads/local-opencode-client/`，dev server 只读提供忽略的签名制品目录，非法/隐藏路径直接 404，JRE/OpenCode 大制品不进入前端 bundle。
+- 同步 runtime、API、local-client、workspace 模块 README/PACKAGE，以及 HTTP API、RunEvent、架构、部署、安全、前端 README 和用户手册；没有数据库/Flyway、generated SDK 或 OpenCode 源码修改。
+
+### How
+
+- 后端受影响链路定向测试共 34 项通过；本地客户端单元测试 11 项通过、1 项按桌面条件跳过；正式签名分发包完成清单签名、五项制品 SHA-256、JAR 托盘资源和安装器校验，版本为 `0.1.0-dev-e2e`。
+- `FigmaShell.test.ts` 60/60、agent-web typecheck 和 development build 通过；dev 下载路由实际返回 200，HTTP 下载脚本与分发源 SHA-256 同为 `470a11a9fcc9f5bc8210cfbf81723308239ddbad00f0fc7280aa382a0ab400f2`，隐藏路径返回 404。
+- 按最新 `.env.test` / `test` profile 使用 JDK 25 完成 26 模块后端构建并重启；backend readiness 与 frontend 3000 均通过。真实 Chromium 登录后确认入口位于指定位置，点击下载得到 `test-agent-local-client-install.sh`，下载文件摘要一致。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，保留当前 dev 已提交的记忆灰度、局域网依赖迁移和通知文案成果，未覆盖 release 工作树中尚未提交的内部模型观测改动。
+
+### Result
+
+- macOS/Kylin 共用托盘、受保护远程 Agent 文件链路和网页下载入口已实现并通过自动化、构建、签名制品、真实启动与 macOS Chromium 下载验证；页面与客户端状态采集没有新增后台轮询压力。
+- 当前签名使用本轮临时 dev 私钥，分发目录被 Git 忽略，只用于本机自测；上线仍需换企业私钥重新打包，并在真实 Apple Silicon 与 ARM64 glibc 麒麟机完成安装、WSS、聊天/文件写入和全部托盘动作验收。真实麒麟 ARM 未验证前只能标记为部分验证。
+
 ## 2026-08-17 - 拉取 release 并重打 TCDS 完整类型名称企业包
 
 ### Why
@@ -10828,3 +11289,327 @@
 
 - 自定义日期首击不再关闭；公开方法和数据无需企业外网即可查看；两张业务图具备整行可读空间。
 - 本次为现有 release 拓扑内的前端交互修复，向后兼容；尚未同步到并行开发中的 dev 工作树，也未重新生成企业发布包。
+## 2026-08-17 - 本地客户端改为双击安装并展示 OpenCode 健康度
+
+### Why
+
+- 用户不应在网页下载 Shell 脚本后再进入终端安装；Apple Silicon macOS 和 ARM 麒麟都需要可直接双击的原生安装包。
+- 客户端完成注册后，原下载位置应该变为本地 OpenCode 健康度，而不是继续诱导重复下载。
+
+### What
+
+- 分发程序新增 `TestAgent-Local-Client-macOS-arm64.pkg` 和 `TestAgent-Local-Client-Kylin-arm64.deb`；两包都内置 JRE、OpenCode、客户端 JAR 和宠物图标，macOS 安装 LaunchAgent，麒麟安装 systemd user unit 与桌面入口。原 `install.sh` 仅作 CLI 兜底。
+- 原生包首次启动使用 Swing 向导填写平台地址、网页地址和客户端密钥，密钥只写入用户私有 `0600` 文件；麒麟尚无图形会话时正常退出，避免 systemd 反复重启。
+- 页面的单一 `/installer` 入口按 User-Agent 返回 macOS PKG 或麒麟 DEB；平台一旦存在 `LOCAL_CLIENT` 注册实例，原位置改为健康、部分健康、异常或离线状态。状态复用现有 endpoint 数据，没有新增轮询。
+- Nginx、增量/完整发布门禁、配置示例、前后端 README、用户手册、本地客户端部署与安全文档已同步。
+
+### How
+
+- JDK 25 下本地客户端 reactor 共 122 项测试通过、1 项桌面条件跳过，其中客户端模块 13 项通过；首次配置覆盖私有文件权限与 HTTP 安全拒绝。
+- `FigmaShell.test.ts` 61/61、agent-web typecheck、用户手册和生产构建通过；安装包测试、真实 Nginx 语法流程、增量组件与双后台部署夹具均通过。
+- 最新 dev 制品版本为 `0.1.0-dev-native`，PKG SHA-256 为 `484d4878801bf2e9c03783bc549ec6cb091beaca30a9789561da0db4cce1ee6f`，DEB 为 `1bd03d9ef1d67ab41152218d20427cdee4562a519a223d90a054398884433bb9`；实测 Vite 路由返回正确 302、MIME 和下载文件名。
+- 按最新 `.env.test`/`test` 配置完成 26 模块后端构建并启动 backend/frontend；随后 `192.168.8.100` PostgreSQL/MySQL 网段返回 `NoRouteToHost`，readiness 为 DOWN，页面登录因此返回服务器内部错误。
+
+### Result
+
+- macOS 和麒麟的下载、原生包内容、自启配置与页面健康度切换逻辑已实现并通过自动化和本机制品校验；不变更 HTTP API、RunEvent、数据库/Flyway、generated SDK 或 OpenCode 只读源码。
+- 当前 macOS dev PKG 因本机没有 Developer ID 证书而未签名/公证；打包脚本已支持应用签名、安装器签名与 notary profile，正式交付仍需注入企业凭据。真实 ARM 麒麟双击安装、托盘、WSS 和聊天/文件端到端尚未验证；页面真实健康状态交互待数据库网络恢复后补验。
+
+## 2026-08-17 - 恢复开发用户服务端 OpenCode 实例
+
+### Why
+
+- 默认开发用户仍绑定已退出的 `kakadeMacBook-Pro.local:4098` 历史进程，平台按稳定绑定失败关闭，无法自动降级或迁移到在线服务器。
+- `dev-192-168-8-100` 的 Java 与 manager 虽在线，但公共配置仓库误停留在只有 README 的 `main` 分支，缺少 `opencode/opencode.jsonc`，无法承载新的用户进程。
+
+### What
+
+- 通过现有公共配置管理 API 将服务器公共配置仓库初始化到包含 OpenCode 配置的 `master` 分支，状态恢复为 `READY`。
+- 确认历史 PID、4098 监听均不存在且没有 Run 快照引用后，先将两张进程表完整备份到本机 `.tmp`，再按运维文档在单事务内精确删除该用户唯一的废弃 binding/process。
+- 通过现有用户进程初始化 API 重新分配，生成进程 `ocp_3d436d6dc9de45a995b4e416efc666a9`，固定到 `dev-192-168-8-100:4096`。
+
+### How
+
+- 从浏览器实际使用的本地 Java 调用状态与实例列表 API，均返回 `READY/RUNNING`、`online=true`、`healthy=true`，路由目标为 `192.168.8.100:4096`。
+- 服务器 manager state、数据库与 `ps/ss` 一致记录 PID `936040` 和权威启动时间；`/global/health`、`/global/config` 均返回 HTTP 200，后续 manager health 持续为 `HEALTHY`。
+- 收尾前回顾全部 `.agents/session-log*.md` 近期记录；保留工作区中新出现的 PowerPoint 临时文件，不暂存、不删除、不覆盖。
+
+### Result
+
+- 服务端 OpenCode 已恢复可用，前端通过本地 Java 的跨节点路由可准确访问服务器实例，不会回退到旧 Mac 进程。
+- 本次仅执行开发环境公共配置、当前快照数据与运行进程修复；没有修改 HTTP API、事件、数据库结构/Flyway、代码、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-17 - 打包 `.134 + .160` 运营与记忆中间件离线制品
+
+### Why
+
+- dev 的运营分析、原生本地客户端和通用记忆准备进入企业试部署；新增的 `.134/.160` 是 PostgreSQL 克隆机，必须保留现有 `5432` 和残留数据，同时企业宿主机明确没有 `psql`、`jq`、`rg`。
+- Apple Silicon 本机已有同 tag arm64 ClickHouse，原 `docker pull --platform` 会发生本地镜像架构污染并在 Docker Hub registry 校验阶段 EOF，不能据此产出可部署 tar。
+
+### What
+
+- ClickHouse 26.3.17.56 改为按固定多架构 index digest 通过 buildx 直接导出 linux/amd64 archive，并从 archive config 强制校验 OS/架构；打包支持受控内网试部署显式账号密码，默认仍使用随机 64 位十六进制密码。自定义用户补充 loopback 白名单，使目标机本机 verify 与远端 `.4/.114` 白名单同时成立。
+- 部署文档固定首次收敛拓扑：`.134:8123` 运行 ClickHouse；`.160` 用全新 `/data/testagent/memory/postgres-v1` 和 `15433/18889/18888/18989` 共置 pgvector、单 Mem0 副本、VIP、CPU BGE，原克隆 PG 进程、`5432` 和数据目录不删除。企业命令不依赖宿主 `psql/jq/rg`，数据库校验使用容器内 `psql`。
+- `backend.env.example` 补齐默认关闭的通用记忆 URL、service key、HMAC、超时、检索和学习参数；客户端分发本身不新增中间件镜像。
+
+### How
+
+- ClickHouse 脚本/夹具校验和 AI 文档校验通过；最终 ZIP SHA-256 为 `84406aa69a932e7a900e9d5323c41af15dd2dcc8fd7a70cd84acfcd3388c3819`。包内 tar 重新 load 后以 amd64 仿真启动，实际完成版本查询、自定义用户认证和 `testagent_analytics` 建库。
+- 记忆四个提交绑定版最终 tar 全量 `SHA256SUMS` 通过，`release.env` revision 为 `eed95c039c76c5ed0a6f7eaa27edb2edbda4b7ef`；SHA-256 分别为 memory-service `98f3c8b0...cf80`、embedding `2190a366...e1ff`、pgvector `01802c80...ce06`、VIP Nginx `7886e103...ca63`。从最终 tar 重新 load 后依次启动 pgvector、CPU BGE、Alembic、Mem0、VIP，验证数据库认证 `select 1`、BGE 固定 revision/512 维/归一化、Alembic head、Mem0/VIP `rawMessageCount=0`，随后按角色停止临时容器。
+- 当前 Mac 到 `.134/.160` 的 22 端口在服务端 SSH banner 前主动断开；5432 与其它探测端口只能建立 TCP 后无应用响应，不能替代企业中转机/堡垒机上的目标宿主预检，因此未远程写入服务器。
+
+### Result
+
+- 外网 Mac 的 ClickHouse ZIP 与记忆四镜像目录已具备可传输、校验和离线启动条件；无运行时依赖下载。企业现场仍必须先执行只读端口、目录、架构、Docker 和容量预检，任一目标端口被占用或新数据目录非空即停止，不能清理克隆 PG。
+- 本次只改变部署脚本、配置模板、测试和稳定部署文档；不修改 HTTP API、RunEvent、平台 PostgreSQL/Flyway、generated SDK、OpenCode 源码或 `.env*`，未新建分支、未推送远端。真实 `.134/.160` 部署与企业网络跨机验收尚未完成。
+
+## 2026-08-17 - 修复 macOS PKG 安装超时与 App 错误重定位
+
+### Why
+
+- 无签名 PKG 经手工放行后仍在 `postinstall` 阶段等待 600 秒并以 `PKInstallErrorDomain Code=112` 失败；安装日志同时显示 App 被历史用户目录安装记录重定位到 `~/Applications`，而系统 LaunchAgent 固定访问 `/Applications`。
+
+### What
+
+- macOS PKG 使用 `pkgbuild --analyze` 生成 component plist，并显式关闭 `BundleIsRelocatable`，保证系统安装固定落到 `/Applications`。
+- `postinstall` 只执行一次带标准输入隔离的 `launchctl bootstrap`，移除可能长期阻塞 PackageKit 的 `kickstart/open`；从用户目录版升级时精确移除同 label 的旧用户 LaunchAgent，不删除配置、工作空间或用户目录版本制品。
+- 安装脚本在非根目标卷验证时跳过当前桌面会话操作；制品测试新增重定位、阻塞命令和目标卷保护断言，同步更新本地客户端部署文档。
+
+### How
+
+- 从 `/var/log/install.log` 复核失败脚本被 PackageKit 在 600 秒超时后终止；运行 `bash -n`、`shellcheck` 和 `deploy/internal/tests/local-opencode-client-package-test.sh` 均通过。
+- 使用真实 Apple Silicon JRE、OpenCode 1.18.4 和客户端 JAR 重建 `0.1.0-dev-native-pkgfix`，展开后的 `PackageInfo` 为 `<relocate/>`，postinstall 不含 `kickstart/open`；修复版 PKG SHA-256 为 `fae60d7ba17fb19412f5d303627ca6e87c4bc061125e8a4c50d6ad422ba7ca72`。
+- 无密码 sudo 无法在隔离 APFS 卷执行 root-auth PKG，真实 `/Applications` 安装仍需用户在系统 Installer 中输入管理员密码；当前机器已切回用户目录 LaunchAgent，Java PID `60264` 运行正常。
+
+### Result
+
+- 代码层面的 600 秒超时和 App/LaunchAgent 路径分裂已修复并通过真实制品结构验证；修复包位于 `~/Downloads/TestAgent-Local-Client-macOS-arm64-pkgfix.pkg`，仍是无 Developer ID 签名的开发包，不能冒充正式交付。
+- 不变更 HTTP API、事件、数据库/Flyway、客户端协议、安全凭据、generated SDK 或 OpenCode 只读源码；实际系统级安装成功状态尚待一次管理员授权的 Installer 验证。
+
+## 2026-08-17 - 纠正企业 ClickHouse 与记忆节点拓扑
+
+### Why
+
+- 现场进一步明确 ClickHouse 应共置到原平台 PostgreSQL 节点，两台新增克隆服务器都属于记忆链路；其中 `.134` 承载记忆数据库，`.160` 承载 Mem0，上一版 `.134:8123 + .160` 全记忆共置命令不能继续使用。
+
+### What
+
+- ClickHouse 改为部署到原平台 PG 节点 `122.233.30.147:8123`，固定使用独立 `/data/testagent/clickhouse`，保留平台 PG 的 `5432`、进程和全部数据。
+- 记忆数据面改为 `.134:15433` 独立 pgvector 与 `.160:18889/18888/18989` Mem0/VIP/CPU BGE；BGE 与 Mem0 共置以避免和数据库争抢 CPU/内存，并增加 `.160` 的 CPU、内存、磁盘预检门禁。
+- 企业中转机、`.134`、`.160` 的完整分发和分角色启动命令写入稳定文档；部署命令继续复用现有 `memory-docker.sh`，没有新增平行脚本。离线包测试锁定 `.147` ClickHouse、`.134` 记忆数据库和 `.160` Mem0 拓扑。
+
+### How
+
+- `tools/verify-ai-docs.sh`、`deploy/internal/tests/memory-offline-package-test.sh`、`tools/verify-internal-clickhouse-deploy.sh`、`tools/verify-internal-clickhouse-package.sh` 和 `git diff --check` 全部通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，没有覆盖其他提交者成果；当前修正提交将作为后续重建记忆离线包的 revision。
+
+### Result
+
+- 源码侧部署拓扑、具体命令与回归门禁已纠正；上一版 `.134` 部署 ClickHouse、`.160` 启动记忆数据库的命令明确作废。
+- 本阶段不修改 HTTP API、RunEvent、数据库结构/Flyway、generated SDK、OpenCode 源码或 `.env*`。最终 linux/amd64 制品仍需按本提交重建并做容器启动验证后才能交付；企业真实节点尚未写入。
+
+## 2026-08-17 - 修复记忆离线角色首次启动校验竞态
+
+### Why
+
+- 从拓扑修正后的最终 tar 启动 `.134` 数据库角色时，`start-db` 刚返回就执行 `verify-db`，PostgreSQL 尚未监听，现场执行单会因正常冷启动竞态失败；BGE、Mem0 和 VIP 同样存在首次启动紧接单次 readiness 的风险。
+
+### What
+
+- 继续复用现有 `memory-docker.sh`，只把四类单次校验改为有界等待：数据库 120 秒、BGE 180 秒、Mem0/VIP 120 秒；超时明确失败，数据库和 BGE附带对应容器末尾日志，不做无限重试或联网下载。
+- 稳定部署文档同步标明等待上限，离线包测试锁定三类超时错误，避免后续退回首次冷启动竞态。
+
+### How
+
+- `bash -n deploy/internal/memory-docker.sh`、`shellcheck deploy/internal/memory-docker.sh`、`deploy/internal/tests/memory-offline-package-test.sh`、`tools/verify-ai-docs.sh` 和 `git diff --check` 全部通过。
+- 当前修正提交将作为再次重建记忆离线包的 revision；重建后必须从最终 tar 重新跑完 pgvector、BGE、Alembic、Mem0 与 VIP。
+
+### Result
+
+- 现场首次冷启动不再需要操作者猜测等待时间或手工重试，超过明确上限仍失败关闭；不改变镜像、端口、数据目录、API、事件、数据库结构/Flyway、安全密钥格式或 `.env*`。
+
+## 2026-08-17 - 收口 ClickHouse 本机验证的 Docker DNAT 差异
+
+### Why
+
+- 最终 ClickHouse linux/amd64 tar 在 Docker Desktop 仿真启动成功，但宿主经映射端口访问时来源被改写为网桥地址，原部署脚本的回环 HTTP 验证触发用户 IP 白名单 403；不能为通过本机验证而放宽 ClickHouse 网络白名单。
+
+### What
+
+- 部署脚本继续复用同一容器和用户配置，把本机版本、认证、建库和数据库存在性检查改为容器内 `clickhouse-client`；`.4/.114` 到 `.147:8123` 的跨机 HTTP 验证继续保留，网络白名单不扩大。
+- ClickHouse 稳定部署文档和脚本回归测试同步更新，明确宿主不需要安装 ClickHouse 客户端，也不依赖 Docker DNAT 保留回环来源。
+
+### How
+
+- `bash -n`、`shellcheck`、`tools/verify-internal-clickhouse-deploy.sh`、`tools/verify-internal-clickhouse-package.sh`、`tools/verify-ai-docs.sh` 和 `git diff --check` 全部通过。
+- 从修正前最终 tar 运行的同一固定镜像已通过容器内 `ck` 用户认证，返回 `26.3.17.56 / testagent_analytics`；脚本修正提交后仍需重新封装最终 ZIP。
+
+### Result
+
+- ClickHouse 本机校验不再受 Docker 网桥来源地址影响，远端访问权限仍只开放给 `.4/.114`；不修改分析 API、ClickHouse DDL、平台 PostgreSQL/Flyway、事件或业务代码。
+
+## 2026-08-17 - 完成修正拓扑的最终中间件离线制品验证
+
+### Why
+
+- 节点拓扑和两处首次启动验证问题修正后，必须重建内嵌部署文档/脚本的最终归档，并从归档重新加载实际 linux/amd64 镜像，不能继续沿用修正前的 ZIP、目录或本机 tag。
+
+### What
+
+- 最终 ClickHouse ZIP 固定 `.147` 共置拓扑，用户名为 `ck`，密码为大小写、数字和 URL-safe 特殊字符组合；明文只存在受控 `0600` 包内配置和本次交付，不写入仓库文档或 session log。
+- 最终记忆目录固定 `.134` 记忆 pgvector 与 `.160` BGE/Mem0/VIP，内嵌带有界 readiness 的最新脚本和部署文档；`release.env` revision 为 `d2affff0532ef334695d3bd0d74ddff3366adc92`。
+
+### How
+
+- ClickHouse ZIP SHA-256 为 `721d1ce9b345bc3d7b0e78906f5d15d7cdf49ae73af88e98ae31e6706585e0e5`，大小约 251 MiB；从最终 tar 以 amd64 仿真启动，容器内 `ck` 认证、`26.3.17.56` 版本和 `testagent_analytics` 建库/当前库查询通过。
+- 记忆四个 tar 的 SHA-256：BGE `f8f50edc...ab77`、VIP `23fb20e1...6034`、Mem0 `147e4f46...b73b`、pgvector `9226e55e...961b`，四份 archive report 均为 `linux/amd64`，完整 `SHA256SUMS` 通过。
+- 从最终记忆 tar 依次启动 pgvector、BGE、Alembic、Mem0、VIP；首次数据库有界等待实际生效，BGE 固定 revision/512 维、Alembic `20260809_01`、Mem0/VIP `rawMessageCount=0` 全部通过，随后停止并删除本次精确临时容器。
+- 最终执行 AI 文档、记忆离线包、ClickHouse 部署/封包四组校验与 `git diff --check` 全部通过；提交前再次回顾全部 `.agents/session-log*.md` 近期记录，保留未跟踪的 PowerPoint 临时文件，不暂存、不删除。
+
+### Result
+
+- 外网 Mac 上的最终 ClickHouse ZIP 和记忆四镜像目录已具备离线传输、完整性校验与启动条件；无运行时依赖下载，企业宿主不需要 `psql`、`jq`、`rg`。
+- 本次不修改 HTTP API、RunEvent、平台数据库结构/Flyway、generated SDK、OpenCode 源码或 `.env*`。企业真实 `.147/.134/.160` 仍未写入；现场必须先做只读资源、端口、目录、防火墙和跨机连通预检，失败即停止。
+
+## 2026-08-17 - 将 macOS PKG 修复版切换到本地下载页面
+
+### Why
+
+- PKG 修复提交完成后，本地开发页面仍从 `deploy/internal/dist/local-opencode-client/` 返回旧 SHA，用户无法从页面取得已修复安装包。
+
+### What
+
+- 将 `0.1.0-dev-native-pkgfix` 的 PKG、DEB、`install.sh`、签名清单和版本化 JAR/JRE/OpenCode 作为完整目录原子切换到本地开发分发路径；旧目录保留为 `deploy/internal/dist/local-opencode-client.bak.20260817154044`。
+
+### How
+
+- 切换前验证版本化制品 `SHA256SUMS` 和 `manifest.json.sig`；切换后从 `http://127.0.0.1:3000/downloads/local-opencode-client/installer` 实际下载，PKG SHA-256 为 `fae60d7ba17fb19412f5d303627ca6e87c4bc061125e8a4c50d6ad422ba7ca72`，与页面清单一致且清单签名验证通过。
+
+### Result
+
+- 本地页面现已返回修复版，用户可以重新下载并执行系统 Installer；现有用户目录客户端保持 PID `60264` 运行，未重启 Java、worker、manager 或数据库。
+- 本次只切换本机忽略跟踪的开发制品目录，没有上传企业 `.2` 的 `/data/testagent/dist/local-opencode-client/`，也没有修改 API、事件、数据库/Flyway、配置文件或源码。
+
+## 2026-08-17 - 兼容企业 Docker 18.09 的中间件 privileged 启动
+
+### Why
+
+- `.147` 修复 IPv4 forwarding 与 Docker NAT 链后，ClickHouse 已能创建容器，但 26.3.17.56 在解析 `UTC` 时因旧 Docker seccomp/runc 对 `/usr/share/zoneinfo` 相关新系统调用返回 `EPERM` 而重启。
+- pgvector、Bookworm Python Mem0/BGE 与 Alpine 3.20 VIP 使用同一批 Docker 18.09 企业宿主，也存在相同系统调用兼容风险；现场负责人明确批准这些新增中间件统一使用 `--privileged`。
+
+### What
+
+- 继续复用 `deploy-clickhouse.sh` 和 `memory-docker.sh`，分别给 ClickHouse，以及记忆 pgvector、Alembic、Mem0、BGE、VIP 五类入口增加 `--privileged`；不修改 daemon，也不改变平台 PG 或克隆机遗留 PG 容器。
+- 更新 ClickHouse、通用记忆、企业部署入口和安全规范，明确 privileged 会显著放宽设备、capability、seccomp/AppArmor 隔离；保留非 root、只读根、受限 tmpfs 等参数，但不把它们表述为等价沙箱。
+- 回归测试锁定六类启动入口都带 privileged。用户明确不重新拷贝大型镜像包，现场改为备份并原地修改已解压脚本，继续复用已校验的镜像 tar、配置和数据目录。
+
+### How
+
+- `bash -n`、ClickHouse 部署/封包测试、memory 离线包测试、AI 文档校验和 `git diff --check` 通过；本机缺少 `shellcheck` 命令，该项未执行。
+- 对提交前旧版脚本以管道实际执行文档中的 `sed` 替换：ClickHouse 精确生成一个 privileged 入口，memory 精确生成五个入口，两份结果均通过 `bash -n`。
+- memory 包的 `SHA256SUMS` 同时覆盖部署脚本；原地修改命令会备份原清单、只重算并替换 `memory-docker.sh` 唯一条目，再全量校验其余镜像和文件，避免后续 `load-*` 因脚本 SHA 变化失败或跳过镜像完整性检查。
+- 在 Docker 24.0.2 上用现有最终 linux/amd64 镜像实际执行 privileged smoke：ClickHouse 返回 `UTC / 26.3.17.56`，pgvector 返回 PostgreSQL `16.12`，Mem0/BGE 完成时区路径解析和线程创建，VIP 返回 Nginx `1.27.2`。Mac 为 arm64，以上通过仿真完成，不能替代企业 Docker 18.09 实机验收。
+
+### Result
+
+- 仓库后续重新封装时会自动带上 privileged 启动参数；本次没有重建或替换 `deploy/internal/dist` 中的大型离线镜像制品。
+- 不修改 HTTP API、RunEvent、数据库结构/Flyway、generated SDK、OpenCode 源码、凭据或 `.env*`。企业 `.147/.134/.160` 的原地脚本修改和真实启动仍由现场按逐机命令执行，任一 readiness 失败即停止后续节点。
+
+## 2026-08-17 - 修复本地客户端首次入口与 client key 查询 500
+
+### Why
+
+- macOS 原生包安装成功后，`Info.plist` 与 JVM 都启用了后台应用模式，尚未配置的 Swing 首次向导也被隐藏，用户从 Dock 和窗口都找不到程序入口。
+- 已存在 client key 的用户进入个人设置时，MyBatis 将 `javaType="long"` 解析为包装类型 `Long`，无法调用 `LocalClientCredentialRow` 的 primitive `long` record 构造器，导致凭据查询返回内部服务器错误。
+
+### What
+
+- 首次配置判断提前到 AWT 初始化之前：原生包缺少配置或 key 时保留普通可见 App，配置完成后的后续启动仍使用菜单栏模式；PKG 不再用静态 `LSUIElement` 隐藏所有启动阶段。
+- 凭据 XML 构造器改用 MyBatis primitive alias `_long`，新增 H2/MyBatis 集成测试锁定 `BIGINT -> long` 两条查询路径。
+- 头像下载入口补充“应用程序 → 首次配置 → 顶部菜单栏兔子图标”提示，原生包结构测试锁定中文应用名和首次入口可见性；同步客户端 README 与安装部署文档。
+
+### How
+
+- 后端定向测试：凭据 MyBatis 1/1、首次向导 3/3；前端 `FigmaShell` 61/61 与 agent-web typecheck 通过；完整本地客户端打包、清单签名、SHA-256、PKG/DEB 展开及兜底安装测试通过。
+- 新页面制品为 `0.1.1-dev-entryfix`，实际 HTTP 下载 PKG SHA-256 `a0b72efdaff463b7f9da5ceff85df0720c594c60f976ec6b1933c90fff691de7`，与签名清单一致；旧目录保留为 `deploy/internal/dist/local-opencode-client.bak.202608171712-entryfix`。
+- 按 `.env.test` / `test` profile 重启，backend readiness、frontend、CORS 和下载路由通过；真实页面登录后个人设置显示掩码 key、版本 1、ACTIVE，后端连续记录凭据 GET success。新 PKG 展开后用独立临时用户目录实启，macOS 返回 `visible=true` 且窗口标题为“配置 TestAgent 本地客户端”。
+
+### Result
+
+- Key 页面 500 已在真实服务修复；重新下载并安装新 PKG 后，首次向导存在可见应用入口，完成配置后入口转为菜单栏兔子图标。
+- 本地 test profile 启动日志确认 PostgreSQL 为 `192.168.8.100:15432/testagent_dev`，XXL MySQL 为 `192.168.8.100:13306/xxl_job`。本次未修改 `.env*`、HTTP API、事件或数据库结构/Flyway，也未修改 generated SDK/OpenCode 源码。
+- 开发 PKG 仍无 Apple Developer ID 签名，只完成项目清单签名与哈希校验；Gatekeeper 风险保持为既有开发约束，不能声明企业正式签名交付。
+
+## 2026-08-17 - 修复企业 ClickHouse 进程与数据目录用户冲突
+
+### Why
+
+- 企业 `.147` 上 ClickHouse 为兼容 Docker 18.09 已使用 `--privileged`，现场临时加入 `CLICKHOUSE_RUN_AS_ROOT=1` 后，进程有效用户变成 root，而既有数据目录仍属于镜像内 clickhouse 用户（UID 101）。
+- ClickHouse 因进程用户与数据所有者不一致报 Code 430 `MISMATCHING_USERS_FOR_PROCESS_AND_DATA`；该问题与 PostgreSQL 容器端口映射无关。
+
+### What
+
+- 保留经用户批准的 `--privileged`，明确禁止再设置 `CLICKHOUSE_RUN_AS_ROOT=1`；ClickHouse 继续以镜像内 UID/GID 101 运行。
+- 部署时将安装后的 `clickhouse-users.xml` 设置为 `101:101` 和 `0600`，使受保护的凭据配置与 ClickHouse 进程用户一致；数据、日志目录继续由 UID/GID 101 持有。
+- 部署与离线封包回归测试锁定配置所有者修复和 root 环境变量禁用，并同步 ClickHouse 企业部署手册与安全规范中的现场原地修复命令和 Code 430 排查说明。
+
+### How
+
+- `bash -n`、ClickHouse 部署/封包测试和 `git diff --check` 通过。
+- 在 Docker 24.0.2 上以最终 linux/amd64 镜像实际执行 `--privileged` 且不设置 root 环境变量的 smoke；ClickHouse 查询返回 `26.3.17.56 UTC`，容器为 running/privileged，`/proc/1/status` 的 UID/GID 均为 101；精确临时容器和卷已清理。
+- 企业 `.134` 的记忆 PostgreSQL 已通过本机 verify（PostgreSQL 16.12、`testagent_memory`）；`.160` 仅完成四类镜像加载，配置文件尚未放置，且 `.160 -> .134:15433` 仍超时，因此记忆服务尚未启动验收。
+
+### Result
+
+- 仓库脚本已避免再次制造 root/UID 101 冲突，企业 `.147` 可直接原地修改现有小脚本，不需要重拷大型镜像包或清空 ClickHouse 数据。
+- 企业 `.147` 尚需现场执行原地修复、重建精确容器并完成 verify；`.160` 还需补齐配置和跨机网络后才能启动。不得把本机验证表述为企业实机完成。
+- 本次不修改 HTTP API、RunEvent、平台数据库结构/Flyway、generated SDK、OpenCode 源码、凭据值或 `.env*`。
+
+## 2026-08-17 - 统一用户治理入口并补齐分支整合兼容项
+
+### Why
+
+- 超级管理员把用户加入客户端灰度后，头像菜单的下载按钮会先出现再被本地实例健康状态替换；账号、角色、记忆灰度和客户端灰度又分散在多个页面，操作容易错位。
+- 合并前门禁发现 dev 在历史冲突处理中漏掉 backend-api 的体验提交、按 Run 读消息、个人进程重启方法，以及 Flyway 本地客户端/运营 outbox 兼容装配；这些 release/dev 已有能力不能随最终合并丢失。
+
+### What
+
+- 将账号查询/新增/删除、用户名、角色、TCDS 同步、记忆灰度和客户端灰度统一到独立“系统管理 → 用户管理”页；设置弹窗移除重复用户入口，记忆能力页只保留平台级模型、存储、队列和抽取策略配置。
+- 下载入口与已注册本地客户端健康状态改为并列显示，健康刷新不再覆盖下载按钮；移除独立本地客户端灰度面板及对应重复测试。
+- 恢复 backend-api 四组已存在的方法与类型导入，并恢复 Flyway 对已执行本地客户端前向历史及 ClickHouse 运营 outbox 主链/前向分叉的严格兼容装配；未改任何已执行 migration 字节。
+- 同步 agent-web、frontend、用户手册、HTTP API、本地客户端架构与部署文档。
+
+### How
+
+- 前端定向 5 个文件 114/114、backend-api 117/117、全量 Vitest 2016 passed / 1 skipped、agent-web typecheck 和生产构建通过。
+- 后端客户端灰度应用/API/MyBatis/Flyway 命名共 24 项通过；真实 PostgreSQL 的 25 套 Spring Boot Flyway 历史升级测试全部通过，未使用 `outOfOrder`、`repair` 或手改历史表。
+- `V20260817193414__local_client_rollout_users_create.sql` 保持已执行原字节，SHA-256 仍为 `88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba`。
+
+### Result
+
+- 用户治理和两类灰度现在使用同一用户事实源，记忆配置保存一次后对所有已开放用户生效；客户端下载 capability 仍默认失败关闭，但已开放用户不会因实例健康查询而丢失入口。
+- 当前 dev 变更已完成代码、文档和数据库兼容门禁，等待与最新 release 做最终语义合并和实际服务重启验证；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未推送远端。
+
+## 2026-08-17 - 合并 dev 到 release 并保留近期部署演进
+
+### Why
+
+- 用户要求把 dev 整体合并到 release、解决已有冲突并切换主工作区，同时明确要求复核近期部署记录，不能在合并中丢失 release 的企业打包、迁移兼容、需求导入和可观测改动。
+
+### What
+
+- 以 release 的 `3ca040972` 为第一父提交合并 dev 的 `4fec97db9`；冲突处理中保留 release 较新的需求导入定向刷新、TCDS 统一请求、SCM Git 姓名补偿和模型 TTFT/ITL/Output TPS 筛选，同时并入 dev 的本地客户端、通用记忆与 ClickHouse 分析链路。
+- 修复合并后部署夹具遗漏：单节点配置渲染现在保留并校验 ClickHouse 连接与密码，同时清除禁用记忆能力时的密钥占位符；增量包和双后台完整包夹具纳入 PostgreSQL 专用 migration、ClickHouse DDL、全部兼容 migration 与两套 XXL V12 历史。
+- 双后台完整包测试不再绑定过期交付提交号，改为逐字比较包内 `START-HERE.md` 与当前 `MULTI-BACKEND.md`，避免最近 release 部署记录更新后门禁自身变成陈旧断言。
+
+### How
+
+- 相对合并前 release 执行部署路径删除审计，没有删除 `deploy/internal`、`docs/deployment`、`tools`、PostgreSQL/XXL migration；三个正式打包/部署脚本继续同时锁定分析 outbox、PostgreSQL trigger、ClickHouse DDL、本地客户端已执行兼容资源和 SCM Git 姓名 migration。
+- 前端全量 Vitest `2020 passed / 1 skipped`、agent-web typecheck、用户手册与生产构建通过；后端 24 模块应用聚合打包通过。
+- 真实 PostgreSQL Flyway 兼容矩阵 25/25 通过且无跳过；灰度应用/API/MyBatis/Flyway 命名测试同时纳入 reactor。`V20260817193414__local_client_rollout_users_create.sql` SHA-256 保持 `88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba`。
+- `verify-dev-scripts.sh`（避开本机既有 19070 mock 进程改用 19071）、`verify-internal-multi-backend-node.sh`、`verify-internal-incremental-components.sh`、`verify-internal-two-backend-complete-package.sh`、Shell 语法与 `git diff --check` 全部通过。
+
+### Result
+
+- release 的近期部署成果与 dev 新能力已形成同一可构建、可迁移、可封包的合并树；未修改 `.env*`、generated SDK、OpenCode 只读源码或任何已执行 migration 字节。
+- 企业真实 ARM 麒麟、本轮企业节点发布和中间件现场状态没有在本机重做，不能据此宣称企业环境已部署；下一步是完成 merge commit、切换主工作区到 release 并按 `.env.test` 实际重启验证。

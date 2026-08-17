@@ -17,6 +17,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.share.DelegatedOperationContext;
 import com.enterprise.testagent.opencode.runtime.share.SessionCollaborationShareService;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -48,6 +49,7 @@ public class TerminalApplicationService {
     private SessionCollaborationShareService shareService;
     private final SessionHistoryRepository sessionHistoryRepository;
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
+    private LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard;
 
     /**
      * 创建 PTY ticket 应用服务，所有安全校验在签发 ticket 前完成。
@@ -209,6 +211,12 @@ public class TerminalApplicationService {
             String traceId,
             DelegatedOperationContext context) {
         Session session = requireTerminalAccess(userId, sessionId, null);
+        if (localRuntimeCapabilityGuard != null) {
+            localRuntimeCapabilityGuard.requireSessionSupported(
+                    sessionId,
+                    "terminal",
+                    "本地 OpenCode 工作区首版不开放浏览器终端");
+        }
         WorkspaceId workspaceId = request.workspaceId() == null || request.workspaceId().isBlank()
                 ? session.workspaceId()
                 : new WorkspaceId(request.workspaceId());
@@ -291,6 +299,12 @@ public class TerminalApplicationService {
     @Autowired(required = false)
     void configureSessionShareService(SessionCollaborationShareService shareService) {
         this.shareService = shareService;
+    }
+
+    /** 本地会话即使具备远端映射也不得签发服务端 PTY ticket。 */
+    @Autowired(required = false)
+    void configureLocalRuntimeCapabilityGuard(LocalRuntimeCapabilityGuard guard) {
+        this.localRuntimeCapabilityGuard = guard;
     }
 
     /**

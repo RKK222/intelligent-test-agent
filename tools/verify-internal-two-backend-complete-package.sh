@@ -38,15 +38,14 @@ printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.ke
 (cd "${JAR_ROOT}" && zip -qr "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" .)
 PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
 mkdir -p "${PERSISTENCE_JAR_ROOT}/db"
-cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration" \
-  "${PERSISTENCE_JAR_ROOT}/db/"
-cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration-compat" \
+# 使用当前完整迁移目录生成夹具，使完整包门禁能覆盖主链、兼容链、PostgreSQL 专用资源与 ClickHouse DDL。
+cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/." \
   "${PERSISTENCE_JAR_ROOT}/db/"
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 XXL_JAR_ROOT="${TMP_ROOT}/xxl-jar-root"
 mkdir -p "${XXL_JAR_ROOT}/xxl-job/db"
-cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration" \
+cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/." \
   "${XXL_JAR_ROOT}/xxl-job/db/"
 (cd "${XXL_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-xxl-job-integration-0.1.0-SNAPSHOT.jar" .)
@@ -156,10 +155,10 @@ grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.
 START_HERE="${TMP_ROOT}/START-HERE.md"
 unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/START-HERE.md' >"${START_HERE}"
 grep -Fq 'V20260728160800__create_toolbox_click_tracking.sql' "${START_HERE}"
-grep -Fq 'f10754e01ab8f846a8aa2430214bb39f4795623b' "${START_HERE}"
-grep -Fq '20260802173416' "${START_HERE}"
-grep -Fq '20260803133000' "${START_HERE}"
-grep -Fq 'OPENCODE_MANAGER_MAX_PROCESSES` 从 `20` 改为 `30`' "${START_HERE}"
+cmp -s "${ROOT_DIR}/deploy/internal/MULTI-BACKEND.md" "${START_HERE}" || {
+  echo 'Complete package START-HERE.md differs from the current multi-backend runbook' >&2
+  exit 1
+}
 INNER_RELEASE="${TMP_ROOT}/inner-release.zip"
 unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/test-agent-internal-release.zip' >"${INNER_RELEASE}"
 inner_listing="$(unzip -Z1 "${INNER_RELEASE}")"

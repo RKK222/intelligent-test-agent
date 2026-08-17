@@ -7,6 +7,7 @@ import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceBackendServerResponse;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceFileRouteResponse;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
@@ -69,6 +70,17 @@ public class WorkspaceFileSocketController {
                 "opencode",
                 requestedWorkspace,
                 traceId), traceId);
+    }
+
+    /** 为当前用户的本地客户端目录选择器定位精确的反向连接持有 Java。 */
+    @PostMapping("/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route")
+    public ApiResponse<WorkspaceFileRouteResponse> routeLocalDirectoryPicker(
+            @PathVariable String clientInstanceId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        return ApiResponse.ok(routingService.routeLocalDirectoryPicker(
+                principal.userId(), new LocalClientInstanceId(clientInstanceId)), traceId);
     }
 
     /**

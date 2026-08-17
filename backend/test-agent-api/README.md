@@ -50,7 +50,7 @@
 - 暴露 opencode-manager WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配、完整运行配置已下发的连接级状态和 traceId 处理；同一连接的 health/start/restart/stop/stopOwned 等出站控制消息在连接级串行 emission，并检查 Reactor sink 结果，发送失败立即进入统一错误链路并取消 pending command，禁止静默等待 command timeout。manager 注册时 runtime 先冻结原 ACTIVE 运行进程候选，入口在完整 `configUpdate` 应用后的首个 `managerHeartbeat` 才把控制连接暴露给业务探测并异步执行恢复，避免空 manager 抢先把待恢复状态写成 `STOPPED`；配置缺失时只返回安全错误且不恢复。旧 manager-backends HTTP 诊断入口已作废，Go manager 运行路径不通过 HTTP 与 Java 交互，只连接本服务器 Java，`backendListRequest/backendListResponse` 仅保留为兼容诊断协议。
 - 后端 Java 路由统一使用 runtime 的 `BackendJavaRouteResolver` 解析当前服务器、首次分配的全局最轻可初始化服务器、`linuxServerId -> BackendJavaProcess` 和 `containerId -> linuxServerId`；API 层普通 Java->Java HTTP 转发走 `BackendHttpForwarder`，RunEvent SSE 长连接走 `BackendSseForwarder` 流式转发，两者都设置 `X-Test-Agent-Backend-Routed` 防循环并透传 Authorization、traceId 和 query。两个 start-run 入口携带 `contextToken` 时，路由过滤器在 32 MiB 上限内缓存请求体并通过 Redis 只读解析 token 绑定的生产服务器，不查询用户进程 assignment，也不刷新 token TTL；字段已出现但为空、非字符串或失效时 fail-closed 返回 409，不回退 assignment。远端转发和本地 Controller 均可再次读取完整 body。无 token 的兼容请求仍走 assignment 路由。后续新增任何 opencode-manager 路由或 Java->manager 控制入口，都必须复用这套公共程序。
 - `CommonParameterMemoryController` / `CommonParameterMemoryBackendRoutingService`：仅向 `SUPER_ADMIN` 提供显式 JVM 内存参数的全部/单进程查询与手工刷新。集群聚合最多 500 个在线 Java，按 `backendProcessId` 精确保留同服务器多进程，使用公共 resolver/forwarder、并发 8、单进程 10 秒超时和内部路由头防循环；部分失败返回 HTTP 200 逐进程结果，未知或离线单进程统一 503。API 层不读取 Repository、不写修改历史、不发布参数广播。
-- `web.aop.ApiLoggingAspect` 按目标 Controller logger 记录前端 HTTP 操作入口、出口、耗时、状态和脱敏请求/响应摘要；`contextToken`、`ticketId/grantId/grant/encryptedPrivateKey`、内存参数 `sourceValue/memoryValue` 与 Authorization、Cookie 等敏感字段同样强制掩码，包含 JSON 转义字符时也不得残留原值。敏感字符串使用无回溯匹配，长加密私钥信封不得因日志脱敏栈溢出而中断业务请求。精确的 `OPENCODE_UNAVAILABLE + 请先初始化 TestAgent 进程` 属于用户可恢复前置条件，只在 API 边界记录一条无堆栈 WARN，Service 切面不重复记录；同错误码的健康失败、manager 不可用等其它异常仍保留 ERROR 堆栈。`web.aop.WebSocketLoggingAspect` 按目标 WebSocket handler logger 记录前端长连接入口、结束信号和异常；`web.aop.ServiceLoggingAspect` 按目标 Service logger 仅在抛出异常时记录方法、参数摘要、耗时和错误。三者统一进入 `logs/backend.log`，ERROR 级别同时进入 `logs/error.log`；SSE 相关 Controller/Service/logger 还会额外进入 `logs/sse.log`。
+- `web.aop.ApiLoggingAspect` 按目标 Controller logger 记录前端 HTTP 操作入口、出口、耗时、状态和脱敏请求/响应摘要；`contextToken`、`ticketId/grantId/grant/encryptedPrivateKey`、内存参数 `sourceValue/memoryValue` 与 Authorization、Cookie 等敏感字段同样强制掩码，包含 JSON 转义字符时也不得残留原值。敏感字符串使用无回溯匹配，长加密私钥不得因日志脱敏栈溢出而中断业务请求。精确的 `OPENCODE_UNAVAILABLE + 请先初始化 TestAgent 进程` 属于用户可恢复前置条件，只在 API 边界记录一条无堆栈 WARN，Service 切面不重复记录；同错误码的健康失败、manager 不可用等其它异常仍保留 ERROR 堆栈。`web.aop.WebSocketLoggingAspect` 按目标 WebSocket handler logger 记录前端长连接入口、结束信号和异常；`web.aop.ServiceLoggingAspect` 按目标 Service logger 仅在抛出异常时记录方法、参数摘要、耗时和错误。三者统一进入 `logs/backend.log`，ERROR 级别同时进入 `logs/error.log`；SSE 相关 Controller/Service/logger 还会额外进入 `logs/sse.log`。
 - 暴露超级管理员运行管理 overview、容器/按稳定服务器身份的后端指标历史和有主/无主 opencode server 重启/停止 API；旧后端进程指标入口已作废。Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、后端指标 DTO 映射和 traceId 处理；manager 明细新增可空 `unifiedAuthId/managerStatus`，旧 manager/旧 Redis 快照缺字段时保持 `null`。UCID 只通过该现有高权限接口返回，不进入普通用户接口、普通错误信息或日志。后端指标 DTO 按可空字段透传服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped/GC/线程字段，并保留旧别名 `memoryMaxBytes`、`jvmGcPauseMillis`。重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是当前 Java 或同服务器选中 Java 时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 manager 明确未托管后的原端口拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员 XXL 一次性 SSO 票据 API，Controller 只做 `SUPER_ADMIN` 鉴权和 traceId；旧 scheduler-management 任意子路径统一返回 `410 API_GONE`。
 - 暴露当前用户批量单项 Session 幂等创建接口，以及定时执行时段和任务创建/查询/改期/取消/失败卡关闭 API；批量 Session 请求必须携带 `batchContext`。夜间创建 DTO 的可选 `batchContext` 只允许在省略 `sessionId` 时使用，可选 `scheduleMode` 缺失时按 `NIGHT_WINDOW`，旧请求行为不变；`ADMIN_CUSTOM` 创建和改期由 Controller 基于真实 `AuthPrincipal` 向应用层传递 `SUPER_ADMIN` 权限事实，owner 始终取认证主体。`NightExecutionDtos` 只把完整 prompt/parts 映射到应用命令，任务响应增加模式但仍仅返回安全截断预览，不回显完整输入。精确内部路径 `/api/internal/platform/opencode-runtime/night-execution/internal-dispatch` 仅接收目标 `linuxServerId` 和最多 50 个 `taskId`，使用标准 XXL access token 鉴权；分发网关必须先由公共 resolver 选出目标服务器上的精确 backendProcessId，再决定本机调用或统一 HTTP 转发。
@@ -59,7 +59,7 @@
 - 暴露应用引用资产库 7 个内部 API，`ReferenceRepositoryController` 只做 `APP_ADMIN` 鉴权（`SUPER_ADMIN` 继承）、初始化/切换分支请求 DTO、包含可空 `repositoryPath` 的状态响应、traceId 和阻塞 Git/文件任务调度；列表、初始化、同步、受控分支切换、只读指针核验、状态、单层树的业务规则全部委托 workspace-management，不在 Controller 访问 Repository 或文件系统。
 - 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、关键字/角色/组织/部门组合筛选与分页参数、创建用户、手工用户名修正、单角色调整及显式/按筛选全选的批量角色请求转换；显式批量请求把缺省或 `null` 的 `allMatching` 兼容为 `false`，避免旧前端请求在反序列化阶段返回 400；改名请求不接收统一认证号，批量操作者从认证主体取得，用户创建、改名、角色替换、目标解析和 ROLE 字典校验委托 `test-agent-system-management`。
 - 暴露 AI Run 整体回复反馈 API：单查/写入按 `runId`，批量查询每次最多 100 个 Run；Controller 只读取当前登录用户和 traceId，成功状态、主对话与归属校验由 runtime 服务完成。旧 messageId API 保留兼容。
-- 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、通用筛选参数传递、CSV 响应头和统一错误转换；查询服务只读 rollup。
+- 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、机构/研发部/部门/用户筛选参数传递、热力 metric、CSV 响应头和统一错误转换；用户维度、运营行为事实、明细、汇总和筛选项全部只读 ClickHouse。新增筛选选项、用户漏斗、日期小时热力、Token 运营和 Agent/Skill/Tool 使用率端点；旧 agent/model/workspace 参数非空时统一返回校验错误。
 - `GET /api/internal/platform/opencode-runtime/sessions` 是当前登录用户历史会话分页接口，支持 `page/size/q`，返回 `workspaceContext` 并按 `pinned desc, updatedAt desc, id desc` 排序；既有 `PATCH /sessions/{sessionId}` 可更新标题和置顶状态，纯置顶更新保留 `updatedAt`，使取消置顶后回到普通组原位置。Session 历史正文恢复主入口是 agent-scoped session tree messages；内部平台 messages 接口的 `refresh=false` 只读数据库快照用于只读 transcript、Run ID 恢复和旧消息反馈兼容，不再为新反馈寻找 assistant messageId。`RunResponse` 可选携带 `storageMode/clientRequestId/detailsAvailableUntil`；active-run API 供前端刷新后恢复 SSE。
 - `GET /api/internal/platform/opencode-runtime/sessions/runtime-state` 和 `/runtime-state/events` 暴露当前登录用户历史会话运行态摘要和 fetch SSE 状态通道；DTO 包含 `questionCount/permissionCount`，`sessions[].attention` 支持 `QUESTION/PERMISSION`。Controller 只读取登录主体、traceId、映射 DTO 和输出 SSE，运行计数、两类待关注状态及事件触发刷新委托 `test-agent-opencode-runtime`。用户已有 Redis 运行态 marker 时，摘要和 active-run fallback 均只读 Redis 索引/manifest，不由 API 层回查 Repository。
 - `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question` 保留同步兼容路径；`.../side-question/runs` 与 agent-scoped 等价路径立即返回旁路 Run。`POST /api/internal/platform/opencode-runtime/manual-question/runs` 在无主对话时按工作区创建归档内部 Session 和远端临时会话。两种流式路径都复用 RunEvent SSE、禁用工具、等待自然语言最终回答并删除临时会话，不追加或创建普通主会话历史。
@@ -124,7 +124,7 @@
 - `BatchSessionControllerTest` 覆盖批量 Session 的认证、DTO 映射和非法上下文；`NightExecutionControllerTest`、`NightExecutionDtosTest` 覆盖认证、旧请求默认模式、批量上下文与 `sessionId` 互斥、超级管理员权限事实透传、创建/查询 DTO、输入校验、安全响应和统一错误；`UserOpencodeBackendRoutingWebFilterTest` 覆盖定时任务创建、改期、取消和失败卡关闭按用户 binding 路由。
 - `UserManagementControllerTest` 覆盖用户管理 API 的 `SUPER_ADMIN` 组合筛选查询、创建、手工用户名修正及统一认证号保持、单人角色调整、旧前端缺省 `allMatching` 的显式批量角色兼容、按筛选全选批量角色命令映射、角色列表和非超管/匿名拒绝。
 - `AiRunFeedbackControllerTest` 覆盖登录用户提交、查询和批量读取 Run 反馈；`AiMessageFeedbackControllerTest` 覆盖旧消息接口兼容与匿名拒绝。
-- `AnalyticsControllerTest` 覆盖运营分析 API 的 `SUPER_ADMIN` 成功、非超级管理员/匿名拒绝和非法时间参数统一校验错误。
+- `AnalyticsControllerTest` 覆盖运营分析 API 的 `SUPER_ADMIN` 成功、筛选项/漏斗/热力/Token/能力端点、非超级管理员/匿名拒绝和非法时间参数统一校验错误。
 - `ManagerControlWebSocketHandlerTest` 覆盖 `register`、完整配置下发后首个 `managerHeartbeat` 才开放控制连接并触发恢复、未配置连接不触发恢复、兼容 `backendListRequest` 忽略、命令结果、错误 envelope 和多线程并发控制命令完整送达的 WebSocket 入口适配。
 - `UserOpencodeBackendRoutingWebFilterTest` 覆盖未绑定状态/初始化请求按全局最轻可初始化服务器转发、当前服务器放行、已有 binding 优先、远端失败不重试、Redis 选服异常统一 503、用户 opencode 进程请求按已有 binding 所属服务器转发、工作区个人 Git/应用配置操作跨服务器转发、公共配置聚合入口留在本地、内部路由头防循环、只读状态 GET 的降级，以及 agent/platform 两个 start-run 入口通过 context 只读路由时零 assignment 调用、远端/本地 body 可复读、过期或显式非法 token 统一 409 且不回显 token、请求体超限统一 400。
 - `UserOpencodeWeakHealthRoutingWebFilterTest` 覆盖 `/processes/me/health` 按 query `linuxServerId` 随机转发到目标服务器在线 Java、目标后端缺失返回 `healthy=false`、路由头防循环和本服务器请求放行。
@@ -153,9 +153,34 @@
 
 ## 后续 AI 编码指引
 
+通用长期记忆 HTTP 入口固定在 `/api/internal/platform/memory/v1/**`，系统管理入口固定在同前缀的
+`/admin/**`。旧 `/qa-memory/v1/**` 由专用 Controller 返回 `410 API_GONE`。Controller 只做当前用户/角色鉴权、DTO、traceId 和统一响应；
+个人/团队范围、Application 成员和 `expectedVersion` 规则由 `test-agent-memory` 执行。Run 使用记录通过批量 HTTP
+恢复，不新增或修改 RunEvent SSE。Skill 提案创建、审核、草稿编辑、归档和已发布资产关联均使用该前缀；审核与关联
+要求 `APP_ADMIN`，Controller 不直接写 Workspace、不调用 Git 或 Hub 发布协议。
+`GET /availability` 是已登录用户的最小灰度探针，只返回“记忆总开关已启用且当前用户位于记忆名单”的布尔结果；其它用户接口仍由业务层强制校验总开关和白名单。前端用该结果隐藏活动栏入口并在 `/memories` 路由挂载前失败关闭，但后端不能依赖前端隐藏完成鉴权。
+
 新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。平台自身接口放 `web.platform`，agent 代理入口放 `web.agent`，横切入口支撑放 `web.common`。不得新增旧 `/api/...` runtime/workspace 入口；新 URL 必须同步记录到 `docs/api/http-api.md`。
 
 `RunResendController` 暴露 agent-scoped 最后一条消息撤销重发，只允许源消息实际发送人操作；分享发送人还必须持有 `canChat`，并接受可选、最长 20000 字符的 `editedPrompt`；`RunResendInternalDispatchController` 仅接收带既有 XXL token 的
 精确 Java→Java 批量恢复请求，`HttpRunResendDispatchGateway` 固定复用公共路由解析器和转发器。`Run`、Session message 与
 runtime-state DTO 的 `resend` 均为可选 additive 字段，分享 runtime-state 额外 additive 返回 `sessionUpdatedAt`；旧客户端缺失时继续按普通运行展示。内部响应与事件不返回 prompt、回答或
 供应商正文。共享人工重发的历史 Run/消息若曾被执行链错误写成所属人，DTO 映射以既有 `resend.requester*` 审计字段恢复实际发送人、姓名和代操作标记，不修改协议结构或数据库历史。
+
+## 本地 OpenCode 客户端入口
+
+`LocalClient*Controller` 和 `LocalClientConnectionWebSocketHandler` 承载当前用户 key、实例、生命周期、模型
+代理和反向 WSS 入口；`LocalWorkspaceController` 与现有文件 route/ticket/handler 承载本地目录选择和文件
+RPC。跨 Java 必须按连接记录的 backendProcessId/generation 复用公共 resolver/forwarder，Controller 不读取
+Redis 快照、不直接控制本地 supervisor。Workspace/Session/Run/夜间及统一 OpenCode 实例响应仅追加
+runtime/capability 字段，旧服务端路径保持兼容。完整契约见 `docs/api/http-api.md` 与
+`docs/api/event-stream.md`。
+`LocalClientRolloutAdminController` 仅允许 `SUPER_ADMIN` 分页、添加和移出客户端下载灰度用户；
+`UserOpencodeEndpointController` 把当前用户是否灰度作为服务端实例的 `localClientDownload` capability additive
+返回，查询异常时失败关闭为 false，不影响已有 OpenCode 实例列表。
+
+`ProtectedAgentMcpController` 仅承载服务器 OpenCode 的精确 stateless MCP JSON-RPC 入口。它从 HTTP exchange
+读取短期 Bearer grant，保持 MCP 原始 wire body，不使用平台 `ApiResponse` envelope；notification 显式返回
+`202` 空 body。请求和响应 DTO 实现安全日志摘要，通用日志切面遇到 `ResponseEntity` 也只序列化摘要，禁止
+记录 Authorization、文件参数/内容或 Skill 正文。`ApiTokenWebFilter` 只豁免该精确路径，相邻子路径仍按原
+鉴权拒绝。`ProtectedAgentMcpControllerTest`、`ApiLoggingAspectTest` 和 `ApiTokenWebFilterTest` 固化上述边界。

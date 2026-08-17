@@ -3,6 +3,8 @@ package com.enterprise.testagent.opencode.runtime.process;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
@@ -30,6 +32,13 @@ public class OpencodeProcessStopService {
     private final UserRepository userRepository;
     private final Clock clock;
     private final ConversationContextStore conversationContextStore;
+    private LocalClientLifecycleGateway localClientLifecycleGateway;
+
+    /** LOCAL_CLIENT 停止仍经本公共停止入口委托隧道网关。 */
+    @Autowired
+    void setLocalClientLifecycleGateway(LocalClientLifecycleGateway localClientLifecycleGateway) {
+        this.localClientLifecycleGateway = Objects.requireNonNull(localClientLifecycleGateway);
+    }
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -210,6 +219,24 @@ public class OpencodeProcessStopService {
                     Map.of("processId", current.processId().value(), "port", current.port()));
         }
         return stoppedResult(persistenceExpected, postStop, request.traceId(), true);
+    }
+
+    /** 停止本地进程后必须由客户端确认原 PID 已退出且 loopback health 不再可达。 */
+    public LocalClientLifecycleResult stopLocalClientAndVerify(
+            LocalClientInstanceId clientInstanceId,
+            long connectionGeneration,
+            String traceId) {
+        if (localClientLifecycleGateway == null) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地客户端生命周期网关未启用");
+        }
+        LocalClientLifecycleResult result = localClientLifecycleGateway.stop(
+                clientInstanceId, connectionGeneration, traceId);
+        if (!result.success()
+                || result.processStatus() != LocalClientProcessStatus.STOPPED
+                || result.opencodeHealthy()) {
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "本地 OpenCode 停止确认失败");
+        }
+        return result;
     }
 
     /**

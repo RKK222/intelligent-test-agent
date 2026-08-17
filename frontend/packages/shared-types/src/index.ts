@@ -70,6 +70,9 @@ export type ToolboxClickResult = {
   incremented: boolean;
 };
 
+/** 运行目标类型；string 后缀保持旧前端对未来枚举值的兼容。 */
+export type RuntimeKind = "SERVER_PROCESS" | "LOCAL_CLIENT" | string;
+
 /** 当前编辑器解析出的 TCDS 案例；固定业务字段和 userId 由后端补齐。 */
 export type TcdsTestCaseMaintenancePayload = {
   itemNo: string;
@@ -96,6 +99,7 @@ export type MemoryStatus =
   | "PAUSED"
   | "CONFLICTED"
   | "REJECTED"
+  | "ARCHIVED"
   | "SUPERSEDED";
 export type MemorySource =
   | "MANUAL"
@@ -238,6 +242,107 @@ export type Workspace = {
    * 工作区不属于任何应用版本时为 `null`。
    */
   applicationWorkspaceId?: string | null;
+  /** 本地客户端工作区由稳定实例承载，不对应服务端 process/binding。 */
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
+  online?: boolean;
+  capabilities?: Record<string, boolean>;
+};
+
+export type LocalClientCredentialStatus = "ACTIVE" | "REVOKED" | string;
+
+export type LocalClientCredential = {
+  exists: boolean;
+  maskedKey?: string | null;
+  version: number;
+  status?: LocalClientCredentialStatus | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+/** copy 是唯一携带明文 key 的响应；调用方必须立即写入剪贴板并丢弃引用。 */
+export type LocalClientPlaintextKey = { clientKey: string };
+
+/** 超级管理员维护的本地客户端下载灰度用户；禁用记录不出现在列表响应中。 */
+export type LocalClientRolloutUser = {
+  userId: string;
+  enabled: boolean;
+  updatedByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LocalClientInstance = {
+  clientInstanceId: string;
+  clientName: string;
+  platform: string;
+  architecture: string;
+  clientVersion: string;
+  opencodeVersion: string;
+  online: boolean;
+  connectionGeneration: number;
+  reportedAddresses: string[];
+  observedRemoteAddress?: string | null;
+  opencodePort?: number | null;
+  processStatus: string;
+  opencodeHealthy: boolean;
+  processId?: number | null;
+  processStartedAt?: string | null;
+  lastHeartbeatAt?: string | null;
+  lastConnectedAt?: string | null;
+  lastDisconnectedAt?: string | null;
+  capabilities: Record<string, boolean>;
+};
+
+export type OpencodeEndpoint = {
+  runtimeKind: RuntimeKind;
+  endpointId: string;
+  displayName: string;
+  online: boolean;
+  processStatus: string;
+  platform?: string | null;
+  architecture?: string | null;
+  clientVersion?: string | null;
+  opencodeVersion?: string | null;
+  connectionGeneration: number;
+  reportedAddresses: string[];
+  observedRemoteAddress?: string | null;
+  port?: number | null;
+  healthy: boolean;
+  lastHeartbeatAt?: string | null;
+  linuxServerId?: string | null;
+  containerId?: string | null;
+  serviceAddress?: string | null;
+  capabilities: Record<string, boolean>;
+};
+
+export type LocalClientDirectoryEntry = {
+  name: string;
+  absolutePath: string;
+  directory: boolean;
+  symbolicLink: boolean;
+  readable: boolean;
+};
+
+export type LocalWorkspace = {
+  workspaceId: string;
+  name: string;
+  rootPath: string;
+  runtimeKind: RuntimeKind;
+  localClientInstanceId: string;
+  online: boolean;
+  capabilities: Record<string, boolean>;
+};
+
+export type LocalClientCommandResult = {
+  success: boolean;
+  processStatus: string;
+  processId?: number | null;
+  processStartedAt?: string | null;
+  opencodePort?: number | null;
+  opencodeHealthy: boolean;
+  executable?: string | null;
+  message: string;
 };
 
 export type WorkspaceDirectoryEntry = {
@@ -406,12 +511,17 @@ export type FileStatus = {
 };
 
 export type WorkspaceFileRoute = {
-  workspaceId: string;
-  linuxServerId: string;
+  workspaceId?: string | null;
+  linuxServerId?: string | null;
   baseUrl: string;
   webSocketPath: string;
   sameServer: boolean;
   message?: string | null;
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
+  connectionGeneration?: number | null;
+  rootDigest?: string | null;
+  online?: boolean;
 };
 
 export type WorkspaceBackendServer = {
@@ -429,6 +539,8 @@ export type WorkspaceFileSocketTicketRequest = {
   mode?: "workspace" | "directory-picker" | "agent-config" | string;
   scope?: AgentConfigScope;
   worktreeId?: string | null;
+  localClientInstanceId?: string | null;
+  connectionGeneration?: number | null;
 };
 
 export type WorkspaceFileSocketTicketResponse = {
@@ -769,6 +881,8 @@ export type Session = {
   shareExpired?: boolean | null;
   /** 是否已被分享 */
   isShared?: boolean | null;
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
 };
 
 /** 协作分享候选用户只暴露平台最小身份资料。 */
@@ -951,6 +1065,9 @@ export type ConversationRunContext = {
   contextToken: string;
   contextVersion: number;
   expiresAt: string;
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
+  connectionGeneration?: number | null;
 };
 
 export type SessionRuntimeAttention = "QUESTION" | "PERMISSION" | string;
@@ -1076,6 +1193,8 @@ export type NightExecutionTask = {
   createdBySharedUser?: boolean;
   createdAt: string;
   updatedAt: string;
+  targetRuntimeKind?: RuntimeKind;
+  targetLocalClientInstanceId?: string | null;
 };
 
 export type NightExecutionTaskQueryResponse = PageResponse<NightExecutionTask> & {
@@ -1210,10 +1329,7 @@ export type AnalyticsQueryParams = {
   organization?: string;
   rdDepartment?: string;
   department?: string;
-  userId?: string;
-  agentId?: string;
-  model?: string;
-  workspaceId?: string;
+  user?: string;
   topN?: number;
   page?: number;
   pageSize?: number;
@@ -1224,6 +1340,103 @@ export type AnalyticsFreshness = {
   generatedAt?: string | null;
   status: "FRESH" | "STALE" | "FAILED" | string;
   message?: string | null;
+  coverageStart?: string | null;
+  coverageEnd?: string | null;
+  attributionMode?: string | null;
+};
+
+export type AnalyticsFilterOption = { value: string; label: string };
+
+export type AnalyticsFilterOptions = {
+  organizations: AnalyticsFilterOption[];
+  rdDepartments: AnalyticsFilterOption[];
+  departments: AnalyticsFilterOption[];
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsFunnel = {
+  totalUsers: number;
+  activeUsers: number;
+  deepUsers: number;
+  activeRate?: number | null;
+  deepRate?: number | null;
+  activeDefinition: string;
+  deepDefinition: string;
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsHeatmapMetric = "USER_MESSAGES" | "PRIMARY_TOKENS" | "CACHE_TOKENS";
+
+export type AnalyticsHourlyHeatmapPoint = {
+  date: string;
+  hourOfDay: number;
+  value: number;
+};
+
+export type AnalyticsHourlyHeatmap = {
+  metric: AnalyticsHeatmapMetric;
+  dates: string[];
+  points: AnalyticsHourlyHeatmapPoint[];
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsTokenDailyPoint = {
+  date: string;
+  totalTokens: number;
+  primaryTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  tokenUsers: number;
+  tokensPerUser?: number | null;
+};
+
+export type AnalyticsTokenUserRow = {
+  userId: string;
+  username?: string | null;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+  totalTokens: number;
+  primaryTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  tokenDays: number;
+  tokensPerTokenDay?: number | null;
+  intensityBand: string;
+};
+
+export type AnalyticsTokenOperations = {
+  totalTokens: number;
+  primaryTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  tokenUsers: number;
+  activeUsers: number;
+  tokenUserRate?: number | null;
+  tokenActivePersonDays: number;
+  dailyTokensPerUser?: number | null;
+  repeatTokenUsers: number;
+  repeatTokenUserRate?: number | null;
+  daily: AnalyticsTokenDailyPoint[];
+  users: AnalyticsTokenUserRow[];
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsCapabilityUsage = {
+  type: "AGENT" | "SKILL" | "TOOL" | string;
+  name: string;
+  invocationCount: number;
+  userCount: number;
+  usageRate?: number | null;
+  succeededCount: number;
+  failedCount: number;
+  incompleteCount: number;
+};
+
+export type AnalyticsCapabilities = {
+  activeUsers: number;
+  rows: AnalyticsCapabilityUsage[];
+  freshness: AnalyticsFreshness;
 };
 
 export type AnalyticsOverview = {
@@ -1433,6 +1646,8 @@ export type Run = {
   messageSenderUnifiedAuthId?: string | null;
   messageSentBySharedUser?: boolean;
   resend?: ResendMetadata | null;
+  runtimeKind?: RuntimeKind;
+  localClientInstanceId?: string | null;
 };
 
 export type CreateRunResendPayload = {
@@ -2179,6 +2394,7 @@ export type InternalModelProviderModel = {
   upstreamModelId: string;
   displayName: string;
   contextLimit?: number | null;
+  embeddingDimension?: number | null;
   enabled: boolean;
   declaredCapabilities: InternalModelCapability[];
   probedCapabilities: InternalModelCapability[];
@@ -2193,6 +2409,7 @@ export type InternalModelProviderModelUpdatePayload = {
     upstreamModelId: string;
     displayName: string;
     contextLimit?: number | null;
+    embeddingDimension?: number | null;
     enabled?: boolean;
     capabilities: InternalModelCapability[];
   }>;

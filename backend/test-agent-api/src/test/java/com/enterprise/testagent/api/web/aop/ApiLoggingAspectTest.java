@@ -18,6 +18,7 @@ import com.enterprise.testagent.domain.externalapi.ExternalApiScope;
 import com.enterprise.testagent.domain.user.UserId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.InetSocketAddress;
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
@@ -274,6 +276,25 @@ class ApiLoggingAspectTest {
     }
 
     @Nested
+    @DisplayName("响应日志摘要测试")
+    class ResponseLogSummaryTest {
+
+        @Test
+        @DisplayName("ResponseEntity 中的安全摘要不记录工具返回正文")
+        void responseEntityUsesSafeSummary() throws Exception {
+            Method serializer = ApiLoggingAspect.class.getDeclaredMethod("serializeResponse", Object.class);
+            serializer.setAccessible(true);
+
+            String serialized = (String) serializer.invoke(
+                    aspect,
+                    ResponseEntity.ok(new TestSummaryResponse("workspace-content-must-not-enter-api-log")));
+
+            assertTrue(serialized.contains("hasResult"));
+            assertTrue(!serialized.contains("workspace-content-must-not-enter-api-log"));
+        }
+    }
+
+    @Nested
     @DisplayName("logApiCall 方法测试")
     class LogApiCallTest {
 
@@ -360,6 +381,13 @@ class ApiLoggingAspectTest {
         @Override
         public Object apiRequestLogSummary() {
             return Map.of("itemNo", "S20260703-000081", "caseCount", 2);
+        }
+    }
+
+    record TestSummaryResponse(String content) implements ApiRequestLogSummary {
+        @Override
+        public Object apiRequestLogSummary() {
+            return Map.of("hasResult", true);
         }
     }
 }

@@ -12,6 +12,10 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.BatchSessionAttributionRepository;
 import com.enterprise.testagent.domain.session.Session;
@@ -19,6 +23,8 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
+import com.enterprise.testagent.domain.session.SessionRuntimeTarget;
+import com.enterprise.testagent.domain.session.SessionRuntimeTargetRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -34,6 +40,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** 夜间任务提交、查询、改期、取消和失败卡关闭的统一应用服务。 */
 @Service
@@ -51,6 +58,8 @@ public class NightExecutionTaskApplicationService {
     private final BatchSessionAttributionRepository batchAttributionRepository;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private LocalClientWorkspaceRepository localClientWorkspaceRepository;
+    private SessionRuntimeTargetRepository sessionRuntimeTargetRepository;
 
     public NightExecutionTaskApplicationService(
             NightExecutionTaskRepository taskRepository,
@@ -166,16 +175,16 @@ public class NightExecutionTaskApplicationService {
         }
 
         NightExecutionRunInputSnapshot snapshot = command.runInput().withStableIds();
-        String targetLinuxServerId = assignmentService.routingLinuxServerId(owner, "opencode")
-                .orElseGet(routeResolver::currentLinuxServerIdValue);
+        NightRuntimeTarget runtimeTarget = resolveRuntimeTarget(owner, workspace.workspaceId(), session.session());
         NightExecutionTask draft = new NightExecutionTask(
                 taskId, owner, session.session().sessionId(), workspace.workspaceId(), command.clientRequestId(),
                 session.session().title(), preview(snapshot.effectivePrompt()), writeSnapshot(snapshot),
                 command.scheduleMode(), NightExecutionTaskStatus.SCHEDULED,
                 schedule.slotStart(), schedule.slotEnd(), schedule.windowEnd(),
-                targetLinuxServerId, null, null, 0, session.created(),
+                runtimeTarget.linuxServerId(), null, null, 0, session.created(),
                 null, null, null, null, 0L, null, null, null, null,
-                traceId, now, now)
+                traceId, now, now,
+                runtimeTarget.runtimeKind(), runtimeTarget.localClientInstanceId())
                 .withCreatorSnapshot(
                         actor.actualCreator(), actor.unifiedAuthId(), actor.shared(),
                         actor.context() == null ? null : actor.context().shareId(),
@@ -187,6 +196,51 @@ public class NightExecutionTaskApplicationService {
             throw new PlatformException(ErrorCode.CONFLICT, "当前会话已有待执行夜间任务");
         }
         return draft;
+    }
+
+    /** 工作区存在本地绑定时冻结实例；离线只影响到点投递，不改变已创建任务目标。 */
+    private NightRuntimeTarget resolveRuntimeTarget(UserId owner, WorkspaceId workspaceId, Session session) {
+        LocalClientWorkspaceBinding localBinding = localClientWorkspaceRepository == null
+                ? null
+                : localClientWorkspaceRepository.findByWorkspaceId(workspaceId).orElse(null);
+        if (localBinding != null) {
+            if (!localBinding.userId().equals(owner)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "本地工作区不属于当前用户");
+            }
+            if (sessionRuntimeTargetRepository == null) {
+                throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "会话本地目标仓储未装配");
+            }
+            SessionRuntimeTarget frozen = sessionRuntimeTargetRepository
+                    .findBySessionId(session.sessionId())
+                    .orElse(null);
+            if (frozen != null && (frozen.runtimeKind() != RuntimeKind.LOCAL_CLIENT
+                    || !localBinding.clientInstanceId().equals(frozen.localClientInstanceId()))) {
+                throw new PlatformException(ErrorCode.CONFLICT, "会话已冻结到其他 OpenCode 实例");
+            }
+            sessionRuntimeTargetRepository.save(new SessionRuntimeTarget(
+                    session.sessionId(), RuntimeKind.LOCAL_CLIENT, localBinding.clientInstanceId()));
+            return new NightRuntimeTarget(RuntimeKind.LOCAL_CLIENT, null, localBinding.clientInstanceId());
+        }
+        if (sessionRuntimeTargetRepository != null) {
+            SessionRuntimeTarget frozen = sessionRuntimeTargetRepository
+                    .findBySessionId(session.sessionId())
+                    .orElseGet(() -> SessionRuntimeTarget.server(session.sessionId()));
+            if (frozen.runtimeKind() == RuntimeKind.LOCAL_CLIENT) {
+                throw new PlatformException(ErrorCode.CONFLICT, "本地会话工作区绑定缺失，禁止降级到服务端");
+            }
+        }
+        String linuxServerId = assignmentService.routingLinuxServerId(owner, "opencode")
+                .orElseGet(routeResolver::currentLinuxServerIdValue);
+        return new NightRuntimeTarget(RuntimeKind.SERVER_PROCESS, linuxServerId, null);
+    }
+
+    /** 生产装配本地工作区和会话目标；旧测试构造器保持兼容。 */
+    @Autowired(required = false)
+    void configureLocalClientRuntime(
+            LocalClientWorkspaceRepository localClientWorkspaceRepository,
+            SessionRuntimeTargetRepository sessionRuntimeTargetRepository) {
+        this.localClientWorkspaceRepository = Objects.requireNonNull(localClientWorkspaceRepository);
+        this.sessionRuntimeTargetRepository = Objects.requireNonNull(sessionRuntimeTargetRepository);
     }
 
     private NightExecutionTask idempotentTask(NightExecutionTask existing, TaskActor actor) {
@@ -494,4 +548,9 @@ public class NightExecutionTaskApplicationService {
             Instant windowEnd,
             int capacity,
             boolean reservesCapacity) { }
+
+    private record NightRuntimeTarget(
+            RuntimeKind runtimeKind,
+            String linuxServerId,
+            LocalClientInstanceId localClientInstanceId) { }
 }

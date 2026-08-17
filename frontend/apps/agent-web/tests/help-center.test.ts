@@ -69,17 +69,19 @@ describe("help center", () => {
     expect(helpDocumentUrl("settings")).toBe("/help/guide/settings.html");
     expect(helpDocumentUrl("directory-mapping")).toBe("/help/guide/directory-mapping.html");
     expect(helpDocumentUrl("reference-config")).toBe("/help/guide/reference-config.html");
+    expect(helpDocumentUrl("memory")).toBe("/help/guide/memory.html");
     expect(helpDocumentUrl("weekly-updates")).toBe("/help/guide/weekly-updates.html");
     expect(normalizeHelpTopic("unknown")).toBe("getting-started");
   });
 
-  it("keeps weekly updates, current features, reference configuration and merged FAQ troubleshooting in embedded Help", async () => {
+  it("keeps weekly updates, current features, memory, reference configuration and merged FAQ troubleshooting in embedded Help", async () => {
     const wrapper = mountHelpCenter();
     const topicLabels = wrapper.findAll(".ta-help-center-topic").map((button) => button.text());
 
     expect(topicLabels.some((label) => label.includes("每周新功能"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("功能总览"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("引用配置"))).toBe(true);
+    expect(topicLabels.some((label) => label.includes("长期记忆"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("常见问题与排查"))).toBe(true);
     expect(topicLabels.filter((label) => label.includes("常见问题"))).toHaveLength(1);
 
@@ -97,7 +99,17 @@ describe("help center", () => {
     expect(prompt.length).toBeLessThan(6_700);
   });
 
-  it("grounds weekly feature questions in user scenarios and release-safe boundaries", () => {
+  it("grounds memory questions in the user-facing governance chapter", () => {
+    const prompt = buildManualQuestionPrompt("memory", "为什么没有显示参考了几条记忆？");
+
+    expect(prompt).toContain("【当前章节】长期记忆");
+    expect(prompt).toContain("参考了 N 条记忆");
+    expect(prompt).toContain("团队记忆");
+    expect(prompt).toContain("Skill 提案");
+    expect(prompt.length).toBeLessThan(3_900);
+  });
+
+  it("grounds weekly feature questions in user scenarios and branch-safe boundaries", () => {
     const prompt = buildManualQuestionPrompt("weekly-updates", "这周自动化代码库怎么用？");
 
     expect(prompt).toContain("【当前章节】每周新功能");
@@ -110,8 +122,8 @@ describe("help center", () => {
     expect(prompt).toContain("本地提交，但不提供远程推送或发布");
     expect(prompt).toContain("VITE_CACHE_DATA_URL");
     expect(prompt).not.toMatch(forbiddenGameContentPatterns[0]!);
-    expect(prompt).not.toContain("长期记忆");
-    expect(prompt.length).toBeLessThan(6_700);
+    expect(prompt).toContain("长期记忆会在新任务中自动复用经验");
+    expect(prompt.length).toBeLessThan(8_100);
   });
 
   it("permanently keeps game content out of every user manual document", () => {

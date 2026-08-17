@@ -31,17 +31,21 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-agent-runtime` | 多 agent 运行时接口、registry、统一日志/指标包装和 opencode 适配器 |
 | `test-agent-workspace-management` | Workspace、文件、超级管理员服务器目录选择、同服务器共享体验目录及实时资格校验、git/diff、对话 Tool 到当前个人 workspace 的安全映射与 Git 编排、设置页初始版本工作区创建、应用版本工作区、个人工作区、个人拉取成功后的单用户运行态重载登记、Agent & Skill Hub 快照/发布/引用/更新、应用引用资产库多服务器副本、应用源码固定提交快照/副本/打开/清理、agent 和 skill 管理业务 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、批量单项 Session 幂等创建、夜间异步执行和会话锁、Redis active/session scope 路由、含 question/permission 计数的用户级会话运行态摘要、每用户公共配置软链接/个人保存与发布 dispose、个人拉取应用 Agent 的当前用户持久化排空、opencode 进程启动环境与 manager 重连后的 ACTIVE 运行进程恢复、公共 Tool 用户作用域凭据、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
+| `test-agent-workspace-filesystem` | 服务端与本地客户端共享的安全文件内核：真实根锚定、相对路径、符号链接防逃逸、原子移动和分片读写。 |
+| `test-agent-local-client-protocol` | `local-opencode-client.v1` 反向隧道帧、版本、分片和载荷契约。 |
+| `test-agent-local-client` | Java 21 用户级 ARM64 客户端，监管 loopback OpenCode、反向连接、文件 RPC 和模型中继。 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、批量单项 Session 幂等创建、夜间异步执行和会话锁、Redis active/session scope 路由、含 question/permission 计数的用户级会话运行态摘要、每用户公共配置软链接/个人保存与发布 dispose、个人拉取应用 Agent 的当前用户持久化排空、opencode 进程启动环境与 manager 重连后的 ACTIVE 运行进程恢复、公共 Tool 用户作用域凭据、agent runtime 调用、Diff/revert、AI 回复反馈、ClickHouse 运营事件消费/回填/汇总/查询，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
 | `test-agent-notification` | 通用用户站内通知生命周期、未读统计、事务提交后本机/跨 Java 实时变化、30 秒数据库校准和 90 天历史清理；首期由会话协作分享生产通知 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理，以及外部工具 API Key 生成、RSA 密文管理、JVM 注册表与跨 Java 刷新 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库及已有应用源码历史的英文名/类型冻结、应用工作空间、个人 SSH key、可审计通用参数配置管理，以及显式 JVM 内存参数的本机注册/诊断状态 |
 | `test-agent-scheduler` | XXL adapter 复用的任务 handler/context/result、Redis 全局锁和旧运行记录清理；不再启动 PostgreSQL runner 或创建 `USER_PLAN` |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界；承载版本化工具盒子、LobeHub 联动，以及外部用户 SSH Key 查询与 TAEK1 加密封装 |
 | `test-agent-model-gateway` | 中立企业模型目录、能力探测、OpenAI-compatible 流式代理、上游错误脱敏和每日用量聚合，并向既有 OpenCode 内部代理提供共享安全支持 |
+| `test-agent-memory` | 通用长期记忆编排：个人/团队治理、官方风格 Mem0 REST、学习 Outbox、2 秒 fail-open 检索、证据引用和 Skill 提案；不保存聊天正文、不直连记忆库 |
 | `test-agent-xxl-job-admin-upstream` | 原样保存 XXL-JOB Admin 3.4.2 源码/资源与 GPL-3.0 许可证，不承载平台补丁 |
 | `test-agent-xxl-job-integration` | 独立 Servlet Admin 子上下文、MySQL Flyway、Admin readiness 就绪后延迟启动的 executor、周期任务 adapter、平台一次性 SSO、JIT 用户和 XXL health |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合、通知中心分页/已读/用户级 SSE、应用源码快照/持久化进度入口和统一异常入口 |
-| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括用户通知与分享有效性投影、外部 API 凭据/Scope、每服务器体验 Workspace 当前绑定、Redis Run manifest/Stream/snapshot/active 索引、应用源码 slot/snapshot/replica/operation/step/cleanup/recent、Agent & Skill Hub 制品与引用状态、opencode 用户进程管理、scheduler/夜间任务、引用资产、工具点击、AI 反馈和运营分析 rollup |
+| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL/ClickHouse 访问，包括用户通知与分享有效性投影、外部 API 凭据/Scope、每服务器体验 Workspace 当前绑定、Redis Run manifest/Stream/snapshot/active 索引、应用源码 slot/snapshot/replica/operation/step/cleanup/recent、Agent & Skill Hub 制品与引用状态、opencode 用户进程管理、scheduler/夜间任务、引用资产、工具点击、AI 反馈，以及运营脱敏 outbox、ClickHouse 事实/汇总查询 |
 | `test-agent-event` | 按 storage mode 分流的 RunEvent 追加、SSE、Redis/数据库回放，以及用户级运行态刷新所需的全局事件触发流 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
@@ -90,6 +94,11 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -pl test-agent-app
 ```
 
 `tools/dev-backend-run.sh` 和仓库根目录的 `restart-dev-services.sh` 启动后端 Java 进程时，会先把 Maven `target` 中的可执行 JAR 校验并复制为 `.tmp/dev-services/backend-runtime/` 下本次启动专属的不可变副本，再清空 JVM 的 HTTP/HTTPS/FTP/SOCKS 代理系统属性后运行；可执行 JAR 以 runtime scope 携带 PostgreSQL JDBC 驱动。这样企业打包或其它 Maven 构建即使覆盖 `target`，也不会破坏运行中 Spring Boot 对尚未加载类的读取。直接使用 Maven 或 IDEA 启动时，如果本机开启了全局 SOCKS/HTTP 代理，需要在 VM options 中显式清空同类 `-D*proxy*` 参数。
+
+需要联调运营分析时，macOS/Linux 从仓库根目录显式增加 `--with-clickhouse`。该模式启动固定版本
+ClickHouse 26.3.17.56，HTTP 只监听 `127.0.0.1:18123`，数据保存在版本化 Docker volume；随机密码和 Java
+JDBC 配置只写入 `.tmp/dev-services/clickhouse` 的 `0600` 文件，不修改 `.env.test`。Java 启动时会执行既有
+ClickHouse schema migration。默认启动路径不探测、停止或配置 ClickHouse。
 
 Windows 开发人员若只需要 legacy guo profile，可直接使用已提交的 IDEA 运行配置 `TestAgentApplication guo`：
 
@@ -141,7 +150,7 @@ cp .env.local.example .env.local
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 历史兼容项。前端对话框模型/供应商目录已统一走 opencode 原生 `/api/model`、`/api/provider`，不再从数据库模型目录读取。 |
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |
-| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。该 Key 只用于 OpenCode → Java 的 `Authorization: Bearer`，不是企业 AI 上游供应商 Token；Java 向上游改用 `Auth-Token`，保证同一请求的 `ucid` 生效。 |
+| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。该 Key 只用于 OpenCode → Java 的 `Authorization: Bearer`，不是企业 AI 上游供应商 Token；Java 向上游改用 `Auth-Token`，保证同一请求的 `ucid` 生效。`local` profile 未配置时按本次 JVM 启动生成临时随机值且不落盘；其它 profile 仍要求显式配置或使用自身受控测试默认值。 |
 | `TEST_AGENT_LOBEHUB_HMAC_SECRET` | LobeHub 服务兑换/撤销共享 HMAC secret，至少 32 字节；不得进入公共参数或日志。 |
 | `TEST_AGENT_LOBEHUB_CLIENT_ID` / `TEST_AGENT_LOBEHUB_TICKET_TTL` / `TEST_AGENT_LOBEHUB_GRANT_TTL` | 模型委托 client 与票据/委托生命周期；默认 `lobehub/60s/30d`。 |
 | `TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW` / `TEST_AGENT_LOBEHUB_NONCE_TTL` | 服务 HMAC 时钟偏差和 nonce 防重放窗口；默认 `60s/120s`。 |
@@ -212,7 +221,7 @@ mvn test
 
 镜像构建、生产/测试 profile、dotenv、连接池和外部依赖配置见 `docs/deployment/backend.md`。
 
-平台数据库由 Spring Boot 唯一 Flyway Bean 按默认顺序迁移。工具盒子已知历史包括旧 `V20260727203500`、企业正式 `V20260728160800/-1966404877` 和当前版本的 `-74327385` 幂等误发变体：启动装配按已执行 version/checksum 选择隔离兼容资源；空库和企业正式历史只解析原始主 migration，未知 checksum 失败关闭，不使用 `outOfOrder`、`repair` 或手工历史表修改。
+平台数据库由 Spring Boot 唯一 Flyway Bean 按默认顺序迁移。工具盒子已知历史包括旧 `V20260727203500`、企业正式 `V20260728160800/-1966404877` 和当前版本的 `-74327385` 幂等误发变体；分支合并产生的 QA Memory、体验工作区和本地客户端低版本缺口也由同一装配按已执行 version/checksum 选择隔离兼容资源或更高前向 migration。空库和正常主链只解析原始 migration，未知 checksum 或主/前向路径混用失败关闭，不使用 `outOfOrder`、`repair` 或手工历史表修改。
 
 ## 后续 AI 编码指引
 

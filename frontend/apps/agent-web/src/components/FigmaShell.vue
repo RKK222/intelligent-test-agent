@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
-import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
-import type { AppSourceRepositorySummary, UserNotification, UserOpencodeProcess } from "@test-agent/shared-types";
+import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import PetMiniGames from "./PetMiniGames.vue";
@@ -82,6 +82,8 @@ const props = withDefaults(
     currentUserName?: string;
     currentUserRoleLabels?: string[];
     opencodeProcessStatus?: UserOpencodeProcess | null;
+    opencodeEndpoints?: OpencodeEndpoint[];
+    opencodeEndpointsLoading?: boolean;
     opencodeProcessLoading?: boolean;
     opencodeProcessInitializing?: boolean;
     processRestarting?: boolean;
@@ -132,6 +134,8 @@ const props = withDefaults(
     notificationsHasMore: false,
     notificationsError: null,
     processRestarting: false,
+    opencodeEndpoints: () => [],
+    opencodeEndpointsLoading: false,
     showProcessStatusInPet: false,
     onboardingActive: false,
     sideQuestionAvailable: true,
@@ -607,6 +611,60 @@ const opencodeServiceDisplay = computed(() => {
   }
   return { tone: "unassigned", text: "待分配专属进程" };
 });
+
+const localClientEndpoints = computed(() =>
+  props.opencodeEndpoints.filter(endpoint => endpoint.runtimeKind === "LOCAL_CLIENT")
+);
+
+/** 下载入口只认后端服务端实例返回的灰度 capability；缺字段和旧节点均默认隐藏。 */
+const localClientDownloadAllowed = computed(() =>
+  props.opencodeEndpoints.some(endpoint =>
+    endpoint.runtimeKind === "SERVER_PROCESS" && endpoint.capabilities?.localClientDownload === true)
+);
+
+/** 以平台注册实例为安装完成依据；多台本地设备时汇总健康数量，不依赖浏览器下载记录。 */
+const localClientHealthDisplay = computed(() => {
+  const endpoints = localClientEndpoints.value;
+  if (!endpoints.length) {
+    return props.opencodeEndpointsLoading
+      ? { tone: "checking", text: "正在检查本地客户端…" }
+      : null;
+  }
+  const healthyCount = endpoints.filter(endpoint => endpoint.online && endpoint.healthy).length;
+  const onlineCount = endpoints.filter(endpoint => endpoint.online).length;
+  const suffix = endpoints.length > 1 ? `（${healthyCount}/${endpoints.length}）` : "";
+  if (healthyCount === endpoints.length) return { tone: "healthy", text: `本地 OpenCode 健康${suffix}` };
+  if (healthyCount > 0) return { tone: "warning", text: `本地 OpenCode 部分健康${suffix}` };
+  if (onlineCount > 0) return { tone: "warning", text: "本地 OpenCode 异常" };
+  return { tone: "offline", text: "本地 OpenCode 离线" };
+});
+
+function endpointStatusText(endpoint: OpencodeEndpoint) {
+  if (!endpoint.online) return "离线";
+  if (endpoint.healthy) return "运行中";
+  return endpoint.processStatus || "已连接";
+}
+
+function endpointPrimaryAddress(endpoint: OpencodeEndpoint) {
+  if (endpoint.runtimeKind === "SERVER_PROCESS") {
+    return endpoint.serviceAddress || endpoint.linuxServerId || "地址未解析";
+  }
+  const reported = endpoint.reportedAddresses?.find((address) => address.trim()) ?? "";
+  return reported || endpoint.observedRemoteAddress || "地址未上报";
+}
+
+function endpointPlatformText(endpoint: OpencodeEndpoint) {
+  if (endpoint.runtimeKind === "SERVER_PROCESS") return "服务端实例";
+  return [endpoint.platform, endpoint.architecture].filter(Boolean).join(" / ") || "本地客户端";
+}
+
+function endpointVersionText(endpoint: OpencodeEndpoint) {
+  if (endpoint.runtimeKind === "SERVER_PROCESS") return "平台托管";
+  const values = [];
+  if (endpoint.clientVersion) values.push(`客户端 ${endpoint.clientVersion}`);
+  if (endpoint.opencodeVersion) values.push(`OpenCode ${endpoint.opencodeVersion}`);
+  return values.join(" · ") || "版本未知";
+}
 
 type RobotProcessTone = "ready" | "needs-initialization" | "checking" | "error";
 
@@ -2642,8 +2700,25 @@ function submitJoinApp() {
               <UserRound class="figma-user-menu-icon" />
               <span class="figma-user-menu-name">{{ userName }}</span>
             </div>
+            <div v-if="!fixedWorkspace && (opencodeEndpoints?.length || opencodeEndpointsLoading)" class="figma-endpoint-list" aria-label="OpenCode 实例列表">
+              <div class="figma-endpoint-list-title">OpenCode 实例</div>
+              <div v-if="opencodeEndpointsLoading && !opencodeEndpoints?.length" class="figma-endpoint-empty">正在读取实例状态…</div>
+              <article v-for="endpoint in opencodeEndpoints" :key="`${endpoint.runtimeKind}:${endpoint.endpointId}`" class="figma-endpoint-card">
+                <span :class="['figma-endpoint-dot', endpoint.online && 'is-online', endpoint.online && !endpoint.healthy && 'is-warning']" aria-hidden="true" />
+                <div class="figma-endpoint-content">
+                  <div class="figma-endpoint-heading">
+                    <strong>{{ endpoint.displayName }}</strong>
+                    <span>{{ endpointStatusText(endpoint) }}</span>
+                  </div>
+                  <div>{{ endpointPlatformText(endpoint) }} · {{ endpointPrimaryAddress(endpoint) }}<template v-if="endpoint.port">:{{ endpoint.port }}</template></div>
+                  <div v-if="endpoint.observedRemoteAddress && endpoint.runtimeKind === 'LOCAL_CLIENT'">后台观察：{{ endpoint.observedRemoteAddress }}</div>
+                  <div>{{ endpointVersionText(endpoint) }}</div>
+                  <div v-if="endpoint.lastHeartbeatAt">心跳：{{ new Date(endpoint.lastHeartbeatAt).toLocaleString() }}</div>
+                </div>
+              </article>
+            </div>
             <div
-              v-if="!fixedWorkspace"
+              v-else-if="!fixedWorkspace"
               class="figma-user-menu-service"
               :class="`figma-user-menu-service--${opencodeServiceDisplay.tone}`"
               role="status"
@@ -2652,6 +2727,30 @@ function submitJoinApp() {
               <span class="figma-user-menu-service-dot" aria-hidden="true" />
               <span class="figma-user-menu-service-text" :title="opencodeServiceDisplay.text">{{ opencodeServiceDisplay.text }}</span>
             </div>
+            <div
+              v-if="!fixedWorkspace && localClientHealthDisplay"
+              class="figma-user-menu-service figma-local-client-health"
+              :class="`figma-local-client-health--${localClientHealthDisplay.tone}`"
+              role="status"
+              data-testid="local-client-health"
+            >
+              <Activity class="figma-user-menu-icon" />
+              <span class="figma-user-menu-service-text">{{ localClientHealthDisplay.text }}</span>
+            </div>
+            <a
+              v-if="!fixedWorkspace && localClientDownloadAllowed"
+              class="figma-user-menu-item"
+              role="menuitem"
+              data-testid="download-local-client"
+              href="/downloads/local-opencode-client/installer"
+              @click="userMenuOpen = false"
+            >
+              <Download class="figma-user-menu-icon" />
+              <span class="figma-local-client-download-text">
+                <strong>下载本地客户端</strong>
+                <small data-testid="local-client-install-hint">安装后从“应用程序”打开，完成配置后使用顶部菜单栏兔子图标</small>
+              </span>
+            </a>
             <button
               v-if="!fixedWorkspace"
               type="button"
@@ -4597,13 +4696,87 @@ function submitJoinApp() {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 168px;
+  min-width: 320px;
+  max-width: min(420px, calc(100vw - 24px));
   background: #fff;
   border: 1px solid #e4e4e7;
   border-radius: 8px;
   padding: 4px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   z-index: 40;
+}
+
+.figma-endpoint-list {
+  padding: 7px 6px 5px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.figma-endpoint-list-title {
+  margin: 0 4px 6px;
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.figma-endpoint-empty {
+  padding: 8px 5px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.figma-endpoint-card {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 7px;
+  border-radius: 7px;
+  background: #fafafa;
+}
+
+.figma-endpoint-card + .figma-endpoint-card { margin-top: 5px; }
+
+.figma-endpoint-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: #a1a1aa;
+}
+
+.figma-endpoint-dot.is-online { background: #22c55e; }
+.figma-endpoint-dot.is-warning { background: #f59e0b; }
+
+.figma-endpoint-content {
+  min-width: 0;
+  color: #71717a;
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.figma-endpoint-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+  color: #18181b;
+  font-size: 12px;
+}
+
+.figma-endpoint-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-endpoint-heading span {
+  flex-shrink: 0;
+  color: #71717a;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .figma-user-menu-summary,
@@ -4695,6 +4868,19 @@ function submitJoinApp() {
   background: #a1a1aa;
 }
 
+.figma-local-client-health--healthy {
+  color: #15803d;
+}
+
+.figma-local-client-health--warning {
+  color: #b45309;
+}
+
+.figma-local-client-health--offline,
+.figma-local-client-health--checking {
+  color: var(--ta-shell-muted);
+}
+
 .figma-user-menu-summary {
   color: var(--ta-shell-muted, #6b7280);
   border-bottom: 1px solid #f0f0f0;
@@ -4704,6 +4890,7 @@ function submitJoinApp() {
 .figma-user-menu-item {
   margin-top: 4px;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .figma-user-menu-item:hover,
@@ -4719,6 +4906,24 @@ function submitJoinApp() {
 
 .figma-user-menu-item:disabled:hover {
   background: transparent;
+}
+
+.figma-local-client-download-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.figma-local-client-download-text strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.figma-local-client-download-text small {
+  color: #71717a;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .figma-user-menu-icon {
@@ -5085,6 +5290,7 @@ function submitJoinApp() {
 /* Custom colorful theme styling per feature icon */
 :deep(.figma-activity-btn--editor .figma-activity-icon) { color: #e53935; }
 :deep(.figma-activity-btn--toolbox .figma-activity-icon) { color: #fb8c00; }
+:deep(.figma-activity-btn--memories .figma-activity-icon) { color: #4f6bed; }
 :deep(.figma-activity-btn--qa .figma-activity-icon) { color: #1e88e5; }
 :deep(.figma-activity-btn--system .figma-activity-icon) { color: #43a047; }
 :deep(.figma-activity-btn--hub .figma-activity-icon) { color: #00acc1; }
@@ -5103,6 +5309,13 @@ function submitJoinApp() {
   color: #ef6c00;
 }
 :deep(.figma-activity-btn--toolbox.figma-activity-btn--active::before) { background: #fb8c00; }
+
+:deep(.figma-activity-btn--memories:hover),
+:deep(.figma-activity-btn--memories.figma-activity-btn--active) {
+  color: #4057c7;
+  background: rgba(79, 107, 237, 0.1);
+}
+:deep(.figma-activity-btn--memories.figma-activity-btn--active::before) { background: #4f6bed; }
 
 :deep(.figma-activity-btn--qa:hover),
 :deep(.figma-activity-btn--qa.figma-activity-btn--active) {
@@ -5230,6 +5443,23 @@ function submitJoinApp() {
     gap: 3px;
     padding-inline: 6px;
     font-size: 9px;
+  }
+}
+
+@media (max-width: 600px) {
+  .figma-header {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .figma-title-group,
+  .figma-header-center,
+  .figma-header-experience,
+  .figma-runtime-inventory-wrapper {
+    display: none;
+  }
+
+  .figma-header-right {
+    grid-column: 2;
   }
 }
 

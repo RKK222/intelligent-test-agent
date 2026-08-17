@@ -581,21 +581,23 @@ PostgreSQL 正常现网路径必须满足：所有记录 `success=true`，且上
 保留，这是数据库兼容要求，不代表启用服务。
 
 XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后的准入历史应为 V1-V11 全部成功且
-checksum 不变，本轮只允许新增 V12。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
+checksum 不变。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
 `665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47`，V11 的 Flyway checksum 为
-`-1863356225`、文件 SHA-256 为 `03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236`。
-V12 的 Flyway checksum 为 `-211900485`、文件 SHA-256 为
-`2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739`。V10 注册每 5 分钟一次的内部模型探活，
-V11 注册每天 03:30 的可观测数据清理，V12 注册每天 04:10 的 SCM Git 姓名补偿。失败记录、未知 checksum、
-未知更高版本、缺少 V1-V11 任一版本或首台启动后没有且仅有 V12 新增 history 时都必须停止发布。
+`-1863356225`、文件 SHA-256 为 `03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236`；
+并行历史中存在两条已执行过且字节不可改写的 V12：ClickHouse 运营入库的 SHA-256 为
+`70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`，SCM Git 姓名补偿的 SHA-256 为
+`2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739`。打包必须同时锁定两份历史资源，运行时按数据库已执行
+V12 选择兼容 location 并由更高版本前向 migration 补齐另一任务。失败记录、未知 checksum、未知更高版本或未登记的 V12
+分叉都必须停止发布。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
 `repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并按部署前基线确认 PostgreSQL 只新增
-`20260813190929`、XXL MySQL 只新增 V12（故障重部署时两边都不新增）；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
-内部模型探活为每 5 分钟、可观测数据清理为每日 03:30、SCM Git 姓名补偿为每日 04:10，再部署 `.114`。共享数据库上 `.114` 启动只允许
+`20260813190929` 及发布清单登记的 dev 前向 migration，XXL MySQL 只新增兼容装配允许的更高版本（故障重部署时两边都不新增）；
+随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、内部模型探活为每 5 分钟、可观测数据清理为每日 03:30、
+ClickHouse 入库为每分钟且 SCM Git 姓名补偿为每日 04:10，再部署 `.114`。共享数据库上 `.114` 启动只允许
 validate，不应再新增 history。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
@@ -1095,15 +1097,16 @@ where platform_task_key in (
     'opencode-runtime.inactive-user-process-cleanup',
     'opencode-runtime.internal-model-probe',
     'opencode-runtime.internal-model-observability-retention',
+    'opencode-runtime.analytics-ingestion',
     'configuration-management.scm-git-name-sync'
 )
 order by platform_task_key;
 ```
 
-预期 V7-V9 保持原 checksum，V10/V11 保持成功，V12 首次成功且 checksum 为 `-211900485`；
+预期 V7-V9 保持原 checksum，V10/V11 保持既有 checksum，已执行 V12 字节与对应兼容分支一致；
 搬迁任务为 `0 0/30 * * * ? *`，闲置进程关闭为 `0 0 2 * * ? *`，内部模型探活为
-`0 */5 * * * ? *`，可观测数据清理为 `0 30 3 * * ? *`，SCM Git 姓名补偿为 `0 10 4 * * ? *`，五条均
-`trigger_status=1`。任一条件不满足时
+`0 */5 * * * ? *`，可观测数据清理为 `0 30 3 * * ? *`，ClickHouse 入库为 `0 * * * * ? *`，SCM Git 姓名补偿为
+`0 10 4 * * ? *`，六条均 `trigger_status=1`。任一条件不满足时
 保持 `.114` 和 `.2` 未部署。
 
 ## 11. 故障定位与回滚

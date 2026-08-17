@@ -38,6 +38,8 @@ public record AnalyticsActivityRow(
         long tokensInput,
         long tokensOutput,
         long tokensReasoning,
+        long tokensCacheRead,
+        long tokensCacheWrite,
         long tokensTotal,
         long durationTotalMs,
         long durationRunCount,

@@ -58,8 +58,54 @@ if [[ "${restart_help}" != *"--lobehub-mode"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document LobeHub online/offline selection"
 fi
+if [[ "${restart_help}" != *"--with-memory"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document the opt-in QA memory data plane"
+fi
+if [[ "${restart_help}" != *"--with-clickhouse"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document the opt-in ClickHouse data plane"
+fi
 if ! grep -Fq 'with_lobehub=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must keep LobeHub disabled by default"
+fi
+if ! grep -Fq 'with_memory=false' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must keep QA memory disabled by default"
+fi
+if ! grep -Fq 'with_clickhouse=false' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must keep ClickHouse disabled by default"
+fi
+MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
+MEMORY_DEV_COMPOSE="${ROOT_DIR}/deploy/dev/memory-compose.yml"
+[[ -x "${MEMORY_DEV_SCRIPT}" ]] || fail "QA memory development helper missing or not executable: ${MEMORY_DEV_SCRIPT}"
+[[ -f "${MEMORY_DEV_COMPOSE}" ]] || fail "QA memory development Compose file missing: ${MEMORY_DEV_COMPOSE}"
+run_check "QA memory dev service script bash syntax" bash -n "${MEMORY_DEV_SCRIPT}"
+run_check "QA memory dev service script help" bash "${MEMORY_DEV_SCRIPT}" --help
+run_check "QA memory dev service behavior" bash "${ROOT_DIR}/tools/memory-dev-services-test.sh"
+if grep -Eq 'image:.*:latest([^-]|$)' "${MEMORY_DEV_COMPOSE}"; then
+  fail "QA memory development dependencies must not use latest tags"
+fi
+if ! grep -Fq 'read_only: true' "${MEMORY_DEV_COMPOSE}" || ! grep -Fq 'cap_drop:' "${MEMORY_DEV_COMPOSE}"; then
+  fail "QA memory service container must keep the read-only and dropped-capability boundary"
+fi
+if grep -Fq 'source "${ENV_FILE}"' "${MEMORY_DEV_SCRIPT}"; then
+  fail "QA memory helper must parse generated dotenv as data instead of executing it"
+fi
+if ! grep -Fq 'load_env_file "${TEST_AGENT_MEMORY_BACKEND_ENV_FILE}"' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must load only the Java-safe memory dotenv"
+fi
+CLICKHOUSE_DEV_SCRIPT="${ROOT_DIR}/tools/clickhouse-dev-services.sh"
+[[ -x "${CLICKHOUSE_DEV_SCRIPT}" ]] || fail "ClickHouse development helper missing or not executable: ${CLICKHOUSE_DEV_SCRIPT}"
+run_check "ClickHouse dev service script bash syntax" bash -n "${CLICKHOUSE_DEV_SCRIPT}"
+run_check "ClickHouse dev service script help" bash "${CLICKHOUSE_DEV_SCRIPT}" --help
+if grep -Fq 'source "${ENV_FILE}"' "${CLICKHOUSE_DEV_SCRIPT}"; then
+  fail "ClickHouse helper must parse generated dotenv as data instead of executing it"
+fi
+if ! grep -Fq '127.0.0.1:${port}:8123' "${CLICKHOUSE_DEV_SCRIPT}"; then
+  fail "ClickHouse development port must stay bound to loopback"
+fi
+if ! grep -Fq 'load_env_file "${TEST_AGENT_CLICKHOUSE_BACKEND_ENV_FILE}"' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must load only the Java-safe ClickHouse dotenv"
 fi
 if ! grep -Fq 'screen -S "${screen_id}" -X quit' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must close cross-worktree screen sessions by their full identifier"

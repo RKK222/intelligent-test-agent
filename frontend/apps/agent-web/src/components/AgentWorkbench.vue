@@ -31,7 +31,7 @@ import {
   subscribeUserNotifications,
   type RunEventRawMessage
 } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, FileWarning, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
+import { BookOpenText, Boxes, BrainCircuit, FileWarning, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -50,6 +50,7 @@ import type {
   FileSearchResult,
   FileTreeEntry,
   ManagedApplication,
+  MemoryUsageView,
   MessagePart,
   PageResponse,
   PromptPart,
@@ -63,6 +64,7 @@ import type {
   NightExecutionSlots,
   NightExecutionTask,
   NightExecutionTaskQueryResponse,
+  OpencodeEndpoint,
   PersonalWorkspaceGitPullResult,
   ProviderInfo,
   RequirementImportResult,
@@ -99,6 +101,7 @@ import {
   type EditorTab
 } from "@test-agent/workbench-shell";
 import { useAuthStore } from "../stores/authStore";
+import { useMemoryAccessStore } from "../stores/memoryAccessStore";
 import {
   chatContextItemsToPromptParts,
   createContextId,
@@ -235,7 +238,9 @@ import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import { createSupportAccessShortcut } from "./support-access-shortcut";
 import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
+import MemoryCenter from "./MemoryCenter.vue";
 import {
+  initialImmersivePanels,
   isRoutedCenterMode,
   routeCenterTransition,
   routedCenterModeFromRouteName,
@@ -360,6 +365,7 @@ provide("api", api);
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
+const memoryAccessStore = useMemoryAccessStore();
 const chatContextStore = useChatContextStore();
 const route = useRoute();
 const router = useRouter();
@@ -405,6 +411,7 @@ type RawOutputEntry = {
 };
 
 const isSuperAdmin = computed(() => !shareMode.value && authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const memoryAvailable = computed(() => !shareMode.value && memoryAccessStore.resolved && memoryAccessStore.allowed);
 const canUseLobehub = computed(() => releaseFeatures.lobehub && isSuperAdmin.value);
 const isAppAdmin = computed(() =>
   !shareMode.value && (isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true)
@@ -494,6 +501,26 @@ function persistRuntimePreference(provider: string, model: string) {
 // 设置弹窗依赖当前用户角色；工作台直达时需要主动补齐 /api/auth/me。
 void authStore.fetchCurrentUser(api);
 
+watch(
+  [() => authStore.token, shareMode],
+  ([token, shared]) => {
+    if (shared) {
+      memoryAccessStore.reset();
+      return;
+    }
+    void memoryAccessStore.ensure(ordinaryApi, token);
+  },
+  { immediate: true }
+);
+
+function refreshMemoryAccessOnFocus() {
+  if (shareMode.value || !authStore.token) return;
+  void memoryAccessStore.refresh(ordinaryApi, authStore.token);
+}
+
+onMounted(() => window.addEventListener("focus", refreshMemoryAccessOnFocus));
+onBeforeUnmount(() => window.removeEventListener("focus", refreshMemoryAccessOnFocus));
+
 // 工作台状态
 const selectedWorkspaceId = ref<string | undefined>(undefined);
 const selectedWorkspaceSnapshot = shallowRef<Workspace | undefined>(undefined);
@@ -580,7 +607,7 @@ const diffFiles = ref<RunDiffFile[]>([]);
 const vcsDiffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
-const centerMode = ref<WorkbenchCenterMode>("editor");
+const centerMode = ref<WorkbenchCenterMode>(routedCenterModeFromRouteName(route.name) ?? "editor");
 const supportAccessRequested = ref(false);
 const supportAccessShortcut = createSupportAccessShortcut();
 const centerModeBeforeHub = ref<Exclude<WorkbenchCenterMode, "hub">>("editor");
@@ -655,12 +682,20 @@ const ignoredRunIds = ref<Set<string>>(new Set());
 const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
-const bottomDrawerOpen = ref(false);
-const leftPanelOpen = ref(true);
-const rightPanelOpen = ref(true);
-const savedLeftPanelOpen = ref(true);
-const savedRightPanelOpen = ref(true);
-const savedBottomDrawerOpen = ref(false);
+const initialPanelSnapshot = initialImmersivePanels({
+  bottomOpen: false,
+  leftOpen: true,
+  rightOpen: true,
+  savedLeftOpen: true,
+  savedRightOpen: true,
+  savedBottomOpen: false
+}, routedCenterModeFromRouteName(route.name));
+const bottomDrawerOpen = ref(initialPanelSnapshot.bottomOpen);
+const leftPanelOpen = ref(initialPanelSnapshot.leftOpen);
+const rightPanelOpen = ref(initialPanelSnapshot.rightOpen);
+const savedLeftPanelOpen = ref(initialPanelSnapshot.savedLeftOpen);
+const savedRightPanelOpen = ref(initialPanelSnapshot.savedRightOpen);
+const savedBottomDrawerOpen = ref(initialPanelSnapshot.savedBottomOpen);
 let restoringRoutedCenterMode = false;
 
 function clearRunEventSseFeedback() {
@@ -704,6 +739,17 @@ watch((): RoutedCenterMode | null => routedCenterModeFromRouteName(route.name), 
   centerMode.value = next.mode;
 }, { immediate: true });
 
+watch(
+  [() => route.name, () => memoryAccessStore.resolved, () => memoryAccessStore.allowed],
+  ([routeName, resolved, allowed]) => {
+    // 已打开页面期间若管理员撤销授权，下一次前台校验后立即退出记忆中心。
+    if (routeName === "memories" && resolved && !allowed) {
+      void router.replace({ name: "workbench" });
+    }
+  },
+  { immediate: true }
+);
+
 async function selectActivityCenterMode(mode: WorkbenchCenterMode) {
   if (isRoutedCenterMode(mode)) {
     if (route.name !== mode) {
@@ -717,6 +763,15 @@ async function selectActivityCenterMode(mode: WorkbenchCenterMode) {
     await router.push({ name: "workbench" });
   }
   centerMode.value = mode;
+}
+
+async function toggleMemories() {
+  if (route.name === "memories") {
+    await selectActivityCenterMode(centerModeBeforeRoute.value);
+    return;
+  }
+  if (!memoryAvailable.value) return;
+  await selectActivityCenterMode("memories");
 }
 
 /** SUPER_ADMIN 可在工作台任意位置三击 Shift，直接进入仍需二次授权的问题排查页。 */
@@ -798,6 +853,7 @@ const firstLoginGuideEnabled = computed(() =>
   experienceOfferPhase.value === "RESOLVED"
   && !experienceJourneyActive.value
   && selectedWorkspaceKind.value !== "EXPERIENCE"
+  && !isRoutedCenterMode(centerMode.value)
 );
 const appSourceContext = ref<AppSourceWorkspaceContext | null>(null);
 const appSourceCapabilities = computed(() => appSourceWorkspaceCapabilities(selectedWorkspaceKind.value));
@@ -1035,6 +1091,7 @@ onBeforeUnmount(() => {
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
 const runFeedbacks = ref<Record<string, AiRunFeedback | null>>({});
+const memoryUsageByRunId = ref<Record<string, MemoryUsageView[]>>({});
 const feedbackSubmitting = ref<Record<string, boolean>>({});
 const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
 const assistantSummaryMessageIdsByRunId = ref<Record<string, string>>({});
@@ -1385,6 +1442,18 @@ const selectedWorkspace = computed(() => {
 });
 const selectedWorkspacePhysicalRootPath = computed(() => workspacePhysicalRootPath(selectedWorkspace.value));
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
+const selectedWorkspaceIsLocal = computed(() => selectedWorkspace.value?.runtimeKind === "LOCAL_CLIENT");
+const selectedRuntimeCapabilities = computed<Record<string, boolean>>(
+  () => selectedWorkspace.value?.capabilities ?? {}
+);
+function selectedCapabilityEnabled(capability: string): boolean {
+  return !selectedWorkspaceIsLocal.value || selectedRuntimeCapabilities.value[capability] === true;
+}
+const selectedAttachmentsEnabled = computed(() => selectedCapabilityEnabled("attachments"));
+const selectedCollaborationEnabled = computed(() => selectedCapabilityEnabled("collaboration"));
+const selectedBrowserTerminalEnabled = computed(() => selectedCapabilityEnabled("terminal"));
+const selectedAgentConfigEnabled = computed(() => selectedCapabilityEnabled("agentConfig"));
+const selectedGitPublishEnabled = computed(() => selectedCapabilityEnabled("gitPublish"));
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
 const sessionRuntimeStateQueryKey = ["sessions", "runtime-state"] as const;
 
@@ -2290,6 +2359,16 @@ const opencodeProcessQuery = useQuery({
   refetchOnWindowFocus: false,
   refetchInterval: false
 });
+const opencodeEndpointQuery = useQuery({
+  queryKey: computed(() => ["runtime", "opencode-endpoints", "me", authStore.token ?? ""] as const),
+  enabled: opencodeProcessEnabled,
+  queryFn: () => api.getMyOpencodeEndpoints(),
+  retry: false,
+  refetchOnWindowFocus: true,
+  refetchInterval: 5_000,
+  refetchIntervalInBackground: false
+});
+const opencodeEndpoints = computed<OpencodeEndpoint[]>(() => opencodeEndpointQuery.data.value ?? []);
 const publicConfigMessageGateQuery = useQuery({
   queryKey: computed(() => ["runtime", "opencode-process", "message-gate", authStore.token ?? ""] as const),
   enabled: opencodeProcessEnabled,
@@ -2352,6 +2431,37 @@ const opencodeHealthQuery = useQuery({
 });
 const opencodeHealthReady = computed(() => opencodeAvailability.value.ready);
 const opencodeProcessReady = computed(() => shareMode.value || opencodeHealthReady.value);
+const selectedLocalEndpoint = computed(() => {
+  const clientInstanceId = selectedWorkspace.value?.localClientInstanceId?.trim();
+  if (!selectedWorkspaceIsLocal.value || !clientInstanceId) return undefined;
+  return opencodeEndpoints.value.find(
+    (endpoint) => endpoint.runtimeKind === "LOCAL_CLIENT" && endpoint.endpointId === clientInstanceId
+  );
+});
+const selectedRuntimeProcessStatus = computed<UserOpencodeProcess | null>(() => {
+  if (!selectedWorkspaceIsLocal.value) return opencodeProcessStatus.value;
+  const endpoint = selectedLocalEndpoint.value;
+  const ready = Boolean(endpoint?.online && endpoint.healthy && endpoint.processStatus === "RUNNING");
+  return {
+    status: ready ? "READY" : "UNAVAILABLE",
+    serviceStatus: ready ? "RUNNING" : "NOT_RUNNING",
+    initializable: false,
+    message: endpoint
+      ? ready
+        ? `${endpoint.displayName} 已连接`
+        : `${endpoint.displayName} 当前离线或 OpenCode 未就绪`
+      : "绑定的本地 OpenCode 客户端当前不在线",
+    processId: endpoint?.endpointId,
+    port: endpoint?.port ?? undefined,
+    checkedAt: endpoint?.lastHeartbeatAt ?? new Date(0).toISOString(),
+    messageSendAllowed: opencodeProcessStatus.value?.messageSendAllowed,
+    messageSendBlockedReason: opencodeProcessStatus.value?.messageSendBlockedReason,
+    publicConfigRolloutId: opencodeProcessStatus.value?.publicConfigRolloutId
+  };
+});
+const selectedRuntimeReady = computed(
+  () => shareMode.value || selectedRuntimeProcessStatus.value?.status === "READY"
+);
 const batchTestCaseGeneration = useBatchTestCaseGeneration({
   api,
   conversationContexts: conversationRunContexts,
@@ -2710,26 +2820,28 @@ const authReady = computed(() => authStore.isAuthenticated());
 // 分享目录必须显式携带授权中的固定 Workspace，既满足后端精确范围校验，也隔离普通目录缓存。
 const runtimeCatalogWorkspaceId = computed(() => shareMode.value
   ? shareAccess.value?.workspaceId?.trim() || undefined
-  : undefined
+  : selectedWorkspaceIsLocal.value
+    ? selectedWorkspaceIdRef.value
+    : undefined
 );
 const runtimeCatalogRecoveryReady = computed(() =>
   runtimeCatalogRecoveryAllowed(
     authReady.value,
-    opencodeProcessReady.value,
-    processStartupOperation.value
+    selectedRuntimeReady.value,
+    selectedWorkspaceIsLocal.value ? null : processStartupOperation.value
   ) && (!shareMode.value || Boolean(runtimeCatalogWorkspaceId.value))
 );
 // 2. 文件路由：只需要 workspace 存在，不依赖 opencode 状态
 const fileRouteReady = computed(() => Boolean(selectedWorkspaceIdRef.value));
 // 3. Runtime 目录（Agent、Command）：需要 opencode 弱健康 READY + workspace
-const opencodeCatalogReady = computed(() => opencodeProcessReady.value && Boolean(selectedWorkspaceIdRef.value));
+const opencodeCatalogReady = computed(() => selectedRuntimeReady.value && Boolean(selectedWorkspaceIdRef.value));
 // 4. LSP、MCP、VCS：需要 opencode 弱健康 READY + workspace
-const runtimeReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
+const runtimeReady = computed(() => selectedRuntimeReady.value && selectedWorkspaceFileRouteReady.value);
 // 5. Run 启动：需要 opencode 弱健康 READY + workspace 文件路由成功
-const runReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
+const runReady = computed(() => selectedRuntimeReady.value && selectedWorkspaceFileRouteReady.value);
 // 宠物问答不再要求先建立主对话：有对话时复用上下文，无对话时只要工作区和用户进程就绪即可查手册。
-const robotQuestionAvailable = computed(() => opencodeProcessReady.value
-  && opencodeProcessStatus.value?.messageSendAllowed !== false
+const robotQuestionAvailable = computed(() => selectedRuntimeReady.value
+  && selectedRuntimeProcessStatus.value?.messageSendAllowed !== false
   && Boolean(session.value?.sessionId || selectedWorkspaceIdRef.value));
 
 // 模型和 Provider 在进程 READY 后加载；未初始化页面不发起无效 503 轮询。
@@ -2953,6 +3065,14 @@ const opencodeProcessInitialLoading = computed(
 const opencodeProcessRefreshing = computed(
   () => opencodeProcessEnabled.value && Boolean(opencodeProcessStatus.value) && manualOpencodeProcessRefreshing.value
 );
+const selectedRuntimeProcessInitialLoading = computed(() => selectedWorkspaceIsLocal.value
+  ? !selectedLocalEndpoint.value && (opencodeEndpointQuery.isPending.value || opencodeEndpointQuery.isFetching.value)
+  : opencodeProcessInitialLoading.value
+);
+const selectedRuntimeProcessRefreshing = computed(() => selectedWorkspaceIsLocal.value
+  ? false
+  : opencodeProcessRefreshing.value
+);
 const sessionsItems = computed(() => sessionHistoryItems.value);
 const runtimeStatesBySessionId = computed<Record<string, SessionRuntimeState>>(() => {
   const entries = sessionRuntimeState.value?.sessions ?? [];
@@ -3004,6 +3124,14 @@ function refreshOpencodeProcessStatus() {
   void opencodeProcessQuery.refetch().finally(() => {
     manualOpencodeProcessRefreshing.value = false;
   });
+}
+
+function refreshSelectedRuntimeStatus() {
+  if (selectedWorkspaceIsLocal.value) {
+    if (!opencodeEndpointQuery.isFetching.value) void opencodeEndpointQuery.refetch();
+    return;
+  }
+  refreshOpencodeProcessStatus();
 }
 
 function agentCatalogErrorMessage(error: unknown): string {
@@ -3458,12 +3586,16 @@ watch(selectedWorkspaceIdRef, (id, previous) => {
   if (previous && previous !== id) {
     void queryClient.cancelQueries({ queryKey: ["runtime", "agents", previous], exact: true });
     chatContextStore.clearContexts();
+    chatAttachments.value = [];
     workspaceUndoStack.value = [];
   }
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
     void loadDirectory("", id);
     if (selectedWorkspaceKind.value !== "APP_SOURCE") void refreshWorkspaceGitDiff();
+  }
+  if (selectedWorkspaceIsLocal.value && bottomMode.value === "terminal") {
+    bottomMode.value = "run";
   }
 }, { immediate: true });
 watch(currentPersonalWorkspaceId, (id, previous) => {
@@ -3501,7 +3633,7 @@ watch(providersQuery.data, (data) => {
 watch(allModels, (data) => {
   applyRuntimeModelPreference(data);
 }, { immediate: true });
-watch(opencodeProcessReady, (ready, previous) => {
+watch(selectedRuntimeReady, (ready, previous) => {
   if (!ready || previous) {
     return;
   }
@@ -4232,7 +4364,7 @@ const startRunMutation = useMutation({
     let activeSessionId = guard.sessionId;
     try {
       assertConversationInteractionCurrent(guard);
-      if (!opencodeProcessReady.value) {
+      if (!selectedRuntimeReady.value) {
         throw new Error("请先初始化 TestAgent 进程");
       }
       if (!guard.workspaceId) {
@@ -4786,12 +4918,12 @@ async function retryLastRun(editedPrompt: string) {
 
 // follow-up 队列：Run 空闲且有排队 prompt 时自动出队执行
 watch(
-  [followUpQueue, run, session, () => startRunMutation.isPending.value, opencodeProcessReady, collaborativeSessionActive],
+  [followUpQueue, run, session, () => startRunMutation.isPending.value, selectedRuntimeReady, collaborativeSessionActive],
   () => {
     if (
       collaborativeSessionActive.value ||
       followUpQueue.value.length === 0 ||
-      !opencodeProcessReady.value ||
+      !selectedRuntimeReady.value ||
       !canStartFollowUp(run.value, startRunMutation.isPending.value)
     ) {
       return;
@@ -8153,6 +8285,14 @@ async function handleUploadFiles(directory: string, files: File[]) {
 
 /** 聊天附件落到专用工作区目录，Run 只携带唯一物理路径和原始展示名。 */
 async function handleChatAttachmentUpload(files: File[]) {
+  if (!selectedAttachmentsEnabled.value) {
+    feedback.value = {
+      kind: "info",
+      title: "本地工作区暂不支持聊天附件",
+      description: "首版可通过文件管理上传普通文件，再在消息中用 @ 引用。"
+    };
+    return;
+  }
   if (!selectedWorkspace.value || !canWriteSelectedWorkspace.value) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传聊天附件。" };
     return;
@@ -9071,6 +9211,14 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
     return;
   }
+  if (!selectedAttachmentsEnabled.value && attachments.length > 0) {
+    feedback.value = {
+      kind: "info",
+      title: "本地工作区暂不支持聊天附件",
+      description: "请移除附件后发送；普通文件仍可通过文件管理和 @ 引用使用。"
+    };
+    return;
+  }
   if (collaborativeSessionActive.value && runtimeBusy.value) {
     feedback.value = {
       kind: "info",
@@ -9079,16 +9227,24 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     };
     return;
   }
-  if (opencodeProcessStatus.value?.messageSendAllowed === false) {
+  if (selectedRuntimeProcessStatus.value?.messageSendAllowed === false) {
     feedback.value = {
       kind: "info",
       title: "公共 Agent/Skill 配置同步中",
-      description: opencodeProcessStatus.value.messageSendBlockedReason
+      description: selectedRuntimeProcessStatus.value.messageSendBlockedReason
         ?? "旧会话排空并释放实例后将自动恢复发送"
     };
     return;
   }
-  if (!opencodeProcessReady.value) {
+  if (!selectedRuntimeReady.value) {
+    if (selectedWorkspaceIsLocal.value) {
+      feedback.value = {
+        kind: "info",
+        title: "本地 OpenCode 当前不可用",
+        description: selectedRuntimeProcessStatus.value?.message ?? "请启动本地客户端并等待 OpenCode 健康检查通过。"
+      };
+      return;
+    }
     // 与聊天面板状态卡一致：按 serviceStatus 区分"未分配 / 未运行"提示
     const assignedServerName = opencodeProcessStatus.value?.linuxServerId?.trim();
     const assignedServiceAddress = opencodeProcessStatus.value?.serviceAddress?.trim() || opencodeProcessStatus.value?.baseUrl?.trim();
@@ -9222,12 +9378,12 @@ async function handleBatchTestCaseGeneration(request: BatchGenerationRequest, co
     controls.reject();
     return;
   }
-  if (!opencodeProcessReady.value || opencodeProcessStatus.value?.messageSendAllowed === false) {
+  if (!selectedRuntimeReady.value || selectedRuntimeProcessStatus.value?.messageSendAllowed === false) {
     feedback.value = {
       kind: "info",
       title: "暂不能批量生成",
-      description: opencodeProcessStatus.value?.messageSendBlockedReason
-        ?? opencodeProcessStatus.value?.message
+      description: selectedRuntimeProcessStatus.value?.messageSendBlockedReason
+        ?? selectedRuntimeProcessStatus.value?.message
         ?? "请先初始化 TestAgent 进程。"
     };
     controls.reject();
@@ -9294,12 +9450,12 @@ async function handleScheduleNight(payload: {
     feedback.value = { kind: "info", title: "当前任务仍在执行", description: "请等待当前任务结束后再安排夜间执行。" };
     return;
   }
-  if (!opencodeProcessReady.value || opencodeProcessStatus.value?.messageSendAllowed === false) {
+  if (!selectedRuntimeReady.value || selectedRuntimeProcessStatus.value?.messageSendAllowed === false) {
     feedback.value = {
       kind: "info",
       title: "暂不能安排夜间执行",
-      description: opencodeProcessStatus.value?.messageSendBlockedReason
-        ?? opencodeProcessStatus.value?.message
+      description: selectedRuntimeProcessStatus.value?.messageSendBlockedReason
+        ?? selectedRuntimeProcessStatus.value?.message
         ?? "请先初始化 TestAgent 进程。"
     };
     return;
@@ -9307,6 +9463,15 @@ async function handleScheduleNight(payload: {
   const workspace = selectedWorkspace.value;
   if (!workspace) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区。" };
+    return;
+  }
+  const requestedAttachments = payload.attachments ?? chatAttachments.value;
+  if (!selectedAttachmentsEnabled.value && requestedAttachments.length > 0) {
+    feedback.value = {
+      kind: "info",
+      title: "本地工作区暂不支持聊天附件",
+      description: "请移除附件后再安排夜间执行。"
+    };
     return;
   }
   const validation = validateChatSend(payload.prompt.trim(), chatContextStore.items);
@@ -9317,7 +9482,7 @@ async function handleScheduleNight(payload: {
 
   const guard = captureConversationInteraction();
   const attachments = routeWorkspaceAttachmentsForModel(
-    payload.attachments ?? chatAttachments.value,
+    requestedAttachments,
     selectedModelInfo.value
   );
   const chatContextParts = chatContextItemsToPromptParts(chatContextStore.items);
@@ -9527,8 +9692,8 @@ function latestRemoteMessageId(): string | undefined {
 }
 
 async function submitRobotQuestion(question: string) {
-  if (opencodeProcessStatus.value?.messageSendAllowed === false) {
-    robotSideQuestion.error.value = opencodeProcessStatus.value.messageSendBlockedReason
+  if (selectedRuntimeProcessStatus.value?.messageSendAllowed === false) {
+    robotSideQuestion.error.value = selectedRuntimeProcessStatus.value.messageSendBlockedReason
       ?? "公共 Agent/Skill 配置正在同步，旧会话排空后将自动恢复发送";
     return;
   }
@@ -9542,7 +9707,7 @@ async function submitRobotQuestion(question: string) {
     return;
   }
   const workspaceId = selectedWorkspaceIdRef.value;
-  if (!workspaceId || !opencodeProcessReady.value) {
+  if (!workspaceId || !selectedRuntimeReady.value) {
     robotSideQuestion.error.value = "请先选择工作区并初始化 TestAgent 服务";
     return;
   }
@@ -9937,7 +10102,7 @@ function applyRunEventWorkbenchProjection(
       selectedWorkspacePhysicalRootPath.value
     );
     if (files.length) {
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "run";
@@ -9956,7 +10121,7 @@ function applyRunEventWorkbenchProjection(
       selectedWorkspacePhysicalRootPath.value
     );
     if (files.length) {
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "session";
@@ -10538,7 +10703,7 @@ async function refreshWorkspaceGitDiff(options: {
     vcsDiffFiles.value = nextFiles;
     if (diffSource.value === "vcs") {
       diffFiles.value = nextFiles;
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
         centerMode.value = nextCenterModeAfterVcsRefresh(centerMode.value, diffSource.value, nextFiles);
       }
       if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
@@ -11074,6 +11239,7 @@ function handleNewConversation() {
   clearAutoRetryState();
   dispatchChat({ type: "reset" });
   runFeedbacks.value = {};
+  memoryUsageByRunId.value = {};
   feedbackSubmitting.value = {};
   platformMessageIdsByRemoteId.value = {};
   assistantSummaryMessageIdsByRunId.value = {};
@@ -11271,6 +11437,30 @@ async function loadFeedbacksForRunIds(
       dispatchChat({ type: "run.statuses.loaded", statuses });
     }
   }
+  await loadMemoryUsageForRunIds(runIds, expectedSessionId, interactionIsCurrent);
+}
+
+/** 记忆使用记录走批量 HTTP 恢复；白名单未开放或服务降级时静默保持无徽标。 */
+async function loadMemoryUsageForRunIds(
+  runIds: string[],
+  expectedSessionId?: string,
+  interactionIsCurrent: () => boolean = () => true
+) {
+  if (runIds.length === 0) return;
+  const loaded: Record<string, MemoryUsageView[]> = Object.fromEntries(runIds.map((runId) => [runId, []]));
+  try {
+    for (let index = 0; index < runIds.length; index += 200) {
+      const usages = await api.queryQaMemoryRunUsage(runIds.slice(index, index + 200));
+      for (const usage of usages) {
+        (loaded[usage.runId] ??= []).push(usage);
+      }
+    }
+  } catch {
+    return;
+  }
+  if (interactionIsCurrent() && (!expectedSessionId || session.value?.sessionId === expectedSessionId)) {
+    memoryUsageByRunId.value = { ...memoryUsageByRunId.value, ...loaded };
+  }
 }
 
 function handleSubmitFeedback(payload: AiRunFeedbackPayload & { runId: string }) {
@@ -11334,12 +11524,14 @@ async function handleLogout() {
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :can-play-pet-games="isSuperAdmin"
-    :can-manage-public-agent-config="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
-    :can-manage-workspace-agent-config="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
+    :can-manage-public-agent-config="selectedWorkspaceKind === 'MANAGED' && selectedAgentConfigEnabled && isSuperAdmin"
+    :can-manage-workspace-agent-config="selectedAgentConfigEnabled && isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
     :personal-runtime-reloading="personalRuntimeReloading"
     :runtime-busy="runtimeReloadBusy"
-    :opencode-process-status="opencodeProcessStatus"
-    :opencode-process-loading="opencodeProcessInitialLoading"
+    :opencode-process-status="selectedRuntimeProcessStatus"
+    :opencode-endpoints="opencodeEndpoints"
+    :opencode-endpoints-loading="opencodeEndpointQuery.isFetching.value"
+    :opencode-process-loading="selectedRuntimeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
     :process-restarting="restartMyOpencodeProcessMutation.isPending.value"
     :show-process-status-in-pet="!shareMode"
@@ -11369,7 +11561,7 @@ async function handleLogout() {
     @open-app-source-repository="openAppSourceRepository"
     @manage-app-source-repository="openAppSourceDownloadDialog"
     @return-managed-workspace="fallbackToManagedWorkspace()"
-    @refresh-opencode-process="refreshOpencodeProcessStatus"
+    @refresh-opencode-process="refreshSelectedRuntimeStatus"
     @initialize-process="beginInitializeOpencodeProcess"
     @restart-process="restartMyOpencodeProcess"
     @logout="handleLogout"
@@ -11407,6 +11599,18 @@ async function handleLogout() {
           >
             <Wrench class="figma-activity-icon" :stroke-width="1.5" />
             <span class="figma-activity-text">工具箱</span>
+          </button>
+          <button
+            v-if="memoryAvailable"
+            type="button"
+            :class="['figma-activity-btn figma-activity-btn--memories', centerMode === 'memories' && 'figma-activity-btn--active']"
+            aria-label="长期记忆"
+            title="记忆中心"
+            data-testid="memory-activity-button"
+            @click="toggleMemories"
+          >
+            <BrainCircuit class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">记忆</span>
           </button>
           <button
             v-if="canUseLobehub"
@@ -11486,8 +11690,10 @@ async function handleLogout() {
           :can-write="canWriteSelectedWorkspace"
           :can-mutate-git="selectedWorkspaceKind !== 'APP_SOURCE' && canWriteSelectedWorkspace"
           :can-undo="workspaceUndoStack.length > 0"
-          :can-manage-agent-config="appSourceCapabilities.canPublishApplicationAgentConfig && isAppAdmin"
-          :can-manage-public-config="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
+          :workspace-git-enabled="selectedGitPublishEnabled"
+          :agent-config-enabled="selectedAgentConfigEnabled"
+          :can-manage-agent-config="selectedAgentConfigEnabled && appSourceCapabilities.canPublishApplicationAgentConfig && isAppAdmin"
+          :can-manage-public-config="selectedAgentConfigEnabled && selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
           :api-base-url="apiBaseUrl"
           :route-linux-server-id="routeLinuxServerId"
           :route-linux-server-resolved="routeLinuxServerResolved"
@@ -11566,6 +11772,15 @@ async function handleLogout() {
       <main class="managed-editor-main">
         <template v-if="centerMode === 'toolbox'">
           <ToolboxPanel />
+        </template>
+        <template v-else-if="centerMode === 'memories'">
+          <MemoryCenter
+            v-if="memoryAvailable"
+            :selected-app-id="selectedAppId"
+            :can-manage-team="isAppAdmin"
+            :access-granted="memoryAvailable"
+            @open-skill-hub="toggleAgentSkillHub"
+          />
         </template>
         <template v-else-if="centerMode === 'hub'">
           <AgentSkillHub
@@ -11837,7 +12052,7 @@ async function handleLogout() {
           :shared-sessions="sharedSessionItems"
           :shared-sessions-loading="sharedSessionsQuery.isFetching.value"
           :fixed-session="shareMode"
-          :can-manage-share="!shareMode && Boolean(session?.sessionId)"
+          :can-manage-share="!shareMode && selectedCollaborationEnabled && Boolean(session?.sessionId)"
           :history-search="sessionSearch"
           :history-total="sessionHistoryTotal"
           :history-has-more="sessionHistoryHasMore"
@@ -11849,11 +12064,12 @@ async function handleLogout() {
           :history-question-count="sessionRuntimeState?.questionCount ?? 0"
           :history-permission-count="sessionPermissionAttentionCount"
           :readonly-reason="readonlySessionReason"
-          :process-status="opencodeProcessStatus"
+          :process-status="selectedRuntimeProcessStatus"
           process-status-placement="pet"
           :process-required="!shareMode"
-          :process-loading="opencodeProcessInitialLoading"
-          :process-refreshing="opencodeProcessRefreshing"
+          :process-loading="selectedRuntimeProcessInitialLoading"
+          :process-refreshing="selectedRuntimeProcessRefreshing"
+          :process-refresh-blocks-submit="false"
           :process-initializing="initializeOpencodeProcessMutation.isPending.value"
           :permissions="chatState.permissions"
           :questions="chatState.questions"
@@ -11890,6 +12106,7 @@ async function handleLogout() {
           :batch-running="batchTestCaseRunning"
           :chat-attachments="chatAttachments"
           :chat-attachments-uploading="!!workspaceUploadOverlay"
+          :attachments-enabled="selectedAttachmentsEnabled"
           :agents-loading="agentsLoading"
           :agents-refreshing="agentsRefreshing"
           :agents-error="agentsError"
@@ -11901,6 +12118,7 @@ async function handleLogout() {
           :selected-provider="selectedProvider"
           :selected-model="selectedModel"
           :run-feedbacks="runFeedbacks"
+          :memory-usage-by-run-id="memoryUsageByRunId"
           :feedback-submitting="feedbackSubmitting"
           :run-statuses-by-run-id="chatState.runStatusesByRunId"
           :commands="commands"
@@ -11967,8 +12185,10 @@ async function handleLogout() {
           >运行</button>
           <button
             type="button"
-            :class="['rounded px-2 py-1 text-[12px]', bottomMode === 'terminal' ? 'bg-[var(--ta-surface)] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-ink)]' : 'text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
-            @click="bottomMode = 'terminal'"
+            :class="['rounded px-2 py-1 text-[12px]', !selectedBrowserTerminalEnabled ? 'cursor-not-allowed opacity-50' : bottomMode === 'terminal' ? 'bg-[var(--ta-surface)] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-ink)]' : 'text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
+            :disabled="!selectedBrowserTerminalEnabled"
+            :title="selectedBrowserTerminalEnabled ? '打开终端' : '本地工作区首版不开放浏览器终端'"
+            @click="selectedBrowserTerminalEnabled && (bottomMode = 'terminal')"
           >终端</button>
           <button
             type="button"
@@ -11991,8 +12211,8 @@ async function handleLogout() {
             v-else
             :base-url="apiBaseUrl"
             :create-ticket="createTerminalTicket"
-            :disabled="!session || !!readonlySessionReason"
-            :disabled-reason="readonlySessionReason || '先发送一次 prompt 建立 Session 运行上下文后再连接终端'"
+            :disabled="!selectedBrowserTerminalEnabled || !session || !!readonlySessionReason"
+            :disabled-reason="!selectedBrowserTerminalEnabled ? '本地工作区首版不开放浏览器终端' : readonlySessionReason || '先发送一次 prompt 建立 Session 运行上下文后再连接终端'"
           />
         </div>
       </div>

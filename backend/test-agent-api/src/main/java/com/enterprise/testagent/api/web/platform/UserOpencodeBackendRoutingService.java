@@ -8,13 +8,22 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationRunContext;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.session.SessionRuntimeTargetRepository;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
@@ -73,6 +82,9 @@ class UserOpencodeBackendRoutingService {
     private final ConversationContextStore conversationContextStore;
     private final int maxRoutedRequestBodyBytes;
     private SessionCollaborationShareService sessionShareService;
+    private LocalClientWorkspaceRepository localClientWorkspaceRepository;
+    private LocalClientConnectionStore localClientConnectionStore;
+    private SessionRuntimeTargetRepository sessionRuntimeTargetRepository;
 
     @Autowired
     UserOpencodeBackendRoutingService(
@@ -226,6 +238,14 @@ class UserOpencodeBackendRoutingService {
     private Mono<RoutingResolution> resolveRoute(
             ServerWebExchange exchange,
             UserId routingUserId) {
+        if (requiresLocalBodyInspection(exchange)) {
+            return cacheRequestBody(exchange)
+                    .map(cached -> resolveCachedRoute(cached, routingUserId));
+        }
+        Optional<BackendProcessId> localTarget = localBackendTarget(exchange, null, routingUserId);
+        if (localTarget.isPresent()) {
+            return Mono.just(localResolution(exchange, localTarget.get()));
+        }
         if (isNightExecutionTaskCreate(exchange)) {
             return cacheRequestBody(exchange)
                     .map(cached -> new RoutingResolution(
@@ -242,6 +262,131 @@ class UserOpencodeBackendRoutingService {
         }
         return cacheRequestBody(exchange)
                 .map(cached -> resolveStartRun(cached, routingUserId, startRunAgentId.get()));
+    }
+
+    private RoutingResolution resolveCachedRoute(CachedRequest cached, UserId routingUserId) {
+        Optional<BackendProcessId> localTarget = localBackendTarget(
+                cached.exchange(), cached.body(), routingUserId);
+        if (localTarget.isPresent()) {
+            return localResolution(cached.exchange(), localTarget.get());
+        }
+        if (isNightExecutionTaskCreate(cached.exchange())) {
+            return new RoutingResolution(
+                    cached.exchange(), legacyTarget(routingUserId, OPENCODE_AGENT_ID));
+        }
+        Optional<String> startRunAgentId = startRunAgentId(cached.exchange());
+        return startRunAgentId
+                .map(agentId -> resolveStartRun(cached, routingUserId, agentId))
+                .orElseGet(() -> new RoutingResolution(
+                        cached.exchange(), targetLinuxServerId(cached.exchange(), routingUserId)));
+    }
+
+    private boolean requiresLocalBodyInspection(ServerWebExchange exchange) {
+        String path = exchange.getRequest().getURI().getRawPath();
+        if (!HttpMethod.POST.equals(exchange.getRequest().getMethod()) || path == null) {
+            return false;
+        }
+        return (PLATFORM_RUNTIME_PREFIX + "/sessions").equals(path)
+                || isNightExecutionTaskCreate(exchange)
+                || startRunAgentId(exchange).isPresent();
+    }
+
+    /** 命中本地 session/workspace 后离线直接失败，绝不回退服务器 OpenCode。 */
+    private Optional<BackendProcessId> localBackendTarget(
+            ServerWebExchange exchange,
+            byte[] requestBody,
+            UserId routingUserId) {
+        if (localClientConnectionStore == null) {
+            return Optional.empty();
+        }
+        String path = exchange.getRequest().getURI().getRawPath();
+        String sessionId = segmentValue(path, "/sessions/");
+        String workspaceId = segmentValue(path, "/workspaces/");
+        if (sessionId == null) {
+            sessionId = exchange.getRequest().getQueryParams().getFirst("sessionId");
+        }
+        if (workspaceId == null) {
+            workspaceId = exchange.getRequest().getQueryParams().getFirst("workspaceId");
+        }
+        if (requestBody != null && requestBody.length > 0) {
+            try {
+                JsonNode body = objectMapper.readTree(requestBody);
+                if (sessionId == null) sessionId = textField(body, "sessionId");
+                if (workspaceId == null) workspaceId = textField(body, "workspaceId");
+            } catch (Exception ignored) {
+                return Optional.empty();
+            }
+        }
+        LocalClientInstanceId targetClient = null;
+        if (sessionId != null && sessionRuntimeTargetRepository != null) {
+            try {
+                var target = sessionRuntimeTargetRepository.findBySessionId(new SessionId(sessionId)).orElse(null);
+                if (target != null && target.runtimeKind() == RuntimeKind.LOCAL_CLIENT) {
+                    targetClient = target.localClientInstanceId();
+                }
+            } catch (IllegalArgumentException exception) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Session ID 无效");
+            } catch (RuntimeException exception) {
+                throw new PlatformException(
+                        ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                        "本地会话运行目标暂不可用");
+            }
+        }
+        if (workspaceId != null && localClientWorkspaceRepository != null) {
+            try {
+                LocalClientWorkspaceBinding binding = localClientWorkspaceRepository
+                        .findByWorkspaceId(new WorkspaceId(workspaceId)).orElse(null);
+                if (binding != null) {
+                    if (!binding.userId().equals(routingUserId)) {
+                        throw new PlatformException(ErrorCode.FORBIDDEN, "本地工作区不属于当前用户");
+                    }
+                    if (targetClient != null && !targetClient.equals(binding.clientInstanceId())) {
+                        throw new PlatformException(ErrorCode.CONFLICT, "本地会话与工作区目标不一致");
+                    }
+                    targetClient = binding.clientInstanceId();
+                }
+            } catch (PlatformException exception) {
+                throw exception;
+            } catch (IllegalArgumentException exception) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Workspace ID 无效");
+            } catch (RuntimeException exception) {
+                throw new PlatformException(
+                        ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                        "本地工作区运行目标暂不可用");
+            }
+        }
+        if (targetClient == null) {
+            return Optional.empty();
+        }
+        LocalClientInstanceId resolvedClient = targetClient;
+        LocalClientConnectionRoute route = localClientConnectionStore.find(resolvedClient)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.LOCAL_CLIENT_DISCONNECTED,
+                        "本地客户端离线",
+                        Map.of("clientInstanceId", resolvedClient.value())));
+        if (!route.userId().equals(routingUserId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端不属于当前用户");
+        }
+        return Optional.of(route.backendProcessId());
+    }
+
+    private RoutingResolution localResolution(ServerWebExchange exchange, BackendProcessId backendProcessId) {
+        return new RoutingResolution(
+                exchange,
+                Optional.empty(),
+                routeResolver.isCurrent(backendProcessId)
+                        ? Optional.empty()
+                        : Optional.of(backendProcessId));
+    }
+
+    private static String segmentValue(String path, String marker) {
+        if (path == null) return null;
+        int start = path.indexOf(marker);
+        if (start < 0) return null;
+        start += marker.length();
+        int end = path.indexOf('/', start);
+        String value = end < 0 ? path.substring(start) : path.substring(start, end);
+        return value.isBlank() ? null : value;
     }
 
     private RoutingResolution resolveStartRun(
@@ -335,6 +480,20 @@ class UserOpencodeBackendRoutingService {
         this.sessionShareService = Objects.requireNonNull(sessionShareService, "sessionShareService must not be null");
     }
 
+    /** 生产环境按本地 workspace/session 冻结目标解析精确 Java；测试构造器可不装配。 */
+    @Autowired(required = false)
+    void configureLocalClientRouting(
+            LocalClientWorkspaceRepository localClientWorkspaceRepository,
+            LocalClientConnectionStore localClientConnectionStore,
+            SessionRuntimeTargetRepository sessionRuntimeTargetRepository) {
+        this.localClientWorkspaceRepository = Objects.requireNonNull(
+                localClientWorkspaceRepository, "localClientWorkspaceRepository must not be null");
+        this.localClientConnectionStore = Objects.requireNonNull(
+                localClientConnectionStore, "localClientConnectionStore must not be null");
+        this.sessionRuntimeTargetRepository = Objects.requireNonNull(
+                sessionRuntimeTargetRepository, "sessionRuntimeTargetRepository must not be null");
+    }
+
     private Optional<String> startRunAgentId(ServerWebExchange exchange) {
         String path = exchange.getRequest().getURI().getRawPath();
         if (!HttpMethod.POST.equals(exchange.getRequest().getMethod()) || path == null) {
@@ -391,7 +550,14 @@ class UserOpencodeBackendRoutingService {
         return value.textValue().trim();
     }
 
-    record RoutingResolution(ServerWebExchange exchange, Optional<String> linuxServerId) {
+    record RoutingResolution(
+            ServerWebExchange exchange,
+            Optional<String> linuxServerId,
+            Optional<BackendProcessId> backendProcessId) {
+
+        RoutingResolution(ServerWebExchange exchange, Optional<String> linuxServerId) {
+            this(exchange, linuxServerId, Optional.empty());
+        }
     }
 
     private record CachedRequest(ServerWebExchange exchange, byte[] body) {
@@ -432,6 +598,31 @@ class UserOpencodeBackendRoutingService {
                             ErrorCode.OPENCODE_UNAVAILABLE,
                             "目标服务器后端不可用",
                             Map.of("linuxServerId", linuxServerId));
+                });
+    }
+
+    /** 按 backendProcessId 精确转发本地客户端请求，禁止同服务器随机 Java 或本机降级。 */
+    Mono<Void> forward(ServerWebExchange exchange, AuthPrincipal principal, BackendProcessId backendProcessId) {
+        BackendJavaProcess backend;
+        try {
+            backend = routeResolver.requireBackend(backendProcessId);
+        } catch (PlatformException exception) {
+            return writeError(
+                    exchange,
+                    ErrorCode.OPENCODE_UNAVAILABLE,
+                    "本地客户端连接持有 Java 不可用",
+                    Map.of("backendProcessId", backendProcessId.value()));
+        }
+        return forwarder.forwardRawResponse(exchange, backend)
+                .flatMap(response -> forwarder.writeRawResponse(exchange, response))
+                .onErrorResume(exception -> {
+                    LOGGER.warn("本地客户端请求转发失败 backendProcessId={} traceId={}",
+                            backendProcessId.value(), traceId(exchange), exception);
+                    return writeError(
+                            exchange,
+                            ErrorCode.OPENCODE_UNAVAILABLE,
+                            "本地客户端连接持有 Java 不可用",
+                            Map.of("backendProcessId", backendProcessId.value()));
                 });
     }
 

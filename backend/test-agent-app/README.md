@@ -34,7 +34,7 @@
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
 - `config.ExternalApiCredentialStartupRunner`：在 Flyway 完成后严格整表加载外部 API 凭据；任何解密或数据校验失败都会阻止实例就绪，不使用未初始化或部分快照启动。
 - `config.ExperienceWorkspaceStartupRunner`：在 Flyway 与通用参数加载后调用 workspace-management，幂等创建本服务器体验目录、`.git`、README 和初始提交；已有内容不重置，初始化失败阻止实例就绪。
-- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析工具盒子、LobeHub、内部模型可观测、撤销重发、外部 API 凭据、历史 QA Memory、体验工作区及本地客户端的已知迁移分叉。QA Memory 资源仅用于保留已执行 Flyway 历史和收敛既有数据库，不再装配 Mem0 运行模块、API、学习/检索或外部服务。已执行 `V20260809120000`、`V20260809230000`、`V20260810090000` 的个人库会保留原始字节，并以 `V20260810110000` 至 `V20260810110002` 顺序补齐外部 API 和会话分享结构；已先执行会话分享主链但缺少较低版本 QA Memory 的 release 历史，在尚未执行 `V20260810234154` 时使用 `V20260810173117`，已执行该 release 最高版本时改用 `V20260811170050`。已执行体验候选 `V20260809210000/-1300860043` 的个人库从 `db/migration-compat/experience-workspace-applied` 解析冻结原文，随后与未执行候选的 release 历史共同执行幂等前向版本 `V20260812104911`。release 若遇到已经执行 `V20260812202425` 的共享开发库，只加载 `db/migration-compat/local-client-runtime-applied` 中的原始字节完成校验；未执行该版本的 release 数据库不扫描该目录，也不会创建或装配本地客户端能力。已落库路径后续继续按原 location 校验，未知 checksum、路径混用或不完整 history 一律失败关闭，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
+- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析工具盒子、LobeHub、内部模型可观测、撤销重发、外部 API 凭据、QA Memory、体验工作区、本地客户端和分析事件 outbox/触发器的已知迁移分叉。已执行 QA Memory、体验工作区或本地客户端候选版本的数据库继续使用冻结原文校验，并通过对应前向 migration 收敛；分析 outbox/触发器同样保留主链、release 后前向链和已执行历史的兼容 location。正常顺序历史与空库继续使用主 migration；未知 checksum、路径混用、版本倒序或不完整 history 一律失败关闭，不启用 `outOfOrder` 或 `repair`。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
 - `config.LobehubDevelopmentBootstrapRunner`：仅在 `test/local` profile 且
   `TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true` 时装配；拒绝非回环平台 PostgreSQL，通过既有通用参数管理服务
   写入审计后配置本地聊天 origin、虚拟邮箱域和唯一 owner，最后才启用 `LOBEHUB_ENABLED`。多个可用超级管理员时
@@ -56,6 +56,7 @@
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
 - 本地 Spring Boot 可执行 JAR 以 runtime scope 打包 PostgreSQL JDBC 驱动；企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖。驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
 - `application.yml`：`test-agent.xxl-job.enabled` 默认 `true`；MySQL、access token、Admin/executor 端口和地址使用 `TEST_AGENT_XXL_JOB_*` 注入。readiness group 明确不包含 `xxlJobAdmin`。
+- `application.yml`：`test-agent.memory.*` 集中绑定独立 memory-service、2 秒检索总预算、原生学习超时、TopK、上下文预算以及 Mem0→Java HMAC。不存在 QA 分类、隐式偏好置信度或自定义抽取提示词配置。`TEST_AGENT_MEMORY_ENABLED` 默认为 `false`；即使运行数据面，空白名单也不学习或注入。Java 只获得 memory-service URL/key，不获得独立 pgvector 密码。部署见 `docs/deployment/qa-memory.md`。
 - 标准夜间执行每个 15 分钟时段容量不绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在运行态 Flyway 完成后严格加载，缺失或非法会让应用启动失败。支持精确分钟测试定时后，分发改由 XXL 每分钟触发，补偿仍每 5 分钟触发。
 - 运营分析等周期 handler 不再由旧 runner 注册；任务定义由 XXL MySQL 版本 SQL 初始化，启停、Cron、手动触发和日志在 XXL 页面维护。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。

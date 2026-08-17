@@ -26,6 +26,9 @@
         <module>test-agent-opencode-sdk-generated</module>
         <module>test-agent-opencode-client</module>
         <module>test-agent-agent-runtime</module>
+        <module>test-agent-local-client-protocol</module>
+        <module>test-agent-workspace-filesystem</module>
+        <module>test-agent-local-client</module>
         <module>test-agent-workspace-management</module>
         <module>test-agent-opencode-runtime</module>
         <module>test-agent-system-management</module>
@@ -33,6 +36,7 @@
         <module>test-agent-scheduler</module>
         <module>test-agent-integration</module>
         <module>test-agent-model-gateway</module>
+        <module>test-agent-memory</module>
         <module>test-agent-xxl-job-admin-upstream</module>
         <module>test-agent-xxl-job-integration</module>
         <module>test-agent-api</module>
@@ -56,10 +60,17 @@
         <xxl-sso.version>2.4.0</xxl-sso.version>
         <apache-poi.version>5.5.1</apache-poi.version>
         <start-class>com.enterprise.testagent.app.TestAgentApplication</start-class>
+        <clickhouse-jdbc.version>0.9.8</clickhouse-jdbc.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.clickhouse</groupId>
+                <artifactId>clickhouse-jdbc</artifactId>
+                <version>${clickhouse-jdbc.version}</version>
+                <classifier>all</classifier>
+            </dependency>
             <dependency>
                 <groupId>org.apache.poi</groupId>
                 <artifactId>poi</artifactId>
@@ -194,6 +205,21 @@
             </dependency>
             <dependency>
                 <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-local-client-protocol</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-workspace-filesystem</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-local-client</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
                 <artifactId>test-agent-workspace-management</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -225,6 +251,11 @@
             <dependency>
                 <groupId>com.enterprise.testagent</groupId>
                 <artifactId>test-agent-model-gateway</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-memory</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

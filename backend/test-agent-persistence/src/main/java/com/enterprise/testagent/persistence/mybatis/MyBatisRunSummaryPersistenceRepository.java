@@ -182,7 +182,9 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                 anchor.modelId(),
                 value(anchor.messageSenderUserId()),
                 anchor.messageSenderUnifiedAuthId(),
-                anchor.messageSentBySharedUser());
+                anchor.messageSentBySharedUser(),
+                anchor.targetRuntimeKind().name(),
+                anchor.targetLocalClientInstanceId());
     }
 
     private RunTerminalProjectionRow toRow(RunTerminalProjection projection) {
@@ -272,7 +274,9 @@ public class MyBatisRunSummaryPersistenceRepository implements RunSummaryPersist
                 row.modelId(),
                 userId(row.messageSenderUserId()),
                 row.messageSenderUnifiedAuthId(),
-                Boolean.TRUE.equals(row.messageSentBySharedUser()));
+                Boolean.TRUE.equals(row.messageSentBySharedUser()),
+                com.enterprise.testagent.domain.runtime.RuntimeKind.fromNullable(row.targetRuntimeKind()),
+                row.targetLocalClientInstanceId());
     }
 
     private RunConversationSummary toDomain(RunSummaryRow row) {

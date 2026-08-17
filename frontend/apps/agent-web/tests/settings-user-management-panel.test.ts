@@ -38,7 +38,13 @@ function createApi(): Partial<BackendApiClient> {
     deleteUser: vi.fn().mockResolvedValue({ deletedUserIds: ["usr_existing"], deletedCount: 1 }),
     deleteUsers: vi.fn().mockResolvedValue({ deletedUserIds: ["usr_existing"], deletedCount: 1 }),
     syncUserFromTcds: vi.fn().mockResolvedValue({ syncedUserIds: ["usr_existing"], syncedCount: 1 }),
-    syncUsersFromTcds: vi.fn().mockResolvedValue({ syncedUserIds: ["usr_existing"], syncedCount: 1 })
+    syncUsersFromTcds: vi.fn().mockResolvedValue({ syncedUserIds: ["usr_existing"], syncedCount: 1 }),
+    listQaMemoryWhitelist: vi.fn().mockResolvedValue({ items: [], page: 1, size: 100, total: 0 }),
+    enableQaMemoryUser: vi.fn().mockResolvedValue({ userId: "usr_existing", enabled: true }),
+    disableQaMemoryUser: vi.fn().mockResolvedValue(undefined),
+    listLocalClientRolloutUsers: vi.fn().mockResolvedValue({ items: [], page: 1, size: 100, total: 0 }),
+    enableLocalClientRolloutUser: vi.fn().mockResolvedValue({ userId: "usr_existing", enabled: true }),
+    disableLocalClientRolloutUser: vi.fn().mockResolvedValue(undefined)
   };
 }
 
@@ -81,6 +87,20 @@ const ElInputStub = defineComponent({
       placeholder: this.placeholder,
       value: this.modelValue,
       onInput: (event: Event) => this.$emit("update:modelValue", (event.target as HTMLInputElement).value)
+    });
+  }
+});
+
+const ElSwitchStub = defineComponent({
+  props: ["modelValue", "disabled", "loading", "ariaLabel"],
+  emits: ["change"],
+  render() {
+    return h("input", {
+      type: "checkbox",
+      checked: this.modelValue,
+      disabled: this.disabled,
+      "aria-label": this.ariaLabel,
+      onChange: (event: Event) => this.$emit("change", (event.target as HTMLInputElement).checked)
     });
   }
 });
@@ -164,6 +184,7 @@ function renderPanel(api: Partial<BackendApiClient> = createApi(), currentUser: 
         },
         ElIcon: { template: `<span><slot /></span>` },
         ElInput: ElInputStub,
+        ElSwitch: ElSwitchStub,
         ElSelect: ElSelectStub,
         ElOption: ElOptionStub,
         ElForm: { template: `<form><slot /></form>` },
@@ -203,7 +224,23 @@ describe("SettingsUserManagementPanel", () => {
       size: 20
     }));
     expect(api.listRoles).toHaveBeenCalled();
+    expect(api.listQaMemoryWhitelist).toHaveBeenCalledWith(1, 100);
+    expect(api.listLocalClientRolloutUsers).toHaveBeenCalledWith(1, 100);
     expect(container.textContent?.indexOf("用户列表")).toBeLessThan(container.textContent?.indexOf("新增用户") ?? 0);
+  });
+
+  it("manages memory and local-client rollout on the same user row", async () => {
+    const api = createApi();
+    const { findByText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    const memorySwitch = getByRole("checkbox", { name: "切换 alice 的记忆灰度" });
+    const clientSwitch = getByRole("checkbox", { name: "切换 alice 的客户端灰度" });
+    await fireEvent.click(memorySwitch);
+    await fireEvent.click(clientSwitch);
+
+    await waitFor(() => expect(api.enableQaMemoryUser).toHaveBeenCalledWith("usr_existing"));
+    await waitFor(() => expect(api.enableLocalClientRolloutUser).toHaveBeenCalledWith("usr_existing"));
   });
 
   it("creates user with default role and refreshes list", async () => {

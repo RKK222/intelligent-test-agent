@@ -39,12 +39,18 @@ import type {
   RunFeedbackState,
   AddSshKeyPayload,
   AnalyticsExceptionDetail,
+  AnalyticsCapabilities,
+  AnalyticsFilterOptions,
+  AnalyticsFunnel,
+  AnalyticsHeatmapMetric,
+  AnalyticsHourlyHeatmap,
   AnalyticsOrganizationUsageRow,
   AnalyticsOverview,
   AnalyticsPeaks,
   AnalyticsQueryParams,
   AnalyticsSatisfaction,
   AnalyticsTimeSeriesPoint,
+  AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
   ApplicationWorkspaceTemplate,
   BatchContext,
@@ -117,6 +123,13 @@ import type {
   LoginRequest,
   LoginResponse,
   LobehubSsoTicket,
+  LocalClientCommandResult,
+  LocalClientCredential,
+  LocalClientDirectoryEntry,
+  LocalClientInstance,
+  LocalClientPlaintextKey,
+  LocalClientRolloutUser,
+  LocalWorkspace,
   ManagedApplication,
   ManagedWorkspaceRuntime,
   MemoryAdminHealth,
@@ -141,6 +154,7 @@ import type {
   OpencodeRuntimeManagedProcessCommandResult,
   OpencodeRuntimeManagementUserProcessParams,
   OpencodeRuntimeProcess,
+  OpencodeEndpoint,
   OpencodeProcessStartOperation,
   UserOpencodeProcessHealth,
   UserOpencodeProcessHealthRequest,
@@ -456,6 +470,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const agentBase = `/api/internal/agent/${encodeURIComponent(agentId)}`;
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
+  const localClientBase = "/api/internal/platform/local-opencode-client";
   const requirementImportBase = "/api/v1/requirement-import";
   const agentConfigBase = `${workspaceManagementBase}/agent-config`;
   const agentSkillHubBase = `${workspaceManagementBase}/agent-skill-hub`;
@@ -814,7 +829,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
           method: "POST",
           body: JSON.stringify({
             workspaceId,
-            linuxServerId: route.linuxServerId,
+            linuxServerId: route.linuxServerId ?? undefined,
             mode: "workspace"
           } satisfies WorkspaceFileSocketTicketRequest)
         }
@@ -869,6 +884,47 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     );
     const client = new WorkspaceFileSocketClient(
       toWebSocketUrl(server.baseUrl, ticket.webSocketUrl),
+      webSocketFactory,
+      () => {}
+    );
+    await client.ready();
+    return client;
+  }
+
+  /** 本地目录选择器先解析精确连接持有 Java，再在该 Java 上签发 generation 绑定 ticket。 */
+  async function createLocalDirectoryPickerClient(clientInstanceId: string): Promise<WorkspaceFileSocketClient> {
+    const normalizedClientInstanceId = clientInstanceId.trim();
+    if (!normalizedClientInstanceId) throw new Error("clientInstanceId is required");
+    const route = await request<WorkspaceFileRoute>(
+      `${workspaceManagementBase}/local-clients/${encodeURIComponent(normalizedClientInstanceId)}/directory-picker/file-ws-route`,
+      { method: "POST" }
+    );
+    if (route.runtimeKind !== "LOCAL_CLIENT"
+      || route.localClientInstanceId !== normalizedClientInstanceId
+      || !route.connectionGeneration) {
+      throw new BackendApiError(409, {
+        success: false,
+        code: "LOCAL_CLIENT_ROUTE_CHANGED",
+        message: "本地客户端连接路由已变化，请重试",
+        traceId: "",
+        retryable: true,
+        details: {}
+      });
+    }
+    const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+      route.baseUrl.replace(/\/$/, ""),
+      `${workspaceManagementBase}/file-ws/tickets`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "directory-picker",
+          localClientInstanceId: normalizedClientInstanceId,
+          connectionGeneration: route.connectionGeneration
+        } satisfies WorkspaceFileSocketTicketRequest)
+      }
+    );
+    const client = new WorkspaceFileSocketClient(
+      toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
       webSocketFactory,
       () => {}
     );
@@ -1085,6 +1141,62 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       ),
     listWorkspaces: (page = 1, size = 20) =>
       request<PageResponse<Workspace>>(`${workspaceManagementBase}/workspaces?page=${page}&size=${size}`),
+    getMyLocalClientCredential: () =>
+      request<LocalClientCredential>(`${localClientBase}/credentials/me`),
+    createMyLocalClientCredential: () =>
+      request<LocalClientCredential>(`${localClientBase}/credentials/me`, { method: "POST" }),
+    copyMyLocalClientCredential: () =>
+      request<LocalClientPlaintextKey>(`${localClientBase}/credentials/me/copy`, { method: "POST" }),
+    rotateMyLocalClientCredential: () =>
+      request<LocalClientCredential>(`${localClientBase}/credentials/me/rotate`, { method: "POST" }),
+    revokeMyLocalClientCredential: () =>
+      request<{ revoked: boolean }>(`${localClientBase}/credentials/me`, { method: "DELETE" }),
+    listMyLocalClientInstances: () =>
+      request<LocalClientInstance[]>(`${localClientBase}/instances/me`),
+    listLocalClientRolloutUsers: (page = 1, size = 50) =>
+      request<PageResponse<LocalClientRolloutUser>>(
+        `${localClientBase}/admin/rollout-users${query({ page, size })}`
+      ),
+    enableLocalClientRolloutUser: (userId: string) =>
+      request<LocalClientRolloutUser>(`${localClientBase}/admin/rollout-users`, {
+        method: "POST",
+        body: JSON.stringify({ userId })
+      }),
+    disableLocalClientRolloutUser: (userId: string) =>
+      request<void>(
+        `${localClientBase}/admin/rollout-users/${encodeURIComponent(userId)}`,
+        { method: "DELETE" }
+      ),
+    getMyOpencodeEndpoints: () =>
+      request<OpencodeEndpoint[]>(agentPath("/opencode-endpoints/me")),
+    commandLocalClientOpencode: (
+      clientInstanceId: string,
+      action: "START" | "RESTART" | "STOP" | "STATUS"
+    ) => request<LocalClientCommandResult>(
+      `${localClientBase}/instances/${encodeURIComponent(clientInstanceId)}/opencode/commands`,
+      { method: "POST", body: JSON.stringify({ action }) }
+    ),
+    listLocalClientDirectories: async (clientInstanceId: string, absolutePath: string) => {
+      const client = await createLocalDirectoryPickerClient(clientInstanceId);
+      try {
+        return await client.request<LocalClientDirectoryEntry[]>("directory.list", {
+          absolutePath,
+          limit: 1000
+        });
+      } finally {
+        client.close();
+      }
+    },
+    createLocalWorkspace: (payload: { clientInstanceId: string; name: string; rootPath: string }) =>
+      request<LocalWorkspace>(`${workspaceManagementBase}/local-workspaces`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    deleteLocalWorkspace: (workspaceId: string) =>
+      request<{ workspaceId: string; localDirectoryDeleted: boolean }>(
+        `${workspaceManagementBase}/local-workspaces/${encodeURIComponent(workspaceId)}`,
+        { method: "DELETE" }
+      ),
     getWorkspace: (workspaceId: string) => routedRequest<Workspace>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}`),
     /** 体验目录、目标服务器与 Workspace ID 全部由后端依据当前用户进程分配，客户端不传选择参数。 */
     openExperienceWorkspace: () => routedRequest<Workspace>(
@@ -2286,6 +2398,16 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<null>(`${externalApiCredentialBase}/${encodeURIComponent(credentialId)}`, { method: "DELETE" }),
     getAnalyticsOverview: (params: AnalyticsQueryParams = {}) =>
       request<AnalyticsOverview>(`${analyticsBase}/overview${query({ ...params })}`),
+    getAnalyticsFilterOptions: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsFilterOptions>(`${analyticsBase}/filter-options${query({ ...params })}`),
+    getAnalyticsFunnel: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsFunnel>(`${analyticsBase}/funnel${query({ ...params })}`),
+    getAnalyticsHourlyHeatmap: (params: AnalyticsQueryParams = {}, metric: AnalyticsHeatmapMetric = "USER_MESSAGES") =>
+      request<AnalyticsHourlyHeatmap>(`${analyticsBase}/hourly-heatmap${query({ ...params, metric })}`),
+    getAnalyticsTokenOperations: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsTokenOperations>(`${analyticsBase}/token-operations${query({ ...params })}`),
+    getAnalyticsCapabilities: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsCapabilities>(`${analyticsBase}/capabilities${query({ ...params })}`),
     getAnalyticsTimeseries: (params: AnalyticsQueryParams = {}) =>
       request<AnalyticsTimeSeriesPoint[]>(`${analyticsBase}/timeseries${query({ ...params })}`),
     getAnalyticsPeaks: (params: AnalyticsQueryParams = {}) =>
@@ -2298,7 +2420,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<AnalyticsSatisfaction>(`${analyticsBase}/satisfaction${query({ ...params })}`),
     getAnalyticsExceptions: (params: AnalyticsQueryParams = {}) =>
       request<PageResponse<AnalyticsExceptionDetail>>(`${analyticsBase}/exceptions${query({ ...params })}`),
-    exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions", params: AnalyticsQueryParams = {}) =>
+    exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions" | "funnel" | "token-operations" | "capabilities", params: AnalyticsQueryParams = {}) =>
       requestCsv(`${analyticsBase}/export${query({ ...params, type })}`),
     createXxlJobSsoTicket: () =>
       request<XxlJobSsoTicket>(`${xxlJobBase}/sso-tickets`, { method: "POST" }),
@@ -3837,6 +3959,7 @@ const OBSERVED_SENSITIVE_KEYS = new Set([
   "cookie",
   "contexttoken",
   "ciphertext",
+  "clientkey",
   "encryptedapikey",
   "granttoken",
   "password",
@@ -3851,7 +3974,7 @@ const OBSERVED_SENSITIVE_KEYS = new Set([
 ]);
 
 function redactObservedSensitiveText(raw: string): string {
-  const keyPattern = /(["']?)\b(?:api[-_]?key|authorization|access[-_]?token|auth[-_]?token|ciphertext|cookie|context[-_]?token|encrypted[-_]?api[-_]?key|grant[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|support[-_]?access[-_]?grant|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
+  const keyPattern = /(["']?)\b(?:api[-_]?key|authorization|access[-_]?token|auth[-_]?token|ciphertext|client[-_]?key|cookie|context[-_]?token|encrypted[-_]?api[-_]?key|grant[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|support[-_]?access[-_]?grant|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;

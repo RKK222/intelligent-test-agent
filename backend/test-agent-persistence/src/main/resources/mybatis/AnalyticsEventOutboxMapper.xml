@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.AnalyticsEventOutboxMapper">
+    <select id="pending" resultType="com.enterprise.testagent.domain.analytics.AnalyticsEventOutboxRepository$Event">
+        select id, event_id, event_version, source_type, aggregate_id, occurred_at, payload_json
+        from analytics_event_outbox
+        where published_at is null
+          and available_at &lt;= #{now}
+        order by id
+        limit #{limit}
+    </select>
+
+    <update id="markPublished">
+        <!-- ClickHouse 已确认后立即移除瞬时投递数据，PostgreSQL 不长期保存运营事实。 -->
+        delete from analytics_event_outbox
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </update>
+
+    <update id="markFailed">
+        update analytics_event_outbox
+        set attempt_count = attempt_count + 1,
+            available_at = #{nextAttemptAt},
+            last_error = #{error}
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </update>
+
+    <select id="redisCandidates" resultType="com.enterprise.testagent.persistence.mybatis.AnalyticsRedisOutboxRunRow">
+        select r.run_id,
+               coalesce(cp.last_stream_id, '0-0') as last_stream_id,
+               coalesce(r.message_sender_user_id, r.triggered_by_user_id) as user_id,
+               coalesce(u.username, '') as username,
+               coalesce(u.organization, '') as organization,
+               coalesce(u.rd_department, '') as rd_department,
+               coalesce(u.department, '') as department,
+               coalesce(r.session_id, '') as session_id,
+               coalesce(r.workspace_id, '') as workspace_id,
+               coalesce(r.agent_id, 'default') as agent_id,
+               coalesce(r.model_id, '') as model_id
+        from runs r
+        left join users u on u.user_id = coalesce(r.message_sender_user_id, r.triggered_by_user_id)
+        left join analytics_redis_outbox_checkpoints cp on cp.run_id = r.run_id
+        where r.storage_mode = 'REDIS_SUMMARY'
+          and (r.status in ('PENDING', 'RUNNING', 'CANCELLING') or r.updated_at &gt;= #{recentTerminalThreshold})
+        order by r.updated_at desc
+        limit #{limit}
+    </select>
+
+    <update id="updateRedisCheckpoint">
+        update analytics_redis_outbox_checkpoints
+        set last_stream_id = #{lastStreamId}, updated_at = #{updatedAt}
+        where run_id = #{runId}
+    </update>
+
+    <insert id="insertRedisCheckpoint">
+        insert into analytics_redis_outbox_checkpoints(run_id, last_stream_id, updated_at)
+        values(#{runId}, #{lastStreamId}, #{updatedAt})
+    </insert>
+
+    <resultMap id="BackfillEventRowMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsBackfillEventRow">
+        <constructor>
+            <arg column="event_id" javaType="java.lang.String"/>
+            <arg column="event_version" javaType="_long"/>
+            <arg column="source_type" javaType="java.lang.String"/>
+            <arg column="aggregate_id" javaType="java.lang.String"/>
+            <arg column="occurred_at" javaType="java.time.Instant"/>
+            <arg column="payload_json" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <select id="backfillUserDimensionEvents" resultMap="BackfillEventRowMap">
+        select concat('backfill-v1:user-dimension:', u.user_id) as event_id,
+               greatest(1, (extract(epoch from u.updated_at) * 1000)::bigint) as event_version,
+               'USER_DIMENSION' as source_type,
+               u.user_id as aggregate_id,
+               current_timestamp as occurred_at,
+               jsonb_build_object(
+                   'eventType', 'USER_DIMENSION', 'userId', u.user_id, 'username', u.username,
+                   'organization', u.organization, 'rdDepartment', u.rd_department,
+                   'department', u.department, 'status', u.status,
+                   'attributionMode', 'CURRENT_ORG_BACKFILL'
+               )::text as payload_json
+        from users u
+        order by u.user_id
+    </select>
+
+    <!-- 回填仅用业务天然 ID 构造稳定事件，JSONB 仅含计数、状态和归属快照。 -->
+    <select id="backfillDetailEvents" resultMap="BackfillEventRowMap">
+        select event_id, event_version, source_type, aggregate_id, occurred_at, payload_json
+        from (
+            select concat('backfill-v1:login:', l.log_id) as event_id,
+                   1::bigint as event_version, 'LOGIN' as source_type, l.log_id as aggregate_id,
+                   l.login_at as occurred_at,
+                   jsonb_build_object(
+                       'eventType', 'LOGIN', 'loginCount', 1,
+                       'userId', l.user_id, 'username', u.username,
+                       'organization', u.organization, 'rdDepartment', u.rd_department,
+                       'department', u.department, 'attributionMode', 'CURRENT_ORG_BACKFILL'
+                   )::text as payload_json
+            from user_login_logs l join users u on u.user_id = l.user_id
+            where l.login_result = 'SUCCESS' and l.login_at &gt;= #{startInclusive} and l.login_at &lt; #{endExclusive}
+
+            union all
+
+            select concat('backfill-v1:session:', s.session_id), 1::bigint, 'SESSION', s.session_id,
+                   s.created_at,
+                   jsonb_build_object(
+                       'eventType', 'SESSION_CREATED', 'sessionId', s.session_id,
+                       'workspaceId', s.workspace_id, 'sessionCount', 1,
+                       'activeSessionCount', case when session_stats.user_message_count &gt; 0 then 1 else 0 end,
+                       'emptySessionCount', case when session_stats.user_message_count = 0 then 1 else 0 end,
+                       'continuousSessionCount', case when session_stats.user_message_count &gt;= 2 then 1 else 0 end,
+                       'userId', s.created_by_user_id, 'username', u.username,
+                       'organization', u.organization, 'rdDepartment', u.rd_department,
+                       'department', u.department, 'attributionMode', 'CURRENT_ORG_BACKFILL'
+                   )::text
+            from sessions s
+            left join users u on u.user_id=s.created_by_user_id
+            left join lateral (
+                select count(*) filter (where m.role = 'USER') as user_message_count
+                from session_messages m
+                where m.session_id = s.session_id
+            ) session_stats on true
+            where s.created_at &gt;= #{startInclusive} and s.created_at &lt; #{endExclusive}
+
+            union all
+
+            select concat('backfill-v1:message:', m.message_id), 1::bigint, 'MESSAGE', m.message_id,
+                   m.created_at,
+                   jsonb_build_object(
+                       'eventType', 'MESSAGE', 'sessionId', m.session_id, 'runId', m.run_id,
+                       'workspaceId', s.workspace_id, 'agentId', coalesce(m.agent_id, r.agent_id),
+                       'modelId', r.model_id,
+                       'userMessageCount', case when m.role = 'USER' then 1 else 0 end,
+                       'assistantMessageCount', case when m.role = 'ASSISTANT' then 1 else 0 end,
+                       'userId', coalesce(m.sender_user_id, r.message_sender_user_id, r.triggered_by_user_id, s.created_by_user_id),
+                       'username', u.username, 'organization', u.organization,
+                       'rdDepartment', u.rd_department, 'department', u.department,
+                       'attributionMode', 'CURRENT_ORG_BACKFILL'
+                   )::text
+            from session_messages m
+            join sessions s on s.session_id=m.session_id
+            left join runs r on r.run_id=m.run_id
+            left join users u on u.user_id=coalesce(m.sender_user_id, r.message_sender_user_id, r.triggered_by_user_id, s.created_by_user_id)
+            where m.role in ('USER','ASSISTANT')
+              and m.created_at &gt;= #{startInclusive} and m.created_at &lt; #{endExclusive}
+              and (coalesce(r.storage_mode, 'LEGACY_FULL') != 'REDIS_SUMMARY' or m.content_kind='SUMMARY')
+
+            union all
+
+            select concat('backfill-v1:run:', r.run_id), greatest(1, r.status_version)::bigint,
+                   'RUN', r.run_id, r.created_at,
+                   jsonb_build_object(
+                       'eventType', case when r.status in ('SUCCEEDED','FAILED','CANCELLED') then 'RUN_TERMINAL' else 'RUN_STARTED' end,
+                       'runId', r.run_id, 'sessionId', r.session_id,
+                       'workspaceId', r.workspace_id, 'agentId', r.agent_id, 'modelId', r.model_id,
+                       'capabilityName', coalesce(r.agent_id, 'default'), 'runCount', 1, 'status', r.status,
+                       'succeededRunCount', case when r.status = 'SUCCEEDED' then 1 else 0 end,
+                       'failedRunCount', case when r.status = 'FAILED' then 1 else 0 end,
+                       'cancelledRunCount', case when r.status = 'CANCELLED' then 1 else 0 end,
+                       'activeTerminationCount', case when r.status = 'CANCELLED' then 1 else 0 end,
+                       'validInteractionCount', case when r.status in ('SUCCEEDED','FAILED','CANCELLED') then 1 else 0 end,
+                       'tokensInput', coalesce(r.tokens_input, 0),
+                       'tokensOutput', coalesce(r.tokens_output, 0),
+                       'tokensReasoning', coalesce(r.tokens_reasoning, 0),
+                       'tokensCacheRead', coalesce(r.tokens_cache_read, 0),
+                       'tokensCacheWrite', coalesce(r.tokens_cache_write, 0),
+                       'durationMs', case when r.status in ('SUCCEEDED','FAILED','CANCELLED')
+                           then greatest(0,(extract(epoch from (r.updated_at-r.created_at))*1000)::bigint)
+                           else 0 end,
+                       'userId', coalesce(r.message_sender_user_id, r.triggered_by_user_id, s.created_by_user_id),
+                       'username', u.username, 'organization', u.organization,
+                       'rdDepartment', u.rd_department, 'department', u.department,
+                       'attributionMode', 'CURRENT_ORG_BACKFILL'
+                   )::text
+            from runs r join sessions s on s.session_id=r.session_id
+            left join users u on u.user_id=coalesce(r.message_sender_user_id, r.triggered_by_user_id, s.created_by_user_id)
+            where r.created_at &gt;= #{startInclusive} and r.created_at &lt; #{endExclusive}
+
+            union all
+
+            select concat('backfill-v1:run-event:', e.event_id), greatest(1,(extract(epoch from e.occurred_at)*1000)::bigint),
+                   'RUN_EVENT', e.event_id, e.occurred_at,
+                   jsonb_strip_nulls(jsonb_build_object(
+                       'eventType', upper(replace(e.type,'.','_')), 'runId', e.run_id,
+                       'sessionId', coalesce(e.session_id,r.session_id),
+                       'parentSessionId', e.parent_session_id, 'taskCallId', e.task_call_id,
+                       'workspaceId', r.workspace_id,
+                       'agentId', r.agent_id, 'modelId', r.model_id,
+                       'toolName', coalesce(e.payload_json::jsonb-&gt;&gt;'tool',e.payload_json::jsonb-&gt;&gt;'toolName'),
+                       'callId', coalesce(e.payload_json::jsonb-&gt;&gt;'callID',e.payload_json::jsonb-&gt;&gt;'callId'),
+                       'title', case when e.type in ('tool.started','tool.finished')
+                               and lower(coalesce(e.payload_json::jsonb-&gt;&gt;'tool',e.payload_json::jsonb-&gt;&gt;'toolName'))='skill'
+                           then e.payload_json::jsonb-&gt;&gt;'title' end,
+                       'agentName', case when e.type='session.child.discovered' then
+                           coalesce(e.payload_json::jsonb-&gt;&gt;'agentName',e.payload_json::jsonb-&gt;&gt;'agent') end,
+                       'status', coalesce(e.payload_json::jsonb-&gt;&gt;'status','SUCCEEDED'),
+                       'diffProposedCount', case when e.type='diff.proposed' then 1 else 0 end,
+                       'diffAcceptedCount', case when e.type='diff.accepted' then 1 else 0 end,
+                       'diffRejectedCount', case when e.type='diff.rejected' then 1 else 0 end,
+                       'userId', coalesce(r.message_sender_user_id,r.triggered_by_user_id,s.created_by_user_id),
+                       'username', u.username, 'organization', u.organization,
+                       'rdDepartment', u.rd_department, 'department', u.department,
+                       'attributionMode', 'CURRENT_ORG_BACKFILL'
+                   ))::text
+            from run_events e join runs r on r.run_id=e.run_id join sessions s on s.session_id=r.session_id
+            left join users u on u.user_id=coalesce(r.message_sender_user_id,r.triggered_by_user_id,s.created_by_user_id)
+            where e.type in (
+                'tool.started','tool.finished','session.child.discovered',
+                'diff.proposed','diff.accepted','diff.rejected'
+            )
+              and e.occurred_at &gt;= #{startInclusive} and e.occurred_at &lt; #{endExclusive}
+
+            union all
+
+            select concat('backfill-v1:feedback:', f.feedback_id), greatest(1,(extract(epoch from f.updated_at)*1000)::bigint),
+                   'FEEDBACK', f.feedback_id, f.updated_at,
+                   jsonb_build_object(
+                       'eventType','FEEDBACK','feedbackId',f.feedback_id,'sessionId',f.session_id,
+                       'runId',f.run_id,'messageId',f.message_id,'rating',f.rating,'reasonCode',f.reason_code,
+                       'userId',f.user_id,'username',u.username,
+                       'organization',coalesce(f.organization,u.organization),
+                       'rdDepartment',coalesce(f.rd_department,u.rd_department),
+                       'department',coalesce(f.department,u.department),
+                       'attributionMode','CURRENT_ORG_BACKFILL'
+                   )::text
+            from ai_message_feedbacks f left join users u on u.user_id=f.user_id
+            where f.updated_at &gt;= #{startInclusive} and f.updated_at &lt; #{endExclusive}
+        ) source_events
+        order by occurred_at, event_id
+    </select>
+
+    <select id="cutoverStatus" resultType="string">
+        select status from analytics_clickhouse_cutovers where cutover_id=#{cutoverId}
+    </select>
+
+    <insert id="upsertVerifiedCutover">
+        insert into analytics_clickhouse_cutovers(
+            cutover_id,status,source_row_count,target_row_count,coverage_start,coverage_end,
+            attribution_mode,verified_at,updated_at
+        ) values(
+            #{cutoverId},'VERIFIED',#{sourceCount},#{targetCount},#{coverageStart},#{coverageEnd},
+            'CURRENT_ORG_BACKFILL',#{verifiedAt},#{verifiedAt}
+        ) on conflict(cutover_id) do update set
+            status=excluded.status,source_row_count=excluded.source_row_count,
+            target_row_count=excluded.target_row_count,coverage_start=excluded.coverage_start,
+            coverage_end=excluded.coverage_end,attribution_mode=excluded.attribution_mode,
+            verified_at=excluded.verified_at,updated_at=excluded.updated_at
+    </insert>
+
+    <update id="cleanupLegacyRollups">
+        drop table if exists
+            analytics_run_duration_histogram_hourly,
+            analytics_user_activity_daily,
+            analytics_user_activity_hourly,
+            analytics_rollup_job_runs,
+            analytics_rollup_watermarks
+    </update>
+</mapper>

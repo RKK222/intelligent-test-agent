@@ -8,6 +8,7 @@ import com.enterprise.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
+import com.enterprise.testagent.domain.hub.ProtectedAgentDefinitionResolver;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
 import com.enterprise.testagent.domain.session.SessionRepository;
@@ -16,6 +17,7 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
@@ -56,6 +58,7 @@ public class OpencodeRuntimeApplicationService {
     private SessionApplicationService sessionApplicationService;
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
+    private ProtectedAgentDefinitionResolver protectedAgentDefinitionResolver;
     private final ThreadLocal<String> agentContext = new ThreadLocal<>();
     private final ThreadLocal<UserId> userContext = new ThreadLocal<>();
 
@@ -110,6 +113,12 @@ public class OpencodeRuntimeApplicationService {
     @Autowired(required = false)
     void configureSessionApplicationService(SessionApplicationService service) {
         this.sessionApplicationService = Objects.requireNonNull(service, "service must not be null");
+    }
+
+    /** Hub 只向本地工作区目录追加受保护选择句柄，正文仍留在服务器。 */
+    @Autowired(required = false)
+    void configureProtectedAgentDefinitionResolver(ProtectedAgentDefinitionResolver resolver) {
+        this.protectedAgentDefinitionResolver = Objects.requireNonNull(resolver, "resolver must not be null");
     }
 
     /**
@@ -225,7 +234,36 @@ public class OpencodeRuntimeApplicationService {
      * 列出当前 workspace 可用 agent。
      */
     public Object listAgents(String workspaceId, String traceId) {
-        return get(workspaceLocation(workspaceId, traceId), "/agent", Map.of(), traceId);
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = workspaceLocation(workspaceId, traceId);
+        Object nativeCatalog = get(location, "/agent", Map.of(), traceId);
+        UserId userId = userContext.get();
+        if (protectedAgentDefinitionResolver == null
+                || userId == null
+                || location.workspaceId() == null
+                || location.node().runtimeKind() != RuntimeKind.LOCAL_CLIENT) {
+            return nativeCatalog;
+        }
+        List<Object> merged = new java.util.ArrayList<>();
+        if (nativeCatalog instanceof List<?> nativeItems) {
+            merged.addAll(nativeItems);
+        }
+        protectedAgentDefinitionResolver.listCatalog(userId, location.workspaceId()).stream()
+                .map(item -> {
+                    Map<String, Object> projected = new LinkedHashMap<>();
+                    projected.put("id", item.selectionId());
+                    projected.put("agentId", item.selectionId());
+                    projected.put("name", item.displayName());
+                    projected.put("mode", "primary");
+                    projected.put("description", item.description() == null || item.description().isBlank()
+                            ? "平台受保护 Agent（服务器执行）"
+                            : item.description());
+                    projected.put("protected", true);
+                    projected.put("revisionId", item.revisionId());
+                    projected.put("contentSha256", item.contentSha256());
+                    return Map.copyOf(projected);
+                })
+                .forEach(merged::add);
+        return List.copyOf(merged);
     }
 
     /**

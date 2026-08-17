@@ -19,31 +19,27 @@ describe("resolveSessionShareEntry", () => {
       participants: []
     };
     const sharedApi = { getSessionShareAccess: vi.fn().mockResolvedValue(access) };
-    const ordinaryApi = { getSession: vi.fn() };
-
-    await expect(resolveSessionShareEntry("shr_1", sharedApi, ordinaryApi)).resolves.toEqual({
+    await expect(resolveSessionShareEntry("shr_1", sharedApi)).resolves.toEqual({
       kind: "shared",
       access
     });
-    expect(ordinaryApi.getSession).not.toHaveBeenCalled();
   });
 
-  it("redirects owners and supports legacy owner /s/{sessionId} links", async () => {
+  it("redirects owners and sends /s/{sessionId} links to the readonly transcript", async () => {
     const ownerAccess = {
       ownerAccess: true,
       sessionId: "ses_owner"
     };
     await expect(resolveSessionShareEntry(
       "shr_owner",
-      { getSessionShareAccess: vi.fn().mockResolvedValue(ownerAccess) },
-      { getSession: vi.fn() }
+      { getSessionShareAccess: vi.fn().mockResolvedValue(ownerAccess) }
     )).resolves.toEqual({ kind: "owner", sessionId: "ses_owner" });
 
-    const legacySession = { sessionId: "ses_legacy" };
+    const sharedApi = { getSessionShareAccess: vi.fn() };
     await expect(resolveSessionShareEntry(
       "ses_legacy",
-      { getSessionShareAccess: vi.fn().mockRejectedValue(new Error("not a share id")) },
-      { getSession: vi.fn().mockResolvedValue(legacySession) }
-    )).resolves.toEqual({ kind: "owner", sessionId: "ses_legacy" });
+      sharedApi
+    )).resolves.toEqual({ kind: "transcript", sessionId: "ses_legacy" });
+    expect(sharedApi.getSessionShareAccess).not.toHaveBeenCalled();
   });
 });

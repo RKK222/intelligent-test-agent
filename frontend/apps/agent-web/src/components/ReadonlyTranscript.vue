@@ -3,12 +3,13 @@ export type ReadonlyTranscriptProps = { sessionId: string };
 </script>
 
 <script setup lang="ts">
-import { ref, shallowRef, watch } from "vue";
+import { computed, ref, shallowRef, watch } from "vue";
 import { createBackendApiClient } from "@test-agent/backend-api";
+import { createOpencodeLikeState, OpencodeTimeline } from "@test-agent/agent-chat";
 import type { Session, SessionMessage } from "@test-agent/shared-types";
 import { type Feedback } from "@test-agent/ui-kit";
 import { notifyFeedback } from "./notify";
-import { dedupeSessionMessages } from "./workbench-utils";
+import { dedupeSessionMessages, messagesFromSessionMessages } from "./workbench-utils";
 
 const props = defineProps<ReadonlyTranscriptProps>();
 
@@ -21,6 +22,10 @@ const api = createBackendApiClient({
 const session = shallowRef<Session | null>(null);
 const messages = ref<SessionMessage[]>([]);
 const feedback = ref<Feedback | null>(null);
+const transcriptState = computed(() => createOpencodeLikeState({
+  // 历史 assistant 正文通常保存在结构化 parts 中，复用工作台投影与时间线避免只显示 content 摘要。
+  messages: messagesFromSessionMessages(messages.value)
+}));
 
 async function load() {
   try {
@@ -54,7 +59,7 @@ watch(feedback, (current) => {
 </script>
 
 <template>
-  <main class="min-h-screen bg-[var(--ta-bg)] text-slate-100">
+  <main class="min-h-screen bg-[var(--ta-bg)] text-slate-100" data-testid="readonly-transcript">
     <section class="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 py-6">
       <header class="border-b border-slate-800 pb-4">
         <div class="text-[12px] uppercase tracking-wide text-slate-500">Readonly transcript</div>
@@ -64,15 +69,12 @@ watch(feedback, (current) => {
           <span>{{ session?.updatedAt ? new Date(session.updatedAt).toLocaleString("zh-CN", { hour12: false }) : "" }}</span>
         </div>
       </header>
-      <div class="min-h-0 flex-1 space-y-3 py-4">
-        <article v-for="message in messages" :key="message.messageId" class="rounded-[10px] border border-[var(--ta-border)] bg-[#f4f5f7] p-3">
-          <div class="mb-2 flex items-center justify-between gap-2 text-[11px] text-slate-500">
-            <span>{{ message.role }}</span>
-            <span>{{ new Date(message.createdAt).toLocaleString("zh-CN", { hour12: false }) }}</span>
-          </div>
-          <div class="whitespace-pre-wrap text-[13px] leading-6 text-slate-100">{{ message.content }}</div>
-        </article>
-        <div v-if="!messages.length && !feedback" class="py-12 text-center text-[12px] text-slate-500">暂无消息</div>
+      <div class="min-h-0 flex-1 overflow-auto py-4">
+        <OpencodeTimeline
+          :state="transcriptState"
+          empty-title="暂无消息"
+          empty-subtitle="当前会话没有可展示的原始对话"
+        />
       </div>
     </section>
   </main>

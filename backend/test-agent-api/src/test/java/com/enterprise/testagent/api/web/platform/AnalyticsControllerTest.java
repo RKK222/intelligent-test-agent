@@ -2,7 +2,11 @@ package com.enterprise.testagent.api.web.platform;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
@@ -15,6 +19,7 @@ import com.enterprise.testagent.opencode.runtime.analytics.AnalyticsQueryService
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 class AnalyticsControllerTest {
@@ -81,6 +86,44 @@ class AnalyticsControllerTest {
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("VALIDATION_ERROR")
                 .jsonPath("$.details.value").isEqualTo("not-a-time");
+    }
+
+    @Test
+    void superAdminCanQueryFunnelWithFuzzyUserParameter() {
+        AnalyticsQueryService service = org.mockito.Mockito.mock(AnalyticsQueryService.class);
+        AnalyticsModels.Filter filter = filter();
+        when(service.filter(
+                nullable(Instant.class), nullable(Instant.class), nullable(String.class),
+                nullable(String.class), nullable(String.class), nullable(String.class), nullable(String.class),
+                nullable(String.class), nullable(String.class), nullable(String.class),
+                nullable(Integer.class), nullable(Integer.class), nullable(Integer.class), nullable(String.class)))
+                .thenReturn(filter);
+        when(service.funnel(filter)).thenReturn(new AnalyticsModels.Funnel(
+                10, 6, 2, 0.6, 2.0 / 6.0,
+                "活跃用户：所选时间内至少发送 1 条用户消息",
+                "深度用户：活跃用户中，至少 2 个自然日有使用且累计至少 5 条用户消息",
+                new AnalyticsModels.Freshness(NOW, AnalyticsModels.FreshnessStatus.FRESH, null)));
+
+        client(service, List.of(Dictionary.ROLE_SUPER_ADMIN))
+                .get()
+                .uri(builder -> builder.path("/api/internal/platform/analytics/funnel")
+                        .queryParam("user", "张")
+                        .build())
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.totalUsers").isEqualTo(10)
+                .jsonPath("$.data.deepUsers").isEqualTo(2)
+                .jsonPath("$.data.activeDefinition").isNotEmpty();
+
+        ArgumentCaptor<String> userKeyword = ArgumentCaptor.forClass(String.class);
+        verify(service).filter(
+                nullable(Instant.class), nullable(Instant.class), nullable(String.class),
+                nullable(String.class), nullable(String.class), nullable(String.class), userKeyword.capture(),
+                nullable(String.class), nullable(String.class), nullable(String.class),
+                nullable(Integer.class), nullable(Integer.class), nullable(Integer.class), nullable(String.class));
+        assertThat(userKeyword.getValue()).isEqualTo("张");
     }
 
     private static WebTestClient client(AnalyticsQueryService service, List<String> roles) {

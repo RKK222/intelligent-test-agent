@@ -17,12 +17,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.stereotype.Repository;
 
 /**
- * 运营分析 MyBatis 仓储实现。看板查询只读 rollup 表，原始事实扫描仅供后台汇总任务调用。
+ * 旧 PostgreSQL 运营仓储，仅保留用于迁移追溯和既有单元测试，不再注册到运行时查询链路。
  */
-@Repository
 public class MyBatisAnalyticsRepository implements AnalyticsRepository {
 
     private final AnalyticsMapper mapper;
@@ -106,7 +104,9 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                     if (row.generatedAt() == null || row.generatedAt().isBefore(staleThreshold)) {
                         status = AnalyticsModels.FreshnessStatus.STALE;
                     }
-                    return new AnalyticsModels.Freshness(row.generatedAt(), status, row.message());
+                    return new AnalyticsModels.Freshness(
+                            row.generatedAt(), status, row.message(),
+                            row.coverageStart(), row.coverageEnd(), row.attributionMode());
                 });
     }
 
@@ -157,12 +157,12 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
 
     @Override
     public long countRegisteredUsers(AnalyticsModels.Filter filter) {
-        return mapper.countRegisteredUsers(filter.organization(), filter.rdDepartment(), filter.department(), filter.userId());
+        return mapper.countRegisteredUsers(filter.organization(), filter.rdDepartment(), filter.department(), filter.userKeyword());
     }
 
     @Override
     public long countEnabledUsers(AnalyticsModels.Filter filter) {
-        return mapper.countEnabledUsers(filter.organization(), filter.rdDepartment(), filter.department(), filter.userId());
+        return mapper.countEnabledUsers(filter.organization(), filter.rdDepartment(), filter.department(), filter.userKeyword());
     }
 
     @Override
@@ -174,7 +174,7 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                             filter.organization(),
                             filter.rdDepartment(),
                             filter.department(),
-                            filter.userId(),
+                            filter.userKeyword(),
                             filter.agentId(),
                             filter.model(),
                             filter.workspaceId())
@@ -190,7 +190,7 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                         filter.organization(),
                         filter.rdDepartment(),
                         filter.department(),
-                        filter.userId(),
+                        filter.userKeyword(),
                         filter.agentId(),
                         filter.model(),
                         filter.workspaceId())
@@ -241,7 +241,7 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                         filter.organization(),
                         filter.rdDepartment(),
                         filter.department(),
-                        filter.userId(),
+                        filter.userKeyword(),
                         filter.agentId(),
                         filter.model(),
                         filter.workspaceId(),
@@ -256,7 +256,7 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                 filter.organization(),
                 filter.rdDepartment(),
                 filter.department(),
-                filter.userId(),
+                filter.userKeyword(),
                 filter.agentId(),
                 filter.model(),
                 filter.workspaceId());
@@ -272,7 +272,7 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                 filter.organization(),
                 filter.rdDepartment(),
                 filter.department(),
-                filter.userId(),
+                filter.userKeyword(),
                 filter.agentId(),
                 filter.model(),
                 filter.workspaceId(),
@@ -302,7 +302,7 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                         filter.organization(),
                         filter.rdDepartment(),
                         filter.department(),
-                        filter.userId(),
+                        filter.userKeyword(),
                         filter.agentId(),
                         filter.model(),
                         filter.workspaceId(),
@@ -317,7 +317,7 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                 filter.organization(),
                 filter.rdDepartment(),
                 filter.department(),
-                filter.userId(),
+                filter.userKeyword(),
                 filter.agentId(),
                 filter.model(),
                 filter.workspaceId());
@@ -333,7 +333,7 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                 filter.organization(),
                 filter.rdDepartment(),
                 filter.department(),
-                filter.userId())) {
+                filter.userKeyword())) {
             userCounts.put(row.name(), row);
         }
         for (AnalyticsModels.ActivityRollupRow row : queryRollups(filter)) {
@@ -384,6 +384,8 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                 row.tokensInput(),
                 row.tokensOutput(),
                 row.tokensReasoning(),
+                row.tokensCacheRead(),
+                row.tokensCacheWrite(),
                 row.durationTotalMs());
     }
 
@@ -420,6 +422,8 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                 row.tokensInput(),
                 row.tokensOutput(),
                 row.tokensReasoning(),
+                row.tokensCacheRead(),
+                row.tokensCacheWrite(),
                 row.tokensTotal(),
                 row.durationTotalMs(),
                 row.durationRunCount(),
@@ -460,6 +464,8 @@ public class MyBatisAnalyticsRepository implements AnalyticsRepository {
                 row.tokensInput(),
                 row.tokensOutput(),
                 row.tokensReasoning(),
+                row.tokensCacheRead(),
+                row.tokensCacheWrite(),
                 row.tokensTotal(),
                 row.durationTotalMs(),
                 row.durationRunCount(),

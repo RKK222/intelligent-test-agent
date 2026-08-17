@@ -94,9 +94,10 @@ class AnalyticsQueryServiceTest {
         assertThat(service.timeseries(threeDayFilter))
                 .extracting(AnalyticsModels.TimeSeriesPoint::bucketStart, AnalyticsModels.TimeSeriesPoint::runCount)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple(START, 2L),
-                        org.assertj.core.groups.Tuple.tuple(START.plus(1, ChronoUnit.DAYS), 0L),
-                        org.assertj.core.groups.Tuple.tuple(START.plus(2, ChronoUnit.DAYS), 0L));
+                        org.assertj.core.groups.Tuple.tuple(Instant.parse("2026-06-27T16:00:00Z"), 2L),
+                        org.assertj.core.groups.Tuple.tuple(Instant.parse("2026-06-28T16:00:00Z"), 0L),
+                        org.assertj.core.groups.Tuple.tuple(Instant.parse("2026-06-29T16:00:00Z"), 0L),
+                        org.assertj.core.groups.Tuple.tuple(Instant.parse("2026-06-30T16:00:00Z"), 0L));
     }
 
     @Test
@@ -158,6 +159,8 @@ class AnalyticsQueryServiceTest {
                 10,
                 8,
                 3,
+                0,
+                0,
                 21,
                 60_000,
                 2,

@@ -20,6 +20,7 @@ import com.enterprise.testagent.workspace.FileSearchResultResponse;
 import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceViewLocator;
 import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalClientWorkspaceFileGateway;
 import com.enterprise.testagent.workspace.RequirementImportApplicationService;
 import com.enterprise.testagent.system.supportaccess.SupportAccessAuthorization;
 import java.net.URI;
@@ -67,6 +68,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private final ObjectMapper objectMapper;
     private final Set<String> allowedOrigins;
     private final boolean allowAnyOrigin;
+    private LocalClientWorkspaceFileGateway localClientFileGateway;
     private RequirementImportApplicationService requirementImportService;
 
     /** 需求导入为可选 setter 注入，保持既有 handler 单元测试构造器兼容。 */
@@ -174,14 +176,17 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         WorkspaceFileSocketTicket activeTicket = ticket;
         // 请求本身由 concatMap 串行执行；连接取消可能从另一线程触发清理，因此会话表仍使用并发容器。
         Map<String, ActiveUpload> activeUploads = new ConcurrentHashMap<>();
+        Set<String> activeLocalUploads = ConcurrentHashMap.newKeySet();
         Mono<Void> inbound = session.receive()
                 .map(WebSocketMessage::getPayloadAsText)
-                .concatMap(payload -> Mono.fromCallable(() -> handleMessage(activeTicket, payload, traceId, activeUploads))
+                .concatMap(payload -> Mono.fromCallable(() -> handleMessage(
+                                activeTicket, payload, traceId, activeUploads, activeLocalUploads))
                         .subscribeOn(Schedulers.boundedElastic())
                         .doOnNext(outbound::tryEmitNext)
                         .then())
                 .doFinally(ignored -> {
                     abortUploads(activeUploads);
+                    scheduleAbortLocalUploads(activeTicket, activeLocalUploads, traceId);
                     outbound.tryEmitComplete();
                 })
                 .then();
@@ -209,11 +214,15 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                                     null, errorCode, "分享文件授权已失效", traceId, Map.of()));
                             outbound.tryEmitComplete();
                             abortUploads(activeUploads);
+                            scheduleAbortLocalUploads(activeTicket, activeLocalUploads, traceId);
                             return session.close();
                         })
                 : Mono.never();
         return Mono.firstWithSignal(Mono.when(inbound, sender), authorization)
-                .doFinally(ignored -> abortUploads(activeUploads));
+                .doFinally(ignored -> {
+                    abortUploads(activeUploads);
+                    scheduleAbortLocalUploads(activeTicket, activeLocalUploads, traceId);
+                });
     }
 
     /**
@@ -235,7 +244,8 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             WorkspaceFileSocketTicket ticket,
             String payload,
             String traceId,
-            Map<String, ActiveUpload> activeUploads) {
+            Map<String, ActiveUpload> activeUploads,
+            Set<String> activeLocalUploads) {
         String id = null;
         String op = null;
         WorkspaceId auditedWorkspaceId = null;
@@ -260,6 +270,11 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 if (experienceWorkspaceRpc) {
                     requireExperienceWorkspaceOperation(op, params);
                 }
+            }
+            if (ticket.localClient()) {
+                Object data = handleLocalClientMessage(
+                        ticket, op, params, traceId, activeLocalUploads);
+                return success(id, data, traceId);
             }
             Object data = switch (op) {
                 case "workspace.list" -> workspaceService.listFiles(workspaceId(ticket, params), text(params, "path"));
@@ -495,6 +510,177 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         return requestedWorkspaceId != null
                 ? requestedWorkspaceId
                 : new WorkspaceId(ticket.workspaceId());
+    }
+
+    /** 本地 ticket 只开放目录选择和完整基础文件能力，不开放 Git、Agent 配置、附件或组合视图。 */
+    private Object handleLocalClientMessage(
+            WorkspaceFileSocketTicket ticket,
+            String op,
+            JsonNode params,
+            String traceId,
+            Set<String> activeLocalUploads) {
+        if (localClientFileGateway == null) {
+            throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "本地文件隧道未装配");
+        }
+        if (MODE_DIRECTORY_PICKER.equals(ticket.mode())) {
+            if (!"directory.list".equals(op)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "本地目录选择 ticket 不允许该操作");
+            }
+            return localClientFileGateway.invoke(
+                    ticket.localClientInstanceId(),
+                    ticket.connectionGeneration(),
+                    null,
+                    null,
+                    op,
+                    params,
+                    traceId);
+        }
+        if (!MODE_WORKSPACE.equals(ticket.mode()) || !LOCAL_WORKSPACE_OPERATIONS.contains(op)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "本地工作区首版不允许该文件操作",
+                    Map.of("op", op));
+        }
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        requireLocalWorkspaceWriteIfNeeded(ticket, workspaceId, op, params);
+        String uploadId = localUploadId(op, params);
+        if ("workspace.upload.begin".equals(op)) {
+            requireLocalUploadCapacity(activeLocalUploads);
+        } else if (uploadId != null && !activeLocalUploads.contains(uploadId)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "上传会话不存在或不属于当前文件连接");
+        }
+        if ("workspace.upload.complete".equals(op) || "workspace.upload.abort".equals(op)) {
+            activeLocalUploads.remove(uploadId);
+        }
+        try {
+            JsonNode result = localClientFileGateway.invoke(
+                    ticket.localClientInstanceId(),
+                    ticket.connectionGeneration(),
+                    workspaceId.value(),
+                    ticket.rootDigest(),
+                    op,
+                    params,
+                    traceId);
+            if ("workspace.upload.begin".equals(op)) {
+                String registeredUploadId = result == null ? null : text(result, "uploadId");
+                if (registeredUploadId == null || registeredUploadId.isBlank()) {
+                    throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "本地上传会话响应无效");
+                }
+                activeLocalUploads.add(registeredUploadId);
+            }
+            return result;
+        } catch (RuntimeException exception) {
+            if (uploadId != null) {
+                activeLocalUploads.remove(uploadId);
+                abortLocalUpload(ticket, workspaceId.value(), uploadId, traceId);
+            }
+            throw exception;
+        }
+    }
+
+    private String localUploadId(String operation, JsonNode params) {
+        return switch (operation) {
+            case "workspace.upload.chunk", "workspace.upload.complete", "workspace.upload.abort" ->
+                    requiredText(params, "uploadId");
+            default -> null;
+        };
+    }
+
+    private static void requireLocalUploadCapacity(Set<String> activeLocalUploads) {
+        if (activeLocalUploads.size() >= MAX_ACTIVE_UPLOADS) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "同一文件连接的并发上传过多",
+                    Map.of("maxActiveUploads", MAX_ACTIVE_UPLOADS));
+        }
+    }
+
+    private void abortLocalUpload(
+            WorkspaceFileSocketTicket ticket,
+            String workspaceId,
+            String uploadId,
+            String traceId) {
+        try {
+            localClientFileGateway.abortUpload(
+                    ticket.localClientInstanceId(),
+                    ticket.connectionGeneration(),
+                    workspaceId,
+                    ticket.rootDigest(),
+                    uploadId,
+                    traceId);
+        } catch (RuntimeException ignored) {
+            // 连接已经断开时客户端会在 WebSocket cleanup 中统一 abortAll；这里保持清理幂等。
+        }
+    }
+
+    private void scheduleAbortLocalUploads(
+            WorkspaceFileSocketTicket ticket,
+            Set<String> activeLocalUploads,
+            String traceId) {
+        if (!ticket.localClient()) {
+            return;
+        }
+        String uploadId;
+        while ((uploadId = activeLocalUploads.stream().findFirst().orElse(null)) != null) {
+            if (!activeLocalUploads.remove(uploadId)) {
+                continue;
+            }
+            String currentUploadId = uploadId;
+            Mono.fromRunnable(() -> abortLocalUpload(
+                            ticket, ticket.workspaceId(), currentUploadId, traceId))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .subscribe();
+        }
+    }
+
+    private static final Set<String> LOCAL_WORKSPACE_OPERATIONS = Set.of(
+            "workspace.list",
+            "workspace.search",
+            "workspace.read",
+            "workspace.read.chunk",
+            "workspace.read.binary.chunk",
+            "workspace.write",
+            "workspace.upload",
+            "workspace.upload.begin",
+            "workspace.upload.chunk",
+            "workspace.upload.complete",
+            "workspace.upload.abort",
+            "workspace.copy",
+            "workspace.move",
+            "workspace.rename",
+            "workspace.status",
+            "workspace.delete",
+            "workspace.mkdir");
+
+    private void requireLocalWorkspaceWriteIfNeeded(
+            WorkspaceFileSocketTicket ticket,
+            WorkspaceId workspaceId,
+            String op,
+            JsonNode params) {
+        switch (op) {
+            case "workspace.write", "workspace.upload", "workspace.upload.begin",
+                    "workspace.rename", "workspace.delete", "workspace.mkdir" ->
+                    requireWorkspaceWrite(ticket, workspaceId, requiredText(params, "path"));
+            case "workspace.copy", "workspace.move" -> {
+                requireWorkspaceWrite(ticket, workspaceId, requiredText(params, "sourcePath"));
+                requireWorkspaceWrite(ticket, workspaceId, requiredText(params, "targetPath"));
+            }
+            case "workspace.upload.chunk", "workspace.upload.complete", "workspace.upload.abort" ->
+                    workspaceService.requireWorkspaceWriteAccess(
+                            workspaceId,
+                            new com.enterprise.testagent.domain.user.UserId(ticket.userId()),
+                            ticket.appAdmin());
+            default -> {
+                // 只读操作已由 ticketService.authorizeWorkspaceRpc 完成逐条 generation 与归属校验。
+            }
+        }
+    }
+
+    /** 可选 setter 保持既有 handler 单元测试构造器稳定。 */
+    @Autowired(required = false)
+    void configureLocalClientFileGateway(LocalClientWorkspaceFileGateway localClientFileGateway) {
+        this.localClientFileGateway = Objects.requireNonNull(
+                localClientFileGateway, "localClientFileGateway must not be null");
     }
 
     /** 排查 ticket 只开放有限文件读取白名单，所有写入、Git、配置和组合视图操作均拒绝。 */

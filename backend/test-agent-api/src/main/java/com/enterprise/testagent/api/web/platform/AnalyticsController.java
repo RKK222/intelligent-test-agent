@@ -40,6 +40,43 @@ public class AnalyticsController {
         return ApiResponse.ok(service.overview(filter(params)), RuntimeApiSupport.traceId(exchange));
     }
 
+    @GetMapping("/filter-options")
+    public ApiResponse<AnalyticsModels.FilterOptions> filterOptions(QueryParams params, ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ApiResponse.ok(service.filterOptions(filter(params)), RuntimeApiSupport.traceId(exchange));
+    }
+
+    @GetMapping("/funnel")
+    public ApiResponse<AnalyticsModels.Funnel> funnel(QueryParams params, ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ApiResponse.ok(service.funnel(filter(params)), RuntimeApiSupport.traceId(exchange));
+    }
+
+    @GetMapping("/hourly-heatmap")
+    public ApiResponse<AnalyticsModels.HourlyHeatmap> hourlyHeatmap(
+            QueryParams params,
+            @RequestParam(required = false, defaultValue = "USER_MESSAGES") String metric,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ApiResponse.ok(
+                service.hourlyHeatmap(filter(params), heatmapMetric(metric)),
+                RuntimeApiSupport.traceId(exchange));
+    }
+
+    @GetMapping("/token-operations")
+    public ApiResponse<AnalyticsModels.TokenOperations> tokenOperations(
+            QueryParams params,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ApiResponse.ok(service.tokenOperations(filter(params)), RuntimeApiSupport.traceId(exchange));
+    }
+
+    @GetMapping("/capabilities")
+    public ApiResponse<AnalyticsModels.Capabilities> capabilities(QueryParams params, ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ApiResponse.ok(service.capabilities(filter(params)), RuntimeApiSupport.traceId(exchange));
+    }
+
     @GetMapping("/timeseries")
     public ApiResponse<Object> timeseries(QueryParams params, ServerWebExchange exchange) {
         requireSuperAdmin(exchange);
@@ -107,7 +144,7 @@ public class AnalyticsController {
                 params.organization(),
                 params.rdDepartment(),
                 params.department(),
-                params.userId(),
+                firstNonBlank(params.user(), params.userId()),
                 params.agentId(),
                 params.model(),
                 params.workspaceId(),
@@ -115,6 +152,20 @@ public class AnalyticsController {
                 params.page(),
                 params.pageSize(),
                 params.sort());
+    }
+
+    private AnalyticsModels.HeatmapMetric heatmapMetric(String value) {
+        try {
+            return AnalyticsModels.HeatmapMetric.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "metric 必须是 USER_MESSAGES、PRIMARY_TOKENS 或 CACHE_TOKENS");
+        }
+    }
+
+    private String firstNonBlank(String preferred, String legacy) {
+        return preferred != null && !preferred.isBlank() ? preferred : legacy;
     }
 
     private Instant parseInstant(String value) {
@@ -142,6 +193,7 @@ public class AnalyticsController {
             String organization,
             String rdDepartment,
             String department,
+            String user,
             String userId,
             String agentId,
             String model,

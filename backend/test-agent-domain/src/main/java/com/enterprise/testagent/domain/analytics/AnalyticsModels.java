@@ -27,6 +27,12 @@ public final class AnalyticsModels {
         FAILED
     }
 
+    public enum HeatmapMetric {
+        USER_MESSAGES,
+        PRIMARY_TOKENS,
+        CACHE_TOKENS
+    }
+
     public record Filter(
             Instant startTime,
             Instant endTime,
@@ -34,7 +40,7 @@ public final class AnalyticsModels {
             String organization,
             String rdDepartment,
             String department,
-            String userId,
+            String userKeyword,
             String agentId,
             String model,
             String workspaceId,
@@ -47,7 +53,111 @@ public final class AnalyticsModels {
     public record Freshness(
             Instant generatedAt,
             FreshnessStatus status,
-            String message) {
+            String message,
+            Instant coverageStart,
+            Instant coverageEnd,
+            String attributionMode) {
+
+        public Freshness(Instant generatedAt, FreshnessStatus status, String message) {
+            this(generatedAt, status, message, null, null, "EVENT_SNAPSHOT");
+        }
+    }
+
+    public record FilterOption(String value, String label) {
+    }
+
+    public record FilterOptions(
+            List<FilterOption> organizations,
+            List<FilterOption> rdDepartments,
+            List<FilterOption> departments,
+            Freshness freshness) {
+    }
+
+    public record Funnel(
+            long totalUsers,
+            long activeUsers,
+            long deepUsers,
+            Double activeRate,
+            Double deepRate,
+            String activeDefinition,
+            String deepDefinition,
+            Freshness freshness) {
+    }
+
+    public record HourlyHeatmapPoint(LocalDate date, int hourOfDay, long value) {
+    }
+
+    public record HourlyHeatmap(
+            HeatmapMetric metric,
+            List<LocalDate> dates,
+            List<HourlyHeatmapPoint> points,
+            Freshness freshness) {
+    }
+
+    public record TokenDailyPoint(
+            LocalDate date,
+            long totalTokens,
+            long primaryTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            long tokenUsers,
+            Double tokensPerUser) {
+    }
+
+    public record TokenUserRow(
+            String userId,
+            String username,
+            String organization,
+            String rdDepartment,
+            String department,
+            long totalTokens,
+            long primaryTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            long tokenDays,
+            Double tokensPerTokenDay,
+            String intensityBand) {
+    }
+
+    public record TokenOperations(
+            long totalTokens,
+            long primaryTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            long tokenUsers,
+            long activeUsers,
+            Double tokenUserRate,
+            long tokenActivePersonDays,
+            Double dailyTokensPerUser,
+            long repeatTokenUsers,
+            Double repeatTokenUserRate,
+            List<TokenDailyPoint> daily,
+            List<TokenUserRow> users,
+            Freshness freshness) {
+    }
+
+    public record CapabilityUsageRow(
+            String type,
+            String name,
+            long invocationCount,
+            long userCount,
+            long succeededCount,
+            long failedCount,
+            long incompleteCount) {
+    }
+
+    public record CapabilityUsage(
+            String type,
+            String name,
+            long invocationCount,
+            long userCount,
+            Double usageRate,
+            long succeededCount,
+            long failedCount,
+            long incompleteCount) {
+    }
+
+    public record Capabilities(long activeUsers, List<CapabilityUsage> rows, Freshness freshness) {
     }
 
     public record Overview(
@@ -261,6 +371,8 @@ public final class AnalyticsModels {
             long tokensInput,
             long tokensOutput,
             long tokensReasoning,
+            long tokensCacheRead,
+            long tokensCacheWrite,
             long durationMs) {
     }
 
@@ -296,6 +408,8 @@ public final class AnalyticsModels {
             long tokensInput,
             long tokensOutput,
             long tokensReasoning,
+            long tokensCacheRead,
+            long tokensCacheWrite,
             long tokensTotal,
             long durationTotalMs,
             long durationRunCount,

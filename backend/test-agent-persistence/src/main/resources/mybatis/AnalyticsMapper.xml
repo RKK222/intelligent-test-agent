@@ -36,6 +36,8 @@
             <arg column="tokens_input" javaType="_long"/>
             <arg column="tokens_output" javaType="_long"/>
             <arg column="tokens_reasoning" javaType="_long"/>
+            <arg column="tokens_cache_read" javaType="_long"/>
+            <arg column="tokens_cache_write" javaType="_long"/>
             <arg column="tokens_total" javaType="_long"/>
             <arg column="duration_total_ms" javaType="_long"/>
             <arg column="duration_run_count" javaType="_long"/>
@@ -81,6 +83,9 @@
             <arg column="generated_at" javaType="java.time.Instant"/>
             <arg column="status" javaType="java.lang.String"/>
             <arg column="message" javaType="java.lang.String"/>
+            <arg column="coverage_start" javaType="java.time.Instant"/>
+            <arg column="coverage_end" javaType="java.time.Instant"/>
+            <arg column="attribution_mode" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
 
@@ -150,6 +155,8 @@
         0 as tokens_input,
         0 as tokens_output,
         0 as tokens_reasoning,
+        0 as tokens_cache_read,
+        0 as tokens_cache_write,
         0 as tokens_total,
         0 as duration_total_ms,
         0 as duration_run_count
@@ -188,6 +195,8 @@
             tokens_input,
             tokens_output,
             tokens_reasoning,
+            tokens_cache_read,
+            tokens_cache_write,
             tokens_total,
             duration_total_ms,
             duration_run_count,
@@ -225,6 +234,8 @@
                 0 as tokens_input,
                 0 as tokens_output,
                 0 as tokens_reasoning,
+                0 as tokens_cache_read,
+                0 as tokens_cache_write,
                 0 as tokens_total,
                 0 as duration_total_ms,
                 0 as duration_run_count
@@ -269,6 +280,8 @@
                 0 as tokens_input,
                 0 as tokens_output,
                 0 as tokens_reasoning,
+                0 as tokens_cache_read,
+                0 as tokens_cache_write,
                 0 as tokens_total,
                 0 as duration_total_ms,
                 0 as duration_run_count
@@ -310,6 +323,8 @@
                 0 as tokens_input,
                 0 as tokens_output,
                 0 as tokens_reasoning,
+                0 as tokens_cache_read,
+                0 as tokens_cache_write,
                 0 as tokens_total,
                 0 as duration_total_ms,
                 0 as duration_run_count
@@ -378,6 +393,8 @@
                 0 as tokens_input,
                 0 as tokens_output,
                 0 as tokens_reasoning,
+                0 as tokens_cache_read,
+                0 as tokens_cache_write,
                 0 as tokens_total,
                 0 as duration_total_ms,
                 0 as duration_run_count
@@ -426,6 +443,8 @@
                 coalesce(r.tokens_input, 0) as tokens_input,
                 coalesce(r.tokens_output, 0) as tokens_output,
                 coalesce(r.tokens_reasoning, 0) as tokens_reasoning,
+                coalesce(r.tokens_cache_read, 0) as tokens_cache_read,
+                coalesce(r.tokens_cache_write, 0) as tokens_cache_write,
                 coalesce(r.tokens_input, 0) + coalesce(r.tokens_output, 0) + coalesce(r.tokens_reasoning, 0) as tokens_total,
                 0 as duration_total_ms,
                 0 as duration_run_count
@@ -468,6 +487,8 @@
                 0 as tokens_input,
                 0 as tokens_output,
                 0 as tokens_reasoning,
+                0 as tokens_cache_read,
+                0 as tokens_cache_write,
                 0 as tokens_total,
                 0 as duration_total_ms,
                 0 as duration_run_count
@@ -513,6 +534,8 @@
                 0 as tokens_input,
                 0 as tokens_output,
                 0 as tokens_reasoning,
+                0 as tokens_cache_read,
+                0 as tokens_cache_write,
                 0 as tokens_total,
                 0 as duration_total_ms,
                 0 as duration_run_count
@@ -560,6 +583,8 @@
                 0 as tokens_input,
                 0 as tokens_output,
                 0 as tokens_reasoning,
+                0 as tokens_cache_read,
+                0 as tokens_cache_write,
                 0 as tokens_total,
                 0 as duration_total_ms,
                 0 as duration_run_count
@@ -609,7 +634,7 @@
             run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
             positive_feedback_count, negative_feedback_count,
             diff_proposed_count, diff_accepted_count, diff_rejected_count,
-            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, tokens_total,
             duration_total_ms, duration_run_count, first_activity_at, last_activity_at, updated_at
         )
         values
@@ -622,7 +647,7 @@
                 #{row.runCount}, #{row.succeededRunCount}, #{row.failedRunCount}, #{row.cancelledRunCount}, #{row.activeTerminationCount}, #{row.validInteractionCount},
                 #{row.positiveFeedbackCount}, #{row.negativeFeedbackCount},
                 #{row.diffProposedCount}, #{row.diffAcceptedCount}, #{row.diffRejectedCount},
-                #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning}, #{row.tokensTotal},
+                #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning}, #{row.tokensCacheRead}, #{row.tokensCacheWrite}, #{row.tokensTotal},
                 #{row.durationTotalMs}, #{row.durationRunCount}, #{row.firstActivityAt}, #{row.lastActivityAt}, #{updatedAt}
             )
         </foreach>
@@ -637,7 +662,7 @@
             run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
             positive_feedback_count, negative_feedback_count,
             diff_proposed_count, diff_accepted_count, diff_rejected_count,
-            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, tokens_total,
             duration_total_ms, duration_run_count, first_activity_at, last_activity_at
         from analytics_user_activity_hourly
         where bucket_start &gt;= #{startInclusive}
@@ -659,7 +684,7 @@
             run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
             positive_feedback_count, negative_feedback_count,
             diff_proposed_count, diff_accepted_count, diff_rejected_count,
-            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, tokens_total,
             duration_total_ms, duration_run_count, first_activity_at, last_activity_at, updated_at
         )
         values
@@ -672,7 +697,7 @@
                 #{row.runCount}, #{row.succeededRunCount}, #{row.failedRunCount}, #{row.cancelledRunCount}, #{row.activeTerminationCount}, #{row.validInteractionCount},
                 #{row.positiveFeedbackCount}, #{row.negativeFeedbackCount},
                 #{row.diffProposedCount}, #{row.diffAcceptedCount}, #{row.diffRejectedCount},
-                #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning}, #{row.tokensTotal},
+                #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning}, #{row.tokensCacheRead}, #{row.tokensCacheWrite}, #{row.tokensTotal},
                 #{row.durationTotalMs}, #{row.durationRunCount}, #{row.firstActivityAt}, #{row.lastActivityAt}, #{updatedAt}
             )
         </foreach>
@@ -699,7 +724,10 @@
     </insert>
 
     <select id="freshness" resultMap="FreshnessRowMap">
-        select job_name, watermark_at, generated_at, status, message
+        select job_name, watermark_at, generated_at, status, message,
+               cast(null as timestamp) as coverage_start,
+               cast(null as timestamp) as coverage_end,
+               'LEGACY_POSTGRES' as attribution_mode
         from analytics_rollup_watermarks
         where job_name = #{jobName}
     </select>
@@ -802,7 +830,8 @@
             and department = #{department}
         </if>
         <if test="userId != null and userId != ''">
-            and user_id = #{userId}
+            and (lower(user_id) like concat('%', lower(#{userId}), '%')
+                 or lower(username) like concat('%', lower(#{userId}), '%'))
         </if>
     </sql>
 
@@ -817,7 +846,8 @@
             and department = #{department}
         </if>
         <if test="userId != null and userId != ''">
-            and user_id = #{userId}
+            and (lower(user_id) like concat('%', lower(#{userId}), '%')
+                 or lower(username) like concat('%', lower(#{userId}), '%'))
         </if>
         <if test="agentId != null and agentId != ''">
             and agent_id = #{agentId}
@@ -839,7 +869,7 @@
             run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
             positive_feedback_count, negative_feedback_count,
             diff_proposed_count, diff_accepted_count, diff_rejected_count,
-            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, tokens_total,
             duration_total_ms, duration_run_count, first_activity_at, last_activity_at
         from analytics_user_activity_hourly
         where bucket_start &gt;= #{startInclusive}
@@ -856,7 +886,7 @@
             run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
             positive_feedback_count, negative_feedback_count,
             diff_proposed_count, diff_accepted_count, diff_rejected_count,
-            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, tokens_total,
             duration_total_ms, duration_run_count, first_activity_at, last_activity_at
         from analytics_user_activity_daily
         where activity_date &gt;= #{startDate}

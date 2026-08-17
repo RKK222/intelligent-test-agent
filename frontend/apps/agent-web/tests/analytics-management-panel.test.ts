@@ -3,11 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
+  AnalyticsCapabilities,
   AnalyticsExceptionDetail,
+  AnalyticsFilterOptions,
+  AnalyticsFunnel,
+  AnalyticsHourlyHeatmap,
   AnalyticsOverview,
   AnalyticsPeaks,
   AnalyticsSatisfaction,
   AnalyticsTimeSeriesPoint,
+  AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
   PageResponse
 } from "@test-agent/shared-types";
@@ -108,12 +113,78 @@ const peaks: AnalyticsPeaks = {
   freshness: overview.freshness
 };
 
+const filterOptions: AnalyticsFilterOptions = {
+  organizations: [{ value: "总行", label: "总行" }],
+  rdDepartments: [{ value: "研发一部", label: "研发一部" }],
+  departments: [{ value: "平台处", label: "平台处" }],
+  freshness: overview.freshness
+};
+
+const funnel: AnalyticsFunnel = {
+  totalUsers: 10,
+  activeUsers: 6,
+  deepUsers: 2,
+  activeRate: 0.6,
+  deepRate: 1 / 3,
+  activeDefinition: "活跃用户：所选时间内至少发送 1 条用户消息",
+  deepDefinition: "深度用户：活跃用户中，至少 2 个自然日有使用且累计至少 5 条用户消息",
+  freshness: overview.freshness
+};
+
+const hourlyHeatmap: AnalyticsHourlyHeatmap = {
+  metric: "USER_MESSAGES",
+  dates: ["2026-06-28", "2026-06-29"],
+  points: Array.from({ length: 48 }, (_, index) => ({
+    date: index < 24 ? "2026-06-28" : "2026-06-29",
+    hourOfDay: index % 24,
+    value: index === 8 ? 12 : 0
+  })),
+  freshness: overview.freshness
+};
+
+const tokenOperations: AnalyticsTokenOperations = {
+  totalTokens: 240,
+  primaryTokens: 200,
+  cacheReadTokens: 30,
+  cacheWriteTokens: 10,
+  tokenUsers: 2,
+  activeUsers: 3,
+  tokenUserRate: 2 / 3,
+  tokenActivePersonDays: 3,
+  dailyTokensPerUser: 66.67,
+  repeatTokenUsers: 1,
+  repeatTokenUserRate: 0.5,
+  daily: [],
+  users: [],
+  freshness: overview.freshness
+};
+
+const capabilities: AnalyticsCapabilities = {
+  activeUsers: 3,
+  rows: [{
+    type: "TOOL",
+    name: "bash",
+    invocationCount: 12,
+    userCount: 2,
+    usageRate: 2 / 3,
+    succeededCount: 10,
+    failedCount: 1,
+    incompleteCount: 1
+  }],
+  freshness: overview.freshness
+};
+
 function pageOf<T>(items: T[]): PageResponse<T> {
   return { items, page: 1, size: 20, total: items.length };
 }
 
 function api() {
   return {
+    getAnalyticsFilterOptions: vi.fn().mockResolvedValue(filterOptions),
+    getAnalyticsFunnel: vi.fn().mockResolvedValue(funnel),
+    getAnalyticsHourlyHeatmap: vi.fn().mockResolvedValue(hourlyHeatmap),
+    getAnalyticsTokenOperations: vi.fn().mockResolvedValue(tokenOperations),
+    getAnalyticsCapabilities: vi.fn().mockResolvedValue(capabilities),
     getAnalyticsOverview: vi.fn().mockResolvedValue(overview),
     getAnalyticsTimeseries: vi.fn().mockResolvedValue(trend),
     getAnalyticsPeaks: vi.fn().mockResolvedValue(peaks),
@@ -156,36 +227,50 @@ describe("analytics management panel", () => {
 
     expect(await view.findByText("运营分析")).toBeTruthy();
     expect(await view.findByText(/可能延迟/)).toBeTruthy();
-    expect(await view.findByText("活跃用户")).toBeTruthy();
-    expect((await view.findAllByText("token 使用量")).length).toBeGreaterThanOrEqual(1);
+    expect(await view.findByText("用户使用漏斗")).toBeTruthy();
+    expect(await view.findByText(funnel.activeDefinition)).toBeTruthy();
+    expect((await view.findAllByText("主 Token 使用量")).length).toBeGreaterThanOrEqual(1);
     expect(await view.findByText("小时热力")).toBeTruthy();
-    expect(await view.findByText("7 天 × 24 小时")).toBeTruthy();
-    expect(view.container.querySelectorAll(".ta-heatmap-cell")).toHaveLength(168);
+    expect(await view.findByText("2 天 × 24 小时")).toBeTruthy();
+    expect(view.container.querySelectorAll(".ta-heatmap-cell")).toHaveLength(48);
+    expect(view.queryByLabelText("agent")).toBeNull();
+    expect(view.queryByLabelText("model")).toBeNull();
+    expect(view.queryByLabelText("workspace")).toBeNull();
     expect(view.container.textContent ?? "").not.toMatch(/成本|费用|花费|costUsd/i);
     view.queryClient.clear();
   });
 
-  it("uses the returned point count for the responsive trend and renders the hourly heatmap grid", async () => {
+  it("renders the selected date by hour heatmap grid", async () => {
     const backendApi = api();
     vi.mocked(backendApi.getAnalyticsTimeseries).mockResolvedValue([
       trend[0]!,
       { ...trend[0]!, bucketStart: "2026-06-29T00:00:00Z", runCount: 5 }
     ]);
-    vi.mocked(backendApi.getAnalyticsPeaks).mockResolvedValue({
-      ...peaks,
-      heatmap: completeHeatmap.map(point => point.dayOfWeek === 1 && point.hourOfDay === 8
-        ? { ...point, activeUsers: 2, runCount: 3, userMessageCount: 5 }
-        : point)
-    });
+    vi.mocked(backendApi.getAnalyticsHourlyHeatmap).mockResolvedValue(hourlyHeatmap);
     const view = renderPanel(backendApi);
 
     await waitFor(() => expect(view.container.querySelectorAll(".ta-trend-item")).toHaveLength(2));
     expect(view.container.querySelector<HTMLElement>(".ta-trend")?.style.getPropertyValue("--ta-trend-columns")).toBe("2");
-    expect(view.container.querySelectorAll(".ta-heatmap-cell")).toHaveLength(168);
+    expect(view.container.querySelectorAll(".ta-heatmap-cell")).toHaveLength(48);
     view.queryClient.clear();
   });
 
-  it("defaults to thirty days and supports wider preset ranges", async () => {
+  it("shows token adoption and capability usage as dedicated operations views", async () => {
+    const backendApi = api();
+    const view = renderPanel(backendApi);
+
+    await fireEvent.click(await view.findByRole("button", { name: "Token 运营" }));
+    expect(await view.findByText("日人均 Token")).toBeTruthy();
+    expect(await view.findByText("66.67")).toBeTruthy();
+    expect(await view.findByText("240")).toBeTruthy();
+
+    await fireEvent.click(view.getByRole("button", { name: "能力使用" }));
+    expect(await view.findByText("bash")).toBeTruthy();
+    expect(await view.findByText("66.7%")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("defaults to thirty days and supports the ninety-day heatmap limit", async () => {
     const backendApi = api();
     const view = renderPanel(backendApi);
 
@@ -204,6 +289,21 @@ describe("analytics management panel", () => {
     view.queryClient.clear();
   });
 
+  it("keeps long-range analysis usable without requesting an unsupported heatmap", async () => {
+    const backendApi = api();
+    const view = renderPanel(backendApi);
+    await view.findByText("小时热力");
+    vi.mocked(backendApi.getAnalyticsHourlyHeatmap).mockClear();
+
+    await fireEvent.update(view.getByLabelText("开始"), "2026-01-01T00:00");
+    await fireEvent.update(view.getByLabelText("结束"), "2026-06-01T00:00");
+
+    expect(await view.findByText("小时热力图最多支持 90 天")).toBeTruthy();
+    expect(backendApi.getAnalyticsHourlyHeatmap).not.toHaveBeenCalled();
+    await waitFor(() => expect(backendApi.getAnalyticsTimeseries).toHaveBeenCalled());
+    view.queryClient.clear();
+  });
+
   it("exports csv with the current overview filters", async () => {
     const backendApi = api();
     const createObjectURL = vi.fn(() => "blob:test");
@@ -218,7 +318,7 @@ describe("analytics management panel", () => {
 
     await waitFor(() => expect(backendApi.exportAnalyticsCsv).toHaveBeenCalledWith("overview", expect.objectContaining({
       granularity: "day",
-      topN: 10,
+      topN: 20,
       pageSize: 20
     })));
     expect(createObjectURL).toHaveBeenCalled();

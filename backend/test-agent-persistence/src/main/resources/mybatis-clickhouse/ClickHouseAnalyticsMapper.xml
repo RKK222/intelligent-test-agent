@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.clickhouse.ClickHouseAnalyticsMapper">
+    <resultMap id="activityMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsActivityRow">
+        <constructor>
+            <arg column="bucket_start" javaType="java.time.Instant"/>
+            <arg column="activity_date" javaType="java.time.LocalDate"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="login_count" javaType="_long"/>
+            <arg column="session_count" javaType="_long"/>
+            <arg column="active_session_count" javaType="_long"/>
+            <arg column="empty_session_count" javaType="_long"/>
+            <arg column="continuous_session_count" javaType="_long"/>
+            <arg column="user_message_count" javaType="_long"/>
+            <arg column="assistant_message_count" javaType="_long"/>
+            <arg column="run_count" javaType="_long"/>
+            <arg column="succeeded_run_count" javaType="_long"/>
+            <arg column="failed_run_count" javaType="_long"/>
+            <arg column="cancelled_run_count" javaType="_long"/>
+            <arg column="active_termination_count" javaType="_long"/>
+            <arg column="valid_interaction_count" javaType="_long"/>
+            <arg column="positive_feedback_count" javaType="_long"/>
+            <arg column="negative_feedback_count" javaType="_long"/>
+            <arg column="diff_proposed_count" javaType="_long"/>
+            <arg column="diff_accepted_count" javaType="_long"/>
+            <arg column="diff_rejected_count" javaType="_long"/>
+            <arg column="tokens_input" javaType="_long"/>
+            <arg column="tokens_output" javaType="_long"/>
+            <arg column="tokens_reasoning" javaType="_long"/>
+            <arg column="tokens_cache_read" javaType="_long"/>
+            <arg column="tokens_cache_write" javaType="_long"/>
+            <arg column="tokens_total" javaType="_long"/>
+            <arg column="duration_total_ms" javaType="_long"/>
+            <arg column="duration_run_count" javaType="_long"/>
+            <arg column="first_activity_at" javaType="java.time.Instant"/>
+            <arg column="last_activity_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="activityColumns">
+        bucket_start, activity_date, user_id, username, organization, rd_department, department,
+        workspace_id, agent_id, model_id, login_count, session_count, active_session_count,
+        empty_session_count, continuous_session_count, user_message_count, assistant_message_count,
+        run_count, succeeded_run_count, failed_run_count, cancelled_run_count,
+        active_termination_count, valid_interaction_count, positive_feedback_count,
+        negative_feedback_count, diff_proposed_count, diff_accepted_count, diff_rejected_count,
+        tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
+        tokens_total, duration_total_ms, duration_run_count, first_activity_at, last_activity_at
+    </sql>
+
+    <sql id="factFilter">
+        occurred_at &gt;= #{filter.startTime} and occurred_at &lt; #{filter.endTime}
+        <include refid="currentUserFilter"/>
+    </sql>
+
+    <sql id="rollupFilter">
+        <include refid="currentUserFilter"/>
+    </sql>
+
+    <sql id="userDimensionFilter">
+        <if test="filter.organization != null and filter.organization != ''">and organization = #{filter.organization}</if>
+        <if test="filter.rdDepartment != null and filter.rdDepartment != ''">and rd_department = #{filter.rdDepartment}</if>
+        <if test="filter.department != null and filter.department != ''">and department = #{filter.department}</if>
+        <if test="filter.userKeyword != null and filter.userKeyword != ''">
+            and (positionCaseInsensitiveUTF8(user_id, #{filter.userKeyword}) &gt; 0
+                 or positionCaseInsensitiveUTF8(username, #{filter.userKeyword}) &gt; 0)
+        </if>
+    </sql>
+
+    <sql id="currentUserFilter">
+        and user_id in (
+            select user_id from analytics_user_dimensions final where status != 'DELETED'
+            <include refid="userDimensionFilter"/>
+        )
+    </sql>
+
+    <insert id="insertEvents">
+        insert into analytics_ingestion_events(
+            event_id, version, source_type, aggregate_id, occurred_at, payload_json, ingested_at
+        ) values
+        <foreach collection="events" item="event" separator=",">
+            (#{event.eventId}, #{event.eventVersion}, #{event.sourceType}, #{event.aggregateId},
+             #{event.occurredAt}, #{event.payloadJson}, #{ingestedAt})
+        </foreach>
+    </insert>
+
+    <select id="countEventsByPrefix" resultType="long">
+        select uniqExact(event_id) from analytics_ingestion_events final
+        where startsWith(event_id, #{eventIdPrefix})
+    </select>
+
+    <select id="countActivityFactsByPrefix" resultType="long">
+        select uniqExact(event_id) from analytics_activity_facts final
+        where startsWith(event_id, #{eventIdPrefix})
+    </select>
+
+    <select id="countUserDimensionFactsByPrefix" resultType="long">
+        select count() from analytics_user_dimensions final
+        where user_id in (
+            select JSONExtractString(payload_json, 'userId')
+            from analytics_ingestion_events final
+            where startsWith(event_id, #{eventIdPrefix})
+              and JSONExtractString(payload_json, 'eventType') = 'USER_DIMENSION'
+        )
+    </select>
+
+    <select id="loadRawActivityFacts" resultMap="activityMap">
+        select occurred_at as bucket_start,
+               toDate(toTimeZone(occurred_at, 'Asia/Shanghai')) as activity_date,
+               user_id, username, organization, rd_department, department,
+               workspace_id, agent_id, model_id,
+               login_count, session_count, active_session_count, empty_session_count,
+               continuous_session_count, user_message_count, assistant_message_count,
+               run_count, succeeded_run_count, failed_run_count, cancelled_run_count,
+               active_termination_count, valid_interaction_count, positive_feedback_count,
+               negative_feedback_count, diff_proposed_count, diff_accepted_count, diff_rejected_count,
+               tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
+               tokens_input + tokens_output + tokens_reasoning as tokens_total,
+               duration_ms as duration_total_ms, if(duration_ms &gt; 0, 1, 0) as duration_run_count,
+               occurred_at as first_activity_at, occurred_at as last_activity_at
+        from analytics_activity_facts final
+        where occurred_at &gt;= #{startInclusive} and occurred_at &lt; #{endExclusive}
+    </select>
+
+    <insert id="insertHourly">
+        insert into analytics_user_activity_hourly(<include refid="activityColumns"/>, version) values
+        <foreach collection="rows" item="row" separator=",">
+            (#{row.bucketStart}, #{row.activityDate}, #{row.userId}, #{row.username}, #{row.organization},
+             #{row.rdDepartment}, #{row.department}, #{row.workspaceId}, #{row.agentId}, #{row.modelId},
+             #{row.loginCount}, #{row.sessionCount}, #{row.activeSessionCount}, #{row.emptySessionCount},
+             #{row.continuousSessionCount}, #{row.userMessageCount}, #{row.assistantMessageCount},
+             #{row.runCount}, #{row.succeededRunCount}, #{row.failedRunCount}, #{row.cancelledRunCount},
+             #{row.activeTerminationCount}, #{row.validInteractionCount}, #{row.positiveFeedbackCount},
+             #{row.negativeFeedbackCount}, #{row.diffProposedCount}, #{row.diffAcceptedCount},
+             #{row.diffRejectedCount}, #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning},
+             #{row.tokensCacheRead}, #{row.tokensCacheWrite}, #{row.tokensTotal}, #{row.durationTotalMs},
+             #{row.durationRunCount}, #{row.firstActivityAt}, #{row.lastActivityAt},
+             toUInt64(toUnixTimestamp64Milli(#{updatedAt})))
+        </foreach>
+    </insert>
+
+    <insert id="insertDaily">
+        insert into analytics_user_activity_daily(<include refid="activityColumns"/>, version) values
+        <foreach collection="rows" item="row" separator=",">
+            (#{row.bucketStart}, #{row.activityDate}, #{row.userId}, #{row.username}, #{row.organization},
+             #{row.rdDepartment}, #{row.department}, #{row.workspaceId}, #{row.agentId}, #{row.modelId},
+             #{row.loginCount}, #{row.sessionCount}, #{row.activeSessionCount}, #{row.emptySessionCount},
+             #{row.continuousSessionCount}, #{row.userMessageCount}, #{row.assistantMessageCount},
+             #{row.runCount}, #{row.succeededRunCount}, #{row.failedRunCount}, #{row.cancelledRunCount},
+             #{row.activeTerminationCount}, #{row.validInteractionCount}, #{row.positiveFeedbackCount},
+             #{row.negativeFeedbackCount}, #{row.diffProposedCount}, #{row.diffAcceptedCount},
+             #{row.diffRejectedCount}, #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning},
+             #{row.tokensCacheRead}, #{row.tokensCacheWrite}, #{row.tokensTotal}, #{row.durationTotalMs},
+             #{row.durationRunCount}, #{row.firstActivityAt}, #{row.lastActivityAt},
+             toUInt64(toUnixTimestamp64Milli(#{updatedAt})))
+        </foreach>
+    </insert>
+
+    <select id="loadHourly" resultMap="activityMap">
+        select <include refid="activityColumns"/> from analytics_user_activity_hourly final
+        where bucket_start &gt;= #{startInclusive} and bucket_start &lt; #{endExclusive}
+    </select>
+
+    <select id="queryHourlyRollups" resultMap="activityMap">
+        select <include refid="activityColumns"/> from analytics_user_activity_hourly final
+        where bucket_start &gt;= #{filter.startTime} and bucket_start &lt; #{filter.endTime}
+        <include refid="rollupFilter"/>
+    </select>
+
+    <select id="queryDailyRollups" resultMap="activityMap">
+        select <include refid="activityColumns"/> from analytics_user_activity_daily final
+        where activity_date &gt;= #{startDate} and activity_date &lt;= #{endDate}
+        <include refid="rollupFilter"/>
+    </select>
+
+    <select id="freshness" resultType="com.enterprise.testagent.persistence.mybatis.AnalyticsFreshnessRow">
+        select job_name, watermark_at, generated_at, status, message,
+               coverage_start, coverage_end, attribution_mode
+        from analytics_rollup_watermarks final where job_name = #{jobName} limit 1
+    </select>
+
+    <insert id="insertWatermark">
+        insert into analytics_rollup_watermarks(
+            job_name, watermark_at, generated_at, status, message,
+            coverage_start, coverage_end, attribution_mode, version
+        ) values (
+            #{jobName}, #{watermarkAt}, #{generatedAt}, #{status}, #{message},
+            #{coverageStart}, #{coverageEnd}, #{attributionMode}, #{version}
+        )
+    </insert>
+
+    <select id="countEventUsers" resultType="long">
+        select uniqExact(user_id) from analytics_activity_facts final
+        where <include refid="factFilter"/> and user_id != ''
+    </select>
+
+    <select id="countRegisteredUsers" resultType="long">
+        select count() from analytics_user_dimensions final where status != 'DELETED'
+        <include refid="userDimensionFilter"/>
+    </select>
+
+    <select id="countEnabledUsers" resultType="long">
+        select count() from analytics_user_dimensions final where status = 'ACTIVE'
+        <include refid="userDimensionFilter"/>
+    </select>
+
+    <select id="p95DurationMs" resultType="java.lang.Long">
+        select toInt64(quantileExact(0.95)(duration_ms)) from analytics_activity_facts final
+        where <include refid="factFilter"/> and duration_ms &gt; 0
+    </select>
+
+    <select id="feedbackDetails" resultType="com.enterprise.testagent.persistence.mybatis.AnalyticsFeedbackDetailRow">
+        select feedback_id, user_id, username, organization, rd_department, department,
+               session_id, run_id, message_id, rating, nullIf(reason_code, '') as reason_code,
+               '' as comment, occurred_at as created_at, occurred_at as updated_at
+        from analytics_feedback_facts final where <include refid="factFilter"/>
+        order by occurred_at desc limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countFeedbackDetails" resultType="long">
+        select count() from analytics_feedback_facts final where <include refid="factFilter"/>
+    </select>
+
+    <select id="negativeReasonCounts" resultType="map">
+        select if(reason_code = '', 'OTHER', reason_code) as reason_code, count() as reason_count
+        from analytics_feedback_facts final where <include refid="factFilter"/> and rating = 'NEGATIVE'
+        group by reason_code order by reason_count desc limit #{limit}
+    </select>
+
+    <select id="exceptionDetails" resultType="com.enterprise.testagent.persistence.mybatis.AnalyticsExceptionDetailRow">
+        select run_id, user_id, username, organization, rd_department, department,
+               workspace_id, agent_id, model_id, status,
+               occurred_at as created_at, occurred_at as updated_at
+        from analytics_activity_facts final where <include refid="factFilter"/> and status in ('FAILED', 'CANCELLED')
+        order by occurred_at desc limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countExceptionDetails" resultType="long">
+        select count() from analytics_activity_facts final
+        where <include refid="factFilter"/> and status in ('FAILED', 'CANCELLED')
+    </select>
+
+    <select id="capabilityUsage" resultType="com.enterprise.testagent.domain.analytics.AnalyticsModels$CapabilityUsageRow">
+        select capability_type as type, capability_name as name,
+               count() as invocation_count, uniqExact(user_id) as user_count,
+               countIf(status = 'SUCCEEDED') as succeeded_count,
+               countIf(status = 'FAILED') as failed_count,
+               countIf(status = 'STARTED') as incomplete_count
+        from analytics_capability_facts final where <include refid="factFilter"/>
+          and capability_name != '' and user_id != ''
+        group by capability_type, capability_name
+        order by user_count desc, invocation_count desc, type, name
+    </select>
+
+    <select id="organizationUserCounts" resultType="com.enterprise.testagent.persistence.mybatis.AnalyticsOrganizationUserCountRow">
+        select
+        <choose>
+            <when test="dimension == 'rdDepartment'">if(rd_department = '', '未归属', rd_department)</when>
+            <when test="dimension == 'department'">if(department = '', '未归属', department)</when>
+            <otherwise>if(organization = '', '未归属', organization)</otherwise>
+        </choose>
+        as name,
+        count() as registered_users,
+        countIf(status = 'ACTIVE') as enabled_users
+        from analytics_user_dimensions final where status != 'DELETED'
+        <include refid="userDimensionFilter"/>
+        group by name order by name
+    </select>
+
+    <select id="organizations" resultType="com.enterprise.testagent.domain.analytics.AnalyticsModels$FilterOption">
+        select distinct organization as value, organization as label
+        from analytics_user_dimensions final where status != 'DELETED' and organization != '' order by label
+    </select>
+
+    <select id="rdDepartments" resultType="com.enterprise.testagent.domain.analytics.AnalyticsModels$FilterOption">
+        select distinct rd_department as value, rd_department as label
+        from analytics_user_dimensions final where status != 'DELETED' and rd_department != ''
+        <if test="organization != null and organization != ''">and organization = #{organization}</if>
+        order by label
+    </select>
+
+    <select id="departments" resultType="com.enterprise.testagent.domain.analytics.AnalyticsModels$FilterOption">
+        select distinct department as value, department as label
+        from analytics_user_dimensions final where status != 'DELETED' and department != ''
+        <if test="organization != null and organization != ''">and organization = #{organization}</if>
+        <if test="rdDepartment != null and rdDepartment != ''">and rd_department = #{rdDepartment}</if>
+        order by label
+    </select>
+</mapper>

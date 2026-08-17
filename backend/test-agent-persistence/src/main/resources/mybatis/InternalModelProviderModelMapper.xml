@@ -11,6 +11,7 @@
             <arg column="upstream_model_id" javaType="java.lang.String"/>
             <arg column="display_name" javaType="java.lang.String"/>
             <arg column="context_limit" javaType="java.lang.Long"/>
+            <arg column="embedding_dimension" javaType="java.lang.Integer"/>
             <arg column="enabled" javaType="_boolean"/>
             <arg column="capability_chat" javaType="_boolean"/>
             <arg column="capability_tools" javaType="_boolean"/>
@@ -37,7 +38,7 @@
     </resultMap>
 
     <sql id="ModelColumns">
-        provider_id, model_id, upstream_model_id, display_name, context_limit, enabled,
+        provider_id, model_id, upstream_model_id, display_name, context_limit, embedding_dimension, enabled,
         capability_chat, capability_tools, capability_vision, capability_reasoning,
         capability_embedding, capability_rerank, capability_image, capability_speech,
         capability_transcription, created_at, updated_at
@@ -79,12 +80,13 @@
 
     <insert id="insertModel">
         insert into internal_model_provider_models(
-            provider_id, model_id, upstream_model_id, display_name, context_limit, enabled,
+            provider_id, model_id, upstream_model_id, display_name, context_limit, embedding_dimension, enabled,
             capability_chat, capability_tools, capability_vision, capability_reasoning,
             capability_embedding, capability_rerank, capability_image, capability_speech,
             capability_transcription, created_at, updated_at
         ) values (
-            #{providerId}, #{modelId}, #{upstreamModelId}, #{displayName}, #{contextLimit}, #{enabled},
+            #{providerId}, #{modelId}, #{upstreamModelId}, #{displayName}, #{contextLimit},
+            #{embeddingDimension}, #{enabled},
             #{capabilityChat}, #{capabilityTools}, #{capabilityVision}, #{capabilityReasoning},
             #{capabilityEmbedding}, #{capabilityRerank}, #{capabilityImage}, #{capabilitySpeech},
             #{capabilityTranscription}, #{createdAt}, #{updatedAt}

@@ -11,6 +11,7 @@
 - `getTcdsTaskTypes()` / `maintainTcdsTestCases(payload)`：普通登录用户案例维护 client；分别固定访问 `/api/internal/platform/integration/tcds/task-types` 与 `/api/internal/platform/integration/tcds/test-cases`，浏览器不直连 TCDS，只提交 `itemNo/caseList`，也不暴露 TCDS 地址、`toolId` 或可伪造的 `userId`。
 
 - `index.ts` 的 `createBatchItemSession` 为每个批量条目幂等创建独立 Session；`CreateNightExecutionTaskPayload.batchContext` 为可选兼容字段，携带时调用方必须省略 `sessionId`。两条链路都复用现有用户 OpenCode 路由提示，不新增工作区文件 HTTP 代理。
+- `index.ts` 的通用记忆 client 固定访问 `/api/internal/platform/memory/v1`（管理端为 `/admin`），承载个人/团队治理、含 Session 标题/ID 的证据、Run usage、Skill 提案、双 profile 健康/设置和白名单；团队提案可选传本人 `sourceMemoryId`，修改请求透传 `expectedVersion`。浏览器不调用 memory-service、不读取他人原始聊天，也不新增 RunEvent。
 - Model/Provider 原生目录在运行配置声明非空 `enabled_providers` 时共用同一轮 config 请求，只按 Provider ID 过滤且不改变原生顺序；未配置或 config 读取失败时保留原生结果，请求完成后不长期缓存白名单。
 - 应用工作空间配置通过 `updateApplicationWorkspace` 部分更新 `workspaceName/enabled`，旧 `renameApplicationWorkspace` 保持兼容。
 - `openExperienceWorkspace()` 对任意已登录用户打开其 READY TestAgent 所在服务器的体验 Workspace；`commitExperienceWorkspace(workspaceId, commitMessage, files)` 只调用运行态 Workspace 本地提交接口，不复用个人 workspace publish，也不暴露 push 参数。

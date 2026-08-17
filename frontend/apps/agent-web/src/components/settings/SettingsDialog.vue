@@ -5,7 +5,7 @@ import type { CurrentUser } from "@test-agent/shared-types";
 import SettingsMenu from "./SettingsMenu.vue";
 import SettingsPanel from "./SettingsPanel.vue";
 
-type MenuKey = "appWorkspace" | "repository" | "personal" | "userManagement";
+type MenuKey = "appWorkspace" | "repository" | "personal";
 
 const props = defineProps<{
   open: boolean;
@@ -64,9 +64,6 @@ watch(
     if (!hasAppAdmin.value && activeKey.value !== "personal") {
       activeKey.value = "personal";
       autoOpenCreate.value = false;
-    } else if (!hasSuperAdmin.value && activeKey.value === "userManagement") {
-      activeKey.value = "appWorkspace";
-      autoOpenCreate.value = false;
     }
   }
 );
@@ -76,7 +73,7 @@ function close() {
 }
 
 function handleSwitchMenu(key: string) {
-  if ((!hasAppAdmin.value && key !== "personal") || (!hasSuperAdmin.value && key === "userManagement")) {
+  if (!hasAppAdmin.value && key !== "personal") {
     selectMenu("personal");
     return;
   }
@@ -87,7 +84,7 @@ function handleSwitchMenu(key: string) {
 }
 
 function selectMenu(key: MenuKey) {
-  if ((!hasAppAdmin.value && key !== "personal") || (!hasSuperAdmin.value && key === "userManagement")) {
+  if (!hasAppAdmin.value && key !== "personal") {
     activeKey.value = "personal";
     autoOpenCreate.value = false;
     return;

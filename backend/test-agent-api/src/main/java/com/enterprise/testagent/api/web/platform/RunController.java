@@ -178,7 +178,7 @@ public class RunController {
     private RuntimeDtos.RunResponse toRunResponse(com.enterprise.testagent.domain.run.Run run) {
         RunResend resend = resendFor(run.runId());
         Function<UserId, String> usernameLookup = usernameLookup();
-        return runService.storageMetadata(run.runId())
+        RuntimeDtos.RunResponse response = runService.storageMetadata(run.runId())
                 .map(metadata -> RuntimeDtos.RunResponse.from(
                         run,
                         metadata.storageMode(),
@@ -188,6 +188,7 @@ public class RunController {
                         usernameLookup))
                 .orElseGet(() -> RuntimeDtos.RunResponse.from(
                         run, null, null, null, resend, usernameLookup));
+        return response.withRuntimeTarget(runService.runtimeTarget(run.runId()));
     }
 
     private RunResend resendFor(RunId runId) {

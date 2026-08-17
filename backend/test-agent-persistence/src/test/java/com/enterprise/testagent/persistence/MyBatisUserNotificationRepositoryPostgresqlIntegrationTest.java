@@ -116,8 +116,8 @@ class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
                 recipient,
                 UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
                 UserNotificationActionType.NONE,
-                "Agent 配置等待生效",
-                "配置已更新，正在等待当前任务结束后应用。",
+                "智能体配置正在更新",
+                "当前任务结束后会自动加载新配置。",
                 NOW);
         assertThat(repository.insert(pending)).isTrue();
         assertThat(repository.markReadById(
@@ -136,8 +136,8 @@ class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
                 recipient,
                 UserNotificationType.AGENT_CONFIG_DISPOSE_FAILED,
                 UserNotificationActionType.RESTART_OWN_PROCESS,
-                "Agent 配置应用失败",
-                "配置暂未应用，可重启自己的 TestAgent 进程后重试。",
+                "智能体配置更新失败",
+                "新配置暂未加载，请重启智能体后再试。",
                 NOW.plusSeconds(3)))).isTrue();
         assertThat(repository.findPage(recipient, false, NOW.plusSeconds(4), new PageRequest(1, 20)).items())
                 .singleElement()
@@ -151,8 +151,8 @@ class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
                 recipient,
                 UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED,
                 UserNotificationActionType.NONE,
-                "Agent 配置已生效",
-                "配置已应用到你的 TestAgent 进程。",
+                "智能体配置更新成功",
+                "新配置已经加载，可以正常使用。",
                 NOW.plusSeconds(5)))).isTrue();
         assertThat(repository.findPage(recipient, false, NOW.plusSeconds(6), new PageRequest(1, 20)).items())
                 .singleElement()

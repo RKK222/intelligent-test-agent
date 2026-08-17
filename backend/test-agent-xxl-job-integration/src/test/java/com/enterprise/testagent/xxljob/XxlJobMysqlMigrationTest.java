@@ -47,7 +47,7 @@ class XxlJobMysqlMigrationTest {
     }
 
     @Test
-    void initializesExecutorAndPlatformTasksWithoutLocalAdmin() throws Exception {
+    void initializesExecutorAndThirteenPlatformTasksWithoutLocalAdmin() throws Exception {
         try (Connection connection = DriverManager.getConnection(
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
@@ -61,6 +61,8 @@ class XxlJobMysqlMigrationTest {
                     .isZero();
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_route_strategy='ROUND' and executor_block_strategy='DISCARD_LATER' and misfire_strategy='DO_NOTHING' and executor_fail_retry_count=0"))
                     .isEqualTo(13);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.analytics-ingestion' and schedule_conf='0 * * * * ? *' and trigger_status=1"))
+                    .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.night-execution-dispatch' and schedule_conf='0 0/1 * * * ? *' and trigger_status=1"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.app-source-cleanup' and schedule_conf='0 0/1 * * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
@@ -114,6 +116,8 @@ class XxlJobMysqlMigrationTest {
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.internal-model-probe' and schedule_conf='0 */5 * * * ? *'"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.internal-model-observability-retention' and schedule_conf='0 30 3 * * ? *'"))
+                    .isEqualTo(1);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.analytics-ingestion' and schedule_conf='0 * * * * ? *'"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='configuration-management.scm-git-name-sync' and schedule_conf='0 10 4 * * ? *'"))
                     .isEqualTo(1);

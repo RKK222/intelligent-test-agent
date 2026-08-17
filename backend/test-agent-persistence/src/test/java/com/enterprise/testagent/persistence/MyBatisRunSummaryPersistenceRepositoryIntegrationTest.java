@@ -15,6 +15,7 @@ import com.enterprise.testagent.domain.run.RunTerminalProjection;
 import com.enterprise.testagent.domain.run.RunTerminalProjectionResult;
 import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.run.TokenUsage;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessageId;
@@ -80,6 +81,9 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
         jdbcClient.sql("alter table runs add column message_sender_user_id varchar(128)").update();
         jdbcClient.sql("alter table runs add column message_sender_unified_auth_id varchar(255)").update();
         jdbcClient.sql("alter table runs add column message_sent_by_shared_user boolean not null default false").update();
+        jdbcClient.sql("alter table runs add column target_runtime_kind varchar(32) not null default 'SERVER_PROCESS'")
+                .update();
+        jdbcClient.sql("alter table runs add column target_local_client_instance_id varchar(128)").update();
         jdbcClient.sql("alter table runs add column active_session_id varchar(128)").update();
         jdbcClient.sql("alter table session_messages add column sender_unified_auth_id varchar(255)").update();
         jdbcClient.sql("alter table session_messages add column sent_by_shared_user boolean not null default false")
@@ -127,6 +131,36 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
 
         assertThat(repository.findBySessionAndClientRequestId(SESSION_ID, "request-anchor-find"))
                 .contains(anchor);
+    }
+
+    @Test
+    void localRuntimeTargetIsInsertedAtomicallyWithRunAnchor() {
+        RunPersistenceAnchor server = anchor("run_summary_local", "request-local");
+        RunPersistenceAnchor local = new RunPersistenceAnchor(
+                server.runId(), server.sessionId(), server.workspaceId(), server.status(), server.storageMode(),
+                server.statusVersion(), server.clientRequestId(), server.producerLinuxServerId(),
+                server.executionNodeIdSnapshot(), server.opencodeProcessIdSnapshot(),
+                server.rootRemoteSessionId(), server.dispatchMessageId(), server.scheduledDispatchAttemptId(),
+                server.scheduledDispatchLeaseUntil(), server.scheduledDispatchAcceptedAt(),
+                server.assistantSummaryMessageId(), server.traceId(), server.createdAt(), server.updatedAt(),
+                server.detailsExpiresAt(), server.sourceType(), server.sourceRefId(), server.triggeredByUserId(),
+                server.agentId(), server.modelId(), server.messageSenderUserId(),
+                server.messageSenderUnifiedAuthId(), server.messageSentBySharedUser(),
+                RuntimeKind.LOCAL_CLIENT, "lci_atomic_target");
+
+        countingDataSource.reset();
+        assertThat(repository.insertAnchor(local)).isTrue();
+
+        assertThat(countingDataSource.statementCount()).isEqualTo(1);
+        assertThat(repository.findBySessionAndClientRequestId(SESSION_ID, "request-local"))
+                .contains(local);
+        assertThat(jdbcClient.sql("select target_runtime_kind, target_local_client_instance_id "
+                        + "from runs where run_id = 'run_summary_local'")
+                .query((rs, ignored) -> Map.entry(
+                        rs.getString("target_runtime_kind"),
+                        rs.getString("target_local_client_instance_id")))
+                .single())
+                .isEqualTo(Map.entry("LOCAL_CLIENT", "lci_atomic_target"));
     }
 
     @Test

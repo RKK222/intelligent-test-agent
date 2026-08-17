@@ -136,10 +136,31 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION;
     private static final String EXPERIENCE_WORKSPACE_MAIN_RESOURCE =
             "db/migration/V20260809210000__common_parameters_add_experience_workspace.sql";
+    private static final String LOCAL_CLIENT_RUNTIME_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION;
     private static final String LOCAL_CLIENT_RUNTIME_FORWARD_VERSION =
             DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION;
+    private static final String LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_FORWARD_COMPATIBILITY_LOCATION;
+    private static final String LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE =
+            "db/migration/V20260811210453__local_client_credentials_create_runtime.sql";
+    private static final String CURRENT_MERGED_RELEASE_MAX_VERSION = "20260812144051";
+    private static final String LOCAL_CLIENT_ROLLOUT_VERSION = "20260817193414";
     private static final String LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION;
+    private static final String ANALYTICS_OUTBOX_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.ANALYTICS_OUTBOX_MIGRATION_VERSION;
+    private static final String ANALYTICS_TRIGGER_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.ANALYTICS_TRIGGER_MIGRATION_VERSION;
+    private static final String ANALYTICS_OUTBOX_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.ANALYTICS_OUTBOX_FORWARD_MIGRATION_VERSION;
+    private static final String ANALYTICS_TRIGGER_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.ANALYTICS_TRIGGER_FORWARD_MIGRATION_VERSION;
+    private static final String ANALYTICS_AFTER_RELEASE_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.ANALYTICS_AFTER_RELEASE_COMPATIBILITY_LOCATION;
+    private static final String ANALYTICS_OUTBOX_MAIN_RESOURCE =
+            "db/migration/V20260813143000__analytics_event_outbox_create_pipeline.sql";
+    private static final String CURRENT_RELEASE_WITH_SCM_MAX_VERSION = "20260813190929";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -174,8 +195,11 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(dataSource, SESSION_SHARE_ATTRIBUTION_VERSION)).isTrue();
             assertThat(applied(dataSource, SESSION_SHARE_FORWARD_VERSION)).isFalse();
             assertThat(applied(dataSource, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION)).isFalse();
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isTrue();
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isFalse();
             assertThat(qaMemorySchemaTableCount(dataSource)).isEqualTo(8L);
             assertSessionShareSchema(dataSource);
+            assertLocalClientRuntimeSchema(dataSource);
         });
     }
 
@@ -734,33 +758,44 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     }
 
     @Test
-    void appliedLocalClientRuntimeHistoryKeepsOriginalBytesWithoutPublishingClientToCleanRelease() {
-        DataSource dataSource = dataSource("local_client_runtime_applied_only");
-        migrateTo(dataSource, CURRENT_RELEASE_MAX_VERSION, MAIN_LOCATION);
-        migrateTo(
+    void currentMergedReleaseHistoryAppliesLocalClientRuntimeThroughHigherForwardMigration() {
+        DataSource dataSource = dataSource("local_client_runtime_after_current_release");
+        // 复现 release 已执行体验工作区默认值，但尚未合入较低版本本地客户端 migration 的真实历史。
+        migrateWithoutResourceTo(
                 dataSource,
-                LOCAL_CLIENT_RUNTIME_FORWARD_VERSION,
-                MAIN_LOCATION,
-                LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION);
+                CURRENT_MERGED_RELEASE_MAX_VERSION,
+                LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE);
 
-        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue();
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isFalse();
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isFalse();
 
         runBootFlyway(dataSource, flyway -> {
             assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
-            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION);
+            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isFalse();
             assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, LOCAL_CLIENT_ROLLOUT_VERSION)).isTrue();
+            assertLocalClientRuntimeSchema(dataSource);
+        });
+
+        // 第二次启动必须继续从同一隔离 location 解析已执行前向版本。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, LOCAL_CLIENT_ROLLOUT_VERSION)).isTrue();
+            assertLocalClientRuntimeSchema(dataSource);
         });
     }
 
     @Test
     void unknownLocalClientRuntimeChecksumStillFailsClosed() {
         DataSource dataSource = dataSource("local_client_runtime_unknown_checksum");
-        migrateTo(dataSource, CURRENT_RELEASE_MAX_VERSION, MAIN_LOCATION);
-        migrateTo(
+        migrateWithoutResourceTo(
                 dataSource,
-                LOCAL_CLIENT_RUNTIME_FORWARD_VERSION,
-                MAIN_LOCATION,
-                LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION);
+                CURRENT_MERGED_RELEASE_MAX_VERSION,
+                LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE);
+        runBootFlyway(dataSource, flyway ->
+                assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue());
         overwriteAppliedChecksum(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION, 987654321);
 
         bootFlywayRunner(dataSource).run(context -> {
@@ -1133,6 +1168,44 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         assertThat(parameterCount).isEqualTo(1L);
         assertThat(parameterValue).isEqualTo("${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience");
         assertThat(indexCount).isEqualTo(1L);
+    }
+
+    private static void assertLocalClientRuntimeSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'local_client_credentials',
+                              'local_client_instances',
+                              'local_client_workspaces',
+                              'local_client_rollout_users'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long runtimeColumnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and (
+                              (table_name = 'sessions'
+                                  and column_name in ('runtime_kind', 'local_client_instance_id'))
+                              or (table_name = 'runs'
+                                  and column_name in ('target_runtime_kind', 'target_local_client_instance_id'))
+                              or (table_name = 'night_execution_tasks'
+                                  and column_name in ('target_runtime_kind', 'target_local_client_instance_id'))
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long rolloutUserCount = jdbc.sql("select count(*) from local_client_rollout_users")
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(4L);
+        assertThat(runtimeColumnCount).isEqualTo(6L);
+        assertThat(rolloutUserCount).isZero();
     }
 
     private static long qaMemorySchemaTableCount(DataSource dataSource) {

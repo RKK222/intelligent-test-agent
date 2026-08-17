@@ -91,6 +91,46 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
+    void serviceRejectsAbsoluteAndNormalizedTraversalPathsEvenWhenTheyResolveInsideRoot() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve("secret.txt"), "secret");
+        Files.createDirectories(root.resolve("nested"));
+
+        assertThatThrownBy(() -> service.readContent(root.toString(), root.resolve("secret.txt").toString()))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.readContent(root.toString(), "nested/../secret.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void serviceRejectsEveryOperationThroughDirectorySymlink() throws Exception {
+        assumeTrue(!System.getProperty("os.name", "").toLowerCase().contains("win"));
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(externalRoot.resolve("secret.txt"), "outside");
+        Path linkedDirectory = root.resolve("linked-outside");
+        Files.createSymbolicLink(linkedDirectory, externalRoot);
+
+        assertThatThrownBy(() -> service.listDirectory(root.toString(), "linked-outside"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.readContent(root.toString(), "linked-outside/secret.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.writeContent(root.toString(), "linked-outside/new.txt", "blocked"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.deleteFile(root.toString(), "linked-outside/secret.txt"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        assertThat(externalRoot.resolve("secret.txt")).hasContent("outside");
+        assertThat(externalRoot.resolve("new.txt")).doesNotExist();
+        assertThat(service.searchFiles(root.toString(), "secret.txt")).isEmpty();
+    }
+
+    @Test
     void serviceListsSingleDirectoryInSortedOrderWithConfiguredLimit() throws Exception {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 2);
         Files.createDirectories(root.resolve("src"));
@@ -415,7 +455,7 @@ class WorkspaceFileServiceTest {
 
         assertThatThrownBy(() -> service.moveFile(root.toString(), "suite", "alias/moved-suite"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
         assertThat(Files.isDirectory(root.resolve("suite"))).isTrue();
         assertThat(Files.readString(root.resolve("suite/case.md"))).isEqualTo("case");
     }
@@ -448,7 +488,7 @@ class WorkspaceFileServiceTest {
 
         assertThatThrownBy(() -> service.moveFile(root.toString(), "linked.txt", "target/linked.txt"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
 
         assumeTrue(isUnixLikePlatform());
         Path fifo = root.resolve("events.fifo");

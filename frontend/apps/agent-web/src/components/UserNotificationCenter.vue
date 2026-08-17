@@ -126,17 +126,35 @@ function notificationTimestamp(notification: UserNotification) {
   return isDisposeNotification(notification) ? notification.updatedAt : notification.createdAt
 }
 
+/** 配置通知按类型使用当前用户文案，让数据库中的历史技术文案也能直接展示为易懂内容。 */
+function notificationTitle(notification: UserNotification) {
+  switch (notificationKind(notification)) {
+    case 'DISPOSE_PENDING': return '智能体配置正在更新'
+    case 'DISPOSE_SUCCEEDED': return '智能体配置更新成功'
+    case 'DISPOSE_FAILED': return '智能体配置更新失败'
+    case 'DISPOSE_SUPERSEDED': return '这次配置更新已结束'
+    default: return notification.title
+  }
+}
+
 function notificationBody(notification: UserNotification) {
-  return notificationKind(notification) === 'SESSION_SHARE' ? sessionTitle(notification) : notification.body
+  switch (notificationKind(notification)) {
+    case 'SESSION_SHARE': return sessionTitle(notification)
+    case 'DISPOSE_PENDING': return '当前任务结束后会自动加载新配置。'
+    case 'DISPOSE_SUCCEEDED': return '新配置已经加载，可以正常使用。'
+    case 'DISPOSE_FAILED': return '新配置暂未加载，请重启智能体后再试。'
+    case 'DISPOSE_SUPERSEDED': return '已有更新的配置，这条通知不用处理。'
+    default: return notification.body
+  }
 }
 
 function notificationStateLabel(notification: UserNotification) {
   switch (notificationKind(notification)) {
     case 'SESSION_SHARE': return permissionLabel(notification)
-    case 'DISPOSE_PENDING': return '等待生效'
-    case 'DISPOSE_SUCCEEDED': return '已生效'
-    case 'DISPOSE_FAILED': return '处理失败'
-    case 'DISPOSE_SUPERSEDED': return '已结束'
+    case 'DISPOSE_PENDING': return '更新中'
+    case 'DISPOSE_SUCCEEDED': return '已更新'
+    case 'DISPOSE_FAILED': return '更新失败'
+    case 'DISPOSE_SUPERSEDED': return '不用处理'
     default: return '暂不支持'
   }
 }
@@ -146,7 +164,7 @@ function notificationActionLabel(notification: UserNotification) {
     case 'SESSION_SHARE':
       return notification.actionAvailable ? formatExpiry(notification.expiresAt) : invalidationLabel(notification)
     case 'DISPOSE_FAILED':
-      return notification.actionAvailable ? '重启进程' : '暂不可重启'
+      return notification.actionAvailable ? '重启智能体' : '暂时无法重启'
     case 'DISPOSE_PENDING':
     case 'DISPOSE_SUCCEEDED':
     case 'DISPOSE_SUPERSEDED':
@@ -159,9 +177,9 @@ function notificationActionLabel(notification: UserNotification) {
 function notificationAriaLabel(notification: UserNotification) {
   // 会话分享保留既有“新标签页打开”语义，避免类型扩展改变辅助技术和自动化定位契约。
   if (notificationKind(notification) === 'SESSION_SHARE' && notification.actionAvailable) {
-    return `${notification.title}，${notificationVisualLabel(notification)}，在新标签页打开`
+    return `${notificationTitle(notification)}，${notificationVisualLabel(notification)}，在新标签页打开`
   }
-  return `${notification.title}，${notificationVisualLabel(notification)}，${notificationActionLabel(notification)}`
+  return `${notificationTitle(notification)}，${notificationVisualLabel(notification)}，${notificationActionLabel(notification)}`
 }
 
 function permissionLabel(notification: UserNotification) {
@@ -333,7 +351,7 @@ onBeforeUnmount(() => {
               </span>
               <span class="user-notification-center__item-main">
                 <span class="user-notification-center__item-heading">
-                  <strong>{{ notification.title }}</strong>
+                  <strong>{{ notificationTitle(notification) }}</strong>
                   <time :datetime="notificationTimestamp(notification)">{{ formatTime(notificationTimestamp(notification)) }}</time>
                 </span>
                 <span class="user-notification-center__session-title">{{ notificationBody(notification) }}</span>

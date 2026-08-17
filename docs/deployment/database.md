@@ -9,11 +9,11 @@
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
-## V20260809120000 已撤销能力的数据库兼容基线
+## V20260809120000 长期记忆兼容基线
 
-`V20260809120000__create_qa_memory_governance.sql` 曾创建 QA Memory 治理表。Mem0 运行能力已经撤销，当前 Java、前端、启动脚本和发布包都不再读取、写入或启动对应能力；这些 SQL 及兼容资源只为已经执行过的 `flyway_schema_history` 保留，禁止删除、改名、改字节或据此重新启用运行能力。既有表和数据不主动删除，避免破坏可恢复性与数据库升级兼容。
+`V20260809120000__create_qa_memory_governance.sql` 创建个人/团队治理、证据、审核、学习 Outbox、Run 使用、白名单、Skill 提案和设置表。完整记忆正文、向量和历史属于独立 Mem0 PostgreSQL + pgvector 数据库；平台表只保存范围/状态、最多 200 字证据摘要和可恢复定位信息，不保存 Prompt、回答或聊天消息。
 
-文件首次在任何需要保留的 PostgreSQL 执行后，版本、文件名和字节必须永久锁定；后续只能新增更高版本 migration。合入与发布前仍须收集全部目标库 `flyway_schema_history`，在每套已知基线上验证升级并核对最终 JAR 内 SHA-256，禁止 `outOfOrder`、`repair` 或手工修改历史表。
+默认白名单为空，单独执行该 migration 不会开启学习或检索。文件首次在任何需要保留的 PostgreSQL 执行后，版本、文件名和字节必须永久锁定；后续只能新增更高版本 migration。合入与发布前仍须收集全部目标库 `flyway_schema_history`，在每套已知基线上验证升级并核对最终 JAR 内 SHA-256，禁止 `outOfOrder`、`repair` 或手工修改历史表。
 
 当前锁定 SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`。遗留 `qa_*` 表名继续作为隐藏兼容存储，不能因产品通用化而重命名或改写已执行 migration。
 
@@ -21,7 +21,7 @@
 
 `V20260809230000__generalize_memory_and_embedding_profiles.sql` 前向增加内部模型 `embedding_dimension`，并在遗留设置表增加可空企业 `primary_embedding_model_id` 与固定 `cpu_embedding_model_id`。新增/修改查询全部位于 MyBatis XML。锁定 SHA-256：`2740ff6d4a97c5b8a4c438586f55d58078c3cfce93b06e4efeb6b77b039c66c3`。
 
-独立 `memory-service`、Embedding 服务和 pgvector 部署物已经从工程与发布流程移除；启动时不再探测或连接这些服务。该 migration 中增加的兼容字段继续留在平台库，当前业务代码忽略它们。
+独立记忆 PostgreSQL/pgvector 不扫描 Java Flyway。`memory-service/alembic` 唯一管理共享 Mem0 history、operation 幂等、逻辑记录/版本历史、profile 投影和补偿 outbox；只允许一个 migration job 在副本启动前执行。Mem0 副本没有本地 history 或数据卷。平台库和记忆库必须记录同一变更窗口的独立一致恢复点；禁止第二套 Java migration runner。详细部署、备份与回滚见 `docs/deployment/qa-memory.md`。
 
 ## V20260810090000 记忆逻辑身份唯一约束
 
@@ -64,10 +64,13 @@ XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backe
 | `V7__register_personal_workspace_relocation_task.sql` | 注册每分钟个人工作区跨服务器搬迁广播任务。 |
 | `V8__schedule_personal_workspace_relocation_every_thirty_minutes.sql` | 保留 V7 原始字节，把既有搬迁任务 Cron 更新为每 30 分钟并触发下一次时间重算。 |
 | `V9__register_inactive_user_process_cleanup_task.sql` | 注册每天北京时间 02:00 执行的十五天未使用用户 OpenCode 进程关闭广播任务。 |
+| `V10__register_internal_model_probe_task.sql` | 注册每 5 分钟内部模型供应商探活。 |
+| `V11__register_internal_model_observability_retention_task.sql` | 注册每天 03:30 内部模型观测明细/汇总清理。 |
+| `V12__register_analytics_clickhouse_ingestion_task.sql` | 注册每分钟 ClickHouse 脱敏运营事实入库。 |
 
-V3-V9 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
+V3-V12 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
 
-所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V9 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
+所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V12 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
 
 PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审计，不再产生新的 PostgreSQL scheduler 运行。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免旧 runner 删除后留下永久活动记录。XXL 运行日志独立留在 MySQL，默认保留 30 天。
 
@@ -1348,7 +1351,8 @@ QA Memory 扩展 `20260809230000`/`20260810090000`、通知中心 `2026081017000
 加载上述三条 QA Memory 主 migration，而只新增隔离补偿 `20260811170050`；只执行到会话分享主链的旧 release
 历史则使用 `20260810173117`，再顺序执行其后的通知和时延输入 migration。两条 QA Memory 补偿不可混用，
 `20260810110001/02` 仅属于精确匹配的 QA Memory 扩展兼容路径，也不得混入正常企业主链。共享 XXL MySQL 本轮
-准入预期为 V1-V11 全部成功且不新增 history。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或
+从已执行 V1-V11 的基线只允许新增 `V12__register_analytics_clickhouse_ingestion_task.sql`，Flyway checksum 为
+`-1848714734`、SHA-256 为 `70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或
 部分历史出现时必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
 
 正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移、通知中心和 Token 延迟输入 migration 的 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
@@ -1420,9 +1424,9 @@ migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示�
 - 修改参数值时自动写入日志，无需人工干预。
 - 日志表只追加，不提供删除接口，满足审计要求。
 
-## V20260628231000 运营分析反馈与汇总表
+## V20260628231000 运营分析反馈与旧汇总表
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260628231000__create_analytics_feedback_and_rollups.sql` 为 AI 回复反馈和运营分析 rollup 增加以下结构。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260628231000__create_analytics_feedback_and_rollups.sql` 为 AI 回复反馈和首版 PostgreSQL 运营 rollup 增加以下结构。反馈仍是业务事实；本节中的 PostgreSQL 运营汇总表只作为 ClickHouse 切换前兼容和回滚来源，新版 API 不再查询这些表。
 
 ### runs 归因扩展
 
@@ -1459,7 +1463,7 @@ migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示�
 
 ### analytics_user_activity_hourly / analytics_user_activity_daily
 
-运营分析 API 只读 hourly/daily rollup 表，不在请求链路扫描原始事实宽表。
+旧版运营分析 API 只读 PostgreSQL hourly/daily rollup 表；新版 API 已改为只读 ClickHouse 同名逻辑汇总。
 
 | 主要字段 | 说明 |
 |---|---|
@@ -1492,6 +1496,37 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 - 新增表和可空字段，不破坏历史数据；历史 Run 的 `agent_id/model_id` 为空时 rollup 使用 `__none__` 维度。
 - 会话创建人、Run 触发人、用户消息发送人由业务层逐步补齐；历史空值按 session 创建人或 `__unknown__` 兜底。
 - 主链路只写事实表，统计刷新由后台定时任务执行；失败时保留最近成功 rollup 并标记 freshness。
+
+## V20260813143000 ClickHouse 运营投递控制表
+
+`V20260813143000__analytics_event_outbox_create_pipeline.sql` 新增以下 PostgreSQL 控制结构，并为旧小时/日表补齐缓存 Token 字段。它们只承担可靠投递、消费进度和切换门禁，不作为运营查询库。
+
+| 表 | 说明 |
+|---|---|
+| `analytics_event_outbox` | 与业务写同事务生成的脱敏临时事件；ClickHouse 确认写入后立即删除，失败时保留并退避重试。 |
+| `analytics_redis_outbox_checkpoints` | 按 Run 保存 `REDIS_SUMMARY` 同槽运营 stream 的最后消费 ID。 |
+| `analytics_clickhouse_cutovers` | 保存回填窗口、源/目标计数、`VERIFIED` 状态和旧汇总清理门禁。 |
+
+`V20260813143001__analytics_event_outbox_install_triggers.sql` 位于独立 `db/migration-postgresql` location，只在 PostgreSQL 方言下装配业务表触发器；H2 不解析 PostgreSQL `jsonb/plpgsql`。触发器捕获用户维度新增/修改/删除、登录、Session、消息、Run、工具、子 Agent、Diff 与反馈，只写用户/组织快照、业务 ID、计数、Token、能力名和状态；用户删除写 `DELETED` 墓碑，不复制密码、统一认证号、消息正文、回答、普通工具标题、工具输入输出、反馈评论或费用。outbox 写入与业务写处于同一事务，触发器异常会使业务事务回滚，禁止静默形成统计缺口；ClickHouse 投递失败则保留 outbox 并退避重试，只形成运营数据延迟。
+
+两个 migration 都是尚未进入稳定环境的开发期候选。合入交付分支前，集成人必须按本文件总则收集个人库、稳定库和企业库的 `flyway_schema_history`；如果任一需保留数据库已经执行，则版本、文件名和字节必须锁定，不得重排或改写。
+
+## ClickHouse V20260813150000 运营事实与汇总
+
+ClickHouse 使用独立 `ClickHouseSchemaMigrator` 执行 `db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql`。DDL 全部可幂等重放，并在 `analytics_schema_history` 锁定版本与 SHA-256；同版本 checksum 不一致时 Java 拒绝启动。该迁移不接入平台唯一 PostgreSQL Flyway，也不创建第二套关系库迁移器。
+
+| 表 | 生命周期与用途 |
+|---|---|
+| `analytics_ingestion_events` | 脱敏原始运营事件；`ReplacingMergeTree(event version)` 幂等，TTL 2 年。 |
+| `analytics_activity_facts` | 用户活动、消息、Run、Token、Diff 计数事实；物化视图生成，TTL 2 年。 |
+| `analytics_user_dimensions` | 每个用户最新脱敏维度与删除墓碑；漏斗基数、组织人数和级联下拉直接查询，不设 TTL。 |
+| `analytics_capability_facts` | Agent、Skill、Tool 调用事实；子 Agent 使用 `session.child.discovered` 的真实 Agent 名，排除泛化 `task` 工具；TTL 2 年。 |
+| `analytics_feedback_facts` | 满意/不满意及原因码事实，不保存评论；TTL 2 年。 |
+| `analytics_user_activity_hourly/daily` | 北京时间小时/日用户汇总，保留用户与组织快照，不设 TTL。 |
+| `analytics_run_duration_histogram_hourly` | 兼容直方图汇总；新版查询可直接使用 ClickHouse 精确分位数，不设 TTL。 |
+| `analytics_rollup_watermarks` | 入库/回填 freshness、覆盖窗口与状态，不设 TTL。 |
+
+实时链路由 XXL `opencode-runtime.analytics-ingestion` 每分钟最多投递 500 条，再由 `opencode-runtime.analytics-rollup` 每 5 分钟刷新最近窗口。历史回填先读取全量用户维度，再按自然日读取 PostgreSQL 业务历史，以 `backfill-v1:` 稳定 ID 写入登录、会话状态、用户/助手消息、Run 结果与 Token、能力调用、Diff 和反馈完整事实；行为只走稳定明细来源，不再叠加旧聚合原始查询。源事件数与 ClickHouse 活动事实、用户维度事实数量之和完全一致后才写 `VERIFIED`。旧 PostgreSQL 汇总必须在备份与页面验收后，通过单节点第二阶段开关清理，禁止手工提前删除。所有运营查询，包括漏斗基数、组织人数和级联筛选项，都只读 ClickHouse。完整配置、专机部署、验收与回滚见 `deploy/internal/CLICKHOUSE-ANALYTICS.md`。
 
 ## V20260626210000 数据库表和字段中文注释
 
@@ -1797,6 +1832,57 @@ migration 创建 `user_notifications`：
 该版本高于 QA Memory 扩展兼容链的 `V20260810110000` 至 `V20260810110002`，通知本身无需复制第二份兼容 SQL：既有 `DatabaseMigrationCompatibilityCustomizer` 仍只过滤不适配的低版本主分享 migration，通知 migration 由主 location 在分享前向迁移之后顺序执行。反向把 QA Memory 合入已执行通知和 `V20260810234154` 的 release 数据库时，使用的是独立的 `V20260811170050` QA Memory 补偿，不是通知迁移副本。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 对每套已知已部署 history 升级到当前 HEAD 后统一断言 `user_notifications` 表和关键列存在；通知仓储 PostgreSQL 集成测试另覆盖空库、主分享基线、审计回填和查询口径。
 
 打包后必须分别从 persistence JAR 和最终应用 JAR 读取 `db/migration/V20260810170000__user_notifications_create_notification_center.sql`，与已测试源码计算 SHA-256；三者不一致不得发布。禁止通过 `repair`、`outOfOrder` 或手工修改 `flyway_schema_history` 处理冲突。
+
+## V20260811210453 本地 OpenCode 客户端运行目标
+
+`V20260811210453__local_client_credentials_create_runtime.sql` 新增：
+
+| 表 | 用途与关键约束 |
+|---|---|
+| `local_client_credentials` | `user_id` 唯一；保存 RSA 密文、SHA-256 指纹、掩码、正版本和 `ACTIVE/REVOKED` 状态，不保存额外明文列。 |
+| `local_client_instances` | `lci_...` 稳定实例、owner、名称、平台/架构/版本和连接历史；`(client_instance_id,user_id)` 供工作区 owner 外键。 |
+| `local_client_workspaces` | Workspace、用户、实例、规范根路径、root digest 和文件系统身份；同用户/实例/root digest 唯一。 |
+
+`sessions` 增加 `runtime_kind/local_client_instance_id`，`runs` 增加
+`target_runtime_kind/target_local_client_instance_id`，`night_execution_tasks` 增加同名固定目标字段并允许
+服务端 ID 在本地目标时为空。CHECK 约束保证：服务端目标只能带 Linux 服务器且不能带本地实例；本地目标
+必须带实例且夜间任务不能同时带 Linux 服务器。默认值均为 `SERVER_PROCESS`，因此旧行和旧序列化数据保持
+兼容。
+
+所有新增业务 SQL 位于 `LocalClientMapper.xml`、`SessionRuntimeTargetMapper.xml`、
+`RunRuntimeTargetMapper.xml` 和扩展后的 `NightExecutionTaskMapper.xml`，未新增 JDBC SQL。发布前必须按
+Flyway 历史兼容规则在全部已知 PostgreSQL 基线执行升级，并核对最终 JAR 内 migration SHA-256；只验证
+空库不构成交付验证。
+
+release 的个人持久库已经执行到 `V20260812144051`，但从未执行 client 分支较低的
+`V20260811210453`。唯一 `DatabaseMigrationCompatibilityCustomizer` 会在该类 history 中过滤低版本主
+migration，并只加载隔离路径
+`db/migration-compat/local-client-runtime-after-release/V20260812202425__local_client_credentials_create_runtime_after_release.sql`；
+前向 migration 创建与主 migration 相同的表、字段、约束、索引和注释，不写业务数据。空库或尚未越过
+`20260811210453` 的正常主链仍执行原 migration；已经执行原 migration 的 client 历史继续按原字节校验，
+主路径与前向路径同时出现时失败关闭。两条路径均保持 `outOfOrder=false`，不执行 `repair`，不修改
+`flyway_schema_history`。
+
+主 migration SHA-256 固定为
+`b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970`，前向 migration SHA-256 固定为
+`168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026`；
+`FlywayMigrationNamingTest` 锁定两份源码字节，
+`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 用真实 PostgreSQL 覆盖正常主链、
+release 缺失低版本 migration 的升级和第二次启动解析。
+
+## V20260817193414 本地客户端下载灰度用户
+
+`V20260817193414__local_client_rollout_users_create.sql` 新增 `local_client_rollout_users`。`user_id` 是引用
+`users(user_id)` 的主键，`enabled` 默认 true；`updated_by_user_id`、`created_at`、`updated_at` 保留最近
+启用或移出灰度名单的操作人和时间。表中没有 client key、客户端实例、IP、端口或本地路径。
+
+名单为空时客户端下载入口对所有用户隐藏。启用使用 `LocalClientMapper.xml` 的 PostgreSQL
+`ON CONFLICT` 幂等写入；移出名单只把 `enabled` 更新为 false，不删除审计行；查询和计数只读取
+`enabled=true`。H2 集成测试覆盖 MyBatis fallback，正式合并和发布仍须在每套已知 PostgreSQL
+`flyway_schema_history` 上验证升级到 HEAD，并核对源码、persistence JAR 和最终应用 JAR 内 migration
+字节一致。该 migration 不写任何灰度用户数据，因此升级后不会自动向任何用户展示入口。
+源码 SHA-256 固定为 `88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba`，
+`FlywayMigrationNamingTest` 锁定文件名和字节。
 
 ## V20260811213000 Agent 配置 dispose 通知枚举扩展
 

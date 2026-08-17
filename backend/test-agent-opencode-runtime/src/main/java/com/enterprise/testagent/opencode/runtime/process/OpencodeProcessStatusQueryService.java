@@ -3,6 +3,7 @@ package com.enterprise.testagent.opencode.runtime.process;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAtomicMutationPort;
@@ -35,6 +36,13 @@ public class OpencodeProcessStatusQueryService {
     private final Clock clock;
     private final OpencodeServerAddressResolver addressResolver;
     private final OpencodeWeakHealthHttpClient weakHealthHttpClient;
+    private LocalClientLifecycleGateway localClientLifecycleGateway;
+
+    /** LOCAL_CLIENT 状态查询仍由公共状态服务统一入口委托。 */
+    @Autowired
+    void setLocalClientLifecycleGateway(LocalClientLifecycleGateway localClientLifecycleGateway) {
+        this.localClientLifecycleGateway = Objects.requireNonNull(localClientLifecycleGateway);
+    }
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -167,6 +175,17 @@ public class OpencodeProcessStatusQueryService {
             return initializingProbe(process.get(), checkedAt);
         }
         return queryExisting(process.get(), checkedAt, traceId, true, false);
+    }
+
+    /** 查询客户端实际进程和 loopback health，不创建服务器进程或 ExecutionNode 记录。 */
+    public LocalClientLifecycleResult queryLocalClient(
+            LocalClientInstanceId clientInstanceId,
+            long connectionGeneration,
+            String traceId) {
+        if (localClientLifecycleGateway == null) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地客户端生命周期网关未启用");
+        }
+        return localClientLifecycleGateway.status(clientInstanceId, connectionGeneration, traceId);
     }
 
     /**

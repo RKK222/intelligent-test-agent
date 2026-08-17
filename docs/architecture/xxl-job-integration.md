@@ -70,6 +70,7 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 - `V9` 注册每天北京时间 02:00 的闲置用户进程关闭任务 `opencode-runtime.inactive-user-process-cleanup`；XXL 只取得全局锁并广播，各 Java 仅处理本机实际持有 manager 连接的进程。
 - `V10` 注册每 5 分钟的内部模型供应商探活任务 `opencode-runtime.internal-model-probe`；GLOBAL_MUTEX 只保证单实例执行，实际探活遍历当前 Java 进程 registry 快照中的启用供应商并落观测明细与探活状态。
 - `V11` 注册每天北京时间 03:30 的内部模型调用观测数据清理任务 `opencode-runtime.internal-model-observability-retention`；删除 30 天前明细与 180 天前小时聚合。
+- `V12` 注册每分钟 ClickHouse 运营事实入库任务 `opencode-runtime.analytics-ingestion`；handler 使用 `GLOBAL_MUTEX` 每轮最多消费 500 条脱敏 PostgreSQL/Redis 事件，ClickHouse 开关关闭时安全跳过。
 - `V12` 注册每天北京时间 04:10 的 SCM Git 姓名补偿任务 `configuration-management.scm-git-name-sync`；任务不访问远端，对每个本机应用仓库只执行一次最多 50,000 条匹配提交的 `origin` 跟踪历史扫描，再按 500 个 SSH Key 用户一页比对和批量写库。
 - 后续新增任务或调整既有生产默认配置必须新建更高版本 SQL；禁止改写已执行 migration，也禁止启动时执行非版本化 upsert。
 

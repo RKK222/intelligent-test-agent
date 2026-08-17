@@ -5,6 +5,7 @@ import faqManual from "../../../user-manual/docs/guide/faq.md?raw";
 import featureOverviewManual from "../../../user-manual/docs/guide/feature-overview.md?raw";
 import firstTimeSetupManual from "../../../user-manual/docs/guide/first-time-setup.md?raw";
 import gettingStartedManual from "../../../user-manual/docs/guide/getting-started.md?raw";
+import memoryManual from "../../../user-manual/docs/guide/memory.md?raw";
 import processInitializationManual from "../../../user-manual/docs/guide/process-initialization.md?raw";
 import referenceConfigManual from "../../../user-manual/docs/guide/reference-config.md?raw";
 import settingsManual from "../../../user-manual/docs/guide/settings.md?raw";
@@ -22,6 +23,7 @@ export type HelpTopicId =
   | "reference-config"
   | "directory-mapping"
   | "conversation"
+  | "memory"
   | "agent-config"
   | "faq";
 
@@ -110,6 +112,13 @@ export const HELP_TOPICS: HelpTopic[] = [
     content: conversationManual
   },
   {
+    id: "memory",
+    label: "长期记忆",
+    description: "个人、团队记忆与 Skill 提案",
+    path: "guide/memory.html",
+    content: memoryManual
+  },
+  {
     id: "agent-config",
     label: "Agent 配置",
     description: "公共与应用配置边界",
@@ -159,8 +168,12 @@ export function stripMarkdownFrontmatter(content: string): string {
 export function buildManualQuestionPrompt(topic: HelpTopicId, question: string): string {
   const currentTopic = helpTopicById(topic);
   const normalizedQuestion = question.trim().slice(0, 500);
-  // 常见问题和周更页都覆盖多个场景，单独放宽到 5600 字，避免宠物只读到前半页。
-  const contextLimit = currentTopic.id === "faq" || currentTopic.id === "weekly-updates" ? 5_600 : 2_800;
+  // 常见问题和周更页都覆盖多个场景；dev 周更另含长期记忆，放宽但仍保持单章有界。
+  const contextLimit = currentTopic.id === "weekly-updates"
+    ? 7_000
+    : currentTopic.id === "faq"
+      ? 5_600
+      : 2_800;
   const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, contextLimit);
   return [
     "你正在回答 MIMO 测试智能体用户手册问题。请只依据下方内置手册资料作答；资料没有覆盖时直接说明，并建议用户联系平台管理员，不要编造按钮或操作路径。",

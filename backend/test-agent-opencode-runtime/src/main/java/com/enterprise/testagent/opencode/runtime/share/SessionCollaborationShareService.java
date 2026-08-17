@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.notification.UserNotificationApplicationService;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import java.security.SecureRandom;
 import java.security.MessageDigest;
 import java.time.Clock;
@@ -53,6 +54,7 @@ public class SessionCollaborationShareService {
     private final Clock clock;
     private final SecureRandom secureRandom;
     private UserNotificationApplicationService notificationService;
+    private LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard;
 
     /** 生产环境固定使用 UTC 时钟和 256 位 SecureRandom 分享标识。 */
     @Autowired
@@ -80,6 +82,7 @@ public class SessionCollaborationShareService {
     /** 查询所属人的当前分享设置；没有分享时返回空。 */
     public SessionShare get(UserId actor, SessionId sessionId) {
         Session session = requireOwnedActiveSession(actor, sessionId);
+        requireCollaborationSupported(session.sessionId());
         return shareRepository.findBySessionId(session.sessionId()).orElse(null);
     }
 
@@ -93,6 +96,7 @@ public class SessionCollaborationShareService {
             List<SessionShareMemberCommand> memberCommands,
             String traceId) {
         Session session = requireOwnedActiveSession(actor, sessionId);
+        requireCollaborationSupported(session.sessionId());
         Instant now = clock.instant();
         List<SessionShareMembership> memberships = resolveMembers(actor, memberCommands, now);
         SessionShare existing = shareRepository.findBySessionId(sessionId).orElse(null);
@@ -205,6 +209,7 @@ public class SessionCollaborationShareService {
         try {
             Session session = sessionRepository.findById(share.sessionId())
                     .orElseThrow(() -> shareExpired("SESSION_MISSING"));
+            requireCollaborationSupported(session.sessionId());
             if (!session.workspaceId().equals(share.workspaceId())) {
                 throw shareExpired("SCOPE_CHANGED");
             }
@@ -346,6 +351,21 @@ public class SessionCollaborationShareService {
     @Autowired(required = false)
     void setNotificationService(UserNotificationApplicationService notificationService) {
         this.notificationService = notificationService;
+    }
+
+    /** 可选注入保持既有领域单测构造器兼容；生产环境始终执行本地能力守卫。 */
+    @Autowired(required = false)
+    void setLocalRuntimeCapabilityGuard(LocalRuntimeCapabilityGuard guard) {
+        this.localRuntimeCapabilityGuard = guard;
+    }
+
+    private void requireCollaborationSupported(SessionId sessionId) {
+        if (localRuntimeCapabilityGuard != null) {
+            localRuntimeCapabilityGuard.requireSessionSupported(
+                    sessionId,
+                    "collaboration",
+                    "本地 OpenCode 工作区首版不开放协作分享");
+        }
     }
 
     /** 通知已读失败不能把已成功的分享鉴权改写为失败。 */

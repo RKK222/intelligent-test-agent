@@ -220,6 +220,33 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void localProfileGeneratesInternalModelProxyApiKeyWhenEnvironmentValueIsMissing() {
+        profileContextRunner
+                .withPropertyValues("spring.profiles.active=local")
+                .run(context -> assertThat(context.getEnvironment()
+                        .getProperty("test-agent.internal-model-proxy.api-key"))
+                        .isNotBlank());
+    }
+
+    @Test
+    void localProfilePrefersExplicitInternalModelProxyApiKey() {
+        profileContextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=local",
+                        "TEST_AGENT_INTERNAL_PROXY_API_KEY=explicit-local-proxy-key")
+                .run(context -> assertThat(context.getEnvironment()
+                        .getProperty("test-agent.internal-model-proxy.api-key"))
+                        .isEqualTo("explicit-local-proxy-key"));
+    }
+
+    @Test
+    void defaultProfileDoesNotGenerateInternalModelProxyApiKey() {
+        profileContextRunner.run(context -> assertThat(context.getEnvironment()
+                .getProperty("test-agent.internal-model-proxy.api-key"))
+                .isNull());
+    }
+
+    @Test
     void defaultDeploymentModeIsExternal() {
         contextRunner.run(context -> {
             TestAgentRuntimeProperties.Deployment deployment = context

@@ -2,6 +2,8 @@
 
 本文档是 SSE 和平台事件流的稳定入口。新增或修改事件类型必须更新本文件。
 
+通用长期记忆 V1 不新增事件类型；聊天中的“参考了 N 条记忆”通过 `/api/internal/platform/memory/v1/run-usage/query` 批量恢复。原生 Mem0 学习、双 collection 投影、团队审核和证据 Session/Run 引用都不进入 RunEvent，避免改变既有回放与兼容边界。
+
 ## 文档模板
 
 每个事件类型必须记录：
@@ -51,7 +53,7 @@
 
 | wire name | 说明 |
 |---|---|
-| `run.created` | Run 已创建；前端据其 `runId` 绑定当前根用户消息。`REDIS_SUMMARY` 仍可额外携带 `storageMode/clientRequestId/assistantSummaryMessageId` 供摘要定位兼容。 |
+| `run.created` | Run 已创建；前端据其 `runId` 绑定当前根用户消息。`REDIS_SUMMARY` 仍可额外携带 `storageMode/clientRequestId/assistantSummaryMessageId` 供摘要定位兼容；受保护 Agent Run 可额外携带 `protectedAgent` 修订审计摘要。 |
 | `run.started` | Run 已开始执行。 |
 | `run.cancelling` | Run 正在取消。 |
 | `run.succeeded` | Run 成功结束。 |
@@ -98,6 +100,12 @@
 `permission.asked` 的原生请求标识可能位于顶层 `id`，回复可能使用 `requestID`；平台按顶层 `requestId/requestID/id/permissionId/questionId` 兼容匹配，不能误取嵌套 option 的 `id`。前端 `PermissionRequest` 优先保留 `patterns[]`，回退旧 `pattern`；展示标题默认“需要权限”，已知权限说明与 OpenCode 1.18.4 中文文案一致，未知权限仍只展示通用标题和路径，不暴露内部 permission type 或 request id。路径只出现在已授权用户的交互卡中，不进入铃铛通知文案或日志。
 
 task part 指向新 session 时，`parentSessionId` 必须等于发起该 task 的 session，而不是固定 root。root task 建立 child，child task 建立 grandchild；task part 本身仍归属于发起它的 scope。当前运行基线强制 `subagent_depth=2`，前端按精确 `sessionId` 隔离 root、child 和 grandchild 时间线，SSE 字段结构不变。
+
+受保护 Agent Run 的 `run.created.payload.protectedAgent` 是 additive 审计字段，结构为
+`{runtimeAgentId,assetId,revisionId,contentSha256,skills[]}`；`skills[]` 每项只有
+`assetId/revisionId/contentSha256`。它固定对应本次服务器执行实际解析的不可变修订，用于审计和复现。
+payload 禁止包含 Agent/Skill 正文、系统提示词、MCP grant、本地路径或文件内容。受保护运行仍沿用既有
+RunEvent 类型、SSE 续传、permission/question 和终态语义，不新增事件名；旧前端可以忽略该字段。
 
 ## `run.snapshot.reset`
 
@@ -503,7 +511,7 @@ manager 复用现有 `sessionPath/configPath/environment` 字段，在合并调�
 
 夜间任务的提交、时段容量、待执行列表、改期、取消和最终失败卡同样只通过 `/api/internal/platform/opencode-runtime/night-execution/**` HTTP 查询/变更，不把 `SCHEDULED/DISPATCHING/DISPATCHED/CANCELLED/FAILED` 调度状态写入 RunEvent。XXL/内部批量接口只负责取得普通 Run 的已受理 runId，不等待或发布 Run 终态；`DISPATCHED` 只表示已交给 Run。此后执行过程与前端即时发送完全复用该 Run 的既有 RunEvent SSE、snapshot/replay、终态和用户级 runtime-state；仅当根 `session.error` 创建统一撤销重发时，才产生本文件定义的 `run.resend.*` 生命周期事件，它不是夜间任务调度状态。Session、USER 消息和 Run 的 HTTP DTO 可选携带 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...` 用于展示来源。旧前端忽略新增字段仍可按普通 Run 展示；待执行任务页面必须继续通过 HTTP 轮询和窗口 focus 刷新，不得从 RunEvent 猜测任务状态。
 
-AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId}/feedback` 只写入 `ai_message_feedbacks` 事实表，不产生 RunEvent，不通过 SSE 推送反馈状态；前端用既有 Run 终态事件绑定用户轮次，并通过 HTTP 批量接口恢复历史 Run 状态与当前用户反馈。旧消息反馈接口只作兼容。运营分析页 `/api/internal/platform/analytics/**` 只读取 hourly/daily rollup、水位和明细查询接口，不订阅 RunEvent，也不新增 SSE 事件类型。反馈、Diff、Run 状态和 token 等运营指标由后台 rollup runner 定期从事实表聚合，主链路不在 RunEvent 里补发统计事件。
+AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId}/feedback` 只写入 `ai_message_feedbacks` 事实表，不产生 RunEvent，不通过 SSE 推送反馈状态；前端用既有 Run 终态事件绑定用户轮次，并通过 HTTP 批量接口恢复历史 Run 状态与当前用户反馈。旧消息反馈接口只作兼容。运营分析页 `/api/internal/platform/analytics/**` 只查询 ClickHouse，不订阅 RunEvent，也不新增浏览器 SSE 事件类型。PostgreSQL 业务事务通过脱敏 outbox 捕获登录、Session、消息、Run、工具、Diff 和反馈计数；`REDIS_SUMMARY` 的运行事件在同槽 Lua 中另写运营 Stream。XXL 每分钟幂等投递并刷新 ClickHouse 汇总，失败只形成数据延迟，不在 RunEvent 里补发统计事件，也不反向失败业务写入。
 
 ## Internal Server Broadcast
 
@@ -939,3 +947,40 @@ manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字�
 # 需求导入的实时边界
 
 需求导入不新增或修改 `RunEvent`/SSE 事件。应用目录和兼容父子目录查询使用普通 HTTP；iframe 的工作区父子目录及“已导入/未导入”状态读取、文件写入分别复用一次性 ticket 保护的文件 WebSocket RPC `workspace.requirement-import-items`、`workspace.requirement-import`。`SUCCEEDED/PARTIAL` 完成后 iframe 只向同源父窗口发送脱敏汇总和后端生成的 `spec/{父条目}` 工作区相对展示路径；父页面先刷新文件树根节点，再只对本批次父目录复用现有逐层懒加载展开，完成后回传同源确认。`SUCCEEDED` 收到确认后才关闭弹窗，`PARTIAL` 解除生成蒙版并保留失败明细。父子页消息不是服务端事件，不进入事件流持久化或重放。
+
+# `local-opencode-client.v1` 反向 WebSocket 协议
+
+连接地址为 `/api/internal/platform/local-opencode-client/connections/ws`。客户端必须使用 WSS；只有本地测试
+配置可以显式放宽为 WS。JSON envelope 为：
+
+```json
+{
+  "protocolVersion": "local-opencode-client.v1",
+  "type": "HEARTBEAT",
+  "requestId": "lch_...",
+  "traceId": "trace_...",
+  "connectionGeneration": 42,
+  "payload": {}
+}
+```
+
+`REGISTER` 是唯一不带 generation 的正常帧，payload 带 client key、稳定实例 ID、名称、平台、架构、客户端
+版本、OpenCode 版本和展示地址。后台验证用户 key 后返回 `REGISTERED`，并保存持有
+`backendProcessId + generation`。同实例后认证连接立即替代旧连接。
+
+| 帧 | 方向 | 说明 |
+|---|---|---|
+| `REGISTER` / `REGISTERED` | client→server / server→client | 认证、generation 和初始短期模型 grant。 |
+| `HEARTBEAT` / `HEARTBEAT_ACK` | 双向 | 每 5 秒上报实际进程状态并刷新 15 秒 TTL。 |
+| `LIFECYCLE_COMMAND` / `LIFECYCLE_RESULT` | server→client→server | `START/RESTART/STOP/STATUS`，返回 PID、权威启动时间、loopback health。 |
+| `HTTP_REQUEST` / `HTTP_RESPONSE` | server→client→server | OpenCode 非流式 HTTP；认证、Host、Cookie 等敏感/逐跳头不透传。 |
+| `STREAM_OPEN/STREAM_CHUNK/STREAM_END` | client→server | OpenCode SSE/流式 HTTP；顺序分片并等待发送完成形成背压。 |
+| `FILE_REQUEST` / `FILE_RESPONSE` | server→client→server | directory picker、根注册和完整 Workspace 文件 RPC。 |
+| `BINARY_CHUNK` | 双向预留/传输 | Base64 数据的原始分片上限为 256 KiB。 |
+| `MODEL_GRANT` | server→client | 原子替换短 TTL 模型 grant，不下发平台模型 key。 |
+| `CANCEL` | 双向 | 按 targetRequestId 取消 HTTP/SSE、文件或生命周期请求。 |
+| `ERROR` | 双向 | 稳定 code、安全 message、retryable 和无敏感 details。 |
+
+每帧上限 2 MiB，requestId/traceId 最长 128 字符。认证后缺 generation、generation 非正数、版本不匹配、
+重复 requestId、超大分片或未知帧都失败关闭。断连时客户端取消全部未完成任务、清理临时上传并清空模型
+grant；服务端完成的 Run 不自动切换到服务端实例或其它本地实例。

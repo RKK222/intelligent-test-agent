@@ -91,6 +91,11 @@
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback/me` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/overview` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/filter-options` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/funnel` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/hourly-heatmap` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/token-operations` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/capabilities` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/timeseries` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/peaks` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/users` | 无旧 URL |
@@ -234,12 +239,17 @@ Base URL：`/api/internal/platform/opencode-runtime`。该能力只写满意度�
 
 ## 运营分析 API
 
-Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`，普通管理员和匿名用户分别返回 `FORBIDDEN`、`UNAUTHENTICATED`。查询接口只读 rollup 表；失败或延迟时通过响应中的 `freshness.status=STALE|FAILED` 标记最近成功数据，不在 API 请求时扫描原始事实宽表。
+Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`，普通管理员和匿名用户分别返回 `FORBIDDEN`、`UNAUTHENTICATED`。开启 `TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED=true` 后，全部运营指标、明细和筛选项只从 ClickHouse 查询；API 请求不扫描 PostgreSQL 业务事实或旧汇总表，也不在 ClickHouse 故障时静默降级。不可查询时统一返回 `503 ANALYTICS_UNAVAILABLE`；可查询但入库延迟时通过 `freshness.status=STALE|FAILED` 标记最近成功状态。
 
-通用 query 参数：`startTime`、`endTime`、`granularity=hour|day|week|month`、`organization`、`rdDepartment`、`department`、`userId`、`agentId`、`model`、`workspaceId`、`topN`、`page`、`pageSize`、`sort`。未传时间时默认最近 30 天；约束：`topN<=100`，`pageSize<=100`，趋势点数 `<=500`；`hour` 粒度最多 48 小时，`day` 粒度最多 180 天。`timeseries` 会为查询范围内无活动的时间桶返回零值点，`peaks.heatmap` 固定按周一至周日、每天 0–23 时返回 168 个格点，避免稀疏事实改变坐标语义。
+通用 query 参数：`startTime`、`endTime`、`granularity=hour|day|week|month`、`organization`、`rdDepartment`、`department`、`user`、`topN`、`page`、`pageSize`、`sort`。`user` 对用户 ID 和用户名做大小写不敏感的包含匹配；机构、研发部和部门应使用 `/filter-options` 返回的级联选项。未传时间时默认最近 30 天，最长 366 天；`topN<=100`，`pageSize<=100`，趋势点数 `<=500`，`hour` 粒度最多 48 小时，`day` 粒度最多 180 天。旧参数 `agentId/model/workspaceId` 在一个兼容周期内保留解析但只要非空就返回 `VALIDATION_ERROR`，不再参与筛选。`timeseries` 会补齐无活动时间桶；旧 `/peaks` 仍返回周一至周日、每天 0–23 时的 168 个聚合格点。
 
 | 方法 | 路径 | 用途 | 响应 |
 |---|---|---|---|
+| `GET` | `/filter-options` | 机构、研发部、部门级联下拉选项及 freshness | `AnalyticsFilterOptions` |
+| `GET` | `/funnel` | 总用户、活跃用户、深度用户漏斗及口径说明 | `AnalyticsFunnel` |
+| `GET` | `/hourly-heatmap?metric=USER_MESSAGES|PRIMARY_TOKENS|CACHE_TOKENS` | 按上海自然日逐日返回 0–23 时完整格点，最多 90 天 | `AnalyticsHourlyHeatmap` |
+| `GET` | `/token-operations` | 总 Token、主 Token、缓存 Token、Token 使用人数/覆盖率、人天日均、复用率、日趋势和用户强度分层 | `AnalyticsTokenOperations` |
+| `GET` | `/capabilities` | Agent、Skill、Tool 的去重调用数、使用人数、使用率和结果分布 | `AnalyticsCapabilities` |
 | `GET` | `/overview` | 用户规模、漏斗、使用强度、Run 结果、满意度、Diff 采纳、token 强度与 freshness | `AnalyticsOverview` |
 | `GET` | `/timeseries` | 按 hour/day/week/month 聚合趋势 | `AnalyticsTimeSeriesPoint[]` |
 | `GET` | `/peaks` | 峰值时段和小时热力 | `AnalyticsPeaks` |
@@ -247,11 +257,13 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `GET` | `/organizations?groupBy=organization|rdDepartment|department` | 组织维度排行 | `AnalyticsOrganizationUsageRow[]` |
 | `GET` | `/satisfaction` | 满意率、反馈覆盖率、负反馈原因分布和反馈明细 | `AnalyticsSatisfaction` |
 | `GET` | `/exceptions` | 失败/取消 Run 明细，不返回 prompt 或 assistant 原文 | `PageResponse<AnalyticsExceptionDetail>` |
-| `GET` | `/export?type=overview|timeseries|users|organizations|feedback|exceptions` | CSV 导出；不导出 prompt 原文、assistant 原文或 cost/costUsd 字段 | `text/csv` |
+| `GET` | `/export?type=overview|timeseries|users|organizations|feedback|exceptions|funnel|token-operations|capabilities` | CSV 导出；不导出 prompt、回答、反馈评论或 cost/costUsd 字段 | `text/csv` |
 
-核心口径：满意率为 `positive/(positive+negative)`，无反馈时为 `null`；反馈覆盖率为 `(positive+negative)/assistantMessageCount`；Diff 采纳率为 `diffAccepted/diffProposed`，无 proposed 时为 `null`；p95 耗时基于 `analytics_run_duration_histogram_hourly` 近似计算；token 仅包含 input/output/reasoning/total，不统计、不展示、不导出费用字段。
+核心口径：总用户是 ClickHouse 最新用户维度快照中当前未删除的全部平台用户，不受所选时间影响；活跃用户是所选时间内至少发送 1 条用户消息的人；深度用户是活跃用户中至少 2 个上海自然日有使用且累计至少 5 条用户消息的人。主 Token 为 `input+output+reasoning`，总 Token 为主 Token 加缓存 read/write；日人均 Token 的分母只包含当天产生任意主或缓存 Token 的用户人天。Token 使用率为 Token 用户数/活跃用户数，复用率为至少 2 个自然日有 Token 的用户数/Token 用户数，用户强度按每 Token 活跃日总 Token 的四分位数分层。能力使用率为调用该能力的去重用户数/同期活跃用户数；Agent 主 Run、`task` 子 Agent、`skill` 和其它 Tool 分开统计，开始态与终态按 `runId+scopeId+callId` 去重，未看到终态的调用计入 `incompleteCount`。
 
-对应测试：`AnalyticsControllerTest`、`AnalyticsQueryServiceTest`、`analytics-management-panel.test.ts`。
+满意率为 `positive/(positive+negative)`，无反馈时为 `null`；反馈覆盖率为 `(positive+negative)/assistantMessageCount`；Diff 采纳率为 `diffAccepted/diffProposed`，无 proposed 时为 `null`；p95 耗时基于 ClickHouse 小时直方图近似计算。运营数据不统计、不展示、不导出费用字段。
+
+对应测试：`AnalyticsControllerTest`、`AnalyticsQueryServiceTest`、`AnalyticsOperationsQueryServiceTest`、`ClickHouseAnalyticsIntegrationTest`、`analytics-management-panel.test.ts`。
 
 ## 统一响应
 
@@ -308,6 +320,7 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `OPENCODE_UNAVAILABLE` | 503 | opencode 服务不可用 |
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
 | `RUNTIME_STATE_UNAVAILABLE` | 503 | 运行态存储不可用 |
+| `ANALYTICS_UNAVAILABLE` | 503 | 运营分析存储不可用 |
 | `NIGHT_EXECUTION_UNAVAILABLE` | 503 | 夜间执行功能不可用 |
 | `EXTERNAL_API_UNAVAILABLE` | 503 | 外部 API 认证服务不可用 |
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
@@ -3020,7 +3033,7 @@ API Key 管理基础路径为 `/api/internal/platform/system-management/api-keys
 
 ### system-management 用户管理 API
 
-用户管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。当前创建用户能力用于研发测试便捷造号，创建时使用默认密码 `123456`，前端不传密码字段。当前不包含普通用户发起审批通知流，角色调整由超级管理员直接操作。
+用户管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`。当前创建用户能力用于研发测试便捷造号，创建时使用默认密码 `123456`，前端不传密码字段。当前不包含普通用户发起审批通知流，角色调整由超级管理员直接操作。前端在独立“系统管理 → 用户管理”页组合本节账号 API、记忆白名单 API 与本地客户端 rollout API，在同一用户行维护两类灰度；记忆模型和抽取策略仍是平台全局配置，不按用户重复保存。
 
 Base URL：`/api/internal/platform/system-management`
 
@@ -3599,7 +3612,7 @@ Base URL：`/api/internal/platform/model-gateway/v1`。所有请求使用
 除 transcription 外，POST 请求体必须是 JSON 对象并含 textual `model`；上限 16 MiB。网关把公开模型 ID
 改写为上游 ID后流式转发。transcription 使用 multipart，必须包含 `model` 与 `file`，每个 part 上限
 100 MiB，临时文件目录由部署配置限定且不持久化。连接、首个响应 chunk 和相邻 chunk 空闲边界分别
-为 10/30/120 秒；响应头等待时间为 30 秒。不设置整体
+为 10/30/120 秒；响应头等待对交互式 LobeHub 为 30 秒，对 Memory 抽取请求冷启动为 120 秒。不设置整体
 SSE 生命周期超时；下游取消会取消上游订阅。
 
 上游非 2xx 保留 HTTP status，但丢弃原始正文并返回固定 JSON：
@@ -4046,6 +4059,60 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 对应测试：`ToolboxControllerTest`、`ToolboxCatalogServiceTest`、`ToolboxCatalogContractTest`、`MyBatisToolboxClickRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发/用户删除测试。
 
+### 通用长期记忆 V1
+
+用户入口 Base URL：`/api/internal/platform/memory/v1`。`GET /availability` 只要求平台登录，只返回“记忆总开关已启用且当前用户位于记忆灰度白名单”的布尔结果；其余用户接口除登录外都要求总开关开启且当前用户已在名单中。默认关闭且白名单为空，因此 migration 上线后不会改变既有对话。前端以该 availability 结果同时控制活动栏入口和 `/memories` 路由，未授权或校验失败时不挂载记忆页面并返回工作台；这只是界面收口，不能替代其它记忆 API 的服务端白名单鉴权。完整记忆正文从 Mem0 读取，平台数据库中的 `displaySummary` 只用于服务不可用时的降级展示。旧 `/api/internal/platform/qa-memory/v1/**` 统一返回 `410 API_GONE`。
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/availability` | 查询记忆总开关与当前用户灰度授权是否同时生效；仅返回 `enabled`，供入口和路由失败关闭 |
+| `GET/POST` | `/personal` | 分页查询或手工新增个人记忆；范围仅 `PERSONAL_GLOBAL/PERSONAL_APPLICATION` |
+| `GET` | `/team` | 按当前有效 Application 成员关系查询团队记忆 |
+| `POST` | `/team/proposals` | 成员手工提交团队候选；可选 `sourceMemoryId` 只复制本人个人记忆的证据引用和摘要 |
+| `POST` | `/team/{memoryId}/reviews` | `APP_ADMIN` 审核候选，决定为 `APPROVE/REJECT` |
+| `GET/PATCH/DELETE` | `/memories/{memoryId}` | 详情、编辑和归档；修改必须携带 `expectedVersion` |
+| `POST` | `/personal/{memoryId}/promote-global` | owner 把 Application 个人记忆提升为个人全局 |
+| `POST` | `/personal/{memoryId}/pause` | 暂停已生效个人记忆 |
+| `GET` | `/memories/{memoryId}/evidence` | 返回 `sessionId/sessionTitle/transcriptAvailable/runId` 和不超过 200 字摘要 |
+| `POST` | `/run-usage/query` | 按最多 200 个 Run ID 批量恢复真正注入的记忆 |
+| `GET/POST` | `/skill-proposals` | 查询提案，或从已生效个人/团队记忆发起 `PENDING_REVIEW` 提案；此时不生成草稿 |
+| `POST` | `/skill-proposals/{proposalId}/reviews` | 所属 Application 的 `APP_ADMIN` 审核；通过后才生成可编辑 `SKILL.md` 草稿，拒绝后状态为 `REJECTED` |
+| `PATCH/DELETE` | `/skill-proposals/{proposalId}` | 创建人或 `APP_ADMIN` 编辑已审核草稿、归档提案；修改携带 `expectedVersion` |
+| `POST` | `/skill-proposals/{proposalId}/published-asset` | `APP_ADMIN` 在既有文件 WebSocket、Git、发布和 Hub 流程完成后，关联同 Application 已发布 Skill 资产 |
+
+团队数据的唯一边界是 `application_members` 中未删除的成员关系。团队记忆不从聊天自动生成；成员只能手工提交 `CANDIDATE`，包括 `APP_ADMIN` 自己提交的候选也必须再次审核。成员退出后，团队记忆与所属 Application 的 Skill 提案查询、贡献、审核和运行时复用立即失效。修改时版本不匹配返回 `409 CONFLICT`；平台在数据库事务内锁定治理记录，先写未提交状态，再执行同 operationId 可重放的 Mem0 修改，避免多 Java 节点交错写入。Mem0 不可用时，列表仍可返回 `contentAvailable=false` 的安全摘要，但 `content` 为空；前端不得编辑该摘要或把它提交为团队候选，需要正文的创建/编辑返回 `503 MEMORY_UNAVAILABLE`。
+
+系统管理 Base URL：`/api/internal/platform/memory/v1/admin`，仅 `SUPER_ADMIN`：
+
+- `GET /health`：Mem0 多节点共享数据面、CPU/企业 Embedding profile、固定 CHAT、学习队列和投影 outbox；后端携带 service key 调用 `/ready` 并验证 `rawMessageCount=0`。
+- `GET/PATCH /settings`：固定 CHAT 模型、可空企业 Embedding 模型和只读 CPU profile；修改携带 `expectedVersion`。企业模型必须已启用、配置凭据、探测 `EMBEDDING` 成功并声明正维度。
+- `GET/POST/DELETE /whitelist...`：分页查询、启用和移除用户白名单；移除不会删除记忆，服务端学习、检索和治理访问立即停止，前端在下次路由进入或窗口聚焦复核时隐藏入口并退出记忆页面。
+
+能解析到当前 Application 的成功人工根 Run 只写无原文学习 outbox；无法解析 Application 时不自动学习，也不降级生成个人全局记忆。异步任务通过现有 Session 恢复表读取本轮 USER/ASSISTANT，并原样调用 `Mem0.add(messages,infer=true)`。不传自定义抽取 prompt，不产生 QA taskTypes、自定义 confidence、显式/隐式/临时候选。原生个人记忆直接生效，默认当前用户 + 当前 Application。
+
+Run 启动前一次请求检索个人全局、Application 个人和团队三个 scope；Java 总预算 2 秒，最多注入 6 条、约 800 tokens。任一 Embedding profile 可用即可返回，全部不可用或超时则不带记忆继续 Run。只有实际进入 system 上下文的条目写 usage。
+
+证据响应的 `sessionTitle/sessionId` 对授权查看者可见；`transcriptAvailable` 只在当前用户是 Session owner 时为 true，前端只能在此时提供 `/s/{sessionId}` 链接。所有成功/失败响应继续使用统一 envelope 与 traceId，日志不得记录记忆正文、聊天原文、模型凭据、HMAC 或 service key。
+
+#### memory-service 内部 REST
+
+Base URL 由 `TEST_AGENT_MEMORY_SERVICE_URL` 配置。除 `/health` 外必须携带 `X-Memory-Service-Key`：
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/health` | 仅 liveness |
+| `GET` | `/ready` | 共享 collection/profile、投影积压、`rawMessageCount=0` |
+| `POST` | `/memories` | `messages`、`infer`、scope/owner、固定 CHAT、operation/Run/Session 上下文 |
+| `GET/PUT/DELETE` | `/memories/{logicalMemoryId}` | 逻辑记忆 CRUD；update/delete 必须携带幂等 operation 上下文 |
+| `GET` | `/memories/{logicalMemoryId}/history` | 共享逻辑版本历史 |
+| `POST` | `/search` | 1–3 个 scope，多 profile RRF |
+
+学习最多 100 条消息、总计默认 120,000 字符；手工正文默认最多 8,000 字符；metadata JSON 最大 16 KiB且任意层级禁止原始消息/prompt/answer/transcript 键；query 最大 8,000 字符；topK API 最大 100、服务配置默认最大 50。旧 `/memory-api/v1/**` 返回 `410 API_GONE`。
+
+#### Mem0 模型网关 HMAC
+
+Mem0 对 `POST /api/internal/platform/model-gateway/v1/chat/completions|embeddings` 不使用浏览器 Bearer 或一次性 model grant，而使用集群 HMAC。请求头包含 client/user/run/session/operation、timestamp、nonce、body SHA-256、capability、signature；embedding 另含 `X-Embedding-Input-Type: query|document`。签名覆盖所有这些身份字段和固定路径，时间偏差默认 30 秒，nonce 在 Redis 中原子消费并保留 2 分钟。CHAT 只能路由管理设置中的固定模型，Embedding 只能路由已配置企业 profile 或固定 CPU profile。认证失败不回显供应商、凭据或正文。
+
 ### TCDS 案例维护
 
 `GET /api/internal/platform/integration/tcds/task-types` 与 `POST /api/internal/platform/integration/tcds/test-cases` 都要求平台登录，不校验额外角色。两个入口只用于 `041-测试设计` 当前编辑器案例维护，不是通用 HTTP 代理。
@@ -4139,6 +4206,88 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 和常量时间比较；浏览器 token 过滤器只对该精确路径豁免。请求只包含目标 `linuxServerId` 和最多 50 个 `resendId`，入口通过
 `BackendJavaRouteResolver`、`BackendHttpForwarder` 固定路由到目标 Java，不扫描 Redis 路由快照、不本机降级。响应只有每条状态与
 安全错误码，不含 prompt、回答或供应商响应。
+# 本地 OpenCode 客户端 API
+
+以下接口均要求当前用户登录态；除连接 WebSocket 和内部撤销入口外，不接受 client key。所有响应继续使用
+统一 `ApiResponse<T>`，并携带或生成 traceId。
+
+| Method | Path | Request / Response | 约束 |
+|---|---|---|---|
+| `GET` | `/api/internal/platform/local-opencode-client/credentials/me` | 掩码、版本、状态和时间 | 不返回明文或密文；不存在时返回空视图。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me` | 创建当前用户唯一 key，返回掩码视图 | 明文通过后续 copy 取得；重复创建幂等返回现有视图。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me/copy` | `{clientKey, version}` | 强制 `no-store/no-cache/no-referrer`；调用记审计。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新掩码视图 | 原子提升版本，撤销全部连接与模型 grant。 |
+| `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant。 |
+| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户所有稳定实例及在线、generation、OpenCode 状态 | reported/observed 地址仅展示。 |
+| `GET` | `/api/internal/platform/local-opencode-client/admin/rollout-users?page={page}&size={size}` | 本地客户端下载灰度用户分页 | 仅 `SUPER_ADMIN`；只返回启用记录和最近操作人/时间。 |
+| `POST` | `/api/internal/platform/local-opencode-client/admin/rollout-users` | `{userId}` → 灰度用户 | 仅 `SUPER_ADMIN`；目标必须是存在且可登录的平台用户，重复添加幂等启用。 |
+| `DELETE` | `/api/internal/platform/local-opencode-client/admin/rollout-users/{userId}` | 空响应 | 仅 `SUPER_ADMIN`；关闭下载入口但保留数据库审计记录，不撤销已安装客户端或 client key。 |
+| `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/opencode/commands` | `{action: START\|RESTART\|STOP\|STATUS}` | 复用公共启动/停止/状态服务；跨 Java 精确转发到持有 generation 的节点。 |
+| `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 只允许实例 owner；目标固定持有连接 Java。 |
+| `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 客户端先验证真实绝对目录，再事务性注册；离线失败。 |
+| `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
+| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map；服务端实例的 `localClientDownload=true` 表示当前用户位于下载灰度名单。缺字段、查询失败或值为 false 时前端必须隐藏。 |
+
+本地目录选择器取得 route 后，继续调用既有
+`POST /api/internal/platform/workspace-management/file-ws/tickets`，ticket 请求使用
+`mode=directory-picker`、`localClientInstanceId` 和 `connectionGeneration`；随后连接既有 `/file/ws`，只允许
+`directory.list {absolutePath,limit}`。普通本地工作区文件 ticket 使用 `mode=workspace` 并冻结
+`runtimeKind=LOCAL_CLIENT`、实例 ID、generation 和 root digest。
+
+Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追加：
+
+- `runtimeKind` / `targetRuntimeKind`：`SERVER_PROCESS` 或 `LOCAL_CLIENT`；
+- `localClientInstanceId` / `targetLocalClientInstanceId`；
+- `localClientOnline`、`connectionGeneration`（仅适用响应）；
+- `capabilities`：明确指示 chat、fileManagement、nightExecution、terminal、gitPublish、agentConfig、
+  attachments、collaboration、protectedAgentExecution。`protectedAgentExecution=true` 不改变
+  `agentConfig=false`；前者表示可在网页选择服务器受保护 Agent，后者仍表示客户端不接收或编辑平台 Agent
+  配置。
+
+旧调用不传 workspaceId 时仍选择服务端 OpenCode；本地实例离线或换代返回稳定冲突/不可用错误，不回退。
+客户端下载入口默认对所有用户隐藏，只能由超级管理员在“系统管理 → 用户管理”中按平台 `userId` 打开客户端灰度。该名单只
+控制网页下载入口，不是客户端 WSS 鉴权、制品下载鉴权或 client key 生命周期的一部分；即使前端被篡改，后端
+连接认证仍必须校验有效 client key。
+
+## 本地工作区受保护 Agent/Skill API
+
+`GET /api/internal/platform/opencode-runtime/agents?workspaceId={localWorkspaceId}` 在已认证且目标为
+`LOCAL_CLIENT` 时，把当前用户可见的已发布 Hub Agent 追加到原生目录。受保护项使用以下 additive 投影；
+`id/agentId` 必须作为 opaque 值原样回传，客户端不得解析或持久化其中正文：
+
+```json
+{
+  "id": "protected:hub_rev_...",
+  "agentId": "protected:hub_rev_...",
+  "name": "合规审查",
+  "mode": "primary",
+  "description": "服务器执行",
+  "protected": true,
+  "revisionId": "hub_rev_...",
+  "contentSha256": "..."
+}
+```
+
+随后仍调用既有 `POST /api/internal/agent/opencode/runs`，把该 opaque 值放在请求 `agent` 字段。后台必须先按
+默认 `opencode` 校验 `contextToken` 的本地实例、Workspace 和 generation，再把 Run 运行时固定为
+`protected-opencode` 并只路由服务器节点。受保护运行固定使用 `LEGACY_FULL` 审计链，不支持原生 `command`
+模式；服务器隔离目录不得返回网页。本地客户端离线、换代或服务器节点不可用时失败关闭，不回退本地或其它
+客户端。
+
+`POST /api/internal/platform/protected-agent/mcp` 是服务器 OpenCode 专用的 stateless Streamable HTTP MCP
+JSON-RPC 入口，不使用平台 `ApiResponse` envelope，也不接受用户登录 Token。Authorization 必须是本次 Run
+签发的短期 `Bearer pag_...`；普通 API Token filter 只对该精确路径放行，子路径不继承。支持
+`initialize`、`ping`、`tools/list`、`tools/call` 和 notification，notification 返回 HTTP `202` 空 body。
+工具白名单为：
+
+- 本地 WSS 文件：`list_directory/search_files/read_file/file_status/write_file/create_directory/copy_path/`
+  `move_path/rename_path/delete_path`；
+- 服务器只读 Skill 资源：`list_skill_resources/read_skill_resource`。
+
+所有本地工具调用都复用已有 `FILE_REQUEST`、连接 generation、Workspace root digest 和路径安全内核。MCP
+请求/响应在通用 API 日志中只记录 JSON-RPC method、id、是否有 params/result/error；Authorization、相对
+路径、写入内容、读取结果、Agent/Skill 正文和 grant 均不得进入日志。
+
 # TCDS 需求导入（同源页面）
 
 > 本节接口由受登录守卫保护的独立同源入口 `/workspace-requirement-import/` 使用。浏览器不接收 TCDS token、文档 URL、物理根路径或后端主机地址。

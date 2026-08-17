@@ -17,12 +17,15 @@ ENV_FILE_FROM_ARG=0
 PLATFORM="linux/amd64"
 PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
+PACKAGE_LOCAL_CLIENT=1
 PACKAGE_OPENCODE_WORKER=1
 PACKAGE_PYTHON_LIBS=0
 PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
 PACKAGE_LOBEHUB=0
+PACKAGE_MEMORY=0
 WITH_LOBEHUB_IN_RELEASE=0
+WITH_MEMORY_IN_RELEASE=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
@@ -100,6 +103,12 @@ EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_RESOURCE="db/migration/V20260812104911__c
 EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_SHA256="a613f77fd42aea5f404dfb51bad5fe93c1f478d73bf131de8c9dc9931a27e5ea"
 EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION_RESOURCE="db/migration/V20260812144051__common_parameters_default_experience_workspace.sql"
 EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION_SHA256="e07d560ac0652860ed8e8788b002df0881eface861998a20e4e83da85276bfcf"
+ANALYTICS_OUTBOX_MIGRATION_RESOURCE="db/migration/V20260813143000__analytics_event_outbox_create_pipeline.sql"
+ANALYTICS_OUTBOX_MIGRATION_SHA256="bd286b1d992e6ff715393fb39bbb47a7d44dfe425c3b4ea6571f62e74eed0eb1"
+ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE="db/migration-postgresql/V20260813143001__analytics_event_outbox_install_triggers.sql"
+ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256="399e8db352ded3f12d5b5a91fe8a07f6242a9aafc07caa8c28589614a43dc50e"
+ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql"
+ANALYTICS_CLICKHOUSE_MIGRATION_SHA256="1a1d4d77b2d92f6f97a864da7a20b6d5f040807d15f2eef940410c10e7e7a7f7"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-applied/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256="168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE="db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"
@@ -110,6 +119,8 @@ XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
+XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_analytics_clickhouse_ingestion_task.sql"
+XXL_ANALYTICS_INGESTION_MIGRATION_SHA256="70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0"
 XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_scm_git_name_sync_task.sql"
 XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256="2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739"
 
@@ -120,6 +131,7 @@ Usage: deploy/internal/package-release.sh [options]
 Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
+  - signed Apple Silicon and ARM64 glibc local OpenCode client HTTP distribution
   - opencode-worker image and docker-loadable tar
   - optional independent Python third-party library bundle
   - pinned IT-Tools and OmniTools images, checksums and complete modified source
@@ -136,12 +148,15 @@ Options:
   --platform <platform>   Docker build platform for opencode-worker. Defaults to linux/amd64.
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.
+  --local-client-only     Package only the signed local OpenCode client HTTP distribution.
   --opencode-only         Package only the opencode worker image.
   --python-libs-only      Package only the independent Python third-party library bundle.
   --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
   --with-lobehub          Include the verified external LobeHub artifact set in a full release.
   --lobehub-only          Package only the verified LobeHub offline artifact set and operations kit.
+  --with-memory           Include independent Mem0/CPU/pgvector/VIP offline artifacts in a full release.
+  --memory-only           Package only the independent memory data-plane artifacts.
   --zip-only              Reassemble the release ZIP from current verified artifacts and component state.
   --include-all-components
                           Force worker runtime (Python/OpenCode Manager/Codex MCP) and toolbox into the ZIP.
@@ -196,6 +211,20 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_LOBEHUB=0
       shift
       ;;
+    --local-client-only)
+      PACKAGE_MODE=local-client-only
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_LOCAL_CLIENT=1
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
+      PACKAGE_MEMORY=0
+      PACKAGE_ZIP=0
+      shift
+      ;;
     --opencode-only)
       PACKAGE_MODE=opencode-only
       PACKAGE_BACKEND=0
@@ -242,6 +271,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-lobehub)
       WITH_LOBEHUB_IN_RELEASE=1
+      shift
+      ;;
+    --with-memory)
+      WITH_MEMORY_IN_RELEASE=1
+      shift
+      ;;
+    --memory-only)
+      PACKAGE_MODE=memory-only
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
+      PACKAGE_MEMORY=1
       shift
       ;;
     --lobehub-only)
@@ -302,6 +347,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only \
+  && "${PACKAGE_MODE}" != local-client-only ]]; then
+  PACKAGE_LOCAL_CLIENT=0
+fi
+
 if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" && "${INCLUDE_ALL_COMPONENTS}" -eq 1 ]]; then
   echo "--worker-runtime-baseline-file cannot be combined with --include-all-components" >&2
   exit 2
@@ -319,6 +369,13 @@ if [[ "${WITH_LOBEHUB_IN_RELEASE}" -eq 1 ]]; then
     exit 2
   fi
   PACKAGE_LOBEHUB=1
+fi
+if [[ "${WITH_MEMORY_IN_RELEASE}" -eq 1 ]]; then
+  if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
+    echo "--with-memory can only be combined with the full or --zip-only release mode" >&2
+    exit 2
+  fi
+  PACKAGE_MEMORY=1
 fi
 
 load_dotenv() {
@@ -620,6 +677,12 @@ verify_release_flyway_migrations_jar() {
   verify_release_flyway_resource "${jar}" "${label}" \
     "${EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION_RESOURCE}" "${EXPERIENCE_WORKSPACE_DEFAULT_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
+    "${ANALYTICS_OUTBOX_MIGRATION_RESOURCE}" "${ANALYTICS_OUTBOX_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE}" "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE}" "${ANALYTICS_CLICKHOUSE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
     "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE}" "${AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256}"
@@ -634,7 +697,34 @@ verify_release_xxl_flyway_migrations_jar() {
   verify_release_flyway_resource "${jar}" "${label}" \
     "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE}" "${XXL_ANALYTICS_INGESTION_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
     "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE}" "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256}"
+}
+
+verify_memory_artifact_set() {
+  local directory="$1" required
+  for required in \
+    images/test-agent-memory-service_internal-linux-amd64.tar \
+    images/test-agent-embedding-bge-small-zh-v1.5_internal-linux-amd64.tar \
+    images/test-agent-pgvector_0.8.1-pg16_internal-linux-amd64.tar \
+    images/test-agent-memory-nginx_1.27.2_internal-linux-amd64.tar \
+    MODEL-IDENTITY.json LICENSES.txt release.env SHA256SUMS \
+    alembic/versions/20260809_01_shared_memory_control.py \
+    memory-docker.sh memory.env.example embedding.env.example; do
+    [[ -f "${directory}/${required}" ]] || {
+      echo "Required memory artifact is missing: ${directory}/${required}" >&2
+      exit 1
+    }
+  done
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${directory}" && sha256sum -c SHA256SUMS)
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${directory}" && shasum -a 256 -c SHA256SUMS)
+  else
+    echo "Neither sha256sum nor shasum is available for memory artifact verification" >&2
+    exit 1
+  fi
 }
 
 state_value() {
@@ -1249,7 +1339,12 @@ package_release_zip() {
   # 后端与前端每次交付；大体积 worker runtime 和 toolbox 只在指纹变化时加入。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
-    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"; do
+    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
+    "${OUTPUT_DIR}/local-opencode-client/install.sh" \
+    "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg" \
+    "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" \
+    "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json" \
+    "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
@@ -1289,11 +1384,16 @@ package_release_zip() {
   if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
     verify_lobehub_artifact_set "${OUTPUT_DIR}/lobehub"
   fi
+  if [[ "${PACKAGE_MEMORY}" -eq 1 ]]; then
+    verify_memory_artifact_set "${OUTPUT_DIR}/memory"
+  fi
 
   # 交付 zip 只放部署所需产物和脚本，避免把 deploy/internal/dist 自身递归打进去。
   mkdir -p "${staging_dir}/dist/backend"
   cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
+  mkdir -p "${staging_dir}/dist/local-opencode-client"
+  cp -a "${OUTPUT_DIR}/local-opencode-client/." "${staging_dir}/dist/local-opencode-client/"
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${worker_tar}" "${staging_dir}/dist/"
   fi
@@ -1312,6 +1412,11 @@ package_release_zip() {
     mkdir -p "${staging_dir}/docs/deployment" "${staging_dir}/docs/architecture"
     cp -a "${ROOT_DIR}/docs/deployment/lobehub-offline.md" "${staging_dir}/docs/deployment/"
     cp -a "${ROOT_DIR}/docs/architecture/lobehub-integration.md" "${staging_dir}/docs/architecture/"
+  fi
+  if [[ "${PACKAGE_MEMORY}" -eq 1 ]]; then
+    mkdir -p "${staging_dir}/dist/memory" "${staging_dir}/docs/deployment"
+    cp -a "${OUTPUT_DIR}/memory/." "${staging_dir}/dist/memory/"
+    cp -a "${ROOT_DIR}/docs/deployment/qa-memory.md" "${staging_dir}/docs/deployment/"
   fi
 
   if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
@@ -1354,6 +1459,10 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
     printf 'TEST_AGENT_RELEASE_LOBEHUB=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf included || printf disabled)"
     printf 'TEST_AGENT_RELEASE_LOBEHUB_VERSION=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && state_value "${OUTPUT_DIR}/lobehub/release.env" LOBEHUB_INTERNAL_VERSION || printf none)"
+    printf 'TEST_AGENT_RELEASE_MEMORY=%s\n' "$([[ "${PACKAGE_MEMORY}" -eq 1 ]] && printf included || printf disabled)"
+    printf 'TEST_AGENT_RELEASE_MEMORY_VERSION=%s\n' "$([[ "${PACKAGE_MEMORY}" -eq 1 ]] && state_value "${OUTPUT_DIR}/memory/release.env" TEST_AGENT_MEMORY_RELEASE_VERSION || printf none)"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=included\n'
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=%s\n' "$(awk -F'"' '$2 == "version" { print $4; exit }' "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json")"
   } >"${staging_dir}/deploy/internal/release-components.env"
   chmod 0644 "${staging_dir}/deploy/internal/release-components.env"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
@@ -1460,6 +1569,7 @@ TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE:-node:2
 TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE:-nginx:1.27.2-alpine3.20@sha256:d213b2a02ef4e7ec85882e8955343cdd08ab49d6548995ad18623f47017c65ee}"
 TEST_AGENT_XXL_JOB_MYSQL_IMAGE="${TEST_AGENT_XXL_JOB_MYSQL_IMAGE:-mysql:8.4}"
 TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${TEST_AGENT_LOBEHUB_ARTIFACT_DIR:-${ROOT_DIR}/lobehub-release-artifacts}"
+TEST_AGENT_MEMORY_BUILD_ENV_FILE="${TEST_AGENT_MEMORY_BUILD_ENV_FILE:-${SCRIPT_DIR}/memory/build.env.example}"
 if [[ "${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" != /* ]]; then
   TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${ROOT_DIR}/${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}"
 fi
@@ -1554,6 +1664,11 @@ if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
   package_frontend
 fi
 
+if [[ "${PACKAGE_LOCAL_CLIENT}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
+  "${SCRIPT_DIR}/package-local-opencode-client.sh" \
+    --output-dir "${OUTPUT_DIR}/local-opencode-client"
+fi
+
 if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then
   require_command docker
   build_opencode_worker_image
@@ -1582,6 +1697,13 @@ if [[ "${PACKAGE_LOBEHUB}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
   package_lobehub_artifacts
 fi
 
+if [[ "${PACKAGE_MEMORY}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
+  "${SCRIPT_DIR}/package-memory-offline.sh" \
+    --env-file "${TEST_AGENT_MEMORY_BUILD_ENV_FILE}" \
+    --output-dir "${OUTPUT_DIR}" \
+    --platform "${PLATFORM}"
+fi
+
 if [[ "${PACKAGE_MODE}" == lobehub-only && "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   package_lobehub_zip
 fi
@@ -1601,6 +1723,9 @@ fi
 if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
   echo "  frontend dist: ${OUTPUT_DIR}/frontend"
   echo "  frontend archive: ${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
+fi
+if [[ "${PACKAGE_LOCAL_CLIENT}" -eq 1 ]]; then
+  echo "  local OpenCode client HTTP distribution: ${OUTPUT_DIR}/local-opencode-client"
 fi
 if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  opencode worker image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
@@ -1627,6 +1752,9 @@ if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
 fi
 if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
   echo "  LobeHub verified artifacts: ${OUTPUT_DIR}/lobehub"
+fi
+if [[ "${PACKAGE_MEMORY}" -eq 1 ]]; then
+  echo "  memory data-plane artifacts: ${OUTPUT_DIR}/memory"
 fi
 if [[ "${PACKAGE_MODE}" == lobehub-only && "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  LobeHub offline zip: ${OUTPUT_DIR}/test-agent-lobehub-offline.zip"

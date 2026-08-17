@@ -6,7 +6,7 @@
 
 ## 主要职责
 
-- 运营分析查询默认覆盖最近 30 天；趋势复用已有 rollup 查询并在服务层补齐查询范围内的零值时间桶，小时热力固定返回周一至周日 × 0–23 时的 168 个格点。补零不扫描原始事实表、不新增 SQL，峰值排行仍只包含真实有活动的小时。
+- 运营分析查询默认覆盖最近 30 天；趋势读取 ClickHouse 汇总并在服务层补齐零值时间桶。小时热力按 `Asia/Shanghai` 返回所选自然日 × 0–23 时完整格点，最长 90 天，并可切换用户消息、主 Token、缓存 Token；超过 90 天时其它运营视图仍可查询。用户漏斗首层使用 ClickHouse 最新未删除用户维度，活跃/深度行为、Token 总量（主 Token 加缓存读写）、使用覆盖/复用/强度分层和 Agent/Skill/Tool 使用率均来自同一 ClickHouse 筛选范围，能力分母为同期活跃用户。
 
 - 会话协作分享在创建/成员重新加入/重新激活、普通设置更新、成员移除、撤销和会话归档后调用 `test-agent-notification` 同步通知生命周期；被分享人通过通知、“分享给我”或旧链接完成分享访问鉴权后，统一按 `shareId` 幂等标记已读。通知写入或已读同步异常只记录脱敏告警，不得阻断分享设置主事务之外的既有访问能力；通知查询还会联表复核分享事实，避免短暂同步失败形成可点击的过期授权。
 
@@ -40,7 +40,7 @@
 - `REDIS_SUMMARY` 普通无活动 Run 由 `RunInactiveExpiryScheduler` 在 Java 启动完成后立即扫描，并每 30 秒扫描本服务器 active 索引；无 attention 且 `updatedAt` 达到两小时边界后，通过公共 Java 路由、owner lease/fencing、best-effort 远端取消与终态摘要投影收敛，不写 `run_events`。
 - 新模式 Run 锚点写入后若 Redis 在远端 prompt 派发前中断，不立即把原文降级写库：启动链路先尝试 fenced 失败终态；仍不可用时由 `RunRuntimeLossConvergenceScheduler` 等待 30 秒。Redis 仍不可用则使用启动期安全控制面快照取消已创建的远端 Session（尚未创建则跳过）并写 `RUNTIME_STATE_LOST` fallback 双摘要；Redis 已恢复则以条件接管产生的新 fencing token 关闭这个从未派发的 Run，避免锚点永久停在 `RUNNING`。
 - AI 整轮回复反馈归属校验和 upsert：只允许 Run 触发人或所属 Session 创建人评价主对话 `SUCCEEDED` Run，按 `(userId, runId)` 幂等更新，评论最多 300 字；旧消息入口能关联 Run 时转入该逻辑。
-- 运营分析 rollup 与查询：主链路只写事实，`AnalyticsRollupTaskHandler` 以任务 key `opencode-runtime.analytics-rollup` 注册到统一 scheduler，默认 cron `0 */5 * * * *`、锁 TTL 5 分钟，刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图。scheduler 负责 Redis 分布式锁、续租、运行记录、手工触发和协作式停止；业务数据库锁暂时保留，供新旧 Java 滚动部署期间共同互斥，锁冲突只记录为本次未执行。查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
+- 运营分析消费、回填、汇总与查询：PostgreSQL 事务 outbox 和 Redis 同槽运营 stream 由 `AnalyticsIngestionTaskHandler` 每分钟幂等写入 ClickHouse，成功后立即删除 PostgreSQL 临时 outbox 行并推进 Redis 检查点；`AnalyticsRollupTaskHandler` 每 5 分钟刷新 ClickHouse 小时/日汇总和 freshness。用户新增、修改和删除也通过脱敏 outbox 维护 ClickHouse 最新维度快照；首次历史回填先补全全部用户维度，再按自然日分块、每批 500 条写行为明细，源数与 ClickHouse 活动事实及用户维度数量之和完全一致后才登记 `VERIFIED`。旧 PostgreSQL 汇总只能在第二阶段显式清理。查询服务的用户维度、行为事实、明细、汇总、筛选项和 freshness 全部只读 ClickHouse，不在请求链路扫描 PostgreSQL 业务事实或旧汇总。ClickHouse 故障时返回明确不可用，不以 PostgreSQL 兜底；全部链路不保存 prompt、回答、工具输入输出、反馈评论或 cost/costUsd。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
 - `BackendJavaProcessLifecycleService` 首次保存后端实例时以进程启动时间作为 `createdAt`，心跳时间作为 `updatedAt`，避免启动阶段 manager 注册与周期心跳并发导致时间逆序、阻断 manager WebSocket 注册。
 - `BackendJavaRouteResolver` 统一解析当前 Java 所属稳定 `linuxServerId`、Redis 中按 `backendProcessId` 保留的 Java 快照、按 `backendProcessId` 精确选择一个在线 Java，以及 `containerId` 对应 manager 所属服务器；同一服务器多 Java 的服务器级命令优先选择与目标服务器 manager 已连接的 Java，其次选择同服务器最新心跳 Java，最后才使用当前 Java 兜底。首次分配选服会对每个 `containerId` 只保留最新 manager 快照，汇总服务器全部 manager CONNECTED 容器的 `currentProcesses`（已满容器也计入），并要求至少一个 READY、未满且与所选 Java CONNECTED 的容器；结果按总进程数、`linuxServerId` 稳定排序。JVM 内存参数等进程级诊断必须使用精确进程方法，不合并同服务器 Java。所有用户进程、运行管理、Agent 配置和文件 WebSocket 路由都必须复用它做目标选择。新增 opencode-manager 路由或 Java->manager 控制入口时，不得在其它 service 中重新扫描 Redis 快照、复制 `linuxServerId/containerId` 解析、直接控制远端 manager 或绕过目标 Java。
@@ -78,6 +78,7 @@
 - `RunConversationSummarizer` 为 `REDIS_SUMMARY` 终态投影生成固定 USER/ASSISTANT 双摘要：USER 最多 512、ASSISTANT 最多 2000 个 Unicode code point，确定性移除 `<context>`、reasoning、工具输入输出、附件正文、data URL、控制字符和常见密钥模式；超长标记 `PARTIAL`，空内容或清洗异常只返回不含原文的 `FALLBACK`。每条结果固定携带 `contentKind=SUMMARY`、摘要版本和角色，供下游终态事务批量写入最多两条历史消息。
 - `RunMessageRecoveryService` 为 Run/Session 历史入口固定执行 Redis 24 小时物化详情 → OpenCode 会话 → PostgreSQL 双摘要降级；Session 在前三者没有可展示正文时再有界分页复用既有 `SessionMessageRepository.findBySessionId()`，把旧 `session_messages` 用户/助手正文映射为 `LEGACY/RAW_LEGACY` 且标记不可完整回放。空 Redis/OpenCode 快照不能提前返回“完整历史”；排查入口可在权威 Java 后端非 ONLINE 时调用持久化专用恢复，跳过不可达 OpenCode。Run 级 OpenCode 恢复按平台 USER、root scope 或 `RunDetailsLocator.dispatchMessageId` 的稳定锚点裁剪，只选择该 user 及 `parentID/parentId` 直接指向它的 assistant；锚点未到达、来源冲突、重复 cursor、20 页超限或旧 Run 时间窗内存在多个 user 时返回空投影。已记录 child scope 可独立恢复，但只有选中的 root 消息能发现新 child。Session 级历史仍保留完整多轮 user/assistant 会话。Redis 命中不读取关系库控制面或旧事件表；摘要会映射成兼容 reducer 的 message/part 事件并标识 `SUMMARY`。legacy RunEvent SSE 建连时先按精确 `sessionId + runId + USER` 读取 `session_messages` 并发布平台权威用户输入，再恢复 assistant-only OpenCode 快照；因此其他协作者不依赖发送方浏览器的乐观消息，OpenCode 暂不可用也不会阻塞用户输入同步，后续远端 user envelope 按同一 remote message ID 原位归并。
 - `RunTerminalProjectionService` 在新模式 root 终态后只读 Redis input/物化快照，以一个事务 CAS 更新无原文 Run 锚点、批量写最多两条摘要并刷新 Session 时间；终态事件 Lua 原子发布 versioned outbox，恢复协调器仍在启动和安全恢复扫描中补做幂等 CAS。数据库异常只把已清洗投影写入独立 Redis 重试存储。`RunTerminalProjectionRetryTaskHandler` 由 XXL 任务 `opencode-runtime.terminal-projection-retry` 每 5 秒触发，本模块不再启动本地 retry ticker；handler 按固定退避重试并 ack 对应 outbox version，最长保留 24 小时。
+- 普通根 Run 派发前通过中立 `AgentRunSystemPromptContributor` 汇总可选 system 片段；slash command 不注入。legacy 与 `REDIS_SUMMARY` 的成功终态都通过 `AgentRootRunTerminalObserver` 通知后处理，观察者异常 fail-open，不能改变已提交 Run 状态或 RunEvent 协议。
 - `RunRuntimeLossConvergenceService` 处理 Redis 运行态连续中断：调用方等待固定 30 秒 grace 后传入启动时缓存的安全控制面快照，服务先复查 manifest；仍不可用时在 10 秒边界内 best-effort 取消远端会话，再直接写 `RUNTIME_STATE_LOST` 的 `FAILED` 终态和固定 `FALLBACK` 双摘要。该链路不读取 Redis input/Stream/snapshot；数据库失败时只把该安全投影写入 `TERMINAL_PENDING_DB` 重试队列。若 PostgreSQL 与 Redis 同时不可写，调度器在 JVM 内按 5 秒、15 秒、30 秒、1 分钟、2 分钟、5 分钟退避并以 5 分钟封顶持续重试，直至任一存储接受安全终态；禁止把原文降级写入 PostgreSQL。
 - 只有 `LEGACY_FULL` 在 Run 终态/取消后执行 `session_messages` 快照持久化：先完整收集并按同一稳定 USER 锚点选择当前轮，再仅 upsert 本轮 assistant 可见 text、完整 message parts 和最后一条 assistant 的 token/cost；无法证明归属时不写任何消息。普通 Session 消息刷新继续同步全会话，但只保留已有 `runId`，新发现的历史 assistant 写空 `runId`，不得重新分配旧轮归属。`REDIS_SUMMARY` 不调用该快照链路，也不写原始 parts。
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化；不调用 opencode `/vcs/diff?mode=working`，实际 Git patch 和精确行数由工作区 Git Diff 接口读取。
@@ -156,7 +157,7 @@
 
 新增与会话、运行、事件、Diff、permission/question、runtime catalog、terminal 相关业务编排时改这里；新增 agent 适配器应放在 `test-agent-agent-runtime`。Controller 和 URL 映射必须放在 `test-agent-api`。
 `LEGACY_FULL` 下高频文本 delta、message projection 和大段 tool/bash 输出不应写入 `run_events`；消息内容刷新恢复优先从 agent 标准 session messages 分页拉取并 upsert 到 `session_messages`，兼容消息列表接口的远端刷新必须在 bounded-elastic 线程执行，agent 不可用时回退数据库快照。`REDIS_SUMMARY` 下所有运行中 mapped/transient/durable 事件都进入 Redis，不写 `run_events` 或 `run_session_scopes`；durable 使用 seq Stream，所有事实帧使用 runtimeVersion Stream，消息/part/entity 当前状态使用 Hash/ZSET 物化，SSE 首帧 reset 后从 runtimeVersion tail 顺序恢复。不得为了 Redis 故障把原始详情降级写数据库。child idle/error 只能产生 session 事件，root idle/error 才能派生 `run.succeeded/run.failed`。
-运营分析新增指标时优先扩展 `AnalyticsModels`、`AnalyticsRepository`、`AnalyticsRollupApplicationService` 和查询服务；调度入口必须继续使用 `AnalyticsRollupTaskHandler`，不得重新增加业务 `@Scheduled`。API 查询不得绕过 rollup 直接扫原始事实表，导出字段不得包含 prompt/assistant 原文、密钥或费用字段。
+运营分析新增指标时优先扩展 `AnalyticsModels`、`AnalyticsRepository`、`AnalyticsIngestionService`、`AnalyticsRollupApplicationService` 和查询服务；调度入口必须继续使用 XXL handler，不得重新增加业务 `@Scheduled`。API 查询不得绕过 ClickHouse 汇总直接扫描 PostgreSQL 业务事实，导出字段不得包含 prompt/assistant 原文、工具参数、密钥、反馈评论或费用字段。
 生产 `OpencodeProcessManagerGateway` 通过 manager WebSocket 控制面下发 `start`/`health`/`restart`/`stop`/`stopOwned` 命令；tracked 停止必须使用 UCID+PID 的 `stopOwned` 且不得回退，只有无平台记录的管理员操作可以使用端口 `stop/restart`。无连接、超时或异常必须转换为平台 opencode 错误码。测试仍可使用 fake gateway 固定初始化、健康检查或运行管理命令结果。
 所有 opencode server 启动入口必须调用 `OpencodeProcessStartupService`，由公共服务统一完成启动、候选进程快照、启动后 health 和最终状态回写；不要在新增业务编排中直接调用 `gateway.startProcess()` 并自行写进程、binding、heartbeat 或 `ExecutionNode`。
 所有 opencode server 停止入口必须调用 `OpencodeProcessStopService`，由公共服务统一完成 tracked 精确预检、manager owned stop、停止后 health 失败确认和最终状态回写；不要在新增业务编排中直接调用 `gateway.stopProcess()` / `gateway.stopOwnedProcess()` 并自行写 `STOPPED`。
@@ -176,3 +177,27 @@ WAITING 替代 Run 可复用现有 cancel 入口；等待期间 `NightExecutionS
 compact 和 share 等主会话写入口。重发预约事务先创建替代 Run、持久化替代 USER、推进 Session 内容修订时间并写入 scheduled 事实；提交成功后，`SessionMessageRealtimeHub` 立即发布含 `sessionId/sourceRunId/replacementRunId/changeType/revision` 的安全变化信号，并复用通用服务器广播唤醒本机及其它 Java 上的分享运行态连接，不等待模型执行。执行器通过稳定远端消息号复用这条 USER；替代消息受理后再清理源 Run 的 PostgreSQL/Redis 明细并发布 `run.resend.started`。WAITING 取消或明确失败会删除未投递替代 USER、推进修订并广播 `RESEND_RESTORED`，前端按 source Run 精确读取完整 USER/ASSISTANT 轮次恢复；每秒状态检查继续作为鉴权和丢信号兜底。重发事件携带真实 requester 身份，分享运行态据此刷新权威消息并保持分享发送人归属，Run、反馈、
 用量和关系保留；历史消息/Run 响应也以共享 requester 修正旧错误归因，无需修改已执行数据库历史。当前预留替代 Run 沿 `LEGACY_FULL` 明细链启动；源 Run 无论是 `LEGACY_FULL` 还是 `REDIS_SUMMARY` 都从远端
 权威用户轮次读取并重放，避免把摘要数据库当作 prompt 事实源。
+
+## 本地客户端运行目标
+
+`RuntimeKind` 在 Workspace 创建、Session、Run context/manifest/node 和夜间任务中固定
+`SERVER_PROCESS` 或 `LOCAL_CLIENT`。本地目标由 `LocalClientConnectionStore` 的
+backendProcessId/generation 精确路由，生命周期仍从公共 startup/stop/status 服务进入，再委托
+`LocalClientLifecycleGateway`。OpenCode HTTP/SSE 使用隧道 transport；文件使用既有 route/ticket/RPC。
+离线或换代永不回退服务端 OpenCode，也不切换到其它客户端。运行中断连收敛为
+`LOCAL_CLIENT_DISCONNECTED`；未开始夜间任务只在当前窗口内等待同实例重连。本地
+execution node 另保存 `OFFLINE/local-client-anchor` 外键锚点，仅供旧关系表引用，绝不参与服务端节点路由。
+
+## 受保护 Agent/Skill 运行
+
+本模块注册 `protected-opencode` 服务器运行时。本地工作区 Agent 目录只追加 Hub 的 opaque 已发布修订选择；
+Run 仍用默认 opencode 的 `contextToken` 校验本地 Workspace 和连接 generation，但执行节点强制为
+`SERVER_PROCESS`。`ProtectedAgentExecutionService` 在服务器隔离目录装配冻结的 Agent/Skill 系统上下文和
+短期 MCP grant，关闭服务器原生文件/终端工具，再由 `ProtectedAgentMcpService` 经既有 WSS 文件网关访问
+用户授权目录。`ProtectedOpencodeAgentRuntime` 用 Redis 保存远端 Session 到服务器目录映射，所有带 directory
+的后续调用重新取该映射，缺失时失败关闭或重建，绝不回退本地绝对路径。
+
+受保护 Run 固定 `LEGACY_FULL`，`run.created` 只审计 revision/SHA-256。grant 明文只存在于签发 Java，调用时
+逐次检查 Run、Workspace、客户端实例、持有 Java、generation 和 root digest。Agent/Skill 正文、MCP
+Authorization、文件参数和结果不得进入通用日志、RunEvent 或客户端目录。对应测试覆盖目录 opaque 投影、
+服务器路由、system/tool 参数、MCP 初始化与文件调用、连接换代失效和服务器目录重写。

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.RunRuntimeTargetMapper">
+    <resultMap id="targetRow" type="com.enterprise.testagent.persistence.mybatis.RunRuntimeTargetRow">
+        <constructor>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="target_runtime_kind" javaType="java.lang.String"/>
+            <arg column="target_local_client_instance_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findByRunId" resultMap="targetRow">
+        SELECT run_id, target_runtime_kind, target_local_client_instance_id
+        FROM runs
+        WHERE run_id = #{runId}
+    </select>
+
+    <update id="updateTarget">
+        UPDATE runs
+        SET target_runtime_kind = #{runtimeKind},
+            target_local_client_instance_id = #{localClientInstanceId}
+        WHERE run_id = #{runId}
+    </update>
+</mapper>

@@ -111,6 +111,12 @@ export SYS_DATA_ROOT_DIR="$TESTAGENT/.testagent"
 
 不要显式把 `TEST_AGENT_ROOT` 改成主工作区；它应继续由脚本设置为当前 worktree，确保构建产物、运行 JAR 和日志都属于当前分支。`TESTAGENT` 负责 Java 对历史 `$TESTAGENT/...` 通用参数的展开，`SYS_DATA_ROOT_DIR` 负责启动脚本写入并让 manager 读取同一份 `.serverid/.serverhost`，两者必须指向同一数据根。
 
+需要联调运营分析时显式执行
+`./restart-dev-services.sh --profile test --env-file .env.test --with-clickhouse`；需要同时验证通用记忆时可再加
+`--with-memory`。ClickHouse 默认关闭，显式模式只监听 `127.0.0.1:18123`，运行密钥和 Java JDBC 配置只写入
+`.tmp/dev-services/clickhouse`，不修改 `.env.test`。本地数据由版本化 Docker volume 保留；停容器或重启平台
+不得删除该 volume。
+
 LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。该模式要求同级
 `../lobehub-platform`，生成的密钥只写入 `.tmp/dev-services/lobehub-dev.env`，不修改任何 `.env.local`；开发

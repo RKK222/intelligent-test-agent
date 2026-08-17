@@ -1,22 +1,28 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { BackendApiError, createBackendApiClient, createSessionShareApiClient } from "@test-agent/backend-api";
+import { BackendApiError, createSessionShareApiClient } from "@test-agent/backend-api";
 import type { SessionShareAccess } from "@test-agent/shared-types";
 import AgentWorkbench from "../components/AgentWorkbench.vue";
 import { resolveSessionShareEntry } from "../session-share-route";
+import TranscriptView from "./TranscriptView.vue";
 
 const props = defineProps<{ shareId: string }>();
 const router = useRouter();
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
 const access = ref<SessionShareAccess | null>(null);
+const transcriptSessionId = ref("");
 const loading = ref(true);
 const invalidReason = ref("");
 
 onMounted(async () => {
-  const ordinaryApi = createBackendApiClient({ baseUrl: apiBaseUrl });
   const sharedApi = createSessionShareApiClient({ baseUrl: apiBaseUrl, shareId: props.shareId });
-  const entry = await resolveSessionShareEntry(props.shareId, sharedApi, ordinaryApi);
+  const entry = await resolveSessionShareEntry(props.shareId, sharedApi);
+  if (entry.kind === "transcript") {
+    transcriptSessionId.value = entry.sessionId;
+    loading.value = false;
+    return;
+  }
   if (entry.kind === "owner") {
     await router.replace({ name: "workbench", query: { sessionId: entry.sessionId } });
     return;
@@ -43,7 +49,8 @@ function invalidShareReason(error: unknown): string {
 </script>
 
 <template>
-  <main v-if="loading" class="share-entry-state" aria-busy="true">
+  <TranscriptView v-if="transcriptSessionId" :session-id="transcriptSessionId" />
+  <main v-else-if="loading" class="share-entry-state" aria-busy="true">
     <div class="share-entry-state__spinner" />
     <p>正在校验分享权限…</p>
   </main>

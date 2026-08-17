@@ -5,8 +5,11 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.sql.Connection;
+import java.sql.SQLException;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
+import org.flywaydb.core.api.MigrationVersion;
 import org.flywaydb.core.api.ResourceProvider;
 import org.flywaydb.core.api.configuration.FluentConfiguration;
 import org.flywaydb.core.api.migration.JavaMigration;
@@ -20,12 +23,16 @@ import org.springframework.stereotype.Component;
 /**
  * 在 Spring Boot 创建唯一 Flyway Bean 时解析历史迁移分叉。
  *
- * <p>工具盒子、LobeHub、内部模型可观测、撤销重发、QA Memory、体验工作区和本地客户端迁移均形成过已知历史分叉。
+ * <p>工具盒子、LobeHub、内部模型可观测、撤销重发、QA Memory、体验工作区、本地客户端和运营 outbox
+ * 迁移均形成过已知历史分叉。
  * 兼容程序只按已应用版本与 checksum 选择原始字节或更高版本补偿资源；未知 checksum、不完整历史和混合路径
  * 必须继续拒绝启动。
  */
 @Component
 public final class DatabaseMigrationCompatibilityCustomizer implements FlywayConfigurationCustomizer {
+
+    private static final String POSTGRESQL_MIGRATION_LOCATION =
+            "classpath:db/migration-postgresql";
 
     static final String LEGACY_TOOLBOX_MIGRATION_VERSION = "20260727203500";
     static final String LEGACY_TOOLBOX_MIGRATION_LOCATION =
@@ -90,9 +97,18 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     static final String EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/experience-workspace-applied";
     static final String EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_VERSION = "20260812104911";
+    static final String LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION = "20260811210453";
     static final String LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION = "20260812202425";
+    static final String LOCAL_CLIENT_RUNTIME_FORWARD_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/local-client-runtime-after-release";
     static final String LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/local-client-runtime-applied";
+    static final String ANALYTICS_OUTBOX_MIGRATION_VERSION = "20260813143000";
+    static final String ANALYTICS_TRIGGER_MIGRATION_VERSION = "20260813143001";
+    static final String ANALYTICS_OUTBOX_FORWARD_MIGRATION_VERSION = "20260814165300";
+    static final String ANALYTICS_TRIGGER_FORWARD_MIGRATION_VERSION = "20260814165301";
+    static final String ANALYTICS_AFTER_RELEASE_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/analytics-after-release";
 
     private static final String CURRENT_TOOLBOX_MIGRATION_FILE =
             "V20260728160800__create_toolbox_click_tracking.sql";
@@ -122,6 +138,12 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             "db/migration/V20260810090000__enforce_qa_memory_identity.sql";
     private static final String EXPERIENCE_WORKSPACE_APPLIED_MAIN_RESOURCE =
             "db/migration/V20260809210000__common_parameters_add_experience_workspace.sql";
+    private static final String LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE =
+            "db/migration/V20260811210453__local_client_credentials_create_runtime.sql";
+    private static final String ANALYTICS_OUTBOX_MAIN_RESOURCE =
+            "db/migration/V20260813143000__analytics_event_outbox_create_pipeline.sql";
+    private static final String ANALYTICS_TRIGGER_MAIN_RESOURCE =
+            "db/migration-postgresql/V20260813143001__analytics_event_outbox_install_triggers.sql";
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(DatabaseMigrationCompatibilityCustomizer.class);
@@ -132,6 +154,7 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     @Override
     public void customize(FluentConfiguration configuration) {
         MigrationInfo[] appliedMigrations = appliedMigrations(configuration);
+        boolean postgresql = isPostgresql(configuration);
         boolean legacyMigrationApplied = isMigrationApplied(
                 appliedMigrations, LEGACY_TOOLBOX_MIGRATION_VERSION);
         Integer currentMigrationChecksum = appliedChecksum(
@@ -295,8 +318,63 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             throw new IllegalStateException(
                     "检测到未知的体验工作区 migration checksum，拒绝自动兼容；请核对 flyway_schema_history");
         }
+        boolean localClientRuntimeMigrationApplied = isMigrationApplied(
+                appliedMigrations, LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION);
         boolean localClientRuntimeForwardMigrationApplied = isMigrationApplied(
                 appliedMigrations, LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
+        if (localClientRuntimeMigrationApplied && localClientRuntimeForwardMigrationApplied) {
+            throw new IllegalStateException(
+                    "检测到本地客户端主 migration 与顺序补偿 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        boolean needsLocalClientRuntimeForwardCompatibility =
+                !localClientRuntimeMigrationApplied
+                        && hasAppliedMigrationAfter(
+                                appliedMigrations, LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION);
+        boolean analyticsOutboxMigrationApplied = isMigrationApplied(
+                appliedMigrations, ANALYTICS_OUTBOX_MIGRATION_VERSION);
+        boolean analyticsTriggerMigrationApplied = isMigrationApplied(
+                appliedMigrations, ANALYTICS_TRIGGER_MIGRATION_VERSION);
+        boolean analyticsOutboxForwardMigrationApplied = isMigrationApplied(
+                appliedMigrations, ANALYTICS_OUTBOX_FORWARD_MIGRATION_VERSION);
+        boolean analyticsTriggerForwardMigrationApplied = isMigrationApplied(
+                appliedMigrations, ANALYTICS_TRIGGER_FORWARD_MIGRATION_VERSION);
+        boolean anyAnalyticsMainMigrationApplied =
+                analyticsOutboxMigrationApplied || analyticsTriggerMigrationApplied;
+        boolean anyAnalyticsForwardMigrationApplied =
+                analyticsOutboxForwardMigrationApplied || analyticsTriggerForwardMigrationApplied;
+        if (postgresql && analyticsTriggerMigrationApplied && !analyticsOutboxMigrationApplied) {
+            throw new IllegalStateException(
+                    "检测到运营 outbox 触发器 migration 缺少基础 history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (postgresql
+                && analyticsOutboxMigrationApplied
+                && !analyticsTriggerMigrationApplied
+                && hasAppliedMigrationAfter(appliedMigrations, ANALYTICS_TRIGGER_MIGRATION_VERSION)) {
+            throw new IllegalStateException(
+                    "检测到不完整的运营 outbox 主 migration history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (postgresql
+                && analyticsTriggerForwardMigrationApplied
+                && !analyticsOutboxForwardMigrationApplied) {
+            throw new IllegalStateException(
+                    "检测到运营 outbox 触发器前向 migration 缺少基础 history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (postgresql
+                && analyticsOutboxForwardMigrationApplied
+                && !analyticsTriggerForwardMigrationApplied
+                && hasAppliedMigrationAfter(
+                        appliedMigrations, ANALYTICS_TRIGGER_FORWARD_MIGRATION_VERSION)) {
+            throw new IllegalStateException(
+                    "检测到不完整的运营 outbox 前向 migration history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (postgresql && anyAnalyticsMainMigrationApplied && anyAnalyticsForwardMigrationApplied) {
+            throw new IllegalStateException(
+                    "检测到运营 outbox 主 migration 与前向 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        boolean needsAnalyticsForwardCompatibility = postgresql
+                && !anyAnalyticsMainMigrationApplied
+                && !anyAnalyticsForwardMigrationApplied
+                && hasAppliedMigrationAfter(appliedMigrations, ANALYTICS_TRIGGER_MIGRATION_VERSION);
         boolean qaMemoryAfterSessionShareForwardApplied = isMigrationApplied(
                 appliedMigrations, QA_MEMORY_AFTER_SESSION_SHARE_FORWARD_VERSION);
         boolean qaMemoryAfterTokenLatencyForwardApplied = isMigrationApplied(
@@ -373,6 +451,9 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         List<String> locations = new ArrayList<>(Arrays.stream(configuration.getLocations())
                 .map(location -> location.getDescriptor())
                 .toList());
+        if (postgresql) {
+            addLocationIfAbsent(locations, POSTGRESQL_MIGRATION_LOCATION);
+        }
         if (legacyMigrationApplied) {
             addLocationIfAbsent(locations, LEGACY_TOOLBOX_MIGRATION_LOCATION);
         }
@@ -410,10 +491,17 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             addLocationIfAbsent(
                     locations, EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION);
         }
+        if (needsLocalClientRuntimeForwardCompatibility) {
+            addLocationIfAbsent(
+                    locations, LOCAL_CLIENT_RUNTIME_FORWARD_COMPATIBILITY_LOCATION);
+        }
         if (localClientRuntimeForwardMigrationApplied) {
             // release 不发布本地客户端能力，仅为已经执行该 dev migration 的数据库保留原始校验字节。
             addLocationIfAbsent(
                     locations, LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION);
+        }
+        if (needsAnalyticsForwardCompatibility || anyAnalyticsForwardMigrationApplied) {
+            addLocationIfAbsent(locations, ANALYTICS_AFTER_RELEASE_COMPATIBILITY_LOCATION);
         }
         configuration.locations(locations.toArray(String[]::new));
 
@@ -453,6 +541,15 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         }
         // 旧体验工作区候选版本已进入个人持久库，只能从隔离路径按原字节解析；主链统一执行更高前向版本。
         filteredMainResources.add(EXPERIENCE_WORKSPACE_APPLIED_MAIN_RESOURCE);
+        if (needsLocalClientRuntimeForwardCompatibility
+                || localClientRuntimeForwardMigrationApplied) {
+            // release 前向版本已经执行时，dev 的较低主链版本仍然不能重新暴露给 Flyway 校验。
+            filteredMainResources.add(LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE);
+        }
+        if (needsAnalyticsForwardCompatibility || anyAnalyticsForwardMigrationApplied) {
+            filteredMainResources.add(ANALYTICS_OUTBOX_MAIN_RESOURCE);
+            filteredMainResources.add(ANALYTICS_TRIGGER_MAIN_RESOURCE);
+        }
         if (!filteredMainResources.isEmpty()) {
             // Flyway 没有公开“排除单个 classpath migration”的配置入口；这里包装唯一默认扫描器，
             // 只隐藏与已知历史分叉不匹配的主目录副本，其余 SQL 和 Java migration 保持原样。
@@ -518,9 +615,25 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                     experienceWorkspaceMigrationChecksum,
                     EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_VERSION);
         }
+        if (needsLocalClientRuntimeForwardCompatibility) {
+            LOGGER.warn("检测到本地客户端 migration 早于已执行的 release history，启用顺序补偿路径: missingVersion={}, forwardVersion={}",
+                    LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION,
+                    LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
+        }
         if (localClientRuntimeForwardMigrationApplied) {
             LOGGER.warn("检测到已执行的本地客户端顺序补偿 migration，仅启用原始字节兼容解析，不装配客户端运行能力: version={}",
                     LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
+        }
+        if (needsAnalyticsForwardCompatibility) {
+            LOGGER.warn("检测到运营 outbox migration 早于已执行的 release history，启用顺序补偿路径: missingVersions={},{}; forwardVersions={},{}",
+                    ANALYTICS_OUTBOX_MIGRATION_VERSION,
+                    ANALYTICS_TRIGGER_MIGRATION_VERSION,
+                    ANALYTICS_OUTBOX_FORWARD_MIGRATION_VERSION,
+                    ANALYTICS_TRIGGER_FORWARD_MIGRATION_VERSION);
+        } else if (anyAnalyticsForwardMigrationApplied) {
+            LOGGER.warn("检测到已执行的运营 outbox 顺序补偿 migration，继续启用原始字节兼容路径: versions={},{}",
+                    ANALYTICS_OUTBOX_FORWARD_MIGRATION_VERSION,
+                    ANALYTICS_TRIGGER_FORWARD_MIGRATION_VERSION);
         }
     }
 
@@ -551,9 +664,27 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                 .orElse(null);
     }
 
+    /** 判断目标版本之后是否已有成功 history，用于选择高版本前向补偿而非开启乱序执行。 */
+    private boolean hasAppliedMigrationAfter(MigrationInfo[] appliedMigrations, String version) {
+        MigrationVersion targetVersion = MigrationVersion.fromVersion(version);
+        return Arrays.stream(appliedMigrations)
+                .map(MigrationInfo::getVersion)
+                .filter(Objects::nonNull)
+                .anyMatch(appliedVersion -> appliedVersion.compareTo(targetVersion) > 0);
+    }
+
     private void addLocationIfAbsent(List<String> locations, String location) {
         if (!locations.contains(location)) {
             locations.add(location);
+        }
+    }
+
+    /** PostgreSQL 专属迁移承载触发器等 H2 无法解析的生产语法。 */
+    private boolean isPostgresql(FluentConfiguration configuration) {
+        try (Connection connection = configuration.getDataSource().getConnection()) {
+            return "PostgreSQL".equalsIgnoreCase(connection.getMetaData().getDatabaseProductName());
+        } catch (SQLException exception) {
+            throw new IllegalStateException("读取 Flyway 数据库类型失败", exception);
         }
     }
 

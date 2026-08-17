@@ -59,7 +59,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 - `AgentConfigApplicationService.supersedePublicConfigRollout` 只处理公共发布纠错的 Git 编排：校验共享运行副本恢复风险、使用当前超级管理员 SSH key 解析远端修正分支 commit，再把精确旧 rolloutId、修正 commit 和必填原因交给 `PublicAgentConfigRolloutCoordinator` 原子替换并广播新 rollout。该模块不直接更新 rollout 表、不接受前端自报强停目标，也不控制 manager。
 
-- 自动化代码库复用非标准库创建路径：允许任意已有分支和远端目录树中的任意已有目录，并要求请求显式传入 `yyyyMMdd` 版本；不接受测试工作库专属的 `directoryNew=true` 新增一级目录能力，也不进入应用源码或应用资产专属链路。
+- 自动化代码库复用非标准库创建路径：允许任意已有分支和远端目录树中的任意已有目录，并要求请求显式传入 `yyyyMMdd` 版本；不接受测试工作库专属的 `directoryNew=true` 新增一级目录能力，也不进入应用源码、应用资产或 Workflow checkout 专属链路。
 
 ## Agent & Skill Hub
 
@@ -102,3 +102,13 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 ## 后续 AI 编码指引
 
 新增与 workspace、文件、应用版本工作区、个人工作区、git、agent 或 skill 管理相关的业务逻辑时优先改这里；HTTP 入口只放在 `test-agent-api`。
+
+通用文件安全实现已经提取到 `test-agent-workspace-filesystem`，本模块依赖并复用该内核，不再拥有第二套
+路径/符号链接/原子移动实现。本地 Workspace 的根注册和反向 RPC 编排属于 runtime/client；本模块只在
+Workspace 查询响应中投影 runtime kind、实例 ID、在线状态和 capability。注销本地 Workspace 绝不删除
+用户磁盘目录。
+
+`AgentSkillHubApplicationService` 同时实现受保护运行的只读定义端口：目录只返回用户可见的公共内置或
+已发布应用 Agent 的不可变修订 ID、名称和 SHA-256；运行解析只接受当前已发布修订，并按依赖表冻结精确
+Skill 修订。制品只在服务器解压，文本文件进入服务器模型上下文或只读 Skill 资源，二进制附件仅由制品摘要
+审计。该端口不得把 `AGENT.md`、`SKILL.md` 或其它正文放入列表 DTO 或本地客户端配置目录。

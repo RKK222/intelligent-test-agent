@@ -10,14 +10,17 @@
 
 - [单后台部署](SINGLE-BACKEND.md)：一个 Java 后端和一个 `opencode-worker`，当前现场示例为 `122.233.30.114`；包含可整文件替换的生产配置。
 - [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 各自的完整配置、部署、验收，以及个人工作区/Agent 跨服务器错配统计 SQL、准确路径和自动搬迁排障。
+- [ClickHouse 运营分析部署](CLICKHOUSE-ANALYTICS.md)：ClickHouse 离线包、当前 `.147` 平台 PG 共置部署、双后台配置、历史回填、两阶段旧汇总清理、验收和回滚。
 - [Redis 7.4.9 独立离线升级](REDIS-OFFLINE.md)：将当前本地 Redis 版本和配置单独封包，用于企业 Redis 5.0 的受控备份、升级、验证与回滚；不修改业务代码，也不并入日常平台包。
 - [Redis 5 升级 + 双后台平台全量执行手册](FULL-UPGRADE-RUNBOOK.md)：按当前现场路径和 `.20 → .4 → .114 → .2` 顺序整合完整命令、成功条件、页面配置、脏数据边界与回滚。
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
+- [通用长期记忆部署](../../docs/deployment/qa-memory.md)：当前 `.134` 记忆 PostgreSQL 与 `.160` Mem0/VIP/CPU BGE 拓扑，以及扩容到多副本后的双集合热备、离线包、灰度和真实浏览器验收。
+- [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：Apple Silicon PKG/麒麟 ARM64 DEB 双击安装、签名打包、Nginx 分发、用户级首次配置、验收与回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
-当前 release 分支的企业包默认不启用 LobeHub：默认打包命令不携带其运行制品，组件清单写入 `disabled`，前端隐藏入口并拒绝深链接。需要交付时必须按 LobeHub 独立部署文档完成制品评审，并显式使用 `--with-lobehub`。
+当前 release 分支的企业包默认不启用 LobeHub：默认打包命令不携带其运行制品，组件清单写入 `disabled`，前端隐藏入口并拒绝深链接。需要启用时必须按 LobeHub 独立部署文档重新评审并显式使用 `--with-lobehub`。
 
 ## 共同前提
 
@@ -26,7 +29,10 @@
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - Docker 18.09 发布 1000 个 worker 端口前必须在 daemon 中禁用 `userland-proxy`；脚本会在删除旧 worker 前拒绝不安全组合，避免启动中途耗尽 fork 资源。
 - worker 构建会自动检查 Python `3.13.14`、pip/venv/常用标准库与脚本工具、Codex 版本、摘要、官方 MCP 契约和失败关闭；启用分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本按十进制解析 `18.09.7`，并用镜像内的 `/bin/true` 和真实 Codex/bubblewrap 验证 namespace、指定 cwd、源码读取、原生 read-only 拒写、Git 不变与续写；不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收。完整说明见 `docs/deployment/codex-whitebox-mcp.md`。
+- 按现场明确批准，ClickHouse 与记忆五类运行入口在当前 Docker 18.09 节点使用 `--privileged` 兼容新镜像系统调用；该高权限例外不修改 daemon、不扩大到现有 PostgreSQL 或其它容器，细节与风险见 ClickHouse、通用记忆部署文档及安全规范。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
+- 当前企业 Linux 目标机不预装宿主机 `psql`、`jq`、`rg`。部署与排障命令不得把这三个命令作为前提：PostgreSQL 只读检查优先使用对应数据库容器内的 `psql`，JSON/文本检查使用随包脚本、`grep`、`sed`、`awk` 或镜像内工具。不得为了部署临时联网安装这些命令。
+- 通用记忆的 `deploy/dev/memory-compose.yml` 只用于个人开发。企业启用时使用 `package-release.sh --memory-only|--with-memory` 生成四个独立镜像 tar；数据库、BGE、Mem0/VIP 和 Java 始终使用隔离容器或进程，不把任何记忆组件并入 Java/worker 容器。当前首次试部署把记忆数据库放在 `.134`，把 BGE、Mem0 和 VIP 共置在 `.160`。
 - Redis 仍是独立共享基础设施，不随平台 ZIP 部署；只有明确执行 Redis 专项升级时，才使用固定名 `test-agent-redis-offline.zip`。
 - `.20` 通过 Docker `-p 6379:6379` 提供共享 Redis 时必须持久化 `net.ipv4.ip_forward=1`；Redis `deploy/verify` 脚本会提前拒绝值为 `0` 的宿主机。容器本机 `healthy` 后仍必须从 `.4`、`.114` 分别验证 `.20:6379`，跨机超时不得通过反复重启 Java 处理。
 - Java 读取 `/data/testagent/config/backend.env`。
@@ -608,13 +614,13 @@ bash /data/testagent/deploy/internal/ensure-experience-workspace-content.sh \
 
 企业后端采用 `test-agent-app.jar` 瘦启动器与 `dist/backend/lib/` 外置依赖。Flyway migration
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
-复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型、体验工作区和 SCM Git 姓名证据）和 XXL MySQL V10/V11/V12 的 SHA-256，并分别比较发布包与安装后的
+复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型、体验工作区、运营 outbox 和 SCM Git 姓名证据）以及 XXL MySQL V10/V11/两套已执行 V12 历史资源的 SHA-256，并分别比较发布包与安装后的
 persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
 当前上一轮已部署平台包的业务源码提交为 `57e211de48a5507fb8d1689e1c8f86fd96563032`，内层 ZIP SHA-256 为
 `7af9c20e57a809258b0acd4672189b5ca875dde3f1a7208f770414a57d234b53`；该包正常企业主链最高版本为
 `20260812204207`，XXL MySQL 准入预期为 V1-V11 全部成功。从该基线首次升级时，第一台 `.4` 只允许新增
-PostgreSQL `20260813190929`，用于创建用户 SCM Git 姓名证据表；XXL MySQL 只允许新增 V12，注册每日 04:10
-的 SCM Git 姓名补偿任务。两条都已执行的故障重部署不得新增 history，`.114` 只做
+PostgreSQL `20260813190929` 和发布清单登记的 dev 前向 migration；XXL MySQL 必须按已执行 V12 分支选择兼容 location，
+并通过更高版本补齐 ClickHouse 每分钟入库和每日 04:10 SCM Git 姓名补偿。故障重部署不得新增 history，`.114` 只做
 validate。必须按多后台手册读取两套完整 `flyway_schema_history`，不能只凭
 提交号、启动日志或最高版本判断数据库历史一致。
 
@@ -625,10 +631,10 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 1. 从两台后台确认外部 `122.210.106.43:3306` 可达，两份 `backend.env` 使用同一个 JDBC 地址、账号密码和 XXL access token。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
 3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一包 `20260812204207` 基线只允许新增
-   `20260813190929`，外部 XXL MySQL 从 V1-V11 基线只允许新增 V12；任何失败、倒序、未知版本或 checksum 都停止。
+   `20260813190929` 和发布清单登记的 dev 前向 migration；外部 XXL MySQL 从 V1-V11 或已登记 V12 分支按兼容装配升级；任何失败、倒序、未知版本或 checksum 都停止。
    随后确认 Admin health、搬迁任务
    每 30 分钟、闲置进程关闭每日 02:00、模型探活每 5 分钟和可观测清理
-   每日 03:30、SCM Git 姓名补偿每日 04:10 均正常。任一校验失败时不得继续 `.114` 和前端。
+   每日 03:30、ClickHouse 运营入库每分钟及 SCM Git 姓名补偿每日 04:10 均正常。任一校验失败时不得继续 `.114` 和前端。
 4. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
 5. 导入 worker 镜像、解压 programs。
 6. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。

@@ -155,8 +155,9 @@ class RunEventSseRouteServiceTest {
         RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
         BackendJavaProcess target = backend("bjp_target_backend", SERVER_B, "http://10.8.0.22:8080");
         when(runtimeStore.findManifest(RUN_ID)).thenReturn(Optional.of(runtimeManifest()));
-        when(routeResolver.remoteTarget(SERVER_B)).thenReturn(Optional.of(SERVER_B));
-        when(routeResolver.requireBackend(SERVER_B)).thenReturn(target);
+        BackendProcessId targetProcessId = new BackendProcessId("bjp_target_backend");
+        when(routeResolver.isCurrent(targetProcessId)).thenReturn(false);
+        when(routeResolver.requireBackend(targetProcessId)).thenReturn(target);
         RunEventSseRouteService service = new RunEventSseRouteService(
                 routingDecisions, processes, routeResolver, runtimeStore);
 

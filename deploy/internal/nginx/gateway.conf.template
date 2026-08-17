@@ -47,6 +47,75 @@ server {
         return 200 "ok\n";
     }
 
+    # 本地客户端制品由内网 HTTP 直接下载；client key 不参与下载认证。
+    location = /downloads/local-opencode-client {
+        return 308 /downloads/local-opencode-client/;
+    }
+
+    location = /downloads/local-opencode-client/install.sh {
+        alias /data/testagent/dist/local-opencode-client/install.sh;
+        default_type text/x-shellscript;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    # 页面只保留一个入口；macOS 下载 PKG，其余受支持桌面下载麒麟 ARM64 DEB。
+    location = /downloads/local-opencode-client/installer {
+        if ($http_user_agent ~* "Macintosh|Mac OS X") { return 302 /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg; }
+        return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
+    }
+
+    location = /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg {
+        alias /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg;
+        default_type application/vnd.apple.installer+xml;
+        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-macOS-arm64.pkg"' always;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {
+        alias /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
+        default_type application/vnd.debian.binary-package;
+        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-Kylin-arm64.deb"' always;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/stable/manifest.json {
+        alias /data/testagent/dist/local-opencode-client/stable/manifest.json;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/stable/manifest.json.sig {
+        alias /data/testagent/dist/local-opencode-client/stable/manifest.json.sig;
+        default_type application/octet-stream;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location ^~ /downloads/local-opencode-client/releases/ {
+        alias /data/testagent/dist/local-opencode-client/releases/;
+        autoindex off;
+        disable_symlinks on;
+        if ($uri ~ "(^|/)\\.") { return 404; }
+        default_type application/octet-stream;
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location ^~ /downloads/local-opencode-client/ {
+        alias /data/testagent/dist/local-opencode-client/;
+        autoindex off;
+        disable_symlinks on;
+        if ($uri ~ "(^|/)\\.") { return 404; }
+        default_type application/octet-stream;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
     location = /api {
         proxy_pass http://$test_agent_backend_route;
         proxy_http_version 1.1;
@@ -144,5 +213,82 @@ server {
 
     location / {
         try_files $uri $uri/ /index.html;
+    }
+}
+
+# 制品下载固定使用独立明文 HTTP 监听；该 server 不暴露 API、SPA 或目录索引。
+server {
+    listen ${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT};
+    server_name _;
+
+    location = /downloads/local-opencode-client {
+        return 308 /downloads/local-opencode-client/;
+    }
+
+    location = /downloads/local-opencode-client/install.sh {
+        alias /data/testagent/dist/local-opencode-client/install.sh;
+        default_type text/x-shellscript;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/installer {
+        if ($http_user_agent ~* "Macintosh|Mac OS X") { return 302 /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg; }
+        return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
+    }
+
+    location = /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg {
+        alias /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg;
+        default_type application/vnd.apple.installer+xml;
+        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-macOS-arm64.pkg"' always;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {
+        alias /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
+        default_type application/vnd.debian.binary-package;
+        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-Kylin-arm64.deb"' always;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/stable/manifest.json {
+        alias /data/testagent/dist/local-opencode-client/stable/manifest.json;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/stable/manifest.json.sig {
+        alias /data/testagent/dist/local-opencode-client/stable/manifest.json.sig;
+        default_type application/octet-stream;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location ^~ /downloads/local-opencode-client/releases/ {
+        alias /data/testagent/dist/local-opencode-client/releases/;
+        autoindex off;
+        disable_symlinks on;
+        if ($uri ~ "(^|/)\\.") { return 404; }
+        default_type application/octet-stream;
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location ^~ /downloads/local-opencode-client/ {
+        alias /data/testagent/dist/local-opencode-client/;
+        autoindex off;
+        disable_symlinks on;
+        if ($uri ~ "(^|/)\\.") { return 404; }
+        default_type application/octet-stream;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location / {
+        return 404;
     }
 }

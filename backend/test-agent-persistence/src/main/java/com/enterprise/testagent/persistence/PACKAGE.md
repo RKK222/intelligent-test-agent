@@ -96,6 +96,8 @@
 - `db/migration-compat/toolbox-current-idempotent/V20260728160800__create_toolbox_click_tracking.sql`：曾误发并执行的当前版本 `-74327385` 幂等原文，只能由 app 在 checksum 命中时隔离加载。
 - `db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql`：LobeHub 主 migration 缺失历史的早期顺序补偿原文；已执行的库继续按该资源校验。
 - `db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql`：release rollout migration 已执行且早期补偿未执行时使用的更高版本补偿，避免倒序迁移。
+- `db/migration-compat/qa-memory-after-session-share/V20260810173117__qa_memories_create_governance_after_session_share.sql`：会话分享主链已执行、但尚未执行 release 最新时延输入 migration 时使用的 QA Memory 顺序补偿；已落库后继续按原始字节解析。
+- `db/migration-compat/qa-memory-after-token-latency-inputs/V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`：release 已执行 `V20260810234154` 时使用的更高 QA Memory 顺序补偿；与前一补偿 SQL 字节一致，只允许兼容装配按 history 二选一加载。
 - `db/migration/V20260810170000__user_notifications_create_notification_center.sql`：创建通知表并仅回填当前有效分享；成员授权后的成功读取审计回填已读，过期/撤销/移除/归档不进入通知历史。
 - `db/migration/V20260813190929__user_scm_git_identities_create.sql`：创建用户 SCM Git 姓名和证据表；MyBatis XML 负责 SSH Key 用户游标分页、批量历史证据写入和右控证据优先级保护。
 - `db/migration/V20260728210000__index_in_flight_app_source_operations.sql`：为周期恢复增加 status 前导的 operation 排序索引，避免历史终态数据导致每实例全表扫描。

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  initialImmersivePanels,
   routeCenterTransition,
   routedCenterModeFromRouteName,
   transitionImmersivePanels,
@@ -23,7 +24,9 @@ describe("toolbox navigation", () => {
   });
 
   it("keeps all activity pages as independent routed immersive views", () => {
-    const toolbox = routeCenterTransition("toolbox", "hub", "editor");
+    const memories = routeCenterTransition("memories", "hub", "editor");
+    expect(memories).toEqual({ mode: "memories", beforeRoute: "editor" });
+    const toolbox = routeCenterTransition("toolbox", memories.mode, memories.beforeRoute);
     expect(toolbox).toEqual({ mode: "toolbox", beforeRoute: "editor" });
     const system = routeCenterTransition("system", toolbox.mode, toolbox.beforeRoute);
     expect(system).toEqual({ mode: "system", beforeRoute: "editor" });
@@ -34,6 +37,7 @@ describe("toolbox navigation", () => {
 
   it("maps only named immersive activity routes to center modes", () => {
     expect(routedCenterModeFromRouteName("toolbox")).toBe("toolbox");
+    expect(routedCenterModeFromRouteName("memories")).toBe("memories");
     expect(routedCenterModeFromRouteName("system")).toBe("system");
     expect(routedCenterModeFromRouteName("hub")).toBe("hub");
     expect(routedCenterModeFromRouteName("workbench")).toBeNull();
@@ -59,7 +63,7 @@ describe("toolbox navigation", () => {
       savedBottomOpen: true
     });
 
-    const switched = transitionImmersivePanels(entered, "system", "toolbox");
+    const switched = transitionImmersivePanels(entered, "memories", "toolbox");
     expect(switched).toEqual(entered);
 
     const exited = transitionImmersivePanels(switched, "editor", "hub");
@@ -69,5 +73,26 @@ describe("toolbox navigation", () => {
       rightOpen: false,
       bottomOpen: true
     });
+  });
+
+  it("starts direct immersive routes with the surrounding workbench panels closed", () => {
+    const initial: ImmersivePanelSnapshot = {
+      leftOpen: true,
+      rightOpen: true,
+      bottomOpen: false,
+      savedLeftOpen: true,
+      savedRightOpen: true,
+      savedBottomOpen: false
+    };
+
+    expect(initialImmersivePanels(initial, "system")).toEqual({
+      leftOpen: false,
+      rightOpen: false,
+      bottomOpen: false,
+      savedLeftOpen: true,
+      savedRightOpen: true,
+      savedBottomOpen: false
+    });
+    expect(initialImmersivePanels(initial, null)).toEqual(initial);
   });
 });

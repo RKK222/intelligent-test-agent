@@ -23,6 +23,9 @@ Browser
           -> test-agent-opencode-client
               -> test-agent-opencode-sdk-generated
                   -> opencode server pool
+      -> local client reverse-tunnel gateway
+          -> test-agent-local-client-protocol
+          -> user-owned test-agent-local-client -> loopback OpenCode / local filesystem
       -> test-agent-xxl-job-integration
           -> test-agent-xxl-job-admin-upstream
           -> isolated MySQL / XXL executors
@@ -34,6 +37,7 @@ Browser
 - `test-agent-app` 只承载启动、装配、profile、migration、health 和日志等运行入口，不承载业务逻辑。
 - `test-agent-agent-runtime` 是多 agent 选择、统一日志/指标包装和具体 agent 适配器边界。
 - `test-agent-opencode-client` 是业务代码访问 opencode server 的唯一门面。
+- 本地目标仍通过 `test-agent-opencode-client` 门面，但传输由 `OpencodeWebClientTransport` 切换为反向隧道；浏览器和业务层不直连客户端。
 - `test-agent-opencode-sdk-generated` 只保存生成代码，不承载业务逻辑。
 - XXL executor 注册不使用稳定 Linux 服务器亲和；夜间扫描取得任务后，由业务层按任务提交时固化的目标服务器通过公共 Java 路由分发。
 - Workspace 级 OpenCode 运行态目录由 `test-agent-opencode-runtime` 在目标解析前复用 `ConversationWorkspaceAccessAuthorizer` 校验应用成员与个人工作区 owner，不能只凭 workspaceId 读取其它应用的 `.opencode` 能力。
@@ -56,21 +60,24 @@ Browser
 | `test-agent-observability` | traceId、结构化日志、Micrometer 指标、观测性工具。 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
+| `test-agent-local-client-protocol` | 后台与本地客户端共享的 `local-opencode-client.v1` JSON 帧、256 KiB 分片、版本与大小校验，不依赖服务端领域。 |
+| `test-agent-workspace-filesystem` | 服务端和本地客户端复用的真实根锚定、相对路径、符号链接防逃逸、预览/搜索、原子移动及分片上传下载内核。 |
+| `test-agent-local-client` | Java 21 用户级客户端，负责 WSS 反向连接、稳定实例身份、loopback OpenCode 监管、文件 RPC 和模型中继。 |
 | `test-agent-notification` | 通用用户站内通知模型编排、分享通知生命周期、配置 dispose 按 rollout/用户单行状态演进、受控动作、未读统计、事务提交后本机与跨 Java 变化、30 秒数据库校准和 90 天历史清理；不承载 Controller、SQL 或页面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
 | `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/上传/复制/移动/删除、基于工作区 JSONC 与本机 READY 引用副本的只读组合文件视图、超级管理员服务器目录选择、git/diff、对话 Tool 到当前个人 workspace 的安全映射与 Git 编排、版本选择前按当前用户身份做 Git 只读访问预检及单 Java 10 分钟成功缓存、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、个人拉取成功后的单用户运行态重载登记、按角色和有效成员关系预览工作空间/版本/实际分支并按单分支或全应用刷新物理 feature 组、feature 固定提交向相关个人 worktree 的原生 Git merge（非重叠本地改动保留、覆盖风险待同步、真实冲突三方处理）、Agent & Skill Hub 远端精确提交快照/显式发布/固定依赖/两阶段引用与取消/更新三方合并、应用 Agent/Skill 发布 rollout、应用引用资产库的 generation/租约/本机有界即时调度/定向退避/补偿副本、应用源码固定提交的多服务器物化/启动与周期数据库补偿/打开/最近选择/索引保护/XXL 清理、受控分支切换、只读实际指针核验与安全目录树、agent 和 skill 管理业务。 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间任务提交/查询/会话锁/XXL 固定目标批量分发/attempt 租约/Run 锚点补偿与显式内存容量条目、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、每用户有效公共配置软链接与公共个人保存热加载、公共全机/应用定向 Agent 配置发布排空及通知状态推进、个人拉取应用 Agent 的当前用户持久化排空、含 question/permission attention 与事件触发的用户级会话运行态摘要/状态流、stale active Run 收敛与十五天未使用进程关闭业务任务、当前用户 opencode 进程强状态/弱健康/初始化/确认式重启契约和可选引用目录启动环境、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、带实时应用成员校验的 workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、按 `backendProcessId` 精确选择在线 Java、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间任务提交/查询/会话锁/XXL 固定目标批量分发/attempt 租约、Run 锚点补偿与显式内存容量条目、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、每用户有效公共配置软链接与公共个人保存热加载、公共全机/应用定向 Agent 配置发布排空及通知状态推进、个人拉取应用 Agent 的当前用户持久化排空、含 question/permission attention 与事件触发的用户级会话运行态摘要/状态流、ClickHouse 运营事件消费/历史回填/汇总/查询、stale active Run 收敛与十五天未使用进程关闭业务任务、当前用户 opencode 进程强状态/弱健康/初始化/确认式重启契约和可选引用目录启动环境、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、带实时应用成员校验且禁止应用源码副本本机降级的 workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、按 `backendProcessId` 精确选择在线 Java、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/上传/复制/移动/删除、基于工作区 JSONC 与本机 READY 引用副本的只读组合文件视图、超级管理员服务器目录选择、git/diff、对话 Tool 到当前个人 workspace 的安全映射与 Git 编排、版本选择前按当前用户身份做 Git 只读访问预检及单 Java 10 分钟成功缓存、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、个人拉取成功后的单用户运行态重载登记、按角色和有效成员关系预览工作空间/版本/实际分支并刷新应用 Git、feature 固定提交向相关个人 worktree 的原生 Git merge（非重叠本地改动保留、覆盖风险待同步、真实冲突三方处理）、Agent & Skill Hub 远端精确提交快照/显式发布/固定依赖/两阶段引用与取消/更新三方合并、应用 Agent/Skill 发布 rollout、应用引用资产库的 generation/租约/本机有界即时调度/定向退避/补偿副本、应用源码固定提交的多服务器物化/启动与周期数据库补偿/打开/最近选择/索引保护/XXL 清理、受控分支切换、只读实际指针核验与安全目录树、agent 和 skill 管理业务。 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间任务提交/查询/会话锁/XXL 固定目标批量分发/attempt 租约/Run 锚点补偿与显式内存容量条目、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、每用户有效公共配置软链接与公共个人保存热加载、公共全机/应用定向 Agent 配置发布排空及通知状态推进、个人拉取应用 Agent 的当前用户持久化排空、含 question/permission attention 与事件触发的用户级会话运行态摘要/状态流、stale active Run 收敛与十五天未使用进程关闭业务任务、当前用户 opencode 进程强状态/弱健康/初始化/确认式重启契约和可选引用目录启动环境、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、带实时应用成员校验且禁止应用源码副本本机降级的 workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、按 `backendProcessId` 精确选择在线 Java、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、统一认证首次建号默认授予普通用户、登录认证和 Token 管理，以及用户管理组合查询、创建测试用户、手工用户名修正、单人角色调整和按显式用户/筛选快照的批量角色调整；新增外部 API Key 生成、RSA 密文生命周期、不可变 JVM 注册表、常量时间认证和跨 Java 刷新。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、已初始化引用资产库及已有应用源码历史的英文名/类型冻结、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器、参数更新跨实例广播，以及只管理显式 SPI 条目的本机内存参数注册表/诊断响应。 |
 | `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/result、Redis 全局锁与旧运行记录清理；不再启动 runner 或创建/执行 `USER_PLAN`，全部周期任务由 XXL adapter 调用业务 handler。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界；当前承载 IT-Tools/OmniTools 版本化离线目录、193 项目录校验、热门 Top 10 和用户/工具 30 秒点击计数服务，以及按统一认证号读取既有用户 SSH Key 并输出 TAEK1 加密信封。 |
 | `test-agent-model-gateway` | 中立的企业模型目录投影、能力探测、OpenAI-compatible 请求准备/流式转发、上游错误脱敏和每日聚合调用；同时提供 OpenCode 内部代理复用的 URL/可信 Header/响应头安全支持，不承载 Controller 或 SQL。 |
+| `test-agent-memory` | 通用长期记忆业务边界；承载个人/团队治理、官方风格 Mem0 REST 端口、证据安全引用、学习 Outbox、2 秒 fail-open 检索和 Skill 提案，不保存聊天正文、不直连记忆 PostgreSQL。 |
 | `test-agent-xxl-job-admin-upstream` | 未做业务修改的 XXL-JOB Admin 3.4.2 源码与资源普通 JAR；只允许整体上游升级。 |
 | `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、平台 advertised host 地址派生、由本机 Admin readiness 门控且不阻塞主服务的 executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、含 `X-Test-Agent-Linux-Server-Id` 的 CORS 边界、RunEvent SSE 按生产 Java 流式转发入口、用户通知分页/已读/fetch SSE、夜间时段/任务 HTTP 入口、工具盒子目录/点击 HTTP 入口、带 `permissionCount/PERMISSION` 的用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图、Agent 配置文件及 Hub 制品/引用操作）、应用源码仓库/物化/打开/最近选择/持久化操作快照 HTTP 入口及独立一次性 ticket 进度 WebSocket、Agent & Skill Hub 浏览/发布/更新 HTTP 入口、应用引用资产库 7 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史、XXL 一次性 SSO 票据和显式 JVM 内存参数跨 Java 查询/刷新入口、trace Web 入口。 |
-| `test-agent-persistence` | 数据库、MyBatis XML mapper、Flyway、Repository 和 Redis 必需适配，包括 Run manifest/input/durable 与 runtime 双 Stream/Hash + order ZSET 物化 snapshot/scope/active 索引、应用源码 slot/snapshot/replica/operation/step/cleanup/recent、会话上下文、workspace 服务器归属、按顶层请求 ID 收敛 `QUESTION/PERMISSION` 的用户级会话运行态只读查询、通用参数表、工作空间创建进度表、应用版本副本表、引用资产总体/服务器副本表、Agent & Skill Hub 内容寻址制品/修订/依赖/引用/更新操作表、工具点击永久明细/累计/用户窗口状态、opencode 用户进程管理表、scheduler/夜间任务/会话锁/时段容量表与 Repository 映射；新增外部 API 凭据/scope 表与整表加载、分页、CRUD mapper。 |
+| `test-agent-persistence` | PostgreSQL/Redis/ClickHouse 的 MyBatis XML、Flyway/ClickHouse checksum migration 与 Repository 适配，包括 Run 运行态、应用源码、会话上下文、workspace 归属、Agent & Skill Hub、工具点击、opencode 进程、scheduler/夜间任务、外部 API 凭据，以及脱敏运营事务 outbox、Redis 运营 stream reader、ClickHouse 原始事实/小时日汇总/能力与反馈事实查询。 |
 | `test-agent-event` | 按 RunStorageMode 分流的 RunEvent 追加、SSE、Redis 首帧物化 reset 与 `runtimeVersion` 有序尾流、legacy 数据库回放、全局事件触发流，以及 Redis/Noop 通用服务器广播适配。 |
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
 | `test-agent-app` | 唯一启动入口和可部署服务包，强制 WebFlux 主上下文并装配 XXL Admin 子上下文/executor；只放启动、装配、profile、migration、health 和日志。 |
@@ -121,7 +128,9 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 
 活动栏底部 `Boxes` 入口的前端 Hub 统一表示 Agent、Skill、MCP、Tool：Agent/Skill 继续调用平台 Hub API 管理远端资产，MCP/Tool 只复用 `apps/agent-web` 已加载的 OpenCode 运行态目录，不新增服务端资产类型。顶部资源摘要另保留 Plugin 计数；顶部摘要与 Hub 详情面板都支持拖拽调宽和页面内全屏。
 
-`apps/agent-web/router.ts` 与 `AgentWorkbench.vue` 共同维护活动栏 URI：`/workbench`、`/toolbox`、`/system`、`/hub` 和 `/settings` 分别对应工作台、工具箱、超级管理员控制台、能力库和设置弹窗，`/` 只兼容跳转到 `/workbench`。`toolbox-navigation.ts` 复用同一沉浸式布局状态机，路由名是刷新、登录回跳和浏览器历史恢复的权威来源；组件内后台状态不能覆盖当前路由页面。
+活动栏 `BrainCircuit` 入口和 `/memories` 路由由 `apps/agent-web` 组合通用记忆中心：`MemoryCenter.vue` 负责个人/团队/Skill 提案治理与含 Session 标题/ID 的证据 rail，`MemoryAdminPanel.vue` 负责 Mem0 多节点、企业/CPU profile、投影积压、模型设置和白名单，`FigmaChatPanel.vue` 只显示 `run-usage/query` 恢复的真实注入数量。`packages/backend-api` 是页面访问 `/api/internal/platform/memory/v1` 的唯一入口；前端不直连 memory-service、不复制原始聊天、不扩展 RunEvent。
+
+`apps/agent-web/router.ts` 与 `AgentWorkbench.vue` 共同维护活动栏 URI：`/workbench`、`/toolbox`、`/memories`、`/system`、`/hub` 和 `/settings` 分别对应工作台、工具箱、记忆中心、超级管理员控制台、能力库和设置弹窗，`/` 只兼容跳转到 `/workbench`。`toolbox-navigation.ts` 复用同一沉浸式布局状态机，路由名是刷新、登录回跳和浏览器历史恢复的权威来源；组件内后台状态不能覆盖当前路由页面。
 
 Skill Hub 的事项分类以逻辑资产持久化：应用推送 Skill 复用 `agent_skill_hub_assets`，公共 Git Skill 使用 `agent_skill_hub_builtin_classifications`，首次入库默认 `OTHER`，后续修订或 commit 不覆盖分类；`test-agent-workspace-management` 校验 `WORKER/TEST/CODE/OTHER` 与受控二级事项组合，`test-agent-persistence` 通过 `AgentSkillHubMapper.xml` 筛选并审计分类者，`test-agent-api` 仅向 `SUPER_ADMIN` 开放分类 mutation。公共 Agent/Skill 由 `AgentSkillHubApplicationService` 定时用共享仓库现有 Git 身份刷新当前分支远端引用并按精确 commit 对账，修订元数据写入公共快照表、正文复用内容寻址 artifact 表，查询链路只读数据库。前端 `AgentSkillHub.vue` 复用同一目录/详情链路提供两级筛选和详情内管理，不新增独立分类服务或客户端直连。
 

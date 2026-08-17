@@ -33,6 +33,8 @@
             <arg column="message_sender_user_id" javaType="java.lang.String"/>
             <arg column="message_sender_unified_auth_id" javaType="java.lang.String"/>
             <arg column="message_sent_by_shared_user" javaType="java.lang.Boolean"/>
+            <arg column="target_runtime_kind" javaType="java.lang.String"/>
+            <arg column="target_local_client_instance_id" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
 
@@ -80,7 +82,8 @@
         scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
         assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
         source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
-        message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user
+        message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
+        target_runtime_kind, target_local_client_instance_id
     </sql>
 
     <insert id="insertAnchor" databaseId="postgresql">
@@ -92,7 +95,7 @@
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
             message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
-            active_session_id
+            target_runtime_kind, target_local_client_instance_id, active_session_id
         ) values (
             #{row.runId}, #{row.sessionId}, #{row.workspaceId}, #{row.status}, #{row.storageMode}, #{row.statusVersion},
             #{row.clientRequestId}, #{row.producerLinuxServerId}, #{row.executionNodeIdSnapshot},
@@ -101,6 +104,7 @@
             #{row.assistantSummaryMessageId}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt}, #{row.detailsExpiresAt},
             #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId},
             #{row.messageSenderUserId}, #{row.messageSenderUnifiedAuthId}, #{row.messageSentBySharedUser},
+            #{row.targetRuntimeKind}, #{row.targetLocalClientInstanceId},
             #{row.sessionId}
         )
         on conflict(session_id, client_request_id) do nothing
@@ -119,6 +123,7 @@
             cast(#{row.updatedAt} as timestamp), cast(#{row.detailsExpiresAt} as timestamp),
             #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId},
             #{row.messageSenderUserId}, #{row.messageSenderUnifiedAuthId}, #{row.messageSentBySharedUser},
+            #{row.targetRuntimeKind}, #{row.targetLocalClientInstanceId},
             #{row.sessionId}
         )) as source(
             run_id, session_id, workspace_id, status, storage_mode, status_version,
@@ -128,7 +133,7 @@
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
             message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
-            active_session_id
+            target_runtime_kind, target_local_client_instance_id, active_session_id
         )
         on target.session_id = source.session_id and target.client_request_id = source.client_request_id
         when not matched then insert (
@@ -139,7 +144,7 @@
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
             message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
-            active_session_id
+            target_runtime_kind, target_local_client_instance_id, active_session_id
         ) values (
             source.run_id, source.session_id, source.workspace_id, source.status, source.storage_mode,
             source.status_version, source.client_request_id, source.producer_linux_server_id,
@@ -150,7 +155,8 @@
             source.trace_id, source.created_at, source.updated_at, source.details_expires_at,
             source.source_type, source.source_ref_id, source.triggered_by_user_id, source.agent_id, source.model_id,
             source.message_sender_user_id, source.message_sender_unified_auth_id,
-            source.message_sent_by_shared_user, source.active_session_id
+            source.message_sent_by_shared_user, source.target_runtime_kind,
+            source.target_local_client_instance_id, source.active_session_id
         )
     </insert>
 

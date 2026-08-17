@@ -60,9 +60,11 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
     public static final String GATEWAY_PATH = "/api/internal/platform/model-gateway/v1";
     public static final String PROVIDER_HEADER = OpenAiUpstreamSupport.PROVIDER_HEADER;
     public static final String UCID_HEADER = OpenAiUpstreamSupport.UCID_HEADER;
+    public static final String EMBEDDING_INPUT_TYPE_HEADER = "X-Embedding-Input-Type";
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration MEMORY_FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(120);
     private static final Duration FIRST_EVENT_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration STREAM_IDLE_TIMEOUT = Duration.ofSeconds(120);
     private static final int MAX_USAGE_CAPTURE_BYTES = 1024 * 1024;
@@ -230,7 +232,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
         Mono<Void> requestMono = webClient.post()
                 .uri(URI.create(targetUrl))
                 .headers(headers -> applyUpstreamHeaders(
-                        headers, exchange, resolvedModel, caller, safeTraceId, contentType))
+                        headers, exchange, endpoint, resolvedModel, caller, safeTraceId, contentType))
                 .body(bodyInserter)
                 .exchangeToMono(response -> {
                     responseHeadersReady.tryEmitEmpty();
@@ -243,7 +245,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
 
         // 只限制响应头到达时间，不能给完整 SSE 生命周期设置总时长上限。
         Mono<Void> responseHeaderTimeout = responseHeadersReady.asMono()
-                .timeout(FIRST_RESPONSE_TIMEOUT)
+                .timeout(firstResponseTimeout(caller))
                 .onErrorMap(ignored -> new PlatformException(
                         ErrorCode.OPENCODE_TIMEOUT, "企业模型供应商响应超时"))
                 .then(Mono.never());
@@ -255,6 +257,13 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
                 .onErrorResume(error -> Mono.defer(() -> recordUsage(
                                 endpoint, publicModelId, resolvedModel, caller, capture, false, startedAt))
                         .then(Mono.error(error)));
+    }
+
+    /** 记忆模型允许更长冷启动；交互式 LobeHub 仍保持 30 秒快速失败。 */
+    static Duration firstResponseTimeout(ModelGatewayCaller caller) {
+        return "memory".equals(caller.sourceClient())
+                ? MEMORY_FIRST_RESPONSE_TIMEOUT
+                : FIRST_RESPONSE_TIMEOUT;
     }
 
     private void copyPart(MultipartBodyBuilder builder, String name, Part part) {
@@ -469,6 +478,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
     private void applyUpstreamHeaders(
             HttpHeaders headers,
             ServerWebExchange exchange,
+            String endpoint,
             ResolvedModel resolvedModel,
             ModelGatewayCaller caller,
             String traceId,
@@ -481,7 +491,19 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
                 traceId,
                 contentType,
                 accept);
-        // 不复制 Authorization、Auth-Token、provider、UCID 或其他客户端 Header。
+        // 只有通过 HMAC 身份进入的记忆 embedding 请求可以把已签名的输入类型转发给
+        // 独立 CPU BGE；浏览器与其它客户端不能伪造该模型语义。
+        if ("memory".equals(caller.sourceClient()) && "/embeddings".equals(endpoint)) {
+            String inputType = exchange.getRequest().getHeaders()
+                    .getFirst(EMBEDDING_INPUT_TYPE_HEADER);
+            if (!"query".equals(inputType) && !"document".equals(inputType)) {
+                throw new PlatformException(ErrorCode.UNAUTHENTICATED, "记忆 embedding 输入类型无效");
+            }
+            headers.set(EMBEDDING_INPUT_TYPE_HEADER, inputType);
+        } else {
+            headers.remove(EMBEDDING_INPUT_TYPE_HEADER);
+        }
+        // 不复制 Authorization、Auth-Token、provider、UCID 或其它客户端 Header。
     }
 
     private void copySafeResponseHeaders(HttpHeaders target, HttpHeaders source) {

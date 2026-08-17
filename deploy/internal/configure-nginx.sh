@@ -112,6 +112,7 @@ load_dotenv "${ENV_FILE}"
 NGINX_MODE="${TEST_AGENT_NGINX_MODE:-single}"
 NGINX_LISTEN_PORT="${TEST_AGENT_NGINX_LISTEN_PORT:-80}"
 NGINX_ADDITIONAL_LISTEN_PORTS="${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS:-}"
+LOCAL_CLIENT_DOWNLOAD_PORT="${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT:-8081}"
 FRONTEND_ROOT="${TEST_AGENT_FRONTEND_ROOT:-/data/testagent/frontend}"
 NGINX_BACKENDS="${TEST_AGENT_NGINX_BACKENDS:-}"
 NGINX_SERVER_ROUTES="${TEST_AGENT_NGINX_SERVER_ROUTES:-}"
@@ -187,6 +188,11 @@ fi
   echo "Invalid TEST_AGENT_NGINX_LISTEN_PORT: ${NGINX_LISTEN_PORT}" >&2
   exit 1
 }
+[[ "${LOCAL_CLIENT_DOWNLOAD_PORT}" =~ ^[0-9]{1,5}$ ]] \
+  && (( LOCAL_CLIENT_DOWNLOAD_PORT >= 1 && LOCAL_CLIENT_DOWNLOAD_PORT <= 65535 )) || {
+  echo "Invalid TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT: ${LOCAL_CLIENT_DOWNLOAD_PORT}" >&2
+  exit 1
+}
 
 # 一个 server 块可同时承接企业网关转发端口和实体 IP 直连端口；端口必须唯一，避免 Nginx 重复 listen。
 listen_ports=("${NGINX_LISTEN_PORT}")
@@ -209,6 +215,13 @@ if [[ -n "${NGINX_ADDITIONAL_LISTEN_PORTS}" ]]; then
     listen_ports+=("${listen_port}")
   done
 fi
+for configured_listen_port in "${listen_ports[@]}"; do
+  [[ "${LOCAL_CLIENT_DOWNLOAD_PORT}" != "${configured_listen_port}" ]] || {
+    echo "Local client HTTP download port must be separate from gateway listen ports: ${LOCAL_CLIENT_DOWNLOAD_PORT}" >&2
+    exit 1
+  }
+done
+listen_ports+=("${LOCAL_CLIENT_DOWNLOAD_PORT}")
 [[ "${FRONTEND_ROOT}" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
   echo "Invalid TEST_AGENT_FRONTEND_ROOT: ${FRONTEND_ROOT}" >&2
   exit 1
@@ -378,6 +391,7 @@ server_upstreams_token='${TEST_AGENT_SERVER_UPSTREAMS}'
 server_route_map_token='${TEST_AGENT_SERVER_ROUTE_MAP}'
 toolbox_it_tools_token='${TEST_AGENT_TOOLBOX_IT_TOOLS_SERVERS}'
 toolbox_omni_tools_token='${TEST_AGENT_TOOLBOX_OMNI_TOOLS_SERVERS}'
+local_client_download_port_token='${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT}'
 listen_directive="listen ${NGINX_LISTEN_PORT};"
 additional_listen_directives=()
 tls_directives=""
@@ -483,6 +497,7 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
   line="${line//${listen_token}/${listen_directive}}"
   line="${line//${tls_token}/${tls_directives}}"
   line="${line//${root_token}/${FRONTEND_ROOT}}"
+  line="${line//${local_client_download_port_token}/${LOCAL_CLIENT_DOWNLOAD_PORT}}"
   printf '%s\n' "${line}" >>"${rendered}"
 done <"${TEMPLATE}"
 
@@ -501,6 +516,7 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   printf 'toolbox upstream counts: it-tools=%s omni-tools=%s\n' \
     "${#toolbox_it_tools_directives[@]}" "${#toolbox_omni_tools_directives[@]}"
   printf 'tls enabled: %s\n' "${NGINX_TLS_ENABLED}"
+  printf 'local client HTTP download port: %s\n' "${LOCAL_CLIENT_DOWNLOAD_PORT}"
   exit 0
 fi
 

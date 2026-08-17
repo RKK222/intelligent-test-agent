@@ -493,6 +493,10 @@ workspace PTY 和 Agent 配置进度仍返回签发 Java 地址。标准生产�
 | `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | 部署 Redis 地址，绑定到 Spring 标准 `spring.data.redis.*` | Redis 是系统必需依赖；用户 Token、会话运行上下文、用户进程运行管理、manager 控制面和 scheduler 均使用同一 Redis。 |
 | `TEST_AGENT_REDIS_SUMMARY_ENABLED` | `false` | 绑定 `test-agent.redis-summary.enabled`；默认关闭 Redis summary 新运行模式。 |
 | `TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE` | `0` | 绑定 `test-agent.redis-summary.rollout-percentage`；取值 0 到 100，默认不选择新模式 Run。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED` | 企业部署 `true`，应用默认 `false` | 启用 ClickHouse 运营事件消费、汇总和只读查询；需要独立专机，完整步骤见 `deploy/internal/CLICKHOUSE-ANALYTICS.md`。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_URL/USERNAME/PASSWORD` | 受控专机 JDBC 配置 | 两台 Java 使用同一最小权限账号；密码不得进入仓库、日志或命令行。ClickHouse 不可用时业务写不阻塞，运营查询返回明确 503。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED` | `false` | 一次性历史回填开关，只允许一个 Java 节点短期开启；必须同时设置明确 UTC start，可选 end。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS` | `false` | 不可逆第二阶段清理门禁；仅在已有 `VERIFIED`、备份和页面验收后与 backfill 开关同时短期开启。 |
 | `TEST_AGENT_LEGACY_RUN_WITHOUT_CONTEXT_ENABLED` | `true` | 绑定 `test-agent.redis-summary.legacy-run-without-context-enabled`；兼容期允许旧客户端不携带 `contextToken`，每次兼容调用递增 `legacy_run_without_context_total`。该指标连续 7 天为 0 后关闭；关闭后缺 token 不自动查询数据库。 |
 | `TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL` | `5s` | 后端实例写入 Redis Java 快照的间隔。 |
 | `TEST_AGENT_BACKEND_STALE_AFTER` | `10s` | Java/manager Redis 快照 TTL；不再作为数据库心跳回退窗口使用。 |
@@ -506,6 +510,7 @@ workspace PTY 和 Agent 配置进度仍返回签发 Java 地址。标准生产�
 | scheduler.run-retention-cleanup XXL cron | `0 0 8 * * ? *` | 北京时间 08:00 清理 PostgreSQL `scheduled_task_runs` 中超过 7 天的已结束记录；活动状态始终保留。 |
 | legacy stale active Run 收敛 XXL cron | `0 0/5 * * * ? *` | 每 5 分钟只扫描 `storage_mode=LEGACY_FULL` 的数据库 active Run；`REDIS_SUMMARY` 不进入该 SQL 或旧事件写入链路。 |
 | 运营分析汇总 XXL cron | `0 0/5 * * * ? *` | 任务 key 为 `opencode-runtime.analytics-rollup`；管理员可在 XXL 页面覆盖 Cron。旧专用环境变量已删除。 |
+| 运营分析入库 XXL cron | `0 0/1 * * * ? *` | 任务 key 为 `opencode-runtime.analytics-ingestion`；每轮最多消费 500 条 PostgreSQL/Redis 脱敏事件，失败一分钟后重试。 |
 | Run 无活动超时阈值 | `2h` | legacy 按 `runs.updated_at`；`REDIS_SUMMARY` 启动时和每 30 秒按本服务器 Redis manifest 的 `updatedAt` 扫描，无 attention 才由公共路由、owner lease/fencing 程序 best-effort cancel 并写安全终态摘要。 |
 | opencode 输出活跃 Redis TTL | `30m` | `test-agent:run-output-activity:{runId}` 存在表示 30 分钟内仍有用户可见输出，收敛时跳过。 |
 | opencode pending ask Redis 状态 | 无固定 TTL | `test-agent:run-pending-ask:{runId}` 存在表示最新状态仍等待用户处理 `permission.asked/question.asked`，不通过数据库 RunEvent 反查；收到 reply/reject 或 Run 终态后清理。 |
@@ -651,7 +656,18 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 个人离线开发备用脚本默认启动备用 Postgres 和 XXL MySQL 8.4，分别映射到 `127.0.0.1:15432` 与 `127.0.0.1:13306`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。MySQL volume 持久化数据，容器只创建 `xxl_job` 库/本地账号，表与任务仍由应用 Flyway 初始化。脚本只读取环境变量，不生成或写入密钥。
 
-仓库根目录的 `restart-dev-services.sh` 是 macOS/Linux/WSL/Git Bash 平台服务一键重启入口，Windows PowerShell 使用同级 `restart-dev-services.ps1`：二者默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。脚本不再识别或启动 Mem0、Embedding 或独立 pgvector 服务。脚本启动后端 Java 进程时同样清空 JVM 代理系统属性，确保测试库和 Redis 使用直连网络。test profile 下脚本默认启动本机 Go `opencode-manager`；其它 profile 在 `TEST_AGENT_OPENCODE_BASE_URL` 指向 loopback 或默认路由网卡探测到的本机 IPv4 时默认启动 manager。manager 以 `run` 长运行模式启动，不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。脚本会导出 `TEST_AGENT_ROOT`，并把早期本地测试库使用的兼容别名 `TESTAGENT` 默认设置为相同项目根目录，确保 `$TEST_AGENT_ROOT/...` 与既有 `$TESTAGENT/...` 通用参数路径都能在 Java 进程中展开后再下发给 manager。停止 manager 时，脚本会读取 `.tmp/dev-services/opencode-manager-state/processes/*.json` 中的 pid，并扫描端口池 `4096..4105` 内的 `opencode serve --port ...` 监听，统一停止残留用户进程后删除 state JSON，避免重启后旧进程或旧 state 导致端口被判定为已托管。脚本不再注入 server-ip-file 路径；Java 和 Go manager 都按 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 约定写读服务器身份与可访问地址。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，Bash 显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`，PowerShell 对应传入 `-Profile local -EnvFile .env.local` 或 `-Profile guo -EnvFile .env.guo`。
+仓库根目录的 `restart-dev-services.sh` 是 macOS/Linux/WSL/Git Bash 平台服务一键重启入口，Windows PowerShell 使用同级 `restart-dev-services.ps1`：二者默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。脚本启动后端 Java 进程时同样清空 JVM 代理系统属性，确保测试库和 Redis 使用直连网络。test profile 下脚本默认启动本机 Go `opencode-manager`；其它 profile 在 `TEST_AGENT_OPENCODE_BASE_URL` 指向 loopback 或默认路由网卡探测到的本机 IPv4 时默认启动 manager。manager 以 `run` 长运行模式启动，不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。脚本会导出 `TEST_AGENT_ROOT`，并把早期本地测试库使用的兼容别名 `TESTAGENT` 默认设置为相同项目根目录，确保 `$TEST_AGENT_ROOT/...` 与既有 `$TESTAGENT/...` 通用参数路径都能在 Java 进程中展开后再下发给 manager。停止 manager 时，脚本会读取 `.tmp/dev-services/opencode-manager-state/processes/*.json` 中的 pid，并扫描端口池 `4096..4105` 内的 `opencode serve --port ...` 监听，统一停止残留用户进程后删除 state JSON，避免重启后旧进程或旧 state 导致端口被判定为已托管。脚本不再注入 server-ip-file 路径；Java 和 Go manager 都按 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 约定写读服务器身份与可访问地址。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，Bash 显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`，PowerShell 对应传入 `-Profile local -EnvFile .env.local` 或 `-Profile guo -EnvFile .env.guo`。
+
+Bash 额外支持 `--with-memory`：它在平台进程前按“独立 pgvector → 独立 CPU BGE → Alembic → 三个无状态 Mem0 副本 → Nginx VIP”启动数据面，并等待带鉴权 readiness 返回 `rawMessageCount=0`。随机 API key、HMAC 和数据库密码只写入 `.tmp/dev-services/memory` 的 `0600` 文件，Java 不继承记忆库密码；默认路径不探测、停止或构建记忆容器。Windows PowerShell 入口 V1 不提供此开关。企业发布包另支持 `--memory-only/--with-memory`，详细命令、物理分离拓扑、端口和回滚见 `docs/deployment/qa-memory.md`。
+
+Bash 额外支持 `--with-clickhouse`：它在后端启动前拉取并启动固定的 ClickHouse 26.3.17.56，HTTP 只绑定
+`127.0.0.1:18123`，数据库为 `testagent_analytics`，数据保存在 `test-agent-clickhouse-dev-data-v1` 版本化
+Docker volume。随机密码、自定义用户配置和 Java JDBC dotenv 只写入 `.tmp/dev-services/clickhouse` 且权限为
+`0600`；后端只加载 JDBC 所需配置，并在启动时执行既有 ClickHouse schema migration。默认路径不探测、停止
+或配置 ClickHouse，Windows PowerShell 入口当前不提供该开关。企业专机仍按
+`deploy/internal/CLICKHOUSE-ANALYTICS.md` 的独立节点流程部署，不复用本地容器。
+
+`local` profile 未提供 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 时，Spring 在本次 JVM 启动期生成临时随机值，供 Java 与其创建的用户 OpenCode 子进程共同使用；该值不写回 `.env.local`，进程重启后自动轮换。显式环境值仍优先。`test` profile 继续使用受控测试默认值；默认/生产 profile 缺失时仍在用户进程启动前失败关闭，不能依赖本地兜底。
 
 `local` profile 未提供 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 时，Spring 在本次 JVM 启动期生成临时随机值，供 Java 与其创建的用户 OpenCode 子进程共同使用；该值不写回 `.env.local`，进程重启后自动轮换。显式环境值仍优先。`test` profile 继续使用受控测试默认值；默认/生产 profile 缺失时仍在用户进程启动前失败关闭，不能依赖本地兜底。
 

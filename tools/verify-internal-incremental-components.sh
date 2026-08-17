@@ -21,6 +21,10 @@ cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migratio
   "${PERSISTENCE_JAR_ROOT}/db/"
 cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration-compat" \
   "${PERSISTENCE_JAR_ROOT}/db/"
+cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration-postgresql" \
+  "${PERSISTENCE_JAR_ROOT}/db/"
+cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/clickhouse" \
+  "${PERSISTENCE_JAR_ROOT}/db/"
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${OUTPUT_DIR}/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 XXL_JAR_ROOT="${TMP_ROOT}/xxl-jar-root"
@@ -33,6 +37,8 @@ printf 'frontend\n' >"${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
 # zip-only 测试复用已生成制品，显式补齐本地客户端分发目录，避免把构建阶段误当作封装阶段。
 mkdir -p "${OUTPUT_DIR}/local-opencode-client/stable"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${OUTPUT_DIR}/local-opencode-client/install.sh"
+printf 'fixture pkg\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg"
+printf 'fixture deb\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
 printf '{\n  "version": "fixture-local-client"\n}\n' \
   >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json"
 printf 'fixture signature\n' >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"
