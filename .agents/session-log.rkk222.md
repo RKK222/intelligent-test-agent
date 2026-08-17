@@ -10779,3 +10779,28 @@
 
 - 导入结果写入完成与文件树可见完成现在是两个明确阶段；页面只请求根目录、`spec` 和本次父条目目录，既自动定位本批次内容，又不会递归展开整个 `spec`。
 - WebSocket 返回字段为向后兼容的加法变化；旧前端可忽略，新前端在字段缺失时仍可刷新根节点。真实企业 TCDS 文档导入仍需在企业网络现场复测。
+
+## 2026-08-17 - 合并远程 release 并重打组合功能企业包
+
+### Why
+
+- 用户要求拉取远程 `release` 后重新打包；远程新增案例维护 sticky 表头选择框重叠修复，本地同时已有小地球组合筛选、模型 Output TPS/UCID 查询和导入后定向刷新文件树三个尚未进入上一包的提交。
+
+### What
+
+- 将远程 `326c76501246b8c0322e5abd8669a85613cb9bad` 无冲突合入本地 `release`，制品源码提交固定为 `cd40311d9f7d983093bfaa2b0623ee73cc726095`。
+- 内层发布 ZIP SHA-256 为 `dfa865684ee619060a6a5297e4e77c14b417848eea1ac8368e339ddc25008ab7`，外层完整包为 `c1a352615505478a221694ebd8c2fc15b85f6e96fd9d148b7df8dab4f10710ad`。
+- 后端 app JAR 为 `6912079dc337caa94ef453b3a635f314f0ac06f5034fb0b1797bee56678e3463`，persistence JAR 为 `d7ac106c040b69151e630a92eba2c30b484f855feeafa0e24fe79dd1594bce75`，XXL integration JAR 为 `2e26aa6fd84c5aba4cbd381143a60fecb3a23fc397474b4aa87c43932e1db923`，前端归档为 `5d550ab5ab6d69770225d70e5d6a14902026362d4c50ef9c3509b29e19c6fee3`。
+
+### How
+
+- 合并后后端组合回归 64/64 通过，其中真实 PostgreSQL/Testcontainers 5/5；前端需求导入、文件树、模型可观测、案例维护与 backend-api 共 170/170 通过。
+- 正式构建完成 agent-web 类型检查、用户手册和生产包；显式关闭 workflow/LobeHub，worker runtime 与 toolbox 继续按既有指纹 `reuse`。
+- 外层 ZIP、内嵌内层逐字节一致、三份节点包 SHA、内层 `--validate-only`、独立需求导入入口、两台 TCDS 精确地址、worker 大制品缺失门禁及最终 JAR 全部受保护 Flyway 资源校验通过。
+- 对比上一包源码没有 migration、`deploy/internal`、依赖锁或 worker/runtime 变化；提交前再次回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并通过最终 `sha256sum -c`、`unzip -t` 和内外层逐字节比较。
+- 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库预期 Flyway history 零新增。
+- 案例表头滚动视觉、小地球真实 TCDS 导入、定向文件树展开及生产可观测 TPS/UCID 数据仍需企业现场验收。
