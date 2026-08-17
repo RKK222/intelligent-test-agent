@@ -29,7 +29,7 @@ cp -a "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/clickhou
   "${OUTPUT_DIR}/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 XXL_JAR_ROOT="${TMP_ROOT}/xxl-jar-root"
 mkdir -p "${XXL_JAR_ROOT}/xxl-job/db"
-cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration" \
+cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/." \
   "${XXL_JAR_ROOT}/xxl-job/db/"
 (cd "${XXL_JAR_ROOT}" && zip -qr \
   "${OUTPUT_DIR}/backend/lib/test-agent-xxl-job-integration-0.1.0-SNAPSHOT.jar" .)

@@ -804,6 +804,55 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         });
     }
 
+    @Test
+    void scmReleaseHistoryAppliesAnalyticsPipelineThroughForwardMigrations() {
+        DataSource dataSource = dataSource("analytics_pipeline_after_scm_release");
+        prepareScmReleaseHistory(dataSource);
+
+        assertThat(applied(dataSource, ANALYTICS_OUTBOX_VERSION)).isFalse();
+        assertThat(applied(dataSource, ANALYTICS_TRIGGER_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(ANALYTICS_AFTER_RELEASE_LOCATION);
+            assertThat(applied(dataSource, ANALYTICS_OUTBOX_VERSION)).isFalse();
+            assertThat(applied(dataSource, ANALYTICS_TRIGGER_VERSION)).isFalse();
+            assertThat(applied(dataSource, ANALYTICS_OUTBOX_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, ANALYTICS_TRIGGER_FORWARD_VERSION)).isTrue();
+            assertAnalyticsPipelineSchema(dataSource);
+        });
+
+        // 已执行前向版本必须继续从隔离 location 按原字节解析。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(ANALYTICS_AFTER_RELEASE_LOCATION);
+            assertAnalyticsPipelineSchema(dataSource);
+        });
+    }
+
+    @Test
+    void appliedAnalyticsOutboxForwardHistoryResumesTriggerMigration() {
+        DataSource dataSource = dataSource("analytics_pipeline_forward_interrupted");
+        prepareScmReleaseHistory(dataSource);
+        // 模拟第一条前向 migration 已提交、第二条触发器 migration 尚未执行时进程退出。
+        migrateWithoutResourceTo(
+                dataSource,
+                ANALYTICS_OUTBOX_FORWARD_VERSION,
+                new String[] {
+                    MAIN_LOCATION,
+                    LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION,
+                    ANALYTICS_AFTER_RELEASE_LOCATION
+                },
+                LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE,
+                ANALYTICS_OUTBOX_MAIN_RESOURCE);
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(ANALYTICS_AFTER_RELEASE_LOCATION);
+            assertThat(applied(dataSource, ANALYTICS_OUTBOX_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, ANALYTICS_TRIGGER_FORWARD_VERSION)).isTrue();
+            assertAnalyticsPipelineSchema(dataSource);
+        });
+    }
+
     /** 为每套历史创建独立 schema，避免测试之间共享 Flyway history。 */
     private static DataSource dataSource(String schema) {
         PGSimpleDataSource admin = postgresDataSource();
@@ -819,6 +868,16 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         dataSource.setUser(POSTGRES.getUsername());
         dataSource.setPassword(POSTGRES.getPassword());
         return dataSource;
+    }
+
+    /** 复现 release 已执行本地客户端前向版本与 SCM 版本、但未发布 analytics 主链的历史。 */
+    private static void prepareScmReleaseHistory(DataSource dataSource) {
+        migrateWithoutResourceTo(
+                dataSource,
+                CURRENT_RELEASE_WITH_SCM_MAX_VERSION,
+                new String[] {MAIN_LOCATION, LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION},
+                LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE,
+                ANALYTICS_OUTBOX_MAIN_RESOURCE);
     }
 
     private static void migrateTo(DataSource dataSource, String target, String... locations) {
@@ -1096,6 +1155,43 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .single();
         assertThat(tableCount).isEqualTo(3L);
         assertThat(attributionColumnCount).isEqualTo(4L);
+    }
+
+    private static void assertAnalyticsPipelineSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'analytics_event_outbox',
+                              'analytics_redis_outbox_checkpoints',
+                              'analytics_clickhouse_cutovers'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long triggerCount = jdbc.sql("""
+                        select count(*)
+                        from pg_trigger trigger_definition
+                        join pg_class target_table on target_table.oid = trigger_definition.tgrelid
+                        join pg_namespace target_schema on target_schema.oid = target_table.relnamespace
+                        where target_schema.nspname = current_schema()
+                          and not trigger_definition.tgisinternal
+                          and trigger_definition.tgname in (
+                              'trg_analytics_user_dimension_outbox',
+                              'trg_analytics_login_outbox',
+                              'trg_analytics_session_outbox',
+                              'trg_analytics_message_outbox',
+                              'trg_analytics_run_outbox',
+                              'trg_analytics_run_event_outbox',
+                              'trg_analytics_feedback_outbox'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(3L);
+        assertThat(triggerCount).isEqualTo(7L);
     }
 
     private static void assertUserNotificationSchema(DataSource dataSource) {

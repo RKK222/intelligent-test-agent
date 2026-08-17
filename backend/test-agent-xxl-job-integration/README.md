@@ -26,7 +26,7 @@
 ## 配置与故障边界
 
 - `TEST_AGENT_XXL_JOB_ENABLED` 控制 Admin/executor，默认开启；测试 profile 默认关闭，真实集成测试显式开启。
-- `TEST_AGENT_XXL_JOB_MYSQL_URL/USERNAME/PASSWORD` 只供 Admin 子上下文使用，Flyway location 固定为顶层独立路径 `xxl-job/db/migration`，不会被平台 PostgreSQL 的 `db/migration` 扫描。
+- `TEST_AGENT_XXL_JOB_MYSQL_URL/USERNAME/PASSWORD` 只供 Admin 子上下文使用，Flyway 主 location 固定为顶层独立路径 `xxl-job/db/migration`，不会被平台 PostgreSQL 的 `db/migration` 扫描。`XxlJobMigrationCompatibilityCustomizer` 不作为主应用组件扫描，只由 `PlatformXxlJobAdminApplication` 显式导入；它仅在 history 精确匹配 analytics V12 checksum 时加载 `xxl-job/db/migration-compat/analytics-v12-applied`、过滤 SCM V12 主链副本，再由 V13 补齐缺失任务。SCM V12 历史和空库直接使用主链，未知 checksum 拒绝启动。
 - `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` 必须在生产使用强随机值并由全部 Admin/executor 共享。
 - SSO 票据通过 Redis Lua 原子读删，兼容 Redis 5 及未提供 `GETDEL` 的 Redis 6.0；Redis 必须允许应用执行 `EVAL`。票据消费、JIT 或登录异常统一返回平台 `503 unavailable` 状态页，不进入上游通用错误页。
 - Admin Cookie 默认保持 `Secure`。只有受控内网明确无法提供 HTTPS 时才设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`；仍强制 `HttpOnly`、`SameSite=Lax` 和限定 Path，入口升级 HTTPS 后必须恢复 `true`。
@@ -38,7 +38,7 @@
 ## 测试
 
 - 单元测试覆盖 ticket 原子一次消费/过期、Redis 异常及平台 SSO 运行时异常返回自有 503 状态页、Cookie 安全模式、session marker、JIT 幂等/改名、原生入口禁用、参数校验、锁/续租/停止和异常脱敏；真实 Redis 5 容器验证不依赖 `GETDEL`。
-- MySQL 8.4 Testcontainers 覆盖 V1-V9 全新初始化、重复/并发 migration、V8 已执行后升级 V9、一个 executor 组、十条任务和无默认管理员；V5 把夜间分发 Cron 更新为每分钟，V6 注册每分钟 `workspace-management.app-source-cleanup`，V7 登记 `workspace-management.personal-workspace-relocation`，V8 在不改写 V7 的前提下把该任务调整为每 30 分钟，V9 注册每日 02:00 的 `opencode-runtime.inactive-user-process-cleanup`；任务继续固定使用 ROUND、DISCARD_LATER、DO_NOTHING、GLOBAL_MUTEX 和零 XXL 重试。
+- MySQL 8.4 Testcontainers 覆盖 V1-V13 全新初始化、重复/并发 migration、V8 已执行后升级、analytics/SCM 两套已执行 V12 保持原 checksum 升级 V13、未知 V12 checksum 失败关闭、一个 executor 组、十四条任务和无默认管理员；任务固定使用 ROUND、DISCARD_LATER、DO_NOTHING、GLOBAL_MUTEX 和零 XXL 重试。
 - `DefaultXxlJobAdminContextLauncherTest` 启动真实 Servlet/Tomcat 子上下文，验证 Flyway 先于 scheduler、原生登录 403、表单 SSO/JIT、安全 Cookie、上游 AdminLTE 与平台嵌入样式资源可访问，以及两个先注册节点在另一 Admin 新增第三节点后仍保留于共享 MySQL registry。
 - endpoint/readiness/lifecycle 测试验证 advertised IPv4/DNS 地址派生、本机 Admin context path 规整、非法监听地址安全拒绝、非 200 不启动、恢复后只启动一次，以及 Spring 自动装配使用派生地址且不会提前创建 executor 注册线程。
 - `TestAgentRuntimePropertiesBindingTest` 验证上游通用 `spring.datasource.*` 不会进入平台主上下文，launcher 集成测试同时验证重定位后的上游默认项仍在 Admin 子上下文生效。

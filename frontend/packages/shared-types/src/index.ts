@@ -272,6 +272,11 @@ export type LocalClientRolloutUser = {
   updatedAt: string;
 };
 
+/** 当前登录用户是否有权看到本地客户端下载入口。 */
+export type LocalClientDownloadAccess = {
+  allowed: boolean;
+};
+
 export type LocalClientInstance = {
   clientInstanceId: string;
   clientName: string;

@@ -37,7 +37,7 @@
 
 ## XXL-JOB 独立 MySQL migration
 
-XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration`，平台主 Flyway 的 `classpath:db/migration` 不会扫描该独立顶层目录。
+XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文主链扫描 `backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration`，平台主 Flyway 的 `classpath:db/migration` 不会扫描该独立顶层目录。已执行 analytics V12 的数据库由 XXL 兼容装配额外加载 `xxl-job/db/migration-compat/analytics-v12-applied`。
 
 ### 当前企业现场连接配置
 
@@ -66,11 +66,13 @@ XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backe
 | `V9__register_inactive_user_process_cleanup_task.sql` | 注册每天北京时间 02:00 执行的十五天未使用用户 OpenCode 进程关闭广播任务。 |
 | `V10__register_internal_model_probe_task.sql` | 注册每 5 分钟内部模型供应商探活。 |
 | `V11__register_internal_model_observability_retention_task.sql` | 注册每天 03:30 内部模型观测明细/汇总清理。 |
-| `V12__register_analytics_clickhouse_ingestion_task.sql` | 注册每分钟 ClickHouse 脱敏运营事实入库。 |
+| `V12__register_scm_git_name_sync_task.sql` | 默认主链注册每天 04:10 的 SCM Git 姓名补偿。 |
+| `migration-compat/analytics-v12-applied/V12__register_analytics_clickhouse_ingestion_task.sql` | 只解析 dev 已执行的 analytics V12 原始字节。 |
+| `V13__xxl_job_info_register_tasks_after_v12_branches.sql` | 对两套 V12 历史幂等补齐 ClickHouse 入库与 SCM Git 姓名补偿任务。 |
 
-V3-V12 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
+V3-V13 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
 
-所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V12 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
+所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V13 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
 
 PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审计，不再产生新的 PostgreSQL scheduler 运行。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免旧 runner 删除后留下永久活动记录。XXL 运行日志独立留在 MySQL，默认保留 30 天。
 
@@ -1350,10 +1352,7 @@ QA Memory 扩展 `20260809230000`/`20260810090000`、通知中心 `2026081017000
 `20260810234154` 和通知 dispose 枚举扩展 `20260811213000`。已经由 release 增量包执行到 `20260810234154`、但从未执行 QA Memory 的数据库，不再倒序
 加载上述三条 QA Memory 主 migration，而只新增隔离补偿 `20260811170050`；只执行到会话分享主链的旧 release
 历史则使用 `20260810173117`，再顺序执行其后的通知和时延输入 migration。两条 QA Memory 补偿不可混用，
-`20260810110001/02` 仅属于精确匹配的 QA Memory 扩展兼容路径，也不得混入正常企业主链。共享 XXL MySQL 本轮
-从已执行 V1-V11 的基线只允许新增 `V12__register_analytics_clickhouse_ingestion_task.sql`，Flyway checksum 为
-`-1848714734`、SHA-256 为 `70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`。任一失败记录、未知 checksum、未知更高版本、主/前向路径混用或
-部分历史出现时必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
+`20260810110001/02` 仅属于精确匹配的 QA Memory 扩展兼容路径，也不得混入正常企业主链。共享 XXL MySQL 已出现两套合法 V12 历史：analytics V12 的 Flyway checksum 为 `-1848714734`、SHA-256 为 `70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`；SCM V12 的 Flyway checksum 为 `-211900485`、SHA-256 为 `2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739`。兼容装配只按这两个 checksum 选择已冻结的 V12 资源：已有任一 V12 的数据库只新增 V13，V1-V11 基线则依次执行主链 SCM V12 和 V13。V13 Flyway checksum 为 `-1179215824`、SHA-256 为 `d7627696bcabc9f170f7709e298b46e28ba306a38f2251572c99b6b8175ff96a`，执行后两个任务都必须存在且各一条。任一失败记录、未知 checksum、未知更高版本、主/兼容路径混用或部分历史出现时必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改 history。
 
 正式发布必须同时验证空库、企业已部署基线、内部模型旧历史、撤销重发分叉和上述 QA Memory 基础/扩展个人历史，并核对源码、persistence JAR 与最终 ZIP 内外部 API、QA Memory、会话分享主迁移及前向迁移、通知中心和 Token 延迟输入 migration 的 SHA-256 一致。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。
 

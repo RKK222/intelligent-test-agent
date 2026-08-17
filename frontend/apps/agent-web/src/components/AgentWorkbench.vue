@@ -2369,6 +2369,18 @@ const opencodeEndpointQuery = useQuery({
   refetchIntervalInBackground: false
 });
 const opencodeEndpoints = computed<OpencodeEndpoint[]>(() => opencodeEndpointQuery.data.value ?? []);
+const localClientDownloadAccessQuery = useQuery({
+  queryKey: computed(() => ["local-client", "download-access", "me", authStore.token ?? ""] as const),
+  enabled: opencodeProcessEnabled,
+  queryFn: () => api.getMyLocalClientDownloadAccess(),
+  retry: false,
+  refetchOnWindowFocus: true,
+  refetchInterval: 5_000,
+  refetchIntervalInBackground: false
+});
+const localClientDownloadAllowed = computed(
+  () => localClientDownloadAccessQuery.data.value?.allowed === true
+);
 const publicConfigMessageGateQuery = useQuery({
   queryKey: computed(() => ["runtime", "opencode-process", "message-gate", authStore.token ?? ""] as const),
   enabled: opencodeProcessEnabled,
@@ -11531,6 +11543,7 @@ async function handleLogout() {
     :opencode-process-status="selectedRuntimeProcessStatus"
     :opencode-endpoints="opencodeEndpoints"
     :opencode-endpoints-loading="opencodeEndpointQuery.isFetching.value"
+    :local-client-download-allowed="localClientDownloadAllowed"
     :opencode-process-loading="selectedRuntimeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
     :process-restarting="restartMyOpencodeProcessMutation.isPending.value"

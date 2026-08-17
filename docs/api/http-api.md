@@ -4219,6 +4219,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新掩码视图 | 原子提升版本，撤销全部连接与模型 grant。 |
 | `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant。 |
 | `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户所有稳定实例及在线、generation、OpenCode 状态 | reported/observed 地址仅展示。 |
+| `GET` | `/api/internal/platform/local-opencode-client/download-access/me` | `{allowed}` | 当前登录用户可调用；只返回下载入口灰度布尔值。该接口不跟随 OpenCode 进程归属转发，避免滚动升级期间旧节点丢失 capability；查询异常失败关闭为 `false`。 |
 | `GET` | `/api/internal/platform/local-opencode-client/admin/rollout-users?page={page}&size={size}` | 本地客户端下载灰度用户分页 | 仅 `SUPER_ADMIN`；只返回启用记录和最近操作人/时间。 |
 | `POST` | `/api/internal/platform/local-opencode-client/admin/rollout-users` | `{userId}` → 灰度用户 | 仅 `SUPER_ADMIN`；目标必须是存在且可登录的平台用户，重复添加幂等启用。 |
 | `DELETE` | `/api/internal/platform/local-opencode-client/admin/rollout-users/{userId}` | 空响应 | 仅 `SUPER_ADMIN`；关闭下载入口但保留数据库审计记录，不撤销已安装客户端或 client key。 |
@@ -4226,7 +4227,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 只允许实例 owner；目标固定持有连接 Java。 |
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 客户端先验证真实绝对目录，再事务性注册；离线失败。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
-| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map；服务端实例的 `localClientDownload=true` 表示当前用户位于下载灰度名单。缺字段、查询失败或值为 false 时前端必须隐藏。 |
+| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map；`localClientDownload` 保留为 additive 兼容字段。网页下载入口以独立 `download-access/me` 为权威结果，避免实例请求转发到旧进程归属节点时闪现或消失。 |
 
 本地目录选择器取得 route 后，继续调用既有
 `POST /api/internal/platform/workspace-management/file-ws/tickets`，ticket 请求使用

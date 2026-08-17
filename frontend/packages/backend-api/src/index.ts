@@ -126,6 +126,7 @@ import type {
   LocalClientCommandResult,
   LocalClientCredential,
   LocalClientDirectoryEntry,
+  LocalClientDownloadAccess,
   LocalClientInstance,
   LocalClientPlaintextKey,
   LocalClientRolloutUser,
@@ -1167,6 +1168,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         `${localClientBase}/admin/rollout-users/${encodeURIComponent(userId)}`,
         { method: "DELETE" }
       ),
+    getMyLocalClientDownloadAccess: () =>
+      request<LocalClientDownloadAccess>(`${localClientBase}/download-access/me`),
     getMyOpencodeEndpoints: () =>
       request<OpencodeEndpoint[]>(agentPath("/opencode-endpoints/me")),
     commandLocalClientOpencode: (

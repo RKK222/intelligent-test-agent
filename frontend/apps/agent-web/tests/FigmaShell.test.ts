@@ -1283,6 +1283,7 @@ describe("FigmaShell", () => {
     const wrapper = mountShell({
       props: {
         currentUserName: "developer",
+        localClientDownloadAllowed: true,
         opencodeEndpoints: [{
           runtimeKind: "SERVER_PROCESS",
           endpointId: "server-opencode",
@@ -1320,12 +1321,13 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="restart-own-process"]').exists()).toBe(false);
   });
 
-  it("hides the local client download by default when the backend capability is absent or false", async () => {
+  it("hides the local client download when independent access is absent or false", async () => {
     const wrapper = mountShell({ props: { currentUserName: "developer" } });
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
 
     await wrapper.setProps({
+      localClientDownloadAllowed: false,
       opencodeEndpoints: [{
         runtimeKind: "SERVER_PROCESS",
         endpointId: "server-opencode",
@@ -1345,6 +1347,7 @@ describe("FigmaShell", () => {
     const wrapper = mountShell({
       props: {
         currentUserName: "developer",
+        localClientDownloadAllowed: true,
         opencodeEndpoints: [{
           runtimeKind: "SERVER_PROCESS",
           endpointId: "server-opencode",

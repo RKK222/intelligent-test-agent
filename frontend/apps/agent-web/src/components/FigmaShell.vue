@@ -84,6 +84,8 @@ const props = withDefaults(
     opencodeProcessStatus?: UserOpencodeProcess | null;
     opencodeEndpoints?: OpencodeEndpoint[];
     opencodeEndpointsLoading?: boolean;
+    /** 独立灰度接口的权威结果；加载失败或缺省时严格隐藏下载入口。 */
+    localClientDownloadAllowed?: boolean;
     opencodeProcessLoading?: boolean;
     opencodeProcessInitializing?: boolean;
     processRestarting?: boolean;
@@ -136,6 +138,7 @@ const props = withDefaults(
     processRestarting: false,
     opencodeEndpoints: () => [],
     opencodeEndpointsLoading: false,
+    localClientDownloadAllowed: false,
     showProcessStatusInPet: false,
     onboardingActive: false,
     sideQuestionAvailable: true,
@@ -616,11 +619,8 @@ const localClientEndpoints = computed(() =>
   props.opencodeEndpoints.filter(endpoint => endpoint.runtimeKind === "LOCAL_CLIENT")
 );
 
-/** 下载入口只认后端服务端实例返回的灰度 capability；缺字段和旧节点均默认隐藏。 */
-const localClientDownloadAllowed = computed(() =>
-  props.opencodeEndpoints.some(endpoint =>
-    endpoint.runtimeKind === "SERVER_PROCESS" && endpoint.capabilities?.localClientDownload === true)
-);
+/** 下载权限与实例状态独立刷新，旧进程归属节点的 capability 不得覆盖新后端的灰度结论。 */
+const showLocalClientDownload = computed(() => props.localClientDownloadAllowed === true);
 
 /** 以平台注册实例为安装完成依据；多台本地设备时汇总健康数量，不依赖浏览器下载记录。 */
 const localClientHealthDisplay = computed(() => {
@@ -2738,7 +2738,7 @@ function submitJoinApp() {
               <span class="figma-user-menu-service-text">{{ localClientHealthDisplay.text }}</span>
             </div>
             <a
-              v-if="!fixedWorkspace && localClientDownloadAllowed"
+              v-if="!fixedWorkspace && showLocalClientDownload"
               class="figma-user-menu-item"
               role="menuitem"
               data-testid="download-local-client"

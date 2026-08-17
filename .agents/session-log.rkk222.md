@@ -11613,3 +11613,28 @@
 
 - release 的近期部署成果与 dev 新能力已形成同一可构建、可迁移、可封包的合并树；未修改 `.env*`、generated SDK、OpenCode 只读源码或任何已执行 migration 字节。
 - 企业真实 ARM 麒麟、本轮企业节点发布和中间件现场状态没有在本机重做，不能据此宣称企业环境已部署；下一步是完成 merge commit、切换主工作区到 release 并按 `.env.test` 实际重启验证。
+
+## 2026-08-18 - 修复 release 灰度入口与两套部署迁移历史
+
+### Why
+
+- 实际页面验证发现客户端灰度用户的下载按钮仍会闪现后消失：旧 Java 持有服务端 OpenCode 连接时，实例列表请求会被转发到旧节点并丢掉新增 capability，健康轮询随后覆盖当前 Java 的灰度判断。
+- release 合并后的真实重启又暴露两处部署历史遗漏：服务器 PostgreSQL 已执行 analytics release 后前向 migration，而 XXL MySQL 已按 release 路径执行 SCM V12 与 V13；合并树分别漏掉原字节兼容资源和 XXL V12 分叉兼容装配，不能靠改名、repair 或删除另一侧任务处理。
+
+### What
+
+- 新增当前 Java 直接判定的 `GET /api/internal/platform/local-opencode-client/download-access/me`；前端独立每 5 秒查询该资格，下载入口不再依赖可被跨 Java 转发的 OpenCode 实例响应。旧响应 capability 继续保留兼容，但不作为入口事实源。
+- 恢复 PostgreSQL analytics-after-release 两份已执行原字节资源及真实历史回归；恢复 XXL `XxlJobMigrationCompatibilityCustomizer`、analytics V12 隔离资源、SCM V12 主链和 V13 前向迁移，三个企业打包/部署脚本重新锁定全部 SHA-256。
+- 增量包夹具改为复制完整 `xxl-job/db`，确保 compatibility location 不会在 zip-only 门禁中再次遗漏；同步 HTTP API、本地客户端、XXL 架构、数据库、安全、测试和模块 README。
+
+### How
+
+- 真实 PostgreSQL 27 套 Spring Boot Flyway 历史升级全部通过；analytics 前向资源 SHA-256 分别为 `bd286b1d992e6ff715393fb39bbb47a7d44dfe425c3b4ea6571f62e74eed0eb1`、`399e8db352ded3f12d5b5a91fe8a07f6242a9afc07caa8c28589614a43dc50e`。
+- 服务器 XXL MySQL 只读核对确认 V12 为 SCM checksum `-211900485`、V13 为 `-1179215824`，两类任务各一条；恢复资源 SHA-256 分别为 analytics V12 `70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`、SCM V12 `2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739`、V13 `d7627696bcabc9f170f7709e298b46e28ba306a38f2251572c99b6b8175ff96a`。
+- 后端资格控制器 3/3、前端全量 Vitest 2020 passed / 1 skipped、agent-web typecheck/用户手册/production build、26 模块跳过测试打包、增量包/多后台节点/双后台完整包门禁、Shell 语法与 `git diff --check` 通过。
+- 按 `.env.test` / test profile 完整重启后，平台 health 为 UP、XXL readiness 为 200、前端为 200；真实页面中灰度开启后下载入口跨两个以上刷新周期仍可见，随后恢复测试用户原有非灰度状态，接口返回 `allowed=false` 且按钮消失。
+
+### Result
+
+- release 近期 SCM、ClickHouse/analytics、企业封包和本地客户端灰度能力同时保留；当前服务连接服务器 PostgreSQL `192.168.8.100:15432/testagent_dev` 与 XXL MySQL `192.168.8.100:13306/xxl_job`，没有修改 `.env*`、数据库 history、generated SDK 或 OpenCode 源码，也没有推送远端。
+- 本机 MySQL 8.4 Testcontainers 容器内部已 ready，但 Docker Desktop 暴露端口在 JDBC 握手阶段持续无响应，因此本轮 7 条空库/analytics V12/SCM V12/未知 checksum/并发自动化未取得结果并已终止；真实服务器 SCM V12 → V13 路径已验证，另一套 analytics V12 自动化仍以历史测试和原字节锁定为证，不能表述为本轮完整重跑。

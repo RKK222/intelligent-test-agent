@@ -92,10 +92,12 @@ XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
-XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_analytics_clickhouse_ingestion_task.sql"
+XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE="xxl-job/db/migration-compat/analytics-v12-applied/V12__register_analytics_clickhouse_ingestion_task.sql"
 XXL_ANALYTICS_INGESTION_MIGRATION_SHA256="70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0"
 XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_scm_git_name_sync_task.sql"
 XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256="2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739"
+XXL_V12_FORWARD_MIGRATION_RESOURCE="xxl-job/db/migration/V13__xxl_job_info_register_tasks_after_v12_branches.sql"
+XXL_V12_FORWARD_MIGRATION_SHA256="d7627696bcabc9f170f7709e298b46e28ba306a38f2251572c99b6b8175ff96a"
 
 usage() {
   cat <<'USAGE'
@@ -302,6 +304,8 @@ verify_release_xxl_flyway_migrations_jar() {
     "${XXL_ANALYTICS_INGESTION_MIGRATION_RESOURCE}" "${XXL_ANALYTICS_INGESTION_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" \
     "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE}" "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${XXL_V12_FORWARD_MIGRATION_RESOURCE}" "${XXL_V12_FORWARD_MIGRATION_SHA256}"
 }
 
 # SHA 文件必须指向同目录的实际文件名，避免误校验同目录中的历史版本。

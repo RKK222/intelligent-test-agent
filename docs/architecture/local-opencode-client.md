@@ -36,8 +36,10 @@ flowchart LR
 
 客户端下载入口默认对所有用户隐藏。`SUPER_ADMIN` 在“系统管理 → 用户管理”中按平台 userId 维护
 `local_client_rollout_users`；只允许加入存在且可登录的用户，移出时保留操作人和时间。普通用户的
-`opencode-endpoints/me` 响应只在服务端实例 capability 中追加 `localClientDownload` 布尔值，前端仅在值
-严格为 true 时展示下载入口。旧 Java 缺字段、数据库查询失败或名单为空都失败关闭为隐藏。
+`download-access/me` 由收到浏览器请求的当前 Java 直接读取共享灰度表，只返回 `allowed` 布尔值；前端仅在
+值严格为 true 时展示下载入口。`opencode-endpoints/me` 继续保留 `localClientDownload` additive capability，
+但它可能按进程归属转发到滚动升级中的旧 Java，因此不再作为网页权威灰度来源。独立接口缺字段、查询失败
+或名单为空都失败关闭为隐藏，实例健康轮询也不会覆盖下载权限。
 
 该名单只控制 UI 可见性，不扩大认证权限：Nginx HTTP 制品仍按内网 ACL 提供，客户端连接仍必须使用有效
 `tack_v1_` key 通过 HTTPS/WSS 认证。移出名单不会撤销 key 或断开已安装客户端；需要停用客户端时仍使用

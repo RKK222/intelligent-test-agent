@@ -61,6 +61,21 @@ class UserOpencodeEndpointControllerTest {
                 .jsonPath("$.data[0].capabilities.localClientDownload").isEqualTo(false);
     }
 
+    @Test
+    void downloadAccessUsesCurrentBackendRolloutStateWithoutReadingRuntimeInstances() {
+        UserOpencodeProcessAssignmentService process = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        LocalClientInstanceApplicationService instances = org.mockito.Mockito.mock(LocalClientInstanceApplicationService.class);
+        LocalClientRolloutApplicationService rollout = org.mockito.Mockito.mock(LocalClientRolloutApplicationService.class);
+        when(rollout.isDownloadAllowed(USER_ID)).thenReturn(true);
+
+        client(process, instances, rollout).get()
+                .uri("/api/internal/platform/local-opencode-client/download-access/me")
+                .exchange().expectStatus().isOk().expectBody()
+                .jsonPath("$.data.allowed").isEqualTo(true);
+
+        org.mockito.Mockito.verifyNoInteractions(process, instances);
+    }
+
     private static WebTestClient client(
             UserOpencodeProcessAssignmentService process,
             LocalClientInstanceApplicationService instances,

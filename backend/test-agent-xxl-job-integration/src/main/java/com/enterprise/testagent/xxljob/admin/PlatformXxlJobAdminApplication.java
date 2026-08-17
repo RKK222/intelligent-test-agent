@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.Import;
 
 /** 独立 Servlet 子上下文入口；排除上游启动类和登录实现，其余 Admin 源码保持原样。 */
 @SpringBootConfiguration(proxyBeanMethods = false)
@@ -19,6 +20,7 @@ import org.springframework.context.annotation.FilterType;
         excludeFilters = @ComponentScan.Filter(
                 type = FilterType.ASSIGNABLE_TYPE,
                 classes = {XxlJobAdminApplication.class, XxlSsoConfig.class, SimpleLoginStore.class}))
+@Import(XxlJobMigrationCompatibilityCustomizer.class)
 @MapperScan({"com.xxl.job.admin.business.mapper", "com.xxl.job.admin.framework.mapper", "com.enterprise.testagent.xxljob.admin"})
 public class PlatformXxlJobAdminApplication {
 }

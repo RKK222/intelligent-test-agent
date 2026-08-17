@@ -69,6 +69,19 @@ public class UserOpencodeEndpointController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
+    /**
+     * 独立返回当前用户的下载灰度，避免实例列表被路由到尚未升级的进程归属节点后丢失 capability。
+     */
+    @GetMapping("/api/internal/platform/local-opencode-client/download-access/me")
+    public Mono<ApiResponse<DownloadAccessView>> downloadAccess(ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return Mono.fromCallable(() -> ApiResponse.ok(
+                        new DownloadAccessView(localClientDownloadAllowed(userId, traceId)),
+                        traceId))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
     /** 灰度存储异常时只隐藏下载入口，不影响用户查看和使用已有 OpenCode 实例。 */
     private boolean localClientDownloadAllowed(UserId userId, String traceId) {
         try {
@@ -115,6 +128,10 @@ public class UserOpencodeEndpointController {
         values.put("collaboration", true);
         values.put("localClientDownload", localClientDownloadAllowed);
         return Map.copyOf(values);
+    }
+
+    /** 当前用户下载权限只暴露布尔值，不返回灰度名单或审计信息。 */
+    public record DownloadAccessView(boolean allowed) {
     }
 
     /** 统一实例投影不会包含 client key、模型授权或本地根目录。 */

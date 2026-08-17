@@ -58,7 +58,7 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 平台 PostgreSQL 与 XXL MySQL 完全分离：
 
 - 平台 Flyway 仍扫描 `classpath:db/migration`，不扫描 XXL migration。
-- Admin 子上下文只连接 MySQL，并扫描独立顶层 location `classpath:xxl-job/db/migration`；平台 PostgreSQL 仍只扫描 `classpath:db/migration`。
+- Admin 子上下文只连接 MySQL，并扫描独立顶层主 location `classpath:xxl-job/db/migration`；平台 PostgreSQL 仍只扫描 `classpath:db/migration`。若 history 精确匹配 analytics V12，唯一兼容装配会追加原字节隔离 location 并过滤 SCM V12 主链副本；未知 checksum 失败关闭。
 - `V1` 是 XXL-JOB 3.4.2 基础表，不写示例任务或默认管理员。
 - `V2` 增加平台用户/session 字段、`platform_task_key` 唯一键并扩展用户名长度。
 - `V3` 新增自动注册执行器组 `test-agent-backend` 和首批六个周期任务。
@@ -70,8 +70,8 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 - `V9` 注册每天北京时间 02:00 的闲置用户进程关闭任务 `opencode-runtime.inactive-user-process-cleanup`；XXL 只取得全局锁并广播，各 Java 仅处理本机实际持有 manager 连接的进程。
 - `V10` 注册每 5 分钟的内部模型供应商探活任务 `opencode-runtime.internal-model-probe`；GLOBAL_MUTEX 只保证单实例执行，实际探活遍历当前 Java 进程 registry 快照中的启用供应商并落观测明细与探活状态。
 - `V11` 注册每天北京时间 03:30 的内部模型调用观测数据清理任务 `opencode-runtime.internal-model-observability-retention`；删除 30 天前明细与 180 天前小时聚合。
-- `V12` 注册每分钟 ClickHouse 运营事实入库任务 `opencode-runtime.analytics-ingestion`；handler 使用 `GLOBAL_MUTEX` 每轮最多消费 500 条脱敏 PostgreSQL/Redis 事件，ClickHouse 开关关闭时安全跳过。
-- `V12` 注册每天北京时间 04:10 的 SCM Git 姓名补偿任务 `configuration-management.scm-git-name-sync`；任务不访问远端，对每个本机应用仓库只执行一次最多 50,000 条匹配提交的 `origin` 跟踪历史扫描，再按 500 个 SSH Key 用户一页比对和批量写库。
+- `V12` 在 dev/release 分别形成 analytics 和 SCM Git 姓名补偿两套已执行历史；两份 SQL 的版本、文件名和字节均冻结，analytics 候选保存在隔离兼容 location，SCM 候选保留在默认主链。
+- `V13` 是唯一前向收敛迁移：对 analytics V12 历史只补 SCM 任务，对 SCM V12 历史和空库只补 analytics 任务，最终同时保有每分钟 `opencode-runtime.analytics-ingestion` 与每天 04:10 `configuration-management.scm-git-name-sync`。
 - 后续新增任务或调整既有生产默认配置必须新建更高版本 SQL；禁止改写已执行 migration，也禁止启动时执行非版本化 upsert。
 
 旧 PostgreSQL 的任务定义和运行历史只做保留，不复制到 MySQL，也不再被 runner 调度。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免 runner 删除后残留永久活动记录；不删除历史审计，新夜间任务只写 `night_execution_tasks`。

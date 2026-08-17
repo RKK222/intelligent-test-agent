@@ -176,8 +176,9 @@ Redis 快照、不直接控制本地 supervisor。Workspace/Session/Run/夜间�
 runtime/capability 字段，旧服务端路径保持兼容。完整契约见 `docs/api/http-api.md` 与
 `docs/api/event-stream.md`。
 `LocalClientRolloutAdminController` 仅允许 `SUPER_ADMIN` 分页、添加和移出客户端下载灰度用户；
-`UserOpencodeEndpointController` 把当前用户是否灰度作为服务端实例的 `localClientDownload` capability additive
-返回，查询异常时失败关闭为 false，不影响已有 OpenCode 实例列表。
+`UserOpencodeEndpointController` 继续把当前用户灰度作为服务端实例的 `localClientDownload` capability
+additive 返回，同时提供不跟随进程归属路由的 `download-access/me` 独立查询。网页以独立布尔结果为权威，
+查询异常时失败关闭为 false，避免滚动升级期间旧归属 Java 的实例响应让入口闪现或消失。
 
 `ProtectedAgentMcpController` 仅承载服务器 OpenCode 的精确 stateless MCP JSON-RPC 入口。它从 HTTP exchange
 读取短期 Bearer grant，保持 MCP 原始 wire body，不使用平台 `ApiResponse` envelope；notification 显式返回
