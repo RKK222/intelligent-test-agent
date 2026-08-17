@@ -4144,8 +4144,8 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/api/v1/requirement-import/applications` | 按当前登录主体的 `unifiedAuthId` 返回全部 TCDS 授权应用。 |
-| `GET` | `/api/v1/requirement-import/sub-items?appShortName=...&editionId=...` | 返回指定应用和月份版本的父子条目，不返回文档下载地址。 |
+| `GET` | `/api/v1/requirement-import/applications` | 按当前登录主体的 `unifiedAuthId` 返回 TCDS 应用目录，作为页面快捷选择建议。 |
+| `GET` | `/api/v1/requirement-import/sub-items?appShortName=...&editionId=...` | 返回指定 TCDS 应用和版本的父子条目，不返回文档下载地址；`appShortName`、`editionId` 接受任意非空值，前端不要求命中应用目录或当前月份前后 3 个月。 |
 
 应用项为 `{appName, appShortName}`；父条目为 `{itemNo, itemName, children:[{itemNo,itemName}]}`。Controller 不直接访问外部客户端，TCDS 访问和目录投影由应用服务完成。浏览器只请求平台同源 API；后端访问 TCDS 登录、用户、应用、子条目、文档元数据和 TCDS 同源文档地址时统一携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`，重定向到跨域对象存储后不透传该 header。
 

@@ -43,7 +43,7 @@ public class RequirementImportApplicationService {
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
     }
 
-    /** 返回当前 TCDS 用户有权访问的完整应用列表。 */
+    /** 返回 TCDS 按当前用户给出的应用目录，供页面作为输入建议。 */
     public List<ApplicationOption> listApplications(String unifiedAuthId) {
         return tcdsGateway.listApplications(required(unifiedAuthId, "unifiedAuthId")).stream()
                 .map(application -> new ApplicationOption(application.appName(), application.appShortName()))

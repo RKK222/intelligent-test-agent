@@ -33,7 +33,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.InternalModelProviderManagementController` / `web.platform.InternalModelTokenManagementController`：超级管理员维护内部模型供应商关联和外部 Token 记录的入口，Token API 响应不含明文；`InternalModelProxyController` 是仅供 opencode 子进程调用、按 Provider ID 注入对应 Token 的内部模型代理入口，代理密钥和供应商快照在订阅请求体前校验，请求体仅在该端点按 `2 MiB` 上限聚合并以 byte[] 转发，顶层 `model` 通过流式 JSON 扫描校验，避免放大全局 WebFlux 缓冲区、完整 JSON 对象树和额外 String 副本。
 - `web.platform.InternalModelObservabilityController`：仅 `SUPER_ADMIN` 可用的内部模型调用明细、小时统计、探活状态和手工探活入口；明细支持精确 `outcome` 与五类 `outcomeGroup`，保留 `traceId/ucid` 等结构化排障字段，不返回请求或响应正文。
 - `web.platform.XxlJobSsoTicketController`：仅 `SUPER_ADMIN` 可用的 60 秒一次性 iframe 表单票据入口；业务签发与 Redis 消费属于 XXL integration。
-- `web.platform.RequirementImportController`：同源 iframe 使用的 TCDS 授权应用和子条目只读 API；身份只取登录主体，响应不含 token 和文档 URL。
+- `web.platform.RequirementImportController`：同源 iframe 使用的 TCDS 应用目录建议和子条目只读 API；身份只取登录主体，响应不含 token 和文档 URL。
 - `web.platform.WorkspaceFileWebSocketHandler`：`workspace.requirement-import-items` 使用与导入一致的可信名称和安全目录规范化返回父子条目导入状态，`workspace.requirement-import` 只收选择 ID 并复用逐 RPC 写鉴权；`workspace.resolve-physical-path` 只对普通受权会话按单文件即时解析。`WorkspaceFileWebSocketTicketFilter` 在 upgrade 前非消费式预检 ticket，缺失、过期和复用统一返回脱敏 401。
 - `web.platform.SchedulerManagementController`：旧 `/scheduler-management/**` 兼容入口，所有方法统一返回 `410 API_GONE`，不再调用旧管理服务。
 - `web.platform.AgentConfigController`：Agent 配置 HTTP 元数据、Git 操作和进度 ticket 入口；公共仓库初始化、显式拉取和超级管理员缺失 worktree 手工补偿按 `linuxServerId` 路由到目标后端，补偿与定时任务复用目标 Java 上的服务器级锁，公共 update-and-push 合并冲突读取/解决/取消接口复用工作区冲突协议，公共 worktree 列表只返回指定服务器 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容操作继续走平台文件 WebSocket。
