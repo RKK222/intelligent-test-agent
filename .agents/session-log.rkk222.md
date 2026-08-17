@@ -11221,3 +11221,22 @@
 
 - 源码侧部署拓扑、具体命令与回归门禁已纠正；上一版 `.134` 部署 ClickHouse、`.160` 启动记忆数据库的命令明确作废。
 - 本阶段不修改 HTTP API、RunEvent、数据库结构/Flyway、generated SDK、OpenCode 源码或 `.env*`。最终 linux/amd64 制品仍需按本提交重建并做容器启动验证后才能交付；企业真实节点尚未写入。
+
+## 2026-08-17 - 将 macOS PKG 修复版切换到本地下载页面
+
+### Why
+
+- PKG 修复提交完成后，本地开发页面仍从 `deploy/internal/dist/local-opencode-client/` 返回旧 SHA，用户无法从页面取得已修复安装包。
+
+### What
+
+- 将 `0.1.0-dev-native-pkgfix` 的 PKG、DEB、`install.sh`、签名清单和版本化 JAR/JRE/OpenCode 作为完整目录原子切换到本地开发分发路径；旧目录保留为 `deploy/internal/dist/local-opencode-client.bak.20260817154044`。
+
+### How
+
+- 切换前验证版本化制品 `SHA256SUMS` 和 `manifest.json.sig`；切换后从 `http://127.0.0.1:3000/downloads/local-opencode-client/installer` 实际下载，PKG SHA-256 为 `fae60d7ba17fb19412f5d303627ca6e87c4bc061125e8a4c50d6ad422ba7ca72`，与页面清单一致且清单签名验证通过。
+
+### Result
+
+- 本地页面现已返回修复版，用户可以重新下载并执行系统 Installer；现有用户目录客户端保持 PID `60264` 运行，未重启 Java、worker、manager 或数据库。
+- 本次只切换本机忽略跟踪的开发制品目录，没有上传企业 `.2` 的 `/data/testagent/dist/local-opencode-client/`，也没有修改 API、事件、数据库/Flyway、配置文件或源码。
