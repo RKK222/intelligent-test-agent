@@ -22,7 +22,6 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -50,18 +49,6 @@ public class TcdsCaseMaintenanceService {
     private static final int MAX_LOG_PAYLOAD_LENGTH = 8 * 1024;
     private static final int LOG_DIGEST_LENGTH = 16;
     private static final String REDACTED = "[REDACTED]";
-    /** TCDS 展示枚举与 createGraphCase 业务枚举并非统一后缀关系，必须按已确认 code 精确转换。 */
-    private static final Map<String, TaskTypeMapping> TASK_TYPE_MAPPINGS_BY_VALUE = Map.ofEntries(
-            Map.entry("0", new TaskTypeMapping("自定义测试任务", "自定义")),
-            Map.entry("1", new TaskTypeMapping("安全测试任务", "安全")),
-            Map.entry("2", new TaskTypeMapping("业务风险防控测试任务", "业务风险防控")),
-            Map.entry("3", new TaskTypeMapping("功能测试任务", "功能测试")),
-            Map.entry("4", new TaskTypeMapping("验收测试任务", "验收")),
-            Map.entry("5", new TaskTypeMapping("准入测试任务", "准入")),
-            Map.entry("6", new TaskTypeMapping("灰度测试任务", "灰度")),
-            Map.entry("7", new TaskTypeMapping("投产验证测试任务", "投产验证")),
-            Map.entry("8", new TaskTypeMapping("非功能性测试任务", "非功能性")),
-            Map.entry("11", new TaskTypeMapping("验收准入测试任务", "验收准入")));
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
@@ -127,7 +114,7 @@ public class TcdsCaseMaintenanceService {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "案例列表不能为空");
         }
         Set<String> allowedTaskTypes = getTaskTypes(normalizedTraceId).stream()
-                .map(option -> toCaseTaskType(option.name(), option.value()))
+                .map(TcdsTaskTypeOption::name)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         validateCaseTaskTypes(cases, allowedTaskTypes);
 
@@ -200,33 +187,20 @@ public class TcdsCaseMaintenanceService {
 
         List<TcdsTaskTypeOption> options = new java.util.ArrayList<>(subItemTypes.size());
         Set<String> values = new HashSet<>();
-        Set<String> caseTaskTypes = new HashSet<>();
+        Set<String> taskTypeNames = new HashSet<>();
         for (JsonNode item : subItemTypes) {
             if (!item.isObject()) {
                 throw unavailable("TCDS 任务类型服务响应格式无效", null);
             }
             String name = normalizedUpstreamText(item.get("name"), MAX_TASK_TYPE_NAME_LENGTH);
             String value = normalizedUpstreamText(item.get("value"), MAX_TASK_TYPE_VALUE_LENGTH);
-            String caseTaskType = toCaseTaskType(name, value);
-            if (name == null || value == null || caseTaskType == null
-                    || !values.add(value) || !caseTaskTypes.add(caseTaskType)) {
+            if (name == null || value == null || name.contains(",") || name.contains("，")
+                    || !values.add(value) || !taskTypeNames.add(name)) {
                 throw unavailable("TCDS 任务类型服务响应格式无效", null);
             }
             options.add(new TcdsTaskTypeOption(name, value));
         }
         return List.copyOf(options);
-    }
-
-    /** 同时校验上游 value 与完整展示名，防止未知枚举或错配名称进入 createGraphCase。 */
-    private static String toCaseTaskType(String upstreamName, String upstreamValue) {
-        if (upstreamName == null || upstreamValue == null) {
-            return null;
-        }
-        TaskTypeMapping mapping = TASK_TYPE_MAPPINGS_BY_VALUE.get(upstreamValue.trim());
-        if (mapping == null || !mapping.upstreamName().equals(upstreamName.trim())) {
-            return null;
-        }
-        return mapping.caseTaskType();
     }
 
     /** 提交前使用同一时刻的实时任务类型集合校验浏览器传入的业务名称。 */
@@ -487,9 +461,6 @@ public class TcdsCaseMaintenanceService {
 
     private static PlatformException unavailable(String message, Throwable cause) {
         return new PlatformException(ErrorCode.EXTERNAL_API_UNAVAILABLE, message, java.util.Map.of(), cause);
-    }
-
-    private record TaskTypeMapping(String upstreamName, String caseTaskType) {
     }
 
     private record UpstreamRequest(
