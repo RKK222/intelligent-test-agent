@@ -318,10 +318,14 @@ function requestClose() {
 .case-content-column { width: 19%; }
 .case-task-column { width: 23%; }
 
-.case-table th {
+.case-table thead {
   position: sticky;
-  z-index: 1;
+  z-index: 2;
   top: 0;
+  isolation: isolate;
+}
+
+.case-table th {
   height: 44px;
   padding: 0 12px;
   border-bottom: 1px solid var(--ta-border);
