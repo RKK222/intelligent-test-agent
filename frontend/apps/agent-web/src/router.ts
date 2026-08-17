@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
+import { createBackendApiClient } from "@test-agent/backend-api";
 import {
   isReleaseFeaturePathEnabled,
   releaseFeatures,
@@ -6,12 +7,15 @@ import {
 } from "./release-features";
 import { jumpAam } from "./utils/aamLogin";
 import { useAuthStore } from "./stores/authStore";
+import { useMemoryAccessStore } from "./stores/memoryAccessStore";
 
 const TOKEN_KEY = "test-agent.auth.token";
 const UNIFIED_AUTH_ID_KEY = "test-agent.auth.unifiedAuthId";
 const DEFAULT_WORKBENCH_PATH = "/workbench";
 
 const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
+const API_BASE_URL = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
+const memoryAccessApi = createBackendApiClient({ baseUrl: API_BASE_URL });
 
 /**
  * 当前环境标识：localhost 表示本地开发模式，其他值走 AAM 统一认证。
@@ -219,6 +223,14 @@ router.beforeEach(async (to, _from) => {
 
   if (!authStore.token) {
     authStore.saveToken(token);
+  }
+
+  if (to.name === "memories") {
+    // 直达记忆路由必须在工作台挂载前重新确认总开关与灰度授权；异常时同样失败关闭。
+    const memoryAllowed = await useMemoryAccessStore().refresh(memoryAccessApi, authStore.token);
+    if (!memoryAllowed) {
+      return { name: "workbench", replace: true };
+    }
   }
 
   return true;

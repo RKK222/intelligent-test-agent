@@ -204,7 +204,7 @@ async function addWhitelistUser() {
   addingWhitelistUser.value = true;
   try {
     await api.enableQaMemoryUser(selectedWhitelistUserId.value);
-    ElMessage.success("用户已加入记忆白名单");
+    ElMessage.success("用户已加入记忆灰度名单");
     whitelistDialogOpen.value = false;
     await load();
   } catch (caught) {
@@ -216,7 +216,7 @@ async function addWhitelistUser() {
 
 async function removeWhitelistUser(user: MemoryWhitelistView) {
   try {
-    await ElMessageBox.confirm(`确定停止为 ${user.userId} 提供记忆能力吗？已有记忆不会被删除。`, "移出白名单", {
+    await ElMessageBox.confirm(`确定停止为 ${user.userId} 提供记忆能力吗？已有记忆不会被删除。`, "移出灰度名单", {
       type: "warning",
       confirmButtonText: "移出",
       cancelButtonText: "取消"
@@ -226,7 +226,7 @@ async function removeWhitelistUser(user: MemoryWhitelistView) {
   }
   try {
     await api.disableQaMemoryUser(user.userId);
-    ElMessage.success("用户已移出白名单");
+    ElMessage.success("用户已移出记忆灰度名单");
     await load();
   } catch (caught) {
     ElMessage.error(caught instanceof Error ? caught.message : "移除失败");
@@ -387,10 +387,10 @@ function formatTime(value: string) {
 
         <section class="memory-admin-card">
           <div class="memory-admin-card__title">
-            <div><small>ROLLOUT</small><h3>用户白名单</h3></div>
+            <div><small>ROLLOUT</small><h3>灰度用户</h3></div>
             <button type="button" data-testid="add-memory-whitelist-user" @click="openWhitelistDialog"><Plus :size="15" />添加用户</button>
           </div>
-          <p class="memory-admin-card__description">白名单为空时，不学习、不检索，也不会改变任何现有对话。</p>
+          <p class="memory-admin-card__description">记忆总开关启用后，只有名单中的用户会看到“记忆”入口并可打开记忆中心，同时参与学习与检索；未授权用户直达页面会返回工作台。</p>
           <div v-if="whitelist.length" class="memory-whitelist">
             <article v-for="user in whitelist" :key="user.userId">
               <span class="memory-user-icon"><UsersRound :size="16" /></span>
@@ -399,7 +399,7 @@ function formatTime(value: string) {
               <button type="button" :aria-label="`移出 ${user.userId}`" @click="removeWhitelistUser(user)"><Trash2 :size="15" /></button>
             </article>
           </div>
-          <div v-else class="memory-whitelist-empty"><UsersRound :size="24" /><strong>白名单为空</strong><span>记忆能力不会影响任何用户。</span></div>
+          <div v-else class="memory-whitelist-empty"><UsersRound :size="24" /><strong>尚未指定灰度用户</strong><span>记忆入口不会向任何用户开放。</span></div>
         </section>
       </div>
     </template>
@@ -407,16 +407,16 @@ function formatTime(value: string) {
     <el-dialog
       v-model="whitelistDialogOpen"
       class="memory-user-dialog"
-      title="添加白名单用户"
+      title="添加灰度用户"
       width="min(520px, calc(100vw - 32px))"
       append-to-body
       :close-on-click-modal="!addingWhitelistUser"
       :close-on-press-escape="!addingWhitelistUser"
     >
-      <p class="memory-user-dialog__description">记忆能力默认不开放。请选择需要灰度启用的平台用户，系统会提交该用户的真实 ID。</p>
+      <p class="memory-user-dialog__description">记忆能力默认不开放。请选择需要显示入口并允许打开记忆中心的平台用户，系统会提交该用户的真实 ID。</p>
       <el-select
         v-model="selectedWhitelistUserId"
-        aria-label="选择白名单用户"
+        aria-label="选择灰度用户"
         class="memory-user-select"
         filterable
         remote

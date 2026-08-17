@@ -78,6 +78,8 @@ cpu:bge-small-zh-v1.5:512:{revision}
 
 Java 调用 memory-service 必须携带 `X-Memory-Service-Key`。该 key 只用于服务到服务认证，不代表最终用户；Java 在调用前后仍校验登录用户、白名单、owner、Application 成员和角色。Mem0 回调 Java 模型网关使用 HMAC-SHA256，签名覆盖方法、固定路径、正文 SHA-256、client/user/run/session/operation、时间、nonce、能力和 embedding input type。允许时钟偏差 30 秒，nonce TTL 2 分钟，Redis 原子防重放。
 
+浏览器只对已登录用户调用 `GET /api/internal/platform/memory/v1/availability`，并以“总开关已启用且当前用户在名单中”的 `enabled` 同时控制活动栏入口和 `/memories` 路由。未授权、超时或校验异常都必须失败关闭并回到工作台；名单中的用户进入路由时必须重新校验，已打开页面在窗口重新聚焦时复核。前端隐藏不是安全边界，其余记忆 API、学习 worker 和 Run 前检索仍必须在 Java 侧分别校验同一总开关与平台白名单。超级管理员通过系统管理“记忆能力 → 灰度用户”选人，不能依赖前端角色或本地存储自行开通。
+
 | 边界 | 当前值 |
 |---|---:|
 | Java WebFlux 单请求内存上限 | 256 KiB |
@@ -219,6 +221,8 @@ deploy/internal/memory-docker.sh verify-vip
 9. 浏览器完整端到端验收。
 10. 开启首批用户白名单。
 11. 增加其余 Mem0 副本并执行故障/容量验收。
+
+首批名单验收必须至少覆盖一名已授权用户和一名未授权用户：已授权用户能看到活动栏入口并打开 `/memories`；未授权用户看不到入口，直接访问该路径会返回 `/workbench`，且直接请求治理 API 仍返回 `403`。availability 请求失败时也必须保持入口隐藏。
 
 任一 checksum、Alembic head、模型身份、向量维度、首台 Java readiness 或浏览器 E2E 失败，必须停止后续节点发布。Java 和 Mem0 的滚动扩容不能用本地降级掩盖 VIP/路由错误。
 

@@ -176,13 +176,13 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 ### 通用长期记忆中心
 
-- activity rail 的 `BrainCircuit` 入口打开 `/memories`，与工具盒子共用沉浸式面板快照；路由激活期间 Run Diff、VCS 刷新和 SSE 状态更新只更新后台数据，不切走页面。
+- activity rail 的 `BrainCircuit` 入口只对服务端记忆 availability 校验通过的用户显示并打开 `/memories`，与工具盒子共用沉浸式面板快照；路由进入前重新校验，未授权或校验失败时不挂载页面并返回 `/workbench`。访问状态按登录 Token 隔离，窗口重新聚焦会复核并在撤权后退出；路由激活期间 Run Diff、VCS 刷新和 SSE 状态更新只更新后台数据，不切走页面。
 - `MemoryCenter.vue` 提供个人、团队、Skill 提案三个治理视图和证据抽屉。个人记忆支持全局/当前 Application 范围、编辑、提升全局、暂停和归档；原生 Mem0 学习结果直接生效。团队只能手工提交并由 `APP_ADMIN` 审核，个人记忆可携带来源安全引用提交团队候选。证据展示 Session 标题/ID和 Run ID，只有 Session owner 能打开 `/s/{sessionId}` 原对话。
 - Mem0 正文不可用时，页面只展示 `displaySummary` 治理摘要并禁用编辑与“提交为团队记忆”；摘要不会进入编辑器或作为完整正文回写，刷新取得 `contentAvailable=true` 后才能继续。
-- 对话完成摘要只消费 `queryQaMemoryRunUsage` 返回的实际注入记录，没有记录不显示徽标。系统管理 `MemoryAdminPanel.vue` 使用 `/memory/v1/admin` 展示 Mem0 多节点、固定 CHAT、企业/CPU Embedding、学习/投影积压和白名单；模型选项只接受已启用、配置凭据且对应能力探测成功的内部模型。健康卡和配置区在中栏、窄屏和暗色模式下不产生横向滚动。
+- 对话完成摘要只消费 `queryQaMemoryRunUsage` 返回的实际注入记录，没有记录不显示徽标。系统管理 `MemoryAdminPanel.vue` 使用 `/memory/v1/admin` 展示 Mem0 多节点、固定 CHAT、企业/CPU Embedding、学习/投影积压和灰度用户；只有 `SUPER_ADMIN` 可从平台用户目录指定名单。模型选项只接受已启用、配置凭据且对应能力探测成功的内部模型。健康卡和配置区在中栏、窄屏和暗色模式下不产生横向滚动。
 - 页面以 evidence rail 作为唯一标志元素，个人蓝 `#4F6BED`、团队青 `#0F8F88`、候选琥珀 `#B7791F`、冲突红 `#C2414B` 只表达状态；其它表面和字体沿用工作台 token，并覆盖暗色、键盘焦点、Reduced Motion 与窄屏抽屉。
 
-`tests/memory-center.test.ts`、`tests/memory-admin-panel.test.ts`、`tests/FigmaChatPanel.test.ts` 与 `tests/workbench.spec.ts` 覆盖通用治理、来源证据、团队批准/带原因拒绝、双 profile、白名单、错误重试、2000 字边界、HTML-like 文本安全渲染和 usage；`tests/memory.real-spec.ts` 从浏览器覆盖创建两个 Application、原生学习、来源 Session/Run 精确匹配、跨会话召回、Application 隔离、个人范围提升前后跨应用召回变化、暂停/归档停止注入、团队批准/拒绝、普通成员直接请求治理与管理 API 的 403、原对话 ACL、旧 API 410、真实管理策略保存，以及等效 200% 缩放下的键盘和 Escape 操作。`tools/memory-cluster-e2e.sh` 会在只剩一个 Mem0、只剩一个 Java 和企业 Embedding 中断窗口继续从浏览器学习，先验证真实投影积压再恢复；容量门禁支持同步发送的多轮/短时耐久运行，记录 p50/p95/p99/max、每轮请求发散、Run/Session 唯一性和抽样学习证据。企业故障门禁还要求 `TEST_AGENT_MEM0_SCALE_OUT_CMD/TEST_AGENT_MEM0_SCALE_IN_CMD` 真正增加再移除无状态副本；本地固定三副本只验证重建。`tools/memory-cluster-e2e-test.sh` 锁定编排顺序、轮数传递和扩缩容 hook，但不替代真实浏览器发布准入。
+`tests/memory-access-store.test.ts`、`tests/memory-center.test.ts`、`tests/memory-admin-panel.test.ts`、`tests/FigmaChatPanel.test.ts` 与 `tests/workbench.spec.ts` 覆盖按 Token 隔离的失败关闭、入口/直达路由灰度、通用治理、来源证据、团队批准/带原因拒绝、双 profile、白名单、错误重试、2000 字边界、HTML-like 文本安全渲染和 usage；`tests/memory.real-spec.ts` 从浏览器覆盖创建两个 Application、原生学习、来源 Session/Run 精确匹配、跨会话召回、Application 隔离、个人范围提升前后跨应用召回变化、暂停/归档停止注入、团队批准/拒绝、普通成员直接请求治理与管理 API 的 403、原对话 ACL、旧 API 410、真实管理策略保存，以及等效 200% 缩放下的键盘和 Escape 操作。`tools/memory-cluster-e2e.sh` 会在只剩一个 Mem0、只剩一个 Java 和企业 Embedding 中断窗口继续从浏览器学习，先验证真实投影积压再恢复；容量门禁支持同步发送的多轮/短时耐久运行，记录 p50/p95/p99/max、每轮请求发散、Run/Session 唯一性和抽样学习证据。企业故障门禁还要求 `TEST_AGENT_MEM0_SCALE_OUT_CMD/TEST_AGENT_MEM0_SCALE_IN_CMD` 真正增加再移除无状态副本；本地固定三副本只验证重建。`tools/memory-cluster-e2e-test.sh` 锁定编排顺序、轮数传递和扩缩容 hook，但不替代真实浏览器发布准入。
 
 独立 worktree 跑 Playwright 时可设置 `TEST_AGENT_E2E_PORT` 使用非 3000 端口；配置中的 `webServer.url`、Vite 端口和浏览器 `baseURL` 会同步切换，避免 `reuseExistingServer` 误连其它 worktree 的开发服务。默认仍为 3000。
 

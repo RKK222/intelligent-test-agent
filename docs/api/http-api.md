@@ -4060,11 +4060,11 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 ### 通用长期记忆 V1
 
-用户入口 Base URL：`/api/internal/platform/memory/v1`。所有接口要求平台登录，并且当前用户必须在记忆灰度白名单中；默认空白名单，因此 migration 上线后不会改变既有对话。完整记忆正文从 Mem0 读取，平台数据库中的 `displaySummary` 只用于服务不可用时的降级展示。旧 `/api/internal/platform/qa-memory/v1/**` 统一返回 `410 API_GONE`。
+用户入口 Base URL：`/api/internal/platform/memory/v1`。`GET /availability` 只要求平台登录，只返回“记忆总开关已启用且当前用户位于记忆灰度白名单”的布尔结果；其余用户接口除登录外都要求总开关开启且当前用户已在名单中。默认关闭且白名单为空，因此 migration 上线后不会改变既有对话。前端以该 availability 结果同时控制活动栏入口和 `/memories` 路由，未授权或校验失败时不挂载记忆页面并返回工作台；这只是界面收口，不能替代其它记忆 API 的服务端白名单鉴权。完整记忆正文从 Mem0 读取，平台数据库中的 `displaySummary` 只用于服务不可用时的降级展示。旧 `/api/internal/platform/qa-memory/v1/**` 统一返回 `410 API_GONE`。
 
 | Method | Path | 说明 |
 |---|---|---|
-| `GET` | `/availability` | 查询当前用户是否已开通 |
+| `GET` | `/availability` | 查询记忆总开关与当前用户灰度授权是否同时生效；仅返回 `enabled`，供入口和路由失败关闭 |
 | `GET/POST` | `/personal` | 分页查询或手工新增个人记忆；范围仅 `PERSONAL_GLOBAL/PERSONAL_APPLICATION` |
 | `GET` | `/team` | 按当前有效 Application 成员关系查询团队记忆 |
 | `POST` | `/team/proposals` | 成员手工提交团队候选；可选 `sourceMemoryId` 只复制本人个人记忆的证据引用和摘要 |
@@ -4085,7 +4085,7 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 - `GET /health`：Mem0 多节点共享数据面、CPU/企业 Embedding profile、固定 CHAT、学习队列和投影 outbox；后端携带 service key 调用 `/ready` 并验证 `rawMessageCount=0`。
 - `GET/PATCH /settings`：固定 CHAT 模型、可空企业 Embedding 模型和只读 CPU profile；修改携带 `expectedVersion`。企业模型必须已启用、配置凭据、探测 `EMBEDDING` 成功并声明正维度。
-- `GET/POST/DELETE /whitelist...`：分页查询、启用和移除用户白名单；移除不会删除记忆，但页面、学习和检索立即停止。
+- `GET/POST/DELETE /whitelist...`：分页查询、启用和移除用户白名单；移除不会删除记忆，服务端学习、检索和治理访问立即停止，前端在下次路由进入或窗口聚焦复核时隐藏入口并退出记忆页面。
 
 能解析到当前 Application 的成功人工根 Run 只写无原文学习 outbox；无法解析 Application 时不自动学习，也不降级生成个人全局记忆。异步任务通过现有 Session 恢复表读取本轮 USER/ASSISTANT，并原样调用 `Mem0.add(messages,infer=true)`。不传自定义抽取 prompt，不产生 QA taskTypes、自定义 confidence、显式/隐式/临时候选。原生个人记忆直接生效，默认当前用户 + 当前 Application。
 

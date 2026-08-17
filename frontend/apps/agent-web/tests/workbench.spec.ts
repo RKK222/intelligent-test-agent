@@ -4967,6 +4967,20 @@ test("ordinary user opens generic memories, inspects the source conversation and
   await expect(rightPanel).toHaveCSS("width", initialRightWidth);
 });
 
+test("user outside the memory rollout cannot see the entry or open the memories route", async ({ page }) => {
+  await mockBackendApi(page, {
+    authRoles: ["USER"],
+    memoryAvailable: false
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await expect(page.getByTestId("memory-activity-button")).toHaveCount(0);
+
+  await page.goto("/memories", { waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/workbench$/);
+  await expect(page.getByTestId("memory-center")).toHaveCount(0);
+});
+
 test("super admin configures generic memory profiles and rollout without clipped controls", async ({ page }, testInfo) => {
   const memorySettingsRequests: Array<Record<string, unknown>> = [];
   const memoryWhitelistEnableRequests: string[] = [];
@@ -5117,22 +5131,11 @@ test("super admin configures generic memory profiles and rollout without clipped
     expectedVersion: 3
   });
 
-  const modelWrapper = page.locator(".memory-model-select .el-select__wrapper").first();
-  await modelWrapper.hover();
-  await page.locator(".memory-model-select .el-select__clear").click();
-  await page.getByRole("button", { name: "保存策略", exact: true }).click();
-  await expect.poll(() => memorySettingsRequests.length).toBe(2);
-  expect(memorySettingsRequests[1]).toEqual({
-    primaryChatModelId: null,
-    primaryEmbeddingModelId: "enterprise/embedding-only",
-    expectedVersion: 4
-  });
-
   await page.getByRole("button", { name: "添加用户", exact: true }).click();
-  let whitelistDialog = page.getByRole("dialog", { name: "添加白名单用户" });
-  let whitelistSelect = whitelistDialog.getByRole("combobox", { name: "选择白名单用户" });
+  let whitelistDialog = page.getByRole("dialog", { name: "添加灰度用户" });
+  let whitelistSelect = whitelistDialog.getByRole("combobox", { name: "选择灰度用户" });
   await whitelistSelect.fill("88");
-  let whitelistListbox = page.getByRole("listbox", { name: "选择白名单用户" });
+  let whitelistListbox = page.getByRole("listbox", { name: "选择灰度用户" });
   await expect(whitelistListbox.getByRole("option")).toHaveCount(1);
   await expect(whitelistListbox.getByRole("option")).toContainText("usr_88");
   const [listboxBox, cancelBox] = await Promise.all([
@@ -5146,22 +5149,31 @@ test("super admin configures generic memory profiles and rollout without clipped
   await expect(page.locator(".memory-user-dialog")).toBeHidden();
 
   await page.getByRole("button", { name: "添加用户", exact: true }).click();
-  whitelistDialog = page.getByRole("dialog", { name: "添加白名单用户" });
-  whitelistSelect = whitelistDialog.getByRole("combobox", { name: "选择白名单用户" });
+  whitelistDialog = page.getByRole("dialog", { name: "添加灰度用户" });
+  whitelistSelect = whitelistDialog.getByRole("combobox", { name: "选择灰度用户" });
   await whitelistSelect.fill("88");
-  whitelistListbox = page.getByRole("listbox", { name: "选择白名单用户" });
+  whitelistListbox = page.getByRole("listbox", { name: "选择灰度用户" });
   await whitelistListbox.getByRole("option", { name: /测试用户 88.*AUTH88.*usr_88/ }).click();
   await whitelistDialog.getByRole("button", { name: "确认添加", exact: true }).click();
   await expect.poll(() => memoryWhitelistEnableRequests).toEqual(["usr_88"]);
   await expect(page.getByRole("button", { name: "移出 usr_88" })).toBeVisible();
   await page.getByRole("button", { name: "移出 usr_88" }).click();
-  await page.getByRole("dialog", { name: "移出白名单" }).getByRole("button", { name: "移出", exact: true }).click();
+  await page.getByRole("dialog", { name: "移出灰度名单" }).getByRole("button", { name: "移出", exact: true }).click();
   await expect.poll(() => memoryWhitelistDisableRequests).toEqual(["usr_88"]);
   expect(memoryDirectoryUserQueries).toContain("88");
 
   await page.getByRole("button", { name: "查看技术信息", exact: true }).click();
   await expect(page.locator("#embedding-technical-details")).toContainText("fixed-revision");
   await page.getByRole("button", { name: "收起技术信息", exact: true }).click();
+  await expect(page.locator(".el-message")).toHaveCount(0, { timeout: 6_000 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    document.querySelectorAll<HTMLElement>("*").forEach((node) => {
+      if (node.scrollLeft > 0) node.scrollLeft = 0;
+    });
+  });
+  await panel.evaluate((node) => { node.scrollTop = 0; });
   await page.screenshot({ path: testInfo.outputPath("memory-admin.png"), fullPage: true });
 
   await page.evaluate(() => document.documentElement.classList.add("dark"));

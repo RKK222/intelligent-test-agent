@@ -10933,3 +10933,27 @@
 
 - 记忆中心点击“打开原始对话”会保留当前页面并在新标签页展示所属人的完整只读时间线；`shr_` 分享链接继续保持原权限和工作台行为。
 - 纯前端路由、渲染与文档变更；未修改 API、RunEvent、数据库/Flyway、部署变量、`.env*`、generated SDK 或 OpenCode 源码，也未新建分支。
+
+## 2026-08-17 - 记忆中心按用户灰度开放
+
+### Why
+
+- 用户要求记忆功能默认不对全员展示，只允许超级管理员指定的少量用户看到入口并打开页面；未授权用户即使输入 `/memories` 也不能进入。
+
+### What
+
+- 复用既有 `qa_memory_whitelist`、`GET /memory/v1/availability` 和超级管理员白名单管理接口作为唯一事实源，没有新增第二套灰度配置。
+- 前端新增按登录 Token 隔离的记忆访问状态，工作台仅向已授权用户显示“记忆”入口；`/memories` 在挂载页面前强制刷新服务端授权，查询失败、未授权或授权被撤销时均返回工作台。
+- 系统管理将“用户白名单”统一调整为“灰度用户”，明确名单同时控制页面入口、记忆学习和检索；同步前后端 README、HTTP API、部署 QA 文档和用户手册，并更新真实 Chromium 管理页截图。
+
+### How
+
+- 前端灰度 Store、记忆中心和管理面板定向 Vitest 16/16，agent-web typecheck、用户手册与生产 build 均通过；Chromium 覆盖已授权访问、未授权隐藏入口/直达拦截和超级管理员增删灰度用户 3/3 通过。
+- JDK 25 下 `QaMemoryApplicationServiceTest` 12/12、`QaMemoryControllerTest` 5/5 通过，受影响 22 模块 reactor 为 `BUILD SUCCESS`；`git diff --check` 通过。
+- 首次按 `.env.test`、`test` profile 启动时，外部 PostgreSQL 与 Redis 均返回 `NoRouteToHostException`；按用户要求改用项目本地 PostgreSQL 16 和 Redis 7.4.9，通过 `.tmp/dev-services` 下 `0600` 的一次性 dotenv 覆盖连接并关闭无需联调的远端 XXL Admin，未修改 `.env*`。
+- 本地 PostgreSQL 完成全部 107 条 Flyway 历史校验并补齐 70 条迁移；真实 `health/readiness` 均为 `UP`、前端 3000 返回 200、登录 CORS 正常。超级管理员真实 API 增删 `usr_test_dev` 灰度名单并完成清理；本次运行未启动 Memory 数据面且总开关为 false，因此真实 availability 保持 false，授权为 true 的页面路径由 Chromium 自动化覆盖。
+
+### Result
+
+- 页面可见性与后端学习/检索共用同一用户灰度名单，超级管理员仍是唯一名单维护者；授权结果按用户隔离并在页面聚焦时复核，无法确认时失败关闭。
+- 仅复用既有 HTTP API 和数据库结构；未变更 API/RunEvent/DTO、数据库/Flyway、部署拓扑、generated SDK 或 OpenCode 源码。平台当前以本地 PostgreSQL/Redis 运行在 `http://127.0.0.1:3000`，Memory 数据面仍保持停止，避免为页面灰度验证额外启动大模型容器。

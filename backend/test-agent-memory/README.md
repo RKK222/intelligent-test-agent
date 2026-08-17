@@ -30,6 +30,7 @@ Java 到 memory-service 使用 `X-Memory-Service-Key`，固定 HTTP/1.1、响应
 ## API 与兼容性
 
 - 新 API：`/api/internal/platform/memory/v1/**`，管理入口 `/api/internal/platform/memory/v1/admin/**`。
+- `GET /availability` 只向已登录用户返回“记忆总开关已启用且当前用户位于白名单”的布尔值，供前端入口和路由失败关闭；其余治理接口、学习和检索仍在业务层校验同一总开关与白名单，前端隐藏不能替代服务端鉴权。
 - 旧 `/api/internal/platform/qa-memory/v1/**` 返回 `410 API_GONE`。
 - 遗留 `qa_*` 表和初始 Flyway 保持字节不变；新增字段只用前向 migration 和 MyBatis XML。
 - Application Skill 提案只对当前有效成员可见；成员退出后不能继续读取管理员审核或编辑过的草稿。

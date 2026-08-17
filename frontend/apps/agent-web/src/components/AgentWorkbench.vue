@@ -100,6 +100,7 @@ import {
   type EditorTab
 } from "@test-agent/workbench-shell";
 import { useAuthStore } from "../stores/authStore";
+import { useMemoryAccessStore } from "../stores/memoryAccessStore";
 import {
   chatContextItemsToPromptParts,
   createContextId,
@@ -363,6 +364,7 @@ provide("api", api);
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
+const memoryAccessStore = useMemoryAccessStore();
 const chatContextStore = useChatContextStore();
 const route = useRoute();
 const router = useRouter();
@@ -408,6 +410,7 @@ type RawOutputEntry = {
 };
 
 const isSuperAdmin = computed(() => !shareMode.value && authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const memoryAvailable = computed(() => !shareMode.value && memoryAccessStore.resolved && memoryAccessStore.allowed);
 const canUseLobehub = computed(() => releaseFeatures.lobehub && isSuperAdmin.value);
 const isAppAdmin = computed(() =>
   !shareMode.value && (isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true)
@@ -496,6 +499,26 @@ function persistRuntimePreference(provider: string, model: string) {
 
 // 设置弹窗依赖当前用户角色；工作台直达时需要主动补齐 /api/auth/me。
 void authStore.fetchCurrentUser(api);
+
+watch(
+  [() => authStore.token, shareMode],
+  ([token, shared]) => {
+    if (shared) {
+      memoryAccessStore.reset();
+      return;
+    }
+    void memoryAccessStore.ensure(ordinaryApi, token);
+  },
+  { immediate: true }
+);
+
+function refreshMemoryAccessOnFocus() {
+  if (shareMode.value || !authStore.token) return;
+  void memoryAccessStore.refresh(ordinaryApi, authStore.token);
+}
+
+onMounted(() => window.addEventListener("focus", refreshMemoryAccessOnFocus));
+onBeforeUnmount(() => window.removeEventListener("focus", refreshMemoryAccessOnFocus));
 
 // 工作台状态
 const selectedWorkspaceId = ref<string | undefined>(undefined);
@@ -715,6 +738,17 @@ watch((): RoutedCenterMode | null => routedCenterModeFromRouteName(route.name), 
   centerMode.value = next.mode;
 }, { immediate: true });
 
+watch(
+  [() => route.name, () => memoryAccessStore.resolved, () => memoryAccessStore.allowed],
+  ([routeName, resolved, allowed]) => {
+    // 已打开页面期间若管理员撤销授权，下一次前台校验后立即退出记忆中心。
+    if (routeName === "memories" && resolved && !allowed) {
+      void router.replace({ name: "workbench" });
+    }
+  },
+  { immediate: true }
+);
+
 async function selectActivityCenterMode(mode: WorkbenchCenterMode) {
   if (isRoutedCenterMode(mode)) {
     if (route.name !== mode) {
@@ -735,6 +769,7 @@ async function toggleMemories() {
     await selectActivityCenterMode(centerModeBeforeRoute.value);
     return;
   }
+  if (!memoryAvailable.value) return;
   await selectActivityCenterMode("memories");
 }
 
@@ -11496,6 +11531,7 @@ async function handleLogout() {
             <span class="figma-activity-text">工具箱</span>
           </button>
           <button
+            v-if="memoryAvailable"
             type="button"
             :class="['figma-activity-btn figma-activity-btn--memories', centerMode === 'memories' && 'figma-activity-btn--active']"
             aria-label="长期记忆"
@@ -11668,8 +11704,10 @@ async function handleLogout() {
         </template>
         <template v-else-if="centerMode === 'memories'">
           <MemoryCenter
+            v-if="memoryAvailable"
             :selected-app-id="selectedAppId"
             :can-manage-team="isAppAdmin"
+            :access-granted="memoryAvailable"
             @open-skill-hub="toggleAgentSkillHub"
           />
         </template>

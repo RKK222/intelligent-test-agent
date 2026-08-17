@@ -195,8 +195,8 @@ describe("MemoryAdminPanel", () => {
     await view.findByTestId("memory-health-mem0");
 
     await fireEvent.click(view.getByTestId("add-memory-whitelist-user"));
-    const dialog = await view.findByRole("dialog", { name: "添加白名单用户" });
-    const userSelect = within(dialog).getByRole("combobox", { name: "选择白名单用户" });
+    const dialog = await view.findByRole("dialog", { name: "添加灰度用户" });
+    const userSelect = within(dialog).getByRole("combobox", { name: "选择灰度用户" });
     await fireEvent.update(userSelect, "88");
     await waitFor(() => expect(backendApi.listUsers).toHaveBeenCalledWith({ keyword: "88", page: 1, size: 30 }));
     const userOption = await waitFor(() => view.getByRole("option", { name: /测试用户.*AUTH88.*usr_88/ }));

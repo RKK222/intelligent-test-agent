@@ -29,10 +29,14 @@ import {
   X
 } from "lucide-vue-next";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   selectedAppId?: string;
   canManageTeam: boolean;
-}>();
+  /** 工作台路由已完成灰度校验时复用其结果，避免页面挂载后重复请求。 */
+  accessGranted?: boolean | null;
+}>(), {
+  accessGranted: null
+});
 
 const emit = defineEmits<{
   openSkillHub: [];
@@ -98,10 +102,14 @@ watch(() => props.selectedAppId, () => {
 watch(tab, () => void loadCurrentTab());
 
 async function initialize() {
-  try {
-    available.value = (await api.getQaMemoryAvailability()).enabled;
-  } catch {
-    available.value = false;
+  if (props.accessGranted !== null) {
+    available.value = props.accessGranted;
+  } else {
+    try {
+      available.value = (await api.getQaMemoryAvailability()).enabled;
+    } catch {
+      available.value = false;
+    }
   }
   if (available.value) await loadCurrentTab();
 }
