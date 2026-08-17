@@ -10632,3 +10632,27 @@
 
 - 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c` 与 `unzip -t`。
 - 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库只允许 validate 且 history 零新增。
+
+## 2026-08-17 - 拉取 release 并重打 TCDS 完整类型名称企业包
+
+### Why
+
+- 用户要求拉取远程 `release` 最新代码并重新打企业包；远程本轮新增 TCDS 案例类型按接口完整名称选择与提交，替代固定短名称映射。
+
+### What
+
+- 制品源码提交固定为 `95a7a93859550fdfbf309e14a5cdea1220cf282e`；内层发布 ZIP SHA-256 为 `9bdc77679cde348cb3b0fb220b677be062f8e193cceabe471da6e0c722c8c04d`，外层完整包为 `cd0ab69614d68347c9c30d7915f010d0c1955b9b14157cb38eeb773612d85cf0`。
+- 后端 app JAR 为 `ec251edbeec24924f522fa85154b0fb8f7199d152ec95fbb63f6f1db4ebb95cb`，persistence JAR 为 `fd79cb19c7599da0beb6462e15a9cc993cf35924a95827775340bd4d4af90871`，XXL integration JAR 为 `66e5162e84d8dfc253aaeb4da7a622a9455197b6768c05be70f7a281eb62a8c0`，前端归档为 `f7dfcd08b2d92954928d7cf5f5bf23141bed874f6fbad44b4c266fca9d3de18e`。
+- TCDS 案例类型现在直接使用 `getTaskTypes.data.subItemTypes[].name` 的完整名称，例如 `准入测试任务,功能测试任务`；继续校验空值、名称含逗号、名称或值重复等异常响应。
+
+### How
+
+- JDK 25 下后端 TCDS 定向测试 13/13、前端 TCDS 定向 Vitest 16/16 通过；正式构建显式关闭 workflow/LobeHub，worker 与 toolbox 继续按既有指纹 `reuse`。
+- 外层 ZIP 完整性、内嵌内层逐字节一致、三份节点归档 SHA、内层 `--validate-only`、前端独立需求导入入口、两台后端 TCDS 精确地址和 worker 大制品缺失门禁均通过。
+- 对比上一包源码 `c8b6762fafcc61734d31826a377abdd29c120ccc` 没有 migration 或 `deploy/internal` 变化；最终 JAR 内受保护 Flyway 资源与已验证源码一致。提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c` 与 `unzip -t`。
+- 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库预期 Flyway history 零新增。
+- 真实企业 TCDS 创建图案例时的完整 `taskType` 请求值与脱敏日志仍需现场验收。
