@@ -11262,6 +11262,29 @@
 
 - ClickHouse 本机校验不再受 Docker 网桥来源地址影响，远端访问权限仍只开放给 `.4/.114`；不修改分析 API、ClickHouse DDL、平台 PostgreSQL/Flyway、事件或业务代码。
 
+## 2026-08-17 - 完成修正拓扑的最终中间件离线制品验证
+
+### Why
+
+- 节点拓扑和两处首次启动验证问题修正后，必须重建内嵌部署文档/脚本的最终归档，并从归档重新加载实际 linux/amd64 镜像，不能继续沿用修正前的 ZIP、目录或本机 tag。
+
+### What
+
+- 最终 ClickHouse ZIP 固定 `.147` 共置拓扑，用户名为 `ck`，密码为大小写、数字和 URL-safe 特殊字符组合；明文只存在受控 `0600` 包内配置和本次交付，不写入仓库文档或 session log。
+- 最终记忆目录固定 `.134` 记忆 pgvector 与 `.160` BGE/Mem0/VIP，内嵌带有界 readiness 的最新脚本和部署文档；`release.env` revision 为 `d2affff0532ef334695d3bd0d74ddff3366adc92`。
+
+### How
+
+- ClickHouse ZIP SHA-256 为 `721d1ce9b345bc3d7b0e78906f5d15d7cdf49ae73af88e98ae31e6706585e0e5`，大小约 251 MiB；从最终 tar 以 amd64 仿真启动，容器内 `ck` 认证、`26.3.17.56` 版本和 `testagent_analytics` 建库/当前库查询通过。
+- 记忆四个 tar 的 SHA-256：BGE `f8f50edc...ab77`、VIP `23fb20e1...6034`、Mem0 `147e4f46...b73b`、pgvector `9226e55e...961b`，四份 archive report 均为 `linux/amd64`，完整 `SHA256SUMS` 通过。
+- 从最终记忆 tar 依次启动 pgvector、BGE、Alembic、Mem0、VIP；首次数据库有界等待实际生效，BGE 固定 revision/512 维、Alembic `20260809_01`、Mem0/VIP `rawMessageCount=0` 全部通过，随后停止并删除本次精确临时容器。
+- 最终执行 AI 文档、记忆离线包、ClickHouse 部署/封包四组校验与 `git diff --check` 全部通过；提交前再次回顾全部 `.agents/session-log*.md` 近期记录，保留未跟踪的 PowerPoint 临时文件，不暂存、不删除。
+
+### Result
+
+- 外网 Mac 上的最终 ClickHouse ZIP 和记忆四镜像目录已具备离线传输、完整性校验与启动条件；无运行时依赖下载，企业宿主不需要 `psql`、`jq`、`rg`。
+- 本次不修改 HTTP API、RunEvent、平台数据库结构/Flyway、generated SDK、OpenCode 源码或 `.env*`。企业真实 `.147/.134/.160` 仍未写入；现场必须先做只读资源、端口、目录、防火墙和跨机连通预检，失败即停止。
+
 ## 2026-08-17 - 将 macOS PKG 修复版切换到本地下载页面
 
 ### Why
