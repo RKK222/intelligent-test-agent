@@ -225,10 +225,16 @@ describe('UserNotificationCenter', () => {
     })
 
     await wrapper.get('[data-testid="notification-center-trigger"]').trigger('click')
-    expect(wrapper.text()).toContain('等待生效')
-    expect(wrapper.text()).toContain('配置运行态更新失败')
-    expect(wrapper.text()).toContain('重启进程')
-    expect(wrapper.text()).toContain('已生效')
+    // 旧记录仍携带历史技术文案，页面必须按通知类型展示当前的通俗说法。
+    expect(wrapper.text()).toContain('智能体配置正在更新')
+    expect(wrapper.text()).toContain('当前任务结束后会自动加载新配置')
+    expect(wrapper.text()).toContain('智能体配置更新失败')
+    expect(wrapper.text()).toContain('新配置暂未加载，请重启智能体后再试')
+    expect(wrapper.text()).toContain('重启智能体')
+    expect(wrapper.text()).toContain('智能体配置更新成功')
+    expect(wrapper.text()).toContain('新配置已经加载，可以正常使用')
+    expect(wrapper.text()).toContain('更新中')
+    expect(wrapper.text()).toContain('已更新')
 
     const pendingButton = wrapper.get('[data-testid="notification-item-ntf_pending"]')
     expect(pendingButton.text()).toContain('标记已读')

@@ -221,6 +221,8 @@ class UserNotificationApplicationServiceTest {
         verify(repository).insert(notification.capture());
         assertThat(notification.getValue()).satisfies(value -> {
             assertThat(value.type()).isEqualTo(UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING);
+            assertThat(value.title()).isEqualTo("智能体配置正在更新");
+            assertThat(value.body()).isEqualTo("当前任务结束后会自动加载新配置。");
             assertThat(value.actionType()).isEqualTo(UserNotificationActionType.NONE);
             assertThat(value.actionTargetId()).isEqualTo("acr_dispose_12345678");
             assertThat(value.dedupKey()).isEqualTo(
@@ -252,10 +254,40 @@ class UserNotificationApplicationServiceTest {
 
         ArgumentCaptor<UserNotification> notification = ArgumentCaptor.forClass(UserNotification.class);
         verify(repository, org.mockito.Mockito.times(3)).updateByDedupKeyIfChanged(notification.capture());
-        assertThat(notification.getAllValues().get(2).actionType())
-                .isEqualTo(UserNotificationActionType.RESTART_OWN_PROCESS);
+        assertThat(notification.getAllValues().get(2)).satisfies(value -> {
+            assertThat(value.title()).isEqualTo("智能体配置更新失败");
+            assertThat(value.body()).isEqualTo("新配置暂未加载，请重启智能体后再试。");
+            assertThat(value.actionType()).isEqualTo(UserNotificationActionType.RESTART_OWN_PROCESS);
+        });
         assertThat(publisher.events).singleElement().satisfies(event ->
                 assertThat(event.payload().get("changeType")).isEqualTo("UPDATED"));
+    }
+
+    @Test
+    void usesPlainLanguageForSuccessfulAndEndedConfigUpdates() {
+        when(repository.updateByDedupKeyIfChanged(any())).thenReturn(true);
+
+        service.syncAgentConfigDispose(
+                MEMBER,
+                "acr_dispose_success",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED,
+                "trace_dispose_success");
+        service.syncAgentConfigDispose(
+                MEMBER,
+                "acr_dispose_ended",
+                UserNotificationType.AGENT_CONFIG_DISPOSE_SUPERSEDED,
+                "trace_dispose_ended");
+
+        ArgumentCaptor<UserNotification> notification = ArgumentCaptor.forClass(UserNotification.class);
+        verify(repository, org.mockito.Mockito.times(2)).updateByDedupKeyIfChanged(notification.capture());
+        assertThat(notification.getAllValues().get(0)).satisfies(value -> {
+            assertThat(value.title()).isEqualTo("智能体配置更新成功");
+            assertThat(value.body()).isEqualTo("新配置已经加载，可以正常使用。");
+        });
+        assertThat(notification.getAllValues().get(1)).satisfies(value -> {
+            assertThat(value.title()).isEqualTo("这次配置更新已结束");
+            assertThat(value.body()).isEqualTo("已有更新的配置，这条通知不用处理。");
+        });
     }
 
     @Test
@@ -265,8 +297,8 @@ class UserNotificationApplicationServiceTest {
                 MEMBER,
                 UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
                 null,
-                "Agent 配置等待生效",
-                "配置已更新，正在等待当前任务结束后应用。",
+                "智能体配置正在更新",
+                "当前任务结束后会自动加载新配置。",
                 UserNotificationActionType.NONE,
                 "acr_dispose_12345678",
                 "AGENT_CONFIG_DISPOSE:acr_dispose_12345678:" + MEMBER.value(),

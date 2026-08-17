@@ -363,20 +363,20 @@ public class UserNotificationApplicationService {
     private DisposeCopy disposeCopy(UserNotificationType type) {
         return switch (type) {
             case AGENT_CONFIG_DISPOSE_PENDING -> new DisposeCopy(
-                    "Agent 配置等待生效",
-                    "配置已更新，正在等待当前任务结束后应用。",
+                    "智能体配置正在更新",
+                    "当前任务结束后会自动加载新配置。",
                     UserNotificationActionType.NONE);
             case AGENT_CONFIG_DISPOSE_SUCCEEDED -> new DisposeCopy(
-                    "Agent 配置已生效",
-                    "配置已应用到你的 TestAgent 进程。",
+                    "智能体配置更新成功",
+                    "新配置已经加载，可以正常使用。",
                     UserNotificationActionType.NONE);
             case AGENT_CONFIG_DISPOSE_FAILED -> new DisposeCopy(
-                    "Agent 配置应用失败",
-                    "配置暂未应用，可重启自己的 TestAgent 进程后重试。",
+                    "智能体配置更新失败",
+                    "新配置暂未加载，请重启智能体后再试。",
                     UserNotificationActionType.RESTART_OWN_PROCESS);
             case AGENT_CONFIG_DISPOSE_SUPERSEDED -> new DisposeCopy(
-                    "Agent 配置更新已结束",
-                    "该配置更新已被替代或结束，无需处理。",
+                    "这次配置更新已结束",
+                    "已有更新的配置，这条通知不用处理。",
                     UserNotificationActionType.NONE);
             case SESSION_SHARED -> throw new IllegalArgumentException(
                     "SESSION_SHARED is not an Agent config dispose type");

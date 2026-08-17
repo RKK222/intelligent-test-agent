@@ -10980,3 +10980,26 @@
 
 - dev 运行拓扑已切换为“本机 frontend/backend → `192.168.8.100` 全部数据与 OpenCode 依赖”，本机与服务器均已实际启动/探测；服务器数据卷、同步 dump 和同步前备份保留。
 - 本轮只修改忽略的 `.env.test` 和仓库外的 Clash/服务器环境，未修改 API、RunEvent、数据库结构/Flyway、generated SDK 或 OpenCode 源码。当前 `origin/dev` 仍落后本机已提交 dev 63 个提交，服务器 worktree 落后本机 2 个已提交变更；相关提交推到 origin 后服务器可正常 fast-forward pull。
+
+## 2026-08-17 - 配置通知改为用户易懂文案
+
+### Why
+
+- 通知中心把配置更新结果表述为“Agent 配置已生效”和“已应用到 TestAgent 进程”，暴露了 Agent、dispose、rollout 和进程等内部概念，普通用户难以理解；已有通知又把标题和正文快照保存在数据库中，只改后端无法改善历史记录。
+
+### What
+
+- 后端四种配置通知统一改为“正在更新、更新成功、更新失败、本次更新已结束”的用户文案，失败提示改为重启智能体。
+- 前端按受控通知类型统一展示同一套标题、正文、状态和动作名称，因此数据库中的旧通知也会立即显示新文案；未知通知与会话分享继续使用原始安全展示逻辑。
+- 同步通知模块 README、agent-web README 和用户手册，并补齐后端四态文案及前端旧记录兼容回归。
+
+### How
+
+- JDK 25 下 `UserNotificationApplicationServiceTest` 9/9 通过；前端全量 Vitest 130 个文件、2008 passed / 1 skipped，agent-web typecheck 通过。
+- `restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 完成 26 模块后端构建和本地服务重启；最终后端 health/readiness 均为 `UP`，前端 3000 返回 200，登录 CORS 预检正常。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并保留工作区中本地客户端、受保护 Agent 和客户端下载入口等并行未提交改动；只暂存本次通知文案相关文件。
+
+### Result
+
+- 新旧配置通知都会使用普通用户可理解的中文表达，不修改通知类型、受控动作、已读规则或实时刷新机制。
+- 本次不变更 HTTP API、RunEvent、DTO、数据库/Flyway、性能、安全、部署拓扑、`.env*`、generated SDK 或 OpenCode 源码；未新建分支。

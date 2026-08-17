@@ -209,6 +209,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 不把通用业务组件堆在 app 内，必须下沉到 packages。
 - `/s/[shareId]` 必须使用平台 Session Share 授权，不得接 opencode 公网 share API；旧 Session ID 兼容入口只允许会话所属人访问。
 - 通知动作不得信任后端或页面传入任意 URL；只接受 `SESSION_SHARE`、`NONE` 和 `RESTART_OWN_PROCESS`。分享动作由页面对 `shareId` 做内部路由编码，点击前不调用通用已读接口；`NONE` 通知可计入未读并标记已读但不显示动作；`RESTART_OWN_PROCESS` 只调用当前用户重启接口。未知类型或动作失败关闭。
+- 配置更新通知按已知类型统一展示“正在更新、更新成功、更新失败、本次更新已结束”等用户文案；即使历史记录仍保存旧的 Agent、dispose 或进程术语，页面也不再直接展示这些技术细节。
 
 ## 验证
 
