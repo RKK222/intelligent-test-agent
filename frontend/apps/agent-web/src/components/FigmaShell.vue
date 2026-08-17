@@ -2740,7 +2740,10 @@ function submitJoinApp() {
               @click="userMenuOpen = false"
             >
               <Download class="figma-user-menu-icon" />
-              <span>下载本地客户端</span>
+              <span class="figma-local-client-download-text">
+                <strong>下载本地客户端</strong>
+                <small data-testid="local-client-install-hint">安装后从“应用程序”打开，完成配置后使用顶部菜单栏兔子图标</small>
+              </span>
             </a>
             <button
               v-if="!fixedWorkspace"
@@ -4897,6 +4900,24 @@ function submitJoinApp() {
 
 .figma-user-menu-item:disabled:hover {
   background: transparent;
+}
+
+.figma-local-client-download-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.figma-local-client-download-text strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.figma-local-client-download-text small {
+  color: #71717a;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .figma-user-menu-icon {

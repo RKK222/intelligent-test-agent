@@ -91,6 +91,10 @@ curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/mani
 向平台注册后，头像菜单原下载位置切换为“本地 OpenCode 健康/异常/离线”；是否安装以服务端实例记录为准，
 不使用浏览器下载记录猜测。
 
+macOS 安装完成后从 Finder 的“应用程序”打开“TestAgent 本地客户端”。尚未保存首次配置时，应用会保留
+Dock 图标和可见配置窗口；配置成功后的后续启动不再占用 Dock，入口固定为屏幕顶部菜单栏的兔子图标。
+若首次向导被取消，可再次从“应用程序”打开，不需要重新安装。
+
 macOS 安装 `/Applications/TestAgent Local Client.app` 和系统级 LaunchAgent 定义，实际客户端仍以登录用户
 运行；麒麟安装到 `/opt/testagent/local-opencode-client`，通过全局启用的 systemd user unit 在登录用户会话
 运行，并提供应用菜单入口。macOS PKG 固定把 App 安装到 `/Applications`，禁止 Installer 根据历史安装记录

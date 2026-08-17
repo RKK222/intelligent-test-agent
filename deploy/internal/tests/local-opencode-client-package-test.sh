@@ -87,6 +87,13 @@ pkgutil --expand-full \
   "${PKG_EXPANDED}"
 test -x "$(find "${PKG_EXPANDED}" -type f -path \
   '*/Payload/Applications/TestAgent Local Client.app/Contents/MacOS/TestAgentLocalClient' | head -n 1)"
+APP_INFO_PLIST="$(find "${PKG_EXPANDED}" -type f -path \
+  '*/Payload/Applications/TestAgent Local Client.app/Contents/Info.plist' | head -n 1)"
+grep -q '<string>TestAgent 本地客户端</string>' "${APP_INFO_PLIST}"
+if grep -q '<key>LSUIElement</key>' "${APP_INFO_PLIST}"; then
+  echo "macOS app unexpectedly hides its first-run configuration entry" >&2
+  exit 1
+fi
 if sed -n '/<relocate>/,/<\/relocate>/p' "${PKG_EXPANDED}/PackageInfo" | grep -q '<bundle '; then
   echo "macOS PKG unexpectedly allows the app bundle to be relocated" >&2
   exit 1

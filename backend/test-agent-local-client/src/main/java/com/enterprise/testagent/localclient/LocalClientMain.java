@@ -23,8 +23,10 @@ public final class LocalClientMain {
             throw new IllegalArgumentException("unsupported command line arguments");
         }
 
-        // macOS 菜单栏客户端不应额外占用 Dock；日志属性必须在日志框架初始化前设置。
-        System.setProperty("apple.awt.UIElement", "true");
+        // 已配置客户端使用菜单栏模式；首次配置必须保留 Dock 和可见窗口，避免用户安装后找不到入口。
+        if (!LocalClientFirstRunSetup.requiresFirstRunSetup()) {
+            System.setProperty("apple.awt.UIElement", "true");
+        }
         Files.createDirectories(LocalClientPaths.logsDirectory());
         System.setProperty("testagent.localclient.logDir", LocalClientPaths.logsDirectory().toString());
         if (!LocalClientFirstRunSetup.ensureConfigured()) {

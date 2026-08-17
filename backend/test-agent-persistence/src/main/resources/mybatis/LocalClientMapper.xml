@@ -8,7 +8,7 @@
             <arg column="encrypted_client_key" javaType="java.lang.String"/>
             <arg column="client_key_fingerprint" javaType="java.lang.String"/>
             <arg column="key_hint" javaType="java.lang.String"/>
-            <arg column="version" javaType="long"/>
+            <arg column="version" javaType="_long"/>
             <arg column="status" javaType="java.lang.String"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>

@@ -15,7 +15,9 @@ macOS 和带 SystemTray 的麒麟 ARM 桌面会显示复用 Web 端 `radar-bunny
 正式制品由 `deploy/internal/package-local-opencode-client.sh` 与平台 JRE/OpenCode 压缩包一起生成，客户端本身
 通过 Maven Shade 输出 `test-agent-local-client.jar`。macOS PKG 和麒麟 ARM64 DEB 把 JRE、OpenCode 与 JAR
 装入原生系统包；首次启动时用桌面对话框填写平台地址和 client key，原子写入用户 `0600` 配置，不再要求
-普通用户执行 shell。命令行 `install.sh` 只保留为无桌面环境和运维排障兜底。
+普通用户执行 shell。macOS 首次配置前保留 Dock 与普通应用窗口，用户从“应用程序”打开
+“TestAgent 本地客户端”；配置完成后的后续启动切换为顶部菜单栏兔子图标。命令行 `install.sh` 只保留为
+无桌面环境和运维排障兜底。
 
 实例 capability 保持 `agentConfig=false`，表示平台 Agent/Skill 正文不会同步到本机配置目录；同时返回
 `protectedAgentExecution=true`，表示网页可选择服务器受保护 Agent。服务器模型调用本地文件时仍只发送既有

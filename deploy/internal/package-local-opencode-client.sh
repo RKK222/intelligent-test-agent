@@ -159,7 +159,6 @@ build_macos_installer() {
   <key>CFBundleShortVersionString</key><string>${package_version}</string>
   <key>CFBundleVersion</key><string>${package_version}</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
-  <key>LSUIElement</key><true/>
 </dict></plist>
 EOF
   iconset="${TEMP_DIR}/native-macos/TestAgentLocalClient.iconset"

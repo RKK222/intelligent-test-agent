@@ -11328,3 +11328,28 @@
 
 - 仓库后续重新封装时会自动带上 privileged 启动参数；本次没有重建或替换 `deploy/internal/dist` 中的大型离线镜像制品。
 - 不修改 HTTP API、RunEvent、数据库结构/Flyway、generated SDK、OpenCode 源码、凭据或 `.env*`。企业 `.147/.134/.160` 的原地脚本修改和真实启动仍由现场按逐机命令执行，任一 readiness 失败即停止后续节点。
+
+## 2026-08-17 - 修复本地客户端首次入口与 client key 查询 500
+
+### Why
+
+- macOS 原生包安装成功后，`Info.plist` 与 JVM 都启用了后台应用模式，尚未配置的 Swing 首次向导也被隐藏，用户从 Dock 和窗口都找不到程序入口。
+- 已存在 client key 的用户进入个人设置时，MyBatis 将 `javaType="long"` 解析为包装类型 `Long`，无法调用 `LocalClientCredentialRow` 的 primitive `long` record 构造器，导致凭据查询返回内部服务器错误。
+
+### What
+
+- 首次配置判断提前到 AWT 初始化之前：原生包缺少配置或 key 时保留普通可见 App，配置完成后的后续启动仍使用菜单栏模式；PKG 不再用静态 `LSUIElement` 隐藏所有启动阶段。
+- 凭据 XML 构造器改用 MyBatis primitive alias `_long`，新增 H2/MyBatis 集成测试锁定 `BIGINT -> long` 两条查询路径。
+- 头像下载入口补充“应用程序 → 首次配置 → 顶部菜单栏兔子图标”提示，原生包结构测试锁定中文应用名和首次入口可见性；同步客户端 README 与安装部署文档。
+
+### How
+
+- 后端定向测试：凭据 MyBatis 1/1、首次向导 3/3；前端 `FigmaShell` 61/61 与 agent-web typecheck 通过；完整本地客户端打包、清单签名、SHA-256、PKG/DEB 展开及兜底安装测试通过。
+- 新页面制品为 `0.1.1-dev-entryfix`，实际 HTTP 下载 PKG SHA-256 `a0b72efdaff463b7f9da5ceff85df0720c594c60f976ec6b1933c90fff691de7`，与签名清单一致；旧目录保留为 `deploy/internal/dist/local-opencode-client.bak.202608171712-entryfix`。
+- 按 `.env.test` / `test` profile 重启，backend readiness、frontend、CORS 和下载路由通过；真实页面登录后个人设置显示掩码 key、版本 1、ACTIVE，后端连续记录凭据 GET success。新 PKG 展开后用独立临时用户目录实启，macOS 返回 `visible=true` 且窗口标题为“配置 TestAgent 本地客户端”。
+
+### Result
+
+- Key 页面 500 已在真实服务修复；重新下载并安装新 PKG 后，首次向导存在可见应用入口，完成配置后入口转为菜单栏兔子图标。
+- 本地 test profile 启动日志确认 PostgreSQL 为 `192.168.8.100:15432/testagent_dev`，XXL MySQL 为 `192.168.8.100:13306/xxl_job`。本次未修改 `.env*`、HTTP API、事件或数据库结构/Flyway，也未修改 generated SDK/OpenCode 源码。
+- 开发 PKG 仍无 Apple Developer ID 签名，只完成项目清单签名与哈希校验；Gatekeeper 风险保持为既有开发约束，不能声明企业正式签名交付。

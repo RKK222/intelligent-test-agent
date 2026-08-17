@@ -39,6 +39,24 @@ final class LocalClientFirstRunSetup {
     }
 
     /**
+     * 判断原生安装包是否还需要展示首次配置窗口。该判断必须发生在 AWT 初始化之前，
+     * 否则 macOS 菜单栏模式会连同首次配置窗口一起隐藏。
+     */
+    static boolean requiresFirstRunSetup() {
+        return requiresFirstRunSetup(
+                LocalClientPaths.configDirectory(),
+                System.getProperty(PACKAGED_OPENCODE_PROPERTY, ""));
+    }
+
+    static boolean requiresFirstRunSetup(Path configDirectory, String packagedExecutable) {
+        if (packagedExecutable == null || packagedExecutable.isBlank()) {
+            return false;
+        }
+        return !Files.isRegularFile(configDirectory.resolve("client.properties"))
+                || !Files.isRegularFile(configDirectory.resolve("client.key"));
+    }
+
+    /**
      * 仅原生安装包缺少配置时显示向导。用户取消属于正常退出，避免 launchd/systemd 反复拉起向导。
      */
     static boolean ensureConfigured() throws Exception {

@@ -1287,6 +1287,10 @@ describe("FigmaShell", () => {
     expect(downloadLink.text()).toContain("下载本地客户端");
     expect(downloadLink.attributes("href")).toBe("/downloads/local-opencode-client/installer");
     expect(downloadLink.attributes("download")).toBeUndefined();
+    expect(wrapper.get('[data-testid="local-client-install-hint"]').text())
+      .toContain("应用程序");
+    expect(wrapper.get('[data-testid="local-client-install-hint"]').text())
+      .toContain("顶部菜单栏兔子图标");
     const restartButton = wrapper.get('[data-testid="restart-own-process"]');
     expect(restartButton.attributes("disabled")).toBeUndefined();
     await restartButton.trigger("click");

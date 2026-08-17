@@ -17,6 +17,21 @@ class LocalClientFirstRunSetupTest {
     Path temporaryDirectory;
 
     @Test
+    void requiresVisibleFirstRunOnlyForUnconfiguredNativePackage() throws Exception {
+        Path configDirectory = temporaryDirectory.resolve("config");
+
+        assertThat(LocalClientFirstRunSetup.requiresFirstRunSetup(configDirectory, "  ")).isFalse();
+        assertThat(LocalClientFirstRunSetup.requiresFirstRunSetup(configDirectory, "/app/opencode")).isTrue();
+
+        Files.createDirectories(configDirectory);
+        Files.writeString(configDirectory.resolve("client.properties"), "serverUrl=https://example.test");
+        assertThat(LocalClientFirstRunSetup.requiresFirstRunSetup(configDirectory, "/app/opencode")).isTrue();
+
+        Files.writeString(configDirectory.resolve("client.key"), "tack_v1_test");
+        assertThat(LocalClientFirstRunSetup.requiresFirstRunSetup(configDirectory, "/app/opencode")).isFalse();
+    }
+
+    @Test
     void writesPrivateConfigurationForNativePackage() throws Exception {
         Path configDirectory = temporaryDirectory.resolve("config");
         Path stateDirectory = temporaryDirectory.resolve("state");
