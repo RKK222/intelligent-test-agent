@@ -219,6 +219,7 @@ describe("backend-api", () => {
       providerId: "enterprise-deepseek",
       outcomeGroup: "UPSTREAM_FAILURE",
       source: "USER_CALL",
+      ucid: "AUTH_1",
       from: "2026-08-07T00:00:00Z",
       to: "2026-08-08T00:00:00Z",
       page: 2,
@@ -227,7 +228,7 @@ describe("backend-api", () => {
 
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       "http://api/api/internal/platform/opencode-runtime/internal-model-observability/call-records"
-      + "?providerId=enterprise-deepseek&outcomeGroup=UPSTREAM_FAILURE&source=USER_CALL"
+      + "?providerId=enterprise-deepseek&outcomeGroup=UPSTREAM_FAILURE&source=USER_CALL&ucid=AUTH_1"
       + "&from=2026-08-07T00%3A00%3A00Z&to=2026-08-08T00%3A00%3A00Z&page=2&size=50"
     );
   });
@@ -281,6 +282,37 @@ describe("backend-api", () => {
 
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       "http://api/api/internal/platform/opencode-runtime/internal-model-observability/itl-distribution"
+      + "?providerId=enterprise-deepseek&outcomeGroup=SUCCESS&source=USER_CALL"
+      + "&from=2026-08-07T00%3A00%3A00Z&to=2026-08-08T00%3A00%3A00Z"
+    );
+  });
+
+  it("passes the active filters to the Output TPS distribution API", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        sampleCount: 4,
+        averageTokensPerSecond: 80,
+        minimumTokensPerSecond: 40,
+        firstQuartileTokensPerSecond: 60,
+        medianTokensPerSecond: 80,
+        thirdQuartileTokensPerSecond: 100,
+        maximumTokensPerSecond: 120
+      }
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.getInternalModelTpsDistribution({
+      providerId: "enterprise-deepseek",
+      outcomeGroup: "SUCCESS",
+      source: "USER_CALL",
+      from: "2026-08-07T00:00:00Z",
+      to: "2026-08-08T00:00:00Z"
+    });
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/opencode-runtime/internal-model-observability/tps-distribution"
       + "?providerId=enterprise-deepseek&outcomeGroup=SUCCESS&source=USER_CALL"
       + "&from=2026-08-07T00%3A00%3A00Z&to=2026-08-08T00%3A00%3A00Z"
     );

@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelThroughputDistribution;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -46,10 +47,10 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
         List<String> outcomes = query.outcomes().stream().map(Enum::name).toList();
         String source = query.source() == null ? null : query.source().name();
         List<InternalModelCallRecordRow> rows = mapper.findCallRecords(
-                query.providerId(), outcomes, source, query.from(), query.to(),
+                query.providerId(), outcomes, source, query.ucid(), query.from(), query.to(),
                 query.page().size(), query.page().offset());
         long total = mapper.countCallRecords(
-                query.providerId(), outcomes, source, query.from(), query.to());
+                query.providerId(), outcomes, source, query.ucid(), query.from(), query.to());
         return new PageResponse<>(
                 rows.stream().map(this::toDomain).toList(),
                 query.page().page(),
@@ -75,7 +76,7 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
             Instant to) {
         List<String> outcomeNames = outcomes == null ? List.of() : outcomes.stream().map(Enum::name).toList();
         InternalModelLatencyDistributionRow row = mapper.findTtftDistribution(
-                providerId, outcomeNames, source == null ? null : source.name(), from, to);
+                providerId, outcomeNames, source == null ? null : source.name(), null, from, to);
         return toDistribution(row);
     }
 
@@ -88,7 +89,27 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
             Instant to) {
         List<String> outcomeNames = outcomes == null ? List.of() : outcomes.stream().map(Enum::name).toList();
         return toDistribution(mapper.findItlDistribution(
-                providerId, outcomeNames, source == null ? null : source.name(), from, to));
+                providerId, outcomeNames, source == null ? null : source.name(), null, from, to));
+    }
+
+    @Override
+    public InternalModelThroughputDistribution queryTpsDistribution(
+            String providerId,
+            List<InternalModelCallOutcome> outcomes,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to) {
+        List<String> outcomeNames = outcomes == null ? List.of() : outcomes.stream().map(Enum::name).toList();
+        InternalModelThroughputDistributionRow row = mapper.findTpsDistribution(
+                providerId, outcomeNames, source == null ? null : source.name(), null, from, to);
+        return new InternalModelThroughputDistribution(
+                row.sampleCount(),
+                row.averageTokensPerSecond(),
+                row.minimumTokensPerSecond(),
+                row.firstQuartileTokensPerSecond(),
+                row.medianTokensPerSecond(),
+                row.thirdQuartileTokensPerSecond(),
+                row.maximumTokensPerSecond());
     }
 
     private InternalModelLatencyDistribution toDistribution(InternalModelLatencyDistributionRow row) {

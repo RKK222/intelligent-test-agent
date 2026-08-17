@@ -13,6 +13,7 @@
 |---|---|---|---|---|
 | **TTFT** | Time to First Token | 首 Token 延迟 | 从客户端向 API 发起请求，到接收到模型返回的第一个 Output Token 之间的等待耗时。反映模型响应的启动速度；看板按模型厂商分别用最小值、P25、中位数、P75、最大值展示选定范围内的分布。 | 已统计 (`time_to_first_token`) |
 | **ITL / TPOT** | Inter-Token Latency / Time Per Output Token | Token 输出间隔 / 单 Token 耗时 | 模型开始回答后，后续每个输出 Token 平均要等多久。按 `(最后一个输出到达时间 - 第一个输出到达时间) / (输出 Token 数 - 1)` 计算。至少输出 2 个 Token 且供应商返回准确用量时才统计；不会用数据块数量代替 Token 数。Overview 展示全量可靠样本的平均值和最大值，箱线图按模型厂商分别展示分布。 | 已统计 (`inter_token_latency`) |
+| **Output TPS** | Output Tokens Per Second | 每秒输出 Token 数 | 模型开始回答后的生成吞吐量。单次按 `(输出 Token 数 - 1) × 1000 / (最后一个输出到达时间 - 第一个输出到达时间)` 计算，单位为 tokens/s；只统计准确用量不少于 2 且首末间隔大于 0 的完整样本，再对单次值计算平均值与五数概括。 | 已统计 (`output_tokens_per_second`) |
 | **SCT** | Stream Completion Time | 流式完成时间 | 从发起请求到流式回答接收到结束标记（`[DONE]` 或 `finish_reason`）的完整传输耗时。 | 已统计 (`stream_completion_time`) |
 | **E2E** | End-to-End Latency | 端到端总延迟 | 从客户端发送 HTTP 请求开始，到接收完全部响应或确认异常终止的总经历时间。 | 已统计 (`request_latency` / `end_to_end_latency`) |
 | **RPS** | Requests Per Second | 每秒请求数 (吞吐量) | 在当前统计窗口内，系统平均每秒处理的请求数量。反映模型代理/推理服务的并发承载压力。 | 已统计 (`throughput` / `request_throughput`) |
@@ -22,7 +23,7 @@
 
 > **ITL / TPOT 样本说明**：没有准确输出 Token 数或只输出 1 个 Token 的调用显示为空，也不进入箱线图。`[DONE]`、`finish_reason` 等收尾信号晚于最后一个输出，它们的等待时间不计入 Token 输出节奏。
 
-> **看板时长单位**：E2E、TTFT、SCT 和总耗时使用秒（s）；ITL / TPOT 使用毫秒（ms）。后端接口继续返回毫秒原始字段，页面按指标统一换算。
+> **看板单位**：E2E、TTFT、SCT 和总耗时使用秒（s）；ITL / TPOT 使用毫秒（ms）；Output TPS 使用 tokens/s。后端时延接口继续返回毫秒原始字段，页面按指标统一换算。
 
 > **全量口径**：明细列表可以分页查看，但 Overview、供应商卡片和所有图表始终使用当前筛选范围内的全量统计，不会拿当前 20/50/100 条明细计算。
 
@@ -39,9 +40,14 @@
    - 横向条形图：按“请求或配置问题”、“上游服务异常”、“调用方中断”等归并分类展示失败次数。
 4. **供应商请求量对比**（Provider REQ Volume）
    - 横向条形图：按 Provider ID 汇总请求承载量。
-5. **TTFT 与 ITL / TPOT 厂商对比**（Provider Latency Box Plot）
-   - 每个模型厂商一个竖向箱体，用于直接比较不同厂商的时延分布；TTFT 使用秒，ITL / TPOT 使用毫秒。
+5. **TTFT、ITL / TPOT 与 Output TPS 厂商对比**（Provider Performance Box Plot）
+   - 每个模型厂商一个竖向箱体，用于直接比较不同厂商的时延与生成吞吐量分布；TTFT 使用秒，ITL / TPOT 使用毫秒，Output TPS 使用 tokens/s。
 
-## 4. 参考资料 (References)
+## 4. 公开性能参考的使用边界
+
+页面提供 Artificial Analysis 的公开结果作为方向性参考，数据核验日期为 **2026-08-17**：Qwen3.6 27B Reasoning 的公开实测 Output TPS 为 59.7、同类中位数为 107.1，TTFT 为 3670ms、同类中位数为 2010ms；DeepSeek V4 Flash Reasoning Max 的对应值为 118.2、67.4、1250ms、1780ms。这里的“同类中位数”不是行业平均或 SLA 标准。公开测试会做 Token 口径归一化，而内部看板使用上游返回的原生 Token 数，且硬件、量化、并发、提示词长度均可能不同，因此只能用来定位差距，不能据此直接验收。
+
+## 5. 参考资料 (References)
 
 - NVIDIA GenAI Perf Official Documentation: [NVIDIA GenAI Perf / AI Perf Metrics Reference](https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference)
+- Artificial Analysis: [Benchmark Methodology](https://artificialanalysis.ai/methodology/)、[Qwen3.6 27B](https://artificialanalysis.ai/models/qwen3-6-27b)、[DeepSeek V4 Flash](https://artificialanalysis.ai/models/deepseek-v4-flash/)

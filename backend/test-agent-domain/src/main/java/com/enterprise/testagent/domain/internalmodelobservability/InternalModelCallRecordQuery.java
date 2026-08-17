@@ -10,17 +10,33 @@ public record InternalModelCallRecordQuery(
         String providerId,
         List<InternalModelCallOutcome> outcomes,
         InternalModelCallSource source,
+        String ucid,
         Instant from,
         Instant to,
         PageRequest page) {
 
     public InternalModelCallRecordQuery {
         providerId = normalize(providerId);
+        ucid = normalize(ucid);
+        if (ucid != null && ucid.length() > 128) {
+            throw new IllegalArgumentException("ucid must not exceed 128 characters");
+        }
         outcomes = outcomes == null ? List.of() : List.copyOf(outcomes);
         Objects.requireNonNull(page, "page must not be null");
         if (from != null && to != null && !from.isBefore(to)) {
             throw new IllegalArgumentException("from must be before to");
         }
+    }
+
+    /** 保留旧构造形态，未传 ucid 时查询全部用户。 */
+    public InternalModelCallRecordQuery(
+            String providerId,
+            List<InternalModelCallOutcome> outcomes,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to,
+            PageRequest page) {
+        this(providerId, outcomes, source, null, from, to, page);
     }
 
     private static String normalize(String value) {

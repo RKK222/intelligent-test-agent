@@ -59,6 +59,18 @@
         </constructor>
     </resultMap>
 
+    <resultMap id="ThroughputDistributionRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelThroughputDistributionRow">
+        <constructor>
+            <arg column="sample_count" javaType="java.lang.Long"/>
+            <arg column="average_tokens_per_second" javaType="java.lang.Double"/>
+            <arg column="minimum_tokens_per_second" javaType="java.lang.Double"/>
+            <arg column="first_quartile_tokens_per_second" javaType="java.lang.Double"/>
+            <arg column="median_tokens_per_second" javaType="java.lang.Double"/>
+            <arg column="third_quartile_tokens_per_second" javaType="java.lang.Double"/>
+            <arg column="maximum_tokens_per_second" javaType="java.lang.Double"/>
+        </constructor>
+    </resultMap>
+
     <resultMap id="ProbeStatusRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelProbeStatusRow">
         <constructor>
             <arg column="provider_id" javaType="java.lang.String"/>
@@ -177,6 +189,7 @@
             </foreach>
         </if>
         <if test="source != null">and source = #{source}</if>
+        <if test="ucid != null">and position(lower(#{ucid}) in lower(ucid)) &gt; 0</if>
         <if test="from != null">and started_at &gt;= #{from}</if>
         <if test="to != null">and started_at &lt; #{to}</if>
     </sql>
@@ -240,6 +253,26 @@
             and last_token_ms is not null
             and output_token_count &gt;= 2
         ) eligible_token_latency_samples
+    </select>
+
+    <select id="findTpsDistribution" resultMap="ThroughputDistributionRowMap">
+        select count(*) as sample_count,
+               avg(output_tokens_per_second) as average_tokens_per_second,
+               min(output_tokens_per_second) as minimum_tokens_per_second,
+               percentile_cont(0.25) within group (order by output_tokens_per_second) as first_quartile_tokens_per_second,
+               percentile_cont(0.50) within group (order by output_tokens_per_second) as median_tokens_per_second,
+               percentile_cont(0.75) within group (order by output_tokens_per_second) as third_quartile_tokens_per_second,
+               max(output_tokens_per_second) as maximum_tokens_per_second
+        from (
+            select cast(output_token_count - 1 as double precision) * 1000.0
+                   / cast(last_token_ms - first_token_ms as double precision) as output_tokens_per_second
+            from internal_model_call_records
+            <include refid="CallRecordWhere"/>
+            and first_token_ms is not null
+            and last_token_ms is not null
+            and output_token_count &gt;= 2
+            and last_token_ms &gt; first_token_ms
+        ) eligible_output_throughput_samples
     </select>
 
     <delete id="deleteCallRecordsBefore">

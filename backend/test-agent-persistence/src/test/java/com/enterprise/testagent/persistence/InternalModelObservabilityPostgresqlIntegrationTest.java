@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelThroughputDistribution;
 import com.enterprise.testagent.persistence.mybatis.InternalModelObservabilityMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelCallRecordRepository;
 import java.time.Instant;
@@ -215,6 +216,26 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
         assertThat(distribution.maximumMillis()).isEqualTo(40.0);
     }
 
+    @Test
+    void calculatesOutputTpsQuartilesWithPostgresqlPercentileCont() {
+        repository.record(tpsRecord(100L, 21));
+        repository.record(tpsRecord(50L, 22));
+        repository.record(tpsRecord(40L, 23));
+        repository.record(tpsRecord(20L, 24));
+
+        InternalModelThroughputDistribution distribution = repository.queryTpsDistribution(
+                "provider-pg-tps", java.util.List.of(InternalModelCallOutcome.SUCCESS),
+                InternalModelCallSource.USER_CALL, STARTED_AT.plusSeconds(20), STARTED_AT.plusSeconds(30));
+
+        assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.averageTokensPerSecond()).isEqualTo(26.25);
+        assertThat(distribution.minimumTokensPerSecond()).isEqualTo(10.0);
+        assertThat(distribution.firstQuartileTokensPerSecond()).isEqualTo(17.5);
+        assertThat(distribution.medianTokensPerSecond()).isEqualTo(22.5);
+        assertThat(distribution.thirdQuartileTokensPerSecond()).isEqualTo(31.25);
+        assertThat(distribution.maximumTokensPerSecond()).isEqualTo(50.0);
+    }
+
     private static InternalModelCallRecord record(Long streamCompleteMillis) {
         return new InternalModelCallRecord(
                 null,
@@ -268,6 +289,16 @@ class InternalModelObservabilityPostgresqlIntegrationTest {
                 InternalModelCallSource.USER_CALL, InternalModelCallOutcome.SUCCESS, 200, null, true,
                 2000L, 10L, firstTokenMillis, lastTokenMillis, lastTokenMillis, outputTokenCount,
                 "trace_pg_itl_" + offsetSeconds, "ucid_pg", STARTED_AT.plusSeconds(offsetSeconds));
+    }
+
+    private static InternalModelCallRecord tpsRecord(long outputSpanMillis, long offsetSeconds) {
+        long firstTokenMillis = 100L;
+        return new InternalModelCallRecord(
+                null, "provider-pg-tps", "model-pg", "/chat/completions",
+                InternalModelCallSource.USER_CALL, InternalModelCallOutcome.SUCCESS, 200, null, true,
+                2000L, 10L, firstTokenMillis, firstTokenMillis + outputSpanMillis,
+                firstTokenMillis + outputSpanMillis, 2L,
+                "trace_pg_tps_" + offsetSeconds, "ucid_pg", STARTED_AT.plusSeconds(offsetSeconds));
     }
 
     private static boolean columnExists(String tableName, String columnName) {

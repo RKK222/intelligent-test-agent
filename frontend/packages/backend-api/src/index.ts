@@ -99,6 +99,7 @@ import type {
   InternalModelCallHourlyStat,
   InternalModelLatencyDistribution,
   InternalModelTtftDistribution,
+  InternalModelThroughputDistribution,
   InternalModelProbeStatus,
   InternalModelProbeRunResult,
   InternalModelProviderManagementResponse,
@@ -2412,6 +2413,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       outcome?: InternalModelCallOutcome | null;
       outcomeGroup?: InternalModelCallOutcomeGroup | null;
       source?: InternalModelCallSource | null;
+      ucid?: string | null;
       from?: string | null;
       to?: string | null;
       page?: number;
@@ -2422,6 +2424,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         outcome: params.outcome,
         outcomeGroup: params.outcomeGroup,
         source: params.source,
+        ucid: params.ucid,
         from: params.from,
         to: params.to,
         page: params.page ?? 1,
@@ -2464,6 +2467,21 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       to?: string | null;
     } = {}) => request<InternalModelLatencyDistribution>(
       `${internalModelObservabilityBase}/itl-distribution${query({
+        providerId: params.providerId,
+        outcomeGroup: params.outcomeGroup,
+        source: params.source,
+        from: params.from,
+        to: params.to
+      })}`
+    ),
+    getInternalModelTpsDistribution: (params: {
+      providerId?: string | null;
+      outcomeGroup?: InternalModelCallOutcomeGroup | null;
+      source?: InternalModelCallSource | null;
+      from?: string | null;
+      to?: string | null;
+    } = {}) => request<InternalModelThroughputDistribution>(
+      `${internalModelObservabilityBase}/tps-distribution${query({
         providerId: params.providerId,
         outcomeGroup: params.outcomeGroup,
         source: params.source,

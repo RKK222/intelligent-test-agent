@@ -35,7 +35,7 @@ const currentUser: CurrentUser = {
 const record: InternalModelCallRecord = {
   id: 1,
   providerId: "local-mock",
-  model: "mock-model",
+  model: "Qwen3.6-27B",
   endpoint: "/chat/completions",
   source: "USER_CALL",
   outcome: "UPSTREAM_HTTP_ERROR",
@@ -55,7 +55,7 @@ const stats: InternalModelCallHourlyStat[] = [
   {
     statHour: "2026-08-07T09:00:00Z",
     providerId: "local-mock",
-    model: "mock-model",
+    model: "Qwen3.6-27B",
     endpoint: "/chat/completions",
     source: "USER_CALL",
     outcome: "SUCCESS",
@@ -72,7 +72,7 @@ const stats: InternalModelCallHourlyStat[] = [
   {
     statHour: "2026-08-07T10:00:00Z",
     providerId: "local-mock",
-    model: "mock-model",
+    model: "Qwen3.6-27B",
     endpoint: "/chat/completions",
     source: "USER_CALL",
     outcome: "UPSTREAM_HTTP_ERROR",
@@ -89,7 +89,7 @@ const stats: InternalModelCallHourlyStat[] = [
   {
     statHour: "2026-08-07T10:00:00Z",
     providerId: "vendor-b",
-    model: "vendor-model",
+    model: "DeepSeek-V4-Flash",
     endpoint: "/chat/completions",
     source: "USER_CALL",
     outcome: "SUCCESS",
@@ -117,9 +117,13 @@ function renderPanel(recordsTotal = 1) {
       consecutiveFailures: 0,
       traceId: "trace_probe"
     }]),
-    listInternalModelCallRecords: vi.fn().mockResolvedValue({
-      items: [record], page: 1, size: 20, total: recordsTotal
-    }),
+    listInternalModelCallRecords: vi.fn().mockImplementation((params: { ucid?: string | null; page?: number; size?: number }) =>
+      Promise.resolve({
+        items: !params.ucid || record.ucid?.toLowerCase().includes(params.ucid.toLowerCase()) ? [record] : [],
+        page: params.page ?? 1,
+        size: params.size ?? 20,
+        total: params.ucid ? 1 : recordsTotal
+      })),
     getInternalModelCallStats: vi.fn().mockResolvedValue(stats),
     getInternalModelTtftDistribution: vi.fn().mockImplementation((params: { providerId?: string | null }) =>
       Promise.resolve(params.providerId === "vendor-b" ? {
@@ -169,6 +173,36 @@ function renderPanel(recordsTotal = 1) {
         maximumMillis: 80
       });
     }),
+    getInternalModelTpsDistribution: vi.fn().mockImplementation((params: { providerId?: string | null }) => {
+      if (!params.providerId) {
+        return Promise.resolve({
+          sampleCount: 8,
+          averageTokensPerSecond: 88,
+          minimumTokensPerSecond: 40,
+          firstQuartileTokensPerSecond: 55,
+          medianTokensPerSecond: 80,
+          thirdQuartileTokensPerSecond: 110,
+          maximumTokensPerSecond: 140
+        });
+      }
+      return Promise.resolve(params.providerId === "vendor-b" ? {
+        sampleCount: 4,
+        averageTokensPerSecond: 100,
+        minimumTokensPerSecond: 80,
+        firstQuartileTokensPerSecond: 90,
+        medianTokensPerSecond: 100,
+        thirdQuartileTokensPerSecond: 110,
+        maximumTokensPerSecond: 120
+      } : {
+        sampleCount: 4,
+        averageTokensPerSecond: 60,
+        minimumTokensPerSecond: 40,
+        firstQuartileTokensPerSecond: 50,
+        medianTokensPerSecond: 60,
+        thirdQuartileTokensPerSecond: 70,
+        maximumTokensPerSecond: 80
+      });
+    }),
     triggerInternalModelProbe: vi.fn().mockResolvedValue({})
   } as Partial<BackendApiClient> as BackendApiClient;
 
@@ -178,6 +212,27 @@ function renderPanel(recordsTotal = 1) {
       plugins: [[VueQueryPlugin, { queryClient }]],
       provide: { api },
       stubs: {
+        ElPopover: {
+          template: `<div><slot name="reference" /><slot /></div>`
+        },
+        ElDatePicker: {
+          emits: ["update:modelValue", "change"],
+          template: `
+            <div>
+              <button type="button" data-testid="partial-time" @click="$emit('update:modelValue', ['2026-08-01 00:00:00', '']); $emit('change', ['2026-08-01 00:00:00', ''])">只选开始时间</button>
+              <button type="button" data-testid="complete-time" @click="$emit('update:modelValue', ['2026-08-01 00:00:00', '2026-08-01 02:00:00']); $emit('change', ['2026-08-01 00:00:00', '2026-08-01 02:00:00'])">选完整时间</button>
+            </div>
+          `
+        },
+        ElSelect: {
+          props: ["modelValue", "placeholder"],
+          emits: ["update:modelValue", "change"],
+          template: `<select :aria-label="placeholder" :value="modelValue" @change="$emit('update:modelValue', $event.target.value); $emit('change', $event.target.value)"><option value=""></option><slot /></select>`
+        },
+        ElOption: {
+          props: ["label", "value"],
+          template: `<option :value="value">{{ label }}</option>`
+        },
         ElPagination: {
           props: ["currentPage", "pageSize", "pageSizes", "total"],
           emits: ["current-change", "size-change"],
@@ -218,20 +273,26 @@ describe("InternalModelObservabilityPanel", () => {
     expect(view.getByText(/当前 24 小时时间段/)).toBeTruthy();
     expect(view.getByText(/ITL \/ TPOT 使用毫秒（ms）/)).toBeTruthy();
     expect(await view.findByText("0.0064")).toBeTruthy();
-    expect(await view.findByText("user-10086")).toBeTruthy();
+    expect((await view.findAllByText("user-10086")).length).toBeGreaterThan(0);
     expect(view.getAllByText("上游服务异常").length).toBeGreaterThan(0);
     expect(view.getByText("上游 HTTP 错误")).toBeTruthy();
     expect(await view.findByText("中间 50%：0.175s–0.325s")).toBeTruthy();
     expect(view.getByText("中位数：0.25s")).toBeTruthy();
     expect(view.getByText("中位数：50ms")).toBeTruthy();
     expect(view.getByText("中位数：140ms")).toBeTruthy();
-    expect(view.getAllByText("样本：4 次")).toHaveLength(4);
+    expect(view.getByText("中位数：60 tokens/s")).toBeTruthy();
+    expect(view.getByText("中位数：100 tokens/s")).toBeTruthy();
+    expect(view.getAllByText("样本：4 次")).toHaveLength(6);
     expect(view.getByText("95ms")).toBeTruthy();
     expect(view.getByText("180ms")).toBeTruthy();
-    expect(view.container.querySelectorAll(".ta-imob-chart-box")).toHaveLength(2);
+    expect(view.getByText("88 tokens/s")).toBeTruthy();
+    expect(view.getByText("公开性能参考（方向性对标）")).toBeTruthy();
+    expect(view.getByText("Qwen3.6 27B Reasoning")).toBeTruthy();
+    expect(view.getByText("DeepSeek V4 Flash Reasoning Max")).toBeTruthy();
+    expect(view.container.querySelectorAll(".ta-imob-chart-box")).toHaveLength(3);
     const comparison = view.container.querySelector(".ta-imob-chart-comparison");
     expect(comparison?.querySelector(".ta-imob-chart-stack")).toBeTruthy();
-    expect(comparison?.querySelectorAll(".ta-imob-latency-box-stack > .ta-imob-box-card")).toHaveLength(2);
+    expect(comparison?.querySelectorAll(".ta-imob-latency-box-stack > .ta-imob-box-card")).toHaveLength(3);
     expect(comparison?.querySelectorAll(".ta-imob-chart-stack > .ta-imob-chart-card")).toHaveLength(2);
 
     await waitFor(() => {
@@ -240,6 +301,9 @@ describe("InternalModelObservabilityPanel", () => {
       );
       const itlOption = [...chartOptions].reverse().find((option) =>
         !Array.isArray(option.yAxis) && option.yAxis?.name === "ITL / TPOT (ms)"
+      );
+      const tpsOption = [...chartOptions].reverse().find((option) =>
+        !Array.isArray(option.yAxis) && option.yAxis?.name === "Output TPS (tokens/s)"
       );
       expect(ttftOption?.xAxis?.data).toEqual(["local-mock", "vendor-b"]);
       expect(ttftOption?.series?.[0]?.data).toEqual([
@@ -250,6 +314,11 @@ describe("InternalModelObservabilityPanel", () => {
       expect(itlOption?.series?.[0]?.data).toEqual([
         [20, 35, 50, 65, 80],
         [100, 120, 140, 160, 180]
+      ]);
+      expect(tpsOption?.xAxis?.data).toEqual(["local-mock", "vendor-b"]);
+      expect(tpsOption?.series?.[0]?.data).toEqual([
+        [40, 50, 60, 70, 80],
+        [80, 90, 100, 110, 120]
       ]);
     });
 
@@ -263,15 +332,19 @@ describe("InternalModelObservabilityPanel", () => {
     expect(view.api.getInternalModelItlDistribution).toHaveBeenCalledWith(expect.objectContaining({
       providerId: "vendor-b"
     }));
+    expect(view.api.getInternalModelTpsDistribution).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: null,
+      source: "USER_CALL"
+    }));
 
     const explainedLabels = [
       "REQ", "Providers", "SR", "FR", "Failures",
       "Avg E2E", "Max E2E", "Total Duration", "RPS",
-      "Avg TTFT", "Max TTFT", "Avg ITL / TPOT", "Max ITL / TPOT",
+      "Avg TTFT", "Max TTFT", "Avg ITL / TPOT", "Max ITL / TPOT", "Avg Output TPS", "P50 Output TPS",
       "Avg SCT", "Max SCT",
-      "请求数与成功率趋势", "TTFT 厂商对比（箱线图）", "ITL / TPOT 厂商对比（箱线图）",
+      "请求数与成功率趋势", "TTFT 厂商对比（箱线图）", "ITL / TPOT 厂商对比（箱线图）", "Output TPS 厂商对比（箱线图）",
       "调用结果分布", "失败原因分类", "供应商请求量对比",
-      "E2E Latency", "TTFT", "ITL / TPOT", "SCT"
+      "E2E Latency", "TTFT", "ITL / TPOT", "Output TPS", "SCT"
     ];
     for (const label of explainedLabels) {
       expect(view.getAllByRole("button", { name: `查看${label}说明` }).length).toBeGreaterThan(0);
@@ -322,6 +395,40 @@ describe("InternalModelObservabilityPanel", () => {
     });
     expect(view.getByTestId("records-pagination").textContent).toContain("page=1");
     expect(view.getByTestId("records-pagination").textContent).toContain("size=50");
+    view.queryClient.clear();
+  });
+
+  it("waits for a complete custom range and applies the user filter on the server", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-07T10:30:00Z"));
+    const view = renderPanel(41);
+
+    await waitFor(() => expect(view.getByTestId("records-pagination").textContent).toContain("total=41"));
+    const initialCalls = vi.mocked(view.api.listInternalModelCallRecords).mock.calls.length;
+
+    await fireEvent.click(view.getByTestId("partial-time"));
+    await Promise.resolve();
+    expect(vi.mocked(view.api.listInternalModelCallRecords).mock.calls).toHaveLength(initialCalls);
+
+    await fireEvent.click(view.getByTestId("complete-time"));
+    const expectedFrom = new Date("2026-08-01T00:00:00").toISOString();
+    const expectedTo = new Date("2026-08-01T02:00:00").toISOString();
+    await waitFor(() => {
+      expect(view.api.listInternalModelCallRecords).toHaveBeenCalledWith(expect.objectContaining({
+        from: expectedFrom,
+        to: expectedTo,
+        page: 1
+      }));
+    });
+
+    await fireEvent.update(view.getByRole("listbox", { name: "按用户" }), "user-10086");
+    await waitFor(() => {
+      expect(view.api.listInternalModelCallRecords).toHaveBeenCalledWith(expect.objectContaining({
+        ucid: "user-10086",
+        page: 1
+      }));
+      expect(view.getByTestId("records-pagination").textContent).toContain("total=1");
+      expect(view.getAllByText("user-10086").length).toBeGreaterThan(0);
+    });
     view.queryClient.clear();
   });
 });

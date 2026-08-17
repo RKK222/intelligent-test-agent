@@ -247,14 +247,14 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
   nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。
 - `InternalModelProviderModelMapper.xml` 覆盖保存公开模型并级联清理旧探测，按能力保存最近探测结果。
 - `ModelGatewayUsageDailyMapper.xml` 使用 PostgreSQL/H2 兼容 upsert 原子累加每日聚合，不先读后写。
-- `InternalModelObservabilityMapper.xml` 维护内部模型调用可观测：明细 insert 与小时聚合 upsert 同一事务，明细查询通过 MyBatis XML 的低基数 `outcome IN (...)` 支持看板结果大类筛选；TTFT 直接对 `first_token_ms`、ITL/TPOT 对 `(last_token_ms-first_token_ms)/(output_token_count-1)` 计算全量样本的平均值，并使用 `percentile_cont` 计算五数概括，不搬运大量样本、不受明细分页影响，也不从小时均值估算。`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 给明细增加末输出时刻和准确输出 Token 数，历史记录保持空值。所有表只存结构化字段，不保存请求/响应正文或 Token 内容。
+- `InternalModelObservabilityMapper.xml` 维护内部模型调用可观测：明细 insert 与小时聚合 upsert 同一事务，明细查询通过 MyBatis XML 的低基数 `outcome IN (...)` 支持看板结果大类筛选，并通过忽略大小写的字面子串匹配 UCID，列表与 count 复用同一条件；TTFT 直接对 `first_token_ms`、ITL/TPOT 对 `(last_token_ms-first_token_ms)/(output_token_count-1)`、Output TPS 对 `(output_token_count-1)*1000/(last_token_ms-first_token_ms)` 逐条计算全量样本的平均值，并使用 `percentile_cont` 计算五数概括，不搬运大量样本、不受明细分页影响，也不从小时均值估算。`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 给明细增加末输出时刻和准确输出 Token 数，历史记录保持空值；本次复用这些既有列，不新增 migration。所有表只存结构化字段，不保存请求/响应正文或 Token 内容。
 - `V20260730090000__add_lobehub_model_gateway.sql` 只创建上述平台表和四个生产必需公共参数；不触碰独立
   LobeHub ParadeDB，也不写测试/演示数据。
 - 已知历史若存在 `V20260801093854`、但缺少 `V20260730090000`，app 兼容装配会隐藏无法再顺序执行的
   旧候选文件。早期补偿 `V20260802173416` 已执行时只加载其原始资源；尚未补偿且 release
   `V20260803133000` 已执行时只加载更高的 `V20260803141754`；否则继续使用早期补偿。三份 migration 都由
   SHA-256 测试锁定；不启用 `outOfOrder`、不执行 `repair`、不修改 `flyway_schema_history`。
-- H2 集成测试覆盖完整 Flyway、mapper、TTFT/ITL 五数概括、无准确用量排除和空样本；PostgreSQL Testcontainers 测试覆盖从首 Token 已部署基线升级到流完成与 ITL 原始量 migration、`ON CONFLICT` 聚合和两类 `percentile_cont` 四分位数。无 Docker 时显式 skip，正式发布仍需在真实目标基线上运行。
+- H2 集成测试覆盖完整 Flyway、mapper、UCID 过滤后的列表/总量、TTFT/ITL/TPS 五数概括、无准确用量排除和空样本；PostgreSQL Testcontainers 测试覆盖从首 Token 已部署基线升级到流完成与 ITL 原始量 migration、`ON CONFLICT` 聚合和三类 `percentile_cont` 四分位数。无 Docker 时显式 skip，正式发布仍需在真实目标基线上运行。
 - Redis Testcontainers 使用真实 Redis 5.0.14 让 8 个线程并发消费同一 ticket，锁定 Lua 只成功一次、nonce
   防重放、grant 轮换/撤销、TTL 上限和 `test-agent:lobehub-sso:*` 前缀隔离。
 

@@ -11,7 +11,8 @@ import type {
   InternalModelCallOutcome,
   InternalModelCallOutcomeGroup,
   InternalModelCallSource,
-  InternalModelLatencyDistribution
+  InternalModelLatencyDistribution,
+  InternalModelThroughputDistribution
 } from "@test-agent/shared-types";
 import MetricHelpLabel from "./MetricHelpLabel.vue";
 
@@ -70,20 +71,30 @@ function selectPreset(hours: number) {
   applyFilters();
 }
 
-function onCustomTimeChange(val: [string, string] | null) {
-  if (val && val.length === 2) {
-    isCustomTime.value = true;
-    selectedWindowHours.value = 0;
-    queryWindow.value = {
-      from: new Date(val[0]).toISOString(),
-      to: new Date(val[1]).toISOString()
-    };
-    timePopoverVisible.value = false;
-  } else {
+function onCustomTimeChange(val: unknown) {
+  if (val === null) {
     isCustomTime.value = false;
     selectedWindowHours.value = 24;
     queryWindow.value = createQueryWindow(24);
+    applyFilters();
+    return;
   }
+
+  // 日期范围组件选完第一个端点时会发出中间态；必须等待两个合法端点都就绪后再查询和收起。
+  if (!Array.isArray(val) || val.length !== 2
+    || typeof val[0] !== "string" || !val[0].trim()
+    || typeof val[1] !== "string" || !val[1].trim()) return;
+  const fromMillis = new Date(val[0].replace(" ", "T")).getTime();
+  const toMillis = new Date(val[1].replace(" ", "T")).getTime();
+  if (!Number.isFinite(fromMillis) || !Number.isFinite(toMillis) || fromMillis >= toMillis) return;
+
+  isCustomTime.value = true;
+  selectedWindowHours.value = 0;
+  queryWindow.value = {
+    from: new Date(fromMillis).toISOString(),
+    to: new Date(toMillis).toISOString()
+  };
+  timePopoverVisible.value = false;
   applyFilters();
 }
 
@@ -149,6 +160,11 @@ const glossaryItems: GlossaryItem[] = [
     name: "Inter-Token Latency / Time Per Output Token",
     desc: "Token 输出间隔：模型开始回答后，后续每个 Token 平均要等多久，页面按毫秒展示；至少输出 2 个 Token 且供应商返回准确用量时才统计。"
   },
+  {
+    abbr: "Output TPS",
+    name: "Output Tokens Per Second",
+    desc: "生成吞吐量：模型开始回答后每秒输出多少 Token；至少输出 2 个 Token、首末 Token 间隔大于 0 且供应商返回准确用量时才统计。"
+  },
   { abbr: "SCT", name: "Stream Completion Time", desc: "流式完成时间：发起请求到流式响应正常结束的总耗时。" },
   { abbr: "E2E", name: "End-to-End Latency", desc: "端到端延迟：发起请求到接收到完整响应或异常终止的总端到端时长。" },
   { abbr: "RPS", name: "Requests Per Second", desc: "每秒请求数：在统计时间窗口内的平均每秒请求处理量（Throughput 吞吐量指标）。" },
@@ -171,8 +187,11 @@ const metricHelp = {
   rps: "当前小时和之前 23 个小时段内，总请求数除以从最早整点到本次加载或刷新时刻的秒数。它反映平均请求负载，不是瞬时峰值。",
   firstToken: "首 Token 延迟（TTFT）：从发起调用到模型开始返回实际回答的等待时间；非流式调用或没有实际回答时显示“—”。",
   interTokenLatency: "ITL / TPOT：模型开始回答后，后续每个输出 Token 平均间隔多久，页面按毫秒展示。至少输出 2 个 Token 且供应商返回准确用量时才显示；不会把数据块数量当作 Token 数。",
+  outputTps: "Output TPS：模型开始回答后平均每秒生成多少个输出 Token。只统计供应商返回准确用量且首末 Token 时间完整的调用。",
   avgInterTokenLatency: "平均 ITL / TPOT：把当前范围内每次可靠的 Token 输出间隔相加，再除以可靠样本数；按毫秒展示。没有准确输出 Token 数的调用不参与。",
   maxInterTokenLatency: "最大 ITL / TPOT：当前范围内最慢的一次可靠 Token 输出间隔；按毫秒展示。没有准确输出 Token 数的调用不参与。",
+  avgOutputTps: "平均 Output TPS：先逐次计算每条完整流的输出速度，再对合格样本取平均；不会用 1000 ÷ 平均 ITL 反推。",
+  medianOutputTps: "P50 Output TPS：一半合格调用的输出速度不低于该值，比平均值更不容易被少量极快或极慢请求影响。",
   avgFirstToken: "平均首 Token 延迟（TTFT）：只统计模型确实开始回答的流式调用，没有返回实际回答的调用不参与。",
   maxFirstToken: "最大首 Token 延迟（TTFT）：只比较模型确实开始回答的流式调用。",
   streamComplete: "从发起调用到流式回答正常结束所用的时间；它以完整结束信号为准，不等同于最后一个 Token 到达时间。",
@@ -187,6 +206,7 @@ const chartHelp = {
   hourlyTrend: "按小时查看请求数和请求成功率如何变化；选择结果大类后只展示该类请求数。",
   ttftDistribution: "按模型厂商比较开始回答前的等待时间。每个厂商一个箱体：箱体表示该厂商中间一半的调用，箱内横线表示中位数，两端表示最短和最长等待时间。",
   itlDistribution: "按模型厂商比较开始回答后的输出节奏。每个厂商一个箱体：箱体表示该厂商中间一半的调用，箱内横线表示中位数，两端表示最快和最慢的平均 Token 间隔。",
+  tpsDistribution: "按模型厂商比较生成吞吐量。数值越高越快；每个厂商一个箱体，展示最小值、P25、中位数、P75 和最大值。",
   successComposition: "把当前筛选范围内的调用分成成功和错误两类，展示各自所占比例。",
   failureBreakdown: "只看异常调用，归并为请求或配置问题、上游服务异常、调用方中断和其他异常。",
   providerVolume: "按供应商汇总当前筛选范围内的调用次数，用来比较各供应商实际承载的调用量。"
@@ -206,6 +226,7 @@ const recordsQuery = useQuery({
     providerId: filterProviderId.value || null,
     outcomeGroup: filterOutcomeGroup.value || null,
     source: filterSource.value || null,
+    ucid: filterUcid.value.trim() || null,
     from: queryWindow.value.from,
     to: queryWindow.value.to,
     page: page.value,
@@ -217,6 +238,7 @@ const recordsQuery = useQuery({
     providerId: filterProviderId.value || null,
     outcomeGroup: filterOutcomeGroup.value || null,
     source: filterSource.value || null,
+    ucid: filterUcid.value.trim() || null,
     from: queryWindow.value.from,
     to: queryWindow.value.to,
     page: page.value,
@@ -295,6 +317,27 @@ const itlDistributionQueries = useQueries({
   })))
 });
 
+const tpsDistributionQueries = useQueries({
+  queries: computed(() => distributionProviderIds.value.map((providerId) => ({
+    queryKey: ["internal-model-observability-tps-distribution", {
+      providerId,
+      outcomeGroup: filterOutcomeGroup.value || null,
+      source: filterSource.value || null,
+      from: queryWindow.value.from,
+      to: queryWindow.value.to
+    }],
+    enabled: () => hasSuperAdmin.value,
+    retry: false,
+    queryFn: () => api.getInternalModelTpsDistribution({
+      providerId,
+      outcomeGroup: filterOutcomeGroup.value || null,
+      source: filterSource.value || null,
+      from: queryWindow.value.from,
+      to: queryWindow.value.to
+    })
+  })))
+});
+
 /** Overview 使用全范围分布接口的准确均值与最大值，不能从当前页明细推算。 */
 const itlOverviewQuery = useQuery({
   queryKey: computed(() => ["internal-model-observability-itl-overview", {
@@ -307,6 +350,25 @@ const itlOverviewQuery = useQuery({
   enabled: () => hasSuperAdmin.value,
   retry: false,
   queryFn: () => api.getInternalModelItlDistribution({
+    providerId: filterProviderId.value || null,
+    outcomeGroup: filterOutcomeGroup.value || null,
+    source: filterSource.value || null,
+    from: queryWindow.value.from,
+    to: queryWindow.value.to
+  })
+});
+
+const tpsOverviewQuery = useQuery({
+  queryKey: computed(() => ["internal-model-observability-tps-overview", {
+    providerId: filterProviderId.value || null,
+    outcomeGroup: filterOutcomeGroup.value || null,
+    source: filterSource.value || null,
+    from: queryWindow.value.from,
+    to: queryWindow.value.to
+  }]),
+  enabled: () => hasSuperAdmin.value,
+  retry: false,
+  queryFn: () => api.getInternalModelTpsDistribution({
     providerId: filterProviderId.value || null,
     outcomeGroup: filterOutcomeGroup.value || null,
     source: filterSource.value || null,
@@ -329,19 +391,23 @@ function probeAll() {
   probeMutation.mutate({});
 }
 
-/** 刷新时重取同一整点窗口内的看板和探活状态；跨小时后自动切换到新的 24 小时范围。 */
+/** 预设窗口刷新时推进到最新时刻；自定义窗口保持用户选择的固定起止时间。 */
 async function refreshAll() {
-  queryWindow.value = createQueryWindow();
+  if (!isCustomTime.value) {
+    queryWindow.value = createQueryWindow();
+  }
   await Promise.all([
     recordsQuery.refetch(),
     statsQuery.refetch(),
     itlOverviewQuery.refetch(),
+    tpsOverviewQuery.refetch(),
     probeStatusQuery.refetch()
   ]);
   await nextTick();
   await Promise.all([
     ...ttftDistributionQueries.value.map((query) => query.refetch()),
-    ...itlDistributionQueries.value.map((query) => query.refetch())
+    ...itlDistributionQueries.value.map((query) => query.refetch()),
+    ...tpsDistributionQueries.value.map((query) => query.refetch())
   ]);
   renderCharts();
 }
@@ -357,12 +423,7 @@ const ucidOptions = computed(() => {
   }
   return [...set].sort();
 });
-const records = computed(() => {
-  const list = recordsQuery.data.value?.items ?? [];
-  if (!filterUcid.value) return list;
-  const keyword = filterUcid.value.trim().toLowerCase();
-  return list.filter((row) => row.ucid && row.ucid.toLowerCase().includes(keyword));
-});
+const records = computed(() => recordsQuery.data.value?.items ?? []);
 // 分页总数必须使用服务端对完整结果集的计数，当前页最多只有 pageSize 条，不能据此判断总页数。
 const recordsTotal = computed(() => recordsQuery.data.value?.total ?? 0);
 // stats API 返回底层 outcome；页面按大类筛选，明细 API 使用相同大类，保证两块口径一致。
@@ -393,22 +454,102 @@ function toBoxValues(
     .map((millis) => millis / divisor) as [number, number, number, number, number];
 }
 
-type ProviderLatencyBox = {
+type ProviderDistributionBox = {
   providerId: string;
   sampleCount: number;
   values: [number, number, number, number, number];
 };
 
-const ttftBoxData = computed<ProviderLatencyBox[]>(() => distributionProviderIds.value.flatMap((providerId, index) => {
+const ttftBoxData = computed<ProviderDistributionBox[]>(() => distributionProviderIds.value.flatMap((providerId, index) => {
   const distribution = ttftDistributionQueries.value[index]?.data;
   const values = distribution ? toBoxValues(distribution, MILLISECONDS_PER_SECOND) : null;
   return distribution && values ? [{ providerId, sampleCount: distribution.sampleCount, values }] : [];
 }));
 
-const itlBoxData = computed<ProviderLatencyBox[]>(() => distributionProviderIds.value.flatMap((providerId, index) => {
+const itlBoxData = computed<ProviderDistributionBox[]>(() => distributionProviderIds.value.flatMap((providerId, index) => {
   const distribution = itlDistributionQueries.value[index]?.data;
   const values = distribution ? toBoxValues(distribution, 1) : null;
   return distribution && values ? [{ providerId, sampleCount: distribution.sampleCount, values }] : [];
+}));
+
+/** TPS 字段已是 tokens/s，只校验五数概括完整、非负且单调，不再做单位换算。 */
+function toThroughputBoxValues(
+  distribution: InternalModelThroughputDistribution
+): [number, number, number, number, number] | null {
+  const values = [
+    distribution.minimumTokensPerSecond,
+    distribution.firstQuartileTokensPerSecond,
+    distribution.medianTokensPerSecond,
+    distribution.thirdQuartileTokensPerSecond,
+    distribution.maximumTokensPerSecond
+  ];
+  if (distribution.sampleCount <= 0 || !values.every((value) => typeof value === "number" && Number.isFinite(value))) {
+    return null;
+  }
+  const [minimum, firstQuartile, median, thirdQuartile, maximum] = values as [number, number, number, number, number];
+  if (minimum < 0 || minimum > firstQuartile || firstQuartile > median || median > thirdQuartile || thirdQuartile > maximum) {
+    return null;
+  }
+  return [minimum, firstQuartile, median, thirdQuartile, maximum];
+}
+
+const tpsBoxData = computed<ProviderDistributionBox[]>(() => distributionProviderIds.value.flatMap((providerId, index) => {
+  const distribution = tpsDistributionQueries.value[index]?.data;
+  const values = distribution ? toThroughputBoxValues(distribution) : null;
+  return distribution && values ? [{ providerId, sampleCount: distribution.sampleCount, values }] : [];
+}));
+
+type PublicPerformanceBenchmark = {
+  modelName: string;
+  matches: (value: string) => boolean;
+  testedOutputTps: number;
+  peerMedianOutputTps: number;
+  testedTtftMillis: number;
+  peerMedianTtftMillis: number;
+  sourceUrl: string;
+};
+
+// 公开数据会随测试方法和版本变化，固定标注核验日期，且不把公开同类中位数包装成行业标准。
+const publicPerformanceBenchmarks: PublicPerformanceBenchmark[] = [
+  {
+    modelName: "Qwen3.6 27B Reasoning",
+    matches: (value) => value.includes("qwen36") && value.includes("27b"),
+    testedOutputTps: 59.7,
+    peerMedianOutputTps: 107.1,
+    testedTtftMillis: 3670,
+    peerMedianTtftMillis: 2010,
+    sourceUrl: "https://artificialanalysis.ai/models/qwen3-6-27b"
+  },
+  {
+    modelName: "DeepSeek V4 Flash Reasoning Max",
+    matches: (value) => value.includes("deepseekv4flash"),
+    testedOutputTps: 118.2,
+    peerMedianOutputTps: 67.4,
+    testedTtftMillis: 1250,
+    peerMedianTtftMillis: 1780,
+    sourceUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash/"
+  }
+];
+
+function normalizeModelName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+const benchmarkComparisons = computed(() => publicPerformanceBenchmarks.map((benchmark) => {
+  const matchedStat = (statsQuery.data.value ?? []).find((row) =>
+    benchmark.matches(normalizeModelName(row.model ?? ""))
+      || benchmark.matches(normalizeModelName(row.providerId))
+  );
+  const providerId = matchedStat?.providerId ?? null;
+  const tpsBox = providerId ? tpsBoxData.value.find((box) => box.providerId === providerId) : null;
+  const ttftBox = providerId ? ttftBoxData.value.find((box) => box.providerId === providerId) : null;
+  return {
+    ...benchmark,
+    providerId,
+    deployedModel: matchedStat?.model ?? null,
+    internalMedianOutputTps: tpsBox?.values[2] ?? null,
+    internalMedianTtftSeconds: ttftBox?.values[2] ?? null
+  };
 }));
 
 const ttftDistributionLoading = computed(() =>
@@ -417,15 +558,21 @@ const ttftDistributionLoading = computed(() =>
 const itlDistributionLoading = computed(() =>
   statsQuery.isLoading.value || itlDistributionQueries.value.some((query) => query.isPending)
 );
+const tpsDistributionLoading = computed(() =>
+  statsQuery.isLoading.value || tpsDistributionQueries.value.some((query) => query.isPending)
+);
 const ttftDistributionError = computed(() => ttftDistributionQueries.value.some((query) => query.isError));
 const itlDistributionError = computed(() => itlDistributionQueries.value.some((query) => query.isError));
+const tpsDistributionError = computed(() => tpsDistributionQueries.value.some((query) => query.isError));
 
 const observabilityFetching = computed(() =>
   recordsQuery.isFetching.value
     || statsQuery.isFetching.value
     || itlOverviewQuery.isFetching.value
+    || tpsOverviewQuery.isFetching.value
     || ttftDistributionQueries.value.some((query) => query.isFetching)
     || itlDistributionQueries.value.some((query) => query.isFetching)
+    || tpsDistributionQueries.value.some((query) => query.isFetching)
 );
 
 const showRateMetrics = computed(() => !filterOutcomeGroup.value);
@@ -528,7 +675,7 @@ const failureBreakdown = computed<Array<{ group: InternalModelCallOutcomeGroup; 
     .sort((a, b) => b.count - a.count);
 });
 
-/** 全局总览指标：小时聚合负责请求类指标，明细分布查询负责可靠的 ITL 均值和最大值。 */
+/** 全局总览指标：小时聚合负责请求类指标，明细分布查询负责可靠的 ITL 与 TPS。 */
 const overallMetrics = computed(() => {
   let totalRequests = 0;
   let successCount = 0;
@@ -572,6 +719,7 @@ const overallMetrics = computed(() => {
   const rps = totalRequests / windowSeconds;
   const providerCount = new Set(stats.value.map((row) => row.providerId)).size;
   const itlDistribution = itlOverviewQuery.data.value;
+  const tpsDistribution = tpsOverviewQuery.data.value;
   return {
     totalRequests, successCount, failureCount, successRate, failureRate,
     avgDuration, maxDuration,
@@ -583,6 +731,9 @@ const overallMetrics = computed(() => {
     interTokenLatencyAvg: itlDistribution?.averageMillis ?? null,
     interTokenLatencyMax: itlDistribution?.maximumMillis ?? null,
     interTokenLatencyCount: itlDistribution?.sampleCount ?? 0,
+    outputTpsAvg: tpsDistribution?.averageTokensPerSecond ?? null,
+    outputTpsMedian: tpsDistribution?.medianTokensPerSecond ?? null,
+    outputTpsCount: tpsDistribution?.sampleCount ?? 0,
     totalDurationMillis,
     rps, providerCount
   };
@@ -672,12 +823,14 @@ const failureBarData = computed(() =>
 const trendChartEl = ref<HTMLDivElement | null>(null);
 const ttftChartEl = ref<HTMLDivElement | null>(null);
 const itlChartEl = ref<HTMLDivElement | null>(null);
+const tpsChartEl = ref<HTMLDivElement | null>(null);
 const pieChartEl = ref<HTMLDivElement | null>(null);
 const failureChartEl = ref<HTMLDivElement | null>(null);
 const providerChartEl = ref<HTMLDivElement | null>(null);
 let trendChart: echarts.ECharts | null = null;
 let ttftChart: echarts.ECharts | null = null;
 let itlChart: echarts.ECharts | null = null;
+let tpsChart: echarts.ECharts | null = null;
 let pieChart: echarts.ECharts | null = null;
 let failureChart: echarts.ECharts | null = null;
 let providerChart: echarts.ECharts | null = null;
@@ -696,13 +849,13 @@ function ensureChart(el: HTMLDivElement, holder: { current: echarts.ECharts | nu
   return holder.current;
 }
 
-/** 一个供应商绘制一个箱体，避免不同厂商的时延被合并后掩盖差异。 */
-function renderLatencyBoxes(
+/** 一个供应商绘制一个箱体，避免不同厂商的性能分布被合并后掩盖差异。 */
+function renderDistributionBoxes(
   el: HTMLDivElement | null,
   chart: echarts.ECharts | null,
-  boxes: ProviderLatencyBox[],
+  boxes: ProviderDistributionBox[],
   label: string,
-  unit: "s" | "ms",
+  unit: "s" | "ms" | "tokens/s",
   color: string,
   background: string
 ): echarts.ECharts | null {
@@ -721,11 +874,11 @@ function renderLatencyBoxes(
         const [minimum, firstQuartile, median, thirdQuartile, maximum] = box.values;
         return [
           `<strong>${escapeTooltipHtml(box.providerId)} · ${label}（${box.sampleCount} 次）</strong>`,
-          `最短：${formatLatencyValue(minimum, unit)}`,
-          `25% 的调用不超过：${formatLatencyValue(firstQuartile, unit)}`,
-          `中位数：${formatLatencyValue(median, unit)}`,
-          `75% 的调用不超过：${formatLatencyValue(thirdQuartile, unit)}`,
-          `最长：${formatLatencyValue(maximum, unit)}`
+          `最小值：${formatDistributionValue(minimum, unit)}`,
+          `P25：${formatDistributionValue(firstQuartile, unit)}`,
+          `中位数：${formatDistributionValue(median, unit)}`,
+          `P75：${formatDistributionValue(thirdQuartile, unit)}`,
+          `最大值：${formatDistributionValue(maximum, unit)}`
         ].join("<br/>");
       }
     },
@@ -741,7 +894,7 @@ function renderLatencyBoxes(
       name: `${label} (${unit})`,
       min: 0,
       scale: true,
-      axisLabel: { formatter: (value: number) => formatLatencyValue(value, unit) }
+      axisLabel: { formatter: (value: number) => formatDistributionValue(value, unit) }
     },
     series: [{
       name: label,
@@ -792,11 +945,14 @@ function renderCharts() {
       ]
     }, true);
   }
-  ttftChart = renderLatencyBoxes(
+  ttftChart = renderDistributionBoxes(
     ttftChartEl.value, ttftChart, ttftBoxData.value, "TTFT", "s", "#2563eb", "#dbeafe"
   );
-  itlChart = renderLatencyBoxes(
+  itlChart = renderDistributionBoxes(
     itlChartEl.value, itlChart, itlBoxData.value, "ITL / TPOT", "ms", "#7c3aed", "#ede9fe"
+  );
+  tpsChart = renderDistributionBoxes(
+    tpsChartEl.value, tpsChart, tpsBoxData.value, "Output TPS", "tokens/s", "#ea580c", "#ffedd5"
   );
   if (showRateMetrics.value && pieChartEl.value && pieChartEl.value.clientWidth > 0) {
     pieChart = ensureChart(pieChartEl.value, { current: pieChart });
@@ -853,6 +1009,7 @@ function resizeCharts() {
   trendChart?.resize();
   ttftChart?.resize();
   itlChart?.resize();
+  tpsChart?.resize();
   pieChart?.resize();
   failureChart?.resize();
   providerChart?.resize();
@@ -865,17 +1022,27 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resizeCharts);
-  [trendChart, ttftChart, itlChart, pieChart, failureChart, providerChart].forEach((chart) => chart?.dispose());
+  [trendChart, ttftChart, itlChart, tpsChart, pieChart, failureChart, providerChart]
+    .forEach((chart) => chart?.dispose());
   trendChart = null;
   ttftChart = null;
   itlChart = null;
+  tpsChart = null;
   pieChart = null;
   failureChart = null;
   providerChart = null;
 });
 
 // 数据变动后 post-flush 触发重新渲染，确保在新 DOM 或过滤数据更新后重绘图表
-watch([() => stats.value, () => ttftBoxData.value, () => itlBoxData.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
+watch([
+  () => stats.value,
+  () => ttftBoxData.value,
+  () => itlBoxData.value,
+  () => tpsBoxData.value,
+  filterProviderId,
+  filterOutcomeGroup,
+  filterSource
+], () => {
   void nextTick(renderCharts);
 }, { deep: true, flush: "post" });
 
@@ -921,7 +1088,11 @@ function formatMilliseconds(millis: number | null | undefined): string {
   return `${rounded}ms`;
 }
 
-function formatLatencyValue(value: number | null | undefined, unit: "s" | "ms"): string {
+function formatDistributionValue(
+  value: number | null | undefined,
+  unit: "s" | "ms" | "tokens/s"
+): string {
+  if (unit === "tokens/s") return formatTps(value);
   return unit === "s" ? formatSeconds(value) : formatMilliseconds(value);
 }
 
@@ -955,6 +1126,21 @@ function interTokenLatencyMillis(row: {
     return null;
   }
   return (last - first) / (count - 1);
+}
+
+/** 单条明细与服务端分布使用同一公式；零时间跨度不展示无穷大 TPS。 */
+function outputTokensPerSecond(row: {
+  firstTokenMillis?: number | null;
+  lastTokenMillis?: number | null;
+  outputTokenCount?: number | null;
+}): number | null {
+  const latencyMillis = interTokenLatencyMillis(row);
+  return latencyMillis !== null && latencyMillis > 0 ? MILLISECONDS_PER_SECOND / latencyMillis : null;
+}
+
+function formatTps(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return "-";
+  return `${Number(value.toFixed(value < 10 ? 2 : 1))} tokens/s`;
 }
 
 /** 低流量不压成 0.00，高流量保持两位小数。 */
@@ -1029,7 +1215,7 @@ function onPageSizeChange(next: number) {
             <ChevronDown :size="13" />
           </button>
         </div>
-        <span class="ta-imob-sub">默认查看当前 {{ selectedWindowHours }} 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有指标和图表都使用当前筛选范围内的全量记录，不受明细分页影响。E2E、TTFT、SCT 使用秒（s），ITL / TPOT 使用毫秒（ms），英文缩写见页首对照指南。</span>
+        <span class="ta-imob-sub">默认查看{{ isCustomTime ? "当前自定义" : `当前 ${selectedWindowHours} 小时` }}时间段的用户调用，统计截至本次加载或刷新时刻。按用户只过滤调用明细及其分页总量；聚合指标和图表使用当前供应商、结果、来源与时间范围的全量记录，不受明细分页影响。E2E、TTFT、SCT 使用秒（s），ITL / TPOT 使用毫秒（ms），Output TPS 使用 tokens/s，英文缩写见页首对照指南。</span>
 
         <!-- 页首 AIPerf / 业界指标英文缩写对照指南 (Glossary) -->
         <div v-if="showGlossary" class="ta-imob-glossary-card">
@@ -1248,6 +1434,12 @@ function onPageSizeChange(next: number) {
               </template>
               <template #default="{ row }">{{ formatMilliseconds(interTokenLatencyMillis(row)) }}</template>
             </el-table-column>
+            <el-table-column label="Output TPS" min-width="190">
+              <template #header>
+                <MetricHelpLabel label="Output TPS" :description="metricHelp.outputTps" />
+              </template>
+              <template #default="{ row }">{{ formatTps(outputTokensPerSecond(row)) }}</template>
+            </el-table-column>
             <el-table-column label="SCT" min-width="170">
               <template #header>
                 <MetricHelpLabel label="SCT" :description="metricHelp.streamComplete" />
@@ -1293,7 +1485,7 @@ function onPageSizeChange(next: number) {
 
         <section class="ta-imob-section ta-imob-metrics-section">
           <h4 class="ta-imob-section-title">聚合指标</h4>
-          <div v-loading="statsQuery.isLoading.value || itlOverviewQuery.isLoading.value" class="ta-imob-stats">
+          <div v-loading="statsQuery.isLoading.value || itlOverviewQuery.isLoading.value || tpsOverviewQuery.isLoading.value" class="ta-imob-stats">
             <!-- 全局总览指标 -->
             <div v-if="overallMetrics.totalRequests !== undefined" class="ta-imob-overview">
               <h4 class="ta-imob-overview-title">Overview</h4>
@@ -1357,6 +1549,14 @@ function onPageSizeChange(next: number) {
                   <MetricHelpLabel class="ta-imob-overview-label" label="Max ITL / TPOT" :description="metricHelp.maxInterTokenLatency" />
                 </div>
                 <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ formatTps(overallMetrics.outputTpsAvg) }}</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Avg Output TPS" :description="metricHelp.avgOutputTps" />
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ formatTps(overallMetrics.outputTpsMedian) }}</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="P50 Output TPS" :description="metricHelp.medianOutputTps" />
+                </div>
+                <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteAvg) }}</span>
                   <MetricHelpLabel class="ta-imob-overview-label" label="Avg SCT" :description="metricHelp.avgStreamComplete" />
                 </div>
@@ -1364,6 +1564,37 @@ function onPageSizeChange(next: number) {
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteMax) }}</span>
                   <MetricHelpLabel class="ta-imob-overview-label" label="Max SCT" :description="metricHelp.maxStreamComplete" />
                 </div>
+              </div>
+            </div>
+
+            <div class="ta-imob-benchmark">
+              <div class="ta-imob-benchmark-heading">
+                <div>
+                  <h4 class="ta-imob-overview-title">公开性能参考（方向性对标）</h4>
+                  <p>公开同类中位数不是行业标准。公开测试会做 Token 口径归一化，本页内部数据使用供应商原生 Token，并受硬件、量化和并发影响，仅用于定位差距。</p>
+                </div>
+                <a href="https://artificialanalysis.ai/methodology/" target="_blank" rel="noopener noreferrer">
+                  方法说明 <ExternalLink :size="12" />
+                </a>
+              </div>
+              <div class="ta-imob-benchmark-grid">
+                <article v-for="benchmark in benchmarkComparisons" :key="benchmark.modelName" class="ta-imob-benchmark-card">
+                  <div class="ta-imob-benchmark-model">{{ benchmark.modelName }}</div>
+                  <div class="ta-imob-benchmark-deployment">
+                    当前部署：{{ benchmark.providerId ? `${benchmark.providerId} / ${benchmark.deployedModel}` : "当前范围未识别到对应模型" }}
+                  </div>
+                  <div class="ta-imob-benchmark-values">
+                    <span>内部 P50 TPS <strong>{{ formatTps(benchmark.internalMedianOutputTps) }}</strong></span>
+                    <span>公开实测 TPS <strong>{{ formatTps(benchmark.testedOutputTps) }}</strong></span>
+                    <span>同类中位 TPS <strong>{{ formatTps(benchmark.peerMedianOutputTps) }}</strong></span>
+                    <span>内部 P50 TTFT <strong>{{ formatSeconds(benchmark.internalMedianTtftSeconds) }}</strong></span>
+                    <span>公开实测 TTFT <strong>{{ formatDuration(benchmark.testedTtftMillis) }}</strong></span>
+                    <span>同类中位 TTFT <strong>{{ formatDuration(benchmark.peerMedianTtftMillis) }}</strong></span>
+                  </div>
+                  <a :href="benchmark.sourceUrl" target="_blank" rel="noopener noreferrer">
+                    数据源（核验于 2026-08-17） <ExternalLink :size="11" />
+                  </a>
+                </article>
               </div>
             </div>
 
@@ -1380,7 +1611,7 @@ function onPageSizeChange(next: number) {
                 <div ref="trendChartEl" class="ta-imob-chart ta-imob-chart-trend" />
               </div>
 
-              <!-- 左侧两张业务图、右侧两张时延箱线图均纵向排列，保持对照关系和视觉平衡。 -->
+              <!-- 左侧两张业务图、右侧性能箱线图均纵向排列，保持对照关系和视觉平衡。 -->
               <div class="ta-imob-chart-comparison">
                 <div class="ta-imob-chart-stack">
                   <div v-if="showRateMetrics" class="ta-imob-chart-card">
@@ -1441,6 +1672,29 @@ function onPageSizeChange(next: number) {
                     <div v-else-if="itlBoxData.length" ref="itlChartEl" class="ta-imob-chart ta-imob-chart-box" />
                     <div v-else-if="!itlDistributionLoading" class="ta-imob-chart-empty">
                       当前范围没有可靠的 ITL / TPOT 样本
+                    </div>
+                  </div>
+
+                  <div v-loading="tpsDistributionLoading" class="ta-imob-chart-card ta-imob-box-card">
+                    <div class="ta-imob-box-title-row">
+                      <h4 class="ta-imob-overview-title">
+                        <MetricHelpLabel label="Output TPS 厂商对比（箱线图）" :description="chartHelp.tpsDistribution" />
+                      </h4>
+                      <div v-if="tpsBoxData.length" class="ta-imob-box-summary">
+                        <div v-for="box in tpsBoxData" :key="box.providerId" class="ta-imob-box-summary-item">
+                          <strong>{{ box.providerId }}</strong>
+                          <span>中间 50%：{{ formatTps(box.values[1]) }}–{{ formatTps(box.values[3]) }}</span>
+                          <span>中位数：{{ formatTps(box.values[2]) }}</span>
+                          <span>样本：{{ box.sampleCount }} 次</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-if="tpsDistributionError && !tpsBoxData.length" class="ta-imob-chart-empty">
+                      Output TPS 分布加载失败，请刷新重试
+                    </div>
+                    <div v-else-if="tpsBoxData.length" ref="tpsChartEl" class="ta-imob-chart ta-imob-chart-box" />
+                    <div v-else-if="!tpsDistributionLoading" class="ta-imob-chart-empty">
+                      当前范围没有可靠的 Output TPS 样本
                     </div>
                   </div>
                 </div>
@@ -1544,6 +1798,12 @@ function onPageSizeChange(next: number) {
                 <td>Inter-Token Latency / Time Per Output Token</td>
                 <td>Token 输出间隔 / 单 Token 耗时</td>
                 <td>已统计，按毫秒展示（首末输出间隔 ÷ 后续 Token 数；至少 2 个输出 Token 且供应商返回准确用量）</td>
+              </tr>
+              <tr>
+                <td><code>Output TPS</code></td>
+                <td>Output Tokens Per Second</td>
+                <td>每秒输出 Token 数</td>
+                <td>已统计，按 tokens/s 展示（后续 Token 数 × 1000 ÷ 首末 Token 间隔；逐次计算后再聚合）</td>
               </tr>
               <tr>
                 <td><code>SCT</code></td>
@@ -1885,6 +2145,72 @@ function onPageSizeChange(next: number) {
   font-size: 12px;
   color: #6b7280;
 }
+.ta-imob-benchmark {
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fffaf5;
+  padding: 12px 16px;
+}
+.ta-imob-benchmark-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ta-imob-benchmark-heading p {
+  margin: -4px 0 10px;
+  color: #78716c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ta-imob-benchmark-heading a,
+.ta-imob-benchmark-card a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #c2410c;
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ta-imob-benchmark-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+}
+.ta-imob-benchmark-card {
+  border: 1px solid #ffedd5;
+  border-radius: 7px;
+  background: #fff;
+  padding: 12px;
+}
+.ta-imob-benchmark-model {
+  color: #9a3412;
+  font-size: 13px;
+  font-weight: 700;
+}
+.ta-imob-benchmark-deployment {
+  margin: 3px 0 10px;
+  color: #78716c;
+  font-size: 11px;
+}
+.ta-imob-benchmark-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ta-imob-benchmark-values span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #78716c;
+  font-size: 11px;
+}
+.ta-imob-benchmark-values strong {
+  color: #292524;
+  font-size: 13px;
+}
 .ta-imob-charts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -1979,6 +2305,12 @@ function onPageSizeChange(next: number) {
   }
   .ta-imob-chart-box {
     min-height: 240px;
+  }
+  .ta-imob-benchmark-heading {
+    flex-direction: column;
+  }
+  .ta-imob-benchmark-values {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 .ta-imob-metric-grid {

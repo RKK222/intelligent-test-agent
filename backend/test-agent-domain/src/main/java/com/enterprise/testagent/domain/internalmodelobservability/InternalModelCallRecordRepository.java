@@ -35,6 +35,14 @@ public interface InternalModelCallRecordRepository {
             Instant from,
             Instant to);
 
+    /** 按筛选范围计算 Output TPS 五数概括，只纳入可确定首末 Token 时刻的完整样本。 */
+    InternalModelThroughputDistribution queryTpsDistribution(
+            String providerId,
+            List<InternalModelCallOutcome> outcomes,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to);
+
     /** 保留旧调用形态，未传 source 时查询所有来源。 */
     default List<InternalModelCallHourlyStat> queryHourlyStats(String providerId, Instant from, Instant to) {
         return queryHourlyStats(providerId, null, from, to);

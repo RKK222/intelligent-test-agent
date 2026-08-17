@@ -27,6 +27,7 @@ public interface InternalModelObservabilityMapper {
             @Param("providerId") String providerId,
             @Param("outcomes") List<String> outcomes,
             @Param("source") String source,
+            @Param("ucid") String ucid,
             @Param("from") Instant from,
             @Param("to") Instant to,
             @Param("limit") int limit,
@@ -36,6 +37,7 @@ public interface InternalModelObservabilityMapper {
             @Param("providerId") String providerId,
             @Param("outcomes") List<String> outcomes,
             @Param("source") String source,
+            @Param("ucid") String ucid,
             @Param("from") Instant from,
             @Param("to") Instant to);
 
@@ -50,6 +52,7 @@ public interface InternalModelObservabilityMapper {
             @Param("providerId") String providerId,
             @Param("outcomes") List<String> outcomes,
             @Param("source") String source,
+            @Param("ucid") String ucid,
             @Param("from") Instant from,
             @Param("to") Instant to);
 
@@ -58,6 +61,16 @@ public interface InternalModelObservabilityMapper {
             @Param("providerId") String providerId,
             @Param("outcomes") List<String> outcomes,
             @Param("source") String source,
+            @Param("ucid") String ucid,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
+
+    /** 按准确输出 Token 数与首末输出时刻计算 Output TPS。 */
+    InternalModelThroughputDistributionRow findTpsDistribution(
+            @Param("providerId") String providerId,
+            @Param("outcomes") List<String> outcomes,
+            @Param("source") String source,
+            @Param("ucid") String ucid,
             @Param("from") Instant from,
             @Param("to") Instant to);
 

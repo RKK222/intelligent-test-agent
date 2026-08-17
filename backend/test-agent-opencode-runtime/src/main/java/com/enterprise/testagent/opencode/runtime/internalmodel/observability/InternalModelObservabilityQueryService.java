@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatusRepository;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelThroughputDistribution;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -45,6 +46,7 @@ public class InternalModelObservabilityQueryService {
             InternalModelCallOutcome outcome,
             InternalModelCallOutcomeGroup outcomeGroup,
             InternalModelCallSource source,
+            String ucid,
             Instant from,
             Instant to,
             PageRequest pageRequest) {
@@ -55,7 +57,19 @@ public class InternalModelObservabilityQueryService {
                 ? List.of(outcome)
                 : outcomeGroup == null ? List.of() : outcomeGroup.outcomes();
         return callRecordRepository.query(new InternalModelCallRecordQuery(
-                providerId, outcomes, source, window[0], window[1], bounded));
+                providerId, outcomes, source, ucid, window[0], window[1], bounded));
+    }
+
+    /** 保留未传 ucid 的调用形态，兼容既有内部调用与测试。 */
+    public PageResponse<InternalModelCallRecord> queryCallRecords(
+            String providerId,
+            InternalModelCallOutcome outcome,
+            InternalModelCallOutcomeGroup outcomeGroup,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to,
+            PageRequest pageRequest) {
+        return queryCallRecords(providerId, outcome, outcomeGroup, source, null, from, to, pageRequest);
     }
 
     /** 保留旧的单 outcome 查询形态，兼容既有内部调用与测试。 */
@@ -66,7 +80,7 @@ public class InternalModelObservabilityQueryService {
             Instant from,
             Instant to,
             PageRequest pageRequest) {
-        return queryCallRecords(providerId, outcome, null, source, from, to, pageRequest);
+        return queryCallRecords(providerId, outcome, null, source, null, from, to, pageRequest);
     }
 
     public List<InternalModelCallHourlyStat> queryHourlyStats(
@@ -100,6 +114,19 @@ public class InternalModelObservabilityQueryService {
         Instant[] window = boundedWindow(from, to);
         List<InternalModelCallOutcome> outcomes = outcomeGroup == null ? List.of() : outcomeGroup.outcomes();
         return callRecordRepository.queryItlDistribution(
+                providerId, outcomes, source, window[0], window[1]);
+    }
+
+    /** Output TPS 必须逐条计算后再聚合，不能用 1000 / 平均 ITL 反推。 */
+    public InternalModelThroughputDistribution queryTpsDistribution(
+            String providerId,
+            InternalModelCallOutcomeGroup outcomeGroup,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to) {
+        Instant[] window = boundedWindow(from, to);
+        List<InternalModelCallOutcome> outcomes = outcomeGroup == null ? List.of() : outcomeGroup.outcomes();
+        return callRecordRepository.queryTpsDistribution(
                 providerId, outcomes, source, window[0], window[1]);
     }
 

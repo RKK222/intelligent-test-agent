@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatusRepository;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelThroughputDistribution;
 import com.enterprise.testagent.persistence.mybatis.InternalModelObservabilityMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelCallRecordRepository;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelProbeStatusRepository;
@@ -180,6 +181,13 @@ class InternalModelObservabilityRepositoryIntegrationTest {
                 null, List.of(), InternalModelCallSource.PROBE, null, null, new PageRequest(1, 20)));
         assertThat(probeOnly.total()).isEqualTo(1);
 
+        var userOnly = callRepository.query(new InternalModelCallRecordQuery(
+                null, List.of(), InternalModelCallSource.USER_CALL, "CID_T",
+                null, null, new PageRequest(1, 2)));
+        assertThat(userOnly.total()).isEqualTo(4);
+        assertThat(userOnly.items()).hasSize(2).allSatisfy(item ->
+                assertThat(item.ucid()).isEqualTo("ucid_test"));
+
         assertThat(callRepository.queryHourlyStats(
                 PROVIDER, InternalModelCallSource.USER_CALL,
                 T0.minus(1, ChronoUnit.HOURS), T0.plus(2, ChronoUnit.HOURS))).hasSize(4);
@@ -266,6 +274,26 @@ class InternalModelObservabilityRepositoryIntegrationTest {
     }
 
     @Test
+    void calculatesOutputTpsDistributionFromEachCompleteStream() {
+        callRepository.record(tpsRecord(100L, 11));
+        callRepository.record(tpsRecord(50L, 12));
+        callRepository.record(tpsRecord(40L, 13));
+        callRepository.record(tpsRecord(20L, 14));
+
+        InternalModelThroughputDistribution distribution = callRepository.queryTpsDistribution(
+                PROVIDER, List.of(InternalModelCallOutcome.SUCCESS), InternalModelCallSource.USER_CALL,
+                T0.plusSeconds(10), T0.plusSeconds(20));
+
+        assertThat(distribution.sampleCount()).isEqualTo(4);
+        assertThat(distribution.averageTokensPerSecond()).isEqualTo(26.25);
+        assertThat(distribution.minimumTokensPerSecond()).isEqualTo(10.0);
+        assertThat(distribution.firstQuartileTokensPerSecond()).isEqualTo(17.5);
+        assertThat(distribution.medianTokensPerSecond()).isEqualTo(22.5);
+        assertThat(distribution.thirdQuartileTokensPerSecond()).isEqualTo(31.25);
+        assertThat(distribution.maximumTokensPerSecond()).isEqualTo(50.0);
+    }
+
+    @Test
     void purgesRecordsAndStatsBeforeCutoff() {
         callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200, 100L, null, T0.minus(40, ChronoUnit.DAYS)));
         callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200, 100L, null, T0));
@@ -321,6 +349,15 @@ class InternalModelObservabilityRepositoryIntegrationTest {
                 InternalModelCallOutcome.SUCCESS, 200, null, true, 5000L, 50L, firstTokenMillis,
                 lastTokenMillis, lastTokenMillis, outputTokenCount,
                 "trace_imo_itl_" + offsetSeconds, "ucid_test", T0.plusSeconds(offsetSeconds));
+    }
+
+    private InternalModelCallRecord tpsRecord(long outputSpanMillis, long offsetSeconds) {
+        long firstTokenMillis = 100L;
+        return new InternalModelCallRecord(
+                null, PROVIDER, "deepseek-v4", "/chat/completions", InternalModelCallSource.USER_CALL,
+                InternalModelCallOutcome.SUCCESS, 200, null, true, 5000L, 50L, firstTokenMillis,
+                firstTokenMillis + outputSpanMillis, firstTokenMillis + outputSpanMillis, 2L,
+                "trace_imo_tps_" + offsetSeconds, "ucid_test", T0.plusSeconds(offsetSeconds));
     }
 
     private InternalModelProbeStatus probeStatus(

@@ -2334,6 +2334,17 @@ export type InternalModelLatencyDistribution = {
 /** TTFT 五数概括；保留别名兼容既有调用方。 */
 export type InternalModelTtftDistribution = InternalModelLatencyDistribution;
 
+/** 单次完整流的输出 Token 吞吐量平均值与五数概括，单位为 tokens/s。 */
+export type InternalModelThroughputDistribution = {
+  sampleCount: number;
+  averageTokensPerSecond?: number | null;
+  minimumTokensPerSecond?: number | null;
+  firstQuartileTokensPerSecond?: number | null;
+  medianTokensPerSecond?: number | null;
+  thirdQuartileTokensPerSecond?: number | null;
+  maximumTokensPerSecond?: number | null;
+};
+
 /** 逐 provider 最近探活状态，供健康卡片直接读取。 */
 export type InternalModelProbeStatus = {
   providerId: string;

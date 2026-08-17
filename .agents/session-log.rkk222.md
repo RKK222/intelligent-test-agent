@@ -10729,3 +10729,28 @@
 
 - 小地球的版本和应用现在是可输入、可直接选择的组合框，已有值不再妨碍修改；子条目筛选在多人、多父条目和大量子项场景下更容易定位及复核选择。
 - 本次只改前端交互、定向测试和说明文档，不变更 HTTP/WebSocket 契约、RunEvent、数据库、Flyway、安全边界、公共 Agent、Workspace ID 或 Git diff/提交推送链路；真实企业 TCDS 返回数据仍需现场联调。
+
+## 2026-08-17 - 增加模型 Output TPS 并修复可观测筛选
+
+### Why
+
+- 内部模型可观测页缺少每秒输出 Token 数及公开性能参照；自定义日期在只选完开始时间时会把中间态当成完整区间；UCID 只在前端当前页过滤，导致过滤后的分页总量不变、目标用户在其它页时误显示为空。
+
+### What
+
+- 复用 PostgreSQL `internal_model_call_records` 既有 `first_token_ms/last_token_ms/output_token_count`，新增 Output TPS 平均值与五数概括 API；单条按 `(output_token_count-1)*1000/(last_token_ms-first_token_ms)` 计算后再聚合，不新增表、列、migration、服务或 ClickHouse 依赖。
+- 页面增加单次 TPS、Overview 平均/P50、按厂商箱线图，以及 2026-08-17 核验的 Artificial Analysis Qwen3.6 27B 与 DeepSeek V4 Flash 公开实测/同类中位数；明确公开 Token 归一化、硬件、量化和并发差异，只作方向性参照。
+- 自定义时间仅在两个端点完整、可解析且开始早于结束时应用，刷新时保留固定自定义窗口；UCID 作为可选参数进入 MyBatis 列表与 count 的共享条件，按忽略大小写的字面子串匹配。
+- 同步 domain/runtime/persistence/API/backend-api/agent-web README、HTTP API、指标口径和本地验证文档；未修改 `.env*`、RunEvent、数据库结构、generated SDK 或 OpenCode 源码。
+
+### How
+
+- 后端定向测试通过：Controller 5/5，H2/MyBatis 9/9，真实 PostgreSQL/Testcontainers 5/5；JDK 25 下 20 模块编译及 22 模块跳过测试打包均成功。
+- 前端可观测面板与 backend-api 定向 Vitest 121/121，agent-web `vue-tsc` 通过；一次误触发的全量 Vitest 为 1989 passed / 1 skipped / 3 failed，其中两项本任务测试随后修正转绿，另一项为未改动的 `MarkdownView.test.ts` Canvas/Markdown 环境基线失败。
+- 使用 release 工作树代码和项目根 `.env.test`/`test` profile 完整重启；backend health/readiness 为 UP，前端 3000 返回 200，登录 CORS 正常。`.env.test` 禁用本地 manager，启动脚本按配置跳过该进程。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目；并行存在的需求导入、安全文档和 Playwright 快照改动不纳入本次暂存或提交。
+
+### Result
+
+- 可观测页面现可按全量 PG 明细准确查看 Output TPS 并与公开参考做有边界说明的对照；自定义日期首击不再跳掉，用户筛选后的明细与总页数保持一致。
+- 功能位于现有 release 部署拓扑内，API 为加法兼容变更；无新部署节点、必需配置、数据库迁移或安全数据暴露。release 修复尚未同步到当前有并行未提交改动的 dev 工作树，后续应按提交哈希安全 cherry-pick。

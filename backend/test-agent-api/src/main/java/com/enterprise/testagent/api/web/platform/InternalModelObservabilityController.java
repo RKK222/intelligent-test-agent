@@ -50,6 +50,7 @@ public class InternalModelObservabilityController {
             @RequestParam(required = false) InternalModelCallOutcome outcome,
             @RequestParam(required = false) InternalModelCallOutcomeGroup outcomeGroup,
             @RequestParam(required = false) InternalModelCallSource source,
+            @RequestParam(required = false) String ucid,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @RequestParam(defaultValue = "1") int page,
@@ -60,7 +61,7 @@ public class InternalModelObservabilityController {
         return Mono.fromCallable(() -> {
             PageResponse<com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord> result =
                     queryService.queryCallRecords(
-                            providerId, outcome, outcomeGroup, source, from, to, new PageRequest(page, size));
+                            providerId, outcome, outcomeGroup, source, ucid, from, to, new PageRequest(page, size));
             return ApiResponse.ok((Object) result, traceId);
         }).subscribeOn(Schedulers.boundedElastic());
     }
@@ -107,6 +108,22 @@ public class InternalModelObservabilityController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return Mono.fromCallable(() -> ApiResponse.ok(
                         (Object) queryService.queryItlDistribution(
+                                providerId, outcomeGroup, source, from, to), traceId))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @GetMapping("/tps-distribution")
+    public Mono<ApiResponse<Object>> tpsDistribution(
+            @RequestParam(required = false) String providerId,
+            @RequestParam(required = false) InternalModelCallOutcomeGroup outcomeGroup,
+            @RequestParam(required = false) InternalModelCallSource source,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return Mono.fromCallable(() -> ApiResponse.ok(
+                        (Object) queryService.queryTpsDistribution(
                                 providerId, outcomeGroup, source, from, to), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }

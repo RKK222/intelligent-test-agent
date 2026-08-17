@@ -19,6 +19,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelLatencyDistribution;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelThroughputDistribution;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelObservabilityQueryService;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelProviderProbeService;
@@ -43,13 +44,13 @@ class InternalModelObservabilityControllerTest {
                 TRACE_ID, "ucid", NOW);
         when(queryService.queryCallRecords(
                         eq("enterprise-deepseek"), any(), eq(InternalModelCallOutcomeGroup.UPSTREAM_FAILURE),
-                        any(), any(), any(), any(PageRequest.class)))
+                        any(), eq("AUTH_1"), any(), any(), any(PageRequest.class)))
                 .thenReturn(new PageResponse<>(List.of(record), 1, 20, 1));
         WebTestClient client = client(queryService, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
                 .uri("/api/internal/platform/opencode-runtime/internal-model-observability/call-records"
-                        + "?providerId=enterprise-deepseek&outcomeGroup=UPSTREAM_FAILURE")
+                        + "?providerId=enterprise-deepseek&outcomeGroup=UPSTREAM_FAILURE&ucid=AUTH_1")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isOk()
@@ -65,7 +66,7 @@ class InternalModelObservabilityControllerTest {
 
         verify(queryService).queryCallRecords(
                 eq("enterprise-deepseek"), any(), eq(InternalModelCallOutcomeGroup.UPSTREAM_FAILURE),
-                any(), any(), any(), any(PageRequest.class));
+                any(), eq("AUTH_1"), any(), any(), any(PageRequest.class));
     }
 
     @Test
@@ -156,6 +157,31 @@ class InternalModelObservabilityControllerTest {
                 .jsonPath("$.data.sampleCount").isEqualTo(3)
                 .jsonPath("$.data.averageMillis").isEqualTo(40.0)
                 .jsonPath("$.data.medianMillis").isEqualTo(40.0);
+    }
+
+    @Test
+    void superAdminCanQueryFilteredTpsDistribution() {
+        InternalModelObservabilityQueryService queryService = mock(InternalModelObservabilityQueryService.class);
+        when(queryService.queryTpsDistribution(
+                        eq("enterprise-deepseek"),
+                        eq(InternalModelCallOutcomeGroup.SUCCESS),
+                        eq(InternalModelCallSource.USER_CALL),
+                        any(),
+                        any()))
+                .thenReturn(new InternalModelThroughputDistribution(
+                        3, 80.0, 40.0, 60.0, 80.0, 100.0, 120.0));
+        WebTestClient client = client(queryService, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-observability/tps-distribution"
+                        + "?providerId=enterprise-deepseek&outcomeGroup=SUCCESS&source=USER_CALL")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.sampleCount").isEqualTo(3)
+                .jsonPath("$.data.averageTokensPerSecond").isEqualTo(80.0)
+                .jsonPath("$.data.medianTokensPerSecond").isEqualTo(80.0);
     }
 
     private WebTestClient client(InternalModelObservabilityQueryService queryService, List<String> roles) {
