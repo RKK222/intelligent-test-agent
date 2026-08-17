@@ -8,6 +8,7 @@ import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.GitWorkspaceService.GitDiffFile;
 import com.enterprise.testagent.common.git.GitWorkspaceService.GitStatusEntry;
+import com.enterprise.testagent.common.git.ScmGitIdentityRejectedException;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.broadcast.ServerBroadcastEvent;
@@ -142,6 +143,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     private PublicAgentConfigRolloutCoordinator publicConfigRolloutCoordinator;
     private PersonalAgentConfigRuntimeReloader personalRuntimeReloader;
     private ScheduledTaskLock scheduledTaskLock;
+    private ScmGitIdentityResolver scmGitIdentityResolver;
 
     /** 应用配置发布复用托管 feature 版本的 HEAD 更新与广播链路。 */
     @Autowired
@@ -165,6 +167,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     @Autowired
     void setScheduledTaskLock(ScheduledTaskLock lock) {
         this.scheduledTaskLock = Objects.requireNonNull(lock, "lock must not be null");
+    }
+
+    /** SCM 姓名校准为可选方法注入，保持既有测试构造器兼容。 */
+    @Autowired(required = false)
+    void setScmGitIdentityResolver(ScmGitIdentityResolver resolver) {
+        this.scmGitIdentityResolver = resolver;
     }
 
     /**
@@ -621,6 +629,21 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
             recordExpectedPublicConfigCommit(rolloutId, commitHash);
             try {
                 gitWorkspaceService.push(repoRoot, normalizedBranch, false, privateKey);
+            } catch (ScmGitIdentityRejectedException rejection) {
+                GitCommitIdentity corrected = correctedGitIdentity(userId, commitIdentity, rejection)
+                        .orElseThrow(() -> rejection);
+                String remoteHead = gitWorkspaceService.resolveCommit(repoRoot, "origin/" + normalizedBranch);
+                commitHash = gitWorkspaceService.createLinearCommitFromTree(
+                        repoRoot, gitWorkspaceService.headCommit(repoRoot), remoteHead, normalizedMessage, corrected);
+                gitWorkspaceService.resetHardToCommit(repoRoot, commitHash);
+                recordExpectedPublicConfigCommit(rolloutId, commitHash);
+                try {
+                    gitWorkspaceService.push(repoRoot, normalizedBranch, false, privateKey);
+                } catch (PlatformException retryException) {
+                    handleUncertainPushFailure(
+                            rolloutId, repoRoot, normalizedBranch, commitHash, privateKey,
+                            repoRoot, previousCommitHash, retryException);
+                }
             } catch (PlatformException pushException) {
                 handleUncertainPushFailure(
                         rolloutId,
@@ -1705,6 +1728,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                     config,
                     PublicRepositorySyncTarget.PERSONAL_WORKTREE);
             String branch = gitWorkspaceService.currentBranch(sharedRepoRoot);
+            progress.branch(branch);
             String previousCommitHash = gitWorkspaceService.headCommit(sharedRepoRoot);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
             gitWorkspaceService.fetch(personalRepoRoot, privateKey);
@@ -1743,6 +1767,24 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                     branch, commitHash, previousCommitHash, false, userId, traceId);
             try {
                 gitWorkspaceService.pushRef(personalRepoRoot, worktree.branch(), branch, privateKey);
+            } catch (ScmGitIdentityRejectedException rejection) {
+                GitCommitIdentity corrected = correctedGitIdentity(userId, commitIdentity, rejection)
+                        .orElseThrow(() -> rejection);
+                commitHash = gitWorkspaceService.createLinearCommitFromTree(
+                        personalRepoRoot,
+                        gitWorkspaceService.headCommit(personalRepoRoot),
+                        remoteCommitHash,
+                        "发布公共 Agent 配置",
+                        corrected);
+                gitWorkspaceService.resetHardToCommit(personalRepoRoot, commitHash);
+                recordExpectedPublicConfigCommit(rolloutId, commitHash);
+                try {
+                    gitWorkspaceService.pushRef(personalRepoRoot, worktree.branch(), branch, privateKey);
+                } catch (PlatformException retryException) {
+                    handleUncertainPushFailure(
+                            rolloutId, personalRepoRoot, branch, commitHash, privateKey,
+                            null, null, retryException);
+                }
             } catch (PlatformException pushException) {
                 handleUncertainPushFailure(
                         rolloutId,
@@ -1794,19 +1836,30 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 AgentConfigWorktree worktree = existingWorktree(worktreeId, AgentConfigScope.WORKSPACE, workspace.workspaceId());
                 progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
                 progress.step(AgentConfigOperationStep.MERGING);
-                GitPublishWorkflow.PublishResult result = gitPublishWorkflow.publishMergedBranch(
-                        repoRoot,
-                        branch,
-                        worktree.branch(),
-                        false,
-                        privateKey,
-                        commitIdentity);
+                GitPublishWorkflow.PublishResult result;
+                try {
+                    result = gitPublishWorkflow.publishMergedBranch(
+                            repoRoot,
+                            branch,
+                            worktree.branch(),
+                            false,
+                            privateKey,
+                            commitIdentity);
+                } catch (ScmGitIdentityRejectedException rejection) {
+                    result = retryWorkspacePublishWithCorrectedIdentity(
+                            repoRoot, branch, privateKey, userId, commitIdentity, rejection);
+                }
                 throwIfConflicted(result, "工作空间 Agent 配置合并冲突");
                 commitHash = result.headCommit();
                 agentConfigRepository.saveWorktree(worktree.markPublished(now()));
             } else {
                 progress.step(AgentConfigOperationStep.PUSHING);
-                commitHash = gitPublishWorkflow.publishDirectBranch(repoRoot, branch, false, privateKey).headCommit();
+                try {
+                    commitHash = gitPublishWorkflow.publishDirectBranch(repoRoot, branch, false, privateKey).headCommit();
+                } catch (ScmGitIdentityRejectedException rejection) {
+                    commitHash = retryWorkspacePublishWithCorrectedIdentity(
+                            repoRoot, branch, privateKey, userId, commitIdentity, rejection).headCommit();
+                }
             }
             progress.step(AgentConfigOperationStep.BROADCASTING);
             if (managedWorkspaceApplicationService != null) {
@@ -1973,6 +2026,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 null,
                 serverIdentity.linuxServerId(),
                 AgentConfigWorktreeStatus.ACTIVE)) {
+            // 日期型或手工命名的历史公共 worktree 已明确不再挂载，不能继续登记为永久重试任务。
+            // 它们的磁盘内容和数据库记录仍保留，只有当前用户稳定命名的 worktree 参与发布收敛。
+            if (!isReusablePublicWorktree(worktree, worktree.createdBy())) {
+                continue;
+            }
             String reason = mergeTargetIntoPublicWorktree(worktree, config, targetCommit, privateKey, identity);
             if (reason != null) {
                 pending.add(new PublicAgentConfigWorktreePending(
@@ -2050,6 +2108,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                     || !claim.userId().equals(worktree.createdBy().value())
                     || !serverIdentity.linuxServerId().equals(worktree.linuxServerId())) {
                 publicConfigRolloutCoordinator.abandonPublicWorktree(claim, "WORKTREE_NO_LONGER_ELIGIBLE");
+                return;
+            }
+            if (!isReusablePublicWorktree(worktree, worktree.createdBy())) {
+                publicConfigRolloutCoordinator.abandonPublicWorktree(claim, "WORKTREE_NO_LONGER_REUSABLE");
                 return;
             }
             UserId owner = worktree.createdBy();
@@ -2519,9 +2581,42 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
      * 将当前平台用户转换为 Git 单次提交身份；平台用户表没有邮箱字段，因此按统一认证号生成企业 SCM 登记邮箱。
      */
     private GitCommitIdentity gitCommitIdentity(UserId userId) {
+        if (scmGitIdentityResolver != null) {
+            return scmGitIdentityResolver.resolve(userId);
+        }
         User user = userRepository.findByUserId(userId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "用户不存在", Map.of("userId", userId.value())));
         return GitCommitIdentity.forPlatformUser(user.username(), user.unifiedAuthId());
+    }
+
+    private Optional<GitCommitIdentity> correctedGitIdentity(
+            UserId userId,
+            GitCommitIdentity attempted,
+            ScmGitIdentityRejectedException rejection) {
+        return scmGitIdentityResolver == null
+                ? Optional.empty()
+                : scmGitIdentityResolver.learnFromRejection(userId, attempted, rejection);
+    }
+
+    /** 右控拒绝后把最终文件树压成以远端 HEAD 为父节点的新提交，并仅重推一次。 */
+    private GitPublishWorkflow.PublishResult retryWorkspacePublishWithCorrectedIdentity(
+            Path repoRoot,
+            String branch,
+            String privateKey,
+            UserId userId,
+            GitCommitIdentity attempted,
+            ScmGitIdentityRejectedException rejection) {
+        GitCommitIdentity corrected = correctedGitIdentity(userId, attempted, rejection)
+                .orElseThrow(() -> rejection);
+        String correctedHead = gitWorkspaceService.createLinearCommitFromTree(
+                repoRoot,
+                gitWorkspaceService.headCommit(repoRoot),
+                gitWorkspaceService.resolveCommit(repoRoot, "origin/" + branch),
+                "发布工作空间 Agent 配置",
+                corrected);
+        gitWorkspaceService.resetHardToCommit(repoRoot, correctedHead);
+        gitWorkspaceService.push(repoRoot, branch, false, privateKey);
+        return GitPublishWorkflow.PublishResult.succeeded(correctedHead);
     }
 
     private Path workspaceAgentRootForRead(String workspaceId, String worktreeId) {
@@ -3297,6 +3392,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         private void step(AgentConfigOperationStep step) {
             operation = agentConfigRepository.saveOperation(operation.step(step, now()));
             publish("step", operation);
+        }
+
+        private void branch(String branch) {
+            operation = agentConfigRepository.saveOperation(operation.withBranch(branch, now()));
+            publish("snapshot", operation);
         }
 
         private AgentConfigResponses.AgentConfigOperationResponse succeeded(String commitHash) {

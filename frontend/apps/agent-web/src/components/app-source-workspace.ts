@@ -1,4 +1,4 @@
-import type { AppSourceOpenResult, AppSourcePurpose, PersonalWorkspace } from "@test-agent/shared-types";
+import type { AppSourceOpenResult, AppSourcePurpose, PersonalWorkspace, Workspace } from "@test-agent/shared-types";
 import { BackendApiError } from "@test-agent/backend-api";
 
 export type SelectedWorkspaceKind = "MANAGED" | "APP_SOURCE" | "EXPERIENCE";
@@ -24,6 +24,35 @@ export function personalWorkspaceRuntimeContext(
     personalWorkspaceId: matched.personalWorkspaceId,
     personalWorkspaceBranch: matched.branch
   };
+}
+
+/**
+ * Workspace 查询缓存只能按运行态 workspaceId 替换同一条记录。同一应用版本和模板下允许同时存在
+ * default 与自定义个人 worktree，versionId/applicationWorkspaceId 只能用于菜单高亮，不能充当运行态主键。
+ */
+export function cacheRuntimeWorkspace(
+  workspaces: readonly Workspace[],
+  workspace: Workspace
+): { items: Workspace[]; existed: boolean } {
+  const existed = workspaces.some((item) => item.workspaceId === workspace.workspaceId);
+  return {
+    items: [workspace, ...workspaces.filter((item) => item.workspaceId !== workspace.workspaceId)],
+    existed
+  };
+}
+
+/** 只有当前用户自己的普通托管工作区文件，才允许按运行态 workspaceId 即时解析物理路径。 */
+export function physicalPathResolutionWorkspaceId(
+  workspaceKind: SelectedWorkspaceKind,
+  workspaceId: string | null | undefined,
+  scope: { shared: boolean; reference: boolean; agent: boolean }
+): string | undefined {
+  const normalizedWorkspaceId = workspaceId?.trim();
+  if (workspaceKind !== "MANAGED" || !normalizedWorkspaceId
+    || scope.shared || scope.reference || scope.agent) {
+    return undefined;
+  }
+  return normalizedWorkspaceId;
 }
 
 /**

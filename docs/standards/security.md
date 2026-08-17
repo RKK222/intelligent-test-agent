@@ -91,8 +91,10 @@ Token 校验流程：
 
 ## 密钥与配置
 
-1. 除基础 `application.yml` 中经用户明确批准的 XXL 本地开发默认 access token 外，禁止硬编码密钥、token、账号、生产地址；该默认值不是生产凭据，生产必须通过环境变量或配置中心覆盖。其它密钥只能来自环境变量、配置中心或本地安全配置；示例配置必须使用占位值。
+1. 除基础 `application.yml` 中经用户明确批准的 XXL 本地开发默认 access token 和下述仅局域网可达的 TCDS 地址外，禁止硬编码密钥、token、账号、生产地址；XXL 默认值不是生产凭据，生产必须通过环境变量或配置中心覆盖。其它密钥只能来自环境变量、配置中心或本地安全配置；除该 TCDS 局域网地址外，示例配置必须使用占位值。
 2. 日志、错误响应、前端状态不得输出密钥。
+- 经用户确认，TCDS 是仅在企业局域网可达的例外端点：默认 yml 固定为 `http://tcds-prod.sdc.icbc:9080`，并允许 `TEST_AGENT_TCDS_BASE_URL` 以 HTTP/HTTPS 绝对地址覆盖。业务接口和 TCDS 同源文档请求统一携带非敏感 `toolId: 66f36bfa5c1c6105572b0118880261d6`；文档重定向到跨域对象存储后不得透传该 header。文档 URL 只能取后端重新查询的 TCDS 响应，并限制协议、超时、重定向和下载容量。token、签名参数、URL 与响应正文不得进入正式日志或浏览器响应。
+- 工作区普通响应不得返回物理根路径。绝对文件路径只允许通过文件 WebSocket 在用户点击后按单个相对文件即时解析，并拒绝越界、符号链接、分享、支持访问、体验空间和源码快照。文件 WebSocket 必须在 upgrade 前非消费式校验 ticket，实际 upgrade 再原子消费；无效、过期和复用对外统一为 401。
 3. 后端生产容器只运行 Java 进程；数据库、Redis 和 opencode server 地址必须从外部配置注入，不能写入镜像或仓库。
 4. 前端不得把密钥写入源码、localStorage 或可公开构建产物。
 5. 个人 Git SSH 私钥必须在浏览器端使用每条记录独立的 AES-256-GCM 临时密钥加密，临时 AES 密钥再用平台 RSA-OAEP/SHA-256 公钥加密后落库。生产 Java 固定加载交付 JAR 内置 `classpath:rsa-private.key`；共享同一数据库的全部 Java 必须部署同一 JAR，禁止使用重启即变化的临时 RSA key。由于交付 JAR/ZIP 包含平台私钥，必须按密钥交付物限制访问、复制和留存；替换内置密钥前必须完成既有 SSH key 迁移或要求用户重新保存。
@@ -101,20 +103,21 @@ Token 校验流程：
 8. 应用版本工作区、个人工作区和引用资产库的 Git clone/worktree/diff/push/pull/副本同步仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录只允许来自对应通用参数；缺失或空白时必须失败，不能回退到 yml、环境变量或代码默认路径。磁盘目录已存在时只能在校验可信 Git、目标 origin 和干净状态后接管，不得覆盖或删除未知目录。引用资产同分支同步只允许快进；显式分支切换也必须阻断已分叉的目标本地分支，不能用 `checkout -B` 或清理命令强制覆盖。跨服务器副本在任何 fetch/checkout/reset 前必须确认工作树无未提交变更；主动指针核验必须使用不取得 Git optional lock 的只读命令，禁止刷新 index、fetch 或修改工作树。
    版本选择前的只读 Git 权限预检允许在单个 Java 内缓存成功结果最多 10 分钟，但每次请求仍必须实时校验应用成员关系并重新读取当前仓库和 SSH key 元数据。缓存键必须绑定用户、版本库、有效 URL 摘要及 SSH key ID/指纹，不得保存或记录私钥明文；URL 或 key 身份变化必须立即重检，失败结果不得缓存，容量必须有明确上限。远端仓库成员权限可在 SSH key 不变时被直接撤销，因此不能使用永久缓存；该短缓存也不能替代真正 clone/fetch/push 等 Git 操作自身的远端鉴权。
 9. 设置页创建应用工作空间的 `workspace_create_operations.error_message` 只能保存平台安全错误说明或通用失败文案，不得写入 SSH 私钥、token、Authorization、Cookie、完整命令行、完整用户输入或敏感路径片段。
+   企业 SCM 右控姓名不一致报文属于个人信息证据：期望姓名、实际姓名、邮箱和原始 stderr 只能在当前 Git 命令内存中用于严格匹配，不得进入错误 details、正式日志、XXL 参数/result 或前端响应。持久化只保存按 `user_id` 关联的 Git 姓名、证据来源、可空提交哈希和时间；定时任务结果只允许输出仓库数、失败仓库数、检查用户数和更新用户数。
 10. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
 11. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。manager 心跳中的 `unifiedAuthId` 只允许由现有运行管理 overview 透传和展示，普通用户进程状态、普通错误响应、RunEvent/SSE、监控指标及业务日志不得新增该字段。运行管理归属必须按数据库 binding/process 与 manager 快照关联，禁止从 `startCommand` 解析身份；无平台记录的进程不得自动认领、停止或改绑。
 12. XXL SSO 票据 API 必须使用用户 JWT 并由后端强制校验 `SUPER_ADMIN`；票据使用至少 256 位安全随机值、最长 60 秒、Redis Lua 原子读删一次消费，且不得保存原始平台 Token。iframe 只能通过隐藏表单 POST 传票据，禁止 URL/query/hash、浏览器存储、访问日志和错误响应携带票据。JIT 用户以稳定平台用户 ID 唯一，所有 XXL 账号均为管理员展示账号但不得使用本地密码登录；原生登录、改密和账号写入口必须禁用。XXL 会话每次请求校验平台 SHA-256 session marker，平台登出、刷新或过期必须同步失效。Cookie 必须保持 `HttpOnly`、`SameSite=Lax` 和受限 Path，`Secure` 默认开启；仅当受控企业内网明确无法提供 HTTPS 时，才允许通过受审部署配置显式关闭 `Secure`，并在 HTTPS 可用后恢复。周期任务 `GLOBAL_MUTEX` 必须使用现有 Redis 锁和续租，不得回退本机或数据库锁。
 13. 普通定时任务 API 必须使用用户 JWT；普通入口 owner 取认证主体，分享入口 owner 取会话所属人并另存真实 creator 与授权快照。按 `taskId/sessionId` 查询或变更时必须隔离无关用户，所属人和 creator 权限按“会话协作分享安全”执行。`ADMIN_CUSTOM` 创建和改期必须由后端根据真实认证主体强制校验 `SUPER_ADMIN`，分享上下文、前端入口可见性、请求中的模式值或历史创建人身份均不能替代；权限被移除后只允许取消，不允许继续改期。模式权限和自定义时间边界必须先于幂等锁、Session、会话锁、任务和容量写入校验，伪造请求不得留下副作用。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 XXL 参数/result、跨服务器请求、HTTP 响应、RunEvent、运营分析或日志；普通 Run 锚点受理、取消或最终调度失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview`、调度模式和安全 actor 归因。目标 Java 必须从共享数据库重读完整任务并重新校验固定 Session/Workspace 范围，固定目标只能使用任务提交时服务端保存的 `target_linux_server_id`；不得接受客户端覆盖、根据后续 binding 自动迁移、直调 manager gateway或建立夜间专属队列。内部批量请求只允许 `linuxServerId + 1..50 taskId`，使用公共 resolver 选出的精确 backendProcessId 和公共 forwarder、traceId、标准 XXL token、统一防循环 header；同服务器多 JVM 不得按 linuxServerId 本机短路。Run 锚点恢复必须校验来源类型、taskId、owner、Session 和 Workspace，客户端提供的幂等 ID 不能替代归属校验。token、prompt、附件、用户信息和底层异常不得进入日志。夜间容量只能由 `SUPER_ADMIN` 通过既有通用参数管理入口修改，服务端必须在审计和广播前校验正整数；`ADMIN_CUSTOM` 不得预留、释放或读取夜间容量。跨服务器刷新 payload 不携带参数值，刷新失败日志不得记录数据库原值或底层敏感错误。
 14. JVM 内存通用参数的查询和手工刷新接口必须强制校验 `SUPER_ADMIN`，因为响应会同时暴露数据库加载源值与进程实际生效值；前端入口可见性不能替代后端权限。跨 Java 请求必须按 `backendProcessId` 精确路由并使用统一防循环头。手工刷新不得写参数修改历史或重复发布广播，日志只允许记录脱敏 traceId、进程身份、参数键和结果状态，不得记录源值、内存值、底层异常消息或堆栈。
 15. 企业离线完整包中的 MySQL root/应用密码和 XXL access token 必须在打包阶段使用安全随机值生成，只能写入权限为 `0600` 的 `.147` MySQL 节点配置和对应后台节点敏感配置；部署脚本只能按文本解析 dotenv，禁止 `source`、回显或写入普通日志。外层 ZIP 因同时包含这些配置和 JAR 内置 RSA 私钥，必须整体按密钥交付物通过受控 U 盘和企业中转机传递。
-15. 内部模型 Token 由外部系统提供，平台不得生成或猜测。仅 `SUPER_ADMIN` 可新增、改名、轮换和删除；API 响应只能返回 `tokenId/name/referencedProviderCount/createdAt/updatedAt`，不得返回明文或密文。`internal_model_tokens.token_value` 继续遵循本系统已确认的明文存储约定，数据库权限、备份和导出必须按密钥数据保护；被 Provider 引用时必须拒绝删除。前端密钥草稿只保存在组件内存，请求完成后立即清空，不得进入浏览器持久化、原始报文或错误提示。刷新广播只携带 traceId 等安全元数据，不携带 Token；Java 仅在一次联表重载时读取明文，并按 Provider ID 保存于不可变内存快照。启用不同 Provider Token 前必须确保全部 Java 节点已经升级。
+15. 内部模型 Token 由外部系统提供，平台不得生成或猜测。仅 `SUPER_ADMIN` 可新增、改名、轮换和删除；API 响应只能返回 `tokenId/name/referencedProviderCount/createdAt/updatedAt`，不得返回明文或密文。`internal_model_tokens.token_value` 继续遵循本系统已确认的明文存储约定，数据库权限、备份和导出必须按密钥数据保护；被 Provider 引用时必须拒绝删除。前端密钥草稿只保存在组件内存，请求完成后立即清空，不得进入浏览器持久化、原始报文或错误提示。刷新广播只携带 traceId 等安全元数据，不携带 Token；Java 仅在一次联表重载时读取明文，并按 Provider ID 保存于不可变内存快照。启用不同 Provider Token 前必须确保全部 Java 节点已经升级。企业 AI 上游的 `Authorization: Bearer <供应商关联 Token>` 只能完成鉴权，不能让 `ucid` 生效；平台必须用 `Auth-Token: <供应商关联 Token>` 调用上游，并覆盖客户端提供的两种供应商鉴权头。OpenCode → Java 内部代理的 Bearer Key 是独立边界，不得转发到上游或与供应商 Token 混用。
 
 ## 外部 API Key 与 SSH Key 安全边界
 
 TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 API Key：
 
 1. 浏览器只能通过 `backend-api` 调用 `/api/internal/platform/integration/tcds/task-types` 和 `/api/internal/platform/integration/tcds/test-cases`，不得直连 TCDS HTTP 地址，避免跨域、mixed content 和客户端暴露固定工具标识。
-2. 任务类型与案例维护生产地址、案例维护 `toolId`、设计方法和其它固定业务字段必须由 `test-agent-integration` 常量组装，不接受 URL、请求头、固定字段或 `userId` 客户端覆盖，禁止复用旧 `/api/proxy/call` 形成 SSRF/任意代理。
+2. 任务类型与案例维护地址必须相对统一 `TEST_AGENT_TCDS_BASE_URL` 解析，所有 TCDS 同源请求的 `toolId` 必须由 `test-agent-integration` 共享请求构造器注入；设计方法和其它固定业务字段由服务端组装，不接受 URL、请求头、固定字段或 `userId` 客户端覆盖，禁止复用旧 `/api/proxy/call` 形成 SSRF/任意代理。
 3. 任务类型查询只向浏览器返回经过数量、长度、控制字符、分隔符和重复值校验的 `subItemTypes.name/value`，不得透传完整上游响应，也不得在失败时降级为可能过期的前端快照、代码内固定输出或简称映射；所有 Spring profile（包括 `local`）都必须真实调用任务类型接口。
 4. `userId` 只取当前 `AuthPrincipal.unifiedAuthId`；案例提交前必须再次实时查询 TCDS，逐项校验并原样使用当前返回的完整 `name`，多值只接受英文逗号分隔。`createGraphCase` 上游请求日志必须把 `userId` 完全删除且不得记录固定 `toolId`；案例 `name/step/data/expect/dataDependencies` 只允许记录长度和 SHA-256 短摘要，安全枚举和固定字段可保留。响应日志只允许记录 HTTP 状态、有界业务 `code/msg` 及 `data` 类型、数量和摘要，禁止记录 `data` 原值、未知响应正文或非法 JSON 原文。请求预览最多 20 条案例，单条安全报文日志最大 8 KiB；所有日志携带 traceId。
 5. 后端 HTTP client 禁止跟随重定向，并设置连接/请求超时与响应体上限；案例维护上游非零业务码只允许返回受限安全消息，任务类型查询和网络、协议、解析错误统一收敛为平台错误，不暴露地址、响应正文或异常堆栈。
@@ -190,7 +193,8 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
 9. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
 10. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
-11. 分享工作区文件 ticket 必须额外绑定 share/version、真实 actor、执行所属人、固定 session/workspace、`canChat` 和分享到期时间；路由使用执行所属人的进程服务器。每条 RPC 和连接级定时监视都必须刷新分享授权，读写按当前 `canChat` 分流，失效时中止未完成上传、记录路径摘要审计并关闭连接。分享 ticket 禁止执行 `agent-config.*`、`directory.*`、`workspace.create` 或 Hub 操作，也禁止通过普通用户 affinity 获得其它 Workspace。
+11. Git 网络/权限/超时错误面向用户只展示稳定错误码、后端脱敏提示、可恢复状态和 traceId；前端不得拼接原始命令、stderr、远端 URL 或凭据。Git 命令超时必须终止 Git 及其 SSH 等后代进程，不能在请求失败后留下后台连接；浏览器待推送恢复只保存逻辑 ID、相对文件白名单和提交说明，不保存 patch、文件正文或物理路径。
+12. 分享工作区文件 ticket 必须额外绑定 share/version、真实 actor、执行所属人、固定 session/workspace、`canChat` 和分享到期时间；路由使用执行所属人的进程服务器。每条 RPC 和连接级定时监视都必须刷新分享授权，读写按当前 `canChat` 分流，失效时中止未完成上传、记录路径摘要审计并关闭连接。分享 ticket 禁止执行 `agent-config.*`、`directory.*`、`workspace.create` 或 Hub 操作，也禁止通过普通用户 affinity 获得其它 Workspace。
 
 ## 个人工作区搬迁 WebSocket 安全例外
 

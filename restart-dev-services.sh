@@ -24,6 +24,7 @@ FRONTEND_SCREEN_SESSION="test-agent-frontend"
 OPENCODE_SCREEN_SESSION="test-agent-opencode"
 OPENCODE_MANAGER_SCREEN_SESSION="test-agent-opencode-manager"
 LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
+EXPERIENCE_WORKSPACE_CONTENT_SCRIPT="${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh"
 
 profile="test"
 env_file=""
@@ -1191,6 +1192,8 @@ build_frontend
 # 1) 后端
 stop_backend_service
 cleanup_stale_backend_runtime_jars
+bash "${EXPERIENCE_WORKSPACE_CONTENT_SCRIPT}" \
+  --workspace-dir "${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience"
 start_backend
 
 # 2) opencode-manager（Go 管理进程）。非本地环境 should_start_opencode_manager 为 false 时自动跳过，

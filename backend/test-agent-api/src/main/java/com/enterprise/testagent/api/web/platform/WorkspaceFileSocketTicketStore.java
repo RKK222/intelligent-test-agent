@@ -41,6 +41,7 @@ class WorkspaceFileSocketTicketStore {
             boolean superAdmin,
             boolean appAdmin,
             String userId,
+            String unifiedAuthId,
             String mode,
             String scope,
             String worktreeId,
@@ -64,9 +65,25 @@ class WorkspaceFileSocketTicketStore {
                 null,
                 traceId,
                 clock.instant().plus(DEFAULT_TTL),
-                null, null, null, null, false, null);
+                null, null, null, null, false, null, null, unifiedAuthId);
         tickets.put(ticket.ticket(), ticket);
         return ticket;
+    }
+
+    WorkspaceFileSocketTicket issue(
+            String workspaceId,
+            String linuxServerId,
+            String agentLinuxServerId,
+            boolean appSourceWorkspace,
+            boolean superAdmin,
+            boolean appAdmin,
+            String userId,
+            String mode,
+            String scope,
+            String worktreeId,
+            String traceId) {
+        return issue(workspaceId, linuxServerId, agentLinuxServerId, appSourceWorkspace,
+                superAdmin, appAdmin, userId, null, mode, scope, worktreeId, traceId);
     }
 
     WorkspaceFileSocketTicket issue(
@@ -81,7 +98,7 @@ class WorkspaceFileSocketTicketStore {
             String worktreeId,
             String traceId) {
         return issue(workspaceId, linuxServerId, agentLinuxServerId, false, superAdmin, appAdmin,
-                userId, mode, scope, worktreeId, traceId);
+                userId, null, mode, scope, worktreeId, traceId);
     }
 
     WorkspaceFileSocketTicket issue(
@@ -94,21 +111,25 @@ class WorkspaceFileSocketTicketStore {
             String worktreeId,
             String traceId) {
         return issue(workspaceId, linuxServerId, agentLinuxServerId, false, superAdmin, superAdmin, null,
-                mode, scope, worktreeId, traceId);
+                null, mode, scope, worktreeId, traceId);
     }
 
     WorkspaceFileSocketTicket consume(String ticketValue, String origin) {
         WorkspaceFileSocketTicket ticket = tickets.remove(ticketValue);
-        if (ticket == null) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "文件 WebSocket ticket 不存在或已使用");
-        }
-        if (ticket.expiresAt().isBefore(clock.instant())) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "文件 WebSocket ticket 已过期");
-        }
-        if (origin == null || origin.isBlank()) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "文件 WebSocket 缺少 Origin");
-        }
+        requireUsable(ticket, origin);
         return ticket;
+    }
+
+    /** 非消费式预检；不存在、过期、复用和缺少 Origin 使用同一脱敏错误。 */
+    void validate(String ticketValue, String origin) {
+        requireUsable(ticketValue == null ? null : tickets.get(ticketValue), origin);
+    }
+
+    private void requireUsable(WorkspaceFileSocketTicket ticket, String origin) {
+        if (ticket == null || ticket.expiresAt().isBefore(clock.instant())
+                || origin == null || origin.isBlank()) {
+            throw new PlatformException(ErrorCode.UNAUTHENTICATED, "文件 WebSocket 未授权");
+        }
     }
 
     /** 签发只读排查 ticket；只保存授权和平台会话摘要，不保存两类 Token 明文。 */
@@ -125,7 +146,7 @@ class WorkspaceFileSocketTicketStore {
                 ticketFactory.get(), workspaceId, linuxServerId, null, false, true, false,
                 actorUserId, "workspace", null, null, true, grantId, grantTokenDigest,
                 actorSessionDigest, targetUserId, traceId, clock.instant().plus(DEFAULT_TTL),
-                null, null, null, null, false, null);
+                null, null, null, null, false, null, null);
         tickets.put(ticket.ticket(), ticket);
         return ticket;
     }
@@ -150,7 +171,7 @@ class WorkspaceFileSocketTicketStore {
                 false, false, false, executionOwnerUserId, "workspace", null, null,
                 false, null, null, null, null, traceId, expiresAt,
                 shareId, shareVersion, actorUserId, executionOwnerUserId, canChat, shareExpiresAt,
-                shareSessionId);
+                shareSessionId, null);
         tickets.put(ticket.ticket(), ticket);
         return ticket;
     }

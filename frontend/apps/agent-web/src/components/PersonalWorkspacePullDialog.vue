@@ -33,6 +33,7 @@ const props = defineProps<{
   result?: PersonalWorkspacePullDialogResult | null;
   errorTitle?: string;
   errorDescription?: string;
+  errorTraceId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -190,6 +191,7 @@ function stepIcon(step: "FETCH" | "MERGE" | "REFRESH" | "RUNTIME") {
       <div v-if="phase === 'FAILED'" class="personal-pull-error" role="alert">
         <strong>{{ errorTitle || "拉取远程失败" }}</strong>
         <p>{{ errorDescription || "请检查提示后重试。" }}</p>
+        <code v-if="errorTraceId">traceId: {{ errorTraceId }}</code>
       </div>
     </section>
 

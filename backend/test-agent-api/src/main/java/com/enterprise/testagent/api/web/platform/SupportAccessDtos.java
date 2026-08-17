@@ -71,8 +71,7 @@ final class SupportAccessDtos {
                 String currentLinuxServerId,
                 boolean backendStateKnown,
                 ManagedWorkspacePathResolver pathResolver) {
-            Workspace resolved = pathResolver.withResolvedRootPathForResponse(workspace);
-            String linuxServerId = resolved.linuxServerId();
+            String linuxServerId = workspace.linuxServerId();
             BackendJavaProcess backend = linuxServerId == null ? null : liveBackends.get(linuxServerId);
             String availability;
             if (linuxServerId == null) {
@@ -87,14 +86,14 @@ final class SupportAccessDtos {
                 availability = "OFFLINE";
             }
             return new WorkspaceResponse(
-                    resolved.workspaceId().value(),
-                    resolved.name(),
-                    resolved.rootPath(),
-                    resolved.rootPath(),
-                    resolved.status().name(),
+                    workspace.workspaceId().value(),
+                    workspace.name(),
+                    "workspace:" + workspace.workspaceId().value(),
+                    null,
+                    workspace.status().name(),
                     linuxServerId,
-                    resolved.createdAt(),
-                    resolved.updatedAt(),
+                    workspace.createdAt(),
+                    workspace.updatedAt(),
                     availability,
                     backend == null ? null : backend.lastHeartbeatAt());
         }

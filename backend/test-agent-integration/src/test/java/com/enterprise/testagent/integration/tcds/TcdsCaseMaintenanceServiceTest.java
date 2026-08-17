@@ -34,7 +34,7 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
 
-/** 锁定生产地址、固定头、服务端补齐字段和 TCDS 业务错误收敛。 */
+/** 锁定统一部署地址、固定头、服务端补齐字段和 TCDS 业务错误收敛。 */
 class TcdsCaseMaintenanceServiceTest {
 
     private static final String TASK_TYPES_RESPONSE = """
@@ -46,7 +46,7 @@ class TcdsCaseMaintenanceServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void loadsTaskTypesFromFixedProductionGetEndpoint() {
+    void loadsTaskTypesFromConfiguredGetEndpointWithToolId() {
         RecordingHttpClient httpClient = new RecordingHttpClient(200, """
                 {"code":0,"msg":"请求成功","data":{"subItemTypes":[
                   {"property":"需求子条目测试任务任务类型","name":"准入测试任务","value":"5"},
@@ -54,16 +54,18 @@ class TcdsCaseMaintenanceServiceTest {
                   {"property":"需求子条目测试任务任务类型","name":"探索性测试任务","value":"12"}
                 ]}}
                 """);
-        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(objectMapper, httpClient);
+        TcdsCaseMaintenanceService service = service(httpClient);
 
         assertThat(service.getTaskTypes("trace_tcds_task_types")).containsExactly(
                 new TcdsTaskTypeOption("准入测试任务", "5"),
                 new TcdsTaskTypeOption("功能测试任务", "3"),
                 new TcdsTaskTypeOption("探索性测试任务", "12"));
-        assertThat(httpClient.request.uri()).isEqualTo(URI.create("http://tcds-prod.sdc.icbc/task/getTaskTypes"));
+        assertThat(httpClient.request.uri()).isEqualTo(
+                URI.create("http://tcds-prod.sdc.icbc:9080/task/getTaskTypes"));
         assertThat(httpClient.request.method()).isEqualTo("GET");
         assertThat(httpClient.request.bodyPublisher()).isEmpty();
-        assertThat(httpClient.request.headers().firstValue("toolId")).isEmpty();
+        assertThat(httpClient.request.headers().firstValue("toolId"))
+                .contains("66f36bfa5c1c6105572b0118880261d6");
     }
 
     @Test
@@ -77,9 +79,7 @@ class TcdsCaseMaintenanceServiceTest {
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"非法，名称\",\"value\":\"5\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"非法\\n名称\",\"value\":\"5\"}]}}",
                 "{\"code\":0,\"data\":{\"subItemTypes\":[{\"name\":\"缺少值\"}]}}")) {
-            TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
-                    objectMapper,
-                    new RecordingHttpClient(200, response));
+            TcdsCaseMaintenanceService service = service(new RecordingHttpClient(200, response));
 
             assertThatThrownBy(() -> service.getTaskTypes("trace_tcds_task_types"))
                     .isInstanceOfSatisfying(PlatformException.class,
@@ -93,7 +93,7 @@ class TcdsCaseMaintenanceServiceTest {
                 200,
                 TASK_TYPES_RESPONSE,
                 "{\"code\":0,\"msg\":\"请求成功\"}");
-        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(objectMapper, httpClient);
+        TcdsCaseMaintenanceService service = service(httpClient);
 
         service.maintain(
                 "S20260703-000081",
@@ -103,7 +103,7 @@ class TcdsCaseMaintenanceServiceTest {
 
         HttpRequest request = httpClient.request;
         assertThat(request.uri()).isEqualTo(
-                URI.create("http://tcds-prod.sdc.icbc/graphDesign/createGraphCase"));
+                URI.create("http://tcds-prod.sdc.icbc:9080/graphDesign/createGraphCase"));
         assertThat(request.method()).isEqualTo("POST");
         assertThat(request.headers().firstValue("toolId"))
                 .contains("66f36bfa5c1c6105572b0118880261d6");
@@ -124,8 +124,7 @@ class TcdsCaseMaintenanceServiceTest {
 
     @Test
     void mapsTcdsBusinessFailureToSafeConflict() {
-        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
-                objectMapper,
+        TcdsCaseMaintenanceService service = service(
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE, "{\"code\":3,\"msg\":\"业务异常\"}"));
 
         assertThatThrownBy(() -> service.maintain(
@@ -139,13 +138,16 @@ class TcdsCaseMaintenanceServiceTest {
     @Test
     void rejectsTaskTypeMissingFromCurrentTaskTypesBeforeCreatingCases() {
         RecordingHttpClient httpClient = new RecordingHttpClient(200, TASK_TYPES_RESPONSE);
-        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(objectMapper, httpClient);
+        TcdsCaseMaintenanceService service = service(httpClient);
 
         assertThatThrownBy(() -> service.maintain(
                 "S20260703-000081", "555033606", List.of(input("案例一", "安全测试任务")), "trace_tcds_case"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         error -> assertThat(error.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
-        assertThat(httpClient.request.uri()).isEqualTo(URI.create("http://tcds-prod.sdc.icbc/task/getTaskTypes"));
+        assertThat(httpClient.request.uri()).isEqualTo(
+                URI.create("http://tcds-prod.sdc.icbc:9080/task/getTaskTypes"));
+        assertThat(httpClient.request.headers().firstValue("toolId"))
+                .contains("66f36bfa5c1c6105572b0118880261d6");
     }
 
     @Test
@@ -158,8 +160,7 @@ class TcdsCaseMaintenanceServiceTest {
     @Test
     void rejectsOversizedResponseBeforeJsonParsing() {
         String oversizedBody = " ".repeat(512 * 1024 + 1);
-        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
-                objectMapper,
+        TcdsCaseMaintenanceService service = service(
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE, oversizedBody));
 
         assertThatThrownBy(() -> service.maintain(
@@ -170,8 +171,7 @@ class TcdsCaseMaintenanceServiceTest {
 
     @Test
     void buildsDiagnosticRequestLogWithoutAuthenticationOrCaseContent() throws Exception {
-        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
-                objectMapper,
+        TcdsCaseMaintenanceService service = service(
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE));
 
         String payload = service.safeRequestLogPayload(
@@ -205,8 +205,7 @@ class TcdsCaseMaintenanceServiceTest {
 
     @Test
     void buildsDiagnosticResponseLogWithoutUpstreamDataContent() throws Exception {
-        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
-                objectMapper,
+        TcdsCaseMaintenanceService service = service(
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE));
         byte[] response = """
                 {"code":3,"msg":"无权限\\n请联系管理员 token=secret-value 555033606","data":{"token":"sensitive-token","detail":"敏感返回"}}
@@ -228,8 +227,7 @@ class TcdsCaseMaintenanceServiceTest {
 
     @Test
     void reportsInvalidAndOversizedResponseBodiesWithoutLoggingTheirContent() throws Exception {
-        TcdsCaseMaintenanceService service = new TcdsCaseMaintenanceService(
-                objectMapper,
+        TcdsCaseMaintenanceService service = service(
                 new RecordingHttpClient(200, TASK_TYPES_RESPONSE));
 
         String invalid = service.safeResponseLogPayload(
@@ -247,6 +245,15 @@ class TcdsCaseMaintenanceServiceTest {
 
     private static TcdsCaseInput input(String name, String taskType) {
         return new TcdsCaseInput(name, "步骤", "数据", "预期", taskType);
+    }
+
+    private TcdsCaseMaintenanceService service(HttpClient httpClient) {
+        TcdsProperties properties = new TcdsProperties();
+        properties.setBaseUrl("http://tcds-prod.sdc.icbc:9080");
+        return new TcdsCaseMaintenanceService(
+                new TcdsHttpRequestFactory(properties),
+                httpClient,
+                objectMapper);
     }
 
     private static final class RecordingHttpClient extends HttpClient {

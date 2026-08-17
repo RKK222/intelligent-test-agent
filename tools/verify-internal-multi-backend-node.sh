@@ -133,6 +133,8 @@ cp "${ROOT_DIR}/deploy/internal/deploy-python-libs.sh" "${RELEASE_ROOT}/deploy/i
 cp "${ROOT_DIR}/tools/verify-python-libs.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/ensure-opencode-runtime-gitignore.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp -R "${ROOT_DIR}/deploy/internal/experience-workspace-template" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/verify-opencode-tool-runtime.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/configure-nginx.sh" "${RELEASE_ROOT}/deploy/internal/"
@@ -261,6 +263,50 @@ if mismatch_output="$(PATH="${REUSE_BIN}:${PATH}" \
   exit 1
 fi
 grep -Fq 'worker runtime fingerprint does not match the installed component' <<<"${mismatch_output}"
+
+# 已部署 release 的源码、包摘要和 worker 指纹一致时，先验真实 runtime/容器，再补写缺失门禁状态。
+BASELINE_RELEASE_ROOT="${TMP_ROOT}/baseline-release-root"
+BASELINE_RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-baseline-reuse-release.zip"
+BASELINE_WORKER_FINGERPRINT="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+cp -R "${REUSE_RELEASE_ROOT}" "${BASELINE_RELEASE_ROOT}"
+sed -i.bak \
+  "s/TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=fixture-worker/TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=${BASELINE_WORKER_FINGERPRINT}/" \
+  "${BASELINE_RELEASE_ROOT}/deploy/internal/release-components.env"
+rm -f "${BASELINE_RELEASE_ROOT}/deploy/internal/release-components.env.bak"
+printf '%s\n' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
+  >>"${BASELINE_RELEASE_ROOT}/deploy/internal/release-components.env"
+(cd "${BASELINE_RELEASE_ROOT}" && zip -qr "${BASELINE_RELEASE_ARCHIVE}" .)
+mkdir -p "${REUSE_INSTALL_ROOT}/programs/bin" "${REUSE_INSTALL_ROOT}/programs/codex/bin"
+cp -R "${PROGRAMS_RUNTIME}" "${REUSE_INSTALL_ROOT}/programs/opencode"
+mkdir -p "${REUSE_INSTALL_ROOT}/programs/opencode/bin"
+printf 'fixture manager\n' >"${REUSE_INSTALL_ROOT}/programs/bin/opencode-manager"
+printf 'fixture opencode\n' >"${REUSE_INSTALL_ROOT}/programs/opencode/bin/opencode"
+printf 'fixture codex\n' >"${REUSE_INSTALL_ROOT}/programs/codex/bin/codex-official"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'if [[ "$*" == *".State.Running"* ]]; then printf "true\n"; else printf "healthy\n"; fi' \
+  >"${REUSE_BIN}/docker"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 1' >"${REUSE_BIN}/systemctl"
+chmod +x "${REUSE_BIN}/docker" "${REUSE_BIN}/systemctl"
+if baseline_output="$(PATH="${REUSE_BIN}:${PATH}" \
+  TEST_AGENT_SYSTEMD_UNIT_DIR="${TMP_ROOT}/systemd" \
+  bash "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh" \
+    --archive "${BASELINE_RELEASE_ARCHIVE}" \
+    --extract-dir "${TMP_ROOT}/baseline-extract" \
+    --install-root "${REUSE_INSTALL_ROOT}" \
+    --docker-env "${REUSE_INSTALL_ROOT}/config/docker.env" \
+    --skip-frontend 2>&1)"; then
+  echo 'Baseline recovery fixture unexpectedly completed the full deployment' >&2
+  exit 1
+fi
+grep -Fq 'Recovered installed worker runtime fingerprint from deployed release baseline' \
+  <<<"${baseline_output}"
+grep -Fxq "TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=${BASELINE_WORKER_FINGERPRINT}" \
+  "${REUSE_INSTALL_ROOT}/config/release-component-state.env"
+grep -Fxq 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+  "${REUSE_INSTALL_ROOT}/config/release-component-state.env"
 
 # 新后台沿用同一配置字段，只替换本机 advertised host 和稳定 server ID。
 cp "${CONFIG_4}/backend.env" "${CONFIG_115}/backend.env"

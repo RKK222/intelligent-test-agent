@@ -26,9 +26,9 @@
 - `PlatformException`：业务层抛出的平台基础异常。
 - `PageRequest`、`PageResponse<T>`：分页请求和响应模型。
 - `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间、应用版本工作区、应用版本服务器副本、服务器广播事件、个人工作区、同步记录、SSH key、scheduler 历史运行/计划，以及 `net_` 夜间任务、`nda_` 分发 attempt、`sai_` 排查单号、`sag_` 排查授权和 `sae_` 排查审计的稳定前缀 ID。
-- `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads --symref` 的默认分支与远端分支解析、`git archive --remote`、tar 目录/文件树解析、超时、输出上限、非交互环境、临时 SSH key 文件清理，以及 `git_command_start/success/slow/failed/timeout/unavailable` 单行脱敏日志。
+- `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads --symref` 的默认分支与远端分支解析、`git archive --remote`、tar 目录/文件树解析、超时、输出上限、非交互环境、临时 SSH key 文件清理，以及 `git_command_start/success/slow/failed/timeout/unavailable` 单行脱敏日志。命令超时会终止 Git 进程及其 SSH 等后代进程并等待退出，避免请求已经失败后遗留连接继续占用资源。企业 SCM 右控明确返回邮箱对应姓名不一致时，执行器只识别固定句式并抛出内部 `ScmGitIdentityRejectedException`；姓名和邮箱不写入统一错误详情或日志。
 - `GitCommitIdentity`：生成并校验单次 Git 提交身份；平台用户没有邮箱字段时按统一认证号生成已在企业 SCM 登记的 `mails.icbc` 邮箱，避免远端以 invalid committer 拒绝提交。
-- `GitWorkspaceService`：封装 clone、worktree add、分支/origin/head/status、porcelain/diff、索引恢复到 HEAD、指定文件回退（恢复已跟踪文件并清理新增/未跟踪文件）、冲突 stage 1/2/3 读取、按操作人身份提交、同名分支 push、个人分支到公共目标分支的非强制 refspec push、pull/fetch、目标分支显式 refspec fetch、冲突文件列表、`merge --abort` 和按提交/路径白名单投影文件等 Git 原子命令；所有可能生成 commit 的入口必须显式传入非空 `GitCommitIdentity`，不依赖仓库或全局 Git 配置中的默认身份，冲突文件拒绝通过普通回退处理。
+- `GitWorkspaceService`：封装 clone、worktree add、分支/origin/head/status、porcelain/diff、索引恢复到 HEAD、指定文件回退（恢复已跟踪文件并清理新增/未跟踪文件）、冲突 stage 1/2/3 读取、按操作人身份提交、同名分支 push、个人分支到公共目标分支的非强制 refspec push、pull/fetch、目标分支显式 refspec fetch、冲突文件列表、`merge --abort` 和按提交/路径白名单投影文件等 Git 原子命令；`hasStagedChanges` 使用 `git diff --cached --quiet --exit-code` 区分“没有待提交内容”和真实 Git 失败，供丢失响应后的幂等发布重试跳过空提交。还提供不联网的 `origin` 跟踪历史提交者读取和当前 HEAD 身份 amend，供 SCM 姓名补偿与右控单次纠正重试。固定提交文件枚举使用 NUL 分隔的原始 UTF-8 路径，中文及空格文件名不会被 Git quotepath 转义后误传给 blob 读取；所有可能生成 commit 的入口必须显式传入非空 `GitCommitIdentity`，不依赖仓库或全局 Git 配置中的默认身份，冲突文件拒绝通过普通回退处理。
 - `SshKeyCryptoService`：封装个人 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成。
 - `RsaKeyService`：封装 SSH key 前端混合加密所需的 RSA 公钥导出和私钥解密；解密优先使用浏览器 Web Crypto 对齐的 RSA-OAEP/SHA-256 + MGF1-SHA-256 参数，并兼容历史 Java 默认 OAEP 参数密文。
 
@@ -37,8 +37,8 @@
 - `ApiResponseTest`、`ApiErrorResponseTest`、`PlatformExceptionTest` 覆盖统一响应和平台异常。
 - `PageRequestTest`、`PageResponseTest` 覆盖分页边界、offset、总页数和列表防御性复制。
 - `ErrorCodeTest`、`RuntimeIdGeneratorTest` 覆盖稳定 HTTP 状态、默认中文说明和运行时 ID 前缀格式。
-- `GitRemoteServiceTest` 覆盖symref默认分支、分支解析、archive tar目录解析、目录/文件树解析和Git超时错误映射；`ProcessGitCommandExecutorTest` 覆盖Git命令日志输出和URL用户信息脱敏。
-- `GitWorkspaceServiceTest` 覆盖 clone 分支、worktree 创建、同名分支复用、分支/origin/head/status 查询、指定 pathspec 时展开未跟踪目录、porcelain 路径解码、staged/unstaged diff 聚合、已跟踪/暂存新增/未跟踪文件回退、冲突回退拒绝、提交身份必填、push、pull、fetch/reset、目标分支显式 refspec、合并冲突文件列表解析、merge abort 和临时 SSH key 清理；workspace-management 真实 Git 测试同时断言 author 与 committer 的企业邮箱，并覆盖 single-branch clone 切换到无共同历史分支及内部版本库刷新 origin 的业务语义。
+- `GitRemoteServiceTest` 覆盖symref默认分支、分支解析、archive tar目录解析、目录/文件树解析和Git超时错误映射；`ProcessGitCommandExecutorTest` 覆盖Git命令日志输出、URL用户信息脱敏及超时后子进程退出。
+- `GitWorkspaceServiceTest` 覆盖 clone 分支、worktree 创建、同名分支复用、分支/origin/head/status 查询、指定 pathspec 时展开未跟踪目录、porcelain 路径解码、staged/unstaged diff 聚合、已跟踪/暂存新增/未跟踪文件回退、冲突回退拒绝、提交身份必填、push、pull、fetch/reset、目标分支显式 refspec、合并冲突文件列表解析、merge abort 和临时 SSH key 清理；`GitWorkspaceServiceRealGitTest` 额外覆盖固定提交中中文 Skill 路径的原样枚举与 blob 读取；workspace-management 真实 Git 测试同时断言 author 与 committer 的企业邮箱，并覆盖 single-branch clone 切换到无共同历史分支及内部版本库刷新 origin 的业务语义。
 - `SshKeyCryptoServiceTest` 覆盖 SSH key 加解密、指纹和密钥配置错误。
 - `RsaKeyServiceTest` 覆盖浏览器 Web Crypto RSA-OAEP/SHA-256 密文的后端解密兼容性。
 

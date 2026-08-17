@@ -375,3 +375,26 @@
 
 - 例如接口返回并选择“准入测试任务”和“功能测试任务”时，最终报文为 `"taskType":"准入测试任务,功能测试任务"`；接口后续新增的合法类型也无需修改固定映射。
 - HTTP 路径和 DTO 结构不变，但前后端必须同步升级；不涉及 RunEvent、SSE、WebSocket、数据库、Flyway、部署拓扑、性能模型、generated SDK、OpenCode 源码或环境配置，未重启服务、未调用真实 TCDS、不会推送远程。
+
+## 2026-08-17 - 合并 release 最新 TCDS 统一请求架构
+
+### Why
+
+- 拉取 `origin/release` 的 34 个提交后，本地完整任务类型修改与上游 TCDS 统一基础地址、共享请求构造器改造在服务、测试及文档中产生冲突。
+
+### What
+
+- 保留上游 `TEST_AGENT_TCDS_BASE_URL`、`TcdsHttpRequestFactory` 和所有同源请求自动注入固定 `toolId` 的实现。
+- 删除合并中重新带回的十项简称映射，继续按本次 `getTaskTypes` 返回的完整 `name` 校验并原样写入 `createGraphCase.taskType`。
+- 合并后测试同时覆盖配置化 `:9080` 地址、固定 `toolId`、动态新增任务类型、重复/分隔符校验和完整名称多选报文；README、HTTP API 与安全规范同步采用两侧合并后的契约。
+
+### How
+
+- 前端案例组包与弹窗定向测试 2 个文件、16 项全部通过。
+- 后端 `TcdsCaseMaintenanceServiceTest`、`TcdsHttpGatewayTest`、`TcdsIntegrationConfigTest` 共 19 项全部通过，Maven reactor `BUILD SUCCESS`。
+- 清理 7 个冲突文件中的全部合并标记并执行差异空白检查；工作区原有 `.gitignore`、本地配置、生成文件和备份文件不纳入冲突解决。
+
+### Result
+
+- TCDS 案例维护兼容上游统一请求架构，最终报文仍为 `"taskType":"准入测试任务,功能测试任务"`，不会退回简称。
+- 本次合并引入的其它上游 API、数据库、部署与前端改动保持远端内容；冲突解决本身不新增 API、事件、数据库、性能或部署变化，未重启服务、未调用真实 TCDS、不会推送远程。

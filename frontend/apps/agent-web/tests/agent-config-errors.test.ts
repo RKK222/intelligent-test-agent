@@ -46,4 +46,58 @@ describe("formatAgentConfigError", () => {
     expect(formatAgentConfigError(error, "发布 Agent 配置失败"))
       .toBe("发布 Agent 配置失败：合并冲突，请先处理 opencode/agents/review.md、opencode/skills/pay/SKILL.md 后重试。");
   });
+
+  it("distinguishes a confirmed missing remote commit from an uncertain push result", () => {
+    const retryNow = new BackendApiError(503, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 远端网络连接失败",
+      traceId: "trace_retry_now",
+      retryable: true,
+      details: {
+        gitFailureHint: "请检查 Git 网络连通性。",
+        localCommitRetained: true,
+        remoteCommitState: "NOT_REACHED",
+        publishRecoveryAction: "RETRY_NOW"
+      }
+    });
+    const waitForRecovery = new BackendApiError(503, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 远端网络连接失败",
+      traceId: "trace_wait",
+      retryable: true,
+      details: {
+        gitFailureHint: "请检查 Git 网络连通性。",
+        localCommitRetained: true,
+        remoteCommitState: "UNKNOWN",
+        publishRecoveryAction: "WAIT_FOR_RECOVERY"
+      }
+    });
+
+    expect(formatAgentConfigError(retryNow, "提交失败"))
+      .toContain("已确认远端未包含本次提交；可直接点击“重新推送”");
+    expect(formatAgentConfigError(waitForRecovery, "提交失败"))
+      .toContain("远端是否收到仍无法确认；应用 Agent 正由后台补偿核验");
+    expect(formatAgentConfigError(waitForRecovery, "提交失败")).toContain("trace_wait");
+  });
+
+  it("explains that a pre-push failure keeps the local commit", () => {
+    const error = new BackendApiError(503, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 远端认证失败",
+      traceId: "trace_pre_push",
+      retryable: true,
+      details: {
+        gitFailureHint: "请检查 SSH key 权限。",
+        localCommitRetained: true,
+        remoteCommitState: "NOT_ATTEMPTED",
+        publishRecoveryAction: "RETRY_NOW"
+      }
+    });
+
+    expect(formatAgentConfigError(error, "提交失败"))
+      .toContain("远端推送尚未开始；修复认证、权限、分支或网络问题后可直接点击“重新推送”");
+  });
 });

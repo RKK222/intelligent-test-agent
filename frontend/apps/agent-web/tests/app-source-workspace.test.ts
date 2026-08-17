@@ -7,10 +7,12 @@ import {
   appSourceWorkspaceCapabilities,
   appSourceProgressBelongsToObservation,
   appSourceTreeAuthorityMatches,
+  cacheRuntimeWorkspace,
   claimAppSourceTerminalOperation,
   diffFileCanWrite,
   ordinaryWorkspaceCanWrite,
   personalWorkspaceRuntimeContext,
+  physicalPathResolutionWorkspaceId,
   sourceContextFromOpen
 } from "../src/components/app-source-workspace";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
@@ -99,6 +101,42 @@ describe("app source workspace state", () => {
     });
     expect(personalWorkspaceRuntimeContext("wrk-shared-feature", [personalWorkspace])).toBeUndefined();
     expect(personalWorkspaceRuntimeContext(undefined, [personalWorkspace])).toBeUndefined();
+  });
+
+  it("keeps multiple personal worktrees from the same version because runtime workspaceId is the cache key", () => {
+    const base = {
+      name: "default",
+      rootPath: "workspace:logical",
+      physicalRootPath: null,
+      status: "ACTIVE",
+      linuxServerId: "linux-a",
+      appId: "app-history",
+      versionId: "awv-history",
+      applicationWorkspaceId: "awp-history",
+      createdAt: "2026-08-04T00:00:00Z",
+      updatedAt: "2026-08-04T00:00:00Z"
+    };
+    const defaultWorkspace = { ...base, workspaceId: "wrk-default" };
+    const customWorkspace = { ...base, workspaceId: "wrk-custom", name: "regression" };
+
+    const inserted = cacheRuntimeWorkspace([defaultWorkspace], customWorkspace);
+    expect(inserted.existed).toBe(false);
+    expect(inserted.items.map((workspace) => workspace.workspaceId)).toEqual(["wrk-custom", "wrk-default"]);
+
+    const refreshed = cacheRuntimeWorkspace(inserted.items, { ...defaultWorkspace, name: "default refreshed" });
+    expect(refreshed.existed).toBe(true);
+    expect(refreshed.items).toHaveLength(2);
+    expect(refreshed.items[0]).toMatchObject({ workspaceId: "wrk-default", name: "default refreshed" });
+  });
+
+  it("only exposes physical path resolution for an ordinary managed runtime workspace", () => {
+    const ordinary = { shared: false, reference: false, agent: false };
+    expect(physicalPathResolutionWorkspaceId("MANAGED", "wrk-managed", ordinary)).toBe("wrk-managed");
+    expect(physicalPathResolutionWorkspaceId("MANAGED", "wrk-managed", { ...ordinary, shared: true })).toBeUndefined();
+    expect(physicalPathResolutionWorkspaceId("MANAGED", "wrk-managed", { ...ordinary, reference: true })).toBeUndefined();
+    expect(physicalPathResolutionWorkspaceId("MANAGED", "wrk-managed", { ...ordinary, agent: true })).toBeUndefined();
+    expect(physicalPathResolutionWorkspaceId("APP_SOURCE", "wrk-source", ordinary)).toBeUndefined();
+    expect(physicalPathResolutionWorkspaceId("EXPERIENCE", "wrk-experience", ordinary)).toBeUndefined();
   });
 
   it("double-gates Diff saves by workspace kind, file scope, and managed roles", () => {

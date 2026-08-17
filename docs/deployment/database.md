@@ -400,6 +400,22 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 - `application_workspaces` 不复用、不引用运行态 `workspaces`，后续使用场景再决定如何衔接。
 - SSH 私钥只保存 AES-GCM 密文和 nonce，API 不返回明文或密文；加密密钥由部署环境配置。
 
+## V20260813190929 用户 SCM Git 姓名证据
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260813190929__user_scm_git_identities_create.sql` 创建 `user_scm_git_identities`，把企业 SCM 提交姓名与可能追加同名数字后缀的平台 `users.username` 分离：
+
+| 字段 | 说明 |
+|---|---|
+| `user_id` | 主键并外键引用 `users.user_id`，用户删除时级联删除。 |
+| `git_name` | SCM 登记的提交姓名，去首尾空白后长度 1–128。 |
+| `source` | `ACCEPTED_COMMIT_HISTORY` 或优先级更高的 `REMOTE_REJECTION`。 |
+| `evidence_commit` | 可空的已接受提交或右控拒绝提交短/完整哈希。 |
+| `evidence_at` / `verified_at` | 证据发生时间与平台核验时间。 |
+
+补偿查询只联查 `ACTIVE` 用户和唯一 `user_ssh_keys` 行，按 `user_id` 游标分页 500 条，不使用高 offset。历史证据使用单条批量 `INSERT ... ON CONFLICT`，只允许更新更旧的 `ACCEPTED_COMMIT_HISTORY`；`REMOTE_REJECTION` 不会被定时历史扫描覆盖。表不保存 SSH 私钥、Token、邮箱或统一认证号副本，邮箱继续由 `users.unified_auth_id` 按固定域实时生成。本 migration 只增加生产结构，不写用户或演示数据。
+
+升级与回滚：部署前必须按既有流程留存目标库 `flyway_schema_history(version, checksum, success)`；新版本首次启动执行建表。代码回滚后该孤立表可保留，不影响旧版本读取；需要物理回收时必须先备份并在停机窗口显式处理，禁止修改已执行 migration 或 `flyway_schema_history`。
+
 ## V8 默认开发用户超级管理员授权
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V8__grant_default_user_super_admin.sql` 为本地默认前端用户 `888888888` 幂等授予 `SUPER_ADMIN` 角色。
@@ -1369,7 +1385,7 @@ LobeHub fork 使用独立 ParadeDB/PostgreSQL 17、独立账号、卷和自身 m
 
 旧体验分支已在需要保留的个人 PostgreSQL 执行候选 `V20260809210000__common_parameters_add_experience_workspace.sql`，因此该文件以 SHA-256 `c093695aac4305aed3caeb8fcec58f0731f1519527031f1775adaf8be86cf24a` 原字节冻结在 `db/migration-compat/experience-workspace-applied`。当前 release 已执行到更高版本，主目录不再解析该候选；无旧候选 history 的数据库执行幂等前向 migration `V20260812104911__common_parameters_add_experience_workspace_after_release.sql`。已执行旧候选且 checksum 为 Flyway `-1300860043` 的数据库由唯一 `DatabaseMigrationCompatibilityCustomizer` 加载隔离 location 校验原文，并继续执行同一高版本前向 migration；未知 checksum 明确失败关闭。两条历史均保持 `outOfOrder=false`，不使用 `repair` 或第二套迁移器。
 
-`V20260812144051__common_parameters_default_experience_workspace.sql` 不变更表结构，也不写演示 Workspace 或用户数据；它只迁移生产必需的默认参数。目录、`.git`、README 和初始提交由各 Java 启动 Runner 在本机幂等创建，不由 Flyway 操作文件系统。
+`V20260812144051__common_parameters_default_experience_workspace.sql` 不变更表结构，也不写演示 Workspace 或用户数据；它只迁移生产必需的默认参数。标准 `docs/spec` 虚构示例是随发布包交付的独立文件模板，由开发/部署 Shell 在 Java 启动前仅补齐缺失文件；Java Runner 只保留目录、`.git` 和 README 的最小兜底。两者都在本机操作，不由 Flyway 操作文件系统。
 
 migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示文件。运行期 SQL 全部位于 `ExperienceWorkspaceMapper.xml`：先按确定性 ID `ON CONFLICT DO NOTHING` 登记 `workspaces`，再以调用前读取的完整 binding 快照执行 compare-and-set；无绑定时只插入、已有绑定时只有 `workspace_id + configured_parameter_value + updated_at` 全部仍匹配才更新。两步由 `MyBatisExperienceWorkspaceRepository` 在同一事务内完成，CAS 失败由应用层从通用参数重新读取并重试，跨 Java 的旧配置请求不能迟到覆盖新绑定。参数换目录时旧 `workspaces` 行不删除、不改指，继续承载历史 Session/Run 外键；普通 Workspace 用户查询按转义后的字面 `wrk_exp_` 前缀排除历史体验记录。
 

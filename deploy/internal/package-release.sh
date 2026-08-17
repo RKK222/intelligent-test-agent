@@ -28,6 +28,7 @@ PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
 PACKAGE_MODE=full
 INCLUDE_ALL_COMPONENTS=0
+WORKER_RUNTIME_BASELINE_FILE=""
 COMPONENT_PLAN_ONLY=0
 COMPONENT_STATE_FILE=""
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
@@ -103,10 +104,14 @@ LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-clien
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256="168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE="db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256="250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554"
+USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE="db/migration/V20260813190929__user_scm_git_identities_create.sql"
+USER_SCM_GIT_IDENTITIES_MIGRATION_SHA256="fd434d47d40c9fd71c987bd6512ba6897e33fe2e1db67299ff01514b4941c92e"
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_internal_model_probe_task.sql"
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
+XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_scm_git_name_sync_task.sql"
+XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256="2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739"
 
 usage() {
   cat <<'USAGE'
@@ -141,6 +146,9 @@ Options:
   --include-all-components
                           Force worker runtime (Python/OpenCode Manager/Codex MCP) and toolbox into the ZIP.
                           Use for first installation, disaster recovery or a new build machine.
+  --worker-runtime-baseline-file <path>
+                          Re-register a previously deployed worker runtime as the reuse baseline.
+                          The file must pin its source commit, release SHA-256 and worker fingerprint.
   --component-state-file <path>
                           Persistent component fingerprint state. Default: <output-dir>/.release-component-state.env.
   --component-plan-only   Print include/reuse decisions and fingerprints without building or packaging.
@@ -262,6 +270,10 @@ while [[ $# -gt 0 ]]; do
       INCLUDE_ALL_COMPONENTS=1
       shift
       ;;
+    --worker-runtime-baseline-file)
+      WORKER_RUNTIME_BASELINE_FILE="$2"
+      shift 2
+      ;;
     --component-state-file)
       COMPONENT_STATE_FILE="$2"
       shift 2
@@ -289,6 +301,16 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" && "${INCLUDE_ALL_COMPONENTS}" -eq 1 ]]; then
+  echo "--worker-runtime-baseline-file cannot be combined with --include-all-components" >&2
+  exit 2
+fi
+if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" \
+  && "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
+  echo "--worker-runtime-baseline-file can only be combined with the full or --zip-only release mode" >&2
+  exit 2
+fi
 
 # 可选能力采用显式 opt-in，并在参数解析后应用，保证选项先后顺序不改变最终交付范围。
 if [[ "${WITH_LOBEHUB_IN_RELEASE}" -eq 1 ]]; then
@@ -601,6 +623,8 @@ verify_release_flyway_migrations_jar() {
     "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE}" "${AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE}" "${USER_SCM_GIT_IDENTITIES_MIGRATION_SHA256}"
 }
 
 verify_release_xxl_flyway_migrations_jar() {
@@ -609,6 +633,8 @@ verify_release_xxl_flyway_migrations_jar() {
     "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE}" "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256}"
 }
 
 state_value() {
@@ -676,6 +702,7 @@ plan_release_components() {
   local previous_worker previous_toolbox worker_config toolbox_config
   local current_release current_manifest current_worker_mode current_worker_fingerprint
   local current_toolbox_mode current_toolbox_fingerprint
+  local baseline_version baseline_source_commit baseline_release_sha256 baseline_worker_fingerprint
   worker_config="schema=2|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|python=${PYTHON_VERSION}|pythonSourceSize=${PYTHON_SOURCE_SIZE}|pythonSourceSha=${PYTHON_SOURCE_SHA256}|pythonSourceBase=${PYTHON_SOURCE_BASE_URL}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
   toolbox_config="schema=1|platform=${PLATFORM}|it=${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}|omni=${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}|node=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}|nginx=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
 
@@ -736,6 +763,48 @@ plan_release_components() {
   fi
   [[ "${PACKAGE_MODE}" != opencode-only ]] || WORKER_COMPONENT_MODE=included
   [[ "${PACKAGE_MODE}" != toolbox-only ]] || TOOLBOX_COMPONENT_MODE=included
+
+  WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
+  WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
+  if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" ]]; then
+    [[ -f "${WORKER_RUNTIME_BASELINE_FILE}" ]] || {
+      echo "Worker runtime baseline file not found: ${WORKER_RUNTIME_BASELINE_FILE}" >&2
+      exit 1
+    }
+    baseline_version="$(state_value "${WORKER_RUNTIME_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_VERSION)"
+    baseline_source_commit="$(state_value "${WORKER_RUNTIME_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT)"
+    baseline_release_sha256="$(state_value "${WORKER_RUNTIME_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256)"
+    baseline_worker_fingerprint="$(state_value "${WORKER_RUNTIME_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+    [[ "${baseline_version}" == 1 ]] || {
+      echo "Unsupported worker runtime baseline version: ${baseline_version:-<empty>}" >&2
+      exit 1
+    }
+    [[ "${baseline_source_commit}" =~ ^[0-9a-f]{40}$ ]] || {
+      echo "Invalid worker runtime baseline source commit" >&2
+      exit 1
+    }
+    git -C "${ROOT_DIR}" cat-file -e "${baseline_source_commit}^{commit}" 2>/dev/null || {
+      echo "Worker runtime baseline source commit is not available locally: ${baseline_source_commit}" >&2
+      exit 1
+    }
+    [[ "${baseline_release_sha256}" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "Invalid worker runtime baseline release SHA-256" >&2
+      exit 1
+    }
+    [[ "${baseline_worker_fingerprint}" == "${WORKER_RUNTIME_FINGERPRINT}" ]] || {
+      echo "Previously deployed worker runtime fingerprint differs from current build inputs" >&2
+      exit 1
+    }
+    WORKER_COMPONENT_MODE=reuse
+    WORKER_RUNTIME_BASELINE_SOURCE_COMMIT="${baseline_source_commit}"
+    WORKER_RUNTIME_BASELINE_RELEASE_SHA256="${baseline_release_sha256}"
+    printf 'worker runtime baseline source commit: %s\n' "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}"
+    printf 'worker runtime baseline release sha256: %s\n' "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
+  fi
 
   printf 'worker runtime component: %s\n' "${WORKER_COMPONENT_MODE}"
   printf 'worker runtime fingerprint: %s\n' "${WORKER_RUNTIME_FINGERPRINT}"
@@ -1275,6 +1344,12 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_COMPONENT_MANIFEST_VERSION=1\n'
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME=%s\n' "${WORKER_COMPONENT_MODE}"
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
+    if [[ -n "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}" ]]; then
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=%s\n' \
+        "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}"
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=%s\n' \
+        "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
+    fi
     printf 'TEST_AGENT_RELEASE_TOOLBOX=%s\n' "${TOOLBOX_COMPONENT_MODE}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
     printf 'TEST_AGENT_RELEASE_LOBEHUB=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf included || printf disabled)"
@@ -1284,9 +1359,13 @@ package_release_zip() {
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
   for required_artifact in \
     "${staging_dir}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
-    "${staging_dir}/deploy/internal/opencode-runtime.gitignore"; do
+    "${staging_dir}/deploy/internal/opencode-runtime.gitignore" \
+    "${staging_dir}/deploy/internal/ensure-experience-workspace-content.sh" \
+    "${staging_dir}/deploy/internal/experience-workspace-template/README.md" \
+    "${staging_dir}/deploy/internal/experience-workspace-template/docs/应用架构/测试概述.md" \
+    "${staging_dir}/deploy/internal/experience-workspace-template/spec/I000001-用户登录体验/04-测试/S000001-账号密码登录/041-测试设计/测试案例.md"; do
     if [[ ! -f "${required_artifact}" ]]; then
-      echo "Required OpenCode Git ignore deployment artifact not found: ${required_artifact}" >&2
+      echo "Required deployment artifact not found: ${required_artifact}" >&2
       exit 1
     fi
   done
@@ -1437,6 +1516,8 @@ mkdir -p "$(dirname "${COMPONENT_STATE_FILE}")"
 WORKER_COMPONENT_MODE=reuse
 TOOLBOX_COMPONENT_MODE=reuse
 WORKER_RUNTIME_FINGERPRINT=""
+WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
+WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
 TOOLBOX_FINGERPRINT=""
 if [[ "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only \
   || "${PACKAGE_MODE}" == opencode-only || "${PACKAGE_MODE}" == toolbox-only \

@@ -165,6 +165,7 @@ class WorkspaceFileSocketTicketServiceTest {
         assertThat(ticket.mode()).isEqualTo("agent-config");
         assertThat(ticket.scope()).isEqualTo("PUBLIC");
         assertThat(ticket.worktreeId()).isEqualTo("agw_1234567890abcdef");
+        assertThat(ticket.unifiedAuthId()).isEqualTo("tester");
         verify(assignmentService, never()).fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
     }
 

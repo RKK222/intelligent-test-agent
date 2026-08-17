@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -26,20 +25,13 @@ import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
 
-/** 调用生产 TCDS 案例维护接口；目标地址、工具标识和固定业务字段均不接受客户端覆盖。 */
-@Service
+/** 调用 TCDS 案例维护接口；目标地址、工具标识和固定业务字段均不接受客户端覆盖。 */
 public class TcdsCaseMaintenanceService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TcdsCaseMaintenanceService.class);
-    private static final URI CREATE_GRAPH_CASE_URI =
-            URI.create("http://tcds-prod.sdc.icbc/graphDesign/createGraphCase");
-    private static final URI TASK_TYPES_URI =
-            URI.create("http://tcds-prod.sdc.icbc/task/getTaskTypes");
-    private static final String TOOL_ID = "66f36bfa5c1c6105572b0118880261d6";
-    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final String CREATE_GRAPH_CASE_PATH = "/graphDesign/createGraphCase";
+    private static final String TASK_TYPES_PATH = "/task/getTaskTypes";
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final int MAX_RESPONSE_BYTES = 512 * 1024;
     private static final int MAX_TASK_TYPE_COUNT = 100;
@@ -49,21 +41,16 @@ public class TcdsCaseMaintenanceService {
     private static final int MAX_LOG_PAYLOAD_LENGTH = 8 * 1024;
     private static final int LOG_DIGEST_LENGTH = 16;
     private static final String REDACTED = "[REDACTED]";
+    private final TcdsHttpRequestFactory requestFactory;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
-    /** Spring 构造器固定禁用重定向，所有 profile 均实时访问 TCDS。 */
-    @Autowired
-    public TcdsCaseMaintenanceService(ObjectMapper objectMapper) {
-        this(objectMapper, HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .version(HttpClient.Version.HTTP_1_1)
-                .build());
-    }
-
-    /** 测试构造器允许注入受控 HTTP client，不改变生产地址或请求头。 */
-    TcdsCaseMaintenanceService(ObjectMapper objectMapper, HttpClient httpClient) {
+    /** 与其它 TCDS 能力共享部署地址、HTTP client 和 toolId 注入程序。 */
+    TcdsCaseMaintenanceService(
+            TcdsHttpRequestFactory requestFactory,
+            HttpClient httpClient,
+            ObjectMapper objectMapper) {
+        this.requestFactory = Objects.requireNonNull(requestFactory);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.httpClient = Objects.requireNonNull(httpClient);
     }
@@ -72,8 +59,7 @@ public class TcdsCaseMaintenanceService {
     public List<TcdsTaskTypeOption> getTaskTypes(String traceId) {
         String normalizedTraceId = requireText(traceId, "traceId 不能为空");
         try {
-            HttpRequest request = HttpRequest.newBuilder(TASK_TYPES_URI)
-                    .timeout(REQUEST_TIMEOUT)
+            HttpRequest request = requestFactory.request(TASK_TYPES_PATH, REQUEST_TIMEOUT)
                     .header("Accept", "application/json")
                     .GET()
                     .build();
@@ -133,11 +119,9 @@ public class TcdsCaseMaintenanceService {
                     cases.size(),
                     normalizedTraceId,
                     safeRequestLogPayload(normalizedItemNo, cases));
-            HttpRequest request = HttpRequest.newBuilder(CREATE_GRAPH_CASE_URI)
-                    .timeout(REQUEST_TIMEOUT)
+            HttpRequest request = requestFactory.request(CREATE_GRAPH_CASE_PATH, REQUEST_TIMEOUT)
                     .header("Accept", "application/json")
                     .header("Content-Type", "application/json")
-                    .header("toolId", TOOL_ID)
                     .POST(HttpRequest.BodyPublishers.ofByteArray(serializedRequest))
                     .build();
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -419,7 +403,7 @@ public class TcdsCaseMaintenanceService {
     /** 上游业务消息可保留用于排障，但其中常见凭据赋值、Bearer 值和长数字身份必须再次脱敏。 */
     private static String safeUpstreamMessage(String value) {
         String normalized = safeLogText(value, 200);
-        normalized = normalized.replace(TOOL_ID, REDACTED);
+        normalized = TcdsHttpRequestFactory.redactToolId(normalized);
         normalized = normalized.replaceAll("(?i)Bearer\\s+[^\\s,;]+", "Bearer " + REDACTED);
         normalized = normalized.replaceAll(
                 "(?i)(authorization|cookie|token|password|secret|toolId)\\s*[:=]\\s*[^\\s,;]+",

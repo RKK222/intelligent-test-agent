@@ -101,6 +101,29 @@ incremental_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip"
 grep -Fxq 'TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse' <<<"${incremental_manifest}"
 grep -Fxq 'TEST_AGENT_RELEASE_TOOLBOX=reuse' <<<"${incremental_manifest}"
 
+# 上一轮已部署成功但目标机尚无组件状态时，可把可信 release 指纹作为一次性恢复基线。
+BASELINE_FILE="${TMP_ROOT}/worker-runtime-baseline.env"
+printf '%s\n' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_VERSION=1' \
+  "TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse HEAD)" \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  "TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=${worker_fingerprint}" \
+  >"${BASELINE_FILE}"
+bash "${PACKAGE_SCRIPT}" --zip-only --worker-runtime-baseline-file "${BASELINE_FILE}" \
+  --output-dir "${OUTPUT_DIR}" --component-state-file "${STATE_FILE}" >/dev/null
+baseline_listing="$(unzip -Z1 "${OUTPUT_DIR}/test-agent-internal-release.zip")"
+if grep -Eq '^dist/(test-agent-programs|test-agent-opencode-worker)' <<<"${baseline_listing}"; then
+  echo 'Worker artifacts leaked into deployed-baseline reuse ZIP' >&2
+  exit 1
+fi
+baseline_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  deploy/internal/release-components.env)"
+grep -Fxq 'TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse' <<<"${baseline_manifest}"
+grep -Fxq "TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse HEAD)" \
+  <<<"${baseline_manifest}"
+grep -Fxq 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  <<<"${baseline_manifest}"
+
 # 只有 worker runtime 基线变化时，只重新携带 Manager/Codex/programs 与 worker 镜像。
 printf '%s\n' \
   'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1' \

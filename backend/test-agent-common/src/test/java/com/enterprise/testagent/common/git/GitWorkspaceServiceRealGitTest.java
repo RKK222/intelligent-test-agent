@@ -73,6 +73,21 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void hasStagedChangesDistinguishesCleanIndexFromStagedContent() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "tracked.txt", "base\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        GitWorkspaceService service = new GitWorkspaceService();
+
+        assertThat(service.hasStagedChanges(repo, null)).isFalse();
+
+        write(repo, "tracked.txt", "changed\n");
+        git(repo, "add", "--", "tracked.txt");
+        assertThat(service.hasStagedChanges(repo, null)).isTrue();
+    }
+
+    @Test
     void commitFilesOnlyDoesNotIncludeOtherUsersStagedPaths() throws Exception {
         Path repo = initializeRepository();
         write(repo, "selected.txt", "base selected\n");
@@ -235,6 +250,69 @@ class GitWorkspaceServiceRealGitTest {
 
         assertThat(git(repo, "show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD").stdoutText().trim())
                 .isEqualTo("alice <AUTH_ALICE@mails.icbc>|alice <AUTH_ALICE@mails.icbc>");
+    }
+
+    @Test
+    void readsAcceptedRemoteCommitterAndAmendsHeadIdentity() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "identity.txt", "accepted\n");
+        git(repo, "add", "--all");
+        new GitWorkspaceService().commitStaged(
+                repo,
+                "accepted identity",
+                null,
+                GitCommitIdentity.forPlatformUser("测试用户", "123456789"));
+        git(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        assertThat(service.latestAcceptedCommitterIdentity(repo, "123456789@mails.icbc"))
+                .get()
+                .satisfies(evidence -> {
+                    assertThat(evidence.name()).isEqualTo("测试用户");
+                    assertThat(evidence.email()).isEqualTo("123456789@mails.icbc");
+                });
+        assertThat(service.acceptedCommitterIdentities(repo, 100))
+                .anySatisfy(evidence -> assertThat(evidence.name()).isEqualTo("测试用户"));
+
+        write(repo, "identity.txt", "wrong\n");
+        git(repo, "add", "--all");
+        service.commitStaged(
+                repo,
+                "wrong identity",
+                null,
+                GitCommitIdentity.forPlatformUser("测试用户1", "123456789"));
+        String amended = service.amendHeadCommitIdentity(
+                repo, null, GitCommitIdentity.forPlatformUser("测试用户", "123456789"));
+
+        assertThat(amended).isEqualTo(service.headCommit(repo));
+        assertThat(git(repo, "show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD").stdoutText().trim())
+                .isEqualTo("测试用户 <123456789@mails.icbc>|测试用户 <123456789@mails.icbc>");
+    }
+
+    @Test
+    void listsAndReadsChineseSkillFilesAtExactCommitWithoutQuotedPathLeakage() throws Exception {
+        Path repo = initializeRepository();
+        String skillRoot = "F-SLB/F-SLB-CONSOLE/.opencode/skills/SLB快速检索环境应用所有端口策略";
+        Files.createDirectories(repo.resolve(skillRoot));
+        write(repo, skillRoot + "/.gitkeep", "");
+        write(repo, skillRoot + "/SKILL.md", "---\nname: slb-port-policy\n---\n中文说明\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "add chinese skill");
+        String commit = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        List<String> files = service.listFilesAtCommit(
+                repo,
+                commit,
+                "F-SLB/F-SLB-CONSOLE/.opencode");
+
+        assertThat(files).containsExactly(
+                skillRoot + "/.gitkeep",
+                skillRoot + "/SKILL.md");
+        assertThat(new String(
+                service.readFileAtCommit(repo, commit, skillRoot + "/SKILL.md"),
+                StandardCharsets.UTF_8))
+                .isEqualTo("---\nname: slb-port-policy\n---\n中文说明\n");
     }
 
     @Test

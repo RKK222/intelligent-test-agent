@@ -70,6 +70,7 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 - `V9` 注册每天北京时间 02:00 的闲置用户进程关闭任务 `opencode-runtime.inactive-user-process-cleanup`；XXL 只取得全局锁并广播，各 Java 仅处理本机实际持有 manager 连接的进程。
 - `V10` 注册每 5 分钟的内部模型供应商探活任务 `opencode-runtime.internal-model-probe`；GLOBAL_MUTEX 只保证单实例执行，实际探活遍历当前 Java 进程 registry 快照中的启用供应商并落观测明细与探活状态。
 - `V11` 注册每天北京时间 03:30 的内部模型调用观测数据清理任务 `opencode-runtime.internal-model-observability-retention`；删除 30 天前明细与 180 天前小时聚合。
+- `V12` 注册每天北京时间 04:10 的 SCM Git 姓名补偿任务 `configuration-management.scm-git-name-sync`；任务不访问远端，对每个本机应用仓库只执行一次最多 50,000 条匹配提交的 `origin` 跟踪历史扫描，再按 500 个 SSH Key 用户一页比对和批量写库。
 - 后续新增任务或调整既有生产默认配置必须新建更高版本 SQL；禁止改写已执行 migration，也禁止启动时执行非版本化 upsert。
 
 旧 PostgreSQL 的任务定义和运行历史只做保留，不复制到 MySQL，也不再被 runner 调度。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免 runner 删除后残留永久活动记录；不删除历史审计，新夜间任务只写 `night_execution_tasks`。
@@ -110,6 +111,9 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 | `opencode-runtime.inactive-user-process-cleanup` | `0 0 2 * * ? *` | 2 小时 |
 | `opencode-runtime.internal-model-probe` | `0 */5 * * * ? *` | 4 分钟 |
 | `opencode-runtime.internal-model-observability-retention` | `0 30 3 * * ? *` | 10 分钟 |
+| `configuration-management.scm-git-name-sync` | `0 10 4 * * ? *` | 1 小时 |
+
+SCM Git 姓名补偿使用 `GLOBAL_MUTEX`，由 ROUND 选中的单个 Java 顺序扫描该节点的应用版本仓库。扫描不执行 `fetch`，只读取本机 `refs/remotes/origin` 中已被远端接受的提交；同一轮先按仓库聚合邮箱最新证据，再分页检查全部 ACTIVE 且已保存 SSH Key 的用户，禁止对每个用户重复扫描仓库。历史提交证据只能更新更旧的历史证据，不能覆盖企业右控拒绝明确返回的当前姓名。
 
 应用源码清理采用 `GLOBAL_MUTEX` 只避免多个 XXL executor 重复广播；该锁不承担 Linux 服务器亲和或持久化执行保证。收到 `app-source.cleanup-requested` 的每台 Java 只扫描当前 `linuxServerId` 的到期任务，并以数据库绝对租约和本机文件锁执行；广播丢失、Java 重启或服务器离线不会丢任务，下一轮或恢复上线后继续认领。
 

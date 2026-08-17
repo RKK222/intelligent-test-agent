@@ -21,6 +21,8 @@ import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -337,6 +339,12 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         fileService.writeContent(workspace.rootPath(), path, content);
     }
 
+    /** 单次解析工作区内现有文件物理路径，供受控文件 WebSocket RPC 使用。 */
+    public String resolvePhysicalFilePath(WorkspaceId workspaceId, String path) {
+        Workspace workspace = getWorkspace(workspaceId);
+        return fileService.resolvePhysicalFilePath(workspace.rootPath(), path);
+    }
+
     /**
      * 上传 Base64 文件内容到工作区新路径；二进制解码、大小和冲突校验由文件服务统一处理。
      */
@@ -397,6 +405,19 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     public FileStatusResponse fileStatus(WorkspaceId workspaceId, String path) {
         Workspace workspace = getWorkspace(workspaceId);
         return fileService.status(workspace.rootPath(), path);
+    }
+
+    /**
+     * 批量查询同一工作区内的文件状态，只解析一次工作区元数据。
+     * 各路径仍逐一经过公共文件服务的相对路径校验，不能借批量入口绕过越界防护。
+     */
+    public Map<String, FileStatusResponse> fileStatuses(WorkspaceId workspaceId, Collection<String> paths) {
+        Workspace workspace = getWorkspace(workspaceId);
+        Map<String, FileStatusResponse> result = new LinkedHashMap<>();
+        for (String path : paths) {
+            result.put(path, fileService.status(workspace.rootPath(), path));
+        }
+        return Map.copyOf(result);
     }
 
     /**

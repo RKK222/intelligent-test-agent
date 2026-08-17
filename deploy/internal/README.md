@@ -4,6 +4,8 @@
 
 企业交付模板默认设置 `TEST_AGENT_SERVER_TERMINAL_ENABLED=true`，并要求 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=wss://<前端入口>`；应用本身在缺少该显式配置时仍保持关闭。上线时确认 systemd Java 的 `User=` 就是期望的运维用户，终端只继承该用户权限，不使用 `sudo` 或额外授权。标准入口的前端 `nginx.env` 必须开启 TLS、配置证书路径，并以 `linuxServerId=host:port` 填写统一的 `TEST_AGENT_NGINX_SERVER_ROUTES`。旧 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 只用于升级兼容，新配置不得与新键并存。当前现场明确选择 HTTP、不能使用 HTTPS，因此单后台和 `.4 + .114` 多后台都按对应文档显式允许 `ws://`，并接受登录数据和终端内容明文传输、浏览器网段必须直达各 Java `:8080` 的风险；该现场例外不改变通用 WSS 安全默认。
 
+应用默认使用企业局域网 TCDS 入口 `http://tcds-prod.sdc.icbc:9080`，所有 Java 节点仍必须在 `backend.env` 显式填写同一个 `TEST_AGENT_TCDS_BASE_URL` HTTP/HTTPS 绝对地址，便于部署审计和环境切换；非法覆盖值会使 Java 启动失败。全部 TCDS 后台接口请求统一携带现场约定的 `toolId` header。升级时先为全部节点核对变量，再升级全部 Java 和前端；回滚时先回滚前端，再回滚全部 Java，禁止长期混跑新旧 `rootPath` 语义。旧 9900 服务仅在同源需求导入完成真实查询、目录写入、重复覆盖、部分失败和文件树刷新验收后由运维另行停用。
+
 请选择对应文档：
 
 - [单后台部署](SINGLE-BACKEND.md)：一个 Java 后端和一个 `opencode-worker`，当前现场示例为 `122.233.30.114`；包含可整文件替换的生产配置。
@@ -223,6 +225,14 @@ deploy/internal/package-release.sh --python-libs-only \
 ```
 
 首次构建、状态文件丢失或对应源码/版本/基础镜像指纹变化时，组件标记为 `included`，脚本重新构建并放入 ZIP；指纹未变化时标记为 `reuse`，ZIP 不再携带对应大文件。`--zip-only` 只允许复用带当前指纹戳的已验证制品，源码已变化但没有重新构建时会失败，不能把旧 tar 伪装成新组件。必须持续复用同一个输出目录，或通过 `--component-state-file <稳定路径>` 显式保存基线。迁移到本机制后第一次必须做全量部署：后台会把实际安装成功的组件指纹写入 `/data/testagent/config/release-component-state.env`；后续 `reuse` 包要求清单指纹与目标机指纹相同且组件健康，缺失或不一致都会停止部署。
+
+若组件状态门禁晚于现场 runtime 部署、但上一轮 release 已明确成功，可用受控 baseline 文件恢复门禁，而不是重载或重启 worker。baseline 必须固定上一轮源码提交、内层 release SHA-256 和 worker 指纹；打包时还会要求该指纹与本轮构建输入完全一致。目标机仅在 Manager/OpenCode/Codex 文件、Tool runtime 和 worker 容器健康全部通过后，才原子补写状态文件，随后继续普通 `reuse` 流程；不会执行 `docker load`、不会重启 manager/worker，也不会替换活动的 `opencode-models.json`。该能力不能用于 runtime 真实变化、来源不明或现场健康失败的情况。
+
+```bash
+deploy/internal/package-release.sh \
+  --worker-runtime-baseline-file deploy/internal/release-baselines/20260813-qwen-gray.env \
+  --output-dir deploy/internal/dist
+```
 
 新装机、灾备全量包或状态不可信时强制携带全部组件：
 
@@ -583,18 +593,28 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
   programs/
 ```
 
+### 体验工作区示例补齐
+
+发布包保留 `deploy/internal/experience-workspace-template/` 作为独立文件模板，不把文档正文写入 Java 或 Shell heredoc。后端部署在 Java 启动前自动执行：
+
+```bash
+bash /data/testagent/deploy/internal/ensure-experience-workspace-content.sh \
+  --workspace-dir /data/testagent/data/agent-opencode/workspace/experience
+```
+
+脚本逐文件检查，只复制缺失项，不覆盖用户已有内容。没有 Git HEAD 时仅为模板路径创建一个无 remote 基线提交；已有 HEAD 时不修改历史和 index，新补文件保留为本地未跟踪变更。标准部署会读取 systemd `User`/`Group` 并以同一 Java 运行身份执行，避免 root 创建的文件导致体验区只读。如果通用参数 `OPENCODE_EXPERIENCE_WORKSPACE_DIR` 使用非默认绝对路径，运维必须在启动该节点 Java 前以 Java 运行身份用同一命令将 `--workspace-dir` 替换为实际路径；脚本不读取数据库参数，也不新增 `backend.env` 配置。
+
 企业交付 JAR/ZIP 包含平台 RSA 私钥，必须按密钥交付物限制读取、复制和留存；替换内置密钥会让既有数据库 SSH key 密文无法解密，除非用户重新保存 SSH key。
 
 企业后端采用 `test-agent-app.jar` 瘦启动器与 `dist/backend/lib/` 外置依赖。Flyway migration
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
-复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型和体验工作区）和 XXL MySQL V10/V11 的 SHA-256，并分别比较发布包与安装后的
+复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型、体验工作区和 SCM Git 姓名证据）和 XXL MySQL V10/V11/V12 的 SHA-256，并分别比较发布包与安装后的
 persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
-当前上一轮已部署平台包的业务源码提交为 `f10754e01ab8f846a8aa2430214bb39f4795623b`，内层 ZIP SHA-256 为
-`99f34a5652d5972dd4dbc1e9384026d1a1a78a8cc4bb1caa702a6c99cc000df5`；该包正常企业主链最高版本为
-`20260810234154`，XXL MySQL 准入预期为 V1-V11 全部成功。从该基线首次升级时，第一台 `.4` 只允许依次新增
-PostgreSQL `20260811170050`、`20260811213000`、`20260812104911`、`20260812144051`；四条都已执行的故障重部署
-不得新增 history。`20260811170050` 只是 QA Memory 已撤销后的历史顺序补偿，不代表重新启用长期记忆功能。
-XXL MySQL 不得新增 history，`.114` 只做
+当前上一轮已部署平台包的业务源码提交为 `57e211de48a5507fb8d1689e1c8f86fd96563032`，内层 ZIP SHA-256 为
+`7af9c20e57a809258b0acd4672189b5ca875dde3f1a7208f770414a57d234b53`；该包正常企业主链最高版本为
+`20260812204207`，XXL MySQL 准入预期为 V1-V11 全部成功。从该基线首次升级时，第一台 `.4` 只允许新增
+PostgreSQL `20260813190929`，用于创建用户 SCM Git 姓名证据表；XXL MySQL 只允许新增 V12，注册每日 04:10
+的 SCM Git 姓名补偿任务。两条都已执行的故障重部署不得新增 history，`.114` 只做
 validate。必须按多后台手册读取两套完整 `flyway_schema_history`，不能只凭
 提交号、启动日志或最高版本判断数据库历史一致。
 
@@ -604,12 +624,11 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 
 1. 从两台后台确认外部 `122.210.106.43:3306` 可达，两份 `backend.env` 使用同一个 JDBC 地址、账号密码和 XXL access token。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
-3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一包 `20260810234154` 基线只允许新增
-   QA 历史顺序补偿、通知处置类型、体验工作区结构和体验工作区默认目录四条 migration 的连续后缀；任何部分、
-   倒序或未知历史都停止。
-   外部 XXL MySQL 必须保持 V1-V11 且不新增 history。随后确认 Admin health、搬迁任务
+3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一包 `20260812204207` 基线只允许新增
+   `20260813190929`，外部 XXL MySQL 从 V1-V11 基线只允许新增 V12；任何失败、倒序、未知版本或 checksum 都停止。
+   随后确认 Admin health、搬迁任务
    每 30 分钟、闲置进程关闭每日 02:00、模型探活每 5 分钟和可观测清理
-   每日 03:30 均正常。任一校验失败时不得继续 `.114` 和前端。
+   每日 03:30、SCM Git 姓名补偿每日 04:10 均正常。任一校验失败时不得继续 `.114` 和前端。
 4. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
 5. 导入 worker 镜像、解压 programs。
 6. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。

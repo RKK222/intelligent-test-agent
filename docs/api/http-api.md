@@ -313,7 +313,7 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
 | `GIT_TIMEOUT` | 504 | Git 操作超时 |
 
-Git 命令返回 `GIT_UNAVAILABLE` 或 `GIT_TIMEOUT` 时，错误 `details` 可能包含 `gitFailureType` 和 `gitFailureHint`，用于区分认证失败、仓库不可访问、网络连接失败、分支不存在、worktree 冲突、超时或未知失败；`gitFailureHint` 是可展示给管理员的安全排查提示，`stderr`、`command`、`timeoutMillis` 和 `durationMillis` 仅用于后端排查，不应在普通 UI 中直接展示。`command` 会隐藏 SSH/HTTP URL 中的用户名或 token。
+Git 命令返回 `GIT_UNAVAILABLE` 或 `GIT_TIMEOUT` 时，错误 `details` 可能包含 `gitFailureType` 和 `gitFailureHint`，用于区分认证失败、仓库不可访问、网络连接失败、分支不存在、worktree 冲突、超时或未知失败；企业 SCM 右控明确返回提交姓名不一致时还会包含 `gitFailureReason=SCM_IDENTITY_MISMATCH`，但不会包含期望姓名、实际姓名、邮箱或原始右控报文。`gitFailureHint` 是可展示给管理员的安全排查提示，`stderr`、`command`、`timeoutMillis` 和 `durationMillis` 仅用于后端排查，不应在普通 UI 中直接展示。`command` 会隐藏 SSH/HTTP URL 中的用户名或 token。平台会在右控报文与本次统一认证邮箱、实际提交姓名完全吻合时保存 SCM 登记姓名、重建提交并仅重试一次；不会通过删除末尾数字猜测姓名。
 
 ## TraceId 规则
 
@@ -386,7 +386,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 
 公共 Git 刷新以远端分支解析出的 commit hash 为唯一目标，不把发起服务器当前 HEAD 当作目标。请求先聚合各服务器只读状态；共享运行副本存在 staged、unstaged 或 untracked 内容且未明确确认时返回 HTTP 409，安全 details 包含 `linuxServerIds`、`repositoryKind=SHARED_RUNTIME` 和 `discardLocalChangesAllowed=true`，且此时不会建立 rollout 或修改工作树。确认后先取得公共全局锁，再由各服务器 worker 将共享运行副本恢复并清理到目标 commit。确认只作用于共享运行副本；个人 worktree 永不 stash/reset/clean，而是执行原生 `git merge --no-edit <targetCommit>`，非重叠 staged、unstaged、untracked 内容原样保留。Git 判定会覆盖本地文件或产生真实冲突时，该 worktree 进入独立 `AWAITING_USER` 补偿，不能阻塞其它 worktree、共享副本或主 rollout。
 
-公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有有效公共个人 worktree；个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。每个服务器明细还以 additive 可选字段 `pendingTargets` 返回最多 200 个未进入 `DISPOSED/ABANDONED` 的目标，包含 `targetId/userId/username/containerId/port/processPid/processStartedAt/status/retryCount/nextRetryAt/lastError/forceStop/updatedAt`，按强制停止优先、下次重试时间和创建时间排序；不返回统一认证号、Session 内容或凭据。前端据此定位卡住用户，并按目标已有 `containerId + port` 复用运行管理停止 API，不新增专用停止入口。
+公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有当前稳定命名的有效公共个人 worktree；日期型或手工命名的历史 worktree 保留磁盘和数据库记录，但不再挂载、登记发布补偿或形成永久 `PENDING`，已存在的相应补偿任务会转为 `ABANDONED/WORKTREE_NO_LONGER_REUSABLE`。个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。每个服务器明细还以 additive 可选字段 `pendingTargets` 返回最多 200 个未进入 `DISPOSED/ABANDONED` 的目标，包含 `targetId/userId/username/containerId/port/processPid/processStartedAt/status/retryCount/nextRetryAt/lastError/forceStop/updatedAt`，按强制停止优先、下次重试时间和创建时间排序；不返回统一认证号、Session 内容或凭据。前端据此定位卡住用户，并按目标已有 `containerId + port` 复用运行管理停止 API，不新增专用停止入口。
 
 所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过 dispose、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，对这个用户专属 opencode 进程只调用一次 `POST /global/dispose`；明确返回布尔 `true` 才把目标置为 `DISPOSED`。该用户的全部目标完成后立即恢复发送，下一次请求重新创建 Instance 并加载已同步的 `opencode.jsonc`、Agent 和 Skill；不等待其他用户。manager 已明确确认目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在 dispose 完成前只阻止该用户发送。
 
@@ -407,6 +407,8 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 新批次登记目标时，只有用户、服务器、容器、端口、PID 和 manager 权威启动时间都与旧批次未排空目标一致的进程才标记 `forceStop=true`。这类目标跳过 `/session/status` 和会话空闲等待，复用 `OpencodeProcessStopService` 再次校验平台进程代次，以权威 UCID + PID 向本机 manager 下发 owned stop；manager 在普通终止超时后升级到强制终止，后端还需确认该实例 health 已不可达才写 `DISPOSED`。身份已变化、manager 快照不可用或停止结果不确定时继续重试，禁止按端口盲停替换实例。新批次中的其它进程仍走普通空闲检测与 `/global/dispose`。`GET /public/rollout` 以可选 additive 字段返回 `supersedesRolloutId`、`supersededByRolloutId` 和 `supersedeReason`，旧客户端可忽略。
 
 长操作进度：
+
+Agent 配置进度 WebSocket 与平台其它文件/进度 WebSocket 共用 `test-agent.security.cors-allowed-origins`。配置为精确列表时在消费一次性 ticket 前校验 Origin；本地 test profile 显式配置单值 `*` 时接受当前浏览器 Origin，但不会放宽一次性 ticket、operationId 绑定或过期校验。进度通道失败只影响旁路展示，提交/发布业务终态始终由对应 HTTP 响应和远端提交证据决定。
 
 | 方法/路径 | 用途 |
 |---|---|
@@ -1148,14 +1150,14 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 
 `WorkspaceResponse`：
 
-列表和详情响应新增显式 `physicalRootPath`，始终是服务端解析后的物理绝对路径；兼容字段 `rootPath` 保持同一物理值，避免旧前端失效。数据库中的 `personalworktree:`、`appworkspace:`、`appsource:` 逻辑值只用于跨服务器重新解析，不得直接返回给前端；历史绝对路径保持兼容，无法识别的相对路径在响应边界失败关闭，禁止按 Java 当前工作目录补成伪绝对路径。普通文件操作仍只使用 `workspaceId` 走文件 WebSocket；两个路径字段仅供复制路径或与同服务器受控外部页面交接目录等物理路径场景使用。
+列表、详情、最近工作区和排查响应均不返回物理根目录：兼容字段 `rootPath` 固定为 `workspace:{workspaceId}`，`physicalRootPath` 固定为 `null`。数据库中的 `personalworktree:`、`appworkspace:`、`appsource:` 逻辑值与历史绝对路径只在目标 Java 内部解析，不得直接返回浏览器。普通文件操作、需求导入和文件树刷新只使用 `workspaceId` 走文件 WebSocket；用户主动复制单个普通文件路径时，才允许调用 `workspace.resolve-physical-path` 即时解析，分享、排查、体验空间和源码快照均拒绝该操作。
 
 ```json
 {
   "workspaceId": "wrk_...",
   "name": "demo",
-  "rootPath": "/absolute/workspace/path",
-  "physicalRootPath": "/absolute/workspace/path",
+  "rootPath": "workspace:wrk_...",
+  "physicalRootPath": null,
   "linuxServerId": "127.0.0.1",
   "status": "ACTIVE",
   "createdAt": "2026-06-19T00:00:00Z",
@@ -1167,7 +1169,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 
 `POST /api/internal/platform/workspace-management/workspaces/experience/open` 不接收请求体，也不接受客户端指定路径、服务器或 Workspace ID。入口先要求当前用户 `opencode` TestAgent 进程为 READY，并沿用用户进程后端路由过滤器、`BackendJavaRouteResolver` 和 `BackendHttpForwarder` 到达进程所属服务器；目标 Java 再核对 assignment 的 `linuxServerId` 就是本服务器。成功响应使用上面的既有 `WorkspaceResponse`，Workspace 名称固定为“体验工作区”；`rootPath` 固定为逻辑定位符 `workspace:{workspaceId}`，`physicalRootPath` 为空，不回显管理员配置的物理目录。
 
-体验资格不再依赖是否加入应用、是否首次进入或角色；任何已登录用户只要本人的 TestAgent 进程 READY，就可随时从常驻入口进入。目标 Java 读取当前平台的通用参数 `OPENCODE_EXPERIENCE_WORKSPACE_DIR`；默认值为 `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience`。每个 Java 实例在启动期解析并创建本服务器目录，缺少 `.git` 时执行本地 `git init -b main`，空仓库补充 `README.md` 和初始提交；已有仓库、提交和用户文件不重置、不覆盖。初始化不创建 remote，也不执行 fetch、pull 或 push；Git 仓库是否存在不作为用户进入资格，启动初始化失败则该 Java 不进入可服务状态。
+体验资格不再依赖是否加入应用、是否首次进入或角色；任何已登录用户只要本人的 TestAgent 进程 READY，就可随时从常驻入口进入。目标 Java 读取当前平台的通用参数 `OPENCODE_EXPERIENCE_WORKSPACE_DIR`；默认值为 `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience`。标准开发重启和企业部署先调用 `deploy/internal/ensure-experience-workspace-content.sh`，从发布包内的独立模板目录逐文件检查：目标不存在才补充，已有文件不覆盖。没有 HEAD 时只为模板路径建立一个无 remote 基线提交；已有 HEAD 时不改历史和 index，新补文件保留为本地变更供用户检查。绕过标准脚本直接启动 Java 时，启动 Runner 仍幂等创建本服务器目录、`.git` 和最小 README 提交作为失败关闭兜底。Git 仓库是否存在不作为用户进入资格，启动初始化失败则该 Java 不进入可服务状态。
 
 同一服务器和目录真实路径生成稳定 `wrk_exp_` Workspace ID；参数不变时并发调用幂等复用，参数换目录时生成新 ID 并更新该服务器当前绑定，旧 Workspace 仅保留历史 Session/Run 外键。打开过程使用数据库 compare-and-set 登记并在写入后复读配置，CAS 失败从通用参数重新开始，跨 Java 的旧读取不能迟到成为最终 current。普通工作区列表不返回任何当前或历史体验 Workspace。详情、Session 创建、Git 状态、文件 route/ticket/每条 RPC、Session runtime 目标、无 contextToken 兼容 Run、contextToken 每次滑动续期和会话上下文签发都会重新校验“Workspace 是本服务器当前绑定、ACTIVE、目录与当前参数一致”；应用成员变化不再关闭或撤销体验访问。参数、服务器归属或绑定变化后旧 ID 返回 `FORBIDDEN`，不会降级为非托管 Workspace。用户自己的历史会话列表仍沿用既有归因规则保留，但不能借历史 Session 访问旧目录或启动新 Run。
 
@@ -1542,7 +1544,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 
 ### 应用版本工作区 API
 
-Base URL：`/api/internal/platform/workspace-management`。该能力把配置管理中的应用工作空间模板落为托管 Git 目录，并同步创建运行态 `workspaces` 记录。新建或显式修复的托管路径在数据库中保存逻辑值：应用版本/副本使用 `appworkspace:<versionSegment>/<repositoryEnglishName>[/<templateDirectory>]`，个人 worktree 使用 `personalworktree:<versionSegment>/<userId>/<repositoryEnglishName>/<branch>[/<templateDirectory>]`；使用时分别基于通用参数 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 解析为当前服务器物理路径。响应里的 `repoRootPath`、`workspaceRootPath`、`runtimeWorkspace.rootPath` 对托管工作区均为解析后的当前服务器物理路径；历史 Unix/Windows 绝对路径只兼容读取，不批量迁移。旧的手动目录注册 `/api/workspaces` 已作废，返回 `410 API_GONE`。
+Base URL：`/api/internal/platform/workspace-management`。该能力把配置管理中的应用工作空间模板落为托管 Git 目录，并同步创建运行态 `workspaces` 记录。新建或显式修复的托管路径在数据库中保存逻辑值：应用版本/副本使用 `appworkspace:<versionSegment>/<repositoryEnglishName>[/<templateDirectory>]`，个人 worktree 使用 `personalworktree:<versionSegment>/<userId>/<repositoryEnglishName>/<branch>[/<templateDirectory>]`；使用时分别基于通用参数 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 在目标 Java 内解析。历史 Unix/Windows 绝对路径只兼容内部读取，不批量迁移。嵌套的 `runtimeWorkspace.rootPath` 固定返回 `workspace:{workspaceId}` 且 `physicalRootPath=null`；旧的手动目录注册 `/api/workspaces` 已作废，返回 `410 API_GONE`。
 
 鉴权：
 
@@ -1690,7 +1692,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "runtimeWorkspace": {
     "workspaceId": "wrk_...",
     "name": "F-GCMS-20260707",
-    "rootPath": "/data/.testagent/agent-opencode/workspace/appworkspace/20260707/demo/F-GCMS/workspace",
+    "rootPath": "workspace:wrk_...",
+    "physicalRootPath": null,
     "status": "ACTIVE",
     "linuxServerId": "10.8.0.12",
     "createdAt": "2026-06-23T00:00:00Z",
@@ -1721,6 +1724,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 `accessible=true` 时 `reason=null`；缺少当前用户 SSH key 时返回 `accessible=false, reason=SSH_KEY_MISSING`；Git 认证失败或仓库不可访问时返回 `accessible=false, reason=REPOSITORY_PERMISSION_REQUIRED`，供前端展示对应版本库权限申请提示。网络、DNS、SSH 端口故障和超时仍返回统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT`，不得误报为用户没有版本库权限。应用成员校验与其它版本接口一致。
 
 `POST /personal-workspaces/{personalWorkspaceId}/git-pull` 无请求体，只允许个人工作区 owner 调用。后端在当前用户位于该应用的整棵个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；应用 workspace 文件和应用 Agent 文件使用相同规则。未完成 merge 会直接返回 `CONFLICT`；普通 unstaged、staged 或 untracked 改动不再先行阻止，Git 能安全合并时保留原改动并完成拉取。只有 Git 判定本地文件会被覆盖时返回 `CONFLICT`、`details.reason=LOCAL_CHANGES`，并在 `files/blockingFiles` 中列出实际阻塞文件。全程不 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/runtimeReloadStatus/runtimeReloadId/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
+
+拉取或发布遇到网络、仓库或权限异常时，统一错误继续返回稳定 `code/message/traceId`；Git details 只允许返回后端脱敏的 `gitFailureHint`、失败阶段及可恢复状态，不返回 Git URL、命令、stderr 或密钥。前端拉取结果弹框必须同时展示错误码、脱敏提示和 traceId，用户关闭后可原地重新发起拉取；已有个人提交、未完成 merge 和已解决的 index 均不得因展示错误而自动 reset。
 
 ### 对话工作区 Git Tool
 
@@ -1753,7 +1758,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 }
 ```
 
-个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{userId}_{workspaceName}`，其中 `workspaceName` 会安全化为 Git/path 可用片段。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{version}/{userId}/{repository.englishName}/{应用版本分支}_{userId}_{workspaceName}`，新记录入库保存 `personalworktree:` 逻辑路径，响应返回解析后的当前服务器物理路径。前端展示 `workspaceName` 和当前 worktree 分支。同一用户在同一应用版本下 `workspaceName` 唯一。
+个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{userId}_{workspaceName}`，其中 `workspaceName` 会安全化为 Git/path 可用片段。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{version}/{userId}/{repository.englishName}/{应用版本分支}_{userId}_{workspaceName}`，新记录入库保存 `personalworktree:` 逻辑路径，响应中的运行态工作区只返回逻辑 `workspace:{workspaceId}`。前端展示 `workspaceName` 和当前 worktree 分支。同一用户在同一应用版本下 `workspaceName` 唯一。
 
 同步请求体：
 
@@ -1792,7 +1797,8 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
   "runtimeWorkspace": {
     "workspaceId": "wrk_...",
     "name": "default",
-    "rootPath": "/data/.testagent/personal-worktrees/...",
+    "rootPath": "workspace:wrk_...",
+    "physicalRootPath": null,
     ...
   }
 }
@@ -1903,6 +1909,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
   "message": "已从个人 HEAD 投影并推送 feature 分支: abc123...",
   "remotePushed": true,
   "headCommit": "abc123...",
+  "remoteBranch": "main",
   "executedCommands": ["git fetch", "git checkout", "git commit", "git push"],
   "currentStep": "COMPLETED"
 }
@@ -1928,7 +1935,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 - 工作台顶部和左下角共用当前应用（`selectedAppId`）的 `GET /applications/{appId}/workspace-templates` 数据，按 `repositoryType` 将自动化代码库与测试工作空间独立分组，只显示已启用配置的 `workspaceName`。顶部上下文以实际完成的 workspace/version 切换为事实源，不在左侧目录加载前乐观显示新选择；重选当前版本会主动刷新目录和 Git diff。设置页关闭后会刷新该查询；若被停用的是当前已打开工作空间，不强制退出或清空当前状态，只在后续菜单中隐藏。版本创建、最近使用、运行态切换和会话逻辑保持原有行为。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
 - 点击版本或提交新增版本时先检查当前用户 TestAgent 专属进程是否 READY；只有强状态明确为 `NEEDS_INITIALIZATION` 且 `initializable=true` 才弹初始化/启动确认框，确认后复用既有进度弹窗，初始化完成后提示用户重新执行原操作。状态仍在查询、明确 `UNAVAILABLE`，或强状态为 READY 但弱健康尚未通过时不提供初始化按钮，只提示等待或当前不可用并刷新状态。在进程真正就绪之前不调用 Git 预检、版本创建或 default ensure，也不提前失效当前会话交互。进程就绪后，点击版本先调用 `GET /workspace-versions/{versionId}/git-access` 做只读权限预检；只有 `accessible=true` 才调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好并触发工作台切换。无仓库权限时前端展示对应版本库名称和申请指引，不创建 worktree。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
-- 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
+- 当前版本匹配规则只使用服务端稳定身份：优先使用最近工作区返回的 `versionId`，旧数据回退时仅按 `runtimeWorkspace.workspaceId` 精确匹配；禁止用根路径匹配。
 - 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 
 应用级"默认工作空间"解析规则（前端 `handleSelectApp` + `pickDefaultWorkspaceForApp`）：
@@ -3371,7 +3378,16 @@ Token 列表及写入响应只返回 `{tokenId,name,referencedProviderCount,crea
 |---|---|---|
 | `*` | `/api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` | 仅供 opencode 子进程调用的 OpenAI-compatible 代理，不给前端 SDK 暴露会话便捷方法。 |
 
-代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-Enterprise-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ENTERPRISE_UCID` 注入。Java 通过一次联表查询把启用供应商构造成不可变的 `providersById` 与 `authTokensByProviderId` 快照；单次代理请求在订阅请求体前完成代理密钥校验，并从同一代快照同时解析 `baseUrl` 和该 Provider 关联的 Token，无效凭据或供应商不会占用请求体聚合缓冲区；解析过程不访问数据库，也不会串用其它 Provider 的 Token。随后转发到对应 OpenAI-compatible 路径并注入 `ucid` 和 traceId。代理请求体上限固定为 `2 MiB`（`2097152` bytes），只在该内部端点按字节聚合，不放大全局 WebFlux codec 缓冲区；超限返回统一 `413 PAYLOAD_TOO_LARGE`，`details.maxBytes=2097152`，且不记录或回显模型请求内容。请求体的顶层 `model` 使用流式 JSON 扫描校验，不构建完整对象树，同时会消费完整文档并拒绝尾部畸形内容或额外根值。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留；没有 `reasoning_content` 时，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`；已有 textual `reasoning_content` 时整个 delta 原样保留，不再解析 `content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、Content-Encoding、错误正文、Retry-After 与 trace header；连接/首个响应/首个模型输出/有效输出间空闲边界分别为 10 秒/30 秒/30 秒/120 秒，只有真实模型输出能刷新输出空闲边界；收到 `[DONE]` 后主动结束上游订阅，不等待异常上游关闭 TCP。下游取消同样会取消上游订阅。
+代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；该请求头只用于 OpenCode 子进程向 Java 内部代理证明身份，不是企业 AI 上游的供应商 Token。请求头 `X-Enterprise-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ENTERPRISE_UCID` 注入。
+
+企业 AI 上游自身有两种供应商 Token 鉴权方式，语义不能混用：
+
+| Java → 企业 AI 上游请求头 | 鉴权结果 | `ucid` 结果 | 平台使用规则 |
+|---|---|---|---|
+| `Authorization: Bearer <供应商关联 Token>` | 可通过鉴权 | `ucid` 不生效 | 不使用；不能满足按真实用户识别和统计的要求 |
+| `Auth-Token: <供应商关联 Token>` | 可通过鉴权 | `ucid` 生效 | 固定使用 |
+
+Java 通过一次联表查询把启用供应商构造成不可变的 `providersById` 与 `authTokensByProviderId` 快照；单次代理请求在订阅请求体前完成代理密钥校验，并从同一代快照同时解析 `baseUrl` 和该 Provider 关联的 Token，无效凭据或供应商不会占用请求体聚合缓冲区；解析过程不访问数据库，也不会串用其它 Provider 的 Token。随后转发到对应 OpenAI-compatible 路径，以 `Auth-Token: <供应商关联 Token>` 鉴权并注入 `ucid` 和 traceId；转发前会删除客户端提供的 `Authorization`、`Auth-Token` 和供应商路由头，避免伪造或串用。这意味着入口 Bearer 只在 Java 代理边界内使用，绝不会原样转发成企业上游 Bearer。代理请求体上限固定为 `2 MiB`（`2097152` bytes），只在该内部端点按字节聚合，不放大全局 WebFlux codec 缓冲区；超限返回统一 `413 PAYLOAD_TOO_LARGE`，`details.maxBytes=2097152`，且不记录或回显模型请求内容。请求体的顶层 `model` 使用流式 JSON 扫描校验，不构建完整对象树，同时会消费完整文档并拒绝尾部畸形内容或额外根值。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留；没有 `reasoning_content` 时，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`；已有 textual `reasoning_content` 时整个 delta 原样保留，不再解析 `content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、Content-Encoding、错误正文、Retry-After 与 trace header；连接/首个响应/首个模型输出/有效输出间空闲边界分别为 10 秒/30 秒/30 秒/120 秒，只有真实模型输出能刷新输出空闲边界；收到 `[DONE]` 后主动结束上游订阅，不等待异常上游关闭 TCP。下游取消同样会取消上游订阅。
 
 Codex `0.145.0` 使用固定子路径：
 
@@ -4035,7 +4051,7 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 #### 实时查询任务类型
 
-前端每次打开案例维护弹窗时调用 `GET /api/internal/platform/integration/tcds/task-types`。平台 Java 使用无请求体 `GET` 访问固定生产 TCDS `getTaskTypes` 地址，不携带案例维护 `toolId`，并只投影 `data.subItemTypes` 中校验后的 `name/value`：
+前端每次打开案例维护弹窗时调用 `GET /api/internal/platform/integration/tcds/task-types`。平台 Java 使用无请求体 `GET` 通过统一部署基础地址访问 TCDS `getTaskTypes`，并与其它 TCDS 请求一致携带固定 `toolId: 66f36bfa5c1c6105572b0118880261d6`，只投影 `data.subItemTypes` 中校验后的 `name/value`：
 
 ```json
 {
@@ -4076,11 +4092,11 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 - `itemNo` 必填、最长 128 字符。
 - `caseList` 至少一项、最多 500 项；每个 Markdown 案例对应一个对象。
 - `name` 必填且最长 1024 字符；`step/data/expect` 允许空字符串且各自最长 65535 字符。`taskType` 使用本次 `getTaskTypes` 中所选 `value` 对应的完整 `name`；同一案例选择多个类型时按选择顺序使用英文逗号连接，例如 `准入测试任务/功能测试任务` 生成 `准入测试任务,功能测试任务`，不接受数字编码、中文逗号或不在本次查询结果中的名称。
-- 客户端不得提交 `userId`、上游 URL、请求头、`aiFlag/method/dataDependencies/isAICase/isUpdate/caseFlag`。后端从认证主体取得 `userId`，固定生产 TCDS 地址和 `toolId`，并分别补齐 `1/文本理解生成法/空字符串/是/否/2`。
+- 客户端不得提交 `userId`、上游 URL、请求头、`aiFlag/method/dataDependencies/isAICase/isUpdate/caseFlag`。后端从认证主体取得 `userId`，通过 `TEST_AGENT_TCDS_BASE_URL` 对应的统一基础地址和共享请求构造器固定 `toolId`，并分别补齐 `1/文本理解生成法/空字符串/是/否/2`。
 
 后端收到提交后会再次调用实时 `getTaskTypes`，按完整 `name` 生成当前允许集合并逐项校验，再调用 `createGraphCase`；类型已下线或客户端篡改返回 `400 VALIDATION_ERROR`，任务类型查询异常返回 `503 EXTERNAL_API_UNAVAILABLE`。成功返回统一 envelope，`data=null`。TCDS 返回 `code=0` 后才视为成功；非零业务码映射为 `409 CONFLICT` 并只返回长度受限、已清理控制字符的业务消息；连接、超时、非 2xx、空响应、超限响应和非法 JSON 统一映射为 `503 EXTERNAL_API_UNAVAILABLE`，不向浏览器回显上游地址、响应正文或堆栈。API 访问日志只记录 `itemNo/caseCount`，不记录四列案例正文；integration 上游日志通过 `event=tcds_create_graph_case_request|tcds_create_graph_case_response` 与 `traceId` 关联调用。请求日志中的 `userId` 固定为 `[REDACTED]`，不记录 `toolId`，`name/step/data/expect/dataDependencies` 只记录字符数、字节数和 SHA-256 短摘要，最多预览 20 条案例且整条日志不超过 8 KiB。响应日志记录 HTTP 状态、业务 `code` 和清理控制字符且最长 200 字符的 `msg`；`data` 及其它正文不写原值，只记录类型、数量和 SHA-256 短摘要，空、非法或超限正文记录安全状态。未认证返回 `401 UNAUTHENTICATED`，参数错误返回 `400 VALIDATION_ERROR`。成功和错误响应都携带当前 `traceId`。
 
-兼容性：API 路径和 DTO 结构不变，但 `taskType` 从简称调整为本次 `getTaskTypes` 返回的完整名称，前后端需要同步升级；不新增数据库字段、Flyway migration、RunEvent、SSE 或 WebSocket。生产 Java 所在网络必须能够访问两个 TCDS 地址；浏览器不需要 TCDS CORS，也不会产生 HTTPS 页面到 HTTP TCDS 的 mixed-content 请求。
+兼容性：API 路径和 DTO 结构不变，但 `taskType` 从简称调整为本次 `getTaskTypes` 返回的完整名称，前后端需要同步升级；不新增数据库字段、Flyway migration、RunEvent、SSE 或 WebSocket。生产 Java 所在网络必须能够访问统一配置的 TCDS 基础地址；浏览器不需要 TCDS CORS，也不会产生 HTTPS 页面到 HTTP TCDS 的 mixed-content 请求。
 
 对应测试：`TcdsCaseMaintenanceControllerTest`、`TcdsCaseMaintenanceServiceTest`、`backend-api.test.ts` 和工作台案例维护组件测试。
 
@@ -4122,3 +4138,23 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 和常量时间比较；浏览器 token 过滤器只对该精确路径豁免。请求只包含目标 `linuxServerId` 和最多 50 个 `resendId`，入口通过
 `BackendJavaRouteResolver`、`BackendHttpForwarder` 固定路由到目标 Java，不扫描 Redis 路由快照、不本机降级。响应只有每条状态与
 安全错误码，不含 prompt、回答或供应商响应。
+# TCDS 需求导入（同源页面）
+
+> 本节接口由受登录守卫保护的独立同源入口 `/workspace-requirement-import/` 使用。浏览器不接收 TCDS token、文档 URL、物理根路径或后端主机地址。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/requirement-import/applications` | 按当前登录主体的 `unifiedAuthId` 返回全部 TCDS 授权应用。 |
+| `GET` | `/api/v1/requirement-import/sub-items?appShortName=...&editionId=...` | 返回指定应用和月份版本的父子条目，不返回文档下载地址。 |
+
+应用项为 `{appName, appShortName}`；父条目为 `{itemNo, itemName, children:[{itemNo,itemName}]}`。Controller 不直接访问外部客户端，TCDS 访问和目录投影由应用服务完成。浏览器只请求平台同源 API；后端访问 TCDS 登录、用户、应用、子条目、文档元数据和 TCDS 同源文档地址时统一携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`，重定向到跨域对象存储后不透传该 header。
+
+实际写入使用既有文件 WebSocket route/ticket：
+
+- `workspace.requirement-import-items` 请求仅包含 `{workspaceId, appShortName, editionId}`，返回父子条目 `{itemNo,itemName,imported,children}`；`imported` 只表示与导入相同规范化规则生成的父目录或子条目 `01-需求` 目录已经存在。服务端只解析一次工作区元数据，再逐一通过公共文件服务检查受控相对目录；该状态不禁用选择，用户仍可覆盖更新或重试部分失败；共享、支持访问、体验工作区和源码快照拒绝调用。
+- `workspace.requirement-import` 请求仅包含 `{workspaceId, appShortName, editionId, selectedSubItemNos, requestId}`。服务端重新查询授权、名称、文档类型和 URL，拒绝共享只读、支持访问、体验工作区和源码快照。
+- 返回 `{status, createdDirectories, importedFiles, overwrittenFiles, failedFiles, failures}`，其中 `status` 为 `SUCCEEDED | PARTIAL | FAILED`，失败原因不含 URL、token、响应正文或绝对路径。
+- 不同来源规范化到同一目标文件时整单以稳定错误码 `PATH_COLLISION` 拒绝，响应只包含工作区相对目标路径；同一来源重复导入仍按覆盖语义处理。
+- Word 恢复轻量文本抽取：DOCX 按段落顺序输出正文并把表格行输出为 Markdown 行，旧 DOC 使用 HWPF 文本提取；不生成 Word 行内样式、列表层级或图片附件。继续兼容 `.doc` 名称承载 DOCX，以及 Word 扩展名实际返回 UTF-8/GB18030 文本；单个转换后的 Markdown 不得超过 20 MiB。
+- `workspace.resolve-physical-path` 请求为 `{workspaceId,path}`，只在用户点击复制时解析一个现有普通文件；越界和符号链接失败关闭，分享、支持访问、体验和源码快照均拒绝。
+- 普通工作区、最近工作区和支持访问响应的 `rootPath` 固定为 `workspace:{workspaceId}`，`physicalRootPath` 为 `null`。超级管理员目录选择器响应以 `existingWorkspaceId` 标记已注册目录。

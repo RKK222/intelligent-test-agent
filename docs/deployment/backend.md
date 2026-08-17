@@ -14,6 +14,12 @@ Java 前必须从每个后台节点验证 Redis TCP。值为 `0` 时，Docker DN
 
 个人离线开发备用依赖只能通过本地开发脚本启动，不能作为研发测试或生产部署拓扑。
 
+## TCDS 内网地址与同批发布
+
+应用默认使用现场确认的企业局域网基础地址 `http://tcds-prod.sdc.icbc:9080`；所有 Java 节点仍应在 `backend.env` 显式配置相同的 `TEST_AGENT_TCDS_BASE_URL`，便于部署审计和后续环境切换。覆盖值必须是 HTTP/HTTPS 绝对地址，相对地址或其它协议会使 Spring 启动失败，错误不回显实际地址。登录、用户、需求导入、任务类型和案例维护等全部 TCDS 同源请求统一通过共享请求构造器携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`；企业内外网隔离由部署网络策略负责。
+
+本变更同时改变普通 Workspace `rootPath/physicalRootPath` 语义和前端 iframe 路由，必须按“全部 Java 节点配置变量并升级 → 验证目录 API/文件 WebSocket → 升级前端”的顺序同批发布。回滚时先回滚前端，再回滚全部 Java；旧 Java 需要恢复旧配置和旧路径响应语义，不能长期混跑。旧 9900 服务只在新版本完成真实 TCDS 查询、重复覆盖、部分失败和文件树刷新验收后由运维另行停用，本仓库不再调用该端口。
+
 生产 Java 固定从交付 JAR 的 `classpath:rsa-private.key` 读取 PKCS8 PEM RSA 私钥，用于解开数据库 `user_ssh_keys` 中每条记录的临时 AES 密钥；外置 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH` 已废除。共享同一数据库的全部 Java 必须部署同一 JAR，升级前后不得替换内置密钥，否则既有 SSH key 密文无法解密。企业交付 JAR/ZIP 因包含平台私钥，必须按密钥交付物限制访问、复制和留存。
 
 外部 API 凭据也使用同一内置 RSA 私钥执行 RSA-OAEP/SHA-256 入库加解密。应用在 Flyway 完成后严格加载全部工具凭据，任何密文、指纹、工具编码或 scope 校验失败都会让该 Java 启动失败并阻止就绪；运行期刷新失败保留上一份有效不可变快照。多 Java 部署必须连接同一 PostgreSQL/Redis，并设置 `TEST_AGENT_SERVER_BROADCAST_ENABLED=true`，使管理事务提交后的 `external-api-credential.refresh-requested` 空载荷广播低延迟触发整表重载；每 60 秒补偿刷新用于收敛漏消息。
@@ -141,7 +147,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端和前端展�
 
 1. Mac 打包前先只读导出每个目标 PostgreSQL 的完整 `flyway_schema_history`（`installed_rank/version/description/checksum/success`），核对本候选版本高于所有尚未执行的新 migration；发现未知版本/checksum 时停止，不使用 `repair` 或 `outOfOrder`。用真实生产基线验证升级并确认最终 `test-agent-persistence` JAR 内 SQL 字节后，再执行体验工作区迁移。旧体验候选历史继续按既有 compatibility location 校验原文，`V20260812144051` 仅把仍为 `UNCONFIGURED` 的默认参数提升为 `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience`，不覆盖管理员自定义值。
 2. 通用参数 `OPENCODE_EXPERIENCE_WORKSPACE_DIR` 是数据库唯一事实源；默认无需人工配置。需要改盘符或挂载点时，超级管理员可在“系统管理 → 通用参数管理”配置所有后端服务器都能按本机解析的同一绝对路径，不增加 `backend.env`、`docker.env` 或 yaml fallback。
-3. 每个后端 Java 启动时由 `ExperienceWorkspaceStartupRunner` 幂等创建本服务器目录和 `.git`，空仓库补充相同 `README.md` 与初始提交。已有仓库、提交和普通文件不 reset、不覆盖；初始化不配置 remote，不执行 fetch/pull/push。目录或 Git 初始化失败会阻止该 Java readiness，先修复挂载和 Java 运行用户读写权限再重启。
+3. 标准企业部署脚本在停止旧 Java 后、启动新 Java 前调用随包 `ensure-experience-workspace-content.sh`，从 `experience-workspace-template/` 仅补齐缺失的 README、标准 `docs/` 稳定资料和 `spec/{需求项}/01-需求` 至 `04-测试` 虚构示例。没有 HEAD 时只创建一个无 remote 基线提交；已有 HEAD 时不 reset、不覆盖、不改历史或 index，新补文件保留为本地未跟踪变更。绕过部署脚本直接启动时，`ExperienceWorkspaceStartupRunner` 仍兜底创建目录、`.git` 和最小 README 提交；初始化失败会阻止该 Java readiness。自定义通用参数路径的节点应在启动前用同一脚本显式传入该绝对路径。
 4. 分别把 TestAgent 进程 READY 的用户路由到每台服务器，调用体验入口并验证文件浏览、普通文件写入、终端、对话、stage/unstage/discard/冲突处理和本地 commit；确认页面没有 push，后端没有体验发布入口，响应只含 `workspace:{workspaceId}` 逻辑根，OpenCode catalog 不出现物理目录。再验证已有应用用户和无应用用户都能随时进入，同服务器用户看到同一目录，不同服务器初始内容一致但后续改动不互相同步；多 Java/多服务器环境还必须从非生产 Java 请求 Run Diff、接受/拒绝和 session-tree，确认请求严格转发到 Run 生产 Java且不本机降级。
 
 参数值必须在每台服务器解析为可创建、可读写的绝对目录。目录异常、启动初始化失败、进程/服务器不可用时只返回安全原因码和 traceId，日志与错误不得记录物理路径。多人共享同一服务器目录和 Git index/history，运维必须明确告知并发覆盖风险和禁止存放密码、密钥、客户数据等敏感信息；本功能不提供快照恢复、用户隔离、定时清理、磁盘配额或跨服务器同步。平台不提供 push 只表示受控产品能力没有 remote/push/发布链路；保留的终端和 Agent shell 仍是共享信任边界，不互信用户必须使用额外 OS/容器隔离。
@@ -878,7 +884,7 @@ TEST_AGENT_INTERNAL_PROXY_BASE_URL=http://<same-node-java>/api/internal/platform
 ENTERPRISE_UCID=<current-user-unified-auth-id>
 ```
 
-`ENTERPRISE_OPENAI_AUTH_TOKEN` 不再通过 Java 环境变量提供；超级管理员在前端“系统管理 → 配置管理 → 内部模型供应商”记录外部系统提供的可复用 Token，并为每个 `providerId/name/baseUrl/enabled/sortOrder` 选择 Token。Token 明文保存在 `internal_model_tokens.token_value`，前端只展示名称、引用数和逐 Provider 配置状态，不回显原值。旧 `internal_model_proxy_settings` 仅为滚动升级兼容保留。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 公共配置样例”；114 单后端可直接使用 `deploy/internal/opencode.jsonc.example`。所有 Java 节点完成后端升级前不得开放不同 Provider Token 的页面操作。
+`ENTERPRISE_OPENAI_AUTH_TOKEN` 不再通过 Java 环境变量提供；超级管理员在前端“系统管理 → 配置管理 → 内部模型供应商”记录外部系统提供的可复用 Token，并为每个 `providerId/name/baseUrl/enabled/sortOrder` 选择 Token。Token 明文保存在 `internal_model_tokens.token_value`，前端只展示名称、引用数和逐 Provider 配置状态，不回显原值。企业 AI 上游自身支持两种方式：`Authorization: Bearer <供应商关联 Token>` 可以完成鉴权，但 `ucid` 不生效；只有 `Auth-Token: <供应商关联 Token>` 会让同一请求的 `ucid` 生效。因此 Java 调用企业 AI 上游固定使用 `Auth-Token`，不会发送上游 Bearer `Authorization`。OpenCode 子进程访问 Java 内部代理时仍使用独立的 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；这个 Bearer 只校验 Java 代理调用方，Java 会在转发前删除它，不能替代上游 `Auth-Token`。旧 `internal_model_proxy_settings` 仅为滚动升级兼容保留。opencode 公共配置文件中应配置内部代理地址和 provider header，完整样例见 `docs/api/http-api.md` 的“opencode 公共配置样例”；114 单后端可直接使用 `deploy/internal/opencode.jsonc.example`。所有 Java 节点完成后端升级前不得开放不同 Provider Token 的页面操作。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|

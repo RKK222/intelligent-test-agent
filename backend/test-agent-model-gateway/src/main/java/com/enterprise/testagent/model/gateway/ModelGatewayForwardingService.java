@@ -481,7 +481,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
                 traceId,
                 contentType,
                 accept);
-        // 不复制 Authorization、provider、UCID 或其他客户端 Header。
+        // 不复制 Authorization、Auth-Token、provider、UCID 或其他客户端 Header。
     }
 
     private void copySafeResponseHeaders(HttpHeaders target, HttpHeaders source) {

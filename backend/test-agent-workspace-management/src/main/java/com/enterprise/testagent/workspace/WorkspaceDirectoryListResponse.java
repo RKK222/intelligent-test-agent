@@ -8,5 +8,13 @@ import java.util.List;
 public record WorkspaceDirectoryListResponse(
         String path,
         String parentPath,
+        String existingWorkspaceId,
         List<WorkspaceDirectoryEntryResponse> entries) {
+
+    public WorkspaceDirectoryListResponse(
+            String path,
+            String parentPath,
+            List<WorkspaceDirectoryEntryResponse> entries) {
+        this(path, parentPath, null, entries);
+    }
 }

@@ -32,6 +32,7 @@ public class AgentConfigOperationWebSocketHandler implements WebSocketHandler {
     private final AgentConfigProgressHub progressHub;
     private final ObjectMapper objectMapper;
     private final Set<String> allowedOrigins;
+    private final boolean allowAnyOrigin;
 
     public AgentConfigOperationWebSocketHandler(
             AgentConfigOperationTicketService ticketService,
@@ -44,10 +45,14 @@ public class AgentConfigOperationWebSocketHandler implements WebSocketHandler {
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
         this.progressHub = Objects.requireNonNull(progressHub, "progressHub must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
+        // 与文件和应用源码进度 WebSocket 保持一致：test profile 可显式用 * 放开来源，
+        // 生产仍应配置精确 Origin；即使放开来源也必须消费一次性 ticket。
+        Set<String> configuredOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
                 .filter(origin -> !origin.isBlank())
                 .toList());
+        this.allowAnyOrigin = configuredOrigins.size() == 1 && configuredOrigins.contains("*");
+        this.allowedOrigins = allowAnyOrigin ? Set.of() : configuredOrigins;
     }
 
     @Override
@@ -56,7 +61,7 @@ public class AgentConfigOperationWebSocketHandler implements WebSocketHandler {
         AgentConfigOperationTicket ticket;
         try {
             String origin = session.getHandshakeInfo().getHeaders().getOrigin();
-            if (!allowedOrigins.contains(origin)) {
+            if (!allowAnyOrigin && !allowedOrigins.contains(origin)) {
                 return sendAndClose(session, error("FORBIDDEN", "origin denied", traceId, Map.of()));
             }
             ticket = ticketService.consume(query(session.getHandshakeInfo().getUri(), "ticket"), origin);

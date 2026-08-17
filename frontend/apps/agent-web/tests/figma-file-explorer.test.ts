@@ -6,6 +6,7 @@ import AgentConfigPanel from "../src/components/AgentConfigPanel.vue";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
 import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
+import fileExplorerSource from "../src/components/FigmaFileExplorer.vue?raw";
 import { FileExplorer } from "@test-agent/file-explorer";
 
 vi.mock("@test-agent/workbench-shell", async () =>
@@ -197,33 +198,30 @@ describe("FigmaFileExplorer", () => {
     expect(sections[0].attributes("style")).toContain("flex: 1");
     expect(sections[1].classes()).not.toContain("is-expanded");
     expect(sections[1].text()).toContain("Agents");
-    expect(wrapper.get('[data-onboarding="workspace-reference"]').attributes("aria-label")).toBe("打开外部页面");
+    expect(wrapper.get('[data-onboarding="workspace-reference"]').attributes("aria-label")).toBe("从 TCDS 导入需求");
   });
 
-  it("only enables the external page when a physical workspace root is available", async () => {
-    vi.stubEnv("VITE_IFRAME_URL", "https://mimo.example/#/dashboard/create");
-    try {
-      const wrapper = shallowMount(FigmaFileExplorer, {
-        props: {
-          workspaceId: "wrk_personal",
-          workspaceRootPath: "personalworktree:20260806/usr_1/demo",
-          entriesByDirectory: { "": [] },
-          expandedDirectories: new Set<string>(),
-          changedFiles: []
-        }
-      });
-      const button = wrapper.get('button[aria-label="打开外部页面"]');
+  it("enables same-origin requirement import from workspace id and write access without a physical root", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        canWrite: false,
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+    const button = wrapper.get('button[aria-label="从 TCDS 导入需求"]');
 
-      expect(button.attributes("disabled")).toBeDefined();
-      expect(button.attributes("title")).toBe("工作区物理路径不可用");
-
-      await wrapper.setProps({ workspaceRootPath: "/data/workspaces/demo" });
-
-      expect(button.attributes("disabled")).toBeUndefined();
-      expect(button.attributes("title")).toBe("打开外部页面");
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    expect(button.attributes("disabled")).toBeDefined();
+    await wrapper.setProps({ canWrite: true });
+    expect(button.attributes("disabled")).toBeUndefined();
+    expect(button.attributes("title")).toBe("从 TCDS 导入需求");
+    expect(fileExplorerSource).not.toContain("VITE_IFRAME_URL");
+    expect(fileExplorerSource).toContain('new URL("/workspace-requirement-import/", window.location.origin)');
+    expect(fileExplorerSource).toContain("event.origin !== window.location.origin");
+    expect(fileExplorerSource).toContain("event.source !== iframeRef.value?.contentWindow");
+    expect(fileExplorerSource).not.toContain("postMessage({type:'FUNC_DISPATCH'");
   });
 
   it("shows the total diff count reported by all three change scopes", async () => {

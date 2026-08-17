@@ -136,11 +136,12 @@ cp .env.local.example .env.local
 | `TEST_AGENT_OPENCODE_BASE_URL` | 本地脚本判断是否启动 opencode-manager 和端口池的地址，不再作为 Java 固定 opencode node 配置。 |
 | `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
 | `TEST_AGENT_DEPLOYMENT_MODE` | 部署模式：`external`（外部部署，默认）或 `internal`（企业内部部署）。 |
+| `TEST_AGENT_TCDS_BASE_URL` | TCDS HTTP/HTTPS 基础地址；默认使用现场确认的企业局域网入口 `http://tcds-prod.sdc.icbc:9080`，其它环境可显式覆盖。 |
 | `TEST_AGENT_SERVER_ADVERTISED_HOST` | 当前 Java、XXL executor 和用户 opencode server 对其它节点可访问的主机地址；缺失时统一复用现有内网 IPv4 探测。 |
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 历史兼容项。前端对话框模型/供应商目录已统一走 opencode 原生 `/api/model`、`/api/provider`，不再从数据库模型目录读取。 |
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |
-| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。`local` profile 未配置时按本次 JVM 启动生成临时随机值且不落盘；其它 profile 仍要求显式配置或使用自身受控测试默认值。 |
+| `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。该 Key 只用于 OpenCode → Java 的 `Authorization: Bearer`，不是企业 AI 上游供应商 Token；Java 向上游改用 `Auth-Token`，保证同一请求的 `ucid` 生效。 |
 | `TEST_AGENT_LOBEHUB_HMAC_SECRET` | LobeHub 服务兑换/撤销共享 HMAC secret，至少 32 字节；不得进入公共参数或日志。 |
 | `TEST_AGENT_LOBEHUB_CLIENT_ID` / `TEST_AGENT_LOBEHUB_TICKET_TTL` / `TEST_AGENT_LOBEHUB_GRANT_TTL` | 模型委托 client 与票据/委托生命周期；默认 `lobehub/60s/30d`。 |
 | `TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW` / `TEST_AGENT_LOBEHUB_NONCE_TTL` | 服务 HMAC 时钟偏差和 nonce 防重放窗口；默认 `60s/120s`。 |
@@ -149,6 +150,8 @@ cp .env.local.example .env.local
 | `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
 | `TEST_AGENT_ENTERPRISE_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `enterprise-openai` 地址一致。 |
 | `TEST_AGENT_ENTERPRISE_OPENAI_UCID_HEADER_NAME` | 历史兼容项；新实现固定由 opencode 配置把环境变量 `ENTERPRISE_UCID` 注入请求头 `ucid`。 |
+
+企业 AI 上游自身支持两种供应商 Token 鉴权：`Authorization: Bearer <供应商关联 Token>` 可以完成接口鉴权，但同一请求携带的 `ucid` 不生效；`Auth-Token: <供应商关联 Token>` 才会同时让 `ucid` 生效。平台的真实代理、能力探测和可观测探活固定使用后者，不允许把内部代理 Bearer Key 与上游供应商 Token 混用。
 
 `guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh`、`restart-dev-services.sh --profile guo --env-file .env.local` 或 `restart-dev-services.ps1 -Profile guo -EnvFile .env.local` 时，`.env.local` 仍可覆盖 yml，便于本地联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile，test profile 下默认启动本机 Go manager，即使 `.env.test` 中 `TEST_AGENT_OPENCODE_BASE_URL` 指向共享测试地址；停止 manager 时会清理其托管的用户 opencode 子进程和 state JSON，防止端口池残留进程导致下次初始化失败。每个稳定 `linuxServerId` 只部署一个 worker；生产和本地都不配置人工 `containerId/managerId`，Go manager 会从 `.serverid` 自动派生稳定 SHA-256 ID，hostname 只作为 `containerName` 展示。
 

@@ -159,10 +159,13 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 公共保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` → `POST /agent-config/public/runtime-reload` → `PersonalAgentConfigRuntimeReloadService` | Controller 把同步等待 dispose 的本地调用或跨服务器转发调度到 `boundedElastic`，避免在 WebFlux 事件线程调用 `block()`；随后校验 worktree owner/服务器，原子切换 `{sessionPath}/.testagent-runtime/current-public-config` 到本人公共 worktree，再只调用本人进程 `/global/dispose` |
 | 应用保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` | 当前用户在个人 worktree 保存后直接调用 `disposeGlobal()`；OpenCode 下一次按请求 directory 重读该个人 worktree `.opencode` |
 | 公共发布热加载 | `PublicAgentConfigRolloutService` 的 PUBLIC scope | 各服务器共享 Git 副本固定提交同步后，逐进程等待全部 Session 空闲，恢复共享配置链接并调用 `/global/dispose`；升级前直接读取共享路径的旧进程兼容只 dispose |
+| 发布失败恢复 | `GitChangesPanel` + `ManagedWorkspaceApplicationService` | 本地提交成功后网络失败保留待推送白名单；刷新可幂等重试且不重复 commit。后端按远端包含/未包含/未知三态处理 feature 临时提交，未知状态保留 PREPARING 闸门；用户可只清除浏览器提醒，管理员仍可按 traceId 排查 |
 
 兼容接口 `POST /personal-workspaces/{id}/sync-from-application` 不再逐文件复制，也不接受 `force` 覆盖个人内容；`files: []` 是“合并整个固定 feature commit”的合法请求，旧客户端传非空路径时只校验格式，不以路径缩小合并范围。
 
 同一 `appId + repositoryId + version + branch` 的多个应用工作空间版本共用物理 feature 仓库和目标提交；测试需覆盖历史 target 不一致自动收敛、新增目录 `.gitkeep` 提交并 push、历史个人记录指向仓库根时修复到模板子目录，以及子目录仍缺失时拒绝回退到仓库根。设置页初始版本失败补偿必须覆盖三种边界：本次新模板且无版本时删除、既有模板失败时保留、版本已经持久化后再失败时保留；还需覆盖快速切换两个版本库后先发请求迟到，分支下拉只保留最后所选版本库的响应。
+
+真实 UI 回归必须至少覆盖：测试工作区个人 worktree 本地提交、测试工作区应用 worktree 提交并推送、自动化版本库个人 worktree 本地提交、公共 Agent 推送与 rollout target `DISPOSED`；另一提交者推进同一远端后的非冲突 merge、add/add 冲突、中止合并、采用远程并完成 merge；确定性断网和偶发 SSH 断连后的重复重试；无应用成员用户看不到目标应用，且非 `SUPER_ADMIN` 不出现公共提交/推送入口。失败弹框必须展示稳定错误码、脱敏 `gitFailureHint` 和 traceId，不能只停在转圈或“执行未完成”。
 
 ## 5. 可重复测试数据
 
@@ -338,3 +341,16 @@ docker logs <backend-container> 2>&1 | grep -E \
 | 可观测性 | 通过：每个 Git 案例核对 ref/HEAD/index，每个热加载案例用 R1→R2 同进程复查。 | 平台若增加 rollout 状态 API，应把 target、pending user 和最后一次 dispose 结果作为首选证据。 |
 | 数据隔离 | 通过：可执行 push 只指向 `.tmp` 本地 bare remote；真实 worktree 造数默认未提交且不 push。 | 使用真实平台正式发布案例前，执行人必须再次确认远程 URL 和测试 feature。 |
 | 回归与清理 | 通过：fixture 可直接删除；真实个人数据按唯一 tag 选择性回退，不处理其他用户 Diff。 | 执行结束在测试记录中保存 fixture README、关键 ref 和热加载前后清单作为证据。 |
+
+## 9. 本地平台真实端到端记录（2026-08-14）
+
+本轮在 `release` 的本地 test profile 和内网 GitLab 专用私有仓库上，通过平台 HTTP API 执行了四条链路；仓库仅用于验收，没有使用团队公共业务分支。浏览器同时登录 `http://127.0.0.1:3000`，确认工作台能加载对应测试应用和自动化工作区。
+
+| 链路 | 平台结果 | Git/运行态事实 |
+| --- | --- | --- |
+| 测试工作区个人 worktree 本地提交 | `LOCAL_COMMITTED`、`remotePushed=false` | 个人提交先生成 `24565915e8847736e66d15195841021d26aa6d34`；远端 feature 当时仍为 `bb3694cd455c6d3bd83f56954c96881666dfcd7d`，证明没有误推个人分支。后续应用发布反向同步后个人 HEAD 合入发布提交属于预期。 |
+| 测试工作区应用 worktree 提交推送 | `PUBLISHED`、`remotePushed=true`、`remoteBranch=feature_testagent_20260813` | 响应、应用副本 HEAD 和远端 feature 均为 `f3f6760477aa7dcf59c0c1780bd46b1deb0c773a`。 |
+| 自动化版本库个人 worktree 本地提交 | `LOCAL_COMMITTED`、`remotePushed=false` | 个人 HEAD 为 `9a45b196ab4d31a994fb57c95469026abaef3f03`；远端 `main` 保持 `ef1eeed2bd9781d7c5d83a477f559f4bcee0e908`。 |
+| 公共 Agent 提交并推送 | `SUCCEEDED`、远端分支 `master` | 修复并重启后从 `3000` 页面直接点击一次“提交并推送”，五步实时进度均为 `SUCCEEDED`，结果明确展示本地提交/远端推送各 1 个文件和远端 commit `d2c941e50854cba7be43bddf516dfc5af2246321`。最终远端 `master`、共享副本和稳定个人 worktree三者一致；rollout `acr_da1a7ff67b7a4be0b73dbd81ba7d13a5` 为 `COMPLETED`，`targetDisposed=1`、`targetPending=0`、`worktreePending=0`、`lastError=null`。dispose 后页面消息门禁重新开放。 |
+
+公共链路还保留一个日期型历史 worktree 用于兼容验证。重启后的旧补偿任务被安全终止；再次发布时该历史记录没有进入新 rollout，稳定 worktree 正常同步，证明不会再出现界面成功但后台长期保留 `PENDING` 的状态。UI 首轮复测发现本地 test profile 的 CORS 单值 `*` 未被 Agent 配置进度 WebSocket 识别，通道先返回无 `operationId` 的 `FORBIDDEN/origin denied`，而发布 HTTP 仍继续并最终成功；现已与文件、应用源码进度 WebSocket 对齐通配配置语义，并让前端将无 operationId 的握手拒绝只标记为“实时进度不可用”。使用新产物重启后三次页面发布（包含失败恢复和一步式提交推送）均未再出现来源拒绝、先失败后转圈或成功但无远端证据。

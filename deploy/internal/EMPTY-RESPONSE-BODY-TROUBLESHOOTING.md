@@ -472,7 +472,7 @@ OpenCode 1.18.4 会扫描配置目录下的 `tool/tools` JavaScript 和 TypeScri
 nc -vz ai-code.sdc.icbc 9070
 ```
 
-然后绕过用户 OpenCode，直接验证“本机 Java → 9070”正式模型链路。代理 key 从 `backend.env` 只读加载到 shell 变量，不打印；UCID 交互输入，不写入命令历史：
+然后绕过用户 OpenCode，直接验证“本机 Java → 9070”正式模型链路。下方 `Authorization: Bearer` 携带的是 OpenCode → Java 的内部代理 Key，只用于通过 Java 代理鉴权；Java 转发时会删除它，并以数据库中的供应商 Token 生成上游 `Auth-Token`。不要把这里的代理 Bearer 误改成供应商 Bearer：企业上游使用供应商 Bearer 时虽然可鉴权，但 `ucid` 不生效，只有 `Auth-Token` 才会让 `ucid` 生效。代理 key 从 `backend.env` 只读加载到 shell 变量，不打印；UCID 交互输入，不写入命令历史：
 
 ```bash
 TEST_AGENT_DIAG_PROXY_KEY="$(sed -n 's/^TEST_AGENT_INTERNAL_PROXY_API_KEY=//p' \

@@ -55,6 +55,7 @@ public class InternalModelProviderProbeService {
 
     /** 探活记录使用的固定调用方标识，不关联真实用户。 */
     public static final String PROBE_UCID = "platform-probe";
+    private static final String AUTH_TOKEN_HEADER = "Auth-Token";
     private static final String UCID_HEADER = "ucid";
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
@@ -304,7 +305,9 @@ public class InternalModelProviderProbeService {
     }
 
     private void applyHeaders(HttpHeaders headers, String authToken, String traceId) {
-        headers.setBearerAuth(authToken);
+        // 探活与真实代理必须使用同一企业网关鉴权协议，避免业务可用而探活误报失败。
+        headers.remove(HttpHeaders.AUTHORIZATION);
+        headers.set(AUTH_TOKEN_HEADER, authToken.trim());
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setAccept(List.of(MediaType.TEXT_EVENT_STREAM));
         headers.set(UCID_HEADER, PROBE_UCID);

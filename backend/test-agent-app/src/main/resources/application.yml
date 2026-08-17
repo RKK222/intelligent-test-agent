@@ -84,7 +84,8 @@ test-agent:
     dev-email-domain: ${TEST_AGENT_LOBEHUB_DEV_EMAIL_DOMAIN:lobehub.local}
     dev-target-enabled: ${TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED:true}
   third-party-api:
-    base-url: http://tcds-prod.sdc.icbc
+    # TCDS 仅在企业局域网可达；保留环境变量覆盖，默认使用现场确认的统一入口。
+    base-url: ${TEST_AGENT_TCDS_BASE_URL:http://tcds-prod.sdc.icbc:9080}
   deployment:
     mode: ${TEST_AGENT_DEPLOYMENT_MODE:external}
   security:

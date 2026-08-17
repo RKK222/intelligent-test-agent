@@ -18,41 +18,43 @@ export function normalizePhysicalAbsolutePath(value?: string | null): string | u
   return undefined;
 }
 
-/** 新后端显式字段优先；兼容旧后端时只接受确实为绝对路径的 rootPath。 */
+/** 普通工作区只接受专用字段；rootPath 已是逻辑定位符，禁止再作为绝对路径兜底。 */
 export function workspacePhysicalRootPath(
   workspace?: Pick<Workspace, "rootPath" | "physicalRootPath"> | null
 ): string | undefined {
-  return normalizePhysicalAbsolutePath(workspace?.physicalRootPath)
-    ?? normalizePhysicalAbsolutePath(workspace?.rootPath);
+  return normalizePhysicalAbsolutePath(workspace?.physicalRootPath);
 }
 
 /**
- * 生成复制入口使用的文件绝对路径。显式 copyPath 非绝对路径时直接失败关闭，
- * 普通相对文件只有在工作区物理根存在且不含内部 URI scheme 时才允许拼接。
+ * 将可信工作区工具路径归一化为相对路径。没有物理根时绝对路径必须失败关闭，不能把宿主机路径
+ * 误发给文件 WebSocket；后端生成的 diff.proposed 会继续提供可信的工作区相对路径。
  */
-export function resolvePhysicalFilePath(input: {
-  explicitPath?: string;
-  workspaceRootPath?: string;
-  filePath?: string;
-}): string | undefined {
-  if (input.explicitPath !== undefined) {
-    return normalizePhysicalAbsolutePath(input.explicitPath);
+export function normalizeWorkspaceRelativePath(
+  raw: string,
+  physicalRootPath?: string
+): string | undefined {
+  let path = raw.trim().replace(/^([ab])\//, "").replace(/\\/g, "/");
+  const root = normalizePhysicalAbsolutePath(physicalRootPath)?.replace(/\/+$/, "");
+  if (root) {
+    if (path === root) path = "";
+    else if (path.startsWith(`${root}/`)) path = path.slice(root.length + 1);
   }
-  const filePath = input.filePath?.trim().replace(/\\/g, "/");
-  if (!filePath) return undefined;
-  const absoluteFile = normalizePhysicalAbsolutePath(filePath);
-  if (absoluteFile) return absoluteFile;
-  if (URI_LIKE_PATH.test(filePath)) {
+  while (path.startsWith("./")) path = path.slice(2);
+  path = path.replace(/\/+$/, "").replace(/\/+/g, "/");
+  if (!path || path.startsWith("/") || WINDOWS_DRIVE_ABSOLUTE.test(path) || URI_LIKE_PATH.test(path)) {
     return undefined;
   }
-  const root = normalizePhysicalAbsolutePath(input.workspaceRootPath);
-  if (!root) return undefined;
-  const rootWithoutTrailingSlash = root.replace(/\/+$/, "");
-  const relativePath = filePath.replace(/^\.\//, "").replace(/^\/+/, "");
-  if (!relativePath || relativePath.split("/").some((segment) => segment === "..")) {
-    return undefined;
-  }
-  return rootWithoutTrailingSlash
-    ? `${rootWithoutTrailingSlash}/${relativePath}`
-    : `/${relativePath}`;
+  if (path.split("/").some((segment) => segment === "..")) return undefined;
+  return path;
+}
+
+/** 批量过滤并归一化 Diff/历史文件；非法绝对路径不得回退到原值。 */
+export function normalizeWorkspaceRelativeEntries<T extends { path: string }>(
+  entries: readonly T[],
+  physicalRootPath?: string
+): T[] {
+  return entries.flatMap((entry) => {
+    const path = normalizeWorkspaceRelativePath(entry.path, physicalRootPath);
+    return path ? [{ ...entry, path }] : [];
+  });
 }

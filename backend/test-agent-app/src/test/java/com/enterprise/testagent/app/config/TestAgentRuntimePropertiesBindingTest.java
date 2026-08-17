@@ -43,6 +43,19 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void tcdsUsesConfirmedIntranetAddressByDefaultAndAllowsDeploymentOverride() {
+        profileContextRunner.run(context -> assertThat(context.getEnvironment()
+                        .getProperty("test-agent.third-party-api.base-url"))
+                .isEqualTo("http://tcds-prod.sdc.icbc:9080"));
+
+        profileContextRunner
+                .withPropertyValues("TEST_AGENT_TCDS_BASE_URL=https://tcds-override.internal")
+                .run(context -> assertThat(context.getEnvironment()
+                                .getProperty("test-agent.third-party-api.base-url"))
+                        .isEqualTo("https://tcds-override.internal"));
+    }
+
+    @Test
     void xxlAdminDatasourceDefaultsDoNotLeakIntoPlatformContext() {
         profileContextRunner
                 .withPropertyValues(
@@ -204,33 +217,6 @@ class TestAgentRuntimePropertiesBindingTest {
                             .isEqualTo("jdbc:postgresql://test-postgres.example.internal:25432/test_agent_ci");
                     assertThat(properties.getOpencode().getManagerControl().getToken()).isEqualTo("manager-secret");
                 });
-    }
-
-    @Test
-    void localProfileGeneratesInternalModelProxyApiKeyWhenEnvironmentValueIsMissing() {
-        profileContextRunner
-                .withPropertyValues("spring.profiles.active=local")
-                .run(context -> assertThat(context.getEnvironment()
-                        .getProperty("test-agent.internal-model-proxy.api-key"))
-                        .isNotBlank());
-    }
-
-    @Test
-    void localProfilePrefersExplicitInternalModelProxyApiKey() {
-        profileContextRunner
-                .withPropertyValues(
-                        "spring.profiles.active=local",
-                        "TEST_AGENT_INTERNAL_PROXY_API_KEY=explicit-local-proxy-key")
-                .run(context -> assertThat(context.getEnvironment()
-                        .getProperty("test-agent.internal-model-proxy.api-key"))
-                        .isEqualTo("explicit-local-proxy-key"));
-    }
-
-    @Test
-    void defaultProfileDoesNotGenerateInternalModelProxyApiKey() {
-        profileContextRunner.run(context -> assertThat(context.getEnvironment()
-                .getProperty("test-agent.internal-model-proxy.api-key"))
-                .isNull());
     }
 
     @Test

@@ -9,9 +9,11 @@ import processInitializationManual from "../../../user-manual/docs/guide/process
 import referenceConfigManual from "../../../user-manual/docs/guide/reference-config.md?raw";
 import settingsManual from "../../../user-manual/docs/guide/settings.md?raw";
 import workspaceManual from "../../../user-manual/docs/guide/workspace.md?raw";
+import weeklyUpdatesManual from "../../../user-manual/docs/guide/weekly-updates.md?raw";
 
 export type HelpTopicId =
   | "getting-started"
+  | "weekly-updates"
   | "feature-overview"
   | "first-time-setup"
   | "process-initialization"
@@ -43,6 +45,13 @@ export const HELP_TOPICS: HelpTopic[] = [
     description: "首次使用的完整顺序",
     path: "guide/getting-started.html",
     content: gettingStartedManual
+  },
+  {
+    id: "weekly-updates",
+    label: "每周新功能",
+    description: "最新能力、使用前配置与操作方法",
+    path: "guide/weekly-updates.html",
+    content: weeklyUpdatesManual
   },
   {
     id: "feature-overview",
@@ -150,8 +159,8 @@ export function stripMarkdownFrontmatter(content: string): string {
 export function buildManualQuestionPrompt(topic: HelpTopicId, question: string): string {
   const currentTopic = helpTopicById(topic);
   const normalizedQuestion = question.trim().slice(0, 500);
-  // 常见问题页合并了问答和排查，单独放宽到 5600 字，避免宠物只读到前半页。
-  const contextLimit = currentTopic.id === "faq" ? 5_600 : 2_800;
+  // 常见问题和周更页都覆盖多个场景，单独放宽到 5600 字，避免宠物只读到前半页。
+  const contextLimit = currentTopic.id === "faq" || currentTopic.id === "weekly-updates" ? 5_600 : 2_800;
   const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, contextLimit);
   return [
     "你正在回答 MIMO 测试智能体用户手册问题。请只依据下方内置手册资料作答；资料没有覆盖时直接说明，并建议用户联系平台管理员，不要编造按钮或操作路径。",

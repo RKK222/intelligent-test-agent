@@ -984,7 +984,6 @@ class ConfigurationManagementApplicationServiceTest {
                 sshKeyFixtures.encryptionService(),
                 org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
                 noReferenceRepositoryState());
-
         SshKeyTestFixtures.EncryptedPayload payload = sshKeyFixtures.encryptPayload(PRIVATE_KEY);
         assertThatThrownBy(() -> service.addSshKey(
                 userId, "work", payload.encryptedPrivateKey(), payload.encryptedAesKey(),
@@ -1009,6 +1008,8 @@ class ConfigurationManagementApplicationServiceTest {
                 sshKeyFixtures.encryptionService(),
                 org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
                 noReferenceRepositoryState());
+        ScmGitIdentitySyncDispatcher dispatcher = org.mockito.Mockito.mock(ScmGitIdentitySyncDispatcher.class);
+        service.setScmGitIdentitySyncDispatcher(dispatcher);
 
         SshKeyTestFixtures.EncryptedPayload payload = sshKeyFixtures.encryptPayload(PRIVATE_KEY);
         ConfigurationManagementResponses.SshKeyResponse response = service.addSshKey(
@@ -1022,6 +1023,7 @@ class ConfigurationManagementApplicationServiceTest {
                         && payload.encryptedPrivateKey().equals(saved.encryptedPrivateKey())
                         && payload.encryptedAesKey().equals(saved.encryptedAesKey())
                         && payload.encryptionNonce().equals(saved.encryptionNonce())));
+        verify(dispatcher).request(userId);
     }
 
     private static GitCloneCacheService createTestCacheService() {

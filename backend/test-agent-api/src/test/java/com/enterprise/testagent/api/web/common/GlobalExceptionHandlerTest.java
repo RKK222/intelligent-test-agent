@@ -45,6 +45,8 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(400);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().code()).isEqualTo("VALIDATION_ERROR");
+        assertThat(response.getBody().message()).isEqualTo("请求参数无效");
+        assertThat(response.getBody().message()).doesNotContain("bad request");
         assertThat(response.getBody().traceId()).isEqualTo("trace_1234567890abcdef");
     }
 }

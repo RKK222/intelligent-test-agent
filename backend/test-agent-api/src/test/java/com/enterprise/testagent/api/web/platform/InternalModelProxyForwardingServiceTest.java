@@ -13,6 +13,7 @@ import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntim
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
+import com.enterprise.testagent.model.gateway.OpenAiUpstreamSupport;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelSseStreamObserver;
@@ -141,9 +142,11 @@ class InternalModelProxyForwardingServiceTest {
 
     @Test
     void forwardsEachProviderWithItsProviderIdMappedToken() {
+        List<String> authTokenHeaders = new CopyOnWriteArrayList<>();
         List<String> authorizationHeaders = new CopyOnWriteArrayList<>();
         WebClient webClient = WebClient.builder()
                 .exchangeFunction(request -> {
+                    authTokenHeaders.add(request.headers().getFirst(OpenAiUpstreamSupport.AUTH_TOKEN_HEADER));
                     authorizationHeaders.add(request.headers().getFirst(HttpHeaders.AUTHORIZATION));
                     return Mono.just(org.springframework.web.reactive.function.client.ClientResponse
                             .create(HttpStatus.OK)
@@ -161,7 +164,8 @@ class InternalModelProxyForwardingServiceTest {
                         service.forward(exchange("deepseek-prod"), REQUEST_BODY, "trace_deepseek")))
                 .verifyComplete();
 
-        assertThat(authorizationHeaders).containsExactlyInAnyOrder("Bearer qwen-token", "Bearer deepseek-token");
+        assertThat(authTokenHeaders).containsExactlyInAnyOrder("qwen-token", "deepseek-token");
+        assertThat(authorizationHeaders).containsOnlyNulls();
     }
 
     @Test

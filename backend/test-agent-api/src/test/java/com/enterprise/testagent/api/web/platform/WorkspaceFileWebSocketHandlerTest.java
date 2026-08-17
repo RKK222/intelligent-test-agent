@@ -44,6 +44,7 @@ import com.enterprise.testagent.workspace.WorkspaceViewLocator;
 import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
 import com.enterprise.testagent.workspace.WorkspaceViewReadResponse;
 import com.enterprise.testagent.workspace.WorkspaceViewSource;
+import com.enterprise.testagent.workspace.RequirementImportApplicationService;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
@@ -1233,6 +1234,116 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void importsRequirementsWithServerTicketIdentityAndTrustedSelectionOnly() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        RequirementImportApplicationService importService = Mockito.mock(RequirementImportApplicationService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        WorkspaceFileSocketTicket ticket = workspaceTicket(workspaceId.value(), "u001");
+        when(ticketService.consume("wft_workspace", "http://localhost:3000")).thenReturn(ticket);
+        when(importService.importRequirements(Mockito.eq("u001"), Mockito.any()))
+                .thenReturn(new RequirementImportApplicationService.ImportResult(
+                        "SUCCEEDED", 6, 1, 0, 0, List.of()));
+        WorkspaceFileWebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        handler.setRequirementImportService(importService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_import","op":"workspace.requirement-import","params":{"workspaceId":"wrk_1234567890abcdef","appShortName":"APP-A","editionId":"2026年8月","selectedSubItemNos":["SI-01"],"requestId":"browser-1","documentUrl":"https://attacker.example/doc"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"type\":\"result\"", "\"status\":\"SUCCEEDED\""));
+        verify(workspaceService).requireWorkspaceWriteAccess(
+                workspaceId, new UserId("usr_1234567890abcdef"), false);
+        var command = org.mockito.ArgumentCaptor.forClass(RequirementImportApplicationService.ImportCommand.class);
+        verify(importService).importRequirements(Mockito.eq("u001"), command.capture());
+        assertThat(command.getValue().selectedSubItemNos()).containsExactly("SI-01");
+        assertThat(command.getValue().toString()).doesNotContain("attacker.example", "documentUrl");
+    }
+
+    @Test
+    void listsRequirementImportStateThroughTheAuthorizedWorkspaceSocket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        RequirementImportApplicationService importService = Mockito.mock(RequirementImportApplicationService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        WorkspaceFileSocketTicket ticket = workspaceTicket(workspaceId.value(), "u001");
+        when(ticketService.consume("wft_workspace", "http://localhost:3000")).thenReturn(ticket);
+        when(importService.listWorkspaceItems("u001", workspaceId.value(), "APP-A", "2026年8月"))
+                .thenReturn(List.of(new RequirementImportApplicationService.ItemOption(
+                        "I-01",
+                        "登录需求",
+                        List.of(new RequirementImportApplicationService.SubItemOption(
+                                "SI-01", "登录校验", true)),
+                        true)));
+        WorkspaceFileWebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        handler.setRequirementImportService(importService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_items","op":"workspace.requirement-import-items","params":{"workspaceId":"wrk_1234567890abcdef","appShortName":"APP-A","editionId":"2026年8月"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message)
+                        .contains("\"type\":\"result\"", "\"itemNo\":\"SI-01\"", "\"imported\":true")
+                        .doesNotContain("documentUrl", "physicalRootPath"));
+        verify(workspaceService).requireWorkspaceWriteAccess(
+                workspaceId, new UserId("usr_1234567890abcdef"), false);
+        verify(importService).listWorkspaceItems("u001", workspaceId.value(), "APP-A", "2026年8月");
+    }
+
+    @Test
+    void sharedWorkspaceCannotReadImportStateOrImportRequirements() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        RequirementImportApplicationService importService = Mockito.mock(RequirementImportApplicationService.class);
+        when(ticketService.consume("wft_shared", "http://localhost:3000")).thenReturn(sharedWorkspaceTicket(true));
+        WorkspaceFileWebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        handler.setRequirementImportService(importService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_shared",
+                List.of(
+                        """
+                        {"id":"req_items","op":"workspace.requirement-import-items","params":{"workspaceId":"wrk_1234567890abcdef","appShortName":"APP-A","editionId":"2026年8月"}}
+                        """,
+                        """
+                        {"id":"req_import","op":"workspace.requirement-import","params":{"workspaceId":"wrk_1234567890abcdef","appShortName":"APP-A","editionId":"2026年8月","selectedSubItemNos":["SI-01"],"requestId":"browser-1"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(2).allSatisfy(message ->
+                assertThat(message).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
+        verify(importService, never()).importRequirements(Mockito.anyString(), Mockito.any());
+        verify(importService, never()).listWorkspaceItems(
+                Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.anyString());
+    }
+
+    @Test
     void supportReadOnlyTicketFiltersAgentConfigAndAuditsBeforeReturningList() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
@@ -1430,6 +1541,18 @@ class WorkspaceFileWebSocketHandlerTest {
                 null,
                 TRACE_ID,
                 NOW.plusSeconds(60));
+    }
+
+    private static WorkspaceFileSocketTicket workspaceTicket(String workspaceId, String unifiedAuthId) {
+        WorkspaceFileSocketTicket ticket = workspaceTicket(workspaceId);
+        return new WorkspaceFileSocketTicket(
+                ticket.ticket(), ticket.workspaceId(), ticket.linuxServerId(), ticket.agentLinuxServerId(),
+                ticket.appSourceWorkspace(), ticket.superAdmin(), ticket.appAdmin(), ticket.userId(),
+                ticket.mode(), ticket.scope(), ticket.worktreeId(), ticket.supportReadOnly(),
+                ticket.supportGrantId(), ticket.supportGrantTokenDigest(), ticket.supportActorSessionDigest(),
+                ticket.supportTargetUserId(), ticket.traceId(), ticket.expiresAt(), ticket.shareId(),
+                ticket.shareVersion(), ticket.shareActorUserId(), ticket.executionOwnerUserId(),
+                ticket.shareCanChat(), ticket.shareExpiresAt(), ticket.shareSessionId(), unifiedAuthId);
     }
 
     private static WorkspaceFileSocketTicket sharedWorkspaceTicket(boolean canChat) {

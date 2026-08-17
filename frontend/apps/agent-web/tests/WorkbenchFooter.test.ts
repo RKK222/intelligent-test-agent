@@ -425,16 +425,16 @@ describe("WorkbenchFooter", () => {
       props: {
         showSave: true,
         writePath: "src/components/WorkbenchFooter.vue",
-        workspaceRootPath: "/workspace/project/"
-      }
+        workspaceId: "wrk_1"
+      },
+      global: { provide: { api: { resolveWorkspacePhysicalPath: vi.fn().mockResolvedValue("/workspace/project/src/components/WorkbenchFooter.vue") } } }
     });
 
     const copyButtons = wrapper.findAll(".ta-workbench-footer-copy-path");
 
     expect(copyButtons).toHaveLength(1);
     expect(copyButtons[0].text()).toBe("复制路径");
-    expect(copyButtons[0].attributes("title"))
-      .toBe("/workspace/project/src/components/WorkbenchFooter.vue");
+    expect(copyButtons[0].attributes("title")).toBe("复制绝对文件路径");
 
     await copyButtons[0].trigger("click");
     expect(mockWriteText).toHaveBeenCalledOnce();
@@ -459,8 +459,9 @@ describe("WorkbenchFooter", () => {
       props: {
         showSave: true,
         writePath: "src\\components\\WorkbenchFooter.vue",
-        workspaceRootPath: "C:\\workspace\\project\\"
-      }
+        workspaceId: "wrk_1"
+      },
+      global: { provide: { api: { resolveWorkspacePhysicalPath: vi.fn().mockResolvedValue("C:/workspace/project/src/components/WorkbenchFooter.vue") } } }
     });
 
     await wrapper.find(".ta-workbench-footer-copy-path").trigger("click");
@@ -481,14 +482,12 @@ describe("WorkbenchFooter", () => {
       props: {
         showSave: true,
         writePath: "agent-workspace:wrk_850cccb889474f4a84cf04fd90584134:::agents%2Fgit-worktree-opencode-baseline-20260717.md",
-        copyPath: "/workspace/F-COSS/workspace/.opencode/agents/git-worktree-opencode-baseline-20260717.md",
-        workspaceRootPath: "/workspace/F-COSS/workspace"
+        copyPath: "/workspace/F-COSS/workspace/.opencode/agents/git-worktree-opencode-baseline-20260717.md"
       }
     });
 
     const copyButton = wrapper.get(".ta-workbench-footer-copy-path");
-    expect(copyButton.attributes("title"))
-      .toBe("/workspace/F-COSS/workspace/.opencode/agents/git-worktree-opencode-baseline-20260717.md");
+    expect(copyButton.attributes("title")).toBe("复制绝对文件路径");
 
     await copyButton.trigger("click");
 
@@ -502,21 +501,32 @@ describe("WorkbenchFooter", () => {
     const logicalWorkspace = mount(WorkbenchFooter, {
       props: {
         showSave: true,
-        writePath: "src/main.ts",
-        workspaceRootPath: "personalworktree:20260806/usr_1/demo"
+        writePath: "src/main.ts"
       }
     });
     const relativeAgent = mount(WorkbenchFooter, {
       props: {
         showSave: true,
         writePath: "agent-workspace:wrk_1:::agents%2Freview.md",
-        copyPath: "agents/review.md",
-        workspaceRootPath: "/data/workspace"
+        copyPath: "agents/review.md"
       }
     });
 
     expect(logicalWorkspace.find(".ta-workbench-footer-copy-path").exists()).toBe(false);
     expect(relativeAgent.find(".ta-workbench-footer-copy-path").exists()).toBe(false);
+  });
+
+  it("does not expose physical path resolution for a workspace without an authorized runtime id", () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        writePath: "src/main.ts",
+        workspaceId: "wrk-source",
+        workspaceKind: "APP_SOURCE"
+      }
+    });
+
+    expect(wrapper.find(".ta-workbench-footer-copy-path").exists()).toBe(false);
   });
 
   it("renders locate button when writePath is defined, and emits locate on click", async () => {

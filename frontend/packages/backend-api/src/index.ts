@@ -226,6 +226,7 @@ import type {
   WorkspaceBackendServer,
   WorkspaceCreateOperation,
   WorkspaceDiff,
+  WorkspaceGitCommitResult,
   WorkspaceGitDiff,
   WorkspaceGitMergeCompletion,
   WorkspaceGitConflict,
@@ -234,6 +235,10 @@ import type {
   WorkspaceSyncResult,
   WorkspaceBranchPreference,
   WorkspaceDirectoryList,
+  RequirementImportApplication,
+  RequirementImportItem,
+  RequirementImportCommand,
+  RequirementImportResult,
   WorkspaceFileRoute,
   WorkspaceFileSocketTicketRequest,
   WorkspaceFileSocketTicketResponse,
@@ -450,6 +455,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const agentBase = `/api/internal/agent/${encodeURIComponent(agentId)}`;
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
+  const requirementImportBase = "/api/v1/requirement-import";
   const agentConfigBase = `${workspaceManagementBase}/agent-config`;
   const agentSkillHubBase = `${workspaceManagementBase}/agent-skill-hub`;
   const opencodeRuntimeBase = "/api/internal/platform/opencode-runtime";
@@ -1079,6 +1085,20 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     listWorkspaces: (page = 1, size = 20) =>
       request<PageResponse<Workspace>>(`${workspaceManagementBase}/workspaces?page=${page}&size=${size}`),
     getWorkspace: (workspaceId: string) => routedRequest<Workspace>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}`),
+    /** 体验目录、目标服务器与 Workspace ID 全部由后端依据当前用户进程分配，客户端不传选择参数。 */
+    openExperienceWorkspace: () => routedRequest<Workspace>(
+      `${workspaceManagementBase}/workspaces/experience/open`,
+      { method: "POST" }
+    ),
+    /** 用户失去体验资格或切换工作区时立即关闭对应文件连接。 */
+    closeWorkspaceFileSocket: (workspaceId: string) => {
+      const client = workspaceFileSockets.get(workspaceId);
+      workspaceFileSockets.delete(workspaceId);
+      client?.close();
+      const connecting = workspaceFileConnections.get(workspaceId);
+      workspaceFileConnections.delete(workspaceId);
+      void connecting?.then((pendingClient) => pendingClient.close()).catch(() => undefined);
+    },
     listManagedApplications: () => request<ManagedApplication[]>(`${workspaceManagementBase}/applications`),
     /** 仅返回当前应用关联的 APPLICATION_ASSET_REPOSITORY。 */
     listReferenceRepositories: (appId: string) =>
@@ -1220,6 +1240,12 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-unstage`,
         { method: "POST", body: JSON.stringify({ files }) }
+      ),
+    /** 体验工作区只建立本服务器 Git 提交，不进入任何发布或 push 程序。 */
+    commitExperienceWorkspace: (workspaceId: string, commitMessage: string, files: string[]) =>
+      routedRequest<WorkspaceGitCommitResult>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-commit`,
+        { method: "POST", body: JSON.stringify({ commitMessage, files }) }
       ),
     getWorkspaceGitConflict: (workspaceId: string, path: string) =>
       routedRequest<WorkspaceGitConflict>(
@@ -1409,6 +1435,24 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       workspaceFileRpc<void>(workspaceId, "workspace.delete", { path }),
     createDirectory: (workspaceId: string, path: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.mkdir", { path }),
+    resolveWorkspacePhysicalPath: (workspaceId: string, path: string) =>
+      workspaceFileRpc<string>(workspaceId, "workspace.resolve-physical-path", { path }),
+    listRequirementImportApplications: () =>
+      request<RequirementImportApplication[]>(`${requirementImportBase}/applications`),
+    listRequirementImportItems: (appShortName: string, editionId: string) =>
+      request<RequirementImportItem[]>(`${requirementImportBase}/sub-items${query({ appShortName, editionId })}`),
+    listWorkspaceRequirementImportItems: (workspaceId: string, appShortName: string, editionId: string) =>
+      workspaceFileRpc<RequirementImportItem[]>(
+        workspaceId,
+        "workspace.requirement-import-items",
+        { appShortName, editionId }
+      ),
+    importWorkspaceRequirements: (command: RequirementImportCommand) =>
+      workspaceFileRpc<RequirementImportResult>(
+        command.workspaceId,
+        "workspace.requirement-import",
+        command as unknown as Record<string, unknown>
+      ),
     searchFiles: async (workspaceId: string, query: string) => {
       const results = await workspaceFileRpc<BackendFileSearchResult[]>(workspaceId, "workspace.search", { query });
       return results.map((result) => ({
@@ -2064,6 +2108,14 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<PageResponse<SessionMessage>>(
         `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages${query({ page, size, refresh: options.refresh })}`
       ),
+    getSessionUserMessageForRun: (sessionId: string, runId: string) =>
+      routedRequest<SessionMessage>(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages/runs/${encodeURIComponent(runId)}/user`
+      ),
+    listSessionMessagesForRun: (sessionId: string, runId: string) =>
+      routedRequest<SessionMessage[]>(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/messages/runs/${encodeURIComponent(runId)}`
+      ),
     getNightExecutionSlots: () =>
       routedRequest<NightExecutionSlots>(`${opencodeRuntimeBase}/night-execution/slots`),
     createNightExecutionTask: (payload: CreateNightExecutionTaskPayload) =>
@@ -2163,6 +2215,13 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<UserOpencodeProcess>(agentPath("/processes/me/initialize"), {
         method: "POST",
         ...(operationId ? { body: JSON.stringify({ operationId }) } : {}),
+        timeoutMs: 120000
+      }),
+    /** 重启始终由后端按当前用户 binding 路由；confirmRunning 只确认取消活动 Run，不参与目标选择。 */
+    restartMyOpencodeProcess: (confirmRunning = false) =>
+      routedRequest<UserOpencodeProcess>(agentPath("/processes/me/restart"), {
+        method: "POST",
+        body: JSON.stringify({ confirmRunning }),
         timeoutMs: 120000
       }),
     getOpencodeProcessStartOperation: (operationId: string) =>

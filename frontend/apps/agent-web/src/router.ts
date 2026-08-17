@@ -20,6 +20,18 @@ const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icb
 const APP_ENV = import.meta.env.VITE_ENV ?? "";
 const IS_LOCAL_ENV = APP_ENV === "localhost";
 
+/**
+ * 旧的无尾斜杠地址仅负责跳转到独立 iframe 入口。
+ * 不再从主工作台路由懒加载导入页，避免 Rollup 将工作台 UI 依赖合并进轻量入口。
+ */
+const RequirementImportRedirectView = {
+  name: "RequirementImportRedirectView",
+  created() {
+    window.location.replace("/workspace-requirement-import/");
+  },
+  render: () => null,
+};
+
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -62,6 +74,12 @@ export const router = createRouter({
       path: "/lobehub/launch",
       name: "lobehub-launch",
       component: () => import("./views/LobehubLaunchView.vue"),
+    },
+    {
+      path: "/workspace-requirement-import",
+      name: "workspace-requirement-import",
+      strict: true,
+      component: RequirementImportRedirectView,
     },
     {
       path: "/s/:shareId",
@@ -127,6 +145,7 @@ function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlag
     || /^\/system\/?$/.test(pathname)
     || /^\/hub\/?$/.test(pathname)
     || /^\/settings\/?$/.test(pathname)
+    || pathname === "/workspace-requirement-import"
     || (pathname === "/lobehub/launch" && features.lobehub)
     || /^\/s\/[^/]+$/.test(pathname);
 }

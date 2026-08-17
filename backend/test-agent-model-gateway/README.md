@@ -9,12 +9,14 @@
 
 - `ModelGatewayCatalogService` 只发布已启用 Provider、已启用模型且最近探测成功的能力，公开模型 ID 跨供应商
   唯一；解析后才把公开 ID 改写成上游 ID。
-- `ModelCapabilityProbeService` 对九项能力使用固定最小样本和对应固定端点，统一覆盖可信 Authorization、UCID
+- `ModelCapabilityProbeService` 对九项能力使用固定最小样本和对应固定端点，统一覆盖可信 `Auth-Token`、UCID
   与 trace header；网络和非 2xx 只返回安全失败结果。
 - `ModelGatewayForwardingService` 支持 JSON、SSE 与 transcription multipart，执行能力门禁、流式取消、分阶段
   timeout、固定上游错误、usage 有界提取和每日增量。连接超时为10秒；LobeHub响应头等待30秒，
   首个响应块与后续空闲仍分别限制为30秒和120秒。
-- `OpenAiUpstreamSupport` 统一安全拼接 base URL、清除客户端同名可信 Header、注入供应商 Token/UCID/trace，
+- `OpenAiUpstreamSupport` 统一安全拼接 base URL、清除客户端同名可信 Header，以 `Auth-Token` 注入供应商
+  Token，并注入 UCID/trace；企业上游的 `Authorization: Bearer` 模式只能完成鉴权、不会让 UCID 生效，
+  因此平台调用固定使用 `Auth-Token`，
   以及过滤响应 hop-by-hop/sensitive header；既有 OpenCode proxy 复用它，但 Responses 转换仍留在原入口。
 
 ## 允许依赖

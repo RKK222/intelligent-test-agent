@@ -79,6 +79,7 @@ vi.mock("@test-agent/workbench-shell", async () => {
 describe("GitChangesPanel", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.sessionStorage.clear();
     apiClientMock.getVcsDiffFiles.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceGitDiff.mockResolvedValue({ files: [] });
     apiClientMock.discardWorkspaceGitFiles.mockResolvedValue(undefined);
@@ -115,7 +116,8 @@ describe("GitChangesPanel", () => {
       conflictFiles: [],
       message: "已从个人 HEAD 投影并推送 feature 分支",
       remotePushed: true,
-      headCommit: "commit_merged"
+      headCommit: "commit_merged",
+      remoteBranch: "main"
     });
     apiClientMock.previewPersonalWorkspacePublish.mockResolvedValue({
       applicationHead: "application_head",
@@ -153,12 +155,18 @@ describe("GitChangesPanel", () => {
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
     apiClientMock.commitPublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
     apiClientMock.commitWorkspaceAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
-    apiClientMock.publishPublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    apiClientMock.publishPublicAgentConfig.mockResolvedValue({
+      status: "SUCCEEDED",
+      currentStep: "COMPLETED",
+      branch: "master",
+      commitHash: "public_remote_head"
+    });
     apiClientMock.publishWorkspaceAgentConfig.mockResolvedValue({ status: "SUCCEEDED", currentStep: "COMPLETED" });
   });
 
   afterEach(() => {
     cleanup();
+    window.sessionStorage.clear();
     vi.clearAllMocks();
     vi.restoreAllMocks();
   });
@@ -549,6 +557,92 @@ describe("GitChangesPanel", () => {
 
     finishPublish?.({ status: "SUCCEEDED", currentStep: "COMPLETED" });
     await waitFor(() => expect(view.getByText("提交并推送成功！")).toBeTruthy());
+  });
+
+  it("keeps the original workspace publish context when the user switches tabs mid-flight", async () => {
+    let finishLocalCommit: ((value: {
+      status: string;
+      personalWorkspaceId: string;
+      versionId: string;
+      conflictFiles: string[];
+      message: string;
+      remotePushed: boolean;
+      headCommit: string;
+    }) => void) | undefined;
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [{
+        path: "docs/race.md",
+        status: "added",
+        rawStatus: "A ",
+        staged: true,
+        patch: ""
+      }]
+    });
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [{
+        path: "opencode/agents/public-review.md",
+        status: "modified",
+        rawStatus: "M ",
+        staged: true,
+        patch: ""
+      }]
+    });
+    apiClientMock.commitPersonalWorkspace.mockImplementationOnce(() => new Promise((resolve) => {
+      finishLocalCommit = resolve;
+    }));
+
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        personalWorkspaceBranch: "main_usr_admin_default",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    expect(await view.findByText("race.md")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "test: 固定提交上下文");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledTimes(1));
+    await fireEvent.click(view.getByRole("tab", { name: /^公共Agent/ }));
+    expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
+
+    finishLocalCommit?.({
+      status: "LOCAL_COMMITTED",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: [],
+      message: "个人 worktree 已提交",
+      remotePushed: false,
+      headCommit: "personal_head"
+    });
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith(
+      "psw_default",
+      expect.objectContaining({ files: ["docs/race.md"] })
+    ));
+    expect(apiClientMock.commitPublicAgentConfig).not.toHaveBeenCalled();
+    expect(apiClientMock.publishPublicAgentConfig).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.getByLabelText("本次操作结果").textContent).toContain("远端 commit：commit_merged"));
+    expect(view.getByText("workspace · 个人 worktree · main_usr_admin_default", { exact: false })).toBeTruthy();
   });
 
   it("shows that public Agent local commit was retained when remote publish is rejected", async () => {
@@ -1139,9 +1233,11 @@ describe("GitChangesPanel", () => {
       files: ["docs/payment.md"]
     }));
     expect(await view.findByText("可发布文件已发布；1 个 spec 文件已按默认规则只提交。")).toBeTruthy();
-    expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 2 个文件");
-    expect(view.getByLabelText("本轮累计结果").textContent).toContain("远端推送 1 个文件");
-    expect(view.getByLabelText("本轮累计结果").textContent).toContain("默认只提交 1 个 spec 文件");
+    expect(view.getByLabelText("本次操作结果").textContent).toContain("本地提交 2 个文件");
+    expect(view.getByLabelText("本次操作结果").textContent).toContain("远端推送 1 个文件");
+    expect(view.getByLabelText("本次操作结果").textContent).toContain("默认只提交 1 个 spec 文件");
+    expect(view.getByLabelText("本次操作结果").textContent).toContain("远端分支：main");
+    expect(view.getByLabelText("本次操作结果").textContent).toContain("远端 commit：commit_merged");
   });
 
   it("only commits when all selected workspace files are under spec", async () => {
@@ -1176,11 +1272,11 @@ describe("GitChangesPanel", () => {
     })));
     expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
     expect(await view.findByText("提交成功！")).toBeTruthy();
-    expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 1 个文件");
-    expect(view.getByLabelText("本轮累计结果").textContent).toContain("默认只提交 1 个 spec 文件");
+    expect(view.getByLabelText("本次操作结果").textContent).toContain("本地提交 1 个文件");
+    expect(view.getByLabelText("本次操作结果").textContent).toContain("默认只提交 1 个 spec 文件");
   });
 
-  it("accumulates workspace, application Agent, and public Agent results in one batch", async () => {
+  it("keeps workspace, application Agent, and public Agent results isolated per operation", async () => {
     let workspaceFiles = [
       { path: "docs/payment.md", status: "added", rawStatus: "A ", staged: true, patch: "", additions: 1, deletions: 0 },
       { path: "spec/payment/design.md", status: "added", rawStatus: "A ", staged: true, patch: "", additions: 1, deletions: 0 }
@@ -1227,7 +1323,7 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "docs: 提交应用文件");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
     await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 2 个文件"));
+    await waitFor(() => expect(view.getByLabelText("本次操作结果").textContent).toContain("本地提交 2 个文件"));
     await fireEvent.click(view.getByText("关闭", { selector: "button" }));
 
     await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
@@ -1236,7 +1332,8 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "agent: 提交应用 Agent");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
     await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 3 个文件"));
+    await waitFor(() => expect(view.getByLabelText("本次操作结果").textContent).toContain("本地提交 1 个文件"));
+    expect(view.getByLabelText("本次操作结果").textContent).not.toContain("默认只提交");
     await fireEvent.click(view.getByText("关闭", { selector: "button" }));
 
     await fireEvent.click(view.getByRole("tab", { name: /^公共Agent/ }));
@@ -1246,13 +1343,15 @@ describe("GitChangesPanel", () => {
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
     await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledTimes(1));
 
-    const summary = await view.findByLabelText("本轮累计结果");
+    const summary = await view.findByLabelText("本次操作结果");
     expect((view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述...") as HTMLInputElement).value).toBe("");
-    expect(summary.textContent).toContain("本地提交 4 个文件");
-    expect(summary.textContent).toContain("远端推送 3 个文件");
-    expect(summary.textContent).toContain("默认只提交 1 个 spec 文件");
-    expect(summary.textContent).toContain("workspace提交 2远端 1spec 默认只提交 1");
-    expect(summary.textContent).toContain("应用 Agent提交 1远端 1");
+    expect(summary.textContent).toContain("本地提交 1 个文件");
+    expect(summary.textContent).toContain("远端推送 1 个文件");
+    expect(summary.textContent).toContain("远端分支：master");
+    expect(summary.textContent).toContain("远端 commit：public_remote_head");
+    expect(summary.textContent).not.toContain("默认只提交");
+    expect(summary.textContent).not.toContain("workspace提交");
+    expect(summary.textContent).not.toContain("应用 Agent提交");
     expect(summary.textContent).toContain("公共 Agent提交 1远端 1");
   });
 
@@ -1900,6 +1999,102 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(view.queryByLabelText("opencode.jsonc")).toBeNull());
   });
 
+  it("keeps failed workspace files pending and retries without another local commit", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "docs/retry.md", status: "modified", rawStatus: "M ", staged: true, patch: "@@ -1 +1 @@\n-old\n+new", additions: 1, deletions: 1 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace
+      .mockRejectedValueOnce(new BackendApiError(503, {
+        success: false,
+        code: "GIT_UNAVAILABLE",
+        message: "Git 远端网络连接失败",
+        traceId: "trace_workspace_retry",
+        retryable: true,
+        details: {
+          failedStep: "PUSH_REMOTE",
+          gitFailureHint: "请检查后端服务器到 Git 远端的网络。",
+          localCommitRetained: true,
+          remoteCommitState: "NOT_REACHED",
+          publishRecoveryAction: "RETRY_NOW"
+        }
+      }))
+      .mockResolvedValueOnce({
+        status: "PUBLISHED",
+        personalWorkspaceId: "psw_default",
+        versionId: "awv_1",
+        conflictFiles: [],
+        message: "已推送",
+        remotePushed: true,
+        headCommit: "commit_retried",
+        remoteBranch: "feature_testagent_20260717"
+      });
+    const props = {
+      workspaceId: "wrk_1234567890abcdef",
+      personalWorkspaceId: "psw_default",
+      apiBaseUrl: "http://api",
+      canWrite: true
+    };
+    const view = render(GitChangesPanel, { props, global: { plugins: [createPinia()] } });
+
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: retry workspace");
+    await fireEvent.click(await view.findByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText("待推送")).toBeTruthy();
+    expect(await view.findByText(/已确认远端未包含本次提交/)).toBeTruthy();
+    expect(view.getByRole("button", { name: "重新推送" })).toBeTruthy();
+    expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledTimes(1);
+
+    await fireEvent.click(view.getByRole("button", { name: "重新推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(2));
+    expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledTimes(1);
+    expect(apiClientMock.publishPersonalWorkspace.mock.calls[1][1]).toMatchObject({
+      commitMessage: "fix: retry workspace",
+      files: ["docs/retry.md"]
+    });
+    expect(await view.findByText("提交并推送成功！")).toBeTruthy();
+  });
+
+  it("restores a failed workspace publish after remount in the same browser tab", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "docs/refresh-retry.md", status: "modified", rawStatus: "M ", staged: true, patch: "patch", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockRejectedValueOnce(new BackendApiError(503, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 操作超时",
+      traceId: "trace_refresh_retry",
+      retryable: true,
+      details: {
+        gitFailureHint: "请检查 Git 网络连通性。",
+        localCommitRetained: true,
+        remoteCommitState: "UNKNOWN",
+        publishRecoveryAction: "RETRY_NOW"
+      }
+    }));
+    const props = {
+      workspaceId: "wrk_1234567890abcdef",
+      personalWorkspaceId: "psw_default",
+      apiBaseUrl: "http://api",
+      canWrite: true
+    };
+    const first = render(GitChangesPanel, { props, global: { plugins: [createPinia()] } });
+    await fireEvent.update(first.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: survive refresh");
+    await fireEvent.click(await first.findByRole("button", { name: "提交并推送" }));
+    expect(await first.findByText("待推送")).toBeTruthy();
+    first.unmount();
+
+    const second = render(GitChangesPanel, { props, global: { plugins: [createPinia()] } });
+
+    expect(await second.findByText("refresh-retry.md")).toBeTruthy();
+    expect(second.getByText("待推送")).toBeTruthy();
+    expect(second.getByRole("button", { name: "重新推送" })).toBeTruthy();
+  });
+
   it("shows the currently running git command from publish progress events", async () => {
     let progressHandler: ((event: { currentStep?: string; command?: string; status?: string }) => void) | undefined;
     apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: typeof progressHandler) => {
@@ -1930,6 +2125,169 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText("git -C /repo commit -m fix: remote")).toBeTruthy();
     expect(view.getByText("RUNNING")).toBeTruthy();
     expect(apiClientMock.publishPersonalWorkspace.mock.calls[0][1].operationId).toMatch(/^aco_/);
+  });
+
+  it("keeps publishing when the progress websocket is unavailable", async () => {
+    let resolvePublish: ((value: unknown) => void) | undefined;
+    apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: (event: {
+      type: string;
+      status: string;
+      errorCode: string;
+      errorMessage: string;
+    }) => void) => {
+      handler({
+        type: "failed",
+        status: "FAILED",
+        errorCode: "WEBSOCKET_ERROR",
+        errorMessage: "Agent 配置进度连接失败"
+      });
+      throw new Error("Agent 配置进度连接失败");
+    });
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockReturnValueOnce(new Promise((resolve) => {
+      resolvePublish = resolve;
+    }));
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("selected.ts")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: progress channel");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText("暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果。")).toBeTruthy();
+    expect(view.getByText("RUNNING")).toBeTruthy();
+    expect(view.queryByText("FAILED")).toBeNull();
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(1);
+
+    resolvePublish?.({
+      status: "PUBLISHED",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: [],
+      message: "发布成功",
+      remotePushed: true,
+      currentStep: "COMPLETED",
+      executedCommands: [],
+      headCommit: "commit_published"
+    });
+
+    expect(await view.findByText("提交并推送成功！")).toBeTruthy();
+    expect(view.queryByText("暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果。")).toBeNull();
+  });
+
+  it("keeps the authoritative HTTP failure after a websocket failure event", async () => {
+    apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: (event: {
+      type: string;
+      operationId: string;
+      currentStep: string;
+      status: string;
+      errorCode: string;
+      errorMessage: string;
+    }) => void) => {
+      handler({
+        type: "failed",
+        operationId: "aco_network_failure",
+        currentStep: "PUSH_REMOTE",
+        status: "FAILED",
+        errorCode: "GIT_UNAVAILABLE",
+        errorMessage: "Git 仓库不可访问"
+      });
+      return { close: vi.fn() };
+    });
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/network.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockRejectedValueOnce(new BackendApiError(503, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 仓库不可访问",
+      traceId: "trace_network_diagnostic",
+      retryable: true,
+      details: {
+        failedStep: "PUSH_REMOTE",
+        gitFailureHint: "请检查后端服务器到 Git 远端的网络、DNS 和 SSH 端口连通性。",
+        localCommitRetained: true,
+        remoteCommitState: "UNKNOWN",
+        publishRecoveryAction: "RETRY_NOW"
+      }
+    }));
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+    await fireEvent.update(await view.findByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: network failure");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText(/trace_network_diagnostic/)).toBeTruthy();
+    expect(view.getByText(/可点击“重新推送”执行幂等核验/)).toBeTruthy();
+    expect(view.getByText("执行失败")).toBeTruthy();
+    expect(view.queryByText("执行未完成")).toBeNull();
+  });
+
+  it("treats a websocket handshake rejection as unavailable progress instead of a git failure", async () => {
+    let resolvePublish: ((value: unknown) => void) | undefined;
+    apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: (event: {
+      type: string;
+      status: string;
+      errorCode: string;
+      errorMessage: string;
+    }) => void) => {
+      // 握手拒绝帧由 WebSocket handler 产生，不属于某个 Git operation，因此没有 operationId。
+      handler({
+        type: "failed",
+        status: "FAILED",
+        errorCode: "FORBIDDEN",
+        errorMessage: "origin denied"
+      });
+      return { close: vi.fn() };
+    });
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/handshake.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockReturnValueOnce(new Promise((resolve) => {
+      resolvePublish = resolve;
+    }));
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("handshake.ts")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: handshake progress");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText("暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果。")).toBeTruthy();
+    expect(view.getByText("RUNNING")).toBeTruthy();
+    expect(view.queryByText("FAILED")).toBeNull();
+    expect(view.queryByText("提交失败：origin denied")).toBeNull();
+
+    resolvePublish?.({
+      status: "PUBLISHED",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: [],
+      message: "发布成功",
+      remotePushed: true,
+      currentStep: "COMPLETED",
+      executedCommands: [],
+      headCommit: "commit_handshake",
+      remoteBranch: "main"
+    });
+
+    expect(await view.findByText("提交并推送成功！")).toBeTruthy();
   });
 
   it("keeps the latest live git command when publish result contains command history", async () => {

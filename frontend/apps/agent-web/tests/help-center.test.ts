@@ -3,11 +3,29 @@ import { describe, expect, it } from "vitest";
 import HelpCenterDialog from "../src/components/HelpCenterDialog.vue";
 import {
   buildManualQuestionPrompt,
+  HELP_TOPICS,
   helpTopicById,
   helpDocumentUrl,
   normalizeHelpTopic,
   stripMarkdownFrontmatter
 } from "../src/components/help-center";
+
+// 用户手册只记录工作能力；游戏内容即使已上线，也必须由整本扫描阻止进入。
+const userManualDocuments = import.meta.glob("../../user-manual/docs/**/*.md", {
+  eager: true,
+  import: "default",
+  query: "?raw"
+}) as Record<string, string>;
+
+const manualOperationImages = import.meta.glob(
+  "../../user-manual/docs/guide/images/operations/*.{png,jpg,jpeg,webp}",
+  { eager: true, import: "default", query: "?url" }
+) as Record<string, string>;
+
+const forbiddenGameContentPatterns = [
+  /游戏|游乐舱|桌面弹球|黄金矿工|俄罗斯方块|扫雷|数独|贪吃蛇/,
+  /\b(?:game|games|gaming|pinball|tetris|minesweeper|sudoku)\b/i
+];
 
 const dialogStub = {
   props: ["modelValue"],
@@ -51,13 +69,15 @@ describe("help center", () => {
     expect(helpDocumentUrl("settings")).toBe("/help/guide/settings.html");
     expect(helpDocumentUrl("directory-mapping")).toBe("/help/guide/directory-mapping.html");
     expect(helpDocumentUrl("reference-config")).toBe("/help/guide/reference-config.html");
+    expect(helpDocumentUrl("weekly-updates")).toBe("/help/guide/weekly-updates.html");
     expect(normalizeHelpTopic("unknown")).toBe("getting-started");
   });
 
-  it("keeps current features, reference configuration and merged FAQ troubleshooting in embedded Help", async () => {
+  it("keeps weekly updates, current features, reference configuration and merged FAQ troubleshooting in embedded Help", async () => {
     const wrapper = mountHelpCenter();
     const topicLabels = wrapper.findAll(".ta-help-center-topic").map((button) => button.text());
 
+    expect(topicLabels.some((label) => label.includes("每周新功能"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("功能总览"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("引用配置"))).toBe(true);
     expect(topicLabels.some((label) => label.includes("常见问题与排查"))).toBe(true);
@@ -75,6 +95,51 @@ describe("help center", () => {
     expect(prompt).toContain("对话输入框发不出去");
     expect(prompt).toContain("traceId");
     expect(prompt.length).toBeLessThan(6_700);
+  });
+
+  it("grounds weekly feature questions in user scenarios and release-safe boundaries", () => {
+    const prompt = buildManualQuestionPrompt("weekly-updates", "这周自动化代码库怎么用？");
+
+    expect(prompt).toContain("【当前章节】每周新功能");
+    expect(prompt).toContain("适用场景");
+    expect(prompt).toContain("使用前配置");
+    expect(prompt).toContain("自动化代码库可以单独建立工作空间");
+    expect(prompt).toContain("页面顶部中间的“应用”");
+    expect(prompt).toContain("工作空间：当前名称");
+    expect(prompt).toContain("文件树左下角的双向箭头");
+    expect(prompt).toContain("本地提交，但不提供远程推送或发布");
+    expect(prompt).toContain("VITE_CACHE_DATA_URL");
+    expect(prompt).not.toMatch(forbiddenGameContentPatterns[0]!);
+    expect(prompt).not.toContain("长期记忆");
+    expect(prompt.length).toBeLessThan(6_700);
+  });
+
+  it("permanently keeps game content out of every user manual document", () => {
+    expect(Object.keys(userManualDocuments).length).toBeGreaterThan(0);
+    for (const [documentPath, content] of Object.entries(userManualDocuments)) {
+      for (const pattern of forbiddenGameContentPatterns) {
+        expect(content, `${documentPath} 不得包含游戏内容：${pattern}`).not.toMatch(pattern);
+      }
+    }
+  });
+
+  it("keeps every embedded manual chapter illustrated with an existing operation image", () => {
+    const existingImageSources = new Set(
+      Object.keys(manualOperationImages).map((imagePath) =>
+        `./images/operations/${imagePath.split("/").at(-1)}`
+      )
+    );
+
+    for (const topic of HELP_TOPICS) {
+      const imageSources = Array.from(
+        topic.content.matchAll(/!\[[^\]\r\n]+\]\((\.\/images\/operations\/[^)\s]+\.(?:png|jpe?g|webp))\)/gi),
+        (match) => match[1]!
+      );
+      expect(imageSources.length, `${topic.path} 至少需要一张操作截图`).toBeGreaterThan(0);
+      for (const imageSource of imageSources) {
+        expect(existingImageSources, `${topic.path} 引用了不存在的截图 ${imageSource}`).toContain(imageSource);
+      }
+    }
   });
 
   it("keeps the directory chapter synchronized with the embedded Help navigation", async () => {
@@ -180,6 +245,6 @@ describe("help center", () => {
     expect(settings).toContain("应用与版本库关联");
     expect(settings).toContain("工作空间管理");
     expect(settings).toContain("08“版本库管理”、09“应用人员管理”、10“应用与版本库关联”、11“工作空间管理”");
-    expect(settings).toContain("超级管理员专属的“用户管理”");
+    expect(settings).toContain("页面不会把超级管理员专属的用户管理");
   });
 });

@@ -99,7 +99,7 @@ class RuntimeDtosCompatibilityTest {
     }
 
     @Test
-    void workspaceMappingResolvesLogicalStoragePathAndExposesExplicitPhysicalPath() {
+    void workspaceMappingExposesOnlyOpaqueWorkspacePath() {
         CommonParameterValues parameters = mock(CommonParameterValues.class);
         when(parameters.resolvedValue(ManagedWorkspacePathResolver.PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT))
                 .thenReturn(Optional.of("/data/.testagent/agent-opencode/workspace/personalworktree"));
@@ -113,10 +113,9 @@ class RuntimeDtosCompatibilityTest {
                 workspace,
                 new ManagedWorkspacePathResolver(parameters));
 
-        assertThat(response.rootPath()).isEqualTo(
-                "/data/.testagent/agent-opencode/workspace/personalworktree/20260806/usr_1/demo/feature_usr_1_default/workspace");
-        assertThat(response.physicalRootPath()).isEqualTo(response.rootPath());
-        assertThat(response.rootPath()).doesNotStartWith("personalworktree:");
+        assertThat(response.rootPath()).isEqualTo("workspace:wrk_physical_contract");
+        assertThat(response.physicalRootPath()).isNull();
+        assertThat(response.toString()).doesNotContain("/data/.testagent");
     }
 
     @Test

@@ -35,6 +35,7 @@ import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeR
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreeClaim;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.user.User;
@@ -669,6 +670,127 @@ class AgentConfigApplicationServiceTest {
         assertThat(git.mergedTargetCommit).isEqualTo("commit_base");
         assertThat(git.resetCommitsByRoot).doesNotContainKey(personalRoot);
         verify(coordinator).markPublicServerSynced(eq(request), anyList());
+    }
+
+    @Test
+    void publicWorkerSkipsLegacyNamedWorktreeInsteadOfLeavingPermanentRetry() throws Exception {
+        Path sharedRoot = root.resolve(".config");
+        Path stableRoot = root.resolve(".configdev/public-usr_admin");
+        Path legacyRoot = root.resolve(".configdev/public-personal-20260717");
+        Files.createDirectories(sharedRoot.resolve(".git"));
+        Files.createDirectories(sharedRoot.resolve("opencode"));
+        Files.createDirectories(stableRoot.resolve(".git"));
+        Files.createDirectories(stableRoot.resolve("opencode"));
+        Files.createDirectories(legacyRoot.resolve(".git"));
+        Files.createDirectories(legacyRoot.resolve("opencode"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_stable",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                stableRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_legacy",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-personal-20260717",
+                "public-personal-20260717",
+                legacyRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeRoot = stableRoot;
+        git.worktreeBranch = "public-usr_admin";
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", sharedRoot.toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutSyncRequest request = new PublicAgentConfigRolloutSyncRequest(
+                "acr_public_legacy",
+                AgentConfigRolloutScope.PUBLIC,
+                null,
+                "main",
+                "commit_base",
+                false,
+                ADMIN.value(),
+                "trace_public_legacy",
+                0,
+                NOW.plusSeconds(180),
+                "acl_public_legacy");
+        when(coordinator.claimPendingSync("linux-1")).thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingPublicConfigSync();
+
+        assertThat(git.mergedRepoRoot).isEqualTo(stableRoot);
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending>> pendingCaptor =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(coordinator).markPublicServerSynced(eq(request), pendingCaptor.capture());
+        assertThat(pendingCaptor.getValue())
+                .extracting(com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending::worktreeId)
+                .containsExactly("agw_public_stable");
+    }
+
+    @Test
+    void publicWorktreeRetryAbandonsLegacyNamedWorktree() throws Exception {
+        Path legacyRoot = root.resolve(".configdev/public-personal-20260717");
+        Files.createDirectories(legacyRoot.resolve(".git"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_legacy",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-personal-20260717",
+                "public-personal-20260717",
+                legacyRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigWorktreeClaim claim = new PublicAgentConfigWorktreeClaim(
+                "acr_public_legacy",
+                "agw_public_legacy",
+                ADMIN.value(),
+                "linux-1",
+                "commit_base",
+                "trace_public_legacy",
+                1,
+                NOW.plusSeconds(180),
+                "acl_public_legacy");
+        when(coordinator.claimPendingPublicWorktree("linux-1")).thenReturn(Optional.of(claim));
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingPublicConfigWorktrees();
+
+        verify(coordinator).abandonPublicWorktree(claim, "WORKTREE_NO_LONGER_REUSABLE");
+        verify(coordinator, never()).markPublicWorktreeRetry(any(), any());
     }
 
     @Test
@@ -1785,6 +1907,8 @@ class AgentConfigApplicationServiceTest {
                 "trace_publish");
 
         assertThat(response.status()).isEqualTo("SUCCEEDED");
+        assertThat(response.branch()).isEqualTo("main");
+        assertThat(response.commitHash()).isEqualTo("commit_publish");
         assertThat(git.mergedRepoRoot).isEqualTo(root.resolve(".configdev/review-agent"));
         assertThat(git.mergedBranch).isEqualTo("origin/main");
         assertThat(git.linearCommitSource).isEqualTo("commit_base");

@@ -123,6 +123,14 @@ Python 的 pandas、Excel、Word 和 JSON 第三方库是第三个、完全独�
 
 首次构建、指纹状态丢失或组件变化时，清单为 `included`；未变化时为 `reuse`，内层 ZIP 不再重复携带该组件的大文件。必须持续使用同一个输出目录，或用 `--component-state-file <稳定路径>` 保存基线。新装机、扩容新节点、灾备恢复和状态不可信的交付必须加 `--include-all-components`；增量包只允许升级已有且组件健康的 `.4/.114`，不能用于空机器。迁移到该机制后的第一次构建也应使用全量命令建立可信基线；部署成功后每台后台会把实际安装指纹写入 `/data/testagent/config/release-component-state.env`，后续复用时会同时校验指纹和健康状态：
 
+若 `.4/.114` 的上一轮灰度已确认部署成功，但当时尚未登记组件状态，可用 `--worker-runtime-baseline-file` 重新登记门禁。baseline 同时固定上一轮源码提交、内层 release SHA-256 和 worker 指纹；封包时必须与本轮 worker 构建输入一致。节点部署仍会先检查 Manager/OpenCode/Codex、Tool runtime 和现有 worker 健康，全部通过后才补写 `/data/testagent/config/release-component-state.env`。该动作不加载镜像、不重启 manager/worker，也不替换 `.4` 与 `.114` 各自活动的模型清单。
+
+```bash
+deploy/internal/package-release.sh \
+  --worker-runtime-baseline-file deploy/internal/release-baselines/20260813-qwen-gray.env \
+  --output-dir deploy/internal/dist
+```
+
 ```bash
 VITE_TEST_AGENT_API_BASE_URL="" \
   deploy/internal/package-release.sh --include-all-components \
@@ -543,9 +551,9 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
 企业现网上一轮已经部署完成的平台包业务源码提交为
-`f10754e01ab8f846a8aa2430214bb39f4795623b`，内层 ZIP SHA-256 为
-`99f34a5652d5972dd4dbc1e9384026d1a1a78a8cc4bb1caa702a6c99cc000df5`。正常 PostgreSQL 企业主链最高版本为
-`20260810234154`；这只能作为已知基线，不能代替本轮部署前的完整 history。XXL MySQL 的准入预期为 V1-V11
+`57e211de48a5507fb8d1689e1c8f86fd96563032`，内层 ZIP SHA-256 为
+`7af9c20e57a809258b0acd4672189b5ca875dde3f1a7208f770414a57d234b53`。正常 PostgreSQL 企业主链最高版本为
+`20260812204207`；这只能作为已知基线，不能代替本轮部署前的完整 history。XXL MySQL 的准入预期为 V1-V11
 全部成功。部署前必须分别由数据库管理员导出
 平台 PostgreSQL 与 XXL MySQL 的完整历史，不能只留最近 20 条：
 
@@ -555,23 +563,15 @@ from flyway_schema_history
 order by installed_rank;
 ```
 
-PostgreSQL 正常现网路径必须满足：所有记录 `success=true`，且上一包引入的 `20260809170000`、
-`20260809170001`、`20260810170000`、`20260810234154` 全部成功、checksum 不变。第一台 `.4` 新 Java 从
-`20260810234154` 基线首次升级时，只允许按顺序新增以下五条：
+PostgreSQL 正常现网路径必须满足：所有记录 `success=true`，且上一包主链最高版本
+`20260812204207` 成功、checksum 不变。若现场仍低于该版本，必须先逐条核对完整历史与已登记兼容路径，不能
+直接套用本节的增量结论。第一台 `.4` 新 Java 从 `20260812204207` 基线首次升级时，只允许新增：
 
-- `V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`，SHA-256
-  `44ea89c0ea5b9edb7fc5cbfb682e540b251f0c106b1d3c2762576d04ade6f984`；这是已撤销 QA Memory 代码的历史顺序补偿，不代表启用长期记忆；
-- `V20260811213000__user_notifications_expand_dispose_types.sql`，SHA-256
-  `00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c`；
-- `V20260812104911__common_parameters_add_experience_workspace_after_release.sql`，SHA-256
-  `a613f77fd42aea5f404dfb51bad5fe93c1f478d73bf131de8c9dc9931a27e5ea`；
-- `V20260812144051__common_parameters_default_experience_workspace.sql`，SHA-256
-  `e07d560ac0652860ed8e8788b002df0881eface861998a20e4e83da85276bfcf`。
-- `V20260812204207__dictionaries_add_automation_code_repository.sql`，SHA-256
-  `250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554`。
+- `V20260813190929__user_scm_git_identities_create.sql`，Flyway checksum `-297528120`，SHA-256
+  `fd434d47d40c9fd71c987bd6512ba6897e33fe2e1db67299ff01514b4941c92e`。
 
-如果本包已经在首台成功启动后只是故障重部署，五条都必须成功且 checksum 不变，本次不得新增 history。只出现
-上述连续序列的一部分、倒序、失败记录或未知更高版本，都必须停止发布。正常企业历史不得出现只用于已登记并行
+如果本包已经在首台成功启动后只是故障重部署，该版本必须成功且 checksum 不变，本次不得新增 history。出现
+失败记录、未知更高版本或未知 checksum 都必须停止发布。正常企业历史不得出现只用于已登记并行
 开发历史的 `20260809120000`、`20260809210000`、`20260809230000`、`20260810090000`、
 `20260810110000` 至 `20260810110002`、`20260810173117` 或 `20260812202425`；其中 `20260809210000`
 仅用于已执行旧体验候选的个人库，`20260812202425` 仅用于已经由 dev 执行本地客户端迁移的共享开发库。
@@ -581,19 +581,21 @@ PostgreSQL 正常现网路径必须满足：所有记录 `success=true`，且上
 保留，这是数据库兼容要求，不代表启用服务。
 
 XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后的准入历史应为 V1-V11 全部成功且
-checksum 不变，本轮不新增 XXL migration。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
+checksum 不变，本轮只允许新增 V12。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
 `665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47`，V11 的 Flyway checksum 为
 `-1863356225`、文件 SHA-256 为 `03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236`。
-V10 注册每 5 分钟一次的内部模型探活，V11 注册每天 03:30 的可观测数据清理。失败记录、未知 checksum、
-未知更高版本、缺少 V1-V11 任一版本或本轮启动后新增 history 时都必须停止发布。
+V12 的 Flyway checksum 为 `-211900485`、文件 SHA-256 为
+`2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739`。V10 注册每 5 分钟一次的内部模型探活，
+V11 注册每天 03:30 的可观测数据清理，V12 注册每天 04:10 的 SCM Git 姓名补偿。失败记录、未知 checksum、
+未知更高版本、缺少 V1-V11 任一版本或首台启动后没有且仅有 V12 新增 history 时都必须停止发布。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
-`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并按部署前基线确认 PostgreSQL 只新增上述
-允许的四条连续 migration（故障重部署时不新增）、XXL MySQL 没有新增 history；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
-内部模型探活为每 5 分钟、可观测数据清理为每日 03:30，再部署 `.114`。共享数据库上 `.114` 启动只允许
+`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并按部署前基线确认 PostgreSQL 只新增
+`20260813190929`、XXL MySQL 只新增 V12（故障重部署时两边都不新增）；随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、
+内部模型探活为每 5 分钟、可观测数据清理为每日 03:30、SCM Git 姓名补偿为每日 04:10，再部署 `.114`。共享数据库上 `.114` 启动只允许
 validate，不应再新增 history。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
@@ -819,7 +821,7 @@ enterprise-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
 
 公共配置必须包含 `includeUsage=false`，避免 OpenCode 1.18.4 默认添加企业内部接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
 
-`enterprise-qwen` / `enterprise-deepseek` 是 OpenCode provider key；`qwen-prod` / `deepseek-prod` 是数据库和 `X-Enterprise-Model-Provider` 使用的 Java 路由键，不能混用。上游 token 只在共享数据库维护，由 Java 以 `Authorization: Bearer <token>` 注入。用户 UCID 由拥有该用户进程的 Java 从用户表读取并逐进程注入，不使用全局 UCID env 文件。
+`enterprise-qwen` / `enterprise-deepseek` 是 OpenCode provider key；`qwen-prod` / `deepseek-prod` 是数据库和 `X-Enterprise-Model-Provider` 使用的 Java 路由键，不能混用。企业上游的 `Authorization: Bearer <供应商关联 Token>` 虽可鉴权，但 `ucid` 不生效；只有 `Auth-Token: <供应商关联 Token>` 会让同一请求的 `ucid` 生效。所以上游 Token 只在共享数据库维护，并由 Java 固定以 `Auth-Token: <token>` 注入。OpenCode 到 Java 内部代理仍使用独立的 Bearer 代理 Key，该 Key 只校验 Java 代理调用方，不会转发为上游供应商鉴权。用户 UCID 由拥有该用户进程的 Java 从用户表读取并逐进程注入，不使用全局 UCID env 文件。
 
 变更生效规则：
 
@@ -1083,7 +1085,7 @@ ACTIVE binding，用户再次使用时由公共启动程序按原归属恢复。
 ```sql
 select version, description, checksum, success
 from flyway_schema_history
-where version in ('7', '8', '9', '10', '11')
+where version in ('7', '8', '9', '10', '11', '12')
 order by installed_rank;
 
 select platform_task_key, schedule_conf, trigger_status
@@ -1092,14 +1094,16 @@ where platform_task_key in (
     'workspace-management.personal-workspace-relocation',
     'opencode-runtime.inactive-user-process-cleanup',
     'opencode-runtime.internal-model-probe',
-    'opencode-runtime.internal-model-observability-retention'
+    'opencode-runtime.internal-model-observability-retention',
+    'configuration-management.scm-git-name-sync'
 )
 order by platform_task_key;
 ```
 
-预期 V7-V9 保持原 checksum，V10/V11 首次成功且 checksum 分别为 `1539433813`、`-1863356225`；
+预期 V7-V9 保持原 checksum，V10/V11 保持成功，V12 首次成功且 checksum 为 `-211900485`；
 搬迁任务为 `0 0/30 * * * ? *`，闲置进程关闭为 `0 0 2 * * ? *`，内部模型探活为
-`0 */5 * * * ? *`，可观测数据清理为 `0 30 3 * * ? *`，四条均 `trigger_status=1`。任一条件不满足时
+`0 */5 * * * ? *`，可观测数据清理为 `0 30 3 * * ? *`，SCM Git 姓名补偿为 `0 10 4 * * ? *`，五条均
+`trigger_status=1`。任一条件不满足时
 保持 `.114` 和 `.2` 未部署。
 
 ## 11. 故障定位与回滚

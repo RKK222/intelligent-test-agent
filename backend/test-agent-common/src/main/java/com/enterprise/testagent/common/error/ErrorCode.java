@@ -9,6 +9,7 @@ public enum ErrorCode {
     FORBIDDEN(403, "无权限"),
     NOT_FOUND(404, "资源不存在"),
     CONFLICT(409, "状态冲突"),
+    PATH_COLLISION(409, "路径冲突"),
     SESSION_BUSY(409, "会话正在运行"),
     SESSION_SHARE_VERSION_CONFLICT(409, "分享设置已被其他操作更新"),
     CONVERSATION_CONTEXT_REQUIRED(409, "需要会话运行上下文"),

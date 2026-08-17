@@ -5,6 +5,70 @@
 
 ## Entries
 
+### 2026-08-13 - 永久从用户手册排除游戏内容
+
+### Why
+
+- 用户明确要求游戏相关内容永远不得进入用户手册，不能只删除当前周更章节后依赖人工记忆。
+
+### What
+
+- 从每周新功能和功能总览中删除游戏入口、适用场景、配置、操作步骤与权限说明，并删除三张对应操作截图。
+- 在用户手册内容边界中增加永久禁入规则；帮助中心测试扫描整本用户手册 Markdown，同时拦截中英文游戏关键词，防止后续在其它章节重新加入。
+- 保留宠物问答、伙伴选择等非游戏说明，也不修改产品中的游戏实现或研发文档。
+
+### How
+
+- 审计 `frontend/apps/user-manual/docs/` 全部 Markdown 和周更图片资源，复用现有帮助中心测试覆盖手册事实源，没有新增独立校验链路。
+- 执行帮助中心 Vitest、用户手册 VitePress 构建、agent-web 类型检查、运行页关键词扫描、截图引用与数量校验。
+
+### Result
+
+- 用户手册正文已无游戏内容；保留的每项周更工作功能仍有用户场景、使用前配置、操作步骤和至少一张截图，后续误加入游戏内容会被自动化测试阻断。
+- 未变更 API、事件、数据库、性能、安全、兼容性、部署拓扑或环境配置。
+
+### 2026-08-13 - 补齐自动化代码库工作空间点击入口
+
+### Why
+
+- 用户指出每周新功能只写了“找到自动化代码库分组”，没有说明入口位置和逐层点击方法，已有截图也未包含顶部工作空间按钮。
+
+### What
+
+- 在自动化代码库周更说明中增加“入口在哪”，写明顶部“应用 → 工作空间 → 版本”和文件树左下角双向箭头两个入口。
+- 普通用户步骤细化到具体按钮和日期版本切换；管理员步骤细化到左下角设置、个人设置、版本库管理、应用关联、工作空间保存的逐层点击路径，并补充分组不显示时的排查方法。
+- 用既有 Playwright 工作台场景重截完整页面，截图同时展示顶部入口、展开后的自动化代码库分组和左下角备用入口；帮助中心测试锁定关键入口文案。
+
+### How
+
+- 复用 `FigmaShell` 顶部工作空间选择、`WorkbenchFooter` 左下角双向箭头以及 `SettingsMenu`/现有管理面板的真实按钮文案，没有新增页面或入口。
+- 执行自动化代码库相关 Playwright 场景、帮助中心 Vitest、VitePress 手册构建、agent-web 类型检查、图片引用和 `git diff --check`，并在运行中的 release 手册复核更新后正文。
+
+### Result
+
+- 用户现在可以直接按手册从工作台找到并进入自动化代码库，也能按管理员路径完成前置配置；未变更 API、事件、数据库、安全、性能或部署拓扑。
+
+### 2026-08-13 - 每周新功能补充配置说明与操作截图
+
+### Why
+
+- 用户要求每周新功能除用户场景和操作步骤外，补充使用前配置，并加入可直接对照页面的操作截图，同时同步 release 与 dev 用户手册。
+
+### What
+
+- release 每周新功能的五项能力逐项补充普通用户与管理员配置边界，并加入平台体验、自动化工作空间、会话分享、资料多选和宠物游戏共 11 张脱敏截图。
+- 帮助中心入口文案与问答上下文测试同步要求“使用前配置”，用户手册维护规范明确截图目录、真实组件状态和替代文本要求。
+
+### How
+
+- 复用项目既有 Playwright 工作台 mock 场景渲染真实前端组件并截图，截图生成后还原临时测试改动；执行帮助中心 Vitest、用户手册 VitePress 构建、agent-web 类型检查、图片引用检查和 `git diff --check`。
+- 构建后的手册由 `127.0.0.1:3001/help/` 提供静态服务，并在应用内浏览器复核章节导航、配置正文、图片替代文本和页面布局。
+
+### Result
+
+- release 手册可按周查看新功能的适用场景、使用前配置、操作步骤、截图和权限边界；未变更 API、事件、数据库、安全策略或部署拓扑。
+- 本地真实登录环境因 PostgreSQL `127.0.0.1:15432` 未启动而不可用，操作截图因此使用项目现有 E2E 数据渲染，不包含真实账号、仓库或客户数据。
+
 ### 2026-08-13 - 从 release 分支移除独立 Workflow 能力
 
 ### Why
@@ -9920,3 +9984,651 @@
 - 内层 ZIP SHA-256 为 `7af9c20e57a809258b0acd4672189b5ca875dde3f1a7208f770414a57d234b53`，外层双后台完整包 SHA-256 为 `95b3dc3b3bd03059aba059b845b6407b86db0616e5c4614681aeca972c48ccd7`，外层内嵌 ZIP 与独立内层 ZIP 字节一致；中转目录副本通过 SHA 和 `unzip -tq`。
 - app JAR、persistence JAR 和前端 tar 仍为 `319d335e...`、`ef6c42d6...`、`33651d15...`；数据库和前端代码相对上一轮包没有变化。Worker runtime 与 toolbox 均为 `reuse`，LobeHub disabled，Workflow 无运行制品。
 - 现场执行必须先部署 `.4` Java 并确认 Flyway，再仅在 `.4` 备份/替换模型文件和重启 worker；`.114` 部署 Java 后只核对模型 SHA 未变化，最后部署 `.2` 前端。
+
+## 2026-08-13 - 用户手册新增每周新功能板块
+
+### Why
+
+- 用户需要从使用者视角按周了解最新功能的适用场景、入口和操作方法，而不是继续从功能总览和多个专题中自行拼接信息。
+- 当前 `release` 已开放平台体验、自动化代码库、会话通知协作、测试资料批量跳转和宠物新游戏；周更内容必须严格以交付分支事实为准，不能混入仅在 `dev` 的长期记忆等能力。
+
+### What
+
+- 新增“每周新功能”稳定章节，并注册到 VitePress 顶部导航、侧栏、手册首页和应用内 Help；首期按 2026-08-10 至 2026-08-16 汇总五类用户场景、步骤和权限/数据边界。
+- `help-center.ts` 直接复用同一 Markdown 作为宠物问答资料，并为多场景周更页使用有界的 5600 字上下文；定向测试锁定同源 URL、用户场景、release 安全边界及不包含长期记忆。
+- 同步用户手册、frontend 和 agent-web README/PACKAGE；功能总览校正宠物游戏入口仅超级管理员可见，以及当前六款游戏名称。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/help-center.test.ts --reporter=verbose`：12/12 通过。
+- `corepack pnpm --filter @test-agent/agent-web typecheck` 与 `corepack pnpm --filter @test-agent/user-manual build` 通过。
+- 实际以 `corepack pnpm --filter @test-agent/user-manual dev` 启动手册，`/help/`、周更页及三个关联专题均返回 HTTP 200，生成 HTML 包含导航、场景、操作步骤和正确内部链接。
+
+### Result
+
+- 用户可从手册首页、顶部导航、侧栏或应用内 Help 直接打开“每周新功能”，按“想做什么”快速定位本周能力，再进入稳定专题查看完整规则。
+- 本次不新增 API、RunEvent、数据库、migration、部署节点、强制配置或安全权限；未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 安全内置 TCDS 需求导入并收敛工作区路径暴露
+
+### Why
+
+- 旧“小地球”依赖仓库外 iframe/9900 服务并在 URL 中传递物理根路径、用户和后端地址；安全扫描同时发现普通 Workspace 响应、文件 WebSocket 握手及框架参数错误存在路径或请求信息暴露风险。
+- TCDS 基础地址需由部署环境注入，不在代码维护主机白名单；浏览器不得获得 TCDS token、文档签名 URL或参与目标物理路径计算。
+
+### What
+
+- 新增登录守卫下的同源 `/workspace-requirement-import` 页面和精确 `origin/source` 的 iframe 协议；新增需求应用/子条目 HTTP API，以及 `workspace.requirement-import` 文件 RPC。服务端以登录主体重新查询授权应用、条目和文档，生成受控 `spec/` 目录并转换 Word、Excel、PowerPoint、文本和 Markdown。
+- 抽象公共 `TcdsGateway`，统一存量用户查询与新导入能力；`test-agent.third-party-api.base-url` 改为必填 `${TEST_AGENT_TCDS_BASE_URL}`，限定 HTTP/HTTPS、连接/请求超时、三次重定向、单文件/总量和文档数上限，不记录或返回 token、签名 URL 与正文。
+- 普通、最近和支持访问的 Workspace 响应改用 `workspace:{workspaceId}` 逻辑标识并清空物理路径；绝对路径复制改为用户点击后逐文件 `workspace.resolve-physical-path` RPC。文件 ticket 增加服务端统一认证上下文，upgrade 前预检、upgrade 时原子消费，无效/过期/复用统一脱敏 401；参数异常统一映射安全错误。
+- 同步 HTTP/文件事件、安全、部署、模块地图、模块 README/PACKAGE、环境变量示例、内部部署脚本、用户手册和专项安全复测记录；未修改个人 `.env.test`、数据库、Flyway、RunEvent、generated SDK 或 OpenCode 源码。
+
+### How
+
+- 后端计划内模块全量测试通过；TCDS 配置/网关专项 8 项、导入/转换/ticket/filter/RPC/错误专项 57 项通过，22 模块 `mvn clean package -DskipTests` 成功。
+- 前端全量测试 1942 passed / 1 skipped，typecheck 和 production build 通过；部署脚本 Bash 语法、差异空白和旧 9900/外部 iframe 调用扫描通过。
+- 以显式 `TEST_AGENT_TCDS_BASE_URL` 和 `.env.test` 执行真实重启；前端 `127.0.0.1:3000` 返回 200，但后端因本机 PostgreSQL `127.0.0.1:15432` 未运行而失败，未为绕过阻塞修改环境配置。
+
+### Result
+
+- 内置需求导入、安全文件写入和路径收敛已实现并通过自动化测试与构建；新增必填部署变量和 `rootPath` 语义要求前后端及部署配置同批发布、同批回滚。
+- 真实 TCDS 查询、目录生成、重复覆盖、部分失败、文件树刷新及原扫描 HTTP/WS 请求重放尚未验证，须在测试 PostgreSQL 恢复后补跑；旧 9900 服务本轮未停用。
+
+## 2026-08-13 - 修复中文 Skill 推送成功后未进入 SkillHub
+
+### Why
+
+- 企业 F-SLB 的中文 Skill 已成功推送 feature 分支，但 SkillHub 未展示；现网定时对账日志持续出现 `git show <commit>:"<中文转义路径>"` 文件不存在。
+- `GitWorkspaceService.listFilesAtCommit()` 使用换行格式读取 `git ls-tree`，Git 默认 quotepath 会把非 ASCII 路径转换为带引号的 C 风格展示文本，后续 blob 读取把该展示文本误当成真实路径。
+
+### What
+
+- 复用既有固定提交枚举入口，将 `git ls-tree` 改为 `-z` NUL 分隔并按 UTF-8 原样解析，不新增 Hub 索引器、补偿任务、API、数据库或配置。
+- 在真实临时 Git 仓库提交 `SLB快速检索环境应用所有端口策略/SKILL.md`，回归验证中文路径原样枚举和固定提交 blob 读取；同步 common README 与包说明。
+
+### How
+
+- JDK 25 下 `GitWorkspaceServiceRealGitTest` 18/18、common 全量 102/102、`AgentSkillHubApplicationServiceTest` 14/14 通过。
+- `test-agent-workspace-management` 及上游六模块跳过测试打包成功；`git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；`GitWorkspaceService.java` 中并行存在 SCM 身份改动，本次只暂存 NUL 路径枚举修复，避免夹带他人工作。
+
+### Result
+
+- 中文及含空格的固定提交路径不会再被 Git 展示转义污染，发布即时索引和既有每 2 分钟本机快照对账均可正常生成 SkillHub 快照。
+- 本次不改变 HTTP API、RunEvent、数据库、migration、性能边界、安全权限、环境配置、generated SDK 或 OpenCode 源码；企业现场需部署包含该修复的新后端，已成功推送的 Skill 无需再次 push。
+
+## 2026-08-13 - 修复中文 Skill 推送成功后未进入 SkillHub
+
+### Why
+
+- 企业 F-SLB 的中文 Skill 已成功推送 feature 分支，但 SkillHub 未展示；现网定时对账日志持续出现 `git show <commit>:"<中文转义路径>"` 文件不存在。
+- `GitWorkspaceService.listFilesAtCommit()` 使用换行格式读取 `git ls-tree`，Git 默认 quotepath 会把非 ASCII 路径转换为带引号的 C 风格展示文本，后续 blob 读取把该展示文本误当成真实路径。
+
+### What
+
+- 复用既有固定提交枚举入口，将 `git ls-tree` 改为 `-z` NUL 分隔并按 UTF-8 原样解析，不新增 Hub 索引器、补偿任务、API、数据库或配置。
+- 在真实临时 Git 仓库提交 `SLB快速检索环境应用所有端口策略/SKILL.md`，回归验证中文路径原样枚举和固定提交 blob 读取；同步 common README 与包说明。
+
+### How
+
+- JDK 25 下 `GitWorkspaceServiceRealGitTest` 18/18、common 全量 102/102、`AgentSkillHubApplicationServiceTest` 14/14 通过。
+- `test-agent-workspace-management` 及上游六模块跳过测试打包成功；`git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；`GitWorkspaceService.java` 中并行存在 SCM 身份改动，本次只暂存 NUL 路径枚举修复，避免夹带他人工作。
+
+### Result
+
+- 中文及含空格的固定提交路径不会再被 Git 展示转义污染，发布即时索引和既有每 2 分钟本机快照对账均可正常生成 SkillHub 快照。
+- 本次不改变 HTTP API、RunEvent、数据库、migration、性能边界、安全权限、环境配置、generated SDK 或 OpenCode 源码；企业现场需部署包含该修复的新后端，已成功推送的 Skill 无需再次 push。
+
+## 2026-08-13 - 回归修复 Workspace 运行态标识
+
+### Why
+
+- `workspaceId` 经多轮语义调整后，需要重新检查运行态 Workspace、应用模板、应用版本和个人 worktree 标识是否混用；物理根路径从普通响应移除后，也要确认文件与 Diff 路由没有退回绝对路径。
+- 复查发现前端缓存用 `versionId + applicationWorkspaceId + linuxServerId` 辅助去重，会误删同版本、同模板、同服务器下不同运行态 `workspaceId` 的个人 worktree；普通 Diff 未传运行态 ID，且非法绝对 Diff 路径仍有回退原值的入口。
+
+### What
+
+- Workspace 缓存只按精确运行态 `workspaceId` 替换，保留同版本的 default 与自定义个人 worktree；新增前缀回归锁定 `wrk_ / awp_ / awv_ / psw_` 四类 ID 边界。
+- 普通托管编辑器和 Diff 按精确 `workspaceId` 开放逐文件物理路径解析，分享、支持、体验、源码快照、引用和 Agent 文件继续失败关闭。
+- 工具事件、实时/历史 Diff 与 Run 详情统一过滤绝对 Unix/Windows、URI 和越界路径，移除归一化失败后回退原始宿主机路径的分支；同步安全复测记录。
+
+### How
+
+- 后端 Workspace/runtime/API 相关 19 模块测试通过，API 模块 565 项通过；ID 前缀专项 2/2 通过。22 模块本地启动前打包成功。
+- 前端全量 124 文件、1949 passed / 1 skipped，类型检查和 production build 通过；Workspace 定向 Chromium 9/9 通过，覆盖普通文件、切换竞态、最近个人 worktree、源码快照、体验空间和 Diff。
+- 全套 Chromium 运行到 103 项通过时，另有既有 `/workbench` 路由断言与首次引导弹窗遮挡失败，未将整套计为通过。`.env.test` 真实启动时前端 3000 返回 200，后端仍因 PostgreSQL `127.0.0.1:15432` 拒绝连接失败。
+
+### Result
+
+- 运行态文件、会话、Run、最近偏好、需求导入与前端缓存继续以 `Workspace.workspaceId` 为唯一主键；模板/版本/个人记录 ID 只承担各自领域语义，不再替代运行态标识。
+- 本次不新增 API、RunEvent、数据库、migration、部署变量或运行服务，未修改 `.env*`、generated SDK 或 OpenCode 源码；真实登录与 TCDS 端到端复测仍受测试 PostgreSQL 未运行阻塞。
+
+## 2026-08-13 - 用随包模板补齐体验工作区内容
+
+### Why
+
+- 体验工作区只有最小 README，用户无法直接体验标准 `docs/` 稳定资料和 TCDS `spec/` 需求至测试过程目录。
+- 示例正文不应硬编码在 Java 服务中，升级存量目录也不能覆盖用户已有文件、提交历史或 Git index。
+
+### What
+
+- 新增 `deploy/internal/experience-workspace-template/` 独立文件模板，覆盖七类 `docs/` 资料与当前 TCDS 导入实现一致的 `spec/{父条目编号-名称}/01-需求` 至 `04-测试` 虚构登录示例。
+- 新增 `ensure-experience-workspace-content.sh`：逐文件仅补缺失项，拒绝符号链接/非普通目标；无 HEAD 时只提交模板路径，已有 HEAD 时新文件保留为未跟踪变更。
+- 本地重启与企业部署共用该脚本；发布 ZIP 强制携带脚本和模板，企业节点以 systemd Java 运行用户创建内容。Java 仅保留目录、Git 和 README 的最小直接启动兜底。
+
+### How
+
+- `tools/verify-experience-workspace-content.sh` 验证新仓库单基线提交、无 remote、不夹带用户暂存文件，以及存量仓库只补缺失文件、不覆盖 README、不改 HEAD/index 和重复执行幂等。
+- `tools/verify-dev-scripts.sh`、`tools/verify-internal-multi-backend-node.sh`、`tools/verify-internal-incremental-components.sh`、Shell 语法和 `git diff --check` 均通过；JDK 25 后端 22 模块跳过测试完整打包成功。
+- 按 `.env.test`/`test` profile 执行真实重启，模板补齐入口成功执行；后端因本机 PostgreSQL `127.0.0.1:15432` 拒绝连接未进入 readiness，未替换 `.env.test` 或绕过依赖。
+
+### Result
+
+- 体验内容改为可直接维护的随包文件，标准部署/重启自动补缺失项且保留存量用户内容；不新增服务、端口、中间件、强制配置或数据库 migration。
+- 本次只同步既有体验 API 的初始化行为说明，不变更 HTTP/RunEvent/DTO 契约、安全权限、generated SDK、`.env*` 或 OpenCode 源码；真实三服务健康验收仍受本机 PostgreSQL 未运行阻塞。
+
+## 2026-08-13 - 补齐稳定用户手册操作截图
+
+### Why
+
+- 每周新功能已经带有操作截图，但其余稳定手册章节仍是纯文字，用户无法直接对照页面入口、按钮和配置状态完成操作。
+- 截图质量要求需要成为整本手册的持续约束，不能只依赖编写周更时人工记忆。
+
+### What
+
+- 将 8 张周更截图迁入可跨章节复用的 `images/operations/`，再从真实 Vue 组件的脱敏 E2E 状态生成 8 张入口、设置、初始化、Agent、引用配置、目录和帮助中心截图。
+- 为帮助中心注册的 12 个 release 章节逐章补图；稳定章节至少 1 张，引用配置、工作区、首次准备和对话等多步骤章节按场景使用 2 张，周更继续保留 8 张。
+- 在帮助中心测试中新增逐章节图片存在性校验，并保留整本手册永久排除游戏内容的扫描；用户手册 README 固化截图目录、替代文本和同步维护要求。
+
+### How
+
+- 截图来源 E2E 首轮 6/6 通过，帮助中心截图最终复跑 1/1 通过；图片均使用模拟业务数据，不包含真实 SSH Key 或其它凭据。
+- `help-center.test.ts` 14/14、agent-web typecheck、VitePress build 和 `git diff --check` 通过；3001 端口的 release 手册中 12/12 章节均渲染至少一张图片，全部构建后图片资源 HTTP 返回成功。
+- 提交前已回顾全部 `.agents/session-log*.md` 近期记录；工作区同时存在 SCM Git 身份等未完成改动，本次只暂存用户手册、对应前端守护测试和本条会话记录。
+
+### Result
+
+- release 内置用户手册的所有稳定章节与每周新功能均已图文结合，自动化代码库、设置、进程、引用配置等关键路径可直接对照入口和配置界面操作。
+- 本次只修改静态手册、图片和测试，不涉及 HTTP API、RunEvent、数据库、migration、性能、安全权限、兼容性、环境配置、generated SDK 或 OpenCode 源码；游戏相关文字、入口、配置和截图仍永久禁止进入手册。
+
+## 2026-08-13 - 校准企业 SCM Git 提交姓名并补偿存量用户
+
+### Why
+
+- F-SLB 某用户的平台展示名因同名追加数字，Git 提交被企业右控以“邮箱对应姓名不一致”拒绝；不能通过删除末尾数字猜测 SCM 姓名，也不能依赖现场 token、psql 或 jq。
+- SSH Key 新增和存量用户都需要从已有可信证据校准独立 Git 姓名，并控制仓库历史扫描对磁盘和数据库的影响。
+
+### What
+
+- 新增独立 `user_scm_git_identities` 证据表和 MyBatis XML 仓储；右控拒绝证据优先于已接受提交历史，平台 `users.username` 保持原语义。
+- Git push 严格解析固定右控报文，逐项核对统一认证邮箱和本次提交姓名后保存期望姓名、重建提交并只重试一次；覆盖应用普通文件、目录占位、应用/公共 Agent 与 Skill 发布，不做尾号猜测。
+- SSH Key 保存后通过有界单线程队列异步定向扫描；XXL 每天 04:10 触发全量补偿，每仓库只读取一次本地 `origin` 跟踪历史（最多 50,000 条），用户按 500 条游标分页并批量 upsert，不执行 fetch 或远端调用。
+
+### How
+
+- JDK 25 定向回归通过：真实 Git 25 项、身份解析 2 项、配置/补偿任务 34 项、H2 migration/MyBatis 与 Flyway 字节锁 14 项；22 模块跳过测试完整打包成功，应用 JAR 可解压。
+- 本机真实 PostgreSQL 从既有 `20260812204207` 历史成功执行 `V20260813190929`，Flyway 记录 success，表 8 列及约束可见；migration SHA-256 `fd434d47...` 已锁定，源码、persistence JAR 与应用内嵌 JAR 字节一致。
+- Testcontainers PostgreSQL/MySQL 用例因本机 Docker socket 不可用被跳过；真实启动在 migration 成功后受既有必填 `TEST_AGENT_TCDS_BASE_URL` 未配置阻塞，未修改 `.env.test` 绕过。
+
+### Result
+
+- release 已具备独立 SCM Git 姓名、右控自校准单次重试、SSH Key 即时异步补偿和存量定时复核；错误详情与日志不暴露姓名、邮箱、统一认证号或右控原文。
+- 本次新增 PostgreSQL 表和 XXL 任务，不变更 HTTP URL、DTO、RunEvent、部署节点、端口、强制环境变量、generated SDK 或 OpenCode 源码；完整 MySQL migration 与应用健康启动仍需在有 Docker/TCDS 配置的环境复验，release 修复后仍需同步回 dev。
+
+## 2026-08-13 - 修复个人 worktree 发布进度连接误报失败
+
+### Why
+
+- 个人 worktree 提交并推送时，实时进度 WebSocket 在 3 秒内建连失败会先把第 3 步标成 `FAILED`，但发布 HTTP 请求仍继续执行，随后页面又回到 `RUNNING`，造成用户误判和重复提交风险。
+
+### What
+
+- `GitChangesPanel` 将 `WEBSOCKET_ERROR` 仅作为实时进度不可用状态，不再写入 Git 发布失败；弹框提示“暂时无法显示实时进度，提交仍在执行，请勿重复操作，等待最终结果”。
+- 保持 `commitPersonalWorkspace`、`publishPersonalWorkspace` 及后端暂存、提交、投影、拉取、推送流程不变；最终成功或失败继续以发布 HTTP 响应为准，HTTP 收敛后清理降级提示。
+- 补充组件回归测试，锁定进度连接先失败时发布 HTTP 仍只调用一次、步骤保持运行态且成功响应正常收敛。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/git-changes-panel.test.ts --reporter=verbose` 通过，42/42。
+- `corepack pnpm typecheck` 通过；`git diff --check` 通过。
+- 本机 Vite 前端继续运行于 `http://127.0.0.1:3000`，已确认实际服务模块包含新提示与降级状态；后端 readiness 为 `UP`。
+
+### Result
+
+- 实时进度通道故障不再伪装成业务失败，也不会取消或重复发起提交推送；真实后端失败仍沿用原错误响应和失败步骤展示。
+- 本次仅修改前端组件、测试、README 和本会话记录，不变更 HTTP API、RunEvent、数据库、部署、安全权限、公共 Agent 业务语义、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-13 - 修正企业 AI 上游鉴权请求头
+
+### Why
+
+- 企业现场直接调用 AI 网关时，`Auth-Token: <供应商关联 Token>` 可以成功返回流式响应；部署代码却按 OpenAI 常见方式发送 `Authorization: Bearer <token>`，造成实际代理调用与已验证协议不一致。
+- 现场进一步确认企业上游实际支持两种供应商鉴权：Bearer 可以完成鉴权但 `ucid` 不生效，只有 `Auth-Token` 会让同一请求的 `ucid` 生效；文档必须与这一区别保持一致。
+
+### What
+
+- 复用 `OpenAiUpstreamSupport` 统一把真实代理、LobeHub 模型网关和能力探测的上游鉴权改为 `Auth-Token` 原值，并在覆盖可信请求头前同时删除客户端传入的 `Authorization` 与 `Auth-Token`。
+- 将内部模型定时/手工探活切换到相同的 `Auth-Token` 协议；OpenCode 子进程访问 Java 内部代理的 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}` 保持不变。
+- 补充代理、模型网关、能力探测和真实本地 HTTP 探活回归，并同步后端/模块 README、HTTP API、安全规范、可观测测试指南与企业单/多后台部署、空响应排障文档；所有相关说明都明确上游 Bearer 与 `Auth-Token` 的 `ucid` 语义差异。
+
+### How
+
+- JDK 25 下 5 个请求头定向测试通过，其中 `InternalModelProviderProbeServiceTest` 使用真实本地 HTTP Server 验证上游收到 `Auth-Token` 且未收到 `Authorization`。
+- 受影响的 `test-agent-model-gateway`、`test-agent-opencode-runtime`、`test-agent-api` 三模块全量测试通过；上游依赖跳过测试安装及相关模块打包成功，`git diff --check` 通过。
+- 文档补充后复跑 `OpenAiUpstreamSupportTest`，并通过 `tools/verify-ai-docs.sh`；文档守护脚本锁定两种上游鉴权与 `ucid` 生效差异，避免后续再次混写。
+- 整个 `-am` 测试在任务外 `test-agent-xxl-job-integration` 的既有匿名测试内部类加载问题处失败，报错为 `NoClassDefFoundError`，未将其误报为通过。
+
+### Result
+
+- Java 到企业 AI 网关现统一发送 `Auth-Token: <供应商关联 Token>`，确保 `ucid` 在企业上游生效；内部代理 Bearer 只保留在 OpenCode → Java 边界，`ucid` 与 traceId 注入链路、流式请求体、响应处理和可观测记录逻辑未改。
+- 本次不变更 HTTP 路径、DTO、RunEvent、数据库、migration、端口、部署拓扑、强制环境变量、generated SDK 或 OpenCode 源码；企业节点需要重新打包并部署后端应用才能生效。
+
+## 2026-08-14 - 修复提交推送进度误报并完成四类 Git 端到端验收
+
+### Why
+
+- 个人及公共 worktree 的提交推送弹框会出现先失败再转圈、成功后步骤仍为 `PENDING`、远端分支/commit 无证据等问题；用户切换工作空间或 Diff Tab 时还可能让进行中的操作误用新上下文。
+- 公共发布会把日期型或手工命名的历史 worktree 纳入补偿，造成远端已成功但 rollout 长期 `PENDING`，需要同时验证公共 Agent 对现有工作区和 dispose 的真实影响。
+
+### What
+
+- 前端在操作开始时冻结 workspace、个人/公共 worktree、分支、暂存文件和作用域；结果按单次操作统计，推送类操作只有确认远端成功才显示成功，并展示后端返回的远端分支与 commit。
+- Agent 配置进度 WebSocket 与现有文件/应用源码通道对齐显式 `*` 的 CORS 语义，一次性 ticket 仍为必需；无 `operationId` 的握手失败只降级实时进度，真实业务失败仍按 operationId 终止。
+- 后端为个人工作区发布响应补充 `remoteBranch`，公共操作持久化 branch；公共 rollout 跳过不再可复用的旧命名 worktree，并把既有相应任务安全标记为 `ABANDONED/WORKTREE_NO_LONGER_REUSABLE`。
+
+### How
+
+- 定向后端 158 项、进度 WebSocket 2 项和前端 Git 面板 48 项通过；前端全量 typecheck、production build，以及后端 22 模块 `clean package` 通过。
+- 使用内网 GitLab 私有仓库实际验证：测试个人本地提交 `24565915e8847736e66d15195841021d26aa6d34` 且远端不前进；测试应用 feature 推送 `f3f6760477aa7dcf59c0c1780bd46b1deb0c773a`；自动化个人本地提交 `9a45b196ab4d31a994fb57c95469026abaef3f03` 且远端不前进。
+- 从 `http://127.0.0.1:3000` 一步式提交并推送公共 Agent 到 `d2c941e50854cba7be43bddf516dfc5af2246321`；远端、共享副本、稳定个人 worktree 一致，rollout `acr_da1a7ff67b7a4be0b73dbd81ba7d13a5` 完成，dispose=1、pending=0、worktreePending=0。
+
+### Result
+
+- 四类 Git 链路均由真实平台和隔离远端完成验收；进度弹框不再先失败后转圈，发布成功会给出可独立核验的远端分支与 commit，切换 Tab 不会改变正在执行的目标。
+- 本地 test 数据库的公共 Agent Git 参数临时指向内网专用验收仓库；未修改 `.env*`、OpenCode 源码、generated SDK、数据库结构或 migration。本次只有 additive `remoteBranch` DTO 兼容扩展，不改变 RunEvent；release 修复后仍需按长期分支策略同步回 dev。
+
+## 2026-08-14 - TCDS 需求导入页恢复原始 Vue 紧凑样式
+
+### Why
+
+- 用户要求去掉需求导入页无用装饰，视觉恢复到提供的 `indexNew.vue` 初始风格，同时保持全选和多选功能不变。
+
+### What
+
+- `RequirementImportView.vue` 去掉内嵌页重复的眉题、大标题、胶囊计数、圆角卡片、双列子项和装饰动效，恢复白底、顶部紧凑筛选、单列目录与底部蓝色“生成”按钮。
+- 保留既有同源上下文、筛选、全选当前结果、父项批量选择、子项多选、100 项上限和导入回调；新增组件测试锁定全选、半选与父项重新全选状态。
+- 同步 `frontend/apps/agent-web/README.md` 的稳定页面说明。
+
+### How
+
+- 专项 Vitest 3/3、agent-web typecheck 和 production build 通过；构建只保留既有大 chunk 提示。
+- 在 `http://127.0.0.1:3017/workspace-requirement-import` 启动真实 Vite 页面并用浏览器 mock 数据核对：选择两个子项后计数为 2、生成按钮可用、父项和全选均为半选；视觉截图确认页面为原始 Vue 风格的白底紧凑单列表格。
+- 提交前回顾全部 `.agents/session-log*.md` 并隔离工作树中其他未提交改动；未修改 `.env*`、API、RunEvent、数据库、部署、安全、generated SDK 或 OpenCode 源码，也未新建分支。
+
+### Result
+
+- TCDS 需求导入页装饰已收敛，全选、多选和导入业务行为保持兼容；真实前端已启动验证并在核对后停止。
+
+## 2026-08-14 - 固化 TCDS 内网地址与后台 toolId 契约
+
+### Why
+
+- 小地球需求导入从旧 iframe 改为平台后台调用后，需要确认现场 `http://tcds-prod.sdc.icbc:9080` 与 `toolId: 66f36bfa5c1c6105572b0118880261d6` 是否覆盖全部 TCDS 后台接口。
+- 现有统一网关已经复用固定 header，但昨天的安全收敛把地址改成必填环境变量，仓库模板仍是占位地址，且测试没有逐条锁定 header。
+
+### What
+
+- `application.yml` 将现场局域网地址作为默认值并保留 `TEST_AGENT_TCDS_BASE_URL` 覆盖；本地与企业 `backend.env` 模板同步同一地址。
+- 不新增 TCDS 客户端或并行请求路径，继续复用 `TcdsHttpGateway` 并收敛统一请求构造器；登录、用户、应用、子条目、文档元数据和 TCDS 同源文档请求统一携带精确 `toolId`，重定向到跨域对象存储后不透传该 header。
+- 同步后端与 integration README、HTTP API、部署、安全和安全扫描复核文档；浏览器仍只访问平台同源 API，不接触 TCDS token、header 或下载地址。
+
+### How
+
+- JDK 25 定向 Maven reactor 通过：TCDS 网关/装配 9 项、应用配置绑定 15 项，0 失败；后端 22 模块跳过测试完整打包成功。
+- 按 `.env.test`/`test` profile 运行标准重启，后端 health/readiness 为 `UP`，前端 200，CORS 正确，manager 最终 health 为 `HEALTHY`。
+- `tcds-prod.sdc.icbc:9080` TCP 连通；携带精确 `toolId` 的无真实用户只读 HTTP 探针被上游直接断开，未返回 HTTP 状态。
+
+### Result
+
+- release 当前后台默认地址、全部固定 TCDS JSON 接口和同源文档请求 header 已满足现场契约，跨域对象存储不泄露 header，环境覆盖保持兼容；未新增 API、DTO、RunEvent、数据库、migration、服务、端口或强制配置。
+- 有效登录用户下的真实授权目录、重复覆盖、部分失败和文件树刷新仍需企业会话验收；release 修复后仍需按长期分支策略同步回 dev。
+
+## 2026-08-14 - 补全 Git 推送不确定状态恢复与多权限 UI 端到端验收
+
+### Why
+
+- workspace 与公共 Agent 的“一步提交并推送”会在 Git/SSH 超时、HTTP 回包丢失或进度 WebSocket 迟到时出现本地已提交但页面仍转圈、步骤停在 `PENDING`、远端事实不明且刷新后无法继续的问题。
+- 平台同时存在普通 workspace、应用 Agent、公共 Agent、自动化仓库、`spec/**` 本地资产、多用户远端并发与不同 Git 权限，不能把单条成功链路作为验收结论。
+
+### What
+
+- workspace 与应用 Agent 在本地提交成功后保存当前 Tab 的待推送逻辑上下文，刷新后可复用原文件白名单幂等“重新推送”，不重复创建本地提交；用户可只清除浏览器提醒，已完成的本地提交不回退。公共 Agent 继续以后端 `publishPending` 为权威事实。
+- 应用 feature 发布改用 index 与 HEAD 的真实差异判断是否需要 commit；push 异常后按远端已包含、确认未包含、无法确认三态收敛，分别继续成功、回退 feature 临时提交并允许立即重试、或保留 PREPARING 闸门交给后台核验。错误只返回稳定恢复状态与 traceId，不向页面暴露 URL、命令或 stderr。
+- Git 超时现在终止顶层 Git 及其 SSH 等后代进程。拉取失败弹框展示错误码、脱敏提示和 traceId；延迟进度事件不能覆盖 HTTP 终态。同步更新 common/workspace/frontend README、HTTP API、安全规范和应用 worktree 测试说明。
+
+### How
+
+- 定向通过 Git 执行器 7 项、真实 Git 20 项、应用发布服务 101 项，以及前端 Git/错误恢复 4 个文件 168 项；前端 typecheck、production build 与后端 22 模块跳过测试完整打包通过。指定后端 reactor 19 个模块全量测试成功，其中 workspace 448 项、API 567 项，全部 0 failure/0 error。
+- 从 `http://127.0.0.1:3000` 完成 UI 级真实验收：自动化个人 worktree 和测试 workspace `spec/**` 只建立本地提交；普通 workspace 与应用 Agent 推送到 feature；公共 Agent 推送、共享同步与 rollout target `DISPOSED`；另一提交者推进远端后的非冲突合并、add/add 冲突、取消合并、采用远端并完成 merge；普通用户应用过滤与公共管理入口隐藏。
+- 使用拒绝连接地址验证确定性断网错误，页面返回 `GIT_UNAVAILABLE`、脱敏 `gitFailureHint` 和 traceId；Gitee SSH 偶发断连后重试成功。复现并修复 Git 超时遗留 SSH 子进程；最终无残留 Git/SSH 发布进程。测试仓库 URL、原 feature/个人/public 分支、物理 worktree 目录和数据库 target commit 已恢复，端到端证据保留在被测仓库本地 `codex-e2e-*` 分支。
+- Docker 恢复后按 `.env.test`/`test` profile/JDK 25 用最终产物重启 backend、manager 与 frontend；health/readiness 为 `UP`、3000 返回 200、登录 CORS 正确、manager WebSocket 已连接且进程 health 最终 `HEALTHY`。重新登录 UI 后三个 Git 作用域均为 0，无待推送、冲突或无效 commit 提示。
+
+### Result
+
+- `release` 上四类 Git 链路、多人冲突、权限隔离、网络失败、刷新恢复和 dispose 已完成真实 UI 端到端验证；网络抖动不再把“本地提交成功”伪装成全失败，也不会因盲目重试重复 commit。
+- 本次不新增 HTTP URL、DTO 或 RunEvent 类型，不改数据库结构/migration、部署拓扑、`.env*`、generated SDK 或 OpenCode 源码；只扩充既有错误 details 的稳定可选字段与前端展示。Gitee SSH 仍可能受外部网络偶发断连影响，但页面保留可重试入口和管理员可关联的 traceId。
+
+## 2026-08-14 - 合入案例远程维护并统一 TCDS toolId
+
+### Why
+
+- 远端 `release` 的案例维护功能新增 `getTaskTypes` 与 `createGraphCase` 两条 TCDS 请求，但前者没有携带现场要求的 `toolId`，两者还各自硬编码了不含 `:9080` 的生产地址。
+- 合并远端提交时需保留本地 `release` 已有的体验工作区、会话消息和个人进程重启客户端能力，不能让自动合并静默删除既有 API。
+
+### What
+
+- 新增包内 `TcdsHttpRequestFactory`，由 `TcdsHttpGateway` 与 `TcdsCaseMaintenanceService` 共同复用部署地址、HTTP 超时和同源 `toolId: 66f36bfa5c1c6105572b0118880261d6` 注入；任务类型与案例维护均通过 `${TEST_AGENT_TCDS_BASE_URL:http://tcds-prod.sdc.icbc:9080}` 访问。
+- 案例维护服务改为 Spring 显式装配并复用统一 `HttpClient`；测试分别锁定 GET、POST 和校验失败前的任务类型请求都携带精确 header 与 `:9080` 端口。
+- 语义合并远端案例维护弹窗、Markdown 解析、平台 API 与日志脱敏能力，并恢复自动合并丢失的体验工作区打开/关闭/提交、Run 消息查询和个人进程重启 6 项既有前端客户端方法。
+- 同步 integration/API/前端 README 与 PACKAGE，以及 HTTP API、部署、安全和模块图；未修改 `.env*`、RunEvent、数据库、migration、generated SDK 或 OpenCode 源码。
+
+### How
+
+- JDK 25 定向 Maven reactor 通过：TCDS 网关/案例维护/装配 16 项、TCDS Controller 与 API 日志 25 项、应用配置绑定 15 项，共 56 项，0 失败。
+- 前端案例维护、编辑器入口和 backend-api 定向 Vitest 137/137，通过全 workspace typecheck、用户手册与 agent-web production build；构建仅保留既有大 chunk 提示。
+- `tools/verify-ai-docs.sh`、`git diff --check` 和冲突标记复核通过；提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 案例远程维护的全部 TCDS 后台调用现在与需求导入链路共用同一地址和同源 header 规则；浏览器仍只调用平台 API，跨域对象存储不会收到内部 `toolId`。
+- 这是现有部署拓扑内的 `release` 修复，HTTP API 为新增平台入口，既有 API/DTO/事件和客户端调用保持兼容；真实 TCDS 业务权限与数据写入仍需在有效企业会话中验收，并按分支策略同步回 `dev`。
+
+## 2026-08-14 - 补齐企业包 Flyway/TCDS 门禁并修复 SCM 姓名游标
+
+### Why
+
+- 本轮 `release` 相对上一企业包新增 PostgreSQL `V20260813190929` 和 XXL MySQL `V12`，但内层打包、外层封装和目标机安装后校验仍只锁定到 `20260812204207` / V11，旧依赖 JAR 可能漏检。
+- SCM Git 姓名补偿的首屏游标 SQL 使用空参数 OR 表达式，真实 PostgreSQL 无法推断参数类型；原 H2 回归未覆盖该数据库差异。
+- 两台企业后台节点包必须统一使用现场 TCDS 地址 `http://tcds-prod.sdc.icbc:9080`，不能仅校验配置非空。
+
+### What
+
+- 三层企业发布脚本新增 PostgreSQL `20260813190929` 与 XXL V12 的文件名/SHA-256 字节锁，外层封装在临时节点副本中写入并复核精确 TCDS 地址，逐机部署脚本也拒绝其它地址。
+- `UserScmGitIdentityMapper.xml` 复用现有 MyBatis 动态游标模式，首屏不生成 `user_id > afterUserId`，后续页才绑定非空游标；真实 PostgreSQL 测试同时锁定首屏与末页。
+- 企业多后台手册更新上一包基线、两套 Flyway 允许增量、checksum、停止条件和 V12 任务验收；持久层 README 同步 PostgreSQL 空游标兼容说明。
+
+### How
+
+- 将本机仅用于 Testcontainers 的 `postgres:16-alpine`、`mysql:8.4` 切换为 arm64 原生镜像，避免 amd64 仿真超过容器启动等待窗口；企业 worker linux/amd64 制品不受影响。
+- JDK 25 下真实 PostgreSQL 兼容矩阵 25/25、SCM MyBatis PostgreSQL 1/1、Flyway 文件命名/字节锁 13/13 通过；真实 MySQL 8.4 空库、V8→V12 与并发初始化 4/4 通过。
+- 四个 Shell 脚本 `bash -n`、`git diff --check` 通过；未修改 migration 原始字节、`.env*`、generated SDK 或 OpenCode 源码。
+
+### Result
+
+- 企业包从构建、外层封装到安装后都会拒绝缺失或字节不匹配的两条新 migration，两台后台节点包的 TCDS 地址固定一致。
+- 每日 04:10 的 SCM Git 姓名补偿首次扫描不再因 PostgreSQL 空参数类型推断失败；数据库变更仍只有已提交的新增表与 V12 任务，本次没有新增 migration。
+
+## 2026-08-14 - 记录 TCDS/SCM 大版本企业增量包
+
+### Why
+
+- 用户要求以当前本地 `release` 重新打企业包，本轮相对上一包包含需求导入、TCDS 案例维护、Git 发布恢复、SCM 姓名校准等较大改动，需要记录可追溯源码、制品哈希和逐机验收基线。
+
+### What
+
+- 制品源码提交固定为 `ad37bfe7675eca62f9b9a2d4d4518bb90889384c`；内层发布 ZIP SHA-256 为 `34b5b8d82d17acd78ea100684d0c68b6261dcc713f87b90b770f5b08a047c102`，外层完整包 SHA-256 为 `2fef802357ad060b715ef0d36f8f93022c8e702ba20bb6eee7a7a84dcf61129c`。
+- 后端 app JAR 为 `6aa6b398205d965bef02e08878f3e152ca216548a3fe8a744dffa6961a020047`，persistence JAR 为 `0eba3f1b6f1b3372398d07ba8975f122f1c840cd8c73b1423c2382188f0ad8e3`，XXL integration JAR 为 `aa6d2df6f7821e6b3b44ff9ea0b13613060bc255a02f6ce93def5b1700eaa366`，前端归档为 `23e6bb2d6bc6eff6ffbb21accaf678bf04b6761ab36995b136750363b13588ca`。
+- models 快照 SHA-256 保持 `6a510be17a7b0616f128fad130773c3fb6ad7a3d4d7881ec59f2873e17cbc44c`；Qwen 日期 `2026-08-07` 高于 DeepSeek `2026-08-06`，继续仅按既有灰度要求在 `.4` 安装，`.114` 保留现网模型文件。
+
+### How
+
+- JDK 25 完成后端构建，agent-web production build 成功；worker runtime 指纹 `50f56c...`、toolbox 指纹 `35447d...` 均判定 `reuse`，LobeHub 标记 `disabled`，Workflow 运行制品不存在。
+- 内层 `--validate-only`、内外层 ZIP SHA、外层内嵌内层 SHA、全部新旧 Flyway 资源、RSA 资源、节点包结构均通过；两台后台节点包均确认 `TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080` 和相同 CORS，未输出任何密钥。
+- 外层包复制到 `/Users/kaka/Desktop/mimoagent/0709/` 后重新执行 SHA 校验通过；用最终构建产物重启本地 backend、manager、frontend，不启用 LobeHub，health/readiness 为 `UP`、前端 200、manager WebSocket 已连接且进程 health 收敛为 `HEALTHY`。
+
+### Result
+
+- 可交付文件为固定名 `test-agent-two-backend-complete.zip` 与 `.sha256`，大小约 128 MiB；企业内从中转机 `~/Desktop/mimoagent/0709` 校验并按 `.4 → .114 → .2` 顺序部署。
+- 数据库只允许从上一包 PostgreSQL `20260812204207` / XXL V11 基线分别新增 `20260813190929/-297528120` 与 V12/`-211900485`；任何失败、未知 checksum 或未知更高版本均停止，不使用 repair/outOfOrder/手改历史表。
+
+## 2026-08-14 - 基于已部署灰度包恢复 worker reuse 指纹门禁
+
+### Why
+
+- 新一轮平台增量包在后台配置安装后、Java 停止前被 worker runtime 指纹门禁拦截；上一轮 `.4` 模型灰度已经成功，manager/worker 实际不需要加载镜像或重启。
+- 原 `reuse` 只接受目标机已有状态文件中的精确指纹，无法处理“runtime 已先部署成功、组件状态门禁后引入或记录缺失”的存量节点；直接跳过门禁会失去既有安全检查。
+
+### What
+
+- `package-release.sh` 新增显式 `--worker-runtime-baseline-file`，baseline 固定上一轮源码提交、内层 release SHA-256 和 worker 指纹；封包只在 baseline 指纹与本轮构建输入完全相同时保留 `reuse`，仍不携带 programs/worker 镜像。
+- `deploy-internal-release.sh` 在普通目标指纹不匹配时，只接受格式完整的随包已部署 baseline；先复用既有 Manager/OpenCode/Codex 与 Tool runtime 检查并只读确认 worker 容器健康，全部通过后才原子补写组件状态，再继续原 `reuse` 流程。
+- 增加 `release-baselines/20260813-qwen-gray.env`，记录已部署灰度源码 `57e211de...`、内层 release `7af9c20e...` 和 worker 指纹 `50f56c...`；`deploy-backend-node.sh` 后续写 toolbox 指纹时保留这些审计字段。
+- 同步企业 README 与双后台部署手册，并增加封包、旧门禁严格失败、可信 baseline 健康后恢复和自动节点状态保留回归。
+
+### How
+
+- 在独立 detached worktree 对已部署源码 `57e211de48a5507fb8d1689e1c8f86fd96563032` 执行组件计划，重新计算 worker 指纹为 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`，与当前 release 完全一致。
+- `verify-internal-incremental-components.sh`、`verify-internal-multi-backend-node.sh`、`verify-internal-auto-node-deploy.sh`、`verify-internal-two-backend-complete-package.sh`、`verify-ai-docs.sh`、相关 Shell `bash -n` 和 `git diff --check` 均通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，确认上一灰度、当前失败包、Flyway 和模型灰度边界一致；未修改 `.env*`、OpenCode 源码、generated SDK 或 migration 字节。
+
+### Result
+
+- 指纹门禁仍默认严格失败；只有本轮显式携带的已部署 baseline 可恢复缺失/旧状态，并且恢复前必须通过真实 runtime 与容器健康检查。
+- 恢复动作只更新 `/data/testagent/config/release-component-state.env`，不执行 `docker load`、不重启 manager/worker、不替换活动的 `opencode-models.json`；`.4` 的 Qwen 灰度和 `.114` 的现网模型继续分别保留。
+- 本次只修改发布脚本、回归、文档和非敏感基线元数据，不涉及 API、事件、数据库结构、Flyway SQL、性能、安全边界或部署拓扑变化。
+- 最终企业包源码提交为 `731b2f1ae9f78aa0d4ef71af3727515f756ebeed`；内层 ZIP SHA-256 为 `35687eb1035faa217fee1ad6e54f11cc35f66bd6fcdf898b186ef63b1c0fdbea`，外层完整包为 `1734a0f30eff5eb78a6da3e6c4a09005161daee636481de0a135539838216700`。
+- 后端 app JAR 为 `8767313d4a96f7332efd1481e2ecd01833e3f508b9c498aeaabc2641eb15ebbf`，persistence JAR 为 `aa502bceb9457b22b1abfa24f328b6b33a9b8922aa5a958f02d8dbc28f1b3c2b`，XXL integration JAR 为 `e2aacd9f6221bf68abdebac2125dc15d872ed559d10280bad943e03218f7390d`，前端归档为 `9679040a4f98cefee02252f3928568987eb2528098317346f4cdaa06224471a9`。
+- 最终独立校验确认外层 checksum、两层 ZIP、外层内嵌内层逐字节一致、`--validate-only`、全部受保护 Flyway 资源、两台 TCDS 精确地址和 worker 制品缺失门禁均通过；发布清单为 worker/toolbox `reuse`、LobeHub `disabled`。
+
+## 2026-08-14 - 修复 TCDS 需求导入筛选布局与历史文档转换
+
+### Why
+
+- 同源需求导入 iframe 的版本、应用仍是不可输入检索的原生选择框，初次条目请求较慢时还会持续禁用；三列筛选器和条目目录缺少收缩边界，在窄 iframe 中会横向溢出。
+- TCDS 历史文档可能出现 `.doc/.ppt` 文件名与实际 DOCX/PPTX 容器不一致，现有转换器严格按扩展名选择解析器，导致每次导入稳定返回“TCDS 文档转换失败”。
+
+### What
+
+- 版本和应用改为复用 Element Plus 的可检索 `el-select`；应用目录加载完成即释放控件，迟到条目请求继续由既有 sequence 防竞态。筛选区改为可收缩网格，搜索框、目录、父子条目统一限制在 iframe 宽度内。
+- Word 和 PowerPoint 转换按实际容器依次尝试 OOXML/旧格式解析，Word 历史纯文本再走受控文本兜底；下载响应的 content type 传入转换器，Office 文件遇到 HTML/JSON 错误页时明确拒绝，日志只保留格式、脱敏媒体类型和异常类别。
+- 同步 workspace 与前端模块 README、扫描复测文档；未修改 `.env*`、HTTP API、RunEvent、数据库、migration、generated SDK 或 OpenCode 源码。
+
+### How
+
+- 前端定向 Vitest 5/5、agent-web typecheck 和 production build 通过；真实 iframe 验证版本可输入检索，筛选区与条目目录 `scrollWidth == clientWidth`，搜索框右边界未越出容器。
+- JDK 25 下文档转换与导入服务定向 Maven 测试 9/9，通过完整后端跳过测试打包；使用根目录 `.env.test` / `test` profile 启动 release worktree 的 backend、manager、frontend，8080 health/readiness 为 `UP`，3000 页面与登录 CORS 正常。
+- 本地测试账号无法取得企业 TCDS 授权应用，因此真实企业文档下载未执行；兼容路径由实际 DOCX/PPTX 二进制伪装旧扩展名及服务级工作区写入测试覆盖。
+
+### Result
+
+- 版本和应用可输入筛选，条目区域不再超出 iframe；历史 Office 文件不再仅因扩展名与真实容器不一致而转换失败，错误页也不会被误写为 Markdown。
+- 这是现有部署拓扑内的 `release` 修复，不影响公共 Agent、既有 Git diff/提交推送链路或工作区 ID 语义；真实 TCDS 授权数据仍需用户在企业会话中最终验收，并按分支策略同步回 `dev`。
+
+## 2026-08-14 - 重新打包 TCDS 需求导入修复企业包
+
+### Why
+
+- 用户要求基于当前本地 `release` 重新打企业包；相对上一制品，源码新增 `9b1151ed0` 的 TCDS 需求导入筛选布局与历史 Office 文档转换修复。
+
+### What
+
+- 制品源码提交固定为 `9b1151ed05b0e2acbbbd8ac8ecf08eda646a5bc7`；内层发布 ZIP SHA-256 为 `76a15ab3e7f0a3f3c0e1033216150c89774516cc3df3073c00eba8b36b74224c`，外层完整包为 `c69a1d629ff09772edfbcca9fc329d840812e98650d496cc08d7f4d0ec32677a`。
+- 后端 app JAR 为 `721e4f02d60d1c703dbd6699b0d5d7454280fb5ce1eddb35509e1476a1f4c0ae`，persistence JAR 为 `18ec9098e26bf80d3b85ad93aa653eab6943bad0560104b9da9dac2a1b88a11c`，XXL integration JAR 为 `5057bad68fd9e7ef5f68cdc869b486a20047527fe5b92ae26fff7e8730cc5901`，前端归档为 `662636c468ac3fa5ae00599dae6a20d430101b7a0b75608a4ad26cee2eacb0d1`。
+
+### How
+
+- JDK 25 后端构建、Spring 构造器装配、前端用户手册、`vue-tsc` 与 Vite production build 通过；需求导入后端定向测试 9/9、前端全量 Vitest 1980 passed / 1 skipped。
+- worker runtime 指纹继续为 `50f56c...`、toolbox 指纹继续为 `35447d...`，两者均为 `reuse`；内层包未携带 worker/programs 制品，LobeHub 为 `disabled`。
+- 内外层 ZIP、外层内嵌内层逐字节一致、内层 `--validate-only`、最终 JAR 全部受保护 Flyway 资源和两台 TCDS 精确地址均验证通过；未修改任何 migration 字节。
+
+### Result
+
+- 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/` 并再次通过校验，部署仍按 `.4 → .114 → .2`，不加载或重启 manager/worker，也不替换两台活动的 `opencode-models.json`。
+- 本轮没有新增 API、事件、数据库结构、Flyway SQL、配置项或部署拓扑；真实企业 TCDS 授权数据和历史 Office 文件仍需现场业务验收。
+
+## 2026-08-14 - 恢复 TCDS 已导入条目状态展示
+
+### Why
+
+- 旧版需求导入页会展示父子条目的“已导入/未导入”状态，但内置同源页面迁移时只保留了重复选择和覆盖导入语义，状态提示丢失，用户无法区分已落盘目录与待导入条目。
+
+### What
+
+- 新增受既有文件 WebSocket ticket、逐 RPC 鉴权和工作区写权限保护的 `workspace.requirement-import-items`，后端按导入使用的同一套路径规范化规则检查父目录和子条目 `01-需求` 目录是否存在。
+- 导入页恢复父子条目“已导入/未导入”标记；已导入项不禁用，继续允许覆盖更新和部分失败重试。状态查询不返回物理路径、文档 URL 或 TCDS token。
+- 同步 API、事件流、workspace、backend-api 和 agent-web 文档；未修改数据库、Flyway、RunEvent、环境配置、公共 Agent 或 Git diff/提交推送流程。
+
+### How
+
+- 前端需求导入定向 Vitest 6/6、agent-web typecheck 和 production build 通过；仅含本次暂存内容的独立快照后端 workspace/API 定向测试合计 46/46 通过，覆盖规范化目录状态、合法 RPC、共享会话拒绝和敏感字段不返回。
+- JDK 25 下完成 22 模块跳过测试打包，并用主工作区 `.env.test` / `test` profile 启动 release worktree；8080 health/readiness 为 `UP`，3000 页面返回 200，manager 未出现解码、重连或致命错误。
+
+### Result
+
+- 已恢复旧版可见状态，同时保持旧版允许重新选择的行为；用户可明确判断条目是否已导入，并继续执行覆盖导入。
+- 本地账号无法取得企业 TCDS 授权目录，真实企业目录的 UI 状态仍需在用户企业会话中验收；release 工作区中另一批尚未提交的 Word 图片附件改动未纳入本次提交。
+
+## 2026-08-14 - 完善 Word 结构化 Markdown 转换
+
+### Why
+
+- TCDS Word 导入仅通过 `paragraph.getText()` 抽取文本，用户实际产物的标题、段落、列表和表格被压成超长行，内嵌图片也没有附件引用。
+- 旧 `folderManager` 也主要是文本抽取，只能保留 DOC/DOCX 容器兼容思路，不能继续沿用转换质量。
+
+### What
+
+- 新增 `WordToMarkdownRenderer`：DOCX 按正文元素原顺序渲染 Heading/大纲标题、Run 加粗/斜体/删除线、分层有序/无序列表、受控超链接、Markdown 表格、硬换行、分隔线和内嵌图片；旧 DOC 由 HWPF 尽力保留标题、列表、基础字符样式和可提取图片。
+- 图片写入 Markdown 同级 `{文档名}.assets/image-NNN.{ext}`，并通过现有工作区安全路径校验的模块内部二进制写入入口幂等覆盖；Markdown 与附件合计继续受 20 MiB 单文档上限约束。
+- 按用户最终决策保留 Word 扩展名实际返回文本时的兼容导入；可解析 DOCX/DOC 容器始终优先走结构化渲染。同步 workspace README、HTTP API 语义和安全复测文档。
+
+### How
+
+- JDK 25 定向转换/导入/文件服务测试 51/51 通过，覆盖标题与大纲级别、行内样式、安全/不安全链接、分层列表、表格、图片引用与字节、覆盖写入、路径穿越和容量限制；受影响 reactor 干净全量 77 个套件/622 项全部通过。
+- 用户进一步明确“Word 文件名实际返回压平文本时不能报错”后，补充 `.doc/.docx`、UTF-8/GB18030、`text/plain`/`application/octet-stream`/`application/msword` 的转换器与完整导入服务回归；定向 14/14、workspace-management 受影响 reactor 684/684 通过，纯文本回退不生成图片附件。
+- 22 模块 `mvn clean package -Dmaven.test.skip=true` 成功。使用根目录 `.env.test` / `test` profile 启动 release worktree；期间两次被主工作区并行重启抢占 8080，等待并行任务结束后重新启动并等待 20 秒，health/readiness 均为 `UP`、3000 为 200、登录 CORS 正常、manager 无重连循环。
+- UI 级登录、工作台和同源导入 iframe 打开成功；当前本机 TCDS 返回“服务暂不可用”，因此未执行真实企业 Word 下载与导入。
+
+### Result
+
+- 原始 DOCX 不再是文本抽取，可保留上述 Word 结构；图片通过安全工作区文件服务写盘并使用相对 Markdown 引用。上游只提供已压平文本时继续可导入，但已丢失的 Word 样式无法从纯文本还原。
+- 结构化渲染前后使用的是同一条“OOXML → 旧 DOC → 可读文本”回退链；本轮无需修改生产转换逻辑，只用回归测试锁定旧链路可导入的压平文本不会因发布新渲染器而退化。
+- 本次不新增 HTTP/RPC/RunEvent 接口、数据库/Flyway、部署变量或依赖，不修改 `.env*`、generated SDK 或 OpenCode 源码；公共 Agent、工作区 ID 及 Git diff/提交/推送链路未变更。
+
+## 2026-08-14 - 合并远程 release 的 TCDS 案例日志增强
+
+### Why
+
+- 用户要求拉取远程 `release` 后重新打企业包；远程新增提交 `9ee0ff643078d93b298060b0bf553f83073ab967`，本地同时保留需求导入状态、Word 结构化转换和纯文本兼容修复。
+- 远程 TCDS 实现基于旧地址装配，直接合并会重新写死生产地址并绕过当前统一 `TcdsHttpRequestFactory`，与企业 `:9080` 地址契约冲突。
+
+### What
+
+- 保留统一 `TEST_AGENT_TCDS_BASE_URL`、共享 `toolId` 注入和所有 profile 实时请求语义，吸收远程确认的 10 项 `name/value -> taskType` 精确映射、仅提交勾选案例及 `createGraphCase` 请求/响应脱敏诊断日志。
+- 日志不复制固定 `toolId` 常量；请求正文只保留有界长度和 SHA-256 短摘要，响应 `data` 只保留类型、数量和摘要，非法、空或超限正文不记录原文。
+- 同步 integration、前端、HTTP API 和安全文档；未修改数据库、Flyway、RunEvent、环境配置、部署拓扑、generated SDK 或 OpenCode 源码。
+
+### How
+
+- JDK 25 下 TCDS 配置/服务与需求文档转换/导入定向测试 27/27 通过；前端案例维护定向 Vitest 16/16、全 workspace typecheck、用户手册和 agent-web production build 通过。
+- 冲突标记、`git diff --check` 均通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，确认继续保留 `.4` Qwen 灰度、`.114` 现网模型及 worker/manager 不重启边界。
+- 对比上一企业包源码 `9b1151ed05b0e2acbbbd8ac8ecf08eda646a5bc7`，Flyway migration 文件无变化。
+
+### Result
+
+- 当前 `release` 同时包含远程 TCDS 日志/任务类型增强和本地三项需求导入修复，TCDS 地址仍由企业部署配置统一控制。
+- 真实企业 TCDS 任务类型、案例维护和 Office 下载仍需现场验收；本地自动化没有替代企业网络验证。
+
+## 2026-08-14 - 打包远程合并后的 release 企业包
+
+### Why
+
+- 用户要求拉取远程 `release` 并基于合并后的最新代码重新打包，上一轮企业包已经部署完成，本轮继续使用增量组件边界。
+
+### What
+
+- 制品源码提交固定为 `d9d5da7e7e95a41ff2813e06636feac093930cbd`；内层发布 ZIP SHA-256 为 `168533721fd28a466811f2a92b9b2ccb1a66eb6d22ea8c09b339be96cb0b50ab`，外层完整包为 `69d09bc0907d4053a3b73dbf21760cdce6122c35e2d5996bc8cbb9a3a5f201f6`。
+- 后端 app JAR 为 `e232a87f6302b3ebdb9d0f0a9f5758e1a6e5b528b45572e2c8e559ab20ab3863`，persistence JAR 为 `43d34ddadfe724441b3d9899cae00dbb4004ba54aa368dc3b6958d24e56db666`，XXL integration JAR 为 `f5e5bb0443f922a3aaa79ac23f2f1845bede542a12c827213f44a2e25034134d`，前端归档为 `179894a24cf8273c27cd3f584566765b828ea7e58a555a39af996daa01e30490`。
+
+### How
+
+- 显式以 `VITE_TEST_AGENT_WORKFLOW_ENABLED=false`、`VITE_TEST_AGENT_LOBEHUB_ENABLED=false` 构建；worker 指纹仍为 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`，toolbox 指纹仍为 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`，两者均为 `reuse`。
+- 内外层 ZIP、外层内嵌内层逐字节一致、内层 `--validate-only`、最终 JAR 受保护 Flyway 资源、两台 TCDS `http://tcds-prod.sdc.icbc:9080` 和 worker/programs 制品缺失门禁均通过。
+- 提交前再次确认全部 `.agents/session-log*.md` 近期记录未与本轮发布边界冲突；本轮没有 migration 文件变化。
+
+### Result
+
+- 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c` 与 `unzip -t`。
+- 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`。
+
+## 2026-08-14 - 回退 Word 结构化转换并补生成蒙版
+
+### Why
+
+- 用户现场反馈导入并生成 Word Markdown 后工作台明显变卡；样本文档 `/Users/kaka/Desktop/qr-decode/out/需求子条目S20260629-001347设计文档.md` 只有 49 行但最长单行约 1450 字符，确认 TCDS 返回的多数内容本身已压平，结构化渲染和图片附件不能还原已丢失格式，反而增加转换与编辑器渲染开销。
+- 生成期间页面只有按钮禁用，没有明确的等待反馈，用户容易重复操作或误判为卡死。
+
+### What
+
+- 删除独立 `WordToMarkdownRenderer`、图片附件导出及 workspace 模块内部二进制写入入口，恢复 DOCX 按段落/表格文本输出和旧 DOC 的 HWPF 文本提取；继续保留 `.doc` 名称承载 DOCX、Word 扩展名实际返回 UTF-8/GB18030 纯文本、跨 Office 容器、错误包络拒绝、路径/容量限制和覆盖导入兼容性。
+- 需求导入页在生成期间增加覆盖 iframe 内容区的状态蒙版、轻量旋转动画和明确提示，同时阻断重复交互；为减少动态效果的系统偏好保留降级样式。
+- 同步 workspace、agent-web README、HTTP API 和安全复测说明；未修改 `.env*`、HTTP/RPC/RunEvent 契约、数据库、Flyway、公共 Agent、工作区 ID 或 Git diff/提交推送链路。
+
+### How
+
+- JDK 21 下转换/导入/文件服务定向测试 50/50，通过 workspace-management 受影响 reactor 453/453；后端相关模块 package 和完整 22 模块启动前打包成功。
+- agent-web typecheck、需求导入定向 Vitest 7/7 和 production build 通过，覆盖蒙版显示、重复交互阻断和完成后自动关闭。
+- 使用主工作区 `.env.test`、`test` profile 和 JDK 25 启动当前 release worktree；8080 health/readiness 均为 `UP`、3000 返回 200、登录 CORS 正常，manager WebSocket 已连接且无解码或重连循环。浏览器确认受保护导入路由会正确跳转登录页，本机无企业登录态，未冒用身份执行真实 TCDS 导入。
+
+### Result
+
+- Word 导入恢复到结构化渲染改造前的轻量兼容语义，不会因文档名为 DOC/DOCX 但内容已压平而拒绝导入；不再生成图片附件或额外样式转换结果，降低现场压平长文本的处理负担。
+- 生成过程现在有清晰蒙版动画，完成或失败后由既有 `finally` 自动解除。真实企业 TCDS 数据的体感和最终导入结果仍需用户在现有企业登录会话中复测。
+
+## 2026-08-14 - 收敛小地球导入页打开与条目加载卡顿
+
+### Why
+
+- 用户反馈 Word 转换回退后页面仍卡，且打开“小地球”本身也会卡顿。运行时确认 iframe 仍通过主 SPA 路由启动，生产入口会额外预加载 Element Plus、Vue Query 和工作台共享依赖；条目状态查询还会为每个父子条目重复解析工作区元数据。
+- 生成蒙版使用 `backdrop-filter: blur(2px)`，长文档生成期间会增加不必要的 GPU 合成开销。
+
+### What
+
+- 新增 `/workspace-requirement-import/` 独立 Vite HTML 入口，只挂载需求导入 Vue 页面和 `backend-api`；父工作台固定加载该同源地址，旧无尾斜杠主路由仅做兼容跳转。独立入口复用同一 `sessionStorage` 登录态，401 通过精确同源消息交给父工作台统一处理。
+- 版本、应用改为原生可输入候选框，移除导入页对 Element Plus 的运行时依赖；生产入口不再预加载 Element Plus、Vue Query、Monaco 或 `AgentWorkbench`。生成蒙版保留旋转动画与操作阻断，但移除背景模糊。
+- `WorkspaceApplicationService.fileStatuses` 一次解析工作区元数据并批量返回状态；`RequirementImportApplicationService` 预先生成受控父子相对目录后一次调用，各路径仍逐一经过公共文件服务的越界和符号链接校验。
+- 同步 agent-web/workspace README、HTTP API、模块图和安全复测说明；未修改 `.env*`、HTTP/WebSocket/RunEvent 契约、数据库、Flyway、公共 Agent、Workspace ID 或 Git diff/提交推送链路。
+
+### How
+
+- 前端需求导入与文件树定向 Vitest 25/25、agent-web typecheck 和 production build 通过；独立入口构建资源约为页面脚本 8.6 KiB、接口客户端 65 KiB、Vue 运行时 127 KiB，不含 Element Plus、Vue Query、Monaco 和工作台主包。
+- JDK 25 下 `RequirementImportApplicationServiceTest` 与 `WorkspaceApplicationServiceTest` 15/15 通过；22 模块 `mvn clean package -Dmaven.test.skip=true` 成功，`git diff --check` 通过。
+- 使用主工作区 `.env.test`、`test` profile 和 JDK 25 启动当前 release worktree；8080 health/readiness 为 `UP`、3000 返回 200、登录 CORS 正确，manager WebSocket 已连接且进程健康为 `HEALTHY`。
+- 真实登录页面热启动点击到弹窗出现约 0.4 秒；iframe 主区、筛选区、条目区均满足 `scrollWidth == clientWidth`，搜索框未越界。当前本机 TCDS 约 1.7 秒返回服务不可用，未执行真实授权目录和文档导入。
+
+### Result
+
+- 小地球不再在 iframe 内重复启动完整工作台，打开后先渲染可交互页面，再异步等待 TCDS；大量条目加载不再重复读取工作区元数据，生成阶段也不再使用背景模糊。
+- 真实企业授权列表、生成蒙版和最终导入仍需用户在企业网络可用的登录会话中复测；当前本机只完成同源 UI、布局、构建产物、服务健康和自动化回归验证。
+
+## 2026-08-14 - 重打需求导入性能优化企业包
+
+### Why
+
+- 用户要求基于当前 `release` 再次生成企业完整包；当前分支已经包含 Word 转换回退和 TCDS 需求导入独立轻量入口优化。
+
+### What
+
+- 制品源码提交固定为 `c8b6762fafcc61734d31826a377abdd29c120ccc`；内层发布 ZIP SHA-256 为 `54c137f003cec4002128e070572c084809efef3678da03d0da2aa6d1421f92de`，外层完整包为 `e6fa8205347f591331a994eb1b274fbc7ad0b7387030a382f5a9e3969ab0b934`。
+- 后端 app JAR 为 `bb8433e6d37f36d27d37337a5a31eb9b46543dee6f9a3e392fcc5108e0ec22db`，persistence JAR 为 `f7b0c40687e5cc561a979c3e53662eb17260d0e771277b61ccb16f53a6b0f1dd`，XXL integration JAR 为 `ced90daf6ba37673830a84346725ee332d959865cb3d84a9b3895d1bd2949ea6`，前端归档为 `237b440068b3b8753770680595e4e7cc1705e8fcb33fee2a325ae170ac8d4e7d`。
+
+### How
+
+- 显式以 `VITE_TEST_AGENT_WORKFLOW_ENABLED=false`、`VITE_TEST_AGENT_LOBEHUB_ENABLED=false` 构建；worker 指纹仍为 `50f56c54991bd7d5b3926fcb8442655b3ca1371a56ec6165a9ec19626f672fb1`，toolbox 指纹仍为 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`，两者均为 `reuse`。
+- 内外层 ZIP、外层内嵌内层逐字节一致、内层 `--validate-only`、最终 JAR 受保护 Flyway 资源、两台 TCDS 精确地址、worker 大制品缺失门禁和 `frontend/workspace-requirement-import/index.html` 独立入口均通过。
+- 对比上一包源码 `d9d5da7e7e95a41ff2813e06636feac093930cbd` 没有 migration 或部署脚本变化；提交前回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 固定名外层 ZIP 与 SHA 文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，并再次通过 `sha256sum -c` 与 `unzip -t`。
+- 部署顺序仍为 `.4 -> .114 -> .2`；不加载或重启 manager/worker，不替换 `.4` Qwen 灰度或 `.114` 现网 `opencode-models.json`，数据库只允许 validate 且 history 零新增。

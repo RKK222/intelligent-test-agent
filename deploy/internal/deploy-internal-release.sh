@@ -23,6 +23,8 @@ SKIP_FRONTEND=0
 SKIP_WORKER=0
 SKIP_WORKER_EXPLICIT=0
 WORKER_RUNTIME_REUSE=0
+WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
+WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
 KEEP_EXTRACT=0
 VALIDATE_ONLY=0
 SYSTEMD_UNIT_DIR="${TEST_AGENT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
@@ -89,10 +91,14 @@ LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-clien
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256="168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE="db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256="250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554"
+USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE="db/migration/V20260813190929__user_scm_git_identities_create.sql"
+USER_SCM_GIT_IDENTITIES_MIGRATION_SHA256="fd434d47d40c9fd71c987bd6512ba6897e33fe2e1db67299ff01514b4941c92e"
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_internal_model_probe_task.sql"
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256="03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236"
+XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE="xxl-job/db/migration/V12__register_scm_git_name_sync_task.sql"
+XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256="2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739"
 RELEASE_PERSISTENCE_JAR=""
 RELEASE_PERSISTENCE_JAR_SHA256=""
 RELEASE_XXL_JOB_INTEGRATION_JAR=""
@@ -403,6 +409,8 @@ verify_release_flyway_migrations_jar() {
     "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE}" "${AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE}" "${USER_SCM_GIT_IDENTITIES_MIGRATION_SHA256}"
 }
 
 verify_release_xxl_flyway_migrations_jar() {
@@ -411,6 +419,8 @@ verify_release_xxl_flyway_migrations_jar() {
     "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE}" "${XXL_INTERNAL_MODEL_RETENTION_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_RESOURCE}" "${XXL_SCM_GIT_NAME_SYNC_MIGRATION_SHA256}"
 }
 
 manifest_value() {
@@ -422,11 +432,19 @@ manifest_value() {
 write_installed_component_fingerprint() {
   local key="$1" value="$2"
   local state_file="${INSTALL_ROOT}/config/release-component-state.env"
-  local worker_fingerprint toolbox_fingerprint tmp
+  local worker_fingerprint toolbox_fingerprint baseline_source_commit baseline_release_sha256 tmp
   worker_fingerprint="$(manifest_value "${state_file}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
   toolbox_fingerprint="$(manifest_value "${state_file}" TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT)"
+  baseline_source_commit="$(manifest_value "${state_file}" \
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT)"
+  baseline_release_sha256="$(manifest_value "${state_file}" \
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256)"
   case "${key}" in
-    TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT) worker_fingerprint="${value}" ;;
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)
+      worker_fingerprint="${value}"
+      baseline_source_commit="${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}"
+      baseline_release_sha256="${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
+      ;;
     TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT) toolbox_fingerprint="${value}" ;;
     *) echo "Unsupported installed component key: ${key}" >&2; exit 1 ;;
   esac
@@ -435,6 +453,10 @@ write_installed_component_fingerprint() {
   {
     printf 'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1\n'
     [[ -z "${worker_fingerprint}" ]] || printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${worker_fingerprint}"
+    [[ -z "${baseline_source_commit}" ]] || \
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=%s\n' "${baseline_source_commit}"
+    [[ -z "${baseline_release_sha256}" ]] || \
+      printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=%s\n' "${baseline_release_sha256}"
     [[ -z "${toolbox_fingerprint}" ]] || printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${toolbox_fingerprint}"
   } >"${tmp}"
   chmod 0600 "${tmp}"
@@ -442,15 +464,20 @@ write_installed_component_fingerprint() {
 }
 
 verify_reused_worker_runtime() {
-  local state health installed_fingerprint
+  local state health installed_fingerprint adopt_baseline=0
   installed_fingerprint="$(manifest_value \
     "${INSTALL_ROOT}/config/release-component-state.env" \
     TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
-  [[ -n "${WORKER_COMPONENT_FINGERPRINT}" \
-    && "${installed_fingerprint}" == "${WORKER_COMPONENT_FINGERPRINT}" ]] || {
-    echo "Incremental release worker runtime fingerprint does not match the installed component; deploy a full component package" >&2
-    exit 1
-  }
+  if [[ -z "${WORKER_COMPONENT_FINGERPRINT}" \
+    || "${installed_fingerprint}" != "${WORKER_COMPONENT_FINGERPRINT}" ]]; then
+    if [[ "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ \
+      && "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+      adopt_baseline=1
+    else
+      echo "Incremental release worker runtime fingerprint does not match the installed component; deploy a full component package" >&2
+      exit 1
+    fi
+  fi
   require_file "${INSTALL_ROOT}/programs/bin/opencode-manager"
   require_file "${INSTALL_ROOT}/programs/opencode/bin/opencode"
   require_file "${INSTALL_ROOT}/programs/codex/bin/codex-official"
@@ -462,6 +489,12 @@ verify_reused_worker_runtime() {
     echo "Incremental release reuses worker runtime, but existing worker is not healthy" >&2
     exit 1
   }
+  if [[ "${adopt_baseline}" -eq 1 ]]; then
+    write_installed_component_fingerprint \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_COMPONENT_FINGERPRINT}"
+    printf 'Recovered installed worker runtime fingerprint from deployed release baseline: source_commit=%s release_sha256=%s\n' \
+      "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}" "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
+  fi
   printf 'Existing worker runtime verified for reuse: OpenCode Manager, Codex MCP and container are present\n'
 }
 
@@ -542,6 +575,41 @@ ensure_backend_service() {
   chmod 0644 "${unit_path}"
   systemctl daemon-reload
   systemctl enable "${BACKEND_SERVICE}"
+}
+
+ensure_experience_workspace_content() {
+  local service_user service_group service_uid current_uid
+  local -a runuser_args=()
+
+  service_user="$(systemctl show "${BACKEND_SERVICE}" --property=User --value 2>/dev/null || true)"
+  service_group="$(systemctl show "${BACKEND_SERVICE}" --property=Group --value 2>/dev/null || true)"
+  service_user="${service_user:-root}"
+  service_uid="$(id -u "${service_user}" 2>/dev/null || true)"
+  current_uid="$(id -u)"
+  if [[ -z "${service_uid}" ]]; then
+    echo "Backend systemd user does not exist: ${service_user}" >&2
+    exit 1
+  fi
+
+  if [[ "${service_uid}" == "${current_uid}" ]]; then
+    bash "${INSTALL_ROOT}/deploy/internal/ensure-experience-workspace-content.sh" \
+      --workspace-dir "${INSTALL_ROOT}/data/agent-opencode/workspace/experience"
+    return
+  fi
+  if [[ "${current_uid}" != "0" ]]; then
+    echo "Deployment user cannot switch to backend systemd user: ${service_user}" >&2
+    exit 1
+  fi
+
+  require_command runuser
+  runuser_args=(--user "${service_user}")
+  if [[ -n "${service_group}" ]]; then
+    runuser_args+=(--group "${service_group}")
+  fi
+  # 以 Java systemd 运行身份创建文件，避免 root 部署后体验区变成只读。
+  runuser "${runuser_args[@]}" -- \
+    bash "${INSTALL_ROOT}/deploy/internal/ensure-experience-workspace-content.sh" \
+      --workspace-dir "${INSTALL_ROOT}/data/agent-opencode/workspace/experience"
 }
 
 validate_existing_backend_service() {
@@ -814,6 +882,10 @@ fi
 COMPONENT_MANIFEST="${EXTRACT_DIR}/deploy/internal/release-components.env"
 WORKER_COMPONENT_MODE="$(manifest_value "${COMPONENT_MANIFEST}" TEST_AGENT_RELEASE_WORKER_RUNTIME)"
 WORKER_COMPONENT_FINGERPRINT="$(manifest_value "${COMPONENT_MANIFEST}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+WORKER_RUNTIME_BASELINE_SOURCE_COMMIT="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT)"
+WORKER_RUNTIME_BASELINE_RELEASE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256)"
 WORKER_COMPONENT_MODE="${WORKER_COMPONENT_MODE:-included}"
 [[ "${WORKER_COMPONENT_MODE}" == included || "${WORKER_COMPONENT_MODE}" == reuse ]] || {
   echo "Invalid TEST_AGENT_RELEASE_WORKER_RUNTIME: ${WORKER_COMPONENT_MODE}" >&2
@@ -822,6 +894,14 @@ WORKER_COMPONENT_MODE="${WORKER_COMPONENT_MODE:-included}"
 if [[ "${WORKER_COMPONENT_MODE}" == reuse ]]; then
   WORKER_RUNTIME_REUSE=1
   SKIP_WORKER=1
+fi
+if [[ -n "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}" ]]; then
+  [[ "${WORKER_COMPONENT_MODE}" == reuse \
+    && "${WORKER_RUNTIME_BASELINE_SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ \
+    && "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Invalid worker runtime deployed baseline metadata" >&2
+    exit 1
+  }
 fi
 if [[ "${VALIDATE_ONLY}" -eq 0 && ( "${SKIP_WORKER}" -eq 0 || "${WORKER_RUNTIME_REUSE}" -eq 1 ) ]]; then
   require_command docker
@@ -858,6 +938,10 @@ if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
 fi
 require_file "${DEPLOY_INTERNAL_SRC}/ensure-opencode-runtime-gitignore.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-runtime.gitignore"
+require_file "${DEPLOY_INTERNAL_SRC}/ensure-experience-workspace-content.sh"
+require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/README.md"
+require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/docs/应用架构/测试概述.md"
+require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/spec/I000001-用户登录体验/04-测试/S000001-账号密码登录/041-测试设计/测试案例.md"
 require_file "${DEPLOY_INTERNAL_SRC}/deploy-python-libs.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/verify-python-libs.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-node-runtime.package.json"
@@ -919,6 +1003,7 @@ chmod +x \
   "${INSTALL_ROOT}/deploy/internal/deploy-python-libs.sh" \
   "${INSTALL_ROOT}/deploy/internal/verify-python-libs.sh" \
   "${INSTALL_ROOT}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
+  "${INSTALL_ROOT}/deploy/internal/ensure-experience-workspace-content.sh" \
   "${INSTALL_ROOT}/deploy/internal/verify-opencode-tool-runtime.sh" \
   || true
 
@@ -933,6 +1018,7 @@ ensure_backend_service
 log "Stop backend service and replace jar"
 systemctl stop "${BACKEND_SERVICE}"
 stop_expected_backend_orphans
+ensure_experience_workspace_content
 if [[ -f "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" ]]; then
   cp -a "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.bak.${timestamp}"
 fi
