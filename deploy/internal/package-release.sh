@@ -32,6 +32,7 @@ PACKAGE_ZIP_ONLY=0
 PACKAGE_MODE=full
 INCLUDE_ALL_COMPONENTS=0
 WORKER_RUNTIME_BASELINE_FILE=""
+LOCAL_CLIENT_BASELINE_FILE=""
 COMPONENT_PLAN_ONLY=0
 COMPONENT_STATE_FILE=""
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
@@ -159,11 +160,14 @@ Options:
   --memory-only           Package only the independent memory data-plane artifacts.
   --zip-only              Reassemble the release ZIP from current verified artifacts and component state.
   --include-all-components
-                          Force worker runtime (Python/OpenCode Manager/Codex MCP) and toolbox into the ZIP.
+                          Force worker runtime, toolbox and the signed local client into the ZIP.
                           Use for first installation, disaster recovery or a new build machine.
   --worker-runtime-baseline-file <path>
                           Re-register a previously deployed worker runtime as the reuse baseline.
                           The file must pin its source commit, release SHA-256 and worker fingerprint.
+  --local-client-baseline-file <path>
+                          Re-register a previously deployed signed local client distribution.
+                          The file must pin its source commit, component fingerprint and artifact hashes.
   --component-state-file <path>
                           Persistent component fingerprint state. Default: <output-dir>/.release-component-state.env.
   --component-plan-only   Print include/reuse decisions and fingerprints without building or packaging.
@@ -319,6 +323,10 @@ while [[ $# -gt 0 ]]; do
       WORKER_RUNTIME_BASELINE_FILE="$2"
       shift 2
       ;;
+    --local-client-baseline-file)
+      LOCAL_CLIENT_BASELINE_FILE="$2"
+      shift 2
+      ;;
     --component-state-file)
       COMPONENT_STATE_FILE="$2"
       shift 2
@@ -354,6 +362,15 @@ fi
 
 if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" && "${INCLUDE_ALL_COMPONENTS}" -eq 1 ]]; then
   echo "--worker-runtime-baseline-file cannot be combined with --include-all-components" >&2
+  exit 2
+fi
+if [[ -n "${LOCAL_CLIENT_BASELINE_FILE}" && "${INCLUDE_ALL_COMPONENTS}" -eq 1 ]]; then
+  echo "--local-client-baseline-file cannot be combined with --include-all-components" >&2
+  exit 2
+fi
+if [[ -n "${LOCAL_CLIENT_BASELINE_FILE}" \
+  && "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
+  echo "--local-client-baseline-file can only be combined with the full or --zip-only release mode" >&2
   exit 2
 fi
 if [[ -n "${WORKER_RUNTIME_BASELINE_FILE}" \
@@ -756,9 +773,45 @@ write_component_fingerprints() {
     printf 'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1\n'
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT=%s\n' \
+      "${LOCAL_CLIENT_FINGERPRINT}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=%s\n' \
+      "${LOCAL_CLIENT_VERSION}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=%s\n' \
+      "${LOCAL_CLIENT_MANIFEST_SHA256}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256=%s\n' \
+      "${LOCAL_CLIENT_SIGNATURE_SHA256}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=%s\n' \
+      "${LOCAL_CLIENT_INSTALL_SHA256}"
   } >"${tmp}"
   chmod 0600 "${tmp}"
   mv -f "${tmp}" "${target}"
+}
+
+load_local_client_artifact_metadata() {
+  local root="${OUTPUT_DIR}/local-opencode-client" manifest
+  manifest="${root}/stable/manifest.json"
+  [[ -f "${manifest}" && -f "${root}/stable/manifest.json.sig" && -f "${root}/install.sh" ]] || {
+    echo "Verified local client distribution is required to build an included release" >&2
+    exit 1
+  }
+  LOCAL_CLIENT_VERSION="$(awk -F'"' '$2 == "version" { print $4; exit }' "${manifest}")"
+  LOCAL_CLIENT_MANIFEST_SHA256="$(sha256_file "${manifest}")"
+  LOCAL_CLIENT_SIGNATURE_SHA256="$(sha256_file "${root}/stable/manifest.json.sig")"
+  LOCAL_CLIENT_INSTALL_SHA256="$(sha256_file "${root}/install.sh")"
+  [[ -n "${LOCAL_CLIENT_VERSION}" \
+    && "${LOCAL_CLIENT_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_SIGNATURE_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Invalid local client artifact metadata" >&2
+    exit 1
+  }
+  bash "${SCRIPT_DIR}/verify-local-opencode-client-distribution.sh" \
+    --root "${root}" \
+    --expected-version "${LOCAL_CLIENT_VERSION}" \
+    --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
+    --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}"
 }
 
 write_worker_artifact_state() {
@@ -789,12 +842,15 @@ require_artifact_fingerprint() {
 }
 
 plan_release_components() {
-  local previous_worker previous_toolbox worker_config toolbox_config
+  local previous_worker previous_toolbox previous_local_client worker_config toolbox_config local_client_config
   local current_release current_manifest current_worker_mode current_worker_fingerprint
   local current_toolbox_mode current_toolbox_fingerprint
+  local current_local_client_mode current_local_client_fingerprint
   local baseline_version baseline_source_commit baseline_release_sha256 baseline_worker_fingerprint
+  local client_baseline_version client_baseline_source_commit client_baseline_fingerprint
   worker_config="schema=2|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|python=${PYTHON_VERSION}|pythonSourceSize=${PYTHON_SOURCE_SIZE}|pythonSourceSha=${PYTHON_SOURCE_SHA256}|pythonSourceBase=${PYTHON_SOURCE_BASE_URL}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
   toolbox_config="schema=1|platform=${PLATFORM}|it=${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}|omni=${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}|node=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}|nginx=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
+  local_client_config="schema=1|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-0.1.0}|defaultServer=${TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL:-}|defaultWeb=${TEST_AGENT_LOCAL_CLIENT_DEFAULT_WEB_URL:-${TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL:-}}|allowInsecure=${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP:-false}|jreDarwin=${TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_SHA256:-default}|jreLinux=${TEST_AGENT_LOCAL_CLIENT_JRE_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeDarwin=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_DARWIN_ARM64_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|macAppIdentity=${TEST_AGENT_LOCAL_CLIENT_MACOS_APPLICATION_IDENTITY:-}|macInstallerIdentity=${TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY:-}|notary=${TEST_AGENT_LOCAL_CLIENT_MACOS_NOTARY_PROFILE:-}"
 
   WORKER_RUNTIME_FINGERPRINT="$(component_fingerprint "${worker_config}" \
     opencode-manager/go.mod \
@@ -817,11 +873,33 @@ plan_release_components() {
   TOOLBOX_FINGERPRINT="$(component_fingerprint "${toolbox_config}" \
     toolbox-source \
     backend/test-agent-integration/src/main/resources/toolbox/catalog-v1.json)"
+  LOCAL_CLIENT_FINGERPRINT="$(component_fingerprint "${local_client_config}" \
+    backend/pom.xml \
+    backend/test-agent-local-client/pom.xml \
+    backend/test-agent-local-client/src/main \
+    backend/test-agent-local-client-protocol/pom.xml \
+    backend/test-agent-local-client-protocol/src/main \
+    deploy/internal/package-local-opencode-client.sh \
+    deploy/internal/local-opencode-client/install.sh.template \
+    deploy/internal/archive-common.sh \
+    frontend/apps/agent-web/src/assets/pets/radar-bunny.png \
+    opencode-source/opencode-1.18.4/LICENSE)"
 
   previous_worker="$(state_value "${COMPONENT_STATE_FILE}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
   previous_toolbox="$(state_value "${COMPONENT_STATE_FILE}" TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT)"
+  previous_local_client="$(state_value "${COMPONENT_STATE_FILE}" \
+    TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT)"
+  LOCAL_CLIENT_VERSION="$(state_value "${COMPONENT_STATE_FILE}" \
+    TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION)"
+  LOCAL_CLIENT_MANIFEST_SHA256="$(state_value "${COMPONENT_STATE_FILE}" \
+    TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256)"
+  LOCAL_CLIENT_SIGNATURE_SHA256="$(state_value "${COMPONENT_STATE_FILE}" \
+    TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256)"
+  LOCAL_CLIENT_INSTALL_SHA256="$(state_value "${COMPONENT_STATE_FILE}" \
+    TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256)"
   WORKER_COMPONENT_MODE=reuse
   TOOLBOX_COMPONENT_MODE=reuse
+  LOCAL_CLIENT_COMPONENT_MODE=reuse
   if [[ "${INCLUDE_ALL_COMPONENTS}" -eq 1 || -z "${previous_worker}" \
     || "${previous_worker}" != "${WORKER_RUNTIME_FINGERPRINT}" ]]; then
     WORKER_COMPONENT_MODE=included
@@ -829,6 +907,10 @@ plan_release_components() {
   if [[ "${INCLUDE_ALL_COMPONENTS}" -eq 1 || -z "${previous_toolbox}" \
     || "${previous_toolbox}" != "${TOOLBOX_FINGERPRINT}" ]]; then
     TOOLBOX_COMPONENT_MODE=included
+  fi
+  if [[ "${INCLUDE_ALL_COMPONENTS}" -eq 1 || -z "${previous_local_client}" \
+    || "${previous_local_client}" != "${LOCAL_CLIENT_FINGERPRINT}" ]]; then
+    LOCAL_CLIENT_COMPONENT_MODE=included
   fi
 
   # zip-only 用于同一发布批次补会话日志或重新封装，必须保持现有 ZIP 的组件选择；
@@ -842,6 +924,8 @@ plan_release_components() {
     current_worker_fingerprint="$(awk -F= '$1 == "TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
     current_toolbox_mode="$(awk -F= '$1 == "TEST_AGENT_RELEASE_TOOLBOX" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
     current_toolbox_fingerprint="$(awk -F= '$1 == "TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+    current_local_client_mode="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+    current_local_client_fingerprint="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
     if [[ ( "${current_worker_mode}" == included || "${current_worker_mode}" == reuse ) \
       && "${current_worker_fingerprint}" == "${WORKER_RUNTIME_FINGERPRINT}" ]]; then
       WORKER_COMPONENT_MODE="${current_worker_mode}"
@@ -850,9 +934,18 @@ plan_release_components() {
       && "${current_toolbox_fingerprint}" == "${TOOLBOX_FINGERPRINT}" ]]; then
       TOOLBOX_COMPONENT_MODE="${current_toolbox_mode}"
     fi
+    if [[ ( "${current_local_client_mode}" == included || "${current_local_client_mode}" == reuse ) \
+      && "${current_local_client_fingerprint}" == "${LOCAL_CLIENT_FINGERPRINT}" ]]; then
+      LOCAL_CLIENT_COMPONENT_MODE="${current_local_client_mode}"
+      LOCAL_CLIENT_VERSION="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+      LOCAL_CLIENT_MANIFEST_SHA256="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+      LOCAL_CLIENT_SIGNATURE_SHA256="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+      LOCAL_CLIENT_INSTALL_SHA256="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+    fi
   fi
   [[ "${PACKAGE_MODE}" != opencode-only ]] || WORKER_COMPONENT_MODE=included
   [[ "${PACKAGE_MODE}" != toolbox-only ]] || TOOLBOX_COMPONENT_MODE=included
+  [[ "${PACKAGE_MODE}" != local-client-only ]] || LOCAL_CLIENT_COMPONENT_MODE=included
 
   WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
   WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
@@ -896,10 +989,61 @@ plan_release_components() {
     printf 'worker runtime baseline release sha256: %s\n' "${WORKER_RUNTIME_BASELINE_RELEASE_SHA256}"
   fi
 
+  if [[ -n "${LOCAL_CLIENT_BASELINE_FILE}" ]]; then
+    [[ -f "${LOCAL_CLIENT_BASELINE_FILE}" ]] || {
+      echo "Local client baseline file not found: ${LOCAL_CLIENT_BASELINE_FILE}" >&2
+      exit 1
+    }
+    client_baseline_version="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_BASELINE_VERSION)"
+    client_baseline_source_commit="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_BASELINE_SOURCE_COMMIT)"
+    client_baseline_fingerprint="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT)"
+    LOCAL_CLIENT_VERSION="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION)"
+    LOCAL_CLIENT_MANIFEST_SHA256="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256)"
+    LOCAL_CLIENT_SIGNATURE_SHA256="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256)"
+    LOCAL_CLIENT_INSTALL_SHA256="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256)"
+    [[ "${client_baseline_version}" == 1 ]] || {
+      echo "Unsupported local client baseline version: ${client_baseline_version:-<empty>}" >&2
+      exit 1
+    }
+    [[ "${client_baseline_source_commit}" =~ ^[0-9a-f]{40}$ ]] || {
+      echo "Invalid local client baseline source commit" >&2
+      exit 1
+    }
+    git -C "${ROOT_DIR}" cat-file -e "${client_baseline_source_commit}^{commit}" 2>/dev/null || {
+      echo "Local client baseline source commit is not available locally: ${client_baseline_source_commit}" >&2
+      exit 1
+    }
+    [[ "${client_baseline_fingerprint}" == "${LOCAL_CLIENT_FINGERPRINT}" ]] || {
+      echo "Previously deployed local client fingerprint differs from current build inputs" >&2
+      exit 1
+    }
+    LOCAL_CLIENT_COMPONENT_MODE=reuse
+    printf 'local client baseline source commit: %s\n' "${client_baseline_source_commit}"
+  fi
+
+  if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == reuse ]]; then
+    [[ -n "${LOCAL_CLIENT_VERSION}" \
+      && "${LOCAL_CLIENT_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ \
+      && "${LOCAL_CLIENT_SIGNATURE_SHA256}" =~ ^[0-9a-f]{64}$ \
+      && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "Local client reuse metadata is missing or invalid; use an approved baseline or include the component" >&2
+      exit 1
+    }
+  fi
+
   printf 'worker runtime component: %s\n' "${WORKER_COMPONENT_MODE}"
   printf 'worker runtime fingerprint: %s\n' "${WORKER_RUNTIME_FINGERPRINT}"
   printf 'toolbox component: %s\n' "${TOOLBOX_COMPONENT_MODE}"
   printf 'toolbox fingerprint: %s\n' "${TOOLBOX_FINGERPRINT}"
+  printf 'local client component: %s\n' "${LOCAL_CLIENT_COMPONENT_MODE}"
+  printf 'local client fingerprint: %s\n' "${LOCAL_CLIENT_FINGERPRINT}"
   printf 'component state: %s\n' "${COMPONENT_STATE_FILE}"
 }
 
@@ -1335,16 +1479,14 @@ package_release_zip() {
   worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
   it_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"
   omni_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${PLATFORM}")"
+  if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
+    load_local_client_artifact_metadata
+  fi
 
-  # 后端与前端每次交付；大体积 worker runtime 和 toolbox 只在指纹变化时加入。
+  # 后端与前端每次交付；worker runtime、toolbox 和本地客户端只在指纹变化时加入。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
-    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
-    "${OUTPUT_DIR}/local-opencode-client/install.sh" \
-    "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg" \
-    "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" \
-    "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json" \
-    "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"; do
+    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
@@ -1392,8 +1534,10 @@ package_release_zip() {
   mkdir -p "${staging_dir}/dist/backend"
   cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
-  mkdir -p "${staging_dir}/dist/local-opencode-client"
-  cp -a "${OUTPUT_DIR}/local-opencode-client/." "${staging_dir}/dist/local-opencode-client/"
+  if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
+    mkdir -p "${staging_dir}/dist/local-opencode-client"
+    cp -a "${OUTPUT_DIR}/local-opencode-client/." "${staging_dir}/dist/local-opencode-client/"
+  fi
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${worker_tar}" "${staging_dir}/dist/"
   fi
@@ -1461,8 +1605,17 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_LOBEHUB_VERSION=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && state_value "${OUTPUT_DIR}/lobehub/release.env" LOBEHUB_INTERNAL_VERSION || printf none)"
     printf 'TEST_AGENT_RELEASE_MEMORY=%s\n' "$([[ "${PACKAGE_MEMORY}" -eq 1 ]] && printf included || printf disabled)"
     printf 'TEST_AGENT_RELEASE_MEMORY_VERSION=%s\n' "$([[ "${PACKAGE_MEMORY}" -eq 1 ]] && state_value "${OUTPUT_DIR}/memory/release.env" TEST_AGENT_MEMORY_RELEASE_VERSION || printf none)"
-    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=included\n'
-    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=%s\n' "$(awk -F'"' '$2 == "version" { print $4; exit }' "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json")"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=%s\n' "${LOCAL_CLIENT_COMPONENT_MODE}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT=%s\n' \
+      "${LOCAL_CLIENT_FINGERPRINT}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=%s\n' \
+      "${LOCAL_CLIENT_VERSION}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=%s\n' \
+      "${LOCAL_CLIENT_MANIFEST_SHA256}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256=%s\n' \
+      "${LOCAL_CLIENT_SIGNATURE_SHA256}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=%s\n' \
+      "${LOCAL_CLIENT_INSTALL_SHA256}"
   } >"${staging_dir}/deploy/internal/release-components.env"
   chmod 0644 "${staging_dir}/deploy/internal/release-components.env"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
@@ -1471,6 +1624,7 @@ package_release_zip() {
     "${staging_dir}/deploy/internal/opencode-runtime.gitignore" \
     "${staging_dir}/deploy/internal/ensure-experience-workspace-content.sh" \
     "${staging_dir}/deploy/internal/run-analytics-clickhouse-backfill.sh" \
+    "${staging_dir}/deploy/internal/verify-local-opencode-client-distribution.sh" \
     "${staging_dir}/deploy/internal/experience-workspace-template/README.md" \
     "${staging_dir}/deploy/internal/experience-workspace-template/docs/应用架构/测试概述.md" \
     "${staging_dir}/deploy/internal/experience-workspace-template/spec/I000001-用户登录体验/04-测试/S000001-账号密码登录/041-测试设计/测试案例.md"; do
@@ -1626,10 +1780,16 @@ mkdir -p "$(dirname "${COMPONENT_STATE_FILE}")"
 
 WORKER_COMPONENT_MODE=reuse
 TOOLBOX_COMPONENT_MODE=reuse
+LOCAL_CLIENT_COMPONENT_MODE=reuse
 WORKER_RUNTIME_FINGERPRINT=""
 WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
 WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
 TOOLBOX_FINGERPRINT=""
+LOCAL_CLIENT_FINGERPRINT=""
+LOCAL_CLIENT_VERSION=""
+LOCAL_CLIENT_MANIFEST_SHA256=""
+LOCAL_CLIENT_SIGNATURE_SHA256=""
+LOCAL_CLIENT_INSTALL_SHA256=""
 if [[ "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only \
   || "${PACKAGE_MODE}" == opencode-only || "${PACKAGE_MODE}" == toolbox-only \
   || "${COMPONENT_PLAN_ONLY}" -eq 1 ]]; then
@@ -1642,6 +1802,7 @@ fi
 if [[ "${PACKAGE_MODE}" == full ]]; then
   [[ "${WORKER_COMPONENT_MODE}" != reuse ]] || PACKAGE_OPENCODE_WORKER=0
   [[ "${TOOLBOX_COMPONENT_MODE}" != reuse ]] || PACKAGE_TOOLBOX=0
+  [[ "${LOCAL_CLIENT_COMPONENT_MODE}" != reuse ]] || PACKAGE_LOCAL_CLIENT=0
 fi
 
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
@@ -1725,7 +1886,7 @@ if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
   echo "  frontend dist: ${OUTPUT_DIR}/frontend"
   echo "  frontend archive: ${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
 fi
-if [[ "${PACKAGE_LOCAL_CLIENT}" -eq 1 ]]; then
+if [[ "${PACKAGE_LOCAL_CLIENT}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
   echo "  local OpenCode client HTTP distribution: ${OUTPUT_DIR}/local-opencode-client"
 fi
 if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
@@ -1767,4 +1928,5 @@ if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
   echo "  release checksum: ${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
   echo "  worker runtime component: ${WORKER_COMPONENT_MODE}"
   echo "  toolbox component: ${TOOLBOX_COMPONENT_MODE}"
+  echo "  local client component: ${LOCAL_CLIENT_COMPONENT_MODE}"
 fi

@@ -25,6 +25,10 @@ corepack pnpm build
 
 企业内完整 ZIP 和 SHA-256 校验文件统一上传到每台目标服务器的 `/data/0709/`，固定为 `test-agent-internal-release.zip` 和 `test-agent-internal-release.zip.sha256`；部署前在该目录执行 `sha256sum -c test-agent-internal-release.zip.sha256`。如果后端服务器能免密直连前端服务器，可在后端执行 `/data/testagent/deploy/internal/deploy-internal-release.sh --archive /data/0709/test-agent-internal-release.zip`，脚本会用 `scp` 分发前端包到 `122.233.30.2`。如果现场统一登录策略导致 `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`，把同一份 ZIP 和校验文件放到 `122.233.30.2:/data/0709/`，在前端机本地执行 `deploy/internal/deploy-internal-frontend.sh --archive /data/0709/test-agent-internal-release.zip`，后端节点部署时统一加 `--skip-frontend`。`/data/0709/` 只存放上传交付物，前端静态资源仍安装到 `/data/testagent/frontend`。
 
+本地 OpenCode 客户端也按独立指纹增量封装。清单为 `reuse` 时，ZIP 不携带
+`dist/local-opencode-client/`；`.2` 部署脚本会在切换前端和 reload Nginx 前，用发布清单中的版本及 SHA-256
+逐文件校验 `/data/testagent/dist/local-opencode-client/`，校验成功后保持该目录不变。校验不依赖 `jq` 或 `rg`。
+
 `frontend-opencode` 使用 Vite 生产构建：
 
 ```bash

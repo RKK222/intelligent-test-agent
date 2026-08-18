@@ -114,20 +114,22 @@ deploy/internal/package-release.sh --python-libs-only \
 
 空值是有意配置：前端统一使用同源相对 `/api`，所以从域名打开时请求域名，从 IP 打开时请求 IP。不得固定成其中任一 origin，否则另一个入口会重新产生跨域或名称解析问题。
 
-发布脚本在输出目录保存组件指纹，只对两个大组件做增量判断：
+发布脚本在输出目录保存组件指纹，只对三个大组件做增量判断：
 
 - `worker runtime` 把 OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 视为一个不可拆分单元；其中任一项变化就全部重建并进入 ZIP。
 - `toolbox` 把 IT-Tools、OmniTools、完整修改源码和目录文件视为一个单元；其中任一项变化就全部重建并进入 ZIP。
+- `local OpenCode client` 把客户端 JAR、PKG、DEB、JRE、OpenCode 归档、安装脚本和签名清单视为一个单元；客户端输入未变化时不再进入 ZIP。
 
 Python 的 pandas、Excel、Word 和 JSON 第三方库是第三个、完全独立的交付单元，不进入内层 ZIP，也不改变 worker 指纹。库升级只重新生成 `test-agent-python-libs-py313-linux-amd64.tar.gz` 及校验文件，然后分别部署到两台后台。该归档由 worker 内的 Linux GNU tar 生成并以相同实现复核，禁止使用会写入并隐藏 `._*` AppleDouble/PAX 成员的 Mac 归档结果；目标机出现 `Unsafe or unexpected archive entry` 时停止部署并更换原始归档，不得忽略成员或重新计算 SHA。
 
-首次构建、指纹状态丢失或组件变化时，清单为 `included`；未变化时为 `reuse`，内层 ZIP 不再重复携带该组件的大文件。必须持续使用同一个输出目录，或用 `--component-state-file <稳定路径>` 保存基线。新装机、扩容新节点、灾备恢复和状态不可信的交付必须加 `--include-all-components`；增量包只允许升级已有且组件健康的 `.4/.114`，不能用于空机器。迁移到该机制后的第一次构建也应使用全量命令建立可信基线；部署成功后每台后台会把实际安装指纹写入 `/data/testagent/config/release-component-state.env`，后续复用时会同时校验指纹和健康状态：
+首次构建、指纹状态丢失或组件变化时，清单为 `included`；未变化时为 `reuse`，内层 ZIP 不再重复携带该组件的大文件。必须持续使用同一个输出目录，或用 `--component-state-file <稳定路径>` 保存基线。新装机、扩容新节点、灾备恢复和状态不可信的交付必须加 `--include-all-components`；增量包只允许升级已有且组件健康的 `.4/.114/.2`，不能用于空机器。迁移到该机制后的第一次构建也应使用全量命令建立可信基线；部署成功后每台后台会把实际安装指纹写入 `/data/testagent/config/release-component-state.env`，`.2` 的客户端则按发布清单逐文件校验版本、签名和全部制品哈希，后续复用不会复制、备份或替换客户端目录：
 
 若 `.4/.114` 的上一轮灰度已确认部署成功，但当时尚未登记组件状态，可用 `--worker-runtime-baseline-file` 重新登记门禁。baseline 同时固定上一轮源码提交、内层 release SHA-256 和 worker 指纹；封包时必须与本轮 worker 构建输入一致。节点部署仍会先检查 Manager/OpenCode/Codex、Tool runtime 和现有 worker 健康，全部通过后才补写 `/data/testagent/config/release-component-state.env`。该动作不加载镜像、不重启 manager/worker，也不替换 `.4` 与 `.114` 各自活动的模型清单。
 
 ```bash
 deploy/internal/package-release.sh \
   --worker-runtime-baseline-file deploy/internal/release-baselines/20260813-qwen-gray.env \
+  --local-client-baseline-file deploy/internal/release-baselines/20260818-local-client-entryfix.env \
   --output-dir deploy/internal/dist
 ```
 
@@ -653,6 +655,10 @@ bash deploy-frontend-node.sh
 前端入口会在 reload 后同时验证两台 Java、两台 XXL Admin、`.4/.114` 上四个工具端口，
 并通过 `127.0.0.1` 请求 IT-Tools 与 OmniTools 的统一入口深链。只要 `.2` 到任一工具端口被防火墙阻断、
 容器未运行或 Nginx 仍使用旧配置，脚本就会失败并指出具体 upstream，不再等到浏览器点击后才暴露 502。
+
+客户端清单为 `reuse` 时，`.2` 不接收 `dist/local-opencode-client/`，而是在任何前端目录切换和 Nginx
+reload 前校验现有 `/data/testagent/dist/local-opencode-client/`。版本、清单、签名、安装脚本、PKG、DEB、
+JRE 或 OpenCode 归档任一 SHA-256 不一致都会停止部署；该校验只使用 `bash`、`awk` 和 `sha256sum`。
 
 正式部署必须由 `root` 执行。平台外层包内已有完整平台发布 ZIP，三台应用服务器不再另外复制内层 ZIP
 或逐机包；`.147` 不再参与本次部署。

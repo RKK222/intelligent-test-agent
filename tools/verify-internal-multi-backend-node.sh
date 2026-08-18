@@ -145,6 +145,8 @@ cp "${ROOT_DIR}/deploy/internal/ensure-opencode-runtime-gitignore.sh" "${RELEASE
 cp "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/run-analytics-clickhouse-backfill.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
+  "${RELEASE_ROOT}/deploy/internal/"
 cp -R "${ROOT_DIR}/deploy/internal/experience-workspace-template" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/verify-opencode-tool-runtime.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" "${RELEASE_ROOT}/deploy/internal/"
