@@ -27,10 +27,10 @@
 
 新增生产 Flyway migration、强制配置或部署资产即视为存在部署影响，默认进入 `dev`；确需作为 release 小功能交付时，必须由用户明确确认，并按数据库和企业发布规范完成存量升级验证。
 
-### 双分支同步
+### 跨分支同步（仅显式执行）
 
-1. `release` 的 Bug 修复和小功能完成验证后，必须合并或 cherry-pick 回 `dev`。
-2. 回合 `dev` 时保留 `dev` 已有的大功能边界和默认关闭策略，不用 release 文件覆盖 dev 的新模块实现。
+1. AI 不主动切换长期分支，也不因 `release` 的 Bug 修复或小功能完成验证就自动合并或 cherry-pick 回 `dev`；只有用户或集成人明确要求同步时才执行。
+2. 收到同步要求后，先列出精确提交和文件范围；回合 `dev` 时保留 `dev` 已有的大功能边界和默认关闭策略，不用 release 文件覆盖 dev 的新模块实现。
 3. 从 `dev` 提升功能到 `release` 前，先列出精确提交和文件范围，确认没有夹带其它 dev-only 服务、节点、migration 或配置。
 4. `main` 只按明确的稳定基线发布决策更新，不作为日常功能开发目标。
 
@@ -93,6 +93,10 @@
 ./restart-dev-services.sh
 ```
 
+本机 `test` 验收固定读取根目录 `.env.test`，其 PostgreSQL 默认使用 `192.168.8.100:15432/testagent_dev`。不得为了让本机启动或某个页面临时可用而改用本机 PostgreSQL、`.env.local` 或临时 dotenv；只有用户明确要求时才切换数据库。`.env.test` 将 `TEST_AGENT_OPENCODE_BASE_URL` 指向远端时，脚本按设计跳过本机 opencode-manager，这不表示重启失败。
+
+共享库会持久化工作区和用户 Agent 的服务器归属。重启后进入对话前必须同时确认：所选工作区与当前用户 ACTIVE Agent binding 的 `linuxServerId` 一致；目标服务器已存在且可读取工作区根目录。不得只更新 `workspaces.linux_server_id` 后就认为搬迁完成。同一共享验收账号不要轮流在本机和远端初始化 Agent；确需双端验证时使用不同的专用测试账号。发现 `工作空间与 agent 不在同一服务器` 时，检查个人工作区迁移状态和目标物理目录；迁移连续进入 `RETRY_WAIT` 不是等待即可恢复的瞬时状态，应保留两端数据并处理目标冲突或鉴权问题，禁止绕过同服与路径校验。
+
 从独立 Git worktree 运行当前分支、但需要复用主工作区已经初始化的本机测试数据时，不能只把主工作区的 `.env.test` 作为 `--env-file` 传入。启动脚本会把兼容变量 `TESTAGENT` 默认设置为当前 worktree，而存量 macOS 测试库的 `SYS_DATA_ROOT_DIR` 通用参数可能仍保存为 `$TESTAGENT/.testagent`；此时用户进程会把公共配置解析到当前 worktree 的空目录并报“公共 Agent 配置源目录不可用”。使用下面的完整命令块，同时保留当前 worktree 作为代码根、主工作区作为持久化数据根：
 
 ```bash
@@ -133,7 +137,7 @@ origin 校验拒绝。参数初始化或 fork readiness 失败时会审计并补
 生成设置仍只写入 `.tmp/dev-services/lobehub-dev.env`。完成在线联调后，企业交付验收必须重新以默认
 `offline` 模式启动。
 
-脚本默认使用 `test` profile、读取 `.env.test`、先编译后端和自研前端，再按「后端 → opencode-manager → 前端」逐个 kill 旧进程并启动新进程。后端启动前会从 `deploy/internal/experience-workspace-template/` 仅补齐体验目录缺失的标准文件，不覆盖已有内容。前端构建和 dev server 启动前会检查 `frontend/node_modules/.modules.yaml` 是否落后于 `pnpm-lock.yaml`、workspace 配置或各包 `package.json`，过期时自动执行 `corepack pnpm install --frozen-lockfile`。后端构建完成后会校验 Maven `target` JAR，并复制为 `.tmp/dev-services/backend-runtime/` 下本次启动专属的不可变副本；Java 只运行该副本，避免并行企业打包或其它 Maven 构建覆盖 `target` 后破坏 Spring Boot 的按需类加载。后端 Java 进程同时会清空 JVM 代理系统属性，避免本机系统代理影响 PostgreSQL JDBC 与 Redis 直连。macOS 上若没有显式 `HTTPS_PROXY`/`https_proxy`，脚本会把已启用的静态系统 HTTPS（或 HTTP）代理仅传给 opencode-manager 及其 OpenCode 子进程，避免 Bun 绕过系统代理后经 TUN 假地址出现间歇性 TLS 失败；显式代理优先，`TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY=false` 可关闭自动探测，证书校验不会被放宽。停止 opencode-manager 时会同步清理其 state 目录中记录的用户 `opencode serve` 子进程、端口池内残留监听进程和 `.tmp/dev-services/opencode-manager-state/processes/*.json`，避免重启后旧端口状态继续占用；新 manager 注册时，后端会在开放控制连接前冻结数据库仍为 `RUNNING/STARTING` 且 binding 为 `ACTIVE` 的原用户进程，完整配置应用并发送首个心跳后自动恢复，显式停止、失败、非活跃或无主进程不会恢复。需要连接 `local` 或 `guo` 环境时显式传入 `--profile local|guo` 和对应 dotenv 文件。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
+脚本默认使用 `test` profile、读取 `.env.test`、先编译后端和自研前端，再按「后端 → 可选的 opencode-manager → 前端」逐个 kill 旧进程并启动新进程。只有 OpenCode 地址为本机，或显式设置 `TEST_AGENT_START_OPENCODE_MANAGER=true` 时才启动本机 manager；OpenCode 地址为远端且未强制启动时会输出跳过提示。后端启动前会从 `deploy/internal/experience-workspace-template/` 仅补齐体验目录缺失的标准文件，不覆盖已有内容。前端构建和 dev server 启动前会检查 `frontend/node_modules/.modules.yaml` 是否落后于 `pnpm-lock.yaml`、workspace 配置或各包 `package.json`，过期时自动执行 `corepack pnpm install --frozen-lockfile`。后端构建完成后会校验 Maven `target` JAR，并复制为 `.tmp/dev-services/backend-runtime/` 下本次启动专属的不可变副本；Java 只运行该副本，避免并行企业打包或其它 Maven 构建覆盖 `target` 后破坏 Spring Boot 的按需类加载。后端 Java 进程同时会清空 JVM 代理系统属性，避免本机系统代理影响 PostgreSQL JDBC 与 Redis 直连。macOS 上若没有显式 `HTTPS_PROXY`/`https_proxy`，脚本会把已启用的静态系统 HTTPS（或 HTTP）代理仅传给 opencode-manager 及其 OpenCode 子进程，避免 Bun 绕过系统代理后经 TUN 假地址出现间歇性 TLS 失败；显式代理优先，`TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY=false` 可关闭自动探测，证书校验不会被放宽。停止 opencode-manager 时会同步清理其 state 目录中记录的用户 `opencode serve` 子进程、端口池内残留监听进程和 `.tmp/dev-services/opencode-manager-state/processes/*.json`，避免重启后旧端口状态继续占用；新 manager 注册时，后端会在开放控制连接前冻结数据库仍为 `RUNNING/STARTING` 且 binding 为 `ACTIVE` 的原用户进程，完整配置应用并发送首个心跳后自动恢复，显式停止、失败、非活跃或无主进程不会恢复。需要连接 `local` 或 `guo` 环境时显式传入 `--profile local|guo` 和对应 dotenv 文件。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
 
 Windows 需要联调当前 test 环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`；脚本同样只解析 dotenv 的 `KEY=VALUE` 行，不执行文件内容，并按后端、opencode-manager、前端顺序重启。WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，可用 IDEA Run Configuration，但必须把 `.env.test` 中的数据库、Redis、模型和 manager token 环境变量配置进去并使用 `-Dspring.profiles.active=test`；已提交的 `TestAgentApplication guo` 只服务 legacy guo profile。
 

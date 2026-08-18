@@ -12000,3 +12000,26 @@
 - 内部模型可观测页面视觉体验得到显著提升，Overview 卡片层次丰富，桌面端大屏下图表左右并排显示，布局紧凑匀称、无冗余空白。
 - 未修改任何 HTTP API、DTO、数据库结构、Flyway migration、环境配置文件（`.env*`）、generated SDK 或 OpenCode 源码。
 
+## 2026-08-18 - 固定 `.100` 验收并排查账号工作区服务器归属
+
+### Why
+
+- 用户要求后续本机验收固定使用 `.100` PostgreSQL、停止主动跨长期分支同步，并处理 `usr_test_dev` 对话报“工作空间与 agent 不在同一服务器”的问题。
+- 该账号 ACTIVE Agent binding 已位于 `dev-192-168-8-100`，8 个个人 runtime workspace 却仍记录为本机或空服务器；6 条自动搬迁已连续 12～13 次进入 `RETRY_WAIT`。
+
+### What
+
+- 更新 `AGENTS.md`、AI 工作流、自检清单、后端 README 和 restart skill：默认 `test` 验收固定读取 `.env.test` 的 `192.168.8.100:15432/testagent_dev`；不主动切本机库或跨长期分支同步；进入对话前同时校验工作区/Agent 同服和目标物理根目录可用。
+- 按用户明确授权，在 `.100` 单事务把 `usr_test_dev` 的 8 个个人 runtime workspace 归属改为当前 ACTIVE binding 的 `dev-192-168-8-100`，并将 6 条旧搬迁记录标记为 `CANCELLED`；事务先校验唯一 binding 和 runtime workspace 未被其它个人工作区共享。
+- 同步修正本机 Codex 启动 skill；该文件位于仓库外，不随本提交进入 Git。
+
+### How
+
+- 完整执行 JDK 25 的 `./restart-dev-services.sh --profile test --env-file .env.test`，后端 26 模块和前端/用户手册 production build 成功，后端 readiness 为 `UP`、前端 3000 返回 200、登录 CORS 预检正常；因 `.env.test` 指向远端 OpenCode，本机 manager 按设计跳过。
+- 浏览器真实提交“只回复验收通过”的 Run：同服 `CONFLICT` 已消失，但远端返回 `VALIDATION_ERROR: 工作区根路径不可用`。通过 `.100` 服务器终端只读核对，应用公共仓库存在于 `/data/.testagent/agent-opencode/workspace/appworkspace/20260813/codex-e2e-test-work-20260813`，个人分支、个人 worktree 和数据库旧基线提交 `5c0c2591...` 均不存在。
+- 回顾全部 `.agents/session-log*.md` 近期条目，未发现与本次文档和环境决策冲突；未修改 `.env*`、代码、HTTP API、RunEvent、数据库结构/Flyway、generated SDK 或 OpenCode 源码。
+
+### Result
+
+- `.100` 中账号工作区服务器归属元数据已经统一，旧自动搬迁不再继续重试；但真实对话尚未恢复，因为 `.100` 缺少个人物理 worktree。仅改 `linux_server_id` 不能视为搬迁成功。
+- 下一步需要用户明确选择远端重建基线：保留本机旧 worktree 不覆盖，在 `.100` 以当前应用提交新建个人分支/worktree，或提供需要保留的本机个人提交并完成真实搬迁；完成后必须再次真实发送 Run 验收。

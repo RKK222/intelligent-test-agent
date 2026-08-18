@@ -20,6 +20,13 @@ export PATH="$JAVA_HOME/bin:/Users/kaka/Desktop/intelligent-test-agent/.tmp/dev-
 
 如果本机没有 JDK 25，才允许把 `JAVA_VERSION` 改成 `21`；解析不到对应 JDK 时停止并报告，不要尝试用 Java 17 启动。即使使用 `--skip-backend-build`，也必须执行同一段 Java 初始化，因为后端运行进程同样需要兼容 JDK。
 
+## 固定验收环境与服务器归属预检
+
+- 默认验收固定使用根目录 `.env.test` 中的 `192.168.8.100:15432/testagent_dev` PostgreSQL。除非用户明确要求，不切本机 PostgreSQL、`.env.local` 或临时 dotenv。
+- `.env.test` 的 `TEST_AGENT_OPENCODE_BASE_URL` 指向远端时，脚本会按设计跳过本机 opencode-manager；不要把该提示当成重启失败，也不要为消除提示强制启动本机 manager。
+- 进入对话前同时检查：所选工作区与当前用户 ACTIVE Agent binding 的 `linuxServerId` 一致；目标服务器实际存在并可读取工作区根目录。同一个共享验收账号不得交替绑定本机和远端 Agent，确需双端验证时使用不同专用账号。
+- 出现“工作空间与 agent 不在同一服务器”后，检查个人工作区迁移记录与目标物理路径。连续 `RETRY_WAIT` 说明存在持久冲突或鉴权问题，不能只重启或继续等待；也不能只改 `workspaces.linux_server_id` 制造不存在的远端目录。
+
 ## 从独立 worktree 启动并复用主工作区测试数据
 
 从 `/Users/kaka/Desktop/intelligent-test-agent-notification-center` 等独立 worktree 启动、但仍需复用主工作区已经初始化的 OpenCode session、公共 Agent 配置和稳定服务器身份时，必须同时显式设置 `TESTAGENT` 与 `SYS_DATA_ROOT_DIR`：
