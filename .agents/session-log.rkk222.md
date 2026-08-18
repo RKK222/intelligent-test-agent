@@ -11665,3 +11665,25 @@
 - 固定名平台 ZIP 仅更新 Java、前端、部署脚本和新引入的本地客户端分发，不加载或重启 manager/worker/toolbox，也不重复交付已部署的 ClickHouse/Mem0/BGE/pgvector 镜像。
 - 现场发布前必须先导出平台 PostgreSQL 与 XXL MySQL 完整 `flyway_schema_history`，并确认 `.4/.114` 已安装配置各有三项真实运行密钥；任一未知 checksum、失败记录或密钥缺失都停止，禁止 `repair`、`outOfOrder`、手改 history 或写入本地开发密钥。
 - 本次未修改 `.env*`、HTTP API、RunEvent、业务数据库结构、generated SDK 或 OpenCode 只读源码；企业 `.4/.114/.2` 尚未执行本轮包，真实启动和功能验收仍以逐机发布结果为准。
+
+## 2026-08-18 - 为用户灰度开关补充即时保存确认与结果反馈
+
+### Why
+
+- 超级管理员在统一用户管理页点击记忆灰度或客户端灰度开关时会立即调用接口保存，但原成功提示没有明确“已保存”，失败只落在页面提示区，也缺少防误触确认，用户难以判断开关是否已持久化。
+
+### What
+
+- 两类灰度开关复用现有 `ElMessageBox`，提交前明确提示“确认后将立即保存”；确认成功后弹出带用户名、灰度类型和开关结果的可关闭“已保存”消息。
+- 取消确认不发请求；接口失败时弹出可关闭“保存失败”消息，并通过显式受控状态回滚保证开关视觉状态恢复到服务端原值。
+- 同步 agent-web README 与包说明，并扩展既有用户管理组件测试覆盖两类确认、成功消息、取消回滚和失败回滚。
+
+### How
+
+- 定向 Vitest `settings-user-management-panel.test.ts`、`scheduler-management-panel.test.ts` 共 31/31 通过；agent-web 用户手册、TypeScript 检查和 production build 成功，仅保留既有大 chunk 警告。
+- 使用真实本地前后端和超级管理员账号进入“系统管理 → 用户管理”，点击测试用户的记忆灰度开关后确认弹框包含“确认后将立即保存”，点击取消后开关保持 `false`，未改变服务器灰度数据；前端与后端 readiness 均为 200/UP。
+
+### Result
+
+- 灰度开关仍使用既有 API 即时保存，不新增接口、状态容器或重复组件；管理员现在能在提交前确认，并从成功/失败弹框明确判断保存结果。
+- 不涉及 HTTP API、RunEvent、数据库、Flyway、部署、性能或安全契约；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未推送远端。

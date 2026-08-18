@@ -1,7 +1,7 @@
 import { defineComponent, h, inject, provide } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
-import { ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser, RoleOption, UserManagementUser } from "@test-agent/shared-types";
 import SettingsUserManagementPanel from "../src/components/settings/SettingsUserManagementPanel.vue";
@@ -232,15 +232,63 @@ describe("SettingsUserManagementPanel", () => {
   it("manages memory and local-client rollout on the same user row", async () => {
     const api = createApi();
     const { findByText, getByRole } = renderPanel(api);
+    const confirm = vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const success = vi.spyOn(ElMessage, "success").mockImplementation(() => undefined as never);
 
     await findByText("alice");
     const memorySwitch = getByRole("checkbox", { name: "切换 alice 的记忆灰度" });
     const clientSwitch = getByRole("checkbox", { name: "切换 alice 的客户端灰度" });
     await fireEvent.click(memorySwitch);
-    await fireEvent.click(clientSwitch);
-
     await waitFor(() => expect(api.enableQaMemoryUser).toHaveBeenCalledWith("usr_existing"));
+
+    await fireEvent.click(clientSwitch);
     await waitFor(() => expect(api.enableLocalClientRolloutUser).toHaveBeenCalledWith("usr_existing"));
+    expect(confirm).toHaveBeenNthCalledWith(
+      1,
+      "确认开启用户“alice”的记忆灰度吗？确认后将立即保存。",
+      "记忆灰度设置",
+      expect.objectContaining({ confirmButtonText: "确认开启", cancelButtonText: "取消" })
+    );
+    expect(confirm).toHaveBeenNthCalledWith(
+      2,
+      "确认开启用户“alice”的客户端灰度吗？确认后将立即保存。",
+      "客户端灰度设置",
+      expect.objectContaining({ confirmButtonText: "确认开启", cancelButtonText: "取消" })
+    );
+    expect(success).toHaveBeenCalledWith(expect.objectContaining({ message: "已保存：alice 的记忆灰度已开启" }));
+    expect(success).toHaveBeenCalledWith(expect.objectContaining({ message: "已保存：alice 的客户端灰度已开启" }));
+  });
+
+  it("keeps rollout unchanged when confirmation is cancelled", async () => {
+    const api = createApi();
+    vi.spyOn(ElMessageBox, "confirm").mockRejectedValue("cancel");
+    const { findByText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    const memorySwitch = getByRole("checkbox", { name: "切换 alice 的记忆灰度" });
+    await fireEvent.click(memorySwitch);
+
+    await waitFor(() => expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1));
+    expect(api.enableQaMemoryUser).not.toHaveBeenCalled();
+    await waitFor(() => expect((memorySwitch as HTMLInputElement).checked).toBe(false));
+  });
+
+  it("shows a popup error and keeps rollout unchanged when saving fails", async () => {
+    const api = createApi();
+    api.enableQaMemoryUser = vi.fn().mockRejectedValue(new Error("服务暂不可用"));
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const popupError = vi.spyOn(ElMessage, "error").mockImplementation(() => undefined as never);
+    const { findByText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    const memorySwitch = getByRole("checkbox", { name: "切换 alice 的记忆灰度" });
+    await fireEvent.click(memorySwitch);
+
+    await waitFor(() => expect(popupError).toHaveBeenCalledWith({
+      message: "保存失败：服务暂不可用",
+      showClose: true
+    }));
+    await waitFor(() => expect((memorySwitch as HTMLInputElement).checked).toBe(false));
   });
 
   it("creates user with default role and refreshes list", async () => {

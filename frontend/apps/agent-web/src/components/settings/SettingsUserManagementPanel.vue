@@ -98,6 +98,18 @@ function rolloutUpdating(userId: string, capability: "memory" | "localClient") {
   return rolloutUpdatingKeys.value.has(`${capability}:${userId}`);
 }
 
+/** 显式更新受控开关状态，使取消或失败回滚时浏览器视觉状态也与服务端值一致。 */
+function setRolloutEnabled(userId: string, capability: "memory" | "localClient", enabled: boolean) {
+  const current = capability === "memory" ? memoryRolloutUserIds.value : localClientRolloutUserIds.value;
+  const next = new Set(current);
+  enabled ? next.add(userId) : next.delete(userId);
+  if (capability === "memory") {
+    memoryRolloutUserIds.value = next;
+  } else {
+    localClientRolloutUserIds.value = next;
+  }
+}
+
 async function updateRollout(
   row: UserManagementUser,
   capability: "memory" | "localClient",
@@ -105,26 +117,42 @@ async function updateRollout(
 ) {
   const key = `${capability}:${row.userId}`;
   if (rolloutUpdatingKeys.value.has(key)) return;
+  const capabilityLabel = capability === "memory" ? "记忆灰度" : "客户端灰度";
+  const actionLabel = enabled ? "开启" : "关闭";
+  const previousEnabled = capability === "memory"
+    ? memoryRolloutUserIds.value.has(row.userId)
+    : localClientRolloutUserIds.value.has(row.userId);
   rolloutUpdatingKeys.value = new Set(rolloutUpdatingKeys.value).add(key);
   rolloutError.value = "";
+  setRolloutEnabled(row.userId, capability, enabled);
   try {
+    await ElMessageBox.confirm(
+      `确认${actionLabel}用户“${row.username}”的${capabilityLabel}吗？确认后将立即保存。`,
+      `${capabilityLabel}设置`,
+      {
+        type: "warning",
+        confirmButtonText: `确认${actionLabel}`,
+        cancelButtonText: "取消"
+      }
+    );
     if (capability === "memory") {
       if (enabled) await api.enableQaMemoryUser(row.userId);
       else await api.disableQaMemoryUser(row.userId);
-      const next = new Set(memoryRolloutUserIds.value);
-      enabled ? next.add(row.userId) : next.delete(row.userId);
-      memoryRolloutUserIds.value = next;
-      ElMessage.success(enabled ? "已为用户开放记忆能力" : "已关闭用户的记忆能力");
     } else {
       if (enabled) await api.enableLocalClientRolloutUser(row.userId);
       else await api.disableLocalClientRolloutUser(row.userId);
-      const next = new Set(localClientRolloutUserIds.value);
-      enabled ? next.add(row.userId) : next.delete(row.userId);
-      localClientRolloutUserIds.value = next;
-      ElMessage.success(enabled ? "已为用户开放本地客户端下载" : "已关闭用户的本地客户端下载");
     }
+    ElMessage.success({
+      message: `已保存：${row.username} 的${capabilityLabel}已${actionLabel}`,
+      showClose: true
+    });
   } catch (error) {
-    rolloutError.value = error instanceof Error ? error.message : "用户能力灰度更新失败";
+    setRolloutEnabled(row.userId, capability, previousEnabled);
+    if (!isMessageBoxCancellation(error)) {
+      const message = error instanceof Error ? error.message : "用户能力灰度更新失败";
+      rolloutError.value = message;
+      ElMessage.error({ message: `保存失败：${message}`, showClose: true });
+    }
   } finally {
     const next = new Set(rolloutUpdatingKeys.value);
     next.delete(key);
