@@ -2643,42 +2643,44 @@ function submitJoinApp() {
             </section>
           </Teleport>
         </div>
-        <!-- 加入应用弹窗 (弹出div) -->
-        <div v-if="addAppVisible" class="figma-add-app-overlay" @click="closeAddApp">
-          <div class="figma-add-app-card" @click.stop>
-            <div class="figma-add-app-header">
-              <span class="figma-add-app-title">加入其他应用</span>
-              <button type="button" class="figma-add-app-close" @click="closeAddApp">×</button>
-            </div>
-            <div class="figma-add-app-body">
-              <div class="figma-add-app-section">
-                <label class="figma-add-app-label">已加入的应用</label>
-                <div class="figma-joined-apps-tags">
-                  <span v-for="app in apps" :key="app.id" class="figma-joined-app-tag">
-                    {{ app.name }}
-                  </span>
+        <!-- 顶栏使用 transform 做视觉对齐，弹窗必须传送到 body，避免 fixed 定位被右侧工具组限制。 -->
+        <Teleport to="body">
+          <div v-if="addAppVisible" class="figma-add-app-overlay" @click="closeAddApp">
+            <div class="figma-add-app-card" @click.stop>
+              <div class="figma-add-app-header">
+                <span class="figma-add-app-title">加入其他应用</span>
+                <button type="button" class="figma-add-app-close" @click="closeAddApp">×</button>
+              </div>
+              <div class="figma-add-app-body">
+                <div class="figma-add-app-section">
+                  <label class="figma-add-app-label">已加入的应用</label>
+                  <div class="figma-joined-apps-tags">
+                    <span v-for="app in apps" :key="app.id" class="figma-joined-app-tag">
+                      {{ app.name }}
+                    </span>
+                  </div>
+                </div>
+                <div class="figma-add-app-section">
+                  <label class="figma-add-app-label">选择要加入的应用</label>
+                  <el-select v-model="selectedAppToJoin" placeholder="请选择应用" class="figma-add-app-select" size="default" filterable>
+                    <el-option
+                      v-for="app in joinableApps"
+                      :key="app.appId"
+                      :label="app.appName"
+                      :value="app.appId"
+                    />
+                  </el-select>
                 </div>
               </div>
-              <div class="figma-add-app-section">
-                <label class="figma-add-app-label">选择要加入的应用</label>
-                <el-select v-model="selectedAppToJoin" placeholder="请选择应用" class="figma-add-app-select" size="default" filterable>
-                  <el-option
-                    v-for="app in joinableApps"
-                    :key="app.appId"
-                    :label="app.appName"
-                    :value="app.appId"
-                  />
-                </el-select>
+              <div class="figma-add-app-footer">
+                <el-button size="small" @click="closeAddApp">取消</el-button>
+                <el-button type="primary" size="small" :loading="joining" :disabled="!selectedAppToJoin" @click="submitJoinApp">
+                  保存
+                </el-button>
               </div>
             </div>
-            <div class="figma-add-app-footer">
-              <el-button size="small" @click="closeAddApp">取消</el-button>
-              <el-button type="primary" size="small" :loading="joining" :disabled="!selectedAppToJoin" @click="submitJoinApp">
-                保存
-              </el-button>
-            </div>
           </div>
-        </div>
+        </Teleport>
         <div class="figma-user-menu-wrapper" @click.stop @blur="onUserMenuBlur">
           <button
             type="button"

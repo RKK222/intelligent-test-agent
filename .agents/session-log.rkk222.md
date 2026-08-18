@@ -11850,3 +11850,27 @@
 
 - 当前 `release` 已真实包含本地 `dev` 全部提交历史，合并冲突没有覆盖 release 已部署的 Flyway、前端、TCDS、运营分析和灰度成果；工作区未修改 `.env*`、generated SDK、OpenCode 只读源码或任何已执行 migration 字节。
 - 正式后端与前端二进制已经从合并提交构建；下一步只需用既有 worker/toolbox 指纹、已签名本地客户端制品和三台已验证节点配置重组内外层 ZIP。企业 `.4/.114/.2` 真实发布与 ClickHouse 首次存量回填仍需现场验收。
+
+## 2026-08-18 - 修复固定 action 路由 ID 误判与加入应用弹窗偏移
+
+### Why
+
+- 本地客户端路由在生产装配态把 `/sessions/` 和 `/workspaces/` 后的任意路径段都当作资源 ID，导致 `batch-items`、`runtime-state` 和 `experience` 分别进入 Session/Workspace ID 校验并报无效。原回归测试未装配本地客户端路由，没有复现生产条件。
+- 顶栏右侧工具组使用 `transform` 对齐，其内的 `position: fixed` 加入应用弹层因此改以该工具组为定位上下文，表现为弹窗缩到右上角。
+
+### What
+
+- 路径段只有以 `ses_` / `wrk_` 开头时才参与本地客户端资源路由；其余固定 action 继续走用户 binding 和正常 Controller 路由。批量 Session 创建同时纳入 body 的 `workspaceId` 检查，保留本地客户端工作区精确路由能力。
+- 回归测试统一按生产方式装配本地客户端路由，覆盖 `/sessions/batch-items`、`/sessions/runtime-state`、`/sessions/runtime-state/events` 和 `/workspaces/experience/open`，并保留普通 `ses_` / `wrk_` 资源路径用例。
+- 加入应用弹层通过 Vue `Teleport` 挂载到 `body`，测试从真实 `document.body` 检查弹层和保存交互；同步 API 模块与 agent-web README。
+
+### How
+
+- JDK 21 定向 Maven 回归 `UserOpencodeBackendRoutingWebFilterTest,BatchSessionControllerTest,ExperienceWorkspaceControllerTest` 共 49 项全部通过。
+- `FigmaShell.test.ts` 62 项全部通过，`@test-agent/agent-web` typecheck 通过，`git diff --check` 通过。一次误传 Vitest 参数触发全量测试，暴露 5 个与本次无关的既有 Mermaid/jsdom canvas 失败，本次目标文件隔离复跑全绿。
+- 用 JDK 21 执行 `./restart-dev-services.sh --profile test --env-file .env.test` 完成后端全量构建、前端生产构建与本地重启；后端 readiness 为 `UP`，前端 `/workbench` 返回 200。
+
+### Result
+
+- 四条固定 action 在生产装配态不再被误判为资源 ID，正常 `ses_xxx` / `wrk_xxx` 路径仍保持原精确路由；加入应用弹窗不再受顶栏 transform 约束。
+- 未变更 HTTP 路径、DTO、RunEvent/SSE 事件契约、数据库、Flyway、部署拓扑、性能模型、安全边界、环境配置、generated SDK 或 OpenCode 只读源码；工作区已有的部署脚本改动未纳入本次修复。

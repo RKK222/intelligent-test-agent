@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { mount } from "@vue/test-utils";
+import { DOMWrapper, mount } from "@vue/test-utils";
 import type { OpencodeEndpoint } from "@test-agent/shared-types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import FigmaShell from "../src/components/FigmaShell.vue";
@@ -77,6 +77,7 @@ describe("FigmaShell", () => {
     expect(figmaShellSource).toMatch(/\.figma-title-group\s*\{[^}]*justify-content: center;[^}]*align-items: flex-start/s);
     expect(figmaShellSource).toMatch(/\.figma-header-center\s*\{[^}]*justify-self: center;[^}]*transform: translateY\(calc\(var\(--ta-shell-gap, 8px\) \/ 2\)\)/s);
     expect(figmaShellSource).toMatch(/\.figma-header-right\s*\{[^}]*justify-self: end;[^}]*transform: translateY\(calc\(var\(--ta-shell-gap, 8px\) \/ 2\)\)/s);
+    expect(figmaShellSource).toMatch(/<Teleport to="body">\s*<div v-if="addAppVisible" class="figma-add-app-overlay"/s);
     expect(figmaShellSource).not.toContain("left: 150px");
     expect(figmaShellSource).toMatch(/\.figma-header-help\s*\{[^}]*border: 0;[^}]*background: transparent;[^}]*color: var\(--ta-shell-muted, #6b7280\)/s);
     expect(figmaShellSource).toMatch(/\.figma-header-help > svg\s*\{[^}]*display: block/s);
@@ -1645,7 +1646,9 @@ describe("FigmaShell", () => {
     await addBtn.trigger("mousedown");
 
     // 4. Expect the overlay to show up
-    const overlay = wrapper.get(".figma-add-app-overlay");
+    const overlayElement = document.body.querySelector(".figma-add-app-overlay");
+    expect(overlayElement).not.toBeNull();
+    const overlay = new DOMWrapper(overlayElement!);
     expect(overlay.get(".figma-joined-app-tag").text()).toBe("F-COSS");
 
     // 5. Select joinable app and click save
