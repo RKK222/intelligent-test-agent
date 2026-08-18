@@ -12070,3 +12070,25 @@
 
 - 固定 CPU BGE 与平台模型目录的认证和向量语义契约已对齐；升级 BGE 镜像与 Java 后，正确配置的 `memory-bge-small-zh-v1.5` 可进入真实 EMBEDDING 探测。
 - 本次不修改响应 DTO、RunEvent、数据库/Flyway、部署拓扑、环境变量、generated SDK 或 OpenCode 只读源码。企业 `.160` BGE 镜像、双后台 Java 和离线内外层 ZIP 尚未重建/部署，现场真实探测仍需按企业包流程完成最终验收。
+
+## 2026-08-18 - 重建企业平台增量包与独立 BGE 节点包
+
+### Why
+
+- CPU BGE 认证契约和 Java EMBEDDING 探测均已修复，企业交付必须同时更新双后台 Java 与 `.160` BGE；BGE 大镜像不得并入前后台完整包。
+
+### What
+
+- 以运行时代码提交 `ffb1af54cfde78bd315387caf91ce27eb9d1282c` 重建平台内层 ZIP和固定双后台外层 ZIP；复用既有 `.4/.114/.2` 节点包，组件清单继续把 worker runtime、toolbox、本地客户端标为 `reuse`，memory/BGE 标为 `disabled`。
+- 单独构建当前 `linux/amd64` BGE 镜像，并只封装 BGE 镜像、平台报告、SBOM、模型身份、Embedding 源码锁、配置模板和部署脚本；独立 ZIP 不含 Mem0、pgvector 或 memory VIP 镜像，平台外层 ZIP 也不含 BGE 镜像。
+
+### How
+
+- BGE pytest 5/5、JDK 25 模型网关 reactor、记忆离线包门禁、ClickHouse 完成门禁和增量组件门禁通过；前端 production build、后端打包、内层后台/前端 `validate-only`、完整外层包验证和全部 JAR Flyway 字节门禁通过。
+- BGE 包内模型身份固定为 `BAAI/bge-small-zh-v1.5`、revision `7999e1d3359715c523056ef9478215996d62a620`、512 维、归一化；Docker archive 实际平台核对为 `linux/amd64`。
+- 平台内层 SHA-256 为 `3bbe9691a18c1e558d31612797b67c6e1a1eac805a13f992ee599a0dfc6e463c`，外层为 `6e9bb51c4fb4bf0d5cd7949ae84ff6e30544e9a2c933f642107d89f55681b476`，独立 BGE ZIP 为 `5c2c44bbea9700ac70847f290c6d9e996927fbb0ba3feee7ce8f8e4685a47f01`，其中 BGE 镜像 tar 为 `65252a183e6108844c3813f368fa3d763b8d55ff5f0347df4433427efc833dd7`。
+
+### Result
+
+- Mac 交付物已分别落到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip` 与 `test-agent-bge-node.zip`，均有同名 `.sha256`；两条包边界已解包验证。
+- 本轮未新增或修改数据库/Flyway、RunEvent、部署拓扑、manager、worker、toolbox、本地客户端或 `.env*`。现场仍需依次升级 `.160` BGE、`.4/.114` Java 和 `.2` 前端并完成真实 EMBEDDING 探测；打包时已有的模型网关 README 未提交说明保持原样，未纳入本次暂存。
