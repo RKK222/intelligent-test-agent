@@ -3,12 +3,12 @@
   line-height: var(--oc-line-height);
   color: var(--oc-fg, #1e293b);
   font-size: var(--oc-text-md);
-  background: var(--ta-chat-answer-bg, #ffffff);
-  border: 1px solid var(--ta-chat-answer-border, #e2e8f0);
+  background: var(--ta-chat-answer-bg, #f7f8fa);
+  border: none;
   padding: 6px 36px 6px 12px;
   border-radius: var(--oc-radius-md);
   border-top-left-radius: 2px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
   margin-top: 0;
   display: block;
   width: 100%;

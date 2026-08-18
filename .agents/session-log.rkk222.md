@@ -5,28 +5,28 @@
 
 ## Entries
 
-### 2026-08-18 - 优化用户对话、被分享人对话与智能体回答视觉色彩
+### 2026-08-18 - 优化用户对话、被分享人对话与无边框智能体回答视觉色彩
 
 ### Why
 
-- 用户反馈用户对话（本人）与被分享人/协作者对话的颜色过于接近、难以直观区分，且智能体输出的米黄色卡片（`#FFFDF7`）不够美观，要求优化三者的色彩体系，增强对比度与整体高质感协调度。
+- 用户反馈用户对话（本人）与被分享人/协作者对话的颜色过于接近、难以直观区分，且智能体输出不需要显式边框，要求完全通过纯色彩与轻量背景色进行高质感区分。
 
 ### What
 
-- **用户本人对话（User Bubble）**：由浅蓝色 `#EAF3FD`（无边框）升级为极清爽的冰蓝色 `#E6F4FF`，并搭配淡蓝发丝边框 `#BAE0FF`，突出“我的输入”明确质感。
-- **被分享人 / 协作者对话（Other User Bubble）**：由低饱和紫 `#DED9F6`（无边框）升级为高辨识度柔紫 `#F3E8FF`，搭配微紫发丝边框 `#DDD6FE` 与突出协作者姓名色，与本人浅蓝对话形成清晰且舒适的视觉对比。
-- **智能体输出（Agent / Assistant Output）**：由陈旧米黄色 `#FFFDF7` 替换为高质感纯白卡片 `#FFFFFF`（`--ta-chat-answer-bg`），搭配极细边框 `#E2E8F0`（`--ta-chat-answer-border`）和微阴影（Soft Elevation），大幅提升与输入气泡的视觉协调度与现代感。
+- **用户本人对话（User Bubble）**：使用极清爽的无边框冰蓝色 `#E6F4FF`，展现清晰的“我的输入”质感。
+- **被分享人 / 协作者对话（Other User Bubble）**：使用高辨识度无边框柔紫 `#F3E8FF`（`--ta-chat-other-user-bg`）与深紫协作者姓名高亮，与本人浅蓝对话形成鲜明且舒适的色彩区分。
+- **智能体输出（Agent / Assistant Output）**：去除显式边框（`border: none`），采用高质感无边框柔灰/冷白卡片 `#F7F8FA`（`--ta-chat-answer-bg`）与柔和微阴影（`0 1px 3px rgba(0, 0, 0, 0.02)`），实现与彩色用户气泡自然契合的极简无边框三方视觉区分。
 - 同步更新 `globals.css`、`tokens.css`、`parts.css`、`rows.css`、`user-message-appearance.ts`、`FigmaChatPanel.vue` 以及关联单测与工程 README 文档。
 
 ### How
 
-- 修改 `globals.css` 中 `--ta-chat-user-bg`、`--ta-chat-other-user-bg`、`--ta-chat-answer-bg`、`--ta-chat-answer-border` token 及 `user-message-appearance.ts` 渲染逻辑。
-- 修改 `parts.css`、`rows.css` 与 `FigmaChatPanel.vue` 中对应的样式规则。
-- 运行 Vitest 测试（`pnpm test`），确认全局与部件层级的所有单元测试均 100% 通过。
+- 修改 `globals.css` 中 `--ta-chat-user-bg`、`--ta-chat-other-user-bg`、`--ta-chat-answer-bg`、`--ta-chat-answer-border` (`transparent`) token 及 `user-message-appearance.ts` 渲染逻辑。
+- 将 `parts.css`、`rows.css` 与 `FigmaChatPanel.vue` 中智能体输出气泡的边框规则调整为 `border: none`。
+- 运行 Vitest 测试（`pnpm test`），确认单元测试全部通过。
 
 ### Result
 
-- 聊天界面三方色彩层级清晰、清爽且高质感，对话气泡视觉区分度显著提升。
+- 对话界面三方均采用极简无边框设计，仅凭纯色彩体系（冰蓝、柔紫、柔灰/冷白）实现清晰、清爽且高质感的视觉区分。
 - 未影响任何 API 契约、事件流、数据库结构、安全配置或后台服务。
 
 ### 2026-08-13 - 永久从用户手册排除游戏内容

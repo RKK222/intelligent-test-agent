@@ -12,12 +12,12 @@ export type UserMessageAppearance = {
 
 const OWN_MESSAGE_STYLE = {
   backgroundColor: "var(--ta-chat-user-bg, #E6F4FF)",
-  border: "1px solid #BAE0FF"
+  border: "none"
 };
 
 const OTHER_MESSAGE_STYLE = {
   backgroundColor: "var(--ta-chat-other-user-bg, #F3E8FF)",
-  border: "1px solid #DDD6FE"
+  border: "none"
 };
 
 /**

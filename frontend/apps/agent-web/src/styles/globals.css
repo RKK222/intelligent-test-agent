@@ -83,14 +83,14 @@
   --ta-chat-message-bg: #ffffff;
   --ta-chat-user-bg: #E6F4FF;
   --ta-chat-other-user-bg: #F3E8FF;
-  --ta-chat-answer-bg: #FFFFFF;
+  --ta-chat-answer-bg: #f7f8fa;
   --ta-chat-process-bg: #f5f5f5;
   --ta-chat-detail-bg: #eeeeee;
   --ta-chat-chip-bg: #f2f2f2;
   --ta-chat-hover: #eeeeee;
   --ta-chat-border: #eaeaea;
   --ta-chat-border-strong: #cfcfcf;
-  --ta-chat-answer-border: #E2E8F0;
+  --ta-chat-answer-border: transparent;
   --ta-chat-text: #333333;
   --ta-chat-muted: #7a7a7a;
   --ta-chat-subtle: #555555;

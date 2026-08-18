@@ -20,7 +20,7 @@ describe("resolveUserMessageAppearance", () => {
       own: true,
       style: {
         backgroundColor: "var(--ta-chat-user-bg, #E6F4FF)",
-        border: "1px solid #BAE0FF"
+        border: "none"
       }
     });
     expect(otherFirst).toEqual({
@@ -28,7 +28,7 @@ describe("resolveUserMessageAppearance", () => {
       displayName: "协作者",
       style: {
         backgroundColor: "var(--ta-chat-other-user-bg, #F3E8FF)",
-        border: "1px solid #DDD6FE"
+        border: "none"
       }
     });
     expect(otherFirst.style).toEqual(otherSecond.style);
@@ -39,7 +39,7 @@ describe("resolveUserMessageAppearance", () => {
       own: true,
       style: {
         backgroundColor: "var(--ta-chat-user-bg, #E6F4FF)",
-        border: "1px solid #BAE0FF"
+        border: "none"
       }
     });
   });
