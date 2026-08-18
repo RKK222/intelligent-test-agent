@@ -120,6 +120,23 @@ find_local_client_dist() {
   find "$1" -maxdepth 6 -type d -path '*/dist/local-opencode-client' | sort | head -n 1
 }
 
+manifest_value() {
+  local file="$1" key="$2"
+  [[ -f "${file}" ]] || return 0
+  awk -F= -v wanted="${key}" '$1 == wanted { value=substr($0, index($0, "=") + 1) } END { print value }' \
+    "${file}"
+}
+
+verify_local_client_root() {
+  local root="$1"
+  bash "${DEPLOY_INTERNAL_SRC}/verify-local-opencode-client-distribution.sh" \
+    --root "${root}" \
+    --expected-version "${LOCAL_CLIENT_VERSION}" \
+    --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
+    --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}"
+}
+
 require_command unzip
 require_command find
 require_command tar
@@ -142,24 +159,66 @@ DEPLOY_INTERNAL_SRC=""
 if [[ -n "${DEPLOY_FRONTEND_SCRIPT}" ]]; then
   DEPLOY_INTERNAL_SRC="$(cd "$(dirname "${DEPLOY_FRONTEND_SCRIPT}")" && pwd)"
 fi
+COMPONENT_MANIFEST="${DEPLOY_INTERNAL_SRC}/release-components.env"
+LOCAL_CLIENT_COMPONENT_MODE="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT)"
+LOCAL_CLIENT_COMPONENT_MODE="${LOCAL_CLIENT_COMPONENT_MODE:-included}"
+LOCAL_CLIENT_FINGERPRINT="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT)"
+LOCAL_CLIENT_VERSION="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION)"
+LOCAL_CLIENT_MANIFEST_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256)"
+LOCAL_CLIENT_SIGNATURE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256)"
+LOCAL_CLIENT_INSTALL_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256)"
 
 require_file "${FRONTEND_ARCHIVE}"
 require_file "${CONFIGURE_NGINX_SCRIPT}"
-require_file "${LOCAL_CLIENT_DIST}/install.sh"
-require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-macOS-arm64.pkg"
-require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
-require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
-require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
 if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
   echo "deploy/internal directory not found in archive" >&2
   exit 1
+fi
+require_file "${DEPLOY_INTERNAL_SRC}/verify-local-opencode-client-distribution.sh"
+[[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included || "${LOCAL_CLIENT_COMPONENT_MODE}" == reuse ]] || {
+  echo "Invalid TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT: ${LOCAL_CLIENT_COMPONENT_MODE}" >&2
+  exit 1
+}
+if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
+  require_file "${LOCAL_CLIENT_DIST}/install.sh"
+  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-macOS-arm64.pkg"
+  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
+  require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
+  require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
+  # 旧全量包没有组件哈希字段时继续兼容；新包必须执行完整逐文件校验。
+  if [[ -n "${LOCAL_CLIENT_FINGERPRINT}${LOCAL_CLIENT_MANIFEST_SHA256}${LOCAL_CLIENT_SIGNATURE_SHA256}${LOCAL_CLIENT_INSTALL_SHA256}" ]]; then
+    [[ "${LOCAL_CLIENT_FINGERPRINT}" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "Invalid local client component fingerprint" >&2
+      exit 1
+    }
+    verify_local_client_root "${LOCAL_CLIENT_DIST}"
+  fi
+else
+  [[ -z "${LOCAL_CLIENT_DIST}" ]] || {
+    echo "Local client reuse release must not embed dist/local-opencode-client" >&2
+    exit 1
+  }
+  [[ "${LOCAL_CLIENT_FINGERPRINT}" =~ ^[0-9a-f]{64}$ \
+    && -n "${LOCAL_CLIENT_VERSION}" \
+    && "${LOCAL_CLIENT_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_SIGNATURE_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Local client reuse metadata is missing or invalid" >&2
+    exit 1
+  }
 fi
 
 if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   log "Frontend archive validation passed"
   printf 'frontend archive: %s\n' "${FRONTEND_ARCHIVE}"
   printf 'deploy internal: %s\n' "${DEPLOY_INTERNAL_SRC}"
-  printf 'local client HTTP distribution: %s\n' "${LOCAL_CLIENT_DIST}"
+  printf 'local client component: %s\n' "${LOCAL_CLIENT_COMPONENT_MODE}"
   if [[ "${KEEP_EXTRACT}" -eq 0 ]]; then
     rm -rf "${EXTRACT_DIR}"
   fi
@@ -172,8 +231,13 @@ log "Update frontend under ${FRONTEND_ROOT}"
 timestamp="$(date +%Y%m%d%H%M%S)"
 mkdir -p "${FRONTEND_ROOT}/frontend" "${FRONTEND_ROOT}/dist" "${FRONTEND_ROOT}/deploy"
 cp "${FRONTEND_ARCHIVE}" "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
-rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.new"
-cp -a "${LOCAL_CLIENT_DIST}" "${FRONTEND_ROOT}/dist/local-opencode-client.new"
+if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
+  rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.new"
+  cp -a "${LOCAL_CLIENT_DIST}" "${FRONTEND_ROOT}/dist/local-opencode-client.new"
+else
+  # reuse 必须在替换静态前端或 reload Nginx 前证明现网分发目录与发布清单逐字一致。
+  verify_local_client_root "${FRONTEND_ROOT}/dist/local-opencode-client"
+fi
 
 rm -rf "${FRONTEND_ROOT}/deploy/internal.new"
 cp -a "${DEPLOY_INTERNAL_SRC}" "${FRONTEND_ROOT}/deploy/internal.new"
@@ -189,11 +253,13 @@ if [[ -d "${FRONTEND_ROOT}/frontend" ]]; then
 fi
 
 tar -C "${FRONTEND_ROOT}" -xzf "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
-if [[ -d "${FRONTEND_ROOT}/dist/local-opencode-client" ]]; then
-  rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
-  mv "${FRONTEND_ROOT}/dist/local-opencode-client" "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
+  if [[ -d "${FRONTEND_ROOT}/dist/local-opencode-client" ]]; then
+    rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+    mv "${FRONTEND_ROOT}/dist/local-opencode-client" "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+  fi
+  mv "${FRONTEND_ROOT}/dist/local-opencode-client.new" "${FRONTEND_ROOT}/dist/local-opencode-client"
 fi
-mv "${FRONTEND_ROOT}/dist/local-opencode-client.new" "${FRONTEND_ROOT}/dist/local-opencode-client"
 bash "${FRONTEND_ROOT}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 curl -fsS "${FRONTEND_HEALTH_URL}" >/dev/null
 curl -fsS "${FRONTEND_URL}" >/dev/null

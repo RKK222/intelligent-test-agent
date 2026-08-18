@@ -34,13 +34,44 @@ cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl
 (cd "${XXL_JAR_ROOT}" && zip -qr \
   "${OUTPUT_DIR}/backend/lib/test-agent-xxl-job-integration-0.1.0-SNAPSHOT.jar" .)
 printf 'frontend\n' >"${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
-# zip-only 测试复用已生成制品，显式补齐本地客户端分发目录，避免把构建阶段误当作封装阶段。
-mkdir -p "${OUTPUT_DIR}/local-opencode-client/stable"
+# zip-only 测试复用已生成制品，显式补齐可逐文件验真的客户端目录，避免把构建阶段误当作封装阶段。
+LOCAL_CLIENT_ROOT="${OUTPUT_DIR}/local-opencode-client"
+LOCAL_CLIENT_VERSION="fixture-local-client"
+LOCAL_CLIENT_RELEASE="${LOCAL_CLIENT_ROOT}/releases/${LOCAL_CLIENT_VERSION}"
+mkdir -p "${LOCAL_CLIENT_ROOT}/stable" "${LOCAL_CLIENT_RELEASE}"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${OUTPUT_DIR}/local-opencode-client/install.sh"
 printf 'fixture pkg\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg"
 printf 'fixture deb\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
-printf '{\n  "version": "fixture-local-client"\n}\n' \
-  >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json"
+printf 'fixture client jar\n' >"${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar"
+printf 'fixture Darwin JRE\n' >"${LOCAL_CLIENT_RELEASE}/temurin-jre21-darwin-arm64.tar.gz"
+printf 'fixture Linux JRE\n' >"${LOCAL_CLIENT_RELEASE}/temurin-jre21-linux-arm64-glibc.tar.gz"
+printf 'fixture Darwin OpenCode\n' >"${LOCAL_CLIENT_RELEASE}/opencode-1.18.4-darwin-arm64.tar.gz"
+printf 'fixture Linux OpenCode\n' >"${LOCAL_CLIENT_RELEASE}/opencode-1.18.4-linux-arm64-glibc.tar.gz"
+client_jar_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar" | awk '{print $1}')"
+jre_darwin_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/temurin-jre21-darwin-arm64.tar.gz" | awk '{print $1}')"
+jre_linux_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/temurin-jre21-linux-arm64-glibc.tar.gz" | awk '{print $1}')"
+opencode_darwin_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/opencode-1.18.4-darwin-arm64.tar.gz" | awk '{print $1}')"
+opencode_linux_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/opencode-1.18.4-linux-arm64-glibc.tar.gz" | awk '{print $1}')"
+pkg_sha="$(shasum -a 256 "${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-macOS-arm64.pkg" | awk '{print $1}')"
+deb_sha="$(shasum -a 256 "${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.deb" | awk '{print $1}')"
+printf '%s\n' \
+  '{' \
+  '  "version": "fixture-local-client",' \
+  '  "clientJarPath": "releases/fixture-local-client/test-agent-local-client.jar",' \
+  "  \"clientJarSha256\": \"${client_jar_sha}\"," \
+  '  "darwinArm64JrePath": "releases/fixture-local-client/temurin-jre21-darwin-arm64.tar.gz",' \
+  "  \"darwinArm64JreSha256\": \"${jre_darwin_sha}\"," \
+  '  "darwinArm64OpencodePath": "releases/fixture-local-client/opencode-1.18.4-darwin-arm64.tar.gz",' \
+  "  \"darwinArm64OpencodeSha256\": \"${opencode_darwin_sha}\"," \
+  '  "linuxArm64GlibcJrePath": "releases/fixture-local-client/temurin-jre21-linux-arm64-glibc.tar.gz",' \
+  "  \"linuxArm64GlibcJreSha256\": \"${jre_linux_sha}\"," \
+  '  "linuxArm64GlibcOpencodePath": "releases/fixture-local-client/opencode-1.18.4-linux-arm64-glibc.tar.gz",' \
+  "  \"linuxArm64GlibcOpencodeSha256\": \"${opencode_linux_sha}\"," \
+  '  "darwinArm64InstallerPath": "TestAgent-Local-Client-macOS-arm64.pkg",' \
+  "  \"darwinArm64InstallerSha256\": \"${pkg_sha}\"," \
+  '  "linuxArm64GlibcInstallerPath": "TestAgent-Local-Client-Kylin-arm64.deb",' \
+  "  \"linuxArm64GlibcInstallerSha256\": \"${deb_sha}\"" \
+  '}' >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json"
 printf 'fixture signature\n' >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"
 printf 'programs\n' >"${OUTPUT_DIR}/test-agent-programs.tar.gz"
 printf 'worker\n' >"${OUTPUT_DIR}/test-agent-opencode-worker_internal-linux-amd64.tar"
@@ -58,7 +89,10 @@ plan_output="$(bash "${PACKAGE_SCRIPT}" --component-plan-only \
   --output-dir "${OUTPUT_DIR}" --component-state-file "${STATE_FILE}")"
 worker_fingerprint="$(sed -n 's/^worker runtime fingerprint: //p' <<<"${plan_output}")"
 toolbox_fingerprint="$(sed -n 's/^toolbox fingerprint: //p' <<<"${plan_output}")"
-[[ "${worker_fingerprint}" =~ ^[0-9a-f]{64}$ && "${toolbox_fingerprint}" =~ ^[0-9a-f]{64}$ ]]
+local_client_fingerprint="$(sed -n 's/^local client fingerprint: //p' <<<"${plan_output}")"
+[[ "${worker_fingerprint}" =~ ^[0-9a-f]{64}$ \
+  && "${toolbox_fingerprint}" =~ ^[0-9a-f]{64}$ \
+  && "${local_client_fingerprint}" =~ ^[0-9a-f]{64}$ ]]
 printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${worker_fingerprint}" \
   >"${OUTPUT_DIR}/.worker-runtime-artifact.env"
 printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${toolbox_fingerprint}" \
@@ -74,6 +108,7 @@ grep -Fxq 'deploy/internal/deploy-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'deploy/internal/verify-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar' <<<"${full_listing}"
+grep -Fxq 'dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg' <<<"${full_listing}"
 if grep -Eq '^dist/lobehub/' <<<"${full_listing}"; then
   echo 'Default release unexpectedly contains LobeHub artifacts' >&2
   exit 1
@@ -81,8 +116,34 @@ fi
 full_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
   deploy/internal/release-components.env)"
 grep -Fxq 'TEST_AGENT_RELEASE_LOBEHUB=disabled' <<<"${full_manifest}"
+grep -Fxq 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=included' <<<"${full_manifest}"
 grep -Fxq "TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=${worker_fingerprint}" "${STATE_FILE}"
 grep -Fxq "TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=${toolbox_fingerprint}" "${STATE_FILE}"
+grep -Fxq "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT=${local_client_fingerprint}" \
+  "${STATE_FILE}"
+local_client_version="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=//p' "${STATE_FILE}")"
+local_client_manifest_sha="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=//p' "${STATE_FILE}")"
+local_client_signature_sha="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256=//p' "${STATE_FILE}")"
+local_client_install_sha="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=//p' "${STATE_FILE}")"
+bash "${ROOT_DIR}/deploy/internal/deploy-internal-frontend.sh" \
+  --archive "${OUTPUT_DIR}/test-agent-internal-release.zip" --validate-only >/dev/null
+bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
+  --root "${LOCAL_CLIENT_ROOT}" \
+  --expected-version "${local_client_version}" \
+  --expected-manifest-sha256 "${local_client_manifest_sha}" \
+  --expected-signature-sha256 "${local_client_signature_sha}" \
+  --expected-install-sha256 "${local_client_install_sha}" >/dev/null
+printf 'tampered pkg\n' >"${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-macOS-arm64.pkg"
+if bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
+  --root "${LOCAL_CLIENT_ROOT}" \
+  --expected-version "${local_client_version}" \
+  --expected-manifest-sha256 "${local_client_manifest_sha}" \
+  --expected-signature-sha256 "${local_client_signature_sha}" \
+  --expected-install-sha256 "${local_client_install_sha}" >/dev/null 2>&1; then
+  echo 'Tampered local client distribution unexpectedly passed verification' >&2
+  exit 1
+fi
+printf 'fixture pkg\n' >"${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-macOS-arm64.pkg"
 
 # 同一批次只补日志的 zip-only 必须保留当前全量选择，不能把尚未部署的组件误删掉。
 bash "${PACKAGE_SCRIPT}" --zip-only --output-dir "${OUTPUT_DIR}" \
@@ -102,10 +163,17 @@ if grep -Eq '^dist/(test-agent-programs|test-agent-opencode-worker|test-agent_(i
   echo 'Unchanged worker runtime or toolbox artifacts leaked into incremental ZIP' >&2
   exit 1
 fi
+if grep -Eq '^dist/local-opencode-client/' <<<"${incremental_listing}"; then
+  echo 'Unchanged local client artifacts leaked into incremental ZIP' >&2
+  exit 1
+fi
 incremental_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
   deploy/internal/release-components.env)"
 grep -Fxq 'TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse' <<<"${incremental_manifest}"
 grep -Fxq 'TEST_AGENT_RELEASE_TOOLBOX=reuse' <<<"${incremental_manifest}"
+grep -Fxq 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=reuse' <<<"${incremental_manifest}"
+bash "${ROOT_DIR}/deploy/internal/deploy-internal-frontend.sh" \
+  --archive "${OUTPUT_DIR}/test-agent-internal-release.zip" --validate-only >/dev/null
 
 # 上一轮已部署成功但目标机尚无组件状态时，可把可信 release 指纹作为一次性恢复基线。
 BASELINE_FILE="${TMP_ROOT}/worker-runtime-baseline.env"
@@ -130,11 +198,48 @@ grep -Fxq "TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=$(git -C "${
 grep -Fxq 'TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
   <<<"${baseline_manifest}"
 
+# 已部署客户端早于本地组件状态时，只允许通过固定源码提交、指纹和制品哈希的 baseline 恢复 reuse。
+LOCAL_CLIENT_BASELINE_FILE="${TMP_ROOT}/local-client-baseline.env"
+printf '%s\n' \
+  'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_BASELINE_VERSION=1' \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_BASELINE_SOURCE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse HEAD)" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT=${local_client_fingerprint}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=${local_client_version}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=${local_client_manifest_sha}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256=${local_client_signature_sha}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=${local_client_install_sha}" \
+  >"${LOCAL_CLIENT_BASELINE_FILE}"
+printf '%s\n' \
+  'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1' \
+  "TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=${worker_fingerprint}" \
+  "TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=${toolbox_fingerprint}" \
+  >"${STATE_FILE}"
+rm -f "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  "${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
+bash "${PACKAGE_SCRIPT}" --zip-only \
+  --local-client-baseline-file "${LOCAL_CLIENT_BASELINE_FILE}" \
+  --output-dir "${OUTPUT_DIR}" --component-state-file "${STATE_FILE}" >/dev/null
+client_baseline_listing="$(unzip -Z1 "${OUTPUT_DIR}/test-agent-internal-release.zip")"
+if grep -Eq '^dist/local-opencode-client/' <<<"${client_baseline_listing}"; then
+  echo 'Local client artifacts leaked into deployed-baseline reuse ZIP' >&2
+  exit 1
+fi
+client_baseline_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  deploy/internal/release-components.env)"
+grep -Fxq 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=reuse' <<<"${client_baseline_manifest}"
+grep -Fxq "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=${local_client_manifest_sha}" \
+  <<<"${client_baseline_manifest}"
+
 # 只有 worker runtime 基线变化时，只重新携带 Manager/Codex/programs 与 worker 镜像。
 printf '%s\n' \
   'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1' \
   'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=outdated' \
   "TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=${toolbox_fingerprint}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT=${local_client_fingerprint}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=${local_client_version}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=${local_client_manifest_sha}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256=${local_client_signature_sha}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=${local_client_install_sha}" \
   >"${STATE_FILE}"
 rm -f "${OUTPUT_DIR}/test-agent-internal-release.zip" \
   "${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
@@ -145,6 +250,10 @@ grep -Fxq 'dist/test-agent-programs.tar.gz' <<<"${worker_only_listing}"
 grep -Fxq 'dist/test-agent-opencode-worker_internal-linux-amd64.tar' <<<"${worker_only_listing}"
 if grep -Eq '^dist/test-agent_(it|omni)-tools_' <<<"${worker_only_listing}"; then
   echo 'Unchanged toolbox artifacts were unexpectedly included' >&2
+  exit 1
+fi
+if grep -Eq '^dist/local-opencode-client/' <<<"${worker_only_listing}"; then
+  echo 'Unchanged local client artifacts were unexpectedly included' >&2
   exit 1
 fi
 

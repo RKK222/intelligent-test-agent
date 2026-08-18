@@ -11874,3 +11874,28 @@
 
 - 四条固定 action 在生产装配态不再被误判为资源 ID，正常 `ses_xxx` / `wrk_xxx` 路径仍保持原精确路由；加入应用弹窗不再受顶栏 transform 约束。
 - 未变更 HTTP 路径、DTO、RunEvent/SSE 事件契约、数据库、Flyway、部署拓扑、性能模型、安全边界、环境配置、generated SDK 或 OpenCode 只读源码；工作区已有的部署脚本改动未纳入本次修复。
+
+## 2026-08-18 - 本地客户端纳入企业增量组件门禁
+
+### Why
+
+- 用户指出 release 最新企业包仍约 500 MiB，而 13:00 左右以后没有部署过的新代码并未修改本地客户端。根因是 worker runtime 和 toolbox 已支持指纹复用，但 `dist/local-opencode-client/` 仍被完整包无条件构建、复制和部署，单项压缩后约 417 MiB。
+- 不能仅从 ZIP 删除客户端：`.2` 必须证明现场既有 PKG、DEB、JRE、OpenCode、客户端 JAR、安装脚本和签名清单与已部署版本完全一致，才能更新前端和 reload Nginx。
+
+### What
+
+- 将本地客户端作为第三个独立增量组件，指纹覆盖客户端/协议源码、POM、封装与安装脚本、固定 OpenCode 许可证、原生图标及版本/上游 SHA/签名身份配置；新增 `included/reuse` 清单字段和持久化版本、manifest、signature、install SHA-256。
+- 新增 `20260818-local-client-entryfix.env`，固定 13:00 前已部署客户端 `0.1.1-dev-entryfix` 的源码提交、当前输入指纹和制品哈希。旧完整包中的同一客户端已用新校验器逐文件验证，未把 14:50 以后仅打包未部署的后端/前端当成现场基线。
+- 新增不依赖 `jq`、`rg` 或网络的客户端分发校验器。`reuse` 包不再携带、复制、备份或替换客户端目录；`.2` 在切换 deploy/internal、静态前端和 Nginx 前校验现有 `/data/testagent/dist/local-opencode-client`，任一文件漂移即停止部署。`included` 包仍先完整验真再原子替换。
+- 同步本地客户端、前端、多后台和企业打包文档；增量夹具覆盖全量加入、下一轮省略、显式 baseline 恢复、篡改拒绝和 worker-only 更新不带客户端。
+
+### How
+
+- Shell 语法、`git diff --check`、增量组件门禁、双后台逐机门禁和本地客户端原生包/签名/安装器测试通过；客户端篡改夹具会稳定失败。
+- JDK 25 下真实 PostgreSQL `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 29/29、`FlywayMigrationNamingTest` 15/15 通过，0 跳过；未使用 `outOfOrder`、`repair` 或手工修改 history。
+- 从 `release@4098f8fe5` 最新业务代码重新编译后端和前端，production build 成功；发布 JAR 内全部受控 PostgreSQL/ClickHouse/XXL migration 字节门禁通过。首次增量内层 ZIP 为 154115982 bytes，worker/toolbox/client 均为 `reuse`、LobeHub/独立 memory 包为 `disabled`，且不存在 `dist/local-opencode-client/` 条目。
+
+### Result
+
+- 后端和前端包含约 13:00 后尚未部署的 release 变更；已部署且未变化的 worker、toolbox 和本地客户端不再重复进入 ZIP，内层包从上一轮约 564 MiB 外层中的 417 MiB 客户端重复内容收敛为约 147 MiB。
+- 本次修复不变更 API、RunEvent、数据库结构、Flyway 字节、运行拓扑、manager/worker 进程、模型清单、环境配置、generated SDK 或 OpenCode 只读源码。真实企业 `.4/.114/.2` 部署仍需按新包执行并完成 ClickHouse 首次存量回填、Flyway 启动和客户端 reuse 校验验收。

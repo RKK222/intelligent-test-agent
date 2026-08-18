@@ -42,8 +42,10 @@ export TEST_AGENT_LOCAL_CLIENT_MACOS_NOTARY_PROFILE='testagent-notary'
 deploy/internal/package-release.sh --local-client-only
 ```
 
-完整企业包默认同时构建本地客户端分发目录，并把它放入发布 ZIP 的
-`dist/local-opencode-client/`。`--zip-only` 要求该目录已存在且清单完整。离线构建可以通过
+本地客户端是企业包中的独立大组件。客户端源码、安装脚本、固定上游归档、版本或签名配置变化时，清单标记
+`included`，脚本重新构建并把分发目录放入发布 ZIP 的 `dist/local-opencode-client/`；指纹未变化时标记
+`reuse`，ZIP 只记录已部署版本和逐文件哈希，不再重复携带约 400 MiB 的 PKG、DEB、JRE 与 OpenCode 归档。
+`--zip-only` 在 `included` 模式下要求本地目录已存在且清单完整。离线构建可以通过
 `TEST_AGENT_LOCAL_CLIENT_*_ARCHIVE` 指向四个已经审批和预下载的归档；脚本仍使用固定 SHA-256 校验。
 可在显式 env 文件中覆盖 URL/SHA，但变更必须重新完成来源、许可证和 ARM 实机验证。
 `TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL` 和 `TEST_AGENT_LOCAL_CLIENT_DEFAULT_WEB_URL` 可为原生首次启动
@@ -57,6 +59,10 @@ deploy/internal/package-release.sh --local-client-only
 ```text
 /data/testagent/dist/local-opencode-client/
 ```
+
+`included` 包会先校验发布目录中的清单、签名、安装器和所有版本制品，再原子替换该目录；`reuse` 包不复制、
+备份或替换客户端，必须先逐文件校验目标机现有目录与发布清单完全一致，才允许更新静态前端和 reload Nginx。
+校验脚本只依赖 `bash`、`awk` 和 `sha256sum`，不依赖企业服务器通常没有的 `jq`、`rg` 或网络访问。
 
 `gateway.conf.template` 暴露 `/downloads/local-opencode-client/`，关闭目录索引与符号链接，拒绝隐藏路径。
 原生安装包、`install.sh` 和 `stable/*` 使用 `Cache-Control: no-store`；`releases/*` 使用一年 immutable 缓存。该下载
@@ -183,6 +189,7 @@ tail -f "$HOME/.local/state/testagent/local-opencode-client/logs/client.log"
 ```bash
 deploy/internal/tests/local-opencode-client-package-test.sh
 tools/verify-internal-nginx-config.sh
+tools/verify-internal-incremental-components.sh
 ```
 
 然后必须分别在 Apple Silicon Mac 和真实 ARM64 glibc 麒麟机上从网页下载并双击 PKG/DEB，验证系统安装器、

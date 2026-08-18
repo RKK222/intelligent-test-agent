@@ -790,6 +790,16 @@ find_local_client_dist() {
   find "$1" -maxdepth 6 -type d -path '*/dist/local-opencode-client' | sort | head -n 1
 }
 
+verify_local_client_distribution_root() {
+  local root="$1"
+  bash "${DEPLOY_INTERNAL_SRC}/verify-local-opencode-client-distribution.sh" \
+    --root "${root}" \
+    --expected-version "${LOCAL_CLIENT_VERSION}" \
+    --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
+    --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}"
+}
+
 find_first_tar() {
   local root="$1"
   find "${root}" -maxdepth 6 -type f -name 'test-agent-opencode-worker*linux-amd64.tar' | sort | head -n 1
@@ -831,6 +841,12 @@ run_frontend_update() {
   local frontend_archive="$2"
   local deploy_internal_src="$3"
   local local_client_dist="$4"
+  local local_client_mode="$5"
+  local local_client_fingerprint="$6"
+  local local_client_version="$7"
+  local local_client_manifest_sha256="$8"
+  local local_client_signature_sha256="$9"
+  local local_client_install_sha256="${10}"
   local remote_deploy_tmp="${FRONTEND_ROOT}/deploy/internal.new"
 
   # 前端服务器只接收静态包和 deploy/internal 模板；不把后端 jar 或 worker 镜像传过去。
@@ -855,8 +871,10 @@ EOF
   fi
   ssh "${frontend_target}" "mkdir -p '${FRONTEND_ROOT}/dist' '${FRONTEND_ROOT}/deploy'"
   scp "${frontend_archive}" "${frontend_target}:${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
-  ssh "${frontend_target}" "rm -rf '${FRONTEND_ROOT}/dist/local-opencode-client.new'"
-  scp -r "${local_client_dist}" "${frontend_target}:${FRONTEND_ROOT}/dist/local-opencode-client.new"
+  if [[ "${local_client_mode}" == included ]]; then
+    ssh "${frontend_target}" "rm -rf '${FRONTEND_ROOT}/dist/local-opencode-client.new'"
+    scp -r "${local_client_dist}" "${frontend_target}:${FRONTEND_ROOT}/dist/local-opencode-client.new"
+  fi
 
   if [[ -d "${deploy_internal_src}" ]]; then
     ssh "${frontend_target}" "rm -rf '${remote_deploy_tmp}'"
@@ -865,10 +883,26 @@ EOF
 
   log "Update frontend files and reload nginx on ${frontend_target}"
   # 远程更新先备份旧目录，再解压新静态资源；nginx 校验失败会阻断 reload。
-  ssh "${frontend_target}" "FRONTEND_ROOT='${FRONTEND_ROOT}' FRONTEND_HEALTH_URL='${FRONTEND_HEALTH_URL}' FRONTEND_URL='${FRONTEND_URL}' NGINX_ENV='${NGINX_ENV}' bash -s" <<'REMOTE_FRONTEND'
+  ssh "${frontend_target}" "FRONTEND_ROOT='${FRONTEND_ROOT}' FRONTEND_HEALTH_URL='${FRONTEND_HEALTH_URL}' FRONTEND_URL='${FRONTEND_URL}' NGINX_ENV='${NGINX_ENV}' LOCAL_CLIENT_COMPONENT_MODE='${local_client_mode}' LOCAL_CLIENT_FINGERPRINT='${local_client_fingerprint}' LOCAL_CLIENT_VERSION='${local_client_version}' LOCAL_CLIENT_MANIFEST_SHA256='${local_client_manifest_sha256}' LOCAL_CLIENT_SIGNATURE_SHA256='${local_client_signature_sha256}' LOCAL_CLIENT_INSTALL_SHA256='${local_client_install_sha256}' bash -s" <<'REMOTE_FRONTEND'
 set -euo pipefail
 timestamp="$(date +%Y%m%d%H%M%S)"
 mkdir -p "${FRONTEND_ROOT}/frontend" "${FRONTEND_ROOT}/dist" "${FRONTEND_ROOT}/deploy"
+
+verify_local_client() {
+  bash "${FRONTEND_ROOT}/deploy/internal.new/verify-local-opencode-client-distribution.sh" \
+    --root "$1" \
+    --expected-version "${LOCAL_CLIENT_VERSION}" \
+    --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
+    --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}"
+}
+
+# 先用本批次临时脚本验证客户端，再切换 deploy/internal、静态前端或 Nginx。
+if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == reuse ]]; then
+  verify_local_client "${FRONTEND_ROOT}/dist/local-opencode-client"
+else
+  verify_local_client "${FRONTEND_ROOT}/dist/local-opencode-client.new"
+fi
 
 if [[ -d "${FRONTEND_ROOT}/deploy/internal.new" ]]; then
   if [[ -d "${FRONTEND_ROOT}/deploy/internal" ]]; then
@@ -884,11 +918,13 @@ if [[ -d "${FRONTEND_ROOT}/frontend" ]]; then
 fi
 
 tar -C "${FRONTEND_ROOT}" -xzf "${FRONTEND_ROOT}/dist/test-agent-frontend-dist.tar.gz"
-if [[ -d "${FRONTEND_ROOT}/dist/local-opencode-client" ]]; then
-  rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
-  mv "${FRONTEND_ROOT}/dist/local-opencode-client" "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
+  if [[ -d "${FRONTEND_ROOT}/dist/local-opencode-client" ]]; then
+    rm -rf "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+    mv "${FRONTEND_ROOT}/dist/local-opencode-client" "${FRONTEND_ROOT}/dist/local-opencode-client.bak.${timestamp}"
+  fi
+  mv "${FRONTEND_ROOT}/dist/local-opencode-client.new" "${FRONTEND_ROOT}/dist/local-opencode-client"
 fi
-mv "${FRONTEND_ROOT}/dist/local-opencode-client.new" "${FRONTEND_ROOT}/dist/local-opencode-client"
 bash "${FRONTEND_ROOT}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 curl -fsS "${FRONTEND_HEALTH_URL}" >/dev/null
 curl -fsS "${FRONTEND_URL}" >/dev/null
@@ -958,7 +994,20 @@ WORKER_RUNTIME_BASELINE_SOURCE_COMMIT="$(manifest_value "${COMPONENT_MANIFEST}" 
   TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_SOURCE_COMMIT)"
 WORKER_RUNTIME_BASELINE_RELEASE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
   TEST_AGENT_RELEASE_WORKER_RUNTIME_BASELINE_RELEASE_SHA256)"
+LOCAL_CLIENT_COMPONENT_MODE="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT)"
+LOCAL_CLIENT_FINGERPRINT="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_FINGERPRINT)"
+LOCAL_CLIENT_VERSION="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION)"
+LOCAL_CLIENT_MANIFEST_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256)"
+LOCAL_CLIENT_SIGNATURE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256)"
+LOCAL_CLIENT_INSTALL_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256)"
 WORKER_COMPONENT_MODE="${WORKER_COMPONENT_MODE:-included}"
+LOCAL_CLIENT_COMPONENT_MODE="${LOCAL_CLIENT_COMPONENT_MODE:-included}"
 [[ "${WORKER_COMPONENT_MODE}" == included || "${WORKER_COMPONENT_MODE}" == reuse ]] || {
   echo "Invalid TEST_AGENT_RELEASE_WORKER_RUNTIME: ${WORKER_COMPONENT_MODE}" >&2
   exit 1
@@ -981,11 +1030,6 @@ if [[ "${VALIDATE_ONLY}" -eq 0 && ( "${SKIP_WORKER}" -eq 0 || "${WORKER_RUNTIME_
 fi
 
 require_file "${FRONTEND_ARCHIVE}"
-require_file "${LOCAL_CLIENT_DIST}/install.sh"
-require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-macOS-arm64.pkg"
-require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
-require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
-require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
 require_file "${BACKEND_JAR}"
 [[ -n "${BACKEND_LIB_DIR}" && -n "$(find "${BACKEND_LIB_DIR}" -maxdepth 1 -type f -name '*.jar' -print -quit)" ]] || {
   echo "backend external lib directory not found in archive" >&2
@@ -1013,6 +1057,39 @@ if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
   echo "deploy/internal directory not found in archive" >&2
   exit 1
 fi
+require_file "${DEPLOY_INTERNAL_SRC}/verify-local-opencode-client-distribution.sh"
+[[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included || "${LOCAL_CLIENT_COMPONENT_MODE}" == reuse ]] || {
+  echo "Invalid TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT: ${LOCAL_CLIENT_COMPONENT_MODE}" >&2
+  exit 1
+}
+if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
+  require_file "${LOCAL_CLIENT_DIST}/install.sh"
+  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-macOS-arm64.pkg"
+  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
+  require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
+  require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
+  # 保持旧全量包兼容；新包带组件哈希时执行逐文件一致性校验。
+  if [[ -n "${LOCAL_CLIENT_FINGERPRINT}${LOCAL_CLIENT_MANIFEST_SHA256}${LOCAL_CLIENT_SIGNATURE_SHA256}${LOCAL_CLIENT_INSTALL_SHA256}" ]]; then
+    [[ "${LOCAL_CLIENT_FINGERPRINT}" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "Invalid local client component fingerprint" >&2
+      exit 1
+    }
+    verify_local_client_distribution_root "${LOCAL_CLIENT_DIST}"
+  fi
+else
+  [[ -z "${LOCAL_CLIENT_DIST}" ]] || {
+    echo "Local client reuse release must not embed dist/local-opencode-client" >&2
+    exit 1
+  }
+  [[ "${LOCAL_CLIENT_FINGERPRINT}" =~ ^[0-9a-f]{64}$ \
+    && -n "${LOCAL_CLIENT_VERSION}" \
+    && "${LOCAL_CLIENT_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_SIGNATURE_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Local client reuse metadata is missing or invalid" >&2
+    exit 1
+  }
+fi
 require_file "${DEPLOY_INTERNAL_SRC}/ensure-opencode-runtime-gitignore.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-runtime.gitignore"
 require_file "${DEPLOY_INTERNAL_SRC}/ensure-experience-workspace-content.sh"
@@ -1031,7 +1108,7 @@ fi
 if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   log "Release archive validation passed"
   printf 'frontend archive: %s\n' "${FRONTEND_ARCHIVE}"
-  printf 'local client HTTP distribution: %s\n' "${LOCAL_CLIENT_DIST}"
+  printf 'local client component: %s\n' "${LOCAL_CLIENT_COMPONENT_MODE}"
   printf 'backend jar: %s\n' "${BACKEND_JAR}"
   printf 'backend lib: %s\n' "${BACKEND_LIB_DIR}"
   printf 'worker runtime component: %s\n' "${WORKER_COMPONENT_MODE}"
@@ -1053,7 +1130,10 @@ if [[ "${WORKER_RUNTIME_REUSE}" -eq 1 && "${SKIP_WORKER_EXPLICIT}" -eq 0 ]]; the
 fi
 
 if [[ "${SKIP_FRONTEND}" -eq 0 ]]; then
-  run_frontend_update "$(ssh_target)" "${FRONTEND_ARCHIVE}" "${DEPLOY_INTERNAL_SRC}" "${LOCAL_CLIENT_DIST}"
+  run_frontend_update "$(ssh_target)" "${FRONTEND_ARCHIVE}" "${DEPLOY_INTERNAL_SRC}" \
+    "${LOCAL_CLIENT_DIST}" "${LOCAL_CLIENT_COMPONENT_MODE}" "${LOCAL_CLIENT_FINGERPRINT}" \
+    "${LOCAL_CLIENT_VERSION}" "${LOCAL_CLIENT_MANIFEST_SHA256}" \
+    "${LOCAL_CLIENT_SIGNATURE_SHA256}" "${LOCAL_CLIENT_INSTALL_SHA256}"
 fi
 
 log "Install backend artifacts under ${INSTALL_ROOT}"
