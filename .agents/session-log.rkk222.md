@@ -11923,3 +11923,28 @@
 
 - 新企业包中的 `.4` 回填门禁会持久推进 cursor 并显示当前汇总进度，完成日志不再依赖固定 400 行窗口。
 - 不修改 ClickHouse/PostgreSQL 数据、Flyway、HTTP API、RunEvent、服务启停顺序、开关语义、环境配置、manager/worker、generated SDK 或 OpenCode 只读源码；已在现场成功的本轮回填不需重做，修复只在后续重打包部署时生效。
+
+## 2026-08-18 - 补齐记忆固定 CPU Embedding 页面内探测闭环
+
+### Why
+
+- 记忆策略保存会同时校验固定 CHAT 与只读的 `memory-bge-small-zh-v1.5` CPU Embedding；内部模型供应商页面却只有 CHAT 探测入口，管理员即使已保存并探测 CHAT，仍会因固定 CPU 模型未通过 `EMBEDDING` 探测收到泛化的“企业模型不存在或未通过探测”。
+- 模型目录覆盖保存会清空该 Provider 的全部旧探测结果，单独新增 EMBEDDING 按钮若不恢复既有状态，还会导致同一 Provider 的 CHAT/EMBEDDING 探测相互清空。
+
+### What
+
+- `InternalModelProviderPanel` 复用既有目录覆盖和通用能力探测 API，增加“保存并探测 EMBEDDING”；指定目标能力时重新探测保存前已成功且仍声明的其它能力，状态标签不再只按 CHAT 判断。
+- `MemoryAdminPanel` 在目录请求成功且固定 CPU BGE 未通过 EMBEDDING 探测时提前显示阻断说明、禁用保存，并提供跳转到内部模型供应商页的产品内入口。
+- 同步前端工程/应用/包说明、模块图和记忆企业部署文档，明确 CPU 模型需点击“保存并探测 EMBEDDING”；HTTP API、DTO、数据库和部署拓扑未变化。
+
+### How
+
+- 定向 Vitest 两个文件 13/13 通过，覆盖 CHAT、EMBEDDING、目录覆盖后的既有能力重探测，以及固定 CPU 未探测时的保存阻断和跳转。
+- 前端全 workspace `typecheck`、`lint`、production build 和 `git diff --check` 通过；构建仅保留既有大 chunk 提示。JDK 25 后端 26 模块跳过测试构建成功。
+- 使用 `.env.test` / `test` profile 连接 `192.168.8.100:15432/testagent_dev` 重启后端和前端，readiness 为 UP；真实浏览器确认两项探测按钮可见、固定 CPU 阻断文案与禁用保存生效、跳转闭环可用且控制台无错误。验收未点击真实探测按钮，没有修改 `.100` 模型目录或探测状态。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，保留当前 release 已有模型目录、记忆灰度和企业打包成果，未发现冲突或残留合并标记。
+
+### Result
+
+- 超级管理员可只通过页面完成记忆依赖的 CHAT/EMBEDDING 配置；固定 CPU BGE 未就绪时不再等到保存请求才暴露泛化错误。
+- 本次不修改 `.env*`、HTTP API、RunEvent、数据库/Flyway、服务端校验、安全边界、部署拓扑、generated SDK 或 OpenCode 只读源码；企业离线内外层 ZIP 尚未因本次前端修复重新构建，现场升级前仍需重新打包并按既有门禁验收。

@@ -128,7 +128,7 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 
 活动栏底部 `Boxes` 入口的前端 Hub 统一表示 Agent、Skill、MCP、Tool：Agent/Skill 继续调用平台 Hub API 管理远端资产，MCP/Tool 只复用 `apps/agent-web` 已加载的 OpenCode 运行态目录，不新增服务端资产类型。顶部资源摘要另保留 Plugin 计数；顶部摘要与 Hub 详情面板都支持拖拽调宽和页面内全屏。
 
-活动栏 `BrainCircuit` 入口和 `/memories` 路由由 `apps/agent-web` 组合通用记忆中心：`MemoryCenter.vue` 负责个人/团队/Skill 提案治理与含 Session 标题/ID 的证据 rail，`MemoryAdminPanel.vue` 负责 Mem0 多节点、企业/CPU profile、投影积压、模型设置和白名单，`FigmaChatPanel.vue` 只显示 `run-usage/query` 恢复的真实注入数量。`packages/backend-api` 是页面访问 `/api/internal/platform/memory/v1` 的唯一入口；前端不直连 memory-service、不复制原始聊天、不扩展 RunEvent。
+活动栏 `BrainCircuit` 入口和 `/memories` 路由由 `apps/agent-web` 组合通用记忆中心：`MemoryCenter.vue` 负责个人/团队/Skill 提案治理与含 Session 标题/ID 的证据 rail，`MemoryAdminPanel.vue` 负责 Mem0 多节点、企业/CPU profile、投影积压、模型设置和固定 CPU EMBEDDING 探测前置校验，`SettingsUserManagementPanel.vue` 负责用户记忆灰度，`InternalModelProviderPanel.vue` 复用模型目录 API 完成 CHAT/EMBEDDING 页面内真探测，`FigmaChatPanel.vue` 只显示 `run-usage/query` 恢复的真实注入数量。`packages/backend-api` 是页面访问 `/api/internal/platform/memory/v1` 的唯一入口；前端不直连 memory-service、不复制原始聊天、不扩展 RunEvent。
 
 `apps/agent-web/router.ts` 与 `AgentWorkbench.vue` 共同维护活动栏 URI：`/workbench`、`/toolbox`、`/memories`、`/system`、`/hub` 和 `/settings` 分别对应工作台、工具箱、记忆中心、超级管理员控制台、能力库和设置弹窗，`/` 只兼容跳转到 `/workbench`。`toolbox-navigation.ts` 复用同一沉浸式布局状态机，路由名是刷新、登录回跳和浏览器历史恢复的权威来源；组件内后台状态不能覆盖当前路由页面。
 

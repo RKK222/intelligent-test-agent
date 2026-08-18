@@ -100,6 +100,16 @@ function api() {
         enabled: true,
         declaredCapabilities: ["EMBEDDING"],
         probedCapabilities: ["EMBEDDING"]
+      },
+      {
+        providerId: "enterprise",
+        modelId: "memory-bge-small-zh-v1.5",
+        upstreamModelId: "BAAI/bge-small-zh-v1.5",
+        displayName: "固定 CPU BGE",
+        embeddingDimension: 512,
+        enabled: true,
+        declaredCapabilities: ["EMBEDDING"],
+        probedCapabilities: ["EMBEDDING"]
       }
     ]),
     listUsers: vi.fn().mockResolvedValue({
@@ -199,6 +209,28 @@ describe("MemoryAdminPanel", () => {
     const configureButton = await view.findByRole("button", { name: "配置并探测 CHAT 模型" });
     await fireEvent.click(configureButton);
     expect(view.emitted("configureModels")).toHaveLength(1);
+  });
+
+  it("blocks saving and links to model configuration when the fixed CPU BGE is not probed", async () => {
+    const backendApi = api();
+    vi.mocked(backendApi.getInternalModelProviderModels).mockResolvedValue([
+      {
+        providerId: "enterprise",
+        modelId: "enterprise/chat-model",
+        upstreamModelId: "chat-model",
+        displayName: "企业聊天模型 V1",
+        enabled: true,
+        declaredCapabilities: ["CHAT"],
+        probedCapabilities: ["CHAT"]
+      }
+    ]);
+    const view = render(MemoryAdminPanel, { global: { provide: { api: backendApi } } });
+
+    expect(await view.findByText("固定 CPU BGE 尚未通过 EMBEDDING 探测，当前策略无法保存。")).toBeTruthy();
+    expect((view.getByRole("button", { name: "保存策略" }) as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(view.getByRole("button", { name: "配置并探测固定 CPU Embedding 模型" }));
+    expect(view.emitted("configureModels")).toHaveLength(1);
+    expect(backendApi.updateQaMemorySettings).not.toHaveBeenCalled();
   });
 
   it("shows a stable management error and reloads global health and settings on retry", async () => {
