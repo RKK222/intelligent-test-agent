@@ -2195,32 +2195,45 @@ function onPageSizeChange(next: number) {
   min-height: 0;
 }
 .ta-imob-overview {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  background: #fff;
-  padding: 12px 16px;
+  background: #ffffff;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 .ta-imob-overview-title {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
+  color: #1e293b;
 }
 .ta-imob-overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
 }
 .ta-imob-overview-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 4px;
+  padding: 10px 8px;
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+.ta-imob-overview-cell:hover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 .ta-imob-overview-value {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
-  color: #111827;
+  color: #0f172a;
+  line-height: 1.2;
   white-space: nowrap;
 }
 .ta-imob-overview-value.is-ok {
@@ -2230,8 +2243,9 @@ function onPageSizeChange(next: number) {
   color: #dc2626;
 }
 .ta-imob-overview-label {
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
 }
 .ta-imob-benchmark {
   border: 1px solid #fed7aa;
@@ -2340,7 +2354,17 @@ function onPageSizeChange(next: number) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-  gap: 12px;
+  gap: 16px;
+}
+@media (min-width: 1024px) {
+  .ta-imob-chart-comparison {
+    grid-template-columns: 380px minmax(0, 1fr);
+  }
+}
+@media (min-width: 1400px) {
+  .ta-imob-chart-comparison {
+    grid-template-columns: 420px minmax(0, 1fr);
+  }
 }
 .ta-imob-chart-stack {
   display: grid;
@@ -2366,8 +2390,8 @@ function onPageSizeChange(next: number) {
 }
 .ta-imob-chart-stack .ta-imob-chart {
   flex: none;
-  height: 340px;
-  min-height: 340px;
+  height: 280px;
+  min-height: 280px;
 }
 .ta-imob-chart-trend {
   height: 260px;
@@ -2411,8 +2435,8 @@ function onPageSizeChange(next: number) {
 }
 @media (max-width: 960px) {
   .ta-imob-chart-stack .ta-imob-chart {
-    height: 300px;
-    min-height: 300px;
+    height: 280px;
+    min-height: 280px;
   }
   .ta-imob-chart-box {
     min-height: 240px;
@@ -2445,10 +2469,10 @@ function onPageSizeChange(next: number) {
   white-space: nowrap;
 }
 
-/* 优化“按供应商”卡片布局：采用上下垂直结构 (Label在上，Value在下)，防止狭窄列内字体折叠堆叠 */
+/* 优化“按供应商”卡片布局：采用 4 列 / 3 列流式单元格结构 */
 .ta-imob-metric-body {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   gap: 8px;
 }
 .ta-imob-metric-cell {
@@ -2576,7 +2600,7 @@ function onPageSizeChange(next: number) {
   width: 1px;
   height: 14px;
   background: #cbd5e1;
-  margin: 0 4px 0 auto;
+  margin: 0 4px;
   flex-shrink: 0;
 }
 .ta-imob-filter-actions {

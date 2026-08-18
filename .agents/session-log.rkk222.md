@@ -11948,3 +11948,28 @@
 
 - 超级管理员可只通过页面完成记忆依赖的 CHAT/EMBEDDING 配置；固定 CPU BGE 未就绪时不再等到保存请求才暴露泛化错误。
 - 本次不修改 `.env*`、HTTP API、RunEvent、数据库/Flyway、服务端校验、安全边界、部署拓扑、generated SDK 或 OpenCode 只读源码；企业离线内外层 ZIP 尚未因本次前端修复重新构建，现场升级前仍需重新打包并按既有门禁验收。
+
+## 2026-08-18 - 内部模型可观测页面布局优化
+
+### Why
+
+- 内部模型可观测页面（`InternalModelObservabilityPanel.vue`）原先存在布局失衡问题：17 项 Overview 概览指标无卡片包裹集中平铺，缺乏视觉层次；图表区域全单列纵向串联堆叠，桌面端纵向拉得过长且屏幕右侧大量空白；吸顶筛选条分割线右侧带 `margin-left: auto` 导致按钮远离下拉框，整体呈现“有时候过于紧凑，有时候又过于松散”。
+
+### What
+
+- 重构 Overview 概览指标视觉卡片，统一背景（`#f8fafc`）、微细边框（`#f1f5f9`）、圆角与 Hover 效果，将字号调至 `20px`，呈现清晰精致的仪表盘小组件风貌。
+- 在桌面端（`@media (min-width: 1024px)`）启用双列网格布局（`grid-template-columns: 380px minmax(0, 1fr)`），让调用结果与供应商对比等业务图表在左侧，TTFT/ITL/TPS 三张性能分布箱线图在右侧，消除大量留白并缩短纵向高度近 50%。
+- 调整吸顶筛选条分割线 margins 移除 `margin-left: auto`，让刷新/探活按钮自然贴合筛选下拉选单；微调“按供应商”指标卡内 `repeat(auto-fit, minmax(100px, 1fr))` 自适应排布。
+- 保持所有组件事件、逻辑、单元测试 DOM selector 选择器名称 strictly 兼容不变。
+
+### How
+
+- 前端定向 Vitest `npx vitest run --environment jsdom tests/internal-model-observability-panel.test.ts` 3/3 100% 测试通过。
+- 全量 TypeScript 类型检查 `npx vue-tsc --noEmit --pretty false` 0 错误通过。
+- 提交前按 `docs/guides/self-checklist.md` 和 `.agents/session-log*.md` 复核，确认本次纯 CSS/布局优化未影响任何 API 逻辑或数据校验。
+
+### Result
+
+- 内部模型可观测页面视觉体验得到显著提升，Overview 卡片层次丰富，桌面端大屏下图表左右并排显示，布局紧凑匀称、无冗余空白。
+- 未修改任何 HTTP API、DTO、数据库结构、Flyway migration、环境配置文件（`.env*`）、generated SDK 或 OpenCode 源码。
+
