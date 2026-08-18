@@ -11827,3 +11827,26 @@
 
 - 本次部署回填修复已同步到 dev，专项行为不回退；release 上的逐机和完整包门禁均通过。
 - dev 两项既有企业包夹具漂移未在本次顺手修复，后续应单独对齐 dev 的配置渲染与 migration 夹具后再把这两项作为 dev 全绿门禁；不得把当前失败误判为真实包可以缺少密钥或 migration。
+
+## 2026-08-18 - 合并本地 dev 到 release 并重建企业交付输入
+
+### Why
+
+- 用户明确要求把当前本地 `dev` 合并到 `release` 后重新打企业包；两分支从既有合并点后分别承载了等价的下载跳转、模型配置、消息配色和 ClickHouse 回填提交，`dev` 另有部署门禁漂移记录，需要形成真实双父合并历史而不能只按提交标题判断。
+
+### What
+
+- 在干净的 `release` 上以 `--no-ff` 合并 `dev@ce2f968aa`，生成双父提交 `578dcdf4a`；冲突只涉及本机 session log 和 agent-web README。日志保留两边全部条目，README 保留 release 更新的 UCID/Output TPS 可观测口径和独立用户灰度管理，同时保留 dev 已进入 release 的模型目录、消息配色和 ClickHouse 回填能力。
+- 合并后的生产 tree 除追加 dev 的 session log 条目外与合并前 release 一致；企业高版本本地客户端补偿、两份 analytics 前向资源、XXL V12/V13 分叉兼容、TCDS 固定域名、`.4` Qwen 灰度和 CK/Mem0 配置均未回退。
+- 继续复用既有 `DatabaseMigrationCompatibilityCustomizer`、ClickHouse Java 回填服务和企业打包/逐机入口，没有新增并行迁移器、部署节点、服务、端口、强制依赖或重复代码路径。
+
+### How
+
+- 真实 PostgreSQL Flyway 历史矩阵 29/29、Flyway 命名 15/15、ClickHouse 回填 Java 服务 4/4 通过；最终后端构建逐项核对 persistence/XXL JAR 内全部受控 migration SHA-256。
+- 前端合并相关 4 个文件 74/74、首轮并发全量中超时的 3 个 Markdown 文件隔离复跑 30/30、agent-chat/agent-web typecheck、用户手册和 production build 通过，仅保留既有大 chunk 警告。
+- ClickHouse 回填脚本行为、开发脚本（mock 端口改用未占用的 `19071`）、Nginx、增量组件、多后台节点、固定名双后台完整包门禁与相关 Shell 语法全部通过。
+
+### Result
+
+- 当前 `release` 已真实包含本地 `dev` 全部提交历史，合并冲突没有覆盖 release 已部署的 Flyway、前端、TCDS、运营分析和灰度成果；工作区未修改 `.env*`、generated SDK、OpenCode 只读源码或任何已执行 migration 字节。
+- 正式后端与前端二进制已经从合并提交构建；下一步只需用既有 worker/toolbox 指纹、已签名本地客户端制品和三台已验证节点配置重组内外层 ZIP。企业 `.4/.114/.2` 真实发布与 ClickHouse 首次存量回填仍需现场验收。
