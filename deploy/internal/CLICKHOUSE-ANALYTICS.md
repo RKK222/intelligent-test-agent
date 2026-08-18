@@ -142,20 +142,31 @@ TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED=false
 TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS=false
 ```
 
-按既有双后台流程发布并重启 `.4`、`.114`。Java 启动时会执行 ClickHouse 幂等 schema migration；checksum 不一致会拒绝启动。确认两台 readiness 正常后，在 XXL-JOB 中确认 `opencode-runtime.analytics-ingestion` 每分钟运行，`opencode-runtime.analytics-rollup` 每 5 分钟运行。
+按既有双后台流程发布并重启 `.4`、`.114`。Java 启动时会执行 ClickHouse 幂等 schema migration；checksum 不一致会拒绝启动。完整平台包的 `.4` 节点部署入口会在常规 Java、worker 和健康校验通过后，自动调用 `run-analytics-clickhouse-backfill.sh` 临时开启回填并重启 Java；`.114` 和后续扩容节点始终保持关闭。打包阶段只封装这项能力，真实回填发生在能访问生产 PostgreSQL/ClickHouse 的 `.4` 部署阶段。
 
-历史回填只允许一个后台节点开启，另一个保持 `BACKFILL_ENABLED=false`。选择明确的 UTC 覆盖窗口：
+历史回填只允许一个后台节点开启，另一个保持 `BACKFILL_ENABLED=false`。包内选择明确的 UTC 覆盖窗口：
 
 ```dotenv
 TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED=true
 TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_START=2025-01-01T00:00:00Z
-TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_END=2026-08-14T00:00:00Z
+TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_END=
 TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS=false
 ```
 
-重启该节点。回填先补全未删除/停用用户维度，再按自然日分块、每批 500 条写行为事实；事实 ID 使用稳定 `backfill-v1:` 前缀。源事件数、ClickHouse 原始事件数、活动事实与用户维度事实之和完全一致后才写入 `analytics_clickhouse_cutovers=VERIFIED` 和 ClickHouse freshness 水位。失败会中止该节点启动，不会清理 PostgreSQL 旧汇总表。
+自动入口会临时把开关改为 `true` 并重启该节点。回填先补全未删除/停用用户维度，再按自然日分块、每批 500 条写行为事实；事实 ID 使用稳定 `backfill-v1:` 前缀。源事件数、ClickHouse 原始事件数、活动事实与用户维度事实之和完全一致后才写入 `analytics_clickhouse_cutovers=VERIFIED` 和 ClickHouse freshness 水位。入口只接受 Java 日志 `ClickHouse 运营回填完成` 作为成功，默认最多等待 7200 秒；故障重部署时 PG cutover 和集群锁使其幂等跳过或重试。
 
-完成后立即把 `BACKFILL_ENABLED=false` 并再次重启。用超级管理员页面验收：
+成功后入口立即把落盘的 `BACKFILL_ENABLED` 恢复为 `false`。当前 Java 只在启动时读取一次该开关，因此无需为关闭开关再次中断服务；未来普通重启也不会重复回填。失败、超时或中断时入口会先恢复 `false`、重启普通服务，再以非零状态阻断 `.114` 和 `.2` 的后续发布。只有明确的紧急恢复场景才可在逐机入口传 `--skip-analytics-backfill`，并必须另行完成本节验收，不能作为正常发布参数。
+
+不使用完整多后台入口、而是直接调用标准后台部署脚本时，首节点必须显式加 `--run-analytics-backfill`。也可在已经安装同批次脚本的 `.4` 单独执行以下等价动作；命令不读取或打印数据库密码：
+
+```bash
+bash /data/testagent/deploy/internal/run-analytics-clickhouse-backfill.sh \
+  --backend-env /data/testagent/config/backend.env \
+  --backend-service test-agent-backend \
+  --timeout-seconds 7200
+```
+
+随后用超级管理员页面验收：
 
 - 小时热力图选择用户消息、主 Token、缓存 Token，日期与小时均按 `Asia/Shanghai`。
 - 用户漏斗以 ClickHouse 当前未删除的全部用户为首层，活跃/深度口径与页面备注一致，三层数量保持单调。

@@ -11,6 +11,9 @@ BACKEND_HOST=""
 PEER_HOST=""
 MODE="deploy"
 SKIP_PEER_CHECK=0
+SKIP_ANALYTICS_BACKFILL=0
+ANALYTICS_BACKFILL_TIMEOUT_SECONDS=7200
+ANALYTICS_BACKFILL_PRIMARY_HOST="122.233.30.4"
 TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
 TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
 
@@ -28,6 +31,9 @@ Options:
   --backend-host <host>     Backend role only; defaults to backend.env.
   --peer-host <host>        Backend health-check peer. Defaults to the other seed node.
   --skip-peer-check         Backend role only; defer peer check for the first stopped-cluster node.
+  --skip-analytics-backfill Backend role only; emergency bypass for the primary-node history backfill.
+  --analytics-backfill-timeout <seconds>
+                            Primary-node backfill timeout. Default: 7200.
   --validate-only           Validate configuration, release checksum and embedded RSA only.
   --verify-only             Verify an already deployed node without changing it.
   -h, --help                Show this help.
@@ -68,6 +74,14 @@ while [[ $# -gt 0 ]]; do
     --skip-peer-check)
       SKIP_PEER_CHECK=1
       shift
+      ;;
+    --skip-analytics-backfill)
+      SKIP_ANALYTICS_BACKFILL=1
+      shift
+      ;;
+    --analytics-backfill-timeout)
+      ANALYTICS_BACKFILL_TIMEOUT_SECONDS="$2"
+      shift 2
       ;;
     --validate-only)
       [[ "${MODE}" == "deploy" ]] || {
@@ -653,6 +667,10 @@ verify_frontend() {
 
 require_absolute_path "${RELEASE_ARCHIVE}" RELEASE_ARCHIVE
 require_absolute_path "${INSTALL_ROOT}" INSTALL_ROOT
+if [[ ! "${ANALYTICS_BACKFILL_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "analytics-backfill-timeout must be a positive integer" >&2
+  exit 1
+fi
 if [[ "${MODE}" == "verify" && "${CONFIG_DIR_EXPLICIT}" -eq 0 ]]; then
   CONFIG_DIR="${INSTALL_ROOT}/config"
 fi
@@ -696,13 +714,23 @@ fi
 
 install_prepared_config
 if [[ "${ROLE}" == "backend" ]]; then
-  bash "${BACKEND_DEPLOY_SCRIPT}" \
-    --archive "${RELEASE_ARCHIVE}" \
-    --install-root "${INSTALL_ROOT}" \
-    --backend-host "${BACKEND_HOST}" \
-    --expected-server-id "$(server_id_from_host "${BACKEND_HOST}")" \
-    --expected-server-host "${BACKEND_HOST}" \
+  backend_deploy_args=(
+    --archive "${RELEASE_ARCHIVE}"
+    --install-root "${INSTALL_ROOT}"
+    --backend-host "${BACKEND_HOST}"
+    --expected-server-id "$(server_id_from_host "${BACKEND_HOST}")"
+    --expected-server-host "${BACKEND_HOST}"
     --skip-frontend
+  )
+  # 固定首节点在常规升级成功后执行一次 Java 回填；PG cutover 和集群锁保证故障重部署幂等。
+  if [[ "${BACKEND_HOST}" == "${ANALYTICS_BACKFILL_PRIMARY_HOST}" \
+    && "${SKIP_ANALYTICS_BACKFILL}" -eq 0 ]]; then
+    backend_deploy_args+=(
+      --run-analytics-backfill
+      --analytics-backfill-timeout "${ANALYTICS_BACKFILL_TIMEOUT_SECONDS}"
+    )
+  fi
+  bash "${BACKEND_DEPLOY_SCRIPT}" "${backend_deploy_args[@]}"
   verify_backend
 else
   bash "${FRONTEND_DEPLOY_SCRIPT}" \

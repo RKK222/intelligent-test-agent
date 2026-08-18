@@ -631,6 +631,12 @@ cd /data/0709/test-agent-two-backend-complete
 bash deploy-backend-node.sh
 ```
 
+`.4` 是固定 ClickHouse 历史回填节点。这个无参数入口在常规平台升级和健康检查通过后，会自动临时开启
+Java 现有回填 Runner、等待源/目标计数校验及 `ClickHouse 运营回填完成` 日志，再把落盘开关恢复为
+`false`；已存在 `analytics-v1` 的 `VERIFIED` cutover 时会幂等跳过。失败时先恢复普通服务，再让部署返回
+非零，因此不得继续 `.114` 或 `.2`。这一步不要求服务器安装 `psql`、`jq` 或 `rg`，也不会在命令行输出
+ClickHouse/PG 密码。
+
 `deploy-backend-node.sh` 会读取内层组件清单：工具箱为 `included` 时自动提取镜像 tar、安装本机 `toolbox.env`、部署并诊断；为 `reuse` 时不提取、不加载镜像，先核对目标机安装指纹，再在平台升级前后诊断现有工具容器，指纹不一致或任一容器不健康都会停止。无需再手工执行工具箱部署命令。
 
 worker runtime 为 `included` 时会同步替换 programs、OpenCode Manager 和 worker 镜像；为 `reuse` 时不携带这些大制品，部署前必须确认目标机安装指纹一致、现有 Manager/OpenCode/Codex 文件齐全且 worker 容器健康，否则立即停止。
@@ -727,7 +733,8 @@ bash /tmp/deploy-internal-release.sh \
 bash /tmp/deploy-internal-release.sh \
   --archive /data/0709/test-agent-internal-release.zip \
   --backend-host 122.233.30.4 \
-  --skip-frontend
+  --skip-frontend \
+  --run-analytics-backfill
 
 /data/testagent/deploy/internal/deploy-python-libs.sh \
   --archive /data/0709/test-agent-python-libs-py313-linux-amd64.tar.gz \

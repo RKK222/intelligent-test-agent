@@ -61,6 +61,8 @@ write_checksum "${RELEASE_ROOT}/dist/test-agent-toolbox-source.tar.gz"
 printf 'toolbox-catalog\n' >"${RELEASE_ROOT}/dist/toolbox-catalog-v1.json"
 write_checksum "${RELEASE_ROOT}/dist/toolbox-catalog-v1.json"
 printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/deploy-multi-backend-node.sh"
+cp "${ROOT_DIR}/deploy/internal/run-analytics-clickhouse-backfill.sh" \
+  "${RELEASE_ROOT}/deploy/internal/run-analytics-clickhouse-backfill.sh"
 cp "${ROOT_DIR}/deploy/internal/toolbox.env.example" "${RELEASE_ROOT}/deploy/internal/toolbox.env.example"
 printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/toolbox-docker.sh"
 printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/diagnose-toolbox.sh"
@@ -162,6 +164,7 @@ cmp -s "${ROOT_DIR}/deploy/internal/MULTI-BACKEND.md" "${START_HERE}" || {
 INNER_RELEASE="${TMP_ROOT}/inner-release.zip"
 unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/test-agent-internal-release.zip' >"${INNER_RELEASE}"
 inner_listing="$(unzip -Z1 "${INNER_RELEASE}")"
+grep -Fxq 'deploy/internal/run-analytics-clickhouse-backfill.sh' <<<"${inner_listing}"
 for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
   grep -Fxq ".agents/$(basename "${session_log}")" <<<"${inner_listing}"
 done
@@ -217,6 +220,8 @@ grep -Fq 'require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_START 14096' 
   <<<"${node_deploy_script}"
 grep -Fq 'require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_END 15095' \
   <<<"${node_deploy_script}"
+grep -Fq 'ANALYTICS_BACKFILL_PRIMARY_HOST="122.233.30.4"' <<<"${node_deploy_script}"
+grep -Fq -- '--run-analytics-backfill' <<<"${node_deploy_script}"
 grep -Fq '14096-15095' <<<"${node_guide}"
 
 # 增量内层包省略未变化的 worker runtime（含 Manager/Codex/programs）和 toolbox 大制品时，

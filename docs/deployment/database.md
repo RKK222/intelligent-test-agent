@@ -1525,7 +1525,7 @@ ClickHouse 使用独立 `ClickHouseSchemaMigrator` 执行 `db/clickhouse/V202608
 | `analytics_run_duration_histogram_hourly` | 兼容直方图汇总；新版查询可直接使用 ClickHouse 精确分位数，不设 TTL。 |
 | `analytics_rollup_watermarks` | 入库/回填 freshness、覆盖窗口与状态，不设 TTL。 |
 
-实时链路由 XXL `opencode-runtime.analytics-ingestion` 每分钟最多投递 500 条，再由 `opencode-runtime.analytics-rollup` 每 5 分钟刷新最近窗口。历史回填先读取全量用户维度，再按自然日读取 PostgreSQL 业务历史，以 `backfill-v1:` 稳定 ID 写入登录、会话状态、用户/助手消息、Run 结果与 Token、能力调用、Diff 和反馈完整事实；行为只走稳定明细来源，不再叠加旧聚合原始查询。源事件数与 ClickHouse 活动事实、用户维度事实数量之和完全一致后才写 `VERIFIED`。旧 PostgreSQL 汇总必须在备份与页面验收后，通过单节点第二阶段开关清理，禁止手工提前删除。所有运营查询，包括漏斗基数、组织人数和级联筛选项，都只读 ClickHouse。完整配置、专机部署、验收与回滚见 `deploy/internal/CLICKHOUSE-ANALYTICS.md`。
+实时链路由 XXL `opencode-runtime.analytics-ingestion` 每分钟最多投递 500 条，再由 `opencode-runtime.analytics-rollup` 每 5 分钟刷新最近窗口。历史回填先读取全量用户维度，再按自然日读取 PostgreSQL 业务历史，以 `backfill-v1:` 稳定 ID 写入登录、会话状态、用户/助手消息、Run 结果与 Token、能力调用、Diff 和反馈完整事实；行为只走稳定明细来源，不再叠加旧聚合原始查询。源事件数与 ClickHouse 活动事实、用户维度事实数量之和完全一致后才写 `VERIFIED`。完整多后台平台包在 `.4` 部署阶段自动临时开启这套 Java 回填程序、验证完成日志并恢复常态开关，`.114` 不并发执行；打包机本身不连接生产数据库。旧 PostgreSQL 汇总必须在备份与页面验收后，通过单节点第二阶段开关清理，禁止手工提前删除。所有运营查询，包括漏斗基数、组织人数和级联筛选项，都只读 ClickHouse。完整配置、专机部署、验收与回滚见 `deploy/internal/CLICKHOUSE-ANALYTICS.md`。
 
 ## V20260626210000 数据库表和字段中文注释
 
