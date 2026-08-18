@@ -62,7 +62,9 @@ deploy/internal/package-release.sh --local-client-only
 原生安装包、`install.sh` 和 `stable/*` 使用 `Cache-Control: no-store`；`releases/*` 使用一年 immutable 缓存。该下载
 位置不校验 client key，访问范围由企业网络 ACL 控制。`TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT` 配置一个
 只暴露下载路径、其余请求均返回 404 的独立明文 HTTP server；它不得与 HTTPS 业务网关端口重复。安装器
-只接受明确的 `http://` 下载基址。示例现场使用 HTTPS 443 作为业务入口、HTTP 80 作为制品入口。
+只接受明确的 `http://` 下载基址。Nginx 对安装器和目录规范化跳转返回相对 `Location`，使企业入口把外部端口
+映射到本机其它监听时仍由浏览器保留原始 `host:port`，避免安装包跳到默认 80/443 后返回 503。示例现场使用
+HTTPS 443 作为业务入口、HTTP 80 作为制品入口。
 
 后台还必须把前端 Nginx 的源 IP 配入 `TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES`。只有来自这些 IP
 的 `X-Forwarded-Proto: https|wss` 才能证明控制隧道或模型中继经过 TLS；生产环境不得开启
@@ -77,6 +79,9 @@ curl -fsSI -A 'Mozilla/5.0 (X11; Linux aarch64)' http://NGINX:DOWNLOAD_PORT/down
 curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/manifest.json
 curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/manifest.json.sig -o /tmp/manifest.json.sig
 ```
+
+两个 `installer` 检查的 `Location` 必须以 `/downloads/` 开头，不能出现缺失外部端口的绝对 URL；再分别追加
+`-L -o /dev/null -w '%{http_code}\n'` 验证跟随跳转后返回 `200`。
 
 ## 用户安装
 

@@ -38,6 +38,8 @@ server {
     ${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_DIRECTIVES}
     ${TEST_AGENT_NGINX_TLS_DIRECTIVES}
     server_name _;
+    # 企业入口可能把外部端口映射到本机其它监听；相对 Location 由浏览器保留原始 host:port。
+    absolute_redirect off;
     root ${TEST_AGENT_FRONTEND_ROOT};
     index index.html;
 
@@ -220,6 +222,8 @@ server {
 server {
     listen ${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT};
     server_name _;
+    # 下载监听也只返回相对跳转，避免端口映射或反向代理后 Location 丢失外部端口。
+    absolute_redirect off;
 
     location = /downloads/local-opencode-client {
         return 308 /downloads/local-opencode-client/;

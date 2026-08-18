@@ -11710,3 +11710,27 @@
 
 - 当前 release 已能在附件对应的企业历史上按默认 Flyway 顺序执行 `20260818094330`，随后继续执行更高的客户端灰度 migration；旧主链、旧前向或企业高前向任一已执行历史都保留原字节复验。
 - 不涉及 HTTP API、RunEvent、业务逻辑、性能或安全契约；未修改 `.env*`、generated SDK、OpenCode 只读源码、任何已执行 migration 字节或数据库 history。最终企业包需完成重组和逐层哈希验证后再交付，`.4/.114/.2` 真实启动仍以现场逐机验收为准。
+
+## 2026-08-18 - 修复企业客户端下载跳转丢失外部端口
+
+### Why
+
+- 最新 release 现场通过企业域名 `mimo.sdc.cs.icbc:9996` 打开安装器时，Nginx 把相对 `return 302` 序列化为不含 `:9996` 的绝对 URL，浏览器随后访问默认 80 端口并得到 503；同一制品从 `.2:9996` 回环访问可正常 302 后下载 200，已排除文件缺失。
+- 同轮现场证据还确认运营事实与小时/日汇总已写入 ClickHouse，但首次历史回填关闭且用户维度未就绪；记忆 CHAT 下拉对应的内部模型目录为空；消息颜色源码和当前活动前端 chunk 均为既定的本人消息 `#B2EDDF`，不属于代码回退。
+
+### What
+
+- 在企业网关与独立下载 server 中关闭 Nginx 绝对重定向，使安装器、目录规范化及其它站内跳转返回相对 `Location`，由浏览器保留外部 `host:port`。
+- 扩展 Nginx 配置验证脚本，锁定两个 server 都生成 `absolute_redirect off;`；同步单/多后台部署说明和本地客户端部署、验收文档。
+- 未改变消息颜色、运营查询口径、模型目录数据或环境配置；后三项分别保留现有正确实现，并通过现场处置/排查命令完成后续定位。
+
+### How
+
+- `tools/verify-internal-nginx-config.sh` 通过，且使用本机已有 `nginx:1.27.2-alpine3.20` 镜像完成真实 `nginx -t`。
+- 消息颜色定向 Vitest 2 个文件 64/64 通过；`tools/verify-ai-docs.sh`、Shell 语法、`git diff --check` 和本次改动文件冲突标记扫描通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次 Nginx、测试和文档修改冲突的未完成事项。
+
+### Result
+
+- 新包部署并 reload Nginx 后，企业域名 `:9996` 的安装器跳转会保留原入口端口，不再因跳到默认端口返回 503；真实企业节点仍需按文档用 Mac/Linux User-Agent 跟随跳转验收 200。
+- 本次只修复现有部署脚本，不新增节点、服务、端口或强制依赖，符合 `release` 维护边界；不涉及 HTTP API、RunEvent、数据库结构、Flyway、性能或 generated SDK，未修改 `.env*` 或 OpenCode 只读源码。
