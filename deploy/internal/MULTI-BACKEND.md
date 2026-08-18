@@ -633,11 +633,13 @@ cd /data/0709/test-agent-two-backend-complete
 bash deploy-backend-node.sh
 ```
 
-`.4` 是固定 ClickHouse 历史回填节点。这个无参数入口在常规平台升级和健康检查通过后，会自动临时开启
-Java 现有回填 Runner、等待源/目标计数校验及 `ClickHouse 运营回填完成` 日志，再把落盘开关恢复为
-`false`；已存在 `analytics-v1` 的 `VERIFIED` cutover 时会幂等跳过。失败时先恢复普通服务，再让部署返回
-非零，因此不得继续 `.114` 或 `.2`。这一步不要求服务器安装 `psql`、`jq` 或 `rg`，也不会在命令行输出
-ClickHouse/PG 密码。
+`.4` 是固定 ClickHouse 历史回填节点。这个无参数入口在常规平台升级和健康检查通过后，先检查
+`/data/testagent/config/analytics-clickhouse-backfill.state`；已登记 `analytics-v1=VERIFIED` 时直接跳过 Runner
+和额外 Java 重启。旧包已经成功但没有状态文件时，只从 `/data/testagent/logs/backend.log` 接受 Java 的
+`verified=true` 完成行并自动补登；只有两者都不存在时才临时开启 Java 回填 Runner，等待源/目标计数校验，
+并同时从 journal cursor 与本次滚动日志字节偏移识别 `ClickHouse 运营回填完成`。成功后以 `0600` 原子写状态并
+把落盘开关恢复为 `false`；失败时先恢复普通服务，再让部署返回非零，因此不得继续 `.114` 或 `.2`。
+这一步不要求服务器安装 `psql`、`jq` 或 `rg`，也不会在命令行输出 ClickHouse/PG 密码。
 
 `deploy-backend-node.sh` 会读取内层组件清单：工具箱为 `included` 时自动提取镜像 tar、安装本机 `toolbox.env`、部署并诊断；为 `reuse` 时不提取、不加载镜像，先核对目标机安装指纹，再在平台升级前后诊断现有工具容器，指纹不一致或任一容器不健康都会停止。无需再手工执行工具箱部署命令。
 

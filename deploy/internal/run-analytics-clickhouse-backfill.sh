@@ -5,8 +5,11 @@ BACKEND_ENV="/data/testagent/config/backend.env"
 BACKEND_SERVICE="test-agent-backend"
 BACKEND_HEALTH_URL="http://127.0.0.1:8080/actuator/health"
 BACKEND_READINESS_URL="http://127.0.0.1:8080/actuator/health/readiness"
+BACKEND_LOG_FILE=""
+COMPLETION_STATE_FILE=""
 TIMEOUT_SECONDS=7200
 RESTORE_REQUIRED=0
+BACKEND_LOG_START_BYTE=1
 
 usage() {
   cat <<'USAGE'
@@ -21,6 +24,9 @@ Options:
   --backend-health-url <url> Backend health URL.
   --backend-readiness-url <url>
                              Backend readiness URL.
+  --backend-log-file <path> Backend rolling log. Default: <install-root>/logs/backend.log.
+  --completion-state-file <path>
+                             Persistent verified marker. Default: <config-dir>/analytics-clickhouse-backfill.state.
   --timeout-seconds <n>      Backfill completion timeout. Default: 7200.
   -h, --help                 Show this help.
 USAGE
@@ -42,6 +48,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --backend-readiness-url)
       BACKEND_READINESS_URL="$2"
+      shift 2
+      ;;
+    --backend-log-file)
+      BACKEND_LOG_FILE="$2"
+      shift 2
+      ;;
+    --completion-state-file)
+      COMPLETION_STATE_FILE="$2"
       shift 2
       ;;
     --timeout-seconds)
@@ -128,6 +142,55 @@ wait_http() {
   done
 }
 
+completion_state_verified() {
+  [[ -e "${COMPLETION_STATE_FILE}" ]] || return 1
+  if [[ ! -f "${COMPLETION_STATE_FILE}" || -L "${COMPLETION_STATE_FILE}" ]]; then
+    echo "Invalid ClickHouse backfill completion state file: ${COMPLETION_STATE_FILE}" >&2
+    return 2
+  fi
+  if [[ "$(key_count "${COMPLETION_STATE_FILE}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_STATE_VERSION)" -ne 1 \
+    || "$(key_count "${COMPLETION_STATE_FILE}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_CUTOVER_ID)" -ne 1 \
+    || "$(key_count "${COMPLETION_STATE_FILE}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_STATUS)" -ne 1 \
+    || "$(env_value "${COMPLETION_STATE_FILE}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_STATE_VERSION)" != "1" \
+    || "$(env_value "${COMPLETION_STATE_FILE}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_CUTOVER_ID)" != "analytics-v1" \
+    || "$(env_value "${COMPLETION_STATE_FILE}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_STATUS)" != "VERIFIED" ]]; then
+    echo "Unrecognized ClickHouse backfill completion state: ${COMPLETION_STATE_FILE}" >&2
+    return 2
+  fi
+}
+
+write_completion_state() {
+  local tmp
+  mkdir -p "$(dirname "${COMPLETION_STATE_FILE}")"
+  tmp="$(mktemp "${COMPLETION_STATE_FILE}.new.XXXXXX")"
+  {
+    printf 'TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_STATE_VERSION=1\n'
+    printf 'TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_CUTOVER_ID=analytics-v1\n'
+    printf 'TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_STATUS=VERIFIED\n'
+  } >"${tmp}"
+  chmod 0600 "${tmp}"
+  chown --reference="${BACKEND_ENV}" "${tmp}" 2>/dev/null || true
+  mv -f "${tmp}" "${COMPLETION_STATE_FILE}"
+}
+
+existing_backend_log_has_verified_completion() {
+  [[ -f "${BACKEND_LOG_FILE}" ]] || return 1
+  grep -Eq 'ClickHouse 运营回填完成, skipped=(true|false), verified=true,' "${BACKEND_LOG_FILE}"
+}
+
+backend_file_terminal_lines_after_start() {
+  local current_bytes
+  [[ -f "${BACKEND_LOG_FILE}" ]] || return 0
+  current_bytes="$(wc -c <"${BACKEND_LOG_FILE}" | tr -d '[:space:]')"
+  if [[ "${current_bytes}" =~ ^[0-9]+$ ]] && (( current_bytes + 1 < BACKEND_LOG_START_BYTE )); then
+    # 周期滚动或人工轮转后从新文件开头读取，不能继续沿用旧 inode 的字节偏移。
+    BACKEND_LOG_START_BYTE=1
+  fi
+  tail -c "+${BACKEND_LOG_START_BYTE}" "${BACKEND_LOG_FILE}" 2>/dev/null \
+    | grep -E 'ClickHouse 运营回填完成,|Application run failed|ClickHouse 回填校验失败|另一节点正在执行 ClickHouse 回填|回填时间窗口非法' \
+    || true
+}
+
 journal_after_start() {
   if [[ -n "${JOURNAL_CURSOR}" ]]; then
     journalctl -u "${BACKEND_SERVICE}" --after-cursor "${JOURNAL_CURSOR}" \
@@ -150,8 +213,11 @@ wait_for_backfill() {
     while IFS= read -r line; do
       if [[ "${line}" == '-- cursor: '* ]]; then
         next_cursor="${line#-- cursor: }"
-      elif [[ "${line}" == *'ClickHouse 运营回填完成,'* ]]; then
+      elif [[ "${line}" == *'ClickHouse 运营回填完成,'* \
+        && "${line}" == *'verified=true,'* ]]; then
         completion_line="${line}"
+      elif [[ "${line}" == *'ClickHouse 运营回填完成,'* ]]; then
+        failure_line="${line}"
       elif [[ "${line}" == *'Application run failed'* \
         || "${line}" == *'ClickHouse 回填校验失败'* \
         || "${line}" == *'另一节点正在执行 ClickHouse 回填'* \
@@ -161,7 +227,11 @@ wait_for_backfill() {
         || "${line}" == *'Analytics daily rollup rebuilt'* ]]; then
         progress_line="${line}"
       fi
-    done < <(journal_after_start)
+    done < <(
+      journal_after_start
+      # 企业旧 systemd 的 journal cursor 可能无法稳定返回新增行；滚动文件是同一 Java 日志的第二可信出口。
+      backend_file_terminal_lines_after_start
+    )
     if [[ -n "${next_cursor}" ]]; then
       JOURNAL_CURSOR="${next_cursor}"
     fi
@@ -223,9 +293,21 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-for command in awk chown chmod curl date grep journalctl mktemp mv sed sleep systemctl tail; do
+for command in awk chown chmod curl date dirname grep journalctl mkdir mktemp mv sed sleep systemctl tail tr wc; do
   require_command "${command}"
 done
+
+BACKEND_CONFIG_DIR="$(dirname "${BACKEND_ENV}")"
+if [[ -z "${BACKEND_LOG_FILE}" ]]; then
+  BACKEND_LOG_FILE="$(dirname "${BACKEND_CONFIG_DIR}")/logs/backend.log"
+fi
+if [[ -z "${COMPLETION_STATE_FILE}" ]]; then
+  COMPLETION_STATE_FILE="${BACKEND_CONFIG_DIR}/analytics-clickhouse-backfill.state"
+fi
+[[ "${BACKEND_LOG_FILE}" == /* && "${COMPLETION_STATE_FILE}" == /* ]] || {
+  echo "Backend log and ClickHouse completion state paths must be absolute" >&2
+  exit 1
+}
 
 require_exact_value TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED true
 require_exact_value TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED false
@@ -236,9 +318,40 @@ if [[ "$(key_count "${BACKEND_ENV}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_STA
   exit 1
 fi
 
+completion_state_status=0
+if completion_state_verified; then
+  completion_state_status=0
+else
+  completion_state_status=$?
+fi
+if [[ "${completion_state_status}" -eq 2 ]]; then
+  exit 1
+fi
+if [[ "${completion_state_status}" -eq 1 ]] && existing_backend_log_has_verified_completion; then
+  # 兼容已经完成 analytics-v1、但旧部署脚本尚未落本机状态文件的企业节点。
+  write_completion_state
+  completion_state_status=0
+  echo "Adopted existing verified ClickHouse analytics backfill completion from backend log"
+fi
+if [[ "${completion_state_status}" -eq 0 ]]; then
+  wait_http "${BACKEND_HEALTH_URL}" "backend health with verified analytics backfill" 120
+  wait_http "${BACKEND_READINESS_URL}" "backend readiness with verified analytics backfill" 120
+  trap - EXIT INT TERM
+  echo "ClickHouse analytics backfill already verified; skip runner and backend restart"
+  exit 0
+fi
+
 JOURNAL_CURSOR="$(journalctl -u "${BACKEND_SERVICE}" -n 0 --show-cursor --no-pager 2>/dev/null \
   | sed -n 's/^-- cursor: //p' | tail -n 1)"
 JOURNAL_START_EPOCH="$(date +%s)"
+if [[ -f "${BACKEND_LOG_FILE}" ]]; then
+  backend_log_bytes="$(wc -c <"${BACKEND_LOG_FILE}" | tr -d '[:space:]')"
+  [[ "${backend_log_bytes}" =~ ^[0-9]+$ ]] || {
+    echo "Unable to determine backend log size: ${BACKEND_LOG_FILE}" >&2
+    exit 1
+  }
+  BACKEND_LOG_START_BYTE=$((backend_log_bytes + 1))
+fi
 
 echo "Starting idempotent ClickHouse analytics backfill through ${BACKEND_SERVICE}"
 RESTORE_REQUIRED=1
@@ -248,6 +361,7 @@ wait_for_backfill
 
 # 当前 Java 进程只在启动时读取一次开关；落盘恢复 false 后无需为关闭开关再次中断服务。
 set_env_value TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED false
+write_completion_state
 wait_http "${BACKEND_HEALTH_URL}" "backend health after analytics backfill" 120
 wait_http "${BACKEND_READINESS_URL}" "backend readiness after analytics backfill" 120
 RESTORE_REQUIRED=0

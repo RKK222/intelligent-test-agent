@@ -12023,3 +12023,27 @@
 
 - `.100` 中账号工作区服务器归属元数据已经统一，旧自动搬迁不再继续重试；但真实对话尚未恢复，因为 `.100` 缺少个人物理 worktree。仅改 `linux_server_id` 不能视为搬迁成功。
 - 下一步需要用户明确选择远端重建基线：保留本机旧 worktree 不覆盖，在 `.100` 以当前应用提交新建个人分支/worktree，或提供需要保留的本机个人提交并完成真实搬迁；完成后必须再次真实发送 Run 验收。
+
+## 2026-08-18 - 修复企业 ClickHouse 回填已完成仍卡住
+
+### Why
+
+- `.4` 已完成 `analytics-v1` 回填后，企业部署仍卡在 `Starting idempotent ClickHouse analytics backfill`。旧入口只消费本次 systemd journal cursor；企业旧 systemd 漏掉瞬时完成行时，即使 Java 已从 PostgreSQL cutover 幂等返回 `VERIFIED`，Shell 仍会等待到超时。
+
+### What
+
+- `run-analytics-clickhouse-backfill.sh` 新增本机 `0600` 完成状态，只接受固定版本、`analytics-v1` 和 `VERIFIED`；后续平台包命中状态时直接跳过 Runner 和额外 Java 重启。
+- 兼容旧包已成功但尚无状态文件的节点：仅从 Java `logs/backend.log` 认领带 `verified=true` 的完成行并补登状态；首次执行同时消费 journal cursor 与本次滚动日志字节偏移，避免再次漏信号。
+- 未知、重复或符号链接状态失败关闭；`verified=false` 不得生成状态。失败、超时和中断仍先恢复持久开关为 `false` 并重启普通 Java。
+- 同步 ClickHouse 企业部署、多后台和部署入口文档，补充旧包卡住时的 `Ctrl+C` 恢复与无 `rg/jq/psql` 验收命令。
+
+### How
+
+- `tools/verify-internal-analytics-backfill-deploy.sh` 覆盖首次成功、状态跳过、旧日志认领、journal 丢行时的文件兜底、`verified=false` 拒绝、失败回滚、重复配置、未知状态和密钥不泄漏。
+- 部署脚本语法及行为、双后台入口、完整平台包、增量组件和开发脚本回归全部通过；开发脚本首次使用默认 `19070` 时被本机已有 mock 服务占用，改用空闲 `19079` 完整复跑通过。
+- 拉取并核对 `origin/release`，修复前本地与远端均为 `c39e039bcdf74c375e9e1fbd7593ed871c07c65b`；提交前回顾全部 `.agents/session-log*.md`，未发现冲突或残留合并标记。
+
+### Result
+
+- 已完成的 `.4` 不会再次同步 ClickHouse；新包首次部署会从旧成功日志补登状态，此后增量发布只做普通平台升级，不再额外重启 Java。
+- 不修改 Java、HTTP API、RunEvent、数据库结构或 Flyway migration，不触碰 CK/PG 数据、manager、worker runtime、toolbox、generated SDK、`.env*` 或 OpenCode 只读源码。

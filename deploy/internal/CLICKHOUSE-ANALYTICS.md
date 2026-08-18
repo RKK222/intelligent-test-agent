@@ -142,7 +142,7 @@ TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED=false
 TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS=false
 ```
 
-按既有双后台流程发布并重启 `.4`、`.114`。Java 启动时会执行 ClickHouse 幂等 schema migration；checksum 不一致会拒绝启动。完整平台包的 `.4` 节点部署入口会在常规 Java、worker 和健康校验通过后，自动调用 `run-analytics-clickhouse-backfill.sh` 临时开启回填并重启 Java；`.114` 和后续扩容节点始终保持关闭。打包阶段只封装这项能力，真实回填发生在能访问生产 PostgreSQL/ClickHouse 的 `.4` 部署阶段。
+按既有双后台流程发布并重启 `.4`、`.114`。Java 启动时会执行 ClickHouse 幂等 schema migration；checksum 不一致会拒绝启动。完整平台包的 `.4` 节点部署入口会在常规 Java、worker 和健康校验通过后调用 `run-analytics-clickhouse-backfill.sh`：若 `/data/testagent/config/analytics-clickhouse-backfill.state` 已登记 `analytics-v1=VERIFIED`，直接跳过 Runner 和额外 Java 重启；旧包已成功但尚无状态文件时，从 `/data/testagent/logs/backend.log` 中只接受 Java 的 `verified=true` 完成行并自动补登。只有两者均不存在时才临时开启回填并重启 Java。`.114` 和后续扩容节点始终保持关闭。打包阶段只封装这项能力，真实回填发生在能访问生产 PostgreSQL/ClickHouse 的 `.4` 部署阶段。
 
 历史回填只允许一个后台节点开启，另一个保持 `BACKFILL_ENABLED=false`。包内选择明确的 UTC 覆盖窗口：
 
@@ -153,9 +153,21 @@ TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_END=
 TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS=false
 ```
 
-自动入口会临时把开关改为 `true` 并重启该节点。回填先补全未删除/停用用户维度，再按自然日分块、每批 500 条写行为事实；事实 ID 使用稳定 `backfill-v1:` 前缀。源事件数、ClickHouse 原始事件数、活动事实与用户维度事实之和完全一致后才写入 `analytics_clickhouse_cutovers=VERIFIED` 和 ClickHouse freshness 水位。入口按 journal cursor 增量读取本次启动日志，每轮输出最新一条 hourly/daily 汇总进度，且只接受 Java 日志 `ClickHouse 运营回填完成` 作为成功；不再使用固定 400 行窗口，避免完成日志被大量逐日汇总日志挤掉。默认最多等待 7200 秒；故障重部署时 PG cutover 和集群锁使其幂等跳过或重试。
+自动入口会临时把开关改为 `true` 并重启该节点。回填先补全未删除/停用用户维度，再按自然日分块、每批 500 条写行为事实；事实 ID 使用稳定 `backfill-v1:` 前缀。源事件数、ClickHouse 原始事件数、活动事实与用户维度事实之和完全一致后才写入 `analytics_clickhouse_cutovers=VERIFIED` 和 ClickHouse freshness 水位。入口按 journal cursor 增量读取本次启动日志，同时从 `/data/testagent/logs/backend.log` 的本次启动字节偏移读取同一 Java 的完成/失败信号；旧 systemd 无法稳定返回 cursor 增量时不再丢失完成行。每轮输出最新一条 hourly/daily 汇总进度，且只接受 Java 日志 `ClickHouse 运营回填完成` 作为成功；不使用固定行数窗口。默认最多等待 7200 秒。
 
-成功后入口立即把落盘的 `BACKFILL_ENABLED` 恢复为 `false`。当前 Java 只在启动时读取一次该开关，因此无需为关闭开关再次中断服务；未来普通重启也不会重复回填。失败、超时或中断时入口会先恢复 `false`、重启普通服务，再以非零状态阻断 `.114` 和 `.2` 的后续发布。只有明确的紧急恢复场景才可在逐机入口传 `--skip-analytics-backfill`，并必须另行完成本节验收，不能作为正常发布参数。
+成功后入口以 `0600` 原子写入本机完成状态，再立即把落盘的 `BACKFILL_ENABLED` 恢复为 `false`。当前 Java 只在启动时读取一次该开关，因此无需为关闭开关再次中断服务；未来普通重启和平台增量发布都不会重复进入 Runner。完成状态缺键、重复、未知版本、未知 cutover 或非 `VERIFIED` 时失败关闭，不能把它当成跳过依据。失败、超时或中断时入口会先恢复 `false`、重启普通服务，再以非零状态阻断 `.114` 和 `.2` 的后续发布。只有明确的紧急恢复场景才可在逐机入口传 `--skip-analytics-backfill`，并必须另行完成本节验收，不能作为正常发布参数。
+
+旧包若终端已经卡在 `Starting idempotent ClickHouse analytics backfill`，先在原终端按 `Ctrl+C`；旧脚本的退出 trap 必须把开关恢复为 `false` 并重启普通 Java。不要直接杀 shell 或继续 `.114`。随后检查 `.4`：
+
+```bash
+grep -E 'ClickHouse 运营回填完成, skipped=(true|false), verified=true,' \
+  /data/testagent/logs/backend.log | tail -n 3
+grep '^TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED=' \
+  /data/testagent/config/backend.env
+curl -fsS http://127.0.0.1:8080/actuator/health/readiness
+```
+
+三项成功条件分别为：至少一条 Java 完成行、开关为 `false`、readiness 成功。再部署含本修复的新包；新入口会自动把旧成功行迁移为完成状态并输出 `skip runner and backend restart`。若第一条没有输出，只能由数据库管理员再次确认 PostgreSQL `analytics_clickhouse_cutovers` 中 `analytics-v1` 的完整状态和计数；不得仅凭 ClickHouse 表“看起来有数据”手工伪造状态文件。
 
 不使用完整多后台入口、而是直接调用标准后台部署脚本时，首节点必须显式加 `--run-analytics-backfill`。也可在已经安装同批次脚本的 `.4` 单独执行以下等价动作；命令不读取或打印数据库密码：
 
