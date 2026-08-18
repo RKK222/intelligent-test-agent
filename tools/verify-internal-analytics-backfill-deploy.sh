@@ -13,8 +13,9 @@ trap cleanup EXIT
 FAKE_BIN="${TMP_ROOT}/bin"
 BACKEND_ENV="${TMP_ROOT}/backend.env"
 SYSTEMCTL_LOG="${TMP_ROOT}/systemctl.log"
+JOURNALCTL_LOG="${TMP_ROOT}/journalctl.log"
 mkdir -p "${FAKE_BIN}"
-export SYSTEMCTL_LOG
+export SYSTEMCTL_LOG JOURNALCTL_LOG
 
 write_backend_env() {
   printf '%s\n' \
@@ -38,18 +39,25 @@ printf '%s\n' \
   'exit 0' \
   >"${FAKE_BIN}/systemctl"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${FAKE_BIN}/curl"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${FAKE_BIN}/sleep"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
-  'if [[ "$*" == *"--show-cursor"* ]]; then' \
+  'printf "%s\n" "$*" >>"${JOURNALCTL_LOG}"' \
+  'if [[ "$*" == *"-n 0"* && "$*" == *"--show-cursor"* ]]; then' \
   '  printf "%s\n" "-- cursor: fixture-cursor"' \
-  'elif [[ "${TEST_AGENT_FIXTURE_BACKFILL_RESULT:-success}" == "success" ]]; then' \
+  'elif [[ "${TEST_AGENT_FIXTURE_BACKFILL_RESULT:-success}" == "failure" ]]; then' \
+  '  printf "%s\n" "Application run failed" "-- cursor: fixture-failure"' \
+  'elif [[ "$*" == *"--after-cursor fixture-cursor-1"* ]]; then' \
   '  printf "%s\n" "ClickHouse 运营回填完成, skipped=false, verified=true, sourceEvents=42, targetFacts=42, cleaned=false"' \
+  '  for ((index = 0; index < 450; index++)); do printf "startup-noise-%s\n" "${index}"; done' \
+  '  printf "%s\n" "-- cursor: fixture-complete"' \
   'else' \
-  '  printf "%s\n" "Application run failed"' \
+  '  printf "%s\n" "Analytics hourly rollup rebuilt, start=2026-08-18T08:00:00Z, end=2026-08-18T09:00:00Z, rows=42, traceId=analytics-clickhouse-backfill"' \
+  '  printf "%s\n" "-- cursor: fixture-cursor-1"' \
   'fi' \
   >"${FAKE_BIN}/journalctl"
 chmod +x "${FAKE_BIN}/id" "${FAKE_BIN}/systemctl" "${FAKE_BIN}/curl" \
-  "${FAKE_BIN}/journalctl"
+  "${FAKE_BIN}/sleep" "${FAKE_BIN}/journalctl"
 
 write_backend_env
 success_output="$(PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_BACKFILL_RESULT=success \
@@ -59,8 +67,18 @@ success_output="$(PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_BACKFILL_RESULT=
     --backend-readiness-url http://127.0.0.1:18080/actuator/health/readiness \
     --timeout-seconds 3 2>&1)"
 grep -Fq 'ClickHouse analytics backfill verified' <<<"${success_output}"
+grep -Fq 'ClickHouse analytics backfill progress: Analytics hourly rollup rebuilt' \
+  <<<"${success_output}"
+grep -Fq 'ClickHouse analytics backfill completion observed: ClickHouse 运营回填完成' \
+  <<<"${success_output}"
 grep -Fxq 'TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED=false' "${BACKEND_ENV}"
 test "$(grep -c '^restart test-agent-backend$' "${SYSTEMCTL_LOG}")" -eq 1
+grep -Fq -- '--after-cursor fixture-cursor --show-cursor --no-pager' "${JOURNALCTL_LOG}"
+grep -Fq -- '--after-cursor fixture-cursor-1 --show-cursor --no-pager' "${JOURNALCTL_LOG}"
+if grep -Fq -- '-n 400' "${JOURNALCTL_LOG}"; then
+  echo 'Backfill orchestration still uses a lossy fixed-size journal window' >&2
+  exit 1
+fi
 if grep -Fq 'secret-must-not-print' <<<"${success_output}"; then
   echo 'Successful backfill orchestration leaked a secret' >&2
   exit 1
@@ -68,6 +86,7 @@ fi
 
 write_backend_env
 : >"${SYSTEMCTL_LOG}"
+: >"${JOURNALCTL_LOG}"
 if failure_output="$(PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_BACKFILL_RESULT=failure \
   bash "${SCRIPT}" --backend-env "${BACKEND_ENV}" --timeout-seconds 3 2>&1)"; then
   echo 'Backfill orchestration unexpectedly accepted a Java startup failure' >&2
@@ -89,4 +108,4 @@ if PATH="${FAKE_BIN}:${PATH}" bash "${SCRIPT}" \
   exit 1
 fi
 
-echo 'ClickHouse deployment backfill success, rollback, secret redaction and duplicate-key gates verified'
+echo 'ClickHouse deployment backfill cursor progress, success, rollback, secret redaction and duplicate-key gates verified'

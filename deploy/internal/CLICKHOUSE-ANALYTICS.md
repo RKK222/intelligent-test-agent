@@ -153,7 +153,7 @@ TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_END=
 TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS=false
 ```
 
-自动入口会临时把开关改为 `true` 并重启该节点。回填先补全未删除/停用用户维度，再按自然日分块、每批 500 条写行为事实；事实 ID 使用稳定 `backfill-v1:` 前缀。源事件数、ClickHouse 原始事件数、活动事实与用户维度事实之和完全一致后才写入 `analytics_clickhouse_cutovers=VERIFIED` 和 ClickHouse freshness 水位。入口只接受 Java 日志 `ClickHouse 运营回填完成` 作为成功，默认最多等待 7200 秒；故障重部署时 PG cutover 和集群锁使其幂等跳过或重试。
+自动入口会临时把开关改为 `true` 并重启该节点。回填先补全未删除/停用用户维度，再按自然日分块、每批 500 条写行为事实；事实 ID 使用稳定 `backfill-v1:` 前缀。源事件数、ClickHouse 原始事件数、活动事实与用户维度事实之和完全一致后才写入 `analytics_clickhouse_cutovers=VERIFIED` 和 ClickHouse freshness 水位。入口按 journal cursor 增量读取本次启动日志，每轮输出最新一条 hourly/daily 汇总进度，且只接受 Java 日志 `ClickHouse 运营回填完成` 作为成功；不再使用固定 400 行窗口，避免完成日志被大量逐日汇总日志挤掉。默认最多等待 7200 秒；故障重部署时 PG cutover 和集群锁使其幂等跳过或重试。
 
 成功后入口立即把落盘的 `BACKFILL_ENABLED` 恢复为 `false`。当前 Java 只在启动时读取一次该开关，因此无需为关闭开关再次中断服务；未来普通重启也不会重复回填。失败、超时或中断时入口会先恢复 `false`、重启普通服务，再以非零状态阻断 `.114` 和 `.2` 的后续发布。只有明确的紧急恢复场景才可在逐机入口传 `--skip-analytics-backfill`，并必须另行完成本节验收，不能作为正常发布参数。
 

@@ -41,6 +41,7 @@ run_check "experience workspace content script bash syntax" bash -n "${ROOT_DIR}
 run_check "experience workspace content script help" bash "${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh" --help
 run_check "analytics ClickHouse backfill deploy script bash syntax" bash -n "${ROOT_DIR}/deploy/internal/run-analytics-clickhouse-backfill.sh"
 run_check "analytics ClickHouse backfill deploy script help" bash "${ROOT_DIR}/deploy/internal/run-analytics-clickhouse-backfill.sh" --help
+run_check "analytics ClickHouse backfill deploy behavior" bash "${ROOT_DIR}/tools/verify-internal-analytics-backfill-deploy.sh"
 run_check "experience workspace content behavior" bash "${ROOT_DIR}/tools/verify-experience-workspace-content.sh"
 
 restart_help="$(sh "${ROOT_DIR}/restart-dev-services.sh" --help)"

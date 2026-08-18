@@ -11899,3 +11899,27 @@
 
 - 后端和前端包含约 13:00 后尚未部署的 release 变更；已部署且未变化的 worker、toolbox 和本地客户端不再重复进入 ZIP，内层包从上一轮约 564 MiB 外层中的 417 MiB 客户端重复内容收敛为约 147 MiB。
 - 本次修复不变更 API、RunEvent、数据库结构、Flyway 字节、运行拓扑、manager/worker 进程、模型清单、环境配置、generated SDK 或 OpenCode 只读源码。真实企业 `.4/.114/.2` 部署仍需按新包执行并完成 ClickHouse 首次存量回填、Flyway 启动和客户端 reuse 校验验收。
+
+## 2026-08-18 - 修复 ClickHouse 回填日志门禁丢失完成信号
+
+### Why
+
+- 企业 `.4` 首次回填期间，数据库已写入 `analytics-v1=VERIFIED`，Java 也输出 `sourceEvents=18532,targetFacts=18532`，但部署终端只显示 `Starting idempotent ClickHouse analytics backfill`，中间无进度。
+- 现有检查每 3 秒重复查询“启动 cursor 之后最近 400 行”；逐日 hourly/daily 汇总会产生大量日志，固定行数窗口存在把完成信号挤掉的丢检风险，且无法让现场判断当前汇总日期。
+
+### What
+
+- 扩展现有 `journal_after_start` / `wait_for_backfill`：每轮从上次 `--show-cursor` 继续增量读取，取消 `-n 400`，仍只以原 Java 完成/失败日志作为门禁，不新增数据库旁路。
+- 每轮只向部署终端输出最新一条 `Analytics hourly/daily rollup rebuilt`，成功时显示捕获到的完成日志。
+- 更新 ClickHouse 企业部署手册，并把既有行为验证器接入 `tools/verify-dev-scripts.sh`。
+
+### How
+
+- Shell 行为回归模拟两轮 cursor：第一轮输出 hourly 进度，第二轮在完成日志后追加 450 行启动噪声，仍必须识别成功；同时继续覆盖失败回滚、开关恢复、重复键拒绝和密钥不泄漏。
+- `tools/verify-internal-analytics-backfill-deploy.sh`、`bash -n`、`git diff --check` 通过。`tools/verify-dev-scripts.sh` 首轮因本机周一遗留的 mock 进程占用 `19070` 且返回空响应而在任务外冒烟失败；不停止该用户进程，改用空闲 `19071` 完整复跑后全部通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次部署脚本修复冲突；工作区起始为干净 `release`。
+
+### Result
+
+- 新企业包中的 `.4` 回填门禁会持久推进 cursor 并显示当前汇总进度，完成日志不再依赖固定 400 行窗口。
+- 不修改 ClickHouse/PostgreSQL 数据、Flyway、HTTP API、RunEvent、服务启停顺序、开关语义、环境配置、manager/worker、generated SDK 或 OpenCode 只读源码；已在现场成功的本轮回填不需重做，修复只在后续重打包部署时生效。

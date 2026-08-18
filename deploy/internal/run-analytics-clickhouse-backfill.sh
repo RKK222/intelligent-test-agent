@@ -131,23 +131,50 @@ wait_http() {
 journal_after_start() {
   if [[ -n "${JOURNAL_CURSOR}" ]]; then
     journalctl -u "${BACKEND_SERVICE}" --after-cursor "${JOURNAL_CURSOR}" \
-      -n 400 --no-pager 2>/dev/null || true
+      --show-cursor --no-pager 2>/dev/null || true
   else
     journalctl -u "${BACKEND_SERVICE}" --since "@${JOURNAL_START_EPOCH}" \
-      -n 400 --no-pager 2>/dev/null || true
+      --show-cursor --no-pager 2>/dev/null || true
   fi
 }
 
 wait_for_backfill() {
-  local deadline=$((SECONDS + TIMEOUT_SECONDS)) logs
+  local deadline=$((SECONDS + TIMEOUT_SECONDS)) line next_cursor
+  local completion_line failure_line progress_line
   while (( SECONDS < deadline )); do
-    logs="$(journal_after_start)"
-    if grep -F 'ClickHouse 运营回填完成,' <<<"${logs}" >/dev/null; then
+    next_cursor=""
+    completion_line=""
+    failure_line=""
+    progress_line=""
+    # 按 journal cursor 增量消费日志，避免逐日汇总产生大量日志后把完成信号挤出固定行数窗口。
+    while IFS= read -r line; do
+      if [[ "${line}" == '-- cursor: '* ]]; then
+        next_cursor="${line#-- cursor: }"
+      elif [[ "${line}" == *'ClickHouse 运营回填完成,'* ]]; then
+        completion_line="${line}"
+      elif [[ "${line}" == *'Application run failed'* \
+        || "${line}" == *'ClickHouse 回填校验失败'* \
+        || "${line}" == *'另一节点正在执行 ClickHouse 回填'* \
+        || "${line}" == *'回填时间窗口非法'* ]]; then
+        failure_line="${line}"
+      elif [[ "${line}" == *'Analytics hourly rollup rebuilt'* \
+        || "${line}" == *'Analytics daily rollup rebuilt'* ]]; then
+        progress_line="${line}"
+      fi
+    done < <(journal_after_start)
+    if [[ -n "${next_cursor}" ]]; then
+      JOURNAL_CURSOR="${next_cursor}"
+    fi
+    if [[ -n "${progress_line}" ]]; then
+      printf 'ClickHouse analytics backfill progress: %s\n' "${progress_line}"
+    fi
+    if [[ -n "${completion_line}" ]]; then
+      printf 'ClickHouse analytics backfill completion observed: %s\n' "${completion_line}"
       return 0
     fi
-    if grep -E 'Application run failed|ClickHouse 回填校验失败|另一节点正在执行 ClickHouse 回填|回填时间窗口非法' \
-      <<<"${logs}" >/dev/null; then
-      echo "ClickHouse analytics backfill failed during backend startup" >&2
+    if [[ -n "${failure_line}" ]]; then
+      printf 'ClickHouse analytics backfill failed during backend startup: %s\n' \
+        "${failure_line}" >&2
       return 1
     fi
     sleep 3
