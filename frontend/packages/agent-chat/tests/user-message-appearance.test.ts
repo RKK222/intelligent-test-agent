@@ -27,7 +27,7 @@ describe("resolveUserMessageAppearance", () => {
       own: false,
       displayName: "协作者",
       style: {
-        backgroundColor: "var(--ta-chat-other-user-bg, #EAF3FD)",
+        backgroundColor: "var(--ta-chat-other-user-bg, #DED9F6)",
         border: "none"
       }
     });

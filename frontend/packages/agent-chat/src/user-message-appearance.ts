@@ -16,12 +16,12 @@ const OWN_MESSAGE_STYLE = {
 };
 
 const OTHER_MESSAGE_STYLE = {
-  backgroundColor: "var(--ta-chat-other-user-bg, #EAF3FD)",
+  backgroundColor: "var(--ta-chat-other-user-bg, #DED9F6)",
   border: "none"
 };
 
 /**
- * 本人及共享会话中的其他用户消息统一使用浅蓝色，发送人归因只控制姓名和操作权限。
+ * 消息颜色始终以当前查看者为基准：本人使用浅蓝色，共享会话中的其他用户使用低饱和浅紫色。
  * 旧消息没有发送人归因时按自己发送处理，保持历史数据兼容。
  */
 export function resolveUserMessageAppearance(
