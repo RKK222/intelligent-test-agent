@@ -613,6 +613,24 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesBatchSessionCreationWithoutTreatingTheStaticActionAsSessionId() {
+        assertRequestIsForwarded(
+                "/api/internal/platform/opencode-runtime/sessions/batch-items");
+    }
+
+    @Test
+    void routesSessionRuntimeStateWithoutTreatingTheStaticActionAsSessionId() {
+        assertRequestIsForwardedGet(
+                "/api/internal/platform/opencode-runtime/sessions/runtime-state");
+    }
+
+    @Test
+    void routesSessionRuntimeStateEventsWithoutTreatingTheStaticActionAsSessionId() {
+        assertRequestIsForwardedGet(
+                "/api/internal/platform/opencode-runtime/sessions/runtime-state/events");
+    }
+
+    @Test
     void routesSideQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
         assertRequestIsForwarded(
                 "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs");
@@ -1043,7 +1061,8 @@ class UserOpencodeBackendRoutingWebFilterTest {
         RecordingHttpClient httpClient = new RecordingHttpClient(200, """
                 {"success":true,"traceId":"trace_1234567890abcdef","data":{}}
                 """);
-        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.22"), httpClient);
+        UserOpencodeBackendRoutingWebFilter filter = filterWithLocalClientRouting(
+                assignmentService, heartbeatStore("10.8.0.22"), httpClient);
         MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
                 .post(path)
                 .header("X-Trace-Id", "trace_1234567890abcdef")
@@ -1069,7 +1088,8 @@ class UserOpencodeBackendRoutingWebFilterTest {
         Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
                 .thenReturn(Optional.of("10.8.0.22"));
         RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
-        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.22"), httpClient);
+        UserOpencodeBackendRoutingWebFilter filter = filterWithLocalClientRouting(
+                assignmentService, heartbeatStore("10.8.0.22"), httpClient);
         MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
                 .get(path)
                 .header("X-Trace-Id", "trace_1234567890abcdef")
@@ -1116,6 +1136,24 @@ class UserOpencodeBackendRoutingWebFilterTest {
                 heartbeatStore,
                 new ObjectMapper().findAndRegisterModules(),
                 httpClient));
+    }
+
+    /** 生产环境始终装配本地客户端路由；固定 action 路径的回归测试必须复现同一装配条件。 */
+    private static UserOpencodeBackendRoutingWebFilter filterWithLocalClientRouting(
+            UserOpencodeProcessAssignmentService assignmentService,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            RecordingHttpClient httpClient) {
+        UserOpencodeBackendRoutingService routingService = new UserOpencodeBackendRoutingService(
+                assignmentService,
+                new WorkspaceServerIdentity("10.8.0.21"),
+                heartbeatStore,
+                new ObjectMapper().findAndRegisterModules(),
+                httpClient);
+        routingService.configureLocalClientRouting(
+                Mockito.mock(LocalClientWorkspaceRepository.class),
+                Mockito.mock(LocalClientConnectionStore.class),
+                Mockito.mock(SessionRuntimeTargetRepository.class));
+        return new UserOpencodeBackendRoutingWebFilter(routingService);
     }
 
     private static UserOpencodeBackendRoutingWebFilter filter(

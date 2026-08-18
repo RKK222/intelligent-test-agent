@@ -67,6 +67,9 @@ class UserOpencodeBackendRoutingService {
     private static final String PROCESS_STATUS_PATH = "/api/internal/agent/opencode/processes/me";
     private static final String PROCESS_INITIALIZE_PATH = PROCESS_STATUS_PATH + "/initialize";
     private static final String PLATFORM_RUNTIME_PREFIX = "/api/internal/platform/opencode-runtime";
+    private static final String BATCH_SESSION_CREATE_PATH = PLATFORM_RUNTIME_PREFIX + "/sessions/batch-items";
+    private static final String SESSION_ID_PREFIX = "ses_";
+    private static final String WORKSPACE_ID_PREFIX = "wrk_";
     private static final String INTERNAL_MODEL_OBSERVABILITY_PREFIX =
             PLATFORM_RUNTIME_PREFIX + "/internal-model-observability";
     private static final String CONFIGURATION_WORKSPACE_PREFIX =
@@ -287,6 +290,7 @@ class UserOpencodeBackendRoutingService {
             return false;
         }
         return (PLATFORM_RUNTIME_PREFIX + "/sessions").equals(path)
+                || BATCH_SESSION_CREATE_PATH.equals(path)
                 || isNightExecutionTaskCreate(exchange)
                 || startRunAgentId(exchange).isPresent();
     }
@@ -300,8 +304,8 @@ class UserOpencodeBackendRoutingService {
             return Optional.empty();
         }
         String path = exchange.getRequest().getURI().getRawPath();
-        String sessionId = segmentValue(path, "/sessions/");
-        String workspaceId = segmentValue(path, "/workspaces/");
+        String sessionId = prefixedSegmentValue(path, "/sessions/", SESSION_ID_PREFIX);
+        String workspaceId = prefixedSegmentValue(path, "/workspaces/", WORKSPACE_ID_PREFIX);
         if (sessionId == null) {
             sessionId = exchange.getRequest().getQueryParams().getFirst("sessionId");
         }
@@ -387,6 +391,14 @@ class UserOpencodeBackendRoutingService {
         int end = path.indexOf('/', start);
         String value = end < 0 ? path.substring(start) : path.substring(start, end);
         return value.isBlank() ? null : value;
+    }
+
+    /**
+     * 只有带领域前缀的路径段才是资源 ID；batch-items、runtime-state、experience 等固定动作交给对应入口处理。
+     */
+    private static String prefixedSegmentValue(String path, String marker, String requiredPrefix) {
+        String value = segmentValue(path, marker);
+        return value != null && value.startsWith(requiredPrefix) ? value : null;
     }
 
     private RoutingResolution resolveStartRun(
