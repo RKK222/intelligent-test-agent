@@ -11620,3 +11620,24 @@
 - 重新打完整平台包并按 `.4 → .114 → .2` 部署时，`.4` 会自动补齐存量用户维度和历史行为，只有 Java 内部源/目标计数验证并记录 `VERIFIED` 后才允许发布继续；后续发布会快速幂等跳过。
 - 本机仅完成模拟部署和 Java 单测，尚未在企业 `.4/.114/.2` 真实执行或验证页面数据；必须用包含本次脚本的新包重部署后，以 `.4` journal 完成日志、落盘开关 `false`、CK 维度/事实计数及运营页面共同验收。
 - 本次不新增节点、服务、端口、强制运行依赖、HTTP API、RunEvent 或数据库结构，不修改 Flyway、`.env*`、generated SDK 或 OpenCode 只读源码；旧汇总清理仍未自动执行。
+
+## 2026-08-18 - 同步 ClickHouse 部署回填到 dev 并记录既有门禁漂移
+
+### Why
+
+- release 的部署修复按长期分支规则 cherry-pick 回 dev 后，需要确认新增回填编排没有被分支差异破坏。
+
+### What
+
+- dev 已包含与 release 相同的回填脚本、标准部署参数、`.4` 单节点自动编排、包门禁和文档；未修改业务代码或生产配置。
+- 复核发现 dev 父提交已有两处测试夹具漂移：多后台节点夹具没有为模板中的 CK/Mem0 `REPLACE_` 值提供替换输入，完整包夹具没有装入其打包门禁已要求的 QA memory migration。
+
+### How
+
+- dev 上新增 `verify-internal-analytics-backfill-deploy.sh`、无参数节点编排和 AI 文档校验通过，工作区干净。
+- `verify-internal-multi-backend-node.sh` 在进入本次新增逻辑前即报 `Rendered configuration still contains REPLACE_ placeholders`；`verify-internal-two-backend-complete-package.sh` 在进入本次新增脚本门禁前即报缺少 `V20260809120000__create_qa_memory_governance.sql`。通过 `git show bbf6d0fee...` 确认对应父提交已经同时具备失败门禁和缺失夹具，非本次 cherry-pick 引入。
+
+### Result
+
+- 本次部署回填修复已同步到 dev，专项行为不回退；release 上的逐机和完整包门禁均通过。
+- dev 两项既有企业包夹具漂移未在本次顺手修复，后续应单独对齐 dev 的配置渲染与 migration 夹具后再把这两项作为 dev 全绿门禁；不得把当前失败误判为真实包可以缺少密钥或 migration。
