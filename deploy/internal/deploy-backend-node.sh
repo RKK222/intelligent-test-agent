@@ -24,6 +24,22 @@ DEPLOY_SCRIPT="${SCRIPT_DIR}/${NODE_NAME}/deploy-multi-backend-node.sh"
 [[ -f "${DEPLOY_SCRIPT}" ]] || { echo "Deployment script not found after extraction: ${DEPLOY_SCRIPT}" >&2; exit 1; }
 TOOLBOX_ENV_SOURCE="${SCRIPT_DIR}/${NODE_NAME}/config/toolbox.env"
 [[ -f "${TOOLBOX_ENV_SOURCE}" ]] || { echo "Prepared toolbox config not found: ${TOOLBOX_ENV_SOURCE}" >&2; exit 1; }
+BACKEND_ENV_SOURCE="${SCRIPT_DIR}/${NODE_NAME}/config/backend.env"
+INSTALLED_BACKEND_ENV="${INSTALL_ROOT}/config/backend.env"
+PRESERVE_INSTALLED_MARKER="__PRESERVE_FROM_INSTALLED_BACKEND_ENV__"
+
+# ClickHouse/Mem0 已独立部署，增量平台包只携带地址和开关；密钥必须继承目标机现有配置。
+hydrate_preserved_env_value "${BACKEND_ENV_SOURCE}" "${INSTALLED_BACKEND_ENV}" \
+  TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD "${PRESERVE_INSTALLED_MARKER}" 8
+hydrate_preserved_env_value "${BACKEND_ENV_SOURCE}" "${INSTALLED_BACKEND_ENV}" \
+  TEST_AGENT_MEMORY_SERVICE_API_KEY "${PRESERVE_INSTALLED_MARKER}" 32
+hydrate_preserved_env_value "${BACKEND_ENV_SOURCE}" "${INSTALLED_BACKEND_ENV}" \
+  TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET "${PRESERVE_INSTALLED_MARKER}" 32
+if grep -qF "${PRESERVE_INSTALLED_MARKER}" "${BACKEND_ENV_SOURCE}"; then
+  echo "Prepared backend configuration still contains an unresolved installed-secret marker" >&2
+  exit 1
+fi
+printf 'Existing ClickHouse and memory runtime secrets carried forward without printing values\n'
 
 manifest_value() {
   local content="$1" key="$2"

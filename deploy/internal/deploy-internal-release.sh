@@ -91,10 +91,17 @@ ANALYTICS_OUTBOX_MIGRATION_RESOURCE="db/migration/V20260813143000__analytics_eve
 ANALYTICS_OUTBOX_MIGRATION_SHA256="bd286b1d992e6ff715393fb39bbb47a7d44dfe425c3b4ea6571f62e74eed0eb1"
 ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE="db/migration-postgresql/V20260813143001__analytics_event_outbox_install_triggers.sql"
 ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256="399e8db352ded3f12d5b5a91fe8a07f6242a9aafc07caa8c28589614a43dc50e"
+ANALYTICS_OUTBOX_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/analytics-after-release/V20260814165300__analytics_event_outbox_create_pipeline_after_release.sql"
+ANALYTICS_TRIGGER_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/analytics-after-release/V20260814165301__analytics_event_outbox_install_triggers_after_release.sql"
 ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql"
 ANALYTICS_CLICKHOUSE_MIGRATION_SHA256="1a1d4d77b2d92f6f97a864da7a20b6d5f040807d15f2eef940410c10e7e7a7f7"
+LOCAL_CLIENT_RUNTIME_MIGRATION_RESOURCE="db/migration/V20260811210453__local_client_credentials_create_runtime.sql"
+LOCAL_CLIENT_RUNTIME_MIGRATION_SHA256="b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-applied/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256="168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026"
+LOCAL_CLIENT_RUNTIME_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-after-release/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
+LOCAL_CLIENT_ROLLOUT_MIGRATION_RESOURCE="db/migration/V20260817193414__local_client_rollout_users_create.sql"
+LOCAL_CLIENT_ROLLOUT_MIGRATION_SHA256="88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE="db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256="250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554"
 USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE="db/migration/V20260813190929__user_scm_git_identities_create.sql"
@@ -420,9 +427,19 @@ verify_release_flyway_migrations_jar() {
   verify_release_flyway_resource "${jar}" "${label}" \
     "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE}" "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
+    "${ANALYTICS_OUTBOX_AFTER_RELEASE_MIGRATION_RESOURCE}" "${ANALYTICS_OUTBOX_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${ANALYTICS_TRIGGER_AFTER_RELEASE_MIGRATION_RESOURCE}" "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
     "${ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE}" "${ANALYTICS_CLICKHOUSE_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOCAL_CLIENT_RUNTIME_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
     "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOCAL_CLIENT_RUNTIME_AFTER_RELEASE_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOCAL_CLIENT_ROLLOUT_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_ROLLOUT_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE}" "${AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \

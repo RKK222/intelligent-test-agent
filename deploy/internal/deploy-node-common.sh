@@ -104,6 +104,47 @@ replace_env_value() {
   mv -f "${tmp}" "${file}"
 }
 
+# dotenv 只按普通 KEY=VALUE 文本读取，不能 source 现场配置，避免执行其中的 shell 内容。
+dotenv_value() {
+  local file="$1"
+  local key="$2"
+  [[ -f "${file}" ]] || return 0
+  awk -F= -v wanted="${key}" '
+    $1 == wanted { value=substr($0, index($0, "=") + 1) }
+    END { print value }
+  ' "${file}"
+}
+
+# 增量节点包不复制新接入组件的运行密钥；部署时只从本机已安装配置继承指定值。
+hydrate_preserved_env_value() {
+  local prepared_file="$1"
+  local installed_file="$2"
+  local key="$3"
+  local marker="$4"
+  local minimum_length="$5"
+  local prepared_count installed_count prepared_value installed_value
+
+  prepared_count="$(grep -c "^${key}=" "${prepared_file}" || true)"
+  [[ "${prepared_count}" -eq 1 ]] || {
+    echo "${prepared_file} must contain exactly one ${key}" >&2
+    return 1
+  }
+  prepared_value="$(dotenv_value "${prepared_file}" "${key}")"
+  [[ "${prepared_value}" == "${marker}" ]] || return 0
+
+  installed_count="$(grep -c "^${key}=" "${installed_file}" 2>/dev/null || true)"
+  [[ "${installed_count}" -eq 1 ]] || {
+    echo "Installed backend.env must contain exactly one ${key} before this incremental deployment" >&2
+    return 1
+  }
+  installed_value="$(dotenv_value "${installed_file}" "${key}")"
+  [[ "${installed_value}" != "${marker}" && ${#installed_value} -ge "${minimum_length}" ]] || {
+    echo "Installed ${key} is missing or shorter than ${minimum_length} characters" >&2
+    return 1
+  }
+  replace_env_value "${prepared_file}" "${key}" "${installed_value}"
+}
+
 append_env_csv_value() {
   local file="$1"
   local key="$2"

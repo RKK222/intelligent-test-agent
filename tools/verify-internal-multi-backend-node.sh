@@ -32,6 +32,7 @@ printf '%s\n' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://122.233.30.147:8123/testagent_analytics' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME=ck' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=clickhouse-secret-must-not-print' \
+  'TEST_AGENT_MEMORY_ENABLED=true' \
   'TEST_AGENT_MEMORY_SERVICE_API_KEY=memory-service-secret-must-not-print' \
   'TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=memory-hmac-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=xxl-mysql-secret-must-not-print' \
@@ -50,6 +51,11 @@ bash "${CONFIGURE_SCRIPT}" backend \
   >/dev/null
 grep -Fxq 'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
   "${CONFIG_114}/backend.env"
+# 当前双后台企业拓扑的数据面已验收，节点部署门禁要求平台侧显式启用记忆。
+sed -i.bak \
+  's/^TEST_AGENT_MEMORY_ENABLED=.*/TEST_AGENT_MEMORY_ENABLED=true/' \
+  "${CONFIG_114}/backend.env"
+rm -f "${CONFIG_114}/backend.env.bak"
 # 当前双后台现场每台 worker 固定发布 1000 个同号端口；通用单后台模板仍保留较小默认值。
 sed -i.bak \
   -e 's/^OPENCODE_WORKER_PORT_START=.*/OPENCODE_WORKER_PORT_START=14096/' \

@@ -508,7 +508,7 @@ bash /data/testagent/deploy/internal/configure-nginx.sh \
 
 预期输出 `backend count: 2`、`server route count: 2`。正式安装必须使用本次发布包中的前端部署入口；它会更新前端和部署脚本、渲染候选配置、执行实体 Nginx `-t/-T` 并 reload，失败自动回滚：
 
-若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定非密钥字段：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，写入 `.4/.114` 两组工具 upstream；两个后台补齐 HTTP Cookie、大文件预览/分片参数、固定 worker 端口池，并分别生成绑定本机 IP 的 `toolbox.env`。源敏感节点包和其中的密码/token 不会被修改或输出；同一键重复定义时封装直接失败，不能继续交付。
+若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定站点配置：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，写入 `.4/.114` 两组工具 upstream；两个后台补齐 HTTP Cookie、大文件预览/分片参数、固定 worker 端口池，以及已部署 ClickHouse `122.233.30.147:8123`、Mem0 VIP `122.233.30.160:18888` 的地址和启用开关，并分别生成绑定本机 IP 的 `toolbox.env`。CK/Mem0/BGE/pgvector 镜像不进入平台增量包，也不会重启这些数据面容器。源敏感节点包和其中的密码/token 不会被修改或输出；旧节点包缺少 ClickHouse 密码、Mem0 service key 或模型网关 HMAC 时，包内只写目标机继承标记，`deploy-backend-node.sh` 在覆盖配置前从本机已安装 `backend.env` 原样继承，缺失、重复或长度不合格会先失败。同一键重复定义时封装直接失败，不能继续交付。
 
 ```bash
 bash /tmp/deploy-internal-frontend.sh \
@@ -535,6 +535,21 @@ bash /tmp/deploy-internal-frontend.sh \
 外部 JDBC 地址、`root` 账号和现场密码；URL 启用 `createDatabaseIfNotExist=true`，因此账号有建库权限时
 会自动创建 `xxl_job` 空库，随后 Admin 子上下文 Flyway 幂等创建表、执行器组和任务。密码不得打印或
 另行写入命令行。
+
+本轮 CK/Mem0/BGE/pgvector 已提前部署，平台升级前还必须在 `.4`、`.114` 分别确认现有
+`/data/testagent/config/backend.env` 已各包含一条 ClickHouse 密码、Mem0 service key 和模型网关 HMAC；只检查键数量和空值，禁止回显值。增量入口会继承这三项敏感值，再写入固定地址和开关：
+
+```bash
+grep -c '^TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=' /data/testagent/config/backend.env
+grep -c '^TEST_AGENT_MEMORY_SERVICE_API_KEY=' /data/testagent/config/backend.env
+grep -c '^TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=' /data/testagent/config/backend.env
+grep -E '^TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=$|^TEST_AGENT_MEMORY_SERVICE_API_KEY=$|^TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=$' /data/testagent/config/backend.env
+nc -vz 122.233.30.147 8123
+nc -vz 122.233.30.160 18888
+```
+
+前三条必须分别输出 `1`，第四条无输出，两个端口都连通；否则停止部署并先按
+`deploy/internal/CLICKHOUSE-ANALYTICS.md`、`docs/deployment/qa-memory.md` 对齐已部署数据面的真实密钥，不能把占位值或本地开发密钥写进企业配置。
 
 两台后台更新后分别执行以下脱敏校验：
 

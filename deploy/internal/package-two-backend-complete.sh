@@ -9,6 +9,7 @@ RELEASE_ARCHIVE="${SCRIPT_DIR}/dist/test-agent-internal-release.zip"
 NODES_DIR=""
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 BUNDLE_NAME="test-agent-two-backend-complete"
+PRESERVE_INSTALLED_MARKER="__PRESERVE_FROM_INSTALLED_BACKEND_ENV__"
 TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
 TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
 LOBEHUB_MAIN_MIGRATION_RESOURCE="db/migration/V20260730090000__add_lobehub_model_gateway.sql"
@@ -80,10 +81,17 @@ ANALYTICS_OUTBOX_MIGRATION_RESOURCE="db/migration/V20260813143000__analytics_eve
 ANALYTICS_OUTBOX_MIGRATION_SHA256="bd286b1d992e6ff715393fb39bbb47a7d44dfe425c3b4ea6571f62e74eed0eb1"
 ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE="db/migration-postgresql/V20260813143001__analytics_event_outbox_install_triggers.sql"
 ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256="399e8db352ded3f12d5b5a91fe8a07f6242a9aafc07caa8c28589614a43dc50e"
+ANALYTICS_OUTBOX_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/analytics-after-release/V20260814165300__analytics_event_outbox_create_pipeline_after_release.sql"
+ANALYTICS_TRIGGER_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/analytics-after-release/V20260814165301__analytics_event_outbox_install_triggers_after_release.sql"
 ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql"
 ANALYTICS_CLICKHOUSE_MIGRATION_SHA256="1a1d4d77b2d92f6f97a864da7a20b6d5f040807d15f2eef940410c10e7e7a7f7"
+LOCAL_CLIENT_RUNTIME_MIGRATION_RESOURCE="db/migration/V20260811210453__local_client_credentials_create_runtime.sql"
+LOCAL_CLIENT_RUNTIME_MIGRATION_SHA256="b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-applied/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256="168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026"
+LOCAL_CLIENT_RUNTIME_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-after-release/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
+LOCAL_CLIENT_ROLLOUT_MIGRATION_RESOURCE="db/migration/V20260817193414__local_client_rollout_users_create.sql"
+LOCAL_CLIENT_ROLLOUT_MIGRATION_SHA256="88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE="db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256="250c2761c9717cca6e689019a9a91f0cc66d52a33baa662b294e41b1d1745554"
 USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE="db/migration/V20260813190929__user_scm_git_identities_create.sql"
@@ -285,9 +293,19 @@ verify_release_flyway_migrations_jar() {
   verify_release_flyway_resource "${jar}" \
     "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE}" "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" \
+    "${ANALYTICS_OUTBOX_AFTER_RELEASE_MIGRATION_RESOURCE}" "${ANALYTICS_OUTBOX_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${ANALYTICS_TRIGGER_AFTER_RELEASE_MIGRATION_RESOURCE}" "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
     "${ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE}" "${ANALYTICS_CLICKHOUSE_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" \
+    "${LOCAL_CLIENT_RUNTIME_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
     "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${LOCAL_CLIENT_RUNTIME_AFTER_RELEASE_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${LOCAL_CLIENT_ROLLOUT_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_ROLLOUT_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" \
     "${AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE}" "${AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" \
@@ -542,6 +560,22 @@ replace_or_append_env_value() {
   mv -f "${tmp_file}" "${file}"
 }
 
+# 敏感值已存在时保持原值；旧节点包没有该键时写入目标机继承标记，不生成或伪造密钥。
+preserve_or_append_env_value() {
+  local file="$1"
+  local key="$2"
+  local fallback="$3"
+  local count
+  count="$(grep -c "^${key}=" "${file}" || true)"
+  if [[ "${count}" -gt 1 ]]; then
+    echo "Prepared node configuration contains duplicate ${key}" >&2
+    exit 1
+  fi
+  if [[ "${count}" -eq 0 ]]; then
+    printf '%s=%s\n' "${key}" "${fallback}" >>"${file}"
+  fi
+}
+
 normalize_backend_node_archive() {
   local source="$1"
   local node_dir="$2"
@@ -557,6 +591,39 @@ normalize_backend_node_archive() {
   replace_or_append_env_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   replace_or_append_env_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     'http://tcds-prod.sdc.icbc:9080'
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED true
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_URL \
+    'jdbc:clickhouse://122.233.30.147:8123/testagent_analytics'
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME ck
+  preserve_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD \
+    "${PRESERVE_INSTALLED_MARKER}"
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED false
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_START \
+    '2025-01-01T00:00:00Z'
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_END ''
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS false
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_ENABLED true
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_SERVICE_URL \
+    'http://122.233.30.160:18888'
+  preserve_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_SERVICE_API_KEY \
+    "${PRESERVE_INSTALLED_MARKER}"
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_REQUEST_TIMEOUT 2s
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_LEARNING_TIMEOUT 130s
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_RETRIEVAL_TIMEOUT 2s
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_MAX_INJECTED 6
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_MAX_CONTEXT_TOKENS 800
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_RETRIEVAL_TOP_K 20
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_RETRIEVAL_THRESHOLD 0.10
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_LEARNING_BATCH_SIZE 8
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_LEARNING_MAX_ATTEMPTS 8
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_LEARNING_POLL_INTERVAL 5s
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_LEARNING_LEASE 5m
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_CLIENT_ID \
+    mem0-cluster
+  preserve_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET \
+    "${PRESERVE_INSTALLED_MARKER}"
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_CLOCK_SKEW 30s
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MEMORY_MODEL_GATEWAY_NONCE_TTL 2m
   replace_or_append_env_value "${backend_env}" TEST_AGENT_MAX_PREVIEW_BYTES 5242880
   replace_or_append_env_value "${backend_env}" TEST_AGENT_UPLOAD_CHUNK_BYTES 262144
   replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_BACKEND_PORT 8080
@@ -585,6 +652,7 @@ validate_mysql_cluster_config() {
   local config_root="${TMP_ROOT}/cluster-config-check"
   local backend_4 backend_114 frontend expected_url
   local backend_password backend_token
+  local backend_4_value backend_114_value expected key minimum_length secret_spec
   mkdir -m 0700 -p "${config_root}"
   backend_4="${config_root}/backend-4.env"
   backend_114="${config_root}/backend-114.env"
@@ -615,6 +683,41 @@ validate_mysql_cluster_config() {
   grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_114}"
   grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_4}"
   grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_114}"
+  for expected in \
+    'TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED=true' \
+    'TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://122.233.30.147:8123/testagent_analytics' \
+    'TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME=ck' \
+    'TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED=false' \
+    'TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS=false' \
+    'TEST_AGENT_MEMORY_ENABLED=true' \
+    'TEST_AGENT_MEMORY_SERVICE_URL=http://122.233.30.160:18888' \
+    'TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_CLIENT_ID=mem0-cluster'; do
+    grep -Fxq "${expected}" "${backend_4}"
+    grep -Fxq "${expected}" "${backend_114}"
+  done
+  for secret_spec in \
+    TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD:8 \
+    TEST_AGENT_MEMORY_SERVICE_API_KEY:32 \
+    TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET:32; do
+    key="${secret_spec%%:*}"
+    minimum_length="${secret_spec##*:}"
+    [[ "$(grep -c "^${key}=" "${backend_4}" || true)" -eq 1 \
+      && "$(grep -c "^${key}=" "${backend_114}" || true)" -eq 1 ]] || {
+      echo "Both backend configs must contain exactly one ${key}" >&2
+      exit 1
+    }
+    backend_4_value="$(sed -n "s/^${key}=//p" "${backend_4}")"
+    backend_114_value="$(sed -n "s/^${key}=//p" "${backend_114}")"
+    [[ "${backend_4_value}" == "${backend_114_value}" ]] || {
+      echo "Prepared backend configs disagree on ${key}" >&2
+      exit 1
+    }
+    [[ "${backend_4_value}" == "${PRESERVE_INSTALLED_MARKER}" \
+      || ${#backend_4_value} -ge "${minimum_length}" ]] || {
+      echo "Prepared ${key} is shorter than ${minimum_length} characters" >&2
+      exit 1
+    }
+  done
   grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' "${frontend}"
   grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120' "${frontend}"
   grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' "${frontend}"

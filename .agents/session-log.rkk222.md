@@ -11638,3 +11638,30 @@
 
 - release 近期 SCM、ClickHouse/analytics、企业封包和本地客户端灰度能力同时保留；当前服务连接服务器 PostgreSQL `192.168.8.100:15432/testagent_dev` 与 XXL MySQL `192.168.8.100:13306/xxl_job`，没有修改 `.env*`、数据库 history、generated SDK 或 OpenCode 源码，也没有推送远端。
 - 本机 MySQL 8.4 Testcontainers 容器内部已 ready，但 Docker Desktop 暴露端口在 JDBC 握手阶段持续无响应，因此本轮 7 条空库/analytics V12/SCM V12/未知 checksum/并发自动化未取得结果并已终止；真实服务器 SCM V12 → V13 路径已验证，另一套 analytics V12 自动化仍以历史测试和原字节锁定为证，不能表述为本轮完整重跑。
+
+## 2026-08-18 - 按已部署中间件拓扑重打 release 企业增量包
+
+### Why
+
+- 用户确认企业 ClickHouse、Mem0、CPU BGE 与独立 pgvector 已部署完成，要求基于当前本地 `release` 重新封包；平台包不应重复携带或重启这些数据面镜像，但两台 Java 必须指向已确认的站点地址。
+- 上一版 `.4/.114` 敏感节点包早于这些集成配置，直接覆盖 `backend.env` 会丢失现场 ClickHouse 密码、Mem0 service key 与模型网关 HMAC；当前新增的本地客户端/analytics compatibility migration 也尚未全部进入最终 JAR 三层字节门禁。
+
+### What
+
+- 双后台封装在临时节点副本中固定启用 ClickHouse `122.233.30.147:8123/testagent_analytics` 和 Mem0 VIP `122.233.30.160:18888`，保持 backfill/旧汇总清理关闭；CK/Mem0/BGE/pgvector 镜像仍不进入平台包。
+- 复用既有 dotenv 读取、替换与逐机部署入口：旧节点包缺少三项运行密钥时只写继承标记，部署前从目标机已安装 `backend.env` 原样带入；键缺失、重复或长度不足会在覆盖配置和重启 Java 前失败，日志不输出密钥。
+- 内层构建、外层封装和目标机安装同时新增本地客户端主迁移、客户端灰度迁移、release 本地客户端兼容迁移和两份 analytics-after-release 兼容迁移的 SHA-256 校验；未修改任何 migration 文件字节。
+- 更新双后台手册与配置夹具，新增密钥继承成功/短值失败回归；`.4` 既有 Qwen 优先模型灰度随 worker runtime 复用保持不变。
+
+### How
+
+- `FlywayMigrationNamingTest` 15/15、运行密钥继承测试、增量组件门禁、双后台完整包门禁和多后台逐机门禁全部通过；相关 Shell `bash -n`、`git diff --check` 通过。
+- 正式后端薄 JAR、152 MiB 外置依赖和同源生产前端从当前工作树重建成功；新增 PostgreSQL/ClickHouse/XXL 资源均从最终 persistence/XXL JAR 逐项核对 SHA-256。
+- 本轮无企业签名私钥，默认全量命令在本地客户端签名步骤按设计停止；确认 `f5cfa6d77` 后客户端二进制源码无变化，并从既有 `0.1.1-dev-entryfix` 分发目录提取内嵌公钥验证 manifest 签名及 PKG/DEB 哈希后，以 `--zip-only` 复用该已验证制品，没有生成假签名。
+- 组件计划为 worker runtime `reuse`（`50f56c...2fb1`）和 toolbox `reuse`（`35447d...5040`）；最终包清单为 LobeHub `disabled`、memory 离线组件 `disabled`、本地客户端分发 `included`。外层内嵌内层逐字节一致，节点配置、前端入口、组件缺席项和新增 Flyway 资源独立解包复验通过。
+
+### Result
+
+- 固定名平台 ZIP 仅更新 Java、前端、部署脚本和新引入的本地客户端分发，不加载或重启 manager/worker/toolbox，也不重复交付已部署的 ClickHouse/Mem0/BGE/pgvector 镜像。
+- 现场发布前必须先导出平台 PostgreSQL 与 XXL MySQL 完整 `flyway_schema_history`，并确认 `.4/.114` 已安装配置各有三项真实运行密钥；任一未知 checksum、失败记录或密钥缺失都停止，禁止 `repair`、`outOfOrder`、手改 history 或写入本地开发密钥。
+- 本次未修改 `.env*`、HTTP API、RunEvent、业务数据库结构、generated SDK 或 OpenCode 只读源码；企业 `.4/.114/.2` 尚未执行本轮包，真实启动和功能验收仍以逐机发布结果为准。

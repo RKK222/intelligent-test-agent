@@ -208,6 +208,19 @@ require_nonempty_value() {
   fi
 }
 
+require_minimum_length_value() {
+  local file="$1"
+  local key="$2"
+  local minimum_length="$3"
+  local value
+  require_one_key "${file}" "${key}"
+  value="$(env_value "${file}" "${key}")"
+  if [[ ${#value} -lt "${minimum_length}" ]]; then
+    echo "${key} in ${file} must contain at least ${minimum_length} characters" >&2
+    exit 1
+  fi
+}
+
 server_id_from_host() {
   printf 'test-agent-backend-%s' "${1//./-}"
 }
@@ -252,6 +265,19 @@ validate_backend_config() {
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   require_exact_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     http://tcds-prod.sdc.icbc:9080
+  require_exact_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED true
+  require_exact_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_URL \
+    jdbc:clickhouse://122.233.30.147:8123/testagent_analytics
+  require_exact_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME ck
+  require_minimum_length_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD 8
+  require_exact_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED false
+  require_exact_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS false
+  require_exact_value "${backend_env}" TEST_AGENT_MEMORY_ENABLED true
+  require_exact_value "${backend_env}" TEST_AGENT_MEMORY_SERVICE_URL \
+    http://122.233.30.160:18888
+  require_minimum_length_value "${backend_env}" TEST_AGENT_MEMORY_SERVICE_API_KEY 32
+  require_exact_value "${backend_env}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_CLIENT_ID mem0-cluster
+  require_minimum_length_value "${backend_env}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET 32
   require_exact_value "${backend_env}" TEST_AGENT_CORS_ALLOWED_ORIGINS \
     http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
   require_exact_value "${backend_env}" TEST_AGENT_SERVER_BROADCAST_ENABLED true
@@ -267,6 +293,10 @@ validate_backend_config() {
   fi
   if grep -q 'REPLACE_' "${backend_env}" "${docker_env}"; then
     echo "Prepared backend configuration still contains a REPLACE_ placeholder" >&2
+    exit 1
+  fi
+  if grep -q '__PRESERVE_FROM_INSTALLED_BACKEND_ENV__' "${backend_env}"; then
+    echo "Prepared backend configuration still contains an unresolved installed-secret marker" >&2
     exit 1
   fi
 
