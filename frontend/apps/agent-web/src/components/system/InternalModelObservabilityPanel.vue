@@ -841,6 +841,47 @@ const failureBarData = computed(() =>
   failureBreakdown.value.map((item) => ({ name: item.label, value: item.count }))
 );
 
+/** 失败分类按供应商划分的竖向柱状图数据。 */
+const failureProviderSeries = computed(() => {
+  const categories: InternalModelCallOutcomeGroup[] = [
+    "REQUEST_OR_CONFIGURATION",
+    "UPSTREAM_FAILURE",
+    "CALLER_INTERRUPTED",
+    "OTHER"
+  ];
+  const providers = new Set<string>();
+  const providerGroupMap = new Map<string, Record<InternalModelCallOutcomeGroup, number>>();
+
+  for (const row of stats.value) {
+    if (row.outcome === "SUCCESS") continue;
+    const group = outcomeGroupOf(row.outcome);
+    providers.add(row.providerId);
+    let groupCounts = providerGroupMap.get(row.providerId);
+    if (!groupCounts) {
+      groupCounts = {
+        SUCCESS: 0,
+        REQUEST_OR_CONFIGURATION: 0,
+        UPSTREAM_FAILURE: 0,
+        CALLER_INTERRUPTED: 0,
+        OTHER: 0
+      };
+      providerGroupMap.set(row.providerId, groupCounts);
+    }
+    groupCounts[group] = (groupCounts[group] ?? 0) + row.requestCount;
+  }
+
+  const providerList = [...providers].sort();
+  return {
+    categories: categories.map((g) => outcomeGroupText[g]),
+    series: providerList.map((providerId) => ({
+      name: providerId,
+      type: "bar",
+      barMaxWidth: 24,
+      data: categories.map((g) => providerGroupMap.get(providerId)?.[g] ?? 0)
+    }))
+  };
+});
+
 const trendChartEl = ref<HTMLDivElement | null>(null);
 const ttftChartEl = ref<HTMLDivElement | null>(null);
 const itlChartEl = ref<HTMLDivElement | null>(null);
@@ -997,15 +1038,15 @@ function renderCharts() {
     failureChart?.setOption({
       animation: false,
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-      grid: { top: 16, left: 96, right: 24, bottom: 24 },
-      xAxis: { type: "value", minInterval: 1 },
-      yAxis: { type: "category", data: failureBarData.value.map((d) => d.name), inverse: true },
-      series: [{
-        type: "bar",
-        data: failureBarData.value.map((d) => d.value),
-        itemStyle: { color: "#ef4444", borderRadius: [0, 4, 4, 0] },
-        barMaxWidth: 18
-      }]
+      legend: { top: 0, left: "center", itemGap: 16, textStyle: { fontSize: 11 } },
+      grid: { top: 32, left: 48, right: 24, bottom: 28 },
+      xAxis: {
+        type: "category",
+        data: failureProviderSeries.value.categories,
+        axisTick: { show: false }
+      },
+      yAxis: { type: "value", name: "次数", minInterval: 1 },
+      series: failureProviderSeries.value.series
     }, true);
   }
   if (providerChartEl.value && providerChartEl.value.clientWidth > 0 && providerBarData.value.length) {
@@ -1743,7 +1784,7 @@ function onPageSizeChange(next: number) {
 
             <!-- 按供应商汇总 -->
             <div v-if="providerMetrics.length">
-              <h4 class="ta-imob-overview-title">按供应商</h4>
+              <h4 class="ta-imob-overview-title">按供应商统计 (聚合明细)</h4>
               <div class="ta-imob-metric-grid">
                 <div v-for="metric in providerMetrics" :key="metric.providerId" class="ta-imob-metric-card">
                   <div class="ta-imob-metric-provider">{{ metric.providerId }}</div>
