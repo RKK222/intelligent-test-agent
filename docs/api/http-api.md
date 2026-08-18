@@ -3584,8 +3584,10 @@ PUT 请求：
 字符。重复公开 ID 返回 `CONFLICT`，非法字段返回 `VALIDATION_ERROR`。
 
 探测请求为 `{ "capability": "CHAT" }`；网络、超时或非 2xx 不回显上游错误，而是以成功 envelope 返回
-`{capability,succeeded:false,probedAt}` 并保存最近结果。未启用或未声明能力返回 `VALIDATION_ERROR`。只有
-最近探测成功的能力能出现在模型网关目录并用于路由。
+`{capability,succeeded:false,probedAt}` 并保存最近结果。EMBEDDING 探测固定向上游发送
+`X-Embedding-Input-Type: query`；平台仍统一使用受控 `Auth-Token`，内部 CPU BGE 同时兼容该认证与运维探活的
+Bearer 认证，但拒绝一项请求同时携带两种凭据。未启用或未声明能力返回 `VALIDATION_ERROR`。只有最近探测成功的
+能力能出现在模型网关目录并用于路由。
 
 ### LobeHub 企业模型网关 API
 

@@ -12047,3 +12047,26 @@
 
 - 已完成的 `.4` 不会再次同步 ClickHouse；新包首次部署会从旧成功日志补登状态，此后增量发布只做普通平台升级，不再额外重启 Java。
 - 不修改 Java、HTTP API、RunEvent、数据库结构或 Flyway migration，不触碰 CK/PG 数据、manager、worker runtime、toolbox、generated SDK、`.env*` 或 OpenCode 只读源码。
+
+## 2026-08-18 - 修复固定 CPU BGE 无法通过平台 EMBEDDING 探测
+
+### Why
+
+- 企业内部按稳定文档配置固定 CPU BGE 后，页面 EMBEDDING 探测仍失败。Java 探测遵循企业模型契约发送 `Auth-Token`，而自研 BGE 服务只接受 Bearer；同时 BGE 强制要求 `X-Embedding-Input-Type`，Java 固定样本探测又未发送该头，因此现有版本按正确模型 ID、Token 和 Base URL 也无法成功。
+
+### What
+
+- CPU BGE 认证同时兼容运维 `Authorization: Bearer` 与平台 `Auth-Token`，两者复用同一个 `embedding.env` API key；缺失、错误或同一请求同时携带两种凭据均失败关闭，Token 不进入日志或响应。
+- Java EMBEDDING 能力探测固定发送 `X-Embedding-Input-Type: query`，继续复用公共 `Auth-Token`、UCID、trace 和上游错误脱敏程序，不按 Provider ID、模型 ID 或 Base URL 写特殊 Bearer 分支。
+- 补充 Python/Java 安全回归并修正一条仍期待 Bearer 的陈旧网关测试；同步模型网关、CPU BGE、HTTP API 与记忆部署文档。
+
+### How
+
+- `embedding-service` 全量 pytest 5/5 通过，覆盖 Bearer、平台 `Auth-Token`、错误 Token、双认证头拒绝、缺少输入类型和固定模型校验。
+- JDK 25 下 `mvn -q -DappLogDir=target/log -pl test-agent-model-gateway -am test` 通过；模型网关模块 19/19，通过测试确认探测 URL、`Auth-Token` 和固定 `query` 头。
+- 使用根目录 `.env.test` 的 `192.168.8.100:15432/testagent_dev` 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；后端 26 模块构建成功、readiness 为 `UP`、前端 3000 返回 200，Java 与 `.100` PostgreSQL 建立真实连接。
+
+### Result
+
+- 固定 CPU BGE 与平台模型目录的认证和向量语义契约已对齐；升级 BGE 镜像与 Java 后，正确配置的 `memory-bge-small-zh-v1.5` 可进入真实 EMBEDDING 探测。
+- 本次不修改响应 DTO、RunEvent、数据库/Flyway、部署拓扑、环境变量、generated SDK 或 OpenCode 只读源码。企业 `.160` BGE 镜像、双后台 Java 和离线内外层 ZIP 尚未重建/部署，现场真实探测仍需按企业包流程完成最终验收。

@@ -72,9 +72,19 @@ def create_app(dependencies: Dependencies) -> FastAPI:
         del exception
         return _error(request, 422, "VALIDATION_ERROR", "embedding 请求参数不合法")
 
-    def authenticate(authorization: str | None = Header(default=None)) -> None:
-        expected = f"Bearer {dependencies.settings.api_key.get_secret_value()}"
-        if authorization is None or not compare_digest(authorization, expected):
+    def authenticate(
+        authorization: str | None = Header(default=None),
+        auth_token: str | None = Header(default=None, alias="Auth-Token"),
+    ) -> None:
+        # 运维探活沿用 Bearer，平台模型网关固定使用 Auth-Token；同时出现时拒绝，避免认证来源歧义。
+        if (authorization is None) == (auth_token is None):
+            raise ServiceError(401, "UNAUTHENTICATED", "embedding 服务认证失败")
+        api_key = dependencies.settings.api_key.get_secret_value()
+        bearer_valid = authorization is not None and compare_digest(
+            authorization, f"Bearer {api_key}"
+        )
+        platform_token_valid = auth_token is not None and compare_digest(auth_token, api_key)
+        if not bearer_valid and not platform_token_valid:
             raise ServiceError(401, "UNAUTHENTICATED", "embedding 服务认证失败")
 
     @app.get("/health")

@@ -37,6 +37,13 @@ async def test_openai_embeddings_requires_auth_fixed_model_and_input_type() -> N
         )
         assert unauthorized.status_code == 401
 
+        missing_input_type = await client.post(
+            "/v1/embeddings",
+            headers={"Authorization": f"Bearer {settings.api_key.get_secret_value()}"},
+            json={"model": MODEL_ID, "input": "测试"},
+        )
+        assert missing_input_type.status_code == 422
+
         wrong_model = await client.post(
             "/v1/embeddings",
             headers=headers,
@@ -54,6 +61,42 @@ async def test_openai_embeddings_requires_auth_fixed_model_and_input_type() -> N
         assert len(payload["data"]) == 2
         assert len(payload["data"][0]["embedding"]) == MODEL_DIMENSION
         assert model.calls == [(["边界", "异常"], "query")]
+
+
+@pytest.mark.asyncio
+async def test_platform_auth_token_is_supported_without_ambiguous_credentials() -> None:
+    settings = EmbeddingServiceSettings(
+        _env_file=None,
+        api_key="platform-key-" + "p" * 32,
+    )
+    model = FakeModel()
+    app = create_app(Dependencies(settings, model))  # type: ignore[arg-type]
+    transport = httpx.ASGITransport(app=app)
+    api_key = settings.api_key.get_secret_value()
+    async with httpx.AsyncClient(transport=transport, base_url="http://embedding") as client:
+        response = await client.post(
+            "/v1/embeddings",
+            headers={
+                "Auth-Token": api_key,
+                "X-Embedding-Input-Type": "query",
+            },
+            json={"model": MODEL_ID, "input": "health check"},
+        )
+        assert response.status_code == 200
+
+        wrong_token = await client.get("/ready", headers={"Auth-Token": "wrong"})
+        assert wrong_token.status_code == 401
+
+        ambiguous = await client.get(
+            "/ready",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Auth-Token": api_key,
+            },
+        )
+        assert ambiguous.status_code == 401
+
+    assert model.calls == [(["health check"], "query")]
 
 
 @pytest.mark.asyncio

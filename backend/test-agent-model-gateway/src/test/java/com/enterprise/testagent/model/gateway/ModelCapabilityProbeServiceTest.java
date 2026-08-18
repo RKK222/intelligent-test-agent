@@ -103,6 +103,40 @@ class ModelCapabilityProbeServiceTest {
                 "/v1/audio/transcriptions");
     }
 
+    @Test
+    void probesEmbeddingWithPlatformAuthTokenAndExplicitQueryInputType() {
+        AtomicReference<ClientRequest> captured = new AtomicReference<>();
+        WebClient client = WebClient.builder()
+                .exchangeFunction(request -> {
+                    captured.set(request);
+                    return Mono.just(ClientResponse.create(HttpStatus.OK).body("{}").build());
+                })
+                .build();
+        InternalModelProviderModel embeddingModel = new InternalModelProviderModel(
+                "provider-a", "memory-bge-small-zh-v1.5", "BAAI/bge-small-zh-v1.5",
+                "固定 CPU BGE", null, true, Set.of(ModelCapability.EMBEDDING), Set.of(), null, NOW, NOW);
+        ModelCapabilityProbeService service = new ModelCapabilityProbeService(
+                new FixedProviders(),
+                new CapturingModels(embeddingModel),
+                client,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        ModelCapabilityProbeResult result = service.probe(
+                "provider-a",
+                "memory-bge-small-zh-v1.5",
+                ModelCapability.EMBEDDING,
+                "AUTH_ADMIN",
+                "trace_probe_embedding").block();
+
+        assertThat(result.succeeded()).isTrue();
+        assertThat(captured.get().url().toString()).isEqualTo("http://models.internal/v1/embeddings");
+        assertThat(captured.get().headers().getFirst(HttpHeaders.AUTHORIZATION)).isNull();
+        assertThat(captured.get().headers().getFirst(OpenAiUpstreamSupport.AUTH_TOKEN_HEADER))
+                .isEqualTo("provider-secret");
+        assertThat(captured.get().headers().getFirst(
+                ModelGatewayForwardingService.EMBEDDING_INPUT_TYPE_HEADER)).isEqualTo("query");
+    }
+
     private static InternalModelProviderModel model() {
         return new InternalModelProviderModel(
                 "provider-a", "enterprise-chat", "upstream-chat", "企业对话", 128_000L, true,

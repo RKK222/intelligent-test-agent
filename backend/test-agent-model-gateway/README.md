@@ -10,7 +10,8 @@
 - `ModelGatewayCatalogService` 只发布已启用 Provider、已启用模型且最近探测成功的能力，公开模型 ID 跨供应商
   唯一；解析后才把公开 ID 改写成上游 ID。
 - `ModelCapabilityProbeService` 对九项能力使用固定最小样本和对应固定端点，统一覆盖可信 `Auth-Token`、UCID
-  与 trace header；网络和非 2xx 只返回安全失败结果。
+  与 trace header；EMBEDDING 还固定发送 `X-Embedding-Input-Type: query`，兼容内部 CPU BGE 的显式向量语义；
+  网络和非 2xx 只返回安全失败结果。
 - `ModelGatewayForwardingService` 支持 JSON、SSE 与 transcription multipart，执行能力门禁、流式取消、分阶段
   timeout、固定上游错误、usage 有界提取和每日增量。连接超时为10秒；交互式LobeHub响应头等待30秒，
   Memory 抽取请求允许120秒冷启动；首个响应块与后续空闲仍分别限制为30秒和120秒。

@@ -100,13 +100,19 @@ public class ModelCapabilityProbeService implements ModelCapabilityProbe {
             String traceId) {
         WebClient.RequestBodySpec spec = webClient.post()
                 .uri(url)
-                .headers(headers -> OpenAiUpstreamSupport.applyTrustedRequestHeaders(
-                        headers,
-                        authToken,
-                        ucid,
-                        traceId,
-                        request.multipart() == null ? MediaType.APPLICATION_JSON : MediaType.MULTIPART_FORM_DATA,
-                        List.of(MediaType.APPLICATION_JSON, MediaType.APPLICATION_OCTET_STREAM)));
+                .headers(headers -> {
+                    OpenAiUpstreamSupport.applyTrustedRequestHeaders(
+                            headers,
+                            authToken,
+                            ucid,
+                            traceId,
+                            request.multipart() == null ? MediaType.APPLICATION_JSON : MediaType.MULTIPART_FORM_DATA,
+                            List.of(MediaType.APPLICATION_JSON, MediaType.APPLICATION_OCTET_STREAM));
+                    if (request.embeddingInputType() != null) {
+                        headers.set(ModelGatewayForwardingService.EMBEDDING_INPUT_TYPE_HEADER,
+                                request.embeddingInputType());
+                    }
+                });
         WebClient.RequestHeadersSpec<?> headersSpec;
         if (request.multipart() != null) {
             headersSpec = spec.body(BodyInserters.fromMultipartData(request.multipart().build()));
@@ -156,7 +162,7 @@ public class ModelCapabilityProbeService implements ModelCapabilityProbe {
                     "messages", List.of(Map.of("role", "user", "content", "1+1")),
                     "reasoning_effort", "low",
                     "max_tokens", 1));
-            case EMBEDDING -> json("/embeddings", Map.of("model", model, "input", "health check"));
+            case EMBEDDING -> embedding(model);
             case RERANK -> json("/rerank", Map.of(
                     "model", model,
                     "query", "health check",
@@ -175,7 +181,16 @@ public class ModelCapabilityProbeService implements ModelCapabilityProbe {
     }
 
     private static ProbeRequest json(String path, Object body) {
-        return new ProbeRequest(path, body, null);
+        return new ProbeRequest(path, body, null, null);
+    }
+
+    /** Embedding 探测固定使用查询向量语义，兼容要求显式输入类型的内部 CPU BGE。 */
+    private static ProbeRequest embedding(String model) {
+        return new ProbeRequest(
+                "/embeddings",
+                Map.of("model", model, "input", "health check"),
+                null,
+                "query");
     }
 
     private static ProbeRequest transcription(String model) {
@@ -187,7 +202,7 @@ public class ModelCapabilityProbeService implements ModelCapabilityProbe {
                 return "health-check.wav";
             }
         }).contentType(MediaType.parseMediaType("audio/wav"));
-        return new ProbeRequest("/audio/transcriptions", null, builder);
+        return new ProbeRequest("/audio/transcriptions", null, builder, null);
     }
 
     /** 生成 100ms/8kHz/16-bit 单声道静音 WAV，避免探测依赖外部文件。 */
@@ -214,6 +229,10 @@ public class ModelCapabilityProbeService implements ModelCapabilityProbe {
                 .build();
     }
 
-    private record ProbeRequest(String path, Object jsonBody, MultipartBodyBuilder multipart) {
+    private record ProbeRequest(
+            String path,
+            Object jsonBody,
+            MultipartBodyBuilder multipart,
+            String embeddingInputType) {
     }
 }
