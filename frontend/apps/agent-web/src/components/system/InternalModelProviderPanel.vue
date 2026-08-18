@@ -327,9 +327,10 @@ async function loadModelCatalog(providerId = selectedCatalogProviderId.value) {
 }
 
 /**
- * 保存目录后后端会清空旧探测状态；“保存并探测 CHAT”在同一操作中补做真实探测，成功后即可被记忆配置选中。
+ * 保存目录后后端会清空该 Provider 的全部旧探测状态。
+ * 指定能力时除探测本次目标能力外，还会重新探测保存前已经成功的能力，避免探测 EMBEDDING 时意外清掉 CHAT 等可用状态。
  */
-async function saveModelCatalog(probeChat: boolean) {
+async function saveModelCatalog(probeCapability: InternalModelCapability | null) {
   const providerId = selectedCatalogProviderId.value;
   if (!providerId) {
     ElMessage.warning("请先保存并选择供应商");
@@ -340,11 +341,15 @@ async function saveModelCatalog(probeChat: boolean) {
     ElMessage.warning(validationMessage);
     return;
   }
-  if (probeChat && !canProbeSelectedProvider.value) {
-    ElMessage.warning("执行 CHAT 探测前，请先启用供应商并配置 Token");
+  if (probeCapability && !canProbeSelectedProvider.value) {
+    ElMessage.warning(`执行 ${probeCapability} 探测前，请先启用供应商并配置 Token`);
     return;
   }
 
+  const previouslyProbedCapabilities = new Map(modelRows.value.map((row) => [
+    row.modelId.trim(),
+    [...row.probedCapabilities]
+  ]));
   modelCatalogSaving.value = true;
   modelCatalogError.value = "";
   try {
@@ -363,26 +368,43 @@ async function saveModelCatalog(probeChat: boolean) {
     });
     modelRows.value = saved.map(toModelRow);
 
-    if (!probeChat) {
+    if (!probeCapability) {
       ElMessage.success("模型目录已保存；目录变更后请重新执行能力探测");
       return;
     }
-    const chatModels = saved.filter((model) => model.enabled && model.declaredCapabilities.includes("CHAT"));
-    if (chatModels.length === 0) {
-      ElMessage.warning("模型目录已保存，但没有启用且声明 CHAT 能力的模型");
+    const targetModels = saved.filter((model) => model.enabled
+      && model.declaredCapabilities.includes(probeCapability));
+    if (targetModels.length === 0) {
+      ElMessage.warning(`模型目录已保存，但没有启用且声明 ${probeCapability} 能力的模型`);
       return;
     }
-    const results = await Promise.allSettled(chatModels.map((model) =>
-      api.probeInternalModelProviderModel(providerId, model.modelId, "CHAT")
-    ));
+
+    const probeTargets = saved.flatMap((model) => {
+      if (!model.enabled) return [];
+      const capabilities = new Set<InternalModelCapability>();
+      for (const capability of previouslyProbedCapabilities.get(model.modelId) ?? []) {
+        if (model.declaredCapabilities.includes(capability)) capabilities.add(capability);
+      }
+      if (model.declaredCapabilities.includes(probeCapability)) capabilities.add(probeCapability);
+      return [...capabilities].map((capability) => ({ modelId: model.modelId, capability }));
+    });
+    const results = await Promise.allSettled(probeTargets.map(async (target) => ({
+      ...target,
+      result: await api.probeInternalModelProviderModel(providerId, target.modelId, target.capability)
+    })));
     await loadModelCatalog(providerId);
-    const successfulCount = results.filter((result) =>
-      result.status === "fulfilled" && result.value.succeeded
+    const targetResults = results.filter((result) => result.status === "rejected"
+      || result.value.capability === probeCapability);
+    const successfulCount = targetResults.filter((result) =>
+      result.status === "fulfilled" && result.value.result.succeeded
     ).length;
-    if (successfulCount === chatModels.length) {
-      ElMessage.success("CHAT 模型已保存并探测成功，可在记忆配置中选择");
+    if (successfulCount === targetModels.length) {
+      const usageHint = probeCapability === "CHAT"
+        ? "可在记忆配置中选择"
+        : "固定 CPU BGE 和企业 Embedding 可被记忆配置校验";
+      ElMessage.success(`${probeCapability} 模型已保存并探测成功，${usageHint}`);
     } else {
-      ElMessage.warning(`模型目录已保存，CHAT 探测成功 ${successfulCount}/${chatModels.length}；请检查上游模型 ID、Base URL 和 Token`);
+      ElMessage.warning(`模型目录已保存，${probeCapability} 探测成功 ${successfulCount}/${targetModels.length}；请检查上游模型 ID、Base URL 和 Token`);
     }
   } catch (error) {
     modelCatalogError.value = formatError(error) || "模型目录保存或探测失败";
@@ -682,7 +704,7 @@ function formatError(error: unknown) {
           <div>
             <div class="internal-provider-eyebrow"><TestTube2 :size="14" /> Provider → Models</div>
             <h3>模型目录与能力探测</h3>
-            <p>配置公开模型与上游模型 ID；目录每次保存后都必须重新探测，探测成功的 CHAT 模型才会进入记忆配置下拉框。</p>
+            <p>配置公开模型与上游模型 ID；目录每次保存后都必须重新探测，记忆配置要求 CHAT 与固定 CPU BGE 分别通过对应能力探测。</p>
           </div>
           <div class="internal-provider-section-actions model-catalog-actions">
             <el-select
@@ -708,7 +730,7 @@ function formatError(error: unknown) {
               size="small"
               :loading="modelCatalogSaving"
               :disabled="!selectedCatalogProviderId || modelCatalogLoading"
-              @click="saveModelCatalog(false)"
+              @click="saveModelCatalog(null)"
             >保存模型目录</el-button>
             <el-button
               size="small"
@@ -716,8 +738,17 @@ function formatError(error: unknown) {
               :icon="TestTube2"
               :loading="modelCatalogSaving"
               :disabled="!selectedCatalogProviderId || modelCatalogLoading || !canProbeSelectedProvider"
-              @click="saveModelCatalog(true)"
+              @click="saveModelCatalog('CHAT')"
             >保存并探测 CHAT</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :icon="TestTube2"
+              :loading="modelCatalogSaving"
+              :disabled="!selectedCatalogProviderId || modelCatalogLoading || !canProbeSelectedProvider"
+              @click="saveModelCatalog('EMBEDDING')"
+            >保存并探测 EMBEDDING</el-button>
           </div>
         </header>
 
@@ -814,7 +845,7 @@ function formatError(error: unknown) {
                 <td class="model-probe-status">
                   <el-tag
                     size="small"
-                    :type="row.probedCapabilities.includes('CHAT') ? 'success' : 'info'"
+                    :type="row.probedCapabilities.length > 0 ? 'success' : 'info'"
                     effect="plain"
                   >{{ formatProbedCapabilities(row) }}</el-tag>
                   <small v-if="row.lastProbedAt">{{ formatDate(row.lastProbedAt) }}</small>
@@ -832,14 +863,14 @@ function formatError(error: unknown) {
               </tr>
               <tr v-if="modelRows.length === 0">
                 <td colspan="9" class="internal-provider-empty">
-                  当前供应商没有模型。点击“新增模型”，填写上游真实 Model ID，然后执行“保存并探测 CHAT”。
+                  当前供应商没有模型。点击“新增模型”，填写上游真实 Model ID，然后执行对应能力的保存与探测。
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
         <div v-if="selectedCatalogProviderId && !canProbeSelectedProvider" class="model-catalog-hint">
-          当前供应商未启用或未配置 Token：可以保存目录，但必须先完成供应商关联，才能执行 CHAT 真探测。
+          当前供应商未启用或未配置 Token：可以保存目录，但必须先完成供应商关联，才能执行真实能力探测。
         </div>
       </section>
 

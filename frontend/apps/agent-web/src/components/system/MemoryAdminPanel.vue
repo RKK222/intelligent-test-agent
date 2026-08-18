@@ -49,6 +49,10 @@ const selectedChatModelUnavailable = computed(() => Boolean(chatModelId.value)
   && !chatModels.value.some((model) => model.modelId === chatModelId.value));
 const selectedEmbeddingModelUnavailable = computed(() => Boolean(enterpriseEmbeddingModelId.value)
   && !embeddingModels.value.some((model) => model.modelId === enterpriseEmbeddingModelId.value));
+const cpuEmbeddingModelUnavailable = computed(() => Boolean(settings.value?.cpuEmbeddingModelId)
+  && !chatModelsLoading.value
+  && !chatModelsError.value
+  && !embeddingModels.value.some((model) => model.modelId === settings.value?.cpuEmbeddingModelId));
 
 onMounted(() => void refreshAll());
 
@@ -283,6 +287,10 @@ async function saveSettings() {
             <span>CPU Embedding profile</span>
             <code>{{ settings.cpuEmbeddingModelId }}</code>
             <small>固定 512 维 BGE 服务；外网测试和企业内网复用同一离线镜像。</small>
+            <div v-if="cpuEmbeddingModelUnavailable" class="memory-model-blocker" role="alert">
+              <span>固定 CPU BGE 尚未通过 EMBEDDING 探测，当前策略无法保存。</span>
+              <button type="button" @click="emit('configureModels')">配置并探测固定 CPU Embedding 模型</button>
+            </div>
           </div>
           <section class="embedding-technical" aria-labelledby="embedding-technical-title">
             <div>
@@ -307,7 +315,7 @@ async function saveSettings() {
               <small>{{ profile.collection }} · {{ profile.fingerprint }}</small>
             </div>
           </dl>
-          <button class="memory-admin-primary" type="button" :disabled="saving" @click="saveSettings"><Save :size="15" />{{ saving ? "保存中" : "保存策略" }}</button>
+          <button class="memory-admin-primary" type="button" :disabled="saving || cpuEmbeddingModelUnavailable" @click="saveSettings"><Save :size="15" />{{ saving ? "保存中" : "保存策略" }}</button>
         </section>
 
       </div>
@@ -370,6 +378,8 @@ async function saveSettings() {
 .memory-admin-field small, .memory-admin-switch small { color: var(--memory-muted); font-size: 10px; font-weight: 400; line-height: 1.5; }
 .memory-admin-field .memory-inline-error { color: #c2414b; }
 .memory-admin .memory-model-empty-action { justify-self: start; border-color: var(--memory-blue); color: var(--memory-blue); }
+.memory-model-blocker { display: grid; gap: 7px; padding: 9px 10px; border: 1px solid #f5c2c7; border-radius: 6px; background: #fff7f7; color: #b42318; font-size: 10px; font-weight: 500; line-height: 1.5; }
+.memory-admin .memory-model-blocker button { justify-self: start; min-height: 28px; border-color: currentColor; background: transparent; color: inherit; }
 .memory-model-option, .memory-user-option { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(90px, .7fr) minmax(150px, 1.2fr); align-items: center; gap: 10px; width: 100%; }
 .memory-model-option strong, .memory-user-option strong { overflow: hidden; color: var(--el-text-color-primary, #1f2937); text-overflow: ellipsis; white-space: nowrap; }
 .memory-model-option span, .memory-user-option span { overflow: hidden; color: var(--el-text-color-regular, #6b7280); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }

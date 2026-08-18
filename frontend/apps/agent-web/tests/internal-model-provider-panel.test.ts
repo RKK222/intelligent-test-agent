@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
+  InternalModelCapability,
   InternalModelProviderManagementResponse,
   InternalModelProviderModel
 } from "@test-agent/shared-types";
@@ -53,6 +54,19 @@ const configuredChatModel: InternalModelProviderModel = {
   lastProbedAt: null
 };
 
+const configuredEmbeddingModel: InternalModelProviderModel = {
+  providerId: "enterprise-qwen",
+  modelId: "memory-bge-small-zh-v1.5",
+  upstreamModelId: "BAAI/bge-small-zh-v1.5",
+  displayName: "固定 CPU BGE",
+  contextLimit: null,
+  embeddingDimension: 512,
+  enabled: true,
+  declaredCapabilities: ["EMBEDDING"],
+  probedCapabilities: [],
+  lastProbedAt: null
+};
+
 function createApi(overrides: Partial<BackendApiClient> = {}): BackendApiClient {
   return {
     getInternalModelProviders: vi.fn().mockResolvedValue(providerResponse),
@@ -69,11 +83,15 @@ function createApi(overrides: Partial<BackendApiClient> = {}): BackendApiClient 
     updateInternalModelProviders: vi.fn().mockResolvedValue(providerResponse),
     getInternalModelProviderModels: vi.fn().mockResolvedValue([]),
     updateInternalModelProviderModels: vi.fn().mockResolvedValue([configuredChatModel]),
-    probeInternalModelProviderModel: vi.fn().mockResolvedValue({
-      capability: "CHAT",
+    probeInternalModelProviderModel: vi.fn().mockImplementation(async (
+      _providerId: string,
+      _modelId: string,
+      capability: InternalModelCapability
+    ) => ({
+      capability,
       succeeded: true,
       probedAt: "2026-08-18T08:00:00Z"
-    }),
+    })),
     refreshInternalModelProviders: vi.fn().mockResolvedValue({
       providers: [], tokenConfigured: true, loadedAt: "2026-07-22T08:00:00Z"
     }),
@@ -271,6 +289,78 @@ describe("InternalModelProviderPanel", () => {
     ));
     await waitFor(() => expect(api.probeInternalModelProviderModel).toHaveBeenCalledWith(
       "enterprise-qwen", "enterprise-chat", "CHAT"
+    ));
+    view.queryClient.clear();
+  });
+
+  it("configures and probes the fixed EMBEDDING model from the same page", async () => {
+    const enabledProviderResponse: InternalModelProviderManagementResponse = {
+      providers: [{
+        ...providerResponse.providers[0]!,
+        enabled: true,
+        tokenId: 11,
+        tokenName: "Qwen Token",
+        tokenConfigured: true
+      }],
+      tokenConfigured: true
+    };
+    const api = createApi({
+      getInternalModelProviders: vi.fn().mockResolvedValue(enabledProviderResponse),
+      getInternalModelProviderModels: vi.fn().mockResolvedValue([configuredEmbeddingModel]),
+      updateInternalModelProviderModels: vi.fn().mockResolvedValue([configuredEmbeddingModel])
+    });
+    const view = renderPanel(api);
+
+    expect((await view.findByRole("textbox", { name: "模型显示名 1" }) as HTMLInputElement).value)
+      .toBe("固定 CPU BGE");
+    await fireEvent.click(view.getByRole("button", { name: "保存并探测 EMBEDDING" }));
+
+    await waitFor(() => expect(api.updateInternalModelProviderModels).toHaveBeenCalledWith(
+      "enterprise-qwen",
+      { models: [expect.objectContaining({
+        modelId: "memory-bge-small-zh-v1.5",
+        upstreamModelId: "BAAI/bge-small-zh-v1.5",
+        embeddingDimension: 512,
+        capabilities: ["EMBEDDING"]
+      })] }
+    ));
+    await waitFor(() => expect(api.probeInternalModelProviderModel).toHaveBeenCalledWith(
+      "enterprise-qwen", "memory-bge-small-zh-v1.5", "EMBEDDING"
+    ));
+    view.queryClient.clear();
+  });
+
+  it("reprobes previously successful capabilities after catalog replacement", async () => {
+    const combinedModel: InternalModelProviderModel = {
+      ...configuredEmbeddingModel,
+      declaredCapabilities: ["CHAT", "EMBEDDING"],
+      probedCapabilities: ["CHAT"]
+    };
+    const enabledProviderResponse: InternalModelProviderManagementResponse = {
+      providers: [{
+        ...providerResponse.providers[0]!,
+        enabled: true,
+        tokenId: 11,
+        tokenName: "Qwen Token",
+        tokenConfigured: true
+      }],
+      tokenConfigured: true
+    };
+    const api = createApi({
+      getInternalModelProviders: vi.fn().mockResolvedValue(enabledProviderResponse),
+      getInternalModelProviderModels: vi.fn().mockResolvedValue([combinedModel]),
+      updateInternalModelProviderModels: vi.fn().mockResolvedValue([combinedModel])
+    });
+    const view = renderPanel(api);
+
+    await view.findByText("已通过 CHAT");
+    await fireEvent.click(view.getByRole("button", { name: "保存并探测 EMBEDDING" }));
+
+    await waitFor(() => expect(api.probeInternalModelProviderModel).toHaveBeenCalledWith(
+      "enterprise-qwen", "memory-bge-small-zh-v1.5", "CHAT"
+    ));
+    await waitFor(() => expect(api.probeInternalModelProviderModel).toHaveBeenCalledWith(
+      "enterprise-qwen", "memory-bge-small-zh-v1.5", "EMBEDDING"
     ));
     view.queryClient.clear();
   });

@@ -344,7 +344,7 @@ nc -vz 122.233.30.134 15433
 
 成功条件：BGE 校验最长等待 180 秒并显示固定 512 维模型；Alembic 到 `20260809_01`；Mem0 与 VIP 校验各最长等待 120 秒并显示 `rawMessageCount=0`。`.160` 只新增 `test-agent-memory-embedding`、`test-agent-memory-node-160-1`、`test-agent-memory-vip`，不启动记忆 PostgreSQL 容器。
 
-上述命令只验证数据面。随后还必须在系统管理中新增 CPU 模型供应商：base URL 为 `http://122.233.30.160:18989/v1`，Token 使用 `embedding.env` 中的 API key；模型 ID 为 `memory-bge-small-zh-v1.5`，上游模型 ID 为 `BAAI/bge-small-zh-v1.5`，能力为 `EMBEDDING`，`embeddingDimension=512`。两台 Java 的 `backend.env` 继续指向 `http://122.233.30.160:18888`，service key 与 HMAC 必须和同一份 `memory.env` 一致。
+上述命令只验证数据面。随后还必须在系统管理中新增 CPU 模型供应商：base URL 为 `http://122.233.30.160:18989/v1`，Token 使用 `embedding.env` 中的 API key；模型 ID 为 `memory-bge-small-zh-v1.5`，上游模型 ID 为 `BAAI/bge-small-zh-v1.5`，能力为 `EMBEDDING`，`embeddingDimension=512`。保存目录时点击“保存并探测 EMBEDDING”，确认状态显示“已通过 EMBEDDING”；只保存模型目录或只探测 CHAT 都不能满足记忆策略校验。两台 Java 的 `backend.env` 继续指向 `http://122.233.30.160:18888`，service key 与 HMAC 必须和同一份 `memory.env` 一致。
 
 固定发布顺序：
 
