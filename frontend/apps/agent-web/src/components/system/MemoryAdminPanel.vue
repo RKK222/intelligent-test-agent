@@ -22,6 +22,9 @@ import {
 
 const api = inject<BackendApiClient>("api")!;
 if (!api) throw new Error("MemoryAdminPanel requires backend api");
+const emit = defineEmits<{
+  configureModels: [];
+}>();
 
 const loading = ref(true);
 const saving = ref(false);
@@ -235,6 +238,12 @@ async function saveSettings() {
               </el-option>
             </el-select>
             <small>记忆提取优先使用该模型；这里只显示已启用且通过 CHAT 能力探测的内部模型。</small>
+            <button
+              v-if="!chatModelsLoading && chatModels.length === 0"
+              type="button"
+              class="memory-model-empty-action"
+              @click="emit('configureModels')"
+            >配置并探测 CHAT 模型</button>
             <small v-if="chatModelsError" class="memory-inline-error">{{ chatModelsError }}</small>
           </div>
           <div class="memory-admin-field memory-admin-field--spaced">
@@ -360,6 +369,7 @@ async function saveSettings() {
 .memory-admin-field :deep(.el-select__selected-item) { color: var(--memory-text); font-size: 12px; font-weight: 500; }
 .memory-admin-field small, .memory-admin-switch small { color: var(--memory-muted); font-size: 10px; font-weight: 400; line-height: 1.5; }
 .memory-admin-field .memory-inline-error { color: #c2414b; }
+.memory-admin .memory-model-empty-action { justify-self: start; border-color: var(--memory-blue); color: var(--memory-blue); }
 .memory-model-option, .memory-user-option { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(90px, .7fr) minmax(150px, 1.2fr); align-items: center; gap: 10px; width: 100%; }
 .memory-model-option strong, .memory-user-option strong { overflow: hidden; color: var(--el-text-color-primary, #1f2937); text-overflow: ellipsis; white-space: nowrap; }
 .memory-model-option span, .memory-user-option span { overflow: hidden; color: var(--el-text-color-regular, #6b7280); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }

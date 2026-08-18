@@ -11,17 +11,17 @@ export type UserMessageAppearance = {
 };
 
 const OWN_MESSAGE_STYLE = {
-  backgroundColor: "#B2EDDF",
+  backgroundColor: "#EAF3FD",
   border: "none"
 };
 
 const OTHER_MESSAGE_STYLE = {
-  backgroundColor: "var(--ta-chat-other-user-bg, #DED9F6)",
+  backgroundColor: "var(--ta-chat-other-user-bg, #EAF3FD)",
   border: "none"
 };
 
 /**
- * 消息颜色始终以当前查看者为基准：自己使用绿色，其他人统一使用紫色，且都不显示边框。
+ * 本人及共享会话中的其他用户消息统一使用浅蓝色，发送人归因只控制姓名和操作权限。
  * 旧消息没有发送人归因时按自己发送处理，保持历史数据兼容。
  */
 export function resolveUserMessageAppearance(

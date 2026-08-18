@@ -191,6 +191,16 @@ describe("MemoryAdminPanel", () => {
     expect(view.container.querySelector(".memory-model-select .el-select__clear")).toBeNull();
   });
 
+  it("offers an in-product configuration path when no probed CHAT model exists", async () => {
+    const backendApi = api();
+    vi.mocked(backendApi.getInternalModelProviderModels).mockResolvedValue([]);
+    const view = render(MemoryAdminPanel, { global: { provide: { api: backendApi } } });
+
+    const configureButton = await view.findByRole("button", { name: "配置并探测 CHAT 模型" });
+    await fireEvent.click(configureButton);
+    expect(view.emitted("configureModels")).toHaveLength(1);
+  });
+
   it("shows a stable management error and reloads global health and settings on retry", async () => {
     const backendApi = api();
     vi.mocked(backendApi.getQaMemoryAdminHealth)

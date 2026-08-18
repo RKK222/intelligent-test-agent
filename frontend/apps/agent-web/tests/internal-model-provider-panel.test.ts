@@ -4,7 +4,11 @@ import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendApiClient } from "@test-agent/backend-api";
-import type { CurrentUser, InternalModelProviderManagementResponse } from "@test-agent/shared-types";
+import type {
+  CurrentUser,
+  InternalModelProviderManagementResponse,
+  InternalModelProviderModel
+} from "@test-agent/shared-types";
 import InternalModelProviderPanel from "../src/components/system/InternalModelProviderPanel.vue";
 
 const currentUser: CurrentUser = {
@@ -36,6 +40,19 @@ const tokenDefinitions = [{
   updatedAt: "2026-07-22T08:00:00Z"
 }];
 
+const configuredChatModel: InternalModelProviderModel = {
+  providerId: "enterprise-qwen",
+  modelId: "enterprise-chat",
+  upstreamModelId: "Qwen3.6-27B",
+  displayName: "企业对话模型",
+  contextLimit: 128000,
+  embeddingDimension: null,
+  enabled: true,
+  declaredCapabilities: ["CHAT"],
+  probedCapabilities: [],
+  lastProbedAt: null
+};
+
 function createApi(overrides: Partial<BackendApiClient> = {}): BackendApiClient {
   return {
     getInternalModelProviders: vi.fn().mockResolvedValue(providerResponse),
@@ -50,6 +67,13 @@ function createApi(overrides: Partial<BackendApiClient> = {}): BackendApiClient 
     updateInternalModelToken: vi.fn().mockResolvedValue(tokenDefinitions[0]),
     deleteInternalModelToken: vi.fn().mockResolvedValue({ tokenId: 11, deleted: true }),
     updateInternalModelProviders: vi.fn().mockResolvedValue(providerResponse),
+    getInternalModelProviderModels: vi.fn().mockResolvedValue([]),
+    updateInternalModelProviderModels: vi.fn().mockResolvedValue([configuredChatModel]),
+    probeInternalModelProviderModel: vi.fn().mockResolvedValue({
+      capability: "CHAT",
+      succeeded: true,
+      probedAt: "2026-08-18T08:00:00Z"
+    }),
     refreshInternalModelProviders: vi.fn().mockResolvedValue({
       providers: [], tokenConfigured: true, loadedAt: "2026-07-22T08:00:00Z"
     }),
@@ -208,6 +232,46 @@ describe("InternalModelProviderPanel", () => {
         tokenId: 11
       })]
     }));
+    view.queryClient.clear();
+  });
+
+  it("configures and probes a CHAT model without requiring browser console commands", async () => {
+    const enabledProviderResponse: InternalModelProviderManagementResponse = {
+      providers: [{
+        ...providerResponse.providers[0]!,
+        enabled: true,
+        tokenId: 11,
+        tokenName: "Qwen Token",
+        tokenConfigured: true
+      }],
+      tokenConfigured: true
+    };
+    const api = createApi({
+      getInternalModelProviders: vi.fn().mockResolvedValue(enabledProviderResponse)
+    });
+    const view = renderPanel(api);
+
+    expect(await view.findByText("模型目录与能力探测")).toBeTruthy();
+    await waitFor(() => expect(api.getInternalModelProviderModels).toHaveBeenCalledWith("enterprise-qwen"));
+    await fireEvent.click(view.getByRole("button", { name: "新增模型" }));
+    await fireEvent.update(view.getByRole("textbox", { name: "公开 Model ID 1" }), "enterprise-chat");
+    await fireEvent.update(view.getByRole("textbox", { name: "上游 Model ID 1" }), "Qwen3.6-27B");
+    await fireEvent.update(view.getByRole("textbox", { name: "模型显示名 1" }), "企业对话模型");
+    await fireEvent.click(view.getByRole("button", { name: "保存并探测 CHAT" }));
+
+    await waitFor(() => expect(api.updateInternalModelProviderModels).toHaveBeenCalledWith(
+      "enterprise-qwen",
+      { models: [expect.objectContaining({
+        modelId: "enterprise-chat",
+        upstreamModelId: "Qwen3.6-27B",
+        displayName: "企业对话模型",
+        enabled: true,
+        capabilities: ["CHAT"]
+      })] }
+    ));
+    await waitFor(() => expect(api.probeInternalModelProviderModel).toHaveBeenCalledWith(
+      "enterprise-qwen", "enterprise-chat", "CHAT"
+    ));
     view.queryClient.clear();
   });
 
