@@ -11403,3 +11403,148 @@
 
 - 用户治理和两类灰度现在使用同一用户事实源，记忆配置保存一次后对所有已开放用户生效；客户端下载 capability 仍默认失败关闭，但已开放用户不会因实例健康查询而丢失入口。
 - 当前 dev 变更已完成代码、文档和数据库兼容门禁，等待与最新 release 做最终语义合并和实际服务重启验证；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未推送远端。
+
+## 2026-08-17 - 合并 dev 到 release 并保留近期部署演进
+
+### Why
+
+- 用户要求把 dev 整体合并到 release、解决已有冲突并切换主工作区，同时明确要求复核近期部署记录，不能在合并中丢失 release 的企业打包、迁移兼容、需求导入和可观测改动。
+
+### What
+
+- 以 release 的 `3ca040972` 为第一父提交合并 dev 的 `4fec97db9`；冲突处理中保留 release 较新的需求导入定向刷新、TCDS 统一请求、SCM Git 姓名补偿和模型 TTFT/ITL/Output TPS 筛选，同时并入 dev 的本地客户端、通用记忆与 ClickHouse 分析链路。
+- 修复合并后部署夹具遗漏：单节点配置渲染现在保留并校验 ClickHouse 连接与密码，同时清除禁用记忆能力时的密钥占位符；增量包和双后台完整包夹具纳入 PostgreSQL 专用 migration、ClickHouse DDL、全部兼容 migration 与两套 XXL V12 历史。
+- 双后台完整包测试不再绑定过期交付提交号，改为逐字比较包内 `START-HERE.md` 与当前 `MULTI-BACKEND.md`，避免最近 release 部署记录更新后门禁自身变成陈旧断言。
+
+### How
+
+- 相对合并前 release 执行部署路径删除审计，没有删除 `deploy/internal`、`docs/deployment`、`tools`、PostgreSQL/XXL migration；三个正式打包/部署脚本继续同时锁定分析 outbox、PostgreSQL trigger、ClickHouse DDL、本地客户端已执行兼容资源和 SCM Git 姓名 migration。
+- 前端全量 Vitest `2020 passed / 1 skipped`、agent-web typecheck、用户手册与生产构建通过；后端 24 模块应用聚合打包通过。
+- 真实 PostgreSQL Flyway 兼容矩阵 25/25 通过且无跳过；灰度应用/API/MyBatis/Flyway 命名测试同时纳入 reactor。`V20260817193414__local_client_rollout_users_create.sql` SHA-256 保持 `88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba`。
+- `verify-dev-scripts.sh`（避开本机既有 19070 mock 进程改用 19071）、`verify-internal-multi-backend-node.sh`、`verify-internal-incremental-components.sh`、`verify-internal-two-backend-complete-package.sh`、Shell 语法与 `git diff --check` 全部通过。
+
+### Result
+
+- release 的近期部署成果与 dev 新能力已形成同一可构建、可迁移、可封包的合并树；未修改 `.env*`、generated SDK、OpenCode 只读源码或任何已执行 migration 字节。
+- 企业真实 ARM 麒麟、本轮企业节点发布和中间件现场状态没有在本机重做，不能据此宣称企业环境已部署；下一步是完成 merge commit、切换主工作区到 release 并按 `.env.test` 实际重启验证。
+
+## 2026-08-18 - 修复 release 灰度入口与两套部署迁移历史
+
+### Why
+
+- 实际页面验证发现客户端灰度用户的下载按钮仍会闪现后消失：旧 Java 持有服务端 OpenCode 连接时，实例列表请求会被转发到旧节点并丢掉新增 capability，健康轮询随后覆盖当前 Java 的灰度判断。
+- release 合并后的真实重启又暴露两处部署历史遗漏：服务器 PostgreSQL 已执行 analytics release 后前向 migration，而 XXL MySQL 已按 release 路径执行 SCM V12 与 V13；合并树分别漏掉原字节兼容资源和 XXL V12 分叉兼容装配，不能靠改名、repair 或删除另一侧任务处理。
+
+### What
+
+- 新增当前 Java 直接判定的 `GET /api/internal/platform/local-opencode-client/download-access/me`；前端独立每 5 秒查询该资格，下载入口不再依赖可被跨 Java 转发的 OpenCode 实例响应。旧响应 capability 继续保留兼容，但不作为入口事实源。
+- 恢复 PostgreSQL analytics-after-release 两份已执行原字节资源及真实历史回归；恢复 XXL `XxlJobMigrationCompatibilityCustomizer`、analytics V12 隔离资源、SCM V12 主链和 V13 前向迁移，三个企业打包/部署脚本重新锁定全部 SHA-256。
+- 增量包夹具改为复制完整 `xxl-job/db`，确保 compatibility location 不会在 zip-only 门禁中再次遗漏；同步 HTTP API、本地客户端、XXL 架构、数据库、安全、测试和模块 README。
+
+### How
+
+- 真实 PostgreSQL 27 套 Spring Boot Flyway 历史升级全部通过；analytics 前向资源 SHA-256 分别为 `bd286b1d992e6ff715393fb39bbb47a7d44dfe425c3b4ea6571f62e74eed0eb1`、`399e8db352ded3f12d5b5a91fe8a07f6242a9afc07caa8c28589614a43dc50e`。
+- 服务器 XXL MySQL 只读核对确认 V12 为 SCM checksum `-211900485`、V13 为 `-1179215824`，两类任务各一条；恢复资源 SHA-256 分别为 analytics V12 `70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`、SCM V12 `2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739`、V13 `d7627696bcabc9f170f7709e298b46e28ba306a38f2251572c99b6b8175ff96a`。
+- 后端资格控制器 3/3、前端全量 Vitest 2020 passed / 1 skipped、agent-web typecheck/用户手册/production build、26 模块跳过测试打包、增量包/多后台节点/双后台完整包门禁、Shell 语法与 `git diff --check` 通过。
+- 按 `.env.test` / test profile 完整重启后，平台 health 为 UP、XXL readiness 为 200、前端为 200；真实页面中灰度开启后下载入口跨两个以上刷新周期仍可见，随后恢复测试用户原有非灰度状态，接口返回 `allowed=false` 且按钮消失。
+
+### Result
+
+- release 近期 SCM、ClickHouse/analytics、企业封包和本地客户端灰度能力同时保留；当前服务连接服务器 PostgreSQL `192.168.8.100:15432/testagent_dev` 与 XXL MySQL `192.168.8.100:13306/xxl_job`，没有修改 `.env*`、数据库 history、generated SDK 或 OpenCode 源码，也没有推送远端。
+- 本机 MySQL 8.4 Testcontainers 容器内部已 ready，但 Docker Desktop 暴露端口在 JDBC 握手阶段持续无响应，因此本轮 7 条空库/analytics V12/SCM V12/未知 checksum/并发自动化未取得结果并已终止；真实服务器 SCM V12 → V13 路径已验证，另一套 analytics V12 自动化仍以历史测试和原字节锁定为证，不能表述为本轮完整重跑。
+
+## 2026-08-18 - 按已部署中间件拓扑重打 release 企业增量包
+
+### Why
+
+- 用户确认企业 ClickHouse、Mem0、CPU BGE 与独立 pgvector 已部署完成，要求基于当前本地 `release` 重新封包；平台包不应重复携带或重启这些数据面镜像，但两台 Java 必须指向已确认的站点地址。
+- 上一版 `.4/.114` 敏感节点包早于这些集成配置，直接覆盖 `backend.env` 会丢失现场 ClickHouse 密码、Mem0 service key 与模型网关 HMAC；当前新增的本地客户端/analytics compatibility migration 也尚未全部进入最终 JAR 三层字节门禁。
+
+### What
+
+- 双后台封装在临时节点副本中固定启用 ClickHouse `122.233.30.147:8123/testagent_analytics` 和 Mem0 VIP `122.233.30.160:18888`，保持 backfill/旧汇总清理关闭；CK/Mem0/BGE/pgvector 镜像仍不进入平台包。
+- 复用既有 dotenv 读取、替换与逐机部署入口：旧节点包缺少三项运行密钥时只写继承标记，部署前从目标机已安装 `backend.env` 原样带入；键缺失、重复或长度不足会在覆盖配置和重启 Java 前失败，日志不输出密钥。
+- 内层构建、外层封装和目标机安装同时新增本地客户端主迁移、客户端灰度迁移、release 本地客户端兼容迁移和两份 analytics-after-release 兼容迁移的 SHA-256 校验；未修改任何 migration 文件字节。
+- 更新双后台手册与配置夹具，新增密钥继承成功/短值失败回归；`.4` 既有 Qwen 优先模型灰度随 worker runtime 复用保持不变。
+
+### How
+
+- `FlywayMigrationNamingTest` 15/15、运行密钥继承测试、增量组件门禁、双后台完整包门禁和多后台逐机门禁全部通过；相关 Shell `bash -n`、`git diff --check` 通过。
+- 正式后端薄 JAR、152 MiB 外置依赖和同源生产前端从当前工作树重建成功；新增 PostgreSQL/ClickHouse/XXL 资源均从最终 persistence/XXL JAR 逐项核对 SHA-256。
+- 本轮无企业签名私钥，默认全量命令在本地客户端签名步骤按设计停止；确认 `f5cfa6d77` 后客户端二进制源码无变化，并从既有 `0.1.1-dev-entryfix` 分发目录提取内嵌公钥验证 manifest 签名及 PKG/DEB 哈希后，以 `--zip-only` 复用该已验证制品，没有生成假签名。
+- 组件计划为 worker runtime `reuse`（`50f56c...2fb1`）和 toolbox `reuse`（`35447d...5040`）；最终包清单为 LobeHub `disabled`、memory 离线组件 `disabled`、本地客户端分发 `included`。外层内嵌内层逐字节一致，节点配置、前端入口、组件缺席项和新增 Flyway 资源独立解包复验通过。
+
+### Result
+
+- 固定名平台 ZIP 仅更新 Java、前端、部署脚本和新引入的本地客户端分发，不加载或重启 manager/worker/toolbox，也不重复交付已部署的 ClickHouse/Mem0/BGE/pgvector 镜像。
+- 现场发布前必须先导出平台 PostgreSQL 与 XXL MySQL 完整 `flyway_schema_history`，并确认 `.4/.114` 已安装配置各有三项真实运行密钥；任一未知 checksum、失败记录或密钥缺失都停止，禁止 `repair`、`outOfOrder`、手改 history 或写入本地开发密钥。
+- 本次未修改 `.env*`、HTTP API、RunEvent、业务数据库结构、generated SDK 或 OpenCode 只读源码；企业 `.4/.114/.2` 尚未执行本轮包，真实启动和功能验收仍以逐机发布结果为准。
+
+## 2026-08-18 - 为用户灰度开关补充即时保存确认与结果反馈
+
+### Why
+
+- 超级管理员在统一用户管理页点击记忆灰度或客户端灰度开关时会立即调用接口保存，但原成功提示没有明确“已保存”，失败只落在页面提示区，也缺少防误触确认，用户难以判断开关是否已持久化。
+
+### What
+
+- 两类灰度开关复用现有 `ElMessageBox`，提交前明确提示“确认后将立即保存”；确认成功后弹出带用户名、灰度类型和开关结果的可关闭“已保存”消息。
+- 取消确认不发请求；接口失败时弹出可关闭“保存失败”消息，并通过显式受控状态回滚保证开关视觉状态恢复到服务端原值。
+- 同步 agent-web README 与包说明，并扩展既有用户管理组件测试覆盖两类确认、成功消息、取消回滚和失败回滚。
+
+### How
+
+- 定向 Vitest `settings-user-management-panel.test.ts`、`scheduler-management-panel.test.ts` 共 31/31 通过；agent-web 用户手册、TypeScript 检查和 production build 成功，仅保留既有大 chunk 警告。
+- 使用真实本地前后端和超级管理员账号进入“系统管理 → 用户管理”，点击测试用户的记忆灰度开关后确认弹框包含“确认后将立即保存”，点击取消后开关保持 `false`，未改变服务器灰度数据；前端与后端 readiness 均为 200/UP。
+
+### Result
+
+- 灰度开关仍使用既有 API 即时保存，不新增接口、状态容器或重复组件；管理员现在能在提交前确认，并从成功/失败弹框明确判断保存结果。
+- 不涉及 HTTP API、RunEvent、数据库、Flyway、部署、性能或安全契约；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未推送远端。
+
+## 2026-08-18 - 修复企业已部署基线上的 Flyway 低版本阻塞
+
+### Why
+
+- `.4` 用上一轮完整包升级 Java 时，包校验、worker runtime 复用和旧 Java 停止均成功，但新 Java 被 Flyway 拒绝启动：企业库已经执行 `20260812204207` 及之后的 release/SCM migration，兼容装配仍暴露更低且未执行的本地客户端前向版本 `20260812202425`。
+- 该问题与 ClickHouse、Mem0、BGE、pgvector、manager 或 worker 健康无关；必须为已越过旧前向版本的企业历史提供更高版本路径，不能开启 `outOfOrder`、执行 `repair` 或修改 `flyway_schema_history`。
+
+### What
+
+- 新增企业已部署基线专用前向 migration `V20260818094330__local_client_credentials_create_runtime_after_enterprise_release.sql`，结构 SQL 与旧前向路径一致；`DatabaseMigrationCompatibilityCustomizer` 依据实际 history 在主链、旧前向和企业高版本前向三条互斥路径中选择，检测到多路径或未知 checksum 时继续失败关闭。
+- 后端构建、内层发布、外层完整包和目标机安装四层门禁都锁定新资源 SHA-256 `6d390354ddb9794c1f3730f09f1dd806ea74628f20fa6ea2857c1dee6774d25c`；同步后端、持久化、数据库和多后台部署说明。
+- 本轮仍只更新 Java、前端和部署资源；复用现有 worker runtime、manager、toolbox 与已签名本地客户端制品，不重复交付或重启已经部署的 ClickHouse、Mem0、BGE、pgvector 数据面。
+
+### How
+
+- `FlywayMigrationNamingTest` 15/15 通过；真实 PostgreSQL `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 29/29 通过，覆盖企业 SCM 基线首次升级、二次启动重校验、旧前向已执行历史和未知企业版本 checksum 拒绝。
+- 正式后端构建、正式前端类型检查/用户手册/production build、增量组件门禁、多后台节点门禁、双后台完整包门禁、相关 Shell `bash -n` 与 `git diff --check` 均通过；前端只保留既有大 chunk 警告。
+
+### Result
+
+- 当前 release 已能在附件对应的企业历史上按默认 Flyway 顺序执行 `20260818094330`，随后继续执行更高的客户端灰度 migration；旧主链、旧前向或企业高前向任一已执行历史都保留原字节复验。
+- 不涉及 HTTP API、RunEvent、业务逻辑、性能或安全契约；未修改 `.env*`、generated SDK、OpenCode 只读源码、任何已执行 migration 字节或数据库 history。最终企业包需完成重组和逐层哈希验证后再交付，`.4/.114/.2` 真实启动仍以现场逐机验收为准。
+
+## 2026-08-18 - 修复企业客户端下载跳转丢失外部端口
+
+### Why
+
+- 最新 release 现场通过企业域名 `mimo.sdc.cs.icbc:9996` 打开安装器时，Nginx 把相对 `return 302` 序列化为不含 `:9996` 的绝对 URL，浏览器随后访问默认 80 端口并得到 503；同一制品从 `.2:9996` 回环访问可正常 302 后下载 200，已排除文件缺失。
+- 同轮现场证据还确认运营事实与小时/日汇总已写入 ClickHouse，但首次历史回填关闭且用户维度未就绪；记忆 CHAT 下拉对应的内部模型目录为空；消息颜色源码和当前活动前端 chunk 均为既定的本人消息 `#B2EDDF`，不属于代码回退。
+
+### What
+
+- 在企业网关与独立下载 server 中关闭 Nginx 绝对重定向，使安装器、目录规范化及其它站内跳转返回相对 `Location`，由浏览器保留外部 `host:port`。
+- 扩展 Nginx 配置验证脚本，锁定两个 server 都生成 `absolute_redirect off;`；同步单/多后台部署说明和本地客户端部署、验收文档。
+- 未改变消息颜色、运营查询口径、模型目录数据或环境配置；后三项分别保留现有正确实现，并通过现场处置/排查命令完成后续定位。
+
+### How
+
+- `tools/verify-internal-nginx-config.sh` 通过，且使用本机已有 `nginx:1.27.2-alpine3.20` 镜像完成真实 `nginx -t`。
+- 消息颜色定向 Vitest 2 个文件 64/64 通过；`tools/verify-ai-docs.sh`、Shell 语法、`git diff --check` 和本次改动文件冲突标记扫描通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次 Nginx、测试和文档修改冲突的未完成事项。
+
+### Result
+
+- 新包部署并 reload Nginx 后，企业域名 `:9996` 的安装器跳转会保留原入口端口，不再因跳到默认端口返回 503；真实企业节点仍需按文档用 Mac/Linux User-Agent 跟随跳转验收 200。
+- 本次只修复现有部署脚本，不新增节点、服务、端口或强制依赖，符合 `release` 维护边界；不涉及 HTTP API、RunEvent、数据库结构、Flyway、性能或 generated SDK，未修改 `.env*` 或 OpenCode 只读源码。

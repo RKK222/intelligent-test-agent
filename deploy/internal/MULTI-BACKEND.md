@@ -482,6 +482,7 @@ TEST_AGENT_NGINX_RELOAD_MODE=binary
 - 发往 Java 前删除 `X-Test-Agent-Linux-Server-Id` 和外部伪造的 `X-Test-Agent-Backend-Routed`。
 - `proxy_next_upstream` 只包含 `error timeout`，不启用 `non_idempotent`，避免已发送的 Session/Run POST 被重复执行。
 - 继续生成 `listen 80`、`listen 9996`、WebSocket Upgrade、SSE 禁缓冲和长连接超时。
+- 站内跳转返回相对 `Location`，企业入口映射到本机其它端口时保留浏览器原始 `host:port`。
 
 配置失败时脚本会恢复旧文件，不再手工维护另一份多节点 Nginx 配置。普通共享控制面 API 不携带路由头，继续使用 `least_conn`；只有用户 OpenCode、会话、Run、SSE 和本地工作区请求采用精确首跳。一次性 WebSocket ticket 仍是 JVM 内存状态，但路由已经闭合：
 

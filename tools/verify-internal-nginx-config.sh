@@ -93,6 +93,7 @@ grep -Fq 'location = /downloads/local-opencode-client/stable/manifest.json {' "$
 grep -Fq 'location ^~ /downloads/local-opencode-client/releases/ {' "${CONF_PATH}"
 grep -Fq 'listen 8081;' "${CONF_PATH}"
 test "$(grep -Fc 'listen 8081;' "${CONF_PATH}")" = 1
+test "$(grep -Fc 'absolute_redirect off;' "${CONF_PATH}")" = 2
 test "$(grep -Fc 'location = /downloads/local-opencode-client/install.sh {' "${CONF_PATH}")" = 2
 test "$(grep -Fc 'location = /downloads/local-opencode-client/installer {' "${CONF_PATH}")" = 2
 test "$(grep -Fc 'location = /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg {' "${CONF_PATH}")" = 2
