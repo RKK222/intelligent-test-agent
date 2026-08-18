@@ -395,6 +395,7 @@ require_archive_entry "${release_listing}" deploy/internal/toolbox.env.example
 require_archive_entry "${release_listing}" deploy/internal/toolbox-docker.sh
 require_archive_entry "${release_listing}" deploy/internal/diagnose-toolbox.sh
 require_archive_entry "${release_listing}" deploy/internal/deploy-multi-backend-node.sh
+require_archive_entry "${release_listing}" deploy/internal/run-analytics-clickhouse-backfill.sh
 persistence_entry_count="$(grep -Ec '^dist/backend/lib/test-agent-persistence-[^/]+\.jar$' <<<"${release_listing}" || true)"
 if [[ "${persistence_entry_count}" != 1 ]]; then
   echo "Inner release must contain exactly one test-agent-persistence JAR, found ${persistence_entry_count}" >&2

@@ -144,6 +144,7 @@ cp "${ROOT_DIR}/tools/verify-python-libs.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/ensure-opencode-runtime-gitignore.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/run-analytics-clickhouse-backfill.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp -R "${ROOT_DIR}/deploy/internal/experience-workspace-template" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/verify-opencode-tool-runtime.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" "${RELEASE_ROOT}/deploy/internal/"
@@ -428,6 +429,9 @@ skip_output="$(PATH="${VERIFY_BIN}:${PATH}" \
 grep -Fq 'peer=deferred' <<<"${skip_output}"
 grep -Fq "grep -E 'event=manager_config_update status=applied|manager config update applied'" \
   "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh"
+grep -Fq -- '--run-analytics-backfill' "${ROOT_DIR}/deploy/internal/deploy-multi-backend-node.sh"
+grep -Fq 'ANALYTICS_BACKFILL_PRIMARY_HOST="122.233.30.4"' \
+  "${ROOT_DIR}/deploy/internal/deploy-multi-backend-node.sh"
 
 # 前端验收必须真实探测两类工具的每个 upstream 和统一入口深链，不能只检查 Nginx 配置文本。
 grep -Fq 'probe_toolbox_upstream IT-Tools "${entry}" /token-generator' "${DEPLOY_SCRIPT}"

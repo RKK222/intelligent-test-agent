@@ -638,7 +638,8 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 4. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
 5. 导入 worker 镜像、解压 programs。
 6. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。
-7. 配置/重载 Nginx 同源 `/xxl-job-admin/` 代理，初始化公共 OpenCode 并完成 iframe SSO/executor 验收。
+7. `.4` 的完整平台包入口自动临时开启 Java ClickHouse 历史回填，等待内部源/目标计数校验完成并把落盘开关恢复为 `false`；失败会恢复普通服务并阻断 `.114/.2`，`.114` 不执行回填。
+8. 配置/重载 Nginx 同源 `/xxl-job-admin/` 代理，初始化公共 OpenCode 并完成 iframe SSO/executor 验收。
 
 当前增量包把 worker runtime 与 toolbox 都标记为 `reuse`，不重复携带未变化的大文件；两台后台会在替换
 平台 JAR/前端前核对已安装组件指纹和健康状态。两台旧 Java 必须先停，再按
@@ -660,7 +661,7 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 
 当前企业浏览器入口固定为 HTTP，因此 Java 模板显式设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`；基础应用默认仍为 `true`，HTTPS 环境不得复制该例外。两台后台必须保持一致，诊断脚本会输出脱敏的 `COOKIE_SECURE` 状态并拒绝缺失或错误值。
 - `.4 + .114` 逐机配置包：[deploy-multi-backend-node.sh](deploy-multi-backend-node.sh)，支持
-  `--validate-only`、正式部署和 `--verify-only`，内部复用标准后台/前端部署脚本
+  `--validate-only`、正式部署和 `--verify-only`，内部复用标准后台/前端部署脚本；`.4` 正式部署默认自动执行幂等 ClickHouse 历史回填
 - 一键入口：平台包使用 [deploy-backend-node.sh](deploy-backend-node.sh)、
   [deploy-frontend-node.sh](deploy-frontend-node.sh)；本机 IP 自动识别且校验、部署、复验输出统一落盘
 - 新后台初始化：[init-backend-node-config.sh](init-backend-node-config.sh) 自动派生本机

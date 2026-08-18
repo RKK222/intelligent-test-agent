@@ -495,7 +495,7 @@ workspace PTY 和 Agent 配置进度仍返回签发 Java 地址。标准生产�
 | `TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE` | `0` | 绑定 `test-agent.redis-summary.rollout-percentage`；取值 0 到 100，默认不选择新模式 Run。 |
 | `TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED` | 企业部署 `true`，应用默认 `false` | 启用 ClickHouse 运营事件消费、汇总和只读查询；需要独立专机，完整步骤见 `deploy/internal/CLICKHOUSE-ANALYTICS.md`。 |
 | `TEST_AGENT_ANALYTICS_CLICKHOUSE_URL/USERNAME/PASSWORD` | 受控专机 JDBC 配置 | 两台 Java 使用同一最小权限账号；密码不得进入仓库、日志或命令行。ClickHouse 不可用时业务写不阻塞，运营查询返回明确 503。 |
-| `TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED` | `false` | 一次性历史回填开关，只允许一个 Java 节点短期开启；必须同时设置明确 UTC start，可选 end。 |
+| `TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED` | `false` | 一次性历史回填开关，只允许一个 Java 节点短期开启；必须同时设置明确 UTC start，可选 end。完整多后台平台包由 `.4` 部署入口临时开启、校验完成后自动恢复 `false`，不得把 `true` 固化进节点配置。 |
 | `TEST_AGENT_ANALYTICS_CLICKHOUSE_CLEANUP_LEGACY_ROLLUPS` | `false` | 不可逆第二阶段清理门禁；仅在已有 `VERIFIED`、备份和页面验收后与 backfill 开关同时短期开启。 |
 | `TEST_AGENT_LEGACY_RUN_WITHOUT_CONTEXT_ENABLED` | `true` | 绑定 `test-agent.redis-summary.legacy-run-without-context-enabled`；兼容期允许旧客户端不携带 `contextToken`，每次兼容调用递增 `legacy_run_without_context_total`。该指标连续 7 天为 0 后关闭；关闭后缺 token 不自动查询数据库。 |
 | `TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL` | `5s` | 后端实例写入 Redis Java 快照的间隔。 |

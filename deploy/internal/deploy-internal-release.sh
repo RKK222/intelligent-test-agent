@@ -27,6 +27,8 @@ WORKER_RUNTIME_BASELINE_SOURCE_COMMIT=""
 WORKER_RUNTIME_BASELINE_RELEASE_SHA256=""
 KEEP_EXTRACT=0
 VALIDATE_ONLY=0
+RUN_ANALYTICS_BACKFILL=0
+ANALYTICS_BACKFILL_TIMEOUT_SECONDS=7200
 SYSTEMD_UNIT_DIR="${TEST_AGENT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
 TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
@@ -143,6 +145,9 @@ Options:
   --expected-server-host <host> Expected /data/testagent/data/.serverhost value.
   --skip-frontend              Do not scp or reload frontend.
   --skip-worker                Do not docker load or restart opencode-worker.
+  --run-analytics-backfill     Run and verify the one-time Java ClickHouse backfill.
+  --analytics-backfill-timeout <seconds>
+                               Backfill completion timeout. Default: 7200.
   --keep-extract               Keep extracted temporary files after success.
   --validate-only              Only unzip and validate release artifacts, without deploying.
   -h, --help                   Show this help.
@@ -228,6 +233,14 @@ while [[ $# -gt 0 ]]; do
       SKIP_WORKER=1
       SKIP_WORKER_EXPLICIT=1
       shift
+      ;;
+    --run-analytics-backfill)
+      RUN_ANALYTICS_BACKFILL=1
+      shift
+      ;;
+    --analytics-backfill-timeout)
+      ANALYTICS_BACKFILL_TIMEOUT_SECONDS="$2"
+      shift 2
       ;;
     --keep-extract)
       KEEP_EXTRACT=1
@@ -877,6 +890,11 @@ wait_worker_config_update() {
 
 configure_backend_defaults
 
+if [[ ! "${ANALYTICS_BACKFILL_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "analytics-backfill-timeout must be a positive integer" >&2
+  exit 1
+fi
+
 require_command unzip
 require_command find
 require_command tar
@@ -973,6 +991,7 @@ fi
 require_file "${DEPLOY_INTERNAL_SRC}/ensure-opencode-runtime-gitignore.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-runtime.gitignore"
 require_file "${DEPLOY_INTERNAL_SRC}/ensure-experience-workspace-content.sh"
+require_file "${DEPLOY_INTERNAL_SRC}/run-analytics-clickhouse-backfill.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/README.md"
 require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/docs/应用架构/测试概述.md"
 require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/spec/I000001-用户登录体验/04-测试/S000001-账号密码登录/041-测试设计/测试案例.md"
@@ -1039,6 +1058,7 @@ chmod +x \
   "${INSTALL_ROOT}/deploy/internal/verify-python-libs.sh" \
   "${INSTALL_ROOT}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
   "${INSTALL_ROOT}/deploy/internal/ensure-experience-workspace-content.sh" \
+  "${INSTALL_ROOT}/deploy/internal/run-analytics-clickhouse-backfill.sh" \
   "${INSTALL_ROOT}/deploy/internal/verify-opencode-tool-runtime.sh" \
   || true
 
@@ -1113,6 +1133,17 @@ if [[ "${SKIP_WORKER}" -eq 0 ]]; then
     write_installed_component_fingerprint \
       TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_COMPONENT_FINGERPRINT}"
   fi
+fi
+
+if [[ "${RUN_ANALYTICS_BACKFILL}" -eq 1 ]]; then
+  log "Run and verify idempotent ClickHouse analytics backfill"
+  bash "${INSTALL_ROOT}/deploy/internal/run-analytics-clickhouse-backfill.sh" \
+    --backend-env "${INSTALL_ROOT}/config/backend.env" \
+    --backend-service "${BACKEND_SERVICE}" \
+    --backend-health-url "${BACKEND_HEALTH_URL}" \
+    --backend-readiness-url "${BACKEND_READINESS_URL}" \
+    --timeout-seconds "${ANALYTICS_BACKFILL_TIMEOUT_SECONDS}"
+  verify_backend_service_owns_port
 fi
 
 if [[ "${SKIP_FRONTEND}" -eq 0 ]]; then
