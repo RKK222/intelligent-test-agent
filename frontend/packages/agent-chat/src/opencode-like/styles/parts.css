@@ -1,14 +1,14 @@
 .oc-text-part {
   position: relative;
   line-height: var(--oc-line-height);
-  color: #000000;
+  color: var(--oc-fg, #1e293b);
   font-size: var(--oc-text-md);
-  background: var(--ta-chat-answer-bg, #FFFDF7);
-  border: none;
+  background: var(--ta-chat-answer-bg, #ffffff);
+  border: 1px solid var(--ta-chat-answer-border, #e2e8f0);
   padding: 6px 36px 6px 12px;
   border-radius: var(--oc-radius-md);
   border-top-left-radius: 2px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
   margin-top: 0;
   display: block;
   width: 100%;

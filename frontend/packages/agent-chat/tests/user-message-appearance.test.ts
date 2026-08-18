@@ -19,27 +19,27 @@ describe("resolveUserMessageAppearance", () => {
     expect(mine).toEqual({
       own: true,
       style: {
-        backgroundColor: "#EAF3FD",
-        border: "none"
+        backgroundColor: "var(--ta-chat-user-bg, #E6F4FF)",
+        border: "1px solid #BAE0FF"
       }
     });
     expect(otherFirst).toEqual({
       own: false,
       displayName: "协作者",
       style: {
-        backgroundColor: "var(--ta-chat-other-user-bg, #DED9F6)",
-        border: "none"
+        backgroundColor: "var(--ta-chat-other-user-bg, #F3E8FF)",
+        border: "1px solid #DDD6FE"
       }
     });
     expect(otherFirst.style).toEqual(otherSecond.style);
   });
 
-  it("uses the current user's borderless color for legacy messages", () => {
+  it("uses the current user's border color for legacy messages", () => {
     expect(resolveUserMessageAppearance({}, "usr_me")).toEqual({
       own: true,
       style: {
-        backgroundColor: "#EAF3FD",
-        border: "none"
+        backgroundColor: "var(--ta-chat-user-bg, #E6F4FF)",
+        border: "1px solid #BAE0FF"
       }
     });
   });

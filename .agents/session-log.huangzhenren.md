@@ -5,6 +5,31 @@
 
 ## Entries
 
+### 2026-08-18 - 区分用户与被分享人对话气泡颜色并重构智能体输出配色
+
+- Why:
+  - 响应用户界面配色优化需求：
+    1. 用户对话（本人）和被分享人对话（协作者）原本均为无边框淡色系（`#EAF3FD` 与 `#DED9F6`），对比度不强，难以一眼区分；
+    2. 智能体输出原本为暗发黄的米黄色背景（`#FFFDF7`），在现代界面中显得陈旧偏丑。
+- What:
+  - `frontend/apps/agent-web/src/styles/globals.css`:
+    - `--ta-chat-user-bg`: 更新为 `#E6F4FF`（清新科技蓝）。
+    - `--ta-chat-other-user-bg`: 更新为 `#F3E8FF`（优雅薰衣草紫）。
+    - `--ta-chat-answer-bg`: 更新为 `#FFFFFF`（极简纯白卡片背景）。
+    - `--ta-chat-answer-border`: 更新为 `#E2E8F0`（精致浅灰边框）。
+  - `frontend/packages/agent-chat/src/user-message-appearance.ts`:
+    - `OWN_MESSAGE_STYLE`: 配置背景为 `var(--ta-chat-user-bg, #E6F4FF)`，边框为 `1px solid #BAE0FF`。
+    - `OTHER_MESSAGE_STYLE`: 配置背景为 `var(--ta-chat-other-user-bg, #F3E8FF)`，边框为 `1px solid #DDD6FE`。
+  - `frontend/packages/agent-chat/src/opencode-like/styles/parts.css`:
+    - `.oc-text-part`: 智能体正文背景由 `#FFFDF7` 提升为 `var(--ta-chat-answer-bg, #ffffff)`，边框设为 `1px solid var(--ta-chat-answer-border, #e2e8f0)`，文字颜色设为 `#1E293B`。
+  - `frontend/apps/agent-web/src/components/FigmaChatPanel.vue`:
+    - 调整存量 `.figma-chat-text-bubble` 使用 `var(--ta-chat-answer-bg, #FFFFFF)` 与 `1px solid var(--ta-chat-answer-border, #E2E8F0)`。
+  - 测试套件 (`user-message-appearance.test.ts` 与 `FigmaShell.test.ts`): 同步更新断言并验证通过。
+- How:
+  - 调整 CSS 变量与 Vue 属性，并使用 `npx vitest run user-message-appearance.test.ts FigmaShell.test.ts` 执行自动化测试校验。
+- Result:
+  - 64 项单元测试 100% 通过。本人对话（蓝色）、被分享人对话（紫色）界限分明，智能体回复呈现现代高端纯白清爽卡片效果。
+
 ### 2026-08-09 - 将“原始输出”入口从对话框顶栏移动至底部状态栏（改为下载图标）
 
 - Why:

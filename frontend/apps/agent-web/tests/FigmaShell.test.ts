@@ -62,8 +62,8 @@ describe("FigmaShell", () => {
     expect(globalStylesSource).toContain("--ta-shell-gap: 8px");
     expect(globalStylesSource).toContain("--ta-shell-radius: 8px");
     expect(globalStylesSource).toContain("--ta-accent: #333333");
-    expect(globalStylesSource).toContain("--ta-chat-user-bg: #EAF3FD");
-    expect(globalStylesSource).toContain("--ta-chat-other-user-bg: #DED9F6");
+    expect(globalStylesSource).toContain("--ta-chat-user-bg: #E6F4FF");
+    expect(globalStylesSource).toContain("--ta-chat-other-user-bg: #F3E8FF");
     expect(logoAsset.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
     expect(logoAsset.length).toBeGreaterThan(1_000);
     expect(figmaShellSource).toContain('import logoUrl from "../assets/figma/logo.png";');

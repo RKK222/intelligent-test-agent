@@ -7991,8 +7991,8 @@ function onCompositionEnd() {
 }
 
 .figma-chat-text-bubble {
-  background: #FFFDF7;
-  border: none;
+  background: var(--ta-chat-answer-bg, #FFFFFF);
+  border: 1px solid var(--ta-chat-answer-border, #E2E8F0);
   padding: 14px 16px;
   border-radius: 12px;
   border-top-left-radius: 2px;
