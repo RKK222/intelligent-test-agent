@@ -1647,11 +1647,14 @@ function onPageSizeChange(next: number) {
                     </div>
                     <div v-show="overallMetrics.totalRequests > 0" ref="pieChartEl" class="ta-imob-chart" />
                   </div>
-                  <div v-if="providerBarData.length" class="ta-imob-chart-card">
+                  <div class="ta-imob-chart-card">
                     <h4 class="ta-imob-overview-title">
                       <MetricHelpLabel label="供应商请求量对比" :description="chartHelp.providerVolume" />
                     </h4>
-                    <div ref="providerChartEl" class="ta-imob-chart" />
+                    <div v-if="!providerBarData.length" class="ta-imob-chart-empty">
+                      当前筛选范围暂无供应商对比数据
+                    </div>
+                    <div v-else ref="providerChartEl" class="ta-imob-chart" />
                   </div>
                 </div>
 
@@ -1727,11 +1730,14 @@ function onPageSizeChange(next: number) {
                 </div>
               </div>
 
-              <div v-if="failureBarData.length" class="ta-imob-chart-card ta-imob-chart-card-full">
+              <div class="ta-imob-chart-card ta-imob-chart-card-full">
                 <h4 class="ta-imob-overview-title">
                   <MetricHelpLabel label="失败原因分类" :description="chartHelp.failureBreakdown" />
                 </h4>
-                <div ref="failureChartEl" class="ta-imob-chart" />
+                <div v-if="!failureBarData.length" class="ta-imob-chart-empty">
+                  当前筛选范围无异常调用记录
+                </div>
+                <div v-else ref="failureChartEl" class="ta-imob-chart" />
               </div>
             </div>
 
