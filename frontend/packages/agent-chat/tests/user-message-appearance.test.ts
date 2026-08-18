@@ -19,7 +19,7 @@ describe("resolveUserMessageAppearance", () => {
     expect(mine).toEqual({
       own: true,
       style: {
-        backgroundColor: "#B2EDDF",
+        backgroundColor: "#EAF3FD",
         border: "none"
       }
     });
@@ -27,7 +27,7 @@ describe("resolveUserMessageAppearance", () => {
       own: false,
       displayName: "协作者",
       style: {
-        backgroundColor: "var(--ta-chat-other-user-bg, #DED9F6)",
+        backgroundColor: "var(--ta-chat-other-user-bg, #EAF3FD)",
         border: "none"
       }
     });
@@ -38,7 +38,7 @@ describe("resolveUserMessageAppearance", () => {
     expect(resolveUserMessageAppearance({}, "usr_me")).toEqual({
       own: true,
       style: {
-        backgroundColor: "#B2EDDF",
+        backgroundColor: "#EAF3FD",
         border: "none"
       }
     });

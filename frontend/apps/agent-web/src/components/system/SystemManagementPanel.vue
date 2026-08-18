@@ -109,7 +109,7 @@ watch(hasSuperAdmin, (allowed) => {
         <ApiKeyManagementPanel v-else-if="activeKey === 'apiKeys'" :current-user="currentUser" />
         <InternalModelProviderPanel v-else-if="activeKey === 'internalModels'" :current-user="currentUser" />
         <InternalModelObservabilityPanel v-else-if="activeKey === 'internalModelObservability'" :current-user="currentUser" />
-        <MemoryAdminPanel v-else-if="activeKey === 'memory'" />
+        <MemoryAdminPanel v-else-if="activeKey === 'memory'" @configure-models="selectMenu('internalModels')" />
         <ConfigurationManagementPanel v-else-if="activeKey === 'config'" :current-user="currentUser" />
         <AnalyticsManagementPanel v-else-if="activeKey === 'analytics'" />
         <SupportAccessPanel

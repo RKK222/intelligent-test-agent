@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { CirclePlus, KeyRound, Pencil, RefreshCw, Trash2 } from "lucide-vue-next";
+import { CirclePlus, KeyRound, Pencil, RefreshCw, TestTube2, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
+  InternalModelCapability,
   InternalModelProviderConfig,
+  InternalModelProviderModel,
   InternalModelTokenDefinition
 } from "@test-agent/shared-types";
 
@@ -25,6 +27,30 @@ type TokenSaveCommand = {
   token?: string;
 };
 
+type ModelRow = {
+  modelId: string;
+  upstreamModelId: string;
+  displayName: string;
+  contextLimit: number | null;
+  embeddingDimension: number | null;
+  enabled: boolean;
+  capabilities: InternalModelCapability[];
+  probedCapabilities: InternalModelCapability[];
+  lastProbedAt: string | null;
+};
+
+const CAPABILITY_OPTIONS: Array<{ value: InternalModelCapability; label: string }> = [
+  { value: "CHAT", label: "对话 CHAT" },
+  { value: "TOOLS", label: "工具 TOOLS" },
+  { value: "VISION", label: "视觉 VISION" },
+  { value: "REASONING", label: "推理 REASONING" },
+  { value: "EMBEDDING", label: "向量 EMBEDDING" },
+  { value: "RERANK", label: "重排 RERANK" },
+  { value: "IMAGE", label: "图像 IMAGE" },
+  { value: "SPEECH", label: "语音合成 SPEECH" },
+  { value: "TRANSCRIPTION", label: "语音识别 TRANSCRIPTION" }
+];
+
 const api = inject<BackendApiClient>("api")!;
 const queryClient = useQueryClient();
 const rows = ref<ProviderRow[]>([]);
@@ -32,6 +58,12 @@ const tokenEditorOpen = ref(false);
 const editingTokenId = ref<number | null>(null);
 const tokenNameDraft = ref("");
 const tokenValueDraft = ref("");
+const selectedCatalogProviderId = ref("");
+const modelRows = ref<ModelRow[]>([]);
+const modelCatalogLoading = ref(false);
+const modelCatalogSaving = ref(false);
+const modelCatalogError = ref("");
+let modelCatalogRequest = 0;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
@@ -65,13 +97,27 @@ watch(
       originalProviderId: provider.providerId,
       originalTokenId: normalizeTokenId(provider.tokenId)
     }));
+    const providerIds = (providers ?? []).map((provider) => provider.providerId);
+    if (!providerIds.includes(selectedCatalogProviderId.value)) {
+      selectedCatalogProviderId.value = providerIds[0] ?? "";
+    }
   },
   { immediate: true }
 );
 
+watch(selectedCatalogProviderId, (providerId) => {
+  void loadModelCatalog(providerId);
+}, { immediate: true });
+
 const tokens = computed(() => tokenQuery.data.value ?? []);
 const tokenConfigured = computed(() => query.data.value?.tokenConfigured === true);
 const refreshStatus = computed(() => refreshStatusQuery.data.value);
+const persistedProviders = computed(() => query.data.value?.providers ?? []);
+const selectedCatalogProvider = computed(() => persistedProviders.value.find(
+  (provider) => provider.providerId === selectedCatalogProviderId.value
+));
+const canProbeSelectedProvider = computed(() => selectedCatalogProvider.value?.enabled === true
+  && selectedCatalogProvider.value.tokenConfigured !== false);
 const errorMessage = computed(() => formatError(
   query.error.value || tokenQuery.error.value || refreshStatusQuery.error.value
 ));
@@ -165,6 +211,7 @@ function refresh() {
   void query.refetch();
   void tokenQuery.refetch();
   void refreshStatusQuery.refetch();
+  void loadModelCatalog(selectedCatalogProviderId.value);
 }
 
 function save() {
@@ -234,6 +281,167 @@ async function deleteToken(token: InternalModelTokenDefinition) {
 
 function triggerRefresh() {
   void refreshMutation.mutate();
+}
+
+function addModelRow() {
+  modelRows.value.push({
+    modelId: "",
+    upstreamModelId: "",
+    displayName: "",
+    contextLimit: null,
+    embeddingDimension: null,
+    enabled: true,
+    capabilities: ["CHAT"],
+    probedCapabilities: [],
+    lastProbedAt: null
+  });
+}
+
+function removeModelRow(index: number) {
+  modelRows.value.splice(index, 1);
+}
+
+/**
+ * 模型目录只绑定已经保存的 Provider；请求代次用于避免快速切换 Provider 时旧响应覆盖新选择。
+ */
+async function loadModelCatalog(providerId = selectedCatalogProviderId.value) {
+  const requestId = ++modelCatalogRequest;
+  modelCatalogError.value = "";
+  if (!providerId) {
+    modelRows.value = [];
+    modelCatalogLoading.value = false;
+    return;
+  }
+  modelCatalogLoading.value = true;
+  try {
+    const models = await api.getInternalModelProviderModels(providerId);
+    if (requestId !== modelCatalogRequest) return;
+    modelRows.value = models.map(toModelRow);
+  } catch (error) {
+    if (requestId !== modelCatalogRequest) return;
+    modelRows.value = [];
+    modelCatalogError.value = formatError(error) || "模型目录加载失败";
+  } finally {
+    if (requestId === modelCatalogRequest) modelCatalogLoading.value = false;
+  }
+}
+
+/**
+ * 保存目录后后端会清空旧探测状态；“保存并探测 CHAT”在同一操作中补做真实探测，成功后即可被记忆配置选中。
+ */
+async function saveModelCatalog(probeChat: boolean) {
+  const providerId = selectedCatalogProviderId.value;
+  if (!providerId) {
+    ElMessage.warning("请先保存并选择供应商");
+    return;
+  }
+  const validationMessage = validateModelRows(modelRows.value);
+  if (validationMessage) {
+    ElMessage.warning(validationMessage);
+    return;
+  }
+  if (probeChat && !canProbeSelectedProvider.value) {
+    ElMessage.warning("执行 CHAT 探测前，请先启用供应商并配置 Token");
+    return;
+  }
+
+  modelCatalogSaving.value = true;
+  modelCatalogError.value = "";
+  try {
+    const saved = await api.updateInternalModelProviderModels(providerId, {
+      models: modelRows.value.map((row) => ({
+        modelId: row.modelId.trim(),
+        upstreamModelId: row.upstreamModelId.trim(),
+        displayName: row.displayName.trim(),
+        contextLimit: normalizePositiveNumber(row.contextLimit),
+        embeddingDimension: row.capabilities.includes("EMBEDDING")
+          ? normalizePositiveNumber(row.embeddingDimension)
+          : null,
+        enabled: row.enabled,
+        capabilities: [...row.capabilities]
+      }))
+    });
+    modelRows.value = saved.map(toModelRow);
+
+    if (!probeChat) {
+      ElMessage.success("模型目录已保存；目录变更后请重新执行能力探测");
+      return;
+    }
+    const chatModels = saved.filter((model) => model.enabled && model.declaredCapabilities.includes("CHAT"));
+    if (chatModels.length === 0) {
+      ElMessage.warning("模型目录已保存，但没有启用且声明 CHAT 能力的模型");
+      return;
+    }
+    const results = await Promise.allSettled(chatModels.map((model) =>
+      api.probeInternalModelProviderModel(providerId, model.modelId, "CHAT")
+    ));
+    await loadModelCatalog(providerId);
+    const successfulCount = results.filter((result) =>
+      result.status === "fulfilled" && result.value.succeeded
+    ).length;
+    if (successfulCount === chatModels.length) {
+      ElMessage.success("CHAT 模型已保存并探测成功，可在记忆配置中选择");
+    } else {
+      ElMessage.warning(`模型目录已保存，CHAT 探测成功 ${successfulCount}/${chatModels.length}；请检查上游模型 ID、Base URL 和 Token`);
+    }
+  } catch (error) {
+    modelCatalogError.value = formatError(error) || "模型目录保存或探测失败";
+    ElMessage.error(modelCatalogError.value);
+  } finally {
+    modelCatalogSaving.value = false;
+  }
+}
+
+function toModelRow(model: InternalModelProviderModel): ModelRow {
+  return {
+    modelId: model.modelId,
+    upstreamModelId: model.upstreamModelId,
+    displayName: model.displayName,
+    contextLimit: normalizePositiveNumber(model.contextLimit),
+    embeddingDimension: normalizePositiveNumber(model.embeddingDimension),
+    enabled: model.enabled,
+    capabilities: [...model.declaredCapabilities],
+    probedCapabilities: [...model.probedCapabilities],
+    lastProbedAt: model.lastProbedAt ?? null
+  };
+}
+
+function validateModelRows(models: ModelRow[]) {
+  const modelIds = new Set<string>();
+  for (const [index, model] of models.entries()) {
+    const rowNumber = index + 1;
+    const modelId = model.modelId.trim();
+    if (!modelId || !model.upstreamModelId.trim() || !model.displayName.trim()) {
+      return `第 ${rowNumber} 个模型的公开 ID、上游 ID 和显示名不能为空`;
+    }
+    if (modelIds.has(modelId)) {
+      return `公开模型 ID「${modelId}」不能重复`;
+    }
+    modelIds.add(modelId);
+    if (model.capabilities.length === 0) {
+      return `模型「${modelId}」至少声明一项能力`;
+    }
+    if (model.contextLimit != null && normalizePositiveNumber(model.contextLimit) == null) {
+      return `模型「${modelId}」的上下文上限必须为正整数`;
+    }
+    if (model.capabilities.includes("EMBEDDING")
+      && normalizePositiveNumber(model.embeddingDimension) == null) {
+      return `Embedding 模型「${modelId}」必须填写正整数向量维度`;
+    }
+  }
+  return "";
+}
+
+function normalizePositiveNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const numberValue = Number(value);
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : null;
+}
+
+function formatProbedCapabilities(row: ModelRow) {
+  return row.probedCapabilities.length > 0
+    ? `已通过 ${row.probedCapabilities.join(" / ")}`
+    : "尚未探测";
 }
 
 async function invalidateConfigurationQueries() {
@@ -466,6 +674,172 @@ function formatError(error: unknown) {
               </tr>
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section class="internal-provider-section model-catalog-section">
+        <header class="internal-provider-section-header model-catalog-header">
+          <div>
+            <div class="internal-provider-eyebrow"><TestTube2 :size="14" /> Provider → Models</div>
+            <h3>模型目录与能力探测</h3>
+            <p>配置公开模型与上游模型 ID；目录每次保存后都必须重新探测，探测成功的 CHAT 模型才会进入记忆配置下拉框。</p>
+          </div>
+          <div class="internal-provider-section-actions model-catalog-actions">
+            <el-select
+              v-model="selectedCatalogProviderId"
+              size="small"
+              aria-label="选择模型目录供应商"
+              placeholder="选择已保存的供应商"
+            >
+              <el-option
+                v-for="provider in persistedProviders"
+                :key="provider.providerId"
+                :label="`${provider.name} · ${provider.providerId}${provider.enabled ? '' : '（已停用）'}`"
+                :value="provider.providerId"
+              />
+            </el-select>
+            <el-button
+              size="small"
+              :icon="CirclePlus"
+              :disabled="!selectedCatalogProviderId"
+              @click="addModelRow"
+            >新增模型</el-button>
+            <el-button
+              size="small"
+              :loading="modelCatalogSaving"
+              :disabled="!selectedCatalogProviderId || modelCatalogLoading"
+              @click="saveModelCatalog(false)"
+            >保存模型目录</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :icon="TestTube2"
+              :loading="modelCatalogSaving"
+              :disabled="!selectedCatalogProviderId || modelCatalogLoading || !canProbeSelectedProvider"
+              @click="saveModelCatalog(true)"
+            >保存并探测 CHAT</el-button>
+          </div>
+        </header>
+
+        <div v-if="modelCatalogError" class="model-catalog-alert">{{ modelCatalogError }}</div>
+        <div v-if="!persistedProviders.length" class="internal-provider-empty-state">
+          请先在“供应商关联”中保存至少一个供应商，再配置模型目录。
+        </div>
+        <div v-else-if="modelCatalogLoading" class="internal-provider-empty-state">正在加载模型目录…</div>
+        <div v-else class="internal-provider-table-shell">
+          <table class="internal-provider-table model-catalog-table">
+            <thead>
+              <tr>
+                <th>公开 Model ID</th>
+                <th>上游 Model ID</th>
+                <th>显示名</th>
+                <th>声明能力</th>
+                <th>上下文上限</th>
+                <th>向量维度</th>
+                <th>启用</th>
+                <th>探测状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, index) in modelRows" :key="`${selectedCatalogProviderId}-${index}`">
+                <td>
+                  <el-input
+                    v-model="row.modelId"
+                    size="small"
+                    :aria-label="`公开 Model ID ${index + 1}`"
+                    placeholder="enterprise-chat"
+                  />
+                </td>
+                <td>
+                  <el-input
+                    v-model="row.upstreamModelId"
+                    size="small"
+                    :aria-label="`上游 Model ID ${index + 1}`"
+                    placeholder="供应商真实模型 ID"
+                  />
+                </td>
+                <td>
+                  <el-input
+                    v-model="row.displayName"
+                    size="small"
+                    :aria-label="`模型显示名 ${index + 1}`"
+                    placeholder="企业对话模型"
+                  />
+                </td>
+                <td class="model-capability-cell">
+                  <el-select
+                    v-model="row.capabilities"
+                    size="small"
+                    multiple
+                    collapse-tags
+                    collapse-tags-tooltip
+                    :aria-label="`模型能力 ${index + 1}`"
+                    placeholder="选择能力"
+                  >
+                    <el-option
+                      v-for="capability in CAPABILITY_OPTIONS"
+                      :key="capability.value"
+                      :label="capability.label"
+                      :value="capability.value"
+                    />
+                  </el-select>
+                </td>
+                <td>
+                  <el-input-number
+                    v-model="row.contextLimit"
+                    size="small"
+                    :min="1"
+                    :max="100000000"
+                    :aria-label="`上下文上限 ${index + 1}`"
+                    placeholder="可空"
+                    controls-position="right"
+                  />
+                </td>
+                <td>
+                  <el-input-number
+                    v-model="row.embeddingDimension"
+                    size="small"
+                    :min="1"
+                    :max="1000000"
+                    :disabled="!row.capabilities.includes('EMBEDDING')"
+                    :aria-label="`向量维度 ${index + 1}`"
+                    placeholder="仅 Embedding"
+                    controls-position="right"
+                  />
+                </td>
+                <td>
+                  <el-switch v-model="row.enabled" size="small" :aria-label="`启用模型 ${row.modelId || index + 1}`" />
+                </td>
+                <td class="model-probe-status">
+                  <el-tag
+                    size="small"
+                    :type="row.probedCapabilities.includes('CHAT') ? 'success' : 'info'"
+                    effect="plain"
+                  >{{ formatProbedCapabilities(row) }}</el-tag>
+                  <small v-if="row.lastProbedAt">{{ formatDate(row.lastProbedAt) }}</small>
+                </td>
+                <td>
+                  <el-button
+                    size="small"
+                    text
+                    type="danger"
+                    :icon="Trash2"
+                    :aria-label="`删除模型 ${row.modelId || index + 1}`"
+                    @click="removeModelRow(index)"
+                  />
+                </td>
+              </tr>
+              <tr v-if="modelRows.length === 0">
+                <td colspan="9" class="internal-provider-empty">
+                  当前供应商没有模型。点击“新增模型”，填写上游真实 Model ID，然后执行“保存并探测 CHAT”。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="selectedCatalogProviderId && !canProbeSelectedProvider" class="model-catalog-hint">
+          当前供应商未启用或未配置 Token：可以保存目录，但必须先完成供应商关联，才能执行 CHAT 真探测。
         </div>
       </section>
 
@@ -732,6 +1106,68 @@ function formatError(error: unknown) {
   width: 100%;
 }
 
+.model-catalog-section {
+  border-left: 3px solid var(--panel-accent);
+}
+
+.model-catalog-header {
+  align-items: flex-end;
+}
+
+.model-catalog-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.model-catalog-actions :deep(.el-select) {
+  width: min(320px, 40vw);
+}
+
+.model-catalog-alert,
+.model-catalog-hint {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--panel-line);
+  background: #fff7f7;
+  color: #b42318;
+  font-size: 12px;
+}
+
+.model-catalog-hint {
+  border-top: 1px solid #fde68a;
+  border-bottom: 0;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.model-catalog-table {
+  min-width: 1540px;
+}
+
+.model-catalog-table td:nth-child(1),
+.model-catalog-table td:nth-child(2),
+.model-catalog-table td:nth-child(3) {
+  min-width: 190px;
+}
+
+.model-capability-cell {
+  min-width: 230px;
+}
+
+.model-capability-cell :deep(.el-select),
+.model-catalog-table :deep(.el-input-number) {
+  width: 100%;
+}
+
+.model-probe-status {
+  min-width: 170px;
+}
+
+.model-probe-status small {
+  display: block;
+  margin-top: 4px;
+  color: var(--panel-muted);
+}
+
 .internal-provider-empty,
 .internal-provider-empty-inline {
   color: #98a2b3;
@@ -772,6 +1208,14 @@ function formatError(error: unknown) {
 
   .internal-provider-commandbar-actions {
     flex-wrap: wrap;
+  }
+
+  .model-catalog-actions {
+    justify-content: flex-start;
+  }
+
+  .model-catalog-actions :deep(.el-select) {
+    width: min(100%, 360px);
   }
 
   .token-editor {

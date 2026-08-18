@@ -93,7 +93,7 @@
 - `components/UserNotificationCenter.vue`：会话分享和 Agent 配置 dispose 四态通知展示；`NONE` 通知仍可标记已读，失败态只发出受控的本人进程重启动作，未知类型/动作不跳转也不执行命令。
 - `components/system/GeneralParamManagementPanel.vue`：通用参数列表、变量名/平台筛选、审计历史和显式 JVM 内存值运维入口；`UITEST_BASE_URL` 使用独立 HTTP 地址输入提示，不展示额外运行机制说明。
 - `components/settings/RuntimeManagementPanel.vue`、`components/settings/runtimeTopologyGraphData.ts`：超级管理员运行管理表格与拓扑投影；无主进程的 12 列明细独立展示 baseUrl、可空 UCID 和 manager PID 状态，无平台记录时使用固定文案且不执行 HTTP health，不从启动命令解析身份或自动认领。“容器 / 管理进程”标题栏按 overview 中 `ownership=BOUND` 汇总可选的有主用户 OpenCode，支持逐项勾选和全选，二次确认后串行复用既有 restart/stop API 执行批量重启或关闭，跳过无主进程、单项失败不阻断后续项且只保留失败项选择；底部用户进程查询只保留单项重启，相同关键字和首页条件再次点击也显式 `refetch`，不沿用旧空结果。旧 overview 缺新增字段时统一回退 `-`。
-- `components/system/InternalModelProviderPanel.vue`：内部模型 Token 定义与 Provider ID 关联页面；密钥草稿只保存在组件内存并在请求结束后清空，启用 Provider 必须选择 Token，Java 内存状态按 Provider 展示。
+- `components/system/InternalModelProviderPanel.vue`：内部模型 Token 定义、Provider ID 关联和公开模型目录维护页面；密钥草稿只保存在组件内存并在请求结束后清空，启用 Provider 必须选择 Token。模型目录直接复用既有覆盖保存与能力探测 API，“保存并探测 CHAT”在旧结果被清空后完成真实探测，使成功模型进入记忆配置下拉；Java 内存状态仍按 Provider 展示。
 - `components/system/ScheduledTaskManagementPanel.vue`、`components/system/xxl-job-embedded-shell.ts`：超级管理员 XXL 同源 iframe 壳；申请 60 秒一次性票据并以隐藏表单 POST，处理重签、403、票据/会话过期、Admin 不可用和登出清理，并只对真实 XXL shell 幂等启用横向导航及只读映射账号。任务操作与日志由 iframe 内 XXL 页面提供。
 - `components/EditorPane.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
