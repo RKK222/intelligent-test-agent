@@ -11958,7 +11958,8 @@
 ### What
 
 - 重构 Overview 概览指标视觉卡片，统一背景（`#f8fafc`）、微细边框（`#f1f5f9`）、圆角与 Hover 效果，将字号调至 `20px`，呈现清晰精致的仪表盘小组件风貌。
-- 在桌面端（`@media (min-width: 1024px)`）启用双列网格布局（`grid-template-columns: 380px minmax(0, 1fr)`），让调用结果与供应商对比等业务图表在左侧，TTFT/ITL/TPS 三张性能分布箱线图在右侧，消除大量留白并缩短纵向高度近 50%。
+- 在桌面端（`@media (min-width: 1024px)`）启用双列网格布局，并将对齐方式设为 `align-items: start`，解决左侧单张卡片（如“调用结果分布”）因 `stretch` 被强行垂直拉高变形、圆环图悬浮在大片空白中间的问题。
+- 将 `.ta-imob-chart-empty` 的最小高度由 `260px` 优化精简为 `120px`，使无数据状态下的箱线图卡片紧凑得当，不再无故挤占空间。
 - 调整吸顶筛选条分割线 margins 移除 `margin-left: auto`，让刷新/探活按钮自然贴合筛选下拉选单；微调“按供应商”指标卡内 `repeat(auto-fit, minmax(100px, 1fr))` 自适应排布。
 - 保持所有组件事件、逻辑、单元测试 DOM selector 选择器名称 strictly 兼容不变。
 

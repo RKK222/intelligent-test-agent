@@ -1642,7 +1642,10 @@ function onPageSizeChange(next: number) {
                     <h4 class="ta-imob-overview-title">
                       <MetricHelpLabel label="调用结果分布" :description="chartHelp.successComposition" />
                     </h4>
-                    <div ref="pieChartEl" class="ta-imob-chart" />
+                    <div v-if="!overallMetrics.totalRequests" class="ta-imob-chart-empty">
+                      当前筛选范围暂无调用记录
+                    </div>
+                    <div v-show="overallMetrics.totalRequests > 0" ref="pieChartEl" class="ta-imob-chart" />
                   </div>
                   <div v-if="providerBarData.length" class="ta-imob-chart-card">
                     <h4 class="ta-imob-overview-title">
@@ -2336,47 +2339,38 @@ function onPageSizeChange(next: number) {
   margin-top: 6px;
 }
 .ta-imob-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ta-imob-chart-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+.ta-imob-chart-card-full {
+  width: 100%;
+}
+.ta-imob-chart-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+.ta-imob-chart-stack,
+.ta-imob-business-chart-stack {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 12px;
-}
-.ta-imob-chart-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fff;
-  padding: 12px 16px;
-}
-.ta-imob-chart-card-full {
-  grid-column: 1 / -1;
-}
-.ta-imob-chart-comparison {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: stretch;
-  gap: 16px;
-}
-@media (min-width: 1024px) {
-  .ta-imob-chart-comparison {
-    grid-template-columns: 380px minmax(0, 1fr);
-  }
-}
-@media (min-width: 1400px) {
-  .ta-imob-chart-comparison {
-    grid-template-columns: 420px minmax(0, 1fr);
-  }
-}
-.ta-imob-chart-stack {
-  display: grid;
-  grid-auto-rows: auto;
-  gap: 12px;
-  min-width: 0;
+  width: 100%;
 }
 .ta-imob-latency-box-stack {
   display: grid;
-  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 12px;
-  min-width: 0;
+  width: 100%;
 }
 .ta-imob-chart-stack .ta-imob-chart-card,
 .ta-imob-box-card {
@@ -2386,40 +2380,43 @@ function onPageSizeChange(next: number) {
 }
 .ta-imob-chart {
   width: 100%;
-  height: 240px;
+  height: 220px;
 }
 .ta-imob-chart-stack .ta-imob-chart {
   flex: none;
-  height: 280px;
-  min-height: 280px;
+  height: 220px;
+  min-height: 220px;
 }
 .ta-imob-chart-trend {
-  height: 260px;
+  height: 240px;
 }
 .ta-imob-chart-box {
   flex: 1;
   height: auto;
-  min-height: 200px;
+  min-height: 180px;
 }
 .ta-imob-box-title-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 .ta-imob-box-summary {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
   color: #475569;
-  font-size: 12px;
+  font-size: 11px;
+  background: #f8fafc;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #f1f5f9;
 }
 .ta-imob-box-summary-item {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px 12px;
+  align-items: center;
+  gap: 4px 10px;
 }
 .ta-imob-box-summary-item strong {
   color: #1e293b;
@@ -2429,17 +2426,22 @@ function onPageSizeChange(next: number) {
   flex: 1;
   align-items: center;
   justify-content: center;
-  min-height: 260px;
+  padding: 20px 12px;
+  min-height: 130px;
   color: #64748b;
-  font-size: 13px;
+  font-size: 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px dashed #cbd5e1;
+  margin-top: 4px;
 }
 @media (max-width: 960px) {
   .ta-imob-chart-stack .ta-imob-chart {
-    height: 280px;
-    min-height: 280px;
+    height: 220px;
+    min-height: 220px;
   }
   .ta-imob-chart-box {
-    min-height: 240px;
+    min-height: 180px;
   }
   .ta-imob-benchmark-heading {
     flex-direction: column;
