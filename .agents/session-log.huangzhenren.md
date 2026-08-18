@@ -2442,16 +2442,19 @@
   - 运营数据查询现只读 ClickHouse，具备可观测 freshness、可重试 outbox、历史回填与校验后清理旧 PostgreSQL 汇总表的切换门禁；HTTP API 增量新增，无 RunEvent/SSE 类型变化，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
   - 全量 Maven 基线仍有两个任务外已知失败：H2 模型网关 fixture 缺 `embedding_dimension`，以及固定日期的分享会话已过期；Redis 全类 10 项中另有一个旧综合用例在同 Session 活跃 Run 未终结时初始化第二个 Run，被现有互斥约束拒绝。新增范围的定向测试和真实存储门禁均已通过。
 
-## 2026-08-18 运营分析小时热力图方块尺寸调整
+## 2026-08-18 运营分析小时热力图与 Run 趋势图优化
 
 - Why:
-  - 优化运营分析界面的小时热力图视觉呈现，将热力方块调整为 10px × 10px。
+  - 优化运营分析界面的视觉呈现，将小时热力方块调整为 10px × 10px，并将 Run 趋势图中的 Run 数量调整至柱状图上方显示。
 - What:
-  - `frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue`：更新 `.ta-heatmap-cell` 尺寸为 10px × 10px，并调整 `.ta-heatmap-row` 的网格列宽定义与容器宽度。
+  - `frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue`：
+    - 更新 `.ta-heatmap-cell` 尺寸为 10px × 10px，并调整 `.ta-heatmap-row` 网格列宽与容器宽度。
+    - 将 Run 趋势图的 Run 数量 `<span>` 移入 `.ta-trend-bar-wrapper` 中并置于 `.ta-trend-bar` 上方，更新对应 CSS。
 - How:
-  - 修改 `.ta-heatmap-cell` 样式为 `width: 10px; height: 10px; border-radius: 2px;`。
-  - 修改 `.ta-heatmap-row` 样式为 `width: max-content; grid-template-columns: 56px repeat(24, 10px);`。
+  - 修改 `.ta-heatmap-cell` 为 `width: 10px; height: 10px; border-radius: 2px;`，`.ta-heatmap-row` 为 `width: max-content; grid-template-columns: 56px repeat(24, 10px);`。
+  - 在 `.ta-trend-item` 中引入 `.ta-trend-bar-wrapper`，设为 `display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 112px;`，内部先渲染 `.ta-trend-count` 再渲染 `.ta-trend-bar`，底部保留日期 `<small>`，网格行调整为 `112px 18px`。
 - Result:
-  - 运营分析中的小时热力图方块长宽均变更为 10px，布局对齐紧凑。
+  - 热力方块紧凑显示为 10px，Run 趋势柱状图顶部直观展示对应 Run 数量。
   - 前端 Vitest 单元测试 6/6 通过，Vue TypeScript 检查通过。
+
 

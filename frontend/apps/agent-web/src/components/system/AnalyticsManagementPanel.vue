@@ -311,7 +311,13 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
           <div class="ta-panel-heading"><h3>Run 趋势</h3><span>{{ timeseries.length }} 个时间点</span></div>
           <div v-if="timeseries.length === 0" class="ta-empty">暂无数据</div>
           <div v-else class="ta-trend" :style="trendGridStyle">
-            <div v-for="point in timeseries" :key="point.bucketStart" class="ta-trend-item"><div class="ta-trend-bar" :style="{ height: trendHeight(point) }" /><small>{{ new Date(point.bucketStart).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) }}</small><span>{{ point.runCount }}</span></div>
+            <div v-for="point in timeseries" :key="point.bucketStart" class="ta-trend-item">
+              <div class="ta-trend-bar-wrapper">
+                <span class="ta-trend-count">{{ point.runCount }}</span>
+                <div class="ta-trend-bar" :style="{ height: trendHeight(point) }" />
+              </div>
+              <small>{{ new Date(point.bucketStart).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) }}</small>
+            </div>
           </div>
         </section>
       </div>
@@ -399,8 +405,10 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
 .ta-definitions { padding-top:8px; border-top:1px solid #edf0f3; color:#687386; font-size:11px; }.ta-definitions p { margin:4px 0; }
 .ta-empty { padding:28px; color:#98a1ae; text-align:center; }
 .ta-trend { display:grid; grid-template-columns:repeat(var(--ta-trend-columns),minmax(34px,1fr)); align-items:flex-end; gap:clamp(4px,.6vw,10px); min-height:180px; overflow-x:auto; }
-.ta-trend-item { display:grid; grid-template-rows:112px 18px 18px; justify-items:center; min-width:0; color:#737e8e; font-size:11px; }
-.ta-trend-bar { align-self:end; width:clamp(12px,45%,22px); border-radius:3px 3px 0 0; background:#227c78; }
+.ta-trend-item { display:grid; grid-template-rows:112px 18px; justify-items:center; min-width:0; color:#737e8e; font-size:11px; }
+.ta-trend-bar-wrapper { display:flex; flex-direction:column; align-items:center; justify-content:flex-end; width:100%; height:112px; }
+.ta-trend-count { font-size:11px; color:#596577; margin-bottom:3px; line-height:1; font-weight:500; }
+.ta-trend-bar { width:clamp(12px,45%,22px); border-radius:3px 3px 0 0; background:#227c78; }
 .ta-heatmap-panel { overflow:hidden; }.ta-panel-heading .ta-segmented { margin-left:auto; }
 .ta-segmented { display:inline-flex; border:1px solid #d4d9e0; border-radius:5px; overflow:hidden; }
 .ta-segmented button { height:28px; padding:0 9px; border:0; border-right:1px solid #d4d9e0; background:#fff; color:#596577; font-size:11px; cursor:pointer; }.ta-segmented button:last-child { border-right:0; }.ta-segmented button.active { background:#2d3745; color:#fff; }
