@@ -578,15 +578,19 @@ from flyway_schema_history
 order by installed_rank;
 ```
 
-PostgreSQL 正常现网路径必须满足：所有记录 `success=true`，且上一包主链最高版本
-`20260812204207` 成功、checksum 不变。若现场仍低于该版本，必须先逐条核对完整历史与已登记兼容路径，不能
-直接套用本节的增量结论。第一台 `.4` 新 Java 从 `20260812204207` 基线首次升级时，只允许新增：
+PostgreSQL 正常现网路径必须满足：所有记录 `success=true`，且自动化代码库版本 `20260812204207` 与已部署
+SCM 版本 `20260813190929` 成功、checksum 不变。若现场仍低于该版本，必须先逐条核对完整历史与已登记兼容路径，不能
+直接套用本节的增量结论。第一台 `.4` 新 Java 从该现场 history 首次成功升级时，只允许按兼容装配新增：
 
-- `V20260813190929__user_scm_git_identities_create.sql`，Flyway checksum `-297528120`，SHA-256
-  `fd434d47d40c9fd71c987bd6512ba6897e33fe2e1db67299ff01514b4941c92e`。
+- `V20260814165300__analytics_event_outbox_create_pipeline_after_release.sql`；
+- `V20260814165301__analytics_event_outbox_install_triggers_after_release.sql`；
+- `V20260817193414__local_client_rollout_users_create.sql`；
+- `V20260818094330__local_client_credentials_create_runtime_after_enterprise_release.sql`，源码 SHA-256
+  `6d390354ddb9794c1f3730f09f1dd806ea74628f20fa6ea2857c1dee6774d25c`。
 
-如果本包已经在首台成功启动后只是故障重部署，该版本必须成功且 checksum 不变，本次不得新增 history。出现
-失败记录、未知更高版本或未知 checksum 都必须停止发布。正常企业历史不得出现只用于已登记并行
+其中 `20260818094330` 是高于现场 `20260812204207`/`20260813190929` 的本地客户端企业前向版本；不得继续
+向该 history 装配较低的 `20260812202425`。如果本包已经在首台成功启动后只是故障重部署，上述版本必须成功且
+checksum 不变，本次不得新增 history。出现失败记录、未知更高版本或未知 checksum 都必须停止发布。正常企业历史不得出现只用于已登记并行
 开发历史的 `20260809120000`、`20260809210000`、`20260809230000`、`20260810090000`、
 `20260810110000` 至 `20260810110002`、`20260810173117` 或 `20260812202425`；其中 `20260809210000`
 仅用于已执行旧体验候选的个人库，`20260812202425` 仅用于已经由 dev 执行本地客户端迁移的共享开发库。

@@ -142,6 +142,10 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION;
     private static final String LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_FORWARD_COMPATIBILITY_LOCATION;
+    private static final String LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION_VERSION;
+    private static final String LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_COMPATIBILITY_LOCATION;
     private static final String LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE =
             "db/migration/V20260811210453__local_client_credentials_create_runtime.sql";
     private static final String CURRENT_MERGED_RELEASE_MAX_VERSION = "20260812144051";
@@ -778,9 +782,11 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertLocalClientRuntimeSchema(dataSource);
         });
 
-        // 第二次启动必须继续从同一隔离 location 解析已执行前向版本。
+        // 第二次启动必须只从冻结的 applied location 解析已执行前向版本，不再暴露待执行目录。
         runBootFlyway(dataSource, flyway -> {
-            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION);
+            assertThat(locationDescriptors(flyway))
+                    .contains(LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION)
+                    .doesNotContain(LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION);
             assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue();
             assertThat(applied(dataSource, LOCAL_CLIENT_ROLLOUT_VERSION)).isTrue();
             assertLocalClientRuntimeSchema(dataSource);
@@ -797,6 +803,64 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         runBootFlyway(dataSource, flyway ->
                 assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isTrue());
         overwriteAppliedChecksum(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION, 987654321);
+
+        bootFlywayRunner(dataSource).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).hasStackTraceContaining("checksum");
+        });
+    }
+
+    @Test
+    void enterpriseScmHistoryUsesForwardVersionAboveInstalledReleaseBaseline() {
+        DataSource dataSource = dataSource("local_client_runtime_after_enterprise_scm_release");
+        // 复现现场：SCM 与自动化代码库 migration 已执行，但本地客户端及 analytics 较低主版本均缺失。
+        migrateWithoutResourceTo(
+                dataSource,
+                CURRENT_RELEASE_WITH_SCM_MAX_VERSION,
+                LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE,
+                ANALYTICS_OUTBOX_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isFalse();
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isFalse();
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway))
+                    .contains(
+                            LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_LOCATION,
+                            ANALYTICS_AFTER_RELEASE_LOCATION)
+                    .doesNotContain(LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isFalse();
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_FORWARD_VERSION)).isFalse();
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_VERSION)).isTrue();
+            assertThat(applied(dataSource, LOCAL_CLIENT_ROLLOUT_VERSION)).isTrue();
+            assertLocalClientRuntimeSchema(dataSource);
+        });
+
+        // 第二次启动必须继续解析同一高版本资源，且不能重新暴露旧前向版本。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway))
+                    .contains(LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_LOCATION)
+                    .doesNotContain(LOCAL_CLIENT_RUNTIME_FORWARD_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_VERSION)).isTrue();
+            assertLocalClientRuntimeSchema(dataSource);
+        });
+    }
+
+    @Test
+    void unknownEnterpriseLocalClientRuntimeChecksumStillFailsClosed() {
+        DataSource dataSource = dataSource("local_client_runtime_enterprise_unknown_checksum");
+        migrateWithoutResourceTo(
+                dataSource,
+                CURRENT_RELEASE_WITH_SCM_MAX_VERSION,
+                LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE,
+                ANALYTICS_OUTBOX_MAIN_RESOURCE);
+        runBootFlyway(dataSource, flyway -> assertThat(
+                        applied(dataSource, LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_VERSION))
+                .isTrue());
+        overwriteAppliedChecksum(
+                dataSource, LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_VERSION, 987654321);
 
         bootFlywayRunner(dataSource).run(context -> {
             assertThat(context).hasFailed();

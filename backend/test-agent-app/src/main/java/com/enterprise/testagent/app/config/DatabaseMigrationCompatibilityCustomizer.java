@@ -103,6 +103,9 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             "classpath:db/migration-compat/local-client-runtime-after-release";
     static final String LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/local-client-runtime-applied";
+    static final String LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION_VERSION = "20260818094330";
+    static final String LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/local-client-runtime-after-enterprise-release";
     static final String ANALYTICS_OUTBOX_MIGRATION_VERSION = "20260813143000";
     static final String ANALYTICS_TRIGGER_MIGRATION_VERSION = "20260813143001";
     static final String ANALYTICS_OUTBOX_FORWARD_MIGRATION_VERSION = "20260814165300";
@@ -322,14 +325,26 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                 appliedMigrations, LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION);
         boolean localClientRuntimeForwardMigrationApplied = isMigrationApplied(
                 appliedMigrations, LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
-        if (localClientRuntimeMigrationApplied && localClientRuntimeForwardMigrationApplied) {
+        boolean localClientRuntimeEnterpriseForwardMigrationApplied = isMigrationApplied(
+                appliedMigrations, LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION_VERSION);
+        int appliedLocalClientRuntimePaths = (localClientRuntimeMigrationApplied ? 1 : 0)
+                + (localClientRuntimeForwardMigrationApplied ? 1 : 0)
+                + (localClientRuntimeEnterpriseForwardMigrationApplied ? 1 : 0);
+        if (appliedLocalClientRuntimePaths > 1) {
             throw new IllegalStateException(
-                    "检测到本地客户端主 migration 与顺序补偿 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+                    "检测到本地客户端主 migration 与顺序补偿 migration 存在多条执行路径，拒绝自动兼容；请核对 flyway_schema_history");
         }
         boolean needsLocalClientRuntimeForwardCompatibility =
                 !localClientRuntimeMigrationApplied
+                        && !localClientRuntimeForwardMigrationApplied
+                        && !localClientRuntimeEnterpriseForwardMigrationApplied
                         && hasAppliedMigrationAfter(
                                 appliedMigrations, LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION);
+        // 旧前向版本只适用于最高 history 仍低于它的 release 基线；现场已经越过该版本时必须选择新的高版本路径。
+        boolean needsLocalClientRuntimeEnterpriseForwardCompatibility =
+                needsLocalClientRuntimeForwardCompatibility
+                        && hasAppliedMigrationAfter(
+                                appliedMigrations, LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
         boolean analyticsOutboxMigrationApplied = isMigrationApplied(
                 appliedMigrations, ANALYTICS_OUTBOX_MIGRATION_VERSION);
         boolean analyticsTriggerMigrationApplied = isMigrationApplied(
@@ -491,12 +506,16 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             addLocationIfAbsent(
                     locations, EXPERIENCE_WORKSPACE_APPLIED_COMPATIBILITY_LOCATION);
         }
-        if (needsLocalClientRuntimeForwardCompatibility) {
+        if (needsLocalClientRuntimeEnterpriseForwardCompatibility
+                || localClientRuntimeEnterpriseForwardMigrationApplied) {
+            addLocationIfAbsent(
+                    locations, LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_COMPATIBILITY_LOCATION);
+        } else if (needsLocalClientRuntimeForwardCompatibility) {
             addLocationIfAbsent(
                     locations, LOCAL_CLIENT_RUNTIME_FORWARD_COMPATIBILITY_LOCATION);
         }
         if (localClientRuntimeForwardMigrationApplied) {
-            // release 不发布本地客户端能力，仅为已经执行该 dev migration 的数据库保留原始校验字节。
+            // 已执行旧前向版本的历史必须继续从冻结 location 解析，不能同时暴露新的企业前向版本。
             addLocationIfAbsent(
                     locations, LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION);
         }
@@ -542,7 +561,8 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         // 旧体验工作区候选版本已进入个人持久库，只能从隔离路径按原字节解析；主链统一执行更高前向版本。
         filteredMainResources.add(EXPERIENCE_WORKSPACE_APPLIED_MAIN_RESOURCE);
         if (needsLocalClientRuntimeForwardCompatibility
-                || localClientRuntimeForwardMigrationApplied) {
+                || localClientRuntimeForwardMigrationApplied
+                || localClientRuntimeEnterpriseForwardMigrationApplied) {
             // release 前向版本已经执行时，dev 的较低主链版本仍然不能重新暴露给 Flyway 校验。
             filteredMainResources.add(LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE);
         }
@@ -618,11 +638,17 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         if (needsLocalClientRuntimeForwardCompatibility) {
             LOGGER.warn("检测到本地客户端 migration 早于已执行的 release history，启用顺序补偿路径: missingVersion={}, forwardVersion={}",
                     LOCAL_CLIENT_RUNTIME_MIGRATION_VERSION,
-                    LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
+                    needsLocalClientRuntimeEnterpriseForwardCompatibility
+                            ? LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION_VERSION
+                            : LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
         }
         if (localClientRuntimeForwardMigrationApplied) {
-            LOGGER.warn("检测到已执行的本地客户端顺序补偿 migration，仅启用原始字节兼容解析，不装配客户端运行能力: version={}",
+            LOGGER.warn("检测到已执行的本地客户端顺序补偿 migration，继续启用原始字节兼容解析: version={}",
                     LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
+        }
+        if (localClientRuntimeEnterpriseForwardMigrationApplied) {
+            LOGGER.warn("检测到已执行的本地客户端企业基线顺序补偿 migration，继续启用原始字节兼容解析: version={}",
+                    LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION_VERSION);
         }
         if (needsAnalyticsForwardCompatibility) {
             LOGGER.warn("检测到运营 outbox migration 早于已执行的 release history，启用顺序补偿路径: missingVersions={},{}; forwardVersions={},{}",

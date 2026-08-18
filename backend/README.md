@@ -221,7 +221,7 @@ mvn test
 
 镜像构建、生产/测试 profile、dotenv、连接池和外部依赖配置见 `docs/deployment/backend.md`。
 
-平台数据库由 Spring Boot 唯一 Flyway Bean 按默认顺序迁移。工具盒子已知历史包括旧 `V20260727203500`、企业正式 `V20260728160800/-1966404877` 和当前版本的 `-74327385` 幂等误发变体；分支合并产生的 QA Memory、体验工作区和本地客户端低版本缺口也由同一装配按已执行 version/checksum 选择隔离兼容资源或更高前向 migration。空库和正常主链只解析原始 migration，未知 checksum 或主/前向路径混用失败关闭，不使用 `outOfOrder`、`repair` 或手工历史表修改。
+平台数据库由 Spring Boot 唯一 Flyway Bean 按默认顺序迁移。工具盒子已知历史包括旧 `V20260727203500`、企业正式 `V20260728160800/-1966404877` 和当前版本的 `-74327385` 幂等误发变体；分支合并产生的 QA Memory、体验工作区和本地客户端低版本缺口也由同一装配按已执行 version/checksum 选择隔离兼容资源或更高前向 migration。本地客户端对尚未越过 `20260812202425` 的旧 release history 使用原前向版本，对已经执行自动化代码库或 SCM 等更高版本的企业 history 使用 `20260818094330` 企业前向版本。空库和正常主链只解析原始 migration，未知 checksum 或主/前向路径混用失败关闭，不使用 `outOfOrder`、`repair` 或手工历史表修改。
 
 ## 后续 AI 编码指引
 

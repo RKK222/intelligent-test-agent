@@ -126,6 +126,10 @@ class FlywayMigrationNamingTest {
             "V20260812202425__local_client_credentials_create_runtime_after_release.sql";
     private static final String LOCAL_CLIENT_RUNTIME_FORWARD_SHA256 =
             "168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026";
+    private static final String LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION =
+            "V20260818094330__local_client_credentials_create_runtime_after_enterprise_release.sql";
+    private static final String LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_SHA256 =
+            "6d390354ddb9794c1f3730f09f1dd806ea74628f20fa6ea2857c1dee6774d25c";
     private static final String LOCAL_CLIENT_ROLLOUT_MIGRATION =
             "V20260817193414__local_client_rollout_users_create.sql";
     private static final String LOCAL_CLIENT_ROLLOUT_SHA256 =
@@ -365,6 +369,10 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/local-client-runtime-after-release",
                 LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION,
                 LOCAL_CLIENT_RUNTIME_FORWARD_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/local-client-runtime-after-enterprise-release",
+                LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION,
+                LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_SHA256);
     }
 
     @Test

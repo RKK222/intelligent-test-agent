@@ -11687,3 +11687,26 @@
 
 - 灰度开关仍使用既有 API 即时保存，不新增接口、状态容器或重复组件；管理员现在能在提交前确认，并从成功/失败弹框明确判断保存结果。
 - 不涉及 HTTP API、RunEvent、数据库、Flyway、部署、性能或安全契约；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未推送远端。
+
+## 2026-08-18 - 修复企业已部署基线上的 Flyway 低版本阻塞
+
+### Why
+
+- `.4` 用上一轮完整包升级 Java 时，包校验、worker runtime 复用和旧 Java 停止均成功，但新 Java 被 Flyway 拒绝启动：企业库已经执行 `20260812204207` 及之后的 release/SCM migration，兼容装配仍暴露更低且未执行的本地客户端前向版本 `20260812202425`。
+- 该问题与 ClickHouse、Mem0、BGE、pgvector、manager 或 worker 健康无关；必须为已越过旧前向版本的企业历史提供更高版本路径，不能开启 `outOfOrder`、执行 `repair` 或修改 `flyway_schema_history`。
+
+### What
+
+- 新增企业已部署基线专用前向 migration `V20260818094330__local_client_credentials_create_runtime_after_enterprise_release.sql`，结构 SQL 与旧前向路径一致；`DatabaseMigrationCompatibilityCustomizer` 依据实际 history 在主链、旧前向和企业高版本前向三条互斥路径中选择，检测到多路径或未知 checksum 时继续失败关闭。
+- 后端构建、内层发布、外层完整包和目标机安装四层门禁都锁定新资源 SHA-256 `6d390354ddb9794c1f3730f09f1dd806ea74628f20fa6ea2857c1dee6774d25c`；同步后端、持久化、数据库和多后台部署说明。
+- 本轮仍只更新 Java、前端和部署资源；复用现有 worker runtime、manager、toolbox 与已签名本地客户端制品，不重复交付或重启已经部署的 ClickHouse、Mem0、BGE、pgvector 数据面。
+
+### How
+
+- `FlywayMigrationNamingTest` 15/15 通过；真实 PostgreSQL `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 29/29 通过，覆盖企业 SCM 基线首次升级、二次启动重校验、旧前向已执行历史和未知企业版本 checksum 拒绝。
+- 正式后端构建、正式前端类型检查/用户手册/production build、增量组件门禁、多后台节点门禁、双后台完整包门禁、相关 Shell `bash -n` 与 `git diff --check` 均通过；前端只保留既有大 chunk 警告。
+
+### Result
+
+- 当前 release 已能在附件对应的企业历史上按默认 Flyway 顺序执行 `20260818094330`，随后继续执行更高的客户端灰度 migration；旧主链、旧前向或企业高前向任一已执行历史都保留原字节复验。
+- 不涉及 HTTP API、RunEvent、业务逻辑、性能或安全契约；未修改 `.env*`、generated SDK、OpenCode 只读源码、任何已执行 migration 字节或数据库 history。最终企业包需完成重组和逐层哈希验证后再交付，`.4/.114/.2` 真实启动仍以现场逐机验收为准。

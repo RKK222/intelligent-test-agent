@@ -1394,7 +1394,7 @@ migration 不创建体验 Workspace 数据、物理目录、Git 仓库或演示�
 
 `MyBatisExperienceWorkspacePostgresqlIntegrationTest` 使用真实 PostgreSQL 从已部署基线 `V20260809120000` 升级到 HEAD，校验高版本前向 migration、参数和表结构，并发同服务器只产生一个当前绑定、不同服务器隔离、换目录保留旧 Workspace。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 另以真实 Spring Boot Flyway 覆盖当前 release history、已执行旧候选 history 和未知旧 checksum 三条路径；`FlywayMigrationNamingTest` 锁定旧文件原始 SHA-256。合并或企业打包前仍必须读取每个目标环境完整 `flyway_schema_history`，并验证源码、persistence JAR 与最终应用嵌套 JAR 中的 migration 字节一致；禁止 `outOfOrder`、`repair` 或手工改历史表。
 
-共享开发库可能已经由 dev 执行本地客户端前向 migration `V20260812202425__local_client_credentials_create_runtime_after_release.sql`。release 不发布本地客户端 API、服务或默认主 migration；只有 history 已存在该版本时，唯一 `DatabaseMigrationCompatibilityCustomizer` 才加载隔离目录 `db/migration-compat/local-client-runtime-applied` 中 SHA-256 为 `168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026` 的原始字节用于 Flyway 校验。未执行该版本的 release 数据库不会扫描或执行该 SQL，因此不会新增本地客户端结构；未知 checksum 仍由 Flyway 失败关闭，不使用 `outOfOrder`、`repair` 或手工修改 history。
+本地客户端存在三条互斥 history：空库或尚未越过 `V20260811210453` 的正常主链执行原 migration；最高已执行版本仍低于旧前向版本的 release history 执行 `V20260812202425__local_client_credentials_create_runtime_after_release.sql`；已经执行 `V20260812204207` 自动化代码库、`V20260813190929` SCM 或其它更高版本的企业 history 执行隔离的 `V20260818094330__local_client_credentials_create_runtime_after_enterprise_release.sql`。唯一 `DatabaseMigrationCompatibilityCustomizer` 只装配与已执行 history 匹配的一条路径；已执行旧前向版本时从 `local-client-runtime-applied` 读取 SHA-256 `168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026` 原字节。未知 checksum 或多条路径并存继续失败关闭，不使用 `outOfOrder`、`repair` 或手工修改 history。
 
 ## V20260628100000 通用参数修改日志表
 
@@ -1855,19 +1855,22 @@ Flyway 历史兼容规则在全部已知 PostgreSQL 基线执行升级，并核�
 
 release 的个人持久库已经执行到 `V20260812144051`，但从未执行 client 分支较低的
 `V20260811210453`。唯一 `DatabaseMigrationCompatibilityCustomizer` 会在该类 history 中过滤低版本主
-migration，并只加载隔离路径
-`db/migration-compat/local-client-runtime-after-release/V20260812202425__local_client_credentials_create_runtime_after_release.sql`；
-前向 migration 创建与主 migration 相同的表、字段、约束、索引和注释，不写业务数据。空库或尚未越过
-`20260811210453` 的正常主链仍执行原 migration；已经执行原 migration 的 client 历史继续按原字节校验，
-主路径与前向路径同时出现时失败关闭。两条路径均保持 `outOfOrder=false`，不执行 `repair`，不修改
+migration，并加载隔离路径
+`db/migration-compat/local-client-runtime-after-release/V20260812202425__local_client_credentials_create_runtime_after_release.sql`。
+企业库已经执行 `V20260812204207` 或更高版本时，旧前向版本本身也低于现场 history，必须改为只加载
+`db/migration-compat/local-client-runtime-after-enterprise-release/V20260818094330__local_client_credentials_create_runtime_after_enterprise_release.sql`。
+两条前向 migration 均创建与主 migration 相同的表、字段、约束、索引和注释，不写业务数据。空库或尚未
+越过 `20260811210453` 的正常主链仍执行原 migration；已经执行任一主/前向路径的历史继续从对应 location
+按原字节校验，多条路径同时出现时失败关闭。所有路径均保持 `outOfOrder=false`，不执行 `repair`，不修改
 `flyway_schema_history`。
 
 主 migration SHA-256 固定为
-`b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970`，前向 migration SHA-256 固定为
-`168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026`；
-`FlywayMigrationNamingTest` 锁定两份源码字节，
+`b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970`，旧 release 前向 migration SHA-256
+固定为 `168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026`，企业前向 migration SHA-256
+固定为 `6d390354ddb9794c1f3730f09f1dd806ea74628f20fa6ea2857c1dee6774d25c`；
+`FlywayMigrationNamingTest` 锁定三份源码字节，
 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 用真实 PostgreSQL 覆盖正常主链、
-release 缺失低版本 migration 的升级和第二次启动解析。
+旧 release 与企业 SCM 缺失低版本 migration 的升级、第二次启动解析和未知 checksum 失败关闭。
 
 ## V20260817193414 本地客户端下载灰度用户
 

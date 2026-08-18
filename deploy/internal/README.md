@@ -614,12 +614,13 @@ bash /data/testagent/deploy/internal/ensure-experience-workspace-content.sh \
 
 企业后端采用 `test-agent-app.jar` 瘦启动器与 `dist/backend/lib/` 外置依赖。Flyway migration
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
-复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型、体验工作区、运营 outbox 和 SCM Git 姓名证据）以及 XXL MySQL V10/V11/两套已执行 V12 历史资源的 SHA-256，并分别比较发布包与安装后的
+复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型、体验工作区、运营 outbox、本地客户端企业前向版本和 SCM Git 姓名证据）以及 XXL MySQL V10/V11/两套已执行 V12 历史资源的 SHA-256，并分别比较发布包与安装后的
 persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
 当前上一轮已部署平台包的业务源码提交为 `57e211de48a5507fb8d1689e1c8f86fd96563032`，内层 ZIP SHA-256 为
 `7af9c20e57a809258b0acd4672189b5ca875dde3f1a7208f770414a57d234b53`；该包正常企业主链最高版本为
-`20260812204207`，XXL MySQL 准入预期为 V1-V11 全部成功。从该基线首次升级时，第一台 `.4` 只允许新增
-PostgreSQL `20260813190929` 和发布清单登记的 dev 前向 migration；XXL MySQL 必须按已执行 V12 分支选择兼容 location，
+`20260812204207`，XXL MySQL 准入预期为 V1-V11 全部成功。当前现场已经执行 SCM `20260813190929`；第一台 `.4`
+从该 history 启动时，本地客户端不得再装配较低的 `20260812202425`，只允许按发布清单执行 analytics
+`20260814165300/20260814165301`、灰度名单 `20260817193414` 和企业前向 `20260818094330`。XXL MySQL 必须按已执行 V12 分支选择兼容 location，
 并通过更高版本补齐 ClickHouse 每分钟入库和每日 04:10 SCM Git 姓名补偿。故障重部署不得新增 history，`.114` 只做
 validate。必须按多后台手册读取两套完整 `flyway_schema_history`，不能只凭
 提交号、启动日志或最高版本判断数据库历史一致。
@@ -630,8 +631,9 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 
 1. 从两台后台确认外部 `122.210.106.43:3306` 可达，两份 `backend.env` 使用同一个 JDBC 地址、账号密码和 XXL access token。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
-3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一包 `20260812204207` 基线只允许新增
-   `20260813190929` 和发布清单登记的 dev 前向 migration；外部 XXL MySQL 从 V1-V11 或已登记 V12 分支按兼容装配升级；任何失败、倒序、未知版本或 checksum 都停止。
+3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从已执行 `20260813190929` 的现场 history
+   只允许按发布清单新增 `20260814165300`、`20260814165301`、`20260817193414`、`20260818094330`；不得新增较低的
+   `20260812202425`。外部 XXL MySQL 从 V1-V11 或已登记 V12 分支按兼容装配升级；任何失败、倒序、未知版本或 checksum 都停止。
    随后确认 Admin health、搬迁任务
    每 30 分钟、闲置进程关闭每日 02:00、模型探活每 5 分钟和可观测清理
    每日 03:30、ClickHouse 运营入库每分钟及 SCM Git 姓名补偿每日 04:10 均正常。任一校验失败时不得继续 `.114` 和前端。

@@ -100,6 +100,8 @@ LOCAL_CLIENT_RUNTIME_MIGRATION_SHA256="b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-applied/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256="168cbf7bf3c1a062c8fd38057cd32726804ab8bf00ced1dff39d5c2837c53026"
 LOCAL_CLIENT_RUNTIME_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-after-release/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
+LOCAL_CLIENT_RUNTIME_AFTER_ENTERPRISE_RELEASE_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-after-enterprise-release/V20260818094330__local_client_credentials_create_runtime_after_enterprise_release.sql"
+LOCAL_CLIENT_RUNTIME_AFTER_ENTERPRISE_RELEASE_MIGRATION_SHA256="6d390354ddb9794c1f3730f09f1dd806ea74628f20fa6ea2857c1dee6774d25c"
 LOCAL_CLIENT_ROLLOUT_MIGRATION_RESOURCE="db/migration/V20260817193414__local_client_rollout_users_create.sql"
 LOCAL_CLIENT_ROLLOUT_MIGRATION_SHA256="88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba"
 AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE="db/migration/V20260812204207__dictionaries_add_automation_code_repository.sql"
@@ -438,6 +440,8 @@ verify_release_flyway_migrations_jar() {
     "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${LOCAL_CLIENT_RUNTIME_AFTER_RELEASE_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOCAL_CLIENT_RUNTIME_AFTER_ENTERPRISE_RELEASE_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_AFTER_ENTERPRISE_RELEASE_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${LOCAL_CLIENT_ROLLOUT_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_ROLLOUT_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
