@@ -363,6 +363,36 @@ describe("RequirementImportView", () => {
     wrapper.unmount();
   });
 
+  it("keeps an exact application short-name filtered after the last character is entered", async () => {
+    listApplications.mockResolvedValueOnce([
+      { appName: "基础应用", appShortName: "f-base" },
+      { appName: "其他应用", appShortName: "f-batch" }
+    ]);
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_exact_application_filter"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledTimes(1));
+    const applicationInput = wrapper.get('input[aria-label="TCDS 应用"]');
+    (applicationInput.element as HTMLInputElement).value = "f-bas";
+    await applicationInput.trigger("input");
+    expect(wrapper.findAll('#requirement-import-application-options [role="option"]')).toHaveLength(1);
+    expect(wrapper.get('#requirement-import-application-options [role="option"]').text()).toContain("f-base");
+
+    (applicationInput.element as HTMLInputElement).value = "f-base";
+    await applicationInput.trigger("input");
+    expect(wrapper.findAll('#requirement-import-application-options [role="option"]')).toHaveLength(1);
+    expect(wrapper.get('#requirement-import-application-options [role="option"]').text()).toContain("f-base");
+    wrapper.unmount();
+  });
+
   it("filters sub-items by parent or child tokens, preserves selection, and supports selected-only view", async () => {
     listItems.mockResolvedValueOnce([
       {

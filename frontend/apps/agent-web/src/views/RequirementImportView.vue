@@ -71,8 +71,8 @@ const versionOptions = computed(() => [...new Set([
 
 const filteredApplications = computed(() => {
   const query = selectedAppInput.value.trim().toLocaleLowerCase();
-  // 聚焦或主动展开时始终展示全量建议；仅在用户开始键入后按新输入过滤。
-  if (!applicationSearchActive.value || !query || resolveApplication(selectedAppInput.value)) return applications.value;
+  // 聚焦或主动展开时展示全量建议；一旦用户键入，即使刚好完整命中简称，也必须保持筛选结果。
+  if (!applicationSearchActive.value || !query) return applications.value;
   return applications.value.filter((application) =>
     `${application.appName} ${application.appShortName}`.toLocaleLowerCase().includes(query));
 });

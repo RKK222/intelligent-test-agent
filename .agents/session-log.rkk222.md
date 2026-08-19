@@ -12208,3 +12208,25 @@
 ### Result
 
 - 自动化代码库配置管理现在与应用资产库共用同一套同步进度交互，同时继续遵守应用级只读 Reference、共享副本和无个人 worktree 的边界；真实服务已启动供用户自行执行登录后的业务验收。
+
+## 2026-08-19 - 修复 TCDS 应用完整简称筛选失效
+
+### Why
+
+- 需求导入页应用输入框键入 `f-bas` 时能正确过滤，但补齐最后一个字符成为目录中的完整简称 `f-base` 后，精确命中旁路会误把本轮输入当成既有选择值，导致建议列表恢复全量，表现为筛选不生效。
+
+### What
+
+- 复用现有 `applicationSearchActive` 区分“聚焦展开”和“用户正在输入”，移除输入期的精确命中旁路；用户键入完整应用名称、简称或组合标签时继续按当前文本过滤，聚焦既有选择时仍展示全量建议。
+- 新增 `f-bas → f-base` 回归用例并同步 agent-web README；未修改后端、HTTP/WebSocket API、RunEvent、数据库、Flyway、部署、安全、公共 Agent 或 Git diff/提交推送链路。
+
+### How
+
+- 需求导入页定向 Vitest 14/14、agent-web typecheck、用户手册和 agent-web production build 均通过；JDK 25 下 26 模块后端跳过测试 package 也在重启流程中成功。
+- 3000 端口保留的当前 Vite 页面通过 Playwright mock TCDS 应用目录完成 UI 级验证：先输入 `f-bas` 再键入 `e`，输入值为 `f-base` 且建议始终只有目标一项。
+- 按规范使用根目录 `.env.test` / `test` profile 重启，但固定 PostgreSQL `192.168.8.100:15432/testagent_dev` 当前连接超时，后端未能启动；未切换本机数据库或其它 dotenv，前端 3000 仍可访问。
+
+### Result
+
+- 完整输入应用简称后筛选结果不再重置，最后一个字符与前缀输入的行为一致。
+- 本次代码与 UI 行为已验证；后端真实启动和企业 TCDS 联调因共享测试数据库不可达未完成，需要数据库网络恢复后按同一 `.env.test` 命令复验。
