@@ -158,4 +158,33 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(wrapper.text()).not.toContain("新增目录引用");
     expect(wrapper.text()).not.toContain("设为当前版本");
   });
+
+  it("displays loading animation when branches and directory tree are being fetched", async () => {
+    let resolveBranches!: (branches: string[]) => void;
+    const branchesPromise = new Promise<string[]>((res) => { resolveBranches = res; });
+    let resolveTree!: (tree: { nodes: Array<{ name: string; path: string; type: "file" | "directory"; children?: any[] }> }) => void;
+    const treePromise = new Promise<{ nodes: Array<{ name: string; path: string; type: "file" | "directory"; children?: any[] }> }>((res) => { resolveTree = res; });
+
+    const mockApi = api({
+      listRepositoryBranches: vi.fn().mockReturnValue(branchesPromise),
+      getRepositoryTree: vi.fn().mockReturnValue(treePromise)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    // 在创建模式下分支加载中时展示拉取动画与文字
+    expect(wrapper.text()).toContain("拉取分支中…");
+    expect(wrapper.find('[data-component="spinner"]').exists()).toBe(true);
+
+    resolveBranches(["main"]);
+    await flushPromises();
+
+    // 目录树加载中时展示目录读取动画与状态
+    expect(wrapper.text()).toContain("正在读取目录…");
+
+    resolveTree({ nodes: [] });
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("正在读取目录…");
+  });
 });

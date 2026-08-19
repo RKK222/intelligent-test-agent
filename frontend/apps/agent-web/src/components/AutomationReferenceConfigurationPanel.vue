@@ -374,7 +374,10 @@ onBeforeUnmount(() => {
         <span>自动化代码库</span>
         <Spinner v-if="loading" class="h-3.5 w-3.5" />
       </div>
-      <div v-if="loading && !templates.length" class="reference-state" role="status">正在加载自动化引用…</div>
+      <div v-if="loading && !templates.length" class="reference-state is-centered" role="status">
+        <Spinner class="h-4 w-4" />
+        <span>正在加载自动化引用…</span>
+      </div>
       <template v-else>
         <div v-if="canManage && !repositories.length" class="reference-state">当前应用未关联自动化代码库。</div>
         <div v-if="!canManage && !templates.length" class="reference-state">当前应用暂无自动化代码库引用。</div>
@@ -498,10 +501,16 @@ onBeforeUnmount(() => {
         <div class="reference-ready-layout">
           <section class="reference-tree-panel" aria-label="自动化目录树">
             <div class="reference-panel-title">
-              <span>目录</span>
+              <span class="automation-panel-title-left">
+                <span>目录</span>
+                <Spinner v-if="treeLoading" class="h-3 w-3 ml-1.5" />
+              </span>
               <code v-if="selectedDirectory" class="reference-title-path">{{ selectedDirectory }}</code>
             </div>
-            <div v-if="treeLoading" class="reference-compact-state">正在读取目录…</div>
+            <div v-if="treeLoading" class="reference-compact-state is-centered" role="status">
+              <Spinner class="h-4 w-4" />
+              <span>正在读取目录…</span>
+            </div>
             <div v-else-if="tree.length === 0" class="reference-compact-state">当前分支没有可选择的目录。</div>
             <div v-else class="reference-tree-wrap">
               <RepositoryDirectoryTree
@@ -521,7 +530,13 @@ onBeforeUnmount(() => {
                 <Input :model-value="selectedRepository?.name || selectedRepositoryId" readonly aria-label="自动化版本库" />
               </label>
               <label>
-                <span>分支（branch）</span>
+                <span class="automation-field-label">
+                  <span>分支（branch）</span>
+                  <span v-if="branchesLoading" class="automation-inline-loading" role="status">
+                    <Spinner class="h-3 w-3" />
+                    <small>拉取分支中…</small>
+                  </span>
+                </span>
                 <select
                   v-model="selectedBranch"
                   class="reference-select"
@@ -529,12 +544,19 @@ onBeforeUnmount(() => {
                   :disabled="branchesLoading || saving"
                   @change="loadTree"
                 >
+                  <option v-if="branchesLoading && !branches.length" value="" disabled>正在拉取分支…</option>
                   <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
                 </select>
               </label>
               <label>
-                <span>引用目录（path） <b aria-hidden="true">*</b></span>
-                <Input :model-value="selectedDirectory" readonly placeholder="请在左侧选择目录" />
+                <span class="automation-field-label">
+                  <span>引用目录（path） <b aria-hidden="true">*</b></span>
+                  <span v-if="treeLoading" class="automation-inline-loading" role="status">
+                    <Spinner class="h-3 w-3" />
+                    <small>读取目录中…</small>
+                  </span>
+                </span>
+                <Input :model-value="selectedDirectory" readonly :placeholder="treeLoading ? '正在读取目录…' : '请在左侧选择目录'" />
               </label>
               <label>
                 <span>引用名称（workspace-name） <b aria-hidden="true">*</b></span>
@@ -544,8 +566,9 @@ onBeforeUnmount(() => {
                 <span>版本日期（version） <b aria-hidden="true">*</b></span>
                 <Input v-model="versionDate" aria-label="自动化引用版本日期" placeholder="YYYYMMDD" :disabled="saving" />
               </label>
-              <div v-if="operation" class="reference-form-notice" role="status">
-                {{ operation.status === "RUNNING" ? "正在初始化共享只读副本…" : operation.status }}
+              <div v-if="operation" class="reference-form-notice is-loading" role="status">
+                <Spinner v-if="operation.status === 'RUNNING'" class="h-3.5 w-3.5 shrink-0" />
+                <span>{{ operation.status === "RUNNING" ? "正在初始化共享只读副本…" : operation.status }}</span>
               </div>
               <div class="reference-form-actions">
                 <Button
@@ -553,6 +576,7 @@ onBeforeUnmount(() => {
                   :disabled="!canCreateReference"
                   @click="createReference"
                 >
+                  <Spinner v-if="saving" class="h-3.5 w-3.5 mr-1.5" />
                   {{ saving ? "保存中…" : "保存目录引用" }}
                 </Button>
               </div>
@@ -575,6 +599,7 @@ onBeforeUnmount(() => {
               :disabled="saving"
               @click="toggleReference(selectedTemplate)"
             >
+              <Spinner v-if="saving" class="h-3 w-3 mr-1" />
               {{ selectedTemplate.enabled === false ? "启用引用" : "停用引用" }}
             </Button>
           </div>
@@ -656,6 +681,7 @@ onBeforeUnmount(() => {
                         :disabled="saving || version.status !== 'ACTIVE'"
                         @click="activateVersion(selectedTemplate, version)"
                       >
+                        <Spinner v-if="saving" class="h-3 w-3 mr-1 inline-block" />
                         设为当前版本
                       </Button>
                     </td>
@@ -672,13 +698,20 @@ onBeforeUnmount(() => {
             <form class="reference-form automation-version-form" @submit.prevent="createVersion">
               <div class="automation-version-fields">
                 <label>
-                  <span>新增版本分支（branch）</span>
+                  <span class="automation-field-label">
+                    <span>新增版本分支（branch）</span>
+                    <span v-if="branchesLoading" class="automation-inline-loading" role="status">
+                      <Spinner class="h-3 w-3" />
+                      <small>拉取分支中…</small>
+                    </span>
+                  </span>
                   <select
                     v-model="selectedBranch"
                     class="reference-select"
                     aria-label="新增自动化版本分支"
                     :disabled="branchesLoading || saving"
                   >
+                    <option v-if="branchesLoading && !branches.length" value="" disabled>正在拉取分支…</option>
                     <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
                   </select>
                 </label>
@@ -694,6 +727,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="reference-form-actions">
                 <Button type="submit" :disabled="!canCreateVersion">
+                  <Spinner v-if="saving" class="h-3.5 w-3.5 mr-1.5" />
                   {{ saving ? "创建中…" : "新增版本" }}
                 </Button>
               </div>
@@ -1049,6 +1083,11 @@ onBeforeUnmount(() => {
   background: var(--ta-panel-2);
 }
 
+.automation-panel-title-left {
+  display: inline-flex;
+  align-items: center;
+}
+
 .reference-title-path {
   overflow: hidden;
   color: var(--ta-ink);
@@ -1071,6 +1110,28 @@ onBeforeUnmount(() => {
   margin-bottom: 5px;
   color: var(--ta-muted);
   font-family: "Geist Mono", monospace;
+  font-size: 10px;
+}
+
+.automation-field-label {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.automation-inline-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ta-muted);
+  font-family: var(--font-sans, -apple-system, sans-serif);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.automation-inline-loading small {
+  color: var(--ta-muted);
   font-size: 10px;
 }
 
@@ -1123,6 +1184,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   text-align: center;
+  gap: 8px;
 }
 
 .reference-state.is-error,
@@ -1149,8 +1211,37 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
+.reference-form-notice.is-loading {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  border-color: var(--ta-cyan);
+  background: rgba(79, 111, 122, 0.06);
+  color: var(--ta-cyan);
+}
+
 .reference-form-notice.is-success {
   color: var(--ta-ok);
+}
+
+@media (max-width: 780px) {
+  .reference-automation-layout {
+    grid-template-columns: 1fr;
+  }
+  .reference-repository-column {
+    max-height: 38vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--ta-border);
+  }
+  .reference-ready-layout {
+    grid-template-columns: 1fr;
+  }
+  .reference-tree-panel {
+    min-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--ta-border);
+  }
 }
 
 @media (max-width: 780px) {
