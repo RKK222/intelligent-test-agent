@@ -380,7 +380,7 @@ async function loadCatalog() {
   }
 }
 
-async function selectRepository(repository: AutomationRepository) {
+async function selectRepository(repository: AutomationRepository, autoSync = false) {
   selectedRepositoryId.value = repository.repositoryId;
   closeBranchPopover();
 
@@ -396,6 +396,16 @@ async function selectRepository(repository: AutomationRepository) {
 
   if (props.canManage) {
     await loadBranches(repository.repositoryId, repository.branch || existing?.branch || "main");
+  }
+
+  if (autoSync && props.canManage && existing) {
+    const versionList = versionsByTemplate.value[existing.workspaceId] ?? [];
+    const targetVersion = (existing.activeVersion
+      ? versionList.find((v) => v.versionId === existing.activeVersion?.versionId) || existing.activeVersion
+      : versionList[0]) as ApplicationWorkspaceVersion | null;
+    if (targetVersion) {
+      void synchronizeVersion(existing, targetVersion);
+    }
   }
 }
 
@@ -529,6 +539,12 @@ async function confirmBranchPopover() {
 
 async function verifyPointers() {
   if (!selectedRepositoryId.value) return;
+  const template = activeTemplate.value;
+  const ver = (activeVersion.value || (template ? versionsByTemplate.value[template.workspaceId]?.[0] : null)) as ApplicationWorkspaceVersion | null;
+  if (template && ver) {
+    void synchronizeVersion(template, ver);
+    return;
+  }
   syncLoading.value = true;
   try {
     await loadCatalog();
@@ -805,7 +821,7 @@ onBeforeUnmount(() => {
             :aria-label="`选择${repository.name}`"
             :aria-pressed="selectedRepositoryId === repository.repositoryId"
             :disabled="saving"
-            @click="selectRepository(repository)"
+            @click="selectRepository(repository, true)"
           >
             <FolderGit2 class="h-4 w-4 shrink-0" />
             <span class="min-w-0">

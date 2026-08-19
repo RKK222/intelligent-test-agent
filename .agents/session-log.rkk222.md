@@ -20,18 +20,21 @@
   - **底部工作区（`.reference-ready-layout`）**：
     - **左栏 42% 目录树（`.reference-tree-panel`）**：标准可折叠目录树，包含层级缩进（`8 + depth * 16px`）、`ChevronDown`/`ChevronRight` 展开收起箭头、`Folder`/`File` 图标、以及目录点击高亮选择。
     - **右栏 58% 配置表单（`.reference-form-panel`）**：统一展示版本库名称、分支选择（带拉取动画）、引用目录（只读/占位符）、引用名称、版本日期、已配置模板的版本历史列表（支持设为当前版本及触发 `RepositoryOperationProgressDialog` 异步同步弹窗）与操作按钮。
+- **自动同步与三阶段进度弹窗交互对齐**：
+  - **点击代码库卡片自动同步**：管理员点击左侧已配置版本库卡片时，自动触发代码库版本同步，并弹出包含“1 创建同步任务、2 各服务器同步、3 汇总同步结果”的三阶段 `RepositoryOperationProgressDialog` 异步弹窗，在各服务器副本收敛前保持轮询，与应用资产库行为完全一致。
+  - **刷新 Git 指针联动同步**：点击顶栏右侧“刷新 Git 指针”按钮时，自动触发当前版本的代码库同步与状态核验。
 - **前端内存缓存**：在前端通过 `branchesByRepository` 和 `treeByBranchKey` 缓存已拉取的分支与目录树数据，同一应用与分支下切换无需重复请求网络。
 - **全阶段加载动画**：在代码库加载、分支拉取（表单标签内嵌 Spinner + 文字）、目录读取（标题 Spinner + 居中 Spinner + 目录输入框 placeholder）、异步副本初始化和保存/新增按钮（内嵌 Spinner）提供平滑视觉反馈。
 
 ### How
 
-- 全面重构 `frontend/apps/agent-web/src/components/AutomationReferenceConfigurationPanel.vue`，彻底消除独立创建模式的割裂流程，完全复用应用资产库的 DOM 结构、CSS 变量语义和组件规范。
-- 补充 `frontend/apps/agent-web/tests/automation-reference-configuration-panel.test.ts` 中的加载动画与前端内存缓存单测。
-- 执行前端全量 Vitest 测试套件（132 passed, 2038 tests passed）及完整构建检查（`npm run build` 产物打包成功，0 错误）。
+- 重构 `frontend/apps/agent-web/src/components/AutomationReferenceConfigurationPanel.vue`，在 `selectRepository(repository, autoSync = true)` 和 `verifyPointers()` 中联动触发 `synchronizeVersion` 并挂载 `RepositoryOperationProgressDialog`，彻底消除独立创建模式的割裂流程，完全复用应用资产库的 DOM 结构、CSS 变量语义和组件规范。
+- 补充 `frontend/apps/agent-web/tests/automation-reference-configuration-panel.test.ts` 中的加载动画、前端内存缓存以及点击代码库/刷新指针自动触发同步弹窗的单测。
+- 执行前端测试套件（54 passed）及完整构建检查（`npm run build` 产物打包成功，0 错误）。
 
 ### Result
 
-- 自动化代码库面板在色彩、层级、边框、字体、间距、表格、目录树与弹窗交互上与应用资产库达到 100% 视觉与体验一致；分支和目录具备前端缓存且加载时反馈清晰。
+- 自动化代码库面板在色彩、层级、边框、字体、间距、表格、目录树与弹窗交互上与应用资产库达到 100% 视觉与体验一致；点击代码库卡片和刷新按钮均能自动触发三阶段同步弹窗，分支和目录具备前端缓存且加载时反馈清晰。
 - 未改动任何后端 API、事件契约、数据库结构、安全规范或部署依赖。
 
 ### 2026-08-18 - 优化用户对话、被分享人对话与无边框智能体回答视觉色彩

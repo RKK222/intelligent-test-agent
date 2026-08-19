@@ -282,13 +282,51 @@ describe("AutomationReferenceConfigurationPanel", () => {
     await flushPromises();
     expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
 
-    // 重新点击“新增目录引用”：命中前端分支和目录缓存，不重复发起请求
-    const addButton = wrapper.findAll("button").find((b) => b.text().includes("新增目录引用"));
-    if (addButton) {
-      await addButton.trigger("click");
-      await flushPromises();
-      expect(mockApi.listRepositoryBranches).toHaveBeenCalledTimes(1);
-      expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
-    }
+    // 重新切换分支：命中前端分支和目录缓存，不重复发起请求
+    await branchSelect.setValue("main");
+    await flushPromises();
+    expect(mockApi.listRepositoryBranches).toHaveBeenCalledTimes(1);
+    expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
+  });
+
+  it("automatically synchronizes repository when clicking repository card or refresh button", async () => {
+    const configuredTemplate = template();
+    const ready = synchronization("awv_old", {
+      status: "READY",
+      readyServerCount: 2,
+      servers: [
+        { linuxServerId: "linux-a", serverName: "server-a", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" },
+        { linuxServerId: "linux-b", serverName: "server-b", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" }
+      ]
+    });
+    const mockApi = api({
+      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
+      listWorkspaceVersions: vi.fn().mockResolvedValue([version("awv_old", "20260812")]),
+      getAutomationWorkspaceVersionSynchronizationStatus: vi.fn().mockResolvedValue(ready),
+      synchronizeAutomationWorkspaceVersion: vi.fn().mockResolvedValue(ready)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    // 点击左侧代码库卡片，自动触发代码同步并弹出进度对话框
+    await wrapper.get('button[aria-label="选择接口自动化库"]').trigger("click");
+    await flushPromises();
+
+    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledWith(
+      "app-demo", "awp_auto", "awv_old"
+    );
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("创建同步任务");
+
+    // 关闭同步进度对话框
+    await wrapper.get('button[aria-label="关闭自动化代码库同步进度"]').trigger("click");
+    await flushPromises();
+
+    // 点击刷新 Git 指针按钮，再次触发同步
+    await wrapper.get('button[aria-label="刷新接口自动化库 Git 指针"]').trigger("click");
+    await flushPromises();
+    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledTimes(2);
+
+    wrapper.unmount();
   });
 });
