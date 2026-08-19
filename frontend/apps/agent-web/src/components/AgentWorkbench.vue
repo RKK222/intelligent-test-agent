@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, toRaw, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, toRaw, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import {
@@ -23,7 +23,7 @@ import {
   type RawHttpExchange
 } from "@test-agent/backend-api";
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
-import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
+import { CodeEditor, languageFromPath, type EditorSelectionContext, type MermaidEditableDiagram } from "@test-agent/editor";
 import {
   subscribeRunEvents,
   subscribeSessionRuntimeState,
@@ -10451,6 +10451,68 @@ async function handleLocateFile(path: string) {
   setTimeout(scrollToActiveFileTreeRow, 300);
 }
 
+const MermaidEditorDialog = defineAsyncComponent(
+  () => import("@test-agent/editor").then((m) => m.MermaidEditorDialog)
+);
+
+type MmdVisualEditorState = {
+  tabPath: string;
+  model?: MermaidEditableDiagram;
+  error?: string;
+};
+
+const mmdVisualEditor = ref<MmdVisualEditorState | null>(null);
+
+async function handleOpenMermaidEditor() {
+  if (!activeTab.value) return;
+  const tab = activeTab.value;
+  const source = tab.content ?? "";
+  try {
+    const { ensureMermaid, parseMermaidDiagram } = await import("@test-agent/editor");
+    const mermaid = await ensureMermaid();
+    await mermaid.parse(source);
+    mmdVisualEditor.value = {
+      tabPath: tab.path,
+      model: parseMermaidDiagram(source)
+    };
+  } catch (error) {
+    mmdVisualEditor.value = {
+      tabPath: tab.path,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function handleApplyMmdVisualEditor(diagram: MermaidEditableDiagram) {
+  if (!mmdVisualEditor.value) return;
+  const targetPath = mmdVisualEditor.value.tabPath;
+  const targetTab = tabs.value.find((t) => t.path === targetPath);
+  if (!targetTab) {
+    mmdVisualEditor.value = null;
+    return;
+  }
+  try {
+    const { serializeMermaidDiagram, ensureMermaid } = await import("@test-agent/editor");
+    const source = serializeMermaidDiagram(diagram);
+    const mermaid = await ensureMermaid();
+    await mermaid.parse(source);
+
+    workbench.updateTabContent(targetTab.path, source);
+    mmdVisualEditor.value = null;
+
+    const updatedTab = tabs.value.find((t) => t.path === targetTab.path) ?? { ...targetTab, content: source };
+    if (!updatedTab.readonly && !updatedTab.livePreview) {
+      saveMutation.mutate(updatedTab);
+    }
+  } catch (error) {
+    mmdVisualEditor.value = {
+      tabPath: targetPath,
+      model: diagram,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 function scrollToActiveFileTreeRow() {
   const activeRowEl = document.querySelector(".ta-file-tree-scroll .ta-file-tree-row.is-active") as HTMLElement | null;
   if (activeRowEl) {
@@ -11902,6 +11964,7 @@ async function handleLogout() {
           @update:markdown-preview="(value: boolean) => { if (!value) markdownPreviewMode = 'off'; else if (markdownPreviewMode === 'off') markdownPreviewMode = 'split'; }"
           @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
           @cache-and-navigate="handleEditorCacheAndNavigate"
+          @open-mermaid-editor="handleOpenMermaidEditor"
         >
           <div
             class="relative h-full min-h-0"
@@ -12043,6 +12106,16 @@ async function handleLogout() {
             </div>
           </div>
         </FigmaEditorArea>
+        <MermaidEditorDialog
+          v-if="mmdVisualEditor"
+          :model="mmdVisualEditor.model"
+          :error="mmdVisualEditor.error"
+          title="Mermaid 可视化编辑"
+          subtitle="拖动图结构并保存后，修改会回写到当前 mmd 文件。"
+          apply-label="保存到文件"
+          @apply="handleApplyMmdVisualEditor"
+          @cancel="mmdVisualEditor = null"
+        />
       </main>
     </template>
 

@@ -16,6 +16,7 @@ let mermaidLoadPromise: Promise<void> | null = null;
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import type { MermaidEditableDiagram } from "./mermaid/diagram";
+import { ensureMermaid } from "./mermaid/init";
 // github-markdown-css 提供 .markdown-body 基础排版样式，侧载一次即可
 import "github-markdown-css/github-markdown.css";
 
@@ -56,28 +57,8 @@ let syncRaf = 0;
 
 // 懒加载 markdown-it + highlight.js + dompurify，仅在首次需要渲染时加载，避免进入首屏 bundle
 async function ensureLibs(needMermaid = false) {
-  if (needMermaid && !mermaidInstance) {
-    if (!mermaidLoadPromise) {
-      mermaidLoadPromise = (async () => {
-        const [mermaidMod, elkLayouts] = await Promise.all([
-          import("mermaid"),
-          import("@mermaid-js/layout-elk")
-        ]);
-        const instance = (mermaidMod as any).default ?? mermaidMod;
-        mermaidInstance = (instance.initialize && instance.render) ? instance : (instance.default ?? instance);
-        const loaders = (elkLayouts as any).default ?? elkLayouts;
-        if (mermaidInstance.registerLayoutLoaders && loaders) {
-          mermaidInstance.registerLayoutLoaders(loaders);
-        }
-        mermaidInstance.initialize({
-          startOnLoad: false,
-          theme: "neutral",
-          securityLevel: "loose",
-          layout: "elk",
-        });
-      })();
-    }
-    await mermaidLoadPromise;
+  if (needMermaid) {
+    mermaidInstance = await ensureMermaid();
   }
 
   if (mdInstance && purifyInstance) {

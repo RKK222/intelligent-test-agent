@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowLeftRight, CodeXml, FileSearch, FlaskConical, LibraryBig, LocateFixed, Plus, Save, ServerCog } from "lucide-vue-next";
+import { ArrowLeftRight, CodeXml, FileSearch, FlaskConical, LibraryBig, LocateFixed, Plus, Save, ServerCog, SquarePen } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type {
   ApplicationWorkspaceTemplate,
@@ -41,6 +41,8 @@ const props = defineProps<{
   showSave?: boolean;
   /** 是否展示 MD 预览按钮（仅 Markdown 文件时显示） */
   showPreviewButton?: boolean;
+  /** 是否展示 Mermaid 可视化编辑按钮（仅 .mmd 文件时显示） */
+  showMermaidEditButton?: boolean;
   /** 当前 MD 预览模式 */
   markdownPreviewMode?: PreviewMode;
   /** 当前应用名（用于菜单首行提示与按钮文案） */
@@ -101,7 +103,11 @@ const emit = defineEmits<{
   // 点击未下载版本库后直接进入该版本库的下载/管理页面。
   (e: "manage-app-source-repository", repository: AppSourceRepositorySummary): void;
   (e: "return-managed-workspace"): void;
+  (e: "open-mermaid-editor"): void;
 }>();
+
+const isMmdFile = computed(() => !!props.writePath && /\.mmd$/i.test(props.writePath));
+const shouldShowMermaidEditButton = computed(() => !!props.showMermaidEditButton || isMmdFile.value);
 
 const updatedLabel = computed(() => {
   if (props.updatedAt === undefined || props.updatedAt === null || props.updatedAt === "") return "—";
@@ -848,6 +854,22 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
         </button>
       </ElTooltip>
       <ElTooltip
+        v-if="shouldShowMermaidEditButton"
+        content="Mermaid 可视化编辑"
+        placement="top"
+        :show-after="0"
+      >
+        <button
+          type="button"
+          class="ta-workbench-footer-mermaid-edit"
+          data-testid="footer-mermaid-edit"
+          aria-label="Mermaid 可视化编辑"
+          @click="emit('open-mermaid-editor')"
+        >
+          <SquarePen class="ta-workbench-footer-icon" />
+        </button>
+      </ElTooltip>
+      <ElTooltip
         v-if="writePath"
         content="定位到当前文件"
         placement="top"
@@ -1163,6 +1185,35 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
 
 .ta-workbench-footer-preview.is-active:hover {
   background: #bae6fd;
+}
+
+/* Mermaid 可视化编辑按钮：蓝紫色/靛青色，与预览/定位按钮风格协调 */
+.ta-workbench-footer-mermaid-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0.8px solid #c7d2fe;
+  border-radius: 6px;
+  background: #fff;
+  color: #4f46e5;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ta-workbench-footer-mermaid-edit:hover:not(:disabled) {
+  background: #eef2ff;
+  border-color: #818cf8;
+  color: #4338ca;
+}
+
+.ta-workbench-footer-mermaid-edit:disabled {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+  color: #a1a1aa;
+  cursor: not-allowed;
 }
 
 /* 定位文件按钮彩色化：琥珀金/橙色 */

@@ -57,6 +57,7 @@ const emit = defineEmits<{
   "update:markdownPreview": [enabled: boolean];
   "update:markdownPreviewMode": [mode: PreviewMode];
   "cacheAndNavigate": [path: string];
+  "open-mermaid-editor": [];
 }>();
 
 // 当前激活 tab 是否是 Markdown 文件：是的话才在 tab 表头最右侧显示预览开关。
@@ -262,6 +263,7 @@ watch(
       @load-versions="(templateId) => emit('load-versions', templateId)"
       @create-version="(payload) => emit('create-version', payload)"
       @open-server-workspace-picker="emit('open-server-workspace-picker')"
+      @open-mermaid-editor="emit('open-mermaid-editor')"
     />
   </div>
 </template>

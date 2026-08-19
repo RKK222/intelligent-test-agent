@@ -14,6 +14,9 @@ import MermaidVisualEditor from "./MermaidVisualEditor.vue";
 const props = defineProps<{
   model?: MermaidEditableDiagram;
   error?: string;
+  title?: string;
+  subtitle?: string;
+  applyLabel?: string;
 }>();
 const emit = defineEmits<{
   apply: [diagram: MermaidEditableDiagram];
@@ -97,8 +100,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       >
         <header class="ta-mermaid-dialog__header">
           <div class="ta-mermaid-dialog__header-left">
-            <h2 id="ta-mermaid-dialog-title">Mermaid 可视化编辑</h2>
-            <p>拖动图结构并应用后，修改会回写到当前 Markdown 代码块。</p>
+            <h2 id="ta-mermaid-dialog-title">{{ title ?? "Mermaid 可视化编辑" }}</h2>
+            <p>{{ subtitle ?? "拖动图结构并应用后，修改会回写到当前 Markdown 代码块。" }}</p>
           </div>
           <button type="button" aria-label="关闭可视化编辑" @click="emit('cancel')">×</button>
         </header>
@@ -128,7 +131,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <footer class="ta-mermaid-dialog__footer">
           <button type="button" @click="emit('cancel')">取消</button>
           <button type="button" class="is-primary" :disabled="!draft || !!error" @click="apply">
-            应用到 Markdown
+            {{ applyLabel ?? "应用到 Markdown" }}
           </button>
         </footer>
       </section>

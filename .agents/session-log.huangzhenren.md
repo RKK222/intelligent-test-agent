@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-08-19 - 工作空间 MMD 文件编辑器新增 Mermaid 可视化编辑入口并支持保存写回
+
+- Why:
+  - 针对工作空间中的 `.mmd` 格式文件，用户需要在文件编辑器底部“定位到当前文件”按钮左侧提供直接的编辑图标入口，点击后复用现有 Mermaid 可视化编辑器完成交互式编辑并保存写回到 `.mmd` 文件。
+- What:
+  - `frontend/packages/editor`:
+    - `src/mermaid/init.ts`: 封装 `ensureMermaid` 懒加载单例，按需初始化 Mermaid 与 ELK 布局引擎。
+    - `src/mermaid/visual-editor/MermaidEditorDialog.vue`: 增加可选 `title`、`subtitle`、`applyLabel` props，支持 Markdown 嵌入块和独立 `.mmd` 文件的可复用自定义文案。
+    - `src/MarkdownPreview.vue`: 复用 `ensureMermaid`。
+    - `src/index.ts`: 导出 `MermaidEditorDialog`、`ensureMermaid`、`parseMermaidDiagram`、`serializeMermaidDiagram`、`cloneMermaidDiagram`、`MermaidEditableDiagram`。
+    - `src/PACKAGE.md`: 同步模块职责与导出说明。
+  - `frontend/apps/agent-web`:
+    - `src/components/WorkbenchFooter.vue`: 在定位到当前文件按钮左侧新增 `ta-workbench-footer-mermaid-edit` 图标按钮（仅 `.mmd` 文件展示），绑定 `open-mermaid-editor` 事件与独立样式。
+    - `src/components/FigmaEditorArea.vue`: 透传 `open-mermaid-editor` 事件。
+    - `src/components/AgentWorkbench.vue`: 接入 `MermaidEditorDialog` 异步弹窗，在打开时解析当前 tab 的 Mermaid 语法，在点击应用时序列化新图表、更新 tab 内容并通过 `saveMutation.mutate(tab)` 保存到 `.mmd` 文件。
+    - `README.md`: 同步更新功能描述与单测覆盖。
+  - 测试用例:
+    - `apps/agent-web/tests/WorkbenchFooter.mermaid-edit.test.ts`: 覆盖 `.mmd` 格式文件按钮渲染、位置、点击 emit 事件与非 mmd 文件隔离。
+    - `apps/agent-web/tests/mermaid-mmd-editor.test.ts`: 覆盖 Mermaid 图表解析、序列化、弹窗自定义文案与应用回调。
+- How:
+  - 复用 `@test-agent/editor` 现有的流程图、时序图、状态图 Vue Flow/ELK 画布与领域 parser/serializer，通过受控事件在 `AgentWorkbench` 侧挂载与持久化。
+- Result:
+  - 自动化单测全部通过（全量 132 套件 / 2037 用例 100% 通过），`vue-tsc` 类型检查无报错。
+
 ### 2026-08-18 - 区分用户与被分享人对话气泡颜色并重构智能体输出配色
 
 - Why:
