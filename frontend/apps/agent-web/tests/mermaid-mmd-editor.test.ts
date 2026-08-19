@@ -1,5 +1,5 @@
-import { mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it } from "vitest";
+import { mount, flushPromises } from "@vue/test-utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MermaidEditorDialog,
   MermaidPreviewDialog,
@@ -7,6 +7,15 @@ import {
   serializeMermaidDiagram,
   type MermaidEditableDiagram
 } from "@test-agent/editor";
+
+vi.mock("../../../packages/editor/src/mermaid/init", () => ({
+  ensureMermaid: vi.fn().mockResolvedValue({
+    initialize: vi.fn(),
+    registerLayoutLoaders: vi.fn(),
+    parse: vi.fn().mockResolvedValue(true),
+    render: vi.fn().mockResolvedValue({ svg: "<svg id='ta-test-svg' width='800' height='600'><g></g></svg>" })
+  })
+}));
 
 describe("Mermaid MMD Editor Integration", () => {
   beforeEach(() => {
@@ -116,6 +125,8 @@ describe("Mermaid MMD Editor Integration", () => {
       }
     });
 
+    await flushPromises();
+
     expect(wrapper.text()).toContain("Mermaid 图表预览 - flow.mmd");
 
     const editButton = wrapper.find(".ta-mermaid-preview-btn-edit");
@@ -142,5 +153,46 @@ describe("Mermaid MMD Editor Integration", () => {
     });
 
     expect(wrapper.find(".ta-mermaid-error").text()).toContain("内容为空，无法渲染图表");
+  });
+
+  it("provides zoom in, zoom out, fit to screen and reset controls in MermaidPreviewDialog", async () => {
+    const source = `flowchart TD
+  A --> B`;
+
+    const wrapper = mount(MermaidPreviewDialog, {
+      props: {
+        code: source,
+        title: "Mermaid 图表预览"
+      },
+      global: {
+        stubs: {
+          Teleport: true
+        }
+      }
+    });
+
+    await flushPromises();
+
+    const toolbar = wrapper.find(".ta-mermaid-preview-toolbar");
+    expect(toolbar.exists()).toBe(true);
+
+    const zoomInBtn = toolbar.find('[aria-label="放大"]');
+    const zoomOutBtn = toolbar.find('[aria-label="缩小"]');
+    const resetBtn = toolbar.find('[aria-label="重置"]');
+    const fitBtn = toolbar.find('[aria-label="适应画布"]');
+
+    expect(zoomInBtn.exists()).toBe(true);
+    expect(zoomOutBtn.exists()).toBe(true);
+    expect(resetBtn.exists()).toBe(true);
+    expect(fitBtn.exists()).toBe(true);
+
+    await zoomInBtn.trigger("click");
+    expect(wrapper.find(".ta-mermaid-toolbar-zoom-label").text()).toBe("125%");
+
+    await zoomOutBtn.trigger("click");
+    expect(wrapper.find(".ta-mermaid-toolbar-zoom-label").text()).toBe("100%");
+
+    await resetBtn.trigger("click");
+    expect(wrapper.find(".ta-mermaid-toolbar-zoom-label").text()).toBe("100%");
   });
 });

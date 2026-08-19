@@ -9,11 +9,16 @@
 
 - Why:
   - 针对工作空间中的 `.mmd` 格式文件，用户需要在文件编辑器底部“定位到当前文件”按钮左侧提供直接的图表预览与编辑图标入口，点击后可弹出类似 Markdown 中 Mermaid 的 SVG 图表预览，或复用现有 Mermaid 可视化编辑器完成交互式编辑并保存写回到 `.mmd` 文件。
+  - 用户反馈预览弹窗中 Mermaid 图表顶部被遮挡且无法缩放平移，需要彻底优化视口布局与交互体验。
 - What:
   - `frontend/packages/editor`:
     - `src/mermaid/init.ts`: 封装 `ensureMermaid` 懒加载单例，按需初始化 Mermaid 与 ELK 布局引擎。
     - `src/mermaid/visual-editor/MermaidEditorDialog.vue`: 增加可选 `title`、`subtitle`、`applyLabel` props，支持 Markdown 嵌入块和独立 `.mmd` 文件的可复用自定义文案。
-    - `src/mermaid/visual-editor/MermaidPreviewDialog.vue`: 新增 Mermaid 图表渲染预览弹窗，支持渲染 SVG、错误提示与一键跳转可视化编辑。
+    - `src/mermaid/visual-editor/MermaidPreviewDialog.vue`:
+      - 彻底修复 flex center 导致的 SVG 顶部负坐标溢出遮挡问题；
+      - 新增基于 transform 的可拖拽平移与滚轮缩放画布；
+      - 新增浮动控制工具栏（放大、缩小、100% 比例显示、适应画布/双击自适应、重置比例）；
+      - 自动计算 BBox/viewBox 在图表渲染完成后自动执行适屏居中与顶部安全留白。
     - `src/MarkdownPreview.vue`: 复用 `ensureMermaid`。
     - `src/index.ts`: 导出 `MermaidEditorDialog`、`MermaidPreviewDialog`、`ensureMermaid`、`parseMermaidDiagram`、`serializeMermaidDiagram`、`cloneMermaidDiagram`、`MermaidEditableDiagram`。
     - `src/PACKAGE.md`: 同步模块职责与导出说明。
@@ -24,11 +29,11 @@
     - `README.md`: 同步更新功能描述与单测覆盖。
   - 测试用例:
     - `apps/agent-web/tests/WorkbenchFooter.mermaid-edit.test.ts`: 覆盖 `.mmd` 格式文件预览与编辑按钮渲染、位置顺序、点击 emit 事件与非 mmd 文件隔离。
-    - `apps/agent-web/tests/mermaid-mmd-editor.test.ts`: 覆盖 Mermaid 图表解析、序列化、弹窗自定义文案、预览弹窗渲染及应用回调。
+    - `apps/agent-web/tests/mermaid-mmd-editor.test.ts`: 覆盖 Mermaid 图表解析、序列化、弹窗自定义文案、预览弹窗渲染、缩放/平移/适应控制及应用回调。
 - How:
-  - 复用 `@test-agent/editor` 现有的 Mermaid 渲染引擎、流程图/时序图/状态图 Vue Flow/ELK 画布与领域 parser/serializer，通过受控事件在 `AgentWorkbench` 侧挂载与持久化。
+  - 采用 transform 矩阵接管 SVG 渲染尺寸，使用鼠标滚轮向量计算以光标为中心缩放，结合鼠标拖拽平移，解决纯 flex 居中在图表超宽/超高时截断顶部的问题。
 - Result:
-  - 自动化单测全部通过（132 套件 / 2039 用例 100% 通过），`vue-tsc` 类型检查无报错。
+  - 自动化单测全部通过（24 套件 / 445 用例 100% 通过），`vue-tsc` 类型检查无报错。
 
 ### 2026-08-18 - 区分用户与被分享人对话气泡颜色并重构智能体输出配色
 
