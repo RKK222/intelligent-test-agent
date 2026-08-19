@@ -10455,6 +10455,10 @@ const MermaidEditorDialog = defineAsyncComponent(
   () => import("@test-agent/editor").then((m) => m.MermaidEditorDialog)
 );
 
+const MermaidPreviewDialog = defineAsyncComponent(
+  () => import("@test-agent/editor").then((m) => m.MermaidPreviewDialog)
+);
+
 type MmdVisualEditorState = {
   tabPath: string;
   model?: MermaidEditableDiagram;
@@ -10462,6 +10466,17 @@ type MmdVisualEditorState = {
 };
 
 const mmdVisualEditor = ref<MmdVisualEditorState | null>(null);
+const mmdPreviewVisible = ref(false);
+
+function handleOpenMermaidPreview() {
+  if (!activeTab.value) return;
+  mmdPreviewVisible.value = true;
+}
+
+function handleSwitchFromPreviewToEditor() {
+  mmdPreviewVisible.value = false;
+  void handleOpenMermaidEditor();
+}
 
 async function handleOpenMermaidEditor() {
   if (!activeTab.value) return;
@@ -11964,6 +11979,7 @@ async function handleLogout() {
           @update:markdown-preview="(value: boolean) => { if (!value) markdownPreviewMode = 'off'; else if (markdownPreviewMode === 'off') markdownPreviewMode = 'split'; }"
           @update:markdown-preview-mode="(mode: PreviewMode) => (markdownPreviewMode = mode)"
           @cache-and-navigate="handleEditorCacheAndNavigate"
+          @open-mermaid-preview="handleOpenMermaidPreview"
           @open-mermaid-editor="handleOpenMermaidEditor"
         >
           <div
@@ -12115,6 +12131,13 @@ async function handleLogout() {
           apply-label="保存到文件"
           @apply="handleApplyMmdVisualEditor"
           @cancel="mmdVisualEditor = null"
+        />
+        <MermaidPreviewDialog
+          v-if="mmdPreviewVisible && activeTab"
+          :code="activeTab.content ?? ''"
+          :title="`Mermaid 图表预览 - ${activeTab.title || activeTab.path}`"
+          @close="mmdPreviewVisible = false"
+          @edit="handleSwitchFromPreviewToEditor"
         />
       </main>
     </template>

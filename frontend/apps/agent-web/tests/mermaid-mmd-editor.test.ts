@@ -2,6 +2,7 @@ import { mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   MermaidEditorDialog,
+  MermaidPreviewDialog,
   parseMermaidDiagram,
   serializeMermaidDiagram,
   type MermaidEditableDiagram
@@ -97,5 +98,49 @@ describe("Mermaid MMD Editor Integration", () => {
 
     expect(wrapper.find(".ta-mermaid-dialog__error").text()).toContain("无法进行可视化编辑");
     expect(wrapper.find(".ta-mermaid-dialog__error").text()).toContain("语法错误: 不支持的图类型");
+  });
+
+  it("renders MermaidPreviewDialog and supports closing and switching to edit", async () => {
+    const source = `flowchart TD
+  A --> B`;
+
+    const wrapper = mount(MermaidPreviewDialog, {
+      props: {
+        code: source,
+        title: "Mermaid 图表预览 - flow.mmd"
+      },
+      global: {
+        stubs: {
+          Teleport: true
+        }
+      }
+    });
+
+    expect(wrapper.text()).toContain("Mermaid 图表预览 - flow.mmd");
+
+    const editButton = wrapper.find(".ta-mermaid-preview-btn-edit");
+    expect(editButton.exists()).toBe(true);
+    await editButton.trigger("click");
+    expect(wrapper.emitted("edit")).toHaveLength(1);
+
+    const closeButton = wrapper.find(".ta-mermaid-preview-btn-close");
+    await closeButton.trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+  });
+
+  it("renders empty error state in MermaidPreviewDialog when code is blank", () => {
+    const wrapper = mount(MermaidPreviewDialog, {
+      props: {
+        code: "   ",
+        title: "Mermaid 图表预览"
+      },
+      global: {
+        stubs: {
+          Teleport: true
+        }
+      }
+    });
+
+    expect(wrapper.find(".ta-mermaid-error").text()).toContain("内容为空，无法渲染图表");
   });
 });

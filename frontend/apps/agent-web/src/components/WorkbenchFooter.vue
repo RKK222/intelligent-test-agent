@@ -41,6 +41,8 @@ const props = defineProps<{
   showSave?: boolean;
   /** 是否展示 MD 预览按钮（仅 Markdown 文件时显示） */
   showPreviewButton?: boolean;
+  /** 是否展示 Mermaid 预览按钮（仅 .mmd 文件时显示） */
+  showMermaidPreviewButton?: boolean;
   /** 是否展示 Mermaid 可视化编辑按钮（仅 .mmd 文件时显示） */
   showMermaidEditButton?: boolean;
   /** 当前 MD 预览模式 */
@@ -103,10 +105,12 @@ const emit = defineEmits<{
   // 点击未下载版本库后直接进入该版本库的下载/管理页面。
   (e: "manage-app-source-repository", repository: AppSourceRepositorySummary): void;
   (e: "return-managed-workspace"): void;
+  (e: "open-mermaid-preview"): void;
   (e: "open-mermaid-editor"): void;
 }>();
 
 const isMmdFile = computed(() => !!props.writePath && /\.mmd$/i.test(props.writePath));
+const shouldShowMermaidPreviewButton = computed(() => !!props.showMermaidPreviewButton || isMmdFile.value);
 const shouldShowMermaidEditButton = computed(() => !!props.showMermaidEditButton || isMmdFile.value);
 
 const updatedLabel = computed(() => {
@@ -854,6 +858,22 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
         </button>
       </ElTooltip>
       <ElTooltip
+        v-if="shouldShowMermaidPreviewButton"
+        content="Mermaid 图表预览"
+        placement="top"
+        :show-after="0"
+      >
+        <button
+          type="button"
+          class="ta-workbench-footer-mermaid-preview"
+          data-testid="footer-mermaid-preview"
+          aria-label="Mermaid 图表预览"
+          @click="emit('open-mermaid-preview')"
+        >
+          <FileSearch class="ta-workbench-footer-icon" />
+        </button>
+      </ElTooltip>
+      <ElTooltip
         v-if="shouldShowMermaidEditButton"
         content="Mermaid 可视化编辑"
         placement="top"
@@ -1185,6 +1205,35 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
 
 .ta-workbench-footer-preview.is-active:hover {
   background: #bae6fd;
+}
+
+/* Mermaid 预览按钮：青蓝/海蓝风格 */
+.ta-workbench-footer-mermaid-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0.8px solid #bae6fd;
+  border-radius: 6px;
+  background: #fff;
+  color: #0284c7;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ta-workbench-footer-mermaid-preview:hover:not(:disabled) {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #0369a1;
+}
+
+.ta-workbench-footer-mermaid-preview:disabled {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+  color: #a1a1aa;
+  cursor: not-allowed;
 }
 
 /* Mermaid 可视化编辑按钮：蓝紫色/靛青色，与预览/定位按钮风格协调 */

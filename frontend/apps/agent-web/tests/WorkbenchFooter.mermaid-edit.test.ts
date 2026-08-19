@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
 import FigmaEditorArea from "../src/components/FigmaEditorArea.vue";
 
-describe("WorkbenchFooter Mermaid Edit Button", () => {
-  it("renders mermaid edit button for .mmd file to the left of the locate button", async () => {
+describe("WorkbenchFooter Mermaid Edit and Preview Buttons", () => {
+  it("renders mermaid preview and edit buttons for .mmd file to the left of the locate button", async () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {
         writePath: "architecture/flow.mmd",
@@ -12,22 +12,31 @@ describe("WorkbenchFooter Mermaid Edit Button", () => {
       }
     });
 
+    const previewBtn = wrapper.find('[data-testid="footer-mermaid-preview"]');
     const editBtn = wrapper.find('[data-testid="footer-mermaid-edit"]');
+
+    expect(previewBtn.exists()).toBe(true);
+    expect(previewBtn.attributes("aria-label")).toBe("Mermaid 图表预览");
     expect(editBtn.exists()).toBe(true);
     expect(editBtn.attributes("aria-label")).toBe("Mermaid 可视化编辑");
 
     const rightButtons = wrapper.find(".ta-workbench-footer-right").findAll("button");
+    const previewIndex = rightButtons.findIndex((btn) => btn.classes().includes("ta-workbench-footer-mermaid-preview"));
     const editIndex = rightButtons.findIndex((btn) => btn.classes().includes("ta-workbench-footer-mermaid-edit"));
     const locateIndex = rightButtons.findIndex((btn) => btn.classes().includes("ta-workbench-footer-locate"));
 
-    expect(editIndex).toBeGreaterThanOrEqual(0);
+    expect(previewIndex).toBeGreaterThanOrEqual(0);
+    expect(editIndex).toBeGreaterThan(previewIndex);
     expect(locateIndex).toBeGreaterThan(editIndex);
+
+    await previewBtn.trigger("click");
+    expect(wrapper.emitted("open-mermaid-preview")).toHaveLength(1);
 
     await editBtn.trigger("click");
     expect(wrapper.emitted("open-mermaid-editor")).toHaveLength(1);
   });
 
-  it("renders mermaid edit button for uppercase .MMD extension", async () => {
+  it("renders mermaid preview and edit buttons for uppercase .MMD extension", async () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {
         writePath: "docs/DIAGRAM.MMD",
@@ -35,10 +44,11 @@ describe("WorkbenchFooter Mermaid Edit Button", () => {
       }
     });
 
+    expect(wrapper.find('[data-testid="footer-mermaid-preview"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="footer-mermaid-edit"]').exists()).toBe(true);
   });
 
-  it("does not render mermaid edit button for non-mmd files", async () => {
+  it("does not render mermaid preview and edit buttons for non-mmd files", async () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {
         writePath: "docs/readme.md",
@@ -46,23 +56,26 @@ describe("WorkbenchFooter Mermaid Edit Button", () => {
       }
     });
 
+    expect(wrapper.find('[data-testid="footer-mermaid-preview"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="footer-mermaid-edit"]').exists()).toBe(false);
     expect(wrapper.find(".ta-workbench-footer-locate").exists()).toBe(true);
   });
 
-  it("supports explicit showMermaidEditButton prop override", async () => {
+  it("supports explicit showMermaidPreviewButton and showMermaidEditButton prop override", async () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {
         writePath: "docs/other.txt",
+        showMermaidPreviewButton: true,
         showMermaidEditButton: true,
         showSave: true
       }
     });
 
+    expect(wrapper.find('[data-testid="footer-mermaid-preview"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="footer-mermaid-edit"]').exists()).toBe(true);
   });
 
-  it("transfers open-mermaid-editor event through FigmaEditorArea", async () => {
+  it("transfers open-mermaid-preview and open-mermaid-editor events through FigmaEditorArea", async () => {
     const wrapper = mount(FigmaEditorArea, {
       props: {
         tabs: [
@@ -79,8 +92,13 @@ describe("WorkbenchFooter Mermaid Edit Button", () => {
       }
     });
 
+    const previewBtn = wrapper.find('[data-testid="footer-mermaid-preview"]');
     const editBtn = wrapper.find('[data-testid="footer-mermaid-edit"]');
+    expect(previewBtn.exists()).toBe(true);
     expect(editBtn.exists()).toBe(true);
+
+    await previewBtn.trigger("click");
+    expect(wrapper.emitted("open-mermaid-preview")).toHaveLength(1);
 
     await editBtn.trigger("click");
     expect(wrapper.emitted("open-mermaid-editor")).toHaveLength(1);

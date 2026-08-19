@@ -57,6 +57,7 @@ const emit = defineEmits<{
   "update:markdownPreview": [enabled: boolean];
   "update:markdownPreviewMode": [mode: PreviewMode];
   "cacheAndNavigate": [path: string];
+  "open-mermaid-preview": [];
   "open-mermaid-editor": [];
 }>();
 
@@ -263,6 +264,7 @@ watch(
       @load-versions="(templateId) => emit('load-versions', templateId)"
       @create-version="(payload) => emit('create-version', payload)"
       @open-server-workspace-picker="emit('open-server-workspace-picker')"
+      @open-mermaid-preview="emit('open-mermaid-preview')"
       @open-mermaid-editor="emit('open-mermaid-editor')"
     />
   </div>
