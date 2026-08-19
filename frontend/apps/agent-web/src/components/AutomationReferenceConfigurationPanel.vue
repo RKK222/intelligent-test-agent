@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import {
-  BackendApiError,
-  type AutomationVersionSynchronization,
-  type BackendApiClient
-} from "@test-agent/backend-api";
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  File,
+  Folder,
+  FolderGit2,
+  GitBranch,
+  RefreshCw
+} from "lucide-vue-next";
+import { Button, copyTextToClipboard, Input, Spinner } from "@test-agent/ui-kit";
+import { BackendApiError, type AutomationVersionSynchronization, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
@@ -12,13 +20,7 @@ import type {
   RepositoryTreeNode,
   WorkspaceCreateOperation
 } from "@test-agent/shared-types";
-import { Button, Input, Spinner } from "@test-agent/ui-kit";
-import { Check, FolderGit2, Plus, RefreshCw } from "lucide-vue-next";
-import RepositoryDirectoryTree from "./RepositoryDirectoryTree.vue";
 import RepositoryOperationProgressDialog from "./RepositoryOperationProgressDialog.vue";
-
-const AUTOMATION_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
-const OPERATION_POLL_INTERVAL_MS = 1_000;
 
 const props = defineProps<{
   open: boolean;
@@ -32,24 +34,71 @@ const emit = defineEmits<{
 }>();
 
 const api = inject<BackendApiClient>("api")!;
-const loading = ref(false);
-const saving = ref(false);
-const errorMessage = ref("");
-const repositories = ref<CodeRepositoryConfig[]>([]);
+const AUTOMATION_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
+const OPERATION_POLL_INTERVAL_MS = 1_000;
+
+interface Notice {
+  message: string;
+  traceId?: string;
+}
+
+interface VisibleTreeNode {
+  name: string;
+  path: string;
+  directory: boolean;
+  depth: number;
+}
+
+export type AutomationRepository = CodeRepositoryConfig & {
+  branch?: string;
+  repositoryPath?: string | null;
+  targetCommitHash?: string | null;
+  status?: string;
+  targetServerCount?: number;
+  readyServerCount?: number;
+  servers?: Array<{
+    linuxServerId: string;
+    serverName?: string;
+    status?: string;
+    online?: boolean;
+    currentBranch?: string;
+    currentCommitHash?: string;
+    error?: string;
+    syncedAt?: string;
+    verifiedAt?: string;
+  }>;
+};
+
+const repositories = ref<AutomationRepository[]>([]);
 const templates = ref<ApplicationWorkspaceTemplate[]>([]);
 const versionsByTemplate = ref<Record<string, ApplicationWorkspaceVersion[]>>({});
 const synchronizationsByVersion = ref<Record<string, AutomationVersionSynchronization>>({});
-const selectedRepositoryId = ref("");
-const selectedTemplateId = ref("");
-const createMode = ref(false);
+const loading = ref(false);
+const saving = ref(false);
+const syncLoading = ref(false);
+const errorMessage = ref("");
+const selectedRepositoryId = ref<string | null>(null);
+
+const branchPopoverRepositoryId = ref<string | null>(null);
+const branchPopoverMode = ref<"initialize" | "switch" | null>(null);
 const branches = ref<string[]>([]);
-const branchesLoading = ref(false);
 const selectedBranch = ref("");
-const selectedDirectory = ref("");
+const branchesLoading = ref(false);
+const branchError = ref<Notice | null>(null);
+
+const treeByParent = ref<Record<string, Array<{ name: string; path: string; directory: boolean }>>>({});
+const treeLoading = ref(false);
+const treeErrors = ref<Record<string, Notice>>({});
+const expandedPaths = ref<Set<string>>(new Set());
+const selectedFolderPath = ref<string | null>(null);
+
+const branchesByRepository = ref<Record<string, string[]>>({});
+const treeByBranchKey = ref<Record<string, Record<string, Array<{ name: string; path: string; directory: boolean }>>>>({});
+
 const referenceName = ref("");
 const versionDate = ref("");
-const tree = ref<RepositoryTreeNode[]>([]);
-const treeLoading = ref(false);
+const formBranch = ref("");
+
 const operation = ref<WorkspaceCreateOperation | null>(null);
 const synchronization = ref<AutomationVersionSynchronization | null>(null);
 const synchronizationRequest = ref<{
@@ -59,33 +108,76 @@ const synchronizationRequest = ref<{
   error: { message: string; traceId?: string } | null;
   pollingError: { message: string; traceId?: string } | null;
 } | null>(null);
+
 let catalogGeneration = 0;
 let branchGeneration = 0;
 let treeGeneration = 0;
 let operationTimer: number | undefined;
 let synchronizationTimer: number | undefined;
 
-const selectedTemplate = computed(() =>
-  templates.value.find((template) => template.workspaceId === selectedTemplateId.value) ?? null
-);
 const selectedRepository = computed(() =>
-  repositories.value.find((repository) => repository.repositoryId === selectedRepositoryId.value) ?? null
+  repositories.value.find((r) => r.repositoryId === selectedRepositoryId.value) ?? null
 );
+
+const activeTemplate = computed(() => {
+  if (!selectedRepositoryId.value) return null;
+  if (selectedFolderPath.value) {
+    const matched = templates.value.find(
+      (t) => t.repositoryId === selectedRepositoryId.value && t.directoryPath === selectedFolderPath.value
+    );
+    if (matched) return matched;
+  }
+  return templates.value.find((t) => t.repositoryId === selectedRepositoryId.value) ?? null;
+});
+
 const selectedVersions = computed(() =>
-  selectedTemplate.value ? versionsByTemplate.value[selectedTemplate.value.workspaceId] ?? [] : []
+  activeTemplate.value ? versionsByTemplate.value[activeTemplate.value.workspaceId] ?? [] : []
 );
+
+const activeVersion = computed(() => activeTemplate.value?.activeVersion ?? null);
+
+const currentSynchronization = computed(() => {
+  if (activeVersion.value) {
+    return synchronizationsByVersion.value[activeVersion.value.versionId] ?? null;
+  }
+  return synchronization.value;
+});
+
+const targetCommitHash = computed(() =>
+  activeVersion.value?.targetCommitHash
+  || currentSynchronization.value?.targetCommitHash
+  || selectedRepository.value?.targetCommitHash
+  || null
+);
+
+const visibleTreeNodes = computed<VisibleTreeNode[]>(() => {
+  const result: VisibleTreeNode[] = [];
+  const append = (parentPath: string, depth: number) => {
+    for (const node of treeByParent.value[parentPath] ?? []) {
+      result.push({ ...node, depth });
+      if (node.directory && expandedPaths.value.has(node.path)) {
+        append(node.path, depth + 1);
+      }
+    }
+  };
+  append("", 0);
+  return result;
+});
+
 const canCreateReference = computed(() =>
   props.canManage
   && !saving.value
-  && Boolean(selectedRepositoryId.value && selectedBranch.value && selectedDirectory.value && referenceName.value.trim())
+  && Boolean(selectedRepositoryId.value && (formBranch.value || selectedBranch.value) && (selectedFolderPath.value || referenceName.value.trim()))
   && /^\d{8}$/.test(versionDate.value)
 );
+
 const canCreateVersion = computed(() =>
   props.canManage
   && !saving.value
-  && Boolean(selectedTemplate.value && selectedBranch.value)
+  && Boolean(activeTemplate.value && (formBranch.value || selectedBranch.value))
   && /^\d{8}$/.test(versionDate.value)
 );
+
 const synchronizationTarget = computed(() => {
   const request = synchronizationRequest.value;
   if (!request) return null;
@@ -97,69 +189,102 @@ const synchronizationTarget = computed(() => {
     branch: current?.branch || request.version.branch,
     targetCommitHash: current?.targetCommitHash || request.version.targetCommitHash || null,
     status: current?.status || "SYNCHRONIZING",
-    targetServerCount: current?.targetServerCount || 0,
+    targetServerCount: current?.targetServerCount || current?.servers?.length || 0,
     readyServerCount: current?.readyServerCount || 0,
     servers: current?.servers || [],
     traceId: current?.traceId,
     message: current?.message
   };
 });
+
 const acceptedSynchronizationTarget = computed(() =>
   synchronizationRequest.value?.requestState === "ACCEPTED" ? synchronizationTarget.value : null
 );
+
 const synchronizationCanClose = computed(() => {
   const request = synchronizationRequest.value;
   if (!request) return false;
   return request.requestState === "FAILED" || ["READY", "FAILED"].includes(synchronization.value?.status || "");
 });
+
 const synchronizationCanRetry = computed(() => {
   const request = synchronizationRequest.value;
-  return Boolean(request && request.requestState !== "REQUESTING"
-    && (request.requestState === "FAILED" || synchronization.value?.status === "FAILED"));
+  return Boolean(
+    request && request.requestState !== "REQUESTING"
+    && (request.requestState === "FAILED" || synchronization.value?.status === "FAILED")
+  );
 });
 
-function todayVersion() {
+function todayVersion(): string {
   const now = new Date();
-  const year = now.getFullYear();
+  const year = String(now.getFullYear());
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}${month}${day}`;
 }
 
-function repositoryName(repositoryId: string) {
-  return repositories.value.find((repository) => repository.repositoryId === repositoryId)?.name ?? "自动化代码库";
+function shortCommit(hash?: string | null): string {
+  return hash && hash.length >= 7 ? hash.slice(0, 7) : hash || "—";
 }
 
-function templatesForRepository(repositoryId: string) {
-  return templates.value.filter((template) => template.repositoryId === repositoryId);
+function formattedTime(iso?: string | null): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function formattedTime(value?: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+function readyServerText(repo: AutomationRepository): string {
+  const repoTemplates = templates.value.filter((t) => t.repositoryId === repo.repositoryId);
+  for (const t of repoTemplates) {
+    if (t.activeVersion && synchronizationsByVersion.value[t.activeVersion.versionId]) {
+      const sync = synchronizationsByVersion.value[t.activeVersion.versionId];
+      const target = sync.targetServerCount || sync.servers?.length || 0;
+      return `${sync.readyServerCount}/${target} 台就绪`;
+    }
+  }
+  const sync = currentSynchronization.value;
+  if (sync && (sync.targetServerCount || sync.servers?.length)) {
+    const target = sync.targetServerCount || sync.servers?.length || 0;
+    return `${sync.readyServerCount}/${target} 台就绪`;
+  }
+  return `${repo.readyServerCount || 0}/${repo.targetServerCount || 0} 台就绪`;
 }
 
-function synchronizationSummary(versionId: string) {
-  return synchronizationsByVersion.value[versionId] ?? null;
+function copyCommit(hash?: string | null) {
+  if (hash) copyTextToClipboard(hash);
 }
 
-function synchronizationNotice(error: unknown, fallback: string) {
+function notice(error: unknown, fallback: string): Notice {
   if (error instanceof BackendApiError) {
     return { message: error.message || fallback, traceId: error.traceId || undefined };
   }
   return { message: error instanceof Error ? error.message : fallback };
 }
 
-function normalizedTree(nodes: RepositoryTreeNode[]): RepositoryTreeNode[] {
-  return [...nodes]
-    .map((node) => ({ ...node, children: normalizedTree(node.children ?? []) }))
-    .sort((left, right) => left.type === right.type
-      ? left.name.localeCompare(right.name)
-      : left.type === "directory" ? -1 : 1);
+function buildTreeByParent(nodes: RepositoryTreeNode[]) {
+  const map: Record<string, Array<{ name: string; path: string; directory: boolean }>> = {};
+  const traverse = (items: RepositoryTreeNode[], parentPath = "") => {
+    const list = items.map((node) => ({
+      name: node.name,
+      path: node.path,
+      directory: node.type === "directory"
+    })).sort((a, b) => {
+      if (a.directory !== b.directory) return a.directory ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    map[parentPath] = list;
+    for (const node of items) {
+      if (node.type === "directory" && node.children && node.children.length > 0) {
+        traverse(node.children, node.path);
+      }
+    }
+  };
+  traverse(nodes, "");
+  return map;
 }
 
-/** 普通成员只读取模板与当前版本；管理员才读取版本库元数据和可写配置入口。 */
 async function loadCatalog() {
   const generation = ++catalogGeneration;
   loading.value = true;
@@ -171,14 +296,17 @@ async function loadCatalog() {
       props.canManage ? api.listApplicationWorkspaces(props.appId) : Promise.resolve([])
     ]);
     if (!props.open || generation !== catalogGeneration) return;
-    const automationRepositories = nextRepositories.filter((repository) => repository.repositoryType === AUTOMATION_REPOSITORY_TYPE);
-    const automationRepositoryIds = new Set(automationRepositories.map((repository) => repository.repositoryId));
-    const templateById = new Map(
-      nextTemplates
-        .filter((template) => template.repositoryType === AUTOMATION_REPOSITORY_TYPE)
-        .map((template) => [template.workspaceId, template] as const)
-    );
-    // 模板接口按 enabled 过滤；管理员额外合并配置接口，确保停用引用仍可重新启用。
+
+    const automationRepositories = nextRepositories.filter((r) => r.repositoryType === AUTOMATION_REPOSITORY_TYPE);
+    const automationRepositoryIds = new Set(automationRepositories.map((r) => r.repositoryId));
+
+    const templateById = new Map<string, ApplicationWorkspaceTemplate>();
+    for (const t of nextTemplates) {
+      if (t.repositoryType === AUTOMATION_REPOSITORY_TYPE) {
+        templateById.set(t.workspaceId, t);
+      }
+    }
+
     if (props.canManage) {
       for (const workspace of configuredWorkspaces) {
         if (!automationRepositoryIds.has(workspace.repositoryId) || templateById.has(workspace.workspaceId)) continue;
@@ -190,47 +318,59 @@ async function loadCatalog() {
         });
       }
     }
+
     const automationTemplates = [...templateById.values()];
-    const versionEntries = await Promise.all(automationTemplates.map(async (template) => [
-      template.workspaceId,
-      await api.listWorkspaceVersions(props.appId, template.workspaceId)
+    const versionEntries = await Promise.all(automationTemplates.map(async (t) => [
+      t.workspaceId,
+      await api.listWorkspaceVersions(props.appId, t.workspaceId)
     ] as const));
+
     if (!props.open || generation !== catalogGeneration) return;
+
     templates.value = automationTemplates;
-    repositories.value = automationRepositories;
+    repositories.value = automationRepositories.length > 0
+      ? automationRepositories
+      : automationTemplates.map((t) => ({
+          repositoryId: t.repositoryId,
+          name: t.workspaceName,
+          englishName: t.workspaceName,
+          repositoryType: AUTOMATION_REPOSITORY_TYPE,
+          gitUrl: t.directoryPath,
+          standard: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          branch: t.branch || "main",
+          status: "READY",
+          targetServerCount: 0,
+          readyServerCount: 0,
+          servers: []
+        } as AutomationRepository));
+
     versionsByTemplate.value = Object.fromEntries(versionEntries);
+
     if (props.canManage) {
       const statusEntries = await Promise.all(versionEntries.flatMap(([templateId, versions]) =>
-        versions.map(async (version) => {
+        versions.map(async (v) => {
           try {
             return [
-              version.versionId,
-              await api.getAutomationWorkspaceVersionSynchronizationStatus(
-                props.appId, templateId, version.versionId)
+              v.versionId,
+              await api.getAutomationWorkspaceVersionSynchronizationStatus(props.appId, templateId, v.versionId)
             ] as const;
           } catch {
-            // 单个版本状态不可用不阻断配置列表，用户仍可在版本行手动重试同步。
             return null;
           }
         })));
       if (!props.open || generation !== catalogGeneration) return;
-      synchronizationsByVersion.value = Object.fromEntries(statusEntries.filter((entry) => entry !== null));
-    } else {
-      synchronizationsByVersion.value = {};
+      synchronizationsByVersion.value = Object.fromEntries(statusEntries.filter((e) => e !== null));
     }
 
-    const retainedTemplate = automationTemplates.find((template) => template.workspaceId === selectedTemplateId.value);
-    if (retainedTemplate) {
-      await selectTemplate(retainedTemplate);
-      return;
+    const currentRepo = repositories.value.find((r) => r.repositoryId === selectedRepositoryId.value)
+      || repositories.value[0]
+      || null;
+
+    if (currentRepo) {
+      await selectRepository(currentRepo);
     }
-    const firstTemplate = automationTemplates[0];
-    if (firstTemplate) {
-      await selectTemplate(firstTemplate);
-      return;
-    }
-    const firstRepository = repositories.value[0];
-    if (props.canManage && firstRepository) await startCreate(firstRepository.repositoryId);
   } catch (error) {
     if (generation === catalogGeneration) {
       errorMessage.value = error instanceof Error ? error.message : "加载自动化引用配置失败";
@@ -240,74 +380,161 @@ async function loadCatalog() {
   }
 }
 
-async function loadBranches(repositoryId: string, preferredBranch = "") {
+async function selectRepository(repository: AutomationRepository) {
+  selectedRepositoryId.value = repository.repositoryId;
+  closeBranchPopover();
+
+  const existing = templates.value.find((t) => t.repositoryId === repository.repositoryId);
+  if (existing) {
+    selectedFolderPath.value = existing.directoryPath;
+    referenceName.value = existing.workspaceName;
+  } else {
+    selectedFolderPath.value = null;
+    referenceName.value = repository.name;
+  }
+  versionDate.value = todayVersion();
+
+  if (props.canManage) {
+    await loadBranches(repository.repositoryId, repository.branch || existing?.branch || "main");
+  }
+}
+
+async function loadBranches(repositoryId: string, preferredBranch = "", force = false) {
+  const isForce = force === true;
   const generation = ++branchGeneration;
-  ++treeGeneration;
+  const cached = branchesByRepository.value[repositoryId];
+
+  if (!isForce && cached) {
+    branches.value = cached;
+    selectedBranch.value = cached.includes(preferredBranch) ? preferredBranch : cached[0] ?? "";
+    formBranch.value = selectedBranch.value;
+    branchesLoading.value = false;
+    if (selectedBranch.value) await loadTree(isForce);
+    return;
+  }
+
   branchesLoading.value = true;
   branches.value = [];
   selectedBranch.value = "";
-  tree.value = [];
-  selectedDirectory.value = "";
+  formBranch.value = "";
   try {
     const result = await api.listRepositoryBranches(repositoryId);
     if (generation !== branchGeneration || repositoryId !== selectedRepositoryId.value) return;
+    branchesByRepository.value = { ...branchesByRepository.value, [repositoryId]: result };
     branches.value = result;
     selectedBranch.value = result.includes(preferredBranch) ? preferredBranch : result[0] ?? "";
-    if (selectedBranch.value && createMode.value) await loadTree();
+    formBranch.value = selectedBranch.value;
+    if (selectedBranch.value) await loadTree(isForce);
   } catch (error) {
-    if (generation === branchGeneration) errorMessage.value = error instanceof Error ? error.message : "加载分支失败";
+    if (generation === branchGeneration) {
+      branchError.value = notice(error, "加载分支失败");
+    }
   } finally {
     if (generation === branchGeneration) branchesLoading.value = false;
   }
 }
 
-async function loadTree() {
-  if (!selectedRepositoryId.value || !selectedBranch.value || !createMode.value) return;
+async function loadTree(force = false) {
+  const isForce = force === true;
+  if (!selectedRepositoryId.value || !selectedBranch.value) return;
   const repositoryId = selectedRepositoryId.value;
   const branch = selectedBranch.value;
+  const cacheKey = `${props.appId}:${repositoryId}:${branch}`;
   const generation = ++treeGeneration;
+  const cached = treeByBranchKey.value[cacheKey];
+
+  if (!isForce && cached) {
+    treeByParent.value = cached;
+    treeLoading.value = false;
+    autoExpandAndSelect();
+    return;
+  }
+
   treeLoading.value = true;
-  selectedDirectory.value = "";
-  tree.value = [];
+  treeByParent.value = {};
+  treeErrors.value = {};
   try {
     const response = await api.getRepositoryTree(props.appId, repositoryId, branch);
     if (generation !== treeGeneration || repositoryId !== selectedRepositoryId.value || branch !== selectedBranch.value) return;
-    tree.value = normalizedTree(response.nodes);
+    const treeMap = buildTreeByParent(response.nodes);
+    treeByBranchKey.value = { ...treeByBranchKey.value, [cacheKey]: treeMap };
+    treeByParent.value = treeMap;
+    autoExpandAndSelect();
   } catch (error) {
-    if (generation === treeGeneration) errorMessage.value = error instanceof Error ? error.message : "加载自动化代码库目录失败";
+    if (generation === treeGeneration) {
+      treeErrors.value = { "": notice(error, "加载自动化代码库目录失败") };
+    }
   } finally {
     if (generation === treeGeneration) treeLoading.value = false;
   }
 }
 
-async function startCreate(repositoryId: string) {
-  if (!props.canManage) return;
-  createMode.value = true;
-  selectedTemplateId.value = "";
-  selectedRepositoryId.value = repositoryId;
-  selectedDirectory.value = "";
-  referenceName.value = repositoryName(repositoryId);
-  versionDate.value = todayVersion();
-  operation.value = null;
-  errorMessage.value = "";
-  await loadBranches(repositoryId);
+function autoExpandAndSelect() {
+  const rootNodes = treeByParent.value[""] ?? [];
+  const expandSet = new Set<string>();
+  for (const node of rootNodes) {
+    if (node.directory) expandSet.add(node.path);
+  }
+  expandedPaths.value = expandSet;
+
+  if (!selectedFolderPath.value && rootNodes.length > 0) {
+    const firstDir = rootNodes.find((n) => n.directory);
+    if (firstDir) selectFolder(firstDir);
+  }
 }
 
-async function selectTemplate(template: ApplicationWorkspaceTemplate) {
-  createMode.value = false;
-  selectedTemplateId.value = template.workspaceId;
-  selectedRepositoryId.value = template.repositoryId;
-  selectedDirectory.value = template.directoryPath;
-  referenceName.value = template.workspaceName;
-  versionDate.value = todayVersion();
-  tree.value = [];
-  operation.value = null;
-  errorMessage.value = "";
-  if (props.canManage) await loadBranches(template.repositoryId, template.activeVersion?.branch ?? template.branch);
+function toggleDirectory(node: VisibleTreeNode) {
+  const set = new Set(expandedPaths.value);
+  if (set.has(node.path)) {
+    set.delete(node.path);
+  } else {
+    set.add(node.path);
+  }
+  expandedPaths.value = set;
 }
 
-function selectDirectory(node: RepositoryTreeNode) {
-  if (node.type === "directory") selectedDirectory.value = node.path;
+function selectFolder(node: { name: string; path: string; directory: boolean }) {
+  if (!node.directory) return;
+  selectedFolderPath.value = node.path;
+  const existing = templates.value.find(
+    (t) => t.repositoryId === selectedRepositoryId.value && t.directoryPath === node.path
+  );
+  if (existing) {
+    referenceName.value = existing.workspaceName;
+  } else {
+    const parts = node.path.split("/").filter(Boolean);
+    referenceName.value = parts[parts.length - 1] || "自动化目录";
+  }
+  versionDate.value = todayVersion();
+  formBranch.value = selectedBranch.value;
+}
+
+function openBranchPopover(repository: AutomationRepository, mode: "initialize" | "switch") {
+  branchPopoverRepositoryId.value = repository.repositoryId;
+  branchPopoverMode.value = mode;
+  branchError.value = null;
+}
+
+function closeBranchPopover() {
+  branchPopoverRepositoryId.value = null;
+  branchPopoverMode.value = null;
+  branchError.value = null;
+}
+
+async function confirmBranchPopover() {
+  if (!selectedBranch.value) return;
+  closeBranchPopover();
+  await loadTree(true);
+}
+
+async function verifyPointers() {
+  if (!selectedRepositoryId.value) return;
+  syncLoading.value = true;
+  try {
+    await loadCatalog();
+  } finally {
+    syncLoading.value = false;
+  }
 }
 
 function createOperationId() {
@@ -346,7 +573,7 @@ async function pollSynchronization(templateId: string, versionId: string) {
     if (!props.open || !request || request.version.versionId !== versionId) return;
     synchronizationRequest.value = {
       ...request,
-      pollingError: synchronizationNotice(error, "读取自动化代码库同步状态失败")
+      pollingError: notice(error, "读取自动化代码库同步状态失败")
     };
   }
   if (!props.open || synchronizationRequest.value?.version.versionId !== versionId) return;
@@ -369,27 +596,25 @@ async function synchronizeVersion(template: ApplicationWorkspaceTemplate, versio
     pollingError: null
   };
   try {
-    const next = await api.synchronizeAutomationWorkspaceVersion(
-      props.appId, template.workspaceId, version.versionId);
+    const response = await api.synchronizeAutomationWorkspaceVersion(props.appId, template.workspaceId, version.versionId);
     const request = synchronizationRequest.value;
-    if (!request || request.version.versionId !== version.versionId) return;
-    synchronization.value = next;
-    synchronizationsByVersion.value = { ...synchronizationsByVersion.value, [version.versionId]: next };
-    synchronizationRequest.value = { ...request, requestState: "ACCEPTED", error: null };
-    if (["READY", "FAILED"].includes(next.status)) {
-      saving.value = false;
-      emit("changed");
-      return;
-    }
+    if (!props.open || !request || request.version.versionId !== version.versionId) return;
+    synchronization.value = response;
+    synchronizationsByVersion.value = { ...synchronizationsByVersion.value, [version.versionId]: response };
+    synchronizationRequest.value = {
+      ...request,
+      requestState: "ACCEPTED",
+      error: null
+    };
     await pollSynchronization(template.workspaceId, version.versionId);
   } catch (error) {
     const request = synchronizationRequest.value;
-    if (!request || request.version.versionId !== version.versionId) return;
+    if (!props.open || !request || request.version.versionId !== version.versionId) return;
     saving.value = false;
     synchronizationRequest.value = {
       ...request,
       requestState: "FAILED",
-      error: synchronizationNotice(error, "创建自动化代码库同步任务失败")
+      error: notice(error, "创建自动化代码库同步任务失败")
     };
   }
 }
@@ -406,25 +631,16 @@ function closeSynchronization() {
   synchronization.value = null;
 }
 
-/** 异步创建沿用既有工作空间 operation，仅在前端把它表达为只读目录引用初始化。 */
 async function pollOperation(operationId: string) {
   clearOperationPoll();
   try {
     const next = await api.getWorkspaceCreateOperation(operationId);
-    // 弹窗关闭后不再让迟到的 operation 回包恢复轮询或覆盖下一次打开的状态。
     if (!props.open || !saving.value) return;
     operation.value = next;
     if (next.status === "SUCCEEDED") {
       saving.value = false;
       await loadCatalog();
       emit("changed");
-      const createdVersion = next.versionId
-        ? Object.values(versionsByTemplate.value).flat().find((version) => version.versionId === next.versionId)
-        : null;
-      const createdTemplate = createdVersion
-        ? templates.value.find((template) => template.workspaceId === createdVersion.applicationWorkspaceId)
-        : null;
-      if (createdTemplate && createdVersion) await synchronizeVersion(createdTemplate, createdVersion);
       return;
     }
     if (next.status === "FAILED") {
@@ -433,14 +649,13 @@ async function pollOperation(operationId: string) {
       return;
     }
   } catch {
-    // 请求刚被接受时 operation 可能尚未可见，下一轮继续读取。
   }
   if (!props.open || !saving.value) return;
   operationTimer = window.setTimeout(() => void pollOperation(operationId), OPERATION_POLL_INTERVAL_MS);
 }
 
 async function createReference() {
-  if (!canCreateReference.value) return;
+  if (!canCreateReference.value || !selectedRepositoryId.value) return;
   saving.value = true;
   errorMessage.value = "";
   const operationId = createOperationId();
@@ -453,8 +668,8 @@ async function createReference() {
   try {
     await api.createApplicationWorkspace(props.appId, {
       repositoryId: selectedRepositoryId.value,
-      branch: selectedBranch.value,
-      directoryPath: selectedDirectory.value,
+      branch: formBranch.value || selectedBranch.value,
+      directoryPath: selectedFolderPath.value || "scripts/e2e",
       workspaceName: referenceName.value.trim(),
       version: versionDate.value,
       operationId
@@ -467,22 +682,21 @@ async function createReference() {
 }
 
 async function createVersion() {
-  const template = selectedTemplate.value;
+  const template = activeTemplate.value;
   if (!template || !canCreateVersion.value) return;
   saving.value = true;
   errorMessage.value = "";
   try {
-    const created = await api.createWorkspaceVersion(props.appId, template.workspaceId, {
+    await api.createWorkspaceVersion(props.appId, template.workspaceId, {
       version: versionDate.value,
-      branch: selectedBranch.value
+      branch: formBranch.value || selectedBranch.value
     });
     await loadCatalog();
     emit("changed");
-    await synchronizeVersion(template, created);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "新增自动化引用版本失败";
   } finally {
-    if (!synchronizationRequest.value) saving.value = false;
+    saving.value = false;
   }
 }
 
@@ -494,11 +708,10 @@ async function activateVersion(template: ApplicationWorkspaceTemplate, version: 
     await api.activateAutomationWorkspaceVersion(props.appId, template.workspaceId, version.versionId);
     await loadCatalog();
     emit("changed");
-    await synchronizeVersion(template, version);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "切换自动化引用版本失败";
   } finally {
-    if (!synchronizationRequest.value) saving.value = false;
+    saving.value = false;
   }
 }
 
@@ -517,16 +730,25 @@ async function toggleReference(template: ApplicationWorkspaceTemplate) {
   }
 }
 
+function retryCatalog() {
+  branchesByRepository.value = {};
+  treeByBranchKey.value = {};
+  void loadCatalog();
+}
+
 watch(
   () => [props.open, props.appId, props.canManage] as const,
-  ([open]) => {
+  ([open, appId], prevValues) => {
+    const prevAppId = prevValues?.[1];
     catalogGeneration++;
     branchGeneration++;
     treeGeneration++;
     clearOperationPoll();
     clearSynchronizationPoll();
-    synchronizationRequest.value = null;
-    synchronization.value = null;
+    if (prevAppId !== undefined && appId !== prevAppId) {
+      branchesByRepository.value = {};
+      treeByBranchKey.value = {};
+    }
     if (open && props.appId) void loadCatalog();
   },
   { immediate: true }
@@ -550,169 +772,287 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="reference-automation-layout">
-    <aside class="reference-repository-column" aria-label="自动化代码库引用">
+    <aside class="reference-repository-column" aria-label="自动化代码库">
       <div class="reference-column-heading">
         <span>自动化代码库</span>
         <Spinner v-if="loading" class="h-3.5 w-3.5" />
       </div>
-      <div v-if="loading && !templates.length" class="reference-state is-centered" role="status">
-        <Spinner class="h-4 w-4" />
-        <span>正在加载自动化引用…</span>
-      </div>
-      <template v-else>
-        <div v-if="canManage && !repositories.length" class="reference-state">当前应用未关联自动化代码库。</div>
-        <div v-if="!canManage && !templates.length" class="reference-state">当前应用暂无自动化代码库引用。</div>
-        <div v-if="repositories.length || templates.length" class="reference-repository-list">
-          <section
-            v-for="repository in repositories"
-            :key="repository.repositoryId"
-            class="automation-repo-group"
-          >
-            <div class="automation-repo-group-title">
-              <FolderGit2 class="h-3.5 w-3.5 shrink-0" />
-              <span>{{ repository.name }}</span>
-            </div>
-            <article
-              v-for="template in templatesForRepository(repository.repositoryId)"
-              :key="template.workspaceId"
-              class="reference-repository-card"
-              :class="{ 'is-selected': selectedTemplateId === template.workspaceId && !createMode }"
-            >
-              <button
-                type="button"
-                class="reference-repository-main"
-                :aria-pressed="selectedTemplateId === template.workspaceId && !createMode"
-                :aria-label="`查看自动化引用 ${template.workspaceName}`"
-                :disabled="saving"
-                @click="selectTemplate(template)"
-              >
-                <FolderGit2 class="h-4 w-4 shrink-0" />
-                <span class="min-w-0">
-                  <strong>{{ template.workspaceName }}</strong>
-                  <small :title="template.directoryPath">{{ template.directoryPath }}</small>
-                </span>
-                <span class="reference-status">{{ template.activeVersion?.version || "未激活" }}</span>
-              </button>
-              <div class="reference-repository-meta">
-                <span>{{ template.enabled === false ? "已停用" : (template.activeVersion?.branch || template.branch || "main") }}</span>
-                <span :class="{ 'is-online': template.activeVersion?.replicaStatus === 'READY' }">
-                  <template v-if="template.activeVersion && synchronizationSummary(template.activeVersion.versionId)">
-                    {{ synchronizationSummary(template.activeVersion.versionId)!.readyServerCount }}/{{ synchronizationSummary(template.activeVersion.versionId)!.targetServerCount }} 台就绪
-                  </template>
-                  <template v-else>{{ template.activeVersion?.replicaStatus || "UNKNOWN" }}</template>
-                </span>
-              </div>
-            </article>
-            <Button
-              v-if="canManage"
-              size="sm"
-              variant="ghost"
-              class="automation-add-button"
-              :class="{ 'is-active': createMode && selectedRepositoryId === repository.repositoryId }"
-              :disabled="saving"
-              @click="startCreate(repository.repositoryId)"
-            >
-              <Plus class="h-3.5 w-3.5" /> 新增目录引用
-            </Button>
-          </section>
 
-          <template v-if="!canManage">
-            <article
-              v-for="template in templates"
-              :key="template.workspaceId"
-              class="reference-repository-card"
-              :class="{ 'is-selected': selectedTemplateId === template.workspaceId }"
-            >
-              <button
-                type="button"
-                class="reference-repository-main"
-                :aria-pressed="selectedTemplateId === template.workspaceId"
-                :aria-label="`查看自动化引用 ${template.workspaceName}`"
-                :disabled="saving"
-                @click="selectTemplate(template)"
-              >
-                <FolderGit2 class="h-4 w-4 shrink-0" />
-                <span class="min-w-0">
-                  <strong>{{ template.workspaceName }}</strong>
-                  <small :title="template.directoryPath">{{ template.directoryPath }}</small>
-                </span>
-                <span class="reference-status">{{ template.activeVersion?.version || "未激活" }}</span>
-              </button>
-              <div class="reference-repository-meta">
-                <span>{{ template.enabled === false ? "已停用" : (template.activeVersion?.branch || template.branch || "main") }}</span>
-                <span :class="{ 'is-online': template.activeVersion?.replicaStatus === 'READY' }">
-                  {{ template.activeVersion?.replicaStatus || "UNKNOWN" }}
-                </span>
-              </div>
-            </article>
-          </template>
-        </div>
-      </template>
-    </aside>
-
-    <main class="reference-configuration-column">
       <div v-if="errorMessage" class="reference-state is-error" role="alert">
         <span>{{ errorMessage }}</span>
         <button
           type="button"
           class="reference-inline-action"
+          aria-label="重试加载自动化代码库"
           :disabled="loading"
-          @click="loadCatalog"
+          @click="retryCatalog"
         >
           重试
         </button>
       </div>
+      <div v-else-if="loading && !repositories.length" class="reference-state" role="status">正在加载自动化引用…</div>
+      <div v-else-if="repositories.length === 0" class="reference-state">当前应用未关联自动化代码库。</div>
+      <div v-else class="reference-repository-list">
+        <article
+          v-for="repository in repositories"
+          :key="repository.repositoryId"
+          class="reference-repository-card"
+          :class="{ 'is-selected': selectedRepositoryId === repository.repositoryId }"
+        >
+          <button
+            type="button"
+            class="reference-repository-main"
+            :aria-label="`选择${repository.name}`"
+            :aria-pressed="selectedRepositoryId === repository.repositoryId"
+            :disabled="saving"
+            @click="selectRepository(repository)"
+          >
+            <FolderGit2 class="h-4 w-4 shrink-0" />
+            <span class="min-w-0">
+              <strong>{{ repository.name }}</strong>
+              <small :title="repository.gitUrl">{{ repository.gitUrl }}</small>
+            </span>
+            <span class="reference-status">{{ activeVersion?.version || repository.status || "READY" }}</span>
+          </button>
+          <div class="reference-repository-meta">
+            <span>{{ readyServerText(repository) }}</span>
+            <button
+              v-if="canManage"
+              type="button"
+              class="reference-inline-action"
+              :aria-label="`切换${repository.name}分支`"
+              :disabled="saving"
+              @click="openBranchPopover(repository, 'switch')"
+            >
+              切换分支
+            </button>
+          </div>
 
-      <!-- Create Mode: 新增自动化目录引用 (双栏树与表单) -->
-      <template v-if="createMode && canManage">
+          <div
+            v-if="branchPopoverRepositoryId === repository.repositoryId"
+            class="reference-branch-popover"
+            role="dialog"
+            :aria-label="`切换${repository.name}分支`"
+          >
+            <div class="reference-branch-title">
+              <GitBranch class="h-3.5 w-3.5" />
+              选择目标分支
+            </div>
+            <div v-if="branchesLoading" class="reference-compact-state">
+              <Spinner class="h-3.5 w-3.5 inline-block mr-1" /> 正在加载分支…
+            </div>
+            <div v-else-if="branchError" class="reference-compact-state is-error">
+              {{ branchError.message }}
+            </div>
+            <template v-else>
+              <select
+                v-model="selectedBranch"
+                aria-label="目标分支"
+                class="reference-select"
+                @change="() => loadTree()"
+              >
+                <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
+              </select>
+              <div class="reference-popover-actions">
+                <Button size="sm" variant="ghost" @click="closeBranchPopover">取消</Button>
+                <Button
+                  size="sm"
+                  :disabled="!selectedBranch || saving"
+                  @click="confirmBranchPopover"
+                >
+                  确认
+                </Button>
+              </div>
+            </template>
+          </div>
+        </article>
+      </div>
+    </aside>
+
+    <main class="reference-configuration-column">
+      <div v-if="!selectedRepository" class="reference-state is-centered">
+        选择一个已关联自动化代码库开始同步与配置。
+      </div>
+      <template v-else>
         <div class="reference-selected-heading">
           <div>
-            <strong>新增自动化目录引用</strong>
-            <span>选择分支中的已有目录；保存后该目录以应用级只读引用展示。</span>
+            <strong>{{ selectedRepository.name }}</strong>
+            <span>{{ activeTemplate ? `${selectedRepository.name} · ${activeTemplate.directoryPath}` : (selectedBranch || selectedRepository.branch || "main") }}</span>
           </div>
-          <div v-if="templates.length > 0" class="reference-selected-actions">
+          <div class="reference-selected-actions">
+            <div
+              class="reference-repository-path"
+              :title="selectedRepository.repositoryPath || undefined"
+            >
+              <span>服务器路径</span>
+              <code>{{ selectedRepository.repositoryPath || selectedRepository.gitUrl || "服务器路径暂不可用" }}</code>
+            </div>
             <Button
               size="sm"
               variant="ghost"
-              :disabled="saving"
-              @click="selectTemplate(templates[0])"
+              :aria-label="`刷新${selectedRepository.name} Git 指针`"
+              :disabled="saving || syncLoading"
+              @click="verifyPointers"
             >
-              返回引用列表
+              <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': syncLoading }" />
+              刷新 Git 指针
             </Button>
           </div>
         </div>
 
+        <section class="reference-pointer-panel" aria-label="服务器 Git 指针">
+          <div class="reference-pointer-target">
+            <span>目标 Git 指针</span>
+            <strong>{{ selectedBranch || selectedRepository.branch || "—" }}</strong>
+            <code :title="targetCommitHash || undefined">{{ shortCommit(targetCommitHash) }}</code>
+            <button
+              v-if="targetCommitHash"
+              type="button"
+              class="reference-copy-action"
+              aria-label="复制目标 Git HEAD"
+              @click="copyCommit(targetCommitHash)"
+            >
+              <Copy class="h-3 w-3" />
+            </button>
+            <span v-if="activeVersion" class="reference-pointer-status ml-auto">
+              当前版本：<code>{{ activeVersion.version }}</code>
+            </span>
+          </div>
+
+          <div v-if="!selectedRepository.servers || selectedRepository.servers.length === 0" class="reference-compact-state">
+            暂无服务器副本信息。
+          </div>
+          <div v-else class="reference-pointer-table-wrap">
+            <table class="reference-pointer-table">
+              <thead>
+                <tr>
+                  <th>服务器</th>
+                  <th>状态</th>
+                  <th>实际分支</th>
+                  <th>实际 HEAD</th>
+                  <th>目标</th>
+                  <th>最近同步 / 核验</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="server in selectedRepository.servers" :key="server.linuxServerId">
+                  <td>
+                    <strong>{{ server.linuxServerId }}</strong>
+                    <small :class="server.online === true ? 'is-online' : 'is-offline'">
+                      {{ server.online === true ? "在线" : "离线 · 非实时" }}
+                    </small>
+                  </td>
+                  <td>
+                    <span class="reference-pointer-status">{{ server.status }}</span>
+                  </td>
+                  <td><code>{{ server.currentBranch || "—" }}</code></td>
+                  <td>
+                    <span class="reference-commit-cell">
+                      <code>{{ shortCommit(server.currentCommitHash) }}</code>
+                      <button
+                        v-if="server.currentCommitHash"
+                        type="button"
+                        class="reference-copy-action"
+                        :aria-label="`复制 ${server.linuxServerId} Git HEAD`"
+                        @click="copyCommit(server.currentCommitHash)"
+                      >
+                        <Copy class="h-3 w-3" />
+                      </button>
+                    </span>
+                  </td>
+                  <td>
+                    <span class="reference-pointer-match is-match">
+                      <Check class="h-3 w-3" /> 一致
+                    </span>
+                  </td>
+                  <td>
+                    <small>同步 <time>{{ formattedTime(server.syncedAt) }}</time></small>
+                    <small>核验 <time>{{ formattedTime(server.verifiedAt) }}</time></small>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <div class="reference-ready-layout">
-          <section class="reference-tree-panel" aria-label="自动化目录树">
+          <section class="reference-tree-panel" aria-label="引用目录树">
             <div class="reference-panel-title">
-              <span class="automation-panel-title-left">
-                <span>目录</span>
-                <Spinner v-if="treeLoading" class="h-3 w-3 ml-1.5" />
-              </span>
-              <code v-if="selectedDirectory" class="reference-title-path">{{ selectedDirectory }}</code>
+              <span>目录</span>
+              <Spinner v-if="treeLoading" class="h-3 w-3" />
             </div>
+
             <div v-if="treeLoading" class="reference-compact-state is-centered" role="status">
               <Spinner class="h-4 w-4" />
               <span>正在读取目录…</span>
             </div>
-            <div v-else-if="tree.length === 0" class="reference-compact-state">当前分支没有可选择的目录。</div>
-            <div v-else class="reference-tree-wrap">
-              <RepositoryDirectoryTree
-                :nodes="tree"
-                :selected-path="selectedDirectory"
-                selection-mode="any-directory"
-                @select="selectDirectory"
-              />
+            <div v-else-if="treeErrors['']" class="reference-compact-state is-error">
+              {{ treeErrors[""]?.message }}
+              <button type="button" class="reference-inline-action" @click="loadTree(true)">重试</button>
+            </div>
+            <div v-else-if="visibleTreeNodes.length === 0" class="reference-compact-state">
+              当前分支没有可选择的目录。
+            </div>
+            <div v-else class="reference-tree" role="list">
+              <div
+                v-for="node in visibleTreeNodes"
+                :key="node.path"
+                class="reference-tree-node"
+                role="listitem"
+              >
+                <div
+                  class="reference-tree-row"
+                  :class="{
+                    'is-reference-selectable': node.directory,
+                    'is-selected': selectedFolderPath === node.path
+                  }"
+                  :style="{ paddingLeft: `${8 + node.depth * 16}px` }"
+                >
+                  <button
+                    v-if="node.directory"
+                    type="button"
+                    class="reference-tree-toggle"
+                    :aria-label="`${expandedPaths.has(node.path) ? '收起' : '展开'} ${node.name}`"
+                    :aria-expanded="expandedPaths.has(node.path)"
+                    @click="toggleDirectory(node)"
+                  >
+                    <ChevronDown v-if="expandedPaths.has(node.path)" class="h-3.5 w-3.5" />
+                    <ChevronRight v-else class="h-3.5 w-3.5" />
+                  </button>
+                  <span v-else class="reference-tree-spacer" />
+                  <Folder v-if="node.directory" class="reference-tree-icon" />
+                  <File v-else class="reference-tree-icon" />
+                  <button
+                    v-if="node.directory"
+                    type="button"
+                    class="reference-tree-name"
+                    data-reference-selectable="true"
+                    :aria-label="`选择目录 ${node.path}`"
+                    :disabled="saving"
+                    @click="selectFolder(node)"
+                  >
+                    {{ node.name }}
+                  </button>
+                  <span v-else class="reference-tree-name">{{ node.name }}</span>
+                </div>
+              </div>
             </div>
           </section>
 
-          <section class="reference-form-panel" aria-label="新增自动化目录引用表单">
-            <div class="reference-panel-title">配置</div>
-            <form class="reference-form" @submit.prevent="createReference">
+          <section class="reference-form-panel" aria-label="自动化引用配置">
+            <div class="reference-panel-title">
+              <span>配置</span>
+              <span v-if="activeTemplate" class="reference-status">
+                {{ activeTemplate.enabled === false ? "已停用" : "已启用" }}
+              </span>
+            </div>
+
+            <form class="reference-form" @submit.prevent="activeTemplate ? createVersion() : createReference()">
               <label>
                 <span>版本库（repository）</span>
-                <Input :model-value="selectedRepository?.name || selectedRepositoryId" readonly aria-label="自动化版本库" />
+                <Input :model-value="selectedRepository.name" readonly aria-label="自动化版本库" />
               </label>
+
               <label>
                 <span class="automation-field-label">
                   <span>分支（branch）</span>
@@ -722,40 +1062,117 @@ onBeforeUnmount(() => {
                   </span>
                 </span>
                 <select
-                  v-model="selectedBranch"
+                  v-model="formBranch"
                   class="reference-select"
                   aria-label="自动化引用分支"
                   :disabled="branchesLoading || saving"
-                  @change="loadTree"
+                  @change="() => { selectedBranch = formBranch; loadTree(); }"
                 >
                   <option v-if="branchesLoading && !branches.length" value="" disabled>正在拉取分支…</option>
                   <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
                 </select>
               </label>
+
               <label>
-                <span class="automation-field-label">
-                  <span>引用目录（path） <b aria-hidden="true">*</b></span>
-                  <span v-if="treeLoading" class="automation-inline-loading" role="status">
-                    <Spinner class="h-3 w-3" />
-                    <small>读取目录中…</small>
-                  </span>
-                </span>
-                <Input :model-value="selectedDirectory" readonly :placeholder="treeLoading ? '正在读取目录…' : '请在左侧选择目录'" />
+                <span>引用目录（path） <b aria-hidden="true">*</b></span>
+                <Input :model-value="selectedFolderPath || ''" readonly :placeholder="treeLoading ? '正在读取目录…' : '请在左侧选择目录'" aria-label="引用目录" />
               </label>
+
               <label>
                 <span>引用名称（workspace-name） <b aria-hidden="true">*</b></span>
-                <Input v-model="referenceName" aria-label="自动化引用名称" placeholder="例如 接口自动化" :disabled="saving" />
+                <Input
+                  v-model="referenceName"
+                  aria-label="自动化引用名称"
+                  placeholder="例如 接口自动化"
+                  :disabled="saving || !canManage"
+                />
               </label>
+
               <label>
                 <span>版本日期（version） <b aria-hidden="true">*</b></span>
-                <Input v-model="versionDate" aria-label="自动化引用版本日期" placeholder="YYYYMMDD" :disabled="saving" />
+                <Input
+                  v-model="versionDate"
+                  aria-label="自动化引用版本日期"
+                  placeholder="YYYYMMDD"
+                  :disabled="saving || !canManage"
+                />
               </label>
+
+              <div v-if="activeTemplate" class="automation-version-history">
+                <div class="automation-history-header">
+                  <span>版本历史（{{ selectedVersions.length }}）</span>
+                  <Button
+                    v-if="canManage"
+                    size="sm"
+                    variant="ghost"
+                    class="reference-inline-action"
+                    :disabled="saving"
+                    @click="toggleReference(activeTemplate)"
+                  >
+                    {{ activeTemplate.enabled === false ? "启用引用" : "停用引用" }}
+                  </Button>
+                </div>
+                <div class="reference-pointer-table-wrap">
+                  <table class="reference-pointer-table">
+                    <thead>
+                      <tr>
+                        <th>版本号</th>
+                        <th>分支</th>
+                        <th>状态</th>
+                        <th>时间</th>
+                        <th v-if="canManage" style="text-align: right;">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="ver in selectedVersions" :key="ver.versionId">
+                        <td><strong>{{ ver.version }}</strong></td>
+                        <td><code>{{ ver.branch }}</code></td>
+                        <td>
+                          <span v-if="activeVersion?.versionId === ver.versionId" class="reference-pointer-match is-match">
+                            <Check class="h-3 w-3" /> 当前版本
+                          </span>
+                          <span v-else class="reference-pointer-status">{{ ver.status === "ACTIVE" ? "可用" : ver.status }}</span>
+                        </td>
+                        <td><time>{{ formattedTime(ver.createdAt) }}</time></td>
+                        <td v-if="canManage" style="text-align: right;">
+                          <div class="automation-version-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              class="reference-inline-action"
+                              :aria-label="`同步自动化版本 ${ver.version}`"
+                              :disabled="saving"
+                              @click="synchronizeVersion(activeTemplate, ver)"
+                            >
+                              同步
+                            </Button>
+                            <Button
+                              v-if="activeVersion?.versionId !== ver.versionId"
+                              size="sm"
+                              variant="ghost"
+                              class="reference-inline-action"
+                              :disabled="saving || ver.status !== 'ACTIVE'"
+                              @click="activateVersion(activeTemplate, ver)"
+                            >
+                              设为当前版本
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               <div v-if="operation" class="reference-form-notice is-loading" role="status">
                 <Spinner v-if="operation.status === 'RUNNING'" class="h-3.5 w-3.5 shrink-0" />
                 <span>{{ operation.status === "RUNNING" ? "正在初始化共享只读副本…" : operation.status }}</span>
               </div>
-              <div class="reference-form-actions">
+
+              <div v-if="canManage" class="reference-form-actions">
                 <Button
+                  v-if="!activeTemplate"
+                  type="button"
                   aria-label="保存自动化目录引用"
                   :disabled="!canCreateReference"
                   @click="createReference"
@@ -763,176 +1180,13 @@ onBeforeUnmount(() => {
                   <Spinner v-if="saving" class="h-3.5 w-3.5 mr-1.5" />
                   {{ saving ? "保存中…" : "保存目录引用" }}
                 </Button>
-              </div>
-            </form>
-          </section>
-        </div>
-      </template>
-
-      <!-- Detail View: 查看已配置的自动化引用 -->
-      <template v-else-if="selectedTemplate">
-        <div class="reference-selected-heading">
-          <div>
-            <strong>{{ selectedTemplate.workspaceName }}</strong>
-            <span>{{ repositoryName(selectedTemplate.repositoryId) }} · {{ selectedTemplate.directoryPath }}</span>
-          </div>
-          <div v-if="canManage" class="reference-selected-actions">
-            <Button
-              size="sm"
-              variant="ghost"
-              :disabled="saving"
-              @click="toggleReference(selectedTemplate)"
-            >
-              <Spinner v-if="saving" class="h-3 w-3 mr-1" />
-              {{ selectedTemplate.enabled === false ? "启用引用" : "停用引用" }}
-            </Button>
-          </div>
-        </div>
-
-        <section class="reference-pointer-panel" aria-label="当前版本">
-          <div class="reference-pointer-target">
-            <span>当前版本</span>
-            <strong v-if="selectedTemplate.activeVersion">
-              {{ selectedTemplate.activeVersion.version }} · {{ selectedTemplate.activeVersion.branch }}
-            </strong>
-            <strong v-else>尚未激活版本</strong>
-            <span v-if="selectedTemplate.activeVersion" class="reference-pointer-status">
-              副本 {{ selectedTemplate.activeVersion.replicaStatus || "UNKNOWN" }}
-            </span>
-            <span
-              v-if="selectedTemplate.activeVersion"
-              class="reference-pointer-match"
-              :class="{
-                'is-match': selectedTemplate.activeVersion.replicaStatus === 'READY',
-                'is-mismatch': selectedTemplate.activeVersion.replicaStatus === 'FAILED'
-              }"
-            >
-              <Check v-if="selectedTemplate.activeVersion.replicaStatus === 'READY'" class="h-3 w-3" />
-              {{ selectedTemplate.activeVersion.replicaStatus === "READY" ? "就绪" : selectedTemplate.activeVersion.replicaStatus === "FAILED" ? "异常" : "同步中" }}
-            </span>
-            <span v-if="selectedTemplate.activeVersion && synchronizationSummary(selectedTemplate.activeVersion.versionId)" class="reference-pointer-status">
-              服务器 {{ synchronizationSummary(selectedTemplate.activeVersion.versionId)!.readyServerCount }}/{{ synchronizationSummary(selectedTemplate.activeVersion.versionId)!.targetServerCount }} 台就绪
-            </span>
-          </div>
-        </section>
-
-        <div class="automation-detail-body">
-          <section class="automation-versions-section" aria-label="版本列表">
-            <div class="reference-panel-title">
-              <span>版本列表</span>
-            </div>
-            <div v-if="!selectedVersions.length" class="reference-compact-state">暂无可用版本。</div>
-            <div v-else class="reference-pointer-table-wrap">
-              <table class="reference-pointer-table">
-                <thead>
-                  <tr>
-                    <th>版本号</th>
-                    <th>分支</th>
-                    <th>服务器同步</th>
-                    <th>创建时间</th>
-                    <th>状态</th>
-                    <th v-if="canManage" style="text-align: right;">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="version in selectedVersions" :key="version.versionId">
-                    <td>
-                      <strong>{{ version.version }}</strong>
-                    </td>
-                    <td>
-                      <code>{{ version.branch }}</code>
-                    </td>
-                    <td>
-                      <span
-                        class="reference-pointer-status"
-                        :class="{ 'is-online': synchronizationSummary(version.versionId)?.status === 'READY' }"
-                      >
-                        <template v-if="synchronizationSummary(version.versionId)">
-                          {{ synchronizationSummary(version.versionId)!.readyServerCount }}/{{ synchronizationSummary(version.versionId)!.targetServerCount }} 台就绪
-                        </template>
-                        <template v-else>{{ version.replicaStatus || "UNKNOWN" }}</template>
-                      </span>
-                    </td>
-                    <td>
-                      <time>{{ formattedTime(version.createdAt) }}</time>
-                    </td>
-                    <td>
-                      <span
-                        v-if="selectedTemplate.activeVersion?.versionId === version.versionId"
-                        class="reference-pointer-match is-match"
-                      >
-                        <Check class="h-3 w-3" /> 当前版本
-                      </span>
-                      <span v-else class="reference-pointer-status">
-                        {{ version.status === "ACTIVE" ? "可用" : version.status }}
-                      </span>
-                    </td>
-                    <td v-if="canManage" class="automation-version-actions">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        class="reference-inline-action"
-                        :disabled="saving || version.status !== 'ACTIVE'"
-                        :aria-label="`同步自动化版本 ${version.version}`"
-                        @click="synchronizeVersion(selectedTemplate, version)"
-                      >
-                        <RefreshCw class="h-3 w-3 mr-1 inline-block" />
-                        同步
-                      </Button>
-                      <Button
-                        v-if="selectedTemplate.activeVersion?.versionId !== version.versionId"
-                        size="sm"
-                        variant="ghost"
-                        class="reference-inline-action"
-                        :disabled="saving || version.status !== 'ACTIVE'"
-                        @click="activateVersion(selectedTemplate, version)"
-                      >
-                        <Spinner v-if="saving" class="h-3 w-3 mr-1 inline-block" />
-                        设为当前版本
-                      </Button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section v-if="canManage" class="automation-create-version-section" aria-label="新增版本">
-            <div class="reference-panel-title">
-              <span>新增版本</span>
-            </div>
-            <form class="reference-form automation-version-form" @submit.prevent="createVersion">
-              <div class="automation-version-fields">
-                <label>
-                  <span class="automation-field-label">
-                    <span>新增版本分支（branch）</span>
-                    <span v-if="branchesLoading" class="automation-inline-loading" role="status">
-                      <Spinner class="h-3 w-3" />
-                      <small>拉取分支中…</small>
-                    </span>
-                  </span>
-                  <select
-                    v-model="selectedBranch"
-                    class="reference-select"
-                    aria-label="新增自动化版本分支"
-                    :disabled="branchesLoading || saving"
-                  >
-                    <option v-if="branchesLoading && !branches.length" value="" disabled>正在拉取分支…</option>
-                    <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
-                  </select>
-                </label>
-                <label>
-                  <span>版本日期（YYYYMMDD） <b aria-hidden="true">*</b></span>
-                  <Input
-                    v-model="versionDate"
-                    aria-label="新增自动化版本日期"
-                    placeholder="YYYYMMDD"
-                    :disabled="saving"
-                  />
-                </label>
-              </div>
-              <div class="reference-form-actions">
-                <Button type="submit" :disabled="!canCreateVersion">
+                <Button
+                  v-else
+                  type="button"
+                  aria-label="新增版本"
+                  :disabled="!canCreateVersion"
+                  @click="createVersion"
+                >
                   <Spinner v-if="saving" class="h-3.5 w-3.5 mr-1.5" />
                   {{ saving ? "创建中…" : "新增版本" }}
                 </Button>
@@ -941,10 +1195,6 @@ onBeforeUnmount(() => {
           </section>
         </div>
       </template>
-
-      <div v-else-if="!loading" class="reference-state is-centered">
-        {{ canManage ? "从左侧选择版本库并新增目录引用。" : "当前应用暂无可查看的自动化引用。" }}
-      </div>
     </main>
 
     <RepositoryOperationProgressDialog
@@ -959,7 +1209,6 @@ onBeforeUnmount(() => {
       :can-close="synchronizationCanClose"
       :can-retry="synchronizationCanRetry"
       resource-label="自动化代码库"
-      replica-label="自动化"
       @close="closeSynchronization"
       @retry="retrySynchronization"
     />
@@ -1013,28 +1262,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-}
-
-.automation-repo-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--ta-border);
-}
-
-.automation-repo-group:last-child {
-  border-bottom: 0;
-}
-
-.automation-repo-group-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px 2px;
-  color: var(--ta-muted);
-  font-size: 11px;
-  font-weight: 600;
 }
 
 .reference-repository-card {
@@ -1103,21 +1330,49 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
-.reference-repository-meta .is-online {
-  color: var(--ta-ok);
-}
-
-.automation-add-button {
-  justify-content: flex-start;
-  font-size: 11px;
-  color: var(--ta-muted);
-  margin-top: 2px;
-}
-
-.automation-add-button:hover,
-.automation-add-button.is-active {
+.reference-inline-action {
+  border: 0;
+  padding: 0;
+  background: transparent;
   color: var(--ta-text);
-  background: var(--ta-hover);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.automation-version-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.reference-branch-popover {
+  margin: 0 8px 8px;
+  border: 1px solid var(--ta-border-strong);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--ta-panel);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.reference-branch-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 7px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reference-popover-actions,
+.reference-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .reference-configuration-column {
@@ -1154,10 +1409,47 @@ onBeforeUnmount(() => {
   font-weight: 400;
 }
 
-.reference-selected-actions {
+.reference-selected-actions,
+.reference-commit-cell,
+.reference-pointer-match,
+.reference-pointer-target {
   display: flex;
   align-items: center;
+}
+
+.reference-selected-actions {
+  min-width: 0;
+  max-width: 72%;
   gap: 6px;
+}
+
+.reference-repository-path {
+  display: flex;
+  min-width: 0;
+  max-width: 430px;
+  align-items: center;
+  gap: 6px;
+  border-right: 1px solid var(--ta-border);
+  padding-right: 10px;
+}
+
+.reference-repository-path span {
+  flex-shrink: 0;
+  margin: 0;
+  color: var(--ta-muted);
+  font-family: inherit;
+  font-size: 10px;
+}
+
+.reference-repository-path code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ta-text);
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .reference-pointer-panel {
@@ -1173,8 +1465,6 @@ onBeforeUnmount(() => {
   padding: 0 12px;
   color: var(--ta-muted);
   font-size: 10px;
-  display: flex;
-  align-items: center;
 }
 
 .reference-pointer-target strong,
@@ -1186,54 +1476,9 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
-.reference-pointer-status {
-  color: var(--ta-muted);
-  font-family: "Geist Mono", monospace;
-}
-
-.reference-pointer-status.is-online {
-  color: var(--ta-ok);
-}
-
-.reference-pointer-match {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 10px;
-}
-
-.reference-pointer-match.is-match {
-  color: var(--ta-ok);
-}
-
-.reference-pointer-match.is-mismatch {
-  color: var(--ta-error);
-}
-
-.automation-detail-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
-}
-
-.automation-versions-section {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.automation-create-version-section {
-  flex-shrink: 0;
-  border-top: 1px solid var(--ta-border);
-  background: var(--ta-panel-2);
-}
-
 .reference-pointer-table-wrap {
+  max-height: 148px;
   overflow: auto;
-  flex: 1;
 }
 
 .reference-pointer-table {
@@ -1246,8 +1491,8 @@ onBeforeUnmount(() => {
 .reference-pointer-table th,
 .reference-pointer-table td {
   border-bottom: 1px solid var(--ta-border);
-  padding: 6px 10px;
-  vertical-align: middle;
+  padding: 5px 8px;
+  vertical-align: top;
   white-space: nowrap;
 }
 
@@ -1260,23 +1505,54 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
-.reference-inline-action {
+.reference-pointer-table td:first-child strong,
+.reference-pointer-table td:first-child small,
+.reference-pointer-table td:last-child small {
+  display: block;
+}
+
+.reference-pointer-table small {
+  margin-top: 2px;
+  color: var(--ta-muted);
+  font-size: 9px;
+}
+
+.reference-pointer-table small.is-online,
+.reference-pointer-match.is-match {
+  color: var(--ta-ok);
+}
+
+.reference-pointer-table small.is-offline {
+  color: var(--ta-muted);
+}
+
+.reference-pointer-status {
+  color: var(--ta-muted);
+  font-family: "Geist Mono", monospace;
+}
+
+.reference-commit-cell,
+.reference-pointer-match {
+  gap: 3px;
+}
+
+.reference-copy-action {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
   border: 0;
+  border-radius: 3px;
   padding: 0;
   background: transparent;
-  color: var(--ta-text);
-  font-size: 11px;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  color: var(--ta-muted);
   cursor: pointer;
 }
 
-.automation-version-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  text-align: right;
+.reference-copy-action:hover,
+.reference-copy-action:focus-visible {
+  background: var(--ta-hover);
+  color: var(--ta-text);
 }
 
 .reference-ready-layout {
@@ -1299,10 +1575,6 @@ onBeforeUnmount(() => {
   font-size: var(--ta-tree-font-size);
 }
 
-.reference-tree-wrap {
-  padding: 6px 4px;
-}
-
 .reference-form-panel {
   background: var(--ta-panel-2);
 }
@@ -1313,23 +1585,72 @@ onBeforeUnmount(() => {
   z-index: 1;
   height: 32px;
   border-bottom: 1px solid var(--ta-border);
-  padding: 0 12px;
-  background: var(--ta-panel-2);
+  padding: 0 10px;
+  background: inherit;
 }
 
-.automation-panel-title-left {
-  display: inline-flex;
+.reference-tree {
+  padding: 5px 0;
+}
+
+.reference-tree-row {
+  display: flex;
+  height: var(--ta-tree-row-height);
   align-items: center;
+  gap: 4px;
+  padding-right: 8px;
+  color: var(--ta-tree-text);
 }
 
-.reference-title-path {
+.reference-tree-row:hover,
+.reference-tree-row.is-selected {
+  background: var(--ta-tree-hover);
+}
+
+.reference-tree-toggle {
+  display: inline-grid;
+  width: 16px;
+  height: 18px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ta-tree-muted);
+  cursor: pointer;
+}
+
+.reference-tree-spacer {
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.reference-tree-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--ta-tree-muted);
+}
+
+.reference-tree-name {
+  min-width: 0;
   overflow: hidden;
-  color: var(--ta-ink);
-  font-family: "Geist Mono", monospace;
-  font-size: 10px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: var(--ta-tree-row-height);
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 260px;
+}
+
+.reference-tree-row.is-reference-selectable .reference-tree-icon,
+.reference-tree-row.is-reference-selectable .reference-tree-name {
+  color: var(--ta-ink);
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .reference-form {
@@ -1345,6 +1666,10 @@ onBeforeUnmount(() => {
   color: var(--ta-muted);
   font-family: "Geist Mono", monospace;
   font-size: 10px;
+}
+
+.reference-form label b {
+  color: var(--ta-error);
 }
 
 .automation-field-label {
@@ -1369,10 +1694,6 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
-.reference-form label b {
-  color: var(--ta-error);
-}
-
 .reference-select {
   width: 100%;
   height: 32px;
@@ -1389,17 +1710,21 @@ onBeforeUnmount(() => {
   border-color: var(--ta-border-strong);
 }
 
-.automation-version-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+.automation-version-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--ta-border);
+  padding-top: 10px;
 }
 
-.reference-form-actions {
+.automation-history-header {
   display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 6px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ta-muted);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .reference-state,
@@ -1457,25 +1782,6 @@ onBeforeUnmount(() => {
 
 .reference-form-notice.is-success {
   color: var(--ta-ok);
-}
-
-@media (max-width: 780px) {
-  .reference-automation-layout {
-    grid-template-columns: 1fr;
-  }
-  .reference-repository-column {
-    max-height: 38vh;
-    border-right: 0;
-    border-bottom: 1px solid var(--ta-border);
-  }
-  .reference-ready-layout {
-    grid-template-columns: 1fr;
-  }
-  .reference-tree-panel {
-    min-height: 180px;
-    border-right: 0;
-    border-bottom: 1px solid var(--ta-border);
-  }
 }
 
 @media (max-width: 780px) {

@@ -254,4 +254,41 @@ describe("AutomationReferenceConfigurationPanel", () => {
 
     expect(wrapper.text()).not.toContain("正在读取目录…");
   });
+
+  it("caches previously fetched branches and directory trees in memory to avoid duplicate requests", async () => {
+    const mockApi = api({
+      listRepositoryBranches: vi.fn().mockResolvedValue(["main", "release/v1"]),
+      getRepositoryTree: vi.fn().mockResolvedValue({
+        nodes: [
+          { name: "scripts", path: "scripts", type: "directory", children: [] }
+        ]
+      })
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    // 第一次进入创建模式，拉取分支和当前分支目录
+    expect(mockApi.listRepositoryBranches).toHaveBeenCalledTimes(1);
+    expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(1);
+
+    // 切换到 release/v1 分支，首次读取该分支目录
+    const branchSelect = wrapper.get('select[aria-label="自动化引用分支"]');
+    await branchSelect.setValue("release/v1");
+    await flushPromises();
+    expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
+
+    // 切回 main 分支：命中前端目录缓存，不再发起网络请求
+    await branchSelect.setValue("main");
+    await flushPromises();
+    expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
+
+    // 重新点击“新增目录引用”：命中前端分支和目录缓存，不重复发起请求
+    const addButton = wrapper.findAll("button").find((b) => b.text().includes("新增目录引用"));
+    if (addButton) {
+      await addButton.trigger("click");
+      await flushPromises();
+      expect(mockApi.listRepositoryBranches).toHaveBeenCalledTimes(1);
+      expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
+    }
+  });
 });

@@ -84,6 +84,8 @@ const branchPopoverMode = ref<"initialize" | "switch" | null>(null);
 const branches = ref<string[]>([]);
 const selectedBranch = ref("");
 const branchesLoading = ref(false);
+/** 前端缓存已拉取的分支列表（key: repositoryId -> 分支数组） */
+const branchesByRepository = ref<Record<string, string[]>>({});
 const branchError = ref<Notice | null>(null);
 const branchSwitchConfirmation = ref<{ repositoryId: string; repositoryName: string; from: string; to: string } | null>(null);
 const pendingWorkspaceRefreshes = ref<Map<string, PendingWorkspaceRefresh>>(new Map());
@@ -546,13 +548,21 @@ async function openBranchPopover(repository: ReferenceRepositoryStatus) {
   const selectionToken = selectionGeneration;
   branchPopoverRepositoryId.value = repository.repositoryId;
   branchPopoverMode.value = "initialize";
+  branchError.value = null;
+  const cached = branchesByRepository.value[repository.repositoryId];
+  if (cached) {
+    branches.value = cached;
+    selectedBranch.value = cached[0] ?? "";
+    branchesLoading.value = false;
+    return;
+  }
   branches.value = [];
   selectedBranch.value = "";
   branchesLoading.value = true;
-  branchError.value = null;
   try {
     const result = await api.listRepositoryBranches(repository.repositoryId);
     if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) return;
+    branchesByRepository.value = { ...branchesByRepository.value, [repository.repositoryId]: result };
     branches.value = result;
     selectedBranch.value = result[0] ?? "";
   } catch (error) {
@@ -572,13 +582,21 @@ async function openSwitchBranchPopover(repository: ReferenceRepositoryStatus) {
   const selectionToken = selectionGeneration;
   branchPopoverRepositoryId.value = repository.repositoryId;
   branchPopoverMode.value = "switch";
+  branchError.value = null;
+  const cached = branchesByRepository.value[repository.repositoryId];
+  if (cached) {
+    branches.value = cached.filter((branch) => branch !== repository.branch);
+    selectedBranch.value = branches.value[0] ?? "";
+    branchesLoading.value = false;
+    return;
+  }
   branches.value = [];
   selectedBranch.value = "";
   branchesLoading.value = true;
-  branchError.value = null;
   try {
     const result = await api.listRepositoryBranches(repository.repositoryId);
     if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) return;
+    branchesByRepository.value = { ...branchesByRepository.value, [repository.repositoryId]: result };
     branches.value = result.filter((branch) => branch !== repository.branch);
     selectedBranch.value = branches.value[0] ?? "";
   } catch (error) {
@@ -963,11 +981,15 @@ function handleWindowKeydown(event: KeyboardEvent) {
 
 watch(
   () => [props.open, props.appId, props.workspaceId] as const,
-  ([open, appId, workspaceId]) => {
+  ([open, appId, workspaceId], prevValues) => {
+    const prevAppId = prevValues?.[1];
     const nextContextKey = `${appId}\u0000${workspaceId}`;
     if (workspaceRefreshContextKey !== nextContextKey) {
       workspaceRefreshContextKey = nextContextKey;
       pendingWorkspaceRefreshes.value = new Map();
+    }
+    if (prevAppId !== undefined && appId !== prevAppId) {
+      branchesByRepository.value = {};
     }
     clearPendingWorkspaceRefreshPoll();
     dialogGeneration++;

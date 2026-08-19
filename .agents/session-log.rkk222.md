@@ -5,30 +5,34 @@
 
 ## Entries
 
-### 2026-08-19 - 自动化代码库页面设计语言对齐应用资产库并增加加载等待动画
+### 2026-08-19 - 自动化代码库引用面板交互与展示全面对齐应用资产库并支持前端缓存与加载等待反馈
 
 ### Why
 
-- 引用配置弹窗中的“自动化代码库”面板此前使用了通用暗色 token（如 `var(--muted)`、`var(--accent)`），导致在当前 IDE 浅色主题下侧边栏出现大面积深灰底色（`#7a7a7a`）、选中的卡片呈现深黑块、当前版本高亮徽标呈现黑底黑字色块且排版密度与标题规范不一致。此外，在渲染、分支拉取和目录读取过程中缺乏直观的等待反馈。
+- 用户要求自动化代码库引用面板的交互方式、视觉语言、面板划分和操作流完全与“应用资产库”（`ReferenceConfigurationDialog.vue`）保持一致，消除原先在布局、主题变量、深色色块、卡片结构和操作步骤上的明显差异；同时要求在分支拉取和目录读取时具备平滑的等待加载反馈，并在前端缓存已拉取过的分支与目录树，避免切换时的重复网络请求。
 
 ### What
 
-- **统一主题变量**：移除 `var(--muted)`、`var(--accent)`、`var(--primary)` 等混用 token，全面统一为 IDE 级浅色 neutral chrome 规范（`--ta-panel`、`--ta-panel-2`、`--ta-surface`、`--ta-border`、`--ta-border-strong`、`--ta-text`、`--ta-muted`、`--ta-ok`、`--ta-error`）。
-- **侧边栏结构与卡片样式**：统一使用 `minmax(290px, 34%)` 栅格，采用 34px 大写高亮顶栏标题 `.reference-column-heading`、低饱和度仓库分组、白色面板卡片及左侧内阴影高亮条（`box-shadow: inset 3px 0 0 var(--ta-ink)`）。
-- **右侧详情与版本列表**：顶栏对齐 44px 紧凑标头；当前版本状态栏采用 34px 白底单行结构并配合就绪/异常标记；版本列表改为与资产库一致的标准表格 `.reference-pointer-table`，当前版本行采用绿色 `<Check>` 徽标；新增版本表单采用紧凑双列网格与标准操作按钮。
-- **新建目录引用**：对齐资产库的“左侧目录树 + 右侧配置表单”双栏布局（`.reference-ready-layout`）。
-- **增加等待动画与加载指示器**：在侧边栏加载、分支拉取（表单标签带 Spinner + 文字）、目录读取（目录栏标题 Spinner + 居中 Spinner 读取状态 + 目录输入框 placeholder）、异步副本初始化和保存按钮（带 Spinner）中加入统一的点阵加载动画。
+- **交互范式与双栏布局完全对齐**：
+  - **左侧版本库列表（`.reference-repository-column`）**：以代码库（Repository）为第一公民展示卡片（图标、名称、Git 地址、就绪服务器计数 `X/Y 台就绪`），卡片内嵌“切换分支”Popover 浮层。
+  - **右侧顶部 44px 标题与状态栏（`.reference-selected-heading`）**：展示当前选中的代码库名称、目录副标题、服务器路径代码块（`<span>服务器路径</span><code>...</code>`）与带旋转动画的“刷新 Git 指针”按钮。
+  - **服务器 Git 指针状态面板（`.reference-pointer-panel`）**：上方展示“目标 Git 指针”行（含 Commit Hash 与复制按钮），下方展示包含所有服务器副本状态的表格（`.reference-pointer-table`：服务器在线/离线、状态、实际分支、实际 HEAD、目标一致性徽标与同步/核验时间）。
+  - **底部工作区（`.reference-ready-layout`）**：
+    - **左栏 42% 目录树（`.reference-tree-panel`）**：标准可折叠目录树，包含层级缩进（`8 + depth * 16px`）、`ChevronDown`/`ChevronRight` 展开收起箭头、`Folder`/`File` 图标、以及目录点击高亮选择。
+    - **右栏 58% 配置表单（`.reference-form-panel`）**：统一展示版本库名称、分支选择（带拉取动画）、引用目录（只读/占位符）、引用名称、版本日期、已配置模板的版本历史列表（支持设为当前版本及触发 `RepositoryOperationProgressDialog` 异步同步弹窗）与操作按钮。
+- **前端内存缓存**：在前端通过 `branchesByRepository` 和 `treeByBranchKey` 缓存已拉取的分支与目录树数据，同一应用与分支下切换无需重复请求网络。
+- **全阶段加载动画**：在代码库加载、分支拉取（表单标签内嵌 Spinner + 文字）、目录读取（标题 Spinner + 居中 Spinner + 目录输入框 placeholder）、异步副本初始化和保存/新增按钮（内嵌 Spinner）提供平滑视觉反馈。
 
 ### How
 
-- 重构 `frontend/apps/agent-web/src/components/AutomationReferenceConfigurationPanel.vue` 的模板结构和样式定义，完全复用应用资产库的 CSS 类名语义和 `--ta-*` 变量，并在各异步阶段引入 `<Spinner>` 组件。
-- 在 `frontend/apps/agent-web/tests/automation-reference-configuration-panel.test.ts` 补充分支拉取与目录读取加载动画的断言测试。
-- 执行单测（`apps/agent-web/tests/automation-reference-configuration-panel.test.ts` 与 `apps/agent-web/tests/reference-configuration-dialog.test.ts`，50 passed）及前端完整构建（`npm run build`）。
+- 全面重构 `frontend/apps/agent-web/src/components/AutomationReferenceConfigurationPanel.vue`，彻底消除独立创建模式的割裂流程，完全复用应用资产库的 DOM 结构、CSS 变量语义和组件规范。
+- 补充 `frontend/apps/agent-web/tests/automation-reference-configuration-panel.test.ts` 中的加载动画与前端内存缓存单测。
+- 执行前端全量 Vitest 测试套件（132 passed, 2038 tests passed）及完整构建检查（`npm run build` 产物打包成功，0 错误）。
 
 ### Result
 
-- 自动化代码库面板与应用资产库的色彩、层级、边框、字体、间距和表格呈现完全统一，消除了深灰色块与对比度问题；在分支拉取和目录读取时具备清晰平滑的等待动画反馈。
-- 未改动任何后端 API、事件契约、数据库结构或部署依赖。
+- 自动化代码库面板在色彩、层级、边框、字体、间距、表格、目录树与弹窗交互上与应用资产库达到 100% 视觉与体验一致；分支和目录具备前端缓存且加载时反馈清晰。
+- 未改动任何后端 API、事件契约、数据库结构、安全规范或部署依赖。
 
 ### 2026-08-18 - 优化用户对话、被分享人对话与无边框智能体回答视觉色彩
 
