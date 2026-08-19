@@ -15,7 +15,7 @@
     - `src/mermaid/init.ts`: 封装 `ensureMermaid` 懒加载单例，按需初始化 Mermaid 与 ELK 布局引擎。
     - `src/mermaid/visual-editor/MermaidEditorDialog.vue`: 增加可选 `title`、`subtitle`、`applyLabel` props，支持 Markdown 嵌入块和独立 `.mmd` 文件的可复用自定义文案。
     - `src/mermaid/visual-editor/MermaidPreviewDialog.vue`:
-      - 放弃 HTML 容器 CSS scale（会引发浏览器固定位图光栅化拉伸模糊），重构为原生 SVG `<g class="ta-mermaid-viewport-layer">` 矢量图层 transform 控制，使任意放大比例下文字与线条保持 100% 矢量无损高清；
+      - 使用原生 SVG `viewBox` 动态映射直接驱动缩放与平移，不修改 SVG 内部节点结构，使任意放大比例下文字、箭头与线条保持 100% 矢量无损高清；
       - 增加 `clampPan` 平移边界约束计算，结合图表尺寸与视口大小动态锁定移动极值，确保缩小或平移拖拽时图表永远处于可视区内，不会漂移至画布外；
       - 彻底修复 flex center 导致的 SVG 顶部负坐标溢出遮挡问题；
       - 新增浮动控制工具栏（放大、缩小、100% 比例显示、适应画布/双击自适应、重置比例）。
@@ -31,7 +31,7 @@
     - `apps/agent-web/tests/WorkbenchFooter.mermaid-edit.test.ts`: 覆盖 `.mmd` 格式文件预览与编辑按钮渲染、位置顺序、点击 emit 事件与非 mmd 文件隔离。
     - `apps/agent-web/tests/mermaid-mmd-editor.test.ts`: 覆盖 Mermaid 图表解析、序列化、弹窗自定义文案、预览弹窗渲染、缩放/平移/适应控制及应用回调。
 - How:
-  - 通过注入 SVG 内部 `<g>` 标签的 `transform="translate(...) scale(...)"` 直接调用浏览器底层矢量渲染器（结合 `geometricPrecision`），并结合动态视口边缘吸附与边界夹取算法限制 pan 坐标。
+  - 通过计算视口像素与图表原始坐标系映射动态设置 SVG `viewBox="${minX} ${minY} ${viewWidth} ${viewHeight}"`，由浏览器底层矢量渲染器根据屏幕物理像素实时光栅化，并结合边界夹取算法限制 pan 坐标。
 - Result:
   - 自动化单测全部通过（全量 132 套件 / 2040 用例 100% 通过），`vue-tsc` 类型检查无报错。
 

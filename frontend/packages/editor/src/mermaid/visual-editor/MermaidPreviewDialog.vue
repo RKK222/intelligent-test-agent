@@ -44,20 +44,26 @@ function clampPan(targetPan: { x: number; y: number }, targetZoom: number) {
 
   const margin = 60;
 
-  let minX = vWidth - dWidth - margin;
-  let maxX = margin;
+  let minX: number;
+  let maxX: number;
   if (dWidth <= vWidth - margin * 2) {
     const midX = (vWidth - dWidth) / 2;
-    minX = Math.min(midX - 60, margin);
-    maxX = Math.max(midX + 60, vWidth - dWidth - margin);
+    minX = midX - 80;
+    maxX = midX + 80;
+  } else {
+    minX = vWidth - dWidth - margin;
+    maxX = margin;
   }
 
-  let minY = vHeight - dHeight - margin;
-  let maxY = margin;
+  let minY: number;
+  let maxY: number;
   if (dHeight <= vHeight - margin * 2) {
     const midY = (vHeight - dHeight) / 2;
-    minY = Math.min(midY - 60, margin);
-    maxY = Math.max(midY + 60, vHeight - dHeight - margin);
+    minY = Math.min(midY - 80, 36);
+    maxY = Math.max(midY + 80, 36);
+  } else {
+    minY = vHeight - dHeight - margin;
+    maxY = margin;
   }
 
   const boundMinX = Math.min(minX, maxX);
@@ -71,21 +77,32 @@ function clampPan(targetPan: { x: number; y: number }, targetZoom: number) {
   };
 }
 
-function applyTransform() {
-  if (!svgHostEl.value) return;
-  const contentG = svgHostEl.value.querySelector("g.ta-mermaid-viewport-layer") as SVGGElement | null;
-  if (contentG) {
-    contentG.setAttribute("transform", `translate(${pan.value.x}, ${pan.value.y}) scale(${zoom.value})`);
-  }
+function applyViewBox() {
+  if (!svgHostEl.value || !viewportEl.value) return;
+  const svgEl = svgHostEl.value.querySelector("svg");
+  if (!svgEl) return;
+
+  const rect = viewportEl.value.getBoundingClientRect();
+  const vWidth = rect.width || 1000;
+  const vHeight = rect.height || 600;
+
+  const currentZoom = Math.max(zoom.value, 0.01);
+  const minX = -pan.value.x / currentZoom;
+  const minY = -pan.value.y / currentZoom;
+  const viewWidth = vWidth / currentZoom;
+  const viewHeight = vHeight / currentZoom;
+
+  svgEl.setAttribute("viewBox", `${minX} ${minY} ${viewWidth} ${viewHeight}`);
+  svgEl.setAttribute("preserveAspectRatio", "none");
 }
 
 function zoomIn() {
-  const newZoom = Math.min(zoom.value * 1.25, 5);
+  const newZoom = Math.min(zoom.value * 1.25, 8);
   updateZoomCentered(newZoom);
 }
 
 function zoomOut() {
-  const newZoom = Math.max(zoom.value * 0.8, 0.1);
+  const newZoom = Math.max(zoom.value * 0.8, 0.08);
   updateZoomCentered(newZoom);
 }
 
@@ -97,7 +114,7 @@ function resetZoom() {
 function updateZoomCentered(newZoom: number) {
   if (!viewportEl.value) {
     zoom.value = newZoom;
-    applyTransform();
+    applyViewBox();
     return;
   }
   const rect = viewportEl.value.getBoundingClientRect();
@@ -111,7 +128,7 @@ function updateZoomCentered(newZoom: number) {
 
   pan.value = clampPan(targetPan, newZoom);
   zoom.value = newZoom;
-  applyTransform();
+  applyViewBox();
 }
 
 function centerDiagram(targetZoom: number) {
@@ -126,7 +143,7 @@ function centerDiagram(targetZoom: number) {
   };
 
   pan.value = clampPan(targetPan, targetZoom);
-  applyTransform();
+  applyViewBox();
 }
 
 function fitToScreen() {
@@ -135,7 +152,7 @@ function fitToScreen() {
   if (viewportRect.width <= 0 || viewportRect.height <= 0) {
     zoom.value = 1;
     pan.value = { x: 24, y: 24 };
-    applyTransform();
+    applyViewBox();
     return;
   }
 
@@ -153,7 +170,7 @@ function fitToScreen() {
   const scaleY = availableHeight / rawHeight;
   const fitScale = Math.min(scaleX, scaleY, 1.2);
 
-  const finalZoom = Math.max(fitScale, 0.1);
+  const finalZoom = Math.max(fitScale, 0.08);
   const renderedWidth = rawWidth * finalZoom;
   const renderedHeight = rawHeight * finalZoom;
 
@@ -162,12 +179,12 @@ function fitToScreen() {
 
   zoom.value = finalZoom;
   pan.value = clampPan({ x: startX, y: startY }, finalZoom);
-  applyTransform();
+  applyViewBox();
 }
 
 function onWheel(event: WheelEvent) {
-  const delta = event.deltaY < 0 ? 1.15 : 0.87;
-  const newZoom = Math.min(Math.max(zoom.value * delta, 0.1), 5);
+  const delta = event.deltaY < 0 ? 1.18 : 0.85;
+  const newZoom = Math.min(Math.max(zoom.value * delta, 0.08), 8);
 
   if (viewportEl.value) {
     const rect = viewportEl.value.getBoundingClientRect();
@@ -182,7 +199,7 @@ function onWheel(event: WheelEvent) {
     pan.value = clampPan(targetPan, newZoom);
   }
   zoom.value = newZoom;
-  applyTransform();
+  applyViewBox();
 }
 
 function onMouseDown(event: MouseEvent) {
@@ -204,7 +221,7 @@ function onMouseMove(event: MouseEvent) {
     y: event.clientY - dragStart.value.y
   };
   pan.value = clampPan(targetPan, zoom.value);
-  applyTransform();
+  applyViewBox();
 }
 
 function onMouseUp() {
@@ -231,35 +248,17 @@ function prepareSvg() {
   }
   diagramBaseSize.value = { width: vbWidth, height: vbHeight };
 
-  // 使得 SVG 画布充满视口，通过内部矢量 <g> 属性接管平移缩放
+  // SVG 铺满视口容器，样式开启高精度几何与文字渲染
+  svgEl.removeAttribute("width");
+  svgEl.removeAttribute("height");
   svgEl.style.width = "100%";
   svgEl.style.height = "100%";
   svgEl.style.maxWidth = "none";
   svgEl.style.maxHeight = "none";
-  svgEl.style.overflow = "hidden";
   svgEl.style.display = "block";
+  svgEl.style.overflow = "hidden";
   svgEl.style.shapeRendering = "geometricPrecision";
   svgEl.style.textRendering = "geometricPrecision";
-
-  // 将全部图形子节点装入矢量视口图层 <g class="ta-mermaid-viewport-layer">
-  let contentG = svgEl.querySelector("g.ta-mermaid-viewport-layer") as SVGGElement | null;
-  if (!contentG) {
-    contentG = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    contentG.classList.add("ta-mermaid-viewport-layer");
-    const childrenToMove: Node[] = [];
-    for (let i = 0; i < svgEl.childNodes.length; i++) {
-      const child = svgEl.childNodes[i];
-      if (
-        child.nodeType === Node.ELEMENT_NODE &&
-        (child.nodeName.toLowerCase() === "defs" || child.nodeName.toLowerCase() === "style")
-      ) {
-        continue;
-      }
-      childrenToMove.push(child);
-    }
-    childrenToMove.forEach((child) => contentG!.appendChild(child));
-    svgEl.appendChild(contentG);
-  }
 
   fitToScreen();
 }
