@@ -975,8 +975,9 @@ start_backend() {
   if command -v screen >/dev/null 2>&1; then
     local backend_cmd proxy_args
     printf -v proxy_args '%q ' "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}"
-    printf -v backend_cmd 'cd %q && exec java %s-jar %q --spring.profiles.active=%q >>%q 2>&1' \
-      "${BACKEND_DIR}" "${proxy_args}" "${BACKEND_RUNTIME_JAR}" "${profile}" "${LOG_DIR}/backend.log"
+    export -p > "${LOG_DIR}/backend-env.sh"
+    printf -v backend_cmd 'cd %q && source %q && exec java %s-jar %q --spring.profiles.active=%q >>%q 2>&1' \
+      "${BACKEND_DIR}" "${LOG_DIR}/backend-env.sh" "${proxy_args}" "${BACKEND_RUNTIME_JAR}" "${profile}" "${LOG_DIR}/backend.log"
     screen -dmS "${BACKEND_SCREEN_SESSION}" bash -lc "${backend_cmd}"
   else
     (

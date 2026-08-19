@@ -31,6 +31,17 @@
 - Controller、Redis key、MyBatis mapper、供应商配置 UI 或 LobeHub fork Session/Workspace 逻辑。
 - 保存 prompt、回答、UCID、原始错误、逐请求 trace 或配额状态。
 
+## 已知风险：上游鉴权模式尚未显式建模
+
+当前 Provider 目录只保存 Token 关联，没有 `authMode`；Java 模型网关按企业模型既有契约统一使用
+`Auth-Token`，以保证企业上游同时识别 UCID。内部 CPU BGE 为接入同一目录同时兼容运维 Bearer 与平台
+`Auth-Token`，但这不代表所有 OpenAI-compatible Provider 都支持 `Auth-Token`：后续接入只接受
+`Authorization: Bearer` 的第三方服务时，探测和正式调用都可能失败。
+
+短期不得根据 Provider ID、模型 ID 或 Base URL 在 Java 中写死 Bearer 特判。长期演进应在 Provider 配置中
+显式增加 `AUTH_TOKEN/BEARER` 等受控鉴权模式，由现有 `OpenAiUpstreamSupport` 与
+`ModelGatewayForwardingService` 统一选择上游请求头，并补齐数据库/API/管理页面兼容升级与密钥脱敏测试。
+
 违反 HTTP 协议边界时改 `test-agent-api`；目录管理用例改 `test-agent-configuration-management`；关系型或 Redis
 实现改 `test-agent-persistence`；fork 的企业适配器改独立 LobeHub 仓库。
 

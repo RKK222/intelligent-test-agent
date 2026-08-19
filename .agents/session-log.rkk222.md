@@ -5,7 +5,28 @@
 
 ## Entries
 
-### 2026-08-19 - 修复自动化版本库目录树加载超时、目录引用创建与版本库卡片拉取弹窗交互
+### 2026-08-19 - 修复 macOS screen 会话丢失环境变量与旧服务器进程绑定清理
+
+### Why
+
+- `restart-dev-services.sh` 启动后端 `screen` 会话时，`bash -lc` 登录 shell 会丢弃当前 shell 中的环境变量，导致 PostgreSQL 数据库配置解析为空字符串，Druid 启动失败；此外缺少 ClickHouse 动态密码注入导致服务反复崩溃。
+- 用户前端登录 `usr_test_dev` 时，小宠物提示“TestAgent 进程不可用（172.20.10.2）”，点击重启提示“TestAgent 进程停止前无法确认当前实例”，原因为数据库中保留了此前热点/历史网络（`172.20.10.2`）上的孤儿进程绑定，而当前 manager 已在新 serverId（`kakadeMacBook-Pro.local`）上注册。
+
+### What
+
+- 修改 `restart-dev-services.sh`，在拉起 `screen` 前将当前 shell 的全量环境变量导出为快照文件 `${LOG_DIR}/backend-env.sh`，在 `screen` 内执行 `source` 后再启动 Java 进程，确保所有配置与动态生成的密码完整透传。
+- 清理本地数据库中 `usr_test_dev` 在旧 `172.20.10.2` 服务器上的孤儿 `user_opencode_process_bindings`、`opencode_server_processes` 及历史失败操作记录，使前端能正常探测到当前本机的候选容器并重新进入初始化流程。
+
+### How
+
+- 使用 `export -p > "${LOG_DIR}/backend-env.sh"` 替代子 shell 零散 export，保持与启动脚本一致的环境上下文。
+- 执行精准 SQL 清理 `usr_test_dev` 的陈旧绑定，不影响其他测试用户数据。
+
+### Result
+
+- 后端 Java 进程成功加载 `.env.test` 与 ClickHouse 环境变量，Flyway 109 项迁移全部校验通过，后端在 8080 端口健康启动。
+- `usr_test_dev` 的旧绑定已清除，刷新页面后小宠物状态将切换为“需要初始化 TestAgent 进程”，点击“初始化进程”即可在当前主机容器上正常分配并拉起 OpenCode。
+
 
 ### Why
 
