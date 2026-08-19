@@ -202,11 +202,6 @@ async function exportCsv() {
   URL.revokeObjectURL(url);
 }
 
-function funnelWidth(value: number | undefined) {
-  const total = Math.max(funnel.value?.totalUsers ?? 0, 1);
-  return `${Math.max(34, ((value ?? 0) / total) * 100)}%`;
-}
-
 function heatmapColor(value: number) {
   if (value === 0) return "#f1f3f6";
   const alpha = 0.18 + Math.min(0.82, value / maxHeatmap.value * 0.82);
@@ -300,9 +295,9 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
         <section class="ta-panel ta-funnel-panel">
           <div class="ta-panel-heading"><h3>用户使用漏斗</h3><span>{{ formatRate(funnel?.deepRate) }} 活跃转深度</span></div>
           <div class="ta-funnel">
-            <div class="ta-funnel-stage total" :style="{ width: funnelWidth(funnel?.totalUsers) }"><span>总用户数</span><strong>{{ funnel?.totalUsers ?? 0 }}</strong></div>
-            <div class="ta-funnel-stage active" :style="{ width: funnelWidth(funnel?.activeUsers) }"><span>活跃用户数</span><strong>{{ funnel?.activeUsers ?? 0 }}</strong></div>
-            <div class="ta-funnel-stage deep" :style="{ width: funnelWidth(funnel?.deepUsers) }"><span>深度用户数</span><strong>{{ funnel?.deepUsers ?? 0 }}</strong></div>
+            <div class="ta-funnel-stage total"><span>总用户数</span><strong>{{ funnel?.totalUsers ?? 0 }}</strong></div>
+            <div class="ta-funnel-stage active"><span>活跃用户数</span><strong>{{ funnel?.activeUsers ?? 0 }}</strong></div>
+            <div class="ta-funnel-stage deep"><span>深度用户数</span><strong>{{ funnel?.deepUsers ?? 0 }}</strong></div>
           </div>
           <div class="ta-definitions"><p>{{ funnel?.activeDefinition }}</p><p>{{ funnel?.deepDefinition }}</p></div>
         </section>
@@ -398,9 +393,11 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
 .ta-panel-heading { justify-content:space-between; gap:12px; margin-bottom:10px; }
 .ta-panel-heading h3 { margin:0; }
 .ta-panel-heading span { color:#737e8e; font-size:12px; }
-.ta-funnel { display:flex; flex-direction:column; align-items:center; gap:5px; min-height:168px; justify-content:center; }
-.ta-funnel-stage { display:flex; align-items:center; justify-content:space-between; min-width:46%; height:45px; box-sizing:border-box; gap:8px; padding:0 12px; border-radius:4px; color:#fff; transition:width .2s ease; }
-.ta-funnel-stage.total { background:#44546a; }.ta-funnel-stage.active { background:#227c78; }.ta-funnel-stage.deep { background:#bd1f31; }
+.ta-funnel { display:flex; flex-direction:column; align-items:center; gap:6px; min-height:168px; justify-content:center; }
+.ta-funnel-stage { display:flex; align-items:center; justify-content:space-between; height:45px; box-sizing:border-box; gap:8px; padding:0 22px; color:#fff; }
+.ta-funnel-stage.total { width:92%; background:#44546a; clip-path:polygon(0 0, 100% 0, 93% 100%, 7% 100%); border-radius:4px 4px 0 0; }
+.ta-funnel-stage.active { width:74%; background:#227c78; clip-path:polygon(0 0, 100% 0, 91% 100%, 9% 100%); }
+.ta-funnel-stage.deep { width:56%; background:#bd1f31; clip-path:polygon(0 0, 100% 0, 88% 100%, 12% 100%); border-radius:0 0 4px 4px; }
 .ta-funnel-stage span { min-width:0; font-size:12px; line-height:1.2; }.ta-funnel-stage strong { flex-shrink:0; font-size:18px; }
 .ta-definitions { padding-top:8px; border-top:1px solid #edf0f3; color:#687386; font-size:11px; }.ta-definitions p { margin:4px 0; }
 .ta-empty { padding:28px; color:#98a1ae; text-align:center; }

@@ -229,6 +229,11 @@ describe("analytics management panel", () => {
     expect(await view.findByText(/可能延迟/)).toBeTruthy();
     expect(await view.findByText("用户使用漏斗")).toBeTruthy();
     expect(await view.findByText(funnel.activeDefinition)).toBeTruthy();
+    const funnelStages = view.container.querySelectorAll(".ta-funnel-stage");
+    expect(funnelStages).toHaveLength(3);
+    expect((funnelStages[0] as HTMLElement).style.width).toBe("");
+    expect((funnelStages[1] as HTMLElement).style.width).toBe("");
+    expect((funnelStages[2] as HTMLElement).style.width).toBe("");
     expect((await view.findAllByText("主 Token 使用量")).length).toBeGreaterThanOrEqual(1);
     expect(await view.findByText("小时热力")).toBeTruthy();
     expect(await view.findByText("2 天 × 24 小时")).toBeTruthy();

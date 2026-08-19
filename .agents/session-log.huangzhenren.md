@@ -2494,3 +2494,21 @@
 - Result:
   - 小时热力图方块高度固定 10px，宽度根据页面自适应横向铺满容器。
   - 前端 Vitest 单元测试 6/6 通过，Vue TypeScript 检查通过。
+
+## 2026-08-19 运营分析用户使用漏斗改为圆锥形且宽度与用户数解耦
+
+- Why:
+  - 运营分析总览中的用户使用漏斗原先采用基于用户数计算的动态百分比宽度，在不同数值下漏斗形状不规则。需要调整为标准的圆锥形漏斗外观，每层宽度固定由层级决定，与用户数解耦。
+- What:
+  - `frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue`：
+    - 移除 `funnelWidth` 动态宽度计算函数及对应模板中的内联 `:style` 属性绑定。
+    - 更新 CSS 样式：总用户数（92%）、活跃用户数（74%）、深度用户数（56%）采用固定递减宽度与斜切效果（`clip-path: polygon(...)`），形成居中圆锥形漏斗。
+  - `frontend/apps/agent-web/tests/analytics-management-panel.test.ts`：
+    - 补充漏斗层级元素及独立宽度样式的测试断言。
+- How:
+  - 在 `.ta-funnel-stage` 设置固定 padding 并为 `.total`、`.active`、`.deep` 分别配置阶梯宽度与 `clip-path` 倒梯形几何多边形裁剪，各层文字居中两端分布。
+- Result:
+  - 用户使用漏斗呈现标准圆锥形/倒梯形几何结构，宽度不再受用户数波动影响。
+  - 前端 Vitest 单元测试 6/6 通过，Vue TypeScript 检查通过。
+
+
