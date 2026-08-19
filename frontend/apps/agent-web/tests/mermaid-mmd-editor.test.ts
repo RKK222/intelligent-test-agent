@@ -178,7 +178,7 @@ describe("Mermaid MMD Editor Integration", () => {
 
     const zoomInBtn = toolbar.find('[aria-label="放大"]');
     const zoomOutBtn = toolbar.find('[aria-label="缩小"]');
-    const resetBtn = toolbar.find('[aria-label="重置"]');
+    const resetBtn = toolbar.find('[aria-label="复原"]');
     const fitBtn = toolbar.find('[aria-label="适应画布"]');
 
     expect(zoomInBtn.exists()).toBe(true);

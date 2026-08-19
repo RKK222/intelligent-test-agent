@@ -30,155 +30,143 @@ const pan = ref({ x: 0, y: 0 });
 const isDragging = ref(false);
 const dragStart = ref({ x: 0, y: 0 });
 
-const diagramOrigin = ref({ x: 0, y: 0 });
-const diagramSize = ref({ width: 800, height: 600 });
-
 let renderSequence = 0;
 
-function clampPan(targetPan: { x: number; y: number }, currentZoom: number) {
-  if (!viewportEl.value) return targetPan;
-  const rect = viewportEl.value.getBoundingClientRect();
-  const vWidth = rect.width || 1000;
-  const vHeight = rect.height || 600;
+function getSvgNaturalSize(): { width: number; height: number } {
+  if (!svgHostEl.value) return { width: 800, height: 600 };
+  const svgEl = svgHostEl.value.querySelector("svg");
+  if (!svgEl) return { width: 800, height: 600 };
 
-  const renderedW = diagramSize.value.width * currentZoom;
-  const renderedH = diagramSize.value.height * currentZoom;
-
-  const margin = 100;
-  const minPanX = Math.min(-(renderedW - margin), (vWidth - renderedW) / 2);
-  const maxPanX = Math.max(vWidth - margin, (vWidth - renderedW) / 2);
-  const minPanY = Math.min(-(renderedH - margin), (vHeight - renderedH) / 2);
-  const maxPanY = Math.max(vHeight - margin, (vHeight - renderedH) / 2);
-
-  return {
-    x: Math.min(Math.max(targetPan.x, minPanX), maxPanX),
-    y: Math.min(Math.max(targetPan.y, minPanY), maxPanY)
-  };
-}
-
-function applyTransform() {
-  if (!svgHostEl.value) return;
-  const contentG = svgHostEl.value.querySelector("g.ta-mermaid-viewport-layer") as SVGGElement | null;
-  if (contentG) {
-    const ox = diagramOrigin.value.x;
-    const oy = diagramOrigin.value.y;
-    contentG.setAttribute(
-      "transform",
-      `translate(${pan.value.x}, ${pan.value.y}) scale(${zoom.value}) translate(${-ox}, ${-oy})`
-    );
+  const viewBoxAttr = svgEl.getAttribute("viewBox");
+  if (viewBoxAttr) {
+    const parts = viewBoxAttr.trim().split(/[\s,]+/).map(Number);
+    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+      return { width: parts[2], height: parts[3] };
+    }
   }
+
+  const widthAttr = parseFloat(svgEl.getAttribute("width") || "0");
+  const heightAttr = parseFloat(svgEl.getAttribute("height") || "0");
+  if (widthAttr > 0 && heightAttr > 0) {
+    return { width: widthAttr, height: heightAttr };
+  }
+
+  const clientRect = svgEl.getBoundingClientRect();
+  if (clientRect.width > 0 && clientRect.height > 0) {
+    return { width: clientRect.width, height: clientRect.height };
+  }
+
+  return { width: 800, height: 600 };
 }
 
-function zoomIn() {
-  const newZoom = Math.min(zoom.value * 1.25, 8);
-  updateZoomCentered(newZoom);
-}
-
-function zoomOut() {
-  const newZoom = Math.max(zoom.value * 0.8, 0.05);
-  updateZoomCentered(newZoom);
-}
-
-function resetZoom() {
-  zoom.value = 1;
-  centerDiagram(1);
-}
-
-function updateZoomCentered(newZoom: number) {
+/**
+ * 还原到 100% 原始比例并居中显示
+ */
+function resetTo100Center() {
   if (!viewportEl.value) {
-    zoom.value = newZoom;
-    applyTransform();
-    return;
-  }
-  const rect = viewportEl.value.getBoundingClientRect();
-  const centerX = rect.width / 2;
-  const centerY = rect.height / 2;
-
-  const targetPan = {
-    x: centerX - (centerX - pan.value.x) * (newZoom / zoom.value),
-    y: centerY - (centerY - pan.value.y) * (newZoom / zoom.value)
-  };
-
-  pan.value = clampPan(targetPan, newZoom);
-  zoom.value = newZoom;
-  applyTransform();
-}
-
-function centerDiagram(targetZoom: number) {
-  if (!viewportEl.value) return;
-  const viewportRect = viewportEl.value.getBoundingClientRect();
-  const vWidth = viewportRect.width || 1000;
-  const vHeight = viewportRect.height || 600;
-
-  const renderedWidth = diagramSize.value.width * targetZoom;
-  const renderedHeight = diagramSize.value.height * targetZoom;
-
-  const targetPan = {
-    x: (vWidth - renderedWidth) / 2,
-    y: Math.max((vHeight - renderedHeight) / 2, 36)
-  };
-
-  pan.value = clampPan(targetPan, targetZoom);
-  applyTransform();
-}
-
-function fitToScreen() {
-  if (!viewportEl.value) return;
-  const viewportRect = viewportEl.value.getBoundingClientRect();
-  const vWidth = viewportRect.width || 1000;
-  const vHeight = viewportRect.height || 600;
-
-  if (vWidth <= 0 || vHeight <= 0) {
     zoom.value = 1;
-    pan.value = { x: 24, y: 24 };
-    applyTransform();
+    pan.value = { x: 36, y: 36 };
     return;
   }
+  const naturalSize = getSvgNaturalSize();
+  const vWidth = viewportEl.value.clientWidth || 1000;
+  const vHeight = viewportEl.value.clientHeight || 600;
 
-  const rawWidth = diagramSize.value.width || 800;
-  const rawHeight = diagramSize.value.height || 600;
+  zoom.value = 1;
+  pan.value = {
+    x: (vWidth - naturalSize.width) / 2,
+    y: Math.max((vHeight - naturalSize.height) / 2, 36)
+  };
+}
+
+/**
+ * 适应画布：根据视口大小按最佳比例完整居中显示
+ */
+function fitToScreen() {
+  if (!viewportEl.value) {
+    resetTo100Center();
+    return;
+  }
+  const naturalSize = getSvgNaturalSize();
+  const vWidth = viewportEl.value.clientWidth || 1000;
+  const vHeight = viewportEl.value.clientHeight || 600;
+
+  if (vWidth <= 0 || vHeight <= 0 || naturalSize.width <= 0 || naturalSize.height <= 0) {
+    resetTo100Center();
+    return;
+  }
 
   const paddingX = 48;
   const paddingTop = 36;
   const paddingBottom = 48;
 
-  const availableWidth = Math.max(vWidth - paddingX * 2, 100);
-  const availableHeight = Math.max(vHeight - paddingTop - paddingBottom, 100);
+  const availW = Math.max(vWidth - paddingX * 2, 100);
+  const availH = Math.max(vHeight - paddingTop - paddingBottom, 100);
 
-  const scaleX = availableWidth / rawWidth;
-  const scaleY = availableHeight / rawHeight;
-  const fitScale = Math.min(scaleX, scaleY, 1.2);
+  const scaleX = availW / naturalSize.width;
+  const scaleY = availH / naturalSize.height;
+  const fitZoom = Math.min(scaleX, scaleY, 1.2); // 最大不超过 120%
 
-  const finalZoom = Math.max(fitScale, 0.05);
-  const renderedWidth = rawWidth * finalZoom;
-  const renderedHeight = rawHeight * finalZoom;
+  zoom.value = Math.max(fitZoom, 0.05);
 
-  const startX = Math.max((vWidth - renderedWidth) / 2, paddingX);
-  const startY = Math.max((vHeight - renderedHeight) / 2, paddingTop);
+  const renderedW = naturalSize.width * zoom.value;
+  const renderedH = naturalSize.height * zoom.value;
 
-  zoom.value = finalZoom;
-  pan.value = clampPan({ x: startX, y: startY }, finalZoom);
-  applyTransform();
+  pan.value = {
+    x: (vWidth - renderedW) / 2,
+    y: Math.max((vHeight - renderedH) / 2, paddingTop)
+  };
+}
+
+function zoomIn() {
+  if (!viewportEl.value) {
+    zoom.value = Math.min(zoom.value * 1.25, 8);
+    return;
+  }
+  const rect = viewportEl.value.getBoundingClientRect();
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  const newZoom = Math.min(zoom.value * 1.25, 8);
+
+  pan.value = {
+    x: centerX - (centerX - pan.value.x) * (newZoom / zoom.value),
+    y: centerY - (centerY - pan.value.y) * (newZoom / zoom.value)
+  };
+  zoom.value = newZoom;
+}
+
+function zoomOut() {
+  if (!viewportEl.value) {
+    zoom.value = Math.max(zoom.value * 0.8, 0.05);
+    return;
+  }
+  const rect = viewportEl.value.getBoundingClientRect();
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  const newZoom = Math.max(zoom.value * 0.8, 0.05);
+
+  pan.value = {
+    x: centerX - (centerX - pan.value.x) * (newZoom / zoom.value),
+    y: centerY - (centerY - pan.value.y) * (newZoom / zoom.value)
+  };
+  zoom.value = newZoom;
 }
 
 function onWheel(event: WheelEvent) {
+  if (!viewportEl.value) return;
+
+  const rect = viewportEl.value.getBoundingClientRect();
+  const mouseX = event.clientX - rect.left;
+  const mouseY = event.clientY - rect.top;
+
   const delta = event.deltaY < 0 ? 1.15 : 0.87;
   const newZoom = Math.min(Math.max(zoom.value * delta, 0.05), 8);
 
-  if (viewportEl.value) {
-    const rect = viewportEl.value.getBoundingClientRect();
-    const mouseX = event.clientX - rect.left;
-    const mouseY = event.clientY - rect.top;
-
-    const targetPan = {
-      x: mouseX - (mouseX - pan.value.x) * (newZoom / zoom.value),
-      y: mouseY - (mouseY - pan.value.y) * (newZoom / zoom.value)
-    };
-
-    pan.value = clampPan(targetPan, newZoom);
-  }
+  pan.value = {
+    x: mouseX - (mouseX - pan.value.x) * (newZoom / zoom.value),
+    y: mouseY - (mouseY - pan.value.y) * (newZoom / zoom.value)
+  };
   zoom.value = newZoom;
-  applyTransform();
 }
 
 function onMouseDown(event: MouseEvent) {
@@ -195,80 +183,28 @@ function onMouseDown(event: MouseEvent) {
 
 function onMouseMove(event: MouseEvent) {
   if (!isDragging.value) return;
-  const targetPan = {
+  pan.value = {
     x: event.clientX - dragStart.value.x,
     y: event.clientY - dragStart.value.y
   };
-  pan.value = clampPan(targetPan, zoom.value);
-  applyTransform();
 }
 
 function onMouseUp() {
   isDragging.value = false;
 }
 
-function prepareSvg() {
+function normalizeSvgElement() {
   if (!svgHostEl.value) return;
   const svgEl = svgHostEl.value.querySelector("svg");
   if (!svgEl) return;
 
-  // 1. 读取 Mermaid 原生 viewBox（包含原点 minX, minY 和宽高 width, height）
-  const viewBoxAttr = svgEl.getAttribute("viewBox");
-  let origMinX = 0;
-  let origMinY = 0;
-  let origW = 800;
-  let origH = 600;
-
-  if (viewBoxAttr) {
-    const parts = viewBoxAttr.trim().split(/[\s,]+/).map(Number);
-    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-      origMinX = parts[0];
-      origMinY = parts[1];
-      origW = parts[2];
-      origH = parts[3];
-    }
-  } else {
-    origW = parseFloat(svgEl.getAttribute("width") || "800") || 800;
-    origH = parseFloat(svgEl.getAttribute("height") || "600") || 600;
-  }
-
-  diagramOrigin.value = { x: origMinX, y: origMinY };
-  diagramSize.value = { width: origW, height: origH };
-
-  // 2. 移除 SVG 自身的 viewBox 限制，使 SVG 100% 充满视口（1 SVG 坐标 = 1 屏幕像素）
-  svgEl.removeAttribute("viewBox");
-  svgEl.removeAttribute("width");
-  svgEl.removeAttribute("height");
-  svgEl.style.width = "100%";
-  svgEl.style.height = "100%";
+  const naturalSize = getSvgNaturalSize();
   svgEl.style.maxWidth = "none";
-  svgEl.style.maxHeight = "none";
+  svgEl.style.width = `${naturalSize.width}px`;
+  svgEl.style.height = `${naturalSize.height}px`;
   svgEl.style.display = "block";
-  svgEl.style.overflow = "hidden";
   svgEl.style.shapeRendering = "geometricPrecision";
   svgEl.style.textRendering = "geometricPrecision";
-
-  // 3. 将除 <defs> 和 <style> 以外的图形节点封装到矢量图层 <g class="ta-mermaid-viewport-layer">
-  let contentG = svgEl.querySelector("g.ta-mermaid-viewport-layer") as SVGGElement | null;
-  if (!contentG) {
-    contentG = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    contentG.classList.add("ta-mermaid-viewport-layer");
-    const childrenToMove: Node[] = [];
-    for (let i = 0; i < svgEl.childNodes.length; i++) {
-      const child = svgEl.childNodes[i];
-      if (
-        child.nodeType === Node.ELEMENT_NODE &&
-        (child.nodeName.toLowerCase() === "defs" || child.nodeName.toLowerCase() === "style")
-      ) {
-        continue;
-      }
-      childrenToMove.push(child);
-    }
-    childrenToMove.forEach((child) => contentG!.appendChild(child));
-    svgEl.appendChild(contentG);
-  }
-
-  fitToScreen();
 }
 
 async function renderDiagram(source: string) {
@@ -292,7 +228,8 @@ async function renderDiagram(source: string) {
       svgContent.value = svg;
       renderError.value = null;
       await nextTick();
-      prepareSvg();
+      normalizeSvgElement();
+      fitToScreen();
     }
   } catch (err) {
     const badDiv = document.getElementById(`d${renderId}`);
@@ -349,7 +286,7 @@ onBeforeUnmount(() => {
         <header class="ta-mermaid-preview-header">
           <div class="ta-mermaid-preview-header-left">
             <h2 id="ta-mermaid-preview-title">{{ title }}</h2>
-            <p>Mermaid 矢量渲染预览（支持鼠标滚轮缩放与拖拽平移）</p>
+            <p>Mermaid 图表渲染预览（支持滚轮缩放与鼠标拖拽平移）</p>
           </div>
           <button
             type="button"
@@ -379,9 +316,17 @@ onBeforeUnmount(() => {
             @mousedown="onMouseDown"
             @dblclick="fitToScreen"
           >
-            <div ref="svgHostEl" class="ta-mermaid-preview-svg-host" v-html="svgContent" />
+            <div
+              class="ta-mermaid-preview-canvas"
+              :style="{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: '0 0'
+              }"
+            >
+              <div ref="svgHostEl" class="ta-mermaid-preview-svg" v-html="svgContent" />
+            </div>
 
-            <!-- 浮动缩放控制栏 -->
+            <!-- 浮动缩放与复原控制栏 -->
             <div class="ta-mermaid-preview-toolbar">
               <button
                 type="button"
@@ -392,14 +337,9 @@ onBeforeUnmount(() => {
               >
                 <ZoomOut :size="14" />
               </button>
-              <button
-                type="button"
-                class="ta-mermaid-toolbar-zoom-label"
-                title="点击重置 100%"
-                @click.stop="resetZoom"
-              >
+              <span class="ta-mermaid-toolbar-zoom-label">
                 {{ Math.round(zoom * 100) }}%
-              </button>
+              </span>
               <button
                 type="button"
                 class="ta-mermaid-toolbar-btn"
@@ -412,21 +352,23 @@ onBeforeUnmount(() => {
               <span class="ta-mermaid-toolbar-divider"></span>
               <button
                 type="button"
-                class="ta-mermaid-toolbar-btn"
+                class="ta-mermaid-toolbar-btn ta-mermaid-toolbar-btn-text"
                 title="适应画布 (双击背景)"
                 aria-label="适应画布"
                 @click.stop="fitToScreen"
               >
-                <Maximize2 :size="14" />
+                <Maximize2 :size="13" />
+                <span>适应</span>
               </button>
               <button
                 type="button"
-                class="ta-mermaid-toolbar-btn"
-                title="重置比例 (100%)"
-                aria-label="重置"
-                @click.stop="resetZoom"
+                class="ta-mermaid-toolbar-btn ta-mermaid-toolbar-btn-text ta-mermaid-toolbar-btn-reset"
+                title="还原到 100% 比例并居中"
+                aria-label="复原"
+                @click.stop="resetTo100Center"
               >
-                <RotateCcw :size="14" />
+                <RotateCcw :size="13" />
+                <span>复原 (100%)</span>
               </button>
             </div>
           </div>
@@ -551,18 +493,22 @@ onBeforeUnmount(() => {
   cursor: grabbing;
 }
 
-.ta-mermaid-preview-svg-host {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  display: block;
+.ta-mermaid-preview-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  user-select: none;
+  pointer-events: none;
 }
 
-.ta-mermaid-preview-svg-host :deep(svg) {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
+.ta-mermaid-preview-svg {
+  display: inline-block;
+}
+
+.ta-mermaid-preview-svg :deep(svg) {
   display: block;
+  max-width: none !important;
+  height: auto;
   shape-rendering: geometricPrecision;
   text-rendering: geometricPrecision;
 }
@@ -587,8 +533,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
   height: 26px;
+  padding: 0 6px;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -602,23 +548,32 @@ onBeforeUnmount(() => {
   color: #0f172a;
 }
 
-.ta-mermaid-toolbar-zoom-label {
-  display: inline-block;
-  min-width: 44px;
-  text-align: center;
+.ta-mermaid-toolbar-btn-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   font-weight: 500;
-  color: #475569;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
+  padding: 0 8px;
 }
 
-.ta-mermaid-toolbar-zoom-label:hover {
-  background: #f1f5f9;
-  color: #0f172a;
+.ta-mermaid-toolbar-btn-reset {
+  color: #4f46e5;
+}
+
+.ta-mermaid-toolbar-btn-reset:hover {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.ta-mermaid-toolbar-zoom-label {
+  display: inline-block;
+  min-width: 42px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  padding: 2px 4px;
 }
 
 .ta-mermaid-toolbar-divider {
