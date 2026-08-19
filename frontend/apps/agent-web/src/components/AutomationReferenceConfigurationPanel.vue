@@ -390,18 +390,28 @@ async function selectRepository(repository: AutomationRepository, autoSync = fal
   }
   versionDate.value = todayVersion();
 
-  if (props.canManage) {
-    await loadBranches(repository.repositoryId, repository.branch || existing?.branch || "main");
-  }
-
+  // 参照应用资产库：点击的瞬间立即弹出同步进度框，不等分支/树加载完
   if (autoSync && props.canManage && existing) {
     const versionList = versionsByTemplate.value[existing.workspaceId] ?? [];
     const targetVersion = (existing.activeVersion
       ? versionList.find((v) => v.versionId === existing.activeVersion?.versionId) || existing.activeVersion
       : versionList[0]) as ApplicationWorkspaceVersion | null;
     if (targetVersion) {
+      // 立即设置 synchronizationRequest，弹框立刻出现（同步设置，不 await）
+      synchronizationRequest.value = {
+        template: existing,
+        version: targetVersion,
+        requestState: "REQUESTING",
+        error: null,
+        pollingError: null
+      };
+      // 后台并行：分支/树加载与实际同步请求互不阻塞
       void synchronizeVersion(existing, targetVersion);
     }
+  }
+
+  if (props.canManage) {
+    void loadBranches(repository.repositoryId, repository.branch || existing?.branch || "main");
   }
 }
 
