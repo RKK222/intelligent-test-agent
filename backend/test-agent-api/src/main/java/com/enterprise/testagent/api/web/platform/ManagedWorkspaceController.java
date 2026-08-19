@@ -26,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -100,6 +101,21 @@ public class ManagedWorkspaceController {
                 userId(exchange),
                 agentLinuxServerId(exchange),
                 RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /** 应用管理员显式激活自动化代码库配置的只读版本。 */
+    @PutMapping("/applications/{appId}/workspace-templates/{templateId}/active-version")
+    public ApiResponse<Object> activateAutomationVersion(
+            @PathVariable String appId,
+            @PathVariable String templateId,
+            @RequestBody ManagedWorkspaceDtos.ActivateAutomationVersionRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        return ok(exchange, service.activateAutomationVersion(
+                appId,
+                templateId,
+                request.versionId(),
+                principal.userId()));
     }
 
     @PostMapping("/workspace-versions/{versionId}/git-pull")

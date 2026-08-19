@@ -3647,10 +3647,10 @@ public class RunApplicationService {
     }
 
     private String systemPrompt(Run run, String prompt, boolean command, String traceId) {
-        if (command || runSystemPromptContributors.isEmpty()) {
+        if (runSystemPromptContributors.isEmpty()) {
             return null;
         }
-        AgentRunPromptContext context = new AgentRunPromptContext(run, prompt, false, traceId);
+        AgentRunPromptContext context = new AgentRunPromptContext(run, prompt, command, traceId);
         List<String> additions = new ArrayList<>();
         for (AgentRunSystemPromptContributor contributor : runSystemPromptContributors) {
             try {

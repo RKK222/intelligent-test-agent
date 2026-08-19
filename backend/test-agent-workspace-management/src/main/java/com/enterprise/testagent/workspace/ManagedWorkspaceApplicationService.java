@@ -19,6 +19,7 @@ import com.enterprise.testagent.domain.configuration.ApplicationWorkspace;
 import com.enterprise.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.AgentConfigOperationStatus;
@@ -37,6 +38,8 @@ import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVers
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplicaId;
+import com.enterprise.testagent.domain.managedworkspace.AutomationWorkspaceActiveVersion;
+import com.enterprise.testagent.domain.managedworkspace.AutomationWorkspaceActiveVersionRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
@@ -175,6 +178,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private AgentSkillHubPushIndexer agentSkillHubPushIndexer;
     private ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
     private ScmGitIdentityResolver scmGitIdentityResolver;
+    private AutomationWorkspaceActiveVersionRepository automationActiveVersionRepository;
 
     /**
      * 可选注入运行上下文端口；测试构造器无需感知 Redis，实现仍保持模块只依赖 domain。
@@ -206,6 +210,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     @Autowired(required = false)
     void setScmGitIdentityResolver(ScmGitIdentityResolver resolver) {
         this.scmGitIdentityResolver = resolver;
+    }
+
+    /** 自动化代码库激活状态独立持久化，保留历史测试构造器兼容。 */
+    @Autowired(required = false)
+    void setAutomationActiveVersionRepository(AutomationWorkspaceActiveVersionRepository repository) {
+        this.automationActiveVersionRepository = repository;
     }
 
     /**
@@ -453,17 +463,77 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .collect(Collectors.toMap(
                         repo -> repo.repositoryId().value(),
                         repo -> repo));
-        return configurationRepository.findWorkspaces(applicationId).stream()
+        List<ApplicationWorkspace> workspaces = configurationRepository.findWorkspaces(applicationId).stream()
                 // 停用只影响工作空间切换入口，不删除模板、版本或个人工作区数据。
                 .filter(ApplicationWorkspace::enabled)
+                .toList();
+        Map<String, AutomationWorkspaceActiveVersion> activeByWorkspace = automationActiveVersionRepository == null
+                ? Map.of()
+                : automationActiveVersionRepository.findByApplicationWorkspaceIds(
+                                workspaces.stream().map(ApplicationWorkspace::workspaceId).toList())
+                        .stream()
+                        .collect(Collectors.toMap(
+                                active -> active.applicationWorkspaceId().value(),
+                                active -> active));
+        return workspaces.stream()
                 .map(workspace -> {
                     CodeRepository repository = repositoryById.get(workspace.repositoryId().value());
                     return ManagedWorkspaceResponses.WorkspaceTemplateResponse.from(
                             workspace,
                             repository != null && repository.standard(),
-                            repository == null ? null : repository.repositoryType());
+                            repository == null ? null : repository.repositoryType(),
+                            activeVersionResponse(activeByWorkspace.get(workspace.workspaceId().value())));
                 })
                 .toList();
+    }
+
+    /** 应用管理员显式切换自动化代码库配置当前只读版本；重复激活同一版本保持原时间。 */
+    public ManagedWorkspaceResponses.AutomationActiveVersionResponse activateAutomationVersion(
+            String appId,
+            String templateId,
+            String versionId,
+            UserId userId) {
+        requireAutomationActiveVersionRepository();
+        ApplicationDefinition application = existingMemberApp(appId, userId, "activate-automation-version");
+        ApplicationWorkspace template = existingTemplate(new ApplicationWorkspaceId(templateId));
+        if (!template.appId().equals(application.appId())) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "自动化代码库配置不属于当前应用",
+                    Map.of("templateId", templateId));
+        }
+        requireAutomationRepository(existingRepository(template.repositoryId()));
+        ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
+        if (!version.applicationWorkspaceId().equals(template.workspaceId())
+                || !version.appId().equals(application.appId())
+                || !version.repositoryId().equals(template.repositoryId())) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "激活版本不属于当前自动化代码库配置",
+                    Map.of("versionId", versionId, "templateId", templateId));
+        }
+        if (version.status() != ManagedWorkspaceStatus.ACTIVE) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "自动化代码库版本当前不可用",
+                    Map.of("versionId", versionId));
+        }
+        Instant now = clock.instant();
+        AutomationWorkspaceActiveVersion current = automationActiveVersionRepository
+                .find(template.workspaceId())
+                .orElse(null);
+        if (current != null && current.versionId().equals(version.versionId())) {
+            return activeVersionResponse(current);
+        }
+        AutomationWorkspaceActiveVersion activated = automationActiveVersionRepository.activate(
+                new AutomationWorkspaceActiveVersion(
+                        template.workspaceId(),
+                        version.versionId(),
+                        userId,
+                        now,
+                        current == null ? now : current.createdAt(),
+                        now));
+        return activeVersionResponse(activated);
     }
 
     public List<ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse> listVersions(String templateId, UserId userId) {
@@ -967,7 +1037,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             LOGGER.info("Version already exists, templateId={}, version={}", template.workspaceId().value(), normalizedVersion);
             ApplicationWorkspaceVersion current = existing.get();
             ApplicationWorkspaceVersionReplica replica = ensureReplicaForTarget(current, template, userId, targetLinuxServerId, "EXISTING_VERSION", traceId);
-            if (markRecent) {
+            initializeAutomationVersionIfAbsent(repository, template, current, userId);
+            if (markRecent && !isAutomationRepository(repository)) {
                 markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
             }
             return versionResponse(current, replica);
@@ -1028,6 +1099,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 saved.targetCommitHash(),
                 traceId,
                 now);
+        initializeAutomationVersionIfAbsent(repository, template, saved, userId);
         if (!serverIdentity.linuxServerId().equals(target)) {
             publishVersionSync(saved, userId, "CREATED", traceId, Map.of("targetLinuxServerId", target));
             ApplicationWorkspaceVersionReplica targetReplica = waitForReadyReplica(saved.versionId(), target)
@@ -1035,19 +1107,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                             ErrorCode.CONFLICT,
                     "目标服务器应用版本工作区副本未就绪",
                             Map.of("targetLinuxServerId", target, "versionId", saved.versionId().value())));
-            if (markRecent) {
+            if (markRecent && !isAutomationRepository(repository)) {
                 markRecent(userId, application.appId(), targetReplica.runtimeWorkspaceId());
             }
             return versionResponse(existingVersion(saved.versionId()), targetReplica);
         }
-        if (markRecent) {
+        if (markRecent && !isAutomationRepository(repository)) {
             markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
         }
         publishVersionSync(saved, userId, "CREATED", traceId, Map.of());
-        return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(
-                versionForResponse(saved),
-                replicaForResponse(replica),
-                workspaceForResponse(runtimeWorkspace));
+        return versionResponse(saved, replica);
     }
 
     public List<ManagedWorkspaceResponses.PersonalWorkspaceResponse> listPersonalWorkspaces(String versionId, UserId userId) {
@@ -1057,6 +1126,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 version,
                 "个人工作区列表",
                 null));
+        if (isAutomationRepository(existingRepository(version.repositoryId()))) {
+            return List.of();
+        }
         return managedWorkspaceRepository.findPersonalWorkspaces(version.versionId(), userId).stream()
                 .map(this::personalResponse)
                 .toList();
@@ -1087,6 +1159,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 version,
                 "个人工作区",
                 workspaceName));
+        requirePersonalWorkspaceFeature(version);
         return createPersonalWorkspaceForVersion(
                 version,
                 workspaceName,
@@ -1154,6 +1227,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "托管工作区不存在", Map.of("workspaceId", workspaceId)));
         ApplicationDefinition application = existingEnabledApp(appId.value());
         ensureMember(appId, userId, loadingContextForWorkspace("mark-recent-workspace", application, workspace));
+        requirePrimaryWorkspace(workspace.workspaceId());
         markRecent(userId, appId, workspace.workspaceId());
         // 复用 recent-workspace 的回填逻辑，把 appId/versionId/applicationWorkspaceId 一起回写，
         // 让前端在切到运行态 Workspace 时立即拿到当前版本与模板信息，无需等模板 versions 异步加载。
@@ -1169,6 +1243,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return managedWorkspaceRepository.findGlobalPreference(userId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
                 .map(this::resolveRecentWorkspaceResponse)
+                .filter(response -> !isAutomationRuntimeResponse(response))
                 // 偏好记录和物理 worktree 在撤权后继续保留，但全局 recent 不再把已撤权应用的
                 // 工作区路径及版本信息暴露给前端；非托管服务器工作区仍沿用原兼容语义。
                 .filter(response -> recentWorkspaceVisibleTo(response, userId));
@@ -1200,7 +1275,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationId applicationId = application.appId();
         return managedWorkspaceRepository.findApplicationPreference(userId, applicationId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
-                .map(workspace -> resolveRecentWorkspaceResponse(workspace));
+                .map(workspace -> resolveRecentWorkspaceResponse(workspace))
+                .filter(response -> !isAutomationRuntimeResponse(response));
     }
 
     /**
@@ -1256,6 +1332,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 version,
                 "default 私人工作区",
                 "default"));
+        requirePersonalWorkspaceFeature(version);
         String defaultName = "default";
         // 先查是否已有 (versionId, userId, workspaceName=default) 的私人空间
         Optional<PersonalWorkspace> existing = managedWorkspaceRepository.findPersonalWorkspaces(version.versionId(), userId).stream()
@@ -1874,6 +1951,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             PersonalWorkspace current = personal.get();
             ensurePersonalOwner(current, userId);
             ApplicationWorkspaceVersion version = existingVersion(current.versionId());
+            requireGitWorkspace(version);
             CodeRepository repository = existingRepository(version.repositoryId());
             return workspaceGitContext(
                     pathResolver.resolve(current.repoRootPath()),
@@ -1884,6 +1962,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 managedWorkspaceRepository.findVersionReplicaByRuntimeWorkspace(workspace.workspaceId());
         if (replica.isPresent()) {
             ApplicationWorkspaceVersion version = existingVersion(replica.get().versionId());
+            requireGitWorkspace(version);
             ensureMember(version.appId(), userId, loadingContextForVersion(
                     "workspace-git", version, "应用版本工作区", workspace.name())
                     .workspaceId(workspace.workspaceId().value()));
@@ -1895,6 +1974,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Optional<ApplicationWorkspaceVersion> version =
                 managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspace.workspaceId());
         if (version.isPresent()) {
+            requireGitWorkspace(version.get());
             ensureMember(version.get().appId(), userId, loadingContextForVersion(
                     "workspace-git", version.get(), "应用版本工作区", workspace.name())
                     .workspaceId(workspace.workspaceId().value()));
@@ -3633,6 +3713,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             ApplicationId applicationId) {
         Map<ApplicationGitRefreshGroupKey, List<ApplicationWorkspaceVersion>> groups = new LinkedHashMap<>();
         for (ApplicationWorkspaceVersion version : managedWorkspaceRepository.findVersionsByApplication(applicationId)) {
+            // 自动化代码库由版本激活和只读副本链路管理，不进入标准 Git 刷新控制台。
+            if (isAutomationRepository(existingRepository(version.repositoryId()))) {
+                continue;
+            }
             ApplicationGitRefreshGroupKey key = new ApplicationGitRefreshGroupKey(
                     version.repositoryId(), version.version(), version.branch());
             groups.computeIfAbsent(key, ignored -> new ArrayList<>()).add(version);
@@ -4656,6 +4740,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse versionResponse(ApplicationWorkspaceVersion version) {
         ApplicationWorkspaceVersionReplica replica = managedWorkspaceRepository.findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
                 .orElse(null);
+        if (isAutomationRepository(existingRepository(version.repositoryId()))) {
+            return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.readonlyReference(version, replica);
+        }
         if (replica == null) {
             return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(
                     versionForResponse(version),
@@ -4667,6 +4754,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse versionResponse(
             ApplicationWorkspaceVersion version,
             ApplicationWorkspaceVersionReplica replica) {
+        if (isAutomationRepository(existingRepository(version.repositoryId()))) {
+            return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.readonlyReference(version, replica);
+        }
         return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(
                 versionForResponse(version),
                 replicaForResponse(replica),
@@ -5102,6 +5192,101 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private void ensurePersonalOwner(PersonalWorkspace personal, UserId userId) {
         if (!personal.userId().equals(userId)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "无个人工作区权限", Map.of("personalWorkspaceId", personal.personalWorkspaceId().value()));
+        }
+        requirePersonalWorkspaceFeature(existingVersion(personal.versionId()));
+    }
+
+    private void requirePrimaryWorkspace(WorkspaceId workspaceId) {
+        ApplicationWorkspaceVersion version = managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspaceId)
+                .orElseGet(() -> managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspaceId)
+                        .flatMap(personal -> managedWorkspaceRepository.findVersion(personal.versionId()))
+                        .orElse(null));
+        if (version != null && isAutomationRepository(existingRepository(version.repositoryId()))) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "自动化代码库是只读引用，不能作为主工作空间");
+        }
+    }
+
+    private boolean isAutomationRuntimeResponse(ManagedWorkspaceResponses.WorkspaceRuntimeResponse response) {
+        if (response.applicationWorkspaceId() == null) {
+            return false;
+        }
+        return configurationRepository.findWorkspace(new ApplicationWorkspaceId(response.applicationWorkspaceId()))
+                .map(ApplicationWorkspace::repositoryId)
+                .flatMap(configurationRepository::findRepository)
+                .map(this::isAutomationRepository)
+                .orElse(false);
+    }
+
+    private void requirePersonalWorkspaceFeature(ApplicationWorkspaceVersion version) {
+        if (isAutomationRepository(existingRepository(version.repositoryId()))) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "自动化代码库是只读引用，不创建或操作个人工作区",
+                    Map.of("versionId", version.versionId().value()));
+        }
+    }
+
+    private void requireGitWorkspace(ApplicationWorkspaceVersion version) {
+        if (isAutomationRepository(existingRepository(version.repositoryId()))) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "自动化代码库是只读引用，不支持 Git 操作",
+                    Map.of("versionId", version.versionId().value()));
+        }
+    }
+
+    private boolean isAutomationRepository(CodeRepository repository) {
+        return CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value().equals(repository.repositoryType());
+    }
+
+    private void requireAutomationRepository(CodeRepository repository) {
+        if (!isAutomationRepository(repository)) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "只有自动化代码库配置支持激活只读版本",
+                    Map.of("repositoryId", repository.repositoryId().value()));
+        }
+    }
+
+    private void initializeAutomationVersionIfAbsent(
+            CodeRepository repository,
+            ApplicationWorkspace template,
+            ApplicationWorkspaceVersion version,
+            UserId userId) {
+        if (!isAutomationRepository(repository) || automationActiveVersionRepository == null) {
+            return;
+        }
+        Instant now = clock.instant();
+        automationActiveVersionRepository.initializeIfAbsent(new AutomationWorkspaceActiveVersion(
+                template.workspaceId(), version.versionId(), userId, now, now, now));
+    }
+
+    private ManagedWorkspaceResponses.AutomationActiveVersionResponse activeVersionResponse(
+            AutomationWorkspaceActiveVersion active) {
+        if (active == null) {
+            return null;
+        }
+        ApplicationWorkspaceVersion version = managedWorkspaceRepository.findVersion(active.versionId()).orElse(null);
+        if (version == null) {
+            return null;
+        }
+        String replicaStatus = managedWorkspaceRepository
+                .findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
+                .map(replica -> replica.syncStatus().name())
+                .orElse(null);
+        return new ManagedWorkspaceResponses.AutomationActiveVersionResponse(
+                version.versionId().value(),
+                version.version(),
+                version.branch(),
+                version.targetCommitHash(),
+                replicaStatus,
+                active.activatedBy() == null ? null : active.activatedBy().value(),
+                active.activatedAt());
+    }
+
+    private void requireAutomationActiveVersionRepository() {
+        if (automationActiveVersionRepository == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "自动化代码库版本激活服务未装配");
         }
     }
 

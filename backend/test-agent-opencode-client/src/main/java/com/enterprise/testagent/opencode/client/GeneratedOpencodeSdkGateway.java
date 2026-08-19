@@ -836,6 +836,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         }
         return list.stream()
                 .filter(item -> item instanceof Map<?, ?>)
+                .filter(item -> !OpencodePromptPart.isInternalRunContextPart((Map<?, ?>) item))
                 .map(item -> normalizePart((Map<?, ?>) item, messageId))
                 .toList();
     }

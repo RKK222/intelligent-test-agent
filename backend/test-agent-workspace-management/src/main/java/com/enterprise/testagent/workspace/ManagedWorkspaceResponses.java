@@ -1,5 +1,6 @@
 package com.enterprise.testagent.workspace;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationWorkspace;
 import com.enterprise.testagent.domain.configuration.WorkspaceCreateOperation;
@@ -115,11 +116,20 @@ public final class ManagedWorkspaceResponses {
             boolean standard,
             String repositoryType,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            AutomationActiveVersionResponse activeVersion) {
         public static WorkspaceTemplateResponse from(
                 ApplicationWorkspace workspace,
                 boolean standard,
                 String repositoryType) {
+            return from(workspace, standard, repositoryType, null);
+        }
+
+        public static WorkspaceTemplateResponse from(
+                ApplicationWorkspace workspace,
+                boolean standard,
+                String repositoryType,
+                AutomationActiveVersionResponse activeVersion) {
             return new WorkspaceTemplateResponse(
                     workspace.workspaceId().value(),
                     workspace.appId().value(),
@@ -131,8 +141,20 @@ public final class ManagedWorkspaceResponses {
                     standard,
                     repositoryType,
                     workspace.createdAt(),
-                    workspace.updatedAt());
+                    workspace.updatedAt(),
+                    activeVersion);
         }
+    }
+
+    /** 自动化代码库配置当前激活的只读版本及本服务器副本状态。 */
+    public record AutomationActiveVersionResponse(
+            String versionId,
+            String version,
+            String branch,
+            String targetCommitHash,
+            String replicaStatus,
+            String activatedByUserId,
+            Instant activatedAt) {
     }
 
     /**
@@ -173,6 +195,7 @@ public final class ManagedWorkspaceResponses {
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ApplicationWorkspaceVersionResponse(
             String versionId,
             String applicationWorkspaceId,
@@ -241,6 +264,29 @@ public final class ManagedWorkspaceResponses {
                     version.repoRootPath(),
                     version.workspaceRootPath(),
                     WorkspaceRuntimeResponse.from(workspace),
+                    version.status().name(),
+                    version.targetCommitHash(),
+                    replica == null ? null : replica.currentCommitHash(),
+                    replica == null ? null : replica.linuxServerId(),
+                    replica == null ? null : replica.syncStatus().name(),
+                    version.createdAt(),
+                    version.updatedAt());
+        }
+
+        /** 自动化引用版本只返回逻辑版本与副本状态，禁止序列化任何服务器物理路径。 */
+        public static ApplicationWorkspaceVersionResponse readonlyReference(
+                ApplicationWorkspaceVersion version,
+                ApplicationWorkspaceVersionReplica replica) {
+            return new ApplicationWorkspaceVersionResponse(
+                    version.versionId().value(),
+                    version.applicationWorkspaceId().value(),
+                    version.appId().value(),
+                    version.repositoryId().value(),
+                    version.version(),
+                    version.branch(),
+                    null,
+                    null,
+                    null,
                     version.status().name(),
                     version.targetCommitHash(),
                     replica == null ? null : replica.currentCommitHash(),

@@ -115,10 +115,10 @@ describe("help center", () => {
     expect(prompt).toContain("【当前章节】每周新功能");
     expect(prompt).toContain("适用场景");
     expect(prompt).toContain("使用前配置");
-    expect(prompt).toContain("自动化代码库可以单独建立工作空间");
-    expect(prompt).toContain("页面顶部中间的“应用”");
-    expect(prompt).toContain("工作空间：当前名称");
-    expect(prompt).toContain("文件树左下角的双向箭头");
+    expect(prompt).toContain("自动化代码库改为工作区内只读参考");
+    expect(prompt).toContain("组合文件树根部会出现虚拟目录“自动化代码库”");
+    expect(prompt).toContain("选择应用并进入一个测试工作空间");
+    expect(prompt).toContain("主工作空间菜单不再列出自动化仓库");
     expect(prompt).toContain("本地提交，但不提供远程推送或发布");
     expect(prompt).toContain("VITE_CACHE_DATA_URL");
     expect(prompt).not.toMatch(forbiddenGameContentPatterns[0]!);

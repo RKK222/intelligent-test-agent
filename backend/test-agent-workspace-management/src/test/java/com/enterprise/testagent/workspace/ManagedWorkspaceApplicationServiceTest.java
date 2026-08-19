@@ -45,6 +45,8 @@ import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVers
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplicaId;
+import com.enterprise.testagent.domain.managedworkspace.AutomationWorkspaceActiveVersion;
+import com.enterprise.testagent.domain.managedworkspace.AutomationWorkspaceActiveVersionRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
@@ -566,6 +568,90 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(response.directoryPath()).isEqualTo("scripts/e2e");
         assertThat(response.initialVersion().version()).isEqualTo("20260812");
         assertThat(git.clonedBranch).isEqualTo("release/automation-v2");
+    }
+
+    @Test
+    void automationRepositoryActivatesOnlyFirstVersionAndRejectsPersonalWorktreeEntry() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "https://example.com/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                Instant.now(),
+                Instant.now());
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeAutomationActiveVersionRepository activeVersions = new FakeAutomationActiveVersionRepository();
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(true, repository, List.of()),
+                managed,
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("scripts/e2e"));
+        service.setAutomationActiveVersionRepository(activeVersions);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse first = service
+                .createApplicationWorkspaceWithInitialVersion(
+                        "app_gcms", "repo_1", "release/v1", "scripts/e2e", "自动化测试", false,
+                        "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_auto_v1")
+                .initialVersion();
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse second = service.createVersion(
+                "app_gcms", first.applicationWorkspaceId(), "20260819", "release/v2", new UserId("usr_1"), "trace_auto_v2");
+
+        assertThat(activeVersions.active.versionId().value()).isEqualTo(first.versionId());
+        assertThat(first.repoRootPath()).isNull();
+        assertThat(first.workspaceRootPath()).isNull();
+        assertThat(first.runtimeWorkspace()).isNull();
+        assertThat(second.repoRootPath()).isNull();
+        assertThat(second.workspaceRootPath()).isNull();
+        assertThat(second.runtimeWorkspace()).isNull();
+        assertThat(managed.globalPreference).isNull();
+        assertThat(managed.applicationPreference).isNull();
+        assertThat(service.listPersonalWorkspaces(second.versionId(), new UserId("usr_1"))).isEmpty();
+        assertThatThrownBy(() -> service.ensureDefaultPersonalWorkspace(
+                second.versionId(), new UserId("usr_1"), "trace_auto_personal"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void automationVersionActivationValidatesOwnershipAndIsIdempotent() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "https://example.com/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                Instant.now(),
+                Instant.now());
+        FakeAutomationActiveVersionRepository activeVersions = new FakeAutomationActiveVersionRepository();
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(true, repository, List.of()),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("scripts/e2e"));
+        service.setAutomationActiveVersionRepository(activeVersions);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse first = service
+                .createApplicationWorkspaceWithInitialVersion(
+                        "app_gcms", "repo_1", "release/v1", "scripts/e2e", "自动化测试", false,
+                        "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_auto_v1")
+                .initialVersion();
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse second = service.createVersion(
+                "app_gcms", first.applicationWorkspaceId(), "20260819", "release/v2", new UserId("usr_1"), "trace_auto_v2");
+
+        ManagedWorkspaceResponses.AutomationActiveVersionResponse switched = service.activateAutomationVersion(
+                "app_gcms", first.applicationWorkspaceId(), second.versionId(), new UserId("usr_1"));
+        Instant firstActivatedAt = switched.activatedAt();
+        ManagedWorkspaceResponses.AutomationActiveVersionResponse repeated = service.activateAutomationVersion(
+                "app_gcms", first.applicationWorkspaceId(), second.versionId(), new UserId("usr_1"));
+
+        assertThat(switched.version()).isEqualTo("20260819");
+        assertThat(repeated.activatedAt()).isEqualTo(firstActivatedAt);
+        assertThat(activeVersions.activateCalls).isEqualTo(1);
+        assertThat(first.versionId()).isNotEqualTo(second.versionId());
     }
 
     @Test
@@ -4076,6 +4162,42 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void publish(ServerBroadcastEvent event) {
             events.add(event);
+        }
+    }
+
+    private static final class FakeAutomationActiveVersionRepository
+            implements AutomationWorkspaceActiveVersionRepository {
+        private AutomationWorkspaceActiveVersion active;
+        private int activateCalls;
+
+        @Override
+        public Optional<AutomationWorkspaceActiveVersion> find(ApplicationWorkspaceId applicationWorkspaceId) {
+            return active == null || !active.applicationWorkspaceId().equals(applicationWorkspaceId)
+                    ? Optional.empty()
+                    : Optional.of(active);
+        }
+
+        @Override
+        public List<AutomationWorkspaceActiveVersion> findByApplicationWorkspaceIds(
+                List<ApplicationWorkspaceId> applicationWorkspaceIds) {
+            return active != null && applicationWorkspaceIds.contains(active.applicationWorkspaceId())
+                    ? List.of(active)
+                    : List.of();
+        }
+
+        @Override
+        public AutomationWorkspaceActiveVersion activate(AutomationWorkspaceActiveVersion activeVersion) {
+            activateCalls += 1;
+            active = activeVersion;
+            return active;
+        }
+
+        @Override
+        public AutomationWorkspaceActiveVersion initializeIfAbsent(AutomationWorkspaceActiveVersion activeVersion) {
+            if (active == null) {
+                active = activeVersion;
+            }
+            return active;
         }
     }
 

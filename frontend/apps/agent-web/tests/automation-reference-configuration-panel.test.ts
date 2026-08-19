@@ -1,0 +1,161 @@
+import { flushPromises, mount } from "@vue/test-utils";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import AutomationReferenceConfigurationPanel from "../src/components/AutomationReferenceConfigurationPanel.vue";
+
+function repository() {
+  return {
+    repositoryId: "repo_automation",
+    gitUrl: "ssh://git.example.test/automation.git",
+    name: "接口自动化库",
+    englishName: "api-automation",
+    repositoryType: "AUTOMATION_CODE_REPOSITORY",
+    repositoryTypeLabel: "自动化代码库",
+    standard: false,
+    createdAt: "2026-08-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z"
+  };
+}
+
+function template() {
+  return {
+    workspaceId: "awp_auto",
+    appId: "app-demo",
+    repositoryId: "repo_automation",
+    branch: "main",
+    directoryPath: "scripts/e2e",
+    workspaceName: "接口自动化",
+    enabled: true,
+    standard: false,
+    repositoryType: "AUTOMATION_CODE_REPOSITORY",
+    activeVersion: {
+      versionId: "awv_old",
+      version: "20260812",
+      branch: "main",
+      replicaStatus: "READY",
+      activatedAt: "2026-08-12T00:00:00Z"
+    },
+    createdAt: "2026-08-12T00:00:00Z",
+    updatedAt: "2026-08-12T00:00:00Z"
+  };
+}
+
+function version(versionId: string, value: string) {
+  return {
+    versionId,
+    applicationWorkspaceId: "awp_auto",
+    appId: "app-demo",
+    repositoryId: "repo_automation",
+    version: value,
+    branch: "main",
+    status: "ACTIVE",
+    replicaStatus: "READY",
+    createdAt: "2026-08-12T00:00:00Z",
+    updatedAt: "2026-08-12T00:00:00Z"
+  };
+}
+
+function api(overrides: Record<string, unknown> = {}) {
+  return {
+    listApplicationRepositories: vi.fn().mockResolvedValue([repository()]),
+    listApplicationWorkspaces: vi.fn().mockResolvedValue([]),
+    listWorkspaceTemplates: vi.fn().mockResolvedValue([]),
+    listWorkspaceVersions: vi.fn().mockResolvedValue([]),
+    listRepositoryBranches: vi.fn().mockResolvedValue(["release/automation-v2"]),
+    getRepositoryTree: vi.fn().mockResolvedValue({
+      nodes: [{
+        name: "scripts",
+        path: "scripts",
+        type: "directory",
+        children: [{ name: "e2e", path: "scripts/e2e", type: "directory", children: [] }]
+      }]
+    }),
+    createApplicationWorkspace: vi.fn().mockResolvedValue({ operationId: "wco_auto", status: "ACCEPTED" }),
+    getWorkspaceCreateOperation: vi.fn().mockResolvedValue({
+      operationId: "wco_auto",
+      status: "SUCCEEDED",
+      currentStep: "COMPLETED",
+      steps: []
+    }),
+    createWorkspaceVersion: vi.fn().mockResolvedValue(version("awv_new", "20260819")),
+    activateAutomationWorkspaceVersion: vi.fn().mockResolvedValue({}),
+    updateApplicationWorkspace: vi.fn().mockResolvedValue({}),
+    ...overrides
+  };
+}
+
+function render(mockApi: ReturnType<typeof api>, canManage = true) {
+  return mount(AutomationReferenceConfigurationPanel, {
+    props: { open: true, appId: "app-demo", canManage },
+    global: { provide: { api: mockApi } }
+  });
+}
+
+describe("AutomationReferenceConfigurationPanel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("selects an arbitrary existing directory and creates an application-level readonly reference", async () => {
+    const mockApi = api();
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("42345678-1234-1234-1234-123456789abc");
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    expect(mockApi.listRepositoryBranches).toHaveBeenCalledWith("repo_automation");
+    expect(mockApi.getRepositoryTree).toHaveBeenCalledWith("app-demo", "repo_automation", "release/automation-v2");
+    await wrapper.get('button[aria-label="选择目录 scripts/e2e"]').trigger("click");
+    await wrapper.get('input[aria-label="自动化引用名称"]').setValue("接口回归");
+    await wrapper.get('input[aria-label="自动化引用版本日期"]').setValue("20260819");
+    await wrapper.get('button[aria-label="保存自动化目录引用"]').trigger("click");
+    await flushPromises();
+
+    expect(mockApi.createApplicationWorkspace).toHaveBeenCalledWith("app-demo", {
+      repositoryId: "repo_automation",
+      branch: "release/automation-v2",
+      directoryPath: "scripts/e2e",
+      workspaceName: "接口回归",
+      version: "20260819",
+      operationId: "wco_42345678123412341234123456789abc"
+    });
+    expect(wrapper.emitted("changed")).toBeTruthy();
+  });
+
+  it("shows configured versions and lets an administrator activate another version", async () => {
+    const configuredTemplate = template();
+    const mockApi = api({
+      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
+      listWorkspaceVersions: vi.fn().mockResolvedValue([
+        version("awv_new", "20260819"),
+        version("awv_old", "20260812")
+      ])
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("scripts/e2e");
+    const activate = wrapper.findAll("button").find((button) => button.text().includes("设为当前版本"));
+    expect(activate).toBeTruthy();
+    await activate!.trigger("click");
+    await flushPromises();
+
+    expect(mockApi.activateAutomationWorkspaceVersion).toHaveBeenCalledWith("app-demo", "awp_auto", "awv_new");
+    expect(wrapper.emitted("changed")).toBeTruthy();
+  });
+
+  it("keeps ordinary members readonly and avoids administrator-only repository APIs", async () => {
+    const configuredTemplate = template();
+    const mockApi = api({
+      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
+      listWorkspaceVersions: vi.fn().mockResolvedValue([version("awv_old", "20260812")])
+    });
+    const wrapper = render(mockApi, false);
+    await flushPromises();
+
+    expect(mockApi.listApplicationRepositories).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("接口自动化");
+    expect(wrapper.text()).toContain("当前版本");
+    expect(wrapper.text()).not.toContain("新增目录引用");
+    expect(wrapper.text()).not.toContain("设为当前版本");
+  });
+});

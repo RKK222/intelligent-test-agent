@@ -16,19 +16,23 @@ import {
   type ReferenceConfigTarget,
   type ReferenceConfigValue
 } from "./reference-config-jsonc";
+import AutomationReferenceConfigurationPanel from "./AutomationReferenceConfigurationPanel.vue";
 
 const OPENCODE_CONFIG_PATH = ".opencode/opencode.jsonc";
 const POLL_INTERVAL_MS = 2_000;
 const PENDING_REFRESH_CONFIRMATION_WINDOW_MS = 30_000;
 const ACTIVE_STATUSES = new Set(["INITIALIZING", "SYNCHRONIZING", "VERIFYING"]);
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   open: boolean;
   appId: string;
   workspaceId: string;
-}>();
+  canManage?: boolean;
+}>(), {
+  canManage: true
+});
 
-const emit = defineEmits<{ close: []; saved: [] }>();
+const emit = defineEmits<{ close: []; saved: []; automationChanged: [] }>();
 const api = inject<BackendApiClient>("api")!;
 
 type Notice = { message: string; traceId?: string };
@@ -85,6 +89,12 @@ const branchError = ref<Notice | null>(null);
 const branchSwitchConfirmation = ref<{ repositoryId: string; repositoryName: string; from: string; to: string } | null>(null);
 const pendingWorkspaceRefreshes = ref<Map<string, PendingWorkspaceRefresh>>(new Map());
 const operationProgress = ref<RepositoryOperationProgress | null>(null);
+const activeReferenceKind = ref<"asset" | "automation">("asset");
+
+const dialogDescription = computed(() => activeReferenceKind.value === "asset"
+  ? "从应用资产库选择首层 SDD 目录，并写入当前个人工作区的 OpenCode 配置。"
+  : "管理应用级自动化代码库只读引用，选择分支、目录和当前版本。"
+);
 
 let dialogGeneration = 0;
 let selectionGeneration = 0;
@@ -1067,8 +1077,9 @@ watch(
     repositoryResponseTokens.clear();
     listError.value = null;
     selectedRepositoryId.value = null;
+    if (!props.canManage) activeReferenceKind.value = "automation";
     if (open) {
-      void loadRepositories(dialogGeneration);
+      if (props.canManage) void loadRepositories(dialogGeneration);
     }
   },
   { immediate: true }
@@ -1119,7 +1130,7 @@ onBeforeUnmount(() => {
         >
           <div>
             <h2 id="reference-dialog-title">引用配置</h2>
-            <p>从应用资产库选择首层 SDD 目录，并写入当前个人工作区的 OpenCode 配置。</p>
+            <p>{{ dialogDescription }}</p>
           </div>
           <Button
             size="icon"
@@ -1135,7 +1146,29 @@ onBeforeUnmount(() => {
           </Button>
         </header>
 
+        <nav
+          class="reference-kind-tabs"
+          aria-label="引用类型"
+          :aria-hidden="branchSwitchConfirmation || operationProgress ? 'true' : undefined"
+          :inert="branchSwitchConfirmation || operationProgress ? true : undefined"
+        >
+          <button
+            v-if="canManage"
+            type="button"
+            :class="{ 'is-active': activeReferenceKind === 'asset' }"
+            :aria-pressed="activeReferenceKind === 'asset'"
+            @click="activeReferenceKind = 'asset'"
+          >应用资产库</button>
+          <button
+            type="button"
+            :class="{ 'is-active': activeReferenceKind === 'automation' }"
+            :aria-pressed="activeReferenceKind === 'automation'"
+            @click="activeReferenceKind = 'automation'"
+          >自动化代码库</button>
+        </nav>
+
         <div
+          v-if="activeReferenceKind === 'asset'"
           class="reference-dialog-body"
           :aria-hidden="branchSwitchConfirmation || operationProgress ? 'true' : undefined"
           :inert="branchSwitchConfirmation || operationProgress ? true : undefined"
@@ -1529,6 +1562,15 @@ onBeforeUnmount(() => {
           </main>
         </div>
 
+        <AutomationReferenceConfigurationPanel
+          v-else
+          class="reference-automation-body"
+          :open="open && activeReferenceKind === 'automation'"
+          :app-id="appId"
+          :can-manage="canManage"
+          @changed="emit('automationChanged')"
+        />
+
         <div v-if="operationProgress" class="reference-confirmation-backdrop">
           <section
             ref="operationDialogElement"
@@ -1755,11 +1797,49 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.reference-kind-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  min-height: 38px;
+  align-items: center;
+  padding: 4px 14px;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-panel);
+}
+
+.reference-kind-tabs button {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ta-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.reference-kind-tabs button:hover,
+.reference-kind-tabs button.is-active {
+  border-color: var(--ta-border);
+  background: var(--ta-panel-2);
+  color: var(--ta-text);
+}
+
+.reference-kind-tabs button.is-active {
+  font-weight: 600;
+}
+
 .reference-dialog-body {
   display: grid;
   min-height: 0;
   flex: 1;
   grid-template-columns: minmax(290px, 34%) minmax(0, 1fr);
+}
+
+.reference-automation-body {
+  min-height: 0;
+  flex: 1;
 }
 
 .reference-repository-column,

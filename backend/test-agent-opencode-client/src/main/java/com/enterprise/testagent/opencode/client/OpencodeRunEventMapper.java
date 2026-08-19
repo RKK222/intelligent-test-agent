@@ -150,6 +150,19 @@ public class OpencodeRunEventMapper {
         return sessionIds.isEmpty() || sessionIds.contains(expected);
     }
 
+    /**
+     * 判断事件是否只是在回显平台为 command 注入的内部上下文附件，供 facade 在持久化和下发前丢弃。
+     */
+    public boolean isInternalRunContextEvent(JsonNode rawEvent) {
+        Objects.requireNonNull(rawEvent, "rawEvent must not be null");
+        if (!rawType(rawEvent).startsWith("message.part.")) {
+            return false;
+        }
+        JsonNode eventProperties = properties(rawEvent);
+        JsonNode part = eventProperties.path("part");
+        return OpencodePromptPart.isInternalRunContextPart(toMap(part.isObject() ? part : eventProperties));
+    }
+
     private void collectSessionIds(JsonNode node, Set<String> sessionIds) {
         if (node == null || node.isNull()) {
             return;

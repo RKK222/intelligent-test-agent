@@ -360,18 +360,22 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 case "workspace.requirement-import-items" -> requirementImportItems(ticket, params);
                 case "workspace.requirement-import" -> importRequirements(ticket, params);
                 case "workspace.view.list" -> workspaceViewService.list(
+                        ticketUserId(ticket),
                         workspaceId(ticket, params),
                         viewLocator(params));
                 case "workspace.view.read" -> workspaceViewService.read(
+                        ticketUserId(ticket),
                         workspaceId(ticket, params),
                         viewLocator(params));
                 case "workspace.view.read.chunk" -> workspaceViewService.readChunk(
+                        ticketUserId(ticket),
                         workspaceId(ticket, params),
                         viewLocator(params),
                         requiredNonNegativeLong(params, "offset"),
                         optionalNonNegativeLong(params, "expectedSize"),
                         optionalNonNegativeLong(params, "expectedLastModifiedMillis"));
                 case "workspace.view.read.binary.chunk" -> workspaceViewService.readBinaryChunk(
+                        ticketUserId(ticket),
                         workspaceId(ticket, params),
                         viewLocator(params),
                         requiredNonNegativeLong(params, "offset"),
@@ -893,7 +897,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         } catch (RuntimeException exception) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "workspace view locator kind 无效");
         }
-        return new WorkspaceViewLocator(kind, text(locator, "path"), text(locator, "referenceAlias"));
+        return new WorkspaceViewLocator(
+                kind,
+                text(locator, "path"),
+                text(locator, "referenceAlias"),
+                text(locator, "automationWorkspaceId"),
+                text(locator, "automationVersionId"));
     }
 
     private void requireWorkspaceWrite(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId, String path) {

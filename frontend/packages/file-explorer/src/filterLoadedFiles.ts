@@ -16,6 +16,9 @@ export function filterLoadedFiles(entriesByDirectory: Record<string, FileTreeEnt
     .flat()
     .filter((entry) => entry.type === "file")
     // 工作区 view 会把引用节点一并加载到树中，本地搜索仍只能覆盖物理 workspace。
-    .filter((entry) => (entry as Partial<WorkspaceViewEntry>).source !== "REFERENCE")
+    .filter((entry) => {
+      const source = (entry as Partial<WorkspaceViewEntry>).source;
+      return source !== "REFERENCE" && source !== "AUTOMATION_REFERENCE";
+    })
     .filter((entry) => fileNameIncludesKeyword(entry.name, keyword));
 }

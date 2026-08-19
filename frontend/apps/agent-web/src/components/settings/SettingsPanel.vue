@@ -31,10 +31,10 @@ const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_A
 const hasAppAdmin = computed(() => hasSuperAdmin.value || props.currentUser?.roles?.includes("APP_ADMIN") === true);
 
 const effectiveKey = computed(() => {
-  if (hasAppAdmin.value) {
-    return panels[props.activeKey] ? props.activeKey : "appWorkspace";
+  if (props.activeKey === "repository" && !hasAppAdmin.value) {
+    return "appWorkspace";
   }
-  return "personal";
+  return panels[props.activeKey] ? props.activeKey : "appWorkspace";
 });
 
 const current = computed<PanelDef>(() => panels[effectiveKey.value] ?? panels.personal);

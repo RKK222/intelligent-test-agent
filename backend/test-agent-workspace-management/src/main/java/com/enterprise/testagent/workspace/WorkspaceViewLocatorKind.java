@@ -4,5 +4,7 @@ package com.enterprise.testagent.workspace;
 public enum WorkspaceViewLocatorKind {
     COMPOSITE,
     WORKSPACE,
-    REFERENCE
+    REFERENCE,
+    AUTOMATION_ROOT,
+    AUTOMATION_REFERENCE
 }

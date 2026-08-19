@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.AutomationWorkspaceActiveVersionMapper">
+    <resultMap id="ActiveVersionMap"
+               type="com.enterprise.testagent.persistence.mybatis.AutomationWorkspaceActiveVersionRow">
+        <constructor>
+            <arg column="application_workspace_id" javaType="java.lang.String"/>
+            <arg column="version_id" javaType="java.lang.String"/>
+            <arg column="activated_by_user_id" javaType="java.lang.String"/>
+            <arg column="activated_at" javaType="java.time.Instant"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="Columns">
+        application_workspace_id, version_id, activated_by_user_id, activated_at, created_at, updated_at
+    </sql>
+
+    <select id="find" resultMap="ActiveVersionMap">
+        select <include refid="Columns"/>
+        from automation_workspace_active_versions
+        where application_workspace_id = #{applicationWorkspaceId}
+    </select>
+
+    <select id="findByApplicationWorkspaceIds" resultMap="ActiveVersionMap">
+        select <include refid="Columns"/>
+        from automation_workspace_active_versions
+        where application_workspace_id in
+        <foreach collection="applicationWorkspaceIds" item="workspaceId" open="(" separator="," close=")">
+            #{workspaceId}
+        </foreach>
+        order by application_workspace_id
+    </select>
+
+    <insert id="insertIfAbsent" databaseId="postgresql">
+        insert into automation_workspace_active_versions(
+            application_workspace_id, version_id, activated_by_user_id, activated_at, created_at, updated_at
+        ) values (
+            #{row.applicationWorkspaceId}, #{row.versionId}, #{row.activatedByUserId},
+            #{row.activatedAt}, #{row.createdAt}, #{row.updatedAt}
+        )
+        on conflict (application_workspace_id) do nothing
+    </insert>
+
+    <insert id="insertIfAbsent" databaseId="h2">
+        insert into automation_workspace_active_versions(
+            application_workspace_id, version_id, activated_by_user_id, activated_at, created_at, updated_at
+        )
+        select #{row.applicationWorkspaceId}, #{row.versionId}, #{row.activatedByUserId},
+               #{row.activatedAt}, #{row.createdAt}, #{row.updatedAt}
+        where not exists (
+            select 1 from automation_workspace_active_versions
+            where application_workspace_id = #{row.applicationWorkspaceId}
+        )
+    </insert>
+
+    <update id="update">
+        update automation_workspace_active_versions
+        set version_id = #{row.versionId},
+            activated_by_user_id = #{row.activatedByUserId},
+            activated_at = #{row.activatedAt},
+            updated_at = #{row.updatedAt}
+        where application_workspace_id = #{row.applicationWorkspaceId}
+    </update>
+</mapper>

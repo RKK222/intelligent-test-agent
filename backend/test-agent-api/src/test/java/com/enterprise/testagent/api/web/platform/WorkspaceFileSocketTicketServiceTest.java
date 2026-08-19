@@ -120,6 +120,28 @@ class WorkspaceFileSocketTicketServiceTest {
     }
 
     @Test
+    void marksHistoricalAutomationWorkspaceTicketAsReadonly() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService, authorizer);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_automation_history");
+        when(workspaceService.currentLinuxServerId()).thenReturn("10.8.0.12");
+        when(authorizer.requireClassifiedFileAccess(USER_ID, workspaceId, false))
+                .thenReturn(FileWorkspaceKind.AUTOMATION_REFERENCE);
+        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID))
+                .thenReturn(readyAffinity("10.8.0.12"));
+
+        service.createTicket(
+                principal(List.of(Dictionary.ROLE_USER)),
+                new WorkspaceFileSocketDtos.TicketRequest(workspaceId.value(), "10.8.0.12", "workspace"),
+                TRACE_ID);
+
+        WorkspaceFileSocketTicket ticket = service.consume("wft_fixed", "http://localhost:3000");
+        assertThat(ticket.appSourceWorkspace()).isTrue();
+    }
+
+    @Test
     void rejectsTicketWhenWorkspaceAndAgentAreOnServerBButReplicaIsOnServerA() {
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);

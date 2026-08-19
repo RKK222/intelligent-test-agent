@@ -289,6 +289,25 @@ class DefaultOpencodeClientFacadeTest {
     }
 
     @Test
+    void facadeDoesNotPublishInternalRunContextPartEvents() throws Exception {
+        FakeGateway gateway = new FakeGateway();
+        ObjectMapper objectMapper = new ObjectMapper();
+        gateway.events = Flux.just(
+                objectMapper.readTree("""
+                        {"id":"evt_internal","type":"message.part.updated","properties":{"sessionID":"ses_remote1234567890abcdef","part":{"type":"file","mime":"text/plain","filename":".testagent-run-context.txt","url":"data:text/plain;charset=utf-8;base64,PGNvbnRleHQgLz4="}}}
+                        """),
+                objectMapper.readTree("""
+                        {"id":"evt_visible","type":"message.part.updated","properties":{"sessionID":"ses_remote1234567890abcdef","part":{"type":"text","text":"visible"}}}
+                        """));
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        List<RunEventDraft> drafts = facade.streamRunEvents(streamCommand()).collectList().block();
+
+        assertThat(drafts).singleElement().satisfies(draft ->
+                assertThat(draft.payload()).containsEntry("rawEventId", "evt_visible"));
+    }
+
+    @Test
     void facadeReadsSessionDiffWithoutLeakingGeneratedDtos() {
         FakeGateway gateway = new FakeGateway();
         OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);

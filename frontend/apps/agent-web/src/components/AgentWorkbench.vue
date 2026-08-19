@@ -185,6 +185,7 @@ import {
 import {
   isReferenceFilePath,
   referenceFileInfo,
+  referenceLocatorFromTab,
   referenceReadFailurePatch,
   referenceTabPath
 } from "./referenceFileLoad";
@@ -1400,7 +1401,9 @@ const breadcrumbDisplay = computed(() => {
   const displayPath = isReferenceFilePath(activePath.value)
     ? (() => {
         const info = referenceFileInfo(activePath.value!);
-        return referenceChatPath(info.referenceAlias, info.referencePath);
+        return info.kind === "AUTOMATION_REFERENCE"
+          ? info.logicalPath
+          : referenceChatPath(info.referenceAlias, info.referencePath);
       })()
     : activePath.value;
   return displayPath.split(/[\\/]+/).filter(Boolean).join(" › ");
@@ -6192,6 +6195,20 @@ async function refreshWorkspaceViewAfterReferenceSaved() {
   await reloadReferenceRuntimeIfIdle();
 }
 
+/** 自动化引用来自应用级数据库状态，不写个人 OpenCode 配置；只刷新模板缓存和组合文件树。 */
+async function refreshWorkspaceViewAfterAutomationChanged() {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates", selectedAppId.value] }),
+    queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-versions", selectedAppId.value] })
+  ]);
+  await refreshWorkspaceView();
+  feedback.value = {
+    kind: "success",
+    title: "自动化引用已更新",
+    description: "新展开的目录和新任务将使用当前激活版本。"
+  };
+}
+
 type WorkspaceViewRefreshOptions = {
   targets?: readonly WorkspaceViewLoadTarget[];
   preserveLoadingPaths?: ReadonlySet<string>;
@@ -6500,7 +6517,9 @@ async function resolveDefaultManagedVersionForApp(
     queryKey: ["managed-workspace", "app-templates", appId],
     queryFn: () => api.listWorkspaceTemplates(appId)
   });
-  const template = templates.find((item) => item.enabled !== false);
+  const template = templates.find((item) =>
+    item.enabled !== false && item.repositoryType !== "AUTOMATION_CODE_REPOSITORY"
+  );
   if (!template) return null;
   const versions = await queryClient.ensureQueryData<ApplicationWorkspaceVersion[]>({
     queryKey: ["managed-workspace", "app-versions", appId, template.workspaceId],
@@ -7296,7 +7315,7 @@ async function readProgressivePreviewChunk(
     const info = referenceFileInfo(tab.path);
     return api.readWorkspaceViewFilePreviewChunk(
       info.workspaceId,
-      { kind: "REFERENCE", path: info.referencePath, referenceAlias: info.referenceAlias },
+      referenceLocatorFromTab(info),
       preview
     );
   }
@@ -7548,7 +7567,10 @@ async function openWorkspaceViewFile(entry: WorkspaceViewEntry) {
     workspaceId: workspace.workspaceId,
     referenceAlias: alias,
     referencePath: entry.locator.path,
-    logicalPath: entry.path
+    logicalPath: entry.path,
+    kind: entry.locator.kind === "AUTOMATION_REFERENCE" ? "AUTOMATION_REFERENCE" : "REFERENCE",
+    automationWorkspaceId: entry.locator.automationWorkspaceId,
+    automationVersionId: entry.locator.automationVersionId
   });
   const existing = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
   const hadLoadedCache = workbench.tabHasLoadedSnapshot(existing);
@@ -7689,14 +7711,14 @@ async function collectWorkspaceViewDownloadFiles(
         directories.push(entry.locator);
         continue;
       }
-      if (entry.locator.kind === "COMPOSITE") {
+      if (entry.locator.kind === "COMPOSITE" || entry.locator.kind === "AUTOMATION_ROOT") {
         throw new Error("组合目录定位器不能作为文件下载");
       }
       files.push({
         path: relativeDownloadPath(entry.path, root.path),
         content: await readWorkspaceViewFileForDownload(workspaceId, entry.locator),
         source: entry.locator.kind,
-        referenceAlias: entry.locator.referenceAlias
+        referenceAlias: entry.locator.referenceAlias ?? entry.referenceAliases[0]
       });
     }
   }
@@ -8024,8 +8046,8 @@ async function reloadReferenceTab(tab: EditorTab) {
     path: info.logicalPath,
     name: tab.title,
     type: "file",
-    locator: { kind: "REFERENCE", path: info.referencePath, referenceAlias: info.referenceAlias },
-    source: "REFERENCE",
+    locator: referenceLocatorFromTab(info),
+    source: info.kind === "AUTOMATION_REFERENCE" ? "AUTOMATION_REFERENCE" : "REFERENCE",
     merged: true,
     collision: false,
     readonly: true,
@@ -8969,7 +8991,7 @@ async function handlePreviewContext(item: ChatContextItem) {
   if (!item.path) {
     return;
   }
-  if (item.openTarget?.locator.kind === "REFERENCE") {
+  if (item.openTarget?.locator.kind === "REFERENCE" || item.openTarget?.locator.kind === "AUTOMATION_REFERENCE") {
     const alias = item.openTarget.locator.referenceAlias;
     if (!alias || item.openTarget.workspaceId !== selectedWorkspace.value?.workspaceId) return;
     await openWorkspaceViewFile({
@@ -8978,7 +9000,7 @@ async function handlePreviewContext(item: ChatContextItem) {
       name: item.fileName,
       type: "file",
       locator: item.openTarget.locator,
-      source: "REFERENCE",
+      source: item.openTarget.locator.kind === "AUTOMATION_REFERENCE" ? "AUTOMATION_REFERENCE" : "REFERENCE",
       merged: true,
       collision: false,
       readonly: true,
@@ -9025,7 +9047,11 @@ function addCurrentSelectionToChatContext() {
     id: createContextId(),
     type: "selection",
     source: reference ? "reference" : "workspace",
-    path: reference ? referenceChatPath(reference.referenceAlias, reference.referencePath) : tab.path,
+    path: reference
+      ? (reference.kind === "AUTOMATION_REFERENCE"
+          ? reference.logicalPath
+          : referenceChatPath(reference.referenceAlias, reference.referencePath))
+      : tab.path,
     fileName: reference ? fileNameOf(reference.logicalPath) : fileNameOf(tab.path),
     language: languageFromPath(reference?.logicalPath ?? tab.path),
     startLine: selection.startLineNumber,
@@ -9036,7 +9062,7 @@ function addCurrentSelectionToChatContext() {
     ...(reference ? {
       openTarget: {
         workspaceId: reference.workspaceId,
-        locator: { kind: "REFERENCE" as const, path: reference.referencePath, referenceAlias: reference.referenceAlias },
+        locator: referenceLocatorFromTab(reference),
         logicalPath: reference.logicalPath
       }
     } : {})
@@ -9102,9 +9128,13 @@ async function addWorkspaceViewFileToChatContext(entry: WorkspaceViewEntry): Pro
       return false;
     }
     const content = file.content;
-    const path = referenceChatPath(alias, entry.locator.path);
+    const path = entry.locator.kind === "AUTOMATION_REFERENCE"
+      ? entry.path
+      : referenceChatPath(alias, entry.locator.path);
     const result = chatContextStore.addFileContext({
-      id: `reference:${workspace.workspaceId}:${alias}:${entry.locator.path}`,
+      id: entry.locator.kind === "AUTOMATION_REFERENCE"
+        ? `automation-reference:${workspace.workspaceId}:${entry.locator.automationWorkspaceId}:${entry.locator.automationVersionId}:${entry.locator.path}`
+        : `reference:${workspace.workspaceId}:${alias}:${entry.locator.path}`,
       type: "file",
       source: "reference",
       path,
@@ -12421,8 +12451,10 @@ async function handleLogout() {
     :open="referenceConfigurationOpen"
     :app-id="selectedAppId ?? ''"
     :workspace-id="selectedWorkspace?.workspaceId ?? ''"
+    :can-manage="isAppAdmin"
     @close="referenceConfigurationOpen = false"
     @saved="refreshWorkspaceViewAfterReferenceSaved"
+    @automation-changed="refreshWorkspaceViewAfterAutomationChanged"
   />
 
   <SettingsDialog

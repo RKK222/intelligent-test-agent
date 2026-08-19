@@ -12092,3 +12092,28 @@
 
 - Mac 交付物已分别落到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip` 与 `test-agent-bge-node.zip`，均有同名 `.sha256`；两条包边界已解包验证。
 - 本轮未新增或修改数据库/Flyway、RunEvent、部署拓扑、manager、worker、toolbox、本地客户端或 `.env*`。现场仍需依次升级 `.160` BGE、`.4/.114` Java 和 `.2` 前端并完成真实 EMBEDDING 探测；打包时已有的模型网关 README 未提交说明保持原样，未纳入本次暂存。
+
+## 2026-08-19 - 自动化代码库改为应用级只读 Reference
+
+### Why
+
+- 自动化仓库原先和测试工作空间处于同一切换维度，会创建个人 worktree，也无法按应用统一激活版本；用户要求复用应用资产库的 Reference 边界，并进一步把目录/版本配置从“工作空间管理”移到工作台“引用配置”。
+
+### What
+
+- 新增 `automation_workspace_active_versions` 及 MyBatis XML 仓储，首版本自动激活、存量选择最新 ACTIVE、后续由管理员显式切换；共享副本继续复用 `application_workspace_version_replicas`，历史个人 worktree 和会话保留但退出正常选择、创建与 Git 入口。
+- 组合文件视图新增自动化根和逻辑定位器，逐次校验应用成员、仓库类型、激活版本、副本与安全相对路径；只开放浏览、读取、分片、下载和加入对话，Run 出站上下文追加应用级只读引用说明且不写用户消息。
+- 工作台“引用配置”新增“自动化代码库”页签，管理员可选择任意分支、任意已有目录、引用名称和日期版本，并维护当前版本及启停；普通成员只读查看。设置页“工作空间管理”仅保留测试工作空间，两处复用统一目录树组件但维持各自选择约束。
+- 同步后端各模块、frontend/agent-web/user-manual README/PACKAGE，以及 HTTP API、事件/文件 RPC、数据库、模块图和专项测试说明；未修改 OpenCode 源码、generated SDK 或 `.env*`。
+
+### How
+
+- 后端 14 个相关测试类共 362 项通过，0 failure / 0 error / 0 skipped，覆盖激活、目录视图、文件 RPC、Run 上下文、权限与响应脱敏；26 模块跳过测试的完整 Maven package 成功。
+- 前端本轮 4 个定向文件 76/76，通过后又对轮询收口用例 3/3 复验；agent-web typecheck、用户手册和 agent-web production build 均通过。此前全量 Vitest 暴露的两个设置页定位断言已修正并由定向用例覆盖，但修正后未再次执行全量前端套件。
+- 根目录 `.env.test` 的 PostgreSQL `192.168.8.100:15432/testagent_dev` 已真实执行 migration 并稳定启动到 `20260819125704`；JDK 25 下重启 `test` profile 后 health/readiness 为 UP、前端 3000 返回 200、登录 CORS 正常，远端 OpenCode 配置下本机 manager 按设计跳过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并执行 `git diff --check`；明确排除工作区原有的模型网关 README 与本地客户端打包脚本改动。
+
+### Result
+
+- 自动化仓库不再作为主工作空间或个人 worktree；用户从组合文件树读取应用当前版本，管理员从“引用配置”选择具体目录和维护版本，应用代码库及既有文档引用保持原入口和状态。
+- 用户明确自行进行页面验收，因此本轮未代替用户执行登录后的真实目录选择、版本切换和 Run 端到端操作；此前后端完整套件仍有 3 个与本功能无关的日期/fixture/Testcontainers 基线失败，未作为本次功能通过项或顺手修改。

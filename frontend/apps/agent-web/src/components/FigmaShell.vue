@@ -312,14 +312,11 @@ function openExperience() {
   emit("open-experience");
 }
 
-const availableWorkspaceTemplates = computed(() => props.appTemplates.filter((template) => template.enabled !== false));
-const automationWorkspaceTemplates = computed(() => availableWorkspaceTemplates.value.filter(
-  (template) => template.repositoryType === "AUTOMATION_CODE_REPOSITORY"
+const availableWorkspaceTemplates = computed(() => props.appTemplates.filter(
+  (template) => template.enabled !== false && template.repositoryType !== "AUTOMATION_CODE_REPOSITORY"
 ));
-// 旧后端没有 repositoryType；未显式标记为自动化库时继续落入原测试工作空间分组。
-const testWorkspaceTemplates = computed(() => availableWorkspaceTemplates.value.filter(
-  (template) => template.repositoryType !== "AUTOMATION_CODE_REPOSITORY"
-));
+// 自动化代码库作为组合文件树中的只读引用展示，不再作为主工作空间切换项。
+const testWorkspaceTemplates = availableWorkspaceTemplates;
 const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
 const selectedAppSourceRepository = computed(() => visibleAppSourceRepositories.value.find(
   (repository) => repository.repositoryId === props.selectedAppSourceRepositoryId
@@ -337,9 +334,6 @@ const headerWorkspaceVersion = computed(() => {
   return versions.find((version) => version.versionId === props.selectedVersionId)
     ?? null;
 });
-const headerWorkspaceIsAutomation = computed(() =>
-  headerWorkspaceTemplate.value?.repositoryType === "AUTOMATION_CODE_REPOSITORY"
-);
 const headerWorkspaceLabel = computed(() => {
   if (props.workspaceKind === "EXPERIENCE") return "体验工作区";
   if (props.workspaceKind === "APP_SOURCE") {
@@ -2254,7 +2248,7 @@ function submitJoinApp() {
           >
             <span class="figma-context-menu-key">工作空间</span>
             <CodeXml
-              v-if="workspaceKind === 'APP_SOURCE' || headerWorkspaceIsAutomation"
+              v-if="workspaceKind === 'APP_SOURCE'"
               class="figma-context-trigger-type-icon figma-context-icon--app-source"
               aria-hidden="true"
             />
@@ -2346,32 +2340,6 @@ function submitJoinApp() {
               <li class="figma-app-menu-divider" role="presentation" />
             </template>
 
-            <li
-              v-if="automationWorkspaceTemplates.length > 0"
-              class="figma-context-menu-section-title"
-              role="presentation"
-            >
-              <span class="figma-context-menu-section-label">
-                <CodeXml class="figma-context-menu-type-icon" aria-hidden="true" />
-                自动化代码库
-              </span>
-            </li>
-            <li
-              v-for="template in automationWorkspaceTemplates"
-              :key="template.workspaceId"
-              :class="['figma-app-menu-item', template.workspaceId === headerWorkspaceTemplate?.workspaceId && 'is-active']"
-              role="option"
-              :aria-selected="template.workspaceId === headerWorkspaceTemplate?.workspaceId"
-              tabindex="0"
-              @mousedown.prevent="selectHeaderWorkspace(template)"
-            >
-              <CodeXml class="figma-context-menu-type-icon" aria-hidden="true" />
-              <div class="figma-app-menu-item-main">
-                <span class="figma-app-menu-item-name">{{ template.workspaceName }}</span>
-                <span class="figma-app-menu-item-desc">{{ template.branch }}</span>
-              </div>
-              <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
-            </li>
             <li
               v-if="testWorkspaceTemplates.length > 0 || availableWorkspaceTemplates.length === 0"
               class="figma-context-menu-section-title is-test-workspace"

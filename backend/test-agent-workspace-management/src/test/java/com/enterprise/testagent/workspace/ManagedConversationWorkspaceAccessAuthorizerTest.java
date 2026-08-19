@@ -10,6 +10,9 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
+import com.enterprise.testagent.domain.configuration.CodeRepository;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
@@ -52,6 +55,29 @@ class ManagedConversationWorkspaceAccessAuthorizerTest {
 
         verify(configurationRepository).isActiveMember(APP_ID, USER_ID);
         verify(managedRepository, never()).findPersonalWorkspaceByRuntimeWorkspace(WORKSPACE_ID);
+    }
+
+    @Test
+    void historicalAutomationWorkspaceUsesReadonlyFileClassification() {
+        ApplicationWorkspaceVersion version = mock(ApplicationWorkspaceVersion.class);
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_automation");
+        when(version.appId()).thenReturn(APP_ID);
+        when(version.repositoryId()).thenReturn(repositoryId);
+        when(managedRepository.findVersionByRuntimeWorkspace(WORKSPACE_ID)).thenReturn(Optional.of(version));
+        when(configurationRepository.findRepository(repositoryId)).thenReturn(Optional.of(new CodeRepository(
+                repositoryId,
+                "https://git.example.test/automation.git",
+                "自动化仓库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                false,
+                NOW,
+                NOW)));
+        when(configurationRepository.findApplication(APP_ID)).thenReturn(Optional.of(application(true)));
+        when(configurationRepository.isActiveMember(APP_ID, USER_ID)).thenReturn(true);
+
+        org.assertj.core.api.Assertions.assertThat(authorizer.requireClassifiedFileAccess(USER_ID, WORKSPACE_ID, false))
+                .isEqualTo(FileWorkspaceKind.AUTOMATION_REFERENCE);
     }
 
     @Test

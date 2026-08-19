@@ -21,6 +21,16 @@ class OpencodeRunEventMapperTest {
     private final OpencodeRunEventMapper mapper = new OpencodeRunEventMapper(objectMapper, () -> NOW);
 
     @Test
+    void identifiesOnlyReservedInternalRunContextPartEvents() throws Exception {
+        assertThat(mapper.isInternalRunContextEvent(objectMapper.readTree("""
+                {"type":"message.part.updated","properties":{"part":{"type":"file","mime":"text/plain","filename":".testagent-run-context.txt","url":"data:text/plain;charset=utf-8;base64,PGNvbnRleHQgLz4="}}}
+                """))).isTrue();
+        assertThat(mapper.isInternalRunContextEvent(objectMapper.readTree("""
+                {"type":"message.part.updated","properties":{"part":{"type":"file","mime":"text/plain","filename":".testagent-run-context.txt","url":"file:///tmp/user-file"}}}
+                """))).isFalse();
+    }
+
+    @Test
     void mapsRootIdleStatusToSessionStatusAndRunSucceeded() throws Exception {
         List<RunEventDraft> drafts = mapper.toDrafts(
                 objectMapper.readTree("""

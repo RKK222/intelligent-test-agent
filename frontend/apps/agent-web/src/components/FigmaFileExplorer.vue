@@ -67,7 +67,7 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   runtimeBusy?: boolean;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
-  /** 是否显示应用管理员个人工作区引用配置入口 */
+  /** 是否显示当前应用的引用配置入口；普通成员也可只读查看自动化引用。 */
   showReferenceConfiguration?: boolean;
   /** 搜索结果列表 */
   searchResults?: FileSearchResult[];

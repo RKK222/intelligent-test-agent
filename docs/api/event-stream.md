@@ -647,12 +647,12 @@ route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地�
 | `op` | `params` | 响应 |
 |---|---|---|
 | `workspace.list` | `workspaceId`, `path?` | `FileTreeEntryResponse[]` |
-| `workspace.view.list` | `workspaceId`, `locator` | `WorkspaceViewListResponse`；工作台文件树的组合视图，`locator.kind` 为 `COMPOSITE / WORKSPACE / REFERENCE`，返回稳定节点身份、来源、只读能力、局部告警和截断标记 |
+| `workspace.view.list` | `workspaceId`, `locator` | `WorkspaceViewListResponse`；`locator.kind` 为 `COMPOSITE / WORKSPACE / REFERENCE / AUTOMATION_ROOT / AUTOMATION_REFERENCE`；自动化定位器只携带配置 ID、版本 ID 和逻辑相对路径，来源固定为只读 `AUTOMATION_REFERENCE` |
 | `workspace.search` | `workspaceId`, `query` | `FileSearchResultResponse[]`；递归搜索工作区相对路径（不区分大小写子串匹配），空 query 返回受限文件目录；跳过黑名单目录，结果按文件名排序并限制数量 |
 | `workspace.read` | `workspaceId`, `path` | `FileContentResponse` |
 | `workspace.read.chunk` | `workspaceId`, `path`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FilePreviewChunkResponse`；渐进读取完整 UTF-8 文件，响应含 `content/nextOffset/size/eof/warningThresholdBytes/lastModifiedMillis` |
 | `workspace.read.binary.chunk` | `workspaceId`, `path`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FileBinaryChunkResponse`；读取工作区普通文件的 Base64 原始字节分段，响应含 `contentBase64/offset/nextOffset/size/eof/lastModifiedMillis` |
-| `workspace.view.read` | `workspaceId`, `locator` | `WorkspaceViewFileContentResponse`；读取工作区或引用视图中的 UTF-8 普通文件，引用内容固定只读 |
+| `workspace.view.read` | `workspaceId`, `locator` | `WorkspaceViewFileContentResponse`；读取工作区、文档引用或自动化引用中的 UTF-8 普通文件，两类引用固定只读；自动化读取实时复核成员及指定版本副本 |
 | `workspace.view.read.chunk` | `workspaceId`, `locator`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FilePreviewChunkResponse`；每段重新解析和校验逻辑 locator，不接收物理路径 |
 | `workspace.view.read.binary.chunk` | `workspaceId`, `locator`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FileBinaryChunkResponse`；读取组合视图文件的 Base64 原始字节分段，每段重新解析和校验逻辑 locator，不接收物理路径 |
 | `workspace.write` | `workspaceId`, `path`, `content` | `null` |

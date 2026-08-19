@@ -4,7 +4,7 @@ export type WorkspaceDownloadFile = {
 };
 
 export type WorkspaceDownloadCandidate = WorkspaceDownloadFile & {
-  source: "WORKSPACE" | "REFERENCE";
+  source: "WORKSPACE" | "REFERENCE" | "AUTOMATION_REFERENCE";
   referenceAlias?: string;
 };
 
@@ -103,6 +103,9 @@ function sourceArchivePath(file: WorkspaceDownloadCandidate): string {
   const alias = file.referenceAlias?.trim();
   if (!alias) {
     throw new Error("引用文件缺少来源别名，无法安全生成 ZIP");
+  }
+  if (file.source === "AUTOMATION_REFERENCE") {
+    return `automation/${alias}/${file.path}`;
   }
   return `references/${alias}/${file.path}`;
 }

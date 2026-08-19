@@ -6,7 +6,7 @@ describe("reference configuration access", () => {
   it.each([
     [{ roles: ["APP_ADMIN"], personalWorkspaceId: "pw-1", runtimeWorkspaceId: "wrk-1", appId: "app-1" }, true],
     [{ roles: ["SUPER_ADMIN"], personalWorkspaceId: "pw-1", runtimeWorkspaceId: "wrk-1", appId: "app-1" }, true],
-    [{ roles: ["USER"], personalWorkspaceId: "pw-1", runtimeWorkspaceId: "wrk-1", appId: "app-1" }, false],
+    [{ roles: ["USER"], personalWorkspaceId: "pw-1", runtimeWorkspaceId: "wrk-1", appId: "app-1" }, true],
     [{ roles: ["APP_ADMIN"], personalWorkspaceId: "pw-1", runtimeWorkspaceId: undefined, appId: "app-1" }, false],
     [{ roles: ["APP_ADMIN"], personalWorkspaceId: "pw-1", runtimeWorkspaceId: "wrk-1", appId: undefined }, false],
     [{ roles: ["APP_ADMIN"], personalWorkspaceId: undefined, runtimeWorkspaceId: "wrk-1", appId: "app-1" }, false],

@@ -193,6 +193,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                                 command.traceId())),
                         "streamRunEvents",
                         command.node())
+                .filter(rawEvent -> !eventMapper.isInternalRunContextEvent(rawEvent))
                 .flatMapIterable(rawEvent -> eventMapper.toDrafts(
                         rawEvent,
                         command.runId(),
@@ -215,6 +216,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 opened.ready(), "openRunEventStreamReady", command.node());
         Flux<RunEventDraft> events = applyObservableStreamEvents(
                         opened.events(), "openRunEventStream", command.node())
+                .filter(rawEvent -> !eventMapper.isInternalRunContextEvent(rawEvent))
                 .flatMapIterable(rawEvent -> eventMapper.toDrafts(
                         rawEvent,
                         command.runId(),

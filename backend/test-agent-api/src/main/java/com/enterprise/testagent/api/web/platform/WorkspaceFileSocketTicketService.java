@@ -123,8 +123,8 @@ class WorkspaceFileSocketTicketService {
             context.requireWorkspace(workspaceId);
             FileWorkspaceKind workspaceKind = workspaceAccessAuthorizer.requireClassifiedFileAccess(
                     context.executionOwnerUserId(), workspaceId, false);
-            if (workspaceKind == FileWorkspaceKind.APP_SOURCE) {
-                throw new PlatformException(ErrorCode.FORBIDDEN, "分享模式不允许访问应用源码工作区");
+            if (readOnlyWorkspaceKind(workspaceKind)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "分享模式不允许访问只读引用工作区");
             }
             UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(
                     context.executionOwnerUserId(), traceId);
@@ -193,7 +193,7 @@ class WorkspaceFileSocketTicketService {
                     workspaceId,
                     currentLinuxServerId,
                     agentLinuxServerId,
-                    workspaceKind == FileWorkspaceKind.APP_SOURCE,
+                    readOnlyWorkspaceKind(workspaceKind),
                     superAdmin,
                     appAdmin,
                     principal.userId().value(),
@@ -339,7 +339,7 @@ class WorkspaceFileSocketTicketService {
         }
         FileWorkspaceKind currentKind = workspaceAccessAuthorizer.requireClassifiedFileAccess(
                 userId, workspaceId, false);
-        if (ticket.appSourceWorkspace() && currentKind != FileWorkspaceKind.APP_SOURCE) {
+        if (ticket.appSourceWorkspace() != readOnlyWorkspaceKind(currentKind)) {
             throw workspaceRpcDenied();
         }
         workspaceService.requireWorkspaceOnCurrentServer(workspaceId, ticket.traceId());
@@ -568,5 +568,10 @@ class WorkspaceFileSocketTicketService {
 
     private String normalizeOptional(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    /** 应用源码副本和历史自动化运行目录共用文件通道的严格只读边界。 */
+    private boolean readOnlyWorkspaceKind(FileWorkspaceKind kind) {
+        return kind == FileWorkspaceKind.APP_SOURCE || kind == FileWorkspaceKind.AUTOMATION_REFERENCE;
     }
 }

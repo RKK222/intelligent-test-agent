@@ -267,6 +267,34 @@ describe("runtime management settings", () => {
     expect(appAdmin.queryByText("运行管理")).toBeNull();
   });
 
+  it("lets ordinary members inspect application automation versions without repository management", () => {
+    const currentUser = {
+      userId: "usr_member",
+      username: "member",
+      unifiedAuthId: "AUTH_MEMBER",
+      roles: ["USER"]
+    };
+    const menu = render(SettingsMenu, {
+      props: { activeKey: "appWorkspace", currentUser }
+    });
+    expect(menu.getByText("应用管理")).toBeTruthy();
+    expect(menu.getByText("个人设置")).toBeTruthy();
+    expect(menu.queryByText("版本库管理")).toBeNull();
+    menu.unmount();
+
+    const panel = render(SettingsPanel, {
+      props: { activeKey: "appWorkspace", currentUser },
+      global: {
+        stubs: {
+          SettingsAppWorkspacePanel: { template: "<div>readonly automation versions</div>" },
+          SettingsPersonalPanel: { template: "<div>personal panel</div>" }
+        }
+      }
+    });
+    expect(panel.getByText("readonly automation versions")).toBeTruthy();
+    expect(panel.queryByText("personal panel")).toBeNull();
+  });
+
   it("renders the application workspace management panel title", () => {
     const view = render(SettingsPanel, {
       props: {

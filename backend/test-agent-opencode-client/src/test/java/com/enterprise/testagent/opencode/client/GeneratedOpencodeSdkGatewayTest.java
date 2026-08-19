@@ -554,6 +554,15 @@ class GeneratedOpencodeSdkGatewayTest {
                             "messageID": "msg_remote1234567890abcdef",
                             "type": "text",
                             "text": "hello"
+                          },
+                          {
+                            "id": "part_internal_context",
+                            "sessionID": "ses_remote1234567890abcdef",
+                            "messageID": "msg_remote1234567890abcdef",
+                            "type": "file",
+                            "mime": "text/plain",
+                            "filename": ".testagent-run-context.txt",
+                            "url": "data:text/plain;charset=utf-8;base64,PGNvbnRleHQgLz4="
                           }
                         ]
                       }

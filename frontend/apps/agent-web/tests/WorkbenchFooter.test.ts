@@ -87,7 +87,7 @@ describe("WorkbenchFooter", () => {
     expect(wrapper.emitted("open-reference-configuration")).toHaveLength(1);
   });
 
-  it("separates the automation repository in the workspace menu without moving server/config buttons", async () => {
+  it("keeps automation repositories out of the primary workspace menu without moving server/config buttons", async () => {
     const automationTemplate = {
       ...template,
       workspaceId: "wks_automation",
@@ -108,7 +108,7 @@ describe("WorkbenchFooter", () => {
 
     const buttons = wrapper.find(".ta-workbench-footer-left").findAll("button");
     expect(buttons.map((button) => button.attributes("aria-label") ?? button.attributes("data-onboarding")))
-      .toEqual(["切换应用代码库、自动化代码库或测试工作空间", "打开引用配置", "切换服务器工作空间"]);
+      .toEqual(["切换应用代码库或测试工作空间", "打开引用配置", "切换服务器工作空间"]);
 
     await buttons[2].trigger("click");
     expect(wrapper.emitted("open-server-workspace-picker")).toHaveLength(1);
@@ -118,8 +118,8 @@ describe("WorkbenchFooter", () => {
     const appSourceSwitch = document.body.querySelector('[aria-label="打开应用代码库源码"]') as HTMLButtonElement | null;
     expect(appSourceSwitch).not.toBeNull();
     expect(document.body.querySelector('[aria-label="管理应用代码库"]')).not.toBeNull();
-    expect(document.body.textContent).toContain("自动化代码库");
-    expect(document.body.textContent).toContain("接口自动化");
+    expect(document.body.textContent).not.toContain("自动化代码库");
+    expect(document.body.textContent).not.toContain("接口自动化");
     expect(document.body.textContent).toContain("测试工作空间");
     expect(document.body.textContent).toContain("主服务");
     expect(document.body.querySelector(".ta-workbench-cascade-item .ta-workbench-cascade-workspace-icon")).not.toBeNull();

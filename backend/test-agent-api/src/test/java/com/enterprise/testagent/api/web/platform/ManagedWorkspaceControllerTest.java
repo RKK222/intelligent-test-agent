@@ -32,6 +32,7 @@ import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRun
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitCommitResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitConflictResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitMergeCompletionResponse;
+import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.AutomationActiveVersionResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -104,6 +105,70 @@ class ManagedWorkspaceControllerTest {
                 .expectBody()
                 .jsonPath("$.data.versionId").isEqualTo("awv_123")
                 .jsonPath("$.data.runtimeWorkspace.workspaceId").isEqualTo("wks_123");
+    }
+
+    @Test
+    void automationVersionListOmitsPhysicalPathsAndRuntimeWorkspace() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.listVersions("aws_automation", USER_ID)).thenReturn(List.of(
+                new ApplicationWorkspaceVersionResponse(
+                        "awv_automation",
+                        "aws_automation",
+                        "app_gcms",
+                        "repo_automation",
+                        "20260819",
+                        "main",
+                        null,
+                        null,
+                        null,
+                        "ACTIVE",
+                        Instant.parse("2026-08-19T00:00:00Z"),
+                        Instant.parse("2026-08-19T00:00:00Z"))));
+
+        client(service).get()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/aws_automation/versions")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data[0].versionId").isEqualTo("awv_automation")
+                .jsonPath("$.data[0].repoRootPath").doesNotExist()
+                .jsonPath("$.data[0].workspaceRootPath").doesNotExist()
+                .jsonPath("$.data[0].runtimeWorkspace").doesNotExist();
+    }
+
+    @Test
+    void automationVersionActivationRequiresApplicationAdministratorAndPassesLogicalIds() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        AutomationActiveVersionResponse response = new AutomationActiveVersionResponse(
+                "awv_2",
+                "20260819",
+                "main",
+                "abc123",
+                "READY",
+                USER_ID.value(),
+                Instant.parse("2026-08-19T00:00:00Z"));
+        when(service.activateAutomationVersion("app_gcms", "awp_auto", "awv_2", USER_ID))
+                .thenReturn(response);
+
+        client(service).put()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/awp_auto/active-version")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"versionId\":\"awv_2\"}")
+                .exchange()
+                .expectStatus().isForbidden();
+
+        client(service, readyAssignmentService("127.0.0.1"), List.of("APP_ADMIN")).put()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/awp_auto/active-version")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"versionId\":\"awv_2\"}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.versionId").isEqualTo("awv_2");
+
+        verify(service).activateAutomationVersion("app_gcms", "awp_auto", "awv_2", USER_ID);
     }
 
     @Test

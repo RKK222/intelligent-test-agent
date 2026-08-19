@@ -805,7 +805,10 @@ class WorkspaceFileWebSocketHandlerTest {
         when(ticketService.consume("wft_workspace", "http://localhost:3000"))
                 .thenReturn(workspaceTicket("wrk_1234567890abcdef"));
         WorkspaceViewLocator root = WorkspaceViewLocator.root();
-        when(viewService.list(new WorkspaceId("wrk_1234567890abcdef"), root)).thenReturn(new WorkspaceViewListResponse(
+        when(viewService.list(
+                new UserId("usr_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                root)).thenReturn(new WorkspaceViewListResponse(
                 List.of(new WorkspaceViewEntry(
                         "view_docs",
                         "docs",
@@ -849,7 +852,10 @@ class WorkspaceFileWebSocketHandlerTest {
         verify(ticketService).authorizeWorkspaceRpc(
                 workspaceTicket("wrk_1234567890abcdef"),
                 new WorkspaceId("wrk_1234567890abcdef"));
-        verify(viewService).list(new WorkspaceId("wrk_1234567890abcdef"), root);
+        verify(viewService).list(
+                new UserId("usr_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                root);
     }
 
     @Test
@@ -863,7 +869,7 @@ class WorkspaceFileWebSocketHandlerTest {
                 "docs-requirements");
         when(ticketService.consume("wft_workspace", "http://localhost:3000"))
                 .thenReturn(workspaceTicket(workspaceId.value()));
-        when(viewService.read(workspaceId, locator)).thenReturn(new WorkspaceViewReadResponse(
+        when(viewService.read(new UserId("usr_1234567890abcdef"), workspaceId, locator)).thenReturn(new WorkspaceViewReadResponse(
                 "docs/guide.md",
                 "reference-content",
                 17L,
@@ -896,7 +902,7 @@ class WorkspaceFileWebSocketHandlerTest {
             assertThat(message).doesNotContain("physicalPath", "rootPath", "repositoryId");
         });
         verify(ticketService).authorizeWorkspaceRpc(workspaceTicket(workspaceId.value()), workspaceId);
-        verify(viewService).read(workspaceId, locator);
+        verify(viewService).read(new UserId("usr_1234567890abcdef"), workspaceId, locator);
     }
 
     @Test
@@ -913,7 +919,8 @@ class WorkspaceFileWebSocketHandlerTest {
                 .thenReturn(workspaceTicket(workspaceId.value()));
         when(workspaceService.readFileBinaryChunk(workspaceId, "asset.bin", 0L, null, null))
                 .thenReturn(new FileBinaryChunkResponse("asset.bin", "AP8=", 0L, 2L, 2L, true, 1234L));
-        when(viewService.readBinaryChunk(workspaceId, locator, 0L, null, null))
+        when(viewService.readBinaryChunk(
+                new UserId("usr_1234567890abcdef"), workspaceId, locator, 0L, null, null))
                 .thenReturn(new FileBinaryChunkResponse("docs/asset.bin", "AYA=", 0L, 2L, 2L, true, 1234L));
         WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
                 ticketService,
@@ -940,7 +947,8 @@ class WorkspaceFileWebSocketHandlerTest {
         assertThat(session.sentText().get(1)).contains("\"contentBase64\":\"AYA=\"", "\"path\":\"docs/asset.bin\"");
         verify(ticketService, times(2)).authorizeWorkspaceRpc(workspaceTicket(workspaceId.value()), workspaceId);
         verify(workspaceService).readFileBinaryChunk(workspaceId, "asset.bin", 0L, null, null);
-        verify(viewService).readBinaryChunk(workspaceId, locator, 0L, null, null);
+        verify(viewService).readBinaryChunk(
+                new UserId("usr_1234567890abcdef"), workspaceId, locator, 0L, null, null);
     }
 
     @Test

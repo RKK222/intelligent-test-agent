@@ -5,8 +5,8 @@ export type ReferenceConfigurationAccessContext = {
   appId: string | undefined;
 };
 
-/** APP_ADMIN 能力包含 SUPER_ADMIN；入口还必须拥有完整应用、个人工作区和实际运行时工作区上下文。 */
+/** 应用成员可只读查看自动化引用；资产库和自动化变更仍由弹窗及后端按管理员权限收口。 */
 export function canShowReferenceConfiguration(context: ReferenceConfigurationAccessContext) {
   if (!context.appId || !context.personalWorkspaceId || !context.runtimeWorkspaceId) return false;
-  return context.roles?.some((role) => role === "APP_ADMIN" || role === "SUPER_ADMIN") === true;
+  return (context.roles?.length ?? 0) > 0;
 }

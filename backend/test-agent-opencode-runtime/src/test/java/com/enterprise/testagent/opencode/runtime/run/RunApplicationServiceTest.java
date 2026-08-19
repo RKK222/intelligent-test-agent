@@ -423,7 +423,6 @@ class RunApplicationServiceTest {
                 new RunEventAppender(new FakeRunEventRepository()),
                 runtimeRegistry(facade),
                 new FakeAgentSessionBindingRepository());
-
         Run run = assertTimeoutPreemptively(
                 Duration.ofMillis(500),
                 () -> service.startRun(
@@ -448,6 +447,10 @@ class RunApplicationServiceTest {
                 new RunEventAppender(new FakeRunEventRepository()),
                 runtimeRegistry(facade),
                 new FakeAgentSessionBindingRepository());
+        service.setRunSystemPromptContributors(List.of(context -> {
+            assertThat(context.command()).isTrue();
+            return Optional.of("<automation_references readonly=\"true\" />");
+        }));
 
         Run run = service.startRun(new StartRunInput(
                         new SessionId("ses_1234567890abcdef"),

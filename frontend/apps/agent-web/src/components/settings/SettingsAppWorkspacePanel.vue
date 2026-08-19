@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, defineComponent, h, inject, onBeforeUnmount, ref, watch, type PropType, type VNode } from "vue";
+import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   ApplicationDefinition,
   ApplicationMember,
   ApplicationWorkspaceConfig,
+  ApplicationWorkspaceTemplate,
   CodeRepositoryConfig,
   CreateApplicationWorkspacePayload,
   CurrentUser,
@@ -14,6 +15,7 @@ import type {
   WorkspaceCreateOperation
 } from "@test-agent/shared-types";
 import { CirclePlus, Delete, InfoFilled, Link } from "@element-plus/icons-vue";
+import RepositoryDirectoryTree from "../RepositoryDirectoryTree.vue";
 
 const ADD_REPOSITORY_OPTION_VALUE = "__create_repository__";
 const TEST_WORK_REPOSITORY_TYPE = "TEST_WORK_REPOSITORY";
@@ -38,81 +40,6 @@ type WorkspaceTreeNode = Omit<RepositoryTreeNode, "children"> & {
   directoryNew?: boolean;
 };
 type AppTab = "members" | "repositories" | "workspaces";
-
-const WorkspaceDirectoryTree = defineComponent({
-  name: "WorkspaceDirectoryTree",
-  props: {
-    nodes: { type: Array as PropType<WorkspaceTreeNode[]>, required: true },
-    selectedPath: { type: String, default: "" }
-  },
-  emits: ["select"],
-  setup(props, { emit }) {
-    const expandedPaths = ref(new Set<string>());
-    const collectDefaultExpandedPaths = (nodes: WorkspaceTreeNode[], depth = 0, acc = new Set<string>()) => {
-      for (const node of nodes) {
-        if (node.type === "directory" && node.children.length > 0 && depth <= 2) {
-          acc.add(node.path);
-          collectDefaultExpandedPaths(node.children, depth + 1, acc);
-        }
-      }
-      return acc;
-    };
-    watch(
-      () => props.nodes,
-      (nodes) => {
-        expandedPaths.value = collectDefaultExpandedPaths(nodes);
-      },
-      { immediate: true }
-    );
-    const toggleExpanded = (path: string) => {
-      const next = new Set(expandedPaths.value);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      expandedPaths.value = next;
-    };
-    const renderNodes = (nodes: WorkspaceTreeNode[], depth = 0): VNode =>
-      h(
-        "ul",
-        { class: "ta-workspace-tree-list", "data-depth": String(depth) },
-        nodes.map((node) => {
-          const selectable = isSelectableWorkspaceTreeNode(node);
-          const expandable = node.type === "directory" && node.children.length > 0;
-          const expanded = expandedPaths.value.has(node.path);
-          return h("li", { key: node.path, class: ["ta-workspace-tree-item", `is-${node.type}`] }, [
-            h(
-              "button",
-              {
-                type: "button",
-                class: [
-                  "ta-workspace-tree-node",
-                  { "is-selected": props.selectedPath === node.path, "is-selectable": selectable }
-                ],
-                style: { paddingLeft: `${8 + depth * 16}px` },
-                disabled: !selectable && (!expandable || !isTreeNodeUnderCurrentApp(node)),
-                title: workspaceTreeNodeTitle(node),
-                "aria-expanded": expandable ? String(expanded) : undefined,
-                onClick: () => {
-                  // 目录树可能很大：默认只渲染展开分支，点击目录时再展开/收起并复用同一次点击完成选择。
-                  if (expandable) toggleExpanded(node.path);
-                  if (selectable) emit("select", node);
-                }
-              },
-              [
-                h("span", { class: "ta-workspace-tree-icon", "aria-hidden": "true" }, expandable ? (expanded ? "▾" : "▸") : "·"),
-                h("span", { class: "ta-workspace-tree-path" }, node.path),
-                node.directoryNew ? h("span", { class: "ta-workspace-tree-badge" }, "新增") : null
-              ]
-            ),
-            expanded ? renderNodes(node.children, depth + 1) : null
-          ]);
-        })
-      );
-    return () => renderNodes(props.nodes);
-  }
-});
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -180,13 +107,18 @@ const availableRepositories = computed(() => {
   const linkedRepositoryIds = new Set(appRepositories.value.map((item) => item.repositoryId));
   return repositories.value.filter((item) => !linkedRepositoryIds.has(item.repositoryId));
 });
-// 工作空间入口支持测试工作库和自动化代码库；standard=true 仅兼容尚未补齐 repositoryType 的历史测试工作库。
-const workspaceRepositories = computed(() => appRepositories.value.filter(isWorkspaceRepository));
+// 工作空间管理只承载可工作的测试工作库；自动化代码库统一进入工作台“引用配置”。
+const workspaceRepositories = computed(() => appRepositories.value.filter(isTestWorkRepository));
 const linkRepositoryId = ref("");
 const lastLinkRepositoryId = ref("");
 
 // 工作空间
 const workspaces = ref<ApplicationWorkspaceConfig[]>([]);
+const managedWorkspaceTemplates = ref<ApplicationWorkspaceTemplate[]>([]);
+const testWorkspaces = computed(() => workspaces.value.filter((workspace) =>
+  managedWorkspaceTemplates.value.find((template) => template.workspaceId === workspace.workspaceId)?.repositoryType
+    !== AUTOMATION_CODE_REPOSITORY_TYPE
+));
 const workspaceRepositoryId = ref("");
 const branches = ref<string[]>([]);
 const workspaceBranch = ref("");
@@ -196,7 +128,6 @@ const repositoryTree = ref<WorkspaceTreeNode[]>([]);
 const newDirectoryName = ref("");
 const treeErrorMessage = ref("");
 const workspaceName = ref(DEFAULT_WORKSPACE_ALIAS);
-const workspaceVersion = ref("");
 const workspaceCreateOperation = ref<WorkspaceCreateOperation | null>(null);
 const workspaceCatalogNotifiedOperationIds = new Set<string>();
 let workspaceCreatePollTimer: number | undefined;
@@ -206,7 +137,6 @@ let branchRequestToken = 0;
 let directoryRequestToken = 0;
 
 const selectedWorkspaceRepository = computed(() => workspaceRepositories.value.find((item) => item.repositoryId === workspaceRepositoryId.value) ?? null);
-const requiresWorkspaceVersion = computed(() => isAutomationCodeRepository(selectedWorkspaceRepository.value));
 const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.steps ?? []);
 const customBranchError = ref("");
 const selectedAppName = computed(() => selectedApp.value?.appName ?? "");
@@ -249,7 +179,6 @@ watch(
 const canSaveWorkspace = computed(() => {
   if (loading.value || !workspaceRepositoryId.value || !workspaceBranch.value || !workspaceDirectory.value) return false;
   if (customBranchError.value || workspaceAliasDuplicate.value || !workspaceAlias.value) return false;
-  if (requiresWorkspaceVersion.value && !/^\d{8}$/.test(workspaceVersion.value ?? "")) return false;
   return true;
 });
 
@@ -407,6 +336,7 @@ function clearAppContext() {
   repositories.value = [];
   appRepositories.value = [];
   workspaces.value = [];
+  managedWorkspaceTemplates.value = [];
   branches.value = [];
   repositoryTree.value = [];
 }
@@ -551,7 +481,17 @@ async function unlinkRepository(repository: CodeRepositoryConfig) {
 
 // 工作空间管理
 async function loadWorkspaces() {
-  workspaces.value = selectedAppId.value ? await api.listApplicationWorkspaces(selectedAppId.value) : [];
+  if (!selectedAppId.value) {
+    workspaces.value = [];
+    managedWorkspaceTemplates.value = [];
+    return;
+  }
+  const [configuredWorkspaces, templates] = await Promise.all([
+    api.listApplicationWorkspaces(selectedAppId.value),
+    api.listWorkspaceTemplates(selectedAppId.value)
+  ]);
+  workspaces.value = configuredWorkspaces;
+  managedWorkspaceTemplates.value = templates;
 }
 
 async function updateWorkspaceEnabled(workspace: ApplicationWorkspaceConfig, enabled: boolean) {
@@ -651,7 +591,7 @@ async function loadRepositoryTree() {
   }
 }
 
-function selectWorkspaceTreeNode(node: WorkspaceTreeNode) {
+function selectWorkspaceTreeNode(node: RepositoryTreeNode & { directoryNew?: boolean }) {
   if (!isSelectableWorkspaceTreeNode(node)) return;
   workspaceDirectory.value = node.path;
   workspaceDirectoryNew.value = Boolean(node.directoryNew);
@@ -689,10 +629,6 @@ async function createWorkspace() {
     errorMessage.value = "工作空间别名已存在";
     return;
   }
-  if (requiresWorkspaceVersion.value && !/^\d{8}$/.test(workspaceVersion.value ?? '')) {
-    errorMessage.value = "自动化代码库版本必须选择日期";
-    return;
-  }
   const operationId = createWorkspaceOperationId();
   startWorkspaceCreatePolling(operationId);
   await run(async () => {
@@ -709,9 +645,6 @@ async function createWorkspace() {
       if (workspaceDirectoryNew.value) {
         payload.directoryNew = true;
       }
-      if (requiresWorkspaceVersion.value) {
-        payload.version = (workspaceVersion.value ?? '').trim() || undefined;
-      }
       await api.createApplicationWorkspace(selectedAppId.value, payload);
     } catch (error) {
       stopWorkspaceCreatePolling();
@@ -719,7 +652,6 @@ async function createWorkspace() {
     }
     await refreshWorkspaceCreateOperation(operationId);
     workspaceName.value = DEFAULT_WORKSPACE_ALIAS;
-    workspaceVersion.value = "";
     await loadWorkspaces();
   });
 }
@@ -785,6 +717,8 @@ async function refreshWorkspaceCreateOperation(operationId: string) {
 watch(() => props.currentUser, async (user) => {
   if (user && hasAppSettingsPermission.value) {
     await loadApplications();
+  } else if (user) {
+    clearAppContext();
   } else {
     clearAppContext();
   }
@@ -799,7 +733,10 @@ watch(() => props.refreshKey, () => {
 
 // 右上角切换应用时同步更新设置弹窗中的选中
 watch(() => props.initialAppId, (newAppId) => {
-  if (!newAppId || !hasAppSettingsPermission.value) return;
+  if (!hasAppSettingsPermission.value) {
+    return;
+  }
+  if (!newAppId) return;
   if (applications.value.some((item) => item.appId === newAppId)) {
     selectedAppId.value = newAppId;
   }
@@ -825,16 +762,6 @@ function isTestWorkRepository(repository: CodeRepositoryConfig | null) {
     return repositoryType === TEST_WORK_REPOSITORY_TYPE;
   }
   return Boolean(repository?.standard);
-}
-
-/** 自动化代码库显式走非标准库工作空间规则，不借用旧 standard 兼容字段。 */
-function isAutomationCodeRepository(repository: CodeRepositoryConfig | null) {
-  return repository?.repositoryType?.trim() === AUTOMATION_CODE_REPOSITORY_TYPE;
-}
-
-/** 工作空间候选仅开放测试工作库和自动化代码库，应用代码库、应用资产库保持隐藏。 */
-function isWorkspaceRepository(repository: CodeRepositoryConfig | null) {
-  return isTestWorkRepository(repository) || isAutomationCodeRepository(repository);
 }
 
 function cloneTreeNode(node: RepositoryTreeNode): WorkspaceTreeNode {
@@ -868,32 +795,11 @@ function findTreeNode(nodes: WorkspaceTreeNode[], path: string): WorkspaceTreeNo
   return null;
 }
 
-function isSelectableWorkspaceTreeNode(node: WorkspaceTreeNode) {
+function isSelectableWorkspaceTreeNode(node: RepositoryTreeNode) {
   if (node.type !== "directory") return false;
-  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return true;
   const appName = selectedAppName.value;
   const parts = node.path.split("/");
   return parts.length === 2 && parts[0] === appName && Boolean(parts[1]);
-}
-
-/**
- * 判断节点是否属于当前应用目录下，仅测试工作库时限制交互范围。
- * 其他应用的目录仅展示、不可展开也不可选中。
- */
-function isTreeNodeUnderCurrentApp(node: WorkspaceTreeNode): boolean {
-  if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return true;
-  const appName = selectedAppName.value;
-  return node.path === appName || node.path.startsWith(appName + "/");
-}
-
-function workspaceTreeNodeTitle(node: WorkspaceTreeNode) {
-  if (isSelectableWorkspaceTreeNode(node)) return "选择为工作空间";
-  if (node.type === "file") return "文件仅可浏览，不能选择为工作空间";
-  if (isTestWorkRepository(selectedWorkspaceRepository.value)) {
-    if (!isTreeNodeUnderCurrentApp(node)) return "其他应用目录仅可查看，不能选择为工作空间";
-    return "测试工作库只能选择应用同名目录的一级子目录";
-  }
-  return "目录";
 }
 
 onBeforeUnmount(() => {
@@ -905,7 +811,12 @@ onBeforeUnmount(() => {
   <div class="ta-settings-app-workspace">
     <!-- 权限不足提示 -->
     <div v-if="!hasAppSettingsPermission" class="ta-permission-placeholder">
-      <el-alert :title="`您当前角色[${currentRoleLabel}]无该项设置权限。`" type="warning" :closable="false" show-icon />
+      <el-alert
+        :title="`您当前角色[${currentRoleLabel}]没有应用设置修改权限；自动化代码库当前版本请在工作台“引用配置”中查看。`"
+        type="info"
+        :closable="false"
+        show-icon
+      />
     </div>
 
     <template v-else>
@@ -1045,7 +956,7 @@ onBeforeUnmount(() => {
               <label class="ta-form-field">
                 <span class="ta-form-label">
                   已关联版本库
-                  <el-tooltip content="只能选择测试工作库或自动化代码库。" placement="top">
+                  <el-tooltip content="工作空间只使用测试工作库；自动化代码库请在工作台“引用配置”中管理。" placement="top">
                     <el-icon class="ta-form-label-hint-icon"><InfoFilled /></el-icon>
                   </el-tooltip>
                 </span>
@@ -1084,17 +995,6 @@ onBeforeUnmount(() => {
                 <el-input v-model="workspaceName" placeholder="ai-test" style="width: 100%" />
                 <div v-if="workspaceAliasDuplicate" class="ta-branch-error">工作空间别名已存在</div>
               </label>
-              <label v-if="requiresWorkspaceVersion" class="ta-form-field">
-                <span class="ta-form-label">自动化代码库版本</span>
-                <el-date-picker
-                  v-model="workspaceVersion"
-                  type="date"
-                  value-format="YYYYMMDD"
-                  format="YYYYMMDD"
-                  placeholder="选择日期"
-                  style="width: 100%"
-                />
-              </label>
             </div>
 
             <div class="ta-workspace-tree-panel">
@@ -1105,10 +1005,12 @@ onBeforeUnmount(() => {
               <div v-if="loadingBranches || loadingDirectories" class="ta-workspace-tree-progress">
                 <el-progress :percentage="100" :indeterminate="true" :duration="1" :show-text="false" :stroke-width="2" style="width: 100%" />
               </div>
-              <WorkspaceDirectoryTree
+              <RepositoryDirectoryTree
                 v-if="repositoryTree.length"
                 :nodes="repositoryTree"
                 :selected-path="workspaceDirectory"
+                selection-mode="test-workspace"
+                :app-name="selectedAppName"
                 @select="selectWorkspaceTreeNode"
               />
               <div v-else class="ta-empty-hint">暂无目录树</div>
@@ -1145,8 +1047,8 @@ onBeforeUnmount(() => {
 
         <div class="ta-section">
           <h4 class="ta-section-title">已有工作空间</h4>
-          <div v-if="!workspaces.length" class="ta-empty-hint">暂无工作空间</div>
-          <div v-for="ws in workspaces" :key="ws.workspaceId" class="ta-item-row">
+          <div v-if="!testWorkspaces.length" class="ta-empty-hint">暂无工作空间</div>
+          <div v-for="ws in testWorkspaces" :key="ws.workspaceId" class="ta-item-row">
             <div>
               <div class="ta-item-title">{{ ws.workspaceName }}</div>
               <div class="ta-item-subtitle">{{ ws.branch }} · {{ ws.directoryPath }}</div>
@@ -1419,70 +1321,6 @@ onBeforeUnmount(() => {
 }
 .ta-workspace-tree-progress :deep(.el-progress) {
   margin: 0;
-}
-:deep(.ta-workspace-tree-list) {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-:deep(.ta-workspace-tree-item) {
-  margin: 0;
-  padding: 0;
-}
-:deep(.ta-workspace-tree-node) {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  height: 24px;
-  border: 0;
-  background: transparent;
-  color: #374151;
-  font-family: var(--ta-tree-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-  font-size: 13px;
-  line-height: 24px;
-  text-align: left;
-  transition: background-color 0.12s ease, color 0.12s ease;
-}
-:deep(.ta-workspace-tree-node:not(:disabled)) {
-  cursor: pointer;
-}
-:deep(.ta-workspace-tree-node:not(:disabled):hover) {
-  background: #eef2f7;
-  color: #111827;
-}
-:deep(.ta-workspace-tree-node:disabled) {
-  cursor: default;
-  color: #9ca3af;
-}
-:deep(.ta-workspace-tree-node.is-selected) {
-  background: #e8f0ff;
-  color: #1d4ed8;
-  font-weight: 500;
-}
-:deep(.ta-workspace-tree-icon) {
-  flex: 0 0 auto;
-  width: 12px;
-  color: #9ca3af;
-  font-size: 10px;
-  line-height: 1;
-  text-align: center;
-}
-:deep(.ta-workspace-tree-path) {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-:deep(.ta-workspace-tree-badge) {
-  flex: 0 0 auto;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: #ecfdf3;
-  color: #168a52;
-  font-size: 11px;
 }
 .ta-workspace-new-directory {
   display: flex;

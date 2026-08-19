@@ -1,6 +1,8 @@
 package com.enterprise.testagent.opencode.client;
 
 import com.enterprise.testagent.domain.support.DomainValidation;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -16,6 +18,9 @@ public record OpencodePromptPart(
         String name,
         Map<String, Object> source,
         Map<String, Object> metadata) {
+
+    private static final String INTERNAL_RUN_CONTEXT_FILENAME = ".testagent-run-context.txt";
+    private static final String INTERNAL_RUN_CONTEXT_DATA_PREFIX = "data:text/plain;charset=utf-8;base64,";
 
     /**
      * 校验 prompt part 类型专属字段，并把 source/metadata 固化为不可变 Map。
@@ -65,6 +70,30 @@ public record OpencodePromptPart(
      */
     public static OpencodePromptPart file(String url, String mime, String filename, Map<String, Object> source) {
         return new OpencodePromptPart("file", null, url, mime, filename, null, source, null);
+    }
+
+    /**
+     * 创建仅供 OpenCode 本次命令消费的内部上下文附件；该保留 part 不得进入平台消息或浏览器事件。
+     */
+    public static OpencodePromptPart internalRunContext(String content) {
+        String encoded = Base64.getEncoder().encodeToString(
+                DomainValidation.requireText(content, "content").getBytes(StandardCharsets.UTF_8));
+        return file(
+                INTERNAL_RUN_CONTEXT_DATA_PREFIX + encoded,
+                "text/plain",
+                INTERNAL_RUN_CONTEXT_FILENAME,
+                Map.of());
+    }
+
+    /**
+     * 识别平台生成的内部命令上下文 part；同时校验类型、MIME 和 data URL，避免隐藏同名用户文件。
+     */
+    static boolean isInternalRunContextPart(Map<?, ?> part) {
+        return "file".equals(part.get("type"))
+                && INTERNAL_RUN_CONTEXT_FILENAME.equals(part.get("filename"))
+                && "text/plain".equals(part.get("mime"))
+                && part.get("url") instanceof String url
+                && url.startsWith(INTERNAL_RUN_CONTEXT_DATA_PREFIX);
     }
 
     /**

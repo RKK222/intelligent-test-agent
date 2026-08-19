@@ -4,5 +4,6 @@ package com.enterprise.testagent.workspace;
 public enum WorkspaceViewSource {
     WORKSPACE,
     REFERENCE,
+    AUTOMATION_REFERENCE,
     MIXED
 }

@@ -25,13 +25,13 @@ function onboardingTarget(key: MenuKey) {
 }
 
 const items = computed<MenuItem[]>(() => {
-  const menuItems: MenuItem[] = [];
+  // 普通成员也能查看应用内当前自动化版本；只有版本库管理继续要求管理员权限。
+  const menuItems: MenuItem[] = [
+    { key: "appWorkspace", label: "应用管理", icon: Setting }
+  ];
   const roles = props.currentUser?.roles ?? [];
   if (roles.includes("SUPER_ADMIN") || roles.includes("APP_ADMIN")) {
-    menuItems.push(
-      { key: "appWorkspace", label: "应用管理", icon: Setting },
-      { key: "repository", label: "版本库管理", icon: Folder }
-    );
+    menuItems.push({ key: "repository", label: "版本库管理", icon: Folder });
   }
   menuItems.push({ key: "personal", label: "个人设置", icon: User });
   return menuItems;

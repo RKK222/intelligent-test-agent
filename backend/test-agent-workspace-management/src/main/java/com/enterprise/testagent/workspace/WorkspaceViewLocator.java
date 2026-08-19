@@ -6,10 +6,17 @@ package com.enterprise.testagent.workspace;
 public record WorkspaceViewLocator(
         WorkspaceViewLocatorKind kind,
         String path,
-        String referenceAlias) {
+        String referenceAlias,
+        String automationWorkspaceId,
+        String automationVersionId) {
+
+    /** 兼容既有工作区和应用资产引用定位器。 */
+    public WorkspaceViewLocator(WorkspaceViewLocatorKind kind, String path, String referenceAlias) {
+        this(kind, path, referenceAlias, null, null);
+    }
 
     /** 返回组合视图根定位器。 */
     public static WorkspaceViewLocator root() {
-        return new WorkspaceViewLocator(WorkspaceViewLocatorKind.COMPOSITE, "", null);
+        return new WorkspaceViewLocator(WorkspaceViewLocatorKind.COMPOSITE, "", null, null, null);
     }
 }

@@ -1,5 +1,7 @@
 # test-agent-opencode-runtime
 
+`AutomationReferenceRunContextContributor` 复用 Run system prompt 扩展点，在普通对话、命令、重发、批量和定时 Run 派发时按本次 Run 固化当前激活的自动化引用，只向 OpenCode 出站上下文追加名称、版本、只读说明和后端内部路径；不写用户消息或浏览器响应。
+
 ## 工程定位
 
 与 agent 运行相关的后端业务编排模块，承载 Session、Run、RunEvent 编排、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert 和受控 PTY terminal 业务；当前唯一真实 agent 实现为 opencode。

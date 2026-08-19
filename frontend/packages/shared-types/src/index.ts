@@ -417,12 +417,14 @@ export type FileTreeEntry = {
 };
 
 export type WorkspaceViewLocator = {
-  kind: "COMPOSITE" | "WORKSPACE" | "REFERENCE";
+  kind: "COMPOSITE" | "WORKSPACE" | "REFERENCE" | "AUTOMATION_ROOT" | "AUTOMATION_REFERENCE";
   path: string;
   referenceAlias?: string;
+  automationWorkspaceId?: string;
+  automationVersionId?: string;
 };
 
-export type WorkspaceViewSource = "WORKSPACE" | "REFERENCE" | "MIXED";
+export type WorkspaceViewSource = "WORKSPACE" | "REFERENCE" | "AUTOMATION_REFERENCE" | "MIXED";
 
 /** 合并工作区树节点；`id` 是缓存、展开状态和 Vue 渲染唯一允许使用的节点身份。 */
 export type WorkspaceViewEntry = FileTreeEntry & {
@@ -3411,6 +3413,18 @@ export type ApplicationWorkspaceTemplate = ApplicationWorkspaceConfig & {
   standard: boolean;
   /** 新后端返回关联版本库类型；可选以兼容滚动升级期间的旧响应。 */
   repositoryType?: string | null;
+  /** 自动化代码库由管理员激活的应用级只读版本；其他工作空间为空。 */
+  activeVersion?: AutomationWorkspaceActiveVersion | null;
+};
+
+export type AutomationWorkspaceActiveVersion = {
+  versionId: string;
+  version: string;
+  branch: string;
+  targetCommitHash?: string | null;
+  replicaStatus?: string | null;
+  activatedByUserId?: string | null;
+  activatedAt: string;
 };
 
 export type ApplicationWorkspaceVersion = {
@@ -3420,9 +3434,10 @@ export type ApplicationWorkspaceVersion = {
   repositoryId: string;
   version: string;
   branch: string;
-  repoRootPath: string;
-  workspaceRootPath: string;
-  runtimeWorkspace: ManagedWorkspaceRuntime;
+  /** 自动化只读引用版本不会暴露服务器物理路径。 */
+  repoRootPath?: string | null;
+  workspaceRootPath?: string | null;
+  runtimeWorkspace?: ManagedWorkspaceRuntime | null;
   status: string;
   targetCommitHash?: string | null;
   replicaCommitHash?: string | null;

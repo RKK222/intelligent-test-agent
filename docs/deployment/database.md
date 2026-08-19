@@ -438,6 +438,7 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 | 表 | 说明 |
 |---|---|
 | `application_workspace_versions` | 应用工作空间模板的版本实例，记录版本、实际分支、托管仓库目录逻辑值、opencode 工作目录逻辑值和关联运行态 `workspaces.workspace_id`。 |
+| `automation_workspace_active_versions` | 自动化工作空间配置的应用级当前版本，记录版本、最近激活操作人和激活时间。 |
 | `personal_workspaces` | 用户基于应用版本工作区派生的 git worktree，记录展示名称、私有分支、托管目录逻辑值、base commit 和关联运行态 Workspace。 |
 | `user_global_workspace_preferences` | 用户全局最近使用的托管运行态 Workspace。 |
 | `user_application_workspace_preferences` | 用户在某应用下最近使用的托管运行态 Workspace。 |
@@ -447,6 +448,7 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 - `application_workspace_versions(application_workspace_id, version)` 唯一，保证同一模板同一日期版本只有一条记录。
 - `application_workspace_versions.runtime_workspace_id` 唯一并引用 `workspaces.workspace_id`。
+- `automation_workspace_active_versions.application_workspace_id` 为主键并级联引用模板，`version_id` 唯一引用应用工作空间版本，操作人删除后置空。`V20260819125704` 为每项存量自动化配置回填创建时间最新的 `ACTIVE` 版本。
 - `personal_workspaces(app_workspace_version_id, user_id, workspace_name)` 唯一，保证同一用户在同一应用版本下个人空间名称不重复。
 - 最近使用偏好按全局 `user_id` 唯一、按应用 `(user_id, app_id)` 唯一。
 - 同步审计中的源/目标 workspace 均引用运行态 `workspaces`。

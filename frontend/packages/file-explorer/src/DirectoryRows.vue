@@ -103,12 +103,16 @@ function isWorkspaceViewEntry(entry: MaybeWorkspaceViewEntry): entry is Workspac
   return Boolean(entry.id && entry.locator && entry.source);
 }
 
+function isReferenceSource(entry: MaybeWorkspaceViewEntry): boolean {
+  return entry.source === "REFERENCE" || entry.source === "AUTOMATION_REFERENCE";
+}
+
 function canMutateEntry(entry: MaybeWorkspaceViewEntry): boolean {
-  return props.canWrite && entry.readonly !== true && entry.source !== "REFERENCE" && entry.source !== "MIXED";
+  return props.canWrite && entry.readonly !== true && !isReferenceSource(entry) && entry.source !== "MIXED";
 }
 
 function canWriteChildren(entry: MaybeWorkspaceViewEntry): boolean {
-  if (!props.canWrite || entry.type !== "directory" || entry.readonly === true || entry.source === "REFERENCE") return false;
+  if (!props.canWrite || entry.type !== "directory" || entry.readonly === true || isReferenceSource(entry)) return false;
   return entry.source !== "MIXED" || Boolean(entry.workspacePath);
 }
 
@@ -117,7 +121,7 @@ function canPasteIntoEntry(entry: MaybeWorkspaceViewEntry): boolean {
 }
 
 function canUndoFromEntry(entry: MaybeWorkspaceViewEntry): boolean {
-  return props.canWrite && Boolean(props.canUndo) && entry.readonly !== true && entry.source !== "REFERENCE";
+  return props.canWrite && Boolean(props.canUndo) && entry.readonly !== true && !isReferenceSource(entry);
 }
 
 function workspaceEntryPath(entry: MaybeWorkspaceViewEntry): string {
@@ -126,6 +130,7 @@ function workspaceEntryPath(entry: MaybeWorkspaceViewEntry): string {
 
 function sourceDescription(entry: MaybeWorkspaceViewEntry): string | undefined {
   const aliases = entry.referenceAliases?.join("、") || entry.locator?.referenceAlias;
+  if (entry.source === "AUTOMATION_REFERENCE") return "自动化代码库只读引用";
   if (entry.source === "REFERENCE" && entry.collision) return `引用冲突：${aliases || "未知来源"}`;
   if (entry.source === "REFERENCE") return `引用来源：${aliases || "未知来源"}`;
   if (entry.source === "MIXED") return aliases ? `工作区与引用合并目录；引用来源：${aliases}` : "工作区与引用合并目录";
@@ -133,6 +138,7 @@ function sourceDescription(entry: MaybeWorkspaceViewEntry): string | undefined {
 }
 
 function semanticClass(entry: MaybeWorkspaceViewEntry): string | undefined {
+  if (entry.source === "AUTOMATION_REFERENCE") return "is-reference-merged";
   if (entry.source !== "REFERENCE") return undefined;
   if (entry.collision) return "is-reference-collision";
   return entry.merged ? "is-reference-merged" : undefined;

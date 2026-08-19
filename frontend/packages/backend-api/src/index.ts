@@ -53,6 +53,7 @@ import type {
   AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
   ApplicationWorkspaceTemplate,
+  AutomationWorkspaceActiveVersion,
   BatchContext,
   ApplicationWorkspaceVersion,
   ApplicationDefinition,
@@ -1259,6 +1260,12 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<ApplicationWorkspaceVersion>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`,
         { method: "POST", body: JSON.stringify(payload) }
+      ),
+    /** 管理员为自动化代码库激活应用级只读版本；重复激活同一版本幂等。 */
+    activateAutomationWorkspaceVersion: (appId: string, templateId: string, versionId: string) =>
+      routedRequest<AutomationWorkspaceActiveVersion>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/active-version`,
+        { method: "PUT", body: JSON.stringify({ versionId }) }
       ),
     /** @deprecated 版本级全员拉取已停用；请使用 gitPullPersonalWorkspace。 */
     gitPullWorkspaceVersion: (versionId: string) =>
@@ -3289,7 +3296,7 @@ type BackendWorkspaceViewEntry = {
   size: number;
   lastModifiedAt?: string;
   locator: WorkspaceViewLocator;
-  source: "WORKSPACE" | "REFERENCE" | "MIXED";
+  source: "WORKSPACE" | "REFERENCE" | "AUTOMATION_REFERENCE" | "MIXED";
   merged: boolean;
   collision: boolean;
   readonly: boolean;
@@ -3308,7 +3315,7 @@ type BackendWorkspaceViewFileContent = {
   content: string;
   size: number;
   readonly: boolean;
-  source: "WORKSPACE" | "REFERENCE" | "MIXED";
+  source: "WORKSPACE" | "REFERENCE" | "AUTOMATION_REFERENCE" | "MIXED";
   referenceAlias?: string;
   locator: WorkspaceViewLocator;
 };

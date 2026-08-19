@@ -11,6 +11,7 @@ public interface ConversationWorkspaceAccessAuthorizer {
     enum FileWorkspaceKind {
         STANDARD,
         APP_SOURCE,
+        AUTOMATION_REFERENCE,
         EXPERIENCE
     }
 

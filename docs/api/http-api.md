@@ -814,7 +814,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 | `POST` | `/applications/{appId}/workspaces` | 基于当前应用已关联代码库的分支和目录创建工作空间配置，并创建初始应用版本工作区。 |
 | `PATCH` | `/applications/{appId}/workspaces/{workspaceId}` | 部分更新工作空间名称或是否启用。 |
 | `DELETE` | `/applications/{appId}/workspaces/{workspaceId}` | 删除工作空间配置。 |
-| `GET` | `/workspace-create-operations/{operationId}` | 查询设置页创建应用工作空间进度。 |
+| `GET` | `/workspace-create-operations/{operationId}` | 查询测试工作空间或自动化目录引用的创建进度。 |
 
 `POST /applications/{appId}/workspaces` 请求体：
 
@@ -838,6 +838,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - 测试工作库必须选择形如 `feature_testagent_yyyyMMdd` 的分支，后端从分支名提取版本号；自动化代码库允许任意已有分支。
 - 测试工作库的 `directoryPath` 必须是当前应用同名根目录的一级子目录，例如 `F-COSS/W1` 可选，`F-COSS/W1/F1` 只能浏览不能作为工作空间；自动化代码库可选择远端目录树中的任意已有目录。
 - 自动化代码库必须传入 `version`，格式为 `yyyyMMdd`；测试工作库传入的 `version` 会被分支解析结果覆盖。应用代码库和应用资产库不是该创建接口的工作空间候选。
+- 该接口保留统一模板/版本创建能力作为后端兼容边界：前端“工作空间管理”只用它创建测试工作空间；自动化代码库由工作台“引用配置 → 自动化代码库”调用，用于创建应用级只读目录引用，不进入主工作空间选择器，也不创建个人 worktree。
 - 只有保存接口会触发 Git clone/fetch、分支 checkout 和本地目录准备；页面上的分支、远端树和新增目录操作均不落磁盘。
 - `directoryNew=true` 只表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。自动化代码库不接受该能力，只能选择已有目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建 `.gitkeep`，以当前用户身份提交并 push 当前 feature 分支；push 未确认时创建失败，避免只在单台服务器留下 Git 无法复制的空目录。旧客户端不传该字段时行为不变。
 - 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。命中已有位置时返回原 `workspaceId`，按本次请求更新别名；若原模板已停用则同时重新启用，避免异步操作显示成功但模板仍不可见。别名仍需满足同应用唯一约束。
@@ -1339,7 +1340,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 上文 UTF-8 限制只适用于文本读取/写入与编辑器预览；下载使用 `workspace.read.binary.chunk` / `workspace.view.read.binary.chunk` 按约 512 KiB 返回 Base64 原始字节，支持任意二进制文件。首次响应提供 `size/lastModifiedMillis`，后续请求回传快照并继续使用 `nextOffset`；下载期间文件变化返回 `CONFLICT + DOWNLOAD_CHANGED`。每段重新校验 ticket、成员、工作区安全路径或组合视图 locator。该能力为 additive WebSocket 协议扩展：旧客户端不受影响，新前端必须在所有目标 Java 节点完成后端升级后再启用下载。
 
-组合视图只消费当前工作区 `.opencode/opencode.jsonc` 中平台可验证的本地引用对象。后端会重新校验引用别名、`path`、`merge`、`sdd-folder-name`、当前应用关联的 `APPLICATION_ASSET_REPOSITORY`、总体和本机副本 `READY` 状态，以及当前平台解析后的 `OPENCODE_REFERENCES_DIR`；配置不能把视图指向任意绝对路径、其它应用仓库、`.git` 或符号链接。单个引用失效时 `workspace.view.list` 仍返回可用工作区内容，并在 `warnings` 中说明被跳过的别名；每层组合结果最多 1000 项，超限通过 `truncated=true` 显式标记。
+组合视图同时消费当前工作区 `.opencode/opencode.jsonc` 中平台可验证的应用资产引用，以及应用级已激活的自动化代码库版本。自动化虚拟根使用 `AUTOMATION_ROOT`，文件和目录使用 `AUTOMATION_REFERENCE`，定位器只携带 `automationWorkspaceId/automationVersionId/path`，禁止客户端提交物理路径。每次列举或读取重新校验应用成员、仓库类型、模板和版本归属、当前服务器 `READY` 副本、目标提交和运行态 Workspace；`.git`、符号链接和路径穿越固定拒绝。单个自动化引用不可用时只返回局部 warning，工作区与已有文档引用继续可用。自动化来源只支持列举、文本/分片/原始字节读取、下载和加入对话，不进入搜索、requirements、Git Diff 或任何写 RPC。
 
 `merge=true` 时，引用内容按 `sdd-folder-name` 合并进工作区同名一级目录：工作区已经存在的同名目录返回 `source=MIXED` 且保持普通颜色，纯引用文件或目录返回 `source=REFERENCE` 供前端显示为蓝色；同名文件不会覆盖工作区文件，冲突节点携带 `collision=true` 和稳定 `id`。工作区目录从纯 `WORKSPACE` 变为 `MIXED` 时沿用工作区路径生成的 `id`，前端刷新后以该稳定身份重新取得最新 `COMPOSITE` locator；各层 `warnings/truncated` 都会汇总展示。`merge=false` 时，以参考别名作为只读一级目录，展开后展示引用路径内容。组合视图的 `locator` 是后端签发的逻辑定位信息；读取时仍会重新解析当前配置和安全根，不能通过伪造 `referenceAlias/path` 绕过校验。详细字段见 `docs/api/event-stream.md`。
 
@@ -1563,6 +1564,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 - 所有接口要求已登录用户。
 - `GET /applications/git-refresh-scopes`、`POST /applications/{appId}/git-refresh` 与 `POST /applications/{appId}/git-refresh-groups` 要求 `APP_ADMIN`，`SUPER_ADMIN` 自动继承。超级管理员继续读取和刷新启用、停用应用且不要求加入应用；应用管理员只读取启用且自己仍是有效成员的应用，执行时再次复核相同条件，伪造、停用或非成员 `appId` 统一返回 `FORBIDDEN`。
+- `PUT /applications/{appId}/workspace-templates/{templateId}/active-version` 要求 `APP_ADMIN`，`SUPER_ADMIN` 自动继承；服务端同时校验应用、自动化配置和版本归属，重复激活同一版本保持原激活时间并幂等返回。
 - 应用、模板、版本、切换最近使用等应用相关接口要求当前用户是 `application_members` 中的有效成员；不区分管理员和普通成员。
 - 个人工作区接口要求当前用户是个人工作区拥有者且属于对应应用。
 - 托管工作区成员校验失败返回 `FORBIDDEN`，message 固定包含当前加载上下文：`无该应用工作区权限：当前正在加载应用 {appName}({appId})，版本 {version/versionId/未确定}，工作区 {workspaceKind}:{workspaceName/workspaceId/未确定}`。`details` 仅放安全业务字段：`loadingStage`、`appId`、`appName`、`versionId`、`version`、`applicationWorkspaceId`、`workspaceKind`、`workspaceName`、`workspaceId`、`personalWorkspaceId`；无值字段不返回。
@@ -1573,9 +1575,10 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/git-refresh-scopes` | 应用管理员查询有权管理且已形成实际 feature 分支组的应用及其工作空间、版本和分支；超级管理员查询全量。 |
 | `POST` | `/applications/{appId}/git-refresh` | 应用管理员按授权应用刷新全部物理 feature 仓库组，并触发相关个人 worktree 与应用 Agent 配置安全收敛。 |
 | `POST` | `/applications/{appId}/git-refresh-groups` | 应用管理员按 `repositoryId + version + branch` 精确刷新授权应用的一个物理 feature 仓库组及其关联 worktree。 |
-| `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置；每项增量返回关联版本库 `repositoryType`，旧 `standard` 字段继续保留。 |
-| `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
+| `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间模板，只返回 `application_workspaces.enabled=true` 的配置；每项返回 `repositoryType`，自动化配置另返回可空 `activeVersion`。 |
+| `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区；自动化模板只返回逻辑版本、提交和副本状态，不返回任何物理路径或运行态 Workspace。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
+| `PUT` | `/applications/{appId}/workspace-templates/{templateId}/active-version` | 把 `{ "versionId": "..." }` 指定的自动化版本设为应用级当前只读版本；仅管理员可调用。 |
 | `POST` | `/workspace-versions/{versionId}/git-pull` | 已停用的版本级拉取兼容入口；返回 `VALIDATION_ERROR`，不会修改共享版本、个人 worktree 或触发广播。 |
 | `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
@@ -1684,13 +1687,13 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - 标准代码库分支固定为 `feature_testagent_{branchFragment}`，其中 `branchFragment` 是 `version` 经 `sanitizeVersionForBranchAndPath` 转换后的值（`yyyyMMdd` 原样使用）；后端会用当前用户 SSH key 先查分支；不存在时返回 `CONFLICT`。
 - 非标准代码库必须传入 `branch`（前端选择的分支名），后端按该分支 clone。
 - 内部部署模式版本库在应用版本、服务器副本和个人工作区的 clone/fetch/pull/push 前，都会按当前操作人统一认证号拼接实际 Git URL，并在本地仓库 origin 中刷新为当前操作人的地址；校验已有 origin 时忽略 `ssh://任意用户@` 前缀，只比较数据库保存的 `host[:port]/path`。
-- 应用版本工作区物理仓库根目录读取通用参数 `OPENCODE_APP_WORKSPACE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终仓库目录为 `{root}/{branchFragment}/{repository.englishName}`，opencode root 为仓库目录下模板 `directoryPath`。新记录入库保存 `appworkspace:` 逻辑路径，响应返回解析后的当前服务器物理路径。
+- 应用版本工作区物理仓库根目录读取通用参数 `OPENCODE_APP_WORKSPACE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终仓库目录为 `{root}/{branchFragment}/{repository.englishName}`，opencode root 为仓库目录下模板 `directoryPath`。新记录入库保存 `appworkspace:` 逻辑路径。测试工作版本响应继续返回当前服务器解析路径；自动化引用版本固定省略 `repoRootPath/workspaceRootPath/runtimeWorkspace`。
 - 历史代码库若缺少 `englishName`，创建或接管应用版本工作区会返回 `VALIDATION_ERROR`，需要先在版本库管理补齐英文名称。
 - 磁盘目录已存在时，空目录会删除后重新 clone；目录仅包含 `.git` 且无有效 HEAD 时视为上次 Git clone 超时/中断留下的残留，会删除后重新 clone。已有有效 Git 仓库会校验 origin URL 和当前分支，匹配则接管，不匹配返回 `CONFLICT`；非 Git 非空目录返回 `CONFLICT`，不覆盖用户内容。
 - SSH Git 操作只使用当前登录用户保存的唯一 SSH key；HTTPS 不额外支持账号或 token。
 - 多服务器部署下，版本主记录保存 `targetCommitHash`，每台服务器通过 `application_workspace_version_replicas` 记录本机副本路径、运行态 Workspace、当前 commit 和同步状态。`runtimeWorkspace` 返回当前用户 READY 的 opencode agent 所在服务器副本；目标副本未就绪时返回 `CONFLICT`。
 
-`ApplicationWorkspaceVersionResponse`（路径字段均为当前服务器解析后的物理路径，不是数据库原始逻辑值）：
+`ApplicationWorkspaceVersionResponse`（测试工作版本的路径字段为当前服务器解析后的物理路径，不是数据库原始逻辑值；自动化引用版本完全省略这些路径字段及 `runtimeWorkspace`）：
 
 ```json
 {
@@ -1941,15 +1944,15 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 
 `currentStep` 取值为 `PREPARE_REMOTE`、`PROJECT_HEAD`、`COMMIT_FEATURE`、`PUSH_REMOTE`、`COMPLETED`。本地提交响应的 `status=LOCAL_COMMITTED`、`remotePushed=false`；发布响应只有 feature 分支 `git push` 成功并读取发布后的 HEAD 后才返回 `status=PUBLISHED`、`remotePushed=true`。前端未收到 `remotePushed=true` 时不得展示推送成功。发布接口抛出统一错误时，`details.failedStep` 和 `details.executedCommands` 会尽量返回失败前已进入的 Git 阶段和已执行命令。
 
-`GET /applications/{appId}/workspace-templates` 的每个模板在既有字段上增量返回 `repositoryType`，例如自动化代码库为 `AUTOMATION_CODE_REPOSITORY`；`standard` 继续按旧兼容语义返回且自动化代码库固定为 `false`。滚动升级期间前端允许旧后端缺少 `repositoryType`，并按原测试工作空间分组展示。
+`GET /applications/{appId}/workspace-templates` 的每个模板增量返回 `repositoryType`；自动化模板的 `activeVersion` 可空，包含 `versionId/version/branch/targetCommitHash/replicaStatus/activatedByUserId/activatedAt`。自动化模板的版本列表与新建版本响应同样只返回逻辑版本、提交和副本状态，不序列化 `repoRootPath/workspaceRootPath/runtimeWorkspace`。迁移会为存量自动化配置选择创建时间最新的 `ACTIVE` 版本；首个新版本自动激活，后续版本不自动覆盖。
 
 前端两级菜单（应用工作空间→版本）使用说明：
 
-- 工作台顶部和左下角共用当前应用（`selectedAppId`）的 `GET /applications/{appId}/workspace-templates` 数据，按 `repositoryType` 将自动化代码库与测试工作空间独立分组，只显示已启用配置的 `workspaceName`。顶部上下文以实际完成的 workspace/version 切换为事实源，不在左侧目录加载前乐观显示新选择；重选当前版本会主动刷新目录和 Git diff。设置页关闭后会刷新该查询；若被停用的是当前已打开工作空间，不强制退出或清空当前状态，只在后续菜单中隐藏。版本创建、最近使用、运行态切换和会话逻辑保持原有行为。
-- 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
+- 工作台顶部和左下角只列应用代码库与测试工作空间，明确过滤 `AUTOMATION_CODE_REPOSITORY`；指向历史自动化运行态 Workspace 的 recent 记录由后端忽略。自动化代码库改在组合文件树根部的虚拟目录“自动化代码库”中只读展示，不再触发 default 个人 worktree 创建或 Git 操作。
+- 测试工作空间鼠标 hover 时仍按需加载版本；自动化版本在工作台“引用配置 → 自动化代码库”展示，管理员通过激活接口切换，普通成员只读查看当前版本与目录。
 - 点击版本或提交新增版本时先检查当前用户 TestAgent 专属进程是否 READY；只有强状态明确为 `NEEDS_INITIALIZATION` 且 `initializable=true` 才弹初始化/启动确认框，确认后复用既有进度弹窗，初始化完成后提示用户重新执行原操作。状态仍在查询、明确 `UNAVAILABLE`，或强状态为 READY 但弱健康尚未通过时不提供初始化按钮，只提示等待或当前不可用并刷新状态。在进程真正就绪之前不调用 Git 预检、版本创建或 default ensure，也不提前失效当前会话交互。进程就绪后，点击版本先调用 `GET /workspace-versions/{versionId}/git-access` 做只读权限预检；只有 `accessible=true` 才调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好并触发工作台切换。无仓库权限时前端展示对应版本库名称和申请指引，不创建 worktree。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
 - 当前版本匹配规则只使用服务端稳定身份：优先使用最近工作区返回的 `versionId`，旧数据回退时仅按 `runtimeWorkspace.workspaceId` 精确匹配；禁止用根路径匹配。
-- 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
+- 测试工作空间的第二级版本菜单底部固定一行「+新增版本」：点击后使用日期选择器创建版本，成功后失效 `versionsByTemplateId` 缓存并按原流程切换。自动化模板不进入该菜单；其新版本仍复用 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 由“引用配置 → 自动化代码库”创建，首版本自动激活，后续版本在同一页面通过 `PUT .../active-version` 显式生效。
 
 应用级"默认工作空间"解析规则（前端 `handleSelectApp` + `pickDefaultWorkspaceForApp`）：
 

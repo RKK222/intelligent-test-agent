@@ -164,19 +164,22 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
         Optional<ApplicationWorkspaceVersion> version =
                 managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspaceId);
         ApplicationId appId;
+        boolean automationReference;
         if (version.isPresent()) {
             appId = version.get().appId();
+            automationReference = isAutomationVersion(version.get());
         } else {
             Optional<ApplicationWorkspaceVersionReplica> replica =
                     managedWorkspaceRepository.findVersionReplicaByRuntimeWorkspace(workspaceId);
             if (replica.isPresent()) {
                 // 运行节点上的版本副本同样属于托管应用，必须先回溯版本再执行成员校验，不能降级为历史工作区。
-                appId = managedWorkspaceRepository.findVersion(replica.get().versionId())
-                        .map(ApplicationWorkspaceVersion::appId)
+                ApplicationWorkspaceVersion replicaVersion = managedWorkspaceRepository.findVersion(replica.get().versionId())
                         .orElseThrow(() -> new PlatformException(
                                 ErrorCode.FORBIDDEN,
                                 "应用版本副本缺少有效的托管版本映射",
                                 Map.of("workspaceId", workspaceId.value())));
+                appId = replicaVersion.appId();
+                automationReference = isAutomationVersion(replicaVersion);
             } else {
                 Optional<PersonalWorkspace> personal =
                         managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspaceId);
@@ -199,6 +202,10 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
                             Map.of("workspaceId", workspaceId.value()));
                 }
                 appId = personal.get().appId();
+                // 历史自动化个人 worktree 继续保留文件，但平台文件通道固定降为只读。
+                automationReference = managedWorkspaceRepository.findVersion(personal.get().versionId())
+                        .map(this::isAutomationVersion)
+                        .orElse(false);
             }
         }
         ApplicationDefinition application = configurationRepository.findApplication(appId)
@@ -218,7 +225,14 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
                     "当前用户已不是应用有效成员，不能创建会话运行上下文",
                     Map.of("appId", appId.value(), "appName", application.appName()));
         }
-        return FileWorkspaceKind.STANDARD;
+        return automationReference ? FileWorkspaceKind.AUTOMATION_REFERENCE : FileWorkspaceKind.STANDARD;
+    }
+
+    private boolean isAutomationVersion(ApplicationWorkspaceVersion version) {
+        return configurationRepository.findRepository(version.repositoryId())
+                .map(repository -> CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value()
+                        .equals(repository.repositoryType()))
+                .orElse(false);
     }
 
     /**

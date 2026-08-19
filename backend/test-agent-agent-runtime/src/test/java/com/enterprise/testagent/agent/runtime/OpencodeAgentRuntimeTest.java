@@ -11,13 +11,17 @@ import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
 import com.enterprise.testagent.opencode.client.OpencodeClientFacade;
+import com.enterprise.testagent.opencode.client.OpencodePromptPart;
 import com.enterprise.testagent.opencode.client.OpencodeRejectDiffResult;
 import com.enterprise.testagent.opencode.client.OpencodeSessionMessage;
 import com.enterprise.testagent.opencode.client.OpencodeSessionMessagesResult;
+import com.enterprise.testagent.opencode.client.OpencodeStartCommand;
 import com.enterprise.testagent.opencode.client.OpencodeUnrevertResult;
 import com.enterprise.testagent.opencode.client.OpencodeStartRunCommand;
 import com.enterprise.testagent.opencode.client.OpencodeStartRunResult;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -150,6 +154,45 @@ class OpencodeAgentRuntimeTest {
         assertThat(command.getValue().system()).isEqualTo("只做只读检查并输出最终答案");
         assertThat(command.getValue().tools()).containsExactly(Map.entry("*", false));
         assertThat(command.getValue().parts()).extracting("type").containsExactly("text");
+    }
+
+    @Test
+    void commandRunCarriesSystemContextAsInternalInlineAttachment() {
+        OpencodeClientFacade facade = mock(OpencodeClientFacade.class);
+        when(facade.startCommand(any())).thenReturn(Mono.just(new OpencodeStartRunResult(true)));
+        OpencodeAgentRuntime runtime = new OpencodeAgentRuntime(facade);
+
+        runtime.startRun(new AgentStartRunCommand(
+                        node(),
+                        "ses_remote1234567890abcdef",
+                        "/tmp/demo",
+                        null,
+                        "/review",
+                        List.of(AgentPromptPart.text("/review")),
+                        null,
+                        "build",
+                        "<automation_references readonly=\"true\" />",
+                        null,
+                        null,
+                        null,
+                        Map.of(),
+                        "review",
+                        "",
+                        "trace_1234567890abcdef"))
+                .block();
+
+        ArgumentCaptor<OpencodeStartCommand> captured = ArgumentCaptor.forClass(OpencodeStartCommand.class);
+        verify(facade).startCommand(captured.capture());
+        assertThat(captured.getValue().arguments()).isEmpty();
+        assertThat(captured.getValue().parts()).extracting(OpencodePromptPart::type)
+                .containsExactly("text", "file");
+        assertThat(captured.getValue().parts().get(1)).satisfies(part -> {
+            assertThat(part.type()).isEqualTo("file");
+            assertThat(part.filename()).isEqualTo(".testagent-run-context.txt");
+            String encoded = part.url().substring(part.url().indexOf(',') + 1);
+            assertThat(new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8))
+                    .isEqualTo("<automation_references readonly=\"true\" />");
+        });
     }
 
     @Test

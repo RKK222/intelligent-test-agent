@@ -13,6 +13,7 @@ import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.domain.broadcast.ServerBroadcastPublisher;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
+import com.enterprise.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
@@ -22,6 +23,8 @@ import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceReposito
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
+import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
+import com.enterprise.testagent.domain.managedworkspace.AutomationWorkspaceReferenceCatalog;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplica;
@@ -30,6 +33,7 @@ import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryState;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
 import com.enterprise.testagent.domain.user.UserRepository;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
@@ -171,6 +175,74 @@ class WorkspaceViewApplicationServiceTest {
         assertThat(content.readonly()).isTrue();
         assertThat(content.source()).isEqualTo(WorkspaceViewSource.REFERENCE);
         assertThat(content.referenceAlias()).isEqualTo("docs-requirements");
+    }
+
+    @Test
+    void exposesAutomationRepositoriesAsVersionPinnedReadonlyLogicalLocators() throws Exception {
+        Path automationRoot = Files.createDirectories(tempDir.resolve("automation-v1"));
+        Files.writeString(automationRoot.resolve("case.robot"), "*** Test Cases ***");
+        AutomationWorkspaceReferenceCatalog.Reference reference = new AutomationWorkspaceReferenceCatalog.Reference(
+                APP_ID,
+                new ApplicationWorkspaceId("awp_auto"),
+                new ApplicationWorkspaceVersionId("awv_v1"),
+                "API 自动化",
+                "API 自动化",
+                "automation",
+                "20260819",
+                "release/v1",
+                "abc123",
+                automationRoot.toString());
+        AutomationWorkspaceReferenceCatalog catalog = new AutomationWorkspaceReferenceCatalog() {
+            @Override
+            public Resolution resolveActive(UserId userId, WorkspaceId hostWorkspaceId) {
+                return new Resolution(APP_ID, 1, List.of(reference), List.of());
+            }
+
+            @Override
+            public Reference resolveVersion(
+                    UserId userId,
+                    WorkspaceId hostWorkspaceId,
+                    ApplicationWorkspaceId applicationWorkspaceId,
+                    ApplicationWorkspaceVersionId versionId) {
+                if (!reference.applicationWorkspaceId().equals(applicationWorkspaceId)
+                        || !reference.versionId().equals(versionId)) {
+                    throw new PlatformException(ErrorCode.FORBIDDEN, "自动化代码库定位器无效");
+                }
+                return reference;
+            }
+        };
+        WorkspaceViewApplicationService automationService = new WorkspaceViewApplicationService(
+                workspaceService,
+                new WorkspaceFileService(1024 * 1024, 2000),
+                managedWorkspaceRepository,
+                mock(ReferenceRepositoryApplicationService.class),
+                catalog);
+        UserId userId = new UserId("usr_1");
+
+        WorkspaceViewEntry automation = automationService.list(userId, WORKSPACE_ID, WorkspaceViewLocator.root()).entries().stream()
+                .filter(entry -> entry.name().equals("自动化代码库"))
+                .findFirst()
+                .orElseThrow();
+        WorkspaceViewEntry configured = automationService.list(userId, WORKSPACE_ID, automation.locator()).entries().getFirst();
+        WorkspaceViewEntry file = automationService.list(userId, WORKSPACE_ID, configured.locator()).entries().getFirst();
+
+        assertThat(file.path()).isEqualTo("自动化代码库/API 自动化/case.robot");
+        assertThat(file.source()).isEqualTo(WorkspaceViewSource.AUTOMATION_REFERENCE);
+        assertThat(file.readonly()).isTrue();
+        assertThat(file.locator().automationWorkspaceId()).isEqualTo("awp_auto");
+        assertThat(file.locator().automationVersionId()).isEqualTo("awv_v1");
+        assertThat(automationService.read(userId, WORKSPACE_ID, file.locator()).content()).isEqualTo("*** Test Cases ***");
+        assertThatThrownBy(() -> automationService.read(
+                userId,
+                WORKSPACE_ID,
+                new WorkspaceViewLocator(
+                        WorkspaceViewLocatorKind.AUTOMATION_REFERENCE,
+                        "case.robot",
+                        null,
+                        "awp_auto",
+                        "awv_spoof")))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }
 
     @Test

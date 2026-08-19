@@ -2614,6 +2614,30 @@ describe("backend-api", () => {
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
   });
 
+  it("activates an automation workspace version with a logical id payload", async () => {
+    const activeVersion = {
+      versionId: "awv_2",
+      version: "20260819",
+      branch: "main",
+      replicaStatus: "READY",
+      activatedAt: "2026-08-19T00:00:00Z"
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: activeVersion
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.activateAutomationWorkspaceVersion("app_gcms", "awp_auto", "awv_2"))
+      .resolves.toEqual(activeVersion);
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/awp_auto/active-version",
+      expect.objectContaining({ method: "PUT" })
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ versionId: "awv_2" });
+  });
+
   it("lists application Git refresh workspaces and branches without user process routing", async () => {
     const scopes = [{
       appId: "app_gcms",
