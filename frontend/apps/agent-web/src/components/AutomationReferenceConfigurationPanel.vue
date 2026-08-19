@@ -120,14 +120,10 @@ const selectedRepository = computed(() =>
 );
 
 const activeTemplate = computed(() => {
-  if (!selectedRepositoryId.value) return null;
-  if (selectedFolderPath.value) {
-    const matched = templates.value.find(
-      (t) => t.repositoryId === selectedRepositoryId.value && t.directoryPath === selectedFolderPath.value
-    );
-    if (matched) return matched;
-  }
-  return templates.value.find((t) => t.repositoryId === selectedRepositoryId.value) ?? null;
+  if (!selectedRepositoryId.value || !selectedFolderPath.value) return null;
+  return templates.value.find(
+    (t) => t.repositoryId === selectedRepositoryId.value && t.directoryPath === selectedFolderPath.value
+  ) ?? null;
 });
 
 const selectedVersions = computed(() =>
@@ -167,7 +163,7 @@ const visibleTreeNodes = computed<VisibleTreeNode[]>(() => {
 const canCreateReference = computed(() =>
   props.canManage
   && !saving.value
-  && Boolean(selectedRepositoryId.value && (formBranch.value || selectedBranch.value) && (selectedFolderPath.value || referenceName.value.trim()))
+  && Boolean(selectedRepositoryId.value && (formBranch.value || selectedBranch.value) && selectedFolderPath.value && referenceName.value.trim())
   && /^\d{8}$/.test(versionDate.value)
 );
 
@@ -487,7 +483,20 @@ function autoExpandAndSelect() {
   }
   expandedPaths.value = expandSet;
 
-  if (!selectedFolderPath.value && rootNodes.length > 0) {
+  if (selectedFolderPath.value) {
+    return;
+  }
+  const repoTemplates = templates.value.filter((t) => t.repositoryId === selectedRepositoryId.value);
+  if (repoTemplates.length > 0) {
+    const firstTemplate = repoTemplates[0]!;
+    selectedFolderPath.value = firstTemplate.directoryPath;
+    referenceName.value = firstTemplate.workspaceName;
+    versionDate.value = todayVersion();
+    formBranch.value = selectedBranch.value;
+    return;
+  }
+
+  if (rootNodes.length > 0) {
     const firstDir = rootNodes.find((n) => n.directory);
     if (firstDir) selectFolder(firstDir);
   }
@@ -671,7 +680,7 @@ async function pollOperation(operationId: string) {
 }
 
 async function createReference() {
-  if (!canCreateReference.value || !selectedRepositoryId.value) return;
+  if (!canCreateReference.value || !selectedRepositoryId.value || !selectedFolderPath.value) return;
   saving.value = true;
   errorMessage.value = "";
   const operationId = createOperationId();
@@ -685,7 +694,7 @@ async function createReference() {
     await api.createApplicationWorkspace(props.appId, {
       repositoryId: selectedRepositoryId.value,
       branch: formBranch.value || selectedBranch.value,
-      directoryPath: selectedFolderPath.value || "scripts/e2e",
+      directoryPath: selectedFolderPath.value,
       workspaceName: referenceName.value.trim(),
       version: versionDate.value,
       operationId
@@ -893,7 +902,7 @@ onBeforeUnmount(() => {
         <div class="reference-selected-heading">
           <div>
             <strong>{{ selectedRepository.name }}</strong>
-            <span>{{ activeTemplate ? `${selectedRepository.name} · ${activeTemplate.directoryPath}` : (selectedBranch || selectedRepository.branch || "main") }}</span>
+            <span>{{ activeTemplate ? `${selectedRepository.name} · ${activeTemplate.directoryPath}` : (selectedFolderPath ? `${selectedRepository.name} · ${selectedFolderPath}` : (selectedBranch || selectedRepository.branch || "main")) }}</span>
           </div>
           <div class="reference-selected-actions">
             <div

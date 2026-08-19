@@ -289,7 +289,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
   });
 
-  it("automatically synchronizes repository when clicking repository card or refresh button", async () => {
+  it("automatically synchronizes repository and opens pull progress dialog when clicking repository card or refresh button", async () => {
     const configuredTemplate = template();
     const ready = synchronization("awv_old", {
       status: "READY",
@@ -308,7 +308,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
     const wrapper = render(mockApi);
     await flushPromises();
 
-    // 点击左侧代码库卡片，自动触发代码同步并弹出进度对话框
+    // 点击左侧代码库卡片，直接触发代码同步并弹出三阶段拉取进度模态框
     await wrapper.get('button[aria-label="选择接口自动化库"]').trigger("click");
     await flushPromises();
 
@@ -328,5 +328,57 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledTimes(2);
 
     wrapper.unmount();
+  });
+
+  it("distinguishes configured template directories from new unconfigured directories", async () => {
+    const configuredTemplate = template();
+    const mockApi = api({
+      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
+      listWorkspaceVersions: vi.fn().mockResolvedValue([version("awv_old", "20260812")]),
+      getRepositoryTree: vi.fn().mockResolvedValue({
+        nodes: [
+          {
+            name: "scripts",
+            path: "scripts",
+            type: "directory",
+            children: [
+              { name: "e2e", path: "scripts/e2e", type: "directory", children: [] },
+              { name: "unit", path: "scripts/unit", type: "directory", children: [] }
+            ]
+          }
+        ]
+      })
+    });
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("11111111-2222-3333-4444-555555555555");
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    // 默认定位到已配置的 scripts/e2e，显示已有版本历史和“新增版本”按钮
+    expect(wrapper.text()).toContain("版本历史（1）");
+    expect(wrapper.find('button[aria-label="新增版本"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="保存自动化目录引用"]').exists()).toBe(false);
+
+    // 点击未配置的新目录 scripts/unit
+    await wrapper.get('button[aria-label="选择目录 scripts/unit"]').trigger("click");
+    await flushPromises();
+
+    // 此时 activeTemplate 为 null，显示“保存目录引用”按钮
+    expect(wrapper.find('button[aria-label="保存自动化目录引用"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="新增版本"]').exists()).toBe(false);
+    expect(wrapper.get('input[aria-label="引用目录"]').element).toHaveProperty("value", "scripts/unit");
+
+    // 点击保存目录引用
+    await wrapper.get('input[aria-label="自动化引用版本日期"]').setValue("20260819");
+    await wrapper.get('button[aria-label="保存自动化目录引用"]').trigger("click");
+    await flushPromises();
+
+    expect(mockApi.createApplicationWorkspace).toHaveBeenCalledWith("app-demo", {
+      repositoryId: "repo_automation",
+      branch: "release/automation-v2",
+      directoryPath: "scripts/unit",
+      workspaceName: "unit",
+      version: "20260819",
+      operationId: "wco_11111111222233334444555555555555"
+    });
   });
 });

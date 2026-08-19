@@ -5,6 +5,43 @@
 
 ## Entries
 
+### 2026-08-19 - 修复自动化版本库目录树加载超时、目录引用创建与版本库卡片拉取弹窗交互
+
+### Why
+
+- 用户反馈在“引用配置 -> 自动化代码库”页面中存在以下问题：
+  1. 后端查询远程目录树时使用 `git archive --remote`，由于 Gitee/GitLab 等远程托管平台默认关闭 `upload-archive` 导致请求超时（60s `GIT_TIMEOUT`），页面提示“当前分支没有可选的目录”；
+  2. `activeTemplate` 计算属性存在回退兜底，导致用户选择新目录后表单错误渲染为“新增版本”（旧模板）而非“保存目录引用”，导致新选目录无法生成工作区引用且工作区完全看不到；
+  3. 点击左侧自动化代码库卡片需要直接弹出三阶段拉取同步模态框（`RepositoryOperationProgressDialog`），而非仅展示小动画。
+
+### What
+
+- **后端 Git 目录树查询改造**：
+  - 在 `test-agent-common` 的 `GitRemoteService` 中将树节点解析工具类与方法公开复用。
+  - 在 `test-agent-configuration-management` 的 `GitCloneCacheService` 中新增 `listTree` 与 `parseLsTreeOutput`，基于浅克隆元数据缓存和 `git ls-tree -r -t FETCH_HEAD` 毫秒级解析目录与文件树结构。
+  - 在 `ConfigurationManagementApplicationService.listRepositoryTree` 中切换为 `gitCloneCacheService.listTree`，彻底解决远程 Git 目录加载超时。
+- **前端自动化代码库配置面板交互与状态修复**：
+  - 在 `AutomationReferenceConfigurationPanel.vue` 中修复 `activeTemplate` 计算，严格校验 `repositoryId` 与 `selectedFolderPath` 匹配；
+  - 选中新目录时正确展示“保存目录引用”按钮（调用 `createApplicationWorkspace`），并在创建成功后触发工作区与文件树刷新挂载；
+  - 保持点击左侧版本库卡片时直接唤起三阶段同步拉取弹窗（`RepositoryOperationProgressDialog`：创建同步任务、各服务器同步、汇总同步结果）。
+- **自动化测试补充**：
+  - 新增 `GitCloneCacheServiceTest.java` 覆盖 `parseLsTreeOutput` 层级树解析；
+  - 更新 `ConfigurationManagementApplicationServiceTest.java` 适配 `gitCloneCacheService.listTree`；
+  - 更新 `automation-reference-configuration-panel.test.ts` 覆盖目录切换、新目录引用创建与点击卡片自动唤起三阶段拉取弹窗。
+
+### How
+
+- 修改 `GitRemoteService.java`、`GitCloneCacheService.java`、`ConfigurationManagementApplicationService.java` 及对应单测。
+- 修改 `AutomationReferenceConfigurationPanel.vue`、`automation-reference-configuration-panel.test.ts`。
+- 执行 Maven 测试（`test-agent-backend` 全量构建与单测通过）以及前端 Vitest / vue-tsc 检查（8 passed，0 错误）。
+
+### Result
+
+- 自动化版本库目录树加载在毫秒级内完成，彻底消除 60s 挂起超时；
+- 点击左侧代码库卡片即刻弹出三阶段拉取进度弹窗；
+- 用户选择新目录能够正确保存为应用工作区引用并在工作区组合文件树中正常展示与读取。
+
+
 ### 2026-08-19 - 自动化代码库引用面板交互与展示全面对齐应用资产库并支持前端缓存与加载等待反馈
 
 ### Why

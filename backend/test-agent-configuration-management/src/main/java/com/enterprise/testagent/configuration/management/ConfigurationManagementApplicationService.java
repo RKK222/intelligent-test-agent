@@ -474,7 +474,7 @@ public class ConfigurationManagementApplicationService {
     }
 
     /**
-     * 读取应用已关联版本库的远端目录/文件树。新接口只使用 git archive，不触发 clone/cache 落盘。
+     * 读取应用已关联版本库的远端目录/文件树。使用 git fetch + ls-tree 缓存查询，
      * 标准测试工作库仅过滤文件根、保留完整目录树供选择。
      */
     public RepositoryTreeResponse listRepositoryTree(String appId, String repositoryId, String branch, UserId currentUserId) {
@@ -483,7 +483,7 @@ public class ConfigurationManagementApplicationService {
         ensureRepositoryLinked(application.appId(), repository.repositoryId());
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         String privateKey = privateKeyFor(repository, currentUserId);
-        List<RemoteTreeNode> nodes = gitRemoteService.listTree(
+        List<RemoteTreeNode> nodes = gitCloneCacheService.listTree(
                 effectiveGitUrl(repository, currentUserId),
                 normalizedBranch,
                 privateKey);

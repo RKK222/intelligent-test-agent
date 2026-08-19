@@ -2,6 +2,9 @@ package com.enterprise.testagent.configuration.management;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.git.GitRemoteService;
+import com.enterprise.testagent.common.git.GitRemoteService.MutableTreeNode;
+import com.enterprise.testagent.common.git.GitRemoteService.RemoteTreeNode;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -109,6 +112,43 @@ public class GitCloneCacheService {
         }
 
         return listCachedDirectories(cacheDir);
+    }
+
+    /**
+     * 列出指定分支的完整目录和文件树。
+     * 使用 git fetch 获取 tree 对象，然后用 ls-tree -r -t 列出完整树结构。
+     *
+     * @param gitUrl     Git 仓库 URL
+     * @param branch     分支名称
+     * @param privateKey SSH 私钥（可选）
+     * @return 目录/文件树节点列表（已排序）
+     */
+    public List<RemoteTreeNode> listTree(String gitUrl, String branch, String privateKey) {
+        String cacheKey = buildCacheKey(gitUrl, branch);
+        Path cacheDir = cacheRoot.resolve(cacheKey);
+
+        // 检查缓存是否有效（包括 URL 校验，防止不同仓库的缓存冲突）
+        if (isCacheValid(cacheDir, gitUrl)) {
+            log.debug("使用缓存目录读取树: {}", cacheDir);
+            return listCachedTree(cacheDir);
+        }
+
+        // 获取锁，防止并发查询同一仓库
+        Object lock = queryLocks.computeIfAbsent(cacheKey, k -> new Object());
+        synchronized (lock) {
+            // 双重检查
+            if (isCacheValid(cacheDir, gitUrl)) {
+                return listCachedTree(cacheDir);
+            }
+
+            // 执行查询
+            fetchAndListDirectories(gitUrl, branch, cacheDir, privateKey);
+
+            // 查询完成后移除锁
+            queryLocks.remove(cacheKey);
+        }
+
+        return listCachedTree(cacheDir);
     }
 
     /**
@@ -286,6 +326,51 @@ public class GitCloneCacheService {
         }
 
         return directories;
+    }
+
+    /**
+     * 使用 ls-tree 列出缓存的目录/文件树结构。
+     */
+    private List<RemoteTreeNode> listCachedTree(Path cacheDir) {
+        List<String> command = List.of(
+                "git", "-C", cacheDir.toString(),
+                "-c", "core.quotepath=false",
+                "ls-tree", "-r", "-t", "FETCH_HEAD"
+        );
+
+        String output = executeCommand(command, null, "列出仓库树失败");
+        return parseLsTreeOutput(output);
+    }
+
+    /**
+     * 解析 git ls-tree -r -t 输出，构建层级树。
+     */
+    public static List<RemoteTreeNode> parseLsTreeOutput(String output) {
+        MutableTreeNode root = new MutableTreeNode("", "", GitRemoteService.NODE_TYPE_DIRECTORY);
+        for (String line : output.lines().toList()) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            int tabIndex = trimmed.indexOf('\t');
+            if (tabIndex < 0) {
+                continue;
+            }
+            String meta = trimmed.substring(0, tabIndex).trim();
+            String path = trimmed.substring(tabIndex + 1).trim();
+            if (path.isEmpty()) {
+                continue;
+            }
+            String[] metaParts = meta.split("\\s+");
+            String type = metaParts.length >= 2 && "tree".equalsIgnoreCase(metaParts[1])
+                    ? GitRemoteService.NODE_TYPE_DIRECTORY
+                    : GitRemoteService.NODE_TYPE_FILE;
+            GitRemoteService.addTreeEntry(root, path, type);
+        }
+        return root.children.values().stream()
+                .sorted(GitRemoteService.treeNodeComparator())
+                .map(MutableTreeNode::toImmutable)
+                .toList();
     }
 
     /**

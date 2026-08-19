@@ -158,7 +158,7 @@ public class GitRemoteService {
         }
     }
 
-    private static void addTreeEntry(MutableTreeNode root, String name, String type) {
+    public static void addTreeEntry(MutableTreeNode root, String name, String type) {
         String normalized = name.endsWith("/") ? name.substring(0, name.length() - 1) : name;
         if (normalized.isBlank()) {
             return;
@@ -235,25 +235,25 @@ public class GitRemoteService {
         return false;
     }
 
-    private static Comparator<MutableTreeNode> treeNodeComparator() {
+    public static Comparator<MutableTreeNode> treeNodeComparator() {
         return Comparator
                 .comparing((MutableTreeNode node) -> NODE_TYPE_FILE.equals(node.type))
                 .thenComparing(node -> node.name);
     }
 
-    private static final class MutableTreeNode {
-        private final String name;
-        private final String path;
-        private String type;
-        private final Map<String, MutableTreeNode> children = new LinkedHashMap<>();
+    public static final class MutableTreeNode {
+        public final String name;
+        public final String path;
+        public String type;
+        public final Map<String, MutableTreeNode> children = new LinkedHashMap<>();
 
-        private MutableTreeNode(String name, String path, String type) {
+        public MutableTreeNode(String name, String path, String type) {
             this.name = name;
             this.path = path;
             this.type = type;
         }
 
-        private RemoteTreeNode toImmutable() {
+        public RemoteTreeNode toImmutable() {
             return new RemoteTreeNode(
                     name,
                     path,
