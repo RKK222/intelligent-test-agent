@@ -1734,6 +1734,32 @@ describe("ReferenceConfigurationDialog", () => {
     wrapper.unmount();
   });
 
+  it("keeps the outer reference dialog locked while automation synchronization is open", async () => {
+    const wrapper = mount(ReferenceConfigurationDialog, {
+      attachTo: document.body,
+      props: { open: true, appId: "app-demo", workspaceId: "wrk-personal" },
+      global: {
+        provide: { api: api() },
+        stubs: {
+          Teleport: true,
+          AutomationReferenceConfigurationPanel: {
+            template: `<button aria-label="模拟自动化同步" @click="$emit('operation-state', { open: true, canClose: false })">同步</button>`
+          }
+        }
+      }
+    });
+    mountedWrappers.push(wrapper);
+    await flushPromises();
+    await wrapper.get('button[aria-pressed="false"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="模拟自动化同步"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('button[aria-label="关闭引用配置"]').attributes()).toHaveProperty("disabled");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(wrapper.emitted("close")).toBeUndefined();
+  });
+
   it("uses list semantics for button-driven rows and allows the overlay to scroll on short viewports", async () => {
     const mockApi = api({
       synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),

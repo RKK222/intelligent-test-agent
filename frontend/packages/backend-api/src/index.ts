@@ -436,6 +436,38 @@ export type ReferenceRepositoryTreeNode = {
   selectable: boolean;
 };
 
+/** 自动化只读版本在单台在线服务器上的共享副本同步状态。 */
+export type AutomationVersionSynchronizationServer = {
+  linuxServerId: string;
+  serverName?: string | null;
+  status: string;
+  online: boolean;
+  currentBranch?: string | null;
+  currentCommitHash?: string | null;
+  matchesTarget?: boolean | null;
+  syncedAt?: string | null;
+  error?: string | null;
+};
+
+/** 自动化只读版本的一轮多服务器同步投影，不包含服务器物理路径。 */
+export type AutomationVersionSynchronization = {
+  applicationWorkspaceId: string;
+  workspaceName: string;
+  repositoryId: string;
+  repositoryName: string;
+  versionId: string;
+  version: string;
+  branch: string;
+  targetCommitHash?: string | null;
+  status: "SYNCHRONIZING" | "READY" | "FAILED" | string;
+  operation: "SYNCHRONIZE" | string;
+  targetServerCount: number;
+  readyServerCount: number;
+  servers: AutomationVersionSynchronizationServer[];
+  traceId?: string | null;
+  message?: string | null;
+};
+
 export type ExtraRequestInit = RequestInit & { timeoutMs?: number };
 
 type RequestFn = <T>(path: string, init?: ExtraRequestInit) => Promise<T>;
@@ -1266,6 +1298,16 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<AutomationWorkspaceActiveVersion>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/active-version`,
         { method: "PUT", body: JSON.stringify({ versionId }) }
+      ),
+    /** 将一个自动化只读版本同步到当前全部在线后端服务器。 */
+    synchronizeAutomationWorkspaceVersion: (appId: string, templateId: string, versionId: string) =>
+      request<AutomationVersionSynchronization>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions/${encodeURIComponent(versionId)}/synchronize`,
+        { method: "POST" }
+      ),
+    getAutomationWorkspaceVersionSynchronizationStatus: (appId: string, templateId: string, versionId: string) =>
+      request<AutomationVersionSynchronization>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions/${encodeURIComponent(versionId)}/synchronization-status`
       ),
     /** @deprecated 版本级全员拉取已停用；请使用 gitPullPersonalWorkspace。 */
     gitPullWorkspaceVersion: (versionId: string) =>

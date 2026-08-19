@@ -157,6 +157,42 @@ public final class ManagedWorkspaceResponses {
             Instant activatedAt) {
     }
 
+    /** 自动化只读版本的一轮多服务器同步投影；只返回逻辑指针和服务器状态，不暴露副本路径。 */
+    public record AutomationVersionSynchronizationResponse(
+            String applicationWorkspaceId,
+            String workspaceName,
+            String repositoryId,
+            String repositoryName,
+            String versionId,
+            String version,
+            String branch,
+            String targetCommitHash,
+            String status,
+            String operation,
+            int targetServerCount,
+            int readyServerCount,
+            List<AutomationVersionServerSynchronizationResponse> servers,
+            String traceId,
+            String message) {
+
+        public AutomationVersionSynchronizationResponse {
+            servers = servers == null ? List.of() : List.copyOf(servers);
+        }
+    }
+
+    /** 自动化只读版本在单台在线服务器上的共享副本状态。 */
+    public record AutomationVersionServerSynchronizationResponse(
+            String linuxServerId,
+            String serverName,
+            String status,
+            boolean online,
+            String currentBranch,
+            String currentCommitHash,
+            Boolean matchesTarget,
+            Instant syncedAt,
+            String error) {
+    }
+
     /**
      * 当前用户对应用版本所关联 Git 版本库的只读访问预检结果。
      * reason 仅在不可访问时返回稳定枚举，前端据此区分申请仓库权限和补充 SSH key。

@@ -1564,7 +1564,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 - 所有接口要求已登录用户。
 - `GET /applications/git-refresh-scopes`、`POST /applications/{appId}/git-refresh` 与 `POST /applications/{appId}/git-refresh-groups` 要求 `APP_ADMIN`，`SUPER_ADMIN` 自动继承。超级管理员继续读取和刷新启用、停用应用且不要求加入应用；应用管理员只读取启用且自己仍是有效成员的应用，执行时再次复核相同条件，伪造、停用或非成员 `appId` 统一返回 `FORBIDDEN`。
-- `PUT /applications/{appId}/workspace-templates/{templateId}/active-version` 要求 `APP_ADMIN`，`SUPER_ADMIN` 自动继承；服务端同时校验应用、自动化配置和版本归属，重复激活同一版本保持原激活时间并幂等返回。
+- `PUT /applications/{appId}/workspace-templates/{templateId}/active-version`、`POST /applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronize` 和对应同步状态查询要求 `APP_ADMIN`，`SUPER_ADMIN` 自动继承；服务端同时校验应用、自动化配置和版本归属，重复激活同一版本保持原激活时间并幂等返回。
 - 应用、模板、版本、切换最近使用等应用相关接口要求当前用户是 `application_members` 中的有效成员；不区分管理员和普通成员。
 - 个人工作区接口要求当前用户是个人工作区拥有者且属于对应应用。
 - 托管工作区成员校验失败返回 `FORBIDDEN`，message 固定包含当前加载上下文：`无该应用工作区权限：当前正在加载应用 {appName}({appId})，版本 {version/versionId/未确定}，工作区 {workspaceKind}:{workspaceName/workspaceId/未确定}`。`details` 仅放安全业务字段：`loadingStage`、`appId`、`appName`、`versionId`、`version`、`applicationWorkspaceId`、`workspaceKind`、`workspaceName`、`workspaceId`、`personalWorkspaceId`；无值字段不返回。
@@ -1579,6 +1579,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区；自动化模板只返回逻辑版本、提交和副本状态，不返回任何物理路径或运行态 Workspace。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
 | `PUT` | `/applications/{appId}/workspace-templates/{templateId}/active-version` | 把 `{ "versionId": "..." }` 指定的自动化版本设为应用级当前只读版本；仅管理员可调用。 |
+| `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronize` | 为自动化只读版本创建全在线服务器同步任务；本机直接准备共享版本副本，其它服务器复用版本同步广播。 |
+| `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronization-status` | 查询该自动化版本在当前在线服务器上的同步进度；仅返回逻辑状态与 branch/commit，不返回物理路径。 |
 | `POST` | `/workspace-versions/{versionId}/git-pull` | 已停用的版本级拉取兼容入口；返回 `VALIDATION_ERROR`，不会修改共享版本、个人 worktree 或触发广播。 |
 | `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
@@ -1724,6 +1726,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "updatedAt": "2026-06-23T00:00:00Z"
 }
 ```
+
+自动化版本同步接口返回 `AutomationVersionSynchronizationResponse`。总体 `status` 为 `SYNCHRONIZING/READY/FAILED`，`targetServerCount/readyServerCount` 用于汇总；`servers[]` 按 `linuxServerId` 稳定排序，包含 `serverName/status/online/currentBranch/currentCommitHash/matchesTarget/syncedAt/error`。逐服务器 `status` 为 `PENDING/PROCESSING/READY/BLOCKED`：不存在副本或目标提交尚未匹配时为 `PENDING`，持久化副本失败时为 `BLOCKED`。响应和错误均禁止包含 `repoRootPath/workspaceRootPath` 等物理路径。前端必须以该状态呈现“创建同步任务 → 各服务器同步 → 汇总同步结果”，不能仅凭 HTTP 请求成功推断所有服务器已经就绪。
 
 `GET /workspace-versions/{versionId}/git-access` 无请求体。后端复用当前登录用户唯一 SSH key、内部版本库统一认证号拼接和公共 Git 命令执行器，通过 `git ls-remote --heads` 做只读预检；不会 clone、fetch、创建 worktree 或写入最近使用偏好。应用成员关系仍在每次请求中实时校验；同一 Java 只对“用户 + 版本库 + 有效 URL 摘要 + SSH key ID/指纹”的成功预检缓存 10 分钟并合并同键并发请求，URL 或 key 身份变化立即重检，失败和基础设施异常不缓存。缓存有 4096 项上限且不保存私钥明文；远端直接撤销仓库成员权限时，最迟在缓存到期后的下一次预检中体现，真正 Git 操作仍由远端实时鉴权。成功响应示例：
 

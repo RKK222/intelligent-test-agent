@@ -54,6 +54,30 @@ function version(versionId: string, value: string) {
   };
 }
 
+function synchronization(versionId = "awv_old", overrides: Record<string, unknown> = {}) {
+  return {
+    applicationWorkspaceId: "awp_auto",
+    workspaceName: "接口自动化",
+    repositoryId: "repo_automation",
+    repositoryName: "接口自动化库",
+    versionId,
+    version: versionId === "awv_new" ? "20260819" : "20260812",
+    branch: "main",
+    targetCommitHash: "abc123",
+    status: "READY",
+    operation: "SYNCHRONIZE",
+    targetServerCount: 2,
+    readyServerCount: 2,
+    servers: [
+      { linuxServerId: "linux-a", serverName: "server-a", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" },
+      { linuxServerId: "linux-b", serverName: "server-b", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" }
+    ],
+    traceId: "trace_auto_sync",
+    message: null,
+    ...overrides
+  };
+}
+
 function api(overrides: Record<string, unknown> = {}) {
   return {
     listApplicationRepositories: vi.fn().mockResolvedValue([repository()]),
@@ -78,6 +102,12 @@ function api(overrides: Record<string, unknown> = {}) {
     }),
     createWorkspaceVersion: vi.fn().mockResolvedValue(version("awv_new", "20260819")),
     activateAutomationWorkspaceVersion: vi.fn().mockResolvedValue({}),
+    synchronizeAutomationWorkspaceVersion: vi.fn().mockImplementation(
+      (_appId: string, _templateId: string, versionId: string) => Promise.resolve(synchronization(versionId))
+    ),
+    getAutomationWorkspaceVersionSynchronizationStatus: vi.fn().mockImplementation(
+      (_appId: string, _templateId: string, versionId: string) => Promise.resolve(synchronization(versionId))
+    ),
     updateApplicationWorkspace: vi.fn().mockResolvedValue({}),
     ...overrides
   };
@@ -141,6 +171,43 @@ describe("AutomationReferenceConfigurationPanel", () => {
 
     expect(mockApi.activateAutomationWorkspaceVersion).toHaveBeenCalledWith("app-demo", "awp_auto", "awv_new");
     expect(wrapper.emitted("changed")).toBeTruthy();
+  });
+
+  it("uses the shared three-stage dialog and shows per-server automation synchronization", async () => {
+    const configuredTemplate = template();
+    const pending = synchronization("awv_old", {
+      status: "SYNCHRONIZING",
+      readyServerCount: 1,
+      servers: [
+        { linuxServerId: "linux-a", serverName: "server-a", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" },
+        { linuxServerId: "linux-b", serverName: "server-b", status: "PENDING", online: true }
+      ]
+    });
+    const mockApi = api({
+      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
+      listWorkspaceVersions: vi.fn().mockResolvedValue([version("awv_old", "20260812")]),
+      getAutomationWorkspaceVersionSynchronizationStatus: vi.fn().mockResolvedValue(pending),
+      synchronizeAutomationWorkspaceVersion: vi.fn().mockResolvedValue(pending)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("1/2 台就绪");
+    await wrapper.get('button[aria-label="同步自动化版本 20260812"]').trigger("click");
+    await flushPromises();
+
+    const progress = wrapper.get('[aria-label="自动化代码库同步进度"]');
+    expect(progress.text()).toContain("创建同步任务");
+    expect(progress.text()).toContain("各服务器同步");
+    expect(progress.text()).toContain("server-a");
+    expect(progress.text()).toContain("已同步");
+    expect(progress.text()).toContain("server-b");
+    expect(progress.text()).toContain("等待同步");
+    expect(wrapper.get('button[aria-label="关闭自动化代码库同步进度"]').attributes()).toHaveProperty("disabled");
+    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledWith(
+      "app-demo", "awp_auto", "awv_old");
+
+    wrapper.unmount();
   });
 
   it("keeps ordinary members readonly and avoids administrator-only repository APIs", async () => {

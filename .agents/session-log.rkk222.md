@@ -12142,3 +12142,25 @@
 
 - 自动化仓库不再作为主工作空间或个人 worktree；用户从组合文件树读取应用当前版本，管理员从“引用配置”选择具体目录和维护版本，应用代码库及既有文档引用保持原入口和状态。
 - 用户明确自行进行页面验收，因此本轮未代替用户执行登录后的真实目录选择、版本切换和 Run 端到端操作；此前后端完整套件仍有 3 个与本功能无关的日期/fixture/Testcontainers 基线失败，未作为本次功能通过项或顺手修改。
+
+## 2026-08-19 - 补齐自动化代码库多服务器同步交互
+
+### Why
+
+- 首版自动化只读 Reference 只有共享副本广播和单服务器副本状态，没有像应用资产库一样展示“创建同步任务 → 各服务器同步 → 汇总同步结果”，管理员无法确认各在线服务器是否真正收敛。
+
+### What
+
+- 自动化版本新增管理员同步与状态查询 API，复用 `application_workspace_version_replicas`、现有版本同步广播和后端 heartbeat 投影当前在线服务器的 `PENDING/PROCESSING/READY/BLOCKED`，响应只含逻辑版本、branch/commit 和服务器状态；自动化广播只维护共享副本，不再触碰保留的历史个人 worktree。
+- 抽取资产库原有三阶段弹层为共享 `RepositoryOperationProgressDialog`，自动化首版本创建、新增版本、激活版本和版本行“同步”均展示真实逐服务器进度、已就绪数、失败重试和 traceId；活动期父级关闭按钮、Escape 与焦点范围同步受控。
+- 同步 HTTP API、内部广播说明、后端/前端模块 README 和用户手册；没有新增数据库表、migration、服务、环境变量、个人 worktree 或物理路径响应。
+
+### How
+
+- JDK 25 下 workspace-management 业务测试 104/104、API Controller 测试 28/28 通过；前端相关 3 个测试文件 172/172 通过，user-manual、vue-tsc 和 agent-web production build 成功，`git diff --check` 通过。
+- 使用根目录 `.env.test` / `test` profile 完整重启，26 模块后端 package 和前端 build 成功；PostgreSQL `192.168.8.100:15432/testagent_dev` 的 110 条 Flyway migration checksum 校验通过且 schema 已是最新，后端 health/readiness 为 UP、前端 3000 返回 200。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，保留并排除任务外的模型网关 README 与本地客户端打包脚本改动，未发现冲突或残留合并标记。
+
+### Result
+
+- 自动化代码库配置管理现在与应用资产库共用同一套同步进度交互，同时继续遵守应用级只读 Reference、共享副本和无个人 worktree 的边界；真实服务已启动供用户自行执行登录后的业务验收。

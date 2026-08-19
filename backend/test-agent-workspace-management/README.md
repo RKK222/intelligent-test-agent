@@ -2,6 +2,8 @@
 
 应用工作空间模板列表只返回配置管理中 `enabled=true` 的模板；响应携带 `repositoryType`、兼容字段 `standard`，自动化配置另返回可空 `activeVersion`。自动化版本列表与创建响应只含逻辑版本、提交和副本状态，省略物理路径及运行态 Workspace。自动化代码库不再进入主工作空间、recent、个人 worktree 或 Git 入口；首版本自动激活，后续版本由管理员显式切换。
 
+自动化版本同步复用既有 `application_workspace_version_replicas` 和 `workspace.version.sync-requested`：发起服务器先确保本机共享副本，再广播其它在线 Java；查询接口以 heartbeat 的当前在线服务器集合投影 `PENDING/PROCESSING/READY/BLOCKED`，只返回版本、提交和逻辑状态。该链路不另建 worktree、资产目录或第二套同步 worker。
+
 - `AutomationWorkspaceReferenceCatalogService` 按用户、主工作空间、应用和当前 Java 服务器解析激活版本，复用 `application_workspace_version_replicas`，要求版本、目标 commit、副本和运行态 Workspace 均可用。重名配置用“版本库 / 分支”后缀区分；不可用项转为局部告警。
 - `WorkspaceViewApplicationService` 在组合根增加虚拟“自动化代码库”，使用 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 逻辑定位器提供目录、文本、分片和二进制只读读取；每次操作重新授权，不接受物理路径。
 

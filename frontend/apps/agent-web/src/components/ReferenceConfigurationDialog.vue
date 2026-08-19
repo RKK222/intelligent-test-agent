@@ -17,6 +17,7 @@ import {
   type ReferenceConfigValue
 } from "./reference-config-jsonc";
 import AutomationReferenceConfigurationPanel from "./AutomationReferenceConfigurationPanel.vue";
+import RepositoryOperationProgressDialog from "./RepositoryOperationProgressDialog.vue";
 
 const OPENCODE_CONFIG_PATH = ".opencode/opencode.jsonc";
 const POLL_INTERVAL_MS = 2_000;
@@ -47,7 +48,6 @@ type PendingWorkspaceRefresh = {
 type RepositoryProgressOperation = "SYNCHRONIZE" | "VERIFY_POINTERS";
 type RepositoryOperationTrigger = "repository-card" | "verify-button";
 type RepositoryOperationRequestState = "REQUESTING" | "ACCEPTED" | "FAILED";
-type RepositoryOperationStepState = "waiting" | "running" | "completed" | "failed";
 type RepositoryOperationProgress = {
   repositoryId: string;
   requestToken: number;
@@ -78,7 +78,6 @@ const baseline = ref<ReferenceConfigValue | null>(null);
 const permissionNeedsUpdate = ref(false);
 const configNotice = ref<(Notice & { kind: "error" | "success" }) | null>(null);
 const dialogElement = ref<HTMLElement | null>(null);
-const operationDialogElement = ref<HTMLElement | null>(null);
 
 const branchPopoverRepositoryId = ref<string | null>(null);
 const branchPopoverMode = ref<"initialize" | "switch" | null>(null);
@@ -90,6 +89,12 @@ const branchSwitchConfirmation = ref<{ repositoryId: string; repositoryName: str
 const pendingWorkspaceRefreshes = ref<Map<string, PendingWorkspaceRefresh>>(new Map());
 const operationProgress = ref<RepositoryOperationProgress | null>(null);
 const activeReferenceKind = ref<"asset" | "automation">("asset");
+const automationOperationState = ref({ open: false, canClose: true });
+const modalOperationOpen = computed(() => Boolean(operationProgress.value) || automationOperationState.value.open);
+
+function handleAutomationOperationState(state: { open: boolean; canClose: boolean }) {
+  automationOperationState.value = state;
+}
 
 const dialogDescription = computed(() => activeReferenceKind.value === "asset"
   ? "从应用资产库选择首层 SDD 目录，并写入当前个人工作区的 OpenCode 配置。"
@@ -469,7 +474,6 @@ function beginOperationProgress(
     error: null
   };
   actionError.value = null;
-  void nextTick(() => operationDialogElement.value?.focus());
   return requestToken;
 }
 
@@ -637,114 +641,6 @@ async function confirmSwitchBranch() {
   } finally {
     if (contextIsCurrent(dialogToken, selectionToken, confirmation.repositoryId)) selectionBusy.value = false;
   }
-}
-
-function isSynchronizationProgress() {
-  return operationProgress.value?.operation === "SYNCHRONIZE";
-}
-
-function operationDialogLabel() {
-  return isSynchronizationProgress() ? "资产库同步进度" : "Git 指针核验进度";
-}
-
-function operationCloseLabel() {
-  return isSynchronizationProgress() ? "关闭资产库同步进度" : "关闭 Git 指针核验进度";
-}
-
-function operationRetryLabel() {
-  return isSynchronizationProgress() ? "重试资产库同步" : "重试 Git 指针核验";
-}
-
-function operationStepState(step: 1 | 2 | 3): RepositoryOperationStepState {
-  const progress = operationProgress.value;
-  const repository = acceptedOperationRepository.value;
-  if (!progress) return "waiting";
-  if (step === 1) {
-    if (progress.requestState === "REQUESTING") return "running";
-    return progress.requestState === "FAILED" ? "failed" : "completed";
-  }
-  if (progress.requestState !== "ACCEPTED") return "waiting";
-  if (repository?.status === "FAILED") return "failed";
-  if (repository?.status === "READY") return "completed";
-  return step === 2 ? "running" : "waiting";
-}
-
-function operationStepText(step: 1 | 2 | 3) {
-  const state = operationStepState(step);
-  const synchronization = isSynchronizationProgress();
-  if (step === 1) {
-    return state === "running" ? "正在创建" : state === "failed" ? "创建失败" : "任务已创建";
-  }
-  if (step === 2) {
-    return state === "running"
-      ? synchronization ? "同步中" : "核验中"
-      : state === "completed"
-        ? "已完成"
-        : state === "failed"
-          ? synchronization ? "同步失败" : "核验失败"
-          : "等待";
-  }
-  return state === "completed"
-    ? synchronization ? "同步完成" : "核验完成"
-    : state === "failed"
-      ? synchronization ? "同步失败" : "核验失败"
-      : "等待服务器";
-}
-
-function operationStepTitle(step: 1 | 2 | 3) {
-  const synchronization = isSynchronizationProgress();
-  if (step === 1) return synchronization ? "创建同步任务" : "创建核验任务";
-  if (step === 2) return synchronization ? "各服务器同步" : "各服务器核验";
-  return synchronization ? "汇总同步结果" : "汇总核验结果";
-}
-
-function operationStepDescription(step: 1 | 2 | 3) {
-  const synchronization = isSynchronizationProgress();
-  if (step === 1) return synchronization ? "向多节点协调器提交同步代次" : "向多节点协调器提交只读核验代次";
-  if (step === 2) return synchronization ? "同步固定分支与目标 HEAD 到各服务器" : "读取本地分支、HEAD、origin 和工作树状态";
-  return "按当前在线服务器判断本轮是否收敛";
-}
-
-function operationHeadline() {
-  const progress = operationProgress.value;
-  const repository = acceptedOperationRepository.value;
-  const synchronization = isSynchronizationProgress();
-  if (!progress || progress.requestState === "REQUESTING") return synchronization ? "正在创建同步任务" : "正在创建核验任务";
-  if (progress.requestState === "FAILED") return synchronization ? "同步任务创建失败" : "核验任务创建失败";
-  if (repository?.status === "READY") return synchronization ? "同步完成" : "核验完成";
-  if (repository?.status === "FAILED") return synchronization ? "同步失败" : "核验失败";
-  return synchronization ? "正在同步各服务器资产副本" : "正在核验服务器 Git 指针";
-}
-
-function operationServerStatusText(server: ReferenceRepositoryStatus["servers"][number]) {
-  if (isSynchronizationProgress()) {
-    switch (server.status) {
-      case "PENDING": return "等待同步";
-      case "PROCESSING": return "同步中";
-      case "READY": return "已同步";
-      case "BLOCKED": return "同步失败";
-      case "RETRY_WAIT": return "等待重试";
-      case "DEFERRED": return "离线延后";
-      default: return server.status;
-    }
-  }
-  switch (server.status) {
-    case "PENDING": return "等待认领";
-    case "PROCESSING": return "核验中";
-    case "READY":
-      return server.matchesTarget === true ? "已一致" : server.matchesTarget === false ? "不一致" : "已核验";
-    case "BLOCKED": return "核验失败";
-    case "RETRY_WAIT": return "等待重试";
-    case "DEFERRED": return "离线延后";
-    default: return server.status;
-  }
-}
-
-function operationServerStatusClass(server: ReferenceRepositoryStatus["servers"][number]) {
-  if (server.status === "READY") return "is-completed";
-  if (server.status === "BLOCKED") return "is-failed";
-  if (["PENDING", "PROCESSING", "RETRY_WAIT"].includes(server.status)) return "is-running";
-  return "is-waiting";
 }
 
 async function verifyPointers(repository: ReferenceRepositoryStatus) {
@@ -1016,7 +912,7 @@ async function submitConfig() {
 function focusableElements() {
   const dialog = dialogElement.value;
   if (!dialog) return [];
-  const scope = operationProgress.value
+  const scope = modalOperationOpen.value
     ? dialog.querySelector<HTMLElement>(".reference-verification-progress") ?? dialog
     : branchSwitchConfirmation.value
       ? dialog.querySelector<HTMLElement>(".reference-confirmation") ?? dialog
@@ -1034,6 +930,7 @@ function handleWindowKeydown(event: KeyboardEvent) {
       if (operationCanClose.value) closeOperationProgress();
       return;
     }
+    if (automationOperationState.value.open) return;
     if (branchSwitchConfirmation.value) {
       if (selectionBusy.value) return;
       closeBranchSwitchConfirmation();
@@ -1048,7 +945,9 @@ function handleWindowKeydown(event: KeyboardEvent) {
   const last = focusable.at(-1);
   if (!first || !last) {
     event.preventDefault();
-    (operationProgress.value ? operationDialogElement.value : dialogElement.value)?.focus();
+    (modalOperationOpen.value
+      ? dialogElement.value?.querySelector<HTMLElement>(".reference-verification-progress")
+      : dialogElement.value)?.focus();
     return;
   }
   const active = document.activeElement;
@@ -1125,8 +1024,8 @@ onBeforeUnmount(() => {
       >
         <header
           class="reference-dialog-header"
-          :aria-hidden="branchSwitchConfirmation || operationProgress ? 'true' : undefined"
-          :inert="branchSwitchConfirmation || operationProgress ? true : undefined"
+          :aria-hidden="branchSwitchConfirmation || modalOperationOpen ? 'true' : undefined"
+          :inert="branchSwitchConfirmation || modalOperationOpen ? true : undefined"
         >
           <div>
             <h2 id="reference-dialog-title">引用配置</h2>
@@ -1139,7 +1038,7 @@ onBeforeUnmount(() => {
             aria-label="关闭引用配置"
             data-reference-initial-focus
             v-initial-focus
-            :disabled="Boolean(operationProgress)"
+            :disabled="modalOperationOpen"
             @click="emit('close')"
           >
             <X class="h-4 w-4" />
@@ -1149,8 +1048,8 @@ onBeforeUnmount(() => {
         <nav
           class="reference-kind-tabs"
           aria-label="引用类型"
-          :aria-hidden="branchSwitchConfirmation || operationProgress ? 'true' : undefined"
-          :inert="branchSwitchConfirmation || operationProgress ? true : undefined"
+          :aria-hidden="branchSwitchConfirmation || modalOperationOpen ? 'true' : undefined"
+          :inert="branchSwitchConfirmation || modalOperationOpen ? true : undefined"
         >
           <button
             v-if="canManage"
@@ -1569,137 +1468,24 @@ onBeforeUnmount(() => {
           :app-id="appId"
           :can-manage="canManage"
           @changed="emit('automationChanged')"
+          @operation-state="handleAutomationOperationState"
         />
 
-        <div v-if="operationProgress" class="reference-confirmation-backdrop">
-          <section
-            ref="operationDialogElement"
-            class="reference-verification-progress"
-            role="dialog"
-            aria-modal="true"
-            :aria-label="operationDialogLabel()"
-            :aria-busy="operationCanClose ? undefined : 'true'"
-            tabindex="-1"
-          >
-            <header class="reference-verification-header">
-              <div>
-                <h3>{{ isSynchronizationProgress() ? "同步资产库" : "刷新 Git 指针" }}</h3>
-                <p aria-live="polite">{{ operationHeadline() }}</p>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                :aria-label="operationCloseLabel()"
-                :disabled="!operationCanClose"
-                @click="closeOperationProgress"
-              >关闭</Button>
-            </header>
-
-            <div v-if="operationRepository" class="reference-verification-target">
-              <div>
-                <span>版本库</span>
-                <strong>{{ operationRepository.name }}（{{ operationRepository.englishName }}）</strong>
-              </div>
-              <div>
-                <span>目标指针</span>
-                <code>{{ operationRepository.branch || "—" }} · {{ shortCommit(operationRepository.targetCommitHash) }}</code>
-              </div>
-              <div>
-                <span>服务器</span>
-                <strong>{{ operationRepository.readyServerCount }}/{{ operationRepository.targetServerCount }} 台就绪</strong>
-              </div>
-            </div>
-
-            <ol class="reference-verification-steps">
-              <li :class="`is-${operationStepState(1)}`">
-                <span class="reference-verification-marker" aria-hidden="true">
-                  <Check v-if="operationStepState(1) === 'completed'" class="h-3.5 w-3.5" />
-                  <X v-else-if="operationStepState(1) === 'failed'" class="h-3.5 w-3.5" />
-                  <RefreshCw v-else-if="operationStepState(1) === 'running'" class="h-3.5 w-3.5 animate-spin" />
-                  <span v-else>1</span>
-                </span>
-                <div>
-                  <strong>{{ operationStepTitle(1) }}</strong>
-                  <small>{{ operationStepDescription(1) }}</small>
-                </div>
-                <span class="reference-verification-step-status">{{ operationStepText(1) }}</span>
-              </li>
-              <li :class="`is-${operationStepState(2)}`">
-                <span class="reference-verification-marker" aria-hidden="true">
-                  <Check v-if="operationStepState(2) === 'completed'" class="h-3.5 w-3.5" />
-                  <X v-else-if="operationStepState(2) === 'failed'" class="h-3.5 w-3.5" />
-                  <RefreshCw v-else-if="operationStepState(2) === 'running'" class="h-3.5 w-3.5 animate-spin" />
-                  <span v-else>2</span>
-                </span>
-                <div>
-                  <strong>{{ operationStepTitle(2) }}</strong>
-                  <small>{{ operationStepDescription(2) }}</small>
-                </div>
-                <span class="reference-verification-step-status">{{ operationStepText(2) }}</span>
-                <div v-if="operationProgress.requestState === 'ACCEPTED'" class="reference-verification-servers">
-                  <div
-                    v-for="server in acceptedOperationRepository?.servers || []"
-                    :key="server.linuxServerId"
-                    class="reference-verification-server"
-                  >
-                    <div>
-                      <strong>{{ server.linuxServerId }}</strong>
-                      <small>{{ serverOnline(server) === true ? "在线" : serverOnline(server) === false ? "离线" : "在线状态未知" }}</small>
-                    </div>
-                    <span :class="operationServerStatusClass(server)">{{ operationServerStatusText(server) }}</span>
-                    <code>{{ server.currentBranch || "—" }} · {{ shortCommit(server.currentCommitHash) }}</code>
-                    <small v-if="server.error" class="is-error">{{ server.error }}</small>
-                  </div>
-                  <div v-if="(acceptedOperationRepository?.servers.length || 0) === 0" class="reference-verification-server-empty">
-                    正在等待服务器领取{{ isSynchronizationProgress() ? "同步" : "核验" }}任务…
-                  </div>
-                </div>
-              </li>
-              <li :class="`is-${operationStepState(3)}`">
-                <span class="reference-verification-marker" aria-hidden="true">
-                  <Check v-if="operationStepState(3) === 'completed'" class="h-3.5 w-3.5" />
-                  <X v-else-if="operationStepState(3) === 'failed'" class="h-3.5 w-3.5" />
-                  <RefreshCw v-else-if="operationStepState(3) === 'running'" class="h-3.5 w-3.5 animate-spin" />
-                  <span v-else>3</span>
-                </span>
-                <div>
-                  <strong>{{ operationStepTitle(3) }}</strong>
-                  <small>{{ operationStepDescription(3) }}</small>
-                </div>
-                <span class="reference-verification-step-status">{{ operationStepText(3) }}</span>
-              </li>
-            </ol>
-
-            <div v-if="operationProgress.error" class="reference-verification-error" role="alert">
-              <strong>{{ operationProgress.error.message }}</strong>
-              <code v-if="operationProgress.error.traceId">traceId: {{ operationProgress.error.traceId }}</code>
-            </div>
-            <div v-else-if="actionError" class="reference-verification-error is-retrying" role="status">
-              <strong>{{ actionError.message }}</strong>
-              <span>正在自动重试状态读取…</span>
-              <code v-if="actionError.traceId">traceId: {{ actionError.traceId }}</code>
-            </div>
-            <div
-              v-else-if="acceptedOperationRepository?.status === 'FAILED'"
-              class="reference-verification-error"
-              role="alert"
-            >
-              <strong>{{ acceptedOperationRepository.message || (isSynchronizationProgress() ? "服务器资产副本同步失败" : "服务器指针核验失败") }}</strong>
-              <code v-if="acceptedOperationRepository.traceId">traceId: {{ acceptedOperationRepository.traceId }}</code>
-            </div>
-
-            <footer class="reference-verification-actions">
-              <Button
-                v-if="operationCanRetry"
-                size="sm"
-                variant="ghost"
-                :aria-label="operationRetryLabel()"
-                @click="retryOperation"
-              >重试</Button>
-              <span v-if="!operationCanClose">{{ isSynchronizationProgress() ? "同步" : "核验" }}期间请保持此窗口打开</span>
-            </footer>
-          </section>
-        </div>
+        <RepositoryOperationProgressDialog
+          v-if="operationProgress"
+          :open="true"
+          :operation="operationProgress.operation"
+          :request-state="operationProgress.requestState"
+          :target="operationRepository"
+          :accepted-target="acceptedOperationRepository"
+          :error="operationProgress.error"
+          :polling-error="actionError"
+          :can-close="operationCanClose"
+          :can-retry="operationCanRetry"
+          resource-label="资产库"
+          @close="closeOperationProgress"
+          @retry="retryOperation"
+        />
 
         <div v-if="branchSwitchConfirmation" class="reference-confirmation-backdrop">
           <section
@@ -2235,278 +2021,6 @@ onBeforeUnmount(() => {
   font-family: "Geist Mono", monospace;
 }
 
-.reference-verification-progress {
-  display: flex;
-  width: min(620px, 100%);
-  max-height: min(680px, calc(100vh - 72px));
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--ta-border-strong);
-  border-radius: 9px;
-  outline: none;
-  background: var(--ta-panel-2);
-  box-shadow: 0 22px 56px rgba(15, 23, 42, 0.26);
-}
-
-.reference-verification-header {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid var(--ta-border);
-  padding: 12px 14px;
-  background: var(--ta-panel);
-}
-
-.reference-verification-header h3,
-.reference-verification-header p {
-  margin: 0;
-}
-
-.reference-verification-header h3 {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.reference-verification-header p {
-  margin-top: 3px;
-  color: var(--ta-muted);
-  font-size: 11px;
-}
-
-.reference-verification-target {
-  display: grid;
-  flex-shrink: 0;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
-  gap: 12px;
-  border-bottom: 1px solid var(--ta-border);
-  padding: 9px 14px;
-  background: var(--ta-surface);
-}
-
-.reference-verification-target div {
-  min-width: 0;
-}
-
-.reference-verification-target span,
-.reference-verification-target strong,
-.reference-verification-target code {
-  display: block;
-}
-
-.reference-verification-target span {
-  margin-bottom: 3px;
-  color: var(--ta-muted);
-  font-size: 9px;
-  text-transform: uppercase;
-}
-
-.reference-verification-target strong,
-.reference-verification-target code {
-  overflow: hidden;
-  color: var(--ta-text);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reference-verification-target code {
-  font-family: "Geist Mono", monospace;
-}
-
-.reference-verification-steps {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 7px;
-  overflow: auto;
-  margin: 0;
-  padding: 12px 14px;
-  list-style: none;
-}
-
-.reference-verification-steps > li {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px 9px;
-  border: 1px solid var(--ta-border);
-  border-radius: 7px;
-  padding: 8px 9px;
-  background: var(--ta-surface);
-}
-
-.reference-verification-steps > li.is-running {
-  border-color: var(--ta-cyan);
-  background: rgba(79, 111, 122, 0.07);
-}
-
-.reference-verification-steps > li.is-completed {
-  border-color: var(--ta-ok);
-  background: rgba(63, 122, 90, 0.07);
-}
-
-.reference-verification-steps > li.is-failed {
-  border-color: var(--ta-error);
-  background: rgba(158, 59, 52, 0.07);
-}
-
-.reference-verification-marker {
-  display: inline-grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border: 1px solid var(--ta-border-strong);
-  border-radius: 50%;
-  color: var(--ta-muted);
-  font-family: "Geist Mono", monospace;
-  font-size: 9px;
-}
-
-.reference-verification-steps > li.is-running .reference-verification-marker {
-  border-color: var(--ta-cyan);
-  color: var(--ta-cyan);
-}
-
-.reference-verification-steps > li.is-completed .reference-verification-marker {
-  border-color: var(--ta-ok);
-  color: var(--ta-ok);
-}
-
-.reference-verification-steps > li.is-failed .reference-verification-marker {
-  border-color: var(--ta-error);
-  color: var(--ta-error);
-}
-
-.reference-verification-steps strong,
-.reference-verification-steps small {
-  display: block;
-}
-
-.reference-verification-steps strong {
-  color: var(--ta-text);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.reference-verification-steps small {
-  margin-top: 2px;
-  color: var(--ta-muted);
-  font-size: 9px;
-}
-
-.reference-verification-step-status {
-  color: var(--ta-muted);
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.reference-verification-servers {
-  display: flex;
-  grid-column: 2 / 4;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
-  border-top: 1px solid var(--ta-border);
-  padding-top: 6px;
-}
-
-.reference-verification-server {
-  display: grid;
-  grid-template-columns: minmax(110px, 1fr) auto minmax(120px, auto);
-  align-items: center;
-  gap: 6px 10px;
-  border-radius: 5px;
-  padding: 4px 6px;
-  background: var(--ta-panel);
-  font-size: 10px;
-}
-
-.reference-verification-server > div strong,
-.reference-verification-server > div small {
-  display: inline;
-}
-
-.reference-verification-server > div small {
-  margin-left: 5px;
-}
-
-.reference-verification-server > span {
-  color: var(--ta-muted);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.reference-verification-server > span.is-completed {
-  color: var(--ta-ok);
-}
-
-.reference-verification-server > span.is-failed,
-.reference-verification-server > small.is-error {
-  color: var(--ta-error);
-}
-
-.reference-verification-server code {
-  overflow: hidden;
-  color: var(--ta-text);
-  font-family: "Geist Mono", monospace;
-  font-size: 9px;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reference-verification-server > small.is-error {
-  grid-column: 1 / -1;
-  margin: 0;
-}
-
-.reference-verification-server-empty {
-  padding: 4px 6px;
-  color: var(--ta-muted);
-  font-size: 10px;
-}
-
-.reference-verification-error {
-  display: flex;
-  flex-shrink: 0;
-  flex-direction: column;
-  gap: 3px;
-  margin: 0 14px 10px;
-  border: 1px solid rgba(158, 59, 52, 0.35);
-  border-radius: 6px;
-  padding: 7px 9px;
-  background: rgba(158, 59, 52, 0.07);
-  color: var(--ta-error);
-  font-size: 10px;
-}
-
-.reference-verification-error.is-retrying {
-  border-color: rgba(79, 111, 122, 0.35);
-  background: rgba(79, 111, 122, 0.07);
-  color: var(--ta-cyan);
-}
-
-.reference-verification-error code {
-  font-family: "Geist Mono", monospace;
-  font-size: 9px;
-}
-
-.reference-verification-actions {
-  display: flex;
-  min-height: 40px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  border-top: 1px solid var(--ta-border);
-  padding: 6px 14px;
-  color: var(--ta-muted);
-  font-size: 10px;
-}
-
 .reference-selected-heading strong {
   font-size: 12px;
 }
@@ -2760,19 +2274,6 @@ onBeforeUnmount(() => {
     flex: 1;
   }
 
-  .reference-verification-target {
-    grid-template-columns: 1fr;
-    gap: 7px;
-  }
-
-  .reference-verification-server {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .reference-verification-server code {
-    grid-column: 1 / -1;
-    text-align: left;
-  }
 }
 
 @media (max-height: 560px) {

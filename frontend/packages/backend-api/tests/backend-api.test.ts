@@ -6,6 +6,7 @@ import {
   LINUX_SERVER_ROUTE_HEADER,
   SESSION_SHARE_HEADER,
   SUPPORT_ACCESS_GRANT_HEADER,
+  type AutomationVersionSynchronization,
   type ReferenceRepositoryStatus,
   type WorkspaceWebSocketFactory
 } from "../src";
@@ -866,6 +867,46 @@ describe("backend-api", () => {
       [
         "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/tree?path=docs%2Fapi",
         undefined,
+        undefined
+      ]
+    ]);
+  });
+
+  it("calls automation version synchronization endpoints without a routed physical workspace", async () => {
+    const status: AutomationVersionSynchronization = {
+      applicationWorkspaceId: "awp/auto",
+      workspaceName: "接口自动化",
+      repositoryId: "repo/auto",
+      repositoryName: "自动化代码库",
+      versionId: "awv/2",
+      version: "20260819",
+      branch: "main",
+      targetCommitHash: "abc123",
+      status: "SYNCHRONIZING",
+      operation: "SYNCHRONIZE",
+      targetServerCount: 2,
+      readyServerCount: 1,
+      servers: [{ linuxServerId: "linux-a", serverName: "server-a", status: "READY", online: true }]
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: status
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.synchronizeAutomationWorkspaceVersion("app/demo", "awp/auto", "awv/2"))
+      .resolves.toEqual(status);
+    await expect(client.getAutomationWorkspaceVersionSynchronizationStatus("app/demo", "awp/auto", "awv/2"))
+      .resolves.toEqual(status);
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/workspace-templates/awp%2Fauto/versions/awv%2F2/synchronize",
+        "POST"
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/workspace-templates/awp%2Fauto/versions/awv%2F2/synchronization-status",
         undefined
       ]
     ]);

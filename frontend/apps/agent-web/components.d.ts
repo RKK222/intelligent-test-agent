@@ -80,6 +80,7 @@ declare module 'vue' {
     ReadonlyTranscript: typeof import('./src/components/ReadonlyTranscript.vue')['default']
     ReferenceConfigurationDialog: typeof import('./src/components/ReferenceConfigurationDialog.vue')['default']
     RepositoryDirectoryTree: typeof import('./src/components/RepositoryDirectoryTree.vue')['default']
+    RepositoryOperationProgressDialog: typeof import('./src/components/RepositoryOperationProgressDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     RuntimeManagementPanel: typeof import('./src/components/settings/RuntimeManagementPanel.vue')['default']

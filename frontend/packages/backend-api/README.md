@@ -8,6 +8,8 @@
 
 ## 主要职责
 
+- 自动化只读引用通过 `synchronizeAutomationWorkspaceVersion()` 创建版本级多服务器同步，通过 `getAutomationWorkspaceVersionSynchronizationStatus()` 轮询当前在线服务器状态；类型只暴露版本、branch/commit、逻辑服务器状态和 traceId，不包含服务器磁盘路径。
+
 - 提供 `listUserNotifications()` 和 `markUserNotificationRead()`，统一访问 `/api/internal/platform/notification-center/notifications`。分页响应保留全局 `unreadCount`；`NONE` 动作的配置 dispose 通知仍可计入未读并标记已读，失败状态只允许触发受控的本人进程重启；分享通知点击不提前调用通用已读接口，仍由 `/s/{shareId}` 鉴权成功后在服务端落已读事实。
 
 - 提供独立 `SessionShareApiClient`：候选用户、分享管理和“分享给我”列表保持普通认证请求，不携带分享头；访问上下文及分享范围内的会话、Run、夜间任务、文件、Git、终端和反馈请求按实例注入 `X-Test-Agent-Session-Share`。错误和调试信息不得输出分享 ID、Authorization 或文件正文。

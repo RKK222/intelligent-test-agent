@@ -118,6 +118,38 @@ public class ManagedWorkspaceController {
                 principal.userId()));
     }
 
+    /** 应用管理员发起自动化只读版本的多服务器共享副本同步。 */
+    @PostMapping("/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronize")
+    public ApiResponse<Object> synchronizeAutomationVersion(
+            @PathVariable String appId,
+            @PathVariable String templateId,
+            @PathVariable String versionId,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        return ok(exchange, service.synchronizeAutomationVersion(
+                appId,
+                templateId,
+                versionId,
+                principal.userId(),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /** 应用管理员轮询自动化只读版本在当前在线服务器集合中的同步状态。 */
+    @GetMapping("/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronization-status")
+    public ApiResponse<Object> automationVersionSynchronizationStatus(
+            @PathVariable String appId,
+            @PathVariable String templateId,
+            @PathVariable String versionId,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        return ok(exchange, service.automationVersionSynchronizationStatus(
+                appId,
+                templateId,
+                versionId,
+                principal.userId(),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
     @PostMapping("/workspace-versions/{versionId}/git-pull")
     public ApiResponse<Object> gitPullVersion(
             @PathVariable String versionId,

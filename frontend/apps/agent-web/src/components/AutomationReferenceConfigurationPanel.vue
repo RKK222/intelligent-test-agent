@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
-import type { BackendApiClient } from "@test-agent/backend-api";
+import {
+  BackendApiError,
+  type AutomationVersionSynchronization,
+  type BackendApiClient
+} from "@test-agent/backend-api";
 import type {
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
@@ -11,6 +15,7 @@ import type {
 import { Button, Input, Spinner } from "@test-agent/ui-kit";
 import { Check, FolderGit2, Plus, RefreshCw } from "lucide-vue-next";
 import RepositoryDirectoryTree from "./RepositoryDirectoryTree.vue";
+import RepositoryOperationProgressDialog from "./RepositoryOperationProgressDialog.vue";
 
 const AUTOMATION_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
 const OPERATION_POLL_INTERVAL_MS = 1_000;
@@ -23,6 +28,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   changed: [];
+  "operation-state": [state: { open: boolean; canClose: boolean }];
 }>();
 
 const api = inject<BackendApiClient>("api")!;
@@ -32,6 +38,7 @@ const errorMessage = ref("");
 const repositories = ref<CodeRepositoryConfig[]>([]);
 const templates = ref<ApplicationWorkspaceTemplate[]>([]);
 const versionsByTemplate = ref<Record<string, ApplicationWorkspaceVersion[]>>({});
+const synchronizationsByVersion = ref<Record<string, AutomationVersionSynchronization>>({});
 const selectedRepositoryId = ref("");
 const selectedTemplateId = ref("");
 const createMode = ref(false);
@@ -44,10 +51,19 @@ const versionDate = ref("");
 const tree = ref<RepositoryTreeNode[]>([]);
 const treeLoading = ref(false);
 const operation = ref<WorkspaceCreateOperation | null>(null);
+const synchronization = ref<AutomationVersionSynchronization | null>(null);
+const synchronizationRequest = ref<{
+  template: ApplicationWorkspaceTemplate;
+  version: ApplicationWorkspaceVersion;
+  requestState: "REQUESTING" | "ACCEPTED" | "FAILED";
+  error: { message: string; traceId?: string } | null;
+  pollingError: { message: string; traceId?: string } | null;
+} | null>(null);
 let catalogGeneration = 0;
 let branchGeneration = 0;
 let treeGeneration = 0;
 let operationTimer: number | undefined;
+let synchronizationTimer: number | undefined;
 
 const selectedTemplate = computed(() =>
   templates.value.find((template) => template.workspaceId === selectedTemplateId.value) ?? null
@@ -70,6 +86,37 @@ const canCreateVersion = computed(() =>
   && Boolean(selectedTemplate.value && selectedBranch.value)
   && /^\d{8}$/.test(versionDate.value)
 );
+const synchronizationTarget = computed(() => {
+  const request = synchronizationRequest.value;
+  if (!request) return null;
+  const current = synchronization.value;
+  const repository = repositories.value.find((item) => item.repositoryId === request.version.repositoryId);
+  return {
+    name: current?.repositoryName || repository?.name || "自动化代码库",
+    englishName: repository?.englishName || null,
+    branch: current?.branch || request.version.branch,
+    targetCommitHash: current?.targetCommitHash || request.version.targetCommitHash || null,
+    status: current?.status || "SYNCHRONIZING",
+    targetServerCount: current?.targetServerCount || 0,
+    readyServerCount: current?.readyServerCount || 0,
+    servers: current?.servers || [],
+    traceId: current?.traceId,
+    message: current?.message
+  };
+});
+const acceptedSynchronizationTarget = computed(() =>
+  synchronizationRequest.value?.requestState === "ACCEPTED" ? synchronizationTarget.value : null
+);
+const synchronizationCanClose = computed(() => {
+  const request = synchronizationRequest.value;
+  if (!request) return false;
+  return request.requestState === "FAILED" || ["READY", "FAILED"].includes(synchronization.value?.status || "");
+});
+const synchronizationCanRetry = computed(() => {
+  const request = synchronizationRequest.value;
+  return Boolean(request && request.requestState !== "REQUESTING"
+    && (request.requestState === "FAILED" || synchronization.value?.status === "FAILED"));
+});
 
 function todayVersion() {
   const now = new Date();
@@ -91,6 +138,17 @@ function formattedTime(value?: string | null) {
   if (!value) return "—";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function synchronizationSummary(versionId: string) {
+  return synchronizationsByVersion.value[versionId] ?? null;
+}
+
+function synchronizationNotice(error: unknown, fallback: string) {
+  if (error instanceof BackendApiError) {
+    return { message: error.message || fallback, traceId: error.traceId || undefined };
+  }
+  return { message: error instanceof Error ? error.message : fallback };
 }
 
 function normalizedTree(nodes: RepositoryTreeNode[]): RepositoryTreeNode[] {
@@ -141,6 +199,25 @@ async function loadCatalog() {
     templates.value = automationTemplates;
     repositories.value = automationRepositories;
     versionsByTemplate.value = Object.fromEntries(versionEntries);
+    if (props.canManage) {
+      const statusEntries = await Promise.all(versionEntries.flatMap(([templateId, versions]) =>
+        versions.map(async (version) => {
+          try {
+            return [
+              version.versionId,
+              await api.getAutomationWorkspaceVersionSynchronizationStatus(
+                props.appId, templateId, version.versionId)
+            ] as const;
+          } catch {
+            // 单个版本状态不可用不阻断配置列表，用户仍可在版本行手动重试同步。
+            return null;
+          }
+        })));
+      if (!props.open || generation !== catalogGeneration) return;
+      synchronizationsByVersion.value = Object.fromEntries(statusEntries.filter((entry) => entry !== null));
+    } else {
+      synchronizationsByVersion.value = {};
+    }
 
     const retainedTemplate = automationTemplates.find((template) => template.workspaceId === selectedTemplateId.value);
     if (retainedTemplate) {
@@ -245,6 +322,90 @@ function clearOperationPoll() {
   operationTimer = undefined;
 }
 
+function clearSynchronizationPoll() {
+  if (synchronizationTimer !== undefined) window.clearTimeout(synchronizationTimer);
+  synchronizationTimer = undefined;
+}
+
+async function pollSynchronization(templateId: string, versionId: string) {
+  clearSynchronizationPoll();
+  try {
+    const next = await api.getAutomationWorkspaceVersionSynchronizationStatus(props.appId, templateId, versionId);
+    const request = synchronizationRequest.value;
+    if (!props.open || !request || request.version.versionId !== versionId) return;
+    synchronization.value = next;
+    synchronizationsByVersion.value = { ...synchronizationsByVersion.value, [versionId]: next };
+    synchronizationRequest.value = { ...request, pollingError: null };
+    if (["READY", "FAILED"].includes(next.status)) {
+      saving.value = false;
+      emit("changed");
+      return;
+    }
+  } catch (error) {
+    const request = synchronizationRequest.value;
+    if (!props.open || !request || request.version.versionId !== versionId) return;
+    synchronizationRequest.value = {
+      ...request,
+      pollingError: synchronizationNotice(error, "读取自动化代码库同步状态失败")
+    };
+  }
+  if (!props.open || synchronizationRequest.value?.version.versionId !== versionId) return;
+  synchronizationTimer = window.setTimeout(
+    () => void pollSynchronization(templateId, versionId),
+    OPERATION_POLL_INTERVAL_MS
+  );
+}
+
+async function synchronizeVersion(template: ApplicationWorkspaceTemplate, version: ApplicationWorkspaceVersion) {
+  if (!props.canManage) return;
+  clearSynchronizationPoll();
+  saving.value = true;
+  synchronization.value = null;
+  synchronizationRequest.value = {
+    template,
+    version,
+    requestState: "REQUESTING",
+    error: null,
+    pollingError: null
+  };
+  try {
+    const next = await api.synchronizeAutomationWorkspaceVersion(
+      props.appId, template.workspaceId, version.versionId);
+    const request = synchronizationRequest.value;
+    if (!request || request.version.versionId !== version.versionId) return;
+    synchronization.value = next;
+    synchronizationsByVersion.value = { ...synchronizationsByVersion.value, [version.versionId]: next };
+    synchronizationRequest.value = { ...request, requestState: "ACCEPTED", error: null };
+    if (["READY", "FAILED"].includes(next.status)) {
+      saving.value = false;
+      emit("changed");
+      return;
+    }
+    await pollSynchronization(template.workspaceId, version.versionId);
+  } catch (error) {
+    const request = synchronizationRequest.value;
+    if (!request || request.version.versionId !== version.versionId) return;
+    saving.value = false;
+    synchronizationRequest.value = {
+      ...request,
+      requestState: "FAILED",
+      error: synchronizationNotice(error, "创建自动化代码库同步任务失败")
+    };
+  }
+}
+
+function retrySynchronization() {
+  const request = synchronizationRequest.value;
+  if (request && synchronizationCanRetry.value) void synchronizeVersion(request.template, request.version);
+}
+
+function closeSynchronization() {
+  if (!synchronizationCanClose.value) return;
+  clearSynchronizationPoll();
+  synchronizationRequest.value = null;
+  synchronization.value = null;
+}
+
 /** 异步创建沿用既有工作空间 operation，仅在前端把它表达为只读目录引用初始化。 */
 async function pollOperation(operationId: string) {
   clearOperationPoll();
@@ -257,6 +418,13 @@ async function pollOperation(operationId: string) {
       saving.value = false;
       await loadCatalog();
       emit("changed");
+      const createdVersion = next.versionId
+        ? Object.values(versionsByTemplate.value).flat().find((version) => version.versionId === next.versionId)
+        : null;
+      const createdTemplate = createdVersion
+        ? templates.value.find((template) => template.workspaceId === createdVersion.applicationWorkspaceId)
+        : null;
+      if (createdTemplate && createdVersion) await synchronizeVersion(createdTemplate, createdVersion);
       return;
     }
     if (next.status === "FAILED") {
@@ -304,16 +472,17 @@ async function createVersion() {
   saving.value = true;
   errorMessage.value = "";
   try {
-    await api.createWorkspaceVersion(props.appId, template.workspaceId, {
+    const created = await api.createWorkspaceVersion(props.appId, template.workspaceId, {
       version: versionDate.value,
       branch: selectedBranch.value
     });
     await loadCatalog();
     emit("changed");
+    await synchronizeVersion(template, created);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "新增自动化引用版本失败";
   } finally {
-    saving.value = false;
+    if (!synchronizationRequest.value) saving.value = false;
   }
 }
 
@@ -325,10 +494,11 @@ async function activateVersion(template: ApplicationWorkspaceTemplate, version: 
     await api.activateAutomationWorkspaceVersion(props.appId, template.workspaceId, version.versionId);
     await loadCatalog();
     emit("changed");
+    await synchronizeVersion(template, version);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "切换自动化引用版本失败";
   } finally {
-    saving.value = false;
+    if (!synchronizationRequest.value) saving.value = false;
   }
 }
 
@@ -354,8 +524,17 @@ watch(
     branchGeneration++;
     treeGeneration++;
     clearOperationPoll();
+    clearSynchronizationPoll();
+    synchronizationRequest.value = null;
+    synchronization.value = null;
     if (open && props.appId) void loadCatalog();
   },
+  { immediate: true }
+);
+
+watch(
+  () => [Boolean(synchronizationRequest.value), synchronizationCanClose.value] as const,
+  ([open, canClose]) => emit("operation-state", { open, canClose }),
   { immediate: true }
 );
 
@@ -364,6 +543,8 @@ onBeforeUnmount(() => {
   branchGeneration++;
   treeGeneration++;
   clearOperationPoll();
+  clearSynchronizationPoll();
+  emit("operation-state", { open: false, canClose: true });
 });
 </script>
 
@@ -415,7 +596,10 @@ onBeforeUnmount(() => {
               <div class="reference-repository-meta">
                 <span>{{ template.enabled === false ? "已停用" : (template.activeVersion?.branch || template.branch || "main") }}</span>
                 <span :class="{ 'is-online': template.activeVersion?.replicaStatus === 'READY' }">
-                  {{ template.activeVersion?.replicaStatus || "UNKNOWN" }}
+                  <template v-if="template.activeVersion && synchronizationSummary(template.activeVersion.versionId)">
+                    {{ synchronizationSummary(template.activeVersion.versionId)!.readyServerCount }}/{{ synchronizationSummary(template.activeVersion.versionId)!.targetServerCount }} 台就绪
+                  </template>
+                  <template v-else>{{ template.activeVersion?.replicaStatus || "UNKNOWN" }}</template>
                 </span>
               </div>
             </article>
@@ -626,6 +810,9 @@ onBeforeUnmount(() => {
               <Check v-if="selectedTemplate.activeVersion.replicaStatus === 'READY'" class="h-3 w-3" />
               {{ selectedTemplate.activeVersion.replicaStatus === "READY" ? "就绪" : selectedTemplate.activeVersion.replicaStatus === "FAILED" ? "异常" : "同步中" }}
             </span>
+            <span v-if="selectedTemplate.activeVersion && synchronizationSummary(selectedTemplate.activeVersion.versionId)" class="reference-pointer-status">
+              服务器 {{ synchronizationSummary(selectedTemplate.activeVersion.versionId)!.readyServerCount }}/{{ synchronizationSummary(selectedTemplate.activeVersion.versionId)!.targetServerCount }} 台就绪
+            </span>
           </div>
         </section>
 
@@ -641,7 +828,7 @@ onBeforeUnmount(() => {
                   <tr>
                     <th>版本号</th>
                     <th>分支</th>
-                    <th>副本状态</th>
+                    <th>服务器同步</th>
                     <th>创建时间</th>
                     <th>状态</th>
                     <th v-if="canManage" style="text-align: right;">操作</th>
@@ -656,7 +843,15 @@ onBeforeUnmount(() => {
                       <code>{{ version.branch }}</code>
                     </td>
                     <td>
-                      <span class="reference-pointer-status">{{ version.replicaStatus || "UNKNOWN" }}</span>
+                      <span
+                        class="reference-pointer-status"
+                        :class="{ 'is-online': synchronizationSummary(version.versionId)?.status === 'READY' }"
+                      >
+                        <template v-if="synchronizationSummary(version.versionId)">
+                          {{ synchronizationSummary(version.versionId)!.readyServerCount }}/{{ synchronizationSummary(version.versionId)!.targetServerCount }} 台就绪
+                        </template>
+                        <template v-else>{{ version.replicaStatus || "UNKNOWN" }}</template>
+                      </span>
                     </td>
                     <td>
                       <time>{{ formattedTime(version.createdAt) }}</time>
@@ -672,7 +867,18 @@ onBeforeUnmount(() => {
                         {{ version.status === "ACTIVE" ? "可用" : version.status }}
                       </span>
                     </td>
-                    <td v-if="canManage" style="text-align: right;">
+                    <td v-if="canManage" class="automation-version-actions">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        class="reference-inline-action"
+                        :disabled="saving || version.status !== 'ACTIVE'"
+                        :aria-label="`同步自动化版本 ${version.version}`"
+                        @click="synchronizeVersion(selectedTemplate, version)"
+                      >
+                        <RefreshCw class="h-3 w-3 mr-1 inline-block" />
+                        同步
+                      </Button>
                       <Button
                         v-if="selectedTemplate.activeVersion?.versionId !== version.versionId"
                         size="sm"
@@ -740,6 +946,23 @@ onBeforeUnmount(() => {
         {{ canManage ? "从左侧选择版本库并新增目录引用。" : "当前应用暂无可查看的自动化引用。" }}
       </div>
     </main>
+
+    <RepositoryOperationProgressDialog
+      v-if="synchronizationRequest"
+      :open="true"
+      operation="SYNCHRONIZE"
+      :request-state="synchronizationRequest.requestState"
+      :target="synchronizationTarget"
+      :accepted-target="acceptedSynchronizationTarget"
+      :error="synchronizationRequest.error"
+      :polling-error="synchronizationRequest.pollingError"
+      :can-close="synchronizationCanClose"
+      :can-retry="synchronizationCanRetry"
+      resource-label="自动化代码库"
+      replica-label="自动化"
+      @close="closeSynchronization"
+      @retry="retrySynchronization"
+    />
   </div>
 </template>
 
@@ -968,6 +1191,10 @@ onBeforeUnmount(() => {
   font-family: "Geist Mono", monospace;
 }
 
+.reference-pointer-status.is-online {
+  color: var(--ta-ok);
+}
+
 .reference-pointer-match {
   display: flex;
   align-items: center;
@@ -1043,6 +1270,13 @@ onBeforeUnmount(() => {
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+}
+
+.automation-version-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  text-align: right;
 }
 
 .reference-ready-layout {

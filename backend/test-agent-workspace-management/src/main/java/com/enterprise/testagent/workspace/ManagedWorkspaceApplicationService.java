@@ -53,6 +53,9 @@ import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncRecordId;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncStatus;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceReplicaSyncStatus;
 import com.enterprise.testagent.domain.hub.AgentSkillHubPushIndexer;
+import com.enterprise.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -179,6 +182,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
     private ScmGitIdentityResolver scmGitIdentityResolver;
     private AutomationWorkspaceActiveVersionRepository automationActiveVersionRepository;
+    private OpencodeProcessHeartbeatStore heartbeatStore;
 
     /**
      * 可选注入运行上下文端口；测试构造器无需感知 Redis，实现仍保持模块只依赖 domain。
@@ -216,6 +220,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     @Autowired(required = false)
     void setAutomationActiveVersionRepository(AutomationWorkspaceActiveVersionRepository repository) {
         this.automationActiveVersionRepository = repository;
+    }
+
+    /** 多服务器同步进度复用运行节点心跳；可选方法注入保持历史单元测试构造器兼容。 */
+    @Autowired(required = false)
+    void setOpencodeProcessHeartbeatStore(OpencodeProcessHeartbeatStore heartbeatStore) {
+        this.heartbeatStore = heartbeatStore;
     }
 
     /**
@@ -545,6 +555,155 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return managedWorkspaceRepository.findVersions(template.workspaceId()).stream()
                 .map(this::versionResponse)
                 .toList();
+    }
+
+    /**
+     * 应用管理员发起自动化只读版本的全在线服务器同步。磁盘同步继续复用版本副本广播与本机
+     * {@link #ensureLocalReplica(ApplicationWorkspaceVersion, ApplicationWorkspace, UserId, String)}，本入口只补齐协调与状态投影。
+     */
+    public ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse synchronizeAutomationVersion(
+            String appId,
+            String templateId,
+            String versionId,
+            UserId userId,
+            String traceId) {
+        AutomationSynchronizationTarget target = requireAutomationSynchronizationTarget(
+                appId, templateId, versionId, userId, "synchronize-automation-version");
+        String normalizedTraceId = requireSyncTraceId(traceId);
+        ensureLocalReplica(target.version(), target.template(), userId, normalizedTraceId);
+        publishVersionSync(target.version(), userId, "AUTOMATION_REFERENCE_SYNCHRONIZE", normalizedTraceId, Map.of());
+        return automationVersionSynchronizationResponse(target, normalizedTraceId);
+    }
+
+    /** 读取自动化只读版本在当前在线服务器集合中的同步进度；每次查询均重新校验成员与版本归属。 */
+    public ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse automationVersionSynchronizationStatus(
+            String appId,
+            String templateId,
+            String versionId,
+            UserId userId,
+            String traceId) {
+        return automationVersionSynchronizationResponse(
+                requireAutomationSynchronizationTarget(
+                        appId, templateId, versionId, userId, "automation-version-synchronization-status"),
+                traceId);
+    }
+
+    private AutomationSynchronizationTarget requireAutomationSynchronizationTarget(
+            String appId,
+            String templateId,
+            String versionId,
+            UserId userId,
+            String operation) {
+        ApplicationDefinition application = existingMemberApp(appId, userId, operation);
+        ApplicationWorkspace template = existingTemplate(new ApplicationWorkspaceId(templateId));
+        if (!template.appId().equals(application.appId())) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "自动化代码库配置不属于当前应用",
+                    Map.of("templateId", templateId));
+        }
+        CodeRepository repository = existingRepository(template.repositoryId());
+        requireAutomationRepository(repository);
+        ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
+        if (!version.applicationWorkspaceId().equals(template.workspaceId())
+                || !version.appId().equals(application.appId())
+                || !version.repositoryId().equals(template.repositoryId())) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "同步版本不属于当前自动化代码库配置",
+                    Map.of("versionId", versionId, "templateId", templateId));
+        }
+        if (version.status() != ManagedWorkspaceStatus.ACTIVE) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "自动化代码库版本当前不可用",
+                    Map.of("versionId", versionId));
+        }
+        return new AutomationSynchronizationTarget(template, version, repository);
+    }
+
+    private ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse automationVersionSynchronizationResponse(
+            AutomationSynchronizationTarget target,
+            String traceId) {
+        List<AutomationServerTarget> serverTargets = automationServerTargets();
+        List<ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse> servers = serverTargets.stream()
+                .map(server -> automationServerSynchronizationResponse(target.version(), server))
+                .toList();
+        int readyCount = (int) servers.stream().filter(server -> "READY".equals(server.status())).count();
+        boolean failed = servers.stream().anyMatch(server -> "BLOCKED".equals(server.status()));
+        String status = failed ? "FAILED" : readyCount == servers.size() ? "READY" : "SYNCHRONIZING";
+        String message = failed
+                ? servers.stream()
+                        .filter(server -> "BLOCKED".equals(server.status()) && server.error() != null)
+                        .map(ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse::error)
+                        .findFirst()
+                        .orElse("自动化代码库副本同步失败")
+                : null;
+        return new ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse(
+                target.template().workspaceId().value(),
+                target.template().workspaceName(),
+                target.repository().repositoryId().value(),
+                target.repository().name(),
+                target.version().versionId().value(),
+                target.version().version(),
+                target.version().branch(),
+                target.version().targetCommitHash(),
+                status,
+                "SYNCHRONIZE",
+                servers.size(),
+                readyCount,
+                servers,
+                requireSyncTraceId(traceId),
+                message);
+    }
+
+    private List<AutomationServerTarget> automationServerTargets() {
+        Map<String, AutomationServerTarget> targets = new java.util.TreeMap<>();
+        if (heartbeatStore != null) {
+            for (BackendRuntimeSnapshot snapshot : heartbeatStore.liveBackendSnapshots()) {
+                String serverId = snapshot.linuxServer().linuxServerId().value();
+                targets.putIfAbsent(serverId, new AutomationServerTarget(serverId, snapshot.linuxServer().name()));
+            }
+            for (LinuxServerId serverId : heartbeatStore.liveBackendServerIds()) {
+                targets.putIfAbsent(serverId.value(), new AutomationServerTarget(serverId.value(), serverId.value()));
+            }
+        }
+        targets.putIfAbsent(
+                serverIdentity.linuxServerId(),
+                new AutomationServerTarget(serverIdentity.linuxServerId(), serverIdentity.linuxServerId()));
+        return List.copyOf(targets.values());
+    }
+
+    private ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse automationServerSynchronizationResponse(
+            ApplicationWorkspaceVersion version,
+            AutomationServerTarget server) {
+        ApplicationWorkspaceVersionReplica replica = managedWorkspaceRepository
+                .findVersionReplica(version.versionId(), server.linuxServerId())
+                .orElse(null);
+        boolean matchesTarget = replica != null
+                && replica.syncStatus() == WorkspaceReplicaSyncStatus.READY
+                && Objects.equals(version.targetCommitHash(), replica.currentCommitHash());
+        String status;
+        if (matchesTarget) {
+            status = "READY";
+        } else if (replica == null || replica.syncStatus() == WorkspaceReplicaSyncStatus.PENDING
+                || replica.syncStatus() == WorkspaceReplicaSyncStatus.READY) {
+            status = "PENDING";
+        } else if (replica.syncStatus() == WorkspaceReplicaSyncStatus.SYNCING) {
+            status = "PROCESSING";
+        } else {
+            status = "BLOCKED";
+        }
+        return new ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse(
+                server.linuxServerId(),
+                server.serverName(),
+                status,
+                true,
+                replica == null ? null : version.branch(),
+                replica == null ? null : replica.currentCommitHash(),
+                replica == null ? null : matchesTarget,
+                replica == null ? null : replica.lastSyncedAt(),
+                replica == null ? null : replica.lastError());
     }
 
     /**
@@ -4683,6 +4842,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         String reason = payloadString(payload, "reason").orElse("SYNC");
         ApplicationWorkspaceVersionReplica replica = ensureLocalReplica(version, template, userId, event.traceId());
+        if (isAutomationRepository(existingRepository(version.repositoryId()))) {
+            // 自动化代码库只维护服务器共享版本副本；历史个人 worktree 保留但不再被同步或参与 Git 操作。
+            return;
+        }
         if ("GIT_PULL_REQUESTED".equals(reason)) {
             // 滚动升级期间可能收到旧节点发出的版本级拉取事件；新语义禁止它继续触发全员同步。
             LOGGER.warn(
@@ -5282,6 +5445,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 replicaStatus,
                 active.activatedBy() == null ? null : active.activatedBy().value(),
                 active.activatedAt());
+    }
+
+    private record AutomationSynchronizationTarget(
+            ApplicationWorkspace template,
+            ApplicationWorkspaceVersion version,
+            CodeRepository repository) {
+    }
+
+    private record AutomationServerTarget(String linuxServerId, String serverName) {
     }
 
     private void requireAutomationActiveVersionRepository() {

@@ -57,6 +57,8 @@ import com.enterprise.testagent.domain.managedworkspace.WorkspaceReplicaSyncStat
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncDirection;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncRecord;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncStatus;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -652,6 +654,95 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(repeated.activatedAt()).isEqualTo(firstActivatedAt);
         assertThat(activeVersions.activateCalls).isEqualTo(1);
         assertThat(first.versionId()).isNotEqualTo(second.versionId());
+    }
+
+    @Test
+    void automationVersionSynchronizationProjectsEveryOnlineServerAndReusesReplicaBroadcast() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "https://example.com/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                Instant.now(),
+                Instant.now());
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("scripts/e2e");
+        git.originUrlValue = "https://example.com/automation.git";
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(true, repository, List.of()),
+                managed,
+                new FakeWorkspaceRepository(),
+                git,
+                publisher);
+        OpencodeProcessHeartbeatStore heartbeats = mock(OpencodeProcessHeartbeatStore.class);
+        when(heartbeats.liveBackendSnapshots()).thenReturn(List.of());
+        when(heartbeats.liveBackendServerIds()).thenReturn(Set.of(
+                new LinuxServerId("127.0.0.1"),
+                new LinuxServerId("10.8.0.12")));
+        service.setOpencodeProcessHeartbeatStore(heartbeats);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse created =
+                service.createApplicationWorkspaceWithInitialVersion(
+                        "app_gcms", "repo_1", "release/v1", "scripts/e2e", "自动化测试", false,
+                        "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_auto_create");
+        publisher.events.clear();
+
+        ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse pending =
+                service.synchronizeAutomationVersion(
+                        "app_gcms",
+                        created.workspaceId(),
+                        created.initialVersion().versionId(),
+                        new UserId("usr_1"),
+                        "trace_auto_sync");
+
+        assertThat(pending.status()).isEqualTo("SYNCHRONIZING");
+        assertThat(pending.readyServerCount()).isEqualTo(1);
+        assertThat(pending.targetServerCount()).isEqualTo(2);
+        assertThat(pending.servers()).extracting(
+                ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse::linuxServerId,
+                ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse::status)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("10.8.0.12", "PENDING"),
+                        org.assertj.core.groups.Tuple.tuple("127.0.0.1", "READY"));
+        assertThat(publisher.events).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo("workspace.version.sync-requested");
+            assertThat(event.payload()).containsEntry("reason", "AUTOMATION_REFERENCE_SYNCHRONIZE");
+            assertThat(event.payload()).containsEntry("versionId", created.initialVersion().versionId());
+        });
+
+        ApplicationWorkspaceVersionReplica local = managed.replicas.stream()
+                .filter(replica -> replica.versionId().value().equals(created.initialVersion().versionId()))
+                .findFirst()
+                .orElseThrow();
+        managed.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
+                new ApplicationWorkspaceVersionReplicaId("awr_remote"),
+                local.versionId(),
+                "10.8.0.12",
+                local.repoRootPath(),
+                local.workspaceRootPath(),
+                new WorkspaceId("wrk_remote"),
+                created.initialVersion().targetCommitHash(),
+                WorkspaceReplicaSyncStatus.READY,
+                null,
+                Instant.now(),
+                "trace_auto_remote",
+                Instant.now(),
+                Instant.now()));
+
+        ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse ready =
+                service.automationVersionSynchronizationStatus(
+                        "app_gcms",
+                        created.workspaceId(),
+                        created.initialVersion().versionId(),
+                        new UserId("usr_1"),
+                        "trace_auto_status");
+        assertThat(ready.status()).isEqualTo("READY");
+        assertThat(ready.readyServerCount()).isEqualTo(2);
+        assertThat(ready.servers()).allMatch(server -> Boolean.TRUE.equals(server.matchesTarget()));
     }
 
     @Test

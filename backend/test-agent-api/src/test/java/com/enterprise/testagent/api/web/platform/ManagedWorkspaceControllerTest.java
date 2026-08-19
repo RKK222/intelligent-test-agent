@@ -33,6 +33,8 @@ import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGit
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitConflictResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitMergeCompletionResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.AutomationActiveVersionResponse;
+import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse;
+import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -169,6 +171,68 @@ class ManagedWorkspaceControllerTest {
                 .jsonPath("$.data.versionId").isEqualTo("awv_2");
 
         verify(service).activateAutomationVersion("app_gcms", "awp_auto", "awv_2", USER_ID);
+    }
+
+    @Test
+    void automationVersionSynchronizationRequiresAdministratorAndExposesOnlyLogicalServerProgress() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        AutomationVersionSynchronizationResponse response = new AutomationVersionSynchronizationResponse(
+                "awp_auto",
+                "接口自动化",
+                "repo_auto",
+                "自动化代码库",
+                "awv_2",
+                "20260819",
+                "main",
+                "abc123",
+                "SYNCHRONIZING",
+                "SYNCHRONIZE",
+                2,
+                1,
+                List.of(
+                        new AutomationVersionServerSynchronizationResponse(
+                                "127.0.0.1", "local", "READY", true, "main", "abc123", true,
+                                Instant.parse("2026-08-19T00:00:00Z"), null),
+                        new AutomationVersionServerSynchronizationResponse(
+                                "10.8.0.12", "remote", "PENDING", true, null, null, null, null, null)),
+                TRACE_ID,
+                null);
+        when(service.synchronizeAutomationVersion(
+                "app_gcms", "awp_auto", "awv_2", USER_ID, TRACE_ID)).thenReturn(response);
+        when(service.automationVersionSynchronizationStatus(
+                "app_gcms", "awp_auto", "awv_2", USER_ID, TRACE_ID)).thenReturn(response);
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/awp_auto/versions/awv_2/synchronize")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        WebTestClient administrator = client(service, readyAssignmentService("127.0.0.1"), List.of("APP_ADMIN"));
+        administrator.post()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/awp_auto/versions/awv_2/synchronize")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.readyServerCount").isEqualTo(1)
+                .jsonPath("$.data.targetServerCount").isEqualTo(2)
+                .jsonPath("$.data.servers[1].serverName").isEqualTo("remote")
+                .jsonPath("$.data.servers[1].repoRootPath").doesNotExist()
+                .jsonPath("$.data.servers[1].workspaceRootPath").doesNotExist();
+
+        administrator.get()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/awp_auto/versions/awv_2/synchronization-status")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("SYNCHRONIZING");
+
+        verify(service).synchronizeAutomationVersion(
+                "app_gcms", "awp_auto", "awv_2", USER_ID, TRACE_ID);
+        verify(service).automationVersionSynchronizationStatus(
+                "app_gcms", "awp_auto", "awv_2", USER_ID, TRACE_ID);
     }
 
     @Test
