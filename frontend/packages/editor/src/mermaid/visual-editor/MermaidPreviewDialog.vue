@@ -29,71 +29,44 @@ const zoom = ref(1);
 const pan = ref({ x: 0, y: 0 });
 const isDragging = ref(false);
 const dragStart = ref({ x: 0, y: 0 });
-const diagramBaseSize = ref({ width: 800, height: 600 });
+
+const diagramOrigin = ref({ x: 0, y: 0 });
+const diagramSize = ref({ width: 800, height: 600 });
 
 let renderSequence = 0;
 
-function clampPan(targetPan: { x: number; y: number }, targetZoom: number) {
+function clampPan(targetPan: { x: number; y: number }, currentZoom: number) {
   if (!viewportEl.value) return targetPan;
   const rect = viewportEl.value.getBoundingClientRect();
   const vWidth = rect.width || 1000;
   const vHeight = rect.height || 600;
 
-  const dWidth = diagramBaseSize.value.width * targetZoom;
-  const dHeight = diagramBaseSize.value.height * targetZoom;
+  const renderedW = diagramSize.value.width * currentZoom;
+  const renderedH = diagramSize.value.height * currentZoom;
 
-  const margin = 60;
-
-  let minX: number;
-  let maxX: number;
-  if (dWidth <= vWidth - margin * 2) {
-    const midX = (vWidth - dWidth) / 2;
-    minX = midX - 80;
-    maxX = midX + 80;
-  } else {
-    minX = vWidth - dWidth - margin;
-    maxX = margin;
-  }
-
-  let minY: number;
-  let maxY: number;
-  if (dHeight <= vHeight - margin * 2) {
-    const midY = (vHeight - dHeight) / 2;
-    minY = Math.min(midY - 80, 36);
-    maxY = Math.max(midY + 80, 36);
-  } else {
-    minY = vHeight - dHeight - margin;
-    maxY = margin;
-  }
-
-  const boundMinX = Math.min(minX, maxX);
-  const boundMaxX = Math.max(minX, maxX);
-  const boundMinY = Math.min(minY, maxY);
-  const boundMaxY = Math.max(minY, maxY);
+  const margin = 100;
+  const minPanX = Math.min(-(renderedW - margin), (vWidth - renderedW) / 2);
+  const maxPanX = Math.max(vWidth - margin, (vWidth - renderedW) / 2);
+  const minPanY = Math.min(-(renderedH - margin), (vHeight - renderedH) / 2);
+  const maxPanY = Math.max(vHeight - margin, (vHeight - renderedH) / 2);
 
   return {
-    x: Math.min(Math.max(targetPan.x, boundMinX), boundMaxX),
-    y: Math.min(Math.max(targetPan.y, boundMinY), boundMaxY)
+    x: Math.min(Math.max(targetPan.x, minPanX), maxPanX),
+    y: Math.min(Math.max(targetPan.y, minPanY), maxPanY)
   };
 }
 
-function applyViewBox() {
-  if (!svgHostEl.value || !viewportEl.value) return;
-  const svgEl = svgHostEl.value.querySelector("svg");
-  if (!svgEl) return;
-
-  const rect = viewportEl.value.getBoundingClientRect();
-  const vWidth = rect.width || 1000;
-  const vHeight = rect.height || 600;
-
-  const currentZoom = Math.max(zoom.value, 0.01);
-  const minX = -pan.value.x / currentZoom;
-  const minY = -pan.value.y / currentZoom;
-  const viewWidth = vWidth / currentZoom;
-  const viewHeight = vHeight / currentZoom;
-
-  svgEl.setAttribute("viewBox", `${minX} ${minY} ${viewWidth} ${viewHeight}`);
-  svgEl.setAttribute("preserveAspectRatio", "none");
+function applyTransform() {
+  if (!svgHostEl.value) return;
+  const contentG = svgHostEl.value.querySelector("g.ta-mermaid-viewport-layer") as SVGGElement | null;
+  if (contentG) {
+    const ox = diagramOrigin.value.x;
+    const oy = diagramOrigin.value.y;
+    contentG.setAttribute(
+      "transform",
+      `translate(${pan.value.x}, ${pan.value.y}) scale(${zoom.value}) translate(${-ox}, ${-oy})`
+    );
+  }
 }
 
 function zoomIn() {
@@ -102,7 +75,7 @@ function zoomIn() {
 }
 
 function zoomOut() {
-  const newZoom = Math.max(zoom.value * 0.8, 0.08);
+  const newZoom = Math.max(zoom.value * 0.8, 0.05);
   updateZoomCentered(newZoom);
 }
 
@@ -114,7 +87,7 @@ function resetZoom() {
 function updateZoomCentered(newZoom: number) {
   if (!viewportEl.value) {
     zoom.value = newZoom;
-    applyViewBox();
+    applyTransform();
     return;
   }
   const rect = viewportEl.value.getBoundingClientRect();
@@ -128,63 +101,69 @@ function updateZoomCentered(newZoom: number) {
 
   pan.value = clampPan(targetPan, newZoom);
   zoom.value = newZoom;
-  applyViewBox();
+  applyTransform();
 }
 
 function centerDiagram(targetZoom: number) {
   if (!viewportEl.value) return;
   const viewportRect = viewportEl.value.getBoundingClientRect();
-  const renderedWidth = diagramBaseSize.value.width * targetZoom;
-  const renderedHeight = diagramBaseSize.value.height * targetZoom;
+  const vWidth = viewportRect.width || 1000;
+  const vHeight = viewportRect.height || 600;
+
+  const renderedWidth = diagramSize.value.width * targetZoom;
+  const renderedHeight = diagramSize.value.height * targetZoom;
 
   const targetPan = {
-    x: (viewportRect.width - renderedWidth) / 2,
-    y: Math.max((viewportRect.height - renderedHeight) / 2, 36)
+    x: (vWidth - renderedWidth) / 2,
+    y: Math.max((vHeight - renderedHeight) / 2, 36)
   };
 
   pan.value = clampPan(targetPan, targetZoom);
-  applyViewBox();
+  applyTransform();
 }
 
 function fitToScreen() {
   if (!viewportEl.value) return;
   const viewportRect = viewportEl.value.getBoundingClientRect();
-  if (viewportRect.width <= 0 || viewportRect.height <= 0) {
+  const vWidth = viewportRect.width || 1000;
+  const vHeight = viewportRect.height || 600;
+
+  if (vWidth <= 0 || vHeight <= 0) {
     zoom.value = 1;
     pan.value = { x: 24, y: 24 };
-    applyViewBox();
+    applyTransform();
     return;
   }
 
-  const rawWidth = diagramBaseSize.value.width || 800;
-  const rawHeight = diagramBaseSize.value.height || 600;
+  const rawWidth = diagramSize.value.width || 800;
+  const rawHeight = diagramSize.value.height || 600;
 
   const paddingX = 48;
   const paddingTop = 36;
   const paddingBottom = 48;
 
-  const availableWidth = Math.max(viewportRect.width - paddingX * 2, 100);
-  const availableHeight = Math.max(viewportRect.height - paddingTop - paddingBottom, 100);
+  const availableWidth = Math.max(vWidth - paddingX * 2, 100);
+  const availableHeight = Math.max(vHeight - paddingTop - paddingBottom, 100);
 
   const scaleX = availableWidth / rawWidth;
   const scaleY = availableHeight / rawHeight;
   const fitScale = Math.min(scaleX, scaleY, 1.2);
 
-  const finalZoom = Math.max(fitScale, 0.08);
+  const finalZoom = Math.max(fitScale, 0.05);
   const renderedWidth = rawWidth * finalZoom;
   const renderedHeight = rawHeight * finalZoom;
 
-  const startX = Math.max((viewportRect.width - renderedWidth) / 2, paddingX);
-  const startY = Math.max((viewportRect.height - renderedHeight) / 2, paddingTop);
+  const startX = Math.max((vWidth - renderedWidth) / 2, paddingX);
+  const startY = Math.max((vHeight - renderedHeight) / 2, paddingTop);
 
   zoom.value = finalZoom;
   pan.value = clampPan({ x: startX, y: startY }, finalZoom);
-  applyViewBox();
+  applyTransform();
 }
 
 function onWheel(event: WheelEvent) {
-  const delta = event.deltaY < 0 ? 1.18 : 0.85;
-  const newZoom = Math.min(Math.max(zoom.value * delta, 0.08), 8);
+  const delta = event.deltaY < 0 ? 1.15 : 0.87;
+  const newZoom = Math.min(Math.max(zoom.value * delta, 0.05), 8);
 
   if (viewportEl.value) {
     const rect = viewportEl.value.getBoundingClientRect();
@@ -199,7 +178,7 @@ function onWheel(event: WheelEvent) {
     pan.value = clampPan(targetPan, newZoom);
   }
   zoom.value = newZoom;
-  applyViewBox();
+  applyTransform();
 }
 
 function onMouseDown(event: MouseEvent) {
@@ -221,7 +200,7 @@ function onMouseMove(event: MouseEvent) {
     y: event.clientY - dragStart.value.y
   };
   pan.value = clampPan(targetPan, zoom.value);
-  applyViewBox();
+  applyTransform();
 }
 
 function onMouseUp() {
@@ -233,22 +212,31 @@ function prepareSvg() {
   const svgEl = svgHostEl.value.querySelector("svg");
   if (!svgEl) return;
 
+  // 1. 读取 Mermaid 原生 viewBox（包含原点 minX, minY 和宽高 width, height）
   const viewBoxAttr = svgEl.getAttribute("viewBox");
-  let vbWidth = 800;
-  let vbHeight = 600;
+  let origMinX = 0;
+  let origMinY = 0;
+  let origW = 800;
+  let origH = 600;
+
   if (viewBoxAttr) {
     const parts = viewBoxAttr.trim().split(/[\s,]+/).map(Number);
     if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-      vbWidth = parts[2];
-      vbHeight = parts[3];
+      origMinX = parts[0];
+      origMinY = parts[1];
+      origW = parts[2];
+      origH = parts[3];
     }
   } else {
-    vbWidth = parseFloat(svgEl.getAttribute("width") || "800") || 800;
-    vbHeight = parseFloat(svgEl.getAttribute("height") || "600") || 600;
+    origW = parseFloat(svgEl.getAttribute("width") || "800") || 800;
+    origH = parseFloat(svgEl.getAttribute("height") || "600") || 600;
   }
-  diagramBaseSize.value = { width: vbWidth, height: vbHeight };
 
-  // SVG 铺满视口容器，样式开启高精度几何与文字渲染
+  diagramOrigin.value = { x: origMinX, y: origMinY };
+  diagramSize.value = { width: origW, height: origH };
+
+  // 2. 移除 SVG 自身的 viewBox 限制，使 SVG 100% 充满视口（1 SVG 坐标 = 1 屏幕像素）
+  svgEl.removeAttribute("viewBox");
   svgEl.removeAttribute("width");
   svgEl.removeAttribute("height");
   svgEl.style.width = "100%";
@@ -259,6 +247,26 @@ function prepareSvg() {
   svgEl.style.overflow = "hidden";
   svgEl.style.shapeRendering = "geometricPrecision";
   svgEl.style.textRendering = "geometricPrecision";
+
+  // 3. 将除 <defs> 和 <style> 以外的图形节点封装到矢量图层 <g class="ta-mermaid-viewport-layer">
+  let contentG = svgEl.querySelector("g.ta-mermaid-viewport-layer") as SVGGElement | null;
+  if (!contentG) {
+    contentG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    contentG.classList.add("ta-mermaid-viewport-layer");
+    const childrenToMove: Node[] = [];
+    for (let i = 0; i < svgEl.childNodes.length; i++) {
+      const child = svgEl.childNodes[i];
+      if (
+        child.nodeType === Node.ELEMENT_NODE &&
+        (child.nodeName.toLowerCase() === "defs" || child.nodeName.toLowerCase() === "style")
+      ) {
+        continue;
+      }
+      childrenToMove.push(child);
+    }
+    childrenToMove.forEach((child) => contentG!.appendChild(child));
+    svgEl.appendChild(contentG);
+  }
 
   fitToScreen();
 }
