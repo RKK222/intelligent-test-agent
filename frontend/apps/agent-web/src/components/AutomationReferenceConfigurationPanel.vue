@@ -63,6 +63,7 @@ export type AutomationRepository = CodeRepositoryConfig & {
     online?: boolean;
     currentBranch?: string;
     currentCommitHash?: string;
+    matchesTarget?: boolean | null;
     error?: string;
     syncedAt?: string;
     verifiedAt?: string;
@@ -133,11 +134,15 @@ const selectedVersions = computed(() =>
 const activeVersion = computed(() => activeTemplate.value?.activeVersion ?? null);
 
 const currentSynchronization = computed(() => {
-  if (activeVersion.value) {
-    return synchronizationsByVersion.value[activeVersion.value.versionId] ?? null;
-  }
-  return synchronization.value;
+  const versionId = activeVersion.value?.versionId;
+  if (!versionId) return null;
+  return synchronizationsByVersion.value[versionId]
+    ?? (synchronization.value?.versionId === versionId ? synchronization.value : null);
 });
+
+const selectedServerSynchronizations = computed(() =>
+  currentSynchronization.value?.servers ?? selectedRepository.value?.servers ?? []
+);
 
 const targetCommitHash = computed(() =>
   activeVersion.value?.targetCommitHash
@@ -232,20 +237,19 @@ function formattedTime(iso?: string | null): string {
 }
 
 function readyServerText(repo: AutomationRepository): string {
-  const repoTemplates = templates.value.filter((t) => t.repositoryId === repo.repositoryId);
-  for (const t of repoTemplates) {
-    if (t.activeVersion && synchronizationsByVersion.value[t.activeVersion.versionId]) {
-      const sync = synchronizationsByVersion.value[t.activeVersion.versionId];
-      const target = sync.targetServerCount || sync.servers?.length || 0;
-      return `${sync.readyServerCount}/${target} 台就绪`;
-    }
-  }
-  const sync = currentSynchronization.value;
+  const template = templates.value.find((t) => t.repositoryId === repo.repositoryId);
+  const versionId = template?.activeVersion?.versionId;
+  const sync = versionId ? synchronizationsByVersion.value[versionId] : null;
   if (sync && (sync.targetServerCount || sync.servers?.length)) {
     const target = sync.targetServerCount || sync.servers?.length || 0;
     return `${sync.readyServerCount}/${target} 台就绪`;
   }
   return `${repo.readyServerCount || 0}/${repo.targetServerCount || 0} 台就绪`;
+}
+
+function repositoryVersionText(repo: AutomationRepository): string {
+  const template = templates.value.find((t) => t.repositoryId === repo.repositoryId);
+  return template?.activeVersion?.version || repo.status || "READY";
 }
 
 function copyCommit(hash?: string | null) {
@@ -345,17 +349,19 @@ async function loadCatalog() {
     versionsByTemplate.value = Object.fromEntries(versionEntries);
 
     if (props.canManage) {
-      const statusEntries = await Promise.all(versionEntries.flatMap(([templateId, versions]) =>
-        versions.map(async (v) => {
+      const statusEntries = await Promise.all(automationTemplates.flatMap((template) => {
+        const versionId = template.activeVersion?.versionId;
+        return versionId ? [Promise.resolve().then(async () => {
           try {
             return [
-              v.versionId,
-              await api.getAutomationWorkspaceVersionSynchronizationStatus(props.appId, templateId, v.versionId)
+              versionId,
+              await api.getAutomationWorkspaceVersionSynchronizationStatus(props.appId, template.workspaceId, versionId)
             ] as const;
           } catch {
             return null;
           }
-        })));
+        })] : [];
+      }));
       if (!props.open || generation !== catalogGeneration) return;
       synchronizationsByVersion.value = Object.fromEntries(statusEntries.filter((e) => e !== null));
     }
@@ -599,7 +605,6 @@ async function pollSynchronization(templateId: string, versionId: string) {
     synchronizationsByVersion.value = { ...synchronizationsByVersion.value, [versionId]: next };
     synchronizationRequest.value = { ...request, pollingError: null };
     if (["READY", "FAILED"].includes(next.status)) {
-      saving.value = false;
       emit("changed");
       return;
     }
@@ -621,7 +626,6 @@ async function pollSynchronization(templateId: string, versionId: string) {
 async function synchronizeVersion(template: ApplicationWorkspaceTemplate, version: ApplicationWorkspaceVersion) {
   if (!props.canManage) return;
   clearSynchronizationPoll();
-  saving.value = true;
   synchronization.value = null;
   synchronizationRequest.value = {
     template,
@@ -645,7 +649,6 @@ async function synchronizeVersion(template: ApplicationWorkspaceTemplate, versio
   } catch (error) {
     const request = synchronizationRequest.value;
     if (!props.open || !request || request.version.versionId !== version.versionId) return;
-    saving.value = false;
     synchronizationRequest.value = {
       ...request,
       requestState: "FAILED",
@@ -847,7 +850,7 @@ onBeforeUnmount(() => {
               <strong>{{ repository.name }}</strong>
               <small :title="repository.gitUrl">{{ repository.gitUrl }}</small>
             </span>
-            <span class="reference-status">{{ activeVersion?.version || repository.status || "READY" }}</span>
+            <span class="reference-status">{{ repositoryVersionText(repository) }}</span>
           </button>
           <div class="reference-repository-meta">
             <span>{{ readyServerText(repository) }}</span>
@@ -954,7 +957,7 @@ onBeforeUnmount(() => {
             </span>
           </div>
 
-          <div v-if="!selectedRepository.servers || selectedRepository.servers.length === 0" class="reference-compact-state">
+          <div v-if="selectedServerSynchronizations.length === 0" class="reference-compact-state">
             暂无服务器副本信息。
           </div>
           <div v-else class="reference-pointer-table-wrap">
@@ -966,11 +969,11 @@ onBeforeUnmount(() => {
                   <th>实际分支</th>
                   <th>实际 HEAD</th>
                   <th>目标</th>
-                  <th>最近同步 / 核验</th>
+                  <th>最近同步</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="server in selectedRepository.servers" :key="server.linuxServerId">
+                <tr v-for="server in selectedServerSynchronizations" :key="server.linuxServerId">
                   <td>
                     <strong>{{ server.linuxServerId }}</strong>
                     <small :class="server.online === true ? 'is-online' : 'is-offline'">
@@ -996,13 +999,15 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
                   <td>
-                    <span class="reference-pointer-match is-match">
+                    <span v-if="server.matchesTarget === true" class="reference-pointer-match is-match">
                       <Check class="h-3 w-3" /> 一致
+                    </span>
+                    <span v-else class="reference-pointer-status">
+                      {{ server.status === "BLOCKED" ? "失败" : "等待同步" }}
                     </span>
                   </td>
                   <td>
                     <small>同步 <time>{{ formattedTime(server.syncedAt) }}</time></small>
-                    <small>核验 <time>{{ formattedTime(server.verifiedAt) }}</time></small>
                   </td>
                 </tr>
               </tbody>
@@ -1138,6 +1143,7 @@ onBeforeUnmount(() => {
                   <span>版本历史（{{ selectedVersions.length }}）</span>
                   <Button
                     v-if="canManage"
+                    type="button"
                     size="sm"
                     variant="ghost"
                     class="reference-inline-action"
@@ -1172,6 +1178,7 @@ onBeforeUnmount(() => {
                         <td v-if="canManage" style="text-align: right;">
                           <div class="automation-version-actions">
                             <Button
+                              type="button"
                               size="sm"
                               variant="ghost"
                               class="reference-inline-action"
@@ -1183,6 +1190,7 @@ onBeforeUnmount(() => {
                             </Button>
                             <Button
                               v-if="activeVersion?.versionId !== ver.versionId"
+                              type="button"
                               size="sm"
                               variant="ghost"
                               class="reference-inline-action"
@@ -1830,9 +1838,11 @@ onBeforeUnmount(() => {
   }
   .reference-ready-layout {
     grid-template-columns: 1fr;
+    /* 窄窗口必须显式分配两行，否则目录内容会把版本配置区压缩到几乎不可操作。 */
+    grid-template-rows: minmax(0, 42%) minmax(0, 58%);
   }
   .reference-tree-panel {
-    min-height: 180px;
+    min-height: 0;
     border-right: 0;
     border-bottom: 1px solid var(--ta-border);
   }

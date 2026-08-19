@@ -12253,3 +12253,28 @@
 
 - release 分支的麒麟图形安装包已消除可复现的软件中心依赖/维护脚本失败路径，旧的未配置 `0.1.1` 可被更高版本 `0.1.2` 直接覆盖修复，页面现已提供该开发验证包。
 - 本次不修改 API、RunEvent、数据库/Flyway、OpenCode 源码或运行时轮询策略；移除安装期特权脚本降低安装风险且不增加客户端性能开销。真实麒麟桌面软件中心的最终双击安装仍需用户重新下载后确认；正式企业发布还必须使用正式签名材料重新产出制品。
+
+## 2026-08-19 - 修复自动化代码库同步阻塞与多仓库状态串用
+
+### Why
+
+- 用户提供的 `trace_4b29e2e380314405af853f760d6885a3` 不在当前本地日志，原远端 PostgreSQL 也已不可达；通过现有实现和本地真实页面复现确认，同步 HTTP 在线程内执行 Git clone/fetch，慢仓库会让弹窗长期停在“创建同步任务”。
+- 自动化引用页面把同步中状态、激活版本和服务器 Git 指针当成全局状态复用，切换两个仓库时会串用；版本历史按钮又缺少 `type=button`，会额外提交新增版本表单。窄窗口下目录区还会把版本配置区压缩到约 33px。
+
+### What
+
+- 新增模块内 `ManagedWorkspaceReplicaTaskDispatcher` 有界后台队列：同步入口和广播消费者先保存本机 `SYNCING` 占位并立即返回，clone/fetch 后台执行；同一 `versionId` 重复唤醒合并，不同目录配置独立，失败只落稳定脱敏文案。
+- 自动化引用前端按每个仓库自己的激活版本读取同步状态、就绪数、Git 指针和版本标签；同步不再全局锁住其它仓库。版本同步、激活和启停按钮显式使用 `type=button`，窄窗口目录与配置区按比例分行且独立滚动。
+- 同步 workspace-management/agent-web README、HTTP API 和内部事件说明。API 路径、请求和响应结构未变；没有新增数据库结构或 Flyway，也没有创建个人 worktree。
+
+### How
+
+- JDK 25 下 `ManagedWorkspaceApplicationServiceTest` 105/105、调度器 1/1、`ManagedWorkspaceControllerTest` 28/28 通过；前端全量 Vitest 132 个文件、2042 passed / 1 skipped，agent-web 类型检查和 production build 成功。
+- 用户明确授权后把忽略提交的 `.env.test` 中 PostgreSQL、Redis、ClickHouse、XXL-Job MySQL 全部切到本机容器；四个容器均启动，PostgreSQL 历史库 109 条 Flyway 记录、0 失败，`automation_workspace_active_versions` migration 在源码和最终应用嵌套 JAR 的 SHA-256 均为 `a331d8b09575fae38b61471fca719af628ac898c01be82fc369c510de2772928`。
+- 使用最终代码重启 `test` profile；backend health/readiness 为 UP、frontend 3000 为 200、CORS 正常。浏览器真实验证 A 的 `20260820/feature_image` 同步约 5 秒收敛到 1/1 并激活，B 保持 `20260819/master`；切到 B 后弹窗、版本历史和 Git 指针不含 A 状态，工作台同时展示两个自动化引用并成功读取 `Main.groovy`。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并执行 `git diff --check`；保留并排除任务外的 `backend/test-agent-model-gateway/README.md`。
+
+### Result
+
+- 自动化代码库同步请求不再被慢 Git 阻塞，两个仓库的同步与激活状态相互隔离；刷新后的组合文件树展示激活版本，目录选择和版本操作在窄窗口也可用。
+- 当前本地 manager 已连接，但验收账号仍绑定历史容器身份，因此聊天区提示需初始化 TestAgent；这不影响本次已完成的自动化引用同步、切换、目录展示和文件读取 E2E，未通过修改服务器归属元数据规避该历史状态。

@@ -183,6 +183,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private ScmGitIdentityResolver scmGitIdentityResolver;
     private AutomationWorkspaceActiveVersionRepository automationActiveVersionRepository;
     private OpencodeProcessHeartbeatStore heartbeatStore;
+    private ManagedWorkspaceReplicaTaskDispatcher replicaTaskDispatcher;
+    private final Object automationReplicaSynchronizationLock = new Object();
 
     /**
      * 可选注入运行上下文端口；测试构造器无需感知 Redis，实现仍保持模块只依赖 domain。
@@ -226,6 +228,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     @Autowired(required = false)
     void setOpencodeProcessHeartbeatStore(OpencodeProcessHeartbeatStore heartbeatStore) {
         this.heartbeatStore = heartbeatStore;
+    }
+
+    /** 自动化共享副本的慢 Git 操作进入有界后台队列，测试构造器缺省时保留同步兼容。 */
+    @Autowired(required = false)
+    void setManagedWorkspaceReplicaTaskDispatcher(ManagedWorkspaceReplicaTaskDispatcher dispatcher) {
+        this.replicaTaskDispatcher = dispatcher;
     }
 
     /**
@@ -558,8 +566,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 应用管理员发起自动化只读版本的全在线服务器同步。磁盘同步继续复用版本副本广播与本机
-     * {@link #ensureLocalReplica(ApplicationWorkspaceVersion, ApplicationWorkspace, UserId, String)}，本入口只补齐协调与状态投影。
+     * 应用管理员发起自动化只读版本的全在线服务器同步。请求线程只登记本机同步状态并广播，
+     * clone/fetch 由有界后台任务复用共享版本副本实现，避免慢仓库阻塞 HTTP 与其它仓库切换。
      */
     public ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse synchronizeAutomationVersion(
             String appId,
@@ -570,9 +578,122 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         AutomationSynchronizationTarget target = requireAutomationSynchronizationTarget(
                 appId, templateId, versionId, userId, "synchronize-automation-version");
         String normalizedTraceId = requireSyncTraceId(traceId);
-        ensureLocalReplica(target.version(), target.template(), userId, normalizedTraceId);
         publishVersionSync(target.version(), userId, "AUTOMATION_REFERENCE_SYNCHRONIZE", normalizedTraceId, Map.of());
+        dispatchLocalAutomationReplicaSynchronization(target, userId, normalizedTraceId);
         return automationVersionSynchronizationResponse(target, normalizedTraceId);
+    }
+
+    /**
+     * 先持久化本机 PROCESSING 状态再提交后台任务；已有精确 READY 副本直接幂等返回。
+     * Spring 未装配 dispatcher 的单元测试构造器继续同步执行，避免测试专用线程泄漏。
+     */
+    private void dispatchLocalAutomationReplicaSynchronization(
+            AutomationSynchronizationTarget target,
+            UserId userId,
+            String traceId) {
+        if (localReplicaMatchesTarget(target.version())) {
+            return;
+        }
+        if (replicaTaskDispatcher == null) {
+            ensureLocalReplica(target.version(), target.template(), userId, traceId);
+            return;
+        }
+        prepareAutomationReplicaSynchronization(target.version(), target.template(), traceId);
+        boolean accepted = replicaTaskDispatcher.dispatch(
+                automationReplicaTaskKey(target.version()),
+                traceId,
+                () -> synchronizeLocalAutomationReplica(target.version(), target.template(), userId, traceId));
+        if (!accepted) {
+            markAutomationReplicaSynchronizationFailed(target.version(), traceId);
+            throw new PlatformException(
+                    ErrorCode.GIT_UNAVAILABLE,
+                    "自动化代码库副本同步队列暂不可用",
+                    Map.of("versionId", target.version().versionId().value()));
+        }
+    }
+
+    private boolean localReplicaMatchesTarget(ApplicationWorkspaceVersion version) {
+        return managedWorkspaceRepository.findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
+                .filter(replica -> replica.syncStatus() == WorkspaceReplicaSyncStatus.READY)
+                .filter(replica -> Objects.equals(version.targetCommitHash(), replica.currentCommitHash()))
+                .isPresent();
+    }
+
+    private String automationReplicaTaskKey(ApplicationWorkspaceVersion version) {
+        // 不按 repository/version/branch 合并：同仓库同版本号仍可能属于两个不同目录引用，各自都要落副本记录。
+        return version.versionId().value();
+    }
+
+    /** 为尚未落盘的自动化版本建立仅供同步状态使用的逻辑 Workspace 和共享副本占位。 */
+    private void prepareAutomationReplicaSynchronization(
+            ApplicationWorkspaceVersion version,
+            ApplicationWorkspace template,
+            String traceId) {
+        synchronized (automationReplicaSynchronizationLock) {
+            if (localReplicaMatchesTarget(version)) {
+                return;
+            }
+            Instant now = clock.instant();
+            CodeRepository repository = existingRepository(version.repositoryId());
+            String repoRootValue = appRepoValue(version.version(), repository);
+            String workspaceRootValue = appWorkspaceValue(version.version(), repository, template);
+            ApplicationWorkspaceVersionReplica existing = managedWorkspaceRepository
+                    .findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
+                    .orElse(null);
+            WorkspaceId runtimeWorkspaceId;
+            if (existing == null) {
+                Workspace runtimeWorkspace = workspaceRepository.save(new Workspace(
+                        new WorkspaceId(RuntimeIdGenerator.workspaceId()),
+                        template.workspaceName() + "-" + version.version(),
+                        workspaceRootValue,
+                        WorkspaceStatus.ACTIVE,
+                        now,
+                        now,
+                        serverIdentity.linuxServerId(),
+                        traceId));
+                runtimeWorkspaceId = runtimeWorkspace.workspaceId();
+            } else {
+                runtimeWorkspaceId = existing.runtimeWorkspaceId();
+            }
+            managedWorkspaceRepository.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
+                    existing == null
+                            ? new ApplicationWorkspaceVersionReplicaId(RuntimeIdGenerator.applicationWorkspaceVersionReplicaId())
+                            : existing.replicaId(),
+                    version.versionId(),
+                    serverIdentity.linuxServerId(),
+                    repoRootValue,
+                    workspaceRootValue,
+                    runtimeWorkspaceId,
+                    existing == null ? null : existing.currentCommitHash(),
+                    WorkspaceReplicaSyncStatus.SYNCING,
+                    null,
+                    existing == null ? null : existing.lastSyncedAt(),
+                    traceId,
+                    existing == null ? now : existing.createdAt(),
+                    now));
+        }
+    }
+
+    private void synchronizeLocalAutomationReplica(
+            ApplicationWorkspaceVersion version,
+            ApplicationWorkspace template,
+            UserId userId,
+            String traceId) {
+        try {
+            ensureLocalReplica(version, template, userId, traceId);
+        } catch (RuntimeException exception) {
+            markAutomationReplicaSynchronizationFailed(version, traceId);
+            throw exception;
+        }
+    }
+
+    /** 失败状态只保存稳定脱敏文案，不能把 Git 命令、凭据或物理路径写入响应和数据库。 */
+    private void markAutomationReplicaSynchronizationFailed(ApplicationWorkspaceVersion version, String traceId) {
+        managedWorkspaceRepository.findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
+                .ifPresent(replica -> managedWorkspaceRepository.saveVersionReplica(replica.failed(
+                        "自动化代码库副本同步失败",
+                        clock.instant(),
+                        traceId)));
     }
 
     /** 读取自动化只读版本在当前在线服务器集合中的同步进度；每次查询均重新校验成员与版本归属。 */
@@ -4841,11 +4962,30 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersion version = existingVersion(versionId);
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         String reason = payloadString(payload, "reason").orElse("SYNC");
-        ApplicationWorkspaceVersionReplica replica = ensureLocalReplica(version, template, userId, event.traceId());
         if (isAutomationRepository(existingRepository(version.repositoryId()))) {
             // 自动化代码库只维护服务器共享版本副本；历史个人 worktree 保留但不再被同步或参与 Git 操作。
+            if (replicaTaskDispatcher == null) {
+                ensureLocalReplica(version, template, userId, event.traceId());
+                return;
+            }
+            if (localReplicaMatchesTarget(version)) {
+                return;
+            }
+            prepareAutomationReplicaSynchronization(version, template, event.traceId());
+            boolean accepted = replicaTaskDispatcher.dispatch(
+                    automationReplicaTaskKey(version),
+                    event.traceId(),
+                    () -> synchronizeLocalAutomationReplica(version, template, userId, event.traceId()));
+            if (!accepted) {
+                markAutomationReplicaSynchronizationFailed(version, event.traceId());
+                throw new PlatformException(
+                        ErrorCode.GIT_UNAVAILABLE,
+                        "自动化代码库副本同步队列暂不可用",
+                        Map.of("versionId", version.versionId().value()));
+            }
             return;
         }
+        ApplicationWorkspaceVersionReplica replica = ensureLocalReplica(version, template, userId, event.traceId());
         if ("GIT_PULL_REQUESTED".equals(reason)) {
             // 滚动升级期间可能收到旧节点发出的版本级拉取事件；新语义禁止它继续触发全员同步。
             LOGGER.warn(

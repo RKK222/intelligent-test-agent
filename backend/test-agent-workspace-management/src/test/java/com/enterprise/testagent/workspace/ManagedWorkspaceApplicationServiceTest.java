@@ -746,6 +746,73 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void automationVersionSynchronizationQueuesSlowLocalGitAndPersistsProcessingBeforeReturning() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "https://example.com/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                Instant.now(),
+                Instant.now());
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("scripts/e2e");
+        git.originUrlValue = "https://example.com/automation.git";
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(true, repository, List.of()),
+                managed,
+                new FakeWorkspaceRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+        OpencodeProcessHeartbeatStore heartbeats = mock(OpencodeProcessHeartbeatStore.class);
+        when(heartbeats.liveBackendSnapshots()).thenReturn(List.of());
+        when(heartbeats.liveBackendServerIds()).thenReturn(Set.of(new LinuxServerId("127.0.0.1")));
+        service.setOpencodeProcessHeartbeatStore(heartbeats);
+        ManagedWorkspaceReplicaTaskDispatcher dispatcher = mock(ManagedWorkspaceReplicaTaskDispatcher.class);
+        when(dispatcher.dispatch(any(String.class), any(String.class), any(Runnable.class))).thenReturn(true);
+        service.setManagedWorkspaceReplicaTaskDispatcher(dispatcher);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse created =
+                service.createApplicationWorkspaceWithInitialVersion(
+                        "app_gcms", "repo_1", "release/v1", "scripts/e2e", "自动化测试", false,
+                        "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_auto_create");
+        managed.replicas.clear();
+
+        ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse processing =
+                service.synchronizeAutomationVersion(
+                        "app_gcms",
+                        created.workspaceId(),
+                        created.initialVersion().versionId(),
+                        new UserId("usr_1"),
+                        "trace_auto_async");
+
+        assertThat(processing.status()).isEqualTo("SYNCHRONIZING");
+        assertThat(processing.readyServerCount()).isZero();
+        assertThat(processing.servers()).singleElement().satisfies(server ->
+                assertThat(server.status()).isEqualTo("PROCESSING"));
+        assertThat(managed.replicas).singleElement().satisfies(replica -> {
+            assertThat(replica.syncStatus()).isEqualTo(WorkspaceReplicaSyncStatus.SYNCING);
+            assertThat(replica.traceId()).isEqualTo("trace_auto_async");
+        });
+
+        ArgumentCaptor<Runnable> task = ArgumentCaptor.forClass(Runnable.class);
+        verify(dispatcher).dispatch(eq(created.initialVersion().versionId()), eq("trace_auto_async"), task.capture());
+        task.getValue().run();
+
+        ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse ready =
+                service.automationVersionSynchronizationStatus(
+                        "app_gcms",
+                        created.workspaceId(),
+                        created.initialVersion().versionId(),
+                        new UserId("usr_1"),
+                        "trace_auto_status");
+        assertThat(ready.status()).isEqualTo("READY");
+        assertThat(ready.readyServerCount()).isEqualTo(1);
+    }
+
+    @Test
     void automationRepositoryWorkspaceRejectsTestRepositoryDirectoryCreationFlag() {
         CodeRepository repository = new CodeRepository(
                 new CodeRepositoryId("repo_1"),

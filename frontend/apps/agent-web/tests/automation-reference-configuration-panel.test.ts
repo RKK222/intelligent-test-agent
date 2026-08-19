@@ -166,10 +166,12 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(wrapper.text()).toContain("scripts/e2e");
     const activate = wrapper.findAll("button").find((button) => button.text().includes("设为当前版本"));
     expect(activate).toBeTruthy();
+    expect(activate!.attributes("type")).toBe("button");
     await activate!.trigger("click");
     await flushPromises();
 
     expect(mockApi.activateAutomationWorkspaceVersion).toHaveBeenCalledWith("app-demo", "awp_auto", "awv_new");
+    expect(mockApi.createWorkspaceVersion).not.toHaveBeenCalled();
     expect(wrapper.emitted("changed")).toBeTruthy();
   });
 
@@ -193,7 +195,9 @@ describe("AutomationReferenceConfigurationPanel", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("1/2 台就绪");
-    await wrapper.get('button[aria-label="同步自动化版本 20260812"]').trigger("click");
+    const synchronizeButton = wrapper.get('button[aria-label="同步自动化版本 20260812"]');
+    expect(synchronizeButton.attributes("type")).toBe("button");
+    await synchronizeButton.trigger("click");
     await flushPromises();
 
     const progress = wrapper.get('[aria-label="自动化代码库同步进度"]');
@@ -206,6 +210,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(wrapper.get('button[aria-label="关闭自动化代码库同步进度"]').attributes()).toHaveProperty("disabled");
     expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledWith(
       "app-demo", "awp_auto", "awv_old");
+    expect(mockApi.createWorkspaceVersion).not.toHaveBeenCalled();
 
     wrapper.unmount();
   });
@@ -326,6 +331,101 @@ describe("AutomationReferenceConfigurationPanel", () => {
     await wrapper.get('button[aria-label="刷新接口自动化库 Git 指针"]').trigger("click");
     await flushPromises();
     expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledTimes(2);
+
+    wrapper.unmount();
+  });
+
+  it("keeps active versions and synchronization rows isolated when switching two automation repositories", async () => {
+    const secondRepository = {
+      ...repository(),
+      repositoryId: "repo_ui_automation",
+      name: "UI 自动化库",
+      englishName: "ui-automation",
+      gitUrl: "ssh://git.example.test/ui-automation.git"
+    };
+    const secondTemplate = {
+      ...template(),
+      workspaceId: "awp_ui_auto",
+      repositoryId: secondRepository.repositoryId,
+      directoryPath: "ui/e2e",
+      workspaceName: "UI 自动化",
+      activeVersion: {
+        ...template().activeVersion,
+        versionId: "awv_ui",
+        version: "20260820"
+      }
+    };
+    const firstSync = synchronization("awv_old", {
+      targetCommitHash: "abc1234",
+      servers: [{
+        linuxServerId: "linux-api",
+        status: "READY",
+        online: true,
+        currentBranch: "main",
+        currentCommitHash: "abc1234",
+        matchesTarget: true
+      }],
+      targetServerCount: 1,
+      readyServerCount: 1
+    });
+    const secondSync = {
+      ...synchronization("awv_ui", {
+        applicationWorkspaceId: "awp_ui_auto",
+        workspaceName: "UI 自动化",
+        repositoryId: secondRepository.repositoryId,
+        repositoryName: secondRepository.name,
+        version: "20260820",
+        targetCommitHash: "def5678",
+        servers: [{
+          linuxServerId: "linux-ui",
+          status: "READY",
+          online: true,
+          currentBranch: "main",
+          currentCommitHash: "def5678",
+          matchesTarget: true
+        }],
+        targetServerCount: 1,
+        readyServerCount: 1
+      })
+    };
+    const mockApi = api({
+      listApplicationRepositories: vi.fn().mockResolvedValue([repository(), secondRepository]),
+      listWorkspaceTemplates: vi.fn().mockResolvedValue([template(), secondTemplate]),
+      listWorkspaceVersions: vi.fn().mockImplementation((_appId: string, templateId: string) =>
+        Promise.resolve(templateId === "awp_ui_auto"
+          ? [{ ...version("awv_ui", "20260820"), applicationWorkspaceId: "awp_ui_auto", repositoryId: secondRepository.repositoryId }]
+          : [version("awv_old", "20260812")])
+      ),
+      listRepositoryBranches: vi.fn().mockResolvedValue(["main"]),
+      getAutomationWorkspaceVersionSynchronizationStatus: vi.fn().mockImplementation(
+        (_appId: string, _templateId: string, versionId: string) =>
+          Promise.resolve(versionId === "awv_ui" ? secondSync : firstSync)
+      ),
+      synchronizeAutomationWorkspaceVersion: vi.fn().mockImplementation(
+        (_appId: string, _templateId: string, versionId: string) =>
+          Promise.resolve(versionId === "awv_ui" ? secondSync : firstSync)
+      )
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    const apiCard = wrapper.get('button[aria-label="选择接口自动化库"]');
+    const uiCard = wrapper.get('button[aria-label="选择UI 自动化库"]');
+    expect(apiCard.text()).toContain("20260812");
+    expect(uiCard.text()).toContain("20260820");
+    expect(wrapper.text()).toContain("linux-api");
+    expect(wrapper.text()).not.toContain("linux-ui");
+
+    await uiCard.trigger("click");
+    await flushPromises();
+    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledWith(
+      "app-demo", "awp_ui_auto", "awv_ui"
+    );
+    expect(wrapper.get('input[aria-label="自动化版本库"]').element).toHaveProperty("value", "UI 自动化库");
+    expect(wrapper.text()).toContain("linux-ui");
+    expect(wrapper.text()).not.toContain("linux-api");
+    expect(apiCard.attributes("disabled")).toBeUndefined();
+    expect(uiCard.attributes("disabled")).toBeUndefined();
 
     wrapper.unmount();
   });

@@ -1579,7 +1579,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区；自动化模板只返回逻辑版本、提交和副本状态，不返回任何物理路径或运行态 Workspace。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
 | `PUT` | `/applications/{appId}/workspace-templates/{templateId}/active-version` | 把 `{ "versionId": "..." }` 指定的自动化版本设为应用级当前只读版本；仅管理员可调用。 |
-| `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronize` | 为自动化只读版本创建全在线服务器同步任务；本机直接准备共享版本副本，其它服务器复用版本同步广播。 |
+| `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronize` | 为自动化只读版本创建全在线服务器同步任务；本机先登记 `SYNCHRONIZING` 逻辑状态并立即响应，实际 clone/fetch 进入有界后台队列，其它服务器复用版本同步广播后同样排队。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronization-status` | 查询该自动化版本在当前在线服务器上的同步进度；仅返回逻辑状态与 branch/commit，不返回物理路径。 |
 | `POST` | `/workspace-versions/{versionId}/git-pull` | 已停用的版本级拉取兼容入口；返回 `VALIDATION_ERROR`，不会修改共享版本、个人 worktree 或触发广播。 |
 | `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
