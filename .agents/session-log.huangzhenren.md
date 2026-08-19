@@ -2482,4 +2482,15 @@
   - 热力方块紧凑显示为 10px，Run 趋势柱状图顶部直观展示对应 Run 数量。
   - 前端 Vitest 单元测试 6/6 通过，Vue TypeScript 检查通过。
 
+## 2026-08-19 运营分析小时热力图方块宽度自适应铺满调整
 
+- Why:
+  - 优化运营分析界面的小时热力图横向视觉展示，使热力图各方块横向自适应铺满页面，同时保持方块高度固定为 10px。
+- What:
+  - `frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue`：更新 `.ta-heatmap-cell` 宽度为 `100%`、高度固定为 `10px`；将 `.ta-heatmap-row` 宽度设为 `100%`，网格列宽调整为 `56px repeat(24, minmax(0, 1fr))`。
+- How:
+  - 修改 `.ta-heatmap-cell` 样式为 `width: 100%; height: 10px; border-radius: 2px;`。
+  - 修改 `.ta-heatmap-row` 样式为 `display: grid; width: 100%; min-width: 0; grid-template-columns: 56px repeat(24, minmax(0, 1fr)); gap: 3px;`。
+- Result:
+  - 小时热力图方块高度固定 10px，宽度根据页面自适应横向铺满容器。
+  - 前端 Vitest 单元测试 6/6 通过，Vue TypeScript 检查通过。

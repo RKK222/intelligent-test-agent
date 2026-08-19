@@ -412,9 +412,9 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
 .ta-heatmap-panel { overflow:hidden; }.ta-panel-heading .ta-segmented { margin-left:auto; }
 .ta-segmented { display:inline-flex; border:1px solid #d4d9e0; border-radius:5px; overflow:hidden; }
 .ta-segmented button { height:28px; padding:0 9px; border:0; border-right:1px solid #d4d9e0; background:#fff; color:#596577; font-size:11px; cursor:pointer; }.ta-segmented button:last-child { border-right:0; }.ta-segmented button.active { background:#2d3745; color:#fff; }
-.ta-heatmap-scroll { width:100%; min-width:0; overflow-x:auto; }.ta-heatmap-row { display:grid; width:max-content; grid-template-columns:56px repeat(24,10px); gap:3px; align-items:center; margin-bottom:3px; }
+.ta-heatmap-scroll { width:100%; min-width:0; overflow-x:auto; }.ta-heatmap-row { display:grid; width:100%; min-width:0; grid-template-columns:56px repeat(24,minmax(0,1fr)); gap:3px; align-items:center; margin-bottom:3px; }
 .ta-heatmap-row > strong { color:#596577; font-size:11px; font-weight:500; }.ta-heatmap-hours small { color:#8993a1; font-size:9px; text-align:center; }
-.ta-heatmap-cell { width:10px; height:10px; border-radius:2px; }
+.ta-heatmap-cell { width:100%; height:10px; border-radius:2px; }
 .ta-reason-list { flex-wrap:wrap; gap:6px; margin-bottom:8px; }.ta-reason-list span,.ta-band,.ta-type { display:inline-block; padding:3px 6px; border-radius:4px; background:#eef1f4; color:#4c5868; font-size:11px; }
 .ta-type { background:#e8f2f1; color:#176b67; }.ta-rate { color:#a41729; font-weight:600; }
 .ta-table { width:100%; border-collapse:collapse; font-size:12px; }.ta-table th,.ta-table td { padding:8px; border-bottom:1px solid #edf0f3; text-align:left; white-space:nowrap; }.ta-table th { color:#697486; font-weight:600; background:#fafbfc; }
