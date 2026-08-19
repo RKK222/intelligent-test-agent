@@ -9,16 +9,16 @@
 
 - Why:
   - 针对工作空间中的 `.mmd` 格式文件，用户需要在文件编辑器底部“定位到当前文件”按钮左侧提供直接的图表预览与编辑图标入口，点击后可弹出类似 Markdown 中 Mermaid 的 SVG 图表预览，或复用现有 Mermaid 可视化编辑器完成交互式编辑并保存写回到 `.mmd` 文件。
-  - 用户反馈预览弹窗中 Mermaid 图表顶部被遮挡且无法缩放平移，需要彻底优化视口布局与交互体验。
+  - 用户反馈预览弹窗中：1) 放大后图像模糊失真；2) 缩小或拖动后容易跑出视口无法定位。
 - What:
   - `frontend/packages/editor`:
     - `src/mermaid/init.ts`: 封装 `ensureMermaid` 懒加载单例，按需初始化 Mermaid 与 ELK 布局引擎。
     - `src/mermaid/visual-editor/MermaidEditorDialog.vue`: 增加可选 `title`、`subtitle`、`applyLabel` props，支持 Markdown 嵌入块和独立 `.mmd` 文件的可复用自定义文案。
     - `src/mermaid/visual-editor/MermaidPreviewDialog.vue`:
+      - 放弃 HTML 容器 CSS scale（会引发浏览器固定位图光栅化拉伸模糊），重构为原生 SVG `<g class="ta-mermaid-viewport-layer">` 矢量图层 transform 控制，使任意放大比例下文字与线条保持 100% 矢量无损高清；
+      - 增加 `clampPan` 平移边界约束计算，结合图表尺寸与视口大小动态锁定移动极值，确保缩小或平移拖拽时图表永远处于可视区内，不会漂移至画布外；
       - 彻底修复 flex center 导致的 SVG 顶部负坐标溢出遮挡问题；
-      - 新增基于 transform 的可拖拽平移与滚轮缩放画布；
-      - 新增浮动控制工具栏（放大、缩小、100% 比例显示、适应画布/双击自适应、重置比例）；
-      - 自动计算 BBox/viewBox 在图表渲染完成后自动执行适屏居中与顶部安全留白。
+      - 新增浮动控制工具栏（放大、缩小、100% 比例显示、适应画布/双击自适应、重置比例）。
     - `src/MarkdownPreview.vue`: 复用 `ensureMermaid`。
     - `src/index.ts`: 导出 `MermaidEditorDialog`、`MermaidPreviewDialog`、`ensureMermaid`、`parseMermaidDiagram`、`serializeMermaidDiagram`、`cloneMermaidDiagram`、`MermaidEditableDiagram`。
     - `src/PACKAGE.md`: 同步模块职责与导出说明。
@@ -31,9 +31,9 @@
     - `apps/agent-web/tests/WorkbenchFooter.mermaid-edit.test.ts`: 覆盖 `.mmd` 格式文件预览与编辑按钮渲染、位置顺序、点击 emit 事件与非 mmd 文件隔离。
     - `apps/agent-web/tests/mermaid-mmd-editor.test.ts`: 覆盖 Mermaid 图表解析、序列化、弹窗自定义文案、预览弹窗渲染、缩放/平移/适应控制及应用回调。
 - How:
-  - 采用 transform 矩阵接管 SVG 渲染尺寸，使用鼠标滚轮向量计算以光标为中心缩放，结合鼠标拖拽平移，解决纯 flex 居中在图表超宽/超高时截断顶部的问题。
+  - 通过注入 SVG 内部 `<g>` 标签的 `transform="translate(...) scale(...)"` 直接调用浏览器底层矢量渲染器（结合 `geometricPrecision`），并结合动态视口边缘吸附与边界夹取算法限制 pan 坐标。
 - Result:
-  - 自动化单测全部通过（24 套件 / 445 用例 100% 通过），`vue-tsc` 类型检查无报错。
+  - 自动化单测全部通过（全量 132 套件 / 2040 用例 100% 通过），`vue-tsc` 类型检查无报错。
 
 ### 2026-08-18 - 区分用户与被分享人对话气泡颜色并重构智能体输出配色
 

@@ -29,8 +29,55 @@ const zoom = ref(1);
 const pan = ref({ x: 0, y: 0 });
 const isDragging = ref(false);
 const dragStart = ref({ x: 0, y: 0 });
+const diagramBaseSize = ref({ width: 800, height: 600 });
 
 let renderSequence = 0;
+
+function clampPan(targetPan: { x: number; y: number }, targetZoom: number) {
+  if (!viewportEl.value) return targetPan;
+  const rect = viewportEl.value.getBoundingClientRect();
+  const vWidth = rect.width || 1000;
+  const vHeight = rect.height || 600;
+
+  const dWidth = diagramBaseSize.value.width * targetZoom;
+  const dHeight = diagramBaseSize.value.height * targetZoom;
+
+  const margin = 60;
+
+  let minX = vWidth - dWidth - margin;
+  let maxX = margin;
+  if (dWidth <= vWidth - margin * 2) {
+    const midX = (vWidth - dWidth) / 2;
+    minX = Math.min(midX - 60, margin);
+    maxX = Math.max(midX + 60, vWidth - dWidth - margin);
+  }
+
+  let minY = vHeight - dHeight - margin;
+  let maxY = margin;
+  if (dHeight <= vHeight - margin * 2) {
+    const midY = (vHeight - dHeight) / 2;
+    minY = Math.min(midY - 60, margin);
+    maxY = Math.max(midY + 60, vHeight - dHeight - margin);
+  }
+
+  const boundMinX = Math.min(minX, maxX);
+  const boundMaxX = Math.max(minX, maxX);
+  const boundMinY = Math.min(minY, maxY);
+  const boundMaxY = Math.max(minY, maxY);
+
+  return {
+    x: Math.min(Math.max(targetPan.x, boundMinX), boundMaxX),
+    y: Math.min(Math.max(targetPan.y, boundMinY), boundMaxY)
+  };
+}
+
+function applyTransform() {
+  if (!svgHostEl.value) return;
+  const contentG = svgHostEl.value.querySelector("g.ta-mermaid-viewport-layer") as SVGGElement | null;
+  if (contentG) {
+    contentG.setAttribute("transform", `translate(${pan.value.x}, ${pan.value.y}) scale(${zoom.value})`);
+  }
+}
 
 function zoomIn() {
   const newZoom = Math.min(zoom.value * 1.25, 5);
@@ -50,77 +97,50 @@ function resetZoom() {
 function updateZoomCentered(newZoom: number) {
   if (!viewportEl.value) {
     zoom.value = newZoom;
+    applyTransform();
     return;
   }
   const rect = viewportEl.value.getBoundingClientRect();
   const centerX = rect.width / 2;
   const centerY = rect.height / 2;
 
-  pan.value = {
+  const targetPan = {
     x: centerX - (centerX - pan.value.x) * (newZoom / zoom.value),
     y: centerY - (centerY - pan.value.y) * (newZoom / zoom.value)
   };
+
+  pan.value = clampPan(targetPan, newZoom);
   zoom.value = newZoom;
+  applyTransform();
 }
 
 function centerDiagram(targetZoom: number) {
-  if (!viewportEl.value || !svgHostEl.value) return;
-  const svgEl = svgHostEl.value.querySelector("svg");
-  if (!svgEl) return;
-
+  if (!viewportEl.value) return;
   const viewportRect = viewportEl.value.getBoundingClientRect();
-  const svgRect = svgEl.getBoundingClientRect();
-  const currentWidth = svgRect.width / (zoom.value || 1);
-  const currentHeight = svgRect.height / (zoom.value || 1);
+  const renderedWidth = diagramBaseSize.value.width * targetZoom;
+  const renderedHeight = diagramBaseSize.value.height * targetZoom;
 
-  const renderedWidth = currentWidth * targetZoom;
-  const renderedHeight = currentHeight * targetZoom;
-
-  pan.value = {
+  const targetPan = {
     x: (viewportRect.width - renderedWidth) / 2,
-    y: Math.max((viewportRect.height - renderedHeight) / 2, 32)
+    y: Math.max((viewportRect.height - renderedHeight) / 2, 36)
   };
+
+  pan.value = clampPan(targetPan, targetZoom);
+  applyTransform();
 }
 
 function fitToScreen() {
-  if (!viewportEl.value || !svgHostEl.value) {
-    zoom.value = 1;
-    pan.value = { x: 0, y: 0 };
-    return;
-  }
-  const svgEl = svgHostEl.value.querySelector("svg");
-  if (!svgEl) {
-    zoom.value = 1;
-    pan.value = { x: 0, y: 0 };
-    return;
-  }
-
-  // 移除 Mermaid 自带的绝对 max-width 限制，让容器和 transform 完全接管缩放
-  svgEl.style.maxWidth = "none";
-  svgEl.style.width = "auto";
-  svgEl.style.height = "auto";
-
+  if (!viewportEl.value) return;
   const viewportRect = viewportEl.value.getBoundingClientRect();
   if (viewportRect.width <= 0 || viewportRect.height <= 0) {
     zoom.value = 1;
     pan.value = { x: 24, y: 24 };
+    applyTransform();
     return;
   }
 
-  const svgBbox = typeof svgEl.getBBox === "function" ? svgEl.getBBox() : null;
-  const rawWidth =
-    (svgBbox && svgBbox.width > 0 ? svgBbox.width : 0) ||
-    svgEl.clientWidth ||
-    parseFloat(svgEl.getAttribute("width") || "0") ||
-    parseFloat(svgEl.viewBox?.baseVal?.width?.toString() || "800") ||
-    800;
-
-  const rawHeight =
-    (svgBbox && svgBbox.height > 0 ? svgBbox.height : 0) ||
-    svgEl.clientHeight ||
-    parseFloat(svgEl.getAttribute("height") || "0") ||
-    parseFloat(svgEl.viewBox?.baseVal?.height?.toString() || "600") ||
-    600;
+  const rawWidth = diagramBaseSize.value.width || 800;
+  const rawHeight = diagramBaseSize.value.height || 600;
 
   const paddingX = 48;
   const paddingTop = 36;
@@ -138,11 +158,11 @@ function fitToScreen() {
   const renderedHeight = rawHeight * finalZoom;
 
   const startX = Math.max((viewportRect.width - renderedWidth) / 2, paddingX);
-  // 确保顶部始终留出足够的内边距，不会被标题栏遮挡或顶出可视区
   const startY = Math.max((viewportRect.height - renderedHeight) / 2, paddingTop);
 
   zoom.value = finalZoom;
-  pan.value = { x: startX, y: startY };
+  pan.value = clampPan({ x: startX, y: startY }, finalZoom);
+  applyTransform();
 }
 
 function onWheel(event: WheelEvent) {
@@ -154,17 +174,19 @@ function onWheel(event: WheelEvent) {
     const mouseX = event.clientX - rect.left;
     const mouseY = event.clientY - rect.top;
 
-    pan.value = {
+    const targetPan = {
       x: mouseX - (mouseX - pan.value.x) * (newZoom / zoom.value),
       y: mouseY - (mouseY - pan.value.y) * (newZoom / zoom.value)
     };
+
+    pan.value = clampPan(targetPan, newZoom);
   }
   zoom.value = newZoom;
+  applyTransform();
 }
 
 function onMouseDown(event: MouseEvent) {
   if (event.button !== 0) return;
-  // 忽略工具栏上的点击
   const target = event.target as HTMLElement | null;
   if (target?.closest(".ta-mermaid-preview-toolbar")) return;
 
@@ -177,14 +199,69 @@ function onMouseDown(event: MouseEvent) {
 
 function onMouseMove(event: MouseEvent) {
   if (!isDragging.value) return;
-  pan.value = {
+  const targetPan = {
     x: event.clientX - dragStart.value.x,
     y: event.clientY - dragStart.value.y
   };
+  pan.value = clampPan(targetPan, zoom.value);
+  applyTransform();
 }
 
 function onMouseUp() {
   isDragging.value = false;
+}
+
+function prepareSvg() {
+  if (!svgHostEl.value) return;
+  const svgEl = svgHostEl.value.querySelector("svg");
+  if (!svgEl) return;
+
+  const viewBoxAttr = svgEl.getAttribute("viewBox");
+  let vbWidth = 800;
+  let vbHeight = 600;
+  if (viewBoxAttr) {
+    const parts = viewBoxAttr.trim().split(/[\s,]+/).map(Number);
+    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+      vbWidth = parts[2];
+      vbHeight = parts[3];
+    }
+  } else {
+    vbWidth = parseFloat(svgEl.getAttribute("width") || "800") || 800;
+    vbHeight = parseFloat(svgEl.getAttribute("height") || "600") || 600;
+  }
+  diagramBaseSize.value = { width: vbWidth, height: vbHeight };
+
+  // 使得 SVG 画布充满视口，通过内部矢量 <g> 属性接管平移缩放
+  svgEl.style.width = "100%";
+  svgEl.style.height = "100%";
+  svgEl.style.maxWidth = "none";
+  svgEl.style.maxHeight = "none";
+  svgEl.style.overflow = "hidden";
+  svgEl.style.display = "block";
+  svgEl.style.shapeRendering = "geometricPrecision";
+  svgEl.style.textRendering = "geometricPrecision";
+
+  // 将全部图形子节点装入矢量视口图层 <g class="ta-mermaid-viewport-layer">
+  let contentG = svgEl.querySelector("g.ta-mermaid-viewport-layer") as SVGGElement | null;
+  if (!contentG) {
+    contentG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    contentG.classList.add("ta-mermaid-viewport-layer");
+    const childrenToMove: Node[] = [];
+    for (let i = 0; i < svgEl.childNodes.length; i++) {
+      const child = svgEl.childNodes[i];
+      if (
+        child.nodeType === Node.ELEMENT_NODE &&
+        (child.nodeName.toLowerCase() === "defs" || child.nodeName.toLowerCase() === "style")
+      ) {
+        continue;
+      }
+      childrenToMove.push(child);
+    }
+    childrenToMove.forEach((child) => contentG!.appendChild(child));
+    svgEl.appendChild(contentG);
+  }
+
+  fitToScreen();
 }
 
 async function renderDiagram(source: string) {
@@ -208,7 +285,7 @@ async function renderDiagram(source: string) {
       svgContent.value = svg;
       renderError.value = null;
       await nextTick();
-      fitToScreen();
+      prepareSvg();
     }
   } catch (err) {
     const badDiv = document.getElementById(`d${renderId}`);
@@ -265,7 +342,7 @@ onBeforeUnmount(() => {
         <header class="ta-mermaid-preview-header">
           <div class="ta-mermaid-preview-header-left">
             <h2 id="ta-mermaid-preview-title">{{ title }}</h2>
-            <p>Mermaid 图表渲染预览（支持滚轮缩放与鼠标拖拽平移）</p>
+            <p>Mermaid 矢量渲染预览（支持鼠标滚轮缩放与拖拽平移）</p>
           </div>
           <button
             type="button"
@@ -295,15 +372,7 @@ onBeforeUnmount(() => {
             @mousedown="onMouseDown"
             @dblclick="fitToScreen"
           >
-            <div
-              class="ta-mermaid-preview-canvas"
-              :style="{
-                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                transformOrigin: '0 0'
-              }"
-            >
-              <div ref="svgHostEl" class="ta-mermaid-preview-svg" v-html="svgContent" />
-            </div>
+            <div ref="svgHostEl" class="ta-mermaid-preview-svg-host" v-html="svgContent" />
 
             <!-- 浮动缩放控制栏 -->
             <div class="ta-mermaid-preview-toolbar">
@@ -475,19 +544,20 @@ onBeforeUnmount(() => {
   cursor: grabbing;
 }
 
-.ta-mermaid-preview-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  will-change: transform;
-}
-
-.ta-mermaid-preview-svg {
-  display: inline-block;
-}
-
-.ta-mermaid-preview-svg :deep(svg) {
+.ta-mermaid-preview-svg-host {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
   display: block;
+}
+
+.ta-mermaid-preview-svg-host :deep(svg) {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: block;
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
 }
 
 .ta-mermaid-preview-toolbar {
