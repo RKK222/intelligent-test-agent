@@ -39,6 +39,8 @@ export TEST_AGENT_LOCAL_CLIENT_VERSION=0.1.0
 export TEST_AGENT_LOCAL_CLIENT_MACOS_APPLICATION_IDENTITY='Developer ID Application: ...'
 export TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY='Developer ID Installer: ...'
 export TEST_AGENT_LOCAL_CLIENT_MACOS_NOTARY_PROFILE='testagent-notary'
+# 麒麟 DEB 必须由 Linux dpkg-deb 生成，不再由 macOS ar/tar 手工拼包。
+export TEST_AGENT_LOCAL_CLIENT_DEB_BUILDER_IMAGE='debian:bookworm-slim'
 deploy/internal/package-release.sh --local-client-only
 ```
 
@@ -51,6 +53,12 @@ deploy/internal/package-release.sh --local-client-only
 `TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL` 和 `TEST_AGENT_LOCAL_CLIENT_DEFAULT_WEB_URL` 可为原生首次启动
 向导预填同一部署的 HTTPS 地址；跨部署复用制品时保持为空。只有 localhost 开发包允许同时设置
 `TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP=true`。
+麒麟 DEB 在 ARM64 Debian 容器中使用 `dpkg-deb --root-owner-group` 生成并执行真实
+`dpkg -i/remove` 验证。包本身不宣告 `systemd` 硬依赖、不携带 `postinst/prerm`；它通过包内
+`/etc/systemd/user/default.target.wants/` 软链接启用已存在的麒麟 systemd user unit，避免软件中心在
+离线解析依赖或维护脚本跨用户操作时只报“软件包操作异常”。
+已发布 DEB 的修复包必须把 `TEST_AGENT_LOCAL_CLIENT_VERSION` 提高到旧包以上；软件中心才能将
+旧包的“已解包未配置”状态作为升级原地修复，不能以相同版本号替换已分发字节。
 
 ## 前端 Nginx 部署
 
@@ -112,8 +120,10 @@ Dock 图标和可见配置窗口；配置成功后的后续启动不再占用 Do
 若首次向导被取消，可再次从“应用程序”打开，不需要重新安装。
 
 macOS 安装 `/Applications/TestAgent Local Client.app` 和系统级 LaunchAgent 定义，实际客户端仍以登录用户
-运行；麒麟安装到 `/opt/testagent/local-opencode-client`，通过全局启用的 systemd user unit 在登录用户会话
-运行，并提供应用菜单入口。macOS PKG 固定把 App 安装到 `/Applications`，禁止 Installer 根据历史安装记录
+运行；麒麟安装到 `/opt/testagent/local-opencode-client`，包内全局启用软链接使 systemd user unit 在下次
+登录用户会话运行，并提供应用菜单入口。安装器不在包管理事务中调用 `systemctl`、`loginctl`
+或 `runuser`；当前会话可从应用菜单直接完成首次配置，配置后重新登录即由 systemd 自启。
+macOS PKG 固定把 App 安装到 `/Applications`，禁止 Installer 根据历史安装记录
 重定位到用户目录；安装后只通过一次 `launchctl bootstrap` 尝试载入当前桌面用户，不在 `postinstall` 中执行
 可能长期阻塞 PackageKit 的 `kickstart` 或 `open`。从兜底脚本升级到 PKG 时，安装器会移除当前桌面用户下
 同 label 的旧用户级 LaunchAgent，避免下次登录同时加载系统级和用户级定义；不会删除用户配置、工作空间或

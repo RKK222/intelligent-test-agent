@@ -18,6 +18,8 @@ macOS 和带 SystemTray 的麒麟 ARM 桌面会显示复用 Web 端 `radar-bunny
 普通用户执行 shell。macOS 首次配置前保留 Dock 与普通应用窗口，用户从“应用程序”打开
 “TestAgent 本地客户端”；配置完成后的后续启动切换为顶部菜单栏兔子图标。命令行 `install.sh` 只保留为
 无桌面环境和运维排障兜底。
+麒麟 DEB 由 Linux `dpkg-deb` 生成，不再使用 macOS `ar/tar` 手工拼包；安装包不携带维护脚本或
+`systemd` 硬依赖，通过包内 systemd user unit 启用软链接保留登录自启和 `journalctl --user`。
 
 实例 capability 保持 `agentConfig=false`，表示平台 Agent/Skill 正文不会同步到本机配置目录；同时返回
 `protectedAgentExecution=true`，表示网页可选择服务器受保护 Agent。服务器模型调用本地文件时仍只发送既有

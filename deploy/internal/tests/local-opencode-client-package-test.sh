@@ -65,7 +65,7 @@ fi
   TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
     "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
       --output-dir dist/local-opencode-client \
-      --version 0.1.0-test \
+      --version 0.1.2-test \
       --signing-key "${TEST_ROOT}/signing-private.pem" \
       --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
       --skip-build
@@ -113,12 +113,49 @@ mkdir -p "${DEB_EXPANDED}"
 (
   cd "${DEB_EXPANDED}"
   ar -x "${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
-  test "$(printf '%s\n' debian-binary control.tar.gz data.tar.gz)" = "$(ar -t "${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb")"
-  tar -tzf data.tar.gz | grep -q './opt/testagent/local-opencode-client/bin/test-agent-local-client'
-  tar -tzf data.tar.gz | grep -q './usr/lib/systemd/user/test-agent-local-opencode-client.service'
-  tar -tzf data.tar.gz | grep -q './usr/share/applications/test-agent-local-opencode-client.desktop'
+  test "$(printf '%s\n' debian-binary control.tar.xz data.tar.xz)" = "$(ar -t "${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb")"
+  tar -tJf data.tar.xz | grep -q './opt/testagent/local-opencode-client/bin/test-agent-local-client'
+  tar -tJf data.tar.xz | grep -q './usr/lib/systemd/user/test-agent-local-opencode-client.service'
+  tar -tJf data.tar.xz | grep -q './usr/share/applications/test-agent-local-opencode-client.desktop'
+  tar -tJf data.tar.xz | grep -q './etc/systemd/user/default.target.wants/test-agent-local-opencode-client.service'
+  if tar -tJf control.tar.xz | grep -Eq './(postinst|preinst|prerm|postrm)$'; then
+    echo "Kylin DEB unexpectedly contains a maintainer script" >&2
+    exit 1
+  fi
 )
-(cd "${TEST_ROOT}/dist/local-opencode-client/releases/0.1.0-test" && \
+docker run --rm --platform linux/arm64 \
+  -v "${TEST_ROOT}/dist/local-opencode-client:/pkg:ro" \
+  debian:bookworm-slim sh -eu -c '
+    dpkg-deb --info /pkg/TestAgent-Local-Client-Kylin-arm64.deb >/dev/null
+    # 模拟麒麟软件中心已留下旧包“已解包未配置”状态，新版必须可原地升级修复。
+    mkdir -p /tmp/legacy/DEBIAN
+    printf "%s\\n" \
+      "Package: test-agent-local-client" \
+      "Version: 0.1.1" \
+      "Section: utils" \
+      "Priority: optional" \
+      "Architecture: arm64" \
+      "Maintainer: TestAgent Platform Team" \
+      "Depends: systemd" \
+      "Description: legacy failure fixture" \
+      > /tmp/legacy/DEBIAN/control
+    dpkg-deb --build --root-owner-group /tmp/legacy /tmp/legacy.deb >/dev/null
+    if dpkg -i /tmp/legacy.deb; then
+      echo "Legacy Kylin fixture unexpectedly installed without systemd" >&2
+      exit 1
+    fi
+    dpkg-query -W -f="\${Status}\\n" test-agent-local-client \
+      | grep -qx "install ok unpacked"
+    dpkg -i /pkg/TestAgent-Local-Client-Kylin-arm64.deb
+    dpkg-query -W -f="\${Status} \${Architecture}\\n" test-agent-local-client \
+      | grep -qx "install ok installed arm64"
+    test -x /opt/testagent/local-opencode-client/bin/test-agent-local-client
+    test "$(readlink /etc/systemd/user/default.target.wants/test-agent-local-opencode-client.service)" \
+      = /usr/lib/systemd/user/test-agent-local-opencode-client.service
+    dpkg --remove test-agent-local-client >/dev/null
+    test ! -e /etc/systemd/user/default.target.wants/test-agent-local-opencode-client.service
+  '
+(cd "${TEST_ROOT}/dist/local-opencode-client/releases/0.1.2-test" && \
   if command -v sha256sum >/dev/null 2>&1; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi)
 
 cp "${TEST_ROOT}/dist/local-opencode-client/stable/manifest.json" "${TEST_ROOT}/tampered-manifest.json"

@@ -12230,3 +12230,26 @@
 
 - 完整输入应用简称后筛选结果不再重置，最后一个字符与前缀输入的行为一致。
 - 本次代码与 UI 行为已验证；后端真实启动和企业 TCDS 联调因共享测试数据库不可达未完成，需要数据库网络恢复后按同一 `.env.test` 命令复验。
+
+## 2026-08-19 - 修复麒麟本地客户端软件包安装失败
+
+### Why
+
+- 麒麟 ARM 用户双击页面下载的 DEB 后，软件中心只提示“软件包操作异常，无法安装或移除软件包”。旧包由 macOS `ar/tar` 手工拼装，并硬依赖 `systemd`、携带跨用户执行 `systemctl/loginctl/runuser` 的维护脚本；在不预装 `systemd` 的 ARM64 Debian 环境中可稳定复现为“已解包未配置”，与现场现象一致。
+
+### What
+
+- 麒麟 DEB 改由 Linux ARM64 容器内的 `dpkg-deb --build --root-owner-group` 生成标准包，移除 `systemd` 硬依赖和全部 maintainer scripts。
+- 继续打包 systemd user unit，并用包拥有的 `/etc/systemd/user/default.target.wants/` 软链接保留登录自启与 `journalctl --user` 日志入口；当前会话仍可从应用菜单启动并完成首次配置。
+- 本地客户端增量指纹升级并纳入 DEB builder image；补充旧版 `0.1.1` 安装失败后由 `0.1.2` 原地升级修复的真实 `dpkg` 回归，同步模块 README、环境样例与部署文档。
+
+### How
+
+- `deploy/internal/tests/local-opencode-client-package-test.sh` 通过：校验标准 DEB members、无维护脚本、systemd unit/启用软链接，并在 ARM64 Debian 容器中复现旧包失败后安装新版、查询 installed 状态和卸载。
+- `tools/verify-internal-incremental-components.sh`、相关脚本 `bash -n`、`git diff --check` 均通过；实际开发包 `TestAgent-Local-Client-Kylin-arm64.deb` 在 ARM64 容器中再次完成 `dpkg -i/remove`。
+- 当前 3000 页面用麒麟 UA 访问下载入口返回 302 到 DEB，直链返回 200、MIME 为 `application/vnd.debian.binary-package`、大小 83097016 bytes；开发包 SHA-256 为 `0eac8a57568cd8c47416a0bbbaaaf2938fc723eb8ee434e28acc6170995bc18c`。
+
+### Result
+
+- release 分支的麒麟图形安装包已消除可复现的软件中心依赖/维护脚本失败路径，旧的未配置 `0.1.1` 可被更高版本 `0.1.2` 直接覆盖修复，页面现已提供该开发验证包。
+- 本次不修改 API、RunEvent、数据库/Flyway、OpenCode 源码或运行时轮询策略；移除安装期特权脚本降低安装风险且不增加客户端性能开销。真实麒麟桌面软件中心的最终双击安装仍需用户重新下载后确认；正式企业发布还必须使用正式签名材料重新产出制品。

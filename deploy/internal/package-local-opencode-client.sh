@@ -18,6 +18,7 @@ ALLOW_INSECURE_SETUP="${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP:-false}"
 MACOS_APPLICATION_IDENTITY="${TEST_AGENT_LOCAL_CLIENT_MACOS_APPLICATION_IDENTITY:-}"
 MACOS_INSTALLER_IDENTITY="${TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY:-}"
 MACOS_NOTARY_PROFILE="${TEST_AGENT_LOCAL_CLIENT_MACOS_NOTARY_PROFILE:-}"
+DEB_BUILDER_IMAGE="${TEST_AGENT_LOCAL_CLIENT_DEB_BUILDER_IMAGE:-debian:bookworm-slim}"
 
 JRE_DARWIN_URL="${TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_URL:-https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.9%2B10/OpenJDK21U-jre_aarch64_mac_hotspot_21.0.9_10.tar.gz}"
 JRE_DARWIN_SHA="${TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_SHA256:-1f7f6506b598e85d7d8ff8b36563d98657d2d81b16bfca3cd242d7906cfbd11b}"
@@ -52,7 +53,8 @@ Options:
 
 Source archive paths, URLs and pinned SHA-256 values can be overridden with the
 TEST_AGENT_LOCAL_CLIENT_JRE_* and TEST_AGENT_LOCAL_CLIENT_OPENCODE_* variables
-documented in deploy/internal/env.example.
+documented in deploy/internal/env.example. Kylin DEB packaging uses the Linux
+dpkg-deb builder image selected by TEST_AGENT_LOCAL_CLIENT_DEB_BUILDER_IMAGE.
 USAGE
 }
 
@@ -250,45 +252,33 @@ EOF
   fi
 }
 
-create_deb_tar() {
-  local output="$1" base_dir="$2"
-  shift 2
-  local -a ownership_flags=()
-  if tar --version 2>&1 | grep -qi 'bsdtar'; then
-    ownership_flags=(--uid 0 --gid 0 --uname root --gname root --no-mac-metadata --no-xattrs --no-acls --no-fflags)
-  else
-    ownership_flags=(--owner=0 --group=0 --numeric-owner)
-  fi
-  COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 \
-    tar "${ownership_flags[@]}" -C "${base_dir}" -czf "${output}" "$@"
-}
-
 build_kylin_installer() {
-  local release_dir="$1" destination="$2" package_version payload_root control_root work_root installed_size
-  require_command ar
+  local release_dir="$1" destination="$2" package_version package_root control_root work_root installed_size
+  require_command docker
   destination="$(cd "$(dirname "${destination}")" && pwd)/$(basename "${destination}")"
   package_version="$(numeric_package_version)"
   work_root="${TEMP_DIR}/native-kylin"
-  payload_root="${work_root}/payload"
-  control_root="${work_root}/control"
-  mkdir -p "${payload_root}/opt/testagent/local-opencode-client" \
-    "${payload_root}/usr/lib/systemd/user" \
-    "${payload_root}/usr/share/applications" \
-    "${payload_root}/usr/share/icons/hicolor/512x512/apps" \
+  package_root="${work_root}/package"
+  control_root="${package_root}/DEBIAN"
+  mkdir -p "${package_root}/opt/testagent/local-opencode-client" \
+    "${package_root}/usr/lib/systemd/user" \
+    "${package_root}/usr/share/applications" \
+    "${package_root}/usr/share/icons/hicolor/512x512/apps" \
+    "${package_root}/etc/systemd/user/default.target.wants" \
     "${control_root}"
-  tar -C "${payload_root}/opt/testagent/local-opencode-client" \
+  tar -C "${package_root}/opt/testagent/local-opencode-client" \
     -xzf "${release_dir}/temurin-jre21-linux-arm64-glibc.tar.gz"
-  tar -C "${payload_root}/opt/testagent/local-opencode-client" \
+  tar -C "${package_root}/opt/testagent/local-opencode-client" \
     -xzf "${release_dir}/opencode-1.18.4-linux-arm64-glibc.tar.gz"
   cp "${release_dir}/test-agent-local-client.jar" \
-    "${payload_root}/opt/testagent/local-opencode-client/test-agent-local-client.jar"
-  mkdir -p "${payload_root}/opt/testagent/local-opencode-client/bin"
+    "${package_root}/opt/testagent/local-opencode-client/test-agent-local-client.jar"
+  mkdir -p "${package_root}/opt/testagent/local-opencode-client/bin"
   write_native_launcher \
-    "${payload_root}/opt/testagent/local-opencode-client/bin/test-agent-local-client" \
+    "${package_root}/opt/testagent/local-opencode-client/bin/test-agent-local-client" \
     '"/opt/testagent/local-opencode-client"'
   cp "${ROOT_DIR}/frontend/apps/agent-web/src/assets/pets/radar-bunny.png" \
-    "${payload_root}/usr/share/icons/hicolor/512x512/apps/test-agent-local-client.png"
-  cat >"${payload_root}/usr/lib/systemd/user/test-agent-local-opencode-client.service" <<'EOF'
+    "${package_root}/usr/share/icons/hicolor/512x512/apps/test-agent-local-client.png"
+  cat >"${package_root}/usr/lib/systemd/user/test-agent-local-opencode-client.service" <<'EOF'
 [Unit]
 Description=TestAgent Local OpenCode Client
 After=network-online.target
@@ -302,7 +292,9 @@ RestartSec=3
 [Install]
 WantedBy=default.target
 EOF
-  cat >"${payload_root}/usr/share/applications/test-agent-local-opencode-client.desktop" <<'EOF'
+  ln -s /usr/lib/systemd/user/test-agent-local-opencode-client.service \
+    "${package_root}/etc/systemd/user/default.target.wants/test-agent-local-opencode-client.service"
+  cat >"${package_root}/usr/share/applications/test-agent-local-opencode-client.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=TestAgent 本地客户端
@@ -313,7 +305,9 @@ Terminal=false
 Categories=Development;Utility;
 StartupNotify=false
 EOF
-  installed_size="$(du -sk "${payload_root}" | awk '{print $1}')"
+  # 麒麟图形安装器的维护脚本错误只显示为笼统“软件包操作异常”。包内直接预置
+  # systemd 全局启用软链接，避免 postinst 跨用户调用 systemctl/runuser，并保留 journalctl 诊断。
+  installed_size="$(du -sk "${package_root}" | awk '{print $1}')"
   cat >"${control_root}/control" <<EOF
 Package: test-agent-local-client
 Version: ${package_version}
@@ -321,47 +315,20 @@ Section: utils
 Priority: optional
 Architecture: arm64
 Maintainer: TestAgent Platform Team
-Depends: libc6 (>= 2.28), systemd
+Depends: libc6 (>= 2.28)
 Installed-Size: ${installed_size}
 Description: TestAgent local OpenCode client
  Connects the TestAgent platform to an authorized local workspace.
 EOF
-  cat >"${control_root}/postinst" <<'EOF'
-#!/usr/bin/env sh
-set -eu
-systemctl --global enable test-agent-local-opencode-client.service >/dev/null 2>&1 || true
-command -v loginctl >/dev/null 2>&1 || exit 0
-active_session="$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null || true)"
-[ -n "${active_session}" ] || exit 0
-active_uid="$(loginctl show-session "${active_session}" -p User --value 2>/dev/null || true)"
-case "${active_uid}" in ''|*[!0-9]*) exit 0 ;; esac
-[ -S "/run/user/${active_uid}/bus" ] || exit 0
-active_user="$(getent passwd "${active_uid}" | awk -F: '{print $1}')"
-[ -n "${active_user}" ] || exit 0
-runuser -u "${active_user}" -- env \
-  XDG_RUNTIME_DIR="/run/user/${active_uid}" \
-  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${active_uid}/bus" \
-  systemctl --user daemon-reload >/dev/null 2>&1 || true
-runuser -u "${active_user}" -- env \
-  XDG_RUNTIME_DIR="/run/user/${active_uid}" \
-  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${active_uid}/bus" \
-  systemctl --user enable --now test-agent-local-opencode-client.service >/dev/null 2>&1 || true
-EOF
-  cat >"${control_root}/prerm" <<'EOF'
-#!/usr/bin/env sh
-set -eu
-[ "${1:-}" = remove ] || exit 0
-systemctl --global disable test-agent-local-opencode-client.service >/dev/null 2>&1 || true
-EOF
-  chmod 0755 "${control_root}/postinst" "${control_root}/prerm"
-  printf '2.0\n' >"${work_root}/debian-binary"
-  create_deb_tar "${work_root}/control.tar.gz" "${control_root}" .
-  create_deb_tar "${work_root}/data.tar.gz" "${payload_root}" .
-  (
-    cd "${work_root}"
-    rm -f "${destination}"
-    ar -rc "${destination}" debian-binary control.tar.gz data.tar.gz
-  )
+  chmod 0755 "${control_root}"
+  chmod 0644 "${control_root}/control"
+  # Mac 不手工拼接 ar/tar；按麒麟官方 DEB 指南复用 Linux dpkg-deb 生成标准 root-owned 包。
+  docker run --rm --platform linux/arm64 \
+    -v "${work_root}:/work" \
+    "${DEB_BUILDER_IMAGE}" \
+    dpkg-deb --build --root-owner-group /work/package /work/TestAgent-Local-Client-Kylin-arm64.deb \
+    >/dev/null
+  cp "${work_root}/TestAgent-Local-Client-Kylin-arm64.deb" "${destination}"
 }
 
 sha256_file() {
