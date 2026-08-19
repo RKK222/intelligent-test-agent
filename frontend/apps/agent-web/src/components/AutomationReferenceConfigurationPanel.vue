@@ -9,7 +9,7 @@ import type {
   WorkspaceCreateOperation
 } from "@test-agent/shared-types";
 import { Button, Input, Spinner } from "@test-agent/ui-kit";
-import { FolderGit2, Plus, RefreshCw } from "lucide-vue-next";
+import { Check, FolderGit2, Plus, RefreshCw } from "lucide-vue-next";
 import RepositoryDirectoryTree from "./RepositoryDirectoryTree.vue";
 
 const AUTOMATION_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
@@ -85,6 +85,12 @@ function repositoryName(repositoryId: string) {
 
 function templatesForRepository(repositoryId: string) {
   return templates.value.filter((template) => template.repositoryId === repositoryId);
+}
+
+function formattedTime(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function normalizedTree(nodes: RepositoryTreeNode[]): RepositoryTreeNode[] {
@@ -362,168 +368,341 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="automation-reference-layout">
-    <aside class="automation-reference-sidebar" aria-label="自动化代码库引用">
-      <div class="automation-reference-heading">
+  <div class="reference-automation-layout">
+    <aside class="reference-repository-column" aria-label="自动化代码库引用">
+      <div class="reference-column-heading">
         <span>自动化代码库</span>
         <Spinner v-if="loading" class="h-3.5 w-3.5" />
       </div>
-      <div v-if="loading && !templates.length" class="automation-reference-state">正在加载自动化引用…</div>
+      <div v-if="loading && !templates.length" class="reference-state" role="status">正在加载自动化引用…</div>
       <template v-else>
-        <div v-if="canManage && !repositories.length" class="automation-reference-state">当前应用未关联自动化代码库。</div>
-        <div v-if="!canManage && !templates.length" class="automation-reference-state">当前应用暂无自动化代码库引用。</div>
-        <section v-for="repository in repositories" :key="repository.repositoryId" class="automation-repository-group">
-          <div class="automation-repository-title">
-            <FolderGit2 class="h-4 w-4" />
-            <span>{{ repository.name }}</span>
-          </div>
-          <button
-            v-for="template in templatesForRepository(repository.repositoryId)"
-            :key="template.workspaceId"
-            type="button"
-            class="automation-reference-card"
-            :class="{ 'is-selected': selectedTemplateId === template.workspaceId && !createMode }"
-            :aria-pressed="selectedTemplateId === template.workspaceId && !createMode"
-            :aria-label="`查看自动化引用 ${template.workspaceName}`"
-            @click="selectTemplate(template)"
+        <div v-if="canManage && !repositories.length" class="reference-state">当前应用未关联自动化代码库。</div>
+        <div v-if="!canManage && !templates.length" class="reference-state">当前应用暂无自动化代码库引用。</div>
+        <div v-if="repositories.length || templates.length" class="reference-repository-list">
+          <section
+            v-for="repository in repositories"
+            :key="repository.repositoryId"
+            class="automation-repo-group"
           >
-            <strong>{{ template.workspaceName }}</strong>
-            <small>{{ template.directoryPath }}</small>
-            <span>{{ template.activeVersion?.version || "尚未激活" }}</span>
-          </button>
-          <Button size="sm" variant="ghost" class="automation-add-button" @click="startCreate(repository.repositoryId)">
-            <Plus class="h-3.5 w-3.5" /> 新增目录引用
-          </Button>
-        </section>
-        <template v-if="!canManage">
-          <button
-            v-for="template in templates"
-            :key="template.workspaceId"
-            type="button"
-            class="automation-reference-card"
-            :class="{ 'is-selected': selectedTemplateId === template.workspaceId }"
-            :aria-pressed="selectedTemplateId === template.workspaceId"
-            :aria-label="`查看自动化引用 ${template.workspaceName}`"
-            @click="selectTemplate(template)"
-          >
-            <strong>{{ template.workspaceName }}</strong>
-            <small>{{ template.directoryPath }}</small>
-            <span>{{ template.activeVersion?.version || "尚未激活" }}</span>
-          </button>
-        </template>
+            <div class="automation-repo-group-title">
+              <FolderGit2 class="h-3.5 w-3.5 shrink-0" />
+              <span>{{ repository.name }}</span>
+            </div>
+            <article
+              v-for="template in templatesForRepository(repository.repositoryId)"
+              :key="template.workspaceId"
+              class="reference-repository-card"
+              :class="{ 'is-selected': selectedTemplateId === template.workspaceId && !createMode }"
+            >
+              <button
+                type="button"
+                class="reference-repository-main"
+                :aria-pressed="selectedTemplateId === template.workspaceId && !createMode"
+                :aria-label="`查看自动化引用 ${template.workspaceName}`"
+                :disabled="saving"
+                @click="selectTemplate(template)"
+              >
+                <FolderGit2 class="h-4 w-4 shrink-0" />
+                <span class="min-w-0">
+                  <strong>{{ template.workspaceName }}</strong>
+                  <small :title="template.directoryPath">{{ template.directoryPath }}</small>
+                </span>
+                <span class="reference-status">{{ template.activeVersion?.version || "未激活" }}</span>
+              </button>
+              <div class="reference-repository-meta">
+                <span>{{ template.enabled === false ? "已停用" : (template.activeVersion?.branch || template.branch || "main") }}</span>
+                <span :class="{ 'is-online': template.activeVersion?.replicaStatus === 'READY' }">
+                  {{ template.activeVersion?.replicaStatus || "UNKNOWN" }}
+                </span>
+              </div>
+            </article>
+            <Button
+              v-if="canManage"
+              size="sm"
+              variant="ghost"
+              class="automation-add-button"
+              :class="{ 'is-active': createMode && selectedRepositoryId === repository.repositoryId }"
+              :disabled="saving"
+              @click="startCreate(repository.repositoryId)"
+            >
+              <Plus class="h-3.5 w-3.5" /> 新增目录引用
+            </Button>
+          </section>
+
+          <template v-if="!canManage">
+            <article
+              v-for="template in templates"
+              :key="template.workspaceId"
+              class="reference-repository-card"
+              :class="{ 'is-selected': selectedTemplateId === template.workspaceId }"
+            >
+              <button
+                type="button"
+                class="reference-repository-main"
+                :aria-pressed="selectedTemplateId === template.workspaceId"
+                :aria-label="`查看自动化引用 ${template.workspaceName}`"
+                :disabled="saving"
+                @click="selectTemplate(template)"
+              >
+                <FolderGit2 class="h-4 w-4 shrink-0" />
+                <span class="min-w-0">
+                  <strong>{{ template.workspaceName }}</strong>
+                  <small :title="template.directoryPath">{{ template.directoryPath }}</small>
+                </span>
+                <span class="reference-status">{{ template.activeVersion?.version || "未激活" }}</span>
+              </button>
+              <div class="reference-repository-meta">
+                <span>{{ template.enabled === false ? "已停用" : (template.activeVersion?.branch || template.branch || "main") }}</span>
+                <span :class="{ 'is-online': template.activeVersion?.replicaStatus === 'READY' }">
+                  {{ template.activeVersion?.replicaStatus || "UNKNOWN" }}
+                </span>
+              </div>
+            </article>
+          </template>
+        </div>
       </template>
     </aside>
 
-    <main class="automation-reference-content">
-      <div v-if="errorMessage" class="automation-reference-error" role="alert">
+    <main class="reference-configuration-column">
+      <div v-if="errorMessage" class="reference-state is-error" role="alert">
         <span>{{ errorMessage }}</span>
-        <Button size="sm" variant="ghost" :disabled="loading" @click="loadCatalog">
-          <RefreshCw class="h-3.5 w-3.5" /> 重试
-        </Button>
+        <button
+          type="button"
+          class="reference-inline-action"
+          :disabled="loading"
+          @click="loadCatalog"
+        >
+          重试
+        </button>
       </div>
 
-      <section v-if="createMode && canManage" class="automation-reference-create" aria-label="新增自动化目录引用">
-        <div class="automation-reference-section-heading">
+      <!-- Create Mode: 新增自动化目录引用 (双栏树与表单) -->
+      <template v-if="createMode && canManage">
+        <div class="reference-selected-heading">
           <div>
-            <h3>新增自动化目录引用</h3>
-            <p>选择分支中的任意已有目录；保存后该目录以应用级只读引用展示。</p>
+            <strong>新增自动化目录引用</strong>
+            <span>选择分支中的已有目录；保存后该目录以应用级只读引用展示。</span>
           </div>
-        </div>
-        <div class="automation-reference-form-grid">
-          <label>
-            <span>版本库</span>
-            <Input :model-value="selectedRepository?.name || selectedRepositoryId" readonly aria-label="自动化版本库" />
-          </label>
-          <label>
-            <span>分支</span>
-            <select v-model="selectedBranch" class="automation-reference-select" aria-label="自动化引用分支" :disabled="branchesLoading || saving" @change="loadTree">
-              <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
-            </select>
-          </label>
-          <label>
-            <span>引用名称</span>
-            <Input v-model="referenceName" aria-label="自动化引用名称" placeholder="例如 接口自动化" :disabled="saving" />
-          </label>
-          <label>
-            <span>版本日期</span>
-            <Input v-model="versionDate" aria-label="自动化引用版本日期" placeholder="YYYYMMDD" :disabled="saving" />
-          </label>
-        </div>
-        <div class="automation-reference-tree-panel">
-          <div class="automation-reference-tree-heading">
-            <span>目录</span>
-            <code>{{ selectedDirectory || "请选择一个已有目录" }}</code>
-          </div>
-          <div v-if="treeLoading" class="automation-reference-state">正在读取目录…</div>
-          <RepositoryDirectoryTree
-            v-else-if="tree.length"
-            :nodes="tree"
-            :selected-path="selectedDirectory"
-            selection-mode="any-directory"
-            @select="selectDirectory"
-          />
-          <div v-else class="automation-reference-state">当前分支没有可选择的目录。</div>
-        </div>
-        <div v-if="operation" class="automation-operation-state" role="status">
-          {{ operation.status === "RUNNING" ? "正在初始化共享只读副本…" : operation.status }}
-        </div>
-        <div class="automation-reference-actions">
-          <Button aria-label="保存自动化目录引用" :disabled="!canCreateReference" @click="createReference">{{ saving ? "保存中…" : "保存目录引用" }}</Button>
-        </div>
-      </section>
-
-      <section v-else-if="selectedTemplate" class="automation-reference-detail" aria-label="自动化引用详情">
-        <div class="automation-reference-section-heading">
-          <div>
-            <h3>{{ selectedTemplate.workspaceName }}</h3>
-            <p>{{ repositoryName(selectedTemplate.repositoryId) }} · {{ selectedTemplate.directoryPath }}</p>
-          </div>
-          <Button v-if="canManage" size="sm" variant="ghost" :disabled="saving" @click="toggleReference(selectedTemplate)">
-            {{ selectedTemplate.enabled === false ? "启用引用" : "停用引用" }}
-          </Button>
-        </div>
-        <div class="automation-current-version">
-          <span>当前版本</span>
-          <strong v-if="selectedTemplate.activeVersion">
-            {{ selectedTemplate.activeVersion.version }} · {{ selectedTemplate.activeVersion.branch }}
-          </strong>
-          <strong v-else>尚未激活版本</strong>
-          <small v-if="selectedTemplate.activeVersion">副本 {{ selectedTemplate.activeVersion.replicaStatus || "UNKNOWN" }}</small>
-        </div>
-        <div class="automation-version-list">
-          <div v-for="version in selectedVersions" :key="version.versionId" class="automation-version-row">
-            <div>
-              <strong>{{ version.version }}</strong>
-              <span>{{ version.branch }}</span>
-              <small>{{ version.replicaStatus || "UNKNOWN" }}</small>
-            </div>
-            <span v-if="selectedTemplate.activeVersion?.versionId === version.versionId" class="automation-current-badge">当前版本</span>
+          <div v-if="templates.length > 0" class="reference-selected-actions">
             <Button
-              v-else-if="canManage"
               size="sm"
               variant="ghost"
-              :disabled="saving || version.status !== 'ACTIVE'"
-              @click="activateVersion(selectedTemplate, version)"
-            >设为当前版本</Button>
+              :disabled="saving"
+              @click="selectTemplate(templates[0])"
+            >
+              返回引用列表
+            </Button>
           </div>
-          <div v-if="!selectedVersions.length" class="automation-reference-state">暂无可用版本。</div>
         </div>
-        <form v-if="canManage" class="automation-version-create" @submit.prevent="createVersion">
-          <label>
-            <span>新增版本分支</span>
-            <select v-model="selectedBranch" class="automation-reference-select" aria-label="新增自动化版本分支" :disabled="branchesLoading || saving">
-              <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
-            </select>
-          </label>
-          <label>
-            <span>版本日期</span>
-            <Input v-model="versionDate" aria-label="新增自动化版本日期" placeholder="YYYYMMDD" :disabled="saving" />
-          </label>
-          <Button type="submit" :disabled="!canCreateVersion">{{ saving ? "创建中…" : "新增版本" }}</Button>
-        </form>
-      </section>
 
-      <div v-else-if="!loading" class="automation-reference-state is-centered">
+        <div class="reference-ready-layout">
+          <section class="reference-tree-panel" aria-label="自动化目录树">
+            <div class="reference-panel-title">
+              <span>目录</span>
+              <code v-if="selectedDirectory" class="reference-title-path">{{ selectedDirectory }}</code>
+            </div>
+            <div v-if="treeLoading" class="reference-compact-state">正在读取目录…</div>
+            <div v-else-if="tree.length === 0" class="reference-compact-state">当前分支没有可选择的目录。</div>
+            <div v-else class="reference-tree-wrap">
+              <RepositoryDirectoryTree
+                :nodes="tree"
+                :selected-path="selectedDirectory"
+                selection-mode="any-directory"
+                @select="selectDirectory"
+              />
+            </div>
+          </section>
+
+          <section class="reference-form-panel" aria-label="新增自动化目录引用表单">
+            <div class="reference-panel-title">配置</div>
+            <form class="reference-form" @submit.prevent="createReference">
+              <label>
+                <span>版本库（repository）</span>
+                <Input :model-value="selectedRepository?.name || selectedRepositoryId" readonly aria-label="自动化版本库" />
+              </label>
+              <label>
+                <span>分支（branch）</span>
+                <select
+                  v-model="selectedBranch"
+                  class="reference-select"
+                  aria-label="自动化引用分支"
+                  :disabled="branchesLoading || saving"
+                  @change="loadTree"
+                >
+                  <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
+                </select>
+              </label>
+              <label>
+                <span>引用目录（path） <b aria-hidden="true">*</b></span>
+                <Input :model-value="selectedDirectory" readonly placeholder="请在左侧选择目录" />
+              </label>
+              <label>
+                <span>引用名称（workspace-name） <b aria-hidden="true">*</b></span>
+                <Input v-model="referenceName" aria-label="自动化引用名称" placeholder="例如 接口自动化" :disabled="saving" />
+              </label>
+              <label>
+                <span>版本日期（version） <b aria-hidden="true">*</b></span>
+                <Input v-model="versionDate" aria-label="自动化引用版本日期" placeholder="YYYYMMDD" :disabled="saving" />
+              </label>
+              <div v-if="operation" class="reference-form-notice" role="status">
+                {{ operation.status === "RUNNING" ? "正在初始化共享只读副本…" : operation.status }}
+              </div>
+              <div class="reference-form-actions">
+                <Button
+                  aria-label="保存自动化目录引用"
+                  :disabled="!canCreateReference"
+                  @click="createReference"
+                >
+                  {{ saving ? "保存中…" : "保存目录引用" }}
+                </Button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </template>
+
+      <!-- Detail View: 查看已配置的自动化引用 -->
+      <template v-else-if="selectedTemplate">
+        <div class="reference-selected-heading">
+          <div>
+            <strong>{{ selectedTemplate.workspaceName }}</strong>
+            <span>{{ repositoryName(selectedTemplate.repositoryId) }} · {{ selectedTemplate.directoryPath }}</span>
+          </div>
+          <div v-if="canManage" class="reference-selected-actions">
+            <Button
+              size="sm"
+              variant="ghost"
+              :disabled="saving"
+              @click="toggleReference(selectedTemplate)"
+            >
+              {{ selectedTemplate.enabled === false ? "启用引用" : "停用引用" }}
+            </Button>
+          </div>
+        </div>
+
+        <section class="reference-pointer-panel" aria-label="当前版本">
+          <div class="reference-pointer-target">
+            <span>当前版本</span>
+            <strong v-if="selectedTemplate.activeVersion">
+              {{ selectedTemplate.activeVersion.version }} · {{ selectedTemplate.activeVersion.branch }}
+            </strong>
+            <strong v-else>尚未激活版本</strong>
+            <span v-if="selectedTemplate.activeVersion" class="reference-pointer-status">
+              副本 {{ selectedTemplate.activeVersion.replicaStatus || "UNKNOWN" }}
+            </span>
+            <span
+              v-if="selectedTemplate.activeVersion"
+              class="reference-pointer-match"
+              :class="{
+                'is-match': selectedTemplate.activeVersion.replicaStatus === 'READY',
+                'is-mismatch': selectedTemplate.activeVersion.replicaStatus === 'FAILED'
+              }"
+            >
+              <Check v-if="selectedTemplate.activeVersion.replicaStatus === 'READY'" class="h-3 w-3" />
+              {{ selectedTemplate.activeVersion.replicaStatus === "READY" ? "就绪" : selectedTemplate.activeVersion.replicaStatus === "FAILED" ? "异常" : "同步中" }}
+            </span>
+          </div>
+        </section>
+
+        <div class="automation-detail-body">
+          <section class="automation-versions-section" aria-label="版本列表">
+            <div class="reference-panel-title">
+              <span>版本列表</span>
+            </div>
+            <div v-if="!selectedVersions.length" class="reference-compact-state">暂无可用版本。</div>
+            <div v-else class="reference-pointer-table-wrap">
+              <table class="reference-pointer-table">
+                <thead>
+                  <tr>
+                    <th>版本号</th>
+                    <th>分支</th>
+                    <th>副本状态</th>
+                    <th>创建时间</th>
+                    <th>状态</th>
+                    <th v-if="canManage" style="text-align: right;">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="version in selectedVersions" :key="version.versionId">
+                    <td>
+                      <strong>{{ version.version }}</strong>
+                    </td>
+                    <td>
+                      <code>{{ version.branch }}</code>
+                    </td>
+                    <td>
+                      <span class="reference-pointer-status">{{ version.replicaStatus || "UNKNOWN" }}</span>
+                    </td>
+                    <td>
+                      <time>{{ formattedTime(version.createdAt) }}</time>
+                    </td>
+                    <td>
+                      <span
+                        v-if="selectedTemplate.activeVersion?.versionId === version.versionId"
+                        class="reference-pointer-match is-match"
+                      >
+                        <Check class="h-3 w-3" /> 当前版本
+                      </span>
+                      <span v-else class="reference-pointer-status">
+                        {{ version.status === "ACTIVE" ? "可用" : version.status }}
+                      </span>
+                    </td>
+                    <td v-if="canManage" style="text-align: right;">
+                      <Button
+                        v-if="selectedTemplate.activeVersion?.versionId !== version.versionId"
+                        size="sm"
+                        variant="ghost"
+                        class="reference-inline-action"
+                        :disabled="saving || version.status !== 'ACTIVE'"
+                        @click="activateVersion(selectedTemplate, version)"
+                      >
+                        设为当前版本
+                      </Button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section v-if="canManage" class="automation-create-version-section" aria-label="新增版本">
+            <div class="reference-panel-title">
+              <span>新增版本</span>
+            </div>
+            <form class="reference-form automation-version-form" @submit.prevent="createVersion">
+              <div class="automation-version-fields">
+                <label>
+                  <span>新增版本分支（branch）</span>
+                  <select
+                    v-model="selectedBranch"
+                    class="reference-select"
+                    aria-label="新增自动化版本分支"
+                    :disabled="branchesLoading || saving"
+                  >
+                    <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
+                  </select>
+                </label>
+                <label>
+                  <span>版本日期（YYYYMMDD） <b aria-hidden="true">*</b></span>
+                  <Input
+                    v-model="versionDate"
+                    aria-label="新增自动化版本日期"
+                    placeholder="YYYYMMDD"
+                    :disabled="saving"
+                  />
+                </label>
+              </div>
+              <div class="reference-form-actions">
+                <Button type="submit" :disabled="!canCreateVersion">
+                  {{ saving ? "创建中…" : "新增版本" }}
+                </Button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </template>
+
+      <div v-else-if="!loading" class="reference-state is-centered">
         {{ canManage ? "从左侧选择版本库并新增目录引用。" : "当前应用暂无可查看的自动化引用。" }}
       </div>
     </main>
@@ -531,229 +710,465 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.automation-reference-layout {
+.reference-automation-layout {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(290px, 34%) minmax(0, 1fr);
   min-height: 0;
   height: 100%;
 }
-.automation-reference-sidebar {
+
+.reference-repository-column,
+.reference-configuration-column {
   min-height: 0;
-  overflow-y: auto;
-  border-right: 1px solid var(--border);
-  background: var(--muted);
+  overflow: auto;
 }
-.automation-reference-heading,
-.automation-repository-title,
-.automation-reference-tree-heading,
-.automation-reference-section-heading,
-.automation-version-row,
-.automation-reference-actions {
+
+.reference-repository-column {
+  border-right: 1px solid var(--ta-border);
+  background: var(--ta-panel-2);
+}
+
+.reference-column-heading,
+.reference-selected-heading,
+.reference-panel-title {
   display: flex;
   align-items: center;
-}
-.automation-reference-heading {
   justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  color: var(--ta-muted);
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
-.automation-repository-group {
-  display: grid;
+
+.reference-column-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 34px;
+  border-bottom: 1px solid var(--ta-border);
+  padding: 0 12px;
+  background: var(--ta-panel-2);
+}
+
+.reference-repository-list {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px;
 }
-.automation-repository-title {
-  gap: 7px;
-  padding: 2px 4px;
-  font-size: 13px;
+
+.automation-repo-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--ta-border);
+}
+
+.automation-repo-group:last-child {
+  border-bottom: 0;
+}
+
+.automation-repo-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 2px;
+  color: var(--ta-muted);
+  font-size: 11px;
   font-weight: 600;
 }
-.automation-reference-card {
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  padding: 9px 10px;
-  border: 1px solid var(--border);
+
+.reference-repository-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--ta-border);
   border-radius: 7px;
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--ta-surface);
+}
+
+.reference-repository-card.is-selected {
+  border-color: var(--ta-border-strong);
+  box-shadow: inset 3px 0 0 var(--ta-ink);
+}
+
+.reference-repository-main {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 9px 10px 6px;
+  background: transparent;
+  color: var(--ta-text);
   text-align: left;
   cursor: pointer;
 }
-.automation-reference-card:hover,
-.automation-reference-card.is-selected {
-  border-color: var(--primary);
-  background: var(--accent);
+
+.reference-repository-main:hover {
+  background: var(--ta-hover);
 }
-.automation-reference-card strong {
-  font-size: 13px;
-}
-.automation-reference-card small,
-.automation-reference-card span {
+
+.reference-repository-main strong,
+.reference-repository-main small {
+  display: block;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.reference-repository-main strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.reference-repository-main small {
+  margin-top: 3px;
+  color: var(--ta-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+}
+
+.reference-status {
+  color: var(--ta-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+}
+
+.reference-repository-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 7px 34px;
+  color: var(--ta-muted);
+  font-size: 10px;
+}
+
+.reference-repository-meta .is-online {
+  color: var(--ta-ok);
+}
+
 .automation-add-button {
   justify-content: flex-start;
+  font-size: 11px;
+  color: var(--ta-muted);
+  margin-top: 2px;
 }
-.automation-reference-content {
-  min-width: 0;
+
+.automation-add-button:hover,
+.automation-add-button.is-active {
+  color: var(--ta-text);
+  background: var(--ta-hover);
+}
+
+.reference-configuration-column {
+  display: flex;
+  flex-direction: column;
+  background: var(--ta-panel);
+}
+
+.reference-selected-heading {
+  min-height: 44px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--ta-border);
+  padding: 0 14px;
+  background: var(--ta-panel-2);
+  color: var(--ta-text);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.reference-selected-heading strong,
+.reference-selected-heading span {
+  display: block;
+}
+
+.reference-selected-heading strong {
+  font-size: 12px;
+}
+
+.reference-selected-heading span {
+  margin-top: 2px;
+  color: var(--ta-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.reference-selected-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reference-pointer-panel {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-surface);
+}
+
+.reference-pointer-target {
+  min-height: 34px;
+  gap: 8px;
+  border-bottom: 1px solid var(--ta-border);
+  padding: 0 12px;
+  color: var(--ta-muted);
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.reference-pointer-target strong,
+.reference-pointer-target code,
+.reference-pointer-table code,
+.reference-pointer-table time {
+  color: var(--ta-text);
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+}
+
+.reference-pointer-status {
+  color: var(--ta-muted);
+  font-family: "Geist Mono", monospace;
+}
+
+.reference-pointer-match {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+}
+
+.reference-pointer-match.is-match {
+  color: var(--ta-ok);
+}
+
+.reference-pointer-match.is-mismatch {
+  color: var(--ta-error);
+}
+
+.automation-detail-body {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
-  padding: 18px;
+  flex: 1;
+  overflow: auto;
 }
-.automation-reference-create,
-.automation-reference-detail {
+
+.automation-versions-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.automation-create-version-section {
+  flex-shrink: 0;
+  border-top: 1px solid var(--ta-border);
+  background: var(--ta-panel-2);
+}
+
+.reference-pointer-table-wrap {
+  overflow: auto;
+  flex: 1;
+}
+
+.reference-pointer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  text-align: left;
+}
+
+.reference-pointer-table th,
+.reference-pointer-table td {
+  border-bottom: 1px solid var(--ta-border);
+  padding: 6px 10px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.reference-pointer-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ta-panel-2);
+  color: var(--ta-muted);
+  font-weight: 600;
+}
+
+.reference-inline-action {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ta-text);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.reference-ready-layout {
   display: grid;
-  gap: 16px;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(210px, 42%) minmax(280px, 1fr);
 }
-.automation-reference-section-heading {
-  justify-content: space-between;
-  gap: 16px;
+
+.reference-tree-panel,
+.reference-form-panel {
+  min-height: 0;
+  overflow: auto;
 }
-.automation-reference-section-heading h3 {
-  margin: 0;
-  font-size: 18px;
+
+.reference-tree-panel {
+  border-right: 1px solid var(--ta-border);
+  background: var(--ta-tree-bg);
+  font-family: var(--ta-tree-font-family);
+  font-size: var(--ta-tree-font-size);
 }
-.automation-reference-section-heading p {
-  margin: 4px 0 0;
-  color: var(--muted-foreground);
-  font-size: 13px;
+
+.reference-tree-wrap {
+  padding: 6px 4px;
 }
-.automation-reference-form-grid,
-.automation-version-create {
+
+.reference-form-panel {
+  background: var(--ta-panel-2);
+}
+
+.reference-panel-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 32px;
+  border-bottom: 1px solid var(--ta-border);
+  padding: 0 12px;
+  background: var(--ta-panel-2);
+}
+
+.reference-title-path {
+  overflow: hidden;
+  color: var(--ta-ink);
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+.reference-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.reference-form label > span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ta-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+}
+
+.reference-form label b {
+  color: var(--ta-error);
+}
+
+.reference-select {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--ta-border);
+  border-radius: 5px;
+  padding: 0 8px;
+  outline: none;
+  background: var(--ta-surface);
+  color: var(--ta-text);
+  font-size: 12px;
+}
+
+.reference-select:focus {
+  border-color: var(--ta-border-strong);
+}
+
+.automation-version-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
-.automation-reference-form-grid label,
-.automation-version-create label {
-  display: grid;
-  gap: 6px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-.automation-reference-select {
-  min-height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--background);
-  color: var(--foreground);
-}
-.automation-reference-tree-panel {
-  min-height: 240px;
-  max-height: 52vh;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--background);
-}
-.automation-reference-tree-heading {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--background);
-  font-size: 13px;
-  font-weight: 600;
-}
-.automation-reference-tree-heading code {
-  overflow: hidden;
-  color: var(--primary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.automation-reference-state,
-.automation-reference-error,
-.automation-operation-state {
-  padding: 12px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-}
-.automation-reference-state.is-centered {
-  display: grid;
-  min-height: 220px;
-  place-items: center;
-}
-.automation-reference-error {
+
+.reference-form-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  border: 1px solid var(--destructive);
-  border-radius: 7px;
-  color: var(--destructive);
-}
-.automation-reference-actions {
   justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
 }
-.automation-current-version {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--muted);
-  font-size: 13px;
-}
-.automation-current-version span,
-.automation-current-version small {
-  color: var(--muted-foreground);
-}
-.automation-version-list {
-  display: grid;
-  gap: 8px;
-}
-.automation-version-row {
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-}
-.automation-version-row > div {
+
+.reference-state,
+.reference-compact-state {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.automation-version-row span,
-.automation-version-row small {
-  color: var(--muted-foreground);
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+  color: var(--ta-muted);
   font-size: 12px;
 }
-.automation-current-badge {
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--primary) !important;
-  font-weight: 600;
+
+.reference-state.is-centered,
+.reference-compact-state.is-centered {
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
-.automation-version-create {
-  align-items: end;
-  padding-top: 4px;
+
+.reference-state.is-error,
+.reference-compact-state.is-error,
+.reference-form-notice.is-error {
+  color: var(--ta-error);
 }
-@media (max-width: 900px) {
-  .automation-reference-layout {
+
+.reference-state code,
+.reference-compact-state code,
+.reference-form-notice code {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+}
+
+.reference-form-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--ta-border);
+  border-radius: 5px;
+  padding: 7px 8px;
+  color: var(--ta-muted);
+  font-size: 11px;
+}
+
+.reference-form-notice.is-success {
+  color: var(--ta-ok);
+}
+
+@media (max-width: 780px) {
+  .reference-automation-layout {
     grid-template-columns: 1fr;
   }
-  .automation-reference-sidebar {
-    max-height: 220px;
+  .reference-repository-column {
+    max-height: 38vh;
     border-right: 0;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--ta-border);
+  }
+  .reference-ready-layout {
+    grid-template-columns: 1fr;
+  }
+  .reference-tree-panel {
+    min-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--ta-border);
   }
 }
 </style>

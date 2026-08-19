@@ -5,6 +5,29 @@
 
 ## Entries
 
+### 2026-08-19 - 自动化代码库页面设计语言对齐应用资产库
+
+### Why
+
+- 引用配置弹窗中的“自动化代码库”面板此前使用了通用暗色 token（如 `var(--muted)`、`var(--accent)`），导致在当前 IDE 浅色主题下侧边栏出现大面积深灰底色（`#7a7a7a`）、选中的卡片呈现深黑块、当前版本高亮徽标呈现黑底黑字色块且排版密度与标题规范不一致。用户要求将其调整为与“应用资产库”页面完全一致的设计语言。
+
+### What
+
+- **统一主题变量**：移除 `var(--muted)`、`var(--accent)`、`var(--primary)` 等混用 token，全面统一为 IDE 级浅色 neutral chrome 规范（`--ta-panel`、`--ta-panel-2`、`--ta-surface`、`--ta-border`、`--ta-border-strong`、`--ta-text`、`--ta-muted`、`--ta-ok`、`--ta-error`）。
+- **侧边栏结构与卡片样式**：统一使用 `minmax(290px, 34%)` 栅格，采用 34px 大写高亮顶栏标题 `.reference-column-heading`、低饱和度仓库分组、白色面板卡片及左侧内阴影高亮条（`box-shadow: inset 3px 0 0 var(--ta-ink)`）。
+- **右侧详情与版本列表**：顶栏对齐 44px 紧凑标头；当前版本状态栏采用 34px 白底单行结构并配合就绪/异常标记；版本列表改为与资产库一致的标准表格 `.reference-pointer-table`，当前版本行采用绿色 `<Check>` 徽标；新增版本表单采用紧凑双列网格与标准操作按钮。
+- **新建目录引用**：对齐资产库的“左侧目录树 + 右侧配置表单”双栏布局（`.reference-ready-layout`）。
+
+### How
+
+- 重构 `frontend/apps/agent-web/src/components/AutomationReferenceConfigurationPanel.vue` 的模板结构和样式定义，完全复用应用资产库的 CSS 类名语义和 `--ta-*` 变量。
+- 执行相关组件单测（`apps/agent-web/tests/automation-reference-configuration-panel.test.ts` 与 `apps/agent-web/tests/reference-configuration-dialog.test.ts`，49 passed）及前端完整构建（`npm run build`）。
+
+### Result
+
+- 自动化代码库面板与应用资产库的色彩、层级、边框、字体、间距和表格呈现完全统一，消除了深灰色块与对比度问题。
+- 未改动任何后端 API、事件契约、数据库结构或部署依赖。
+
 ### 2026-08-18 - 优化用户对话、被分享人对话与无边框智能体回答视觉色彩
 
 ### Why
