@@ -57,12 +57,12 @@ function api(overrides: Partial<BackendApiClient> = {}): BackendApiClient {
   } as Partial<BackendApiClient> as BackendApiClient;
 }
 
-function renderPanel(client: BackendApiClient, currentUser: CurrentUser = admin) {
+function renderPanel(client: BackendApiClient, currentUser: CurrentUser = admin, pageActive = true) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });
   const view = render(ApiKeyManagementPanel, {
-    props: { currentUser },
+    props: { currentUser, pageActive },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
       provide: { api: client }
@@ -175,6 +175,47 @@ describe("ApiKeyManagementPanel", () => {
     await Promise.resolve();
     expect(apiKeyRead).toBe(false);
     expect(JSON.stringify(view.queryClient.getMutationCache().getAll())).not.toContain("taak_v1_late-secret");
+    view.queryClient.clear();
+  });
+
+  it("clears a visible key immediately when its page tab becomes inactive", async () => {
+    const view = renderPanel(api());
+    await view.findByText("deploy.bot");
+
+    await fireEvent.click(view.getByRole("button", { name: "查看 deploy.bot" }));
+    expect(await view.findByDisplayValue("taak_v1_revealed-secret")).toBeTruthy();
+
+    await view.rerender({ currentUser: admin, pageActive: false });
+    expect(view.queryByDisplayValue("taak_v1_revealed-secret")).toBeNull();
+    view.queryClient.clear();
+  });
+
+  it("ignores a revealed key response that arrives after its page tab becomes inactive", async () => {
+    let resolveReveal!: (value: { credentialId: string; toolCode: string; apiKey: string }) => void;
+    let apiKeyRead = false;
+    const revealPromise = new Promise<{ credentialId: string; toolCode: string; apiKey: string }>((resolve) => {
+      resolveReveal = resolve;
+    });
+    const client = api({ revealExternalApiCredential: vi.fn().mockReturnValue(revealPromise) });
+    const view = renderPanel(client);
+    await view.findByText("deploy.bot");
+
+    await fireEvent.click(view.getByRole("button", { name: "查看 deploy.bot" }));
+    await waitFor(() => expect(client.revealExternalApiCredential).toHaveBeenCalledWith("eac_one"));
+    await view.rerender({ currentUser: admin, pageActive: false });
+    resolveReveal({
+      credentialId: "eac_one",
+      toolCode: "deploy.bot",
+      get apiKey() {
+        apiKeyRead = true;
+        return "taak_v1_inactive-secret";
+      }
+    });
+
+    await revealPromise;
+    await Promise.resolve();
+    expect(apiKeyRead).toBe(false);
+    expect(view.queryByDisplayValue("taak_v1_inactive-secret")).toBeNull();
     view.queryClient.clear();
   });
 });

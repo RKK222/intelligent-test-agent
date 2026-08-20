@@ -696,7 +696,7 @@ test("session share read-only workbench shows sender identity colors and fixed s
   expect(shareHeaderRequests.every((request) => request.shareId === "shr_readonly")).toBe(true);
 
   await newConversationButton.click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/workbench$/);
   await expect(page.getByTestId("header-fixed-share-context")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "新建对话" })).toBeVisible();
 });
@@ -4891,6 +4891,129 @@ test("release-disabled question entry stays hidden for super admin", async ({ pa
 
   await expect(page.getByRole("navigation", { name: "系统管理导航" })).toBeVisible();
   await expect(page.getByRole("button", { name: "通用参数管理" })).toBeVisible();
+});
+
+test("activity pages stay open in an in-app tab workspace while workbench remains tabless", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await expect(page.getByRole("tablist", { name: "已打开功能页" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "长期记忆" }).click();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "记忆" })).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/\/memories$/);
+  await page.getByTestId("memory-tab-team").click();
+
+  await page.getByRole("tab", { name: "工具箱" }).click();
+  await page.getByRole("tab", { name: "记忆" }).click();
+  await expect(page.getByTestId("memory-tab-team")).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "打开工作台" }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+  await expect(page.getByRole("tablist", { name: "已打开功能页" })).toBeHidden();
+
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "记忆" })).toBeVisible();
+
+  await page.getByRole("button", { name: "关闭全部功能页" }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+});
+
+test("closing the temporary support page returns to its neighbour without opening a default system tab", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+
+  await page.keyboard.press("Shift");
+  await page.keyboard.press("Shift");
+  await page.keyboard.press("Shift");
+  await expect(page.getByRole("tab", { name: "问题排查只读访问" })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "关闭 问题排查只读访问" }).click();
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "定时任务管理" })).toHaveCount(0);
+});
+
+test("system subpages open as unique tabs and the console activity restores the latest page", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "系统管理" }).click();
+  await expect(page.getByRole("tab", { name: "定时任务管理" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "运行管理" }).click();
+  await expect(page).toHaveURL(/\/system\?section=runtime$/);
+  await expect(page.getByRole("tab", { name: "运行管理" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "定时任务管理" })).toBeVisible();
+
+  await page.getByRole("button", { name: "打开工作台" }).click();
+  await page.getByRole("button", { name: "系统管理" }).click();
+  await expect(page).toHaveURL(/\/system\?section=runtime$/);
+  await expect(page.getByRole("tab", { name: "运行管理" })).toHaveCount(1);
+
+  await page.getByRole("button", { name: "通用参数管理" }).click();
+  await expect(page).toHaveURL(/\/system\?section=params$/);
+  await expect(page.getByRole("tab", { name: "通用参数管理" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("page-tab order survives refresh and bulk close uses the context target", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await page.getByRole("button", { name: "长期记忆" }).click();
+  await page.getByRole("button", { name: "Agent、Skill、MCP 与 Tool Hub" }).click();
+
+  const tablist = page.getByRole("tablist", { name: "已打开功能页" });
+  const toolboxItem = page.getByRole("tab", { name: "工具箱" }).locator("..");
+  const hubItem = page.getByRole("tab", { name: "能力库" }).locator("..");
+  await toolboxItem.dragTo(hubItem);
+  await expect.poll(() => tablist.getByRole("tab").evaluateAll((tabs) =>
+    tabs.map((tab) => (tab as HTMLElement).dataset.pageId)
+  )).toEqual(["memories", "hub", "toolbox"]);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/hub$/);
+  await expect.poll(() => page.getByRole("tablist", { name: "已打开功能页" }).getByRole("tab").evaluateAll((tabs) =>
+    tabs.map((tab) => (tab as HTMLElement).dataset.pageId)
+  )).toEqual(["memories", "hub", "toolbox"]);
+
+  await page.getByRole("tab", { name: "能力库" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "能力库 Tab 操作" }).getByRole("menuitem", { name: "关闭右侧" }).click();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "能力库" })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "关闭全部功能页" }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+});
+
+test("application administrators canonicalize forbidden system deep links to configuration management", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["APP_ADMIN"] });
+  await page.goto("/system?section=runtime", { waitUntil: "domcontentloaded" });
+
+  await expect(page).toHaveURL(/\/system$/);
+  await expect(page.getByRole("tab", { name: "配置管理" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: "配置管理", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "运行管理", exact: true })).toHaveCount(0);
+});
+
+test("browser history reopens a function page that was closed after leaving it", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await page.getByRole("button", { name: "长期记忆" }).click();
+
+  await page.getByRole("button", { name: "关闭 工具箱" }).click();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveCount(0);
+  await page.goBack();
+
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveCount(1);
+  await expect(page.getByRole("tab", { name: "记忆" })).toBeVisible();
 });
 
 test("left activity pages expose stable URIs and restore through browser history", async ({ page }) => {
@@ -12583,7 +12706,7 @@ async function callAgentWorkbenchHandler(
 async function emitDiffViewerSave(page: Page, path: string, content: string) {
   await page.evaluate(({ filePath, fileContent }) => {
     type VueInternalInstance = { emit?: (event: string, ...args: unknown[]) => void };
-    const root = document.querySelector(".managed-editor-main > div.flex-1 > div") as (HTMLElement & {
+    const root = document.querySelector(".managed-workbench-center > div.flex-1 > div") as (HTMLElement & {
       __vueParentComponent?: VueInternalInstance;
     }) | null;
     if (!root?.__vueParentComponent?.emit) throw new Error("DiffViewer instance not found");

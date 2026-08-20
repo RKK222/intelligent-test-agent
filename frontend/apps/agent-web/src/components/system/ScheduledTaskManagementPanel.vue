@@ -7,6 +7,7 @@ import { applyXxlJobEmbeddedShell } from "./xxl-job-embedded-shell";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  pageActive: boolean;
 }>();
 
 type ConsoleState =
@@ -80,6 +81,7 @@ function isSafeFormAction(value: string) {
 }
 
 async function loadConsole() {
+  if (!props.pageActive) return;
   if (!hasSuperAdmin.value) {
     state.value = "forbidden";
     return;
@@ -91,7 +93,7 @@ async function loadConsole() {
   state.value = "loading";
   try {
     const issue = await api.createXxlJobSsoTicket();
-    if (sequence !== requestSequence || !hasSuperAdmin.value) {
+    if (sequence !== requestSequence || !hasSuperAdmin.value || !props.pageActive) {
       return;
     }
     if (!issue.ticket || !isSafeFormAction(issue.formAction)) {
@@ -101,10 +103,12 @@ async function loadConsole() {
     ticket.value = issue.ticket;
     formAction.value = issue.formAction;
     await nextTick();
-    if (sequence !== requestSequence || !formRef.value) {
+    if (sequence !== requestSequence || !formRef.value || !props.pageActive) {
       return;
     }
     formRef.value.submit();
+    // 原生表单已同步取得字段值；提交后立刻擦除父页面内存中的一次性票据，iframe 会话不受影响。
+    ticket.value = "";
 
     // 票据最长只存活 60 秒；iframe 未完成导航时给出可操作的过期或不可用状态。
     const expiresIn = Math.min(60_000, Math.max(0, Date.parse(issue.expiresAt) - Date.now()));
@@ -155,7 +159,7 @@ function onFrameLoad() {
 watch(hasSuperAdmin, (allowed) => {
   requestSequence += 1;
   clearTimers();
-  if (allowed) {
+  if (allowed && props.pageActive) {
     void loadConsole();
   } else {
     ticket.value = "";
@@ -164,9 +168,22 @@ watch(hasSuperAdmin, (allowed) => {
   }
 });
 
+watch(() => props.pageActive, (active) => {
+  if (!active) {
+    requestSequence += 1;
+    clearTimers();
+    ticket.value = "";
+    formAction.value = "";
+    if (state.value === "loading") state.value = "idle";
+    return;
+  }
+  // ready 表示 iframe 已持有服务端会话，重新显示时不申请票据、不重载现有页面。
+  if (hasSuperAdmin.value && state.value !== "ready") void loadConsole();
+});
+
 onMounted(() => {
   window.addEventListener("message", onSsoMessage);
-  if (hasSuperAdmin.value) {
+  if (hasSuperAdmin.value && props.pageActive) {
     void loadConsole();
   } else {
     state.value = "forbidden";
@@ -181,7 +198,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="ta-xxl-shell">
+  <section :class="['ta-xxl-shell', { 'is-page-inactive': !props.pageActive }]">
     <div v-if="!hasSuperAdmin" class="ta-xxl-placeholder">当前账号无定时任务管理权限</div>
     <template v-else>
       <header class="ta-xxl-toolbar">
@@ -427,6 +444,10 @@ onBeforeUnmount(() => {
   background: #2563eb;
   box-shadow: 0 0 0 0 rgb(37 99 235 / 35%);
   animation: ta-xxl-pulse 1.4s ease-out infinite;
+}
+
+.ta-xxl-shell.is-page-inactive .ta-xxl-pulse {
+  animation-play-state: paused;
 }
 
 .ta-xxl-state-action {

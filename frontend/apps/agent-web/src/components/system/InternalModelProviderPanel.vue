@@ -12,6 +12,7 @@ import type {
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  pageActive: boolean;
 }>();
 
 type ProviderRow = InternalModelProviderConfig & {
@@ -32,26 +33,27 @@ const tokenEditorOpen = ref(false);
 const editingTokenId = ref<number | null>(null);
 const tokenNameDraft = ref("");
 const tokenValueDraft = ref("");
+let pendingTokenCommand: TokenSaveCommand | null = null;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
 const query = useQuery({
   queryKey: ["internal-model-providers"],
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.getInternalModelProviders()
 });
 
 const tokenQuery = useQuery({
   queryKey: ["internal-model-tokens"],
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.listInternalModelTokens()
 });
 
 const refreshStatusQuery = useQuery({
   queryKey: ["internal-model-provider-refresh-status"],
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.getInternalModelProviderRefreshStatus()
 });
@@ -101,6 +103,7 @@ const saveMutation = useMutation({
 
 const tokenSaveMutation = useMutation({
   mutationFn: async (command: TokenSaveCommand) => {
+    pendingTokenCommand = command;
     try {
       return command.tokenId == null
         ? await api.createInternalModelToken({ name: command.name, token: command.token ?? "" })
@@ -109,6 +112,7 @@ const tokenSaveMutation = useMutation({
       // API Promise 一结束即同时擦除输入草稿与 mutation 变量，避免后续刷新期间仍保留密钥。
       command.token = undefined;
       tokenValueDraft.value = "";
+      if (pendingTokenCommand === command) pendingTokenCommand = null;
     }
   },
   onSuccess: async (_result, command) => {
@@ -275,6 +279,13 @@ function formatError(error: unknown) {
   }
   return error instanceof Error ? error.message : "内部模型供应商数据加载失败";
 }
+
+watch(() => props.pageActive, (active) => {
+  if (active) return;
+  // 页面隐藏时只擦除敏感 Token；名称和供应商编辑草稿按普通页面状态继续保留。
+  tokenValueDraft.value = "";
+  if (pendingTokenCommand) pendingTokenCommand.token = undefined;
+});
 </script>
 
 <template>

@@ -17,6 +17,7 @@ import MetricHelpLabel from "./MetricHelpLabel.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  pageActive: boolean;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
@@ -196,7 +197,7 @@ const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_A
 
 const probeStatusQuery = useQuery({
   queryKey: ["internal-model-observability-probe-status"],
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.getInternalModelProbeStatus()
 });
@@ -211,7 +212,7 @@ const recordsQuery = useQuery({
     page: page.value,
     size: pageSize.value
   }]),
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.listInternalModelCallRecords({
     providerId: filterProviderId.value || null,
@@ -231,7 +232,7 @@ const statsQuery = useQuery({
     from: queryWindow.value.from,
     to: queryWindow.value.to
   }]),
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.getInternalModelCallStats({
     providerId: filterProviderId.value || null,
@@ -262,7 +263,7 @@ const ttftDistributionQueries = useQueries({
       from: queryWindow.value.from,
       to: queryWindow.value.to
     }],
-    enabled: () => hasSuperAdmin.value,
+    enabled: () => hasSuperAdmin.value && props.pageActive,
     retry: false,
     queryFn: () => api.getInternalModelTtftDistribution({
       providerId,
@@ -283,7 +284,7 @@ const itlDistributionQueries = useQueries({
       from: queryWindow.value.from,
       to: queryWindow.value.to
     }],
-    enabled: () => hasSuperAdmin.value,
+    enabled: () => hasSuperAdmin.value && props.pageActive,
     retry: false,
     queryFn: () => api.getInternalModelItlDistribution({
       providerId,
@@ -304,7 +305,7 @@ const itlOverviewQuery = useQuery({
     from: queryWindow.value.from,
     to: queryWindow.value.to
   }]),
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.getInternalModelItlDistribution({
     providerId: filterProviderId.value || null,
@@ -756,6 +757,7 @@ function renderLatencyBoxes(
 }
 
 function renderCharts() {
+  if (!props.pageActive) return;
   if (trendChartEl.value && trendChartEl.value.clientWidth > 0) {
     trendChart = ensureChart(trendChartEl.value, { current: trendChart });
     trendChart?.setOption({
@@ -850,6 +852,7 @@ function renderCharts() {
 }
 
 function resizeCharts() {
+  if (!props.pageActive) return;
   trendChart?.resize();
   ttftChart?.resize();
   itlChart?.resize();
@@ -860,7 +863,7 @@ function resizeCharts() {
 
 onMounted(() => {
   window.addEventListener("resize", resizeCharts);
-  void nextTick(renderCharts);
+  if (props.pageActive) void nextTick(renderCharts);
 });
 
 onBeforeUnmount(() => {
@@ -878,6 +881,10 @@ onBeforeUnmount(() => {
 watch([() => stats.value, () => ttftBoxData.value, () => itlBoxData.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
   void nextTick(renderCharts);
 }, { deep: true, flush: "post" });
+
+watch(() => props.pageActive, (active) => {
+  if (active) void nextTick(renderCharts);
+});
 
 const outcomeText: Record<InternalModelCallOutcome, string> = {
   SUCCESS: "成功",

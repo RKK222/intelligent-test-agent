@@ -129,7 +129,7 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 
 活动栏 `BrainCircuit` 入口和 `/memories` 路由由 `apps/agent-web` 组合通用记忆中心：`MemoryCenter.vue` 负责个人/团队/Skill 提案治理与含 Session 标题/ID 的证据 rail，`MemoryAdminPanel.vue` 负责 Mem0 多节点、企业/CPU profile、投影积压、模型设置和白名单，`FigmaChatPanel.vue` 只显示 `run-usage/query` 恢复的真实注入数量。`packages/backend-api` 是页面访问 `/api/internal/platform/memory/v1` 的唯一入口；前端不直连 memory-service、不复制原始聊天、不扩展 RunEvent。
 
-`apps/agent-web/router.ts` 与 `AgentWorkbench.vue` 共同维护活动栏 URI：`/workbench`、`/toolbox`、`/memories`、`/system`、`/hub` 和 `/settings` 分别对应工作台、工具箱、记忆中心、超级管理员控制台、能力库和设置弹窗，`/` 只兼容跳转到 `/workbench`。`toolbox-navigation.ts` 复用同一沉浸式布局状态机，路由名是刷新、登录回跳和浏览器历史恢复的权威来源；组件内后台状态不能覆盖当前路由页面。
+`apps/agent-web/router.ts` 与 `AgentWorkbench.vue` 共同维护活动栏 URI：`/workbench`、`/toolbox`、`/memories`、`/system`、`/hub` 和 `/settings` 分别对应工作台、工具箱、记忆中心、控制台、能力库和设置弹窗，控制台非默认功能使用 `/system?section=<key>`，`/` 只兼容跳转到 `/workbench`。`workspace-page-tabs.ts` 维护统一页面注册表、权限/路由映射、去重/排序/关闭策略和按用户版本化会话恢复，`WorkspacePageTabBar.vue` 负责横向溢出、原生拖放、键盘操作、页面列表和批量关闭；两者与编辑器文件 Tab 完全隔离。工作台不进入功能页 Tab，`toolbox-navigation.ts` 继续维护工作台面板快照；已访问功能页关闭前常驻挂载，切回工作台只隐藏。路由是当前功能页的权威来源，刷新、登录回跳和浏览器历史会切换或补开目标 Tab，不清理其它页面；临时排查页不持久化且失活卸载，敏感控制台页通过显式活动状态清理明文和暂停后台任务。
 
 Skill Hub 的事项分类以逻辑资产持久化：应用推送 Skill 复用 `agent_skill_hub_assets`，公共 Git Skill 使用 `agent_skill_hub_builtin_classifications`，首次入库默认 `OTHER`，后续修订或 commit 不覆盖分类；`test-agent-workspace-management` 校验 `WORKER/TEST/CODE/OTHER` 与受控二级事项组合，`test-agent-persistence` 通过 `AgentSkillHubMapper.xml` 筛选并审计分类者，`test-agent-api` 仅向 `SUPER_ADMIN` 开放分类 mutation。公共 Agent/Skill 由 `AgentSkillHubApplicationService` 定时用共享仓库现有 Git 身份刷新当前分支远端引用并按精确 commit 对账，修订元数据写入公共快照表、正文复用内容寻址 artifact 表，查询链路只读数据库。前端 `AgentSkillHub.vue` 复用同一目录/详情链路提供两级筛选和详情内管理，不新增独立分类服务或客户端直连。
 

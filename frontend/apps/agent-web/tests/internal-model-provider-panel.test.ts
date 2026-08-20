@@ -104,10 +104,10 @@ const ElSwitchStub = defineComponent({
   }
 });
 
-function renderPanel(api: BackendApiClient) {
+function renderPanel(api: BackendApiClient, pageActive = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const view = render(InternalModelProviderPanel, {
-    props: { currentUser },
+    props: { currentUser, pageActive },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
       provide: { api },
@@ -223,6 +223,20 @@ describe("InternalModelProviderPanel", () => {
     await fireEvent.click(view.getByRole("button", { name: "删除 Qwen Token" }));
 
     await waitFor(() => expect(error).toHaveBeenCalledWith("内部模型 Token 仍被供应商引用，不能删除"));
+    view.queryClient.clear();
+  });
+
+  it("wipes the Token input but keeps the non-sensitive editor draft when its page tab becomes inactive", async () => {
+    const view = renderPanel(createApi());
+    await view.findByText("Qwen Token");
+    await fireEvent.click(view.getByRole("button", { name: "新增 Token" }));
+    await fireEvent.update(view.getByPlaceholderText("Token 名称"), "DeepSeek Token");
+    await fireEvent.update(view.getByPlaceholderText("粘贴外部 Token"), "temporary-secret");
+
+    await view.rerender({ currentUser, pageActive: false });
+
+    expect((view.getByPlaceholderText("粘贴外部 Token") as HTMLInputElement).value).toBe("");
+    expect((view.getByPlaceholderText("Token 名称") as HTMLInputElement).value).toBe("DeepSeek Token");
     view.queryClient.clear();
   });
 });

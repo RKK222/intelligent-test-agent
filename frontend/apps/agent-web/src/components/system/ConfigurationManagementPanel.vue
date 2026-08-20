@@ -7,6 +7,7 @@ import ApplicationGitRefreshManagementPanel from "./ApplicationGitRefreshManagem
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  pageActive: boolean;
 }>();
 
 type ConfigMenuKey = "opencode-public" | "application-git";
@@ -42,7 +43,11 @@ watch(hasSuperAdmin, (allowed) => {
       </button>
     </nav>
     <div class="ta-config-content">
-      <OpencodePublicConfigManagementPanel v-if="hasSuperAdmin && activeKey === 'opencode-public'" :current-user="currentUser" />
+      <OpencodePublicConfigManagementPanel
+        v-if="hasSuperAdmin && activeKey === 'opencode-public'"
+        :current-user="currentUser"
+        :page-active="props.pageActive"
+      />
       <ApplicationGitRefreshManagementPanel v-else :current-user="currentUser" />
     </div>
   </section>

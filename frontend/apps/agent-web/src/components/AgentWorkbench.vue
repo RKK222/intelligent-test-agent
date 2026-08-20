@@ -235,6 +235,7 @@ import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
+import WorkspacePageTabBar from "./WorkspacePageTabBar.vue";
 import { createSupportAccessShortcut } from "./support-access-shortcut";
 import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
@@ -249,6 +250,24 @@ import {
   type RoutedCenterMode,
   type WorkbenchCenterMode
 } from "./toolbox-navigation";
+import {
+  canOpenWorkspacePage,
+  closeWorkspacePageTabs,
+  defaultSystemMenuKey,
+  isSystemWorkspacePageId,
+  moveWorkspacePageTab,
+  openWorkspacePageTab,
+  parseWorkspacePageRoute,
+  restoreWorkspacePageTabs,
+  serializeWorkspacePageTabs,
+  systemMenuKeyFromPageId,
+  workspacePageRoute,
+  workspacePageTab,
+  type SystemMenuKey,
+  type WorkspacePageCloseMode,
+  type WorkspacePageId,
+  type WorkspacePageTabsState
+} from "./workspace-page-tabs";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyError, notifyFeedback } from "./notify";
 import { launchLobehubInNewTab } from "./lobehub-launch";
@@ -586,9 +605,12 @@ const vcsDiffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<WorkbenchCenterMode>(routedCenterModeFromRouteName(route.name) ?? "editor");
-const supportAccessRequested = ref(false);
 const supportAccessShortcut = createSupportAccessShortcut();
-const centerModeBeforeHub = ref<Exclude<WorkbenchCenterMode, "hub">>("editor");
+const workspacePageTabsState = ref<WorkspacePageTabsState>({ openIds: [], activeId: null, lastSystemId: null });
+const mountedWorkspacePageIds = ref<Set<WorkspacePageId>>(new Set());
+const supportAccessRevealed = ref(false);
+const supportAccessActivationSequence = ref(0);
+let hydratedWorkspacePageTabsUserId: string | null = null;
 const centerModeBeforeRoute = ref<NonRoutedCenterMode>("editor");
 const hubUpdateCount = ref(0);
 let hubUpdateTimer: ReturnType<typeof setInterval> | null = null;
@@ -717,52 +739,165 @@ watch((): RoutedCenterMode | null => routedCenterModeFromRouteName(route.name), 
   centerMode.value = next.mode;
 }, { immediate: true });
 
-async function selectActivityCenterMode(mode: WorkbenchCenterMode) {
-  if (isRoutedCenterMode(mode)) {
-    if (route.name !== mode) {
-      await router.push({ name: mode });
-    } else if (centerMode.value !== mode) {
-      centerMode.value = mode;
-    }
+const workspacePageRoles = computed(() => authStore.currentUser?.roles ?? []);
+const workspacePageMode = computed(() => isRoutedCenterMode(centerMode.value));
+const workspacePageTabs = computed(() => workspacePageTabsState.value.openIds.map(workspacePageTab));
+const mountedWorkspacePageTabs = computed(() => workspacePageTabs.value.filter(
+  (tab) => mountedWorkspacePageIds.value.has(tab.id)
+));
+
+function workspacePageStorageKey(userId: string) {
+  return `test-agent.workspace-page-tabs.v1:${userId}`;
+}
+
+function persistWorkspacePageTabs() {
+  const userId = authStore.currentUser?.userId?.trim();
+  if (!userId) return;
+  try {
+    sessionStorage.setItem(workspacePageStorageKey(userId), serializeWorkspacePageTabs(workspacePageTabsState.value));
+  } catch {
+    // sessionStorage 不可用时只失去刷新恢复，当前页面内的多 Tab 仍可继续使用。
+  }
+}
+
+function applyWorkspacePageTabsState(next: WorkspacePageTabsState, persist = true) {
+  workspacePageTabsState.value = next;
+  mountedWorkspacePageIds.value = new Set(
+    [...mountedWorkspacePageIds.value].filter((id) => next.openIds.includes(id))
+  );
+  if (!next.openIds.includes("system:support")) supportAccessRevealed.value = false;
+  if (persist) persistWorkspacePageTabs();
+}
+
+function mountWorkspacePage(id: WorkspacePageId) {
+  if (mountedWorkspacePageIds.value.has(id)) return;
+  mountedWorkspacePageIds.value = new Set([...mountedWorkspacePageIds.value, id]);
+}
+
+async function syncWorkspacePageFromRoute() {
+  if (!routedCenterModeFromRouteName(route.name)) return;
+  // 控制台权限依赖异步 current-user；资料尚未返回时保持路由，不抢先误判为无权限。
+  if (route.name === "system" && !authStore.currentUser) return;
+  const parsed = parseWorkspacePageRoute(
+    route.name,
+    route.query.section,
+    workspacePageRoles.value,
+    supportAccessRevealed.value
+  );
+  if (!parsed) {
+    await router.replace({ name: "workbench" });
+    centerMode.value = "editor";
     return;
   }
-  if (routedCenterModeFromRouteName(route.name)) {
-    await router.push({ name: "workbench" });
+  applyWorkspacePageTabsState(openWorkspacePageTab(workspacePageTabsState.value, parsed.id));
+  mountWorkspacePage(parsed.id);
+  if (parsed.canonicalize) {
+    await router.replace(workspacePageRoute(parsed.id, workspacePageRoles.value));
   }
-  centerMode.value = mode;
+}
+
+watch(
+  [
+    () => authStore.currentUser?.userId?.trim() ?? "",
+    () => (authStore.currentUser?.roles ?? []).slice().sort().join(",")
+  ],
+  ([userId]) => {
+    if (!userId || !authStore.currentUser) return;
+    const roles = authStore.currentUser.roles ?? [];
+    let restored: WorkspacePageTabsState;
+    if (hydratedWorkspacePageTabsUserId !== userId) {
+      let raw: string | null = null;
+      try {
+        raw = sessionStorage.getItem(workspacePageStorageKey(userId));
+      } catch {
+        // 禁用存储时从空 Tab 集合开始。
+      }
+      restored = restoreWorkspacePageTabs(raw, roles);
+      hydratedWorkspacePageTabsUserId = userId;
+      mountedWorkspacePageIds.value = new Set();
+    } else {
+      restored = restoreWorkspacePageTabs(serializeWorkspacePageTabs(workspacePageTabsState.value), roles);
+    }
+    applyWorkspacePageTabsState(restored);
+    void syncWorkspacePageFromRoute();
+  },
+  { immediate: true }
+);
+
+watch(
+  [() => route.name, () => route.query.section],
+  () => void syncWorkspacePageFromRoute(),
+  { immediate: true }
+);
+
+async function openWorkspacePage(id: WorkspacePageId, replace = false) {
+  if (!canOpenWorkspacePage(id, workspacePageRoles.value, supportAccessRevealed.value)) return;
+  applyWorkspacePageTabsState(openWorkspacePageTab(workspacePageTabsState.value, id));
+  mountWorkspacePage(id);
+  const target = workspacePageRoute(id, workspacePageRoles.value);
+  const targetFullPath = router.resolve(target).fullPath;
+  if (route.fullPath === targetFullPath) {
+    const mode = systemMenuKeyFromPageId(id) ? "system" : id;
+    centerMode.value = mode as RoutedCenterMode;
+    return;
+  }
+  await router[replace ? "replace" : "push"](target);
+}
+
+async function showWorkbench() {
+  if (routedCenterModeFromRouteName(route.name)) await router.push({ name: "workbench" });
+  centerMode.value = "editor";
+}
+
+async function activateWorkspacePage(id: WorkspacePageId) {
+  await openWorkspacePage(id);
+}
+
+async function moveWorkspacePage(id: WorkspacePageId, targetIndex: number) {
+  applyWorkspacePageTabsState(moveWorkspacePageTab(workspacePageTabsState.value, id, targetIndex));
+}
+
+async function closeWorkspacePages(id: WorkspacePageId, mode: WorkspacePageCloseMode) {
+  const result = closeWorkspacePageTabs(workspacePageTabsState.value, id, mode);
+  applyWorkspacePageTabsState(result.state);
+  if (result.navigateTo === "workbench") {
+    await router.replace({ name: "workbench" });
+    centerMode.value = "editor";
+  } else if (result.navigateTo) {
+    await openWorkspacePage(result.navigateTo, true);
+  }
+}
+
+async function openSystemMenuPage(key: SystemMenuKey) {
+  await openWorkspacePage(`system:${key}`);
+}
+
+async function openSystemActivity() {
+  const remembered = workspacePageTabsState.value.lastSystemId;
+  const target = remembered && canOpenWorkspacePage(remembered, workspacePageRoles.value, supportAccessRevealed.value)
+    ? remembered
+    : `system:${defaultSystemMenuKey(workspacePageRoles.value)}` as WorkspacePageId;
+  await openWorkspacePage(target);
 }
 
 async function toggleMemories() {
-  if (route.name === "memories") {
-    await selectActivityCenterMode(centerModeBeforeRoute.value);
-    return;
-  }
-  await selectActivityCenterMode("memories");
+  await openWorkspacePage("memories");
 }
 
 /** SUPER_ADMIN 可在工作台任意位置三击 Shift，直接进入仍需二次授权的问题排查页。 */
 async function openSupportAccessFromShortcut() {
-  await selectActivityCenterMode("system");
-  supportAccessRequested.value = true;
+  if (!isSuperAdmin.value) return;
+  supportAccessRevealed.value = true;
+  supportAccessActivationSequence.value += 1;
+  await openWorkspacePage("system:support");
 }
 
 async function toggleToolbox() {
-  if (route.name === "toolbox") {
-    await selectActivityCenterMode(centerModeBeforeRoute.value);
-    return;
-  }
-  await selectActivityCenterMode("toolbox");
+  await openWorkspacePage("toolbox");
 }
 
 async function toggleAgentSkillHub() {
-  if (route.name === "hub") {
-    await selectActivityCenterMode(centerModeBeforeHub.value);
-    return;
-  }
-  if (centerMode.value !== "hub") {
-    centerModeBeforeHub.value = centerMode.value;
-  }
-  await selectActivityCenterMode("hub");
+  await openWorkspacePage("hub");
 }
 
 function handleHubChanged(paths: string[]) {
@@ -11413,7 +11548,7 @@ async function handleLogout() {
             data-onboarding="editor-button"
             aria-label="打开工作台"
             title="工作台"
-            @click="selectActivityCenterMode('editor')"
+            @click="showWorkbench"
           >
             <LayoutDashboard class="figma-activity-icon" :stroke-width="1.5" />
             <span class="figma-activity-text">工作台</span>
@@ -11459,7 +11594,7 @@ async function handleLogout() {
             :class="['figma-activity-btn figma-activity-btn--system', centerMode === 'system' && 'figma-activity-btn--active']"
             aria-label="系统管理"
             title="控制台"
-            @click="selectActivityCenterMode('system')"
+            @click="openSystemActivity"
           >
             <Monitor class="figma-activity-icon" :stroke-width="1.5" />
             <span class="figma-activity-text">控制台</span>
@@ -11600,30 +11735,62 @@ async function handleLogout() {
 
     <template #editor>
       <main class="managed-editor-main">
-        <template v-if="centerMode === 'toolbox'">
-          <ToolboxPanel />
-        </template>
-        <template v-else-if="centerMode === 'memories'">
-          <MemoryCenter
-            :selected-app-id="selectedAppId"
-            :can-manage-team="isAppAdmin"
-            @open-skill-hub="toggleAgentSkillHub"
+        <section v-show="workspacePageMode" class="workspace-page-host" aria-label="功能页多标签工作区">
+          <WorkspacePageTabBar
+            :tabs="workspacePageTabs"
+            :active-id="workspacePageTabsState.activeId"
+            @activate="activateWorkspacePage"
+            @close="closeWorkspacePages"
+            @move="moveWorkspacePage"
           />
-        </template>
-        <template v-else-if="centerMode === 'hub'">
-          <AgentSkillHub
-            :selected-app-id="selectedAppId"
-            :workspace-id="selectedWorkspace?.workspaceId"
-            :can-manage="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
-            :can-classify-skills="isSuperAdmin"
-            :runtime-mcp="runtimeInventoryForShell.mcp"
-            :runtime-tools="runtimeInventoryForShell.tools"
-            @update-count="hubUpdateCount = $event"
-            @changed="handleHubChanged"
-            @refresh-runtime="refreshRuntimeHubCatalog"
-          />
-        </template>
-        <template v-else-if="centerMode === 'diff'">
+          <div class="workspace-page-host__content">
+            <section
+              v-for="pageTab in mountedWorkspacePageTabs"
+              v-show="workspacePageMode && workspacePageTabsState.activeId === pageTab.id"
+              :key="pageTab.id"
+              class="workspace-page-view"
+              :data-page-id="pageTab.id"
+              :aria-hidden="workspacePageTabsState.activeId !== pageTab.id"
+            >
+              <ToolboxPanel v-if="pageTab.id === 'toolbox'" />
+              <MemoryCenter
+                v-else-if="pageTab.id === 'memories'"
+                :selected-app-id="selectedAppId"
+                :can-manage-team="isAppAdmin"
+                @open-skill-hub="toggleAgentSkillHub"
+              />
+              <AgentSkillHub
+                v-else-if="pageTab.id === 'hub'"
+                :selected-app-id="selectedAppId"
+                :workspace-id="selectedWorkspace?.workspaceId"
+                :can-manage="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
+                :can-classify-skills="isSuperAdmin"
+                :page-active="workspacePageMode && workspacePageTabsState.activeId === pageTab.id"
+                :runtime-mcp="runtimeInventoryForShell.mcp"
+                :runtime-tools="runtimeInventoryForShell.tools"
+                @update-count="hubUpdateCount = $event"
+                @changed="handleHubChanged"
+                @refresh-runtime="refreshRuntimeHubCatalog"
+              />
+              <template v-else-if="isSystemWorkspacePageId(pageTab.id) && pageTab.systemMenuKey">
+                <div class="managed-runtime-container">
+                  <SystemManagementWrapper
+                    :current-user="authStore.currentUser"
+                    :active-key="pageTab.systemMenuKey"
+                    :page-active="workspacePageMode && workspacePageTabsState.activeId === pageTab.id"
+                    :support-revealed="supportAccessRevealed"
+                    :support-activation-sequence="supportAccessActivationSequence"
+                    @select-menu="openSystemMenuPage"
+                  />
+                </div>
+                <WorkbenchFooter />
+              </template>
+            </section>
+          </div>
+        </section>
+
+        <div v-show="!workspacePageMode" class="managed-workbench-center">
+        <template v-if="centerMode === 'diff'">
           <div class="flex-1 min-h-0 min-w-0">
             <DiffViewer
               ref="diffViewerRef"
@@ -11669,16 +11836,6 @@ async function handleLogout() {
             @create-version="handleCreateVersion"
             @open-server-workspace-picker="openServerWorkspacePicker"
           />
-        </template>
-        <template v-else-if="centerMode === 'system'">
-          <div class="managed-runtime-container">
-            <SystemManagementWrapper
-              :current-user="authStore.currentUser"
-              :support-access-requested="supportAccessRequested"
-              @support-access-opened="supportAccessRequested = false"
-            />
-          </div>
-          <WorkbenchFooter />
         </template>
         <FigmaEditorArea
           v-else
@@ -11866,6 +12023,7 @@ async function handleLogout() {
             </div>
           </div>
         </FigmaEditorArea>
+        </div>
       </main>
     </template>
 
@@ -12288,8 +12446,37 @@ async function handleLogout() {
   overflow: hidden;
 }
 
-.managed-editor-main > *:first-child {
+.workspace-page-host,
+.managed-workbench-center {
+  display: flex;
+  min-width: 0;
   min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.workspace-page-host__content {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: var(--ta-shell-surface, #ffffff);
+}
+
+.workspace-page-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ta-shell-surface, #ffffff);
+}
+
+.workspace-page-view > .managed-runtime-container {
+  height: auto;
   flex: 1;
 }
 
