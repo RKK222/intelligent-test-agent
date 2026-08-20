@@ -969,10 +969,16 @@ async function closeBatchTestCaseDialog(result: { incompleteCount: number }) {
   if (props.batchRunning) return
   if (result.incompleteCount > 0) {
     try {
+      // MessageBox 默认 Teleport 到 body；显式类用于把二次确认提升到批量弹层之上。
       await ElMessageBox.confirm(
         `仍有 ${result.incompleteCount} 个子条目未创建会话，关闭后本次批量创建将结束。是否关闭？`,
         '确认关闭批量创建',
-        { confirmButtonText: '仍然关闭', cancelButtonText: '继续处理', type: 'warning' }
+        {
+          confirmButtonText: '仍然关闭',
+          cancelButtonText: '继续处理',
+          type: 'warning',
+          modalClass: 'figma-chat-batch-close-confirm-overlay'
+        }
       )
     } catch {
       return
@@ -6978,6 +6984,11 @@ function onCompositionEnd() {
 </template>
 
 <style scoped>
+:global(.figma-chat-batch-close-confirm-overlay) {
+  /* 批量弹层为 2200；二次确认必须位于其上，才能看见并接收点击。 */
+  z-index: 2300 !important;
+}
+
 .figma-chat-header {
   display: flex;
   align-items: center;

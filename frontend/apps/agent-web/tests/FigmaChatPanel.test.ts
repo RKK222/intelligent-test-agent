@@ -202,7 +202,9 @@ describe("FigmaChatPanel", () => {
     expect(confirm).toHaveBeenCalledWith(
       expect.stringContaining("仍有 2 个子条目未创建会话"),
       "确认关闭批量创建",
-      expect.any(Object)
+      expect.objectContaining({
+        modalClass: "figma-chat-batch-close-confirm-overlay"
+      })
     );
     expect(wrapper.find('[data-testid="batch-test-case-dialog"]').exists()).toBe(true);
     expect(wrapper.emitted("reset-batch-test-cases")).toBeUndefined();
