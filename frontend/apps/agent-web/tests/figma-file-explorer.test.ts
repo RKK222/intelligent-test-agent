@@ -437,20 +437,10 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.emitted("openViewFile")).toEqual([[node]]);
   });
 
-  it("keeps partial reference warnings visible with a refresh action", async () => {
-    const wrapper = shallowMount(FigmaFileExplorer, {
-      props: {
-        workspaceId: "wrk_personal",
-        entriesByDirectory: { "": [] },
-        expandedDirectories: new Set<string>(),
-        changedFiles: [],
-        workspaceViewWarnings: [{ alias: "legacy", code: "REFERENCE_UNAVAILABLE", message: "引用副本不可用" }]
-      }
-    });
-
-    expect(wrapper.text()).toContain("legacy：引用副本不可用");
-    await wrapper.get('button[aria-label="刷新引用文件树"]').trigger("click");
-    expect(wrapper.emitted("refresh")).toHaveLength(1);
+  it("does not render a standalone reference warning row above the file tree", () => {
+    expect(fileExplorerSource).not.toContain("workspaceViewWarnings");
+    expect(fileExplorerSource).not.toContain("figma-fe-warning-banner");
+    expect(fileExplorerSource).not.toContain("刷新引用文件树");
   });
 
   it("forwards Agent tree mutations to the existing revision-based diff refresh owner", async () => {

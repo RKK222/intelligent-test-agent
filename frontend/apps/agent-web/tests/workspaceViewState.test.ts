@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
+import type { WorkspaceViewEntry } from "@test-agent/shared-types";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
 import {
   migrateWorkspaceViewRefreshTargets,
@@ -300,26 +300,4 @@ describe("workspace view state", () => {
     expect(revalidatedWorkspaceViewRefreshTarget(targets[2]!, new Map([[movedSource.id, movedSource]]))).toEqual(movedSource);
   });
 
-  it("collects nested warnings and truncation once, then clears a recovered directory", () => {
-    type Snapshot = { warnings: WorkspaceViewWarning[]; truncated: boolean };
-    const snapshots = new Map<string, Snapshot>([
-      ["", { warnings: [{ code: "REFERENCE_UNAVAILABLE", message: "引用副本不可用", alias: "docs" }], truncated: false }],
-      ["docs", {
-        warnings: [{ code: "REFERENCE_UNAVAILABLE", message: "引用副本不可用", alias: "docs" }],
-        truncated: true
-      }]
-    ]);
-    const collect = (workspaceViewState as typeof workspaceViewState & {
-      collectWorkspaceViewWarnings?: (snapshots: ReadonlyMap<string, Snapshot>) => WorkspaceViewWarning[];
-    }).collectWorkspaceViewWarnings;
-
-    expect(collect?.(snapshots)).toEqual([
-      { code: "REFERENCE_UNAVAILABLE", message: "引用副本不可用", alias: "docs" },
-      { code: "WORKSPACE_VIEW_TRUNCATED", message: "文件树条目过多，当前结果已截断" }
-    ]);
-
-    snapshots.set("docs", { warnings: [], truncated: false });
-    snapshots.set("", { warnings: [], truncated: false });
-    expect(collect?.(snapshots)).toEqual([]);
-  });
 });

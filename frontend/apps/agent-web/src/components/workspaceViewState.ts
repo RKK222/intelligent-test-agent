@@ -1,18 +1,12 @@
 import type {
   FileTreeEntry,
   WorkspaceViewEntry,
-  WorkspaceViewLocator,
-  WorkspaceViewWarning
+  WorkspaceViewLocator
 } from "@test-agent/shared-types";
 
 export type WorkspaceViewLoadTarget = Pick<WorkspaceViewEntry, "id" | "locator"> & {
   /** 工作区侧真实相对路径，用于条目移动后跨稳定 ID 重新认领目录。 */
   workspacePath?: string;
-};
-
-export type WorkspaceViewWarningSnapshot = {
-  warnings: WorkspaceViewWarning[];
-  truncated: boolean;
 };
 
 type WorkspaceFileLoadingTab = {
@@ -157,30 +151,6 @@ export function revalidatedWorkspaceViewRefreshTarget(
   return undefined;
 }
 
-/** 汇总所有已加载目录的引用告警，并对重复告警和截断提示去重。 */
-export function collectWorkspaceViewWarnings(
-  snapshots: ReadonlyMap<string, WorkspaceViewWarningSnapshot>
-): WorkspaceViewWarning[] {
-  const warnings: WorkspaceViewWarning[] = [];
-  const seen = new Set<string>();
-  let truncated = false;
-  for (const snapshot of snapshots.values()) {
-    truncated ||= snapshot.truncated;
-    for (const warning of snapshot.warnings) {
-      const key = `${warning.alias ?? ""}\u0000${warning.code}\u0000${warning.message}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      warnings.push(warning);
-    }
-  }
-  if (truncated) {
-    warnings.push({
-      code: "WORKSPACE_VIEW_TRUNCATED",
-      message: "文件树条目过多，当前结果已截断"
-    });
-  }
-  return warnings;
-}
 
 type WorkspaceViewIdentityEntry = Pick<FileTreeEntry, "type"> & { id?: string };
 

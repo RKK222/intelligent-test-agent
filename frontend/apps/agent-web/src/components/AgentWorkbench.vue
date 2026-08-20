@@ -88,7 +88,6 @@ import type {
   WorkspaceGitDiffFile,
   WorkspaceGitUpdateBlocker,
   WorkspaceViewEntry,
-  WorkspaceViewWarning
 } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
@@ -191,7 +190,6 @@ import {
   referenceTabPath
 } from "./referenceFileLoad";
 import {
-  collectWorkspaceViewWarnings,
   copiedWorkspaceFileTargetPath,
   migrateWorkspaceViewRefreshTargets,
   ROOT_WORKSPACE_VIEW_TARGET,
@@ -204,8 +202,7 @@ import {
   workspaceFilesAsViewEntries,
   workspaceFileRefreshSettlements,
   workspaceViewRefreshTargets,
-  type WorkspaceViewLoadTarget,
-  type WorkspaceViewWarningSnapshot
+  type WorkspaceViewLoadTarget
 } from "./workspaceViewState";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
 import SessionShareDialog from "./SessionShareDialog.vue";
@@ -532,8 +529,6 @@ const downloadingEntryId = ref<string | undefined>();
 let workspaceDownloadSequence = 0;
 const workspaceViewDirectoryById = new Map<string, WorkspaceViewEntry>();
 const workspaceViewNodeIdByTabPath = new Map<string, string>();
-const workspaceViewWarningByDirectory = new Map<string, WorkspaceViewWarningSnapshot>();
-const workspaceViewWarnings = ref<WorkspaceViewWarning[]>([]);
 // 文件树面板内错误状态，不覆盖全局顶部反馈
 const fileTreeError = ref<string | null>(null);
 let workspaceLoadGeneration = 0;
@@ -5260,8 +5255,6 @@ function resetWorkspaceState() {
   expandedDirectories.value = new Set();
   workspaceViewDirectoryById.clear();
   workspaceViewNodeIdByTabPath.clear();
-  workspaceViewWarningByDirectory.clear();
-  workspaceViewWarnings.value = [];
   loadingPath.value = new Set();
   fileTreeError.value = null;
   // 切换工作区时清空搜索状态，避免旧工作区的搜索结果残留。
@@ -6267,8 +6260,6 @@ async function refreshWorkspaceView(
   clearFileTreeRetryTimers();
   entriesByDirectory.value = {};
   workspaceViewDirectoryById.clear();
-  workspaceViewWarningByDirectory.clear();
-  workspaceViewWarnings.value = [];
   loadingPath.value = new Set();
   expandedDirectories.value = new Set();
   await loadDirectory(targets[0] ?? ROOT_WORKSPACE_VIEW_TARGET, workspaceId, true, 0, generation);
@@ -7095,11 +7086,6 @@ async function loadDirectory(
     }
     entriesByDirectory.value = { ...entriesByDirectory.value, [cacheKey]: entries };
     for (const entry of response.entries) workspaceViewDirectoryById.set(entry.id, entry);
-    workspaceViewWarningByDirectory.set(cacheKey, {
-      warnings: response.warnings,
-      truncated: response.truncated
-    });
-    workspaceViewWarnings.value = collectWorkspaceViewWarnings(workspaceViewWarningByDirectory);
     if (cacheKey === "") {
       workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: true };
       // 根目录加载成功后清除面板内错误
@@ -11873,7 +11859,6 @@ async function handleLogout() {
           :search-loading="searchLoading"
           :search-keyword="searchKeyword"
           :file-tree-error="fileTreeError"
-          :workspace-view-warnings="workspaceViewWarnings"
           @toggle-directory="toggleDirectory"
           @toggle-view-directory="toggleWorkspaceViewDirectory"
           @open-file="openFile"
