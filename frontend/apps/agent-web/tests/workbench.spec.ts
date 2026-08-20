@@ -2182,6 +2182,180 @@ test("workspace file loading distinguishes an empty file and supports retry afte
   expect(fileReadRequests.filter((item) => item.path === "docs/retry.md")).toHaveLength(3);
 });
 
+test("standalone mind map previews, restores a draft, applies through dirty state, saves, and cancels without writing", async ({ page }) => {
+  const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
+  const source = "# 产品冷启动\n\n- 用户分析\n  - 用户画像\n- 产品验证\n";
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileWriteRequests,
+    fileContents: { "docs/roadmap.mind": source }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "roadmap.mind", exact: true }).click();
+  await expect(page.getByTestId("mind-map-document")).toBeVisible();
+  await expect(page.getByTestId("mind-map-canvas")).toBeVisible();
+  await expect(page.locator(".monaco-editor")).toHaveCount(0);
+
+  const edit = page.getByTestId("footer-mind-map-edit");
+  await expect(edit).toBeEnabled();
+  await edit.click();
+  await expect(page.getByRole("button", { name: "应用思维导图" })).toBeVisible();
+  const tab = page.getByRole("tab").filter({ hasText: "roadmap.mind" });
+  await expect(tab.locator(".figma-editor-tab-dirty-star")).toBeVisible();
+  const blockedSave = page.locator(".ta-workbench-footer-save");
+  await expect(blockedSave).toBeDisabled();
+  await expect(blockedSave).toHaveAttribute("title", "请先应用或取消思维导图编辑");
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect(page.getByText("思维导图尚未应用", { exact: true })).toBeVisible();
+
+  await tab.getByRole("button", { name: "关闭标签" }).click();
+  const closeConfirm = page.getByRole("dialog", { name: "未保存的修改" });
+  await expect(closeConfirm).toBeVisible();
+  await closeConfirm.getByRole("button", { name: "取消" }).click();
+  await expect(page.getByRole("button", { name: "应用思维导图" })).toBeVisible();
+
+  await page.getByRole("button", { name: "应用思维导图" }).click();
+  await expect(page.getByRole("button", { name: "应用思维导图" })).toHaveCount(0);
+  await expect(page.locator(".ta-workbench-footer-save")).toBeEnabled();
+  await page.locator(".ta-workbench-footer-save").click();
+  await expect.poll(() => fileWriteRequests).toHaveLength(1);
+  expect(fileWriteRequests[0]).toMatchObject({
+    workspaceId: "wrk_personal_default",
+    path: "docs/roadmap.mind"
+  });
+  expect(fileWriteRequests[0]?.content).toMatch(/<!-- mm:id=root -->[\s\S]*<!--mm:v1:[A-Za-z0-9_-]+-->/);
+  await expect(tab.locator(".figma-editor-tab-dirty-star")).toHaveCount(0);
+
+  await page.getByTestId("footer-mind-map-edit").click();
+  await page.getByRole("button", { name: "取消编辑" }).click();
+  await expect.poll(() => fileWriteRequests).toHaveLength(1);
+  await expect(tab.locator(".figma-editor-tab-dirty-star")).toHaveCount(0);
+});
+
+test("markdown with multiple mind fences applies only the selected block and saves through the existing file route", async ({ page }) => {
+  const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
+  const first = "# 第一张图\n\n- A";
+  const second = "# 第二张图\n\n- B";
+  const source = `开头\n\n\`\`\`mind\n${first}\n\`\`\`\n\n正文\n\n\`\`\`mind\n${second}\n\`\`\`\n`;
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileWriteRequests,
+    fileContents: { "docs/multiple-maps.md": source }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "multiple-maps.md", exact: true }).click();
+  await page.getByTestId("footer-markdown-preview").click();
+  const blocks = page.locator(".mind-map-block");
+  await expect(blocks).toHaveCount(2);
+  await blocks.nth(1).getByRole("button", { name: "编辑" }).click();
+  const dialog = page.getByRole("dialog", { name: "编辑第 2 个思维导图" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "应用思维导图" }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.locator(".ta-workbench-footer-save").click();
+
+  await expect.poll(() => fileWriteRequests).toHaveLength(1);
+  const saved = fileWriteRequests[0]?.content ?? "";
+  expect(saved).toContain(`\`\`\`mind\n${first}\n\`\`\``);
+  expect(saved).toMatch(/```mind\n# 第二张图\n\n<!-- mm:id=root -->[\s\S]*<!--mm:v1:[A-Za-z0-9_-]+-->\n```/);
+  expect(saved.match(/<!--mm:v1:/g)).toHaveLength(1);
+});
+
+test("damaged metadata and reference mind maps remain safe read-only previews", async ({ page }) => {
+  const damaged = "# 损坏图\n\n<!-- mm:id=root -->\n\n- A <!-- mm:id=n1 -->\n\n<!--mm:v2:AAAA-->\n";
+  const readonlySource = "# 引用图\n\n- 只读节点\n";
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileContents: { "docs/damaged.mind": damaged },
+    workspaceViewLists: {
+      "COMPOSITE::": {
+        entries: [
+          {
+            id: "workspace:docs",
+            path: "docs",
+            name: "docs",
+            directory: true,
+            size: 0,
+            locator: { kind: "COMPOSITE", path: "docs" },
+            source: "WORKSPACE",
+            merged: false,
+            collision: false,
+            readonly: false,
+            workspacePath: "docs",
+            referenceAliases: []
+          },
+          {
+            id: "reference:readonly-maps",
+            path: "readonly-maps",
+            name: "readonly-maps",
+            directory: true,
+            size: 0,
+            locator: { kind: "REFERENCE", path: "", referenceAlias: "readonly-maps" },
+            source: "REFERENCE",
+            merged: false,
+            collision: false,
+            readonly: true,
+            referenceAliases: ["readonly-maps"]
+          }
+        ]
+      },
+      "COMPOSITE::docs": {
+        entries: [{
+          id: "workspace:docs/damaged.mind",
+          path: "docs/damaged.mind",
+          name: "damaged.mind",
+          directory: false,
+          size: damaged.length,
+          locator: { kind: "WORKSPACE", path: "docs/damaged.mind" },
+          source: "WORKSPACE",
+          merged: false,
+          collision: false,
+          readonly: false,
+          workspacePath: "docs/damaged.mind",
+          referenceAliases: []
+        }]
+      },
+      "REFERENCE:readonly-maps:": {
+        entries: [{
+          id: "reference:readonly-maps:readonly.mind",
+          path: "readonly-maps/readonly.mind",
+          name: "readonly.mind",
+          directory: false,
+          size: readonlySource.length,
+          locator: { kind: "REFERENCE", path: "readonly.mind", referenceAlias: "readonly-maps" },
+          source: "REFERENCE",
+          merged: false,
+          collision: false,
+          readonly: true,
+          referenceAliases: ["readonly-maps"]
+        }]
+      }
+    },
+    workspaceViewContents: {
+      "REFERENCE:readonly-maps:readonly.mind": readonlySource
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "damaged.mind", exact: true }).click();
+  await expect(page.getByTestId("mind-map-canvas")).toBeVisible();
+  await expect(page.getByTestId("footer-mind-map-edit")).toBeDisabled();
+  await expect(page.getByTestId("footer-mind-map-edit")).toHaveAttribute("title", /不支持思维导图元数据版本/);
+  await expect(page.getByRole("button", { name: "应用思维导图" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "readonly-maps", exact: true }).click();
+  await page.getByRole("button", { name: "readonly.mind", exact: true }).click();
+  await expect(page.getByTestId("mind-map-canvas")).toBeVisible();
+  await expect(page.getByTestId("footer-mind-map-edit")).toBeDisabled();
+  await expect(page.getByTestId("footer-mind-map-edit")).toHaveAttribute("title", "只读文件不可编辑");
+  await expect(page.locator(".monaco-editor")).toHaveCount(0);
+});
+
 test("initial file loading is not editable and applies the response readonly state", async ({ page }) => {
   const readonlyWorkspace = {
     ...workspace(),

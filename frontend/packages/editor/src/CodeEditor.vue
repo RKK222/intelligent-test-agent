@@ -1,5 +1,6 @@
 <script lang="ts">
 import type * as monaco from "monaco-editor";
+import type { MindMapDocumentStatus, MindMapVisualDraft } from "./mind-map/model";
 
 export type EditorSelectionContext = {
   startLineNumber: number;
@@ -27,6 +28,10 @@ export type CodeEditorProps = {
   showPreview?: boolean;
   /** 预览模式：off(关闭) | full(整体预览) | split(分上下) */
   previewMode?: PreviewMode;
+  /** 独立 .mind 文件是否处于可视化编辑态，由工作台 tab 草稿受控。 */
+  mindMapEditing?: boolean;
+  /** 可恢复的纯文本草稿；禁止传入 SimpleMindMap 实例或节点对象。 */
+  mindMapDraft?: MindMapVisualDraft;
 };
 
 export type CodeEditorEmits = {
@@ -36,14 +41,24 @@ export type CodeEditorEmits = {
   selectionChange: [selection: EditorSelectionContext | undefined];
   "update:showPreview": [enabled: boolean];
   "update:previewMode": [mode: PreviewMode];
+  "update:mindMapEditing": [editing: boolean];
+  "update:mindMapDraft": [draft: MindMapVisualDraft | undefined];
+  mindMapStatus: [status: MindMapDocumentStatus];
 };
 </script>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { languageFromPath } from "./language";
+import { isMindMapPath, languageFromPath } from "./language";
 import { releaseCodeEditorModel, retainCodeEditorModel } from "./model-lifecycle";
 import MarkdownPreview from "./MarkdownPreview.vue";
+import MindMapCanvas from "./mind-map/MindMapCanvas.vue";
+import MindMapEditor from "./mind-map/MindMapEditor.vue";
+import { parseMindMapMarkdown, prepareMindMapDocument } from "./mind-map/markdown";
+import type {
+  MindMapApplyResult,
+  MindMapDocument
+} from "./mind-map/model";
 
 const props = withDefaults(defineProps<CodeEditorProps>(), { content: "", showPreview: false });
 const displayName = computed(() => {
@@ -53,8 +68,30 @@ const displayName = computed(() => {
 });
 const emit = defineEmits<CodeEditorEmits>();
 
-// 当前文件是否为 Markdown：决定是否展示预览与分屏能力
-const isMarkdown = computed(() => !!props.path && languageFromPath(props.path) === "markdown");
+// .mind 必须优先于普通 Markdown/纯文本识别，独立文件始终进入专属画布。
+const isMindMap = computed(() => !!props.path && isMindMapPath(props.path));
+// 当前文件是否为 Markdown：决定是否展示预览与分屏能力。
+const isMarkdown = computed(() => (
+  !!props.path && !isMindMap.value && languageFromPath(props.path) === "markdown"
+));
+
+const mindMapSource = computed(() => (
+  props.mindMapEditing && props.mindMapDraft?.kind === "mind-map"
+    ? props.mindMapDraft.content
+    : props.content
+));
+const mindMapParseResult = computed(() => (
+  isMindMap.value ? parseMindMapMarkdown(mindMapSource.value) : undefined
+));
+const mindMapDocument = computed(() => mindMapParseResult.value?.document ?? undefined);
+const mindMapCanEdit = computed(() => Boolean(
+  props.mindMapEditing
+  && !props.readonly
+  && props.mindMapDraft
+  && mindMapParseResult.value?.status.canEdit
+  && mindMapDocument.value
+));
+const mindMapInteractionError = ref("");
 
 // 规范化的预览模式：off | full | split
 const effectivePreviewMode = computed<PreviewMode>(() => {
@@ -86,6 +123,21 @@ let syncing = false;
 
 let containerResizeObserver: ResizeObserver | null = null;
 let ensureEditorSequence = 0;
+
+function destroyMonacoEditor(): void {
+  ensureEditorSequence += 1;
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
+    containerResizeObserver = null;
+  }
+  const previousModel = model;
+  editor.value?.dispose();
+  editor.value = null;
+  model = null;
+  if (previousModel) releaseCodeEditorModel(previousModel);
+  syncedContentLength = 0;
+  syncedProgressiveAppend = false;
+}
 
 function layoutEditor() {
   if (editor.value && typeof editor.value.layout === "function") {
@@ -253,7 +305,7 @@ function emitSelection(inst: monaco.editor.IStandaloneCodeEditor) {
 
 onMounted(async () => {
   await nextTick();
-  if (!props.path || !containerEl.value) {
+  if (!props.path || isMindMapPath(props.path) || !containerEl.value) {
     return;
   }
   await ensureMonacoEditor(props.path);
@@ -272,16 +324,8 @@ watch(
 watch(
   () => props.path,
   async (path) => {
-    if (!path) {
-      ensureEditorSequence += 1;
-      const previousModel = model;
-      model = null;
-      editor.value?.setModel(null);
-      if (previousModel) {
-        releaseCodeEditorModel(previousModel);
-      }
-      syncedContentLength = 0;
-      syncedProgressiveAppend = false;
+    if (!path || isMindMapPath(path)) {
+      destroyMonacoEditor();
       return;
     }
     // 切换文件时由父级决定是否关闭预览；这里不主动改写 props。
@@ -428,6 +472,48 @@ watch(
 );
 
 watch(
+  () => mindMapParseResult.value?.status,
+  (status) => {
+    mindMapInteractionError.value = "";
+    if (status) emit("mindMapStatus", status);
+  },
+  { immediate: true }
+);
+
+/** 画布变化只更新可恢复文本草稿；未点击“应用”前绝不触碰文件正文。 */
+function updateMindMapDraft(document: MindMapDocument): void {
+  if (!props.mindMapEditing || props.readonly) return;
+  try {
+    const prepared = prepareMindMapDocument(document);
+    emit("update:mindMapDraft", {
+      kind: "mind-map",
+      baseContent: props.mindMapDraft?.baseContent ?? props.content,
+      content: prepared.content
+    });
+    mindMapInteractionError.value = "";
+  } catch (error) {
+    mindMapInteractionError.value = error instanceof Error ? error.message : "思维导图草稿更新失败";
+  }
+}
+
+/** 应用前核对打开时正文，避免后台刷新或其它入口改写后覆盖新内容。 */
+function applyMindMapDraft(result: MindMapApplyResult): void {
+  const draft = props.mindMapDraft;
+  if (!draft || draft.baseContent !== props.content) {
+    mindMapInteractionError.value = "文件内容已发生变化，请取消编辑后重新打开";
+    return;
+  }
+  emit("change", result.content);
+  emit("update:mindMapDraft", undefined);
+  emit("update:mindMapEditing", false);
+}
+
+function cancelMindMapDraft(): void {
+  emit("update:mindMapDraft", undefined);
+  emit("update:mindMapEditing", false);
+}
+
+watch(
   () => props.readonly,
   (readonly) => {
     editor.value?.updateOptions({ readOnly: readonly ?? false });
@@ -435,19 +521,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  if (containerResizeObserver) {
-    containerResizeObserver.disconnect();
-    containerResizeObserver = null;
-  }
-  const previousModel = model;
-  editor.value?.dispose();
-  editor.value = null;
-  model = null;
-  if (previousModel) {
-    releaseCodeEditorModel(previousModel);
-  }
-  syncedContentLength = 0;
-  syncedProgressiveAppend = false;
+  destroyMonacoEditor();
 });
 
 function revealSelection(payload: { startLine: number; endLine: number; text: string }) {
@@ -522,6 +596,32 @@ defineExpose({
       <slot name="empty-actions" />
     </div>
   </div>
+  <div v-else-if="isMindMap" class="ta-mind-map-document" data-testid="mind-map-document">
+    <div
+      v-if="mindMapParseResult?.status.message || mindMapInteractionError"
+      class="ta-mind-map-document__warning"
+      role="alert"
+    >
+      {{ mindMapInteractionError || mindMapParseResult?.status.message }}
+    </div>
+    <MindMapEditor
+      v-if="mindMapCanEdit && mindMapDocument"
+      :key="path"
+      :document="mindMapDocument"
+      :generation-key="path"
+      @draft-change="updateMindMapDraft"
+      @apply="applyMindMapDraft"
+      @cancel="cancelMindMapDraft"
+    />
+    <MindMapCanvas
+      v-else-if="mindMapDocument"
+      :key="path"
+      :document="mindMapDocument"
+      :generation-key="path"
+      readonly
+    />
+    <pre v-else class="ta-mind-map-document__fallback">{{ content }}</pre>
+  </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">
     <!-- 编辑器主体始终保留同一个容器，避免 v-if 切换销毁 Monaco 已挂载的 DOM；
          Markdown 预览整体(full)/分屏(split)受控于 effectivePreviewMode。 -->
@@ -558,6 +658,37 @@ defineExpose({
 </template>
 
 <style scoped>
+.ta-mind-map-document {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ta-surface, #fff);
+}
+
+.ta-mind-map-document__warning {
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: 1px solid #fecdd3;
+  color: #9f1239;
+  background: #fff1f2;
+  font-size: 12px;
+}
+
+.ta-mind-map-document__fallback {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 20px;
+  color: var(--ta-text, #374151);
+  background: var(--ta-panel-2, #f8fafc);
+  font: 13px/1.6 var(--ta-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: pre-wrap;
+}
+
 .code-editor-empty-icon {
   display: flex;
   align-items: center;

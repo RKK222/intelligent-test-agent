@@ -2441,3 +2441,19 @@
 - Result:
   - 运营数据查询现只读 ClickHouse，具备可观测 freshness、可重试 outbox、历史回填与校验后清理旧 PostgreSQL 汇总表的切换门禁；HTTP API 增量新增，无 RunEvent/SSE 类型变化，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
   - 全量 Maven 基线仍有两个任务外已知失败：H2 模型网关 fixture 缺 `embedding_dimension`，以及固定日期的分享会话已过期；Redis 全类 10 项中另有一个旧综合用例在同 Session 活跃 Run 未终结时初始化第二个 Run，被现有互斥约束拒绝。新增范围的定向测试和真实存储门禁均已通过。
+
+### 2026-08-20 - 支持 Markdown 思维导图查看与编辑
+
+- Why:
+  - AI 生成的 Markdown 层级列表需要在工作台内直接查看和修订；既要支持 Markdown 文档中的 `mind` fence，也要支持独立 `.mind` 文件，并继续沿用现有文件 dirty、关闭确认和保存链路。
+- What:
+  - 固定引入 `simple-mind-map@0.14.0-fix.3`，按需懒加载 core、`Drag` 和 `KeyboardNavigation`；新增右向逻辑结构画布、节点编辑/拖拽/撤销重做/缩放折叠和白名单样式工具。
+  - 新增严格 Markdown parser/serializer、fence 精确替换、稳定节点 ID 分配、版本化 TLV + FNV-1a 紧凑元数据和安全画布适配；限制 2,000 节点、128 层、单节点 4,096 字符、元数据 1 MiB，并拒绝损坏、重复或越界数据进入编辑态。
+  - Markdown 预览增加源码/预览/弹层编辑；独立 `.mind` 默认可视化查看，footer 提供就地编辑入口，草稿接入 tab dirty、关闭确认、后台刷新保护和保存前应用/取消门禁。同步 editor、file-explorer、workbench-shell、agent-web 说明、前端规范、模块图和内置用户手册（含 SimpleMindMap MIT 归属）。
+- How:
+  - 定向 Vitest 13 个文件 116/116，editor、workbench-shell、agent-web 类型检查均通过；Chromium 工作台 3/3，覆盖多 fence 精确保存、独立 `.mind` 草稿/应用/保存/取消及损坏元数据/只读阻断。
+  - `corepack pnpm build` 通过，产物保持 `simple-mind-map`、`Drag`、`KeyboardNavigation` 和编辑弹层独立 chunk，构建目标继续为 Chromium 108；独立复审最终无 Critical、Important 或 Minor 发现。
+  - 全量 Vitest 为 132/133 个文件、2028 passed / 1 skipped / 1 failed；唯一失败仍是任务外既有 `help-center.test.ts` 要求“超级管理员专属的‘用户管理’”而 `HEAD` 文档正文无引号，本次相关文件未修改。`git diff --check` 与冲突标记扫描通过，提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+- Result:
+  - 两类思维导图均可安全预览和编辑，只有“应用”才补齐 ID/元数据，之后仍由现有写文件动作落盘；损坏或超限内容仅安全预览，未知属性不执行。
+  - 本次为静态前端依赖和前端状态扩展，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、migration、部署节点、强制配置或后端安全边界；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。

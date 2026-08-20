@@ -23,7 +23,14 @@ import {
   type RawHttpExchange
 } from "@test-agent/backend-api";
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
-import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
+import {
+  CodeEditor,
+  isMindMapPath,
+  languageFromPath,
+  type EditorSelectionContext,
+  type MindMapDocumentStatus,
+  type MindMapVisualDraft
+} from "@test-agent/editor";
 import {
   subscribeRunEvents,
   subscribeSessionRuntimeState,
@@ -93,6 +100,7 @@ import { TestRunnerPanel } from "@test-agent/test-runner";
 import { Spinner, type Feedback } from "@test-agent/ui-kit";
 import {
   useWorkbenchStore,
+  editorTabIsDirty,
   mockVcsDiffFiles,
   mockPublicAgentDiffs,
   mockWorkspaceAgentDiffs,
@@ -113,6 +121,11 @@ import type { UserNotificationFilter } from "./UserNotificationCenter.vue";
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import ExperienceWorkspaceDialog from "./ExperienceWorkspaceDialog.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
+import {
+  createMindMapDraft,
+  mindMapEditBlockReason,
+  mindMapSaveBlockedReason
+} from "./mind-map-workbench";
 import AppSourceDialog from "./AppSourceDialog.vue";
 import AppSourcePicker from "./AppSourcePicker.vue";
 import {
@@ -962,10 +975,11 @@ const showReferenceConfiguration = computed(() =>
 const manualOpencodeProcessRefreshing = ref(false);
 
 // Ctrl/Cmd+S 全局快捷键：在编辑器打开文件时拦截浏览器默认的「保存网页」行为，
-// 转而触发右下角保存按钮同款逻辑（saveMutation.mutate）。
+// 转而触发右下角保存按钮同款逻辑（requestSaveTab）。
 // 条件与保存按钮禁用态完全一致：必须有 activeTab、非 livePreview、文件存在未保存改动、
-// 非只读、未在保存中。即使条件不满足也要 preventDefault，避免在 IDE 类应用里出现
-// 「按 Ctrl+S 弹网页另存为」的尴尬体验。
+// 非只读、未在保存中。思维导图待应用草稿也属于未保存改动，此时统一入口会给出
+// “先应用或取消”的明确提示。即使条件不满足也要 preventDefault，避免在 IDE 类应用里
+// 出现「按 Ctrl+S 弹网页另存为」的尴尬体验。
 function tryHandleSaveShortcut(event: KeyboardEvent) {
   // 同时覆盖 Windows/Linux 的 Ctrl 和 macOS 的 Cmd
   const isSaveCombo = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (event.key === "s" || event.key === "S");
@@ -976,12 +990,12 @@ function tryHandleSaveShortcut(event: KeyboardEvent) {
     event.preventDefault();
     return;
   }
-  const dirty = tab.content !== tab.savedContent;
+  const dirty = editorTabIsDirty(tab);
   const canSave = !tab.livePreview && !tab.readonly && !saveMutation.isPending.value && dirty;
   // 始终 preventDefault：即使不可保存也吞掉浏览器默认行为
   event.preventDefault();
   if (canSave) {
-    saveMutation.mutate(tab);
+    requestSaveTab(tab);
   }
 }
 
@@ -1338,6 +1352,17 @@ const activeWorkspaceViewNodeId = computed(() =>
 );
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
+const mindMapStatusByPath = ref<Record<string, MindMapDocumentStatus>>({});
+const activeMindMapStatus = computed(() => (
+  activePath.value && isMindMapPath(activePath.value)
+    ? mindMapStatusByPath.value[activePath.value]
+    : undefined
+));
+const activeMindMapEditDisabledReason = computed(() => (
+  activePath.value && isMindMapPath(activePath.value)
+    ? mindMapEditBlockReason(activeTab.value, activeMindMapStatus.value)
+    : undefined
+));
 const activeTabCopyPath = computed(() => {
   const tab = activeTab.value;
   if (!tab || !isAgentFilePath(tab.path)) return undefined;
@@ -4146,6 +4171,8 @@ function handleAgentConfigMutation(payload: AgentConfigMutation) {
 
 const saveMutation = useMutation({
   mutationFn: async (tab: NonNullable<typeof activeTab.value>) => {
+    const draftBlockReason = mindMapSaveBlockedReason(tab);
+    if (draftBlockReason) throw new Error(draftBlockReason);
     if (isReferenceFilePath(tab.path)) {
       throw new Error("引用文件为只读，不能保存");
     }
@@ -4201,6 +4228,51 @@ const saveMutation = useMutation({
     feedback.value = errorFeedback("保存文件失败", error);
   }
 });
+
+function requestSaveTab(tab: EditorTab): void {
+  const blockedReason = mindMapSaveBlockedReason(tab);
+  if (blockedReason) {
+    feedback.value = {
+      kind: "info",
+      title: "思维导图尚未应用",
+      description: blockedReason
+    };
+    return;
+  }
+  saveMutation.mutate(tab);
+}
+
+function updateMindMapStatus(path: string, status: MindMapDocumentStatus): void {
+  if (!isMindMapPath(path)) return;
+  mindMapStatusByPath.value = { ...mindMapStatusByPath.value, [path]: status };
+}
+
+function updateMindMapDraft(path: string, draft: MindMapVisualDraft | undefined): void {
+  if (!isMindMapPath(path) || !workbench.tabs.some((tab: EditorTab) => tab.path === path)) return;
+  workbench.updateTab(path, { visualDraft: draft });
+}
+
+function updateMindMapEditing(path: string, editing: boolean): void {
+  const tab = workbench.tabs.find((item: EditorTab) => item.path === path);
+  if (!tab || !isMindMapPath(path)) return;
+  if (!editing) {
+    updateMindMapDraft(path, undefined);
+    return;
+  }
+  const draft = createMindMapDraft(tab, mindMapStatusByPath.value[path]);
+  if (draft) updateMindMapDraft(path, draft);
+}
+
+function startActiveMindMapEditing(): void {
+  const tab = activeTab.value;
+  if (!tab || !isMindMapPath(tab.path)) return;
+  const reason = mindMapEditBlockReason(tab, mindMapStatusByPath.value[tab.path]);
+  if (reason) {
+    feedback.value = { kind: "info", title: "当前思维导图不可编辑", description: reason };
+    return;
+  }
+  updateMindMapEditing(tab.path, true);
+}
 
 type StartRunDraft = {
   prompt: string;
@@ -5280,7 +5352,7 @@ const showUnsavedConfirm = ref(false);
 
 function handleCloseTab(path: string) {
   const tab = workbench.tabs.find((t) => t.path === path);
-  if (tab && !tab.livePreview && tab.content !== tab.savedContent) {
+  if (editorTabIsDirty(tab)) {
     tabPathToClose.value = path;
     showUnsavedConfirm.value = true;
   } else {
@@ -5292,7 +5364,7 @@ function handleCloseTabs(paths: string[]) {
   for (const path of paths) {
     const tab = workbench.tabs.find((t) => t.path === path);
     if (!tab) continue;
-    if (!tab.livePreview && tab.content !== tab.savedContent) {
+    if (editorTabIsDirty(tab)) {
       tabPathToClose.value = path;
       showUnsavedConfirm.value = true;
       return;
@@ -7113,10 +7185,6 @@ function workspaceFileReadIsCurrent(
     && workspaceLoadGeneration === workspaceGeneration
     && latestWorkspaceFileReadByPath.get(path) === requestGeneration
     && workbench.tabs.some((tab: EditorTab) => tab.path === path);
-}
-
-function editorTabIsDirty(tab: EditorTab | undefined): boolean {
-  return Boolean(tab && !tab.livePreview && tab.content !== tab.savedContent);
 }
 
 function progressivePreviewPatch(chunk: FilePreviewChunk) {
@@ -10100,7 +10168,7 @@ async function openLivePreview(relPath: string) {
   expandPathToFile(relPath);
   refreshParentDirectory(relPath);
   const existing = tabs.value.find((tab: EditorTab) => tab.path === relPath);
-  if (existing && !existing.livePreview && existing.content !== existing.savedContent) {
+  if (existing && !existing.livePreview && editorTabIsDirty(existing)) {
     workbench.setActivePath(relPath);
     centerMode.value = "editor";
     feedback.value = { kind: "info", title: "实时追踪未覆盖未保存文件", description: relPath };
@@ -11621,7 +11689,7 @@ async function handleLogout() {
           :copy-path="activeTabCopyPath"
           :workspace-root-path="selectedWorkspacePhysicalRootPath"
           :updated-at="activeTab ? Date.now() / 1000 : undefined"
-          :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
+          :dirty="editorTabIsDirty(activeTab)"
           :readonly="!!activeTab?.readonly"
           :saving="saveMutation.isPending.value"
           :app-name="selectedManagedApplication?.appName"
@@ -11635,13 +11703,16 @@ async function handleLogout() {
           :workspace-kind="selectedWorkspaceKind"
           :markdown-preview="markdownPreview"
           :markdown-preview-mode="markdownPreviewMode"
+          :mind-map-can-edit="activeMindMapStatus?.canEdit"
+          :mind-map-edit-disabled-reason="activeMindMapEditDisabledReason"
           @activate="activateEditorTab"
           @locate-file="handleLocateFile"
           @close="handleCloseTab"
           @close-many="handleCloseTabs"
           @add-file-context="addWorkspaceFileToChatContext"
           @editor-action="() => {}"
-          @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+          @save="() => activeTab && requestSaveTab(activeTab)"
+          @edit-mind-map="startActiveMindMapEditing"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
@@ -11660,14 +11731,19 @@ async function handleLogout() {
               ref="codeEditorRef"
               :path="activeTab?.path"
               :content="activeTab?.content"
-              :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
+              :dirty="editorTabIsDirty(activeTab)"
               :readonly="activeTab?.readonly"
               :progressive-append="!!activeTab?.progressivePreview"
               :saving="saveMutation.isPending.value"
               :show-preview="markdownPreview"
               :preview-mode="markdownPreviewMode"
+              :mind-map-editing="Boolean(activeTab?.visualDraft)"
+              :mind-map-draft="activeTab?.visualDraft"
               @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
-              @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+              @save="() => activeTab && requestSaveTab(activeTab)"
+              @update:mind-map-draft="(draft: MindMapVisualDraft | undefined) => activeTab && updateMindMapDraft(activeTab.path, draft)"
+              @update:mind-map-editing="(editing: boolean) => activeTab && updateMindMapEditing(activeTab.path, editing)"
+              @mind-map-status="(status: MindMapDocumentStatus) => activeTab && updateMindMapStatus(activeTab.path, status)"
               @add-selection-context="addCurrentSelectionToChatContext"
               @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
             >

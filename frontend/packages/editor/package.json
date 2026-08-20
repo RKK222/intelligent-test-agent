@@ -21,6 +21,7 @@
     "@mermaid-js/layout-elk": "^0.2.2",
     "elkjs": "^0.9.3",
     "monaco-editor": "0.55.1",
+    "simple-mind-map": "0.14.0-fix.3",
     "vue": "3.5.38"
   },
   "devDependencies": {

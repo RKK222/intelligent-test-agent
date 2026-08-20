@@ -175,4 +175,63 @@ describe("FigmaEditorArea", () => {
     expect(wrapper.getComponent({ name: "WorkbenchFooter" }).props("workspaceKind"))
       .toBe("APP_SOURCE");
   });
+
+  it(".mind 草稿显示 tab 星号并只透传思维导图编辑入口", async () => {
+    const content = "# 根\n\n- A\n";
+    const mindTab = {
+      id: "docs/plan.mind",
+      path: "docs/plan.mind",
+      title: "plan.mind",
+      content,
+      savedContent: content,
+      visualDraft: { kind: "mind-map" as const, baseContent: content, content }
+    };
+    const wrapper = mount(FigmaEditorArea, {
+      props: {
+        tabs: [mindTab],
+        activePath: mindTab.path,
+        mindMapCanEdit: true
+      },
+      global: { stubs: { WorkbenchFooter: true } }
+    });
+
+    expect(wrapper.find(".figma-editor-tab-dirty-star").exists()).toBe(true);
+    const footer = wrapper.getComponent({ name: "WorkbenchFooter" });
+    expect(footer.props("showPreviewButton")).toBe(false);
+    expect(footer.props("showMindMapEditButton")).toBe(true);
+    expect(footer.props("saveBlockedReason")).toContain("应用或取消");
+
+    footer.vm.$emit("editMindMap");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("editMindMap")).toHaveLength(1);
+  });
+
+  it("渐进式 .mind 只读预览禁用编辑入口", () => {
+    const mindTab = {
+      id: "docs/large.mind",
+      path: "docs/large.mind",
+      title: "large.mind",
+      content: "# 根\n\n- A\n",
+      savedContent: "# 根\n\n- A\n",
+      readonly: true,
+      progressivePreview: {
+        size: 6_000_000,
+        warningThresholdBytes: 5_000_000,
+        loadedBytes: 1024,
+        nextOffset: 1024,
+        lastModifiedMillis: 1,
+        eof: false,
+        loading: false,
+        loadingAll: false
+      }
+    };
+    const wrapper = mount(FigmaEditorArea, {
+      props: { tabs: [mindTab], activePath: mindTab.path, mindMapCanEdit: true },
+      global: { stubs: { WorkbenchFooter: true } }
+    });
+
+    const footer = wrapper.getComponent({ name: "WorkbenchFooter" });
+    expect(footer.props("mindMapEditDisabled")).toBe(true);
+    expect(footer.props("mindMapEditDisabledReason")).toContain("渐进");
+  });
 });

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { useWorkbenchStore } from "../src/workbenchStore";
+import { editorTabIsDirty, useWorkbenchStore } from "../src/workbenchStore";
 
 describe("workbenchStore 编辑器 tab 加载状态", () => {
   beforeEach(() => {
@@ -66,5 +66,25 @@ describe("workbenchStore 编辑器 tab 加载状态", () => {
     store.markTabSaved("docs/revision.md", "edit-2");
     store.updateTab("docs/revision.md", { content: "background", savedContent: "background" });
     expect(store.tabs[0]?.contentRevision).toBe(2);
+  });
+
+  it("思维导图待应用草稿计入 dirty，供星号、关闭确认和后台刷新统一保护", () => {
+    const clean = {
+      id: "file:docs/plan.mind",
+      path: "docs/plan.mind",
+      title: "plan.mind",
+      content: "# 根\n\n- A\n",
+      savedContent: "# 根\n\n- A\n"
+    };
+
+    expect(editorTabIsDirty(clean)).toBe(false);
+    expect(editorTabIsDirty({
+      ...clean,
+      visualDraft: {
+        kind: "mind-map",
+        baseContent: clean.content,
+        content: "# 草稿\n\n- B\n"
+      }
+    })).toBe(true);
   });
 });

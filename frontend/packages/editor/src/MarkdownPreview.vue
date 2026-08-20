@@ -14,8 +14,11 @@ let mermaidLoadPromise: Promise<void> | null = null;
 </script>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
+import { computed, createApp, defineAsyncComponent, onBeforeUnmount, ref, watch, type App } from "vue";
 import type { MermaidEditableDiagram } from "./mermaid/diagram";
+import { parseMindMapMarkdown } from "./mind-map/markdown";
+import { findMindMapBlocks, replaceMindMapBlock } from "./mind-map/markdown-blocks";
+import type { MindMapApplyResult, MindMapDocument, MindMapFenceBlock } from "./mind-map/model";
 // github-markdown-css 提供 .markdown-body 基础排版样式，侧载一次即可
 import "github-markdown-css/github-markdown.css";
 
@@ -32,6 +35,9 @@ const emit = defineEmits<{
 const MermaidEditorDialog = defineAsyncComponent(
   () => import("./mermaid/visual-editor/MermaidEditorDialog.vue")
 );
+const MindMapEditorDialog = defineAsyncComponent(
+  () => import("./mind-map/MindMapEditorDialog.vue")
+);
 type VisualEditorState = {
   blockIndex: number;
   originalSource: string;
@@ -39,6 +45,15 @@ type VisualEditorState = {
   error?: string;
 };
 const visualEditor = ref<VisualEditorState>();
+type MindMapEditorState = {
+  blockIndex: number;
+  sourceLine: number;
+  originalSource: string;
+  document: MindMapDocument;
+  error?: string;
+};
+const mindMapEditor = ref<MindMapEditorState>();
+const mindMapPreviewApps = new Map<HTMLElement, App>();
 
 // 渲染后的 HTML（已消毒），用 shallowRef 避免对大段 HTML 做深度代理
 const html = ref("");
@@ -100,6 +115,7 @@ async function ensureLibs(needMermaid = false) {
       // 只取 level===0，避免列表项/引用内段落数字堆叠
       md.core.ruler.push("source_line", (state) => {
         let mermaidIndex = 0;
+        let mindMapIndex = 0;
         for (const tok of state.tokens) {
           if (tok.level === 0 && tok.map) {
             tok.attrSet("data-source-line", String(tok.map[0] + 1));
@@ -108,10 +124,14 @@ async function ensureLibs(needMermaid = false) {
             tok.meta = { ...(tok.meta ?? {}), mermaidIndex };
             mermaidIndex += 1;
           }
+          if (tok.type === "fence" && tok.info.trim().split(/\s+/)[0] === "mind") {
+            tok.meta = { ...(tok.meta ?? {}), mindMapIndex };
+            mindMapIndex += 1;
+          }
         }
       });
       // fence 默认不会把 token attrs 渲染到 <pre>，覆盖渲染以带上 data-source-line 与 hljs 高亮
-      md.renderer.rules.fence = (tokens, idx, _options, _env, slf) => {
+      md.renderer.rules.fence = (tokens, idx, _options, env, slf) => {
         const token = tokens[idx];
         const lang = token.info ? token.info.trim() : "";
         const attrs = slf.renderAttrs(token);
@@ -127,6 +147,41 @@ async function ensureLibs(needMermaid = false) {
             </div>
             <pre class="hljs ta-mermaid-script"><code class="language-mermaid">${escapedCode}</code></pre>
             <div class="ta-mermaid-chart" hidden></div>
+          </div>`;
+        }
+        if (lang.split(/\s+/)[0] === "mind") {
+          const id = `ta-mind-map-${Math.random().toString(36).substring(2, 9)}`;
+          const visibleBlockIndex = typeof token.meta?.mindMapIndex === "number" ? token.meta.mindMapIndex : 0;
+          const sourceLine = (token.map?.[0] ?? 0) + 2;
+          // markdown-it 负责展示，领域扫描器负责精确替换；用源码行绑定两者，避免
+          // 嵌套或长闭合 fence 造成仅按序号定位时替换到另一块。
+          const sourceBlock = (env?.mindMapBlocks as MindMapFenceBlock[] | undefined)
+            ?.find((block) => block.sourceLine === sourceLine);
+          const blockIndex = sourceBlock?.index ?? -1;
+          const source = sourceBlock?.source ?? token.content;
+          const parsed = parseMindMapMarkdown(source);
+          const escapedCode = md.utils.escapeHtml(source);
+          const contextError = parsed.status.message
+            ? `第 ${visibleBlockIndex + 1} 个 mind 块（源码第 ${sourceLine} 行）：${parsed.status.message}`
+            : !sourceBlock
+              ? `第 ${visibleBlockIndex + 1} 个 mind 块（源码第 ${sourceLine} 行）：当前位置只支持源码和安全预览`
+            : "";
+          const warning = contextError
+            ? `<div class="ta-mind-map-warning" role="status">${md.utils.escapeHtml(contextError)}</div>`
+            : "";
+          const editDisabled = sourceBlock && parsed.status.canEdit && parsed.document
+            ? ""
+            : " disabled aria-disabled=\"true\"";
+          const previewDisabled = parsed.document ? "" : " disabled aria-disabled=\"true\"";
+          return `<div${attrs} class="mind-map-block is-source" id="${id}" data-content="${encodeURIComponent(source)}" data-block-index="${blockIndex}" data-source-start-line="${sourceLine}">
+            <div class="ta-mind-map-header">
+              <button type="button" class="ta-mind-map-mode-btn is-active" data-mind-map-mode="source" data-block-id="${id}">源码</button>
+              <button type="button" class="ta-mind-map-mode-btn" data-mind-map-mode="preview" data-block-id="${id}"${previewDisabled}>预览</button>
+              <button type="button" class="ta-mind-map-mode-btn" data-mind-map-mode="edit" data-block-id="${id}"${editDisabled}>编辑</button>
+            </div>
+            ${warning}
+            <pre class="hljs ta-mind-map-source"><code class="language-mind">${escapedCode}</code></pre>
+            <div class="ta-mind-map-chart" hidden></div>
           </div>`;
         }
         let code: string;
@@ -151,6 +206,11 @@ async function ensureLibs(needMermaid = false) {
 
 async function handleMdPreviewClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
+  const mindMapButton = target.closest(".ta-mind-map-mode-btn") as HTMLButtonElement | null;
+  if (mindMapButton) {
+    await handleMindMapMode(mindMapButton);
+    return;
+  }
   const btn = target.closest(".ta-mermaid-mode-btn") as HTMLButtonElement | null;
   if (!btn) return;
 
@@ -224,6 +284,122 @@ async function handleMdPreviewClick(event: MouseEvent) {
   }
 }
 
+function activateMindMapMode(block: HTMLElement, button: HTMLButtonElement): void {
+  block.querySelectorAll<HTMLButtonElement>(".ta-mind-map-mode-btn").forEach((item) => {
+    item.classList.toggle("is-active", item === button);
+  });
+}
+
+function unmountMindMapPreview(chart: HTMLElement): void {
+  const app = mindMapPreviewApps.get(chart);
+  if (app) {
+    app.unmount();
+    mindMapPreviewApps.delete(chart);
+  }
+}
+
+function unmountMindMapPreviews(): void {
+  for (const [chart, app] of mindMapPreviewApps) {
+    app.unmount();
+    mindMapPreviewApps.delete(chart);
+  }
+}
+
+/** 预览按钮点击后才创建独立 Vue 子树，因此 SimpleMindMap 不进入 Markdown 首次渲染链路。 */
+async function showMindMapPreview(block: HTMLElement, button: HTMLButtonElement): Promise<void> {
+  const source = decodeURIComponent(block.getAttribute("data-content") ?? "");
+  const parsed = parseMindMapMarkdown(source);
+  const script = block.querySelector<HTMLElement>(".ta-mind-map-source");
+  const chart = block.querySelector<HTMLElement>(".ta-mind-map-chart");
+  if (!chart || !parsed.document) return;
+  activateMindMapMode(block, button);
+  button.disabled = true;
+  const originalText = button.textContent ?? "预览";
+  button.textContent = "准备中";
+  try {
+    unmountMindMapPreview(chart);
+    chart.innerHTML = "";
+    chart.hidden = false;
+    if (script) script.hidden = true;
+    const { default: MindMapCanvas } = await import("./mind-map/MindMapCanvas.vue");
+    if (!chart.isConnected) return;
+    const app = createApp(MindMapCanvas, {
+      document: parsed.document,
+      readonly: true,
+      generationKey: `markdown-mind-${block.getAttribute("data-block-index") ?? "0"}`
+    });
+    mindMapPreviewApps.set(chart, app);
+    app.mount(chart);
+  } catch (error) {
+    chart.hidden = false;
+    if (script) script.hidden = true;
+    chart.textContent = `思维导图预览失败：${errorMessage(error)}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function handleMindMapMode(button: HTMLButtonElement): Promise<void> {
+  if (button.disabled) return;
+  const blockId = button.getAttribute("data-block-id");
+  const block = blockId ? document.getElementById(blockId) : null;
+  if (!block) return;
+  const mode = button.getAttribute("data-mind-map-mode") ?? "source";
+  const script = block.querySelector<HTMLElement>(".ta-mind-map-source");
+  const chart = block.querySelector<HTMLElement>(".ta-mind-map-chart");
+  if (mode === "source") {
+    activateMindMapMode(block, button);
+    if (script) script.hidden = false;
+    if (chart) chart.hidden = true;
+    return;
+  }
+  if (mode === "preview") {
+    await showMindMapPreview(block, button);
+    return;
+  }
+  const originalSource = decodeURIComponent(block.getAttribute("data-content") ?? "");
+  const parsed = parseMindMapMarkdown(originalSource);
+  if (!parsed.status.canEdit || !parsed.document) return;
+  mindMapEditor.value = {
+    blockIndex: Number(block.getAttribute("data-block-index") ?? "0"),
+    sourceLine: Number(block.getAttribute("data-source-start-line") ?? "1"),
+    originalSource,
+    document: parsed.document
+  };
+}
+
+function applyMindMapEditor(result: MindMapApplyResult): void {
+  const state = mindMapEditor.value;
+  if (!state) return;
+  try {
+    // Editor 已完成序列化后二次解析；这里再做 fence 身份与原文并发保护。
+    const markdown = replaceCurrentMindMapBlock(
+      props.content,
+      state.blockIndex,
+      result.content,
+      state.originalSource
+    );
+    emit("change", markdown);
+    mindMapEditor.value = undefined;
+  } catch (error) {
+    mindMapEditor.value = {
+      ...state,
+      error: `第 ${state.blockIndex + 1} 个 mind 块（源码第 ${state.sourceLine} 行）：${errorMessage(error)}`
+    };
+  }
+}
+
+function replaceCurrentMindMapBlock(
+  markdown: string,
+  blockIndex: number,
+  source: string,
+  expectedSource: string
+): string {
+  // 静态 import 会把极小的 fence 工具留在 editor chunk，不会带入 SimpleMindMap。
+  return replaceMindMapBlock(markdown, blockIndex, source, expectedSource);
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -280,7 +456,10 @@ async function applyVisualEditor(diagram: MermaidEditableDiagram) {
 async function render() {
   try {
     await ensureLibs();
-    const raw = mdInstance?.render(displayContent.value) ?? "";
+    unmountMindMapPreviews();
+    const raw = mdInstance?.render(displayContent.value, {
+      mindMapBlocks: findMindMapBlocks(displayContent.value)
+    }) ?? "";
     html.value = purifyInstance?.sanitize(raw) ?? "";
     renderError.value = null;
   } catch (error) {
@@ -372,6 +551,7 @@ onBeforeUnmount(() => {
   if (syncRaf) {
     cancelAnimationFrame(syncRaf);
   }
+  unmountMindMapPreviews();
 });
 
 defineExpose({ scrollToSourceLine });
@@ -399,6 +579,15 @@ defineExpose({ scrollToSourceLine });
       :error="visualEditor.error"
       @apply="applyVisualEditor"
       @cancel="visualEditor = undefined"
+    />
+    <MindMapEditorDialog
+      v-if="mindMapEditor"
+      :document="mindMapEditor.document"
+      :block-index="mindMapEditor.blockIndex"
+      :source-line="mindMapEditor.sourceLine"
+      :error="mindMapEditor.error"
+      @apply="applyMindMapEditor"
+      @cancel="mindMapEditor = undefined"
     />
   </div>
 </template>
@@ -590,6 +779,93 @@ defineExpose({ scrollToSourceLine });
   width: 100%;
   color: inherit;
   border: none;
+}
+
+/* mind 围栏沿用 Mermaid 的紧凑控制语言，但把画布固定为独立工作面，
+   让“源码 / 预览 / 编辑”三态在长文档里仍可一眼辨认。 */
+.markdown-body :deep(.mind-map-block) {
+  margin: 8px 0;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: var(--ta-panel-2, var(--ta-control));
+}
+
+.markdown-body :deep(.ta-mind-map-header) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 0 6px;
+  padding: 2px;
+  border: 1px solid var(--ta-border, #dbe2ea);
+  border-radius: 6px;
+  background: var(--ta-control, #f1f5f9);
+}
+
+.markdown-body :deep(.ta-mind-map-mode-btn) {
+  display: inline-flex;
+  min-width: 38px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ta-text);
+  background: transparent;
+  font: 11px/18px inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.markdown-body :deep(.ta-mind-map-mode-btn:hover:not(:disabled)) {
+  background: var(--ta-border, #dbe2ea);
+}
+
+.markdown-body :deep(.ta-mind-map-mode-btn.is-active) {
+  color: var(--ta-ink);
+  background: var(--ta-surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
+}
+
+.markdown-body :deep(.ta-mind-map-mode-btn:focus-visible) {
+  outline: 2px solid var(--primary, #7f1e2b);
+  outline-offset: 1px;
+}
+
+.markdown-body :deep(.ta-mind-map-mode-btn:disabled) {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.markdown-body :deep(.ta-mind-map-source[hidden]),
+.markdown-body :deep(.ta-mind-map-chart[hidden]) {
+  display: none !important;
+}
+
+.markdown-body :deep(.ta-mind-map-source) {
+  margin: 0;
+}
+
+.markdown-body :deep(.ta-mind-map-chart) {
+  width: 100%;
+  height: clamp(280px, 48vh, 520px);
+  min-width: 360px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--ta-surface, #ffffff);
+}
+
+.markdown-body :deep(.ta-mind-map-warning) {
+  margin: 0 0 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--ta-mind-map-warning-border, rgba(185, 28, 28, 0.28));
+  border-radius: 5px;
+  color: var(--destructive, #9f1239);
+  background: var(--ta-mind-map-warning-bg, rgba(185, 28, 28, 0.07));
+  font-size: 11px;
+  line-height: 1.5;
 }
 </style>
 

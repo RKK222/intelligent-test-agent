@@ -30,6 +30,7 @@
 - dockview-vue（Dockview 官方 Vue 封装）
 - Monaco Editor（原生 `monaco-editor`，按需懒加载）
 - Vue Flow（`@vue-flow/core`，仅在 Mermaid 可视化编辑时懒加载）
+- SimpleMindMap（固定 `simple-mind-map@0.14.0-fix.3`，仅在思维导图预览或编辑时懒加载 core、Drag 和 KeyboardNavigation；MIT License）
 - lucide-vue-next
 - @vscode/codicons（仅文件浏览区使用）
 - jsonc-parser 3.3.1（引用配置对 `.opencode/opencode.jsonc` 做保留注释的最小字段补丁）
@@ -58,6 +59,8 @@ packages/shared-types
 `agent-web` 每次加载 Vite 配置时按北京时间生成 `VyyyyMMdd.HHmmss` 构建版本，并以只读编译常量固化到 bundle；设置弹窗左侧导航底部展示该版本。普通刷新或静态服务重启不会改变版本，只有重新构建前端产物才会变化。
 
 `packages/editor` 在 Markdown 预览中支持 Mermaid `flowchart`/`graph`、`sequenceDiagram` 与 `stateDiagram`/`stateDiagram-v2` 可视化编辑。Flowchart 提供按“流程图 / 文档与显示”分组的 14 类共享 SVG 节点、轮廓分配的 8/12 个端口和不随画布缩放、可在视口边缘翻转的双列快捷建连菜单，选中备选图形后菜单立即收起；节点无论是否选中都可直接从可见连接点拖出连线，选中节点的连接点外围继续用于移动节点，选中连线可拖动绿色端点更换起止锚点。选中节点还可通过四角外置手柄在 50%–300% 范围内等比缩放，实际节点、端口、ELK 包围盒和路由端点共用缩放后的尺寸；双击节点或连线可就地编辑文字与文字颜色，右侧属性栏可设置节点文字、填充、边框颜色和连线文字颜色。Sequence 使用递归 AST、专用时序场景和“元素 / 结构 / 属性”单侧栏，支持参与者、消息、Note、生命周期和常用组合片段任意嵌套。State 使用递归 Scope/Region 模型和“概览 + 聚焦”画布，支持复合/嵌套状态、并发 Region、开始/结束、Choice、Fork/Join、Note、各层方向、标签转换、自循环、状态说明与限定直接样式；同一聚焦层展示全部并发 Region。三类图各自维护 parser、serializer、校验和布局，按连接规则复用画布拖线能力；应用后只回写当前 Markdown fence，并继续复用工作台 dirty、Git Diff 与 workspace 文件保存链路。
+
+`packages/editor` 还支持 Markdown 中的 ```` ```mind ```` 围栏与独立 `.mind` 文件。围栏默认展示源码，可切换只读画布或在可访问弹层中编辑；独立文件默认在中栏展示只读画布，由底部任务栏进入就地编辑。只有“应用”才会按前序补齐稳定节点 ID、写入单个版本化紧凑元数据注释并更新编辑器正文，之后仍复用既有 dirty、Ctrl/Cmd+S、Git Diff 和 Workspace 文件 WebSocket 保存链。编辑草稿只以纯文本保存在 tab 中，计入关闭确认和后台刷新保护；只读、引用、渐进式大文件、损坏/未知元数据或超限内容只提供安全预览。SimpleMindMap 固定为 `0.14.0-fix.3`，强制普通文本与 `richText=false`，不执行图片、链接、HTML、SVG、图标、备注、标签、概要、协同数据或未知属性；该第三方项目按 MIT License 使用。
 
 工作台中间 Monaco 源码区默认按可视宽度自动换行。编辑器页脚“复制路径”只复制文件在目标服务器上的真实绝对路径；公共级/应用级 Agent tab 的 `agent-public:`、`agent-workspace:` 合成路径只用于前端身份和路由，不进入剪贴板。左侧个人工作区普通文件支持 Ctrl/Cmd+C/X/V/Z、右键复制/剪切/粘贴/撤销和拖放到目录或根目录；工作区标题与目录行的 `+` 统一按明确目标路径新建或上传一个或多个本机文件，文件/目录行尾 `−` 与 Delete/Del 键共用删除确认，目录删除会递归清理内容；拖放结束后清除目标高亮。文件操作弹框统一使用紧凑工作台面板样式。所有落盘和撤销操作继续走 backend-api 的目标后端文件 WebSocket route/ticket/RPC，只读应用版本副本不展示这些入口。
 工作台中间 Monaco 源码区默认按可视宽度自动换行。左侧个人工作区普通文件支持 Ctrl/Cmd+C/X/V/Z、右键复制/剪切/粘贴/撤销和拖放到目录或根目录；仅可写纯 `WORKSPACE` 文件和目录可作为拖动源，源行提供抓取/半透明反馈；只读、纯 `REFERENCE` 和 `MIXED` 条目不可拖。合法目录和根空白区显示蓝色落点；当前父目录、自身、被拖目录的后代、文件行、纯引用目录和只读目录不接受拖入，带 `workspacePath` 的 `MIXED` 目录可作为工作区侧落点接收工作区条目。工作区标题与目录行的 `+` 统一按明确目标路径新建或上传一个或多个本机文件，文件/目录行尾 `−` 与 Delete/Del 键共用删除确认，目录删除会递归清理内容；拖放结束后清除目标高亮。移动成功会迁移已打开子文件 tab 与展开路径、刷新组合树和 Git Diff，并支持既有反向移动撤销。文件操作弹框统一使用紧凑工作台面板样式。所有落盘和撤销操作继续走 backend-api 的目标后端文件 WebSocket route/ticket/RPC，只读应用版本副本不展示这些入口。
@@ -129,9 +132,9 @@ corepack pnpm e2e:session-share
 corepack pnpm e2e:real
 ```
 
-Vitest 全量回归统一限制为最多 4 个 worker，并使用 20 秒单测超时，避免 Mermaid、Monaco 与多组件异步测试在高并发机器上因 CPU/计时器争抢产生随机假失败；直接执行默认 `corepack pnpm test` 即可使用这套稳定配置。
+Vitest 全量回归统一限制为最多 4 个 worker，并使用 20 秒单测超时，避免 Mermaid、SimpleMindMap、Monaco 与多组件异步测试在高并发机器上因 CPU/计时器争抢产生随机假失败；直接执行默认 `corepack pnpm test` 即可使用这套稳定配置。
 
-Playwright 常规全量回归覆盖桌面 Chromium（项目没有移动端产品内容），统一单 worker 顺序执行，并将单例上限设为 60 秒、断言等待设为 10 秒。会话协作分享使用独立 `playwright.session-share.config.ts` 在 Chromium、Firefox 和 WebKit 固定验证分享管理、只读/代操作工作台、运行互斥与失效路由。工作台 E2E 会加载 Monaco、Mermaid 与内嵌手册，避免额外视口把非产品范围纳入交付门槛。
+Playwright 常规全量回归覆盖桌面 Chromium（项目没有移动端产品内容），统一单 worker 顺序执行，并将单例上限设为 60 秒、断言等待设为 10 秒。会话协作分享使用独立 `playwright.session-share.config.ts` 在 Chromium、Firefox 和 WebKit 固定验证分享管理、只读/代操作工作台、运行互斥与失效路由。工作台 E2E 会加载 Monaco、Mermaid、SimpleMindMap 与内嵌手册，避免额外视口把非产品范围纳入交付门槛。
 
 完整前端检查也可以从仓库根目录执行：
 

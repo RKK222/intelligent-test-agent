@@ -31,7 +31,22 @@ export type EditorTab = {
   contentRevision?: number;
   /** 实时追踪打开的 agent 改动预览 tab：只读、内容随 diff 事件刷新、不可保存。 */
   livePreview?: boolean;
+  /** 可恢复的编辑器草稿；只保存纯数据，禁止保存第三方组件实例。 */
+  visualDraft?: {
+    kind: "mind-map";
+    baseContent: string;
+    content: string;
+  };
 };
+
+/** 正文改动与待应用可视化草稿共用同一个 dirty 契约。 */
+export function editorTabIsDirty(tab: EditorTab | undefined): boolean {
+  return Boolean(
+    tab
+    && !tab.livePreview
+    && (tab.content !== tab.savedContent || tab.visualDraft)
+  );
+}
 
 /** 兼容旧 tab，并优先使用不会被瞬时 loading 覆盖的快照身份。 */
 function editorTabHasLoadedSnapshot(
