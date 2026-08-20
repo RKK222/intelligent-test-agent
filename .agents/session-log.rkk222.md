@@ -12404,11 +12404,13 @@
 - 公共和业务工作区 Tool 本地保存改为只受管重启当前用户；纯本地 commit 不触发额外用户，公共 push 覆盖全部运行用户，应用 push 只覆盖对应应用版本用户。
 - PUBLIC/APPLICATION rollout 持久化配置范围与应用版本，按用户独立等待空闲、受管重启并核对 manager 新代次和 `/experimental/tool/ids` 非空目录；既有 5 秒 drain 调度同时承担失败补偿，一个用户失败不阻断后续目标。
 - 超管公共配置页新增“应用更新配置”、未重启用户明细和单用户立即受管重启；运行管理批量操作把目标、游标、PID/startedAt、成功/失败写入当前超管的 localStorage，刷新后核对并继续。
+- 批量开始或刷新恢复时自动展开目标容器，在每名用户姓名后以灰/蓝/绿/红圆点直接投影等待、处理中、成功和失败，悬停查看具体状态或错误，不增加表格列；“应用更新配置”改为无 rollout 时也常驻说明单用户受管重启入口。
 - 本机启动脚本优先从稳定发布清单解包并校验 OpenCode 1.18.4，避免误用用户目录中的其它版本；同步 HTTP API、runtime/workspace、agent-web 和 backend-api 稳定说明。
 
 ### How
 
 - JDK 25 下完整 26 模块 `mvn clean package -Dmaven.test.skip=true` 成功；相关 workspace 172/172、runtime 46/46、persistence 9/9、API 27/27 全通过。前端定向 Vitest 49/49，backend-api 与 agent-web typecheck 通过。
+- 本次进度圆点与常驻入口补充 Vitest 40/40、agent-web typecheck 通过；JDK 25、`.env.test`、test profile 和 ClickHouse 完整重启成功，26 模块后端与前端生产构建通过。原生 Python Playwright 使用 Chrome 真实登录超管，浏览器层拦截展示数据验证空状态、单用户按钮、8px 进度圆点、无新增列和完成态，证据保存在 `output/e2e-tool-rollout/09-*` 至 `12-*` 与脱敏 JSON 报告中，不纳入提交。
 - 使用根目录 `.env.test`、`test` profile 和 `--with-clickhouse` 启动完整环境；后端 readiness UP、前端 3000、ClickHouse 26.3.17.56，OpenCode `/global/health` 返回 `healthy=true, version=1.18.4`。
 - 原生 Python Playwright 登录真实超管页面，真实接口返回 200；在浏览器层仅拦截应用 rollout/重启验收数据，验证未重启用户、人工重启、批量进度刷新恢复及清理。另对当前验收账号执行真实受管重启，PID `18714 -> 26379`、startedAt 更新，重启前后 Tool 目录均非空；截图和 JSON 报告保存在 `output/e2e-tool-rollout/`，不纳入代码提交。
 - 提交前回顾全部 `.agents/session-log*.md` 近期记录；工作区同期存在其他开发者的 SkillHub、自动化引用和文档改动，本次仅暂存 Tool 重载、rollout、管理进度、相关测试文档与本日志。

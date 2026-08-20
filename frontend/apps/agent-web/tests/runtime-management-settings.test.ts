@@ -814,8 +814,11 @@ describe("runtime management settings", () => {
     expect(await view.findByText(/批量重启进行中：已完成 1 \/ 2/)).toBeTruthy();
     await waitFor(() => expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledTimes(1));
     expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_02", 4097);
+    expect(await view.findByLabelText("user-a：重启成功")).toBeTruthy();
+    expect(await view.findByLabelText("user-b：正在重启")).toBeTruthy();
     resolveRestart({ command: "restart", status: "STARTED" });
     expect(await view.findByText("批量重启完成：成功 2，失败 0。")).toBeTruthy();
+    expect(await view.findAllByLabelText(/：重启成功$/)).toHaveLength(2);
     expect(localStorage.getItem("testagent.runtime-management.batch.v1:usr_admin")).toBeNull();
 
     view.queryClient.clear();
@@ -856,6 +859,7 @@ describe("runtime management settings", () => {
     );
     expect(await view.findByText(/批量关闭完成：成功 1，失败 1。/)).toBeTruthy();
     expect(await view.findByText(/user-b（ctr_02:4097）.*OPENCODE_UNAVAILABLE/)).toBeTruthy();
+    expect(await view.findByLabelText("user-b：关闭失败")).toBeTruthy();
     await waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2));
 
     view.queryClient.clear();

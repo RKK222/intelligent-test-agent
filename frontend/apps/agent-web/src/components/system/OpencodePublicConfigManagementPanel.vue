@@ -617,17 +617,16 @@ function newOperationId() {
         </table>
       </section>
 
-      <section
-        v-if="applicationRollouts.length"
-        class="ta-opencode-config-rollout"
-        aria-label="应用 Agent 与 Tool 发布状态"
-      >
+      <section class="ta-opencode-config-rollout" aria-label="应用 Agent 与 Tool 发布状态">
         <header>
           <div>
             <strong>应用更新配置</strong>
-            <span>最近 {{ applicationRollouts.length }} 次发布；Tool 变更会在会话空闲后受管重启</span>
+            <span>最近 {{ applicationRollouts.length }} 次发布；Tool 变更会在会话空闲后受管重启，有待处理用户时可在用户行右侧立即操作</span>
           </div>
         </header>
+        <div v-if="!applicationRollouts.length" class="ta-opencode-config-application-rollout-empty">
+          当前没有应用 Agent / Tool 发布记录；产生尚未重启或 dispose 的用户后，会在这里逐人显示“立即受管重启”。
+        </div>
         <article
           v-for="applicationRollout in applicationRollouts"
           :key="applicationRollout.rolloutId"
@@ -943,6 +942,14 @@ function newOperationId() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.ta-opencode-config-application-rollout-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #64748b;
+  padding: 12px;
+  line-height: 1.5;
 }
 .ta-opencode-config-toolbar {
   padding: 12px 14px;

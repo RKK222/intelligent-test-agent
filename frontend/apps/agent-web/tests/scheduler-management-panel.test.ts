@@ -664,6 +664,15 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
+  it("keeps the application update section discoverable when no rollout is pending", async () => {
+    const view = renderWithApi(OpencodePublicConfigManagementPanel, api());
+
+    expect(await view.findByText("应用更新配置")).toBeTruthy();
+    expect(await view.findByText(/会在这里逐人显示“立即受管重启”/)).toBeTruthy();
+    expect(view.queryByRole("button", { name: /重启 .* 的 OpenCode/ })).toBeNull();
+    view.queryClient.clear();
+  });
+
   it("requires confirmation and supersedes a draining rollout with forced exact-process stop", async () => {
     const latestRollout = {
       rolloutId: "acr_stuck",

@@ -78,6 +78,13 @@ type BatchManagedProcessResult = {
   total: number;
   succeeded: number;
   failures: BatchManagedProcessFailure[];
+  targets: BatchManagedProcessTarget[];
+};
+
+type BatchManagedProcessTargetStatus = {
+  label: string;
+  state: "pending" | "running" | "succeeded" | "failed";
+  detail?: string;
 };
 
 type BatchManagedProcessProgress = {
@@ -264,6 +271,41 @@ const batchManagedProcessProgressMessage = computed(() => {
   const currentMessage = current ? `；当前：${current.label}` : "";
   return `批量${actionLabel}进行中：已完成 ${progress.nextIndex} / ${progress.targets.length}，成功 ${progress.succeeded}，失败 ${progress.failures.length}${currentMessage}`;
 });
+const batchManagedProcessTargetStatuses = computed(() => {
+  const statuses = new Map<string, BatchManagedProcessTargetStatus>();
+  const progress = batchManagedProcessProgress.value;
+  if (progress) {
+    const actionLabel = progress.action === "restart" ? "重启" : "关闭";
+    const failures = new Map(progress.failures.map(failure => [failure.key, failure]));
+    progress.targets.forEach((target, index) => {
+      const failure = failures.get(target.key);
+      if (failure) {
+        statuses.set(target.key, { label: `${actionLabel}失败`, state: "failed", detail: failure.message });
+      } else if (progress.activeTargetKey === target.key) {
+        statuses.set(target.key, { label: `正在${actionLabel}`, state: "running" });
+      } else if (index < progress.nextIndex) {
+        statuses.set(target.key, { label: `${actionLabel}成功`, state: "succeeded" });
+      } else {
+        statuses.set(target.key, { label: `等待${actionLabel}`, state: "pending" });
+      }
+    });
+    return statuses;
+  }
+
+  const result = batchManagedProcessResult.value;
+  if (!result) {
+    return statuses;
+  }
+  const actionLabel = result.action === "restart" ? "重启" : "关闭";
+  const failures = new Map(result.failures.map(failure => [failure.key, failure]));
+  result.targets.forEach(target => {
+    const failure = failures.get(target.key);
+    statuses.set(target.key, failure
+      ? { label: `${actionLabel}失败`, state: "failed", detail: failure.message }
+      : { label: `${actionLabel}成功`, state: "succeeded" });
+  });
+  return statuses;
+});
 const totalPages = computed(() => Math.max(1, Math.ceil((processPage.value?.total ?? 0) / userProcessSize.value)));
 const summaryCards = computed(() => {
   const item = summary.value;
@@ -397,6 +439,7 @@ watch(ownedManagedProcessTargets, targets => {
 
 watch(overview, value => {
   if (value && batchManagedProcessProgress.value) {
+    expandBatchManagedProcessTargets(batchManagedProcessProgress.value.targets);
     void resumePersistedBatchManagedProcessAction();
   }
 });
@@ -686,6 +729,31 @@ function managedProcessTargetKey(row: RuntimeContainerManagerRow, process: Openc
   return `${containerId}:${process.port}`;
 }
 
+function batchManagedProcessTargetStatus(row: RuntimeContainerManagerRow, process: OpencodeRuntimeManagedProcess) {
+  const key = managedProcessTargetKey(row, process);
+  return key ? batchManagedProcessTargetStatuses.value.get(key) : undefined;
+}
+
+function batchManagedProcessTargetStatusTitle(row: RuntimeContainerManagerRow, process: OpencodeRuntimeManagedProcess) {
+  const status = batchManagedProcessTargetStatus(row, process);
+  if (!status) {
+    return undefined;
+  }
+  return status.detail ? `${status.label}：${status.detail}` : status.label;
+}
+
+function expandBatchManagedProcessTargets(targets: BatchManagedProcessTarget[]) {
+  const containerIds = new Set(targets.map(target => target.containerId));
+  const expanded = new Set(expandedRuntimeRowKeys.value);
+  for (const row of containerManagerRows.value) {
+    const containerId = runtimeRowContainerId(row);
+    if (containerId && containerIds.has(containerId)) {
+      expanded.add(row.key);
+    }
+  }
+  expandedRuntimeRowKeys.value = expanded;
+}
+
 function isOwnedManagedProcessSelected(row: RuntimeContainerManagerRow, process: OpencodeRuntimeManagedProcess) {
   const key = managedProcessTargetKey(row, process);
   return Boolean(key) && selectedManagedProcessKeys.value.has(key);
@@ -762,6 +830,7 @@ async function runBatchManagedProcessAction(action: ManagedProcessActionKind) {
     retryAfter: null,
     startedAt: Date.now()
   });
+  expandBatchManagedProcessTargets(targets);
   await executeBatchManagedProcessProgress();
 }
 
@@ -805,6 +874,7 @@ function restoreBatchManagedProcessProgress() {
     batchManagedProcessAction.value = parsed.action;
     batchManagedProcessResult.value = null;
     batchManagedProcessProgress.value = parsed;
+    expandBatchManagedProcessTargets(parsed.targets);
     if (overview.value) {
       void resumePersistedBatchManagedProcessAction();
     }
@@ -915,7 +985,8 @@ function finishBatchManagedProcessProgress(progress: BatchManagedProcessProgress
     action: progress.action,
     total: progress.targets.length,
     succeeded: progress.succeeded,
-    failures: progress.failures
+    failures: progress.failures,
+    targets: progress.targets
   };
   selectedManagedProcessKeys.value = new Set(progress.failures.map(failure => failure.key));
   batchManagedProcessAction.value = null;
@@ -1430,7 +1501,15 @@ function startResize(e: MouseEvent) {
                                     </td>
                                     <td>{{ process.port }}</td>
                                     <td>{{ formatNullable(process.pid) }}</td>
-                                    <td class="is-compact" :title="processOwner(process) ?? undefined">{{ processOwner(process) }}</td>
+                                    <td class="is-compact" :title="processOwner(process) ?? undefined">
+                                      <span>{{ processOwner(process) }}</span>
+                                      <span
+                                        v-if="batchManagedProcessTargetStatus(row, process)"
+                                        :class="['ta-runtime-batch-target-status', `is-${batchManagedProcessTargetStatus(row, process)?.state}`]"
+                                        :aria-label="`${processOwner(process)}：${batchManagedProcessTargetStatus(row, process)?.label}`"
+                                        :title="batchManagedProcessTargetStatusTitle(row, process)"
+                                      ></span>
+                                    </td>
                                     <td class="is-compact" :title="process.processId ?? undefined">{{ formatNullable(process.processId) }}</td>
                                     <td class="is-compact" :title="process.baseUrl ?? undefined">{{ formatNullable(process.baseUrl) }}</td>
                                     <td>{{ formatDate(process.startedAt) }}</td>
@@ -1759,6 +1838,25 @@ function startResize(e: MouseEvent) {
 .ta-runtime-batch-progress small {
   grid-column: 1 / -1;
   color: #5d7190;
+}
+.ta-runtime-batch-target-status {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  vertical-align: 1px;
+}
+.ta-runtime-batch-target-status.is-running {
+  background: #3b82f6;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 16%);
+}
+.ta-runtime-batch-target-status.is-succeeded {
+  background: #22c55e;
+}
+.ta-runtime-batch-target-status.is-failed {
+  background: #ef4444;
 }
 .ta-runtime-placeholder {
   display: flex;
