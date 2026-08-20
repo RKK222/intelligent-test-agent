@@ -21,6 +21,11 @@ public interface PublicAgentConfigRolloutRepository {
             AgentConfigRolloutScope scope,
             String scopeKey);
 
+    /** 超管诊断页读取最近的应用发布，活动任务优先。 */
+    List<PublicAgentConfigRolloutStatus> findRecentRolloutStatuses(
+            AgentConfigRolloutScope scope,
+            int limit);
+
     /** 查询一次 rollout 的全服务器 Git 同步、排空计数和最近错误。 */
     List<PublicAgentConfigRolloutServerStatus> findRolloutServerStatuses(String rolloutId);
 

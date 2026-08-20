@@ -28,7 +28,28 @@ public record OpencodeProcessStartupRequest(
         String configPath,
         Map<String, String> environment,
         String traceId,
-        boolean bindingRecovery) {
+        boolean bindingRecovery,
+        boolean sharedPublicConfigRequired) {
+
+    /** 兼容既有 binding 恢复调用；默认仍允许加载当前用户的公共个人预览。 */
+    public OpencodeProcessStartupRequest(
+            UserId userId,
+            OpencodeProcessId processId,
+            Instant createdAt,
+            Instant bindingCreatedAt,
+            LinuxServerId linuxServerId,
+            OpencodeContainerId containerId,
+            int port,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Map<String, String> environment,
+            String traceId,
+            boolean bindingRecovery) {
+        this(
+                userId, processId, createdAt, bindingCreatedAt, linuxServerId, containerId, port,
+                baseUrl, sessionPath, configPath, environment, traceId, bindingRecovery, false);
+    }
 
     /** 兼容既有调用；未显式标记时按首次分配执行 manager 容量校验。 */
     public OpencodeProcessStartupRequest(
@@ -57,6 +78,7 @@ public record OpencodeProcessStartupRequest(
                 configPath,
                 environment,
                 traceId,
+                false,
                 false);
     }
 

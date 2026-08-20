@@ -2382,7 +2382,8 @@ class AgentConfigApplicationServiceTest {
                         ADMIN,
                         "linux-1",
                         worktreeRoot.resolve("opencode").toString(),
-                        "trace-reload"))
+                        "trace-reload",
+                        false))
                 .thenReturn(new PersonalAgentConfigRuntimeReloadResult(true, "reloaded"));
         service.setPersonalRuntimeReloader(reloader);
 
@@ -2394,7 +2395,42 @@ class AgentConfigApplicationServiceTest {
                 ADMIN,
                 "linux-1",
                 worktreeRoot.resolve("opencode").toString(),
-                "trace-reload");
+                "trace-reload",
+                false);
+    }
+
+    @Test
+    void reloadPublicPersonalRuntimeRequestsRestartForDirtyToolTypeScript() throws Exception {
+        Path worktreeRoot = root.resolve("worktrees/public-usr_admin");
+        Files.createDirectories(worktreeRoot.resolve("opencode/tools"));
+        Files.writeString(worktreeRoot.resolve("opencode/opencode.jsonc"), "{}");
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public", AgentConfigScope.PUBLIC, null, "linux-1",
+                "public-usr_admin", "public-usr_admin", worktreeRoot.toString(), ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE, NOW, NOW));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.stagedAfterAdd = " M opencode/tools/workspace-git.ts";
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+        PersonalAgentConfigRuntimeReloader reloader = mock(PersonalAgentConfigRuntimeReloader.class);
+        when(reloader.reloadPublicPreview(
+                        ADMIN, "linux-1", worktreeRoot.resolve("opencode").toString(), "trace-tool", true))
+                .thenReturn(new PersonalAgentConfigRuntimeReloadResult(true, "restarted"));
+        service.setPersonalRuntimeReloader(reloader);
+
+        PersonalAgentConfigRuntimeReloadResult result = service.reloadPublicPersonalRuntime(
+                "agw_public", ADMIN, "trace-tool");
+
+        assertThat(result.reloaded()).isTrue();
+        verify(reloader).reloadPublicPreview(
+                ADMIN, "linux-1", worktreeRoot.resolve("opencode").toString(), "trace-tool", true);
     }
 
     private AgentConfigApplicationService service(Map<String, String> parameters) {

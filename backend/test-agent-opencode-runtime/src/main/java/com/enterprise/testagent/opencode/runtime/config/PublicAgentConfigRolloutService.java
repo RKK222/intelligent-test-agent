@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRuntimeImpactResolver;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
@@ -40,6 +41,7 @@ import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopRequest;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopService;
+import com.enterprise.testagent.opencode.runtime.process.RuntimeManagementCommandService;
 import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
@@ -54,6 +56,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -85,6 +88,8 @@ public class PublicAgentConfigRolloutService
     private final Duration retryDelay;
     private OpencodeProcessConfigLinkService configLinkService;
     private OpencodeProcessStopService stopService;
+    private PublicAgentConfigRuntimeImpactResolver runtimeImpactResolver;
+    private RuntimeManagementCommandService runtimeManagementCommandService;
     private UserNotificationApplicationService notificationService;
 
     /** 公共发布排空时把个人预览指针恢复到共享运行副本；方法注入保持既有测试构造器兼容。 */
@@ -97,6 +102,19 @@ public class PublicAgentConfigRolloutService
     @Autowired
     void setStopService(OpencodeProcessStopService stopService) {
         this.stopService = Objects.requireNonNull(stopService, "stopService must not be null");
+    }
+
+    /** Git 提交差异由工作区模块解释，运行时只根据影响结论选择 dispose 或受管重启。 */
+    @Autowired(required = false)
+    void setRuntimeImpactResolver(PublicAgentConfigRuntimeImpactResolver resolver) {
+        this.runtimeImpactResolver = Objects.requireNonNull(resolver, "resolver must not be null");
+    }
+
+    /** Tool 脚本发布重启复用运行管理已封装的公共停止、启动与 health 确认。 */
+    @Autowired(required = false)
+    void setRuntimeManagementCommandService(@Lazy RuntimeManagementCommandService commandService) {
+        this.runtimeManagementCommandService = Objects.requireNonNull(
+                commandService, "commandService must not be null");
     }
 
     /** dispose 生命周期只通过通用通知应用服务写入，不让运行时模块直接访问通知仓储。 */
@@ -374,6 +392,14 @@ public class PublicAgentConfigRolloutService
         return repository.findLatestRolloutStatus(AgentConfigRolloutScope.PUBLIC, null)
                 .map(status -> status.withServers(
                         repository.findRolloutServerStatuses(status.rolloutId())));
+    }
+
+    @Override
+    public List<PublicAgentConfigRolloutStatus> recentApplicationRolloutStatuses() {
+        return repository.findRecentRolloutStatuses(AgentConfigRolloutScope.APPLICATION, 20).stream()
+                .map(status -> status.withServers(
+                        repository.findRolloutServerStatuses(status.rolloutId())))
+                .toList();
     }
 
     @Override
@@ -868,7 +894,12 @@ public class PublicAgentConfigRolloutService
                 retry(target, "MANAGER_SNAPSHOT_UNAVAILABLE", now);
                 return;
             }
+            boolean processRestartRequired = !target.forceStop() && requiresProcessRestart(target);
             if (presence == ProcessPresence.ABSENT) {
+                if (processRestartRequired) {
+                    resumeToolModuleRestart(target, now);
+                    return;
+                }
                 // manager 明确确认目标端口已不存在时等同于已经释放，无需向死地址重复调用 dispose。
                 markTargetDisposed(target);
                 return;
@@ -914,6 +945,10 @@ public class PublicAgentConfigRolloutService
                 retry(target, "PROCESS_CONFIG_IDENTITY_CHANGED", Instant.now());
                 return;
             }
+            if (processRestartRequired) {
+                restartToolModuleTarget(target, now);
+                return;
+            }
             JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
                             node, "POST", "/global/dispose", null, null, Map.of(), Map.of(),
                             target.traceId()))
@@ -931,6 +966,191 @@ public class PublicAgentConfigRolloutService
         } catch (Exception exception) {
             retry(target, safeError(exception.getMessage()), now);
         }
+    }
+
+    private boolean requiresProcessRestart(PublicAgentConfigRolloutTarget target) {
+        return runtimeImpactResolver != null
+                && (target.configScope() == AgentConfigRolloutScope.PUBLIC
+                        || target.configScope() == AgentConfigRolloutScope.APPLICATION)
+                && runtimeImpactResolver.requiresProcessRestart(
+                        target.configScope(), target.scopeKey(), target.previousCommitHash(), target.commitHash());
+    }
+
+    /**
+     * Tool 模块 URL 被 Node/Bun 的进程级 ESM 缓存后，原生 dispose 无法重新导入同一路径；
+     * 这里固定旧进程身份后复用公共受管重启，并强制新进程从共享发布副本启动。
+     */
+    private void restartToolModuleTarget(PublicAgentConfigRolloutTarget target, Instant now) {
+        if (runtimeManagementCommandService == null) {
+            retry(target, "PROCESS_RESTART_SERVICE_UNAVAILABLE", now);
+            return;
+        }
+        Optional<OpencodeServerProcess> process = exactTargetProcess(target);
+        if (process.isEmpty()) {
+            retry(target, "PROCESS_IDENTITY_CHANGED", now);
+            return;
+        }
+        runtimeManagementCommandService.restartTrackedProcess(
+                process.get(), target.traceId(), requiresSharedPublicConfig(target));
+        completeToolRestartAfterCatalogProbe(target, now);
+    }
+
+    /**
+     * 停止成功、重新拉起失败时旧 manager 快照已经消失；根据同一用户当前 binding 恢复启动，
+     * 已由本次操作拉起且仍指向共享副本的实例则直接幂等收口。
+     */
+    private void resumeToolModuleRestart(PublicAgentConfigRolloutTarget target, Instant now) {
+        if (runtimeManagementCommandService == null || target.userId() == null || target.userId().isBlank()) {
+            retry(target, "PROCESS_RESTART_RECOVERY_UNAVAILABLE", now);
+            return;
+        }
+        Optional<OpencodeServerProcess> bound = currentBoundProcess(target);
+        if (bound.isEmpty()) {
+            // 用户已经解绑或迁移到其它坐标；旧实例消失后下次受管启动会读取已同步配置。
+            markTargetDisposed(target);
+            return;
+        }
+        OpencodeServerProcess process = bound.get();
+        if (!target.linuxServerId().equals(process.linuxServerId().value())
+                || !target.containerId().equals(process.containerId().value())
+                || target.port() != process.port()) {
+            markTargetDisposed(target);
+            return;
+        }
+        if (process.status() == OpencodeServerProcessStatus.RUNNING
+                && !Objects.equals(
+                        normalizedStartedAt(target.processStartedAt()),
+                        normalizedStartedAt(process.startedAt()))) {
+            boolean configReady = !requiresSharedPublicConfig(target)
+                    || (configLinkService != null
+                            && configLinkService.isLinkedToShared(process.sessionPath(), process.configPath()));
+            if (configReady) {
+                if (toolCatalogHealthy(target, process)) {
+                    markTargetDisposed(target);
+                } else {
+                    retry(target, "TOOL_CATALOG_INVALID", now);
+                }
+                return;
+            }
+        }
+        if (process.status() == OpencodeServerProcessStatus.RUNNING
+                && !currentProcessSessionsIdle(target, process, now)) {
+            return;
+        }
+        if (requiresSharedPublicConfig(target)
+                && !restoreSharedConfigLink(process.sessionPath(), process.configPath())) {
+            retry(target, "PROCESS_CONFIG_IDENTITY_CHANGED", now);
+            return;
+        }
+        runtimeManagementCommandService.restartTrackedProcess(
+                process, target.traceId(), requiresSharedPublicConfig(target));
+        completeToolRestartAfterCatalogProbe(target, now);
+    }
+
+    /**
+     * 受管重启完成后必须用新进程读取一次 Tool 目录；仅 health 正常不足以证明 TS/JS 导入成功。
+     * 失败目标不置终态，交给 {@link #drainTargets()} 的周期任务持续补偿并暴露给管理员。
+     */
+    private void completeToolRestartAfterCatalogProbe(PublicAgentConfigRolloutTarget target, Instant now) {
+        Optional<OpencodeServerProcess> replacement = currentBoundProcess(target)
+                .filter(process -> process.status() == OpencodeServerProcessStatus.RUNNING)
+                .filter(process -> !Objects.equals(
+                        normalizedStartedAt(target.processStartedAt()),
+                        normalizedStartedAt(process.startedAt())));
+        if (replacement.isEmpty()) {
+            retry(target, "PROCESS_RESTART_NOT_OBSERVED", now);
+            return;
+        }
+        if (!toolCatalogHealthy(target, replacement.get())) {
+            retry(target, "TOOL_CATALOG_INVALID", now);
+            return;
+        }
+        markTargetDisposed(target);
+    }
+
+    /** 对本次发布实际关联过的每个 workspace 查询 Tool ID，数组响应表示新进程已完成模块目录装载。 */
+    private boolean toolCatalogHealthy(PublicAgentConfigRolloutTarget target, OpencodeServerProcess process) {
+        ExecutionNode node = new ExecutionNode(
+                new ExecutionNodeId("node_" + target.targetId().replace("act_", "") + "_tool_audit"),
+                process.baseUrl(),
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                Instant.now());
+        List<String> rootPaths = repository.findTargetWorkspaceRootPaths(target.targetId());
+        if (rootPaths.isEmpty()) {
+            JsonNode tools = runtime.runtime(new AgentRuntimeCommand(
+                            node, "GET", "/experimental/tool/ids", null, null, Map.of(), null,
+                            target.traceId()))
+                    .map(AgentRuntimeResult::body)
+                    .block(RUNTIME_TIMEOUT);
+            return tools != null && tools.isArray() && !tools.isEmpty();
+        }
+        for (String rootPath : rootPaths) {
+            if (!renewTargetLease(target)) {
+                return false;
+            }
+            String directory = workspacePathResolver.resolve(rootPath).toString();
+            JsonNode tools = runtime.runtime(new AgentRuntimeCommand(
+                            node, "GET", "/experimental/tool/ids", directory, null, Map.of(), null,
+                            target.traceId()))
+                    .map(AgentRuntimeResult::body)
+                    .block(RUNTIME_TIMEOUT);
+            if (tools == null || !tools.isArray() || tools.isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean requiresSharedPublicConfig(PublicAgentConfigRolloutTarget target) {
+        return target.configScope() == AgentConfigRolloutScope.PUBLIC;
+    }
+
+    /**
+     * 重启恢复期间可能已有新代次进程占用原 binding；仍按发布目标的工作区逐一确认空闲，
+     * 禁止仅凭旧 manager 快照消失就打断新进程中的会话。
+     */
+    private boolean currentProcessSessionsIdle(
+            PublicAgentConfigRolloutTarget target,
+            OpencodeServerProcess process,
+            Instant now) {
+        ExecutionNode node = new ExecutionNode(
+                new ExecutionNodeId("node_" + target.targetId().replace("act_", "") + "_recovery"),
+                process.baseUrl(),
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                now);
+        for (String rootPath : repository.findTargetWorkspaceRootPaths(target.targetId())) {
+            if (!renewTargetLease(target)) {
+                return false;
+            }
+            String directory = workspacePathResolver.resolve(rootPath).toString();
+            JsonNode status = runtime.runtime(new AgentRuntimeCommand(
+                            node, "GET", "/session/status", directory, null, Map.of(), null, target.traceId()))
+                    .map(AgentRuntimeResult::body)
+                    .block(RUNTIME_TIMEOUT);
+            if (!renewTargetLease(target)) {
+                return false;
+            }
+            SessionActivity activity = sessionActivity(status);
+            if (activity == SessionActivity.BUSY) {
+                retry(target, "SESSION_RUNNING", now);
+                return false;
+            }
+            if (activity == SessionActivity.INVALID) {
+                retry(target, "SESSION_STATUS_INVALID", now);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Optional<OpencodeServerProcess> currentBoundProcess(PublicAgentConfigRolloutTarget target) {
+        return processRepository.findUserBinding(new UserId(target.userId()), OPENCODE_AGENT_ID)
+                .flatMap(binding -> processRepository.findOpencodeServerProcessById(binding.processId()))
+                .filter(process -> target.userId().equals(process.userId().value()));
     }
 
     private boolean renewTargetLease(PublicAgentConfigRolloutTarget target) {

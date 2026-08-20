@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from "vue";
+import { computed, inject, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh, Search } from "@element-plus/icons-vue";
 import { ElMessageBox } from "element-plus";
@@ -63,6 +63,8 @@ type BatchManagedProcessTarget = {
   containerId: string;
   port: number;
   label: string;
+  pid?: number | null;
+  startedAt?: string | null;
 };
 
 type BatchManagedProcessFailure = {
@@ -77,6 +79,22 @@ type BatchManagedProcessResult = {
   succeeded: number;
   failures: BatchManagedProcessFailure[];
 };
+
+type BatchManagedProcessProgress = {
+  version: 1;
+  initiatedByUserId: string;
+  action: ManagedProcessActionKind;
+  targets: BatchManagedProcessTarget[];
+  nextIndex: number;
+  succeeded: number;
+  failures: BatchManagedProcessFailure[];
+  activeTargetKey?: string | null;
+  retryAfter?: number | null;
+  startedAt: number;
+};
+
+const BATCH_PROGRESS_STORAGE_PREFIX = "testagent.runtime-management.batch.v1";
+const BATCH_RETRY_GRACE_MS = 30_000;
 
 const processStatusOptions = ["RUNNING"];
 const metricsSourceHelp =
@@ -100,6 +118,8 @@ const activeManagedProcessAction = ref<ManagedProcessActionRequest | null>(null)
 const selectedManagedProcessKeys = ref<Set<string>>(new Set());
 const batchManagedProcessAction = ref<ManagedProcessActionKind | null>(null);
 const batchManagedProcessResult = ref<BatchManagedProcessResult | null>(null);
+const batchManagedProcessProgress = ref<BatchManagedProcessProgress | null>(null);
+const batchRunnerActive = ref(false);
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => ({
@@ -234,6 +254,16 @@ const batchManagedProcessResultMessage = computed(() => {
     .join("；");
   return `${summary}失败项：${details}`;
 });
+const batchManagedProcessProgressMessage = computed(() => {
+  const progress = batchManagedProcessProgress.value;
+  if (!progress) {
+    return "";
+  }
+  const actionLabel = progress.action === "restart" ? "重启" : "关闭";
+  const current = progress.targets[progress.nextIndex];
+  const currentMessage = current ? `；当前：${current.label}` : "";
+  return `批量${actionLabel}进行中：已完成 ${progress.nextIndex} / ${progress.targets.length}，成功 ${progress.succeeded}，失败 ${progress.failures.length}${currentMessage}`;
+});
 const totalPages = computed(() => Math.max(1, Math.ceil((processPage.value?.total ?? 0) / userProcessSize.value)));
 const summaryCards = computed(() => {
   const item = summary.value;
@@ -337,7 +367,9 @@ const ownedManagedProcessTargets = computed<BatchManagedProcessTarget[]>(() => {
         key,
         containerId,
         port: process.port,
-        label: `${processOwner(process)}（${containerId}:${process.port}）`
+        label: `${processOwner(process)}（${containerId}:${process.port}）`,
+        pid: process.pid,
+        startedAt: process.startedAt
       });
     }
   }
@@ -361,6 +393,16 @@ watch(ownedManagedProcessTargets, targets => {
   if (retained.size !== selectedManagedProcessKeys.value.size) {
     selectedManagedProcessKeys.value = retained;
   }
+});
+
+watch(overview, value => {
+  if (value && batchManagedProcessProgress.value) {
+    void resumePersistedBatchManagedProcessAction();
+  }
+});
+
+onMounted(() => {
+  restoreBatchManagedProcessProgress();
 });
 
 function applyFilters() {
@@ -708,29 +750,176 @@ async function runBatchManagedProcessAction(action: ManagedProcessActionKind) {
 
   actionErrorMessage.value = "";
   batchManagedProcessResult.value = null;
-  const failures: BatchManagedProcessFailure[] = [];
-  let succeeded = 0;
-  // 控制命令串行发送，避免同一批次同时挤占 manager 与启动健康检查资源。
-  for (const target of targets) {
-    try {
-      if (action === "restart") {
-        await api.restartOpencodeRuntimeManagedProcess(target.containerId, target.port);
-      } else {
-        await api.stopOpencodeRuntimeManagedProcess(target.containerId, target.port);
-        removeStoppedManagedProcess({ action, containerId: target.containerId, port: target.port });
-      }
-      succeeded += 1;
-    } catch (error) {
-      failures.push({
-        key: target.key,
-        label: target.label,
-        message: formatProcessActionError(error)
+  setBatchManagedProcessProgress({
+    version: 1,
+    initiatedByUserId: props.currentUser?.userId ?? "",
+    action,
+    targets,
+    nextIndex: 0,
+    succeeded: 0,
+    failures: [],
+    activeTargetKey: null,
+    retryAfter: null,
+    startedAt: Date.now()
+  });
+  await executeBatchManagedProcessProgress();
+}
+
+function batchProgressStorageKey() {
+  const userId = props.currentUser?.userId?.trim();
+  return userId ? `${BATCH_PROGRESS_STORAGE_PREFIX}:${userId}` : "";
+}
+
+function setBatchManagedProcessProgress(progress: BatchManagedProcessProgress) {
+  batchManagedProcessProgress.value = progress;
+  const key = batchProgressStorageKey();
+  if (!key || typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    localStorage.setItem(key, JSON.stringify(progress));
+  } catch {
+    // 隐私模式或配额异常不阻断当前页面内仍可继续的批量操作。
+  }
+}
+
+function clearPersistedBatchManagedProcessProgress() {
+  const key = batchProgressStorageKey();
+  if (key && typeof localStorage !== "undefined") {
+    localStorage.removeItem(key);
+  }
+  batchManagedProcessProgress.value = null;
+}
+
+function restoreBatchManagedProcessProgress() {
+  const key = batchProgressStorageKey();
+  if (!key || typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? "null") as BatchManagedProcessProgress | null;
+    if (!isValidBatchManagedProcessProgress(parsed)) {
+      localStorage.removeItem(key);
+      return;
+    }
+    batchManagedProcessAction.value = parsed.action;
+    batchManagedProcessResult.value = null;
+    batchManagedProcessProgress.value = parsed;
+    if (overview.value) {
+      void resumePersistedBatchManagedProcessAction();
+    }
+  } catch {
+    localStorage.removeItem(key);
+  }
+}
+
+function isValidBatchManagedProcessProgress(value: BatchManagedProcessProgress | null): value is BatchManagedProcessProgress {
+  return value?.version === 1
+    && value.initiatedByUserId === props.currentUser?.userId
+    && (value.action === "restart" || value.action === "stop")
+    && Array.isArray(value.targets)
+    && value.targets.length > 0
+    && Number.isInteger(value.nextIndex)
+    && value.nextIndex >= 0
+    && value.nextIndex <= value.targets.length
+    && Array.isArray(value.failures);
+}
+
+async function resumePersistedBatchManagedProcessAction() {
+  const progress = batchManagedProcessProgress.value;
+  if (!progress || batchRunnerActive.value) {
+    return;
+  }
+  if (progress.activeTargetKey) {
+    const target = progress.targets[progress.nextIndex];
+    const current = ownedManagedProcessTargets.value.find(item => item.key === target?.key);
+    const commandAlreadyApplied = progress.action === "stop"
+      ? !current
+      : Boolean(current && (
+          (target?.pid != null && current.pid !== target.pid)
+          || (target?.startedAt && current.startedAt !== target.startedAt)
+        ));
+    if (commandAlreadyApplied) {
+      setBatchManagedProcessProgress({
+        ...progress,
+        nextIndex: progress.nextIndex + 1,
+        succeeded: progress.succeeded + 1,
+        activeTargetKey: null,
+        retryAfter: null
       });
+    } else if ((progress.retryAfter ?? 0) > Date.now()) {
+      window.setTimeout(
+        () => void resumePersistedBatchManagedProcessAction(),
+        Math.max(1, (progress.retryAfter ?? 0) - Date.now())
+      );
+      return;
     }
   }
-  batchManagedProcessResult.value = { action, total: targets.length, succeeded, failures };
-  selectedManagedProcessKeys.value = new Set(failures.map(failure => failure.key));
+  await executeBatchManagedProcessProgress();
+}
+
+async function executeBatchManagedProcessProgress() {
+  if (batchRunnerActive.value) {
+    return;
+  }
+  batchRunnerActive.value = true;
+  try {
+    // 控制命令串行发送；每项发出前持久化游标，刷新页面后可核对结果并继续剩余目标。
+    while (batchManagedProcessProgress.value) {
+      const progress = batchManagedProcessProgress.value;
+      if (progress.nextIndex >= progress.targets.length) {
+        finishBatchManagedProcessProgress(progress);
+        return;
+      }
+      const target = progress.targets[progress.nextIndex];
+      setBatchManagedProcessProgress({
+        ...progress,
+        activeTargetKey: target.key,
+        retryAfter: Date.now() + BATCH_RETRY_GRACE_MS
+      });
+      let failure: BatchManagedProcessFailure | null = null;
+      try {
+        if (progress.action === "restart") {
+          await api.restartOpencodeRuntimeManagedProcess(target.containerId, target.port);
+        } else {
+          await api.stopOpencodeRuntimeManagedProcess(target.containerId, target.port);
+          removeStoppedManagedProcess({
+            action: progress.action,
+            containerId: target.containerId,
+            port: target.port
+          });
+        }
+      } catch (error) {
+        failure = { key: target.key, label: target.label, message: formatProcessActionError(error) };
+      }
+      const latest = batchManagedProcessProgress.value;
+      if (!latest) {
+        return;
+      }
+      setBatchManagedProcessProgress({
+        ...latest,
+        nextIndex: latest.nextIndex + 1,
+        succeeded: latest.succeeded + (failure ? 0 : 1),
+        failures: failure ? [...latest.failures, failure] : latest.failures,
+        activeTargetKey: null,
+        retryAfter: null
+      });
+    }
+  } finally {
+    batchRunnerActive.value = false;
+  }
+}
+
+function finishBatchManagedProcessProgress(progress: BatchManagedProcessProgress) {
+  batchManagedProcessResult.value = {
+    action: progress.action,
+    total: progress.targets.length,
+    succeeded: progress.succeeded,
+    failures: progress.failures
+  };
+  selectedManagedProcessKeys.value = new Set(progress.failures.map(failure => failure.key));
   batchManagedProcessAction.value = null;
+  clearPersistedBatchManagedProcessProgress();
   refetchRuntimeManagementAfterAction();
 }
 
@@ -894,6 +1083,15 @@ function startResize(e: MouseEvent) {
         :role="batchManagedProcessResult?.failures.length ? 'alert' : 'status'"
       >
         {{ batchManagedProcessResultMessage }}
+      </div>
+      <div v-if="batchManagedProcessProgressMessage" class="ta-runtime-batch-progress" role="status">
+        <span>{{ batchManagedProcessProgressMessage }}</span>
+        <progress
+          :value="batchManagedProcessProgress?.nextIndex ?? 0"
+          :max="batchManagedProcessProgress?.targets.length ?? 1"
+          aria-label="批量 OpenCode 进程操作进度"
+        ></progress>
+        <small>刷新页面后会自动核对当前项，并继续未执行的用户。</small>
       </div>
 
       <div v-if="isLoading" class="ta-runtime-placeholder">正在加载运行状态...</div>
@@ -1541,6 +1739,26 @@ function startResize(e: MouseEvent) {
   border-color: #b3e19d;
   background: #f0f9eb;
   color: #397826;
+}
+.ta-runtime-batch-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 280px);
+  align-items: center;
+  gap: 6px 12px;
+  flex-shrink: 0;
+  padding: 9px 12px;
+  border: 1px solid #a3c7f5;
+  border-radius: 8px;
+  background: #f2f8ff;
+  color: #245b9e;
+  font-size: 12px;
+}
+.ta-runtime-batch-progress progress {
+  width: 100%;
+}
+.ta-runtime-batch-progress small {
+  grid-column: 1 / -1;
+  color: #5d7190;
 }
 .ta-runtime-placeholder {
   display: flex;

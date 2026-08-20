@@ -18,7 +18,30 @@ public record PublicAgentConfigRolloutStatus(
         Instant createdAt,
         Instant updatedAt,
         Instant completedAt,
-        List<PublicAgentConfigRolloutServerStatus> servers) {
+        List<PublicAgentConfigRolloutServerStatus> servers,
+        AgentConfigRolloutScope configScope,
+        String scopeKey) {
+
+    /** 兼容只展示公共发布的既有调用。 */
+    public PublicAgentConfigRolloutStatus(
+            String rolloutId,
+            String status,
+            String branch,
+            String commitHash,
+            String failureReason,
+            String supersedesRolloutId,
+            String supersededByRolloutId,
+            String supersedeReason,
+            Instant createdAt,
+            Instant updatedAt,
+            Instant completedAt,
+            List<PublicAgentConfigRolloutServerStatus> servers) {
+        this(
+                rolloutId, status, branch, commitHash, failureReason,
+                supersedesRolloutId, supersededByRolloutId, supersedeReason,
+                createdAt, updatedAt, completedAt, servers,
+                AgentConfigRolloutScope.PUBLIC, null);
+    }
 
     public PublicAgentConfigRolloutStatus {
         servers = servers == null ? List.of() : List.copyOf(servers);
@@ -43,6 +66,8 @@ public record PublicAgentConfigRolloutStatus(
                 createdAt,
                 updatedAt,
                 completedAt,
-                serverStatuses);
+                serverStatuses,
+                configScope,
+                scopeKey);
     }
 }

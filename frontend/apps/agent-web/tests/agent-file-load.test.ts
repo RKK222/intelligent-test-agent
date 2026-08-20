@@ -3,6 +3,7 @@ import {
   agentConfigMutationReloadTarget,
   agentFileInfo,
   agentTabPath,
+  requiresManagedRestartForAgentConfigFile,
   shouldReloadPersonalRuntimeCatalog
 } from "../src/components/agentFileLoad";
 
@@ -53,7 +54,17 @@ describe("Agent 文件标签路由", () => {
     expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "agents/reviewer.md")).toBe(true);
     expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "skills/test-design/SKILL.md")).toBe(true);
     expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "opencode.jsonc")).toBe(true);
+    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "tools/workspace-git.ts")).toBe(true);
+    expect(shouldReloadPersonalRuntimeCatalog("WORKSPACE", "tool/bank-query.js")).toBe(true);
     expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "skills/test-design/rules/check.md")).toBe(false);
+    expect(shouldReloadPersonalRuntimeCatalog("PUBLIC", "tools/helpers/client.ts")).toBe(true);
+  });
+
+  it("Tool TS/JS 入口和依赖都需要受管重启，并兼容应用发布的 .opencode 路径", () => {
+    expect(requiresManagedRestartForAgentConfigFile("PUBLIC", "tools/workspace-git.ts")).toBe(true);
+    expect(requiresManagedRestartForAgentConfigFile("WORKSPACE", ".opencode/tool/bank-query.js")).toBe(true);
+    expect(requiresManagedRestartForAgentConfigFile("WORKSPACE", "tools/helpers/client.ts")).toBe(true);
+    expect(requiresManagedRestartForAgentConfigFile("PUBLIC", "agents/reviewer.md")).toBe(false);
   });
 
   it("从 Agent/Skill 模板的多文件变更中只选择定义文件并保留个人路由", () => {

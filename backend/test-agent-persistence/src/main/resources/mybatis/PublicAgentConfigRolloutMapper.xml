@@ -60,6 +60,9 @@
             <arg column="lease_token" javaType="java.lang.String"/>
             <arg column="trace_id" javaType="java.lang.String"/>
             <arg column="force_stop" javaType="_boolean"/>
+            <arg column="previous_commit_hash" javaType="java.lang.String"/>
+            <arg column="commit_hash" javaType="java.lang.String"/>
+            <arg column="scope_key" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
     <resultMap id="WorktreeRowMap" type="com.enterprise.testagent.persistence.mybatis.AgentConfigRolloutWorktreeRow">
@@ -89,6 +92,8 @@
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
             <arg column="completed_at" javaType="java.time.Instant"/>
+            <arg column="config_scope" javaType="java.lang.String"/>
+            <arg column="scope_key" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
     <resultMap id="RolloutServerStatusRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutServerStatusRow">
@@ -145,7 +150,7 @@
     <select id="findLatestRolloutStatus" resultMap="RolloutStatusRowMap">
         select rollout_id, status, branch, commit_hash, failure_reason,
                supersedes_rollout_id, superseded_by_rollout_id, supersede_reason,
-               created_at, updated_at, completed_at
+               created_at, updated_at, completed_at, config_scope, scope_key
         from public_agent_config_rollouts
         where config_scope = #{scope}
         <choose>
@@ -159,6 +164,17 @@
         order by case when status in ('PREPARING', 'DRAINING') then 0 else 1 end,
                  created_at desc
         limit 1
+    </select>
+
+    <select id="findRecentRolloutStatuses" resultMap="RolloutStatusRowMap">
+        select rollout_id, status, branch, commit_hash, failure_reason,
+               supersedes_rollout_id, superseded_by_rollout_id, supersede_reason,
+               created_at, updated_at, completed_at, config_scope, scope_key
+        from public_agent_config_rollouts
+        where config_scope = #{scope}
+        order by case when status in ('PREPARING', 'DRAINING') then 0 else 1 end,
+                 created_at desc
+        limit #{limit}
     </select>
 
     <select id="findRolloutServerIds" resultType="java.lang.String">
@@ -439,7 +455,8 @@
         select t.target_id, t.rollout_id, r.config_scope, t.user_id,
                t.linux_server_id, t.container_id, t.port, t.process_pid,
                t.process_started_at, t.base_url, t.retry_count,
-               t.lease_until, t.lease_token, r.trace_id, t.force_stop
+               t.lease_until, t.lease_token, r.trace_id, t.force_stop,
+               r.previous_commit_hash, r.commit_hash, r.scope_key
         from public_agent_config_rollout_targets t
         join public_agent_config_rollouts r on r.rollout_id = t.rollout_id
         where t.linux_server_id = #{linuxServerId}
@@ -704,7 +721,8 @@
     <select id="findClaimableTargets" resultMap="TargetRowMap">
         select t.target_id, t.rollout_id, r.config_scope, t.user_id, t.linux_server_id, t.container_id, t.port,
                t.process_pid, t.process_started_at, t.base_url,
-               t.retry_count, t.lease_until, t.lease_token, r.trace_id, t.force_stop
+               t.retry_count, t.lease_until, t.lease_token, r.trace_id, t.force_stop,
+               r.previous_commit_hash, r.commit_hash, r.scope_key
         from public_agent_config_rollout_targets t
         join public_agent_config_rollouts r
           on r.rollout_id = t.rollout_id

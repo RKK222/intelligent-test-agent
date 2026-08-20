@@ -24,6 +24,7 @@ import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindin
 import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
+import com.enterprise.testagent.opencode.runtime.process.RuntimeManagementCommandService;
 import com.fasterxml.jackson.databind.node.BooleanNode;
 import java.time.Instant;
 import java.util.Optional;
@@ -69,6 +70,25 @@ class PersonalAgentConfigRuntimeReloadServiceTest {
         assertThat(command.getValue().method()).isEqualTo("POST");
         assertThat(command.getValue().path()).isEqualTo("/global/dispose");
         assertThat(command.getValue().node().baseUrl()).isEqualTo(process.baseUrl());
+    }
+
+    @Test
+    void restartsManagedProcessInsteadOfDisposingWhenPublicToolModuleChanged() {
+        OpencodeServerProcess process = process("linux-1", "/session/usr-1/.testagent-runtime/current-public-config");
+        RuntimeManagementCommandService commandService = mock(RuntimeManagementCommandService.class);
+        service.configureRuntimeManagementCommandService(commandService);
+        when(repository.findUserBinding(USER_ID, "opencode")).thenReturn(Optional.of(binding()));
+        when(repository.findOpencodeServerProcessById(PROCESS_ID)).thenReturn(Optional.of(process));
+        when(configLinkService.isManagedConfigPath(process.sessionPath(), process.configPath())).thenReturn(true);
+
+        var result = service.reloadPublicPreview(
+                USER_ID, "linux-1", "/worktrees/usr-1/opencode", "trace-1", true);
+
+        assertThat(result.reloaded()).isTrue();
+        assertThat(result.message()).contains("受管重启");
+        verify(configLinkService).switchTo("/worktrees/usr-1/opencode", process.configPath());
+        verify(commandService).restartTrackedProcess(process, "trace-1", false);
+        verify(runtime, never()).runtime(any());
     }
 
     @Test

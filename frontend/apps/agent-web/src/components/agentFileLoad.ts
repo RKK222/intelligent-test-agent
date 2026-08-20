@@ -56,7 +56,18 @@ export function shouldReloadPersonalRuntimeCatalog(
   const personalPreviewScope = scope === "PUBLIC" || scope === "WORKSPACE";
   return personalPreviewScope && (/(^|\/)opencode\.jsonc?$/i.test(normalized)
     || /(^|\/)agents\/.*\.md$/i.test(normalized)
-    || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized));
+    || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized)
+    || requiresManagedRestartForAgentConfigFile(scope, normalized));
+}
+
+/** OpenCode 1.18.4 会按同一 file URL 缓存一级 Tool 模块，dispose 不能替换已导入实现。 */
+export function requiresManagedRestartForAgentConfigFile(
+  scope: "PUBLIC" | "WORKSPACE",
+  path: string
+): boolean {
+  const normalized = path.replaceAll("\\", "/");
+  if (scope !== "PUBLIC" && scope !== "WORKSPACE") return false;
+  return /(^|\/)(?:\.opencode\/)?tools?\/.+\.(?:js|ts)$/i.test(normalized);
 }
 
 /**

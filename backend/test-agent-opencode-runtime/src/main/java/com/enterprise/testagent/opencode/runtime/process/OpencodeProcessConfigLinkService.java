@@ -87,6 +87,12 @@ public class OpencodeProcessConfigLinkService {
         }
     }
 
+    /** 判断受管指针是否已经指向共享公共配置，用于发布重启崩溃后的幂等收口。 */
+    public boolean isLinkedToShared(String sessionPath, String targetConfigPath) {
+        requireManagedTarget(sessionPath, targetConfigPath);
+        return isLinkedTo(sharedConfigPath().toString(), targetConfigPath);
+    }
+
     private Path sharedConfigPath() {
         String source = commonParameterValues.resolvedValue(PUBLIC_CONFIG_PARAMETER)
                 .map(String::trim)

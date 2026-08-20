@@ -19,6 +19,10 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("scope") String scope,
             @Param("scopeKey") String scopeKey);
 
+    List<PublicAgentConfigRolloutStatusRow> findRecentRolloutStatuses(
+            @Param("scope") String scope,
+            @Param("limit") int limit);
+
     List<PublicAgentConfigRolloutServerStatusRow> findRolloutServerStatuses(
             @Param("rolloutId") String rolloutId);
 

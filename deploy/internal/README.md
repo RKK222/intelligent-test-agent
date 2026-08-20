@@ -424,7 +424,7 @@ worker 不再从 OpenCode 源码生成 Node bundle，而是下载并校验上游
 
 这套基线覆盖使用官方 `tool(...)`、schema、SDK 类型和 Effect/Zod 的 Tool。`axios`、数据库驱动或企业私有 SDK 等任意业务依赖不会被猜测加入；新增这类 import 时，必须同步修改 `opencode-node-runtime.package.json` 和 lockfile，在外网 Mac 重新打完整企业包。升级依赖不能只替换 Tool 文件，必须同时解压新 programs、导入新 worker 镜像并重启 worker；标准 `deploy-internal-release.sh` 已按该顺序执行。
 
-Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，再调用 OpenCode 原生 `/global/dispose`。全局 [opencode-models.json](opencode-models.json) 是独立的 models.dev 元数据输入，通过 worker 的 `OPENCODE_MODELS_PATH` 继承，不放入上述任一配置目录；公共 [opencode.jsonc.example](opencode.jsonc.example) 负责代理、模型默认值和 `code_analysis` MCP。官方程序启动器只做离线依赖链接（含共享工作区祖先目录投影）、离线开关、`subagent_depth=2` 和信号转发，不包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
+Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，普通 Agent/Skill/JSONC 调用 OpenCode 原生 `/global/dispose`，公共 `opencode/tool[s]/**/*.js|ts` 或应用 `.opencode/tool[s]/**/*.js|ts` 变化则复用平台公共停止/启动程序，对受影响用户的进程执行受管重启，清除进程级 ESM 模块缓存。全局 [opencode-models.json](opencode-models.json) 是独立的 models.dev 元数据输入，通过 worker 的 `OPENCODE_MODELS_PATH` 继承，不放入上述任一配置目录；公共 [opencode.jsonc.example](opencode.jsonc.example) 负责代理、模型默认值和 `code_analysis` MCP。官方程序启动器只做离线依赖链接（含共享工作区祖先目录投影）、离线开关、`subagent_depth=2` 和信号转发，不包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
 
 ## 中转机与目标服务器交付目录
 

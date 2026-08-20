@@ -1673,6 +1673,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     listPublicAgentRepositories: () => request<PublicAgentRepositoryStatus[]>(`${agentConfigBase}/public/repositories`),
     getPublicAgentConfigRollout: () =>
       request<PublicAgentConfigRolloutStatus | null>(`${agentConfigBase}/public/rollout`),
+    getApplicationAgentConfigRollouts: () =>
+      request<PublicAgentConfigRolloutStatus[]>(`${agentConfigBase}/application/rollouts`),
     supersedePublicAgentConfigRollout: (payload: {
       activeRolloutId: string;
       branch: string;

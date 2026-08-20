@@ -17,6 +17,7 @@ const props = defineProps<{
 const api = inject<BackendApiClient>("api")!;
 const rows = ref<PublicAgentRepositoryStatus[]>([]);
 const rollout = ref<PublicAgentConfigRolloutStatus | null>(null);
+const applicationRollouts = ref<PublicAgentConfigRolloutStatus[]>([]);
 const loading = ref(false);
 const initializing = ref(false);
 const pulling = ref(false);
@@ -37,11 +38,17 @@ const supersedeReason = ref("");
 const supersedeErrorMessage = ref("");
 const supersedeBranchesLoading = ref(false);
 const closingTargetId = ref<string | null>(null);
+const restartingTargetId = ref<string | null>(null);
 let rolloutTimer: number | null = null;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const canSubmitInitialize = computed(() => !!targetRepository.value && !!selectedBranch.value && !initializing.value && !branchesLoading.value);
 const rolloutActive = computed(() => rollout.value?.status === "PREPARING" || rollout.value?.status === "DRAINING");
+const applicationRolloutActive = computed(() => applicationRollouts.value.some((item) =>
+  item.status === "PREPARING"
+  || item.status === "DRAINING"
+  || item.servers.some((server) => server.targetPending > 0)
+));
 const canSubmitPull = computed(() => !!selectedBranch.value && !pulling.value && !branchesLoading.value && !rolloutActive.value);
 const forceStopTargetCount = computed(() => rollout.value?.servers.reduce((total, server) => total + server.targetPending, 0) ?? 0);
 const canSubmitSupersede = computed(() =>
@@ -66,12 +73,14 @@ async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [repositories, latestRollout] = await Promise.all([
+    const [repositories, latestRollout, latestApplicationRollouts] = await Promise.all([
       api.listPublicAgentRepositories(),
-      api.getPublicAgentConfigRollout()
+      api.getPublicAgentConfigRollout(),
+      api.getApplicationAgentConfigRollouts()
     ]);
     rows.value = repositories;
     rollout.value = latestRollout;
+    applicationRollouts.value = latestApplicationRollouts;
     scheduleRolloutPolling();
   } catch (error) {
     errorMessage.value = formatError(error, "加载公共配置仓库状态失败");
@@ -82,10 +91,14 @@ async function refresh() {
 
 async function refreshRollout() {
   try {
-    const latest = await api.getPublicAgentConfigRollout();
-    const wasActive = rolloutActive.value;
+    const [latest, latestApplicationRollouts] = await Promise.all([
+      api.getPublicAgentConfigRollout(),
+      api.getApplicationAgentConfigRollouts()
+    ]);
+    const wasActive = rolloutActive.value || applicationRolloutActive.value;
     rollout.value = latest;
-    if (wasActive && !rolloutActive.value) {
+    applicationRollouts.value = latestApplicationRollouts;
+    if (wasActive && !rolloutActive.value && !applicationRolloutActive.value) {
       rows.value = await api.listPublicAgentRepositories();
     }
     scheduleRolloutPolling();
@@ -97,7 +110,7 @@ async function refreshRollout() {
 
 function scheduleRolloutPolling() {
   stopRolloutPolling();
-  if (rolloutActive.value) {
+  if (rolloutActive.value || applicationRolloutActive.value) {
     rolloutTimer = window.setTimeout(() => void refreshRollout(), 2_000);
   }
 }
@@ -325,6 +338,30 @@ async function closePendingTarget(target: PublicAgentConfigRolloutTargetStatus) 
     errorMessage.value = formatError(error, `关闭 ${owner} 的 OpenCode 失败`);
   } finally {
     closingTargetId.value = null;
+  }
+}
+
+/** 应用 Tool 发布允许超管对单个未收敛用户执行受管重启；其它用户的后台重试不受影响。 */
+async function restartPendingApplicationTarget(target: PublicAgentConfigRolloutTargetStatus) {
+  if (restartingTargetId.value || !target.containerId || !Number.isFinite(target.port)) {
+    return;
+  }
+  const owner = targetOwner(target);
+  const confirmed = window.confirm(
+    `确认立即受管重启 ${owner} 的 OpenCode（${target.containerId}:${target.port}）吗？该操作可能中断刚启动但尚未被状态流观察到的任务。`
+  );
+  if (!confirmed) return;
+  restartingTargetId.value = target.targetId;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    await api.restartOpencodeRuntimeManagedProcess(target.containerId, target.port);
+    successMessage.value = `已重启 ${owner} 的 OpenCode，后台将继续核验 Tool 目录与新进程代次`;
+    await refreshRollout();
+  } catch (error) {
+    errorMessage.value = formatError(error, `重启 ${owner} 的 OpenCode 失败`);
+  } finally {
+    restartingTargetId.value = null;
   }
 }
 
@@ -580,6 +617,96 @@ function newOperationId() {
         </table>
       </section>
 
+      <section
+        v-if="applicationRollouts.length"
+        class="ta-opencode-config-rollout"
+        aria-label="应用 Agent 与 Tool 发布状态"
+      >
+        <header>
+          <div>
+            <strong>应用更新配置</strong>
+            <span>最近 {{ applicationRollouts.length }} 次发布；Tool 变更会在会话空闲后受管重启</span>
+          </div>
+        </header>
+        <article
+          v-for="applicationRollout in applicationRollouts"
+          :key="applicationRollout.rolloutId"
+          class="ta-opencode-config-application-rollout"
+        >
+          <div class="ta-opencode-config-application-rollout-title">
+            <div>
+              <strong>{{ formatNullable(applicationRollout.scopeKey) }}</strong>
+              <span>{{ rolloutStatusText(applicationRollout.status) }}</span>
+              <span>{{ applicationRollout.branch }} · {{ shortHash(applicationRollout.commitHash) }}</span>
+            </div>
+            <span class="ta-opencode-config-muted">{{ applicationRollout.rolloutId }}</span>
+          </div>
+          <table class="ta-opencode-config-rollout-table">
+            <thead>
+              <tr>
+                <th>服务器</th>
+                <th>同步 / 重载</th>
+                <th>个人 worktree 补偿</th>
+                <th>重试</th>
+                <th>last_error</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="server in applicationRollout.servers" :key="`${applicationRollout.rolloutId}:${server.linuxServerId}`">
+                <tr>
+                  <td>{{ server.linuxServerId }}</td>
+                  <td>{{ serverProgress(server) }}</td>
+                  <td>{{ worktreeProgress(server) }}</td>
+                  <td>{{ server.retryCount }}</td>
+                  <td class="ta-opencode-config-message">{{ formatNullable(server.lastError) }}</td>
+                </tr>
+                <tr v-if="server.targetPending > 0" class="ta-opencode-config-target-detail-row">
+                  <td colspan="5">
+                    <div class="ta-opencode-config-target-detail-header">
+                      <strong>尚未重启 / dispose 的用户</strong>
+                      <span v-if="omittedPendingTargetCount(server) > 0" class="ta-opencode-config-muted">
+                        当前展示 {{ pendingTargetDetails(server).length }} 个，另有 {{ omittedPendingTargetCount(server) }} 个目标
+                      </span>
+                    </div>
+                    <div v-if="pendingTargetDetails(server).length" class="ta-opencode-config-target-list">
+                      <article
+                        v-for="target in pendingTargetDetails(server)"
+                        :key="target.targetId"
+                        class="ta-opencode-config-target"
+                      >
+                        <div class="ta-opencode-config-target-owner">
+                          <strong>{{ targetOwner(target) }}</strong>
+                          <span class="ta-opencode-config-muted">{{ formatNullable(target.userId) }}</span>
+                        </div>
+                        <div class="ta-opencode-config-target-state">
+                          <span>{{ targetStatusText(target) }}</span>
+                          <span>重试 {{ target.retryCount }}</span>
+                          <span v-if="target.lastError" class="ta-opencode-config-target-error">{{ target.lastError }}</span>
+                        </div>
+                        <div class="ta-opencode-config-mono ta-opencode-config-target-process">
+                          {{ target.containerId }}:{{ target.port }} · PID {{ target.processPid ?? "-" }}
+                        </div>
+                        <button
+                          type="button"
+                          class="ta-opencode-config-btn is-danger"
+                          :aria-label="`重启 ${targetOwner(target)} 的 OpenCode`"
+                          :disabled="restartingTargetId !== null"
+                          @click="restartPendingApplicationTarget(target)"
+                        >
+                          <Loader2 v-if="restartingTargetId === target.targetId" class="ta-opencode-config-icon is-spin" />
+                          立即受管重启
+                        </button>
+                      </article>
+                    </div>
+                    <div v-else class="ta-opencode-config-muted">目标明细尚未返回，请等待下一轮定时巡检。</div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </article>
+      </section>
+
       <div class="ta-opencode-config-table-wrap">
         <table class="ta-opencode-config-table">
           <thead>
@@ -798,6 +925,24 @@ function newOperationId() {
   margin-top: 4px;
   color: #92400e;
   line-height: 1.45;
+}
+.ta-opencode-config-application-rollout + .ta-opencode-config-application-rollout {
+  margin-top: 12px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 12px;
+}
+.ta-opencode-config-application-rollout-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.ta-opencode-config-application-rollout-title > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .ta-opencode-config-toolbar {
   padding: 12px 14px;

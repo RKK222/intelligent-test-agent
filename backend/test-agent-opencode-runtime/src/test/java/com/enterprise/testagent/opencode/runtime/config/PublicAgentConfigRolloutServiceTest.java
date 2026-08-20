@@ -20,6 +20,7 @@ import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRuntimeImpactResolver;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
@@ -48,6 +49,7 @@ import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopRequest;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopService;
+import com.enterprise.testagent.opencode.runtime.process.RuntimeManagementCommandService;
 import com.enterprise.testagent.notification.UserNotificationApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -724,6 +726,200 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
+    void publicToolModuleRolloutRestartsTrackedProcessInsteadOfUsingGlobalDispose() {
+        PublicAgentConfigRolloutTarget target = new PublicAgentConfigRolloutTarget(
+                "act_target", "acr_rollout", AgentConfigRolloutScope.PUBLIC,
+                "usr-1", "linux-1", "container-1", 4096,
+                123L, PROCESS_STARTED_AT, "http://127.0.0.1:4096", 0,
+                Instant.now().plusSeconds(60), "acl_lease", "trace-rollout", false,
+                "commit-old", "commit-new");
+        PublicAgentConfigRuntimeImpactResolver impactResolver = mock(PublicAgentConfigRuntimeImpactResolver.class);
+        RuntimeManagementCommandService commandService = mock(RuntimeManagementCommandService.class);
+        OpencodeProcessConfigLinkService configLinkService = mock(OpencodeProcessConfigLinkService.class);
+        OpencodeServerProcess process = targetProcess();
+        OpencodeServerProcess replacement = replacementProcess(process.configPath());
+        service.setRuntimeImpactResolver(impactResolver);
+        service.setRuntimeManagementCommandService(commandService);
+        service.setConfigLinkService(configLinkService);
+        when(impactResolver.requiresProcessRestart(
+                AgentConfigRolloutScope.PUBLIC, null, "commit-old", "commit-new")).thenReturn(true);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1))).thenReturn(List.of(target));
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(targetBinding()));
+        when(processRepository.findOpencodeServerProcessById(process.processId()))
+                .thenReturn(Optional.of(process), Optional.of(process), Optional.of(replacement));
+        when(configLinkService.isSharedConfigPath(process.configPath())).thenReturn(false);
+        when(configLinkService.isManagedConfigPath(process.sessionPath(), process.configPath())).thenReturn(true);
+        useManagerPorts(4096);
+        when(runtime.runtime(any(AgentRuntimeCommand.class)))
+                .thenReturn(Mono.just(new AgentRuntimeResult(objectMapper.createObjectNode())))
+                .thenReturn(Mono.just(new AgentRuntimeResult(
+                        objectMapper.createArrayNode().add("bash").add("workspace-git"))));
+
+        service.drainTargets();
+
+        verify(configLinkService).switchToShared(process.sessionPath(), process.configPath());
+        verify(commandService).restartTrackedProcess(process, "trace-rollout", true);
+        verify(runtime, times(2)).runtime(any(AgentRuntimeCommand.class));
+        verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+    }
+
+    @Test
+    void applicationToolModuleRolloutRestartsWithoutChangingPublicConfigLink() {
+        PublicAgentConfigRolloutTarget target = new PublicAgentConfigRolloutTarget(
+                "act_target", "acr_rollout", AgentConfigRolloutScope.APPLICATION,
+                "usr-1", "linux-1", "container-1", 4096,
+                123L, PROCESS_STARTED_AT, "http://127.0.0.1:4096", 0,
+                Instant.now().plusSeconds(60), "acl_lease", "trace-rollout", false,
+                "commit-old", "commit-new", "awv_1");
+        PublicAgentConfigRuntimeImpactResolver impactResolver = mock(PublicAgentConfigRuntimeImpactResolver.class);
+        RuntimeManagementCommandService commandService = mock(RuntimeManagementCommandService.class);
+        OpencodeProcessConfigLinkService configLinkService = mock(OpencodeProcessConfigLinkService.class);
+        OpencodeServerProcess process = targetProcess();
+        OpencodeServerProcess replacement = replacementProcess(process.configPath());
+        service.setRuntimeImpactResolver(impactResolver);
+        service.setRuntimeManagementCommandService(commandService);
+        service.setConfigLinkService(configLinkService);
+        when(impactResolver.requiresProcessRestart(
+                AgentConfigRolloutScope.APPLICATION, "awv_1", "commit-old", "commit-new")).thenReturn(true);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1))).thenReturn(List.of(target));
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(targetBinding()));
+        when(processRepository.findOpencodeServerProcessById(process.processId()))
+                .thenReturn(Optional.of(process), Optional.of(replacement));
+        useManagerPorts(4096);
+        when(runtime.runtime(any(AgentRuntimeCommand.class)))
+                .thenReturn(Mono.just(new AgentRuntimeResult(objectMapper.createObjectNode())))
+                .thenReturn(Mono.just(new AgentRuntimeResult(
+                        objectMapper.createArrayNode().add("bash").add("bank-query"))));
+
+        service.drainTargets();
+
+        verify(configLinkService, never()).switchToShared(any(), any());
+        verify(commandService).restartTrackedProcess(process, "trace-rollout", false);
+        verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+    }
+
+    @Test
+    void toolCatalogProbeFailureRemainsRetryableForScheduledCompensation() {
+        PublicAgentConfigRolloutTarget target = new PublicAgentConfigRolloutTarget(
+                "act_target", "acr_rollout", AgentConfigRolloutScope.APPLICATION,
+                "usr-1", "linux-1", "container-1", 4096,
+                123L, PROCESS_STARTED_AT, "http://127.0.0.1:4096", 0,
+                Instant.now().plusSeconds(60), "acl_lease", "trace-rollout", false,
+                "commit-old", "commit-new", "awv_1");
+        PublicAgentConfigRuntimeImpactResolver impactResolver = mock(PublicAgentConfigRuntimeImpactResolver.class);
+        RuntimeManagementCommandService commandService = mock(RuntimeManagementCommandService.class);
+        OpencodeServerProcess process = targetProcess();
+        OpencodeServerProcess replacement = replacementProcess(process.configPath());
+        service.setRuntimeImpactResolver(impactResolver);
+        service.setRuntimeManagementCommandService(commandService);
+        when(impactResolver.requiresProcessRestart(
+                AgentConfigRolloutScope.APPLICATION, "awv_1", "commit-old", "commit-new")).thenReturn(true);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1))).thenReturn(List.of(target));
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(targetBinding()));
+        when(processRepository.findOpencodeServerProcessById(process.processId()))
+                .thenReturn(Optional.of(process), Optional.of(replacement));
+        useManagerPorts(4096);
+        when(runtime.runtime(any(AgentRuntimeCommand.class)))
+                .thenReturn(Mono.just(new AgentRuntimeResult(objectMapper.createObjectNode())))
+                .thenReturn(Mono.just(new AgentRuntimeResult(objectMapper.createArrayNode())));
+
+        service.drainTargets();
+
+        verify(commandService).restartTrackedProcess(process, "trace-rollout", false);
+        verify(repository).markTargetRetry(
+                eq("act_target"), eq("acl_lease"), eq(1), any(Instant.class),
+                eq("TOOL_CATALOG_INVALID"), any(Instant.class));
+        verify(repository, never()).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+    }
+
+    @Test
+    void failedTargetDoesNotBlockFollowingTargetInSameDrainBatch() {
+        PublicAgentConfigRolloutTarget failed = new PublicAgentConfigRolloutTarget(
+                "act_failed", "acr_rollout", AgentConfigRolloutScope.PUBLIC,
+                "usr-failed", "linux-1", "container-1", 4096,
+                null, null, "http://127.0.0.1:4096", 0,
+                Instant.now().plusSeconds(60), "acl_failed", "trace-failed");
+        PublicAgentConfigRolloutTarget healthy = new PublicAgentConfigRolloutTarget(
+                "act_healthy", "acr_rollout", AgentConfigRolloutScope.PUBLIC,
+                "usr-healthy", "linux-1", "container-1", 4097,
+                456L, PROCESS_STARTED_AT, "http://127.0.0.1:4097", 0,
+                Instant.now().plusSeconds(60), "acl_healthy", "trace-healthy");
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1)))
+                .thenReturn(List.of(failed, healthy));
+        when(repository.renewTargetLease(eq("act_failed"), eq("acl_failed"), any(), any())).thenReturn(true);
+        when(repository.renewTargetLease(eq("act_healthy"), eq("acl_healthy"), any(), any())).thenReturn(true);
+        when(repository.markTargetRetry(
+                eq("act_failed"), eq("acl_failed"), any(Integer.class), any(Instant.class),
+                any(String.class), any(Instant.class))).thenReturn(true);
+        when(repository.markTargetDisposed(eq("act_healthy"), eq("acl_healthy"), any())).thenReturn(true);
+        useManagerPorts();
+
+        service.drainTargets();
+
+        verify(repository).markTargetRetry(
+                eq("act_failed"), eq("acl_failed"), eq(1), any(Instant.class),
+                eq("TARGET_PROCESS_IDENTITY_MISSING"), any(Instant.class));
+        verify(repository).markTargetDisposed(eq("act_healthy"), eq("acl_healthy"), any());
+    }
+
+    @Test
+    void toolRestartRecoveryWaitsWhenReplacementProcessHasBusySession() {
+        PublicAgentConfigRolloutTarget target = new PublicAgentConfigRolloutTarget(
+                "act_target", "acr_rollout", AgentConfigRolloutScope.PUBLIC,
+                "usr-1", "linux-1", "container-1", 4096,
+                123L, PROCESS_STARTED_AT, "http://127.0.0.1:4096", 0,
+                Instant.now().plusSeconds(60), "acl_lease", "trace-rollout", false,
+                "commit-old", "commit-new");
+        PublicAgentConfigRuntimeImpactResolver impactResolver = mock(PublicAgentConfigRuntimeImpactResolver.class);
+        RuntimeManagementCommandService commandService = mock(RuntimeManagementCommandService.class);
+        OpencodeProcessConfigLinkService configLinkService = mock(OpencodeProcessConfigLinkService.class);
+        Instant replacementStartedAt = PROCESS_STARTED_AT.plusSeconds(60);
+        OpencodeServerProcess replacement = new OpencodeServerProcess(
+                new OpencodeProcessId("ocp_1234567890abcdef"),
+                new UserId("usr-1"),
+                new LinuxServerId("linux-1"),
+                new OpencodeContainerId("container-1"),
+                4096,
+                456L,
+                "http://127.0.0.1:4096",
+                OpencodeServerProcessStatus.RUNNING,
+                "/session/usr-1",
+                "/session/usr-1/.testagent-runtime/personal-preview/config",
+                replacementStartedAt,
+                replacementStartedAt,
+                "healthy",
+                replacementStartedAt,
+                replacementStartedAt,
+                "trace-replacement");
+        service.setRuntimeImpactResolver(impactResolver);
+        service.setRuntimeManagementCommandService(commandService);
+        service.setConfigLinkService(configLinkService);
+        when(impactResolver.requiresProcessRestart(
+                AgentConfigRolloutScope.PUBLIC, null, "commit-old", "commit-new")).thenReturn(true);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1))).thenReturn(List.of(target));
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(targetBinding()));
+        when(processRepository.findOpencodeServerProcessById(replacement.processId()))
+                .thenReturn(Optional.of(replacement));
+        when(configLinkService.isLinkedToShared(replacement.sessionPath(), replacement.configPath())).thenReturn(false);
+        useManagerPorts();
+        when(runtime.runtime(any(AgentRuntimeCommand.class))).thenReturn(Mono.just(new AgentRuntimeResult(
+                objectMapper.valueToTree(java.util.Map.of("ses_1", java.util.Map.of("type", "busy"))))));
+
+        service.drainTargets();
+
+        verify(repository).markTargetRetry(
+                eq("act_target"), eq("acl_lease"), eq(1), any(Instant.class),
+                eq("SESSION_RUNNING"), any(Instant.class));
+        verify(commandService, never()).restartTrackedProcess(any(), any(), anyBoolean());
+        verify(configLinkService, never()).switchToShared(any(), any());
+        verify(repository, never()).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+    }
+
+    @Test
     void supersedingRolloutForceStopsOnlyFlaggedExactProcessWithoutSessionStatus() {
         PublicAgentConfigRolloutTarget target = new PublicAgentConfigRolloutTarget(
                 "act_target", "acr_replacement", AgentConfigRolloutScope.PUBLIC,
@@ -902,6 +1098,27 @@ class PublicAgentConfigRolloutServiceTest {
                 PROCESS_STARTED_AT,
                 PROCESS_STARTED_AT,
                 "trace-rollout");
+    }
+
+    private OpencodeServerProcess replacementProcess(String configPath) {
+        Instant replacementStartedAt = PROCESS_STARTED_AT.plusSeconds(60);
+        return new OpencodeServerProcess(
+                new OpencodeProcessId("ocp_1234567890abcdef"),
+                new UserId("usr-1"),
+                new LinuxServerId("linux-1"),
+                new OpencodeContainerId("container-1"),
+                4096,
+                456L,
+                "http://127.0.0.1:4096",
+                OpencodeServerProcessStatus.RUNNING,
+                "/session/usr-1",
+                configPath,
+                replacementStartedAt,
+                replacementStartedAt,
+                "healthy",
+                replacementStartedAt,
+                replacementStartedAt,
+                "trace-replacement");
     }
 
     private UserOpencodeProcessBinding targetBinding() {

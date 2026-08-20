@@ -13,6 +13,7 @@ import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutServerStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
@@ -125,6 +126,53 @@ class AgentConfigControllerTest {
 
         client.get()
                 .uri("/api/internal/platform/workspace-management/agent-config/public/rollout")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void superAdminCanReadApplicationRolloutProgress() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        when(service.recentApplicationRolloutStatuses()).thenReturn(List.of(new PublicAgentConfigRolloutStatus(
+                "acr_application",
+                "DRAINING",
+                "release/20260820",
+                "commit-tool",
+                null,
+                null,
+                null,
+                null,
+                Instant.parse("2026-08-20T06:00:00Z"),
+                Instant.parse("2026-08-20T06:01:00Z"),
+                null,
+                List.of(),
+                AgentConfigRolloutScope.APPLICATION,
+                "awv_1")));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/workspace-management/agent-config/application/rollouts")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data[0].rolloutId").isEqualTo("acr_application")
+                .jsonPath("$.data[0].configScope").isEqualTo("APPLICATION")
+                .jsonPath("$.data[0].scopeKey").isEqualTo("awv_1");
+
+        verify(service).recentApplicationRolloutStatuses();
+    }
+
+    @Test
+    void nonSuperAdminCannotReadApplicationRolloutProgress() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/workspace-management/agent-config/application/rollouts")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isForbidden();

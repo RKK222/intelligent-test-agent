@@ -790,6 +790,16 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 直接比较两个提交树的文件变化，不使用 merge-base；公共运行副本切换必须识别旧树被删除的 Tool 文件。
+     */
+    public String diffNameStatusBetweenTrees(Path repoRoot, String from, String to) {
+        return executor.execute(
+                gitNoQuotedPath(repoRoot, "diff", "--name-status", "-M", from, to),
+                null,
+                DEFAULT_TIMEOUT).stdoutText();
+    }
+
+    /**
      * 返回冲突文件在 Git index 中实际存在的 stage（1=base、2=current、3=incoming）。
      */
     public Set<Integer> conflictStages(Path repoRoot, String file) {

@@ -133,6 +133,7 @@ function api(overrides: Partial<BackendApiClient> = {}) {
     getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyRuntimeOverview),
     listPublicAgentRepositories: vi.fn().mockResolvedValue([publicRepository]),
     getPublicAgentConfigRollout: vi.fn().mockResolvedValue(null),
+    getApplicationAgentConfigRollouts: vi.fn().mockResolvedValue([]),
     listPublicAgentBranches: vi.fn().mockResolvedValue(["main", "develop"]),
     updatePublicAgentConfig: vi.fn().mockResolvedValue({
       operationId: "aco_update",
@@ -150,6 +151,13 @@ function api(overrides: Partial<BackendApiClient> = {}) {
       port: 4096,
       healthy: false,
       traceId: "trace-stop"
+    }),
+    restartOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({
+      command: "restart",
+      status: "STARTED",
+      port: 4096,
+      healthy: true,
+      traceId: "trace-restart"
     }),
     pullPublicAgentRepository: vi.fn().mockResolvedValue({
       ...publicRepository,
@@ -593,6 +601,66 @@ describe("scheduler management panel", () => {
       .toHaveBeenCalledWith("container-1", 4096));
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("可能中断正在执行的任务"));
     expect(await view.findByText("已关闭 张三 的 OpenCode，正在等待排空任务确认")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("shows pending application Tool users and allows a managed restart", async () => {
+    const applicationRollout = {
+      rolloutId: "acr_application_tool",
+      configScope: "APPLICATION",
+      scopeKey: "awv_20260820",
+      status: "DRAINING",
+      branch: "feature_testagent_20260820",
+      commitHash: "commit_tool",
+      failureReason: null,
+      createdAt: "2026-08-20T00:00:00Z",
+      updatedAt: "2026-08-20T00:00:01Z",
+      completedAt: null,
+      servers: [{
+        linuxServerId: "linux-1",
+        syncStatus: "SYNCED",
+        retryCount: 0,
+        targetTotal: 1,
+        targetPending: 1,
+        targetDisposed: 0,
+        targetAbandoned: 0,
+        worktreeTotal: 0,
+        worktreePending: 0,
+        worktreeSynced: 0,
+        lastError: "TOOL_CATALOG_INVALID",
+        syncedAt: "2026-08-20T00:00:01Z",
+        updatedAt: "2026-08-20T00:00:01Z",
+        pendingTargets: [{
+          targetId: "act_application_tool",
+          userId: "usr_lisi",
+          username: "李四",
+          linuxServerId: "linux-1",
+          containerId: "container-1",
+          port: 4096,
+          processPid: 2345,
+          processStartedAt: "2026-08-19T23:50:00Z",
+          status: "RETRY_WAIT",
+          retryCount: 2,
+          nextRetryAt: "2026-08-20T00:00:05Z",
+          lastError: "TOOL_CATALOG_INVALID",
+          forceStop: false,
+          updatedAt: "2026-08-20T00:00:01Z"
+        }]
+      }]
+    };
+    const backendApi = api({
+      getApplicationAgentConfigRollouts: vi.fn().mockResolvedValue([applicationRollout])
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi);
+
+    expect(await view.findByText("应用更新配置")).toBeTruthy();
+    expect(await view.findByText("李四")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "重启 李四 的 OpenCode" }));
+
+    await waitFor(() => expect(backendApi.restartOpencodeRuntimeManagedProcess)
+      .toHaveBeenCalledWith("container-1", 4096));
+    expect(await view.findByText(/后台将继续核验 Tool 目录/)).toBeTruthy();
     view.queryClient.clear();
   });
 

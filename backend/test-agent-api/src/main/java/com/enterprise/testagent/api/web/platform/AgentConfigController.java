@@ -97,6 +97,13 @@ public class AgentConfigController {
         return ok(exchange, service.latestPublicRolloutStatus().orElse(null));
     }
 
+    /** 应用 Agent/Tool 发布沿用同一排空状态模型，供超管查看未重启用户并手工处理。 */
+    @GetMapping("/application/rollouts")
+    public ApiResponse<Object> applicationRollouts(ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ok(exchange, service.recentApplicationRolloutStatuses());
+    }
+
     @PostMapping("/public/repositories/{linuxServerId}/initialize")
     public ApiResponse<AgentConfigResponses.PublicRepositoryStatusResponse> initializePublicRepository(
             @PathVariable String linuxServerId,

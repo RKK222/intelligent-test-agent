@@ -57,7 +57,32 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                         row.createdAt(),
                         row.updatedAt(),
                         row.completedAt(),
-                        List.of()));
+                        List.of(),
+                        AgentConfigRolloutScope.valueOf(row.configScope()),
+                        row.scopeKey()));
+    }
+
+    @Override
+    public List<PublicAgentConfigRolloutStatus> findRecentRolloutStatuses(
+            AgentConfigRolloutScope scope,
+            int limit) {
+        return mapper.findRecentRolloutStatuses(scope.name(), Math.max(1, Math.min(limit, 50))).stream()
+                .map(row -> new PublicAgentConfigRolloutStatus(
+                        row.rolloutId(),
+                        row.status(),
+                        row.branch(),
+                        row.commitHash(),
+                        row.failureReason(),
+                        row.supersedesRolloutId(),
+                        row.supersededByRolloutId(),
+                        row.supersedeReason(),
+                        row.createdAt(),
+                        row.updatedAt(),
+                        row.completedAt(),
+                        List.of(),
+                        AgentConfigRolloutScope.valueOf(row.configScope()),
+                        row.scopeKey()))
+                .toList();
     }
 
     @Override
@@ -485,7 +510,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                             row.targetId(), row.rolloutId(), row.configScope(), row.userId(),
                             row.linuxServerId(), row.containerId(), row.port(), row.processPid(),
                             row.processStartedAt(), row.baseUrl(), row.retryCount(), leaseUntil,
-                            leaseToken, row.traceId(), row.forceStop()));
+                            leaseToken, row.traceId(), row.forceStop(),
+                            row.previousCommitHash(), row.commitHash(), row.scopeKey()));
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
@@ -526,7 +552,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                 target.targetId(), target.rolloutId(), target.configScope().name(),
                 target.userId(), target.linuxServerId(), target.containerId(),
                 target.port(), target.processPid(), target.processStartedAt(), target.baseUrl(), target.retryCount(),
-                target.leaseUntil(), target.leaseToken(), target.traceId(), target.forceStop());
+                target.leaseUntil(), target.leaseToken(), target.traceId(), target.forceStop(),
+                target.previousCommitHash(), target.commitHash(), target.scopeKey());
     }
 
     private PublicAgentConfigRolloutTarget toTarget(PublicAgentConfigRolloutTargetRow row) {
@@ -534,6 +561,7 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                 row.targetId(), row.rolloutId(), AgentConfigRolloutScope.valueOf(row.configScope()),
                 row.userId(), row.linuxServerId(), row.containerId(), row.port(), row.processPid(),
                 row.processStartedAt(), row.baseUrl(), row.retryCount(), row.leaseUntil(),
-                row.leaseToken(), row.traceId(), row.forceStop());
+                row.leaseToken(), row.traceId(), row.forceStop(),
+                row.previousCommitHash(), row.commitHash(), row.scopeKey());
     }
 }

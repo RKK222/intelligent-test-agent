@@ -780,6 +780,9 @@ export type PublicAgentConfigRolloutServerStatus = {
 
 export type PublicAgentConfigRolloutStatus = {
   rolloutId: string;
+  configScope?: "PUBLIC" | "APPLICATION" | "PERSONAL_APPLICATION" | string;
+  /** APPLICATION 时为应用版本 ID；旧后端或 PUBLIC 为空。 */
+  scopeKey?: string | null;
   status: string;
   branch: string;
   commitHash?: string | null;

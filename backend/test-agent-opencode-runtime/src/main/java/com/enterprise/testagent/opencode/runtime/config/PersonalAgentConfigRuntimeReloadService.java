@@ -17,6 +17,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
+import com.enterprise.testagent.opencode.runtime.process.RuntimeManagementCommandService;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
@@ -24,6 +25,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 /**
@@ -43,6 +45,7 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
     private final OpencodeProcessConfigLinkService configLinkService;
     private final AgentRuntime runtime;
     private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
+    private RuntimeManagementCommandService runtimeManagementCommandService;
 
     public PersonalAgentConfigRuntimeReloadService(
             OpencodeProcessManagementRepository repository,
@@ -63,13 +66,31 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
                 coordinator, "coordinator must not be null");
     }
 
+    /** Tool 模块重载必须复用受管停止、启动和 health 确认链路。 */
+    @Autowired(required = false)
+    void configureRuntimeManagementCommandService(@Lazy RuntimeManagementCommandService commandService) {
+        this.runtimeManagementCommandService = Objects.requireNonNull(
+                commandService, "commandService must not be null");
+    }
+
     @Override
     public PersonalAgentConfigRuntimeReloadResult reloadPublicPreview(
             UserId userId,
             String linuxServerId,
             String sourceConfigPath,
             String traceId) {
-        return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId, false);
+        return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId, false, false);
+    }
+
+    @Override
+    public PersonalAgentConfigRuntimeReloadResult reloadPublicPreview(
+            UserId userId,
+            String linuxServerId,
+            String sourceConfigPath,
+            String traceId,
+            boolean processRestartRequired) {
+        return reloadPublicPreview(
+                userId, linuxServerId, sourceConfigPath, traceId, false, processRestartRequired);
     }
 
     /**
@@ -81,7 +102,7 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
             String linuxServerId,
             String sourceConfigPath,
             String traceId) {
-        return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId, true);
+        return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId, true, false);
     }
 
     private PersonalAgentConfigRuntimeReloadResult reloadPublicPreview(
@@ -89,7 +110,8 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
             String linuxServerId,
             String sourceConfigPath,
             String traceId,
-            boolean skipDisposeWhenAlreadyLinked) {
+            boolean skipDisposeWhenAlreadyLinked,
+            boolean processRestartRequired) {
         Objects.requireNonNull(userId, "userId must not be null");
         String targetServer = requireText(linuxServerId, "公共 Agent worktree 缺少服务器归属");
         if (!targetServer.equals(backendIdentity.linuxServerId())) {
@@ -116,6 +138,13 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
 
         Runnable reload = () -> {
             configLinkService.switchTo(sourceConfigPath, process.configPath());
+            if (processRestartRequired) {
+                if (runtimeManagementCommandService == null) {
+                    throw new PlatformException(ErrorCode.INTERNAL_ERROR, "TestAgent 受管重启服务不可用");
+                }
+                runtimeManagementCommandService.restartTrackedProcess(process, traceId, false);
+                return;
+            }
             JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
                             executionNode(process),
                             "POST",
@@ -139,7 +168,10 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
                 return Boolean.TRUE;
             });
         }
-        return new PersonalAgentConfigRuntimeReloadResult(true, "已加载公共个人 worktree 配置并重新加载当前用户运行态");
+        String message = processRestartRequired
+                ? "已加载公共个人 worktree 配置并受管重启当前用户 TestAgent 进程"
+                : "已加载公共个人 worktree 配置并重新加载当前用户运行态";
+        return new PersonalAgentConfigRuntimeReloadResult(true, message);
     }
 
     private void requireOwnedRunningProcess(UserId userId, String linuxServerId, OpencodeServerProcess process) {

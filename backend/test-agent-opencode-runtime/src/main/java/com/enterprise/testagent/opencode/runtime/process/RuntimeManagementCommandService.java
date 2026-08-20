@@ -62,20 +62,28 @@ public class RuntimeManagementCommandService {
     public OpencodeProcessControlResult restartManagedProcess(OpencodeContainerId containerId, int port, String traceId) {
         Optional<OpencodeServerProcess> process = latestProcess(containerId, port);
         if (process.isPresent()) {
-            return restartTrackedProcess(process.get(), traceId);
+            return restartTrackedProcess(process.get(), traceId, false);
         }
         return restartUntrackedProcess(containerId, port, traceId);
     }
 
-    private OpencodeProcessControlResult restartTrackedProcess(OpencodeServerProcess process, String traceId) {
+    /**
+     * 重启已经由上层固定身份的受管进程；公共 Tool 发布可要求启动前强制恢复共享配置。
+     */
+    public OpencodeProcessControlResult restartTrackedProcess(
+            OpencodeServerProcess process,
+            String traceId,
+            boolean sharedPublicConfigRequired) {
+        Objects.requireNonNull(process, "process must not be null");
         if (process.status() == OpencodeServerProcessStatus.STOPPED) {
-            return startExistingProcess(process, traceId);
+            return startExistingProcess(process, traceId, sharedPublicConfigRequired);
         }
         if (startupService == null) {
             return gateway.restartProcess(new OpencodeProcessControlCommand(process.containerId(), process.port(), traceId));
         }
         stopService.stopAndVerify(OpencodeProcessStopRequest.tracked(process, traceId));
-        OpencodeServerProcess running = startupService.startAndVerify(startupRequest(process, traceId));
+        OpencodeServerProcess running = startupService.startAndVerify(
+                startupRequest(process, traceId, sharedPublicConfigRequired));
         return controlResult(running, traceId);
     }
 
@@ -109,15 +117,22 @@ public class RuntimeManagementCommandService {
                 .max(Comparator.comparing(OpencodeServerProcess::updatedAt));
     }
 
-    private OpencodeProcessControlResult startExistingProcess(OpencodeServerProcess process, String traceId) {
+    private OpencodeProcessControlResult startExistingProcess(
+            OpencodeServerProcess process,
+            String traceId,
+            boolean sharedPublicConfigRequired) {
         if (startupService == null) {
             return gateway.restartProcess(new OpencodeProcessControlCommand(process.containerId(), process.port(), traceId));
         }
-        OpencodeServerProcess running = startupService.startAndVerify(startupRequest(process, traceId));
+        OpencodeServerProcess running = startupService.startAndVerify(
+                startupRequest(process, traceId, sharedPublicConfigRequired));
         return controlResult(running, traceId);
     }
 
-    private OpencodeProcessStartupRequest startupRequest(OpencodeServerProcess process, String traceId) {
+    private OpencodeProcessStartupRequest startupRequest(
+            OpencodeServerProcess process,
+            String traceId,
+            boolean sharedPublicConfigRequired) {
         Optional<UserOpencodeProcessBinding> binding = matchingActiveBinding(process);
         return new OpencodeProcessStartupRequest(
                 process.userId(),
@@ -133,7 +148,8 @@ public class RuntimeManagementCommandService {
                 Map.of(),
                 traceId,
                 // 运行管理重启的是平台已登记进程，即使历史记录缺少 ACTIVE binding 也必须保留原端口和容量归属。
-                true);
+                true,
+                sharedPublicConfigRequired);
     }
 
     private Optional<UserOpencodeProcessBinding> matchingActiveBinding(OpencodeServerProcess process) {

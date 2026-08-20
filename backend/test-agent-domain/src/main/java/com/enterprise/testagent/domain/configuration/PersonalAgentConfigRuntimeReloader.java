@@ -16,6 +16,16 @@ public interface PersonalAgentConfigRuntimeReloader {
             String sourceConfigPath,
             String traceId);
 
+    /** Tool 脚本变化时显式要求重建进程；默认实现保持旧调用方的 dispose 语义。 */
+    default PersonalAgentConfigRuntimeReloadResult reloadPublicPreview(
+            UserId userId,
+            String linuxServerId,
+            String sourceConfigPath,
+            String traceId,
+            boolean processRestartRequired) {
+        return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId);
+    }
+
     /**
      * 初始化完成后激活公共个人配置；若进程启动前已经直接加载同一路径，实现方可跳过重复 dispose。
      */

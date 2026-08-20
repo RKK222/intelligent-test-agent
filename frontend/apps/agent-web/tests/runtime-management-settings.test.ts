@@ -214,6 +214,7 @@ function createManagedRuntimeOverview(): OpencodeRuntimeManagementOverview {
 
 describe("runtime management settings", () => {
   afterEach(() => {
+    localStorage.clear();
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -776,6 +777,46 @@ describe("runtime management settings", () => {
     );
     expect(await view.findByText("批量重启完成：成功 2，失败 0。")).toBeTruthy();
     await waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2));
+
+    view.queryClient.clear();
+  });
+
+  it("restores persisted batch restart progress after a page refresh and continues remaining users", async () => {
+    const overview = createManagedRuntimeOverview();
+    localStorage.setItem("testagent.runtime-management.batch.v1:usr_admin", JSON.stringify({
+      version: 1,
+      initiatedByUserId: "usr_admin",
+      action: "restart",
+      targets: [
+        { key: "ctr_01:4096", containerId: "ctr_01", port: 4096, label: "user-a（ctr_01:4096）", pid: 12345 },
+        { key: "ctr_02:4097", containerId: "ctr_02", port: 4097, label: "user-b（ctr_02:4097）", pid: 22345 }
+      ],
+      nextIndex: 1,
+      succeeded: 1,
+      failures: [],
+      activeTargetKey: null,
+      retryAfter: null,
+      startedAt: Date.now()
+    }));
+    let resolveRestart!: (value: { command: string; status: string }) => void;
+    const restartRequest = new Promise<{ command: string; status: string }>(resolve => {
+      resolveRestart = resolve;
+    });
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn(),
+      restartOpencodeRuntimeManagedProcess: vi.fn().mockReturnValue(restartRequest),
+      stopOpencodeRuntimeManagedProcess: vi.fn()
+    };
+
+    const view = renderRuntimePanel(api);
+
+    expect(await view.findByText(/批量重启进行中：已完成 1 \/ 2/)).toBeTruthy();
+    await waitFor(() => expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledTimes(1));
+    expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_02", 4097);
+    resolveRestart({ command: "restart", status: "STARTED" });
+    expect(await view.findByText("批量重启完成：成功 2，失败 0。")).toBeTruthy();
+    expect(localStorage.getItem("testagent.runtime-management.batch.v1:usr_admin")).toBeNull();
 
     view.queryClient.clear();
   });

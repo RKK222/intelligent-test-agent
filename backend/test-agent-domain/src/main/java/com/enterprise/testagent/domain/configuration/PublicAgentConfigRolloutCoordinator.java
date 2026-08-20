@@ -89,6 +89,11 @@ public interface PublicAgentConfigRolloutCoordinator {
     /** 超级管理员页面读取最近一次公共全局 rollout 及各服务器状态。 */
     Optional<PublicAgentConfigRolloutStatus> latestPublicRolloutStatus();
 
+    /** 超级管理员查看最近应用配置发布及未完成用户，不改变后台重试状态。 */
+    default List<PublicAgentConfigRolloutStatus> recentApplicationRolloutStatuses() {
+        return List.of();
+    }
+
     Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(String linuxServerId, AgentConfigRolloutScope scope);
 
     default Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(String linuxServerId) {

@@ -176,6 +176,7 @@ import {
   agentFileInfo,
   agentTabPath,
   isAgentFilePath,
+  requiresManagedRestartForAgentConfigFile,
   shouldReloadPersonalRuntimeCatalog,
   type AgentConfigMutation,
   type AgentFileTabInfo,
@@ -632,6 +633,8 @@ const pendingReferenceRuntimeReloadRevision = ref(0);
 let handledReferenceRuntimeReloadRevision = 0;
 let pendingRuntimeReloadKind: "reference" | "agent" = "reference";
 let pendingPublicRuntimeReloadTarget: Pick<AgentFileTabInfo, "worktreeId" | "linuxServerId"> | null = null;
+// 多次保存合并为同一代次时，只要包含 Tool 模块就必须保留受管重启语义，不能被后续普通文件覆盖。
+let pendingRuntimeRestartRequired = false;
 let pendingAgentCatalogReloadId: string | null = null;
 let lastRuntimeReloadError: unknown | null = null;
 const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
@@ -3876,11 +3879,14 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(
   if (!shouldReloadPersonalRuntimeCatalog(agent.scope, agent.path) || !opencodeCatalogReady.value) {
     return null;
   }
+  pendingRuntimeRestartRequired = pendingRuntimeRestartRequired
+    || requiresManagedRestartForAgentConfigFile(agent.scope, agent.path);
   if (agent.scope === "PUBLIC") {
     if (!agent.worktreeId) {
       return new Error("公共 Agent 个人 worktree 路由缺失，无法只热加载当前用户");
     }
-    // 公共个人配置不写入共享运行目录；后端先切换本人 Git 外固定配置链接，再 dispose 本人实例。
+    // 公共个人配置不写入共享运行目录；后端先切换本人 Git 外固定配置链接，
+    // Tool JS/TS 使用受管重启，其余配置仅 dispose 本人实例。
     pendingPublicRuntimeReloadTarget = {
       worktreeId: agent.worktreeId,
       linuxServerId: agent.linuxServerId
@@ -3909,6 +3915,7 @@ function consumePendingPublicRuntimeReload(
   handledReferenceRuntimeReloadRevision = targetRevision;
   if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
     pendingPublicRuntimeReloadTarget = null;
+    pendingRuntimeRestartRequired = false;
   }
   lastRuntimeReloadError = null;
   runtimeReloadConflictWaitingForIdle.value = false;
@@ -3971,15 +3978,22 @@ async function handlePersonalRuntimeReload(payload: {
   const pendingPublicReloadRevision = payload.scope === "PUBLIC" && pendingPublicTargetMatches
     ? pendingReferenceRuntimeReloadRevision.value
     : null;
+  const publicProcessRestartRequired = payload.scope === "PUBLIC"
+    && pendingPublicTargetMatches
+    && pendingRuntimeRestartRequired;
 
   runtimeReloadLock.value = payload.scope;
   try {
+    let workspaceProcessRestartRequired = false;
     if (payload.scope === "WORKSPACE") {
       // 应用配置更新必须先复用现有 Git 合并链路；仅 dispose 不会把 feature 固定提交带入个人 worktree。
       const sync = await api.syncApplicationToPersonal(currentPersonalWorkspaceId.value!, { files: [] });
       if (sync.status.toUpperCase() !== "SUCCEEDED") {
         throw new Error("应用 feature 更新未合并；请在 Diff 中处理个人变更或 Git 冲突后重试。");
       }
+      workspaceProcessRestartRequired = sync.files.some((path) =>
+        requiresManagedRestartForAgentConfigFile("WORKSPACE", path)
+      );
       agentConfigRevision.value += 1;
       fileExplorerRef.value?.refreshAll();
       refreshCurrentWorkspacePanels();
@@ -3999,10 +4013,18 @@ async function handlePersonalRuntimeReload(payload: {
       if (!result.reloaded) {
         throw new Error(result.message || "公共个人配置未重新加载");
       }
-      // 后端已完成指针切换和 dispose；即使后续目录刷新失败也不能再次释放同一运行态。
+      // 后端已完成指针切换与本人运行态刷新；后续目录校验失败也不能重复执行。
       consumePendingPublicRuntimeReload(pendingPublicReloadRevision, publicRuntimeRoute!);
+      if (publicProcessRestartRequired && selectedWorkspaceIdRef.value) {
+        await api.getMcpTools(selectedWorkspaceIdRef.value);
+      }
     } else {
-      await api.disposeGlobal();
+      if (workspaceProcessRestartRequired) {
+        await api.restartMyOpencodeProcess(false);
+        await api.getMcpTools(selectedWorkspaceIdRef.value);
+      } else {
+        await api.disposeGlobal();
+      }
     }
     await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
     feedback.value = {
@@ -4038,6 +4060,7 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
   if (!opencodeProcessReady.value || (!publicReloadTarget && !selectedWorkspaceIdRef.value)) {
     // 进程未运行时无需 dispose；下次受管启动会直接读取刚保存的磁盘配置和引用目录环境。
     handledReferenceRuntimeReloadRevision = targetRevision;
+    pendingRuntimeRestartRequired = false;
     lastRuntimeReloadError = null;
     if (!options.quiet) {
       feedback.value = {
@@ -4049,6 +4072,7 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
     return "NOT_RUNNING";
   }
   runtimeReloadLock.value = "REFERENCE";
+  const processRestartRequired = pendingRuntimeRestartRequired;
   try {
     if (publicReloadTarget?.worktreeId) {
       const result = await api.reloadPublicPersonalAgentRuntime(
@@ -4058,12 +4082,21 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
       if (!result.reloaded) {
         throw new Error(result.message || "当前用户公共 Agent 配置未重新加载");
       }
+      if (processRestartRequired && selectedWorkspaceIdRef.value) {
+        await api.getMcpTools(selectedWorkspaceIdRef.value);
+      }
     } else {
-      // 应用个人配置仍由 OpenCode 原生 workspace 配置读取，只需释放当前进程缓存的实例。
-      await api.disposeGlobal();
+      if (pendingRuntimeRestartRequired) {
+        // Tool 实现由进程级 ESM 缓存持有；本人空闲后复用公共受管重启，并读取一次目录验证新进程可加载 Tool。
+        await api.restartMyOpencodeProcess(false);
+        await api.getMcpTools(selectedWorkspaceIdRef.value);
+      } else {
+        await api.disposeGlobal();
+      }
     }
     await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
     handledReferenceRuntimeReloadRevision = targetRevision;
+    pendingRuntimeRestartRequired = false;
     if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
       pendingPublicRuntimeReloadTarget = null;
     }
@@ -4072,7 +4105,9 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
       feedback.value = {
         kind: "info",
         title: pendingRuntimeReloadKind === "reference" ? "引用配置已生效" : "Agent 配置已生效",
-        description: "已重新加载当前用户的 TestAgent workspace 实例，无需重启专属进程。"
+        description: processRestartRequired
+          ? "已受管重启当前用户的 TestAgent 进程，并确认新进程可加载 Tool 目录。"
+          : "已重新加载当前用户的 TestAgent workspace 实例，无需重启专属进程。"
       };
     }
     return "RELOADED";
@@ -4092,6 +4127,7 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
       return "WAITING_IDLE";
     }
     handledReferenceRuntimeReloadRevision = targetRevision;
+    pendingRuntimeRestartRequired = false;
     if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
       pendingPublicRuntimeReloadTarget = null;
     }

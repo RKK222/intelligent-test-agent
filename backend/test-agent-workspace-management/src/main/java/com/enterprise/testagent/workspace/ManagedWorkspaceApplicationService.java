@@ -2977,7 +2977,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .anyMatch(path -> path.equals(".opencode/opencode.jsonc")
                         || path.equals(".opencode/opencode.json")
                         || path.startsWith(".opencode/agents/")
-                        || path.startsWith(".opencode/skills/"));
+                        || path.startsWith(".opencode/skills/")
+                        || GitPublicAgentConfigRuntimeImpactResolver.isApplicationToolModulePath(path));
     }
 
     private String prepareApplicationConfigRolloutIfNeeded(

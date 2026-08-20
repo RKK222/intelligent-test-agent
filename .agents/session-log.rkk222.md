@@ -12391,3 +12391,29 @@
 
 - 双来源目录、按需物化、下架语义和 push 来源归属已经实现并完成代码级定向验证；新增向后兼容的内部 HTTP 查询参数和物化/手工同步接口、一个 Flyway migration 和部署期可选 SkillHub 配置，不新增部署节点、RunEvent/SSE 类型或 OpenCode 源码修改。
 - 真实 PostgreSQL 升级、SkillHub 现场接口联调和整站运行仍未验证；恢复符合仓库约定的 `.env.test` 后需要按 `./restart-dev-services.sh --profile test --env-file .env.test` 复验。
+
+## 2026-08-20 - 修复 Tool TS 更新后 OpenCode 缓存未失效与批量重启进度丢失
+
+### Why
+
+- OpenCode 1.18.4 会在进程内缓存 `tool/tools/**/*.ts/js` 模块；仅调用 `/global/dispose` 可能留下空报文体，而完整受管重启后恢复。
+- 公共/应用 Tool 发布缺少面向受影响用户的持久排空、目录巡检和补偿入口；超级管理员批量重启刷新页面后也会丢失客户端游标。
+
+### What
+
+- 公共和业务工作区 Tool 本地保存改为只受管重启当前用户；纯本地 commit 不触发额外用户，公共 push 覆盖全部运行用户，应用 push 只覆盖对应应用版本用户。
+- PUBLIC/APPLICATION rollout 持久化配置范围与应用版本，按用户独立等待空闲、受管重启并核对 manager 新代次和 `/experimental/tool/ids` 非空目录；既有 5 秒 drain 调度同时承担失败补偿，一个用户失败不阻断后续目标。
+- 超管公共配置页新增“应用更新配置”、未重启用户明细和单用户立即受管重启；运行管理批量操作把目标、游标、PID/startedAt、成功/失败写入当前超管的 localStorage，刷新后核对并继续。
+- 本机启动脚本优先从稳定发布清单解包并校验 OpenCode 1.18.4，避免误用用户目录中的其它版本；同步 HTTP API、runtime/workspace、agent-web 和 backend-api 稳定说明。
+
+### How
+
+- JDK 25 下完整 26 模块 `mvn clean package -Dmaven.test.skip=true` 成功；相关 workspace 172/172、runtime 46/46、persistence 9/9、API 27/27 全通过。前端定向 Vitest 49/49，backend-api 与 agent-web typecheck 通过。
+- 使用根目录 `.env.test`、`test` profile 和 `--with-clickhouse` 启动完整环境；后端 readiness UP、前端 3000、ClickHouse 26.3.17.56，OpenCode `/global/health` 返回 `healthy=true, version=1.18.4`。
+- 原生 Python Playwright 登录真实超管页面，真实接口返回 200；在浏览器层仅拦截应用 rollout/重启验收数据，验证未重启用户、人工重启、批量进度刷新恢复及清理。另对当前验收账号执行真实受管重启，PID `18714 -> 26379`、startedAt 更新，重启前后 Tool 目录均非空；截图和 JSON 报告保存在 `output/e2e-tool-rollout/`，不纳入代码提交。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；工作区同期存在其他开发者的 SkillHub、自动化引用和文档改动，本次仅暂存 Tool 重载、rollout、管理进度、相关测试文档与本日志。
+
+### Result
+
+- Tool 模块更新不再依赖用户手工重启；本地保存只影响本人，公共/应用发布按实际影响范围排空并持续补偿，失败按目标隔离。
+- 超管能查看应用发布尚未重启/dispose 的用户并人工处理；批量重启刷新后可恢复进度并继续。新增一个向后兼容的内部查询 API，不新增 RunEvent、数据库/Flyway、部署节点、强制环境变量或安全权限，不修改 `.env*`、generated SDK、OpenCode 源码，也未创建分支。

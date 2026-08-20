@@ -81,6 +81,42 @@ describe("public agent config update", () => {
     );
   });
 
+  it("reads recent application rollout progress for superadmin recovery", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: [{
+            rolloutId: "acr_application",
+            configScope: "APPLICATION",
+            scopeKey: "awv_1",
+            status: "DRAINING",
+            servers: []
+          }]
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getApplicationAgentConfigRollouts()).resolves.toEqual([{
+      rolloutId: "acr_application",
+      configScope: "APPLICATION",
+      scopeKey: "awv_1",
+      status: "DRAINING",
+      servers: []
+    }]);
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/workspace-management/agent-config/application/rollouts",
+      expect.not.objectContaining({ method: expect.anything() })
+    );
+  });
+
   it("sends the expected rollout id and audit reason for forced supersede", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

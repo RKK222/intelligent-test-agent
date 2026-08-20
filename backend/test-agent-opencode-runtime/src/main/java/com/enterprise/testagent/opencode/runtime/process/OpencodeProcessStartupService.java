@@ -493,7 +493,7 @@ public class OpencodeProcessStartupService {
      * <p>解析仅发生在 start/restart，不进入健康轮询；个人目录不可用不能阻断进程启动。</p>
      */
     private void preparePublicConfigLink(OpencodeProcessStartupRequest request) {
-        if (publicPreviewSourceResolver != null) {
+        if (!request.sharedPublicConfigRequired() && publicPreviewSourceResolver != null) {
             try {
                 Optional<String> personalConfig = publicPreviewSourceResolver.resolvePublicPersonalConfigPath(
                         request.userId(),

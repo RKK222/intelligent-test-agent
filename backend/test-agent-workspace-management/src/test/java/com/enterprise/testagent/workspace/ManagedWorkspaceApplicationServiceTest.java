@@ -3863,6 +3863,45 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void publishApplicationToolTypeScriptCreatesApplicationRollout() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextStatusPorcelain = "";
+        git.nextHeadCommit = "commit_application_tool";
+        git.nextRemoteCommit = "commit_base";
+        git.remoteFastForward = false;
+        git.targetContainedInHead = false;
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.prepareApplication(
+                version.versionId(),
+                version.branch(),
+                "commit_application_tool",
+                "commit_application_tool",
+                "127.0.0.1",
+                "usr_1",
+                "trace_tool_publish"))
+                .thenReturn("acr_application_tool");
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "feat: publish application tool",
+                List.of(".opencode/tools/bank-query.ts"),
+                new UserId("usr_1"),
+                "trace_tool_publish");
+
+        assertThat(result.status()).isEqualTo("PUBLISHED");
+        verify(coordinator).activate("acr_application_tool", "commit_application_tool");
+    }
+
+    @Test
     void retryAfterLostHttpResponseDoesNotCreateDuplicateApplicationAgentRollout() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();

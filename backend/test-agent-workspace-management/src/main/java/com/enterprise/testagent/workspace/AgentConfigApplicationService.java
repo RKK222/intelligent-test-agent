@@ -396,6 +396,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 : publicConfigRolloutCoordinator.latestPublicRolloutStatus();
     }
 
+    /** 超管诊断页同时读取应用发布目标，单用户失败不会隐藏其它用户的收敛进度。 */
+    public List<PublicAgentConfigRolloutStatus> recentApplicationRolloutStatuses() {
+        return publicConfigRolloutCoordinator == null
+                ? List.of()
+                : publicConfigRolloutCoordinator.recentApplicationRolloutStatuses();
+    }
+
     public AgentConfigResponses.PublicRepositoryStatusResponse initializeLocalPublicRepository(
             String branch,
             String operationId,
@@ -889,11 +896,19 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         if (personalRuntimeReloader == null) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "个人 Agent 配置运行态重载服务不可用");
         }
+        boolean processRestartRequired = hasWorkingTreeToolModuleChange(Path.of(worktree.rootPath()));
         return personalRuntimeReloader.reloadPublicPreview(
                 userId,
                 worktreeServer,
                 configRoot.toString(),
-                traceId);
+                traceId,
+                processRestartRequired);
+    }
+
+    /** 保存个人预览后状态仍在 worktree；提交或推送不会额外扩大本地影响范围。 */
+    private boolean hasWorkingTreeToolModuleChange(Path worktreeRoot) {
+        return GitPublicAgentConfigRuntimeImpactResolver.hasWorkingTreeToolModuleChange(
+                gitWorkspaceService.statusPorcelain(worktreeRoot));
     }
 
     /**
