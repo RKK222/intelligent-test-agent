@@ -137,6 +137,8 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
                 }
                 slot = new TaskSlot();
                 taskSlots.put(key, slot);
+            } else if (slot.cancelled) {
+                return false;
             } else if (slot.running && !scheduledFor.isAfter(now)) {
                 return true;
             } else if (slot.scheduled != null && !scheduledFor.isBefore(slot.scheduled.scheduledFor)) {
@@ -164,10 +166,39 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
         }
     }
 
+    /**
+     * 终止指定仓库代次的等待或运行任务。运行任务通过线程中断通知 Git 执行器回收进程树；
+     * 数据库 generation/lease fencing 仍是阻止迟到写回的最终边界。
+     */
+    public boolean cancel(CodeRepositoryId repositoryId, long generation) {
+        Objects.requireNonNull(repositoryId, "repositoryId must not be null");
+        TaskKey key = new TaskKey(repositoryId, generation);
+        synchronized (monitor) {
+            TaskSlot slot = taskSlots.get(key);
+            if (slot == null) {
+                return false;
+            }
+            boolean cancelled = false;
+            slot.cancelled = true;
+            if (slot.scheduled != null && slot.scheduled.future != null) {
+                cancelled = slot.scheduled.future.cancel(false) || cancelled;
+                slot.scheduled = null;
+            }
+            if (slot.runningThread != null) {
+                slot.runningThread.interrupt();
+                cancelled = true;
+            }
+            if (!slot.running) {
+                taskSlots.remove(key);
+            }
+            return cancelled;
+        }
+    }
+
     private void execute(TaskKey key, ScheduledTask registration) {
         synchronized (monitor) {
             TaskSlot slot = taskSlots.get(key);
-            if (!running || slot == null || slot.scheduled != registration) {
+            if (!running || slot == null || slot.cancelled || slot.scheduled != registration) {
                 return;
             }
             if (slot.running) {
@@ -187,6 +218,7 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
             }
             slot.scheduled = null;
             slot.running = true;
+            slot.runningThread = Thread.currentThread();
         }
 
         Instant startedAt = clock.instant();
@@ -211,7 +243,8 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
                 TaskSlot slot = taskSlots.get(key);
                 if (slot != null) {
                     slot.running = false;
-                    if (slot.scheduled == null) {
+                    slot.runningThread = null;
+                    if (slot.cancelled || slot.scheduled == null) {
                         taskSlots.remove(key);
                     }
                 }
@@ -246,6 +279,8 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
 
     private static final class TaskSlot {
         private boolean running;
+        private boolean cancelled;
+        private Thread runningThread;
         private ScheduledTask scheduled;
     }
 

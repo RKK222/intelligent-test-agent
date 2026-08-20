@@ -24,6 +24,18 @@ public interface ReferenceRepositoryMapper {
             @Param("expectedOldBranch") String expectedOldBranch,
             @Param("row") ReferenceRepositoryStateRow row);
 
+    int terminateActiveState(
+            @Param("repositoryId") String repositoryId,
+            @Param("expectedGeneration") long expectedGeneration,
+            @Param("lastError") String lastError,
+            @Param("now") Instant now);
+
+    int terminateActiveReplicas(
+            @Param("repositoryId") String repositoryId,
+            @Param("expectedGeneration") long expectedGeneration,
+            @Param("lastError") String lastError,
+            @Param("now") Instant now);
+
     void upsertTarget(
             @Param("repositoryId") String repositoryId,
             @Param("linuxServerId") String linuxServerId,

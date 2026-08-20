@@ -13,4 +13,8 @@ public final class ReferenceRepositoryDtos {
     /** 受控切换目标分支请求。 */
     public record SwitchBranchRequest(String branch) {
     }
+
+    /** 终止请求必须携带页面实际观察到的 generation，防止误伤随后发起的新操作。 */
+    public record TerminateRequest(long expectedGeneration) {
+    }
 }

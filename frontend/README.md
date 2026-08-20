@@ -70,7 +70,7 @@ packages/shared-types
 
 工作区和 Agent 配置上传直接传递浏览器 `File/Blob`，backend-api 只对当前分片调用 `Blob.slice()` 和 Base64 编码，同一连接按 begin/chunk/complete 顺序发送，不把整个文件读入前端内存，也不设置前端总大小上限。上传期间全局紧凑遮罩阻断重复操作，展示当前文件、文件数、字节进度和总百分比，成功或失败后关闭。读取超过后端一次性预览阈值的 UTF-8 文件时，中间区域切换为 IDE 风格的渐进只读预览：先显示约 512 KiB 首段，提供“继续加载一段”和“加载全部（可能卡顿）”，可读取到文件末尾；警告条持续展示已加载字节/总字节和完整加载的内存、Monaco 卡顿风险。新增分段通过 Monaco 尾部增量 edit 追加，不反复 setValue 重建已有正文；上传、移动、改名、删除和 Git 操作不受一次性预览阈值影响。
 
-应用成员在已选择应用和个人运行态工作区时，可从工作区切换按钮后的“引用配置”入口查看自动化代码库当前只读引用；`APP_ADMIN/SUPER_ADMIN` 还可切换到应用资产库页签，并初始化、同步或经二次确认切换资产库分支。应用资产库继续在双栏弹窗选择后端标记的橙色 SDD 根目录并最小更新当前工作区 `.opencode/opencode.jsonc`；自动化代码库页签复用版本库分支和目录树，允许管理员选择任意已有目录、引用名称和 `yyyyMMdd` 版本，新增版本后显式激活，普通成员只读。自动化配置保存到应用级状态并复用共享版本副本，不写个人 OpenCode 配置、不创建个人 worktree，也不触发 OpenCode dispose；变更后只刷新模板缓存和组合文件树。应用资产配置保存后的 dispose、运行中延迟重载、只读引用 tab、搜索/Git/requirements 隔离及 `OPENCODE_REFERENCES_DIR` 边界保持原行为。
+应用成员在已选择应用和个人运行态工作区时，可从工作区切换按钮后的“引用配置”入口查看自动化代码库当前只读引用；`APP_ADMIN/SUPER_ADMIN` 还可切换到应用资产库页签，并初始化、同步或经二次确认切换资产库分支。应用资产库的初始化、同步、切换分支和指针核验统一在三阶段弹层展示；Git 超时进入 `RETRY_WAIT` 时可终止当前 generation，或直接“重试”以先终止旧代次再创建新同步代次。应用资产库继续在双栏弹窗选择后端标记的橙色 SDD 根目录并最小更新当前工作区 `.opencode/opencode.jsonc`；自动化代码库页签复用版本库分支和目录树，允许管理员选择任意已有目录、引用名称和 `yyyyMMdd` 版本，新增版本后显式激活，普通成员只读。自动化配置保存到应用级状态并复用共享版本副本，不写个人 OpenCode 配置、不创建个人 worktree，也不触发 OpenCode dispose；变更后只刷新模板缓存和组合文件树。应用资产配置保存后的 dispose、运行中延迟重载、只读引用 tab、搜索/Git/requirements 隔离及 `OPENCODE_REFERENCES_DIR` 边界保持原行为。
 
 引用配置的已选仓库标题会在“刷新 Git 指针”左侧展示当前服务器规范化仓库路径；旧后端、缺少引用根参数或历史非法英文名时显示“服务器路径暂不可用”。同步与核验弹层都按仓库、真实 operation、generation 和请求序号隔离，执行期间锁定父弹层和键盘焦点，逐服务器显示等待、处理、重试、失败或离线延后，终态保留到用户手动关闭并把焦点恢复到原卡片或刷新按钮；2 秒状态轮询临时失败会自动继续。
 
@@ -191,7 +191,7 @@ powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile guo
 
 脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；未显式设置 `TEST_AGENT_BASE_URL` 时，会使用自动探测到的后端内网地址（例如 `http://192.168.100.115:8080`），避免局域网访问前端时浏览器仍请求 `127.0.0.1`。需要指定固定入口时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。
 
-本机存在多个 opencode 版本时，在当前使用的 dotenv（默认 `.env.test`，或显式 `--env-file` 指定的文件）里指定 `TEST_AGENT_OPENCODE_BIN`，避免 PATH 命中旧版本。例如：
+macOS arm64 本地启动在未设置 `TEST_AGENT_OPENCODE_BIN` 时，会优先读取企业交付目录 `deploy/internal/dist/local-opencode-client/stable/manifest.json`，校验其中的 Darwin 归档 SHA，并把随包 OpenCode `1.18.4` 解压到 `.tmp/dev-opencode/<sha>/` 后交给 manager；因此不会再被 `$HOME/.opencode/bin` 中较新的个人版本覆盖。交付物尚未生成或需要显式调试其它二进制时，仍可在当前使用的 dotenv（默认 `.env.test`，或显式 `--env-file` 指定的文件）外通过环境变量指定 `TEST_AGENT_OPENCODE_BIN`，例如：
 
 ```bash
 TEST_AGENT_OPENCODE_BIN=${HOME}/.opencode/bin/opencode

@@ -64,10 +64,12 @@ import org.springframework.beans.factory.annotation.Value;
 public class ReferenceRepositoryApplicationService implements ServerBroadcastHandler {
 
     public static final String SYNC_REQUESTED_EVENT = "reference-repository.sync-requested";
+    public static final String CANCEL_REQUESTED_EVENT = "reference-repository.cancel-requested";
     private static final String REFERENCES_DIR_PARAMETER = "OPENCODE_REFERENCES_DIR";
     private static final String SDD_FOLDERS_PARAMETER = "REFERENCES_SDD_FOLDER_NAMES";
     private static final int MAX_TREE_ENTRIES = 1000;
     private static final int STATE_SCAN_PAGE_SIZE = 200;
+    private static final String TERMINATED_MESSAGE = "引用资产库操作已由管理员终止";
     private static final Duration LEASE_DURATION = Duration.ofMinutes(2);
     private static final Pattern BRANCH_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$");
     private static final Pattern REPOSITORY_ENGLISH_NAME_PATTERN =
@@ -398,6 +400,48 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         return status(repository, saved);
     }
 
+    /**
+     * 终止当前活动 generation。仓储先原子封死未完成副本，再广播各 Java 中断本机 Git 任务；
+     * expectedGeneration 防止迟到页面误终止管理员随后发起的新操作。
+     */
+    public ReferenceRepositoryResponses.Status terminate(
+            String appId,
+            String repositoryId,
+            long expectedGeneration,
+            String traceId) {
+        CodeRepository repository = requireLinkedAssetRepository(applicationId(appId), repositoryId(repositoryId));
+        if (expectedGeneration < 1L) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "待终止的引用资产库 generation 无效");
+        }
+        ReferenceRepositoryState current = referenceRepository.findState(repository.repositoryId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库尚未初始化"));
+        requireExpectedGeneration(current, expectedGeneration);
+        if (!current.status().active()) {
+            return status(repository, current);
+        }
+        Instant now = clock.instant();
+        boolean terminated = referenceRepository.terminateActiveOperation(
+                repository.repositoryId(), expectedGeneration, TERMINATED_MESSAGE, now);
+        ReferenceRepositoryState result = referenceRepository.findState(repository.repositoryId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "引用资产库终止结果不存在"));
+        requireExpectedGeneration(result, expectedGeneration);
+        if (!terminated && result.status().active()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "引用资产库操作状态已变化，请刷新后重试");
+        }
+        if (terminated) {
+            publishCancelRequested(result.repositoryId(), result.generation(), requireTraceId(traceId));
+        }
+        return status(repository, result);
+    }
+
+    private void requireExpectedGeneration(ReferenceRepositoryState state, long expectedGeneration) {
+        if (state.generation() != expectedGeneration) {
+            throw new PlatformException(ErrorCode.CONFLICT, "引用资产库操作代次已变化，请刷新后重试", Map.of(
+                    "expectedGeneration", expectedGeneration,
+                    "actualGeneration", state.generation()));
+        }
+    }
+
     private void createTargetsForNewGeneration(ReferenceRepositoryState state, Instant now) {
         Set<LinuxServerId> live = liveServerIds();
         ensureCurrentGenerationTargets(state, live, now);
@@ -579,7 +623,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
 
     @Override
     public boolean supports(String type) {
-        return SYNC_REQUESTED_EVENT.equals(type);
+        return SYNC_REQUESTED_EVENT.equals(type) || CANCEL_REQUESTED_EVENT.equals(type);
     }
 
     /** 广播载荷只作为远端低延迟唤醒；消费线程只排队，实际任务仍通过 DB 租约认领。 */
@@ -594,6 +638,10 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             return;
         }
         CodeRepositoryId parsedRepositoryId = new CodeRepositoryId(id);
+        if (CANCEL_REQUESTED_EVENT.equals(event.type())) {
+            taskDispatcher.cancel(parsedRepositoryId, number.longValue());
+            return;
+        }
         taskDispatcher.dispatchNow(
                 parsedRepositoryId,
                 number.longValue(),
@@ -611,7 +659,9 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         while (true) {
             List<ReferenceRepositoryState> page = referenceRepository.findStatesAfter(cursor, STATE_SCAN_PAGE_SIZE);
             for (ReferenceRepositoryState state : page) {
-                if (state.branch() != null && state.status() != ReferenceRepositoryStatus.UNINITIALIZED) {
+                if (state.branch() != null
+                        && state.status() != ReferenceRepositoryStatus.UNINITIALIZED
+                        && !terminatedByAdministrator(state)) {
                     ensureCurrentGenerationTargets(state, live, now);
                     refreshOverallStatus(state.repositoryId(), state.generation(), live);
                 }
@@ -1010,7 +1060,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             long generation,
             Set<LinuxServerId> live) {
         ReferenceRepositoryState state = referenceRepository.findState(repositoryId).orElse(null);
-        if (state == null || state.generation() != generation) {
+        if (state == null || state.generation() != generation || terminatedByAdministrator(state)) {
             return;
         }
         List<ReferenceRepositoryReplica> online = referenceRepository.findReplicas(repositoryId).stream()
@@ -1038,6 +1088,11 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             referenceRepository.updateOverallStatus(
                     repositoryId, generation, activeStatus, null, clock.instant());
         }
+    }
+
+    private boolean terminatedByAdministrator(ReferenceRepositoryState state) {
+        return state.status() == ReferenceRepositoryStatus.FAILED
+                && TERMINATED_MESSAGE.equals(state.lastError());
     }
 
     private ReferenceRepositoryResponses.Status status(CodeRepository repository, ReferenceRepositoryState state) {
@@ -1206,6 +1261,30 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 state.traceId(),
                 ReferenceRepositoryReplicaTaskDispatcher.WakeSource.LOCAL_REQUEST,
                 () -> claimAndSynchronize(state.repositoryId(), state.generation(), state.traceId()));
+    }
+
+    /** 数据库终态是权威；广播用于尽快回收各 Java 当前 generation 的本机 Git 进程。 */
+    private void publishCancelRequested(CodeRepositoryId repositoryId, long generation, String traceId) {
+        try {
+            broadcastPublisher.publish(new ServerBroadcastEvent(
+                    RuntimeIdGenerator.serverBroadcastEventId(),
+                    CANCEL_REQUESTED_EVENT,
+                    broadcastPublisher.instanceId(),
+                    serverIdentity.linuxServerId(),
+                    traceId,
+                    clock.instant(),
+                    Map.of(
+                            "repositoryId", repositoryId.value(),
+                            "generation", generation,
+                            "traceId", traceId)));
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Reference repository cancellation wakeup publish failed repositoryId={} generation={}",
+                    repositoryId.value(),
+                    generation);
+        }
+        // 发布者忽略本实例事件，因此本机必须显式中断。
+        taskDispatcher.cancel(repositoryId, generation);
     }
 
     private Path repositoryRoot(CodeRepository repository) {

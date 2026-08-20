@@ -24,8 +24,8 @@ Workspace 和文件管理业务包，负责工作区注册、当前用户及受�
 - `ExperienceWorkspaceApplicationService`：解析本服务器体验目录、建立稳定 Workspace 身份与实时访问边界；直接启动 Java 时仅兜底初始化目录、Git 与 README，标准 `docs/spec` 内容由随部署包交付的 Shell 模板补齐。
 - `ManagedWorkspaceApplicationService`：应用成员校验、版本选择前按当前用户身份执行 Git 远端只读访问预检、设置页工作空间模板 + 初始版本工作区创建、进度表更新、应用版本工作区 clone/接管、通用参数路径根目录读取、每服务器版本副本、目标 commit 广播同步、个人 git worktree、最近使用、diff、同步和版本工作区 git pull 编排；个人发布先本地提交，再按白名单从个人 HEAD 投影到应用 feature worktree 后提交、推送和广播，不合并个人分支。
 - `AgentConfigApplicationService`：公共级/工作空间级 Agent 配置目录选择、读写、文件目标服务器归属查询、公共 worktree 切换列表、公共 Git 更新、worktree 创建、diff、stage/unstage、commit、publish、进度快照和公共配置广播同步；还在服务器级 Redis 租约下定时补偿已有 ACTIVE OpenCode binding 但缺失稳定公共个人 worktree 的超级管理员，补偿只复用本机共享仓库，不读取用户 SSH key 或切换运行态；直接发布和 worktree 合并发布复用 `GitPublishWorkflow`。
-- `ReferenceRepositoryApplicationService`：应用资产库列表、分支初始化/受控切换、generation 同步与只读实际指针核验、当前平台规范化绝对目录的可空展示、总体/服务器状态、单层安全目录树、本机/广播/补偿/重试唤醒、数据库租约 worker、Git 副本安全落盘和离线/恢复补偿编排。
-- `ReferenceRepositoryReplicaTaskDispatcher`：以仓库 generation 去重的本机有界异步调度器，默认两个 worker、最多 256 个 key，支持立即和按退避时刻执行，避免 HTTP 与 Redis listener 线程承载阻塞 Git。
+- `ReferenceRepositoryApplicationService`：应用资产库列表、分支初始化/受控切换、generation 同步与只读实际指针核验、携带 expected generation 的管理员终止、当前平台规范化绝对目录的可空展示、总体/服务器状态、单层安全目录树、本机/广播/补偿/重试/取消唤醒、数据库租约 worker、Git 副本安全落盘和离线/恢复补偿编排。
+- `ReferenceRepositoryReplicaTaskDispatcher`：以仓库 generation 去重的本机有界异步调度器，默认两个 worker、最多 256 个 key，支持立即和按退避时刻执行，并能取消等待任务或中断运行线程，避免 HTTP 与 Redis listener 线程承载阻塞 Git。
 - `ReferenceRepositoryReplicaReconciler`：默认 60 秒扫描数据库目标，恢复广播丢失、Java 重启和 `DEFERRED` 服务器重新上线。
 - `ReferenceRepositoryResponses`：引用资产库可空服务器路径、总体目标、内部操作类型、逐服务器在线/实际指针/匹配状态和目录树业务响应模型。
 - `AppSourceApplicationService`：应用源码仓库/分支/目录树查询、固定 commit 物化受理、当前 generation 保留期调整、同 generation 重试、操作进度授权、打开与最近选择编排；续期以仓库/slot/cleanup 锁串行同步 snapshot expiry、索引 SHA 和清理计划，清理开始后拒绝。retry 重放先按客户端不可变身份返回原 operation，TEAM 进度按 repository 任一当前启用关联应用成员授权，PERSONAL 保留 owner/成员管理员边界。所有入口实时复核应用、成员、关联、仓库类型与生命周期权限，最近选择只对确定性失效删除偏好，显式清除先执行完整打开鉴权。

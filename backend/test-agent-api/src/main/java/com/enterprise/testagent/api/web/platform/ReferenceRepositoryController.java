@@ -76,6 +76,17 @@ public class ReferenceRepositoryController {
                 exchange, traceId -> service.verify(appId, repositoryId, traceId));
     }
 
+    @PostMapping("/{repositoryId}/terminate")
+    public Mono<ApiResponse<Object>> terminate(
+            @PathVariable String appId,
+            @PathVariable String repositoryId,
+            @RequestBody ReferenceRepositoryDtos.TerminateRequest request,
+            ServerWebExchange exchange) {
+        requireAppAdmin(exchange);
+        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> service.terminate(
+                appId, repositoryId, request.expectedGeneration(), traceId));
+    }
+
     @GetMapping("/{repositoryId}/status")
     public Mono<ApiResponse<Object>> status(
             @PathVariable String appId,

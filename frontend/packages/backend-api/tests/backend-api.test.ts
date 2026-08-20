@@ -819,6 +819,7 @@ describe("backend-api", () => {
     await client.synchronizeReferenceRepository("app/demo", "repo/assets");
     await client.switchReferenceRepositoryBranch("app/demo", "repo/assets", "release/2026");
     await client.verifyReferenceRepositoryPointers("app/demo", "repo/assets");
+    await client.terminateReferenceRepositoryOperation("app/demo", "repo/assets", 7);
     await expect(client.getReferenceRepositoryStatus("app/demo", "repo/assets")).resolves.toEqual(
       expect.objectContaining({
         repositoryPath: "/data/.testagent/agent-opencode/references/requirements",
@@ -858,6 +859,11 @@ describe("backend-api", () => {
         "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/verify",
         "POST",
         undefined
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/terminate",
+        "POST",
+        JSON.stringify({ expectedGeneration: 7 })
       ],
       [
         "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/reference-repositories/repo%2Fassets/status",

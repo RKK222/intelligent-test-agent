@@ -39,6 +39,11 @@ function api(overrides: Record<string, unknown> = {}) {
       readyServerCount: 0
     })),
     verifyReferenceRepositoryPointers: vi.fn().mockResolvedValue(status({ status: "VERIFYING", readyServerCount: 0 })),
+    terminateReferenceRepositoryOperation: vi.fn().mockResolvedValue(status({
+      status: "FAILED",
+      readyServerCount: 0,
+      message: "引用资产库操作已由管理员终止"
+    })),
     getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status()),
     listReferenceRepositoryTree: vi.fn().mockResolvedValue([]),
     readFile: vi.fn().mockRejectedValue(new BackendApiError(500, {
@@ -886,6 +891,144 @@ describe("ReferenceConfigurationDialog", () => {
     await flushPromises();
     expect(mockApi.getReferenceRepositoryStatus).toHaveBeenCalledWith("app-demo", "repo-assets");
     expect(wrapper.get('[aria-label="资产库同步进度"]').text()).toContain("同步完成");
+  });
+
+  it("terminates an active synchronization with generation fencing and then allows retry", async () => {
+    const active = status({
+      generation: 6,
+      status: "SYNCHRONIZING",
+      operation: "SYNCHRONIZE",
+      readyServerCount: 0,
+      servers: [{
+        linuxServerId: "linux-a",
+        status: "RETRY_WAIT",
+        online: true,
+        error: "Git 操作超时"
+      }]
+    });
+    const terminated = status({
+      generation: 6,
+      status: "FAILED",
+      operation: "SYNCHRONIZE",
+      readyServerCount: 0,
+      message: "引用资产库操作已由管理员终止",
+      servers: [{
+        linuxServerId: "linux-a",
+        status: "BLOCKED",
+        online: true,
+        error: "引用资产库操作已由管理员终止"
+      }]
+    });
+    const mockApi = api({
+      listReferenceRepositories: vi.fn().mockResolvedValue([active]),
+      terminateReferenceRepositoryOperation: vi.fn().mockResolvedValue(terminated)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[aria-label="资产库同步进度"]').text()).toContain("Git 操作超时");
+    expect(wrapper.find('button[aria-label="重试资产库同步"]').exists()).toBe(true);
+    await wrapper.get('button[aria-label="终止资产库同步"]').trigger("click");
+    expect(wrapper.text()).toContain("终止后当前代次会失败，可重新发起");
+    await wrapper.get('button[aria-label="确认终止资产库同步"]').trigger("click");
+    await flushPromises();
+
+    expect(mockApi.terminateReferenceRepositoryOperation).toHaveBeenCalledWith("app-demo", "repo-assets", 6);
+    expect(wrapper.get('[aria-label="资产库同步进度"]').text()).toContain("引用资产库操作已由管理员终止");
+    expect(wrapper.get('button[aria-label="关闭资产库同步进度"]').attributes()).not.toHaveProperty("disabled");
+    expect(wrapper.find('button[aria-label="重试资产库同步"]').exists()).toBe(true);
+  });
+
+  it("immediately retries a Git timeout by terminating the old generation first", async () => {
+    const active = status({
+      generation: 7,
+      status: "SYNCHRONIZING",
+      operation: "SYNCHRONIZE",
+      readyServerCount: 0,
+      servers: [{
+        linuxServerId: "linux-a",
+        status: "RETRY_WAIT",
+        online: true,
+        error: "Git 操作超时"
+      }]
+    });
+    const terminated = status({
+      generation: 7,
+      status: "FAILED",
+      operation: "SYNCHRONIZE",
+      readyServerCount: 0,
+      message: "引用资产库操作已由管理员终止"
+    });
+    const retried = status({
+      generation: 8,
+      status: "SYNCHRONIZING",
+      operation: "SYNCHRONIZE",
+      readyServerCount: 0
+    });
+    const mockApi = api({
+      listReferenceRepositories: vi.fn().mockResolvedValue([active]),
+      terminateReferenceRepositoryOperation: vi.fn().mockResolvedValue(terminated),
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(retried)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="重试资产库同步"]').trigger("click");
+    await flushPromises();
+
+    expect(mockApi.terminateReferenceRepositoryOperation).toHaveBeenCalledWith("app-demo", "repo-assets", 7);
+    expect(mockApi.synchronizeReferenceRepository).toHaveBeenCalledWith("app-demo", "repo-assets");
+    expect(wrapper.get('[aria-label="资产库同步进度"]').text()).toContain("正在同步各服务器资产副本");
+  });
+
+  it("retries a branch-switch Git timeout through a terminated old generation", async () => {
+    const activeSwitch = status({
+      generation: 4,
+      branch: "release",
+      targetCommitHash: "def456",
+      status: "SYNCHRONIZING",
+      operation: "SWITCH_BRANCH",
+      readyServerCount: 0,
+      servers: [{
+        linuxServerId: "linux-a",
+        status: "RETRY_WAIT",
+        online: true,
+        error: "Git 操作超时"
+      }]
+    });
+    const terminated = status({
+      ...activeSwitch,
+      status: "FAILED",
+      message: "引用资产库操作已由管理员终止"
+    });
+    const retried = status({
+      generation: 5,
+      branch: "release",
+      targetCommitHash: "def456",
+      status: "SYNCHRONIZING",
+      operation: "SYNCHRONIZE",
+      readyServerCount: 0
+    });
+    const mockApi = api({
+      listReferenceRepositories: vi.fn().mockResolvedValue([activeSwitch]),
+      terminateReferenceRepositoryOperation: vi.fn().mockResolvedValue(terminated),
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(retried)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="重试资产库同步"]').trigger("click");
+    await flushPromises();
+
+    expect(mockApi.terminateReferenceRepositoryOperation).toHaveBeenCalledWith("app-demo", "repo-assets", 4);
+    expect(mockApi.synchronizeReferenceRepository).toHaveBeenCalledWith("app-demo", "repo-assets");
+    expect(wrapper.get('[aria-label="资产库同步进度"]').text()).toContain("正在同步各服务器资产副本");
   });
 
   it("selects an uninitialized repository without opening synchronization progress", async () => {

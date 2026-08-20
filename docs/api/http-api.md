@@ -1465,6 +1465,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 | `POST` | `/{repositoryId}/synchronize` | 在已固定分支上重新解析远端 HEAD；当前总体状态已在执行时幂等返回，终态时以 CAS 推进 generation 并同步在线服务器及历史副本服务器。无请求体。 |
 | `POST` | `/{repositoryId}/switch-branch` | 把已初始化资产库切换到指定分支的固定远端 HEAD。请求体为 `{ "branch": "release" }`；仅 `READY/FAILED` 可开始，活动中的同目标切换幂等返回，冲突操作返回 `CONFLICT`。 |
 | `POST` | `/{repositoryId}/verify` | 新建只读核验 generation，要求各在线服务器读取本地实际 branch、HEAD、origin 和工作树状态；不执行 fetch、checkout 或 reset。无请求体。 |
+| `POST` | `/{repositoryId}/terminate` | 终止页面实际观察到的活动 generation。请求体为 `{ "expectedGeneration": 2 }`；代次已变化返回 `CONFLICT`，避免迟到页面误终止新操作。 |
 | `GET` | `/{repositoryId}/status` | 查询总体状态和当前 generation 的逐服务器状态。 |
 | `GET` | `/{repositoryId}/tree?path=` | 从当前 Java 所在服务器的本地副本读取指定相对目录的单层树。 |
 
@@ -1518,6 +1519,8 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 
 `branch/targetCommitHash` 是当前 generation 的目标指针，`servers[].currentBranch/currentCommitHash` 是最近一次从该服务器实际观察到的指针；新 generation 不用目标值覆盖实际快照。`online=false` 时实际指针和 `verifiedAt` 可能是离线前快照；`matchesTarget=null` 表示尚无完整观察，`false` 也用于 branch/HEAD、origin、干净状态或可信目录任一不符合目标的情况。`syncedAt` 是最近成功同步时间，`verifiedAt` 是最近成功完成实际指针读取的时间。`message` 和 `servers[].error` 只返回安全错误说明，不包含凭据、Git 原始 stderr 或内部命令。
 
+终止接口只接受当前活动的 `INITIALIZING/VERIFYING/SYNCHRONIZING` 代次：后端在同一事务中把总体状态置为 `FAILED`，把当前 generation 的未完成副本置为 `BLOCKED` 并清除 retry/lease，再通过内部广播通知各 Java 中断本机任务。已完成的副本事实保留；相同 generation 已进入终态时幂等返回当前状态。终止后的同步/核验重试复用既有入口创建新 generation，旧 worker 即使迟到也不能写回。终止消息固定为安全文案，不返回原始 Git 命令、stderr、凭据或物理路径。
+
 `repositoryPath` 是可空兼容字段，仅由当前平台解析后的 `OPENCODE_REFERENCES_DIR` 与已校验的版本库英文名在服务端拼接、绝对化和规范化得到。参数缺失或历史英文名不合法时返回 `null`，不影响仓库列表和状态；客户端不得提交或持久化该字段。该物理路径只通过本节要求 `APP_ADMIN` 的既有响应返回，不进入错误消息或业务日志。
 
 分支切换先解析远端 HEAD，再用旧 generation 与旧分支 CAS 建立新代次。在线节点在干净、origin 匹配的共享仓库中切换；已有目标本地分支必须可快进到固定目标，脏仓库、非 Git 目录、origin 冲突或分叉会阻塞该服务器，不删除、清理或强制覆盖。已经成功的服务器不因其它节点失败而回滚；离线及历史副本由数据库目标、广播唤醒和补偿扫描最终追平。
@@ -1552,7 +1555,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 - 每次只列一层，目录优先并按名称排序，最多返回 1000 项；`.git` 和符号链接不进入结果。
 - 只有仓库根层、名称命中 `REFERENCES_SDD_FOLDER_NAMES` 小写清单的真实目录才返回 `highlighted=true`、`selectable=true`。文件和所有嵌套目录均不可选。
 
-初始化接口只负责首次固定分支；再次用相同分支调用为幂等查询，用不同分支调用返回 `CONFLICT`，后续分支变化必须使用受控 `switch-branch` 接口。未初始化时调用同步返回 `CONFLICT`。应用不存在或未启用返回 `NOT_FOUND`；代码库未关联当前应用、类型错误、ID/分支/英文名不合法返回 `VALIDATION_ERROR`；缺少当前用户 SSH key 返回 `FORBIDDEN`；Git 网络/超时按统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT` 返回。缺少引用根目录参数、磁盘读取或原子落盘异常按统一安全错误返回。
+初始化接口只负责首次固定分支；再次用相同分支调用为幂等查询，用不同分支调用返回 `CONFLICT`，后续分支变化必须使用受控 `switch-branch` 接口。未初始化时调用同步返回 `CONFLICT`。应用不存在或未启用返回 `NOT_FOUND`；代码库未关联当前应用、类型错误、ID/分支/英文名不合法返回 `VALIDATION_ERROR`；缺少当前用户 SSH key 返回 `FORBIDDEN`；Git 网络/超时按统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT` 返回。终止请求的 `expectedGeneration < 1` 返回 `VALIDATION_ERROR`，与当前代次不一致返回 `CONFLICT`。缺少引用根目录参数、磁盘读取或原子落盘异常按统一安全错误返回。
 
 所有成功响应仍包裹 `ApiResponse<T>`，入口生成或透传同一 `traceId`；初始化/同步将该 traceId 写入总体状态并放入内部唤醒广播，后续状态查询返回最近 generation 的 traceId。错误响应遵循本文统一格式，并通过响应头和响应体返回同一个 traceId。
 

@@ -194,6 +194,52 @@ class ReferenceRepositoryReplicaTaskDispatcherTest {
                 .isFalse();
     }
 
+    @Test
+    void cancellationRemovesDelayedTaskBeforeItRuns() throws Exception {
+        dispatcher = new ReferenceRepositoryReplicaTaskDispatcher(1, 16, Clock.systemUTC());
+        dispatcher.start();
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_cancel_pending");
+        AtomicInteger executions = new AtomicInteger();
+        assertThat(dispatcher.dispatchAt(
+                repositoryId,
+                8L,
+                "trace_cancel_pending",
+                ReferenceRepositoryReplicaTaskDispatcher.WakeSource.RETRY,
+                Instant.now().plusSeconds(30),
+                executions::incrementAndGet)).isTrue();
+
+        assertThat(dispatcher.cancel(repositoryId, 8L)).isTrue();
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(executions).hasValue(0);
+    }
+
+    @Test
+    void cancellationInterruptsRunningTask() throws Exception {
+        dispatcher = new ReferenceRepositoryReplicaTaskDispatcher(1, 16, Clock.systemUTC());
+        dispatcher.start();
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_cancel_running");
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        assertThat(dispatcher.dispatchNow(
+                repositoryId,
+                9L,
+                "trace_cancel_running",
+                ReferenceRepositoryReplicaTaskDispatcher.WakeSource.LOCAL_REQUEST,
+                () -> {
+                    entered.countDown();
+                    try {
+                        TimeUnit.SECONDS.sleep(30);
+                    } catch (InterruptedException exception) {
+                        interrupted.countDown();
+                        Thread.currentThread().interrupt();
+                    }
+                })).isTrue();
+        assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(dispatcher.cancel(repositoryId, 9L)).isTrue();
+        assertThat(interrupted.await(1, TimeUnit.SECONDS)).isTrue();
+    }
+
     private static void await(CountDownLatch latch) {
         try {
             latch.await(2, TimeUnit.SECONDS);

@@ -122,6 +122,23 @@
           and status in ('READY', 'FAILED')
     </update>
 
+    <update id="terminateActiveState">
+        update reference_repository_states
+        set status = 'FAILED', last_error = #{lastError}, updated_at = #{now}
+        where repository_id = #{repositoryId}
+          and generation = #{expectedGeneration}
+          and status in ('INITIALIZING', 'VERIFYING', 'SYNCHRONIZING')
+    </update>
+
+    <update id="terminateActiveReplicas">
+        update reference_repository_replicas
+        set status = 'BLOCKED', next_retry_at = null, lease_token = null, lease_until = null,
+            last_error = #{lastError}, updated_at = #{now}
+        where repository_id = #{repositoryId}
+          and generation = #{expectedGeneration}
+          and status in ('PENDING', 'PROCESSING', 'RETRY_WAIT', 'DEFERRED')
+    </update>
+
     <insert id="upsertTarget" databaseId="postgresql">
         insert into reference_repository_replicas(
             repository_id, linux_server_id, generation, status, branch, retry_count, created_at, updated_at

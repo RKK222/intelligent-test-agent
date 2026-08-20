@@ -45,7 +45,7 @@ type PendingWorkspaceRefresh = {
   confirmationDeadlineMs: number | null;
   paused: boolean;
 };
-type RepositoryProgressOperation = "SYNCHRONIZE" | "VERIFY_POINTERS";
+type RepositoryProgressOperation = "INITIALIZE" | "SYNCHRONIZE" | "SWITCH_BRANCH" | "VERIFY_POINTERS";
 type RepositoryOperationTrigger = "repository-card" | "verify-button";
 type RepositoryOperationRequestState = "REQUESTING" | "ACCEPTED" | "FAILED";
 type RepositoryOperationProgress = {
@@ -90,6 +90,8 @@ const branchError = ref<Notice | null>(null);
 const branchSwitchConfirmation = ref<{ repositoryId: string; repositoryName: string; from: string; to: string } | null>(null);
 const pendingWorkspaceRefreshes = ref<Map<string, PendingWorkspaceRefresh>>(new Map());
 const operationProgress = ref<RepositoryOperationProgress | null>(null);
+const operationTerminating = ref(false);
+const operationTerminationError = ref<Notice | null>(null);
 const activeReferenceKind = ref<"asset" | "automation">("asset");
 const automationOperationState = ref({ open: false, canClose: true });
 const modalOperationOpen = computed(() => Boolean(operationProgress.value) || automationOperationState.value.open);
@@ -150,7 +152,17 @@ const operationCanClose = computed(() => {
 const operationCanRetry = computed(() => {
   const progress = operationProgress.value;
   if (!progress || progress.requestState === "REQUESTING") return false;
-  return progress.requestState === "FAILED" || acceptedOperationRepository.value?.status === "FAILED";
+  if (progress.requestState === "FAILED" || acceptedOperationRepository.value?.status === "FAILED") return true;
+  return acceptedOperationRepository.value?.servers.some((server) => server.status === "RETRY_WAIT") === true;
+});
+
+const operationCanTerminate = computed(() => {
+  const progress = operationProgress.value;
+  const repository = acceptedOperationRepository.value;
+  return Boolean(progress
+    && progress.requestState === "ACCEPTED"
+    && repository
+    && ACTIVE_STATUSES.has(repository.status));
 });
 
 const visibleTreeNodes = computed<VisibleTreeNode[]>(() => {
@@ -364,6 +376,8 @@ function resetSelectionState() {
   permissionNeedsUpdate.value = false;
   configNotice.value = null;
   operationProgress.value = null;
+  operationTerminating.value = false;
+  operationTerminationError.value = null;
   branchSwitchConfirmation.value = null;
   closeBranchPopover();
 }
@@ -452,7 +466,10 @@ async function applyOperationStatus(
 }
 
 function isProgressOperation(operation: ReferenceRepositoryStatus["operation"]): operation is RepositoryProgressOperation {
-  return operation === "SYNCHRONIZE" || operation === "VERIFY_POINTERS";
+  return operation === "INITIALIZE"
+    || operation === "SYNCHRONIZE"
+    || operation === "SWITCH_BRANCH"
+    || operation === "VERIFY_POINTERS";
 }
 
 /**
@@ -475,6 +492,8 @@ function beginOperationProgress(
     generation,
     error: null
   };
+  operationTerminating.value = false;
+  operationTerminationError.value = null;
   actionError.value = null;
   return requestToken;
 }
@@ -640,6 +659,7 @@ async function confirmSwitchBranch() {
     if (!contextIsCurrent(dialogToken, selectionToken, confirmation.repositoryId)) return;
     branchSwitchConfirmation.value = null;
     closeBranchPopover();
+    beginOperationProgress(next, "SWITCH_BRANCH", "repository-card", "ACCEPTED", next.generation);
     treeByParent.value = {};
     expandedPaths.value = new Set();
     selectedFolderPath.value = null;
@@ -705,11 +725,65 @@ function retryOperation() {
   const repository = operationRepository.value;
   const progress = operationProgress.value;
   if (!repository || !progress || !operationCanRetry.value) return;
-  if (progress.operation === "SYNCHRONIZE") {
-    void selectRepository(repository);
+  if (acceptedOperationRepository.value && ACTIVE_STATUSES.has(acceptedOperationRepository.value.status)) {
+    void terminateOperation(true);
     return;
   }
-  void verifyPointers(repository);
+  if (progress.operation === "VERIFY_POINTERS") {
+    void verifyPointers(repository);
+    return;
+  }
+  void selectRepository(repository, true);
+}
+
+/**
+ * 终止请求携带进度弹层实际观察到的 generation；“重试”活动超时任务时先终止旧代次，
+ * 再复用原同步/核验入口创建新代次，任何迟到响应都由 requestToken 丢弃。
+ */
+async function terminateOperation(retryAfterTermination = false) {
+  const progress = operationProgress.value;
+  const repository = acceptedOperationRepository.value;
+  if (!progress || !repository || !operationCanTerminate.value || operationTerminating.value) return;
+  const requestToken = progress.requestToken;
+  const generation = progress.generation;
+  if (generation === null) return;
+  operationTerminating.value = true;
+  operationTerminationError.value = null;
+  clearPoll();
+  try {
+    const responseToken = beginRepositoryRequest();
+    const next = await api.terminateReferenceRepositoryOperation(
+      props.appId,
+      repository.repositoryId,
+      generation
+    );
+    const currentProgress = operationProgress.value;
+    if (!contextIsCurrent(dialogGeneration, selectionGeneration, repository.repositoryId)
+      || !currentProgress
+      || currentProgress.requestToken !== requestToken) return;
+    replaceRepository(next, responseToken);
+    operationTerminating.value = false;
+    if (retryAfterTermination) {
+      if (progress.operation === "VERIFY_POINTERS") {
+        void verifyPointers(next);
+      } else {
+        void selectRepository(next, true);
+      }
+    }
+  } catch (error) {
+    const currentProgress = operationProgress.value;
+    if (contextIsCurrent(dialogGeneration, selectionGeneration, repository.repositoryId)
+      && currentProgress
+      && currentProgress.requestToken === requestToken) {
+      operationTerminationError.value = notice(error, "终止引用资产库操作失败");
+      if (ACTIVE_STATUSES.has(selectedRepository.value?.status ?? "")) {
+        scheduleStatusPoll(repository.repositoryId, dialogGeneration, selectionGeneration);
+      }
+    }
+  } finally {
+    const currentProgress = operationProgress.value;
+    if (currentProgress?.requestToken === requestToken) operationTerminating.value = false;
+  }
 }
 
 function closeOperationProgress() {
@@ -780,6 +854,7 @@ async function confirmInitialize(repository: ReferenceRepositoryStatus) {
     const next = await api.initializeReferenceRepository(props.appId, repository.repositoryId, selectedBranch.value);
     if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) return;
     closeBranchPopover();
+    beginOperationProgress(next, "INITIALIZE", "repository-card", "ACCEPTED", next.generation);
     await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
   } catch (error) {
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) {
@@ -1502,11 +1577,15 @@ onBeforeUnmount(() => {
           :accepted-target="acceptedOperationRepository"
           :error="operationProgress.error"
           :polling-error="actionError"
+          :termination-error="operationTerminationError"
           :can-close="operationCanClose"
           :can-retry="operationCanRetry"
+          :can-terminate="operationCanTerminate"
+          :terminating="operationTerminating"
           resource-label="资产库"
           @close="closeOperationProgress"
           @retry="retryOperation"
+          @terminate="terminateOperation(false)"
         />
 
         <div v-if="branchSwitchConfirmation" class="reference-confirmation-backdrop">

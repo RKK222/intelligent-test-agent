@@ -4,7 +4,7 @@ import { Button } from "@test-agent/ui-kit";
 import { Check, RefreshCw, X } from "lucide-vue-next";
 
 type Notice = { message: string; traceId?: string };
-type Operation = "SYNCHRONIZE" | "VERIFY_POINTERS";
+type Operation = "INITIALIZE" | "SYNCHRONIZE" | "SWITCH_BRANCH" | "VERIFY_POINTERS";
 type RequestState = "REQUESTING" | "ACCEPTED" | "FAILED";
 type StepState = "waiting" | "running" | "completed" | "failed";
 type OperationServer = {
@@ -38,8 +38,11 @@ const props = withDefaults(defineProps<{
   acceptedTarget?: OperationTarget | null;
   error?: Notice | null;
   pollingError?: Notice | null;
+  terminationError?: Notice | null;
   canClose: boolean;
   canRetry: boolean;
+  canTerminate?: boolean;
+  terminating?: boolean;
   resourceLabel?: string;
   replicaLabel?: string;
 }>(), {
@@ -47,14 +50,18 @@ const props = withDefaults(defineProps<{
   acceptedTarget: null,
   error: null,
   pollingError: null,
+  terminationError: null,
+  canTerminate: false,
+  terminating: false,
   resourceLabel: "资产库",
   replicaLabel: "资产"
 });
 
-const emit = defineEmits<{ close: []; retry: [] }>();
+const emit = defineEmits<{ close: []; retry: []; terminate: [] }>();
 const dialogElement = ref<HTMLElement | null>(null);
+const terminationConfirmation = ref(false);
 const steps = [1, 2, 3] as const;
-const synchronization = computed(() => props.operation === "SYNCHRONIZE");
+const synchronization = computed(() => props.operation !== "VERIFY_POINTERS");
 
 watch(
   () => props.open,
@@ -62,6 +69,13 @@ watch(
     if (open) void nextTick(() => dialogElement.value?.focus());
   },
   { immediate: true }
+);
+
+watch(
+  () => props.canTerminate,
+  (canTerminate) => {
+    if (!canTerminate) terminationConfirmation.value = false;
+  }
 );
 
 function dialogLabel() {
@@ -74,6 +88,10 @@ function closeLabel() {
 
 function retryLabel() {
   return synchronization.value ? `重试${props.resourceLabel}同步` : "重试 Git 指针核验";
+}
+
+function terminateLabel() {
+  return synchronization.value ? `终止${props.resourceLabel}同步` : "终止 Git 指针核验";
 }
 
 function stepState(step: 1 | 2 | 3): StepState {
@@ -171,7 +189,7 @@ function shortCommit(commitHash?: string | null) {
       role="dialog"
       aria-modal="true"
       :aria-label="dialogLabel()"
-      :aria-busy="canClose ? undefined : 'true'"
+      :aria-busy="terminating || !canClose ? 'true' : undefined"
       tabindex="-1"
     >
       <header class="reference-verification-header">
@@ -179,7 +197,7 @@ function shortCommit(commitHash?: string | null) {
           <h3>{{ synchronization ? `同步${resourceLabel}` : "刷新 Git 指针" }}</h3>
           <p aria-live="polite">{{ headline() }}</p>
         </div>
-        <Button size="sm" variant="ghost" :aria-label="closeLabel()" :disabled="!canClose" @click="emit('close')">关闭</Button>
+        <Button size="sm" variant="ghost" :aria-label="closeLabel()" :disabled="!canClose || terminating" @click="emit('close')">关闭</Button>
       </header>
 
       <div v-if="target" class="reference-verification-target">
@@ -231,6 +249,10 @@ function shortCommit(commitHash?: string | null) {
         <strong>{{ error.message }}</strong>
         <code v-if="error.traceId">traceId: {{ error.traceId }}</code>
       </div>
+      <div v-else-if="terminationError" class="reference-verification-error" role="alert">
+        <strong>{{ terminationError.message }}</strong>
+        <code v-if="terminationError.traceId">traceId: {{ terminationError.traceId }}</code>
+      </div>
       <div v-else-if="pollingError" class="reference-verification-error is-retrying" role="status">
         <strong>{{ pollingError.message }}</strong>
         <span>正在自动重试状态读取…</span>
@@ -242,8 +264,37 @@ function shortCommit(commitHash?: string | null) {
       </div>
 
       <footer class="reference-verification-actions">
-        <Button v-if="canRetry" size="sm" variant="ghost" :aria-label="retryLabel()" @click="emit('retry')">重试</Button>
-        <span v-if="!canClose">{{ synchronization ? "同步" : "核验" }}期间请保持此窗口打开</span>
+        <template v-if="terminationConfirmation && canTerminate">
+          <span role="status">终止后当前代次会失败，可重新发起。</span>
+          <Button size="sm" variant="ghost" :disabled="terminating" @click="terminationConfirmation = false">取消</Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            :aria-label="`确认${terminateLabel()}`"
+            :disabled="terminating"
+            @click="emit('terminate')"
+          >{{ terminating ? "终止中…" : "确认终止" }}</Button>
+        </template>
+        <template v-else>
+          <Button
+            v-if="canTerminate"
+            size="sm"
+            variant="ghost"
+            :aria-label="terminateLabel()"
+            :disabled="terminating"
+            @click="terminationConfirmation = true"
+          >终止</Button>
+          <Button
+            v-if="canRetry"
+            size="sm"
+            variant="ghost"
+            :aria-label="retryLabel()"
+            :disabled="terminating"
+            @click="emit('retry')"
+          >重试</Button>
+          <span v-if="terminating">正在终止当前操作…</span>
+          <span v-else-if="!canClose">{{ synchronization ? "同步" : "核验" }}期间请保持此窗口打开</span>
+        </template>
       </footer>
     </section>
   </div>

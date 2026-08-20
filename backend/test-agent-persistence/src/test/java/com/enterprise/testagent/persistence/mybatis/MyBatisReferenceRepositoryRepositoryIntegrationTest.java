@@ -207,6 +207,38 @@ class MyBatisReferenceRepositoryRepositoryIntegrationTest {
     }
 
     @Test
+    void terminationFencesRunningAndWaitingReplicasInTheObservedGeneration() {
+        assertThat(repository.initializeIfAbsent(state(
+                "main", "commit-1", 1L, ReferenceRepositoryStatus.SYNCHRONIZING))).isPresent();
+        repository.upsertTargets(REPOSITORY_ID, 1L, "main", Set.of(SERVER_ID, SERVER_B_ID), NOW);
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "lease-running", NOW.plusSeconds(30), NOW)).isPresent();
+
+        assertThat(repository.terminateActiveOperation(
+                REPOSITORY_ID, 1L, "引用资产库操作已由管理员终止", NOW.plusSeconds(1))).isTrue();
+        assertThat(repository.findState(REPOSITORY_ID)).get().satisfies(state -> {
+            assertThat(state.status()).isEqualTo(ReferenceRepositoryStatus.FAILED);
+            assertThat(state.lastError()).isEqualTo("引用资产库操作已由管理员终止");
+        });
+        assertThat(repository.findReplicas(REPOSITORY_ID)).allSatisfy(replica -> {
+            assertThat(replica.status()).isEqualTo(ReferenceRepositoryReplicaStatus.BLOCKED);
+            assertThat(replica.leaseToken()).isNull();
+            assertThat(replica.leaseUntil()).isNull();
+        });
+        assertThat(repository.markReady(
+                REPOSITORY_ID,
+                1L,
+                SERVER_ID,
+                "lease-running",
+                "main",
+                "commit-1",
+                NOW.plusSeconds(2),
+                NOW.plusSeconds(2))).isFalse();
+        assertThat(repository.terminateActiveOperation(
+                REPOSITORY_ID, 1L, "重复终止", NOW.plusSeconds(2))).isFalse();
+    }
+
+    @Test
     void leaseRenewalPreventsReplacementUntilRenewedDeadlineAndOldTokenCannotRenewAfterTakeover() {
         assertThat(repository.initializeIfAbsent(state(1L))).isPresent();
         repository.upsertTargets(REPOSITORY_ID, 1L, "main", Set.of(SERVER_ID), NOW);

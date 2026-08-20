@@ -1274,6 +1274,12 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/verify`,
         { method: "POST" }
       ),
+    /** 以页面观察到的 generation 终止活动操作，防止迟到交互误伤新代次。 */
+    terminateReferenceRepositoryOperation: (appId: string, repositoryId: string, expectedGeneration: number) =>
+      request<ReferenceRepositoryStatus>(
+        `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/terminate`,
+        { method: "POST", body: JSON.stringify({ expectedGeneration }) }
+      ),
     getReferenceRepositoryStatus: (appId: string, repositoryId: string) =>
       request<ReferenceRepositoryStatus>(
         `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/status`

@@ -71,6 +71,20 @@ public class MyBatisReferenceRepositoryRepository implements ReferenceRepository
 
     @Override
     @Transactional
+    public boolean terminateActiveOperation(
+            CodeRepositoryId repositoryId,
+            long expectedGeneration,
+            String lastError,
+            Instant now) {
+        if (mapper.terminateActiveState(repositoryId.value(), expectedGeneration, lastError, now) != 1) {
+            return false;
+        }
+        mapper.terminateActiveReplicas(repositoryId.value(), expectedGeneration, lastError, now);
+        return true;
+    }
+
+    @Override
+    @Transactional
     public void upsertTargets(
             CodeRepositoryId repositoryId,
             long generation,

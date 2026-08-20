@@ -10,6 +10,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
@@ -62,6 +65,37 @@ class ProcessGitCommandExecutorTest {
         long childPid = Long.parseLong(Files.readString(childPidFile));
         boolean childStopped = waitUntilStopped(childPid, Duration.ofSeconds(2));
         assertThat(childStopped).as("超时后 shell 启动的子进程应被一并终止").isTrue();
+    }
+
+    @Test
+    void interruptionTerminatesDescendantProcess(@TempDir Path tempDir) throws Exception {
+        ProcessGitCommandExecutor executor = new ProcessGitCommandExecutor();
+        Path childPidFile = tempDir.resolve("interrupted-child.pid");
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> execution = worker.submit(() -> executor.execute(
+                    List.of(
+                            "/bin/sh",
+                            "-c",
+                            "sleep 30 & child=$!; printf '%s' \"$child\" > \"$1\"; wait \"$child\"",
+                            "sh",
+                            childPidFile.toString()),
+                    null,
+                    Duration.ofSeconds(60)));
+            long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+            while (!Files.exists(childPidFile) && System.nanoTime() < deadline) {
+                TimeUnit.MILLISECONDS.sleep(20);
+            }
+            assertThat(childPidFile).exists();
+
+            assertThat(execution.cancel(true)).isTrue();
+            long childPid = Long.parseLong(Files.readString(childPidFile));
+            assertThat(waitUntilStopped(childPid, Duration.ofSeconds(2)))
+                    .as("线程中断后 shell 启动的子进程应被一并终止")
+                    .isTrue();
+        } finally {
+            worker.shutdownNow();
+        }
     }
 
     private static boolean waitUntilStopped(long pid, Duration timeout) throws InterruptedException {

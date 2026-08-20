@@ -693,6 +693,7 @@ generation、租约和 CAS 规则：
 - 新同步只允许在总体仍为预期 generation、分支未变且旧状态为 `READY` / `FAILED` 时 CAS 推进；活动状态的重复同步幂等返回当前 generation。
 - 副本目标只接受相同或更高 generation。更高 generation 会清空旧租约和重试，但保留上一代实际 branch、commit、同步及核验时间作为明确的历史快照；同 generation 的 `DEFERRED` 服务器恢复上线时重置为 `PENDING`。
 - worker 只能认领 `PENDING` / `DEFERRED`、已到期的 `RETRY_WAIT` 或租约已过期的 `PROCESSING`。续租及 `READY` / `RETRY_WAIT` / `BLOCKED` 写回必须同时匹配 `repository_id + linux_server_id + generation + lease_token`，并要求租约在写回时仍未过期；旧 generation 或旧 token 无权修改共享副本状态。
+- 管理员终止必须在同一事务中按 `repository_id + expected generation + 活动状态` 把总体置为 `FAILED`，并把该 generation 的 `PENDING/PROCESSING/RETRY_WAIT/DEFERRED` 副本置为 `BLOCKED`、清除 `next_retry_at/lease_token/lease_until`。该能力复用现有表和 MyBatis XML，不新增 migration；事务提交后才广播本机任务取消，迟到 worker 仍因租约 fencing 无法写回。
 - 补偿扫描把当前 generation 中离线服务器的 `PENDING`、`RETRY_WAIT`、`PROCESSING` 转为 `DEFERRED` 并清除租约；离线目标保留，恢复后重新参与同步，但不阻塞当前在线服务器汇总为 `READY`。
 
 索引：

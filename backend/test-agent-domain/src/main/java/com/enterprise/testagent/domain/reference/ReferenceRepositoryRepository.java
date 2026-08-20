@@ -33,6 +33,16 @@ public interface ReferenceRepositoryRepository {
         return advanceGenerationIfCurrent(expectedGeneration, nextState.branch(), nextState);
     }
 
+    /**
+     * 仅在指定 generation 仍处于活动态时终止总体操作，并使同代次未完成副本立即失去租约。
+     * 实现必须在一个事务内完成总体状态与副本 fencing，避免旧 worker 迟到写回。
+     */
+    boolean terminateActiveOperation(
+            CodeRepositoryId repositoryId,
+            long expectedGeneration,
+            String lastError,
+            Instant now);
+
     void upsertTargets(
             CodeRepositoryId repositoryId,
             long generation,

@@ -36,6 +36,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
     public GitCommandResult execute(List<String> command, String privateKey, Duration timeout) {
         GitCommandExecutor.record(command);
         Path keyFile = null;
+        Process process = null;
         long startedAt = System.nanoTime();
         String safeCommand = safeCommand(command);
         LOGGER.info("event=git_command_start timeoutMs={} command={}", timeout.toMillis(), safeCommand);
@@ -57,7 +58,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
                                 + " -o ServerAliveInterval=5"
                                 + " -o ServerAliveCountMax=2");
             }
-            Process process = builder.start();
+            process = builder.start();
             process.getOutputStream().close();
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             ByteArrayOutputStream stderr = new ByteArrayOutputStream();
@@ -130,6 +131,24 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
                 LOGGER.info("event=git_command_success durationMs={} command={}", durationMs, safeCommand);
             }
             return new GitCommandResult(exit, new String(stdoutBytes, StandardCharsets.UTF_8), stdoutBytes);
+        } catch (InterruptedException exception) {
+            if (process != null) {
+                terminateProcessTree(process);
+            }
+            Thread.currentThread().interrupt();
+            long durationMs = elapsedMillis(startedAt);
+            LOGGER.info(
+                    "event=git_command_cancelled durationMs={} command={}",
+                    durationMs,
+                    safeCommand);
+            throw new PlatformException(
+                    ErrorCode.GIT_UNAVAILABLE,
+                    "Git 操作已终止",
+                    Map.of(
+                            "command", safeCommand,
+                            "durationMillis", durationMs,
+                            "gitFailureType", "CANCELLED"),
+                    exception);
         } catch (PlatformException exception) {
             throw exception;
         } catch (Exception exception) {

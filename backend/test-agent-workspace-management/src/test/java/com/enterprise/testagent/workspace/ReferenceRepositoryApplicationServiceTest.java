@@ -329,6 +329,53 @@ class ReferenceRepositoryApplicationServiceTest {
     }
 
     @Test
+    void terminateFencesObservedGenerationAndBroadcastsWorkerCancellation() {
+        ReferenceRepositoryState active = new ReferenceRepositoryState(
+                ASSET_ID, "main", "commit-3", 3L, ReferenceRepositoryStatus.SYNCHRONIZING,
+                ReferenceRepositoryOperationType.SYNCHRONIZE, ADMIN, "trace_active", null, NOW, NOW, NOW);
+        ReferenceRepositoryState terminated = new ReferenceRepositoryState(
+                ASSET_ID, "main", "commit-3", 3L, ReferenceRepositoryStatus.FAILED,
+                ReferenceRepositoryOperationType.SYNCHRONIZE, ADMIN, "trace_active",
+                "引用资产库操作已由管理员终止", NOW, NOW, NOW);
+        when(configurationRepository.findRepositoriesByApplication(APP)).thenReturn(List.of(assetRepository()));
+        when(referenceRepository.findState(ASSET_ID))
+                .thenReturn(Optional.of(active), Optional.of(terminated));
+        when(referenceRepository.terminateActiveOperation(
+                ASSET_ID, 3L, "引用资产库操作已由管理员终止", NOW)).thenReturn(true);
+
+        ReferenceRepositoryResponses.Status result = service.terminate(
+                APP.value(), ASSET_ID.value(), 3L, "trace_terminate");
+
+        assertThat(result.status()).isEqualTo(ReferenceRepositoryStatus.FAILED.name());
+        assertThat(result.message()).isEqualTo("引用资产库操作已由管理员终止");
+        assertThat(publisher.events).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(ReferenceRepositoryApplicationService.CANCEL_REQUESTED_EVENT);
+            assertThat(event.payload()).containsEntry("repositoryId", ASSET_ID.value()).containsEntry("generation", 3L);
+        });
+        verify(taskDispatcher).cancel(ASSET_ID, 3L);
+    }
+
+    @Test
+    void terminateRejectsStaleGenerationWithoutCancellingNewOperation() {
+        ReferenceRepositoryState current = state("main", 4L, ReferenceRepositoryStatus.SYNCHRONIZING);
+        when(configurationRepository.findRepositoriesByApplication(APP)).thenReturn(List.of(assetRepository()));
+        when(referenceRepository.findState(ASSET_ID)).thenReturn(Optional.of(current));
+
+        assertThatThrownBy(() -> service.terminate(
+                APP.value(), ASSET_ID.value(), 3L, "trace_stale_terminate"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details())
+                            .containsEntry("expectedGeneration", 3L)
+                            .containsEntry("actualGeneration", 4L);
+                });
+
+        verify(referenceRepository, never()).terminateActiveOperation(any(), anyLong(), anyString(), any());
+        verify(taskDispatcher, never()).cancel(any(), anyLong());
+        assertThat(publisher.events).isEmpty();
+    }
+
+    @Test
     void switchesBranchAtFixedRemoteHeadAndKeepsHistoricalTargets() {
         ReferenceRepositoryState ready = state("main", 2L, ReferenceRepositoryStatus.READY);
         LinuxServerId online = new LinuxServerId("server-a");
