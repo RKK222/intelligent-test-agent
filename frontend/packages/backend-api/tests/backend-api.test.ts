@@ -2674,7 +2674,12 @@ describe("backend-api", () => {
       traceId: "trace_fixed",
       data: activeVersion
     }), { status: 200 }));
-    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      routeLinuxServerId: () => "linux-user-node"
+    });
 
     await expect(client.activateAutomationWorkspaceVersion("app_gcms", "awp_auto", "awv_2"))
       .resolves.toEqual(activeVersion);
@@ -2683,6 +2688,29 @@ describe("backend-api", () => {
       expect.objectContaining({ method: "PUT" })
     );
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ versionId: "awv_2" });
+    expect((fetcher.mock.calls[0]?.[1]?.headers as Headers).get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+  });
+
+  it("loads shared automation configuration without user process routing", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: []
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      routeLinuxServerId: () => "linux-user-node"
+    });
+
+    await client.listApplicationWorkspaces("app_gcms");
+    await client.listWorkspaceVersions("app_gcms", "awp_auto");
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    for (const call of fetcher.mock.calls) {
+      expect((call[1]?.headers as Headers).get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+    }
   });
 
   it("lists application Git refresh workspaces and branches without user process routing", async () => {

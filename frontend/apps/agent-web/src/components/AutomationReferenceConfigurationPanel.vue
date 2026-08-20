@@ -21,21 +21,25 @@ import type {
   WorkspaceCreateOperation
 } from "@test-agent/shared-types";
 import RepositoryOperationProgressDialog from "./RepositoryOperationProgressDialog.vue";
+import { patchReferenceConfig } from "./reference-config-jsonc";
 
 const props = defineProps<{
   open: boolean;
   appId: string;
+  workspaceId: string;
   canManage: boolean;
 }>();
 
 const emit = defineEmits<{
   changed: [];
+  saved: [];
   "operation-state": [state: { open: boolean; canClose: boolean }];
 }>();
 
 const api = inject<BackendApiClient>("api")!;
 const AUTOMATION_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
 const OPERATION_POLL_INTERVAL_MS = 1_000;
+const OPENCODE_CONFIG_PATH = "opencode.jsonc";
 
 interface Notice {
   message: string;
@@ -76,9 +80,13 @@ const versionsByTemplate = ref<Record<string, ApplicationWorkspaceVersion[]>>({}
 const synchronizationsByVersion = ref<Record<string, AutomationVersionSynchronization>>({});
 const loading = ref(false);
 const saving = ref(false);
+const applying = ref(false);
 const syncLoading = ref(false);
 const errorMessage = ref("");
 const selectedRepositoryId = ref<string | null>(null);
+const selectedVersionId = ref<string | null>(null);
+const applyNotice = ref<(Notice & { kind: "error" | "success" | "info" }) | null>(null);
+const pendingApplyVersionId = ref<string | null>(null);
 
 const branchPopoverRepositoryId = ref<string | null>(null);
 const branchPopoverMode = ref<"initialize" | "switch" | null>(null);
@@ -132,6 +140,20 @@ const selectedVersions = computed(() =>
 );
 
 const activeVersion = computed(() => activeTemplate.value?.activeVersion ?? null);
+
+const selectedVersion = computed(() => {
+  const versions = selectedVersions.value;
+  return versions.find((version) => version.versionId === selectedVersionId.value)
+    ?? versions.find((version) => version.versionId === activeVersion.value?.versionId)
+    ?? versions[0]
+    ?? null;
+});
+
+const canApplyReference = computed(() => props.canManage
+  && !saving.value
+  && !applying.value
+  && Boolean(activeTemplate.value && selectedVersion.value?.referencePath && referenceName.value.trim())
+  && safeReferenceName(referenceName.value));
 
 const currentSynchronization = computed(() => {
   const versionId = activeVersion.value?.versionId;
@@ -263,6 +285,19 @@ function notice(error: unknown, fallback: string): Notice {
   return { message: error instanceof Error ? error.message : fallback };
 }
 
+function isFileMissing(error: unknown) {
+  return error instanceof BackendApiError && (error.code === "FILE_NOT_FOUND" || error.code === "NOT_FOUND");
+}
+
+function safeReferenceName(value: string) {
+  const normalized = value.trim();
+  return normalized.length > 0
+    && normalized.length <= 128
+    && !normalized.includes("/")
+    && !normalized.includes("\\")
+    && !normalized.includes("\0");
+}
+
 function buildTreeByParent(nodes: RepositoryTreeNode[]) {
   const map: Record<string, Array<{ name: string; path: string; directory: boolean }>> = {};
   const traverse = (items: RepositoryTreeNode[], parentPath = "") => {
@@ -290,10 +325,9 @@ async function loadCatalog() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [nextTemplates, nextRepositories, configuredWorkspaces] = await Promise.all([
+    const [nextTemplates, nextRepositories] = await Promise.all([
       api.listWorkspaceTemplates(props.appId),
-      props.canManage ? api.listApplicationRepositories(props.appId) : Promise.resolve([]),
-      props.canManage ? api.listApplicationWorkspaces(props.appId) : Promise.resolve([])
+      props.canManage ? api.listApplicationRepositories(props.appId) : Promise.resolve([])
     ]);
     if (!props.open || generation !== catalogGeneration) return;
 
@@ -304,18 +338,6 @@ async function loadCatalog() {
     for (const t of nextTemplates) {
       if (t.repositoryType === AUTOMATION_REPOSITORY_TYPE) {
         templateById.set(t.workspaceId, t);
-      }
-    }
-
-    if (props.canManage) {
-      for (const workspace of configuredWorkspaces) {
-        if (!automationRepositoryIds.has(workspace.repositoryId) || templateById.has(workspace.workspaceId)) continue;
-        templateById.set(workspace.workspaceId, {
-          ...workspace,
-          standard: false,
-          repositoryType: AUTOMATION_REPOSITORY_TYPE,
-          activeVersion: null
-        });
       }
     }
 
@@ -382,42 +404,31 @@ async function loadCatalog() {
   }
 }
 
-async function selectRepository(repository: AutomationRepository, autoSync = false) {
+async function selectRepository(repository: AutomationRepository) {
+  const sameRepository = selectedRepositoryId.value === repository.repositoryId;
+  const previousFolder = sameRepository ? selectedFolderPath.value : null;
   selectedRepositoryId.value = repository.repositoryId;
   closeBranchPopover();
+  applyNotice.value = null;
 
-  const existing = templates.value.find((t) => t.repositoryId === repository.repositoryId);
+  const existing = templates.value.find((t) =>
+    t.repositoryId === repository.repositoryId && (!previousFolder || t.directoryPath === previousFolder)
+  ) ?? templates.value.find((t) => t.repositoryId === repository.repositoryId);
   if (existing) {
     selectedFolderPath.value = existing.directoryPath;
     referenceName.value = existing.workspaceName;
+    selectedVersionId.value = existing.activeVersion?.versionId
+      ?? versionsByTemplate.value[existing.workspaceId]?.[0]?.versionId
+      ?? null;
   } else {
-    selectedFolderPath.value = null;
+    selectedFolderPath.value = previousFolder;
     referenceName.value = repository.name;
+    selectedVersionId.value = null;
   }
   versionDate.value = todayVersion();
 
-  // 参照应用资产库：点击的瞬间立即弹出同步进度框，不等分支/树加载完
-  if (autoSync && props.canManage && existing) {
-    const versionList = versionsByTemplate.value[existing.workspaceId] ?? [];
-    const targetVersion = (existing.activeVersion
-      ? versionList.find((v) => v.versionId === existing.activeVersion?.versionId) || existing.activeVersion
-      : versionList[0]) as ApplicationWorkspaceVersion | null;
-    if (targetVersion) {
-      // 立即设置 synchronizationRequest，弹框立刻出现（同步设置，不 await）
-      synchronizationRequest.value = {
-        template: existing,
-        version: targetVersion,
-        requestState: "REQUESTING",
-        error: null,
-        pollingError: null
-      };
-      // 后台并行：分支/树加载与实际同步请求互不阻塞
-      void synchronizeVersion(existing, targetVersion);
-    }
-  }
-
   if (props.canManage) {
-    void loadBranches(repository.repositoryId, repository.branch || existing?.branch || "main");
+    void loadBranches(repository.repositoryId, selectedVersion.value?.branch || repository.branch || existing?.branch || "main");
   }
 }
 
@@ -536,9 +547,13 @@ function selectFolder(node: { name: string; path: string; directory: boolean }) 
   );
   if (existing) {
     referenceName.value = existing.workspaceName;
+    selectedVersionId.value = existing.activeVersion?.versionId
+      ?? versionsByTemplate.value[existing.workspaceId]?.[0]?.versionId
+      ?? null;
   } else {
     const parts = node.path.split("/").filter(Boolean);
     referenceName.value = parts[parts.length - 1] || "自动化目录";
+    selectedVersionId.value = null;
   }
   versionDate.value = todayVersion();
   formBranch.value = selectedBranch.value;
@@ -606,6 +621,13 @@ async function pollSynchronization(templateId: string, versionId: string) {
     synchronizationRequest.value = { ...request, pollingError: null };
     if (["READY", "FAILED"].includes(next.status)) {
       emit("changed");
+      if (next.status === "READY" && pendingApplyVersionId.value === versionId) {
+        pendingApplyVersionId.value = null;
+        await writeSelectedReference(request.template, request.version);
+      } else if (next.status === "FAILED" && pendingApplyVersionId.value === versionId) {
+        pendingApplyVersionId.value = null;
+        applyNotice.value = { kind: "error", message: next.message || "共享只读副本同步失败，尚未修改当前工作树" };
+      }
       return;
     }
   } catch (error) {
@@ -623,8 +645,13 @@ async function pollSynchronization(templateId: string, versionId: string) {
   );
 }
 
-async function synchronizeVersion(template: ApplicationWorkspaceTemplate, version: ApplicationWorkspaceVersion) {
+async function synchronizeVersion(
+  template: ApplicationWorkspaceTemplate,
+  version: ApplicationWorkspaceVersion,
+  applyWhenReady = false
+) {
   if (!props.canManage) return;
+  if (applyWhenReady) pendingApplyVersionId.value = version.versionId;
   clearSynchronizationPoll();
   synchronization.value = null;
   synchronizationRequest.value = {
@@ -654,6 +681,7 @@ async function synchronizeVersion(template: ApplicationWorkspaceTemplate, versio
       requestState: "FAILED",
       error: notice(error, "创建自动化代码库同步任务失败")
     };
+    if (pendingApplyVersionId.value === version.versionId) pendingApplyVersionId.value = null;
   }
 }
 
@@ -669,6 +697,86 @@ function closeSynchronization() {
   synchronization.value = null;
 }
 
+async function readWorkspaceConfig(): Promise<string> {
+  try {
+    return (await api.readWorkspaceAgentFile(props.workspaceId, OPENCODE_CONFIG_PATH)).content;
+  } catch (error) {
+    if (isFileMissing(error)) return "";
+    throw error;
+  }
+}
+
+async function writeSelectedReference(
+  template: ApplicationWorkspaceTemplate,
+  version: ApplicationWorkspaceVersion
+) {
+  if (!version.referencePath || !safeReferenceName(referenceName.value)) {
+    applyNotice.value = {
+      kind: "error",
+      message: !version.referencePath
+        ? "当前版本缺少受控引用路径，请先同步后重试"
+        : "引用名称不能为空、不能包含斜杠，且最多 128 个字符"
+    };
+    return;
+  }
+  applying.value = true;
+  applyNotice.value = { kind: "info", message: "正在写入当前工作树的 OpenCode 引用与只读权限…" };
+  try {
+    const latest = await readWorkspaceConfig();
+    const output = patchReferenceConfig(latest, {
+      alias: referenceName.value.trim(),
+      path: version.referencePath,
+      folder: template.directoryPath,
+      merge: false,
+      sddFolderName: template.directoryPath,
+      description: `${selectedRepository.value?.name || template.workspaceName} ${version.version} 只读自动化引用`,
+      managedFields: {
+        "testagent-reference-kind": "automation",
+        "testagent-automation-workspace-id": template.workspaceId,
+        "testagent-automation-version-id": version.versionId
+      }
+    });
+    await api.writeWorkspaceAgentFile(props.workspaceId, OPENCODE_CONFIG_PATH, output);
+    applyNotice.value = {
+      kind: "success",
+      message: `已应用：${selectedRepository.value?.name || template.workspaceName} / ${version.version} / ${template.directoryPath}`
+    };
+    emit("changed");
+    emit("saved");
+  } catch (error) {
+    applyNotice.value = { ...notice(error, "应用自动化引用失败"), kind: "error" };
+  } finally {
+    applying.value = false;
+  }
+}
+
+async function applySelectedReference() {
+  const template = activeTemplate.value;
+  const version = selectedVersion.value;
+  if (!props.canManage || !template || !version || applying.value
+    || !version.referencePath || !safeReferenceName(referenceName.value)) return;
+  applyNotice.value = null;
+  try {
+    if (activeVersion.value?.versionId !== version.versionId) {
+      const activated = await api.activateAutomationWorkspaceVersion(
+        props.appId, template.workspaceId, version.versionId
+      );
+      templates.value = templates.value.map((item) => item.workspaceId === template.workspaceId
+        ? { ...item, activeVersion: { ...version, ...activated, activatedAt: activated.activatedAt || new Date().toISOString() } }
+        : item);
+    }
+    const sync = synchronizationsByVersion.value[version.versionId];
+    if (version.replicaStatus !== "READY" || (sync && sync.status !== "READY")) {
+      applyNotice.value = { kind: "info", message: "当前副本未就绪，完成同步后会自动应用到当前工作树" };
+      await synchronizeVersion(template, version, true);
+      return;
+    }
+    await writeSelectedReference(template, version);
+  } catch (error) {
+    applyNotice.value = { ...notice(error, "应用自动化引用失败"), kind: "error" };
+  }
+}
+
 async function pollOperation(operationId: string) {
   clearOperationPoll();
   try {
@@ -679,6 +787,19 @@ async function pollOperation(operationId: string) {
       saving.value = false;
       await loadCatalog();
       emit("changed");
+      const createdTemplate = templates.value.find((item) =>
+        item.workspaceId === next.workspaceId
+        || (item.repositoryId === selectedRepositoryId.value && item.directoryPath === selectedFolderPath.value)
+      );
+      if (createdTemplate) {
+        selectedFolderPath.value = createdTemplate.directoryPath;
+        referenceName.value = createdTemplate.workspaceName;
+        selectedVersionId.value = next.versionId
+          ?? createdTemplate.activeVersion?.versionId
+          ?? versionsByTemplate.value[createdTemplate.workspaceId]?.[0]?.versionId
+          ?? null;
+      }
+      await applySelectedReference();
       return;
     }
     if (next.status === "FAILED") {
@@ -725,32 +846,32 @@ async function createVersion() {
   saving.value = true;
   errorMessage.value = "";
   try {
-    await api.createWorkspaceVersion(props.appId, template.workspaceId, {
+    const created = await api.createWorkspaceVersion(props.appId, template.workspaceId, {
       version: versionDate.value,
       branch: formBranch.value || selectedBranch.value
     });
-    await loadCatalog();
-    emit("changed");
+    versionsByTemplate.value = {
+      ...versionsByTemplate.value,
+      [template.workspaceId]: [
+        created,
+        ...(versionsByTemplate.value[template.workspaceId] ?? []).filter((item) => item.versionId !== created.versionId)
+      ]
+    };
+    selectedVersionId.value = created.versionId;
+    await applySelectedReference();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "新增自动化引用版本失败";
+    applyNotice.value = { ...notice(error, "新增并应用自动化引用版本失败"), kind: "error" };
   } finally {
     saving.value = false;
   }
 }
 
-async function activateVersion(template: ApplicationWorkspaceTemplate, version: ApplicationWorkspaceVersion) {
-  if (!props.canManage || saving.value) return;
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    await api.activateAutomationWorkspaceVersion(props.appId, template.workspaceId, version.versionId);
-    await loadCatalog();
-    emit("changed");
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "切换自动化引用版本失败";
-  } finally {
-    saving.value = false;
-  }
+function selectVersion(version: ApplicationWorkspaceVersion) {
+  selectedVersionId.value = version.versionId;
+  formBranch.value = version.branch;
+  selectedBranch.value = version.branch;
+  versionDate.value = version.version;
+  applyNotice.value = null;
 }
 
 async function toggleReference(template: ApplicationWorkspaceTemplate) {
@@ -775,7 +896,7 @@ function retryCatalog() {
 }
 
 watch(
-  () => [props.open, props.appId, props.canManage] as const,
+  () => [props.open, props.appId, props.workspaceId, props.canManage] as const,
   ([open, appId], prevValues) => {
     const prevAppId = prevValues?.[1];
     catalogGeneration++;
@@ -783,6 +904,7 @@ watch(
     treeGeneration++;
     clearOperationPoll();
     clearSynchronizationPoll();
+    pendingApplyVersionId.value = null;
     if (prevAppId !== undefined && appId !== prevAppId) {
       branchesByRepository.value = {};
       treeByBranchKey.value = {};
@@ -804,6 +926,7 @@ onBeforeUnmount(() => {
   treeGeneration++;
   clearOperationPoll();
   clearSynchronizationPoll();
+  pendingApplyVersionId.value = null;
   emit("operation-state", { open: false, canClose: true });
 });
 </script>
@@ -843,7 +966,7 @@ onBeforeUnmount(() => {
             :aria-label="`选择${repository.name}`"
             :aria-pressed="selectedRepositoryId === repository.repositoryId"
             :disabled="saving"
-            @click="selectRepository(repository, true)"
+            @click="selectRepository(repository)"
           >
             <FolderGit2 class="h-4 w-4 shrink-0" />
             <span class="min-w-0">
@@ -854,16 +977,7 @@ onBeforeUnmount(() => {
           </button>
           <div class="reference-repository-meta">
             <span>{{ readyServerText(repository) }}</span>
-            <button
-              v-if="canManage"
-              type="button"
-              class="reference-inline-action"
-              :aria-label="`切换${repository.name}分支`"
-              :disabled="saving"
-              @click="openBranchPopover(repository, 'switch')"
-            >
-              切换分支
-            </button>
+            <small>点选仅查看，不会拉取</small>
           </div>
 
           <div
@@ -909,7 +1023,7 @@ onBeforeUnmount(() => {
 
     <main class="reference-configuration-column">
       <div v-if="!selectedRepository" class="reference-state is-centered">
-        选择一个已关联自动化代码库开始同步与配置。
+        选择一个自动化代码库，再选择版本和目录应用到当前工作树。
       </div>
       <template v-else>
         <div class="reference-selected-heading">
@@ -918,12 +1032,9 @@ onBeforeUnmount(() => {
             <span>{{ activeTemplate ? `${selectedRepository.name} · ${activeTemplate.directoryPath}` : (selectedFolderPath ? `${selectedRepository.name} · ${selectedFolderPath}` : (selectedBranch || selectedRepository.branch || "main")) }}</span>
           </div>
           <div class="reference-selected-actions">
-            <div
-              class="reference-repository-path"
-              :title="selectedRepository.repositoryPath || undefined"
-            >
-              <span>服务器路径</span>
-              <code>{{ selectedRepository.repositoryPath || selectedRepository.gitUrl || "服务器路径暂不可用" }}</code>
+            <div class="reference-repository-path" :title="selectedRepository.gitUrl">
+              <span>远端仓库</span>
+              <code>{{ selectedRepository.gitUrl }}</code>
             </div>
             <Button
               size="sm"
@@ -933,7 +1044,7 @@ onBeforeUnmount(() => {
               @click="verifyPointers"
             >
               <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': syncLoading }" />
-              刷新 Git 指针
+              更新当前版本副本
             </Button>
           </div>
         </div>
@@ -1015,6 +1126,11 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
+        <section class="automation-apply-guide" aria-label="自动化引用使用说明">
+          <strong>当前工作树生效方式</strong>
+          <span>选择版本和目录后点击“应用到当前工作树”。平台会一次写入 <code>.opencode/opencode.jsonc</code> 的引用与只读权限；文件树中的引用根会直接展示所选目录内容。</span>
+        </section>
+
         <div class="reference-ready-layout">
           <section class="reference-tree-panel" aria-label="引用目录树">
             <div class="reference-panel-title">
@@ -1093,6 +1209,21 @@ onBeforeUnmount(() => {
                 <Input :model-value="selectedRepository.name" readonly aria-label="自动化版本库" />
               </label>
 
+              <label v-if="activeTemplate">
+                <span>使用版本（version） <b aria-hidden="true">*</b></span>
+                <select
+                  v-model="selectedVersionId"
+                  class="reference-select"
+                  aria-label="要应用的自动化版本"
+                  :disabled="saving || applying"
+                  @change="() => { const version = selectedVersions.find(item => item.versionId === selectedVersionId); if (version) selectVersion(version); }"
+                >
+                  <option v-for="version in selectedVersions" :key="version.versionId" :value="version.versionId">
+                    {{ version.version }} · {{ version.branch }}{{ activeVersion?.versionId === version.versionId ? " · 当前" : "" }}
+                  </option>
+                </select>
+              </label>
+
               <label>
                 <span class="automation-field-label">
                   <span>分支（branch）</span>
@@ -1114,8 +1245,9 @@ onBeforeUnmount(() => {
               </label>
 
               <label>
-                <span>引用目录（path） <b aria-hidden="true">*</b></span>
+                <span>挂载目录（path） <b aria-hidden="true">*</b></span>
                 <Input :model-value="selectedFolderPath || ''" readonly :placeholder="treeLoading ? '正在读取目录…' : '请在左侧选择目录'" aria-label="引用目录" />
+                <small class="automation-field-help">应用后，文件树会在引用名称下直接展示该目录的内容。</small>
               </label>
 
               <label>
@@ -1189,16 +1321,17 @@ onBeforeUnmount(() => {
                               同步
                             </Button>
                             <Button
-                              v-if="activeVersion?.versionId !== ver.versionId"
+                              v-if="selectedVersionId !== ver.versionId"
                               type="button"
                               size="sm"
                               variant="ghost"
                               class="reference-inline-action"
-                              :disabled="saving || ver.status !== 'ACTIVE'"
-                              @click="activateVersion(activeTemplate, ver)"
+                              :disabled="saving || applying || ver.status !== 'ACTIVE'"
+                              @click="selectVersion(ver)"
                             >
-                              设为当前版本
+                              选择此版本
                             </Button>
+                            <span v-else class="reference-pointer-status">已选择</span>
                           </div>
                         </td>
                       </tr>
@@ -1212,27 +1345,43 @@ onBeforeUnmount(() => {
                 <span>{{ operation.status === "RUNNING" ? "正在初始化共享只读副本…" : operation.status }}</span>
               </div>
 
+              <div v-if="applyNotice" class="reference-form-notice" :class="`is-${applyNotice.kind}`" role="status">
+                <span>{{ applyNotice.message }}</span>
+                <code v-if="applyNotice.traceId">traceId: {{ applyNotice.traceId }}</code>
+              </div>
+
               <div v-if="canManage" class="reference-form-actions">
                 <Button
                   v-if="!activeTemplate"
                   type="button"
-                  aria-label="保存自动化目录引用"
+                  aria-label="创建并应用自动化目录引用"
                   :disabled="!canCreateReference"
                   @click="createReference"
                 >
                   <Spinner v-if="saving" class="h-3.5 w-3.5 mr-1.5" />
-                  {{ saving ? "保存中…" : "保存目录引用" }}
+                  {{ saving ? "创建中…" : "创建配置并应用" }}
                 </Button>
-                <Button
-                  v-else
-                  type="button"
-                  aria-label="新增版本"
-                  :disabled="!canCreateVersion"
-                  @click="createVersion"
-                >
-                  <Spinner v-if="saving" class="h-3.5 w-3.5 mr-1.5" />
-                  {{ saving ? "创建中…" : "新增版本" }}
-                </Button>
+                <template v-else>
+                  <Button
+                    type="button"
+                    aria-label="应用自动化引用到当前工作树"
+                    :disabled="!canApplyReference"
+                    @click="applySelectedReference"
+                  >
+                    <Spinner v-if="applying" class="h-3.5 w-3.5 mr-1.5" />
+                    {{ applying ? "应用中…" : "应用到当前工作树" }}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    aria-label="新增版本"
+                    :disabled="!canCreateVersion"
+                    @click="createVersion"
+                  >
+                    <Spinner v-if="saving" class="h-3.5 w-3.5 mr-1.5" />
+                    {{ saving ? "创建中…" : "按上方分支新建并应用版本" }}
+                  </Button>
+                </template>
               </div>
             </form>
           </section>
@@ -1715,6 +1864,34 @@ onBeforeUnmount(() => {
   color: var(--ta-error);
 }
 
+.automation-apply-guide {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-bottom: 1px solid var(--ta-border);
+  padding: 9px 14px;
+  background: rgba(79, 111, 122, 0.05);
+  color: var(--ta-muted);
+  font-size: 11px;
+}
+
+.automation-apply-guide strong {
+  flex: none;
+  color: var(--ta-text);
+}
+
+.automation-apply-guide code,
+.automation-field-help {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+}
+
+.automation-field-help {
+  display: block;
+  margin-top: 5px;
+  color: var(--ta-muted);
+}
+
 .automation-field-label {
   display: flex !important;
   align-items: center;
@@ -1825,6 +2002,12 @@ onBeforeUnmount(() => {
 
 .reference-form-notice.is-success {
   color: var(--ta-ok);
+}
+
+.reference-form-notice.is-info {
+  border-color: var(--ta-cyan);
+  background: rgba(79, 111, 122, 0.06);
+  color: var(--ta-cyan);
 }
 
 @media (max-width: 780px) {

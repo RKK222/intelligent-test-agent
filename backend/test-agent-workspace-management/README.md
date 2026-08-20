@@ -5,7 +5,8 @@
 自动化版本同步复用既有 `application_workspace_version_replicas` 和 `workspace.version.sync-requested`：发起服务器先登记本机 `SYNCING` 占位并立即返回，再由模块内有界后台队列执行共享副本 clone/fetch；其它在线 Java 收到广播后也只登记并排队，不占用 HTTP 或 Redis listener 线程。同一 `versionId` 的重复唤醒合并，不同目录引用即使仓库、版本号和分支相同也独立执行；默认并行数为 2、等待上限为 256，可通过 `test-agent.managed-workspace.replica-worker.worker-count/max-pending-tasks` 调整。查询接口以 heartbeat 的当前在线服务器集合投影 `PENDING/PROCESSING/READY/BLOCKED`，只返回版本、提交和逻辑状态；失败只保存稳定脱敏文案。该链路不另建 worktree 或资产目录。
 
 - `AutomationWorkspaceReferenceCatalogService` 按用户、主工作空间、应用和当前 Java 服务器解析激活版本，复用 `application_workspace_version_replicas`，要求版本、目标 commit、副本和运行态 Workspace 均可用。重名配置用“版本库 / 分支”后缀区分；不可用项转为局部告警。
-- `WorkspaceViewApplicationService` 在组合根增加虚拟“自动化代码库”，使用 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 逻辑定位器提供目录、文本、分片和二进制只读读取；每次操作重新授权，不接受物理路径。
+- `WorkspaceViewApplicationService` 在组合根增加虚拟“自动化代码库”，只装载当前工作树 `.opencode/opencode.jsonc` 中由平台写入且版本、目录、逻辑配置路径均可重新验证的自动化条目；使用 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 逻辑定位器提供目录、文本、分片和二进制只读读取。每次操作重新授权，不接受物理路径；版本切换不会偷偷改写其它用户或未应用的工作树。
+- 存量个人 runtime Workspace 若仍记录在应用目录而配置留在固定 `workspace/.opencode`，Agent 配置读取与组合树可兼容该受控子目录；首次引用保存会写入会话根的标准 `.opencode/opencode.jsonc`，使 OpenCode 从当前 cwd 原生加载同一份 references/permission。不会递归搜索，也不接受客户端物理路径。
 
 ## 工程定位
 

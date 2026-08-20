@@ -16,6 +16,8 @@ export type ReferenceConfigTarget = {
   alias: string;
   path: string;
   folder: string;
+  /** 平台托管的附加身份字段；用于自动化版本/目录引用，未知字段仍由 JSONC 补丁保留。 */
+  managedFields?: Record<string, string | boolean>;
 };
 
 export type ReferenceConfigValue = {
@@ -34,6 +36,8 @@ export type ReferenceConfigInspection = {
   baseline: ReferenceConfigValue;
   /** 当前引用是否缺少平台托管的外部目录自动允许规则。 */
   permissionNeedsUpdate: boolean;
+  /** 受控自动化引用切换版本时用于清理旧的精确权限规则。 */
+  previousPath?: string;
 };
 
 export class ReferenceConfigValidationError extends Error {
@@ -145,7 +149,8 @@ function createInspection(
     mode: "create",
     value,
     baseline: { ...value },
-    permissionNeedsUpdate: permissionNeedsUpdate(root, target)
+    permissionNeedsUpdate: permissionNeedsUpdate(root, target),
+    previousPath: undefined
   };
 }
 
@@ -180,7 +185,10 @@ export function inspectReferenceConfig(content: string, target: ReferenceConfigT
       `引用别名 ${target.alias} 已被 Git 引用占用，未执行覆盖`
     );
   }
-  if (existing.path !== target.path) {
+  const existingManagedKind = existing["testagent-reference-kind"];
+  const targetManagedKind = target.managedFields?.["testagent-reference-kind"];
+  const controlledAutomationUpdate = existingManagedKind === "automation" && targetManagedKind === "automation";
+  if (existing.path !== target.path && !controlledAutomationUpdate) {
     throw new ReferenceConfigValidationError(
       "PATH_CONFLICT",
       `引用别名 ${target.alias} 的 path 与当前目录不一致，未执行覆盖`
@@ -205,7 +213,8 @@ export function inspectReferenceConfig(content: string, target: ReferenceConfigT
       sddFolderName: persistedSddFolderName,
       description
     },
-    permissionNeedsUpdate: permissionNeedsUpdate(root, target)
+    permissionNeedsUpdate: permissionNeedsUpdate(root, target),
+    previousPath: typeof existing.path === "string" ? existing.path : undefined
   };
 }
 
@@ -302,6 +311,29 @@ function patchExternalDirectoryPermission(content: string, target: ReferenceConf
   return content;
 }
 
+function removePreviousExternalDirectoryPermission(
+  content: string,
+  alias: string,
+  previousPath: string | undefined,
+  nextPath: string
+): string {
+  if (!previousPath || previousPath === nextPath) return content;
+  const root = parseRoot(content);
+  if (!root) return content;
+  const references = isObject(root.references) ? root.references : {};
+  const stillUsed = Object.entries(references).some(([name, value]) =>
+    name !== alias && isObject(value) && value.path === previousPath
+  );
+  if (stillUsed) return content;
+  const permission = isObject(root.permission) ? root.permission : null;
+  const externalDirectory = permission && isObject(permission.external_directory)
+    ? permission.external_directory
+    : null;
+  const oldPattern = `${previousPath.replace(/\/+$/, "")}/*`;
+  if (!externalDirectory || !Object.prototype.hasOwnProperty.call(externalDirectory, oldPattern)) return content;
+  return applyModification(content, ["permission", "external_directory", oldPattern], undefined);
+}
+
 /**
  * 每次以调用方刚读取的最新正文为输入。新增别名时只增加该节点；更新时逐字段 modify，
  * 同一补丁再补齐精确外部目录 allow，从而保留 hidden、未来字段、注释以及其它区域的尾逗号。
@@ -312,7 +344,8 @@ export function patchReferenceConfig(content: string, patch: ReferenceConfigPatc
     path: patch.path,
     merge: patch.merge,
     "sdd-folder-name": patch.folder,
-    description: patch.description.trim()
+    description: patch.description.trim(),
+    ...(patch.managedFields ?? {})
   };
   let output = content.trim() === ""
     ? `{\n  "$schema": "${OPENCODE_CONFIG_SCHEMA}"\n}\n`
@@ -324,5 +357,11 @@ export function patchReferenceConfig(content: string, patch: ReferenceConfigPatc
       output = applyModification(output, ["references", patch.alias, field], value);
     }
   }
+  output = removePreviousExternalDirectoryPermission(
+    output,
+    patch.alias,
+    inspection.previousPath,
+    patch.path
+  );
   return patchExternalDirectoryPermission(output, patch);
 }

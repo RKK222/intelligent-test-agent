@@ -525,7 +525,9 @@ class OpencodeProcessStartupServiceTest {
         RecordingGateway gateway = new RecordingGateway();
         CommonParameterValues commonParameterValues = Mockito.mock(CommonParameterValues.class);
         Mockito.when(commonParameterValues.resolvedValue("OPENCODE_REFERENCES_DIR", ParameterPlatform.current()))
-                .thenReturn(Optional.of(" /data/testagent/references "));
+                .thenReturn(Optional.of(" /data/testagent/references/ "));
+        Mockito.when(commonParameterValues.resolvedValue("OPENCODE_APP_WORKSPACE_ROOT", ParameterPlatform.current()))
+                .thenReturn(Optional.of(" /data/testagent/appworkspace/ "));
         OpencodeProcessStartupService service = new OpencodeProcessStartupService(
                 repository,
                 repository,
@@ -538,9 +540,12 @@ class OpencodeProcessStartupServiceTest {
 
         assertThat(gateway.startCommands).singleElement().satisfies(command ->
                 assertThat(command.environment())
-                        .containsEntry("OPENCODE_REFERENCES_DIR", "/data/testagent/references"));
+                        .containsEntry("OPENCODE_REFERENCES_DIR", "/data/testagent/references")
+                        .containsEntry("OPENCODE_APP_WORKSPACE_ROOT", "/data/testagent/appworkspace"));
         Mockito.verify(commonParameterValues)
                 .resolvedValue("OPENCODE_REFERENCES_DIR", ParameterPlatform.current());
+        Mockito.verify(commonParameterValues)
+                .resolvedValue("OPENCODE_APP_WORKSPACE_ROOT", ParameterPlatform.current());
     }
 
     @Test
@@ -561,7 +566,8 @@ class OpencodeProcessStartupServiceTest {
         service.startAndVerify(request(null, null, null));
 
         assertThat(gateway.startCommands).singleElement().satisfies(command ->
-                assertThat(command.environment()).doesNotContainKey("OPENCODE_REFERENCES_DIR"));
+                assertThat(command.environment())
+                        .doesNotContainKeys("OPENCODE_REFERENCES_DIR", "OPENCODE_APP_WORKSPACE_ROOT"));
     }
 
     @Test
@@ -583,11 +589,14 @@ class OpencodeProcessStartupServiceTest {
                 null,
                 null,
                 null,
-                Map.of("OPENCODE_REFERENCES_DIR", "/data/caller/references")));
+                Map.of(
+                        "OPENCODE_REFERENCES_DIR", "/data/caller/references/",
+                        "OPENCODE_APP_WORKSPACE_ROOT", "/data/caller/appworkspace/")));
 
         assertThat(gateway.startCommands).singleElement().satisfies(command ->
                 assertThat(command.environment())
-                        .containsEntry("OPENCODE_REFERENCES_DIR", "/data/caller/references"));
+                        .containsEntry("OPENCODE_REFERENCES_DIR", "/data/caller/references")
+                        .containsEntry("OPENCODE_APP_WORKSPACE_ROOT", "/data/caller/appworkspace"));
     }
 
     @Test

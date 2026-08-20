@@ -56,6 +56,7 @@ public class OpencodeProcessStartupService {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpencodeProcessStartupService.class);
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final String OPENCODE_REFERENCES_DIR_PARAM = "OPENCODE_REFERENCES_DIR";
+    private static final String OPENCODE_APP_WORKSPACE_ROOT_PARAM = "OPENCODE_APP_WORKSPACE_ROOT";
     private static final Duration DEFAULT_STARTUP_HEALTH_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration DEFAULT_STARTUP_HEALTH_POLL_INTERVAL = Duration.ofMillis(500);
     /** 旧 manager 在 start 后会立即补发心跳；最多等待约两秒读取同一 state 的启动时间。 */
@@ -970,19 +971,16 @@ public class OpencodeProcessStartupService {
     }
 
     /**
-     * 合并调用方环境、目标 Java 平台引用目录和平台内部代理变量。
+     * 合并调用方环境、目标 Java 平台只读引用目录和平台内部代理变量。
      *
      * <p>引用目录是可选的滚动升级能力：旧库缺少参数时不阻止既有进程启动；调用方显式提供同名值时
      * 保留调用方选择。内部代理变量继续由平台权威配置覆盖，避免调用方替换鉴权或路由信息。
      */
     private Map<String, String> startupEnvironment(OpencodeProcessStartupRequest request) {
         Map<String, String> environment = new java.util.LinkedHashMap<>(request.environment());
-        if (!environment.containsKey(OPENCODE_REFERENCES_DIR_PARAM) && commonParameterValues != null) {
-            commonParameterValues.resolvedValue(OPENCODE_REFERENCES_DIR_PARAM, ParameterPlatform.current())
-                    .map(String::trim)
-                    .filter(value -> !value.isBlank())
-                    .ifPresent(value -> environment.put(OPENCODE_REFERENCES_DIR_PARAM, value));
-        }
+        injectOptionalPathParameter(environment, OPENCODE_REFERENCES_DIR_PARAM);
+        // 自动化代码库引用使用同一 JSONC references/permission 机制，通过既有应用版本根参数解析路径。
+        injectOptionalPathParameter(environment, OPENCODE_APP_WORKSPACE_ROOT_PARAM);
         if (internalProxySettings != null) {
             environment.put(InternalModelProxyRuntimeSettings.API_KEY_ENV_NAME, internalProxySettings.requireApiKey());
             environment.put(InternalModelProxyRuntimeSettings.BASE_URL_ENV_NAME, internalProxySettings.sameNodeProxyBaseUrl());
@@ -997,6 +995,33 @@ public class OpencodeProcessStartupService {
                     workspaceGitToolTokenService.issue(request.userId()));
         }
         return Map.copyOf(environment);
+    }
+
+    private void injectOptionalPathParameter(Map<String, String> environment, String parameterName) {
+        if (environment.containsKey(parameterName)) {
+            environment.computeIfPresent(parameterName, (ignored, value) -> normalizedEnvironmentPath(value));
+            return;
+        }
+        if (commonParameterValues == null) {
+            return;
+        }
+        commonParameterValues.resolvedValue(parameterName, ParameterPlatform.current())
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(this::normalizedEnvironmentPath)
+                .ifPresent(value -> environment.put(parameterName, value));
+    }
+
+    /**
+     * OpenCode 会把环境变量值直接插入 references 与权限 glob；统一去除尾部分隔符，避免双斜线导致
+     * 引用能定位文件但精确 external_directory allow 无法命中规范化后的真实路径。
+     */
+    private String normalizedEnvironmentPath(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.isBlank()) {
+            return trimmed;
+        }
+        return java.nio.file.Path.of(trimmed).normalize().toString();
     }
 
     private String unifiedAuthId(com.enterprise.testagent.domain.user.UserId userId) {

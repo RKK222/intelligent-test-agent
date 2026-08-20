@@ -177,6 +177,8 @@ class AutomationWorkspaceReferenceCatalogServiceTest {
         when(version.repositoryId()).thenReturn(repositoryId);
         when(version.version()).thenReturn("20260819");
         when(version.branch()).thenReturn(branch);
+        when(version.workspaceRootPath()).thenReturn(
+                "appworkspace:20260819/" + repositoryId.value() + "/automation/" + suffix);
         when(version.targetCommitHash()).thenReturn("commit-" + suffix);
         when(version.status()).thenReturn(ManagedWorkspaceStatus.ACTIVE);
         when(managedWorkspaceRepository.findVersion(versionId)).thenReturn(Optional.of(version));

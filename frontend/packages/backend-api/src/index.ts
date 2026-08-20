@@ -1298,7 +1298,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     listWorkspaceTemplates: (appId: string) =>
       request<ApplicationWorkspaceTemplate[]>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates`),
     listWorkspaceVersions: (appId: string, templateId: string) =>
-      routedRequest<ApplicationWorkspaceVersion[]>(
+      request<ApplicationWorkspaceVersion[]>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`
       ),
     createWorkspaceVersion: (appId: string, templateId: string, payload: CreateWorkspaceVersionPayload) =>
@@ -1308,7 +1308,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       ),
     /** 管理员为自动化代码库激活应用级只读版本；重复激活同一版本幂等。 */
     activateAutomationWorkspaceVersion: (appId: string, templateId: string, versionId: string) =>
-      routedRequest<AutomationWorkspaceActiveVersion>(
+      request<AutomationWorkspaceActiveVersion>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/active-version`,
         { method: "PUT", body: JSON.stringify({ versionId }) }
       ),
@@ -3276,7 +3276,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         `${configurationBase}/applications/${encodeURIComponent(appId)}/repositories/${encodeURIComponent(repositoryId)}/tree${query({ branch })}`
       ),
     listApplicationWorkspaces: (appId: string) =>
-      routedRequest<ApplicationWorkspaceConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`),
+      request<ApplicationWorkspaceConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`),
     createApplicationWorkspace: (appId: string, payload: CreateApplicationWorkspacePayload) =>
       routedRequest<CreateWorkspaceAcceptedResponse>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`, {
         method: "POST",

@@ -40,6 +40,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class AutomationWorkspaceReferenceCatalogService implements AutomationWorkspaceReferenceCatalog {
 
+    private static final String APP_WORKSPACE_PREFIX = "appworkspace:";
+    private static final String APP_WORKSPACE_ENV_PREFIX = "{env:OPENCODE_APP_WORKSPACE_ROOT}/";
+
     private final ConfigurationManagementRepository configurationRepository;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final AutomationWorkspaceActiveVersionRepository activeVersionRepository;
@@ -175,7 +178,18 @@ public class AutomationWorkspaceReferenceCatalogService implements AutomationWor
                 version.version(),
                 version.branch(),
                 version.targetCommitHash(),
-                resolvedRoot.toString());
+                resolvedRoot.toString(),
+                template.directoryPath(),
+                configurationPath(version));
+    }
+
+    private String configurationPath(ApplicationWorkspaceVersion version) {
+        String storedPath = version.workspaceRootPath();
+        if (storedPath.startsWith(APP_WORKSPACE_PREFIX)) {
+            return APP_WORKSPACE_ENV_PREFIX
+                    + storedPath.substring(APP_WORKSPACE_PREFIX.length()).replace('\\', '/');
+        }
+        throw new PlatformException(ErrorCode.CONFLICT, "自动化代码库版本尚未使用受管逻辑路径");
     }
 
     private Optional<ApplicationId> resolveHostApplication(WorkspaceId workspaceId) {

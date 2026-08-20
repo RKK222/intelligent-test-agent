@@ -1,5 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BackendApiError } from "@test-agent/backend-api";
 import AutomationReferenceConfigurationPanel from "../src/components/AutomationReferenceConfigurationPanel.vue";
 
 function repository() {
@@ -31,6 +32,7 @@ function template() {
       versionId: "awv_old",
       version: "20260812",
       branch: "main",
+      referencePath: "{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/awv_old/repository/scripts/e2e",
       replicaStatus: "READY",
       activatedAt: "2026-08-12T00:00:00Z"
     },
@@ -48,6 +50,7 @@ function version(versionId: string, value: string) {
     version: value,
     branch: "main",
     status: "ACTIVE",
+    referencePath: `{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/${versionId}/repository/scripts/e2e`,
     replicaStatus: "READY",
     createdAt: "2026-08-12T00:00:00Z",
     updatedAt: "2026-08-12T00:00:00Z"
@@ -109,13 +112,20 @@ function api(overrides: Record<string, unknown> = {}) {
       (_appId: string, _templateId: string, versionId: string) => Promise.resolve(synchronization(versionId))
     ),
     updateApplicationWorkspace: vi.fn().mockResolvedValue({}),
+    readWorkspaceAgentFile: vi.fn().mockRejectedValue(new BackendApiError(404, {
+      success: false,
+      code: "FILE_NOT_FOUND",
+      message: "文件不存在",
+      traceId: "trace_missing"
+    })),
+    writeWorkspaceAgentFile: vi.fn().mockResolvedValue(undefined),
     ...overrides
   };
 }
 
 function render(mockApi: ReturnType<typeof api>, canManage = true) {
   return mount(AutomationReferenceConfigurationPanel, {
-    props: { open: true, appId: "app-demo", canManage },
+    props: { open: true, appId: "app-demo", workspaceId: "wrk-personal", canManage },
     global: { provide: { api: mockApi } }
   });
 }
@@ -137,7 +147,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
     await wrapper.get('button[aria-label="选择目录 scripts/e2e"]').trigger("click");
     await wrapper.get('input[aria-label="自动化引用名称"]').setValue("接口回归");
     await wrapper.get('input[aria-label="自动化引用版本日期"]').setValue("20260819");
-    await wrapper.get('button[aria-label="保存自动化目录引用"]').trigger("click");
+    await wrapper.get('button[aria-label="创建并应用自动化目录引用"]').trigger("click");
     await flushPromises();
 
     expect(mockApi.createApplicationWorkspace).toHaveBeenCalledWith("app-demo", {
@@ -164,14 +174,16 @@ describe("AutomationReferenceConfigurationPanel", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("scripts/e2e");
-    const activate = wrapper.findAll("button").find((button) => button.text().includes("设为当前版本"));
-    expect(activate).toBeTruthy();
-    expect(activate!.attributes("type")).toBe("button");
-    await activate!.trigger("click");
+    const select = wrapper.findAll("button").find((button) => button.text().includes("选择此版本"));
+    expect(select).toBeTruthy();
+    expect(select!.attributes("type")).toBe("button");
+    await select!.trigger("click");
+    await wrapper.get('button[aria-label="应用自动化引用到当前工作树"]').trigger("click");
     await flushPromises();
 
     expect(mockApi.activateAutomationWorkspaceVersion).toHaveBeenCalledWith("app-demo", "awp_auto", "awv_new");
     expect(mockApi.createWorkspaceVersion).not.toHaveBeenCalled();
+    expect(mockApi.writeWorkspaceAgentFile).toHaveBeenCalledTimes(1);
     expect(wrapper.emitted("changed")).toBeTruthy();
   });
 
@@ -294,7 +306,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
   });
 
-  it("automatically synchronizes repository and opens pull progress dialog when clicking repository card or refresh button", async () => {
+  it("only selects a repository card and synchronizes after the explicit refresh action", async () => {
     const configuredTemplate = template();
     const ready = synchronization("awv_old", {
       status: "READY",
@@ -313,24 +325,18 @@ describe("AutomationReferenceConfigurationPanel", () => {
     const wrapper = render(mockApi);
     await flushPromises();
 
-    // 点击左侧代码库卡片，直接触发代码同步并弹出三阶段拉取进度模态框
+    // 点击左侧代码库卡片只切换选择，不触发 Git 拉取。
     await wrapper.get('button[aria-label="选择接口自动化库"]').trigger("click");
     await flushPromises();
 
-    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledWith(
-      "app-demo", "awp_auto", "awv_old"
-    );
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain("创建同步任务");
+    expect(mockApi.synchronizeAutomationWorkspaceVersion).not.toHaveBeenCalled();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
 
-    // 关闭同步进度对话框
-    await wrapper.get('button[aria-label="关闭自动化代码库同步进度"]').trigger("click");
-    await flushPromises();
-
-    // 点击刷新 Git 指针按钮，再次触发同步
+    // 只有明确点击刷新 Git 指针才发起同步并展示进度。
     await wrapper.get('button[aria-label="刷新接口自动化库 Git 指针"]').trigger("click");
     await flushPromises();
-    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledTimes(2);
+    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("创建同步任务");
 
     wrapper.unmount();
   });
@@ -418,9 +424,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
 
     await uiCard.trigger("click");
     await flushPromises();
-    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledWith(
-      "app-demo", "awp_ui_auto", "awv_ui"
-    );
+    expect(mockApi.synchronizeAutomationWorkspaceVersion).not.toHaveBeenCalled();
     expect(wrapper.get('input[aria-label="自动化版本库"]').element).toHaveProperty("value", "UI 自动化库");
     expect(wrapper.text()).toContain("linux-ui");
     expect(wrapper.text()).not.toContain("linux-api");
@@ -456,20 +460,20 @@ describe("AutomationReferenceConfigurationPanel", () => {
     // 默认定位到已配置的 scripts/e2e，显示已有版本历史和“新增版本”按钮
     expect(wrapper.text()).toContain("版本历史（1）");
     expect(wrapper.find('button[aria-label="新增版本"]').exists()).toBe(true);
-    expect(wrapper.find('button[aria-label="保存自动化目录引用"]').exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="创建并应用自动化目录引用"]').exists()).toBe(false);
 
     // 点击未配置的新目录 scripts/unit
     await wrapper.get('button[aria-label="选择目录 scripts/unit"]').trigger("click");
     await flushPromises();
 
     // 此时 activeTemplate 为 null，显示“保存目录引用”按钮
-    expect(wrapper.find('button[aria-label="保存自动化目录引用"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="创建并应用自动化目录引用"]').exists()).toBe(true);
     expect(wrapper.find('button[aria-label="新增版本"]').exists()).toBe(false);
     expect(wrapper.get('input[aria-label="引用目录"]').element).toHaveProperty("value", "scripts/unit");
 
     // 点击保存目录引用
     await wrapper.get('input[aria-label="自动化引用版本日期"]').setValue("20260819");
-    await wrapper.get('button[aria-label="保存自动化目录引用"]').trigger("click");
+    await wrapper.get('button[aria-label="创建并应用自动化目录引用"]').trigger("click");
     await flushPromises();
 
     expect(mockApi.createApplicationWorkspace).toHaveBeenCalledWith("app-demo", {

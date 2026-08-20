@@ -46,13 +46,13 @@ function api(overrides: Record<string, unknown> = {}) {
     })),
     getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status()),
     listReferenceRepositoryTree: vi.fn().mockResolvedValue([]),
-    readFile: vi.fn().mockRejectedValue(new BackendApiError(500, {
+    readWorkspaceAgentFile: vi.fn().mockRejectedValue(new BackendApiError(500, {
       success: false,
       code: "FILE_NOT_FOUND",
       message: "文件不存在",
       traceId: "trace_missing"
     })),
-    writeFile: vi.fn().mockResolvedValue(undefined),
+    writeWorkspaceAgentFile: vi.fn().mockResolvedValue(undefined),
     ...overrides
   };
 }
@@ -671,6 +671,8 @@ describe("ReferenceConfigurationDialog", () => {
     await flushPromises();
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
     await flushPromises();
+    await wrapper.get('button[aria-label="更新需求资产库副本"]').trigger("click");
+    await flushPromises();
 
     await vi.advanceTimersByTimeAsync(2_000);
     await flushPromises();
@@ -697,6 +699,8 @@ describe("ReferenceConfigurationDialog", () => {
     const wrapper = render(mockApi);
     await flushPromises();
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="更新需求资产库副本"]').trigger("click");
     await flushPromises();
 
     await vi.advanceTimersByTimeAsync(2_000);
@@ -732,7 +736,7 @@ describe("ReferenceConfigurationDialog", () => {
       ]
     });
     const mockApi = api({
-      synchronizeReferenceRepository: vi.fn().mockResolvedValue(verified),
+      listReferenceRepositories: vi.fn().mockResolvedValue([verified]),
       verifyReferenceRepositoryPointers: vi.fn().mockResolvedValue(status({ status: "VERIFYING" }))
     });
     const wrapper = render(mockApi);
@@ -758,7 +762,7 @@ describe("ReferenceConfigurationDialog", () => {
     await wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]').trigger("click");
     await flushPromises();
     expect(mockApi.verifyReferenceRepositoryPointers).toHaveBeenCalledWith("app-demo", "repo-assets");
-    expect(mockApi.synchronizeReferenceRepository).toHaveBeenCalledTimes(1);
+    expect(mockApi.synchronizeReferenceRepository).not.toHaveBeenCalled();
   });
 
   it("shows the server repository path immediately before the refresh action with a legacy fallback", async () => {
@@ -775,12 +779,12 @@ describe("ReferenceConfigurationDialog", () => {
     expect(path.element.compareDocumentPosition(refresh.element) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
 
     mockApi.synchronizeReferenceRepository.mockResolvedValueOnce(status({ repositoryPath: undefined }));
-    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await wrapper.get('button[aria-label="更新需求资产库副本"]').trigger("click");
     await flushPromises();
     expect(wrapper.get('[data-reference-repository-path="true"]').text()).toContain("服务器路径暂不可用");
   });
 
-  it("opens synchronization progress before selecting an initialized repository finishes", async () => {
+  it("opens synchronization progress immediately after the explicit update action", async () => {
     const synchronization = deferred<ReferenceRepositoryStatus>();
     const mockApi = api({
       synchronizeReferenceRepository: vi.fn().mockReturnValue(synchronization.promise),
@@ -790,6 +794,8 @@ describe("ReferenceConfigurationDialog", () => {
     await flushPromises();
 
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="更新需求资产库副本"]').trigger("click");
     await wrapper.vm.$nextTick();
 
     const progress = wrapper.get('[aria-label="资产库同步进度"]');
@@ -840,6 +846,8 @@ describe("ReferenceConfigurationDialog", () => {
     await flushPromises();
 
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="更新需求资产库副本"]').trigger("click");
     await flushPromises();
 
     const failedProgress = wrapper.get('[aria-label="资产库同步进度"]');
@@ -1306,8 +1314,7 @@ describe("ReferenceConfigurationDialog", () => {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     try {
       const fullHash = "0123456789abcdef0123456789abcdef01234567";
-      const mockApi = api({
-        synchronizeReferenceRepository: vi.fn().mockResolvedValue(status({
+      const pointerStatus = status({
           targetCommitHash: fullHash,
           servers: [{
             linuxServerId: "linux-a",
@@ -1317,7 +1324,9 @@ describe("ReferenceConfigurationDialog", () => {
             online: true,
             matchesTarget: true
           }]
-        }))
+        });
+      const mockApi = api({
+        listReferenceRepositories: vi.fn().mockResolvedValue([pointerStatus])
       });
       const wrapper = render(mockApi);
       await flushPromises();
@@ -1391,6 +1400,8 @@ describe("ReferenceConfigurationDialog", () => {
 
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
     await flushPromises();
+    await wrapper.get('button[aria-label="更新需求资产库副本"]').trigger("click");
+    await flushPromises();
     await vi.advanceTimersByTimeAsync(2_000);
     await flushPromises();
 
@@ -1420,6 +1431,8 @@ describe("ReferenceConfigurationDialog", () => {
 
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
     await flushPromises();
+    await wrapper.get('button[aria-label="更新需求资产库副本"]').trigger("click");
+    await flushPromises();
     expect(wrapper.emitted("saved")).toEqual([[]]);
   });
 
@@ -1434,7 +1447,7 @@ describe("ReferenceConfigurationDialog", () => {
         matchesTarget: null
       }]
     });
-    const mockApi = api({ synchronizeReferenceRepository: vi.fn().mockResolvedValue(compatible) });
+    const mockApi = api({ listReferenceRepositories: vi.fn().mockResolvedValue([compatible]) });
     const wrapper = render(mockApi);
     await flushPromises();
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
@@ -1462,6 +1475,8 @@ describe("ReferenceConfigurationDialog", () => {
     const wrapper = render(mockApi);
     await flushPromises();
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="刷新需求资产库 Git 指针"]').trigger("click");
     await flushPromises();
 
     await vi.advanceTimersByTimeAsync(2000);
@@ -1493,6 +1508,8 @@ describe("ReferenceConfigurationDialog", () => {
 
     await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
     await flushPromises();
+    await wrapper.get('button[aria-label="更新需求资产库副本"]').trigger("click");
+    await flushPromises();
     expect(mockApi.synchronizeReferenceRepository).toHaveBeenCalledWith("app-demo", "repo-assets");
 
     await vi.advanceTimersByTimeAsync(2000);
@@ -1520,10 +1537,10 @@ describe("ReferenceConfigurationDialog", () => {
     await wrapper.get('button[aria-label="保存引用配置"]').trigger("click");
     await flushPromises();
 
-    expect(mockApi.readFile).toHaveBeenCalledWith("wrk-personal", ".opencode/opencode.jsonc");
-    expect(mockApi.writeFile).toHaveBeenCalledWith(
+    expect(mockApi.readWorkspaceAgentFile).toHaveBeenCalledWith("wrk-personal", "opencode.jsonc");
+    expect(mockApi.writeWorkspaceAgentFile).toHaveBeenCalledWith(
       "wrk-personal",
-      ".opencode/opencode.jsonc",
+      "opencode.jsonc",
       expect.stringContaining('"description": "产品需求与接口约束"')
     );
     expect(wrapper.emitted("saved")).toEqual([[]]);
@@ -1552,7 +1569,7 @@ describe("ReferenceConfigurationDialog", () => {
       listReferenceRepositoryTree: vi.fn().mockResolvedValue([
         { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
       ]),
-      readFile: vi.fn().mockResolvedValue({ path: ".opencode/opencode.jsonc", content: existing, size: existing.length })
+      readWorkspaceAgentFile: vi.fn().mockResolvedValue({ path: "opencode.jsonc", content: existing, size: existing.length })
     });
     const wrapper = render(mockApi);
     await flushPromises();
@@ -1572,8 +1589,8 @@ describe("ReferenceConfigurationDialog", () => {
     await wrapper.get('button[aria-label="更新引用配置"]').trigger("click");
     await flushPromises();
 
-    const written = mockApi.writeFile.mock.calls[0]?.[2] as string;
-    expect(mockApi.writeFile).toHaveBeenCalledTimes(1);
+    const written = mockApi.writeWorkspaceAgentFile.mock.calls[0]?.[2] as string;
+    expect(mockApi.writeWorkspaceAgentFile).toHaveBeenCalledTimes(1);
     expect(written).toContain("// keep root comment");
     expect(written).toContain('"hidden": true');
     expect(written).toContain('"merge": false');
@@ -1593,8 +1610,8 @@ describe("ReferenceConfigurationDialog", () => {
     }
   }
 }`;
-    const readFile = vi.fn().mockResolvedValue({
-      path: ".opencode/opencode.jsonc",
+    const readWorkspaceAgentFile = vi.fn().mockResolvedValue({
+      path: "opencode.jsonc",
       content: existing,
       size: existing.length
     });
@@ -1603,7 +1620,7 @@ describe("ReferenceConfigurationDialog", () => {
       listReferenceRepositoryTree: vi.fn().mockResolvedValue([
         { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
       ]),
-      readFile
+      readWorkspaceAgentFile
     });
     const wrapper = render(mockApi);
     await flushPromises();
@@ -1616,9 +1633,9 @@ describe("ReferenceConfigurationDialog", () => {
     await updateButton.trigger("click");
     await flushPromises();
 
-    expect(readFile).toHaveBeenCalledTimes(2);
-    expect(mockApi.writeFile).toHaveBeenCalledTimes(1);
-    const written = mockApi.writeFile.mock.calls[0]?.[2] as string;
+    expect(readWorkspaceAgentFile).toHaveBeenCalledTimes(2);
+    expect(mockApi.writeWorkspaceAgentFile).toHaveBeenCalledTimes(1);
+    const written = mockApi.writeWorkspaceAgentFile.mock.calls[0]?.[2] as string;
     expect(written).toContain('"docs-requirements"');
     expect(written).toContain('"description": "现有说明"');
     expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"');
@@ -1642,8 +1659,8 @@ describe("ReferenceConfigurationDialog", () => {
       listReferenceRepositoryTree: vi.fn().mockResolvedValue([
         { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
       ]),
-      readFile: vi.fn().mockResolvedValue({ path: ".opencode/opencode.jsonc", content: existing, size: existing.length }),
-      writeFile: vi.fn().mockReturnValue(pendingWrite.promise)
+      readWorkspaceAgentFile: vi.fn().mockResolvedValue({ path: "opencode.jsonc", content: existing, size: existing.length }),
+      writeWorkspaceAgentFile: vi.fn().mockReturnValue(pendingWrite.promise)
     });
     const wrapper = render(mockApi);
     await flushPromises();
@@ -1657,7 +1674,7 @@ describe("ReferenceConfigurationDialog", () => {
     expect(wrapper.get('select[aria-label="是否合并（merge）"]').attributes()).toHaveProperty("disabled");
     expect(wrapper.get('textarea[aria-label="描述（description）"]').attributes()).toHaveProperty("disabled");
     expect(wrapper.get('button[aria-label="选择需求资产库"]').attributes()).toHaveProperty("disabled");
-    const written = mockApi.writeFile.mock.calls[0]?.[2] as string;
+    const written = mockApi.writeWorkspaceAgentFile.mock.calls[0]?.[2] as string;
     expect(written).toContain('"merge": false');
     expect(written).toContain('"description": "提交时说明"');
 
@@ -1691,8 +1708,8 @@ describe("ReferenceConfigurationDialog", () => {
       listReferenceRepositoryTree: vi.fn().mockResolvedValue([
         { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
       ]),
-      readFile: vi.fn().mockResolvedValue({ path: ".opencode/opencode.jsonc", content: existing, size: existing.length }),
-      writeFile: vi.fn()
+      readWorkspaceAgentFile: vi.fn().mockResolvedValue({ path: "opencode.jsonc", content: existing, size: existing.length }),
+      writeWorkspaceAgentFile: vi.fn()
         .mockReturnValueOnce(firstWrite.promise)
         .mockReturnValueOnce(secondWrite.promise)
     });

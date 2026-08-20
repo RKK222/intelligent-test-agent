@@ -42,8 +42,13 @@ public class WorkspaceViewApplicationService {
 
     private static final int MAX_ENTRIES = 1000;
     private static final String CONFIG_PATH = ".opencode/opencode.jsonc";
+    private static final String LEGACY_CONFIG_PATH = "workspace/.opencode/opencode.jsonc";
     private static final String REFERENCE_PREFIX = "{env:OPENCODE_REFERENCES_DIR}/";
     private static final String AUTOMATION_ROOT_NAME = "自动化代码库";
+    private static final String AUTOMATION_KIND_FIELD = "testagent-reference-kind";
+    private static final String AUTOMATION_KIND = "automation";
+    private static final String AUTOMATION_WORKSPACE_FIELD = "testagent-automation-workspace-id";
+    private static final String AUTOMATION_VERSION_FIELD = "testagent-automation-version-id";
 
     private final WorkspaceApplicationService workspaceService;
     private final WorkspaceFileService fileService;
@@ -92,7 +97,8 @@ public class WorkspaceViewApplicationService {
         WorkspaceViewLocator normalized = normalizeLocator(locator, true);
         MountSnapshot snapshot = rebuildMounts(workspaceId, workspace);
         List<WorkspaceViewWarning> warnings = new ArrayList<>(snapshot.warnings());
-        AutomationWorkspaceReferenceCatalog.Resolution automation = rebuildAutomation(userId, workspaceId, warnings);
+        AutomationWorkspaceReferenceCatalog.Resolution automation = rebuildAutomation(
+                userId, workspaceId, workspace, warnings);
         List<Candidate> candidates = switch (normalized.kind()) {
             case WORKSPACE -> workspaceCandidates(workspace, normalized.path(), false);
             case REFERENCE -> referenceCandidates(snapshot, normalized, false, warnings);
@@ -391,17 +397,107 @@ public class WorkspaceViewApplicationService {
                 .toList();
     }
 
+    /**
+     * 自动化引用与应用资产库一样，以当前工作树 JSONC 为唯一挂载入口；数据库只负责校验版本和共享副本。
+     */
     private AutomationWorkspaceReferenceCatalog.Resolution rebuildAutomation(
             UserId userId,
             WorkspaceId workspaceId,
+            Workspace workspace,
             List<WorkspaceViewWarning> warnings) {
         if (automationCatalog == null || userId == null) {
             return AutomationWorkspaceReferenceCatalog.Resolution.empty();
         }
-        AutomationWorkspaceReferenceCatalog.Resolution resolution = automationCatalog.resolveActive(userId, workspaceId);
-        resolution.warnings().forEach(warning -> warnings.add(new WorkspaceViewWarning(
-                warning.alias(), warning.code(), warning.message())));
-        return resolution;
+        JsonNode references = referenceConfigNodes(workspace, warnings);
+        if (references == null) {
+            return AutomationWorkspaceReferenceCatalog.Resolution.empty();
+        }
+        List<AutomationWorkspaceReferenceCatalog.Reference> resolved = new ArrayList<>();
+        int[] configuredCount = {0};
+        references.fields().forEachRemaining(field -> {
+            String alias = field.getKey();
+            JsonNode value = field.getValue();
+            if (!value.isObject() || !AUTOMATION_KIND.equals(value.path(AUTOMATION_KIND_FIELD).asText(null))) {
+                return;
+            }
+            configuredCount[0]++;
+            try {
+                if (!safeDisplayName(alias)) {
+                    throw new PlatformException(ErrorCode.VALIDATION_ERROR, "自动化引用名称无效");
+                }
+                JsonNode pathNode = value.get("path");
+                JsonNode mergeNode = value.get("merge");
+                String templateId = value.path(AUTOMATION_WORKSPACE_FIELD).asText(null);
+                String versionId = value.path(AUTOMATION_VERSION_FIELD).asText(null);
+                if (pathNode == null || !pathNode.isTextual()
+                        || mergeNode == null || !mergeNode.isBoolean() || mergeNode.booleanValue()
+                        || templateId == null || templateId.isBlank()
+                        || versionId == null || versionId.isBlank()) {
+                    throw new PlatformException(ErrorCode.VALIDATION_ERROR, "自动化引用缺少平台托管字段");
+                }
+                AutomationWorkspaceReferenceCatalog.Reference reference = automationCatalog.resolveVersion(
+                        userId,
+                        workspaceId,
+                        new ApplicationWorkspaceId(templateId),
+                        new ApplicationWorkspaceVersionId(versionId));
+                if (!reference.configurationPath().equals(pathNode.textValue())) {
+                    throw new PlatformException(ErrorCode.FORBIDDEN, "自动化引用路径与受管版本不匹配");
+                }
+                resolved.add(reference.withDisplayName(alias));
+            } catch (PlatformException exception) {
+                warnings.add(new WorkspaceViewWarning(alias, exception.errorCode().name(), "自动化引用 " + alias + " 当前不可用"));
+            } catch (RuntimeException exception) {
+                warnings.add(new WorkspaceViewWarning(alias, ErrorCode.INTERNAL_ERROR.name(), "自动化引用当前不可用"));
+            }
+        });
+        resolved.sort(Comparator.comparing(AutomationWorkspaceReferenceCatalog.Reference::displayName));
+        ApplicationId appId = resolved.isEmpty() ? null : resolved.getFirst().applicationId();
+        return new AutomationWorkspaceReferenceCatalog.Resolution(appId, configuredCount[0], resolved, List.of());
+    }
+
+    private JsonNode referenceConfigNodes(Workspace workspace, List<WorkspaceViewWarning> warnings) {
+        FileContentResponse config = referenceConfigContent(workspace, warnings);
+        if (config == null) {
+            return null;
+        }
+        try {
+            JsonNode root = jsoncMapper.readTree(config.content());
+            JsonNode references = root == null ? null : root.get("references");
+            return references != null && references.isObject() ? references : null;
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    /** 固定兼容存量 runtime root 停在应用目录的记录；不递归搜索，也不接受客户端物理路径。 */
+    private FileContentResponse referenceConfigContent(
+            Workspace workspace,
+            List<WorkspaceViewWarning> warnings) {
+        PlatformException primaryFailure;
+        try {
+            return fileService.readContent(workspace.rootPath(), CONFIG_PATH);
+        } catch (PlatformException exception) {
+            if (exception.errorCode() != ErrorCode.NOT_FOUND
+                    && exception.errorCode() != ErrorCode.VALIDATION_ERROR) {
+                throw exception;
+            }
+            primaryFailure = exception;
+        }
+        try {
+            return fileService.readContent(workspace.rootPath(), LEGACY_CONFIG_PATH);
+        } catch (PlatformException exception) {
+            if (exception.errorCode() == ErrorCode.NOT_FOUND) {
+                if (primaryFailure.errorCode() == ErrorCode.VALIDATION_ERROR) {
+                    warnings.add(new WorkspaceViewWarning(null, "CONFIG_UNAVAILABLE", "工作区引用配置当前不可读取"));
+                }
+                return null;
+            }
+            if (exception.errorCode() == ErrorCode.VALIDATION_ERROR) {
+                warnings.add(new WorkspaceViewWarning(null, "CONFIG_UNAVAILABLE", "工作区引用配置当前不可读取"));
+                return null;
+            }
+            throw exception;
+        }
     }
 
     private AutomationWorkspaceReferenceCatalog.Reference requireAutomationReference(
@@ -411,17 +507,25 @@ public class WorkspaceViewApplicationService {
         if (automationCatalog == null || userId == null) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "自动化代码库引用不可用");
         }
-        return automationCatalog.resolveVersion(
+        AutomationWorkspaceReferenceCatalog.Reference reference = automationCatalog.resolveVersion(
                 userId,
                 workspaceId,
                 new ApplicationWorkspaceId(locator.automationWorkspaceId()),
                 new ApplicationWorkspaceVersionId(locator.automationVersionId()));
+        // referenceAlias 对自动化定位器仅承载服务端生成的展示名，不参与物理路径解析；旧标签可继续绑定原版本。
+        return locator.referenceAlias() == null
+                ? reference
+                : reference.withDisplayName(locator.referenceAlias());
     }
 
     private String automationLogicalPath(
             AutomationWorkspaceReferenceCatalog.Reference reference,
             String path) {
-        return join(join(AUTOMATION_ROOT_NAME, reference.displayName()), path);
+        return join(join(AUTOMATION_ROOT_NAME, automationDisplayName(reference)), path);
+    }
+
+    private static String automationDisplayName(AutomationWorkspaceReferenceCatalog.Reference reference) {
+        return reference.displayName() + "（目录 " + reference.directoryPath() + "）";
     }
 
     private List<Candidate> workspaceCandidates(Workspace workspace, String path, boolean composite) {
@@ -563,25 +667,13 @@ public class WorkspaceViewApplicationService {
         if (appId.isEmpty()) {
             return MountSnapshot.empty();
         }
-        FileContentResponse config;
-        try {
-            config = fileService.readContent(workspace.rootPath(), CONFIG_PATH);
-        } catch (PlatformException exception) {
-            if (exception.errorCode() == ErrorCode.NOT_FOUND) {
-                return MountSnapshot.empty();
-            }
-            if (exception.errorCode() != ErrorCode.VALIDATION_ERROR) {
-                throw exception;
-            }
-            return new MountSnapshot(
-                    List.of(),
-                    List.of(new WorkspaceViewWarning(
-                            null,
-                            "CONFIG_UNAVAILABLE",
-                            "工作区引用配置当前不可读取")),
-                    false);
-        }
         List<WorkspaceViewWarning> warnings = new ArrayList<>();
+        FileContentResponse config = referenceConfigContent(workspace, warnings);
+        if (config == null) {
+            return warnings.isEmpty()
+                    ? MountSnapshot.empty()
+                    : new MountSnapshot(List.of(), warnings, false);
+        }
         List<Mount> parsed = parseMounts(appId.get(), config.content(), warnings);
         List<ValidatedMount> valid = new ArrayList<>();
         for (Mount mount : parsed) {
@@ -648,6 +740,10 @@ public class WorkspaceViewApplicationService {
             List<WorkspaceViewWarning> warnings) {
         if (!value.isObject()) {
             // OpenCode 原生支持字符串形式的 Git 引用；平台视图只消费自己的本地挂载对象。
+            return null;
+        }
+        if (AUTOMATION_KIND.equals(value.path(AUTOMATION_KIND_FIELD).asText(null))) {
+            // 自动化条目由共享副本目录单独校验，不能按应用资产库路径解释。
             return null;
         }
         JsonNode pathNode = value.get("path");
@@ -750,7 +846,8 @@ public class WorkspaceViewApplicationService {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "应用资产引用不能携带自动化定位信息");
             }
         } else if (locator.kind() == WorkspaceViewLocatorKind.AUTOMATION_REFERENCE) {
-            if (alias != null || automationWorkspaceId == null || automationVersionId == null) {
+            if (automationWorkspaceId == null || automationVersionId == null
+                    || (alias != null && !safeDisplayName(alias))) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "自动化引用定位器字段无效");
             }
         } else if (locator.kind() == WorkspaceViewLocatorKind.AUTOMATION_ROOT) {
@@ -794,6 +891,15 @@ public class WorkspaceViewApplicationService {
                 && !value.equals("..")
                 && !value.equalsIgnoreCase(".git")
                 && !value.contains("\\");
+    }
+
+    private boolean safeDisplayName(String value) {
+        return value != null
+                && !value.isBlank()
+                && value.length() <= 128
+                && !value.contains("/")
+                && !value.contains("\\")
+                && !value.contains("\u0000");
     }
 
     private WorkspaceId requireWorkspaceId(WorkspaceId workspaceId) {
@@ -916,17 +1022,18 @@ public class WorkspaceViewApplicationService {
 
         private static Candidate automationReferenceRoot(
                 AutomationWorkspaceReferenceCatalog.Reference reference) {
+            String displayName = automationDisplayName(reference);
             return new Candidate(
                     "automation:" + reference.applicationWorkspaceId().value() + ":" + reference.versionId().value(),
-                    join(AUTOMATION_ROOT_NAME, reference.displayName()),
-                    reference.displayName(),
+                    join(AUTOMATION_ROOT_NAME, displayName),
+                    displayName,
                     true,
                     0L,
                     null,
                     new WorkspaceViewLocator(
                             WorkspaceViewLocatorKind.AUTOMATION_REFERENCE,
                             "",
-                            null,
+                            reference.displayName(),
                             reference.applicationWorkspaceId().value(),
                             reference.versionId().value()),
                     WorkspaceViewSource.AUTOMATION_REFERENCE,
@@ -945,7 +1052,7 @@ public class WorkspaceViewApplicationService {
             return new Candidate(
                     "automation:" + reference.applicationWorkspaceId().value() + ":"
                             + reference.versionId().value() + ":" + relativePath,
-                    join(join(AUTOMATION_ROOT_NAME, reference.displayName()), relativePath),
+                    join(join(AUTOMATION_ROOT_NAME, automationDisplayName(reference)), relativePath),
                     entry.name(),
                     entry.directory(),
                     entry.size(),
@@ -953,7 +1060,7 @@ public class WorkspaceViewApplicationService {
                     new WorkspaceViewLocator(
                             WorkspaceViewLocatorKind.AUTOMATION_REFERENCE,
                             relativePath,
-                            null,
+                            reference.displayName(),
                             reference.applicationWorkspaceId().value(),
                             reference.versionId().value()),
                     WorkspaceViewSource.AUTOMATION_REFERENCE,

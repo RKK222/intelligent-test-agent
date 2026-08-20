@@ -27,6 +27,74 @@ describe("reference config JSONC helper", () => {
     expect(inspectReferenceConfig(output, target).permissionNeedsUpdate).toBe(false);
   });
 
+  it("writes automation identity and permission into the same workspace JSONC flow", () => {
+    const automationTarget: ReferenceConfigTarget = {
+      alias: "接口自动化",
+      path: "{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/awv_old/repository/scripts/e2e",
+      folder: "scripts/e2e",
+      managedFields: {
+        "testagent-reference-kind": "automation",
+        "testagent-automation-workspace-id": "awp_auto",
+        "testagent-automation-version-id": "awv_old"
+      }
+    };
+
+    const output = patchReferenceConfig("", {
+      ...automationTarget,
+      merge: false,
+      sddFolderName: "scripts/e2e",
+      description: "接口自动化 20260812 只读自动化引用"
+    });
+
+    expect(output).toContain('"testagent-reference-kind": "automation"');
+    expect(output).toContain('"testagent-automation-workspace-id": "awp_auto"');
+    expect(output).toContain('"testagent-automation-version-id": "awv_old"');
+    expect(output).toContain(`"${automationTarget.path}/*": "allow"`);
+    expect(inspectReferenceConfig(output, automationTarget).permissionNeedsUpdate).toBe(false);
+  });
+
+  it("switches a managed automation alias to another version and removes its unused old permission", () => {
+    const oldPath = "{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/awv_old/repository/scripts/e2e";
+    const nextPath = "{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/awv_new/repository/scripts/e2e";
+    const source = `{
+  "references": {
+    "接口自动化": {
+      "path": "${oldPath}",
+      "merge": false,
+      "sdd-folder-name": "scripts/e2e",
+      "description": "旧版本",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-workspace-id": "awp_auto",
+      "testagent-automation-version-id": "awv_old"
+    }
+  },
+  "permission": {
+    "external_directory": {
+      "${oldPath}/*": "allow"
+    }
+  }
+}`;
+
+    const output = patchReferenceConfig(source, {
+      alias: "接口自动化",
+      path: nextPath,
+      folder: "scripts/e2e",
+      merge: false,
+      sddFolderName: "scripts/e2e",
+      description: "新版本",
+      managedFields: {
+        "testagent-reference-kind": "automation",
+        "testagent-automation-workspace-id": "awp_auto",
+        "testagent-automation-version-id": "awv_new"
+      }
+    });
+
+    expect(output).toContain(`"path": "${nextPath}"`);
+    expect(output).toContain('"testagent-automation-version-id": "awv_new"');
+    expect(output).not.toContain(`"${oldPath}/*"`);
+    expect(output).toContain(`"${nextPath}/*": "allow"`);
+  });
+
   it("creates the minimal schema object and references object for an empty file", () => {
     const output = patchReferenceConfig("", {
       ...target,
@@ -151,7 +219,8 @@ describe("reference config JSONC helper", () => {
         sddFolderName: "requirements-docs",
         description: "现有说明"
       },
-      permissionNeedsUpdate: true
+      permissionNeedsUpdate: true,
+      previousPath: target.path
     });
     expect(inspectReferenceConfig(`{
       "references": {

@@ -12417,3 +12417,30 @@
 
 - Tool 模块更新不再依赖用户手工重启；本地保存只影响本人，公共/应用发布按实际影响范围排空并持续补偿，失败按目标隔离。
 - 超管能查看应用发布尚未重启/dispose 的用户并人工处理；批量重启刷新后可恢复进度并继续。新增一个向后兼容的内部查询 API，不新增 RunEvent、数据库/Flyway、部署节点、强制环境变量或安全权限，不修改 `.env*`、generated SDK、OpenCode 源码，也未创建分支。
+
+## 2026-08-20 - 统一自动化代码库与应用资产库只读 Reference 流程
+
+### Why
+
+- 自动化配置弹窗把仓库点选、Git 拉取、版本/分支刷新、目录选择和应用混在一起，用户无法判断哪一步会生效；两个自动化仓库切换时还会串用表单状态。
+- 引用写入历史 `workspace/.opencode/opencode.jsonc` 后，OpenCode 从工作树根启动时不会加载；自动化引用另由 Java 拼接运行上下文和权限，未复用应用资产库的 JSONC Reference 流程，且环境根目录尾部斜线会让精确 `external_directory` 规则失效。
+- 888888888 用户选择应用资产库时误走普通文件 RPC，受保护的 `.opencode` 配置无法读取或保存。
+
+### What
+
+- 自动化代码库改为“选择仓库 → 选择已有版本/分支 → 点选引用目录 → 应用到当前工作树”的显式流程：点选仓库只加载元数据，不触发同步；A/B 仓库状态隔离；只有“更新当前版本副本”才展示真实同步进度。
+- 自动化与应用资产引用统一通过 Agent Config WebSocket RPC 读写当前工作树的 `opencode.jsonc`，使用 `{env:OPENCODE_APP_WORKSPACE_ROOT}`、精确版本目录和 `permission.external_directory`；删除 Java 侧自动化 Run 上下文拼接器。
+- 工作区组合文件树只展示当前 JSONC 已引用的自动化目录，并使用携带配置 ID、版本 ID 和逻辑路径的只读 locator；保存后立即按选定目录生效。读取兼容历史 `workspace/.opencode`，写入时提升到 OpenCode 会话 cwd 下的标准 `.opencode`。
+- OpenCode 启动时复用公共参数注入应用版本根目录，并规范化引用根路径，消除尾部分隔符造成的双斜线和权限匹配失败；应用资产库的控制面请求不再错误依赖个人 TestAgent 路由。
+
+### How
+
+- 后端定向测试：workspace 86/86、runtime 26/26；受影响三模块完整 Maven reactor 通过，API 608 项通过；完整 26 模块跳过测试打包并随启动脚本成功。
+- 前端引用配置定向 Vitest 59/59、全量 Vitest 2054 passed / 1 skipped、全 workspace typecheck、agent-web 与用户手册 production build 通过。
+- 使用根目录 `.env.test` 的本地 PostgreSQL `127.0.0.1:15432/test_agent`、Redis、XXL MySQL 和 Docker ClickHouse 启动 `test` profile；Flyway 校验 110 条历史并确认源码与打包 JAR 中 108 个 migration 字节一致。
+- 真实浏览器以 888888888 验收应用资产 `docs` 选择、自动化 A/B 独立切换、A 的 `master / 20260819 / src` 应用和组合文件树；新对话读取 `Main.groovy` 返回 `Matthew`，Run 为 `SUCCEEDED`，未出现目录权限申请。日志确认精确 external_directory 规则判定为 allow。
+
+### Result
+
+- 用户只需点选仓库、版本和目录后“应用到当前工作树”；仓库点选/分支目录刷新不再伪装成 Git 拉取，只有显式更新副本才同步。应用资产库重新可选，自动化引用与应用资产库使用同一 JSONC 配置和权限流程。
+- 本次跟进不新增数据库结构、Flyway、RunEvent 或部署节点；既有激活版本内部 API 保持兼容。未修改 `.env*`、generated SDK 或 OpenCode 源码，未创建分支。

@@ -47,7 +47,25 @@ public interface AutomationWorkspaceReferenceCatalog {
             String version,
             String branch,
             String targetCommitHash,
-            String workspaceRootPath) {
+            String workspaceRootPath,
+            String directoryPath,
+            String configurationPath) {
+
+        public Reference withDisplayName(String configuredDisplayName) {
+            return new Reference(
+                    applicationId,
+                    applicationWorkspaceId,
+                    versionId,
+                    workspaceName,
+                    configuredDisplayName,
+                    repositoryName,
+                    version,
+                    branch,
+                    targetCommitHash,
+                    workspaceRootPath,
+                    directoryPath,
+                    configurationPath);
+        }
     }
 
     record Warning(

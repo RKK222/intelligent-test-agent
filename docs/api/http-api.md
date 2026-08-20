@@ -1341,7 +1341,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 上文 UTF-8 限制只适用于文本读取/写入与编辑器预览；下载使用 `workspace.read.binary.chunk` / `workspace.view.read.binary.chunk` 按约 512 KiB 返回 Base64 原始字节，支持任意二进制文件。首次响应提供 `size/lastModifiedMillis`，后续请求回传快照并继续使用 `nextOffset`；下载期间文件变化返回 `CONFLICT + DOWNLOAD_CHANGED`。每段重新校验 ticket、成员、工作区安全路径或组合视图 locator。该能力为 additive WebSocket 协议扩展：旧客户端不受影响，新前端必须在所有目标 Java 节点完成后端升级后再启用下载。
 
-组合视图同时消费当前工作区 `.opencode/opencode.jsonc` 中平台可验证的应用资产引用，以及应用级已激活的自动化代码库版本。自动化虚拟根使用 `AUTOMATION_ROOT`，文件和目录使用 `AUTOMATION_REFERENCE`，定位器只携带 `automationWorkspaceId/automationVersionId/path`，禁止客户端提交物理路径。每次列举或读取重新校验应用成员、仓库类型、模板和版本归属、当前服务器 `READY` 副本、目标提交和运行态 Workspace；`.git`、符号链接和路径穿越固定拒绝。单个自动化引用不可用时只返回局部 warning，工作区与已有文档引用继续可用。自动化来源只支持列举、文本/分片/原始字节读取、下载和加入对话，不进入搜索、requirements、Git Diff 或任何写 RPC。
+组合视图同时消费当前工作区 `.opencode/opencode.jsonc` 中平台可验证的应用资产引用和自动化引用；自动化条目必须携带平台写入的配置 ID、版本 ID、`merge=false` 与服务端可复算的逻辑 `referencePath`，不能仅凭应用级激活记录自动挂载到每个用户工作树。自动化虚拟根使用 `AUTOMATION_ROOT`，文件和目录使用 `AUTOMATION_REFERENCE`，定位器只携带 `automationWorkspaceId/automationVersionId/path`，禁止客户端提交物理路径。每次列举或读取重新校验应用成员、仓库类型、模板和版本归属、当前服务器 `READY` 副本及目标提交；`.git`、符号链接和路径穿越固定拒绝。单个自动化引用不可用时只返回局部 warning，工作区与已有文档引用继续可用。自动化来源只支持列举、文本/分片/原始字节读取、下载和加入对话，不进入搜索、requirements、Git Diff 或任何写 RPC。
 
 `merge=true` 时，引用内容按 `sdd-folder-name` 合并进工作区同名一级目录：工作区已经存在的同名目录返回 `source=MIXED` 且保持普通颜色，纯引用文件或目录返回 `source=REFERENCE` 供前端显示为蓝色；同名文件不会覆盖工作区文件，冲突节点携带 `collision=true` 和稳定 `id`。工作区目录从纯 `WORKSPACE` 变为 `MIXED` 时沿用工作区路径生成的 `id`，前端刷新后以该稳定身份重新取得最新 `COMPOSITE` locator；各层 `warnings/truncated` 都会汇总展示。`merge=false` 时，以参考别名作为只读一级目录，展开后展示引用路径内容。组合视图的 `locator` 是后端签发的逻辑定位信息；读取时仍会重新解析当前配置和安全根，不能通过伪造 `referenceAlias/path` 绕过校验。详细字段见 `docs/api/event-stream.md`。
 
@@ -1699,7 +1699,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - SSH Git 操作只使用当前登录用户保存的唯一 SSH key；HTTPS 不额外支持账号或 token。
 - 多服务器部署下，版本主记录保存 `targetCommitHash`，每台服务器通过 `application_workspace_version_replicas` 记录本机副本路径、运行态 Workspace、当前 commit 和同步状态。`runtimeWorkspace` 返回当前用户 READY 的 opencode agent 所在服务器副本；目标副本未就绪时返回 `CONFLICT`。
 
-`ApplicationWorkspaceVersionResponse`（测试工作版本的路径字段为当前服务器解析后的物理路径，不是数据库原始逻辑值；自动化引用版本完全省略这些路径字段及 `runtimeWorkspace`）：
+`ApplicationWorkspaceVersionResponse`（测试工作版本的路径字段为当前服务器解析后的物理路径，不是数据库原始逻辑值；自动化引用版本省略这些物理路径字段及 `runtimeWorkspace`，并新增可空 `referencePath`，值为 OpenCode 可展开的 `${OPENCODE_APP_WORKSPACE_ROOT}/...` 受控配置路径）：
 
 ```json
 {
@@ -1730,6 +1730,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "updatedAt": "2026-06-23T00:00:00Z"
 }
 ```
+
+自动化版本响应中的受控字段示例为 `"referencePath": "${OPENCODE_APP_WORKSPACE_ROOT}/20260819/automation-demo"`；该响应不同时返回上例的物理路径和 `runtimeWorkspace`。
 
 自动化版本同步接口返回 `AutomationVersionSynchronizationResponse`。总体 `status` 为 `SYNCHRONIZING/READY/FAILED`，`targetServerCount/readyServerCount` 用于汇总；`servers[]` 按 `linuxServerId` 稳定排序，包含 `serverName/status/online/currentBranch/currentCommitHash/matchesTarget/syncedAt/error`。逐服务器 `status` 为 `PENDING/PROCESSING/READY/BLOCKED`：不存在副本或目标提交尚未匹配时为 `PENDING`，持久化副本失败时为 `BLOCKED`。响应和错误均禁止包含 `repoRootPath/workspaceRootPath` 等物理路径。前端必须以该状态呈现“创建同步任务 → 各服务器同步 → 汇总同步结果”，不能仅凭 HTTP 请求成功推断所有服务器已经就绪。
 

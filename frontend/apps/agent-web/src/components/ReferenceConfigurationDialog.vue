@@ -19,7 +19,7 @@ import {
 import AutomationReferenceConfigurationPanel from "./AutomationReferenceConfigurationPanel.vue";
 import RepositoryOperationProgressDialog from "./RepositoryOperationProgressDialog.vue";
 
-const OPENCODE_CONFIG_PATH = ".opencode/opencode.jsonc";
+const OPENCODE_CONFIG_PATH = "opencode.jsonc";
 const POLL_INTERVAL_MS = 2_000;
 const PENDING_REFRESH_CONFIRMATION_WINDOW_MS = 30_000;
 const ACTIVE_STATUSES = new Set(["INITIALIZING", "SYNCHRONIZING", "VERIFYING"]);
@@ -101,8 +101,8 @@ function handleAutomationOperationState(state: { open: boolean; canClose: boolea
 }
 
 const dialogDescription = computed(() => activeReferenceKind.value === "asset"
-  ? "从应用资产库选择首层 SDD 目录，并写入当前个人工作区的 OpenCode 配置。"
-  : "管理应用级自动化代码库只读引用，选择分支、目录和当前版本。"
+  ? "选择应用资产目录并应用到当前工作树；点选版本库不会自动同步。"
+  : "选择自动化代码库、版本和目录，并应用到当前工作树的 OpenCode 配置。"
 );
 
 let dialogGeneration = 0;
@@ -115,6 +115,7 @@ let repositoryRequestSequence = 0;
 const repositoryResponseTokens = new Map<string, number>();
 let restoreFocusTo: HTMLElement | null = null;
 let workspaceRefreshContextKey = "";
+let referenceKindForcedReadonly = false;
 
 /** v-if 创建弹窗内容后直接聚焦关闭按钮，避免依赖父组件更新时序。 */
 const vInitialFocus = {
@@ -498,7 +499,7 @@ function beginOperationProgress(
   return requestToken;
 }
 
-async function selectRepository(repository: ReferenceRepositoryStatus, synchronize = true) {
+async function selectRepository(repository: ReferenceRepositoryStatus, synchronize = false) {
   const repairsFailedSwitch = repository.operation === "SWITCH_BRANCH"
     && repository.status === "FAILED"
     && Boolean(repository.branch);
@@ -513,7 +514,18 @@ async function selectRepository(repository: ReferenceRepositoryStatus, synchroni
   }
   const dialogToken = dialogGeneration;
   const selectionToken = selectionGeneration;
-  if (!synchronize || !repository.initialized) return;
+  if (!repository.initialized) return;
+  if (!synchronize) {
+    if (repository.status === "READY") {
+      void loadTreeLevel("", dialogToken, selectionToken, repository.repositoryId);
+    } else if (ACTIVE_STATUSES.has(repository.status)) {
+      if (isProgressOperation(repository.operation)) {
+        beginOperationProgress(repository, repository.operation, "repository-card", "ACCEPTED", repository.generation);
+      }
+      scheduleStatusPoll(repository.repositoryId, dialogToken, selectionToken);
+    }
+    return;
+  }
   if (ACTIVE_STATUSES.has(repository.status)) {
     if (isProgressOperation(repository.operation)) {
       beginOperationProgress(repository, repository.operation, "repository-card", "ACCEPTED", repository.generation);
@@ -913,7 +925,7 @@ function nodeSelectable(node: VisibleTreeNode) {
 
 async function readWorkspaceConfig(workspaceId = props.workspaceId): Promise<string> {
   try {
-    return (await api.readFile(workspaceId, OPENCODE_CONFIG_PATH)).content;
+    return (await api.readWorkspaceAgentFile(workspaceId, OPENCODE_CONFIG_PATH)).content;
   } catch (error) {
     if (isFileMissing(error)) return "";
     throw error;
@@ -984,7 +996,7 @@ async function submitConfig() {
       sddFolderName: submitted.sddFolderName,
       description: submitted.description
     });
-    await api.writeFile(workspaceId, OPENCODE_CONFIG_PATH, output);
+    await api.writeWorkspaceAgentFile(workspaceId, OPENCODE_CONFIG_PATH, output);
     if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) || selectedFolderPath.value !== folderPath) return;
     baseline.value = { ...submitted };
     configMode.value = "update";
@@ -1073,9 +1085,24 @@ watch(
     repositoryResponseTokens.clear();
     listError.value = null;
     selectedRepositoryId.value = null;
-    if (!props.canManage) activeReferenceKind.value = "automation";
     if (open) {
       if (props.canManage) void loadRepositories(dialogGeneration);
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => props.canManage,
+  (canManage) => {
+    if (!canManage) {
+      if (activeReferenceKind.value === "asset") activeReferenceKind.value = "automation";
+      referenceKindForcedReadonly = true;
+      return;
+    }
+    if (referenceKindForcedReadonly) {
+      activeReferenceKind.value = "asset";
+      referenceKindForcedReadonly = false;
     }
   },
   { immediate: true }
@@ -1292,7 +1319,7 @@ onBeforeUnmount(() => {
 
           <main class="reference-configuration-column">
             <div v-if="!selectedRepository" class="reference-state is-centered">
-              选择一个已初始化资产库开始同步。
+              选择一个资产库查看可引用目录；需要拉取最新内容时再点“更新副本”。
             </div>
             <template v-else>
               <div class="reference-selected-heading">
@@ -1310,6 +1337,17 @@ onBeforeUnmount(() => {
                     <span>服务器路径</span>
                     <code>{{ selectedRepository.repositoryPath || "服务器路径暂不可用" }}</code>
                   </div>
+                  <Button
+                    v-if="selectedRepository.initialized"
+                    size="sm"
+                    variant="ghost"
+                    :aria-label="`更新${selectedRepository.name}副本`"
+                    :disabled="selectionBusy || configSaving || ACTIVE_STATUSES.has(selectedRepository.status)"
+                    @click="selectRepository(selectedRepository, true)"
+                  >
+                    <RefreshCw class="h-3.5 w-3.5" />
+                    更新副本
+                  </Button>
                   <Button
                     v-if="selectedRepository.initialized"
                     size="sm"
@@ -1442,7 +1480,9 @@ onBeforeUnmount(() => {
                       重试
                     </button>
                   </div>
-                  <div v-else-if="visibleTreeNodes.length === 0" class="reference-compact-state">仓库根目录为空。</div>
+                  <div v-else-if="visibleTreeNodes.length === 0" class="reference-compact-state">
+                    未找到可引用的首层目录。应用资产库只展示系统允许的 SDD 目录（默认 docs、spec）。
+                  </div>
                   <div v-else class="reference-tree" role="list">
                     <div
                       v-for="node in visibleTreeNodes"
@@ -1563,8 +1603,10 @@ onBeforeUnmount(() => {
           class="reference-automation-body"
           :open="open && activeReferenceKind === 'automation'"
           :app-id="appId"
+          :workspace-id="workspaceId"
           :can-manage="canManage"
           @changed="emit('automationChanged')"
+          @saved="emit('saved')"
           @operation-state="handleAutomationOperationState"
         />
 

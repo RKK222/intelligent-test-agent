@@ -3440,6 +3440,8 @@ export type AutomationWorkspaceActiveVersion = {
   versionId: string;
   version: string;
   branch: string;
+  /** 写入当前工作树 OpenCode JSONC 的受控环境变量路径。 */
+  referencePath?: string | null;
   targetCommitHash?: string | null;
   replicaStatus?: string | null;
   activatedByUserId?: string | null;
@@ -3462,6 +3464,8 @@ export type ApplicationWorkspaceVersion = {
   replicaCommitHash?: string | null;
   replicaLinuxServerId?: string | null;
   replicaStatus?: string | null;
+  /** 自动化版本对应的受控 OpenCode 引用路径；普通工作版本为空。 */
+  referencePath?: string | null;
   createdAt: string;
   updatedAt: string;
 };

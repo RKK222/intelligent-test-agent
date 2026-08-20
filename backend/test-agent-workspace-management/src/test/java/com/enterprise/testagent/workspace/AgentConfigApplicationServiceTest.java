@@ -1558,6 +1558,39 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void workspaceAgentFilesReadFixedWorkspaceChildAndPromoteWritesToRuntimeRoot() throws Exception {
+        Path runtimeRoot = Files.createDirectories(root.resolve("legacy-runtime/F-COSS"));
+        Path configRoot = Files.createDirectories(runtimeRoot.resolve("workspace/.opencode"));
+        Files.writeString(configRoot.resolve("opencode.jsonc"), "{\"references\":{}}");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_legacy_runtime"),
+                        "legacy-runtime",
+                        runtimeRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        assertThat(service.readWorkspaceAgentFile("wrk_legacy_runtime", "opencode.jsonc", null).content())
+                .isEqualTo("{\"references\":{}}");
+        service.writeWorkspaceAgentFile("wrk_legacy_runtime", "opencode.jsonc", "{\"references\":{\"auto\":{}}}", null);
+
+        assertThat(Files.readString(configRoot.resolve("opencode.jsonc")))
+                .isEqualTo("{\"references\":{}}");
+        assertThat(Files.readString(runtimeRoot.resolve(".opencode/opencode.jsonc")))
+                .isEqualTo("{\"references\":{\"auto\":{}}}");
+    }
+
+    @Test
     void workspaceDiffIncludesApplicationRuntimeConfigAgentAndSkillFiles() {
         Path workspaceRoot = root.resolve("project/F-COSS/workspace");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();

@@ -5045,7 +5045,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersionReplica replica = managedWorkspaceRepository.findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
                 .orElse(null);
         if (isAutomationRepository(existingRepository(version.repositoryId()))) {
-            return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.readonlyReference(version, replica);
+            return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.readonlyReference(
+                    version, replica, automationReferenceConfigPath(version));
         }
         if (replica == null) {
             return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(
@@ -5059,7 +5060,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             ApplicationWorkspaceVersion version,
             ApplicationWorkspaceVersionReplica replica) {
         if (isAutomationRepository(existingRepository(version.repositoryId()))) {
-            return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.readonlyReference(version, replica);
+            return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.readonlyReference(
+                    version, replica, automationReferenceConfigPath(version));
         }
         return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(
                 versionForResponse(version),
@@ -5582,10 +5584,24 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 version.versionId().value(),
                 version.version(),
                 version.branch(),
+                automationReferenceConfigPath(version),
                 version.targetCommitHash(),
                 replicaStatus,
                 active.activatedBy() == null ? null : active.activatedBy().value(),
                 active.activatedAt());
+    }
+
+    /**
+     * 自动化引用写入个人工作树时复用应用资产库的环境变量路径形式，避免把服务器物理路径带到 API 和 JSONC。
+     * 历史绝对路径仍可由服务端读取，但不能投影到浏览器配置；新建版本一律使用 appworkspace: 逻辑路径。
+     */
+    private String automationReferenceConfigPath(ApplicationWorkspaceVersion version) {
+        String storedPath = requireText(version.workspaceRootPath(), "自动化引用路径不能为空", "workspaceRootPath");
+        if (storedPath.startsWith("appworkspace:")) {
+            String suffix = storedPath.substring("appworkspace:".length()).replace('\\', '/');
+            return "{env:" + PARAM_OPENCODE_APP_WORKSPACE_ROOT + "}/" + suffix;
+        }
+        return null;
     }
 
     private record AutomationSynchronizationTarget(

@@ -151,6 +151,7 @@ public final class ManagedWorkspaceResponses {
             String versionId,
             String version,
             String branch,
+            String referencePath,
             String targetCommitHash,
             String replicaStatus,
             String activatedByUserId,
@@ -247,6 +248,7 @@ public final class ManagedWorkspaceResponses {
             String replicaCommitHash,
             String replicaLinuxServerId,
             String replicaStatus,
+            String referencePath,
             Instant createdAt,
             Instant updatedAt) {
 
@@ -278,6 +280,7 @@ public final class ManagedWorkspaceResponses {
                     null,
                     null,
                     null,
+                    null,
                     createdAt,
                     updatedAt);
         }
@@ -305,14 +308,16 @@ public final class ManagedWorkspaceResponses {
                     replica == null ? null : replica.currentCommitHash(),
                     replica == null ? null : replica.linuxServerId(),
                     replica == null ? null : replica.syncStatus().name(),
+                    null,
                     version.createdAt(),
                     version.updatedAt());
         }
 
-        /** 自动化引用版本只返回逻辑版本与副本状态，禁止序列化任何服务器物理路径。 */
+        /** 自动化引用版本只返回逻辑版本、OpenCode 环境变量路径与副本状态，不序列化服务器物理路径。 */
         public static ApplicationWorkspaceVersionResponse readonlyReference(
                 ApplicationWorkspaceVersion version,
-                ApplicationWorkspaceVersionReplica replica) {
+                ApplicationWorkspaceVersionReplica replica,
+                String referencePath) {
             return new ApplicationWorkspaceVersionResponse(
                     version.versionId().value(),
                     version.applicationWorkspaceId().value(),
@@ -328,6 +333,7 @@ public final class ManagedWorkspaceResponses {
                     replica == null ? null : replica.currentCommitHash(),
                     replica == null ? null : replica.linuxServerId(),
                     replica == null ? null : replica.syncStatus().name(),
+                    referencePath,
                     version.createdAt(),
                     version.updatedAt());
         }

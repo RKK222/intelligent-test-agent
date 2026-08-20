@@ -99,6 +99,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     private static final String PUBLIC_AGENT_LEGACY_RELATIVE_ROOT = "opencode/agents";
     private static final String WORKSPACE_AGENT_RELATIVE_ROOT = ".opencode";
     private static final String WORKSPACE_AGENT_LEGACY_RELATIVE_ROOT = ".opencode/agents";
+    private static final String LEGACY_WORKSPACE_CONTENT_ROOT = "workspace";
     private static final long MAX_CONFLICT_FILE_BYTES = 1024L * 1024L;
     private static final int MAX_DISPLAY_METADATA_CHARS = 64 * 1024;
     private static final Duration PREPARATION_RECOVERY_DELAY = Duration.ofMinutes(3);
@@ -2639,6 +2640,14 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         Path standard = workspaceStandardAgentRoot(repoRoot);
         if (Files.isDirectory(standard)) {
             return standard;
+        }
+        // 存量 runtime root 可能停在应用目录；读取时兼容固定 workspace 子目录，保存时仍提升到标准根目录，
+        // 确保 OpenCode 从会话 cwd 能加载同一份项目配置。
+        Path compatible = repoRoot.resolve(LEGACY_WORKSPACE_CONTENT_ROOT)
+                .resolve(WORKSPACE_AGENT_RELATIVE_ROOT)
+                .normalize();
+        if (Files.isDirectory(compatible)) {
+            return compatible;
         }
         Path legacy = repoRoot.resolve(WORKSPACE_AGENT_LEGACY_RELATIVE_ROOT).normalize();
         return Files.isDirectory(legacy) ? legacy : standard;

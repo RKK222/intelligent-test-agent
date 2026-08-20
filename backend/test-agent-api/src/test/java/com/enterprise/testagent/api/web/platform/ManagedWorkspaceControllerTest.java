@@ -145,6 +145,7 @@ class ManagedWorkspaceControllerTest {
                 "awv_2",
                 "20260819",
                 "main",
+                "${OPENCODE_APP_WORKSPACE_ROOT}/20260819/automation-demo",
                 "abc123",
                 "READY",
                 USER_ID.value(),

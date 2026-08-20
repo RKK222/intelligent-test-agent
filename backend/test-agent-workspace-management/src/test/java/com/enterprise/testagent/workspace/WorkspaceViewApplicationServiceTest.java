@@ -178,9 +178,51 @@ class WorkspaceViewApplicationServiceTest {
     }
 
     @Test
+    void readsReferencesFromFixedWorkspaceChildForLegacyRuntimeRoot() throws Exception {
+        Files.createDirectories(workspaceRoot.resolve("workspace/.opencode"));
+        Files.writeString(workspaceRoot.resolve("workspace/.opencode/opencode.jsonc"), """
+                {
+                  "references": {
+                    "docs-requirements": {
+                      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
+                      "merge": false,
+                      "sdd-folder-name": "docs",
+                      "description": "兼容存量工作区"
+                    }
+                  }
+                }
+                """);
+        Files.createDirectories(referencesRoot.resolve("requirements/docs"));
+        Files.writeString(referencesRoot.resolve("requirements/docs/reference.md"), "reference");
+
+        WorkspaceViewListResponse root = service.list(
+                WORKSPACE_ID,
+                new WorkspaceViewLocator(WorkspaceViewLocatorKind.COMPOSITE, "", null));
+
+        assertThat(root.warnings()).isEmpty();
+        assertThat(root.entries()).extracting(WorkspaceViewEntry::name).contains("docs-requirements");
+    }
+
+    @Test
     void exposesAutomationRepositoriesAsVersionPinnedReadonlyLogicalLocators() throws Exception {
         Path automationRoot = Files.createDirectories(tempDir.resolve("automation-v1"));
         Files.writeString(automationRoot.resolve("case.robot"), "*** Test Cases ***");
+        String configurationPath = "{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/awv_v1/repository/scripts/e2e";
+        Files.createDirectories(workspaceRoot.resolve(".opencode"));
+        Files.writeString(workspaceRoot.resolve(".opencode/opencode.jsonc"), """
+                {
+                  "references": {
+                    "API 自动化": {
+                      "path": "%s",
+                      "merge": false,
+                      "sdd-folder-name": "scripts/e2e",
+                      "testagent-reference-kind": "automation",
+                      "testagent-automation-workspace-id": "awp_auto",
+                      "testagent-automation-version-id": "awv_v1"
+                    }
+                  }
+                }
+                """.formatted(configurationPath));
         AutomationWorkspaceReferenceCatalog.Reference reference = new AutomationWorkspaceReferenceCatalog.Reference(
                 APP_ID,
                 new ApplicationWorkspaceId("awp_auto"),
@@ -191,7 +233,9 @@ class WorkspaceViewApplicationServiceTest {
                 "20260819",
                 "release/v1",
                 "abc123",
-                automationRoot.toString());
+                automationRoot.toString(),
+                "scripts/e2e",
+                configurationPath);
         AutomationWorkspaceReferenceCatalog catalog = new AutomationWorkspaceReferenceCatalog() {
             @Override
             public Resolution resolveActive(UserId userId, WorkspaceId hostWorkspaceId) {
@@ -226,7 +270,8 @@ class WorkspaceViewApplicationServiceTest {
         WorkspaceViewEntry configured = automationService.list(userId, WORKSPACE_ID, automation.locator()).entries().getFirst();
         WorkspaceViewEntry file = automationService.list(userId, WORKSPACE_ID, configured.locator()).entries().getFirst();
 
-        assertThat(file.path()).isEqualTo("自动化代码库/API 自动化/case.robot");
+        assertThat(configured.name()).isEqualTo("API 自动化（目录 scripts/e2e）");
+        assertThat(file.path()).isEqualTo("自动化代码库/API 自动化（目录 scripts/e2e）/case.robot");
         assertThat(file.source()).isEqualTo(WorkspaceViewSource.AUTOMATION_REFERENCE);
         assertThat(file.readonly()).isTrue();
         assertThat(file.locator().automationWorkspaceId()).isEqualTo("awp_auto");
