@@ -30,6 +30,14 @@
             <arg column="skill_subcategory" javaType="java.lang.String"/><arg column="latest_pushed_revision_id" javaType="java.lang.String"/>
             <arg column="latest_published_revision_id" javaType="java.lang.String"/><arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="source_kind" javaType="java.lang.String"/><arg column="source_available" javaType="_boolean"/>
+            <arg column="external_identity_key" javaType="java.lang.String"/><arg column="external_skill_id" javaType="java.lang.Long"/>
+            <arg column="external_version" javaType="java.lang.String"/><arg column="external_source" javaType="java.lang.String"/>
+            <arg column="external_tag" javaType="java.lang.String"/><arg column="external_phase" javaType="java.lang.String"/>
+            <arg column="external_phase_name" javaType="java.lang.String"/><arg column="external_contributor" javaType="java.lang.String"/>
+            <arg column="external_download_count" javaType="java.lang.Long"/><arg column="catalog_display_name" javaType="java.lang.String"/>
+            <arg column="catalog_description" javaType="java.lang.String"/><arg column="forked_from_asset_id" javaType="java.lang.String"/>
+            <arg column="forked_from_revision_id" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
     <resultMap id="RevisionMap" type="com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows$RevisionRow">
@@ -41,6 +49,8 @@
             <arg column="description" javaType="java.lang.String"/><arg column="deleted" javaType="_boolean"/>
             <arg column="pushed_at" javaType="java.time.Instant"/><arg column="published_at" javaType="java.time.Instant"/>
             <arg column="published_by_user_id" javaType="java.lang.String"/>
+            <arg column="external_skill_id" javaType="java.lang.Long"/>
+            <arg column="external_version" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
     <resultMap id="DependencyMap" type="com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows$DependencyRow">
@@ -196,6 +206,49 @@
         select * from agent_skill_hub_assets where source_app_id = #{sourceAppId}
           and source_application_workspace_id = #{sourceWorkspaceId} and asset_type = #{assetType} and technical_id = #{technicalId}
     </select>
+    <select id="findAssetByExternalIdentity" resultMap="AssetMap">
+        select * from agent_skill_hub_assets where external_identity_key = #{externalIdentityKey}
+    </select>
+    <update id="markExternalAssetsUnavailable">
+        update agent_skill_hub_assets set source_available = false, updated_at = #{synchronizedAt}
+        where source_kind = 'SKILLHUB'
+    </update>
+    <insert id="upsertExternalAsset" databaseId="postgresql">
+        insert into agent_skill_hub_assets(
+          asset_id, source_app_id, source_application_workspace_id, asset_type, technical_id,
+          skill_category, skill_subcategory, latest_pushed_revision_id, latest_published_revision_id,
+          created_at, updated_at, source_kind, source_available, external_identity_key, external_skill_id,
+          external_version, external_source, external_tag, external_phase, external_phase_name,
+          external_contributor, external_download_count, catalog_display_name, catalog_description)
+        values (#{assetId}, null, null, 'SKILL', #{technicalId}, #{skillCategory}, #{skillSubcategory},
+          #{latestPushedRevisionId}, #{latestPublishedRevisionId}, #{createdAt}, #{updatedAt}, 'SKILLHUB', true,
+          #{externalIdentityKey}, #{externalSkillId}, #{externalVersion}, #{externalSource}, #{externalTag},
+          #{externalPhase}, #{externalPhaseName}, #{externalContributor}, #{externalDownloadCount},
+          #{catalogDisplayName}, #{catalogDescription})
+        on conflict (external_identity_key) do update set
+          external_skill_id = excluded.external_skill_id, external_version = excluded.external_version,
+          external_source = excluded.external_source, external_tag = excluded.external_tag,
+          external_phase = excluded.external_phase, external_phase_name = excluded.external_phase_name,
+          external_contributor = excluded.external_contributor,
+          external_download_count = excluded.external_download_count,
+          catalog_display_name = excluded.catalog_display_name,
+          catalog_description = excluded.catalog_description,
+          source_available = true, updated_at = excluded.updated_at
+    </insert>
+    <insert id="upsertExternalAsset">
+        merge into agent_skill_hub_assets(
+          asset_id, source_app_id, source_application_workspace_id, asset_type, technical_id,
+          skill_category, skill_subcategory, latest_pushed_revision_id, latest_published_revision_id,
+          created_at, updated_at, source_kind, source_available, external_identity_key, external_skill_id,
+          external_version, external_source, external_tag, external_phase, external_phase_name,
+          external_contributor, external_download_count, catalog_display_name, catalog_description)
+        key(external_identity_key)
+        values (#{assetId}, null, null, 'SKILL', #{technicalId}, #{skillCategory}, #{skillSubcategory},
+          #{latestPushedRevisionId}, #{latestPublishedRevisionId}, #{createdAt}, #{updatedAt}, 'SKILLHUB', true,
+          #{externalIdentityKey}, #{externalSkillId}, #{externalVersion}, #{externalSource}, #{externalTag},
+          #{externalPhase}, #{externalPhaseName}, #{externalContributor}, #{externalDownloadCount},
+          #{catalogDisplayName}, #{catalogDescription})
+    </insert>
     <select id="findAssetsBySource" resultMap="AssetMap">
         select * from agent_skill_hub_assets where source_app_id = #{sourceAppId}
           and source_application_workspace_id = #{sourceWorkspaceId}
@@ -203,38 +256,63 @@
     <insert id="insertRevision" databaseId="postgresql">
         insert into agent_skill_hub_revisions(revision_id, asset_id, source_version_id, source_commit_hash,
             artifact_sha256, content_sha256, display_name, display_name_en, description, deleted,
-            pushed_at, published_at, published_by_user_id)
+            pushed_at, published_at, published_by_user_id, external_skill_id, external_version)
         values (#{revisionId}, #{assetId}, #{sourceVersionId}, #{sourceCommitHash}, #{artifactSha256},
             #{contentSha256}, #{displayName}, #{displayNameEn}, #{description}, #{deleted},
-            #{pushedAt}, #{publishedAt}, #{publishedByUserId}) on conflict (asset_id, source_commit_hash) do nothing
+            #{pushedAt}, #{publishedAt}, #{publishedByUserId}, #{externalSkillId}, #{externalVersion})
+        on conflict (asset_id, source_commit_hash) do nothing
     </insert>
     <insert id="insertRevision">
         merge into agent_skill_hub_revisions(revision_id, asset_id, source_version_id, source_commit_hash,
             artifact_sha256, content_sha256, display_name, display_name_en, description, deleted,
-            pushed_at, published_at, published_by_user_id) key(asset_id, source_commit_hash)
+            pushed_at, published_at, published_by_user_id, external_skill_id, external_version)
+            key(asset_id, source_commit_hash)
         values (#{revisionId}, #{assetId}, #{sourceVersionId}, #{sourceCommitHash}, #{artifactSha256},
             #{contentSha256}, #{displayName}, #{displayNameEn}, #{description}, #{deleted},
-            #{pushedAt}, #{publishedAt}, #{publishedByUserId})
+            #{pushedAt}, #{publishedAt}, #{publishedByUserId}, #{externalSkillId}, #{externalVersion})
     </insert>
     <select id="findRevision" resultMap="RevisionMap">select * from agent_skill_hub_revisions where revision_id = #{revisionId}</select>
     <select id="findRevisionBySourceCommit" resultMap="RevisionMap">
         select * from agent_skill_hub_revisions where asset_id = #{assetId} and source_commit_hash = #{sourceCommitHash}
+    </select>
+    <select id="findExternalRevision" resultMap="RevisionMap">
+        select * from agent_skill_hub_revisions
+        where asset_id = #{assetId} and external_skill_id = #{externalSkillId}
+          and external_version = #{externalVersion}
     </select>
     <update id="updateLatestPushed">
         update agent_skill_hub_assets set latest_pushed_revision_id = #{revisionId}, updated_at = #{pushedAt}
         where asset_id = #{assetId} and (latest_pushed_revision_id is null or
           (select pushed_at from agent_skill_hub_revisions where revision_id = latest_pushed_revision_id) &lt;= #{pushedAt})
     </update>
+    <update id="updateExternalRevisionPointers">
+        update agent_skill_hub_assets
+        set latest_pushed_revision_id = #{revisionId}, latest_published_revision_id = #{revisionId},
+            external_skill_id = #{externalSkillId}, external_version = #{externalVersion}, updated_at = #{updatedAt}
+        where asset_id = #{assetId} and source_kind = 'SKILLHUB' and source_available = true
+    </update>
+    <update id="setForkLineage">
+        update agent_skill_hub_assets
+        set forked_from_asset_id = coalesce(forked_from_asset_id, #{forkedFromAssetId}),
+            forked_from_revision_id = coalesce(forked_from_revision_id, #{forkedFromRevisionId}),
+            updated_at = #{updatedAt}
+        where asset_id = #{assetId} and source_kind = 'PLATFORM'
+    </update>
 
     <sql id="BrowseWhere">
         where <if test="assetType != null">a.asset_type = #{assetType} and</if>
           <if test="skillCategory != null">a.skill_category = #{skillCategory} and</if>
           <if test="skillSubcategory != null">a.skill_subcategory = #{skillSubcategory} and</if>
+          <if test="sourceKind != null">a.source_kind = #{sourceKind} and</if>
           <choose><when test="keyword != null and keyword != ''">
             (lower(a.technical_id) like concat('%', lower(#{keyword}), '%') or
-             lower(coalesce(pr.display_name, '')) like concat('%', lower(#{keyword}), '%') or
-             lower(app.app_name) like concat('%', lower(#{keyword}), '%'))
+             lower(coalesce(pub.display_name, pr.display_name, a.catalog_display_name, '')) like concat('%', lower(#{keyword}), '%') or
+             lower(coalesce(a.catalog_description, '')) like concat('%', lower(#{keyword}), '%') or
+             lower(coalesce(app.app_name, 'SkillHub')) like concat('%', lower(#{keyword}), '%'))
           </when><otherwise>1 = 1</otherwise></choose>
+          <if test="!referencedOnly">
+            and a.source_available = true and coalesce(pr.deleted, false) = false
+          </if>
           <if test="referencedOnly">
             and exists (select 1 from agent_skill_hub_references current_ref
               where current_ref.asset_id = a.asset_id
@@ -249,6 +327,14 @@
           a.skill_subcategory as skillSubcategory, a.latest_pushed_revision_id as latestPushedRevisionId,
           a.latest_published_revision_id as latestPublishedRevisionId, a.created_at as assetCreatedAt,
           a.updated_at as assetUpdatedAt,
+          a.source_kind as sourceKind, a.source_available as sourceAvailable,
+          a.external_skill_id as externalSkillId, a.external_version as externalVersion,
+          a.external_source as externalSource, a.external_tag as externalTag,
+          a.external_phase as externalPhase, a.external_phase_name as externalPhaseName,
+          a.external_contributor as externalContributor,
+          a.external_download_count as externalDownloadCount,
+          a.catalog_display_name as catalogDisplayName, a.catalog_description as catalogDescription,
+          a.forked_from_asset_id as forkedFromAssetId, a.forked_from_revision_id as forkedFromRevisionId,
           pr.revision_id as pushedRevisionId, pr.source_version_id as pushedSourceVersionId,
           pr.source_commit_hash as pushedSourceCommitHash, pr.artifact_sha256 as pushedArtifactSha256,
           pr.content_sha256 as pushedContentSha256, pr.display_name as pushedDisplayName,
@@ -262,7 +348,11 @@
           pub.deleted as publishedDeleted, pub.pushed_at as publishedPushedAt, pub.published_at as publishedAt,
           pub.published_by_user_id as publishedByUserId, app.app_name as sourceAppName,
           aw.workspace_name as sourceWorkspaceName,
-          (a.latest_published_revision_id is not null and pr.content_sha256 &lt;&gt; pub.content_sha256) as updateAvailable,
+          (a.latest_published_revision_id is not null and (
+            pr.content_sha256 &lt;&gt; pub.content_sha256 or
+            (a.source_kind = 'SKILLHUB' and (
+              pub.external_skill_id is distinct from a.external_skill_id or
+              pub.external_version is distinct from a.external_version)))) as updateAvailable,
           (select ref.status from agent_skill_hub_references ref
             join application_members mem on mem.app_id = ref.target_app_id
             where ref.asset_id = a.asset_id and mem.user_id = #{currentUserId} and mem.deleted_at is null
@@ -276,19 +366,20 @@
             where effective_ref.asset_id = a.asset_id
               and effective_ref.status in ('ACTIVE', 'UPDATE_CONFLICT')) as referenceCount
         from agent_skill_hub_assets a
-        join agent_skill_hub_revisions pr on pr.revision_id = a.latest_pushed_revision_id
+        left join agent_skill_hub_revisions pr on pr.revision_id = a.latest_pushed_revision_id
         left join agent_skill_hub_revisions pub on pub.revision_id = a.latest_published_revision_id
-        join applications app on app.app_id = a.source_app_id
-        join application_workspaces aw on aw.workspace_id = a.source_application_workspace_id
+        left join applications app on app.app_id = a.source_app_id
+        left join application_workspaces aw on aw.workspace_id = a.source_application_workspace_id
         <include refid="BrowseWhere"/>
         order by coalesce(pub.published_at, pr.pushed_at) desc, a.asset_id
         limit #{limit} offset #{offset}
     </select>
     <select id="countAssets" resultType="long">
         select count(*) from agent_skill_hub_assets a
-        join agent_skill_hub_revisions pr on pr.revision_id = a.latest_pushed_revision_id
-        join applications app on app.app_id = a.source_app_id
-        join application_workspaces aw on aw.workspace_id = a.source_application_workspace_id
+        left join agent_skill_hub_revisions pr on pr.revision_id = a.latest_pushed_revision_id
+        left join agent_skill_hub_revisions pub on pub.revision_id = a.latest_published_revision_id
+        left join applications app on app.app_id = a.source_app_id
+        left join application_workspaces aw on aw.workspace_id = a.source_application_workspace_id
         <include refid="BrowseWhere"/>
     </select>
     <update id="updateSkillClassification">
@@ -356,21 +447,35 @@
           #{createdByUserId}, #{createdAt}, #{updatedAt})
     </insert>
     <update id="updateReference">
-        update agent_skill_hub_references set target_path = #{targetPath}, alias_technical_id = #{aliasTechnicalId},
+        update agent_skill_hub_references set asset_id = #{assetId}, target_path = #{targetPath}, alias_technical_id = #{aliasTechnicalId},
           active_revision_id = #{activeRevisionId}, pending_revision_id = #{pendingRevisionId},
           pending_content_sha256 = #{pendingContentSha256}, status = #{status}, updated_at = #{updatedAt}
         where reference_id = #{referenceId}
+    </update>
+    <update id="activateReference">
+        update agent_skill_hub_references
+        set asset_id = #{assetId}, active_revision_id = #{activeRevisionId}, pending_revision_id = null,
+            pending_content_sha256 = null, status = 'ACTIVE', updated_at = #{updatedAt}
+        where reference_id = #{referenceId} and status = 'PENDING_PUSH'
     </update>
     <delete id="deleteReference">
         delete from agent_skill_hub_references where reference_id = #{referenceId}
     </delete>
     <sql id="UpdateWhere">
         where mem.user_id = #{userId} and mem.deleted_at is null and a.latest_published_revision_id is not null
+          and (a.source_kind &lt;&gt; 'SKILLHUB' or a.source_available = true)
           and r.status &lt;&gt; 'PENDING_REMOVE'
           <if test="targetWorkspaceId != null and targetWorkspaceId != ''">
             and r.target_application_workspace_id = #{targetWorkspaceId}
           </if>
           and (r.status = 'PENDING_PUSH' or r.active_revision_id is null or
+            (a.source_kind = 'SKILLHUB' and (
+              (select active_external.external_skill_id from agent_skill_hub_revisions active_external
+                where active_external.revision_id = r.active_revision_id)
+                is distinct from a.external_skill_id or
+              (select active_external.external_version from agent_skill_hub_revisions active_external
+                where active_external.revision_id = r.active_revision_id)
+                is distinct from a.external_version)) or
             (select active_revision.content_sha256 from agent_skill_hub_revisions active_revision
               where active_revision.revision_id = r.active_revision_id)
             &lt;&gt;
@@ -387,25 +492,36 @@
           a.source_application_workspace_id as sourceApplicationWorkspaceId, a.asset_type as assetType,
           a.technical_id as technicalId, a.latest_pushed_revision_id as latestPushedRevisionId,
           a.latest_published_revision_id as latestPublishedRevisionId, a.created_at as assetCreatedAt,
-          a.updated_at as assetUpdatedAt, active.source_version_id as activeSourceVersionId,
+          a.updated_at as assetUpdatedAt, a.source_kind as sourceKind,
+          a.source_available as sourceAvailable, a.external_skill_id as externalSkillId,
+          a.external_version as externalVersion, a.external_source as externalSource,
+          a.external_tag as externalTag, a.external_phase as externalPhase,
+          a.external_phase_name as externalPhaseName, a.external_contributor as externalContributor,
+          a.external_download_count as externalDownloadCount, a.catalog_display_name as catalogDisplayName,
+          a.catalog_description as catalogDescription, a.forked_from_asset_id as forkedFromAssetId,
+          a.forked_from_revision_id as forkedFromRevisionId,
+          active.source_version_id as activeSourceVersionId,
           active.source_commit_hash as activeSourceCommitHash, active.artifact_sha256 as activeArtifactSha256,
           active.content_sha256 as activeContentSha256, active.display_name as activeDisplayName,
           active.display_name_en as activeDisplayNameEn, active.description as activeDescription,
           active.deleted as activeDeleted, active.pushed_at as activePushedAt,
           active.published_at as activePublishedAt, active.published_by_user_id as activePublishedByUserId,
+          active.external_skill_id as activeExternalSkillId, active.external_version as activeExternalVersion,
           latest.source_version_id as latestSourceVersionId, latest.source_commit_hash as latestSourceCommitHash,
           latest.artifact_sha256 as latestArtifactSha256, latest.content_sha256 as latestContentSha256,
           latest.display_name as latestDisplayName, latest.display_name_en as latestDisplayNameEn,
           latest.description as latestDescription, latest.deleted as latestDeleted,
           latest.pushed_at as latestPushedAt, latest.published_at as latestPublishedAt,
-          latest.published_by_user_id as latestPublishedByUserId, app.app_name as sourceAppName,
-          aw.workspace_name as sourceWorkspaceName
+          latest.published_by_user_id as latestPublishedByUserId,
+          latest.external_skill_id as latestExternalSkillId, latest.external_version as latestExternalVersion,
+          coalesce(app.app_name, 'SkillHub') as sourceAppName,
+          coalesce(aw.workspace_name, '外部能力目录') as sourceWorkspaceName
         from agent_skill_hub_references r join agent_skill_hub_assets a on a.asset_id = r.asset_id
         join application_members mem on mem.app_id = r.target_app_id
         left join agent_skill_hub_revisions active on active.revision_id = r.active_revision_id
         join agent_skill_hub_revisions latest on latest.revision_id = a.latest_published_revision_id
-        join applications app on app.app_id = a.source_app_id
-        join application_workspaces aw on aw.workspace_id = a.source_application_workspace_id
+        left join applications app on app.app_id = a.source_app_id
+        left join application_workspaces aw on aw.workspace_id = a.source_application_workspace_id
         <include refid="UpdateWhere"/> order by latest.published_at desc, r.reference_id limit #{limit} offset #{offset}
     </select>
     <select id="countUpdates" resultType="long">

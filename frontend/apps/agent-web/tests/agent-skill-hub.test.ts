@@ -7,6 +7,7 @@ import AgentSkillHub from "../src/components/AgentSkillHub.vue";
 const api = {
   listAgentSkillHubAssets: vi.fn(),
   getAgentSkillHubAsset: vi.fn(),
+  materializeAgentSkillHubAsset: vi.fn(),
   readAgentSkillHubFile: vi.fn(),
   getAgentSkillHubUpdateCount: vi.fn(),
   listAgentSkillHubUpdates: vi.fn(),
@@ -243,6 +244,45 @@ describe("AgentSkillHub", () => {
       subcategory: "TEST_DESIGN"
     })));
     expect(view.getByText("测试 · 测试设计")).toBeTruthy();
+  });
+
+  it("filters interface-document Skills and downloads content only after explicit preview", async () => {
+    const external = {
+      ...hubAsset(), assetId: "hub_asset_external", type: "SKILL", technicalId: "case-design",
+      displayName: "外部测试设计", sourceAppId: null, sourceWorkspaceId: null,
+      sourceAppName: "SkillHub", sourceWorkspaceName: "外部能力目录",
+      pushedRevisionId: null, publishedRevisionId: null, published: false,
+      sourceKind: "SKILLHUB", sourceAvailable: true, contentAvailable: false,
+      externalSkillId: 42, externalVersion: "1.2.0", externalPhaseName: "稳定"
+    } as const;
+    const materialized = {
+      ...external, pushedRevisionId: "hub_rev_external", publishedRevisionId: "hub_rev_external",
+      published: true, contentAvailable: true
+    } as const;
+    api.listAgentSkillHubAssets.mockResolvedValue({ items: [external], total: 1, page: 1, size: 100 });
+    api.getAgentSkillHubAsset.mockResolvedValue({
+      asset: external, selectedRevisionId: null, files: [], dependencies: [], consumers: []
+    });
+    api.materializeAgentSkillHubAsset.mockResolvedValue({
+      asset: materialized,
+      selectedRevisionId: "hub_rev_external",
+      files: [{ path: "SKILL.md", size: 30, sha256: "a".repeat(64), mediaType: "text/markdown" }],
+      dependencies: [], consumers: []
+    });
+    const view = renderHub({ canManage: true });
+
+    await fireEvent.click(await view.findByRole("button", { name: "Skill" }));
+    await fireEvent.click(view.getByRole("button", { name: "接口文档" }));
+    await waitFor(() => expect(api.listAgentSkillHubAssets).toHaveBeenCalledWith(expect.objectContaining({
+      type: "SKILL", source: "SKILLHUB"
+    })));
+    await fireEvent.click(view.getByText("外部测试设计"));
+    expect(api.materializeAgentSkillHubAsset).not.toHaveBeenCalled();
+    await fireEvent.click(await view.findByText("预览内容"));
+    await waitFor(() => expect(api.materializeAgentSkillHubAsset).toHaveBeenCalledWith(
+      "hub_asset_external", "wrk_personal"
+    ));
+    expect(api.readAgentSkillHubFile).toHaveBeenCalledWith("hub_rev_external", "SKILL.md");
   });
 
   it("lets only a super administrator classify a user-pushed Skill in the detail page", async () => {

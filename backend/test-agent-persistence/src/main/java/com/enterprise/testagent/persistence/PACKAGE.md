@@ -28,6 +28,7 @@
 - `mybatis.UserNotificationMapper` / `mybatis/UserNotificationMapper.xml` / `mybatis.MyBatisUserNotificationRepository`：用户通知原子去重、快照更新、失效、接收人分页、未读、幂等已读和 90 天清理；列表通过分享/成员/会话/所属人联表计算实时有效性，关系型 SQL 全部位于 XML。
 - `RedisSupportAccessGrantStore` / `SupportAccessStoreConfig`：登录会话内当前授权和明文令牌的短期 Redis 适配；轮换、撤销使用 Lua 原子收敛，数据库只保存 SHA-256 摘要。
 - `mybatis.UserWorkspaceQueryMapper` / `mybatis/UserWorkspaceQueryMapper.xml` / `mybatis.MyBatisUserWorkspaceQueryRepository`：目标用户个人工作区与目标用户会话引用工作区的只读联合查询；所有新增关系型 SQL 均位于 MyBatis XML。
+- `mybatis.AgentSkillHubMapper` / `mybatis/AgentSkillHubMapper.xml` / `mybatis.MyBatisAgentSkillHubRepository`：Agent & Skill Hub 双来源目录、外部精确修订物化、下架隐藏但保留既有引用，以及 push 原样保留外部身份或原子转为平台派生资产的关系型实现。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。
 - `mybatis.MyBatisRunRepository`：Run 领域端口的生产 Bean，通过 `saveIfStatus` 原子条件写入避免终态竞态覆盖。
 - `mybatis.RunResendMapper` / `mybatis/RunResendMapper.xml` / `mybatis.MyBatisRunResendRepository`：重发状态机、会话锁、幂等键、租约和到期扫描的全部关系型 SQL；状态表仅保存身份、次数、路由和安全错误摘要，不保存 prompt、附件或模型回答。
@@ -100,6 +101,7 @@
 - `db/migration-compat/qa-memory-after-token-latency-inputs/V20260811170050__qa_memories_create_governance_after_token_latency_inputs.sql`：release 已执行 `V20260810234154` 时使用的更高 QA Memory 顺序补偿；与前一补偿 SQL 字节一致，只允许兼容装配按 history 二选一加载。
 - `db/migration/V20260810170000__user_notifications_create_notification_center.sql`：创建通知表并仅回填当前有效分享；成员授权后的成功读取审计回填已读，过期/撤销/移除/归档不进入通知历史。
 - `db/migration/V20260813190929__user_scm_git_identities_create.sql`：创建用户 SCM Git 姓名和证据表；MyBatis XML 负责 SSH Key 用户游标分页、批量历史证据写入和右控证据优先级保护。
+- `db/migration/V20260820153926__agent_skill_hub_assets_add_skillhub_source.sql`：为能力库增加 `PLATFORM/SKILLHUB` 来源、外部目录元数据与版本身份、来源可用性和平台派生链路；不删除已经被应用引用的下架外部资产。
 - `db/migration/V20260728210000__index_in_flight_app_source_operations.sql`：为周期恢复增加 status 前导的 operation 排序索引，避免历史终态数据导致每实例全表扫描。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现；Run 运行数据面不得新增 PostgreSQL 或 JVM 内存降级实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。
@@ -149,6 +151,7 @@
 - ReferenceRepository 测试必须覆盖 Flyway 建表、MyBatis XML generation/CAS、同服务器租约互斥/续期、过期 worker fencing、离线 `DEFERRED`/恢复和稳定游标分页。
 - AppSource 测试必须覆盖 slot 乐观冲突、snapshot JSONB/整小时过期/十六进制摘要/状态 CAS、副本首次建档与 generation+owner+lease fencing、步骤作用域唯一/活租约更新/attempt reset/旧步骤回填与终态防回退、普通 operation stranded 恢复与 retry SERVER steps 终态门禁、同 operationId 并发单写和冻结目标、operation 历史守卫、cleanup 第一写的延迟外键和每用户 recent selection；PostgreSQL 专有约束、并发事务及 reset SQL 必须使用真实 PostgreSQL 验证。
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL、MyBatis 注解 SQL，并固化 PostgreSQL 专有 SQL 兼容约束。
+- Agent & Skill Hub 测试必须覆盖外部目录只写元数据、下架后发现入口隐藏而当前应用引用保留、相同外部 ID+版本内容冲突，以及 push 未修改保持外部身份、修改后原子生成平台派生资产。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
 - Flyway migration 命名测试必须覆盖版本唯一性和已落库历史文件仍可解析；V18 之后新增 migration 只能使用 `VyyyyMMddHHmmss__table_name_description.sql`，涉及多张表时按 SQL 实际变更顺序取第一张表。
 - 内部模型代理鉴权列去机构标识时，历史 SQL migration 保持已落库 checksum，`db.migration.V20260716143000__rename_internal_model_auth_token_column` 负责兼容重命名既有数据库列。

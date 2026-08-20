@@ -34,6 +34,7 @@ public class AgentSkillHubController {
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String subcategory,
+            @RequestParam(required = false) String source,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "false") boolean referencedOnly,
             @RequestParam(required = false) String targetWorkspaceId,
@@ -41,9 +42,27 @@ public class AgentSkillHubController {
             @RequestParam(defaultValue = "30") int size,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
-        return ApiResponse.ok(service.listAssets(type, category, subcategory, keyword, referencedOnly, page, size,
+        return ApiResponse.ok(service.listAssets(type, category, subcategory, source, keyword, referencedOnly, page, size,
                         targetWorkspaceId, principal.userId()),
                 RuntimeApiSupport.traceId(exchange));
+    }
+
+    /** 正文仅在用户显式预览时从外部 SkillHub 下载并安全物化。 */
+    @PostMapping("/assets/{assetId}/materialize")
+    public ApiResponse<AgentSkillHubResponses.AssetDetailResponse> materialize(
+            @PathVariable String assetId,
+            @RequestParam(required = false) String targetWorkspaceId,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        return ApiResponse.ok(service.materializeExternalAsset(assetId, targetWorkspaceId, principal.userId()),
+                RuntimeApiSupport.traceId(exchange));
+    }
+
+    /** 运维补偿入口；正常情况由带 Redis 锁的定时对账刷新目录。 */
+    @PostMapping("/external/sync")
+    public ApiResponse<AgentSkillHubResponses.ExternalSyncResponse> syncExternalCatalog(ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ApiResponse.ok(service.syncExternalSkillHubCatalog(), RuntimeApiSupport.traceId(exchange));
     }
 
     @GetMapping("/assets/{assetId}")

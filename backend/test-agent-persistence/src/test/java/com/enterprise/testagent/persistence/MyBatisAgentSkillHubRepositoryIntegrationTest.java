@@ -1,17 +1,23 @@
 package com.enterprise.testagent.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Artifact;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinPushedRevision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ExternalSkill;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedAsset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceAction;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceDecision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SourceKind;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisAgentSkillHubRepository;
@@ -60,6 +66,8 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
                 "db/migration/V20260806190000__persist_public_skill_hub_snapshots.sql")).execute(dataSource);
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260806190500__classify_public_skill_hub_snapshots.sql")).execute(dataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260820153926__agent_skill_hub_assets_add_skillhub_source.sql")).execute(dataSource);
         seedRequiredParents(JdbcClient.create(dataSource));
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
         factory.setDataSource(dataSource);
@@ -261,6 +269,127 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
             assertThat(revision.skillCategory()).isEqualTo(SkillCategory.CODE);
             assertThat(revision.skillSubcategory()).isEqualTo(SkillSubcategory.WHITE_BOX_ANALYSIS);
         });
+    }
+
+    @Test
+    void externalCatalogIsMetadataOnlyAndDelistedReferenceRemainsVisible() {
+        ExternalSkill external = externalSkill();
+        repository.replaceExternalCatalog(List.of(external), NOW);
+
+        var summary = repository.listAssets(
+                AssetType.SKILL, null, null, SourceKind.SKILLHUB,
+                null, "usr_hub", null, false, 0, 10).getFirst();
+        assertThat(summary.asset().sourceKind()).isEqualTo(SourceKind.SKILLHUB);
+        assertThat(summary.pushedRevision()).isNull();
+        assertThat(summary.asset().sourceAvailable()).isTrue();
+        assertThat(repository.countAssets(
+                AssetType.SKILL, null, null, SourceKind.PLATFORM, null, null, false)).isZero();
+
+        Revision externalRevision = materializeExternal(summary.asset().assetId(), external);
+        repository.saveReference(new Reference(
+                "hub_ref_external", summary.asset().assetId(), "app_hub", "aw_hub",
+                ".opencode/skills/case-design/", "case-design", externalRevision.revisionId(),
+                null, null, "ACTIVE", "usr_hub", NOW, NOW));
+        repository.replaceExternalCatalog(List.of(), NOW.plusSeconds(60));
+
+        assertThat(repository.listAssets(
+                AssetType.SKILL, null, null, SourceKind.SKILLHUB,
+                null, "usr_hub", null, false, 0, 10)).isEmpty();
+        assertThat(repository.listAssets(
+                AssetType.SKILL, null, null, null,
+                null, "usr_hub", "aw_hub", true, 0, 10)).singleElement().satisfies(item -> {
+                    assertThat(item.asset().sourceAvailable()).isFalse();
+                    assertThat(item.referenceStatus()).isEqualTo("ACTIVE");
+                });
+    }
+
+    @Test
+    void externalRevisionRejectsDifferentContentForTheSameIdAndVersion() {
+        ExternalSkill external = externalSkill();
+        repository.replaceExternalCatalog(List.of(external), NOW);
+        String assetId = repository.listAssets(
+                AssetType.SKILL, null, null, SourceKind.SKILLHUB,
+                null, "usr_hub", null, false, 0, 10).getFirst().asset().assetId();
+        materializeExternal(assetId, external);
+        byte[] compressed = new byte[]{6, 6, 6};
+        Artifact conflicting = new Artifact(
+                "f".repeat(64), "GZIP_JSON_V1", compressed, "[]", 12,
+                compressed.length, 1, NOW.plusSeconds(1));
+
+        assertThatThrownBy(() -> repository.saveExternalRevision(
+                assetId, external.id(), external.version(), conflicting, "f".repeat(64),
+                external.displayName(), external.description(), NOW.plusSeconds(1)))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("不同内容");
+        assertThat(repository.findExternalRevision(assetId, external.id(), external.version()))
+                .get().extracting(Revision::contentSha256).isEqualTo("e".repeat(64));
+    }
+
+    @Test
+    void exactExternalPushKeepsSourceWhileChangedPushCreatesUnpublishedPlatformFork() {
+        ExternalSkill external = externalSkill();
+        repository.replaceExternalCatalog(List.of(external), NOW);
+        var externalAsset = repository.listAssets(
+                AssetType.SKILL, null, null, SourceKind.SKILLHUB,
+                null, "usr_hub", null, false, 0, 10).getFirst().asset();
+        Revision externalRevision = materializeExternal(externalAsset.assetId(), external);
+
+        repository.saveReference(new Reference(
+                "hub_ref_exact", externalAsset.assetId(), "app_hub", "aw_hub",
+                ".opencode/skills/case-design/", "case-design", null, externalRevision.revisionId(),
+                externalRevision.contentSha256(), "PENDING_PUSH", "usr_hub", NOW, NOW));
+        repository.replacePushedSnapshot(
+                new PushedSnapshot("app_hub", "aw_hub", "ver_hub", "b".repeat(40),
+                        NOW.plusSeconds(10), List.of()),
+                List.of(new PushReferenceDecision(
+                        "hub_ref_exact", PushReferenceAction.KEEP_SOURCE, AssetType.SKILL,
+                        "case-design", null, null)));
+        assertThat(repository.findReference("hub_ref_exact")).get().satisfies(reference -> {
+            assertThat(reference.assetId()).isEqualTo(externalAsset.assetId());
+            assertThat(reference.activeRevisionId()).isEqualTo(externalRevision.revisionId());
+            assertThat(reference.status()).isEqualTo("ACTIVE");
+        });
+
+        repository.saveReference(new Reference(
+                "hub_ref_fork", externalAsset.assetId(), "app_hub", "aw_hub",
+                ".opencode/skills/forked-case-design/", "forked-case-design", null,
+                externalRevision.revisionId(), externalRevision.contentSha256(),
+                "PENDING_PUSH", "usr_hub", NOW, NOW.plusSeconds(20)));
+        PushedSnapshot forkSnapshot = skillSnapshot("c".repeat(40), "4".repeat(64), NOW.plusSeconds(30));
+        PushedAsset forkAsset = new PushedAsset(
+                AssetType.SKILL, "forked-case-design", forkSnapshot.assets().getFirst().artifact(),
+                "4".repeat(64), "派生测试设计", "Forked case design", "已修改的外部 Skill");
+        repository.replacePushedSnapshot(
+                new PushedSnapshot("app_hub", "aw_hub", "ver_hub", "c".repeat(40),
+                        NOW.plusSeconds(30), List.of(forkAsset)),
+                List.of(new PushReferenceDecision(
+                        "hub_ref_fork", PushReferenceAction.FORK_TO_PLATFORM, AssetType.SKILL,
+                        "forked-case-design", externalAsset.assetId(), externalRevision.revisionId())));
+
+        var forkReference = repository.findReference("hub_ref_fork").orElseThrow();
+        var platformFork = repository.findAsset(forkReference.assetId()).orElseThrow();
+        assertThat(platformFork.sourceKind()).isEqualTo(SourceKind.PLATFORM);
+        assertThat(platformFork.forkedFromAssetId()).isEqualTo(externalAsset.assetId());
+        assertThat(platformFork.forkedFromRevisionId()).isEqualTo(externalRevision.revisionId());
+        assertThat(platformFork.latestPublishedRevisionId()).isNull();
+        assertThat(forkReference.status()).isEqualTo("ACTIVE");
+        assertThat(forkReference.activeRevisionId()).isEqualTo(platformFork.latestPushedRevisionId());
+    }
+
+    private ExternalSkill externalSkill() {
+        return new ExternalSkill(
+                42, "case-design", "1.2.0", "测试设计", "生成结构化测试案例",
+                "official", "test", "stable", "稳定", "team", NOW, 7);
+    }
+
+    private Revision materializeExternal(String assetId, ExternalSkill external) {
+        byte[] compressed = new byte[]{9, 8, 7};
+        Artifact artifact = new Artifact(
+                "e".repeat(64), "GZIP_JSON_V1", compressed, "[]", 12,
+                compressed.length, 1, NOW);
+        return repository.saveExternalRevision(
+                assetId, external.id(), external.version(), artifact, "e".repeat(64),
+                external.displayName(), external.description(), NOW);
     }
 
     private PushedSnapshot snapshot(String commit, String artifactSha, Instant pushedAt) {

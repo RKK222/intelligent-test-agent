@@ -12366,3 +12366,28 @@
 
 - 应用管理员和超级管理员可终止超时或仍在运行的资产库操作，并从等待重试状态立即重启新一代任务；数据库栅栏是最终一致性保障，跨节点中断为尽力而为的资源回收。
 - 新增一个向后兼容的内部 HTTP API 和内部服务器广播，不新增 RunEvent/SSE 类型；不涉及数据库结构、Flyway migration、部署拓扑或新的强制配置。终止接口沿用应用管理员鉴权，只返回稳定错误，不暴露 Git stderr、路径或凭据。
+
+## 2026-08-20 - 实现 SkillHub 双来源能力库
+
+### Why
+
+- Skill 能力库需要同时展示 SkillHub 接口目录和用户在平台 push 的资产；外部条目下架后不得继续出现在发现入口，但应用已经引用的历史内容必须可见、可移除。
+- SkillHub 请求需要固定认证头，下载接口必须使用受控枚举 `channel=3`；外部 Skill 被管理员拉到个人 worktree 后，原样 push 与修改后 push 需要有不同的来源归属。
+
+### What
+
+- 新增 `SkillHubGateway` 和 HTTP 适配器，目录同步只保存元数据，预览、引用或更新时才下载 ZIP；固定认证头、`SkillHubDownloadChannel.PLATFORM(3)`、连接/请求超时、响应容量、ZIP 路径/数量/UTF-8/根 `SKILL.md`/稳定名称校验均在后端收口，密钥只从环境注入。
+- Agent & Skill Hub 增加 `PLATFORM/SKILLHUB` 来源、来源可用性、外部精确版本和派生谱系；远端下架只隐藏发现入口并保留当前应用引用。外部内容原样 push 时引用仍指向外部资产，编辑后 push 在同一 MyBatis 事务中生成未发布的平台派生资产并记录 `forkedFrom*`。
+- 前端 Skill 页增加“全部 / 接口文档 / 平台更新”筛选，外部卡片打开不下载，显式预览才物化；下架引用禁止新增/更新但允许移除。同步 HTTP API、事件无新增说明、数据库、部署、安全、模块 README/PACKAGE 和前端类型。
+
+### How
+
+- JDK 25 下 SkillHub persistence/service/API/integration、Flyway 命名和 SQL 约束定向测试全部通过；覆盖目录元数据、下架保留引用、同 ID+版本内容冲突、原样保持来源、修改后平台分叉和 ZIP 路径穿越。
+- 前端 `agent-skill-hub` 与 `backend-api` 定向 Vitest 135/135，通过 backend-api 与 agent-web 类型检查；`git diff --check` 和明文密钥模式检查通过。
+- 相关模块全量 Maven 回归运行 347 项，在任务外既有基线处失败：模型网关 H2 fixture 缺 `embedding_dimension`，会话分享固定日期已变为 `EXPIRED`；两项与本次文件无关，未顺手修改。
+- 按本地启动技能检查后，当前根目录 `.env.test` 指向 `127.0.0.1:15432/test_agent`，与项目固定验收库 `192.168.8.100:15432/testagent_dev` 冲突；遵守规范未修改 `.env.test`、未切换数据库、未执行真实 PostgreSQL migration 或整站重启。
+
+### Result
+
+- 双来源目录、按需物化、下架语义和 push 来源归属已经实现并完成代码级定向验证；新增向后兼容的内部 HTTP 查询参数和物化/手工同步接口、一个 Flyway migration 和部署期可选 SkillHub 配置，不新增部署节点、RunEvent/SSE 类型或 OpenCode 源码修改。
+- 真实 PostgreSQL 升级、SkillHub 现场接口联调和整站运行仍未验证；恢复符合仓库约定的 `.env.test` 后需要按 `./restart-dev-services.sh --profile test --env-file .env.test` 复验。

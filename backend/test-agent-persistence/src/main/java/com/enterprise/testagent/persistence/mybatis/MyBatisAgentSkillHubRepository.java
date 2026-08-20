@@ -10,14 +10,18 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinPushedRevi
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Dependency;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ExternalSkill;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedAsset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceAction;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceDecision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceConsumer;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceUpdate;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SourceKind;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.ArtifactRow;
@@ -57,6 +61,13 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
     @Override
     @Transactional
     public void replacePushedSnapshot(PushedSnapshot snapshot) {
+        replacePushedSnapshot(snapshot, List.of());
+    }
+
+    /** 快照写入、外部原样引用生效和修改后分叉在一个事务中提交。 */
+    @Override
+    @Transactional
+    public void replacePushedSnapshot(PushedSnapshot snapshot, List<PushReferenceDecision> referenceDecisions) {
         Set<String> identities = new HashSet<>();
         for (PushedAsset pushed : snapshot.assets()) {
             identities.add(pushed.assetType().name() + ":" + pushed.technicalId());
@@ -71,7 +82,8 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                         assetId, snapshot.sourceAppId(), snapshot.sourceApplicationWorkspaceId(),
                         pushed.assetType().name(), pushed.technicalId(), SkillCategory.OTHER.name(), null,
                         null, null,
-                        snapshot.pushedAt(), snapshot.pushedAt()));
+                        snapshot.pushedAt(), snapshot.pushedAt(), SourceKind.PLATFORM.name(), true,
+                        null, null, null, null, null, null, null, null, null, null, null, null, null));
                 asset = mapper.findAssetByIdentity(
                         snapshot.sourceAppId(), snapshot.sourceApplicationWorkspaceId(),
                         pushed.assetType().name(), pushed.technicalId());
@@ -82,7 +94,7 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 mapper.insertRevision(new RevisionRow(
                         revisionId, asset.assetId(), snapshot.sourceVersionId(), snapshot.sourceCommitHash(),
                         artifact.sha256(), pushed.contentSha256(), pushed.displayName(), pushed.displayNameEn(),
-                        pushed.description(), false, snapshot.pushedAt(), null, null));
+                        pushed.description(), false, snapshot.pushedAt(), null, null, null, null));
                 revision = mapper.findRevisionBySourceCommit(asset.assetId(), snapshot.sourceCommitHash());
             }
             mapper.updateLatestPushed(asset.assetId(), revision.revisionId(), snapshot.pushedAt());
@@ -99,11 +111,96 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 mapper.insertRevision(new RevisionRow(
                         id("hub_rev_"), asset.assetId(), snapshot.sourceVersionId(), snapshot.sourceCommitHash(),
                         null, deletedDigest, null, asset.technicalId(), null, true,
-                        snapshot.pushedAt(), null, null));
+                        snapshot.pushedAt(), null, null, null, null));
                 revision = mapper.findRevisionBySourceCommit(asset.assetId(), snapshot.sourceCommitHash());
             }
             mapper.updateLatestPushed(asset.assetId(), revision.revisionId(), snapshot.pushedAt());
         }
+
+        reconcilePushedReferences(snapshot, referenceDecisions);
+    }
+
+    private void reconcilePushedReferences(
+            PushedSnapshot snapshot, List<PushReferenceDecision> referenceDecisions) {
+        for (PushReferenceDecision decision : referenceDecisions) {
+            if (decision.action() == PushReferenceAction.REMOVE) {
+                mapper.deleteReference(decision.referenceId());
+                continue;
+            }
+            ReferenceRow reference = mapper.findReference(decision.referenceId());
+            if (reference == null || !"PENDING_PUSH".equals(reference.status())) {
+                continue;
+            }
+            if (decision.action() == PushReferenceAction.KEEP_SOURCE) {
+                mapper.activateReference(reference.referenceId(), reference.assetId(),
+                        reference.pendingRevisionId(), snapshot.pushedAt());
+                continue;
+            }
+            AssetRow fork = mapper.findAssetByIdentity(
+                    snapshot.sourceAppId(), snapshot.sourceApplicationWorkspaceId(),
+                    decision.assetType().name(), decision.technicalId());
+            if (fork == null || fork.latestPushedRevisionId() == null) {
+                throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 派生资产未随 push 快照写入");
+            }
+            mapper.setForkLineage(fork.assetId(), decision.forkedFromAssetId(),
+                    decision.forkedFromRevisionId(), snapshot.pushedAt());
+            mapper.activateReference(reference.referenceId(), fork.assetId(),
+                    fork.latestPushedRevisionId(), snapshot.pushedAt());
+        }
+    }
+
+    /** 先把现有外部条目标记不可用，再 upsert 本轮完整目录，事务失败不会暴露半份目录。 */
+    @Override
+    @Transactional
+    public void replaceExternalCatalog(List<ExternalSkill> skills, Instant synchronizedAt) {
+        mapper.markExternalAssetsUnavailable(synchronizedAt);
+        for (ExternalSkill skill : skills) {
+            AssetRow existing = mapper.findAssetByExternalIdentity(skill.name());
+            mapper.upsertExternalAsset(new AssetRow(
+                    existing == null ? id("hub_asset_") : existing.assetId(), null, null,
+                    AssetType.SKILL.name(), skill.name(),
+                    existing == null ? SkillCategory.OTHER.name() : existing.skillCategory(),
+                    existing == null ? null : existing.skillSubcategory(),
+                    existing == null ? null : existing.latestPushedRevisionId(),
+                    existing == null ? null : existing.latestPublishedRevisionId(),
+                    existing == null ? synchronizedAt : existing.createdAt(), synchronizedAt,
+                    SourceKind.SKILLHUB.name(), true, skill.name(), skill.id(), skill.version(),
+                    skill.source(), skill.tag(), skill.phase(), skill.phaseName(), skill.contributor(),
+                    skill.downloadCount(), skill.displayName(), skill.description(), null, null));
+        }
+    }
+
+    @Override
+    public Optional<Revision> findExternalRevision(String assetId, long externalSkillId, String externalVersion) {
+        return Optional.ofNullable(mapper.findExternalRevision(assetId, externalSkillId, externalVersion))
+                .map(this::toDomain);
+    }
+
+    @Override
+    @Transactional
+    public Revision saveExternalRevision(
+            String assetId, long externalSkillId, String externalVersion, Artifact artifact,
+            String contentSha256, String displayName, String description, Instant materializedAt) {
+        mapper.insertArtifact(toRow(artifact));
+        RevisionRow existing = mapper.findExternalRevision(assetId, externalSkillId, externalVersion);
+        if (existing != null && !existing.contentSha256().equals(contentSha256)) {
+            throw new PlatformException(ErrorCode.CONFLICT,
+                    "SkillHub 同一 ID 和版本返回了不同内容，已拒绝覆盖",
+                    java.util.Map.of("assetId", assetId, "externalVersion", externalVersion));
+        }
+        if (existing == null) {
+            mapper.insertRevision(new RevisionRow(
+                    id("hub_rev_"), assetId, null,
+                    "skillhub:" + sha256(externalSkillId + ":" + externalVersion),
+                    artifact.sha256(), contentSha256, displayName, null, description, false,
+                    materializedAt, materializedAt, null, externalSkillId, externalVersion));
+            existing = mapper.findExternalRevision(assetId, externalSkillId, externalVersion);
+        }
+        if (existing == null || mapper.updateExternalRevisionPointers(
+                assetId, existing.revisionId(), externalSkillId, externalVersion, materializedAt) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 资产已下架或版本已变化，请刷新后重试");
+        }
+        return toDomain(existing);
     }
 
     @Override
@@ -163,12 +260,14 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
     @Override
     public List<AssetSummary> listAssets(
             AssetType type, SkillCategory category, SkillSubcategory subcategory,
+            SourceKind sourceKind,
             String keyword, String currentUserId,
             String targetApplicationWorkspaceId, boolean referencedOnly,
             int offset, int limit) {
         return mapper.listAssets(type == null ? null : type.name(), keyword,
                         category == null ? null : category.name(),
-                        subcategory == null ? null : subcategory.name(), currentUserId,
+                        subcategory == null ? null : subcategory.name(),
+                        sourceKind == null ? null : sourceKind.name(), currentUserId,
                         targetApplicationWorkspaceId, referencedOnly, offset, limit).stream()
                 .map(this::toSummary).toList();
     }
@@ -176,11 +275,12 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
     @Override
     public long countAssets(
             AssetType type, SkillCategory category, SkillSubcategory subcategory,
+            SourceKind sourceKind,
             String keyword, String targetApplicationWorkspaceId,
             boolean referencedOnly) {
         return mapper.countAssets(type == null ? null : type.name(), keyword,
                 category == null ? null : category.name(),
-                subcategory == null ? null : subcategory.name(),
+                subcategory == null ? null : subcategory.name(), sourceKind == null ? null : sourceKind.name(),
                 targetApplicationWorkspaceId, referencedOnly);
     }
 
@@ -334,16 +434,25 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 AssetType.valueOf(row.assetType()), row.technicalId(), SkillCategory.valueOf(row.skillCategory()),
                 row.skillSubcategory() == null ? null : SkillSubcategory.valueOf(row.skillSubcategory()),
                 row.latestPushedRevisionId(),
-                row.latestPublishedRevisionId(), row.assetCreatedAt(), row.assetUpdatedAt());
-        Revision pushed = revision(row.pushedRevisionId(), row.assetId(), row.pushedSourceVersionId(),
+                row.latestPublishedRevisionId(), row.assetCreatedAt(), row.assetUpdatedAt(),
+                SourceKind.valueOf(row.sourceKind()), row.sourceAvailable(), row.externalSkillId(),
+                row.externalVersion(), row.externalSource(), row.externalTag(), row.externalPhase(),
+                row.externalPhaseName(), row.externalContributor(), row.externalDownloadCount(),
+                row.catalogDisplayName(), row.catalogDescription(), row.forkedFromAssetId(),
+                row.forkedFromRevisionId());
+        Revision pushed = row.pushedRevisionId() == null ? null : revision(
+                row.pushedRevisionId(), row.assetId(), row.pushedSourceVersionId(),
                 row.pushedSourceCommitHash(), row.pushedArtifactSha256(), row.pushedContentSha256(),
-                row.pushedDisplayName(), row.pushedDisplayNameEn(), row.pushedDescription(), row.pushedDeleted(),
-                row.pushedAt(), row.pushedPublishedAt(), row.pushedPublishedByUserId());
+                row.pushedDisplayName(), row.pushedDisplayNameEn(), row.pushedDescription(),
+                Boolean.TRUE.equals(row.pushedDeleted()),
+                row.pushedAt(), row.pushedPublishedAt(), row.pushedPublishedByUserId(),
+                row.externalSkillId(), row.externalVersion());
         Revision published = row.publishedRevisionId() == null ? null : revision(
                 row.publishedRevisionId(), row.assetId(), row.publishedSourceVersionId(), row.publishedSourceCommitHash(),
                 row.publishedArtifactSha256(), row.publishedContentSha256(), row.publishedDisplayName(),
                 row.publishedDisplayNameEn(), row.publishedDescription(), Boolean.TRUE.equals(row.publishedDeleted()),
-                row.publishedPushedAt(), row.publishedAt(), row.publishedByUserId());
+                row.publishedPushedAt(), row.publishedAt(), row.publishedByUserId(),
+                row.externalSkillId(), row.externalVersion());
         return new AssetSummary(asset, pushed, published, row.sourceAppName(), row.sourceWorkspaceName(),
                 row.updateAvailable(), row.referenceStatus(), row.referenceCount());
     }
@@ -354,17 +463,23 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 row.activeRevisionId(), row.pendingRevisionId(), row.pendingContentSha256(), row.status(),
                 row.createdByUserId(), row.referenceCreatedAt(), row.referenceUpdatedAt());
         Asset asset = new Asset(row.assetId(), row.sourceAppId(), row.sourceApplicationWorkspaceId(),
-                AssetType.valueOf(row.assetType()), row.technicalId(), row.latestPushedRevisionId(),
-                row.latestPublishedRevisionId(), row.assetCreatedAt(), row.assetUpdatedAt());
+                AssetType.valueOf(row.assetType()), row.technicalId(), SkillCategory.OTHER, null,
+                row.latestPushedRevisionId(), row.latestPublishedRevisionId(), row.assetCreatedAt(),
+                row.assetUpdatedAt(), SourceKind.valueOf(row.sourceKind()), row.sourceAvailable(),
+                row.externalSkillId(), row.externalVersion(), row.externalSource(), row.externalTag(),
+                row.externalPhase(), row.externalPhaseName(), row.externalContributor(),
+                row.externalDownloadCount(), row.catalogDisplayName(), row.catalogDescription(),
+                row.forkedFromAssetId(), row.forkedFromRevisionId());
         Revision active = row.activeRevisionId() == null ? null : revision(row.activeRevisionId(), row.assetId(),
                 row.activeSourceVersionId(), row.activeSourceCommitHash(), row.activeArtifactSha256(),
                 row.activeContentSha256(), row.activeDisplayName(), row.activeDisplayNameEn(), row.activeDescription(),
                 Boolean.TRUE.equals(row.activeDeleted()), row.activePushedAt(), row.activePublishedAt(),
-                row.activePublishedByUserId());
+                row.activePublishedByUserId(), row.activeExternalSkillId(), row.activeExternalVersion());
         Revision latest = revision(row.latestPublishedRevisionId(), row.assetId(), row.latestSourceVersionId(),
                 row.latestSourceCommitHash(), row.latestArtifactSha256(), row.latestContentSha256(),
                 row.latestDisplayName(), row.latestDisplayNameEn(), row.latestDescription(), row.latestDeleted(),
-                row.latestPushedAt(), row.latestPublishedAt(), row.latestPublishedByUserId());
+                row.latestPushedAt(), row.latestPublishedAt(), row.latestPublishedByUserId(),
+                row.latestExternalSkillId(), row.latestExternalVersion());
         return new ReferenceUpdate(reference, asset, active, latest, row.sourceAppName(), row.sourceWorkspaceName());
     }
 
@@ -400,22 +515,28 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 AssetType.valueOf(row.assetType()), row.technicalId(), SkillCategory.valueOf(row.skillCategory()),
                 row.skillSubcategory() == null ? null : SkillSubcategory.valueOf(row.skillSubcategory()),
                 row.latestPushedRevisionId(),
-                row.latestPublishedRevisionId(), row.createdAt(), row.updatedAt());
+                row.latestPublishedRevisionId(), row.createdAt(), row.updatedAt(),
+                SourceKind.valueOf(row.sourceKind()), row.sourceAvailable(), row.externalSkillId(),
+                row.externalVersion(), row.externalSource(), row.externalTag(), row.externalPhase(),
+                row.externalPhaseName(), row.externalContributor(), row.externalDownloadCount(),
+                row.catalogDisplayName(), row.catalogDescription(), row.forkedFromAssetId(),
+                row.forkedFromRevisionId());
     }
 
     private Revision toDomain(RevisionRow row) {
         return revision(row.revisionId(), row.assetId(), row.sourceVersionId(), row.sourceCommitHash(),
                 row.artifactSha256(), row.contentSha256(), row.displayName(), row.displayNameEn(), row.description(),
-                row.deleted(), row.pushedAt(), row.publishedAt(), row.publishedByUserId());
+                row.deleted(), row.pushedAt(), row.publishedAt(), row.publishedByUserId(),
+                row.externalSkillId(), row.externalVersion());
     }
 
     private Revision revision(String revisionId, String assetId, String sourceVersionId, String sourceCommitHash,
                               String artifactSha256, String contentSha256, String displayName, String displayNameEn,
                               String description, boolean deleted, Instant pushedAt, Instant publishedAt,
-                              String publishedByUserId) {
+                              String publishedByUserId, Long externalSkillId, String externalVersion) {
         return new Revision(revisionId, assetId, sourceVersionId, sourceCommitHash, artifactSha256,
                 contentSha256, displayName, displayNameEn, description, deleted, pushedAt, publishedAt,
-                publishedByUserId);
+                publishedByUserId, externalSkillId, externalVersion);
     }
 
     private DependencyRow toRow(Dependency value) {

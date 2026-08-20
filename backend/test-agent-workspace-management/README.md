@@ -68,6 +68,9 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 ## Agent & Skill Hub
 
+- Skill 目录由两类来源组成：应用成功 push 形成的 `PLATFORM` 资产，以及外部 `/list` 只同步元数据的 `SKILLHUB` 资产；公共配置 Git 只继续提供内置 Agent，不再展示公共 Git Skill。外部目录由 Redis 分布式锁保护的定时任务完整对账，下架只隐藏发现入口并保留当前应用已有引用。
+- 外部 ZIP 仅在预览、引用或更新时按需下载，应用服务复用既有内容寻址制品编码，并校验 20 MiB/256 文件、路径、重复项、根 `SKILL.md`、UTF-8 和稳定 `name`。相同外部 ID+版本不同摘要拒绝覆盖。
+- 外部 Skill 写入管理员个人 worktree 后，push 摘要未变则仍是外部引用并排除重复平台卡片；发生编辑则同一事务自动转为记录 `forkedFrom*` 的平台派生资产，初始为已推送未发布，仍需管理员显式发布。
 - `AgentSkillHubApplicationService` 在应用 feature push 成功后从精确 Git commit 扫描 `.opencode/agents/*.md` 与完整 `.opencode/skills/{id}/**`，按同一物理仓库组逐工作空间目录生成不可变压缩快照；平台外部 push 由具备该应用刷新权限的管理员通过应用 Git 刷新发现，远端提交同步完成后立即执行同一组索引。Hub 不依赖用户个人 worktree 拉取，定时对账本机 READY 副本仅用于补偿漏记。
 - push 与 publish 分离：全员可浏览 pushed 快照，显式发布固定当前修订和精确依赖；公共配置仓库只以平台内置只读资产展示。`reconcilePublicBuiltinSnapshots()` 默认启动 2 秒后、此后每 10 分钟用共享仓库现有 Git 身份 fetch 当前分支、读取 `origin/{branch}` 的精确提交并把元数据和内容寻址制品写入数据库，因此用户从其它本地 clone 直接 push 后无需打开 Hub 即可入库；任务只刷新远端引用，不 checkout/reset 运行工作树，认证暂不可用时回退已由公共 rollout 同步的本地 HEAD。Hub 列表、详情和正文查询不再读取 Git。
 - Skill 目录持久化受控事项分类：一级固定为 `WORKER/TEST/CODE/OTHER`，二级固定为测试设计、测试数据构造、测试执行、测试分析和白盒分析。历史、新 push 与公共 Git Skill 默认 `OTHER`；应用 Skill 分类保存在资产表，公共 Skill 分类保存在独立逻辑资产表，后续 push/commit 都不覆盖超级管理员已经设置的分类。列表分类筛选同时覆盖两类内容。

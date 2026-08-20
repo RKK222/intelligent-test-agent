@@ -21,6 +21,7 @@ import type {
   AgentSkillHubAsset,
   AgentSkillHubAssetDetail,
   AgentSkillHubAssetType,
+  AgentSkillHubSourceKind,
   AgentSkillHubClassification,
   AgentSkillHubFileContent,
   AgentSkillHubReference,
@@ -1105,6 +1106,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       type?: AgentSkillHubAssetType;
       category?: AgentSkillHubSkillCategory;
       subcategory?: AgentSkillHubSkillSubcategory;
+      source?: AgentSkillHubSourceKind | "ALL";
       keyword?: string;
       referencedOnly?: boolean;
       targetWorkspaceId?: string;
@@ -1114,6 +1116,11 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     getAgentSkillHubAsset: (assetId: string, revisionId?: string, targetWorkspaceId?: string) =>
       request<AgentSkillHubAssetDetail>(
         `${agentSkillHubBase}/assets/${encodeURIComponent(assetId)}${query({ revisionId, targetWorkspaceId })}`
+      ),
+    materializeAgentSkillHubAsset: (assetId: string, targetWorkspaceId?: string) =>
+      request<AgentSkillHubAssetDetail>(
+        `${agentSkillHubBase}/assets/${encodeURIComponent(assetId)}/materialize${query({ targetWorkspaceId })}`,
+        { method: "POST" }
       ),
     readAgentSkillHubFile: (revisionId: string, path: string) =>
       hubReadRpc<AgentSkillHubFileContent>("hub.asset.read", { revisionId, path }),

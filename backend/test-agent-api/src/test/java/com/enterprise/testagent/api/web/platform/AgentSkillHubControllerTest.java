@@ -70,6 +70,30 @@ class AgentSkillHubControllerTest {
                 .expectStatus().isUnauthorized();
     }
 
+    @Test
+    void listForwardsExplicitSourceAndExternalSyncRequiresSuperAdmin() {
+        AgentSkillHubApplicationService service = mock(AgentSkillHubApplicationService.class);
+        when(service.listAssets(
+                "SKILL", null, null, "ALL", null, false, 1, 30, null, new UserId("usr_admin")))
+                .thenReturn(new AgentSkillHubResponses.PageResponse<>(List.of(), 0, 1, 30));
+        when(service.syncExternalSkillHubCatalog())
+                .thenReturn(new AgentSkillHubResponses.ExternalSyncResponse(2, NOW));
+
+        client(service, List.of(Dictionary.ROLE_SUPER_ADMIN)).get()
+                .uri("/api/internal/platform/workspace-management/agent-skill-hub/assets?type=SKILL&source=ALL")
+                .exchange().expectStatus().isOk().expectBody().jsonPath("$.data.total").isEqualTo(0);
+        client(service, List.of(Dictionary.ROLE_SUPER_ADMIN)).post()
+                .uri("/api/internal/platform/workspace-management/agent-skill-hub/external/sync")
+                .exchange().expectStatus().isOk().expectBody().jsonPath("$.data.assetCount").isEqualTo(2);
+        client(service, List.of(Dictionary.ROLE_APP_ADMIN)).post()
+                .uri("/api/internal/platform/workspace-management/agent-skill-hub/external/sync")
+                .exchange().expectStatus().isForbidden();
+
+        verify(service).listAssets(
+                "SKILL", null, null, "ALL", null, false, 1, 30, null, new UserId("usr_admin"));
+        verify(service).syncExternalSkillHubCatalog();
+    }
+
     private static WebTestClient client(AgentSkillHubApplicationService service, List<String> roles) {
         AuthPrincipal principal = new AuthPrincipal(
                 "platform-token", new UserId("usr_admin"), "平台管理员", "AUTH_HUB",

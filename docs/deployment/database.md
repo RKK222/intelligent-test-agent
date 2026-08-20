@@ -1898,3 +1898,14 @@ migration，并加载隔离路径
 - 运行期单行状态演进由 `UserNotificationMapper.xml` 按 dedupKey 条件更新；相同状态不修改 `read_at/updated_at`，真实状态变化才清空已读。
 
 真实 PostgreSQL 验证必须覆盖空库、已执行分享通知基线升级到 HEAD、dispose 单行状态演进，以及所有已知 compatibility location。打包后分别从 persistence JAR 和最终应用 JAR 解出本 migration 并与上述已测试源码 SHA-256 比对；禁止用 H2、Flyway `repair/outOfOrder` 或手工历史表修改替代存量升级验证。
+
+## V20260820153926 Skill Hub 双来源
+
+`V20260820153926__agent_skill_hub_assets_add_skillhub_source.sql` 扩展既有 Hub 表，不新增迁移器：
+
+- `agent_skill_hub_assets.source_kind/source_available` 区分 `PLATFORM/SKILLHUB` 和来源是否仍在目录；外部资产的应用/工作空间外键允许为空，并以唯一 `external_identity_key` 保存稳定英文 `name`。
+- 外部 `/list` 元数据保存在资产行；ZIP 正文仍只进入既有内容寻址制品表。`agent_skill_hub_revisions.external_skill_id/external_version` 固化下载版本，同一资产、外部 ID 和版本唯一。
+- 平台派生资产使用 `forked_from_asset_id/forked_from_revision_id` 追溯外部来源。外部下架只把 `source_available` 置为 false，不级联删除历史修订或引用。
+- 平台推送、外部目录替换、按需修订保存和引用身份切换的关系型 SQL 全部位于 `AgentSkillHubMapper.xml`，没有新增 JDBC SQL。
+
+发布前必须在所有已知 PostgreSQL history 上从已部署基线升级到 HEAD，并核对源码、persistence JAR 与最终应用 JAR 中 migration 字节一致；禁止使用 `outOfOrder`、`repair` 或手工修改历史表。

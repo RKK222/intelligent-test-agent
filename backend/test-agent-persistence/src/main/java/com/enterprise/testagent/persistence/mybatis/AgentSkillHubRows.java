@@ -15,13 +15,20 @@ public final class AgentSkillHubRows {
     public record AssetRow(String assetId, String sourceAppId, String sourceApplicationWorkspaceId,
                            String assetType, String technicalId, String skillCategory, String skillSubcategory,
                            String latestPushedRevisionId,
-                           String latestPublishedRevisionId, Instant createdAt, Instant updatedAt) {
+                           String latestPublishedRevisionId, Instant createdAt, Instant updatedAt,
+                           String sourceKind, boolean sourceAvailable, String externalIdentityKey,
+                           Long externalSkillId, String externalVersion, String externalSource,
+                           String externalTag, String externalPhase, String externalPhaseName,
+                           String externalContributor, Long externalDownloadCount,
+                           String catalogDisplayName, String catalogDescription,
+                           String forkedFromAssetId, String forkedFromRevisionId) {
     }
 
     public record RevisionRow(String revisionId, String assetId, String sourceVersionId,
                               String sourceCommitHash, String artifactSha256, String contentSha256,
                               String displayName, String displayNameEn, String description, boolean deleted,
-                              Instant pushedAt, Instant publishedAt, String publishedByUserId) {
+                              Instant pushedAt, Instant publishedAt, String publishedByUserId,
+                              Long externalSkillId, String externalVersion) {
     }
 
     public record BuiltinRevisionRow(
@@ -51,9 +58,13 @@ public final class AgentSkillHubRows {
             String technicalId, String skillCategory, String skillSubcategory,
             String latestPushedRevisionId, String latestPublishedRevisionId,
             Instant assetCreatedAt, Instant assetUpdatedAt,
+            String sourceKind, boolean sourceAvailable, Long externalSkillId, String externalVersion,
+            String externalSource, String externalTag, String externalPhase, String externalPhaseName,
+            String externalContributor, Long externalDownloadCount, String catalogDisplayName,
+            String catalogDescription, String forkedFromAssetId, String forkedFromRevisionId,
             String pushedRevisionId, String pushedSourceVersionId, String pushedSourceCommitHash,
             String pushedArtifactSha256, String pushedContentSha256, String pushedDisplayName,
-            String pushedDisplayNameEn, String pushedDescription, boolean pushedDeleted,
+            String pushedDisplayNameEn, String pushedDescription, Boolean pushedDeleted,
             Instant pushedAt, Instant pushedPublishedAt, String pushedPublishedByUserId,
             String publishedRevisionId, String publishedSourceVersionId, String publishedSourceCommitHash,
             String publishedArtifactSha256, String publishedContentSha256, String publishedDisplayName,
@@ -77,13 +88,18 @@ public final class AgentSkillHubRows {
             Instant referenceUpdatedAt, String sourceAppId, String sourceApplicationWorkspaceId,
             String assetType, String technicalId, String latestPushedRevisionId, String latestPublishedRevisionId,
             Instant assetCreatedAt, Instant assetUpdatedAt,
+            String sourceKind, boolean sourceAvailable, Long externalSkillId, String externalVersion,
+            String externalSource, String externalTag, String externalPhase, String externalPhaseName,
+            String externalContributor, Long externalDownloadCount, String catalogDisplayName,
+            String catalogDescription, String forkedFromAssetId, String forkedFromRevisionId,
             String activeSourceVersionId, String activeSourceCommitHash, String activeArtifactSha256,
             String activeContentSha256, String activeDisplayName, String activeDisplayNameEn,
             String activeDescription, Boolean activeDeleted, Instant activePushedAt, Instant activePublishedAt,
-            String activePublishedByUserId,
+            String activePublishedByUserId, Long activeExternalSkillId, String activeExternalVersion,
             String latestSourceVersionId, String latestSourceCommitHash, String latestArtifactSha256,
             String latestContentSha256, String latestDisplayName, String latestDisplayNameEn,
             String latestDescription, boolean latestDeleted, Instant latestPushedAt, Instant latestPublishedAt,
-            String latestPublishedByUserId, String sourceAppName, String sourceWorkspaceName) {
+            String latestPublishedByUserId, Long latestExternalSkillId, String latestExternalVersion,
+            String sourceAppName, String sourceWorkspaceName) {
     }
 }

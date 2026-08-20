@@ -10,6 +10,7 @@ import type {
   AgentSkillHubAssetType,
   AgentSkillHubConflictFile,
   AgentSkillHubSkillCategory,
+  AgentSkillHubSourceKind,
   AgentSkillHubSkillSubcategory,
   AgentSkillHubUpdate,
   AgentSkillHubUpdateOperation,
@@ -67,6 +68,7 @@ if (!api) throw new Error("AgentSkillHub requires backend api");
 type HubTab = "DISCOVER" | "AGENT" | "SKILL" | "MCP" | "TOOL" | "REFERENCED" | "UPDATES";
 type SkillCategoryFilter = AgentSkillHubSkillCategory | "ALL";
 type SkillSubcategoryFilter = AgentSkillHubSkillSubcategory | "ALL";
+type SkillSourceFilter = AgentSkillHubSourceKind | "ALL";
 
 const SKILL_CATEGORIES: Array<{ value: SkillCategoryFilter; label: string; hint: string }> = [
   { value: "ALL", label: "全部", hint: "全部 Skill" },
@@ -88,6 +90,7 @@ const CODE_SUBCATEGORIES: Array<{ value: AgentSkillHubSkillSubcategory; label: s
 const tab = ref<HubTab>("DISCOVER");
 const skillCategory = ref<SkillCategoryFilter>("ALL");
 const skillSubcategory = ref<SkillSubcategoryFilter>("ALL");
+const skillSource = ref<SkillSourceFilter>("ALL");
 const keyword = ref("");
 const loading = ref(false);
 const actionLoading = ref(false);
@@ -225,12 +228,14 @@ const activeBinaryConflict = computed(() =>
 
 const canPublishSelected = computed(() =>
   props.canManage && !selectedAsset.value?.builtin
+    && selectedAsset.value?.sourceKind !== "SKILLHUB"
     && selectedAsset.value?.sourceAppId === props.selectedAppId && !selectedAsset.value?.deleted
     && (!selectedAsset.value?.published || selectedAsset.value?.updateAvailable)
 );
 const canReferenceSelected = computed(() =>
   props.canManage && Boolean(props.workspaceId) && !selectedAsset.value?.builtin
-    && selectedAsset.value?.published && !selectedAsset.value?.deleted
+    && selectedAsset.value?.sourceAvailable !== false && !selectedAsset.value?.deleted
+    && (selectedAsset.value?.published || selectedAsset.value?.sourceKind === "SKILLHUB")
     && (!selectedAsset.value?.referenceStatus || selectedAsset.value.referenceStatus === "PENDING_REMOVE")
 );
 const canRemoveSelected = computed(() =>
@@ -268,6 +273,7 @@ async function loadAssets() {
     }
     const page = await api.listAgentSkillHubAssets({
       type: selectedAssetType(requestedTab),
+      source: requestedTab === "SKILL" ? skillSource.value : requestedTab === "AGENT" ? "PLATFORM" : "ALL",
       category: requestedTab === "SKILL" && skillCategory.value !== "ALL" ? skillCategory.value : undefined,
       subcategory: requestedTab === "SKILL" && skillSubcategory.value !== "ALL" ? skillSubcategory.value : undefined,
       keyword: requestedKeyword || undefined,
@@ -299,9 +305,9 @@ async function refreshOverview() {
   try {
     const [agents, skills, referenced] = await Promise.all([
       api.listAgentSkillHubAssets({ type: "AGENT", page: 1, size: 1 }),
-      api.listAgentSkillHubAssets({ type: "SKILL", page: 1, size: 1 }),
+      api.listAgentSkillHubAssets({ type: "SKILL", source: "ALL", page: 1, size: 1 }),
       props.workspaceId
-        ? api.listAgentSkillHubAssets({ referencedOnly: true, targetWorkspaceId: props.workspaceId, page: 1, size: 1 })
+        ? api.listAgentSkillHubAssets({ source: "ALL", referencedOnly: true, targetWorkspaceId: props.workspaceId, page: 1, size: 1 })
         : Promise.resolve({ items: [], total: 0, page: 1, size: 1 })
     ]);
     agentTotal.value = agents.total;
@@ -372,6 +378,11 @@ function selectSkillSubcategory(subcategory: SkillSubcategoryFilter) {
   void loadAssets();
 }
 
+function selectSkillSource(source: SkillSourceFilter) {
+  skillSource.value = source;
+  void loadAssets();
+}
+
 function skillCategoryLabel(asset: AgentSkillHubAsset) {
   return SKILL_CATEGORIES.find((item) => item.value === (asset.category ?? "OTHER"))?.label ?? "其他";
 }
@@ -417,7 +428,7 @@ function selectRuntimeItem(item: RuntimeHubItem) {
 }
 
 async function readFile(path: string) {
-  if (!detail.value) return;
+  if (!detail.value?.selectedRevisionId) return;
   selectedFile.value = path;
   fileLoading.value = true;
   try {
@@ -426,6 +437,22 @@ async function readFile(path: string) {
     error.value = message(cause);
   } finally {
     fileLoading.value = false;
+  }
+}
+
+async function materializeSelected() {
+  if (!selectedAsset.value || selectedAsset.value.sourceKind !== "SKILLHUB") return;
+  actionLoading.value = true;
+  try {
+    detail.value = await api.materializeAgentSkillHubAsset(selectedAsset.value.assetId, props.workspaceId);
+    selectedAsset.value = detail.value.asset;
+    assets.value = assets.value.map((item) => item.assetId === detail.value?.asset.assetId ? detail.value.asset : item);
+    selectedFile.value = detail.value.files[0]?.path ?? null;
+    if (selectedFile.value) await readFile(selectedFile.value);
+  } catch (cause) {
+    ElMessage.error(message(cause));
+  } finally {
+    actionLoading.value = false;
   }
 }
 
@@ -601,8 +628,13 @@ function message(cause: unknown) {
 
 /** 列表状态必须同时给出文本与图标，不能只依赖颜色表达。 */
 function assetStatus(asset: AgentSkillHubAsset) {
+  if (asset.sourceAvailable === false) return { key: "deleted", label: "来源已下架", title: "来源目录已删除，当前应用仍可移除已有引用" };
   if (asset.deleted) return { key: "deleted", label: "远端已删除", title: "该资产已从来源远端删除" };
   if (asset.builtin) return { key: "builtin", label: "平台内置", title: "平台内置、无需发布或引用" };
+  if (asset.sourceKind === "SKILLHUB" && !asset.contentAvailable) {
+    return { key: "pushed", label: "外部 · 未下载", title: "仅同步目录元数据，预览或引用时才下载正文" };
+  }
+  if (asset.sourceKind === "SKILLHUB") return { key: "published", label: "SkillHub", title: "外部 SkillHub 当前可用" };
   if (tab.value === "REFERENCED") {
     if (asset.referenceStatus === "PENDING_PUSH") {
       return { key: "waiting", label: "引用待推送", title: "已写入当前 worktree，尚未 push 到远端" };
@@ -767,7 +799,7 @@ onUnmounted(stopDetailResize);
         <div class="hub-update-main">
           <strong>{{ update.displayName || update.technicalId }}</strong>
           <span>原创应用：{{ update.sourceAppName }} · {{ update.sourceWorkspaceName }}</span>
-          <code>{{ update.activeRevisionId?.slice(-8) || '未推送' }} → {{ update.latestRevisionId.slice(-8) }}</code>
+          <code>{{ update.activeRevisionId?.slice(-8) || '未推送' }} → {{ update.latestVersion || update.latestRevisionId.slice(-8) }}</code>
         </div>
         <span :class="['hub-update-state', update.status === 'PENDING_PUSH' && 'waiting']">
           <RefreshCw v-if="update.status !== 'PENDING_PUSH'" :size="13" />
@@ -789,6 +821,12 @@ onUnmounted(stopDetailResize);
           <label class="hub-search"><Search :size="14" /><input v-model="keyword" placeholder="搜索名称、应用或技术 ID" /></label>
         </div>
         <div v-if="tab === 'SKILL'" class="hub-taxonomy" aria-label="Skill 事项分类">
+          <div class="hub-taxonomy-row">
+            <span>能力来源</span>
+            <button type="button" :class="skillSource === 'ALL' && 'is-active'" @click="selectSkillSource('ALL')">全部</button>
+            <button type="button" :class="skillSource === 'SKILLHUB' && 'is-active'" @click="selectSkillSource('SKILLHUB')">接口文档</button>
+            <button type="button" :class="skillSource === 'PLATFORM' && 'is-active'" @click="selectSkillSource('PLATFORM')">平台更新</button>
+          </div>
           <div class="hub-taxonomy-row">
             <span>事项分类</span>
             <button
@@ -847,7 +885,7 @@ onUnmounted(stopDetailResize);
           >
             <span class="hub-card-top">
               <span class="hub-asset-avatar" :data-type="asset.type"><Bot v-if="asset.type === 'AGENT'" :size="18" /><Sparkles v-else :size="18" /></span>
-              <span class="hub-card-type">{{ asset.type }}</span>
+              <span class="hub-card-type">{{ asset.type }} · {{ asset.sourceKind === 'SKILLHUB' ? '接口文档' : '平台更新' }}</span>
               <span :class="['hub-asset-status', assetStatus(asset).key]" :title="assetStatus(asset).title">
                 <CheckCircle2 v-if="['builtin', 'published', 'referenced'].includes(assetStatus(asset).key)" :size="11" />
                 <RefreshCw v-else-if="assetStatus(asset).key === 'update'" :size="11" />
@@ -862,7 +900,7 @@ onUnmounted(stopDetailResize);
             </span>
             <p>{{ asset.description || '该能力暂未提供说明。' }}</p>
             <span class="hub-card-meta">
-              <span class="hub-card-origin"><Building2 :size="12" />原创应用：<b>{{ asset.builtin ? '平台内置' : asset.sourceAppName }}</b></span>
+              <span class="hub-card-origin"><Building2 :size="12" />来源：<b>{{ asset.builtin ? '平台内置' : asset.sourceAppName }}</b></span>
               <span v-if="tab === 'REFERENCED'" :aria-label="`${asset.referenceCount} 个应用引用`"><UsersRound :size="12" />{{ asset.referenceCount }} 个引用</span>
               <span v-else><Library :size="12" />归属工作区：{{ asset.builtin ? '平台' : asset.sourceWorkspaceName }}</span>
             </span>
@@ -928,7 +966,7 @@ onUnmounted(stopDetailResize);
             <div v-if="selectedAsset" class="hub-origin-banner">
               <Building2 :size="15" />
               <div class="hub-origin-info">
-                <span class="hub-origin-label">原创应用</span>
+                <span class="hub-origin-label">能力来源</span>
                 <strong>{{ selectedAsset.builtin ? '平台内置' : selectedAsset.sourceAppName }}</strong>
                 <span v-if="!selectedAsset.builtin" class="hub-origin-workspace">（工作区：{{ selectedAsset.sourceWorkspaceName }}）</span>
               </div>
@@ -941,6 +979,12 @@ onUnmounted(stopDetailResize);
                   <p>{{ selectedAsset.description || '该资产未提供说明。可先阅读完整内容，再决定是否发布或引用。' }}</p>
                 </div>
                 <div class="hub-actions">
+                  <button
+                    v-if="selectedAsset.sourceKind === 'SKILLHUB' && !selectedAsset.contentAvailable && selectedAsset.sourceAvailable !== false"
+                    class="hub-secondary"
+                    :disabled="actionLoading"
+                    @click="materializeSelected"
+                  ><PackageOpen :size="14" />预览内容</button>
                   <button v-if="canPublishSelected" class="hub-secondary" :disabled="actionLoading" @click="openPublish"><UploadCloud :size="14" />发布</button>
                   <button v-if="canReferenceSelected" class="hub-primary" :disabled="actionLoading" @click="openReference"><ArrowDownToLine :size="14" />引用到当前应用</button>
                   <button
@@ -951,6 +995,14 @@ onUnmounted(stopDetailResize);
                   >{{ selectedAsset.referenceStatus === 'PENDING_REMOVE' ? '取消待推送' : '取消引用' }}</button>
                 </div>
               </div>
+
+              <section v-if="selectedAsset.sourceKind === 'SKILLHUB'" class="hub-classification">
+                <div>
+                  <strong>SkillHub 目录元数据</strong>
+                  <span>版本 {{ selectedAsset.externalVersion || '-' }} · {{ selectedAsset.externalPhaseName || selectedAsset.externalPhase || '未标注阶段' }}</span>
+                </div>
+                <b class="hub-classification-value">{{ selectedAsset.externalTag || selectedAsset.externalSource || '外部能力' }}</b>
+              </section>
 
               <section v-if="selectedAsset.type === 'SKILL'" class="hub-classification">
                 <div>
@@ -988,9 +1040,9 @@ onUnmounted(stopDetailResize);
 
               <div class="hub-revision-strip">
                 <GitCommitHorizontal :size="17" />
-                <div><strong>{{ selectedAsset.builtin ? '平台公共提交' : '最新 push' }}</strong><code>{{ selectedAsset.pushedRevisionId.slice(-12) }}</code></div>
+                <div><strong>{{ selectedAsset.sourceKind === 'SKILLHUB' ? 'SkillHub 版本' : selectedAsset.builtin ? '平台公共提交' : '最新 push' }}</strong><code>{{ selectedAsset.externalVersion || selectedAsset.pushedRevisionId?.slice(-12) || '正文未下载' }}</code></div>
                 <span class="hub-revision-line" />
-                <div><strong>{{ selectedAsset.builtin ? '平台内置' : selectedAsset.published ? '已发布' : '等待发布' }}</strong><code>{{ selectedAsset.builtin ? '无需引用' : selectedAsset.publishedRevisionId?.slice(-12) || '不可被引用' }}</code></div>
+                <div><strong>{{ selectedAsset.sourceKind === 'SKILLHUB' ? (selectedAsset.contentAvailable ? '正文已缓存' : '按需下载') : selectedAsset.builtin ? '平台内置' : selectedAsset.published ? '已发布' : '等待发布' }}</strong><code>{{ selectedAsset.sourceKind === 'SKILLHUB' ? (selectedAsset.contentAvailable ? selectedAsset.publishedRevisionId?.slice(-12) : '预览或引用时下载') : selectedAsset.builtin ? '无需引用' : selectedAsset.publishedRevisionId?.slice(-12) || '不可被引用' }}</code></div>
                 <span v-if="selectedAsset.updateAvailable" class="hub-status update">有未发布更新</span>
               </div>
 
@@ -1014,7 +1066,7 @@ onUnmounted(stopDetailResize);
                 <p v-else>尚未被任何应用引用。待推送引用仅对目标应用成员可见。</p>
               </section>
 
-              <div class="hub-files">
+              <div v-if="detail.files.length" class="hub-files">
                 <div class="hub-file-tabs">
                   <button v-for="file in detail.files" :key="file.path" :class="selectedFile === file.path && 'is-active'" @click="readFile(file.path)">
                     {{ file.path }}<small>{{ Math.max(1, Math.ceil(file.size / 1024)) }} KB</small>
@@ -1024,6 +1076,10 @@ onUnmounted(stopDetailResize);
                   <div v-if="fileLoading" class="hub-loading overlay"><Loader2 class="hub-spin" :size="18" />加载不可变制品</div>
                   <CodeEditor :path="selectedFile || undefined" :content="fileContent" :readonly="true" :dirty="false" />
                 </div>
+              </div>
+              <div v-else-if="selectedAsset.sourceKind === 'SKILLHUB'" class="hub-runtime-notice">
+                <PackageOpen :size="16" />
+                <div><strong>正文尚未下载</strong><p>目录卡片只保存元数据。点击“预览内容”或直接引用时，平台才会下载并校验 ZIP。</p></div>
               </div>
             </div>
             <div v-else-if="selectedRuntimeItem" class="hub-detail-content hub-runtime-detail">

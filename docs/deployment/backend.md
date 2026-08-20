@@ -911,6 +911,13 @@ ENTERPRISE_UCID=<current-user-unified-auth-id>
 | `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` | `EXTERNAL_API_KEY` | 外部模型密钥所在环境变量名。旧 `TEST_AGENT_BAILIAN_API_KEY_ENV` 仍作为兼容兜底。 |
 | `test-agent.model-catalog.external.api-key` | 空 | 外部模型密钥的 yml 直配值；本地 IDEA 启动优先使用该值，未配置时回退到 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 指向的环境变量。 |
 | `TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL` | 空 | 外部模式同步给 opencode 的默认模型，例如 `deepseek-v4-pro`。旧 `TEST_AGENT_BAILIAN_DEFAULT_MODEL` 仍作为兼容兜底。 |
+| `TEST_AGENT_SKILLHUB_ENABLED` | `false` | 是否启用外部 SkillHub `/list` 目录同步和按需下载。 |
+| `TEST_AGENT_SKILLHUB_BASE_URL` | 空 | SkillHub 固定 HTTP(S) 基础地址；启用时必填。 |
+| `TEST_AGENT_SKILLHUB_ACCESS_KEY` | 空 | `X-Skill-Access-Key` 的敏感值；启用时必填，不得写入配置模板或日志。 |
+| `TEST_AGENT_SKILLHUB_CONNECT_TIMEOUT` | `10s` | SkillHub HTTP 连接超时。 |
+| `TEST_AGENT_SKILLHUB_REQUEST_TIMEOUT` | `30s` | SkillHub 单次目录/下载请求超时。 |
+| `TEST_AGENT_SKILLHUB_SYNC_INITIAL_DELAY` | `10s` | 服务启动后首次目录同步延迟。 |
+| `TEST_AGENT_SKILLHUB_SYNC_DELAY` | `10m` | 多节点 Redis 锁保护下的目录同步间隔。 |
 | `MODELSTUDIO_API_KEY` | 空 | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置的 `modelstudio` provider、`https://coding.dashscope.aliyuncs.com/v1` base URL 和 `qwen3.5-plus` 默认模型。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | 空；`local` 启动期随机值 | 内部模型代理鉴权 apikey，Java 校验 opencode 子进程请求并注入用户 opencode server 环境；敏感，不得写入日志或 startCommand 明文。生产必须显式配置，随机兜底仅对 `local` profile 生效。 |
 

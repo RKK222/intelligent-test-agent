@@ -16,16 +16,22 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinPushedRevi
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Dependency;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ExternalSkill;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ExternalSkillPackage;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedAsset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceAction;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceDecision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceUpdate;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SourceKind;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import com.enterprise.testagent.domain.hub.AgentSkillHubPushIndexer;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
+import com.enterprise.testagent.domain.hub.SkillHubGateway;
 import com.enterprise.testagent.domain.hub.ProtectedAgentDefinitionResolver;
 import com.enterprise.testagent.domain.hub.ProtectedAgentSelection;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
@@ -34,6 +40,8 @@ import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
+import com.enterprise.testagent.scheduler.ScheduledTaskLock;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
@@ -46,6 +54,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -64,6 +73,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -86,6 +97,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     private static final String PUBLIC_CONFIG_GIT_ROOT = "OPENCODE_PUBLIC_CONFIG_GIT_ROOT";
     private static final String BUILTIN_ASSET_PREFIX = "hub_builtin_";
     private static final String BUILTIN_REVISION_PREFIX = "hub_builtin_rev_";
+    private static final ScheduledTaskKey SKILLHUB_SYNC_TASK_KEY =
+            new ScheduledTaskKey("workspace-management.skillhub-catalog-sync");
     private static final AgentConfigMetadataParser METADATA_PARSER = new AgentConfigMetadataParser();
 
     private final AgentSkillHubRepository repository;
@@ -95,6 +108,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     private final GitWorkspaceService git;
     private final ObjectMapper objectMapper;
     private final ManagedWorkspacePathResolver pathResolver;
+    private SkillHubGateway skillHubGateway;
+    private ScheduledTaskLock scheduledTaskLock;
 
     @Autowired
     public AgentSkillHubApplicationService(
@@ -121,6 +136,43 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         this.git = Objects.requireNonNull(git, "git must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.pathResolver = new ManagedWorkspacePathResolver(this.commonParameterValues);
+    }
+
+    /** 测试构造器保持轻量；生产环境由 Spring 显式注入外部网关和 Redis 分布式锁。 */
+    @Autowired(required = false)
+    void setSkillHubGateway(SkillHubGateway skillHubGateway) {
+        this.skillHubGateway = skillHubGateway;
+    }
+
+    @Autowired(required = false)
+    void setScheduledTaskLock(ScheduledTaskLock scheduledTaskLock) {
+        this.scheduledTaskLock = scheduledTaskLock;
+    }
+
+    /** 多节点只允许一个实例同步目录；Redis 不可用时不做本机锁降级。 */
+    @Scheduled(
+            initialDelayString = "${test-agent.skill-hub.sync-initial-delay:PT10S}",
+            fixedDelayString = "${test-agent.skill-hub.sync-delay:PT10M}")
+    public void reconcileExternalSkillHubCatalog() {
+        if (skillHubGateway == null || !skillHubGateway.enabled() || scheduledTaskLock == null) return;
+        scheduledTaskLock.acquire(SKILLHUB_SYNC_TASK_KEY, Duration.ofMinutes(2)).ifPresent(lease -> {
+            try (lease) {
+                syncExternalSkillHubCatalog();
+            } catch (RuntimeException exception) {
+                LOGGER.warn("event=skillhub_catalog_sync_failed error={}", exception.toString());
+            }
+        });
+    }
+
+    public AgentSkillHubResponses.ExternalSyncResponse syncExternalSkillHubCatalog() {
+        if (skillHubGateway == null || !skillHubGateway.enabled()) {
+            throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 集成未启用");
+        }
+        List<ExternalSkill> skills = skillHubGateway.listSkills();
+        validateExternalCatalog(skills);
+        Instant synchronizedAt = Instant.now();
+        repository.replaceExternalCatalog(skills, synchronizedAt);
+        return new AgentSkillHubResponses.ExternalSyncResponse(skills.size(), synchronizedAt);
     }
 
     @Override
@@ -155,11 +207,14 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 assets.add(pushedAsset(AssetType.SKILL, technicalId, skillFiles));
             }
         });
-        repository.replacePushedSnapshot(new PushedSnapshot(
+        SnapshotReconciliation reconciliation = reconcilePushedReferences(
+                version.applicationWorkspaceId().value(), blobs, prefix, assets);
+        PushedSnapshot snapshot = new PushedSnapshot(
                 version.appId().value(), version.applicationWorkspaceId().value(), version.versionId().value(),
                 commitHash, Objects.requireNonNullElse(version.targetCommitUpdatedAt(), version.updatedAt()),
-                List.copyOf(assets)));
-        promoteMatchingPendingReferences(version, blobs, prefix);
+                reconciliation.assets());
+        if (reconciliation.decisions().isEmpty()) repository.replacePushedSnapshot(snapshot);
+        else repository.replacePushedSnapshot(snapshot, reconciliation.decisions());
     }
 
     /**
@@ -246,7 +301,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     }
 
     public AgentSkillHubResponses.PageResponse<AgentSkillHubResponses.AssetResponse> listAssets(
-            String type, String category, String subcategory, String keyword,
+            String type, String category, String subcategory, String source, String keyword,
             boolean referencedOnly, int page, int size,
             String targetRuntimeWorkspaceId, UserId userId) {
         int normalizedPage = Math.max(1, page);
@@ -255,13 +310,14 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         SkillCategory skillCategory = category == null || category.isBlank() ? null : parseCategory(category);
         SkillSubcategory skillSubcategory = subcategory == null || subcategory.isBlank()
                 ? null : parseSubcategory(subcategory);
+        SourceKind sourceKind = parseSourceFilter(source);
         validateClassificationFilter(assetType, skillCategory, skillSubcategory);
         String normalizedKeyword = keyword == null || keyword.isBlank() ? null : keyword.trim();
         String targetWorkspaceId = targetApplicationWorkspaceId(targetRuntimeWorkspaceId, userId);
         if (referencedOnly && targetWorkspaceId == null) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "查看当前应用引用时必须选择个人工作区");
         }
-        List<BuiltinRevision> builtins = referencedOnly ? List.of()
+        List<BuiltinRevision> builtins = referencedOnly || sourceKind == SourceKind.SKILLHUB ? List.of()
                 : publicBuiltinSnapshots(assetType, normalizedKeyword, skillCategory, skillSubcategory);
         int offset = (normalizedPage - 1) * normalizedSize;
         List<AgentSkillHubResponses.AssetResponse> items = new ArrayList<>();
@@ -272,20 +328,46 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         int databaseOffset = Math.max(0, offset - builtins.size());
         int remaining = normalizedSize - items.size();
         if (remaining > 0) {
-            repository.listAssets(assetType, skillCategory, skillSubcategory, normalizedKeyword, userId.value(),
+            listRepositoryAssets(assetType, skillCategory, skillSubcategory, sourceKind,
+                            normalizedKeyword, userId.value(),
                             targetWorkspaceId, referencedOnly, databaseOffset, remaining).stream()
                     .map(this::response).forEach(items::add);
         }
+        long databaseTotal = sourceKind == SourceKind.PLATFORM
+                ? repository.countAssets(assetType, skillCategory, skillSubcategory,
+                        normalizedKeyword, targetWorkspaceId, referencedOnly)
+                : repository.countAssets(assetType, skillCategory, skillSubcategory, sourceKind,
+                        normalizedKeyword, targetWorkspaceId, referencedOnly);
         return new AgentSkillHubResponses.PageResponse<>(
                 List.copyOf(items),
-                builtins.size() + repository.countAssets(assetType, skillCategory, skillSubcategory,
-                        normalizedKeyword, targetWorkspaceId, referencedOnly),
+                builtins.size() + databaseTotal,
                 normalizedPage, normalizedSize);
+    }
+
+    private List<AssetSummary> listRepositoryAssets(
+            AssetType assetType, SkillCategory category, SkillSubcategory subcategory, SourceKind sourceKind,
+            String keyword, String userId, String targetWorkspaceId, boolean referencedOnly,
+            int offset, int limit) {
+        if (sourceKind == SourceKind.PLATFORM) {
+            return repository.listAssets(assetType, category, subcategory, keyword, userId,
+                    targetWorkspaceId, referencedOnly, offset, limit);
+        }
+        return repository.listAssets(assetType, category, subcategory, sourceKind, keyword, userId,
+                targetWorkspaceId, referencedOnly, offset, limit);
+    }
+
+    /** 兼容既有 API/测试调用；未声明来源时只返回原平台来源。 */
+    public AgentSkillHubResponses.PageResponse<AgentSkillHubResponses.AssetResponse> listAssets(
+            String type, String category, String subcategory, String keyword,
+            boolean referencedOnly, int page, int size,
+            String targetRuntimeWorkspaceId, UserId userId) {
+        return listAssets(type, category, subcategory, null, keyword, referencedOnly, page, size,
+                targetRuntimeWorkspaceId, userId);
     }
 
     public AgentSkillHubResponses.PageResponse<AgentSkillHubResponses.AssetResponse> listAssets(
             String type, String keyword, int page, int size, UserId userId) {
-        return listAssets(type, null, null, keyword, false, page, size, null, userId);
+        return listAssets(type, null, null, null, keyword, false, page, size, null, userId);
     }
 
     /**
@@ -427,19 +509,27 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                     List.of(), List.of());
         }
         Asset asset = requireAsset(assetId);
+        String targetWorkspaceId = targetApplicationWorkspaceId(targetRuntimeWorkspaceId, userId);
+        boolean unavailableReferenceView = !asset.sourceAvailable();
+        if (unavailableReferenceView && targetWorkspaceId == null) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "Hub 资产不存在或来源已不可用");
+        }
+        AssetSummary summary = repository.listAssets(
+                        asset.assetType(), null, null, asset.sourceKind(), asset.technicalId(), userId.value(),
+                        targetWorkspaceId, unavailableReferenceView, 0, 100).stream()
+                .filter(item -> item.asset().assetId().equals(assetId)).findFirst()
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Hub 资产不存在"));
         String selected = revisionId == null || revisionId.isBlank()
                 ? asset.latestPushedRevisionId() : revisionId.trim();
+        if (selected == null && asset.sourceKind() == SourceKind.SKILLHUB) {
+            return new AgentSkillHubResponses.AssetDetailResponse(
+                    response(summary), null, List.of(), List.of(), consumers(asset.assetId(), userId));
+        }
         Revision revision = requireRevision(selected);
         if (!asset.assetId().equals(revision.assetId())) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "修订不属于指定 Hub 资产");
         }
         ArtifactEnvelope envelope = revision.deleted() ? new ArtifactEnvelope(List.of()) : decode(requireArtifact(revision));
-        String targetWorkspaceId = targetApplicationWorkspaceId(targetRuntimeWorkspaceId, userId);
-        AssetSummary summary = repository.listAssets(
-                        asset.assetType(), null, null, asset.technicalId(), userId.value(),
-                        targetWorkspaceId, false, 0, 100).stream()
-                .filter(item -> item.asset().assetId().equals(assetId)).findFirst()
-                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Hub 资产不存在"));
         return new AgentSkillHubResponses.AssetDetailResponse(
                 response(summary), selected,
                 envelope.files().stream().map(file -> new AgentSkillHubResponses.ArtifactFileResponse(
@@ -449,6 +539,14 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
 
     public AgentSkillHubResponses.AssetDetailResponse getAsset(String assetId, String revisionId, UserId userId) {
         return getAsset(assetId, revisionId, null, userId);
+    }
+
+    /** 显式预览才下载 ZIP；相同外部 ID+版本必须保持同一内容摘要。 */
+    public AgentSkillHubResponses.AssetDetailResponse materializeExternalAsset(
+            String assetId, String targetRuntimeWorkspaceId, UserId userId) {
+        Asset asset = requireAsset(assetId);
+        materializeExternalRevision(asset);
+        return getAsset(assetId, null, targetRuntimeWorkspaceId, userId);
     }
 
     public AgentSkillHubResponses.FileContentResponse readFile(String revisionId, String path) {
@@ -476,6 +574,9 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
             throw new PlatformException(ErrorCode.CONFLICT, "平台内置 Agent/Skill 已全局生效，无需发布");
         }
         Asset asset = requireAsset(assetId);
+        if (asset.sourceKind() == SourceKind.SKILLHUB) {
+            throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 外部 Skill 无需平台发布；修改后 push 会自动形成平台派生资产");
+        }
         requireMember(asset.sourceAppId(), userId);
         Revision revision = requireRevision(asset.latestPushedRevisionId());
         if (revision.deleted()) throw new PlatformException(ErrorCode.CONFLICT, "已删除的 Agent/Skill 不能发布");
@@ -549,7 +650,10 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     public AgentSkillHubResponses.ReferenceResponse createReference(
             String assetId, String targetRuntimeWorkspaceId, String alias, UserId userId) {
         PersonalWorkspace personal = requireOwnedPersonal(targetRuntimeWorkspaceId, userId);
-        Asset rootAsset = requireAsset(assetId);
+        Asset rootAsset = ensureExternalMaterialized(requireAsset(assetId));
+        if (!rootAsset.sourceAvailable()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Agent/Skill 来源已不可用，不能新建引用");
+        }
         if (requireRevision(rootAsset.latestPushedRevisionId()).deleted()) {
             throw new PlatformException(ErrorCode.CONFLICT, "Agent/Skill 已从远端删除，不能新建引用");
         }
@@ -630,7 +734,10 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         PersonalWorkspace personal = requireOwnedPersonal(targetRuntimeWorkspaceId, userId);
         Reference reference = requireReference(referenceId);
         requireReferenceTarget(reference, personal);
-        Asset asset = requireAsset(reference.assetId());
+        Asset asset = ensureExternalMaterialized(requireAsset(reference.assetId()));
+        if (!asset.sourceAvailable()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 来源已不可用，不能更新引用");
+        }
         Revision incoming = requireRevision(asset.latestPublishedRevisionId());
         Revision base = reference.activeRevisionId() == null ? null : requireRevision(reference.activeRevisionId());
         Map<String, byte[]> baseFiles = base == null ? Map.of() : importFiles(asset, base, reference.aliasTechnicalId());
@@ -755,6 +862,126 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         repository.saveUpdateOperation(new UpdateOperation(operation.operationId(), operation.referenceId(),
                 operation.targetPersonalWorkspaceId(), operation.fromRevisionId(), operation.toRevisionId(),
                 "ABORTED", operation.conflictsJson(), operation.createdByUserId(), operation.createdAt(), Instant.now()));
+    }
+
+    private void validateExternalCatalog(List<ExternalSkill> skills) {
+        if (skills == null) throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 目录为空");
+        Set<String> names = new HashSet<>();
+        Set<String> versions = new HashSet<>();
+        for (ExternalSkill skill : skills) {
+            if (skill == null || skill.id() <= 0 || skill.version() == null || skill.version().isBlank()
+                    || skill.name() == null || !skill.name().matches("[a-z0-9][a-z0-9-]{0,127}")) {
+                throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 目录条目标识无效");
+            }
+            if (!names.add(skill.name()) || !versions.add(skill.id() + ":" + skill.version())) {
+                throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 目录存在重复条目");
+            }
+        }
+    }
+
+    private Asset ensureExternalMaterialized(Asset asset) {
+        if (asset.sourceKind() != SourceKind.SKILLHUB) return asset;
+        if (!asset.sourceAvailable()) return asset;
+        Revision current = asset.latestPublishedRevisionId() == null
+                ? null : requireRevision(asset.latestPublishedRevisionId());
+        if (current == null || !Objects.equals(current.externalSkillId(), asset.externalSkillId())
+                || !Objects.equals(current.externalVersion(), asset.externalVersion())) {
+            materializeExternalRevision(asset);
+            return requireAsset(asset.assetId());
+        }
+        return asset;
+    }
+
+    private Revision materializeExternalRevision(Asset asset) {
+        if (asset.sourceKind() != SourceKind.SKILLHUB) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "只有 SkillHub 外部 Skill 支持按需下载");
+        }
+        if (!asset.sourceAvailable()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 条目已下架，不能下载或更新");
+        }
+        if (skillHubGateway == null || !skillHubGateway.enabled()
+                || asset.externalSkillId() == null || asset.externalVersion() == null) {
+            throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 集成未启用或目录元数据不完整");
+        }
+        ExternalSkillPackage downloaded = skillHubGateway.download(asset.externalSkillId(), asset.externalVersion());
+        if (downloaded.id() != asset.externalSkillId()
+                || !Objects.equals(downloaded.version(), asset.externalVersion())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 下载版本与当前目录不一致，请刷新后重试");
+        }
+        Map<String, byte[]> files = unzipExternalSkill(downloaded.content());
+        validateExternalSkillManifest(asset.technicalId(), files.get("SKILL.md"));
+        PushedAsset pushed = pushedAsset(AssetType.SKILL, asset.technicalId(), files);
+        Revision existing = repository.findExternalRevision(
+                asset.assetId(), downloaded.id(), downloaded.version()).orElse(null);
+        if (existing != null && !existing.contentSha256().equals(pushed.contentSha256())) {
+            throw new PlatformException(ErrorCode.CONFLICT,
+                    "SkillHub 同一 ID 和版本返回了不同内容，已拒绝覆盖",
+                    Map.of("assetId", asset.assetId(), "externalVersion", downloaded.version()));
+        }
+        return repository.saveExternalRevision(
+                asset.assetId(), downloaded.id(), downloaded.version(), pushed.artifact(),
+                pushed.contentSha256(), firstText(pushed.displayName(), asset.catalogDisplayName(), asset.technicalId()),
+                firstText(pushed.description(), asset.catalogDescription()), Instant.now());
+    }
+
+    /** ZIP 只读入内存映射，不在文件系统展开，因此链接附件也不会被解释为链接。 */
+    private Map<String, byte[]> unzipExternalSkill(byte[] zipBytes) {
+        if (zipBytes == null || zipBytes.length == 0 || zipBytes.length > MAX_UNCOMPRESSED_BYTES) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 下载包大小无效");
+        }
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        long total = 0;
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (entry.isDirectory()) continue;
+                String path = normalizeArtifactPath(entry.getName());
+                if (files.containsKey(path)) {
+                    throw new PlatformException(ErrorCode.VALIDATION_ERROR,
+                            "SkillHub 下载包包含重复路径", Map.of("path", path));
+                }
+                if (files.size() >= MAX_FILES) {
+                    throw new PlatformException(ErrorCode.VALIDATION_ERROR,
+                            "SkillHub 下载包文件数量超限", Map.of("maxFiles", MAX_FILES));
+                }
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                byte[] buffer = new byte[16 * 1024];
+                int read;
+                while ((read = zip.read(buffer)) >= 0) {
+                    total += read;
+                    if (total > MAX_UNCOMPRESSED_BYTES) {
+                        throw new PlatformException(ErrorCode.VALIDATION_ERROR,
+                                "SkillHub 下载包解压后超过 20 MiB");
+                    }
+                    output.write(buffer, 0, read);
+                }
+                files.put(path, output.toByteArray());
+            }
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 下载包不是有效 ZIP", Map.of(), exception);
+        }
+        if (files.isEmpty() || !files.containsKey("SKILL.md")) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 下载包根目录必须包含 SKILL.md");
+        }
+        return Map.copyOf(files);
+    }
+
+    private void validateExternalSkillManifest(String expectedName, byte[] skillMarkdown) {
+        String content = utf8(skillMarkdown, "SKILL.md");
+        var matcher = java.util.regex.Pattern.compile("(?m)^name\\s*:\\s*(.+?)\\s*$").matcher(content);
+        if (!matcher.find()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub SKILL.md 缺少 name");
+        }
+        String declared = matcher.group(1).trim();
+        if ((declared.startsWith("\"") && declared.endsWith("\""))
+                || (declared.startsWith("'") && declared.endsWith("'"))) {
+            declared = declared.substring(1, declared.length() - 1);
+        }
+        if (!expectedName.equals(declared)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "SkillHub SKILL.md name 与目录稳定 ID 不一致");
+        }
     }
 
     private PushedAsset pushedAsset(AssetType type, String technicalId, Map<String, byte[]> files) {
@@ -1030,8 +1257,12 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }
     }
 
-    private void promoteMatchingPendingReferences(ApplicationWorkspaceVersion version, Map<String, byte[]> blobs, String prefix) {
-        for (Reference reference : repository.findPendingReferences(version.applicationWorkspaceId().value())) {
+    private SnapshotReconciliation reconcilePushedReferences(
+            String targetApplicationWorkspaceId, Map<String, byte[]> blobs,
+            String prefix, List<PushedAsset> scannedAssets) {
+        List<PushReferenceDecision> decisions = new ArrayList<>();
+        Set<String> excludedIdentities = new HashSet<>();
+        for (Reference reference : repository.findPendingReferences(targetApplicationWorkspaceId)) {
             String gitPath = prefix + reference.targetPath();
             Map<String, byte[]> committed = new LinkedHashMap<>();
             if (reference.targetPath().endsWith(".md")) {
@@ -1042,15 +1273,31 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 });
             }
             if ("PENDING_REMOVE".equals(reference.status())) {
-                if (committed.isEmpty()) repository.deleteReference(reference.referenceId());
-            } else if (reference.pendingContentSha256() != null
-                    && reference.pendingContentSha256().equals(digestFiles(committed))) {
-                repository.saveReference(new Reference(reference.referenceId(), reference.assetId(),
-                        reference.targetAppId(), reference.targetApplicationWorkspaceId(), reference.targetPath(),
-                        reference.aliasTechnicalId(), reference.pendingRevisionId(), null, null, "ACTIVE",
-                        reference.createdByUserId(), reference.createdAt(), Instant.now()));
+                if (committed.isEmpty()) {
+                    decisions.add(new PushReferenceDecision(reference.referenceId(), PushReferenceAction.REMOVE,
+                            null, null, null, null));
+                }
+                continue;
+            }
+            if (committed.isEmpty() || reference.pendingContentSha256() == null) continue;
+            Asset sourceAsset = requireAsset(reference.assetId());
+            boolean exact = reference.pendingContentSha256().equals(digestFiles(committed));
+            if (exact) {
+                decisions.add(new PushReferenceDecision(reference.referenceId(), PushReferenceAction.KEEP_SOURCE,
+                        sourceAsset.assetType(), reference.aliasTechnicalId(), null, null));
+                if (sourceAsset.sourceKind() == SourceKind.SKILLHUB) {
+                    excludedIdentities.add(sourceAsset.assetType().name() + ":" + reference.aliasTechnicalId());
+                }
+            } else if (sourceAsset.sourceKind() == SourceKind.SKILLHUB) {
+                decisions.add(new PushReferenceDecision(reference.referenceId(), PushReferenceAction.FORK_TO_PLATFORM,
+                        sourceAsset.assetType(), reference.aliasTechnicalId(), sourceAsset.assetId(),
+                        reference.pendingRevisionId()));
             }
         }
+        List<PushedAsset> filtered = scannedAssets.stream()
+                .filter(asset -> !excludedIdentities.contains(asset.assetType().name() + ":" + asset.technicalId()))
+                .toList();
+        return new SnapshotReconciliation(List.copyOf(filtered), List.copyOf(decisions));
     }
 
     private void ensureAcyclic(String rootAssetId, List<Dependency> nextDependencies) {
@@ -1087,6 +1334,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
             AssetType type, String keyword, SkillCategory category, SkillSubcategory subcategory) {
         String lowered = keyword == null ? null : keyword.toLowerCase(Locale.ROOT);
         return repository.listCurrentBuiltinRevisions().stream()
+                .filter(snapshot -> snapshot.assetType() == AssetType.AGENT)
                 .filter(snapshot -> type == null || snapshot.assetType() == type)
                 .filter(snapshot -> category == null || snapshot.skillCategory() == category)
                 .filter(snapshot -> subcategory == null || snapshot.skillSubcategory() == subcategory)
@@ -1219,7 +1467,9 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 snapshot.skillCategory().name(), snapshot.skillSubcategory() == null
                         ? null : snapshot.skillSubcategory().name(),
                 "platform", "平台内置", "public", "公共配置", snapshot.revisionId(), snapshot.revisionId(),
-                true, true, false, false, false, null, 0, snapshot.pushedAt(), snapshot.pushedAt());
+                true, true, false, false, false, null, 0, snapshot.pushedAt(), snapshot.pushedAt(),
+                SourceKind.PLATFORM.name(), true, true, null, null, null, null, null, null, null,
+                null, null, null);
     }
 
     private AgentSkillHubResponses.AssetResponse response(AssetSummary summary) {
@@ -1227,14 +1477,27 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         Revision published = summary.publishedRevision();
         Revision display = published == null ? pushed : published;
         return new AgentSkillHubResponses.AssetResponse(summary.asset().assetId(), summary.asset().assetType().name(),
-                summary.asset().technicalId(), display.displayName(), display.displayNameEn(), display.description(),
+                summary.asset().technicalId(), firstText(display == null ? null : display.displayName(),
+                        summary.asset().catalogDisplayName(), summary.asset().technicalId()),
+                display == null ? summary.asset().technicalId() : display.displayNameEn(),
+                firstText(display == null ? null : display.description(), summary.asset().catalogDescription()),
                 summary.asset().skillCategory().name(), summary.asset().skillSubcategory() == null
                         ? null : summary.asset().skillSubcategory().name(),
-                summary.asset().sourceAppId(), summary.sourceAppName(), summary.asset().sourceApplicationWorkspaceId(),
-                summary.sourceWorkspaceName(), pushed.revisionId(), published == null ? null : published.revisionId(),
+                summary.asset().sourceAppId(), firstText(summary.sourceAppName(),
+                        summary.asset().sourceKind() == SourceKind.SKILLHUB ? "SkillHub" : null),
+                summary.asset().sourceApplicationWorkspaceId(), firstText(summary.sourceWorkspaceName(),
+                        summary.asset().sourceKind() == SourceKind.SKILLHUB ? "外部能力目录" : null),
+                pushed == null ? null : pushed.revisionId(), published == null ? null : published.revisionId(),
                 published != null, false, summary.updateAvailable(), isEffectiveReference(summary.referenceStatus()),
-                pushed.deleted(), summary.referenceStatus(), summary.referenceCount(),
-                pushed.pushedAt(), published == null ? null : published.publishedAt());
+                pushed != null && pushed.deleted(), summary.referenceStatus(), summary.referenceCount(),
+                pushed == null ? summary.asset().updatedAt() : pushed.pushedAt(),
+                published == null ? null : published.publishedAt(),
+                summary.asset().sourceKind().name(), summary.asset().sourceAvailable(), pushed != null,
+                summary.asset().externalSkillId(), summary.asset().externalVersion(),
+                summary.asset().externalSource(), summary.asset().externalTag(), summary.asset().externalPhase(),
+                summary.asset().externalPhaseName(), summary.asset().externalContributor(),
+                summary.asset().externalDownloadCount(), summary.asset().forkedFromAssetId(),
+                summary.asset().forkedFromRevisionId());
     }
 
     private List<AgentSkillHubResponses.ReferenceConsumerResponse> consumers(String assetId, UserId userId) {
@@ -1255,7 +1518,9 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         return new AgentSkillHubResponses.UpdateResponse(update.reference().referenceId(), update.asset().assetId(),
                 update.asset().technicalId(), update.latestRevision().displayName(), update.sourceAppName(),
                 update.sourceWorkspaceName(), update.reference().activeRevisionId(), update.latestRevision().revisionId(),
-                update.reference().status(), update.reference().targetPath(), update.latestRevision().publishedAt());
+                update.asset().sourceKind() == SourceKind.SKILLHUB ? update.asset().externalVersion() : null,
+                update.asset().sourceAvailable(), update.reference().status(), update.reference().targetPath(),
+                update.latestRevision().publishedAt());
     }
 
     private AgentSkillHubResponses.ReferenceResponse referenceResponse(Reference reference, boolean reload, String message) {
@@ -1341,6 +1606,17 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     private SkillSubcategory parseSubcategory(String subcategory) {
         try { return SkillSubcategory.valueOf(subcategory.trim().toUpperCase(Locale.ROOT)); }
         catch (Exception exception) { throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Skill 具体事项无效"); }
+    }
+
+    /** 空参数保持旧客户端语义（仅平台）；新界面显式传 ALL 才合并双来源。 */
+    private SourceKind parseSourceFilter(String source) {
+        if (source == null || source.isBlank()) return SourceKind.PLATFORM;
+        if ("ALL".equalsIgnoreCase(source.trim())) return null;
+        try {
+            return SourceKind.valueOf(source.trim().toUpperCase(Locale.ROOT));
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Skill 来源筛选无效");
+        }
     }
 
     /** 列表允许只选一级分类；一旦给出二级事项，就必须与一级分类匹配。 */
@@ -1478,8 +1754,12 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         return value.getBytes(StandardCharsets.UTF_8);
     }
     private String mediaType(String path) { return path.toLowerCase(Locale.ROOT).endsWith(".md") ? "text/markdown" : "text/plain"; }
-    private String firstText(String first, String fallback) {
-        return first == null || first.isBlank() ? fallback : first.trim();
+    private String firstText(String... values) {
+        if (values == null) return null;
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value.trim();
+        }
+        return null;
     }
     private String join(String left, String right) { return (left == null ? "" : left) + (right == null ? "" : right); }
     private byte[] readBytes(Path path) { try { return Files.readAllBytes(path); } catch (Exception e) { throw new IllegalStateException(e); } }
@@ -1498,6 +1778,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     private record ArtifactEnvelope(List<ArtifactFile> files) { }
     private record ArtifactFile(String path, long size, String sha256, String mediaType, String contentBase64) { }
     private record BuiltinIdentity(AssetType type, String technicalId) { }
+    private record SnapshotReconciliation(List<PushedAsset> assets, List<PushReferenceDecision> decisions) { }
     private record WriteBackup(Path assetRoot, Path backupPath, boolean existed) { }
     private record ImportRequest(Asset asset, Revision revision, String alias, Map<String, byte[]> files, String contentSha256) { }
     private record ConflictFile(String path, String kind, String baseContent, String currentContent,

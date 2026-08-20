@@ -24,6 +24,7 @@ public enum ErrorCode {
     OPENCODE_UNAVAILABLE(503, "TestAgent 服务不可用"),
     LOCAL_CLIENT_DISCONNECTED(503, "本地 OpenCode 客户端已断开"),
     EXTERNAL_API_UNAVAILABLE(503, "外部 API 认证服务不可用"),
+    SKILLHUB_UNAVAILABLE(503, "SkillHub 服务不可用"),
     NIGHT_EXECUTION_UNAVAILABLE(503, "夜间执行功能不可用"),
     TERMINAL_UNAVAILABLE(503, "终端服务不可用"),
     OPENCODE_TIMEOUT(504, "TestAgent 服务超时"),

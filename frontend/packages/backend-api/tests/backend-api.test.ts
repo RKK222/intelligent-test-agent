@@ -3484,6 +3484,25 @@ describe("backend-api", () => {
       }));
   });
 
+  it("requests the combined Skill sources and explicitly materializes external content", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: {} }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.listAgentSkillHubAssets({ type: "SKILL", source: "ALL", page: 1, size: 30 });
+    await client.materializeAgentSkillHubAsset("hub_asset_external", "wrk_personal");
+
+    expect(fetcher).toHaveBeenNthCalledWith(1,
+      "http://api/api/internal/platform/workspace-management/agent-skill-hub/assets"
+        + "?type=SKILL&source=ALL&page=1&size=30",
+      expect.any(Object));
+    expect(fetcher).toHaveBeenNthCalledWith(2,
+      "http://api/api/internal/platform/workspace-management/agent-skill-hub/assets/hub_asset_external/materialize"
+        + "?targetWorkspaceId=wrk_personal",
+      expect.objectContaining({ method: "POST" }));
+  });
+
   it("resolves a relative Hub file websocket ticket against the enterprise same-origin page", async () => {
     vi.stubGlobal("location", { href: "http://mimo.sdc.cs.icbc:9996/hub" });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(

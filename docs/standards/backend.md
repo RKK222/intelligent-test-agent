@@ -66,6 +66,7 @@
 | `OPENCODE_BAD_GATEWAY` | 502 | opencode 服务响应异常 |
 | `OPENCODE_UNAVAILABLE` | 503 | opencode 服务不可用 |
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
+| `SKILLHUB_UNAVAILABLE` | 503 | SkillHub 服务不可用 |
 
 新增或修改错误码必须同步 `docs/api/http-api.md`、相关模块 README 和对应测试。
 
@@ -109,6 +110,12 @@
 4. opencode server 启动成功不能只信任 manager `STARTED` 回包；所有启动入口必须走 `OpencodeProcessStartupService`，由它在目标 Java 上写入候选进程快照、调用 manager health 同时确认本地 state/PID 和 opencode HTTP health，健康后才回写 `RUNNING`、ACTIVE binding、Redis heartbeat 和兼容节点投影。
 5. opencode server 停止成功不能只信任 manager `STOPPED` 回包；所有停止入口必须走 `OpencodeProcessStopService`，由它通过 manager stop 发起停止，对平台已有进程记录的端口继续调用 manager health，确认 health 不健康后才回写 `STOPPED`。
 6. opencode server 状态查询不能在业务入口直接调用 manager health；所有强状态查询必须走 `OpencodeProcessStatusQueryService`，先确认平台进程记录是否存在，再通过目标 Java 的本机 manager health 归一为未启动、运行中或健康检查异常，并统一刷新 DB 状态与 Redis heartbeat。
+
+### SkillHub 调用
+
+1. SkillHub 目录同步和下载只能通过 `SkillHubGateway` 领域端口及 integration 适配器完成；访问密钥只从部署环境注入，所有请求固定使用 `X-Skill-Access-Key`，日志和错误响应不得记录该请求头或第三方正文。
+2. `/download/{id}` 的渠道固定由 `SkillHubDownloadChannel.PLATFORM(3)` 生成，业务层和前端不得传入任意整数；目录同步只保存元数据，ZIP 只允许在显式预览、引用或更新时按需下载。
+3. 外部 ZIP 必须限制响应体、文件数量、路径、重复项、根 `SKILL.md`、UTF-8 和稳定名称；相同外部 ID+版本出现不同内容摘要时失败关闭，不得覆盖已保存修订。
 
 ### SSE 与事件
 

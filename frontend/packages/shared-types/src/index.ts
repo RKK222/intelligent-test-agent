@@ -559,6 +559,7 @@ export type WorkspaceFileSocketTicketResponse = {
 export type AgentConfigScope = "PUBLIC" | "WORKSPACE" | string;
 
 export type AgentSkillHubAssetType = "AGENT" | "SKILL";
+export type AgentSkillHubSourceKind = "PLATFORM" | "SKILLHUB";
 export type AgentSkillHubSkillCategory = "WORKER" | "TEST" | "CODE" | "OTHER";
 export type AgentSkillHubSkillSubcategory =
   | "TEST_DESIGN"
@@ -577,11 +578,11 @@ export type AgentSkillHubAsset = {
   /** 旧后端缺失时按 OTHER 展示，避免升级窗口把未分类 Skill 隐藏。 */
   category?: AgentSkillHubSkillCategory | null;
   subcategory?: AgentSkillHubSkillSubcategory | null;
-  sourceAppId: string;
+  sourceAppId?: string | null;
   sourceAppName: string;
-  sourceWorkspaceId: string;
+  sourceWorkspaceId?: string | null;
   sourceWorkspaceName: string;
-  pushedRevisionId: string;
+  pushedRevisionId?: string | null;
   publishedRevisionId?: string | null;
   published: boolean;
   builtin: boolean;
@@ -592,6 +593,19 @@ export type AgentSkillHubAsset = {
   referenceCount: number;
   pushedAt: string;
   publishedAt?: string | null;
+  sourceKind?: AgentSkillHubSourceKind | null;
+  sourceAvailable?: boolean;
+  contentAvailable?: boolean;
+  externalSkillId?: number | null;
+  externalVersion?: string | null;
+  externalSource?: string | null;
+  externalTag?: string | null;
+  externalPhase?: string | null;
+  externalPhaseName?: string | null;
+  externalContributor?: string | null;
+  externalDownloadCount?: number | null;
+  forkedFromAssetId?: string | null;
+  forkedFromRevisionId?: string | null;
 };
 
 export type AgentSkillHubClassification = {
@@ -619,7 +633,7 @@ export type AgentSkillHubDependency = {
 
 export type AgentSkillHubAssetDetail = {
   asset: AgentSkillHubAsset;
-  selectedRevisionId: string;
+  selectedRevisionId?: string | null;
   files: AgentSkillHubArtifactFile[];
   dependencies: AgentSkillHubDependency[];
   consumers: AgentSkillHubReferenceConsumer[];
@@ -666,6 +680,8 @@ export type AgentSkillHubUpdate = {
   sourceWorkspaceName: string;
   activeRevisionId?: string | null;
   latestRevisionId: string;
+  latestVersion?: string | null;
+  sourceAvailable?: boolean;
   status: string;
   targetPath: string;
   publishedAt: string;

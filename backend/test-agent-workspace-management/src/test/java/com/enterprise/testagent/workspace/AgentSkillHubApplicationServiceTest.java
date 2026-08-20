@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
@@ -26,13 +27,18 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetSummary;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ExternalSkillPackage;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceAction;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceDecision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SourceKind;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
+import com.enterprise.testagent.domain.hub.SkillHubGateway;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
@@ -44,12 +50,15 @@ import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -65,6 +74,44 @@ class AgentSkillHubApplicationServiceTest {
 
         assertThat(scheduled.fixedDelayString())
                 .isEqualTo("${test-agent.agent-skill-hub.builtin-reconcile-delay:PT10M}");
+    }
+
+    @Test
+    void externalMaterializationRejectsZipTraversalBeforePersistence() throws Exception {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        Asset external = new Asset(
+                "hub_asset_external", null, null, AssetType.SKILL, "case-design",
+                SkillCategory.OTHER, null, null, null, now, now,
+                SourceKind.SKILLHUB, true, 42L, "1.2.0", "official", "test",
+                "stable", "稳定", "team", 7L, "测试设计", "生成案例", null, null);
+        when(repository.findAsset(external.assetId())).thenReturn(Optional.of(external));
+        when(gateway.enabled()).thenReturn(true);
+        when(gateway.download(42, "1.2.0")).thenReturn(
+                new ExternalSkillPackage(42, "1.2.0", zip("../SKILL.md", "name: case-design")));
+        AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
+                repository, mock(ConfigurationManagementRepository.class),
+                mock(ManagedWorkspaceRepository.class), mock(CommonParameterValues.class),
+                mock(GitWorkspaceService.class), new ObjectMapper());
+        service.setSkillHubGateway(gateway);
+
+        assertThatThrownBy(() -> service.materializeExternalAsset(
+                external.assetId(), null, new UserId("usr_1")))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("路径无效");
+        verify(repository, never()).saveExternalRevision(
+                anyString(), anyLong(), anyString(), any(), anyString(), any(), any(), any());
+    }
+
+    private byte[] zip(String path, String content) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(output)) {
+            zip.putNextEntry(new ZipEntry(path));
+            zip.write(content.getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        return output.toByteArray();
     }
 
     @Test
@@ -139,7 +186,12 @@ class AgentSkillHubApplicationServiceTest {
 
         service.indexSuccessfulPush(version(commit), repoRoot, workspaceRoot, commit);
 
-        verify(repository).deleteReference("hub_ref_remove");
+        ArgumentCaptor<List<PushReferenceDecision>> decisions = ArgumentCaptor.forClass(List.class);
+        verify(repository).replacePushedSnapshot(any(PushedSnapshot.class), decisions.capture());
+        assertThat(decisions.getValue()).singleElement().satisfies(decision -> {
+            assertThat(decision.referenceId()).isEqualTo("hub_ref_remove");
+            assertThat(decision.action()).isEqualTo(PushReferenceAction.REMOVE);
+        });
     }
 
     @Test

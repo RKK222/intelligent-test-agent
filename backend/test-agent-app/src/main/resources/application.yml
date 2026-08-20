@@ -71,6 +71,14 @@ management:
       enabled: true
 
 test-agent:
+  skill-hub:
+    enabled: ${TEST_AGENT_SKILLHUB_ENABLED:false}
+    base-url: ${TEST_AGENT_SKILLHUB_BASE_URL:}
+    access-key: ${TEST_AGENT_SKILLHUB_ACCESS_KEY:}
+    connect-timeout: ${TEST_AGENT_SKILLHUB_CONNECT_TIMEOUT:10s}
+    request-timeout: ${TEST_AGENT_SKILLHUB_REQUEST_TIMEOUT:30s}
+    sync-initial-delay: ${TEST_AGENT_SKILLHUB_SYNC_INITIAL_DELAY:10s}
+    sync-delay: ${TEST_AGENT_SKILLHUB_SYNC_DELAY:10m}
   analytics:
     clickhouse:
       enabled: ${TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED:false}

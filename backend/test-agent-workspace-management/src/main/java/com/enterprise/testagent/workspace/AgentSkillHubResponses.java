@@ -19,7 +19,11 @@ public final class AgentSkillHubResponses {
             String sourceWorkspaceName, String pushedRevisionId, String publishedRevisionId,
             boolean published, boolean builtin, boolean updateAvailable, boolean referenced, boolean deleted,
             String referenceStatus, long referenceCount,
-            Instant pushedAt, Instant publishedAt) {
+            Instant pushedAt, Instant publishedAt,
+            String sourceKind, boolean sourceAvailable, boolean contentAvailable,
+            Long externalSkillId, String externalVersion, String externalSource, String externalTag,
+            String externalPhase, String externalPhaseName, String externalContributor,
+            Long externalDownloadCount, String forkedFromAssetId, String forkedFromRevisionId) {
     }
 
     /** 超级管理员修改 Skill 事项分类后的审计响应。 */
@@ -52,6 +56,9 @@ public final class AgentSkillHubResponses {
     public record PublishResponse(String assetId, String revisionId, Instant publishedAt, int dependencyCount) {
     }
 
+    public record ExternalSyncResponse(int assetCount, Instant synchronizedAt) {
+    }
+
     public record ReferenceResponse(String referenceId, String assetId, String targetPath, String aliasTechnicalId,
                                     String activeRevisionId, String pendingRevisionId, String status,
                                     boolean runtimeReloadRequired, String message) {
@@ -59,7 +66,8 @@ public final class AgentSkillHubResponses {
 
     public record UpdateResponse(String referenceId, String assetId, String technicalId, String displayName,
                                  String sourceAppName, String sourceWorkspaceName, String activeRevisionId,
-                                 String latestRevisionId, String status, String targetPath, Instant publishedAt) {
+                                 String latestRevisionId, String latestVersion, boolean sourceAvailable,
+                                 String status, String targetPath, Instant publishedAt) {
     }
 
     public record UpdateOperationResponse(String operationId, String referenceId, String status,

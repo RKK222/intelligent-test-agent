@@ -17,6 +17,19 @@ public final class AgentSkillHubModels {
         SKILL
     }
 
+    /** Hub 资产来源；公共 Git 只承担内置 Agent，Skill 只来自平台推送或外部 SkillHub。 */
+    public enum SourceKind {
+        PLATFORM,
+        SKILLHUB
+    }
+
+    /** push 对账时，待生效引用与远端提交内容之间的关系。 */
+    public enum PushReferenceAction {
+        KEEP_SOURCE,
+        FORK_TO_PLATFORM,
+        REMOVE
+    }
+
     /** Skill Hub 一级事项分类；用户推送的 Skill 默认进入 OTHER。 */
     public enum SkillCategory {
         WORKER,
@@ -69,10 +82,25 @@ public final class AgentSkillHubModels {
             String latestPushedRevisionId,
             String latestPublishedRevisionId,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            SourceKind sourceKind,
+            boolean sourceAvailable,
+            Long externalSkillId,
+            String externalVersion,
+            String externalSource,
+            String externalTag,
+            String externalPhase,
+            String externalPhaseName,
+            String externalContributor,
+            Long externalDownloadCount,
+            String catalogDisplayName,
+            String catalogDescription,
+            String forkedFromAssetId,
+            String forkedFromRevisionId) {
 
         public Asset {
             Objects.requireNonNull(skillCategory, "skillCategory must not be null");
+            sourceKind = sourceKind == null ? SourceKind.PLATFORM : sourceKind;
         }
 
         /** 兼容既有调用方；未显式分类的资产统一进入 OTHER。 */
@@ -88,7 +116,27 @@ public final class AgentSkillHubModels {
                 Instant updatedAt) {
             this(assetId, sourceAppId, sourceApplicationWorkspaceId, assetType, technicalId,
                     SkillCategory.OTHER, null, latestPushedRevisionId, latestPublishedRevisionId,
-                    createdAt, updatedAt);
+                    createdAt, updatedAt, SourceKind.PLATFORM, true, null, null, null, null,
+                    null, null, null, null, null, null, null, null);
+        }
+
+        /** 兼容分类能力引入后的平台资产构造方式。 */
+        public Asset(
+                String assetId,
+                String sourceAppId,
+                String sourceApplicationWorkspaceId,
+                AssetType assetType,
+                String technicalId,
+                SkillCategory skillCategory,
+                SkillSubcategory skillSubcategory,
+                String latestPushedRevisionId,
+                String latestPublishedRevisionId,
+                Instant createdAt,
+                Instant updatedAt) {
+            this(assetId, sourceAppId, sourceApplicationWorkspaceId, assetType, technicalId,
+                    skillCategory, skillSubcategory, latestPushedRevisionId, latestPublishedRevisionId,
+                    createdAt, updatedAt, SourceKind.PLATFORM, true, null, null, null, null,
+                    null, null, null, null, null, null, null, null);
         }
     }
 
@@ -105,7 +153,67 @@ public final class AgentSkillHubModels {
             boolean deleted,
             Instant pushedAt,
             Instant publishedAt,
-            String publishedByUserId) {
+            String publishedByUserId,
+            Long externalSkillId,
+            String externalVersion) {
+
+        /** 兼容既有平台修订构造方式。 */
+        public Revision(
+                String revisionId,
+                String assetId,
+                String sourceVersionId,
+                String sourceCommitHash,
+                String artifactSha256,
+                String contentSha256,
+                String displayName,
+                String displayNameEn,
+                String description,
+                boolean deleted,
+                Instant pushedAt,
+                Instant publishedAt,
+                String publishedByUserId) {
+            this(revisionId, assetId, sourceVersionId, sourceCommitHash, artifactSha256, contentSha256,
+                    displayName, displayNameEn, description, deleted, pushedAt, publishedAt,
+                    publishedByUserId, null, null);
+        }
+    }
+
+    /** 外部 SkillHub /list 的目录元数据；正文必须等用户显式预览、引用或更新时再下载。 */
+    public record ExternalSkill(
+            long id,
+            String name,
+            String version,
+            String displayName,
+            String description,
+            String source,
+            String tag,
+            String phase,
+            String phaseName,
+            String contributor,
+            Instant createdAt,
+            long downloadCount) {
+    }
+
+    /** 外部下载接口返回的原始 ZIP；解包和安全校验由应用服务负责。 */
+    public record ExternalSkillPackage(long id, String version, byte[] content) {
+        public ExternalSkillPackage {
+            content = content == null ? new byte[0] : content.clone();
+        }
+
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
+    }
+
+    /** push 快照和引用身份切换必须在同一个数据库事务中完成。 */
+    public record PushReferenceDecision(
+            String referenceId,
+            PushReferenceAction action,
+            AssetType assetType,
+            String technicalId,
+            String forkedFromAssetId,
+            String forkedFromRevisionId) {
     }
 
     public record Dependency(

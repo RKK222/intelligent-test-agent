@@ -46,17 +46,33 @@ public interface AgentSkillHubMapper {
                                  @Param("sourceWorkspaceId") String sourceWorkspaceId,
                                  @Param("assetType") String assetType,
                                  @Param("technicalId") String technicalId);
+    AssetRow findAssetByExternalIdentity(@Param("externalIdentityKey") String externalIdentityKey);
+    int upsertExternalAsset(AssetRow row);
+    int markExternalAssetsUnavailable(@Param("synchronizedAt") Instant synchronizedAt);
     List<AssetRow> findAssetsBySource(@Param("sourceAppId") String sourceAppId,
                                       @Param("sourceWorkspaceId") String sourceWorkspaceId);
     int insertRevision(RevisionRow row);
     RevisionRow findRevision(@Param("revisionId") String revisionId);
     RevisionRow findRevisionBySourceCommit(@Param("assetId") String assetId,
                                            @Param("sourceCommitHash") String sourceCommitHash);
+    RevisionRow findExternalRevision(@Param("assetId") String assetId,
+                                     @Param("externalSkillId") long externalSkillId,
+                                     @Param("externalVersion") String externalVersion);
     int updateLatestPushed(@Param("assetId") String assetId, @Param("revisionId") String revisionId,
                            @Param("pushedAt") Instant pushedAt);
+    int updateExternalRevisionPointers(@Param("assetId") String assetId,
+                                       @Param("revisionId") String revisionId,
+                                       @Param("externalSkillId") long externalSkillId,
+                                       @Param("externalVersion") String externalVersion,
+                                       @Param("updatedAt") Instant updatedAt);
+    int setForkLineage(@Param("assetId") String assetId,
+                       @Param("forkedFromAssetId") String forkedFromAssetId,
+                       @Param("forkedFromRevisionId") String forkedFromRevisionId,
+                       @Param("updatedAt") Instant updatedAt);
     List<AssetSummaryRow> listAssets(@Param("assetType") String assetType, @Param("keyword") String keyword,
                                      @Param("skillCategory") String skillCategory,
                                      @Param("skillSubcategory") String skillSubcategory,
+                                     @Param("sourceKind") String sourceKind,
                                      @Param("currentUserId") String currentUserId,
                                      @Param("targetWorkspaceId") String targetWorkspaceId,
                                      @Param("referencedOnly") boolean referencedOnly,
@@ -64,6 +80,7 @@ public interface AgentSkillHubMapper {
     long countAssets(@Param("assetType") String assetType, @Param("keyword") String keyword,
                      @Param("skillCategory") String skillCategory,
                      @Param("skillSubcategory") String skillSubcategory,
+                     @Param("sourceKind") String sourceKind,
                      @Param("targetWorkspaceId") String targetWorkspaceId,
                      @Param("referencedOnly") boolean referencedOnly);
     int updateSkillClassification(@Param("assetId") String assetId,
@@ -88,6 +105,10 @@ public interface AgentSkillHubMapper {
     List<ReferenceRow> findPendingReferences(@Param("targetWorkspaceId") String targetWorkspaceId);
     int insertReference(ReferenceRow row);
     int updateReference(ReferenceRow row);
+    int activateReference(@Param("referenceId") String referenceId,
+                          @Param("assetId") String assetId,
+                          @Param("activeRevisionId") String activeRevisionId,
+                          @Param("updatedAt") Instant updatedAt);
     int deleteReference(@Param("referenceId") String referenceId);
     List<ReferenceUpdateRow> listUpdates(@Param("userId") String userId,
                                          @Param("targetWorkspaceId") String targetWorkspaceId,
