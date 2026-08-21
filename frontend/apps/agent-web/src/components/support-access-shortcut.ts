@@ -1,18 +1,21 @@
 export const SUPPORT_ACCESS_SHIFT_WINDOW_MS = 2_000;
 
-export type SupportAccessShortcut = {
+export type TripleKeyShortcut = {
   handleKeydown: (event: Pick<KeyboardEvent, "key" | "repeat"> & Partial<Pick<KeyboardEvent, "code">>) => boolean;
   reset: () => void;
 };
 
+export type SupportAccessShortcut = TripleKeyShortcut;
+
 /**
- * 只识别短时间内连续三次独立 Shift 按下；其它按键会打断序列，长按产生的 repeat 不计数。
- * 该手势只负责请求展示入口，实际角色校验和排查授权仍由调用方及后端完成。
+ * 只识别短时间内连续三次独立修饰键按下；其它按键会打断序列，长按产生的 repeat 不计数。
+ * 该手势只负责请求展示入口，实际角色校验仍由调用方及后端完成。
  */
-export function createSupportAccessShortcut(
+export function createTripleKeyShortcut(
+  triggerKey: "Shift" | "Control",
   now: () => number = () => Date.now(),
   windowMs = SUPPORT_ACCESS_SHIFT_WINDOW_MS
-): SupportAccessShortcut {
+): TripleKeyShortcut {
   let pressCount = 0;
   let firstPressAt = 0;
 
@@ -22,12 +25,9 @@ export function createSupportAccessShortcut(
   }
 
   function handleKeydown(event: Pick<KeyboardEvent, "key" | "repeat"> & Partial<Pick<KeyboardEvent, "code">>) {
-    const isShift = event.key === "Shift"
-      || event.key === "ShiftLeft"
-      || event.key === "ShiftRight"
-      || event.code === "ShiftLeft"
-      || event.code === "ShiftRight";
-    if (!isShift) {
+    const keyVariants = [triggerKey, `${triggerKey}Left`, `${triggerKey}Right`];
+    const isTriggerKey = keyVariants.includes(event.key) || keyVariants.includes(event.code ?? "");
+    if (!isTriggerKey) {
       reset();
       return false;
     }
@@ -47,4 +47,12 @@ export function createSupportAccessShortcut(
   }
 
   return { handleKeydown, reset };
+}
+
+/** 排查入口继续使用既有的三次 Shift 手势，保持其调用方接口兼容。 */
+export function createSupportAccessShortcut(
+  now: () => number = () => Date.now(),
+  windowMs = SUPPORT_ACCESS_SHIFT_WINDOW_MS
+): SupportAccessShortcut {
+  return createTripleKeyShortcut("Shift", now, windowMs);
 }

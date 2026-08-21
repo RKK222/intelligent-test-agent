@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSupportAccessShortcut } from "../src/components/support-access-shortcut";
+import { createSupportAccessShortcut, createTripleKeyShortcut } from "../src/components/support-access-shortcut";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
 
 function key(key: string, repeat = false, code?: string) {
@@ -18,6 +18,17 @@ describe("support access shortcut", () => {
     expect(shortcut.handleKeydown(key("Shift"))).toBe(true);
     now = 1_700;
     expect(shortcut.handleKeydown(key("Shift"))).toBe(false);
+  });
+
+  it("supports the same three-press gesture for Control", () => {
+    let now = 100;
+    const shortcut = createTripleKeyShortcut("Control", () => now);
+
+    expect(shortcut.handleKeydown(key("ControlLeft"))).toBe(false);
+    now = 500;
+    expect(shortcut.handleKeydown(key("Control"))).toBe(false);
+    now = 900;
+    expect(shortcut.handleKeydown(key("ControlRight"))).toBe(true);
   });
 
   it("accepts left and right Shift code variants from older or synthetic browsers", () => {

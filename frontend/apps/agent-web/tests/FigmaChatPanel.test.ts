@@ -651,6 +651,7 @@ describe("FigmaChatPanel", () => {
         messages: [],
         processRequired: true,
         processStatusPlacement: "pet",
+        canSelectModel: true,
         processStatus: {
           status: "NEEDS_INITIALIZATION",
           initializable: true,
@@ -696,6 +697,27 @@ describe("FigmaChatPanel", () => {
 
     await wrapper.get('[aria-label="发送"]').trigger("click");
     expect(wrapper.emitted("send")?.[0]).toEqual(["直接发送第一条消息"]);
+  });
+
+  it("hides model switching and the native models command without the permission gate", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        models: [{ id: "model-1", providerId: "provider-1", name: "模型一" }]
+      } as any
+    });
+
+    expect(wrapper.find('[aria-label="切换模型"]').exists()).toBe(false);
+    await wrapper.get("textarea").setValue("/");
+    expect(wrapper.get('[data-testid="slash-native-section"]').text()).not.toContain("/models");
+
+    await wrapper.get("textarea").setValue("/models");
+    await wrapper.get("textarea").trigger("keydown", { key: "Enter" });
+    expect(wrapper.find('[aria-label="模型选择"]').exists()).toBe(false);
+
+    await wrapper.setProps({ canSelectModel: true } as any);
+    expect(wrapper.find('[aria-label="切换模型"]').exists()).toBe(true);
   });
 
   it("keeps a READY card inline without a saved drag and only uses floating mode after a drag", async () => {
@@ -1318,6 +1340,7 @@ describe("FigmaChatPanel", () => {
       props: {
         messages: [],
         processStatus: { status: "READY", initializable: false, message: "ready" },
+        canSelectModel: true,
         models: [],
         providers: [
           {
@@ -2232,6 +2255,7 @@ describe("FigmaChatPanel", () => {
       props: {
         messages: [],
         processStatus: { status: "READY", initializable: false, message: "ready" },
+        canSelectModel: true,
         commands: [
           { commandId: "skill-1", name: "test-design", description: "Equivalence Partitioning（等价类法）。生成等价类表", source: "skill" },
           { commandId: "command-init", name: "init", description: "项目初始化", source: "command" },
@@ -2322,6 +2346,7 @@ describe("FigmaChatPanel", () => {
       props: {
         messages: [],
         processStatus: { status: "READY", initializable: false, message: "ready" },
+        canSelectModel: true,
         models: [{ id: "Qwen3.6-27B", providerId: "enterprise-qwen", name: "Qwen3.6 27B" }]
       } as any
     });

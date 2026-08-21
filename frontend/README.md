@@ -237,6 +237,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 ## 访问边界
 
+- 模型选择入口默认隐藏；仅非分享态的 `SUPER_ADMIN` 在工作台连续独立按三次 Ctrl 后才可显示并切换，普通用户和分享成员不能通过按钮或 `/models` 原生命令绕过该门禁。
+
 - 前端不得直连 opencode server。
 - HTTP 请求只能通过 `packages/backend-api`；Run/Diff/runtime 默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` 后端 URL。
 - 独立工作流是唯一受控例外：`/workflow-chat` 只能通过 `packages/workflow-api-client` 同源访问 Python `/workflow-api/v1/**`，不经过 Java；其原生 AG-UI 也不进入平台 RunEvent。

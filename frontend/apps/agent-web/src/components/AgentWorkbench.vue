@@ -234,7 +234,7 @@ import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
-import { createSupportAccessShortcut } from "./support-access-shortcut";
+import { createSupportAccessShortcut, createTripleKeyShortcut } from "./support-access-shortcut";
 import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
 import MemoryCenter from "./MemoryCenter.vue";
@@ -409,7 +409,16 @@ type RawOutputEntry = {
   occurredAt: string;
 };
 
+// 模型切换是超级管理员的隐藏运维入口，默认不展示，避免普通操作误触。
+const modelSelectionUnlocked = ref(false);
+const modelSelectionShortcut = createTripleKeyShortcut("Control");
 const isSuperAdmin = computed(() => !shareMode.value && authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const canSelectModel = computed(() => isSuperAdmin.value && modelSelectionUnlocked.value);
+watch(isSuperAdmin, () => {
+  // 退出超级管理员上下文后立即收回入口；再次进入仍需重新完成三次 Ctrl。
+  modelSelectionUnlocked.value = false;
+  modelSelectionShortcut.reset();
+}, { immediate: true });
 const memoryAvailable = computed(() => !shareMode.value && memoryAccessStore.resolved && memoryAccessStore.allowed);
 const canUseLobehub = computed(() => releaseFeatures.lobehub && isSuperAdmin.value);
 const isAppAdmin = computed(() =>
@@ -1041,6 +1050,19 @@ function onSupportAccessShortcutKeydown(event: KeyboardEvent) {
   }
 }
 
+/** 捕获阶段识别超级管理员的模型切换手势；权限变化后必须重新完成三次 Ctrl。 */
+function onModelSelectionShortcutKeydown(event: KeyboardEvent) {
+  if (!isSuperAdmin.value) {
+    modelSelectionShortcut.reset();
+    return;
+  }
+  if (modelSelectionUnlocked.value) return;
+  if (modelSelectionShortcut.handleKeydown(event)) {
+    event.preventDefault();
+    modelSelectionUnlocked.value = true;
+  }
+}
+
 function onWindowKeydown(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null;
   if (target) {
@@ -1062,6 +1084,7 @@ function onWindowKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener("keydown", onSupportAccessShortcutKeydown, true);
+  window.addEventListener("keydown", onModelSelectionShortcutKeydown, true);
   window.addEventListener("keydown", onWindowKeydown);
   window.addEventListener("focus", refreshAppSourceAuthorizationOnFocus);
 });
@@ -1073,6 +1096,7 @@ onBeforeUnmount(() => {
   invalidateConversationInteraction();
   clearTerminalRunEventSubscriptionHold();
   window.removeEventListener("keydown", onSupportAccessShortcutKeydown, true);
+  window.removeEventListener("keydown", onModelSelectionShortcutKeydown, true);
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("focus", refreshAppSourceAuthorizationOnFocus);
   teardownAppSourceInteractions();
@@ -12256,6 +12280,7 @@ async function handleLogout() {
           :chat-context-over-limit="chatContextStore.isOverLimit"
           :chat-context-error="chatContextStore.lastError"
           :selected-model-label="selectedModelLabel"
+          :can-select-model="canSelectModel"
           :model-picker-disabled="false"
           :agents="agents"
           :workspace-file-candidates="workspaceFileCandidates"

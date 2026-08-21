@@ -701,7 +701,7 @@ test("session share read-only workbench shows sender identity colors and fixed s
   await expect(page.getByRole("button", { name: "新建对话" })).toBeVisible();
 });
 
-test("session share model picker selects from the fixed owner workspace catalog", async ({ page }) => {
+test("session share hides model switching from ordinary users", async ({ page }) => {
   const runtimeCatalogRequests: Array<{ path: string; workspaceId: string | null; shareId: string | null }> = [];
   const sharedSession = {
     ...session(),
@@ -734,12 +734,9 @@ test("session share model picker selects from the fixed owner workspace catalog"
 
   await page.goto("/s/shr_model", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("header-fixed-share-context")).toContainText("所属人固定工作区");
-  await page.getByRole("button", { name: "切换模型" }).click();
-  await expect(page.locator(".figma-chat-model-group-title", { hasText: "所属人 Provider" })).toBeVisible();
-  const ownerModel = page.locator(".figma-chat-model-option-item", { hasText: "所属人模型" });
-  await expect(ownerModel).toBeVisible();
-  await ownerModel.click();
-  await expect(page.getByRole("button", { name: "切换模型" })).toContainText("所属人模型");
+  await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("/");
+  await expect(page.getByTestId("slash-native-section")).not.toContainText("/models");
   await expect.poll(() => runtimeCatalogRequests).toEqual(expect.arrayContaining([
     { path: "/api/internal/platform/opencode-runtime/models", workspaceId: "wrk_shared_model", shareId: "shr_model" },
     { path: "/api/internal/platform/opencode-runtime/providers", workspaceId: "wrk_shared_model", shareId: "shr_model" }
@@ -5520,12 +5517,25 @@ test("application recent version without default personal workspace stays empty"
   expect(fileRequests).toEqual([]);
 });
 
-test("model picker groups models by provider and updates run model", async ({ page }) => {
+test("model picker stays hidden for ordinary users even after three Ctrl presses", async ({ page }) => {
+  await mockBackendApi(page, { ...runnableWorkspaceSetup(), authRoles: ["USER"] });
+
+  await gotoWorkbench(page);
+  await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
+  await page.keyboard.press("Control");
+  await page.keyboard.press("Control");
+  await page.keyboard.press("Control");
+  await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
+});
+
+test("model picker groups models by provider and updates run model after super admin unlock", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
-  await mockBackendApi(page, { ...runnableWorkspaceSetup(), runRequests });
+  await mockBackendApi(page, { ...runnableWorkspaceSetup(), runRequests, authRoles: ["SUPER_ADMIN"] });
 
   await gotoWorkbench(page);
   await expect(page.locator(".ta-workbench-footer-branch")).toBeVisible();
+  await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
+  await unlockModelPicker(page);
 
   await page.getByRole("button", { name: "切换模型" }).click();
   await expect(page.getByRole("dialog", { name: "模型选择" })).toBeVisible();
@@ -5549,6 +5559,7 @@ test("model picker groups models by provider and updates run model", async ({ pa
 
 test("model picker recovers automatically when the first catalog response after restart is empty", async ({ page }) => {
   await mockBackendApi(page, {
+    authRoles: ["SUPER_ADMIN"],
     modelResponses: [
       [],
       [{ id: "recovered-model", providerId: "anthropic", name: "Recovered Model" }]
@@ -5557,6 +5568,7 @@ test("model picker recovers automatically when the first catalog response after 
   });
 
   await gotoWorkbench(page);
+  await unlockModelPicker(page);
   await page.getByRole("button", { name: "切换模型" }).click();
   await expect(page.getByRole("dialog", { name: "模型选择" })).toContainText("暂无匹配模型");
   await expect(
@@ -6347,6 +6359,7 @@ test("agent catalog uses the current workspace when an older request finishes la
 test("model picker keeps the selected model after page reload", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
+    authRoles: ["SUPER_ADMIN"],
     runRequests,
     recentWorkspaces: {
       app_gcms: {
@@ -6362,6 +6375,7 @@ test("model picker keeps the selected model after page reload", async ({ page })
   });
 
   await gotoWorkbench(page);
+  await unlockModelPicker(page);
 
   await page.getByRole("button", { name: "切换模型" }).click();
   await page.getByPlaceholder("搜索模型").fill("north");
@@ -6369,6 +6383,7 @@ test("model picker keeps the selected model after page reload", async ({ page })
   await expect(page.getByRole("button", { name: "切换模型" })).toContainText("North Mini Code Free");
 
   await page.reload({ waitUntil: "domcontentloaded" });
+  await unlockModelPicker(page);
   await expect(page.getByRole("button", { name: "切换模型" })).toContainText("North Mini Code Free");
 
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("use persisted model");
@@ -6491,6 +6506,7 @@ test("context usage keeps payload.info remote root usage separate from the platf
 test("workbench clears stale persisted model and sends catalog default", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
+    authRoles: ["SUPER_ADMIN"],
     runRequests,
     recentWorkspaces: {
       app_gcms: {
@@ -6520,6 +6536,7 @@ test("workbench clears stale persisted model and sends catalog default", async (
   });
 
   await gotoWorkbench(page);
+  await unlockModelPicker(page);
 
   await expect(page.getByRole("button", { name: "切换模型" })).toContainText("DeepSeek-V4-Flash-W8A8");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("ta_selected_model"))).toBe("enterprise-openai/DeepSeek-V4-Flash-W8A8");
@@ -9833,6 +9850,7 @@ test("enterprise native slash commands open models, compact context, and rename 
   });
   await mockBackendApi(page, {
     ...runnableWorkspaceSetup(),
+    authRoles: ["SUPER_ADMIN"],
     runRequests,
     compactRequests,
     compactRequestGate,
@@ -9841,6 +9859,7 @@ test("enterprise native slash commands open models, compact context, and rename 
   });
 
   await gotoWorkbench(page);
+  await unlockModelPicker(page);
   const textarea = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
   await textarea.fill("建立原生命令测试会话");
   await page.getByRole("button", { name: "发送" }).click();
@@ -12483,6 +12502,13 @@ async function gotoWorkbench(page: Page, options: { selectConversation?: boolean
   if (buttonVisible && await newConversationButton.isEnabled()) {
     await newConversationButton.click();
   }
+}
+
+async function unlockModelPicker(page: Page) {
+  await expect(page.getByRole("button", { name: /当前用户/ })).toBeVisible({ timeout: 20_000 });
+  await page.keyboard.press("Control");
+  await page.keyboard.press("Control");
+  await page.keyboard.press("Control");
 }
 
 /** 会话卡片主按钮与置顶按钮并列；历史切换必须限定主按钮，避免可访问名称包含同一标题时产生歧义。 */

@@ -751,6 +751,8 @@ const props =
     readonlyReason?: string
     /** 当前选中的模型展示名 */
     selectedModelLabel?: string
+    /** 是否已通过当前工作台权限和隐藏手势开放模型切换。 */
+    canSelectModel?: boolean
     /** 模型选择按钮是否禁用 */
     modelPickerDisabled?: boolean
     /** 可作为主运行入口选择的 Agent 列表 */
@@ -858,6 +860,7 @@ const props =
   }>(), {
     processRefreshBlocksSubmit: true,
     processStatusPlacement: 'chat',
+    canSelectModel: false,
     commands: () => [],
     agents: () => [],
     workspaceFileCandidates: () => [],
@@ -1579,8 +1582,11 @@ const filteredSkills = computed(() => {
 
 const filteredNativeCommands = computed(() => {
   const query = skillFilterText.value.toLowerCase()
-  if (!query) return OPENCODE_TUI_COMMANDS
-  return OPENCODE_TUI_COMMANDS.filter((command) =>
+  const nativeCommands = props.canSelectModel
+    ? OPENCODE_TUI_COMMANDS
+    : OPENCODE_TUI_COMMANDS.filter((command) => command.name !== 'models')
+  if (!query) return nativeCommands
+  return nativeCommands.filter((command) =>
     command.name.includes(query)
     || command.aliases.some((alias) => alias.includes(query))
     || command.description.toLowerCase().includes(query)
@@ -1713,6 +1719,7 @@ function executeNativeCommand(command: OpenCodeTuiCommand) {
   dismissSkillPanel()
   switch (command.name) {
     case 'models':
+      if (!props.canSelectModel) return
       agentDropdownOpen.value = false
       dropdownOpen.value = true
       void nextTick(() => document.querySelector<HTMLInputElement>('.figma-chat-model-search-input')?.focus())
@@ -6034,7 +6041,7 @@ function onCompositionEnd() {
             </div>
           </div>
           <!-- 中间：模型选择 -->
-          <div class="figma-chat-model-select-wrapper">
+          <div v-if="canSelectModel" class="figma-chat-model-select-wrapper">
             <el-tooltip
               :content="selectedModelLabel || '选择模型'"
               placement="top"

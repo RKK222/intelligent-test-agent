@@ -12470,3 +12470,25 @@
 
 - 文件树不再展示引用不可用提示栏和无效刷新按钮；失效引用的根因已明确为工作区 JSONC 中的旧资产库标识，而非当前共享副本同步失败。
 - 不涉及 API、事件、数据库、Flyway、部署、性能、安全、generated SDK、OpenCode 源码或环境配置；未创建分支。
+
+## 2026-08-21 - 隐藏普通用户模型选择并增加超级管理员三次 Ctrl 解锁
+
+### Why
+
+- 普通用户不应在对话工作台切换模型；超级管理员仍需保留一个默认隐藏、主动触发后才可用的运维入口。
+
+### What
+
+- 复用现有三次 Shift 快捷键状态机，抽象为可配置的三次修饰键手势，新增三次独立 Ctrl 解锁模型入口。
+- `AgentWorkbench` 仅在非分享态 `SUPER_ADMIN` 完成手势后向 `FigmaChatPanel` 开放模型按钮；普通用户、分享成员以及未解锁的超级管理员均不渲染按钮，`/models` 原生命令也同步受门禁保护。
+- 增加快捷键、面板、普通用户、分享态和超级管理员解锁测试，并同步用户手册、agent-web README、src 包说明和前端访问边界。
+
+### How
+
+- 目标 Vitest：2056 passed / 1 skipped；`@test-agent/agent-web` typecheck、production build、用户手册 VitePress build 和 `git diff --check` 通过。
+- Chromium 缺失后补齐 Playwright 浏览器；模型相关 E2E 中普通用户隐藏、目录恢复和分享态用例通过。另有既有工作区自动化引用对账改动导致的 Run 请求前置超时，普通 `new runs use one in-memory conversation context` 用例也可独立复现，未将该无关问题混入本次修复。
+
+### Result
+
+- 普通用户始终看不到模型选择入口；超级管理员连续独立按三次 Ctrl 后可显示并切换，权限离开或进入分享态时会立即收回入口且需重新解锁。
+- 不涉及 HTTP API、RunEvent、数据库、Flyway、部署、性能、安全契约、generated SDK 或 OpenCode 源码；未修改环境配置，未创建分支。
