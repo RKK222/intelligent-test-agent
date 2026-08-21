@@ -12625,8 +12625,12 @@
 - 自动化后端定向 Maven reactor 构建成功；真实 PostgreSQL 历史迁移、MyBatis XML 持久化及完整 Flyway 多历史兼容测试共 33 条通过。
 - 前端全量 Vitest 143 个文件通过，2161 passed、1 skipped；用户手册和 agent-web 生产构建成功。提交前回顾全部 `.agents/session-log*.md` 近期记录，扫描未解决冲突并执行 `git diff --check`。
 - 使用 JDK 25、根目录 `.env.test`、`test` profile 与 ClickHouse 完整重启；backend readiness 为 UP，frontend `127.0.0.1:3000` 可访问，opencode-manager 已重新启动。
+- 浏览器以 888888888 验收应用资产库可选、自动化 A/B 卡片、目标与逐服务器 Git 指针、任意目录树和描述字段；点选仓库只切换查看，没有启动同步。工作树只显示 A/B 两条托管引用，自动化根计算色为 `rgb(109, 40, 217)`，`labels.properties` 展示 `app.title=Our App`，Monaco 输入 textarea 为只读；公共 Agent 树也正常加载且控制台没有前端 error。
+- 首轮启动因本机 `hostname` 返回 `bogon`，与本地持久库中 888888888 的稳定 binding `kakadeMacBook-Pro.local` 不一致，真实返回 `OPENCODE_UNAVAILABLE`。未改数据库归属，而是显式使用已有稳定 server ID 和 `127.0.0.1` advertised host 重启，随后进程、工作版本、应用资产和自动化树全部恢复；后续本机验收不能依赖易变 hostname。
 
 ### Result
 
 - `release` 同时包含最新 `dev` 能力和本次自动化引用最终实现，冲突文件中没有重新引入个人自动化 worktree、Java Run 上下文注入或按 workspace/version 选择的正常入口。
+- 本地数据库确认 `app_fcoss` 仅有两个 `(appId, repositoryId)` 当前状态，分别为 `feature_image/resources` 和 `master/css`，旧 automation application workspace 启用数为 0；个人工作树 JSONC 也只有这两条自动化引用和两条精确外部目录权限。
+- 审计保留一项需后续明确的安全/交互口径：新展开目录只接受当前 generation，但已打开只读标签为满足“切换后继续读旧内容”会直接解析任意仍为 READY 的历史 generation；这与稳定安全文档写的“当前或 Run 租约保护”不完全一致。若严格拒绝伪造历史 locator，需要新增标签级服务端租约或接受切换后旧标签失效，不能只靠现有无状态 locator 同时满足两者。
 - 本次合并没有新增部署节点；保留已有 API、数据库迁移和安全边界，未修改 `.env*`、generated SDK、OpenCode 只读源码或用户未跟踪的 `.reasonix/`。
