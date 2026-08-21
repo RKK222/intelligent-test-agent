@@ -12492,3 +12492,26 @@
 
 - 普通用户始终看不到模型选择入口；超级管理员连续独立按三次 Ctrl 后可显示并切换，权限离开或进入分享态时会立即收回入口且需重新解锁。
 - 不涉及 HTTP API、RunEvent、数据库、Flyway、部署、性能、安全契约、generated SDK 或 OpenCode 源码；未修改环境配置，未创建分支。
+
+## 2026-08-21 - 模型选择入口支持三次 Ctrl 循环显隐
+
+### Why
+
+- 超级管理员完成三次 Ctrl 后原来只能单向显示模型入口，无法用同一隐藏手势再次收起；用户要求每组三次 Ctrl 在显示与隐藏之间循环切换。
+
+### What
+
+- 继续复用 `createTripleKeyShortcut("Control")` 的三击计数和自动重置能力，仅把工作台触发结果改为对模型入口可见状态取反，不新增监听器或快捷键实现。
+- 第二组三击会同时收起已打开的模型弹层和 `/models` 原生命令，第三组三击可再次显示；普通用户和分享态继续始终不可用。
+- 补充连续两组三击、超级管理员显示/隐藏/再次显示、模型弹层收起及 `/models` 同步门禁的 Chromium E2E，并同步前端 README、agent-web README/PACKAGE 和用户手册。
+
+### How
+
+- `support-access-shortcut.test.ts` 6/6 通过，覆盖同一 Control 状态机连续触发两轮三击。
+- Chromium 聚焦 E2E 3/3 通过，覆盖分享态、普通用户和超级管理员循环显隐；重启服务后复跑仍为 3/3。
+- 全前端 `corepack pnpm typecheck`、`corepack pnpm build` 通过；使用 JDK 25、根目录 `.env.test` 和 `test` profile 执行完整重启，最终 backend health/readiness 为 UP、前端 3000 返回 200、登录 CORS 预检通过。
+
+### Result
+
+- 非分享态超级管理员现在每连续独立按三次 Ctrl 都会切换模型入口显隐，隐藏时按钮、弹层和 `/models` 同步收回；模型选择值本身保持不变。
+- 不涉及 HTTP API、RunEvent、数据库、Flyway、部署节点、性能、安全契约、generated SDK 或 OpenCode 源码；未修改环境配置，未创建分支。

@@ -5522,10 +5522,36 @@ test("model picker stays hidden for ordinary users even after three Ctrl presses
 
   await gotoWorkbench(page);
   await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
-  await page.keyboard.press("Control");
-  await page.keyboard.press("Control");
-  await page.keyboard.press("Control");
+  await toggleModelPickerShortcut(page);
   await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
+  await toggleModelPickerShortcut(page);
+  await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
+});
+
+test("model picker toggles after each three Ctrl presses for super admins", async ({ page }) => {
+  await mockBackendApi(page, { ...runnableWorkspaceSetup(), authRoles: ["SUPER_ADMIN"] });
+
+  await gotoWorkbench(page);
+  const modelPicker = page.getByRole("button", { name: "切换模型" });
+  await expect(modelPicker).toHaveCount(0);
+
+  await toggleModelPickerShortcut(page);
+  await expect(modelPicker).toBeVisible();
+  await modelPicker.click();
+  await expect(page.getByRole("dialog", { name: "模型选择" })).toBeVisible();
+
+  await toggleModelPickerShortcut(page);
+  await expect(modelPicker).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "模型选择" })).toHaveCount(0);
+  const textarea = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await textarea.fill("/");
+  await expect(page.getByTestId("slash-native-section")).not.toContainText("/models");
+  await textarea.fill("");
+
+  await toggleModelPickerShortcut(page);
+  await expect(modelPicker).toBeVisible();
+  await textarea.fill("/");
+  await expect(page.getByTestId("slash-native-section")).toContainText("/models");
 });
 
 test("model picker groups models by provider and updates run model after super admin unlock", async ({ page }) => {
@@ -5535,7 +5561,7 @@ test("model picker groups models by provider and updates run model after super a
   await gotoWorkbench(page);
   await expect(page.locator(".ta-workbench-footer-branch")).toBeVisible();
   await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
-  await unlockModelPicker(page);
+  await toggleModelPickerShortcut(page);
 
   await page.getByRole("button", { name: "切换模型" }).click();
   await expect(page.getByRole("dialog", { name: "模型选择" })).toBeVisible();
@@ -5568,7 +5594,7 @@ test("model picker recovers automatically when the first catalog response after 
   });
 
   await gotoWorkbench(page);
-  await unlockModelPicker(page);
+  await toggleModelPickerShortcut(page);
   await page.getByRole("button", { name: "切换模型" }).click();
   await expect(page.getByRole("dialog", { name: "模型选择" })).toContainText("暂无匹配模型");
   await expect(
@@ -6375,7 +6401,7 @@ test("model picker keeps the selected model after page reload", async ({ page })
   });
 
   await gotoWorkbench(page);
-  await unlockModelPicker(page);
+  await toggleModelPickerShortcut(page);
 
   await page.getByRole("button", { name: "切换模型" }).click();
   await page.getByPlaceholder("搜索模型").fill("north");
@@ -6383,7 +6409,7 @@ test("model picker keeps the selected model after page reload", async ({ page })
   await expect(page.getByRole("button", { name: "切换模型" })).toContainText("North Mini Code Free");
 
   await page.reload({ waitUntil: "domcontentloaded" });
-  await unlockModelPicker(page);
+  await toggleModelPickerShortcut(page);
   await expect(page.getByRole("button", { name: "切换模型" })).toContainText("North Mini Code Free");
 
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("use persisted model");
@@ -6536,7 +6562,7 @@ test("workbench clears stale persisted model and sends catalog default", async (
   });
 
   await gotoWorkbench(page);
-  await unlockModelPicker(page);
+  await toggleModelPickerShortcut(page);
 
   await expect(page.getByRole("button", { name: "切换模型" })).toContainText("DeepSeek-V4-Flash-W8A8");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("ta_selected_model"))).toBe("enterprise-openai/DeepSeek-V4-Flash-W8A8");
@@ -9859,7 +9885,7 @@ test("enterprise native slash commands open models, compact context, and rename 
   });
 
   await gotoWorkbench(page);
-  await unlockModelPicker(page);
+  await toggleModelPickerShortcut(page);
   const textarea = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
   await textarea.fill("建立原生命令测试会话");
   await page.getByRole("button", { name: "发送" }).click();
@@ -12504,7 +12530,7 @@ async function gotoWorkbench(page: Page, options: { selectConversation?: boolean
   }
 }
 
-async function unlockModelPicker(page: Page) {
+async function toggleModelPickerShortcut(page: Page) {
   await expect(page.getByRole("button", { name: /当前用户/ })).toBeVisible({ timeout: 20_000 });
   await page.keyboard.press("Control");
   await page.keyboard.press("Control");

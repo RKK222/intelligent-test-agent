@@ -1050,16 +1050,15 @@ function onSupportAccessShortcutKeydown(event: KeyboardEvent) {
   }
 }
 
-/** 捕获阶段识别超级管理员的模型切换手势；权限变化后必须重新完成三次 Ctrl。 */
+/** 捕获阶段识别超级管理员的模型切换手势；每完成三次 Ctrl 就切换一次入口显隐。 */
 function onModelSelectionShortcutKeydown(event: KeyboardEvent) {
   if (!isSuperAdmin.value) {
     modelSelectionShortcut.reset();
     return;
   }
-  if (modelSelectionUnlocked.value) return;
   if (modelSelectionShortcut.handleKeydown(event)) {
     event.preventDefault();
-    modelSelectionUnlocked.value = true;
+    modelSelectionUnlocked.value = !modelSelectionUnlocked.value;
   }
 }
 

@@ -29,6 +29,12 @@ describe("support access shortcut", () => {
     expect(shortcut.handleKeydown(key("Control"))).toBe(false);
     now = 900;
     expect(shortcut.handleKeydown(key("ControlRight"))).toBe(true);
+    now = 1_000;
+    expect(shortcut.handleKeydown(key("Control"))).toBe(false);
+    now = 1_100;
+    expect(shortcut.handleKeydown(key("Control"))).toBe(false);
+    now = 1_200;
+    expect(shortcut.handleKeydown(key("Control"))).toBe(true);
   });
 
   it("accepts left and right Shift code variants from older or synthetic browsers", () => {
