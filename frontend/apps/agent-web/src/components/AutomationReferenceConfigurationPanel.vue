@@ -652,6 +652,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.reference-automation-layout {
+  --reference-folder-accent: #7c3aed;
+  --automation-reference-accent: #7c3aed;
+}
 .reference-dialog-body { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(290px, 34%) minmax(0, 1fr); }
 .reference-repository-column, .reference-configuration-column { min-height: 0; overflow: auto; }
 .reference-repository-column { border-right: 1px solid var(--ta-border); background: var(--ta-panel-2); }
@@ -659,8 +663,9 @@ onBeforeUnmount(() => {
 .reference-column-heading { position: sticky; top: 0; z-index: 2; height: 34px; border-bottom: 1px solid var(--ta-border); padding: 0 12px; background: var(--ta-panel-2); }
 .reference-repository-list { display: flex; flex-direction: column; gap: 6px; padding: 8px; }
 .reference-repository-card { position: relative; overflow: hidden; border: 1px solid var(--ta-border); border-radius: 7px; background: var(--ta-surface); }
-.reference-repository-card.is-selected { border-color: var(--ta-border-strong); box-shadow: inset 3px 0 0 var(--ta-ink); }
+.reference-repository-card.is-selected { border-color: #c4b5fd; box-shadow: inset 3px 0 0 var(--automation-reference-accent); }
 .reference-repository-main { display: grid; width: 100%; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 8px; border: 0; padding: 9px 10px 6px; background: transparent; color: var(--ta-text); text-align: left; cursor: pointer; }
+.reference-repository-main > svg { color: var(--automation-reference-accent); }
 .reference-repository-main:hover { background: var(--ta-hover); }
 .reference-repository-main strong, .reference-repository-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reference-repository-main strong { font-size: 12px; font-weight: 600; }

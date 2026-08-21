@@ -980,7 +980,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             LOGGER.info("Version already exists, templateId={}, version={}", template.workspaceId().value(), normalizedVersion);
             ApplicationWorkspaceVersion current = existing.get();
             ApplicationWorkspaceVersionReplica replica = ensureReplicaForTarget(current, template, userId, targetLinuxServerId, "EXISTING_VERSION", traceId);
-            if (markRecent && !isAutomationRepository(repository)) {
+            if (markRecent) {
                 markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
             }
             return versionResponse(current, replica);
@@ -1048,12 +1048,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                             ErrorCode.CONFLICT,
                     "目标服务器应用版本工作区副本未就绪",
                             Map.of("targetLinuxServerId", target, "versionId", saved.versionId().value())));
-            if (markRecent && !isAutomationRepository(repository)) {
+            if (markRecent) {
                 markRecent(userId, application.appId(), targetReplica.runtimeWorkspaceId());
             }
             return versionResponse(existingVersion(saved.versionId()), targetReplica);
         }
-        if (markRecent && !isAutomationRepository(repository)) {
+        if (markRecent) {
             markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
         }
         publishVersionSync(saved, userId, "CREATED", traceId, Map.of());

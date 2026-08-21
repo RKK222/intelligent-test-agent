@@ -116,6 +116,54 @@ describe("DirectoryRows", () => {
     expect(view.emitted("openViewFile")).toEqual([[entries[1]]]);
   });
 
+  it("uses a distinct semantic color class for automation references", () => {
+    const entries = [
+      {
+        id: "reference:docs",
+        type: "directory" as const,
+        path: "docs",
+        name: "docs",
+        locator: { kind: "REFERENCE" as const, path: "", referenceAlias: "docs" },
+        source: "REFERENCE" as const,
+        merged: true,
+        collision: false,
+        readonly: true,
+        referenceAliases: ["docs"]
+      },
+      {
+        id: "automation:app_demo:repo_auto:3",
+        type: "directory" as const,
+        path: "自动化代码库/接口自动化",
+        name: "接口自动化",
+        locator: {
+          kind: "AUTOMATION_REFERENCE" as const,
+          path: "",
+          automationAppId: "app_demo",
+          automationRepositoryId: "repo_auto",
+          automationGeneration: 3
+        },
+        source: "AUTOMATION_REFERENCE" as const,
+        merged: false,
+        collision: false,
+        readonly: true,
+        referenceAliases: ["接口自动化"]
+      }
+    ];
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": entries },
+        expandedDirectories: new Set<string>()
+      }
+    });
+
+    expect(view.getByRole("button", { name: "docs" }).classList.contains("is-reference-merged")).toBe(true);
+    const automation = view.getByRole("button", { name: "接口自动化" });
+    expect(automation.classList.contains("is-automation-reference")).toBe(true);
+    expect(automation.classList.contains("is-reference-merged")).toBe(false);
+    expect(automation.title).toBe("自动化代码库只读引用");
+  });
+
   it("keeps mixed directories ordinary and allows child writes only through workspacePath", async () => {
     const mixed = {
       id: "mixed:docs",

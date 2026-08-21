@@ -138,7 +138,7 @@ function sourceDescription(entry: MaybeWorkspaceViewEntry): string | undefined {
 }
 
 function semanticClass(entry: MaybeWorkspaceViewEntry): string | undefined {
-  if (entry.source === "AUTOMATION_REFERENCE") return "is-reference-merged";
+  if (entry.source === "AUTOMATION_REFERENCE") return "is-automation-reference";
   if (entry.source !== "REFERENCE") return undefined;
   if (entry.collision) return "is-reference-collision";
   return entry.merged ? "is-reference-merged" : undefined;
@@ -1135,6 +1135,10 @@ function submitRename() {
   color: var(--ta-reference-merged, #2563eb);
 }
 
+.ta-file-tree-row.is-automation-reference {
+  color: var(--ta-automation-reference, #7c3aed);
+}
+
 .ta-file-tree-row.is-reference-collision {
   color: var(--ta-reference-collision, #dc2626);
 }
@@ -1142,6 +1146,11 @@ function submitRename() {
 .ta-file-tree-row.is-reference-merged:focus-visible,
 .ta-file-tree-row.is-reference-merged.is-active {
   color: var(--ta-reference-merged-active, #1d4ed8);
+}
+
+.ta-file-tree-row.is-automation-reference:focus-visible,
+.ta-file-tree-row.is-automation-reference.is-active {
+  color: var(--ta-automation-reference-active, #6d28d9);
 }
 
 .ta-file-tree-row.is-reference-collision:focus-visible,
@@ -1158,6 +1167,10 @@ function submitRename() {
 /* sprite 内部带固定 fill，语义来源色通过整枚图标滤镜统一覆盖，不改变图标和行布局。 */
 .ta-file-tree-row.is-reference-merged :deep(.ta-file-tree-icon) {
   filter: brightness(0) saturate(100%) invert(35%) sepia(89%) saturate(1719%) hue-rotate(207deg) brightness(93%) contrast(94%);
+}
+
+.ta-file-tree-row.is-automation-reference :deep(.ta-file-tree-icon) {
+  filter: brightness(0) saturate(100%) invert(26%) sepia(91%) saturate(3706%) hue-rotate(257deg) brightness(94%) contrast(98%);
 }
 
 .ta-file-tree-row.is-reference-collision :deep(.ta-file-tree-icon) {

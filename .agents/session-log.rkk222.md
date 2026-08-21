@@ -12582,3 +12582,29 @@
 ### Result
 
 - 后续本机 E2E 运行结果不会污染 Git 状态，也不会被误提交；需要交付证据时仍可从本地目录查看。
+
+## 2026-08-21 - 清理自动化旧分支并区分只读引用颜色
+
+### Why
+
+- 用户要求在拉取远端最新 `release` 后复核旧自动化工作空间/激活版本逻辑是否真正退出，并确认自动化文件能由对话直接读取。
+- 自动化只读引用此前继续复用应用资产引用的蓝色语义，文件树和配置页无法直观看出来源差异。
+
+### What
+
+- 审计确认旧 active-version Controller、Service、Mapper、Run 上下文注入器及个人自动化 worktree 正常入口已删除；移除测试工作空间版本创建流程中三处因入口前置拒绝自动化仓库而永远不可达的二次判断，并清理 `backend-api` 包说明中已不存在的 `activateAutomationWorkspaceVersion` 方法名。
+- 保留已执行且 checksum 冻结的 `V20260819125704`、旧表迁移 fixture，以及阻止历史自动化工作区继续被选择、同步或执行 Git 的兼容守卫；这些属于升级输入和安全边界，不是当前配置事实源。
+- 自动化文件树、仓库卡片和目录选择改用紫色，应用资产合并引用继续使用蓝色；补充来源语义类单元测试，并同步安全规范、前端包说明、用户手册和 README。
+
+### How
+
+- 全前端 Vitest 134 个文件通过：2070 passed、1 skipped；`@test-agent/agent-web` production build（含用户手册和 `vue-tsc`）成功。后端 workspace 定向回归 147/147 通过，覆盖应用自动化配置、Run generation 租约、组合文件树、历史工作区鉴权和测试工作区版本流程。
+- 使用 JDK 25、根目录 `.env.test`、`test` profile、`kakadeMacBook-Pro.local` 和 ClickHouse 完整重启；后端 readiness 为 UP、前端返回 200、PostgreSQL/Redis/XXL MySQL/ClickHouse 容器与 manager 正常运行。
+- 888888888 真实工作台显示两个紫色自动化目录；未把文件加入对话上下文，直接要求读取 A 仓库 generation 3 的 `labels.properties`。OpenCode 日志记录目标 `read` 与 `external_directory=allow`，无授权弹窗；确认 Run 返回 `app.title=Our App` 并以 `SUCCEEDED` 结束。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，执行旧符号/端点扫描、冻结 migration SHA-256 对照、`git diff --check` 和服务健康检查；未覆盖其它开发者成果。
+
+### Result
+
+- 当前运行时只以 `(appId, repositoryId)` application automation reference generation 和各成员工作树 JSONC 为事实源；Java 不再向 Run 注入引用说明或物理路径。
+- 自动化来源使用紫色，应用资产 docs 来源保持蓝色。对话读权限和实际内容读取已通过真实端到端验证。
+- 本次不新增 API、RunEvent、数据库结构、Flyway 或部署节点；未修改 `.env*`、generated SDK、OpenCode 源码或冻结 migration，未创建新分支。
