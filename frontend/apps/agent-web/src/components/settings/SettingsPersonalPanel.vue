@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
@@ -16,8 +16,9 @@ import { encryptSshKey } from "../../utils/ssh-crypto";
 
 // SettingsPanel 统一向所有面板传入 currentUser；个人设置面板目前不依赖该字段，
 // 但保留 prop 以避免 Vue 透传告警，类型与 SettingsAppWorkspacePanel 保持一致。
-defineProps<{
+const props = defineProps<{
   currentUser: CurrentUser | null;
+  pageActive: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -34,6 +35,8 @@ const errorMessage = ref("");
 const localClientLoading = ref(false);
 const localClientError = ref("");
 const credential = ref<LocalClientCredential | null>(null);
+const plaintextDialogOpen = ref(false);
+const plaintextClientKey = ref("");
 const localClients = ref<LocalClientInstance[]>([]);
 const localWorkspaces = ref<Workspace[]>([]);
 const localWorkspaceClientId = ref("");
@@ -45,6 +48,13 @@ const pickerError = ref("");
 const pickerPath = ref("/");
 const pickerEntries = ref<LocalClientDirectoryEntry[]>([]);
 let localClientRefreshTimer: ReturnType<typeof setInterval> | undefined;
+let localClientRequestEpoch = 0;
+
+type LocalClientRequestContext = {
+  ownerUserId: string | null;
+  pageActive: boolean;
+  requestEpoch: number;
+};
 
 const onlineLocalClients = computed(() => localClients.value.filter((client) => client.online));
 const selectedLocalClient = computed(() =>
@@ -96,6 +106,8 @@ async function deleteSshKey(sshKeyId: string) {
 
 /** 状态轮询只读取掩码与实例元数据，不请求也不持有明文 client key。 */
 async function loadLocalClientState(silent = false) {
+  if (!props.pageActive) return;
+  const requestContext = captureLocalClientRequestContext();
   if (!silent) localClientLoading.value = true;
   localClientError.value = "";
   try {
@@ -104,6 +116,7 @@ async function loadLocalClientState(silent = false) {
       api.listMyLocalClientInstances(),
       api.listWorkspaces(1, 100)
     ]);
+    if (!isLocalClientRequestCurrent(requestContext)) return;
     credential.value = credentialView;
     localClients.value = clients;
     localWorkspaces.value = workspaces.items.filter((workspace) => workspace.runtimeKind === "LOCAL_CLIENT");
@@ -111,33 +124,92 @@ async function loadLocalClientState(silent = false) {
       localWorkspaceClientId.value = onlineLocalClients.value[0]?.clientInstanceId ?? "";
     }
   } catch (error) {
-    localClientError.value = error instanceof Error ? error.message : "读取本地客户端状态失败";
+    if (isLocalClientRequestCurrent(requestContext)) {
+      localClientError.value = error instanceof Error ? error.message : "读取本地客户端状态失败";
+    }
   } finally {
-    if (!silent) localClientLoading.value = false;
+    if (!silent && isLocalClientRequestCurrent(requestContext)) localClientLoading.value = false;
   }
 }
 
 async function createCredential() {
+  const requestContext = captureLocalClientRequestContext();
   await runLocalClientAction(async () => {
-    credential.value = await api.createMyLocalClientCredential();
-    ElMessage.success("Client key 已创建，请点击复制后写入客户端配置");
+    if (!isLocalClientRequestCurrent(requestContext)) return;
+    const created = await api.createMyLocalClientCredential();
+    if (!isLocalClientRequestCurrent(requestContext)) return;
+    credential.value = created;
+    if (created.revealAvailable === true) {
+      await consumeCredentialReveal(requestContext);
+      return;
+    }
+    ElMessage.success("Client key 已创建");
   });
 }
 
-/** 明文只存在于当前调用栈，复制结束立即清空局部引用，不写响应式状态或浏览器存储。 */
-async function copyCredential() {
+/**
+ * 消费当前凭据版本唯一一次明文，并仅放入本组件的一次性对话框。
+ * 请求期间页面失活或用户切换时丢弃迟到结果，不能把前一用户的 Key 带入新页面。
+ */
+async function consumeCredentialReveal(requestContext = captureLocalClientRequestContext()) {
+  if (!isLocalClientRequestCurrent(requestContext)) return;
+  try {
+    const plaintext = (await api.copyMyLocalClientCredential()).clientKey;
+    if (!plaintext) throw new Error("Client key 显示失败");
+    if (!isLocalClientRequestCurrent(requestContext)) return;
+    plaintextClientKey.value = plaintext;
+    plaintextDialogOpen.value = true;
+    if (credential.value) credential.value = { ...credential.value, revealAvailable: false };
+    await loadLocalClientState(true);
+  } catch (error) {
+    if (isLocalClientRequestCurrent(requestContext)) await loadLocalClientState(true);
+    throw error;
+  }
+}
+
+async function showCredential() {
+  const requestContext = captureLocalClientRequestContext();
   await runLocalClientAction(async () => {
-    let plaintext = "";
-    try {
-      plaintext = (await api.copyMyLocalClientCredential()).clientKey;
-      if (!plaintext || !await copyTextToClipboard(plaintext)) {
-        throw new Error("浏览器未允许写入剪贴板");
-      }
-      ElMessage.success("Client key 已复制，请立即粘贴到客户端配置");
-    } finally {
-      plaintext = "";
-    }
+    if (!isLocalClientRequestCurrent(requestContext)) return;
+    if (credential.value?.revealAvailable !== true) return;
+    await consumeCredentialReveal(requestContext);
   });
+}
+
+/** 显式复制只读取当前一次性对话框内存，不重新请求服务端。 */
+async function copyPlaintextCredential() {
+  const plaintext = plaintextClientKey.value;
+  if (!plaintext) return;
+  try {
+    if (!await copyTextToClipboard(plaintext)) throw new Error("copy rejected");
+    ElMessage.success("Client key 已复制，请立即粘贴到客户端配置");
+  } catch {
+    localClientError.value = "复制 Client key 失败，请手动选择并复制";
+  }
+}
+
+function clearCredentialPlaintext() {
+  plaintextDialogOpen.value = false;
+  plaintextClientKey.value = "";
+}
+
+/**
+ * 密钥请求必须绑定发起时的身份、页面活跃态和代际；任一边界变化后，
+ * 迟到响应只能丢弃，不能继续消费或重新写入明文。
+ */
+function captureLocalClientRequestContext(): LocalClientRequestContext {
+  return {
+    ownerUserId: props.currentUser?.userId ?? null,
+    pageActive: props.pageActive,
+    requestEpoch: localClientRequestEpoch
+  };
+}
+
+function isLocalClientRequestCurrent(requestContext: LocalClientRequestContext) {
+  return requestContext.pageActive
+    && props.pageActive
+    && requestContext.requestEpoch === localClientRequestEpoch
+    && requestContext.ownerUserId === (props.currentUser?.userId ?? null);
 }
 
 async function rotateCredential() {
@@ -150,10 +222,18 @@ async function rotateCredential() {
   } catch {
     return;
   }
+  const requestContext = captureLocalClientRequestContext();
   await runLocalClientAction(async () => {
-    credential.value = await api.rotateMyLocalClientCredential();
+    if (!isLocalClientRequestCurrent(requestContext)) return;
+    const rotated = await api.rotateMyLocalClientCredential();
+    if (!isLocalClientRequestCurrent(requestContext)) return;
+    credential.value = rotated;
+    if (rotated.revealAvailable === true) {
+      await consumeCredentialReveal(requestContext);
+      return;
+    }
     await loadLocalClientState(true);
-    ElMessage.success("Client key 已轮换，请复制新 key 并更新所有设备");
+    ElMessage.success("Client key 已轮换");
   });
 }
 
@@ -272,15 +352,52 @@ async function deleteLocalWorkspace(workspace: Workspace) {
   });
 }
 
-onMounted(() => {
-  loadSshKeys();
-  void loadLocalClientState();
-  localClientRefreshTimer = setInterval(() => void loadLocalClientState(true), 5_000);
-});
+watch(
+  [() => props.pageActive, () => props.currentUser?.userId ?? null],
+  ([active]) => {
+    localClientRequestEpoch += 1;
+    stopLocalClientPolling();
+    clearCredentialPlaintext();
+    if (!active) return;
+    void loadSshKeys();
+    void loadLocalClientState();
+    localClientRefreshTimer = setInterval(() => void loadLocalClientState(true), 5_000);
+  },
+  { immediate: true }
+);
 
 onBeforeUnmount(() => {
-  if (localClientRefreshTimer) clearInterval(localClientRefreshTimer);
+  localClientRequestEpoch += 1;
+  stopLocalClientPolling();
+  clearCredentialPlaintext();
 });
+
+function stopLocalClientPolling() {
+  if (!localClientRefreshTimer) return;
+  clearInterval(localClientRefreshTimer);
+  localClientRefreshTimer = undefined;
+}
+
+function localClientDirectionLabel(direction?: string | null) {
+  if (direction === "ROLLBACK") return "回退";
+  if (direction === "UPDATE") return "更新";
+  if (direction === "SAME") return "已一致";
+  return "策略未知";
+}
+
+function formatLocalClientTime(value?: string | null) {
+  if (!value) return "时间未知";
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(new Date(timestamp));
+}
 </script>
 
 <template>
@@ -308,7 +425,7 @@ onBeforeUnmount(() => {
         <div class="ta-row-actions">
           <el-button v-if="!credential?.exists || credential.status === 'REVOKED'" size="small" type="primary" :disabled="localClientLoading" @click="createCredential">创建</el-button>
           <template v-else>
-            <el-button size="small" type="primary" :disabled="localClientLoading" @click="copyCredential">复制</el-button>
+            <el-button v-if="credential.revealAvailable === true" size="small" type="primary" :disabled="localClientLoading" @click="showCredential">显示 Client key</el-button>
             <el-button size="small" :disabled="localClientLoading" @click="rotateCredential">轮换</el-button>
             <el-button size="small" type="danger" plain :disabled="localClientLoading" @click="revokeCredential">撤销</el-button>
           </template>
@@ -326,6 +443,24 @@ onBeforeUnmount(() => {
               </div>
               <div class="ta-item-subtitle">
                 {{ client.processStatus }} · {{ client.observedRemoteAddress || '未观察到远端地址' }}<template v-if="client.opencodePort"> · 端口 {{ client.opencodePort }}</template>
+              </div>
+              <div v-if="client.selfUpdateSupported === true" class="ta-client-update-state">
+                <div class="ta-client-update-heading">
+                  <span class="ta-update-support is-supported">支持静默自更新</span>
+                  <span :class="['ta-update-direction', `is-${String(client.updateDirection || 'unknown').toLowerCase()}`]">
+                    {{ localClientDirectionLabel(client.updateDirection) }}
+                  </span>
+                </div>
+                <div v-if="client.targetClientVersion" class="ta-version-transition">
+                  {{ client.clientVersion }} → {{ client.targetClientVersion }}
+                </div>
+                <div v-else class="ta-item-subtitle">平台尚未设置目标版本</div>
+                <div v-if="client.lastUpdateStatus" class="ta-item-subtitle">
+                  最近结果 {{ client.lastUpdateStatus }} · {{ formatLocalClientTime(client.lastUpdateAt) }}
+                </div>
+              </div>
+              <div v-else class="ta-client-update-state is-legacy">
+                <span class="ta-update-support">不支持自更新，请安装新版 DEB</span>
               </div>
             </div>
           </div>
@@ -371,6 +506,29 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </section>
+
+    <el-dialog
+      v-model="plaintextDialogOpen"
+      title="一次性 Client key"
+      width="560px"
+      append-to-body
+      :close-on-click-modal="false"
+      :destroy-on-close="true"
+      @close="clearCredentialPlaintext"
+      @closed="clearCredentialPlaintext"
+    >
+      <el-alert
+        title="关闭后不能再次查看；如遗失，请轮换生成新 Key。"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+      <code class="ta-plaintext-client-key">{{ plaintextClientKey }}</code>
+      <template #footer>
+        <el-button :disabled="!plaintextClientKey" @click="copyPlaintextCredential">复制到剪贴板</el-button>
+        <el-button type="primary" @click="clearCredentialPlaintext">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 已有 SSH key 列表 -->
     <div v-if="sshKeys.length" class="ta-section">
@@ -470,12 +628,24 @@ onBeforeUnmount(() => {
 .ta-client-card,
 .ta-local-workspace-form { padding: 12px; border: 1px solid #ebeef5; border-radius: 8px; background: #fff; }
 .ta-masked-key { margin-top: 4px; font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: #4c4d4f; }
+.ta-plaintext-client-key { display: block; margin-top: 14px; padding: 12px; overflow-wrap: anywhere; border: 1px solid #e4e7ed; border-radius: 6px; background: #f7f8fa; color: #303133; user-select: all; }
 .ta-row-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .ta-row-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .ta-client-list { display: flex; flex-direction: column; gap: 8px; }
 .ta-client-main { align-items: flex-start; gap: 9px; min-width: 0; }
 .ta-online-dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: #b4b4b4; box-shadow: 0 0 0 3px #f2f2f2; }
 .ta-online-dot.is-online { background: #2f9e61; box-shadow: 0 0 0 3px #e5f6ed; }
+.ta-client-update-state { margin-top: 7px; padding: 7px 8px; border: 1px solid #e4e7ed; border-radius: 6px; background: #fafbfc; }
+.ta-client-update-state.is-legacy { border-color: #ead8b5; background: #fffaf0; color: #946015; }
+.ta-client-update-heading { display: flex; align-items: center; gap: 7px; }
+.ta-update-support,
+.ta-update-direction { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 7px; font-size: 10px; font-weight: 600; }
+.ta-update-support { background: #f4eee3; color: #946015; }
+.ta-update-support.is-supported { background: #e5f6ed; color: #2f7a51; }
+.ta-update-direction { background: #f2f3f5; color: #606266; }
+.ta-update-direction.is-update { background: #e5f6ed; color: #2f7a51; }
+.ta-update-direction.is-rollback { background: #fff1dc; color: #9a5d16; }
+.ta-version-transition { margin-top: 5px; color: #991b1b; font: 11px "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .ta-local-workspace-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .ta-local-workspace-form h5,
 .ta-item-list h5 { grid-column: 1 / -1; margin: 0; font-size: 13px; color: #303133; }

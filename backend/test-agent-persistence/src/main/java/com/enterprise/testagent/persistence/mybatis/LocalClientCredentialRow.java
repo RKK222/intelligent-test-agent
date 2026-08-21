@@ -12,5 +12,6 @@ public record LocalClientCredentialRow(
         String status,
         Instant createdAt,
         Instant updatedAt,
+        Instant revealedAt,
         Instant revokedAt) {
 }

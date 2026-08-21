@@ -15,6 +15,7 @@ public record LocalClientCredential(
         LocalClientCredentialStatus status,
         Instant createdAt,
         Instant updatedAt,
+        Instant revealedAt,
         Instant revokedAt) {
 
     public LocalClientCredential {
@@ -30,6 +31,9 @@ public record LocalClientCredential(
         updatedAt = DomainValidation.requireInstant(updatedAt, "updatedAt");
         if (updatedAt.isBefore(createdAt)) {
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
+        }
+        if (revealedAt != null && revealedAt.isBefore(createdAt)) {
+            throw new IllegalArgumentException("revealedAt must not be before createdAt");
         }
         if (status == LocalClientCredentialStatus.ACTIVE && revokedAt != null) {
             throw new IllegalArgumentException("active credential must not have revokedAt");

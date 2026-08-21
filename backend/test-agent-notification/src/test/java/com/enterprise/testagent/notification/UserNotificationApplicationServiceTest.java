@@ -39,6 +39,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 
 class UserNotificationApplicationServiceTest {
 
@@ -287,6 +289,55 @@ class UserNotificationApplicationServiceTest {
         verify(repository).markReadById(pending.notificationId(), MEMBER, NOW, "trace_dispose_read");
         assertThat(publisher.events).singleElement().satisfies(event ->
                 assertThat(event.payload().get("changeType")).isEqualTo("READ"));
+    }
+
+    @Test
+    void invalidatesOnlyTheClickedStaleLocalClientNotificationById() {
+        UserNotificationId staleId = new UserNotificationId("ntf_local_client_stale");
+        when(repository.invalidateActiveById(
+                staleId, MEMBER, "STALE_POLICY", "trace_local_stale", NOW)).thenReturn(true);
+
+        service.invalidateLocalClientUpdateNotification(
+                MEMBER, staleId, "STALE_POLICY", "trace_local_stale");
+
+        verify(repository).invalidateActiveById(
+                staleId, MEMBER, "STALE_POLICY", "trace_local_stale", NOW);
+        verify(repository, never()).invalidateActiveByAction(
+                eq(UserNotificationActionType.LOCAL_CLIENT_UPDATE), any(), eq(MEMBER), any(), any(), any());
+    }
+
+    @Test
+    void reactivatesSameUpdateNotificationWithLatestVersionCopy() {
+        when(repository.reactivateByDedupKeyIfChanged(any())).thenReturn(true);
+
+        service.syncLocalClientUpdateAvailable(
+                MEMBER,
+                "lci_notification_device",
+                "麒麟设备",
+                "20260820183000",
+                "20260820190000",
+                "UPDATE",
+                7,
+                "trace_local_reactivate");
+
+        ArgumentCaptor<UserNotification> notification = ArgumentCaptor.forClass(UserNotification.class);
+        verify(repository).reactivateByDedupKeyIfChanged(notification.capture());
+        assertThat(notification.getValue().body())
+                .contains("当前 20260820183000", "目标 20260820190000");
+        assertThat(publisher.events).singleElement().satisfies(event ->
+                assertThat(event.payload().get("changeType")).isEqualTo("UPDATED"));
+    }
+
+    @Test
+    void staleUpdateInvalidationUsesRequiresNewTransactionBoundary() throws Exception {
+        var method = LocalClientUpdateNotificationInvalidationService.class.getMethod(
+                "invalidate", UserId.class, UserNotificationId.class, String.class, String.class);
+        var transaction = new AnnotationTransactionAttributeSource().getTransactionAttribute(
+                method, LocalClientUpdateNotificationInvalidationService.class);
+
+        assertThat(transaction).isNotNull();
+        assertThat(transaction.getPropagationBehavior())
+                .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     private SessionShare share(List<SessionShareMembership> memberships, long version) {

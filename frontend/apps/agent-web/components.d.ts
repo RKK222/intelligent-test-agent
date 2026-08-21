@@ -67,6 +67,7 @@ declare module 'vue' {
     HelpCenterDialog: typeof import('./src/components/HelpCenterDialog.vue')['default']
     InternalModelObservabilityPanel: typeof import('./src/components/system/InternalModelObservabilityPanel.vue')['default']
     InternalModelProviderPanel: typeof import('./src/components/system/InternalModelProviderPanel.vue')['default']
+    LocalClientVersionManagementPanel: typeof import('./src/components/system/LocalClientVersionManagementPanel.vue')['default']
     MemoryAdminPanel: typeof import('./src/components/system/MemoryAdminPanel.vue')['default']
     MemoryCenter: typeof import('./src/components/MemoryCenter.vue')['default']
     MetricHelpLabel: typeof import('./src/components/system/MetricHelpLabel.vue')['default']

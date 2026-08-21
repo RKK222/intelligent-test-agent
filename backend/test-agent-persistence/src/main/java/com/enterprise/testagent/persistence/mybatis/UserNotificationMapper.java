@@ -13,6 +13,8 @@ public interface UserNotificationMapper {
 
     int updateByDedupKeyIfChanged(@Param("row") UserNotificationRow row);
 
+    int reactivateByDedupKeyIfChanged(@Param("row") UserNotificationRow row);
+
     int updateActiveByAction(
             @Param("recipientUserId") String recipientUserId,
             @Param("actionType") String actionType,
@@ -41,6 +43,13 @@ public interface UserNotificationMapper {
 
     int invalidateSessionSharesBySession(
             @Param("sessionId") String sessionId,
+            @Param("reason") String reason,
+            @Param("traceId") String traceId,
+            @Param("invalidatedAt") Instant invalidatedAt);
+
+    int invalidateActiveById(
+            @Param("notificationId") String notificationId,
+            @Param("recipientUserId") String recipientUserId,
             @Param("reason") String reason,
             @Param("traceId") String traceId,
             @Param("invalidatedAt") Instant invalidatedAt);

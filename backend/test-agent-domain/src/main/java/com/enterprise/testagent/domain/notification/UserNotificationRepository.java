@@ -19,6 +19,9 @@ public interface UserNotificationRepository {
      */
     boolean updateByDedupKeyIfChanged(UserNotification notification);
 
+    /** 重新激活同一 dedupKey 的已失效通知，并刷新其当前版本文案。 */
+    boolean reactivateByDedupKeyIfChanged(UserNotification notification);
+
     /** 更新仍有效的受控动作通知快照，返回命中行数。 */
     int updateActiveByAction(
             UserId recipientUserId,
@@ -44,6 +47,14 @@ public interface UserNotificationRepository {
     int invalidateActiveByAction(
             UserNotificationActionType actionType,
             String actionTargetId,
+            UserId recipientUserId,
+            String reason,
+            String traceId,
+            Instant invalidatedAt);
+
+    /** 只失效接收人的精确通知 ID，避免旧通知动作关闭同实例的新通知。 */
+    boolean invalidateActiveById(
+            UserNotificationId notificationId,
             UserId recipientUserId,
             String reason,
             String traceId,

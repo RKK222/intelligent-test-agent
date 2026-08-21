@@ -17,7 +17,33 @@ record LocalClientConfiguration(
         Path opencodeDataDirectory,
         int portMin,
         int portMax,
-        boolean allowInsecureControl) {
+        boolean allowInsecureControl,
+        URI downloadBaseUri,
+        String signingPublicKeyBase64,
+        Path installRoot) {
+
+    LocalClientConfiguration(
+            URI serverBaseUri,
+            String clientName,
+            Path opencodeExecutable,
+            Path opencodeConfigDirectory,
+            Path opencodeDataDirectory,
+            int portMin,
+            int portMax,
+            boolean allowInsecureControl) {
+        this(
+                serverBaseUri,
+                clientName,
+                opencodeExecutable,
+                opencodeConfigDirectory,
+                opencodeDataDirectory,
+                portMin,
+                portMax,
+                allowInsecureControl,
+                null,
+                null,
+                null);
+    }
 
     static LocalClientConfiguration load() throws IOException {
         Path configDirectory = LocalClientPaths.configDirectory();
@@ -41,6 +67,9 @@ record LocalClientConfiguration(
                         "opencodeDataDirectory", LocalClientPaths.stateDirectory().resolve("opencode-data").toString()))
                 .toAbsolutePath().normalize();
         String defaultName = System.getProperty("user.name", "user") + "@" + hostname();
+        String downloadBase = optional(properties, "downloadBaseUrl");
+        String publicKeyBase64 = optional(properties, "signingPublicKeyBase64");
+        String installRootValue = optional(properties, "installRoot");
         return new LocalClientConfiguration(
                 normalizeBaseUri(serverUri),
                 properties.getProperty("clientName", defaultName).trim(),
@@ -49,7 +78,10 @@ record LocalClientConfiguration(
                 opencodeData,
                 portMin,
                 portMax,
-                allowInsecure);
+                allowInsecure,
+                downloadBase == null ? null : URI.create(downloadBase),
+                publicKeyBase64,
+                installRootValue == null ? null : Path.of(installRootValue).toAbsolutePath().normalize());
     }
 
     LocalClientConfiguration {
@@ -68,6 +100,30 @@ record LocalClientConfiguration(
         Objects.requireNonNull(opencodeExecutable, "opencodeExecutable must not be null");
         Objects.requireNonNull(opencodeConfigDirectory, "opencodeConfigDirectory must not be null");
         Objects.requireNonNull(opencodeDataDirectory, "opencodeDataDirectory must not be null");
+        boolean anySelfUpdate = downloadBaseUri != null || signingPublicKeyBase64 != null || installRoot != null;
+        if (anySelfUpdate && (downloadBaseUri == null || signingPublicKeyBase64 == null || installRoot == null)) {
+            throw new IllegalArgumentException("self-update configuration must include downloadBaseUrl, signingPublicKeyBase64 and installRoot");
+        }
+        if (downloadBaseUri != null) {
+            String downloadScheme = downloadBaseUri.getScheme();
+            if (downloadBaseUri.getHost() == null
+                    || !("http".equalsIgnoreCase(downloadScheme) || "https".equalsIgnoreCase(downloadScheme))
+                    || downloadBaseUri.getUserInfo() != null
+                    || downloadBaseUri.getRawQuery() != null
+                    || downloadBaseUri.getRawFragment() != null) {
+                throw new IllegalArgumentException("self-update downloadBaseUrl is invalid");
+            }
+            if (signingPublicKeyBase64.isBlank()
+                    || signingPublicKeyBase64.length() > 16 * 1024
+                    || !signingPublicKeyBase64.matches("[A-Za-z0-9+/=]+")) {
+                throw new IllegalArgumentException("self-update signing public key is invalid");
+            }
+            installRoot = installRoot.toAbsolutePath().normalize();
+        }
+    }
+
+    boolean selfUpdateConfigured() {
+        return downloadBaseUri != null && signingPublicKeyBase64 != null && installRoot != null;
     }
 
     URI websocketUri() {
@@ -103,6 +159,11 @@ record LocalClientConfiguration(
     private static int integer(Properties properties, String key, int fallback) {
         String value = properties.getProperty(key);
         return value == null || value.isBlank() ? fallback : Integer.parseInt(value.trim());
+    }
+
+    private static String optional(Properties properties, String key) {
+        String value = properties.getProperty(key);
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private static String hostname() {

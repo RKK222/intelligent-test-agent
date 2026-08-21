@@ -292,3 +292,13 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 所有读写都校验 generation/fencing token。结构由
 `V20260811210453__local_client_credentials_create_runtime.sql` 创建，详见
 `docs/deployment/database.md`。
+
+`LocalClientVersionMapper.xml` / `MyBatisLocalClientVersionRepository` 保存受签名 release、artifact、全局/用户
+策略、rollout 快照与 update attempt；所有关系型 SQL 均在 MyBatis XML。runtime 的独立短事务门面把 attempt 终态 CAS 与
+`SELECT ... FOR UPDATE` rollout 主行锁、全量 attempt 读取和 `COMPLETED/PARTIAL_FAILED` 更新放在同一物理事务，使并发普通终态、
+deadline、能力/generation 取消和迟到纠正串行收敛；锁目标不存在时整套写入回滚并保持 `NOT_FOUND`。固定迁移为
+`V20260820182024__local_client_releases_create_version_management.sql` 与
+`V20260820202529__local_client_credentials_add_revealed_at.sql`；一旦在任何需保留数据库执行，文件名、字节和
+checksum 均不得改写。两项 SQL 都位于交付物 `backend/lib/test-agent-persistence-*.jar`，不在瘦
+`test-agent-app.jar` 中；交付前必须在真实 PostgreSQL 空库、已部署主历史和 release 兼容历史上升级，并从
+源码、构建输出、发布 ZIP 和安装后 persistence JAR 核对字节。不得使用 `repair`、`outOfOrder` 或手改 history。

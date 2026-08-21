@@ -38,6 +38,11 @@ public class MyBatisUserNotificationRepository implements UserNotificationReposi
     }
 
     @Override
+    public boolean reactivateByDedupKeyIfChanged(UserNotification notification) {
+        return mapper.reactivateByDedupKeyIfChanged(toRow(notification)) == 1;
+    }
+
+    @Override
     public int updateActiveByAction(
             UserId recipientUserId,
             UserNotificationActionType actionType,
@@ -95,6 +100,17 @@ public class MyBatisUserNotificationRepository implements UserNotificationReposi
             Instant invalidatedAt) {
         return mapper.invalidateSessionSharesBySession(
                 sessionId.value(), reason, traceId, invalidatedAt);
+    }
+
+    @Override
+    public boolean invalidateActiveById(
+            UserNotificationId notificationId,
+            UserId recipientUserId,
+            String reason,
+            String traceId,
+            Instant invalidatedAt) {
+        return mapper.invalidateActiveById(
+                notificationId.value(), recipientUserId.value(), reason, traceId, invalidatedAt) == 1;
     }
 
     @Override

@@ -5,6 +5,27 @@
 
 ## Entries
 
+### 2026-08-21 - 实现麒麟 ARM 本地客户端认证、版本管理与静默自更新
+
+- Why:
+  - 麒麟 ARM64 内网客户端需要单 Shell 引导、统一认证号与平台 Client key 配对、平台可控的全局/用户灰度版本策略，以及无需重复输入凭据的静默升级、回退和坏版本恢复；同时要求 `tack_v1_` key 由平台生成且每次创建/重置只成功展示一次。
+- What:
+  - 后端新增 14 位北京时间版本值对象、签名 catalog/manifest 同步、release/artifact/global policy/user policy/rollout/attempt 持久化模型与 MyBatis XML，实现用户覆盖优先、在线实例快照、generation fencing、PREPARED 二次策略校验、补偿扫描、更新状态和站内信去重；管理 API 实时校验 `SUPER_ADMIN`，普通用户更新 API 重验通知归属、实例所有权、在线状态和目标策略。
+  - WSS 注册以兼容方式增加平台、客户端/OpenCode/启动器版本和 `SELF_UPDATE_V1` capability，并增加版本检查、策略、更新命令、准备、应用、取消和状态帧；旧 `0.1.0` 客户端继续兼容注册但不会接收自更新命令。
+  - 审查收敛后，全部非终态 attempt 统一受 30 分钟 deadline 约束；只有 `FAILED/DELIVERY_DEADLINE_EXCEEDED` 可由迟到 `SUCCEEDED/AUTO_ROLLED_BACK` 条件纠正。ACK 直接使用协调器从持久化 attempt 派生的命令坐标和终态，普通冲突不 ACK，客户端保留 marker；独立短事务门面统一平台补偿和客户端普通/迟到终态，在同一物理事务内执行 attempt CAS、实例投影、PostgreSQL rollout 行锁、attempt 读取及汇总，扫描与网络发送留在事务外，避免多 Java 并发终结遗留错误的 `PARTIAL_FAILED`。
+  - Java 客户端新增隐藏式首次接入、本地 `0700/0600` 凭据与实例 ID 持久化、注册后立即及五分钟抖动版本检查、可信根签名下载、候选 JDK/JAR/OpenCode 自检、pending marker、专用退出、静默凭据复用和状态上报。
+  - 麒麟 ARM64 DEB 的业务 payload 收敛为稳定 Shell；Shell 校验 ARM64/glibc，识别同一完整 home 的系统 JDK21 或下载签名 JDK，生成用户级 systemd/桌面入口，并以不可变 `releases/{version}`、`current` 原子切换和 known-good 自动回滚管理完整发布单元。
+  - 前端新增客户端版本管理页、全局/用户策略和 rollout/attempt 展示，个人设置增加客户端目标版本/方向/最近结果，站内信只触发对应实例；Client key 创建/重置改为一次性明文对话框，并处理迟到响应、页面切换、卸载和原生关闭时的立即内存清理。
+  - 同步工程 README、HTTP API、WSS 事件、安全、数据库、企业打包/Nginx 与麒麟逐机部署文档；两条 Flyway migration 按已执行不可变字节和 SHA-256 固定，打包脚本校验最终 persistence JAR 内字节。
+- How:
+  - 采用测试先行与多轮独立审查，覆盖版本比较、认证限流/脱敏、一次性 key 并发、策略优先级、rollout 幂等与 generation、通知冲突、签名/Host/路径/大小/SHA、系统 JDK home 与软链逃逸、升级/回退/自动回滚及凭据复用。
+  - 最终终态事务边界相关聚合扩展为 46 个测试类共 153 项：148 通过、5 个真实 PostgreSQL 用例因本机 Docker daemon 不可用按 Testcontainers 规范跳过；coordinator 25/25 覆盖补偿终态真实 Spring 活动事务、扫描/网络事务外、无事务失败关闭和锁异常回滚，新增 app 集成门禁从生产事务服务并发纠正同一 rollout。`test-agent-app -am -DskipTests package` 通过；两条固定 migration SHA-256 未变化。
+  - 前端 `lint/typecheck/test/build` 通过（139 个测试文件，2084 passed、1 skipped）；麒麟 package/update Shell 测试均通过；后端任务相关模块和本地客户端测试通过；临时 backend-only 打包通过且最终 persistence JAR 内两条 migration SHA 与源码一致。
+  - 全量 `mvn clean test` 仍被两个与 HEAD 一致的既有 persistence 基线问题阻断：H2 model-gateway fixture 缺少 `embedding_dimension`，session-share 固定日期在当前时间已过期；单独重跑稳定复现，本任务未越界修改。
+- Result:
+  - 代码、协议、管理/用户页面、部署脚本和文档已形成麒麟 ARM64 首次接入与静默版本控制闭环；未修改 `.env.local`、generated SDK 或 `opencode-source`，未新建分支/worktree。
+  - Docker daemon 当前不可用，生产终态事务服务及其它真实 PostgreSQL 多历史升级/并发测试、真实 Nginx 语法，以及真实麒麟 ARM64 的首次安装→用户更新→管理员强制更新→低版本回退→坏版本恢复仍是生产发布前现场闸门，不能视为本机已通过。
+
 ### 2026-08-09 - 将“原始输出”入口从对话框顶栏移动至底部状态栏（改为下载图标）
 
 - Why:

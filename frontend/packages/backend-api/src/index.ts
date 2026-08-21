@@ -125,8 +125,16 @@ import type {
   LocalClientCommandResult,
   LocalClientCredential,
   LocalClientDirectoryEntry,
+  LocalClientGlobalPolicy,
   LocalClientInstance,
   LocalClientPlaintextKey,
+  LocalClientRelease,
+  LocalClientReleaseSyncResult,
+  LocalClientRollout,
+  LocalClientRolloutRequest,
+  LocalClientUpdateAttempt,
+  LocalClientUserPolicy,
+  LocalClientUserUpdateRequest,
   LocalWorkspace,
   ManagedApplication,
   ManagedWorkspaceRuntime,
@@ -463,6 +471,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
   const localClientBase = "/api/internal/platform/local-opencode-client";
+  const localClientVersionManagementBase = `${localClientBase}/version-management`;
   const agentConfigBase = `${workspaceManagementBase}/agent-config`;
   const agentSkillHubBase = `${workspaceManagementBase}/agent-skill-hub`;
   const opencodeRuntimeBase = "/api/internal/platform/opencode-runtime";
@@ -1143,6 +1152,49 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<{ revoked: boolean }>(`${localClientBase}/credentials/me`, { method: "DELETE" }),
     listMyLocalClientInstances: () =>
       request<LocalClientInstance[]>(`${localClientBase}/instances/me`),
+    syncLocalClientReleases: () =>
+      request<LocalClientReleaseSyncResult>(`${localClientVersionManagementBase}/releases/sync`, {
+        method: "POST"
+      }),
+    listLocalClientReleases: () =>
+      request<LocalClientRelease[]>(`${localClientVersionManagementBase}/releases`),
+    getLocalClientGlobalPolicy: () =>
+      request<LocalClientGlobalPolicy>(`${localClientVersionManagementBase}/global-policy`),
+    setLocalClientGlobalPolicy: (targetVersion: string) =>
+      request<LocalClientGlobalPolicy>(`${localClientVersionManagementBase}/global-policy`, {
+        method: "PUT",
+        body: JSON.stringify({ targetVersion })
+      }),
+    listLocalClientUserPolicies: () =>
+      request<LocalClientUserPolicy[]>(`${localClientVersionManagementBase}/user-policies`),
+    setLocalClientUserPolicy: (userId: string, targetVersion: string) =>
+      request<LocalClientUserPolicy>(
+        `${localClientVersionManagementBase}/user-policies/${encodeURIComponent(userId)}`,
+        { method: "PUT", body: JSON.stringify({ targetVersion }) }
+      ),
+    clearLocalClientUserPolicy: (userId: string) =>
+      request<LocalClientUserPolicy>(
+        `${localClientVersionManagementBase}/user-policies/${encodeURIComponent(userId)}`,
+        { method: "DELETE" }
+      ),
+    createLocalClientRollout: (payload: LocalClientRolloutRequest) =>
+      request<LocalClientRollout>(`${localClientVersionManagementBase}/rollouts`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    listLocalClientRollouts: () =>
+      request<LocalClientRollout[]>(`${localClientVersionManagementBase}/rollouts`),
+    listLocalClientRolloutAttempts: (rolloutId: string) =>
+      request<LocalClientUpdateAttempt[]>(
+        `${localClientVersionManagementBase}/rollouts/${encodeURIComponent(rolloutId)}/attempts`
+      ),
+    requestLocalClientUpdate: (
+      clientInstanceId: string,
+      payload: LocalClientUserUpdateRequest
+    ) => request<LocalClientRollout>(
+      `${localClientBase}/instances/${encodeURIComponent(clientInstanceId)}/updates`,
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
     getMyOpencodeEndpoints: () =>
       request<OpencodeEndpoint[]>(agentPath("/opencode-endpoints/me")),
     commandLocalClientOpencode: (

@@ -74,6 +74,7 @@
 - `LoggingFrameworkBindingTest` 覆盖运行态使用 Log4j2 作为 SLF4J 实际绑定。
 - `WebClientConfigTest` 覆盖运行态提供可构建的 `WebClient.Builder`。
 - `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 验证企业顺序基线、工具盒子/LobeHub/内部模型/撤销重发分叉、QA Memory 完整与中间态个人历史、已执行会话分享但缺少 QA Memory 的 release 历史，以及体验工作区候选已执行/未执行两套历史都能升级到当前版本；未知 checksum 失败关闭，所有路径均未启用 `outOfOrder`。
+- `LocalClientUpdateTerminalTransactionPostgresqlIntegrationTest` 使用真实 PostgreSQL、生产 MyBatis repository 和运行时终态事务门面并发纠正同一 rollout 的 deadline attempt，验证 attempt CAS、实例投影、rollout 行锁及最终汇总共同提交；Docker 不可用时按 Testcontainers 规范跳过。
 - `ExperienceWorkspaceStartupRunnerTest` 覆盖启动阶段只委托统一体验初始化程序，避免在 app 层复制 Git 逻辑。
 - `TestAgentApplicationTest` 覆盖即使 classpath 含 Servlet 依赖，平台主应用仍强制为 Reactive 并使用北京时间；integration 模块覆盖 Admin 独立端口、真实 MySQL Flyway、SSO 与故障退避。
 - `SpringBeanConstructorWiringTest` 扫描最终应用 `com.enterprise.testagent` 下的全部生产 Spring 组件，禁止多构造器 Bean 在既无显式注入构造器、又无无参构造器的情况下进入发布包，避免运行时回退到不存在的无参构造器。

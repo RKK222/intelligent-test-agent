@@ -1154,7 +1154,9 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                         from information_schema.columns
                         where table_schema = current_schema()
                           and (
-                              (table_name = 'sessions'
+                              (table_name = 'local_client_credentials'
+                                  and column_name = 'revealed_at')
+                              or (table_name = 'sessions'
                                   and column_name in ('runtime_kind', 'local_client_instance_id'))
                               or (table_name = 'runs'
                                   and column_name in ('target_runtime_kind', 'target_local_client_instance_id'))
@@ -1165,7 +1167,7 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .query(Long.class)
                 .single();
         assertThat(tableCount).isEqualTo(3L);
-        assertThat(runtimeColumnCount).isEqualTo(6L);
+        assertThat(runtimeColumnCount).isEqualTo(7L);
     }
 
     private static long qaMemorySchemaTableCount(DataSource dataSource) {

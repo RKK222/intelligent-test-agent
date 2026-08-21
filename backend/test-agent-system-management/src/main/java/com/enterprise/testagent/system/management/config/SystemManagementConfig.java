@@ -8,6 +8,7 @@ import com.enterprise.testagent.domain.user.UserDeletionRepository;
 import com.enterprise.testagent.domain.user.UserManagementQueryRepository;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.system.management.auth.AuthApplicationService;
+import com.enterprise.testagent.system.management.localclient.LocalClientReleaseCatalogProperties;
 import com.enterprise.testagent.system.management.user.ThirdPartyUserApiClient;
 import com.enterprise.testagent.system.management.user.UserDomainService;
 import com.enterprise.testagent.system.management.user.UserManagementApplicationService;
@@ -19,7 +20,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
 @Configuration
-@EnableConfigurationProperties(ThirdPartyApiProperties.class)
+@EnableConfigurationProperties({ThirdPartyApiProperties.class, LocalClientReleaseCatalogProperties.class})
 public class SystemManagementConfig {
 
     @Bean

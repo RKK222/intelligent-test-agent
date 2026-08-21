@@ -17,6 +17,10 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 全局顶部栏在用户手册与资源/头像区之间渲染 `UserNotificationCenter`。面板默认打开“未读”，并把“全部”置于其后，支持分页、加载/空态/错误重试/失效态、Esc/点击外部关闭、焦点返回和键盘操作；未读使用工行红闭合信封，已读使用中性灰打开信封，未读取即失效的历史使用停用图标，避免误标已读。点击有效 `SESSION_SHARE` 通知在新标签页打开 `/s/{shareId}`，当前工作台保留，且不会在页面侧提前调用通用已读接口。
 - `AgentWorkbench` 登录后先读取通知分页，再订阅用户级通知 SSE；变化信号更新角标并合并刷新列表，断流由 client 重连。固定分享工作台隐藏铃铛。分享设置成功文案明确“已通知被分享人”，完整链接输入区不再占据主流程，只在弹框页脚保留低强调“复制备用链接”。
 
+- `SUPER_ADMIN` 在系统管理页可同步已签名本地客户端 release、维护全局/用户目标版本、创建 `ALL_ONLINE` 或
+  `USER` rollout 并查看 attempt；普通用户仍只从通知动作更新自己的在线实例。页面不展示或缓存 Key、签名私钥、
+  下载 URL 或策略 revision；旧客户端显示需安装新 DEB。
+
 - 会话列表提供“我的会话 / 分享给我”双 Tab；分享列表保留过期、取消、移除和会话归档记录并置灰，只有 `ACTIVE` 可进入，点击有效分享会话时使用独立浏览器标签页打开 `/s/{shareId}`，当前普通工作台不切换路由。所属人通过可从右下角双向拉伸的分享弹窗设置 1/3/7 天有效期、用户搜索、多选和逐人 `canChat` 权限（双侧显示只读与可对话）；站内通知是主入口，永久唯一链接仅作为页脚备用复制动作，原链接仍支持取消后重新启用。取消前会提示仍待执行的定时任务。
 - `/s/{shareId}` 为固定 Session/Workspace 的完整分享工作台：所属人按普通历史会话流程跳转，被分享人隐藏会话列表等越界入口，但保留“新建对话”，点击后直接回到本人工作台的空白对话；旧 `/s/{sessionId}` 仅对所属人兼容跳转。模型与 Provider 目录显式绑定分享授权中的固定 Workspace，并通过所属人的 OpenCode 进程加载，可对话成员可选择模型后代操作。只读成员可查看消息、Run、Diff 和文件，不能修改或执行；可对话成员按所属人身份代操作，界面仍记录实际 actor。权限失效会关闭 SSE、文件连接和终端并进入明确失效页。
 - 分享消息以当前查看者为基准使用固定两色：自己的用户气泡为 `#B2EDDF`，所有其他人的用户气泡统一使用浅紫 token `--ta-chat-other-user-bg`（默认 `#DED9F6`），两者均无边框；别人的用户气泡显示姓名，自己的不显示，姓名由分享访问上下文的参与者目录解析。多人页面以平台 `session_messages` 用户输入为正文权威源：分享 runtime-state 发现活动 Run 后立即订阅 RunEvent SSE，先恢复平台消息并按远端 message ID 与 OpenCode envelope 原位归并；空 envelope 不展示，断线重放也不重复生成气泡。后续帧中 active Run 消失时保留本地 Run 身份并按精确 `runId` 拉取终态，不能只清空 Run 导致持续“思考中”；`sessionUpdatedAt` 变化且当前无活动 Run 时重新读取消息，使 compact 结果无需刷新页面即可同步。重发的 `messageChange` 在预约提交后按 replacement Run 精确读取 USER，取消/失败时按 source Run 精确读取完整 USER/ASSISTANT 并原位恢复；前端按 Session 维护修订水位，并在异步读取返回时二次校验，拒绝迟到旧通知覆盖新状态。两条路径都不切换 Session、不重载历史树，也不触发 history loading 或滚动到底。分享模式禁用 busy follow-up 队列，任一活动 Run 都立即禁用所有参与方输入，后端唯一约束仍是最终裁决。
@@ -208,11 +212,11 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 不直连 opencode server。
 - 不把通用业务组件堆在 app 内，必须下沉到 packages。
 - `/s/[shareId]` 必须使用平台 Session Share 授权，不得接 opencode 公网 share API；旧 Session ID 兼容入口只允许会话所属人访问。
-- 通知动作不得信任后端或页面传入任意 URL；只接受 `SESSION_SHARE`、`NONE` 和 `RESTART_OWN_PROCESS`。分享动作由页面对 `shareId` 做内部路由编码，点击前不调用通用已读接口；`NONE` 通知可计入未读并标记已读但不显示动作；`RESTART_OWN_PROCESS` 只调用当前用户重启接口。未知类型或动作失败关闭。
+- 通知动作不得信任后端或页面传入任意 URL；只接受 `SESSION_SHARE`、`NONE`、`RESTART_OWN_PROCESS` 和 `LOCAL_CLIENT_UPDATE`。分享动作由页面对 `shareId` 做内部路由编码，点击前不调用通用已读接口；`NONE` 通知可计入未读并标记已读但不显示动作；`RESTART_OWN_PROCESS` 只调用当前用户重启接口；本地客户端更新只把 `actionTargetId` 作为受控实例路径参数，并从通知正文唯一的 14 位目标版本提交 `notificationId` 与 `expectedTargetVersion`，成功或冲突失败后均刷新权威通知列表。未知类型、动作或版本正文失败关闭。
 
 ## 验证
 
-`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、标记已读、失败重启动作、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸和弱化后的备用链接入口；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单个人重启以及固定分享工作台隐藏。
+`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、标记已读、失败重启动作、本地客户端更新/回退文案、异常版本正文的失败关闭、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/local-client-notification-update.test.ts` 覆盖通知原始目标版本请求、成功刷新以及 409 冲突反馈后的权威刷新；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸和弱化后的备用链接入口；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单个人重启以及固定分享工作台隐藏。
 
 `tests/xxl-job-management-panel.test.ts` 覆盖隐藏表单 POST/URL 无票据、刷新重签、403/503、票据或平台会话失效、登出清空 iframe，以及横向 shell 装饰幂等、只读账号、错误页跳过和菜单滚动；`tests/support-access-shortcut.test.ts` 覆盖三击 Shift、两秒窗口、左右 Shift 兼容、捕获阶段注册、其它按键打断、长按去重和角色失效重置，`tests/support-access-panel.test.ts` 覆盖唯一排查单号请求、重复触发/撤销后换号、登录资料延迟到达、迟到响应隔离、归档筛选、离线工作区禁用、Session/Trace 上下文以及 assistant text part 通过首页时间线展示，`tests/scheduler-management-panel.test.ts` 覆盖系统管理导航、问题排查全局手势请求/激活代次与 actor/target 身份提示，以及公共配置卡死 rollout 的分支/原因/二次确认/纠错请求回归。
 

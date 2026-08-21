@@ -208,6 +208,10 @@ function renderWithApi(
         SupportAccessPanel: {
           props: ["currentUser", "activationSequence"],
           template: `<div data-testid="support-access-panel" :data-activation-sequence="activationSequence">只读排查授权面板</div>`
+        },
+        LocalClientVersionManagementPanel: {
+          props: ["currentUser", "pageActive"],
+          template: `<div data-testid="local-client-version-panel" :data-page-active="pageActive">客户端版本管理面板</div>`
         }
       },
       provide: { api: backendApi }
@@ -288,6 +292,19 @@ describe("scheduler management panel", () => {
       supportActivationSequence: 7
     });
     expect(view.queryByTestId("support-access-panel")).toBeNull();
+    view.queryClient.clear();
+  });
+
+  it("exposes local-client version management only through the controlled super-admin page", async () => {
+    const view = renderWithApi(SystemManagementPanel, api(), currentUser, {
+      activeKey: "localClientVersions",
+      pageActive: true
+    });
+
+    expect(view.getByText("本地客户端版本", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    expect(view.getByTestId("local-client-version-panel").getAttribute("data-page-active")).toBe("true");
+    await fireEvent.click(view.getByText("运行管理", { selector: ".ta-system-menu-text" }));
+    expect(view.emitted().selectMenu?.[0]).toEqual(["runtime"]);
     view.queryClient.clear();
   });
 

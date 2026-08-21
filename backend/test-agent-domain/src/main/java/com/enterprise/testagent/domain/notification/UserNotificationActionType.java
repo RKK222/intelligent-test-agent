@@ -4,5 +4,6 @@ package com.enterprise.testagent.domain.notification;
 public enum UserNotificationActionType {
     SESSION_SHARE,
     NONE,
-    RESTART_OWN_PROCESS
+    RESTART_OWN_PROCESS,
+    LOCAL_CLIENT_UPDATE
 }

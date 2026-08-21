@@ -1,0 +1,338 @@
+package com.enterprise.testagent.localclient;
+
+import com.enterprise.testagent.common.localclient.LocalClientDownloadTrust;
+import com.enterprise.testagent.common.localclient.LocalClientReleaseVersion;
+import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
+import com.enterprise.testagent.localclient.protocol.LocalClientProtocol;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+/** 下载、验签、解包并自检完整 JDK/JAR/OpenCode 发布单元；成功前不触碰 current。 */
+final class LocalClientReleaseDownloader {
+
+    private static final int MAX_MANIFEST_BYTES = 1024 * 1024;
+    private static final int MAX_SIGNATURE_BYTES = 16 * 1024;
+    private static final long MAX_ARTIFACT_BYTES = 4L * 1024 * 1024 * 1024;
+    private static final Set<String> REQUIRED_KINDS = Set.of("CLIENT_JAR", "JDK", "OPENCODE");
+    private static final String SYSTEM_JDK_PROVENANCE = "source=system-jdk21\n";
+
+    private final LocalClientDownloadTrust trust;
+    private final Path installRoot;
+    private final ObjectMapper objectMapper;
+    private final Fetcher fetcher;
+    private final ArchiveExtractor extractor;
+    private final CandidateChecker candidateChecker;
+
+    LocalClientReleaseDownloader(
+            LocalClientDownloadTrust trust,
+            Path installRoot,
+            ObjectMapper objectMapper,
+            Fetcher fetcher,
+            ArchiveExtractor extractor,
+            CandidateChecker candidateChecker) {
+        this.trust = Objects.requireNonNull(trust);
+        this.installRoot = Objects.requireNonNull(installRoot).toAbsolutePath().normalize();
+        this.objectMapper = Objects.requireNonNull(objectMapper);
+        this.fetcher = Objects.requireNonNull(fetcher);
+        this.extractor = Objects.requireNonNull(extractor);
+        this.candidateChecker = Objects.requireNonNull(candidateChecker);
+    }
+
+    PreparedRelease prepare(LocalClientPayloads.UpdateCommand command, String currentVersion) throws Exception {
+        return prepare(command, currentVersion, phase -> {
+            // 兼容不需要展示下载阶段的调用方。
+        });
+    }
+
+    PreparedRelease prepare(
+            LocalClientPayloads.UpdateCommand command,
+            String currentVersion,
+            PreparationListener listener) throws Exception {
+        Objects.requireNonNull(listener, "listener must not be null");
+        validateCommand(command, currentVersion);
+        String version = LocalClientReleaseVersion.parse(command.targetVersion()).value();
+        String releasePrefix = "releases/" + version + "/";
+        byte[] manifestBytes = fetcher.fetchBytes(
+                trust.resolve(releasePrefix + "manifest.json"), MAX_MANIFEST_BYTES);
+        byte[] manifestSignature = fetcher.fetchBytes(
+                trust.resolve(releasePrefix + "manifest.json.sig"), MAX_SIGNATURE_BYTES);
+        trust.verifySignature(manifestBytes, manifestSignature);
+        String releaseDigest = LocalClientDownloadTrust.sha256(manifestBytes);
+        ReleaseManifest manifest = parseManifest(manifestBytes);
+        Map<String, ManifestArtifact> artifacts = validateManifest(manifest, version, releasePrefix);
+
+        Path releasesDirectory = installRoot.resolve("releases");
+        Path finalDirectory = releasesDirectory.resolve(version).normalize();
+        if (!finalDirectory.getParent().equals(releasesDirectory)) {
+            throw new SecurityException("release directory escapes install root");
+        }
+        Files.createDirectories(releasesDirectory);
+        Path existingManifest = finalDirectory.resolve("manifest.json");
+        if (Files.isRegularFile(existingManifest)) {
+            LocalClientDownloadTrust.requireSha256(existingManifest, releaseDigest);
+            verifyPreparedLayout(finalDirectory, artifacts);
+            listener.onPhase(PreparationPhase.SELF_CHECKING);
+            candidateChecker.check(
+                    finalDirectory.resolve("jdk/bin/java"),
+                    finalDirectory.resolve("test-agent-local-client.jar"),
+                    finalDirectory,
+                    version);
+            return new PreparedRelease(version, releaseDigest, finalDirectory);
+        }
+
+        Path stagingRoot = releasesDirectory.resolve(
+                ".prepare-" + UUID.randomUUID().toString().replace("-", ""));
+        Path staging = stagingRoot.resolve(version);
+        createPrivateDirectory(stagingRoot);
+        createPrivateDirectory(staging);
+        try {
+            writePrivate(staging.resolve("manifest.json"), manifestBytes);
+            writePrivate(staging.resolve("manifest.json.sig"), manifestSignature);
+            for (String kind : REQUIRED_KINDS) {
+                ManifestArtifact artifact = artifacts.get(kind);
+                Path target = staging.resolve(localFileName(kind));
+                fetcher.fetchFile(trust.resolve(artifact.path()), target, artifact.size());
+                if (!Files.isRegularFile(target) || Files.size(target) != artifact.size()) {
+                    throw new SecurityException("release artifact size verification failed");
+                }
+                LocalClientDownloadTrust.requireSha256(target, artifact.sha256());
+                byte[] signature = fetcher.fetchBytes(
+                        trust.resolve(artifact.signaturePath()), MAX_SIGNATURE_BYTES);
+                trust.verifySignature(target, signature);
+                writePrivate(staging.resolve(localFileName(kind) + ".sig"), signature);
+            }
+            extractor.extract(staging.resolve("jdk.tar.gz"), staging);
+            extractor.extract(staging.resolve("opencode.tar.gz"), staging);
+            verifyPreparedLayout(staging, artifacts);
+            listener.onPhase(PreparationPhase.SELF_CHECKING);
+            candidateChecker.check(
+                    staging.resolve("jdk/bin/java"),
+                    staging.resolve("test-agent-local-client.jar"),
+                    staging,
+                    version);
+            moveAtomically(staging, finalDirectory);
+            return new PreparedRelease(version, releaseDigest, finalDirectory);
+        } finally {
+            // 候选进程必须看到 basename=版本号；无论成功与否都只清理随机暂存父目录。
+            deleteTree(stagingRoot);
+        }
+    }
+
+    private ReleaseManifest parseManifest(byte[] bytes) {
+        try {
+            return objectMapper.readValue(bytes, ReleaseManifest.class);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("release manifest is invalid", exception);
+        }
+    }
+
+    private Map<String, ManifestArtifact> validateManifest(
+            ReleaseManifest manifest,
+            String version,
+            String releasePrefix) {
+        if (manifest.schemaVersion() != 2
+                || !version.equals(manifest.version())
+                || manifest.publishedAt() == null
+                || !"linux".equals(manifest.platform())
+                || !"arm64".equals(manifest.architecture())
+                || manifest.launcherVersionMin() > 1
+                || manifest.launcherVersionMax() < 1
+                || !LocalClientProtocol.VERSION.equals(manifest.protocolVersion())
+                || !"1.18.4".equals(manifest.opencodeVersion())
+                || manifest.artifacts() == null) {
+            throw new IllegalArgumentException("release manifest is incompatible with this launcher");
+        }
+        Map<String, ManifestArtifact> byKind;
+        try {
+            byKind = manifest.artifacts().stream().collect(Collectors.toUnmodifiableMap(
+                    ManifestArtifact::kind, Function.identity()));
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("release manifest contains duplicate artifacts", exception);
+        }
+        if (!byKind.keySet().equals(REQUIRED_KINDS)) {
+            throw new IllegalArgumentException("release manifest must contain JDK, JAR and OpenCode");
+        }
+        for (ManifestArtifact artifact : byKind.values()) {
+            if (artifact.size() < 1
+                    || artifact.size() > MAX_ARTIFACT_BYTES
+                    || artifact.sha256() == null
+                    || !artifact.sha256().matches("[0-9a-f]{64}")
+                    || artifact.path() == null
+                    || !artifact.path().startsWith(releasePrefix)
+                    || artifact.signaturePath() == null
+                    || !artifact.signaturePath().startsWith(releasePrefix)) {
+                throw new IllegalArgumentException("release artifact metadata is invalid");
+            }
+            trust.resolve(artifact.path());
+            trust.resolve(artifact.signaturePath());
+        }
+        return byKind;
+    }
+
+    private static void validateCommand(LocalClientPayloads.UpdateCommand command, String currentVersion) {
+        Objects.requireNonNull(command, "command must not be null");
+        if (command.commandId() == null
+                || !command.commandId().matches("[A-Za-z0-9_]{1,128}")
+                || command.clientInstanceId() == null
+                || command.connectionGeneration() < 1
+                || command.policyRevision() < 1) {
+            throw new IllegalArgumentException("update command coordinates are invalid");
+        }
+        String expectedDirection = LocalClientReleaseVersion.parse(currentVersion)
+                .directionTo(LocalClientReleaseVersion.parse(command.targetVersion()))
+                .name();
+        if ("SAME".equals(expectedDirection) || !expectedDirection.equals(command.direction())) {
+            throw new IllegalArgumentException("update command direction does not match versions");
+        }
+    }
+
+    private static void verifyPreparedLayout(
+            Path releaseDirectory,
+            Map<String, ManifestArtifact> artifacts) throws IOException {
+        if (!Files.isRegularFile(releaseDirectory.resolve("test-agent-local-client.jar"))
+                || !Files.isRegularFile(releaseDirectory.resolve("jdk/bin/java"))
+                || !Files.isExecutable(releaseDirectory.resolve("jdk/bin/java"))
+                || !Files.isRegularFile(releaseDirectory.resolve("jdk/bin/javac"))
+                || !Files.isExecutable(releaseDirectory.resolve("jdk/bin/javac"))
+                || !Files.isRegularFile(releaseDirectory.resolve("opencode/bin/opencode"))
+                || !Files.isExecutable(releaseDirectory.resolve("opencode/bin/opencode"))) {
+            throw new IllegalStateException("prepared release layout is incomplete");
+        }
+        boolean bootstrapSystemJdk = hasBootstrapSystemJdkProvenance(releaseDirectory);
+        for (String kind : REQUIRED_KINDS) {
+            if ("JDK".equals(kind) && bootstrapSystemJdk) {
+                // 只有稳定 Shell 初装写入的 marker release 可省略本地 JDK 归档摘要。
+                continue;
+            }
+            ManifestArtifact artifact = artifacts.get(kind);
+            Path file = releaseDirectory.resolve(localFileName(kind));
+            if (!Files.isRegularFile(file) || Files.size(file) != artifact.size()) {
+                throw new SecurityException("prepared release artifact size changed");
+            }
+            LocalClientDownloadTrust.requireSha256(file, artifact.sha256());
+        }
+    }
+
+    private static boolean hasBootstrapSystemJdkProvenance(Path releaseDirectory) throws IOException {
+        Path marker = releaseDirectory.resolve("jdk.provenance");
+        Path jdkArchive = releaseDirectory.resolve("jdk.tar.gz");
+        Path jdkSignature = releaseDirectory.resolve("jdk.tar.gz.sig");
+        return Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)
+                && Files.size(marker) == SYSTEM_JDK_PROVENANCE.getBytes(StandardCharsets.UTF_8).length
+                && SYSTEM_JDK_PROVENANCE.equals(Files.readString(marker, StandardCharsets.UTF_8))
+                && !Files.exists(jdkArchive, LinkOption.NOFOLLOW_LINKS)
+                && !Files.exists(jdkSignature, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private static String localFileName(String kind) {
+        return switch (kind) {
+            case "CLIENT_JAR" -> "test-agent-local-client.jar";
+            case "JDK" -> "jdk.tar.gz";
+            case "OPENCODE" -> "opencode.tar.gz";
+            default -> throw new IllegalArgumentException("unknown artifact kind");
+        };
+    }
+
+    private static void createPrivateDirectory(Path directory) throws IOException {
+        Files.createDirectory(directory);
+        try {
+            Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
+        } catch (UnsupportedOperationException ignored) {
+            // 麒麟使用 POSIX；未来平台依赖用户目录 ACL。
+        }
+    }
+
+    private static void writePrivate(Path path, byte[] bytes) throws IOException {
+        Files.write(path, bytes);
+        try {
+            Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
+        } catch (UnsupportedOperationException ignored) {
+            // 麒麟使用 POSIX；未来平台依赖用户目录 ACL。
+        }
+    }
+
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException exception) {
+            Files.move(source, target);
+        }
+    }
+
+    private static void deleteTree(Path root) {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (var paths = Files.walk(root)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                    // 下次启动不会选择点号 staging；残留可由安装维护流程清理。
+                }
+            });
+        } catch (IOException ignored) {
+            // 同上，绝不删除 releases 下的正式版本。
+        }
+    }
+
+    record PreparedRelease(String version, String releaseDigest, Path releaseDirectory) {
+    }
+
+    record ReleaseManifest(
+            int schemaVersion,
+            String version,
+            Instant publishedAt,
+            String platform,
+            String architecture,
+            int launcherVersionMin,
+            int launcherVersionMax,
+            String protocolVersion,
+            String opencodeVersion,
+            List<ManifestArtifact> artifacts) {
+    }
+
+    record ManifestArtifact(String kind, String path, long size, String sha256, String signaturePath) {
+    }
+
+    interface Fetcher {
+        byte[] fetchBytes(URI uri, int maxBytes) throws Exception;
+
+        void fetchFile(URI uri, Path target, long expectedSize) throws Exception;
+    }
+
+    @FunctionalInterface
+    interface ArchiveExtractor {
+        void extract(Path archive, Path releaseDirectory) throws Exception;
+    }
+
+    @FunctionalInterface
+    interface CandidateChecker {
+        void check(Path javaExecutable, Path clientJar, Path releaseDirectory, String targetVersion) throws Exception;
+    }
+
+    enum PreparationPhase {
+        SELF_CHECKING
+    }
+
+    @FunctionalInterface
+    interface PreparationListener {
+        void onPhase(PreparationPhase phase);
+    }
+}

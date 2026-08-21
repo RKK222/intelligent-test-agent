@@ -60,6 +60,7 @@
         <xxl-sso.version>2.4.0</xxl-sso.version>
         <start-class>com.enterprise.testagent.app.TestAgentApplication</start-class>
         <clickhouse-jdbc.version>0.9.8</clickhouse-jdbc.version>
+        <test.agent.local.client.version>0.1.0-dev</test.agent.local.client.version>
     </properties>
 
     <dependencyManagement>

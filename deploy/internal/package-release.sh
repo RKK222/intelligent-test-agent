@@ -96,6 +96,10 @@ USER_NOTIFICATION_MIGRATION_RESOURCE="db/migration/V20260810170000__user_notific
 USER_NOTIFICATION_MIGRATION_SHA256="4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9"
 USER_NOTIFICATION_DISPOSE_MIGRATION_RESOURCE="db/migration/V20260811213000__user_notifications_expand_dispose_types.sql"
 USER_NOTIFICATION_DISPOSE_MIGRATION_SHA256="00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c"
+LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_RESOURCE="db/migration/V20260820182024__local_client_releases_create_version_management.sql"
+LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_SHA256="17aa8c1634513868f96b5fb4b0dedc75de635280af4b618004ea955be183594c"
+LOCAL_CLIENT_CREDENTIAL_REVEALED_AT_MIGRATION_RESOURCE="db/migration/V20260820202529__local_client_credentials_add_revealed_at.sql"
+LOCAL_CLIENT_CREDENTIAL_REVEALED_AT_MIGRATION_SHA256="0f7c30b7a932d96b754253261e61b3317308da08874a91747bdf0dddf098918d"
 EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_RESOURCE="db/migration-compat/experience-workspace-applied/V20260809210000__common_parameters_add_experience_workspace.sql"
 EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_SHA256="c093695aac4305aed3caeb8fcec58f0731f1519527031f1775adaf8be86cf24a"
 EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_RESOURCE="db/migration/V20260812104911__common_parameters_add_experience_workspace_after_release.sql"
@@ -122,7 +126,7 @@ Usage: deploy/internal/package-release.sh [options]
 Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
-  - signed Apple Silicon and ARM64 glibc local OpenCode client HTTP distribution
+  - signed Kylin ARM64/aarch64 glibc local OpenCode client HTTP distribution
   - opencode-worker image and docker-loadable tar
   - optional independent Python third-party library bundle
   - pinned IT-Tools and OmniTools images, checksums and complete modified source
@@ -656,6 +660,10 @@ verify_release_flyway_migrations_jar() {
     "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_RESOURCE}" "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE}" "${ANALYTICS_CLICKHOUSE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOCAL_CLIENT_CREDENTIAL_REVEALED_AT_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_CREDENTIAL_REVEALED_AT_MIGRATION_SHA256}"
 }
 
 verify_release_xxl_flyway_migrations_jar() {
@@ -1249,6 +1257,7 @@ package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
   local worker_tar it_tools_tar omni_tools_tar required_artifact persistence_jar xxl_job_integration_jar
+  local local_client_catalog local_client_version local_client_deb local_client_release_dir
 
   require_command zip
   require_command rsync
@@ -1259,13 +1268,38 @@ package_release_zip() {
   it_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"
   omni_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${PLATFORM}")"
 
-  # 后端与前端每次交付；大体积 worker runtime 和 toolbox 只在指纹变化时加入。
+  local_client_catalog="${OUTPUT_DIR}/local-opencode-client/catalog.json"
+  [[ -f "${local_client_catalog}" ]] || {
+    echo "Required local client catalog not found: ${local_client_catalog}" >&2
+    exit 1
+  }
+  local_client_version="$(awk -F'"' '$2 == "version" { print $4 }' \
+    "${local_client_catalog}" | sort | tail -n 1)"
+  [[ "${local_client_version}" =~ ^[0-9]{14}$ ]] || {
+    echo "Local client catalog does not contain a valid release version" >&2
+    exit 1
+  }
+  local_client_deb="${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${local_client_version}_arm64.deb"
+  local_client_release_dir="${OUTPUT_DIR}/local-opencode-client/releases/${local_client_version}"
+
+  # 后端、前端和完整客户端发布单元每次交付；大体积 worker runtime 和 toolbox 只在指纹变化时加入。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
     "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
     "${OUTPUT_DIR}/local-opencode-client/install.sh" \
+    "${OUTPUT_DIR}/local-opencode-client/catalog.json" \
+    "${OUTPUT_DIR}/local-opencode-client/catalog.json.sig" \
     "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json" \
-    "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"; do
+    "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig" \
+    "${local_client_deb}" \
+    "${local_client_release_dir}/manifest.json" \
+    "${local_client_release_dir}/manifest.json.sig" \
+    "${local_client_release_dir}/test-agent-local-client.jar" \
+    "${local_client_release_dir}/test-agent-local-client.jar.sig" \
+    "${local_client_release_dir}/jdk.tar.gz" \
+    "${local_client_release_dir}/jdk.tar.gz.sig" \
+    "${local_client_release_dir}/opencode.tar.gz" \
+    "${local_client_release_dir}/opencode.tar.gz.sig"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
@@ -1377,7 +1411,7 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_MEMORY=%s\n' "$([[ "${PACKAGE_MEMORY}" -eq 1 ]] && printf included || printf disabled)"
     printf 'TEST_AGENT_RELEASE_MEMORY_VERSION=%s\n' "$([[ "${PACKAGE_MEMORY}" -eq 1 ]] && state_value "${OUTPUT_DIR}/memory/release.env" TEST_AGENT_MEMORY_RELEASE_VERSION || printf none)"
     printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=included\n'
-    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=%s\n' "$(awk -F'"' '$2 == "version" { print $4; exit }' "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json")"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=%s\n' "${local_client_version}"
   } >"${staging_dir}/deploy/internal/release-components.env"
   chmod 0644 "${staging_dir}/deploy/internal/release-components.env"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。

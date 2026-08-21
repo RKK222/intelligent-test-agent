@@ -10,6 +10,13 @@
 
 - 提供 `listUserNotifications()` 和 `markUserNotificationRead()`，统一访问 `/api/internal/platform/notification-center/notifications`。分页响应保留全局 `unreadCount`；`NONE` 动作的配置 dispose 通知仍可计入未读并标记已读，失败状态只允许触发受控的本人进程重启；分享通知点击不提前调用通用已读接口，仍由 `/s/{shareId}` 鉴权成功后在服务端落已读事实。
 
+- 提供本地客户端版本管理 client：超级管理员的 release 同步/列表、全局策略、用户策略、rollout 与 attempt
+  全部固定在 `/api/internal/platform/local-opencode-client/version-management`；普通用户只能使用
+  `requestLocalClientUpdate(clientInstanceId, { notificationId, expectedTargetVersion })` 请求自己的在线实例。
+  client 不推断目标版本或下载地址，409 后交由页面刷新权威通知；`instances/me` 的
+  `selfUpdateSupported/targetClientVersion/updateDirection/lastUpdateStatus/lastUpdateAt` 是 additive 字段，旧后端
+  缺失时按不支持自更新处理。
+
 - 提供独立 `SessionShareApiClient`：候选用户、分享管理和“分享给我”列表保持普通认证请求，不携带分享头；访问上下文及分享范围内的会话、Run、夜间任务、文件、Git、终端和反馈请求按实例注入 `X-Test-Agent-Session-Share`。错误和调试信息不得输出分享 ID、Authorization 或文件正文。
 - 统一 baseUrl、traceId、鉴权头和 JSON 解析；`VITE_TEST_AGENT_API_BASE_URL` 显式为空时，HTTP 请求保留同源相对 `/api`，WebSocket ticket 的相对路径则按当前页面 origin 补全为绝对 `ws://` / `wss://` 地址，不会回退到本机开发地址。
 - 超级管理员排查读取使用独立的 `X-Support-Access-Grant` 内存令牌和独立 support 文件 WebSocket 连接；client 提供授权签发/撤销、目标选择、显式归档会话筛选/读取、会话树、带后端可用状态的用户工作区和审计查询，只暴露文件列表、搜索、文本/二进制预览分段读取。该令牌会从原始交换 observer 递归脱敏，带该头的 401 不触发普通登录全局退出。

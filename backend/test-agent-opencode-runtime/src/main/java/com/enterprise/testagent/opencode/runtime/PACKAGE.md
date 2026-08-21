@@ -43,6 +43,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射；平台配置 GET 使用实例级 `/config` 读取包含 `OPENCODE_CONFIG_DIR` 的合并有效配置，Agent 标准 global config 兼容路径继续使用 `/global/config`。
 - `internalmodel.observability.InternalModelObservabilityQueryService`：统一内部模型可观测查询的时间与分页上限，把五类 `outcomeGroup` 展开为稳定精确结果集合后交给领域仓储；兼容精确 `outcome` 查询，且精确条件优先。
 - `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run；临时 fork 仅接收用户问题并禁用工具，通过本轮 assistant 事件流输出增量，消息快照补偿漏失终态，最后以事务 CAS 写唯一终态。
+- `localclient.LocalClientUpdateCoordinator` / `LocalClientUpdateTerminalService`：前者在事务外执行更新补偿扫描、路由与网络发送；后者以独立短事务统一 attempt 终态 CAS、实例结果、rollout 行锁、全量 attempt 读取与汇总，客户端普通/迟到终态和平台 deadline/capability/generation 终态共用同一原子边界。
 - `runtime.SideQuestionOrphanCleanupTaskHandler` / `runtime.SideQuestionOrphanCleanupService`：复用 scheduler 每 5 分钟回收超过 10 分钟的旁路 fork；按内部映射使用原节点，404 幂等，无映射时记录潜在泄漏窗口并收敛平台 Run。
 - `process.*`：当前用户 opencode 进程分配、用户/服务器短事务预留、process/binding 生命周期代次 CAS、已有 binding 原端口恢复、公共状态查询、公共启动/owned-stop 健康确认、通用参数 session/config 路径读取、启动时可选注入当前平台 `OPENCODE_REFERENCES_DIR`、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。只有明确 `PORT_CONFLICT/PORT_OUT_OF_RANGE` 才进入既有端口选择；引用目录参数缺失不阻断滚动升级中的进程启动，既有进程不热更新环境。
 - `process.WorkspaceFileRoutingService`：复用公共 Java 路由程序定位 workspace 文件 WebSocket 的目标后端，并在普通路由阶段通过 `ConversationWorkspaceAccessAuthorizer` 校验当前用户归属，`SUPER_ADMIN` 不旁路；排查只读路由按目标工作区权威服务器选择 Java，不使用 actor affinity、回绑或本机降级，ticket 和具体 RPC 的再次校验由 API/业务入口共同完成。

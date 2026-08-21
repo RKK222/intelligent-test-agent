@@ -12,7 +12,15 @@ public interface LocalClientInstanceRepository {
 
     List<LocalClientInstance> findByUserId(UserId userId);
 
+    List<LocalClientInstance> findAll();
+
     void save(LocalClientInstance instance);
 
     void markDisconnected(LocalClientInstanceId clientInstanceId, Instant disconnectedAt);
+
+    void updateLastUpdateStatus(
+            LocalClientInstanceId clientInstanceId,
+            String status,
+            String targetVersion,
+            Instant observedAt);
 }

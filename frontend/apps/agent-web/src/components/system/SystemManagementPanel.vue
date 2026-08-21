@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, Settings2, SlidersHorizontal } from "lucide-vue-next";
+import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, RefreshCw, Settings2, SlidersHorizontal } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
 import ScheduledTaskManagementPanel from "./ScheduledTaskManagementPanel.vue";
@@ -12,6 +12,7 @@ import InternalModelObservabilityPanel from "./InternalModelObservabilityPanel.v
 import SupportAccessPanel from "./SupportAccessPanel.vue";
 import MemoryAdminPanel from "./MemoryAdminPanel.vue";
 import ApiKeyManagementPanel from "./ApiKeyManagementPanel.vue";
+import LocalClientVersionManagementPanel from "./LocalClientVersionManagementPanel.vue";
 import type { SystemMenuKey } from "../workspace-page-tabs";
 
 const props = defineProps<{
@@ -35,6 +36,7 @@ const hasSystemAccess = computed(() => hasSuperAdmin.value || hasApplicationAdmi
 const items: SystemMenuItem[] = [
   { key: "scheduler", label: "定时任务管理", icon: CalendarClock },
   { key: "runtime", label: "运行管理", icon: Activity },
+  { key: "localClientVersions", label: "本地客户端版本", icon: RefreshCw },
   { key: "params", label: "通用参数管理", icon: SlidersHorizontal },
   { key: "apiKeys", label: "API Key 管理", icon: Fingerprint },
   { key: "internalModels", label: "内部模型供应商", icon: Network },
@@ -86,6 +88,11 @@ function selectMenu(key: SystemMenuKey) {
         />
         <RuntimeManagementPanel
           v-else-if="props.activeKey === 'runtime'"
+          :current-user="currentUser"
+          :page-active="props.pageActive"
+        />
+        <LocalClientVersionManagementPanel
+          v-else-if="props.activeKey === 'localClientVersions'"
           :current-user="currentUser"
           :page-active="props.pageActive"
         />

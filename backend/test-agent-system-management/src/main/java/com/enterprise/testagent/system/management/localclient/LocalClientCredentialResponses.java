@@ -15,7 +15,8 @@ public final class LocalClientCredentialResponses {
             long version,
             LocalClientCredentialStatus status,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            boolean revealAvailable) {
     }
 
     public record PlaintextKey(String clientKey) {

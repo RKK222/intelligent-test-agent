@@ -101,6 +101,23 @@
             or status &lt;&gt; #{row.status})
     </update>
 
+    <update id="reactivateByDedupKeyIfChanged">
+        update user_notifications
+        set type = #{row.type},
+            title = #{row.title},
+            body = #{row.body},
+            action_type = #{row.actionType},
+            action_target_id = #{row.actionTargetId},
+            status = 'ACTIVE',
+            invalidation_reason = null,
+            invalidated_at = null,
+            read_at = null,
+            trace_id = #{row.traceId},
+            updated_at = #{row.updatedAt}
+        where dedup_key = #{row.dedupKey}
+          and (status &lt;&gt; 'ACTIVE' or title &lt;&gt; #{row.title} or body &lt;&gt; #{row.body})
+    </update>
+
     <update id="updateActiveByAction">
         update user_notifications
         set actor_user_id = #{actorUserId},
@@ -166,6 +183,18 @@
           )
     </update>
 
+    <update id="invalidateActiveById">
+        update user_notifications
+        set status = 'INVALIDATED',
+            invalidation_reason = #{reason},
+            invalidated_at = #{invalidatedAt},
+            trace_id = #{traceId},
+            updated_at = #{invalidatedAt}
+        where notification_id = #{notificationId}
+          and recipient_user_id = #{recipientUserId}
+          and status = 'ACTIVE'
+    </update>
+
     <select id="findByIdForRecipient" resultMap="NotificationRowMap">
         select <include refid="NotificationColumns"/>
         from user_notifications
@@ -204,7 +233,7 @@
 
     <sql id="ActionAvailablePredicate">
         (<include refid="NotificationEffectivePredicate"/>)
-        and notification.action_type in ('SESSION_SHARE', 'RESTART_OWN_PROCESS')
+        and notification.action_type in ('SESSION_SHARE', 'RESTART_OWN_PROCESS', 'LOCAL_CLIENT_UPDATE')
     </sql>
 
     <sql id="NotificationViewColumns">

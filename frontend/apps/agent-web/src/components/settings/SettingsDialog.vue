@@ -119,6 +119,7 @@ function selectMenu(key: MenuKey) {
           :initial-app-id="props.initialAppId"
           :initial-app-tab="props.initialAppTab"
           :refresh-key="refreshKey"
+          :page-active="props.open"
           @switch-menu="handleSwitchMenu"
           @workspace-catalog-changed="emit('workspace-catalog-changed')"
         />

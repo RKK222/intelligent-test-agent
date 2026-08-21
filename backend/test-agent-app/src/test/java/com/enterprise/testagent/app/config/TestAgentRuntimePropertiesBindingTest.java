@@ -43,6 +43,42 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void localClientAuthenticationAndVersionManagementEnvironmentAreMapped() {
+        profileContextRunner
+                .withPropertyValues(
+                        "TEST_AGENT_LOCAL_CLIENT_AUTHENTICATION_RATE_LIMIT_CAPACITY=7",
+                        "TEST_AGENT_LOCAL_CLIENT_AUTHENTICATION_RATE_LIMIT_WINDOW=2m",
+                        "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://downloads.example/local-client/",
+                        "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=cHVibGljLWtleQ==",
+                        "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=releases/catalog.json",
+                        "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CONNECT_TIMEOUT=4s",
+                        "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_REQUEST_TIMEOUT=12s")
+                .run(context -> {
+                    assertThat(context.getEnvironment().getProperty(
+                                    "test-agent.local-client.authentication-rate-limit.capacity", Integer.class))
+                            .isEqualTo(7);
+                    assertThat(context.getEnvironment().getProperty(
+                                    "test-agent.local-client.authentication-rate-limit.window"))
+                            .isEqualTo("2m");
+                    assertThat(context.getEnvironment().getProperty(
+                                    "test-agent.local-client.version-management.download-base-url"))
+                            .isEqualTo("http://downloads.example/local-client/");
+                    assertThat(context.getEnvironment().getProperty(
+                                    "test-agent.local-client.version-management.signing-public-key-base64"))
+                            .isEqualTo("cHVibGljLWtleQ==");
+                    assertThat(context.getEnvironment().getProperty(
+                                    "test-agent.local-client.version-management.catalog-path"))
+                            .isEqualTo("releases/catalog.json");
+                    assertThat(context.getEnvironment().getProperty(
+                                    "test-agent.local-client.version-management.connect-timeout"))
+                            .isEqualTo("4s");
+                    assertThat(context.getEnvironment().getProperty(
+                                    "test-agent.local-client.version-management.request-timeout"))
+                            .isEqualTo("12s");
+                });
+    }
+
+    @Test
     void xxlAdminDatasourceDefaultsDoNotLeakIntoPlatformContext() {
         profileContextRunner
                 .withPropertyValues(
