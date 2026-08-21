@@ -12564,3 +12564,21 @@
 ### Result
 
 - 本地已有固定 ClickHouse 镜像时可直接完成 `pull/restart` 的镜像准备阶段；首次使用或镜像缺失时仍按原流程拉取，不改变版本固定、容器所有权、数据卷、安全配置或部署拓扑。
+
+## 2026-08-21 - 忽略本机 E2E 验收产物
+
+### Why
+
+- `output/e2e-tool-rollout/` 只保存本机浏览器验收截图和 JSON 报告，不是源代码、测试 fixture 或发布资产；每次验收都会产生新的未跟踪文件。
+
+### What
+
+- 在现有 `output/playwright/` 忽略规则旁新增 `output/e2e-tool-rollout/`，保留本地证据文件但不进入 Git 提交。
+
+### How
+
+- 使用 `git check-ignore -v` 验证目录及文件命中仓库规则，并执行 `git diff --check`；未删除或改写任何 E2E 产物。
+
+### Result
+
+- 后续本机 E2E 运行结果不会污染 Git 状态，也不会被误提交；需要交付证据时仍可从本地目录查看。
