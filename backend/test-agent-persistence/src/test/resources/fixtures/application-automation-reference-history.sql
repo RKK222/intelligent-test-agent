@@ -12,6 +12,51 @@ create table users (
     user_id varchar(128) primary key
 );
 
+-- 上一版 release 已经具备本地客户端运行结构；本夹具必须保留这些依赖，才能验证合并 dev 后的后续迁移顺序。
+create table local_client_credentials (
+    user_id varchar(128) primary key references users(user_id),
+    encrypted_client_key text not null,
+    client_key_fingerprint varchar(64) not null unique,
+    key_hint varchar(64) not null,
+    version bigint not null,
+    status varchar(32) not null,
+    created_at timestamp with time zone not null,
+    updated_at timestamp with time zone not null,
+    revoked_at timestamp with time zone
+);
+
+create table local_client_instances (
+    client_instance_id varchar(128) primary key,
+    user_id varchar(128) not null references users(user_id),
+    client_name varchar(255) not null,
+    platform varchar(64) not null,
+    architecture varchar(64) not null,
+    client_version varchar(64) not null,
+    opencode_version varchar(64) not null,
+    created_at timestamp with time zone not null,
+    updated_at timestamp with time zone not null,
+    last_connected_at timestamp with time zone,
+    last_disconnected_at timestamp with time zone
+);
+
+create table user_notifications (
+    id bigserial primary key,
+    type varchar(64) not null,
+    action_type varchar(64) not null,
+    constraint ck_user_notifications_type check (
+        type in (
+            'SESSION_SHARED',
+            'AGENT_CONFIG_DISPOSE_PENDING',
+            'AGENT_CONFIG_DISPOSE_SUCCEEDED',
+            'AGENT_CONFIG_DISPOSE_FAILED',
+            'AGENT_CONFIG_DISPOSE_SUPERSEDED'
+        )
+    ),
+    constraint ck_user_notifications_action_type check (
+        action_type in ('SESSION_SHARE', 'NONE', 'RESTART_OWN_PROCESS')
+    )
+);
+
 create table application_workspaces (
     workspace_id varchar(128) primary key,
     app_id varchar(128) not null,

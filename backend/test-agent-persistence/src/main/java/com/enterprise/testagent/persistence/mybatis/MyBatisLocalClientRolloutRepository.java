@@ -42,7 +42,7 @@ public class MyBatisLocalClientRolloutRepository implements LocalClientRolloutRe
 
     @Override
     public void save(LocalClientRolloutEntry entry) {
-        mapper.upsertRollout(new LocalClientRolloutRow(
+        mapper.upsertRollout(new LocalClientRolloutUserRow(
                 entry.userId().value(), entry.enabled(), entry.updatedByUserId().value(),
                 entry.createdAt(), entry.updatedAt()));
     }
@@ -52,7 +52,7 @@ public class MyBatisLocalClientRolloutRepository implements LocalClientRolloutRe
         return mapper.disableRollout(userId.value(), updatedByUserId.value(), updatedAt) == 1;
     }
 
-    private static LocalClientRolloutEntry toDomain(LocalClientRolloutRow row) {
+    private static LocalClientRolloutEntry toDomain(LocalClientRolloutUserRow row) {
         return new LocalClientRolloutEntry(
                 new UserId(row.userId()), row.enabled(), new UserId(row.updatedByUserId()),
                 row.createdAt(), row.updatedAt());

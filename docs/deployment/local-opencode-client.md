@@ -1,222 +1,247 @@
-# 本地 OpenCode 客户端原生安装包与内网分发
+# 麒麟 ARM 本地 OpenCode 客户端逐机交付
 
-## 制品范围
+## 范围、版本与停止条件
 
-首版只发布 `darwin-arm64` 和 `linux-arm64-glibc`。每个版本包含跨平台 Java 客户端 JAR、Temurin JRE
-21.0.9+10、OpenCode 1.18.4，以及签名的稳定清单。打包脚本固定校验四个上游归档的 SHA-256，再把目录
-结构规范化为 `jre/bin/java` 和 `opencode/bin/opencode`。面向普通用户额外生成 macOS PKG 和麒麟 ARM64
-DEB；`install.sh` 只作为无桌面环境和运维排障兜底。
+本交付仅支持麒麟 Linux aarch64/arm64 + glibc 的已登录用户，不支持 macOS、Windows、非 glibc 系统、开机未登录即运行或稳定 Shell 自更新。OpenCode 固定为 1.18.4。每个 release 使用北京时间 yyyyMMddHHmmss 的 14 位版本；releases/<RELEASE_VERSION>/ 中的 JAR、JDK、OpenCode、manifest 及其签名都是不可变制品，不能原地覆盖。
 
-```text
-deploy/internal/dist/local-opencode-client/
-├── TestAgent-Local-Client-macOS-arm64.pkg
-├── TestAgent-Local-Client-Kylin-arm64.deb
-├── install.sh
-├── stable/
-│   ├── manifest.json
-│   └── manifest.json.sig
-└── releases/0.1.0/
-    ├── test-agent-local-client.jar
-    ├── temurin-jre21-darwin-arm64.tar.gz
-    ├── temurin-jre21-linux-arm64-glibc.tar.gz
-    ├── opencode-1.18.4-darwin-arm64.tar.gz
-    ├── opencode-1.18.4-linux-arm64-glibc.tar.gz
-    └── SHA256SUMS
-```
+交付路径固定为：外网 Mac 构建和签名 → U 盘只转运生成包 → 企业内部中转机 ~/Desktop/mimoagent/0709 校验并 scp → .4、.114 后台配置 → .2 前端 Nginx 发布 → 麒麟用户安装与接入。中转机不得创建或使用 /data/0709；只有目标节点使用自己的 /data/0709 接收文件。
 
-## 外网构建机打包
+文中 <RELEASE_VERSION> 必须替换为同一个已批准的 14 位版本，例如 20260820183000；<部署账号> 必须替换为目标节点的实际 SSH 账号。任何一步命令非零退出、摘要不匹配、文件不存在、服务不健康或页面状态异常时，立即停止，不要继续下一台机器，也不要用 repair、outOfOrder、覆盖旧 release 或重新输入/传回 Client key 来绕过问题。
 
-私钥必须在仓库外生成并以最小权限保存；它不会写入制品。RSA 和 EC PEM 均可由 OpenSSL 签名验证。
+## 1. 外网 Mac：记录构建输入并生成签名交付包
 
-```bash
-umask 077
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
-  -out /secure/local-client-signing-private.pem
+**机器：外网 Mac（允许联网）**。以下命令在 /Users/huang/workspace/intelligent-test-agent-gitee 执行。构建使用当前工作树；git status --short 用于留存输入，不要求为空，但不得有未解决冲突，也不得清理、stash 或切换其他人的并行改动。
 
+~~~bash
+cd /Users/huang/workspace/intelligent-test-agent-gitee
+git rev-parse HEAD
+git status --short
+test -z "$(git diff --name-only --diff-filter=U)"
+~~~
+
+成功条件：输出 HEAD 和工作树状态，最后一条无输出且退出码为 0。失败即停止构建。
+
+**机器：外网 Mac（同一终端）**。固定本次版本、下载根、控制服务根、私钥和已审核的 ARM64 输入文件。package-release.sh 没有 --version 参数，版本只能通过 TEST_AGENT_LOCAL_CLIENT_VERSION 固定；不要把 --version 追加给该脚本。
+
+~~~bash
+export TEST_AGENT_LOCAL_CLIENT_VERSION=<RELEASE_VERSION>
+export TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
+export TEST_AGENT_LOCAL_CLIENT_SERVER_URL=https://122.233.30.2
 export TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY=/secure/local-client-signing-private.pem
-export TEST_AGENT_LOCAL_CLIENT_VERSION=0.1.0
-# 生产 Mac 构建机应配置真实 Developer ID；没有证书时只会产出不可作为正式交付的 unsigned PKG。
-export TEST_AGENT_LOCAL_CLIENT_MACOS_APPLICATION_IDENTITY='Developer ID Application: ...'
-export TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY='Developer ID Installer: ...'
-export TEST_AGENT_LOCAL_CLIENT_MACOS_NOTARY_PROFILE='testagent-notary'
-# 麒麟 DEB 必须由 Linux dpkg-deb 生成，不再由 macOS ar/tar 手工拼包。
-export TEST_AGENT_LOCAL_CLIENT_DEB_BUILDER_IMAGE='debian:bookworm-slim'
-deploy/internal/package-release.sh --local-client-only
-```
+export TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE=/secure/input/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.9_10.tar.gz
+export TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE=/secure/input/opencode-linux-arm64.tar.gz
+test -r /secure/local-client-signing-private.pem
+test -r /secure/input/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.9_10.tar.gz
+test -r /secure/input/opencode-linux-arm64.tar.gz
+~~~
 
-本地客户端是企业包中的独立大组件。客户端源码、安装脚本、固定上游归档、版本或签名配置变化时，清单标记
-`included`，脚本重新构建并把分发目录放入发布 ZIP 的 `dist/local-opencode-client/`；指纹未变化时标记
-`reuse`，ZIP 只记录已部署版本和逐文件哈希，不再重复携带约 400 MiB 的 PKG、DEB、JRE 与 OpenCode 归档。
-`--zip-only` 在 `included` 模式下要求本地目录已存在且清单完整。离线构建可以通过
-`TEST_AGENT_LOCAL_CLIENT_*_ARCHIVE` 指向四个已经审批和预下载的归档；脚本仍使用固定 SHA-256 校验。
-可在显式 env 文件中覆盖 URL/SHA，但变更必须重新完成来源、许可证和 ARM 实机验证。
-`TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL` 和 `TEST_AGENT_LOCAL_CLIENT_DEFAULT_WEB_URL` 可为原生首次启动
-向导预填同一部署的 HTTPS 地址；跨部署复用制品时保持为空。只有 localhost 开发包允许同时设置
-`TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP=true`。
-麒麟 DEB 在 ARM64 Debian 容器中使用 `dpkg-deb --root-owner-group` 生成并执行真实
-`dpkg -i/remove` 验证。包本身不宣告 `systemd` 硬依赖、不携带 `postinst/prerm`；它通过包内
-`/etc/systemd/user/default.target.wants/` 软链接启用已存在的麒麟 systemd user unit，避免软件中心在
-离线解析依赖或维护脚本跨用户操作时只报“软件包操作异常”。
-已发布 DEB 的修复包必须把 `TEST_AGENT_LOCAL_CLIENT_VERSION` 提高到旧包以上；软件中心才能将
-旧包的“已解包未配置”状态作为升级原地修复，不能以相同版本号替换已分发字节。
+成功条件：三个 test -r 均返回 0。私钥只可留在该外网 Mac 的受控目录，绝不放入仓库、交付包、U 盘、日志或聊天。
 
-## 前端 Nginx 部署
+**机器：外网 Mac（同一终端）**。执行真实打包，使用独立输出目录，避免污染固定 deploy/internal/dist。
 
-`deploy-internal-release.sh` 和 `deploy-internal-frontend.sh` 会把目录原子切换到：
+~~~bash
+cd /Users/huang/workspace/intelligent-test-agent-gitee
+deploy/internal/package-release.sh --local-client-only --no-zip --output-dir /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>
+test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/catalog.json
+test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/catalog.json.sig
+test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
+test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb
+test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/releases/<RELEASE_VERSION>/manifest.json
+~~~
 
-```text
-/data/testagent/dist/local-opencode-client/
-```
+成功条件：脚本退出 0，五个文件均存在，且不带版本号的麒麟 ARM64 下载别名与本次版本化 DEB 逐字节相同。脚本会对输入 JDK/OpenCode 摘要、release 签名及 catalog 发布顺序失败关闭。
 
-`included` 包会先校验发布目录中的清单、签名、安装器和所有版本制品，再原子替换该目录；`reuse` 包不复制、
-备份或替换客户端，必须先逐文件校验目标机现有目录与发布清单完全一致，才允许更新静态前端和 reload Nginx。
-校验脚本只依赖 `bash`、`awk` 和 `sha256sum`，不依赖企业服务器通常没有的 `jq`、`rg` 或网络访问。
+**机器：外网 Mac（同一终端）**。把生成目录封装为 U 盘只转运的一个压缩包和一个摘要文件；包内顶层必须是 local-opencode-client/。
 
-`gateway.conf.template` 暴露 `/downloads/local-opencode-client/`，关闭目录索引与符号链接，拒绝隐藏路径。
-原生安装包、`install.sh` 和 `stable/*` 使用 `Cache-Control: no-store`；`releases/*` 使用一年 immutable 缓存。该下载
-位置不校验 client key，访问范围由企业网络 ACL 控制。`TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT` 配置一个
-只暴露下载路径、其余请求均返回 404 的独立明文 HTTP server；它不得与 HTTPS 业务网关端口重复。安装器
-只接受明确的 `http://` 下载基址。Nginx 对安装器和目录规范化跳转返回相对 `Location`，使企业入口把外部端口
-映射到本机其它监听时仍由浏览器保留原始 `host:port`，避免安装包跳到默认 80/443 后返回 503。示例现场使用
-HTTPS 443 作为业务入口、HTTP 80 作为制品入口。
+~~~bash
+cd /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>
+tar -czf /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz local-opencode-client
+shasum -a 256 /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz > /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz.sha256
+cat /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz.sha256
+~~~
 
-后台还必须把前端 Nginx 的源 IP 配入 `TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES`。只有来自这些 IP
-的 `X-Forwarded-Proto: https|wss` 才能证明控制隧道或模型中继经过 TLS；生产环境不得开启
-`TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL`。
+成功条件：只得到 test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz 及同名 .sha256，并记录显示的 SHA-256。失败即停止；不要把私钥或原始上游压缩包拷入 U 盘。
 
-部署后至少检查：
+## 2. U 盘：仅转运已生成的两个文件
 
-```bash
-curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/install.sh | head
-curl -fsSI -A 'Mozilla/5.0 (Macintosh)' http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/installer
-curl -fsSI -A 'Mozilla/5.0 (X11; Linux aarch64)' http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/installer
-curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/manifest.json
-curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/stable/manifest.json.sig -o /tmp/manifest.json.sig
-```
+**机器：外网 Mac，然后是企业内部中转机**。U 盘只复制上一节生成的以下两个文件，不从 Mac 直接向企业目标机 scp：
 
-两个 `installer` 检查的 `Location` 必须以 `/downloads/` 开头，不能出现缺失外部端口的绝对 URL；再分别追加
-`-L -o /dev/null -w '%{http_code}\n'` 验证跟随跳转后返回 `200`。
+~~~text
+/Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz
+/Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz.sha256
+~~~
 
-## 用户安装
+成功条件：中转机 U 盘挂载后的两个文件名与摘要文件中名称一致。缺任一文件即停止，返回外网 Mac 重新生成。
 
-客户端下载入口默认隐藏。超级管理员先进入“系统管理 → 用户管理”，在目标用户行打开“客户端灰度”；
-名单变更由后端写入数据库，目标用户刷新页面后生效，不需要重启 Java 或前端。移出名单只隐藏入口，不卸载
-已有客户端，也不撤销该用户已创建的 client key。灰度名单不参与 Nginx 制品鉴权；内网下载仍由网络 ACL
-控制。
+## 3. 企业内部中转机：校验并分发至目标节点
 
-灰度用户先到“个人设置 → 本地 OpenCode 客户端”创建并复制 client key，再点击右上角头像，在 OpenCode 实例列表
-下方选择“下载本地客户端”。统一入口 `/downloads/local-opencode-client/installer` 按 User-Agent 返回：
+**机器：企业内部中转机**。从 U 盘把两个文件复制到固定目录 ~/Desktop/mimoagent/0709；不要创建 /data/0709。随后执行：
 
-- Apple Silicon macOS：`TestAgent-Local-Client-macOS-arm64.pkg`，双击后使用系统 Installer。
-- ARM64 glibc 麒麟：`TestAgent-Local-Client-Kylin-arm64.deb`，双击后使用麒麟软件安装器。
+~~~bash
+cd ~/Desktop/mimoagent/0709
+sha256sum -c test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz.sha256
+scp ~/Desktop/mimoagent/0709/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz <部署账号>@122.233.30.2:/data/0709/
+scp ~/Desktop/mimoagent/0709/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz.sha256 <部署账号>@122.233.30.2:/data/0709/
+~~~
 
-原生包内已经包含 JRE、OpenCode 和客户端 JAR。安装完成后首次启动向导要求填写平台服务地址、打开网页地址
-并粘贴 client key；key 只进入密码框和当前用户的 `0600` 文件，不进入命令行、环境变量或安装日志。客户端
-向平台注册后，头像菜单原下载位置切换为“本地 OpenCode 健康/异常/离线”；是否安装以服务端实例记录为准，
-不使用浏览器下载记录猜测。
+成功条件：第一条输出 OK，两条 scp 均退出 0。该本地客户端制品仅需要发送到 .2 前端节点；.4、.114 后台节点在下一节只修改自己已有的 /data/testagent/config/backend.env。任何摘要或传输失败即停止，不要继续后台或前端配置。
 
-macOS 安装完成后从 Finder 的“应用程序”打开“TestAgent 本地客户端”。尚未保存首次配置时，应用会保留
-Dock 图标和可见配置窗口；配置成功后的后续启动不再占用 Dock，入口固定为屏幕顶部菜单栏的兔子图标。
-若首次向导被取消，可再次从“应用程序”打开，不需要重新安装。
+## 4. 122.233.30.4 后台：配置版本发现与安全控制
 
-macOS 安装 `/Applications/TestAgent Local Client.app` 和系统级 LaunchAgent 定义，实际客户端仍以登录用户
-运行；麒麟安装到 `/opt/testagent/local-opencode-client`，包内全局启用软链接使 systemd user unit 在下次
-登录用户会话运行，并提供应用菜单入口。安装器不在包管理事务中调用 `systemctl`、`loginctl`
-或 `runuser`；当前会话可从应用菜单直接完成首次配置，配置后重新登录即由 systemd 自启。
-macOS PKG 固定把 App 安装到 `/Applications`，禁止 Installer 根据历史安装记录
-重定位到用户目录；安装后只通过一次 `launchctl bootstrap` 尝试载入当前桌面用户，不在 `postinstall` 中执行
-可能长期阻塞 PackageKit 的 `kickstart` 或 `open`。从兜底脚本升级到 PKG 时，安装器会移除当前桌面用户下
-同 label 的旧用户级 LaunchAgent，避免下次登录同时加载系统级和用户级定义；不会删除用户配置、工作空间或
-兜底脚本保存的版本目录。桌面会话暂不可用时，从应用菜单启动“TestAgent 本地客户端”或重新登录即可进入
-首次向导。
+**机器：122.233.30.4 后台**。编辑唯一生产配置文件，不要使用根目录 .env.local，也不要 source 含密钥的 dotenv 文件：
 
-生产由 Nginx 提供，dev server 默认从 `deploy/internal/dist/local-opencode-client/` 只读提供，必要时可用
-`TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录。无桌面环境仍可审阅并执行兜底脚本：
+~~~bash
+sudoedit /data/testagent/config/backend.env
+~~~
 
-```bash
-curl -fsS http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client/install.sh -o /tmp/install-local-opencode-client.sh
-TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL=http://NGINX:DOWNLOAD_PORT/downloads/local-opencode-client \
-TEST_AGENT_LOCAL_CLIENT_SERVER_URL=https://PLATFORM \
-TEST_AGENT_LOCAL_CLIENT_WEB_URL=https://PLATFORM \
-  sh /tmp/install-local-opencode-client.sh
-```
+在该文件中确认或加入以下精确键。TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64 是外网 Mac 签名私钥的匹配公钥 PEM 的单行 Base64，不是私钥，也不得填写 REPLACE_ 占位符。
 
-兜底脚本从 `/dev/tty` 隐藏读取 key，不接受 key 命令行参数或环境变量。它先验证内嵌公钥对应的
-`manifest.json.sig`，再逐一验证 JAR/JRE/OpenCode SHA-256，最后安装到用户目录并原子切换 `current`。
-兜底脚本在 macOS 创建 `~/Library/LaunchAgents/com.enterprise.testagent.local-opencode-client.plist`；麒麟 ARM 创建
-`~/.config/systemd/user/test-agent-local-opencode-client.service`。两者均以登录用户运行且不需要 root。
-`TEST_AGENT_LOCAL_CLIENT_WEB_URL` 省略时默认等于 `SERVER_URL`；只有本地开发显式启用不安全控制开关时才
-允许使用 HTTP。macOS 和提供 Java SystemTray 的麒麟桌面显示宠物托盘；无图形会话或不支持托盘时客户端
-继续作为后台服务运行。托盘正常退出后 launchd/systemd 不立即重启，异常退出仍会自动恢复；下次登录会
-按已启用的用户服务重新启动。
+~~~dotenv
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=<完整公钥_PEM_的单行_Base64>
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json
+TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=false
+TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2
+~~~
 
-常用检查：
+**机器：122.233.30.4 后台（同一终端）**。只验证键和值是否存在，不回显公钥或任何其他敏感配置：
 
-```bash
-# macOS
-launchctl print gui/$(id -u)/com.enterprise.testagent.local-opencode-client
-tail -f "$HOME/Library/Application Support/TestAgent/local-opencode-client/state/logs/client.log"
+~~~bash
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/' /data/testagent/config/backend.env
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json' /data/testagent/config/backend.env
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=false' /data/testagent/config/backend.env
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2' /data/testagent/config/backend.env
+sudo awk -F= '$1 == "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64" && $2 != "" && $2 !~ /^REPLACE_/ { print "local-client signing public key configured" }' /data/testagent/config/backend.env
+sudo systemctl restart test-agent-backend
+sudo systemctl is-active --quiet test-agent-backend
+curl -fsS http://127.0.0.1:8080/actuator/health
+~~~
 
-# 麒麟 ARM
-systemctl --user status test-agent-local-opencode-client
-journalctl --user -u test-agent-local-opencode-client -f
-tail -f "$HOME/.local/state/testagent/local-opencode-client/logs/client.log"
-```
+成功条件：四个 grep 都回显精确行，awk 只回显配置成功文字，服务为 active，health 返回成功 JSON。任一失败即保持 .4 停止，不要继续 .114。
 
-麒麟的 `journalctl` 用于补充查看 systemd 服务事件；托盘“查看日志/下载日志”直接使用客户端自行写入的
-`~/.local/state/testagent/local-opencode-client/logs/`，不依赖 journal。下载 ZIP 只收集客户端滚动日志，
-最多 20 个文件、每个文件最多末尾 10 MiB，不包含 `client.key`、`client.properties`、OpenCode 日志或
-工作区内容。托盘“会话进度”只展示当前操作类型、数量与耗时。
+## 5. 122.233.30.114 后台：重复配置并确认健康
 
-轮换 key 后，同一用户所有设备都必须把新值写入各自 `client.key`（权限保持 `0600`）并重启用户服务。
-撤销 key 会立即断开全部设备。
+**机器：122.233.30.114 后台**。编辑该节点自己的配置文件：
 
-## 受保护 Agent/Skill 运行要求
+~~~bash
+sudoedit /data/testagent/config/backend.env
+~~~
 
-该链路复用现有服务器 OpenCode 节点、Redis、Java 回调地址和本地客户端 WSS，不新增客户端进程或外部
-中间件。至少保证：
+在该文件中确认或加入以下精确键；公钥值必须与 .4 和 DEB 内置的信任公钥配对：
 
-- 当前 Java 的监听地址可被同服务器 OpenCode 访问；MCP 回调固定为
-  `/api/internal/platform/protected-agent/mcp`，不经过浏览器登录 Token。
-- 存在可路由的 `SERVER_PROCESS` OpenCode 节点。本地客户端在线不等于服务器执行节点可用，服务器节点缺失
-  时受保护 Run 必须返回不可用，不能回退本地 OpenCode。
-- Redis 可保存受保护远端 Session 到服务器隔离目录的七天映射；映射缺失时重建远端 Session，禁止使用本地
-  绝对路径兜底。
-- `TEST_AGENT_PROTECTED_AGENT_WORK_ROOT` 可选覆盖隔离目录根，默认使用 JVM 临时目录下
-  `test-agent-protected-agent`。运行用户必须可创建目录并支持逐级拒绝符号链接；POSIX 目录会收紧为 `0700`。
-- 受保护文件 grant 只驻留签发 Java 内存且最长四小时。Java 重启、Run 终态、客户端重连换代或 Workspace
-  重绑后，旧 MCP 调用预期失败；浏览器应以普通 Run 失败/重试流程处理，不复用旧 grant。
+~~~dotenv
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=<完整公钥_PEM_的单行_Base64>
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json
+TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=false
+TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2
+~~~
 
-上线验收应在一个已发布 Hub Agent 中冻结至少一个 Skill，确认网页目录只出现 revision/SHA 摘要；运行时
-服务器 OpenCode 能通过 `local_files_read_file` 读取授权目录，并在用户确认权限后写入文件；客户端目录中不
-出现 Agent/Skill 正文。后台 API 日志、RunEvent 和客户端日志均不得出现 MCP Authorization、prompt 或文件
-内容。
+**机器：122.233.30.114 后台（同一终端）**。执行校验和重启：
 
-## 发布验证
+~~~bash
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/' /data/testagent/config/backend.env
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json' /data/testagent/config/backend.env
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=false' /data/testagent/config/backend.env
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2' /data/testagent/config/backend.env
+sudo awk -F= '$1 == "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64" && $2 != "" && $2 !~ /^REPLACE_/ { print "local-client signing public key configured" }' /data/testagent/config/backend.env
+sudo systemctl restart test-agent-backend
+sudo systemctl is-active --quiet test-agent-backend
+curl -fsS http://127.0.0.1:8080/actuator/health
+~~~
 
-打包机先执行自动化制品和 Nginx 校验：
+成功条件：与 .4 相同，所有命令返回成功。任一失败即停止，不要发布 .2 Nginx，也不要让用户开始 enroll。
 
-```bash
-deploy/internal/tests/local-opencode-client-package-test.sh
-tools/verify-internal-nginx-config.sh
-tools/verify-internal-incremental-components.sh
-```
+## 6. 122.233.30.2 前端：解包、发布 Nginx 并同步 catalog
 
-然后必须分别在 Apple Silicon Mac 和真实 ARM64 glibc 麒麟机上从网页下载并双击 PKG/DEB，验证系统安装器、
-首次桌面向导、用户服务启动、WSS 认证、OpenCode 1.18.4 loopback 健康、菜单下载入口切换为健康度、
-本地工作区注册、聊天修改文件、
-分片 CRUD、托盘状态与全部菜单动作以及客户端重启恢复。没有完成真实麒麟 ARM 流程时，发布验收只能记为
-“部分验证”。
+**机器：122.233.30.2 前端**。先校验收到的文件，再解包到独立 staging 目录。此步骤不会覆盖现有 immutable release：
 
-## 回滚与风险
+~~~bash
+cd /data/0709
+sha256sum -c test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz.sha256
+sudo install -d -m 0755 /data/testagent/dist
+local_client_stage_dir="$(sudo mktemp -d /data/testagent/dist/.local-opencode-client-stage.XXXXXX)"
+sudo tar -xzf /data/0709/test-agent-local-opencode-client_<RELEASE_VERSION>_arm64.tar.gz --no-same-owner -C "$local_client_stage_dir"
+test -f "$local_client_stage_dir/local-opencode-client/catalog.json"
+test -f "$local_client_stage_dir/local-opencode-client/catalog.json.sig"
+test -f "$local_client_stage_dir/local-opencode-client/releases/<RELEASE_VERSION>/manifest.json"
+test -f "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb"
+test -f "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+cmp -s "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb" "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+~~~
 
-命令行安装的每个版本位于独立 `releases/{version}`，回滚时把 `current` 原子指回已验证版本并重启用户
-服务。原生 PKG/DEB 回滚必须重新安装已留存的上一版系统包，再重启对应用户服务；Nginx 端切换安装包时
-必须同步回滚 stable 清单和签名，版本化制品不可原地替换。
+成功条件：摘要输出 OK，五个文件均存在且两个 DEB 逐字节相同。失败即停止并保留现有 /data/testagent/dist/local-opencode-client/ 不变。
 
-当前部署明确使用无需认证的内网明文 HTTP。签名清单记录 PKG/DEB SHA-256，但浏览器在启动安装器前不会
-自动核对该清单；主动中间人仍可能替换下载内容。正式 macOS PKG 必须使用 Developer ID Installer 签名，
-按网络条件完成 notarization 并 stapler；当前构建机没有身份时脚本只产出带明确警告的 unsigned 开发包，
-不得冒充正式双击交付。麒麟 DEB 依赖受控发布链路、网络 ACL 和带外清单校验，未来应迁移到可信 HTTPS 或
-签名软件源。client key、控制隧道和模型请求仍必须使用 HTTPS/WSS；只有显式测试开关才允许不安全控制地址，
-生产禁止开启。
+**机器：122.233.30.2 前端（同一终端）**。先放置 versioned release，若同版本已经存在则必须逐字节相同；然后才替换 catalog、stable manifest、启动器和 DEB。下面的 mv 仅移动由上一条 mktemp 创建的精确 staging 路径。
+
+~~~bash
+sudo install -d -m 0755 /data/testagent/dist/local-opencode-client/releases
+if test -e /data/testagent/dist/local-opencode-client/releases/<RELEASE_VERSION>; then sudo diff -qr "$local_client_stage_dir/local-opencode-client/releases/<RELEASE_VERSION>" /data/testagent/dist/local-opencode-client/releases/<RELEASE_VERSION>; else sudo mv "$local_client_stage_dir/local-opencode-client/releases/<RELEASE_VERSION>" /data/testagent/dist/local-opencode-client/releases/<RELEASE_VERSION>; fi
+sudo install -d -m 0755 /data/testagent/dist/local-opencode-client/stable
+sudo install -m 0755 "$local_client_stage_dir/local-opencode-client/install.sh" /data/testagent/dist/local-opencode-client/install.sh
+sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/stable/manifest.json" /data/testagent/dist/local-opencode-client/stable/manifest.json
+sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/stable/manifest.json.sig" /data/testagent/dist/local-opencode-client/stable/manifest.json.sig
+sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb" /data/testagent/dist/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
+sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb
+sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/catalog.json.sig" /data/testagent/dist/local-opencode-client/catalog.json.sig
+sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/catalog.json" /data/testagent/dist/local-opencode-client/catalog.json
+~~~
+
+成功条件：若同版本存在，diff -qr 没有输出且退出 0；若不存在，release 目录移动成功。catalog.json 必须最后落盘，从而不会先公开指向不完整 release 的 catalog。任一失败即停止，不要执行 Nginx reload。
+
+**机器：122.233.30.2 前端（同一终端）**。使用受控的实体 Nginx 配置，脚本会渲染、语法校验、确认 include 并 reload；不要改用 PATH 中可能读取其他主配置的 nginx：
+
+~~~bash
+sudo /data/testagent/deploy/internal/configure-nginx.sh --env-file /data/testagent/config/nginx.env --template /data/testagent/deploy/internal/nginx/gateway.conf.template
+curl -fsSI http://127.0.0.1/downloads/local-opencode-client/catalog.json
+curl -fsSI http://127.0.0.1/downloads/local-opencode-client/releases/<RELEASE_VERSION>/manifest.json
+curl -fsSI http://127.0.0.1/downloads/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
+curl -fsSIL http://127.0.0.1/downloads/local-opencode-client/installer
+~~~
+
+成功条件：配置脚本打印已安装的 gateway，前三个 curl 返回 200，`/installer` 只重定向并最终下载 `TestAgent-Local-Client-Kylin-arm64.deb`。配置中 /downloads/local-opencode-client/ 必须映射到 /data/testagent/dist/local-opencode-client/；下载服务只暴露制品，不暴露 API 或目录索引。失败即停止，脚本会恢复旧 Nginx 配置。
+
+**机器：平台网页（超级管理员）**。在 Nginx 三个 URL 都返回 200 后，进入本地客户端版本管理页面，执行“同步 release/catalog”。成功条件：页面显示 <RELEASE_VERSION> 的已同步 release，且 platform=linux、architecture=arm64、签名校验成功。同步失败或版本不兼容时停止，不能创建 rollout。
+
+**机器：122.233.30.2 前端（完成后）**。仅在上述验证成功后清理本次精确 staging 目录：
+
+~~~bash
+case "$local_client_stage_dir" in
+  /data/testagent/dist/.local-opencode-client-stage.*) sudo rm -rf "$local_client_stage_dir" ;;
+  *) echo "Refusing unsafe cleanup: $local_client_stage_dir" >&2; exit 1 ;;
+esac
+~~~
+
+成功条件：local_client_stage_dir 是本节 mktemp 生成的 /data/testagent/dist/.local-opencode-client-stage.* 目录。若变量为空、路径不匹配或不确定，停止并人工检查，不要扩大删除范围。
+
+## 7. 麒麟 ARM 用户节点：管理员安装与普通用户 enroll
+
+**机器：麒麟 ARM 用户节点，管理员账户**。只下载并安装本次精确版本的 DEB；不要把 Client key 放到该命令、环境变量或安装日志中。
+
+~~~bash
+curl -fS --proto '=http' http://122.233.30.2/downloads/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb -o /var/tmp/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
+dpkg-deb -f /var/tmp/test-agent-local-client_<RELEASE_VERSION>_arm64.deb Package Version Architecture
+sudo dpkg -i /var/tmp/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
+test -x /usr/bin/test-agent-local-client
+/usr/bin/test-agent-local-client --version
+~~~
+
+成功条件：dpkg-deb 输出 Package: test-agent-local-client、Version: <RELEASE_VERSION>、Architecture: arm64，dpkg -i 成功，最后一条显示 release=not-installed（首次安装尚未由用户下载 runtime）或已有受控 release。非 ARM64/aarch64 或非 glibc 设备必须在启动器检查失败时停止。
+
+**机器：同一麒麟节点的普通登录用户，不能使用 sudo**。在真实交互终端执行：
+
+~~~bash
+test-agent-local-client enroll
+systemctl --user is-active --quiet test-agent-local-opencode-client.service
+systemctl --user status test-agent-local-opencode-client.service --no-pager
+journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes ago' --no-pager
+test-agent-local-client --version
+~~~
+
+enroll 会交互提示统一认证号和隐藏 Client key；只在用户本机输入，绝不把 Key 作为命令行参数、环境变量、URL、截图、日志或聊天内容回传。成功条件：命令显示“本地客户端重新接入成功”或“本地客户端接入认证成功”，user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
+
+**机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认该实例 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。此项与本机 active user service 一起证明 WSS 已建立；若任一项失败，停止 rollout，先检查 .2 的 Nginx 下载/HTTPS-WSS 路由、.4/.114 的 TRUSTED_PROXY_ADDRESSES 和后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
+
+## 8. 数据库与真实现场闸门
+
+本手册的文件、Nginx、首次 enroll 和 WSS/实例检查不替代数据库准入。发布前仍必须按照 [database.md](database.md) 对每套已知真实 PostgreSQL 历史留存 flyway_schema_history 的 version/checksum/success，验证升级到当前 HEAD，并检查两条固定 migration 在源码、构建输出、发布 ZIP 和安装后 backend/lib/test-agent-persistence-*.jar 中的字节。未完成真实 PostgreSQL 升级或真实麒麟 ARM64 glibc 全链路测试时，它们必须继续标记为发布闸门，不能表述为已通过。

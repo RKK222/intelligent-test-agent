@@ -11,12 +11,12 @@ usage() {
   cat <<'USAGE'
 Usage: verify-local-opencode-client-distribution.sh [options]
 
-Verify an installed or packaged local OpenCode client HTTP distribution without
-jq or network access.
+Verify an installed or packaged Kylin ARM64 local OpenCode client HTTP
+distribution without jq or network access.
 
 Options:
   --root <path>                       Distribution root.
-  --expected-version <version>        Expected manifest version.
+  --expected-version <version>        Expected 14-digit release version.
   --expected-manifest-sha256 <sha>    Expected stable/manifest.json SHA-256.
   --expected-signature-sha256 <sha>   Expected stable/manifest.json.sig SHA-256.
   --expected-install-sha256 <sha>     Expected install.sh SHA-256.
@@ -54,6 +54,14 @@ sha256_file() {
   fi
 }
 
+file_size() {
+  if stat -f %z "$1" >/dev/null 2>&1; then
+    stat -f %z "$1"
+  else
+    stat -c %s "$1"
+  fi
+}
+
 require_sha256() {
   [[ "$1" =~ ^[0-9a-f]{64}$ ]] || {
     echo "Invalid expected SHA-256 for $2" >&2
@@ -79,29 +87,57 @@ manifest_value() {
 validate_relative_path() {
   local path="$1" label="$2"
   case "${path}" in
-    /*|*..*|*//*|*\\*)
+    ""|/*|*..*|*//*|*\\*)
       echo "Unsafe local client ${label} path: ${path}" >&2
       exit 1
       ;;
   esac
 }
 
-verify_manifest_artifact() {
-  local path_key="$1" sha_key="$2" path expected actual
-  path="$(manifest_value "${MANIFEST}" "${path_key}")"
-  expected="$(manifest_value "${MANIFEST}" "${sha_key}")"
-  validate_relative_path "${path}" "${path_key}"
-  require_sha256 "${expected}" "${sha_key}"
+artifact_field() {
+  local line="$1" key="$2"
+  printf '%s\n' "${line}" | sed -n "s/.*\"${key}\": \"\([^\"]*\)\".*/\1/p"
+}
+
+artifact_size() {
+  printf '%s\n' "$1" | sed -n 's/.*"size": \([0-9][0-9]*\).*/\1/p'
+}
+
+verify_artifact() {
+  local kind="$1" count line path signature_path expected_sha expected_size actual_sha actual_size
+  count="$(grep -F -c "\"kind\": \"${kind}\"" "${MANIFEST}" || true)"
+  [[ "${count}" -eq 1 ]] || {
+    echo "Local client manifest must contain exactly one ${kind} artifact" >&2
+    exit 1
+  }
+  line="$(grep -F "\"kind\": \"${kind}\"" "${MANIFEST}")"
+  path="$(artifact_field "${line}" path)"
+  signature_path="$(artifact_field "${line}" signaturePath)"
+  expected_sha="$(artifact_field "${line}" sha256)"
+  expected_size="$(artifact_size "${line}")"
+  validate_relative_path "${path}" "${kind} artifact"
+  validate_relative_path "${signature_path}" "${kind} signature"
+  require_sha256 "${expected_sha}" "${kind} artifact"
+  [[ "${expected_size}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid expected size for ${kind} artifact" >&2
+    exit 1
+  }
   require_file "${ROOT}/${path}"
-  actual="$(sha256_file "${ROOT}/${path}")"
-  [[ "${actual}" == "${expected}" ]] || {
-    echo "Local client artifact SHA-256 mismatch: ${path}" >&2
+  require_file "${ROOT}/${signature_path}"
+  actual_sha="$(sha256_file "${ROOT}/${path}")"
+  actual_size="$(file_size "${ROOT}/${path}")"
+  [[ "${actual_sha}" == "${expected_sha}" && "${actual_size}" == "${expected_size}" ]] || {
+    echo "Local client artifact integrity mismatch: ${path}" >&2
     exit 1
   }
 }
 
 [[ -n "${ROOT}" && -n "${EXPECTED_VERSION}" ]] || {
   echo "--root and --expected-version are required" >&2
+  exit 2
+}
+[[ "${EXPECTED_VERSION}" =~ ^[0-9]{14}$ ]] || {
+  echo "Expected local client version must be a 14-digit release version" >&2
   exit 2
 }
 require_sha256 "${EXPECTED_MANIFEST_SHA256}" manifest
@@ -111,9 +147,17 @@ require_sha256 "${EXPECTED_INSTALL_SHA256}" install.sh
 MANIFEST="${ROOT}/stable/manifest.json"
 SIGNATURE="${ROOT}/stable/manifest.json.sig"
 INSTALL_SCRIPT="${ROOT}/install.sh"
-require_file "${MANIFEST}"
-require_file "${SIGNATURE}"
-require_file "${INSTALL_SCRIPT}"
+CATALOG="${ROOT}/catalog.json"
+CATALOG_SIGNATURE="${ROOT}/catalog.json.sig"
+RELEASE_MANIFEST="${ROOT}/releases/${EXPECTED_VERSION}/manifest.json"
+RELEASE_SIGNATURE="${ROOT}/releases/${EXPECTED_VERSION}/manifest.json.sig"
+VERSIONED_DEB="${ROOT}/test-agent-local-client_${EXPECTED_VERSION}_arm64.deb"
+DOWNLOAD_ALIAS="${ROOT}/TestAgent-Local-Client-Kylin-arm64.deb"
+for required in "${MANIFEST}" "${SIGNATURE}" "${INSTALL_SCRIPT}" "${CATALOG}" \
+  "${CATALOG_SIGNATURE}" "${RELEASE_MANIFEST}" "${RELEASE_SIGNATURE}" \
+  "${VERSIONED_DEB}" "${DOWNLOAD_ALIAS}"; do
+  require_file "${required}"
+done
 
 [[ "$(sha256_file "${MANIFEST}")" == "${EXPECTED_MANIFEST_SHA256}" ]] || {
   echo "Local client manifest SHA-256 mismatch" >&2
@@ -127,19 +171,51 @@ require_file "${INSTALL_SCRIPT}"
   echo "Local client install.sh SHA-256 mismatch" >&2
   exit 1
 }
-[[ "$(manifest_value "${MANIFEST}" version)" == "${EXPECTED_VERSION}" ]] || {
-  echo "Local client version mismatch" >&2
+cmp "${MANIFEST}" "${RELEASE_MANIFEST}" >/dev/null || {
+  echo "Stable and versioned local client manifests differ" >&2
+  exit 1
+}
+cmp "${SIGNATURE}" "${RELEASE_SIGNATURE}" >/dev/null || {
+  echo "Stable and versioned local client manifest signatures differ" >&2
+  exit 1
+}
+cmp "${VERSIONED_DEB}" "${DOWNLOAD_ALIAS}" >/dev/null || {
+  echo "Local client download alias does not match the active versioned DEB" >&2
   exit 1
 }
 
-# manifest 字节已由发布包固定；继续逐项核对，防止目标机只保留清单而安装器或版本制品已经漂移。
-verify_manifest_artifact clientJarPath clientJarSha256
-verify_manifest_artifact darwinArm64JrePath darwinArm64JreSha256
-verify_manifest_artifact darwinArm64OpencodePath darwinArm64OpencodeSha256
-verify_manifest_artifact linuxArm64GlibcJrePath linuxArm64GlibcJreSha256
-verify_manifest_artifact linuxArm64GlibcOpencodePath linuxArm64GlibcOpencodeSha256
-verify_manifest_artifact darwinArm64InstallerPath darwinArm64InstallerSha256
-verify_manifest_artifact linuxArm64GlibcInstallerPath linuxArm64GlibcInstallerSha256
+schema_count="$(grep -Ec '^[[:space:]]*"schemaVersion":[[:space:]]*2,' "${MANIFEST}" || true)"
+[[ "${schema_count}" -eq 1 \
+  && "$(manifest_value "${MANIFEST}" version)" == "${EXPECTED_VERSION}" \
+  && "$(manifest_value "${MANIFEST}" platform)" == "linux" \
+  && "$(manifest_value "${MANIFEST}" architecture)" == "arm64" ]] || {
+  echo "Local client manifest platform, schema or version mismatch" >&2
+  exit 1
+}
+
+artifact_count="$(grep -F -c '"kind":' "${MANIFEST}" || true)"
+[[ "${artifact_count}" -eq 3 ]] || {
+  echo "Local client manifest must contain exactly three runtime artifacts" >&2
+  exit 1
+}
+verify_artifact CLIENT_JAR
+verify_artifact JDK
+verify_artifact OPENCODE
+
+catalog_line="$(grep -F "\"version\": \"${EXPECTED_VERSION}\"" "${CATALOG}" || true)"
+[[ -n "${catalog_line}" ]] || {
+  echo "Local client catalog does not contain the expected release" >&2
+  exit 1
+}
+catalog_manifest_path="$(artifact_field "${catalog_line}" manifestPath)"
+catalog_manifest_sha="$(artifact_field "${catalog_line}" manifestSha256)"
+catalog_signature_path="$(artifact_field "${catalog_line}" manifestSignaturePath)"
+[[ "${catalog_manifest_path}" == "releases/${EXPECTED_VERSION}/manifest.json" \
+  && "${catalog_signature_path}" == "releases/${EXPECTED_VERSION}/manifest.json.sig" \
+  && "${catalog_manifest_sha}" == "${EXPECTED_MANIFEST_SHA256}" ]] || {
+  echo "Local client catalog entry does not match the active release" >&2
+  exit 1
+}
 
 printf 'Local OpenCode client distribution verified: version=%s manifestSha256=%s\n' \
   "${EXPECTED_VERSION}" "${EXPECTED_MANIFEST_SHA256}"

@@ -39,6 +39,12 @@ public class MyBatisLocalClientInstanceRepository implements LocalClientInstance
                 instance.architecture(),
                 instance.clientVersion(),
                 instance.opencodeVersion(),
+                instance.launcherVersion(),
+                String.join(",", instance.selfUpdateCapabilities()),
+                instance.selfUpdateSupported(),
+                instance.lastUpdateStatus(),
+                instance.lastUpdateTargetVersion(),
+                instance.lastUpdateAt(),
                 instance.createdAt(),
                 instance.updatedAt(),
                 instance.lastConnectedAt(),
@@ -53,6 +59,23 @@ public class MyBatisLocalClientInstanceRepository implements LocalClientInstance
         mapper.markInstanceDisconnected(clientInstanceId.value(), disconnectedAt);
     }
 
+    @Override
+    public List<LocalClientInstance> findAll() {
+        return mapper.findAllInstances().stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public void updateLastUpdateStatus(
+            LocalClientInstanceId clientInstanceId,
+            String status,
+            String targetVersion,
+            Instant observedAt) {
+        if (mapper.updateInstanceLastUpdateStatus(
+                clientInstanceId.value(), status, targetVersion, observedAt) != 1) {
+            throw new IllegalStateException("local client instance does not exist while updating status");
+        }
+    }
+
     private LocalClientInstance toDomain(LocalClientInstanceRow row) {
         return new LocalClientInstance(
                 new LocalClientInstanceId(row.clientInstanceId()),
@@ -62,6 +85,14 @@ public class MyBatisLocalClientInstanceRepository implements LocalClientInstance
                 row.architecture(),
                 row.clientVersion(),
                 row.opencodeVersion(),
+                row.launcherVersion(),
+                row.selfUpdateCapabilities() == null || row.selfUpdateCapabilities().isBlank()
+                        ? List.of()
+                        : List.of(row.selfUpdateCapabilities().split(",")),
+                row.selfUpdateSupported(),
+                row.lastUpdateStatus(),
+                row.lastUpdateTargetVersion(),
+                row.lastUpdateAt(),
                 row.createdAt(),
                 row.updatedAt(),
                 row.lastConnectedAt(),

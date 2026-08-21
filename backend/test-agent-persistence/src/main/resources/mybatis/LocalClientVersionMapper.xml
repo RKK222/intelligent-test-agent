@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.LocalClientVersionMapper">
+
+    <resultMap id="releaseRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientReleaseRow">
+        <constructor>
+            <arg column="version" javaType="java.lang.String"/>
+            <arg column="platform" javaType="java.lang.String"/>
+            <arg column="architecture" javaType="java.lang.String"/>
+            <arg column="launcher_version_min" javaType="_int"/>
+            <arg column="launcher_version_max" javaType="_int"/>
+            <arg column="protocol_version" javaType="java.lang.String"/>
+            <arg column="manifest_url" javaType="java.lang.String"/>
+            <arg column="manifest_sha256" javaType="java.lang.String"/>
+            <arg column="manifest_signature" javaType="java.lang.String"/>
+            <arg column="compatible" javaType="_boolean"/>
+            <arg column="published_at" javaType="java.time.Instant"/>
+            <arg column="synced_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="artifactRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientReleaseArtifactRow">
+        <constructor>
+            <arg column="version" javaType="java.lang.String"/>
+            <arg column="artifact_kind" javaType="java.lang.String"/>
+            <arg column="artifact_url" javaType="java.lang.String"/>
+            <arg column="artifact_size" javaType="_long"/>
+            <arg column="artifact_sha256" javaType="java.lang.String"/>
+            <arg column="artifact_signature" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="globalPolicyRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientGlobalPolicyRow">
+        <constructor>
+            <arg column="target_version" javaType="java.lang.String"/>
+            <arg column="revision" javaType="_long"/>
+            <arg column="updated_by" javaType="java.lang.String"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="userPolicyRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientUserPolicyRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="target_version" javaType="java.lang.String"/>
+            <arg column="revision" javaType="_long"/>
+            <arg column="updated_by" javaType="java.lang.String"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="rolloutRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientRolloutRow">
+        <constructor>
+            <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="rollout_scope" javaType="java.lang.String"/>
+            <arg column="requested_user_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="created_by" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="completed_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="attemptRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientUpdateAttemptRow">
+        <constructor>
+            <arg column="command_id" javaType="java.lang.String"/>
+            <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="client_instance_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="connection_generation" javaType="_long"/>
+            <arg column="policy_revision" javaType="_long"/>
+            <arg column="current_version" javaType="java.lang.String"/>
+            <arg column="target_version" javaType="java.lang.String"/>
+            <arg column="direction" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="release_digest" javaType="java.lang.String"/>
+            <arg column="error_code" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="completed_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="releaseColumns">
+        version, platform, architecture, launcher_version_min, launcher_version_max,
+        protocol_version, manifest_url, manifest_sha256, manifest_signature,
+        compatible, published_at, synced_at
+    </sql>
+
+    <sql id="attemptColumns">
+        command_id, rollout_id, client_instance_id, user_id, connection_generation,
+        policy_revision, current_version, target_version, direction, status,
+        release_digest, error_code, created_at, updated_at, completed_at
+    </sql>
+
+    <select id="findRelease" resultMap="releaseRow">
+        SELECT <include refid="releaseColumns"/> FROM local_client_releases WHERE version = #{version}
+    </select>
+
+    <select id="findReleases" resultMap="releaseRow">
+        SELECT <include refid="releaseColumns"/> FROM local_client_releases ORDER BY version DESC
+    </select>
+
+    <insert id="insertRelease">
+        INSERT INTO local_client_releases(
+            version, platform, architecture, launcher_version_min, launcher_version_max,
+            protocol_version, manifest_url, manifest_sha256, manifest_signature,
+            compatible, published_at, synced_at
+        ) VALUES (
+            #{version}, #{platform}, #{architecture}, #{launcherVersionMin}, #{launcherVersionMax},
+            #{protocolVersion}, #{manifestUrl}, #{manifestSha256}, #{manifestSignature},
+            #{compatible}, #{publishedAt}, #{syncedAt}
+        )
+    </insert>
+
+    <select id="findReleaseArtifacts" resultMap="artifactRow">
+        SELECT version, artifact_kind, artifact_url, artifact_size, artifact_sha256, artifact_signature
+        FROM local_client_release_artifacts WHERE version = #{version} ORDER BY artifact_kind
+    </select>
+
+    <insert id="insertReleaseArtifact">
+        INSERT INTO local_client_release_artifacts(
+            version, artifact_kind, artifact_url, artifact_size, artifact_sha256, artifact_signature
+        ) VALUES (
+            #{version}, #{artifactKind}, #{artifactUrl}, #{artifactSize}, #{artifactSha256}, #{artifactSignature}
+        )
+    </insert>
+
+    <select id="nextPolicyRevision" resultType="java.lang.Long">
+        SELECT nextval('local_client_policy_revision_seq')
+    </select>
+
+    <select id="findGlobalPolicy" resultMap="globalPolicyRow">
+        SELECT target_version, revision, updated_by, updated_at
+        FROM local_client_global_version_policy WHERE policy_id = 'GLOBAL'
+    </select>
+
+    <insert id="upsertGlobalPolicy">
+        INSERT INTO local_client_global_version_policy(policy_id, target_version, revision, updated_by, updated_at)
+        VALUES ('GLOBAL', #{targetVersion}, #{revision}, #{updatedBy}, #{updatedAt})
+        ON CONFLICT (policy_id) DO UPDATE SET
+            target_version = EXCLUDED.target_version,
+            revision = EXCLUDED.revision,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = EXCLUDED.updated_at
+        WHERE local_client_global_version_policy.revision &lt; EXCLUDED.revision
+    </insert>
+
+    <select id="findUserPolicy" resultMap="userPolicyRow">
+        SELECT user_id, target_version, revision, updated_by, updated_at
+        FROM local_client_user_version_policies WHERE user_id = #{userId}
+    </select>
+
+    <select id="findUserPolicies" resultMap="userPolicyRow">
+        SELECT user_id, target_version, revision, updated_by, updated_at
+        FROM local_client_user_version_policies ORDER BY updated_at DESC, user_id
+    </select>
+
+    <insert id="upsertUserPolicy">
+        INSERT INTO local_client_user_version_policies(user_id, target_version, revision, updated_by, updated_at)
+        VALUES (#{userId}, #{targetVersion}, #{revision}, #{updatedBy}, #{updatedAt})
+        ON CONFLICT (user_id) DO UPDATE SET
+            target_version = EXCLUDED.target_version,
+            revision = EXCLUDED.revision,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = EXCLUDED.updated_at
+        WHERE local_client_user_version_policies.revision &lt; EXCLUDED.revision
+    </insert>
+
+    <insert id="insertPolicyAudit">
+        INSERT INTO local_client_version_policy_audits(
+            audit_id, policy_scope, user_id, previous_target_version, target_version,
+            revision, action, actor_user_id, created_at
+        ) VALUES (
+            #{auditId}, #{scope}, #{userId}, #{previousTargetVersion}, #{targetVersion},
+            #{revision}, #{action}, #{actorUserId}, #{createdAt}
+        )
+    </insert>
+
+    <insert id="insertRollout">
+        INSERT INTO local_client_update_rollouts(
+            rollout_id, rollout_scope, requested_user_id, status, created_by, created_at, completed_at
+        ) VALUES (
+            #{rolloutId}, #{rolloutScope}, #{requestedUserId}, #{status}, #{createdBy}, #{createdAt}, #{completedAt}
+        )
+    </insert>
+
+    <select id="findRollouts" resultMap="rolloutRow">
+        SELECT rollout_id, rollout_scope, requested_user_id, status, created_by, created_at, completed_at
+        FROM local_client_update_rollouts ORDER BY created_at DESC, rollout_id DESC
+    </select>
+
+    <select id="findRollout" resultMap="rolloutRow">
+        SELECT rollout_id, rollout_scope, requested_user_id, status, created_by, created_at, completed_at
+        FROM local_client_update_rollouts WHERE rollout_id = #{rolloutId}
+    </select>
+
+    <!-- 汇总前锁 rollout 主行；同一 rollout 的 attempts 读取和状态更新必须在持锁事务内完成。 -->
+    <select id="findRolloutForUpdate" resultMap="rolloutRow">
+        SELECT rollout_id, rollout_scope, requested_user_id, status, created_by, created_at, completed_at
+        FROM local_client_update_rollouts WHERE rollout_id = #{rolloutId}
+        FOR UPDATE
+    </select>
+
+    <update id="completeRollout">
+        UPDATE local_client_update_rollouts
+        SET status = #{status}, completed_at = #{completedAt}
+        WHERE rollout_id = #{rolloutId} AND status != #{status}
+    </update>
+
+    <insert id="insertAttempt">
+        INSERT INTO local_client_update_attempts(
+            command_id, rollout_id, client_instance_id, user_id, connection_generation,
+            policy_revision, current_version, target_version, direction, status,
+            release_digest, error_code, created_at, updated_at, completed_at
+        ) VALUES (
+            #{commandId}, #{rolloutId}, #{clientInstanceId}, #{userId}, #{connectionGeneration},
+            #{policyRevision}, #{currentVersion}, #{targetVersion}, #{direction}, #{status},
+            #{releaseDigest}, #{errorCode}, #{createdAt}, #{updatedAt}, #{completedAt}
+        )
+    </insert>
+
+    <select id="findAttemptsByRollout" resultMap="attemptRow">
+        SELECT <include refid="attemptColumns"/> FROM local_client_update_attempts
+        WHERE rollout_id = #{rolloutId} ORDER BY created_at, command_id
+    </select>
+
+    <select id="findAttempt" resultMap="attemptRow">
+        SELECT <include refid="attemptColumns"/> FROM local_client_update_attempts WHERE command_id = #{commandId}
+    </select>
+
+    <select id="findDispatchableAttempts" resultMap="attemptRow">
+        SELECT <include refid="attemptColumns"/> FROM local_client_update_attempts
+        WHERE status IN ('PENDING', 'SENT', 'PREPARING', 'PREPARED', 'APPLYING')
+        ORDER BY CASE WHEN created_at &lt;= #{deadlineCutoff} THEN 0 ELSE 1 END,
+                 created_at,
+                 command_id
+        LIMIT #{limit}
+        OFFSET #{offset}
+    </select>
+
+    <update id="transitionAttempt">
+        UPDATE local_client_update_attempts
+        SET status = #{status},
+            release_digest = COALESCE(#{releaseDigest}, release_digest),
+            error_code = #{errorCode},
+            updated_at = #{observedAt},
+            completed_at =
+            <choose>
+                <when test="terminal">#{observedAt}</when>
+                <otherwise>NULL</otherwise>
+            </choose>
+        WHERE command_id = #{commandId}
+          AND status = #{expectedStatus}
+          AND (
+              completed_at IS NULL
+              OR (
+                  status = 'FAILED'
+                  AND error_code = 'DELIVERY_DEADLINE_EXCEEDED'
+                  AND #{status} IN ('SUCCEEDED', 'AUTO_ROLLED_BACK')
+              )
+          )
+    </update>
+</mapper>

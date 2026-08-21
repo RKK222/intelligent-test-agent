@@ -23,12 +23,16 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 全局顶部栏在用户手册与资源/头像区之间渲染 `UserNotificationCenter`。面板默认打开“未读”，并把“全部”置于其后，支持分页、加载/空态/错误重试/失效态、Esc/点击外部关闭、焦点返回和键盘操作；未读使用工行红闭合信封，已读使用中性灰打开信封，未读取即失效的历史使用停用图标，避免误标已读。点击有效 `SESSION_SHARE` 通知在新标签页打开 `/s/{shareId}`，当前工作台保留，且不会在页面侧提前调用通用已读接口。
 - `AgentWorkbench` 登录后先读取通知分页，再订阅用户级通知 SSE；变化信号更新角标并合并刷新列表，断流由 client 重连。固定分享工作台隐藏铃铛。分享设置成功文案明确“已通知被分享人”，完整链接输入区不再占据主流程，只在弹框页脚保留低强调“复制备用链接”。
 
+- `SUPER_ADMIN` 在系统管理页可同步已签名本地客户端 release、维护全局/用户目标版本、创建 `ALL_ONLINE` 或
+  `USER` rollout 并查看 attempt；普通用户仍只从通知动作更新自己的在线实例。页面不展示或缓存 Key、签名私钥、
+  下载 URL 或策略 revision；旧客户端显示需安装新 DEB。
+
 - 会话列表提供“我的会话 / 分享给我”双 Tab；分享列表保留过期、取消、移除和会话归档记录并置灰，只有 `ACTIVE` 可进入，点击有效分享会话时使用独立浏览器标签页打开 `/s/{shareId}`，当前普通工作台不切换路由。所属人通过可从右下角双向拉伸的分享弹窗设置 1/3/7 天有效期、用户搜索、多选和逐人 `canChat` 权限（双侧显示只读与可对话）；站内通知是主入口，永久唯一链接仅作为页脚备用复制动作，原链接仍支持取消后重新启用。取消前会提示仍待执行的定时任务。
 - `/s/{id}` 按强类型前缀分流：`ses_` Session ID 直接打开仅所属人可访问的只读原始对话，`shr_` shareId 打开固定 Session/Workspace 的完整分享工作台。只读原始对话复用工作台消息归一化与 OpenCode 时间线，同时展示 `content` 和结构化 `parts`，不能把仅有 parts 的历史消息渲染成空白。分享所属人仍按普通历史会话流程跳转；被分享人隐藏会话列表等越界入口，但保留“新建对话”，点击后直接回到本人工作台的空白对话。模型与 Provider 目录显式绑定分享授权中的固定 Workspace，并通过所属人的 OpenCode 进程加载，可对话成员可选择模型后代操作。只读成员可查看消息、Run、Diff 和文件，不能修改或执行；可对话成员按所属人身份代操作，界面仍记录实际 actor。权限失效会关闭 SSE、文件连接和终端并进入明确失效页。记忆证据中的“打开原始对话”使用新标签页，原记忆中心保持不变。
 - 本人消息使用浅蓝 `#E6F4FF`，共享会话中的其他用户消息使用低饱和柔紫 token `--ta-chat-other-user-bg`（默认 `#F3E8FF`），两者均无边框并保持高对比度与清爽识别；智能体返回回答使用高质感无边框柔灰/纯白卡片 `--ta-chat-answer-bg`（默认 `#F7F8FA`），提升与输入气泡的视觉协调度与现代感；别人的用户气泡仍显示姓名，自己的不显示，姓名由分享访问上下文的参与者目录解析。多人页面以平台 `session_messages` 用户输入为正文权威源：分享 runtime-state 发现活动 Run 后立即订阅 RunEvent SSE，先恢复平台消息并按远端 message ID 与 OpenCode envelope 原位归并；空 envelope 不展示，断线重放也不重复生成气泡。后续帧中 active Run 消失时保留本地 Run 身份并按精确 `runId` 拉取终态，不能只清空 Run 导致持续“思考中”；`sessionUpdatedAt` 变化且当前无活动 Run 时重新读取消息，使 compact 结果无需刷新页面即可同步。重发的 `messageChange` 在预约提交后按 replacement Run 精确读取 USER，取消/失败时按 source Run 精确读取完整 USER/ASSISTANT 并原位恢复；前端按 Session 维护修订水位，并在异步读取返回时二次校验，拒绝迟到旧通知覆盖新状态。两条路径都不切换 Session、不重载历史树，也不触发 history loading 或滚动到底。分享模式禁用 busy follow-up 队列，任一活动 Run 都立即禁用所有参与方输入，后端唯一约束仍是最终裁决。
 - 定时异步执行交互由 `AgentWorkbench` 与 `FigmaChatPanel` 组合：输入框发送按钮左侧提供定时图标，普通用户点击后加载北京时间 21:00 至次日 07:00 的 15 分钟容量时段并默认选中后端推荐值；超级管理员还可切换“测试时间”，使用 1/3/5 分钟快捷值或显式按 `Asia/Shanghai` 解析的 `datetime-local` 选择未来 24 小时内的完整分钟。创建面板每次打开仍默认夜间模式，提交前按当前时间重新校验；自定义改期保持原模式，角色移除后隐藏调整入口但保留取消。新对话草稿成功提交后才清空输入。主对话始终展示当前会话内容；“会话列表”以 Teleport 非模态抽屉覆盖对话栏左侧编辑区，内部提供“会话 / 待执行任务”页签，选择会话或任务后保持打开，当前会话高亮，再次点击“会话列表”、关闭按钮、Esc 或收起右栏时关闭。待执行页逐页收齐全部待执行项，并展示内容、时间、创建时间和状态，自定义任务显示“测试定时”和单个精确时间，旧响应缺少模式时按夜间范围展示。当前 Session 存在 `SCHEDULED/DISPATCHING` 任务时禁用普通发送但保留“新建对话”。切换到待执行页签时立即查询，页面另按每 30 秒及窗口重新聚焦刷新；夜间容量冲突会重取最新时段。成功投递后复用现有 Session/Run/RunEvent 展示，并以来源标签和北京时间实际启动时间区分。
 
-- 右上角头像菜单只在独立 `download-access/me` 返回 `allowed=true` 时提供“下载本地客户端”，缺字段、请求失败或 false 默认隐藏；实例 capability 仅兼容旧消费者，OpenCode 健康轮询不得覆盖灰度结果。超级管理员在独立的“系统管理 → 用户管理”页统一维护账号、角色、记忆灰度和客户端灰度。统一入口 `/downloads/local-opencode-client/installer` 按 User-Agent 下载 macOS ARM64 PKG 或麒麟 ARM64 DEB；已注册本地实例的健康度与下载入口同时展示。生产由网关分发，dev server 从仓库忽略的正式制品目录只读提供，不把 ARM JRE/OpenCode 制品并入前端构建。
+- 右上角头像菜单只在独立 `download-access/me` 返回 `allowed=true` 时提供“下载本地客户端”，缺字段、请求失败或 false 默认隐藏；实例 capability 仅兼容旧消费者，OpenCode 健康轮询不得覆盖灰度结果。超级管理员在独立的“系统管理 → 用户管理”页统一维护账号、角色、记忆灰度和客户端灰度。统一入口 `/downloads/local-opencode-client/installer` 下载麒麟 Linux ARM64 DEB；macOS、Windows 和非 glibc 系统不进入客户端支持范围。已注册本地实例的健康度与下载入口同时展示。生产由网关分发，dev server 从仓库忽略的正式制品目录只读提供，不把 ARM JDK/OpenCode 制品并入前端构建。
 - 提供 `/985211` 登录页、`/workbench` 工作台、`/toolbox` 离线工具箱、`/memories` 通用长期记忆中心、`/system` 管理控制台（`APP_ADMIN` 仅应用 Git，`SUPER_ADMIN` 全量）、`/hub` 能力库、`/settings` 设置弹窗、可选 `/lobehub/launch` 通用问答交接、`/workflow-chat` 长程任务和 `/s/[shareId]` 协作分享工作台（vue-router 客户端路由；旧 Session ID 仅对会话所属人兼容），历史根路径 `/` 兼容跳转到 `/workbench`，未知路径进入 404 页面。`AgentWorkbench` 将工作台与功能页 Tab 分层：工作台仍直接恢复编辑器快照；工具箱、记忆、能力库及每个控制台二级功能使用唯一的应用内 Tab，支持拖放和键盘排序、列表切换、相邻关闭及批量关闭。控制台非默认项映射 `/system?section=<key>`；路由、前进/后退或深链接负责切换或补开目标 Tab，不关闭其它页面。设置从活动栏打开时关闭会返回原页面，直接深链关闭则回到工作台。LobeHub 与长程任务入口沿用各自构建开关和角色门禁；缺失或其它值时入口隐藏、登录回跳拒绝、直接访问回到工作台。
 - 功能页 Tab 状态按用户写入版本化 `sessionStorage`，只持久化页面描述、顺序、活动项和最近控制台页；页面内容不进入浏览器持久化。已访问页面在关闭前常驻挂载，切回工作台仅隐藏，失活页通过 `pageActive` 暂停轮询/动画/延迟任务。API Key 和内部模型 Token 在失活时擦除；三击 Shift 打开的排查页不持久化，失活即卸载并复用既有 grant/连接清理；XXL iframe 保留既有会话，但父页面的一次性票据在表单提交后立即清空。
 - 组合 dockview-vue 三栏布局和底部运行面板。
@@ -219,12 +223,12 @@ Skill 目录显式合并“接口文档（SkillHub）”和“平台更新（应
 - 不直连 opencode server。
 - 不把通用业务组件堆在 app 内，必须下沉到 packages。
 - `/s/[shareId]` 必须使用平台 Session Share 授权，不得接 opencode 公网 share API；旧 Session ID 兼容入口只允许会话所属人访问。
-- 通知动作不得信任后端或页面传入任意 URL；只接受 `SESSION_SHARE`、`NONE` 和 `RESTART_OWN_PROCESS`。分享动作由页面对 `shareId` 做内部路由编码，点击前不调用通用已读接口；`NONE` 通知可计入未读并标记已读但不显示动作；`RESTART_OWN_PROCESS` 只调用当前用户重启接口。未知类型或动作失败关闭。
+- 通知动作不得信任后端或页面传入任意 URL；只接受 `SESSION_SHARE`、`NONE`、`RESTART_OWN_PROCESS` 和 `LOCAL_CLIENT_UPDATE`。分享动作由页面对 `shareId` 做内部路由编码，点击前不调用通用已读接口；`NONE` 通知可计入未读并标记已读但不显示动作；`RESTART_OWN_PROCESS` 只调用当前用户重启接口；本地客户端更新只把 `actionTargetId` 作为受控实例路径参数，并从通知正文唯一的 14 位目标版本提交 `notificationId` 与 `expectedTargetVersion`，成功或冲突失败后均刷新权威通知列表。未知类型、动作或版本正文失败关闭。
 - 配置更新通知按已知类型统一展示“正在更新、更新成功、更新失败、本次更新已结束”等用户文案；即使历史记录仍保存旧的 Agent、dispose 或进程术语，页面也不再直接展示这些技术细节。
 
 ## 验证
 
-`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、标记已读、失败重启动作、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸和弱化后的备用链接入口；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单个人重启以及固定分享工作台隐藏。
+`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、标记已读、失败重启动作、本地客户端更新/回退文案、异常版本正文的失败关闭、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/local-client-notification-update.test.ts` 覆盖通知原始目标版本请求、成功刷新以及 409 冲突反馈后的权威刷新；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸和弱化后的备用链接入口；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单个人重启以及固定分享工作台隐藏。
 
 `tests/xxl-job-management-panel.test.ts` 覆盖隐藏表单 POST/URL 无票据、刷新重签、403/503、票据或平台会话失效、登出清空 iframe，以及横向 shell 装饰幂等、只读账号、错误页跳过和菜单滚动；`tests/support-access-shortcut.test.ts` 覆盖三击 Shift、两秒窗口、左右 Shift 兼容、捕获阶段注册、其它按键打断、长按去重和角色失效重置，`tests/support-access-panel.test.ts` 覆盖唯一排查单号请求、重复触发/撤销后换号、登录资料延迟到达、迟到响应隔离、归档筛选、离线工作区禁用、Session/Trace 上下文以及 assistant text part 通过首页时间线展示，`tests/scheduler-management-panel.test.ts` 覆盖系统管理导航、问题排查全局手势请求/激活代次与 actor/target 身份提示，以及公共配置卡死 rollout 的分支/原因/二次确认/纠错请求回归。
 

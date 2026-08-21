@@ -2,6 +2,7 @@ export type SystemMenuKey =
   | "scheduler"
   | "runtime"
   | "users"
+  | "localClientVersions"
   | "params"
   | "apiKeys"
   | "internalModels"
@@ -32,6 +33,7 @@ const SYSTEM_MENU_KEYS: readonly SystemMenuKey[] = [
   "scheduler",
   "runtime",
   "users",
+  "localClientVersions",
   "params",
   "apiKeys",
   "internalModels",
@@ -46,6 +48,7 @@ const SYSTEM_SECTION_BY_KEY: Record<SystemMenuKey, string> = {
   scheduler: "scheduler",
   runtime: "runtime",
   users: "users",
+  localClientVersions: "local-client-versions",
   params: "params",
   apiKeys: "api-keys",
   internalModels: "internal-models",
@@ -67,6 +70,7 @@ const PAGE_TITLES: Record<WorkspacePageId, string> = {
   "system:scheduler": "定时任务管理",
   "system:runtime": "运行管理",
   "system:users": "用户管理",
+  "system:localClientVersions": "本地客户端版本",
   "system:params": "通用参数管理",
   "system:apiKeys": "API Key 管理",
   "system:internalModels": "内部模型供应商",

@@ -16,7 +16,7 @@
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
 - [通用长期记忆部署](../../docs/deployment/qa-memory.md)：当前 `.134` 记忆 PostgreSQL 与 `.160` Mem0/VIP/CPU BGE 拓扑，以及扩容到多副本后的双集合热备、离线包、灰度和真实浏览器验收。
-- [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：Apple Silicon PKG/麒麟 ARM64 DEB 双击安装、签名打包、Nginx 分发、用户级首次配置、验收与回滚。
+- [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：仅麒麟 ARM64/aarch64 + glibc 客户端的签名打包、Nginx 明文 HTTP 分发、用户级安装、验收与回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
@@ -26,6 +26,9 @@
 
 - Mac 构建机允许联网；企业服务器完全离线。
 - 企业内部中转机的固定交付目录是 `~/Desktop/mimoagent/0709`；中转机不使用 `/data/0709`。`.20/.4/.114/.2` 等目标服务器的固定接收目录才是 `/data/0709`。
+- 麒麟 ARM 本地客户端由外网 Mac 构建和签名后经 U 盘导入上述中转机；中转机先验证摘要并向目标节点分发，禁止把
+  中转步骤写成 Mac 直接 `scp` 到目标节点。客户端 release/catalog、签名顺序、首次 enroll、回退和真实设备
+  发布闸门见 [`docs/deployment/local-opencode-client.md`](../../docs/deployment/local-opencode-client.md)。
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - Docker 18.09 发布 1000 个 worker 端口前必须在 daemon 中禁用 `userland-proxy`；脚本会在删除旧 worker 前拒绝不安全组合，避免启动中途耗尽 fork 资源。
 - worker 构建会自动检查 Python `3.13.14`、pip/venv/常用标准库与脚本工具、Codex 版本、摘要、官方 MCP 契约和失败关闭；启用分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本按十进制解析 `18.09.7`，并用镜像内的 `/bin/true` 和真实 Codex/bubblewrap 验证 namespace、指定 cwd、源码读取、原生 read-only 拒写、Git 不变与续写；不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收。完整说明见 `docs/deployment/codex-whitebox-mcp.md`。

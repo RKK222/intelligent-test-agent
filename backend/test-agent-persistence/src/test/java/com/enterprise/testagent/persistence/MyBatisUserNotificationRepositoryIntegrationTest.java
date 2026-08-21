@@ -172,6 +172,51 @@ class MyBatisUserNotificationRepositoryIntegrationTest {
     }
 
     @Test
+    void exactInvalidationPreservesNewerNotificationAndInvalidatedDedupCanReactivate() {
+        UserNotification oldNotification = disposeNotification(
+                "ntf_dispose_repository_old",
+                "AGENT_CONFIG_DISPOSE:old:" + DISPOSE_MEMBER.value(),
+                "旧更新通知",
+                "旧版本文案",
+                now);
+        UserNotification newNotification = disposeNotification(
+                "ntf_dispose_repository_new",
+                "AGENT_CONFIG_DISPOSE:new:" + DISPOSE_MEMBER.value(),
+                "新更新通知",
+                "新版本文案",
+                now.plusSeconds(1));
+        assertThat(repository.insert(oldNotification)).isTrue();
+        assertThat(repository.insert(newNotification)).isTrue();
+
+        assertThat(repository.invalidateActiveById(
+                oldNotification.notificationId(),
+                DISPOSE_MEMBER,
+                "STALE_POLICY",
+                "trace_exact_invalidation",
+                now.plusSeconds(2))).isTrue();
+
+        assertThat(repository.findByIdForRecipient(oldNotification.notificationId(), DISPOSE_MEMBER))
+                .get().extracting(UserNotification::status).isEqualTo(UserNotificationStatus.INVALIDATED);
+        assertThat(repository.findByIdForRecipient(newNotification.notificationId(), DISPOSE_MEMBER))
+                .get().extracting(UserNotification::status).isEqualTo(UserNotificationStatus.ACTIVE);
+
+        UserNotification refreshed = disposeNotification(
+                oldNotification.notificationId().value(),
+                oldNotification.dedupKey(),
+                "重新可用更新",
+                "当前版本与方向已刷新",
+                now.plusSeconds(3));
+        assertThat(repository.reactivateByDedupKeyIfChanged(refreshed)).isTrue();
+        assertThat(repository.findByIdForRecipient(oldNotification.notificationId(), DISPOSE_MEMBER))
+                .get().satisfies(notification -> {
+                    assertThat(notification.status()).isEqualTo(UserNotificationStatus.ACTIVE);
+                    assertThat(notification.title()).isEqualTo("重新可用更新");
+                    assertThat(notification.body()).isEqualTo("当前版本与方向已刷新");
+                    assertThat(notification.invalidationReason()).isNull();
+                });
+    }
+
+    @Test
     void disposeNotificationEvolvesInOneRowWithoutRefreshingUnreadForTheSameState() {
         UserNotification pending = disposeNotification(
                 UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
@@ -240,6 +285,32 @@ class MyBatisUserNotificationRepositoryIntegrationTest {
                 actionType,
                 "acr_dispose_repository",
                 "AGENT_CONFIG_DISPOSE:acr_dispose_repository:" + DISPOSE_MEMBER.value(),
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                "trace_dispose_repository",
+                now,
+                updatedAt);
+    }
+
+    private UserNotification disposeNotification(
+            String notificationId,
+            String dedupKey,
+            String title,
+            String body,
+            Instant updatedAt) {
+        return new UserNotification(
+                new UserNotificationId(notificationId),
+                DISPOSE_MEMBER,
+                UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
+                null,
+                title,
+                body,
+                UserNotificationActionType.NONE,
+                "acr_dispose_repository",
+                dedupKey,
                 UserNotificationStatus.ACTIVE,
                 null,
                 null,

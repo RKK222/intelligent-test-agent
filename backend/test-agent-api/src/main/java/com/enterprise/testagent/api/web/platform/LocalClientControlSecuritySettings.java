@@ -46,10 +46,32 @@ public class LocalClientControlSecuritySettings {
         throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端认证和模型请求必须使用 HTTPS/WSS");
     }
 
+    /**
+     * 解析限流和审计使用的真实来源地址。仅当直连地址可信时读取代理链，并从右向左剥离可信代理，
+     * 防止客户端预置伪造的 X-Forwarded-For 首项绕过认证限流。
+     */
+    public String resolveClientAddress(HttpHeaders headers, InetSocketAddress remoteAddress) {
+        String remote = normalizeRemoteAddress(remoteAddress);
+        if (remote == null || !trustedProxyAddresses.contains(remote)) {
+            return remote == null ? "unknown" : remote;
+        }
+        String forwarded = headers == null ? null : headers.getFirst("X-Forwarded-For");
+        if (forwarded == null || forwarded.isBlank()) {
+            return remote;
+        }
+        String[] addresses = forwarded.split(",");
+        for (int index = addresses.length - 1; index >= 0; index--) {
+            String candidate = parseForwardedIp(addresses[index]);
+            if (candidate != null && !trustedProxyAddresses.contains(candidate)) {
+                return candidate;
+            }
+        }
+        return remote;
+    }
+
     private boolean isTrustedProxy(InetSocketAddress remoteAddress) {
-        return remoteAddress != null
-                && remoteAddress.getAddress() != null
-                && trustedProxyAddresses.contains(normalize(remoteAddress.getAddress()));
+        String normalized = normalizeRemoteAddress(remoteAddress);
+        return normalized != null && trustedProxyAddresses.contains(normalized);
     }
 
     private static boolean isSecureForwardedProto(String forwardedProto) {
@@ -77,6 +99,24 @@ public class LocalClientControlSecuritySettings {
         } catch (UnknownHostException exception) {
             throw new IllegalArgumentException("invalid trusted proxy address: " + value, exception);
         }
+    }
+
+    private static String parseForwardedIp(String value) {
+        String candidate = value == null ? "" : value.trim();
+        if (candidate.isEmpty() || !candidate.matches("[0-9A-Fa-f:.]+")) {
+            return null;
+        }
+        try {
+            return normalize(InetAddress.getByName(candidate));
+        } catch (UnknownHostException exception) {
+            return null;
+        }
+    }
+
+    private static String normalizeRemoteAddress(InetSocketAddress remoteAddress) {
+        return remoteAddress == null || remoteAddress.getAddress() == null
+                ? null
+                : normalize(remoteAddress.getAddress());
     }
 
     private static String normalize(InetAddress address) {

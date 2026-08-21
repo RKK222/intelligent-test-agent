@@ -98,6 +98,10 @@ USER_NOTIFICATION_MIGRATION_RESOURCE="db/migration/V20260810170000__user_notific
 USER_NOTIFICATION_MIGRATION_SHA256="4592eb72a69179ca91febe43278ce8ed70fe02979f7b5c0f7366004048510ca9"
 USER_NOTIFICATION_DISPOSE_MIGRATION_RESOURCE="db/migration/V20260811213000__user_notifications_expand_dispose_types.sql"
 USER_NOTIFICATION_DISPOSE_MIGRATION_SHA256="00bd72f2efe1916d8a33fc5310d59936c6950d3fd81e8fce91eda529ffb5096c"
+LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_RESOURCE="db/migration/V20260820182024__local_client_releases_create_version_management.sql"
+LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_SHA256="17aa8c1634513868f96b5fb4b0dedc75de635280af4b618004ea955be183594c"
+LOCAL_CLIENT_CREDENTIAL_REVEALED_AT_MIGRATION_RESOURCE="db/migration/V20260820202529__local_client_credentials_add_revealed_at.sql"
+LOCAL_CLIENT_CREDENTIAL_REVEALED_AT_MIGRATION_SHA256="0f7c30b7a932d96b754253261e61b3317308da08874a91747bdf0dddf098918d"
 EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_RESOURCE="db/migration-compat/experience-workspace-applied/V20260809210000__common_parameters_add_experience_workspace.sql"
 EXPERIENCE_WORKSPACE_APPLIED_MIGRATION_SHA256="c093695aac4305aed3caeb8fcec58f0731f1519527031f1775adaf8be86cf24a"
 EXPERIENCE_WORKSPACE_FORWARD_MIGRATION_RESOURCE="db/migration/V20260812104911__common_parameters_add_experience_workspace_after_release.sql"
@@ -143,7 +147,7 @@ Usage: deploy/internal/package-release.sh [options]
 Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
-  - signed Apple Silicon and ARM64 glibc local OpenCode client HTTP distribution
+  - signed Kylin ARM64/aarch64 glibc local OpenCode client HTTP distribution
   - opencode-worker image and docker-loadable tar
   - optional independent Python third-party library bundle
   - pinned IT-Tools and OmniTools images, checksums and complete modified source
@@ -728,6 +732,10 @@ verify_release_flyway_migrations_jar() {
     "${AUTOMATION_CODE_REPOSITORY_MIGRATION_RESOURCE}" "${AUTOMATION_CODE_REPOSITORY_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${USER_SCM_GIT_IDENTITIES_MIGRATION_RESOURCE}" "${USER_SCM_GIT_IDENTITIES_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOCAL_CLIENT_CREDENTIAL_REVEALED_AT_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_CREDENTIAL_REVEALED_AT_MIGRATION_SHA256}"
 }
 
 verify_release_xxl_flyway_migrations_jar() {
@@ -875,7 +883,7 @@ plan_release_components() {
   local client_baseline_version client_baseline_source_commit client_baseline_fingerprint
   worker_config="schema=2|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|python=${PYTHON_VERSION}|pythonSourceSize=${PYTHON_SOURCE_SIZE}|pythonSourceSha=${PYTHON_SOURCE_SHA256}|pythonSourceBase=${PYTHON_SOURCE_BASE_URL}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
   toolbox_config="schema=1|platform=${PLATFORM}|it=${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}|omni=${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}|node=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}|nginx=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
-  local_client_config="schema=2|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-0.1.0}|defaultServer=${TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL:-}|defaultWeb=${TEST_AGENT_LOCAL_CLIENT_DEFAULT_WEB_URL:-${TEST_AGENT_LOCAL_CLIENT_DEFAULT_SERVER_URL:-}}|allowInsecure=${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_SETUP:-false}|jreDarwin=${TEST_AGENT_LOCAL_CLIENT_JRE_DARWIN_ARM64_SHA256:-default}|jreLinux=${TEST_AGENT_LOCAL_CLIENT_JRE_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeDarwin=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_DARWIN_ARM64_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|macAppIdentity=${TEST_AGENT_LOCAL_CLIENT_MACOS_APPLICATION_IDENTITY:-}|macInstallerIdentity=${TEST_AGENT_LOCAL_CLIENT_MACOS_INSTALLER_IDENTITY:-}|notary=${TEST_AGENT_LOCAL_CLIENT_MACOS_NOTARY_PROFILE:-}|debBuilder=${TEST_AGENT_LOCAL_CLIENT_DEB_BUILDER_IMAGE:-debian:bookworm-slim}"
+  local_client_config="schema=3|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}"
 
   WORKER_RUNTIME_FINGERPRINT="$(component_fingerprint "${worker_config}" \
     opencode-manager/go.mod \
@@ -1495,6 +1503,7 @@ package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
   local worker_tar it_tools_tar omni_tools_tar required_artifact persistence_jar xxl_job_integration_jar
+  local local_client_catalog local_client_version local_client_deb local_client_release_dir
 
   require_command zip
   require_command rsync
@@ -1517,6 +1526,38 @@ package_release_zip() {
       exit 1
     fi
   done
+  if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
+    local_client_catalog="${OUTPUT_DIR}/local-opencode-client/catalog.json"
+    local_client_version="$(awk -F'"' '$2 == "version" { print $4 }' \
+      "${local_client_catalog}" | sort | tail -n 1)"
+    [[ "${local_client_version}" =~ ^[0-9]{14}$ ]] || {
+      echo "Local client catalog does not contain a valid release version" >&2
+      exit 1
+    }
+    local_client_deb="${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${local_client_version}_arm64.deb"
+    local_client_release_dir="${OUTPUT_DIR}/local-opencode-client/releases/${local_client_version}"
+    for required_artifact in \
+      "${OUTPUT_DIR}/local-opencode-client/install.sh" \
+      "${local_client_catalog}" \
+      "${OUTPUT_DIR}/local-opencode-client/catalog.json.sig" \
+      "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json" \
+      "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig" \
+      "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" \
+      "${local_client_deb}" \
+      "${local_client_release_dir}/manifest.json" \
+      "${local_client_release_dir}/manifest.json.sig" \
+      "${local_client_release_dir}/test-agent-local-client.jar" \
+      "${local_client_release_dir}/test-agent-local-client.jar.sig" \
+      "${local_client_release_dir}/jdk.tar.gz" \
+      "${local_client_release_dir}/jdk.tar.gz.sig" \
+      "${local_client_release_dir}/opencode.tar.gz" \
+      "${local_client_release_dir}/opencode.tar.gz.sig"; do
+      [[ -f "${required_artifact}" ]] || {
+        echo "Required release artifact not found: ${required_artifact}" >&2
+        exit 1
+      }
+    done
+  fi
   persistence_jar="$(find_unique_persistence_jar "${OUTPUT_DIR}/backend/lib")"
   verify_release_flyway_migrations_jar "${persistence_jar}" "Release ZIP input persistence JAR"
   xxl_job_integration_jar="$(find_unique_xxl_job_integration_jar "${OUTPUT_DIR}/backend/lib")"

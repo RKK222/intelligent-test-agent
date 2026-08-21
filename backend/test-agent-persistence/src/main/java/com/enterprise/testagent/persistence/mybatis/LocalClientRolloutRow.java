@@ -2,11 +2,13 @@ package com.enterprise.testagent.persistence.mybatis;
 
 import java.time.Instant;
 
-/** 本地客户端灰度名单关系型行。 */
+/** local_client_update_rollouts 的 MyBatis 行模型。 */
 public record LocalClientRolloutRow(
-        String userId,
-        boolean enabled,
-        String updatedByUserId,
+        String rolloutId,
+        String rolloutScope,
+        String requestedUserId,
+        String status,
+        String createdBy,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant completedAt) {
 }

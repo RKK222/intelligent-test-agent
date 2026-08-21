@@ -10,6 +10,9 @@ public interface LocalClientCredentialRepository {
 
     Optional<LocalClientCredential> findByUserId(UserId userId);
 
+    /** 锁定并读取凭据，供一次性明文消费在同一事务内串行化。 */
+    Optional<LocalClientCredential> findByUserIdForUpdate(UserId userId);
+
     Optional<LocalClientCredential> findActiveByFingerprint(String fingerprint);
 
     void save(LocalClientCredential credential);

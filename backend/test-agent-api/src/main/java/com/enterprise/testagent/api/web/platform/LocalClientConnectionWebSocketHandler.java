@@ -15,10 +15,10 @@ import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnecti
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnectionSender;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientRegistrationService;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientTunnelGateway;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalClientUpdateCoordinator;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStartupService;
 import com.enterprise.testagent.system.management.localclient.LocalClientCredentialApplicationService;
-import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -49,7 +49,9 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
     private final LocalClientTunnelGateway tunnelGateway;
     private final BackendJavaRouteResolver routeResolver;
     private final OpencodeProcessStartupService startupService;
+    private final LocalClientUpdateCoordinator updateCoordinator;
     private final LocalClientControlSecuritySettings securitySettings;
+    private final LocalClientAuthenticationRateLimiter authenticationRateLimiter;
     private final LocalClientFrameCodec codec = new LocalClientFrameCodec();
 
     public LocalClientConnectionWebSocketHandler(
@@ -60,7 +62,9 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             LocalClientTunnelGateway tunnelGateway,
             BackendJavaRouteResolver routeResolver,
             OpencodeProcessStartupService startupService,
-            LocalClientControlSecuritySettings securitySettings) {
+            LocalClientUpdateCoordinator updateCoordinator,
+            LocalClientControlSecuritySettings securitySettings,
+            LocalClientAuthenticationRateLimiter authenticationRateLimiter) {
         this.credentialService = Objects.requireNonNull(credentialService);
         this.registrationService = Objects.requireNonNull(registrationService);
         this.connectionRegistry = Objects.requireNonNull(connectionRegistry);
@@ -68,7 +72,9 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         this.tunnelGateway = Objects.requireNonNull(tunnelGateway);
         this.routeResolver = Objects.requireNonNull(routeResolver);
         this.startupService = Objects.requireNonNull(startupService);
+        this.updateCoordinator = Objects.requireNonNull(updateCoordinator);
         this.securitySettings = Objects.requireNonNull(securitySettings);
+        this.authenticationRateLimiter = Objects.requireNonNull(authenticationRateLimiter);
     }
 
     @Override
@@ -83,6 +89,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         }
         String handshakeTraceId = TraceIdSupport.resolve(
                 session.getHandshakeInfo().getHeaders().getFirst(TraceConstants.TRACE_ID_HEADER));
+        String clientAddress = securitySettings.resolveClientAddress(
+                session.getHandshakeInfo().getHeaders(), session.getHandshakeInfo().getRemoteAddress());
         Sinks.Many<LocalClientFrame> outbound = Sinks.many().unicast()
                 .onBackpressureBuffer(new ArrayBlockingQueue<>(128));
         Sinks.One<String> closeSignal = Sinks.one();
@@ -107,7 +115,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                         stateRef,
                         sender,
                         handshakeTraceId,
-                        observedAddress(session)))
+                        clientAddress))
                 .onErrorResume(exception -> {
                     ConnectionState state = stateRef.get();
                     String traceId = state == null ? handshakeTraceId : state.traceId();
@@ -139,7 +147,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             AtomicReference<ConnectionState> stateRef,
             LocalClientConnectionSender sender,
             String handshakeTraceId,
-            String observedAddress) {
+            String clientAddress) {
         if (message.getType() != WebSocketMessage.Type.TEXT) {
             return Mono.error(new PlatformException(ErrorCode.VALIDATION_ERROR, "本地客户端只接受文本协议帧"));
         }
@@ -149,7 +157,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             if (frame.type() != LocalClientFrameType.REGISTER) {
                 return Mono.error(new PlatformException(ErrorCode.UNAUTHENTICATED, "本地客户端首帧必须完成注册认证"));
             }
-            return register(frame, outbound, closeSignal, stateRef, sender, handshakeTraceId, observedAddress);
+            return register(frame, outbound, closeSignal, stateRef, sender, handshakeTraceId, clientAddress);
         }
         return handleAuthenticated(frame, outbound, closeSignal, state);
     }
@@ -161,16 +169,20 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             AtomicReference<ConnectionState> stateRef,
             LocalClientConnectionSender sender,
             String handshakeTraceId,
-            String observedAddress) {
+            String clientAddress) {
         LocalClientPayloads.Register payload = codec.payload(frame, LocalClientPayloads.Register.class);
+        boolean strictLegacyRegistration = LocalClientPayloads.isStrictLegacyRegister(frame.payload(), payload);
         return Mono.fromCallable(() -> {
-                    var authenticated = credentialService.authenticate(payload.clientKey());
+                    authenticationRateLimiter.acquire(clientAddress);
+                    var authenticated = credentialService.authenticate(
+                            payload.clientKey(), payload.unifiedAuthId(), strictLegacyRegistration);
+                    authenticationRateLimiter.authenticationSucceeded(clientAddress);
                     UserId userId = new UserId(authenticated.userId());
                     LocalClientRegistrationService.Registration registration = registrationService.register(
                             userId,
                             payload,
                             routeResolver.currentBackendProcessId(),
-                            observedAddress);
+                            clientAddress);
                     supersessionService.supersede(
                             registration.previousRoute(), registration.route(), frame.traceId());
                     ConnectionState state = new ConnectionState(
@@ -178,7 +190,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             registration.route().clientInstanceId(),
                             registration.route().connectionGeneration(),
                             registration.modelGrantFingerprint(),
-                            frame.traceId());
+                            frame.traceId(),
+                            registration.selfUpdateSupported());
                     if (!stateRef.compareAndSet(null, state)) {
                         throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重复注册");
                     }
@@ -227,7 +240,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                                 state.clientInstanceId().value(), state.generation(), state.traceId(), error));
     }
 
-    private Mono<Void> handleAuthenticated(
+    Mono<Void> handleAuthenticated(
             LocalClientFrame frame,
             Sinks.Many<LocalClientFrame> outbound,
             Sinks.One<String> closeSignal,
@@ -255,16 +268,56 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                                     Instant.now().plus(LocalClientProtocol.CONNECTION_TTL)))), closeSignal))
                     .then();
         }
-        if (frame.type() == LocalClientFrameType.REGISTER
-                || frame.type() == LocalClientFrameType.REGISTERED
-                || frame.type() == LocalClientFrameType.HEARTBEAT_ACK
-                || frame.type() == LocalClientFrameType.LIFECYCLE_COMMAND
-                || frame.type() == LocalClientFrameType.HTTP_REQUEST
-                || frame.type() == LocalClientFrameType.FILE_REQUEST
-                || frame.type() == LocalClientFrameType.CANCEL
-                || frame.type() == LocalClientFrameType.MODEL_GRANT) {
-            return Mono.error(new PlatformException(ErrorCode.VALIDATION_ERROR, "客户端发送了不允许的帧类型"));
+        return switch (frame.type()) {
+            case VERSION_CHECK -> blockingUpdate(() -> updateCoordinator.handleVersionCheck(
+                    requireSelfUpdate(state),
+                    state.clientInstanceId(),
+                    state.generation(),
+                    codec.payload(frame, LocalClientPayloads.VersionCheck.class),
+                    frame.traceId()));
+            case UPDATE_PREPARED -> blockingUpdate(() -> updateCoordinator.handlePrepared(
+                    requireSelfUpdate(state),
+                    state.clientInstanceId(),
+                    state.generation(),
+                    codec.payload(frame, LocalClientPayloads.UpdatePrepared.class),
+                    frame.traceId()));
+            case UPDATE_STATUS -> {
+                LocalClientPayloads.UpdateStatus status = codec.payload(frame, LocalClientPayloads.UpdateStatus.class);
+                yield Mono.fromCallable(() -> updateCoordinator.handleStatus(
+                                requireSelfUpdate(state),
+                                state.clientInstanceId(),
+                                state.generation(),
+                                status,
+                                frame.traceId()))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .doOnNext(persistedAck -> emit(outbound, new LocalClientFrame(
+                                LocalClientProtocol.VERSION,
+                                LocalClientFrameType.UPDATE_STATUS_ACK,
+                                frame.requestId(),
+                                frame.traceId(),
+                                state.generation(),
+                                codec.payload(persistedAck)), closeSignal))
+                        .then();
+            }
+            case LIFECYCLE_RESULT, HTTP_RESPONSE, STREAM_OPEN, STREAM_CHUNK, STREAM_END,
+                    FILE_RESPONSE, BINARY_CHUNK, ERROR -> acceptTunnelResponse(state, frame);
+            default -> Mono.error(new PlatformException(
+                    ErrorCode.VALIDATION_ERROR, "客户端发送了不允许的帧类型"));
+        };
+    }
+
+    private Mono<Void> blockingUpdate(Runnable action) {
+        return Mono.fromRunnable(action).subscribeOn(Schedulers.boundedElastic()).then();
+    }
+
+    private static UserId requireSelfUpdate(ConnectionState state) {
+        if (!state.selfUpdateSupported()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端未声明 SELF_UPDATE_V1 能力");
         }
+        return state.userId();
+    }
+
+    private Mono<Void> acceptTunnelResponse(ConnectionState state, LocalClientFrame frame) {
         if (!tunnelGateway.accept(state.clientInstanceId(), frame)) {
             LOGGER.debug(
                     "local_client_orphan_response clientInstanceId={} generation={} requestId={} type={}",
@@ -340,21 +393,17 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         }
     }
 
-    private static String observedAddress(WebSocketSession session) {
-        InetSocketAddress address = session.getHandshakeInfo().getRemoteAddress();
-        return address == null ? null : address.getHostString() + ":" + address.getPort();
-    }
-
     private static String safeCloseReason(String reason) {
         String resolved = reason == null || reason.isBlank() ? "CONNECTION_CLOSED" : reason;
         return resolved.substring(0, Math.min(100, resolved.length()));
     }
 
-    private record ConnectionState(
+    record ConnectionState(
             UserId userId,
             LocalClientInstanceId clientInstanceId,
             long generation,
             String modelGrantFingerprint,
-            String traceId) {
+            String traceId,
+            boolean selfUpdateSupported) {
     }
 }

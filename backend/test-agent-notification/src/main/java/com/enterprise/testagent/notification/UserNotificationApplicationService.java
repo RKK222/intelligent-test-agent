@@ -220,6 +220,93 @@ public class UserNotificationApplicationService {
         }
     }
 
+    /** 按实例、目标版本和策略修订幂等创建用户主动更新/回退通知。 */
+    @Transactional
+    public void syncLocalClientUpdateAvailable(
+            UserId recipientUserId,
+            String clientInstanceId,
+            String clientName,
+            String currentVersion,
+            String targetVersion,
+            String direction,
+            long policyRevision,
+            String traceId) {
+        Objects.requireNonNull(recipientUserId, "recipientUserId must not be null");
+        String instanceId = boundedIdentifier(clientInstanceId, "clientInstanceId", 128);
+        String target = boundedIdentifier(targetVersion, "targetVersion", 64);
+        if (policyRevision < 1) {
+            throw new IllegalArgumentException("policyRevision must be positive");
+        }
+        String normalizedDirection = "ROLLBACK".equals(direction) ? "ROLLBACK" : "UPDATE";
+        Instant now = clock.instant();
+        UserNotification notification = new UserNotification(
+                new UserNotificationId(RuntimeIdGenerator.userNotificationId()),
+                recipientUserId,
+                UserNotificationType.LOCAL_CLIENT_UPDATE_AVAILABLE,
+                null,
+                normalizedDirection.equals("ROLLBACK") ? "本地客户端可回退" : "本地客户端可更新",
+                truncate(safeText(clientName, "本机设备")
+                        + " · 当前 " + safeText(currentVersion, "未知")
+                        + " → 目标 " + target,
+                        500),
+                UserNotificationActionType.LOCAL_CLIENT_UPDATE,
+                instanceId,
+                "LOCAL_CLIENT_UPDATE:" + instanceId + ":" + target + ":" + policyRevision,
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                traceId,
+                now,
+                now);
+        if (repository.reactivateByDedupKeyIfChanged(notification)) {
+            publish(recipientUserId, null, UserNotificationChangeType.UPDATED, traceId, now);
+        } else if (repository.insert(notification)) {
+            publish(recipientUserId, notification.notificationId(), UserNotificationChangeType.CREATED, traceId, now);
+        }
+    }
+
+    /** 用户点击陈旧通知时只精确失效该 ID；调用方通过独立事务门面提交。 */
+    @Transactional
+    public void invalidateLocalClientUpdateNotification(
+            UserId recipientUserId,
+            UserNotificationId notificationId,
+            String reason,
+            String traceId) {
+        Instant now = clock.instant();
+        if (repository.invalidateActiveById(
+                notificationId,
+                recipientUserId,
+                boundedIdentifier(reason, "reason", 128),
+                traceId,
+                now)) {
+            publish(recipientUserId, notificationId, UserNotificationChangeType.INVALIDATED, traceId, now);
+        }
+    }
+
+    /** 仅在更新成功或策略恢复一致后关闭该实例全部待处理更新通知。 */
+    @Transactional
+    public void invalidateLocalClientUpdate(
+            UserId recipientUserId,
+            String clientInstanceId,
+            String reason,
+            String traceId) {
+        Instant now = clock.instant();
+        List<UserId> recipients = repository.findActiveRecipientsByAction(
+                UserNotificationActionType.LOCAL_CLIENT_UPDATE, clientInstanceId, recipientUserId);
+        int changed = repository.invalidateActiveByAction(
+                UserNotificationActionType.LOCAL_CLIENT_UPDATE,
+                clientInstanceId,
+                recipientUserId,
+                boundedIdentifier(reason, "reason", 128),
+                traceId,
+                now);
+        if (changed > 0) {
+            publishRecipients(recipients, UserNotificationChangeType.INVALIDATED, traceId, now);
+        }
+    }
+
     /**
      * 建立用户级当前状态流：首帧和每 30 秒从数据库校准，变化信号到达时立即刷新未读数。
      */
@@ -378,7 +465,7 @@ public class UserNotificationApplicationService {
                     "这次配置更新已结束",
                     "已有更新的配置，这条通知不用处理。",
                     UserNotificationActionType.NONE);
-            case SESSION_SHARED -> throw new IllegalArgumentException(
+            case SESSION_SHARED, LOCAL_CLIENT_UPDATE_AVAILABLE -> throw new IllegalArgumentException(
                     "SESSION_SHARED is not an Agent config dispose type");
         };
     }
@@ -386,6 +473,13 @@ public class UserNotificationApplicationService {
     private String safeText(String value, String fallback) {
         String normalized = value == null ? "" : value.strip().replaceAll("[\\p{Cntrl}]", "");
         return normalized.isBlank() ? fallback : normalized;
+    }
+
+    private static String boundedIdentifier(String value, String field, int maxLength) {
+        if (value == null || value.isBlank() || value.length() > maxLength) {
+            throw new IllegalArgumentException(field + " is invalid");
+        }
+        return value.trim();
     }
 
     /** 按 Unicode code point 截断，避免在代理对中间切断展示文本。 */

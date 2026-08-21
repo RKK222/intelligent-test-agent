@@ -60,10 +60,10 @@ Browser
 | `test-agent-observability` | traceId、结构化日志、Micrometer 指标、观测性工具。 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
-| `test-agent-local-client-protocol` | 后台与本地客户端共享的 `local-opencode-client.v1` JSON 帧、256 KiB 分片、版本与大小校验，不依赖服务端领域。 |
+| `test-agent-local-client-protocol` | 后台与本地客户端共享的 `local-opencode-client.v1` JSON 帧、256 KiB 分片、版本与大小校验；包含受 generation fencing 的自更新帧，不依赖服务端领域。 |
 | `test-agent-workspace-filesystem` | 服务端和本地客户端复用的真实根锚定、相对路径、符号链接防逃逸、预览/搜索、原子移动及分片上传下载内核。 |
-| `test-agent-local-client` | Java 21 用户级客户端，负责 WSS 反向连接、稳定实例身份、loopback OpenCode 监管、文件 RPC 和模型中继。 |
-| `test-agent-notification` | 通用用户站内通知模型编排、分享通知生命周期、配置 dispose 按 rollout/用户单行状态演进、受控动作、未读统计、事务提交后本机与跨 Java 变化、30 秒数据库校准和 90 天历史清理；不承载 Controller、SQL 或页面。 |
+| `test-agent-local-client` | Java 21 麒麟 ARM64/aarch64 + glibc 用户级客户端，负责 WSS 反向连接、稳定实例身份、loopback OpenCode 监管、文件 RPC、模型中继及稳定 Shell 驱动的 release 切换。 |
+| `test-agent-notification` | 通用用户站内通知模型编排、分享通知生命周期、配置 dispose 与本地客户端更新通知的去重/失效、受控动作、未读统计、事务提交后本机与跨 Java 变化、30 秒数据库校准和 90 天历史清理；不承载 Controller、SQL 或页面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
 | `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/上传/复制/移动/删除、基于工作区 JSONC 与本机 READY 引用副本的只读组合文件视图、超级管理员服务器目录选择、git/diff、对话 Tool 到当前个人 workspace 的安全映射与 Git 编排、版本选择前按当前用户身份做 Git 只读访问预检及单 Java 10 分钟成功缓存、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、个人拉取成功后的单用户运行态重载登记、按角色和有效成员关系预览工作空间/版本/实际分支并按单分支或全应用刷新物理 feature 组、feature 固定提交向相关个人 worktree 的原生 Git merge（非重叠本地改动保留、覆盖风险待同步、真实冲突三方处理）、Agent & Skill Hub 远端精确提交快照/显式发布/固定依赖/两阶段引用与取消/更新三方合并、应用 Agent/Skill 发布 rollout、应用引用资产库的 generation/租约/本机有界即时调度/定向退避/按代次终止与跨 Java 取消/补偿副本、应用源码固定提交的多服务器物化/启动与周期数据库补偿/打开/最近选择/索引保护/XXL 清理、受控分支切换、只读实际指针核验与安全目录树、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间任务提交/查询/会话锁/XXL 固定目标批量分发/attempt 租约、Run 锚点补偿与显式内存容量条目、订阅级 root/child scope、Redis active 索引、RunEvent SSE 按 Redis manifest 优先解析生产 Java、每用户有效公共配置软链接与公共个人保存热加载、公共全机/应用定向 Agent 配置发布排空及通知状态推进、个人拉取应用 Agent 的当前用户持久化排空、含 question/permission attention 与事件触发的用户级会话运行态摘要/状态流、ClickHouse 运营事件消费/历史回填/汇总/查询、stale active Run 收敛与十五天未使用进程关闭业务任务、当前用户 opencode 进程强状态/弱健康/初始化/确认式重启契约和可选引用目录启动环境、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、带实时应用成员校验且禁止应用源码副本本机降级的 workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、按 `backendProcessId` 精确选择在线 Java、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、归档内部 Session + 临时 fork + 按预算 compact + build agent 系统提示只读约束的宠物旁路 RunEvent 流式问答及 10 分钟孤儿清理、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |

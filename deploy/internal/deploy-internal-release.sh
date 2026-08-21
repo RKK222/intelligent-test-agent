@@ -1064,7 +1064,6 @@ require_file "${DEPLOY_INTERNAL_SRC}/verify-local-opencode-client-distribution.s
 }
 if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
   require_file "${LOCAL_CLIENT_DIST}/install.sh"
-  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-macOS-arm64.pkg"
   require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
   require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
   require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"

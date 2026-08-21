@@ -36,43 +36,54 @@ cp -a "${ROOT_DIR}/backend/test-agent-xxl-job-integration/src/main/resources/xxl
 printf 'frontend\n' >"${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
 # zip-only 测试复用已生成制品，显式补齐可逐文件验真的客户端目录，避免把构建阶段误当作封装阶段。
 LOCAL_CLIENT_ROOT="${OUTPUT_DIR}/local-opencode-client"
-LOCAL_CLIENT_VERSION="fixture-local-client"
+LOCAL_CLIENT_VERSION="20260820153045"
 LOCAL_CLIENT_RELEASE="${LOCAL_CLIENT_ROOT}/releases/${LOCAL_CLIENT_VERSION}"
 mkdir -p "${LOCAL_CLIENT_ROOT}/stable" "${LOCAL_CLIENT_RELEASE}"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${OUTPUT_DIR}/local-opencode-client/install.sh"
-printf 'fixture pkg\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg"
 printf 'fixture deb\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+cp "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" \
+  "${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${LOCAL_CLIENT_VERSION}_arm64.deb"
 printf 'fixture client jar\n' >"${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar"
-printf 'fixture Darwin JRE\n' >"${LOCAL_CLIENT_RELEASE}/temurin-jre21-darwin-arm64.tar.gz"
-printf 'fixture Linux JRE\n' >"${LOCAL_CLIENT_RELEASE}/temurin-jre21-linux-arm64-glibc.tar.gz"
-printf 'fixture Darwin OpenCode\n' >"${LOCAL_CLIENT_RELEASE}/opencode-1.18.4-darwin-arm64.tar.gz"
-printf 'fixture Linux OpenCode\n' >"${LOCAL_CLIENT_RELEASE}/opencode-1.18.4-linux-arm64-glibc.tar.gz"
+printf 'fixture Linux JDK\n' >"${LOCAL_CLIENT_RELEASE}/jdk.tar.gz"
+printf 'fixture Linux OpenCode\n' >"${LOCAL_CLIENT_RELEASE}/opencode.tar.gz"
+for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz; do
+  printf 'fixture signature for %s\n' "${artifact}" >"${LOCAL_CLIENT_RELEASE}/${artifact}.sig"
+done
 client_jar_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar" | awk '{print $1}')"
-jre_darwin_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/temurin-jre21-darwin-arm64.tar.gz" | awk '{print $1}')"
-jre_linux_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/temurin-jre21-linux-arm64-glibc.tar.gz" | awk '{print $1}')"
-opencode_darwin_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/opencode-1.18.4-darwin-arm64.tar.gz" | awk '{print $1}')"
-opencode_linux_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/opencode-1.18.4-linux-arm64-glibc.tar.gz" | awk '{print $1}')"
-pkg_sha="$(shasum -a 256 "${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-macOS-arm64.pkg" | awk '{print $1}')"
-deb_sha="$(shasum -a 256 "${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.deb" | awk '{print $1}')"
+jdk_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/jdk.tar.gz" | awk '{print $1}')"
+opencode_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/opencode.tar.gz" | awk '{print $1}')"
+client_jar_size="$(wc -c <"${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar" | tr -d ' ')"
+jdk_size="$(wc -c <"${LOCAL_CLIENT_RELEASE}/jdk.tar.gz" | tr -d ' ')"
+opencode_size="$(wc -c <"${LOCAL_CLIENT_RELEASE}/opencode.tar.gz" | tr -d ' ')"
 printf '%s\n' \
   '{' \
-  '  "version": "fixture-local-client",' \
-  '  "clientJarPath": "releases/fixture-local-client/test-agent-local-client.jar",' \
-  "  \"clientJarSha256\": \"${client_jar_sha}\"," \
-  '  "darwinArm64JrePath": "releases/fixture-local-client/temurin-jre21-darwin-arm64.tar.gz",' \
-  "  \"darwinArm64JreSha256\": \"${jre_darwin_sha}\"," \
-  '  "darwinArm64OpencodePath": "releases/fixture-local-client/opencode-1.18.4-darwin-arm64.tar.gz",' \
-  "  \"darwinArm64OpencodeSha256\": \"${opencode_darwin_sha}\"," \
-  '  "linuxArm64GlibcJrePath": "releases/fixture-local-client/temurin-jre21-linux-arm64-glibc.tar.gz",' \
-  "  \"linuxArm64GlibcJreSha256\": \"${jre_linux_sha}\"," \
-  '  "linuxArm64GlibcOpencodePath": "releases/fixture-local-client/opencode-1.18.4-linux-arm64-glibc.tar.gz",' \
-  "  \"linuxArm64GlibcOpencodeSha256\": \"${opencode_linux_sha}\"," \
-  '  "darwinArm64InstallerPath": "TestAgent-Local-Client-macOS-arm64.pkg",' \
-  "  \"darwinArm64InstallerSha256\": \"${pkg_sha}\"," \
-  '  "linuxArm64GlibcInstallerPath": "TestAgent-Local-Client-Kylin-arm64.deb",' \
-  "  \"linuxArm64GlibcInstallerSha256\": \"${deb_sha}\"" \
-  '}' >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json"
-printf 'fixture signature\n' >"${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig"
+  '  "schemaVersion": 2,' \
+  "  \"version\": \"${LOCAL_CLIENT_VERSION}\"," \
+  '  "publishedAt": "2026-08-20T07:30:45Z",' \
+  '  "platform": "linux",' \
+  '  "architecture": "arm64",' \
+  '  "launcherVersionMin": 1,' \
+  '  "launcherVersionMax": 1,' \
+  '  "protocolVersion": "local-opencode-client.v1",' \
+  '  "opencodeVersion": "1.18.4",' \
+  '  "artifacts": [' \
+  "    {\"kind\": \"CLIENT_JAR\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/test-agent-local-client.jar\", \"size\": ${client_jar_size}, \"sha256\": \"${client_jar_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/test-agent-local-client.jar.sig\"}," \
+  "    {\"kind\": \"JDK\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/jdk.tar.gz\", \"size\": ${jdk_size}, \"sha256\": \"${jdk_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/jdk.tar.gz.sig\"}," \
+  "    {\"kind\": \"OPENCODE\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/opencode.tar.gz\", \"size\": ${opencode_size}, \"sha256\": \"${opencode_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/opencode.tar.gz.sig\"}" \
+  '  ]' \
+  '}' >"${LOCAL_CLIENT_RELEASE}/manifest.json"
+printf 'fixture manifest signature\n' >"${LOCAL_CLIENT_RELEASE}/manifest.json.sig"
+cp "${LOCAL_CLIENT_RELEASE}/manifest.json" "${LOCAL_CLIENT_ROOT}/stable/manifest.json"
+cp "${LOCAL_CLIENT_RELEASE}/manifest.json.sig" "${LOCAL_CLIENT_ROOT}/stable/manifest.json.sig"
+manifest_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/manifest.json" | awk '{print $1}')"
+printf '%s\n' \
+  '{' \
+  '  "schemaVersion": 1,' \
+  '  "releases": [' \
+  "    {\"version\": \"${LOCAL_CLIENT_VERSION}\", \"manifestPath\": \"releases/${LOCAL_CLIENT_VERSION}/manifest.json\", \"manifestSha256\": \"${manifest_sha}\", \"manifestSignaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/manifest.json.sig\"}" \
+  '  ]' \
+  '}' >"${LOCAL_CLIENT_ROOT}/catalog.json"
+printf 'fixture catalog signature\n' >"${LOCAL_CLIENT_ROOT}/catalog.json.sig"
 printf 'programs\n' >"${OUTPUT_DIR}/test-agent-programs.tar.gz"
 printf 'worker\n' >"${OUTPUT_DIR}/test-agent-opencode-worker_internal-linux-amd64.tar"
 printf 'it-tools\n' >"${OUTPUT_DIR}/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar"
@@ -108,7 +119,7 @@ grep -Fxq 'deploy/internal/deploy-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'deploy/internal/verify-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar' <<<"${full_listing}"
-grep -Fxq 'dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg' <<<"${full_listing}"
+grep -Fxq 'dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb' <<<"${full_listing}"
 if grep -Eq '^dist/lobehub/' <<<"${full_listing}"; then
   echo 'Default release unexpectedly contains LobeHub artifacts' >&2
   exit 1
@@ -133,7 +144,7 @@ bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" 
   --expected-manifest-sha256 "${local_client_manifest_sha}" \
   --expected-signature-sha256 "${local_client_signature_sha}" \
   --expected-install-sha256 "${local_client_install_sha}" >/dev/null
-printf 'tampered pkg\n' >"${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-macOS-arm64.pkg"
+printf 'tampered deb alias\n' >"${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.deb"
 if bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
   --root "${LOCAL_CLIENT_ROOT}" \
   --expected-version "${local_client_version}" \
@@ -143,7 +154,8 @@ if bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.s
   echo 'Tampered local client distribution unexpectedly passed verification' >&2
   exit 1
 fi
-printf 'fixture pkg\n' >"${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-macOS-arm64.pkg"
+cp "${LOCAL_CLIENT_ROOT}/test-agent-local-client_${LOCAL_CLIENT_VERSION}_arm64.deb" \
+  "${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.deb"
 
 # 同一批次只补日志的 zip-only 必须保留当前全量选择，不能把尚未部署的组件误删掉。
 bash "${PACKAGE_SCRIPT}" --zip-only --output-dir "${OUTPUT_DIR}" \

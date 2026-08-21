@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.git.GitCommandExecutor;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceGeneration;
@@ -46,6 +47,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -266,6 +268,62 @@ class ApplicationAutomationReferenceServiceTest {
         assertThat(nodes).extracting(RepositoryRemoteTreeReader.TreeNode::name)
                 .containsExactly("cases", "case.feature");
         verify(remoteTreeReader, never()).listTree(any(), anyString(), any());
+    }
+
+    @Test
+    void sharedReplicaSynchronizationRedactsPhysicalReferenceRoot(@TempDir Path referencesRoot) throws Exception {
+        ApplicationAutomationReferenceGeneration current = generation(APP_ID, 4L, "op_redaction");
+        ApplicationAutomationReferenceReplica claimed = new ApplicationAutomationReferenceReplica(
+                APP_ID,
+                REPOSITORY_ID,
+                4L,
+                new LinuxServerId("server-a"),
+                ReferenceRepositoryReplicaStatus.PROCESSING,
+                null,
+                null,
+                0,
+                null,
+                "lease-redaction",
+                NOW.plusSeconds(120),
+                null,
+                null,
+                null,
+                NOW,
+                NOW);
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR"))
+                .thenReturn(Optional.of(referencesRoot.toString()));
+        when(automationRepository.findState(APP_ID, REPOSITORY_ID))
+                .thenReturn(Optional.of(state(APP_ID, 4L, null, 5L, 9L, ReferenceRepositoryStatus.READY)));
+        when(automationRepository.findGeneration(APP_ID, REPOSITORY_ID, 4L)).thenReturn(Optional.of(current));
+        when(automationRepository.renewLease(
+                eq(APP_ID), eq(REPOSITORY_ID), eq(4L), any(), eq("lease-redaction"), any(), eq(NOW)))
+                .thenReturn(true);
+        String logicalRoot = service.logicalConfigurationPath(APP_ID, repository(), current);
+        String relativeRoot = logicalRoot.substring("{env:OPENCODE_REFERENCES_DIR}/".length());
+        Path replicaRoot = referencesRoot.resolve(
+                relativeRoot.substring(0, relativeRoot.length() - "/src/test".length()));
+        Files.createDirectories(replicaRoot.resolve("src/test"));
+        AtomicReference<String> observedLogPath = new AtomicReference<>();
+        when(gitWorkspaceService.currentBranch(replicaRoot)).thenAnswer(invocation -> {
+            observedLogPath.set(GitCommandExecutor.redactSensitiveText(replicaRoot.toString()));
+            return "main";
+        });
+        when(gitWorkspaceService.headCommit(replicaRoot)).thenReturn("commit-main");
+        when(gitWorkspaceService.isGitRepository(replicaRoot)).thenReturn(true);
+        when(gitWorkspaceService.originUrl(replicaRoot))
+                .thenReturn("https://git.example.test/automation.git");
+        when(gitWorkspaceService.isWorktreeCleanReadOnly(replicaRoot)).thenReturn(true);
+
+        var synchronize = ApplicationAutomationReferenceService.class.getDeclaredMethod(
+                "synchronizeClaimedReplica", ApplicationAutomationReferenceReplica.class, String.class);
+        synchronize.setAccessible(true);
+        synchronize.invoke(service, claimed, "trace_redaction");
+
+        assertThat(observedLogPath.get())
+                .startsWith("<redacted-local-path>/automation/")
+                .doesNotContain(referencesRoot.toString());
+        assertThat(GitCommandExecutor.redactSensitiveText(referencesRoot.toString()))
+                .isEqualTo(referencesRoot.toString());
     }
 
     private ApplicationDefinition application(ApplicationId appId) {

@@ -17,7 +17,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.git.GitWorkspaceService;
+import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
+import com.enterprise.testagent.domain.configuration.ApplicationWorkspace;
 import com.enterprise.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
@@ -74,6 +76,42 @@ class AgentSkillHubApplicationServiceTest {
 
         assertThat(scheduled.fixedDelayString())
                 .isEqualTo("${test-agent.agent-skill-hub.builtin-reconcile-delay:PT10M}");
+    }
+
+    @Test
+    void localSnapshotReconciliationSkipsDisabledHistoricalWorkspaceTemplates() {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
+        ManagedWorkspaceRepository managed = mock(ManagedWorkspaceRepository.class);
+        GitWorkspaceService git = mock(GitWorkspaceService.class);
+        Instant now = Instant.parse("2026-08-22T00:00:00Z");
+        ApplicationId appId = new ApplicationId("app_1");
+        ApplicationWorkspace disabled = new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_1"),
+                appId,
+                new CodeRepositoryId("repo_1"),
+                "feature_testagent_20260725",
+                "service/pay",
+                "历史自动化工作区",
+                false,
+                now,
+                now);
+        when(configuration.findApplications(true))
+                .thenReturn(List.of(new ApplicationDefinition(appId, "应用", true, now, now)));
+        when(configuration.findWorkspaces(appId)).thenReturn(List.of(disabled));
+        when(managed.findVersionsByApplication(appId)).thenReturn(List.of(version("a".repeat(40))));
+        AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
+                repository,
+                configuration,
+                managed,
+                mock(CommonParameterValues.class),
+                git,
+                new ObjectMapper());
+
+        service.reconcileLocalSnapshots();
+
+        verify(managed, never()).findVersionReplicaByRuntimeWorkspace(any());
+        verifyNoInteractions(git);
     }
 
     @Test

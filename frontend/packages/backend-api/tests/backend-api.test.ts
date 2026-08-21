@@ -5035,6 +5035,108 @@ describe("backend-api", () => {
     const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
     expect(headers.get("Authorization")).toBe("Bearer notification-token");
   });
+
+  it("uses the fixed local-client version-management and single-instance update contracts", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {}
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "local-client-admin-token",
+      routeLinuxServerId: () => "linux-must-not-route",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.syncLocalClientReleases();
+    await client.listLocalClientReleases();
+    await client.getLocalClientGlobalPolicy();
+    await client.setLocalClientGlobalPolicy("20260820183000");
+    await client.listLocalClientUserPolicies();
+    await client.setLocalClientUserPolicy("usr_gray", "20260819183000");
+    await client.clearLocalClientUserPolicy("usr_gray");
+    await client.createLocalClientRollout({ scope: "ALL_ONLINE" });
+    await client.createLocalClientRollout({ scope: "USER", userId: "usr_gray" });
+    await client.listLocalClientRollouts();
+    await client.listLocalClientRolloutAttempts("lcr_rollout");
+    await client.requestLocalClientUpdate("lci_device", {
+      notificationId: "ntf_update",
+      expectedTargetVersion: "20260820183000"
+    });
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/releases/sync",
+        "POST",
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/releases",
+        undefined,
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/global-policy",
+        undefined,
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/global-policy",
+        "PUT",
+        JSON.stringify({ targetVersion: "20260820183000" })
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/user-policies",
+        undefined,
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/user-policies/usr_gray",
+        "PUT",
+        JSON.stringify({ targetVersion: "20260819183000" })
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/user-policies/usr_gray",
+        "DELETE",
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/rollouts",
+        "POST",
+        JSON.stringify({ scope: "ALL_ONLINE" })
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/rollouts",
+        "POST",
+        JSON.stringify({ scope: "USER", userId: "usr_gray" })
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/rollouts",
+        undefined,
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/version-management/rollouts/lcr_rollout/attempts",
+        undefined,
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/local-opencode-client/instances/lci_device/updates",
+        "POST",
+        JSON.stringify({
+          notificationId: "ntf_update",
+          expectedTargetVersion: "20260820183000"
+        })
+      ]
+    ]);
+    for (const call of fetcher.mock.calls) {
+      const headers = new Headers(call[1]?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer local-client-admin-token");
+      expect(headers.get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+    }
+  });
 });
 
 type WebSocketEventHandler = ((event: any) => void) | null;

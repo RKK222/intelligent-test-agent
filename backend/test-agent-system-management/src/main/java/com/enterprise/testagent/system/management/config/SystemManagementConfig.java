@@ -9,13 +9,16 @@ import com.enterprise.testagent.domain.user.UserManagementQueryRepository;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.domain.tcds.TcdsGateway;
 import com.enterprise.testagent.system.management.auth.AuthApplicationService;
+import com.enterprise.testagent.system.management.localclient.LocalClientReleaseCatalogProperties;
 import com.enterprise.testagent.system.management.user.ThirdPartyUserApiClient;
 import com.enterprise.testagent.system.management.user.UserDomainService;
 import com.enterprise.testagent.system.management.user.UserManagementApplicationService;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@EnableConfigurationProperties(LocalClientReleaseCatalogProperties.class)
 public class SystemManagementConfig {
 
     @Bean

@@ -1110,16 +1110,22 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
     }
 
     // 2. Fetch public agent changes
-    try {
-      const pubDiff = await api.getPublicAgentDiff(workbench.publicWorktree?.worktreeId);
-      if (token !== refreshChangesToken) return;
-      // 工作区撤权/切换会同时刷新三类 Diff；兼容旧后端或空 mock 缺少 files，避免一次异常中断 Vue 空态渲染。
-      applyPublicAgentDiffRefresh(
-        Array.isArray(pubDiff.files) ? pubDiff.files : [],
-        pubDiff.publishPending
-      );
-    } catch {
-      if (token !== refreshChangesToken) return;
+    // 公共 worktree 在登录后的运行态准备完成前为空；此时保持空态，避免向后端发送无效 diff 请求。
+    const publicWorktreeId = workbench.publicWorktree?.worktreeId;
+    if (publicWorktreeId) {
+      try {
+        const pubDiff = await api.getPublicAgentDiff(publicWorktreeId);
+        if (token !== refreshChangesToken) return;
+        // 工作区撤权/切换会同时刷新三类 Diff；兼容旧后端或空 mock 缺少 files，避免一次异常中断 Vue 空态渲染。
+        applyPublicAgentDiffRefresh(
+          Array.isArray(pubDiff.files) ? pubDiff.files : [],
+          pubDiff.publishPending
+        );
+      } catch {
+        if (token !== refreshChangesToken) return;
+        publicAgentDiffs.value = [];
+      }
+    } else {
       publicAgentDiffs.value = [];
     }
 

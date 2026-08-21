@@ -47,6 +47,7 @@ class LocalClientDomainTest {
                 LocalClientCredentialStatus.ACTIVE,
                 now,
                 now,
+                null,
                 now))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("active credential");

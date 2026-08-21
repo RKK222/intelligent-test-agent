@@ -1,17 +1,31 @@
 #!/usr/bin/env sh
 set -eu
 
-# 该脚本只接收非敏感下载地址；client key 只能交互写入 0600 私有文件。
-PUBLIC_KEY_BASE64="__PUBLIC_KEY_BASE64__"
-DOWNLOAD_BASE_URL="${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}"
+# 公钥、Nginx 下载根和平台控制根在外网 Mac 打包时固化；HTTP 只负责传输，信任来自签名。
+PUBLIC_KEY_PEM_BASE64="__PUBLIC_KEY_PEM_BASE64__"
+PUBLIC_KEY_DER_BASE64="__PUBLIC_KEY_DER_BASE64__"
+DOWNLOAD_BASE_URL="__DOWNLOAD_BASE_URL__"
+SERVER_URL="__SERVER_URL__"
+LAUNCHER_VERSION=1
+APPLY_EXIT_CODE=42
+ACTIVATION_FAILED_EXIT_CODE=43
 
 fail() {
-  printf 'local-opencode-client install failed: %s\n' "$*" >&2
+  printf 'test-agent-local-client: %s\n' "$*" >&2
   exit 1
 }
 
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
+  command -v "$1" >/dev/null 2>&1 || fail "缺少必需命令: $1"
+}
+
+cleanup() {
+  if [ -n "${TEMP_DIR:-}" ]; then
+    case "${TEMP_DIR}" in
+      */test-agent-local-client.*) rm -rf "${TEMP_DIR}" ;;
+      *) printf '拒绝清理异常临时目录: %s\n' "${TEMP_DIR}" >&2 ;;
+    esac
+  fi
 }
 
 sha256_file() {
@@ -20,229 +34,641 @@ sha256_file() {
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
   else
-    fail "sha256sum or shasum is required"
+    fail "缺少 sha256sum 或 shasum"
   fi
 }
 
-manifest_value() {
-  key="$1"
-  awk -F'"' -v wanted="${key}" '$2 == wanted { print $4; exit }' "${MANIFEST_FILE}"
+file_size() {
+  wc -c <"$1" | tr -d '[:space:]'
+}
+
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
+valid_version() {
+  [ "$(expr "$1" : '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$')" -eq 14 ]
+}
+
+safe_relative_path() {
+  path_value="$1"
+  expected_prefix="$2"
+  case "${path_value}" in
+    "${expected_prefix}"*) ;;
+    *) return 1 ;;
+  esac
+  case "${path_value}" in
+    /*|*\\*|*%*|*//*|../*|*/../*|*/..|./*|*/./*|*/.) return 1 ;;
+  esac
+  return 0
+}
+
+download_relative() {
+  relative_path="$1"
+  destination="$2"
+  safe_relative_path "${relative_path}" "${EXPECTED_DOWNLOAD_PREFIX}" \
+    || fail "签名元数据包含越界下载路径"
+  curl -fS --max-redirs 0 --proto '=http' \
+    "${DOWNLOAD_BASE_URL}${relative_path}" -o "${destination}"
+}
+
+manifest_string() {
+  wanted_key="$1"
+  awk -v wanted="\"${wanted_key}\"" '
+    index($0, wanted) {
+      line=$0
+      sub(".*" wanted "[[:space:]]*:[[:space:]]*\"", "", line)
+      sub("\".*", "", line)
+      print line
+      exit
+    }
+  ' "${MANIFEST_FILE}"
+}
+
+manifest_number() {
+  wanted_key="$1"
+  awk -v wanted="\"${wanted_key}\"" '
+    index($0, wanted) {
+      line=$0
+      sub(".*" wanted "[[:space:]]*:[[:space:]]*", "", line)
+      sub("[^0-9].*", "", line)
+      print line
+      exit
+    }
+  ' "${MANIFEST_FILE}"
+}
+
+artifact_string() {
+  wanted_kind="$1"
+  wanted_key="$2"
+  awk -v kind="\"kind\": \"${wanted_kind}\"" -v wanted="\"${wanted_key}\"" '
+    index($0, kind) && index($0, wanted) {
+      line=$0
+      sub(".*" wanted "[[:space:]]*:[[:space:]]*\"", "", line)
+      sub("\".*", "", line)
+      print line
+      exit
+    }
+  ' "${MANIFEST_FILE}"
+}
+
+artifact_number() {
+  wanted_kind="$1"
+  wanted_key="$2"
+  awk -v kind="\"kind\": \"${wanted_kind}\"" -v wanted="\"${wanted_key}\"" '
+    index($0, kind) && index($0, wanted) {
+      line=$0
+      sub(".*" wanted "[[:space:]]*:[[:space:]]*", "", line)
+      sub("[^0-9].*", "", line)
+      print line
+      exit
+    }
+  ' "${MANIFEST_FILE}"
+}
+
+property_value() {
+  property_file="$1"
+  property_key="$2"
+  awk -F= -v wanted="${property_key}" '$1 == wanted { print substr($0, index($0, "=") + 1); exit }' "${property_file}"
+}
+
+java_major() {
+  java_command="$1"
+  "${java_command}" -version 2>&1 | awk -F'"' '
+    /version/ {
+      split($2, parts, ".")
+      if (parts[1] == "1") print parts[2]; else print parts[1]
+      exit
+    }
+  '
+}
+
+javac_major() {
+  javac_command="$1"
+  "${javac_command}" -version 2>&1 | awk '{ split($2, parts, "."); print parts[1]; exit }'
+}
+
+resolve_real_path() {
+  resolved_path="$1"
+  [ -e "${resolved_path}" ] || return 1
+  while [ -L "${resolved_path}" ]; do
+    link_target="$(readlink "${resolved_path}")" || return 1
+    case "${link_target}" in
+      /*) resolved_path="${link_target}" ;;
+      *) resolved_path="$(dirname "${resolved_path}")/${link_target}" ;;
+    esac
+  done
+  resolved_directory="$(cd -P "$(dirname "${resolved_path}")" && pwd -P)" || return 1
+  printf '%s/%s\n' "${resolved_directory}" "$(basename "${resolved_path}")"
+}
+
+path_inside_root() {
+  target_path="$1"
+  root_path="$2"
+  case "${target_path}" in
+    "${root_path}"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_jdk_tree() {
+  jdk_root="$1"
+  canonical_jdk_root="$(resolve_real_path "${jdk_root}")" || return 1
+  [ -d "${canonical_jdk_root}" ] && [ ! -L "${canonical_jdk_root}" ] || return 1
+  link_list="${TEMP_DIR}/jdk-links.$$"
+  find "${canonical_jdk_root}" -type l -print >"${link_list}" || return 1
+  while IFS= read -r jdk_link; do
+    [ -n "${jdk_link}" ] || continue
+    link_target="$(resolve_real_path "${jdk_link}")" || return 1
+    path_inside_root "${link_target}" "${canonical_jdk_root}" || return 1
+  done <"${link_list}"
+}
+
+system_jdk21_home() {
+  java_command="$(command -v java 2>/dev/null || true)"
+  javac_command="$(command -v javac 2>/dev/null || true)"
+  [ -n "${java_command}" ] && [ -n "${javac_command}" ] || return 1
+  java_path="$(resolve_real_path "${java_command}")" || return 1
+  javac_path="$(resolve_real_path "${javac_command}")" || return 1
+  jdk_home="$(cd -P "$(dirname "${java_path}")/.." && pwd -P)" || return 1
+  canonical_jdk_home="$(resolve_real_path "${jdk_home}")" || return 1
+  home_java="$(resolve_real_path "${jdk_home}/bin/java")" || return 1
+  home_javac="$(resolve_real_path "${jdk_home}/bin/javac")" || return 1
+  [ "${java_path}" = "${home_java}" ] && [ "${javac_path}" = "${home_javac}" ] || return 1
+  path_inside_root "${java_path}" "${canonical_jdk_home}" || return 1
+  path_inside_root "${javac_path}" "${canonical_jdk_home}" || return 1
+  validate_jdk_tree "${canonical_jdk_home}" || return 1
+  [ "$(java_major "${jdk_home}/bin/java")" = 21 ] || return 1
+  [ "$(javac_major "${jdk_home}/bin/javac")" = 21 ] || return 1
+  printf '%s\n' "${jdk_home}"
+}
+
+is_system_jdk_release() {
+  release_directory="$1"
+  marker_file="${release_directory}/jdk.provenance"
+  [ -f "${marker_file}" ] && [ ! -L "${marker_file}" ] \
+    && [ "$(file_size "${marker_file}")" = 20 ] \
+    && printf '%s\n' 'source=system-jdk21' | cmp -s - "${marker_file}" \
+    && [ ! -e "${release_directory}/jdk.tar.gz" ] && [ ! -L "${release_directory}/jdk.tar.gz" ] \
+    && [ ! -e "${release_directory}/jdk.tar.gz.sig" ] && [ ! -L "${release_directory}/jdk.tar.gz.sig" ]
+}
+
+copy_system_jdk() {
+  system_jdk_home="$1"
+  staging_directory="$2"
+  [ -d "${system_jdk_home}" ] && [ ! -L "${system_jdk_home}" ] \
+    || fail "系统 JDK home 不安全"
+  validate_jdk_tree "${system_jdk_home}" || fail "系统 JDK 包含越界链接"
+  cp -RL "${system_jdk_home}" "${staging_directory}/jdk" \
+    || fail "无法复制系统 JDK 到私有发布单元"
+  chmod -R go-rwx "${staging_directory}/jdk" \
+    || fail "无法收紧私有 JDK 权限"
+  [ -x "${staging_directory}/jdk/bin/java" ] && [ -x "${staging_directory}/jdk/bin/javac" ] \
+    || fail "复制后的系统 JDK 布局无效"
+  [ "$(java_major "${staging_directory}/jdk/bin/java")" = 21 ] \
+    && [ "$(javac_major "${staging_directory}/jdk/bin/javac")" = 21 ] \
+    || fail "复制后的系统 JDK 主版本不是 21"
+  validate_jdk_tree "${staging_directory}/jdk" || fail "私有 JDK 包含越界链接"
+  # marker 只声明可信来源类型，不写入可识别用户环境的系统路径。
+  printf '%s\n' 'source=system-jdk21' >"${staging_directory}/jdk.provenance"
+  chmod 0600 "${staging_directory}/jdk.provenance"
+}
+
+verify_platform() {
+  if [ "${TEST_AGENT_LOCAL_CLIENT_TEST_MODE:-false}" = true ]; then
+    [ "${TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM:-}" = linux-arm64-glibc ] \
+      || fail "测试平台覆盖值无效"
+    return
+  fi
+  [ "$(uname -s)" = Linux ] || fail "本安装包仅支持麒麟 ARM64 Linux"
+  case "$(uname -m)" in
+    aarch64|arm64) ;;
+    *) fail "本安装包仅支持 arm64/aarch64" ;;
+  esac
+  getconf GNU_LIBC_VERSION >/dev/null 2>&1 \
+    || ldd --version 2>&1 | grep -Eqi 'glibc|GNU libc' \
+    || fail "当前系统不是受支持的 glibc 环境"
+}
+
+verify_manifest() {
+  expected_version="$1"
+  EXPECTED_DOWNLOAD_PREFIX="releases/${expected_version}/"
+  [ "$(manifest_number schemaVersion)" = 2 ] || fail "发布清单 schema 不受支持"
+  [ "$(manifest_string version)" = "${expected_version}" ] || fail "发布清单版本不一致"
+  [ "$(manifest_string platform)" = linux ] || fail "发布清单平台不兼容"
+  [ "$(manifest_string architecture)" = arm64 ] || fail "发布清单架构不兼容"
+  [ "$(manifest_string protocolVersion)" = local-opencode-client.v1 ] || fail "发布清单协议不兼容"
+  [ "$(manifest_string opencodeVersion)" = 1.18.4 ] || fail "OpenCode 版本不兼容"
+  launcher_min="$(manifest_number launcherVersionMin)"
+  launcher_max="$(manifest_number launcherVersionMax)"
+  [ -n "${launcher_min}" ] && [ -n "${launcher_max}" ] \
+    && [ "${launcher_min}" -le "${LAUNCHER_VERSION}" ] \
+    && [ "${launcher_max}" -ge "${LAUNCHER_VERSION}" ] \
+    || fail "稳定启动器版本不兼容"
 }
 
 download_artifact() {
-  relative_path="$1"
-  expected_sha256="$2"
-  destination="$3"
-  case "${relative_path}" in
-    releases/*) ;;
-    *) fail "signed manifest contains an invalid artifact path" ;;
+  kind="$1"
+  local_name="$2"
+  destination_root="$3"
+  artifact_path="$(artifact_string "${kind}" path)"
+  artifact_signature_path="$(artifact_string "${kind}" signaturePath)"
+  artifact_sha="$(artifact_string "${kind}" sha256)"
+  artifact_size="$(artifact_number "${kind}" size)"
+  safe_relative_path "${artifact_path}" "${EXPECTED_DOWNLOAD_PREFIX}" \
+    || fail "${kind} 路径不受信任"
+  safe_relative_path "${artifact_signature_path}" "${EXPECTED_DOWNLOAD_PREFIX}" \
+    || fail "${kind} 签名路径不受信任"
+  valid_sha_length="$(expr "${artifact_sha}" : '[0-9a-f][0-9a-f]*$')"
+  [ "${valid_sha_length}" -eq 64 ] || fail "${kind} SHA-256 无效"
+  case "${artifact_size}" in ''|*[!0-9]*) fail "${kind} 大小无效" ;; esac
+  [ "${artifact_size}" -ge 1 ] && [ "${artifact_size}" -le 4294967296 ] \
+    || fail "${kind} 大小超限"
+  download_relative "${artifact_path}" "${destination_root}/${local_name}"
+  download_relative "${artifact_signature_path}" "${destination_root}/${local_name}.sig"
+  [ "$(file_size "${destination_root}/${local_name}")" = "${artifact_size}" ] \
+    || fail "${kind} 文件大小与签名清单不一致"
+  [ "$(sha256_file "${destination_root}/${local_name}")" = "${artifact_sha}" ] \
+    || fail "${kind} SHA-256 校验失败"
+  openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
+    -signature "${destination_root}/${local_name}.sig" \
+    "${destination_root}/${local_name}" >/dev/null \
+    || fail "${kind} 制品签名校验失败"
+}
+
+verify_release_directory() {
+  release_directory="$1"
+  expected_digest="$2"
+  MANIFEST_FILE="${release_directory}/manifest.json"
+  MANIFEST_SIGNATURE_FILE="${release_directory}/manifest.json.sig"
+  [ -f "${MANIFEST_FILE}" ] && [ ! -L "${MANIFEST_FILE}" ] \
+    && [ -f "${MANIFEST_SIGNATURE_FILE}" ] && [ ! -L "${MANIFEST_SIGNATURE_FILE}" ] \
+    || fail "发布目录缺少常规清单文件"
+  release_version="$(basename "${release_directory}")"
+  valid_version "${release_version}" || fail "发布目录版本无效"
+  openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
+    -signature "${MANIFEST_SIGNATURE_FILE}" "${MANIFEST_FILE}" >/dev/null \
+    || fail "本地发布清单签名无效"
+  [ -z "${expected_digest}" ] || [ "$(sha256_file "${MANIFEST_FILE}")" = "${expected_digest}" ] \
+    || fail "本地发布清单摘要与 PREPARED 不一致"
+  verify_manifest "${release_version}"
+  for kind_and_name in 'CLIENT_JAR test-agent-local-client.jar' 'JDK jdk.tar.gz' 'OPENCODE opencode.tar.gz'; do
+    set -- ${kind_and_name}
+    artifact_path="$(artifact_string "$1" path)"
+    artifact_sha="$(artifact_string "$1" sha256)"
+    artifact_size="$(artifact_number "$1" size)"
+    artifact_signature_path="$(artifact_string "$1" signaturePath)"
+    safe_relative_path "${artifact_path}" "${EXPECTED_DOWNLOAD_PREFIX}" || fail "本地制品路径无效"
+    safe_relative_path "${artifact_signature_path}" "${EXPECTED_DOWNLOAD_PREFIX}" || fail "本地签名路径无效"
+    if [ "$1" = JDK ] && is_system_jdk_release "${release_directory}"; then
+      # 初装时复制的系统 JDK 没有签名归档；其余已签名制品仍逐项校验。
+      continue
+    fi
+    [ "$(file_size "${release_directory}/$2")" = "${artifact_size}" ] || fail "本地制品大小变化"
+    [ "$(sha256_file "${release_directory}/$2")" = "${artifact_sha}" ] || fail "本地制品摘要变化"
+    openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
+      -signature "${release_directory}/$2.sig" "${release_directory}/$2" >/dev/null \
+      || fail "本地制品签名无效"
+  done
+  [ -x "${release_directory}/jdk/bin/java" ] \
+    && [ -x "${release_directory}/jdk/bin/javac" ] \
+    && [ -x "${release_directory}/opencode/bin/opencode" ] \
+    || fail "发布单元运行布局不完整"
+  [ "$(java_major "${release_directory}/jdk/bin/java")" = 21 ] \
+    && [ "$(javac_major "${release_directory}/jdk/bin/javac")" = 21 ] \
+    || fail "发布单元不是完整 JDK 21"
+}
+
+bootstrap_release() {
+  mkdir -p "${RELEASES_DIR}"
+  catalog_file="${TEMP_DIR}/catalog.json"
+  catalog_signature="${TEMP_DIR}/catalog.json.sig"
+  EXPECTED_DOWNLOAD_PREFIX=""
+  curl -fS --max-redirs 0 --proto '=http' "${DOWNLOAD_BASE_URL}catalog.json" -o "${catalog_file}"
+  curl -fS --max-redirs 0 --proto '=http' "${DOWNLOAD_BASE_URL}catalog.json.sig" -o "${catalog_signature}"
+  [ "$(file_size "${catalog_file}")" -le 1048576 ] || fail "版本 catalog 超过大小上限"
+  openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
+    -signature "${catalog_signature}" "${catalog_file}" >/dev/null \
+    || fail "版本 catalog 签名校验失败"
+  version="$(awk -F'"' '$2 == "version" { print $4 }' "${catalog_file}" | sort | tail -n 1)"
+  valid_version "${version}" || fail "版本 catalog 没有有效版本"
+  final_directory="${RELEASES_DIR}/${version}"
+  if [ -d "${final_directory}" ]; then
+    verify_release_directory "${final_directory}" ""
+  else
+    staging_parent="${RELEASES_DIR}/.bootstrap-$$"
+    staging_directory="${staging_parent}/${version}"
+    mkdir -p "${staging_directory}"
+    EXPECTED_DOWNLOAD_PREFIX="releases/${version}/"
+    MANIFEST_FILE="${staging_directory}/manifest.json"
+    MANIFEST_SIGNATURE_FILE="${staging_directory}/manifest.json.sig"
+    download_relative "releases/${version}/manifest.json" "${MANIFEST_FILE}"
+    download_relative "releases/${version}/manifest.json.sig" "${MANIFEST_SIGNATURE_FILE}"
+    openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
+      -signature "${MANIFEST_SIGNATURE_FILE}" "${MANIFEST_FILE}" >/dev/null \
+      || fail "发布清单签名校验失败"
+    verify_manifest "${version}"
+    if system_jdk_home="$(system_jdk21_home)"; then
+      printf '检测到完整系统 JDK 21；复制到私有发布单元。\n'
+      copy_system_jdk "${system_jdk_home}" "${staging_directory}"
+    else
+      printf '未检测到完整 JDK 21，先下载签名 ARM64 JDK。\n'
+      download_artifact JDK jdk.tar.gz "${staging_directory}"
+      tar -C "${staging_directory}" -xzf "${staging_directory}/jdk.tar.gz"
+      [ -x "${staging_directory}/jdk/bin/java" ] && [ -x "${staging_directory}/jdk/bin/javac" ] \
+        || fail "JDK 归档布局无效"
+      [ "$(java_major "${staging_directory}/jdk/bin/java")" = 21 ] \
+        && [ "$(javac_major "${staging_directory}/jdk/bin/javac")" = 21 ] \
+        || fail "下载的 JDK 主版本不是 21"
+    fi
+    download_artifact CLIENT_JAR test-agent-local-client.jar "${staging_directory}"
+    download_artifact OPENCODE opencode.tar.gz "${staging_directory}"
+    tar -C "${staging_directory}" -xzf "${staging_directory}/opencode.tar.gz"
+    [ -x "${staging_directory}/opencode/bin/opencode" ] || fail "OpenCode 归档布局无效"
+    "${staging_directory}/jdk/bin/java" -jar \
+      "${staging_directory}/test-agent-local-client.jar" \
+      self-check "${staging_directory}" "${version}" >/dev/null \
+      || fail "候选客户端本机自检失败"
+    verify_release_directory "${staging_directory}" ""
+    mv "${staging_directory}" "${final_directory}"
+    rmdir "${staging_parent}"
+  fi
+  switch_current "${version}"
+}
+
+switch_current() {
+  switch_version="$1"
+  valid_version "${switch_version}" || fail "拒绝切换到非法版本"
+  [ -d "${RELEASES_DIR}/${switch_version}" ] || fail "目标发布目录不存在"
+  ln -s "releases/${switch_version}" "${INSTALL_ROOT}/.current.$$"
+  # GNU mv 使用 -T、BSD mv 使用 -h，均禁止跟随指向目录的旧 current 链接。
+  if ! mv -fT "${INSTALL_ROOT}/.current.$$" "${INSTALL_ROOT}/current" 2>/dev/null; then
+    mv -fh "${INSTALL_ROOT}/.current.$$" "${INSTALL_ROOT}/current"
+  fi
+}
+
+current_version() {
+  current_target="$(readlink "${INSTALL_ROOT}/current" 2>/dev/null || true)"
+  case "${current_target}" in
+    releases/*) basename "${current_target}" ;;
+    *) return 1 ;;
   esac
-  curl -fsSL --proto '=http' "${DOWNLOAD_BASE_URL}/${relative_path}" -o "${destination}"
-  actual_sha256="$(sha256_file "${destination}")"
-  [ "${actual_sha256}" = "${expected_sha256}" ] \
-    || fail "SHA-256 mismatch for ${relative_path}"
 }
 
-read_secret_key() {
-  printf 'Client key (tack_v1_..., input hidden): ' >/dev/tty
-  saved_stty="$(stty -g </dev/tty)"
-  trap 'stty "${saved_stty}" </dev/tty 2>/dev/null || true' INT TERM EXIT
-  stty -echo </dev/tty
-  IFS= read -r CLIENT_KEY </dev/tty
-  stty "${saved_stty}" </dev/tty
-  trap cleanup INT TERM EXIT
-  printf '\n' >/dev/tty
+ensure_configuration() {
+  mkdir -p "${CONFIG_DIR}" "${STATE_DIR}" "${STATE_DIR}/logs"
+  chmod 0700 "${CONFIG_DIR}" "${STATE_DIR}"
+  {
+    printf 'serverUrl=%s\n' "${SERVER_URL}"
+    printf 'clientName=%s@%s\n' "${USER:-user}" "$(hostname 2>/dev/null || printf local)"
+    printf 'opencodeExecutable=%s/current/opencode/bin/opencode\n' "${INSTALL_ROOT}"
+    printf 'opencodeConfigDirectory=%s/opencode-config\n' "${CONFIG_DIR}"
+    printf 'opencodeDataDirectory=%s/opencode-data\n' "${STATE_DIR}"
+    printf 'portMin=4096\nportMax=4195\nallowInsecureControl=false\n'
+    printf 'downloadBaseUrl=%s\n' "${DOWNLOAD_BASE_URL}"
+    printf 'signingPublicKeyBase64=%s\n' "${PUBLIC_KEY_DER_BASE64}"
+    printf 'installRoot=%s\n' "${INSTALL_ROOT}"
+  } >"${CONFIG_DIR}/client.properties"
+  chmod 0600 "${CONFIG_DIR}/client.properties"
 }
 
-cleanup() {
-  [ -z "${TEMP_DIR:-}" ] || rm -rf "${TEMP_DIR}"
+ensure_runtime() {
+  if [ ! -L "${INSTALL_ROOT}/current" ]; then
+    bootstrap_release
+  fi
+  active_version="$(current_version)" || fail "current 不是受控发布链接"
+  verify_release_directory "${RELEASES_DIR}/${active_version}" ""
+  ensure_configuration
+}
+
+enroll_client() {
+  active_version="$(current_version)"
+  "${RELEASES_DIR}/${active_version}/jdk/bin/java" -jar \
+    "${RELEASES_DIR}/${active_version}/test-agent-local-client.jar" enroll
+  [ -f "${CONFIG_DIR}/credentials.properties" ] || fail "接入成功后未生成凭据文件"
+  [ "$(file_mode "${CONFIG_DIR}/credentials.properties")" = 600 ] \
+    || fail "凭据文件权限必须为 0600"
+}
+
+install_user_service() {
+  [ "${TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START:-false}" != true ] || return 0
+  unit_dir="${HOME}/.config/systemd/user"
+  desktop_dir="${HOME}/.local/share/applications"
+  mkdir -p "${unit_dir}" "${desktop_dir}"
+  {
+    printf '%s\n' '[Unit]' 'Description=Test Agent Local OpenCode Client' \
+      'After=network-online.target' 'Wants=network-online.target' '' '[Service]'
+    printf '%s\n' 'ExecStart=/usr/bin/test-agent-local-client run' \
+      'Restart=on-failure' 'RestartSec=3' 'SuccessExitStatus=0' '' '[Install]' \
+      'WantedBy=default.target'
+  } >"${unit_dir}/test-agent-local-opencode-client.service"
+  chmod 0600 "${unit_dir}/test-agent-local-opencode-client.service"
+  {
+    printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Test Agent 本地客户端接入' \
+      'Comment=输入统一认证号和 Client key 重新接入' \
+      'Exec=/usr/bin/test-agent-local-client enroll' 'Terminal=true' \
+      'Categories=Development;Utility;'
+  } >"${desktop_dir}/test-agent-local-client.desktop"
+  chmod 0600 "${desktop_dir}/test-agent-local-client.desktop"
+  systemctl --user daemon-reload
+  systemctl --user enable --now test-agent-local-opencode-client.service
+}
+
+validate_pending() {
+  PENDING_FILE="${STATE_DIR}/pending-update.properties"
+  [ -f "${PENDING_FILE}" ] && [ ! -L "${PENDING_FILE}" ] || fail "更新 pending marker 不安全"
+  [ "$(file_mode "${PENDING_FILE}")" = 600 ] || fail "更新 pending marker 权限必须为 0600"
+  pending_current="$(property_value "${PENDING_FILE}" currentVersion)"
+  pending_target="$(property_value "${PENDING_FILE}" targetVersion)"
+  pending_direction="$(property_value "${PENDING_FILE}" direction)"
+  pending_digest="$(property_value "${PENDING_FILE}" releaseDigest)"
+  valid_version "${pending_current}" && valid_version "${pending_target}" \
+    || fail "更新 marker 版本无效"
+  [ "$(expr "${pending_digest}" : '[0-9a-f][0-9a-f]*$')" -eq 64 ] \
+    || fail "更新 marker 摘要无效"
+  case "${pending_direction}" in
+    UPDATE) [ "${pending_target}" \> "${pending_current}" ] || fail "更新方向与版本不一致" ;;
+    ROLLBACK) [ "${pending_target}" \< "${pending_current}" ] || fail "回退方向与版本不一致" ;;
+    *) fail "更新 marker 方向无效" ;;
+  esac
+}
+
+write_update_result() {
+  result_status="$1"
+  result_error="$2"
+  result_version="$3"
+  result_file="${STATE_DIR}/update-result.properties"
+  result_temp="${STATE_DIR}/.update-result.$$"
+  cp "${PENDING_FILE}" "${result_temp}"
+  {
+    printf 'status=%s\n' "${result_status}"
+    printf 'errorCode=%s\n' "${result_error}"
+    printf 'actualVersion=%s\n' "${result_version}"
+    printf 'observedAt=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >>"${result_temp}"
+  chmod 0600 "${result_temp}"
+  mv -f "${result_temp}" "${result_file}"
+}
+
+prepare_pending_switch() {
+  validate_pending
+  [ "$(current_version)" = "${pending_current}" ] || fail "更新 marker 的当前版本已失效"
+  verify_release_directory "${RELEASES_DIR}/${pending_target}" "${pending_digest}"
+  rm -f "${STATE_DIR}/update-activation.properties" "${STATE_DIR}/update-result.properties"
+  switch_current "${pending_target}"
+}
+
+rollback_pending() {
+  rollback_error="$1"
+  validate_pending
+  verify_release_directory "${RELEASES_DIR}/${pending_current}" ""
+  switch_current "${pending_current}"
+  write_update_result AUTO_ROLLED_BACK "${rollback_error}" "${pending_current}"
+  rm -f "${STATE_DIR}/update-activation.properties"
+  printf '目标版本本机启动失败，已自动恢复到 %s。\n' "${pending_current}" >&2
+}
+
+run_activation_process() {
+  active_version="$(current_version)"
+  active_release="${RELEASES_DIR}/${active_version}"
+  "${active_release}/jdk/bin/java" -jar "${active_release}/test-agent-local-client.jar" &
+  client_pid="$!"
+  timeout_seconds="${TEST_AGENT_LOCAL_CLIENT_ACTIVATION_TIMEOUT_SECONDS:-70}"
+  elapsed=0
+  while kill -0 "${client_pid}" >/dev/null 2>&1; do
+    activation_file="${STATE_DIR}/update-activation.properties"
+    if [ -f "${activation_file}" ] && [ ! -L "${activation_file}" ]; then
+      activation_status="$(property_value "${activation_file}" status)"
+      activation_error="$(property_value "${activation_file}" errorCode)"
+      activation_version="$(property_value "${activation_file}" actualVersion)"
+      [ "${activation_version}" = "${pending_target}" ] || fail "激活 marker 版本不一致"
+      case "${activation_status}" in
+        READY)
+          write_update_result SUCCEEDED "" "${pending_target}"
+          set +e
+          wait "${client_pid}"
+          activation_rc="$?"
+          set -e
+          return "${activation_rc}"
+          ;;
+        FAILED)
+          kill "${client_pid}" >/dev/null 2>&1 || true
+          wait "${client_pid}" >/dev/null 2>&1 || true
+          rollback_pending "${activation_error:-TARGET_ACTIVATION_FAILED}"
+          return 99
+          ;;
+        *) fail "激活 marker 状态无效" ;;
+      esac
+    fi
+    [ "${elapsed}" -lt "${timeout_seconds}" ] || {
+      kill "${client_pid}" >/dev/null 2>&1 || true
+      wait "${client_pid}" >/dev/null 2>&1 || true
+      rollback_pending TARGET_ACTIVATION_TIMEOUT
+      return 99
+    }
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  set +e
+  wait "${client_pid}"
+  activation_rc="$?"
+  set -e
+  rollback_pending TARGET_ACTIVATION_FAILED
+  return 99
+}
+
+run_client() {
+  ensure_runtime
+  [ -f "${CONFIG_DIR}/credentials.properties" ] \
+    || fail "尚未接入，请先在终端运行 test-agent-local-client enroll"
+  while :; do
+    active_version="$(current_version)"
+    if [ -f "${STATE_DIR}/pending-update.properties" ] \
+      && [ ! -f "${STATE_DIR}/update-result.properties" ]; then
+      validate_pending
+      if [ "${active_version}" = "${pending_target}" ]; then
+        set +e
+        run_activation_process
+        client_rc="$?"
+        set -e
+        [ "${client_rc}" -eq 99 ] && continue
+      else
+        client_rc=0
+      fi
+    else
+      active_release="${RELEASES_DIR}/${active_version}"
+      set +e
+      "${active_release}/jdk/bin/java" -jar "${active_release}/test-agent-local-client.jar"
+      client_rc="$?"
+      set -e
+    fi
+    case "${client_rc}" in
+      "${APPLY_EXIT_CODE}") prepare_pending_switch ;;
+      "${ACTIVATION_FAILED_EXIT_CODE}") rollback_pending TARGET_ACTIVATION_FAILED ;;
+      *) return "${client_rc}" ;;
+    esac
+  done
 }
 
 require_command curl
 require_command openssl
 require_command tar
 require_command awk
+require_command wc
+require_command stat
+require_command getconf
+require_command grep
+require_command find
+require_command cmp
+verify_platform
 
-if [ -z "${DOWNLOAD_BASE_URL}" ]; then
-  printf 'HTTP download base URL (for example http://nginx/downloads/local-opencode-client): ' >/dev/tty
-  IFS= read -r DOWNLOAD_BASE_URL </dev/tty
-fi
-DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL%/}"
-case "${DOWNLOAD_BASE_URL}" in
-  http://*) ;;
-  *) fail "download base URL must use the configured internal HTTP channel" ;;
-esac
-
-os_name="$(uname -s)"
-machine_name="$(uname -m)"
-case "${os_name}:${machine_name}" in
-  Darwin:arm64)
-    PLATFORM="darwin-arm64"
-    JRE_PATH_KEY="darwinArm64JrePath"
-    JRE_SHA_KEY="darwinArm64JreSha256"
-    OPENCODE_PATH_KEY="darwinArm64OpencodePath"
-    OPENCODE_SHA_KEY="darwinArm64OpencodeSha256"
-    ;;
-  Linux:aarch64|Linux:arm64)
-    PLATFORM="linux-arm64-glibc"
-    JRE_PATH_KEY="linuxArm64GlibcJrePath"
-    JRE_SHA_KEY="linuxArm64GlibcJreSha256"
-    OPENCODE_PATH_KEY="linuxArm64GlibcOpencodePath"
-    OPENCODE_SHA_KEY="linuxArm64GlibcOpencodeSha256"
-    ;;
-  *) fail "unsupported platform ${os_name}/${machine_name}; only Apple Silicon and ARM64 glibc Linux are supported" ;;
-esac
-
+INSTALL_ROOT="${TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT:-${HOME}/.local/share/testagent/local-opencode-client}"
+CONFIG_DIR="${TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR:-${HOME}/.config/testagent/local-opencode-client}"
+STATE_DIR="${TEST_AGENT_LOCAL_CLIENT_STATE_DIR:-${HOME}/.local/state/testagent/local-opencode-client}"
+RELEASES_DIR="${INSTALL_ROOT}/releases"
+umask 077
+mkdir -p "${INSTALL_ROOT}" "${CONFIG_DIR}" "${STATE_DIR}"
+chmod 0700 "${CONFIG_DIR}" "${STATE_DIR}"
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-local-client.XXXXXX")"
 trap cleanup INT TERM EXIT
-MANIFEST_FILE="${TEMP_DIR}/manifest.json"
-SIGNATURE_FILE="${TEMP_DIR}/manifest.json.sig"
-PUBLIC_KEY_FILE="${TEMP_DIR}/manifest-public.pem"
-curl -fsSL --proto '=http' "${DOWNLOAD_BASE_URL}/stable/manifest.json" -o "${MANIFEST_FILE}"
-curl -fsSL --proto '=http' "${DOWNLOAD_BASE_URL}/stable/manifest.json.sig" -o "${SIGNATURE_FILE}"
-printf '%s' "${PUBLIC_KEY_BASE64}" | openssl base64 -d -A >"${PUBLIC_KEY_FILE}"
-openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" -signature "${SIGNATURE_FILE}" "${MANIFEST_FILE}" >/dev/null \
-  || fail "manifest signature verification failed"
+PUBLIC_KEY_FILE="${TEMP_DIR}/release-public.pem"
+printf '%s' "${PUBLIC_KEY_PEM_BASE64}" | openssl base64 -d -A >"${PUBLIC_KEY_FILE}"
 
-VERSION="$(manifest_value version)"
-CLIENT_JAR_PATH="$(manifest_value clientJarPath)"
-CLIENT_JAR_SHA="$(manifest_value clientJarSha256)"
-JRE_PATH="$(manifest_value "${JRE_PATH_KEY}")"
-JRE_SHA="$(manifest_value "${JRE_SHA_KEY}")"
-OPENCODE_PATH="$(manifest_value "${OPENCODE_PATH_KEY}")"
-OPENCODE_SHA="$(manifest_value "${OPENCODE_SHA_KEY}")"
-case "${VERSION}" in
-  ''|*[!A-Za-z0-9._-]*) fail "signed manifest contains an invalid version" ;;
-esac
-for required_value in "${CLIENT_JAR_PATH}" "${CLIENT_JAR_SHA}" "${JRE_PATH}" "${JRE_SHA}" "${OPENCODE_PATH}" "${OPENCODE_SHA}"; do
-  [ -n "${required_value}" ] || fail "signed manifest is incomplete"
-done
-
-download_artifact "${CLIENT_JAR_PATH}" "${CLIENT_JAR_SHA}" "${TEMP_DIR}/test-agent-local-client.jar"
-download_artifact "${JRE_PATH}" "${JRE_SHA}" "${TEMP_DIR}/jre.tar.gz"
-download_artifact "${OPENCODE_PATH}" "${OPENCODE_SHA}" "${TEMP_DIR}/opencode.tar.gz"
-
-if [ "${os_name}" = Darwin ]; then
-  DEFAULT_BASE="${HOME}/Library/Application Support/TestAgent/local-opencode-client"
-  INSTALL_ROOT="${TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT:-${DEFAULT_BASE}/runtime}"
-  CONFIG_DIR="${TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR:-${DEFAULT_BASE}}"
-  STATE_DIR="${TEST_AGENT_LOCAL_CLIENT_STATE_DIR:-${DEFAULT_BASE}/state}"
-else
-  INSTALL_ROOT="${TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT:-${HOME}/.local/share/testagent/local-opencode-client}"
-  CONFIG_DIR="${TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR:-${HOME}/.config/testagent/local-opencode-client}"
-  STATE_DIR="${TEST_AGENT_LOCAL_CLIENT_STATE_DIR:-${HOME}/.local/state/testagent/local-opencode-client}"
-fi
-RELEASES_DIR="${INSTALL_ROOT}/releases"
-RELEASE_DIR="${RELEASES_DIR}/${VERSION}"
-STAGING_DIR="${RELEASES_DIR}/.${VERSION}.install.$$"
-umask 077
-mkdir -p "${RELEASES_DIR}" "${CONFIG_DIR}" "${STATE_DIR}"
-mkdir -p "${STAGING_DIR}"
-cp "${TEMP_DIR}/test-agent-local-client.jar" "${STAGING_DIR}/test-agent-local-client.jar"
-tar -C "${STAGING_DIR}" -xzf "${TEMP_DIR}/jre.tar.gz"
-tar -C "${STAGING_DIR}" -xzf "${TEMP_DIR}/opencode.tar.gz"
-[ -x "${STAGING_DIR}/jre/bin/java" ] || fail "JRE package does not contain jre/bin/java"
-[ -x "${STAGING_DIR}/opencode/bin/opencode" ] || fail "OpenCode package does not contain opencode/bin/opencode"
-
-if [ -d "${RELEASE_DIR}" ]; then
-  PREVIOUS_DIR="${RELEASES_DIR}/.${VERSION}.previous.$(date +%Y%m%d%H%M%S)"
-  mv "${RELEASE_DIR}" "${PREVIOUS_DIR}"
-  printf 'Previous same-version installation retained at %s\n' "${PREVIOUS_DIR}"
-fi
-mv "${STAGING_DIR}" "${RELEASE_DIR}"
-ln -s "releases/${VERSION}" "${INSTALL_ROOT}/.current.$$"
-mv -f "${INSTALL_ROOT}/.current.$$" "${INSTALL_ROOT}/current"
-
-if [ ! -f "${CONFIG_DIR}/client.key" ]; then
-  read_secret_key
-  case "${CLIENT_KEY}" in
-    tack_v1_*) ;;
-    *) fail "client key format is invalid" ;;
-  esac
-  printf '%s\n' "${CLIENT_KEY}" >"${CONFIG_DIR}/client.key"
-  chmod 0600 "${CONFIG_DIR}/client.key"
-  CLIENT_KEY=''
-fi
-
-SERVER_URL="${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}"
-if [ -z "${SERVER_URL}" ] && [ -f "${CONFIG_DIR}/client.properties" ]; then
-  SERVER_URL="$(awk -F= '$1 == "serverUrl" { print substr($0, index($0, "=") + 1); exit }' "${CONFIG_DIR}/client.properties")"
-fi
-if [ -z "${SERVER_URL}" ]; then
-  printf 'Platform HTTPS base URL (for example https://testagent.example): ' >/dev/tty
-  IFS= read -r SERVER_URL </dev/tty
-fi
-case "${SERVER_URL}" in
-  https://*) ALLOW_INSECURE=false ;;
-  http://*)
-    [ "${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}" = true ] \
-      || fail "control channel must use HTTPS/WSS"
-    ALLOW_INSECURE=true
+command_name="${1:-setup}"
+case "${command_name}" in
+  setup)
+    [ "$#" -le 1 ] || fail "setup 不接受额外参数"
+    ensure_runtime
+    if [ ! -f "${CONFIG_DIR}/credentials.properties" ]; then
+      enroll_client
+    fi
+    install_user_service
+    printf '麒麟 ARM64 本地客户端已安装并接入。\n'
     ;;
-  *) fail "platform server URL is invalid" ;;
+  enroll)
+    [ "$#" -eq 1 ] || fail "enroll 不接受额外参数"
+    ensure_runtime
+    enroll_client
+    rm -f "${STATE_DIR}/re-enrollment-required"
+    install_user_service
+    printf '本地客户端重新接入成功。\n'
+    ;;
+  run)
+    [ "$#" -eq 1 ] || fail "run 不接受额外参数"
+    run_client
+    ;;
+  --version)
+    [ "$#" -eq 1 ] || fail "--version 不接受额外参数"
+    if [ -L "${INSTALL_ROOT}/current" ]; then
+      active_version="$(current_version)"
+      printf 'test-agent-local-client launcher=%s release=%s\n' "${LAUNCHER_VERSION}" "${active_version}"
+    else
+      printf 'test-agent-local-client launcher=%s release=not-installed\n' "${LAUNCHER_VERSION}"
+    fi
+    ;;
+  *) fail "不支持的命令: ${command_name}" ;;
 esac
-
-WEB_URL="${TEST_AGENT_LOCAL_CLIENT_WEB_URL:-}"
-if [ -z "${WEB_URL}" ] && [ -f "${CONFIG_DIR}/client.properties" ]; then
-  WEB_URL="$(awk -F= '$1 == "webUrl" { print substr($0, index($0, "=") + 1); exit }' "${CONFIG_DIR}/client.properties")"
-fi
-WEB_URL="${WEB_URL:-${SERVER_URL}}"
-case "${WEB_URL}" in
-  https://*) ;;
-  http://*) [ "${ALLOW_INSECURE}" = true ] || fail "web URL must use HTTPS" ;;
-  *) fail "platform web URL is invalid" ;;
-esac
-
-{
-  printf 'serverUrl=%s\n' "${SERVER_URL%/}"
-  printf 'webUrl=%s\n' "${WEB_URL%/}"
-  printf 'opencodeExecutable=%s/current/opencode/bin/opencode\n' "${INSTALL_ROOT}"
-  printf 'opencodeConfigDirectory=%s/opencode-config\n' "${CONFIG_DIR}"
-  printf 'opencodeDataDirectory=%s/opencode-data\n' "${STATE_DIR}"
-  printf 'portMin=4096\nportMax=4195\n'
-  printf 'allowInsecureControl=%s\n' "${ALLOW_INSECURE}"
-} >"${CONFIG_DIR}/client.properties"
-chmod 0600 "${CONFIG_DIR}/client.properties"
-
-mkdir -p "${STATE_DIR}/logs"
-if [ "${TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START:-false}" != true ]; then
-  if [ "${os_name}" = Darwin ]; then
-    LAUNCH_AGENT_DIR="${TEST_AGENT_LOCAL_CLIENT_LAUNCH_AGENT_DIR:-${HOME}/Library/LaunchAgents}"
-    PLIST_PATH="${LAUNCH_AGENT_DIR}/com.enterprise.testagent.local-opencode-client.plist"
-    mkdir -p "${LAUNCH_AGENT_DIR}"
-    # 默认安装路径由本脚本控制，不包含 XML 元字符；测试覆盖路径同样必须满足这一约束。
-    case "${INSTALL_ROOT}${STATE_DIR}" in *'&'*|*'<'*|*'>'*) fail "installation paths contain unsupported XML characters" ;; esac
-    {
-      printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
-      printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-      printf '%s\n' '<plist version="1.0"><dict>'
-      printf '%s\n' '<key>Label</key><string>com.enterprise.testagent.local-opencode-client</string>'
-      printf '<key>ProgramArguments</key><array><string>%s/current/jre/bin/java</string><string>-jar</string><string>%s/current/test-agent-local-client.jar</string></array>\n' "${INSTALL_ROOT}" "${INSTALL_ROOT}"
-      printf '%s\n' '<key>RunAtLoad</key><true/>'
-      printf '%s\n' '<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>'
-      printf '<key>StandardOutPath</key><string>%s/logs/client.log</string>\n' "${STATE_DIR}"
-      printf '<key>StandardErrorPath</key><string>%s/logs/client-error.log</string>\n' "${STATE_DIR}"
-      printf '%s\n' '</dict></plist>'
-    } >"${PLIST_PATH}"
-    chmod 0600 "${PLIST_PATH}"
-    launchctl bootout "gui/$(id -u)" "${PLIST_PATH}" >/dev/null 2>&1 || true
-    launchctl bootstrap "gui/$(id -u)" "${PLIST_PATH}"
-  else
-    UNIT_DIR="${TEST_AGENT_LOCAL_CLIENT_SYSTEMD_USER_DIR:-${HOME}/.config/systemd/user}"
-    UNIT_PATH="${UNIT_DIR}/test-agent-local-opencode-client.service"
-    mkdir -p "${UNIT_DIR}"
-    case "${INSTALL_ROOT}" in *'"'*) fail "installation path contains an unsupported quote" ;; esac
-    {
-      printf '%s\n' '[Unit]' 'Description=Test Agent Local OpenCode Client' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]'
-      printf 'ExecStart="%s/current/jre/bin/java" -jar "%s/current/test-agent-local-client.jar"\n' "${INSTALL_ROOT}" "${INSTALL_ROOT}"
-      printf '%s\n' 'Restart=on-failure' 'RestartSec=3' '' '[Install]' 'WantedBy=default.target'
-    } >"${UNIT_PATH}"
-    chmod 0600 "${UNIT_PATH}"
-    systemctl --user daemon-reload
-    systemctl --user enable --now test-agent-local-opencode-client.service
-  fi
-fi
 
 cleanup
+TEMP_DIR=""
 trap - INT TERM EXIT
-printf 'Installed local OpenCode client %s for %s under %s\n' "${VERSION}" "${PLATFORM}" "${INSTALL_ROOT}"

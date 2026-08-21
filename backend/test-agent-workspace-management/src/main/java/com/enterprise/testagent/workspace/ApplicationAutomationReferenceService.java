@@ -2,6 +2,7 @@ package com.enterprise.testagent.workspace;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.git.GitCommandExecutor;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
@@ -575,6 +576,15 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
     }
 
     private void synchronizeClaimedReplica(ApplicationAutomationReferenceReplica claimed, String traceId) {
+        // 自动化共享副本的物理根目录属于服务器实现细节；同步、核验及异常归因都必须在同一脱敏作用域内完成。
+        try (GitCommandExecutor.LogRedaction ignored = GitCommandExecutor.redactSensitiveArguments(
+                List.of(referencesRoot().toString()))) {
+            synchronizeClaimedReplicaWithRedactedPath(claimed, traceId);
+        }
+    }
+
+    private void synchronizeClaimedReplicaWithRedactedPath(
+            ApplicationAutomationReferenceReplica claimed, String traceId) {
         ApplicationAutomationReferenceState state = automationRepository
                 .findState(claimed.appId(), claimed.repositoryId())
                 .orElse(null);

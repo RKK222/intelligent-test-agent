@@ -14,6 +14,7 @@ const props = defineProps<{
   initialAppId?: string;
   initialAppTab?: "members" | "repositories" | "workspaces";
   refreshKey?: number;
+  pageActive: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -38,6 +39,9 @@ const effectiveKey = computed(() => {
 });
 
 const current = computed<PanelDef>(() => panels[effectiveKey.value] ?? panels.personal);
+const currentPageActivityProps = computed(() =>
+  effectiveKey.value === "personal" ? { pageActive: props.pageActive } : {}
+);
 </script>
 
 <template>
@@ -53,6 +57,7 @@ const current = computed<PanelDef>(() => panels[effectiveKey.value] ?? panels.pe
         :initial-app-id="props.initialAppId"
         :initial-app-tab="props.initialAppTab"
         :refresh-key="props.refreshKey"
+        v-bind="currentPageActivityProps"
         @switch-menu="(key: string) => emit('switch-menu', key)"
         @workspace-catalog-changed="emit('workspace-catalog-changed')"
       />

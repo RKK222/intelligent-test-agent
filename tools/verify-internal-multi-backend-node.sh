@@ -27,6 +27,7 @@ printf '%s\n' \
   'TEST_AGENT_REDIS_PASSWORD=' \
   'TEST_AGENT_API_TOKEN=' \
   'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret-must-not-print' \
+  'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=fixture-public-key-base64' \
   'TEST_AGENT_INTERNAL_PROXY_API_KEY=proxy-secret-must-not-print' \
   'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://122.233.30.147:8123/testagent_analytics' \
@@ -112,8 +113,6 @@ tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.g
 mkdir -p "${RELEASE_ROOT}/dist/local-opencode-client/stable"
 printf '#!/usr/bin/env bash\nexit 0\n' \
   >"${RELEASE_ROOT}/dist/local-opencode-client/install.sh"
-printf 'fixture pkg\n' \
-  >"${RELEASE_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg"
 printf 'fixture deb\n' \
   >"${RELEASE_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
 printf '{\n  "version": "fixture-local-client"\n}\n' \

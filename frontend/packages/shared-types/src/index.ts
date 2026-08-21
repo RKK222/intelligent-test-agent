@@ -258,9 +258,11 @@ export type LocalClientCredential = {
   status?: LocalClientCredentialStatus | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  /** 仅 true 时允许消费当前凭据版本唯一一次明文；缺失时失败关闭。 */
+  revealAvailable?: boolean;
 };
 
-/** copy 是唯一携带明文 key 的响应；调用方必须立即写入剪贴板并丢弃引用。 */
+/** copy 是唯一携带明文 key 的响应；调用方只能在一次性对话框内短暂持有。 */
 export type LocalClientPlaintextKey = { clientKey: string };
 
 /** 超级管理员维护的本地客户端下载灰度用户；禁用记录不出现在列表响应中。 */
@@ -297,6 +299,97 @@ export type LocalClientInstance = {
   lastConnectedAt?: string | null;
   lastDisconnectedAt?: string | null;
   capabilities: Record<string, boolean>;
+  /** 旧客户端缺少该字段时按不支持自更新处理。 */
+  selfUpdateSupported?: boolean;
+  targetClientVersion?: string | null;
+  updateDirection?: LocalClientUpdateDirection | null;
+  lastUpdateStatus?: string | null;
+  lastUpdateAt?: string | null;
+};
+
+export type LocalClientUpdateDirection = "UPDATE" | "ROLLBACK" | "SAME" | string;
+
+export type LocalClientReleaseArtifact = {
+  kind: string;
+  url: string;
+  size: number;
+  sha256: string;
+};
+
+export type LocalClientRelease = {
+  version: string;
+  platform: string;
+  architecture: string;
+  launcherVersionMin: number;
+  launcherVersionMax: number;
+  protocolVersion: string;
+  manifestSha256: string;
+  compatible: boolean;
+  publishedAt: string;
+  syncedAt: string;
+  artifacts: LocalClientReleaseArtifact[];
+};
+
+export type LocalClientReleaseSyncResult = {
+  synced: number;
+  unchanged: number;
+  discovered: number;
+};
+
+export type LocalClientGlobalPolicy = {
+  targetVersion?: string | null;
+  revision: number;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
+};
+
+export type LocalClientUserPolicy = {
+  userId: string;
+  targetVersion?: string | null;
+  revision: number;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
+};
+
+export type LocalClientRolloutScope = "ALL_ONLINE" | "USER";
+
+export type LocalClientRollout = {
+  rolloutId: string;
+  scope: LocalClientRolloutScope | string;
+  requestedUserId?: string | null;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+  completedAt?: string | null;
+  attemptCount?: number | null;
+};
+
+export type LocalClientUpdateAttempt = {
+  commandId: string;
+  rolloutId: string;
+  clientInstanceId: string;
+  userId: string;
+  connectionGeneration: number;
+  policyRevision: number;
+  currentVersion: string;
+  targetVersion: string;
+  direction: LocalClientUpdateDirection;
+  status: string;
+  releaseDigest?: string | null;
+  errorCode?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+};
+
+export type LocalClientRolloutRequest = {
+  scope: LocalClientRolloutScope;
+  userId?: string;
+};
+
+export type LocalClientUserUpdateRequest = {
+  notificationId: string;
+  expectedTargetVersion: string;
 };
 
 export type OpencodeEndpoint = {
@@ -1035,8 +1128,14 @@ export type UserNotificationType =
   | "AGENT_CONFIG_DISPOSE_SUCCEEDED"
   | "AGENT_CONFIG_DISPOSE_FAILED"
   | "AGENT_CONFIG_DISPOSE_SUPERSEDED"
+  | "LOCAL_CLIENT_UPDATE_AVAILABLE"
   | string;
-export type UserNotificationActionType = "SESSION_SHARE" | "NONE" | "RESTART_OWN_PROCESS" | string;
+export type UserNotificationActionType =
+  | "SESSION_SHARE"
+  | "NONE"
+  | "RESTART_OWN_PROCESS"
+  | "LOCAL_CLIENT_UPDATE"
+  | string;
 export type UserNotificationStatus = "ACTIVE" | "INVALIDATED" | string;
 export type UserNotificationChangeType = "SNAPSHOT" | "CREATED" | "READ" | "UPDATED" | "INVALIDATED";
 

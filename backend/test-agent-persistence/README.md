@@ -302,3 +302,17 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 `docs/deployment/database.md`。
 灰度名单由 `V20260817193414__local_client_rollout_users_create.sql` 创建，启用使用 MyBatis XML 幂等 upsert，
 移出只更新 `enabled=false` 以保留操作人和时间；migration 不预置任何用户。
+
+`LocalClientVersionMapper.xml` / `MyBatisLocalClientVersionRepository` 保存受签名 release、artifact、全局/用户
+策略、rollout 快照与 update attempt；所有关系型 SQL 均在 MyBatis XML。runtime 的独立短事务门面把 attempt 终态 CAS 与
+`SELECT ... FOR UPDATE` rollout 主行锁、全量 attempt 读取和 `COMPLETED/PARTIAL_FAILED` 更新放在同一物理事务，使并发普通终态、
+deadline、能力/generation 取消和迟到纠正串行收敛；锁目标不存在时整套写入回滚并保持 `NOT_FOUND`。固定迁移为
+`V20260820182024__local_client_releases_create_version_management.sql` 与
+`V20260820202529__local_client_credentials_add_revealed_at.sql`；一旦在任何需保留数据库执行，文件名、字节和
+checksum 均不得改写。已经先执行 `V20260821113000__application_automation_references_create.sql`、但缺少上述
+两个较低 dev 版本的 release 历史，由
+`db/migration-compat/local-client-version-management-after-automation/V20260822013000__local_client_instances_add_version_management_after_automation.sql`
+在更高版本一次性补齐相同最终结构；兼容装配会过滤两个低版本主资源，主链与前向链混用、未知 checksum 或不完整
+history 均失败关闭。三项 SQL 都位于交付物 `backend/lib/test-agent-persistence-*.jar`，不在瘦
+`test-agent-app.jar` 中；交付前必须在真实 PostgreSQL 空库、已部署主历史和 release 兼容历史上升级，并从
+源码、构建输出、发布 ZIP 和安装后 persistence JAR 核对字节。不得使用 `repair`、`outOfOrder` 或手改 history。

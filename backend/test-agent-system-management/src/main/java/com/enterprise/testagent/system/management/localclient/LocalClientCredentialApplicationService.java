@@ -7,6 +7,8 @@ import com.enterprise.testagent.domain.localclient.LocalClientCredential;
 import com.enterprise.testagent.domain.localclient.LocalClientCredentialRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientCredentialStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.user.User;
+import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.system.management.externalapi.ExternalApiCredentialCipher;
 import com.enterprise.testagent.system.management.externalapi.ExternalApiKeyGenerator;
 import com.enterprise.testagent.system.management.externalapi.ExternalApiKeyMaterial;
@@ -26,6 +28,7 @@ public class LocalClientCredentialApplicationService {
     public static final String CLIENT_KEY_PREFIX = "tack_v1_";
 
     private final LocalClientCredentialRepository repository;
+    private final UserRepository userRepository;
     private final ExternalApiCredentialCipher cipher;
     private final ExternalApiKeyGenerator keyGenerator;
     private final LocalClientConnectionRevoker connectionRevoker;
@@ -35,21 +38,24 @@ public class LocalClientCredentialApplicationService {
     @Autowired
     public LocalClientCredentialApplicationService(
             LocalClientCredentialRepository repository,
+            UserRepository userRepository,
             ExternalApiCredentialCipher cipher,
             ExternalApiKeyGenerator keyGenerator,
             LocalClientConnectionRevoker connectionRevoker,
             LocalClientCredentialAuditLogger auditLogger) {
-        this(repository, cipher, keyGenerator, connectionRevoker, auditLogger, Clock.systemUTC());
+        this(repository, userRepository, cipher, keyGenerator, connectionRevoker, auditLogger, Clock.systemUTC());
     }
 
     LocalClientCredentialApplicationService(
             LocalClientCredentialRepository repository,
+            UserRepository userRepository,
             ExternalApiCredentialCipher cipher,
             ExternalApiKeyGenerator keyGenerator,
             LocalClientConnectionRevoker connectionRevoker,
             LocalClientCredentialAuditLogger auditLogger,
             Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.cipher = Objects.requireNonNull(cipher, "cipher must not be null");
         this.keyGenerator = Objects.requireNonNull(keyGenerator, "keyGenerator must not be null");
         this.connectionRevoker = Objects.requireNonNull(connectionRevoker, "connectionRevoker must not be null");
@@ -62,7 +68,7 @@ public class LocalClientCredentialApplicationService {
         return repository.findByUserId(userId)
                 .map(LocalClientCredentialApplicationService::view)
                 .orElseGet(() -> new LocalClientCredentialResponses.CredentialView(
-                        false, null, 0, null, null, null));
+                        false, null, 0, null, null, null, false));
     }
 
     /** 创建或重新启用凭据；明文不从创建响应返回，必须显式调用 copy。 */
@@ -88,12 +94,31 @@ public class LocalClientCredentialApplicationService {
         }
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public LocalClientCredentialResponses.PlaintextKey copy(UserId userId, String traceId) {
         try {
-            LocalClientCredential credential = requireActive(userId);
+            LocalClientCredential credential = repository.findByUserIdForUpdate(userId)
+                    .filter(LocalClientCredential::active)
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.NOT_FOUND, "本地客户端密钥不存在或已撤销"));
+            if (credential.revealedAt() != null) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT, "Client key 已显示，需轮换后才能再次查看");
+            }
             String clientKey = cipher.decrypt(credential.encryptedClientKey());
-            auditLogger.success(userId, "COPY", traceId);
+            Instant now = Instant.now(clock);
+            repository.save(new LocalClientCredential(
+                    credential.userId(),
+                    credential.encryptedClientKey(),
+                    credential.clientKeyFingerprint(),
+                    credential.keyHint(),
+                    credential.version(),
+                    credential.status(),
+                    credential.createdAt(),
+                    now,
+                    now,
+                    credential.revokedAt()));
+            auditAfterCompletion(userId, "COPY", traceId);
             return new LocalClientCredentialResponses.PlaintextKey(clientKey);
         } catch (RuntimeException exception) {
             auditLogger.failure(userId, "COPY", traceId, safeReason(exception));
@@ -132,6 +157,7 @@ public class LocalClientCredentialApplicationService {
                     LocalClientCredentialStatus.REVOKED,
                     current.createdAt(),
                     now,
+                    current.revealedAt(),
                     now));
             auditAfterCompletion(userId, "REVOKE", traceId);
             revokeAfterCommit(userId, "CLIENT_KEY_REVOKED", traceId);
@@ -141,15 +167,27 @@ public class LocalClientCredentialApplicationService {
         }
     }
 
-    /** WSS 注册只按 SHA-256 摘要认证，任何失败都返回同一未认证错误。 */
+    /** WSS 注册先按摘要定位 Key 所属用户，再精确核对统一认证号与用户状态。 */
     @Transactional(readOnly = true)
-    public LocalClientCredentialResponses.AuthenticatedCredential authenticate(String clientKey) {
+    public LocalClientCredentialResponses.AuthenticatedCredential authenticate(
+            String clientKey,
+            String unifiedAuthId,
+            boolean strictLegacyRegistration) {
         if (clientKey == null || !clientKey.startsWith(CLIENT_KEY_PREFIX) || clientKey.length() > 128) {
             throw unauthenticated();
         }
         String fingerprint = ExternalApiKeyGenerator.fingerprint(clientKey);
         LocalClientCredential credential = repository.findActiveByFingerprint(fingerprint)
                 .orElseThrow(LocalClientCredentialApplicationService::unauthenticated);
+        User user = userRepository.findByUserId(credential.userId())
+                .filter(User::canLogin)
+                .orElseThrow(LocalClientCredentialApplicationService::unauthenticated);
+        boolean missingUnifiedAuthId = unifiedAuthId == null || unifiedAuthId.isBlank();
+        if ((missingUnifiedAuthId && !strictLegacyRegistration)
+                || (!missingUnifiedAuthId
+                        && (unifiedAuthId.length() > 255 || !user.unifiedAuthId().equals(unifiedAuthId)))) {
+            throw unauthenticated();
+        }
         return new LocalClientCredentialResponses.AuthenticatedCredential(
                 credential.userId().value(), credential.version());
     }
@@ -166,6 +204,7 @@ public class LocalClientCredentialApplicationService {
                 LocalClientCredentialStatus.ACTIVE,
                 createdAt,
                 now,
+                null,
                 null);
     }
 
@@ -213,7 +252,8 @@ public class LocalClientCredentialApplicationService {
                 credential.version(),
                 credential.status(),
                 credential.createdAt(),
-                credential.updatedAt());
+                credential.updatedAt(),
+                credential.active() && credential.revealedAt() == null);
     }
 
     private static PlatformException unauthenticated() {

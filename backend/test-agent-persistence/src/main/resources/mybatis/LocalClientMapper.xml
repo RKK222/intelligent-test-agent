@@ -12,6 +12,7 @@
             <arg column="status" javaType="java.lang.String"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="revealed_at" javaType="java.time.Instant"/>
             <arg column="revoked_at" javaType="java.time.Instant"/>
         </constructor>
     </resultMap>
@@ -25,6 +26,12 @@
             <arg column="architecture" javaType="java.lang.String"/>
             <arg column="client_version" javaType="java.lang.String"/>
             <arg column="opencode_version" javaType="java.lang.String"/>
+            <arg column="launcher_version" javaType="java.lang.String"/>
+            <arg column="self_update_capabilities" javaType="java.lang.String"/>
+            <arg column="self_update_supported" javaType="boolean"/>
+            <arg column="last_update_status" javaType="java.lang.String"/>
+            <arg column="last_update_target_version" javaType="java.lang.String"/>
+            <arg column="last_update_at" javaType="java.time.Instant"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
             <arg column="last_connected_at" javaType="java.time.Instant"/>
@@ -45,7 +52,7 @@
         </constructor>
     </resultMap>
 
-    <resultMap id="rolloutRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientRolloutRow">
+    <resultMap id="rolloutRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientRolloutUserRow">
         <constructor>
             <arg column="user_id" javaType="java.lang.String"/>
             <arg column="enabled" javaType="_boolean"/>
@@ -57,12 +64,14 @@
 
     <sql id="credentialColumns">
         user_id, encrypted_client_key, client_key_fingerprint, key_hint,
-        version, status, created_at, updated_at, revoked_at
+        version, status, created_at, updated_at, revealed_at, revoked_at
     </sql>
 
     <sql id="instanceColumns">
         client_instance_id, user_id, client_name, platform, architecture,
-        client_version, opencode_version, created_at, updated_at,
+        client_version, opencode_version, launcher_version, self_update_capabilities,
+        self_update_supported, last_update_status, last_update_target_version, last_update_at,
+        created_at, updated_at,
         last_connected_at, last_disconnected_at
     </sql>
 
@@ -81,6 +90,13 @@
         WHERE user_id = #{userId}
     </select>
 
+    <select id="findCredentialByUserIdForUpdate" resultMap="credentialRow">
+        SELECT <include refid="credentialColumns"/>
+        FROM local_client_credentials
+        WHERE user_id = #{userId}
+        FOR UPDATE
+    </select>
+
     <select id="findActiveCredentialByFingerprint" resultMap="credentialRow">
         SELECT <include refid="credentialColumns"/>
         FROM local_client_credentials
@@ -90,10 +106,10 @@
     <insert id="upsertCredential">
         INSERT INTO local_client_credentials(
             user_id, encrypted_client_key, client_key_fingerprint, key_hint,
-            version, status, created_at, updated_at, revoked_at
+            version, status, created_at, updated_at, revealed_at, revoked_at
         ) VALUES (
             #{userId}, #{encryptedClientKey}, #{clientKeyFingerprint}, #{keyHint},
-            #{version}, #{status}, #{createdAt}, #{updatedAt}, #{revokedAt}
+            #{version}, #{status}, #{createdAt}, #{updatedAt}, #{revealedAt}, #{revokedAt}
         )
         ON CONFLICT (user_id) DO UPDATE SET
             encrypted_client_key = EXCLUDED.encrypted_client_key,
@@ -102,6 +118,7 @@
             version = EXCLUDED.version,
             status = EXCLUDED.status,
             updated_at = EXCLUDED.updated_at,
+            revealed_at = EXCLUDED.revealed_at,
             revoked_at = EXCLUDED.revoked_at
     </insert>
 
@@ -118,14 +135,24 @@
         ORDER BY updated_at DESC, client_instance_id ASC
     </select>
 
+    <select id="findAllInstances" resultMap="instanceRow">
+        SELECT <include refid="instanceColumns"/>
+        FROM local_client_instances
+        ORDER BY updated_at DESC, client_instance_id ASC
+    </select>
+
     <insert id="upsertInstance">
         INSERT INTO local_client_instances(
             client_instance_id, user_id, client_name, platform, architecture,
-            client_version, opencode_version, created_at, updated_at,
+            client_version, opencode_version, launcher_version, self_update_capabilities,
+            self_update_supported, last_update_status, last_update_target_version, last_update_at,
+            created_at, updated_at,
             last_connected_at, last_disconnected_at
         ) VALUES (
             #{clientInstanceId}, #{userId}, #{clientName}, #{platform}, #{architecture},
-            #{clientVersion}, #{opencodeVersion}, #{createdAt}, #{updatedAt},
+            #{clientVersion}, #{opencodeVersion}, #{launcherVersion}, #{selfUpdateCapabilities},
+            #{selfUpdateSupported}, #{lastUpdateStatus}, #{lastUpdateTargetVersion}, #{lastUpdateAt},
+            #{createdAt}, #{updatedAt},
             #{lastConnectedAt}, #{lastDisconnectedAt}
         )
         ON CONFLICT (client_instance_id) DO UPDATE SET
@@ -134,6 +161,9 @@
             architecture = EXCLUDED.architecture,
             client_version = EXCLUDED.client_version,
             opencode_version = EXCLUDED.opencode_version,
+            launcher_version = EXCLUDED.launcher_version,
+            self_update_capabilities = EXCLUDED.self_update_capabilities,
+            self_update_supported = EXCLUDED.self_update_supported,
             updated_at = EXCLUDED.updated_at,
             last_connected_at = EXCLUDED.last_connected_at,
             last_disconnected_at = EXCLUDED.last_disconnected_at
@@ -145,6 +175,15 @@
         SET last_disconnected_at = #{disconnectedAt}, updated_at = #{disconnectedAt}
         WHERE client_instance_id = #{clientInstanceId}
           AND (last_disconnected_at IS NULL OR last_disconnected_at &lt; #{disconnectedAt})
+    </update>
+
+    <update id="updateInstanceLastUpdateStatus">
+        UPDATE local_client_instances
+        SET last_update_status = #{status},
+            last_update_target_version = #{targetVersion},
+            last_update_at = #{observedAt},
+            updated_at = #{observedAt}
+        WHERE client_instance_id = #{clientInstanceId}
     </update>
 
     <select id="findWorkspaceById" resultMap="workspaceRow">

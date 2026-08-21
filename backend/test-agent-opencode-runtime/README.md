@@ -203,3 +203,14 @@ Run 仍用默认 opencode 的 `contextToken` 校验本地 Workspace 和连接 ge
 逐次检查 Run、Workspace、客户端实例、持有 Java、generation 和 root digest。Agent/Skill 正文、MCP
 Authorization、文件参数和结果不得进入通用日志、RunEvent 或客户端目录。对应测试覆盖目录 opaque 投影、
 服务器路由、system/tool 参数、MCP 初始化与文件调用、连接换代失效和服务器目录重写。
+`LocalClientUpdateCoordinator` 编排本地客户端的策略快照、通知、跨 Java 唤醒和两阶段切换：仅支持
+`SELF_UPDATE_V1` 的在线实例可进入更新 attempt；`commandId + clientInstanceId + generation + policyRevision`
+必须在 `PREPARED/APPLY/CANCEL/STATUS` 全程一致。准备完成时再次校验实例所有权、连接 generation 和有效策略；
+过期通知或策略改变按 `notificationId + recipient` 在独立事务中精确失效并返回冲突，不影响同实例的新通知。
+attempt 每 30 秒补偿，所有非终态在创建 30 分钟后统一到期失败，按到期优先稳定分页扫描以免超过 100 条时饥饿。扫描、网络发送和
+跨 Java 唤醒保持事务外；deadline、能力取消、generation 失效以及客户端普通/迟到终态统一调用
+`LocalClientUpdateTerminalService` 的短事务门面，在一个物理事务内完成 attempt CAS、实例最近结果、rollout 主行锁、全量 attempt
+读取与汇总更新，无活动事务时失败关闭。运行时先幂等持久化成功、失败、取消和自动回切，再由 WebSocket 入口返回终态 ACK；deadline
+观测失败只允许迟到的成功/自动回切条件纠正，其它冲突终态拒绝 ACK。同一 rollout 的并发完成最终按行锁串行收敛。自动回切或仍偏离
+策略的取消不关闭更新通知，后续
+版本检查可按同一 dedup key 重新激活并刷新当前版本文案。不能把网络断连或凭据失效映射为制品验签失败。

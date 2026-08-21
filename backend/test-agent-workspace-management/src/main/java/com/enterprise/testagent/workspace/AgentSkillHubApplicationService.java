@@ -218,12 +218,19 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     }
 
     /**
-     * 周期对账只扫描本机 READY 且精确等于 target commit 的应用版本副本；失败留给下轮，不影响服务启动。
+     * 周期对账只扫描仍启用、本机 READY 且精确等于 target commit 的应用版本副本；
+     * 已退出正常入口的历史模板（包括旧自动化 worktree）不得再参与 Agent/Skill 投影。
      */
     @Scheduled(initialDelayString = "PT20S", fixedDelayString = "PT2M")
     public void reconcileLocalSnapshots() {
         for (var app : configurationRepository.findApplications(true)) {
+            Set<ApplicationWorkspaceId> enabledWorkspaceIds = configurationRepository.findWorkspaces(app.appId())
+                    .stream()
+                    .filter(ApplicationWorkspace::enabled)
+                    .map(ApplicationWorkspace::workspaceId)
+                    .collect(Collectors.toSet());
             for (ApplicationWorkspaceVersion version : managedWorkspaceRepository.findVersionsByApplication(app.appId())) {
+                if (!enabledWorkspaceIds.contains(version.applicationWorkspaceId())) continue;
                 if (version.targetCommitHash() == null) continue;
                 managedWorkspaceRepository.findVersionReplicaByRuntimeWorkspace(version.runtimeWorkspaceId())
                         .filter(replica -> "READY".equals(replica.syncStatus().name()))

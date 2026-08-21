@@ -286,7 +286,7 @@ describe("runtime management settings", () => {
     menu.unmount();
 
     const panel = render(SettingsPanel, {
-      props: { activeKey: "appWorkspace", currentUser },
+      props: { activeKey: "appWorkspace", currentUser, pageActive: true },
       global: {
         stubs: {
           SettingsAppWorkspacePanel: { template: "<div>readonly automation versions</div>" },
@@ -302,6 +302,7 @@ describe("runtime management settings", () => {
     const view = render(SettingsPanel, {
       props: {
         activeKey: "appWorkspace",
+        pageActive: true,
         currentUser: {
           userId: "usr_admin",
           username: "admin",
@@ -334,7 +335,7 @@ describe("runtime management settings", () => {
       roles: ["SUPER_ADMIN"]
     };
     const panel = render(SettingsPanel, {
-      props: { activeKey: "appWorkspace", currentUser },
+      props: { activeKey: "appWorkspace", pageActive: true, currentUser },
       attrs: { "onWorkspace-catalog-changed": onWorkspaceCatalogChanged },
       global: { stubs: { SettingsAppWorkspacePanel: WorkspacePanelStub } }
     });
@@ -368,6 +369,7 @@ describe("runtime management settings", () => {
     const view = render(SettingsPanel, {
       props: {
         activeKey: "appWorkspace",
+        pageActive: true,
         currentUser: {
           userId: "usr_app",
           username: "app",

@@ -6,6 +6,7 @@
 
 - `AutomationWorkspaceReferenceCatalogService` 按用户、主工作空间、应用、版本库、配置 generation 和当前 Java 服务器解析共享只读副本，要求 JSONC 逻辑路径、目标 commit 和本机副本均可验证；不可用项转为局部告警，普通工作树和其它引用继续可用。
 - `ApplicationAutomationReferenceService` 以不可变 generation 管理每个应用自动化版本库的一套分支、任意层级目录、共享描述和固定目标提交。每个 generation、每台服务器只维护一个共享只读仓库副本；目录只是副本内逻辑选择。在线服务器全部 READY 后才以 CAS 激活，离线节点标记 `DEFERRED` 并由 `ApplicationAutomationReferenceReconciler` 恢复后补齐；更新副本建立新提交代次，Git 指针核验只读本地状态。
+- 自动化共享副本的同步、核验和错误归因统一在引用根目录日志脱敏作用域内执行，Git 命令日志不得输出服务器物理路径；Agent/Skill 的本机快照周期对账只扫描仍启用的应用工作空间模板，已停用的旧自动化模板、版本和 worktree 只保留历史，不再被后台任务读取或投影。
 - `WorkspaceViewApplicationService` 在组合根增加虚拟“自动化代码库”，只装载当前工作树 `.opencode/opencode.jsonc` 中由平台写入且应用、版本库、generation、目录和逻辑配置路径均可重新验证的自动化条目；使用 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 定位器提供目录、文本、分片和二进制只读读取。每次操作重新授权，不接受客户端物理路径；`.git`、符号链接、越界和全部写/Git/搜索/requirements 操作固定拒绝。
 - `ApplicationAutomationReferenceRunLeaseService` 只为 Run 记录共享代次生命周期租约，不拼接 system prompt、用户消息、物理路径或其它 OpenCode 上下文；OpenCode 唯一运行时事实源仍是个人工作树 JSONC。
 - 存量个人 runtime Workspace 若仍记录在应用目录而配置留在固定 `workspace/.opencode`，Agent 配置读取与组合树可兼容该受控子目录；首次引用保存会写入会话根的标准 `.opencode/opencode.jsonc`，使 OpenCode 从当前 cwd 原生加载同一份 references/permission。不会递归搜索，也不接受客户端物理路径。

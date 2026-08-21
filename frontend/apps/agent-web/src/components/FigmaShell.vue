@@ -2718,7 +2718,7 @@ function submitJoinApp() {
               <Download class="figma-user-menu-icon" />
               <span class="figma-local-client-download-text">
                 <strong>下载本地客户端</strong>
-                <small data-testid="local-client-install-hint">安装后从“应用程序”打开，完成配置后使用顶部菜单栏兔子图标</small>
+                <small data-testid="local-client-install-hint">仅支持麒麟 ARM64；管理员安装后，在终端运行 test-agent-local-client enroll</small>
               </span>
             </a>
             <button

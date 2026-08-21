@@ -106,6 +106,11 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     static final String LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION_VERSION = "20260818094330";
     static final String LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/local-client-runtime-after-enterprise-release";
+    static final String LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_VERSION = "20260820182024";
+    static final String LOCAL_CLIENT_CREDENTIAL_REVEAL_MIGRATION_VERSION = "20260820202529";
+    static final String LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_MIGRATION_VERSION = "20260822013000";
+    static final String LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/local-client-version-management-after-automation";
     static final String ANALYTICS_OUTBOX_MIGRATION_VERSION = "20260813143000";
     static final String ANALYTICS_TRIGGER_MIGRATION_VERSION = "20260813143001";
     static final String ANALYTICS_OUTBOX_FORWARD_MIGRATION_VERSION = "20260814165300";
@@ -143,6 +148,10 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             "db/migration/V20260809210000__common_parameters_add_experience_workspace.sql";
     private static final String LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE =
             "db/migration/V20260811210453__local_client_credentials_create_runtime.sql";
+    private static final String LOCAL_CLIENT_VERSION_MANAGEMENT_MAIN_RESOURCE =
+            "db/migration/V20260820182024__local_client_releases_create_version_management.sql";
+    private static final String LOCAL_CLIENT_CREDENTIAL_REVEAL_MAIN_RESOURCE =
+            "db/migration/V20260820202529__local_client_credentials_add_revealed_at.sql";
     private static final String ANALYTICS_OUTBOX_MAIN_RESOURCE =
             "db/migration/V20260813143000__analytics_event_outbox_create_pipeline.sql";
     private static final String ANALYTICS_TRIGGER_MAIN_RESOURCE =
@@ -345,6 +354,35 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                 needsLocalClientRuntimeForwardCompatibility
                         && hasAppliedMigrationAfter(
                                 appliedMigrations, LOCAL_CLIENT_RUNTIME_FORWARD_MIGRATION_VERSION);
+        boolean localClientVersionManagementMigrationApplied = isMigrationApplied(
+                appliedMigrations, LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_VERSION);
+        boolean localClientCredentialRevealMigrationApplied = isMigrationApplied(
+                appliedMigrations, LOCAL_CLIENT_CREDENTIAL_REVEAL_MIGRATION_VERSION);
+        boolean localClientVersionManagementForwardMigrationApplied = isMigrationApplied(
+                appliedMigrations, LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_MIGRATION_VERSION);
+        if (localClientCredentialRevealMigrationApplied && !localClientVersionManagementMigrationApplied) {
+            throw new IllegalStateException(
+                    "检测到本地客户端凭据展示 migration 缺少版本管理基础 history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (localClientVersionManagementMigrationApplied
+                && !localClientCredentialRevealMigrationApplied
+                && hasAppliedMigrationAfter(
+                        appliedMigrations, LOCAL_CLIENT_CREDENTIAL_REVEAL_MIGRATION_VERSION)) {
+            throw new IllegalStateException(
+                    "检测到不完整的本地客户端版本管理 migration history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (localClientVersionManagementForwardMigrationApplied
+                && (localClientVersionManagementMigrationApplied
+                        || localClientCredentialRevealMigrationApplied)) {
+            throw new IllegalStateException(
+                    "检测到本地客户端版本管理主链与顺序补偿 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        boolean needsLocalClientVersionManagementForwardCompatibility =
+                !localClientVersionManagementMigrationApplied
+                        && !localClientCredentialRevealMigrationApplied
+                        && !localClientVersionManagementForwardMigrationApplied
+                        && hasAppliedMigrationAfter(
+                                appliedMigrations, LOCAL_CLIENT_CREDENTIAL_REVEAL_MIGRATION_VERSION);
         boolean analyticsOutboxMigrationApplied = isMigrationApplied(
                 appliedMigrations, ANALYTICS_OUTBOX_MIGRATION_VERSION);
         boolean analyticsTriggerMigrationApplied = isMigrationApplied(
@@ -519,6 +557,11 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             addLocationIfAbsent(
                     locations, LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION);
         }
+        if (needsLocalClientVersionManagementForwardCompatibility
+                || localClientVersionManagementForwardMigrationApplied) {
+            addLocationIfAbsent(
+                    locations, LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_COMPATIBILITY_LOCATION);
+        }
         if (needsAnalyticsForwardCompatibility || anyAnalyticsForwardMigrationApplied) {
             addLocationIfAbsent(locations, ANALYTICS_AFTER_RELEASE_COMPATIBILITY_LOCATION);
         }
@@ -565,6 +608,12 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                 || localClientRuntimeEnterpriseForwardMigrationApplied) {
             // release 前向版本已经执行时，dev 的较低主链版本仍然不能重新暴露给 Flyway 校验。
             filteredMainResources.add(LOCAL_CLIENT_RUNTIME_MAIN_RESOURCE);
+        }
+        if (needsLocalClientVersionManagementForwardCompatibility
+                || localClientVersionManagementForwardMigrationApplied) {
+            // 自动化配置已越过 dev 客户端版本管理时，只允许执行更高版本的完整前向补偿。
+            filteredMainResources.add(LOCAL_CLIENT_VERSION_MANAGEMENT_MAIN_RESOURCE);
+            filteredMainResources.add(LOCAL_CLIENT_CREDENTIAL_REVEAL_MAIN_RESOURCE);
         }
         if (needsAnalyticsForwardCompatibility || anyAnalyticsForwardMigrationApplied) {
             filteredMainResources.add(ANALYTICS_OUTBOX_MAIN_RESOURCE);
@@ -649,6 +698,15 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         if (localClientRuntimeEnterpriseForwardMigrationApplied) {
             LOGGER.warn("检测到已执行的本地客户端企业基线顺序补偿 migration，继续启用原始字节兼容解析: version={}",
                     LOCAL_CLIENT_RUNTIME_ENTERPRISE_FORWARD_MIGRATION_VERSION);
+        }
+        if (needsLocalClientVersionManagementForwardCompatibility) {
+            LOGGER.warn("检测到自动化配置 history 已越过本地客户端版本管理主链，启用高版本顺序补偿: missingVersions={},{}; forwardVersion={}",
+                    LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_VERSION,
+                    LOCAL_CLIENT_CREDENTIAL_REVEAL_MIGRATION_VERSION,
+                    LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_MIGRATION_VERSION);
+        } else if (localClientVersionManagementForwardMigrationApplied) {
+            LOGGER.warn("检测到已执行的本地客户端版本管理顺序补偿 migration，继续启用原始字节兼容解析: version={}",
+                    LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_MIGRATION_VERSION);
         }
         if (needsAnalyticsForwardCompatibility) {
             LOGGER.warn("检测到运营 outbox migration 早于已执行的 release history，启用顺序补偿路径: missingVersions={},{}; forwardVersions={},{}",

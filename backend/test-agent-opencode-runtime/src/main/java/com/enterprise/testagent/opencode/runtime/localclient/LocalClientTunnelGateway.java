@@ -15,7 +15,6 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.SignalType;
 
 /** 服务端向本地客户端发起生命周期、HTTP/SSE 和文件 RPC 的统一隧道网关。 */
 @Service
@@ -54,12 +53,12 @@ public class LocalClientTunnelGateway {
                     .switchIfEmpty(Mono.error(new PlatformException(
                             ErrorCode.OPENCODE_BAD_GATEWAY, "本地客户端未返回响应")))
                     .flatMap(this::errorOrFrame)
-                    .doFinally(signal -> {
-                        if (signal == SignalType.CANCEL || signal == SignalType.ON_ERROR) {
-                            cancelRemote(clientInstanceId, generation, outbound.requestId(), traceId);
-                        }
-                        pendingRequests.cancel(outbound.requestId());
-                    });
+                    // 错误和下游取消必须先通知远端，再把终止信号交给调用方，避免超时后的取消帧产生竞态。
+                    .doOnError(ignored -> cancelRemote(
+                            clientInstanceId, generation, outbound.requestId(), traceId))
+                    .doOnCancel(() -> cancelRemote(
+                            clientInstanceId, generation, outbound.requestId(), traceId))
+                    .doFinally(signal -> pendingRequests.cancel(outbound.requestId()));
         });
     }
 
@@ -81,12 +80,11 @@ public class LocalClientTunnelGateway {
             return outbound.exchange().frames()
                     .timeout(requireTimeout(idleTimeout))
                     .concatMap(frame -> errorOrFrame(frame).flux())
-                    .doFinally(signal -> {
-                        if (signal == SignalType.CANCEL || signal == SignalType.ON_ERROR) {
-                            cancelRemote(clientInstanceId, generation, outbound.requestId(), traceId);
-                        }
-                        pendingRequests.cancel(outbound.requestId());
-                    });
+                    .doOnError(ignored -> cancelRemote(
+                            clientInstanceId, generation, outbound.requestId(), traceId))
+                    .doOnCancel(() -> cancelRemote(
+                            clientInstanceId, generation, outbound.requestId(), traceId))
+                    .doFinally(signal -> pendingRequests.cancel(outbound.requestId()));
         });
     }
 

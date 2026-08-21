@@ -16,6 +16,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.enterprise.testagent</groupId>
+            <artifactId>test-agent-common</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>

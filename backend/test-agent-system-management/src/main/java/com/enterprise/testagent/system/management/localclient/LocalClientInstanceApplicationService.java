@@ -2,11 +2,14 @@ package com.enterprise.testagent.system.management.localclient;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.localclient.LocalClientReleaseVersion;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientVersionModels;
+import com.enterprise.testagent.domain.localclient.LocalClientVersionRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,17 +26,25 @@ public class LocalClientInstanceApplicationService {
 
     private final LocalClientInstanceRepository instanceRepository;
     private final LocalClientConnectionStore connectionStore;
+    private final LocalClientVersionRepository versionRepository;
 
     public LocalClientInstanceApplicationService(
             LocalClientInstanceRepository instanceRepository,
-            LocalClientConnectionStore connectionStore) {
+            LocalClientConnectionStore connectionStore,
+            LocalClientVersionRepository versionRepository) {
         this.instanceRepository = Objects.requireNonNull(instanceRepository);
         this.connectionStore = Objects.requireNonNull(connectionStore);
+        this.versionRepository = Objects.requireNonNull(versionRepository);
     }
 
     @Transactional(readOnly = true)
     public List<LocalClientInstanceResponses.InstanceView> list(UserId userId) {
-        return instanceRepository.findByUserId(userId).stream().map(this::view).toList();
+        LocalClientVersionModels.EffectivePolicy effective = LocalClientVersionModels.resolveEffectivePolicy(
+                versionRepository.findGlobalPolicy().orElse(null),
+                versionRepository.findUserPolicy(userId).orElse(null));
+        return instanceRepository.findByUserId(userId).stream()
+                .map(instance -> view(instance, effective))
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -56,7 +67,9 @@ public class LocalClientInstanceApplicationService {
         return route;
     }
 
-    private LocalClientInstanceResponses.InstanceView view(LocalClientInstance instance) {
+    private LocalClientInstanceResponses.InstanceView view(
+            LocalClientInstance instance,
+            LocalClientVersionModels.EffectivePolicy effective) {
         LocalClientConnectionRoute route = connectionStore.find(instance.clientInstanceId())
                 .filter(candidate -> candidate.userId().equals(instance.userId()))
                 .orElse(null);
@@ -79,7 +92,26 @@ public class LocalClientInstanceApplicationService {
                 route == null ? null : route.lastHeartbeatAt(),
                 instance.lastConnectedAt(),
                 instance.lastDisconnectedAt(),
-                CAPABILITIES);
+                CAPABILITIES,
+                instance.selfUpdateSupported(),
+                effective.targetVersion(),
+                direction(instance, effective.targetVersion()),
+                instance.lastUpdateStatus(),
+                instance.lastUpdateAt());
+    }
+
+    private static String direction(LocalClientInstance instance, String targetVersion) {
+        if (!instance.selfUpdateSupported() || targetVersion == null) {
+            return null;
+        }
+        try {
+            return LocalClientReleaseVersion.parse(instance.clientVersion())
+                    .directionTo(LocalClientReleaseVersion.parse(targetVersion))
+                    .name();
+        } catch (IllegalArgumentException exception) {
+            // 旧客户端的 0.1.0 版本无法参与时间戳比较，管理页通过 selfUpdateSupported 明确提示重装。
+            return null;
+        }
     }
 
     private static Map<String, Boolean> capabilities() {

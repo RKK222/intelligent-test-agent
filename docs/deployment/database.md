@@ -1926,3 +1926,94 @@ migration 会从仍关联自动化版本库的 `application_workspaces`、`appli
 副本逻辑路径位于 `OPENCODE_REFERENCES_DIR` 下的 `automation/{appId}/{repositoryEnglishName}/{generation}`，目录只是该完整仓库副本内的逻辑选择，不因不同目录重复 clone。API、错误和日志只使用逻辑路径或摘要，不返回数据库中解析后的物理根。状态切换以 generation 和 `lock_version` CAS；副本写回还必须匹配 `lease_token`，迟到 worker 不能覆盖新代次。在线服务器全部 READY 后才激活，离线服务器为 `DEFERRED` 并由补偿器恢复。
 
 `V20260819125704__automation_workspace_active_versions_create.sql` 已进入需要保留的历史，SHA-256 固定为 `a331d8b09575fae38b61471fca719af628ac898c01be82fc369c510de2772928`，不得删除、重命名或改写。发布验证必须使用真实 PostgreSQL 覆盖“已执行该旧 migration 且存在同库多模板、多分支、多版本、多副本数据 → 当前 HEAD”，断言每个 `(app_id, repository_id)` 只有一套当前配置；同时核对源码、persistence JAR 和最终应用 JAR 中两份 migration 字节一致。禁止使用 `outOfOrder`、`repair` 或手工修改 `flyway_schema_history`。
+## 本地客户端版本管理
+
+`V20260820182024__local_client_releases_create_version_management.sql` 创建本地客户端受签名 release、artifact、
+全局/用户策略、rollout 和 update attempt 结构；运行期全部关系型 SQL 位于 `LocalClientVersionMapper.xml`，不得
+新增 JDBC SQL。该 migration 还扩展通知枚举，以支持 `LOCAL_CLIENT_UPDATE_AVAILABLE` 和
+`LOCAL_CLIENT_UPDATE` 的受控通知动作；通知去重键语义为“实例 + 目标版本 + 策略修订”，不保存下载 URL、签名
+私钥、Client key 或完整制品错误。
+
+`V20260820202529__local_client_credentials_add_revealed_at.sql` 为 `local_client_credentials` 增加
+`revealed_at`；存量凭据以已有 `updated_at` 标记为已经展示，避免升级后重新获得明文 Key 展示资格。
+
+release 数据库可能已经执行更高的自动化引用 `V20260821113000`，却尚未执行合入自 dev 的上述两个低版本。
+唯一 `DatabaseMigrationCompatibilityCustomizer` 会识别该历史，过滤两个低版本主资源，并从隔离 location 加载
+`V20260822013000__local_client_instances_add_version_management_after_automation.sql`，在默认
+`outOfOrder=false` 下建立相同最终结构。已执行该前向版本的后续启动继续解析原 location；主链与前向链混用、
+任一不完整历史或未知 checksum 均拒绝启动，不使用 `repair`，也不修改历史表。
+
+两条 SQL 一旦在任何需要保留的数据库执行，文件名、内容和 SHA-256 都不得改写：
+
+| migration | 固定 SHA-256 |
+| --- | --- |
+| `V20260820182024__local_client_releases_create_version_management.sql` | `17aa8c1634513868f96b5fb4b0dedc75de635280af4b618004ea955be183594c` |
+| `V20260820202529__local_client_credentials_add_revealed_at.sql` | `0f7c30b7a932d96b754253261e61b3317308da08874a91747bdf0dddf098918d` |
+| `migration-compat/local-client-version-management-after-automation/V20260822013000__local_client_instances_add_version_management_after_automation.sql` | `9d6882edb28f8379f7c930e17ffe188bd76f046436ca8693d373f4d7b4183153` |
+
+交付后的 Flyway 资源只位于外置
+`backend/lib/test-agent-persistence-*.jar`。瘦 `backend/test-agent-app.jar` 不包含该依赖 JAR，因此只检查
+`test-agent-app.jar` 或外层 ZIP 的 SHA-256 不能证明 migration 已交付。
+
+### 本地客户端版本管理 migration 的逐字节校验
+
+以下四处的 migration 输出必须按上表顺序与固定 SHA-256 完全一致；第 3、4 步的完整 persistence JAR
+SHA-256 也必须相同。构建目录示例使用默认
+`/Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist`；若本次构建显式指定
+`--output-dir`，只能把命令中的该精确绝对目录替换为实际输出目录。
+
+1. 在外网 Mac 校验源码：
+
+   ```bash
+   shasum -a 256 \
+     /Users/huang/workspace/intelligent-test-agent-gitee/backend/test-agent-persistence/src/main/resources/db/migration/V20260820182024__local_client_releases_create_version_management.sql \
+     /Users/huang/workspace/intelligent-test-agent-gitee/backend/test-agent-persistence/src/main/resources/db/migration/V20260820202529__local_client_credentials_add_revealed_at.sql \
+     /Users/huang/workspace/intelligent-test-agent-gitee/backend/test-agent-persistence/src/main/resources/db/migration-compat/local-client-version-management-after-automation/V20260822013000__local_client_instances_add_version_management_after_automation.sql
+   ```
+
+2. 在外网 Mac 校验 `package-release.sh` 的构建输出。先确认目录中恰好一个 persistence JAR，再从该 JAR
+   解出资源：
+
+   ```bash
+   build_persistence_jar="$(find /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist/backend/lib -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print)"
+   test "$(printf '%s\n' "$build_persistence_jar" | awk 'NF { count += 1 } END { print count + 0 }')" -eq 1
+   unzip -p "$build_persistence_jar" db/migration/V20260820182024__local_client_releases_create_version_management.sql | shasum -a 256
+   unzip -p "$build_persistence_jar" db/migration/V20260820202529__local_client_credentials_add_revealed_at.sql | shasum -a 256
+   unzip -p "$build_persistence_jar" db/migration-compat/local-client-version-management-after-automation/V20260822013000__local_client_instances_add_version_management_after_automation.sql | shasum -a 256
+   ```
+
+3. 在外网 Mac 校验完整发布 ZIP 内嵌的 persistence JAR。必须先从 ZIP 提取嵌套 JAR，再读取 JAR 内资源：
+
+   ```bash
+   release_zip=/Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist/test-agent-internal-release.zip
+   release_persistence_entry="$(unzip -Z1 "$release_zip" | awk '/^dist\/backend\/lib\/test-agent-persistence-[^/]+\.jar$/ { print }')"
+   test "$(printf '%s\n' "$release_persistence_entry" | awk 'NF { count += 1 } END { print count + 0 }')" -eq 1
+   release_persistence_dir="$(mktemp -d /tmp/test-agent-local-client-persistence.XXXXXX)"
+   unzip -p "$release_zip" "$release_persistence_entry" > "$release_persistence_dir/test-agent-persistence.jar"
+   shasum -a 256 "$release_persistence_dir/test-agent-persistence.jar"
+   unzip -p "$release_persistence_dir/test-agent-persistence.jar" db/migration/V20260820182024__local_client_releases_create_version_management.sql | shasum -a 256
+   unzip -p "$release_persistence_dir/test-agent-persistence.jar" db/migration/V20260820202529__local_client_credentials_add_revealed_at.sql | shasum -a 256
+   unzip -p "$release_persistence_dir/test-agent-persistence.jar" db/migration-compat/local-client-version-management-after-automation/V20260822013000__local_client_instances_add_version_management_after_automation.sql | shasum -a 256
+   ```
+
+   校验完成后，只能删除上一条 `mktemp` 创建的精确临时目录：
+
+   ```bash
+   case "$release_persistence_dir" in /tmp/test-agent-local-client-persistence.*) rm -rf "$release_persistence_dir" ;; *) echo "Refusing unsafe cleanup: $release_persistence_dir" >&2; exit 1 ;; esac
+   ```
+
+4. 在目标后台节点校验安装后的 JAR；两台后台节点都要在自己的绝对安装路径执行：
+
+   ```bash
+   installed_persistence_jar="$(find /data/testagent/dist/backend/lib -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print)"
+   test "$(printf '%s\n' "$installed_persistence_jar" | awk 'NF { count += 1 } END { print count + 0 }')" -eq 1
+   shasum -a 256 "$installed_persistence_jar"
+   unzip -p "$installed_persistence_jar" db/migration/V20260820182024__local_client_releases_create_version_management.sql | shasum -a 256
+   unzip -p "$installed_persistence_jar" db/migration/V20260820202529__local_client_credentials_add_revealed_at.sql | shasum -a 256
+   unzip -p "$installed_persistence_jar" db/migration-compat/local-client-version-management-after-automation/V20260822013000__local_client_instances_add_version_management_after_automation.sql | shasum -a 256
+   ```
+
+上述字节校验是发布现场闸门的一部分而非已完成声明：仍必须分别用真实 PostgreSQL 验证空库、已部署主历史和
+release 兼容历史到当前 HEAD 的升级，先留存每套 `flyway_schema_history` 的
+`version/checksum/success`。未知 checksum、版本倒序或历史分叉必须停止交付并制定兼容方案；不得用 Flyway
+`repair`、`outOfOrder` 或手改历史表掩盖问题。

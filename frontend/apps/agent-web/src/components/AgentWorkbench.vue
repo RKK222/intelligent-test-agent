@@ -173,6 +173,7 @@ import {
 } from "./fileUploadOverlayState";
 import { formatPreviewBytes, progressivePreviewRequired } from "./fileProgressivePreview";
 import { restartOwnProcessWithConfirmation } from "./process-restart";
+import { requestLocalClientNotificationUpdate } from "./local-client-notification-update";
 import {
   assertCompleteWorkspaceViewDownload,
   concatWorkspaceDownloadChunks,
@@ -2097,6 +2098,20 @@ async function handleOpenNotification(notification: UserNotification) {
     } catch (error) {
       feedback.value = errorFeedback("进程已重启，但通知标记已读失败", error);
     }
+    return;
+  }
+  if (
+    notification.type === "LOCAL_CLIENT_UPDATE_AVAILABLE"
+    && notification.actionType === "LOCAL_CLIENT_UPDATE"
+  ) {
+    await requestLocalClientNotificationUpdate({
+      notification,
+      update: (clientInstanceId, payload) => ordinaryApi.requestLocalClientUpdate(clientInstanceId, payload),
+      refresh: refreshUserNotifications,
+      reportFailure: (error) => {
+        feedback.value = errorFeedback("本地客户端更新失败", error);
+      }
+    });
   }
 }
 

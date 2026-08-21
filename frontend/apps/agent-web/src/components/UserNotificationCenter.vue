@@ -11,6 +11,7 @@ import {
   RefreshCw,
 } from 'lucide-vue-next'
 import type { UserNotification } from '@test-agent/shared-types'
+import { parseLocalClientNotificationUpdate } from './local-client-notification-update'
 
 export type UserNotificationFilter = 'ALL' | 'UNREAD'
 type NotificationVisualState = 'UNREAD' | 'READ' | 'INACTIVE'
@@ -91,6 +92,7 @@ type NotificationKind =
   | 'DISPOSE_SUCCEEDED'
   | 'DISPOSE_FAILED'
   | 'DISPOSE_SUPERSEDED'
+  | 'LOCAL_CLIENT_UPDATE'
   | 'UNKNOWN'
 
 /** 未知类型或类型/动作组合必须失败关闭，不能把 actionTargetId 当作 URL 或其它命令。 */
@@ -100,6 +102,7 @@ function notificationKind(notification: UserNotification): NotificationKind {
   if (notification.type === 'AGENT_CONFIG_DISPOSE_SUCCEEDED' && notification.actionType === 'NONE') return 'DISPOSE_SUCCEEDED'
   if (notification.type === 'AGENT_CONFIG_DISPOSE_FAILED' && notification.actionType === 'RESTART_OWN_PROCESS') return 'DISPOSE_FAILED'
   if (notification.type === 'AGENT_CONFIG_DISPOSE_SUPERSEDED' && notification.actionType === 'NONE') return 'DISPOSE_SUPERSEDED'
+  if (notification.type === 'LOCAL_CLIENT_UPDATE_AVAILABLE' && notification.actionType === 'LOCAL_CLIENT_UPDATE') return 'LOCAL_CLIENT_UPDATE'
   return 'UNKNOWN'
 }
 
@@ -111,6 +114,7 @@ function canOpenNotification(notification: UserNotification) {
   const kind = notificationKind(notification)
   if (kind === 'SESSION_SHARE') return notification.actionAvailable
   if (kind === 'DISPOSE_FAILED') return notification.actionAvailable
+  if (kind === 'LOCAL_CLIENT_UPDATE') return parseLocalClientNotificationUpdate(notification) !== null
   if (kind === 'DISPOSE_PENDING' || kind === 'DISPOSE_SUCCEEDED' || kind === 'DISPOSE_SUPERSEDED') {
     return notification.unread
   }
@@ -119,7 +123,9 @@ function canOpenNotification(notification: UserNotification) {
 
 function shouldDimNotification(notification: UserNotification) {
   const kind = notificationKind(notification)
-  return kind === 'UNKNOWN' || (kind === 'SESSION_SHARE' && !notification.actionAvailable)
+  return kind === 'UNKNOWN'
+    || (kind === 'SESSION_SHARE' && !notification.actionAvailable)
+    || (kind === 'LOCAL_CLIENT_UPDATE' && !canOpenNotification(notification))
 }
 
 function notificationTimestamp(notification: UserNotification) {
@@ -149,13 +155,14 @@ function notificationBody(notification: UserNotification) {
 }
 
 function notificationStateLabel(notification: UserNotification) {
-  switch (notificationKind(notification)) {
-    case 'SESSION_SHARE': return permissionLabel(notification)
-    case 'DISPOSE_PENDING': return '更新中'
-    case 'DISPOSE_SUCCEEDED': return '已更新'
-    case 'DISPOSE_FAILED': return '更新失败'
-    case 'DISPOSE_SUPERSEDED': return '不用处理'
-    default: return '暂不支持'
+    switch (notificationKind(notification)) {
+      case 'SESSION_SHARE': return permissionLabel(notification)
+      case 'DISPOSE_PENDING': return '更新中'
+      case 'DISPOSE_SUCCEEDED': return '已更新'
+      case 'DISPOSE_FAILED': return '更新失败'
+      case 'DISPOSE_SUPERSEDED': return '不用处理'
+      case 'LOCAL_CLIENT_UPDATE': return localClientUpdateDirectionLabel(notification) ?? '版本信息不可用'
+      default: return '暂不支持'
   }
 }
 
@@ -169,9 +176,20 @@ function notificationActionLabel(notification: UserNotification) {
     case 'DISPOSE_SUCCEEDED':
     case 'DISPOSE_SUPERSEDED':
       return notification.unread ? '标记已读' : '已读'
+    case 'LOCAL_CLIENT_UPDATE': {
+      const direction = localClientUpdateDirectionLabel(notification)
+      return direction ? `立即${direction}` : '暂不可用'
+    }
     default:
       return '不支持的通知动作'
   }
+}
+
+function localClientUpdateDirectionLabel(notification: UserNotification) {
+  const direction = parseLocalClientNotificationUpdate(notification)?.direction
+  if (direction === 'UPDATE') return '更新'
+  if (direction === 'ROLLBACK') return '回退'
+  return null
 }
 
 function notificationAriaLabel(notification: UserNotification) {
@@ -368,6 +386,12 @@ onBeforeUnmount(() => {
               />
               <RefreshCw
                 v-else-if="notificationKind(notification) === 'DISPOSE_FAILED' && canOpenNotification(notification)"
+                class="user-notification-center__open-icon"
+                :size="15"
+                aria-hidden="true"
+              />
+              <RefreshCw
+                v-else-if="notificationKind(notification) === 'LOCAL_CLIENT_UPDATE' && canOpenNotification(notification)"
                 class="user-notification-center__open-icon"
                 :size="15"
                 aria-hidden="true"

@@ -93,6 +93,15 @@ test-agent:
   local-client:
     allow-insecure-control: ${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:false}
     trusted-proxy-addresses: ${TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES:127.0.0.1,::1}
+    authentication-rate-limit:
+      capacity: ${TEST_AGENT_LOCAL_CLIENT_AUTHENTICATION_RATE_LIMIT_CAPACITY:5}
+      window: ${TEST_AGENT_LOCAL_CLIENT_AUTHENTICATION_RATE_LIMIT_WINDOW:1m}
+    version-management:
+      download-base-url: ${TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL:}
+      signing-public-key-base64: ${TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64:}
+      catalog-path: ${TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH:catalog.json}
+      connect-timeout: ${TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CONNECT_TIMEOUT:10s}
+      request-timeout: ${TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_REQUEST_TIMEOUT:30s}
   memory:
     enabled: ${TEST_AGENT_MEMORY_ENABLED:false}
     service-url: ${TEST_AGENT_MEMORY_SERVICE_URL:http://127.0.0.1:18888}

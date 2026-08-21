@@ -30,6 +30,11 @@ public class MyBatisLocalClientCredentialRepository implements LocalClientCreden
     }
 
     @Override
+    public Optional<LocalClientCredential> findByUserIdForUpdate(UserId userId) {
+        return Optional.ofNullable(mapper.findCredentialByUserIdForUpdate(userId.value())).map(this::toDomain);
+    }
+
+    @Override
     public Optional<LocalClientCredential> findActiveByFingerprint(String fingerprint) {
         return Optional.ofNullable(mapper.findActiveCredentialByFingerprint(fingerprint)).map(this::toDomain);
     }
@@ -45,6 +50,7 @@ public class MyBatisLocalClientCredentialRepository implements LocalClientCreden
                 credential.status().name(),
                 credential.createdAt(),
                 credential.updatedAt(),
+                credential.revealedAt(),
                 credential.revokedAt()));
         if (updated != 1) {
             throw new IllegalStateException("local client credential upsert did not affect one row");
@@ -61,6 +67,7 @@ public class MyBatisLocalClientCredentialRepository implements LocalClientCreden
                 LocalClientCredentialStatus.valueOf(row.status()),
                 row.createdAt(),
                 row.updatedAt(),
+                row.revealedAt(),
                 row.revokedAt());
     }
 }

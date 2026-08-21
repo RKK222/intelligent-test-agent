@@ -29,6 +29,11 @@ public final class LocalClientInstanceResponses {
             Instant lastHeartbeatAt,
             Instant lastConnectedAt,
             Instant lastDisconnectedAt,
-            Map<String, Boolean> capabilities) {
+            Map<String, Boolean> capabilities,
+            boolean selfUpdateSupported,
+            String targetClientVersion,
+            String updateDirection,
+            String lastUpdateStatus,
+            Instant lastUpdateAt) {
     }
 }

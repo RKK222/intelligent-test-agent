@@ -38,7 +38,6 @@ server {
     ${TEST_AGENT_NGINX_ADDITIONAL_LISTEN_DIRECTIVES}
     ${TEST_AGENT_NGINX_TLS_DIRECTIVES}
     server_name _;
-    # 企业入口可能把外部端口映射到本机其它监听；相对 Location 由浏览器保留原始 host:port。
     absolute_redirect off;
     root ${TEST_AGENT_FRONTEND_ROOT};
     index index.html;
@@ -61,25 +60,37 @@ server {
         add_header X-Content-Type-Options nosniff always;
     }
 
-    # 页面只保留一个入口；macOS 下载 PKG，其余受支持桌面下载麒麟 ARM64 DEB。
+    # 网页统一入口只提供 dev 客户端核心支持的麒麟 ARM64 安装包。
     location = /downloads/local-opencode-client/installer {
-        if ($http_user_agent ~* "Macintosh|Mac OS X") { return 302 /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg; }
         return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
-    }
-
-    location = /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg {
-        alias /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg;
-        default_type application/vnd.apple.installer+xml;
-        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-macOS-arm64.pkg"' always;
-        add_header Cache-Control "no-store" always;
-        add_header X-Content-Type-Options nosniff always;
     }
 
     location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {
         alias /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
         default_type application/vnd.debian.binary-package;
-        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-Kylin-arm64.deb"' always;
         add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-Kylin-arm64.deb"' always;
+    }
+
+    location = /downloads/local-opencode-client/catalog.json {
+        alias /data/testagent/dist/local-opencode-client/catalog.json;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/catalog.json.sig {
+        alias /data/testagent/dist/local-opencode-client/catalog.json.sig;
+        default_type application/octet-stream;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location ~ "^/downloads/local-opencode-client/(test-agent-local-client_[0-9]{14}_arm64\.deb)$" {
+        alias /data/testagent/dist/local-opencode-client/$1;
+        default_type application/vnd.debian.binary-package;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
         add_header X-Content-Type-Options nosniff always;
     }
 
@@ -102,6 +113,7 @@ server {
         autoindex off;
         disable_symlinks on;
         if ($uri ~ "(^|/)\\.") { return 404; }
+        limit_except GET HEAD { deny all; }
         default_type application/octet-stream;
         expires 1y;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
@@ -222,7 +234,6 @@ server {
 server {
     listen ${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_PORT};
     server_name _;
-    # 下载监听也只返回相对跳转，避免端口映射或反向代理后 Location 丢失外部端口。
     absolute_redirect off;
 
     location = /downloads/local-opencode-client {
@@ -236,24 +247,37 @@ server {
         add_header X-Content-Type-Options nosniff always;
     }
 
+    # 独立下载端口与同源入口保持相同的麒麟 ARM64 下载行为。
     location = /downloads/local-opencode-client/installer {
-        if ($http_user_agent ~* "Macintosh|Mac OS X") { return 302 /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg; }
         return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
-    }
-
-    location = /downloads/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg {
-        alias /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-macOS-arm64.pkg;
-        default_type application/vnd.apple.installer+xml;
-        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-macOS-arm64.pkg"' always;
-        add_header Cache-Control "no-store" always;
-        add_header X-Content-Type-Options nosniff always;
     }
 
     location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {
         alias /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
         default_type application/vnd.debian.binary-package;
-        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-Kylin-arm64.deb"' always;
         add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Content-Disposition 'attachment; filename="TestAgent-Local-Client-Kylin-arm64.deb"' always;
+    }
+
+    location = /downloads/local-opencode-client/catalog.json {
+        alias /data/testagent/dist/local-opencode-client/catalog.json;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location = /downloads/local-opencode-client/catalog.json.sig {
+        alias /data/testagent/dist/local-opencode-client/catalog.json.sig;
+        default_type application/octet-stream;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
+    location ~ "^/downloads/local-opencode-client/(test-agent-local-client_[0-9]{14}_arm64\.deb)$" {
+        alias /data/testagent/dist/local-opencode-client/$1;
+        default_type application/vnd.debian.binary-package;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
         add_header X-Content-Type-Options nosniff always;
     }
 
@@ -276,6 +300,7 @@ server {
         autoindex off;
         disable_symlinks on;
         if ($uri ~ "(^|/)\\.") { return 404; }
+        limit_except GET HEAD { deny all; }
         default_type application/octet-stream;
         expires 1y;
         add_header Cache-Control "public, max-age=31536000, immutable" always;

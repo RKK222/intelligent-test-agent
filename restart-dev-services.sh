@@ -106,8 +106,8 @@ Options:
 
 Environment overrides:
   TEST_AGENT_START_OPENCODE_MANAGER  auto|true|false. Set false to skip the Go manager.
-  TEST_AGENT_OPENCODE_BIN            Explicit OpenCode binary. When unset on macOS arm64, prefer the
-                                     packaged stable local-client OpenCode 1.18.4 artifact before HOME/PATH.
+  TEST_AGENT_OPENCODE_BIN            Explicit OpenCode binary. When unset, use HOME/PATH; the Kylin ARM64
+                                     local-client distribution is not a macOS development runtime source.
   TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY  auto|true|false. On macOS, auto reuses the static system HTTPS proxy for OpenCode only.
   TEST_AGENT_OPENCODE_MANAGER_TOKEN  Shared secret between manager and backend. Defaults to local-manager-token.
   TEST_AGENT_ROOT                    Project root used by common parameter path expansion.
@@ -572,55 +572,8 @@ should_start_opencode() {
 }
 
 bundled_local_opencode_bin() {
-  [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]] || return 0
-  local release_root manifest relative_archive expected_sha archive cache_parent cached stage candidate version actual_sha
-  release_root="${ROOT_DIR}/deploy/internal/dist/local-opencode-client"
-  manifest="${release_root}/stable/manifest.json"
-  [[ -f "${manifest}" ]] || return 0
-  relative_archive="$(sed -n 's/.*"darwinArm64OpencodePath": "\([^"]*\)".*/\1/p' "${manifest}" | head -1)"
-  expected_sha="$(sed -n 's/.*"darwinArm64OpencodeSha256": "\([^"]*\)".*/\1/p' "${manifest}" | head -1)"
-  if [[ -z "${relative_archive}" || -z "${expected_sha}" ]]; then
-    echo "Stable local-client manifest is missing the macOS arm64 OpenCode artifact metadata: ${manifest}" >&2
-    return 1
-  fi
-  archive="${release_root}/${relative_archive}"
-  if [[ ! -f "${archive}" ]]; then
-    echo "Stable local-client OpenCode artifact is missing: ${archive}" >&2
-    return 1
-  fi
-  cache_parent="${ROOT_DIR}/.tmp/dev-opencode/${expected_sha}"
-  cached="${cache_parent}/opencode/bin/opencode"
-  if [[ -x "${cached}" ]]; then
-    echo "${cached}"
-    return 0
-  fi
-  actual_sha="$(shasum -a 256 "${archive}" | awk '{print $1}')"
-  if [[ "${actual_sha}" != "${expected_sha}" ]]; then
-    echo "Stable local-client OpenCode artifact checksum mismatch: ${archive}" >&2
-    return 1
-  fi
-  mkdir -p "${cache_parent}"
-  stage="$(mktemp -d "${cache_parent}/extract.XXXXXX")"
-  if ! tar -xzf "${archive}" -C "${stage}"; then
-    rm -rf "${stage}"
-    echo "Failed to extract stable local-client OpenCode artifact: ${archive}" >&2
-    return 1
-  fi
-  candidate="${stage}/opencode/bin/opencode"
-  version=""
-  if [[ -x "${candidate}" ]]; then
-    version="$("${candidate}" --version 2>/dev/null || true)"
-  fi
-  if [[ "${version}" != "1.18.4" ]]; then
-    rm -rf "${stage}"
-    echo "Packaged local OpenCode version must be 1.18.4, got ${version:-unknown}." >&2
-    return 1
-  fi
-  if [[ ! -e "${cache_parent}/opencode" ]]; then
-    mv "${stage}/opencode" "${cache_parent}/opencode"
-  fi
-  rm -rf "${stage}"
-  echo "${cached}"
+  # 本地客户端分发仅面向麒麟 ARM64，不再作为 macOS 开发环境的 OpenCode 来源。
+  return 0
 }
 
 opencode_bin() {

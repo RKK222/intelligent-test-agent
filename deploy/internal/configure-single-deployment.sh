@@ -26,7 +26,7 @@ Create the complete configuration files for the current single-backend deploymen
 Backend role (run on 122.233.30.114):
   - rewrites /data/testagent/config/backend.env and docker.env from release templates;
   - preserves the existing database password, Redis password, API token, manager token,
-    and internal proxy key without printing them;
+    local-client signing public key and internal proxy key without printing them;
   - removes duplicate and obsolete keys while keeping the current fixed IPs and paths.
 
 Frontend role (run on 122.233.30.2):
@@ -198,6 +198,7 @@ render_backend_template() {
   local analytics_clickhouse_password="${12}"
   local memory_service_api_key="${13}"
   local memory_model_gateway_hmac_secret="${14}"
+  local local_client_signing_public_key_base64="${15}"
   local line key value
 
   : >"${output}"
@@ -213,6 +214,7 @@ render_backend_template() {
       TEST_AGENT_REDIS_PASSWORD) value="${redis_password}" ;;
       TEST_AGENT_API_TOKEN) value="${api_token}" ;;
       TEST_AGENT_OPENCODE_MANAGER_TOKEN) value="${manager_token}" ;;
+      TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64) value="${local_client_signing_public_key_base64}" ;;
       TEST_AGENT_INTERNAL_PROXY_API_KEY) value="${proxy_key}" ;;
       TEST_AGENT_LOBEHUB_HMAC_SECRET) value="${lobehub_hmac_secret}" ;;
       TEST_AGENT_ANALYTICS_CLICKHOUSE_URL) value="${analytics_clickhouse_url}" ;;
@@ -269,6 +271,7 @@ configure_backend() {
   local xxl_mysql_password xxl_access_token lobehub_hmac_secret
   local analytics_clickhouse_url analytics_clickhouse_username analytics_clickhouse_password
   local memory_service_api_key memory_model_gateway_hmac_secret
+  local local_client_signing_public_key_base64
 
   require_file "${BACKEND_TEMPLATE}"
   require_file "${DOCKER_TEMPLATE}"
@@ -290,6 +293,7 @@ configure_backend() {
   analytics_clickhouse_password="$(env_value "${BACKEND_ENV}" TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD)"
   memory_service_api_key="$(env_value "${BACKEND_ENV}" TEST_AGENT_MEMORY_SERVICE_API_KEY)"
   memory_model_gateway_hmac_secret="$(env_value "${BACKEND_ENV}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET)"
+  local_client_signing_public_key_base64="$(env_value "${BACKEND_ENV}" TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64)"
   analytics_clickhouse_username="${analytics_clickhouse_username:-testagent_analytics}"
 
   [[ -n "${db_password}" ]] || {
@@ -307,6 +311,10 @@ configure_backend() {
   manager_token="${backend_manager_token:-${docker_manager_token}}"
   [[ -n "${proxy_key}" ]] || {
     echo "TEST_AGENT_INTERNAL_PROXY_API_KEY is missing from ${BACKEND_ENV}" >&2
+    exit 1
+  }
+  [[ -n "${local_client_signing_public_key_base64}" ]] || {
+    echo "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64 is missing from ${BACKEND_ENV}" >&2
     exit 1
   }
   [[ -n "${xxl_mysql_password}" ]] || {
@@ -340,7 +348,8 @@ configure_backend() {
   render_backend_template "${backend_tmp}" "${db_password}" "${redis_password}" "${api_token}" "${manager_token}" \
     "${proxy_key}" "${xxl_mysql_password}" "${xxl_access_token}" "${lobehub_hmac_secret}" \
     "${analytics_clickhouse_url}" "${analytics_clickhouse_username}" "${analytics_clickhouse_password}" \
-    "${memory_service_api_key}" "${memory_model_gateway_hmac_secret}"
+    "${memory_service_api_key}" "${memory_model_gateway_hmac_secret}" \
+    "${local_client_signing_public_key_base64}"
   render_docker_template "${docker_tmp}" "${manager_token}"
 
   if grep -q 'REPLACE_' "${backend_tmp}" "${docker_tmp}"; then

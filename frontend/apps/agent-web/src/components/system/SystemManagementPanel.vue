@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, Settings2, SlidersHorizontal, UsersRound } from "lucide-vue-next";
+import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, RefreshCw, Settings2, SlidersHorizontal, UsersRound } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
 import ScheduledTaskManagementPanel from "./ScheduledTaskManagementPanel.vue";
@@ -13,6 +13,7 @@ import SupportAccessPanel from "./SupportAccessPanel.vue";
 import MemoryAdminPanel from "./MemoryAdminPanel.vue";
 import ApiKeyManagementPanel from "./ApiKeyManagementPanel.vue";
 import SettingsUserManagementPanel from "../settings/SettingsUserManagementPanel.vue";
+import LocalClientVersionManagementPanel from "./LocalClientVersionManagementPanel.vue";
 import type { SystemMenuKey } from "../workspace-page-tabs";
 
 const props = defineProps<{
@@ -37,6 +38,7 @@ const items: SystemMenuItem[] = [
   { key: "scheduler", label: "定时任务管理", icon: CalendarClock },
   { key: "runtime", label: "运行管理", icon: Activity },
   { key: "users", label: "用户管理", icon: UsersRound },
+  { key: "localClientVersions", label: "本地客户端版本", icon: RefreshCw },
   { key: "params", label: "通用参数管理", icon: SlidersHorizontal },
   { key: "apiKeys", label: "API Key 管理", icon: Fingerprint },
   { key: "internalModels", label: "内部模型供应商", icon: Network },
@@ -94,6 +96,11 @@ function selectMenu(key: SystemMenuKey) {
         <SettingsUserManagementPanel
           v-else-if="props.activeKey === 'users'"
           :current-user="currentUser"
+        />
+        <LocalClientVersionManagementPanel
+          v-else-if="props.activeKey === 'localClientVersions'"
+          :current-user="currentUser"
+          :page-active="props.pageActive"
         />
         <GeneralParamManagementPanel v-else-if="props.activeKey === 'params'" :current-user="currentUser" />
         <ApiKeyManagementPanel

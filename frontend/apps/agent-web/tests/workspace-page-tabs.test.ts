@@ -144,6 +144,10 @@ describe("workspace page tabs", () => {
       id: "system:runtime",
       canonicalize: false
     });
+    expect(parseWorkspacePageRoute("system", "local-client-versions", ["SUPER_ADMIN"])).toEqual({
+      id: "system:localClientVersions",
+      canonicalize: false
+    });
     expect(parseWorkspacePageRoute("system", "runtime", ["APP_ADMIN"])).toEqual({
       id: "system:config",
       canonicalize: true
@@ -165,6 +169,10 @@ describe("workspace page tabs", () => {
     expect(workspacePageRoute("system:apiKeys", ["SUPER_ADMIN"])).toEqual({
       name: "system",
       query: { section: "api-keys" }
+    });
+    expect(workspacePageRoute("system:localClientVersions", ["SUPER_ADMIN"])).toEqual({
+      name: "system",
+      query: { section: "local-client-versions" }
     });
     expect(workspacePageRoute("memories", ["USER"])).toEqual({ name: "memories" });
   });

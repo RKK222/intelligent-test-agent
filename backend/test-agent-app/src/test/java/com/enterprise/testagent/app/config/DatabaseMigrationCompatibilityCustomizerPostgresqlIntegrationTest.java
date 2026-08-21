@@ -30,6 +30,7 @@ import org.testcontainers.utility.DockerImageName;
 class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
 
     private static final String MAIN_LOCATION = "classpath:db/migration";
+    private static final String POSTGRESQL_LOCATION = "classpath:db/migration-postgresql";
     private static final String COMPATIBILITY_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.LEGACY_TOOLBOX_MIGRATION_LOCATION;
     private static final String IDEMPOTENT_COMPATIBILITY_LOCATION =
@@ -152,6 +153,19 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static final String LOCAL_CLIENT_ROLLOUT_VERSION = "20260817193414";
     private static final String LOCAL_CLIENT_RUNTIME_APPLIED_LOCATION =
             DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_RUNTIME_APPLIED_COMPATIBILITY_LOCATION;
+    private static final String LOCAL_CLIENT_VERSION_MANAGEMENT_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_VERSION_MANAGEMENT_MIGRATION_VERSION;
+    private static final String LOCAL_CLIENT_CREDENTIAL_REVEAL_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_CREDENTIAL_REVEAL_MIGRATION_VERSION;
+    private static final String LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_MIGRATION_VERSION;
+    private static final String LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_COMPATIBILITY_LOCATION;
+    private static final String LOCAL_CLIENT_VERSION_MANAGEMENT_MAIN_RESOURCE =
+            "db/migration/V20260820182024__local_client_releases_create_version_management.sql";
+    private static final String LOCAL_CLIENT_CREDENTIAL_REVEAL_MAIN_RESOURCE =
+            "db/migration/V20260820202529__local_client_credentials_add_revealed_at.sql";
+    private static final String AUTOMATION_REFERENCE_RELEASE_MAX_VERSION = "20260821113000";
     private static final String ANALYTICS_OUTBOX_VERSION =
             DatabaseMigrationCompatibilityCustomizer.ANALYTICS_OUTBOX_MIGRATION_VERSION;
     private static final String ANALYTICS_TRIGGER_VERSION =
@@ -869,6 +883,58 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     }
 
     @Test
+    void automationReleaseHistoryAppliesLocalClientVersionManagementThroughForwardMigration() {
+        DataSource dataSource = dataSource("local_client_version_management_after_automation");
+        // 复现当前本地库：release 自动化配置已执行，但 dev 的两个较低客户端版本 migration 尚未进入历史。
+        migrateWithoutResourceTo(
+                dataSource,
+                AUTOMATION_REFERENCE_RELEASE_MAX_VERSION,
+                new String[] {MAIN_LOCATION, POSTGRESQL_LOCATION},
+                LOCAL_CLIENT_VERSION_MANAGEMENT_MAIN_RESOURCE,
+                LOCAL_CLIENT_CREDENTIAL_REVEAL_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, LOCAL_CLIENT_RUNTIME_VERSION)).isTrue();
+        assertThat(applied(dataSource, LOCAL_CLIENT_VERSION_MANAGEMENT_VERSION)).isFalse();
+        assertThat(applied(dataSource, LOCAL_CLIENT_CREDENTIAL_REVEAL_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_VERSION_MANAGEMENT_VERSION)).isFalse();
+            assertThat(applied(dataSource, LOCAL_CLIENT_CREDENTIAL_REVEAL_VERSION)).isFalse();
+            assertThat(applied(dataSource, LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_VERSION)).isTrue();
+            assertLocalClientVersionManagementSchema(dataSource);
+        });
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_LOCATION);
+            assertThat(applied(dataSource, LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_VERSION)).isTrue();
+            assertLocalClientVersionManagementSchema(dataSource);
+        });
+    }
+
+    @Test
+    void unknownLocalClientVersionManagementForwardChecksumStillFailsClosed() {
+        DataSource dataSource = dataSource("local_client_version_management_unknown_checksum");
+        migrateWithoutResourceTo(
+                dataSource,
+                AUTOMATION_REFERENCE_RELEASE_MAX_VERSION,
+                new String[] {MAIN_LOCATION, POSTGRESQL_LOCATION},
+                LOCAL_CLIENT_VERSION_MANAGEMENT_MAIN_RESOURCE,
+                LOCAL_CLIENT_CREDENTIAL_REVEAL_MAIN_RESOURCE);
+        runBootFlyway(dataSource, flyway -> assertThat(
+                        applied(dataSource, LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_VERSION))
+                .isTrue());
+        overwriteAppliedChecksum(
+                dataSource, LOCAL_CLIENT_VERSION_MANAGEMENT_FORWARD_VERSION, 987654321);
+
+        bootFlywayRunner(dataSource).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).hasStackTraceContaining("checksum");
+        });
+    }
+
+    @Test
     void scmReleaseHistoryAppliesAnalyticsPipelineThroughForwardMigrations() {
         DataSource dataSource = dataSource("analytics_pipeline_after_scm_release");
         prepareScmReleaseHistory(dataSource);
@@ -1350,7 +1416,9 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                         from information_schema.columns
                         where table_schema = current_schema()
                           and (
-                              (table_name = 'sessions'
+                              (table_name = 'local_client_credentials'
+                                  and column_name = 'revealed_at')
+                              or (table_name = 'sessions'
                                   and column_name in ('runtime_kind', 'local_client_instance_id'))
                               or (table_name = 'runs'
                                   and column_name in ('target_runtime_kind', 'target_local_client_instance_id'))
@@ -1364,8 +1432,50 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .query(Long.class)
                 .single();
         assertThat(tableCount).isEqualTo(4L);
-        assertThat(runtimeColumnCount).isEqualTo(6L);
+        assertThat(runtimeColumnCount).isEqualTo(7L);
         assertThat(rolloutUserCount).isZero();
+    }
+
+    private static void assertLocalClientVersionManagementSchema(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'local_client_releases',
+                              'local_client_release_artifacts',
+                              'local_client_global_version_policy',
+                              'local_client_user_version_policies',
+                              'local_client_version_policy_audits',
+                              'local_client_update_rollouts',
+                              'local_client_update_attempts'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long columnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and (
+                              (table_name = 'local_client_instances'
+                                  and column_name in (
+                                      'launcher_version',
+                                      'self_update_capabilities',
+                                      'self_update_supported',
+                                      'last_update_status',
+                                      'last_update_target_version',
+                                      'last_update_at'
+                                  ))
+                              or (table_name = 'local_client_credentials'
+                                  and column_name = 'revealed_at')
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(7L);
+        assertThat(columnCount).isEqualTo(7L);
     }
 
     private static long qaMemorySchemaTableCount(DataSource dataSource) {

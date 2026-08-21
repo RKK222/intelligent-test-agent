@@ -197,7 +197,7 @@ powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile guo
 
 脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；未显式设置 `TEST_AGENT_BASE_URL` 时，会使用自动探测到的后端内网地址（例如 `http://192.168.100.115:8080`），避免局域网访问前端时浏览器仍请求 `127.0.0.1`。需要指定固定入口时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。
 
-macOS arm64 本地启动在未设置 `TEST_AGENT_OPENCODE_BIN` 时，会优先读取企业交付目录 `deploy/internal/dist/local-opencode-client/stable/manifest.json`，校验其中的 Darwin 归档 SHA，并把随包 OpenCode `1.18.4` 解压到 `.tmp/dev-opencode/<sha>/` 后交给 manager；因此不会再被 `$HOME/.opencode/bin` 中较新的个人版本覆盖。交付物尚未生成或需要显式调试其它二进制时，仍可在当前使用的 dotenv（默认 `.env.test`，或显式 `--env-file` 指定的文件）外通过环境变量指定 `TEST_AGENT_OPENCODE_BIN`，例如：
+macOS arm64 本地启动不复用麒麟客户端分发清单；未设置 `TEST_AGENT_OPENCODE_BIN` 时使用 `$HOME/.opencode/bin/opencode` 或 `PATH` 中的二进制。需要固定调试版本时，应在当前使用的 dotenv（默认 `.env.test`，或显式 `--env-file` 指定的文件）外通过环境变量指定 `TEST_AGENT_OPENCODE_BIN`，例如：
 
 ```bash
 TEST_AGENT_OPENCODE_BIN=${HOME}/.opencode/bin/opencode
@@ -286,8 +286,9 @@ tools/dev-phase11-real-e2e.sh --start-services
 个人设置页提供 client key 创建/复制/轮换/撤销、实例状态与生命周期控制、本地只读目录选择和 Workspace
 注册。明文 key 只在 API 方法局部变量中直接写剪贴板，不渲染、不进入 TanStack Query cache 或浏览器
 存储。头像菜单合并服务端和本地 OpenCode 实例，显示平台、上报/观察地址、端口、版本、状态和最后心跳。
-实例列表下方的“下载本地客户端”经 `/downloads/local-opencode-client/installer` 按浏览器系统下载 macOS ARM64
-PKG 或麒麟 ARM64 DEB，用户双击后进入系统安装器；客户端向平台注册后，该位置改为显示本地 OpenCode
+实例列表下方的“下载本地客户端”经 `/downloads/local-opencode-client/installer` 下载麒麟 Linux ARM64 DEB；
+管理员安装后，普通用户在终端执行 `test-agent-local-client enroll` 完成接入。macOS、Windows 与非 glibc
+系统不在本地客户端支持范围；客户端向平台注册后，该位置改为显示本地 OpenCode
 健康、异常或离线状态。生产由 Nginx 同源下载路由提供，dev server 只读暴露
 `deploy/internal/dist/local-opencode-client/`，也可用
 `TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录，不会把 JRE/OpenCode 大制品打入前端 bundle。

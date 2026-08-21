@@ -7,6 +7,9 @@
 ## 主要程序清单
 
 - Agent/Skill Hub client 支持 `source=PLATFORM|SKILLHUB|ALL` 和外部正文 `materialize`；文件正文仍走只读 Hub WebSocket，引用写入仍走目标工作区文件 RPC。
+- `index.ts` 的本地客户端 API 使用固定 `localClientBase` 与 `localClientVersionManagementBase`：版本管理方法仅供
+  超级管理员页面调用，普通用户更新只传通知 ID 与原通知解析的 14 位目标版本；不接受浏览器提供下载 URL、策略
+  revision 或实例 owner。`instances/me` 新增字段均为可选，以兼容旧节点。
 
 - `createRunResend(agentId, sessionId, payload)`：调用统一撤销重发 API，传递最后远端消息边界、可选源 Run、上下文令牌、客户端幂等键和可选修改文本，返回预留替代 Run 及 additive `resend` 元数据。
 - `listExternalApiScopes/listExternalApiCredentials/create/update/reveal/rotate/deleteExternalApiCredential`：超级管理员 API Key 管理 client；`rawExchangeObserver` 对 `apiKey/ciphertext/encryptedApiKey` 强制脱敏，调用方不得缓存一次性明文响应。

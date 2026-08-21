@@ -802,7 +802,7 @@ data: {"eventId":"evt_live_...","runId":"run_...","seq":0,"type":"message.part.d
 - `message.part.updated` 本身仍是 transient；当其中的 `write`、`edit`、`apply_patch` tool part 进入 `completed` 状态时，后端会额外派生 durable `diff.proposed`。payload 只保留 `source=tool`、`tool`、`messageID/messageId`、`partID/partId` 和 `files[]`，不会持久化原始 `rawPayload`、完整 `input/output` 或 tool `metadata`。
 - Skill 调用不新增 `skill.*` wire name；opencode 中的 Skill 仍作为 tool 上报，前端仅在 `tool.started`、`tool.finished`、`message.part.updated`、`message.part.delta` 中根据 `payload.tool`、`payload.toolName` 或 ToolPart `toolName=skill` 分类为 Skill 调用展示。
 
-Phase 08 后，opencode raw event 的终态映射为：
+当前 opencode raw event 的终态映射为：
 
 - `session.next.step.ended` -> `opencode.event.unknown`，不再派生 `run.succeeded`。
 - root `session.status` 且 `payload.status.type=idle` -> `session.status + run.succeeded`，应用服务同时把 Run 状态更新为 `SUCCEEDED`；child idle 只保留 `session.status`。
@@ -978,9 +978,11 @@ manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字�
 }
 ```
 
-`REGISTER` 是唯一不带 generation 的正常帧，payload 带 client key、稳定实例 ID、名称、平台、架构、客户端
-版本、OpenCode 版本和展示地址。后台验证用户 key 后返回 `REGISTERED`，并保存持有
-`backendProcessId + generation`。同实例后认证连接立即替代旧连接。
+`REGISTER` 是唯一不带 generation 的正常帧。其旧八字段为 `clientKey`、`clientInstanceId`、`clientName`、
+`platform`、`architecture`、`clientVersion`、`opencodeVersion`、`reportedAddresses`；新版在其后追加可选
+`unifiedAuthId`、`launcherVersion`、`capabilities`。只有恰好旧八字段且 `clientVersion=0.1.0` 的客户端允许省略
+`unifiedAuthId`；任何新增字段的新协议注册缺失或空白统一认证号都认证失败。后台验证用户 key 后返回 `REGISTERED`，
+并保存持有 `backendProcessId + generation`。同实例后认证连接立即替代旧连接。
 
 | 帧 | 方向 | 说明 |
 |---|---|---|
@@ -992,9 +994,29 @@ manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字�
 | `FILE_REQUEST` / `FILE_RESPONSE` | server→client→server | directory picker、根注册和完整 Workspace 文件 RPC。 |
 | `BINARY_CHUNK` | 双向预留/传输 | Base64 数据的原始分片上限为 256 KiB。 |
 | `MODEL_GRANT` | server→client | 原子替换短 TTL 模型 grant，不下发平台模型 key。 |
+| `VERSION_CHECK` | client→server | 客户端声明版本与 capabilities。 |
+| `VERSION_POLICY` | server→client | 平台返回有效目标、方向和策略 revision。 |
+| `UPDATE_COMMAND` | server→client | 不带下载 URL 的幂等准备命令。 |
+| `UPDATE_PREPARED` | client→server | 客户端完成下载、验签和候选自检后的回执。 |
+| `UPDATE_APPLY` | server→client | 服务端通过再次策略复核后发出的最终切换许可。 |
+| `UPDATE_CANCEL` | server→client | 服务端撤销已授权的更新命令。 |
+| `UPDATE_STATUS` | client→server | 客户端上报无敏感状态和错误码。 |
+| `UPDATE_STATUS_ACK` | server→client | 服务端完成终态幂等持久化后确认原命令坐标；客户端据此删除唯一 result marker。 |
 | `CANCEL` | 双向 | 按 targetRequestId 取消 HTTP/SSE、文件或生命周期请求。 |
 | `ERROR` | 双向 | 稳定 code、安全 message、retryable 和无敏感 details。 |
 
 每帧上限 2 MiB，requestId/traceId 最长 128 字符。认证后缺 generation、generation 非正数、版本不匹配、
 重复 requestId、超大分片或未知帧都失败关闭。断连时客户端取消全部未完成任务、清理临时上传并清空模型
 grant；服务端完成的 Run 不自动切换到服务端实例或其它本地实例。
+
+只有 `REGISTER.capabilities` 声明 `SELF_UPDATE_V1` 且携带 launcher 版本的客户端才可双向使用版本帧；服务端拒绝
+旧客户端发送 `VERSION_CHECK/UPDATE_PREPARED/UPDATE_STATUS`，也不向其发送策略、命令、应用或取消帧。所有 `UPDATE_*` 均以
+`commandId + clientInstanceId` 幂等，且必须匹配同一 connection generation、policy revision、目标版本和方向；
+重连或换代后不得复用旧授权。帧不携带 Client key、凭据、下载地址、签名或完整错误。客户端在 `PREPARED` 后，
+服务端再次校验实例所有权、在线 generation 和有效策略，才会发送 `UPDATE_APPLY`。成功、失败、取消和启动器
+自动回切用 `UPDATE_STATUS` 回报；客户端在 WebSocket 写入完成后仍保留 result marker，断线重连会继续重报，只有收到
+与 `commandId + clientInstanceId + 原 connectionGeneration + status` 完全匹配的 `UPDATE_STATUS_ACK` 才清除。
+若平台先将 attempt 记为 `FAILED/DELIVERY_DEADLINE_EXCEEDED`，迟到的物理 `SUCCEEDED` 或 `AUTO_ROLLED_BACK`
+可通过条件 CAS 纠正 attempt、实例最近状态、通知与 rollout 汇总，随后才返回同终态 ACK；其它已持久化终态冲突
+返回协议冲突且不发 ACK，客户端必须保留 marker。
+网络中断或凭据失效不得上报为制品验证失败。

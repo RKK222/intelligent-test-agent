@@ -8,6 +8,18 @@
 
 ## 主要职责
 
+- `LocalClientVersionManagementController` 的基址为 `/api/internal/platform/local-opencode-client/version-management`，
+  仅暴露受签名 release 同步/查询、全局与用户策略、rollout 与 attempt 查询；每个方法都实时调用
+  `AuthWebSupport.requireRole(..., SUPER_ADMIN)`。`LocalClientUpdateController` 是普通用户的独立入口，只接受
+  `notificationId/expectedTargetVersion` 和 path 中的实例 ID，业务层再校验通知、owner、在线 generation 与策略；
+  不接收制品 URL、签名、策略 revision 或用户 ID。
+- `LocalClientAuthenticationRateLimiter` 只用于 WSS 首帧注册认证。它按可信代理解析后的来源 IP，在当前 Java
+  内存中执行默认每分钟 5 次固定窗口；成功认证清除该窗口。多 Java 部署不会共享该额度，生产级全局限流必须由
+  Redis 或可信网关补齐。所有认证失败保持同一安全消息，不泄露 Key、统一认证号或账号状态。
+- `LocalClientConnectionWebSocketHandler` 仅允许持久化注册能力为 `SELF_UPDATE_V1` 的连接收发版本帧。终态
+  `UPDATE_STATUS` 由协调器完成关系库幂等提交后才返回 `UPDATE_STATUS_ACK`；ACK 绑定原命令的实例、generation
+  和数据库实际终态，不能由一次 WebSocket 写入代替持久化确认；冲突终态返回错误且不发 ACK。
+
 - 当前用户 OpenCode 受管启动/重启会在公共启动程序中自动选择同服有效公共个人配置；初始化首次创建 `public-{userId}` worktree 后也会自动加载。API 只返回既有 `publicWorktreePreparation` 结果，不新增轮询接口；准备或加载异常不回滚已健康进程。
 - 暴露 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
 - 旧 runtime/workspace `/api/...` 兼容 URL 由 `LegacyApiGoneWebFilter` 在进入 Controller 前统一返回 `410 API_GONE`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。

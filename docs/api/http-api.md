@@ -1106,7 +1106,7 @@ manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超�
 
 ## 限流
 
-Phase 02/03 不新增对外 HTTP API，也不新增 Controller。新增的 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 字段目前只作为后端内部领域和持久化边界使用，Phase 04 暴露 Runtime API 时再在本文件固化请求/响应 DTO。
+早期仅限后端内部的 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 字段现在仍只作为领域和持久化边界使用；对外 HTTP 请求/响应 DTO 以本文件当前已固化的运行时 API 契约为准。
 
 问题排查入口不接收部署侧共享暗号，所以没有“暗号错误 N 次锁定”之类的独立限流。以下接口继续进入平台统一限流；生产网关应按当前登录用户和 `/system-management/support-access/**` 接口组实施分布式频率/并发限制，限流键不得包含平台 Token 或 `X-Support-Access-Grant` 明文。
 
@@ -1117,9 +1117,9 @@ Phase 02/03 不新增对外 HTTP API，也不新增 Controller。新增的 Works
 - opencode 错误已在 `test-agent-opencode-client` 映射为平台 `OPENCODE_BAD_GATEWAY`、`OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`，对外仍使用统一错误响应。
 - 平台 Session 与远端 agent Session 是不同概念；`agent_session_bindings` 是新链路主映射，`opencodeSessionId` 和 `opencodeExecutionNodeId` 只作为后端内部兼容字段保存，不进入 HTTP DTO。
 
-## Phase 04 Runtime API
+## Runtime API
 
-Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agent-app` 装配为单一可部署服务包。Controller 只做协议转换、参数校验和统一响应封装，业务编排进入对应业务模块；Controller 不直接访问 Repository，也不直接调用 generated SDK。
+`test-agent-api` 定义可联调 HTTP API，并由 `test-agent-app` 装配为单一可部署服务包。Controller 只做协议转换、参数校验和统一响应封装，业务编排进入对应业务模块；Controller 不直接访问 Repository，也不直接调用 generated SDK。
 
 ### 鉴权、限流和 CORS
 
@@ -2099,7 +2099,7 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 
 #### 工作台通用通知中心 API
 
-通知中心只接受当前登录用户的 Bearer Token，接收人从 `AuthPrincipal` 取得，客户端不能查询或修改其他用户通知。通知类型包括会话分享，以及 Agent 配置 dispose 的 `AGENT_CONFIG_DISPOSE_PENDING/SUCCEEDED/FAILED/SUPERSEDED`。动作只允许受控枚举 `SESSION_SHARE/NONE/RESTART_OWN_PROCESS`：分享目标保存 `shareId`，dispose 目标只保存 `rolloutId`，响应不提供任意 URL、去重键或数据库行 ID。前端必须同时校验类型与动作组合，未知组合失败关闭。
+通知中心只接受当前登录用户的 Bearer Token，接收人从 `AuthPrincipal` 取得，客户端不能查询或修改其他用户通知。通知类型包括会话分享、Agent 配置 dispose 的 `AGENT_CONFIG_DISPOSE_PENDING/SUCCEEDED/FAILED/SUPERSEDED`，以及 `LOCAL_CLIENT_UPDATE_AVAILABLE`。动作只允许受控枚举 `SESSION_SHARE/NONE/RESTART_OWN_PROCESS/LOCAL_CLIENT_UPDATE`：分享目标保存 `shareId`，dispose 目标只保存 `rolloutId`，本地客户端更新目标只保存 `clientInstanceId`；响应不提供任意 URL、去重键或数据库行 ID。前端必须同时校验类型与动作组合，未知组合失败关闭。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -2158,6 +2158,58 @@ X-Test-Agent-Session-Share: shr_<64 位十六进制>
 ```
 
 不存在或不属于当前接收人的通知统一返回 `404 NOT_FOUND`，不得泄露其他用户通知是否存在。重复已读仍返回成功，不重复产生变化；未读的 `SESSION_SHARE` 通知调用通用已读入口返回 `400 VALIDATION_ERROR`，防止绕过分享访问成功事实。
+
+本地客户端更新通知以 `实例 + 目标版本 + 策略修订` 去重。页面只能从通知正文中解析唯一的 14 位目标版本，不能以重新查询到的策略替换该值；更新入口见下节。策略满足、实例离线、旧通知或策略变化时，服务端使通知失效。
+
+#### 本地客户端版本管理与用户更新 API
+
+管理基址为 `/api/internal/platform/local-opencode-client/version-management`。以下每次请求均实时校验
+`SUPER_ADMIN`，不能依赖前端菜单或先前登录快照。除另有说明外，成功 `data` 使用下列精确 DTO 字段：
+
+- `SyncView(synced, unchanged, discovered)`。
+- `ArtifactView(kind, url, size, sha256)`。
+- `ReleaseView(version, platform, architecture, launcherVersionMin, launcherVersionMax, protocolVersion, manifestSha256, compatible, publishedAt, syncedAt, artifacts)`，其中 `artifacts` 为 `ArtifactView[]`。
+- `GlobalPolicyView(targetVersion, revision, updatedBy, updatedAt)`。
+- `UserPolicyView(userId, targetVersion, revision, updatedBy, updatedAt)`。
+- `RolloutView(rolloutId, scope, requestedUserId, status, createdBy, createdAt, completedAt, attemptCount)`。
+- `AttemptView(commandId, rolloutId, clientInstanceId, userId, connectionGeneration, policyRevision, currentVersion, targetVersion, direction, status, releaseDigest, errorCode, createdAt, updatedAt, completedAt)`。
+
+| 方法 | 路径 | 精确请求 body | 成功 `data` |
+|---|---|---|---|
+| `POST` | `/releases/sync` | 无 body | `SyncView`。 |
+| `GET` | `/releases` | 无 body | `ReleaseView[]`。 |
+| `GET` | `/global-policy` | 无 body | `GlobalPolicyView`。未设置时其 `targetVersion/updatedBy/updatedAt` 为 `null`、`revision=0`。 |
+| `PUT` | `/global-policy` | `SetTargetVersionRequest(targetVersion)` | `GlobalPolicyView`。 |
+| `GET` | `/user-policies` | 无 body | `UserPolicyView[]`；已清除覆盖的 tombstone 不在列表中。 |
+| `PUT` | `/user-policies/{userId}` | `SetTargetVersionRequest(targetVersion)` | `UserPolicyView`。 |
+| `DELETE` | `/user-policies/{userId}` | 无 body | `UserPolicyView`，`targetVersion=null` 表示清除覆盖的修订 tombstone。 |
+| `POST` | `/rollouts` | `CreateRolloutRequest(scope, userId)`；`scope=ALL_ONLINE` 时 `userId` 不参与选择，`scope=USER` 时 `userId` 必填。 | `RolloutView`，创建响应的 `attemptCount` 为本次冻结的实例数。 |
+| `GET` | `/rollouts` | 无 body | `RolloutView[]`；列表投影的 `attemptCount` 可以为 `null`。 |
+| `GET` | `/rollouts/{rolloutId}/attempts` | 无 body | `AttemptView[]`。 |
+
+`ALL_ONLINE` 与 `USER` 都在创建时快照在线实例及其当时有效策略，后续策略变更不重写已创建 rollout。catalog
+只用于发现版本，不作为信任事实；平台逐个下载 manifest，校验其 SHA-256 和独立签名后，才把 manifest 中受约束的
+artifact `url` 保存为已校验元数据。浏览器页面不将其作为客户端下载指令，响应也不返回签名私钥或 Client key。
+
+普通用户只能调用：
+
+```text
+POST /api/internal/platform/local-opencode-client/instances/{clientInstanceId}/updates
+{
+  "notificationId": "ntf_...",
+  "expectedTargetVersion": "yyyyMMddHHmmss"
+}
+```
+
+入口请求为 `UserUpdateRequest(notificationId, expectedTargetVersion)`，成功 `data` 为 `RolloutView`。入口只允许
+当前登录用户拥有的在线实例。服务端重新校验通知接收人、实例所有权、connection generation 与当前有效策略；
+旧通知或策略冲突（包括离线实例）返回 `409 CONFLICT` 并使通知失效。请求不接受下载 URL、签名、策略 revision
+或 owner；成功响应只返回上述 `RolloutView` 字段。
+
+`GET /api/internal/platform/local-opencode-client/instances/me` 在既有字段上 additive 增加
+`selfUpdateSupported`、`targetClientVersion`、`updateDirection`、`lastUpdateStatus`、`lastUpdateAt`。旧节点没有
+这些字段时，客户端必须按不支持自更新处理。版本是北京时间 `yyyyMMddHHmmss`：目标大于当前为 `UPDATE`，
+小于为 `ROLLBACK`，相同为 `SAME`；旧 `0.1.0` 客户端可继续注册，但必须显示“安装新 DEB”，且不接收更新帧。
 
 旧 `/api/sessions/**` 和 `/api/workspaces/{workspaceId}/sessions` 已作废，返回 `410 API_GONE`。
 
@@ -4253,10 +4305,10 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 
 | Method | Path | Request / Response | 约束 |
 |---|---|---|---|
-| `GET` | `/api/internal/platform/local-opencode-client/credentials/me` | 掩码、版本、状态和时间 | 不返回明文或密文；不存在时返回空视图。 |
-| `POST` | `/api/internal/platform/local-opencode-client/credentials/me` | 创建当前用户唯一 key，返回掩码视图 | 明文通过后续 copy 取得；重复创建幂等返回现有视图。 |
-| `POST` | `/api/internal/platform/local-opencode-client/credentials/me/copy` | `{clientKey, version}` | 强制 `no-store/no-cache/no-referrer`；调用记审计。 |
-| `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新掩码视图 | 原子提升版本，撤销全部连接与模型 grant。 |
+| `GET` | `/api/internal/platform/local-opencode-client/credentials/me` | `CredentialView(exists,maskedKey,version,status,createdAt,updatedAt,revealAvailable)` | 不返回明文或密文；不存在时返回空视图。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me` | 创建当前用户唯一 key，返回 `CredentialView` | 明文通过后续 copy 取得；重复创建幂等返回现有视图。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me/copy` | `PlaintextKey(clientKey)` | 仅 `revealAvailable=true` 的首次调用成功；成功后消费展示资格，第二次返回 `409 CONFLICT` 且不再解密。强制 `no-store/no-cache/no-referrer`；调用记审计。 |
+| `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新 `CredentialView` | 原子提升版本，重置新版本的首次展示资格，并撤销全部连接与模型 grant。 |
 | `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant。 |
 | `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户所有稳定实例及在线、generation、OpenCode 状态 | reported/observed 地址仅展示。 |
 | `GET` | `/api/internal/platform/local-opencode-client/download-access/me` | `{allowed}` | 当前登录用户可调用；只返回下载入口灰度布尔值。该接口不跟随 OpenCode 进程归属转发，避免滚动升级期间旧节点丢失 capability；查询异常失败关闭为 `false`。 |
@@ -4268,6 +4320,9 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 客户端先验证真实绝对目录，再事务性注册；离线失败。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
 | `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map；`localClientDownload` 保留为 additive 兼容字段。网页下载入口以独立 `download-access/me` 为权威结果，避免实例请求转发到旧进程归属节点时闪现或消失。 |
+
+`revealAvailable` 为 `true` 时才可消费明文；历史凭据升级后已写入展示时间，视为已经展示，必须 rotate 后才能再次
+获得一次 copy 机会。任何客户端或浏览器都不得缓存、记录或转发 `clientKey`。
 
 本地目录选择器取得 route 后，继续调用既有
 `POST /api/internal/platform/workspace-management/file-ws/tickets`，ticket 请求使用

@@ -2,6 +2,7 @@ package com.enterprise.testagent.opencode.runtime.localclient;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.localclient.LocalClientReleaseVersion;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
@@ -72,6 +73,16 @@ public class LocalClientRegistrationService {
         }
         String clientName = requireText(payload.clientName(), "clientName", 255);
         String clientVersion = requireText(payload.clientVersion(), "clientVersion", 64);
+        String launcherVersion = optionalText(payload.launcherVersion(), "launcherVersion", 32);
+        List<String> capabilities = validateCapabilities(payload.capabilities());
+        boolean selfUpdateSupported = launcherVersion != null && capabilities.contains("SELF_UPDATE_V1");
+        if (selfUpdateSupported) {
+            try {
+                LocalClientReleaseVersion.parse(clientVersion);
+            } catch (IllegalArgumentException exception) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "自更新客户端版本格式无效");
+            }
+        }
         List<String> reportedAddresses = validateAddresses(payload.reportedAddresses());
         Optional<LocalClientInstance> existing = instanceRepository.findById(clientInstanceId);
         if (existing.isPresent() && !existing.get().userId().equals(userId)) {
@@ -108,6 +119,12 @@ public class LocalClientRegistrationService {
                 architecture,
                 clientVersion,
                 payload.opencodeVersion(),
+                launcherVersion,
+                capabilities,
+                selfUpdateSupported,
+                existing.map(LocalClientInstance::lastUpdateStatus).orElse(null),
+                existing.map(LocalClientInstance::lastUpdateTargetVersion).orElse(null),
+                existing.map(LocalClientInstance::lastUpdateAt).orElse(null),
                 existing.map(LocalClientInstance::createdAt).orElse(now),
                 now,
                 now,
@@ -129,7 +146,13 @@ public class LocalClientRegistrationService {
             }
             throw exception;
         }
-        return new Registration(route, previousRoute.orElse(null), rawModelGrant, grantFingerprint, grantExpiresAt);
+        return new Registration(
+                route,
+                previousRoute.orElse(null),
+                rawModelGrant,
+                grantFingerprint,
+                grantExpiresAt,
+                selfUpdateSupported);
     }
 
     /** PostgreSQL 最终提交失败时按 generation/fingerprint 清理先发布的短 TTL Redis 状态。 */
@@ -241,6 +264,31 @@ public class LocalClientRegistrationService {
         return addresses.stream().map(address -> requireText(address, "reportedAddress", 255)).toList();
     }
 
+    private static List<String> validateCapabilities(List<String> capabilities) {
+        if (capabilities == null) {
+            return List.of();
+        }
+        if (capabilities.size() > 16) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "客户端能力数量超过限制");
+        }
+        return capabilities.stream()
+                .map(value -> requireText(value, "capability", 64))
+                .peek(value -> {
+                    if (!value.matches("[A-Z0-9_]+")) {
+                        throw new PlatformException(ErrorCode.VALIDATION_ERROR, "客户端能力格式无效");
+                    }
+                })
+                .distinct()
+                .toList();
+    }
+
+    private static String optionalText(String value, String field, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return requireText(value, field, maxLength);
+    }
+
     private static String requireText(String value, String field, int maxLength) {
         if (value == null || value.isBlank() || value.length() > maxLength) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 无效");
@@ -253,6 +301,7 @@ public class LocalClientRegistrationService {
             LocalClientConnectionRoute previousRoute,
             String rawModelGrant,
             String modelGrantFingerprint,
-            Instant modelGrantExpiresAt) {
+            Instant modelGrantExpiresAt,
+            boolean selfUpdateSupported) {
     }
 }

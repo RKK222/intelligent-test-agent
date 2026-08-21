@@ -67,3 +67,13 @@
 `LocalClientRolloutApplicationService` 管理本地客户端下载入口的用户灰度名单：默认无用户，启用前校验目标
 用户存在且可登录，分页只返回启用记录，移出时保留最近操作人和时间。普通用户侧只查询本人是否启用；
 `SUPER_ADMIN` 鉴权仍由 API 模块执行。
+撤销和安全审计。普通视图只返回掩码；`CredentialView.revealAvailable=true` 才允许首次复制明文，成功后
+立即标记已展示。相同凭据版本的第二次复制返回 `409 CONFLICT` 且不再解密；存量凭据升级后视为已展示，
+必须轮换后才能再次查看。轮换/撤销通过端口撤销该用户全部连接与模型 grant。实例服务只投影 owner 自己的
+稳定 `lci_...` 记录，并合并 Redis 在线状态；上报 IP/端口仅供状态展示。
+
+同一包还承载 release catalog 发现、逐 manifest 独立验签和策略：catalog 本身不作为受签名信任事实；同步时强制
+manifest 的 OpenCode 版本为 `1.18.4`，并要求每个制品和签名路径位于对应 `releases/{version}/` 前缀。全局目标版本与用户覆盖策略都只引用已同步的不可变 release；
+有效策略优先用户覆盖。版本管理不保存或向浏览器返回签名私钥/原文制品。版本为北京时间 14 位
+`yyyyMMddHHmmss`；`ALL_ONLINE` 与 `USER` rollout 都在创建时冻结在线实例和各实例当时有效策略，后续策略
+变化不会重写已创建 rollout 的目标。

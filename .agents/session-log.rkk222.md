@@ -12634,3 +12634,30 @@
 - 本地数据库确认 `app_fcoss` 仅有两个 `(appId, repositoryId)` 当前状态，分别为 `feature_image/resources` 和 `master/css`，旧 automation application workspace 启用数为 0；个人工作树 JSONC 也只有这两条自动化引用和两条精确外部目录权限。
 - 审计保留一项需后续明确的安全/交互口径：新展开目录只接受当前 generation，但已打开只读标签为满足“切换后继续读旧内容”会直接解析任意仍为 READY 的历史 generation；这与稳定安全文档写的“当前或 Run 租约保护”不完全一致。若严格拒绝伪造历史 locator，需要新增标签级服务端租约或接受切换后旧标签失效，不能只靠现有无状态 locator 同时满足两者。
 - 本次合并没有新增部署节点；保留已有 API、数据库迁移和安全边界，未修改 `.env*`、generated SDK、OpenCode 只读源码或用户未跟踪的 `.reasonix/`。
+
+## 2026-08-22 - 以 dev 客户端为基线完成自动化引用合并与真实验收
+
+### Why
+
+- 用户要求重新拉取远端并把最新 `dev` 合入 `release`：客户端核心逻辑以 `dev` 为准，`release` 的客户端增量继续叠加；自动化版本库必须保留 `release` 已确认的“应用 + 版本库”共享只读引用模型。
+- 本地持久 PostgreSQL 已执行自动化引用 migration，但尚未执行版本号更低的两条客户端版本管理 migration，不能通过改名、repair、outOfOrder 或重建数据库掩盖真实历史。
+
+### What
+
+- 合并 `origin/dev@011f48d18`，保留麒麟 ARM64 注册、认证、签名版本与静默更新客户端主链，并叠加 `release` 的托盘、状态、重连和增量交付；自动化继续使用 `(appId, repositoryId, generation)`、共享只读副本和 JSONC 唯一运行时事实源。
+- 为已部署自动化 migration 之后的本地客户端版本管理历史增加受 checksum 严格约束的 compatibility location 和更高版本前向 migration；没有修改已执行 migration 的文件名或字节。
+- 自动化副本 Git 命令对引用物理根路径统一脱敏；Agent/Skill 后台投影跳过已禁用的历史自动化 workspace，旧个人 worktree 仍只作为历史数据保留，不再进入正常读取、选择、同步或 Git 扫描入口。
+- 修复登录后公共个人 worktree 尚未挂载时 Git 变更面板发送空 `worktreeId` 的瞬态 400；现在先保持公共 Agent 空态，身份到达后复用既有 watcher 刷新。
+
+### How
+
+- 后端全量 Maven 测试 26 个模块全部成功：app 93（2 skipped）、persistence 358（20 skipped）、workspace 485、API 627，零失败；兼容迁移定向测试 31/31、命名测试 15/15，真实 PostgreSQL 从已部署自动化历史只执行新的前向 migration。
+- 前端全量 Vitest 147/147 文件通过，2194 passed、1 skipped；用户手册、`vue-tsc` 与 agent-web 生产构建成功。客户端打包/更新和内部 nginx、增量、多后端、开发脚本验证均通过。
+- 使用 `.env.test`、JDK 25、`test` profile、PostgreSQL/Redis/XXL MySQL/ClickHouse 和真实前后端启动。888888888 浏览器端验证应用资产库可选、自动化 A/B 独立配置、任意目录、Git 指针核验、公共 Agent 树及紫色自动化来源；页面最终 0 个 console error。
+- 真实对话 Run `run_55e8f2b7e675487eaf580afec9fb28b4` 未手工加入文件上下文，直接读取自动化 B 的 `default.css` 并正确返回 `font-size: 16px`、`h1-h6: #333333`，无外部目录授权弹窗。新启动后的指针核验日志仅出现 `<redacted-local-path>`，没有自动化副本物理根路径，也没有历史 automation worktree 后台 Git 扫描。
+
+### Result
+
+- 远端 `dev`、当前 `MERGE_HEAD` 均为 `011f48d18`，远端 `release` 为 `8385dbea9`；本次冲突解决满足“客户端以 dev 为基线、自动化以 release 为准”。
+- 自动化用户流程稳定为选择版本库、选择分支、选择任意已有目录、按需修改描述后保存生效；点选仓库和刷新指针不会拉取，只有保存配置或“更新副本”创建同步任务。
+- 本次涉及既有客户端/API/数据库兼容和日志脱敏，不新增部署节点，不修改 `.env*`、generated SDK、OpenCode 源码或已执行 migration，不触碰用户未跟踪的 `.reasonix/`。

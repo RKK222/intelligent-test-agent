@@ -13,6 +13,8 @@ public interface LocalClientMapper {
 
     LocalClientCredentialRow findCredentialByUserId(@Param("userId") String userId);
 
+    LocalClientCredentialRow findCredentialByUserIdForUpdate(@Param("userId") String userId);
+
     LocalClientCredentialRow findActiveCredentialByFingerprint(@Param("fingerprint") String fingerprint);
 
     int upsertCredential(LocalClientCredentialRow row);
@@ -21,11 +23,19 @@ public interface LocalClientMapper {
 
     List<LocalClientInstanceRow> findInstancesByUserId(@Param("userId") String userId);
 
+    List<LocalClientInstanceRow> findAllInstances();
+
     int upsertInstance(LocalClientInstanceRow row);
 
     int markInstanceDisconnected(
             @Param("clientInstanceId") String clientInstanceId,
             @Param("disconnectedAt") Instant disconnectedAt);
+
+    int updateInstanceLastUpdateStatus(
+            @Param("clientInstanceId") String clientInstanceId,
+            @Param("status") String status,
+            @Param("targetVersion") String targetVersion,
+            @Param("observedAt") Instant observedAt);
 
     LocalClientWorkspaceRow findWorkspaceById(@Param("workspaceId") String workspaceId);
 
@@ -38,15 +48,15 @@ public interface LocalClientMapper {
 
     boolean isRolloutEnabled(@Param("userId") String userId);
 
-    LocalClientRolloutRow findRolloutByUserId(@Param("userId") String userId);
+    LocalClientRolloutUserRow findRolloutByUserId(@Param("userId") String userId);
 
-    List<LocalClientRolloutRow> findEnabledRolloutPage(
+    List<LocalClientRolloutUserRow> findEnabledRolloutPage(
             @Param("offset") long offset,
             @Param("limit") int limit);
 
     long countEnabledRollout();
 
-    int upsertRollout(LocalClientRolloutRow row);
+    int upsertRollout(LocalClientRolloutUserRow row);
 
     int disableRollout(
             @Param("userId") String userId,

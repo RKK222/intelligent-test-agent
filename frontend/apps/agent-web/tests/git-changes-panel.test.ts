@@ -171,6 +171,24 @@ describe("GitChangesPanel", () => {
     vi.restoreAllMocks();
   });
 
+  it("waits for the public Agent worktree before requesting its diff", async () => {
+    const pinia = createPinia();
+
+    render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true,
+        agentConfigRevision: 0
+      },
+      global: { plugins: [pinia] }
+    });
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceGitDiff).toHaveBeenCalled());
+    expect(apiClientMock.getPublicAgentDiff).not.toHaveBeenCalled();
+  });
+
   it("refreshes public Agent diff when a saved Agent revision changes", async () => {
     apiClientMock.getPublicAgentDiff
       .mockResolvedValueOnce({ files: [] })
@@ -320,6 +338,21 @@ describe("GitChangesPanel", () => {
     apiClientMock.getPublicAgentDiff.mockResolvedValue({
       files: [{ path: fixture.files.publicAgent, status: "M", staged: false, patch: "" }]
     });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
 
     const view = render(GitChangesPanel, {
       props: {
@@ -329,7 +362,7 @@ describe("GitChangesPanel", () => {
         canManageAgentConfig: true,
         canManagePublicConfig: true
       },
-      global: { plugins: [createPinia()] }
+      global: { plugins: [pinia] }
     });
 
     expect(await view.findByText("publish-guide.md", { exact: false })).toBeTruthy();
