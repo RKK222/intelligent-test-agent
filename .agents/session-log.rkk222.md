@@ -12544,3 +12544,23 @@
 
 - 自动化引用现在以应用和版本库为唯一配置维度，管理员只需选择版本库、分支、目录并保存；所有成员刷新、重新进入或创建新 Run 前由工作树 JSONC 对账到当前共享代次，运行中的任务继续受旧代次租约保护。
 - API 与数据库为增量兼容变更，无新增 RunEvent 或部署节点；共享副本仍为平台层只读边界，不提供 OS 只读挂载。历史离线服务器副本和个人 worktree 不删除，但不能从正常入口继续创建、选择或执行 Git 操作。
+
+## 2026-08-21 - 本地 ClickHouse 启动复用已有固定镜像
+
+### Why
+
+- 本地已经存在项目固定版本 ClickHouse 镜像时，`pull` 和 `restart` 仍访问外部 registry；离线、代理不可用或 registry 抖动时会无意义阻断本地开发环境启动。
+
+### What
+
+- 在既有 `pull_image()` 中复用 `TEST_AGENT_CLICKHOUSE_DEV_IMAGE`，先通过 `docker image inspect` 检查本地固定镜像；命中后直接返回，未命中时继续执行原有 `docker pull`。
+- 保留 `start()` 的容器重建、数据卷保留和 readiness 核验逻辑，并同步脚本内置帮助，使 `pull/restart` 的说明与“确保镜像本地可用”语义一致。
+
+### How
+
+- 执行 Shell 语法检查、开发脚本校验、真实 `pull` 缓存命中和 ClickHouse 鉴权状态检查；确认已有固定镜像不访问 registry，运行中容器仍可用。
+- 提交前回顾全部 `.agents/session-log*.md`；未纳入未跟踪的 `output/e2e-tool-rollout/` 本机验收产物。
+
+### Result
+
+- 本地已有固定 ClickHouse 镜像时可直接完成 `pull/restart` 的镜像准备阶段；首次使用或镜像缺失时仍按原流程拉取，不改变版本固定、容器所有权、数据卷、安全配置或部署拓扑。

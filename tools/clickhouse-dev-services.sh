@@ -18,10 +18,10 @@ Docker volume. Generated secrets stay under .tmp/dev-services/clickhouse.
 
 Commands:
   prepare  Create or refresh 0600 runtime and backend dotenv files.
-  pull     Pull the pinned ClickHouse server image without changing services.
+  pull     Ensure the pinned ClickHouse server image is available locally.
   start    Recreate the owned container, preserve its volume and verify readiness.
   stop     Stop the owned container and preserve its volume.
-  restart  Prepare, pull and start the complete local ClickHouse data plane.
+  restart  Prepare, ensure the image and start the complete local ClickHouse data plane.
   status   Show container status and verify authenticated HTTP access.
 
 Environment overrides:
@@ -202,6 +202,11 @@ pull_image() {
   [[ -f "${ENV_FILE}" ]] || prepare
   load_runtime_env
   require_docker
+  # 本地已存在固定镜像时无需再次访问外部 registry；start 仍会重建并核验容器。
+  if docker image inspect "${TEST_AGENT_CLICKHOUSE_DEV_IMAGE}" >/dev/null 2>&1; then
+    echo "Using existing ClickHouse ${CLICKHOUSE_VERSION} development image."
+    return
+  fi
   docker pull "${TEST_AGENT_CLICKHOUSE_DEV_IMAGE}" >/dev/null
   echo "Pulled ClickHouse ${CLICKHOUSE_VERSION} development image."
 }
