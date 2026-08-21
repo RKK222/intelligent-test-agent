@@ -19,6 +19,7 @@ import com.enterprise.testagent.agent.runtime.AgentStartRunCommand;
 import com.enterprise.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
+import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunLeaseLifecycle;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.hub.ProtectedAgentSelection;
 import com.enterprise.testagent.domain.event.RunEventDraft;
@@ -206,6 +207,7 @@ public class RunApplicationService {
     private RunResendCancellationService resendCancellationService;
     private List<AgentRunSystemPromptContributor> runSystemPromptContributors = List.of();
     private List<AgentRootRunTerminalObserver> rootRunTerminalObservers = List.of();
+    private AutomationReferenceRunLeaseLifecycle automationReferenceRunLeaseLifecycle;
     private ProtectedAgentExecutionService protectedAgentExecutionService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
@@ -1212,6 +1214,7 @@ public class RunApplicationService {
         }
 
         try {
+            acquireAutomationReferenceRunLeases(pending, workspace, userId, traceId);
             AgentRoutingTarget target = protectedSelection
                     ? resolveServerAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
                     : userProcessAssignment == null
@@ -1356,6 +1359,7 @@ public class RunApplicationService {
                     Map.of("errorCode", safeException.errorCode().name()), storageMode);
             snapshotService.persistRunSnapshot(resolvedAgentId, failed, traceId);
             runSessionScopeRouter.finishRun(failed.runId());
+            notifyRootRunTerminalObservers(failed.runId(), failed.status(), traceId);
             markLegacyScheduledDispatchAccepted(scheduledClaim, source, failed.runId());
             throw safeException;
         }
@@ -1517,6 +1521,7 @@ public class RunApplicationService {
             boolean subscriptionHandedOff = false;
             String remoteSessionIdForConvergence = context.remoteSessionId();
             try {
+                acquireAutomationReferenceRunLeases(running, workspace, userId, traceId);
                 if (!runRuntimeStore.confirmClientRequest(
                         session.sessionId(), input.clientRequestId(), running.runId())) {
                     LOGGER.warn(
@@ -3646,6 +3651,12 @@ public class RunApplicationService {
         this.rootRunTerminalObservers = observers == null ? List.of() : List.copyOf(observers);
     }
 
+    /** 自动化引用只在 Run 锚点落库后记录代次租约，不向 OpenCode 出站上下文追加任何内容。 */
+    @Autowired(required = false)
+    void setAutomationReferenceRunLeaseLifecycle(AutomationReferenceRunLeaseLifecycle lifecycle) {
+        this.automationReferenceRunLeaseLifecycle = lifecycle;
+    }
+
     private String systemPrompt(Run run, String prompt, boolean command, String traceId) {
         if (runSystemPromptContributors.isEmpty()) {
             return null;
@@ -3685,6 +3696,25 @@ public class RunApplicationService {
                         runId.value(), traceId, observer.getClass().getSimpleName(),
                         failure.getClass().getSimpleName());
             }
+        }
+        if (automationReferenceRunLeaseLifecycle != null) {
+            try {
+                automationReferenceRunLeaseLifecycle.release(runId, traceId);
+            } catch (RuntimeException failure) {
+                LOGGER.warn(
+                        "Automation reference Run lease release failed open, runId={}, traceId={}, exceptionType={}",
+                        runId.value(), traceId, failure.getClass().getSimpleName());
+            }
+        }
+    }
+
+    private void acquireAutomationReferenceRunLeases(
+            Run run,
+            Workspace workspace,
+            UserId userId,
+            String traceId) {
+        if (automationReferenceRunLeaseLifecycle != null) {
+            automationReferenceRunLeaseLifecycle.acquire(run, workspace, userId, traceId);
         }
     }
 

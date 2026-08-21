@@ -13,9 +13,6 @@ final class ManagedWorkspaceDtos {
     record CreateVersionRequest(String version, String branch) {
     }
 
-    record ActivateAutomationVersionRequest(String versionId) {
-    }
-
     record CreatePersonalWorkspaceRequest(String workspaceName) {
     }
 

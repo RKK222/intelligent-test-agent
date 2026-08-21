@@ -104,7 +104,6 @@ function createApi(): Partial<BackendApiClient> {
     listApplicationWorkspaces: vi.fn().mockResolvedValue([]),
     listWorkspaceTemplates: vi.fn().mockResolvedValue([]),
     listWorkspaceVersions: vi.fn().mockResolvedValue([]),
-    activateAutomationWorkspaceVersion: vi.fn().mockResolvedValue({}),
     listRepositoryBranches: vi.fn().mockResolvedValue(["main"]),
     listRepositoryDirectories: vi.fn().mockResolvedValue(["tests"]),
     getRepositoryTree: vi.fn().mockResolvedValue(repositoryTree),

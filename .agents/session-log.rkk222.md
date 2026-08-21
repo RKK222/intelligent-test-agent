@@ -12515,3 +12515,32 @@
 
 - 非分享态超级管理员现在每连续独立按三次 Ctrl 都会切换模型入口显隐，隐藏时按钮、弹层和 `/models` 同步收回；模型选择值本身保持不变。
 - 不涉及 HTTP API、RunEvent、数据库、Flyway、部署节点、性能、安全契约、generated SDK 或 OpenCode 源码；未修改环境配置，未创建分支。
+
+## 2026-08-21 - 自动化引用重构为应用版本库级共享只读代次
+
+### Why
+
+- 前一版仍以自动化工作空间模板和版本为配置维度，同一应用、同一版本库可能保留多套分支和目录；页面状态、服务器副本与工作树 JSONC 存在多套事实源，首次选择还容易误触发拉取或命中旧分支目录。
+- 目标交互应与应用资产库保持同一状态机：一个应用可关联多个自动化版本库，每个版本库只有一个当前分支、目录和描述；服务器维护共享只读副本，用户工作树只通过 `.opencode/opencode.jsonc` 引用当前逻辑代次。
+
+### What
+
+- 新增 `(app_id, repository_id)` 唯一的自动化引用状态、不可变 generation、服务器副本和 Run 租约模型；MyBatis XML 持久化，前向 Flyway migration 从历史多模板/多版本数据收敛最新有效配置，旧模板、版本、副本和个人 worktree 保留但退出正常入口。
+- 保存配置时固定 `merge=false`，解析目标分支 HEAD 后同步共享完整仓库副本；在线节点 READY 后以 CAS 激活，离线节点 DEFERRED 后补。目录仅为副本内逻辑选择，不重复 clone；核验只读实际分支、HEAD 和工作树状态。
+- 新增应用级列表、保存、同步、核验、终止、状态和远端目录 API；组合文件树 locator 改为应用、版本库、generation 和逻辑相对路径，并继续拒绝 `.git`、符号链接、路径穿越、Git/requirements 及全部写操作。
+- JSONC 保持唯一运行时事实源：每个应用自动化版本库只保留一条托管 reference 和精确 `permission.external_directory`，清理同库历史 workspace/version 引用；Java 仅处理副本、安全、文件 RPC 和租约，不向 Run 提示词或消息注入引用信息。
+- 自动化配置页复用应用资产库的仓库卡片、READY/FAILED、目标 Git 指针、服务器状态、同步/核验/终止/重试和保存反馈；唯一差异为允许选择任意已有目录。点击仓库和切换分支只更新草稿，保存后才同步并整体生效；description 可编辑且首次自动生成默认值。
+- 同步 HTTP API、事件/文件 RPC、数据库、部署、模块图、测试说明、后端/前端 README 和用户手册；删除旧 active-version 正常入口和持久化实现，未修改已执行的 `V20260819125704` 字节、generated SDK 或 OpenCode 源码。
+
+### How
+
+- 前端定向引用测试 23/23、全量 Vitest 2054 passed / 1 skipped、全 workspace typecheck、agent-web 与用户手册 production build 通过。
+- JDK 25 下完整 26 模块 `mvn clean test` 为 `BUILD SUCCESS`；persistence 351 项（20 skip）、app 89 项（2 skip）及其它模块全部 0 failure / 0 error。新增真实 PostgreSQL 历史迁移用例验证旧多模板、多分支、多版本、多副本收敛到 `(appId, repositoryId)` 唯一配置；本机 PostgreSQL、Redis、XXL MySQL 和 ClickHouse 集成测试通过。
+- 使用根目录 `.env.test`、`test` profile、稳定服务器标识 `kakadeMacBook-Pro.local` 和 `--with-clickhouse` 启动真实后端、manager、前端；readiness UP、工作台 200。真实浏览器以 888888888 验收应用资产库、自动化 A/B 两个仓库、分支草稿、任意目录、Git 指针、服务器 READY、描述、保存按钮和公共 Agent 区域。
+- F-COSS 当前工作树 JSONC 对账为 A generation 3 `feature_image/resources`、B generation 1 `master/css` 两条引用及精确只读权限；组合文件树只展示两个当前目录。对话实际读取 generation 3 的 `labels.properties` 得到 `app.title=Our App`，未出现外部目录权限申请；免费模型前期在工作区和旧代次间搜索属于模型路径发现表现，不是 Java 隐式注入或权限失败。
+- 提交前回顾全部 `.agents/session-log*.md`，执行 `git diff --check` 并保留其他开发者的公共 Agent、模型入口和 Tool rollout 成果；用户本地修改的 `tools/clickhouse-dev-services.sh` 与未跟踪 `output/e2e-tool-rollout/` 不纳入提交。
+
+### Result
+
+- 自动化引用现在以应用和版本库为唯一配置维度，管理员只需选择版本库、分支、目录并保存；所有成员刷新、重新进入或创建新 Run 前由工作树 JSONC 对账到当前共享代次，运行中的任务继续受旧代次租约保护。
+- API 与数据库为增量兼容变更，无新增 RunEvent 或部署节点；共享副本仍为平台层只读边界，不提供 OS 只读挂载。历史离线服务器副本和个人 worktree 不删除，但不能从正常入口继续创建、选择或执行 Git 操作。

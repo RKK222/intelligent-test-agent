@@ -59,6 +59,10 @@ class MyBatisModelGatewayRepositoryIntegrationTest {
                 new ClassPathResource("db/migration/V20260722180000__add_internal_model_token_definitions.sql"),
                 new ClassPathResource("db/migration/V20260730090000__add_lobehub_model_gateway.sql"))
                 .execute(dataSource);
+        // 本测试刻意只装配模型网关相关 migration；同步最新版 Mapper 所需的维度字段，避免夹具停留在旧表结构。
+        JdbcClient.create(dataSource)
+                .sql("alter table internal_model_provider_models add column embedding_dimension integer")
+                .update();
         jdbc = JdbcClient.create(dataSource);
         seedProvider();
 

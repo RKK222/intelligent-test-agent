@@ -26,7 +26,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -100,53 +99,6 @@ public class ManagedWorkspaceController {
                 request.branch(),
                 userId(exchange),
                 agentLinuxServerId(exchange),
-                RuntimeApiSupport.traceId(exchange)));
-    }
-
-    /** 应用管理员显式激活自动化代码库配置的只读版本。 */
-    @PutMapping("/applications/{appId}/workspace-templates/{templateId}/active-version")
-    public ApiResponse<Object> activateAutomationVersion(
-            @PathVariable String appId,
-            @PathVariable String templateId,
-            @RequestBody ManagedWorkspaceDtos.ActivateAutomationVersionRequest request,
-            ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
-        return ok(exchange, service.activateAutomationVersion(
-                appId,
-                templateId,
-                request.versionId(),
-                principal.userId()));
-    }
-
-    /** 应用管理员发起自动化只读版本的多服务器共享副本同步。 */
-    @PostMapping("/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronize")
-    public ApiResponse<Object> synchronizeAutomationVersion(
-            @PathVariable String appId,
-            @PathVariable String templateId,
-            @PathVariable String versionId,
-            ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
-        return ok(exchange, service.synchronizeAutomationVersion(
-                appId,
-                templateId,
-                versionId,
-                principal.userId(),
-                RuntimeApiSupport.traceId(exchange)));
-    }
-
-    /** 应用管理员轮询自动化只读版本在当前在线服务器集合中的同步状态。 */
-    @GetMapping("/applications/{appId}/workspace-templates/{templateId}/versions/{versionId}/synchronization-status")
-    public ApiResponse<Object> automationVersionSynchronizationStatus(
-            @PathVariable String appId,
-            @PathVariable String templateId,
-            @PathVariable String versionId,
-            ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
-        return ok(exchange, service.automationVersionSynchronizationStatus(
-                appId,
-                templateId,
-                versionId,
-                principal.userId(),
                 RuntimeApiSupport.traceId(exchange)));
     }
 

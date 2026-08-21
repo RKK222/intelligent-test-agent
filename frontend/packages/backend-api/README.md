@@ -8,7 +8,7 @@
 
 ## 主要职责
 
-- 自动化只读引用通过 `synchronizeAutomationWorkspaceVersion()` 创建版本级多服务器同步，通过 `getAutomationWorkspaceVersionSynchronizationStatus()` 轮询当前在线服务器状态；类型只暴露版本、branch/commit、逻辑服务器状态和 traceId，不包含服务器磁盘路径。
+- 自动化只读引用通过 `list/get/configure/synchronize/verify/terminateAutomationReferenceRepository*` 访问应用级 `(appId, repositoryId)` 当前配置；类型暴露 branch、任意目录、共享描述、generation、固定 commit、逐服务器指针和 traceId，不包含服务器磁盘路径。
 
 - 提供 `listUserNotifications()` 和 `markUserNotificationRead()`，统一访问 `/api/internal/platform/notification-center/notifications`。分页响应保留全局 `unreadCount`；`NONE` 动作的配置 dispose 通知仍可计入未读并标记已读，失败状态只允许触发受控的本人进程重启；分享通知点击不提前调用通用已读接口，仍由 `/s/{shareId}` 鉴权成功后在服务端落已读事实。
 
@@ -27,7 +27,7 @@
 - `openExperienceWorkspace()` 使用 routed POST 调用 `/api/internal/platform/workspace-management/workspaces/experience/open`，不发送请求体、路径、服务器或 Workspace ID；`closeWorkspaceFileSocket(workspaceId)` 可在成员资格变化或页面卸载时立即关闭已建立或仍在连接中的指定工作区 socket，避免旧 ticket/RPC 继续留在页面。
 - 暴露 `getToolboxCatalog()` 与 `recordToolboxClick(toolId, eventId)`，统一访问 `/api/internal/platform/toolbox`；目录和点击沿用登录 Token，不携带工具级角色，`toolId` 使用路径编码，点击失败由工具盒子页面静默处理且不得阻断原生链接打开。
 - 工作区原始文件列表、读取、写入、二进制上传、普通文件复制/移动、状态和删除，以及工作台使用的引用组合视图 `listWorkspaceView/readWorkspaceViewFile`，统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。组合视图只映射后端签发的稳定 `id/locator/source/readonly/workspacePath/warnings`，不在浏览器自行解析引用根目录。`readFileBinaryChunk` / `readWorkspaceViewFileBinaryChunk` 透传有界 Base64 原始字节分段及文件快照，供任意二进制文件下载。
-- 暴露自动化当前版本激活 API，并透传 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 组合视图定位器。自动化配置列表、版本列表和激活属于应用共享控制面，固定不附加个人 TestAgent 路由头；客户端只发送配置 ID、版本 ID 和逻辑路径，自动化标签身份固化版本 ID，切换后已打开标签继续读取旧版本，新展开目录使用工作树已应用版本。
+- 暴露应用自动化引用列表、状态、分支、任意层级目录、配置、同步、核验和终止 API，并透传 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 组合视图定位器。配置按 `(appId, repositoryId)` 唯一，客户端保存 `branch/directoryPath/description/merge=false/expectedGeneration/operationId`；响应和定位器只携带 generation、固定提交和逻辑路径，不携带服务器物理路径，也不附加个人 TestAgent 路由头。
 - 需求导入应用目录调用同源 `/api/v1/requirement-import/applications`；带工作区“已导入/未导入”状态的父子目录和实际导入分别复用文件 ticket 下的 `workspace.requirement-import-items`、`workspace.requirement-import` RPC，浏览器只携带工作区、应用/版本和子条目编号。导入结果透传后端生成的 `workspaceRelativeDisplayPaths`，前端不根据条目名称猜目录。兼容 `/api/v1/requirement-import/sub-items` 仍只返回 TCDS 目录，不读取工作区。普通文件“复制绝对路径”使用 `workspace.resolve-physical-path` 按单文件即时解析，不再根据 Workspace 响应中的根路径拼接。
 - 工作区与 Agent 配置文件连接分别按路由键复用 single-flight 建连过程，并对缓存连接做实例身份校验；连接在 open 前关闭、报错或同步发送失败时会立即结算 pending，同步发送失败还会安全关闭已失效的底层 socket。只有 `workspace.read`、`workspace.view.read`、三类 `*.read.chunk`、两类 `*.read.binary.chunk` 与 `agent-config.read` 等幂等只读操作遇到明确 WebSocket 传输错误时自动重连并重试一次，业务错误、请求超时和写操作不重试。
 - 工作区、组合引用视图和 Agent 配置文件超过一次性读取阈值后，分别通过 `readFilePreviewChunk`、`readWorkspaceViewFilePreviewChunk`、`readPublicAgentFilePreviewChunk`、`readWorkspaceAgentFilePreviewChunk` 读取约 512 KiB UTF-8 分段；client 透传 `offset/expectedSize/expectedLastModifiedMillis` 并返回 `nextOffset/eof`，调用方可加载到 EOF。上传方法直接接收 `Blob`，只把当前 `Blob.slice()` 分片读入内存并在同一 socket 上执行 begin/chunk/complete，进度回调使用已上传/总字节；读写会话都不把完整大文件打进单个 WebSocket frame。

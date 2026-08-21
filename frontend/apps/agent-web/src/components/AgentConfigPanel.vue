@@ -1384,6 +1384,31 @@ function publicFileTargetAvailable() {
   return Boolean(preferredPublicServer(publicRepositories.value));
 }
 
+/**
+ * 公共仓库或个人 worktree 不可用时给出稳定原因，避免展开后只剩空白区域被误认为页面崩溃。
+ */
+const publicRootUnavailableMessage = computed(() => {
+  if (refreshing.value || !status.value.PUBLIC || status.value.PUBLIC.enabled === false || errorMessage.value) {
+    return "";
+  }
+  if (publicFileTargetAvailable()) {
+    return "";
+  }
+  const unavailableRepository = publicRepositories.value.find((repository) => !repository.initialized);
+  const reason = unavailableRepository?.message?.trim()
+    || (publicRepositories.value.length === 0 ? "没有发现公共配置服务器" : "公共配置仓库尚未初始化");
+  if (!props.canWrite) {
+    return `公共 Agent 暂不可用：${reason}。请联系超级管理员处理后点击上方“刷新”。`;
+  }
+  if (unavailableRepository || publicRepositories.value.length === 0) {
+    return `公共 Agent 暂不可用：${reason}。请先在系统管理中恢复公共配置仓库。`;
+  }
+  if (props.routeLinuxServerResolved !== true) {
+    return "正在确认当前用户的 TestAgent 服务器，请稍候。";
+  }
+  return "当前用户尚未挂载公共个人 worktree；请先初始化或启动 TestAgent 进程后点击上方“刷新”。";
+});
+
 async function publicFileLinuxServerId() {
   if (publicWorktree.value?.worktreeId && publicWorktree.value.linuxServerId) {
     return publicWorktree.value.linuxServerId;
@@ -2069,6 +2094,17 @@ defineExpose({
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
+        <div v-else-if="publicRootUnavailableMessage" class="agent-empty-state" role="status">
+          <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
+          <span>{{ publicRootUnavailableMessage }}</span>
+        </div>
+        <div
+          v-else-if="entriesByScope.PUBLIC[''] !== undefined && visibleEntries('PUBLIC', '').length === 0"
+          class="agent-empty-state"
+          role="status"
+        >
+          公共 Agent 目录为空。
+        </div>
         <AgentConfigTreeNode
           v-for="entry in visibleEntries('PUBLIC', '')"
           :key="`PUBLIC:${entry.path}`"
@@ -2619,6 +2655,19 @@ defineExpose({
   padding: 5px 8px;
   font-size: 12px;
   color: #9a3412;
+}
+
+.agent-empty-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 4px 8px 8px 22px;
+  border: 1px dashed var(--ta-border-strong);
+  border-radius: 5px;
+  padding: 7px 8px;
+  color: var(--ta-muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 .agent-public-conflict-panel {
   display: flex;

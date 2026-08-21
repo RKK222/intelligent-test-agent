@@ -901,8 +901,9 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 kind,
                 text(locator, "path"),
                 text(locator, "referenceAlias"),
-                text(locator, "automationWorkspaceId"),
-                text(locator, "automationVersionId"));
+                text(locator, "automationAppId"),
+                text(locator, "automationRepositoryId"),
+                optionalNonNegativeLong(locator, "automationGeneration"));
     }
 
     private void requireWorkspaceWrite(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId, String path) {

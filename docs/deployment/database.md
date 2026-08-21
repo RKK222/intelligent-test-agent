@@ -438,7 +438,7 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 | 表 | 说明 |
 |---|---|
 | `application_workspace_versions` | 应用工作空间模板的版本实例，记录版本、实际分支、托管仓库目录逻辑值、opencode 工作目录逻辑值和关联运行态 `workspaces.workspace_id`。 |
-| `automation_workspace_active_versions` | 自动化工作空间配置的应用级当前版本，记录版本、最近激活操作人和激活时间。 |
+| `automation_workspace_active_versions` | 已冻结的旧自动化模板当前版本表；只作为历史升级输入保留，不再承载运行时当前配置。 |
 | `personal_workspaces` | 用户基于应用版本工作区派生的 git worktree，记录展示名称、私有分支、托管目录逻辑值、base commit 和关联运行态 Workspace。 |
 | `user_global_workspace_preferences` | 用户全局最近使用的托管运行态 Workspace。 |
 | `user_application_workspace_preferences` | 用户在某应用下最近使用的托管运行态 Workspace。 |
@@ -448,7 +448,7 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 - `application_workspace_versions(application_workspace_id, version)` 唯一，保证同一模板同一日期版本只有一条记录。
 - `application_workspace_versions.runtime_workspace_id` 唯一并引用 `workspaces.workspace_id`。
-- `automation_workspace_active_versions.application_workspace_id` 为主键并级联引用模板，`version_id` 唯一引用应用工作空间版本，操作人删除后置空。`V20260819125704` 为每项存量自动化配置回填创建时间最新的 `ACTIVE` 版本。
+- `automation_workspace_active_versions.application_workspace_id` 为主键并级联引用模板，`version_id` 唯一引用应用工作空间版本，操作人删除后置空。已执行的 `V20260819125704` 文件名、字节和 checksum 保持冻结；新模型 migration 只读取它和其它旧表完成前向归并，不修改其历史记录。
 - `personal_workspaces(app_workspace_version_id, user_id, workspace_name)` 唯一，保证同一用户在同一应用版本下个人空间名称不重复。
 - 最近使用偏好按全局 `user_id` 唯一、按应用 `(user_id, app_id)` 唯一。
 - 同步审计中的源/目标 workspace 均引用运行态 `workspaces`。
@@ -1909,3 +1909,20 @@ migration，并加载隔离路径
 - 平台推送、外部目录替换、按需修订保存和引用身份切换的关系型 SQL 全部位于 `AgentSkillHubMapper.xml`，没有新增 JDBC SQL。
 
 发布前必须在所有已知 PostgreSQL history 上从已部署基线升级到 HEAD，并核对源码、persistence JAR 与最终应用 JAR 中 migration 字节一致；禁止使用 `outOfOrder`、`repair` 或手工修改历史表。
+
+## V20260821113000 应用自动化引用
+
+`V20260821113000__application_automation_references_create.sql` 把自动化引用从“工作空间模板 + 日期版本”前向迁移为 `(app_id, repository_id)` 唯一当前配置。新增关系型访问全部位于 `ApplicationAutomationReferenceMapper.xml`，没有新增 JDBC SQL。
+
+| 表 | 用途与关键约束 |
+|---|---|
+| `application_automation_references` | `(app_id, repository_id)` 主键；保存当前/待切换 generation、操作类型、总体状态、幂等 operation ID、乐观锁和安全错误。 |
+| `application_automation_reference_generations` | `(app_id, repository_id, generation)` 唯一不可变配置；保存分支、逻辑目录、共享描述、固定目标提交、操作者、状态和激活时间，`merge_enabled` 由 CHECK 固定为 `false`。 |
+| `application_automation_reference_replicas` | 每个 generation、每台 Linux 服务器唯一共享只读仓库副本；保存逻辑副本路径、实际分支/HEAD、状态、租约 fencing token、同步/核验时间和退避重试，不保存个人目录或运行态 Workspace。 |
+| `application_automation_reference_run_leases` | Run 对实际使用 generation 的生命周期租约；同一 Run/应用/版本库唯一，终态释放，用于保留运行中任务仍使用的旧 generation。 |
+
+migration 会从仍关联自动化版本库的 `application_workspaces`、`application_workspace_versions`、已冻结的 `automation_workspace_active_versions` 和 `application_workspace_version_replicas` 归并历史：同一应用、同一版本库只选择最新有效配置生成 generation 1；优先使用旧激活版本，其次按版本更新时间/创建时间选择最新有效记录。目录、分支、目标提交和描述进入新 generation；旧自动化模板统一设为 `enabled=false`，旧版本、副本、个人 worktree、Workspace 和会话不删除。相同版本库关联不同应用时分别建立独立状态。
+
+副本逻辑路径位于 `OPENCODE_REFERENCES_DIR` 下的 `automation/{appId}/{repositoryEnglishName}/{generation}`，目录只是该完整仓库副本内的逻辑选择，不因不同目录重复 clone。API、错误和日志只使用逻辑路径或摘要，不返回数据库中解析后的物理根。状态切换以 generation 和 `lock_version` CAS；副本写回还必须匹配 `lease_token`，迟到 worker 不能覆盖新代次。在线服务器全部 READY 后才激活，离线服务器为 `DEFERRED` 并由补偿器恢复。
+
+`V20260819125704__automation_workspace_active_versions_create.sql` 已进入需要保留的历史，SHA-256 固定为 `a331d8b09575fae38b61471fca719af628ac898c01be82fc369c510de2772928`，不得删除、重命名或改写。发布验证必须使用真实 PostgreSQL 覆盖“已执行该旧 migration 且存在同库多模板、多分支、多版本、多副本数据 → 当前 HEAD”，断言每个 `(app_id, repository_id)` 只有一套当前配置；同时核对源码、persistence JAR 和最终应用 JAR 中两份 migration 字节一致。禁止使用 `outOfOrder`、`repair` 或手工修改 `flyway_schema_history`。

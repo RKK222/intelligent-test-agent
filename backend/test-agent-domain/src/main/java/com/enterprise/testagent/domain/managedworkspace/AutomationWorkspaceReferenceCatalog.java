@@ -1,77 +1,48 @@
 package com.enterprise.testagent.domain.managedworkspace;
 
 import com.enterprise.testagent.domain.configuration.ApplicationId;
-import com.enterprise.testagent.domain.configuration.ApplicationWorkspaceId;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
-import java.util.List;
 
-/**
- * 自动化代码库只读引用目录。
- *
- * <p>物理根只允许在后端内部消费；浏览器协议必须继续使用配置、版本和相对路径组成的逻辑定位器。
- */
+/** 自动化共享只读副本目录；浏览器只能携带应用、版本库、代次和逻辑相对路径。 */
 public interface AutomationWorkspaceReferenceCatalog {
 
-    Resolution resolveActive(UserId userId, WorkspaceId hostWorkspaceId);
-
-    Reference resolveVersion(
+    Reference resolveGeneration(
             UserId userId,
             WorkspaceId hostWorkspaceId,
-            ApplicationWorkspaceId applicationWorkspaceId,
-            ApplicationWorkspaceVersionId versionId);
-
-    record Resolution(
-            ApplicationId applicationId,
-            int configuredCount,
-            List<Reference> references,
-            List<Warning> warnings) {
-
-        public Resolution {
-            references = references == null ? List.of() : List.copyOf(references);
-            warnings = warnings == null ? List.of() : List.copyOf(warnings);
-        }
-
-        public static Resolution empty() {
-            return new Resolution(null, 0, List.of(), List.of());
-        }
-    }
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            long generation);
 
     record Reference(
             ApplicationId applicationId,
-            ApplicationWorkspaceId applicationWorkspaceId,
-            ApplicationWorkspaceVersionId versionId,
-            String workspaceName,
+            CodeRepositoryId repositoryId,
+            long generation,
             String displayName,
             String repositoryName,
-            String version,
             String branch,
             String targetCommitHash,
             String workspaceRootPath,
             String directoryPath,
-            String configurationPath) {
+            String configurationPath,
+            String description,
+            boolean current) {
 
         public Reference withDisplayName(String configuredDisplayName) {
             return new Reference(
                     applicationId,
-                    applicationWorkspaceId,
-                    versionId,
-                    workspaceName,
+                    repositoryId,
+                    generation,
                     configuredDisplayName,
                     repositoryName,
-                    version,
                     branch,
                     targetCommitHash,
                     workspaceRootPath,
                     directoryPath,
-                    configurationPath);
+                    configurationPath,
+                    description,
+                    current);
         }
-    }
-
-    record Warning(
-            ApplicationWorkspaceId applicationWorkspaceId,
-            String alias,
-            String code,
-            String message) {
     }
 }

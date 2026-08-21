@@ -3,6 +3,7 @@ package com.enterprise.testagent.opencode.runtime.run;
 import com.enterprise.testagent.agent.runtime.AgentRootRunTerminalObserver;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunLeaseLifecycle;
 import com.enterprise.testagent.domain.event.RunEventDraft;
 import com.enterprise.testagent.domain.event.RunEventType;
 import com.enterprise.testagent.domain.run.RunConversationSummary;
@@ -57,6 +58,7 @@ public class RunTerminalProjectionService {
     private final RunTerminalRetryStore retryStore;
     private final Clock clock;
     private List<AgentRootRunTerminalObserver> terminalObservers = List.of();
+    private AutomationReferenceRunLeaseLifecycle automationReferenceRunLeaseLifecycle;
 
     /** 保留给既有单元测试的兼容构造；生产装配始终注入 Redis 重试端口。 */
     public RunTerminalProjectionService(
@@ -198,6 +200,12 @@ public class RunTerminalProjectionService {
         this.terminalObservers = observers == null ? List.of() : List.copyOf(observers);
     }
 
+    /** Redis 摘要模式终态投影成功后，释放与 legacy Run 共用的自动化引用代次租约。 */
+    @Autowired(required = false)
+    void setAutomationReferenceRunLeaseLifecycle(AutomationReferenceRunLeaseLifecycle lifecycle) {
+        this.automationReferenceRunLeaseLifecycle = lifecycle;
+    }
+
     private void notifyTerminalObservers(RunId runId, RunStatus status, String traceId) {
         for (AgentRootRunTerminalObserver observer : terminalObservers) {
             try {
@@ -207,6 +215,15 @@ public class RunTerminalProjectionService {
                         "Run terminal projection observer failed open, runId={}, traceId={}, observerType={}, exceptionType={}",
                         runId.value(), traceId, observer.getClass().getSimpleName(),
                         failure.getClass().getSimpleName());
+            }
+        }
+        if (automationReferenceRunLeaseLifecycle != null) {
+            try {
+                automationReferenceRunLeaseLifecycle.release(runId, traceId);
+            } catch (RuntimeException failure) {
+                LOGGER.warn(
+                        "Automation reference Run lease release failed open, runId={}, traceId={}, exceptionType={}",
+                        runId.value(), traceId, failure.getClass().getSimpleName());
             }
         }
     }

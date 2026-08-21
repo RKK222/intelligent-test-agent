@@ -14,7 +14,7 @@ const AUTOMATION_CODE_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
 const APPLICATION_CODE_REPOSITORY_TYPE = "APPLICATION_CODE_REPOSITORY";
 const EXTERNAL_DEPLOYMENT_MODE = "EXTERNAL";
 const INTERNAL_DEPLOYMENT_MODE = "INTERNAL";
-const REPOSITORY_TYPE_TOOLTIP = "测试工作库按标准分支和目录规则创建工作空间；自动化代码库支持任意分支和已有目录，创建时需选择日期版本。";
+const REPOSITORY_TYPE_TOOLTIP = "测试工作库按标准分支和目录规则创建工作空间；自动化代码库关联应用后，在工作台为每个版本库配置一个当前分支和任意已有目录。";
 const REPOSITORY_ENGLISH_NAME_ERROR = "版本库英文名称只能使用字母、数字和连字符，长度 1 到 128，且不能以连字符开头或结尾";
 const DEFAULT_REPOSITORY_TYPES: RepositoryTypeOption[] = [
   { typeCode: TEST_WORK_REPOSITORY_TYPE, typeLabel: "测试工作库" },

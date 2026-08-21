@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.ApplicationAutomationReferenceMapper">
+    <resultMap id="StateRowMap" type="com.enterprise.testagent.persistence.mybatis.ApplicationAutomationReferenceStateRow">
+        <constructor>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="active_generation" javaType="java.lang.Long"/>
+            <arg column="pending_generation" javaType="java.lang.Long"/>
+            <arg column="next_generation" javaType="_long"/>
+            <arg column="lock_version" javaType="_long"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="operation_type" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="last_error" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="GenerationRowMap" type="com.enterprise.testagent.persistence.mybatis.ApplicationAutomationReferenceGenerationRow">
+        <constructor>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="generation" javaType="_long"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="directory_path" javaType="java.lang.String"/>
+            <arg column="description" javaType="java.lang.String"/>
+            <arg column="merge_enabled" javaType="_boolean"/>
+            <arg column="target_commit_hash" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="operation_type" javaType="java.lang.String"/>
+            <arg column="operated_by_user_id" javaType="java.lang.String"/>
+            <arg column="operation_id" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="last_error" javaType="java.lang.String"/>
+            <arg column="activated_at" javaType="java.time.Instant"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="ReplicaRowMap" type="com.enterprise.testagent.persistence.mybatis.ApplicationAutomationReferenceReplicaRow">
+        <constructor>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="generation" javaType="_long"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="current_branch" javaType="java.lang.String"/>
+            <arg column="current_commit_hash" javaType="java.lang.String"/>
+            <arg column="retry_count" javaType="_int"/>
+            <arg column="next_retry_at" javaType="java.time.Instant"/>
+            <arg column="lease_token" javaType="java.lang.String"/>
+            <arg column="lease_until" javaType="java.time.Instant"/>
+            <arg column="last_error" javaType="java.lang.String"/>
+            <arg column="synced_at" javaType="java.time.Instant"/>
+            <arg column="verified_at" javaType="java.time.Instant"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="StateColumns">
+        app_id, repository_id, active_generation, pending_generation, next_generation, lock_version,
+        status, operation_type, trace_id, last_error, created_at, updated_at
+    </sql>
+    <sql id="GenerationColumns">
+        app_id, repository_id, generation, branch, directory_path, description, merge_enabled,
+        target_commit_hash, status, operation_type, operated_by_user_id, operation_id, trace_id,
+        last_error, activated_at, created_at, updated_at
+    </sql>
+    <sql id="ReplicaColumns">
+        app_id, repository_id, generation, linux_server_id, status, current_branch, current_commit_hash,
+        retry_count, next_retry_at, lease_token, lease_until, last_error, synced_at, verified_at,
+        created_at, updated_at
+    </sql>
+
+    <insert id="insertStateIfAbsent" databaseId="postgresql">
+        insert into application_automation_references(
+            app_id, repository_id, active_generation, pending_generation, next_generation, lock_version,
+            status, operation_type, trace_id, created_at, updated_at
+        ) values (
+            #{appId}, #{repositoryId}, null, null, 1, 0,
+            'UNINITIALIZED', 'CONFIGURE', #{traceId}, #{now}, #{now}
+        ) on conflict (app_id, repository_id) do nothing
+    </insert>
+
+    <insert id="insertStateIfAbsent" databaseId="h2">
+        merge into application_automation_references as target
+        using (values (#{appId}, #{repositoryId}, #{traceId}, cast(#{now} as timestamp)))
+            as source(app_id, repository_id, trace_id, updated_at)
+        on target.app_id = source.app_id and target.repository_id = source.repository_id
+        when not matched then insert (
+            app_id, repository_id, active_generation, pending_generation, next_generation, lock_version,
+            status, operation_type, trace_id, created_at, updated_at
+        ) values (
+            source.app_id, source.repository_id, null, null, 1, 0,
+            'UNINITIALIZED', 'CONFIGURE', source.trace_id, source.updated_at, source.updated_at
+        )
+    </insert>
+
+    <select id="findState" resultMap="StateRowMap">
+        select <include refid="StateColumns"/>
+        from application_automation_references
+        where app_id = #{appId} and repository_id = #{repositoryId}
+    </select>
+
+    <select id="findGeneration" resultMap="GenerationRowMap">
+        select <include refid="GenerationColumns"/>
+        from application_automation_reference_generations
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+    </select>
+
+    <select id="findByOperationId" resultMap="GenerationRowMap">
+        select <include refid="GenerationColumns"/>
+        from application_automation_reference_generations
+        where app_id = #{appId} and repository_id = #{repositoryId} and operation_id = #{operationId}
+    </select>
+
+    <select id="findRecoverableGenerations" resultMap="GenerationRowMap">
+        select generation_row.*
+        from application_automation_reference_generations generation_row
+        join application_automation_references state
+          on state.app_id = generation_row.app_id and state.repository_id = generation_row.repository_id
+        where generation_row.status in ('SYNCHRONIZING', 'READY')
+          and (state.pending_generation = generation_row.generation
+               or state.active_generation = generation_row.generation)
+        order by generation_row.updated_at, generation_row.app_id, generation_row.repository_id, generation_row.generation
+        limit #{limit}
+    </select>
+
+    <select id="findReplicas" resultMap="ReplicaRowMap">
+        select <include refid="ReplicaColumns"/>
+        from application_automation_reference_replicas
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+        order by linux_server_id
+    </select>
+
+    <select id="findKnownServerIds" resultType="java.lang.String">
+        select distinct linux_server_id
+        from application_automation_reference_replicas
+        where app_id = #{appId} and repository_id = #{repositoryId}
+        order by linux_server_id
+    </select>
+
+    <update id="reserveState">
+        update application_automation_references
+        set pending_generation = #{row.generation},
+            next_generation = #{row.generation} + 1,
+            lock_version = lock_version + 1,
+            status = case when active_generation is null then 'INITIALIZING' else 'SYNCHRONIZING' end,
+            operation_type = #{row.operationType},
+            trace_id = #{row.traceId},
+            last_error = null,
+            updated_at = #{now}
+        where app_id = #{row.appId}
+          and repository_id = #{row.repositoryId}
+          and pending_generation is null
+          and next_generation = #{row.generation}
+          and lock_version = #{expectedLockVersion}
+          and ((active_generation is null and #{expectedActiveGeneration} = 0)
+               or active_generation = #{expectedActiveGeneration})
+          and status in ('UNINITIALIZED', 'READY', 'FAILED')
+    </update>
+
+    <insert id="insertGeneration">
+        insert into application_automation_reference_generations(
+            app_id, repository_id, generation, branch, directory_path, description, merge_enabled,
+            target_commit_hash, status, operation_type, operated_by_user_id, operation_id, trace_id,
+            last_error, activated_at, created_at, updated_at
+        ) values (
+            #{row.appId}, #{row.repositoryId}, #{row.generation}, #{row.branch}, #{row.directoryPath},
+            #{row.description}, #{row.mergeEnabled}, #{row.targetCommitHash}, #{row.status},
+            #{row.operationType}, #{row.operatedByUserId}, #{row.operationId}, #{row.traceId},
+            #{row.lastError}, #{row.activatedAt}, #{row.createdAt}, #{row.updatedAt}
+        )
+    </insert>
+
+    <update id="beginVerification">
+        update application_automation_references
+        set lock_version = lock_version + 1,
+            status = 'VERIFYING',
+            operation_type = 'VERIFY_POINTERS',
+            trace_id = #{traceId},
+            last_error = null,
+            updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId}
+          and active_generation = #{generation} and pending_generation is null
+          and lock_version = #{expectedLockVersion}
+          and status in ('READY', 'FAILED')
+    </update>
+
+    <update id="resetReplicaForVerification">
+        update application_automation_reference_replicas
+        set status = 'PENDING', retry_count = 0, next_retry_at = null,
+            lease_token = null, lease_until = null, last_error = null, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId}
+    </update>
+
+    <insert id="upsertTarget" databaseId="postgresql">
+        insert into application_automation_reference_replicas(
+            app_id, repository_id, generation, linux_server_id, status, retry_count, created_at, updated_at
+        ) values (
+            #{appId}, #{repositoryId}, #{generation}, #{linuxServerId}, 'PENDING', 0, #{now}, #{now}
+        ) on conflict (app_id, repository_id, generation, linux_server_id) do update set
+            status = case when application_automation_reference_replicas.status = 'DEFERRED'
+                          then 'PENDING' else application_automation_reference_replicas.status end,
+            retry_count = case when application_automation_reference_replicas.status = 'DEFERRED'
+                               then 0 else application_automation_reference_replicas.retry_count end,
+            next_retry_at = case when application_automation_reference_replicas.status = 'DEFERRED'
+                                 then null else application_automation_reference_replicas.next_retry_at end,
+            lease_token = case when application_automation_reference_replicas.status = 'DEFERRED'
+                               then null else application_automation_reference_replicas.lease_token end,
+            lease_until = case when application_automation_reference_replicas.status = 'DEFERRED'
+                               then null else application_automation_reference_replicas.lease_until end,
+            last_error = case when application_automation_reference_replicas.status = 'DEFERRED'
+                              then null else application_automation_reference_replicas.last_error end,
+            updated_at = case when application_automation_reference_replicas.status = 'DEFERRED'
+                              then excluded.updated_at else application_automation_reference_replicas.updated_at end
+    </insert>
+
+    <insert id="upsertTarget" databaseId="h2">
+        merge into application_automation_reference_replicas as target
+        using (values (
+            #{appId}, #{repositoryId}, #{generation}, #{linuxServerId}, cast(#{now} as timestamp)
+        )) as source(app_id, repository_id, generation, linux_server_id, updated_at)
+        on target.app_id = source.app_id and target.repository_id = source.repository_id
+           and target.generation = source.generation and target.linux_server_id = source.linux_server_id
+        when matched and target.status = 'DEFERRED' then update set
+            status = 'PENDING', retry_count = 0, next_retry_at = null, lease_token = null,
+            lease_until = null, last_error = null, updated_at = source.updated_at
+        when not matched then insert (
+            app_id, repository_id, generation, linux_server_id, status, retry_count, created_at, updated_at
+        ) values (
+            source.app_id, source.repository_id, source.generation, source.linux_server_id,
+            'PENDING', 0, source.updated_at, source.updated_at
+        )
+    </insert>
+
+    <update id="deferOfflineReplicas">
+        update application_automation_reference_replicas
+        set status = 'DEFERRED', lease_token = null, lease_until = null, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and status in ('PENDING', 'RETRY_WAIT', 'PROCESSING')
+        <if test="liveServerIds != null and liveServerIds.size() > 0">
+          and linux_server_id not in
+          <foreach collection="liveServerIds" item="serverId" open="(" separator="," close=")">
+              #{serverId}
+          </foreach>
+        </if>
+    </update>
+
+    <select id="findClaimableReplicas" resultMap="ReplicaRowMap">
+        select replica.*
+        from application_automation_reference_replicas replica
+        join application_automation_references state
+          on state.app_id = replica.app_id and state.repository_id = replica.repository_id
+        where replica.linux_server_id = #{linuxServerId}
+          and state.status in ('INITIALIZING', 'VERIFYING', 'SYNCHRONIZING', 'READY')
+          and (state.pending_generation = replica.generation or state.active_generation = replica.generation)
+          and (
+            replica.status in ('PENDING', 'DEFERRED')
+            or (replica.status = 'RETRY_WAIT' and (replica.next_retry_at is null or replica.next_retry_at &lt;= #{now}))
+            or (replica.status = 'PROCESSING' and replica.lease_until &lt;= #{now})
+          )
+        order by replica.updated_at, replica.app_id, replica.repository_id, replica.generation
+        limit #{limit}
+    </select>
+
+    <update id="claimReplica">
+        update application_automation_reference_replicas
+        set status = 'PROCESSING', lease_token = #{leaseToken}, lease_until = #{leaseUntil}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId}
+          and (
+            status in ('PENDING', 'DEFERRED')
+            or (status = 'RETRY_WAIT' and (next_retry_at is null or next_retry_at &lt;= #{now}))
+            or (status = 'PROCESSING' and lease_until &lt;= #{now})
+          )
+          and exists (
+            select 1 from application_automation_references state
+            where state.app_id = #{appId} and state.repository_id = #{repositoryId}
+              and state.status in ('INITIALIZING', 'VERIFYING', 'SYNCHRONIZING', 'READY')
+              and (state.pending_generation = #{generation} or state.active_generation = #{generation})
+          )
+    </update>
+
+    <update id="renewLease">
+        update application_automation_reference_replicas
+        set lease_until = #{leaseUntil}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId} and status = 'PROCESSING'
+          and lease_token = #{leaseToken} and lease_until &gt; #{now}
+    </update>
+
+    <update id="markReady">
+        update application_automation_reference_replicas
+        set status = 'READY', current_branch = #{branch}, current_commit_hash = #{commitHash},
+            retry_count = 0, next_retry_at = null, lease_token = null, lease_until = null,
+            last_error = null, synced_at = #{syncedAt}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId} and status = 'PROCESSING'
+          and lease_token = #{leaseToken} and lease_until &gt; #{now}
+    </update>
+
+    <update id="markRetry">
+        update application_automation_reference_replicas
+        set status = 'RETRY_WAIT', retry_count = #{retryCount}, next_retry_at = #{nextRetryAt},
+            lease_token = null, lease_until = null, last_error = #{lastError}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId} and status = 'PROCESSING'
+          and lease_token = #{leaseToken} and lease_until &gt; #{now}
+    </update>
+
+    <update id="markBlocked">
+        update application_automation_reference_replicas
+        set status = 'BLOCKED', next_retry_at = null, lease_token = null, lease_until = null,
+            last_error = #{lastError}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId} and status = 'PROCESSING'
+          and lease_token = #{leaseToken} and lease_until &gt; #{now}
+    </update>
+
+    <update id="markVerificationResult">
+        update application_automation_reference_replicas
+        set status = #{status}, current_branch = #{actualBranch}, current_commit_hash = #{actualCommitHash},
+            retry_count = 0, next_retry_at = null, lease_token = null, lease_until = null,
+            last_error = #{lastError}, verified_at = #{verifiedAt}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId} and status = 'PROCESSING'
+          and lease_token = #{leaseToken} and lease_until &gt; #{now}
+    </update>
+
+    <update id="updateGenerationResult">
+        update application_automation_reference_generations
+        set status = #{status}, last_error = #{lastError},
+            activated_at = case when #{status} = 'READY' and activated_at is null then #{activatedAt} else activated_at end,
+            updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and status in ('SYNCHRONIZING', 'READY')
+    </update>
+
+    <update id="completeState">
+        update application_automation_references
+        set active_generation = case
+                when #{status} = 'READY' and pending_generation = #{generation} then #{generation}
+                else active_generation end,
+            pending_generation = case when pending_generation = #{generation} then null else pending_generation end,
+            lock_version = lock_version + 1,
+            status = #{status},
+            last_error = #{lastError},
+            updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId}
+          and status in ('INITIALIZING', 'VERIFYING', 'SYNCHRONIZING')
+          and (pending_generation = #{generation} or active_generation = #{generation})
+    </update>
+
+    <update id="terminateState">
+        update application_automation_references
+        set pending_generation = case when pending_generation = #{generation} then null else pending_generation end,
+            lock_version = lock_version + 1,
+            status = 'FAILED', last_error = #{lastError}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId}
+          and lock_version = #{expectedLockVersion}
+          and status in ('INITIALIZING', 'VERIFYING', 'SYNCHRONIZING')
+          and (pending_generation = #{generation} or active_generation = #{generation})
+    </update>
+
+    <update id="terminateGeneration">
+        update application_automation_reference_generations
+        set status = 'FAILED', last_error = #{lastError}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and status = 'SYNCHRONIZING'
+    </update>
+
+    <update id="terminateReplicas">
+        update application_automation_reference_replicas
+        set status = 'BLOCKED', next_retry_at = null, lease_token = null, lease_until = null,
+            last_error = #{lastError}, updated_at = #{now}
+        where app_id = #{appId} and repository_id = #{repositoryId} and generation = #{generation}
+          and status in ('PENDING', 'PROCESSING', 'RETRY_WAIT', 'DEFERRED')
+    </update>
+
+    <delete id="deleteRunLeases">
+        delete from application_automation_reference_run_leases
+        where run_id = #{runId}
+    </delete>
+
+    <insert id="insertRunLease">
+        insert into application_automation_reference_run_leases(
+            run_id, app_id, repository_id, generation, linux_server_id, created_at
+        ) values (
+            #{runId}, #{appId}, #{repositoryId}, #{generation}, #{linuxServerId}, #{now}
+        )
+    </insert>
+</mapper>

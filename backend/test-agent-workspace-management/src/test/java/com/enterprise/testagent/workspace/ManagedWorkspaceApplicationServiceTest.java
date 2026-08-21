@@ -45,8 +45,6 @@ import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVers
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplicaId;
-import com.enterprise.testagent.domain.managedworkspace.AutomationWorkspaceActiveVersion;
-import com.enterprise.testagent.domain.managedworkspace.AutomationWorkspaceActiveVersionRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
@@ -57,8 +55,6 @@ import com.enterprise.testagent.domain.managedworkspace.WorkspaceReplicaSyncStat
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncDirection;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncRecord;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncStatus;
-import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
-import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -532,48 +528,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void automationRepositoryWorkspaceAcceptsArbitraryBranchDirectoryAndExplicitVersion() {
-        CodeRepository repository = new CodeRepository(
-                new CodeRepositoryId("repo_1"),
-                "https://example.com/automation.git",
-                "自动化代码库",
-                "automation",
-                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
-                CodeRepositoryDeploymentMode.EXTERNAL.value(),
-                true,
-                Instant.now(),
-                Instant.now());
-        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true, repository, List.of());
-        FakeGitWorkspaceService git = new FakeGitWorkspaceService("scripts/e2e");
-        ManagedWorkspaceApplicationService service = service(
-                configuration,
-                new FakeManagedWorkspaceRepository(),
-                new FakeWorkspaceRepository(),
-                git);
-
-        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse response =
-                service.createApplicationWorkspaceWithInitialVersion(
-                        "app_gcms",
-                        "repo_1",
-                        "release/automation-v2",
-                        "scripts/e2e",
-                        "自动化测试",
-                        false,
-                        "20260812",
-                        null,
-                        new UserId("usr_1"),
-                        "127.0.0.1",
-                        "trace_automation_workspace");
-
-        assertThat(repository.standard()).isFalse();
-        assertThat(response.branch()).isEqualTo("release/automation-v2");
-        assertThat(response.directoryPath()).isEqualTo("scripts/e2e");
-        assertThat(response.initialVersion().version()).isEqualTo("20260812");
-        assertThat(git.clonedBranch).isEqualTo("release/automation-v2");
-    }
-
-    @Test
-    void automationRepositoryActivatesOnlyFirstVersionAndRejectsPersonalWorktreeEntry() {
+    void automationRepositoryIsRejectedByLegacyWorkspaceTemplateEntry() {
         CodeRepository repository = new CodeRepository(
                 new CodeRepositoryId("repo_1"),
                 "https://example.com/automation.git",
@@ -584,268 +539,18 @@ class ManagedWorkspaceApplicationServiceTest {
                 false,
                 Instant.now(),
                 Instant.now());
-        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
-        FakeAutomationActiveVersionRepository activeVersions = new FakeAutomationActiveVersionRepository();
         ManagedWorkspaceApplicationService service = service(
                 new FakeConfigurationRepository(true, repository, List.of()),
-                managed,
-                new FakeWorkspaceRepository(),
-                new FakeGitWorkspaceService("scripts/e2e"));
-        service.setAutomationActiveVersionRepository(activeVersions);
-
-        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse first = service
-                .createApplicationWorkspaceWithInitialVersion(
-                        "app_gcms", "repo_1", "release/v1", "scripts/e2e", "自动化测试", false,
-                        "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_auto_v1")
-                .initialVersion();
-        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse second = service.createVersion(
-                "app_gcms", first.applicationWorkspaceId(), "20260819", "release/v2", new UserId("usr_1"), "trace_auto_v2");
-
-        assertThat(activeVersions.active.versionId().value()).isEqualTo(first.versionId());
-        assertThat(first.repoRootPath()).isNull();
-        assertThat(first.workspaceRootPath()).isNull();
-        assertThat(first.runtimeWorkspace()).isNull();
-        assertThat(second.repoRootPath()).isNull();
-        assertThat(second.workspaceRootPath()).isNull();
-        assertThat(second.runtimeWorkspace()).isNull();
-        assertThat(managed.globalPreference).isNull();
-        assertThat(managed.applicationPreference).isNull();
-        assertThat(service.listPersonalWorkspaces(second.versionId(), new UserId("usr_1"))).isEmpty();
-        assertThatThrownBy(() -> service.ensureDefaultPersonalWorkspace(
-                second.versionId(), new UserId("usr_1"), "trace_auto_personal"))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
-    }
-
-    @Test
-    void automationVersionActivationValidatesOwnershipAndIsIdempotent() {
-        CodeRepository repository = new CodeRepository(
-                new CodeRepositoryId("repo_1"),
-                "https://example.com/automation.git",
-                "自动化代码库",
-                "automation",
-                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
-                CodeRepositoryDeploymentMode.EXTERNAL.value(),
-                false,
-                Instant.now(),
-                Instant.now());
-        FakeAutomationActiveVersionRepository activeVersions = new FakeAutomationActiveVersionRepository();
-        ManagedWorkspaceApplicationService service = service(
-                new FakeConfigurationRepository(true, repository, List.of()),
-                new FakeManagedWorkspaceRepository(),
-                new FakeWorkspaceRepository(),
-                new FakeGitWorkspaceService("scripts/e2e"));
-        service.setAutomationActiveVersionRepository(activeVersions);
-        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse first = service
-                .createApplicationWorkspaceWithInitialVersion(
-                        "app_gcms", "repo_1", "release/v1", "scripts/e2e", "自动化测试", false,
-                        "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_auto_v1")
-                .initialVersion();
-        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse second = service.createVersion(
-                "app_gcms", first.applicationWorkspaceId(), "20260819", "release/v2", new UserId("usr_1"), "trace_auto_v2");
-
-        ManagedWorkspaceResponses.AutomationActiveVersionResponse switched = service.activateAutomationVersion(
-                "app_gcms", first.applicationWorkspaceId(), second.versionId(), new UserId("usr_1"));
-        Instant firstActivatedAt = switched.activatedAt();
-        ManagedWorkspaceResponses.AutomationActiveVersionResponse repeated = service.activateAutomationVersion(
-                "app_gcms", first.applicationWorkspaceId(), second.versionId(), new UserId("usr_1"));
-
-        assertThat(switched.version()).isEqualTo("20260819");
-        assertThat(repeated.activatedAt()).isEqualTo(firstActivatedAt);
-        assertThat(activeVersions.activateCalls).isEqualTo(1);
-        assertThat(first.versionId()).isNotEqualTo(second.versionId());
-    }
-
-    @Test
-    void automationVersionSynchronizationProjectsEveryOnlineServerAndReusesReplicaBroadcast() {
-        CodeRepository repository = new CodeRepository(
-                new CodeRepositoryId("repo_1"),
-                "https://example.com/automation.git",
-                "自动化代码库",
-                "automation",
-                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
-                CodeRepositoryDeploymentMode.EXTERNAL.value(),
-                false,
-                Instant.now(),
-                Instant.now());
-        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
-        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
-        FakeGitWorkspaceService git = new FakeGitWorkspaceService("scripts/e2e");
-        git.originUrlValue = "https://example.com/automation.git";
-        ManagedWorkspaceApplicationService service = service(
-                new FakeConfigurationRepository(true, repository, List.of()),
-                managed,
-                new FakeWorkspaceRepository(),
-                git,
-                publisher);
-        OpencodeProcessHeartbeatStore heartbeats = mock(OpencodeProcessHeartbeatStore.class);
-        when(heartbeats.liveBackendSnapshots()).thenReturn(List.of());
-        when(heartbeats.liveBackendServerIds()).thenReturn(Set.of(
-                new LinuxServerId("127.0.0.1"),
-                new LinuxServerId("10.8.0.12")));
-        service.setOpencodeProcessHeartbeatStore(heartbeats);
-
-        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse created =
-                service.createApplicationWorkspaceWithInitialVersion(
-                        "app_gcms", "repo_1", "release/v1", "scripts/e2e", "自动化测试", false,
-                        "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_auto_create");
-        publisher.events.clear();
-
-        ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse pending =
-                service.synchronizeAutomationVersion(
-                        "app_gcms",
-                        created.workspaceId(),
-                        created.initialVersion().versionId(),
-                        new UserId("usr_1"),
-                        "trace_auto_sync");
-
-        assertThat(pending.status()).isEqualTo("SYNCHRONIZING");
-        assertThat(pending.readyServerCount()).isEqualTo(1);
-        assertThat(pending.targetServerCount()).isEqualTo(2);
-        assertThat(pending.servers()).extracting(
-                ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse::linuxServerId,
-                ManagedWorkspaceResponses.AutomationVersionServerSynchronizationResponse::status)
-                .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("10.8.0.12", "PENDING"),
-                        org.assertj.core.groups.Tuple.tuple("127.0.0.1", "READY"));
-        assertThat(publisher.events).singleElement().satisfies(event -> {
-            assertThat(event.type()).isEqualTo("workspace.version.sync-requested");
-            assertThat(event.payload()).containsEntry("reason", "AUTOMATION_REFERENCE_SYNCHRONIZE");
-            assertThat(event.payload()).containsEntry("versionId", created.initialVersion().versionId());
-        });
-
-        ApplicationWorkspaceVersionReplica local = managed.replicas.stream()
-                .filter(replica -> replica.versionId().value().equals(created.initialVersion().versionId()))
-                .findFirst()
-                .orElseThrow();
-        managed.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
-                new ApplicationWorkspaceVersionReplicaId("awr_remote"),
-                local.versionId(),
-                "10.8.0.12",
-                local.repoRootPath(),
-                local.workspaceRootPath(),
-                new WorkspaceId("wrk_remote"),
-                created.initialVersion().targetCommitHash(),
-                WorkspaceReplicaSyncStatus.READY,
-                null,
-                Instant.now(),
-                "trace_auto_remote",
-                Instant.now(),
-                Instant.now()));
-
-        ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse ready =
-                service.automationVersionSynchronizationStatus(
-                        "app_gcms",
-                        created.workspaceId(),
-                        created.initialVersion().versionId(),
-                        new UserId("usr_1"),
-                        "trace_auto_status");
-        assertThat(ready.status()).isEqualTo("READY");
-        assertThat(ready.readyServerCount()).isEqualTo(2);
-        assertThat(ready.servers()).allMatch(server -> Boolean.TRUE.equals(server.matchesTarget()));
-    }
-
-    @Test
-    void automationVersionSynchronizationQueuesSlowLocalGitAndPersistsProcessingBeforeReturning() {
-        CodeRepository repository = new CodeRepository(
-                new CodeRepositoryId("repo_1"),
-                "https://example.com/automation.git",
-                "自动化代码库",
-                "automation",
-                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
-                CodeRepositoryDeploymentMode.EXTERNAL.value(),
-                false,
-                Instant.now(),
-                Instant.now());
-        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
-        FakeGitWorkspaceService git = new FakeGitWorkspaceService("scripts/e2e");
-        git.originUrlValue = "https://example.com/automation.git";
-        ManagedWorkspaceApplicationService service = service(
-                new FakeConfigurationRepository(true, repository, List.of()),
-                managed,
-                new FakeWorkspaceRepository(),
-                git,
-                new RecordingBroadcastPublisher());
-        OpencodeProcessHeartbeatStore heartbeats = mock(OpencodeProcessHeartbeatStore.class);
-        when(heartbeats.liveBackendSnapshots()).thenReturn(List.of());
-        when(heartbeats.liveBackendServerIds()).thenReturn(Set.of(new LinuxServerId("127.0.0.1")));
-        service.setOpencodeProcessHeartbeatStore(heartbeats);
-        ManagedWorkspaceReplicaTaskDispatcher dispatcher = mock(ManagedWorkspaceReplicaTaskDispatcher.class);
-        when(dispatcher.dispatch(any(String.class), any(String.class), any(Runnable.class))).thenReturn(true);
-        service.setManagedWorkspaceReplicaTaskDispatcher(dispatcher);
-
-        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse created =
-                service.createApplicationWorkspaceWithInitialVersion(
-                        "app_gcms", "repo_1", "release/v1", "scripts/e2e", "自动化测试", false,
-                        "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_auto_create");
-        managed.replicas.clear();
-
-        ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse processing =
-                service.synchronizeAutomationVersion(
-                        "app_gcms",
-                        created.workspaceId(),
-                        created.initialVersion().versionId(),
-                        new UserId("usr_1"),
-                        "trace_auto_async");
-
-        assertThat(processing.status()).isEqualTo("SYNCHRONIZING");
-        assertThat(processing.readyServerCount()).isZero();
-        assertThat(processing.servers()).singleElement().satisfies(server ->
-                assertThat(server.status()).isEqualTo("PROCESSING"));
-        assertThat(managed.replicas).singleElement().satisfies(replica -> {
-            assertThat(replica.syncStatus()).isEqualTo(WorkspaceReplicaSyncStatus.SYNCING);
-            assertThat(replica.traceId()).isEqualTo("trace_auto_async");
-        });
-
-        ArgumentCaptor<Runnable> task = ArgumentCaptor.forClass(Runnable.class);
-        verify(dispatcher).dispatch(eq(created.initialVersion().versionId()), eq("trace_auto_async"), task.capture());
-        task.getValue().run();
-
-        ManagedWorkspaceResponses.AutomationVersionSynchronizationResponse ready =
-                service.automationVersionSynchronizationStatus(
-                        "app_gcms",
-                        created.workspaceId(),
-                        created.initialVersion().versionId(),
-                        new UserId("usr_1"),
-                        "trace_auto_status");
-        assertThat(ready.status()).isEqualTo("READY");
-        assertThat(ready.readyServerCount()).isEqualTo(1);
-    }
-
-    @Test
-    void automationRepositoryWorkspaceRejectsTestRepositoryDirectoryCreationFlag() {
-        CodeRepository repository = new CodeRepository(
-                new CodeRepositoryId("repo_1"),
-                "https://example.com/automation.git",
-                "自动化代码库",
-                "automation",
-                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
-                CodeRepositoryDeploymentMode.EXTERNAL.value(),
-                false,
-                Instant.now(),
-                Instant.now());
-        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true, repository, List.of());
-        ManagedWorkspaceApplicationService service = service(
-                configuration,
                 new FakeManagedWorkspaceRepository(),
                 new FakeWorkspaceRepository(),
                 new FakeGitWorkspaceService("scripts/e2e"));
 
         assertThatThrownBy(() -> service.createApplicationWorkspaceWithInitialVersion(
-                "app_gcms",
-                "repo_1",
-                "release/automation-v2",
-                "scripts/e2e",
-                "自动化测试",
-                true,
-                "20260812",
-                null,
-                new UserId("usr_1"),
-                "127.0.0.1",
-                "trace_automation_directory_new"))
+                "app_gcms", "repo_1", "release/v2", "scripts/e2e", "自动化测试", false,
+                "20260812", null, new UserId("usr_1"), "127.0.0.1", "trace_automation"))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
-                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
-                    assertThat(exception.getMessage()).isEqualTo("只有测试工作库支持新增一级目录");
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+                    assertThat(exception.getMessage()).contains("应用级引用配置");
                 });
     }
 
@@ -1378,7 +1083,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void workspaceSwitchTemplatesExposeAutomationRepositoryType() {
+    void workspaceSwitchTemplatesAlwaysExcludeAutomationRepositories() {
         Instant now = Instant.parse("2026-08-13T00:00:00Z");
         CodeRepository automationRepository = new CodeRepository(
                 new CodeRepositoryId("repo_automation"),
@@ -1396,13 +1101,49 @@ class ManagedWorkspaceApplicationServiceTest {
                 new FakeWorkspaceRepository(),
                 new FakeGitWorkspaceService("F-GCMS/workspace"));
 
-        assertThat(service.listTemplates("app_gcms", new UserId("usr_1")))
-                .singleElement()
-                .satisfies(template -> {
-                    assertThat(template.standard()).isFalse();
-                    assertThat(template.repositoryType())
-                            .isEqualTo(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value());
-                });
+        assertThat(service.listTemplates("app_gcms", new UserId("usr_1"))).isEmpty();
+    }
+
+    @Test
+    void legacyReplicaReconcilerNeverRecreatesAutomationWorkspace() {
+        Instant now = Instant.parse("2026-08-21T00:00:00Z");
+        CodeRepository automationRepository = new CodeRepository(
+                new CodeRepositoryId("repo_automation"),
+                "https://example.com/automation.git",
+                "自动化代码库",
+                "automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                now,
+                now);
+        FakeConfigurationRepository configuration =
+                new FakeConfigurationRepository(true, automationRepository, List.of());
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        managed.versions.add(new ApplicationWorkspaceVersion(
+                new ApplicationWorkspaceVersionId("awv_automation_history"),
+                new ApplicationWorkspaceId("awp_1"),
+                new ApplicationId("app_gcms"),
+                automationRepository.repositoryId(),
+                "20260821",
+                "main",
+                "appworkspace:20260821/automation",
+                "appworkspace:20260821/automation/src/test",
+                new WorkspaceId("wrk_automation_history"),
+                new UserId("usr_1"),
+                ManagedWorkspaceStatus.ACTIVE,
+                "commit-history",
+                now,
+                now,
+                now));
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("src/test");
+        ManagedWorkspaceApplicationService service = service(
+                configuration, managed, new FakeWorkspaceRepository(), git);
+
+        service.reconcileLocalReplicas("trace_reconcile_history");
+
+        assertThat(git.clonedBranch).isNull();
+        assertThat(managed.replicas).isEmpty();
     }
 
     @Test
@@ -4359,42 +4100,6 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void publish(ServerBroadcastEvent event) {
             events.add(event);
-        }
-    }
-
-    private static final class FakeAutomationActiveVersionRepository
-            implements AutomationWorkspaceActiveVersionRepository {
-        private AutomationWorkspaceActiveVersion active;
-        private int activateCalls;
-
-        @Override
-        public Optional<AutomationWorkspaceActiveVersion> find(ApplicationWorkspaceId applicationWorkspaceId) {
-            return active == null || !active.applicationWorkspaceId().equals(applicationWorkspaceId)
-                    ? Optional.empty()
-                    : Optional.of(active);
-        }
-
-        @Override
-        public List<AutomationWorkspaceActiveVersion> findByApplicationWorkspaceIds(
-                List<ApplicationWorkspaceId> applicationWorkspaceIds) {
-            return active != null && applicationWorkspaceIds.contains(active.applicationWorkspaceId())
-                    ? List.of(active)
-                    : List.of();
-        }
-
-        @Override
-        public AutomationWorkspaceActiveVersion activate(AutomationWorkspaceActiveVersion activeVersion) {
-            activateCalls += 1;
-            active = activeVersion;
-            return active;
-        }
-
-        @Override
-        public AutomationWorkspaceActiveVersion initializeIfAbsent(AutomationWorkspaceActiveVersion activeVersion) {
-            if (active == null) {
-                active = activeVersion;
-            }
-            return active;
         }
     }
 

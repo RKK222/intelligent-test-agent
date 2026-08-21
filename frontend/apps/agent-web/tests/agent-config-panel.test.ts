@@ -157,6 +157,14 @@ describe("AgentConfigPanel", () => {
     expect(apiClientMock.listPublicAgentWorktrees).not.toHaveBeenCalled();
     expect(apiClientMock.createPublicAgentWorktree).not.toHaveBeenCalled();
     expect(view.getByText("创建公共 worktree")).toBeTruthy();
+    expect(await view.findByText(/公共 Agent 暂不可用：未初始化/)).toBeTruthy();
+  });
+
+  it("shows an explicit empty state when the readable public directory has no entries", async () => {
+    const { view } = renderPanel(undefined, { canWrite: false });
+
+    expect(await view.findByText("公共 Agent 目录为空。")).toBeTruthy();
+    expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith("", undefined, "linux-1");
   });
 
   it("does not fall back to the shared public directory when the admin worktree cannot be prepared", async () => {

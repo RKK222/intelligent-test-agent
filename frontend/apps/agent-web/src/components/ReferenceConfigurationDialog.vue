@@ -102,7 +102,7 @@ function handleAutomationOperationState(state: { open: boolean; canClose: boolea
 
 const dialogDescription = computed(() => activeReferenceKind.value === "asset"
   ? "选择应用资产目录并应用到当前工作树；点选版本库不会自动同步。"
-  : "选择自动化代码库、版本和目录，并应用到当前工作树的 OpenCode 配置。"
+  : "选择自动化代码库、分支和目录，并应用到当前工作树的 OpenCode 配置。"
 );
 
 let dialogGeneration = 0;

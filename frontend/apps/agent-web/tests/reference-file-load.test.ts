@@ -22,22 +22,24 @@ describe("reference file tab identity", () => {
     });
   });
 
-  it("pins automation tabs to the version id used when the file was opened", () => {
+  it("pins automation tabs to the application repository generation used when the file was opened", () => {
     const info = referenceFileInfo(referenceTabPath({
       workspaceId: "wrk_1",
       referenceAlias: "接口自动化",
       referencePath: "cases/login.robot",
       logicalPath: "自动化代码库/接口自动化/cases/login.robot",
       kind: "AUTOMATION_REFERENCE",
-      automationWorkspaceId: "awp_auto",
-      automationVersionId: "awv_20260819"
+      automationAppId: "app_demo",
+      automationRepositoryId: "repo_auto",
+      automationGeneration: 3
     }));
 
     expect(referenceLocatorFromTab(info)).toEqual({
       kind: "AUTOMATION_REFERENCE",
       path: "cases/login.robot",
-      automationWorkspaceId: "awp_auto",
-      automationVersionId: "awv_20260819"
+      automationAppId: "app_demo",
+      automationRepositoryId: "repo_auto",
+      automationGeneration: 3
     });
   });
 });

@@ -35,6 +35,7 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 class MyBatisSessionShareRepositoryIntegrationTest {
 
     private static final Instant NOW = Instant.parse("2026-08-09T08:00:00Z");
+    private static final Instant ACTIVE_NOW = Instant.now();
     private static final UserId OWNER = new UserId("usr_share_owner");
     private static final UserId MEMBER = new UserId("usr_share_member");
     private static final SessionId SESSION = new SessionId("ses_share_repository");
@@ -83,10 +84,10 @@ class MyBatisSessionShareRepositoryIntegrationTest {
         assertThat(repository.findByShareId(initial.shareId())).contains(initial);
 
         SessionShare updated = initial.update(
-                NOW.plus(Duration.ofDays(2)),
+                ACTIVE_NOW.plus(Duration.ofDays(2)),
                 List.of(SessionShareMembership.active(
-                        MEMBER, "ucid_share_member", "分享成员", false, NOW.plusSeconds(10))),
-                NOW.plusSeconds(10),
+                        MEMBER, "ucid_share_member", "分享成员", false, ACTIVE_NOW.plusSeconds(10))),
+                ACTIVE_NOW.plusSeconds(10),
                 "trace_share_update");
         assertThat(repository.update(updated, 0)).isTrue();
         assertThat(repository.update(updated, 0)).isFalse();
@@ -111,7 +112,7 @@ class MyBatisSessionShareRepositoryIntegrationTest {
                 });
 
         SessionShare removed = initial.update(
-                NOW.plus(Duration.ofDays(2)), List.of(), NOW.plusSeconds(20), "trace_share_remove");
+                ACTIVE_NOW.plus(Duration.ofDays(2)), List.of(), ACTIVE_NOW.plusSeconds(20), "trace_share_remove");
         assertThat(repository.update(removed, 0)).isTrue();
         assertThat(repository.findSharedWith(MEMBER, new PageRequest(1, 20)).items())
                 .singleElement()
@@ -181,10 +182,10 @@ class MyBatisSessionShareRepositoryIntegrationTest {
     private SessionShare share() {
         return SessionShare.create(
                 new SessionShareId("shr_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
-                SESSION, WORKSPACE, OWNER, NOW.plus(Duration.ofDays(1)),
+                SESSION, WORKSPACE, OWNER, ACTIVE_NOW.plus(Duration.ofDays(1)),
                 List.of(SessionShareMembership.active(
-                        MEMBER, "ucid_share_member", "分享成员", true, NOW)),
-                NOW, "trace_share_repository");
+                        MEMBER, "ucid_share_member", "分享成员", true, ACTIVE_NOW)),
+                ACTIVE_NOW, "trace_share_repository");
     }
 
     private void seedScope() {

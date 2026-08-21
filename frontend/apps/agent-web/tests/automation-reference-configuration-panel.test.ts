@@ -3,115 +3,75 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BackendApiError } from "@test-agent/backend-api";
 import AutomationReferenceConfigurationPanel from "../src/components/AutomationReferenceConfigurationPanel.vue";
 
-function repository() {
+function configuration(overrides: Record<string, unknown> = {}) {
   return {
-    repositoryId: "repo_automation",
-    gitUrl: "ssh://git.example.test/automation.git",
-    name: "接口自动化库",
-    englishName: "api-automation",
-    repositoryType: "AUTOMATION_CODE_REPOSITORY",
-    repositoryTypeLabel: "自动化代码库",
-    standard: false,
-    createdAt: "2026-08-01T00:00:00Z",
-    updatedAt: "2026-08-01T00:00:00Z"
-  };
-}
-
-function template() {
-  return {
-    workspaceId: "awp_auto",
-    appId: "app-demo",
-    repositoryId: "repo_automation",
+    generation: 3,
     branch: "main",
     directoryPath: "scripts/e2e",
-    workspaceName: "接口自动化",
-    enabled: true,
-    standard: false,
-    repositoryType: "AUTOMATION_CODE_REPOSITORY",
-    activeVersion: {
-      versionId: "awv_old",
-      version: "20260812",
-      branch: "main",
-      referencePath: "{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/awv_old/repository/scripts/e2e",
-      replicaStatus: "READY",
-      activatedAt: "2026-08-12T00:00:00Z"
-    },
-    createdAt: "2026-08-12T00:00:00Z",
-    updatedAt: "2026-08-12T00:00:00Z"
+    description: "接口自动化库 / main / scripts/e2e，只读自动化引用",
+    merge: false,
+    targetCommitHash: "abcdef1234567890",
+    alias: "automation-api-automation",
+    logicalPath: "{env:OPENCODE_REFERENCES_DIR}/automation/app-key/api-automation/3/scripts/e2e",
+    directoryName: "e2e",
+    activatedAt: "2026-08-21T00:00:00Z",
+    status: "READY",
+    ...overrides
   };
 }
 
-function version(versionId: string, value: string) {
+function repository(overrides: Record<string, unknown> = {}) {
   return {
-    versionId,
-    applicationWorkspaceId: "awp_auto",
     appId: "app-demo",
     repositoryId: "repo_automation",
-    version: value,
-    branch: "main",
-    status: "ACTIVE",
-    referencePath: `{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/${versionId}/repository/scripts/e2e`,
-    replicaStatus: "READY",
-    createdAt: "2026-08-12T00:00:00Z",
-    updatedAt: "2026-08-12T00:00:00Z"
-  };
-}
-
-function synchronization(versionId = "awv_old", overrides: Record<string, unknown> = {}) {
-  return {
-    applicationWorkspaceId: "awp_auto",
-    workspaceName: "接口自动化",
-    repositoryId: "repo_automation",
-    repositoryName: "接口自动化库",
-    versionId,
-    version: versionId === "awv_new" ? "20260819" : "20260812",
-    branch: "main",
-    targetCommitHash: "abc123",
+    name: "接口自动化库",
+    englishName: "api-automation",
+    gitUrl: "ssh://git.example.test/automation.git",
     status: "READY",
-    operation: "SYNCHRONIZE",
-    targetServerCount: 2,
-    readyServerCount: 2,
-    servers: [
-      { linuxServerId: "linux-a", serverName: "server-a", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" },
-      { linuxServerId: "linux-b", serverName: "server-b", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" }
-    ],
-    traceId: "trace_auto_sync",
+    operation: "CONFIGURE",
+    lockVersion: 4,
+    activeGeneration: 3,
+    pendingGeneration: null,
+    currentConfiguration: configuration(),
+    pendingConfiguration: null,
+    targetServerCount: 1,
+    readyServerCount: 1,
+    servers: [{
+      linuxServerId: "linux-a",
+      status: "READY",
+      online: true,
+      currentBranch: "main",
+      currentCommitHash: "abcdef1234567890",
+      matchesTarget: true,
+      syncedAt: "2026-08-21T00:00:00Z",
+      verifiedAt: null,
+      error: null
+    }],
+    traceId: null,
     message: null,
     ...overrides
   };
 }
 
+function tree() {
+  return [{
+    name: "scripts",
+    path: "scripts",
+    type: "directory",
+    children: [{ name: "e2e", path: "scripts/e2e", type: "directory", children: [] }]
+  }];
+}
+
 function api(overrides: Record<string, unknown> = {}) {
   return {
-    listApplicationRepositories: vi.fn().mockResolvedValue([repository()]),
-    listApplicationWorkspaces: vi.fn().mockResolvedValue([]),
-    listWorkspaceTemplates: vi.fn().mockResolvedValue([]),
-    listWorkspaceVersions: vi.fn().mockResolvedValue([]),
-    listRepositoryBranches: vi.fn().mockResolvedValue(["release/automation-v2"]),
-    getRepositoryTree: vi.fn().mockResolvedValue({
-      nodes: [{
-        name: "scripts",
-        path: "scripts",
-        type: "directory",
-        children: [{ name: "e2e", path: "scripts/e2e", type: "directory", children: [] }]
-      }]
-    }),
-    createApplicationWorkspace: vi.fn().mockResolvedValue({ operationId: "wco_auto", status: "ACCEPTED" }),
-    getWorkspaceCreateOperation: vi.fn().mockResolvedValue({
-      operationId: "wco_auto",
-      status: "SUCCEEDED",
-      currentStep: "COMPLETED",
-      steps: []
-    }),
-    createWorkspaceVersion: vi.fn().mockResolvedValue(version("awv_new", "20260819")),
-    activateAutomationWorkspaceVersion: vi.fn().mockResolvedValue({}),
-    synchronizeAutomationWorkspaceVersion: vi.fn().mockImplementation(
-      (_appId: string, _templateId: string, versionId: string) => Promise.resolve(synchronization(versionId))
-    ),
-    getAutomationWorkspaceVersionSynchronizationStatus: vi.fn().mockImplementation(
-      (_appId: string, _templateId: string, versionId: string) => Promise.resolve(synchronization(versionId))
-    ),
-    updateApplicationWorkspace: vi.fn().mockResolvedValue({}),
+    listAutomationReferenceRepositories: vi.fn().mockResolvedValue([repository()]),
+    getAutomationReferenceRepositoryStatus: vi.fn().mockResolvedValue(repository()),
+    listAutomationReferenceRepositoryBranches: vi.fn().mockResolvedValue(["main", "release/v2"]),
+    listAutomationReferenceRepositoryTree: vi.fn().mockResolvedValue(tree()),
+    configureAutomationReferenceRepository: vi.fn(),
+    synchronizeAutomationReferenceRepository: vi.fn(),
+    verifyAutomationReferenceRepository: vi.fn(),
+    terminateAutomationReferenceRepository: vi.fn(),
     readWorkspaceAgentFile: vi.fn().mockRejectedValue(new BackendApiError(404, {
       success: false,
       code: "FILE_NOT_FOUND",
@@ -136,353 +96,144 @@ describe("AutomationReferenceConfigurationPanel", () => {
     vi.useRealTimers();
   });
 
-  it("selects an arbitrary existing directory and creates an application-level readonly reference", async () => {
-    const mockApi = api();
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("42345678-1234-1234-1234-123456789abc");
-    const wrapper = render(mockApi);
+  it("uses the asset repository layout while keeping arbitrary nested directory selection", async () => {
+    const wrapper = render(api());
     await flushPromises();
 
-    expect(mockApi.listRepositoryBranches).toHaveBeenCalledWith("repo_automation");
-    expect(mockApi.getRepositoryTree).toHaveBeenCalledWith("app-demo", "repo_automation", "release/automation-v2");
-    await wrapper.get('button[aria-label="选择目录 scripts/e2e"]').trigger("click");
-    await wrapper.get('input[aria-label="自动化引用名称"]').setValue("接口回归");
-    await wrapper.get('input[aria-label="自动化引用版本日期"]').setValue("20260819");
-    await wrapper.get('button[aria-label="创建并应用自动化目录引用"]').trigger("click");
-    await flushPromises();
-
-    expect(mockApi.createApplicationWorkspace).toHaveBeenCalledWith("app-demo", {
-      repositoryId: "repo_automation",
-      branch: "release/automation-v2",
-      directoryPath: "scripts/e2e",
-      workspaceName: "接口回归",
-      version: "20260819",
-      operationId: "wco_42345678123412341234123456789abc"
-    });
-    expect(wrapper.emitted("changed")).toBeTruthy();
+    expect(wrapper.text()).toContain("1/1 台就绪");
+    expect(wrapper.text()).toContain("目标 Git 指针");
+    expect(wrapper.text()).toContain("实际 HEAD");
+    expect(wrapper.text()).toContain("更新副本");
+    expect(wrapper.text()).toContain("刷新 Git 指针");
+    expect(wrapper.text()).toContain("切换分支");
+    expect(wrapper.get('input[aria-label="目录名称（sdd-folder-name）"]').element).toHaveProperty("value", "e2e");
+    expect(wrapper.text()).not.toContain("历史版本");
+    expect(wrapper.text()).not.toContain("上一次引用");
   });
 
-  it("shows configured versions and lets an administrator activate another version", async () => {
-    const configuredTemplate = template();
+  it("clicking another repository only selects it and never starts synchronization", async () => {
+    const second = repository({
+      repositoryId: "repo_ui",
+      name: "UI 自动化库",
+      englishName: "ui-automation",
+      currentConfiguration: configuration({
+        branch: "release/ui",
+        directoryPath: "ui/tests",
+        alias: "automation-ui-automation",
+        logicalPath: "{env:OPENCODE_REFERENCES_DIR}/automation/app-key/ui-automation/3/ui/tests"
+      })
+    });
     const mockApi = api({
-      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
-      listWorkspaceVersions: vi.fn().mockResolvedValue([
-        version("awv_new", "20260819"),
-        version("awv_old", "20260812")
-      ])
+      listAutomationReferenceRepositories: vi.fn().mockResolvedValue([repository(), second])
     });
     const wrapper = render(mockApi);
     await flushPromises();
 
-    expect(wrapper.text()).toContain("scripts/e2e");
-    const select = wrapper.findAll("button").find((button) => button.text().includes("选择此版本"));
-    expect(select).toBeTruthy();
-    expect(select!.attributes("type")).toBe("button");
-    await select!.trigger("click");
-    await wrapper.get('button[aria-label="应用自动化引用到当前工作树"]').trigger("click");
+    await wrapper.get('button[aria-label="选择UI 自动化库"]').trigger("click");
     await flushPromises();
 
-    expect(mockApi.activateAutomationWorkspaceVersion).toHaveBeenCalledWith("app-demo", "awp_auto", "awv_new");
-    expect(mockApi.createWorkspaceVersion).not.toHaveBeenCalled();
-    expect(mockApi.writeWorkspaceAgentFile).toHaveBeenCalledTimes(1);
-    expect(wrapper.emitted("changed")).toBeTruthy();
+    expect(mockApi.synchronizeAutomationReferenceRepository).not.toHaveBeenCalled();
+    expect(mockApi.configureAutomationReferenceRepository).not.toHaveBeenCalled();
+    expect(mockApi.listAutomationReferenceRepositoryBranches).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("release/ui · ui/tests");
   });
 
-  it("uses the shared three-stage dialog and shows per-server automation synchronization", async () => {
-    const configuredTemplate = template();
-    const pending = synchronization("awv_old", {
+  it("saves one app-repository configuration and reconciles the whole JSONC set after activation", async () => {
+    vi.useFakeTimers();
+    const pending = repository({
       status: "SYNCHRONIZING",
-      readyServerCount: 1,
-      servers: [
-        { linuxServerId: "linux-a", serverName: "server-a", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" },
-        { linuxServerId: "linux-b", serverName: "server-b", status: "PENDING", online: true }
-      ]
+      operation: "CONFIGURE",
+      pendingGeneration: 4,
+      pendingConfiguration: configuration({
+        generation: 4,
+        branch: "release/v2",
+        directoryPath: "scripts",
+        logicalPath: "{env:OPENCODE_REFERENCES_DIR}/automation/app-key/api-automation/4/scripts",
+        status: "SYNCHRONIZING"
+      })
+    });
+    const ready = repository({
+      activeGeneration: 4,
+      currentConfiguration: configuration({
+        generation: 4,
+        branch: "release/v2",
+        directoryPath: "scripts",
+        logicalPath: "{env:OPENCODE_REFERENCES_DIR}/automation/app-key/api-automation/4/scripts"
+      })
     });
     const mockApi = api({
-      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
-      listWorkspaceVersions: vi.fn().mockResolvedValue([version("awv_old", "20260812")]),
-      getAutomationWorkspaceVersionSynchronizationStatus: vi.fn().mockResolvedValue(pending),
-      synchronizeAutomationWorkspaceVersion: vi.fn().mockResolvedValue(pending)
+      configureAutomationReferenceRepository: vi.fn().mockResolvedValue(pending),
+      getAutomationReferenceRepositoryStatus: vi.fn().mockResolvedValue(ready),
+      listAutomationReferenceRepositories: vi.fn()
+        .mockResolvedValueOnce([repository()])
+        .mockResolvedValueOnce([ready]),
+      readWorkspaceAgentFile: vi.fn()
+        .mockResolvedValueOnce({ content: "" })
+        .mockResolvedValueOnce({ content: `{
+  "references": {
+    "old-main": {
+      "path": "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-main",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-repository-id": "repo_automation"
+    },
+    "old-release": {
+      "path": "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-release",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-workspace-id": "awp_old"
+    }
+  },
+  "permission": { "external_directory": {
+    "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-main/*": "allow",
+    "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-release/*": "allow"
+  } }
+}` })
     });
     const wrapper = render(mockApi);
     await flushPromises();
-
-    expect(wrapper.text()).toContain("1/2 台就绪");
-    const synchronizeButton = wrapper.get('button[aria-label="同步自动化版本 20260812"]');
-    expect(synchronizeButton.attributes("type")).toBe("button");
-    await synchronizeButton.trigger("click");
+    const switchButton = wrapper.findAll("button").find((button) => button.text() === "切换分支");
+    expect(switchButton).toBeDefined();
+    await switchButton!.trigger("click");
+    await flushPromises();
+    await wrapper.get('select[aria-label="目标分支"]').setValue("release/v2");
+    const continueButton = wrapper.findAll("button").find((button) => button.text() === "继续");
+    expect(continueButton).toBeDefined();
+    await continueButton!.trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="选择目录 scripts"]').trigger("click");
+    await wrapper.get('textarea[aria-label="描述（description）"]').setValue("发布分支自动化脚本");
+    expect(wrapper.get('button[aria-label="保存自动化配置并生效"]').attributes("disabled")).toBeUndefined();
+    await wrapper.get("form").trigger("submit");
     await flushPromises();
 
-    const progress = wrapper.get('[aria-label="自动化代码库同步进度"]');
-    expect(progress.text()).toContain("创建同步任务");
-    expect(progress.text()).toContain("各服务器同步");
-    expect(progress.text()).toContain("server-a");
-    expect(progress.text()).toContain("已同步");
-    expect(progress.text()).toContain("server-b");
-    expect(progress.text()).toContain("等待同步");
-    expect(wrapper.get('button[aria-label="关闭自动化代码库同步进度"]').attributes()).toHaveProperty("disabled");
-    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledWith(
-      "app-demo", "awp_auto", "awv_old");
-    expect(mockApi.createWorkspaceVersion).not.toHaveBeenCalled();
+    expect(mockApi.configureAutomationReferenceRepository).toHaveBeenCalledWith("app-demo", "repo_automation", {
+      branch: "release/v2",
+      directoryPath: "scripts",
+      description: "发布分支自动化脚本",
+      merge: false,
+      expectedGeneration: 3,
+      operationId: expect.stringMatching(/^aar_/)
+    });
 
-    wrapper.unmount();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushPromises();
+    const written = mockApi.writeWorkspaceAgentFile.mock.calls.at(-1)?.[2] as string;
+    expect(written).toContain('"testagent-automation-app-id": "app-demo"');
+    expect(written).toContain('"testagent-automation-repository-id": "repo_automation"');
+    expect(written).toContain('"testagent-automation-generation": 4');
+    expect(written).toContain('"merge": false');
+    expect(written).not.toContain("old-main");
+    expect(written).not.toContain("old-release");
   });
 
-  it("keeps ordinary members readonly and avoids administrator-only repository APIs", async () => {
-    const configuredTemplate = template();
-    const mockApi = api({
-      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
-      listWorkspaceVersions: vi.fn().mockResolvedValue([version("awv_old", "20260812")])
-    });
+  it("keeps members readonly while still showing current branch, directory and server status", async () => {
+    const mockApi = api();
     const wrapper = render(mockApi, false);
     await flushPromises();
 
-    expect(mockApi.listApplicationRepositories).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("接口自动化");
-    expect(wrapper.text()).toContain("当前版本");
-    expect(wrapper.text()).not.toContain("新增目录引用");
-    expect(wrapper.text()).not.toContain("设为当前版本");
-  });
-
-  it("displays loading animation when branches and directory tree are being fetched", async () => {
-    let resolveBranches!: (branches: string[]) => void;
-    const branchesPromise = new Promise<string[]>((res) => { resolveBranches = res; });
-    let resolveTree!: (tree: { nodes: Array<{ name: string; path: string; type: "file" | "directory"; children?: any[] }> }) => void;
-    const treePromise = new Promise<{ nodes: Array<{ name: string; path: string; type: "file" | "directory"; children?: any[] }> }>((res) => { resolveTree = res; });
-
-    const mockApi = api({
-      listRepositoryBranches: vi.fn().mockReturnValue(branchesPromise),
-      getRepositoryTree: vi.fn().mockReturnValue(treePromise)
-    });
-    const wrapper = render(mockApi);
-    await flushPromises();
-
-    // 在创建模式下分支加载中时展示拉取动画与文字
-    expect(wrapper.text()).toContain("拉取分支中…");
-    expect(wrapper.find('[data-component="spinner"]').exists()).toBe(true);
-
-    resolveBranches(["main"]);
-    await flushPromises();
-
-    // 目录树加载中时展示目录读取动画与状态
-    expect(wrapper.text()).toContain("正在读取目录…");
-
-    resolveTree({ nodes: [] });
-    await flushPromises();
-
-    expect(wrapper.text()).not.toContain("正在读取目录…");
-  });
-
-  it("caches previously fetched branches and directory trees in memory to avoid duplicate requests", async () => {
-    const mockApi = api({
-      listRepositoryBranches: vi.fn().mockResolvedValue(["main", "release/v1"]),
-      getRepositoryTree: vi.fn().mockResolvedValue({
-        nodes: [
-          { name: "scripts", path: "scripts", type: "directory", children: [] }
-        ]
-      })
-    });
-    const wrapper = render(mockApi);
-    await flushPromises();
-
-    // 第一次进入创建模式，拉取分支和当前分支目录
-    expect(mockApi.listRepositoryBranches).toHaveBeenCalledTimes(1);
-    expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(1);
-
-    // 切换到 release/v1 分支，首次读取该分支目录
-    const branchSelect = wrapper.get('select[aria-label="自动化引用分支"]');
-    await branchSelect.setValue("release/v1");
-    await flushPromises();
-    expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
-
-    // 切回 main 分支：命中前端目录缓存，不再发起网络请求
-    await branchSelect.setValue("main");
-    await flushPromises();
-    expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
-
-    // 重新切换分支：命中前端分支和目录缓存，不重复发起请求
-    await branchSelect.setValue("main");
-    await flushPromises();
-    expect(mockApi.listRepositoryBranches).toHaveBeenCalledTimes(1);
-    expect(mockApi.getRepositoryTree).toHaveBeenCalledTimes(2);
-  });
-
-  it("only selects a repository card and synchronizes after the explicit refresh action", async () => {
-    const configuredTemplate = template();
-    const ready = synchronization("awv_old", {
-      status: "READY",
-      readyServerCount: 2,
-      servers: [
-        { linuxServerId: "linux-a", serverName: "server-a", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" },
-        { linuxServerId: "linux-b", serverName: "server-b", status: "READY", online: true, currentBranch: "main", currentCommitHash: "abc123" }
-      ]
-    });
-    const mockApi = api({
-      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
-      listWorkspaceVersions: vi.fn().mockResolvedValue([version("awv_old", "20260812")]),
-      getAutomationWorkspaceVersionSynchronizationStatus: vi.fn().mockResolvedValue(ready),
-      synchronizeAutomationWorkspaceVersion: vi.fn().mockResolvedValue(ready)
-    });
-    const wrapper = render(mockApi);
-    await flushPromises();
-
-    // 点击左侧代码库卡片只切换选择，不触发 Git 拉取。
-    await wrapper.get('button[aria-label="选择接口自动化库"]').trigger("click");
-    await flushPromises();
-
-    expect(mockApi.synchronizeAutomationWorkspaceVersion).not.toHaveBeenCalled();
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
-
-    // 只有明确点击刷新 Git 指针才发起同步并展示进度。
-    await wrapper.get('button[aria-label="刷新接口自动化库 Git 指针"]').trigger("click");
-    await flushPromises();
-    expect(mockApi.synchronizeAutomationWorkspaceVersion).toHaveBeenCalledTimes(1);
-    expect(wrapper.text()).toContain("创建同步任务");
-
-    wrapper.unmount();
-  });
-
-  it("keeps active versions and synchronization rows isolated when switching two automation repositories", async () => {
-    const secondRepository = {
-      ...repository(),
-      repositoryId: "repo_ui_automation",
-      name: "UI 自动化库",
-      englishName: "ui-automation",
-      gitUrl: "ssh://git.example.test/ui-automation.git"
-    };
-    const secondTemplate = {
-      ...template(),
-      workspaceId: "awp_ui_auto",
-      repositoryId: secondRepository.repositoryId,
-      directoryPath: "ui/e2e",
-      workspaceName: "UI 自动化",
-      activeVersion: {
-        ...template().activeVersion,
-        versionId: "awv_ui",
-        version: "20260820"
-      }
-    };
-    const firstSync = synchronization("awv_old", {
-      targetCommitHash: "abc1234",
-      servers: [{
-        linuxServerId: "linux-api",
-        status: "READY",
-        online: true,
-        currentBranch: "main",
-        currentCommitHash: "abc1234",
-        matchesTarget: true
-      }],
-      targetServerCount: 1,
-      readyServerCount: 1
-    });
-    const secondSync = {
-      ...synchronization("awv_ui", {
-        applicationWorkspaceId: "awp_ui_auto",
-        workspaceName: "UI 自动化",
-        repositoryId: secondRepository.repositoryId,
-        repositoryName: secondRepository.name,
-        version: "20260820",
-        targetCommitHash: "def5678",
-        servers: [{
-          linuxServerId: "linux-ui",
-          status: "READY",
-          online: true,
-          currentBranch: "main",
-          currentCommitHash: "def5678",
-          matchesTarget: true
-        }],
-        targetServerCount: 1,
-        readyServerCount: 1
-      })
-    };
-    const mockApi = api({
-      listApplicationRepositories: vi.fn().mockResolvedValue([repository(), secondRepository]),
-      listWorkspaceTemplates: vi.fn().mockResolvedValue([template(), secondTemplate]),
-      listWorkspaceVersions: vi.fn().mockImplementation((_appId: string, templateId: string) =>
-        Promise.resolve(templateId === "awp_ui_auto"
-          ? [{ ...version("awv_ui", "20260820"), applicationWorkspaceId: "awp_ui_auto", repositoryId: secondRepository.repositoryId }]
-          : [version("awv_old", "20260812")])
-      ),
-      listRepositoryBranches: vi.fn().mockResolvedValue(["main"]),
-      getAutomationWorkspaceVersionSynchronizationStatus: vi.fn().mockImplementation(
-        (_appId: string, _templateId: string, versionId: string) =>
-          Promise.resolve(versionId === "awv_ui" ? secondSync : firstSync)
-      ),
-      synchronizeAutomationWorkspaceVersion: vi.fn().mockImplementation(
-        (_appId: string, _templateId: string, versionId: string) =>
-          Promise.resolve(versionId === "awv_ui" ? secondSync : firstSync)
-      )
-    });
-    const wrapper = render(mockApi);
-    await flushPromises();
-
-    const apiCard = wrapper.get('button[aria-label="选择接口自动化库"]');
-    const uiCard = wrapper.get('button[aria-label="选择UI 自动化库"]');
-    expect(apiCard.text()).toContain("20260812");
-    expect(uiCard.text()).toContain("20260820");
-    expect(wrapper.text()).toContain("linux-api");
-    expect(wrapper.text()).not.toContain("linux-ui");
-
-    await uiCard.trigger("click");
-    await flushPromises();
-    expect(mockApi.synchronizeAutomationWorkspaceVersion).not.toHaveBeenCalled();
-    expect(wrapper.get('input[aria-label="自动化版本库"]').element).toHaveProperty("value", "UI 自动化库");
-    expect(wrapper.text()).toContain("linux-ui");
-    expect(wrapper.text()).not.toContain("linux-api");
-    expect(apiCard.attributes("disabled")).toBeUndefined();
-    expect(uiCard.attributes("disabled")).toBeUndefined();
-
-    wrapper.unmount();
-  });
-
-  it("distinguishes configured template directories from new unconfigured directories", async () => {
-    const configuredTemplate = template();
-    const mockApi = api({
-      listWorkspaceTemplates: vi.fn().mockResolvedValue([configuredTemplate]),
-      listWorkspaceVersions: vi.fn().mockResolvedValue([version("awv_old", "20260812")]),
-      getRepositoryTree: vi.fn().mockResolvedValue({
-        nodes: [
-          {
-            name: "scripts",
-            path: "scripts",
-            type: "directory",
-            children: [
-              { name: "e2e", path: "scripts/e2e", type: "directory", children: [] },
-              { name: "unit", path: "scripts/unit", type: "directory", children: [] }
-            ]
-          }
-        ]
-      })
-    });
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("11111111-2222-3333-4444-555555555555");
-    const wrapper = render(mockApi);
-    await flushPromises();
-
-    // 默认定位到已配置的 scripts/e2e，显示已有版本历史和“新增版本”按钮
-    expect(wrapper.text()).toContain("版本历史（1）");
-    expect(wrapper.find('button[aria-label="新增版本"]').exists()).toBe(true);
-    expect(wrapper.find('button[aria-label="创建并应用自动化目录引用"]').exists()).toBe(false);
-
-    // 点击未配置的新目录 scripts/unit
-    await wrapper.get('button[aria-label="选择目录 scripts/unit"]').trigger("click");
-    await flushPromises();
-
-    // 此时 activeTemplate 为 null，显示“保存目录引用”按钮
-    expect(wrapper.find('button[aria-label="创建并应用自动化目录引用"]').exists()).toBe(true);
-    expect(wrapper.find('button[aria-label="新增版本"]').exists()).toBe(false);
-    expect(wrapper.get('input[aria-label="引用目录"]').element).toHaveProperty("value", "scripts/unit");
-
-    // 点击保存目录引用
-    await wrapper.get('input[aria-label="自动化引用版本日期"]').setValue("20260819");
-    await wrapper.get('button[aria-label="创建并应用自动化目录引用"]').trigger("click");
-    await flushPromises();
-
-    expect(mockApi.createApplicationWorkspace).toHaveBeenCalledWith("app-demo", {
-      repositoryId: "repo_automation",
-      branch: "release/automation-v2",
-      directoryPath: "scripts/unit",
-      workspaceName: "unit",
-      version: "20260819",
-      operationId: "wco_11111111222233334444555555555555"
-    });
+    expect(wrapper.text()).toContain("main · scripts/e2e");
+    expect(wrapper.text()).toContain("READY");
+    expect(wrapper.find('button[aria-label="保存自动化配置并生效"]').exists()).toBe(false);
+    expect(wrapper.findAll("button").some((button) => button.text() === "切换分支")).toBe(false);
+    expect(mockApi.listAutomationReferenceRepositories).toHaveBeenCalledWith("app-demo");
   });
 });

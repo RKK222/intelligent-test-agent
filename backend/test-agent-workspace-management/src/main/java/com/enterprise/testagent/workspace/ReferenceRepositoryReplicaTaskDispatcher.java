@@ -104,7 +104,17 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
             String traceId,
             WakeSource source,
             Runnable task) {
-        return dispatchAt(repositoryId, generation, traceId, source, clock.instant(), task);
+        return dispatchScopedNow(repositoryId.value(), generation, traceId, source, task);
+    }
+
+    /** 应用级自动化引用复用同一有界调度状态机，并以 app/repository 组合键隔离。 */
+    public boolean dispatchScopedNow(
+            String scopeId,
+            long generation,
+            String traceId,
+            WakeSource source,
+            Runnable task) {
+        return dispatchScopedAt(scopeId, generation, traceId, source, clock.instant(), task);
     }
 
     /**
@@ -117,11 +127,21 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
             WakeSource source,
             Instant notBefore,
             Runnable task) {
-        Objects.requireNonNull(repositoryId, "repositoryId must not be null");
+        return dispatchScopedAt(repositoryId.value(), generation, traceId, source, notBefore, task);
+    }
+
+    public boolean dispatchScopedAt(
+            String scopeId,
+            long generation,
+            String traceId,
+            WakeSource source,
+            Instant notBefore,
+            Runnable task) {
+        Objects.requireNonNull(scopeId, "scopeId must not be null");
         Objects.requireNonNull(source, "source must not be null");
         Objects.requireNonNull(notBefore, "notBefore must not be null");
         Objects.requireNonNull(task, "task must not be null");
-        TaskKey key = new TaskKey(repositoryId, generation);
+        TaskKey key = new TaskKey(scopeId, generation);
         Instant now = clock.instant();
         Instant scheduledFor = notBefore.isBefore(now) ? now : notBefore;
         synchronized (monitor) {
@@ -171,8 +191,12 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
      * 数据库 generation/lease fencing 仍是阻止迟到写回的最终边界。
      */
     public boolean cancel(CodeRepositoryId repositoryId, long generation) {
-        Objects.requireNonNull(repositoryId, "repositoryId must not be null");
-        TaskKey key = new TaskKey(repositoryId, generation);
+        return cancelScoped(repositoryId.value(), generation);
+    }
+
+    public boolean cancelScoped(String scopeId, long generation) {
+        Objects.requireNonNull(scopeId, "scopeId must not be null");
+        TaskKey key = new TaskKey(scopeId, generation);
         synchronized (monitor) {
             TaskSlot slot = taskSlots.get(key);
             if (slot == null) {
@@ -225,7 +249,7 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
         long queueWaitMillis = elapsedMillis(registration.enqueuedAt, startedAt);
         LOGGER.info(
                 "event=reference_repository_replica_task_started repositoryId={} generation={} source={} queueWaitMs={} traceId={}",
-                key.repositoryId().value(), key.generation(), registration.source, queueWaitMillis, registration.traceId);
+                key.scopeId(), key.generation(), registration.source, queueWaitMillis, registration.traceId);
         boolean succeeded = false;
         try {
             registration.task.run();
@@ -233,11 +257,11 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
         } catch (RuntimeException exception) {
             LOGGER.warn(
                     "event=reference_repository_replica_task_failed repositoryId={} generation={} source={} traceId={}",
-                    key.repositoryId().value(), key.generation(), registration.source, registration.traceId);
+                    key.scopeId(), key.generation(), registration.source, registration.traceId);
         } finally {
             LOGGER.info(
                     "event=reference_repository_replica_task_completed repositoryId={} generation={} source={} result={} durationMs={} traceId={}",
-                    key.repositoryId().value(), key.generation(), registration.source,
+                    key.scopeId(), key.generation(), registration.source,
                     succeeded ? "SUCCESS" : "FAILED", elapsedMillis(startedAt, clock.instant()), registration.traceId);
             synchronized (monitor) {
                 TaskSlot slot = taskSlots.get(key);
@@ -255,7 +279,7 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
     private void logRejected(TaskKey key, String traceId, WakeSource source) {
         LOGGER.warn(
                 "event=reference_repository_replica_task_rejected repositoryId={} generation={} source={} traceId={}",
-                key.repositoryId().value(), key.generation(), source, traceId);
+                key.scopeId(), key.generation(), source, traceId);
     }
 
     private long delayMillis(Instant now, Instant scheduledFor) {
@@ -274,7 +298,7 @@ public class ReferenceRepositoryReplicaTaskDispatcher implements SmartLifecycle 
         RETRY
     }
 
-    private record TaskKey(CodeRepositoryId repositoryId, long generation) {
+    private record TaskKey(String scopeId, long generation) {
     }
 
     private static final class TaskSlot {

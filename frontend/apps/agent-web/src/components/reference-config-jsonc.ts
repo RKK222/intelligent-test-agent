@@ -11,13 +11,15 @@ import {
 } from "jsonc-parser";
 
 const OPENCODE_CONFIG_SCHEMA = "https://opencode.ai/config.json";
+const OPENCODE_REFERENCE_ALIAS_MAX_LENGTH = 128;
+const OPENCODE_REFERENCE_ALIAS_INVALID = /[\/\\\s`,]/u;
 
 export type ReferenceConfigTarget = {
   alias: string;
   path: string;
   folder: string;
   /** 平台托管的附加身份字段；用于自动化版本/目录引用，未知字段仍由 JSONC 补丁保留。 */
-  managedFields?: Record<string, string | boolean>;
+  managedFields?: Record<string, string | boolean | number>;
 };
 
 export type ReferenceConfigValue = {
@@ -28,6 +30,11 @@ export type ReferenceConfigValue = {
 };
 
 export type ReferenceConfigPatch = ReferenceConfigTarget & Omit<ReferenceConfigValue, "path">;
+
+export type ManagedReferenceConfigPatch = ReferenceConfigPatch & {
+  /** 兼容尚未写入 repository-id 的历史自动化引用，保存当前配置时按已知模板 ID 一并清理。 */
+  supersededAutomationWorkspaceIds?: string[];
+};
 
 export type ReferenceConfigInspection = {
   mode: "create" | "update";
@@ -44,6 +51,36 @@ export class ReferenceConfigValidationError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
     this.name = "ReferenceConfigValidationError";
+  }
+}
+
+/**
+ * OpenCode 原生 reference loader 会忽略包含空白、斜杠、反引号或逗号的别名；平台在写盘前复用同一边界，
+ * 避免文件树能展示但模型运行时无法发现的双重状态。
+ */
+export function isOpenCodeReferenceAlias(value: string) {
+  const normalized = value.trim();
+  return normalized.length > 0
+    && normalized.length <= OPENCODE_REFERENCE_ALIAS_MAX_LENGTH
+    && !OPENCODE_REFERENCE_ALIAS_INVALID.test(normalized);
+}
+
+/** 把展示名称转换成 OpenCode 可发现的建议别名；最终写盘仍会执行严格校验。 */
+export function normalizeOpenCodeReferenceAlias(value: string) {
+  return value
+    .trim()
+    .replace(/[\/\\\s`,]+/gu, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, OPENCODE_REFERENCE_ALIAS_MAX_LENGTH);
+}
+
+function requireOpenCodeReferenceAlias(value: string) {
+  if (!isOpenCodeReferenceAlias(value)) {
+    throw new ReferenceConfigValidationError(
+      "INVALID_REFERENCE_ALIAS",
+      "引用名称必须是 1-128 个字符，且不能包含空格、斜杠、反引号或逗号"
+    );
   }
 }
 
@@ -158,6 +195,7 @@ function createInspection(
  * 只接受缺失引用或 path 完全匹配的本地对象；字符串简写、Git 引用与冲突 path 均不猜测覆盖。
  */
 export function inspectReferenceConfig(content: string, target: ReferenceConfigTarget): ReferenceConfigInspection {
+  requireOpenCodeReferenceAlias(target.alias);
   const root = parseRoot(content);
   if (!root) {
     return createInspection(target);
@@ -216,6 +254,40 @@ export function inspectReferenceConfig(content: string, target: ReferenceConfigT
     permissionNeedsUpdate: permissionNeedsUpdate(root, target),
     previousPath: typeof existing.path === "string" ? existing.path : undefined
   };
+}
+
+function previousManagedAutomationReferences(
+  root: Record<string, unknown> | null,
+  patch: ManagedReferenceConfigPatch
+): Array<{ alias: string; path?: string }> {
+  const kind = patch.managedFields?.["testagent-reference-kind"];
+  const workspaceId = patch.managedFields?.["testagent-automation-workspace-id"];
+  const appId = patch.managedFields?.["testagent-automation-app-id"];
+  const repositoryId = patch.managedFields?.["testagent-automation-repository-id"];
+  const workspaceIds = new Set([
+    ...(patch.supersededAutomationWorkspaceIds ?? []),
+    ...(typeof workspaceId === "string" ? [workspaceId] : [])
+  ]);
+  if (!root || kind !== "automation" || !isObject(root.references)) {
+    return [];
+  }
+  return Object.entries(root.references)
+    .filter(([alias, value]) => alias !== patch.alias
+      && isObject(value)
+      && value["testagent-reference-kind"] === "automation"
+      && (
+        (typeof repositoryId === "string"
+          && value["testagent-automation-repository-id"] === repositoryId
+          && (typeof appId !== "string"
+            || value["testagent-automation-app-id"] === appId
+            || value["testagent-automation-app-id"] === undefined))
+        || (typeof value["testagent-automation-workspace-id"] === "string"
+          && workspaceIds.has(value["testagent-automation-workspace-id"]))
+      ))
+    .map(([alias, value]) => ({
+      alias,
+      path: isObject(value) && typeof value.path === "string" ? value.path : undefined
+    }));
 }
 
 function formattingOptions(content: string): FormattingOptions {
@@ -338,7 +410,10 @@ function removePreviousExternalDirectoryPermission(
  * 每次以调用方刚读取的最新正文为输入。新增别名时只增加该节点；更新时逐字段 modify，
  * 同一补丁再补齐精确外部目录 allow，从而保留 hidden、未来字段、注释以及其它区域的尾逗号。
  */
-export function patchReferenceConfig(content: string, patch: ReferenceConfigPatch): string {
+export function patchReferenceConfig(content: string, patch: ManagedReferenceConfigPatch): string {
+  requireOpenCodeReferenceAlias(patch.alias);
+  const root = parseRoot(content);
+  const previousManagedReferences = previousManagedAutomationReferences(root, patch);
   const inspection = inspectReferenceConfig(content, patch);
   const managedValue = {
     path: patch.path,
@@ -357,11 +432,83 @@ export function patchReferenceConfig(content: string, patch: ReferenceConfigPatc
       output = applyModification(output, ["references", patch.alias, field], value);
     }
   }
-  output = removePreviousExternalDirectoryPermission(
-    output,
-    patch.alias,
-    inspection.previousPath,
-    patch.path
-  );
+  for (const previousReference of previousManagedReferences) {
+    output = applyModification(output, ["references", previousReference.alias], undefined);
+  }
+  const previousPaths = [inspection.previousPath, ...previousManagedReferences.map((item) => item.path)];
+  for (const previousPath of previousPaths) {
+    output = removePreviousExternalDirectoryPermission(output, patch.alias, previousPath, patch.path);
+  }
   return patchExternalDirectoryPermission(output, patch);
+}
+
+/**
+ * 以应用当前的 `(appId, repositoryId)` 配置集合对账自动化引用。每个版本库只保留一个托管节点，
+ * 同时移除旧 workspace/version 身份以及已经没有引用使用的精确外部目录权限。
+ */
+export function reconcileAutomationReferenceConfig(
+  content: string,
+  appId: string,
+  patches: ManagedReferenceConfigPatch[]
+): string {
+  const normalizedAppId = appId.trim();
+  if (!normalizedAppId) {
+    throw new ReferenceConfigValidationError("INVALID_AUTOMATION_APP", "自动化引用缺少应用标识");
+  }
+  const repositoryIds = new Set<string>();
+  const aliases = new Set<string>();
+  let output = content;
+  for (const patch of patches) {
+    const repositoryId = patch.managedFields?.["testagent-automation-repository-id"];
+    if (patch.managedFields?.["testagent-automation-app-id"] !== normalizedAppId
+      || typeof repositoryId !== "string"
+      || !repositoryId.trim()) {
+      throw new ReferenceConfigValidationError(
+        "INVALID_AUTOMATION_IDENTITY",
+        "自动化引用必须携带应用和版本库标识"
+      );
+    }
+    if (repositoryIds.has(repositoryId) || aliases.has(patch.alias)) {
+      throw new ReferenceConfigValidationError(
+        "DUPLICATE_AUTOMATION_REFERENCE",
+        "同一应用的自动化版本库或引用别名不能重复"
+      );
+    }
+    repositoryIds.add(repositoryId);
+    aliases.add(patch.alias);
+    output = patchReferenceConfig(output, patch);
+    // 新模型只以 app/repository/generation 标识；同别名升级时同步清掉旧 workspace/version 身份。
+    output = applyModification(
+      output,
+      ["references", patch.alias, "testagent-automation-workspace-id"],
+      undefined
+    );
+    output = applyModification(
+      output,
+      ["references", patch.alias, "testagent-automation-version-id"],
+      undefined
+    );
+  }
+
+  const root = parseRoot(output);
+  if (!root || !isObject(root.references)) return output;
+  const stale = Object.entries(root.references)
+    .filter(([alias, value]) => {
+      if (!isObject(value) || value["testagent-reference-kind"] !== "automation") return false;
+      const managedAppId = value["testagent-automation-app-id"];
+      if (managedAppId !== undefined && managedAppId !== normalizedAppId) return false;
+      const managedRepositoryId = value["testagent-automation-repository-id"];
+      return !aliases.has(alias)
+        || typeof managedRepositoryId !== "string"
+        || !repositoryIds.has(managedRepositoryId);
+    })
+    .map(([alias, value]) => ({
+      alias,
+      path: isObject(value) && typeof value.path === "string" ? value.path : undefined
+    }));
+  for (const reference of stale) {
+    output = applyModification(output, ["references", reference.alias], undefined);
+    output = removePreviousExternalDirectoryPermission(output, reference.alias, reference.path, "");
+  }
+  return output;
 }

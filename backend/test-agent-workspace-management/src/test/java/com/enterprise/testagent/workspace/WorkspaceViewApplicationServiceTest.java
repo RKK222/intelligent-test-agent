@@ -204,10 +204,10 @@ class WorkspaceViewApplicationServiceTest {
     }
 
     @Test
-    void exposesAutomationRepositoriesAsVersionPinnedReadonlyLogicalLocators() throws Exception {
-        Path automationRoot = Files.createDirectories(tempDir.resolve("automation-v1"));
+    void exposesAutomationRepositoriesAsGenerationPinnedReadonlyLogicalLocators() throws Exception {
+        Path automationRoot = Files.createDirectories(tempDir.resolve("automation-v3"));
         Files.writeString(automationRoot.resolve("case.robot"), "*** Test Cases ***");
-        String configurationPath = "{env:OPENCODE_APP_WORKSPACE_ROOT}/awp_auto/awv_v1/repository/scripts/e2e";
+        String configurationPath = "{env:OPENCODE_REFERENCES_DIR}/automation/app_view/repo_auto/3/scripts/e2e";
         Files.createDirectories(workspaceRoot.resolve(".opencode"));
         Files.writeString(workspaceRoot.resolve(".opencode/opencode.jsonc"), """
                 {
@@ -217,43 +217,33 @@ class WorkspaceViewApplicationServiceTest {
                       "merge": false,
                       "sdd-folder-name": "scripts/e2e",
                       "testagent-reference-kind": "automation",
-                      "testagent-automation-workspace-id": "awp_auto",
-                      "testagent-automation-version-id": "awv_v1"
+                      "testagent-automation-app-id": "app_view",
+                      "testagent-automation-repository-id": "repo_auto",
+                      "testagent-automation-generation": 3
                     }
                   }
                 }
                 """.formatted(configurationPath));
         AutomationWorkspaceReferenceCatalog.Reference reference = new AutomationWorkspaceReferenceCatalog.Reference(
                 APP_ID,
-                new ApplicationWorkspaceId("awp_auto"),
-                new ApplicationWorkspaceVersionId("awv_v1"),
+                new CodeRepositoryId("repo_auto"),
+                3L,
                 "API 自动化",
                 "API 自动化",
-                "automation",
-                "20260819",
                 "release/v1",
                 "abc123",
                 automationRoot.toString(),
                 "scripts/e2e",
-                configurationPath);
-        AutomationWorkspaceReferenceCatalog catalog = new AutomationWorkspaceReferenceCatalog() {
-            @Override
-            public Resolution resolveActive(UserId userId, WorkspaceId hostWorkspaceId) {
-                return new Resolution(APP_ID, 1, List.of(reference), List.of());
+                configurationPath,
+                "API 自动化 / release/v1 / scripts/e2e，只读自动化引用",
+                true);
+        AutomationWorkspaceReferenceCatalog catalog = (userId, hostWorkspaceId, appId, repositoryId, generation) -> {
+            if (!reference.applicationId().equals(appId)
+                    || !reference.repositoryId().equals(repositoryId)
+                    || reference.generation() != generation) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "自动化代码库定位器无效");
             }
-
-            @Override
-            public Reference resolveVersion(
-                    UserId userId,
-                    WorkspaceId hostWorkspaceId,
-                    ApplicationWorkspaceId applicationWorkspaceId,
-                    ApplicationWorkspaceVersionId versionId) {
-                if (!reference.applicationWorkspaceId().equals(applicationWorkspaceId)
-                        || !reference.versionId().equals(versionId)) {
-                    throw new PlatformException(ErrorCode.FORBIDDEN, "自动化代码库定位器无效");
-                }
-                return reference;
-            }
+            return reference;
         };
         WorkspaceViewApplicationService automationService = new WorkspaceViewApplicationService(
                 workspaceService,
@@ -274,8 +264,9 @@ class WorkspaceViewApplicationServiceTest {
         assertThat(file.path()).isEqualTo("自动化代码库/API 自动化（目录 scripts/e2e）/case.robot");
         assertThat(file.source()).isEqualTo(WorkspaceViewSource.AUTOMATION_REFERENCE);
         assertThat(file.readonly()).isTrue();
-        assertThat(file.locator().automationWorkspaceId()).isEqualTo("awp_auto");
-        assertThat(file.locator().automationVersionId()).isEqualTo("awv_v1");
+        assertThat(file.locator().automationAppId()).isEqualTo("app_view");
+        assertThat(file.locator().automationRepositoryId()).isEqualTo("repo_auto");
+        assertThat(file.locator().automationGeneration()).isEqualTo(3L);
         assertThat(automationService.read(userId, WORKSPACE_ID, file.locator()).content()).isEqualTo("*** Test Cases ***");
         assertThatThrownBy(() -> automationService.read(
                 userId,
@@ -283,9 +274,10 @@ class WorkspaceViewApplicationServiceTest {
                 new WorkspaceViewLocator(
                         WorkspaceViewLocatorKind.AUTOMATION_REFERENCE,
                         "case.robot",
-                        null,
-                        "awp_auto",
-                        "awv_spoof")))
+                        "API 自动化",
+                        "app_view",
+                        "repo_spoof",
+                        3L)))
                 .isInstanceOfSatisfying(PlatformException.class,
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }

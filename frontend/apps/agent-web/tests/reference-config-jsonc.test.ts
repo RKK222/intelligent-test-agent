@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  isOpenCodeReferenceAlias,
+  normalizeOpenCodeReferenceAlias,
   ReferenceConfigValidationError,
   inspectReferenceConfig,
   patchReferenceConfig,
+  reconcileAutomationReferenceConfig,
   type ReferenceConfigTarget
 } from "../src/components/reference-config-jsonc";
 
@@ -13,6 +16,14 @@ const target: ReferenceConfigTarget = {
 };
 
 describe("reference config JSONC helper", () => {
+  it("uses the same alias boundary as the OpenCode native reference loader", () => {
+    expect(isOpenCodeReferenceAlias("自动化-E2E-A")).toBe(true);
+    expect(isOpenCodeReferenceAlias("自动化 E2E A")).toBe(false);
+    expect(normalizeOpenCodeReferenceAlias(" 自动化 E2E/A,` ")).toBe("自动化-E2E-A");
+    expect(() => inspectReferenceConfig("", { ...target, alias: "docs reference" }))
+      .toThrowError(expect.objectContaining({ code: "INVALID_REFERENCE_ALIAS" }));
+  });
+
   it("writes an exact external directory allow when creating a reference", () => {
     const output = patchReferenceConfig("", {
       ...target,
@@ -93,6 +104,98 @@ describe("reference config JSONC helper", () => {
     expect(output).toContain('"testagent-automation-version-id": "awv_new"');
     expect(output).not.toContain(`"${oldPath}/*"`);
     expect(output).toContain(`"${nextPath}/*": "allow"`);
+  });
+
+  it("renames a legacy managed automation alias that OpenCode could not discover", () => {
+    const oldPath = "{env:OPENCODE_APP_WORKSPACE_ROOT}/20260819/automation-e2e-b-dir/css";
+    const nextPath = "{env:OPENCODE_APP_WORKSPACE_ROOT}/20260820/automation-e2e-b-dir/css";
+    const source = `{
+  "references": {
+    "自动化引用 E2E B": {
+      "path": "${oldPath}",
+      "merge": false,
+      "sdd-folder-name": "css",
+      "description": "自动化 E2E B 只读引用",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-workspace-id": "awp_e2e_auto_b",
+      "testagent-automation-version-id": "awv_old"
+    }
+  },
+  "permission": {
+    "external_directory": {
+      "${oldPath}/*": "allow"
+    }
+  }
+}`;
+
+    const output = patchReferenceConfig(source, {
+      alias: "自动化引用-E2E-B",
+      path: nextPath,
+      folder: "css",
+      merge: false,
+      sddFolderName: "css",
+      description: "自动化 E2E B 20260820 只读自动化引用",
+      managedFields: {
+        "testagent-reference-kind": "automation",
+        "testagent-automation-workspace-id": "awp_e2e_auto_b",
+        "testagent-automation-version-id": "awv_new"
+      }
+    });
+
+    expect(output).toContain('"自动化引用-E2E-B"');
+    expect(output).not.toContain('"自动化引用 E2E B"');
+    expect(output).not.toContain(`"${oldPath}/*"`);
+    expect(output).toContain(`"${nextPath}/*": "allow"`);
+  });
+
+  it("replaces every historical branch reference for the same automation repository", () => {
+    const oldA = "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-a/scripts";
+    const oldB = "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-b/scripts";
+    const next = "{env:OPENCODE_APP_WORKSPACE_ROOT}/current/scripts";
+    const source = `{
+  "references": {
+    "automation-a": {
+      "path": "${oldA}",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-workspace-id": "awp_a"
+    },
+    "automation-b": {
+      "path": "${oldB}",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-workspace-id": "awp_b"
+    }
+  },
+  "permission": {
+    "external_directory": {
+      "${oldA}/*": "allow",
+      "${oldB}/*": "allow"
+    }
+  }
+}`;
+
+    const output = patchReferenceConfig(source, {
+      alias: "automation-api",
+      path: next,
+      folder: "scripts",
+      merge: false,
+      sddFolderName: "scripts",
+      description: "当前自动化引用",
+      supersededAutomationWorkspaceIds: ["awp_a", "awp_b", "awp_current"],
+      managedFields: {
+        "testagent-reference-kind": "automation",
+        "testagent-automation-repository-id": "repo_api",
+        "testagent-automation-workspace-id": "awp_current",
+        "testagent-automation-version-id": "awv_current"
+      }
+    });
+
+    expect(output).not.toContain('"automation-a"');
+    expect(output).not.toContain('"automation-b"');
+    expect(output).not.toContain(`${oldA}/*`);
+    expect(output).not.toContain(`${oldB}/*`);
+    expect(output).toContain('"automation-api"');
+    expect(output).toContain('"testagent-automation-repository-id": "repo_api"');
+    expect(output).toContain(`"${next}/*": "allow"`);
   });
 
   it("creates the minimal schema object and references object for an empty file", () => {
@@ -520,5 +623,69 @@ describe("reference config JSONC helper", () => {
 
     expect(second).toBe(first);
     expect(second.match(new RegExp(target.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))).toHaveLength(2);
+  });
+
+  it("reconciles one managed automation reference per application repository", () => {
+    const oldMain = "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-main/scripts";
+    const oldRelease = "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-release/scripts";
+    const source = `{
+  "references": {
+    "old-main": {
+      "path": "${oldMain}",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-repository-id": "repo_auto"
+    },
+    "old-release": {
+      "path": "${oldRelease}",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-workspace-id": "awp_old"
+    },
+    "docs": { "path": "/manual/docs", "merge": true }
+  },
+  "permission": { "external_directory": {
+    "${oldMain}/*": "allow",
+    "${oldRelease}/*": "allow",
+    "/manual/docs/*": "allow"
+  } }
+}`;
+    const logicalPath = "{env:OPENCODE_REFERENCES_DIR}/automation/app/repository/7/scripts";
+    const output = reconcileAutomationReferenceConfig(source, "app_demo", [{
+      alias: "automation-repository",
+      path: logicalPath,
+      folder: "scripts",
+      merge: false,
+      sddFolderName: "scripts",
+      description: "只读脚本",
+      managedFields: {
+        "testagent-reference-kind": "automation",
+        "testagent-automation-app-id": "app_demo",
+        "testagent-automation-repository-id": "repo_auto",
+        "testagent-automation-generation": 7
+      }
+    }]);
+
+    expect(output).toContain('"automation-repository"');
+    expect(output).toContain('"testagent-automation-generation": 7');
+    expect(output).not.toContain('"old-main"');
+    expect(output).not.toContain('"old-release"');
+    expect(output).not.toContain(`${oldMain}/*`);
+    expect(output).not.toContain(`${oldRelease}/*`);
+    expect(output).toContain('"docs"');
+    expect(output).toContain('"/manual/docs/*": "allow"');
+  });
+
+  it("preserves managed automation references owned by a different application", () => {
+    const source = `{
+  "references": {
+    "other-app": {
+      "path": "/other/app",
+      "testagent-reference-kind": "automation",
+      "testagent-automation-app-id": "app_other",
+      "testagent-automation-repository-id": "repo_other"
+    }
+  }
+}`;
+
+    expect(reconcileAutomationReferenceConfig(source, "app_demo", [])).toBe(source);
   });
 });

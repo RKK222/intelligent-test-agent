@@ -515,7 +515,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 ## Internal Server Broadcast
 
-内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件包括应用版本工作区副本同步、公共 Agent 配置同步、通用参数刷新、外部 API 凭据刷新，以及引用资产库副本同步和终止唤醒。
+内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件包括应用版本工作区副本同步、公共 Agent 配置同步、通用参数刷新、外部 API 凭据刷新、应用资产库副本同步，以及应用自动化引用副本同步和终止唤醒。
 
 传输：
 
@@ -547,9 +547,21 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 }
 ```
 
-`workspace.version.sync-requested` 的有效 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`AGENT_CONFIG_PUBLISHED`、`AUTOMATION_REFERENCE_SYNCHRONIZE`。当前应用 Agent/Skill 与 workspace 共用个人 worktree，按个人 `HEAD` 白名单投影成功后使用 `PERSONAL_PUBLISHED`；兼容的旧工作空间 Agent 直发入口仍使用 `AGENT_CONFIG_PUBLISHED`。`AUTOMATION_REFERENCE_SYNCHRONIZE` 只准备共享自动化版本副本，不创建或更新个人 worktree；发起入口和广播消费者都先写本机 `SYNCING` 占位，再把 clone/fetch 投递到有界后台队列，同一 `versionId` 的重复唤醒合并，HTTP 请求与 Redis listener 不等待 Git。浏览器通过 workspace-management 的版本同步状态 HTTP 接口轮询逐服务器事实，不新增 RunEvent/SSE 事件。历史节点可能仍发送 `GIT_PULL_REQUESTED`，新消费者必须忽略该原因，个人 `git-pull` 不发布服务器广播；旧 `GIT_PULLED` 同样不再生成。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；非自动化版本的远端节点仍使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset feature 副本到目标 commit，然后以 `git merge --no-edit <targetCommit>` 反向同步本机相关个人 worktree，不以整仓 clean 作为前置条件。非重叠的 dirty/staged/untracked 内容保留并完成合并；只有 Git 判定会覆盖本地文件时才由 Diff 显示待同步，真实冲突保留 `MERGE_HEAD` 和三方 index。广播只负责服务器间低延迟唤醒，不进入浏览器 SSE；消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
+`workspace.version.sync-requested` 的有效 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`AGENT_CONFIG_PUBLISHED`。当前应用 Agent/Skill 与 workspace 共用个人 worktree，按个人 `HEAD` 白名单投影成功后使用 `PERSONAL_PUBLISHED`；兼容的旧工作空间 Agent 直发入口仍使用 `AGENT_CONFIG_PUBLISHED`。自动化引用不再复用该广播或 `versionId` 副本模型。历史节点可能仍发送 `GIT_PULL_REQUESTED`、`GIT_PULLED` 或 `AUTOMATION_REFERENCE_SYNCHRONIZE`，新消费者必须忽略；个人 `git-pull` 不发布服务器广播。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；工作版本的远端节点仍使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset feature 副本到目标 commit，然后以 `git merge --no-edit <targetCommit>` 反向同步本机相关个人 worktree，不以整仓 clean 作为前置条件。非重叠的 dirty/staged/untracked 内容保留并完成合并；只有 Git 判定会覆盖本地文件时才由 Diff 显示待同步，真实冲突保留 `MERGE_HEAD` 和三方 index。广播只负责服务器间低延迟唤醒，不进入浏览器 SSE；消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
 
-自动化引用不新增 RunEvent，也不在普通对话、命令、重发、批量或定时 Run 的消息/system prompt 中注入路径。OpenCode 仅从 Run 绑定工作树的 `.opencode/opencode.jsonc` 读取 `references` 和精确外部目录权限；因此切换应用级版本但尚未“应用到当前工作树”不会改变既有 Run 上下文。
+自动化引用不新增 RunEvent，也不在普通对话、命令、重发、批量或定时 Run 的消息/system prompt 中注入路径。OpenCode 仅从 Run 绑定工作树的 `.opencode/opencode.jsonc` 读取 `references` 和精确外部目录权限；管理员保存、成员刷新/重新进入以及创建新任务前会通过既有文件 RPC 对账应用当前 generation，运行中的任务保持原配置和租约。
+
+`automation-reference.sync-requested` 与 `automation-reference.cancel-requested` 用于应用自动化引用 generation 的低延迟同步和终止唤醒，payload 固定只包含：
+
+```json
+{
+  "appId": "app_demo",
+  "repositoryId": "repo_automation",
+  "generation": 4
+}
+```
+
+发起 Java 在数据库建档后直接把本机任务提交到与应用资产库共用的有界副本调度器，不依赖接收自身广播；其它 Java 只按 `appId + repositoryId + generation + 本机 linuxServerId` 从数据库认领带 fencing token 的租约。payload 不包含分支、目录、描述、commit、Git URL、操作者、凭据或任何物理路径；重复、乱序、迟到或丢失广播均不能越过数据库 generation、租约和周期补偿。`VERIFY_POINTERS` 只读本地 Git 元数据，不 fetch、checkout 或 reset。两类事件不写 `run_events`，不进入 RunEvent SSE。
 
 `common-parameter.refresh-requested` 用于通用参数 `value` 修改后的跨实例联动。某实例 `PATCH` 修改参数后，本地广播器发布该广播并发布本地 `CommonParameterReloadedEvent`；其他实例收到后发布本地 `CommonParameterReloadedEvent`，监听方直接从数据库读取最新参数并向本实例持有的 opencode manager 下发最新运行配置。远端处理不再转发广播，避免循环；消费者跳过 `originInstanceId` 与本机相同的事件。payload 只携带参数标识，不携带参数值（各实例自行从库读取，避免值在总线明文）：
 
@@ -649,12 +661,12 @@ route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地�
 | `op` | `params` | 响应 |
 |---|---|---|
 | `workspace.list` | `workspaceId`, `path?` | `FileTreeEntryResponse[]` |
-| `workspace.view.list` | `workspaceId`, `locator` | `WorkspaceViewListResponse`；`locator.kind` 为 `COMPOSITE / WORKSPACE / REFERENCE / AUTOMATION_ROOT / AUTOMATION_REFERENCE`；自动化定位器只携带配置 ID、版本 ID 和逻辑相对路径，来源固定为只读 `AUTOMATION_REFERENCE` |
+| `workspace.view.list` | `workspaceId`, `locator` | `WorkspaceViewListResponse`；`locator.kind` 为 `COMPOSITE / WORKSPACE / REFERENCE / AUTOMATION_ROOT / AUTOMATION_REFERENCE`；自动化定位器只携带应用 ID、版本库 ID、配置 generation 和逻辑相对路径，来源固定为只读 `AUTOMATION_REFERENCE` |
 | `workspace.search` | `workspaceId`, `query` | `FileSearchResultResponse[]`；递归搜索工作区相对路径（不区分大小写子串匹配），空 query 返回受限文件目录；跳过黑名单目录，结果按文件名排序并限制数量 |
 | `workspace.read` | `workspaceId`, `path` | `FileContentResponse` |
 | `workspace.read.chunk` | `workspaceId`, `path`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FilePreviewChunkResponse`；渐进读取完整 UTF-8 文件，响应含 `content/nextOffset/size/eof/warningThresholdBytes/lastModifiedMillis` |
 | `workspace.read.binary.chunk` | `workspaceId`, `path`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FileBinaryChunkResponse`；读取工作区普通文件的 Base64 原始字节分段，响应含 `contentBase64/offset/nextOffset/size/eof/lastModifiedMillis` |
-| `workspace.view.read` | `workspaceId`, `locator` | `WorkspaceViewFileContentResponse`；读取工作区、文档引用或自动化引用中的 UTF-8 普通文件，两类引用固定只读；自动化读取实时复核成员及指定版本副本 |
+| `workspace.view.read` | `workspaceId`, `locator` | `WorkspaceViewFileContentResponse`；读取工作区、文档引用或自动化引用中的 UTF-8 普通文件，两类引用固定只读；自动化读取实时复核成员、当前或受租约保护的 generation 及本机副本 |
 | `workspace.view.read.chunk` | `workspaceId`, `locator`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FilePreviewChunkResponse`；每段重新解析和校验逻辑 locator，不接收物理路径 |
 | `workspace.view.read.binary.chunk` | `workspaceId`, `locator`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FileBinaryChunkResponse`；读取组合视图文件的 Base64 原始字节分段，每段重新解析和校验逻辑 locator，不接收物理路径 |
 | `workspace.write` | `workspaceId`, `path`, `content` | `null` |

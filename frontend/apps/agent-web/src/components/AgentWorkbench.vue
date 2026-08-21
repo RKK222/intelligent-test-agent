@@ -230,6 +230,7 @@ import {
 } from "./test-case-maintenance";
 import ReferenceConfigurationDialog from "./ReferenceConfigurationDialog.vue";
 import { canShowReferenceConfiguration } from "./reference-configuration-access";
+import { reconcileAutomationReferenceWorkspace } from "./automation-reference-config-reconciliation";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
@@ -641,6 +642,7 @@ let pendingPublicRuntimeReloadTarget: Pick<AgentFileTabInfo, "worktreeId" | "lin
 let pendingRuntimeRestartRequired = false;
 let pendingAgentCatalogReloadId: string | null = null;
 let lastRuntimeReloadError: unknown | null = null;
+let automationReferenceReconciliationInFlight: { key: string; promise: Promise<boolean> } | null = null;
 const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
 const isDiffDirty = ref(false);
 const sessionSearch = ref("");
@@ -3634,6 +3636,17 @@ watch(selectedWorkspaceIdRef, (id, previous) => {
     bottomMode.value = "run";
   }
 }, { immediate: true });
+watch(
+  [selectedAppId, selectedWorkspaceIdRef, currentPersonalWorkspaceId, selectedWorkspaceKind],
+  ([appId, workspaceId, personalWorkspaceId, workspaceKind]) => {
+    if (!appId || !workspaceId || !personalWorkspaceId || workspaceKind !== "MANAGED") return;
+    void reconcileCurrentAutomationReferences({ quiet: true }).catch((error) => {
+      if (error instanceof StaleConversationInteractionError) return;
+      console.warn("自动化引用工作树对账失败", error);
+    });
+  },
+  { immediate: true }
+);
 watch(currentPersonalWorkspaceId, (id, previous) => {
   if (id !== previous) workspaceUndoStack.value = [];
 });
@@ -4173,6 +4186,62 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
   }
 }
 
+/**
+ * 应用自动化引用以 JSONC 为唯一运行时事实源。重新进入工作树和新 Run 前都通过既有文件 RPC
+ * 对账当前应用配置；仅在正文实际变化时登记 dispose/reload，不向 Run prompt 或消息追加内容。
+ */
+async function reconcileCurrentAutomationReferences(options: {
+  requireReloadBeforeRun?: boolean;
+  quiet?: boolean;
+} = {}): Promise<boolean> {
+  const appId = selectedAppId.value;
+  const workspaceId = selectedWorkspaceIdRef.value;
+  if (!appId || !workspaceId || selectedWorkspaceKind.value !== "MANAGED" || !currentPersonalWorkspaceId.value) {
+    return false;
+  }
+  const key = `${appId}:${workspaceId}`;
+  let reconciliation = automationReferenceReconciliationInFlight?.key === key
+    ? automationReferenceReconciliationInFlight.promise
+    : null;
+  if (!reconciliation) {
+    reconciliation = (async () => {
+      const result = await reconcileAutomationReferenceWorkspace(api, appId, workspaceId);
+      if (appId !== selectedAppId.value
+        || workspaceId !== selectedWorkspaceIdRef.value
+        || selectedWorkspaceKind.value !== "MANAGED") {
+        throw new StaleConversationInteractionError();
+      }
+      if (result.changed) {
+        pendingRuntimeReloadKind = "reference";
+        pendingReferenceRuntimeReloadRevision.value += 1;
+        await refreshWorkspaceView(workspaceId);
+      }
+      return result.changed;
+    })();
+    automationReferenceReconciliationInFlight = { key, promise: reconciliation };
+    void reconciliation.finally(() => {
+      if (automationReferenceReconciliationInFlight?.promise === reconciliation) {
+        automationReferenceReconciliationInFlight = null;
+      }
+    }).catch(() => undefined);
+  }
+  const changed = await reconciliation;
+  if (!options.requireReloadBeforeRun) {
+    if (changed && !userRuntimeBusy.value) {
+      await reloadReferenceRuntimeIfIdle({ quiet: options.quiet ?? true });
+    }
+    return changed;
+  }
+  const outcome = await reloadReferenceRuntimeIfIdle({ quiet: options.quiet ?? true });
+  if (outcome === "WAITING_IDLE") {
+    throw new Error("当前用户仍有运行中的 Session，请等待旧任务结束后再启动新任务");
+  }
+  if (outcome === "FAILED") {
+    throw lastRuntimeReloadError ?? new Error("自动化引用已更新，但运行态重新加载失败");
+  }
+  return changed;
+}
+
 function clearRuntimeReloadConflictRetryTimer() {
   if (runtimeReloadConflictRetryTimer === null) return;
   clearTimeout(runtimeReloadConflictRetryTimer);
@@ -4439,6 +4508,8 @@ const startRunMutation = useMutation({
       if (!guard.workspaceId) {
         throw new Error("未选择 Workspace");
       }
+      await reconcileCurrentAutomationReferences({ requireReloadBeforeRun: true, quiet: true });
+      assertConversationInteractionCurrent(guard);
       let activeSession = session.value;
       if (!activeSession) {
         const createdSession = await api.createSession(
@@ -4945,6 +5016,7 @@ async function retryLastRun(editedPrompt: string) {
   resendStarting.value = true;
   const clientRequestId = createClientRequestId();
   try {
+    await reconcileCurrentAutomationReferences({ requireReloadBeforeRun: true, quiet: true });
     let context = await conversationRunContexts.get(currentSession.sessionId);
     let response;
     try {
@@ -6247,12 +6319,8 @@ async function refreshWorkspaceViewAfterReferenceSaved() {
   await reloadReferenceRuntimeIfIdle();
 }
 
-/** 自动化引用来自应用级数据库状态，不写个人 OpenCode 配置；只刷新模板缓存和组合文件树。 */
+/** 自动化引用已经按应用当前配置写入个人工作树；这里仅刷新组合文件树，不再触碰旧模板缓存。 */
 async function refreshWorkspaceViewAfterAutomationChanged() {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates", selectedAppId.value] }),
-    queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-versions", selectedAppId.value] })
-  ]);
   await refreshWorkspaceView();
   feedback.value = {
     kind: "success",
@@ -7614,8 +7682,9 @@ async function openWorkspaceViewFile(entry: WorkspaceViewEntry) {
     referencePath: entry.locator.path,
     logicalPath: entry.path,
     kind: entry.locator.kind === "AUTOMATION_REFERENCE" ? "AUTOMATION_REFERENCE" : "REFERENCE",
-    automationWorkspaceId: entry.locator.automationWorkspaceId,
-    automationVersionId: entry.locator.automationVersionId
+    automationAppId: entry.locator.automationAppId,
+    automationRepositoryId: entry.locator.automationRepositoryId,
+    automationGeneration: entry.locator.automationGeneration
   });
   const existing = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
   const hadLoadedCache = workbench.tabHasLoadedSnapshot(existing);
@@ -9178,7 +9247,7 @@ async function addWorkspaceViewFileToChatContext(entry: WorkspaceViewEntry): Pro
       : referenceChatPath(alias, entry.locator.path);
     const result = chatContextStore.addFileContext({
       id: entry.locator.kind === "AUTOMATION_REFERENCE"
-        ? `automation-reference:${workspace.workspaceId}:${entry.locator.automationWorkspaceId}:${entry.locator.automationVersionId}:${entry.locator.path}`
+        ? `automation-reference:${workspace.workspaceId}:${entry.locator.automationAppId}:${entry.locator.automationRepositoryId}:${entry.locator.automationGeneration}:${entry.locator.path}`
         : `reference:${workspace.workspaceId}:${alias}:${entry.locator.path}`,
       type: "file",
       source: "reference",
@@ -9483,6 +9552,8 @@ async function handleBatchTestCaseGeneration(request: BatchGenerationRequest, co
   }
 
   try {
+    // 批量立即执行和定时创建也必须先把应用当前自动化配置写入工作树，不能只覆盖普通对话入口。
+    await reconcileCurrentAutomationReferences({ requireReloadBeforeRun: true, quiet: true });
     const result = await batchTestCaseGeneration.execute(request);
     void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     if (request.executionMode === "scheduled") void refreshNightExecutionTasks();
@@ -9638,6 +9709,8 @@ async function handleScheduleNight(payload: {
 
   nightTaskSubmitting.value = true;
   try {
+    // 夜间任务固化前先对账 JSONC；后端 Run 不再补写提示词或隐藏路径。
+    await reconcileCurrentAutomationReferences({ requireReloadBeforeRun: true, quiet: true });
     const created = await api.createNightExecutionTask(request);
     nightCreateIdempotency = null;
     nightTasks.value = [created, ...nightTasks.value.filter((task) => task.taskId !== created.taskId)];
@@ -10763,7 +10836,11 @@ async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
     } else if (source === "vcs") {
       nextFiles = await loadWorkspaceGitDiffFiles();
     } else if (source === "agent") {
-      const pubDiff = await api.getPublicAgentDiff(workbench.publicWorktree?.worktreeId).catch(() => ({ files: [] }));
+      // 公共 Diff 只属于超级管理员个人 worktree；只读共享目录没有 worktreeId，不应发出必然失败的请求。
+      const publicWorktreeId = workbench.publicWorktree?.worktreeId;
+      const pubDiff = publicWorktreeId
+        ? await api.getPublicAgentDiff(publicWorktreeId).catch(() => ({ files: [] }))
+        : { files: [] };
       const mappedPub = pubDiff.files.map((f) => ({
         path: f.path,
         status: f.status,

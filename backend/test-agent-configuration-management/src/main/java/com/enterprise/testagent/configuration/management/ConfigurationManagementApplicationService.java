@@ -29,6 +29,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryDeploymentMod
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.enterprise.testagent.domain.configuration.RepositoryRemoteTreeReader;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.appsource.AppSourceRepositoryHistory;
@@ -58,7 +59,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 应用配置管理应用服务，集中编排配置持久化、Git 远端读取和个人 SSH key 加密。
  */
 @Service
-public class ConfigurationManagementApplicationService {
+public class ConfigurationManagementApplicationService implements RepositoryRemoteTreeReader {
 
     private static final Pattern SCP_LIKE_SSH_URL = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+:.+");
     private static final Pattern REPOSITORY_ENGLISH_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?$");
@@ -459,7 +460,13 @@ public class ConfigurationManagementApplicationService {
 
     public List<String> listBranches(String repositoryId, UserId currentUserId) {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
-        return gitRemoteService.listBranches(effectiveGitUrl(repository, currentUserId), privateKeyFor(repository, currentUserId));
+        return listBranches(repository, currentUserId);
+    }
+
+    @Override
+    public List<String> listBranches(CodeRepository repository, UserId currentUserId) {
+        return gitRemoteService.listBranches(
+                effectiveGitUrl(repository, currentUserId), privateKeyFor(repository, currentUserId));
     }
 
     /**
@@ -493,6 +500,23 @@ public class ConfigurationManagementApplicationService {
                     .toList();
         }
         return new RepositoryTreeResponse(nodes.stream().map(this::treeNodeResponse).toList());
+    }
+
+    /** 自动化引用页面复用同一浅克隆缓存读取任意层级目录，不创建共享副本或个人 worktree。 */
+    @Override
+    public List<RepositoryRemoteTreeReader.TreeNode> listTree(
+            CodeRepository repository, String branch, UserId currentUserId) {
+        String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+        String privateKey = privateKeyFor(repository, currentUserId);
+        return gitCloneCacheService.listTree(
+                        effectiveGitUrl(repository, currentUserId), normalizedBranch, privateKey).stream()
+                .map(this::remoteTreeNode)
+                .toList();
+    }
+
+    private RepositoryRemoteTreeReader.TreeNode remoteTreeNode(RemoteTreeNode node) {
+        return new RepositoryRemoteTreeReader.TreeNode(
+                node.name(), node.path(), node.type(), node.children().stream().map(this::remoteTreeNode).toList());
     }
 
     public List<ApplicationWorkspaceResponse> listWorkspaces(String appId) {

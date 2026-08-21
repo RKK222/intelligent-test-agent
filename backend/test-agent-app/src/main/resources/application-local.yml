@@ -1,0 +1,4 @@
+test-agent:
+  internal-model-proxy:
+    # 本地 profile 仅在当前 JVM 生命周期生成临时值；显式环境配置始终优先，且不会写回 .env.local。
+    api-key: ${TEST_AGENT_INTERNAL_PROXY_API_KEY:${random.uuid}}

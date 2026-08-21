@@ -979,7 +979,7 @@ public class OpencodeProcessStartupService {
     private Map<String, String> startupEnvironment(OpencodeProcessStartupRequest request) {
         Map<String, String> environment = new java.util.LinkedHashMap<>(request.environment());
         injectOptionalPathParameter(environment, OPENCODE_REFERENCES_DIR_PARAM);
-        // 自动化代码库引用使用同一 JSONC references/permission 机制，通过既有应用版本根参数解析路径。
+        // 新引用统一使用 OPENCODE_REFERENCES_DIR；旧根参数仅保留给历史 JSONC 的滚动兼容。
         injectOptionalPathParameter(environment, OPENCODE_APP_WORKSPACE_ROOT_PARAM);
         if (internalProxySettings != null) {
             environment.put(InternalModelProxyRuntimeSettings.API_KEY_ENV_NAME, internalProxySettings.requireApiKey());

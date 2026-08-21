@@ -38,6 +38,7 @@ import type {
   AiRunFeedbackPayload,
   RunFeedbackQuery,
   RunFeedbackState,
+  RepositoryTreeNode,
   AddSshKeyPayload,
   AnalyticsExceptionDetail,
   AnalyticsCapabilities,
@@ -54,7 +55,6 @@ import type {
   AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
   ApplicationWorkspaceTemplate,
-  AutomationWorkspaceActiveVersion,
   BatchContext,
   ApplicationWorkspaceVersion,
   ApplicationDefinition,
@@ -437,34 +437,37 @@ export type ReferenceRepositoryTreeNode = {
   selectable: boolean;
 };
 
-/** 自动化只读版本在单台在线服务器上的共享副本同步状态。 */
-export type AutomationVersionSynchronizationServer = {
-  linuxServerId: string;
-  serverName?: string | null;
+export type AutomationReferenceConfiguration = {
+  generation: number;
+  branch: string;
+  directoryPath: string;
+  description: string;
+  merge: false;
+  targetCommitHash: string;
+  alias: string;
+  logicalPath: string;
+  directoryName: string;
+  activatedAt?: string | null;
   status: string;
-  online: boolean;
-  currentBranch?: string | null;
-  currentCommitHash?: string | null;
-  matchesTarget?: boolean | null;
-  syncedAt?: string | null;
-  error?: string | null;
 };
 
-/** 自动化只读版本的一轮多服务器同步投影，不包含服务器物理路径。 */
-export type AutomationVersionSynchronization = {
-  applicationWorkspaceId: string;
-  workspaceName: string;
+/** `(appId, repositoryId)` 唯一自动化引用及当前共享副本状态。 */
+export type AutomationReferenceRepositoryStatus = {
+  appId: string;
   repositoryId: string;
-  repositoryName: string;
-  versionId: string;
-  version: string;
-  branch: string;
-  targetCommitHash?: string | null;
-  status: "SYNCHRONIZING" | "READY" | "FAILED" | string;
-  operation: "SYNCHRONIZE" | string;
+  name: string;
+  englishName: string;
+  gitUrl: string;
+  status: string;
+  operation: "CONFIGURE" | "SYNCHRONIZE" | "VERIFY_POINTERS" | string;
+  lockVersion: number;
+  activeGeneration?: number | null;
+  pendingGeneration?: number | null;
+  currentConfiguration?: AutomationReferenceConfiguration | null;
+  pendingConfiguration?: AutomationReferenceConfiguration | null;
   targetServerCount: number;
   readyServerCount: number;
-  servers: AutomationVersionSynchronizationServer[];
+  servers: ReferenceRepositoryServerStatus[];
   traceId?: string | null;
   message?: string | null;
 };
@@ -526,6 +529,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
     `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/reference-repositories`;
+  const automationReferenceRepositoryBase = (appId: string) =>
+    `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/automation-reference-repositories`;
   const appSourceRepositoryBase = (appId: string) =>
     `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/app-source-repositories`;
   const appSourceOperationBase = `${workspaceManagementBase}/app-source-operations`;
@@ -1295,6 +1300,60 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<ReferenceRepositoryTreeNode[]>(
         `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({ path })}`
       ),
+    listAutomationReferenceRepositories: (appId: string) =>
+      request<AutomationReferenceRepositoryStatus[]>(automationReferenceRepositoryBase(appId)),
+    getAutomationReferenceRepositoryStatus: (appId: string, repositoryId: string) =>
+      request<AutomationReferenceRepositoryStatus>(
+        `${automationReferenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/status`
+      ),
+    listAutomationReferenceRepositoryBranches: (appId: string, repositoryId: string) =>
+      request<string[]>(
+        `${automationReferenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/branches`
+      ),
+    listAutomationReferenceRepositoryTree: (
+      appId: string,
+      repositoryId: string,
+      branch: string,
+      path = ""
+    ) => request<RepositoryTreeNode[]>(
+      `${automationReferenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({ branch, path })}`
+    ),
+    configureAutomationReferenceRepository: (appId: string, repositoryId: string, payload: {
+      branch: string;
+      directoryPath: string;
+      description?: string;
+      merge: false;
+      expectedGeneration: number;
+      operationId: string;
+    }) => request<AutomationReferenceRepositoryStatus>(
+      `${automationReferenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/configuration`,
+      { method: "PUT", body: JSON.stringify(payload) }
+    ),
+    synchronizeAutomationReferenceRepository: (
+      appId: string,
+      repositoryId: string,
+      expectedGeneration: number,
+      operationId: string
+    ) => request<AutomationReferenceRepositoryStatus>(
+      `${automationReferenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/synchronize`,
+      { method: "POST", body: JSON.stringify({ expectedGeneration, operationId }) }
+    ),
+    verifyAutomationReferenceRepository: (
+      appId: string,
+      repositoryId: string,
+      expectedGeneration: number
+    ) => request<AutomationReferenceRepositoryStatus>(
+      `${automationReferenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/verify`,
+      { method: "POST", body: JSON.stringify({ expectedGeneration }) }
+    ),
+    terminateAutomationReferenceRepository: (
+      appId: string,
+      repositoryId: string,
+      expectedGeneration: number
+    ) => request<AutomationReferenceRepositoryStatus>(
+      `${automationReferenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/terminate`,
+      { method: "POST", body: JSON.stringify({ expectedGeneration }) }
+    ),
     listWorkspaceTemplates: (appId: string) =>
       request<ApplicationWorkspaceTemplate[]>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates`),
     listWorkspaceVersions: (appId: string, templateId: string) =>
@@ -1305,22 +1364,6 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<ApplicationWorkspaceVersion>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`,
         { method: "POST", body: JSON.stringify(payload) }
-      ),
-    /** 管理员为自动化代码库激活应用级只读版本；重复激活同一版本幂等。 */
-    activateAutomationWorkspaceVersion: (appId: string, templateId: string, versionId: string) =>
-      request<AutomationWorkspaceActiveVersion>(
-        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/active-version`,
-        { method: "PUT", body: JSON.stringify({ versionId }) }
-      ),
-    /** 将一个自动化只读版本同步到当前全部在线后端服务器。 */
-    synchronizeAutomationWorkspaceVersion: (appId: string, templateId: string, versionId: string) =>
-      request<AutomationVersionSynchronization>(
-        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions/${encodeURIComponent(versionId)}/synchronize`,
-        { method: "POST" }
-      ),
-    getAutomationWorkspaceVersionSynchronizationStatus: (appId: string, templateId: string, versionId: string) =>
-      request<AutomationVersionSynchronization>(
-        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions/${encodeURIComponent(versionId)}/synchronization-status`
       ),
     /** @deprecated 版本级全员拉取已停用；请使用 gitPullPersonalWorkspace。 */
     gitPullWorkspaceVersion: (versionId: string) =>

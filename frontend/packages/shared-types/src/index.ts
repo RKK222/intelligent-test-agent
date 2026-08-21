@@ -420,8 +420,9 @@ export type WorkspaceViewLocator = {
   kind: "COMPOSITE" | "WORKSPACE" | "REFERENCE" | "AUTOMATION_ROOT" | "AUTOMATION_REFERENCE";
   path: string;
   referenceAlias?: string;
-  automationWorkspaceId?: string;
-  automationVersionId?: string;
+  automationAppId?: string;
+  automationRepositoryId?: string;
+  automationGeneration?: number;
 };
 
 export type WorkspaceViewSource = "WORKSPACE" | "REFERENCE" | "AUTOMATION_REFERENCE" | "MIXED";
@@ -3432,20 +3433,6 @@ export type ApplicationWorkspaceTemplate = ApplicationWorkspaceConfig & {
   standard: boolean;
   /** 新后端返回关联版本库类型；可选以兼容滚动升级期间的旧响应。 */
   repositoryType?: string | null;
-  /** 自动化代码库由管理员激活的应用级只读版本；其他工作空间为空。 */
-  activeVersion?: AutomationWorkspaceActiveVersion | null;
-};
-
-export type AutomationWorkspaceActiveVersion = {
-  versionId: string;
-  version: string;
-  branch: string;
-  /** 写入当前工作树 OpenCode JSONC 的受控环境变量路径。 */
-  referencePath?: string | null;
-  targetCommitHash?: string | null;
-  replicaStatus?: string | null;
-  activatedByUserId?: string | null;
-  activatedAt: string;
 };
 
 export type ApplicationWorkspaceVersion = {

@@ -6,7 +6,6 @@ import {
   LINUX_SERVER_ROUTE_HEADER,
   SESSION_SHARE_HEADER,
   SUPPORT_ACCESS_GRANT_HEADER,
-  type AutomationVersionSynchronization,
   type ReferenceRepositoryStatus,
   type WorkspaceWebSocketFactory
 } from "../src";
@@ -878,18 +877,18 @@ describe("backend-api", () => {
     ]);
   });
 
-  it("calls automation version synchronization endpoints without a routed physical workspace", async () => {
-    const status: AutomationVersionSynchronization = {
-      applicationWorkspaceId: "awp/auto",
-      workspaceName: "接口自动化",
+  it("calls app-repository automation endpoints without a routed physical workspace", async () => {
+    const status = {
+      appId: "app/demo",
       repositoryId: "repo/auto",
-      repositoryName: "自动化代码库",
-      versionId: "awv/2",
-      version: "20260819",
+      name: "接口自动化",
+      englishName: "api-automation",
+      gitUrl: "https://git.example.test/automation.git",
       branch: "main",
-      targetCommitHash: "abc123",
       status: "SYNCHRONIZING",
-      operation: "SYNCHRONIZE",
+      operation: "CONFIGURE",
+      lockVersion: 1,
+      pendingGeneration: 2,
       targetServerCount: 2,
       readyServerCount: 1,
       servers: [{ linuxServerId: "linux-a", serverName: "server-a", status: "READY", online: true }]
@@ -901,18 +900,25 @@ describe("backend-api", () => {
     }), { status: 200 }));
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
 
-    await expect(client.synchronizeAutomationWorkspaceVersion("app/demo", "awp/auto", "awv/2"))
+    await expect(client.configureAutomationReferenceRepository("app/demo", "repo/auto", {
+      branch: "main",
+      directoryPath: "scripts/e2e",
+      description: "接口自动化 / main / scripts/e2e，只读自动化引用",
+      merge: false,
+      expectedGeneration: 1,
+      operationId: "aar_12345678"
+    }))
       .resolves.toEqual(status);
-    await expect(client.getAutomationWorkspaceVersionSynchronizationStatus("app/demo", "awp/auto", "awv/2"))
+    await expect(client.getAutomationReferenceRepositoryStatus("app/demo", "repo/auto"))
       .resolves.toEqual(status);
 
     expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
       [
-        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/workspace-templates/awp%2Fauto/versions/awv%2F2/synchronize",
-        "POST"
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/automation-reference-repositories/repo%2Fauto/configuration",
+        "PUT"
       ],
       [
-        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/workspace-templates/awp%2Fauto/versions/awv%2F2/synchronization-status",
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/automation-reference-repositories/repo%2Fauto/status",
         undefined
       ]
     ]);
@@ -2661,36 +2667,6 @@ describe("backend-api", () => {
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
   });
 
-  it("activates an automation workspace version with a logical id payload", async () => {
-    const activeVersion = {
-      versionId: "awv_2",
-      version: "20260819",
-      branch: "main",
-      replicaStatus: "READY",
-      activatedAt: "2026-08-19T00:00:00Z"
-    };
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      success: true,
-      traceId: "trace_fixed",
-      data: activeVersion
-    }), { status: 200 }));
-    const client = createBackendApiClient({
-      baseUrl: "http://api",
-      fetcher,
-      traceIdFactory: () => "trace_fixed",
-      routeLinuxServerId: () => "linux-user-node"
-    });
-
-    await expect(client.activateAutomationWorkspaceVersion("app_gcms", "awp_auto", "awv_2"))
-      .resolves.toEqual(activeVersion);
-    expect(fetcher).toHaveBeenCalledWith(
-      "http://api/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/awp_auto/active-version",
-      expect.objectContaining({ method: "PUT" })
-    );
-    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ versionId: "awv_2" });
-    expect((fetcher.mock.calls[0]?.[1]?.headers as Headers).get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
-  });
-
   it("loads shared automation configuration without user process routing", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
       success: true,
@@ -2704,10 +2680,9 @@ describe("backend-api", () => {
       routeLinuxServerId: () => "linux-user-node"
     });
 
-    await client.listApplicationWorkspaces("app_gcms");
-    await client.listWorkspaceVersions("app_gcms", "awp_auto");
+    await client.listAutomationReferenceRepositories("app_gcms");
 
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
     for (const call of fetcher.mock.calls) {
       expect((call[1]?.headers as Headers).get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
     }

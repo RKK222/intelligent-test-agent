@@ -7,16 +7,17 @@ public record WorkspaceViewLocator(
         WorkspaceViewLocatorKind kind,
         String path,
         String referenceAlias,
-        String automationWorkspaceId,
-        String automationVersionId) {
+        String automationAppId,
+        String automationRepositoryId,
+        Long automationGeneration) {
 
     /** 兼容既有工作区和应用资产引用定位器。 */
     public WorkspaceViewLocator(WorkspaceViewLocatorKind kind, String path, String referenceAlias) {
-        this(kind, path, referenceAlias, null, null);
+        this(kind, path, referenceAlias, null, null, null);
     }
 
     /** 返回组合视图根定位器。 */
     public static WorkspaceViewLocator root() {
-        return new WorkspaceViewLocator(WorkspaceViewLocatorKind.COMPOSITE, "", null, null, null);
+        return new WorkspaceViewLocator(WorkspaceViewLocatorKind.COMPOSITE, "", null, null, null, null);
     }
 }

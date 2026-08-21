@@ -116,20 +116,11 @@ public final class ManagedWorkspaceResponses {
             boolean standard,
             String repositoryType,
             Instant createdAt,
-            Instant updatedAt,
-            AutomationActiveVersionResponse activeVersion) {
+            Instant updatedAt) {
         public static WorkspaceTemplateResponse from(
                 ApplicationWorkspace workspace,
                 boolean standard,
                 String repositoryType) {
-            return from(workspace, standard, repositoryType, null);
-        }
-
-        public static WorkspaceTemplateResponse from(
-                ApplicationWorkspace workspace,
-                boolean standard,
-                String repositoryType,
-                AutomationActiveVersionResponse activeVersion) {
             return new WorkspaceTemplateResponse(
                     workspace.workspaceId().value(),
                     workspace.appId().value(),
@@ -141,57 +132,8 @@ public final class ManagedWorkspaceResponses {
                     standard,
                     repositoryType,
                     workspace.createdAt(),
-                    workspace.updatedAt(),
-                    activeVersion);
+                    workspace.updatedAt());
         }
-    }
-
-    /** 自动化代码库配置当前激活的只读版本及本服务器副本状态。 */
-    public record AutomationActiveVersionResponse(
-            String versionId,
-            String version,
-            String branch,
-            String referencePath,
-            String targetCommitHash,
-            String replicaStatus,
-            String activatedByUserId,
-            Instant activatedAt) {
-    }
-
-    /** 自动化只读版本的一轮多服务器同步投影；只返回逻辑指针和服务器状态，不暴露副本路径。 */
-    public record AutomationVersionSynchronizationResponse(
-            String applicationWorkspaceId,
-            String workspaceName,
-            String repositoryId,
-            String repositoryName,
-            String versionId,
-            String version,
-            String branch,
-            String targetCommitHash,
-            String status,
-            String operation,
-            int targetServerCount,
-            int readyServerCount,
-            List<AutomationVersionServerSynchronizationResponse> servers,
-            String traceId,
-            String message) {
-
-        public AutomationVersionSynchronizationResponse {
-            servers = servers == null ? List.of() : List.copyOf(servers);
-        }
-    }
-
-    /** 自动化只读版本在单台在线服务器上的共享副本状态。 */
-    public record AutomationVersionServerSynchronizationResponse(
-            String linuxServerId,
-            String serverName,
-            String status,
-            boolean online,
-            String currentBranch,
-            String currentCommitHash,
-            Boolean matchesTarget,
-            Instant syncedAt,
-            String error) {
     }
 
     /**
@@ -313,30 +255,6 @@ public final class ManagedWorkspaceResponses {
                     version.updatedAt());
         }
 
-        /** 自动化引用版本只返回逻辑版本、OpenCode 环境变量路径与副本状态，不序列化服务器物理路径。 */
-        public static ApplicationWorkspaceVersionResponse readonlyReference(
-                ApplicationWorkspaceVersion version,
-                ApplicationWorkspaceVersionReplica replica,
-                String referencePath) {
-            return new ApplicationWorkspaceVersionResponse(
-                    version.versionId().value(),
-                    version.applicationWorkspaceId().value(),
-                    version.appId().value(),
-                    version.repositoryId().value(),
-                    version.version(),
-                    version.branch(),
-                    null,
-                    null,
-                    null,
-                    version.status().name(),
-                    version.targetCommitHash(),
-                    replica == null ? null : replica.currentCommitHash(),
-                    replica == null ? null : replica.linuxServerId(),
-                    replica == null ? null : replica.syncStatus().name(),
-                    referencePath,
-                    version.createdAt(),
-                    version.updatedAt());
-        }
     }
 
     public record PersonalWorkspaceResponse(

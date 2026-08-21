@@ -48,7 +48,7 @@
 
 ## 为什么目录树有内容，但工作空间目录不能选择？
 
-测试工作库只允许选择当前应用同名根目录下的一级子目录，路径必须严格是 `应用名称/一级子目录`，并且应用名称的大小写、连字符和点号必须完全一致。例如当前应用为 `F-APIP` 时，`F-APIP/f-apip-support` 可以选择；`F-APIP.SUPPORT/workspace` 的根目录不匹配，`F-APIP/f-apip-support/workspace` 层级超过一级。自动化代码库可选择任意已有目录并指定 `yyyyMMdd` 版本，但保存结果是只读 Reference，不是可切换 workspace，也不能新建目录或个人 worktree。
+测试工作库只允许选择当前应用同名根目录下的一级子目录，路径必须严格是 `应用名称/一级子目录`，并且应用名称的大小写、连字符和点号必须完全一致。例如当前应用为 `F-APIP` 时，`F-APIP/f-apip-support` 可以选择；`F-APIP.SUPPORT/workspace` 的根目录不匹配，`F-APIP/f-apip-support/workspace` 层级超过一级。自动化代码库可选择任意已有目录；每个版本库只保存一个当前分支和目录，结果是只读 Reference，不是可切换 workspace，也不能新建目录或个人 worktree。
 
 ## 初始化进程会修改我的业务文件吗？
 

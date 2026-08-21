@@ -6,8 +6,9 @@ export type ReferenceFileTabInfo = {
   referencePath: string;
   logicalPath: string;
   kind?: "REFERENCE" | "AUTOMATION_REFERENCE";
-  automationWorkspaceId?: string;
-  automationVersionId?: string;
+  automationAppId?: string;
+  automationRepositoryId?: string;
+  automationGeneration?: number;
 };
 
 const REFERENCE_FILE_PREFIX = "workspace-reference:";
@@ -27,7 +28,12 @@ export function referenceTabPath(info: ReferenceFileTabInfo): string {
     info.logicalPath
   ];
   if (info.kind === "AUTOMATION_REFERENCE") {
-    fields.push(info.kind, info.automationWorkspaceId ?? "", info.automationVersionId ?? "");
+    fields.push(
+      info.kind,
+      info.automationAppId ?? "",
+      info.automationRepositoryId ?? "",
+      String(info.automationGeneration ?? "")
+    );
   }
   return `${REFERENCE_FILE_PREFIX}${fields.map(encodeURIComponent).join(":")}`;
 }
@@ -36,12 +42,22 @@ export function referenceFileInfo(tabPath: string): ReferenceFileTabInfo {
   if (!isReferenceFilePath(tabPath)) {
     throw new Error("不是引用文件 tab 身份");
   }
-  const [workspaceId = "", referenceAlias = "", referencePath = "", logicalPath = "", kind, automationWorkspaceId, automationVersionId] = tabPath
+  const [workspaceId = "", referenceAlias = "", referencePath = "", logicalPath = "", kind,
+    automationAppId, automationRepositoryId, automationGeneration] = tabPath
     .slice(REFERENCE_FILE_PREFIX.length)
     .split(":")
     .map(decodeURIComponent);
   return kind === "AUTOMATION_REFERENCE"
-    ? { workspaceId, referenceAlias, referencePath, logicalPath, kind, automationWorkspaceId, automationVersionId }
+    ? {
+      workspaceId,
+      referenceAlias,
+      referencePath,
+      logicalPath,
+      kind,
+      automationAppId,
+      automationRepositoryId,
+      automationGeneration: automationGeneration ? Number(automationGeneration) : undefined
+    }
     : { workspaceId, referenceAlias, referencePath, logicalPath };
 }
 
@@ -51,8 +67,9 @@ export function referenceLocatorFromTab(info: ReferenceFileTabInfo): WorkspaceVi
     return {
       kind: "AUTOMATION_REFERENCE",
       path: info.referencePath,
-      automationWorkspaceId: info.automationWorkspaceId,
-      automationVersionId: info.automationVersionId
+      automationAppId: info.automationAppId,
+      automationRepositoryId: info.automationRepositoryId,
+      automationGeneration: info.automationGeneration
     };
   }
   return { kind: "REFERENCE", path: info.referencePath, referenceAlias: info.referenceAlias };
