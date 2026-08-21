@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { AlertTriangle, CheckCircle2, GitBranch, Loader2, RefreshCw } from "lucide-vue-next";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
@@ -12,6 +12,7 @@ import type {
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  pageActive: boolean;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
@@ -55,7 +56,7 @@ const canSubmitSupersede = computed(() =>
 const dirtyServers = computed(() => rows.value.filter((row) => row.localChangesPresent || row.status === "CONFLICT"));
 
 onMounted(() => {
-  if (hasSuperAdmin.value) {
+  if (hasSuperAdmin.value && props.pageActive) {
     void refresh();
   }
 });
@@ -97,7 +98,7 @@ async function refreshRollout() {
 
 function scheduleRolloutPolling() {
   stopRolloutPolling();
-  if (rolloutActive.value) {
+  if (props.pageActive && rolloutActive.value) {
     rolloutTimer = window.setTimeout(() => void refreshRollout(), 2_000);
   }
 }
@@ -108,6 +109,14 @@ function stopRolloutPolling() {
     rolloutTimer = null;
   }
 }
+
+watch(() => props.pageActive, (active) => {
+  if (!active) {
+    stopRolloutPolling();
+    return;
+  }
+  if (hasSuperAdmin.value) void refresh();
+});
 
 async function openInitializeDialog(repository: PublicAgentRepositoryStatus) {
   if (!repository.initializationAllowed || initializing.value) {

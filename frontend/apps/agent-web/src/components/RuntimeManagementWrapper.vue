@@ -14,5 +14,5 @@ const props = defineProps<{
 </script>
 
 <template>
-  <RuntimeManagementPanel :current-user="currentUser" />
+  <RuntimeManagementPanel :current-user="currentUser" :page-active="true" />
 </template>

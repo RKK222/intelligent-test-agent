@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, reactive, ref } from "vue";
+import { computed, inject, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Copy, Eye, KeyRound, Pencil, Plus, RefreshCw, RotateCw, Search, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -12,7 +12,7 @@ import type {
   ExternalApiScope
 } from "@test-agent/shared-types";
 
-const props = defineProps<{ currentUser: CurrentUser | null }>();
+const props = defineProps<{ currentUser: CurrentUser | null; pageActive: boolean }>();
 const api = inject<BackendApiClient>("api")!;
 const queryClient = useQueryClient();
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
@@ -29,6 +29,7 @@ const plainApiKey = ref("");
 const secretToolCode = ref("");
 const secretTitle = ref("");
 let componentDisposed = false;
+let sensitiveResponseEpoch = 0;
 const form = reactive<{
   toolCode: string;
   toolName: string;
@@ -38,14 +39,14 @@ const form = reactive<{
 
 const scopeQuery = useQuery({
   queryKey: ["external-api-scopes"],
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.listExternalApiScopes()
 });
 
 const credentialQuery = useQuery({
   queryKey: computed(() => ["external-api-credentials", keyword.value, enabledFilter.value, page.value, size]),
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
   queryFn: () => api.listExternalApiCredentials({
     keyword: keyword.value || undefined,
@@ -63,9 +64,12 @@ const loadError = computed(() => formatError(credentialQuery.error.value || scop
 
 const createMutation = useMutation({
   mutationFn: async (payload: ExternalApiCredentialCreatePayload) => {
+    const requestEpoch = sensitiveResponseEpoch;
     const result = await api.createExternalApiCredential(payload);
-    // 异步响应晚于组件卸载时不得重新把明文 Key 写回组件内存。
-    if (!componentDisposed) showSecret("新建凭据", result.credential.toolCode, result.apiKey);
+    // 异步响应晚于失活或卸载时不得读取、写回一次性明文 Key。
+    if (!componentDisposed && props.pageActive && requestEpoch === sensitiveResponseEpoch) {
+      showSecret("新建凭据", result.credential.toolCode, result.apiKey);
+    }
   },
   onSuccess: () => {
     closeEditor();
@@ -88,8 +92,11 @@ const updateMutation = useMutation({
 
 const revealMutation = useMutation({
   mutationFn: async (credentialId: string) => {
+    const requestEpoch = sensitiveResponseEpoch;
     const result = await api.revealExternalApiCredential(credentialId);
-    if (!componentDisposed) showSecret("查看当前凭据", result.toolCode, result.apiKey);
+    if (!componentDisposed && props.pageActive && requestEpoch === sensitiveResponseEpoch) {
+      showSecret("查看当前凭据", result.toolCode, result.apiKey);
+    }
   },
   onError: (error) => ElMessage.error(formatError(error) || "查看 API Key 失败"),
   onSettled: () => queueMicrotask(() => revealMutation.reset())
@@ -97,8 +104,11 @@ const revealMutation = useMutation({
 
 const rotateMutation = useMutation({
   mutationFn: async (credentialId: string) => {
+    const requestEpoch = sensitiveResponseEpoch;
     const result = await api.rotateExternalApiCredential(credentialId);
-    if (!componentDisposed) showSecret("轮换后的新凭据", result.toolCode, result.apiKey);
+    if (!componentDisposed && props.pageActive && requestEpoch === sensitiveResponseEpoch) {
+      showSecret("轮换后的新凭据", result.toolCode, result.apiKey);
+    }
   },
   onSuccess: () => {
     void invalidateList();
@@ -265,8 +275,16 @@ function formatError(error: unknown) {
   return error instanceof Error ? error.message : "API Key 数据加载失败";
 }
 
+watch(() => props.pageActive, (active) => {
+  if (active) return;
+  // 代次先失效，保证同一事件循环中返回的迟到请求也无法重新展示明文。
+  sensitiveResponseEpoch += 1;
+  clearSecret();
+});
+
 onBeforeUnmount(() => {
   componentDisposed = true;
+  sensitiveResponseEpoch += 1;
   clearSecret();
   closeEditor();
   createMutation.reset();

@@ -2441,3 +2441,36 @@
 - Result:
   - 运营数据查询现只读 ClickHouse，具备可观测 freshness、可重试 outbox、历史回填与校验后清理旧 PostgreSQL 汇总表的切换门禁；HTTP API 增量新增，无 RunEvent/SSE 类型变化，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
   - 全量 Maven 基线仍有两个任务外已知失败：H2 模型网关 fixture 缺 `embedding_dimension`，以及固定日期的分享会话已过期；Redis 全类 10 项中另有一个旧综合用例在同 Session 活跃 Run 未终结时初始化第二个 Run，被现有互斥约束拒绝。新增范围的定向测试和真实存储门禁均已通过。
+
+### 2026-08-20 - 支持 Markdown 思维导图查看与编辑
+
+- Why:
+  - AI 生成的 Markdown 层级列表需要在工作台内直接查看和修订；既要支持 Markdown 文档中的 `mind` fence，也要支持独立 `.mind` 文件，并继续沿用现有文件 dirty、关闭确认和保存链路。
+- What:
+  - 固定引入 `simple-mind-map@0.14.0-fix.3`，按需懒加载 core、`Drag` 和 `KeyboardNavigation`；新增右向逻辑结构画布、节点编辑/拖拽/撤销重做/缩放折叠和白名单样式工具。
+  - 新增严格 Markdown parser/serializer、fence 精确替换、稳定节点 ID 分配、版本化 TLV + FNV-1a 紧凑元数据和安全画布适配；限制 2,000 节点、128 层、单节点 4,096 字符、元数据 1 MiB，并拒绝损坏、重复或越界数据进入编辑态。
+  - Markdown 预览增加源码/预览/弹层编辑；独立 `.mind` 默认可视化查看，footer 提供就地编辑入口，草稿接入 tab dirty、关闭确认、后台刷新保护和保存前应用/取消门禁。同步 editor、file-explorer、workbench-shell、agent-web 说明、前端规范、模块图和内置用户手册（含 SimpleMindMap MIT 归属）。
+- How:
+  - 定向 Vitest 13 个文件 116/116，editor、workbench-shell、agent-web 类型检查均通过；Chromium 工作台 3/3，覆盖多 fence 精确保存、独立 `.mind` 草稿/应用/保存/取消及损坏元数据/只读阻断。
+  - `corepack pnpm build` 通过，产物保持 `simple-mind-map`、`Drag`、`KeyboardNavigation` 和编辑弹层独立 chunk，构建目标继续为 Chromium 108；独立复审最终无 Critical、Important 或 Minor 发现。
+  - 全量 Vitest 为 132/133 个文件、2028 passed / 1 skipped / 1 failed；唯一失败仍是任务外既有 `help-center.test.ts` 要求“超级管理员专属的‘用户管理’”而 `HEAD` 文档正文无引号，本次相关文件未修改。`git diff --check` 与冲突标记扫描通过，提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+- Result:
+  - 两类思维导图均可安全预览和编辑，只有“应用”才补齐 ID/元数据，之后仍由现有写文件动作落盘；损坏或超限内容仅安全预览，未知属性不执行。
+  - 本次为静态前端依赖和前端状态扩展，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、migration、部署节点、强制配置或后端安全边界；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。
+
+### 2026-08-20 - 支持工作台功能页多标签交互
+
+- Why:
+  - 工具箱、记忆、能力库和控制台二级功能原先会直接替换中央页面，用户无法保留多个功能页上下文并快速往返；工作台本身仍需保持既有编辑器和三栏快照交互。
+- What:
+  - 新增统一功能页注册表和独立 `WorkspacePageTabBar`，覆盖工具箱、记忆、能力库、全部受权控制台页及三击 Shift 临时排查页；同一页面去重，支持横向溢出、列表定位、拖放/键盘排序、相邻关闭和关闭其他/左侧/右侧/全部，刷新后也会保留已关闭 Tab 所记录的最近受权控制台页。
+  - `AgentWorkbench` 将工作台与功能页 Tab 分层，已访问页面关闭前常驻挂载，切回 `/workbench` 只隐藏；`/system?section=<key>`、深链接和浏览器历史切换或补开目标 Tab。Tab 描述按 `userId` 写入版本化 `sessionStorage`，恢复时等待用户资料并过滤未知、越权和临时页面。
+  - 控制台改为受控二级导航；功能页失活会暂停运行管理/公共配置轮询、能力库延迟搜索和可观测图表刷新。API Key 用响应代次阻止迟到明文，内部模型擦除 Token，排查页失活卸载并清理 grant/连接，XXL 表单提交后立即清空父页面一次性票据。
+  - 同步前端总览、agent-web 包说明、前端规范、模块地图及用户手册导航/控制台章节；未增加前端依赖，保持 Chromium 108 / ES2022 基线。
+- How:
+  - 最终树全 workspace `lint`、`typecheck`、生产 `build` 通过；全量 Vitest 135/135 文件通过，2052 passed / 1 skipped。功能页状态、Tab 组件、权限、敏感失活和迟到响应均有单元/组件回归；最近控制台页关闭后刷新恢复用例按 TDD 先失败再以最小修正转绿。
+  - 最终全量 Playwright 为 163 passed / 6 failed / 1 flaky，新增多 Tab 场景全部通过；6 项失败及 1 项 flaky 均稳定定位于任务外旧链路：源码进度瞬态文案、平台体验弹框遮挡两个旧用例、CHAT 选择器既有非 clearable 契约、标题探针新增字段、SSE 重试提示竞态和弹球物理采样。此前已废弃根路径断言和新增工作台包裹层导致的两个 Diff 测试探针共 3 项已修正并通过。
+  - 视觉 trace 复核了白色面板、工行红激活线、内容占满和右键菜单，并将页面列表锚定到中央 Tab 栏而非浏览器右边缘。提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次文件冲突的未完成事项。
+- Result:
+  - 功能页可在应用内多 Tab 间切换、排序、批量关闭并跨工作台往返，刷新只恢复安全的页面描述；工作台和编辑器文件 Tab 保持原交互，关闭最后一个功能页自动回到工作台。
+  - 本次涉及前端性能和敏感内存生命周期优化，但不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、migration、部署、安全协议或强制配置；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支或推送远端。

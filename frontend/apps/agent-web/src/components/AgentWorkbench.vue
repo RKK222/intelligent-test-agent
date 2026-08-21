@@ -23,7 +23,14 @@ import {
   type RawHttpExchange
 } from "@test-agent/backend-api";
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
-import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
+import {
+  CodeEditor,
+  isMindMapPath,
+  languageFromPath,
+  type EditorSelectionContext,
+  type MindMapDocumentStatus,
+  type MindMapVisualDraft
+} from "@test-agent/editor";
 import {
   subscribeRunEvents,
   subscribeSessionRuntimeState,
@@ -94,6 +101,7 @@ import { TestRunnerPanel } from "@test-agent/test-runner";
 import { Spinner, type Feedback } from "@test-agent/ui-kit";
 import {
   useWorkbenchStore,
+  editorTabIsDirty,
   mockVcsDiffFiles,
   mockPublicAgentDiffs,
   mockWorkspaceAgentDiffs,
@@ -115,6 +123,11 @@ import type { UserNotificationFilter } from "./UserNotificationCenter.vue";
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import ExperienceWorkspaceDialog from "./ExperienceWorkspaceDialog.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
+import {
+  createMindMapDraft,
+  mindMapEditBlockReason,
+  mindMapSaveBlockedReason
+} from "./mind-map-workbench";
 import AppSourceDialog from "./AppSourceDialog.vue";
 import AppSourcePicker from "./AppSourcePicker.vue";
 import {
@@ -234,6 +247,7 @@ import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
+import WorkspacePageTabBar from "./WorkspacePageTabBar.vue";
 import { createSupportAccessShortcut } from "./support-access-shortcut";
 import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
@@ -248,6 +262,24 @@ import {
   type RoutedCenterMode,
   type WorkbenchCenterMode
 } from "./toolbox-navigation";
+import {
+  canOpenWorkspacePage,
+  closeWorkspacePageTabs,
+  defaultSystemMenuKey,
+  isSystemWorkspacePageId,
+  moveWorkspacePageTab,
+  openWorkspacePageTab,
+  parseWorkspacePageRoute,
+  restoreWorkspacePageTabs,
+  serializeWorkspacePageTabs,
+  systemMenuKeyFromPageId,
+  workspacePageRoute,
+  workspacePageTab,
+  type SystemMenuKey,
+  type WorkspacePageCloseMode,
+  type WorkspacePageId,
+  type WorkspacePageTabsState
+} from "./workspace-page-tabs";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyError, notifyFeedback } from "./notify";
 import { launchLobehubInNewTab } from "./lobehub-launch";
@@ -607,9 +639,12 @@ const vcsDiffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<WorkbenchCenterMode>(routedCenterModeFromRouteName(route.name) ?? "editor");
-const supportAccessRequested = ref(false);
 const supportAccessShortcut = createSupportAccessShortcut();
-const centerModeBeforeHub = ref<Exclude<WorkbenchCenterMode, "hub">>("editor");
+const workspacePageTabsState = ref<WorkspacePageTabsState>({ openIds: [], activeId: null, lastSystemId: null });
+const mountedWorkspacePageIds = ref<Set<WorkspacePageId>>(new Set());
+const supportAccessRevealed = ref(false);
+const supportAccessActivationSequence = ref(0);
+let hydratedWorkspacePageTabsUserId: string | null = null;
 const centerModeBeforeRoute = ref<NonRoutedCenterMode>("editor");
 const hubUpdateCount = ref(0);
 let hubUpdateTimer: ReturnType<typeof setInterval> | null = null;
@@ -738,64 +773,177 @@ watch((): RoutedCenterMode | null => routedCenterModeFromRouteName(route.name), 
   centerMode.value = next.mode;
 }, { immediate: true });
 
+const workspacePageRoles = computed(() => authStore.currentUser?.roles ?? []);
+const workspacePageMode = computed(() => isRoutedCenterMode(centerMode.value));
+const workspacePageTabs = computed(() => workspacePageTabsState.value.openIds.map(workspacePageTab));
+const mountedWorkspacePageTabs = computed(() => workspacePageTabs.value.filter(
+  (tab) => mountedWorkspacePageIds.value.has(tab.id)
+));
+
+function workspacePageStorageKey(userId: string) {
+  return `test-agent.workspace-page-tabs.v1:${userId}`;
+}
+
+function persistWorkspacePageTabs() {
+  const userId = authStore.currentUser?.userId?.trim();
+  if (!userId) return;
+  try {
+    sessionStorage.setItem(workspacePageStorageKey(userId), serializeWorkspacePageTabs(workspacePageTabsState.value));
+  } catch {
+    // sessionStorage 不可用时只失去刷新恢复，当前页面内的多 Tab 仍可继续使用。
+  }
+}
+
+function applyWorkspacePageTabsState(next: WorkspacePageTabsState, persist = true) {
+  workspacePageTabsState.value = next;
+  mountedWorkspacePageIds.value = new Set(
+    [...mountedWorkspacePageIds.value].filter((id) => next.openIds.includes(id))
+  );
+  if (!next.openIds.includes("system:support")) supportAccessRevealed.value = false;
+  if (persist) persistWorkspacePageTabs();
+}
+
+function mountWorkspacePage(id: WorkspacePageId) {
+  if (mountedWorkspacePageIds.value.has(id)) return;
+  mountedWorkspacePageIds.value = new Set([...mountedWorkspacePageIds.value, id]);
+}
+
+async function syncWorkspacePageFromRoute() {
+  if (!routedCenterModeFromRouteName(route.name)) return;
+  // 控制台权限依赖异步 current-user；资料尚未返回时保持路由，不抢先误判为无权限。
+  if (route.name === "system" && !authStore.currentUser) return;
+  const parsed = parseWorkspacePageRoute(
+    route.name,
+    route.query.section,
+    workspacePageRoles.value,
+    supportAccessRevealed.value
+  );
+  if (!parsed) {
+    await router.replace({ name: "workbench" });
+    centerMode.value = "editor";
+    return;
+  }
+  applyWorkspacePageTabsState(openWorkspacePageTab(workspacePageTabsState.value, parsed.id));
+  mountWorkspacePage(parsed.id);
+  if (parsed.canonicalize) {
+    await router.replace(workspacePageRoute(parsed.id, workspacePageRoles.value));
+  }
+}
+
 watch(
   [() => route.name, () => memoryAccessStore.resolved, () => memoryAccessStore.allowed],
   ([routeName, resolved, allowed]) => {
-    // 已打开页面期间若管理员撤销授权，下一次前台校验后立即退出记忆中心。
+    // 已打开页面期间若管理员撤销授权，关闭记忆页并回到工作台，避免保留可重新激活的越权 Tab。
     if (routeName === "memories" && resolved && !allowed) {
-      void router.replace({ name: "workbench" });
+      void closeWorkspacePages("memories", "current");
     }
   },
   { immediate: true }
 );
 
-async function selectActivityCenterMode(mode: WorkbenchCenterMode) {
-  if (isRoutedCenterMode(mode)) {
-    if (route.name !== mode) {
-      await router.push({ name: mode });
-    } else if (centerMode.value !== mode) {
-      centerMode.value = mode;
+watch(
+  [
+    () => authStore.currentUser?.userId?.trim() ?? "",
+    () => (authStore.currentUser?.roles ?? []).slice().sort().join(",")
+  ],
+  ([userId]) => {
+    if (!userId || !authStore.currentUser) return;
+    const roles = authStore.currentUser.roles ?? [];
+    let restored: WorkspacePageTabsState;
+    if (hydratedWorkspacePageTabsUserId !== userId) {
+      let raw: string | null = null;
+      try {
+        raw = sessionStorage.getItem(workspacePageStorageKey(userId));
+      } catch {
+        // 禁用存储时从空 Tab 集合开始。
+      }
+      restored = restoreWorkspacePageTabs(raw, roles);
+      hydratedWorkspacePageTabsUserId = userId;
+      mountedWorkspacePageIds.value = new Set();
+    } else {
+      restored = restoreWorkspacePageTabs(serializeWorkspacePageTabs(workspacePageTabsState.value), roles);
     }
+    applyWorkspacePageTabsState(restored);
+    void syncWorkspacePageFromRoute();
+  },
+  { immediate: true }
+);
+
+watch(
+  [() => route.name, () => route.query.section],
+  () => void syncWorkspacePageFromRoute(),
+  { immediate: true }
+);
+
+async function openWorkspacePage(id: WorkspacePageId, replace = false) {
+  if (!canOpenWorkspacePage(id, workspacePageRoles.value, supportAccessRevealed.value)) return;
+  applyWorkspacePageTabsState(openWorkspacePageTab(workspacePageTabsState.value, id));
+  mountWorkspacePage(id);
+  const target = workspacePageRoute(id, workspacePageRoles.value);
+  const targetFullPath = router.resolve(target).fullPath;
+  if (route.fullPath === targetFullPath) {
+    const mode = systemMenuKeyFromPageId(id) ? "system" : id;
+    centerMode.value = mode as RoutedCenterMode;
     return;
   }
-  if (routedCenterModeFromRouteName(route.name)) {
-    await router.push({ name: "workbench" });
+  await router[replace ? "replace" : "push"](target);
+}
+
+async function showWorkbench() {
+  if (routedCenterModeFromRouteName(route.name)) await router.push({ name: "workbench" });
+  centerMode.value = "editor";
+}
+
+async function activateWorkspacePage(id: WorkspacePageId) {
+  await openWorkspacePage(id);
+}
+
+async function moveWorkspacePage(id: WorkspacePageId, targetIndex: number) {
+  applyWorkspacePageTabsState(moveWorkspacePageTab(workspacePageTabsState.value, id, targetIndex));
+}
+
+async function closeWorkspacePages(id: WorkspacePageId, mode: WorkspacePageCloseMode) {
+  const result = closeWorkspacePageTabs(workspacePageTabsState.value, id, mode);
+  applyWorkspacePageTabsState(result.state);
+  if (result.navigateTo === "workbench") {
+    await router.replace({ name: "workbench" });
+    centerMode.value = "editor";
+  } else if (result.navigateTo) {
+    await openWorkspacePage(result.navigateTo, true);
   }
-  centerMode.value = mode;
+}
+
+async function openSystemMenuPage(key: SystemMenuKey) {
+  await openWorkspacePage(`system:${key}`);
+}
+
+async function openSystemActivity() {
+  const remembered = workspacePageTabsState.value.lastSystemId;
+  const target = remembered && canOpenWorkspacePage(remembered, workspacePageRoles.value, supportAccessRevealed.value)
+    ? remembered
+    : `system:${defaultSystemMenuKey(workspacePageRoles.value)}` as WorkspacePageId;
+  await openWorkspacePage(target);
 }
 
 async function toggleMemories() {
-  if (route.name === "memories") {
-    await selectActivityCenterMode(centerModeBeforeRoute.value);
-    return;
-  }
   if (!memoryAvailable.value) return;
-  await selectActivityCenterMode("memories");
+  await openWorkspacePage("memories");
 }
 
 /** SUPER_ADMIN 可在工作台任意位置三击 Shift，直接进入仍需二次授权的问题排查页。 */
 async function openSupportAccessFromShortcut() {
-  await selectActivityCenterMode("system");
-  supportAccessRequested.value = true;
+  if (!isSuperAdmin.value) return;
+  supportAccessRevealed.value = true;
+  supportAccessActivationSequence.value += 1;
+  await openWorkspacePage("system:support");
 }
 
 async function toggleToolbox() {
-  if (route.name === "toolbox") {
-    await selectActivityCenterMode(centerModeBeforeRoute.value);
-    return;
-  }
-  await selectActivityCenterMode("toolbox");
+  await openWorkspacePage("toolbox");
 }
 
 async function toggleAgentSkillHub() {
-  if (route.name === "hub") {
-    await selectActivityCenterMode(centerModeBeforeHub.value);
-    return;
-  }
-  if (centerMode.value !== "hub") {
-    centerModeBeforeHub.value = centerMode.value;
-  }
-  await selectActivityCenterMode("hub");
+  await openWorkspacePage("hub");
 }
 
 function handleHubChanged(paths: string[]) {
@@ -1008,10 +1156,11 @@ const showReferenceConfiguration = computed(() =>
 const manualOpencodeProcessRefreshing = ref(false);
 
 // Ctrl/Cmd+S 全局快捷键：在编辑器打开文件时拦截浏览器默认的「保存网页」行为，
-// 转而触发右下角保存按钮同款逻辑（saveMutation.mutate）。
+// 转而触发右下角保存按钮同款逻辑（requestSaveTab）。
 // 条件与保存按钮禁用态完全一致：必须有 activeTab、非 livePreview、文件存在未保存改动、
-// 非只读、未在保存中。即使条件不满足也要 preventDefault，避免在 IDE 类应用里出现
-// 「按 Ctrl+S 弹网页另存为」的尴尬体验。
+// 非只读、未在保存中。思维导图待应用草稿也属于未保存改动，此时统一入口会给出
+// “先应用或取消”的明确提示。即使条件不满足也要 preventDefault，避免在 IDE 类应用里
+// 出现「按 Ctrl+S 弹网页另存为」的尴尬体验。
 function tryHandleSaveShortcut(event: KeyboardEvent) {
   // 同时覆盖 Windows/Linux 的 Ctrl 和 macOS 的 Cmd
   const isSaveCombo = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (event.key === "s" || event.key === "S");
@@ -1022,12 +1171,12 @@ function tryHandleSaveShortcut(event: KeyboardEvent) {
     event.preventDefault();
     return;
   }
-  const dirty = tab.content !== tab.savedContent;
+  const dirty = editorTabIsDirty(tab);
   const canSave = !tab.livePreview && !tab.readonly && !saveMutation.isPending.value && dirty;
   // 始终 preventDefault：即使不可保存也吞掉浏览器默认行为
   event.preventDefault();
   if (canSave) {
-    saveMutation.mutate(tab);
+    requestSaveTab(tab);
   }
 }
 
@@ -1384,6 +1533,17 @@ const activeWorkspaceViewNodeId = computed(() =>
 );
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
+const mindMapStatusByPath = ref<Record<string, MindMapDocumentStatus>>({});
+const activeMindMapStatus = computed(() => (
+  activePath.value && isMindMapPath(activePath.value)
+    ? mindMapStatusByPath.value[activePath.value]
+    : undefined
+));
+const activeMindMapEditDisabledReason = computed(() => (
+  activePath.value && isMindMapPath(activePath.value)
+    ? mindMapEditBlockReason(activeTab.value, activeMindMapStatus.value)
+    : undefined
+));
 const activeTabCopyPath = computed(() => {
   const tab = activeTab.value;
   if (!tab || !isAgentFilePath(tab.path)) return undefined;
@@ -4192,6 +4352,8 @@ function handleAgentConfigMutation(payload: AgentConfigMutation) {
 
 const saveMutation = useMutation({
   mutationFn: async (tab: NonNullable<typeof activeTab.value>) => {
+    const draftBlockReason = mindMapSaveBlockedReason(tab);
+    if (draftBlockReason) throw new Error(draftBlockReason);
     if (isReferenceFilePath(tab.path)) {
       throw new Error("引用文件为只读，不能保存");
     }
@@ -4247,6 +4409,51 @@ const saveMutation = useMutation({
     feedback.value = errorFeedback("保存文件失败", error);
   }
 });
+
+function requestSaveTab(tab: EditorTab): void {
+  const blockedReason = mindMapSaveBlockedReason(tab);
+  if (blockedReason) {
+    feedback.value = {
+      kind: "info",
+      title: "思维导图尚未应用",
+      description: blockedReason
+    };
+    return;
+  }
+  saveMutation.mutate(tab);
+}
+
+function updateMindMapStatus(path: string, status: MindMapDocumentStatus): void {
+  if (!isMindMapPath(path)) return;
+  mindMapStatusByPath.value = { ...mindMapStatusByPath.value, [path]: status };
+}
+
+function updateMindMapDraft(path: string, draft: MindMapVisualDraft | undefined): void {
+  if (!isMindMapPath(path) || !workbench.tabs.some((tab: EditorTab) => tab.path === path)) return;
+  workbench.updateTab(path, { visualDraft: draft });
+}
+
+function updateMindMapEditing(path: string, editing: boolean): void {
+  const tab = workbench.tabs.find((item: EditorTab) => item.path === path);
+  if (!tab || !isMindMapPath(path)) return;
+  if (!editing) {
+    updateMindMapDraft(path, undefined);
+    return;
+  }
+  const draft = createMindMapDraft(tab, mindMapStatusByPath.value[path]);
+  if (draft) updateMindMapDraft(path, draft);
+}
+
+function startActiveMindMapEditing(): void {
+  const tab = activeTab.value;
+  if (!tab || !isMindMapPath(tab.path)) return;
+  const reason = mindMapEditBlockReason(tab, mindMapStatusByPath.value[tab.path]);
+  if (reason) {
+    feedback.value = { kind: "info", title: "当前思维导图不可编辑", description: reason };
+    return;
+  }
+  updateMindMapEditing(tab.path, true);
+}
 
 type StartRunDraft = {
   prompt: string;
@@ -5314,7 +5521,7 @@ const showUnsavedConfirm = ref(false);
 
 function handleCloseTab(path: string) {
   const tab = workbench.tabs.find((t) => t.path === path);
-  if (tab && !tab.livePreview && tab.content !== tab.savedContent) {
+  if (editorTabIsDirty(tab)) {
     tabPathToClose.value = path;
     showUnsavedConfirm.value = true;
   } else {
@@ -5326,7 +5533,7 @@ function handleCloseTabs(paths: string[]) {
   for (const path of paths) {
     const tab = workbench.tabs.find((t) => t.path === path);
     if (!tab) continue;
-    if (!tab.livePreview && tab.content !== tab.savedContent) {
+    if (editorTabIsDirty(tab)) {
       tabPathToClose.value = path;
       showUnsavedConfirm.value = true;
       return;
@@ -7151,10 +7358,6 @@ function workspaceFileReadIsCurrent(
     && workspaceLoadGeneration === workspaceGeneration
     && latestWorkspaceFileReadByPath.get(path) === requestGeneration
     && workbench.tabs.some((tab: EditorTab) => tab.path === path);
-}
-
-function editorTabIsDirty(tab: EditorTab | undefined): boolean {
-  return Boolean(tab && !tab.livePreview && tab.content !== tab.savedContent);
 }
 
 function progressivePreviewPatch(chunk: FilePreviewChunk) {
@@ -10269,7 +10472,7 @@ async function openLivePreview(relPath: string) {
   expandPathToFile(relPath);
   refreshParentDirectory(relPath);
   const existing = tabs.value.find((tab: EditorTab) => tab.path === relPath);
-  if (existing && !existing.livePreview && existing.content !== existing.savedContent) {
+  if (existing && !existing.livePreview && editorTabIsDirty(existing)) {
     workbench.setActivePath(relPath);
     centerMode.value = "editor";
     feedback.value = { kind: "info", title: "实时追踪未覆盖未保存文件", description: relPath };
@@ -11514,7 +11717,7 @@ async function handleLogout() {
             data-onboarding="editor-button"
             aria-label="打开工作台"
             title="工作台"
-            @click="selectActivityCenterMode('editor')"
+            @click="showWorkbench"
           >
             <LayoutDashboard class="figma-activity-icon" :stroke-width="1.5" />
             <span class="figma-activity-text">工作台</span>
@@ -11561,7 +11764,7 @@ async function handleLogout() {
             :class="['figma-activity-btn figma-activity-btn--system', centerMode === 'system' && 'figma-activity-btn--active']"
             aria-label="系统管理"
             title="控制台"
-            @click="selectActivityCenterMode('system')"
+            @click="openSystemActivity"
           >
             <Monitor class="figma-activity-icon" :stroke-width="1.5" />
             <span class="figma-activity-text">控制台</span>
@@ -11699,32 +11902,64 @@ async function handleLogout() {
 
     <template #editor>
       <main class="managed-editor-main">
-        <template v-if="centerMode === 'toolbox'">
-          <ToolboxPanel />
-        </template>
-        <template v-else-if="centerMode === 'memories'">
-          <MemoryCenter
-            v-if="memoryAvailable"
-            :selected-app-id="selectedAppId"
-            :can-manage-team="isAppAdmin"
-            :access-granted="memoryAvailable"
-            @open-skill-hub="toggleAgentSkillHub"
+        <section v-show="workspacePageMode" class="workspace-page-host" aria-label="功能页多标签工作区">
+          <WorkspacePageTabBar
+            :tabs="workspacePageTabs"
+            :active-id="workspacePageTabsState.activeId"
+            @activate="activateWorkspacePage"
+            @close="closeWorkspacePages"
+            @move="moveWorkspacePage"
           />
-        </template>
-        <template v-else-if="centerMode === 'hub'">
-          <AgentSkillHub
-            :selected-app-id="selectedAppId"
-            :workspace-id="selectedWorkspace?.workspaceId"
-            :can-manage="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
-            :can-classify-skills="isSuperAdmin"
-            :runtime-mcp="runtimeInventoryForShell.mcp"
-            :runtime-tools="runtimeInventoryForShell.tools"
-            @update-count="hubUpdateCount = $event"
-            @changed="handleHubChanged"
-            @refresh-runtime="refreshRuntimeHubCatalog"
-          />
-        </template>
-        <template v-else-if="centerMode === 'diff'">
+          <div class="workspace-page-host__content">
+            <section
+              v-for="pageTab in mountedWorkspacePageTabs"
+              v-show="workspacePageMode && workspacePageTabsState.activeId === pageTab.id"
+              :key="pageTab.id"
+              class="workspace-page-view"
+              :data-page-id="pageTab.id"
+              :aria-hidden="workspacePageTabsState.activeId !== pageTab.id"
+            >
+              <ToolboxPanel v-if="pageTab.id === 'toolbox'" />
+              <MemoryCenter
+                v-else-if="pageTab.id === 'memories'"
+                v-show="memoryAvailable"
+                :selected-app-id="selectedAppId"
+                :can-manage-team="isAppAdmin"
+                :access-granted="memoryAvailable"
+                @open-skill-hub="toggleAgentSkillHub"
+              />
+              <AgentSkillHub
+                v-else-if="pageTab.id === 'hub'"
+                :selected-app-id="selectedAppId"
+                :workspace-id="selectedWorkspace?.workspaceId"
+                :can-manage="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
+                :can-classify-skills="isSuperAdmin"
+                :page-active="workspacePageMode && workspacePageTabsState.activeId === pageTab.id"
+                :runtime-mcp="runtimeInventoryForShell.mcp"
+                :runtime-tools="runtimeInventoryForShell.tools"
+                @update-count="hubUpdateCount = $event"
+                @changed="handleHubChanged"
+                @refresh-runtime="refreshRuntimeHubCatalog"
+              />
+              <template v-else-if="isSystemWorkspacePageId(pageTab.id) && pageTab.systemMenuKey">
+                <div class="managed-runtime-container">
+                  <SystemManagementWrapper
+                    :current-user="authStore.currentUser"
+                    :active-key="pageTab.systemMenuKey"
+                    :page-active="workspacePageMode && workspacePageTabsState.activeId === pageTab.id"
+                    :support-revealed="supportAccessRevealed"
+                    :support-activation-sequence="supportAccessActivationSequence"
+                    @select-menu="openSystemMenuPage"
+                  />
+                </div>
+                <WorkbenchFooter />
+              </template>
+            </section>
+          </div>
+        </section>
+
+        <div v-show="!workspacePageMode" class="managed-workbench-center">
+        <template v-if="centerMode === 'diff'">
           <div class="flex-1 min-h-0 min-w-0">
             <DiffViewer
               ref="diffViewerRef"
@@ -11771,16 +12006,6 @@ async function handleLogout() {
             @open-server-workspace-picker="openServerWorkspacePicker"
           />
         </template>
-        <template v-else-if="centerMode === 'system'">
-          <div class="managed-runtime-container">
-            <SystemManagementWrapper
-              :current-user="authStore.currentUser"
-              :support-access-requested="supportAccessRequested"
-              @support-access-opened="supportAccessRequested = false"
-            />
-          </div>
-          <WorkbenchFooter />
-        </template>
         <FigmaEditorArea
           v-else
           :tabs="tabs"
@@ -11790,7 +12015,7 @@ async function handleLogout() {
           :workspace-id="resolvablePhysicalPathWorkspaceId(activeTab?.path)"
           :copy-path="activeTabCopyPath"
           :updated-at="activeTab ? Date.now() / 1000 : undefined"
-          :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
+          :dirty="editorTabIsDirty(activeTab)"
           :readonly="!!activeTab?.readonly"
           :saving="saveMutation.isPending.value"
           :app-name="selectedManagedApplication?.appName"
@@ -11804,13 +12029,16 @@ async function handleLogout() {
           :workspace-kind="selectedWorkspaceKind"
           :markdown-preview="markdownPreview"
           :markdown-preview-mode="markdownPreviewMode"
+          :mind-map-can-edit="activeMindMapStatus?.canEdit"
+          :mind-map-edit-disabled-reason="activeMindMapEditDisabledReason"
           @activate="activateEditorTab"
           @locate-file="handleLocateFile"
           @close="handleCloseTab"
           @close-many="handleCloseTabs"
           @add-file-context="addWorkspaceFileToChatContext"
           @editor-action="() => {}"
-          @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+          @save="() => activeTab && requestSaveTab(activeTab)"
+          @edit-mind-map="startActiveMindMapEditing"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
@@ -11829,14 +12057,19 @@ async function handleLogout() {
               ref="codeEditorRef"
               :path="activeTab?.path"
               :content="activeTab?.content"
-              :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
+              :dirty="editorTabIsDirty(activeTab)"
               :readonly="activeTab?.readonly"
               :progressive-append="!!activeTab?.progressivePreview"
               :saving="saveMutation.isPending.value"
               :show-preview="markdownPreview"
               :preview-mode="markdownPreviewMode"
+              :mind-map-editing="Boolean(activeTab?.visualDraft)"
+              :mind-map-draft="activeTab?.visualDraft"
               @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
-              @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+              @save="() => activeTab && requestSaveTab(activeTab)"
+              @update:mind-map-draft="(draft: MindMapVisualDraft | undefined) => activeTab && updateMindMapDraft(activeTab.path, draft)"
+              @update:mind-map-editing="(editing: boolean) => activeTab && updateMindMapEditing(activeTab.path, editing)"
+              @mind-map-status="(status: MindMapDocumentStatus) => activeTab && updateMindMapStatus(activeTab.path, status)"
               @add-selection-context="addCurrentSelectionToChatContext"
               @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
             >
@@ -11959,6 +12192,7 @@ async function handleLogout() {
             </div>
           </div>
         </FigmaEditorArea>
+        </div>
       </main>
     </template>
 
@@ -12397,8 +12631,37 @@ async function handleLogout() {
   overflow: hidden;
 }
 
-.managed-editor-main > *:first-child {
+.workspace-page-host,
+.managed-workbench-center {
+  display: flex;
+  min-width: 0;
   min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.workspace-page-host__content {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: var(--ta-shell-surface, #ffffff);
+}
+
+.workspace-page-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ta-shell-surface, #ffffff);
+}
+
+.workspace-page-view > .managed-runtime-container {
+  height: auto;
   flex: 1;
 }
 

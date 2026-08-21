@@ -23,6 +23,7 @@ import RuntimeTopologyGraph from "./RuntimeTopologyGraph.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  pageActive: boolean;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
@@ -119,24 +120,24 @@ const userProcessQueryKey = computed(() => ["opencode-runtime-management-user-pr
 
 const overviewQuery = useQuery<OpencodeRuntimeManagementOverview, Error>({
   queryKey: overviewQueryKey,
-  enabled: () => hasSuperAdmin.value,
+  enabled: () => hasSuperAdmin.value && props.pageActive,
   retry: false,
-  refetchInterval: 5000,
+  refetchInterval: () => props.pageActive ? 5000 : false,
   queryFn: () => api.getOpencodeRuntimeManagementOverview(overviewParams.value)
 });
 
 const userProcessQuery = useQuery<PageResponse<OpencodeRuntimeProcess>, Error>({
   queryKey: userProcessQueryKey,
-  enabled: () => hasSuperAdmin.value && activeUserKeyword.value.trim().length > 0,
+  enabled: () => hasSuperAdmin.value && props.pageActive && activeUserKeyword.value.trim().length > 0,
   retry: false,
   queryFn: () => api.getOpencodeRuntimeManagementUserProcesses(userProcessParams.value)
 });
 
 const metricsQuery = useQuery<OpencodeRuntimeContainerMetricHistory | OpencodeRuntimeBackendMetricHistory, Error>({
   queryKey: computed(() => ["opencode-runtime-metrics", selectedMetricsTarget.value?.type, selectedMetricsTarget.value?.id, selectedWindowMinutes.value]),
-  enabled: () => hasSuperAdmin.value && selectedMetricsTarget.value !== null,
+  enabled: () => hasSuperAdmin.value && props.pageActive && selectedMetricsTarget.value !== null,
   retry: false,
-  refetchInterval: 5000,
+  refetchInterval: () => props.pageActive ? 5000 : false,
   queryFn: () => {
     const target = selectedMetricsTarget.value;
     if (!target) {

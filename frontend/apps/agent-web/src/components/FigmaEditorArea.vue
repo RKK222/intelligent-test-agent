@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch, nextTick } from "vue";
 import { Plane } from "lucide-vue-next";
 import { FileIcon } from "@test-agent/file-explorer";
 import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
-import { languageFromPath } from "@test-agent/editor";
+import { isMindMapPath, languageFromPath } from "@test-agent/editor";
 import WorkbenchFooter, { type AppWorkspaceTemplate, type AppWorkspaceVersion, type PreviewMode } from "./WorkbenchFooter.vue";
 import type { SelectedWorkspaceKind } from "./app-source-workspace";
 
@@ -38,6 +38,10 @@ const props = withDefaults(
     markdownPreview?: boolean;
     /** Markdown 预览模式：off | full | split */
     markdownPreviewMode?: PreviewMode;
+    /** CodeEditor 对当前 .mind 解析后的编辑能力判定。 */
+    mindMapCanEdit?: boolean;
+    /** 解析失败、只读或大文件等禁用原因。 */
+    mindMapEditDisabledReason?: string;
   }>(),
   { markdownPreview: false, markdownPreviewMode: "off" }
 );
@@ -56,17 +60,31 @@ const emit = defineEmits<{
   "open-server-workspace-picker": [];
   "update:markdownPreview": [enabled: boolean];
   "update:markdownPreviewMode": [mode: PreviewMode];
+  editMindMap: [];
   "cacheAndNavigate": [path: string];
 }>();
 
 // 当前激活 tab 是否是 Markdown 文件：是的话才在 tab 表头最右侧显示预览开关。
 // 使用与 CodeEditor 完全相同的判定规则（@test-agent/editor 的 languageFromPath），
 // 避免出现"按钮可见但点击后编辑器无反应"的不一致。
-const activeIsMarkdown = computed(() => {
-  if (!props.activePath) return false;
-  const activeTab = props.tabs.find((tab) => tab.path === props.activePath);
-  return !activeTab?.progressivePreview
-    && languageFromPath(props.activePath) === "markdown";
+const activeTab = computed(() => props.tabs.find((tab) => tab.path === props.activePath));
+const tabHasPendingChanges = (tab: WorkbenchTab) => (
+  !tab.livePreview && (tab.content !== tab.savedContent || Boolean(tab.visualDraft))
+);
+const activeIsMindMap = computed(() => Boolean(props.activePath && isMindMapPath(props.activePath)));
+const activeIsMarkdown = computed(() => Boolean(
+  props.activePath
+  && !activeIsMindMap.value
+  && !activeTab.value?.progressivePreview
+  && languageFromPath(props.activePath) === "markdown"
+));
+const mindMapEditDisabledReason = computed(() => {
+  if (!activeIsMindMap.value) return "";
+  if (activeTab.value?.progressivePreview) return "渐进式大文件预览不可编辑";
+  if (props.readonly || activeTab.value?.readonly) return "只读文件不可编辑";
+  if (props.mindMapEditDisabledReason) return props.mindMapEditDisabledReason;
+  if (props.mindMapCanEdit !== true) return "正在检查思维导图格式";
+  return "";
 });
 
 const tabMenu = ref<{ path: string; x: number; y: number } | null>(null);
@@ -153,7 +171,7 @@ watch(
         <div class="figma-editor-tab-inner">
           <FileIcon :entry="{ name: tab.title, path: tab.path, type: 'file' }" class="figma-editor-tab-icon" />
           <span
-            v-if="!tab.livePreview && tab.content !== tab.savedContent"
+            v-if="tabHasPendingChanges(tab)"
             class="figma-editor-tab-dirty-star"
           >*</span>
           <span class="figma-editor-tab-title">{{ tab.title }}</span>
@@ -253,11 +271,17 @@ watch(
       :server-workspace-switch-disabled="serverWorkspaceSwitchDisabled"
       :workspace-kind="workspaceKind"
       :show-preview-button="activeIsMarkdown"
+      :show-mind-map-edit-button="activeIsMindMap"
+      :mind-map-editing="Boolean(activeTab?.visualDraft)"
+      :mind-map-edit-disabled="Boolean(mindMapEditDisabledReason)"
+      :mind-map-edit-disabled-reason="mindMapEditDisabledReason"
+      :save-blocked-reason="activeTab?.visualDraft ? '请先应用或取消思维导图编辑' : undefined"
       :markdown-preview-mode="markdownPreviewMode"
       show-save
       @save="emit('save')"
       @locate="(path) => emit('locateFile', path)"
       @update:markdown-preview-mode="(mode) => emit('update:markdownPreviewMode', mode)"
+      @edit-mind-map="emit('editMindMap')"
       @select-version="(payload) => emit('select-version', payload)"
       @load-versions="(templateId) => emit('load-versions', templateId)"
       @create-version="(payload) => emit('create-version', payload)"
