@@ -2,6 +2,7 @@ export { default as WorkbenchShell } from "./WorkbenchShell.vue";
 export type { WorkbenchShellProps } from "./WorkbenchShell.vue";
 export {
   useWorkbenchStore,
+  editorTabIsDirty,
   mockVcsDiffFiles,
   mockPublicAgentDiffs,
   mockWorkspaceAgentDiffs

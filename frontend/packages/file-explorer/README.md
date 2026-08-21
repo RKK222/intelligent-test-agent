@@ -17,6 +17,7 @@
 - `canWrite=false` 时保留展开、读取和搜索，隐藏并在组件内部阻断新增、删除、重命名、复制移动和上传入口；`canAttach=false` 独立隐藏并阻断“添加文件到对话”，`canDownload=false` 独立隐藏并阻断文件/目录下载。排查页面同时关闭三项能力，避免伪只读入口；节点级 `readonly=true` 同样阻断所有变更，`source=MIXED` 的目录只允许通过 `workspacePath` 向工作区侧新增、上传、粘贴或拖入，不能重命名、删除或移动整棵混合目录。
 - 使用 VS Code Workbench 风格的 30px icon tabbar 承载文件树、搜索和变更视图，文件浏览列表行保持 22px 高、13px 字号。
 - 文件/目录、chevron 和 loading 图标使用 `@vscode/codicons`；`getVsCodeFileIconClass(entry)` 从包入口导出，供 `agent-web` 的 Agent 配置树复用。
+- 独立思维导图文件扩展名 `.mind` 映射到现有 Material Icon Theme `Tree` 图标；本包只负责文件类型视觉识别，不解析或编辑思维导图正文。
 - 展开目录时通过回调交给 app 调用后端。
 - 文件树标题行提供刷新事件按钮，本包不直接调用后端。
 - 搜索可使用 app 层传入的服务端结果；`file-explorer` 在渲染前仍按当前关键字对 `name` 做不区分大小写的子串过滤，父目录路径命中不会展示文件名未命中的文件。app 未提供结果时，本地回退同样只过滤已加载物理工作区的文件名。

@@ -191,7 +191,14 @@ function renderWithApi(
 ) {
   const client = queryClient();
   const view = render(component, {
-    props: { currentUser: user, ...props },
+    props: {
+      currentUser: user,
+      activeKey: user?.roles?.includes("APP_ADMIN") ? "config" : "scheduler",
+      pageActive: true,
+      supportRevealed: false,
+      supportActivationSequence: 0,
+      ...props
+    },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
@@ -223,10 +230,11 @@ function renderWithApi(
 
 describe("scheduler management panel", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
-  it("system management switches between scheduler and runtime management", async () => {
+  it("system management requests runtime management and renders the selected controlled page", async () => {
     const backendApi = api();
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
@@ -234,8 +242,64 @@ describe("scheduler management panel", () => {
     expect(view.getByTitle("XXL-JOB 定时任务管理")).toBeTruthy();
     await fireEvent.click(view.getByText("运行管理", { selector: ".ta-system-menu-text" }));
 
+    expect(view.emitted().selectMenu?.[0]).toEqual(["runtime"]);
+    await view.rerender({
+      currentUser,
+      activeKey: "runtime",
+      pageActive: true,
+      supportRevealed: false,
+      supportActivationSequence: 0
+    });
     await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());
     expect(await view.findByText("暂无服务器 / Java 进程")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("emits a page-tab request without mutating the controlled system page", async () => {
+    const backendApi = api();
+    const view = renderWithApi(SystemManagementPanel, backendApi, currentUser, {
+      activeKey: "scheduler",
+      pageActive: true,
+      supportRevealed: false,
+      supportActivationSequence: 0
+    });
+
+    expect(view.getByTitle("XXL-JOB 定时任务管理")).toBeTruthy();
+    await fireEvent.click(view.getByText("运行管理", { selector: ".ta-system-menu-text" }));
+
+    expect(view.emitted().selectMenu?.[0]).toEqual(["runtime"]);
+    expect(view.getByTitle("XXL-JOB 定时任务管理")).toBeTruthy();
+    expect(backendApi.getOpencodeRuntimeManagementOverview).not.toHaveBeenCalled();
+
+    await view.rerender({
+      currentUser,
+      activeKey: "runtime",
+      pageActive: true,
+      supportRevealed: false,
+      supportActivationSequence: 0
+    });
+    await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());
+    view.queryClient.clear();
+  });
+
+  it("mounts the temporary support page only while its page tab is active", async () => {
+    const view = renderWithApi(SystemManagementPanel, api(), currentUser, {
+      activeKey: "support",
+      pageActive: true,
+      supportRevealed: true,
+      supportActivationSequence: 7
+    });
+
+    expect(view.getByTestId("support-access-panel").getAttribute("data-activation-sequence")).toBe("7");
+
+    await view.rerender({
+      currentUser,
+      activeKey: "support",
+      pageActive: false,
+      supportRevealed: true,
+      supportActivationSequence: 7
+    });
+    expect(view.queryByTestId("support-access-panel")).toBeNull();
     view.queryClient.clear();
   });
 
@@ -288,9 +352,7 @@ describe("scheduler management panel", () => {
       }),
       listQaMemoryWhitelist: vi.fn().mockResolvedValue({ items: [], page: 1, size: 100, total: 0 })
     });
-    const view = renderWithApi(SystemManagementPanel, backendApi);
-
-    await fireEvent.click(view.getByText("记忆能力", { selector: ".ta-system-menu-text" }));
+    const view = renderWithApi(SystemManagementPanel, backendApi, currentUser, { activeKey: "memory" });
 
     expect(await view.findByTestId("memory-admin-panel")).toBeTruthy();
     expect((await view.findByTestId("memory-health-mem0")).textContent).toContain("就绪");
@@ -302,38 +364,53 @@ describe("scheduler management panel", () => {
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
     await fireEvent.click(view.getByText("用户管理", { selector: ".ta-system-menu-text" }));
+    // 系统二级页由工作台 Tab 容器持有选中态；菜单点击只发出受控切换事件。
+    await view.rerender({
+      currentUser,
+      activeKey: "users",
+      pageActive: true,
+      supportRevealed: false,
+      supportActivationSequence: 0
+    });
 
     expect(await view.findByTestId("unified-user-management-panel")).toBeTruthy();
     expect(view.queryByText("本地客户端灰度", { selector: ".ta-system-menu-text" })).toBeNull();
     view.queryClient.clear();
   });
 
-  it("reveals the support panel only after the global super-admin gesture requests it without changing identity", async () => {
+  it("reveals the support page only from controlled shortcut state without changing identity", async () => {
     const backendApi = api();
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
     expect(view.queryByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeNull();
-    await view.rerender({ currentUser, supportAccessRequested: true });
+    await view.rerender({
+      currentUser,
+      activeKey: "support",
+      pageActive: true,
+      supportRevealed: true,
+      supportActivationSequence: 1
+    });
 
     expect(await view.findByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeTruthy();
     expect(view.getByTestId("support-access-panel")).toBeTruthy();
     expect(view.getByTestId("support-access-panel").getAttribute("data-activation-sequence")).toBe("1");
-    expect(view.emitted().supportAccessOpened).toHaveLength(1);
     expect(currentUser.userId).toBe("usr_admin");
     expect(currentUser.roles).toEqual(["SUPER_ADMIN"]);
 
-    await view.rerender({ currentUser, supportAccessRequested: false });
-    await view.rerender({ currentUser, supportAccessRequested: true });
+    await view.rerender({
+      currentUser,
+      activeKey: "support",
+      pageActive: true,
+      supportRevealed: true,
+      supportActivationSequence: 2
+    });
     await waitFor(() => expect(view.getByTestId("support-access-panel").getAttribute("data-activation-sequence")).toBe("2"));
-    expect(view.emitted().supportAccessOpened).toHaveLength(2);
     view.queryClient.clear();
   });
 
   it("system management exposes config management and initializes public opencode repository", async () => {
     const backendApi = api();
-    const view = renderWithApi(SystemManagementPanel, backendApi);
-
-    await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
+    const view = renderWithApi(SystemManagementPanel, backendApi, currentUser, { activeKey: "config" });
 
     expect(await view.findByText("TestAgent公共配置管理")).toBeTruthy();
     expect(await view.findByText("/data/opencode-public-config")).toBeTruthy();
@@ -459,9 +536,7 @@ describe("scheduler management panel", () => {
     const backendApi = api({
       listPublicAgentRepositories: vi.fn().mockResolvedValue([initializedPublicRepository])
     });
-    const view = renderWithApi(SystemManagementPanel, backendApi);
-
-    await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
+    const view = renderWithApi(SystemManagementPanel, backendApi, currentUser, { activeKey: "config" });
 
     expect(await view.findByText("TestAgent公共配置管理")).toBeTruthy();
     expect(view.queryByRole("button", { name: "拉取更新" })).toBeNull();
@@ -489,9 +564,7 @@ describe("scheduler management panel", () => {
       listPublicAgentRepositories: vi.fn().mockResolvedValue([dirtyRepository])
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const view = renderWithApi(SystemManagementPanel, backendApi);
-
-    await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
+    const view = renderWithApi(SystemManagementPanel, backendApi, currentUser, { activeKey: "config" });
 
     expect(await view.findByText("存在本地变更")).toBeTruthy();
     expect(await view.findByText(/opencode\/agents\/review\.md/)).toBeTruthy();
@@ -542,6 +615,37 @@ describe("scheduler management panel", () => {
     expect(await view.findByText("git fetch 超时")).toBeTruthy();
     expect(await view.findByText(/补偿已收敛 1\/2，待用户处理 1/)).toBeTruthy();
     expect(view.getByRole("button", { name: "刷新公共 Agent Git" }).hasAttribute("disabled")).toBe(true);
+    view.queryClient.clear();
+  });
+
+  it("pauses public configuration rollout polling while its page tab is inactive and refreshes on return", async () => {
+    vi.useFakeTimers();
+    const activeRollout = {
+      rolloutId: "acr_poll",
+      status: "DRAINING" as const,
+      branch: "main",
+      commitHash: "commit_target",
+      failureReason: null,
+      createdAt: "2026-07-28T00:00:00Z",
+      updatedAt: "2026-07-28T00:00:01Z",
+      completedAt: null,
+      servers: []
+    };
+    const backendApi = api({
+      getPublicAgentConfigRollout: vi.fn().mockResolvedValue(activeRollout)
+    });
+    const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi, currentUser, { pageActive: true });
+    await vi.waitFor(() => expect(backendApi.getPublicAgentConfigRollout).toHaveBeenCalledTimes(1));
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.waitFor(() => expect(backendApi.getPublicAgentConfigRollout).toHaveBeenCalledTimes(2));
+
+    await view.rerender({ currentUser, pageActive: false });
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(backendApi.getPublicAgentConfigRollout).toHaveBeenCalledTimes(2);
+
+    await view.rerender({ currentUser, pageActive: true });
+    await vi.waitFor(() => expect(backendApi.getPublicAgentConfigRollout).toHaveBeenCalledTimes(3));
     view.queryClient.clear();
   });
 

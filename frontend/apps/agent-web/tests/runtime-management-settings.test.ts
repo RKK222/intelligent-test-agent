@@ -45,11 +45,12 @@ function renderRuntimePanel(
     username: "admin",
     unifiedAuthId: "AUTH_1",
     roles: ["SUPER_ADMIN"]
-  }
+  },
+  pageActive = true
 ) {
   const queryClient = createQueryClient();
   const view = render(RuntimeManagementPanel, {
-    props: { currentUser },
+    props: { currentUser, pageActive },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
       stubs: {
@@ -215,6 +216,7 @@ function createManagedRuntimeOverview(): OpencodeRuntimeManagementOverview {
 describe("runtime management settings", () => {
   afterEach(() => {
     localStorage.clear();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -400,6 +402,43 @@ describe("runtime management settings", () => {
     expect(api.getOpencodeRuntimeManagementUserProcesses).not.toHaveBeenCalled();
 
     queryClient.clear();
+  });
+
+  it("pauses overview polling while its page tab is inactive and refreshes when reactivated", async () => {
+    vi.useFakeTimers();
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn()
+    };
+    const view = renderRuntimePanel(api);
+    await vi.waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(1));
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2));
+
+    await view.rerender({
+      currentUser: {
+        userId: "usr_admin",
+        username: "admin",
+        unifiedAuthId: "AUTH_1",
+        roles: ["SUPER_ADMIN"]
+      },
+      pageActive: false
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2);
+
+    await view.rerender({
+      currentUser: {
+        userId: "usr_admin",
+        username: "admin",
+        unifiedAuthId: "AUTH_1",
+        roles: ["SUPER_ADMIN"]
+      },
+      pageActive: true
+    });
+    await vi.waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(3));
+    view.queryClient.clear();
   });
 
   it("refetches when the administrator repeats the same user process query", async () => {

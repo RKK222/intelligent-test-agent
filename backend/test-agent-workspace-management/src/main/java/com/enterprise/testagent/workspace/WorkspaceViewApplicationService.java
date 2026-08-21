@@ -33,8 +33,8 @@ import org.springframework.stereotype.Service;
 /**
  * 工作区文件与受管引用资产的只读组合视图。
  *
- * <p>每次 list/read 都从 Workspace 的 JSONC 和数据库当前状态重建挂载；定位器只包含逻辑路径和引用别名，
- * 物理引用根、repositoryId 与服务器副本均由后端重新解析。
+ * <p>每次 list/read 都从 Workspace 的 JSONC 和数据库当前状态重建挂载；自动化定位器只携带应用、
+ * 版本库、配置代次与逻辑相对路径，物理引用根和当前服务器副本均由后端重新解析。
  */
 @Service
 public class WorkspaceViewApplicationService {

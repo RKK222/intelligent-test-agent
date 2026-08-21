@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, type Component } from "vue";
+import { computed, type Component } from "vue";
 import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, Settings2, SlidersHorizontal, UsersRound } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
@@ -13,22 +13,22 @@ import SupportAccessPanel from "./SupportAccessPanel.vue";
 import MemoryAdminPanel from "./MemoryAdminPanel.vue";
 import ApiKeyManagementPanel from "./ApiKeyManagementPanel.vue";
 import SettingsUserManagementPanel from "../settings/SettingsUserManagementPanel.vue";
+import type { SystemMenuKey } from "../workspace-page-tabs";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
-  supportAccessRequested?: boolean;
+  activeKey: SystemMenuKey;
+  pageActive: boolean;
+  supportRevealed: boolean;
+  supportActivationSequence: number;
 }>();
 
 const emit = defineEmits<{
-  supportAccessOpened: [];
+  selectMenu: [key: SystemMenuKey];
 }>();
 
-type SystemMenuKey = "scheduler" | "runtime" | "users" | "params" | "apiKeys" | "internalModels" | "internalModelObservability" | "memory" | "config" | "analytics" | "support";
 type SystemMenuItem = { key: SystemMenuKey; label: string; icon: Component };
 
-const activeKey = ref<SystemMenuKey>(props.currentUser?.roles?.includes("SUPER_ADMIN") === true ? "scheduler" : "config");
-const supportRevealed = ref(false);
-const supportActivationSequence = ref(0);
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const hasApplicationAdmin = computed(() => props.currentUser?.roles?.includes("APP_ADMIN") === true);
 const hasSystemAccess = computed(() => hasSuperAdmin.value || hasApplicationAdmin.value);
@@ -48,36 +48,15 @@ const items: SystemMenuItem[] = [
 const visibleItems = computed<SystemMenuItem[]>(() => {
   // 应用管理员只获得应用 Git 控制台入口，其余系统能力继续由超级管理员独占。
   if (!hasSuperAdmin.value) return items.filter((item) => item.key === "config");
-  return supportRevealed.value
+  return props.supportRevealed
     ? [...items, { key: "support", label: "问题排查只读访问", icon: KeyRound }]
     : items;
 });
 
 function selectMenu(key: SystemMenuKey) {
-  activeKey.value = key;
+  if (!visibleItems.value.some((item) => item.key === key)) return;
+  emit("selectMenu", key);
 }
-
-/** 全局手势只请求展示入口；组件仍按实时角色收口，不参与身份切换。 */
-function revealSupportAccess() {
-  if (!hasSuperAdmin.value) return;
-  supportActivationSequence.value += 1;
-  supportRevealed.value = true;
-  activeKey.value = "support";
-  emit("supportAccessOpened");
-}
-
-watch(() => props.supportAccessRequested, (requested) => {
-  if (requested) revealSupportAccess();
-}, { immediate: true });
-watch(hasSuperAdmin, (allowed) => {
-  if (allowed) {
-    // 登录态异步恢复为超级管理员时，保持原有控制台默认进入定时任务管理的行为。
-    activeKey.value = "scheduler";
-    return;
-  }
-  supportRevealed.value = false;
-  activeKey.value = hasApplicationAdmin.value ? "config" : "scheduler";
-});
 </script>
 
 <template>
@@ -93,7 +72,7 @@ watch(hasSuperAdmin, (allowed) => {
         >
           <button
             type="button"
-            :class="['ta-system-menu-item', { 'is-active': activeKey === item.key }]"
+            :class="['ta-system-menu-item', { 'is-active': props.activeKey === item.key }]"
             @click="selectMenu(item.key)"
           >
             <component :is="item.icon" class="ta-system-menu-icon" :stroke-width="1.6" />
@@ -102,20 +81,50 @@ watch(hasSuperAdmin, (allowed) => {
         </el-tooltip>
       </nav>
       <div class="ta-system-content">
-        <ScheduledTaskManagementPanel v-if="activeKey === 'scheduler'" :current-user="currentUser" />
-        <RuntimeManagementPanel v-else-if="activeKey === 'runtime'" :current-user="currentUser" />
-        <SettingsUserManagementPanel v-else-if="activeKey === 'users'" :current-user="currentUser" />
-        <GeneralParamManagementPanel v-else-if="activeKey === 'params'" :current-user="currentUser" />
-        <ApiKeyManagementPanel v-else-if="activeKey === 'apiKeys'" :current-user="currentUser" />
-        <InternalModelProviderPanel v-else-if="activeKey === 'internalModels'" :current-user="currentUser" />
-        <InternalModelObservabilityPanel v-else-if="activeKey === 'internalModelObservability'" :current-user="currentUser" />
-        <MemoryAdminPanel v-else-if="activeKey === 'memory'" @configure-models="selectMenu('internalModels')" />
-        <ConfigurationManagementPanel v-else-if="activeKey === 'config'" :current-user="currentUser" />
-        <AnalyticsManagementPanel v-else-if="activeKey === 'analytics'" />
-        <SupportAccessPanel
-          v-else-if="activeKey === 'support'"
+        <ScheduledTaskManagementPanel
+          v-if="props.activeKey === 'scheduler'"
           :current-user="currentUser"
-          :activation-sequence="supportActivationSequence"
+          :page-active="props.pageActive"
+        />
+        <RuntimeManagementPanel
+          v-else-if="props.activeKey === 'runtime'"
+          :current-user="currentUser"
+          :page-active="props.pageActive"
+        />
+        <SettingsUserManagementPanel
+          v-else-if="props.activeKey === 'users'"
+          :current-user="currentUser"
+        />
+        <GeneralParamManagementPanel v-else-if="props.activeKey === 'params'" :current-user="currentUser" />
+        <ApiKeyManagementPanel
+          v-else-if="props.activeKey === 'apiKeys'"
+          :current-user="currentUser"
+          :page-active="props.pageActive"
+        />
+        <InternalModelProviderPanel
+          v-else-if="props.activeKey === 'internalModels'"
+          :current-user="currentUser"
+          :page-active="props.pageActive"
+        />
+        <InternalModelObservabilityPanel
+          v-else-if="props.activeKey === 'internalModelObservability'"
+          :current-user="currentUser"
+          :page-active="props.pageActive"
+        />
+        <MemoryAdminPanel
+          v-else-if="props.activeKey === 'memory'"
+          @configure-models="selectMenu('internalModels')"
+        />
+        <ConfigurationManagementPanel
+          v-else-if="props.activeKey === 'config'"
+          :current-user="currentUser"
+          :page-active="props.pageActive"
+        />
+        <AnalyticsManagementPanel v-else-if="props.activeKey === 'analytics'" />
+        <SupportAccessPanel
+          v-else-if="props.activeKey === 'support' && props.supportRevealed && props.pageActive"
+          :current-user="currentUser"
+          :activation-sequence="props.supportActivationSequence"
         />
       </div>
     </template>

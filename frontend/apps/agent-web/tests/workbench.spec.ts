@@ -696,7 +696,7 @@ test("session share read-only workbench shows sender identity colors and fixed s
   expect(shareHeaderRequests.every((request) => request.shareId === "shr_readonly")).toBe(true);
 
   await newConversationButton.click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/workbench$/);
   await expect(page.getByTestId("header-fixed-share-context")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "新建对话" })).toBeVisible();
 });
@@ -2177,6 +2177,180 @@ test("workspace file loading distinguishes an empty file and supports retry afte
   await page.getByRole("button", { name: "重试读取文件" }).click();
   await expect(page.locator(".monaco-editor")).toContainText("retry succeeded", { timeout: 10_000 });
   expect(fileReadRequests.filter((item) => item.path === "docs/retry.md")).toHaveLength(3);
+});
+
+test("standalone mind map previews, restores a draft, applies through dirty state, saves, and cancels without writing", async ({ page }) => {
+  const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
+  const source = "# 产品冷启动\n\n- 用户分析\n  - 用户画像\n- 产品验证\n";
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileWriteRequests,
+    fileContents: { "docs/roadmap.mind": source }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "roadmap.mind", exact: true }).click();
+  await expect(page.getByTestId("mind-map-document")).toBeVisible();
+  await expect(page.getByTestId("mind-map-canvas")).toBeVisible();
+  await expect(page.locator(".monaco-editor")).toHaveCount(0);
+
+  const edit = page.getByTestId("footer-mind-map-edit");
+  await expect(edit).toBeEnabled();
+  await edit.click();
+  await expect(page.getByRole("button", { name: "应用思维导图" })).toBeVisible();
+  const tab = page.getByRole("tab").filter({ hasText: "roadmap.mind" });
+  await expect(tab.locator(".figma-editor-tab-dirty-star")).toBeVisible();
+  const blockedSave = page.locator(".ta-workbench-footer-save");
+  await expect(blockedSave).toBeDisabled();
+  await expect(blockedSave).toHaveAttribute("title", "请先应用或取消思维导图编辑");
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect(page.getByText("思维导图尚未应用", { exact: true })).toBeVisible();
+
+  await tab.getByRole("button", { name: "关闭标签" }).click();
+  const closeConfirm = page.getByRole("dialog", { name: "未保存的修改" });
+  await expect(closeConfirm).toBeVisible();
+  await closeConfirm.getByRole("button", { name: "取消" }).click();
+  await expect(page.getByRole("button", { name: "应用思维导图" })).toBeVisible();
+
+  await page.getByRole("button", { name: "应用思维导图" }).click();
+  await expect(page.getByRole("button", { name: "应用思维导图" })).toHaveCount(0);
+  await expect(page.locator(".ta-workbench-footer-save")).toBeEnabled();
+  await page.locator(".ta-workbench-footer-save").click();
+  await expect.poll(() => fileWriteRequests).toHaveLength(1);
+  expect(fileWriteRequests[0]).toMatchObject({
+    workspaceId: "wrk_personal_default",
+    path: "docs/roadmap.mind"
+  });
+  expect(fileWriteRequests[0]?.content).toMatch(/<!-- mm:id=root -->[\s\S]*<!--mm:v1:[A-Za-z0-9_-]+-->/);
+  await expect(tab.locator(".figma-editor-tab-dirty-star")).toHaveCount(0);
+
+  await page.getByTestId("footer-mind-map-edit").click();
+  await page.getByRole("button", { name: "取消编辑" }).click();
+  await expect.poll(() => fileWriteRequests).toHaveLength(1);
+  await expect(tab.locator(".figma-editor-tab-dirty-star")).toHaveCount(0);
+});
+
+test("markdown with multiple mind fences applies only the selected block and saves through the existing file route", async ({ page }) => {
+  const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
+  const first = "# 第一张图\n\n- A";
+  const second = "# 第二张图\n\n- B";
+  const source = `开头\n\n\`\`\`mind\n${first}\n\`\`\`\n\n正文\n\n\`\`\`mind\n${second}\n\`\`\`\n`;
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileWriteRequests,
+    fileContents: { "docs/multiple-maps.md": source }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "multiple-maps.md", exact: true }).click();
+  await page.getByTestId("footer-markdown-preview").click();
+  const blocks = page.locator(".mind-map-block");
+  await expect(blocks).toHaveCount(2);
+  await blocks.nth(1).getByRole("button", { name: "编辑" }).click();
+  const dialog = page.getByRole("dialog", { name: "编辑第 2 个思维导图" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "应用思维导图" }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.locator(".ta-workbench-footer-save").click();
+
+  await expect.poll(() => fileWriteRequests).toHaveLength(1);
+  const saved = fileWriteRequests[0]?.content ?? "";
+  expect(saved).toContain(`\`\`\`mind\n${first}\n\`\`\``);
+  expect(saved).toMatch(/```mind\n# 第二张图\n\n<!-- mm:id=root -->[\s\S]*<!--mm:v1:[A-Za-z0-9_-]+-->\n```/);
+  expect(saved.match(/<!--mm:v1:/g)).toHaveLength(1);
+});
+
+test("damaged metadata and reference mind maps remain safe read-only previews", async ({ page }) => {
+  const damaged = "# 损坏图\n\n<!-- mm:id=root -->\n\n- A <!-- mm:id=n1 -->\n\n<!--mm:v2:AAAA-->\n";
+  const readonlySource = "# 引用图\n\n- 只读节点\n";
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileContents: { "docs/damaged.mind": damaged },
+    workspaceViewLists: {
+      "COMPOSITE::": {
+        entries: [
+          {
+            id: "workspace:docs",
+            path: "docs",
+            name: "docs",
+            directory: true,
+            size: 0,
+            locator: { kind: "COMPOSITE", path: "docs" },
+            source: "WORKSPACE",
+            merged: false,
+            collision: false,
+            readonly: false,
+            workspacePath: "docs",
+            referenceAliases: []
+          },
+          {
+            id: "reference:readonly-maps",
+            path: "readonly-maps",
+            name: "readonly-maps",
+            directory: true,
+            size: 0,
+            locator: { kind: "REFERENCE", path: "", referenceAlias: "readonly-maps" },
+            source: "REFERENCE",
+            merged: false,
+            collision: false,
+            readonly: true,
+            referenceAliases: ["readonly-maps"]
+          }
+        ]
+      },
+      "COMPOSITE::docs": {
+        entries: [{
+          id: "workspace:docs/damaged.mind",
+          path: "docs/damaged.mind",
+          name: "damaged.mind",
+          directory: false,
+          size: damaged.length,
+          locator: { kind: "WORKSPACE", path: "docs/damaged.mind" },
+          source: "WORKSPACE",
+          merged: false,
+          collision: false,
+          readonly: false,
+          workspacePath: "docs/damaged.mind",
+          referenceAliases: []
+        }]
+      },
+      "REFERENCE:readonly-maps:": {
+        entries: [{
+          id: "reference:readonly-maps:readonly.mind",
+          path: "readonly-maps/readonly.mind",
+          name: "readonly.mind",
+          directory: false,
+          size: readonlySource.length,
+          locator: { kind: "REFERENCE", path: "readonly.mind", referenceAlias: "readonly-maps" },
+          source: "REFERENCE",
+          merged: false,
+          collision: false,
+          readonly: true,
+          referenceAliases: ["readonly-maps"]
+        }]
+      }
+    },
+    workspaceViewContents: {
+      "REFERENCE:readonly-maps:readonly.mind": readonlySource
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "docs", exact: true }).click();
+  await page.getByRole("button", { name: "damaged.mind", exact: true }).click();
+  await expect(page.getByTestId("mind-map-canvas")).toBeVisible();
+  await expect(page.getByTestId("footer-mind-map-edit")).toBeDisabled();
+  await expect(page.getByTestId("footer-mind-map-edit")).toHaveAttribute("title", /不支持思维导图元数据版本/);
+  await expect(page.getByRole("button", { name: "应用思维导图" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "readonly-maps", exact: true }).click();
+  await page.getByRole("button", { name: "readonly.mind", exact: true }).click();
+  await expect(page.getByTestId("mind-map-canvas")).toBeVisible();
+  await expect(page.getByTestId("footer-mind-map-edit")).toBeDisabled();
+  await expect(page.getByTestId("footer-mind-map-edit")).toHaveAttribute("title", "只读文件不可编辑");
+  await expect(page.locator(".monaco-editor")).toHaveCount(0);
 });
 
 test("initial file loading is not editable and applies the response readonly state", async ({ page }) => {
@@ -4715,6 +4889,129 @@ test("release-disabled question entry stays hidden for super admin", async ({ pa
 
   await expect(page.getByRole("navigation", { name: "系统管理导航" })).toBeVisible();
   await expect(page.getByRole("button", { name: "通用参数管理" })).toBeVisible();
+});
+
+test("activity pages stay open in an in-app tab workspace while workbench remains tabless", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await expect(page.getByRole("tablist", { name: "已打开功能页" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "长期记忆" }).click();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "记忆" })).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/\/memories$/);
+  await page.getByTestId("memory-tab-team").click();
+
+  await page.getByRole("tab", { name: "工具箱" }).click();
+  await page.getByRole("tab", { name: "记忆" }).click();
+  await expect(page.getByTestId("memory-tab-team")).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "打开工作台" }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+  await expect(page.getByRole("tablist", { name: "已打开功能页" })).toBeHidden();
+
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "记忆" })).toBeVisible();
+
+  await page.getByRole("button", { name: "关闭全部功能页" }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+});
+
+test("closing the temporary support page returns to its neighbour without opening a default system tab", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+
+  await page.keyboard.press("Shift");
+  await page.keyboard.press("Shift");
+  await page.keyboard.press("Shift");
+  await expect(page.getByRole("tab", { name: "问题排查只读访问" })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "关闭 问题排查只读访问" }).click();
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "定时任务管理" })).toHaveCount(0);
+});
+
+test("system subpages open as unique tabs and the console activity restores the latest page", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "系统管理" }).click();
+  await expect(page.getByRole("tab", { name: "定时任务管理" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "运行管理" }).click();
+  await expect(page).toHaveURL(/\/system\?section=runtime$/);
+  await expect(page.getByRole("tab", { name: "运行管理" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "定时任务管理" })).toBeVisible();
+
+  await page.getByRole("button", { name: "打开工作台" }).click();
+  await page.getByRole("button", { name: "系统管理" }).click();
+  await expect(page).toHaveURL(/\/system\?section=runtime$/);
+  await expect(page.getByRole("tab", { name: "运行管理" })).toHaveCount(1);
+
+  await page.getByRole("button", { name: "通用参数管理" }).click();
+  await expect(page).toHaveURL(/\/system\?section=params$/);
+  await expect(page.getByRole("tab", { name: "通用参数管理" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("page-tab order survives refresh and bulk close uses the context target", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await page.getByRole("button", { name: "长期记忆" }).click();
+  await page.getByRole("button", { name: "Agent、Skill、MCP 与 Tool Hub" }).click();
+
+  const tablist = page.getByRole("tablist", { name: "已打开功能页" });
+  const toolboxItem = page.getByRole("tab", { name: "工具箱" }).locator("..");
+  const hubItem = page.getByRole("tab", { name: "能力库" }).locator("..");
+  await toolboxItem.dragTo(hubItem);
+  await expect.poll(() => tablist.getByRole("tab").evaluateAll((tabs) =>
+    tabs.map((tab) => (tab as HTMLElement).dataset.pageId)
+  )).toEqual(["memories", "hub", "toolbox"]);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/hub$/);
+  await expect.poll(() => page.getByRole("tablist", { name: "已打开功能页" }).getByRole("tab").evaluateAll((tabs) =>
+    tabs.map((tab) => (tab as HTMLElement).dataset.pageId)
+  )).toEqual(["memories", "hub", "toolbox"]);
+
+  await page.getByRole("tab", { name: "能力库" }).click({ button: "right" });
+  await page.getByRole("menu", { name: "能力库 Tab 操作" }).getByRole("menuitem", { name: "关闭右侧" }).click();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "能力库" })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "关闭全部功能页" }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+});
+
+test("application administrators canonicalize forbidden system deep links to configuration management", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["APP_ADMIN"] });
+  await page.goto("/system?section=runtime", { waitUntil: "domcontentloaded" });
+
+  await expect(page).toHaveURL(/\/system$/);
+  await expect(page.getByRole("tab", { name: "配置管理" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: "配置管理", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "运行管理", exact: true })).toHaveCount(0);
+});
+
+test("browser history reopens a function page that was closed after leaving it", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+  await page.getByRole("button", { name: "长期记忆" }).click();
+
+  await page.getByRole("button", { name: "关闭 工具箱" }).click();
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveCount(0);
+  await page.goBack();
+
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "工具箱" })).toHaveCount(1);
+  await expect(page.getByRole("tab", { name: "记忆" })).toBeVisible();
 });
 
 test("left activity pages expose stable URIs and restore through browser history", async ({ page }) => {
@@ -12506,7 +12803,7 @@ async function callAgentWorkbenchHandler(
 async function emitDiffViewerSave(page: Page, path: string, content: string) {
   await page.evaluate(({ filePath, fileContent }) => {
     type VueInternalInstance = { emit?: (event: string, ...args: unknown[]) => void };
-    const root = document.querySelector(".managed-editor-main > div.flex-1 > div") as (HTMLElement & {
+    const root = document.querySelector(".managed-workbench-center > div.flex-1 > div") as (HTMLElement & {
       __vueParentComponent?: VueInternalInstance;
     }) | null;
     if (!root?.__vueParentComponent?.emit) throw new Error("DiffViewer instance not found");

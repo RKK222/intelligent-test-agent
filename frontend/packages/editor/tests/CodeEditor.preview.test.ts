@@ -4,6 +4,10 @@ import { fireEvent, render } from "@testing-library/vue";
 
 const editorLayout = vi.fn();
 const editorCreate = vi.fn();
+const mindMapRuntime = vi.hoisted(() => ({
+  created: vi.fn(),
+  destroyed: vi.fn()
+}));
 
 // 屏蔽 Monaco 真实加载（jsdom 无法运行 Monaco），提供一个最小 editor 工厂桩
 vi.mock("../src/monaco-env", () => {
@@ -67,7 +71,31 @@ vi.mock("@vue-flow/core", () => ({
   getSmoothStepPath: vi.fn(() => ["M0 0 L1 1"])
 }));
 
+vi.mock("../src/mind-map/simple-mind-map-runtime", () => ({
+  loadSimpleMindMapRuntime: vi.fn(async () => ({
+    MindMap: class {
+      view = { enlarge: vi.fn(), narrow: vi.fn(), fit: vi.fn() };
+      options: Record<string, unknown>;
+
+      constructor(options: Record<string, unknown>) {
+        this.options = options;
+        mindMapRuntime.created(options);
+      }
+
+      on() {}
+      off() {}
+      execCommand() {}
+      getData() { return this.options.data; }
+      setData(data: unknown) { this.options.data = data; }
+      setMode() {}
+      resize() {}
+      destroy() { mindMapRuntime.destroyed(); }
+    }
+  }))
+}));
+
 import CodeEditor from "../src/CodeEditor.vue";
+import { isMindMapPath } from "../src";
 
 const baseProps = { content: "# hi", dirty: false, readonly: false, saving: false };
 
@@ -167,5 +195,114 @@ describe("CodeEditor Markdown 预览受控", () => {
     await vi.waitFor(() => expect(emitted().change).toBeTruthy());
     expect((emitted().change as Array<[string]>)[0]?.[0])
       .toMatch(/^```mermaid\nflowchart TD\n%%@[A-Za-z0-9_-]+(?:\n%%@\+[A-Za-z0-9_-]+)*$/m);
+  });
+});
+
+describe("CodeEditor 独立思维导图", () => {
+  const content = "# 产品冷启动\n\n- 用户分析\n  - 用户画像\n";
+
+  it("显式识别 .mind 且不把相似路径误判为思维导图", () => {
+    expect(isMindMapPath("docs/plan.mind")).toBe(true);
+    expect(isMindMapPath("docs/PLAN.MIND")).toBe(true);
+    expect(isMindMapPath("docs/plan.mind.md")).toBe(false);
+    expect(isMindMapPath("docs/mind")).toBe(false);
+  });
+
+  it(".mind 默认按需显示只读画布且不创建 Monaco", async () => {
+    editorCreate.mockClear();
+    mindMapRuntime.created.mockClear();
+    const { findByTestId, emitted } = render(CodeEditor, {
+      props: { ...baseProps, path: "docs/plan.mind", content }
+    });
+
+    expect(await findByTestId("mind-map-canvas")).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(mindMapRuntime.created).toHaveBeenCalledWith(expect.objectContaining({ readonly: true }));
+    });
+    expect(editorCreate).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect((emitted().mindMapStatus as Array<[{ canEdit: boolean }]> | undefined)?.at(-1)?.[0].canEdit)
+        .toBe(true);
+    });
+  });
+
+  it("损坏元数据只做安全预览并阻止进入编辑器", async () => {
+    mindMapRuntime.created.mockClear();
+    const damaged = "# 根\n\n<!-- mm:id=root -->\n\n- A <!-- mm:id=n1 -->\n\n<!--mm:v2:AAAA-->\n";
+    const { findByTestId, queryByRole, emitted } = render(CodeEditor, {
+      props: {
+        ...baseProps,
+        path: "docs/damaged.mind",
+        content: damaged,
+        mindMapEditing: true,
+        mindMapDraft: { kind: "mind-map", baseContent: damaged, content: damaged }
+      }
+    });
+
+    expect(await findByTestId("mind-map-canvas")).toBeTruthy();
+    expect(queryByRole("button", { name: "应用思维导图" })).toBeNull();
+    await vi.waitFor(() => {
+      expect(mindMapRuntime.created).toHaveBeenCalledWith(expect.objectContaining({ readonly: true }));
+      expect((emitted().mindMapStatus as Array<[{ canEdit: boolean }]>).at(-1)?.[0].canEdit).toBe(false);
+    });
+  });
+
+  it("切回 .mind 时从受控草稿恢复编辑内容", async () => {
+    mindMapRuntime.created.mockClear();
+    const draftContent = "# 已恢复草稿\n\n- A\n";
+    const { findByRole } = render(CodeEditor, {
+      props: {
+        ...baseProps,
+        path: "docs/plan.mind",
+        content,
+        mindMapEditing: true,
+        mindMapDraft: { kind: "mind-map", baseContent: content, content: draftContent }
+      }
+    });
+
+    expect(await findByRole("button", { name: "应用思维导图" })).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(mindMapRuntime.created).toHaveBeenCalledWith(expect.objectContaining({
+        readonly: false,
+        data: expect.objectContaining({ data: expect.objectContaining({ text: "已恢复草稿" }) })
+      }));
+    });
+  });
+
+  it("应用草稿后上报规范正文并清理受控编辑状态", async () => {
+    const { findByRole, emitted } = render(CodeEditor, {
+      props: {
+        ...baseProps,
+        path: "docs/plan.mind",
+        content,
+        mindMapEditing: true,
+        mindMapDraft: { kind: "mind-map", baseContent: content, content }
+      }
+    });
+
+    await fireEvent.click(await findByRole("button", { name: "应用思维导图" }));
+
+    await vi.waitFor(() => expect(emitted().change).toBeTruthy());
+    expect((emitted().change as Array<[string]>).at(-1)?.[0]).toMatch(/<!-- mm:id=root -->[\s\S]*<!--mm:v1:[A-Za-z0-9_-]+-->/);
+    expect(emitted()["update:mindMapDraft"]?.at(-1)).toEqual([undefined]);
+    expect(emitted()["update:mindMapEditing"]?.at(-1)).toEqual([false]);
+  });
+
+  it("取消草稿不修改正文，只清理受控编辑状态", async () => {
+    const { findByRole, emitted } = render(CodeEditor, {
+      props: {
+        ...baseProps,
+        path: "docs/plan.mind",
+        content,
+        mindMapEditing: true,
+        mindMapDraft: { kind: "mind-map", baseContent: content, content: "# 草稿\n\n- B\n" }
+      }
+    });
+
+    await fireEvent.click(await findByRole("button", { name: "取消编辑" }));
+
+    expect(emitted().change).toBeUndefined();
+    expect(emitted()["update:mindMapDraft"]?.at(-1)).toEqual([undefined]);
+    expect(emitted()["update:mindMapEditing"]?.at(-1)).toEqual([false]);
   });
 });

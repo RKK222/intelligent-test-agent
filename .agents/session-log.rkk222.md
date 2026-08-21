@@ -12608,3 +12608,25 @@
 - 当前运行时只以 `(appId, repositoryId)` application automation reference generation 和各成员工作树 JSONC 为事实源；Java 不再向 Run 注入引用说明或物理路径。
 - 自动化来源使用紫色，应用资产 docs 来源保持蓝色。对话读权限和实际内容读取已通过真实端到端验证。
 - 本次不新增 API、RunEvent、数据库结构、Flyway 或部署节点；未修改 `.env*`、generated SDK、OpenCode 源码或冻结 migration，未创建新分支。
+
+## 2026-08-21 - 合并 dev 并复核自动化引用最终口径
+
+### Why
+
+- 用户明确要求先把远端最新改动纳入 `dev`，再把 `dev` 合并进 `release`；自动化版本库仍以本次对话最终确定的“应用 + 版本库”共享只读引用为准，不能被旧 workspace/version 实现覆盖。
+
+### What
+
+- 将 `origin/dev` 合入本地 `dev` 后再合入 `release`；冲突解决保留自动化共享只读引用、JSONC 唯一运行时事实源和紫色来源语义，同时纳入 `dev` 的工作台多功能页标签与 Markdown 思维导图能力。
+- 修正合并后受控系统页签测试和用户手册精确文案，并把自动化 JSONC 清理、组合文件树定位器的维护说明统一为 `(appId, repositoryId, generation)`，不再使用旧 workspace/template 身份口径。
+
+### How
+
+- 自动化后端定向 Maven reactor 构建成功；真实 PostgreSQL 历史迁移、MyBatis XML 持久化及完整 Flyway 多历史兼容测试共 33 条通过。
+- 前端全量 Vitest 143 个文件通过，2161 passed、1 skipped；用户手册和 agent-web 生产构建成功。提交前回顾全部 `.agents/session-log*.md` 近期记录，扫描未解决冲突并执行 `git diff --check`。
+- 使用 JDK 25、根目录 `.env.test`、`test` profile 与 ClickHouse 完整重启；backend readiness 为 UP，frontend `127.0.0.1:3000` 可访问，opencode-manager 已重新启动。
+
+### Result
+
+- `release` 同时包含最新 `dev` 能力和本次自动化引用最终实现，冲突文件中没有重新引入个人自动化 worktree、Java Run 上下文注入或按 workspace/version 选择的正常入口。
+- 本次合并没有新增部署节点；保留已有 API、数据库迁移和安全边界，未修改 `.env*`、generated SDK、OpenCode 只读源码或用户未跟踪的 `.reasonix/`。

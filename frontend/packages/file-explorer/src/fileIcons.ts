@@ -98,6 +98,7 @@ const FILE_EXTENSIONS: Record<string, string> = {
   md: "Markdown",
   markdown: "Markdown",
   mdx: "Mdx",
+  mind: "Tree",
   py: "Python",
   pyx: "Python",
   pyw: "Python",

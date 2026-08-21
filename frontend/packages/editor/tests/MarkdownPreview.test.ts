@@ -4,6 +4,10 @@ import { fireEvent, render, within } from "@testing-library/vue";
 import MarkdownPreview from "../src/MarkdownPreview.vue";
 
 const mermaidParse = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+const mindMapLifecycle = vi.hoisted(() => ({
+  created: vi.fn(),
+  destroyed: vi.fn()
+}));
 
 vi.mock("mermaid", () => {
   return {
@@ -34,6 +38,30 @@ vi.mock("@vue-flow/core", () => ({
   MarkerType: { ArrowClosed: "arrowclosed", Arrow: "arrow" },
   ConnectionMode: { Loose: "loose" },
   getSmoothStepPath: vi.fn(() => ["M0 0 L1 1"])
+}));
+
+vi.mock("../src/mind-map/simple-mind-map-runtime", () => ({
+  loadSimpleMindMapRuntime: vi.fn(async () => ({
+    MindMap: class {
+      view = { enlarge: vi.fn(), narrow: vi.fn(), fit: vi.fn() };
+      handlers = new Map<string, (...args: unknown[]) => void>();
+      options: Record<string, unknown>;
+
+      constructor(options: Record<string, unknown>) {
+        this.options = options;
+        mindMapLifecycle.created(options);
+      }
+
+      on(name: string, handler: (...args: unknown[]) => void) { this.handlers.set(name, handler); }
+      off(name: string) { this.handlers.delete(name); }
+      execCommand() {}
+      getData() { return this.options.data; }
+      setData(data: unknown) { this.options.data = data; }
+      setMode() {}
+      resize() {}
+      destroy() { mindMapLifecycle.destroyed(); }
+    }
+  }))
 }));
 
 // 等待防抖（150ms）+ markdown-it/dompurify/highlight.js 动态 import 完成并完成 DOM 更新
@@ -127,6 +155,96 @@ describe("MarkdownPreview", () => {
       await fireEvent.click(scriptBtn);
       expect((container.querySelector(".ta-mermaid-script") as HTMLElement | null)?.hidden).toBe(false);
     }
+  });
+
+  it("mind fence 默认显示源码，并在点击预览后按需创建只读画布", async () => {
+    mindMapLifecycle.created.mockClear();
+    const { container, findByTestId } = render(MarkdownPreview, {
+      props: { content: "```mind\n# 根\n\n- A\n```" }
+    });
+    await waitRender();
+
+    expect(container.querySelector("code.language-mind")?.textContent).toContain("# 根");
+    const preview = container.querySelector('[data-mind-map-mode="preview"]') as HTMLButtonElement;
+    expect(preview.textContent).toContain("预览");
+    expect(mindMapLifecycle.created).not.toHaveBeenCalled();
+
+    await fireEvent.click(preview);
+    expect(await findByTestId("mind-map-canvas")).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(mindMapLifecycle.created).toHaveBeenCalledWith(expect.objectContaining({ readonly: true }));
+    });
+    expect((container.querySelector(".ta-mind-map-source") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("损坏或未知元数据仍可安全预览，但禁用编辑", async () => {
+    const content = "```mind\n# 根\n\n<!-- mm:id=root -->\n\n- A <!-- mm:id=n1 -->\n\n<!--mm:v2:AAAA-->\n```";
+    const { container, findByTestId } = render(MarkdownPreview, { props: { content } });
+    await waitRender();
+
+    const edit = container.querySelector('[data-mind-map-mode="edit"]') as HTMLButtonElement;
+    expect(edit.disabled).toBe(true);
+    expect(container.querySelector(".ta-mind-map-warning")?.textContent).toContain("第 1 个 mind 块");
+
+    await fireEvent.click(container.querySelector('[data-mind-map-mode="preview"]') as Element);
+    expect(await findByTestId("mind-map-canvas")).toBeTruthy();
+  });
+
+  it("弹层编辑只应用当前 mind block，取消不修改 Markdown", async () => {
+    const first = "# 一\n\n- A";
+    const second = "# 二\n\n- B";
+    const content = `文首\n\n\`\`\`mind\n${first}\n\`\`\`\n\n正文\n\n\`\`\`mind\n${second}\n\`\`\`\n`;
+    const { container, emitted, findByRole } = render(MarkdownPreview, { props: { content } });
+    await waitRender();
+
+    const editButtons = container.querySelectorAll('[data-mind-map-mode="edit"]');
+    await fireEvent.click(editButtons[1] as Element);
+    const dialog = await findByRole("dialog", { name: "编辑第 2 个思维导图" }, { timeout: 5000 });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "取消编辑" }));
+    expect(emitted().change).toBeUndefined();
+
+    await fireEvent.click(editButtons[1] as Element);
+    const reopened = await findByRole("dialog", { name: "编辑第 2 个思维导图" }, { timeout: 5000 });
+    await fireEvent.click(within(reopened).getByRole("button", { name: "应用思维导图" }));
+
+    await vi.waitFor(() => expect(emitted().change).toBeTruthy());
+    const markdown = (emitted().change as Array<[string]>)[0]![0];
+    expect(markdown).toContain(`\`\`\`mind\n${first}\n\`\`\``);
+    expect(markdown).toMatch(/```mind\n# 二\n\n<!-- mm:id=root -->[\s\S]*<!--mm:v1:[A-Za-z0-9_-]+-->\n```/);
+  });
+
+  it("长闭合 fence 与同内容后续块并存时仍只应用第一个 mind block", async () => {
+    const source = "# 相同\n\n- A\n";
+    const content = `\`\`\`\`mind\n${source}\`\`\`\`\`\n正文\n\`\`\`mind\n${source}\`\`\`\n`;
+    const { container, emitted, findByRole } = render(MarkdownPreview, { props: { content } });
+    await waitRender();
+
+    const editButtons = container.querySelectorAll('[data-mind-map-mode="edit"]');
+    await fireEvent.click(editButtons[0] as Element);
+    const dialog = await findByRole("dialog", { name: "编辑第 1 个思维导图" }, { timeout: 5000 });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "应用思维导图" }));
+
+    await vi.waitFor(() => expect(emitted().change).toBeTruthy());
+    const markdown = (emitted().change as Array<[string]>)[0]![0];
+    expect(markdown).toMatch(/````mind\n# 相同\n\n<!-- mm:id=root -->[\s\S]*<!--mm:v1:[A-Za-z0-9_-]+-->\n`````/);
+    expect(markdown).toContain(`\`\`\`mind\n${source}\`\`\`\n`);
+  });
+
+  it("mind 弹层打开后目标 block 被刷新时拒绝覆盖", async () => {
+    const original = "```mind\n# 根\n\n- A\n```";
+    const refreshed = "```mind\n# 根\n\n- B\n```";
+    const { container, emitted, findByRole, rerender } = render(MarkdownPreview, {
+      props: { content: original }
+    });
+    await waitRender();
+
+    await fireEvent.click(container.querySelector('[data-mind-map-mode="edit"]') as Element);
+    const dialog = await findByRole("dialog", { name: "编辑第 1 个思维导图" }, { timeout: 5000 });
+    await rerender({ content: refreshed });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "应用思维导图" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toMatch(/已发生变化/);
+    expect(emitted().change).toBeUndefined();
   });
 
   it("可视化编辑节点后只回写当前 Mermaid block", async () => {

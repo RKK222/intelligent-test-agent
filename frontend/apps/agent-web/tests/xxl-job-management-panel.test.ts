@@ -34,9 +34,9 @@ function api(issue = vi.fn().mockResolvedValue(ticket())) {
   return { createXxlJobSsoTicket: issue } as unknown as BackendApiClient;
 }
 
-function renderPanel(backendApi: BackendApiClient, currentUser: CurrentUser = superAdmin) {
+function renderPanel(backendApi: BackendApiClient, currentUser: CurrentUser = superAdmin, pageActive = true) {
   return render(ScheduledTaskManagementPanel, {
-    props: { currentUser },
+    props: { currentUser, pageActive },
     global: { provide: { api: backendApi } }
   });
 }
@@ -84,7 +84,10 @@ describe("XXL-JOB management panel", () => {
   });
 
   it("uses a one-time ticket in a hidden POST form and never puts it in the iframe URL", async () => {
-    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
+    let submittedTicket = "";
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
+      submittedTicket = (this.querySelector('input[name="ticket"]') as HTMLInputElement | null)?.value ?? "";
+    });
     const backendApi = api();
     const view = renderPanel(backendApi);
 
@@ -97,7 +100,8 @@ describe("XXL-JOB management panel", () => {
     expect(form?.getAttribute("method")).toBe("post");
     expect(form?.getAttribute("action")).toBe("/xxl-job-admin/platform-sso/login");
     expect(form?.getAttribute("target")).toBe(iframe.getAttribute("name"));
-    expect(input.value).toBe("ticket-one");
+    expect(submittedTicket).toBe("ticket-one");
+    expect(input.value).toBe("");
     expect(iframe.getAttribute("src")).not.toContain("ticket-one");
 
     await fireEvent.load(iframe);
@@ -171,7 +175,10 @@ describe("XXL-JOB management panel", () => {
   });
 
   it("requests a fresh ticket when the embedded console is reloaded", async () => {
-    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
+    const submittedTickets: string[] = [];
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
+      submittedTickets.push((this.querySelector('input[name="ticket"]') as HTMLInputElement | null)?.value ?? "");
+    });
     const issue = vi.fn()
       .mockResolvedValueOnce(ticket("ticket-one"))
       .mockResolvedValueOnce(ticket("ticket-two"));
@@ -182,7 +189,32 @@ describe("XXL-JOB management panel", () => {
 
     await waitFor(() => expect(issue).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
-    expect((view.container.querySelector('input[name="ticket"]') as HTMLInputElement).value).toBe("ticket-two");
+    expect(submittedTickets).toEqual(["ticket-one", "ticket-two"]);
+    expect((view.container.querySelector('input[name="ticket"]') as HTMLInputElement).value).toBe("");
+  });
+
+  it("keeps an established iframe but cancels a pending ticket handoff while its page tab is inactive", async () => {
+    let resolveFirst!: (value: ReturnType<typeof ticket>) => void;
+    const firstTicket = new Promise<ReturnType<typeof ticket>>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const issue = vi.fn()
+      .mockReturnValueOnce(firstTicket)
+      .mockResolvedValueOnce(ticket("ticket-two"));
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
+    const view = renderPanel(api(issue));
+
+    await waitFor(() => expect(issue).toHaveBeenCalledTimes(1));
+    await view.rerender({ currentUser: superAdmin, pageActive: false });
+    resolveFirst(ticket("ticket-one"));
+    await firstTicket;
+    await Promise.resolve();
+    expect(submit).not.toHaveBeenCalled();
+    expect(view.getByTitle("XXL-JOB 定时任务管理")).toBeTruthy();
+
+    await view.rerender({ currentUser: superAdmin, pageActive: true });
+    await waitFor(() => expect(issue).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
   });
 
   it("shows permission and Admin availability states", async () => {

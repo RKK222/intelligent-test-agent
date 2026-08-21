@@ -106,6 +106,7 @@ declare module 'vue' {
     ToolboxPanel: typeof import('./src/components/ToolboxPanel.vue')['default']
     UserNotificationCenter: typeof import('./src/components/UserNotificationCenter.vue')['default']
     WorkbenchFooter: typeof import('./src/components/WorkbenchFooter.vue')['default']
+    WorkspacePageTabBar: typeof import('./src/components/WorkspacePageTabBar.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

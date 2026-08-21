@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowLeftRight, CodeXml, FileSearch, FlaskConical, LibraryBig, LocateFixed, Plus, Save, ServerCog, SquarePen } from "lucide-vue-next";
+import { ArrowLeftRight, CodeXml, FileSearch, FlaskConical, LibraryBig, LocateFixed, PencilLine, Plus, Save, ServerCog, SquarePen } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type {
   ApplicationWorkspaceTemplate,
@@ -47,6 +47,14 @@ const props = defineProps<{
   showMermaidEditButton?: boolean;
   /** 当前 MD 预览模式 */
   markdownPreviewMode?: PreviewMode;
+  /** 独立 .mind 文件的中栏编辑入口。 */
+  showMindMapEditButton?: boolean;
+  /** 当前 .mind 已有待应用草稿。 */
+  mindMapEditing?: boolean;
+  mindMapEditDisabled?: boolean;
+  mindMapEditDisabledReason?: string;
+  /** 保存被编辑器草稿阻断时的可操作提示。 */
+  saveBlockedReason?: string;
   /** 当前应用名（用于菜单首行提示与按钮文案） */
   appName?: string;
   /** 归属当前应用的工作空间模板列表；为空则不展示两级菜单 */
@@ -85,6 +93,7 @@ const emit = defineEmits<{
   (e: "save"): void;
   (e: "locate", path: string): void;
   (e: "update:markdownPreviewMode", mode: PreviewMode): void;
+  (e: "editMindMap"): void;
   // 选择某工作空间下的某个版本：父组件负责切换运行态 Workspace。
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
   // 要求父组件按需懒加载某模板下的版本列表
@@ -810,6 +819,25 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
 
     <div v-if="showSave" class="ta-workbench-footer-right">
       <ElTooltip
+        v-if="showMindMapEditButton"
+        :content="mindMapEditDisabledReason || (mindMapEditing ? '正在编辑思维导图' : '编辑思维导图')"
+        placement="top"
+        :show-after="0"
+      >
+        <button
+          type="button"
+          :class="['ta-workbench-footer-mind-map', { 'is-active': mindMapEditing }]"
+          :disabled="mindMapEditDisabled || mindMapEditing"
+          :title="mindMapEditDisabledReason || (mindMapEditing ? '正在编辑思维导图' : '编辑思维导图')"
+          :aria-pressed="mindMapEditing"
+          aria-label="编辑思维导图"
+          data-testid="footer-mind-map-edit"
+          @click="emit('editMindMap')"
+        >
+          <PencilLine class="ta-workbench-footer-icon" />
+        </button>
+      </ElTooltip>
+      <ElTooltip
         v-if="showPreviewButton"
         placement="top"
         :show-after="0"
@@ -877,14 +905,15 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
       </ElTooltip>
       <ElTooltip
         v-if="dirty || saving"
-        :content="readonly ? '只读文件不可保存' : saving ? '保存中…' : '保存 (Ctrl+S)'"
+        :content="saveBlockedReason || (readonly ? '只读文件不可保存' : saving ? '保存中…' : '保存 (Ctrl+S)')"
         placement="top"
         :show-after="0"
       >
         <button
           type="button"
           class="ta-workbench-footer-save"
-          :disabled="readonly || saving"
+          :disabled="readonly || saving || Boolean(saveBlockedReason)"
+          :title="saveBlockedReason || (readonly ? '只读文件不可保存' : saving ? '保存中…' : '保存 (Ctrl+S)')"
           @click="emit('save')"
         >
           <Save class="ta-workbench-footer-save-icon" />
@@ -1161,6 +1190,35 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
   color: #0284c7;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+/* 思维导图编辑入口使用节点连线常见的青绿色，与 Markdown 蓝色预览明确区分。 */
+.ta-workbench-footer-mind-map {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0.8px solid #99f6e4;
+  border-radius: 6px;
+  color: #0f766e;
+  background: #fff;
+  cursor: pointer;
+}
+
+.ta-workbench-footer-mind-map:hover:not(:disabled),
+.ta-workbench-footer-mind-map.is-active {
+  border-color: #14b8a6;
+  color: #115e59;
+  background: #ccfbf1;
+}
+
+.ta-workbench-footer-mind-map:disabled {
+  border-color: #e4e4e7;
+  color: #a1a1aa;
+  background: #f4f4f5;
+  cursor: not-allowed;
 }
 
 .ta-workbench-footer-preview:hover:not(:disabled) {

@@ -72,6 +72,7 @@ describe("AgentSkillHub", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
     vi.clearAllMocks();
   });
@@ -84,6 +85,31 @@ describe("AgentSkillHub", () => {
     await waitFor(() => expect(api.readAgentSkillHubFile).toHaveBeenCalledWith("hub_rev_published", "AGENT.md"));
     expect(view.queryByText("发布")).toBeNull();
     expect(view.queryByText("引用到当前应用")).toBeNull();
+  });
+
+  it("pauses a debounced catalog search while its page tab is inactive and refreshes it on return", async () => {
+    vi.useFakeTimers();
+    const view = renderHub({ canManage: false, pageActive: true });
+    await vi.waitFor(() => expect(api.listAgentSkillHubAssets).toHaveBeenCalled());
+    const initialCalls = api.listAgentSkillHubAssets.mock.calls.length;
+
+    await fireEvent.update(view.getByPlaceholderText("搜索名称、应用或技术 ID"), "checkout");
+    await view.rerender({
+      selectedAppId: "app_pay",
+      workspaceId: "wrk_personal",
+      canManage: false,
+      pageActive: false
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(api.listAgentSkillHubAssets).toHaveBeenCalledTimes(initialCalls);
+
+    await view.rerender({
+      selectedAppId: "app_pay",
+      workspaceId: "wrk_personal",
+      canManage: false,
+      pageActive: true
+    });
+    await vi.waitFor(() => expect(api.listAgentSkillHubAssets).toHaveBeenCalledTimes(initialCalls + 1));
   });
 
   it("writes a published asset to the current workspace and reports the changed Agent path", async () => {
@@ -438,6 +464,7 @@ describe("AgentSkillHub", () => {
 
 function renderHub(props: {
   canManage: boolean;
+  pageActive?: boolean;
   canClassifySkills?: boolean;
   runtimeMcp?: Array<{ id: string; name: string; status?: string; description?: string }>;
   runtimeTools?: Array<{ id: string; name: string; status?: string; description?: string }>;
@@ -446,6 +473,7 @@ function renderHub(props: {
     props: {
       selectedAppId: "app_pay",
       workspaceId: "wrk_personal",
+      pageActive: true,
       ...props
     },
     global: {

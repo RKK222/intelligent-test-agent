@@ -105,7 +105,7 @@ const stats: InternalModelCallHourlyStat[] = [
   }
 ];
 
-function renderPanel(recordsTotal = 1) {
+function renderPanel(recordsTotal = 1, pageActive = true) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });
@@ -207,7 +207,7 @@ function renderPanel(recordsTotal = 1) {
   } as Partial<BackendApiClient> as BackendApiClient;
 
   const view = render(InternalModelObservabilityPanel, {
-    props: { currentUser },
+    props: { currentUser, pageActive },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
       provide: { api },
@@ -271,6 +271,20 @@ describe("InternalModelObservabilityPanel", () => {
     cleanup();
     chartOptions.length = 0;
     vi.restoreAllMocks();
+  });
+
+  it("defers observability requests while its page tab is inactive and refreshes when activated", async () => {
+    const view = renderPanel(1, false);
+    await Promise.resolve();
+    expect(view.api.getInternalModelProbeStatus).not.toHaveBeenCalled();
+    expect(view.api.listInternalModelCallRecords).not.toHaveBeenCalled();
+    expect(view.api.getInternalModelCallStats).not.toHaveBeenCalled();
+
+    await view.rerender({ currentUser, pageActive: true });
+    await waitFor(() => expect(view.api.getInternalModelProbeStatus).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.api.listInternalModelCallRecords).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.api.getInternalModelCallStats).toHaveBeenCalledTimes(1));
+    view.queryClient.clear();
   });
 
   it("uses standard metric names, plain-language help, grouped outcomes, and the user id", async () => {

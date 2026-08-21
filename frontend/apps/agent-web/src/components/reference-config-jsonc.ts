@@ -32,7 +32,7 @@ export type ReferenceConfigValue = {
 export type ReferenceConfigPatch = ReferenceConfigTarget & Omit<ReferenceConfigValue, "path">;
 
 export type ManagedReferenceConfigPatch = ReferenceConfigPatch & {
-  /** 兼容尚未写入 repository-id 的历史自动化引用，保存当前配置时按已知模板 ID 一并清理。 */
+  /** 兼容旧 workspace/version 身份的自动化引用，按当前应用与版本库保存时一并清理。 */
   supersededAutomationWorkspaceIds?: string[];
 };
 

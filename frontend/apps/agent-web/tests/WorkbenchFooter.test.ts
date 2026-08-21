@@ -575,4 +575,40 @@ describe("WorkbenchFooter", () => {
     });
     expect(wrapper3.find(".ta-workbench-footer-save").exists()).toBe(true);
   });
+
+  it("提供独立 .mind 编辑入口并在不可编辑时保留原因", async () => {
+    const editable = mount(WorkbenchFooter, {
+      props: { showSave: true, showMindMapEditButton: true }
+    });
+    const edit = editable.get('[data-testid="footer-mind-map-edit"]');
+    expect(edit.attributes("aria-label")).toBe("编辑思维导图");
+    await edit.trigger("click");
+    expect(editable.emitted("editMindMap")).toHaveLength(1);
+
+    const blocked = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        showMindMapEditButton: true,
+        mindMapEditDisabled: true,
+        mindMapEditDisabledReason: "元数据校验失败"
+      }
+    });
+    const blockedEdit = blocked.get('[data-testid="footer-mind-map-edit"]');
+    expect(blockedEdit.attributes("disabled")).toBeDefined();
+    expect(blockedEdit.attributes("title")).toBe("元数据校验失败");
+  });
+
+  it("待应用思维导图草稿禁用保存并提示先应用或取消", () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        dirty: true,
+        saveBlockedReason: "请先应用或取消思维导图编辑"
+      }
+    });
+
+    const save = wrapper.get(".ta-workbench-footer-save");
+    expect(save.attributes("disabled")).toBeDefined();
+    expect(save.attributes("title")).toBe("请先应用或取消思维导图编辑");
+  });
 });

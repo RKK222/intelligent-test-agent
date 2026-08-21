@@ -11,7 +11,7 @@
 - `FileEntryContextMenu.vue`：工作空间与 Agents 树共用的 Teleport 右键菜单外壳，统一遮罩、定位、菜单项密度和危险操作颜色。
 - `FileEntryCreateDialog.vue`：工作空间根、目录行和 Agents 配置树共享的新建/上传面板；统一文件/文件夹名称校验、目标目录展示和可选上传入口，不直接访问后端。Agent 配置根通过 `allowAgentTemplates` 追加 Agent/Skill 标准模板选项与普通条目差异说明，公共/应用及目录上传仍由调用方按 scope 路由。
 - `FileEntryDeleteDialog.vue`：工作空间与 Agents 配置树共享的文件/目录删除确认面板；目录明确提示递归删除全部内容，只上报确认事件，不直接访问后端。
-- `fileIcons.ts`：按文件类型返回 VS Code codicon class，包入口导出 `getVsCodeFileIconClass` 供应用侧 Agent 树复用。
+- `fileIcons.ts`：按文件类型返回现有文件图标，`.mind` 映射为 Material Icon Theme `Tree`；包入口导出图标 helper 供应用侧 Agent 树复用。
 - `filterLoadedFiles.ts`：已加载文件名过滤，作为服务端搜索结果未提供时的本地回退。
 - `highlightKeyword.ts`：把文件名按关键字分段，供搜索结果高亮渲染。
 

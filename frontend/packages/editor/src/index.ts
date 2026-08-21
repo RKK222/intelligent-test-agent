@@ -16,5 +16,5 @@ export type {
   MermaidNodeStyle,
   MermaidNodeType
 } from "./mermaid/model";
-export { languageFromPath } from "./language";
-
+export type { MindMapDocumentStatus, MindMapVisualDraft } from "./mind-map/model";
+export { isMindMapPath, languageFromPath } from "./language";

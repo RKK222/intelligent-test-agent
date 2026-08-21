@@ -51,6 +51,7 @@ const props = defineProps<{
   selectedAppId?: string;
   workspaceId?: string;
   canManage: boolean;
+  pageActive: boolean;
   canClassifySkills?: boolean;
   runtimeMcp?: RuntimeHubItem[];
   runtimeTools?: RuntimeHubItem[];
@@ -704,18 +705,43 @@ watch(() => props.canManage, (canManage) => {
 });
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let searchRefreshPending = false;
 watch(keyword, () => {
-  if (searchTimer) clearTimeout(searchTimer);
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+  searchRefreshPending = true;
+  if (!props.pageActive) return;
   searchTimer = setTimeout(() => {
+    searchTimer = null;
+    searchRefreshPending = false;
     if (tab.value !== "UPDATES" && !isRuntimeTab.value) void loadAssets();
   }, 250);
 });
 
-onMounted(async () => {
-  await Promise.all([loadAssets(), refreshCount(), refreshOverview()]);
+watch(() => props.pageActive, (active) => {
+  if (!active) {
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
+      searchRefreshPending = true;
+    }
+    return;
+  }
+  if (!searchRefreshPending || tab.value === "UPDATES" || isRuntimeTab.value) return;
+  searchRefreshPending = false;
+  void loadAssets();
 });
 
-onUnmounted(stopDetailResize);
+onMounted(async () => {
+  if (props.pageActive) await Promise.all([loadAssets(), refreshCount(), refreshOverview()]);
+});
+
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer);
+  stopDetailResize();
+});
 </script>
 
 <template>

@@ -9,6 +9,7 @@ describe("getMaterialFileIconName", () => {
     expect(icon({ name: "package.json", path: "package.json", type: "file" })).toBe("Nodejs");
     expect(icon({ name: "AgentConfigTreeNode.vue", path: "src/AgentConfigTreeNode.vue", type: "file" })).toBe("Vue");
     expect(icon({ name: "hero.png", path: "assets/hero.png", type: "file" })).toBe("Image");
+    expect(icon({ name: "roadmap.mind", path: "docs/roadmap.mind", type: "file" })).toBe("Tree");
     expect(icon({ name: "artifact.unknown", path: "artifact.unknown", type: "file" })).toBe("Document");
   });
 });
