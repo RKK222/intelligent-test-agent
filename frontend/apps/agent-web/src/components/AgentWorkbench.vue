@@ -1248,7 +1248,7 @@ onMounted(() => {
   window.addEventListener("focus", refreshAppSourceAuthorizationOnFocus);
 });
 onBeforeUnmount(() => {
-  if (selectedWorkspaceKind.value === "EXPERIENCE" && selectedWorkspaceId.value) {
+  if (["EXPERIENCE", "LOCAL_CLIENT"].includes(selectedWorkspaceKind.value) && selectedWorkspaceId.value) {
     api.closeWorkspaceFileSocket(selectedWorkspaceId.value);
   }
   cancelExperienceWorkspaceFlow("UNMOUNT");
@@ -1607,6 +1607,13 @@ const workspacesQuery = useQuery({
   queryFn: () => api.listWorkspaces(1, 50)
 });
 const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
+const localWorkspaces = computed(() => workspaces.value
+  .filter((workspace) => workspace.runtimeKind === "LOCAL_CLIENT")
+  .map((workspace) => ({
+    workspaceId: workspace.workspaceId,
+    name: workspace.name,
+    online: workspace.online
+  })));
 // selectedWorkspace 只接受应用 recent workspace 或用户显式选择产生的 selectedWorkspaceId。
 // 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
 const selectedWorkspace = computed(() => {
@@ -1648,7 +1655,7 @@ async function clearLocalWorkspaceRouteQuery() {
 }
 
 /** 客户端注册成功后打开此深链；网页按授权接口取回 Workspace，再走现有文件 WebSocket 加载目录。 */
-async function activateLocalWorkspaceFromRoute(workspaceId: string, sequence: number) {
+async function activateLocalWorkspace(workspaceId: string, sequence: number, clearRouteQuery: boolean) {
   try {
     const workspace = workspaces.value.find((item) => item.workspaceId === workspaceId)
       ?? await api.getWorkspace(workspaceId);
@@ -1662,22 +1669,40 @@ async function activateLocalWorkspaceFromRoute(workspaceId: string, sequence: nu
     teardownAppSourceInteractions();
     selectedAppId.value = undefined;
     appSourceContext.value = null;
+    const previousWorkspaceId = selectedWorkspaceId.value;
+    if (previousWorkspaceId && previousWorkspaceId !== workspace.workspaceId) {
+      api.closeWorkspaceFileSocket(previousWorkspaceId);
+    }
     const switched = await switchWorkspace(workspace, {
       kind: "LOCAL_CLIENT",
       isCurrent: () => sequence === localWorkspaceRouteSequence
     });
     if (!switched || sequence !== localWorkspaceRouteSequence) return;
+    try {
+      await api.markRecentLocalWorkspace(workspace.workspaceId);
+    } catch (error) {
+      if (sequence !== localWorkspaceRouteSequence) return;
+      feedback.value = errorFeedback("本地工作区已打开，但最近选择保存失败", error);
+      if (clearRouteQuery) await clearLocalWorkspaceRouteQuery();
+      return;
+    }
+    if (sequence !== localWorkspaceRouteSequence) return;
     feedback.value = {
       kind: "success",
       title: "已打开本地工作区",
       description: workspace.name
     };
-    await clearLocalWorkspaceRouteQuery();
+    if (clearRouteQuery) await clearLocalWorkspaceRouteQuery();
   } catch (error) {
     if (sequence !== localWorkspaceRouteSequence) return;
     feedback.value = errorFeedback("打开本地工作区失败", error);
-    await clearLocalWorkspaceRouteQuery();
+    if (clearRouteQuery) await clearLocalWorkspaceRouteQuery();
   }
+}
+
+function handleSelectLocalWorkspace(workspaceId: string) {
+  const sequence = ++localWorkspaceRouteSequence;
+  void activateLocalWorkspace(workspaceId, sequence, false);
 }
 
 watch(
@@ -1686,7 +1711,7 @@ watch(
     const workspaceId = requestedLocalWorkspaceId(rawWorkspaceId);
     const sequence = ++localWorkspaceRouteSequence;
     if (shareMode.value || routeName !== "workbench" || !token || !workspaceId) return;
-    void activateLocalWorkspaceFromRoute(workspaceId, sequence);
+    void activateLocalWorkspace(workspaceId, sequence, true);
   },
   { immediate: true }
 );
@@ -1854,6 +1879,7 @@ const globalRecentQuery = useQuery({
   retry: false
 });
 const globalRecentAppId = computed(() => globalRecentQuery.data.value?.appId ?? null);
+const globalRecentWorkspaceId = computed(() => globalRecentQuery.data.value?.workspaceId ?? null);
 const globalRecentLoaded = computed(() => globalRecentQuery.isSuccess.value || globalRecentQuery.isError.value);
 const shellApps = computed(() =>
   applicationCatalog.value.map((app) => ({ id: app.appId, name: app.appName, description: app.enabled ? "已启用" : "已停用" }))
@@ -3792,6 +3818,36 @@ async function recoverActiveRunForSession(
 // ===== 默认值与联动 effect =====
 // 选择默认应用：优先使用「全局最近工作区」所属应用；没有可用全局 recent 时降级到已加入应用的第一项。
 // 这里仅负责选应用，是否加载工作区继续由 per-app recent + 已存在 default 私人工作区决定。
+let recentLocalWorkspaceRestoreId: string | undefined;
+
+/** 全局最近记录指向本地工作区时，先恢复本地选择，不能被首个托管应用抢先覆盖。 */
+function tryRestoreRecentLocalWorkspace() {
+  if (
+    shareMode.value
+    || selectedAppId.value
+    || selectedWorkspaceId.value
+    || selectedWorkspaceKind.value === "EXPERIENCE"
+    || selectedWorkspaceKind.value === "LOCAL_CLIENT"
+    || requestedLocalWorkspaceId(route.query.localWorkspaceId)
+  ) return false;
+  const workspaceId = globalRecentWorkspaceId.value;
+  if (!workspaceId) return false;
+  const workspace = workspaces.value.find((item) =>
+    item.workspaceId === workspaceId && item.runtimeKind === "LOCAL_CLIENT"
+  );
+  if (!workspace) {
+    // recent 没有 appId 时可能是尚未加载完成的本地工作区；等工作区目录查询结束后再决定回退应用。
+    return globalRecentAppId.value == null && !workspacesQuery.isSuccess.value;
+  }
+  if (recentLocalWorkspaceRestoreId === workspaceId) return true;
+  recentLocalWorkspaceRestoreId = workspaceId;
+  const sequence = ++localWorkspaceRouteSequence;
+  void activateLocalWorkspace(workspaceId, sequence, false).finally(() => {
+    if (selectedWorkspaceId.value !== workspaceId) recentLocalWorkspaceRestoreId = undefined;
+  });
+  return true;
+}
+
 function trySelectDefaultApp() {
   // 体验区没有应用 ID；应用成员列表的 focus/定时刷新不能把它误判为“尚未选应用”。
   if (
@@ -3800,6 +3856,7 @@ function trySelectDefaultApp() {
     || selectedWorkspaceKind.value === "LOCAL_CLIENT"
     || experienceJourneyActive.value
   ) return;
+  if (tryRestoreRecentLocalWorkspace()) return;
   const apps = applicationCatalog.value;
   if (apps.length === 0 || !globalRecentLoaded.value) return;
   if (!appSourceRecoveryChecked) {
@@ -3847,6 +3904,10 @@ watch(
 );
 // applicationCatalog 先于 globalRecent 加载完成时，等 recent 回来再补一次选择。
 watch(globalRecentLoaded, () => {
+  trySelectDefaultApp();
+});
+// recent 可能先于工作区分页返回；本地工作区出现后再执行一次恢复判断。
+watch(() => workspacesQuery.data.value, () => {
   trySelectDefaultApp();
 });
 watch(selectedWorkspace, (sw) => {
@@ -6494,6 +6555,9 @@ async function retryAppSourceOperation(operation: AppSourceOperation) {
 }
 
 async function fallbackToManagedWorkspace(reason?: string) {
+  if (selectedWorkspaceKind.value === "LOCAL_CLIENT" && selectedWorkspaceId.value) {
+    api.closeWorkspaceFileSocket(selectedWorkspaceId.value);
+  }
   teardownAppSourceInteractions();
   selectedWorkspaceKind.value = "MANAGED";
   appSourceContext.value = null;
@@ -7304,9 +7368,9 @@ async function handleSelectApp(
   const leavingExperience = selectedWorkspaceKind.value === "EXPERIENCE";
   const leavingLocalClient = selectedWorkspaceKind.value === "LOCAL_CLIENT";
   const selectDefaultVersionWhenMissing = options.selectDefaultVersionWhenMissing === true || leavingExperience;
-  if (leavingExperience && selectedWorkspaceId.value) {
+  if ((leavingExperience || leavingLocalClient) && selectedWorkspaceId.value) {
     api.closeWorkspaceFileSocket(selectedWorkspaceId.value);
-    cancelExperienceWorkspaceFlow("WORKSPACE_SWITCHED");
+    if (leavingExperience) cancelExperienceWorkspaceFlow("WORKSPACE_SWITCHED");
   }
   teardownAppSourceInteractions();
   if (leavingAppSource) {
@@ -8157,6 +8221,7 @@ async function handleDownloadEntry(entry: FileTreeEntry) {
   try {
     if (entry.type === "directory") {
       const files = selectedWorkspaceKind.value === "EXPERIENCE"
+        || selectedWorkspaceKind.value === "LOCAL_CLIENT"
         ? await collectOrdinaryWorkspaceDownloadFiles(workspace.workspaceId, entry.path)
         : await collectWorkspaceViewDownloadFiles(
             workspace.workspaceId,
@@ -8179,7 +8244,9 @@ async function handleDownloadEntry(entry: FileTreeEntry) {
       return;
     }
 
-    const content = selectedWorkspaceKind.value === "EXPERIENCE" || !viewEntry
+    const content = selectedWorkspaceKind.value === "EXPERIENCE"
+      || selectedWorkspaceKind.value === "LOCAL_CLIENT"
+      || !viewEntry
       ? await readWorkspaceFileForDownload(workspace.workspaceId, entry.path)
       : await readWorkspaceViewFileForDownload(workspace.workspaceId, viewEntry.locator);
     if (!isCurrentDownload()) return;
@@ -12057,6 +12124,7 @@ async function handleLogout() {
     :joinable-apps="joinableApps"
     :selected-app-id="selectedAppId"
     :app-templates="appTemplatesWithVersions"
+    :local-workspaces="localWorkspaces"
     :show-app-source="Boolean(selectedManagedApplication)"
     :workspace-kind="selectedWorkspaceKind"
     :app-source-repositories="appSourceRepositories"
@@ -12064,6 +12132,7 @@ async function handleLogout() {
     :app-source-repositories-error="appSourcePickerError"
     :selected-app-source-repository-id="appSourceContext?.repositoryId"
     :selected-workspace-template-id="selectedWorkspaceKind === 'MANAGED' ? (selectedWorkspace?.applicationWorkspaceId ?? undefined) : undefined"
+    :selected-local-workspace-id="selectedWorkspaceKind === 'LOCAL_CLIENT' ? selectedWorkspace?.workspaceId : undefined"
     :selected-version-id="selectedWorkspaceKind === 'MANAGED' ? selectedVersionId : undefined"
     :loading-app-templates="loadingAppTemplates"
     :loading-app-versions="loadingAppVersions"
@@ -12101,6 +12170,7 @@ async function handleLogout() {
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
+    @select-local-workspace="handleSelectLocalWorkspace"
     @open-experience="toggleExperienceWorkspace"
     @load-versions="handleLoadVersions"
     @select-version="handleSelectVersion"
