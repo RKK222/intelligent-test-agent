@@ -781,6 +781,67 @@ test("session share busy run blocks every participant and only sender can stop",
   await expect(page.getByRole("button", { name: "发送" })).toHaveCount(0);
 });
 
+test("session share failure card starts a new ordinary run instead of a resend", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runResendRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    runRequests,
+    runResendRequests,
+    runIds: ["run_shared_failed", "run_shared_retry"],
+    authUser: { userId: "usr_writer", username: "协作者", unifiedAuthId: "ucid_writer", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_retry", name: "共享失败重试工作区" }],
+    sessions: [{
+      ...session(),
+      sessionId: "ses_shared_retry",
+      workspaceId: "wrk_shared_retry",
+      title: "共享失败重试会话"
+    }],
+    sessionShareAccess: sessionShareAccess({
+      shareId: "shr_failed_retry",
+      actorUserId: "usr_writer",
+      actorUnifiedAuthId: "ucid_writer",
+      actorUsername: "协作者",
+      sessionId: "ses_shared_retry",
+      workspaceId: "wrk_shared_retry",
+      canChat: true,
+      ownerAccess: false
+    }),
+    sessionShareRuntimeStates: [sessionShareRuntimeState({
+      shareId: "shr_failed_retry",
+      sessionId: "ses_shared_retry",
+      workspaceId: "wrk_shared_retry",
+      canChat: true
+    })],
+    sessionMessagesBySessionId: { ses_shared_retry: [] },
+    runEventsByRunId: {
+      run_shared_failed: [{
+        ...event(1, "run.failed", {
+          error: { name: "ConnectionError", message: "共享请求发送失败" }
+        }),
+        runId: "run_shared_failed"
+      }],
+      run_shared_retry: []
+    }
+  });
+
+  await page.goto("/s/shr_failed_retry", { waitUntil: "domcontentloaded" });
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("重新检查共享任务");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect(page.locator(".figma-chat-retry-card-text")).toContainText("共享请求发送失败");
+
+  await page.locator(".figma-chat-retry-card-btn").click();
+
+  await expect.poll(() => runRequests.length).toBe(2);
+  expect(runRequests[1]).toMatchObject({
+    sessionId: "ses_shared_retry",
+    prompt: "重新检查共享任务"
+  });
+  expect(runResendRequests).toEqual([]);
+  await expect(page.getByTestId("resend-edit-banner")).toHaveCount(0);
+});
+
 test("session share sender can edit and resend their last message", async ({ page }) => {
   const runResendRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
@@ -7390,7 +7451,7 @@ test("a superseded title-pending run cannot restore its todos into the next turn
   await expect(page.getByTestId("oc-work-status-dock").getByText("共 4")).toHaveCount(0);
 });
 
-test("retrying a failed chat run resends the previous remote user turn", async ({ page }) => {
+test("retrying a failed chat run starts a new ordinary run", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const runResendRequests: Array<Record<string, unknown>> = [];
   await page.addInitScript(() => {
@@ -7399,7 +7460,7 @@ test("retrying a failed chat run resends the previous remote user turn", async (
   await mockBackendApi(page, {
     runRequests,
     runResendRequests,
-    runIds: ["run_1"],
+    runIds: ["run_1", "run_2"],
     recentWorkspaces: {
       app_gcms: {
         ...workspace(),
@@ -7411,16 +7472,16 @@ test("retrying a failed chat run resends the previous remote user turn", async (
     personalWorkspaces: {
       awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
     },
-    runEvents: [
-      event(1, "message.updated", {
-        message: { id: "msg_remote_retry_source", role: "user", content: "重试这条测试任务" }
-      }),
-      event(2, "run.failed", {
-        error: { name: "ConnectionError", message: "Streaming response failed" }
-      })
-    ],
     runEventsByRunId: {
-      run_resend_replacement: []
+      run_1: [
+        event(1, "message.updated", {
+          message: { id: "msg_remote_retry_source", role: "user", content: "重试这条测试任务" }
+        }),
+        event(2, "run.failed", {
+          error: { name: "ConnectionError", message: "Streaming response failed" }
+        })
+      ],
+      run_2: []
     }
   });
 
@@ -7434,24 +7495,15 @@ test("retrying a failed chat run resends the previous remote user turn", async (
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
-  const resendComposer = page.getByPlaceholder("修改上一条消息后发送");
-  await expect(page.getByTestId("resend-edit-banner")).toBeVisible();
-  await expect(resendComposer).toHaveValue("重试这条测试任务");
-  await resendComposer.fill("修改后重试这条测试任务");
-  await page.getByRole("button", { name: "发送" }).click();
-
-  await expect.poll(() => runResendRequests.length).toBe(1);
-  expect(runResendRequests[0]).toMatchObject({
-    expectedRemoteMessageId: "msg_remote_retry_source",
-    expectedRunId: "run_1",
-    editedPrompt: "修改后重试这条测试任务"
-  });
-  expect(runRequests).toHaveLength(1);
-  await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
+  await expect.poll(() => runRequests.length).toBe(2);
+  expect(runRequests[1]).toMatchObject({ prompt: "重试这条测试任务" });
+  expect(runResendRequests).toEqual([]);
+  await expect(page.getByTestId("resend-edit-banner")).toHaveCount(0);
+  await expect(page.getByTestId("oc-user-message")).toHaveCount(2);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
 });
 
-test("manual retry refuses to replace a still-running run after a transient session interruption", async ({ page }) => {
+test("failure card retry starts a new ordinary run without cancelling a still-running run", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const cancelRunRequests: string[] = [];
   const runResendRequests: Array<Record<string, unknown>> = [];
@@ -7476,18 +7528,22 @@ test("manual retry refuses to replace a still-running run after a transient sess
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
+  await expect.poll(() => runRequests.length).toBe(2);
   expect(cancelRunRequests).toEqual([]);
   expect(runResendRequests).toEqual([]);
-  expect(runRequests).toHaveLength(1);
-  await expect(page.getByText("无法撤销重发")).toBeVisible();
-  await expect(page.locator(".figma-chat-retry-card")).toBeVisible();
+  expect(runRequests[1]).toMatchObject({ prompt: "恢复异常对话" });
+  await expect(page.getByText("无法撤销重发")).toHaveCount(0);
+  await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
 });
 
-test("retrying a reopened failed chat resends the persisted remote user turn", async ({ page }) => {
+test("retrying a reopened failed chat starts a new ordinary run", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
   const runResendRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
     ...runnableWorkspaceSetup(),
+    runRequests,
     runResendRequests,
+    runIds: ["run_history_retry"],
     sessions: [{
       sessionId: "ses_history",
       workspaceId: "wrk_1234567890abcdef",
@@ -7518,7 +7574,7 @@ test("retrying a reopened failed chat resends the persisted remote user turn", a
       createdAt: "2026-07-05T10:00:00Z",
       updatedAt: "2026-07-05T10:01:00Z"
     },
-    runEventsByRunId: { run_resend_replacement: [] }
+    runEventsByRunId: { run_history_retry: [] }
   });
 
   await gotoWorkbench(page);
@@ -7529,18 +7585,14 @@ test("retrying a reopened failed chat resends the persisted remote user turn", a
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
-  const resendComposer = page.getByPlaceholder("修改上一条消息后发送");
-  await expect(resendComposer).toHaveValue("重新检查登录流程");
-  await resendComposer.fill("重新检查登录和退出流程");
-  await page.getByRole("button", { name: "发送" }).click();
-
-  await expect.poll(() => runResendRequests.length).toBe(1);
-  expect(runResendRequests[0]).toMatchObject({
-    expectedRemoteMessageId: "msg_remote_user_failed",
-    expectedRunId: "run_history",
-    editedPrompt: "重新检查登录和退出流程"
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({
+    sessionId: "ses_history",
+    prompt: "重新检查登录流程"
   });
-  await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
+  expect(runResendRequests).toEqual([]);
+  await expect(page.getByTestId("resend-edit-banner")).toHaveCount(0);
+  await expect(page.getByTestId("oc-user-message")).toHaveCount(2);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
 });
 

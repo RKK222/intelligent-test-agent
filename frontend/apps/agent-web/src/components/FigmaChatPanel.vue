@@ -897,7 +897,10 @@ const emit =
   defineEmits<{
     (e: 'send', prompt: string, attachments?: ComposerAttachment[]): void
     (e: 'stop'): void
+    /** 失败卡片重试：重新发起普通 Run，不撤回历史消息。 */
     (e: 'retry'): void
+    /** 用户消息操作：沿用既有撤回重发流程。 */
+    (e: 'resend'): void
     (e: 'cancel-resend-edit'): void
     (e: 'new-conversation'): void
     (e: 'native-command', command: OpenCodeTuiCommandName): void
@@ -4624,7 +4627,7 @@ function onCompositionEnd() {
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
-        @resend="emit('retry')"
+        @resend="emit('resend')"
       >
         <template #empty-icon>
           <div class="oc-empty-state__pet-avatar">

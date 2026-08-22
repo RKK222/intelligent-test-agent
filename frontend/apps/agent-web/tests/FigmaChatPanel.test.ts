@@ -4666,7 +4666,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("任务失败");
   });
 
-  it("shows the real run failure message in the retry card", () => {
+  it("shows the real run failure message and emits an ordinary retry from the failure card", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -4698,6 +4698,9 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".figma-chat-retry-card-text").text()).toContain("Insufficient Balance");
     expect(wrapper.find(".figma-chat-retry-card-text").text()).not.toContain("974");
+    await wrapper.get(".figma-chat-retry-card-btn").trigger("click");
+    expect(wrapper.emitted("retry")).toHaveLength(1);
+    expect(wrapper.emitted("resend")).toBeUndefined();
   });
 
   it("shows fallback run failure metadata instead of a generic retry message", () => {
@@ -5419,7 +5422,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".oc-user-message__resend").exists()).toBe(false);
   });
 
-  it("emits retry from the eligible last user turn", async () => {
+  it("emits resend from the eligible last user turn", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [{
@@ -5438,7 +5441,8 @@ describe("FigmaChatPanel", () => {
 
     await showFullTimeline(wrapper);
     await wrapper.get(".oc-user-message__resend").trigger("click");
-    expect(wrapper.emitted("retry")).toHaveLength(1);
+    expect(wrapper.emitted("resend")).toHaveLength(1);
+    expect(wrapper.emitted("retry")).toBeUndefined();
   });
 
   it("allows the explore section to expand and collapse", async () => {

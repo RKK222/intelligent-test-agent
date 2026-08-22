@@ -10301,8 +10301,29 @@ function handleStopRun() {
   }
 }
 
+/** 失败卡片只重新发送最后一条根用户问题，创建普通新 Run，不改写既有消息。 */
+function handleFailedRequestRetry() {
+  const sourceMessage = [...chatState.value.messages].reverse().find(
+    (message): message is Extract<AgentMessage, { role: "user" }> => {
+      if (message.role !== "user") return false;
+      const scope = chatState.value.messageScopesById[message.messageId ?? message.id];
+      return scope?.isChildSession !== true;
+    }
+  );
+  const prompt = sourceMessage ? displayTextFromUserPrompt(sourceMessage.text).trim() : lastPrompt.value.trim();
+  if (!prompt) {
+    feedback.value = {
+      kind: "info",
+      title: "无法重试",
+      description: "未找到失败请求的原始内容，请重新输入后发送。"
+    };
+    return;
+  }
+  handleSend(prompt);
+}
+
 /** 撤回入口先把上一条消息恢复到输入框，用户确认或修改后才创建替代 Run。 */
-function handleRetryRun() {
+function handleResendRun() {
   if (!resendableMessageId.value) {
     feedback.value = {
       kind: "info",
@@ -12721,7 +12742,8 @@ async function handleLogout() {
           @upload-chat-attachments="handleChatAttachmentUpload"
           @remove-chat-attachment="handleRemoveChatAttachment"
           @stop="handleStopRun"
-          @retry="handleRetryRun"
+          @retry="handleFailedRequestRetry"
+          @resend="handleResendRun"
           @new-conversation="handleNewConversation"
           @native-command="handleNativeTuiCommand"
           @run-shell="handleNativeShellCommand"
@@ -12796,7 +12818,7 @@ async function handleLogout() {
             :cancel-disabled="!canStopRun"
             :retry-disabled="!resendableMessageId"
             @cancel="handleStopRun"
-            @retry="handleRetryRun"
+            @retry="handleResendRun"
           />
           <TerminalPanel
             v-else

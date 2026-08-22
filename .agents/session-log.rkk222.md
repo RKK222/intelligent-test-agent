@@ -12911,3 +12911,26 @@
 - 当前本机旧 Local Client Dev 与 manager 同时监听 4096 的环境冲突仍使新的平台 Run 命中旧客户端进程；因此最新真实实证使用 manager 的局域网地址完成，平台 Run 相关性和本地客户端物理断网续传以单元/集成测试验证，尚未在消除该端口冲突后重新做整条平台 Run 实测。
 - 已完成插件 hook p99/RSS/I/O 基准，但尚未完成真实模型多轮关闭/开启对照所需的 CPU、磁盘 IOPS、首 token 与整轮 p95 ≤3% 统计，不能把性能验收写成全部通过。
 - 未修改 `.env*`、generated SDK、OpenCode 只读源码或部署节点；未纳入工作区既有文件 WebSocket、本地工作区下拉、SSE transport、进程陈旧 PID/端口探测和 `.reasonix/` 等无关改动。
+
+## 2026-08-22 - 修复失败卡片误走撤回重发
+
+### Why
+
+- 单人和协作对话的失败卡片都复用了消息气泡的“撤回重发”事件，点击“重试”会进入编辑旧消息、替代 Run 和权限校验流程，与失败请求直接重新执行的产品语义不符。
+
+### What
+
+- 将 `FigmaChatPanel` 的失败卡片 `retry` 与用户消息气泡 `resend` 拆成独立事件；`AgentWorkbench` 为失败卡片读取最后一条根用户问题，并通过现有普通发送链路创建新 Run，不取消旧 Run、不调用 resends 接口、不替换历史消息。
+- 保留现有消息气泡撤回重发和底部运行面板行为，本批次不扩展范围；在前端总览与 Agent Web README 中记录后续边界：消息气泡撤回重发仅限协作对话实际发送人，普通对话没有失败卡片时不提供其它重试入口。
+- 增加单人失败、协作失败、仍运行状态异常和重开历史失败会话回归，并保留协作消息气泡撤回重发回归，锁定两个入口不再串线。
+
+### How
+
+- `FigmaChatPanel.test.ts` 定向 Vitest 160 passed / 1 skipped；工作台 Chromium 定向 E2E 5/5 通过。
+- `@test-agent/agent-web` production build（含 `vue-tsc --noEmit`）通过；构建仅保留既有大 chunk 与静态/动态 import 提示。
+- 当前已有 frontend `127.0.0.1:3000` 与 backend `127.0.0.1:8080` 继续运行，页面和 health 均返回 HTTP 200；提交前回顾全部 `.agents/session-log*.md` 近期记录，并仅暂存本次相关差异。
+
+### Result
+
+- 失败卡片“重试”在单人和协作对话中都创建普通新 Run，旧用户消息和旧 Run 保持不变；消息气泡撤回重发仍走原有替代 Run 流程。
+- 本次仅改变前端事件分流与调用选择，不新增或变更 HTTP API、DTO、RunEvent/SSE、数据库、Flyway、部署节点、性能或安全边界；未修改 `.env*`、generated SDK、OpenCode 只读源码或工作区其它未完成改动。
