@@ -96,7 +96,8 @@ Workspace ID，并重新下发 `workspace.registerRoot` 恢复客户端状态，
 客户端收到注册成功帧后自动打开 `/workbench?localWorkspaceId=<workspaceId>`，托盘“打开网页”在本次进程已有最近
 注册结果时使用同一深链。URI 不携带本机绝对路径；前端通过带对象级归属校验的 Workspace API 解析逻辑 ID，切换为
 `LOCAL_CLIENT` 工作区语义后仍使用既有 `file-ws-route → ticket → /file/ws` 加载文件树，并关闭 Git、版本和物理路径
-复制入口。登录页的受控 `redirect` 会保留该同源深链查询参数。
+复制入口。文件树调用客户端已实现的 `workspace.list` 普通目录操作，不调用服务端托管工作区专用的组合引用视图
+`workspace.view.list`。登录页的受控 `redirect` 会保留该同源深链查询参数。
 
 ## Session、Run 与夜间任务
 

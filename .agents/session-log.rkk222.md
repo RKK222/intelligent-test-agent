@@ -12861,3 +12861,24 @@
 - 同一目录可安全重复选择，客户端注册成功后会直接打开并选中对应网页工作区；网页通过既有文件 WebSocket 展示和操作本地目录，不依赖应用/版本下拉框。
 - 当前服务和新客户端均已运行；macOS 原生目录弹窗及浏览器可见结果仍需用户最后点击一次确认。
 - 本次不新增或变更 HTTP 路径、请求/响应 DTO、RunEvent/SSE、数据库结构、Flyway、部署节点、强制配置或额外权限；仅新增存量表查询/行锁和兼容前端状态。未修改 `.env*`、generated SDK、OpenCode 只读源码或未跟踪 `.reasonix/`。
+
+## 2026-08-22 - 修复本地工作区登录后文件树加载超时
+
+### Why
+
+- 客户端注册并打开本地工作区深链后，登录和工作区切换均已成功，但文件树仍调用服务端托管工作区使用的 `workspace.view.list` 组合视图操作；本地客户端只实现普通目录 `workspace.list`，因此页面等待后显示“请求超时”。
+
+### What
+
+- `AgentWorkbench` 对 `LOCAL_CLIENT` 复用体验区已有的普通目录转换链路，通过 `api.listFiles` 发送 `workspace.list`，不再调用本地客户端不支持的组合引用视图。
+- 增加前端源码回归断言，并同步前端总览、Agent Web README 和本地客户端架构说明；未扩展文件 WebSocket 协议或增加第二套目录实现。
+
+### How
+
+- Agent Web 工作区源码测试 14/14、类型检查和 production build 通过，构建仅保留既有 chunk 提示。
+- 在用户现有 Chrome 登录态中真实打开 `/workbench?localWorkspaceId=wrk_b6daaf37eaec4939bc91bafa8eef6b5e`：路由、ticket 和文件 WebSocket 建立成功，根目录展示 `.agents`、`backend`、`frontend`、`docs` 等项目内容；继续展开 `backend` 后展示各 Maven 模块和文件，页面不再出现“请求超时”。
+
+### Result
+
+- macOS 托盘选择并注册工作区后，即使先经过登录页，工作台也能选中本地工作区并加载、展开真实本地目录。
+- 本次仅修正前端对既有文件 WebSocket 操作的选择，不涉及 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、性能或安全协议；未修改 `.env*`、generated SDK、OpenCode 只读源码或未跟踪 `.reasonix/`。

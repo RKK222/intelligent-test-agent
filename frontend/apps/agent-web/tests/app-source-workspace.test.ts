@@ -91,6 +91,10 @@ describe("app source workspace state", () => {
     expect(agentWorkbenchSource).toContain('kind: "LOCAL_CLIENT"');
     expect(agentWorkbenchSource).toContain('title: "已打开本地工作区"');
     expect(agentWorkbenchSource).toContain("if (!selectedGitPublishEnabled.value)");
+    expect(agentWorkbenchSource).toContain('|| selectedWorkspaceKind.value === "LOCAL_CLIENT"');
+    expect(agentWorkbenchSource).toContain(
+      "workspaceFilesAsViewEntries(await api.listFiles(workspaceId, target.locator.path))"
+    );
   });
 
   it("restores personal worktree identity only from an exact runtime workspace match", () => {

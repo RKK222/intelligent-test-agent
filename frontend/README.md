@@ -290,7 +290,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 本地客户端在线时隐藏该入口，全部离线且仍有下载灰度权限时恢复显示。工作区默认从客户端托盘直接选择并注册，
 网页个人设置只保留目录浏览和手工注册兜底。客户端注册成功会打开只携带逻辑 Workspace ID 的工作台深链；页面
 校验当前用户归属后切换到 `LOCAL_CLIENT` 工作区，通过既有文件 WebSocket 加载目录，不把本机绝对路径写入 URL。
-本地工作区使用独立选择语义，不触发默认应用补选，并隐藏 Git、应用版本和物理路径复制入口。
+本地工作区使用客户端已实现的 `workspace.list` 普通目录 RPC，不调用仅服务端组合引用视图支持的
+`workspace.view.list`；同时使用独立选择语义，不触发默认应用补选，并隐藏 Git、应用版本和物理路径复制入口。
 管理员安装后，普通用户在终端执行 `test-agent-local-client enroll` 完成接入。macOS、Windows 与非 glibc
 系统不在本地客户端支持范围；客户端向平台注册后，该位置改为显示本地 OpenCode
 健康、异常或离线状态。生产由 Nginx 同源下载路由提供，dev server 只读暴露

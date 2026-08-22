@@ -7441,8 +7441,9 @@ async function loadDirectory(
   nextLoading.add(cacheKey);
   loadingPath.value = nextLoading;
   try {
-    // 体验区只是普通共享目录，不构造应用/引用资产组合视图；服务端也固定拒绝其 COMPOSITE/REFERENCE RPC。
+    // 体验区和本地客户端都只提供普通目录 RPC，不构造应用/引用资产组合视图。
     const response = selectedWorkspaceKind.value === "EXPERIENCE"
+      || selectedWorkspaceKind.value === "LOCAL_CLIENT"
       ? {
           entries: workspaceFilesAsViewEntries(await api.listFiles(workspaceId, target.locator.path)),
           warnings: [],
