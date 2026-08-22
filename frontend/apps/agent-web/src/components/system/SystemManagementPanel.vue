@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, RefreshCw, Settings2, SlidersHorizontal, UsersRound } from "lucide-vue-next";
+import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, RefreshCw, Settings2, SlidersHorizontal, UsersRound, Waypoints } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
 import ScheduledTaskManagementPanel from "./ScheduledTaskManagementPanel.vue";
@@ -47,7 +47,7 @@ const items: SystemMenuItem[] = [
   { key: "memory", label: "记忆能力", icon: BrainCircuit },
   { key: "config", label: "配置管理", icon: Settings2 },
   { key: "analytics", label: "运营分析", icon: BarChart3 },
-  { key: "traces", label: "Trace 可观测", icon: Activity }
+  { key: "traces", label: "Trace 可观测", icon: Waypoints }
 ];
 const visibleItems = computed<SystemMenuItem[]>(() => {
   // 应用管理员只获得应用 Git 控制台入口，其余系统能力继续由超级管理员独占。

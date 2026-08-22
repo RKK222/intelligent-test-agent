@@ -15,6 +15,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Trash2,
+  Waypoints,
   Wrench,
   X
 } from "lucide-vue-next";
@@ -56,6 +57,7 @@ const PAGE_ICONS: Partial<Record<WorkspacePageId, Component>> = {
   "system:memory": BrainCircuit,
   "system:config": Settings2,
   "system:analytics": BarChart3,
+  "system:traces": Waypoints,
   "system:support": KeyRound
 };
 

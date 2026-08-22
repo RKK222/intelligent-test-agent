@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TraceCatalog, TraceRawEvent } from "@test-agent/shared-types";
 import TraceView from "../src/views/TraceView.vue";
 import traceViewSource from "../src/views/TraceView.vue?raw";
+import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
 import { useAuthStore } from "../src/stores/authStore";
 
 const api = vi.hoisted(() => ({
@@ -157,6 +158,11 @@ describe("TraceView", () => {
       .map((element) => element.textContent?.replace(/\s+/g, " ").trim());
     expect(laneText).toEqual(["Input", "Model", "Tools"]);
 
+    const skillLaneButton = view.getByRole("button", { name: "选择 test-design 事件" });
+    await fireEvent.click(skillLaneButton);
+    expect(skillLaneButton.getAttribute("aria-pressed")).toBe("true");
+    expect(view.container.querySelector(".event-row.selected .event-card b")?.textContent).toBe("test-design");
+
     const skillEventTitle = Array.from(view.container.querySelectorAll(".event-card b"))
       .find((element) => element.textContent === "test-design");
     await fireEvent.click(skillEventTitle!.closest("button")!);
@@ -194,6 +200,7 @@ describe("TraceView", () => {
     expect(traceViewSource).not.toMatch(/(?:linear|radial|conic)-gradient\s*\(/);
     expect(traceViewSource).toContain(".event-row { min-height:28px;");
     expect(traceViewSource).toContain(".trace-list-item { min-height:40px;");
+    expect(agentWorkbenchSource).not.toContain('data-testid="trace-activity-button"');
   });
 });
 

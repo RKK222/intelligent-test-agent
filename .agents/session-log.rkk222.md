@@ -13013,3 +13013,26 @@
 - 本地与服务器工作区现在在同一紧凑可检索列表中直接选择，永久加载属于前端状态判断缺陷而非 Mac 性能问题，已完成真实页面验证。
 - F-COSS 部分服务器版本仍因现有 Git 远端预检返回 `GIT_UNAVAILABLE`，Agent 数量仍取决于公共配置仓库的已发布内容及 mode/hidden 元数据治理；两者未在本批次扩大范围处理。
 - 本次仅修改前端交互、状态选择、测试和稳定文档；不涉及 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、性能协议、安全权限、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-23 - 修正 Trace 轨迹点击与控制台入口
+
+### Why
+
+- Trace 三泳道中的短条只有很小的可见区域，实际不易点击且选中反馈可能落在视口外；工作台最左 activity rail 与系统控制台同时存在 Trace 入口，图标也与其它运营能力重复。
+
+### What
+
+- 将三泳道短条改为具备完整泳道高度命中区、键盘焦点和选中状态的真实按钮；点击后同步选中事件、重置检查器到摘要页并把对应明细行滚入视口。
+- 系统控制台菜单、功能页标签和 Trace 空状态统一使用 Waypoints 图标；删除工作台最左 activity rail 的重复 Trace 入口及遗留样式，Trace 继续只在控制台内展开。
+- 保持紧凑行高和 Input/Model/Tools 纯色，不引入渐变；同步前端总览、agent-web 包说明和交互回归测试。
+
+### How
+
+- 前端全量 Vitest 150 个文件通过，2201 passed / 1 skipped；agent-web `vue-tsc` 类型检查通过。
+- 使用 `.env.test`、`test` profile 和 ClickHouse 完成生产构建及真实服务重启；backend readiness 为 UP、frontend 返回 200，启动脚本确认 OpenCode manager 固定为 1.18.4 和 ClickHouse 正常。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，`git diff --check` 通过；未纳入 `.reasonix/`、根目录 `node_modules/` 等无关内容。
+
+### Result
+
+- Trace 总览短条现在可点击、可键盘操作，并能明确定位到对应明细；入口只保留在系统控制台，图标与其它菜单能力可区分。
+- 本次仅涉及前端交互、图标、测试和稳定文档，不变更 HTTP API、RunEvent/SSE、数据库、ClickHouse schema、部署协议、安全权限、`.env*`、generated SDK 或 OpenCode 只读源码。

@@ -310,8 +310,10 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 `apps/agent-web` 把 Trace 作为系统控制台内的独立菜单，不嵌入运营分析面板；兼容 `/traces` 地址只重定向到
 `/system?section=traces`。只有实时角色为 `SUPER_ADMIN` 时显示菜单，router 直接访问也会校验角色；后端四个 Trace API 仍再次
-强制鉴权。页面左侧持续保留基础目录，选中后在同一控制台原位展开 Input/Model/Tools 三泳道，支持 Duration、Turns、
+强制鉴权。工作台最左 activity rail 不再重复提供 Trace 入口；系统控制台菜单与页签统一使用 Waypoints 轨迹图标。页面左侧
+持续保留基础目录，选中后在同一控制台原位展开 Input/Model/Tools 三泳道，支持 Duration、Turns、
 Calls、搜索、父子 Agent 折叠和 Summary/Payload/Result/Timing/Source 检查器，并显示覆盖起点、积压、归档、脱敏、丢弃和
 完整度。交互语义与 DSH 一致：Duration 在等宽和真实耗时轴之间切换，Turns 折叠/展开全部 Turn，Calls 折叠/展开 Tool
-调用；Timing 展示 Step 起点、耗时、TTFT、Decode 及 input/output/reasoning/cache-read/cache-write token。正文与单条下载
+调用；三泳道总览条带使用真实可聚焦按钮和不改变视觉高度的扩展命中区，点击后同步选中并滚动到对应明细行。Timing 展示
+Step 起点、耗时、TTFT、Decode 及 input/output/reasoning/cache-read/cache-write token。正文与单条下载
 来自服务器归档，不能从客户端、本地路径或 ClickHouse 拼装。

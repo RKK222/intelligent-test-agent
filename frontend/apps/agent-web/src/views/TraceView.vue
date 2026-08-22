@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { createBackendApiClient } from "@test-agent/backend-api";
 import type {
   PageResponse,
@@ -8,13 +8,13 @@ import type {
   TraceRawEvent,
 } from "@test-agent/shared-types";
 import {
-  Activity,
   ChevronDown,
   ChevronRight,
   Download,
   RefreshCw,
   Search,
   ShieldCheck,
+  Waypoints,
 } from "lucide-vue-next";
 import { useAuthStore } from "../stores/authStore";
 
@@ -441,6 +441,18 @@ function base64Bytes(value: string): Uint8Array {
   const binary = atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
+
+/**
+ * 三泳道条带和明细行复用同一个选择动作；从总览选择时同步把对应明细滚入视口，
+ * 让紧凑轨迹产生明确反馈，而不是只更新屏幕外的检查器。
+ */
+async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
+  selectedEventId.value = event.eventId;
+  inspectorTab.value = "summary";
+  if (!revealRow) return;
+  await nextTick();
+  document.getElementById(`trace-event-${event.eventId}`)?.scrollIntoView?.({ block: "nearest" });
+}
 </script>
 
 <template>
@@ -545,7 +557,7 @@ function base64Bytes(value: string): Uint8Array {
 
         <section class="trace-timeline-panel">
           <div v-if="!selectedTrace" class="trace-empty trace-empty--hero">
-            <Activity :size="30" />
+            <Waypoints :size="30" />
             <strong>选择一条 Trace 查看完整轨迹</strong>
             <span>Input / Model / Tools 三泳道会按全局序号对齐。</span>
           </div>
@@ -581,9 +593,17 @@ function base64Bytes(value: string): Uint8Array {
               <div v-for="lane in (['INPUT', 'MODEL', 'TOOLS'] as TraceLane[])" :key="lane" class="lane-track">
                 <span>{{ lane === 'TOOLS' ? 'Tools' : lane === 'MODEL' ? 'Model' : 'Input' }}</span>
                 <div>
-                  <i v-for="event in displayEvents.filter((item) => item.lane === lane)" :key="event.eventId"
-                    :class="`lane-dot lane-dot--${lane.toLowerCase()}`" :style="trackStyle(event)"
-                    :title="eventTitle(event)" @click="selectedEventId = event.eventId" />
+                  <button
+                    v-for="event in displayEvents.filter((item) => item.lane === lane)"
+                    :key="event.eventId"
+                    type="button"
+                    :class="['lane-dot', `lane-dot--${lane.toLowerCase()}`, { selected: selectedEventId === event.eventId }]"
+                    :style="trackStyle(event)"
+                    :title="eventTitle(event)"
+                    :aria-label="`选择 ${eventTitle(event)} 事件`"
+                    :aria-pressed="selectedEventId === event.eventId"
+                    @click="selectTimelineEvent(event, true)"
+                  />
                 </div>
               </div>
             </div>
@@ -593,9 +613,11 @@ function base64Bytes(value: string): Uint8Array {
               <button
                 v-for="event in filteredEvents"
                 :key="event.eventId"
+                :id="`trace-event-${event.eventId}`"
                 type="button"
                 :class="['event-row', `event-row--${eventKind(event)}`, { selected: selectedEventId === event.eventId, 'turn-start': isTurnStart(event) }]"
-                @click="selectedEventId = event.eventId"
+                :aria-pressed="selectedEventId === event.eventId"
+                @click="selectTimelineEvent(event)"
               >
                 <time>
                   <small v-if="isTurnStart(event)">{{ turnLabel(event) }}</small>
@@ -709,7 +731,7 @@ function base64Bytes(value: string): Uint8Array {
 .timeline-header { display:flex; align-items:center; justify-content:space-between; padding:14px 17px; border-bottom:1px solid var(--line); background:#fff; }.timeline-header p,.timeline-header h2,.timeline-header span { margin:0; }.timeline-header p { color:#6b507e; font-size:11px; font-weight:700; }.timeline-header h2 { margin:3px 0; font:600 14px ui-monospace,SFMono-Regular,monospace; }.timeline-header span { color:var(--muted); font-size:10px; }
 .timeline-toolbar { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--line); background:#fff; }.timeline-modes { display:flex; gap:3px; padding:3px; border-radius:8px; background:#f0f0f2; }.timeline-modes button { padding:5px 9px; border:0; border-radius:6px; background:transparent; color:#777b85; font-size:10px; cursor:pointer; }.timeline-modes button.active { background:#fff; color:#2b2c31; box-shadow:0 1px 3px #0001; }
 .event-search { display:flex; align-items:center; gap:5px; width:190px; padding:0 8px; border:1px solid #dddde2; border-radius:7px; background:#fff; }.event-search input { width:100%; height:27px; border:0; outline:0; font-size:10px; }
-.lane-overview { padding:9px 12px; border-bottom:1px solid var(--line); background:#fff; }.lane-track { display:grid; grid-template-columns:68px 1fr; align-items:center; min-height:25px; }.lane-track>span { color:#858994; font-size:9px; }.lane-track>span b { float:right; margin-right:8px; }.lane-track>div { position:relative; height:11px; border-left:1px solid #dedee3; background:transparent; }.lane-dot { position:absolute; top:2px; height:7px; min-width:3px; border-radius:2px; cursor:pointer; }.lane-dot--input { background:var(--input); }.lane-dot--model { background:var(--model); }.lane-dot--tools { background:var(--tools); }
+.lane-overview { padding:9px 12px; border-bottom:1px solid var(--line); background:#fff; }.lane-track { display:grid; grid-template-columns:68px 1fr; align-items:center; min-height:25px; }.lane-track>span { color:#858994; font-size:9px; }.lane-track>span b { float:right; margin-right:8px; }.lane-track>div { position:relative; height:11px; border-left:1px solid #dedee3; background:transparent; }.lane-dot { position:absolute; top:0; height:14px; min-width:6px; padding:0; border:0; border-radius:0; background:transparent; cursor:pointer; }.lane-dot::after { position:absolute; inset:3px 0; border-radius:2px; background:var(--lane-color); content:""; }.lane-dot--input { --lane-color:var(--input); }.lane-dot--model { --lane-color:var(--model); }.lane-dot--tools { --lane-color:var(--tools); }.lane-dot.selected::after { box-shadow:0 0 0 1px #fff,0 0 0 2px #477bea; }
 .event-list { min-height:0; overflow:auto; padding-bottom:30px; }.event-row { width:100%; min-height:54px; display:grid; grid-template-columns:90px 20px 1fr 62px; align-items:center; padding:6px 12px; text-align:left; border:0; border-bottom:1px solid #ededf0; background:#fff; cursor:pointer; }.event-row:hover { background:#fafafa; }.event-row.selected { background:#f6f3fb; }.event-row>time { color:#8a8d96; font:9px ui-monospace,SFMono-Regular,monospace; }.event-row>time small { display:block; margin-top:4px; font-size:8px; }.event-tree-control { color:#777; }.event-card { min-width:0; display:flex; flex-direction:column; gap:4px; padding:7px 10px; border-left:3px solid var(--model); border-radius:5px; background:#f2edf7; }.event-row--input .event-card { border-color:var(--input); background:#eaf7f0; }.event-row--tools .event-card { border-color:var(--tools); background:#fff4e6; }.event-card b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }.event-card small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#777b85; font-size:9px; }.event-duration { text-align:right; color:#777b85; font:9px ui-monospace,SFMono-Regular,monospace; }
 .trace-inspector { border-left:1px solid var(--line); }.trace-inspector nav { display:flex; overflow-x:auto; padding:0 8px; border-bottom:1px solid var(--line); }.trace-inspector nav button { padding:10px 7px 8px; border:0; border-bottom:2px solid transparent; background:transparent; color:#7b7e87; font-size:9px; cursor:pointer; }.trace-inspector nav button.active { color:#684a98; border-color:#7b5ab4; }
 .inspector-body { min-height:0; flex:1; overflow:auto; padding:13px; }.inspector-body dl { display:grid; grid-template-columns:82px 1fr; gap:10px 8px; margin:0; font-size:10px; }.inspector-body dt { color:#8a8d96; }.inspector-body dd { min-width:0; margin:0; overflow-wrap:anywhere; color:#32333a; }.inspector-body pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; font:10px/1.55 ui-monospace,SFMono-Regular,monospace; color:#34353b; }
@@ -780,9 +802,10 @@ function base64Bytes(value: string): Uint8Array {
 .lane-track:first-child { margin-top:4px; }
 .lane-track>span { display:flex; align-items:center; justify-content:flex-end; padding-right:4px; border-right:1px solid var(--line); font-size:10px; }
 .lane-track>div { height:14px; border-left:0; background:transparent; }
-.lane-dot { top:3px; height:8px; min-width:2px; border-radius:1px; opacity:.86; }
-.lane-dot--model { background:var(--model); }
-.lane-dot:hover { opacity:1; box-shadow:0 0 0 1px #fff,0 0 0 2px #477bea; }
+.lane-dot { top:0; height:14px; min-width:6px; opacity:.86; }
+.lane-dot::after { inset:3px 0; border-radius:1px; }
+.lane-dot:hover,.lane-dot:focus-visible { opacity:1; outline:0; }
+.lane-dot:hover::after,.lane-dot:focus-visible::after { box-shadow:0 0 0 1px #fff,0 0 0 2px #477bea; }
 .event-list { flex:1; padding:0; background:#fff; }
 .event-row { min-height:32px; grid-template-columns:66px 118px minmax(220px,1fr) 92px 66px; padding:0 8px; border-bottom:1px solid var(--line-soft); }
 .event-row:hover { background:#fafafa; }

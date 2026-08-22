@@ -243,6 +243,8 @@ describe("scheduler management panel", () => {
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
     expect(await view.findByText("定时任务管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    const traceMenuButton = view.getByText("Trace 可观测", { selector: ".ta-system-menu-text" }).closest("button");
+    expect(traceMenuButton?.querySelector(".lucide-waypoints")).toBeTruthy();
     expect(view.getByTitle("XXL-JOB 定时任务管理")).toBeTruthy();
     await fireEvent.click(view.getByText("运行管理", { selector: ".ta-system-menu-text" }));
 
