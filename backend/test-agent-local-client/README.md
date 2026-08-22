@@ -29,7 +29,14 @@ Java 21 可执行客户端仅交付给麒麟 ARM64/aarch64 + glibc 的登录用�
 
 客户端监管的进程身份始终以 PID、权威启动时间、可执行文件和参数共同判定。若持久化 PID 已退出，即使原端口
 后来被其它健康进程占用，也只清理本客户端的过期记录，绝不停止或接管该陌生进程；下一次启动按既有受控端口
-探测跳过占用端口并选择空闲端口，避免陈旧状态永久阻断自动恢复。
+探测跳过占用端口并选择空闲端口，避免陈旧状态永久阻断自动恢复。开发机同时运行服务器 OpenCode 时，客户端
+必须使用不重叠的端口池，避免两个健康进程共占一个端口后把本地工作区请求路由到服务器目录。客户端启动受管
+OpenCode 时固定设置 `OPENCODE_DISABLE_MODELS_FETCH=true`，模型目录只读取随企业包和公共配置下发的事实源，
+不在冷启动阶段访问 `models.dev`。
+
+客户端到本机 OpenCode 的 loopback HTTP 请求固定使用 HTTP/1.1。Java 25 默认协商的明文 HTTP/2 upgrade
+会让 OpenCode 1.18.4 的部分 POST 请求停在请求体阶段，表现为工作区可浏览但对话无响应；该约束由
+`LocalClientHttpTransportTest` 覆盖，不得恢复为 `HttpClient` 默认版本选择。
 
 版本使用北京时间 `yyyyMMddHHmmss` 的 14 位字符串。稳定 Shell 只原子切换整个 release；候选 JAR 先由目标
 JDK 自检，下载后先验签 manifest，再核对可信 Host/相对路径、大小和 SHA-256。更新准备完成后仍须等待服务端
