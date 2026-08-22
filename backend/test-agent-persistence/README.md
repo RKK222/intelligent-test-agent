@@ -304,6 +304,8 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 `docs/deployment/database.md`。
 灰度名单由 `V20260817193414__local_client_rollout_users_create.sql` 创建，启用使用 MyBatis XML 幂等 upsert，
 移出只更新 `enabled=false` 以保留操作人和时间；migration 不预置任何用户。
+`LocalClientInstanceRow.selfUpdateSupported` 是原始 `boolean`，构造器映射固定使用 MyBatis `_boolean` 别名；
+`MyBatisLocalClientInstanceRepositoryIntegrationTest` 覆盖按实例、按用户和全量查询，防止包装类型反射调用再次导致客户端注册后断线。
 
 `LocalClientVersionMapper.xml` / `MyBatisLocalClientVersionRepository` 保存受签名 release、artifact、全局/用户
 策略、rollout 快照与 update attempt；所有关系型 SQL 均在 MyBatis XML。runtime 的独立短事务门面把 attempt 终态 CAS 与

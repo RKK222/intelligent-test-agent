@@ -12713,3 +12713,24 @@
 
 - 两类引用保存反馈的最终浏览器层级高于配置弹层；应用资产为蓝色、自动化为紫色；管理员修改自动化别名并保存后，别名随应用级共享 generation 和 JSONC 对账生效。使用 `.env.test`、`test` profile 和本地 ClickHouse helper 重启，backend health/readiness 为 UP，frontend 返回 200，manager 对用户 OpenCode 进程核验为 HEALTHY。
 - 本次变更涉及兼容 API 字段和 PostgreSQL migration，不新增事件 payload、Run 上下文、部署节点、性能通路或额外权限；未修改 `.env*`、generated SDK、OpenCode 源码和未跟踪 `.reasonix/`。
+
+## 2026-08-22 - 修复本地客户端实例 MyBatis 原始布尔映射
+
+### Why
+
+- macOS 客户端 enroll 后，后台读取 `local_client_instances.self_update_supported` 时，MyBatis 将 `boolean` 别名解析为 `Boolean`，无法调用 `LocalClientInstanceRow` 的原始类型 `boolean` 构造器，WebSocket 随即关闭并显示“客户端内部错误”。
+
+### What
+
+- 将 `LocalClientMapper.xml` 的 `self_update_supported` 构造映射改为项目既有的 `_boolean` 原始类型别名。
+- 新增 `MyBatisLocalClientInstanceRepositoryIntegrationTest`，覆盖按实例、按用户和全量查询，并同步 persistence README。
+
+### How
+
+- 修复前测试稳定复现生产同款 `NoSuchMethodException`；修复后聚焦测试通过，完整 persistence reactor 共 360 项通过、20 项按既有条件跳过。
+- 使用 JDK 25、根目录 `.env.test`、`test` profile 和本地 ClickHouse helper 重新构建并重启 backend、opencode-manager 与 frontend，客户端 PID 46962 自动恢复到后端 8080 的 `ESTABLISHED` 连接。
+
+### Result
+
+- backend health/readiness 为 UP、frontend 3000 返回 200、CORS 正常；后台记录 `local_client_connected ... generation=2`，未再出现 `LocalClientInstanceRow` 映射异常。
+- 不涉及 API、事件、数据库结构/Flyway、性能、安全、环境文件、generated SDK 或 OpenCode 源码；未新增部署节点。

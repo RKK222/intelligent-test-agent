@@ -28,7 +28,7 @@
             <arg column="opencode_version" javaType="java.lang.String"/>
             <arg column="launcher_version" javaType="java.lang.String"/>
             <arg column="self_update_capabilities" javaType="java.lang.String"/>
-            <arg column="self_update_supported" javaType="boolean"/>
+            <arg column="self_update_supported" javaType="_boolean"/>
             <arg column="last_update_status" javaType="java.lang.String"/>
             <arg column="last_update_target_version" javaType="java.lang.String"/>
             <arg column="last_update_at" javaType="java.time.Instant"/>
