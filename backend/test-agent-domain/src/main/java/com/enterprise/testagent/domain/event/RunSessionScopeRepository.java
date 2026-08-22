@@ -33,4 +33,11 @@ public interface RunSessionScopeRepository {
      * 查询当前 Run scope 中的单个 session。
      */
     Optional<RunSessionScopeSession> findSession(RunId runId, String sessionId);
+
+    /**
+     * 按 OpenCode session 反查最近一次平台 Run，用于插件事件补齐平台相关性。
+     */
+    default Optional<RunSessionScopeSession> findLatestBySessionId(String sessionId) {
+        return Optional.empty();
+    }
 }

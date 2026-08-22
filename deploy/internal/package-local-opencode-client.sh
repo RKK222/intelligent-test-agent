@@ -141,9 +141,12 @@ normalize_opencode() {
   executable="$(find "${work}/extract" -type f -name opencode | sort | head -n 1)"
   [[ -n "${executable}" ]] || { echo "OpenCode archive does not contain the opencode executable" >&2; exit 1; }
   stage="${work}/stage"
-  mkdir -p "${stage}/opencode/bin"
+  mkdir -p "${stage}/opencode/bin" "${stage}/opencode/plugins"
   cp -a "${executable}" "${stage}/opencode/bin/opencode"
   chmod 0755 "${stage}/opencode/bin/opencode"
+  cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
+    "${stage}/opencode/plugins/test-agent-observability.mjs"
+  chmod 0644 "${stage}/opencode/plugins/test-agent-observability.mjs"
   if [[ -f "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" ]]; then
     cp "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" "${stage}/opencode/LICENSE"
   fi

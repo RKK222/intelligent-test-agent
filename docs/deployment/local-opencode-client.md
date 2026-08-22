@@ -245,3 +245,8 @@ enroll 会交互提示统一认证号和隐藏 Client key；只在用户本机�
 ## 8. 数据库与真实现场闸门
 
 本手册的文件、Nginx、首次 enroll 和 WSS/实例检查不替代数据库准入。发布前仍必须按照 [database.md](database.md) 对每套已知真实 PostgreSQL 历史留存 flyway_schema_history 的 version/checksum/success，验证升级到当前 HEAD，并检查两条固定 migration 在源码、构建输出、发布 ZIP 和安装后 backend/lib/test-agent-persistence-*.jar 中的字节。未完成真实 PostgreSQL 升级或真实麒麟 ARM64 glibc 全链路测试时，它们必须继续标记为发布闸门，不能表述为已通过。
+
+Observability 现场验收还必须确认 DEB 的受控 release 包含共享插件，客户端注册 capability
+`OPENCODE_OBSERVABILITY_V1`，对话期间 WSS 没有 Trace 上传，空闲 3 秒后才出现单在途分片。断网后 spool 保留，重连按
+服务器 watermark 续传；只有匹配 ACK 后文件才删除。空间不足时客户端必须继续对话并报告 degraded/incomplete。不得通过
+清理用户 spool、调高超过 1 MiB/s 的速率或降低 3 秒空闲门槛来使验收表面通过。

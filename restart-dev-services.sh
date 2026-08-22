@@ -602,7 +602,7 @@ bundled_local_opencode_bin() {
   return 0
 }
 
-opencode_bin() {
+raw_opencode_bin() {
   if [[ -n "${TEST_AGENT_OPENCODE_BIN:-}" ]]; then
     echo "${TEST_AGENT_OPENCODE_BIN}"
     return
@@ -618,6 +618,74 @@ opencode_bin() {
     return
   fi
   command -v opencode || true
+}
+
+opencode_runtime_dependencies_complete() {
+  local node_modules="$1" dependency
+  for dependency in "@opencode-ai/plugin" "@opencode-ai/sdk" "effect" "zod"; do
+    [[ -e "${node_modules}/${dependency}" ]] || return 1
+  done
+}
+
+# 开发环境也必须经过与生产 worker 相同的 launcher，避免本地联调绕过 Observability 插件。
+# 运行目录位于 .tmp；优先复用已经存在的依赖树，缺失时才按锁文件安装固定版本。
+prepare_observability_opencode_runtime() {
+  local official_bin runtime_root launcher_bin version dependency_source candidate
+  official_bin="$(raw_opencode_bin)"
+  [[ -n "${official_bin}" && -x "${official_bin}" ]] || return 1
+
+  # 已经是完整企业运行时 launcher 时直接复用，避免嵌套注入同一插件。
+  runtime_root="$(cd "$(dirname "${official_bin}")/.." 2>/dev/null && pwd -P || true)"
+  if [[ -n "${runtime_root}" \
+      && -f "${runtime_root}/opencode-observability-plugin.mjs" \
+      && -x "${runtime_root}/bin/opencode-official" ]]; then
+    echo "${official_bin}"
+    return
+  fi
+
+  runtime_root="${LOG_DIR}/opencode-observability-runtime"
+  launcher_bin="${runtime_root}/bin/opencode"
+  mkdir -p "${runtime_root}/bin"
+  install -m 0755 "${ROOT_DIR}/deploy/internal/opencode-official-launcher.mjs" "${launcher_bin}"
+  install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
+    "${runtime_root}/opencode-observability-plugin.mjs"
+  install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" \
+    "${runtime_root}/package.json"
+  install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \
+    "${runtime_root}/package-lock.json"
+  install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" \
+    "${runtime_root}/opencode-runtime.gitignore"
+  version="$("${official_bin}" --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+  [[ "${version}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+ ]] || version="1.18.4"
+  printf '%s\n' "${version}" >"${runtime_root}/VERSION"
+  rm -f "${runtime_root}/bin/opencode-official"
+  ln -s "${official_bin}" "${runtime_root}/bin/opencode-official"
+
+  if ! opencode_runtime_dependencies_complete "${runtime_root}/node_modules"; then
+    dependency_source=""
+    for candidate in \
+      "${ROOT_DIR}/node_modules" \
+      "${ROOT_DIR}/deploy/internal/dist/programs/opencode/node_modules" \
+      "${SYS_DATA_ROOT_DIR}/agent-opencode/.config/opencode/node_modules"; do
+      if opencode_runtime_dependencies_complete "${candidate}"; then
+        dependency_source="${candidate}"
+        break
+      fi
+    done
+    if [[ -n "${dependency_source}" ]]; then
+      rm -rf "${runtime_root}/node_modules"
+      ln -s "${dependency_source}" "${runtime_root}/node_modules"
+    else
+      require_command npm
+      # stdout 由 opencode_bin 的命令替换接收，只允许最终可执行文件路径写入 stdout。
+      npm ci --prefix "${runtime_root}" --ignore-scripts --no-audit --no-fund >&2
+    fi
+  fi
+  echo "${launcher_bin}"
+}
+
+opencode_bin() {
+  prepare_observability_opencode_runtime
 }
 
 # 只清理脚本管理端口上的 opencode serve，避免误杀其他 opencode 客户端。

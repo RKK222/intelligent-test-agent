@@ -18,6 +18,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** OpenCode 只访问此 loopback 中继并持有随机本地 token；平台模型 grant 由中继内存转发。 */
 final class LocalModelRelay implements AutoCloseable {
@@ -31,6 +33,8 @@ final class LocalModelRelay implements AutoCloseable {
     private final HttpServer server;
     private final ExecutorService executor;
     private final AtomicReference<String> modelGrant = new AtomicReference<>();
+    private final AtomicInteger activeRequests = new AtomicInteger();
+    private final AtomicLong lastActivityNanos = new AtomicLong(System.nanoTime());
     private final String localToken = generateToken();
 
     LocalModelRelay(LocalClientConfiguration configuration) throws IOException {
@@ -64,7 +68,17 @@ final class LocalModelRelay implements AutoCloseable {
         modelGrant.set(null);
     }
 
+    boolean active() {
+        return activeRequests.get() > 0;
+    }
+
+    long lastActivityNanos() {
+        return lastActivityNanos.get();
+    }
+
     private void handle(HttpExchange exchange) throws IOException {
+        activeRequests.incrementAndGet();
+        lastActivityNanos.set(System.nanoTime());
         try (exchange) {
             if (!localAuthMatches(exchange.getRequestHeaders().getFirst("Authorization"))) {
                 writeError(exchange, 401, "local model token invalid");
@@ -100,6 +114,9 @@ final class LocalModelRelay implements AutoCloseable {
             writeErrorIfPossible(exchange, 503, "model relay interrupted");
         } catch (Exception exception) {
             writeErrorIfPossible(exchange, 502, "model relay upstream failed");
+        } finally {
+            lastActivityNanos.set(System.nanoTime());
+            activeRequests.decrementAndGet();
         }
     }
 

@@ -1565,6 +1565,80 @@ export type AnalyticsCapabilities = {
   activeUsers: number;
   rows: AnalyticsCapabilityUsage[];
   freshness: AnalyticsFreshness;
+  source?: "OPENCODE_PLUGIN" | "LEGACY_RUNEVENT" | string;
+  coverageStartAt?: string | null;
+  completeThrough?: string | null;
+  rolloutCompleteness?: number | null;
+};
+
+/** Trace 目录仅含可查询元数据；prompt/reasoning/tool payload 只由单条 events 接口返回。 */
+export type TraceCatalog = {
+  traceId: string;
+  userId: string;
+  username: string;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+  runtimeKind: string;
+  source: string;
+  processId?: string | null;
+  clientInstanceId?: string | null;
+  backendProcessId: string;
+  linuxServerId: string;
+  sessionId?: string | null;
+  runId?: string | null;
+  agentId?: string | null;
+  status: string;
+  archiveStatus: string;
+  startedAt: string;
+  updatedAt: string;
+  coverageStartAt: string;
+  completeThrough: number;
+  eventCount: number;
+  archivedBytes: number;
+  droppedCount: number;
+  pendingChunks: number;
+  complete: boolean;
+  redacted: boolean;
+};
+
+export type TraceQueryParams = {
+  startTime?: string;
+  endTime?: string;
+  user?: string;
+  organization?: string;
+  agentId?: string;
+  skill?: string;
+  tool?: string;
+  status?: string;
+  traceId?: string;
+  runId?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+export type TraceRawEvent = {
+  schemaVersion: string;
+  eventId: string;
+  traceId: string;
+  type: string;
+  timestamp: string;
+  globalSequence: number;
+  sessionSequence: number;
+  sessionId: string;
+  runId?: string | null;
+  turnId?: string | null;
+  stepId?: string | null;
+  messageId?: string | null;
+  callId?: string | null;
+  parentId?: string | null;
+  payload?: Record<string, unknown> | null;
+};
+
+export type TraceRawEventPage = {
+  items: TraceRawEvent[];
+  completeThrough: number;
+  complete: boolean;
 };
 
 export type AnalyticsOverview = {

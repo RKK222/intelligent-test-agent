@@ -4391,6 +4391,40 @@ JSON-RPC 入口，不使用平台 `ApiResponse` envelope，也不接受用户登
 请求/响应在通用 API 日志中只记录 JSON-RPC method、id、是否有 params/result/error；Authorization、相对
 路径、写入内容、读取结果、Agent/Skill 正文和 grant 均不得进入日志。
 
+# OpenCode Observability 与 Trace API
+
+运行态 Agent、Skill、Tool 事实由同一份 OpenCode Observability 插件采集，进入独立 telemetry stream；不得写入
+对话 RunEvent、用户 SSE 或应用日志。插件启用前不回填历史。服务端插件入口为：
+
+| Method | Path | 调用方与结果 | 约束 |
+|---|---|---|---|
+| `POST` | `/api/internal/agent/opencode-observability/v1/events` | 服务端 OpenCode 插件提交 `PluginBatch`，返回每个 Trace 的 `TraceAck` | 只接受短期 `Bearer` 专用令牌和 `X-Test-Agent-Observability-Generation`；令牌绑定用户、进程、服务器、generation 与过期时间。 |
+| `PUT` | `/api/internal/agent/opencode-observability/v1/traces/{traceId}/chunks/{sequence}` | 归档 owner Java 接收其它 Java 转发的本地分片，返回相同 `TraceAck` | 只接受既有 Java 控制面令牌；路径序号必须等于 `firstSequence`，请求只携带 opaque ID、摘要和 Base64 数据，禁止路径。相同序号范围与 SHA-256 重传返回幂等 ACK。 |
+
+`PluginBatch` 包含 `schemaVersion=1.0`、`runtime(kind,generation,processId,serverId,clientInstanceId)`、
+`coverageStartAt`、`droppedCount`、`complete` 和追加式 `events[]`。事件必须携带稳定 `eventId/traceId/globalSequence`
+及可用的 Session 序号和父子关联 ID。Skill 名称只取实际调用的 `args.name` 或 `metadata.name`；同一调用按
+`callId` 唯一计数。`TraceAck` 返回序号范围、SHA-256、内容长度、`completeThrough`、重复标记、归档状态和时间。
+子会话以 OpenCode 1.18.4 `session.created.properties.info.parentID`（兼容顶层 `parentID/parentId`）继承根会话 Trace ID，服务端使用既有 Run session scope 按 OpenCode session 反查并
+补齐平台 `runId`；反查结果必须属于令牌用户，不能信任客户端提交路径或跨用户 Run 相关性。
+
+超级管理员使用独立 Trace 管理接口：
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/api/internal/platform/traces` | 按 ISO 时间、用户、组织、Agent、Skill、Tool、状态、Trace ID、Run ID 分页筛选目录。 |
+| `GET` | `/api/internal/platform/traces/{traceId}` | 返回一条 Trace 的目录、覆盖起点、归档/积压/丢弃和完整度元数据。 |
+| `GET` | `/api/internal/platform/traces/{traceId}/events?afterSequence=0&limit=200` | 从冻结的归档节点读取正文事件；正文已归档后不依赖本地客户端在线。 |
+| `GET` | `/api/internal/platform/traces/{traceId}/download` | 下载该 Trace 的完整 `application/gzip` 压缩 NDJSON；不提供批量正文导出。 |
+
+四个管理接口均由后端强制 `SUPER_ADMIN`，不能只依赖菜单隐藏。正文查看、下载和失败尝试都写安全审计；审计不含正文、
+物理路径或凭据。归档 owner 在首次写入时冻结，跨 Java 读取只允许复用 `BackendJavaRouteResolver` 与
+`BackendHttpForwarder`；owner 不可用返回 `TRACE_CONTENT_UNAVAILABLE`，禁止扫描或本机降级。
+
+运营能力响应 additive 增加 `source=OPENCODE_PLUGIN`、`coverageStartAt`、`completeThrough` 与
+`rolloutCompleteness`。查询用 `eventId/runId/callId` 幂等去重；同一调用已有插件事实时忽略旧 RunEvent 推导事实，
+避免 Skill/Agent/Tool 双计数。登录和反馈等非 OpenCode 运行态指标继续使用现有业务链路。
+
 # TCDS 需求导入（同源页面）
 
 > 本节接口由受登录守卫保护的独立同源入口 `/workspace-requirement-import/` 使用。浏览器不接收 TCDS token、文档 URL、物理根路径或后端主机地址。

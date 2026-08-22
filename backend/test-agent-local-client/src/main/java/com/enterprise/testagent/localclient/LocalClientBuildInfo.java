@@ -16,6 +16,7 @@ public record LocalClientBuildInfo(
 
     public static final String LAUNCHER_VERSION = "1";
     public static final String SELF_UPDATE_CAPABILITY = "SELF_UPDATE_V1";
+    public static final String OBSERVABILITY_CAPABILITY = "OPENCODE_OBSERVABILITY_V1";
     private static final String DEVELOPMENT_VERSION = "0.1.0-dev";
     private static final String MANIFEST_VERSION_ATTRIBUTE = "Local-Client-Version";
 
@@ -40,7 +41,7 @@ public record LocalClientBuildInfo(
         return new LocalClientBuildInfo(
                 managedVersion,
                 LAUNCHER_VERSION,
-                List.of(SELF_UPDATE_CAPABILITY),
+                List.of(SELF_UPDATE_CAPABILITY, OBSERVABILITY_CAPABILITY),
                 true);
     }
 

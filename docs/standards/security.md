@@ -97,6 +97,16 @@ Token 校验流程：
 4. ClickHouse 使用独立最小权限账号，端口只向平台 Java 节点开放；密码从受控环境配置注入，不得出现在仓库、日志、错误、URL、前端构建物或普通运维命令历史。离线包包含随机密码时按 `0600` 密钥交付物管理。
 5. 用户与组织归属按事件发生时快照保存；历史回填无法恢复事件时归属时，使用当前主数据并显式标记 `CURRENT_ORG_BACKFILL`。页面和导出不得把这种近似归因伪装成历史精确快照。
 
+## OpenCode Trace 正文安全
+
+1. prompt、reasoning、用户/assistant 正文和 Tool/Skill 输入输出只允许进入服务器不可变 Trace 归档；PostgreSQL、ClickHouse、Redis、RunEvent、应用日志和审计正文均不得保存。ClickHouse 只保留目录与 span 元数据。
+2. 插件在进入服务端或本地 spool 前必须递归脱敏 Authorization、Cookie、私钥、JWT、云密钥及明显的 secret/env 赋值；二进制只记录类型、大小、SHA-256 和既有内容引用，不复制正文。脱敏失败按不完整处理，不能把原文降级写日志。
+3. 服务端插件令牌必须短期且绑定用户、进程、服务器、generation 和 expiry，不得复用 manager/platform token。本地插件只持有随机 loopback relay token，与模型 relay grant 隔离，不能直接持有平台凭据或操作 WSS。
+4. Trace 归档路径只能由服务器从严格校验的 opaque ID 生成；拒绝客户端路径、分隔符和目录穿越。首次接收冻结 owner 节点，跨 Java 只复用公共 resolver/forwarder，不扫描路由快照、不本机降级。
+5. Trace 列表、详情、正文和下载必须由后端强制 `SUPER_ADMIN`。每次正文查看、单条下载和失败尝试记录 actor、目标用户、Trace、动作、结果、时间和请求 traceId；审计不记录正文、摘要正文、物理路径或凭据。不提供批量正文导出。
+6. 服务端插件只使用绑定用户、进程、服务器、generation 和过期时间的专用 HMAC 令牌；TTL 可配置，默认 7 天且只允许 1 分钟至 30 天。令牌过期、进程重启或数据库 generation 改变都必须拒绝，不能降级接受普通平台 Token。
+7. 本地未确认 spool 使用用户私有目录和原子文件，服务器 ACK 前不得删除、按时间清理或显示上传成功。空间/队列耗尽时停止采集并标记 `INCOMPLETE`，优先保证对话；禁止丢弃未上传数据后伪造完整状态。
+
 ## 会话协作分享安全
 
 1. 分享链接必须使用至少 256 位安全随机 `shareId`，但 shareId 不是登录凭据。每个请求都必须先校验真实 Bearer Token 对应的有效 `AuthPrincipal`，再校验所属人/成员、分享状态、有效期、版本和精确 Session/Workspace；禁止匿名访问、仅凭 URL 访问或把 shareId 写入 Cookie/本地持久化认证状态。

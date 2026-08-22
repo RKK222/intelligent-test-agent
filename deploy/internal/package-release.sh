@@ -898,6 +898,7 @@ plan_release_components() {
     deploy/internal/opencode-node-runtime.package.json \
     deploy/internal/opencode-node-runtime.package-lock.json \
     deploy/internal/opencode-official-launcher.mjs \
+    deploy/internal/opencode-observability-plugin.mjs \
     deploy/internal/opencode-runtime.gitignore \
     deploy/internal/codex-whitebox-mcp-launcher.sh \
     deploy/internal/codex-whitebox-requirements.toml \
@@ -913,6 +914,7 @@ plan_release_components() {
     backend/test-agent-local-client-protocol/pom.xml \
     backend/test-agent-local-client-protocol/src/main \
     deploy/internal/package-local-opencode-client.sh \
+    deploy/internal/opencode-observability-plugin.mjs \
     deploy/internal/local-opencode-client/install.sh.template \
     deploy/internal/archive-common.sh \
     frontend/apps/agent-web/src/assets/pets/radar-bunny.png \

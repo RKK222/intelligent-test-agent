@@ -86,6 +86,8 @@ public interface ClickHouseAnalyticsMapper {
 
     List<AnalyticsModels.CapabilityUsageRow> capabilityUsage(@Param("filter") AnalyticsModels.Filter filter);
 
+    AnalyticsModels.CapabilityCoverage capabilityCoverage(@Param("filter") AnalyticsModels.Filter filter);
+
     List<com.enterprise.testagent.persistence.mybatis.AnalyticsOrganizationUserCountRow> organizationUserCounts(
             @Param("dimension") String dimension,
             @Param("filter") AnalyticsModels.Filter filter);

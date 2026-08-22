@@ -285,3 +285,22 @@ cd /data/0709/test-agent-clickhouse-offline
 `127.0.0.1:18123`，数据保存在 `test-agent-clickhouse-dev-data-v1` Docker volume。随机密码、自定义用户配置和
 后端 JDBC dotenv 位于 `.tmp/dev-services/clickhouse`，权限为 `0600`，不会写入 `.env.test` 或仓库。可单独执行
 `tools/clickhouse-dev-services.sh status|stop|restart`；`stop` 只停止容器，不删除数据卷。
+
+## 11. OpenCode 插件事实与 Trace 目录
+
+发布包包含 `V20260822174420__analytics_trace_catalog_create_tables.sql`。启动期 checksum migrator 会创建无 TTL 的
+Trace catalog/span 和插件 capability facts；ClickHouse 只保存筛选、泳道、父子关系、状态、token 与耗时元数据，
+不得保存 prompt、reasoning、工具参数/结果或任何归档路径。Skill/Agent/Tool 查询优先插件事实，并按
+`event_id`、`run_id + call_id` 幂等；旧 RunEvent 事实只补足插件覆盖起点以前或未覆盖的调用。
+
+Trace 正文写在归档 owner 后端的现有持久化数据卷，不写 ClickHouse。无自动 TTL 时运维必须监控：
+
+- `testagent.trace.archive.write.failures`；
+- `testagent.trace.events.dropped`；
+- `testagent.trace.archive.backlog`；
+- `testagent.trace.archive.last.success.epoch.seconds`；
+- `testagent.trace.archive.disk.usable.bytes`。
+
+本地验收使用 `./restart-dev-services.sh --profile test --env-file .env.test --with-clickhouse`；不得切换到其它 PostgreSQL
+dotenv。验证 migration 后还要检查 `analytics_trace_*` 和 `analytics_plugin_capability_facts` 均没有 raw/payload/path
+正文列，并执行插件事实覆盖同 callId 旧事实的集成测试。

@@ -26,6 +26,12 @@ public final class ClickHouseSchemaMigrator implements InitializingBean {
     static final String VERSION = "20260813150000";
     static final String DESCRIPTION = "analytics_activity_facts_create_tables";
     static final String SCRIPT = "db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql";
+    private static final java.util.List<Migration> MIGRATIONS = java.util.List.of(
+            new Migration(VERSION, DESCRIPTION, SCRIPT),
+            new Migration(
+                    "20260822174420",
+                    "analytics_trace_catalog_create_tables",
+                    "db/clickhouse/V20260822174420__analytics_trace_catalog_create_tables.sql"));
 
     private final DataSource dataSource;
 
@@ -39,19 +45,21 @@ public final class ClickHouseSchemaMigrator implements InitializingBean {
     }
 
     public void migrate() throws SQLException, IOException {
-        ClassPathResource resource = new ClassPathResource(SCRIPT);
-        String checksum = sha256(resource.getContentAsByteArray());
         try (Connection connection = dataSource.getConnection()) {
             createHistoryTable(connection);
-            String appliedChecksum = appliedChecksum(connection);
-            if (appliedChecksum != null) {
-                if (!checksum.equals(appliedChecksum)) {
-                    throw new IllegalStateException("ClickHouse migration checksum 不一致: " + VERSION);
+            for (Migration migration : MIGRATIONS) {
+                ClassPathResource resource = new ClassPathResource(migration.script());
+                String checksum = sha256(resource.getContentAsByteArray());
+                String appliedChecksum = appliedChecksum(connection, migration.version());
+                if (appliedChecksum != null) {
+                    if (!checksum.equals(appliedChecksum)) {
+                        throw new IllegalStateException("ClickHouse migration checksum 不一致: " + migration.version());
+                    }
+                    continue;
                 }
-                return;
+                ScriptUtils.executeSqlScript(connection, resource);
+                recordSuccess(connection, migration, checksum);
             }
-            ScriptUtils.executeSqlScript(connection, resource);
-            recordSuccess(connection, checksum);
         }
     }
 
@@ -66,27 +74,27 @@ public final class ClickHouseSchemaMigrator implements InitializingBean {
         }
     }
 
-    private String appliedChecksum(Connection connection) throws SQLException {
+    private String appliedChecksum(Connection connection, String version) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 select checksum from analytics_schema_history final
                 where version = ? and success = 1 limit 1
                 """)) {
-            statement.setString(1, VERSION);
+            statement.setString(1, version);
             try (ResultSet result = statement.executeQuery()) {
                 return result.next() ? result.getString(1) : null;
             }
         }
     }
 
-    private void recordSuccess(Connection connection, String checksum) throws SQLException {
+    private void recordSuccess(Connection connection, Migration migration, String checksum) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 insert into analytics_schema_history(
                     version, description, script, checksum, installed_on, success
                 ) values (?, ?, ?, ?, ?, 1)
                 """)) {
-            statement.setString(1, VERSION);
-            statement.setString(2, DESCRIPTION);
-            statement.setString(3, SCRIPT);
+            statement.setString(1, migration.version());
+            statement.setString(2, migration.description());
+            statement.setString(3, migration.script());
             statement.setString(4, checksum);
             statement.setObject(5, Instant.now());
             statement.executeUpdate();
@@ -99,5 +107,8 @@ public final class ClickHouseSchemaMigrator implements InitializingBean {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("当前 JRE 不支持 SHA-256", exception);
         }
+    }
+
+    private record Migration(String version, String description, String script) {
     }
 }

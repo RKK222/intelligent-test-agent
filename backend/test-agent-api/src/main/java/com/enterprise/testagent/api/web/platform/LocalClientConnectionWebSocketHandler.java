@@ -4,6 +4,9 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.user.UserRepository;
+import com.enterprise.testagent.domain.trace.TraceCatalogRepository;
+import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
 import com.enterprise.testagent.localclient.protocol.LocalClientFrame;
 import com.enterprise.testagent.localclient.protocol.LocalClientFrameCodec;
 import com.enterprise.testagent.localclient.protocol.LocalClientFrameType;
@@ -19,6 +22,11 @@ import com.enterprise.testagent.opencode.runtime.localclient.LocalClientUpdateCo
 import com.enterprise.testagent.opencode.runtime.localclient.LocalWorkspaceApplicationService;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStartupService;
+import com.enterprise.testagent.opencode.runtime.observability.OpencodeObservabilityModels;
+import com.enterprise.testagent.opencode.runtime.observability.TraceArchiveService;
+import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.system.management.localclient.LocalClientCredentialApplicationService;
 import java.time.Instant;
 import java.util.Map;
@@ -27,9 +35,11 @@ import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.Base64;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.reactive.socket.CloseStatus;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
@@ -57,6 +67,26 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
     private final LocalClientControlSecuritySettings securitySettings;
     private final LocalClientAuthenticationRateLimiter authenticationRateLimiter;
     private final LocalClientFrameCodec codec = new LocalClientFrameCodec();
+    private TraceArchiveService traceArchiveService;
+    private UserRepository userRepository;
+    private TraceCatalogRepository traceCatalogRepository;
+    private BackendHttpForwarder backendHttpForwarder;
+    private ManagerControlSettings managerSettings;
+
+    /** 方法注入保持既有 handler 单测构造器兼容，同时让生产连接具备 Trace 归档能力。 */
+    @Autowired
+    void setObservabilityServices(
+            TraceArchiveService traceArchiveService,
+            UserRepository userRepository,
+            TraceCatalogRepository traceCatalogRepository,
+            BackendHttpForwarder backendHttpForwarder,
+            ManagerControlSettings managerSettings) {
+        this.traceArchiveService = Objects.requireNonNull(traceArchiveService);
+        this.userRepository = Objects.requireNonNull(userRepository);
+        this.traceCatalogRepository = Objects.requireNonNull(traceCatalogRepository);
+        this.backendHttpForwarder = Objects.requireNonNull(backendHttpForwarder);
+        this.managerSettings = Objects.requireNonNull(managerSettings);
+    }
 
     public LocalClientConnectionWebSocketHandler(
             LocalClientCredentialApplicationService credentialService,
@@ -198,7 +228,10 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             registration.modelGrantFingerprint(),
                             frame.traceId(),
                             registration.selfUpdateSupported(),
-                            ConcurrentHashMap.newKeySet());
+                            payload.capabilities() != null
+                                    && payload.capabilities().contains("OPENCODE_OBSERVABILITY_V1"),
+                            ConcurrentHashMap.newKeySet(),
+                            new ConcurrentHashMap<>());
                     if (!stateRef.compareAndSet(null, state)) {
                         throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重复注册");
                     }
@@ -307,11 +340,202 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                         .then();
             }
             case WORKSPACE_REGISTER -> registerWorkspace(frame, outbound, closeSignal, state);
+            case OBSERVABILITY_BATCH -> declareObservabilityBatch(frame, state);
+            case TRACE_CHUNK_UPLOAD -> uploadTraceChunk(frame, outbound, closeSignal, state);
             case LIFECYCLE_RESULT, HTTP_RESPONSE, STREAM_OPEN, STREAM_CHUNK, STREAM_END,
                     FILE_RESPONSE, BINARY_CHUNK, ERROR -> acceptTunnelResponse(state, frame);
             default -> Mono.error(new PlatformException(
                     ErrorCode.VALIDATION_ERROR, "客户端发送了不允许的帧类型"));
         };
+    }
+
+    private Mono<Void> declareObservabilityBatch(LocalClientFrame frame, ConnectionState state) {
+        requireObservability(state);
+        LocalClientPayloads.ObservabilityBatch batch = codec.payload(
+                frame, LocalClientPayloads.ObservabilityBatch.class);
+        validateObservabilityCoordinates(
+                state, frame, batch.clientInstanceId(), batch.connectionGeneration(), batch.traceId());
+        if (state.traceDeclarations().size() >= 8
+                || batch.batchId() == null
+                || !batch.batchId().matches("obs_[a-f0-9]{32}")
+                || batch.runtimeGeneration() == null
+                || batch.runtimeGeneration().isBlank()
+                || batch.firstSequence() < 1
+                || batch.lastSequence() < batch.firstSequence()
+                || batch.contentLength() < 1
+                || batch.contentLength() > 256L * 1024L
+                || batch.sha256() == null
+                || !batch.sha256().matches("[a-f0-9]{64}")) {
+            return Mono.error(new PlatformException(ErrorCode.VALIDATION_ERROR, "Observability 分片声明无效"));
+        }
+        LocalClientPayloads.ObservabilityBatch previous = state.traceDeclarations()
+                .putIfAbsent(frame.requestId(), batch);
+        if (previous != null && !previous.equals(batch)) {
+            return Mono.error(new PlatformException(ErrorCode.CONFLICT, "Observability requestId 已被占用"));
+        }
+        return Mono.empty();
+    }
+
+    private Mono<Void> uploadTraceChunk(
+            LocalClientFrame frame,
+            Sinks.Many<LocalClientFrame> outbound,
+            Sinks.One<String> closeSignal,
+            ConnectionState state) {
+        requireObservability(state);
+        LocalClientPayloads.ObservabilityBatch declaration = state.traceDeclarations().get(frame.requestId());
+        LocalClientPayloads.TraceChunkUpload upload = codec.payload(
+                frame, LocalClientPayloads.TraceChunkUpload.class);
+        validateObservabilityCoordinates(
+                state, frame, upload.clientInstanceId(), upload.connectionGeneration(), upload.traceId());
+        if (declaration == null
+                || !declaration.batchId().equals(upload.batchId())
+                || declaration.firstSequence() != upload.firstSequence()
+                || declaration.lastSequence() != upload.lastSequence()
+                || !declaration.sha256().equals(upload.sha256())) {
+            return Mono.error(new PlatformException(ErrorCode.CONFLICT, "Trace 上传缺少匹配的批次声明"));
+        }
+        byte[] body;
+        try {
+            body = Base64.getDecoder().decode(upload.dataBase64());
+        } catch (IllegalArgumentException exception) {
+            return Mono.error(new PlatformException(ErrorCode.VALIDATION_ERROR, "Trace 分片 Base64 无效"));
+        }
+        if (body.length != declaration.contentLength()) {
+            return Mono.error(new PlatformException(ErrorCode.VALIDATION_ERROR, "Trace 分片长度与声明不一致"));
+        }
+        return Mono.fromCallable(() -> {
+                    var user = userRepository.findByUserId(state.userId())
+                            .filter(com.enterprise.testagent.domain.user.User::canLogin)
+                            .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHENTICATED, "本地客户端用户已停用"));
+                    var identity = new OpencodeObservabilityModels.IngestionIdentity(
+                            user, null, state.clientInstanceId().value(), declaration.runtimeGeneration());
+                    var runtime = new OpencodeObservabilityModels.RuntimeIdentity(
+                            declaration.runtimeKind(), declaration.runtimeGeneration(), null, null,
+                            state.clientInstanceId().value());
+                    return archiveLocalOrForward(
+                            identity,
+                            runtime,
+                            declaration.coverageStartAt(),
+                            declaration.droppedCount(),
+                            declaration.complete(),
+                            declaration.traceId(),
+                            declaration.firstSequence(),
+                            declaration.lastSequence(),
+                            declaration.sha256(),
+                            body);
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnNext(ack -> {
+                    state.traceDeclarations().remove(frame.requestId(), declaration);
+                    emit(outbound, new LocalClientFrame(
+                            LocalClientProtocol.VERSION,
+                            LocalClientFrameType.TRACE_CHUNK_ACK,
+                            frame.requestId(),
+                            frame.traceId(),
+                            state.generation(),
+                            codec.payload(new LocalClientPayloads.TraceChunkAck(
+                                    declaration.batchId(),
+                                    state.clientInstanceId().value(),
+                                    state.generation(),
+                                    ack.traceId(),
+                                    ack.firstSequence(),
+                                    ack.lastSequence(),
+                                    ack.sha256(),
+                                    ack.completeThrough(),
+                                    ack.archiveStatus(),
+                                    ack.archivedAt()))), closeSignal);
+                    emit(outbound, new LocalClientFrame(
+                            LocalClientProtocol.VERSION,
+                            LocalClientFrameType.TRACE_UPLOAD_WATERMARK,
+                            frame.requestId() + "_wm",
+                            frame.traceId(),
+                            state.generation(),
+                            codec.payload(new LocalClientPayloads.TraceUploadWatermark(
+                                    state.clientInstanceId().value(),
+                                    state.generation(),
+                                    ack.traceId(),
+                                    ack.completeThrough(),
+                                    Instant.now()))), closeSignal);
+                })
+                .doOnError(error -> {
+                    state.traceDeclarations().remove(frame.requestId(), declaration);
+                    emitRequestError(outbound, closeSignal, state, frame, error);
+                })
+                .onErrorResume(error -> Mono.empty())
+                .then();
+    }
+
+    /** 首次归档留在当前连接 Java；后续重连若落到其它 Java，统一转发到冻结的 owner。 */
+    private OpencodeObservabilityModels.TraceAck archiveLocalOrForward(
+            OpencodeObservabilityModels.IngestionIdentity identity,
+            OpencodeObservabilityModels.RuntimeIdentity runtime,
+            Instant coverageStartAt,
+            long droppedCount,
+            boolean complete,
+            String traceId,
+            long firstSequence,
+            long lastSequence,
+            String sha256,
+            byte[] body) {
+        var existing = traceCatalogRepository.find(traceId);
+        if (existing.isPresent()) {
+            BackendProcessId owner = new BackendProcessId(existing.get().backendProcessId());
+            if (!routeResolver.isCurrent(owner)) {
+                var backend = routeResolver.requireBackend(owner);
+                var request = new OpencodeObservabilityModels.InternalTraceChunk(
+                        identity.user().userId().value(),
+                        identity.clientInstanceId(),
+                        identity.generation(),
+                        runtime,
+                        coverageStartAt,
+                        droppedCount,
+                        complete,
+                        traceId,
+                        firstSequence,
+                        lastSequence,
+                        sha256,
+                        Base64.getEncoder().encodeToString(body));
+                return backendHttpForwarder.forwardSystemTyped(
+                        backend,
+                        "/api/internal/agent/opencode-observability/v1/traces/"
+                                + traceId + "/chunks/" + firstSequence,
+                        "PUT",
+                        request,
+                        new TypeReference<ApiResponse<OpencodeObservabilityModels.TraceAck>>() { },
+                        traceId,
+                        "Bearer " + managerSettings.token()).data();
+            }
+        }
+        return traceArchiveService.ingestLocalChunk(
+                identity,
+                runtime,
+                coverageStartAt,
+                droppedCount,
+                complete,
+                traceId,
+                firstSequence,
+                lastSequence,
+                sha256,
+                body);
+    }
+
+    private void validateObservabilityCoordinates(
+            ConnectionState state,
+            LocalClientFrame frame,
+            String clientInstanceId,
+            long connectionGeneration,
+            String traceId) {
+        if (!state.clientInstanceId().value().equals(clientInstanceId)
+                || state.generation() != connectionGeneration
+                || !frame.traceId().equals(traceId)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Observability 连接坐标已失效");
+        }
+    }
+
+    private void requireObservability(ConnectionState state) {
+        if (!state.observabilitySupported() || traceArchiveService == null || userRepository == null) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端未声明 OPENCODE_OBSERVABILITY_V1 能力");
+        }
     }
 
     /**
@@ -477,6 +701,20 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             String modelGrantFingerprint,
             String traceId,
             boolean selfUpdateSupported,
-            Set<String> workspaceRequestIds) {
+            boolean observabilitySupported,
+            Set<String> workspaceRequestIds,
+            Map<String, LocalClientPayloads.ObservabilityBatch> traceDeclarations) {
+
+        ConnectionState(
+                UserId userId,
+                LocalClientInstanceId clientInstanceId,
+                long generation,
+                String modelGrantFingerprint,
+                String traceId,
+                boolean selfUpdateSupported,
+                Set<String> workspaceRequestIds) {
+            this(userId, clientInstanceId, generation, modelGrantFingerprint, traceId,
+                    selfUpdateSupported, false, workspaceRequestIds, new ConcurrentHashMap<>());
+        }
     }
 }

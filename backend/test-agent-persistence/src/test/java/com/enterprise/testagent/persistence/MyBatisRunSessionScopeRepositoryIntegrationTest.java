@@ -113,6 +113,10 @@ class MyBatisRunSessionScopeRepositoryIntegrationTest {
                     assertThat(session.taskPartId()).isEqualTo("part_task");
                     assertThat(session.metadata()).containsEntry("agent", "build");
                 });
+        assertThat(repository.findLatestBySessionId("ses_child"))
+                .get()
+                .extracting(RunSessionScopeSession::runId)
+                .isEqualTo(runId);
     }
 
     private void seedRun() {

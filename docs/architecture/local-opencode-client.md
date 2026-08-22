@@ -74,7 +74,9 @@ SHA-256 摘要、掩码和版本；认证只比较摘要，普通查询不返回
 客户端从用户私有 `client.properties` 和权限为 `0600` 的 `client.key` 启动，命令行不接受 key。
 OpenCode 固定监听 `127.0.0.1`，端口在 4096–4195 的受控范围内选择并持久化。启动成功必须同时满足：
 进程仍存活、`ProcessHandle.startInstant` 可取得、loopback `/global/health` 成功。停止前同时核验 PID、
-权威启动时间、真实可执行文件和启动参数；PID 复用或身份无法确认时失败关闭。
+权威启动时间、真实可执行文件和启动参数；PID 复用或身份无法确认时失败关闭。已记录 PID 明确退出后只清理
+客户端自身的陈旧身份，不把同端口后来出现的健康进程视为本客户端进程，也不对其执行停止；后续启动跳过该
+占用端口并继续选择受控范围内的空闲端口。
 
 注册工作区时，持有连接的客户端执行 `toRealPath`、目录/读写权限和文件系统身份校验，后台再事务性创建
 Workspace 与 `local_client_workspaces` 绑定。后续 RPC 只接收 workspaceId、root digest 和相对路径。
@@ -97,7 +99,9 @@ Workspace ID，并重新下发 `workspace.registerRoot` 恢复客户端状态，
 注册结果时使用同一深链。URI 不携带本机绝对路径；前端通过带对象级归属校验的 Workspace API 解析逻辑 ID，切换为
 `LOCAL_CLIENT` 工作区语义后仍使用既有 `file-ws-route → ticket → /file/ws` 加载文件树，并关闭 Git、版本和物理路径
 复制入口。文件树调用客户端已实现的 `workspace.list` 普通目录操作，不调用服务端托管工作区专用的组合引用视图
-`workspace.view.list`。登录页的受控 `redirect` 会保留该同源深链查询参数。
+`workspace.view.list`。ticket 签发涉及的 MyBatis/Redis 同步校验在 `boundedElastic` 执行，不占用 WebFlux
+event-loop。工作台顶部直接复用平台 Workspace 列表展示已持久化的本地工作区，可按逻辑 ID 重开其它已注册目录，
+并可返回最近服务器应用工作区；浏览器不另存本机绝对路径。登录页的受控 `redirect` 会保留该同源深链查询参数。
 
 ## Session、Run 与夜间任务
 
@@ -155,6 +159,10 @@ SHA-256，便于审计复现，不记录提示词、文件正文或 grant。
 `protectedAgentExecution=true` 只表示可选择服务器受保护 Agent，不改变 `agentConfig=false`，前端不能仅凭
 在线状态推断。
 
+本地隧道构造的 `WebClient` 显式使用 generated SDK 对应的 Jackson 2 JSON codec，避免 Spring 7 默认
+Jackson 3 codec 无法反序列化 SDK `JsonNode`。SSE 的 `STREAM_OPEN` 与后续 body 由独立有界流转发；取得
+HTTP 响应对象不会取消后续事件，页面取消订阅时仍会沿既有隧道发送取消帧。
+
 ## 桌面托盘与资源约束
 
 macOS 和提供 Java SystemTray 的麒麟 ARM 桌面显示客户端托盘；不支持托盘或无图形会话时降级为后台服务，
@@ -166,3 +174,8 @@ macOS 和提供 Java SystemTray 的麒麟 ARM 桌面显示客户端托盘；不�
 托盘定时刷新只复制内存快照，状态不变时不重绘；OpenCode 状态复用原有 5 秒心跳结果，不新增健康探测。
 客户端日志由 JVM 自行滚动到 state 目录，导出限制为最多 20 个客户端日志、每文件末尾 10 MiB，明确排除
 密钥、配置、OpenCode 日志与工作区文件。
+
+Observability 使用独立 loopback relay token，不复用模型 grant。插件 hook 仅把必要引用放入有界队列，后台微任务脱敏和
+序列化；Java 以最低优先级单线程写未确认 spool。WSS 发送顺序固定为控制/模型/文件优先，Trace 只有在它们全部空闲至少
+3 秒后才允许单分片在途。ACK 丢失按相同摘要幂等重传，旧 connection generation 的上传与 ACK 失败关闭。服务器一旦归档，
+Trace 正文读取不依赖客户端在线。

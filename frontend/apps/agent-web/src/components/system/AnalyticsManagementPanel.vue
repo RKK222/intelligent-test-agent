@@ -130,6 +130,16 @@ const maxHeatmap = computed(() => Math.max(1, ...(heatmap.value?.points ?? []).m
 const trendGridStyle = computed(() => ({ "--ta-trend-columns": String(Math.max(timeseries.value.length, 1)) }));
 const capabilityRows = computed(() => (capabilitiesQuery.data.value?.rows ?? [])
   .filter(row => capabilityType.value === "ALL" || row.type === capabilityType.value));
+const capabilityCoverageText = computed(() => {
+  const value = capabilitiesQuery.data.value;
+  if (!value) return "正在读取插件覆盖口径";
+  const source = value.source === "OPENCODE_PLUGIN" ? "OpenCode 插件事实" : "旧 RunEvent 推导";
+  const start = value.coverageStartAt ? new Date(value.coverageStartAt).toLocaleString("zh-CN") : "暂无覆盖起点";
+  const completeThrough = value.completeThrough
+    ? new Date(value.completeThrough).toLocaleString("zh-CN")
+    : "尚无完整水位";
+  return `${source} · 覆盖 ${start} · 完整至 ${completeThrough} · Rollout ${formatRate(value.rolloutCompleteness)}`;
+});
 const freshnessText = computed(() => {
   const freshness = overview.value?.freshness;
   if (!freshness?.generatedAt) return "暂无统计时间";
@@ -351,6 +361,7 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
 
     <section v-else-if="activeTab === 'capabilities'" class="ta-panel">
       <div class="ta-panel-heading"><div><h3>Agent / Skill / Tool 使用率</h3><span>分母：{{ capabilitiesQuery.data.value?.activeUsers ?? 0 }} 个活跃用户</span></div><div class="ta-segmented"><button v-for="type in ['ALL', 'AGENT', 'SKILL', 'TOOL'] as CapabilityType[]" :key="type" :class="{ active: capabilityType === type }" @click="capabilityType = type">{{ type === 'ALL' ? '全部' : capabilityLabel(type) }}</button></div></div>
+      <p class="ta-capability-coverage">{{ capabilityCoverageText }}</p>
       <table class="ta-table"><thead><tr><th>类型</th><th>名称</th><th>使用率</th><th>使用用户</th><th>调用次数</th><th>成功</th><th>失败</th><th>未完成</th></tr></thead><tbody><tr v-for="row in capabilityRows" :key="`${row.type}-${row.name}`"><td><span class="ta-type">{{ capabilityLabel(row.type) }}</span></td><td>{{ row.name }}</td><td class="ta-rate">{{ formatRate(row.usageRate) }}</td><td>{{ row.userCount }}</td><td>{{ row.invocationCount }}</td><td>{{ row.succeededCount }}</td><td>{{ row.failedCount }}</td><td>{{ row.incompleteCount }}</td></tr></tbody></table>
     </section>
 
@@ -393,6 +404,7 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
 .ta-panel-heading { justify-content:space-between; gap:12px; margin-bottom:10px; }
 .ta-panel-heading h3 { margin:0; }
 .ta-panel-heading span { color:#737e8e; font-size:12px; }
+.ta-capability-coverage { margin:-2px 0 12px; padding:8px 10px; border:1px solid #e5e8ef; border-radius:8px; background:#f8f9fb; color:#626d7d; font-size:11px; }
 .ta-funnel { display:flex; flex-direction:column; align-items:center; gap:6px; min-height:168px; justify-content:center; }
 .ta-funnel-stage { display:flex; align-items:center; justify-content:space-between; height:45px; box-sizing:border-box; gap:8px; padding:0 22px; color:#fff; }
 .ta-funnel-stage.total { width:92%; background:#44546a; clip-path:polygon(0 0, 100% 0, 93% 100%, 7% 100%); border-radius:4px 4px 0 0; }

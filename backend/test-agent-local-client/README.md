@@ -27,6 +27,10 @@ Java 21 可执行客户端仅交付给麒麟 ARM64/aarch64 + glibc 的登录用�
 `clientInstanceId` 位于 release 目录外：配置目录为 `0700`、`credentials.properties` 为 `0600`，普通重启、
 更新、回退与自动回切均复用它们，且不会再次弹窗。
 
+客户端监管的进程身份始终以 PID、权威启动时间、可执行文件和参数共同判定。若持久化 PID 已退出，即使原端口
+后来被其它健康进程占用，也只清理本客户端的过期记录，绝不停止或接管该陌生进程；下一次启动按既有受控端口
+探测跳过占用端口并选择空闲端口，避免陈旧状态永久阻断自动恢复。
+
 版本使用北京时间 `yyyyMMddHHmmss` 的 14 位字符串。稳定 Shell 只原子切换整个 release；候选 JAR 先由目标
 JDK 自检，下载后先验签 manifest，再核对可信 Host/相对路径、大小和 SHA-256。更新准备完成后仍须等待服务端
 按 `commandId + clientInstanceId + generation` 复核策略；成功、失败、取消与自动回切都会回报持久化状态。网络
@@ -35,3 +39,18 @@ JDK 自检，下载后先验签 manifest，再核对可信 Host/相对路径、�
 
 正式制品由 `deploy/internal/package-local-opencode-client.sh` 与完整 JDK/OpenCode 压缩包一起生成，客户端本身
 通过 Maven Shade 输出 `test-agent-local-client.jar`。不支持 Windows、开机未登录即运行或稳定 Shell 自更新。
+原生桌面启动器显式传入安装包内 OpenCode 路径时，该路径优先于用户目录中旧版 `client.properties` 的
+`opencodeExecutable`，确保整包升级后始终使用同一 release 随附的 OpenCode 与插件；裸 JAR 和麒麟稳定启动器未传参数时
+仍读取配置文件。
+
+OpenCode 进程统一注入服务端相同的 `opencode-observability-plugin.mjs`。插件只向独立随机 token 保护的 loopback relay
+批量提交；relay 用最低优先级单线程顺序写入 state 目录的 `observability-spool`，不压缩、不逐事件 fsync，也不持有平台
+凭据。服务器校验并 ACK 精确 batch/Trace/序号/SHA-256 后才删除 `.ndjson + .json`；断网、重启和 connection generation
+切换均保留未确认分片。
+
+默认分片 256 KiB、单在途、空闲 3 秒后上传、1 MiB/s 上限、16 MiB 内存队列和 1 GiB spool。以下环境变量只能收紧
+吞吐/内存预算、关闭上传或延长等待，不能突破硬上限：`TEST_AGENT_OBSERVABILITY_CHUNK_BYTES`、
+`TEST_AGENT_OBSERVABILITY_MAX_IN_FLIGHT`（`0|1`）、`TEST_AGENT_OBSERVABILITY_UPLOAD_BYTES_PER_SECOND`、
+`TEST_AGENT_OBSERVABILITY_IDLE_MILLIS`、`TEST_AGENT_OBSERVABILITY_ACK_TIMEOUT_MILLIS`、
+`TEST_AGENT_OBSERVABILITY_SPOOL_MAX_BYTES`、`TEST_AGENT_OBSERVABILITY_MEMORY_QUEUE_MAX_BYTES`。对话、模型 relay、文件 RPC
+或控制操作活跃时不上传；队列/磁盘满只标记 degraded/incomplete，不阻塞聊天，也不自动删除未确认数据。

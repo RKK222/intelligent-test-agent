@@ -40,6 +40,10 @@ public class ApiTokenWebFilter implements WebFilter {
             "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer/ws";
     private static final String WORKSPACE_GIT_TOOL_PATH =
             "/api/internal/agent/opencode/workspace-git-tool";
+    private static final String OPENCODE_OBSERVABILITY_EVENTS_PATH =
+            "/api/internal/agent/opencode-observability/v1/events";
+    private static final String OPENCODE_OBSERVABILITY_TRACE_CHUNKS_PATH =
+            "/api/internal/agent/opencode-observability/v1/traces/";
     private static final String UI_TEST_TOOL_CONFIG_PATH =
             "/api/internal/agent/opencode/ui-test-tool/config";
     private static final String LOBEHUB_SSO_REDEEM_PATH =
@@ -93,6 +97,8 @@ public class ApiTokenWebFilter implements WebFilter {
                 || path.equals(PERSONAL_WORKSPACE_RELOCATION_TICKET_PATH)
                 || path.equals(PERSONAL_WORKSPACE_RELOCATION_WEB_SOCKET_PATH)
                 || path.equals(WORKSPACE_GIT_TOOL_PATH)
+                || path.equals(OPENCODE_OBSERVABILITY_EVENTS_PATH)
+                || path.startsWith(OPENCODE_OBSERVABILITY_TRACE_CHUNKS_PATH)
                 || path.equals(UI_TEST_TOOL_CONFIG_PATH)
                 || path.equals(LOBEHUB_SSO_REDEEM_PATH)
                 || path.equals(LOBEHUB_SSO_REVOKE_PATH)

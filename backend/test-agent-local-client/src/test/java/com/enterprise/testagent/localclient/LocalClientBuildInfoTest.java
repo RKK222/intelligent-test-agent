@@ -12,7 +12,8 @@ class LocalClientBuildInfoTest {
 
         assertThat(buildInfo.clientVersion()).isEqualTo("20260820153045");
         assertThat(buildInfo.launcherVersion()).isEqualTo("1");
-        assertThat(buildInfo.capabilities()).containsExactly("SELF_UPDATE_V1");
+        assertThat(buildInfo.capabilities()).containsExactly(
+                "SELF_UPDATE_V1", "OPENCODE_OBSERVABILITY_V1");
         assertThat(buildInfo.managedRelease()).isTrue();
     }
 

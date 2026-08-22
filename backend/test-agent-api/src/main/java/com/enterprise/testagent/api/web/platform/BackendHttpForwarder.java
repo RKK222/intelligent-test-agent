@@ -134,6 +134,43 @@ public class BackendHttpForwarder {
         }
     }
 
+    /** 发送使用内部 Bearer 凭据的系统级请求，供已冻结归档 owner 节点接收 Trace 分片。 */
+    <T> ApiResponse<T> forwardSystemTyped(
+            BackendJavaProcess backend,
+            String path,
+            String method,
+            Object requestBody,
+            TypeReference<ApiResponse<T>> responseType,
+            String traceId,
+            String authorization) {
+        Objects.requireNonNull(backend, "backend must not be null");
+        Objects.requireNonNull(path, "path must not be null");
+        try {
+            HttpRequest.BodyPublisher body = requestBody == null
+                    ? HttpRequest.BodyPublishers.noBody()
+                    : HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(trimTrailingSlash(backend.listenUrl()) + path))
+                    .timeout(FORWARD_TIMEOUT)
+                    .header(HttpHeaders.CONTENT_TYPE, "application/json")
+                    .header(HttpHeaders.AUTHORIZATION, authorization)
+                    .header(TraceConstants.TRACE_ID_HEADER, traceId)
+                    .header(ROUTED_HEADER, "true")
+                    .method(method, body)
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return objectMapper.readValue(response.body(), responseType);
+            }
+            ApiErrorResponse error = objectMapper.readValue(response.body(), ApiErrorResponse.class);
+            throw new PlatformException(errorCode(error.code()), error.message(), error.details());
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw unavailable(backend, exception);
+        }
+    }
+
     /**
      * 转发统一 JSON API 请求，允许调用方指定目标 path/method。
      */

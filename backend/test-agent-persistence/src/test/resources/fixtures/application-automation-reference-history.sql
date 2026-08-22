@@ -13,6 +13,11 @@ create table users (
     user_id varchar(128) primary key
 );
 
+-- 该夹具基线晚于 V14；保留当时已部署的进程表，避免后续升级测试跳过真实前置结构。
+create table opencode_server_processes (
+    process_id varchar(128) primary key
+);
+
 -- 上一版 release 已经具备本地客户端运行结构；本夹具必须保留这些依赖，才能验证合并 dev 后的后续迁移顺序。
 create table local_client_credentials (
     user_id varchar(128) primary key references users(user_id),

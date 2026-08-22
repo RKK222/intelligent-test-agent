@@ -13,6 +13,7 @@ import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
 import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeObservabilityGenerationRepository;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAtomicMutationPort;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAssignmentConflictException;
@@ -27,6 +28,7 @@ import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.enterprise.testagent.opencode.runtime.observability.OpencodeObservabilityTokenService;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerCommandNotDispatchedException;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.nio.file.Path;
@@ -80,6 +82,8 @@ public class OpencodeProcessStartupService {
     private PublicAgentConfigPreviewSourceResolver publicPreviewSourceResolver;
     private OpencodeProcessStopService stopService;
     private WorkspaceGitToolTokenService workspaceGitToolTokenService;
+    private OpencodeObservabilityTokenService observabilityTokenService;
+    private OpencodeObservabilityGenerationRepository observabilityGenerationRepository;
     private LocalClientLifecycleGateway localClientLifecycleGateway;
 
     /** 启动前选择用户有效公共个人配置或共享运行副本；方法注入保持既有测试构造器兼容。 */
@@ -105,6 +109,21 @@ public class OpencodeProcessStartupService {
     void setWorkspaceGitToolTokenService(WorkspaceGitToolTokenService workspaceGitToolTokenService) {
         this.workspaceGitToolTokenService = Objects.requireNonNull(
                 workspaceGitToolTokenService, "workspaceGitToolTokenService must not be null");
+    }
+
+    /** 同一公共启动入口注入与进程代次绑定的 Observability 专用凭据。 */
+    @Autowired
+    void setObservabilityTokenService(OpencodeObservabilityTokenService observabilityTokenService) {
+        this.observabilityTokenService = Objects.requireNonNull(
+                observabilityTokenService, "observabilityTokenService must not be null");
+    }
+
+    /** 启动候选写入后冻结当前 Observability 代次，避免后续健康 traceId 将其覆盖。 */
+    @Autowired
+    void setObservabilityGenerationRepository(
+            OpencodeObservabilityGenerationRepository observabilityGenerationRepository) {
+        this.observabilityGenerationRepository = Objects.requireNonNull(
+                observabilityGenerationRepository, "observabilityGenerationRepository must not be null");
     }
 
     /** LOCAL_CLIENT 目标仍通过本公共启动入口委托反向隧道，禁止业务层绕过。 */
@@ -444,6 +463,7 @@ public class OpencodeProcessStartupService {
     public OpencodeServerProcess startAndVerify(
             OpencodeProcessStartupRequest request,
             OpencodeProcessStartProgress progress) {
+        request = withStableProcessId(request);
         OpencodeProcessStartProgress resolvedProgress = progress == null ? OpencodeProcessStartProgress.noop() : progress;
         Optional<OpencodeServerProcess> expectedExisting = expectedExistingAssignment(request);
         try {
@@ -571,6 +591,9 @@ public class OpencodeProcessStartupService {
         } else {
             // 仅保留旧公共 API 的首次创建兼容；正常用户初始化已在短事务中预留 process/binding。
             repository.saveOpencodeServerProcess(candidate);
+        }
+        if (observabilityGenerationRepository != null) {
+            observabilityGenerationRepository.save(candidate.processId(), request.traceId());
         }
         OpencodeProcessStatusProbe probe = waitForStartupHealth(candidate, request.traceId(), resolvedProgress);
         if (probe.status() != OpencodeProcessProbeStatus.RUNNING) {
@@ -994,7 +1017,41 @@ public class OpencodeProcessStartupService {
                     WorkspaceGitToolTokenService.TOKEN_ENV_NAME,
                     workspaceGitToolTokenService.issue(request.userId()));
         }
+        if (observabilityTokenService != null && internalProxySettings != null) {
+            environment.put(
+                    OpencodeObservabilityTokenService.BASE_URL_ENV_NAME,
+                    internalProxySettings.sameNodeBaseUrl());
+            environment.put(
+                    OpencodeObservabilityTokenService.TOKEN_ENV_NAME,
+                    observabilityTokenService.issue(request));
+            environment.put(OpencodeObservabilityTokenService.RUNTIME_KIND_ENV_NAME, "SERVER_PROCESS");
+            environment.put(OpencodeObservabilityTokenService.GENERATION_ENV_NAME, request.traceId());
+            environment.put(OpencodeObservabilityTokenService.PROCESS_ID_ENV_NAME, request.processId().value());
+            environment.put(OpencodeObservabilityTokenService.SERVER_ID_ENV_NAME, request.linuxServerId().value());
+        }
         return Map.copyOf(environment);
+    }
+
+    /** 首次分配也在 manager start 前生成稳定进程 ID，使专用凭据与最终持久化身份完全一致。 */
+    private OpencodeProcessStartupRequest withStableProcessId(OpencodeProcessStartupRequest request) {
+        if (request.processId() != null) {
+            return request;
+        }
+        return new OpencodeProcessStartupRequest(
+                request.userId(),
+                new OpencodeProcessId(RuntimeIdGenerator.opencodeProcessId()),
+                request.createdAt(),
+                request.bindingCreatedAt(),
+                request.linuxServerId(),
+                request.containerId(),
+                request.port(),
+                request.baseUrl(),
+                request.sessionPath(),
+                request.configPath(),
+                request.environment(),
+                request.traceId(),
+                request.bindingRecovery(),
+                request.sharedPublicConfigRequired());
     }
 
     private void injectOptionalPathParameter(Map<String, String> environment, String parameterName) {

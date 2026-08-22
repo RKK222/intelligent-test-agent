@@ -17,6 +17,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /** 本地 OpenCode 监管器；PID、实际启动时间和可执行文件全部匹配后才允许停止。 */
 final class OpencodeProcessSupervisor {
@@ -26,6 +30,7 @@ final class OpencodeProcessSupervisor {
     private final LocalClientConfiguration configuration;
     private final LocalClientStateStore stateStore;
     private final LocalModelRelay modelRelay;
+    private final LocalObservabilityRelay observabilityRelay;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(1))
             .build();
@@ -34,9 +39,18 @@ final class OpencodeProcessSupervisor {
             LocalClientConfiguration configuration,
             LocalClientStateStore stateStore,
             LocalModelRelay modelRelay) {
+        this(configuration, stateStore, modelRelay, null);
+    }
+
+    OpencodeProcessSupervisor(
+            LocalClientConfiguration configuration,
+            LocalClientStateStore stateStore,
+            LocalModelRelay modelRelay,
+            LocalObservabilityRelay observabilityRelay) {
         this.configuration = configuration;
         this.stateStore = stateStore;
         this.modelRelay = modelRelay;
+        this.observabilityRelay = observabilityRelay;
     }
 
     synchronized LocalClientPayloads.LifecycleResult start(Integer preferredPort) {
@@ -165,6 +179,27 @@ final class OpencodeProcessSupervisor {
             builder.environment().put("OPENCODE_CONFIG_DIR", configuration.opencodeConfigDirectory().toString());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_BASE_URL", modelRelay.baseUrl());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_API_KEY", modelRelay.localToken());
+            if (observabilityRelay != null) {
+                String generation = "lcg_" + UUID.randomUUID().toString().replace("-", "");
+                Path plugin = executable.getParent().getParent()
+                        .resolve("plugins/test-agent-observability.mjs")
+                        .toAbsolutePath().normalize();
+                if (!Files.isRegularFile(plugin)) {
+                    throw new IllegalStateException("OpenCode observability plugin is missing");
+                }
+                builder.environment().put(
+                        "OPENCODE_CONFIG_CONTENT",
+                        withObservabilityPlugin(
+                                builder.environment().get("OPENCODE_CONFIG_CONTENT"),
+                                plugin.toUri().toString()));
+                builder.environment().put("TEST_AGENT_OBSERVABILITY_BASE_URL", observabilityRelay.baseUrl());
+                builder.environment().put("TEST_AGENT_OBSERVABILITY_TOKEN", observabilityRelay.localToken());
+                builder.environment().put("TEST_AGENT_OBSERVABILITY_RUNTIME_KIND", "LOCAL_CLIENT");
+                builder.environment().put("TEST_AGENT_OBSERVABILITY_GENERATION", generation);
+                builder.environment().put(
+                        "TEST_AGENT_OBSERVABILITY_CLIENT_INSTANCE_ID",
+                        stateStore.read().clientInstanceId());
+            }
             builder.redirectErrorStream(true);
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logDirectory.resolve("opencode.log").toFile()));
             process = builder.start();
@@ -186,6 +221,27 @@ final class OpencodeProcessSupervisor {
         } catch (RuntimeException exception) {
             cleanupFailedStart(process, recorded);
             throw exception;
+        }
+    }
+
+    /** 只追加共享插件 URI，保留用户已有 OPENCODE_CONFIG_CONTENT 和其它插件顺序。 */
+    String withObservabilityPlugin(String inherited, String pluginUri) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode root = inherited == null || inherited.isBlank()
+                    ? mapper.createObjectNode()
+                    : (ObjectNode) mapper.readTree(inherited);
+            ArrayNode plugins = root.withArray("plugin");
+            boolean present = false;
+            for (var plugin : plugins) {
+                present |= pluginUri.equals(plugin.asText());
+            }
+            if (!present) {
+                plugins.add(pluginUri);
+            }
+            return mapper.writeValueAsString(root);
+        } catch (Exception exception) {
+            throw new IllegalStateException("OPENCODE_CONFIG_CONTENT is invalid", exception);
         }
     }
 

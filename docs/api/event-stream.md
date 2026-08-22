@@ -72,7 +72,7 @@
 | `session.diff` | session 级 Diff 状态更新。 |
 | `session.status` | session busy/idle/status 更新。 |
 | `session.error` | session 错误事件；root session error 额外派生 `run.failed`，child error 不改变 Run 终态。 |
-| `session.created` | opencode session 创建事件，payload 可携带 `parentID`。 |
+| `session.created` | opencode session 创建事件；1.18.4 的父级位于 `properties.info.parentID`。 |
 | `session.updated` | opencode session 更新事件；root session 标题成功同步到平台 Session 时，payload 会带平台确认标记和标题。 |
 | `session.deleted` | opencode session 删除事件。 |
 | `session.child.discovered` | 平台发现 child session 并纳入当前 Run scope。 |
@@ -442,7 +442,7 @@ RunEvent payload 可包含以下 scope 字段，前端必须允许这些字段�
 
 scope 发现与缓存规则：
 
-- child discovery 来源包括 task/tool part metadata 中的 `sessionID/sessionId`、`session.created/session.updated` 的 `parentID/parentId`，以及 `session.children(root)` bootstrap 候选。
+- child discovery 来源包括 task/tool part metadata 中的 `sessionID/sessionId`、`session.created/session.updated` 的 `properties.info.parentID`（兼容顶层 `parentID/parentId`），以及 `session.children(root)` bootstrap 候选。
 - 原生 opencode task 子 Agent 是两阶段事件：先出现 root `message.part.updated` 的 `part.type=tool`、`part.tool=task`、`state.status=pending`，此时通常没有 child session；随后 `session.created/session.updated` 带 `parentID/parentId` 创建 child session。runtime `RunSessionScopeRouter` 会按 `runId + parentSessionId` 维护 pending task FIFO 队列，在 child session 事件没有 task 字段时补齐最早未绑定 task 的 `taskMessageId/taskPartId/taskCallId`。
 - `message.part.updated` 的 task metadata 也可能直接携带 child `sessionId/sessionID`；这只用于发现 child 和补齐 `session.child.discovered/session.scope.updated`，原始 task part 仍属于 root assistant message，payload scope 必须保持 `sessionId=rootSessionId`、`isChildSession=false`。
 - child session metadata 会从 `info.agent` 和 `info.title` 提取展示信息；`title` 会去掉形如 `(@explore subagent)` 的 opencode 原生后缀后写入 `session.child.discovered/session.scope.updated` payload。
@@ -944,6 +944,25 @@ LobeHub 登录票据签发、HMAC 兑换/撤销、Desktop/CLI 浏览器确认、
 `event-stream-client`，不支持 `Last-Event-ID`，也不得映射或复用任何平台事件名。LobeHub 自身对话、知识索引
 和 Workspace 事件保留在独立 fork 与独立数据库中。fork 的 loopback 定时调度 POST 及 `/api/workflows/*`
 离线拒绝同样不创建平台事件，也不进入平台 SSE。
+
+## OpenCode Observability telemetry 与本地 Trace 帧
+
+OpenCode Observability 是独立于 RunEvent/SSE 的追加式 telemetry stream。实际 system prompt、上下文、用户消息、
+assistant/reasoning 分片、父子 Agent、Tool/Skill 参数与结果、异常、token 和耗时只进入此链路；不得映射为新的
+RunEvent，也不得改变聊天 SSE 的顺序、续传或错误语义。
+
+服务端 OpenCode 插件直接使用专用 HTTP 入口。本地插件只连接随机 token 保护的 loopback Java relay，本地 Java 再在
+现有 `local-opencode-client.v1` WSS 上使用以下 additive 帧：
+
+- `OBSERVABILITY_BATCH`：先声明 batch、Trace、runtime generation、序号范围、摘要、长度、丢弃数和完整标记。
+- `TRACE_CHUNK_UPLOAD`：同 requestId 发送 Base64 NDJSON 分片；单分片默认且最多 256 KiB。
+- `TRACE_CHUNK_ACK`：服务器完成原子落盘及 SHA-256 校验后确认精确 batch/Trace/末序号/摘要；客户端收到匹配 ACK 后才删除 spool。
+- `TRACE_UPLOAD_WATERMARK`：返回服务器已确认水位，供断网、重连和进程重启后的断点续传核验。
+
+上述帧都绑定 `clientInstanceId + connectionGeneration`，旧连接的声明、正文和 ACK 一律拒绝。客户端注册 capability
+`OPENCODE_OBSERVABILITY_V1`；旧服务端可忽略该 capability，旧客户端不会产生这些帧。控制、模型、文件和普通 HTTP/SSE
+反向帧优先；Trace 仅在所有前台操作和模型 relay 空闲至少 3 秒后发送，默认单在途、1 MiB/s 上限，失败指数退避。
+未确认数据保留在本地 spool，不把网络或归档失败传播给聊天。
 
 ## 兼容性
 

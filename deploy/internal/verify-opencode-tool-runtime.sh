@@ -78,6 +78,7 @@ if [[ -n "${ARCHIVE}" ]]; then
   archive_members=(
     programs/opencode/package.json
     programs/opencode/package-lock.json
+    programs/opencode/opencode-observability-plugin.mjs
   )
   for dependency_entry in "${DEPENDENCIES[@]}"; do
     dependency="${dependency_entry%%|*}"
@@ -120,6 +121,7 @@ require_runtime_file() {
 
 require_runtime_file package.json
 require_runtime_file package-lock.json
+require_runtime_file opencode-observability-plugin.mjs
 runtime_manifest="$(read_runtime_file package.json)"
 runtime_lock="$(read_runtime_file package-lock.json)"
 

@@ -25,6 +25,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerManager;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeObservabilityGenerationRepository;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
@@ -38,6 +39,7 @@ import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerCommandNotDispatchedException;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.enterprise.testagent.opencode.runtime.observability.OpencodeObservabilityTokenService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -610,6 +612,12 @@ class OpencodeProcessStartupServiceTest {
         Mockito.when(proxySettings.sameNodeBaseUrl()).thenReturn("http://127.0.0.1:8080");
         WorkspaceGitToolTokenService tokenService = Mockito.mock(WorkspaceGitToolTokenService.class);
         Mockito.when(tokenService.issue(USER_ID)).thenReturn("signed-workspace-token");
+        OpencodeObservabilityTokenService observabilityTokenService =
+                Mockito.mock(OpencodeObservabilityTokenService.class);
+        OpencodeObservabilityGenerationRepository generationRepository =
+                Mockito.mock(OpencodeObservabilityGenerationRepository.class);
+        Mockito.when(observabilityTokenService.issue(Mockito.any()))
+                .thenReturn("signed-observability-token");
         OpencodeProcessStartupService service = new OpencodeProcessStartupService(
                 repository,
                 repository,
@@ -625,13 +633,24 @@ class OpencodeProcessStartupServiceTest {
                 null,
                 null);
         service.setWorkspaceGitToolTokenService(tokenService);
+        service.setObservabilityTokenService(observabilityTokenService);
+        service.setObservabilityGenerationRepository(generationRepository);
 
         service.startAndVerify(request(null, null, null));
 
         assertThat(gateway.startCommands).singleElement().satisfies(command ->
                 assertThat(command.environment())
                         .containsEntry("TEST_AGENT_PLATFORM_BASE_URL", "http://127.0.0.1:8080")
-                        .containsEntry("TEST_AGENT_WORKSPACE_GIT_TOOL_TOKEN", "signed-workspace-token"));
+                        .containsEntry("TEST_AGENT_WORKSPACE_GIT_TOOL_TOKEN", "signed-workspace-token")
+                        .containsEntry("TEST_AGENT_OBSERVABILITY_BASE_URL", "http://127.0.0.1:8080")
+                        .containsEntry("TEST_AGENT_OBSERVABILITY_TOKEN", "signed-observability-token")
+                        .containsEntry("TEST_AGENT_OBSERVABILITY_RUNTIME_KIND", "SERVER_PROCESS")
+                        .containsEntry("TEST_AGENT_OBSERVABILITY_GENERATION", TRACE_ID)
+                        .containsEntry("TEST_AGENT_OBSERVABILITY_SERVER_ID", SERVER_ID.value())
+                        .containsKey("TEST_AGENT_OBSERVABILITY_PROCESS_ID"));
+        Mockito.verify(observabilityTokenService).issue(Mockito.argThat(startupRequest ->
+                startupRequest.processId() != null && startupRequest.traceId().equals(TRACE_ID)));
+        Mockito.verify(generationRepository).save(Mockito.any(OpencodeProcessId.class), Mockito.eq(TRACE_ID));
     }
 
     @Test

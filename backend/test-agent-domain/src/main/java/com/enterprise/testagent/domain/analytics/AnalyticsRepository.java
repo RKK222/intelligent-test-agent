@@ -57,6 +57,10 @@ public interface AnalyticsRepository {
         return List.of();
     }
 
+    default Optional<AnalyticsModels.CapabilityCoverage> capabilityCoverage(AnalyticsModels.Filter filter) {
+        return Optional.empty();
+    }
+
     default List<AnalyticsModels.FilterOption> organizations() {
         return List.of();
     }

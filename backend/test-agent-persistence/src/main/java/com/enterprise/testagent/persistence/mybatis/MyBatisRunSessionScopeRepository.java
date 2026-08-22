@@ -85,6 +85,13 @@ public class MyBatisRunSessionScopeRepository implements RunSessionScopeReposito
                 .map(this::toSessionDomain);
     }
 
+    @Override
+    public Optional<RunSessionScopeSession> findLatestBySessionId(String sessionId) {
+        String normalizedSessionId = DomainValidation.requireText(sessionId, "sessionId");
+        return Optional.ofNullable(mapper.findLatestBySessionId(normalizedSessionId))
+                .map(this::toSessionDomain);
+    }
+
     private RunSessionScopeSession toSessionDomain(RunSessionScopeSessionRow row) {
         return new RunSessionScopeSession(
                 new RunId(row.runId()),

@@ -39,7 +39,7 @@ import {
   subscribeUserNotifications,
   type RunEventRawMessage
 } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, BrainCircuit, FileWarning, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
+import { Activity, BookOpenText, Boxes, BrainCircuit, FileWarning, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -938,6 +938,11 @@ async function openSystemActivity() {
     ? remembered
     : `system:${defaultSystemMenuKey(workspacePageRoles.value)}` as WorkspacePageId;
   await openWorkspacePage(target);
+}
+
+async function openTracePage() {
+  if (!isSuperAdmin.value) return;
+  await router.push({ name: "traces" });
 }
 
 async function toggleMemories() {
@@ -12157,6 +12162,18 @@ async function handleLogout() {
           >
             <Monitor class="figma-activity-icon" :stroke-width="1.5" />
             <span class="figma-activity-text">控制台</span>
+          </button>
+          <button
+            v-if="isSuperAdmin"
+            type="button"
+            class="figma-activity-btn figma-activity-btn--trace"
+            aria-label="Trace 可观测"
+            title="Trace"
+            data-testid="trace-activity-button"
+            @click="openTracePage"
+          >
+            <Activity class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">Trace</span>
           </button>
           <button
             v-if="selectedWorkspaceKind === 'MANAGED'"

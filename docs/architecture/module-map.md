@@ -108,6 +108,16 @@ Browser
   Windows/Linux 设备策略，源码不放入当前仓库；本地默认 checkout 为同级 `../lobehub-platform`，精确提交由
   `deploy/internal/lobehub/version.env` 锁定。
 
+### OpenCode Observability 模块边界
+
+共享插件到服务端有两条传输：服务端 OpenCode 直接提交专用 HTTP；本地 OpenCode 依次经过 loopback relay、私有 spool、
+既有认证 WSS，再到归档 owner 后端。`test-agent-local-client-protocol` 只定义版本化 Trace 帧；`test-agent-local-client` 负责
+低优先级调度和 ACK 后删除；`test-agent-opencode-runtime` 负责令牌、归档与目录查询；`test-agent-persistence` 仅保存
+ClickHouse 元数据；`test-agent-api` 复用公共 Java 路由。任何模块都不得把正文旁路到 RunEvent、PostgreSQL 或 ClickHouse。
+
+前端由 `packages/shared-types` 定义 Trace DTO，`packages/backend-api` 访问四个管理接口，`apps/agent-web` 提供独立
+`/traces` 顶层页面。页面只对 `SUPER_ADMIN` 导航可见，后端权限仍是权威边界。
+
 ## 前端包职责
 
 普通用户首次引导由 `apps/agent-web` 复用工作台现有控件锚点，覆盖应用下拉、workspace/version 切换、小地球引入需求子条目、首条消息建立对话、设置和手册；具体操作说明由 `apps/user-manual` 的快速开始、设置与权限、工作区和对话章节维护，设置章节按普通用户与应用管理员权限区分入口。

@@ -9,7 +9,9 @@ import com.enterprise.testagent.persistence.clickhouse.ClickHouseAnalyticsReposi
 import com.enterprise.testagent.persistence.clickhouse.ClickHouseAnalyticsMapper;
 import com.enterprise.testagent.persistence.clickhouse.ClickHouseInstantTypeHandler;
 import com.enterprise.testagent.persistence.clickhouse.ClickHouseSchemaMigrator;
+import com.enterprise.testagent.persistence.clickhouse.ClickHouseTraceCatalogMapper;
 import com.enterprise.testagent.persistence.mybatis.AnalyticsMapper;
+import com.enterprise.testagent.domain.trace.TraceModels;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -37,6 +39,7 @@ class ClickHouseAnalyticsIntegrationTest {
             DockerImageName.parse("clickhouse/clickhouse-server:26.3.17.56").asCompatibleSubstituteFor("clickhouse"));
 
     private static ClickHouseAnalyticsMapper mapper;
+    private static ClickHouseTraceCatalogMapper traceMapper;
     private static JdbcClient jdbc;
 
     @BeforeAll
@@ -45,7 +48,9 @@ class ClickHouseAnalyticsIntegrationTest {
         ClickHouseSchemaMigrator migrator = new ClickHouseSchemaMigrator(dataSource);
         migrator.migrate();
         migrator.migrate();
-        mapper = new SqlSessionTemplate(sqlSessionFactory(dataSource)).getMapper(ClickHouseAnalyticsMapper.class);
+        SqlSessionTemplate session = new SqlSessionTemplate(sqlSessionFactory(dataSource));
+        mapper = session.getMapper(ClickHouseAnalyticsMapper.class);
+        traceMapper = session.getMapper(ClickHouseTraceCatalogMapper.class);
         jdbc = JdbcClient.create(dataSource);
     }
 
@@ -193,6 +198,108 @@ class ClickHouseAnalyticsIntegrationTest {
             assertThat(row.bucketStart()).isEqualTo(Instant.parse("2026-08-12T16:00:00Z"));
             assertThat(row.tokensTotal()).isEqualTo(35);
         });
+    }
+
+    @Test
+    void pluginCapabilityFactOverridesLegacyCallAndPublishesCoverageWithoutRawPayload() {
+        Instant occurredAt = Instant.parse("2026-08-22T06:00:00Z");
+        mapper.insertEvents(List.of(
+                event(
+                        "plugin-dimension:usr-plugin", 30, occurredAt.minusSeconds(1),
+                        "{\"eventType\":\"USER_DIMENSION\",\"userId\":\"usr-plugin\","
+                                + "\"username\":\"王五\",\"organization\":\"插件组织\","
+                                + "\"rdDepartment\":\"研发二部\",\"department\":\"测试平台\","
+                                + "\"status\":\"ACTIVE\"}"),
+                event(
+                        "plugin-legacy:start", 31, occurredAt,
+                        "{\"eventType\":\"TOOL_STARTED\",\"userId\":\"usr-plugin\","
+                                + "\"runId\":\"run-plugin\",\"sessionId\":\"ses-plugin\","
+                                + "\"callId\":\"call-test-design\",\"toolName\":\"skill\","
+                                + "\"title\":\"Loaded skill: test-design\"}"),
+                event(
+                        "plugin-legacy:finish", 32, occurredAt.plusSeconds(1),
+                        "{\"eventType\":\"TOOL_FINISHED\",\"userId\":\"usr-plugin\","
+                                + "\"runId\":\"run-plugin\",\"sessionId\":\"ses-plugin\","
+                                + "\"callId\":\"call-test-design\",\"toolName\":\"skill\","
+                                + "\"title\":\"Loaded skill: test-design\",\"status\":\"SUCCEEDED\"}")),
+                occurredAt.plusSeconds(2));
+
+        traceMapper.insertCapabilityFacts(List.of(new TraceModels.CapabilityFact(
+                "capability:run-plugin:ses-plugin:call-test-design",
+                101,
+                occurredAt.plusSeconds(1),
+                "usr-plugin",
+                "王五",
+                "插件组织",
+                "研发二部",
+                "测试平台",
+                "ses-plugin",
+                "run-plugin",
+                "call-test-design",
+                "SKILL",
+                "test-design",
+                "SUCCEEDED",
+                29,
+                "OPENCODE_PLUGIN")), occurredAt.plusSeconds(2));
+        TraceModels.Catalog catalog = new TraceModels.Catalog(
+                "trc_11111111111111111111111111111111",
+                "usr-plugin",
+                "王五",
+                "插件组织",
+                "研发二部",
+                "测试平台",
+                "LOCAL_CLIENT",
+                "OPENCODE_PLUGIN",
+                "",
+                "lci-plugin",
+                "bjp-plugin",
+                "linux-plugin",
+                "ses-plugin",
+                "run-plugin",
+                "test-design-agent",
+                "COMPLETED",
+                "INCOMPLETE",
+                occurredAt,
+                occurredAt.plusSeconds(3),
+                occurredAt,
+                101,
+                100,
+                4096,
+                1,
+                0,
+                false,
+                true);
+        traceMapper.insertCatalog(catalog, 101);
+
+        AnalyticsModels.Filter analyticsFilter = filter(
+                occurredAt.minusSeconds(2), occurredAt.plusSeconds(5), "插件组织");
+        AnalyticsModels.CapabilityUsageRow row = mapper.capabilityUsage(analyticsFilter).stream()
+                .filter(candidate -> candidate.name().equals("test-design"))
+                .findFirst()
+                .orElseThrow();
+        AnalyticsModels.CapabilityCoverage coverage = mapper.capabilityCoverage(analyticsFilter);
+        TraceModels.Filter traceFilter = new TraceModels.Filter(
+                occurredAt.minusSeconds(2), occurredAt.plusSeconds(5), null, "插件组织", null,
+                null, null, "INCOMPLETE", null, null, 1, 20);
+
+        assertThat(row.invocationCount()).isEqualTo(1);
+        assertThat(row.userCount()).isEqualTo(1);
+        assertThat(row.succeededCount()).isEqualTo(1);
+        assertThat(coverage.source()).isEqualTo("OPENCODE_PLUGIN");
+        assertThat(coverage.coverageStartAt()).isEqualTo(occurredAt);
+        assertThat(coverage.rolloutCompleteness()).isZero();
+        assertThat(traceMapper.search(traceFilter, 20, 0))
+                .extracting(TraceModels.Catalog::traceId)
+                .containsExactly(catalog.traceId());
+        assertThat(jdbc.sql("""
+                        select count() from system.columns
+                        where database = currentDatabase()
+                          and table in ('analytics_trace_catalog', 'analytics_trace_spans',
+                                        'analytics_plugin_capability_facts')
+                          and name in ('payload', 'prompt', 'reasoning', 'tool_input',
+                                       'tool_output', 'archive_path')
+                        """)
+                .query(Long.class).single()).isZero();
     }
 
     private static AnalyticsModels.Filter filter(Instant start, Instant end) {

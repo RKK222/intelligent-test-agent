@@ -50,6 +50,11 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private static final Logger LOGGER = LoggerFactory.getLogger(LocalClientConnection.class);
     private static final int MAX_NON_STREAM_RESPONSE_BYTES = 1024 * 1024;
     private static final int MAX_ACTIVE_OPERATIONS = 64;
+    static final long OBSERVABILITY_IDLE_NANOS = LocalObservabilitySettings.DEFAULT_IDLE_BEFORE_UPLOAD.toNanos();
+    static final long OBSERVABILITY_ACK_TIMEOUT_NANOS =
+            LocalObservabilitySettings.DEFAULT_ACKNOWLEDGEMENT_TIMEOUT.toNanos();
+    static final long OBSERVABILITY_BYTES_PER_SECOND =
+            LocalObservabilitySettings.DEFAULT_UPLOAD_BYTES_PER_SECOND;
     private static final Set<String> BLOCKED_HEADERS = Set.of(
             "authorization", "proxy-authorization", "proxy-authenticate", "host", "cookie", "connection",
             "content-length", "transfer-encoding", "upgrade", "keep-alive", "te", "trailer");
@@ -62,6 +67,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private final LocalModelRelay modelRelay;
     private final LocalClientFileRpcHandler fileRpcHandler;
     private final LocalClientSelfUpdater selfUpdater;
+    private final LocalObservabilityRelay observabilityRelay;
+    private final LocalObservabilitySettings observabilitySettings;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final LocalClientFrameCodec codec = new LocalClientFrameCodec(objectMapper);
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -93,6 +100,13 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private final AtomicReference<String> lastFailure = new AtomicReference<>();
     private final AtomicReference<LocalClientPayloads.LifecycleResult> processStatus = new AtomicReference<>();
     private final AtomicReference<ScheduledFuture<?>> versionCheckTask = new AtomicReference<>();
+    private final AtomicReference<ScheduledFuture<?>> observabilityUploadTask = new AtomicReference<>();
+    private final AtomicBoolean observabilityInFlight = new AtomicBoolean();
+    private final AtomicLong observabilityInFlightStartedNanos = new AtomicLong();
+    private final Map<String, LocalObservabilityRelay.PendingChunk> observabilityRequests = new ConcurrentHashMap<>();
+    private final AtomicLong lastForegroundActivityNanos = new AtomicLong(System.nanoTime());
+    private final AtomicLong observabilityRetryNotBeforeNanos = new AtomicLong();
+    private final AtomicInteger observabilityFailureCount = new AtomicInteger();
 
     LocalClientConnection(
             LocalClientConfiguration configuration,
@@ -101,6 +115,31 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             OpencodeProcessSupervisor supervisor,
             LocalModelRelay modelRelay,
             LocalClientFileRpcHandler fileRpcHandler) {
+        this(configuration, credentials, stateStore, supervisor, modelRelay, fileRpcHandler, null,
+                LocalObservabilitySettings.defaults());
+    }
+
+    LocalClientConnection(
+            LocalClientConfiguration configuration,
+            LocalClientCredentialFile.Credentials credentials,
+            LocalClientStateStore stateStore,
+            OpencodeProcessSupervisor supervisor,
+            LocalModelRelay modelRelay,
+            LocalClientFileRpcHandler fileRpcHandler,
+            LocalObservabilityRelay observabilityRelay) {
+        this(configuration, credentials, stateStore, supervisor, modelRelay, fileRpcHandler, observabilityRelay,
+                LocalObservabilitySettings.defaults());
+    }
+
+    LocalClientConnection(
+            LocalClientConfiguration configuration,
+            LocalClientCredentialFile.Credentials credentials,
+            LocalClientStateStore stateStore,
+            OpencodeProcessSupervisor supervisor,
+            LocalModelRelay modelRelay,
+            LocalClientFileRpcHandler fileRpcHandler,
+            LocalObservabilityRelay observabilityRelay,
+            LocalObservabilitySettings observabilitySettings) {
         this.configuration = configuration;
         this.credentials = credentials;
         this.buildInfo = LocalClientBuildInfo.current();
@@ -108,6 +147,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         this.supervisor = supervisor;
         this.modelRelay = modelRelay;
         this.fileRpcHandler = fileRpcHandler;
+        this.observabilityRelay = observabilityRelay;
+        this.observabilitySettings = observabilitySettings;
         this.selfUpdater = createSelfUpdater();
     }
 
@@ -222,6 +263,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             modelRelay.updateGrant(registered.modelGrant());
             startHeartbeat();
             startVersionChecks();
+            startObservabilityUpload();
             if (selfUpdater != null) {
                 selfUpdater.reportStoredResult();
             }
@@ -253,9 +295,12 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             case UPDATE_CANCEL -> handleUpdateCancel(frame);
             case UPDATE_STATUS_ACK -> requireSelfUpdater().handleStatusAck(
                     codec.payload(frame, LocalClientPayloads.UpdateStatusAck.class));
+            case TRACE_CHUNK_ACK -> handleTraceChunkAck(frame);
+            case TRACE_UPLOAD_WATERMARK -> handleTraceWatermark(frame);
             case WORKSPACE_REGISTERED -> completeWorkspaceRegistration(frame);
             case ERROR -> {
-                if (!completeWorkspaceRegistrationError(frame)) {
+                if (!completeWorkspaceRegistrationError(frame)
+                        && !completeObservabilityError(frame)) {
                     throw new IllegalStateException("server rejected local client connection");
                 }
             }
@@ -285,6 +330,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     }
 
     private void submit(LocalClientFrame frame, Runnable task) {
+        markForegroundActivity();
         if (!acceptingRequests.get()) {
             sendResponse(frame, LocalClientFrameType.ERROR, new LocalClientPayloads.Error(
                     "LOCAL_CLIENT_UPDATING",
@@ -305,6 +351,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             } finally {
                 operations.remove(frame.requestId());
                 operationProgress.remove(frame.requestId());
+                markForegroundActivity();
             }
         }, null);
         Future<?> previous = operations.putIfAbsent(frame.requestId(), future);
@@ -526,6 +573,186 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         }
     }
 
+    private void startObservabilityUpload() {
+        if (observabilityRelay == null
+                || observabilitySettings.maxInFlight() == 0
+                || !buildInfo.capabilities().contains(LocalClientBuildInfo.OBSERVABILITY_CAPABILITY)) {
+            return;
+        }
+        ScheduledFuture<?> previous = observabilityUploadTask.getAndSet(
+                scheduler.scheduleWithFixedDelay(
+                        this::uploadObservabilitySafely,
+                        1,
+                        250,
+                        TimeUnit.MILLISECONDS));
+        if (previous != null) {
+            previous.cancel(false);
+        }
+    }
+
+    /** Trace 只在高优先级业务空闲三秒后发送；一次只允许一个分片等待 ACK。 */
+    private void uploadObservabilitySafely() {
+        try {
+            long now = System.nanoTime();
+            long currentGeneration = generation.get();
+            if (observabilityInFlight.get()
+                    && now - observabilityInFlightStartedNanos.get()
+                    >= observabilitySettings.acknowledgementTimeout().toNanos()) {
+                // ACK 丢失不能永久冻结低优先级队列；原分片仍在 spool，下一轮按相同摘要幂等重传。
+                observabilityRequests.clear();
+                observabilityInFlight.set(false);
+                observabilityInFlightStartedNanos.set(0);
+                observabilityBackoff();
+                return;
+            }
+            if (!shouldUploadObservability(
+                    currentGeneration,
+                    webSocket.get() != null,
+                    observabilityInFlight.get(),
+                    !operations.isEmpty(),
+                    modelRelay.active(),
+                    now,
+                    observabilityRetryNotBeforeNanos.get(),
+                    Math.max(lastForegroundActivityNanos.get(), modelRelay.lastActivityNanos()),
+                    observabilitySettings.idleBeforeUpload().toNanos())) {
+                return;
+            }
+            LocalObservabilityRelay.PendingChunk pending = observabilityRelay.nextPending();
+            if (pending == null || !observabilityInFlight.compareAndSet(false, true)) {
+                return;
+            }
+            String requestId = requestId("lcobs_");
+            observabilityRequests.put(requestId, pending);
+            observabilityInFlightStartedNanos.set(now);
+            try {
+                String clientInstanceId = stateStore.read().clientInstanceId();
+                sendFrame(new LocalClientFrame(
+                        LocalClientProtocol.VERSION,
+                        LocalClientFrameType.OBSERVABILITY_BATCH,
+                        requestId,
+                        pending.traceId(),
+                        currentGeneration,
+                        codec.payload(new LocalClientPayloads.ObservabilityBatch(
+                                pending.batchId(), clientInstanceId, currentGeneration,
+                                pending.traceId(), pending.runtimeGeneration(), pending.runtimeKind(),
+                                pending.coverageStartAt(), pending.firstSequence(), pending.lastSequence(),
+                                pending.sha256(), pending.contentLength(), pending.droppedCount(),
+                                pending.complete(), pending.createdAt()))));
+                byte[] body = observabilityRelay.readBody(pending);
+                sendFrame(new LocalClientFrame(
+                        LocalClientProtocol.VERSION,
+                        LocalClientFrameType.TRACE_CHUNK_UPLOAD,
+                        requestId,
+                        pending.traceId(),
+                        currentGeneration,
+                        codec.payload(new LocalClientPayloads.TraceChunkUpload(
+                                pending.batchId(), clientInstanceId, currentGeneration,
+                                pending.traceId(), pending.firstSequence(), pending.lastSequence(),
+                                pending.sha256(), Base64.getEncoder().encodeToString(body)))));
+                long throttleNanos = Math.max(
+                        TimeUnit.MILLISECONDS.toNanos(250),
+                        (long) Math.ceil((double) body.length * 1_000_000_000D
+                                / observabilitySettings.uploadBytesPerSecond()));
+                observabilityRetryNotBeforeNanos.set(now + throttleNanos);
+            } catch (RuntimeException exception) {
+                observabilityRequests.remove(requestId);
+                observabilityInFlight.set(false);
+                observabilityInFlightStartedNanos.set(0);
+                observabilityBackoff();
+            }
+        } catch (RuntimeException exception) {
+            observabilityInFlight.set(false);
+            observabilityInFlightStartedNanos.set(0);
+            observabilityBackoff();
+        }
+    }
+
+    private void handleTraceChunkAck(LocalClientFrame frame) {
+        if (observabilityRelay == null) {
+            throw new IllegalStateException("unexpected trace acknowledgement");
+        }
+        LocalClientPayloads.TraceChunkAck ack = codec.payload(frame, LocalClientPayloads.TraceChunkAck.class);
+        LocalObservabilityRelay.PendingChunk pending = observabilityRequests.remove(frame.requestId());
+        if (pending == null) {
+            // 超时后的旧 ACK 或幂等重传的后到 ACK 不再影响当前连接，也不能删除新的 spool 坐标。
+            return;
+        }
+        if (!stateStore.read().clientInstanceId().equals(ack.clientInstanceId())
+                || ack.connectionGeneration() != generation.get()
+                || !pending.batchId().equals(ack.batchId())) {
+            throw new IllegalStateException("trace acknowledgement coordinates are invalid");
+        }
+        observabilityRelay.acknowledge(
+                ack.batchId(), ack.traceId(), ack.lastSequence(), ack.sha256());
+        observabilityFailureCount.set(0);
+        observabilityInFlight.set(false);
+        observabilityInFlightStartedNanos.set(0);
+    }
+
+    private void handleTraceWatermark(LocalClientFrame frame) {
+        LocalClientPayloads.TraceUploadWatermark watermark = codec.payload(
+                frame, LocalClientPayloads.TraceUploadWatermark.class);
+        if (!stateStore.read().clientInstanceId().equals(watermark.clientInstanceId())
+                || watermark.connectionGeneration() != generation.get()) {
+            throw new IllegalStateException("trace watermark coordinates are invalid");
+        }
+    }
+
+    private boolean completeObservabilityError(LocalClientFrame frame) {
+        LocalObservabilityRelay.PendingChunk pending = observabilityRequests.remove(frame.requestId());
+        if (pending == null) {
+            return false;
+        }
+        observabilityInFlight.set(false);
+        observabilityInFlightStartedNanos.set(0);
+        observabilityBackoff();
+        return true;
+    }
+
+    private void observabilityBackoff() {
+        int failures = Math.min(6, observabilityFailureCount.incrementAndGet());
+        long delaySeconds = Math.min(30, 1L << Math.max(0, failures - 1));
+        observabilityRetryNotBeforeNanos.set(System.nanoTime() + TimeUnit.SECONDS.toNanos(delaySeconds));
+    }
+
+    private void markForegroundActivity() {
+        lastForegroundActivityNanos.set(System.nanoTime());
+    }
+
+    /** 高优先级业务、退避窗口和三秒空闲门槛统一判定，Trace 永远不能抢占对话帧。 */
+    static boolean shouldUploadObservability(
+            long connectionGeneration,
+            boolean connected,
+            boolean traceInFlight,
+            boolean foregroundOperationActive,
+            boolean modelActive,
+            long nowNanos,
+            long retryNotBeforeNanos,
+            long lastForegroundActivityNanos) {
+        return shouldUploadObservability(
+                connectionGeneration, connected, traceInFlight, foregroundOperationActive, modelActive,
+                nowNanos, retryNotBeforeNanos, lastForegroundActivityNanos, OBSERVABILITY_IDLE_NANOS);
+    }
+
+    static boolean shouldUploadObservability(
+            long connectionGeneration,
+            boolean connected,
+            boolean traceInFlight,
+            boolean foregroundOperationActive,
+            boolean modelActive,
+            long nowNanos,
+            long retryNotBeforeNanos,
+            long lastForegroundActivityNanos,
+            long idleNanos) {
+        return connectionGeneration > 0
+                && connected
+                && !traceInFlight
+                && !foregroundOperationActive
+                && !modelActive
+                && nowNanos >= retryNotBeforeNanos
+                && nowNanos - lastForegroundActivityNanos >= idleNanos;
+    }
+
     private void versionCheckSafely() {
         try {
             long currentGeneration = generation.get();
@@ -609,6 +836,14 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         if (versionTask != null) {
             versionTask.cancel(false);
         }
+        ScheduledFuture<?> observabilityTask = observabilityUploadTask.getAndSet(null);
+        if (observabilityTask != null) {
+            observabilityTask.cancel(false);
+        }
+        observabilityRequests.clear();
+        observabilityInFlight.set(false);
+        observabilityInFlightStartedNanos.set(0);
+        markForegroundActivity();
         operations.forEach((id, future) -> future.cancel(true));
         operations.clear();
         operationProgress.clear();

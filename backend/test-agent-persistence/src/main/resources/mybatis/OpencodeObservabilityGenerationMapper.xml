@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.OpencodeObservabilityGenerationMapper">
+    <update id="updateGeneration">
+        update opencode_server_processes
+        set observability_generation = #{generation}
+        where process_id = #{processId}
+    </update>
+
+    <select id="findGeneration" resultType="java.lang.String">
+        select observability_generation
+        from opencode_server_processes
+        where process_id = #{processId}
+    </select>
+</mapper>

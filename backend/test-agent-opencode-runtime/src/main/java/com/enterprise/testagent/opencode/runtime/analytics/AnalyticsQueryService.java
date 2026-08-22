@@ -224,7 +224,16 @@ public class AnalyticsQueryService {
                 .sorted(Comparator.comparingLong(AnalyticsModels.CapabilityUsage::userCount).reversed()
                         .thenComparing(Comparator.comparingLong(AnalyticsModels.CapabilityUsage::invocationCount).reversed()))
                 .toList();
-        return new AnalyticsModels.Capabilities(activeUsers, rows, freshness());
+        AnalyticsModels.CapabilityCoverage coverage = repository.capabilityCoverage(filter)
+                .orElse(new AnalyticsModels.CapabilityCoverage("LEGACY_RUNEVENT", null, null, 0D));
+        return new AnalyticsModels.Capabilities(
+                activeUsers,
+                rows,
+                freshness(),
+                coverage.source(),
+                coverage.coverageStartAt(),
+                coverage.completeThrough(),
+                coverage.rolloutCompleteness());
     }
 
     private AnalyticsModels.Filter hourlyFilter(AnalyticsModels.Filter filter) {

@@ -127,7 +127,7 @@ export async function reconcileProjectConfigDirectories({ cwd = process.cwd(), r
   return preparedCount
 }
 
-function withRequiredConfig(env, supportsSubagentDepth) {
+function withRequiredConfig(env, supportsSubagentDepth, runtimeRoot) {
   let inherited = {}
   if (env.OPENCODE_CONFIG_CONTENT) {
     try {
@@ -140,6 +140,9 @@ function withRequiredConfig(env, supportsSubagentDepth) {
     }
   }
   const config = { ...inherited }
+  const observabilityPlugin = new URL(`file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`).href
+  const inheritedPlugins = Array.isArray(config.plugin) ? config.plugin : []
+  config.plugin = [...new Set([...inheritedPlugins, observabilityPlugin])]
   if (supportsSubagentDepth) {
     config.subagent_depth = 2
   } else {
@@ -204,6 +207,7 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   prepared.OPENCODE_CONFIG_CONTENT = withRequiredConfig(
     prepared,
     await runtimeSupportsSubagentDepth(resolvedRuntimeRoot),
+    resolvedRuntimeRoot,
   )
   prepared.OPENCODE_OFFLINE_TOOL_NODE_MODULES = join(resolvedRuntimeRoot, "node_modules")
 

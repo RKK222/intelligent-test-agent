@@ -53,9 +53,11 @@ public final class LocalClientMain {
         LocalClientCredentialFile.Credentials credentials = LocalClientCredentialFile.read();
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         LocalWorkspaceRegistry workspaceRegistry = new LocalWorkspaceRegistry(stateStore);
-        try (LocalModelRelay modelRelay = new LocalModelRelay(configuration)) {
+        LocalObservabilitySettings observabilitySettings = LocalObservabilitySettings.load();
+        try (LocalModelRelay modelRelay = new LocalModelRelay(configuration);
+             LocalObservabilityRelay observabilityRelay = new LocalObservabilityRelay(stateStore, observabilitySettings)) {
             OpencodeProcessSupervisor supervisor = new OpencodeProcessSupervisor(
-                    configuration, stateStore, modelRelay);
+                    configuration, stateStore, modelRelay, observabilityRelay);
             LocalClientBuildInfo buildInfo = LocalClientBuildInfo.current();
             if (configuration.selfUpdateConfigured() && buildInfo.managedRelease()) {
                 LocalClientUpdateMarkerStore markerStore =
@@ -76,7 +78,9 @@ public final class LocalClientMain {
                     stateStore,
                     supervisor,
                     modelRelay,
-                    fileRpcHandler);
+                    fileRpcHandler,
+                    observabilityRelay,
+                    observabilitySettings);
             LocalClientTray tray = LocalClientTray.install(configuration, connection);
             try (connection; tray) {
                 Runtime.getRuntime().addShutdownHook(new Thread(() -> {

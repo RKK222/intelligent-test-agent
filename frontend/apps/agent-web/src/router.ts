@@ -80,6 +80,11 @@ export const router = createRouter({
       component: () => import("./views/WorkbenchView.vue"),
     },
     {
+      path: "/traces",
+      name: "traces",
+      component: () => import("./views/TraceView.vue"),
+    },
+    {
       path: "/lobehub/launch",
       name: "lobehub-launch",
       component: () => import("./views/LobehubLaunchView.vue"),
@@ -155,6 +160,7 @@ function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlag
     || /^\/system\/?$/.test(pathname)
     || /^\/hub\/?$/.test(pathname)
     || /^\/settings\/?$/.test(pathname)
+    || /^\/traces\/?$/.test(pathname)
     || pathname === "/workspace-requirement-import"
     || (pathname === "/lobehub/launch" && features.lobehub)
     || /^\/s\/[^/]+$/.test(pathname);
@@ -229,6 +235,14 @@ router.beforeEach(async (to, _from) => {
     // 直达记忆路由必须在工作台挂载前重新确认总开关与灰度授权；异常时同样失败关闭。
     const memoryAllowed = await useMemoryAccessStore().refresh(memoryAccessApi, authStore.token);
     if (!memoryAllowed) {
+      return { name: "workbench", replace: true };
+    }
+  }
+
+  if (to.name === "traces") {
+    // 菜单隐藏不是权限边界；直达路由先刷新当前角色，后台接口还会再次执行 SUPER_ADMIN 强校验。
+    const currentUser = authStore.currentUser ?? await authStore.fetchCurrentUser(memoryAccessApi);
+    if (!currentUser?.roles?.includes("SUPER_ADMIN")) {
       return { name: "workbench", replace: true };
     }
   }

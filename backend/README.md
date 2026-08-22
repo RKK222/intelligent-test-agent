@@ -50,6 +50,11 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
 
+OpenCode Observability 仍在现有模块边界内实现：`test-agent-domain` 只定义 Trace catalog/span/fact 与稳定进程代次端口，
+`test-agent-opencode-runtime` 负责短期插件令牌、不可变归档和查询编排，`test-agent-persistence` 只向 ClickHouse 写目录与
+元数据，并通过 MyBatis 把 opaque generation 写入 PostgreSQL 进程行；`test-agent-api` 提供插件/内部分片入口及
+`SUPER_ADMIN` Trace API。正文不进入数据库、Redis、RunEvent 或日志。
+
 ## 构建方式
 
 ```bash
@@ -109,6 +114,8 @@ Windows 开发人员若只需要 legacy guo profile，可直接使用已提交�
 3. 使用 JDK 21+ 启动。
 
 该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录启动编排脚本，不属于 Java 进程配置。当前本地联调默认改用 `test` profile 和 `.env.test`；Windows 用户要连同一测试环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`，WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，仍可在 IDEA/PowerShell 中显式导入 `.env.test` 的数据库、Redis、模型和 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 等变量，并用 `-Dspring.profiles.active=test` 启动 Java 后端。
+`test` profile 会直接允许本机原生客户端使用 loopback 明文 WebSocket 联调，无需额外导出
+`TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL`；该放宽不进入其它 profile，正式环境仍必须使用 HTTPS/WSS。
 
 需要同时联调 LobeHub 时，macOS/Linux 从仓库根目录显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。默认不启动 LobeHub；该模式从

@@ -2028,3 +2028,30 @@ SHA-256 也必须相同。构建目录示例使用默认
 release 兼容历史到当前 HEAD 的升级，先留存每套 `flyway_schema_history` 的
 `version/checksum/success`。未知 checksum、版本倒序或历史分叉必须停止交付并制定兼容方案；不得用 Flyway
 `repair`、`outOfOrder` 或手改历史表掩盖问题。
+
+## PostgreSQL V20260822201811 OpenCode Observability 进程代次
+
+`V20260822201811__opencode_server_processes_add_observability_generation.sql` 为 `opencode_server_processes` 增加可空的
+`observability_generation`。公共启动程序在 manager 返回启动候选后通过 MyBatis XML 写入本次 generation；插件专用令牌校验
+只读取该稳定列，不再误用会被健康检查、重启操作和状态回写更新的业务 `trace_id`。旧行不伪造代次，必须经过公共启动程序
+重新拉起后才允许提交插件事件。该字段只保存 opaque generation，不保存 prompt、reasoning、Tool/Skill 输入输出或归档路径。
+该 migration 已在本机持久验收库执行，原始 SHA-256 固定为
+`033a70045a188d3f322868efc83bddebd8b4b86afe18f7b0f943632eb8fa1865`，由 `FlywayMigrationNamingTest` 锁定，后续不得改名或改字节。
+真实 PostgreSQL 的应用自动化已部署基线夹具同时保留 V14 已存在的 `opencode_server_processes` 前置结构，验证从该历史升级到
+当前 HEAD，而不是通过 `IF EXISTS`、repair 或跳过本 migration 掩盖兼容问题。
+
+## ClickHouse V20260822174420 OpenCode Trace 目录与插件能力事实
+
+`V20260822174420__analytics_trace_catalog_create_tables.sql` 只变更 ClickHouse；PostgreSQL generation fencing 由上述独立 migration 承载。它创建：
+
+- `analytics_trace_catalog`：Trace opaque ID、用户/组织快照、runtime、Session/Run/Agent、归档状态、覆盖起点、确认水位、事件/字节/丢弃/积压和完整度；
+- `analytics_trace_spans`：时间线索引、父子关联、Skill/Agent/Tool 名称、状态、耗时及 token 元数据；
+- `analytics_plugin_capability_facts`：按稳定 `event_id` 与 `run_id + call_id` 去重的插件运行态能力事实。
+
+三张表都不设置 TTL。它们严禁保存 prompt、reasoning、消息正文、工具输入输出、压缩 NDJSON、物理归档路径或本地 spool
+路径。完整正文由现有后端节点的数据卷保存为不可变 gzip NDJSON 分片和 manifest；归档根目录通过
+`TEST_AGENT_OBSERVABILITY_TRACE_ARCHIVE_ROOT`（Spring 属性 `test-agent.observability.trace.archive-root`）配置。归档和目录均不自动删除，容量控制依赖磁盘水位、
+写失败、积压和最后成功时间监控。
+
+运营能力查询在插件事实与旧事实之间执行反连接：同一 `run_id + call_id` 已存在插件事实时不再读取旧 RunEvent 推导事实。
+上线从插件 `coverage_start_at` 开始，不执行历史回填；回滚只停止插件注入/入口消费并保留已归档数据，不能删除目录冒充回滚。

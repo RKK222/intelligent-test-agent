@@ -54,6 +54,9 @@ import type {
   AnalyticsTimeSeriesPoint,
   AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
+  TraceCatalog,
+  TraceQueryParams,
+  TraceRawEventPage,
   ApplicationWorkspaceTemplate,
   BatchContext,
   ApplicationWorkspaceVersion,
@@ -540,6 +543,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const memoryBase = "/api/internal/platform/memory/v1";
   const memoryAdminBase = `${memoryBase}/admin`;
   const analyticsBase = "/api/internal/platform/analytics";
+  const traceBase = "/api/internal/platform/traces";
   const notificationCenterBase = "/api/internal/platform/notification-center/notifications";
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
@@ -682,10 +686,10 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     return requestFrom<T>(baseUrl, path, { ...init, headers });
   }
 
-  async function requestCsv(path: string, init: RequestInit = {}): Promise<Blob> {
+  async function requestBlob(path: string, init: RequestInit = {}, accept = "application/octet-stream"): Promise<Blob> {
     const traceId = traceIdFactory();
     const headers = new Headers(init.headers);
-    headers.set("Accept", "text/csv");
+    headers.set("Accept", accept);
     headers.set("X-Trace-Id", traceId);
     const userToken = options.apiToken ?? (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("test-agent.auth.token") : null);
     if (userToken && !headers.has("Authorization")) {
@@ -700,6 +704,10 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       throw new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
     }
     return response.blob();
+  }
+
+  async function requestCsv(path: string, init: RequestInit = {}): Promise<Blob> {
+    return requestBlob(path, init, "text/csv");
   }
 
   const agentPath = (path: string) => `${agentBase}${path}`;
@@ -2599,6 +2607,16 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<PageResponse<AnalyticsExceptionDetail>>(`${analyticsBase}/exceptions${query({ ...params })}`),
     exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions" | "funnel" | "token-operations" | "capabilities", params: AnalyticsQueryParams = {}) =>
       requestCsv(`${analyticsBase}/export${query({ ...params, type })}`),
+    listTraces: (params: TraceQueryParams = {}) =>
+      request<PageResponse<TraceCatalog>>(`${traceBase}${query({ ...params })}`),
+    getTrace: (traceId: string) =>
+      request<TraceCatalog>(`${traceBase}/${encodeURIComponent(traceId)}`),
+    getTraceEvents: (traceId: string, afterSequence = 0, limit = 500) =>
+      request<TraceRawEventPage>(
+        `${traceBase}/${encodeURIComponent(traceId)}/events${query({ afterSequence, limit })}`
+      ),
+    downloadTrace: (traceId: string) =>
+      requestBlob(`${traceBase}/${encodeURIComponent(traceId)}/download`, {}, "application/gzip"),
     createXxlJobSsoTicket: () =>
       request<XxlJobSsoTicket>(`${xxlJobBase}/sso-tickets`, { method: "POST" }),
     createLobehubSsoTicket: () =>

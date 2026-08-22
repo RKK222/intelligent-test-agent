@@ -291,7 +291,10 @@ tools/dev-phase11-real-e2e.sh --start-services
 网页个人设置只保留目录浏览和手工注册兜底。客户端注册成功会打开只携带逻辑 Workspace ID 的工作台深链；页面
 校验当前用户归属后切换到 `LOCAL_CLIENT` 工作区，通过既有文件 WebSocket 加载目录，不把本机绝对路径写入 URL。
 本地工作区使用客户端已实现的 `workspace.list` 普通目录 RPC，不调用仅服务端组合引用视图支持的
-`workspace.view.list`；同时使用独立选择语义，不触发默认应用补选，并隐藏 Git、应用版本和物理路径复制入口。
+`workspace.view.list`；文件 ticket 的 MyBatis/Redis 校验由后端移出 WebFlux event-loop，避免本地目录加载被同步
+路由读取卡住。顶部工作空间菜单直接列出平台已持久化的本地工作区及在线状态，可在已注册目录间切换，并可返回
+最近使用的服务器应用工作区；切换只传递逻辑 Workspace ID，不在浏览器另存本机路径。LOCAL_CLIENT 仍使用独立
+选择语义，不触发默认应用补选，并隐藏 Git、应用版本和物理路径复制入口。
 管理员安装后，普通用户在终端执行 `test-agent-local-client enroll` 完成接入。macOS、Windows 与非 glibc
 系统不在本地客户端支持范围；客户端向平台注册后，该位置改为显示本地 OpenCode
 健康、异常或离线状态。生产由 Nginx 同源下载路由提供，dev server 只读暴露
@@ -299,3 +302,10 @@ tools/dev-phase11-real-e2e.sh --start-services
 `TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录，不会把 JRE/OpenCode 大制品打入前端 bundle。
 本地 Workspace 的 capability 明确关闭 terminal、Git 发布、Agent 配置、附件和协作分享；页面不能仅靠
 按钮隐藏代替后端约束。
+
+## Trace 管理页面
+
+`apps/agent-web` 提供独立顶层 `/traces`，不嵌入运营分析面板。只有实时角色为 `SUPER_ADMIN` 时显示导航，router 直接访问
+也会校验角色；后端四个 Trace API 仍再次强制鉴权。页面按 Input/Model/Tools 三泳道展示追加式事件，支持 Duration、Turns、
+Calls、搜索、父子 Agent 折叠和 Summary/Payload/Result/Timing/Source 检查器，并显示覆盖起点、积压、归档、脱敏、丢弃和
+完整度。正文与单条下载来自服务器归档，不能从客户端、本地路径或 ClickHouse 拼装。

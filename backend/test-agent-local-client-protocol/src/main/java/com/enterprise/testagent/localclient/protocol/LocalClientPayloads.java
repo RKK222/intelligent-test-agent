@@ -232,6 +232,58 @@ public final class LocalClientPayloads {
             String status) {
     }
 
+    /** 客户端先声明待上传分片的不可变坐标，服务端据此执行 generation fencing 和摘要校验。 */
+    public record ObservabilityBatch(
+            String batchId,
+            String clientInstanceId,
+            long connectionGeneration,
+            String traceId,
+            String runtimeGeneration,
+            String runtimeKind,
+            Instant coverageStartAt,
+            long firstSequence,
+            long lastSequence,
+            String sha256,
+            long contentLength,
+            long droppedCount,
+            boolean complete,
+            Instant createdAt) {
+    }
+
+    /** 单个在途 Trace 分片；原始 NDJSON 固定不超过 256 KiB，Base64 后仍低于帧上限。 */
+    public record TraceChunkUpload(
+            String batchId,
+            String clientInstanceId,
+            long connectionGeneration,
+            String traceId,
+            long firstSequence,
+            long lastSequence,
+            String sha256,
+            String dataBase64) {
+    }
+
+    /** 服务端完成原子归档、摘要校验和目录写入后才发送 ACK。 */
+    public record TraceChunkAck(
+            String batchId,
+            String clientInstanceId,
+            long connectionGeneration,
+            String traceId,
+            long firstSequence,
+            long lastSequence,
+            String sha256,
+            long completeThrough,
+            String archiveStatus,
+            Instant archivedAt) {
+    }
+
+    public record TraceUploadWatermark(
+            String clientInstanceId,
+            long connectionGeneration,
+            String traceId,
+            long completeThrough,
+            Instant updatedAt) {
+    }
+
     public record Cancel(String targetRequestId, String reason) {
     }
 

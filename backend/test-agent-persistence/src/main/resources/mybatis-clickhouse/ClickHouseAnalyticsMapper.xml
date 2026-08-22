@@ -253,10 +253,38 @@
                countIf(status = 'SUCCEEDED') as succeeded_count,
                countIf(status = 'FAILED') as failed_count,
                countIf(status = 'STARTED') as incomplete_count
-        from analytics_capability_facts final where <include refid="factFilter"/>
-          and capability_name != '' and user_id != ''
+        from (
+            select occurred_at, user_id, run_id, call_id, capability_type, capability_name, status
+            from analytics_plugin_capability_facts final
+            where <include refid="factFilter"/> and capability_name != '' and user_id != ''
+            union all
+            select occurred_at, user_id, run_id, call_id, capability_type, capability_name, status
+            from analytics_capability_facts final
+            where <include refid="factFilter"/> and capability_name != '' and user_id != ''
+              and (run_id, call_id) not in (
+                  select run_id, call_id from analytics_plugin_capability_facts final
+                  where occurred_at &gt;= #{filter.startTime} and occurred_at &lt; #{filter.endTime}
+              )
+        )
         group by capability_type, capability_name
         order by user_count desc, invocation_count desc, type, name
+    </select>
+
+    <select id="capabilityCoverage" resultType="com.enterprise.testagent.domain.analytics.AnalyticsModels$CapabilityCoverage">
+        select 'OPENCODE_PLUGIN' as source,
+               min(started_at) as coverage_start_at,
+               maxIf(updated_at, complete = 1) as complete_through,
+               if(count() = 0, 0.0, countIf(complete = 1) / count()) as rollout_completeness
+        from analytics_trace_catalog final
+        where started_at &gt;= #{filter.startTime} and started_at &lt; #{filter.endTime}
+        <if test="filter.organization != null and filter.organization != ''">and organization = #{filter.organization}</if>
+        <if test="filter.rdDepartment != null and filter.rdDepartment != ''">and rd_department = #{filter.rdDepartment}</if>
+        <if test="filter.department != null and filter.department != ''">and department = #{filter.department}</if>
+        <if test="filter.userKeyword != null and filter.userKeyword != ''">
+            and (positionCaseInsensitiveUTF8(user_id, #{filter.userKeyword}) &gt; 0
+                 or positionCaseInsensitiveUTF8(username, #{filter.userKeyword}) &gt; 0)
+        </if>
+        having count() &gt; 0
     </select>
 
     <select id="organizationUserCounts" resultType="com.enterprise.testagent.persistence.mybatis.AnalyticsOrganizationUserCountRow">

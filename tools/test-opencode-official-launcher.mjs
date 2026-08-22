@@ -36,6 +36,7 @@ async function createRuntime(root) {
     join(root, "opencode-runtime.gitignore"),
   )
   await writeFile(join(root, "VERSION"), "1.18.4\n")
+  await writeFile(join(root, "opencode-observability-plugin.mjs"), "export default async () => ({})\n")
 }
 
 async function assertToolDependencyLinks(directory, runtimeRoot) {
@@ -104,6 +105,7 @@ test("keeps recursive project scanning out of user startup and prepares it throu
     assert.equal(prepared.OPENCODE_DISABLE_AUTOUPDATE, "true")
     assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT), {
       theme: "dark",
+      plugin: [`file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`],
       subagent_depth: 2,
     })
 
@@ -367,7 +369,10 @@ test("does not inject unsupported subagent depth into the 1.17 rollback runtime"
       runtimeRoot,
     })
 
-    assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT), { theme: "dark" })
+    assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT), {
+      theme: "dark",
+      plugin: [`file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`],
+    })
   } finally {
     await rm(root, { force: true, recursive: true })
   }

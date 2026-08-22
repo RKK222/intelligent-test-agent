@@ -267,6 +267,11 @@ public class ClickHouseAnalyticsRepository implements AnalyticsRepository, Analy
     }
 
     @Override
+    public Optional<AnalyticsModels.CapabilityCoverage> capabilityCoverage(AnalyticsModels.Filter filter) {
+        return available(() -> Optional.ofNullable(mapper.capabilityCoverage(filter)));
+    }
+
+    @Override
     public List<AnalyticsModels.FilterOption> organizations() {
         return available(mapper::organizations);
     }

@@ -81,7 +81,7 @@
                                     <manifestEntries>
                                         <Local-Client-Version>${test.agent.local.client.version}</Local-Client-Version>
                                         <Local-Client-Launcher-Version>1</Local-Client-Launcher-Version>
-                                        <Local-Client-Capabilities>SELF_UPDATE_V1</Local-Client-Capabilities>
+                                        <Local-Client-Capabilities>SELF_UPDATE_V1,OPENCODE_OBSERVABILITY_V1</Local-Client-Capabilities>
                                     </manifestEntries>
                                 </transformer>
                             </transformers>

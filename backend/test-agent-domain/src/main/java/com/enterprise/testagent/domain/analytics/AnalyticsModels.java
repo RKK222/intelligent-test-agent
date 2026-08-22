@@ -157,7 +157,25 @@ public final class AnalyticsModels {
             long incompleteCount) {
     }
 
-    public record Capabilities(long activeUsers, List<CapabilityUsage> rows, Freshness freshness) {
+    public record Capabilities(
+            long activeUsers,
+            List<CapabilityUsage> rows,
+            Freshness freshness,
+            String source,
+            Instant coverageStartAt,
+            Instant completeThrough,
+            Double rolloutCompleteness) {
+
+        public Capabilities(long activeUsers, List<CapabilityUsage> rows, Freshness freshness) {
+            this(activeUsers, rows, freshness, "LEGACY_RUNEVENT", null, null, 0D);
+        }
+    }
+
+    public record CapabilityCoverage(
+            String source,
+            Instant coverageStartAt,
+            Instant completeThrough,
+            Double rolloutCompleteness) {
     }
 
     public record Overview(

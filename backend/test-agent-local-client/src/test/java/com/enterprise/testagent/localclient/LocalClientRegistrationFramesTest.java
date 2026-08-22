@@ -37,7 +37,8 @@ class LocalClientRegistrationFramesTest {
         assertThat(register.clientKey()).isEqualTo("tack_v1_secret");
         assertThat(register.clientInstanceId()).isEqualTo(stateStore.read().clientInstanceId());
         assertThat(register.clientVersion()).isEqualTo("20260820153045");
-        assertThat(register.capabilities()).containsExactly("SELF_UPDATE_V1");
+        assertThat(register.capabilities()).containsExactly(
+                "SELF_UPDATE_V1", "OPENCODE_OBSERVABILITY_V1");
     }
 
     @Test
@@ -53,7 +54,8 @@ class LocalClientRegistrationFramesTest {
                 "lcr_test",
                 "trace_test");
 
-        assertThat(codec.payload(frame, LocalClientPayloads.Register.class).capabilities()).isEmpty();
+        assertThat(codec.payload(frame, LocalClientPayloads.Register.class).capabilities())
+                .containsExactly("OPENCODE_OBSERVABILITY_V1");
     }
 
     private LocalClientConfiguration configuration(boolean selfUpdateConfigured) {

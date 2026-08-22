@@ -102,4 +102,13 @@
         where run_id = #{runId}
           and session_id = #{sessionId}
     </select>
+
+    <select id="findLatestBySessionId" resultMap="RunSessionScopeSessionRowMap">
+        select
+        <include refid="RunSessionScopeSessionColumns"/>
+        from run_session_scope_sessions
+        where session_id = #{sessionId}
+        order by updated_at desc, discovered_at desc, run_id desc
+        limit 1
+    </select>
 </mapper>

@@ -142,6 +142,10 @@ class FlywayMigrationNamingTest {
             "V20260813190929__user_scm_git_identities_create.sql";
     private static final String USER_SCM_GIT_IDENTITIES_SHA256 =
             "fd434d47d40c9fd71c987bd6512ba6897e33fe2e1db67299ff01514b4941c92e";
+    private static final String OPENCODE_OBSERVABILITY_GENERATION_MIGRATION =
+            "V20260822201811__opencode_server_processes_add_observability_generation.sql";
+    private static final String OPENCODE_OBSERVABILITY_GENERATION_SHA256 =
+            "033a70045a188d3f322868efc83bddebd8b4b86afe18f7b0f943632eb8fa1865";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -391,6 +395,15 @@ class FlywayMigrationNamingTest {
                 "db/migration",
                 LOCAL_CLIENT_ROLLOUT_MIGRATION,
                 LOCAL_CLIENT_ROLLOUT_SHA256);
+    }
+
+    @Test
+    void appliedOpencodeObservabilityGenerationMigrationRemainsByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                OPENCODE_OBSERVABILITY_GENERATION_MIGRATION,
+                OPENCODE_OBSERVABILITY_GENERATION_SHA256);
     }
 
     private static void assertMigrationSha256(

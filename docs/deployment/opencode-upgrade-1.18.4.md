@@ -46,7 +46,32 @@
 - 1.18.4 的 `GET /session/status` 返回当前 busy/retry session map；session 进入 idle 时上游发布 idle 事件并从 map 删除该 key。平台的交互回复终态补偿据此只把“root key 不存在”视为 idle，空值、非对象、请求异常或 root key 仍存在均失败关闭，不能仅凭某条 assistant `finish=stop` 判定整轮结束。
 - 1.18.4 的旧 Provider 配置 schema 虽接受模型 `release_date`，旧 `/provider` 也会回显该值，但 v1→v2 配置迁移和 `ConfigV2.Model` 不传递发布时间；平台实际使用的 `/api/model` 对这类本地 JSONC 模型返回 `time.released=0`。企业前端只能保持该接口的原生目录顺序，不能把 `enabled_providers` 数组或 JSONC 的键顺序解释为展示排序配置。随 worker 通过 `OPENCODE_MODELS_PATH` 注入的 models.dev 元数据是另一条输入：它会生成 `time.released`，`/api/model` 按该时间倒序返回。
 - [opencode-models.json](../../deploy/internal/opencode-models.json) 是 models.dev 兼容的全局模型元数据固定快照，不是 OpenCode 会按文件名自动发现的公共配置。当前 Qwen 上下文为 `200000`，DeepSeek 为 `262144`；Qwen 的目录排序日期固定高于 DeepSeek，使 `/api/model` 返回时 Qwen 优先，但公共默认/小模型和 `code_analysis` MCP 仍为 DeepSeek。标准发布时两台后台统一把随包文件安装到宿主机 `/data/testagent/config/opencode-models.json`；经明确批准的单节点灰度可只在 `.4` 替换并重启 worker，必须留存 `.4/.114` 各自 SHA，回滚时恢复 `.4` 备份，不能误把灰度文件同步到 `.114`。worker 将文件只读挂载为 `/etc/test-agent/opencode-models.json` 并设置 `OPENCODE_MODELS_PATH`，manager 启动的所有用户 OpenCode 进程继承后生效。该文件只维护 Provider/Model 元数据，不放 token、UCID 或内部代理密钥；实际 provider、`includeUsage=false` 和企业代理路由仍由公共配置 Git 的 [opencode.jsonc.example](../../deploy/internal/opencode.jsonc.example) 管理。宿主启动脚本在删除当前容器前、worker entrypoint 在 manager 启动前均复用 [validate-opencode-models.sh](../../deploy/internal/validate-opencode-models.sh)，常规校验 ID 对齐、必填能力、`release_date`、正数 `limit` 和可选模态；Mac 封包另由 [verify-opencode-model-priority.sh](../../deploy/internal/verify-opencode-model-priority.sh) 锁定本次快照优先级，不改变 worker 指纹，同时允许 `.114` 的旧快照继续通过常规 worker 重启校验。替换文件后必须重启目标 worker；已有用户进程不能只靠刷新浏览器取得新目录。
-- 本次不修改平台 HTTP API、RunEvent SSE wire shape、数据库结构、Flyway、鉴权和密钥配置。
+- OpenCode 1.18.4 本身不改变既有聊天 HTTP API 或 RunEvent SSE wire shape。平台在源码外新增独立 Observability HTTP/WSS 协议和 ClickHouse 目录表；它不修改 OpenCode 源码或既有聊天鉴权。PostgreSQL 只新增进程代次字段用于 generation fencing，不保存任何 Trace 正文。
+
+## Observability 插件装配
+
+平台不修改只读 `opencode-source/opencode-1.18.4/`。共享
+`deploy/internal/opencode-observability-plugin.mjs` 由服务端 official launcher 强制追加到 `OPENCODE_CONFIG_CONTENT.plugin`，
+本地 Java 监管 OpenCode 时追加同一文件 URI；两端不复制 hook 逻辑，也不覆盖用户已配置的其它插件。
+根目录 `restart-dev-services.sh` 也会在 `.tmp/dev-services/opencode-observability-runtime` 组装同一 launcher，manager 的
+`OPENCODE_BIN` 必须指向该入口而不是本机原始二进制；这样自动恢复的开发进程不会绕过插件。该临时运行时优先复用已安装的
+固定依赖树，依赖缺失时才按随仓库 lockfile 安装，不修改 OpenCode 源码或用户配置。
+
+插件适配 1.18.4 的 `tool.execute.before/after`、`chat.message`、`experimental.chat.system.transform`、
+`experimental.chat.messages.transform` 和 `event` hook。before 以 `callID + tool + args` 固化调用身份，after 只补状态、结果和耗时；
+Skill 名只取 `args.name` 或 `metadata.name`。hook 热路径只入有界队列，后台微任务完成脱敏、序列化和批量提交；任何采集 I/O
+异常都必须被插件吞掉并增加 dropped/error 事实，不能改变 OpenCode 返回。
+子 Agent 的 `session.created.properties.info.parentID` 会把子会话绑定到根会话 Trace，后续子会话 Tool/Skill 事件沿用根 Trace ID；服务端再按
+现有 `run_session_scope_sessions` MyBatis 映射补齐平台 Run ID，并校验 Run 属于专用令牌绑定用户。
+专用令牌中的 generation 在公共启动程序写入 `opencode_server_processes.observability_generation`；该列不会被健康检查使用的
+业务 `trace_id` 覆盖。插件请求必须同时匹配令牌 generation、当前数据库 generation 和运行中进程身份，旧代次一律拒绝。
+令牌 TTL 由 `TEST_AGENT_OBSERVABILITY_TOKEN_TTL`（Spring 属性 `test-agent.observability.token-ttl`）配置，默认 7 天，
+只接受 1 分钟至 30 天。该时限覆盖长期运行进程且不复用长期平台凭据；进程重启时 generation 变化会立即让旧令牌失效，
+连续运行超过 TTL 后由公共启动/重启程序签发新令牌。
+
+worker 镜像、完整发布包和本地客户端发布包必须包含该插件，发布校验脚本同时校验文件存在和 SHA-256。关闭或回滚插件时移除
+launcher 注入即可；已经归档的 Trace/目录不自动删除。升级其它 OpenCode 版本前必须重新以真实 hook payload 运行
+`tools/test-opencode-observability-plugin.mjs`，不能假定 1.18.4 的字段名继续有效。
 
 ## 交付、升级与回滚
 
@@ -58,6 +83,8 @@
 
 ```bash
 node --test tools/test-opencode-official-launcher.mjs
+node --test tools/test-opencode-observability-plugin.mjs
+node tools/benchmark-opencode-observability-plugin.mjs
 tools/verify-opencode-runtime-gitignore.sh
 tools/verify-opencode-tool-runtime-deploy.sh
 deploy/internal/validate-opencode-models.sh deploy/internal/opencode-models.json

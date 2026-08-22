@@ -21,4 +21,6 @@ public interface RunSessionScopeMapper {
     RunSessionScopeSessionRow findSession(
             @Param("runId") String runId,
             @Param("sessionId") String sessionId);
+
+    RunSessionScopeSessionRow findLatestBySessionId(@Param("sessionId") String sessionId);
 }

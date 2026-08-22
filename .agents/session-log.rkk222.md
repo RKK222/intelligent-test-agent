@@ -12882,3 +12882,32 @@
 
 - macOS 托盘选择并注册工作区后，即使先经过登录页，工作台也能选中本地工作区并加载、展开真实本地目录。
 - 本次仅修正前端对既有文件 WebSocket 操作的选择，不涉及 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、性能或安全协议；未修改 `.env*`、generated SDK、OpenCode 只读源码或未跟踪 `.reasonix/`。
+
+## 2026-08-22 - OpenCode 插件化运营事实与集中式 Trace
+
+### Why
+
+- 运营分析长期把 OpenCode Tool 的 before/after 事件拆开推导，导致实际调用 `test-design` Skill 的用户仍显示 0；同时缺少像 DeepSeek Harness 一样可回放 Agent、子 Agent、模型和工具全过程的追加式轨迹。
+- 服务端与本地客户端都必须在不修改 OpenCode 1.18.4 源码、不写入 RunEvent/SSE、不中断对话的前提下采集，并把本地未确认数据低优先级续传到服务器权威归档。
+
+### What
+
+- 新增同一份 OpenCode Observability V1 插件，由服务端 official launcher 和本地 Java 监管器强制注入；插件按 `callID + tool + args` 关联 before/after，Skill 只取 `args.name/metadata.name`，记录 system/context/message/reasoning/Tool/Skill/子 Session、序号、父子关系、token、耗时和异常，并在落队列前脱敏凭据、secret/env 和二进制正文。
+- 新增专用限时令牌、稳定进程 generation、独立 telemetry HTTP 入口、Trace 分片归档入口和本地 WSS 帧。令牌 TTL 可配置（默认 7 天、范围 1 分钟至 30 天），同时由当前数据库 generation 隔离旧进程。服务器以不可变 gzip NDJSON 分片与 manifest 保存权威正文，ClickHouse 只保存目录、span 和插件能力事实；插件事实与旧 RunEvent 事实按 `eventId/runId/callId` 反连接去重，不回填历史。
+- 本地客户端新增随机 loopback token relay、未确认 spool、SHA-256/ACK/水位续传、generation fencing、单在途与空闲 3 秒调度；对话、模型和文件帧优先，Trace 只在高优先队列为空时以默认 1 MiB/s 上传，队列/磁盘压力只降级 Trace 并标记不完整。
+- 新增仅 `SUPER_ADMIN` 可见且后端强制鉴权的独立 Trace 页面和四个管理 API，提供三泳道、筛选、父子折叠、Payload/Result/Timing/Source 检查器及单条 gzip 下载；正文查看、下载和失败尝试均记录不含正文/路径的安全审计。
+- 新增 PostgreSQL `V20260822201811` generation migration 和 ClickHouse `V20260822174420` 目录 migration；前者已执行字节 SHA-256 固定为 `033a70045a188d3f322868efc83bddebd8b4b86afe18f7b0f943632eb8fa1865` 并有测试锁。同步 HTTP、事件、数据库、ClickHouse、OpenCode 升级、本地客户端、安全、模块和前端文档。
+
+### How
+
+- JDK 25 下受影响后端 24 模块完整 reactor 最终 `BUILD SUCCESS`：API 635 条、persistence 364 条（20 条按既有外部依赖条件跳过）等均 0 failure/error；新增 Trace 后端权限/失败审计 3/3、专用令牌签发/过期/generation 隔离 4/4、真实 PostgreSQL 兼容升级和 migration 字节锁 17/17 通过。
+- 插件与 launcher Node 测试 17/17、前端 Trace/运营/登录路由 12/12、agent-web typecheck 与 production build、`verify-dev-scripts.sh`、麒麟 ARM64 本地客户端离线封包测试及相关 shell 语法均通过。
+- 插件热路径 20,000 次基准：增量 p99 约 0.0015 ms、RSS 增量约 11.5 MiB、热路径文件 I/O 和网络操作均为 0，低于 2 ms/32 MiB 门槛。
+- 使用 `.env.test`、`test` profile、ClickHouse 完整重启 backend/manager/frontend；最终 backend health/readiness 为 UP、frontend 3000 为 200、ClickHouse 鉴权查询成功。真实 server OpenCode 执行 `test-design-generation` 后，Trace `trc_a14c3311d665c03b91dc6e595c50170a` 为 `COMPLETED/ARCHIVED`、570 事件、0 dropped，ClickHouse 显示 `SKILL test-design SUCCEEDED calls=1 users=1`、`TOOL read calls=2 users=1`；115500 字节下载 gzip 校验和 DOWNLOAD SUCCESS 审计通过。
+
+### Result
+
+- Skill 使用不再依赖 title 或丢失 before 身份；运行态运营事实和完整 Trace 已走 OpenCode 插件独立链路，服务器保存最终权威副本，本地只保留未 ACK 临时 spool，采集/上传故障不会阻塞聊天。
+- 当前本机旧 Local Client Dev 与 manager 同时监听 4096 的环境冲突仍使新的平台 Run 命中旧客户端进程；因此最新真实实证使用 manager 的局域网地址完成，平台 Run 相关性和本地客户端物理断网续传以单元/集成测试验证，尚未在消除该端口冲突后重新做整条平台 Run 实测。
+- 已完成插件 hook p99/RSS/I/O 基准，但尚未完成真实模型多轮关闭/开启对照所需的 CPU、磁盘 IOPS、首 token 与整轮 p95 ≤3% 统计，不能把性能验收写成全部通过。
+- 未修改 `.env*`、generated SDK、OpenCode 只读源码或部署节点；未纳入工作区既有文件 WebSocket、本地工作区下拉、SSE transport、进程陈旧 PID/端口探测和 `.reasonix/` 等无关改动。

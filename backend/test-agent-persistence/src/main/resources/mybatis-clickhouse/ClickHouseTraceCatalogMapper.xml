@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.clickhouse.ClickHouseTraceCatalogMapper">
+    <sql id="catalogColumns">
+        trace_id, user_id, username, organization, rd_department, department, runtime_kind, source,
+        process_id, client_instance_id, backend_process_id, linux_server_id, session_id, run_id,
+        agent_id, status, archive_status, started_at, updated_at, coverage_start_at, complete_through,
+        event_count, archived_bytes, dropped_count, pending_chunks, complete, redacted
+    </sql>
+
+    <sql id="traceFilter">
+        started_at &gt;= #{filter.startTime} and started_at &lt; #{filter.endTime}
+        <if test="filter.userKeyword != null and filter.userKeyword != ''">
+            and (positionCaseInsensitiveUTF8(user_id, #{filter.userKeyword}) &gt; 0
+                 or positionCaseInsensitiveUTF8(username, #{filter.userKeyword}) &gt; 0)
+        </if>
+        <if test="filter.organization != null and filter.organization != ''">and organization = #{filter.organization}</if>
+        <if test="filter.status != null and filter.status != ''">
+            and (status = #{filter.status} or archive_status = #{filter.status})
+        </if>
+        <if test="filter.traceId != null and filter.traceId != ''">and trace_id = #{filter.traceId}</if>
+        <if test="filter.runId != null and filter.runId != ''">and run_id = #{filter.runId}</if>
+        <if test="filter.agentId != null and filter.agentId != ''">and agent_id = #{filter.agentId}</if>
+        <if test="(filter.skill != null and filter.skill != '') or (filter.tool != null and filter.tool != '')">
+            and trace_id in (
+                select trace_id from analytics_trace_spans final where 1 = 1
+                <if test="filter.skill != null and filter.skill != ''">
+                    and capability_kind = 'SKILL' and capability_name = #{filter.skill}
+                </if>
+                <if test="filter.tool != null and filter.tool != ''">
+                    and capability_kind = 'TOOL' and capability_name = #{filter.tool}
+                </if>
+            )
+        </if>
+    </sql>
+
+    <insert id="insertCatalog">
+        insert into analytics_trace_catalog(<include refid="catalogColumns"/>, version) values (
+            #{catalog.traceId}, #{catalog.userId}, #{catalog.username}, #{catalog.organization},
+            #{catalog.rdDepartment}, #{catalog.department}, #{catalog.runtimeKind}, #{catalog.source},
+            #{catalog.processId}, #{catalog.clientInstanceId}, #{catalog.backendProcessId},
+            #{catalog.linuxServerId}, #{catalog.sessionId}, #{catalog.runId}, #{catalog.agentId},
+            #{catalog.status}, #{catalog.archiveStatus}, #{catalog.startedAt}, #{catalog.updatedAt},
+            #{catalog.coverageStartAt}, #{catalog.completeThrough}, #{catalog.eventCount},
+            #{catalog.archivedBytes}, #{catalog.droppedCount}, #{catalog.pendingChunks},
+            #{catalog.complete}, #{catalog.redacted}, #{version}
+        )
+    </insert>
+
+    <insert id="insertSpans">
+        insert into analytics_trace_spans(
+            trace_id, event_id, type, lane, occurred_at, global_sequence, session_sequence,
+            session_id, run_id, turn_id, step_id, message_id, call_id, parent_id,
+            capability_kind, capability_name, status, duration_ms, tokens_input, tokens_output,
+            tokens_reasoning, source, version
+        ) values
+        <foreach collection="spans" item="span" separator=",">
+            (#{span.traceId}, #{span.eventId}, #{span.type}, #{span.lane}, #{span.occurredAt},
+             #{span.globalSequence}, #{span.sessionSequence}, #{span.sessionId}, #{span.runId},
+             #{span.turnId}, #{span.stepId}, #{span.messageId}, #{span.callId}, #{span.parentId},
+             #{span.capabilityKind}, #{span.capabilityName}, #{span.status}, #{span.durationMs},
+             #{span.tokensInput}, #{span.tokensOutput}, #{span.tokensReasoning}, #{span.source},
+             #{span.globalSequence})
+        </foreach>
+    </insert>
+
+    <insert id="insertCapabilityFacts">
+        insert into analytics_plugin_capability_facts(
+            event_id, version, occurred_at, user_id, username, organization, rd_department,
+            department, session_id, run_id, call_id, capability_type, capability_name,
+            status, duration_ms, source, ingested_at
+        ) values
+        <foreach collection="facts" item="fact" separator=",">
+            (#{fact.eventId}, #{fact.version}, #{fact.occurredAt}, #{fact.userId}, #{fact.username},
+             #{fact.organization}, #{fact.rdDepartment}, #{fact.department}, #{fact.sessionId},
+             #{fact.runId}, #{fact.callId}, #{fact.capabilityType}, #{fact.capabilityName},
+             #{fact.status}, #{fact.durationMs}, #{fact.source}, #{ingestedAt})
+        </foreach>
+    </insert>
+
+    <select id="find" resultType="com.enterprise.testagent.domain.trace.TraceModels$Catalog">
+        select <include refid="catalogColumns"/> from analytics_trace_catalog final
+        where trace_id = #{traceId} limit 1
+    </select>
+
+    <select id="search" resultType="com.enterprise.testagent.domain.trace.TraceModels$Catalog">
+        select <include refid="catalogColumns"/> from analytics_trace_catalog final
+        where <include refid="traceFilter"/>
+        order by started_at desc, trace_id limit #{limit} offset #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        select count() from analytics_trace_catalog final where <include refid="traceFilter"/>
+    </select>
+
+    <select id="events" resultType="com.enterprise.testagent.domain.trace.TraceModels$Span">
+        select trace_id, event_id, type, lane, occurred_at, global_sequence, session_sequence,
+               session_id, run_id, turn_id, step_id, message_id, call_id, parent_id,
+               capability_kind, capability_name, status, duration_ms, tokens_input, tokens_output,
+               tokens_reasoning, source
+        from analytics_trace_spans final
+        where trace_id = #{traceId} and global_sequence &gt; #{afterSequence}
+        order by global_sequence, event_id limit #{limit}
+    </select>
+
+    <select id="countEvents" resultType="long">
+        select count() from analytics_trace_spans final where trace_id = #{traceId}
+    </select>
+</mapper>
