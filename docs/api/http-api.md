@@ -4319,20 +4319,21 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/local-opencode-client/admin/rollout-users` | `{userId}` → 灰度用户 | 仅 `SUPER_ADMIN`；目标必须是存在且可登录的平台用户，重复添加幂等启用。 |
 | `DELETE` | `/api/internal/platform/local-opencode-client/admin/rollout-users/{userId}` | 空响应 | 仅 `SUPER_ADMIN`；关闭下载入口但保留数据库审计记录，不撤销已安装客户端或 client key。 |
 | `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/opencode/commands` | `{action: START\|RESTART\|STOP\|STATUS}` | 复用公共启动/停止/状态服务；跨 Java 精确转发到持有 generation 的节点。 |
-| `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 只允许实例 owner；目标固定持有连接 Java。 |
-| `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 客户端先验证真实绝对目录，再事务性注册；离线失败。 |
+| `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 网页目录浏览兜底；只允许实例 owner，目标固定持有连接 Java。 |
+| `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 网页兜底注册；客户端先验证真实绝对目录，再事务性注册；离线失败。同步反向 RPC 调度到 `boundedElastic`。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
 | `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map；`localClientDownload` 保留为 additive 兼容字段。网页下载入口以独立 `download-access/me` 为权威结果，避免实例请求转发到旧进程归属节点时闪现或消失。 |
 
 `revealAvailable` 为 `true` 时才可消费明文；历史凭据升级后已写入展示时间，视为已经展示，必须 rotate 后才能再次
 获得一次 copy 机会。任何客户端或浏览器都不得缓存、记录或转发 `clientKey`。
 
-本地目录选择器取得 route 后，继续调用既有
+网页目录浏览兜底取得 route 后，继续调用既有
 `POST /api/internal/platform/workspace-management/file-ws/tickets`，ticket 请求使用
 `mode=directory-picker`、`localClientInstanceId` 和 `connectionGeneration`；随后连接既有 `/file/ws`，只允许
-`directory.pick {initialPath?}` 和 `directory.list {absolutePath,limit}`。前者由客户端桌面打开原生目录选择器，
-返回 `{cancelled,absolutePath?}`，取消为正常结果；后者作为无图形桌面、旧客户端或弹窗失败时的显式网页
-浏览兜底。两种操作返回路径前都由客户端执行真实目录和访问权限校验。普通本地工作区文件 ticket 使用
+`directory.list {absolutePath,limit}`，返回路径前由客户端执行真实目录和访问权限校验。默认原生入口在客户端
+托盘：客户端发送 `WORKSPACE_REGISTER {name,rootPath}`，后台从已认证连接取得 owner/实例/generation，成功返回
+同 requestId 的 `WORKSPACE_REGISTERED {workspaceId,name,rootPath}`，失败用同 requestId 的 `ERROR`，不关闭连接。
+普通本地工作区文件 ticket 使用
 `mode=workspace` 并冻结
 `runtimeKind=LOCAL_CLIENT`、实例 ID、generation 和 root digest。
 

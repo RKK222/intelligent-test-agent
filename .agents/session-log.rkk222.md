@@ -12783,6 +12783,34 @@
 - 当前客户端、后台和前端均已运行。浏览器现有 TestAgent 标签登录态已过期，未读取浏览器存储或冒充用户登录，因此原生弹窗最后一次人工点击需由用户登录后执行；协议、客户端、API 和页面链路分别由自动化测试覆盖。
 - 本次增加兼容的内部文件 WebSocket 操作，不新增 HTTP 路由、RunEvent/SSE、数据库、部署节点、强制配置、额外端口或新的文件代理；未触碰未跟踪 `.reasonix/`。
 
+## 2026-08-22 - 客户端托盘直接注册工作区并修复网页 500
+
+### Why
+
+- 用户明确要求像 Codex 一样直接从 macOS 客户端选择并注册本地工作区，不再从网页远程触发客户端目录弹窗；客户端在线时网页也不应继续展示下载入口。
+- 网页兜底注册调用 `POST /api/internal/platform/workspace-management/local-workspaces` 时，Controller 在 `reactor-http-nio` 线程内进入同步文件隧道并执行 `block()`，真实日志因此返回 500。
+
+### What
+
+- 托盘新增“选择并注册工作区…”，仅在线时可用；复用现有 macOS 原生目录选择器，按目录名生成工作区名称，并通过当前已认证、带 generation fencing 的客户端 WebSocket 发送 `WORKSPACE_REGISTER`。服务端复用 `LocalWorkspaceApplicationService.create` 完成路径校验、目录根注册和既有补偿，不信任客户端传入用户身份。
+- 协议新增同 requestId 的 `WORKSPACE_REGISTERED` 成功响应；服务端异步执行创建，避免 WebSocket `concatMap` 等待工作区创建时阻塞同连接上的 `FILE_RESPONSE`。断连、超时和服务端错误会精确结束对应客户端请求，托盘成功通知不暴露绝对路径。
+- 删除上一轮网页触发 `directory.pick` 的实现，网页设置只保留明确标注的兜底注册；在线客户端存在时隐藏“下载本地客户端”，全部离线且允许下载时重新显示。
+- `LocalWorkspaceController` 的创建和删除把完整同步业务放到 `boundedElastic`，修复 WebFlux 事件循环阻塞 500；HTTP 路径、DTO 和权限契约保持不变。
+- 同步客户端/API/协议、前端、HTTP/文件 WebSocket、架构、安全和用户手册文档。
+
+### How
+
+- JDK 25 下后端相关 61 项通过：API 49 项，客户端协议 7 项，客户端托盘/文件 RPC 5 项；新增测试证明 Controller 不在事件循环阻塞，以及工作区请求在文件 RPC 回包前不会形成 WebSocket 入站死锁。
+- 前端定向 Vitest 190 项、`@test-agent/shared-types` 和 `@test-agent/agent-web` typecheck 通过；全 workspace typecheck 仍被既有 backend-api 测试第 903 行缺少自动化 `alias` 字段阻塞，与本次文件无关。
+- JDK 25 完整后端跳过测试打包和前端 production build 通过；首次标准启动被本机已有 ClickHouse 密码不一致阻塞，改用项目 `--with-clickhouse` helper 后成功。因 `.env.test` 按安全默认未开启明文客户端控制，最终只对本次进程注入 `TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true`，未修改环境文件。
+- 最终 backend readiness 为 UP、frontend 3000 返回 200；12 MiB 客户端 JAR 与 `/Users/kaka/Applications/TestAgent Local Client Dev.app` 内 JAR SHA-256 均为 `0403ac9ca1b0a03a0ab119534f70883ad01b73d9216cef212c1096c1768008e8`，客户端 PID 96925 以 generation 9 完成认证并在线。
+
+### Result
+
+- macOS 用户现在可直接点击托盘小兔子 → “选择并注册工作区…” → 选择目录完成注册，网页无需参与；网页仍保留旧客户端或无图形环境的手工兜底，在线时不显示重复下载入口。
+- 500 根因已由线程模型修复并有 WebTestClient 回归覆盖。当前服务和客户端均运行；server manager 同时占用 4096，导致客户端自动启动本地 OpenCode 的一次健康告警，但不影响客户端在线和工作区注册，本地 OpenCode 端点自身返回 200。
+- 本次变更内部客户端 WebSocket 帧和既有 HTTP 实现，不新增 HTTP 路径、RunEvent/SSE、数据库/Flyway、SQL、部署节点、性能通路或额外权限；未修改 `.env*`、generated SDK、OpenCode 源码和未跟踪 `.reasonix/`。
+
 ## 2026-08-22 - 默认重启自动对齐本地 ClickHouse 凭据
 
 ### Why

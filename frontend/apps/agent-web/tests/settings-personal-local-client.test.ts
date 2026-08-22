@@ -47,7 +47,6 @@ function api(instance: LocalClientInstance = clientInstance): BackendApiClient {
     listMyLocalClientInstances: vi.fn().mockResolvedValue([instance]),
     listWorkspaces: vi.fn().mockResolvedValue({ items: [], page: 1, size: 100, total: 0 }),
     commandLocalClientOpencode: vi.fn(),
-    pickLocalClientDirectory: vi.fn(),
     listLocalClientDirectories: vi.fn().mockResolvedValue([])
   };
 }
@@ -119,25 +118,6 @@ describe("SettingsPersonalPanel local-client version state", () => {
     await waitFor(() => expect(client.listMyLocalClientInstances).toHaveBeenCalledTimes(1));
     await fireEvent.click(view.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(client.listMyLocalClientInstances).toHaveBeenCalledTimes(2));
-  });
-
-  it("fills the workspace path and name from the directory selected on the client", async () => {
-    const client = api();
-    vi.mocked(client.pickLocalClientDirectory).mockResolvedValue({
-      cancelled: false,
-      absolutePath: "/Users/test/native-project"
-    });
-    const view = renderPanel(client, true);
-
-    await view.findByText("麒麟工作站", { selector: ".ta-item-title" });
-    await fireEvent.click(view.getByRole("button", { name: "客户端选择" }));
-
-    await waitFor(() => expect(client.pickLocalClientDirectory)
-      .toHaveBeenCalledWith("lci_device", null));
-    expect((view.getByPlaceholderText("绝对路径，例如 /Users/me/project") as HTMLInputElement).value)
-      .toBe("/Users/test/native-project");
-    expect((view.getByPlaceholderText("工作区名称") as HTMLInputElement).value)
-      .toBe("native-project");
   });
 
   it("lets the web fallback select one directory without navigating on single click", async () => {

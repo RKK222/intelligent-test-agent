@@ -128,7 +128,6 @@ import type {
   LocalClientCommandResult,
   LocalClientCredential,
   LocalClientDirectoryEntry,
-  LocalClientDirectorySelection,
   LocalClientDownloadAccess,
   LocalClientGlobalPolicy,
   LocalClientInstance,
@@ -297,7 +296,6 @@ export type FileUploadProgressHandler = (progress: FileUploadProgress) => void;
 const WEBSOCKET_OPEN_STATE = 1;
 const AGENT_CONFIG_PROGRESS_OPEN_TIMEOUT_MS = 3000;
 const APP_SOURCE_PROGRESS_OPEN_TIMEOUT_MS = 3000;
-const LOCAL_DIRECTORY_PICKER_TIMEOUT_MS = 10 * 60 * 1000;
 
 export type BackendApiClientOptions = {
   baseUrl?: string;
@@ -1291,18 +1289,6 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
           absolutePath,
           limit: 1000
         });
-      } finally {
-        client.close();
-      }
-    },
-    pickLocalClientDirectory: async (clientInstanceId: string, initialPath?: string | null) => {
-      const client = await createLocalDirectoryPickerClient(clientInstanceId);
-      try {
-        return await client.request<LocalClientDirectorySelection>(
-          "directory.pick",
-          { initialPath: initialPath?.trim() || undefined },
-          LOCAL_DIRECTORY_PICKER_TIMEOUT_MS
-        );
       } finally {
         client.close();
       }

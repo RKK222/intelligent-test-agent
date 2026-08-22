@@ -18,6 +18,7 @@ import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnecti
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientRegistrationService;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientTunnelGateway;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientUpdateCoordinator;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalWorkspaceApplicationService;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStartupService;
 import com.enterprise.testagent.system.management.localclient.LocalClientCredentialApplicationService;
@@ -68,6 +69,7 @@ class LocalClientConnectionAuthenticationRateLimitTest {
                 mock(BackendJavaRouteResolver.class),
                 mock(OpencodeProcessStartupService.class),
                 mock(LocalClientUpdateCoordinator.class),
+                mock(LocalWorkspaceApplicationService.class),
                 new LocalClientControlSecuritySettings(false, "127.0.0.1"),
                 limiter);
 

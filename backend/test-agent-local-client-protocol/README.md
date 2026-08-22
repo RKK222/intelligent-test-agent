@@ -16,3 +16,7 @@ fencing 约束。只有同时携带 launcher 版本并声明 `SELF_UPDATE_V1` �
 result marker 并在重连后重报；服务端完成幂等持久化才返回精确匹配原命令 generation/status 的 ACK，客户端收到匹配
 ACK 后清 marker。deadline 失败可由迟到 `SUCCEEDED/AUTO_ROLLED_BACK` 条件纠正；其它持久化终态冲突不返回 ACK。
 目标版本大于当前为 `UPDATE`、小于为 `ROLLBACK`、相同为 `SAME`。
+
+客户端桌面主动注册工作区使用 `WORKSPACE_REGISTER {name,rootPath}`，后台只采用已认证连接中的 userId、
+clientInstanceId 和 generation，不接受载荷伪造身份；平台完成客户端真实根校验和事务持久化后返回同 requestId 的
+`WORKSPACE_REGISTERED {workspaceId,name,rootPath}`。业务失败用同 requestId 的 `ERROR` 收敛单次请求，不关闭连接。

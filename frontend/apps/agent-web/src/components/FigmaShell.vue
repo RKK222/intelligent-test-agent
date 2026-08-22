@@ -613,8 +613,12 @@ const localClientEndpoints = computed(() =>
   props.opencodeEndpoints.filter(endpoint => endpoint.runtimeKind === "LOCAL_CLIENT")
 );
 
-/** 下载权限与实例状态独立刷新，旧进程归属节点的 capability 不得覆盖新后端的灰度结论。 */
-const showLocalClientDownload = computed(() => props.localClientDownloadAllowed === true);
+/** 已有任一在线客户端时隐藏安装入口，避免把“再下载”误当成后续操作。 */
+const showLocalClientDownload = computed(() =>
+  props.localClientDownloadAllowed === true
+  && !props.opencodeEndpointsLoading
+  && !localClientEndpoints.value.some(endpoint => endpoint.online)
+);
 
 /** 以平台注册实例为安装完成依据；多台本地设备时汇总健康数量，不依赖浏览器下载记录。 */
 const localClientHealthDisplay = computed(() => {

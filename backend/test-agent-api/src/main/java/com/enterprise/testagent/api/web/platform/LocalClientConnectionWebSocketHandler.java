@@ -16,13 +16,16 @@ import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnecti
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientRegistrationService;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientTunnelGateway;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientUpdateCoordinator;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalWorkspaceApplicationService;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStartupService;
 import com.enterprise.testagent.system.management.localclient.LocalClientCredentialApplicationService;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +53,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
     private final BackendJavaRouteResolver routeResolver;
     private final OpencodeProcessStartupService startupService;
     private final LocalClientUpdateCoordinator updateCoordinator;
+    private final LocalWorkspaceApplicationService workspaceService;
     private final LocalClientControlSecuritySettings securitySettings;
     private final LocalClientAuthenticationRateLimiter authenticationRateLimiter;
     private final LocalClientFrameCodec codec = new LocalClientFrameCodec();
@@ -63,6 +67,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             BackendJavaRouteResolver routeResolver,
             OpencodeProcessStartupService startupService,
             LocalClientUpdateCoordinator updateCoordinator,
+            LocalWorkspaceApplicationService workspaceService,
             LocalClientControlSecuritySettings securitySettings,
             LocalClientAuthenticationRateLimiter authenticationRateLimiter) {
         this.credentialService = Objects.requireNonNull(credentialService);
@@ -73,6 +78,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         this.routeResolver = Objects.requireNonNull(routeResolver);
         this.startupService = Objects.requireNonNull(startupService);
         this.updateCoordinator = Objects.requireNonNull(updateCoordinator);
+        this.workspaceService = Objects.requireNonNull(workspaceService);
         this.securitySettings = Objects.requireNonNull(securitySettings);
         this.authenticationRateLimiter = Objects.requireNonNull(authenticationRateLimiter);
     }
@@ -191,7 +197,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             registration.route().connectionGeneration(),
                             registration.modelGrantFingerprint(),
                             frame.traceId(),
-                            registration.selfUpdateSupported());
+                            registration.selfUpdateSupported(),
+                            ConcurrentHashMap.newKeySet());
                     if (!stateRef.compareAndSet(null, state)) {
                         throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重复注册");
                     }
@@ -299,11 +306,49 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                                 codec.payload(persistedAck)), closeSignal))
                         .then();
             }
+            case WORKSPACE_REGISTER -> registerWorkspace(frame, outbound, closeSignal, state);
             case LIFECYCLE_RESULT, HTTP_RESPONSE, STREAM_OPEN, STREAM_CHUNK, STREAM_END,
                     FILE_RESPONSE, BINARY_CHUNK, ERROR -> acceptTunnelResponse(state, frame);
             default -> Mono.error(new PlatformException(
                     ErrorCode.VALIDATION_ERROR, "客户端发送了不允许的帧类型"));
         };
+    }
+
+    /**
+     * 客户端主动注册不能占住当前 WebSocket 的 concatMap：业务服务会反向发出两个 FILE_REQUEST，
+     * 必须先释放入站流才能继续接收对应 FILE_RESPONSE。
+     */
+    private Mono<Void> registerWorkspace(
+            LocalClientFrame frame,
+            Sinks.Many<LocalClientFrame> outbound,
+            Sinks.One<String> closeSignal,
+            ConnectionState state) {
+        if (state.workspaceRequestIds().size() >= 4 || !state.workspaceRequestIds().add(frame.requestId())) {
+            emitRequestError(outbound, closeSignal, state, frame, new PlatformException(
+                    ErrorCode.CONFLICT, "本地工作区注册请求正在处理中"));
+            return Mono.empty();
+        }
+        LocalClientPayloads.WorkspaceRegister request = codec.payload(
+                frame, LocalClientPayloads.WorkspaceRegister.class);
+        Mono.fromCallable(() -> workspaceService.create(
+                        state.userId(),
+                        state.clientInstanceId(),
+                        request.name(),
+                        request.rootPath(),
+                        frame.traceId()))
+                .subscribeOn(Schedulers.boundedElastic())
+                .doFinally(ignored -> state.workspaceRequestIds().remove(frame.requestId()))
+                .subscribe(
+                        workspace -> emit(outbound, new LocalClientFrame(
+                                LocalClientProtocol.VERSION,
+                                LocalClientFrameType.WORKSPACE_REGISTERED,
+                                frame.requestId(),
+                                frame.traceId(),
+                                state.generation(),
+                                codec.payload(new LocalClientPayloads.WorkspaceRegistered(
+                                        workspace.workspaceId(), workspace.name(), workspace.rootPath()))), closeSignal),
+                        error -> emitRequestError(outbound, closeSignal, state, frame, error));
+        return Mono.empty();
     }
 
     private Mono<Void> blockingUpdate(Runnable action) {
@@ -374,6 +419,33 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         }
     }
 
+    /** 业务请求失败只终止对应注册操作，不关闭已认证的客户端连接。 */
+    private void emitRequestError(
+            Sinks.Many<LocalClientFrame> outbound,
+            Sinks.One<String> closeSignal,
+            ConnectionState state,
+            LocalClientFrame request,
+            Throwable error) {
+        ErrorCode errorCode = error instanceof PlatformException platformException
+                ? platformException.errorCode()
+                : ErrorCode.INTERNAL_ERROR;
+        String message = error instanceof PlatformException
+                ? error.getMessage()
+                : "本地工作区注册失败";
+        try {
+            emit(outbound, new LocalClientFrame(
+                    LocalClientProtocol.VERSION,
+                    LocalClientFrameType.ERROR,
+                    request.requestId(),
+                    request.traceId(),
+                    state.generation(),
+                    codec.payload(new LocalClientPayloads.Error(
+                            errorCode.name(), message, false, Map.of()))), closeSignal);
+        } catch (RuntimeException ignored) {
+            // 连接已结束时由客户端断线处理收敛等待中的注册请求。
+        }
+    }
+
     private static void emit(
             Sinks.Many<LocalClientFrame> outbound,
             LocalClientFrame frame,
@@ -404,6 +476,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             long generation,
             String modelGrantFingerprint,
             String traceId,
-            boolean selfUpdateSupported) {
+            boolean selfUpdateSupported,
+            Set<String> workspaceRequestIds) {
     }
 }

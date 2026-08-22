@@ -1344,7 +1344,7 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
   });
 
-  it("keeps the installer entry visible when a rollout user already has registered local OpenCode", async () => {
+  it("hides the installer while a local client is online and restores it after disconnect", async () => {
     const wrapper = mountShell({
       props: {
         currentUserName: "developer",
@@ -1379,7 +1379,7 @@ describe("FigmaShell", () => {
     });
 
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
-    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("本地 OpenCode 健康");
 
     const currentEndpoints = wrapper.props("opencodeEndpoints") as OpencodeEndpoint[];
@@ -1389,6 +1389,7 @@ describe("FigmaShell", () => {
         : endpoint)
     });
     expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("离线");
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(true);
   });
 
   it("opens the focused side-question input directly when the process and main session are ready", async () => {

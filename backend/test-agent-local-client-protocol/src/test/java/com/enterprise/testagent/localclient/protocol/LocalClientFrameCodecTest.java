@@ -126,6 +126,25 @@ class LocalClientFrameCodecTest {
     }
 
     @Test
+    void shouldRoundTripClientInitiatedWorkspaceRegistration() {
+        LocalClientFrame request = new LocalClientFrame(
+                LocalClientProtocol.VERSION,
+                LocalClientFrameType.WORKSPACE_REGISTER,
+                "workspace-request",
+                "trace-workspace",
+                7L,
+                codec.payload(new LocalClientPayloads.WorkspaceRegister(
+                        "native-project", "/Users/test/native-project")));
+
+        LocalClientFrame decoded = codec.decode(codec.encode(request));
+
+        assertThat(decoded.type()).isEqualTo(LocalClientFrameType.WORKSPACE_REGISTER);
+        assertThat(codec.payload(decoded, LocalClientPayloads.WorkspaceRegister.class))
+                .isEqualTo(new LocalClientPayloads.WorkspaceRegister(
+                        "native-project", "/Users/test/native-project"));
+    }
+
+    @Test
     void shouldRejectUnsupportedVersionAndMissingGeneration() {
         LocalClientFrame unsupported = new LocalClientFrame(
                 "local-opencode-client.v2",

@@ -179,7 +179,9 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 - 本地绝对根路径不得进入普通审计、运行事件、指标或错误响应；审计只保存 SHA-256 root/path digest。
   客户端 reported IP、observed address 和端口是状态信息，不得用作可信路由或授权依据。
 - client key 轮换/撤销必须同时 fencing 该用户所有连接和模型 grant。连接、文件 ticket、模型 grant、
-  HTTP/SSE 请求都必须绑定 `clientInstanceId + backendProcessId + connectionGeneration`，不允许跨代复用。
+  HTTP/SSE 请求都必须绑定 `clientInstanceId + backendProcessId + connectionGeneration`，不允许跨代复用。客户端托盘
+  主动发送 `WORKSPACE_REGISTER` 时，userId 和 clientInstanceId 只能取自已认证连接状态，载荷只接受工作区名称与
+  待验证绝对路径；服务端必须继续通过 FILE_REQUEST 安全内核校验和注册根目录，不能信任客户端声明或允许伪造身份。
 - 生产控制面只允许 HTTPS/WSS。OpenCode 只能绑定 loopback，平台模型 key 永不下发；OpenCode 仅持有
   随机本地 token，后台 grant 必须短 TTL 且可立即撤销。客户端 key 文件必须是当前用户所有的 `0600`，
   禁止命令行参数和环境变量传 key。

@@ -85,11 +85,12 @@ Workspace 与 `local_client_workspaces` 绑定。后续 RPC 只接收 workspaceI
 generation 和 root digest；持票 Java 通过现有文件 WebSocket handler 调用反向隧道，不新增 Java 间文件
 HTTP 代理。
 
-注册本地工作区的目录入口也复用这条链路。网页默认发送 `directory.pick`，由绑定且在线的客户端在自己的
-桌面会话打开原生目录选择器；客户端选中后先执行与注册工作区相同的真实路径和权限校验，再只返回规范化
-绝对路径。用户取消返回正常的 `cancelled=true`，客户端无图形桌面、版本过旧或原生弹窗不可用时，网页可
-显式改用 `directory.list` 逐层浏览。网页兜底中单击目录表示选中、双击才进入下一级，避免目录只能下钻而
-不能作为工作区根目录。两种入口都由 owner、实例 ID 和 connection generation 约束。
+注册本地工作区的默认入口位于客户端托盘。用户点击“选择并注册工作区”后由客户端桌面打开原生目录选择器，
+目录名作为默认工作区名称，并通过已认证反向连接发送 `WORKSPACE_REGISTER`。后台从连接状态取得 owner、实例 ID
+和 generation，异步调用既有 `LocalWorkspaceApplicationService`；该服务仍通过 `FILE_REQUEST` 完成真实路径、
+权限、符号链接和文件系统身份校验与根注册，再事务性持久化。WSS 入站处理必须先释放当前 `concatMap`，避免等待
+根校验时阻塞同一连接的 `FILE_RESPONSE`。网页仅保留 `directory.list` 逐层浏览和 HTTP 注册兜底，单击目录表示
+选中、双击才进入下一级。
 
 ## Session、Run 与夜间任务
 

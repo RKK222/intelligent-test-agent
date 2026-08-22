@@ -5,7 +5,6 @@ import com.enterprise.testagent.workspace.WorkspaceFileService;
 import com.enterprise.testagent.workspace.WorkspaceFileUpload;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,22 +18,12 @@ final class LocalClientFileRpcHandler {
     private final LocalWorkspaceRegistry workspaceRegistry;
     private final WorkspaceFileService fileService;
     private final ObjectMapper objectMapper;
-    private final DirectoryPicker directoryPicker;
     private final Map<String, ActiveUpload> uploads = new ConcurrentHashMap<>();
     private final Semaphore uploadSlots = new Semaphore(MAX_ACTIVE_UPLOADS);
 
     LocalClientFileRpcHandler(LocalWorkspaceRegistry workspaceRegistry, ObjectMapper objectMapper) {
-        this(workspaceRegistry, objectMapper, LocalClientDesktopActions::chooseDirectory);
-    }
-
-    /** 测试可注入无界面的选择器，生产始终使用客户端桌面原生入口。 */
-    LocalClientFileRpcHandler(
-            LocalWorkspaceRegistry workspaceRegistry,
-            ObjectMapper objectMapper,
-            DirectoryPicker directoryPicker) {
         this.workspaceRegistry = workspaceRegistry;
         this.objectMapper = objectMapper;
-        this.directoryPicker = directoryPicker;
         this.fileService = new WorkspaceFileService();
     }
 
@@ -43,7 +32,6 @@ final class LocalClientFileRpcHandler {
         Object result = switch (request.operation()) {
             case "directory.list" -> workspaceRegistry.listAbsolute(
                     requiredOneOf(params, "absolutePath", "path"), integer(params, "limit", 1000));
-            case "directory.pick" -> pickDirectory(text(params, "initialPath"));
             case "workspace.validateRoot" -> workspaceRegistry.validate(requiredText(params, "absolutePath"));
             case "workspace.registerRoot" -> workspaceRegistry.register(
                     requiredWorkspaceId(request), requiredText(params, "absolutePath"));
@@ -107,15 +95,6 @@ final class LocalClientFileRpcHandler {
             default -> throw new IllegalArgumentException("unsupported local file operation: " + request.operation());
         };
         return objectMapper.valueToTree(result);
-    }
-
-    private DirectorySelection pickDirectory(String initialPath) {
-        Path selected = directoryPicker.choose(initialPath);
-        if (selected == null) {
-            return new DirectorySelection(true, null);
-        }
-        LocalWorkspaceRegistry.Registration validated = workspaceRegistry.validate(selected.toString());
-        return new DirectorySelection(false, validated.normalizedRootPath());
     }
 
     void abortAll() {
@@ -258,14 +237,6 @@ final class LocalClientFileRpcHandler {
     private static int integer(JsonNode node, String field, int fallback) {
         JsonNode value = node.path(field);
         return value.isMissingNode() || value.isNull() ? fallback : value.asInt();
-    }
-
-    @FunctionalInterface
-    interface DirectoryPicker {
-        Path choose(String initialPath);
-    }
-
-    record DirectorySelection(boolean cancelled, String absolutePath) {
     }
 
     private record ActiveUpload(String workspaceId, String rootDigest, WorkspaceFileUpload upload) {

@@ -184,8 +184,10 @@ runtime-state DTO 的 `resend` 均为可选 additive 字段，分享 runtime-sta
 ## 本地 OpenCode 客户端入口
 
 `LocalClient*Controller` 和 `LocalClientConnectionWebSocketHandler` 承载当前用户 key、实例、生命周期、模型
-代理和反向 WSS 入口；`LocalWorkspaceController` 与现有文件 route/ticket/handler 承载本地目录选择和文件
-RPC。跨 Java 必须按连接记录的 backendProcessId/generation 复用公共 resolver/forwarder，Controller 不读取
+代理和反向 WSS 入口；`LocalWorkspaceController` 与现有文件 route/ticket/handler 承载网页目录浏览兜底和文件
+RPC，客户端托盘的 `WORKSPACE_REGISTER` 则由反向 WSS 入口调用同一个 `LocalWorkspaceApplicationService`。
+HTTP 注册/注销会同步等待反向文件 RPC，Controller 必须调度到 `boundedElastic`，不得阻塞 WebFlux event-loop。
+跨 Java 必须按连接记录的 backendProcessId/generation 复用公共 resolver/forwarder，Controller 不读取
 Redis 快照、不直接控制本地 supervisor。Workspace/Session/Run/夜间及统一 OpenCode 实例响应仅追加
 runtime/capability 字段，旧服务端路径保持兼容。完整契约见 `docs/api/http-api.md` 与
 `docs/api/event-stream.md`。

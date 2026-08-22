@@ -138,6 +138,14 @@ public final class LocalClientPayloads {
     public record FileResponse(boolean success, JsonNode result) {
     }
 
+    /** 客户端主动选择本机目录后，只提交显示名称和绝对路径；用户与实例身份取自已认证连接。 */
+    public record WorkspaceRegister(String name, String rootPath) {
+    }
+
+    /** 平台完成根目录校验、注册和持久化后返回的工作区摘要。 */
+    public record WorkspaceRegistered(String workspaceId, String name, String rootPath) {
+    }
+
     public record ModelGrant(String modelGrant, Instant expiresAt) {
     }
 

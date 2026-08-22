@@ -22,6 +22,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -47,6 +48,7 @@ final class LocalClientTray implements AutoCloseable {
     private final SystemTray systemTray;
     private final TrayIcon trayIcon;
     private final MenuItem statusItem;
+    private final MenuItem workspaceItem;
     private final MenuItem progressItem;
     private final BufferedImage petImage;
     private final ScheduledExecutorService updater;
@@ -60,6 +62,7 @@ final class LocalClientTray implements AutoCloseable {
             SystemTray systemTray,
             TrayIcon trayIcon,
             MenuItem statusItem,
+            MenuItem workspaceItem,
             MenuItem progressItem,
             BufferedImage petImage,
             ScheduledExecutorService updater,
@@ -69,6 +72,7 @@ final class LocalClientTray implements AutoCloseable {
         this.systemTray = systemTray;
         this.trayIcon = trayIcon;
         this.statusItem = statusItem;
+        this.workspaceItem = workspaceItem;
         this.progressItem = progressItem;
         this.petImage = petImage;
         this.updater = updater;
@@ -89,6 +93,8 @@ final class LocalClientTray implements AutoCloseable {
             MenuItem status = new MenuItem("正在连接");
             status.setEnabled(false);
             MenuItem openWeb = new MenuItem("打开网页");
+            MenuItem registerWorkspace = new MenuItem("选择并注册工作区…");
+            registerWorkspace.setEnabled(false);
             MenuItem reconnect = new MenuItem("重连");
             MenuItem viewLogs = new MenuItem("查看日志");
             MenuItem downloadLogs = new MenuItem("下载日志");
@@ -98,6 +104,7 @@ final class LocalClientTray implements AutoCloseable {
             menu.add(status);
             menu.addSeparator();
             menu.add(openWeb);
+            menu.add(registerWorkspace);
             menu.add(reconnect);
             menu.addSeparator();
             menu.add(viewLogs);
@@ -119,8 +126,8 @@ final class LocalClientTray implements AutoCloseable {
             ExecutorService actions = Executors.newCachedThreadPool(
                     Thread.ofPlatform().daemon().name("local-client-tray-action-", 0).factory());
             LocalClientTray result = new LocalClientTray(
-                    configuration, connection, tray, icon, status, progress, pet, updater, actions);
-            result.bindActions(openWeb, reconnect, viewLogs, downloadLogs, progress, exit);
+                    configuration, connection, tray, icon, status, registerWorkspace, progress, pet, updater, actions);
+            result.bindActions(openWeb, registerWorkspace, reconnect, viewLogs, downloadLogs, progress, exit);
             tray.add(icon);
             updater.scheduleAtFixedRate(result::refreshSafely, 0, 2, TimeUnit.SECONDS);
             LOGGER.info("local_client_tray_started platform={} icon=radar-bunny", platformName());
@@ -135,11 +142,12 @@ final class LocalClientTray implements AutoCloseable {
             LocalClientConfiguration configuration,
             LocalClientConnection connection) {
         return new LocalClientTray(
-                configuration, connection, null, null, null, null, null, null, null);
+                configuration, connection, null, null, null, null, null, null, null, null);
     }
 
     private void bindActions(
             MenuItem openWeb,
+            MenuItem registerWorkspace,
             MenuItem reconnect,
             MenuItem viewLogs,
             MenuItem downloadLogs,
@@ -147,6 +155,8 @@ final class LocalClientTray implements AutoCloseable {
             MenuItem exit) {
         openWeb.addActionListener(event -> runAction("open_web", () ->
                 LocalClientDesktopActions.openWeb(configuration.webBaseUri()), null));
+        registerWorkspace.addActionListener(event -> runAction(
+                "register_workspace", this::chooseAndRegisterWorkspace, null));
         reconnect.addActionListener(event -> {
             connection.reconnect();
             displayMessage("TestAgent 客户端", "正在重新连接", TrayIcon.MessageType.INFO);
@@ -189,12 +199,41 @@ final class LocalClientTray implements AutoCloseable {
         }
         String status = statusText(snapshot, snapshot.processStatus());
         statusItem.setLabel(status);
+        workspaceItem.setEnabled(snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE);
         int operationCount = snapshot.activeOperations().size();
         progressItem.setLabel("会话进度 · " + operationCount + " 项进行中");
         Dimension size = systemTray.getTrayIconSize();
         trayIcon.setImage(renderIcon(
                 petImage, size.width, size.height, statusColor(snapshot.connectionState())));
         trayIcon.setToolTip("TestAgent 客户端 · " + status);
+    }
+
+    /** 目录名称作为默认工作区名称，选择、注册和结果反馈全部在客户端桌面闭环。 */
+    private void chooseAndRegisterWorkspace() throws Exception {
+        Path selected = LocalClientDesktopActions.chooseDirectory(null);
+        if (selected == null) {
+            return;
+        }
+        try {
+            LocalClientPayloads.WorkspaceRegistered workspace = connection.registerWorkspace(
+                            workspaceName(selected), selected.toString())
+                    .get(50, TimeUnit.SECONDS);
+            displayMessage(
+                    "工作区注册成功",
+                    workspace.name(),
+                    TrayIcon.MessageType.INFO);
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof Exception resolved) {
+                throw resolved;
+            }
+            throw exception;
+        }
+    }
+
+    static String workspaceName(Path selected) {
+        Path fileName = selected == null ? null : selected.getFileName();
+        return fileName == null || fileName.toString().isBlank() ? "本地工作区" : fileName.toString();
     }
 
     private void showProgress() {

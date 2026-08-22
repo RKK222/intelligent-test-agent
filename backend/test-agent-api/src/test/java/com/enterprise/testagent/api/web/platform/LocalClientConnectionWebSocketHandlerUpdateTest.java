@@ -19,12 +19,14 @@ import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnecti
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientRegistrationService;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientTunnelGateway;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientUpdateCoordinator;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalWorkspaceApplicationService;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStartupService;
 import com.enterprise.testagent.system.management.localclient.LocalClientCredentialApplicationService;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
@@ -44,16 +46,19 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
             mock(BackendJavaRouteResolver.class),
             mock(OpencodeProcessStartupService.class),
             updates,
+            mock(LocalWorkspaceApplicationService.class),
             mock(LocalClientControlSecuritySettings.class),
             new LocalClientAuthenticationRateLimiter(1, Duration.ofMinutes(1)));
     private final UserId userId = new UserId("usr_local_ws_update");
     private final LocalClientInstanceId instanceId = new LocalClientInstanceId("lci_local_ws_update");
     private final LocalClientConnectionWebSocketHandler.ConnectionState state =
             new LocalClientConnectionWebSocketHandler.ConnectionState(
-                    userId, instanceId, 7, "grant-fingerprint", "trace-register", true);
+                    userId, instanceId, 7, "grant-fingerprint", "trace-register", true,
+                    ConcurrentHashMap.newKeySet());
     private final LocalClientConnectionWebSocketHandler.ConnectionState legacyState =
             new LocalClientConnectionWebSocketHandler.ConnectionState(
-                    userId, instanceId, 7, "grant-fingerprint", "trace-register", false);
+                    userId, instanceId, 7, "grant-fingerprint", "trace-register", false,
+                    ConcurrentHashMap.newKeySet());
 
     @Test
     void versionCheckIsHandledByUpdateCoordinator() {

@@ -42,7 +42,6 @@ const localWorkspaces = ref<Workspace[]>([]);
 const localWorkspaceClientId = ref("");
 const localWorkspaceName = ref("");
 const localWorkspaceRoot = ref("");
-const nativePickerLoading = ref(false);
 const pickerOpen = ref(false);
 const pickerLoading = ref(false);
 const pickerError = ref("");
@@ -279,32 +278,6 @@ async function runLocalClientAction(action: () => Promise<void>) {
   }
 }
 
-/** 客户端原生选择结果只在当前用户、页面和客户端仍一致时写入表单。 */
-async function pickDirectoryOnClient() {
-  const client = selectedLocalClient.value;
-  if (!client) return;
-  const requestContext = captureLocalClientRequestContext();
-  nativePickerLoading.value = true;
-  localClientError.value = "";
-  try {
-    const selection = await api.pickLocalClientDirectory(
-      client.clientInstanceId,
-      localWorkspaceRoot.value.trim() || null
-    );
-    if (!isLocalClientRequestCurrent(requestContext)
-      || selectedLocalClient.value?.clientInstanceId !== client.clientInstanceId
-      || selection.cancelled) return;
-    if (!selection.absolutePath?.trim()) throw new Error("客户端目录选择结果无效");
-    applyLocalWorkspaceRoot(selection.absolutePath);
-  } catch (error) {
-    if (isLocalClientRequestCurrent(requestContext)) {
-      localClientError.value = error instanceof Error ? error.message : "客户端目录选择失败";
-    }
-  } finally {
-    nativePickerLoading.value = false;
-  }
-}
-
 async function openWebDirectoryPicker() {
   if (!selectedLocalClient.value) return;
   pickerOpen.value = true;
@@ -514,21 +487,15 @@ function formatLocalClientTime(value?: string | null) {
       <el-empty v-else :image-size="56" description="暂无已认证客户端实例" />
 
       <div class="ta-local-workspace-form">
-        <h5>注册本地工作区</h5>
+        <h5>网页兜底注册本地工作区</h5>
+        <p class="ta-item-subtitle">默认请在客户端托盘点击“选择并注册工作区…”，无需在网页填写。</p>
         <el-select v-model="localWorkspaceClientId" placeholder="选择在线客户端" style="width: 100%">
           <el-option v-for="client in onlineLocalClients" :key="client.clientInstanceId" :label="client.clientName" :value="client.clientInstanceId" />
         </el-select>
         <el-input v-model="localWorkspaceName" maxlength="120" placeholder="工作区名称" />
         <div class="ta-path-row">
           <el-input v-model="localWorkspaceRoot" placeholder="绝对路径，例如 /Users/me/project" />
-          <el-button
-            type="primary"
-            plain
-            :loading="nativePickerLoading"
-            :disabled="!selectedLocalClient"
-            @click="pickDirectoryOnClient"
-          ><el-icon><Folder /></el-icon>客户端选择</el-button>
-          <el-button :disabled="!selectedLocalClient || nativePickerLoading" @click="openWebDirectoryPicker">网页浏览</el-button>
+          <el-button :disabled="!selectedLocalClient" @click="openWebDirectoryPicker">网页浏览</el-button>
         </div>
         <el-button
           type="primary"

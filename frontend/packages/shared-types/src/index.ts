@@ -422,12 +422,6 @@ export type LocalClientDirectoryEntry = {
   readable: boolean;
 };
 
-/** 客户端原生目录选择结果；取消是正常结果，不作为文件 RPC 错误。 */
-export type LocalClientDirectorySelection = {
-  cancelled: boolean;
-  absolutePath?: string | null;
-};
-
 export type LocalWorkspace = {
   workspaceId: string;
   name: string;

@@ -74,6 +74,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             Thread.ofPlatform().name("local-client-heartbeat-", 0).factory());
     private final Map<String, Future<?>> operations = new ConcurrentHashMap<>();
     private final Map<String, LocalClientRuntimeSnapshot.ActiveOperation> operationProgress = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<LocalClientPayloads.WorkspaceRegistered>> workspaceRegistrations =
+            new ConcurrentHashMap<>();
     private final AtomicReference<WebSocket> webSocket = new AtomicReference<>();
     private final AtomicLong generation = new AtomicLong();
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -173,6 +175,32 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         }
     }
 
+    /** 通过当前已认证连接注册用户在托盘中选择的本机目录，不依赖浏览器登录态。 */
+    CompletableFuture<LocalClientPayloads.WorkspaceRegistered> registerWorkspace(String name, String rootPath) {
+        long currentGeneration = generation.get();
+        if (connectionState.get() != LocalClientRuntimeSnapshot.ConnectionState.ONLINE || currentGeneration < 1) {
+            return CompletableFuture.failedFuture(new IllegalStateException("本地客户端尚未连接平台"));
+        }
+        String requestId = requestId("lcwr_");
+        CompletableFuture<LocalClientPayloads.WorkspaceRegistered> result = new CompletableFuture<>();
+        workspaceRegistrations.put(requestId, result);
+        result.orTimeout(45, TimeUnit.SECONDS)
+                .whenComplete((ignored, error) -> workspaceRegistrations.remove(requestId, result));
+        try {
+            sendFrame(new LocalClientFrame(
+                    LocalClientProtocol.VERSION,
+                    LocalClientFrameType.WORKSPACE_REGISTER,
+                    requestId,
+                    requestId("trace_"),
+                    currentGeneration,
+                    codec.payload(new LocalClientPayloads.WorkspaceRegister(name, rootPath))));
+        } catch (RuntimeException exception) {
+            workspaceRegistrations.remove(requestId, result);
+            result.completeExceptionally(exception);
+        }
+        return result;
+    }
+
     private void handleFrame(LocalClientFrame frame) {
         if (isRegistrationAuthenticationFailure(frame, codec, generation.get())) {
             stateStore.requireReEnrollment();
@@ -225,9 +253,35 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             case UPDATE_CANCEL -> handleUpdateCancel(frame);
             case UPDATE_STATUS_ACK -> requireSelfUpdater().handleStatusAck(
                     codec.payload(frame, LocalClientPayloads.UpdateStatusAck.class));
-            case ERROR -> throw new IllegalStateException("server rejected local client connection");
+            case WORKSPACE_REGISTERED -> completeWorkspaceRegistration(frame);
+            case ERROR -> {
+                if (!completeWorkspaceRegistrationError(frame)) {
+                    throw new IllegalStateException("server rejected local client connection");
+                }
+            }
             default -> throw new IllegalArgumentException("unsupported server frame type: " + frame.type());
         }
+    }
+
+    private void completeWorkspaceRegistration(LocalClientFrame frame) {
+        CompletableFuture<LocalClientPayloads.WorkspaceRegistered> pending =
+                workspaceRegistrations.remove(frame.requestId());
+        if (pending == null) {
+            throw new IllegalStateException("unknown workspace registration response");
+        }
+        pending.complete(codec.payload(frame, LocalClientPayloads.WorkspaceRegistered.class));
+    }
+
+    private boolean completeWorkspaceRegistrationError(LocalClientFrame frame) {
+        CompletableFuture<LocalClientPayloads.WorkspaceRegistered> pending =
+                workspaceRegistrations.remove(frame.requestId());
+        if (pending == null) {
+            return false;
+        }
+        LocalClientPayloads.Error error = codec.payload(frame, LocalClientPayloads.Error.class);
+        pending.completeExceptionally(new IllegalStateException(
+                error.message() == null || error.message().isBlank() ? "本地工作区注册失败" : error.message()));
+        return true;
     }
 
     private void submit(LocalClientFrame frame, Runnable task) {
@@ -558,6 +612,9 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         operations.forEach((id, future) -> future.cancel(true));
         operations.clear();
         operationProgress.clear();
+        workspaceRegistrations.forEach((id, pending) -> pending.completeExceptionally(
+                new IllegalStateException("平台连接已断开")));
+        workspaceRegistrations.clear();
         fileRpcHandler.abortAll();
         connectedAt.set(null);
         if (!closed.get()) {

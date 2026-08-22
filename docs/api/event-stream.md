@@ -1008,7 +1008,8 @@ manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字�
 | `LIFECYCLE_COMMAND` / `LIFECYCLE_RESULT` | server→client→server | `START/RESTART/STOP/STATUS`，返回 PID、权威启动时间、loopback health。 |
 | `HTTP_REQUEST` / `HTTP_RESPONSE` | server→client→server | OpenCode 非流式 HTTP；认证、Host、Cookie 等敏感/逐跳头不透传。 |
 | `STREAM_OPEN/STREAM_CHUNK/STREAM_END` | client→server | OpenCode SSE/流式 HTTP；顺序分片并等待发送完成形成背压。 |
-| `FILE_REQUEST` / `FILE_RESPONSE` | server→client→server | directory picker、根注册和完整 Workspace 文件 RPC。 |
+| `FILE_REQUEST` / `FILE_RESPONSE` | server→client→server | 网页目录浏览、根注册和完整 Workspace 文件 RPC。 |
+| `WORKSPACE_REGISTER` / `WORKSPACE_REGISTERED` | client→server / server→client | 托盘原生选择后直接注册；身份取自认证连接，响应复用 requestId。 |
 | `BINARY_CHUNK` | 双向预留/传输 | Base64 数据的原始分片上限为 256 KiB。 |
 | `MODEL_GRANT` | server→client | 原子替换短 TTL 模型 grant，不下发平台模型 key。 |
 | `VERSION_CHECK` | client→server | 客户端声明版本与 capabilities。 |

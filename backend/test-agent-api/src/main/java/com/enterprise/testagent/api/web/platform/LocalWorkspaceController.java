@@ -22,6 +22,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /** 本地工作区注册与注销 HTTP 入口；任意 Java 接入后精确转发到连接持有节点。 */
 @RestController
@@ -43,7 +45,7 @@ public class LocalWorkspaceController {
     }
 
     @PostMapping(BASE)
-    public ApiResponse<LocalWorkspaceView> create(
+    public Mono<ApiResponse<LocalWorkspaceView>> create(
             @RequestBody CreateLocalWorkspaceRequest request,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
@@ -51,42 +53,49 @@ public class LocalWorkspaceController {
         if (request == null) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "本地工作区请求不能为空");
         }
-        LocalClientInstanceId clientInstanceId = new LocalClientInstanceId(request.clientInstanceId());
-        LocalClientConnectionRoute route = service.requireOwnedOnlineRoute(userId, clientInstanceId);
-        BackendJavaProcess backend = routeResolver.requireBackend(route.backendProcessId());
-        if (!routeResolver.isCurrent(backend.backendProcessId())) {
-            requireNotAlreadyRouted(exchange);
-            return forwarder.forwardTyped(
-                    exchange,
-                    backend,
-                    request,
-                    new TypeReference<ApiResponse<LocalWorkspaceView>>() { });
-        }
-        return ApiResponse.ok(service.create(
-                userId, clientInstanceId, request.name(), request.rootPath(), traceId), traceId);
+        // 本地根目录验证通过反向隧道同步等待客户端回包，必须离开 WebFlux event-loop。
+        return Mono.fromCallable(() -> {
+                    LocalClientInstanceId clientInstanceId = new LocalClientInstanceId(request.clientInstanceId());
+                    LocalClientConnectionRoute route = service.requireOwnedOnlineRoute(userId, clientInstanceId);
+                    BackendJavaProcess backend = routeResolver.requireBackend(route.backendProcessId());
+                    if (!routeResolver.isCurrent(backend.backendProcessId())) {
+                        requireNotAlreadyRouted(exchange);
+                        return forwarder.forwardTyped(
+                                exchange,
+                                backend,
+                                request,
+                                new TypeReference<ApiResponse<LocalWorkspaceView>>() { });
+                    }
+                    return ApiResponse.ok(service.create(
+                            userId, clientInstanceId, request.name(), request.rootPath(), traceId), traceId);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     @DeleteMapping(BASE + "/{workspaceId}")
-    public ApiResponse<LocalWorkspaceDeleted> delete(
+    public Mono<ApiResponse<LocalWorkspaceDeleted>> delete(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        WorkspaceId requestedWorkspace = new WorkspaceId(workspaceId);
-        LocalClientConnectionRoute route = service.findOwnedWorkspaceOnlineRoute(userId, requestedWorkspace)
-                .orElse(null);
-        if (route != null) {
-            BackendJavaProcess backend = routeResolver.requireBackend(route.backendProcessId());
-            if (!routeResolver.isCurrent(backend.backendProcessId())) {
-                requireNotAlreadyRouted(exchange);
-                return forwarder.forwardTyped(
-                        exchange,
-                        backend,
-                        null,
-                        new TypeReference<ApiResponse<LocalWorkspaceDeleted>>() { });
-            }
-        }
-        return ApiResponse.ok(service.archive(userId, requestedWorkspace, traceId), traceId);
+        return Mono.fromCallable(() -> {
+                    WorkspaceId requestedWorkspace = new WorkspaceId(workspaceId);
+                    LocalClientConnectionRoute route = service.findOwnedWorkspaceOnlineRoute(userId, requestedWorkspace)
+                            .orElse(null);
+                    if (route != null) {
+                        BackendJavaProcess backend = routeResolver.requireBackend(route.backendProcessId());
+                        if (!routeResolver.isCurrent(backend.backendProcessId())) {
+                            requireNotAlreadyRouted(exchange);
+                            return forwarder.forwardTyped(
+                                    exchange,
+                                    backend,
+                                    null,
+                                    new TypeReference<ApiResponse<LocalWorkspaceDeleted>>() { });
+                        }
+                    }
+                    return ApiResponse.ok(service.archive(userId, requestedWorkspace, traceId), traceId);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     private void requireNotAlreadyRouted(ServerWebExchange exchange) {
