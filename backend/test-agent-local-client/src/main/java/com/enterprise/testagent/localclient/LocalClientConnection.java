@@ -71,9 +71,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private final LocalObservabilitySettings observabilitySettings;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final LocalClientFrameCodec codec = new LocalClientFrameCodec(objectMapper);
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+    private final HttpClient httpClient = loopbackHttpClient();
     private final ExecutorService inboundExecutor = Executors.newSingleThreadExecutor(
             Thread.ofPlatform().name("local-client-inbound-", 0).factory());
     private final ExecutorService operationExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -451,6 +449,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
 
     private void handleHttp(LocalClientFrame frame) {
         LocalClientPayloads.HttpRequest request = codec.payload(frame, LocalClientPayloads.HttpRequest.class);
+        LOGGER.debug("local_client_http_started requestId={} method={} path={}",
+                frame.requestId(), request.method(), request.pathAndQuery());
         LocalClientPayloads.LifecycleResult status = supervisor.status();
         if (!status.success() || !status.opencodeHealthy() || status.opencodePort() == null) {
             throw new IllegalStateException("local OpenCode is not healthy");
@@ -460,7 +460,12 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             throw new IllegalArgumentException("OpenCode request path is invalid");
         }
         URI target = URI.create("http://127.0.0.1:" + status.opencodePort() + pathAndQuery);
-        HttpRequest.Builder builder = HttpRequest.newBuilder().uri(target).timeout(Duration.ofHours(24));
+        // OpenCode 1.18.4 的本地 HTTP server 不支持 JDK HttpClient 的 h2c upgrade；POST 虽会执行，
+        // 但响应流不会结束。这里显式锁定 HTTP/1.1，避免平台在正常创建远端会话后误报 504。
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(target)
+                .version(HttpClient.Version.HTTP_1_1)
+                .timeout(Duration.ofHours(24));
         copyHeaders(request.headers(), builder);
         byte[] body = request.bodyBase64() == null || request.bodyBase64().isBlank()
                 ? new byte[0]
@@ -482,6 +487,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             byte[] responseBody = readBounded(response.body(), MAX_NON_STREAM_RESPONSE_BYTES);
             sendResponse(frame, LocalClientFrameType.HTTP_RESPONSE, new LocalClientPayloads.HttpResponse(
                     response.statusCode(), response.headers().map(), Base64.getEncoder().encodeToString(responseBody)));
+            LOGGER.debug("local_client_http_completed requestId={} status={} responseBytes={}",
+                    frame.requestId(), response.statusCode(), responseBody.length);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("OpenCode HTTP request cancelled", exception);
@@ -929,6 +936,13 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
 
     private static String requestId(String prefix) {
         return prefix + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    static HttpClient loopbackHttpClient() {
+        return HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
     }
 
     static boolean isRegistrationAuthenticationFailure(
