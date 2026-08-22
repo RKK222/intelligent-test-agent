@@ -189,6 +189,9 @@ backendProcessId/generation 精确路由，生命周期仍从公共 startup/stop
 离线或换代永不回退服务端 OpenCode，也不切换到其它客户端。运行中断连收敛为
 `LOCAL_CLIENT_DISCONNECTED`；未开始夜间任务只在当前窗口内等待同实例重连。本地
 execution node 另保存 `OFFLINE/local-client-anchor` 外键锚点，仅供旧关系表引用，绝不参与服务端节点路由。
+带登录用户的旧版 Run 入口和完成态消息快照同样复用 Spring 管理的 `AgentRuntimeTargetResolver`，以 Session
+已冻结目标为准；本地会话不得重新分配服务器进程。Run 接受后必须把实际 runtime kind、客户端实例和 generation
+写回 `runs`，保证历史、刷新和前端状态展示与真实执行位置一致。
 
 ## 受保护 Agent/Skill 运行
 
