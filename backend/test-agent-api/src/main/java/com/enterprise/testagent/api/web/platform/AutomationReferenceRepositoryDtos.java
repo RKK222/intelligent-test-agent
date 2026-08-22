@@ -7,6 +7,7 @@ public final class AutomationReferenceRepositoryDtos {
     }
 
     public record ConfigureRequest(
+            String alias,
             String branch,
             String directoryPath,
             String description,

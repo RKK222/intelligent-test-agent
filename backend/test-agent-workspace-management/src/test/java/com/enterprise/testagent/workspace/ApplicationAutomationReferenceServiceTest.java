@@ -124,6 +124,7 @@ class ApplicationAutomationReferenceServiceTest {
         service.configure(
                 APP_ID.value(),
                 REPOSITORY_ID.value(),
+                "custom-e2e",
                 "feature/e2e",
                 "src/test",
                 " ",
@@ -145,6 +146,7 @@ class ApplicationAutomationReferenceServiceTest {
             assertThat(saved.directoryPath()).isEqualTo("src/test");
             assertThat(saved.description())
                     .isEqualTo("自动化测试库 / feature/e2e / src/test，只读自动化引用");
+            assertThat(saved.referenceAlias()).isEqualTo("custom-e2e");
             assertThat(saved.merge()).isFalse();
             assertThat(saved.targetCommitHash()).isEqualTo("commit-a");
         });
@@ -165,11 +167,90 @@ class ApplicationAutomationReferenceServiceTest {
                 .thenReturn(state(APP_ID, 2L, null, 3L, 7L, ReferenceRepositoryStatus.READY));
 
         assertThatThrownBy(() -> service.configure(
-                APP_ID.value(), REPOSITORY_ID.value(), "main", "src/test", "描述", false,
+                APP_ID.value(), REPOSITORY_ID.value(), "automation-tests", "main", "src/test", "描述", false,
                 1L, "op_stale", ADMIN_ID, false, "trace_stale"))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.details()).containsEntry("actualGeneration", 2L);
+                });
+
+        verify(gitWorkspaceService, never()).resolveRemoteBranchCommit(anyString(), anyString(), any());
+        verify(automationRepository, never()).reserveGeneration(any(), anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void aliasThatOpenCodeCannotDiscoverIsRejectedBeforeRemoteAccess() {
+        assertThatThrownBy(() -> service.configure(
+                APP_ID.value(), REPOSITORY_ID.value(), "invalid alias", "main", "src/test", "描述", false,
+                0L, "op_invalid_alias", ADMIN_ID, false, "trace_invalid_alias"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.getMessage()).contains("引用名称必须是 1-128 个字符");
+                });
+
+        verify(remoteTreeReader, never()).listTree(any(), anyString(), any());
+        verify(automationRepository, never()).ensureState(any(), any(), anyString(), any());
+    }
+
+    @Test
+    void aliasAlreadyUsedByAnotherAutomationRepositoryInSameApplicationIsRejected() {
+        CodeRepositoryId otherRepositoryId = new CodeRepositoryId("repo_other_automation");
+        CodeRepository otherRepository = new CodeRepository(
+                otherRepositoryId,
+                "https://git.example.test/other-automation.git",
+                "其它自动化库",
+                "other-automation",
+                CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value(),
+                "EXTERNAL",
+                false,
+                NOW,
+                NOW);
+        when(configurationRepository.findRepositoriesByApplication(APP_ID))
+                .thenReturn(List.of(repository(), otherRepository));
+        when(remoteTreeReader.listTree(repository(), "main", ADMIN_ID)).thenReturn(remoteTree());
+        when(automationRepository.ensureState(APP_ID, REPOSITORY_ID, "trace_duplicate_alias", NOW))
+                .thenReturn(state(APP_ID, null, null, 1L, 0L, ReferenceRepositoryStatus.UNINITIALIZED));
+        when(automationRepository.findState(APP_ID, otherRepositoryId)).thenReturn(Optional.of(
+                new ApplicationAutomationReferenceState(
+                        APP_ID,
+                        otherRepositoryId,
+                        2L,
+                        null,
+                        3L,
+                        4L,
+                        ReferenceRepositoryStatus.READY,
+                        AutomationReferenceOperationType.CONFIGURE,
+                        "trace_other",
+                        null,
+                        NOW,
+                        NOW)));
+        when(automationRepository.findGeneration(APP_ID, otherRepositoryId, 2L)).thenReturn(Optional.of(
+                new ApplicationAutomationReferenceGeneration(
+                        APP_ID,
+                        otherRepositoryId,
+                        2L,
+                        "main",
+                        "src/test",
+                        "其它自动化引用",
+                        "shared-alias",
+                        false,
+                        "commit-other",
+                        AutomationReferenceGenerationStatus.READY,
+                        AutomationReferenceOperationType.CONFIGURE,
+                        ADMIN_ID,
+                        "op_other",
+                        "trace_other",
+                        null,
+                        NOW,
+                        NOW,
+                        NOW)));
+
+        assertThatThrownBy(() -> service.configure(
+                APP_ID.value(), REPOSITORY_ID.value(), "shared-alias", "main", "src/test", "描述", false,
+                0L, "op_duplicate_alias", ADMIN_ID, false, "trace_duplicate_alias"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("其它版本库占用");
                 });
 
         verify(gitWorkspaceService, never()).resolveRemoteBranchCommit(anyString(), anyString(), any());
@@ -186,10 +267,11 @@ class ApplicationAutomationReferenceServiceTest {
         when(automationRepository.findGeneration(APP_ID, REPOSITORY_ID, 4L)).thenReturn(Optional.of(existing));
 
         AutomationReferenceRepositoryResponses.Status response = service.configure(
-                APP_ID.value(), REPOSITORY_ID.value(), "other", "other/path", "other", false,
+                APP_ID.value(), REPOSITORY_ID.value(), "automation-tests", "other", "other/path", "other", false,
                 4L, "op_same", ADMIN_ID, false, "trace_replay");
 
         assertThat(response.activeGeneration()).isEqualTo(4L);
+        assertThat(response.currentConfiguration().alias()).isEqualTo("automation-tests");
         verify(remoteTreeReader, never()).listTree(any(), anyString(), any());
         verify(automationRepository, never()).reserveGeneration(any(), anyLong(), anyLong(), any());
         verify(automationRepository, never()).upsertTargets(any(), any(), anyLong(), any(), any());
@@ -198,14 +280,14 @@ class ApplicationAutomationReferenceServiceTest {
     @Test
     void pathTraversalAndFileSelectionAreRejected() {
         assertThatThrownBy(() -> service.configure(
-                APP_ID.value(), REPOSITORY_ID.value(), "main", "../secret", "描述", false,
+                APP_ID.value(), REPOSITORY_ID.value(), "automation-tests", "main", "../secret", "描述", false,
                 0L, "op_traversal", ADMIN_ID, false, "trace_traversal"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
 
         when(remoteTreeReader.listTree(repository(), "main", ADMIN_ID)).thenReturn(remoteTree());
         assertThatThrownBy(() -> service.configure(
-                APP_ID.value(), REPOSITORY_ID.value(), "main", "src/test/case.feature", "描述", false,
+                APP_ID.value(), REPOSITORY_ID.value(), "automation-tests", "main", "src/test/case.feature", "描述", false,
                 0L, "op_file", ADMIN_ID, false, "trace_file"))
                 .isInstanceOfSatisfying(PlatformException.class,
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
@@ -229,9 +311,9 @@ class ApplicationAutomationReferenceServiceTest {
         when(automationRepository.reserveGeneration(any(), eq(0L), eq(0L), eq(NOW)))
                 .thenAnswer(invocation -> Optional.of(invocation.getArgument(0)));
 
-        service.configure(APP_ID.value(), REPOSITORY_ID.value(), "main", "src/test", "应用 A", false,
+        service.configure(APP_ID.value(), REPOSITORY_ID.value(), "automation-tests-a", "main", "src/test", "应用 A", false,
                 0L, "op_app_a", ADMIN_ID, false, "trace_app_a");
-        service.configure(otherApp.value(), REPOSITORY_ID.value(), "main", "src/test", "应用 B", false,
+        service.configure(otherApp.value(), REPOSITORY_ID.value(), "automation-tests-b", "main", "src/test", "应用 B", false,
                 0L, "op_app_b", ADMIN_ID, false, "trace_app_b");
 
         ArgumentCaptor<ApplicationAutomationReferenceGeneration> generations =
@@ -418,6 +500,7 @@ class ApplicationAutomationReferenceServiceTest {
                 "main",
                 "src/test",
                 "自动化测试",
+                "automation-tests",
                 false,
                 "commit-main",
                 AutomationReferenceGenerationStatus.READY,

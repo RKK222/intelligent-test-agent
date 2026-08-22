@@ -109,6 +109,7 @@
 - `V20260812204207__dictionaries_add_automation_code_repository.sql`：新增生产必需字典项 `AUTOMATION_CODE_REPOSITORY`（自动化代码库），并把版本库类型顺序规范为测试工作库、自动化代码库、应用代码库、应用资产库，不改表结构或存量版本库数据。
 - `V20260819125704__automation_workspace_active_versions_create.sql`：已执行的旧模型 migration，文件名、字节和 checksum 必须保持不变，仅用于兼容历史升级。
 - `V20260821113000__application_automation_references_create.sql`：新增应用自动化引用状态、不可变 generation、逐服务器共享副本和 Run 租约表；从旧模板/激活版本中为每个 `(app_id, repository_id)` 迁移最新有效配置，并停用旧自动化工作空间入口但不删除历史数据。持久化统一由 `ApplicationAutomationReferenceMapper.xml` 提供，未新增 JDBC SQL。
+- `V20260822103625__application_automation_reference_generations_add_alias.sql`：为自动化引用不可变代次新增 `reference_alias`，存量配置按 `automation-{repository.english_name}` 前向回填；别名随应用共享配置代次整体切换，旧客户端未传别名时由服务端继续生成相同默认值。该文件已在本地持久 PostgreSQL 验收库执行，必须保持字节不变，SHA-256 为 `0313c4153a77cf0bb6311e2c12320454a993c41db556685876d6881a0726fdce`。
 - `V20260822075000__application_automation_reference_read_leases_create.sql`：新增只保存令牌 SHA-256 的历史自动化标签租约；MyBatis XML 以当前 READY 条件插入、完整用户/工作区/应用/版本库/generation 绑定续期，并在 Run/标签租约均释放后原子退役旧 generation、清理各服务器本地 replica 行。
 - `V20260702180000__add_code_repository_deployment_mode.sql`：为 `code_repositories` 增加非空 `deployment_mode`（`EXTERNAL`/`INTERNAL`，存量默认外部），并把 `english_name` 扩展到 128 字符。
 - `V20260703141000__create_run_session_scopes.sql`：创建 `run_session_scopes` 和 `run_session_scope_sessions`，并为 `run_events` 预留可空 session scope 与 `raw_event_id` 列；metadata 使用 `metadata_json text`，不使用 JSONB。
@@ -211,7 +212,7 @@
 - RunEvent 覆盖 append-only seq 单调递增、并发追加唯一性、`runId + lastSeq` 增量读取、结构化 scope 列和 `(run_id, seq)` 唯一约束。
 - Session 覆盖远端 opencode 映射、全局搜索、置顶排序、工作区会话分页和归档过滤。
 - AgentSessionBinding 覆盖 upsert、按 agent 查询、远端 session 唯一约束和从旧 opencode 字段回填。
-- ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、自动化代码库字典排序与 `repository_type` 往返、版本库部署模式 `deployment_mode` 默认值和 MyBatis XML 保存/读取、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。应用自动化引用集成测试覆盖真实旧历史迁移为 `(appId, repositoryId)` 唯一状态、应用间隔离、generation 乐观锁与幂等、逐服务器租约 fencing、离线恢复、标签租约绑定和旧 generation 安全退役；旧 `automation_workspace_active_versions` 仅作为 migration 输入保留。
+- ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、自动化代码库字典排序与 `repository_type` 往返、版本库部署模式 `deployment_mode` 默认值和 MyBatis XML 保存/读取、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。应用自动化引用集成测试覆盖真实旧历史迁移为 `(appId, repositoryId)` 唯一状态、应用间隔离、可编辑别名回填与往返、generation 乐观锁与幂等、逐服务器租约 fencing、离线恢复、标签租约绑定和旧 generation 安全退役；旧 `automation_workspace_active_versions` 仅作为 migration 输入保留。
 - ManagedWorkspace 覆盖 V9/V20260626120900 migration、版本工作区唯一性、每服务器副本 upsert、目标 commit、个人空间名称唯一性、最近使用偏好和同步审计保存。
 - OpencodeProcessManagement 覆盖 V14 migration、V17 loopback 种子清理、拓扑读写、历史用户进程与后端 Java 进程时间戳归一化、健康容器查询、运行管理拓扑列表、manager-backend 连接列表、opencode server 进程分页筛选、绑定关联查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - `MyBatisOpencodeProcessReservationLockPostgresqlIntegrationTest` 使用真实 PostgreSQL 覆盖用户/服务器 `FOR UPDATE` 锁顺序、首次 process/binding 原子预留、同用户并发单胜者、不同用户同服务器端口互斥，以及迁移双表 CAS 成功与冲突整笔回滚。

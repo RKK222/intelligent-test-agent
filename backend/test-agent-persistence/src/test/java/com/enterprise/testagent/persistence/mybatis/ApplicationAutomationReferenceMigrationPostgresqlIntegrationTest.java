@@ -23,6 +23,7 @@ class ApplicationAutomationReferenceMigrationPostgresqlIntegrationTest {
     private static final String PREVIOUS_HEAD = "20260820153926";
     private static final String MIGRATION_VERSION = "20260821113000";
     private static final String READ_LEASE_MIGRATION_VERSION = "20260822075000";
+    private static final String ALIAS_MIGRATION_VERSION = "20260822103625";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -65,11 +66,18 @@ class ApplicationAutomationReferenceMigrationPostgresqlIntegrationTest {
         assertThat(jdbc.sql("select count(*) from application_automation_reference_read_leases")
                 .query(Long.class).single()).isZero();
         assertThat(jdbc.sql("""
-                        select branch || ':' || directory_path
+                        select count(*) from flyway_schema_history
+                        where version = :version and success = true
+                        """)
+                .param("version", ALIAS_MIGRATION_VERSION)
+                .query(Long.class)
+                .single()).isEqualTo(1L);
+        assertThat(jdbc.sql("""
+                        select branch || ':' || directory_path || ':' || reference_alias
                         from application_automation_reference_generations
                         where app_id = 'app_alpha' and repository_id = 'repo_automation'
                         """)
-                .query(String.class).single()).isEqualTo("feature/e2e:src/test");
+                .query(String.class).single()).isEqualTo("feature/e2e:src/test:automation-automation-repo");
         assertThat(jdbc.sql("""
                         select count(*) from application_workspaces workspace
                         join code_repositories repository on repository.repository_id = workspace.repository_id

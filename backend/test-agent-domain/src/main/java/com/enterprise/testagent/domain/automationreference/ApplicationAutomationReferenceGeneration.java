@@ -6,7 +6,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import java.time.Instant;
 import java.util.Objects;
 
-/** 自动化引用不可变配置代次；分支、目录、描述和目标提交在代次创建后不再修改。 */
+/** 自动化引用不可变配置代次；别名、分支、目录、描述和目标提交在代次创建后不再修改。 */
 public record ApplicationAutomationReferenceGeneration(
         ApplicationId appId,
         CodeRepositoryId repositoryId,
@@ -14,6 +14,7 @@ public record ApplicationAutomationReferenceGeneration(
         String branch,
         String directoryPath,
         String description,
+        String referenceAlias,
         boolean merge,
         String targetCommitHash,
         AutomationReferenceGenerationStatus status,
@@ -40,6 +41,7 @@ public record ApplicationAutomationReferenceGeneration(
         branch = requireText(branch, "branch");
         directoryPath = normalizeDirectory(directoryPath);
         description = requireText(description, "description");
+        referenceAlias = requireText(referenceAlias, "referenceAlias");
         targetCommitHash = requireText(targetCommitHash, "targetCommitHash");
         operationId = requireText(operationId, "operationId");
         traceId = requireText(traceId, "traceId");

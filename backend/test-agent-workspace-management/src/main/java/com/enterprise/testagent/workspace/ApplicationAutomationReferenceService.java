@@ -231,6 +231,7 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
     public AutomationReferenceRepositoryResponses.Status configure(
             String appId,
             String repositoryId,
+            String alias,
             String branch,
             String directoryPath,
             String description,
@@ -245,6 +246,7 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
         }
         ApplicationId applicationId = requireApplicationAccess(appId, userId, superAdmin);
         CodeRepository repository = requireLinkedAutomationRepository(applicationId, repositoryId(repositoryId));
+        String normalizedAlias = AutomationReferencePathPolicy.normalizeAlias(alias, repository);
         String normalizedBranch = normalizeBranch(branch);
         String normalizedDirectory = normalizeRelativePath(directoryPath, true);
         String normalizedOperationId = normalizeOperationId(operationId);
@@ -262,6 +264,7 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
         if (state.pendingGeneration() != null || state.status().active()) {
             throw new PlatformException(ErrorCode.CONFLICT, "自动化引用存在执行中的操作");
         }
+        requireAliasAvailable(applicationId, repository.repositoryId(), normalizedAlias);
         String targetCommit = resolveRemoteHead(repository, normalizedBranch, userId);
         Instant now = clock.instant();
         String normalizedDescription = normalizeDescription(
@@ -273,6 +276,7 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
                 normalizedBranch,
                 normalizedDirectory,
                 normalizedDescription,
+                normalizedAlias,
                 false,
                 targetCommit,
                 AutomationReferenceGenerationStatus.SYNCHRONIZING,
@@ -327,6 +331,7 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
                 current.branch(),
                 current.directoryPath(),
                 current.description(),
+                current.referenceAlias(),
                 false,
                 targetCommit,
                 AutomationReferenceGenerationStatus.SYNCHRONIZING,
@@ -889,7 +894,7 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
                 generation.description(),
                 false,
                 generation.targetCommitHash(),
-                alias(repository),
+                generation.referenceAlias(),
                 logicalPath(appId, repository, generation),
                 directoryName(repository, generation.directoryPath()),
                 generation.activatedAt(),
@@ -1274,12 +1279,35 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
         return AutomationReferencePathPolicy.logicalPath(appId, repository, generation);
     }
 
-    private String alias(CodeRepository repository) {
-        return AutomationReferencePathPolicy.alias(repository);
-    }
-
     private String directoryName(CodeRepository repository, String directoryPath) {
         return AutomationReferencePathPolicy.directoryName(repository, directoryPath);
+    }
+
+    /** 同一应用内的自动化引用别名必须唯一；同时检查当前与待激活代次，避免 JSONC 对账产生歧义。 */
+    private void requireAliasAvailable(
+            ApplicationId appId, CodeRepositoryId targetRepositoryId, String referenceAlias) {
+        for (CodeRepository candidate : configurationRepository.findRepositoriesByApplication(appId)) {
+            if (!isAutomationRepository(candidate) || candidate.repositoryId().equals(targetRepositoryId)) {
+                continue;
+            }
+            ApplicationAutomationReferenceState state = automationRepository
+                    .findState(appId, candidate.repositoryId())
+                    .orElse(null);
+            if (state == null) {
+                continue;
+            }
+            for (Long generationValue : new Long[] {state.activeGeneration(), state.pendingGeneration()}) {
+                if (generationValue == null) {
+                    continue;
+                }
+                ApplicationAutomationReferenceGeneration generation = automationRepository
+                        .findGeneration(appId, candidate.repositoryId(), generationValue)
+                        .orElse(null);
+                if (generation != null && generation.referenceAlias().equals(referenceAlias)) {
+                    throw new PlatformException(ErrorCode.CONFLICT, "自动化引用别名已被当前应用的其它版本库占用");
+                }
+            }
+        }
     }
 
     private String scopeId(ApplicationId appId, CodeRepositoryId repositoryId) {

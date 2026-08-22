@@ -160,6 +160,7 @@ class ApplicationAutomationReferenceRunLeaseServiceTest {
                 "main",
                 "src/test",
                 "测试自动化引用",
+                "automation-tests",
                 false,
                 "abc123",
                 AutomationReferenceGenerationStatus.READY,

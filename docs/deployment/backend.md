@@ -158,7 +158,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端和前端展�
 
 ### 引用资产库多服务器副本
 
-引用资产根目录来自只读通用参数 `OPENCODE_REFERENCES_DIR=${SYS_DATA_ROOT_DIR}/agent-opencode/references`，每台在线 Java 所在服务器都必须拥有独立本地目录并让 Java 运行用户可读写。单个仓库固定落在 `{OPENCODE_REFERENCES_DIR}/{repository.englishName}`；首次初始化成功后 `englishName` 和代码库类型冻结，避免多服务器目录身份漂移。`REFERENCES_SDD_FOLDER_NAMES` 默认 `docs,spec`，保存小写逗号清单，后端只把仓库根层命中清单的真实目录标记为前端橙色可选目录。
+引用资产根目录来自只读通用参数 `OPENCODE_REFERENCES_DIR=${SYS_DATA_ROOT_DIR}/agent-opencode/references`，每台在线 Java 所在服务器都必须拥有独立本地目录并让 Java 运行用户可读写。单个仓库固定落在 `{OPENCODE_REFERENCES_DIR}/{repository.englishName}`；首次初始化成功后 `englishName` 和代码库类型冻结，避免多服务器目录身份漂移。`REFERENCES_SDD_FOLDER_NAMES` 默认 `docs,spec`，保存小写逗号清单，后端只把仓库根层命中清单的真实目录标记为前端蓝色可选目录。
 
 首次初始化固定分支和当时的远端 HEAD；后续同步只在同一分支解析新 HEAD，并以递增 generation 固定本轮提交。新副本先在引用根目录下创建同文件系统临时目录，clone 指定分支、解析并 hard reset 到固定提交、再次校验 HEAD 后使用原子 rename 落位；文件系统不支持原子移动时标记阻塞，不降级为普通移动。已有目录只在它是非符号链接 Git 仓库、工作树干净且 origin 与数据库匹配时接管：实际分支和 HEAD 已等于本 generation 固定目标时直接完成最终指针复核，不再执行 fetch、祖先校验或 reset；同分支存在差异时仍要求当前提交可快进。受控切换会用显式目标分支 refspec 绕过 single-branch clone 的旧 fetchspec，并从已固定提交安全创建不存在的本地分支，已有目标本地分支仍必须可快进。未知目录、脏工作树、origin/分支冲突或提交分叉均标记 `BLOCKED`，不删除、不覆盖。
 

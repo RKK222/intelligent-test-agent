@@ -1552,7 +1552,7 @@ onBeforeUnmount(() => {
                 <section class="reference-form-panel" aria-label="引用表单">
                   <div class="reference-panel-title">配置</div>
                   <div v-if="!configTarget" class="reference-compact-state is-centered">
-                    选择橙色首层目录后配置引用。
+                    选择蓝色首层目录后配置引用。
                   </div>
                   <div v-else-if="configLoading" class="reference-compact-state is-centered">正在读取工作区配置…</div>
                   <form v-else class="reference-form" @submit.prevent="submitConfig">
@@ -1685,7 +1685,8 @@ onBeforeUnmount(() => {
 }
 
 .reference-dialog {
-  --reference-folder-accent: #d97706;
+  --reference-folder-accent: #2563eb;
+  --asset-reference-accent: #2563eb;
   position: relative;
   display: flex;
   width: min(1120px, calc(100vw - 32px));
@@ -1823,8 +1824,8 @@ onBeforeUnmount(() => {
 }
 
 .reference-repository-card.is-selected {
-  border-color: var(--ta-border-strong);
-  box-shadow: inset 3px 0 0 var(--ta-ink);
+  border-color: #bfdbfe;
+  box-shadow: inset 3px 0 0 var(--asset-reference-accent);
 }
 
 .reference-repository-main {
@@ -1839,6 +1840,10 @@ onBeforeUnmount(() => {
   color: var(--ta-text);
   text-align: left;
   cursor: pointer;
+}
+
+.reference-repository-main > svg {
+  color: var(--asset-reference-accent);
 }
 
 .reference-repository-main:hover {
@@ -2269,7 +2274,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* 唯一橙色语义：后端明确标记 highlighted + selectable 的仓库首层 SDD 目录。 */
+/* 应用资产使用蓝色来源语义：后端明确标记 highlighted + selectable 的仓库首层 SDD 目录。 */
 .reference-tree-row.is-reference-selectable .reference-tree-icon,
 .reference-tree-row.is-reference-selectable .reference-tree-name {
   color: var(--reference-folder-accent);

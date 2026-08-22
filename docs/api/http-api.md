@@ -1561,7 +1561,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 
 ### 应用自动化引用 API
 
-Base URL：`/api/internal/platform/workspace-management/applications/{appId}/automation-reference-repositories`。配置维度固定为 `(appId, repositoryId)`：每个应用可关联多个自动化版本库，每个版本库只有一套当前分支、目录和共享描述；`merge` 固定为 `false`。读取接口要求当前用户是启用应用的有效成员，`SUPER_ADMIN` 可按既有平台权限读取；配置、同步、核验和终止仅允许 `APP_ADMIN` 及继承权限的 `SUPER_ADMIN`。
+Base URL：`/api/internal/platform/workspace-management/applications/{appId}/automation-reference-repositories`。配置维度固定为 `(appId, repositoryId)`：每个应用可关联多个自动化版本库，每个版本库只有一套当前别名、分支、目录和共享描述；`merge` 固定为 `false`。读取接口要求当前用户是启用应用的有效成员，`SUPER_ADMIN` 可按既有平台权限读取；配置、同步、核验和终止仅允许 `APP_ADMIN` 及继承权限的 `SUPER_ADMIN`。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -1569,7 +1569,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/aut
 | `GET` | `/applications/{appId}/automation-reference-repositories/{repositoryId}/status` | 查询单库当前操作、目标指针和逐服务器状态。 |
 | `GET` | `/applications/{appId}/automation-reference-repositories/{repositoryId}/branches` | 只读查询远端分支；不 clone、fetch 或切换共享副本。 |
 | `GET` | `/applications/{appId}/automation-reference-repositories/{repositoryId}/tree?branch={branch}&path={path}` | 浏览仓库根或任意已有目录；当前 READY 分支直接读取本机共享副本，其它分支只作远端预览。 |
-| `PUT` | `/applications/{appId}/automation-reference-repositories/{repositoryId}/configuration` | 保存分支、目录和描述并创建待切换 generation；在线节点准备完成后 CAS 原子激活。 |
+| `PUT` | `/applications/{appId}/automation-reference-repositories/{repositoryId}/configuration` | 保存别名、分支、目录和描述并创建待切换 generation；在线节点准备完成后 CAS 原子激活。 |
 | `POST` | `/applications/{appId}/automation-reference-repositories/{repositoryId}/synchronize` | 在当前分支创建新目标提交 generation，即“更新副本”。 |
 | `POST` | `/applications/{appId}/automation-reference-repositories/{repositoryId}/verify` | 只读刷新各服务器实际分支、HEAD 和匹配状态，不 fetch、不切换。 |
 | `POST` | `/applications/{appId}/automation-reference-repositories/{repositoryId}/terminate` | 按 `expectedGeneration` 终止当前操作；迟到结果受 generation fencing 隔离。 |
@@ -1578,6 +1578,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/aut
 
 ```json
 {
+  "alias": "e2e-automation",
   "branch": "feature_image",
   "directoryPath": "src/test",
   "description": "自动化 E2E / feature_image / src/test，只读自动化引用",
@@ -1587,7 +1588,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/aut
 }
 ```
 
-`expectedGeneration=0` 表示首次配置；服务端按当前激活 generation 做乐观锁校验。`operationId` 是保存/同步幂等键，同一配置重复提交返回同一操作；同键不同内容返回 `CONFLICT`。目录为空表示仓库根，只接受 `/` 分隔的相对目录；绝对路径、`.`、`..`、`.git`、文件和符号链接拒绝。描述为空时由服务端按“版本库名称 / 分支 / 目录，只读自动化引用”默认填充。响应 `currentConfiguration/pendingConfiguration` 包含 generation、branch、directoryPath、description、固定 `merge=false`、targetCommitHash、alias、logicalPath、directoryName、activatedAt 和 status；`servers[]` 只包含服务器标识、在线状态、实际分支/HEAD、匹配结果、同步/核验时间和安全错误，不返回共享副本物理路径。
+`expectedGeneration=0` 表示首次配置；服务端按当前激活 generation 做乐观锁校验。`operationId` 是保存/同步幂等键，同一配置重复提交返回同一操作；同键不同内容返回 `CONFLICT`。`alias` 可由管理员编辑，要求 1–128 个字符且不能包含空格、斜杠、反引号或逗号；省略或空白时兼容为 `automation-{repositoryEnglishName}`，同一应用内当前或待激活的其它自动化版本库不得占用相同别名。目录为空表示仓库根，只接受 `/` 分隔的相对目录；绝对路径、`.`、`..`、`.git`、文件和符号链接拒绝。描述为空时由服务端按“版本库名称 / 分支 / 目录，只读自动化引用”默认填充。响应 `currentConfiguration/pendingConfiguration` 包含 generation、branch、directoryPath、description、固定 `merge=false`、targetCommitHash、alias、logicalPath、directoryName、activatedAt 和 status；`servers[]` 只包含服务器标识、在线状态、实际分支/HEAD、匹配结果、同步/核验时间和安全错误，不返回共享副本物理路径。
 
 共享副本按“应用 + 版本库 + generation + 服务器”唯一，整个仓库只 clone 一次，目录只是副本内逻辑选择。在线服务器全部 READY 后才激活；离线服务器记为 `DEFERRED`，恢复后由补偿器补齐而不阻塞激活。保存成功后管理员当前工作树立即对账 `.opencode/opencode.jsonc`；其他成员在刷新、重新进入或创建新任务前通过既有文件 RPC 对账。每个版本库只保留一个托管引用和精确 `permission.external_directory`，Java 不向 Run 消息、system prompt 或 OpenCode 上下文注入引用信息。创建新任务前会固定本次实际可用的 READY generation；单库不可用时只跳过该库并通过 `run.created.payload.automationReferenceWarnings` 返回安全局部告警，主工作树、其它引用和 Run 继续可用。
 

@@ -5,6 +5,8 @@ type MessageKind = "success" | "info" | "warning" | "error";
 
 const COMMON_DURATION = 3500;
 const NOTIFICATION_DURATION = 4500;
+/** 工作台引用配置等全屏业务弹层最高使用 11000；全局反馈必须始终位于其上方。 */
+const TOP_MESSAGE_Z_INDEX = 12050;
 
 function asString(value: unknown): string | undefined {
   if (typeof value === "string" && value.length > 0) return value;
@@ -50,6 +52,7 @@ export function showMessage(kind: MessageKind, title: string, description?: stri
     offset: 24,
     duration: COMMON_DURATION,
     grouping: true,
+    zIndex: TOP_MESSAGE_Z_INDEX,
     customClass: "ta-top-message",
     message: renderHtml(title, description, traceId),
     dangerouslyUseHTMLString: true

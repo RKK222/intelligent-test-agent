@@ -1917,7 +1917,7 @@ migration，并加载隔离路径
 | 表 | 用途与关键约束 |
 |---|---|
 | `application_automation_references` | `(app_id, repository_id)` 主键；保存当前/待切换 generation、操作类型、总体状态、幂等 operation ID、乐观锁和安全错误。 |
-| `application_automation_reference_generations` | `(app_id, repository_id, generation)` 唯一不可变配置；保存分支、逻辑目录、共享描述、固定目标提交、操作者、状态和激活时间，`merge_enabled` 由 CHECK 固定为 `false`。 |
+| `application_automation_reference_generations` | `(app_id, repository_id, generation)` 唯一不可变配置；保存共享引用别名、分支、逻辑目录、共享描述、固定目标提交、操作者、状态和激活时间，`merge_enabled` 由 CHECK 固定为 `false`。 |
 | `application_automation_reference_replicas` | 每个 generation、每台 Linux 服务器唯一共享只读仓库副本；保存逻辑副本路径、实际分支/HEAD、状态、租约 fencing token、同步/核验时间和退避重试，不保存个人目录或运行态 Workspace。 |
 | `application_automation_reference_run_leases` | Run 对实际使用 generation 的生命周期租约；同一 Run/应用/版本库唯一，终态释放，用于保留运行中任务仍使用的旧 generation。 |
 
@@ -1932,6 +1932,10 @@ migration 会从仍关联自动化版本库的 `application_workspaces`、`appli
 `V20260822075000__application_automation_reference_read_leases_create.sql` 新增 `application_automation_reference_read_leases`。表中只保存随机浏览器令牌的 SHA-256、用户、主工作区、应用、版本库、generation、到期时间和审计时间，不保存明文令牌、逻辑路径或物理路径。租约只允许在目标 generation 仍为当前 READY 配置时通过条件 INSERT 创建；历史标签每次读取按完整绑定续期，伪造、串用户、串工作区或过期令牌均失败关闭。
 
 本地副本补偿先删除过期标签租约，再查询既非 active/pending、也无 Run/标签租约的 READY generation，并以同样条件原子更新为 `RETIRED`。各服务器只删除自己 `OPENCODE_REFERENCES_DIR/automation/.../{generation}` 下的受管目录和对应 replica 行；generation 配置保留审计。关系型 SQL 全部位于 `ApplicationAutomationReferenceMapper.xml`，没有新增 JDBC SQL。
+
+## V20260822103625 自动化引用共享别名
+
+`V20260822103625__application_automation_reference_generations_add_alias.sql` 为 `application_automation_reference_generations` 新增非空 `reference_alias varchar(128)`，并用 `automation-{repository.english_name}` 回填已存在的不可变代次；极端旧数据缺少英文名时使用稳定 repository ID 回退。别名属于应用与版本库当前共享配置，管理员修改后随新 generation 整体切换，旧 generation 保留原别名供运行中任务和历史只读标签审计。运行时校验继续由工作空间管理服务和 JSONC 对账共同执行，不新增 JDBC SQL，也不把别名写入 Run 提示词或广播 payload。该 migration 已在本地持久 PostgreSQL 验收库执行，文件必须保持字节不变，SHA-256 为 `0313c4153a77cf0bb6311e2c12320454a993c41db556685876d6881a0726fdce`。
 
 ## 本地客户端版本管理
 

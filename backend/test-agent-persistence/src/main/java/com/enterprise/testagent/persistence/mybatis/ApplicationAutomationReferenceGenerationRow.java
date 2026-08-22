@@ -10,6 +10,7 @@ public record ApplicationAutomationReferenceGenerationRow(
         String branch,
         String directoryPath,
         String description,
+        String referenceAlias,
         boolean mergeEnabled,
         String targetCommitHash,
         String status,

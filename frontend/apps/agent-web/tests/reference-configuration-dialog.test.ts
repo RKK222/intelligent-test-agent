@@ -1490,7 +1490,7 @@ describe("ReferenceConfigurationDialog", () => {
     expect(wrapper.text()).not.toContain("trace_transient");
   });
 
-  it("synchronizes an initialized repository, exposes only orange selectable root folders, and saves through workspace RPC", async () => {
+  it("synchronizes an initialized repository, exposes only blue selectable root folders, and saves through workspace RPC", async () => {
     vi.useFakeTimers();
     const mockApi = api({
       listReferenceRepositoryTree: vi.fn().mockImplementation((_appId: string, _repositoryId: string, path: string) =>
@@ -1517,6 +1517,8 @@ describe("ReferenceConfigurationDialog", () => {
     expect(mockApi.listReferenceRepositoryTree).toHaveBeenCalledWith("app-demo", "repo-assets", "");
     expect(wrapper.findAll(".is-reference-selectable")).toHaveLength(1);
     expect(wrapper.get(".is-reference-selectable").text()).toContain("docs");
+    expect(referenceConfigurationDialogSource).toContain("--reference-folder-accent: #2563eb");
+    expect(referenceConfigurationDialogSource).toContain("--asset-reference-accent: #2563eb");
 
     await wrapper.get('button[aria-label="展开 docs"]').trigger("click");
     await flushPromises();

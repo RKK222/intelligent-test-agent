@@ -1371,6 +1371,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       `${automationReferenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({ branch, path })}`
     ),
     configureAutomationReferenceRepository: (appId: string, repositoryId: string, payload: {
+      alias: string;
       branch: string;
       directoryPath: string;
       description?: string;

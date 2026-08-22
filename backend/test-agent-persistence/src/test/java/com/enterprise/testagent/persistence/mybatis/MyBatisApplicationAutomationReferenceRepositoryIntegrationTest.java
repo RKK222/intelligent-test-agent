@@ -62,7 +62,8 @@ class MyBatisApplicationAutomationReferenceRepositoryIntegrationTest {
         ResourceDatabasePopulator populator = new ResourceDatabasePopulator(
                 new ClassPathResource("fixtures/application-automation-reference-history.sql"),
                 new ClassPathResource("db/migration/V20260821113000__application_automation_references_create.sql"),
-                new ClassPathResource("db/migration/V20260822075000__application_automation_reference_read_leases_create.sql"));
+                new ClassPathResource("db/migration/V20260822075000__application_automation_reference_read_leases_create.sql"),
+                new ClassPathResource("db/migration/V20260822103625__application_automation_reference_generations_add_alias.sql"));
         populator.execute(schemaDataSource);
         jdbcClient = JdbcClient.create(h2);
 
@@ -102,6 +103,7 @@ class MyBatisApplicationAutomationReferenceRepositoryIntegrationTest {
             assertThat(generation.targetCommitHash()).isEqualTo("commit-feature");
             assertThat(generation.description())
                     .isEqualTo("自动化代码库 / feature/e2e / src/test，只读自动化引用");
+            assertThat(generation.referenceAlias()).isEqualTo("automation-automation-repo");
             assertThat(generation.merge()).isFalse();
         });
         assertThat(repository.findGeneration(APP_BETA, REPOSITORY_ID, 1L)).get().satisfies(generation -> {
@@ -309,6 +311,7 @@ class MyBatisApplicationAutomationReferenceRepositoryIntegrationTest {
                 "release/next",
                 "src/e2e",
                 "下一代自动化引用",
+                "automation-tests",
                 false,
                 "commit-next",
                 AutomationReferenceGenerationStatus.SYNCHRONIZING,

@@ -16,6 +16,7 @@ import {
   mustTerminateReferenceRepositoryBeforeRetry,
   REFERENCE_REPOSITORY_ACTIVE_STATUSES as ACTIVE_STATUSES
 } from "./reference-repository-operation-state";
+import { isOpenCodeReferenceAlias } from "./reference-config-jsonc";
 
 const POLL_INTERVAL_MS = 1_000;
 
@@ -34,7 +35,7 @@ const emit = defineEmits<{
 
 type Notice = { message: string; traceId?: string };
 type VisibleTreeNode = RepositoryTreeNode & { depth: number };
-type Draft = { branch: string; directoryPath: string; description: string };
+type Draft = { alias: string; branch: string; directoryPath: string; description: string };
 type OperationProgress = {
   token: number;
   repositoryId: string;
@@ -58,7 +59,7 @@ const treeByParent = ref<Record<string, RepositoryTreeNode[]>>({});
 const treeLoadingPaths = ref<Set<string>>(new Set());
 const treeErrors = ref<Record<string, Notice>>({});
 const expandedPaths = ref<Set<string>>(new Set());
-const draft = ref<Draft>({ branch: "", directoryPath: "", description: "" });
+const draft = ref<Draft>({ alias: "", branch: "", directoryPath: "", description: "" });
 const baseline = ref<Draft | null>(null);
 const saving = ref(false);
 const actionError = ref<Notice | null>(null);
@@ -93,10 +94,17 @@ const visibleTreeNodes = computed<VisibleTreeNode[]>(() => {
   return result;
 });
 const modified = computed(() => {
-  if (!baseline.value) return Boolean(draft.value.branch || draft.value.directoryPath || draft.value.description.trim());
-  return draft.value.branch !== baseline.value.branch
+  if (!baseline.value) return Boolean(
+    draft.value.alias || draft.value.branch || draft.value.directoryPath || draft.value.description.trim()
+  );
+  return draft.value.alias.trim() !== baseline.value.alias.trim()
+    || draft.value.branch !== baseline.value.branch
     || draft.value.directoryPath !== baseline.value.directoryPath
     || draft.value.description.trim() !== baseline.value.description.trim();
+});
+const aliasError = computed(() => {
+  if (isOpenCodeReferenceAlias(draft.value.alias)) return "";
+  return "别名须为 1-128 个字符，不能包含空格、斜杠、反引号或逗号";
 });
 const displayedLogicalPath = computed(() => modified.value
   ? "保存并同步后生成逻辑代次路径"
@@ -104,6 +112,7 @@ const displayedLogicalPath = computed(() => modified.value
 const canSave = computed(() => Boolean(
   props.canManage
   && selectedRepository.value
+  && !aliasError.value
   && draft.value.branch
   && draft.value.description.trim()
   && modified.value
@@ -157,10 +166,23 @@ function currentGeneration(repository: AutomationReferenceRepositoryStatus) {
   return repository.activeGeneration ?? 0;
 }
 
-function configurationDraft(configuration: AutomationReferenceConfiguration | null | undefined): Draft {
+function configurationDraft(
+  configuration: AutomationReferenceConfiguration | null | undefined,
+  repository: AutomationReferenceRepositoryStatus | null = selectedRepository.value
+): Draft {
   return configuration
-    ? { branch: configuration.branch, directoryPath: configuration.directoryPath, description: configuration.description }
-    : { branch: "", directoryPath: "", description: "" };
+    ? {
+        alias: configuration.alias,
+        branch: configuration.branch,
+        directoryPath: configuration.directoryPath,
+        description: configuration.description
+      }
+    : {
+        alias: repository ? `automation-${repository.englishName}` : "",
+        branch: "",
+        directoryPath: "",
+        description: ""
+      };
 }
 
 function defaultDescription(
@@ -251,7 +273,7 @@ async function selectRepository(repository: AutomationReferenceRepositoryStatus,
   treeLoadingPaths.value = new Set();
   expandedPaths.value = new Set();
   if (!keepBranchPopover) branchPopoverRepositoryId.value = null;
-  const nextDraft = configurationDraft(repository.currentConfiguration);
+  const nextDraft = configurationDraft(repository.currentConfiguration, repository);
   draft.value = nextDraft;
   baseline.value = repository.currentConfiguration ? { ...nextDraft } : null;
   branches.value = nextDraft.branch ? [nextDraft.branch] : [];
@@ -283,6 +305,7 @@ async function applyBranchDraft(repository: AutomationReferenceRepositoryStatus)
   const useDefaultDescription = !previous.description.trim()
     || previous.description === defaultDescription(previous.directoryPath, previous.branch);
   draft.value = {
+    alias: previous.alias,
     branch: selectedBranch.value,
     directoryPath: "",
     description: useDefaultDescription
@@ -432,7 +455,7 @@ function pollOperation(token: number) {
           await reconcileWorkspace(latest, true);
           const selected = latest.find((item) => item.repositoryId === selectedRepositoryId.value);
           if (selected) {
-            const nextDraft = configurationDraft(selected.currentConfiguration);
+            const nextDraft = configurationDraft(selected.currentConfiguration, selected);
             draft.value = nextDraft;
             baseline.value = { ...nextDraft };
           }
@@ -462,6 +485,7 @@ async function saveConfiguration() {
   const token = beginProgress(repository, "SYNCHRONIZE", "SAVE_CONFIGURATION");
   try {
     const next = await api.configureAutomationReferenceRepository(props.appId, repository.repositoryId, {
+      alias: draft.value.alias.trim(),
       branch: draft.value.branch,
       directoryPath: draft.value.directoryPath,
       description: draft.value.description.trim(),
@@ -648,7 +672,18 @@ onBeforeUnmount(() => {
           <section class="reference-form-panel" aria-label="自动化引用配置">
             <div class="reference-panel-title">配置</div>
             <form class="reference-form" @submit.prevent="saveConfiguration">
-              <label><span>参考别名（alias）</span><Input :model-value="selectedConfiguration?.alias || `automation-${selectedRepository.englishName}`" readonly aria-label="参考别名（alias）" /></label>
+              <label>
+                <span>参考别名（alias） <b aria-hidden="true">*</b></span>
+                <Input
+                  v-model="draft.alias"
+                  :readonly="!canManage"
+                  :disabled="saving"
+                  maxlength="128"
+                  aria-label="参考别名（alias）"
+                  :aria-invalid="aliasError ? 'true' : undefined"
+                />
+                <small v-if="aliasError" class="reference-field-error">{{ aliasError }}</small>
+              </label>
               <label><span>路径（path）</span><Input :model-value="displayedLogicalPath" readonly aria-label="路径（path）" /></label>
               <label><span>目录名称（sdd-folder-name）</span><Input :model-value="directoryName(draft.directoryPath)" readonly aria-label="目录名称（sdd-folder-name）" /></label>
               <label><span>是否合并（merge）</span><Input model-value="否" readonly aria-label="是否合并（merge）" /></label>
@@ -742,6 +777,7 @@ onBeforeUnmount(() => {
 .reference-form { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
 .reference-form label > span { display: block; margin-bottom: 5px; color: var(--ta-muted); font-family: "Geist Mono", monospace; font-size: 10px; }
 .reference-form label b { color: var(--ta-error); }
+.reference-field-error { display: block; margin-top: 4px; color: var(--ta-error); font-size: 10px; }
 .reference-select { width: 100%; height: 32px; border: 1px solid var(--ta-border); border-radius: 5px; padding: 0 8px; outline: none; background: var(--ta-surface); color: var(--ta-text); font-size: 12px; }
 .reference-state, .reference-compact-state { display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; color: var(--ta-muted); font-size: 12px; }
 .reference-state.is-centered, .reference-compact-state.is-centered { min-height: 120px; align-items: center; justify-content: center; text-align: center; }

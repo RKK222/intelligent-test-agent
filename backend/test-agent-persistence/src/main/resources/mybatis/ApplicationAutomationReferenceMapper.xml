@@ -28,6 +28,7 @@
             <arg column="branch" javaType="java.lang.String"/>
             <arg column="directory_path" javaType="java.lang.String"/>
             <arg column="description" javaType="java.lang.String"/>
+            <arg column="reference_alias" javaType="java.lang.String"/>
             <arg column="merge_enabled" javaType="_boolean"/>
             <arg column="target_commit_hash" javaType="java.lang.String"/>
             <arg column="status" javaType="java.lang.String"/>
@@ -68,7 +69,7 @@
         status, operation_type, trace_id, last_error, created_at, updated_at
     </sql>
     <sql id="GenerationColumns">
-        app_id, repository_id, generation, branch, directory_path, description, merge_enabled,
+        app_id, repository_id, generation, branch, directory_path, description, reference_alias, merge_enabled,
         target_commit_hash, status, operation_type, operated_by_user_id, operation_id, trace_id,
         last_error, activated_at, created_at, updated_at
     </sql>
@@ -168,12 +169,12 @@
 
     <insert id="insertGeneration">
         insert into application_automation_reference_generations(
-            app_id, repository_id, generation, branch, directory_path, description, merge_enabled,
+            app_id, repository_id, generation, branch, directory_path, description, reference_alias, merge_enabled,
             target_commit_hash, status, operation_type, operated_by_user_id, operation_id, trace_id,
             last_error, activated_at, created_at, updated_at
         ) values (
             #{row.appId}, #{row.repositoryId}, #{row.generation}, #{row.branch}, #{row.directoryPath},
-            #{row.description}, #{row.mergeEnabled}, #{row.targetCommitHash}, #{row.status},
+            #{row.description}, #{row.referenceAlias}, #{row.mergeEnabled}, #{row.targetCommitHash}, #{row.status},
             #{row.operationType}, #{row.operatedByUserId}, #{row.operationId}, #{row.traceId},
             #{row.lastError}, #{row.activatedAt}, #{row.createdAt}, #{row.updatedAt}
         )

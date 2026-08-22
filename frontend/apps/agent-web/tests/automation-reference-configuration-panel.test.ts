@@ -107,6 +107,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(wrapper.text()).toContain("刷新 Git 指针");
     expect(wrapper.text()).toContain("切换分支");
     expect(wrapper.get('input[aria-label="目录名称（sdd-folder-name）"]').element).toHaveProperty("value", "e2e");
+    expect(wrapper.get('input[aria-label="参考别名（alias）"]').element).toHaveProperty("readOnly", false);
     expect(wrapper.text()).not.toContain("历史版本");
     expect(wrapper.text()).not.toContain("上一次引用");
   });
@@ -200,12 +201,14 @@ describe("AutomationReferenceConfigurationPanel", () => {
     await continueButton!.trigger("click");
     await flushPromises();
     await wrapper.get('button[aria-label="选择目录 scripts"]').trigger("click");
+    await wrapper.get('input[aria-label="参考别名（alias）"]').setValue("release-e2e");
     await wrapper.get('textarea[aria-label="描述（description）"]').setValue("发布分支自动化脚本");
     expect(wrapper.get('button[aria-label="保存自动化配置并生效"]').attributes("disabled")).toBeUndefined();
     await wrapper.get("form").trigger("submit");
     await flushPromises();
 
     expect(mockApi.configureAutomationReferenceRepository).toHaveBeenCalledWith("app-demo", "repo_automation", {
+      alias: "release-e2e",
       branch: "release/v2",
       directoryPath: "scripts",
       description: "发布分支自动化脚本",
@@ -233,8 +236,20 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(wrapper.text()).toContain("main · scripts/e2e");
     expect(wrapper.text()).toContain("READY");
     expect(wrapper.find('button[aria-label="保存自动化配置并生效"]').exists()).toBe(false);
+    expect(wrapper.get('input[aria-label="参考别名（alias）"]').element).toHaveProperty("readOnly", true);
     expect(wrapper.findAll("button").some((button) => button.text() === "切换分支")).toBe(false);
     expect(mockApi.listAutomationReferenceRepositories).toHaveBeenCalledWith("app-demo");
+  });
+
+  it("rejects aliases that OpenCode cannot discover", async () => {
+    const wrapper = render(api());
+    await flushPromises();
+
+    await wrapper.get('input[aria-label="参考别名（alias）"]').setValue("invalid alias");
+
+    expect(wrapper.text()).toContain("不能包含空格、斜杠、反引号或逗号");
+    expect(wrapper.get('input[aria-label="参考别名（alias）"]').attributes("aria-invalid")).toBe("true");
+    expect(wrapper.get('button[aria-label="保存自动化配置并生效"]').attributes("disabled")).toBeDefined();
   });
 
   it("retries RETRY_WAIT by terminating the fenced generation before synchronizing again", async () => {

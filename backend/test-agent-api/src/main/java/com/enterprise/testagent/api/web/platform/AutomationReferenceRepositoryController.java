@@ -78,6 +78,7 @@ public class AutomationReferenceRepositoryController {
         return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> service.configure(
                 appId,
                 repositoryId,
+                request.alias(),
                 request.branch(),
                 request.directoryPath(),
                 request.description(),

@@ -183,6 +183,7 @@ class AutomationWorkspaceReferenceCatalogServiceTest {
                 "release/e2e",
                 "scripts/e2e",
                 "自动化代码库 / release/e2e / scripts/e2e，只读自动化引用",
+                "automation-tests",
                 false,
                 "abc123",
                 AutomationReferenceGenerationStatus.READY,

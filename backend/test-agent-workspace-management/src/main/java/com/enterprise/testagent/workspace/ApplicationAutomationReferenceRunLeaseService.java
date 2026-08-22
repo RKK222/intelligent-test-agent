@@ -107,7 +107,7 @@ public class ApplicationAutomationReferenceRunLeaseService
                     appId.value(),
                     repository.repositoryId().value(),
                     generation.generation(),
-                    AutomationReferencePathPolicy.alias(repository),
+                    generation.referenceAlias(),
                     AutomationReferencePathPolicy.logicalPath(appId, repository, generation),
                     AutomationReferencePathPolicy.directoryName(repository, generation.directoryPath()),
                     generation.description()));

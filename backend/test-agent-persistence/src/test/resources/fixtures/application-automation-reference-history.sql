@@ -5,6 +5,7 @@ create table applications (
 create table code_repositories (
     repository_id varchar(128) primary key,
     name varchar(255) not null,
+    english_name varchar(128),
     repository_type varchar(64) not null
 );
 
@@ -94,9 +95,9 @@ create table runs (
 );
 
 insert into applications(app_id) values ('app_alpha'), ('app_beta');
-insert into code_repositories(repository_id, name, repository_type) values
-    ('repo_automation', '自动化代码库', 'AUTOMATION_CODE_REPOSITORY'),
-    ('repo_code', '应用代码库', 'APPLICATION_CODE_REPOSITORY');
+insert into code_repositories(repository_id, name, english_name, repository_type) values
+    ('repo_automation', '自动化代码库', 'automation-repo', 'AUTOMATION_CODE_REPOSITORY'),
+    ('repo_code', '应用代码库', 'application-code', 'APPLICATION_CODE_REPOSITORY');
 insert into users(user_id) values ('usr_admin');
 
 insert into application_workspaces(

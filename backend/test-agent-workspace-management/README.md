@@ -2,7 +2,7 @@
 
 应用工作空间模板列表只返回配置管理中 `enabled=true` 的非自动化模板；响应继续携带 `repositoryType` 和兼容字段 `standard`。自动化代码库不再使用工作空间模板/版本模型，而由 `(appId, repositoryId)` 唯一当前配置管理；旧模板、版本、副本和个人 worktree 仅保留追溯，不能进入主工作空间、recent、个人 worktree 或 Git 入口。
 
-自动化引用同步使用独立的 generation/replica 状态和 `automation-reference.sync-requested` 广播，复用 `ReferenceRepositoryReplicaTaskDispatcher` 的有界后台队列与 generation fencing。同一应用、版本库和 generation 的重复唤醒合并，不同应用或版本库互不影响；HTTP 与广播线程都不等待 Git。副本固定落在 `OPENCODE_REFERENCES_DIR/automation/{appDigest}/{repositoryEnglishName}/{generation}`，不进入应用资产目录，也不创建个人 worktree。
+自动化引用同步使用独立的 generation/replica 状态和 `automation-reference.sync-requested` 广播，复用 `ReferenceRepositoryReplicaTaskDispatcher` 的有界后台队列与 generation fencing。同一应用、版本库和 generation 的重复唤醒合并，不同应用或版本库互不影响；HTTP 与广播线程都不等待 Git。共享配置代次保存可编辑 `referenceAlias`、分支、目录和描述；同一应用内当前/待激活自动化别名不得与其它版本库重复，并按 OpenCode 原生引用发现边界校验。副本固定落在 `OPENCODE_REFERENCES_DIR/automation/{appDigest}/{repositoryEnglishName}/{generation}`，不进入应用资产目录，也不创建个人 worktree。
 
 - `AutomationWorkspaceReferenceCatalogService` 按用户、主工作空间、应用、版本库、配置 generation 和当前 Java 服务器解析共享只读副本，要求 JSONC 逻辑路径、目标 commit 和本机副本均可验证；展开当前代次时签发只保存哈希的标签租约，已打开标签可在管理员切换后继续读取旧代次。不可用项转为局部告警，普通工作树和其它引用继续可用。
 - `ApplicationAutomationReferenceRunLeaseService` 在 Run 可见副作用前对账工作树 JSONC 并固定本次确实 READY 的 generation；不可用单库只产生安全告警并跳过。Run 只持久化 generation 生命周期租约，绝不向消息、system prompt 或 OpenCode 上下文拼接自动化说明或路径。补偿器在 Run/标签租约均释放后退役旧 generation，并只删除本机受管共享副本。

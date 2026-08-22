@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 final class AutomationReferencePathPolicy {
 
     private static final Pattern ENGLISH_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+    private static final Pattern ALIAS_PATTERN = Pattern.compile("^[^/\\\\\\s`,]{1,128}$");
 
     private AutomationReferencePathPolicy() {
     }
@@ -38,6 +39,19 @@ final class AutomationReferencePathPolicy {
 
     static String alias(CodeRepository repository) {
         return "automation-" + validatedEnglishName(repository);
+    }
+
+    /** 与 OpenCode 原生引用发现规则保持一致；旧客户端未传别名时继续使用稳定默认值。 */
+    static String normalizeAlias(String requestedAlias, CodeRepository repository) {
+        String value = requestedAlias == null || requestedAlias.isBlank()
+                ? alias(repository)
+                : requestedAlias.trim();
+        if (!ALIAS_PATTERN.matcher(value).matches()) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "引用名称必须是 1-128 个字符，且不能包含空格、斜杠、反引号或逗号");
+        }
+        return value;
     }
 
     static String directoryName(CodeRepository repository, String directoryPath) {

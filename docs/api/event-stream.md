@@ -551,7 +551,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 自动化引用不新增 RunEvent 类型，也不在普通对话、命令、重发、批量或定时 Run 的消息/system prompt 中注入路径。OpenCode 仅从 Run 绑定工作树的 `.opencode/opencode.jsonc` 读取 `references` 和精确外部目录权限；管理员保存、成员刷新/重新进入以及创建新任务前会通过既有文件 RPC 对账应用当前 generation，运行中的任务保持原配置和租约。若某个应用自动化副本在派发前不可用，既有 `run.created` 可追加 `automationReferenceWarnings: string[]`；内容只有版本库展示名和安全状态说明，不包含逻辑/物理路径、提交凭据或文件内容，旧客户端可忽略。
 
-`automation-reference.sync-requested` 与 `automation-reference.cancel-requested` 用于应用自动化引用 generation 的低延迟同步和终止唤醒，payload 固定只包含：
+`automation-reference.sync-requested` 与 `automation-reference.cancel-requested` 用于应用自动化引用 generation 的低延迟同步和终止唤醒，别名与分支、目录、描述一样只保存在不可变 generation 并由 JSONC 对账消费，不进入广播 payload。payload 固定只包含：
 
 ```json
 {

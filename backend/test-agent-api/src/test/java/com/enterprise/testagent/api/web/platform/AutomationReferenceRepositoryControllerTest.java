@@ -49,6 +49,7 @@ class AutomationReferenceRepositoryControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
                         {
+                          "alias":"custom-e2e",
                           "branch":"main",
                           "directoryPath":"src/test",
                           "description":"只读自动化引用",
@@ -76,6 +77,7 @@ class AutomationReferenceRepositoryControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
                         {
+                          "alias":"custom-e2e",
                           "branch":"feature/e2e",
                           "directoryPath":"src/test",
                           "description":"E2E 自动化脚本",
@@ -90,6 +92,7 @@ class AutomationReferenceRepositoryControllerTest {
         verify(service).configure(
                 "app_gcms",
                 "repo_automation",
+                "custom-e2e",
                 "feature/e2e",
                 "src/test",
                 "E2E 自动化脚本",
