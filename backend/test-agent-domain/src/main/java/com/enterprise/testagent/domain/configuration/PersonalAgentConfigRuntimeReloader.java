@@ -36,4 +36,15 @@ public interface PersonalAgentConfigRuntimeReloader {
             String traceId) {
         return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId);
     }
+
+    /**
+     * 工作树内 {@code .opencode/opencode.jsonc} 已更新时，只释放当前用户 OpenCode 配置缓存，
+     * 不切换公共 Agent 配置软链接。
+     */
+    default PersonalAgentConfigRuntimeReloadResult reloadWorkspaceConfiguration(
+            UserId userId,
+            String linuxServerId,
+            String traceId) {
+        return new PersonalAgentConfigRuntimeReloadResult(false, "当前运行时不支持工作树配置热加载");
+    }
 }

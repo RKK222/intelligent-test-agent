@@ -1926,6 +1926,13 @@ migration 会从仍关联自动化版本库的 `application_workspaces`、`appli
 副本逻辑路径位于 `OPENCODE_REFERENCES_DIR` 下的 `automation/{appId}/{repositoryEnglishName}/{generation}`，目录只是该完整仓库副本内的逻辑选择，不因不同目录重复 clone。API、错误和日志只使用逻辑路径或摘要，不返回数据库中解析后的物理根。状态切换以 generation 和 `lock_version` CAS；副本写回还必须匹配 `lease_token`，迟到 worker 不能覆盖新代次。在线服务器全部 READY 后才激活，离线服务器为 `DEFERRED` 并由补偿器恢复。
 
 `V20260819125704__automation_workspace_active_versions_create.sql` 已进入需要保留的历史，SHA-256 固定为 `a331d8b09575fae38b61471fca719af628ac898c01be82fc369c510de2772928`，不得删除、重命名或改写。发布验证必须使用真实 PostgreSQL 覆盖“已执行该旧 migration 且存在同库多模板、多分支、多版本、多副本数据 → 当前 HEAD”，断言每个 `(app_id, repository_id)` 只有一套当前配置；同时核对源码、persistence JAR 和最终应用 JAR 中两份 migration 字节一致。禁止使用 `outOfOrder`、`repair` 或手工修改 `flyway_schema_history`。
+
+## V20260822075000 自动化历史标签只读租约
+
+`V20260822075000__application_automation_reference_read_leases_create.sql` 新增 `application_automation_reference_read_leases`。表中只保存随机浏览器令牌的 SHA-256、用户、主工作区、应用、版本库、generation、到期时间和审计时间，不保存明文令牌、逻辑路径或物理路径。租约只允许在目标 generation 仍为当前 READY 配置时通过条件 INSERT 创建；历史标签每次读取按完整绑定续期，伪造、串用户、串工作区或过期令牌均失败关闭。
+
+本地副本补偿先删除过期标签租约，再查询既非 active/pending、也无 Run/标签租约的 READY generation，并以同样条件原子更新为 `RETIRED`。各服务器只删除自己 `OPENCODE_REFERENCES_DIR/automation/.../{generation}` 下的受管目录和对应 replica 行；generation 配置保留审计。关系型 SQL 全部位于 `ApplicationAutomationReferenceMapper.xml`，没有新增 JDBC SQL。
+
 ## 本地客户端版本管理
 
 `V20260820182024__local_client_releases_create_version_management.sql` 创建本地客户端受签名 release、artifact、

@@ -8,21 +8,26 @@ import com.enterprise.testagent.domain.automationreference.ApplicationAutomation
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceState;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceGenerationStatus;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunLeaseLifecycle;
+import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunPreparation;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
-import com.enterprise.testagent.domain.managedworkspace.AutomationWorkspaceReferenceCatalog;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloader;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
 import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -34,28 +39,41 @@ import org.springframework.stereotype.Service;
 public class ApplicationAutomationReferenceRunLeaseService
         implements AutomationReferenceRunLeaseLifecycle {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(ApplicationAutomationReferenceRunLeaseService.class);
+    private static final String OPENCODE_CONFIG_PATH = "opencode.jsonc";
+
     private final ConfigurationManagementRepository configurationRepository;
     private final ApplicationAutomationReferenceRepository automationRepository;
     private final AutomationWorkspaceReferenceCatalogService catalogService;
+    private final AgentConfigApplicationService agentConfigService;
+    private final PersonalAgentConfigRuntimeReloader runtimeReloader;
+    private final AutomationReferenceWorkspaceJsoncReconciler jsoncReconciler;
     private final Clock clock;
 
+    @Autowired
     public ApplicationAutomationReferenceRunLeaseService(
             ConfigurationManagementRepository configurationRepository,
             ApplicationAutomationReferenceRepository automationRepository,
             AutomationWorkspaceReferenceCatalogService catalogService,
+            AgentConfigApplicationService agentConfigService,
+            PersonalAgentConfigRuntimeReloader runtimeReloader,
+            ObjectMapper objectMapper,
             Clock clock) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository);
         this.automationRepository = Objects.requireNonNull(automationRepository);
         this.catalogService = Objects.requireNonNull(catalogService);
+        this.agentConfigService = Objects.requireNonNull(agentConfigService);
+        this.runtimeReloader = Objects.requireNonNull(runtimeReloader);
+        this.jsoncReconciler = new AutomationReferenceWorkspaceJsoncReconciler(
+                Objects.requireNonNull(objectMapper));
         this.clock = Objects.requireNonNull(clock);
     }
 
     @Override
-    public void acquire(Run run, Workspace workspace, UserId userId, String traceId) {
+    public AutomationReferenceRunPreparation prepare(Workspace workspace, UserId userId, String traceId) {
         ApplicationId appId = catalogService.resolveHostApplication(workspace.workspaceId()).orElse(null);
         if (appId == null) {
-            automationRepository.replaceRunLeases(run.runId(), List.of(), clock.instant());
-            return;
+            return AutomationReferenceRunPreparation.empty();
         }
         if (!configurationRepository.isActiveMember(appId, userId)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "当前用户已无应用自动化引用访问权限");
@@ -65,6 +83,8 @@ public class ApplicationAutomationReferenceRunLeaseService
         }
         LinuxServerId linuxServerId = new LinuxServerId(workspace.linuxServerId());
         List<ApplicationAutomationReferenceRunLease> leases = new ArrayList<>();
+        List<AutomationReferenceWorkspaceJsoncReconciler.Patch> patches = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
         for (CodeRepository repository : automationRepositories(appId)) {
             ApplicationAutomationReferenceState state = automationRepository
                     .findState(appId, repository.repositoryId())
@@ -74,18 +94,46 @@ public class ApplicationAutomationReferenceRunLeaseService
             }
             ApplicationAutomationReferenceGeneration generation = automationRepository
                     .findGeneration(appId, repository.repositoryId(), state.activeGeneration())
-                    .orElseThrow(() -> new PlatformException(
-                            ErrorCode.CONFLICT, "自动化引用当前配置代次不存在，请联系管理员"));
-            if (generation.status() != AutomationReferenceGenerationStatus.READY
+                    .orElse(null);
+            if (generation == null
+                    || generation.status() != AutomationReferenceGenerationStatus.READY
                     || !hasReadyReplica(generation, linuxServerId)) {
-                throw new PlatformException(
-                        ErrorCode.CONFLICT,
-                        "自动化引用共享副本尚未就绪，请稍后重试");
+                warnings.add(repository.name() + "：当前服务器共享只读副本尚未就绪，本次运行已跳过");
+                continue;
             }
             leases.add(new ApplicationAutomationReferenceRunLease(
                     appId, repository.repositoryId(), generation.generation(), linuxServerId));
+            patches.add(new AutomationReferenceWorkspaceJsoncReconciler.Patch(
+                    appId.value(),
+                    repository.repositoryId().value(),
+                    generation.generation(),
+                    AutomationReferencePathPolicy.alias(repository),
+                    AutomationReferencePathPolicy.logicalPath(appId, repository, generation),
+                    AutomationReferencePathPolicy.directoryName(repository, generation.directoryPath()),
+                    generation.description()));
         }
-        automationRepository.replaceRunLeases(run.runId(), leases, clock.instant());
+        String current = readWorkspaceConfiguration(workspace);
+        String reconciled = jsoncReconciler.reconcile(current, appId.value(), patches);
+        boolean changed = !reconciled.equals(current);
+        if (changed) {
+            agentConfigService.writeWorkspaceAgentFile(
+                    workspace.workspaceId().value(), OPENCODE_CONFIG_PATH, reconciled, null);
+            runtimeReloader.reloadWorkspaceConfiguration(userId, linuxServerId.value(), traceId);
+        }
+        if (!warnings.isEmpty()) {
+            LOGGER.warn(
+                    "Automation references partially unavailable, appId={}, workspaceId={}, skippedCount={}, traceId={}",
+                    appId.value(), workspace.workspaceId().value(), warnings.size(), traceId);
+        }
+        return new AutomationReferenceRunPreparation(leases, warnings, changed);
+    }
+
+    @Override
+    public void acquire(Run run, AutomationReferenceRunPreparation preparation, String traceId) {
+        AutomationReferenceRunPreparation safe = preparation == null
+                ? AutomationReferenceRunPreparation.empty()
+                : preparation;
+        automationRepository.replaceRunLeases(run.runId(), safe.leases(), clock.instant());
     }
 
     @Override
@@ -109,5 +157,17 @@ public class ApplicationAutomationReferenceRunLeaseService
                         && replica.status() == ReferenceRepositoryReplicaStatus.READY
                         && generation.branch().equals(replica.currentBranch())
                         && generation.targetCommitHash().equals(replica.currentCommitHash()));
+    }
+
+    private String readWorkspaceConfiguration(Workspace workspace) {
+        try {
+            return agentConfigService.readWorkspaceAgentFile(
+                    workspace.workspaceId().value(), OPENCODE_CONFIG_PATH, null).content();
+        } catch (PlatformException exception) {
+            if (exception.errorCode() == ErrorCode.NOT_FOUND) {
+                return "";
+            }
+            throw exception;
+        }
     }
 }

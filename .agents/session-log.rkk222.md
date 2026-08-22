@@ -12661,3 +12661,32 @@
 - 远端 `dev`、当前 `MERGE_HEAD` 均为 `011f48d18`，远端 `release` 为 `8385dbea9`；本次冲突解决满足“客户端以 dev 为基线、自动化以 release 为准”。
 - 自动化用户流程稳定为选择版本库、选择分支、选择任意已有目录、按需修改描述后保存生效；点选仓库和刷新指针不会拉取，只有保存配置或“更新副本”创建同步任务。
 - 本次涉及既有客户端/API/数据库兼容和日志脱敏，不新增部署节点，不修改 `.env*`、generated SDK、OpenCode 源码或已执行 migration，不触碰用户未跟踪的 `.reasonix/`。
+
+## 2026-08-22 - 修复自动化引用运行竞态、历史标签租约和页面回归
+
+### Why
+
+- 多轮合并后的自动化主模型已经是 `(appId, repositoryId)` 共享只读引用，但审计发现新 Run 的 JSONC 对账、generation 生命周期、历史标签读取和页面重试仍有竞态或回归缺口；重复刷新文件树还会持续新增 12 小时标签租约。
+- 用户要求按最终口径修复、使用本地真实数据平面完成端到端验收，并确认旧个人 worktree/active-version 正常入口已经退出；本次只做本地提交，不推送。
+
+### What
+
+- Run 在持久锚点和 owner fencing 建立后才锁定精确自动化 generation，并在所有终态/启动失败路径释放；派发前通过既有工作区文件 RPC 对账 `.opencode/opencode.jsonc` 并走空闲 reload，不向提示词、用户消息或 OpenCode 出站上下文注入引用说明或物理路径。单库副本不可用时删除该库 JSONC 托管引用、返回安全局部告警并继续主 Run；同一 `clientRequestId` 幂等重试不再触碰工作树配置。
+- 新增服务端历史只读标签租约，令牌绑定用户、工作区、应用、版本库和 generation，数据库仅保存 SHA-256；generation 退役与 Run/标签租约使用同一行锁串行化，无租约的旧代次才会退役并安全清理本机共享副本。文件树重建对同一有效租约做有界进程内复用，避免每次刷新写库。
+- 自动化定位器、WebSocket RPC 和前端共享类型携带标签租约；继续拒绝伪造 locator、路径穿越、符号链接、`.git`、搜索、requirements、标准 Git 和全部写操作。旧 active-version 生产 Controller/Service/Mapper 保持删除，仅保留冻结 migration 和新模型迁移输入；历史个人 worktree 只保留兼容只读守卫。
+- 前端对自动化列表兼容数组及滚动升级残留的 `{data: []}`，修复应用资产库选择回归；自动化 `RETRY_WAIT` 与资产库一致，先终止旧 generation 再精确重试。两类页面复用同一操作状态函数；自动化文件树和仓库/目录提示使用紫色，应用资产 docs 保持蓝色。
+- 更新 HTTP API、事件/文件 RPC、数据库、安全、测试说明、各后端模块 README、前端 README/PACKAGE 和共享类型说明，并把旧自动化个人 worktree 的真实记录明确标为已退出的历史追溯。
+
+### How
+
+- 后端完整 26 模块 `mvn test` 通过；追加修复后定向通过 `AutomationWorkspaceReferenceCatalogServiceTest` 5/5、`RunApplicationServiceTest#redisSummaryExistingSessionStartsAndCancelsWithoutLegacyWrites` 1/1，以及 H2/真实 PostgreSQL 的 generation 退役、Run/标签租约互斥和历史升级用例。
+- 前端全量 Vitest 148 个文件通过：2198 passed、1 skipped；用户手册、`vue-tsc` 与 agent-web production build 通过。两次 JDK 25 完整后端打包成功，最终源码、persistence JAR 和应用嵌套 JAR 的新 migration 字节一致。
+- 根目录 `.env.test` 的持久 PostgreSQL 已执行 `20260821113000` 与 `20260822075000` 且均为 success；本地 PostgreSQL、Redis、XXL MySQL、ClickHouse、backend、opencode-manager 和 frontend 全部启动，`dev-health-check` 与 readiness 通过。
+- 888888888 真实浏览器验收应用资产库可选、自动化 A/B 各一套当前配置、任意目录、Git 指针、紫色来源、只读打开 B 仓库 `default.css` 并加入对话上下文（18 行/226 字）；公共 Agent Hub 正常展示 14 个 Agent，浏览器 0 error。后端重启后连续刷新工作台 3 次，未过期标签租约保持 `36 → 36`。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，扫描旧符号/端点、冲突标记与 `git diff --check`；未改 `.env*`、generated SDK、OpenCode 源码或冻结 migration，未触碰未跟踪 `.reasonix/`。
+
+### Result
+
+- 自动化引用事实源、页面、共享副本和 Run 生命周期现按最终模型收敛：一个应用可有多个自动化版本库，每个版本库只有一个当前分支、目录和描述；成员共同读取服务器共享副本，个人工作树只保存 JSONC 逻辑引用。
+- 切换后新目录和新 Run 使用当前 generation，已打开标签依赖服务端租约继续读取旧 generation，运行中任务依赖 Run 租约保持原状态；旧代次无租约后自动退役。企业旧模板通过前向 migration 自动归并，历史文件和会话不自动删除。
+- 本次增加兼容 API 字段与新的标签租约表，不新增部署节点；平台只读边界保持应用层约束，不增加 OS 只读挂载。服务正在 `127.0.0.1:8080`、`127.0.0.1:3000` 和 `127.0.0.1:18123` 运行；按用户要求仅本地提交、不推送。

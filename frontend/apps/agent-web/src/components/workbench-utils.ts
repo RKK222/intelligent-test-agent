@@ -379,6 +379,17 @@ export function assistantSummaryMessageId(payload: Record<string, unknown>): str
     : undefined;
 }
 
+/** Run 创建时只展示后端已经脱敏的局部自动化引用告警，坏 payload 不影响主对话。 */
+export function automationReferenceWarnings(payload: Record<string, unknown>): string[] {
+  const candidate = payload.automationReferenceWarnings;
+  if (!Array.isArray(candidate)) return [];
+  return candidate
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim().slice(0, 240))
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
 export const OPENCODE_HEALTH_REFETCH_INTERVAL_MS = 10_000;
 export const PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS = 5_000;
 /** 会话列表按固定小页渐进加载，避免首次进入工作台就保留过多历史记录。 */

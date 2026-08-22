@@ -183,6 +183,11 @@ public interface ApplicationAutomationReferenceMapper {
 
     int deleteRunLeases(@Param("runId") String runId);
 
+    String lockReadyGeneration(
+            @Param("appId") String appId,
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation);
+
     int insertRunLease(
             @Param("runId") String runId,
             @Param("appId") String appId,
@@ -190,4 +195,44 @@ public interface ApplicationAutomationReferenceMapper {
             @Param("generation") long generation,
             @Param("linuxServerId") String linuxServerId,
             @Param("now") Instant now);
+
+    int insertReadLeaseForActiveGeneration(
+            @Param("tokenHash") String tokenHash,
+            @Param("userId") String userId,
+            @Param("workspaceId") String workspaceId,
+            @Param("appId") String appId,
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("expiresAt") Instant expiresAt,
+            @Param("now") Instant now);
+
+    int renewReadLease(
+            @Param("tokenHash") String tokenHash,
+            @Param("userId") String userId,
+            @Param("workspaceId") String workspaceId,
+            @Param("appId") String appId,
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("nextExpiresAt") Instant nextExpiresAt,
+            @Param("now") Instant now);
+
+    int deleteExpiredReadLeases(@Param("now") Instant now);
+
+    List<ApplicationAutomationReferenceGenerationRow> findRetirableGenerations(
+            @Param("now") Instant now, @Param("limit") int limit);
+
+    int retireGeneration(
+            @Param("appId") String appId,
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("now") Instant now);
+
+    List<ApplicationAutomationReferenceReplicaRow> findRetiredReplicas(
+            @Param("linuxServerId") String linuxServerId, @Param("limit") int limit);
+
+    int deleteRetiredReplica(
+            @Param("appId") String appId,
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("linuxServerId") String linuxServerId);
 }

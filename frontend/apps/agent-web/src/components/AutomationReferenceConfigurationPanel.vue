@@ -11,9 +11,13 @@ import { Button, copyTextToClipboard, Input, Spinner, Textarea } from "@test-age
 import { Check, ChevronDown, ChevronRight, Copy, File, Folder, GitBranch, LibraryBig, RefreshCw } from "lucide-vue-next";
 import RepositoryOperationProgressDialog from "./RepositoryOperationProgressDialog.vue";
 import { reconcileAutomationReferenceWorkspace } from "./automation-reference-config-reconciliation";
+import {
+  canRetryReferenceRepositoryOperation,
+  mustTerminateReferenceRepositoryBeforeRetry,
+  REFERENCE_REPOSITORY_ACTIVE_STATUSES as ACTIVE_STATUSES
+} from "./reference-repository-operation-state";
 
 const POLL_INTERVAL_MS = 1_000;
-const ACTIVE_STATUSES = new Set(["INITIALIZING", "SYNCHRONIZING", "VERIFYING"]);
 
 const props = defineProps<{
   open: boolean;
@@ -127,10 +131,9 @@ const progressCanClose = computed(() => Boolean(
   progress.value?.requestState === "FAILED"
   || ["READY", "FAILED"].includes(acceptedProgressTarget.value?.status ?? "")
 ));
-const progressCanRetry = computed(() => Boolean(
-  progress.value?.requestState === "FAILED"
-  || acceptedProgressTarget.value?.status === "FAILED"
-  || acceptedProgressTarget.value?.servers.some((server) => server.status === "RETRY_WAIT")
+const progressCanRetry = computed(() => canRetryReferenceRepositoryOperation(
+  progress.value?.requestState,
+  acceptedProgressTarget.value
 ));
 const progressCanTerminate = computed(() => Boolean(
   acceptedProgressTarget.value && ACTIVE_STATUSES.has(acceptedProgressTarget.value.status)
@@ -500,7 +503,7 @@ async function verifyPointers(repository: AutomationReferenceRepositoryStatus) {
   }
 }
 
-async function terminateOperation() {
+async function terminateOperation(retryAfterTermination = false) {
   const current = progress.value;
   if (!current || current.generation === null || terminating.value) return;
   terminating.value = true;
@@ -510,7 +513,13 @@ async function terminateOperation() {
     const next = await api.terminateAutomationReferenceRepository(props.appId, current.repositoryId, current.generation);
     if (progress.value?.token !== current.token) return;
     replaceRepository(next);
-    emit("operation-state", { open: true, canClose: true });
+    if (retryAfterTermination) {
+      if (current.retryAction === "VERIFY_POINTERS") void verifyPointers(next);
+      else if (current.retryAction === "SYNCHRONIZE") void synchronizeRepository(next);
+      else void saveConfiguration();
+    } else {
+      emit("operation-state", { open: true, canClose: true });
+    }
   } catch (error) {
     if (progress.value?.token === current.token) {
       terminationError.value = notice(error, "终止自动化引用操作失败");
@@ -523,7 +532,12 @@ async function terminateOperation() {
 
 function retryOperation() {
   const repository = progressRepository.value;
-  const retryAction = progress.value?.retryAction;
+  const current = progress.value;
+  const retryAction = current?.retryAction;
+  if (current && mustTerminateReferenceRepositoryBeforeRetry(acceptedProgressTarget.value)) {
+    void terminateOperation(true);
+    return;
+  }
   closeProgress();
   if (!repository || !retryAction) return;
   if (retryAction === "VERIFY_POINTERS") void verifyPointers(repository);

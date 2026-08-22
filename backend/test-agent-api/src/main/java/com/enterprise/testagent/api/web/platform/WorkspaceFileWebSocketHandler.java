@@ -903,7 +903,8 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 text(locator, "referenceAlias"),
                 text(locator, "automationAppId"),
                 text(locator, "automationRepositoryId"),
-                optionalNonNegativeLong(locator, "automationGeneration"));
+                optionalNonNegativeLong(locator, "automationGeneration"),
+                text(locator, "automationReadLease"));
     }
 
     private void requireWorkspaceWrite(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId, String path) {

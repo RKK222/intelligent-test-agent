@@ -34,19 +34,16 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -74,8 +71,6 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
     private static final int RECOVERY_LIMIT = 500;
     private static final String TERMINATED_MESSAGE = "自动化引用操作已由管理员终止";
     private static final Pattern BRANCH_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$");
-    private static final Pattern ENGLISH_NAME_PATTERN =
-            Pattern.compile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?$");
     private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^[A-Za-z0-9._:-]{1,128}$");
     private static final Logger LOGGER = LoggerFactory.getLogger(ApplicationAutomationReferenceService.class);
 
@@ -469,21 +464,67 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
                     generation.appId(), generation.repositoryId(), generation.generation(), live, now);
             refreshOverallStatus(generation.appId(), generation.repositoryId(), generation.generation(), live);
         }
-        if (!live.contains(localServer)) {
-            return;
+        if (live.contains(localServer)) {
+            for (ApplicationAutomationReferenceReplica replica
+                    : automationRepository.findClaimableReplicas(localServer, now, 100)) {
+                dispatch(
+                        replica.appId(),
+                        replica.repositoryId(),
+                        replica.generation(),
+                        traceId,
+                        ReferenceRepositoryReplicaTaskDispatcher.WakeSource.RECONCILIATION);
+            }
+        }
+        retireUnusedGenerations(now, localServer, traceId);
+    }
+
+    /** 只有当前/待切换代次之外且没有 Run、标签页租约的旧代次才可原子退役并清理本机副本。 */
+    private void retireUnusedGenerations(Instant now, LinuxServerId localServer, String traceId) {
+        automationRepository.deleteExpiredReadLeases(now);
+        for (ApplicationAutomationReferenceGeneration generation
+                : automationRepository.findRetirableGenerations(now, 100)) {
+            automationRepository.retireGeneration(
+                    generation.appId(), generation.repositoryId(), generation.generation(), now);
         }
         for (ApplicationAutomationReferenceReplica replica
-                : automationRepository.findClaimableReplicas(localServer, now, 100)) {
-            dispatch(
-                    replica.appId(),
-                    replica.repositoryId(),
-                    replica.generation(),
-                    traceId,
-                    ReferenceRepositoryReplicaTaskDispatcher.WakeSource.RECONCILIATION);
+                : automationRepository.findRetiredReplicas(localServer, 100)) {
+            CodeRepository repository = configurationRepository.findRepository(replica.repositoryId()).orElse(null);
+            if (repository == null || !isAutomationRepository(repository)) {
+                continue;
+            }
+            Path root = repositoryRoot(replica.appId(), repository, replica.generation());
+            try {
+                deleteRetiredReplicaDirectory(root);
+                automationRepository.deleteRetiredReplica(
+                        replica.appId(), replica.repositoryId(), replica.generation(), localServer);
+            } catch (IOException exception) {
+                LOGGER.warn(
+                        "Automation reference retired replica cleanup failed appId={} repositoryId={} generation={} traceId={}",
+                        replica.appId().value(), replica.repositoryId().value(), replica.generation(), traceId);
+            }
         }
     }
 
-    /** 组合文件树和 JSONC 对账只可解析当前或受运行租约保护的 READY 代次。 */
+    private void deleteRetiredReplicaDirectory(Path directory) throws IOException {
+        Path referencesRoot = referencesRoot();
+        Path normalized = directory.toAbsolutePath().normalize();
+        if (!normalized.startsWith(referencesRoot) || normalized.equals(referencesRoot)) {
+            throw new IOException("retired automation replica path is outside the managed root");
+        }
+        if (!Files.exists(normalized, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        if (Files.isSymbolicLink(normalized)) {
+            throw new IOException("retired automation replica root is a symbolic link");
+        }
+        try (java.util.stream.Stream<Path> paths = Files.walk(normalized)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
+    }
+
+    /** 上层已经校验当前代次或历史标签租约后，只解析本机指针完全匹配的 READY 代次。 */
     Path requireReadyLocalRepositoryRoot(ApplicationId appId, CodeRepositoryId repositoryId, long generation) {
         CodeRepository repository = requireLinkedAutomationRepository(appId, repositoryId);
         ApplicationAutomationReferenceGeneration configuration = requireGeneration(appId, repositoryId, generation);
@@ -1068,7 +1109,7 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
     private Path repositoryRoot(ApplicationId appId, CodeRepository repository, long generation) {
         Path root = referencesRoot();
         Path resolved = root.resolve("automation")
-                .resolve(applicationPathFragment(appId))
+                .resolve(AutomationReferencePathPolicy.applicationPathFragment(appId))
                 .resolve(validatedEnglishName(repository))
                 .resolve(Long.toString(generation))
                 .toAbsolutePath()
@@ -1113,7 +1154,7 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
     private ReplicaFileLock acquireReplicaFileLock(
             ApplicationId appId, CodeRepository repository, long generation) {
         Path lockDirectory = referencesRoot().resolve(".automation-reference-locks").normalize();
-        String lockName = applicationPathFragment(appId) + "-" + validatedEnglishName(repository)
+        String lockName = AutomationReferencePathPolicy.applicationPathFragment(appId) + "-" + validatedEnglishName(repository)
                 + "-" + generation + ".lock";
         Path lockPath = lockDirectory.resolve(lockName).normalize();
         FileChannel channel = null;
@@ -1230,53 +1271,23 @@ public class ApplicationAutomationReferenceService implements ServerBroadcastHan
             ApplicationId appId,
             CodeRepository repository,
             ApplicationAutomationReferenceGeneration generation) {
-        List<String> segments = new ArrayList<>();
-        segments.add("{env:OPENCODE_REFERENCES_DIR}");
-        segments.add("automation");
-        segments.add(applicationPathFragment(appId));
-        segments.add(validatedEnglishName(repository));
-        segments.add(Long.toString(generation.generation()));
-        if (!generation.directoryPath().isEmpty()) {
-            segments.add(generation.directoryPath());
-        }
-        return String.join("/", segments);
+        return AutomationReferencePathPolicy.logicalPath(appId, repository, generation);
     }
 
     private String alias(CodeRepository repository) {
-        return "automation-" + validatedEnglishName(repository);
+        return AutomationReferencePathPolicy.alias(repository);
     }
 
     private String directoryName(CodeRepository repository, String directoryPath) {
-        if (directoryPath.isEmpty()) {
-            return validatedEnglishName(repository);
-        }
-        int slash = directoryPath.lastIndexOf('/');
-        return slash < 0 ? directoryPath : directoryPath.substring(slash + 1);
-    }
-
-    private String applicationPathFragment(ApplicationId appId) {
-        return sha256(appId.value()).substring(0, 16);
+        return AutomationReferencePathPolicy.directoryName(repository, directoryPath);
     }
 
     private String scopeId(ApplicationId appId, CodeRepositoryId repositoryId) {
         return "automation:" + appId.value() + ":" + repositoryId.value();
     }
 
-    private String sha256(String value) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception exception) {
-            throw new IllegalStateException("SHA-256 unavailable", exception);
-        }
-    }
-
     private String validatedEnglishName(CodeRepository repository) {
-        String value = repository.englishName();
-        if (value == null || !ENGLISH_NAME_PATTERN.matcher(value).matches()) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "自动化代码库英文名称无效");
-        }
-        return value;
+        return AutomationReferencePathPolicy.validatedEnglishName(repository);
     }
 
     private String normalizeBranch(String branch) {

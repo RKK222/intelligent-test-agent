@@ -22,6 +22,7 @@ class ApplicationAutomationReferenceMigrationPostgresqlIntegrationTest {
 
     private static final String PREVIOUS_HEAD = "20260820153926";
     private static final String MIGRATION_VERSION = "20260821113000";
+    private static final String READ_LEASE_MIGRATION_VERSION = "20260822075000";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -54,6 +55,15 @@ class ApplicationAutomationReferenceMigrationPostgresqlIntegrationTest {
                 .single()).isEqualTo(1L);
         assertThat(jdbc.sql("select count(*) from application_automation_references")
                 .query(Long.class).single()).isEqualTo(2L);
+        assertThat(jdbc.sql("""
+                        select count(*) from flyway_schema_history
+                        where version = :version and success = true
+                        """)
+                .param("version", READ_LEASE_MIGRATION_VERSION)
+                .query(Long.class)
+                .single()).isEqualTo(1L);
+        assertThat(jdbc.sql("select count(*) from application_automation_reference_read_leases")
+                .query(Long.class).single()).isZero();
         assertThat(jdbc.sql("""
                         select branch || ':' || directory_path
                         from application_automation_reference_generations

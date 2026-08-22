@@ -4,6 +4,7 @@ import type { AgentMessage, FileSearchResult, MessagePart, PromptPart, Run, RunD
 import * as workbenchUtils from "../src/components/workbench-utils";
 import {
   assistantSummaryMessageId,
+  automationReferenceWarnings,
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
   PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
@@ -557,6 +558,15 @@ describe("assistantSummaryMessageId", () => {
     })).toBe("msg_0123456789abcdef0123456789abcdef");
     expect(assistantSummaryMessageId({ assistantSummaryMessageId: "msg_remote-opencode" })).toBeUndefined();
     expect(assistantSummaryMessageId({})).toBeUndefined();
+  });
+});
+
+describe("automationReferenceWarnings", () => {
+  it("accepts only bounded non-empty warning strings", () => {
+    expect(automationReferenceWarnings({
+      automationReferenceWarnings: [" 自动化 A 暂不可用 ", null, 42, "", "自动化 B 暂不可用"]
+    })).toEqual(["自动化 A 暂不可用", "自动化 B 暂不可用"]);
+    expect(automationReferenceWarnings({ automationReferenceWarnings: "invalid" })).toEqual([]);
   });
 });
 

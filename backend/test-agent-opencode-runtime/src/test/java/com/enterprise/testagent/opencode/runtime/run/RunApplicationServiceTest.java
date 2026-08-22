@@ -13,6 +13,8 @@ import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.enterprise.testagent.agent.runtime.OpencodeAgentRuntime;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
+import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunLeaseLifecycle;
+import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunPreparation;
 import com.enterprise.testagent.domain.event.RunEvent;
 import com.enterprise.testagent.domain.event.RunEventDraft;
 import com.enterprise.testagent.domain.event.RunEventId;
@@ -449,7 +451,7 @@ class RunApplicationServiceTest {
                 new FakeAgentSessionBindingRepository());
         service.setRunSystemPromptContributors(List.of(context -> {
             assertThat(context.command()).isTrue();
-            return Optional.of("<automation_references readonly=\"true\" />");
+            return Optional.of("<generic_internal_context readonly=\"true\" />");
         }));
 
         Run run = service.startRun(new StartRunInput(
@@ -892,10 +894,12 @@ class RunApplicationServiceTest {
         FakeRoutingDecisionRepository routing = new FakeRoutingDecisionRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         AtomicReference<String> serverDispatchMessageId = new AtomicReference<>();
+        AtomicReference<RunPersistenceAnchor> persistedAnchor = new AtomicReference<>();
         org.mockito.Mockito.when(summaryPort.insertAnchor(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
             assertThat(facade.createSessionCommands).isEmpty();
             assertThat(facade.startRunCommands).isEmpty();
             com.enterprise.testagent.domain.run.RunPersistenceAnchor anchor = invocation.getArgument(0);
+            persistedAnchor.set(anchor);
             serverDispatchMessageId.set(anchor.dispatchMessageId());
             return true;
         });
@@ -948,6 +952,12 @@ class RunApplicationServiceTest {
                 terminalProjectionService,
                 identity,
                 ownerSupervisor);
+        AutomationReferenceRunLeaseLifecycle automationLifecycle =
+                org.mockito.Mockito.mock(AutomationReferenceRunLeaseLifecycle.class);
+        org.mockito.Mockito.when(automationLifecycle.prepare(
+                        workspaceSnapshot, userId, "trace_redis_summary"))
+                .thenReturn(AutomationReferenceRunPreparation.empty());
+        service.setAutomationReferenceRunLeaseLifecycle(automationLifecycle);
 
         Run run = service.startRun(userId, "opencode", input, "trace_redis_summary");
 
@@ -965,10 +975,12 @@ class RunApplicationServiceTest {
         org.mockito.Mockito.verify(runtimeStore).confirmClientRequest(
                 sessionSnapshot.sessionId(), "request-summary-123", run.runId());
         org.mockito.Mockito.verify(runtimeStore, org.mockito.Mockito.atLeastOnce())
-                .appendDurable(org.mockito.ArgumentMatchers.argThat(draft ->
-                        draft.type() == RunEventType.RUN_CREATED
-                                && draft.payload().get("assistantSummaryMessageId") instanceof String messageId
-                                && messageId.startsWith("msg_")));
+                .appendDurable(
+                        org.mockito.ArgumentMatchers.argThat(draft ->
+                                draft.type() == RunEventType.RUN_CREATED
+                                        && draft.payload().get("assistantSummaryMessageId") instanceof String messageId
+                                        && messageId.startsWith("msg_")),
+                        org.mockito.ArgumentMatchers.any(RunOwnerLease.class));
         assertThat(facade.createSessionCommands).isEmpty();
         assertThat(facade.startRunCommands).singleElement().satisfies(command -> {
             assertThat(command.messageId()).isEqualTo(serverDispatchMessageId.get());
@@ -980,6 +992,26 @@ class RunApplicationServiceTest {
         org.mockito.Mockito.verify(ownerSupervisor, org.mockito.Mockito.atLeast(4)).requireOwned(ownership);
         org.mockito.Mockito.verify(summaryPort, org.mockito.Mockito.never())
                 .findDetailsLocator(run.runId());
+        org.mockito.Mockito.verify(automationLifecycle).prepare(
+                workspaceSnapshot, userId, "trace_redis_summary");
+        org.mockito.Mockito.verify(automationLifecycle).acquire(
+                org.mockito.ArgumentMatchers.argThat(candidate -> candidate.runId().equals(run.runId())),
+                org.mockito.ArgumentMatchers.eq(AutomationReferenceRunPreparation.empty()),
+                org.mockito.ArgumentMatchers.eq("trace_redis_summary"));
+
+        // 同一 clientRequestId 的幂等重试只返回既有 Run，不能再次改写 JSONC 或创建代次租约。
+        org.mockito.Mockito.clearInvocations(automationLifecycle);
+        org.mockito.Mockito.when(runtimeStore.findByClientRequest(
+                        sessionSnapshot.sessionId(), input.clientRequestId()))
+                .thenReturn(Optional.of(run.runId()));
+        org.mockito.Mockito.when(summaryPort.findBySessionAndClientRequestId(
+                        sessionSnapshot.sessionId(), input.clientRequestId()))
+                .thenReturn(Optional.of(persistedAnchor.get()));
+
+        Run duplicate = service.startRun(userId, "opencode", input, "trace_redis_summary");
+
+        assertThat(duplicate.runId()).isEqualTo(run.runId());
+        org.mockito.Mockito.verifyNoInteractions(automationLifecycle);
 
         Run cancelled = service.cancelRun("opencode", run.runId(), "trace_redis_summary_cancel");
 
@@ -1395,7 +1427,7 @@ class RunApplicationServiceTest {
                 .thenReturn(Optional.of(handle));
         java.util.concurrent.atomic.AtomicInteger checks = new java.util.concurrent.atomic.AtomicInteger();
         org.mockito.Mockito.doAnswer(ignored -> {
-            if (checks.incrementAndGet() == 2) {
+            if (checks.incrementAndGet() == 4) {
                 throw new RunOwnershipLostException("lost after create");
             }
             return null;

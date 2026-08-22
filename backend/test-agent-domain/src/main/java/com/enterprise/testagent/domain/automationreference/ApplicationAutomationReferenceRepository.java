@@ -6,6 +6,8 @@ import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
 import com.enterprise.testagent.domain.run.RunId;
+import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -148,4 +150,40 @@ public interface ApplicationAutomationReferenceRepository {
             Instant now);
 
     void deleteRunLeases(RunId runId);
+
+    boolean saveReadLease(
+            String tokenHash,
+            UserId userId,
+            WorkspaceId workspaceId,
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            long generation,
+            Instant expiresAt,
+            Instant now);
+
+    boolean renewReadLease(
+            String tokenHash,
+            UserId userId,
+            WorkspaceId workspaceId,
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            long generation,
+            Instant nextExpiresAt,
+            Instant now);
+
+    int deleteExpiredReadLeases(Instant now);
+
+    List<ApplicationAutomationReferenceGeneration> findRetirableGenerations(Instant now, int limit);
+
+    boolean retireGeneration(
+            ApplicationId appId, CodeRepositoryId repositoryId, long generation, Instant now);
+
+    List<ApplicationAutomationReferenceReplica> findRetiredReplicas(
+            LinuxServerId linuxServerId, int limit);
+
+    boolean deleteRetiredReplica(
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId);
 }

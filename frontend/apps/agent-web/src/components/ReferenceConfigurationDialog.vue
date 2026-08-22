@@ -18,11 +18,15 @@ import {
 } from "./reference-config-jsonc";
 import AutomationReferenceConfigurationPanel from "./AutomationReferenceConfigurationPanel.vue";
 import RepositoryOperationProgressDialog from "./RepositoryOperationProgressDialog.vue";
+import {
+  canRetryReferenceRepositoryOperation,
+  mustTerminateReferenceRepositoryBeforeRetry,
+  REFERENCE_REPOSITORY_ACTIVE_STATUSES as ACTIVE_STATUSES
+} from "./reference-repository-operation-state";
 
 const OPENCODE_CONFIG_PATH = "opencode.jsonc";
 const POLL_INTERVAL_MS = 2_000;
 const PENDING_REFRESH_CONFIRMATION_WINDOW_MS = 30_000;
-const ACTIVE_STATUSES = new Set(["INITIALIZING", "SYNCHRONIZING", "VERIFYING"]);
 
 const props = withDefaults(defineProps<{
   open: boolean;
@@ -150,12 +154,10 @@ const operationCanClose = computed(() => {
   return ["READY", "FAILED"].includes(acceptedOperationRepository.value?.status ?? "");
 });
 
-const operationCanRetry = computed(() => {
-  const progress = operationProgress.value;
-  if (!progress || progress.requestState === "REQUESTING") return false;
-  if (progress.requestState === "FAILED" || acceptedOperationRepository.value?.status === "FAILED") return true;
-  return acceptedOperationRepository.value?.servers.some((server) => server.status === "RETRY_WAIT") === true;
-});
+const operationCanRetry = computed(() => canRetryReferenceRepositoryOperation(
+  operationProgress.value?.requestState,
+  acceptedOperationRepository.value
+));
 
 const operationCanTerminate = computed(() => {
   const progress = operationProgress.value;
@@ -737,7 +739,7 @@ function retryOperation() {
   const repository = operationRepository.value;
   const progress = operationProgress.value;
   if (!repository || !progress || !operationCanRetry.value) return;
-  if (acceptedOperationRepository.value && ACTIVE_STATUSES.has(acceptedOperationRepository.value.status)) {
+  if (mustTerminateReferenceRepositoryBeforeRetry(acceptedOperationRepository.value)) {
     void terminateOperation(true);
     return;
   }

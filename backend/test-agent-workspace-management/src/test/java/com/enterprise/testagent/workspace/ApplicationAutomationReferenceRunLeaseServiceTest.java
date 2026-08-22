@@ -16,11 +16,13 @@ import com.enterprise.testagent.domain.automationreference.ApplicationAutomation
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceState;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceGenerationStatus;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceOperationType;
+import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunPreparation;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloader;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
@@ -38,6 +40,7 @@ import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -53,6 +56,8 @@ class ApplicationAutomationReferenceRunLeaseServiceTest {
     private ConfigurationManagementRepository configurationRepository;
     private ApplicationAutomationReferenceRepository automationRepository;
     private AutomationWorkspaceReferenceCatalogService catalogService;
+    private AgentConfigApplicationService agentConfigService;
+    private PersonalAgentConfigRuntimeReloader runtimeReloader;
     private ApplicationAutomationReferenceRunLeaseService service;
 
     @BeforeEach
@@ -60,15 +65,22 @@ class ApplicationAutomationReferenceRunLeaseServiceTest {
         configurationRepository = mock(ConfigurationManagementRepository.class);
         automationRepository = mock(ApplicationAutomationReferenceRepository.class);
         catalogService = mock(AutomationWorkspaceReferenceCatalogService.class);
+        agentConfigService = mock(AgentConfigApplicationService.class);
+        runtimeReloader = mock(PersonalAgentConfigRuntimeReloader.class);
         service = new ApplicationAutomationReferenceRunLeaseService(
                 configurationRepository,
                 automationRepository,
                 catalogService,
+                agentConfigService,
+                runtimeReloader,
+                new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(catalogService.resolveHostApplication(new WorkspaceId("wrk_main")))
                 .thenReturn(Optional.of(APP_ID));
         when(configurationRepository.isActiveMember(APP_ID, USER_ID)).thenReturn(true);
         when(configurationRepository.findRepositoriesByApplication(APP_ID)).thenReturn(List.of(repository()));
+        when(agentConfigService.readWorkspaceAgentFile("wrk_main", "opencode.jsonc", null))
+                .thenReturn(new FileContentResponse("opencode.jsonc", "{\"references\":{}}", 17));
     }
 
     @Test
@@ -79,7 +91,8 @@ class ApplicationAutomationReferenceRunLeaseServiceTest {
         when(automationRepository.findReplicas(APP_ID, REPOSITORY_ID, 3L))
                 .thenReturn(List.of(replica(3L, ReferenceRepositoryReplicaStatus.READY, "main", "abc123")));
 
-        service.acquire(run(), workspace(), USER_ID, "trace-run");
+        AutomationReferenceRunPreparation preparation = service.prepare(workspace(), USER_ID, "trace-run");
+        service.acquire(run(), preparation, "trace-run");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Collection<ApplicationAutomationReferenceRunLease>> leases =
@@ -90,16 +103,19 @@ class ApplicationAutomationReferenceRunLeaseServiceTest {
     }
 
     @Test
-    void acquireRejectsRunWhenCurrentReplicaIsNotReady() {
+    void prepareSkipsOnlyUnavailableReplicaAndKeepsRunUsable() {
         when(automationRepository.findState(APP_ID, REPOSITORY_ID)).thenReturn(Optional.of(state(3L)));
         when(automationRepository.findGeneration(APP_ID, REPOSITORY_ID, 3L))
                 .thenReturn(Optional.of(generation(3L)));
         when(automationRepository.findReplicas(APP_ID, REPOSITORY_ID, 3L))
                 .thenReturn(List.of(replica(3L, ReferenceRepositoryReplicaStatus.BLOCKED, "main", "abc123")));
 
-        assertThatThrownBy(() -> service.acquire(run(), workspace(), USER_ID, "trace-run"))
-                .isInstanceOf(PlatformException.class)
-                .hasMessageContaining("共享副本尚未就绪");
+        AutomationReferenceRunPreparation preparation = service.prepare(workspace(), USER_ID, "trace-run");
+
+        assertThat(preparation.leases()).isEmpty();
+        assertThat(preparation.warnings()).singleElement().asString().contains("本次运行已跳过");
+        service.acquire(run(), preparation, "trace-run");
+        verify(automationRepository).replaceRunLeases(new RunId("run_1"), List.of(), NOW);
     }
 
     @Test

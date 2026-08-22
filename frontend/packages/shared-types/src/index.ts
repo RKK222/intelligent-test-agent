@@ -516,6 +516,8 @@ export type WorkspaceViewLocator = {
   automationAppId?: string;
   automationRepositoryId?: string;
   automationGeneration?: number;
+  /** 服务端签发的历史标签页只读租约；不包含服务器物理路径。 */
+  automationReadLease?: string;
 };
 
 export type WorkspaceViewSource = "WORKSPACE" | "REFERENCE" | "AUTOMATION_REFERENCE" | "MIXED";

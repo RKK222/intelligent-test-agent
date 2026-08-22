@@ -3,11 +3,17 @@ package com.enterprise.testagent.workspace;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceGeneration;
+import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceRepository;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceGenerationStatus;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceOperationType;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
@@ -43,6 +49,7 @@ class AutomationWorkspaceReferenceCatalogServiceTest {
     private ConfigurationManagementRepository configurationRepository;
     private ManagedWorkspaceRepository managedWorkspaceRepository;
     private ApplicationAutomationReferenceService automationReferenceService;
+    private ApplicationAutomationReferenceRepository automationRepository;
     private AutomationWorkspaceReferenceCatalogService service;
 
     @BeforeEach
@@ -50,8 +57,9 @@ class AutomationWorkspaceReferenceCatalogServiceTest {
         configurationRepository = mock(ConfigurationManagementRepository.class);
         managedWorkspaceRepository = mock(ManagedWorkspaceRepository.class);
         automationReferenceService = mock(ApplicationAutomationReferenceService.class);
+        automationRepository = mock(ApplicationAutomationReferenceRepository.class);
         service = new AutomationWorkspaceReferenceCatalogService(
-                configurationRepository, managedWorkspaceRepository, automationReferenceService);
+                configurationRepository, managedWorkspaceRepository, automationReferenceService, automationRepository);
 
         ApplicationWorkspaceVersion hostVersion = mock(ApplicationWorkspaceVersion.class);
         when(hostVersion.appId()).thenReturn(APP_ID);
@@ -111,6 +119,60 @@ class AutomationWorkspaceReferenceCatalogServiceTest {
                 3L))
                 .isInstanceOfSatisfying(PlatformException.class,
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void historicalGenerationRequiresServerIssuedLeaseBoundToTheOpeningUserAndWorkspace() {
+        ApplicationAutomationReferenceGeneration generation = generation(3L);
+        when(automationReferenceService.requireGeneration(APP_ID, REPOSITORY_ID, 3L)).thenReturn(generation);
+        when(automationReferenceService.requireReadyLocalDirectory(APP_ID, REPOSITORY_ID, 3L))
+                .thenReturn(tempDir);
+        when(automationReferenceService.logicalConfigurationPath(any(), any(), any()))
+                .thenReturn("{env:OPENCODE_REFERENCES_DIR}/automation/app/repo/3/scripts/e2e");
+        when(automationReferenceService.isActiveGeneration(APP_ID, REPOSITORY_ID, 3L))
+                .thenReturn(true, false, false, false);
+        when(automationRepository.saveReadLease(
+                anyString(), eq(USER_ID), eq(HOST_WORKSPACE_ID), eq(APP_ID), eq(REPOSITORY_ID),
+                eq(3L), any(), any())).thenReturn(true);
+        when(automationRepository.renewReadLease(
+                anyString(), eq(USER_ID), eq(HOST_WORKSPACE_ID), eq(APP_ID), eq(REPOSITORY_ID),
+                eq(3L), any(), any())).thenReturn(true);
+        var opened = service.resolveGeneration(USER_ID, HOST_WORKSPACE_ID, APP_ID, REPOSITORY_ID, 3L);
+        String token = service.issueReadLease(USER_ID, HOST_WORKSPACE_ID, opened);
+
+        assertThat(service.resolveGeneration(
+                USER_ID, HOST_WORKSPACE_ID, APP_ID, REPOSITORY_ID, 3L, token).generation()).isEqualTo(3L);
+        assertThatThrownBy(() -> service.resolveGeneration(
+                USER_ID, HOST_WORKSPACE_ID, APP_ID, REPOSITORY_ID, 3L, null))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.resolveGeneration(
+                new UserId("usr_other"), HOST_WORKSPACE_ID, APP_ID, REPOSITORY_ID, 3L, token))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void reusesReadLeaseWhileFileTreeRebuildsTheSameCurrentReference() {
+        ApplicationAutomationReferenceGeneration generation = generation(3L);
+        when(automationReferenceService.requireGeneration(APP_ID, REPOSITORY_ID, 3L)).thenReturn(generation);
+        when(automationReferenceService.requireReadyLocalDirectory(APP_ID, REPOSITORY_ID, 3L))
+                .thenReturn(tempDir);
+        when(automationReferenceService.logicalConfigurationPath(any(), any(), any()))
+                .thenReturn("{env:OPENCODE_REFERENCES_DIR}/automation/app/repo/3/scripts/e2e");
+        when(automationReferenceService.isActiveGeneration(APP_ID, REPOSITORY_ID, 3L)).thenReturn(true);
+        when(automationRepository.saveReadLease(
+                anyString(), eq(USER_ID), eq(HOST_WORKSPACE_ID), eq(APP_ID), eq(REPOSITORY_ID),
+                eq(3L), any(), any())).thenReturn(true);
+        var reference = service.resolveGeneration(USER_ID, HOST_WORKSPACE_ID, APP_ID, REPOSITORY_ID, 3L);
+
+        String firstToken = service.issueReadLease(USER_ID, HOST_WORKSPACE_ID, reference);
+        String secondToken = service.issueReadLease(USER_ID, HOST_WORKSPACE_ID, reference);
+
+        assertThat(secondToken).isEqualTo(firstToken);
+        verify(automationRepository, times(1)).saveReadLease(
+                anyString(), eq(USER_ID), eq(HOST_WORKSPACE_ID), eq(APP_ID), eq(REPOSITORY_ID),
+                eq(3L), any(), any());
     }
 
     private ApplicationAutomationReferenceGeneration generation(long generation) {

@@ -9,6 +9,7 @@ export type ReferenceFileTabInfo = {
   automationAppId?: string;
   automationRepositoryId?: string;
   automationGeneration?: number;
+  automationReadLease?: string;
 };
 
 const REFERENCE_FILE_PREFIX = "workspace-reference:";
@@ -32,7 +33,8 @@ export function referenceTabPath(info: ReferenceFileTabInfo): string {
       info.kind,
       info.automationAppId ?? "",
       info.automationRepositoryId ?? "",
-      String(info.automationGeneration ?? "")
+      String(info.automationGeneration ?? ""),
+      info.automationReadLease ?? ""
     );
   }
   return `${REFERENCE_FILE_PREFIX}${fields.map(encodeURIComponent).join(":")}`;
@@ -43,7 +45,7 @@ export function referenceFileInfo(tabPath: string): ReferenceFileTabInfo {
     throw new Error("不是引用文件 tab 身份");
   }
   const [workspaceId = "", referenceAlias = "", referencePath = "", logicalPath = "", kind,
-    automationAppId, automationRepositoryId, automationGeneration] = tabPath
+    automationAppId, automationRepositoryId, automationGeneration, automationReadLease] = tabPath
     .slice(REFERENCE_FILE_PREFIX.length)
     .split(":")
     .map(decodeURIComponent);
@@ -56,7 +58,8 @@ export function referenceFileInfo(tabPath: string): ReferenceFileTabInfo {
       kind,
       automationAppId,
       automationRepositoryId,
-      automationGeneration: automationGeneration ? Number(automationGeneration) : undefined
+      automationGeneration: automationGeneration ? Number(automationGeneration) : undefined,
+      ...(automationReadLease ? { automationReadLease } : {})
     }
     : { workspaceId, referenceAlias, referencePath, logicalPath };
 }
@@ -69,7 +72,8 @@ export function referenceLocatorFromTab(info: ReferenceFileTabInfo): WorkspaceVi
       path: info.referencePath,
       automationAppId: info.automationAppId,
       automationRepositoryId: info.automationRepositoryId,
-      automationGeneration: info.automationGeneration
+      automationGeneration: info.automationGeneration,
+      ...(info.automationReadLease ? { automationReadLease: info.automationReadLease } : {})
     };
   }
   return { kind: "REFERENCE", path: info.referencePath, referenceAlias: info.referenceAlias };

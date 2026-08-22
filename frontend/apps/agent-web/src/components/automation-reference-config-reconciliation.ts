@@ -12,9 +12,10 @@ const OPENCODE_CONFIG_PATH = "opencode.jsonc";
 
 export function automationReferencePatches(
   appId: string,
-  repositories: AutomationReferenceRepositoryStatus[]
+  repositories: AutomationReferenceRepositoryStatus[] | unknown
 ): ManagedReferenceConfigPatch[] {
-  return repositories.flatMap((repository) => {
+  const normalized = normalizeRepositoryList(repositories);
+  return normalized.flatMap((repository) => {
     const configuration = repository.currentConfiguration;
     if (!configuration || configuration.status !== "READY") return [];
     return [{
@@ -32,6 +33,16 @@ export function automationReferencePatches(
       }
     }];
   });
+}
+
+/** 滚动升级期间兼容旧网关残留的 data 包装，同时把异常响应转换成可诊断错误，不能让页面 flatMap 崩溃。 */
+export function normalizeRepositoryList(value: unknown): AutomationReferenceRepositoryStatus[] {
+  if (Array.isArray(value)) return value as AutomationReferenceRepositoryStatus[];
+  if (value && typeof value === "object" && "data" in value) {
+    const data = (value as { data?: unknown }).data;
+    if (Array.isArray(data)) return data as AutomationReferenceRepositoryStatus[];
+  }
+  throw new Error("自动化代码库列表响应格式无效，请刷新页面或检查后端版本");
 }
 
 async function readWorkspaceConfig(api: BackendApiClient, workspaceId: string) {
@@ -54,7 +65,9 @@ export async function reconcileAutomationReferenceWorkspace(
   workspaceId: string,
   knownRepositories?: AutomationReferenceRepositoryStatus[]
 ) {
-  const repositories = knownRepositories ?? await api.listAutomationReferenceRepositories(appId);
+  const repositories = normalizeRepositoryList(
+    knownRepositories ?? await api.listAutomationReferenceRepositories(appId)
+  );
   const latest = await readWorkspaceConfig(api, workspaceId);
   const content = reconcileAutomationReferenceConfig(
     latest,

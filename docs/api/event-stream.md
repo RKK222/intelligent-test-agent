@@ -53,7 +53,7 @@
 
 | wire name | 说明 |
 |---|---|
-| `run.created` | Run 已创建；前端据其 `runId` 绑定当前根用户消息。`REDIS_SUMMARY` 仍可额外携带 `storageMode/clientRequestId/assistantSummaryMessageId` 供摘要定位兼容；受保护 Agent Run 可额外携带 `protectedAgent` 修订审计摘要。 |
+| `run.created` | Run 已创建；前端据其 `runId` 绑定当前根用户消息。`REDIS_SUMMARY` 仍可额外携带 `storageMode/clientRequestId/assistantSummaryMessageId` 供摘要定位兼容；受保护 Agent Run 可额外携带 `protectedAgent` 修订审计摘要；部分自动化共享副本不可用时可额外携带安全字符串数组 `automationReferenceWarnings`，前端仅作局部提示，不能阻断 Run。 |
 | `run.started` | Run 已开始执行。 |
 | `run.cancelling` | Run 正在取消。 |
 | `run.succeeded` | Run 成功结束。 |
@@ -549,7 +549,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 `workspace.version.sync-requested` 的有效 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`PERSONAL_PUBLISHED`、`AGENT_CONFIG_PUBLISHED`。当前应用 Agent/Skill 与 workspace 共用个人 worktree，按个人 `HEAD` 白名单投影成功后使用 `PERSONAL_PUBLISHED`；兼容的旧工作空间 Agent 直发入口仍使用 `AGENT_CONFIG_PUBLISHED`。自动化引用不再复用该广播或 `versionId` 副本模型。历史节点可能仍发送 `GIT_PULL_REQUESTED`、`GIT_PULLED` 或 `AUTOMATION_REFERENCE_SYNCHRONIZE`，新消费者必须忽略；个人 `git-pull` 不发布服务器广播。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；工作版本的远端节点仍使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset feature 副本到目标 commit，然后以 `git merge --no-edit <targetCommit>` 反向同步本机相关个人 worktree，不以整仓 clean 作为前置条件。非重叠的 dirty/staged/untracked 内容保留并完成合并；只有 Git 判定会覆盖本地文件时才由 Diff 显示待同步，真实冲突保留 `MERGE_HEAD` 和三方 index。广播只负责服务器间低延迟唤醒，不进入浏览器 SSE；消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
 
-自动化引用不新增 RunEvent，也不在普通对话、命令、重发、批量或定时 Run 的消息/system prompt 中注入路径。OpenCode 仅从 Run 绑定工作树的 `.opencode/opencode.jsonc` 读取 `references` 和精确外部目录权限；管理员保存、成员刷新/重新进入以及创建新任务前会通过既有文件 RPC 对账应用当前 generation，运行中的任务保持原配置和租约。
+自动化引用不新增 RunEvent 类型，也不在普通对话、命令、重发、批量或定时 Run 的消息/system prompt 中注入路径。OpenCode 仅从 Run 绑定工作树的 `.opencode/opencode.jsonc` 读取 `references` 和精确外部目录权限；管理员保存、成员刷新/重新进入以及创建新任务前会通过既有文件 RPC 对账应用当前 generation，运行中的任务保持原配置和租约。若某个应用自动化副本在派发前不可用，既有 `run.created` 可追加 `automationReferenceWarnings: string[]`；内容只有版本库展示名和安全状态说明，不包含逻辑/物理路径、提交凭据或文件内容，旧客户端可忽略。
 
 `automation-reference.sync-requested` 与 `automation-reference.cancel-requested` 用于应用自动化引用 generation 的低延迟同步和终止唤醒，payload 固定只包含：
 
@@ -762,6 +762,22 @@ route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地�
   "referenceAlias": "docs-application-assets"
 }
 ```
+
+已经打开的自动化只读标签 locator 示例：
+
+```json
+{
+  "kind": "AUTOMATION_REFERENCE",
+  "path": "cases/login.robot",
+  "referenceAlias": "接口自动化",
+  "automationAppId": "app_...",
+  "automationRepositoryId": "repo_...",
+  "automationGeneration": 7,
+  "automationReadLease": "arl_..."
+}
+```
+
+`automationReadLease` 由服务端在当前 generation 展开时签发，只绑定当前用户、ticket 主工作区、应用、版本库和 generation；数据库仅保存令牌 SHA-256。当前 generation 读取不依赖该字段，切换后的历史标签必须携带有效租约并在每段读取时续期。其它 locator 携带该字段固定拒绝，租约不包含或替代物理路径。
 
 服务端不得信任客户端提交的引用路径：每次 list/read 都从当前工作区最新 JSONC 重新建立允许集合，并校验应用关联、仓库类型、本机 READY 副本、平台参数、`.git`、符号链接和 root 越界。某个引用配置非法或副本暂不可用时，只跳过该引用并返回 `warnings`；工作区树本身仍可浏览。每层最多 1000 项，达到上限时 `truncated=true`。
 

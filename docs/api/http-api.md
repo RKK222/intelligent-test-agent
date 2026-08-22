@@ -1589,7 +1589,9 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/aut
 
 `expectedGeneration=0` 表示首次配置；服务端按当前激活 generation 做乐观锁校验。`operationId` 是保存/同步幂等键，同一配置重复提交返回同一操作；同键不同内容返回 `CONFLICT`。目录为空表示仓库根，只接受 `/` 分隔的相对目录；绝对路径、`.`、`..`、`.git`、文件和符号链接拒绝。描述为空时由服务端按“版本库名称 / 分支 / 目录，只读自动化引用”默认填充。响应 `currentConfiguration/pendingConfiguration` 包含 generation、branch、directoryPath、description、固定 `merge=false`、targetCommitHash、alias、logicalPath、directoryName、activatedAt 和 status；`servers[]` 只包含服务器标识、在线状态、实际分支/HEAD、匹配结果、同步/核验时间和安全错误，不返回共享副本物理路径。
 
-共享副本按“应用 + 版本库 + generation + 服务器”唯一，整个仓库只 clone 一次，目录只是副本内逻辑选择。在线服务器全部 READY 后才激活；离线服务器记为 `DEFERRED`，恢复后由补偿器补齐而不阻塞激活。保存成功后管理员当前工作树立即对账 `.opencode/opencode.jsonc`；其他成员在刷新、重新进入或创建新任务前通过既有文件 RPC 对账。每个版本库只保留一个托管引用和精确 `permission.external_directory`，Java 不向 Run 消息、system prompt 或 OpenCode 上下文注入引用信息。
+共享副本按“应用 + 版本库 + generation + 服务器”唯一，整个仓库只 clone 一次，目录只是副本内逻辑选择。在线服务器全部 READY 后才激活；离线服务器记为 `DEFERRED`，恢复后由补偿器补齐而不阻塞激活。保存成功后管理员当前工作树立即对账 `.opencode/opencode.jsonc`；其他成员在刷新、重新进入或创建新任务前通过既有文件 RPC 对账。每个版本库只保留一个托管引用和精确 `permission.external_directory`，Java 不向 Run 消息、system prompt 或 OpenCode 上下文注入引用信息。创建新任务前会固定本次实际可用的 READY generation；单库不可用时只跳过该库并通过 `run.created.payload.automationReferenceWarnings` 返回安全局部告警，主工作树、其它引用和 Run 继续可用。
+
+组合文件树为当前自动化 generation 签发绑定用户、主工作区、应用和版本库的短期只读标签租约。浏览器 locator 只携带明文随机租约，数据库只保存 SHA-256；管理员切换 generation 后，已经打开的标签依靠租约继续读取旧副本，刷新或重新展开则使用新 generation。无 Run 租约且无未过期标签租约的旧 generation 由补偿任务原子标记 `RETIRED`，再由各服务器仅清理自己的受管共享副本；历史配置行继续保留审计。
 
 ### 应用版本工作区 API
 

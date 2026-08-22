@@ -236,4 +236,41 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(wrapper.findAll("button").some((button) => button.text() === "切换分支")).toBe(false);
     expect(mockApi.listAutomationReferenceRepositories).toHaveBeenCalledWith("app-demo");
   });
+
+  it("retries RETRY_WAIT by terminating the fenced generation before synchronizing again", async () => {
+    const active = repository({
+      status: "SYNCHRONIZING",
+      pendingGeneration: 4,
+      servers: [{
+        linuxServerId: "linux-a",
+        status: "RETRY_WAIT",
+        online: true,
+        currentBranch: "main",
+        currentCommitHash: "abcdef1234567890",
+        matchesTarget: true,
+        error: "Git 操作超时"
+      }]
+    });
+    const terminated = repository({ status: "FAILED", activeGeneration: 3, pendingGeneration: null });
+    const retried = repository({ status: "SYNCHRONIZING", pendingGeneration: 5 });
+    const mockApi = api({
+      synchronizeAutomationReferenceRepository: vi.fn()
+        .mockResolvedValueOnce(active)
+        .mockResolvedValueOnce(retried),
+      terminateAutomationReferenceRepository: vi.fn().mockResolvedValue(terminated)
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="更新接口自动化库副本"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('button[aria-label="重试自动化代码库同步"]').trigger("click");
+    await flushPromises();
+
+    expect(mockApi.terminateAutomationReferenceRepository)
+      .toHaveBeenCalledWith("app-demo", "repo_automation", 4);
+    expect(mockApi.synchronizeAutomationReferenceRepository).toHaveBeenCalledTimes(2);
+    expect(mockApi.synchronizeAutomationReferenceRepository.mock.calls[1]?.slice(0, 3))
+      .toEqual(["app-demo", "repo_automation", 3]);
+  });
 });

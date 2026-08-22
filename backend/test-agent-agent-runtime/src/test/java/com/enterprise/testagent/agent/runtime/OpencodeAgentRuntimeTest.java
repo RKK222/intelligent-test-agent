@@ -171,7 +171,7 @@ class OpencodeAgentRuntimeTest {
                         List.of(AgentPromptPart.text("/review")),
                         null,
                         "build",
-                        "<automation_references readonly=\"true\" />",
+                        "<internal_context readonly=\"true\" />",
                         null,
                         null,
                         null,
@@ -191,7 +191,7 @@ class OpencodeAgentRuntimeTest {
             assertThat(part.filename()).isEqualTo(".testagent-run-context.txt");
             String encoded = part.url().substring(part.url().indexOf(',') + 1);
             assertThat(new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8))
-                    .isEqualTo("<automation_references readonly=\"true\" />");
+                    .isEqualTo("<internal_context readonly=\"true\" />");
         });
     }
 

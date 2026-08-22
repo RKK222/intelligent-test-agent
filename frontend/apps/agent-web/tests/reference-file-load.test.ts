@@ -31,7 +31,8 @@ describe("reference file tab identity", () => {
       kind: "AUTOMATION_REFERENCE",
       automationAppId: "app_demo",
       automationRepositoryId: "repo_auto",
-      automationGeneration: 3
+      automationGeneration: 3,
+      automationReadLease: "arl_lease"
     }));
 
     expect(referenceLocatorFromTab(info)).toEqual({
@@ -39,7 +40,8 @@ describe("reference file tab identity", () => {
       path: "cases/login.robot",
       automationAppId: "app_demo",
       automationRepositoryId: "repo_auto",
-      automationGeneration: 3
+      automationGeneration: 3,
+      automationReadLease: "arl_lease"
     });
   });
 });

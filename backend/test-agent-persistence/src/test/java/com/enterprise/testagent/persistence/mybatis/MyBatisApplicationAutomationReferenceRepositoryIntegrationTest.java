@@ -1,9 +1,11 @@
 package com.enterprise.testagent.persistence.mybatis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceGeneration;
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceRepository;
+import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceRunLease;
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceState;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceGenerationStatus;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceOperationType;
@@ -12,8 +14,11 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
+import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
+import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
@@ -56,7 +61,8 @@ class MyBatisApplicationAutomationReferenceRepositoryIntegrationTest {
         schemaDataSource = new SingleConnectionDataSource(url, "sa", "", true);
         ResourceDatabasePopulator populator = new ResourceDatabasePopulator(
                 new ClassPathResource("fixtures/application-automation-reference-history.sql"),
-                new ClassPathResource("db/migration/V20260821113000__application_automation_references_create.sql"));
+                new ClassPathResource("db/migration/V20260821113000__application_automation_references_create.sql"),
+                new ClassPathResource("db/migration/V20260822075000__application_automation_reference_read_leases_create.sql"));
         populator.execute(schemaDataSource);
         jdbcClient = JdbcClient.create(h2);
 
@@ -213,6 +219,85 @@ class MyBatisApplicationAutomationReferenceRepositoryIntegrationTest {
                 .singleElement()
                 .extracting(replica -> replica.status())
                 .isEqualTo(ReferenceRepositoryReplicaStatus.READY);
+    }
+
+    @Test
+    void historicalGenerationIsRetiredOnlyAfterReadLeaseExpires() {
+        assertThat(repository.completeGeneration(
+                APP_ALPHA, REPOSITORY_ID, 1L, ReferenceRepositoryStatus.READY, null, NOW.minusSeconds(1)))
+                .isTrue();
+        String tokenHash = "read-lease-token-hash";
+        WorkspaceId workspaceId = new WorkspaceId("wrk_history");
+        assertThat(repository.saveReadLease(
+                tokenHash,
+                ADMIN_ID,
+                workspaceId,
+                APP_ALPHA,
+                REPOSITORY_ID,
+                1L,
+                NOW.plusSeconds(60),
+                NOW)).isTrue();
+        ApplicationAutomationReferenceState migrated = repository.findState(APP_ALPHA, REPOSITORY_ID).orElseThrow();
+        ApplicationAutomationReferenceGeneration second = generation(APP_ALPHA, 2L, "op-switch-2");
+        assertThat(repository.reserveGeneration(second, 1L, migrated.lockVersion(), NOW)).contains(second);
+        repository.upsertTargets(APP_ALPHA, REPOSITORY_ID, 2L, Set.of(SERVER_A), NOW);
+        assertThat(repository.claimReplica(
+                APP_ALPHA, REPOSITORY_ID, 2L, SERVER_A, "lease-second", NOW.plusSeconds(60), NOW)).isPresent();
+        assertThat(repository.markReady(
+                APP_ALPHA,
+                REPOSITORY_ID,
+                2L,
+                SERVER_A,
+                "lease-second",
+                "release/next",
+                "commit-next",
+                NOW.plusSeconds(1),
+                NOW.plusSeconds(1))).isTrue();
+        assertThat(repository.completeGeneration(
+                APP_ALPHA, REPOSITORY_ID, 2L, ReferenceRepositoryStatus.READY, null, NOW.plusSeconds(2)))
+                .isTrue();
+        assertThat(repository.saveReadLease(
+                "late-token-hash",
+                ADMIN_ID,
+                workspaceId,
+                APP_ALPHA,
+                REPOSITORY_ID,
+                1L,
+                NOW.plusSeconds(60),
+                NOW.plusSeconds(3))).isFalse();
+
+        assertThat(repository.renewReadLease(
+                tokenHash,
+                ADMIN_ID,
+                workspaceId,
+                APP_ALPHA,
+                REPOSITORY_ID,
+                1L,
+                NOW.plusSeconds(120),
+                NOW.plusSeconds(30))).isTrue();
+        assertThat(repository.findRetirableGenerations(NOW.plusSeconds(31), 10)).isEmpty();
+
+        assertThat(repository.deleteExpiredReadLeases(NOW.plusSeconds(121))).isEqualTo(1);
+        RunId runId = new RunId("run_historical_generation");
+        jdbcClient.sql("insert into runs(run_id) values (:runId)")
+                .param("runId", runId.value())
+                .update();
+        ApplicationAutomationReferenceRunLease runLease = new ApplicationAutomationReferenceRunLease(
+                APP_ALPHA, REPOSITORY_ID, 1L, SERVER_A);
+        repository.replaceRunLeases(runId, List.of(runLease), NOW.plusSeconds(121));
+        assertThat(repository.findRetirableGenerations(NOW.plusSeconds(121), 10)).isEmpty();
+        repository.deleteRunLeases(runId);
+        assertThat(repository.findRetirableGenerations(NOW.plusSeconds(121), 10))
+                .extracting(ApplicationAutomationReferenceGeneration::generation)
+                .containsExactly(1L);
+        assertThat(repository.retireGeneration(APP_ALPHA, REPOSITORY_ID, 1L, NOW.plusSeconds(122))).isTrue();
+        assertThatThrownBy(() -> repository.replaceRunLeases(
+                        new RunId("run_retired_generation"), List.of(runLease), NOW.plusSeconds(123)))
+                .hasMessageContaining("配置已切换");
+        assertThat(repository.findRetiredReplicas(SERVER_A, 10))
+                .extracting(replica -> replica.generation())
+                .containsExactly(1L);
+        assertThat(repository.deleteRetiredReplica(APP_ALPHA, REPOSITORY_ID, 1L, SERVER_A)).isTrue();
     }
 
     private ApplicationAutomationReferenceGeneration generation(

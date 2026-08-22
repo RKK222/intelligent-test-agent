@@ -105,6 +105,28 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
         return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId, true, false);
     }
 
+    @Override
+    public PersonalAgentConfigRuntimeReloadResult reloadWorkspaceConfiguration(
+            UserId userId,
+            String linuxServerId,
+            String traceId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        String targetServer = requireText(linuxServerId, "工作区缺少服务器归属");
+        if (!targetServer.equals(backendIdentity.linuxServerId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "工作树配置必须在所属服务器重新加载");
+        }
+        var binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
+        if (binding.isEmpty()) {
+            return new PersonalAgentConfigRuntimeReloadResult(
+                    false, "当前用户 TestAgent 进程尚未初始化；下次启动会读取最新工作树配置");
+        }
+        OpencodeServerProcess process = repository.findOpencodeServerProcessById(binding.get().processId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "当前用户 TestAgent 进程不存在"));
+        requireOwnedRunningProcess(userId, targetServer, process);
+        disposeConfiguration(userId, process, traceId);
+        return new PersonalAgentConfigRuntimeReloadResult(true, "已重新加载当前工作树 OpenCode 配置");
+    }
+
     private PersonalAgentConfigRuntimeReloadResult reloadPublicPreview(
             UserId userId,
             String linuxServerId,
@@ -145,20 +167,7 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
                 runtimeManagementCommandService.restartTrackedProcess(process, traceId, false);
                 return;
             }
-            JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
-                            executionNode(process),
-                            "POST",
-                            "/global/dispose",
-                            null,
-                            null,
-                            Map.of(),
-                            Map.of(),
-                            traceId))
-                    .map(AgentRuntimeResult::body)
-                    .block(RUNTIME_TIMEOUT);
-            if (disposed == null || !disposed.isBoolean() || !disposed.booleanValue()) {
-                throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "当前用户 TestAgent 运行态重新加载失败");
-            }
+            disposeProcess(process, traceId);
         };
         if (userRuntimeDisposeCoordinator == null) {
             reload.run();
@@ -172,6 +181,35 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
                 ? "已加载公共个人 worktree 配置并受管重启当前用户 TestAgent 进程"
                 : "已加载公共个人 worktree 配置并重新加载当前用户运行态";
         return new PersonalAgentConfigRuntimeReloadResult(true, message);
+    }
+
+    private void disposeConfiguration(UserId userId, OpencodeServerProcess process, String traceId) {
+        Runnable reload = () -> disposeProcess(process, traceId);
+        if (userRuntimeDisposeCoordinator == null) {
+            reload.run();
+        } else {
+            userRuntimeDisposeCoordinator.withUserIdle(userId, traceId, () -> {
+                reload.run();
+                return Boolean.TRUE;
+            });
+        }
+    }
+
+    private void disposeProcess(OpencodeServerProcess process, String traceId) {
+        JsonNode disposed = runtime.runtime(new AgentRuntimeCommand(
+                        executionNode(process),
+                        "POST",
+                        "/global/dispose",
+                        null,
+                        null,
+                        Map.of(),
+                        Map.of(),
+                        traceId))
+                .map(AgentRuntimeResult::body)
+                .block(RUNTIME_TIMEOUT);
+        if (disposed == null || !disposed.isBoolean() || !disposed.booleanValue()) {
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "当前用户 TestAgent 运行态重新加载失败");
+        }
     }
 
     private void requireOwnedRunningProcess(UserId userId, String linuxServerId, OpencodeServerProcess process) {

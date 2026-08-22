@@ -305,6 +305,7 @@ import { useSideQuestionRun } from "./useSideQuestionRun";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy, type FollowUpDraft } from "./follow-up-queue";
 import {
   assistantSummaryMessageId,
+  automationReferenceWarnings,
   buildPromptParts,
   chatStateFromSessionTreeSnapshot,
   completedRunDurationMs,
@@ -7903,7 +7904,8 @@ async function openWorkspaceViewFile(entry: WorkspaceViewEntry) {
     kind: entry.locator.kind === "AUTOMATION_REFERENCE" ? "AUTOMATION_REFERENCE" : "REFERENCE",
     automationAppId: entry.locator.automationAppId,
     automationRepositoryId: entry.locator.automationRepositoryId,
-    automationGeneration: entry.locator.automationGeneration
+    automationGeneration: entry.locator.automationGeneration,
+    automationReadLease: entry.locator.automationReadLease
   });
   const existing = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
   const hadLoadedCache = workbench.tabHasLoadedSnapshot(existing);
@@ -10402,6 +10404,14 @@ function applyRunEventWorkbenchProjection(
     }
   }
   if (event.type === "run.created") {
+    const warnings = automationReferenceWarnings(event.payload);
+    if (allowNotification && warnings.length > 0) {
+      feedback.value = {
+        kind: "info",
+        title: "部分自动化引用暂不可用",
+        description: warnings.join("；")
+      };
+    }
     const summaryMessageId = assistantSummaryMessageId(event.payload);
     if (summaryMessageId) {
       assistantSummaryMessageIdsByRunId.value = {

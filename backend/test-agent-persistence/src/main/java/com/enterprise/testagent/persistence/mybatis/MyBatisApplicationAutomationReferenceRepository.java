@@ -1,5 +1,7 @@
 package com.enterprise.testagent.persistence.mybatis;
 
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceGeneration;
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceReplica;
 import com.enterprise.testagent.domain.automationreference.ApplicationAutomationReferenceRepository;
@@ -14,6 +16,7 @@ import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatu
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -313,6 +316,13 @@ public class MyBatisApplicationAutomationReferenceRepository
             Instant now) {
         mapper.deleteRunLeases(runId.value());
         for (ApplicationAutomationReferenceRunLease lease : leases) {
+            String lockedStatus = mapper.lockReadyGeneration(
+                    lease.appId().value(), lease.repositoryId().value(), lease.generation());
+            if (lockedStatus == null) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "自动化引用配置已切换，请重试本次运行");
+            }
             mapper.insertRunLease(
                     runId.value(),
                     lease.appId().value(),
@@ -326,6 +336,72 @@ public class MyBatisApplicationAutomationReferenceRepository
     @Override
     public void deleteRunLeases(RunId runId) {
         mapper.deleteRunLeases(runId.value());
+    }
+
+    @Override
+    public boolean saveReadLease(
+            String tokenHash,
+            UserId userId,
+            WorkspaceId workspaceId,
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            long generation,
+            Instant expiresAt,
+            Instant now) {
+        return mapper.insertReadLeaseForActiveGeneration(
+                tokenHash, userId.value(), workspaceId.value(), appId.value(), repositoryId.value(),
+                generation, expiresAt, now) == 1;
+    }
+
+    @Override
+    public boolean renewReadLease(
+            String tokenHash,
+            UserId userId,
+            WorkspaceId workspaceId,
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            long generation,
+            Instant nextExpiresAt,
+            Instant now) {
+        return mapper.renewReadLease(
+                tokenHash, userId.value(), workspaceId.value(), appId.value(), repositoryId.value(),
+                generation, nextExpiresAt, now) == 1;
+    }
+
+    @Override
+    public int deleteExpiredReadLeases(Instant now) {
+        return mapper.deleteExpiredReadLeases(now);
+    }
+
+    @Override
+    public List<ApplicationAutomationReferenceGeneration> findRetirableGenerations(Instant now, int limit) {
+        return mapper.findRetirableGenerations(now, Math.max(1, Math.min(1000, limit))).stream()
+                .map(this::toGeneration)
+                .toList();
+    }
+
+    @Override
+    public boolean retireGeneration(
+            ApplicationId appId, CodeRepositoryId repositoryId, long generation, Instant now) {
+        return mapper.retireGeneration(appId.value(), repositoryId.value(), generation, now) == 1;
+    }
+
+    @Override
+    public List<ApplicationAutomationReferenceReplica> findRetiredReplicas(
+            LinuxServerId linuxServerId, int limit) {
+        return mapper.findRetiredReplicas(linuxServerId.value(), Math.max(1, Math.min(1000, limit))).stream()
+                .map(this::toReplica)
+                .toList();
+    }
+
+    @Override
+    public boolean deleteRetiredReplica(
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId) {
+        return mapper.deleteRetiredReplica(
+                appId.value(), repositoryId.value(), generation, linuxServerId.value()) == 1;
     }
 
     private ApplicationAutomationReferenceState toState(ApplicationAutomationReferenceStateRow row) {

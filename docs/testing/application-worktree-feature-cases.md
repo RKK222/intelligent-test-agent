@@ -350,7 +350,7 @@ docker logs <backend-container> 2>&1 | grep -E \
 | --- | --- | --- |
 | 测试工作区个人 worktree 本地提交 | `LOCAL_COMMITTED`、`remotePushed=false` | 个人提交先生成 `24565915e8847736e66d15195841021d26aa6d34`；远端 feature 当时仍为 `bb3694cd455c6d3bd83f56954c96881666dfcd7d`，证明没有误推个人分支。后续应用发布反向同步后个人 HEAD 合入发布提交属于预期。 |
 | 测试工作区应用 worktree 提交推送 | `PUBLISHED`、`remotePushed=true`、`remoteBranch=feature_testagent_20260813` | 响应、应用副本 HEAD 和远端 feature 均为 `f3f6760477aa7dcf59c0c1780bd46b1deb0c773a`。 |
-| 自动化版本库个人 worktree 本地提交 | `LOCAL_COMMITTED`、`remotePushed=false` | 个人 HEAD 为 `9a45b196ab4d31a994fb57c95469026abaef3f03`；远端 `main` 保持 `ef1eeed2bd9781d7c5d83a477f559f4bcee0e908`。 |
+| 历史自动化个人 worktree 本地提交（已退出正常入口） | `LOCAL_COMMITTED`、`remotePushed=false` | 这是 2026-08-14 旧模型的追溯记录，不再作为当前验收链路。现行自动化引用只使用应用级共享只读副本，禁止新建、选择或提交个人 worktree；历史文件和会话仅保留兼容读取。 |
 | 公共 Agent 提交并推送 | `SUCCEEDED`、远端分支 `master` | 修复并重启后从 `3000` 页面直接点击一次“提交并推送”，五步实时进度均为 `SUCCEEDED`，结果明确展示本地提交/远端推送各 1 个文件和远端 commit `d2c941e50854cba7be43bddf516dfc5af2246321`。最终远端 `master`、共享副本和稳定个人 worktree三者一致；rollout `acr_da1a7ff67b7a4be0b73dbd81ba7d13a5` 为 `COMPLETED`，`targetDisposed=1`、`targetPending=0`、`worktreePending=0`、`lastError=null`。dispose 后页面消息门禁重新开放。 |
 
 公共链路还保留一个日期型历史 worktree 用于兼容验证。重启后的旧补偿任务被安全终止；再次发布时该历史记录没有进入新 rollout，稳定 worktree 正常同步，证明不会再出现界面成功但后台长期保留 `PENDING` 的状态。UI 首轮复测发现本地 test profile 的 CORS 单值 `*` 未被 Agent 配置进度 WebSocket 识别，通道先返回无 `operationId` 的 `FORBIDDEN/origin denied`，而发布 HTTP 仍继续并最终成功；现已与文件、应用源码进度 WebSocket 对齐通配配置语义，并让前端将无 operationId 的握手拒绝只标记为“实时进度不可用”。使用新产物重启后三次页面发布（包含失败恢复和一步式提交推送）均未再出现来源拒绝、先失败后转圈或成功但无远端证据。

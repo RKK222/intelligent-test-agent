@@ -449,7 +449,8 @@ public class WorkspaceViewApplicationService {
                 if (!reference.configurationPath().equals(pathNode.textValue())) {
                     throw new PlatformException(ErrorCode.FORBIDDEN, "自动化引用路径与受管版本不匹配");
                 }
-                resolved.add(reference.withDisplayName(alias));
+                String readLease = automationCatalog.issueReadLease(userId, workspaceId, reference);
+                resolved.add(reference.withDisplayName(alias).withReadLease(readLease));
             } catch (PlatformException exception) {
                 warnings.add(new WorkspaceViewWarning(alias, exception.errorCode().name(), "自动化引用 " + alias + " 当前不可用"));
             } catch (RuntimeException exception) {
@@ -517,7 +518,8 @@ public class WorkspaceViewApplicationService {
                 workspaceId,
                 new ApplicationId(locator.automationAppId()),
                 new CodeRepositoryId(locator.automationRepositoryId()),
-                locator.automationGeneration());
+                locator.automationGeneration(),
+                locator.automationReadLease());
         // referenceAlias 对自动化定位器仅承载服务端生成的展示名，不参与物理路径解析；旧标签可继续绑定原版本。
         return locator.referenceAlias() == null
                 ? reference
@@ -845,11 +847,13 @@ public class WorkspaceViewApplicationService {
         String automationAppId = normalizeOptional(locator.automationAppId());
         String automationRepositoryId = normalizeOptional(locator.automationRepositoryId());
         Long automationGeneration = locator.automationGeneration();
+        String automationReadLease = normalizeOptional(locator.automationReadLease());
         if (locator.kind() == WorkspaceViewLocatorKind.REFERENCE) {
             if (alias == null) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "引用定位器缺少 referenceAlias");
             }
-            if (automationAppId != null || automationRepositoryId != null || automationGeneration != null) {
+            if (automationAppId != null || automationRepositoryId != null || automationGeneration != null
+                    || automationReadLease != null) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "应用资产引用不能携带自动化定位信息");
             }
         } else if (locator.kind() == WorkspaceViewLocatorKind.AUTOMATION_REFERENCE) {
@@ -860,18 +864,21 @@ public class WorkspaceViewApplicationService {
             }
         } else if (locator.kind() == WorkspaceViewLocatorKind.AUTOMATION_ROOT) {
             if (!path.isEmpty() || alias != null || automationAppId != null
-                    || automationRepositoryId != null || automationGeneration != null) {
+                    || automationRepositoryId != null || automationGeneration != null
+                    || automationReadLease != null) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "自动化引用根定位器不能携带路径或版本信息");
             }
         } else if (alias != null || automationAppId != null
-                || automationRepositoryId != null || automationGeneration != null) {
+                || automationRepositoryId != null || automationGeneration != null
+                || automationReadLease != null) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "非引用定位器不能携带 referenceAlias");
         }
         if (locator.kind() == WorkspaceViewLocatorKind.COMPOSITE && path.isEmpty() && !listing) {
             return WorkspaceViewLocator.root();
         }
         return new WorkspaceViewLocator(
-                locator.kind(), path, alias, automationAppId, automationRepositoryId, automationGeneration);
+                locator.kind(), path, alias, automationAppId, automationRepositoryId, automationGeneration,
+                automationReadLease);
     }
 
     private String normalizePath(String path) {
@@ -1060,7 +1067,8 @@ public class WorkspaceViewApplicationService {
                             reference.displayName(),
                             reference.applicationId().value(),
                             reference.repositoryId().value(),
-                            reference.generation()),
+                            reference.generation(),
+                            reference.readLeaseToken()),
                     WorkspaceViewSource.AUTOMATION_REFERENCE,
                     false,
                     true,
@@ -1088,7 +1096,8 @@ public class WorkspaceViewApplicationService {
                             reference.displayName(),
                             reference.applicationId().value(),
                             reference.repositoryId().value(),
-                            reference.generation()),
+                            reference.generation(),
+                            reference.readLeaseToken()),
                     WorkspaceViewSource.AUTOMATION_REFERENCE,
                     false,
                     true,

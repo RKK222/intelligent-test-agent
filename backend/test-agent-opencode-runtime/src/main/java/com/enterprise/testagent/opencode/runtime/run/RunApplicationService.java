@@ -20,6 +20,7 @@ import com.enterprise.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunLeaseLifecycle;
+import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.hub.ProtectedAgentSelection;
 import com.enterprise.testagent.domain.event.RunEventDraft;
@@ -1192,29 +1193,36 @@ public class RunApplicationService {
         if (!scheduledClaim.managed()) {
             runRepository.save(pending);
         }
-        boolean userMessageCreated;
-        if (reservedRunId != null || scheduledClaim.managed()) {
-            userMessageCreated = ensureUserMessage(
-                    session.sessionId(), pending.runId(), prompt, input.parts(), userId,
-                    dispatchMessageId, traceId, now, source, messageAttribution);
-        } else {
-            saveUserMessage(
-                    session.sessionId(), pending.runId(), prompt, input.parts(), userId,
-                    dispatchMessageId, traceId, now, source, messageAttribution);
-            userMessageCreated = true;
-        }
-        if (userMessageCreated) {
-            Map<String, Object> createdPayload = new LinkedHashMap<>();
-            createdPayload.put("status", RunStatus.PENDING.name());
-            if (protectedContext != null) {
-                createdPayload.put("protectedAgent", protectedContext.auditPayload());
-            }
-            append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
-                    Map.copyOf(createdPayload), storageMode);
-        }
-
         try {
-            acquireAutomationReferenceRunLeases(pending, workspace, userId, traceId);
+            AutomationReferenceRunPreparation automationPreparation = prepareAutomationReferences(
+                    protectedSelection ? null : workspace,
+                    userId,
+                    traceId);
+            // Run 锚点持久化后、任何可见消息和事件发布前锁定精确配置代次，避免旧代次被并发回收。
+            acquireAutomationReferenceRunLeases(pending, automationPreparation, traceId);
+            boolean userMessageCreated;
+            if (reservedRunId != null || scheduledClaim.managed()) {
+                userMessageCreated = ensureUserMessage(
+                        session.sessionId(), pending.runId(), prompt, input.parts(), userId,
+                        dispatchMessageId, traceId, now, source, messageAttribution);
+            } else {
+                saveUserMessage(
+                        session.sessionId(), pending.runId(), prompt, input.parts(), userId,
+                        dispatchMessageId, traceId, now, source, messageAttribution);
+                userMessageCreated = true;
+            }
+            if (userMessageCreated) {
+                Map<String, Object> createdPayload = new LinkedHashMap<>();
+                createdPayload.put("status", RunStatus.PENDING.name());
+                if (protectedContext != null) {
+                    createdPayload.put("protectedAgent", protectedContext.auditPayload());
+                }
+                if (!automationPreparation.warnings().isEmpty()) {
+                    createdPayload.put("automationReferenceWarnings", automationPreparation.warnings());
+                }
+                append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
+                        Map.copyOf(createdPayload), storageMode);
+            }
             AgentRoutingTarget target = protectedSelection
                     ? resolveServerAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
                     : userProcessAssignment == null
@@ -1444,6 +1452,11 @@ public class RunApplicationService {
                 context.connectionGeneration());
         boolean anchorInserted = false;
         try {
+            // 只有本次请求成功取得新 Run claim 后才对账 JSONC；失败时由外层清理 claim，幂等重试不改配置。
+            AutomationReferenceRunPreparation automationPreparation = prepareAutomationReferences(
+                    workspace,
+                    userId,
+                    traceId);
             runRuntimeStore.initialize(
                     manifest,
                     new RunRuntimeInput(
@@ -1506,31 +1519,40 @@ public class RunApplicationService {
             }
             anchorInserted = true;
 
-            // 关系库唯一活动会话锁与 Redis 原子占用都成功后，才允许发布任何可见事件。
-            append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
-                    Map.of(
-                            "status", RunStatus.PENDING.name(),
-                            "storageMode", RunStorageMode.REDIS_SUMMARY.name(),
-                            "clientRequestId", input.clientRequestId(),
-                            "assistantSummaryMessageId", RunSummaryIdentifiers.assistant(pending.runId()).value()),
-                    RunStorageMode.REDIS_SUMMARY);
-            append(running.runId(), RunEventType.RUN_STARTED, traceId, startedAt,
-                    Map.of("status", RunStatus.RUNNING.name()), RunStorageMode.REDIS_SUMMARY);
-
             RunOwnerLeaseSupervisor.OwnershipHandle ownership = null;
             boolean subscriptionHandedOff = false;
             String remoteSessionIdForConvergence = context.remoteSessionId();
             try {
-                acquireAutomationReferenceRunLeases(running, workspace, userId, traceId);
+                ownership = claimInitialOwnership(running.runId());
+                RunOwnerLeaseSupervisor.OwnershipHandle claimedOwnership = ownership;
+                requireOwnedIfPresent(claimedOwnership);
+                // SQL 锚点和 owner fencing 就绪后先锁定自动化代次，再发布任何前端可见事件。
+                acquireAutomationReferenceRunLeases(running, automationPreparation, traceId);
                 if (!runRuntimeStore.confirmClientRequest(
                         session.sessionId(), input.clientRequestId(), running.runId())) {
                     LOGGER.warn(
                             "Run 锚点已写入但 clientRequestId 映射正由并发请求收敛，runId={}, traceId={}",
                             running.runId().value(), traceId);
                 }
-                ownership = claimInitialOwnership(running.runId());
-                RunOwnerLeaseSupervisor.OwnershipHandle claimedOwnership = ownership;
                 requireOwnedIfPresent(claimedOwnership);
+
+                Map<String, Object> createdPayload = new LinkedHashMap<>();
+                createdPayload.put("status", RunStatus.PENDING.name());
+                createdPayload.put("storageMode", RunStorageMode.REDIS_SUMMARY.name());
+                createdPayload.put("clientRequestId", input.clientRequestId());
+                createdPayload.put(
+                        "assistantSummaryMessageId",
+                        RunSummaryIdentifiers.assistant(pending.runId()).value());
+                if (!automationPreparation.warnings().isEmpty()) {
+                    createdPayload.put("automationReferenceWarnings", automationPreparation.warnings());
+                }
+                append(pending.runId(), RunEventType.RUN_CREATED, traceId, now,
+                        Map.copyOf(createdPayload), RunStorageMode.REDIS_SUMMARY, claimedOwnership);
+                append(running.runId(), RunEventType.RUN_STARTED, traceId, startedAt,
+                        Map.of("status", RunStatus.RUNNING.name()),
+                        RunStorageMode.REDIS_SUMMARY,
+                        claimedOwnership);
+
                 boolean initialBinding = context.bindingSnapshot() == null;
                 AgentSessionBinding binding = !initialBinding
                         ? context.bindingSnapshot()
@@ -2183,6 +2205,7 @@ public class RunApplicationService {
                 false,
                 traceId);
         runSessionScopeRouter.finishRun(run.runId());
+        releaseAutomationReferenceRunLeasesBestEffort(run.runId(), traceId);
     }
 
     private UserOpencodeProcessAssignment resolveUserProcessAssignment(UserId userId, String agentId, String traceId) {
@@ -3697,24 +3720,40 @@ public class RunApplicationService {
                         failure.getClass().getSimpleName());
             }
         }
-        if (automationReferenceRunLeaseLifecycle != null) {
-            try {
-                automationReferenceRunLeaseLifecycle.release(runId, traceId);
-            } catch (RuntimeException failure) {
-                LOGGER.warn(
-                        "Automation reference Run lease release failed open, runId={}, traceId={}, exceptionType={}",
-                        runId.value(), traceId, failure.getClass().getSimpleName());
-            }
+        releaseAutomationReferenceRunLeasesBestEffort(runId, traceId);
+    }
+
+    private void releaseAutomationReferenceRunLeasesBestEffort(RunId runId, String traceId) {
+        if (automationReferenceRunLeaseLifecycle == null) {
+            return;
         }
+        try {
+            automationReferenceRunLeaseLifecycle.release(runId, traceId);
+        } catch (RuntimeException failure) {
+            LOGGER.warn(
+                    "Automation reference Run lease release failed open, runId={}, traceId={}, exceptionType={}",
+                    runId.value(), traceId, failure.getClass().getSimpleName());
+        }
+    }
+
+    private AutomationReferenceRunPreparation prepareAutomationReferences(
+            Workspace workspace,
+            UserId userId,
+            String traceId) {
+        if (automationReferenceRunLeaseLifecycle == null || workspace == null || userId == null) {
+            return AutomationReferenceRunPreparation.empty();
+        }
+        AutomationReferenceRunPreparation preparation =
+                automationReferenceRunLeaseLifecycle.prepare(workspace, userId, traceId);
+        return preparation == null ? AutomationReferenceRunPreparation.empty() : preparation;
     }
 
     private void acquireAutomationReferenceRunLeases(
             Run run,
-            Workspace workspace,
-            UserId userId,
+            AutomationReferenceRunPreparation preparation,
             String traceId) {
         if (automationReferenceRunLeaseLifecycle != null) {
-            automationReferenceRunLeaseLifecycle.acquire(run, workspace, userId, traceId);
+            automationReferenceRunLeaseLifecycle.acquire(run, preparation, traceId);
         }
     }
 

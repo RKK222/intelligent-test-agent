@@ -326,6 +326,37 @@ class ApplicationAutomationReferenceServiceTest {
                 .isEqualTo(referencesRoot.toString());
     }
 
+    @Test
+    void reconciliationRetiresUnleasedGenerationAndDeletesOnlyItsManagedReplica(@TempDir Path referencesRoot)
+            throws Exception {
+        ApplicationAutomationReferenceGeneration historical = generation(APP_ID, 3L, "op_historical");
+        ApplicationAutomationReferenceReplica retiredReplica = readyReplica(3L);
+        when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR"))
+                .thenReturn(Optional.of(referencesRoot.toString()));
+        when(configurationRepository.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(repository()));
+        when(automationRepository.findRecoverableGenerations(100)).thenReturn(List.of());
+        when(automationRepository.findRetirableGenerations(NOW, 100)).thenReturn(List.of(historical));
+        when(automationRepository.retireGeneration(APP_ID, REPOSITORY_ID, 3L, NOW)).thenReturn(true);
+        when(automationRepository.findRetiredReplicas(new LinuxServerId("server-a"), 100))
+                .thenReturn(List.of(retiredReplica));
+        when(automationRepository.deleteRetiredReplica(
+                APP_ID, REPOSITORY_ID, 3L, new LinuxServerId("server-a"))).thenReturn(true);
+        String logicalPath = service.logicalConfigurationPath(APP_ID, repository(), historical);
+        String relativePath = logicalPath.substring("{env:OPENCODE_REFERENCES_DIR}/".length());
+        Path generationRoot = referencesRoot.resolve(
+                relativePath.substring(0, relativePath.length() - "/src/test".length()));
+        Files.createDirectories(generationRoot.resolve("src/test"));
+        Files.writeString(generationRoot.resolve("src/test/case.feature"), "Feature: retired");
+
+        service.reconcileLocalReplicas("trace_retire");
+
+        assertThat(generationRoot).doesNotExist();
+        verify(automationRepository).deleteExpiredReadLeases(NOW);
+        verify(automationRepository).retireGeneration(APP_ID, REPOSITORY_ID, 3L, NOW);
+        verify(automationRepository).deleteRetiredReplica(
+                APP_ID, REPOSITORY_ID, 3L, new LinuxServerId("server-a"));
+    }
+
     private ApplicationDefinition application(ApplicationId appId) {
         return new ApplicationDefinition(appId, "Demo", true, NOW, NOW);
     }

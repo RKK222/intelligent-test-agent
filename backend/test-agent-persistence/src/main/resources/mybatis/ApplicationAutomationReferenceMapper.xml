@@ -390,6 +390,17 @@
         where run_id = #{runId}
     </delete>
 
+    <!-- 与 retireGeneration 串行化：锁住 READY 代次后再写 Run 租约，避免副本先被并发回收。 -->
+    <select id="lockReadyGeneration" resultType="string">
+        select status
+        from application_automation_reference_generations
+        where app_id = #{appId}
+          and repository_id = #{repositoryId}
+          and generation = #{generation}
+          and status = 'READY'
+        for update
+    </select>
+
     <insert id="insertRunLease">
         insert into application_automation_reference_run_leases(
             run_id, app_id, repository_id, generation, linux_server_id, created_at
@@ -397,4 +408,118 @@
             #{runId}, #{appId}, #{repositoryId}, #{generation}, #{linuxServerId}, #{now}
         )
     </insert>
+
+    <insert id="insertReadLeaseForActiveGeneration">
+        insert into application_automation_reference_read_leases(
+            token_hash, user_id, workspace_id, app_id, repository_id, generation,
+            expires_at, created_at, updated_at
+        )
+        select #{tokenHash}, #{userId}, #{workspaceId}, generation_row.app_id,
+               generation_row.repository_id, generation_row.generation, #{expiresAt}, #{now}, #{now}
+        from application_automation_reference_generations generation_row
+        join application_automation_references state
+          on state.app_id = generation_row.app_id and state.repository_id = generation_row.repository_id
+        where generation_row.app_id = #{appId}
+          and generation_row.repository_id = #{repositoryId}
+          and generation_row.generation = #{generation}
+          and generation_row.status = 'READY'
+          and state.active_generation = generation_row.generation
+    </insert>
+
+    <update id="renewReadLease">
+        update application_automation_reference_read_leases
+        set expires_at = #{nextExpiresAt}, updated_at = #{now}
+        where token_hash = #{tokenHash}
+          and user_id = #{userId}
+          and workspace_id = #{workspaceId}
+          and app_id = #{appId}
+          and repository_id = #{repositoryId}
+          and generation = #{generation}
+          and expires_at &gt; #{now}
+    </update>
+
+    <delete id="deleteExpiredReadLeases">
+        delete from application_automation_reference_read_leases where expires_at &lt;= #{now}
+    </delete>
+
+    <select id="findRetirableGenerations" resultMap="GenerationRowMap">
+        select generation_row.*
+        from application_automation_reference_generations generation_row
+        join application_automation_references state
+          on state.app_id = generation_row.app_id and state.repository_id = generation_row.repository_id
+        where generation_row.status = 'READY'
+          and (state.active_generation is null or state.active_generation &lt;&gt; generation_row.generation)
+          and (state.pending_generation is null or state.pending_generation &lt;&gt; generation_row.generation)
+          and not exists (
+              select 1 from application_automation_reference_run_leases run_lease
+              where run_lease.app_id = generation_row.app_id
+                and run_lease.repository_id = generation_row.repository_id
+                and run_lease.generation = generation_row.generation
+          )
+          and not exists (
+              select 1 from application_automation_reference_read_leases read_lease
+              where read_lease.app_id = generation_row.app_id
+                and read_lease.repository_id = generation_row.repository_id
+                and read_lease.generation = generation_row.generation
+                and read_lease.expires_at &gt; #{now}
+          )
+        order by generation_row.updated_at, generation_row.app_id, generation_row.repository_id, generation_row.generation
+        limit #{limit}
+    </select>
+
+    <update id="retireGeneration">
+        update application_automation_reference_generations generation_row
+        set status = 'RETIRED', updated_at = #{now}
+        where generation_row.app_id = #{appId}
+          and generation_row.repository_id = #{repositoryId}
+          and generation_row.generation = #{generation}
+          and generation_row.status = 'READY'
+          and not exists (
+              select 1 from application_automation_references state
+              where state.app_id = generation_row.app_id
+                and state.repository_id = generation_row.repository_id
+                and (state.active_generation = generation_row.generation
+                     or state.pending_generation = generation_row.generation)
+          )
+          and not exists (
+              select 1 from application_automation_reference_run_leases run_lease
+              where run_lease.app_id = generation_row.app_id
+                and run_lease.repository_id = generation_row.repository_id
+                and run_lease.generation = generation_row.generation
+          )
+          and not exists (
+              select 1 from application_automation_reference_read_leases read_lease
+              where read_lease.app_id = generation_row.app_id
+                and read_lease.repository_id = generation_row.repository_id
+                and read_lease.generation = generation_row.generation
+                and read_lease.expires_at &gt; #{now}
+          )
+    </update>
+
+    <select id="findRetiredReplicas" resultMap="ReplicaRowMap">
+        select replica.*
+        from application_automation_reference_replicas replica
+        join application_automation_reference_generations generation_row
+          on generation_row.app_id = replica.app_id
+         and generation_row.repository_id = replica.repository_id
+         and generation_row.generation = replica.generation
+        where generation_row.status = 'RETIRED' and replica.linux_server_id = #{linuxServerId}
+        order by replica.updated_at, replica.app_id, replica.repository_id, replica.generation
+        limit #{limit}
+    </select>
+
+    <delete id="deleteRetiredReplica">
+        delete from application_automation_reference_replicas replica
+        where replica.app_id = #{appId}
+          and replica.repository_id = #{repositoryId}
+          and replica.generation = #{generation}
+          and replica.linux_server_id = #{linuxServerId}
+          and exists (
+              select 1 from application_automation_reference_generations generation_row
+              where generation_row.app_id = replica.app_id
+                and generation_row.repository_id = replica.repository_id
+                and generation_row.generation = replica.generation
+                and generation_row.status = 'RETIRED'
+          )
+    </delete>
 </mapper>
