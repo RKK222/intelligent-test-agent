@@ -4321,6 +4321,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/opencode/commands` | `{action: START\|RESTART\|STOP\|STATUS}` | 复用公共启动/停止/状态服务；跨 Java 精确转发到持有 generation 的节点。 |
 | `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 网页目录浏览兜底；只允许实例 owner，目标固定持有连接 Java。 |
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 网页兜底注册；客户端先验证真实绝对目录，再事务性注册；离线失败。同步反向 RPC 调度到 `boundedElastic`。 |
+| `POST` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}/recent` | 本地 Workspace | 校验当前用户与有效本地绑定后，复用全局最近工作区偏好保存本次选择；重新登录或打开工作台时优先恢复该本地工作区，后续选择服务器工作区会覆盖此偏好。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
 | `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 服务端实例加所有本地实例 | 当前只允许 `agentId=opencode`，服务端实例排第一，并返回 capability map；`localClientDownload` 保留为 additive 兼容字段。网页下载入口以独立 `download-access/me` 为权威结果，避免实例请求转发到旧进程归属节点时闪现或消失。 |
 
