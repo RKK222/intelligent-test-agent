@@ -12699,17 +12699,17 @@
 
 ### What
 
-- 全局工作台消息层级提高到引用配置弹层之上，资产与自动化保存反馈都复用同一修复；应用资产库仓库卡片、图标和可选 SDD 目录统一为蓝色，自动化继续使用紫色。
+- 全局工作台消息使用最终 DOM 样式提高到引用配置弹层之上，资产与自动化保存反馈都复用同一修复；应用资产库仓库卡片、图标和可选 SDD 目录统一为蓝色，自动化继续使用紫色。最初仅传递 Element Plus Message `zIndex` 参数的实现无效，已在用户复测后纠正并删除该误导参数。
 - 自动化别名进入配置草稿、API、不可变 generation 与 MyBatis XML 持久化；管理员可编辑，普通成员只读，同一应用内校验唯一，旧客户端缺省时仍生成 `automation-{englishName}`。
 - 新增 `V20260822103625__application_automation_reference_generations_add_alias.sql` 前向迁移并回填存量别名；本地持久 PostgreSQL 已执行，SHA-256 固定为 `0313c4153a77cf0bb6311e2c12320454a993c41db556685876d6881a0726fdce`。HTTP API、事件边界、数据库、部署、模块 README 和用户手册同步更新。
 
 ### How
 
 - 后端自动化服务/API 22 项、H2 MyBatis 4 项和真实 Testcontainers PostgreSQL 历史升级 1 项通过；JDK 25 完整 26 模块生产打包成功。
-- 前端定向 57 项、类型检查和生产构建通过；全量 Vitest 149/149 文件通过，2200 passed、1 skipped。`git diff --check` 通过。
+- 前端定向引用反馈/配置弹层 52 项、类型检查和生产构建通过；全量 Vitest 149/149 文件通过，2201 passed、1 skipped。用户复测发现 Message 仍被遮挡后，进一步在已启动的生产页面用真实 Chromium 验证 Element Plus 内联 `z-index: 2001` 被最终样式覆盖为 `12050`，高于引用弹层的 `11000`；`git diff --check` 通过。
 - 使用 `.env.test` 与本地 ClickHouse helper 启动真实 backend、opencode-manager、frontend；health/readiness 为 UP，前端 3000 返回 200，Flyway 当前版本为 `20260822103625`。应用内浏览器新会话无 888888888 登录态，因此未自行输入密码，页面保存交互由组件测试覆盖。
 
 ### Result
 
-- 两类引用保存反馈不会再被配置弹层遮挡；应用资产为蓝色、自动化为紫色；管理员修改自动化别名并保存后，别名随应用级共享 generation 和 JSONC 对账生效。
+- 两类引用保存反馈的最终浏览器层级高于配置弹层；应用资产为蓝色、自动化为紫色；管理员修改自动化别名并保存后，别名随应用级共享 generation 和 JSONC 对账生效。使用 `.env.test`、`test` profile 和本地 ClickHouse helper 重启，backend health/readiness 为 UP，frontend 返回 200，manager 对用户 OpenCode 进程核验为 HEALTHY。
 - 本次变更涉及兼容 API 字段和 PostgreSQL migration，不新增事件 payload、Run 上下文、部署节点、性能通路或额外权限；未修改 `.env*`、generated SDK、OpenCode 源码和未跟踪 `.reasonix/`。

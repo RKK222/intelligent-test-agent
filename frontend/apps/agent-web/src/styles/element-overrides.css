@@ -10,6 +10,8 @@
 
 /* Message 气泡：顶部居中、深色卡片 */
 .el-message.ta-top-message {
+  /* Element Plus 2.12 使用内部全局层级覆盖 Message 的 zIndex 参数，必须在最终 DOM 样式上越过 11000 的业务弹层。 */
+  z-index: 12050 !important;
   background: #1f1f23;
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);

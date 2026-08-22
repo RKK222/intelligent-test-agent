@@ -1,4 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const elementOverridesSource = readFileSync(
+  resolve(process.cwd(), "apps/agent-web/src/styles/element-overrides.css"),
+  "utf8"
+);
 
 const { message, notification } = vi.hoisted(() => ({
   message: vi.fn(),
@@ -18,13 +25,18 @@ describe("notify", () => {
     notification.mockReset();
   });
 
-  it("keeps global save feedback above full-screen reference dialogs", () => {
+  it("uses the common top-message presentation for save feedback", () => {
     notifySuccess("引用配置已保存");
 
     expect(message).toHaveBeenCalledWith(expect.objectContaining({
       type: "success",
-      customClass: "ta-top-message",
-      zIndex: 12050
+      customClass: "ta-top-message"
     }));
+  });
+
+  it("overrides Element Plus inline stacking so feedback stays above reference dialogs", () => {
+    expect(elementOverridesSource).toMatch(
+      /\.el-message\.ta-top-message\s*\{[^}]*z-index:\s*12050\s*!important;/s
+    );
   });
 });
