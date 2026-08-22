@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
-import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
 import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess, Workspace } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
@@ -195,7 +195,6 @@ const emit = defineEmits<{
   (e: "load-app-source-repositories"): void;
   (e: "open-app-source-repository", repository: AppSourceRepositorySummary): void;
   (e: "manage-app-source-repository", repository: AppSourceRepositorySummary): void;
-  (e: "return-managed-workspace"): void;
   (e: "logout"): void;
   (e: "refresh-opencode-process"): void;
   (e: "initialize-process"): void;
@@ -213,6 +212,8 @@ const emit = defineEmits<{
 
 const appMenuOpen = ref(false);
 const workspaceMenuOpen = ref(false);
+const workspaceSearch = ref("");
+const workspaceSearchInput = ref<HTMLInputElement | null>(null);
 const versionMenuOpen = ref(false);
 const userMenuOpen = ref(false);
 const runtimeInventoryOpen = ref(false);
@@ -244,6 +245,7 @@ function closeAppMenu() {
 
 function closeWorkspaceMenu() {
   workspaceMenuOpen.value = false;
+  workspaceSearch.value = "";
 }
 
 function closeVersionMenu() {
@@ -254,12 +256,16 @@ function toggleWorkspaceMenu() {
   if (props.workspaceKind === "EXPERIENCE") return;
   const opening = !workspaceMenuOpen.value;
   workspaceMenuOpen.value = opening;
+  workspaceSearch.value = "";
   appMenuOpen.value = false;
   versionMenuOpen.value = false;
   userMenuOpen.value = false;
   closeRuntimeInventory();
   // 与左下角统一入口一致：每次展开都刷新代码库 generation，避免打开已经失效的缓存副本。
   if (opening && props.showAppSource) emit("load-app-source-repositories");
+  if (opening) {
+    void nextTick(() => workspaceSearchInput.value?.focus());
+  }
 }
 
 function toggleVersionMenu() {
@@ -324,6 +330,33 @@ const availableWorkspaceTemplates = computed(() => props.appTemplates.filter(
 const testWorkspaceTemplates = availableWorkspaceTemplates;
 const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
 const visibleLocalWorkspaces = computed(() => props.localWorkspaces ?? []);
+const normalizedWorkspaceSearch = computed(() => workspaceSearch.value.trim().toLocaleLowerCase());
+
+/** 顶栏工作空间入口统一按名称、分支与来源状态检索，不改变各类工作空间原有切换链路。 */
+function workspaceSearchMatches(...values: Array<string | null | undefined>) {
+  const query = normalizedWorkspaceSearch.value;
+  return !query || values.some((value) => value?.toLocaleLowerCase().includes(query));
+}
+
+const filteredLocalWorkspaces = computed(() => visibleLocalWorkspaces.value.filter((workspace) =>
+  workspaceSearchMatches(workspace.name, workspace.online === false ? "本地 客户端离线" : "本地 客户端在线")
+));
+const filteredAppSourceRepositories = computed(() => visibleAppSourceRepositories.value.filter((repository) =>
+  workspaceSearchMatches(
+    repository.name,
+    repository.englishName,
+    repository.branch,
+    repository.downloadState === "NOT_DOWNLOADED" ? "应用代码库 尚未拉取" : "应用代码库 源码"
+  )
+));
+const filteredTestWorkspaceTemplates = computed(() => testWorkspaceTemplates.value.filter((template) =>
+  workspaceSearchMatches(template.workspaceName, template.branch, "测试工作空间 服务器")
+));
+const hasWorkspaceSearchResults = computed(() =>
+  filteredLocalWorkspaces.value.length > 0
+  || (props.showAppSource && filteredAppSourceRepositories.value.length > 0)
+  || filteredTestWorkspaceTemplates.value.length > 0
+);
 const selectedAppSourceRepository = computed(() => visibleAppSourceRepositories.value.find(
   (repository) => repository.repositoryId === props.selectedAppSourceRepositoryId
 ) ?? null);
@@ -419,11 +452,6 @@ function openHeaderAppSourceRepository(repository: AppSourceRepositorySummary) {
   if (!repository.openable) return;
   closeWorkspaceMenu();
   emit("open-app-source-repository", repository);
-}
-
-function returnHeaderManagedWorkspace() {
-  closeWorkspaceMenu();
-  emit("return-managed-workspace");
 }
 
 function selectHeaderLocalWorkspace(workspaceId: string) {
@@ -2272,25 +2300,50 @@ function submitJoinApp() {
             class="figma-app-menu-dropdown figma-context-menu-dropdown is-workspace-combined"
             role="listbox"
           >
+            <li class="figma-workspace-menu-search" role="presentation">
+              <Search class="figma-workspace-menu-search-icon" aria-hidden="true" />
+              <input
+                ref="workspaceSearchInput"
+                v-model="workspaceSearch"
+                type="search"
+                aria-label="搜索工作空间"
+                placeholder="输入名称或分支检索"
+                @keydown.esc.stop="closeWorkspaceMenu"
+              />
+              <button
+                v-if="workspaceSearch"
+                type="button"
+                aria-label="清空工作空间检索"
+                title="清空"
+                @mousedown.prevent="workspaceSearch = ''"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </li>
             <template v-if="visibleLocalWorkspaces.length > 0 || workspaceKind === 'LOCAL_CLIENT'">
-              <li class="figma-context-menu-section-title" role="presentation">
+              <li
+                v-if="!normalizedWorkspaceSearch || filteredLocalWorkspaces.length > 0"
+                class="figma-context-menu-section-title"
+                role="presentation"
+              >
                 <span class="figma-context-menu-section-label">
                   <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
                   本地工作区
                 </span>
               </li>
               <li
-                v-if="visibleLocalWorkspaces.length === 0"
+                v-if="visibleLocalWorkspaces.length === 0 && !normalizedWorkspaceSearch"
                 class="figma-context-menu-empty is-section-state"
                 role="presentation"
               >
                 暂无已注册本地工作区
               </li>
-              <li v-for="workspace in visibleLocalWorkspaces" :key="workspace.workspaceId" role="presentation">
+              <li v-for="workspace in filteredLocalWorkspaces" :key="workspace.workspaceId" role="presentation">
                 <button
                   type="button"
                   :class="[
                     'figma-app-menu-item',
+                    'figma-workspace-menu-item',
                     workspace.workspaceId === selectedLocalWorkspaceId && 'is-active'
                   ]"
                   role="option"
@@ -2301,33 +2354,22 @@ function submitJoinApp() {
                   @mousedown.prevent="selectHeaderLocalWorkspace(workspace.workspaceId)"
                 >
                   <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
-                  <div class="figma-app-menu-item-main">
-                    <span class="figma-app-menu-item-name">{{ workspace.name }}</span>
-                    <span class="figma-app-menu-item-desc">{{ workspace.online === false ? '客户端离线' : '客户端在线' }}</span>
-                  </div>
+                  <span class="figma-app-menu-item-name">{{ workspace.name }}</span>
+                  <span :class="['figma-workspace-menu-item-meta', workspace.online === false && 'is-offline']">
+                    本地 · {{ workspace.online === false ? '离线' : '在线' }}
+                  </span>
                   <span v-if="workspace.workspaceId === selectedLocalWorkspaceId" class="figma-app-menu-item-check">✓</span>
                 </button>
               </li>
-              <li v-if="workspaceKind === 'LOCAL_CLIENT'" role="presentation">
-                <button
-                  type="button"
-                  class="figma-app-menu-item"
-                  role="option"
-                  aria-label="返回服务器工作区"
-                  @mousedown.prevent="returnHeaderManagedWorkspace"
-                >
-                  <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
-                  <div class="figma-app-menu-item-main">
-                    <span class="figma-app-menu-item-name">返回服务器工作区</span>
-                    <span class="figma-app-menu-item-desc">恢复最近使用的应用工作区</span>
-                  </div>
-                </button>
-              </li>
-              <li class="figma-app-menu-divider" role="presentation" />
+              <li v-if="!normalizedWorkspaceSearch || filteredLocalWorkspaces.length > 0" class="figma-app-menu-divider" role="presentation" />
             </template>
 
             <template v-if="showAppSource">
-              <li class="figma-context-menu-section-title" role="presentation">
+              <li
+                v-if="!normalizedWorkspaceSearch || filteredAppSourceRepositories.length > 0"
+                class="figma-context-menu-section-title"
+                role="presentation"
+              >
                 <span class="figma-context-menu-section-label">
                   <CodeXml class="figma-context-menu-type-icon" aria-hidden="true" />
                   应用代码库
@@ -2343,14 +2385,14 @@ function submitJoinApp() {
                 </button>
               </li>
               <li
-                v-if="loadingAppSourceRepositories && visibleAppSourceRepositories.length === 0"
+                v-if="loadingAppSourceRepositories && visibleAppSourceRepositories.length === 0 && !normalizedWorkspaceSearch"
                 class="figma-context-menu-empty is-section-state"
                 role="presentation"
               >
                 应用代码库加载中…
               </li>
               <li
-                v-else-if="appSourceRepositoriesError && visibleAppSourceRepositories.length === 0"
+                v-else-if="appSourceRepositoriesError && visibleAppSourceRepositories.length === 0 && !normalizedWorkspaceSearch"
                 class="figma-context-menu-empty is-section-state is-error"
                 role="presentation"
               >
@@ -2358,17 +2400,18 @@ function submitJoinApp() {
                 <button type="button" aria-label="重试加载应用代码库" @mousedown.prevent="retryHeaderAppSourceRepositories">重试</button>
               </li>
               <li
-                v-else-if="visibleAppSourceRepositories.length === 0"
+                v-else-if="visibleAppSourceRepositories.length === 0 && !normalizedWorkspaceSearch"
                 class="figma-context-menu-empty is-section-state"
                 role="presentation"
               >
                 暂无应用代码库
               </li>
-              <li v-for="repository in visibleAppSourceRepositories" :key="repository.repositoryId" role="presentation">
+              <li v-for="repository in filteredAppSourceRepositories" :key="repository.repositoryId" role="presentation">
                 <button
                   type="button"
                   :class="[
                     'figma-app-menu-item',
+                    'figma-workspace-menu-item',
                     'figma-context-source-item',
                     repository.downloadState === 'NOT_DOWNLOADED' && 'is-not-downloaded',
                     repository.repositoryId === selectedAppSourceRepositoryId && 'is-active'
@@ -2390,23 +2433,22 @@ function submitJoinApp() {
                   @mousedown.prevent="openHeaderAppSourceRepository(repository)"
                 >
                   <CodeXml class="figma-context-menu-type-icon" aria-hidden="true" />
-                  <div class="figma-app-menu-item-main">
-                    <span class="figma-app-menu-item-name">{{ repository.name }}</span>
-                    <span class="figma-app-menu-item-desc">
-                      {{ repository.downloadState === 'NOT_DOWNLOADED' ? '尚未拉取' : (repository.branch || '源码快照') }}
-                    </span>
-                  </div>
+                  <span class="figma-app-menu-item-name">{{ repository.name }}</span>
+                  <span class="figma-workspace-menu-item-meta">
+                    代码库 · {{ repository.downloadState === 'NOT_DOWNLOADED' ? '尚未拉取' : (repository.branch || '源码快照') }}
+                  </span>
                   <span
                     v-if="repository.repositoryId === selectedAppSourceRepositoryId"
                     class="figma-app-menu-item-check"
                   >✓</span>
                 </button>
               </li>
-              <li class="figma-app-menu-divider" role="presentation" />
+              <li v-if="!normalizedWorkspaceSearch || filteredAppSourceRepositories.length > 0" class="figma-app-menu-divider" role="presentation" />
             </template>
 
             <li
-              v-if="testWorkspaceTemplates.length > 0 || availableWorkspaceTemplates.length === 0"
+              v-if="(!normalizedWorkspaceSearch && (testWorkspaceTemplates.length > 0 || availableWorkspaceTemplates.length === 0))
+                || filteredTestWorkspaceTemplates.length > 0"
               class="figma-context-menu-section-title is-test-workspace"
               role="presentation"
             >
@@ -2416,46 +2458,47 @@ function submitJoinApp() {
               </span>
             </li>
             <li
-              v-if="loadingAppTemplates && availableWorkspaceTemplates.length === 0"
+              v-if="loadingAppTemplates && availableWorkspaceTemplates.length === 0 && !normalizedWorkspaceSearch"
               class="figma-context-menu-empty is-section-state"
               role="presentation"
             >
               工作空间加载中…
             </li>
             <li
-              v-else-if="availableWorkspaceTemplates.length === 0"
+              v-else-if="availableWorkspaceTemplates.length === 0 && !normalizedWorkspaceSearch"
               class="figma-context-menu-empty is-section-state"
               role="presentation"
             >
               暂无测试工作空间
             </li>
-            <li
-              v-for="template in testWorkspaceTemplates"
-              :key="template.workspaceId"
-              :class="['figma-app-menu-item', template.workspaceId === headerWorkspaceTemplate?.workspaceId && 'is-active']"
-              role="option"
-              :aria-selected="template.workspaceId === headerWorkspaceTemplate?.workspaceId"
-              tabindex="0"
-              @mousedown.prevent="selectHeaderWorkspace(template)"
-            >
-              <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
-              <div class="figma-app-menu-item-main">
+            <li v-for="template in filteredTestWorkspaceTemplates" :key="template.workspaceId" role="presentation">
+              <button
+                type="button"
+                :class="[
+                  'figma-app-menu-item',
+                  'figma-workspace-menu-item',
+                  template.workspaceId === headerWorkspaceTemplate?.workspaceId && 'is-active'
+                ]"
+                role="option"
+                :aria-selected="template.workspaceId === headerWorkspaceTemplate?.workspaceId"
+                :aria-label="`打开测试工作空间${template.workspaceName}`"
+                @mousedown.prevent="selectHeaderWorkspace(template)"
+              >
+                <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
                 <span class="figma-app-menu-item-name">{{ template.workspaceName }}</span>
-                <span class="figma-app-menu-item-desc">{{ template.branch }}</span>
-              </div>
-              <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
+                <span class="figma-workspace-menu-item-meta">服务器 · {{ template.branch }}</span>
+                <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
+              </button>
             </li>
             <li
-              v-if="workspaceKind === 'APP_SOURCE' && availableWorkspaceTemplates.length === 0"
-              class="figma-app-menu-item"
-              role="option"
-              tabindex="0"
-              @mousedown.prevent="returnHeaderManagedWorkspace"
+              v-if="normalizedWorkspaceSearch
+                && !hasWorkspaceSearchResults
+                && !loadingAppTemplates
+                && !loadingAppSourceRepositories"
+              class="figma-context-menu-empty is-search-empty"
+              role="presentation"
             >
-              <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
-              <div class="figma-app-menu-item-main">
-                <span class="figma-app-menu-item-name">返回测试工作空间</span>
-              </div>
+              没有匹配的工作空间
             </li>
           </ul>
           </div>
@@ -4377,10 +4420,78 @@ function submitJoinApp() {
 
 .figma-context-menu-dropdown.is-workspace-combined {
   width: max-content;
-  min-width: 276px;
-  max-width: min(340px, calc(100vw - 24px));
+  min-width: 360px;
+  max-width: min(460px, calc(100vw - 24px));
   max-height: min(520px, calc(100vh - 72px));
   overflow-y: auto;
+}
+
+.figma-workspace-menu-search {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -1px -1px 3px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--ta-shell-border, #e5e7eb);
+  background: color-mix(in srgb, var(--ta-shell-surface, #fff) 96%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.figma-workspace-menu-search-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--ta-shell-muted, #6b7280);
+}
+
+.figma-workspace-menu-search input {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ta-shell-header-text, #000);
+  font: inherit;
+  font-size: 12px;
+  line-height: 22px;
+}
+
+.figma-workspace-menu-search input::placeholder {
+  color: var(--ta-shell-muted, #6b7280);
+}
+
+.figma-workspace-menu-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.figma-workspace-menu-search button {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ta-shell-muted, #6b7280);
+  cursor: pointer;
+}
+
+.figma-workspace-menu-search button:hover,
+.figma-workspace-menu-search button:focus-visible {
+  background: var(--ta-shell-hover, #f3f4f6);
+  color: var(--ta-shell-header-text, #000);
+  outline: none;
+}
+
+.figma-workspace-menu-search button svg {
+  width: 13px;
+  height: 13px;
 }
 
 .figma-context-menu-section-title {
@@ -4459,6 +4570,45 @@ function submitJoinApp() {
   cursor: pointer;
   outline: none;
   transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.figma-workspace-menu-item {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.figma-workspace-menu-item .figma-app-menu-item-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-workspace-menu-item-meta {
+  max-width: 44%;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--ta-shell-muted, #6b7280);
+  font-size: 10px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-workspace-menu-item-meta.is-offline {
+  color: #9ca3af;
+}
+
+.figma-context-menu-empty.is-search-empty {
+  padding: 18px 10px;
+  text-align: center;
 }
 
 .figma-context-source-item {

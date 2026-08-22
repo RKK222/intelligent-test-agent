@@ -102,6 +102,20 @@ describe("app source workspace state", () => {
     );
   });
 
+  it("renders local workspace selection before its directory finishes and keeps server templates available", () => {
+    const activationStart = agentWorkbenchSource.indexOf("async function activateLocalWorkspace");
+    const activationEnd = agentWorkbenchSource.indexOf("function handleSelectLocalWorkspace", activationStart);
+    const activationSource = agentWorkbenchSource.slice(activationStart, activationEnd);
+
+    expect(activationSource).toContain('kind: "LOCAL_CLIENT"');
+    expect(activationSource).toContain("awaitDirectory: false");
+    expect(activationSource).not.toContain("selectedAppId.value = undefined");
+    expect(agentWorkbenchSource).toContain('if (selectedWorkspaceKind.value !== "LOCAL_CLIENT") return undefined;');
+    expect(agentWorkbenchSource).toContain(
+      "Boolean(selectedAppIdRef.value) && appTemplatesQuery.isPending.value"
+    );
+  });
+
   it("restores personal worktree identity only from an exact runtime workspace match", () => {
     const personalWorkspace = {
       personalWorkspaceId: "psw-history",

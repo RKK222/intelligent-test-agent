@@ -1256,12 +1256,37 @@ describe("FigmaShell", () => {
     expect(wrapper.get('[aria-label="打开应用代码库源码"]').classes()).toContain("is-active");
   });
 
-  it("switches persisted local workspaces and returns to the server workspace", async () => {
+  it("searches and switches local and server workspaces from one compact menu", async () => {
+    const serverVersion = {
+      versionId: "version-server",
+      applicationWorkspaceId: "workspace-server",
+      appId: "app-fcoss",
+      repositoryId: "repo-server",
+      version: "20260823",
+      branch: "release",
+      status: "ACTIVE",
+      createdAt: "2026-08-23T00:00:00Z",
+      updatedAt: "2026-08-23T00:00:00Z"
+    };
+    const serverWorkspace = {
+      workspaceId: "workspace-server",
+      workspaceName: "服务器工作空间",
+      appId: "app-fcoss",
+      repositoryId: "repo-server",
+      branch: "release",
+      directoryPath: "F-COSS/workspace",
+      standard: true,
+      enabled: true,
+      createdAt: "2026-08-23T00:00:00Z",
+      updatedAt: "2026-08-23T00:00:00Z",
+      versions: [serverVersion]
+    };
     const wrapper = mountShell({
       props: {
         workspaceKind: "LOCAL_CLIENT",
         workspaceName: "native-project",
         selectedLocalWorkspaceId: "wrk-native",
+        appTemplates: [serverWorkspace],
         localWorkspaces: [
           { workspaceId: "wrk-native", name: "native-project", online: true },
           { workspaceId: "wrk-saved", name: "saved-project", online: true },
@@ -1280,15 +1305,28 @@ describe("FigmaShell", () => {
 
     await workspaceButton.trigger("click");
     expect(wrapper.get(".figma-workspace-menu-wrapper .figma-app-menu-dropdown").text()).toContain("本地工作区");
+    expect(wrapper.get(".figma-workspace-menu-wrapper .figma-app-menu-dropdown").text()).toContain("测试工作空间");
     expect(wrapper.get('[aria-label="打开本地工作区native-project"]').classes()).toContain("is-active");
     expect(wrapper.get('[aria-label="打开本地工作区offline-project"]').attributes("disabled")).toBe("");
+    expect(wrapper.find('[aria-label="返回服务器工作区"]').exists()).toBe(false);
+    expect(wrapper.findAll(".figma-workspace-menu-item .figma-app-menu-item-main")).toHaveLength(0);
+
+    const search = wrapper.get<HTMLInputElement>('[aria-label="搜索工作空间"]');
+    await search.setValue("saved");
+    const menuText = wrapper.get(".figma-workspace-menu-wrapper .figma-app-menu-dropdown").text();
+    expect(menuText).toContain("saved-project");
+    expect(menuText).not.toContain("native-project");
+    expect(menuText).not.toContain("服务器工作空间");
 
     await wrapper.get('[aria-label="打开本地工作区saved-project"]').trigger("mousedown");
     expect(wrapper.emitted("select-local-workspace")?.[0]).toEqual(["wrk-saved"]);
 
     await workspaceButton.trigger("click");
-    await wrapper.get('[aria-label="返回服务器工作区"]').trigger("mousedown");
-    expect(wrapper.emitted("return-managed-workspace")).toHaveLength(1);
+    await wrapper.get('[aria-label="打开测试工作空间服务器工作空间"]').trigger("mousedown");
+    expect(wrapper.emitted("select-version")?.[0]?.[0]).toEqual({
+      template: serverWorkspace,
+      version: serverVersion
+    });
   });
 
   it("shows process status with server name and resolved address", async () => {

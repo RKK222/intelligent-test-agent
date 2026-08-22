@@ -1654,7 +1654,7 @@ async function clearLocalWorkspaceRouteQuery() {
   await router.replace({ name: "workbench", query });
 }
 
-/** 客户端注册成功后打开此深链；网页按授权接口取回 Workspace，再走现有文件 WebSocket 加载目录。 */
+/** 客户端注册成功后打开此深链；先切换并渲染逻辑 Workspace，文件目录继续通过 WebSocket 后台加载。 */
 async function activateLocalWorkspace(workspaceId: string, sequence: number, clearRouteQuery: boolean) {
   try {
     const workspace = workspaces.value.find((item) => item.workspaceId === workspaceId)
@@ -1667,7 +1667,6 @@ async function activateLocalWorkspace(workspaceId: string, sequence: number, cle
     selectingAppId = undefined;
     cancelExperienceWorkspaceFlow("WORKSPACE_SWITCHED");
     teardownAppSourceInteractions();
-    selectedAppId.value = undefined;
     appSourceContext.value = null;
     const previousWorkspaceId = selectedWorkspaceId.value;
     if (previousWorkspaceId && previousWorkspaceId !== workspace.workspaceId) {
@@ -1675,6 +1674,7 @@ async function activateLocalWorkspace(workspaceId: string, sequence: number, cle
     }
     const switched = await switchWorkspace(workspace, {
       kind: "LOCAL_CLIENT",
+      awaitDirectory: false,
       isCurrent: () => sequence === localWorkspaceRouteSequence
     });
     if (!switched || sequence !== localWorkspaceRouteSequence) return;
@@ -1923,7 +1923,15 @@ async function handleJoinApp(appId: string, callback: (success: boolean) => void
 // ===== 应用工作空间模板与版本（两级菜单数据源） =====
 // 一级菜单：归属当前应用的工作空间模板（如 F-COSS 主服务）；二级菜单：模板下的应用版本（如 20260701）。
 // 模板在切换应用时拉取一次；版本按需懒加载，用户在菜单里 hover 模板时才拉取，避免一次性把全部版本拉回前端。
-const selectedAppIdRef = computed(() => selectedAppId.value);
+// 本地工作区仍保留最近应用作为服务器工作空间目录上下文；首次登录没有应用选择时回退已加入的首个应用。
+// 这里只决定菜单数据源，不会把当前本地工作区静默切回服务器工作区。
+const selectedAppIdRef = computed(() => {
+  if (selectedAppId.value) return selectedAppId.value;
+  if (selectedWorkspaceKind.value !== "LOCAL_CLIENT") return undefined;
+  const recentAppId = globalRecentAppId.value;
+  if (recentAppId && applicationCatalog.value.some((app) => app.appId === recentAppId)) return recentAppId;
+  return applicationCatalog.value[0]?.appId;
+});
 const appTemplatesQuery = useQuery({
   queryKey: ["managed-workspace", "app-templates", selectedAppIdRef],
   enabled: () => Boolean(selectedAppIdRef.value),
@@ -1931,7 +1939,7 @@ const appTemplatesQuery = useQuery({
   retry: false
 });
 const appTemplates = computed<ApplicationWorkspaceTemplate[]>(() => appTemplatesQuery.data.value ?? []);
-const loadingAppTemplates = computed(() => appTemplatesQuery.isPending.value);
+const loadingAppTemplates = computed(() => Boolean(selectedAppIdRef.value) && appTemplatesQuery.isPending.value);
 // 按模板 ID 缓存应用版本；用户首次展开某个模板时调用 ensureAppVersionsLoaded(templateId)。
 const versionsByTemplateId = ref<Record<string, ApplicationWorkspaceVersion[]>>({});
 const loadingVersionTemplateIds = ref<Set<string>>(new Set());
@@ -6810,7 +6818,8 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
   if (!await confirmProcessInitializationBeforeWorkspaceAction("切换应用版本")) {
     return;
   }
-  const selectionAuthority = beginManagedWorkspaceIntent(payload.version.appId ?? selectedAppId.value);
+  const targetAppId = payload.version.appId || payload.template.appId || selectedAppId.value;
+  const selectionAuthority = beginManagedWorkspaceIntent(targetAppId);
   const selectionIsCurrent = () => appSourceIntentIsCurrent(selectionAuthority);
   try {
     const gitAccess = await api.checkWorkspaceVersionGitAccess(payload.version.versionId);
@@ -6838,6 +6847,8 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
       }
       return;
     }
+    // 从本地工作区直接选择服务器工作空间时，同步恢复其应用上下文，后续版本、源码与权限查询均使用同一 appId。
+    if (targetAppId) selectedAppId.value = targetAppId;
     invalidateConversationInteraction();
     const defaultPw = await api.ensureDefaultPersonalWorkspace(payload.version.versionId);
     if (!selectionIsCurrent()) return;
@@ -12178,7 +12189,6 @@ async function handleLogout() {
     @load-app-source-repositories="loadAppSourceRepositories"
     @open-app-source-repository="openAppSourceRepository"
     @manage-app-source-repository="openAppSourceDownloadDialog"
-    @return-managed-workspace="fallbackToManagedWorkspace()"
     @refresh-opencode-process="refreshSelectedRuntimeStatus"
     @initialize-process="beginInitializeOpencodeProcess"
     @restart-process="restartMyOpencodeProcess"
