@@ -67,7 +67,8 @@ Services managed by this script:
                     manager runs, because the manager spawns opencode child processes.
   frontend          agent-web Vite dev server (corepack pnpm dev).
   memory            Independent Mem0/BGE service and pgvector; started only with --with-memory.
-  clickhouse        Independent operational analytics database; started only with --with-clickhouse.
+  clickhouse        Independent operational analytics database; started with --with-clickhouse or
+                    automatically when enabled backend config targets the managed loopback endpoint.
   lobehub           Independent ../lobehub-platform fork plus dev-only ParadeDB/RustFS.
                     It is started only when --with-lobehub is explicitly supplied.
 
@@ -82,7 +83,7 @@ Defaults:
   manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
   LobeHub:         disabled unless --with-lobehub is supplied
   memory:          disabled unless --with-memory is supplied
-  ClickHouse:      disabled unless --with-clickhouse is supplied
+  ClickHouse:      auto-managed when enabled at 127.0.0.1/localhost/[::1] on the managed port/database
   screen sessions: test-agent-backend, test-agent-frontend and test-agent-opencode-manager
                    when screen is available
 
@@ -94,7 +95,7 @@ Options:
   --skip-frontend-build  Restart frontend without running pnpm build first.
   --with-memory          Opt in to local pgvector + fixed Mem0/BGE service on 15433/18888.
                          Generated secrets stay under .tmp/dev-services/memory with mode 0600.
-  --with-clickhouse      Opt in to ClickHouse 26.3.17.56 on loopback port 18123.
+  --with-clickhouse      Force-enable ClickHouse 26.3.17.56 on loopback port 18123.
                          Generated secrets stay under .tmp/dev-services/clickhouse with mode 0600.
   --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
   --without-lobehub      Explicitly keep LobeHub disabled; this is already the dev default.
@@ -393,6 +394,31 @@ url_host() {
   host="${host#[}"
   host="${host%]}"
   echo "${host}"
+}
+
+# dotenv 已明确启用项目托管的回环 ClickHouse 时，默认重启必须复用 helper 的凭据与容器生命周期。
+# 只匹配 helper 固定端口和数据库，避免接管用户自行维护的其它本机或远端 ClickHouse。
+should_auto_manage_local_clickhouse() {
+  local enabled url expected_port expected_database host actual_port actual_database url_without_query
+
+  enabled="${TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED:-false}"
+  case "${enabled}" in
+    true|TRUE|1|yes|YES) ;;
+    *) return 1 ;;
+  esac
+
+  url="${TEST_AGENT_ANALYTICS_CLICKHOUSE_URL:-}"
+  [[ -n "${url}" ]] || return 1
+  expected_port="${TEST_AGENT_CLICKHOUSE_DEV_PORT:-18123}"
+  expected_database="${TEST_AGENT_CLICKHOUSE_DEV_DATABASE:-testagent_analytics}"
+  host="$(url_host "${url}")"
+  actual_port="$(url_port "${url}")"
+  url_without_query="${url%%\?*}"
+  actual_database="${url_without_query##*/}"
+
+  [[ "${host}" == "127.0.0.1" || "${host}" == "localhost" || "${host}" == "::1" ]] &&
+    [[ "${actual_port}" == "${expected_port}" ]] &&
+    [[ "${actual_database}" == "${expected_database}" ]]
 }
 
 derive_frontend_runtime_settings() {
@@ -1134,6 +1160,11 @@ load_env_file "${env_file}"
 backend_url="${TEST_AGENT_BASE_URL:-${backend_url}}"
 frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
 OPENCODE_MANAGER_RUNTIME_STATE_DIR="${OPENCODE_MANAGER_STATE_DIR:-${LOG_DIR}/opencode-manager-state}"
+
+if [[ "${with_clickhouse}" != "true" ]] && should_auto_manage_local_clickhouse; then
+  with_clickhouse=true
+  echo "Auto-enabling managed local ClickHouse because backend analytics targets its loopback endpoint."
+fi
 
 if [[ "${with_lobehub}" == "true" ]]; then
   [[ -x "${LOBEHUB_DEV_SCRIPT}" ]] || {

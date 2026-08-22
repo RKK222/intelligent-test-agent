@@ -274,8 +274,12 @@ cd /data/0709/test-agent-clickhouse-offline
 企业专机部署脚本不用于开发机。macOS/Linux 在仓库根目录执行：
 
 ```bash
-./restart-dev-services.sh --profile test --env-file .env.test --with-clickhouse
+./restart-dev-services.sh --profile test --env-file .env.test
 ```
+
+当 dotenv 已启用 ClickHouse 并精确指向项目托管的本机
+`127.0.0.1|localhost|[::1]:18123/testagent_analytics` 时，上述默认命令会自动启动本地数据面并加载 helper
+凭据；dotenv 未启用时可增加 `--with-clickhouse` 强制进入相同路径。其它本机端口、数据库或远端地址不会被接管。
 
 需要同时验证通用记忆时追加 `--with-memory`。本地 helper 固定使用 ClickHouse 26.3.17.56，只把 HTTP 暴露到
 `127.0.0.1:18123`，数据保存在 `test-agent-clickhouse-dev-data-v1` Docker volume。随机密码、自定义用户配置和

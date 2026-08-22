@@ -660,11 +660,13 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 Bash 额外支持 `--with-memory`：它在平台进程前按“独立 pgvector → 独立 CPU BGE → Alembic → 三个无状态 Mem0 副本 → Nginx VIP”启动数据面，并等待带鉴权 readiness 返回 `rawMessageCount=0`。随机 API key、HMAC 和数据库密码只写入 `.tmp/dev-services/memory` 的 `0600` 文件，Java 不继承记忆库密码；默认路径不探测、停止或构建记忆容器。Windows PowerShell 入口 V1 不提供此开关。企业发布包另支持 `--memory-only/--with-memory`，详细命令、物理分离拓扑、端口和回滚见 `docs/deployment/qa-memory.md`。
 
-Bash 额外支持 `--with-clickhouse`：它在后端启动前拉取并启动固定的 ClickHouse 26.3.17.56，HTTP 只绑定
-`127.0.0.1:18123`，数据库为 `testagent_analytics`，数据保存在 `test-agent-clickhouse-dev-data-v1` 版本化
-Docker volume。随机密码、自定义用户配置和 Java JDBC dotenv 只写入 `.tmp/dev-services/clickhouse` 且权限为
-`0600`；后端只加载 JDBC 所需配置，并在启动时执行既有 ClickHouse schema migration。默认路径不探测、停止
-或配置 ClickHouse，Windows PowerShell 入口当前不提供该开关。企业专机仍按
+Bash 在 dotenv 已启用 ClickHouse 且 JDBC 地址精确指向项目托管的本机
+`127.0.0.1|localhost|[::1]:18123/testagent_analytics` 时，会在后端启动前自动拉取并启动固定的 ClickHouse
+26.3.17.56；其它本机端口、数据库或远端地址不会被接管。dotenv 未启用时可用 `--with-clickhouse` 强制进入同一
+管理路径。HTTP 只绑定回环端口 `18123`，数据库为 `testagent_analytics`，数据保存在
+`test-agent-clickhouse-dev-data-v1` 版本化 Docker volume。随机密码、自定义用户配置和 Java JDBC dotenv 只写入
+`.tmp/dev-services/clickhouse` 且权限为 `0600`；后端只加载 JDBC 所需配置，并在启动时执行既有 ClickHouse
+schema migration。Windows PowerShell 入口当前不提供该本地容器管理能力。企业专机仍按
 `deploy/internal/CLICKHOUSE-ANALYTICS.md` 的独立节点流程部署，不复用本地容器。
 
 `local` profile 未提供 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 时，Spring 在本次 JVM 启动期生成临时随机值，供 Java 与其创建的用户 OpenCode 子进程共同使用；该值不写回 `.env.local`，进程重启后自动轮换。显式环境值仍优先。`test` profile 继续使用受控测试默认值；默认/生产 profile 缺失时仍在用户进程启动前失败关闭，不能依赖本地兜底。

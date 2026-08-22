@@ -76,7 +76,10 @@ if ! grep -Fq 'with_memory=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must keep QA memory disabled by default"
 fi
 if ! grep -Fq 'with_clickhouse=false' "${ROOT_DIR}/restart-dev-services.sh"; then
-  fail "restart script must keep ClickHouse disabled by default"
+  fail "restart script must not force ClickHouse before loading backend configuration"
+fi
+if ! grep -Fq 'should_auto_manage_local_clickhouse' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must reconcile an enabled managed loopback ClickHouse configuration"
 fi
 MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
 MEMORY_DEV_COMPOSE="${ROOT_DIR}/deploy/dev/memory-compose.yml"
@@ -217,10 +220,10 @@ screen_calls="${tmp_dir}/screen.calls"
 cors_calls="${tmp_dir}/cors.calls"
 # backend 启动的 screen 调用出现后，模拟 ps 返回本 worktree 的不可变运行 JAR；
 # 这样测试既覆盖启动归属门禁，也不会在首次停止阶段伪造旧进程。
-printf '#!/usr/bin/env bash\nif [[ -s %q ]] && grep -Fq "/backend-runtime/test-agent-app." %q; then\n  printf "54321 /usr/bin/java /usr/bin/java -jar %s/logs/backend-runtime/test-agent-app.mock.jar --spring.profiles.active=test\\n"\nfi\nexit 0\n' \
-  "${screen_calls}" "${screen_calls}" "${tmp_dir}" >"${tmp_dir}/bin/ps"
+printf '#!/usr/bin/env bash\nif [[ -s %q ]]; then\n  for log_name in logs auto-clickhouse-logs remote-clickhouse-logs; do\n    runtime_dir=%q/${log_name}/backend-runtime\n    if grep -Fq "${runtime_dir}/test-agent-app." %q; then\n      printf "54321 /usr/bin/java /usr/bin/java -jar %%s/test-agent-app.mock.jar --spring.profiles.active=test\\n" "${runtime_dir}"\n    fi\n  done\nfi\nexit 0\n' \
+  "${screen_calls}" "${tmp_dir}" "${screen_calls}" >"${tmp_dir}/bin/ps"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nprintf "%%s\\n" "$*" >>%q\nprintf "%%s\\n" "${TEST_AGENT_CORS_ALLOWED_ORIGINS:-}" >>%q\nexit 0\n' "${screen_calls}" "${cors_calls}" >"${tmp_dir}/bin/screen"
-printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/curl"
+printf '#!/usr/bin/env bash\nif [[ "$*" == *"127.0.0.1:18123"* ]]; then printf "26.3.17.56\\ttestagent_analytics\\n"; fi\nexit 0\n' >"${tmp_dir}/bin/curl"
 printf '#!/usr/bin/env bash\necho "   interface: en0"\n' >"${tmp_dir}/bin/route"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "getifaddr" && "${2:-}" == "en0" ]]; then echo "10.8.0.115"; exit 0; fi\nexit 1\n' >"${tmp_dir}/bin/ipconfig"
 printf '#!/usr/bin/env bash\necho "go should not run for remote opencode base URL" >&2\nexit 99\n' >"${tmp_dir}/bin/go"
@@ -254,6 +257,77 @@ fi
 if [[ "${restart_output}" != *"Defaulting TEST_AGENT_BASE_URL to detected local IPv4 for browser access: http://10.8.0.115:8080"* ]]; then
   echo "${restart_output}" >&2
   fail "restart script did not default TEST_AGENT_BASE_URL to detected local IPv4"
+fi
+
+# dotenv 已启用且指向 helper 固定回环端点时，默认命令必须自动走既有 ClickHouse 管理路径，
+# 用生成的 Java-safe dotenv 覆盖仓库外环境文件中的旧账号；远端地址不得被本地 helper 接管。
+docker_calls="${tmp_dir}/docker.calls"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>%q\nexit 0\n' "${docker_calls}" >"${tmp_dir}/bin/docker"
+chmod +x "${tmp_dir}/bin/docker"
+auto_clickhouse_logs="${tmp_dir}/auto-clickhouse-logs"
+cat >"${tmp_dir}/env-auto-clickhouse.local" <<EOF
+TEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.116:4096
+TEST_AGENT_START_OPENCODE_MANAGER=false
+SYS_DATA_ROOT_DIR=${tmp_dir}/auto-clickhouse-data
+TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED=true
+TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://127.0.0.1:18123/testagent_analytics
+TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME=stale-testagent
+TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=stale-password
+EOF
+set +e
+restart_auto_clickhouse_output="$(
+  PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --skip-backend-build \
+    --skip-frontend-build \
+    --env-file "${tmp_dir}/env-auto-clickhouse.local" \
+    --log-dir "${auto_clickhouse_logs}" 2>&1
+)"
+restart_auto_clickhouse_status=$?
+set -e
+if [[ "${restart_auto_clickhouse_status}" -ne 0 ]]; then
+  echo "${restart_auto_clickhouse_output}" >&2
+  fail "restart script auto-managed ClickHouse scenario failed"
+fi
+if [[ "${restart_auto_clickhouse_output}" != *"Auto-enabling managed local ClickHouse"* ]]; then
+  echo "${restart_auto_clickhouse_output}" >&2
+  fail "restart script should auto-manage an enabled ClickHouse at the managed loopback endpoint"
+fi
+if ! grep -Fq 'run -d' "${docker_calls}"; then
+  cat "${docker_calls}" >&2 || true
+  fail "restart script should start the managed ClickHouse container automatically"
+fi
+if ! grep -Fq 'TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME="testagent_analytics"' "${auto_clickhouse_logs}/backend-env.sh"; then
+  fail "restart script should override stale backend ClickHouse credentials with the helper dotenv"
+fi
+
+: >"${docker_calls}"
+cat >"${tmp_dir}/env-remote-clickhouse.local" <<EOF
+TEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.116:4096
+TEST_AGENT_START_OPENCODE_MANAGER=false
+SYS_DATA_ROOT_DIR=${tmp_dir}/remote-clickhouse-data
+TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED=true
+TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://10.8.0.117:8123/enterprise_analytics
+TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME=remote-testagent
+TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=remote-password
+EOF
+set +e
+restart_remote_clickhouse_output="$(
+  PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --skip-backend-build \
+    --skip-frontend-build \
+    --env-file "${tmp_dir}/env-remote-clickhouse.local" \
+    --log-dir "${tmp_dir}/remote-clickhouse-logs" 2>&1
+)"
+restart_remote_clickhouse_status=$?
+set -e
+if [[ "${restart_remote_clickhouse_status}" -ne 0 ]]; then
+  echo "${restart_remote_clickhouse_output}" >&2
+  fail "restart script remote ClickHouse scenario failed"
+fi
+if [[ -s "${docker_calls}" || "${restart_remote_clickhouse_output}" == *"Auto-enabling managed local ClickHouse"* ]]; then
+  echo "${restart_remote_clickhouse_output}" >&2
+  cat "${docker_calls}" >&2 || true
+  fail "restart script must not take over a remote ClickHouse configuration"
 fi
 
 # 单独的通配 Origin 已覆盖动态前端地址，启动脚本不得再拼成既不合法也不等价的混合配置。

@@ -116,11 +116,12 @@ export SYS_DATA_ROOT_DIR="$TESTAGENT/.testagent"
 
 不要显式把 `TEST_AGENT_ROOT` 改成主工作区；它应继续由脚本设置为当前 worktree，确保构建产物、运行 JAR 和日志都属于当前分支。`TESTAGENT` 负责 Java 对历史 `$TESTAGENT/...` 通用参数的展开，`SYS_DATA_ROOT_DIR` 负责启动脚本写入并让 manager 读取同一份 `.serverid/.serverhost`，两者必须指向同一数据根。
 
-需要联调运营分析时显式执行
-`./restart-dev-services.sh --profile test --env-file .env.test --with-clickhouse`；需要同时验证通用记忆时可再加
-`--with-memory`。ClickHouse 默认关闭，显式模式只监听 `127.0.0.1:18123`，运行密钥和 Java JDBC 配置只写入
-`.tmp/dev-services/clickhouse`，不修改 `.env.test`。本地数据由版本化 Docker volume 保留；停容器或重启平台
-不得删除该 volume。
+当 dotenv 已启用 ClickHouse 且 JDBC 地址精确指向项目托管的本机
+`127.0.0.1|localhost|[::1]:18123/testagent_analytics` 时，默认重启会自动进入本地 ClickHouse 管理路径，启动固定
+版本容器并用 `.tmp/dev-services/clickhouse` 中同一套运行凭据覆盖 Java 配置；无需另外添加参数。其它地址不会被
+自动接管。需要在 dotenv 未启用时强制联调运营分析，可显式增加 `--with-clickhouse`；需要同时验证通用记忆时再加
+`--with-memory`。本地 ClickHouse 只监听回环地址，运行密钥和 Java JDBC 配置不写回 `.env.test`；数据由版本化
+Docker volume 保留，停容器或重启平台不得删除该 volume。
 
 LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。该模式要求同级

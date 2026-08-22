@@ -12782,3 +12782,27 @@
 - 浏览器不读取本机文件系统，所有目录结果仍由在线实例 owner 和 connection generation fencing；客户端选中后只回传通过校验的规范化绝对路径。网页兜底现在能够直接选择目录，不再只能逐层下钻。
 - 当前客户端、后台和前端均已运行。浏览器现有 TestAgent 标签登录态已过期，未读取浏览器存储或冒充用户登录，因此原生弹窗最后一次人工点击需由用户登录后执行；协议、客户端、API 和页面链路分别由自动化测试覆盖。
 - 本次增加兼容的内部文件 WebSocket 操作，不新增 HTTP 路由、RunEvent/SSE、数据库、部署节点、强制配置、额外端口或新的文件代理；未触碰未跟踪 `.reasonix/`。
+
+## 2026-08-22 - 默认重启自动对齐本地 ClickHouse 凭据
+
+### Why
+
+- `.env.test` 已启用并指向项目托管的本机 ClickHouse，但默认重启只加载其中的旧账号；本地容器实际使用 `.tmp/dev-services/clickhouse` 中 helper 管理的另一套账号和密码，导致后端 schema migrator 以 ClickHouse `Code: 516` 启动失败。
+- 只有人工追加 `--with-clickhouse` 才会加载正确凭据，所以下次恢复默认命令仍会复现。
+
+### What
+
+- 扩展既有 `restart-dev-services.sh`：dotenv 明确启用 ClickHouse 且 JDBC 地址精确匹配 helper 管理的回环端口和数据库时，自动进入原有 `with_clickhouse` 路径；其它本机端口、数据库和远端地址不接管，显式 `--with-clickhouse` 继续可强制启用。
+- 复用 `tools/clickhouse-dev-services.sh` 的 prepare/pull/start 和 Java-safe dotenv，不新增凭据生成或容器管理实现；补充开发脚本回归，锁定旧账号覆盖和远端不接管行为。
+- 同步后端 README、本地研发流程、后端部署说明和 ClickHouse 运营分析开发说明；未修改 `.env.test`。
+
+### How
+
+- `./tools/verify-dev-scripts.sh` 完整通过，新增模拟场景验证默认命令自动启动托管容器并让 Java 使用 `testagent_analytics`，远端 ClickHouse 不产生 Docker 调用。
+- 使用 JDK 25 执行不带 `--with-clickhouse` 的 `./restart-dev-services.sh --profile test --env-file .env.test`，后端 26 模块跳过测试打包、前端 production build、ClickHouse 鉴权 readiness、backend readiness 和 frontend 启动全部成功。
+- 最终 backend health/readiness 为 UP、frontend 3000 返回 200、CORS 返回本机 origin，ClickHouse 26.3.17.56 在 `127.0.0.1:18123` 认证成功；最近后端日志没有 `Code: 516/AUTHENTICATION_FAILED`。
+
+### Result
+
+- 当前 `.env.test` 下可直接使用默认重启命令，不再要求人工记住 `--with-clickhouse`，helper 运行凭据会在启动 Java 前自动覆盖旧 ClickHouse 账号。
+- 本次只改变本地 Bash 开发启动行为和文档，不涉及 HTTP/API、RunEvent/SSE、数据库/Flyway、生产 ClickHouse 专机、权限、安全协议、generated SDK 或 OpenCode 源码，也未新增部署节点。
