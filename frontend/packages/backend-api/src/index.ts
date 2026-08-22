@@ -128,6 +128,7 @@ import type {
   LocalClientCommandResult,
   LocalClientCredential,
   LocalClientDirectoryEntry,
+  LocalClientDirectorySelection,
   LocalClientDownloadAccess,
   LocalClientGlobalPolicy,
   LocalClientInstance,
@@ -296,6 +297,7 @@ export type FileUploadProgressHandler = (progress: FileUploadProgress) => void;
 const WEBSOCKET_OPEN_STATE = 1;
 const AGENT_CONFIG_PROGRESS_OPEN_TIMEOUT_MS = 3000;
 const APP_SOURCE_PROGRESS_OPEN_TIMEOUT_MS = 3000;
+const LOCAL_DIRECTORY_PICKER_TIMEOUT_MS = 10 * 60 * 1000;
 
 export type BackendApiClientOptions = {
   baseUrl?: string;
@@ -1289,6 +1291,18 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
           absolutePath,
           limit: 1000
         });
+      } finally {
+        client.close();
+      }
+    },
+    pickLocalClientDirectory: async (clientInstanceId: string, initialPath?: string | null) => {
+      const client = await createLocalDirectoryPickerClient(clientInstanceId);
+      try {
+        return await client.request<LocalClientDirectorySelection>(
+          "directory.pick",
+          { initialPath: initialPath?.trim() || undefined },
+          LOCAL_DIRECTORY_PICKER_TIMEOUT_MS
+        );
       } finally {
         client.close();
       }
@@ -3715,7 +3729,7 @@ class WorkspaceFileSocketClient {
     return this.opened;
   }
 
-  request<T>(op: string, params: Record<string, unknown>): Promise<T> {
+  request<T>(op: string, params: Record<string, unknown>, timeoutMs = 30000): Promise<T> {
     if (!this.open) {
       return Promise.reject(new WorkspaceFileTransportError("工作空间文件 WebSocket 尚未连接"));
     }
@@ -3731,7 +3745,7 @@ class WorkspaceFileSocketClient {
           retryable: true,
           details: { op }
         }));
-      }, 30000);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timeoutId });
       try {
         this.socket.send(JSON.stringify({ id, op, params }));

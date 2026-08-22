@@ -5137,6 +5137,66 @@ describe("backend-api", () => {
       expect(headers.get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
     }
   });
+
+  it("opens the bound local client's native directory picker over the existing file websocket", async () => {
+    const clientInstanceId = "lci_native_picker";
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const routeRequest = String(input).endsWith(
+        `/local-clients/${clientInstanceId}/directory-picker/file-ws-route`
+      );
+      return new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: routeRequest
+          ? {
+              runtimeKind: "LOCAL_CLIENT",
+              localClientInstanceId: clientInstanceId,
+              connectionGeneration: 9,
+              baseUrl: "http://127.0.0.1:8080",
+              sameServer: true
+            }
+          : {
+              ticket: "wft_native_picker",
+              expiresAt: "2026-08-22T12:30:00Z",
+              webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_native_picker"
+            }
+      }), { status: 200 });
+    });
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const factory = ((url: string) => {
+      const socket = new FakeWorkspaceWebSocket(url, false);
+      socket.onSend = (message) => queueMicrotask(() => socket.onmessage?.({
+        data: JSON.stringify({
+          id: message.id,
+          type: "result",
+          data: { cancelled: false, absolutePath: "/Users/test/project" }
+        })
+      }));
+      sockets.push(socket);
+      queueMicrotask(() => socket.openConnection());
+      return socket;
+    }) satisfies WorkspaceWebSocketFactory;
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "local-client-token",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: factory
+    });
+
+    await expect(client.pickLocalClientDirectory(clientInstanceId, "/Users/test"))
+      .resolves.toEqual({ cancelled: false, absolutePath: "/Users/test/project" });
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      `http://api/api/internal/platform/workspace-management/local-clients/${clientInstanceId}/directory-picker/file-ws-route`,
+      "http://127.0.0.1:8080/api/internal/platform/workspace-management/file-ws/tickets"
+    ]);
+    expect(sockets[0]?.sentMessages[0]).toMatchObject({
+      op: "directory.pick",
+      params: { initialPath: "/Users/test" }
+    });
+    expect(sockets[0]?.closeCalls).toBe(1);
+  });
 });
 
 type WebSocketEventHandler = ((event: any) => void) | null;

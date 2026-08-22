@@ -12757,3 +12757,28 @@
 
 - `.opencode/opencode.jsonc` 继续是 OpenCode 唯一运行时事实源，自动化只由 Java 对账，浏览器不再拥有第二套自动化补丁算法；应用资产库既有前端补丁行为不变。单库副本不可用只移除/跳过该托管引用并给出安全局部告警，主工作区和其它引用继续可用。
 - 本次新增内部文件 WebSocket 操作和条件写并发保护，不新增 HTTP API、RunEvent 类型、数据库结构/Flyway、部署节点或强制环境变量；未修改 `.env*`、generated SDK、OpenCode 只读源码、未跟踪 `.reasonix/` 和并行的本地客户端持久化修复。公共 Tool 真实远程 push → rollout → 多用户 reload 全链路未执行，也不作为本次已验证项。
+
+## 2026-08-22 - 本地工作区支持客户端原生目录选择并修复网页选择
+
+### Why
+
+- 个人设置注册本地工作区时，网页目录浏览把单击直接解释为进入下一级，用户无法选中列表中的目录；浏览器自身也不能直接唤起客户端机器上的受控目录选择器。
+- 需要在不新增本地 HTTP 端口或后端文件代理的前提下，让已认证客户端打开 macOS 原生目录弹窗，同时保留无图形桌面、旧客户端和弹窗失败时的网页兜底。
+
+### What
+
+- 复用既有 `file-ws-route → directory-picker ticket → /file/ws → FILE_REQUEST` 链路，新增受限操作 `directory.pick`；客户端在虚拟操作线程中切到 AWT EventQueue，macOS 使用原生 `FileDialog`，其它图形桌面使用 `JFileChooser`。同一客户端只允许一个弹窗，取消返回 `cancelled=true`，选中结果继续执行真实路径、目录权限、符号链接和文件系统身份校验。
+- 前端新增“客户端选择”和“网页浏览”两个明确入口；原生选择最长等待 10 分钟并在结束后关闭一次性文件 WebSocket。网页兜底改为单击选中、双击进入目录，底部明确显示当前/所选路径。
+- 同步本地客户端 README、架构文档、HTTP/文件 WebSocket 契约、Agent Web README 和 backend-api PACKAGE；未修改 `.env*`、generated SDK、OpenCode 源码、数据库或 Flyway。
+
+### How
+
+- JDK 25 下客户端选择/取消/路径校验测试 4/4、API 文件 WebSocket 原生选择转发定向测试通过；`test-agent-local-client,test-agent-api -am test` 完整 reactor 通过并生成 12 MiB Shade JAR。
+- 前端全量 Vitest 149 个文件通过（2197 passed、1 skipped）；Agent Web `vue-tsc` 与 production build 通过。全 workspace typecheck 被当前 HEAD 已存在的 backend-api 测试缺少自动化 `alias` 字段阻塞，本次目录选择文件的构建与运行测试不受影响。
+- 使用根目录 `.env.test`、`test` profile、JDK 25 和 ClickHouse helper 重启 backend、opencode-manager、frontend；readiness 为 UP、前端 3000 可访问。基于 root 所有的既有安装复制用户可写的 `/Users/kaka/Applications/TestAgent Local Client Dev.app`，替换为最终 JAR 后启动；追加的 Swing 取消清理通过客户端完整 reactor 复测，实例 `lci_c8d77417e5a0462db2edbf8d4a433445` 最终以 generation 5 成功连接。
+
+### Result
+
+- 浏览器不读取本机文件系统，所有目录结果仍由在线实例 owner 和 connection generation fencing；客户端选中后只回传通过校验的规范化绝对路径。网页兜底现在能够直接选择目录，不再只能逐层下钻。
+- 当前客户端、后台和前端均已运行。浏览器现有 TestAgent 标签登录态已过期，未读取浏览器存储或冒充用户登录，因此原生弹窗最后一次人工点击需由用户登录后执行；协议、客户端、API 和页面链路分别由自动化测试覆盖。
+- 本次增加兼容的内部文件 WebSocket 操作，不新增 HTTP 路由、RunEvent/SSE、数据库、部署节点、强制配置、额外端口或新的文件代理；未触碰未跟踪 `.reasonix/`。

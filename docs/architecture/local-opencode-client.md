@@ -85,6 +85,12 @@ Workspace 与 `local_client_workspaces` 绑定。后续 RPC 只接收 workspaceI
 generation 和 root digest；持票 Java 通过现有文件 WebSocket handler 调用反向隧道，不新增 Java 间文件
 HTTP 代理。
 
+注册本地工作区的目录入口也复用这条链路。网页默认发送 `directory.pick`，由绑定且在线的客户端在自己的
+桌面会话打开原生目录选择器；客户端选中后先执行与注册工作区相同的真实路径和权限校验，再只返回规范化
+绝对路径。用户取消返回正常的 `cancelled=true`，客户端无图形桌面、版本过旧或原生弹窗不可用时，网页可
+显式改用 `directory.list` 逐层浏览。网页兜底中单击目录表示选中、双击才进入下一级，避免目录只能下钻而
+不能作为工作区根目录。两种入口都由 owner、实例 ID 和 connection generation 约束。
+
 ## Session、Run 与夜间任务
 
 `RuntimeKind` 取 `SERVER_PROCESS` 或 `LOCAL_CLIENT`。本地工作区绑定稳定实例 ID，不创建服务端 process 或

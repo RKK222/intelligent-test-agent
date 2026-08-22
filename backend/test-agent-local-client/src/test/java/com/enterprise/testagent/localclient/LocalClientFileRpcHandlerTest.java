@@ -109,6 +109,31 @@ class LocalClientFileRpcHandlerTest {
     }
 
     @Test
+    void shouldReturnValidatedNativeDirectorySelectionAndTreatCancelAsSuccess() throws Exception {
+        Path root = Files.createDirectory(temporaryDirectory.resolve("native-workspace"));
+        LocalWorkspaceRegistry registry = new LocalWorkspaceRegistry(
+                new LocalClientStateStore(temporaryDirectory.resolve("state")));
+        ObjectMapper objectMapper = objectMapper();
+        LocalClientFileRpcHandler selectedHandler = new LocalClientFileRpcHandler(
+                registry, objectMapper, initialPath -> {
+                    assertThat(initialPath).isEqualTo(temporaryDirectory.toString());
+                    return root;
+                });
+        ObjectNode parameters = params(objectMapper, "initialPath", temporaryDirectory.toString());
+
+        assertThat(selectedHandler.handle(new LocalClientPayloads.FileRequest(
+                        null, null, "directory.pick", parameters)))
+                .isEqualTo(objectMapper.valueToTree(new LocalClientFileRpcHandler.DirectorySelection(
+                        false, root.toRealPath().toString())));
+
+        LocalClientFileRpcHandler cancelledHandler = new LocalClientFileRpcHandler(
+                registry, objectMapper, ignored -> null);
+        assertThat(cancelledHandler.handle(new LocalClientPayloads.FileRequest(
+                        null, null, "directory.pick", objectMapper.createObjectNode())))
+                .isEqualTo(objectMapper.valueToTree(new LocalClientFileRpcHandler.DirectorySelection(true, null)));
+    }
+
+    @Test
     void shouldBoundActiveUploadsAndReleaseSlotsWhenConnectionCloses() throws Exception {
         Path root = Files.createDirectory(temporaryDirectory.resolve("workspace"));
         LocalClientStateStore stateStore = new LocalClientStateStore(temporaryDirectory.resolve("state"));

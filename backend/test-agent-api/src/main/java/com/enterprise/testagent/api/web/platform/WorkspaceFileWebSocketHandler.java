@@ -538,7 +538,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "本地文件隧道未装配");
         }
         if (MODE_DIRECTORY_PICKER.equals(ticket.mode())) {
-            if (!"directory.list".equals(op)) {
+            if (!Set.of("directory.list", "directory.pick").contains(op)) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "本地目录选择 ticket 不允许该操作");
             }
             return localClientFileGateway.invoke(

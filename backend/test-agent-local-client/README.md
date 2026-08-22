@@ -9,6 +9,11 @@ Java 21 可执行客户端仅交付给麒麟 ARM64/aarch64 + glibc 的登录用�
 托盘状态只读取既有 5 秒心跳与请求生命周期缓存，不额外探测 OpenCode；状态和任务数不变时不重绘图标。
 桌面环境不支持 SystemTray 时只记录 `local_client_tray_unavailable`，反向连接和文件能力继续运行。
 
+注册本地工作区时，网页优先通过既有文件 WebSocket 请求客户端打开系统目录选择器：macOS 使用原生
+`FileDialog`，其它有图形桌面的系统使用 `JFileChooser`。选择结果仍由客户端执行真实路径、目录权限、
+符号链接和文件系统身份校验；用户取消作为正常结果返回，同一客户端同时只允许一个选择器。无图形桌面或
+原生选择失败时，网页可显式切换到 `directory.list` 目录浏览兜底，不会开放新的本地 HTTP 端口。
+
 客户端自行把日志滚动写入用户 state 目录下的 `logs/client.log`，不依赖 `journalctl`；麒麟上的 journal
 仍可作为 systemd 服务级补充诊断。日志导出只包含最多 20 个 `client*.log[.gz]`，每个文件最多取末尾
 10 MiB，不包含 client key、配置、OpenCode 日志和工作区内容。

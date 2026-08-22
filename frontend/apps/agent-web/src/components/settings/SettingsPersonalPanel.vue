@@ -42,10 +42,12 @@ const localWorkspaces = ref<Workspace[]>([]);
 const localWorkspaceClientId = ref("");
 const localWorkspaceName = ref("");
 const localWorkspaceRoot = ref("");
+const nativePickerLoading = ref(false);
 const pickerOpen = ref(false);
 const pickerLoading = ref(false);
 const pickerError = ref("");
 const pickerPath = ref("/");
+const pickerSelectedPath = ref("");
 const pickerEntries = ref<LocalClientDirectoryEntry[]>([]);
 let localClientRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let localClientRequestEpoch = 0;
@@ -277,9 +279,36 @@ async function runLocalClientAction(action: () => Promise<void>) {
   }
 }
 
-async function openDirectoryPicker() {
+/** 客户端原生选择结果只在当前用户、页面和客户端仍一致时写入表单。 */
+async function pickDirectoryOnClient() {
+  const client = selectedLocalClient.value;
+  if (!client) return;
+  const requestContext = captureLocalClientRequestContext();
+  nativePickerLoading.value = true;
+  localClientError.value = "";
+  try {
+    const selection = await api.pickLocalClientDirectory(
+      client.clientInstanceId,
+      localWorkspaceRoot.value.trim() || null
+    );
+    if (!isLocalClientRequestCurrent(requestContext)
+      || selectedLocalClient.value?.clientInstanceId !== client.clientInstanceId
+      || selection.cancelled) return;
+    if (!selection.absolutePath?.trim()) throw new Error("客户端目录选择结果无效");
+    applyLocalWorkspaceRoot(selection.absolutePath);
+  } catch (error) {
+    if (isLocalClientRequestCurrent(requestContext)) {
+      localClientError.value = error instanceof Error ? error.message : "客户端目录选择失败";
+    }
+  } finally {
+    nativePickerLoading.value = false;
+  }
+}
+
+async function openWebDirectoryPicker() {
   if (!selectedLocalClient.value) return;
   pickerOpen.value = true;
+  pickerSelectedPath.value = "";
   pickerPath.value = localWorkspaceRoot.value.trim() || "/";
   await loadPickerDirectory(pickerPath.value);
 }
@@ -294,6 +323,7 @@ async function loadPickerDirectory(path: string) {
       path
     );
     pickerPath.value = path;
+    pickerSelectedPath.value = "";
   } catch (error) {
     pickerError.value = error instanceof Error ? error.message : "目录读取失败";
   } finally {
@@ -309,11 +339,21 @@ function parentDirectory(path: string) {
 }
 
 function selectPickerDirectory() {
-  localWorkspaceRoot.value = pickerPath.value;
-  if (!localWorkspaceName.value.trim()) {
-    localWorkspaceName.value = pickerPath.value.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "本地工作区";
-  }
+  applyLocalWorkspaceRoot(pickerSelectedPath.value || pickerPath.value);
+  pickerSelectedPath.value = "";
   pickerOpen.value = false;
+}
+
+function selectPickerEntry(entry: LocalClientDirectoryEntry) {
+  if (!entry.directory || entry.symbolicLink || !entry.readable) return;
+  pickerSelectedPath.value = entry.absolutePath;
+}
+
+function applyLocalWorkspaceRoot(path: string) {
+  localWorkspaceRoot.value = path;
+  if (!localWorkspaceName.value.trim()) {
+    localWorkspaceName.value = path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "本地工作区";
+  }
 }
 
 async function createLocalWorkspace() {
@@ -481,7 +521,14 @@ function formatLocalClientTime(value?: string | null) {
         <el-input v-model="localWorkspaceName" maxlength="120" placeholder="工作区名称" />
         <div class="ta-path-row">
           <el-input v-model="localWorkspaceRoot" placeholder="绝对路径，例如 /Users/me/project" />
-          <el-button :disabled="!selectedLocalClient" @click="openDirectoryPicker"><el-icon><Folder /></el-icon>浏览</el-button>
+          <el-button
+            type="primary"
+            plain
+            :loading="nativePickerLoading"
+            :disabled="!selectedLocalClient"
+            @click="pickDirectoryOnClient"
+          ><el-icon><Folder /></el-icon>客户端选择</el-button>
+          <el-button :disabled="!selectedLocalClient || nativePickerLoading" @click="openWebDirectoryPicker">网页浏览</el-button>
         </div>
         <el-button
           type="primary"
@@ -585,18 +632,25 @@ function formatLocalClientTime(value?: string | null) {
           v-for="entry in pickerEntries"
           :key="entry.absolutePath"
           type="button"
+          :class="{ 'is-selected': pickerSelectedPath === entry.absolutePath }"
+          :aria-pressed="pickerSelectedPath === entry.absolutePath"
           :disabled="!entry.directory || entry.symbolicLink || !entry.readable"
           @dblclick="loadPickerDirectory(entry.absolutePath)"
-          @click="entry.directory && !entry.symbolicLink && entry.readable && loadPickerDirectory(entry.absolutePath)"
+          @click="selectPickerEntry(entry)"
         >
           <el-icon><Folder /></el-icon>
           <span>{{ entry.name }}</span>
           <small v-if="entry.symbolicLink">符号链接不可选</small>
         </button>
       </div>
+      <div class="ta-picker-selection">
+        {{ pickerSelectedPath ? `已选择：${pickerSelectedPath}` : `当前目录：${pickerPath}` }}
+      </div>
       <template #footer>
         <el-button @click="pickerOpen = false">取消</el-button>
-        <el-button type="primary" :disabled="pickerLoading" @click="selectPickerDirectory">使用当前目录</el-button>
+        <el-button type="primary" :disabled="pickerLoading" @click="selectPickerDirectory">
+          {{ pickerSelectedPath ? '使用所选目录' : '使用当前目录' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -655,8 +709,10 @@ function formatLocalClientTime(value?: string | null) {
 .ta-picker-list { min-height: 280px; max-height: 420px; margin-top: 12px; overflow: auto; border: 1px solid #ebeef5; border-radius: 8px; }
 .ta-picker-list button { width: 100%; display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 8px; padding: 9px 12px; border: 0; border-bottom: 1px solid #f2f3f5; background: #fff; color: #303133; text-align: left; cursor: pointer; }
 .ta-picker-list button:hover:not(:disabled) { background: #f5f7fa; }
+.ta-picker-list button.is-selected { background: #ecf5ff; color: #2563eb; box-shadow: inset 3px 0 #409eff; }
 .ta-picker-list button:disabled { color: #b6b8bc; cursor: not-allowed; }
 .ta-picker-list small { color: #a66; }
+.ta-picker-selection { margin-top: 8px; color: #606266; font-size: 12px; overflow-wrap: anywhere; }
 .ta-section {
   display: flex;
   flex-direction: column;

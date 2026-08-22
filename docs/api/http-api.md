@@ -4330,7 +4330,10 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 本地目录选择器取得 route 后，继续调用既有
 `POST /api/internal/platform/workspace-management/file-ws/tickets`，ticket 请求使用
 `mode=directory-picker`、`localClientInstanceId` 和 `connectionGeneration`；随后连接既有 `/file/ws`，只允许
-`directory.list {absolutePath,limit}`。普通本地工作区文件 ticket 使用 `mode=workspace` 并冻结
+`directory.pick {initialPath?}` 和 `directory.list {absolutePath,limit}`。前者由客户端桌面打开原生目录选择器，
+返回 `{cancelled,absolutePath?}`，取消为正常结果；后者作为无图形桌面、旧客户端或弹窗失败时的显式网页
+浏览兜底。两种操作返回路径前都由客户端执行真实目录和访问权限校验。普通本地工作区文件 ticket 使用
+`mode=workspace` 并冻结
 `runtimeKind=LOCAL_CLIENT`、实例 ID、generation 和 root digest。
 
 Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追加：

@@ -48,6 +48,7 @@ import com.enterprise.testagent.workspace.WorkspaceViewSource;
 import com.enterprise.testagent.workspace.RequirementImportApplicationService;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -58,6 +59,7 @@ import com.enterprise.testagent.domain.automationreference.AutomationReferenceRu
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalClientWorkspaceFileGateway;
 import com.enterprise.testagent.system.supportaccess.SupportAccessAuthorization;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -161,6 +163,84 @@ class WorkspaceFileWebSocketHandlerTest {
         assertThat(session.sentText()).singleElement().satisfies(message ->
                 assertThat(message).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
         verify(ticketService, never()).consume(Mockito.anyString(), Mockito.anyString());
+    }
+
+    @Test
+    void localDirectoryPickerForwardsNativePickToTheBoundClientGeneration() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        LocalClientWorkspaceFileGateway gateway = Mockito.mock(LocalClientWorkspaceFileGateway.class);
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
+                "wft_local_picker",
+                null,
+                null,
+                null,
+                false,
+                false,
+                false,
+                "usr_1234567890abcdef",
+                "directory-picker",
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                TRACE_ID,
+                NOW.plusSeconds(60),
+                null,
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                RuntimeKind.LOCAL_CLIENT,
+                "lci_1234567890abcdef",
+                7L,
+                null);
+        when(ticketService.consume("wft_local_picker", "http://localhost:3000")).thenReturn(ticket);
+        when(gateway.invoke(
+                Mockito.eq("lci_1234567890abcdef"),
+                Mockito.eq(7L),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.eq("directory.pick"),
+                Mockito.any(),
+                Mockito.eq(TRACE_ID)))
+                .thenReturn(objectMapper.valueToTree(Map.of(
+                        "cancelled", false,
+                        "absolutePath", "/Users/test/project")));
+        WorkspaceFileWebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                Mockito.mock(WorkspaceApplicationService.class),
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                objectMapper,
+                "http://localhost:3000");
+        handler.configureLocalClientFileGateway(gateway);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_local_picker",
+                List.of("""
+                        {"id":"req_pick","op":"directory.pick","params":{"initialPath":"/Users/test"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains(
+                        "\"type\":\"result\"",
+                        "\"cancelled\":false",
+                        "\"absolutePath\":\"/Users/test/project\""));
+        verify(gateway).invoke(
+                Mockito.eq("lci_1234567890abcdef"),
+                Mockito.eq(7L),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.eq("directory.pick"),
+                Mockito.any(),
+                Mockito.eq(TRACE_ID));
     }
 
     @Test
