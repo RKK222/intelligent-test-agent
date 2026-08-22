@@ -294,7 +294,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 本地工作区使用客户端已实现的 `workspace.list` 普通目录 RPC，不调用仅服务端组合引用视图支持的
 `workspace.view.list`；文件 ticket 的 MyBatis/Redis 校验由后端移出 WebFlux event-loop，避免本地目录加载被同步
 路由读取卡住。顶部工作空间菜单直接列出平台已持久化的本地工作区及在线状态，可在已注册目录间切换，并可返回
-最近使用的服务器应用工作区；切换只传递逻辑 Workspace ID，不在浏览器另存本机路径。LOCAL_CLIENT 仍使用独立
+最近使用的服务器应用工作区；每次成功切换都会写入服务端全局最近工作区偏好，刷新、重新登录或由客户端再次打开
+网页时自动恢复最后一次本地/服务器选择。切换只传递逻辑 Workspace ID，不在浏览器另存本机路径。LOCAL_CLIENT 仍使用独立
 选择语义，不触发默认应用补选，并隐藏 Git、应用版本和物理路径复制入口。
 管理员安装后，普通用户在终端执行 `test-agent-local-client enroll` 完成接入。macOS、Windows 与非 glibc
 系统不在本地客户端支持范围；客户端向平台注册后，该位置改为显示本地 OpenCode
