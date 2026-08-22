@@ -28,6 +28,7 @@ import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthor
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
+import com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -68,6 +69,7 @@ public class RunSessionMessageSnapshotService {
     private final RunSessionScopeRepository runSessionScopeRepository;
     private final ObjectMapper objectMapper;
     private WorkspaceRepository workspaceRepository;
+    private AgentRuntimeTargetResolver runtimeTargetResolver;
 
     /**
      * 注入快照刷新所需端口。该服务只使用 agent facade 投影，不直接依赖 generated SDK。
@@ -96,6 +98,15 @@ public class RunSessionMessageSnapshotService {
     @Autowired(required = false)
     void configureWorkspaceRepository(WorkspaceRepository workspaceRepository) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+    }
+
+    /**
+     * 生产刷新必须复用会话统一运行目标解析；旧单元测试仍可使用固定节点仓储。
+     */
+    @Autowired(required = false)
+    void configureRuntimeTargetResolver(AgentRuntimeTargetResolver runtimeTargetResolver) {
+        this.runtimeTargetResolver = Objects.requireNonNull(
+                runtimeTargetResolver, "runtimeTargetResolver must not be null");
     }
 
     /** 兼容不需要 scope 交叉校验的独立测试和旧装配。 */
@@ -140,6 +151,23 @@ public class RunSessionMessageSnapshotService {
     private boolean refreshSnapshot(String agentId, Session session, Run run, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         try {
+            if (runtimeTargetResolver != null && session.createdByUserId() != null) {
+                AgentRuntimeTargetResolver.SessionRuntimeTarget target = runtimeTargetResolver.sessionTarget(
+                        resolvedAgentId,
+                        session.createdByUserId(),
+                        session.sessionId().value(),
+                        traceId);
+                SnapshotUsage runUsage = refreshSnapshotPages(
+                        target.runtime(),
+                        target.node(),
+                        target.remoteSessionId(),
+                        resolvedAgentId,
+                        session,
+                        run,
+                        traceId);
+                persistRunUsage(run, runUsage);
+                return runUsage != null;
+            }
             Optional<AgentSessionBinding> binding = findAgentBinding(resolvedAgentId, session, traceId);
             if (binding.isEmpty()) {
                 return false;
@@ -157,13 +185,8 @@ public class RunSessionMessageSnapshotService {
                     session,
                     run,
                     traceId);
-            if (runUsage == null) {
-                return false;
-            }
-            if (run != null && runUsage.hasValue()) {
-                runRepository.save(run.withUsage(runUsage.tokenUsage(), runUsage.costUsd()));
-            }
-            return true;
+            persistRunUsage(run, runUsage);
+            return runUsage != null;
         } catch (RuntimeException exception) {
             if (ExperienceWorkspaceAccessAuthorizer.isExperienceWorkspaceId(session.workspaceId())) {
                 // 体验错误链可能包含物理 cwd；日志只记录稳定标识，不输出 message/cause。
@@ -183,6 +206,13 @@ public class RunSessionMessageSnapshotService {
                         exception);
             }
             return false;
+        }
+    }
+
+    /** 只在快照确实返回用量时回写 Run，保持旧路径的空值语义。 */
+    private void persistRunUsage(Run run, SnapshotUsage runUsage) {
+        if (run != null && runUsage != null && runUsage.hasValue()) {
+            runRepository.save(run.withUsage(runUsage.tokenUsage(), runUsage.costUsd()));
         }
     }
 

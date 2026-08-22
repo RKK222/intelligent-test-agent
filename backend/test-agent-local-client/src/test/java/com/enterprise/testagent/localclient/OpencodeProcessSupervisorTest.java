@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.sun.net.httpserver.HttpServer;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
@@ -51,6 +52,51 @@ class OpencodeProcessSupervisorTest {
                 assertThat(result.message()).contains("PID 已被复用");
             });
             assertThat(current.isAlive()).isTrue();
+        }
+    }
+
+    @Test
+    void clearsExitedPidEvenWhenAnotherHealthyProcessOwnsTheRecordedPort() throws Exception {
+        Path executable = Path.of("/bin/sh");
+        assumeTrue(Files.isExecutable(executable));
+        long missingPid = 999_999_999L;
+        assumeTrue(ProcessHandle.of(missingPid).isEmpty());
+        HttpServer unrelated = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        unrelated.createContext("/global/health", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        unrelated.start();
+        int occupiedPort = unrelated.getAddress().getPort();
+        assumeTrue(occupiedPort < 65_535);
+        LocalClientConfiguration configuration = configuration(executable, occupiedPort, occupiedPort + 1);
+        LocalClientStateStore stateStore = new LocalClientStateStore(temporaryDirectory.resolve("stale-state"));
+        LocalClientPersistentState.ProcessState stale = new LocalClientPersistentState.ProcessState(
+                missingPid, Instant.parse("2026-08-22T00:00:00Z"), executable.toString(), occupiedPort);
+        stateStore.update(state -> new LocalClientPersistentState(
+                state.clientInstanceId(), stale, state.workspaces()));
+
+        try (LocalModelRelay relay = new LocalModelRelay(configuration)) {
+            OpencodeProcessSupervisor supervisor = new OpencodeProcessSupervisor(configuration, stateStore, relay);
+
+            assertThat(supervisor.status()).satisfies(result -> {
+                assertThat(result.success()).isTrue();
+                assertThat(result.processStatus()).isEqualTo("STOPPED");
+                assertThat(result.processId()).isNull();
+                assertThat(result.opencodeHealthy()).isFalse();
+            });
+            assertThat(stateStore.read().process()).isNull();
+
+            // 直接 start 也必须越过同一份陈旧记录，而不是返回旧 PID 的永久 FAILED。
+            stateStore.update(state -> new LocalClientPersistentState(
+                    state.clientInstanceId(), stale, state.workspaces()));
+            assertThat(supervisor.start(occupiedPort)).satisfies(result -> {
+                assertThat(result.processStatus()).isEqualTo("FAILED");
+                assertThat(result.processId()).isNull();
+            });
+            assertThat(stateStore.read().process()).isNull();
+        } finally {
+            unrelated.stop(0);
         }
     }
 

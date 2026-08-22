@@ -10,6 +10,8 @@ import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.managedworkspace.UserWorkspacePreference;
 import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -35,6 +37,7 @@ public class LocalWorkspaceApplicationService {
     private static final Map<String, Boolean> CAPABILITIES = capabilities();
 
     private final WorkspaceRepository workspaceRepository;
+    private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final LocalClientWorkspaceRepository localWorkspaceRepository;
     private final LocalClientInstanceRepository instanceRepository;
     private final LocalClientConnectionStore connectionStore;
@@ -44,6 +47,7 @@ public class LocalWorkspaceApplicationService {
 
     public LocalWorkspaceApplicationService(
             WorkspaceRepository workspaceRepository,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
             LocalClientWorkspaceRepository localWorkspaceRepository,
             LocalClientInstanceRepository instanceRepository,
             LocalClientConnectionStore connectionStore,
@@ -51,12 +55,28 @@ public class LocalWorkspaceApplicationService {
             com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver routeResolver,
             ObjectMapper objectMapper) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository);
+        this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository);
         this.localWorkspaceRepository = Objects.requireNonNull(localWorkspaceRepository);
         this.instanceRepository = Objects.requireNonNull(instanceRepository);
         this.connectionStore = Objects.requireNonNull(connectionStore);
         this.fileGateway = Objects.requireNonNull(fileGateway);
         this.routeResolver = Objects.requireNonNull(routeResolver);
         this.objectMapper = Objects.requireNonNull(objectMapper);
+    }
+
+    /** 记录当前用户最近选择的本地工作区，复用全局工作区偏好以支持重新登录后自动恢复。 */
+    @Transactional
+    public LocalWorkspaceView markRecent(UserId userId, WorkspaceId workspaceId) {
+        LocalClientWorkspaceBinding binding = requireOwnedBinding(userId, workspaceId);
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "本地工作区不可用"));
+        managedWorkspaceRepository.savePreference(new UserWorkspacePreference(
+                userId, null, workspaceId, Instant.now()));
+        boolean online = connectionStore.find(binding.clientInstanceId())
+                .filter(route -> route.userId().equals(userId))
+                .isPresent();
+        return LocalWorkspaceView.from(workspace, binding.clientInstanceId(), online);
     }
 
     public LocalClientConnectionRoute requireOwnedOnlineRoute(

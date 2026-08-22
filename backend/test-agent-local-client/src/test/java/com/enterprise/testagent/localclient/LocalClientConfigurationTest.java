@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.Properties;
 import org.junit.jupiter.api.Test;
 
 class LocalClientConfigurationTest {
@@ -71,6 +72,18 @@ class LocalClientConfigurationTest {
                 configured.installRoot()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("self-update");
+    }
+
+    @Test
+    void nativePackageExecutableOverridesStaleConfiguredExecutable() {
+        Properties properties = new Properties();
+        properties.setProperty("opencodeExecutable", "/old-release/opencode");
+
+        assertThat(LocalClientConfiguration.resolveOpencodeExecutable(
+                        properties, " /current-app/opencode "))
+                .isEqualTo(Path.of("/current-app/opencode"));
+        assertThat(LocalClientConfiguration.resolveOpencodeExecutable(properties, " "))
+                .isEqualTo(Path.of("/old-release/opencode"));
     }
 
     private static LocalClientConfiguration configuration(URI serverUri, boolean allowInsecure) {

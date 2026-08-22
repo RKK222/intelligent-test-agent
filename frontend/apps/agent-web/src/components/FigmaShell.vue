@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
 import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
-import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess } from "@test-agent/shared-types";
+import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess, Workspace } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import PetMiniGames from "./PetMiniGames.vue";
@@ -59,6 +59,8 @@ const props = withDefaults(
     selectedAppId?: string;
     /** 顶栏复用左下角工作空间选择器的数据源，不新增工作区切换链路。 */
     appTemplates?: AppWorkspaceTemplate[];
+    /** 已在客户端注册的平台工作区；顶栏只显示逻辑身份和在线状态，不接触本机绝对路径。 */
+    localWorkspaces?: Pick<Workspace, "workspaceId" | "name" | "online">[];
     /** 顶栏与左下角共用应用代码库目录和 MANAGED/APP_SOURCE 选择语义。 */
     showAppSource?: boolean;
     workspaceKind?: SelectedWorkspaceKind;
@@ -67,6 +69,7 @@ const props = withDefaults(
     appSourceRepositoriesError?: string | null;
     selectedAppSourceRepositoryId?: string;
     selectedWorkspaceTemplateId?: string;
+    selectedLocalWorkspaceId?: string;
     selectedVersionId?: string;
     loadingAppTemplates?: boolean;
     loadingAppVersions?: boolean;
@@ -120,6 +123,7 @@ const props = withDefaults(
       { id: "ms-runner", name: "MS-Runner", description: "质谱批量回归任务" }
     ],
     appTemplates: () => [],
+    localWorkspaces: () => [],
     showAppSource: false,
     workspaceKind: "MANAGED",
     appSourceRepositories: () => [],
@@ -183,6 +187,7 @@ const emit = defineEmits<{
   (e: "toggle-left-panel"): void;
   (e: "toggle-right-panel"): void;
   (e: "select-app", appId: string): void;
+  (e: "select-local-workspace", workspaceId: string): void;
   (e: "open-experience"): void;
   (e: "load-versions", templateId: string): void;
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
@@ -246,7 +251,7 @@ function closeVersionMenu() {
 }
 
 function toggleWorkspaceMenu() {
-  if (props.workspaceKind === "EXPERIENCE" || props.workspaceKind === "LOCAL_CLIENT") return;
+  if (props.workspaceKind === "EXPERIENCE") return;
   const opening = !workspaceMenuOpen.value;
   workspaceMenuOpen.value = opening;
   appMenuOpen.value = false;
@@ -318,6 +323,7 @@ const availableWorkspaceTemplates = computed(() => props.appTemplates.filter(
 // 自动化代码库作为组合文件树中的只读引用展示，不再作为主工作空间切换项。
 const testWorkspaceTemplates = availableWorkspaceTemplates;
 const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
+const visibleLocalWorkspaces = computed(() => props.localWorkspaces ?? []);
 const selectedAppSourceRepository = computed(() => visibleAppSourceRepositories.value.find(
   (repository) => repository.repositoryId === props.selectedAppSourceRepositoryId
 ) ?? null);
@@ -418,6 +424,11 @@ function openHeaderAppSourceRepository(repository: AppSourceRepositorySummary) {
 function returnHeaderManagedWorkspace() {
   closeWorkspaceMenu();
   emit("return-managed-workspace");
+}
+
+function selectHeaderLocalWorkspace(workspaceId: string) {
+  closeWorkspaceMenu();
+  emit("select-local-workspace", workspaceId);
 }
 
 const selectedApp = computed(
@@ -743,12 +754,6 @@ function onAppMenuBlur(event: FocusEvent) {
   const next = event.relatedTarget as Node | null;
   if (next && (event.currentTarget as Node).contains(next)) return;
   setTimeout(closeAppMenu, 120);
-}
-
-function onWorkspaceMenuBlur(event: FocusEvent) {
-  const next = event.relatedTarget as Node | null;
-  if (next && (event.currentTarget as Node).contains(next)) return;
-  setTimeout(closeWorkspaceMenu, 120);
 }
 
 function onVersionMenuBlur(event: FocusEvent) {
@@ -2241,6 +2246,7 @@ function submitJoinApp() {
           </div>
 
           <div class="figma-workspace-menu-wrapper" @click.stop>
+          <!-- 页面根节点已经统一处理外部点击关闭；这里不能在按钮 blur 时关闭，否则菜单项尚未接管焦点就会被收起。 -->
           <button
             type="button"
             :class="['figma-context-menu-trigger', workspaceMenuOpen && 'is-open']"
@@ -2248,9 +2254,8 @@ function submitJoinApp() {
             aria-haspopup="listbox"
             :aria-expanded="workspaceMenuOpen"
             :aria-label="`工作空间：${headerWorkspaceLabel}`"
-            :disabled="workspaceKind === 'EXPERIENCE' || workspaceKind === 'LOCAL_CLIENT'"
-            @click="toggleWorkspaceMenu"
-            @blur="onWorkspaceMenuBlur"
+            :disabled="workspaceKind === 'EXPERIENCE'"
+            @click.stop="toggleWorkspaceMenu"
           >
             <span class="figma-context-menu-key">工作空间</span>
             <CodeXml
@@ -2260,13 +2265,67 @@ function submitJoinApp() {
             />
             <FlaskConical v-else class="figma-context-trigger-type-icon figma-context-icon--workspace" aria-hidden="true" />
             <span class="figma-context-menu-value">{{ headerWorkspaceLabel }}</span>
-            <ChevronDown v-if="workspaceKind !== 'EXPERIENCE' && workspaceKind !== 'LOCAL_CLIENT'" class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
+            <ChevronDown v-if="workspaceKind !== 'EXPERIENCE'" class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
           </button>
           <ul
             v-if="workspaceMenuOpen"
             class="figma-app-menu-dropdown figma-context-menu-dropdown is-workspace-combined"
             role="listbox"
           >
+            <template v-if="visibleLocalWorkspaces.length > 0 || workspaceKind === 'LOCAL_CLIENT'">
+              <li class="figma-context-menu-section-title" role="presentation">
+                <span class="figma-context-menu-section-label">
+                  <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
+                  本地工作区
+                </span>
+              </li>
+              <li
+                v-if="visibleLocalWorkspaces.length === 0"
+                class="figma-context-menu-empty is-section-state"
+                role="presentation"
+              >
+                暂无已注册本地工作区
+              </li>
+              <li v-for="workspace in visibleLocalWorkspaces" :key="workspace.workspaceId" role="presentation">
+                <button
+                  type="button"
+                  :class="[
+                    'figma-app-menu-item',
+                    workspace.workspaceId === selectedLocalWorkspaceId && 'is-active'
+                  ]"
+                  role="option"
+                  :aria-selected="workspace.workspaceId === selectedLocalWorkspaceId"
+                  :aria-label="`打开本地工作区${workspace.name}`"
+                  :title="workspace.online === false ? '绑定的本地客户端当前离线' : `打开${workspace.name}`"
+                  :disabled="workspace.online === false"
+                  @mousedown.prevent="selectHeaderLocalWorkspace(workspace.workspaceId)"
+                >
+                  <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
+                  <div class="figma-app-menu-item-main">
+                    <span class="figma-app-menu-item-name">{{ workspace.name }}</span>
+                    <span class="figma-app-menu-item-desc">{{ workspace.online === false ? '客户端离线' : '客户端在线' }}</span>
+                  </div>
+                  <span v-if="workspace.workspaceId === selectedLocalWorkspaceId" class="figma-app-menu-item-check">✓</span>
+                </button>
+              </li>
+              <li v-if="workspaceKind === 'LOCAL_CLIENT'" role="presentation">
+                <button
+                  type="button"
+                  class="figma-app-menu-item"
+                  role="option"
+                  aria-label="返回服务器工作区"
+                  @mousedown.prevent="returnHeaderManagedWorkspace"
+                >
+                  <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
+                  <div class="figma-app-menu-item-main">
+                    <span class="figma-app-menu-item-name">返回服务器工作区</span>
+                    <span class="figma-app-menu-item-desc">恢复最近使用的应用工作区</span>
+                  </div>
+                </button>
+              </li>
+              <li class="figma-app-menu-divider" role="presentation" />
+            </template>
+
             <template v-if="showAppSource">
               <li class="figma-context-menu-section-title" role="presentation">
                 <span class="figma-context-menu-section-label">

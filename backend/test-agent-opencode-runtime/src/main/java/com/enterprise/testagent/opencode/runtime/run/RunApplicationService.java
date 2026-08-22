@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.automationreference.AutomationReferenceRu
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.hub.ProtectedAgentSelection;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.event.RunEventDraft;
 import com.enterprise.testagent.domain.event.RunEventScopeContext;
 import com.enterprise.testagent.domain.event.RunSessionScope;
@@ -179,7 +180,7 @@ public class RunApplicationService {
     private final ModelCatalogApplicationService modelCatalogService;
     private final UserOpencodeProcessAssignmentService userProcessAssignmentService;
     private final ManagedWorkspacePathResolver workspacePathResolver;
-    private final AgentRuntimeTargetResolver runtimeTargetResolver;
+    private AgentRuntimeTargetResolver runtimeTargetResolver;
     private final RunSessionMessageSnapshotService snapshotService;
     private final RunSessionScopeRepository runSessionScopeRepository;
     private final RunSessionScopeRuntimeCache runSessionScopeRuntimeCache;
@@ -710,6 +711,16 @@ public class RunApplicationService {
                 runtimeLossScheduler, "runtimeLossScheduler must not be null");
     }
 
+    /**
+     * 生产运行必须复用已经装配本地客户端、会话冻结目标与跨 Java 路由能力的公共解析器。
+     * 构造器内的兼容实例仅服务历史手工单测，不能成为线上请求的最终依赖。
+     */
+    @Autowired
+    void configureRuntimeTargetResolver(AgentRuntimeTargetResolver runtimeTargetResolver) {
+        this.runtimeTargetResolver = Objects.requireNonNull(
+                runtimeTargetResolver, "runtimeTargetResolver must not be null");
+    }
+
     /** 公共 Agent/Skill 发布期间的硬闸门放在 Run 应用入口，不能只依赖前端按钮状态。 */
     @Autowired
     void configurePublicConfigMessageGate(PublicAgentConfigMessageGate messageGate) {
@@ -1073,9 +1084,15 @@ public class RunApplicationService {
         if (conversationContext == null) {
             requireAuthenticatedLegacyRunAccess(userId, session);
         }
+        Optional<AgentRuntimeTargetResolver.SessionRuntimeTarget> localSessionTarget = protectedSelection
+                || conversationContext != null
+                ? Optional.empty()
+                : runtimeTargetResolver.localSessionTarget(
+                        resolvedAgentId, userId, session.sessionId().value(), traceId);
         UserOpencodeProcessAssignment userProcessAssignment = protectedSelection
                 ? null
                 : conversationContext == null
+                && localSessionTarget.isEmpty()
                 ? resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
                 : null;
         // 新上下文已经缓存 binding 快照，首次远端会话可由“无 binding”判断，避免为标题监听额外查询消息表。
@@ -1225,6 +1242,8 @@ public class RunApplicationService {
             }
             AgentRoutingTarget target = protectedSelection
                     ? resolveServerAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
+                    : localSessionTarget.isPresent()
+                    ? sessionRuntimeTarget(localSessionTarget.orElseThrow(), pending.runId(), now, traceId)
                     : userProcessAssignment == null
                     ? (conversationContext == null
                             ? resolveAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
@@ -1235,6 +1254,7 @@ public class RunApplicationService {
                     target.node().executionNodeId().value(),
                     target.decision().reason().name(),
                     traceId);
+            persistLegacyRunRuntimeTarget(pending.runId(), target.node());
             routingDecisionRepository.save(target.decision());
             if (protectedContext != null) {
                 protectedAgentExecutionService.configureMcp(protectedContext, runtime, target.node(), traceId);
@@ -2341,6 +2361,35 @@ public class RunApplicationService {
         return new AgentRoutingTarget(
                 node,
                 new RoutingDecision(runId, node.executionNodeId(), RoutingReason.MANUAL_OVERRIDE, now, traceId));
+    }
+
+    /** 已冻结本地会话使用公共解析器返回的实时连接代次，不能再从数据库 OFFLINE 外键锚点还原节点。 */
+    private AgentRoutingTarget sessionRuntimeTarget(
+            AgentRuntimeTargetResolver.SessionRuntimeTarget target,
+            RunId runId,
+            Instant now,
+            String traceId) {
+        ExecutionNode node = target.node();
+        return new AgentRoutingTarget(
+                node,
+                new RoutingDecision(runId, node.executionNodeId(), RoutingReason.STICKY_SESSION, now, traceId));
+    }
+
+    /**
+     * Legacy Run 先保存关系型锚点再解析执行节点；目标确定后必须立即冻结真实 runtime，
+     * 否则本地客户端已经执行成功，Run API 仍会被数据库默认值误报为服务器进程。
+     */
+    private void persistLegacyRunRuntimeTarget(RunId runId, ExecutionNode node) {
+        if (runRuntimeTargetRepository == null) {
+            return;
+        }
+        LocalClientInstanceId localClientInstanceId = node.runtimeKind() == RuntimeKind.LOCAL_CLIENT
+                ? new LocalClientInstanceId(node.localClientInstanceId())
+                : null;
+        runRuntimeTargetRepository.save(new RunRuntimeTarget(
+                runId,
+                node.runtimeKind(),
+                localClientInstanceId));
     }
 
     /**

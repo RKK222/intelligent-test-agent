@@ -40,6 +40,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 - `DefaultOpencodeClientFacadeTest` 覆盖 traceId 透传、health/create/sessionExists/start/cancel/event/diff/reject/messages facade 编排，以及超时、远端 404/503 和有限重试映射。
 - `OpencodeRunEventMapperTest` 覆盖旧版 `session.next.*` 事件、opencode 1.18.4 `session.status`/`session.idle` 终态、message/permission/question/todo/vcs/lsp/mcp/reference/file 等运行态事件、公共 ID alias、派生终态来源字段和未知事件透传。
 - `GeneratedOpencodeSdkGatewayTest` 使用本地 HTTP server 覆盖 create/start/cancel/event/messages/diff/revert/runtime 的真实请求路径、query、请求体和 `X-Trace-Id` header，确保 generated SDK DTO 不外泄。
+- `GeneratedOpencodeSdkGatewayTest` 同时锁定生产构造必须显式注入 `OpencodeWebClientTransport`；禁止恢复无参构造，否则本地工作区会绕过反向隧道直连服务器 OpenCode。
 - `OpencodeRuntimeFacadeTest` 覆盖 runtime facade 的 GET/POST 调用透传和 JSON projection 返回。
 
 ## 允许依赖

@@ -46,6 +46,13 @@ class LocalWorkspaceControllerTest {
                 .thenReturn(new LocalWorkspaceApplicationService.LocalWorkspaceView(
                         "wrk_local_workspace", "project", "/Users/test/project",
                         RuntimeKind.LOCAL_CLIENT, instanceId.value(), true, Map.of()));
+        when(service.markRecent(userId, new com.enterprise.testagent.domain.workspace.WorkspaceId("wrk_local_workspace")))
+                .thenAnswer(ignored -> {
+                    assertThat(Thread.currentThread().getName()).contains("boundedElastic");
+                    return new LocalWorkspaceApplicationService.LocalWorkspaceView(
+                            "wrk_local_workspace", "project", "/Users/test/project",
+                            RuntimeKind.LOCAL_CLIENT, instanceId.value(), true, Map.of());
+                });
         WebTestClient client = WebTestClient.bindToController(new LocalWorkspaceController(
                         service, routes, mock(BackendHttpForwarder.class)))
                 .webFilter(new TraceIdWebFilter())
@@ -64,6 +71,14 @@ class LocalWorkspaceControllerTest {
                 .bodyValue("""
                         {"clientInstanceId":"lci_local_workspace","name":"project","rootPath":"/Users/test/project"}
                         """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.workspaceId").isEqualTo("wrk_local_workspace");
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/local-workspaces/wrk_local_workspace/recent")
+                .header("X-Trace-Id", "trace_local_workspace")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()

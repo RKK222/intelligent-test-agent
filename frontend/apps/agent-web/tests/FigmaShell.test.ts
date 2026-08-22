@@ -1256,24 +1256,39 @@ describe("FigmaShell", () => {
     expect(wrapper.get('[aria-label="打开应用代码库源码"]').classes()).toContain("is-active");
   });
 
-  it("shows a client-selected local workspace without application version controls", async () => {
+  it("switches persisted local workspaces and returns to the server workspace", async () => {
     const wrapper = mountShell({
       props: {
         workspaceKind: "LOCAL_CLIENT",
-        workspaceName: "native-project"
-      }
+        workspaceName: "native-project",
+        selectedLocalWorkspaceId: "wrk-native",
+        localWorkspaces: [
+          { workspaceId: "wrk-native", name: "native-project", online: true },
+          { workspaceId: "wrk-saved", name: "saved-project", online: true },
+          { workspaceId: "wrk-offline", name: "offline-project", online: false }
+        ]
+      } as any
     });
 
     const workspaceButton = wrapper.get('[data-testid="header-workspace-selector"]');
     const versionButton = wrapper.get('[data-testid="header-version-selector"]');
     expect(workspaceButton.text()).toContain("native-project");
-    expect(workspaceButton.attributes("disabled")).toBe("");
-    expect(workspaceButton.find(".figma-app-menu-chevron").exists()).toBe(false);
+    expect(workspaceButton.attributes("disabled")).toBeUndefined();
+    expect(workspaceButton.find(".figma-app-menu-chevron").exists()).toBe(true);
     expect(versionButton.text()).toContain("本地目录");
     expect(versionButton.attributes("disabled")).toBe("");
 
     await workspaceButton.trigger("click");
-    expect(wrapper.find(".figma-workspace-menu-wrapper .figma-app-menu-dropdown").exists()).toBe(false);
+    expect(wrapper.get(".figma-workspace-menu-wrapper .figma-app-menu-dropdown").text()).toContain("本地工作区");
+    expect(wrapper.get('[aria-label="打开本地工作区native-project"]').classes()).toContain("is-active");
+    expect(wrapper.get('[aria-label="打开本地工作区offline-project"]').attributes("disabled")).toBe("");
+
+    await wrapper.get('[aria-label="打开本地工作区saved-project"]').trigger("mousedown");
+    expect(wrapper.emitted("select-local-workspace")?.[0]).toEqual(["wrk-saved"]);
+
+    await workspaceButton.trigger("click");
+    await wrapper.get('[aria-label="返回服务器工作区"]').trigger("mousedown");
+    expect(wrapper.emitted("return-managed-workspace")).toHaveLength(1);
   });
 
   it("shows process status with server name and resolved address", async () => {

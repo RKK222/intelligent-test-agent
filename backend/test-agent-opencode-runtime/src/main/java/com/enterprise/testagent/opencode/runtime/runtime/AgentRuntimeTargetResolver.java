@@ -175,13 +175,10 @@ public class AgentRuntimeTargetResolver {
         requireAuthenticatedSessionAccess(userId, session);
         requireRuntimeWorkspaceAccess(userId, session.workspaceId());
         Workspace workspace = findWorkspace(session.workspaceId());
-        com.enterprise.testagent.domain.session.SessionRuntimeTarget frozenTarget = sessionRuntimeTarget(session);
-        if (frozenTarget.runtimeKind() == RuntimeKind.LOCAL_CLIENT) {
-            LocalClientWorkspaceBinding binding = requireFrozenLocalBinding(session, frozenTarget);
-            ExecutionNode node = localExecutionNode(binding, userId, traceId);
-            AgentSessionBinding agentBinding = ensureAgentSession(
-                    resolvedAgentId, runtime, session, workspace, node, traceId);
-            return new SessionRuntimeTarget(runtime, node, workspace.rootPath(), agentBinding.remoteSessionId());
+        Optional<SessionRuntimeTarget> localTarget = frozenLocalSessionTarget(
+                resolvedAgentId, runtime, userId, session, workspace, traceId);
+        if (localTarget.isPresent()) {
+            return localTarget.orElseThrow();
         }
         if (localBinding(session.workspaceId()) != null) {
             throw new PlatformException(ErrorCode.CONFLICT, "本地会话运行目标缺失，禁止降级到服务端 OpenCode");
@@ -215,6 +212,47 @@ public class AgentRuntimeTargetResolver {
                         Map.of("agentId", resolvedAgentId, "nodeId", binding.executionNodeId().value())));
         return new SessionRuntimeTarget(
                 runtime, node, workspaceRoot(workspace), binding.remoteSessionId(), workspace.workspaceId());
+    }
+
+    /**
+     * 仅在平台 Session 已冻结为本地客户端时返回目标；服务器 Session 返回空，供兼容 Run 入口
+     * 先阻断本地会话降级，同时保持原有服务器路由与历史匿名测试行为不变。
+     */
+    public Optional<SessionRuntimeTarget> localSessionTarget(
+            String agentId,
+            UserId userId,
+            String sessionId,
+            String traceId) {
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+        Session session = findSession(new SessionId(sessionId));
+        requireAuthenticatedSessionAccess(userId, session);
+        requireRuntimeWorkspaceAccess(userId, session.workspaceId());
+        Workspace workspace = findWorkspace(session.workspaceId());
+        return frozenLocalSessionTarget(resolvedAgentId, runtime, userId, session, workspace, traceId);
+    }
+
+    private Optional<SessionRuntimeTarget> frozenLocalSessionTarget(
+            String resolvedAgentId,
+            AgentRuntime runtime,
+            UserId userId,
+            Session session,
+            Workspace workspace,
+            String traceId) {
+        com.enterprise.testagent.domain.session.SessionRuntimeTarget frozenTarget = sessionRuntimeTarget(session);
+        if (frozenTarget.runtimeKind() != RuntimeKind.LOCAL_CLIENT) {
+            return Optional.empty();
+        }
+        LocalClientWorkspaceBinding binding = requireFrozenLocalBinding(session, frozenTarget);
+        ExecutionNode node = localExecutionNode(binding, userId, traceId);
+        AgentSessionBinding agentBinding = ensureAgentSession(
+                resolvedAgentId, runtime, session, workspace, node, traceId);
+        return Optional.of(new SessionRuntimeTarget(
+                runtime,
+                node,
+                workspace.rootPath(),
+                agentBinding.remoteSessionId(),
+                workspace.workspaceId()));
     }
 
     /**

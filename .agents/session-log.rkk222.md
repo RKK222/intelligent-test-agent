@@ -12934,3 +12934,30 @@
 
 - 失败卡片“重试”在单人和协作对话中都创建普通新 Run，旧用户消息和旧 Run 保持不变；消息气泡撤回重发仍走原有替代 Run 流程。
 - 本次仅改变前端事件分流与调用选择，不新增或变更 HTTP API、DTO、RunEvent/SSE、数据库、Flyway、部署节点、性能或安全边界；未修改 `.env*`、generated SDK、OpenCode 只读源码或工作区其它未完成改动。
+
+## 2026-08-23 - 完成本地/服务器工作区、对话与 Agent 端到端闭环
+
+### Why
+
+- macOS 客户端注册本地工作区后，网页不能稳定恢复或切回服务器工作区；本地目录虽可浏览，普通对话仍会因 Java 25 的 h2c 请求卡住或旧 Run 入口误分配服务器进程而失败。
+- 完成态消息刷新和 Run 持久化目标还可能把已经在客户端执行成功的会话显示成服务器运行，导致历史展示与真实执行位置不一致。
+
+### What
+
+- 顶部工作空间菜单直接列出已注册本地工作区，支持客户端/服务器双向切换；本地选择写入既有全局最近工作区偏好，刷新、重新登录和客户端再次打开网页后恢复上次选择。LOCAL_CLIENT 文件树和目录下载复用普通 `workspace.list/read`，切换时关闭旧文件 WebSocket。
+- 新增本地工作区 recent API，复用 `UserWorkspacePreference`；文件 ticket 的同步 MyBatis/Redis 路由移到 `boundedElastic`，避免占用 WebFlux event-loop。
+- 本地 OpenCode loopback 固定 HTTP/1.1；generated gateway 移除可绕过隧道的无参构造。旧版 Run 和完成态快照复用 Spring 管理的 `AgentRuntimeTargetResolver`，按 Session 冻结的 LOCAL_CLIENT 目标路由，并把真实 runtime kind/客户端实例写回 Run。
+- 同步 local-client、opencode-client、opencode-runtime、前端、用户手册与 HTTP API 说明；未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+### How
+
+- 定向 Maven 10 个测试类共 118 项通过、1 项按平台条件跳过；前端 3 个测试文件 200 项通过，agent-web `vue-tsc + vite build` 通过。
+- 使用 `.env.test` / `test` profile 重建并重启 backend、frontend、manager；安装并运行 `/Users/kaka/Applications/TestAgent Local Client Dev.app`。最终 backend health 为 UP、frontend 为 HTTP 200，服务器 4096 与客户端 4106 的 OpenCode 1.18.4 health 均为 true，客户端实例 `lci_c8d77417e5a0462db2edbf8d4a433445` 在线。
+- 真实验证本地 `wrk_16dfcef54a8b4e48a354ce0946a04fb2` 与服务器 `wrk_0be73a3431a34f179e96f18d3f314dff` 往返切换和 recent 恢复；两端文件 route/ticket/WebSocket 均能列出各自根目录。
+- 本地/服务器普通对话分别以 `LOCAL_CHAT_E2E_OK`、`SERVER_CHAT_E2E_OK` 成功结束；本地/服务器 Agent `task` 子调用均为 completed，并分别返回 `LOCAL_AGENT_E2E_OK`、`SERVER_AGENT_E2E_OK`。Run API 最终显示真实 `LOCAL_CLIENT` 或 `SERVER_PROCESS`。
+
+### Result
+
+- 服务器和客户端的工作区展示、选择持久化、普通对话及 Agent 子任务调用形成真实端到端闭环，当前服务与客户端保持运行，可直接由用户继续页面验收。
+- 浏览器自动可见点击复核未完成：已有 Chrome 页面处于登录页，控制插件两次 DOM 快照超时；未在未确认情况下代填浏览器密码。HTTP、WebSocket、真实模型/Agent 执行和前端组件/构建均已验证。
+- 新增一个 recent HTTP 路径但不改变既有 DTO；无 RunEvent/SSE、数据库结构、Flyway、部署节点、强制配置或安全权限变化。

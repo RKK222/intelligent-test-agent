@@ -22,6 +22,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 工作空间文件 WebSocket HTTP 入口，负责路由发现、后端服务器列表和短期 ticket 签发。
@@ -97,7 +99,7 @@ public class WorkspaceFileSocketController {
      * 在目标后端签发文件 WebSocket 一次性 ticket。
      */
     @PostMapping("/api/internal/platform/workspace-management/file-ws/tickets")
-    public ApiResponse<WorkspaceFileSocketDtos.TicketResponse> createTicket(
+    public Mono<ApiResponse<WorkspaceFileSocketDtos.TicketResponse>> createTicket(
             @RequestBody(required = false) WorkspaceFileSocketDtos.TicketRequest request,
             @RequestHeader(name = SessionShareController.SHARE_HEADER, required = false) String shareId,
             ServerWebExchange exchange) {
@@ -106,8 +108,13 @@ public class WorkspaceFileSocketController {
         WorkspaceFileSocketDtos.TicketRequest resolved = request == null
                 ? new WorkspaceFileSocketDtos.TicketRequest(null, null, null)
                 : request;
-        DelegatedOperationContext context = shareContext(principal, shareId, traceId);
-        return ApiResponse.ok(ticketService.createTicket(principal, resolved, context, traceId), traceId);
+        // 本地 ticket 会同步读取 MyBatis 与 Redis 连接路由，必须离开 WebFlux event-loop，
+        // 否则同步 Redis 等待可能占住负责回包的网络线程，最终让前端目录加载超时。
+        return Mono.fromCallable(() -> {
+                    DelegatedOperationContext context = shareContext(principal, shareId, traceId);
+                    return ApiResponse.ok(ticketService.createTicket(principal, resolved, context, traceId), traceId);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     private DelegatedOperationContext shareContext(

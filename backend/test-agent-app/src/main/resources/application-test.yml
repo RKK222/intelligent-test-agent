@@ -24,6 +24,10 @@ management:
       enabled: true
 
 test-agent:
+  local-client:
+    # test profile 只用于受控本地联调，允许原生客户端通过 loopback 明文 WebSocket 接入。
+    # 其它 profile 仍保持 application.yml 的默认拒绝策略，生产必须使用 HTTPS/WSS。
+    allow-insecure-control: true
   xxl-job:
     enabled: false
   internal-model-proxy:

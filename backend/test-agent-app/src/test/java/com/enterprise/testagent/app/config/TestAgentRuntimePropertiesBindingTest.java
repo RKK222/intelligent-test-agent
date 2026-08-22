@@ -92,6 +92,15 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void testProfileAllowsOnlyItsLocalClientDevelopmentTransport() {
+        profileContextRunner
+                .withPropertyValues("spring.profiles.active=test")
+                .run(context -> assertThat(context.getEnvironment().getProperty(
+                                "test-agent.local-client.allow-insecure-control", Boolean.class))
+                        .isTrue());
+    }
+
+    @Test
     void xxlAdminDatasourceDefaultsDoNotLeakIntoPlatformContext() {
         profileContextRunner
                 .withPropertyValues(

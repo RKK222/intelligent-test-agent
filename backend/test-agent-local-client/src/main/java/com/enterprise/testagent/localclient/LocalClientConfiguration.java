@@ -116,7 +116,9 @@ record LocalClientConfiguration(
         if (portMin < 1024 || portMax > 65535 || portMin > portMax) {
             throw new IllegalArgumentException("local OpenCode port range is invalid");
         }
-        Path executable = Path.of(required(properties, "opencodeExecutable")).toAbsolutePath().normalize();
+        Path executable = resolveOpencodeExecutable(
+                properties,
+                System.getProperty(LocalClientFirstRunSetup.PACKAGED_OPENCODE_PROPERTY, ""));
         Path opencodeConfig = Path.of(properties.getProperty(
                         "opencodeConfigDirectory", configDirectory.resolve("opencode-config").toString()))
                 .toAbsolutePath().normalize();
@@ -140,6 +142,18 @@ record LocalClientConfiguration(
                 downloadBase == null ? null : URI.create(downloadBase),
                 publicKeyBase64,
                 installRootValue == null ? null : Path.of(installRootValue).toAbsolutePath().normalize());
+    }
+
+    /**
+     * 原生安装包每次升级都可能切换完整 release 目录，因此启动器明确传入的受管 OpenCode 路径
+     * 必须覆盖首次安装时留下的旧配置；裸 JAR/麒麟稳定启动器未传该参数时仍严格读取配置文件。
+     */
+    static Path resolveOpencodeExecutable(Properties properties, String packagedExecutable) {
+        String candidate = packagedExecutable == null ? "" : packagedExecutable.trim();
+        if (candidate.isEmpty()) {
+            candidate = required(properties, "opencodeExecutable");
+        }
+        return Path.of(candidate).toAbsolutePath().normalize();
     }
 
     LocalClientConfiguration {

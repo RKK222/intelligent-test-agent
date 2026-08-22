@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -100,12 +101,10 @@ final class OpencodeProcessSupervisor {
         }
         ProcessHandle handle = ProcessHandle.of(recorded.processId()).orElse(null);
         if (handle == null || !handle.isAlive()) {
-            if (healthy(recorded.port())) {
-                return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(), true,
-                        recorded.executable(), "原进程已退出但端口被其他进程占用");
-            }
+            // 权威 PID 已退出时，端口上的任何新进程都不再属于本客户端：只清过期记录，绝不控制陌生进程。
+            // 后续 start 会通过受控端口探测跳过占用端口，避免陈旧状态永久阻断自动恢复。
             clearProcess(recorded);
-            return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "已停止");
+            return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "原进程已退出");
         }
         IdentityCheck identity = checkIdentity(handle, recorded);
         if (!identity.matches()) {
@@ -134,13 +133,9 @@ final class OpencodeProcessSupervisor {
         }
         ProcessHandle handle = ProcessHandle.of(recorded.processId()).orElse(null);
         if (handle == null || !handle.isAlive()) {
-            boolean portHealthy = healthy(recorded.port());
-            if (!portHealthy) {
-                clearProcess(recorded);
-                return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "进程已退出");
-            }
-            return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(), true,
-                    recorded.executable(), "记录进程已退出但端口身份不明");
+            // 不能用端口 health 替代 PID/启动时间身份；即使端口被其它 OpenCode 占用，也只清理本客户端旧记录。
+            clearProcess(recorded);
+            return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "进程已退出");
         }
         IdentityCheck identity = checkIdentity(handle, recorded);
         boolean health = healthy(recorded.port());
@@ -177,6 +172,9 @@ final class OpencodeProcessSupervisor {
                     "--print-logs");
             builder.environment().put("XDG_DATA_HOME", configuration.opencodeDataDirectory().toString());
             builder.environment().put("OPENCODE_CONFIG_DIR", configuration.opencodeConfigDirectory().toString());
+            // 企业内网客户端使用随 OpenCode 发布的模型快照；禁止启动时访问 models.dev，
+            // 避免断网环境首次打开工作区时模型目录阻塞两个远端超时窗口。
+            builder.environment().put("OPENCODE_DISABLE_MODELS_FETCH", "true");
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_BASE_URL", modelRelay.baseUrl());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_API_KEY", modelRelay.localToken());
             if (observabilityRelay != null) {
@@ -376,10 +374,14 @@ final class OpencodeProcessSupervisor {
     }
 
     private static boolean portAvailable(int port) {
+        try (Socket probe = new Socket()) {
+            // macOS 允许启用地址复用的通配监听与 127.0.0.1 监听意外共存；先连接可识别所有真实监听者。
+            probe.connect(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 200);
+            return false;
+        } catch (IOException ignored) {
+            // 连接被拒绝只表示当前没有监听者；继续用无地址复用的 bind 缩小检查与启动之间的竞态窗口。
+        }
         try (ServerSocket socket = new ServerSocket()) {
-            // 探测 socket 本身不承载连接，允许地址复用可避免 macOS 在 close 后短暂保留候选端口，
-            // 导致紧接着启动的 OpenCode 错误地得到 EADDRINUSE。真实占用仍会让 bind 失败。
-            socket.setReuseAddress(true);
             // OpenCode 明确监听 127.0.0.1，探测必须使用同一地址族，避免只检查 ::1 后误判端口可用。
             socket.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port));
             return true;

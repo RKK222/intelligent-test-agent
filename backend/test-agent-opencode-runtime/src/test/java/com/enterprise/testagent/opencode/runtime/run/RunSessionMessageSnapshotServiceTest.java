@@ -1,6 +1,9 @@
 package com.enterprise.testagent.opencode.runtime.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.agent.runtime.AgentRuntime;
@@ -23,6 +26,8 @@ import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunRepository;
 import com.enterprise.testagent.domain.run.RunStatus;
+import com.enterprise.testagent.domain.runtime.RuntimeKind;
+import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessage;
@@ -30,10 +35,12 @@ import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionStatus;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
+import com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -73,6 +80,53 @@ class RunSessionMessageSnapshotServiceTest {
             assertThat(message.content()).isEqualTo("assistant text");
             assertThat(message.remoteMessageId()).startsWith("synthetic:");
         });
+    }
+
+    @Test
+    void refreshSessionSnapshotUsesUnifiedTargetResolverForLocalClientSession() {
+        FakeMessageRepository messages = new FakeMessageRepository();
+        PagedRuntime runtime = new PagedRuntime();
+        runtime.pages.put("<latest>", new AgentSessionMessagesResult(List.of(
+                assistant("msg_local_assistant", "msg_local_user", NOW.plusSeconds(1)))));
+        RunSessionMessageSnapshotService service = service(messages, runtime);
+        AgentRuntimeTargetResolver targetResolver = mock(AgentRuntimeTargetResolver.class);
+        ExecutionNode localNode = new ExecutionNode(
+                new ExecutionNodeId("node_local_1234567890abcdef"),
+                "http://local-opencode-client.invalid",
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                100,
+                NOW,
+                java.util.Set.of("local-client"),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef",
+                RuntimeKind.LOCAL_CLIENT,
+                "lci_1234567890abcdef",
+                7L);
+        when(targetResolver.sessionTarget(anyString(), org.mockito.ArgumentMatchers.any(), anyString(), anyString()))
+                .thenReturn(new AgentRuntimeTargetResolver.SessionRuntimeTarget(
+                        runtime,
+                        localNode,
+                        "/Users/test/local-workspace",
+                        "remote_local_session"));
+        service.configureRuntimeTargetResolver(targetResolver);
+        Session ownedSession = session().withSource(
+                ConversationSourceType.MANUAL,
+                null,
+                new UserId("usr_local_snapshot"));
+
+        boolean refreshed = service.refreshSessionSnapshot(
+                "opencode", ownedSession, "trace_1234567890abcdef");
+
+        assertThat(refreshed).isTrue();
+        assertThat(runtime.commands).singleElement().satisfies(command -> {
+            assertThat(command.node().runtimeKind()).isEqualTo(RuntimeKind.LOCAL_CLIENT);
+            assertThat(command.remoteSessionId()).isEqualTo("remote_local_session");
+        });
+        assertThat(messages.findBySessionIdAndRemoteMessageId(SESSION_ID, "msg_local_assistant"))
+                .isPresent();
     }
 
     @Test

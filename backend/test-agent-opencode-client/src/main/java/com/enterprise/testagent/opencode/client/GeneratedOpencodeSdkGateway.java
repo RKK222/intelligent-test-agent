@@ -18,7 +18,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
@@ -45,12 +44,10 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<OpencodeWebClientTransport> transports;
 
-    /** 兼容纯单元测试；生产构造器会注入本地隧道传输。 */
-    public GeneratedOpencodeSdkGateway() {
-        this(List.of());
-    }
-
-    @Autowired
+    /**
+     * 生产组件必须显式注入可用传输；不保留无参构造器，避免本地节点
+     * 静默回退到对 local-opencode-client.invalid 的真实网络请求。
+     */
     public GeneratedOpencodeSdkGateway(List<OpencodeWebClientTransport> transports) {
         this.transports = transports == null ? List.of() : List.copyOf(transports);
     }

@@ -95,6 +95,11 @@ describe("app source workspace state", () => {
     expect(agentWorkbenchSource).toContain(
       "workspaceFilesAsViewEntries(await api.listFiles(workspaceId, target.locator.path))"
     );
+    expect(agentWorkbenchSource).toContain("await api.markRecentLocalWorkspace(workspace.workspaceId)");
+    expect(agentWorkbenchSource).toContain("function tryRestoreRecentLocalWorkspace()");
+    expect(agentWorkbenchSource).toContain(
+      '|| selectedWorkspaceKind.value === "LOCAL_CLIENT"\n        ? await collectOrdinaryWorkspaceDownloadFiles'
+    );
   });
 
   it("restores personal worktree identity only from an exact runtime workspace match", () => {

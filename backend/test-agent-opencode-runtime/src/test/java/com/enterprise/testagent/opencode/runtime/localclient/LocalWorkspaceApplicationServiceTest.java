@@ -2,6 +2,7 @@ package com.enterprise.testagent.opencode.runtime.localclient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -16,6 +17,8 @@ import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository
 import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.managedworkspace.UserWorkspacePreference;
 import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -35,6 +38,7 @@ class LocalWorkspaceApplicationServiceTest {
     @Test
     void repeatedRootRegistrationRestoresAndReturnsExistingWorkspace() {
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        ManagedWorkspaceRepository recentWorkspaces = mock(ManagedWorkspaceRepository.class);
         LocalClientWorkspaceRepository bindings = mock(LocalClientWorkspaceRepository.class);
         LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
         LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
@@ -42,7 +46,7 @@ class LocalWorkspaceApplicationServiceTest {
         BackendJavaRouteResolver routes = mock(BackendJavaRouteResolver.class);
         ObjectMapper objectMapper = new ObjectMapper();
         LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
-                workspaces, bindings, instances, connections, files, routes, objectMapper);
+                workspaces, recentWorkspaces, bindings, instances, connections, files, routes, objectMapper);
 
         Instant now = Instant.parse("2026-08-22T07:00:00Z");
         UserId userId = new UserId("usr_test_dev");
@@ -113,6 +117,7 @@ class LocalWorkspaceApplicationServiceTest {
                 .thenReturn(registration);
         when(bindings.findByOwnerClientAndRootDigest(userId, clientId, "root-digest"))
                 .thenReturn(Optional.of(binding));
+        when(bindings.findByWorkspaceId(workspaceId)).thenReturn(Optional.of(binding));
         when(workspaces.findById(workspaceId)).thenReturn(Optional.of(workspace));
         when(files.invoke(
                 eq(clientId.value()), eq(7L), eq(workspaceId.value()), eq(null),
@@ -127,5 +132,12 @@ class LocalWorkspaceApplicationServiceTest {
         verify(bindings).lockRegistration(userId, clientId);
         verify(workspaces, never()).save(any());
         verify(bindings, never()).save(any());
+
+        LocalWorkspaceApplicationService.LocalWorkspaceView recent = service.markRecent(userId, workspaceId);
+        assertThat(recent.online()).isTrue();
+        verify(recentWorkspaces).savePreference(argThat((UserWorkspacePreference preference) ->
+                preference.userId().equals(userId)
+                        && preference.appId() == null
+                        && preference.workspaceId().equals(workspaceId)));
     }
 }

@@ -11,10 +11,13 @@ import com.enterprise.testagent.localclient.protocol.LocalClientFrameType;
 import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
 import com.enterprise.testagent.localclient.protocol.LocalClientProtocol;
 import com.enterprise.testagent.opencode.client.OpencodeWebClientTransport;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +25,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.reactivestreams.Publisher;
 import org.springframework.core.io.buffer.DataBuffer;
@@ -34,14 +39,18 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ClientHttpRequest;
+import org.springframework.http.codec.json.Jackson2JsonDecoder;
+import org.springframework.http.codec.json.Jackson2JsonEncoder;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 /** generated SDK 的本地 OpenCode HTTP/SSE ExchangeFunction，所有字节经固定 generation 反向隧道。 */
 @org.springframework.stereotype.Component
@@ -69,8 +78,18 @@ public class LocalClientOpencodeWebClientTransport implements OpencodeWebClientT
         if (!supports(node)) {
             throw new IllegalArgumentException("local transport only supports LOCAL_CLIENT nodes");
         }
+        ObjectMapper mapper = new ObjectMapper()
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(maxInMemorySize))
+                .codecs(codecs -> {
+                    // generated SDK 暂时仍使用 Jackson 2；显式注册兼容 codec，避免 Spring 7 默认
+                    // Jackson 3 codec 无法构造 com.fasterxml.jackson.databind.JsonNode。
+                    codecs.defaultCodecs().jackson2JsonEncoder(
+                            new Jackson2JsonEncoder(mapper, MediaType.APPLICATION_JSON));
+                    codecs.defaultCodecs().jackson2JsonDecoder(
+                            new Jackson2JsonDecoder(mapper, MediaType.APPLICATION_JSON));
+                    codecs.defaultCodecs().maxInMemorySize(maxInMemorySize);
+                })
                 .build();
         return WebClient.builder()
                 .exchangeStrategies(strategies)
@@ -115,38 +134,96 @@ public class LocalClientOpencodeWebClientTransport implements OpencodeWebClientT
                 payload,
                 traceId,
                 Duration.ofSeconds(60));
-        return frames.switchOnFirst((signal, connectedFrames) -> {
-                    if (!signal.hasValue()) {
-                        return signal.hasError()
-                                ? Flux.error(signal.getThrowable())
-                                : Flux.empty();
+        return streamingResponse(frames, strategies);
+    }
+
+    /**
+     * 将 STREAM_OPEN 与后续 body 分开转发；不能用 switchOnFirst 后直接返回 response，
+     * 否则 WebClient 取得 response 时会取消外层 Flux，连带取消尚未消费的 SSE body。
+     */
+    private Mono<ClientResponse> streamingResponse(
+            Flux<LocalClientFrame> frames,
+            ExchangeStrategies strategies) {
+        Sinks.One<ClientResponse> response = Sinks.one();
+        Sinks.Many<DataBuffer> body = Sinks.many().unicast()
+                .onBackpressureBuffer(new ArrayBlockingQueue<>(64));
+        AtomicBoolean opened = new AtomicBoolean(false);
+        AtomicReference<Disposable> upstream = new AtomicReference<>();
+        Flux<DataBuffer> bodyFlux = body.asFlux().doOnCancel(() -> dispose(upstream));
+
+        Disposable subscription = frames.subscribe(
+                frame -> forwardStreamFrame(frame, strategies, response, body, bodyFlux, opened, upstream),
+                error -> {
+                    if (opened.get()) {
+                        body.tryEmitError(error);
+                    } else {
+                        response.tryEmitError(error);
                     }
-                    LocalClientFrame first = signal.get();
-                    if (first.type() != LocalClientFrameType.STREAM_OPEN) {
-                        return Flux.error(new PlatformException(
+                },
+                () -> {
+                    if (opened.get()) {
+                        body.tryEmitComplete();
+                    } else {
+                        response.tryEmitError(new PlatformException(
                                 ErrorCode.OPENCODE_BAD_GATEWAY,
                                 "本地 OpenCode SSE 未返回流式响应"));
                     }
-                    LocalClientPayloads.StreamOpen open = codec.payload(first, LocalClientPayloads.StreamOpen.class);
-                    Flux<DataBuffer> body = connectedFrames.skip(1)
-                            .takeUntil(frame -> frame.type() == LocalClientFrameType.STREAM_END)
-                            .handle((frame, sink) -> {
-                                if (frame.type() == LocalClientFrameType.STREAM_CHUNK) {
-                                    LocalClientPayloads.BinaryChunk chunk = codec.payload(
-                                            frame, LocalClientPayloads.BinaryChunk.class);
-                                    sink.next(DefaultDataBufferFactory.sharedInstance.wrap(
-                                            Base64.getDecoder().decode(chunk.dataBase64())));
-                                } else if (frame.type() != LocalClientFrameType.STREAM_END) {
-                                    sink.error(new PlatformException(
-                                            ErrorCode.OPENCODE_BAD_GATEWAY,
-                                            "本地 OpenCode SSE 帧类型无效"));
-                                }
-                            });
-                    return Flux.just(responseBuilder(open.status(), open.headers(), strategies)
-                            .body(body)
-                            .build());
-                })
-                .next();
+                });
+        upstream.set(subscription);
+        return response.asMono().doOnCancel(() -> dispose(upstream));
+    }
+
+    private void forwardStreamFrame(
+            LocalClientFrame frame,
+            ExchangeStrategies strategies,
+            Sinks.One<ClientResponse> response,
+            Sinks.Many<DataBuffer> body,
+            Flux<DataBuffer> bodyFlux,
+            AtomicBoolean opened,
+            AtomicReference<Disposable> upstream) {
+        if (opened.compareAndSet(false, true)) {
+            if (frame.type() != LocalClientFrameType.STREAM_OPEN) {
+                response.tryEmitError(new PlatformException(
+                        ErrorCode.OPENCODE_BAD_GATEWAY,
+                        "本地 OpenCode SSE 未返回流式响应"));
+                dispose(upstream);
+                return;
+            }
+            LocalClientPayloads.StreamOpen open = codec.payload(frame, LocalClientPayloads.StreamOpen.class);
+            response.tryEmitValue(responseBuilder(open.status(), open.headers(), strategies)
+                    .body(bodyFlux)
+                    .build());
+            return;
+        }
+        if (frame.type() == LocalClientFrameType.STREAM_END) {
+            body.tryEmitComplete();
+            return;
+        }
+        if (frame.type() != LocalClientFrameType.STREAM_CHUNK) {
+            body.tryEmitError(new PlatformException(
+                    ErrorCode.OPENCODE_BAD_GATEWAY,
+                    "本地 OpenCode SSE 帧类型无效"));
+            dispose(upstream);
+            return;
+        }
+        LocalClientPayloads.BinaryChunk chunk = codec.payload(frame, LocalClientPayloads.BinaryChunk.class);
+        DataBuffer buffer = DefaultDataBufferFactory.sharedInstance.wrap(
+                Base64.getDecoder().decode(chunk.dataBase64()));
+        Sinks.EmitResult result = body.tryEmitNext(buffer);
+        if (result.isFailure()) {
+            DataBufferUtils.release(buffer);
+            body.tryEmitError(new PlatformException(
+                    ErrorCode.OPENCODE_BAD_GATEWAY,
+                    "本地 OpenCode SSE 响应背压溢出"));
+            dispose(upstream);
+        }
+    }
+
+    private void dispose(AtomicReference<Disposable> upstream) {
+        Disposable subscription = upstream.get();
+        if (subscription != null && !subscription.isDisposed()) {
+            subscription.dispose();
+        }
     }
 
     private ClientResponse nonStreamingResponse(LocalClientFrame frame, ExchangeStrategies strategies) {

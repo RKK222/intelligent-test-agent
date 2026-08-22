@@ -122,6 +122,90 @@ class RunApplicationServiceTest {
     private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
 
     @Test
+    void authenticatedLegacyLocalRunUsesManagedResolverAndPersistsLocalTarget() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        Session localSession = session().withSource(ConversationSourceType.MANUAL, null, userId);
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        AgentRuntimeRegistry registry = runtimeRegistry(facade);
+        com.enterprise.testagent.agent.runtime.AgentRuntime runtime = registry.require("opencode");
+        String clientInstanceId = "lci_1234567890abcdef";
+        ExecutionNode localNode = new ExecutionNode(
+                new ExecutionNodeId("node_local_1234567890abcdef"),
+                "http://local-opencode-client.invalid",
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                100,
+                NOW,
+                Set.of("opencode", "local-client"),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef",
+                com.enterprise.testagent.domain.runtime.RuntimeKind.LOCAL_CLIENT,
+                clientInstanceId,
+                7L);
+        com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver resolver =
+                org.mockito.Mockito.mock(
+                        com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver.class);
+        org.mockito.Mockito.when(resolver.localSessionTarget(
+                        "opencode", userId, localSession.sessionId().value(), "trace_1234567890abcdef"))
+                .thenReturn(Optional.of(
+                        new com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver.SessionRuntimeTarget(
+                                runtime,
+                                localNode,
+                                workspace().rootPath(),
+                                REMOTE_SESSION_ID,
+                                workspace().workspaceId())));
+        AgentSessionBinding binding = new AgentSessionBinding(
+                localSession.sessionId(),
+                "opencode",
+                REMOTE_SESSION_ID,
+                localNode.executionNodeId(),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+        org.mockito.Mockito.when(resolver.ensureAgentSession(
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(binding);
+        com.enterprise.testagent.domain.run.RunRuntimeTargetRepository targetRepository =
+                org.mockito.Mockito.mock(com.enterprise.testagent.domain.run.RunRuntimeTargetRepository.class);
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(localSession),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                registry,
+                new FakeAgentSessionBindingRepository());
+        service.configureRuntimeTargetResolver(resolver);
+        service.configureRunRuntimeTargetRepository(targetRepository);
+
+        Run run = service.startRun(
+                userId,
+                "opencode",
+                StartRunInput.ofPrompt(localSession.sessionId(), "local prompt"),
+                "trace_1234567890abcdef");
+
+        org.mockito.Mockito.verify(targetRepository).save(org.mockito.ArgumentMatchers.argThat(target ->
+                target.runId().equals(run.runId())
+                        && target.runtimeKind()
+                                == com.enterprise.testagent.domain.runtime.RuntimeKind.LOCAL_CLIENT
+                        && target.localClientInstanceId() != null
+                        && clientInstanceId.equals(target.localClientInstanceId().value())));
+        assertThat(facade.startRunCommands).singleElement()
+                .extracting(command -> command.node().runtimeKind())
+                .isEqualTo(com.enterprise.testagent.domain.runtime.RuntimeKind.LOCAL_CLIENT);
+    }
+
+    @Test
     void authenticatedLegacyRunRechecksCurrentWorkspaceAccessBeforeResolvingProcess() {
         UserId userId = new UserId("usr_1234567890abcdef");
         Session ownedSession = session().withSource(ConversationSourceType.MANUAL, null, userId);

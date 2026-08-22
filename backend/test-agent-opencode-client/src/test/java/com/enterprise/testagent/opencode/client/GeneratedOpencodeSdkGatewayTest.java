@@ -53,7 +53,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeEventStream opened = new GeneratedOpencodeSdkGateway()
+            OpencodeEventStream opened = new GeneratedOpencodeSdkGateway(List.of())
                     .openEventStream(node(server), "/tmp/demo", null, TRACE_ID);
             CompletableFuture<JsonNode> firstEvent = opened.events().next().toFuture();
 
@@ -78,7 +78,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeCreateSessionResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeCreateSessionResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .createSession(node(server), "/tmp/demo", null, "Demo session", TRACE_ID)
                     .block(Duration.ofSeconds(5));
 
@@ -103,7 +103,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            new GeneratedOpencodeSdkGateway()
+            new GeneratedOpencodeSdkGateway(List.of())
                     .createSession(node(server), "/tmp/demo", null, null, TRACE_ID)
                     .block(Duration.ofSeconds(5));
 
@@ -122,7 +122,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .startRun(
                             node(server),
                             REMOTE_SESSION_ID,
@@ -164,7 +164,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .startCommand(
                             node(server),
                             REMOTE_SESSION_ID,
@@ -212,7 +212,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .startRun(
                             node(server),
                             REMOTE_SESSION_ID,
@@ -264,7 +264,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            new GeneratedOpencodeSdkGateway()
+            new GeneratedOpencodeSdkGateway(List.of())
                     .startRun(
                             node(server),
                             REMOTE_SESSION_ID,
@@ -347,7 +347,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeCancelResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeCancelResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .cancelSession(node(server), REMOTE_SESSION_ID, "/tmp/demo", null, TRACE_ID)
                     .block(Duration.ofSeconds(5));
 
@@ -374,7 +374,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            JsonNode event = new GeneratedOpencodeSdkGateway()
+            JsonNode event = new GeneratedOpencodeSdkGateway(List.of())
                     .streamEvents(node(server), "/tmp/demo", null, TRACE_ID)
                     .blockFirst(Duration.ofSeconds(5));
 
@@ -408,7 +408,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeDiffResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeDiffResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .getDiff(
                             node(server),
                             REMOTE_SESSION_ID,
@@ -445,7 +445,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeRejectDiffResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeRejectDiffResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .rejectDiff(
                             node(server),
                             REMOTE_SESSION_ID,
@@ -479,7 +479,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeRuntimeResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeRuntimeResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .runtime(
                             node(server),
                             "POST",
@@ -509,7 +509,7 @@ class GeneratedOpencodeSdkGatewayTest {
         HttpServer server = startServer(GeneratedOpencodeSdkGatewayTest::respondNoContent);
 
         try {
-            OpencodeRuntimeResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeRuntimeResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .runtime(node(server), "POST", "/api/session/" + REMOTE_SESSION_ID + "/abort",
                             "/tmp/demo", null, Map.of(), null, TRACE_ID)
                     .block(Duration.ofSeconds(5));
@@ -571,7 +571,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .sessionMessages(node(server), REMOTE_SESSION_ID, 100, "asc", null, TRACE_ID)
                     .block(Duration.ofSeconds(5));
 
@@ -618,7 +618,7 @@ class GeneratedOpencodeSdkGatewayTest {
                 """.formatted(largeText)));
 
         try {
-            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .sessionMessages(node(server), REMOTE_SESSION_ID, 100, "asc", null, TRACE_ID)
                     .block(Duration.ofSeconds(5));
 
@@ -651,7 +651,7 @@ class GeneratedOpencodeSdkGatewayTest {
         });
 
         try {
-            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway()
+            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway(List.of())
                     .sessionMessages(node(server), REMOTE_SESSION_ID, 50, "asc", "cursor_previous_page", TRACE_ID)
                     .block(Duration.ofSeconds(5));
 

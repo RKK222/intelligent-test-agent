@@ -68,6 +68,36 @@ describe("backend-api", () => {
     }
   });
 
+  it("persists the most recently selected local workspace", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        workspaceId: "wrk_local",
+        name: "本地项目",
+        rootPath: "workspace:wrk_local",
+        status: "ACTIVE",
+        runtimeKind: "LOCAL_CLIENT",
+        localClientInstanceId: "lci_device",
+        localClientOnline: true
+      }
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "login-token",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.markRecentLocalWorkspace("wrk/local");
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/workspace-management/local-workspaces/wrk%2Flocal/recent"
+    );
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBe("POST");
+  });
+
   it("opens the server-assigned experience workspace without a client-selected body", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,

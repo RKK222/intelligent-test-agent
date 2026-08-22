@@ -1306,6 +1306,11 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         method: "POST",
         body: JSON.stringify(payload)
       }),
+    markRecentLocalWorkspace: (workspaceId: string) =>
+      request<LocalWorkspace>(
+        `${workspaceManagementBase}/local-workspaces/${encodeURIComponent(workspaceId)}/recent`,
+        { method: "POST" }
+      ),
     deleteLocalWorkspace: (workspaceId: string) =>
       request<{ workspaceId: string; localDirectoryDeleted: boolean }>(
         `${workspaceManagementBase}/local-workspaces/${encodeURIComponent(workspaceId)}`,
