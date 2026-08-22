@@ -235,6 +235,11 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
     }
 
     @Override
+    public List<BuiltinRevision> listBuiltinRevisionsByCommit(String sourceCommitHash) {
+        return mapper.listBuiltinRevisionsByCommit(sourceCommitHash).stream().map(this::toDomain).toList();
+    }
+
+    @Override
     public Optional<BuiltinRevision> findCurrentBuiltinRevision(String assetId) {
         return Optional.ofNullable(mapper.findCurrentBuiltinRevision(PUBLIC_SOURCE_KEY, assetId))
                 .map(this::toDomain);

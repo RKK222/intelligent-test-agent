@@ -100,6 +100,14 @@
   JSON、SSE 和 multipart 转发都委托 `test-agent-model-gateway`，不在 Controller 解析供应商或访问 Repository。
 - API 日志对票据原始 bytes 只输出长度占位，并递归脱敏 `ticket/modelGrant`。LobeHub 模型流不创建 RunEvent。
 
+### OpenCode Observability 与 Trace
+
+- `OpencodeObservabilityPluginController` 只接收绑定用户、进程、服务器与 generation 的短期专用令牌批次；
+  `OpencodeObservabilityTraceChunkController` 接收 Java 间幂等分片并委托 runtime 归档，Controller 不操作文件或 ClickHouse mapper。
+- `LocalClientConnectionWebSocketHandler` 在既有 WSS 上处理 additive Observability 声明、分片、ACK 和水位；每帧校验
+  client instance/connection generation，并把 `pendingChunks` 传入归档目录。模型、控制和文件路径不复用该正文。
+- 四个 `/api/internal/platform/traces` 管理入口均强制 `SUPER_ADMIN`，正文查看、下载和失败尝试只写无正文、无物理路径的审计事实；正文按稳定 `linuxServerId` 存储节点路由，同节点 JVM 重启不会把已归档正文错误路由给离线的旧 `backendProcessId`。
+
 ## 允许依赖
 
 - `test-agent-common`。
@@ -198,6 +206,8 @@ additive 返回，同时提供不跟随进程归属路由的 `download-access/me
 
 `ProtectedAgentMcpController` 仅承载服务器 OpenCode 的精确 stateless MCP JSON-RPC 入口。它从 HTTP exchange
 读取短期 Bearer grant，保持 MCP 原始 wire body，不使用平台 `ApiResponse` envelope；notification 显式返回
-`202` 空 body。请求和响应 DTO 实现安全日志摘要，通用日志切面遇到 `ResponseEntity` 也只序列化摘要，禁止
+`202` 空 body。Spring Boot 4 的 HTTP codec 边界使用开放 `Object` 接收 id/params，再显式转换为运行层
+Jackson 2 树，不能把 Jackson 2 `JsonNode` 直接声明为 HTTP DTO。请求和响应 DTO 实现安全日志摘要，通用
+日志切面遇到 `ResponseEntity` 也只序列化摘要；空响应只记录状态码，不展开框架 Header。禁止
 记录 Authorization、文件参数/内容或 Skill 正文。`ApiTokenWebFilter` 只豁免该精确路径，相邻子路径仍按原
 鉴权拒绝。`ProtectedAgentMcpControllerTest`、`ApiLoggingAspectTest` 和 `ApiTokenWebFilterTest` 固化上述边界。

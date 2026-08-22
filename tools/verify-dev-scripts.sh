@@ -348,7 +348,13 @@ fi
 # auto 模式必须把默认路由网卡的 IPv4 识别为本机地址；.env.test 使用局域网 IP 时也要启动 manager。
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>%q\nexit 0\n' "${tmp_dir}/go.calls" >"${tmp_dir}/bin/go"
 chmod +x "${tmp_dir}/bin/go"
-printf 'TEST_AGENT_BASE_URL=http://10.8.0.115:8080\nTEST_AGENT_FRONTEND_URL=http://10.8.0.115:3000\nTEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.115:4096\n' >"${tmp_dir}/env-local-ip.local"
+# 脚本行为测试不能访问公网；显式提供一个只实现版本契约的 1.18.4 fixture，
+# 让用例继续覆盖 manager 自动启动，同时避免把 curl 健康检查桩误当成下载器。
+printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "--version" ]]; then echo "1.18.4"; exit 0; fi\nexit 1\n' \
+  >"${tmp_dir}/bin/opencode-1.18.4"
+chmod +x "${tmp_dir}/bin/opencode-1.18.4"
+printf 'TEST_AGENT_BASE_URL=http://10.8.0.115:8080\nTEST_AGENT_FRONTEND_URL=http://10.8.0.115:3000\nTEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.115:4096\nTEST_AGENT_OPENCODE_BIN=%s\n' \
+  "${tmp_dir}/bin/opencode-1.18.4" >"${tmp_dir}/env-local-ip.local"
 set +e
 restart_local_ip_output="$(
   PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \

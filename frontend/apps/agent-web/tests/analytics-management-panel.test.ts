@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
+
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   AnalyticsCapabilities,
@@ -169,6 +171,7 @@ const capabilities: AnalyticsCapabilities = {
     usageRate: 2 / 3,
     succeededCount: 10,
     failedCount: 1,
+    cancelledCount: 0,
     incompleteCount: 1
   }],
   freshness: overview.freshness
@@ -217,6 +220,7 @@ function renderPanel(backendApi: BackendApiClient) {
 
 describe("analytics management panel", () => {
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });

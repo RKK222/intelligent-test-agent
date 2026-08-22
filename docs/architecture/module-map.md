@@ -115,8 +115,9 @@ Browser
 低优先级调度和 ACK 后删除；`test-agent-opencode-runtime` 负责令牌、归档与目录查询；`test-agent-persistence` 仅保存
 ClickHouse 元数据；`test-agent-api` 复用公共 Java 路由。任何模块都不得把正文旁路到 RunEvent、PostgreSQL 或 ClickHouse。
 
-前端由 `packages/shared-types` 定义 Trace DTO，`packages/backend-api` 访问四个管理接口，`apps/agent-web` 提供独立
-`/traces` 顶层页面。页面只对 `SUPER_ADMIN` 导航可见，后端权限仍是权威边界。
+前端由 `packages/shared-types` 定义 Trace DTO，`packages/backend-api` 访问四个管理接口，`apps/agent-web` 在系统控制台
+提供 Trace 独立菜单；兼容 `/traces` 地址只重定向到 `/system?section=traces`。页面左侧保留目录、选中后原位展开 DSH
+轨迹，只对 `SUPER_ADMIN` 菜单可见，后端权限仍是权威边界。
 
 ## 前端包职责
 

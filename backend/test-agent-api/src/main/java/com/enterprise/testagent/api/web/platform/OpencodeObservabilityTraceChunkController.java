@@ -68,6 +68,7 @@ public class OpencodeObservabilityTraceChunkController {
                                 request.runtime(),
                                 request.coverageStartAt(),
                                 request.droppedCount(),
+                                request.pendingChunks(),
                                 request.complete(),
                                 request.traceId(),
                                 request.firstSequence(),

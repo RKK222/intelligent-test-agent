@@ -93,8 +93,8 @@ class AnalyticsOperationsQueryServiceTest {
                 row("usr_b", LocalDate.parse("2026-06-28"), 1, 0, 0, 0, 0),
                 row("usr_c", LocalDate.parse("2026-06-28"), 1, 0, 0, 0, 0)),
                 List.of(
-                        new AnalyticsModels.CapabilityUsageRow("TOOL", "bash", 4, 2, 2, 1, 1),
-                        new AnalyticsModels.CapabilityUsageRow("SKILL", "review", 1, 1, 0, 1, 0)));
+                        new AnalyticsModels.CapabilityUsageRow("TOOL", "bash", 4, 2, 2, 1, 0, 1),
+                        new AnalyticsModels.CapabilityUsageRow("SKILL", "review", 1, 1, 0, 1, 0, 0)));
         AnalyticsQueryService service = new AnalyticsQueryService(repository);
 
         AnalyticsModels.Capabilities capabilities = service.capabilities(filter(service));
@@ -105,6 +105,7 @@ class AnalyticsOperationsQueryServiceTest {
             assertThat(row.invocationCount()).isEqualTo(4);
             assertThat(row.usageRate()).isEqualTo(2.0d / 3.0d);
             assertThat(row.failedCount()).isEqualTo(1);
+            assertThat(row.cancelledCount()).isZero();
         });
     }
 

@@ -28,8 +28,10 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +80,7 @@ class TraceArchiveServiceTest {
         assertThat(catalog.eventCount()).isEqualTo(3);
         assertThat(catalog.completeThrough()).isEqualTo(8);
         assertThat(catalog.complete()).isTrue();
+        assertThat(catalog.coverageStartAt()).isAfter(batch.coverageStartAt());
         assertThat(repository.spans).hasSize(3);
         assertThat(repository.facts).hasSize(1);
         TraceModels.CapabilityFact fact = repository.facts.values().iterator().next();
@@ -101,6 +104,75 @@ class TraceArchiveServiceTest {
     }
 
     @Test
+    void shouldIndexRealOpenCodeMessageTokensTimingAndNestedAgent() throws Exception {
+        InMemoryCatalogRepository repository = new InMemoryCatalogRepository();
+        TraceArchiveService service = service(repository);
+        User user = User.createNew(
+                "usr_00000000000000000000000009", "u-9", "性能用户", "hash", null, null, null);
+        String traceId = "trc_00000000000000000000000000000009";
+        JsonNode rawEvent = event(traceId, 1, "OPENCODE_EVENT", """
+                {"event":{"type":"message.part.updated","properties":{
+                  "sessionID":"session-1",
+                  "time":1120,
+                  "info":{"agent":"test-design-agent"},
+                  "part":{"id":"part-1","type":"step-finish","messageID":"msg-1",
+                    "reason":"stop","cost":0.25,
+                    "tokens":{"total":174,"input":123,"output":45,"reasoning":6,"cache":{"read":88,"write":9}}}
+                }}}
+                """);
+        JsonNode metricEvent = event(traceId, 2, "ASSISTANT_STEP_METRICS", """
+                {"recordKind":"message","status":"COMPLETED","timingRecorded":true,
+                 "startedAt":"1970-01-01T00:00:01Z","durationMs":125,"ttftMs":25,"decodeMs":100,
+                 "tokensInput":123,"tokensOutput":45,"tokensReasoning":6,
+                 "tokensCacheRead":88,"tokensCacheWrite":9,"tokensTotal":174,
+                 "decodeTokens":45,"cost":0.25,"finishReason":"stop"}
+                """);
+
+        service.ingestPluginBatch(
+                new OpencodeObservabilityModels.IngestionIdentity(user, "proc-9", null, "generation-9"),
+                new OpencodeObservabilityModels.PluginBatch(
+                        "1.0",
+                        new OpencodeObservabilityModels.RuntimeIdentity(
+                                "SERVER_PROCESS", "generation-9", "proc-9", "server-1", null),
+                        Instant.parse("2026-08-22T00:00:00Z"),
+                        0,
+                        false,
+                        List.of(rawEvent, metricEvent)));
+
+        assertThat(repository.spans.values())
+                .filteredOn(span -> span.type().equals("OPENCODE_EVENT"))
+                .singleElement()
+                .satisfies(span -> {
+                    assertThat(span.durationMs()).isZero();
+                    assertThat(span.tokensInput()).isEqualTo(123);
+                    assertThat(span.tokensOutput()).isEqualTo(45);
+                    assertThat(span.tokensReasoning()).isEqualTo(6);
+                    assertThat(span.tokensCacheRead()).isEqualTo(88);
+                    assertThat(span.tokensCacheWrite()).isEqualTo(9);
+                    assertThat(span.tokensTotal()).isEqualTo(174);
+                    assertThat(span.decodeTokens()).isEqualTo(45);
+                    assertThat(span.cost()).isEqualTo(0.25);
+                    assertThat(span.finishReason()).isEqualTo("stop");
+                    assertThat(span.recordKind()).isEqualTo("message");
+                    assertThat(span.startedAt()).isNull();
+                });
+        assertThat(repository.spans.values())
+                .filteredOn(span -> span.type().equals("ASSISTANT_STEP_METRICS"))
+                .singleElement()
+                .satisfies(span -> {
+                    assertThat(span.durationMs()).isEqualTo(125);
+                    assertThat(span.startedAt()).isEqualTo(Instant.ofEpochMilli(1000));
+                    assertThat(span.ttftMs()).isEqualTo(25);
+                    assertThat(span.decodeMs()).isEqualTo(100);
+                    assertThat(span.decodeTokens()).isEqualTo(45);
+                    assertThat(span.cost()).isEqualTo(0.25);
+                });
+        assertThat(repository.find(traceId)).get()
+                .extracting(TraceModels.Catalog::agentId)
+                .isEqualTo("test-design-agent");
+    }
+
+    @Test
     void shouldRejectDigestMismatchWithoutCreatingCatalog() throws Exception {
         InMemoryCatalogRepository repository = new InMemoryCatalogRepository();
         TraceArchiveService service = service(repository);
@@ -116,6 +188,7 @@ class TraceArchiveServiceTest {
                         "LOCAL_CLIENT", "generation-2", null, null, "client-1"),
                 Instant.parse("2026-08-22T00:00:00Z"),
                 0,
+                0,
                 false,
                 "trc_00000000000000000000000000000002",
                 1,
@@ -124,6 +197,45 @@ class TraceArchiveServiceTest {
                 ndjson))
                 .isInstanceOf(PlatformException.class);
         assertThat(repository.catalogs).isEmpty();
+    }
+
+    @Test
+    void shouldArchiveLocalChunkAndPersistRealPendingSpoolCountUntilAck() throws Exception {
+        InMemoryCatalogRepository repository = new InMemoryCatalogRepository();
+        TraceArchiveService service = service(repository);
+        User user = User.createNew(
+                "usr_00000000000000000000000008", "u-8", "本地用户", "hash", null, null, null);
+        String traceId = "trc_00000000000000000000000000000008";
+        JsonNode event = event(traceId, 8, "OPENCODE_EVENT",
+                "{\"event\":{\"type\":\"session.idle\",\"properties\":{}}}");
+        byte[] ndjson = (objectMapper.writeValueAsString(event) + "\n").getBytes(StandardCharsets.UTF_8);
+        String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(ndjson));
+
+        OpencodeObservabilityModels.TraceAck ack = service.ingestLocalChunk(
+                new OpencodeObservabilityModels.IngestionIdentity(user, null, "client-8", "generation-8"),
+                new OpencodeObservabilityModels.RuntimeIdentity(
+                        "LOCAL_CLIENT", "generation-8", null, null, "client-8"),
+                Instant.parse("2026-08-22T00:00:00Z"),
+                0,
+                3,
+                true,
+                traceId,
+                8,
+                8,
+                digest,
+                ndjson);
+
+        assertThat(ack.completeThrough()).isEqualTo(8);
+        assertThat(ack.sha256()).isEqualTo(digest);
+        assertThat(repository.find(traceId)).get().satisfies(catalog -> {
+            assertThat(catalog.pendingChunks()).isEqualTo(3);
+            assertThat(catalog.runtimeKind()).isEqualTo("LOCAL_CLIENT");
+            assertThat(catalog.archiveStatus()).isEqualTo("INCOMPLETE");
+            assertThat(catalog.complete()).isFalse();
+        });
+        assertThat(service.readRawEvents(traceId, 0, 10).items()).singleElement()
+                .extracting(node -> node.path("payload").path("event").path("type").asText())
+                .isEqualTo("session.idle");
     }
 
     @Test
@@ -156,6 +268,34 @@ class TraceArchiveServiceTest {
                         List.of(event(traceId, 2, "CHAT_MESSAGE", "{\"message\":\"world\"}")))))
                 .isInstanceOf(PlatformException.class)
                 .hasMessageContaining("冻结");
+    }
+
+    @Test
+    void shouldResumeSameTraceGenerationAfterBackendJvmRestartsOnFrozenStorageNode() throws Exception {
+        InMemoryCatalogRepository repository = new InMemoryCatalogRepository();
+        User user = User.createNew(
+                "usr_00000000000000000000000010", "u-10", "续传用户", "hash", null, null, null);
+        String traceId = "trc_00000000000000000000000000000010";
+        var identity = new OpencodeObservabilityModels.IngestionIdentity(
+                user, "proc-10", null, "generation-10");
+        var runtime = new OpencodeObservabilityModels.RuntimeIdentity(
+                "SERVER_PROCESS", "generation-10", "proc-10", "server-1", null);
+
+        service(repository, mock(RunSessionScopeRepository.class), mock(RunRepository.class), "backend-process-before")
+                .ingestPluginBatch(identity, new OpencodeObservabilityModels.PluginBatch(
+                        "1.0", runtime, Instant.parse("2026-08-22T00:00:00Z"), 0, false,
+                        List.of(event(traceId, 1, "CHAT_MESSAGE", "{\"message\":\"before\"}"))));
+        service(repository, mock(RunSessionScopeRepository.class), mock(RunRepository.class), "backend-process-after")
+                .ingestPluginBatch(identity, new OpencodeObservabilityModels.PluginBatch(
+                        "1.0", runtime, Instant.parse("2026-08-22T00:00:00Z"), 0, false,
+                        List.of(event(traceId, 2, "CHAT_MESSAGE", "{\"message\":\"after\"}"))));
+
+        assertThat(repository.find(traceId)).get().satisfies(catalog -> {
+            assertThat(catalog.eventCount()).isEqualTo(2);
+            assertThat(catalog.completeThrough()).isEqualTo(2);
+            assertThat(catalog.backendProcessId()).isEqualTo("backend-process-after");
+            assertThat(catalog.linuxServerId()).isEqualTo("linux-server-1");
+        });
     }
 
     @Test
@@ -233,8 +373,16 @@ class TraceArchiveServiceTest {
             InMemoryCatalogRepository repository,
             RunSessionScopeRepository scopeRepository,
             RunRepository runRepository) {
+        return service(repository, scopeRepository, runRepository, "backend-process-1");
+    }
+
+    private TraceArchiveService service(
+            InMemoryCatalogRepository repository,
+            RunSessionScopeRepository scopeRepository,
+            RunRepository runRepository,
+            String backendProcessId) {
         BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
-        when(routeResolver.currentBackendProcessIdValue()).thenReturn("backend-process-1");
+        when(routeResolver.currentBackendProcessIdValue()).thenReturn(backendProcessId);
         when(routeResolver.currentLinuxServerIdValue()).thenReturn("linux-server-1");
         TraceArchiveSettings settings = new TraceArchiveSettings(
                 mock(CommonParameterValues.class), temporaryDirectory.toString(), 64L * 1024 * 1024);

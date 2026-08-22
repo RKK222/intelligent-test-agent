@@ -4389,8 +4389,16 @@ JSON-RPC 入口，不使用平台 `ApiResponse` envelope，也不接受用户登
 - 服务器只读 Skill 资源：`list_skill_resources/read_skill_resource`。
 
 所有本地工具调用都复用已有 `FILE_REQUEST`、连接 generation、Workspace root digest 和路径安全内核。MCP
+`list_skill_resources` 返回只含稳定 `name` 与不可变相对 `path` 的列表；`read_skill_resource` 必须同时提交
+`{name,path}`，且 `path` 必须位于 `skills/{name}/`。公共内置 Agent 的资源只来自同一公共 Git commit 的
+数据库快照，并按 Agent 正文中完整技术 ID 的明确引用冻结，不扫描当前工作树。
+Skill 正文不预载到 system prompt；Agent 指令要求加载时必须真实调用只读 MCP，使插件以真实 `callID` 和
+`args.name` 生成 Skill 事实。
+HTTP DTO 在 Spring Boot 4/Jackson 3 codec 边界使用开放 `Object`，进入运行层前显式转为 Jackson 2 树，
+避免 OpenCode 1.18.4 的开放 JSON-RPC params 触发 codec 500。
 请求/响应在通用 API 日志中只记录 JSON-RPC method、id、是否有 params/result/error；Authorization、相对
-路径、写入内容、读取结果、Agent/Skill 正文和 grant 均不得进入日志。
+路径、写入内容、读取结果、Agent/Skill 正文和 grant 均不得进入日志；notification 的空响应只记录 HTTP
+状态码，不展开框架 Header。
 
 # OpenCode Observability 与 Trace API
 
@@ -4406,6 +4414,12 @@ JSON-RPC 入口，不使用平台 `ApiResponse` envelope，也不接受用户登
 `coverageStartAt`、`droppedCount`、`complete` 和追加式 `events[]`。事件必须携带稳定 `eventId/traceId/globalSequence`
 及可用的 Session 序号和父子关联 ID。Skill 名称只取实际调用的 `args.name` 或 `metadata.name`；同一调用按
 `callId` 唯一计数。`TraceAck` 返回序号范围、SHA-256、内容长度、`completeThrough`、重复标记、归档状态和时间。
+`ASSISTANT_STEP_METRICS` 投影 OpenCode 1.18.4 的 step-start、首个非空 delta、step-finish usage、assistant message 完成时刻和五类 token；中断 Step 只计数并返回 `timingRecorded=false`；`SESSION_METRICS`
+使用 DeepSeek Harness 同名字段 `turns/steps/llmMs/toolMs/ttftMs/ttftSteps/decodeMs/decodeTokens`。
+本地 WSS 的 `OBSERVABILITY_BATCH.pendingChunks` 表示当前分片之后仍待服务器确认的 spool 数量，服务端据此展示真实上传积压。
+相同 Trace 序号范围若已由其它 SHA-256 占用，服务端返回 `CONFLICT`，并携带
+`details.reason=TRACE_CHUNK_DIGEST_CONFLICT`；客户端据此持久隔离而不删除原始分片，服务端目录保持不完整，不能把该错误
+当作成功水位。
 子会话以 OpenCode 1.18.4 `session.created.properties.info.parentID`（兼容顶层 `parentID/parentId`）继承根会话 Trace ID，服务端使用既有 Run session scope 按 OpenCode session 反查并
 补齐平台 `runId`；反查结果必须属于令牌用户，不能信任客户端提交路径或跨用户 Run 相关性。
 
@@ -4419,12 +4433,16 @@ JSON-RPC 入口，不使用平台 `ApiResponse` envelope，也不接受用户登
 | `GET` | `/api/internal/platform/traces/{traceId}/download` | 下载该 Trace 的完整 `application/gzip` 压缩 NDJSON；不提供批量正文导出。 |
 
 四个管理接口均由后端强制 `SUPER_ADMIN`，不能只依赖菜单隐藏。正文查看、下载和失败尝试都写安全审计；审计不含正文、
-物理路径或凭据。归档 owner 在首次写入时冻结，跨 Java 读取只允许复用 `BackendJavaRouteResolver` 与
-`BackendHttpForwarder`；owner 不可用返回 `TRACE_CONTENT_UNAVAILABLE`，禁止扫描或本机降级。
+物理路径或凭据。归档 owner 在首次写入时冻结到稳定 `linuxServerId` 存储节点，不冻结到会随 JVM 重启变化的
+`backendProcessId`；同节点 Java 重启后由新进程继续读取和断点接收原 generation，跨存储节点读取只允许复用
+`BackendJavaRouteResolver` 与 `BackendHttpForwarder`。归档服务器不可用统一返回 `TRACE_CONTENT_UNAVAILABLE`，
+禁止扫描其它节点或本机降级。
 
 运营能力响应 additive 增加 `source=OPENCODE_PLUGIN`、`coverageStartAt`、`completeThrough` 与
 `rolloutCompleteness`。查询用 `eventId/runId/callId` 幂等去重；同一调用已有插件事实时忽略旧 RunEvent 推导事实，
 避免 Skill/Agent/Tool 双计数。登录和反馈等非 OpenCode 运行态指标继续使用现有业务链路。
+插件 capability fact 自带采集时冻结的用户和组织维度，查询不等待异步 `USER_DIMENSION` 事件先到；因此新用户首次
+调用 Skill 后即可计数。legacy RunEvent 推导事实仍使用既有用户维度关联，保持旧数据兼容。
 
 # TCDS 需求导入（同源页面）
 

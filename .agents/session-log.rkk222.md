@@ -12961,3 +12961,31 @@
 - 服务器和客户端的工作区展示、选择持久化、普通对话及 Agent 子任务调用形成真实端到端闭环，当前服务与客户端保持运行，可直接由用户继续页面验收。
 - 浏览器自动可见点击复核未完成：已有 Chrome 页面处于登录页，控制插件两次 DOM 快照超时；未在未确认情况下代填浏览器密码。HTTP、WebSocket、真实模型/Agent 执行和前端组件/构建均已验证。
 - 新增一个 recent HTTP 路径但不改变既有 DTO；无 RunEvent/SSE、数据库结构、Flyway、部署节点、强制配置或安全权限变化。
+
+## 2026-08-23 - 复核 OpenCode 1.18.4 可观测性、DSH Trace 与企业封包
+
+### Why
+
+- 需要按八组门禁重新审核插件化运营事实和集中式 Trace，统一服务端/客户端 OpenCode 1.18.4，并把 Trace 保留在系统控制台内；目录行与事件行要更紧凑且禁止渐变。
+- 既有结论没有区分真实服务端测试设计 Agent、真实本地普通 Agent 与本地实际 `test-design`，也缺少最终 linux/amd64 Worker、固定数据集运营回归和切换后旧来源事实的精确证据。
+
+### What
+
+- 插件严格按 1.18.4 hook/事件 fixture 采集 system/messages transform、流式 assistant/reasoning、step/token/cost、Tool/Skill before/after/error 和子 Session；Skill 名只取 `args.name/metadata.name`，失败 Tool 由 `message.part.updated state=error` 闭合。ClickHouse 新增 DSH Span 指标、唯一 call 状态、插件切换物化视图和查询层 cutoff，正文继续只落服务器 gzip NDJSON。
+- Trace 改为控制台内独立 `SUPER_ADMIN` 菜单：左侧基础目录常驻，点选后原位展开 DSH 三泳道；Duration 切换等宽/真实耗时，Turns/Calls 分别折叠，Timing 展示 TTFT、Decode、cost 和五类 token。基础行 40px、事件行 28px，全部纯色且测试禁止任何 gradient。
+- 服务端和本地启动/封包固定验证 OpenCode 1.18.4；企业脚本封装同一插件、四条 ClickHouse migration 摘要、持久卷/告警/双节点路由说明，并补充 USTC TLS 失败时只在联网封包机显式改用 Debian 官方镜像的安全回退。
+- 完成八组 Markdown 验收清单并明确剩余门禁；外部研究目录只保留 Markdown 和四张 `.drawio`，不生成 Word、证据卡或阅读路线。
+
+### How
+
+- 固定数据集在基线 `473d48dfc` 与当前代码分别执行 `AnalyticsQueryServiceTest` 7/7，旧字段规范化 SHA-256 都为 `ff77d42d...e012`；再执行运营/ClickHouse 定向测试 16/16、前端 16/16、插件真实 1.18.4 fixture 16/16、归档/权限/本地协议定向后端 28/28，typecheck 通过。
+- 真实服务端 Run `run_6d73a62460254293b8fa1847bb3c271f` 归档 3,413 事件、696,361 bytes、0 dropped；唯一 Skill 事实为 `test-design` 成功 14/失败 1、用户 1，事件/调用去重均为 0。下载 gzip SHA-256 为 `fbe2b2e8...67941`，关闭客户端后仍可查看下载，审计只含 VIEW/DOWNLOAD 元数据。
+- ClickHouse 运行表正文/路径列计数为 0；16 条 cutoff 后发生的旧来源行均在切换 migration 安装前写入，查询层屏蔽。migration 安装后新增旧来源 Agent/Skill/Tool 行为 0。
+- 插件 20,000 次基准增量 p99 0.0017 ms、RSS 10,321,920 bytes、热路径 I/O/网络为 0。使用 `.env.test` 重启后 backend readiness、frontend、ClickHouse、服务端 4096 与本地 4106 均正常，两端 OpenCode 都为 1.18.4。
+- 正式输出 backend JAR、frontend tar、Kylin ARM64 本地包及 linux/amd64 Worker；Worker 独立离线探针验证 OpenCode 1.18.4、glibc 2.31，镜像内插件 SHA 与仓库/客户端一致。Worker tar SHA-256 为 `482868e7...def3`。
+
+### Result
+
+- 代码、接口、事件、ClickHouse、归档安全、低优先级本地上传、控制台 Trace 和企业依赖主要链路已实现并按当前环境部分验收；OpenCode 只读源码、`.env*` 和 generated SDK 未修改，也未新增部署节点。
+- 八组最终验收仍不能标记为全部完成：本地 Run `run_e0a1d5f3245f4a53ad16a267e5cf1672` 已冻结为 `LOCAL_CLIENT`，但本地 `/agent` 没有 `test-design-orchestrator`，证明离线包尚缺受管公共 Agent/Skill 配置分发；另缺真实模型关闭/开启 p95 对照、运行态归档 I/O 故障注入、两台真实企业后端演练、目标企业历史 PostgreSQL 升级和真实麒麟 ARM64 无公网安装/回滚。
+- 本次提交只纳入可观测性、DSH、版本固定和企业封包相关改动；保留工作区菜单检索、本地切换优化、`.reasonix/` 和 `node_modules/` 等其它未完成内容不提交。

@@ -154,6 +154,11 @@ public class ProtectedAgentExecutionService {
                 .append("只读文件工具可直接使用；写入、移动、重命名、删除等工具应遵循平台权限询问结果。\n\n")
                 .append("[受保护 Agent]\n")
                 .append(agentPrompt.trim());
+        if (!definition.skills().isEmpty()) {
+            prompt.append("\n\n[受保护 Skill 加载]\n")
+                    .append("Agent 指令要求加载 Skill 时，必须先调用 local_files_list_skill_resources，再按其返回的 name/path 调用 local_files_read_skill_resource。")
+                    .append("Skill 正文未预载到 system prompt，不得跳过工具调用或猜测正文。可用 Skill：");
+        }
         for (ProtectedAgentDefinitionResolver.SkillDefinition skill : definition.skills()) {
             String skillPrompt = skill.files().get("SKILL.md");
             if (skillPrompt == null || skillPrompt.isBlank()) {
@@ -162,10 +167,7 @@ public class ProtectedAgentExecutionService {
                         "受保护 Agent 的 Skill 制品缺少 SKILL.md",
                         Map.of("skillRevisionId", skill.revisionId()));
             }
-            prompt.append("\n\n[受保护 Skill: ")
-                    .append(skill.technicalId())
-                    .append("]\n")
-                    .append(skillPrompt.trim());
+            prompt.append(" ").append(skill.technicalId());
         }
         prompt.append("\n\n[固定版本审计]\nAgent revision=")
                 .append(definition.revisionId())

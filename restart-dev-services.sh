@@ -27,6 +27,10 @@ LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
 MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
 CLICKHOUSE_DEV_SCRIPT="${ROOT_DIR}/tools/clickhouse-dev-services.sh"
 EXPERIENCE_WORKSPACE_CONTENT_SCRIPT="${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh"
+OPENCODE_REQUIRED_VERSION="1.18.4"
+# 本地开发端与企业交付端使用同一固定版本。摘要来自 OpenCode v1.18.4 官方 darwin-arm64 release。
+OPENCODE_DARWIN_ARM64_ARCHIVE_SHA256="04fb881b632b323c712dfda6dcbbc6fce736394f07ba76176e52d6665925d4e6"
+OPENCODE_DARWIN_ARM64_BINARY_SHA256="9449af91f517eacc2b0742fa93ae0da64fa6e5db7b714e30c62edea2a8de3f98"
 
 profile="test"
 env_file=""
@@ -107,8 +111,9 @@ Options:
 
 Environment overrides:
   TEST_AGENT_START_OPENCODE_MANAGER  auto|true|false. Set false to skip the Go manager.
-  TEST_AGENT_OPENCODE_BIN            Explicit OpenCode binary. When unset, use HOME/PATH; the Kylin ARM64
-                                     local-client distribution is not a macOS development runtime source.
+  TEST_AGENT_OPENCODE_BIN            Explicit OpenCode 1.18.4 binary. When unset on macOS ARM64, download the
+                                     pinned official 1.18.4 asset once into .tmp/dev-services/dependencies.
+                                     Other versions are rejected instead of silently changing runtime contracts.
   TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY  auto|true|false. On macOS, auto reuses the static system HTTPS proxy for OpenCode only.
   TEST_AGENT_OPENCODE_MANAGER_TOKEN  Shared secret between manager and backend. Defaults to local-manager-token.
   TEST_AGENT_ROOT                    Project root used by common parameter path expansion.
@@ -602,6 +607,79 @@ bundled_local_opencode_bin() {
   return 0
 }
 
+sha256_file() {
+  local target="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${target}" | awk '{print $1}'
+    return
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${target}" | awk '{print $1}'
+    return
+  fi
+  echo "Neither shasum nor sha256sum is available for OpenCode verification." >&2
+  return 1
+}
+
+verify_opencode_1_18_4() {
+  local binary="$1" expected_binary_sha="${2:-}" actual_version actual_sha
+  [[ -x "${binary}" ]] || {
+    echo "OpenCode binary is not executable: ${binary}" >&2
+    return 1
+  }
+  actual_version="$("${binary}" --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+  [[ "${actual_version#v}" == "${OPENCODE_REQUIRED_VERSION}" ]] || {
+    echo "OpenCode ${OPENCODE_REQUIRED_VERSION} is required, but ${binary} reports ${actual_version:-unknown}." >&2
+    return 1
+  }
+  if [[ -n "${expected_binary_sha}" ]]; then
+    actual_sha="$(sha256_file "${binary}")"
+    [[ "${actual_sha}" == "${expected_binary_sha}" ]] || {
+      echo "OpenCode binary SHA-256 mismatch: expected ${expected_binary_sha}, got ${actual_sha}." >&2
+      return 1
+    }
+  fi
+}
+
+pinned_development_opencode_bin() {
+  local platform architecture runtime_dir binary archive archive_part extract_dir archive_sha
+  platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  architecture="$(uname -m)"
+  if [[ "${platform}" != "darwin" || "${architecture}" != "arm64" ]]; then
+    echo "Automatic OpenCode provisioning only supports macOS ARM64; set TEST_AGENT_OPENCODE_BIN to an exact 1.18.4 binary." >&2
+    return 1
+  fi
+
+  runtime_dir="${LOG_DIR}/dependencies/opencode-${OPENCODE_REQUIRED_VERSION}/darwin-arm64"
+  binary="${runtime_dir}/opencode"
+  archive="${runtime_dir}/opencode-darwin-arm64.zip"
+  if verify_opencode_1_18_4 "${binary}" "${OPENCODE_DARWIN_ARM64_BINARY_SHA256}" 2>/dev/null; then
+    echo "${binary}"
+    return
+  fi
+
+  require_command curl
+  require_command unzip
+  mkdir -p "${runtime_dir}"
+  archive_part="${archive}.part.$$"
+  curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 \
+    "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_REQUIRED_VERSION}/opencode-darwin-arm64.zip" \
+    --output "${archive_part}"
+  archive_sha="$(sha256_file "${archive_part}")"
+  [[ "${archive_sha}" == "${OPENCODE_DARWIN_ARM64_ARCHIVE_SHA256}" ]] || {
+    rm -f "${archive_part}"
+    echo "OpenCode archive SHA-256 mismatch: expected ${OPENCODE_DARWIN_ARM64_ARCHIVE_SHA256}, got ${archive_sha}." >&2
+    return 1
+  }
+  mv "${archive_part}" "${archive}"
+  extract_dir="$(mktemp -d "${runtime_dir}/extract.XXXXXX")"
+  unzip -q "${archive}" -d "${extract_dir}"
+  verify_opencode_1_18_4 "${extract_dir}/opencode" "${OPENCODE_DARWIN_ARM64_BINARY_SHA256}"
+  install -m 0755 "${extract_dir}/opencode" "${binary}"
+  rm -rf "${extract_dir}"
+  echo "${binary}"
+}
+
 raw_opencode_bin() {
   if [[ -n "${TEST_AGENT_OPENCODE_BIN:-}" ]]; then
     echo "${TEST_AGENT_OPENCODE_BIN}"
@@ -613,11 +691,7 @@ raw_opencode_bin() {
     echo "${bundled}"
     return
   fi
-  if [[ -x "${HOME}/.opencode/bin/opencode" ]]; then
-    echo "${HOME}/.opencode/bin/opencode"
-    return
-  fi
-  command -v opencode || true
+  pinned_development_opencode_bin
 }
 
 opencode_runtime_dependencies_complete() {
@@ -633,6 +707,7 @@ prepare_observability_opencode_runtime() {
   local official_bin runtime_root launcher_bin version dependency_source candidate
   official_bin="$(raw_opencode_bin)"
   [[ -n "${official_bin}" && -x "${official_bin}" ]] || return 1
+  verify_opencode_1_18_4 "${official_bin}"
 
   # 已经是完整企业运行时 launcher 时直接复用，避免嵌套注入同一插件。
   runtime_root="$(cd "$(dirname "${official_bin}")/.." 2>/dev/null && pwd -P || true)"
@@ -655,8 +730,7 @@ prepare_observability_opencode_runtime() {
     "${runtime_root}/package-lock.json"
   install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" \
     "${runtime_root}/opencode-runtime.gitignore"
-  version="$("${official_bin}" --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
-  [[ "${version}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+ ]] || version="1.18.4"
+  version="${OPENCODE_REQUIRED_VERSION}"
   printf '%s\n' "${version}" >"${runtime_root}/VERSION"
   rm -f "${runtime_root}/bin/opencode-official"
   ln -s "${official_bin}" "${runtime_root}/bin/opencode-official"

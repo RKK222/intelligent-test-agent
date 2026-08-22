@@ -2055,3 +2055,12 @@ release 兼容历史到当前 HEAD 的升级，先留存每套 `flyway_schema_hi
 
 运营能力查询在插件事实与旧事实之间执行反连接：同一 `run_id + call_id` 已存在插件事实时不再读取旧 RunEvent 推导事实。
 上线从插件 `coverage_start_at` 开始，不执行历史回填；回滚只停止插件注入/入口消费并保留已归档数据，不能删除目录冒充回滚。
+
+## ClickHouse V20260822215123 Trace Span 增加 DSH 指标
+
+`V20260822215123__analytics_trace_spans_add_dsh_metrics.sql` 为 `analytics_trace_spans` additive 增加
+`record_kind`、可空 `started_at`、`tokens_cache_read`、`tokens_cache_write`、可空 `ttft_ms` 和可空 `decode_ms`。
+字段对应 DeepSeek Harness 的闭集轨迹记录、Step 起点、五类 token、TTFT 和 Decode 区间；历史行保持默认值或空值，
+不伪造历史性能数据。迁移不写 prompt、reasoning、Tool 输入输出或物理路径，不设置 TTL；原始 SHA-256 固定为
+`328c03ca3488e64a462aa1b1e7bff0fe541bb2cf1c5bf4dce0e024fb38c2cd7c`。ClickHouse migrator 按
+`20260822174420 -> 20260822215123` 顺序执行并锁定 history checksum，完整企业封包同时校验最终 persistence JAR 内字节。

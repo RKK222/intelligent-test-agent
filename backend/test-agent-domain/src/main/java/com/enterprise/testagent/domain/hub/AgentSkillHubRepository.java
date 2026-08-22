@@ -52,6 +52,9 @@ public interface AgentSkillHubRepository {
 
     List<BuiltinRevision> listCurrentBuiltinRevisions();
 
+    /** 读取某个不可变公共 Git 提交内的全部 Agent/Skill 修订，供受保护运行冻结精确依赖。 */
+    List<BuiltinRevision> listBuiltinRevisionsByCommit(String sourceCommitHash);
+
     Optional<BuiltinRevision> findCurrentBuiltinRevision(String assetId);
 
     Optional<BuiltinRevision> findBuiltinRevision(String revisionId);

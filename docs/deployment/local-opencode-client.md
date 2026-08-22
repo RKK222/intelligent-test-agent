@@ -250,3 +250,10 @@ Observability 现场验收还必须确认 DEB 的受控 release 包含共享插�
 `OPENCODE_OBSERVABILITY_V1`，对话期间 WSS 没有 Trace 上传，空闲 3 秒后才出现单在途分片。断网后 spool 保留，重连按
 服务器 watermark 续传；只有匹配 ACK 后文件才删除。空间不足时客户端必须继续对话并报告 degraded/incomplete。不得通过
 清理用户 spool、调高超过 1 MiB/s 的速率或降低 3 秒空闲门槛来使验收表面通过。
+
+当前 DEB 只交付 OpenCode 1.18.4、Java 客户端和 Observability 插件，不内置平台公共 Agent/Skill 配置。若企业验收要求本地
+OpenCode 实际执行 `test-design`，目标工作区或受控本地配置必须先通过既有配置治理链路取得同版本
+`test-design-orchestrator` 与 `test-design` 资源；禁止在封包脚本中复制本机 `.testagent` 运行目录或绕过发布治理。未提供该依赖时，
+本地 `/agent` 只有 OpenCode 默认 Agent，显式选择 `test-design-orchestrator` 会失败，不能用服务端受保护 Agent 的成功结果冒充
+`runtimeKind=LOCAL_CLIENT` 验收。正式发布前必须确定并验证公共配置对本地客户端的受控分发方案，或明确取消“本地执行测试设计”
+这一产品要求。

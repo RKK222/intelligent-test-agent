@@ -6,11 +6,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageResponse;
+import com.enterprise.testagent.domain.analytics.AiMessageFeedbackRating;
+import com.enterprise.testagent.domain.analytics.AiMessageFeedbackReasonCode;
 import com.enterprise.testagent.domain.analytics.AnalyticsModels;
 import com.enterprise.testagent.domain.analytics.AnalyticsRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -124,6 +133,74 @@ class AnalyticsQueryServiceTest {
         assertThat(csv.toLowerCase(java.util.Locale.ROOT)).doesNotContain("cost");
         assertThat(csv).doesNotContain("costUsd");
         assertThat(csv).contains("totalTokens");
+    }
+
+    /**
+     * 用同一份固定数据覆盖改造前运营页的全部查询和导出，摘要可直接在历史基线与当前代码间比较。
+     * 新增的插件覆盖水位、取消次数属于向后兼容字段，不参与旧字段摘要。
+     */
+    @Test
+    void originalOperationsMetricsMatchTheFixedDatasetBaseline() throws Exception {
+        AnalyticsQueryService service = new AnalyticsQueryService(new FakeAnalyticsRepository(List.of(row())));
+        AnalyticsModels.Filter filter = service.filter(
+                START, END, "day", null, null, null, null, null, null, null, 10, 1, 20, null);
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("filterOptions", service.filterOptions(filter));
+        snapshot.put("funnel", service.funnel(filter));
+        for (AnalyticsModels.HeatmapMetric metric : AnalyticsModels.HeatmapMetric.values()) {
+            snapshot.put("hourlyHeatmap." + metric, service.hourlyHeatmap(filter, metric));
+        }
+        snapshot.put("tokenOperations", service.tokenOperations(filter));
+        snapshot.put("capabilities", service.capabilities(filter));
+        snapshot.put("overview", service.overview(filter));
+        snapshot.put("timeseries", service.timeseries(filter));
+        snapshot.put("peaks", service.peaks(filter));
+        snapshot.put("users", service.users(filter));
+        snapshot.put("organizations.organization", service.organizations(filter, "organization"));
+        snapshot.put("organizations.rdDepartment", service.organizations(filter, "rdDepartment"));
+        snapshot.put("organizations.department", service.organizations(filter, "department"));
+        snapshot.put("satisfaction", service.satisfaction(filter));
+        snapshot.put("feedbackDetails", service.feedbackDetails(filter));
+        snapshot.put("exceptionDetails", service.exceptionDetails(filter));
+        for (String type : List.of(
+                "overview", "timeseries", "users", "organizations", "feedback", "exceptions", "funnel",
+                "token-operations", "capabilities")) {
+            String csv = service.exportCsv(filter, type);
+            snapshot.put("csv." + type, "capabilities".equals(type) ? legacyCapabilitiesCsv(csv) : csv);
+        }
+
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        JsonNode normalized = mapper.valueToTree(snapshot);
+        removePluginAdditiveFields(normalized);
+        String canonical = mapper.writer()
+                .with(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+                .writeValueAsString(normalized);
+        String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(canonical.getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(digest).isEqualTo("ff77d42df433913e460f2bc281084b50530cfb1dc8bc8f18e2a2e3482b06e012");
+    }
+
+    private static void removePluginAdditiveFields(JsonNode node) {
+        if (node instanceof ObjectNode object) {
+            object.remove(List.of(
+                    "cancelledCount", "source", "coverageStartAt", "completeThrough", "rolloutCompleteness"));
+            object.elements().forEachRemaining(AnalyticsQueryServiceTest::removePluginAdditiveFields);
+            return;
+        }
+        if (node.isArray()) {
+            node.elements().forEachRemaining(AnalyticsQueryServiceTest::removePluginAdditiveFields);
+        }
+    }
+
+    private static String legacyCapabilitiesCsv(String csv) {
+        return csv.lines().map(line -> {
+            String[] values = line.split(",", -1);
+            if (values.length != 9) {
+                return line;
+            }
+            return String.join(",", values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[8]);
+        }).collect(java.util.stream.Collectors.joining("\n", "", "\n"));
     }
 
     private static AnalyticsModels.ActivityRollupRow row() {
@@ -254,7 +331,11 @@ class AnalyticsQueryServiceTest {
 
         @Override
         public PageResponse<AnalyticsModels.FeedbackDetail> feedbackDetails(AnalyticsModels.Filter filter) {
-            return new PageResponse<>(List.of(), filter.page(), filter.pageSize(), 0);
+            return new PageResponse<>(List.of(new AnalyticsModels.FeedbackDetail(
+                    "fb_analytics12345", "usr_analytics12345", "alice", "总行", "研发一部", "效能平台",
+                    "ses_analytics12345", "run_analytics12345", "msg_analytics12345",
+                    AiMessageFeedbackRating.NEGATIVE, AiMessageFeedbackReasonCode.WRONG_ANSWER, "固定反馈",
+                    START.plusSeconds(30), START.plusSeconds(31))), filter.page(), filter.pageSize(), 1);
         }
 
         @Override
@@ -264,12 +345,46 @@ class AnalyticsQueryServiceTest {
 
         @Override
         public PageResponse<AnalyticsModels.ExceptionDetail> exceptionDetails(AnalyticsModels.Filter filter) {
-            return new PageResponse<>(List.of(), filter.page(), filter.pageSize(), 0);
+            return new PageResponse<>(List.of(new AnalyticsModels.ExceptionDetail(
+                    "run_analytics12345", "usr_analytics12345", "alice", "总行", "研发一部", "效能平台",
+                    "wrk_analytics12345", "opencode", "gpt-5", "FAILED", START, START.plusSeconds(60))),
+                    filter.page(), filter.pageSize(), 1);
         }
 
         @Override
         public List<AnalyticsModels.OrganizationUsageRow> organizationRows(AnalyticsModels.Filter filter, String dimension) {
-            return List.of();
+            return List.of(new AnalyticsModels.OrganizationUsageRow(
+                    dimension, "固定组织", 12, 10, 1, 1, 1, 0.1d, 1.0d, 2, 1, 1, 0,
+                    1, 1, 1, 1, 21, 0.5d, 0.5d, 0.5d));
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public List<AnalyticsModels.CapabilityUsageRow> capabilityUsage(AnalyticsModels.Filter filter) {
+            try {
+                var constructor = AnalyticsModels.CapabilityUsageRow.class.getDeclaredConstructors()[0];
+                Object[] values = constructor.getParameterCount() == 8
+                        ? new Object[] {"SKILL", "test-design", 1L, 1L, 1L, 0L, 0L, 0L}
+                        : new Object[] {"SKILL", "test-design", 1L, 1L, 1L, 0L, 0L};
+                return List.of((AnalyticsModels.CapabilityUsageRow) constructor.newInstance(values));
+            } catch (ReflectiveOperationException exception) {
+                throw new AssertionError("无法创建跨版本能力固定数据", exception);
+            }
+        }
+
+        @Override
+        public List<AnalyticsModels.FilterOption> organizations() {
+            return List.of(new AnalyticsModels.FilterOption("总行", "总行"));
+        }
+
+        @Override
+        public List<AnalyticsModels.FilterOption> rdDepartments(String organization) {
+            return List.of(new AnalyticsModels.FilterOption("研发一部", "研发一部"));
+        }
+
+        @Override
+        public List<AnalyticsModels.FilterOption> departments(String organization, String rdDepartment) {
+            return List.of(new AnalyticsModels.FilterOption("效能平台", "效能平台"));
         }
     }
 }

@@ -246,6 +246,7 @@ public final class LocalClientPayloads {
             String sha256,
             long contentLength,
             long droppedCount,
+            long pendingChunks,
             boolean complete,
             Instant createdAt) {
     }

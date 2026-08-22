@@ -224,23 +224,41 @@ class ClickHouseAnalyticsIntegrationTest {
                                 + "\"title\":\"Loaded skill: test-design\",\"status\":\"SUCCEEDED\"}")),
                 occurredAt.plusSeconds(2));
 
-        traceMapper.insertCapabilityFacts(List.of(new TraceModels.CapabilityFact(
-                "capability:run-plugin:ses-plugin:call-test-design",
-                101,
-                occurredAt.plusSeconds(1),
-                "usr-plugin",
-                "王五",
-                "插件组织",
-                "研发二部",
-                "测试平台",
-                "ses-plugin",
-                "run-plugin",
-                "call-test-design",
-                "SKILL",
-                "test-design",
-                "SUCCEEDED",
-                29,
-                "OPENCODE_PLUGIN")), occurredAt.plusSeconds(2));
+        traceMapper.insertCapabilityFacts(List.of(
+                new TraceModels.CapabilityFact(
+                        "capability:run-plugin:ses-plugin:call-test-design",
+                        101,
+                        occurredAt.plusSeconds(1),
+                        "usr-plugin",
+                        "王五",
+                        "插件组织",
+                        "研发二部",
+                        "测试平台",
+                        "ses-plugin",
+                        "run-plugin",
+                        "call-test-design",
+                        "SKILL",
+                        "test-design",
+                        "SUCCEEDED",
+                        29,
+                        "OPENCODE_PLUGIN"),
+                new TraceModels.CapabilityFact(
+                        "capability:run-plugin:ses-plugin:call-test-design-cancelled",
+                        102,
+                        occurredAt.plusSeconds(2),
+                        "usr-plugin",
+                        "王五",
+                        "插件组织",
+                        "研发二部",
+                        "测试平台",
+                        "ses-plugin",
+                        "run-plugin",
+                        "call-test-design-cancelled",
+                        "SKILL",
+                        "test-design",
+                        "CANCELLED",
+                        31,
+                        "OPENCODE_PLUGIN")), occurredAt.plusSeconds(2));
         TraceModels.Catalog catalog = new TraceModels.Catalog(
                 "trc_11111111111111111111111111111111",
                 "usr-plugin",
@@ -270,6 +288,53 @@ class ClickHouseAnalyticsIntegrationTest {
                 false,
                 true);
         traceMapper.insertCatalog(catalog, 101);
+        traceMapper.insertSpans(List.of(new TraceModels.Span(
+                catalog.traceId(),
+                "evt_000000000000000000000000000000000101",
+                "ASSISTANT_STEP_METRICS",
+                "MODEL",
+                "message",
+                occurredAt.plusSeconds(2),
+                occurredAt.plusSeconds(1),
+                101,
+                10,
+                "ses-plugin",
+                "run-plugin",
+                "turn-plugin",
+                "step-plugin",
+                "message-plugin",
+                null,
+                null,
+                "",
+                "",
+                "COMPLETED",
+                1_000,
+                100,
+                20,
+                7,
+                60,
+                5,
+                127,
+                30L,
+                970L,
+                20,
+                0.125D,
+                "stop",
+                "OPENCODE_PLUGIN")));
+        mapper.insertEvents(List.of(
+                event(
+                        "plugin-legacy:before-cutover", 33, occurredAt.minusSeconds(1),
+                        "{\"eventType\":\"TOOL_FINISHED\",\"userId\":\"usr-plugin\","
+                                + "\"runId\":\"run-plugin-before\",\"sessionId\":\"ses-plugin\","
+                                + "\"callId\":\"call-before-cutover\",\"toolName\":\"bash\","
+                                + "\"status\":\"SUCCEEDED\"}"),
+                event(
+                        "plugin-legacy:after-cutover", 34, occurredAt.plusSeconds(4),
+                        "{\"eventType\":\"TOOL_FINISHED\",\"userId\":\"usr-plugin\","
+                                + "\"runId\":\"run-plugin-after\",\"sessionId\":\"ses-plugin\","
+                                + "\"callId\":\"call-after-cutover\",\"toolName\":\"bash\","
+                                + "\"status\":\"SUCCEEDED\"}")),
+                occurredAt.plusSeconds(5));
 
         AnalyticsModels.Filter analyticsFilter = filter(
                 occurredAt.minusSeconds(2), occurredAt.plusSeconds(5), "插件组织");
@@ -282,12 +347,27 @@ class ClickHouseAnalyticsIntegrationTest {
                 occurredAt.minusSeconds(2), occurredAt.plusSeconds(5), null, "插件组织", null,
                 null, null, "INCOMPLETE", null, null, 1, 20);
 
-        assertThat(row.invocationCount()).isEqualTo(1);
+        assertThat(row.invocationCount()).isEqualTo(2);
         assertThat(row.userCount()).isEqualTo(1);
         assertThat(row.succeededCount()).isEqualTo(1);
+        assertThat(row.cancelledCount()).isEqualTo(1);
+        assertThat(jdbc.sql("""
+                        select count() from analytics_capability_facts final
+                        where call_id = 'call-before-cutover'
+                        """).query(Long.class).single()).isEqualTo(1L);
+        assertThat(jdbc.sql("""
+                        select count() from analytics_capability_facts final
+                        where call_id = 'call-after-cutover'
+                        """).query(Long.class).single()).isZero();
         assertThat(coverage.source()).isEqualTo("OPENCODE_PLUGIN");
         assertThat(coverage.coverageStartAt()).isEqualTo(occurredAt);
         assertThat(coverage.rolloutCompleteness()).isZero();
+        assertThat(traceMapper.events(catalog.traceId(), 0, 10)).singleElement().satisfies(span -> {
+            assertThat(span.tokensTotal()).isEqualTo(127);
+            assertThat(span.decodeTokens()).isEqualTo(20);
+            assertThat(span.cost()).isEqualTo(0.125D);
+            assertThat(span.finishReason()).isEqualTo("stop");
+        });
         assertThat(traceMapper.search(traceFilter, 20, 0))
                 .extracting(TraceModels.Catalog::traceId)
                 .containsExactly(catalog.traceId());
@@ -300,6 +380,63 @@ class ClickHouseAnalyticsIntegrationTest {
                                        'tool_output', 'archive_path')
                         """)
                 .query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("""
+                        select count() from system.columns
+                        where database = currentDatabase()
+                          and table = 'analytics_trace_spans'
+                          and name in ('record_kind', 'started_at', 'tokens_cache_read',
+                                       'tokens_cache_write', 'ttft_ms', 'decode_ms')
+                        """)
+                .query(Long.class).single()).isEqualTo(6L);
+        assertThat(jdbc.sql("""
+                        select count() from system.columns
+                        where database = currentDatabase()
+                          and table = 'analytics_trace_spans'
+                          and name in ('tokens_total', 'decode_tokens', 'cost', 'finish_reason')
+                        """)
+                .query(Long.class).single()).isEqualTo(4L);
+        assertThat(jdbc.sql("""
+                        select count() from analytics_schema_history final
+                        where version in ('20260822215123', '20260823000346', '20260823001128') and success = 1
+                        """)
+                .query(Long.class).single()).isEqualTo(3L);
+    }
+
+    @Test
+    void pluginCapabilityIsVisibleBeforeUserDimensionArrives() {
+        Instant occurredAt = Instant.parse("2026-08-22T07:00:00Z");
+        traceMapper.insertCapabilityFacts(List.of(new TraceModels.CapabilityFact(
+                "capability:run-plugin-early:ses-plugin-early:call-test-design-early",
+                201,
+                occurredAt,
+                "usr-plugin-early",
+                "维表未同步用户",
+                "插件先到组织",
+                "研发三部",
+                "效能平台",
+                "ses-plugin-early",
+                "run-plugin-early",
+                "call-test-design-early",
+                "SKILL",
+                "test-design",
+                "SUCCEEDED",
+                17,
+                "OPENCODE_PLUGIN")), occurredAt.plusSeconds(1));
+
+        AnalyticsModels.Filter analyticsFilter = filter(
+                occurredAt.minusSeconds(1), occurredAt.plusSeconds(2), "插件先到组织");
+        AnalyticsModels.CapabilityUsageRow row = mapper.capabilityUsage(analyticsFilter).stream()
+                .filter(candidate -> candidate.name().equals("test-design"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(jdbc.sql("""
+                        select count() from analytics_user_dimensions final
+                        where user_id = 'usr-plugin-early'
+                        """).query(Long.class).single()).isZero();
+        assertThat(row.invocationCount()).isEqualTo(1);
+        assertThat(row.userCount()).isEqualTo(1);
+        assertThat(row.succeededCount()).isEqualTo(1);
     }
 
     private static AnalyticsModels.Filter filter(Instant start, Instant end) {

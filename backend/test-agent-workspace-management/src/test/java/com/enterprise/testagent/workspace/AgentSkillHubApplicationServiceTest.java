@@ -243,9 +243,17 @@ class AgentSkillHubApplicationServiceTest {
         when(git.isGitRepository(publicRoot)).thenReturn(true);
         when(git.headCommit(publicRoot)).thenReturn(commit);
         when(git.listFilesAtCommit(publicRoot, commit, "opencode"))
-                .thenReturn(List.of("opencode/agents/reviewer.md"));
+                .thenReturn(List.of(
+                        "opencode/agents/reviewer.md",
+                        "opencode/skills/review/SKILL.md",
+                        "opencode/skills/review-api/SKILL.md"));
         when(git.readFileAtCommit(publicRoot, commit, "opencode/agents/reviewer.md"))
-                .thenReturn("---\ndescription: Reviewer（评审专家）。\n---\n# Reviewer".getBytes(StandardCharsets.UTF_8));
+                .thenReturn(("---\ndescription: Reviewer（评审专家）。\n---\n# Reviewer\n"
+                        + "加载 `review` skill。").getBytes(StandardCharsets.UTF_8));
+        when(git.readFileAtCommit(publicRoot, commit, "opencode/skills/review/SKILL.md"))
+                .thenReturn("---\nname: review\n---\n# Review".getBytes(StandardCharsets.UTF_8));
+        when(git.readFileAtCommit(publicRoot, commit, "opencode/skills/review-api/SKILL.md"))
+                .thenReturn("---\nname: review-api\n---\n# Review API".getBytes(StandardCharsets.UTF_8));
         AtomicReference<BuiltinSnapshot> stored = new AtomicReference<>();
         when(repository.findBuiltinSnapshotCommit()).thenAnswer(invocation -> Optional.ofNullable(stored.get())
                 .map(BuiltinSnapshot::sourceCommitHash));
@@ -257,6 +265,10 @@ class AgentSkillHubApplicationServiceTest {
         when(repository.listCurrentBuiltinRevisions()).thenAnswer(invocation -> stored.get() == null
                 ? List.of()
                 : stored.get().revisions().stream().map(item -> item.revision()).toList());
+        when(repository.listBuiltinRevisionsByCommit(anyString())).thenAnswer(invocation -> stored.get() == null
+                ? List.of()
+                : stored.get().revisions().stream().map(item -> item.revision())
+                .filter(item -> item.sourceCommitHash().equals(invocation.getArgument(0))).toList());
         when(repository.findCurrentBuiltinRevision(anyString())).thenAnswer(invocation -> stored.get().revisions()
                 .stream().map(item -> item.revision())
                 .filter(item -> item.assetId().equals(invocation.getArgument(0))).findFirst());
@@ -290,8 +302,11 @@ class AgentSkillHubApplicationServiceTest {
                     new UserId("usr_1"),
                     new WorkspaceId("wrk_protected_catalog"),
                     item.revisionId());
-            assertThat(definition.agentFiles()).containsEntry("AGENT.md", "---\ndescription: Reviewer（评审专家）。\n---\n# Reviewer");
-            assertThat(definition.skills()).isEmpty();
+            assertThat(definition.agentFiles().get("AGENT.md")).contains("# Reviewer");
+            assertThat(definition.skills()).singleElement().satisfies(skill -> {
+                assertThat(skill.technicalId()).isEqualTo("review");
+                assertThat(skill.files()).containsEntry("SKILL.md", "---\nname: review\n---\n# Review");
+            });
         });
         assertThat(page.items()).singleElement().satisfies(asset -> {
             assertThat(asset.builtin()).isTrue();

@@ -133,6 +133,7 @@ public class TraceArchiveService {
                     batch.runtime(),
                     batch.coverageStartAt(),
                     batch.droppedCount(),
+                    0L,
                     batch.complete(),
                     entry.getKey(),
                     firstSequence(entry.getValue()),
@@ -150,6 +151,7 @@ public class TraceArchiveService {
             OpencodeObservabilityModels.RuntimeIdentity runtime,
             Instant coverageStartAt,
             long droppedCount,
+            long pendingChunks,
             boolean complete,
             String traceId,
             long firstSequence,
@@ -165,7 +167,7 @@ public class TraceArchiveService {
                 || lastSequence(events) != lastSequence) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Trace 分片序号或身份不一致");
         }
-        return archive(identity, runtime, coverageStartAt, droppedCount, complete, traceId,
+        return archive(identity, runtime, coverageStartAt, droppedCount, pendingChunks, complete, traceId,
                 firstSequence, lastSequence, expectedSha256, ndjson, events);
     }
 
@@ -242,6 +244,7 @@ public class TraceArchiveService {
             OpencodeObservabilityModels.RuntimeIdentity runtime,
             Instant coverageStartAt,
             long batchDroppedCount,
+            long batchPendingChunks,
             boolean batchComplete,
             String traceId,
             long firstSequence,
@@ -266,10 +269,13 @@ public class TraceArchiveService {
                             .findFirst()
                             .orElse(null);
                     if (duplicate != null && !duplicate.rawSha256().equals(rawSha256)) {
-                        throw new PlatformException(ErrorCode.CONFLICT, "Trace 分片序号已由不同摘要占用");
+                        throw new PlatformException(
+                                ErrorCode.CONFLICT,
+                                "Trace 分片序号已由不同摘要占用",
+                                Map.of("reason", "TRACE_CHUNK_DIGEST_CONFLICT"));
                     }
                     if (duplicate != null) {
-                        persistCatalog(identity, runtime, coverageStartAt, batchDroppedCount, batchComplete,
+                        persistCatalog(identity, runtime, coverageStartAt, batchDroppedCount, batchPendingChunks, batchComplete,
                                 existing, events, false);
                         lastSuccessEpochSeconds.set(clock.instant().getEpochSecond());
                         return ack(traceId, duplicate, existing, true);
@@ -308,9 +314,9 @@ public class TraceArchiveService {
                         fileName,
                         clock.instant());
                 Manifest updated = appendManifest(existing, identity, runtime, traceId, chunk,
-                        coverageStartAt, batchDroppedCount, batchComplete, events);
+                        coverageStartAt, batchDroppedCount, batchPendingChunks, batchComplete, events);
                 writeManifest(directory, updated);
-                persistCatalog(identity, runtime, coverageStartAt, batchDroppedCount, batchComplete,
+                persistCatalog(identity, runtime, coverageStartAt, batchDroppedCount, batchPendingChunks, batchComplete,
                         updated, events, false);
                 lastSuccessEpochSeconds.set(clock.instant().getEpochSecond());
                 return ack(traceId, chunk, updated, false);
@@ -331,6 +337,7 @@ public class TraceArchiveService {
             OpencodeObservabilityModels.RuntimeIdentity runtime,
             Instant coverageStartAt,
             long batchDroppedCount,
+            long batchPendingChunks,
             boolean batchComplete,
             Manifest manifest,
             List<JsonNode> events,
@@ -354,8 +361,13 @@ public class TraceArchiveService {
         if (dropped > 0) {
             droppedEvents.increment(dropped);
         }
-        boolean complete = terminal && batchComplete && dropped == 0;
+        long pendingChunks = Math.max(0, batchPendingChunks);
+        boolean complete = terminal && batchComplete && dropped == 0 && pendingChunks == 0;
         Instant now = clock.instant();
+        // 以服务器首次成功接收该插件 Trace 的时刻冻结覆盖起点，避免插件启动后到首批落库前出现旧事实空窗。
+        Instant effectiveCoverageStartAt = previousCatalog == null
+                ? now
+                : previousCatalog.coverageStartAt();
         TraceModels.Catalog catalog = new TraceModels.Catalog(
                 manifest.traceId(),
                 user.userId().value(),
@@ -376,15 +388,15 @@ public class TraceArchiveService {
                         firstNonBlank(correlation.agentId(),
                                 previousCatalog == null ? "opencode" : previousCatalog.agentId())),
                 terminal ? "COMPLETED" : "ACTIVE",
-                dropped > 0 ? "INCOMPLETE" : "ARCHIVED",
+                dropped > 0 || pendingChunks > 0 ? "INCOMPLETE" : "ARCHIVED",
                 manifest.createdAt(),
                 now,
-                coverageStartAt == null ? manifest.createdAt() : coverageStartAt,
+                effectiveCoverageStartAt,
                 manifest.completeThrough(),
                 manifest.eventCount(),
                 manifest.archivedBytes(),
                 dropped,
-                0,
+                pendingChunks,
                 complete,
                 true);
         catalogRepository.save(catalog, spans, facts, now);
@@ -440,7 +452,9 @@ public class TraceArchiveService {
                 requiredText(event, "eventId"),
                 value(type),
                 lane(type, payload),
+                recordKind(type, payload),
                 parseInstant(text(event, "timestamp")),
+                startedAt(payload),
                 longValue(event, "globalSequence"),
                 longValue(event, "sessionSequence"),
                 text(event, "sessionId"),
@@ -453,10 +467,18 @@ public class TraceArchiveService {
                 value(capabilityKind),
                 value(capabilityName),
                 status(type, payload),
-                longValue(payload, "durationMs"),
+                durationMs(payload),
                 token(payload, "tokensInput", "input"),
                 token(payload, "tokensOutput", "output"),
                 token(payload, "tokensReasoning", "reasoning"),
+                cacheToken(payload, "tokensCacheRead", "read"),
+                cacheToken(payload, "tokensCacheWrite", "write"),
+                totalTokens(payload),
+                nullableLong(payload, "ttftMs"),
+                nullableLong(payload, "decodeMs"),
+                firstPositive(longValue(payload, "decodeTokens"), token(payload, "tokensOutput", "output")),
+                cost(payload),
+                finishReason(payload),
                 SOURCE);
     }
 
@@ -491,6 +513,7 @@ public class TraceArchiveService {
             Chunk chunk,
             Instant coverageStartAt,
             long droppedCount,
+            long pendingChunks,
             boolean batchComplete,
             List<JsonNode> events) {
         List<Chunk> chunks = new ArrayList<>(existing == null ? List.of() : existing.chunks());
@@ -518,7 +541,7 @@ public class TraceArchiveService {
                 Math.max(existing == null ? 0 : existing.droppedCount(), droppedCount),
                 (existing != null && existing.complete())
                         || (events.stream().anyMatch(this::isTerminalEvent)
-                            && batchComplete && droppedCount == 0),
+                            && batchComplete && droppedCount == 0 && pendingChunks == 0),
                 List.copyOf(chunks));
     }
 
@@ -587,8 +610,8 @@ public class TraceArchiveService {
             Manifest manifest,
             OpencodeObservabilityModels.IngestionIdentity identity,
             OpencodeObservabilityModels.RuntimeIdentity runtime) {
-        if (!manifest.backendProcessId().equals(routeResolver.currentBackendProcessIdValue())
-                || !manifest.linuxServerId().equals(routeResolver.currentLinuxServerIdValue())
+        // 归档只冻结到持久化存储节点；同节点 Java 重启后必须允许原 generation 断点续传。
+        if (!manifest.linuxServerId().equals(routeResolver.currentLinuxServerIdValue())
                 || !manifest.userId().equals(identity.user().userId().value())
                 || !manifest.runtimeKind().equals(value(runtime.kind()))
                 || !MessageDigest.isEqual(
@@ -743,6 +766,28 @@ public class TraceArchiveService {
         return "TOOL_EXECUTE_BEFORE".equals(type) ? "STARTED" : "COMPLETED";
     }
 
+    /** DSH Trajectory 的闭集记录类型；插件派生类型优先，其余从 1.18.4 事件结构确定。 */
+    private String recordKind(String type, JsonNode payload) {
+        String explicit = text(payload, "recordKind");
+        if (!blank(explicit)) {
+            return explicit;
+        }
+        if ("SYSTEM_PROMPT".equals(type)) {
+            return "system";
+        }
+        if ("CHAT_MESSAGE".equals(type)) {
+            return "user";
+        }
+        if ("CONTEXT_MESSAGES".equals(type)) {
+            return "context";
+        }
+        if (type != null && type.startsWith("TOOL_")) {
+            return "tool";
+        }
+        String partType = text(payload.path("event").path("properties").path("part"), "type");
+        return "compaction".equals(partType) ? "compacted" : "message";
+    }
+
     private boolean isTerminalEvent(JsonNode event) {
         JsonNode nested = event.path("payload").path("event");
         String eventType = text(nested, "type");
@@ -753,12 +798,141 @@ public class TraceArchiveService {
 
     private String agentName(JsonNode event) {
         JsonNode payload = event.path("payload");
-        return firstNonBlank(text(payload, "agentName"), text(payload.path("event").path("properties"), "agent"));
+        JsonNode properties = payload.path("event").path("properties");
+        return firstNonBlank(
+                text(payload, "agentName"),
+                firstNonBlank(text(properties, "agent"), text(properties.path("info"), "agent")));
     }
 
     private long token(JsonNode payload, String directName, String usageName) {
         long direct = longValue(payload, directName);
-        return direct > 0 ? direct : longValue(payload.path("usage"), usageName);
+        if (direct > 0) {
+            return direct;
+        }
+        long usage = longValue(payload.path("usage"), usageName);
+        if (usage > 0) {
+            return usage;
+        }
+        JsonNode properties = payload.path("event").path("properties");
+        long partToken = longValue(properties.path("part").path("tokens"), usageName);
+        return partToken > 0 ? partToken : longValue(properties.path("info").path("tokens"), usageName);
+    }
+
+    private long cacheToken(JsonNode payload, String directName, String cacheName) {
+        long direct = longValue(payload, directName);
+        if (direct > 0) {
+            return direct;
+        }
+        JsonNode properties = payload.path("event").path("properties");
+        long fromPart = longValue(properties.path("part").path("tokens").path("cache"), cacheName);
+        return fromPart > 0
+                ? fromPart
+                : longValue(properties.path("info").path("tokens").path("cache"), cacheName);
+    }
+
+    private long totalTokens(JsonNode payload) {
+        long direct = longValue(payload, "tokensTotal");
+        if (direct > 0) {
+            return direct;
+        }
+        JsonNode properties = payload.path("event").path("properties");
+        long eventTotal = firstPositive(
+                longValue(properties.path("part").path("tokens"), "total"),
+                longValue(properties.path("info").path("tokens"), "total"));
+        return eventTotal > 0
+                ? eventTotal
+                : token(payload, "tokensInput", "input")
+                    + token(payload, "tokensOutput", "output")
+                    + token(payload, "tokensReasoning", "reasoning");
+    }
+
+    private Double cost(JsonNode payload) {
+        Double direct = nullableDouble(payload, "cost");
+        if (direct != null) {
+            return direct;
+        }
+        JsonNode properties = payload.path("event").path("properties");
+        Double partCost = nullableDouble(properties.path("part"), "cost");
+        return partCost == null ? nullableDouble(properties.path("info"), "cost") : partCost;
+    }
+
+    private String finishReason(JsonNode payload) {
+        JsonNode properties = payload.path("event").path("properties");
+        return firstNonBlank(
+                text(payload, "finishReason"),
+                firstNonBlank(text(properties.path("part"), "reason"), text(properties.path("info"), "finish")));
+    }
+
+    private Instant startedAt(JsonNode payload) {
+        String direct = text(payload, "startedAt");
+        if (!blank(direct)) {
+            return parseInstant(direct);
+        }
+        JsonNode properties = payload.path("event").path("properties");
+        JsonNode part = properties.path("part");
+        long epochMs = firstPositive(
+                longValue(part.path("state").path("time"), "start"),
+                longValue(part.path("time"), "start"),
+                longValue(properties.path("info").path("time"), "created"));
+        return epochMs > 0 ? Instant.ofEpochMilli(epochMs) : null;
+    }
+
+    private long firstPositive(long... values) {
+        for (long candidate : values) {
+            if (candidate > 0) {
+                return candidate;
+            }
+        }
+        return 0;
+    }
+
+    private Long nullableLong(JsonNode node, String field) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() || !value.isNumber() ? null : Math.max(0L, value.asLong());
+    }
+
+    private Double nullableDouble(JsonNode node, String field) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() || !value.isNumber() || !Double.isFinite(value.asDouble())
+                ? null
+                : Math.max(0D, value.asDouble());
+    }
+
+    /** 兼容插件派生耗时和 OpenCode 1.18.4 message/part 的真实毫秒时间结构。 */
+    private long durationMs(JsonNode payload) {
+        long direct = longValue(payload, "durationMs");
+        if (direct > 0) {
+            return direct;
+        }
+        JsonNode properties = payload.path("event").path("properties");
+        JsonNode part = properties.path("part");
+        long fromPartState = elapsed(part.path("state").path("time"));
+        if (fromPartState > 0) {
+            return fromPartState;
+        }
+        long fromPart = elapsed(part.path("time"));
+        if (fromPart > 0) {
+            return fromPart;
+        }
+        return elapsed(properties.path("info").path("time"));
+    }
+
+    private long elapsed(JsonNode time) {
+        long start = longValue(time, "start");
+        if (start <= 0) {
+            start = longValue(time, "created");
+        }
+        long end = longValue(time, "end");
+        if (end <= 0) {
+            end = longValue(time, "completed");
+        }
+        return start > 0 && end >= start ? end - start : 0;
     }
 
     private String requiredText(JsonNode node, String field) {

@@ -55,9 +55,16 @@ OpenCode 进程统一注入服务端相同的 `opencode-observability-plugin.mjs
 凭据。服务器校验并 ACK 精确 batch/Trace/序号/SHA-256 后才删除 `.ndjson + .json`；断网、重启和 connection generation
 切换均保留未确认分片。
 
+若服务器明确返回 `TRACE_CHUNK_DIGEST_CONFLICT`，说明同一 Trace 序号区间已由不同 SHA-256 占用，重复上传无法自愈。
+客户端会把该 `.ndjson + .json` 原样移入 `observability-spool/blocked`，保留证据并继续计入 1 GiB 磁盘预算；活动上传队列
+跳过该分片以免饿死其它 Trace，服务器目录继续显示 incomplete/pending。除精确匹配 ACK 外任何路径都不得删除它。
+
 默认分片 256 KiB、单在途、空闲 3 秒后上传、1 MiB/s 上限、16 MiB 内存队列和 1 GiB spool。以下环境变量只能收紧
 吞吐/内存预算、关闭上传或延长等待，不能突破硬上限：`TEST_AGENT_OBSERVABILITY_CHUNK_BYTES`、
 `TEST_AGENT_OBSERVABILITY_MAX_IN_FLIGHT`（`0|1`）、`TEST_AGENT_OBSERVABILITY_UPLOAD_BYTES_PER_SECOND`、
 `TEST_AGENT_OBSERVABILITY_IDLE_MILLIS`、`TEST_AGENT_OBSERVABILITY_ACK_TIMEOUT_MILLIS`、
 `TEST_AGENT_OBSERVABILITY_SPOOL_MAX_BYTES`、`TEST_AGENT_OBSERVABILITY_MEMORY_QUEUE_MAX_BYTES`。对话、模型 relay、文件 RPC
 或控制操作活跃时不上传；队列/磁盘满只标记 degraded/incomplete，不阻塞聊天，也不自动删除未确认数据。
+
+`SELF_UPDATE_V1` 与定时版本检查必须使用同一能力判定：只有 14 位受管版本且同时配置可信下载基址、公钥和 runtime 根时
+才声明并启动。开发包即使为了 Observability 使用受管格式测试版本，也不能发送未注册的 `VERSION_CHECK` 导致 WSS 重连。

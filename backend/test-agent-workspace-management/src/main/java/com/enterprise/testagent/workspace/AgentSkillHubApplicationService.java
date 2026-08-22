@@ -414,6 +414,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
             if (revision.assetType() != AssetType.AGENT) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "受保护运行只能选择 Agent 修订");
             }
+            Map<String, String> agentFiles = textFiles(requireBuiltinArtifact(revision));
             return new ProtectedAgentDefinitionResolver.Definition(
                     revision.assetId(),
                     revision.technicalId(),
@@ -421,8 +422,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                     revision.artifactSha256(),
                     revision.contentSha256(),
                     firstText(revision.displayName(), revision.technicalId()),
-                    textFiles(requireBuiltinArtifact(revision)),
-                    List.of());
+                    agentFiles,
+                    referencedBuiltinSkills(revision, agentFiles));
         }
         Revision revision = requireRevision(revisionId);
         Asset asset = requireAsset(revision.assetId());
@@ -472,6 +473,40 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 skillRevision.contentSha256(),
                 firstText(skillRevision.displayName(), skillAsset.technicalId()),
                 textFiles(requireArtifact(skillRevision)));
+    }
+
+    /**
+     * 公共内置 Agent 没有独立依赖表；受保护运行只能从同一不可变 Git 提交中选择正文精确提到的 Skill 技术 ID。
+     * 边界把连字符视为技术 ID 的一部分，避免 test-design 误命中 test-design-api。
+     */
+    private List<ProtectedAgentDefinitionResolver.SkillDefinition> referencedBuiltinSkills(
+            BuiltinRevision agentRevision, Map<String, String> agentFiles) {
+        String agentPrompt = agentFiles.getOrDefault(AGENT_FILE, "");
+        return repository.listBuiltinRevisionsByCommit(agentRevision.sourceCommitHash()).stream()
+                .filter(candidate -> candidate.assetType() == AssetType.SKILL)
+                .filter(candidate -> containsTechnicalId(agentPrompt, candidate.technicalId()))
+                .map(this::protectedBuiltinSkill)
+                .toList();
+    }
+
+    private boolean containsTechnicalId(String content, String technicalId) {
+        String boundary = "[A-Za-z0-9._-]";
+        return java.util.regex.Pattern.compile(
+                        "(?<!" + boundary + ")" + java.util.regex.Pattern.quote(technicalId)
+                                + "(?!" + boundary + ")")
+                .matcher(content)
+                .find();
+    }
+
+    private ProtectedAgentDefinitionResolver.SkillDefinition protectedBuiltinSkill(BuiltinRevision revision) {
+        return new ProtectedAgentDefinitionResolver.SkillDefinition(
+                revision.assetId(),
+                revision.technicalId(),
+                revision.revisionId(),
+                revision.artifactSha256(),
+                revision.contentSha256(),
+                firstText(revision.displayName(), revision.technicalId()),
+                textFiles(requireBuiltinArtifact(revision)));
     }
 
     private ProtectedAgentDefinitionResolver.CatalogItem protectedCatalogItem(BuiltinRevision revision) {

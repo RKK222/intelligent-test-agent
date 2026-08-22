@@ -49,17 +49,21 @@
 
     <insert id="insertSpans">
         insert into analytics_trace_spans(
-            trace_id, event_id, type, lane, occurred_at, global_sequence, session_sequence,
+            trace_id, event_id, type, lane, record_kind, occurred_at, started_at, global_sequence, session_sequence,
             session_id, run_id, turn_id, step_id, message_id, call_id, parent_id,
             capability_kind, capability_name, status, duration_ms, tokens_input, tokens_output,
-            tokens_reasoning, source, version
+            tokens_reasoning, tokens_cache_read, tokens_cache_write, tokens_total, ttft_ms, decode_ms,
+            decode_tokens, cost, finish_reason, source, version
         ) values
         <foreach collection="spans" item="span" separator=",">
-            (#{span.traceId}, #{span.eventId}, #{span.type}, #{span.lane}, #{span.occurredAt},
+            (#{span.traceId}, #{span.eventId}, #{span.type}, #{span.lane}, #{span.recordKind},
+             #{span.occurredAt}, #{span.startedAt},
              #{span.globalSequence}, #{span.sessionSequence}, #{span.sessionId}, #{span.runId},
              #{span.turnId}, #{span.stepId}, #{span.messageId}, #{span.callId}, #{span.parentId},
              #{span.capabilityKind}, #{span.capabilityName}, #{span.status}, #{span.durationMs},
-             #{span.tokensInput}, #{span.tokensOutput}, #{span.tokensReasoning}, #{span.source},
+             #{span.tokensInput}, #{span.tokensOutput}, #{span.tokensReasoning},
+             #{span.tokensCacheRead}, #{span.tokensCacheWrite}, #{span.tokensTotal}, #{span.ttftMs}, #{span.decodeMs},
+             #{span.decodeTokens}, #{span.cost}, #{span.finishReason}, #{span.source},
              #{span.globalSequence})
         </foreach>
     </insert>
@@ -94,10 +98,11 @@
     </select>
 
     <select id="events" resultType="com.enterprise.testagent.domain.trace.TraceModels$Span">
-        select trace_id, event_id, type, lane, occurred_at, global_sequence, session_sequence,
+        select trace_id, event_id, type, lane, record_kind, occurred_at, started_at, global_sequence, session_sequence,
                session_id, run_id, turn_id, step_id, message_id, call_id, parent_id,
                capability_kind, capability_name, status, duration_ms, tokens_input, tokens_output,
-               tokens_reasoning, source
+               tokens_reasoning, tokens_cache_read, tokens_cache_write, tokens_total, ttft_ms, decode_ms,
+               decode_tokens, cost, finish_reason, source
         from analytics_trace_spans final
         where trace_id = #{traceId} and global_sequence &gt; #{afterSequence}
         order by global_sequence, event_id limit #{limit}

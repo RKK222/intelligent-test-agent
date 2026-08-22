@@ -220,7 +220,8 @@ public class AnalyticsQueryService {
         List<AnalyticsModels.CapabilityUsage> rows = repository.capabilityUsage(filter).stream()
                 .map(row -> new AnalyticsModels.CapabilityUsage(
                         row.type(), row.name(), row.invocationCount(), row.userCount(),
-                        ratio(row.userCount(), activeUsers), row.succeededCount(), row.failedCount(), row.incompleteCount()))
+                        ratio(row.userCount(), activeUsers), row.succeededCount(), row.failedCount(),
+                        row.cancelledCount(), row.incompleteCount()))
                 .sorted(Comparator.comparingLong(AnalyticsModels.CapabilityUsage::userCount).reversed()
                         .thenComparing(Comparator.comparingLong(AnalyticsModels.CapabilityUsage::invocationCount).reversed()))
                 .toList();
@@ -442,10 +443,10 @@ public class AnalyticsQueryService {
 
     private String csvCapabilities(AnalyticsModels.Filter filter) {
         StringBuilder builder = new StringBuilder(
-                "type,name,usageRate,userCount,invocationCount,succeededCount,failedCount,incompleteCount\n");
+                "type,name,usageRate,userCount,invocationCount,succeededCount,failedCount,cancelledCount,incompleteCount\n");
         for (AnalyticsModels.CapabilityUsage row : capabilities(filter).rows()) {
             row(builder, row.type(), row.name(), row.usageRate(), row.userCount(), row.invocationCount(),
-                    row.succeededCount(), row.failedCount(), row.incompleteCount());
+                    row.succeededCount(), row.failedCount(), row.cancelledCount(), row.incompleteCount());
         }
         return builder.toString();
     }

@@ -61,6 +61,18 @@
 `experimental.chat.messages.transform` 和 `event` hook。before 以 `callID + tool + args` 固化调用身份，after 只补状态、结果和耗时；
 Skill 名只取 `args.name` 或 `metadata.name`。hook 热路径只入有界队列，后台微任务完成脱敏、序列化和批量提交；任何采集 I/O
 异常都必须被插件吞掉并增加 dropped/error 事实，不能改变 OpenCode 返回。
+其中 1.18.4 的 `experimental.chat.messages.transform` 输入对象为空，Session 必须从
+`output.messages[0].info.sessionID` 取得；普通 Tool 抛错不会调用 `tool.execute.after`，必须从
+`message.part.updated` 的 `part.type=tool/state.status=error` 补齐一次失败事实，而 `task` 失败会以空 output 调用 after。
+这些分支均以只读快照中的真实 schema 和源码路径锁定，不能按其它 OpenCode 版本猜测字段。
+
+对齐 DeepSeek Harness 的轨迹模型时，插件将 system/user/context/message/tool/subtool 作为闭集记录类型，使用 Turn/Step/Call
+关联和 Input/Model/Tools 三泳道。`step-start`、首个非空 `message.part.delta`、`step-finish` 投影
+`step-finish` 只暂存 usage，直到 `message.updated.info.time.completed` 才投影
+`startedAt/durationMs/ttftMs/decodeMs` 以及 input/output/reasoning/cache-read/cache-write 五类 token；中断 Step
+仍计入 steps/turns，但标记 `timingRecorded=false` 且不伪造墙钟耗时。每次
+`session.idle` 再输出累计 `turns/steps/llmMs/toolMs/ttftMs/ttftSteps/decodeMs/decodeTokens`。这些是独立 Trace
+事实，不写入 RunEvent，也不改变聊天终态判断。
 子 Agent 的 `session.created.properties.info.parentID` 会把子会话绑定到根会话 Trace，后续子会话 Tool/Skill 事件沿用根 Trace ID；服务端再按
 现有 `run_session_scope_sessions` MyBatis 映射补齐平台 Run ID，并校验 Run 属于专用令牌绑定用户。
 专用令牌中的 generation 在公共启动程序写入 `opencode_server_processes.observability_generation`；该列不会被健康检查使用的

@@ -90,7 +90,8 @@ class ProtectedAgentMcpServiceTest {
                 "Bearer " + issued.token(),
                 fixture.json("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\","
                         + "\"params\":{\"name\":\"read_skill_resource\","
-                        + "\"arguments\":{\"path\":\"skills/review/references/checklist.md\"}}}"),
+                        + "\"arguments\":{\"name\":\"review\","
+                        + "\"path\":\"skills/review/references/checklist.md\"}}}"),
                 "trace_mcp");
 
         assertThat(response.toString()).contains("server-only checklist");

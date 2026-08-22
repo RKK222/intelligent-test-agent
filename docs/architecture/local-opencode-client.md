@@ -145,7 +145,11 @@ generation 身份，不复用本地执行节点或本地绝对路径。Run 强�
 
 文件 grant 只驻留签发 Java 的有界内存，Redis/数据库不保存明文 Token；每次调用重新检查 Run 未终态、
 Workspace 绑定、连接 generation、root digest 和持有 Java，任一变化立即失败关闭。Skill 附件资源留在 grant
-中供服务器模型只读使用。`run.created.payload.protectedAgent` 只记录 Agent/Skill 的 assetId、revisionId 和
+中供服务器模型只读使用。应用 Hub Agent 按发布依赖表冻结 Skill；公共内置 Agent 则只从同一 Git commit 的
+数据库快照中选取 `AGENT.md` 按完整技术 ID 明确引用的 Skill，禁止扫描当前工作树或跨提交拼接。资源目录
+返回 `{name,path}`，读取时强制校验二者一致，使运行态 Skill 指标只从 `args.name` 取名。
+Skill 正文不预载进 system prompt；Agent 指令要求加载时必须真实调用只读 MCP，调用事实与实际加载保持一致。
+`run.created.payload.protectedAgent` 只记录 Agent/Skill 的 assetId、revisionId 和
 SHA-256，便于审计复现，不记录提示词、文件正文或 grant。
 
 该能力不增加客户端轮询：Agent 目录只随页面请求解析，文件鉴权只在模型真实调用工具时执行。托盘仍复用

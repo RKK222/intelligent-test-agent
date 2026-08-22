@@ -942,7 +942,7 @@ async function openSystemActivity() {
 
 async function openTracePage() {
   if (!isSuperAdmin.value) return;
-  await router.push({ name: "traces" });
+  await openWorkspacePage("system:traces");
 }
 
 async function toggleMemories() {
@@ -12257,7 +12257,7 @@ async function handleLogout() {
           <button
             v-if="isSuperAdmin"
             type="button"
-            class="figma-activity-btn figma-activity-btn--trace"
+            :class="['figma-activity-btn figma-activity-btn--trace', workspacePageTabsState.activeId === 'system:traces' && 'figma-activity-btn--active']"
             aria-label="Trace 可观测"
             title="Trace"
             data-testid="trace-activity-button"

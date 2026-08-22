@@ -271,6 +271,8 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 - `InternalModelProviderModelMapper.xml` 覆盖保存公开模型并级联清理旧探测，按能力保存最近探测结果。
 - `ModelGatewayUsageDailyMapper.xml` 使用 PostgreSQL/H2 兼容 upsert 原子累加每日聚合，不先读后写。
 - `InternalModelObservabilityMapper.xml` 维护内部模型调用可观测：明细 insert 与小时聚合 upsert 同一事务，明细查询通过 MyBatis XML 的低基数 `outcome IN (...)` 支持看板结果大类筛选，并通过忽略大小写的字面子串匹配 UCID，列表与 count 复用同一条件；TTFT 直接对 `first_token_ms`、ITL/TPOT 对 `(last_token_ms-first_token_ms)/(output_token_count-1)`、Output TPS 对 `(output_token_count-1)*1000/(last_token_ms-first_token_ms)` 逐条计算全量样本的平均值，并使用 `percentile_cont` 计算五数概括，不搬运大量样本、不受明细分页影响，也不从小时均值估算。`V20260810234154__internal_model_call_records_add_token_latency_inputs.sql` 给明细增加末输出时刻和准确输出 Token 数，历史记录保持空值；本次复用这些既有列，不新增 migration。所有表只存结构化字段，不保存请求/响应正文或 Token 内容。
+- `ClickHouseTraceCatalogMapper.xml` 维护插件 Trace 目录、DSH 对齐 span 元数据和 capability facts；`V20260822174420` 建表后由 `V20260822215123` additive 增加 `record_kind/started_at/cache token/ttft/decode`。`ClickHouseSchemaMigrator` 必须顺序执行两条 Trace migration 并锁定 checksum，不能只把 SQL 打进 JAR 却漏掉运行态迁移列表。ClickHouse 仍只保存目录和 span 元数据，正文保留在归档 gzip NDJSON。
+- `ClickHouseAnalyticsMapper.xml` 查询插件 capability facts 时直接使用事实随采集冻结的用户/组织维度，不等待可能后到的 `analytics_user_dimensions`；legacy RunEvent 事实仍保留既有维度关联。集成测试锁定新用户首个 Skill 事实先到时也能立即出现在运营接口。
 - `V20260730090000__add_lobehub_model_gateway.sql` 只创建上述平台表和四个生产必需公共参数；不触碰独立
   LobeHub ParadeDB，也不写测试/演示数据。
 - 已知历史若存在 `V20260801093854`、但缺少 `V20260730090000`，app 兼容装配会隐藏无法再顺序执行的

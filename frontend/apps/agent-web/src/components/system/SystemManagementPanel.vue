@@ -14,6 +14,7 @@ import MemoryAdminPanel from "./MemoryAdminPanel.vue";
 import ApiKeyManagementPanel from "./ApiKeyManagementPanel.vue";
 import SettingsUserManagementPanel from "../settings/SettingsUserManagementPanel.vue";
 import LocalClientVersionManagementPanel from "./LocalClientVersionManagementPanel.vue";
+import TraceView from "../../views/TraceView.vue";
 import type { SystemMenuKey } from "../workspace-page-tabs";
 
 const props = defineProps<{
@@ -45,7 +46,8 @@ const items: SystemMenuItem[] = [
   { key: "internalModelObservability", label: "内部模型可观测", icon: Radar },
   { key: "memory", label: "记忆能力", icon: BrainCircuit },
   { key: "config", label: "配置管理", icon: Settings2 },
-  { key: "analytics", label: "运营分析", icon: BarChart3 }
+  { key: "analytics", label: "运营分析", icon: BarChart3 },
+  { key: "traces", label: "Trace 可观测", icon: Activity }
 ];
 const visibleItems = computed<SystemMenuItem[]>(() => {
   // 应用管理员只获得应用 Git 控制台入口，其余系统能力继续由超级管理员独占。
@@ -128,6 +130,7 @@ function selectMenu(key: SystemMenuKey) {
           :page-active="props.pageActive"
         />
         <AnalyticsManagementPanel v-else-if="props.activeKey === 'analytics'" />
+        <TraceView v-else-if="props.activeKey === 'traces'" />
         <SupportAccessPanel
           v-else-if="props.activeKey === 'support' && props.supportRevealed && props.pageActive"
           :current-user="currentUser"

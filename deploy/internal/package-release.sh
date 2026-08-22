@@ -116,6 +116,16 @@ ANALYTICS_OUTBOX_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/analytics
 ANALYTICS_TRIGGER_AFTER_RELEASE_MIGRATION_RESOURCE="db/migration-compat/analytics-after-release/V20260814165301__analytics_event_outbox_install_triggers_after_release.sql"
 ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260813150000__analytics_activity_facts_create_tables.sql"
 ANALYTICS_CLICKHOUSE_MIGRATION_SHA256="1a1d4d77b2d92f6f97a864da7a20b6d5f040807d15f2eef940410c10e7e7a7f7"
+OPENCODE_OBSERVABILITY_GENERATION_MIGRATION_RESOURCE="db/migration/V20260822201811__opencode_server_processes_add_observability_generation.sql"
+OPENCODE_OBSERVABILITY_GENERATION_MIGRATION_SHA256="033a70045a188d3f322868efc83bddebd8b4b86afe18f7b0f943632eb8fa1865"
+TRACE_CATALOG_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260822174420__analytics_trace_catalog_create_tables.sql"
+TRACE_CATALOG_CLICKHOUSE_MIGRATION_SHA256="7c880ee5fc4176cd179e53cfee850001f63291580e5d87ac2301ead59ae3ace7"
+TRACE_DSH_METRICS_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260822215123__analytics_trace_spans_add_dsh_metrics.sql"
+TRACE_DSH_METRICS_CLICKHOUSE_MIGRATION_SHA256="328c03ca3488e64a462aa1b1e7bff0fe541bb2cf1c5bf4dce0e024fb38c2cd7c"
+CAPABILITY_CUTOVER_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260823000346__analytics_capability_facts_enforce_plugin_cutover.sql"
+CAPABILITY_CUTOVER_CLICKHOUSE_MIGRATION_SHA256="e73aa51dd301619d4b729f09935c09da2ead45cbe510e1fc62daaf32ad294825"
+TRACE_COST_CLICKHOUSE_MIGRATION_RESOURCE="db/clickhouse/V20260823001128__analytics_trace_spans_add_cost_decode_tokens.sql"
+TRACE_COST_CLICKHOUSE_MIGRATION_SHA256="e099a0f3b780cbd0dde1cb448c8e3fc0e10bfbdbfe27400e4783afba0e108c28"
 LOCAL_CLIENT_RUNTIME_MIGRATION_RESOURCE="db/migration/V20260811210453__local_client_credentials_create_runtime.sql"
 LOCAL_CLIENT_RUNTIME_MIGRATION_SHA256="b4ae9ca6d8dbe04ebe058ab7b01841e30c2880231e858b6233e3571d62848970"
 LOCAL_CLIENT_RUNTIME_APPLIED_MIGRATION_RESOURCE="db/migration-compat/local-client-runtime-applied/V20260812202425__local_client_credentials_create_runtime_after_release.sql"
@@ -718,6 +728,16 @@ verify_release_flyway_migrations_jar() {
     "${ANALYTICS_TRIGGER_AFTER_RELEASE_MIGRATION_RESOURCE}" "${ANALYTICS_POSTGRES_TRIGGER_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${ANALYTICS_CLICKHOUSE_MIGRATION_RESOURCE}" "${ANALYTICS_CLICKHOUSE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${OPENCODE_OBSERVABILITY_GENERATION_MIGRATION_RESOURCE}" "${OPENCODE_OBSERVABILITY_GENERATION_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${TRACE_CATALOG_CLICKHOUSE_MIGRATION_RESOURCE}" "${TRACE_CATALOG_CLICKHOUSE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${TRACE_DSH_METRICS_CLICKHOUSE_MIGRATION_RESOURCE}" "${TRACE_DSH_METRICS_CLICKHOUSE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${CAPABILITY_CUTOVER_CLICKHOUSE_MIGRATION_RESOURCE}" "${CAPABILITY_CUTOVER_CLICKHOUSE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${TRACE_COST_CLICKHOUSE_MIGRATION_RESOURCE}" "${TRACE_COST_CLICKHOUSE_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${LOCAL_CLIENT_RUNTIME_MIGRATION_RESOURCE}" "${LOCAL_CLIENT_RUNTIME_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \

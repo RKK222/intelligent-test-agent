@@ -71,8 +71,9 @@ class ProtectedAgentExecutionServiceTest {
                 java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
                 java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
         assertThat(context.systemPrompt())
-                .contains("agent instructions", "skill instructions", "hub_rev_agent_1", "hub_rev_skill_1")
-                .doesNotContain("/Users/test/workspace");
+                .contains("agent instructions", "local_files_list_skill_resources", "review",
+                        "hub_rev_agent_1", "hub_rev_skill_1")
+                .doesNotContain("skill instructions", "/Users/test/workspace");
         assertThat(context.auditPayload().toString())
                 .contains("hub_rev_agent_1", "sha256-agent", "hub_rev_skill_1", "sha256-skill")
                 .doesNotContain("agent instructions", "skill instructions", "pag_runtime_secret");

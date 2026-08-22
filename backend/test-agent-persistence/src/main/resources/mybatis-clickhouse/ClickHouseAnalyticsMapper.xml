@@ -60,6 +60,21 @@
         <include refid="currentUserFilter"/>
     </sql>
 
+    <!--
+      插件能力事实可能早于 USER_DIMENSION 到达。这里直接使用事实行已经冻结的用户维度，
+      避免 test-design 等真实调用在维表同步窗口内被错误过滤为 0。
+    -->
+    <sql id="capabilityFactFilter">
+        occurred_at &gt;= #{filter.startTime} and occurred_at &lt; #{filter.endTime}
+        <if test="filter.organization != null and filter.organization != ''">and organization = #{filter.organization}</if>
+        <if test="filter.rdDepartment != null and filter.rdDepartment != ''">and rd_department = #{filter.rdDepartment}</if>
+        <if test="filter.department != null and filter.department != ''">and department = #{filter.department}</if>
+        <if test="filter.userKeyword != null and filter.userKeyword != ''">
+            and (positionCaseInsensitiveUTF8(user_id, #{filter.userKeyword}) &gt; 0
+                 or positionCaseInsensitiveUTF8(username, #{filter.userKeyword}) &gt; 0)
+        </if>
+    </sql>
+
     <sql id="rollupFilter">
         <include refid="currentUserFilter"/>
     </sql>
@@ -248,19 +263,26 @@
     </select>
 
     <select id="capabilityUsage" resultType="com.enterprise.testagent.domain.analytics.AnalyticsModels$CapabilityUsageRow">
+        with (
+            select minOrNull(coverage_start_at)
+            from analytics_trace_catalog final
+            where source = 'OPENCODE_PLUGIN'
+        ) as plugin_cutover
         select capability_type as type, capability_name as name,
                count() as invocation_count, uniqExact(user_id) as user_count,
                countIf(status = 'SUCCEEDED') as succeeded_count,
                countIf(status = 'FAILED') as failed_count,
+               countIf(status = 'CANCELLED') as cancelled_count,
                countIf(status = 'STARTED') as incomplete_count
         from (
             select occurred_at, user_id, run_id, call_id, capability_type, capability_name, status
             from analytics_plugin_capability_facts final
-            where <include refid="factFilter"/> and capability_name != '' and user_id != ''
+            where <include refid="capabilityFactFilter"/> and capability_name != '' and user_id != ''
             union all
             select occurred_at, user_id, run_id, call_id, capability_type, capability_name, status
             from analytics_capability_facts final
             where <include refid="factFilter"/> and capability_name != '' and user_id != ''
+              and (plugin_cutover is null or occurred_at &lt; plugin_cutover)
               and (run_id, call_id) not in (
                   select run_id, call_id from analytics_plugin_capability_facts final
                   where occurred_at &gt;= #{filter.startTime} and occurred_at &lt; #{filter.endTime}
@@ -271,8 +293,13 @@
     </select>
 
     <select id="capabilityCoverage" resultType="com.enterprise.testagent.domain.analytics.AnalyticsModels$CapabilityCoverage">
+        with (
+            select minOrNull(coverage_start_at)
+            from analytics_trace_catalog final
+            where source = 'OPENCODE_PLUGIN'
+        ) as plugin_cutover
         select 'OPENCODE_PLUGIN' as source,
-               min(started_at) as coverage_start_at,
+               plugin_cutover as coverage_start_at,
                maxIf(updated_at, complete = 1) as complete_through,
                if(count() = 0, 0.0, countIf(complete = 1) / count()) as rollout_completeness
         from analytics_trace_catalog final
@@ -284,7 +311,7 @@
             and (positionCaseInsensitiveUTF8(user_id, #{filter.userKeyword}) &gt; 0
                  or positionCaseInsensitiveUTF8(username, #{filter.userKeyword}) &gt; 0)
         </if>
-        having count() &gt; 0
+        having plugin_cutover is not null
     </select>
 
     <select id="organizationUserCounts" resultType="com.enterprise.testagent.persistence.mybatis.AnalyticsOrganizationUserCountRow">

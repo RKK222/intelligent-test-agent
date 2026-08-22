@@ -8,6 +8,7 @@ import com.enterprise.testagent.localclient.protocol.LocalClientFrameType;
 import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -56,6 +57,29 @@ class LocalClientRegistrationFramesTest {
 
         assertThat(codec.payload(frame, LocalClientPayloads.Register.class).capabilities())
                 .containsExactly("OPENCODE_OBSERVABILITY_V1");
+        assertThat(LocalClientConnection.shouldStartVersionChecks(
+                configuration(false), LocalClientBuildInfo.resolve("20260820153045"))).isFalse();
+        assertThat(LocalClientConnection.shouldStartVersionChecks(
+                configuration(true), LocalClientBuildInfo.resolve("20260820153045"))).isTrue();
+    }
+
+    @Test
+    void shouldOnlyQuarantineExplicitNonRetryableDigestConflict() {
+        assertThat(LocalClientConnection.isDigestConflict(new LocalClientPayloads.Error(
+                "CONFLICT",
+                "safe message",
+                false,
+                Map.of("reason", "TRACE_CHUNK_DIGEST_CONFLICT")))).isTrue();
+        assertThat(LocalClientConnection.isDigestConflict(new LocalClientPayloads.Error(
+                "CONFLICT",
+                "safe message",
+                true,
+                Map.of("reason", "TRACE_CHUNK_DIGEST_CONFLICT")))).isFalse();
+        assertThat(LocalClientConnection.isDigestConflict(new LocalClientPayloads.Error(
+                "CONFLICT",
+                "safe message",
+                false,
+                Map.of("reason", "TRACE_UPLOAD_DECLARATION_MISSING")))).isFalse();
     }
 
     private LocalClientConfiguration configuration(boolean selfUpdateConfigured) {

@@ -10,6 +10,7 @@ export type SystemMenuKey =
   | "memory"
   | "config"
   | "analytics"
+  | "traces"
   | "support";
 
 export type WorkspacePageId = "toolbox" | "memories" | "hub" | `system:${SystemMenuKey}`;
@@ -41,6 +42,7 @@ const SYSTEM_MENU_KEYS: readonly SystemMenuKey[] = [
   "memory",
   "config",
   "analytics",
+  "traces",
   "support"
 ];
 
@@ -56,6 +58,7 @@ const SYSTEM_SECTION_BY_KEY: Record<SystemMenuKey, string> = {
   memory: "memory",
   config: "config",
   analytics: "analytics",
+  traces: "traces",
   support: "support"
 };
 
@@ -78,6 +81,7 @@ const PAGE_TITLES: Record<WorkspacePageId, string> = {
   "system:memory": "记忆能力",
   "system:config": "配置管理",
   "system:analytics": "运营分析",
+  "system:traces": "Trace 可观测",
   "system:support": "问题排查只读访问"
 };
 

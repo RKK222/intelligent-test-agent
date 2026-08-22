@@ -11,11 +11,13 @@ import com.enterprise.testagent.opencode.runtime.protectedagent.ProtectedAgentMc
 import com.enterprise.testagent.observability.TraceConstants;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.test.web.reactive.server.WebTestClient;
 
 class ProtectedAgentMcpControllerTest {
 
@@ -44,7 +46,7 @@ class ProtectedAgentMcpControllerTest {
 
         assertThat(response).isNotNull();
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(objectMapper.writeValueAsString(response.getBody())).isEqualTo(serviceResponse.toString());
+        assertThat(response.getBody().body()).isEqualTo(objectMapper.convertValue(serviceResponse, Object.class));
         assertThat(new McpRequest("2.0", id, "tools/call", params).apiRequestLogSummary().toString())
                 .contains("tools/call")
                 .doesNotContain("pag_secret", "secret.txt", "file-content-must-not-enter-api-log");
@@ -54,6 +56,39 @@ class ProtectedAgentMcpControllerTest {
                 "Bearer pag_secret",
                 objectMapper.valueToTree(new McpRequest("2.0", id, "tools/call", params)),
                 "trace_mcp_controller");
+    }
+
+    @Test
+    void springJackson3HttpBoundaryAcceptsOpenParamsAndKeepsRawJsonRpcResponse() {
+        ProtectedAgentMcpService service = mock(ProtectedAgentMcpService.class);
+        ProtectedAgentMcpController controller = new ProtectedAgentMcpController(service, objectMapper);
+        JsonNode serviceResponse = objectMapper.valueToTree(Map.of(
+                "jsonrpc", "2.0",
+                "id", 7,
+                "result", Map.of("protocolVersion", "2025-03-26")));
+        when(service.handle(
+                        org.mockito.ArgumentMatchers.eq("Bearer pag_secret"),
+                        org.mockito.ArgumentMatchers.any(JsonNode.class),
+                        org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(serviceResponse);
+
+        WebTestClient.bindToController(controller)
+                .build()
+                .post()
+                .uri("/api/internal/platform/protected-agent/mcp")
+                .header("Authorization", "Bearer pag_secret")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "jsonrpc", "2.0",
+                        "id", 7,
+                        "method", "initialize",
+                        "params", Map.of("protocolVersion", "2025-03-26")))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.jsonrpc").isEqualTo("2.0")
+                .jsonPath("$.id").isEqualTo(7)
+                .jsonPath("$.result.protocolVersion").isEqualTo("2025-03-26");
     }
 
     @Test

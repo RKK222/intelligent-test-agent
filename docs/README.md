@@ -44,6 +44,7 @@
 - `docs/testing/app-source-snapshot.md`：应用源码固定提交、多服务器物化、独立进度 WebSocket、文件能力和到期清理的自动化与人工验收。
 - `docs/testing/xxl-job-integration.md`：XXL-JOB 自动化、双 Java、故障隔离和安全验收清单。
 - `docs/testing/internal-model-observability-local.md`：企业内部模型调用可观测性的本地验证——用 `tools/mock-model-server.py` 在不部署/不连真实企业端点时复现成功、上游错误、超时、连接失败并核对明细/探活/查询 API。
+- `docs/testing/opencode-observability-acceptance.md`：OpenCode 1.18.4 插件化运营指标、DSH Trace、本地低优先级上传、集中归档和企业离线交付的八组验收记录。
 
 ## 产品介绍与宣传素材
 

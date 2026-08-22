@@ -570,7 +570,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     }
 
     private void startVersionChecks() {
-        if (!buildInfo.capabilities().contains(LocalClientBuildInfo.SELF_UPDATE_CAPABILITY)) {
+        if (!shouldStartVersionChecks(configuration, buildInfo)) {
             return;
         }
         ScheduledFuture<?> previous = versionCheckTask.getAndSet(
@@ -578,6 +578,14 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         if (previous != null) {
             previous.cancel(false);
         }
+    }
+
+    /** 注册报文未声明自更新时不得发送 VERSION_CHECK，否则服务端会按能力 fencing 主动断开连接。 */
+    static boolean shouldStartVersionChecks(
+            LocalClientConfiguration configuration,
+            LocalClientBuildInfo buildInfo) {
+        return configuration.selfUpdateConfigured()
+                && buildInfo.capabilities().contains(LocalClientBuildInfo.SELF_UPDATE_CAPABILITY);
     }
 
     private void startObservabilityUpload() {
@@ -644,6 +652,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                                 pending.traceId(), pending.runtimeGeneration(), pending.runtimeKind(),
                                 pending.coverageStartAt(), pending.firstSequence(), pending.lastSequence(),
                                 pending.sha256(), pending.contentLength(), pending.droppedCount(),
+                                Math.max(0, observabilityRelay.pendingChunkCount() - 1)
+                                        + observabilityRelay.blockedChunkCount(),
                                 pending.complete(), pending.createdAt()))));
                 byte[] body = observabilityRelay.readBody(pending);
                 sendFrame(new LocalClientFrame(
@@ -710,10 +720,26 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         if (pending == null) {
             return false;
         }
+        LocalClientPayloads.Error error = codec.payload(frame, LocalClientPayloads.Error.class);
         observabilityInFlight.set(false);
         observabilityInFlightStartedNanos.set(0);
+        if (isDigestConflict(error)) {
+            // 不可重试的摘要冲突保留在 blocked spool；随后继续上传其它分片，Trace 在服务器端保持不完整。
+            observabilityRelay.quarantine(pending, "TRACE_CHUNK_DIGEST_CONFLICT");
+            observabilityFailureCount.set(0);
+            observabilityRetryNotBeforeNanos.set(System.nanoTime() + TimeUnit.SECONDS.toNanos(1));
+            return true;
+        }
         observabilityBackoff();
         return true;
+    }
+
+    static boolean isDigestConflict(LocalClientPayloads.Error error) {
+        return error != null
+                && !error.retryable()
+                && "CONFLICT".equals(error.code())
+                && error.details() != null
+                && "TRACE_CHUNK_DIGEST_CONFLICT".equals(error.details().get("reason"));
     }
 
     private void observabilityBackoff() {

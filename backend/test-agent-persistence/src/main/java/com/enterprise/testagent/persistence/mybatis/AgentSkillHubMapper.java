@@ -37,6 +37,7 @@ public interface AgentSkillHubMapper {
                                          @Param("classifiedByUserId") String classifiedByUserId,
                                          @Param("classifiedAt") Instant classifiedAt);
     List<BuiltinRevisionRow> listCurrentBuiltinRevisions(@Param("sourceKey") String sourceKey);
+    List<BuiltinRevisionRow> listBuiltinRevisionsByCommit(@Param("sourceCommitHash") String sourceCommitHash);
     BuiltinRevisionRow findCurrentBuiltinRevision(@Param("sourceKey") String sourceKey,
                                                   @Param("assetId") String assetId);
     BuiltinRevisionRow findBuiltinRevision(@Param("revisionId") String revisionId);

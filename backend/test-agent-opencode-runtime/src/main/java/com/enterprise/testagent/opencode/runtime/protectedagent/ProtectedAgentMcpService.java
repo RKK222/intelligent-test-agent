@@ -88,9 +88,10 @@ public class ProtectedAgentMcpService {
                 property("name", "string", "新文件名")), List.of("path", "name")));
         tools.add(tool("delete_path", "删除授权本地工作区的普通文件或空目录", objectSchema(
                 property("path", "string", "相对路径")), List.of("path")));
-        tools.add(tool("list_skill_resources", "列出本次受保护 Agent 冻结的服务器 Skill 文本资源", objectSchema(), List.of()));
+        tools.add(tool("list_skill_resources", "列出本次受保护 Agent 冻结的服务器 Skill 文本资源及稳定 Skill 名", objectSchema(), List.of()));
         tools.add(tool("read_skill_resource", "读取本次受保护 Agent 冻结的服务器 Skill 文本资源", objectSchema(
-                property("path", "string", "list_skill_resources 返回的资源路径")), List.of("path")));
+                property("name", "string", "list_skill_resources 返回的稳定 Skill 名"),
+                property("path", "string", "list_skill_resources 返回的资源路径")), List.of("name", "path")));
         return result;
     }
 
@@ -112,8 +113,9 @@ public class ProtectedAgentMcpService {
                 case "move_path" -> invoke(grant, "workspace.move", arguments, traceId);
                 case "rename_path" -> invoke(grant, "workspace.rename", arguments, traceId);
                 case "delete_path" -> invoke(grant, "workspace.delete", arguments, traceId);
-                case "list_skill_resources" -> grant.protectedResources().keySet().stream().sorted().toList();
-                case "read_skill_resource" -> readSkillResource(grant, required(arguments, "path"));
+                case "list_skill_resources" -> listSkillResources(grant);
+                case "read_skill_resource" -> readSkillResource(
+                        grant, required(arguments, "name"), required(arguments, "path"));
                 default -> throw new PlatformException(ErrorCode.FORBIDDEN, "工具不在授权范围内");
             };
             return toolSuccess(result);
@@ -126,12 +128,27 @@ public class ProtectedAgentMcpService {
         return grantService.invokeLocal(grant, operation, arguments, traceId);
     }
 
-    private String readSkillResource(Grant grant, String path) {
+    private List<Map<String, String>> listSkillResources(Grant grant) {
+        return grant.protectedResources().keySet().stream()
+                .sorted()
+                .map(path -> Map.of("name", skillName(path), "path", path))
+                .toList();
+    }
+
+    private String readSkillResource(Grant grant, String name, String path) {
+        if (!path.startsWith("skills/" + name + "/") || !name.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Skill 名称与资源路径不匹配");
+        }
         String content = grant.protectedResources().get(path);
         if (content == null) {
             throw new PlatformException(ErrorCode.NOT_FOUND, "Skill 资源不存在");
         }
         return content;
+    }
+
+    private String skillName(String path) {
+        String remainder = path.substring("skills/".length());
+        return remainder.substring(0, remainder.indexOf('/'));
     }
 
     private JsonNode toolSuccess(Object value) {

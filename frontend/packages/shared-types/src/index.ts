@@ -1558,6 +1558,7 @@ export type AnalyticsCapabilityUsage = {
   usageRate?: number | null;
   succeededCount: number;
   failedCount: number;
+  cancelledCount: number;
   incompleteCount: number;
 };
 

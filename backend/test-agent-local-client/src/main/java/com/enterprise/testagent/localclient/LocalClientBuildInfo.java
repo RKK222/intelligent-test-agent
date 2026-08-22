@@ -31,10 +31,11 @@ public record LocalClientBuildInfo(
 
     static LocalClientBuildInfo resolve(String version) {
         if (version == null || version.isBlank() || DEVELOPMENT_VERSION.equals(version)) {
+            // 开发包没有可信发布版本，不能自更新；Trace 上传能力属于运行时协议，不能随版本能力一起清空。
             return new LocalClientBuildInfo(
                     DEVELOPMENT_VERSION,
                     LAUNCHER_VERSION,
-                    List.of(),
+                    List.of(OBSERVABILITY_CAPABILITY),
                     false);
         }
         String managedVersion = LocalClientReleaseVersion.parse(version).value();

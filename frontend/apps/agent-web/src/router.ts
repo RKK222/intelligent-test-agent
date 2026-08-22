@@ -82,7 +82,7 @@ export const router = createRouter({
     {
       path: "/traces",
       name: "traces",
-      component: () => import("./views/TraceView.vue"),
+      redirect: (to) => ({ name: "system", query: { ...to.query, section: "traces" } }),
     },
     {
       path: "/lobehub/launch",

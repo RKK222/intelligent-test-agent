@@ -59,7 +59,9 @@ public final class TraceModels {
             String eventId,
             String type,
             String lane,
+            String recordKind,
             Instant occurredAt,
+            Instant startedAt,
             long globalSequence,
             long sessionSequence,
             String sessionId,
@@ -76,6 +78,14 @@ public final class TraceModels {
             long tokensInput,
             long tokensOutput,
             long tokensReasoning,
+            long tokensCacheRead,
+            long tokensCacheWrite,
+            long tokensTotal,
+            Long ttftMs,
+            Long decodeMs,
+            long decodeTokens,
+            Double cost,
+            String finishReason,
             String source) {
     }
 

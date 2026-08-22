@@ -124,5 +124,7 @@ Workspace 查询响应中投影 runtime kind、实例 ID、在线状态和 capab
 
 `AgentSkillHubApplicationService` 同时实现受保护运行的只读定义端口：目录只返回用户可见的公共内置或
 已发布应用 Agent 的不可变修订 ID、名称和 SHA-256；运行解析只接受当前已发布修订，并按依赖表冻结精确
-Skill 修订。制品只在服务器解压，文本文件进入服务器模型上下文或只读 Skill 资源，二进制附件仅由制品摘要
+Skill 修订。公共内置 Agent 没有发布依赖表，因此只从同一公共 Git commit 的数据库快照中选择 `AGENT.md`
+按完整技术 ID 明确引用的 Skill；禁止读取当前工作树或跨 commit 拼接正文。制品只在服务器解压，Agent
+文本进入服务器 system prompt，Skill 文本只通过服务器只读资源按需加载，二进制附件仅由制品摘要
 审计。该端口不得把 `AGENT.md`、`SKILL.md` 或其它正文放入列表 DTO 或本地客户端配置目录。

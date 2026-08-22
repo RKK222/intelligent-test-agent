@@ -73,11 +73,52 @@ class LocalObservabilityRelayTest {
         }
     }
 
+    @Test
+    void shouldUploadSameTraceChunksByMonotonicSequenceInsteadOfRandomBatchFileName() throws Exception {
+        try (LocalObservabilityRelay relay = new LocalObservabilityRelay(
+                temporaryDirectory.resolve("ordered-spool"), 1024 * 1024)) {
+            assertThat(post(relay, relay.localToken(), "later", 2).statusCode()).isEqualTo(202);
+            assertThat(post(relay, relay.localToken(), "earlier", 1).statusCode()).isEqualTo(202);
+
+            assertThat(relay.pendingChunkCount()).isEqualTo(2);
+            assertThat(relay.nextPending().firstSequence()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void shouldRetainDigestConflictInBlockedSpoolWithoutStarvingLaterChunks() throws Exception {
+        Path spool = temporaryDirectory.resolve("conflict-spool");
+        try (LocalObservabilityRelay relay = new LocalObservabilityRelay(spool, 1024 * 1024)) {
+            assertThat(post(relay, relay.localToken(), "conflict", 1).statusCode()).isEqualTo(202);
+            assertThat(post(relay, relay.localToken(), "later", 2).statusCode()).isEqualTo(202);
+            LocalObservabilityRelay.PendingChunk conflict = relay.nextPending();
+            long bytesBefore = relay.backlogBytes();
+
+            relay.quarantine(conflict, "TRACE_CHUNK_DIGEST_CONFLICT");
+
+            assertThat(relay.degraded()).isTrue();
+            assertThat(relay.blockedChunkCount()).isEqualTo(1);
+            assertThat(relay.pendingChunkCount()).isEqualTo(1);
+            assertThat(relay.nextPending().firstSequence()).isEqualTo(2);
+            assertThat(relay.backlogBytes()).isEqualTo(bytesBefore);
+            assertThat(Files.readString(spool.resolve("blocked").resolve(conflict.batchId() + ".ndjson")))
+                    .contains("conflict");
+        }
+    }
+
     private HttpResponse<String> post(LocalObservabilityRelay relay, String token) throws Exception {
         return post(relay, token, "已脱敏工具输出");
     }
 
     private HttpResponse<String> post(LocalObservabilityRelay relay, String token, String result) throws Exception {
+        return post(relay, token, result, 1);
+    }
+
+    private HttpResponse<String> post(
+            LocalObservabilityRelay relay,
+            String token,
+            String result,
+            long sequence) throws Exception {
         String body = """
                 {
                   "schemaVersion":"1.0",
@@ -87,18 +128,22 @@ class LocalObservabilityRelayTest {
                   "complete":false,
                   "events":[{
                     "schemaVersion":"1.0",
-                    "eventId":"evt_0000000000000000000000000000000000000001",
+                    "eventId":"evt_%040d",
                     "traceId":"trc_00000000000000000000000000000001",
                     "type":"TOOL_EXECUTE_AFTER",
                     "timestamp":"2026-08-22T00:00:01Z",
-                    "globalSequence":1,
-                    "sessionSequence":1,
+                    "globalSequence":%d,
+                    "sessionSequence":%d,
                     "sessionId":"session-1",
                     "callId":"call-1",
                     "payload":{"tool":"skill","skillName":"test-design","result":"%s"}
                   }]
                 }
-                """.formatted(result.replace("\\", "\\\\").replace("\"", "\\\""));
+                """.formatted(
+                        sequence,
+                        sequence,
+                        sequence,
+                        result.replace("\\", "\\\\").replace("\"", "\\\""));
         HttpRequest request = HttpRequest.newBuilder(
                         URI.create(relay.baseUrl() + LocalObservabilityRelay.EVENTS_PATH))
                 .header("Authorization", "Bearer " + token)

@@ -3,6 +3,7 @@ package com.enterprise.testagent.api.web.platform;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.domain.trace.TraceCatalogRepository;
@@ -403,7 +404,9 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         if (body.length != declaration.contentLength()) {
             return Mono.error(new PlatformException(ErrorCode.VALIDATION_ERROR, "Trace 分片长度与声明不一致"));
         }
-        return Mono.fromCallable(() -> {
+        // Trace 归档属于低优先级后台任务，不能占住 WebSocket 入站 concatMap；否则其后的
+        // HTTP_RESPONSE/STREAM_CHUNK 会排队到归档完成，最终把正常客户端对话误报为 504。
+        Mono.fromCallable(() -> {
                     var user = userRepository.findByUserId(state.userId())
                             .filter(com.enterprise.testagent.domain.user.User::canLogin)
                             .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHENTICATED, "本地客户端用户已停用"));
@@ -417,6 +420,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             runtime,
                             declaration.coverageStartAt(),
                             declaration.droppedCount(),
+                            declaration.pendingChunks(),
                             declaration.complete(),
                             declaration.traceId(),
                             declaration.firstSequence(),
@@ -425,52 +429,53 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             body);
                 })
                 .subscribeOn(Schedulers.boundedElastic())
-                .doOnNext(ack -> {
-                    state.traceDeclarations().remove(frame.requestId(), declaration);
-                    emit(outbound, new LocalClientFrame(
-                            LocalClientProtocol.VERSION,
-                            LocalClientFrameType.TRACE_CHUNK_ACK,
-                            frame.requestId(),
-                            frame.traceId(),
-                            state.generation(),
-                            codec.payload(new LocalClientPayloads.TraceChunkAck(
-                                    declaration.batchId(),
-                                    state.clientInstanceId().value(),
-                                    state.generation(),
-                                    ack.traceId(),
-                                    ack.firstSequence(),
-                                    ack.lastSequence(),
-                                    ack.sha256(),
-                                    ack.completeThrough(),
-                                    ack.archiveStatus(),
-                                    ack.archivedAt()))), closeSignal);
-                    emit(outbound, new LocalClientFrame(
-                            LocalClientProtocol.VERSION,
-                            LocalClientFrameType.TRACE_UPLOAD_WATERMARK,
-                            frame.requestId() + "_wm",
-                            frame.traceId(),
-                            state.generation(),
-                            codec.payload(new LocalClientPayloads.TraceUploadWatermark(
-                                    state.clientInstanceId().value(),
-                                    state.generation(),
-                                    ack.traceId(),
-                                    ack.completeThrough(),
-                                    Instant.now()))), closeSignal);
-                })
-                .doOnError(error -> {
-                    state.traceDeclarations().remove(frame.requestId(), declaration);
-                    emitRequestError(outbound, closeSignal, state, frame, error);
-                })
-                .onErrorResume(error -> Mono.empty())
-                .then();
+                .subscribe(
+                    ack -> {
+                        state.traceDeclarations().remove(frame.requestId(), declaration);
+                        emit(outbound, new LocalClientFrame(
+                                LocalClientProtocol.VERSION,
+                                LocalClientFrameType.TRACE_CHUNK_ACK,
+                                frame.requestId(),
+                                frame.traceId(),
+                                state.generation(),
+                                codec.payload(new LocalClientPayloads.TraceChunkAck(
+                                        declaration.batchId(),
+                                        state.clientInstanceId().value(),
+                                        state.generation(),
+                                        ack.traceId(),
+                                        ack.firstSequence(),
+                                        ack.lastSequence(),
+                                        ack.sha256(),
+                                        ack.completeThrough(),
+                                        ack.archiveStatus(),
+                                        ack.archivedAt()))), closeSignal);
+                        emit(outbound, new LocalClientFrame(
+                                LocalClientProtocol.VERSION,
+                                LocalClientFrameType.TRACE_UPLOAD_WATERMARK,
+                                frame.requestId() + "_wm",
+                                frame.traceId(),
+                                state.generation(),
+                                codec.payload(new LocalClientPayloads.TraceUploadWatermark(
+                                        state.clientInstanceId().value(),
+                                        state.generation(),
+                                        ack.traceId(),
+                                        ack.completeThrough(),
+                                        Instant.now()))), closeSignal);
+                    },
+                    error -> {
+                        state.traceDeclarations().remove(frame.requestId(), declaration);
+                        emitRequestError(outbound, closeSignal, state, frame, error);
+                    });
+        return Mono.empty();
     }
 
-    /** 首次归档留在当前连接 Java；后续重连若落到其它 Java，统一转发到冻结的 owner。 */
+    /** 首次归档冻结到当前 Linux 节点；JVM 重启后仍按节点选择最新 Java，不能追逐已失效的进程 ID。 */
     private OpencodeObservabilityModels.TraceAck archiveLocalOrForward(
             OpencodeObservabilityModels.IngestionIdentity identity,
             OpencodeObservabilityModels.RuntimeIdentity runtime,
             Instant coverageStartAt,
             long droppedCount,
+            long pendingChunks,
             boolean complete,
             String traceId,
             long firstSequence,
@@ -479,7 +484,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             byte[] body) {
         var existing = traceCatalogRepository.find(traceId);
         if (existing.isPresent()) {
-            BackendProcessId owner = new BackendProcessId(existing.get().backendProcessId());
+            LinuxServerId owner = new LinuxServerId(existing.get().linuxServerId());
             if (!routeResolver.isCurrent(owner)) {
                 var backend = routeResolver.requireBackend(owner);
                 var request = new OpencodeObservabilityModels.InternalTraceChunk(
@@ -489,6 +494,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                         runtime,
                         coverageStartAt,
                         droppedCount,
+                        pendingChunks,
                         complete,
                         traceId,
                         firstSequence,
@@ -511,6 +517,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                 runtime,
                 coverageStartAt,
                 droppedCount,
+                pendingChunks,
                 complete,
                 traceId,
                 firstSequence,
@@ -656,6 +663,14 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         String message = error instanceof PlatformException
                 ? error.getMessage()
                 : "本地工作区注册失败";
+        Map<String, Object> details = error instanceof PlatformException platformException
+                ? platformException.details()
+                : Map.of();
+        boolean retryable = switch (errorCode) {
+            case INTERNAL_ERROR, OPENCODE_BAD_GATEWAY, OPENCODE_UNAVAILABLE,
+                    TRACE_CONTENT_UNAVAILABLE, OPENCODE_TIMEOUT, RUNTIME_STATE_UNAVAILABLE -> true;
+            default -> false;
+        };
         try {
             emit(outbound, new LocalClientFrame(
                     LocalClientProtocol.VERSION,
@@ -664,7 +679,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                     request.traceId(),
                     state.generation(),
                     codec.payload(new LocalClientPayloads.Error(
-                            errorCode.name(), message, false, Map.of()))), closeSignal);
+                            errorCode.name(), message, retryable, details))), closeSignal);
         } catch (RuntimeException ignored) {
             // 连接已结束时由客户端断线处理收敛等待中的注册请求。
         }

@@ -163,6 +163,16 @@
           on classification.asset_id = revision.asset_id
         order by revision.asset_type, coalesce(revision.display_name, revision.technical_id), revision.technical_id
     </select>
+    <select id="listBuiltinRevisionsByCommit" resultMap="BuiltinRevisionMap">
+        select revision.*,
+               coalesce(classification.skill_category, 'OTHER') as skill_category,
+               classification.skill_subcategory as skill_subcategory
+        from agent_skill_hub_builtin_revisions revision
+        left join agent_skill_hub_builtin_classifications classification
+          on classification.asset_id = revision.asset_id
+        where revision.source_commit_hash = #{sourceCommitHash}
+        order by revision.asset_type, coalesce(revision.display_name, revision.technical_id), revision.technical_id
+    </select>
     <select id="findCurrentBuiltinRevision" resultMap="BuiltinRevisionMap">
         select revision.*,
                coalesce(classification.skill_category, 'OTHER') as skill_category,

@@ -72,6 +72,7 @@ public final class OpencodeObservabilityModels {
             RuntimeIdentity runtime,
             Instant coverageStartAt,
             long droppedCount,
+            long pendingChunks,
             boolean complete,
             String traceId,
             long firstSequence,

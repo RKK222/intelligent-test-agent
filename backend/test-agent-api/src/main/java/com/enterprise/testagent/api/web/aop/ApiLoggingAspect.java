@@ -8,6 +8,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.observability.TraceLogContext;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Optional;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -221,6 +222,9 @@ public class ApiLoggingAspect {
             if (result instanceof ResponseEntity<?> response
                     && response.getBody() instanceof ApiRequestLogSummary summarized) {
                 logValue = summarized.apiRequestLogSummary();
+            } else if (result instanceof ResponseEntity<?> response && response.getBody() == null) {
+                // 空响应只记录状态，避免把框架 Header 对象展开到日志；MCP notification 等路径尤其需要保持窄摘要。
+                logValue = Map.of("statusCode", response.getStatusCode().value(), "bodyPresent", false);
             } else if (result instanceof ApiRequestLogSummary summarized) {
                 logValue = summarized.apiRequestLogSummary();
             }

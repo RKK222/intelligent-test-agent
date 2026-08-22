@@ -31,7 +31,19 @@ public final class ClickHouseSchemaMigrator implements InitializingBean {
             new Migration(
                     "20260822174420",
                     "analytics_trace_catalog_create_tables",
-                    "db/clickhouse/V20260822174420__analytics_trace_catalog_create_tables.sql"));
+                    "db/clickhouse/V20260822174420__analytics_trace_catalog_create_tables.sql"),
+            new Migration(
+                    "20260822215123",
+                    "analytics_trace_spans_add_dsh_metrics",
+                    "db/clickhouse/V20260822215123__analytics_trace_spans_add_dsh_metrics.sql"),
+            new Migration(
+                    "20260823000346",
+                    "analytics_capability_facts_enforce_plugin_cutover",
+                    "db/clickhouse/V20260823000346__analytics_capability_facts_enforce_plugin_cutover.sql"),
+            new Migration(
+                    "20260823001128",
+                    "analytics_trace_spans_add_cost_decode_tokens",
+                    "db/clickhouse/V20260823001128__analytics_trace_spans_add_cost_decode_tokens.sql"));
 
     private final DataSource dataSource;
 

@@ -98,6 +98,16 @@
 
 代理转发链路上对每次调用落结构化明细（`internal_model_call_records`）并小时聚合（`internal_model_call_stats_hourly`），按 `InternalModelCallOutcome` 保留精确原因，再由 `InternalModelCallOutcomeGroup` 归并为五个看板大类。代理与探活共同复用 `InternalModelSseStreamObserver`，每个 SSE data 只解析一次；只有 OpenAI-compatible `choices` 中的正文、推理、拒绝、legacy text 或工具输出算真实输出，注释、role/usage、伪心跳和畸形 data 都不产生首 Token。`firstTokenMillis`/`lastTokenMillis` 记录首末有效输出到达，`outputTokenCount` 只取上游 usage 的准确值，ITL/TPOT 按 `(末输出-首输出)/(输出 Token 数-1)` 计算，Output TPS 按其倒数口径 `(输出 Token 数-1)*1000/(末输出-首输出)` 逐条计算后聚合；缺少用量、少于 2 个输出 Token 或 TPS 时间跨度为 0 时不统计，绝不以 chunk 数代替 Token 数。`streamCompleteMillis` 仍表示 `[DONE]` 或非空 `finish_reason` 到达，`durationMillis` 是端到端耗时。TTFT、ITL/TPOT 与 Output TPS 分布由 `InternalModelObservabilityQueryService` 在最长 31 天范围内基于全量明细查询平均值、真实最小值、P25、中位数、P75、最大值和样本数，不受页面明细分页影响；页面按模型厂商分别绘制箱体，Overview 使用同一全量查询。Responses 适配请求会开启上游 usage；直接 Chat Completions 仅在调用方或供应商返回 usage 时形成 ITL/TPOT 与 TPS 样本。所有观测只记 traceId、耗时、状态、异常类简名和 Token 数，不存正文或 Token 内容。探活固定 `max_tokens=1`，因此不会进入 ITL/TPOT 或 TPS 样本。查询统计 API 支持按来源隔离，明细 API 额外支持 UCID 服务端过滤并用同一条件计算分页总量，明细和三类分布 API 支持结果大类筛选；保留期与 `SUPER_ADMIN` 权限不变。
 
+## OpenCode Trace 归档
+
+`observability` 包接收同一 OpenCode 1.18.4 插件的服务端批次与本地 WSS 分片，按 opaque Trace ID 在首次接收的稳定
+`linuxServerId` 存储节点冻结 owner，并以不可变 gzip NDJSON chunk、manifest、SHA-256 和确认水位形成服务器权威副本。
+`backendProcessId` 只保留本次写入进程的来源，不作为永久存储 owner；同节点 Java 重启后允许原 generation 继续断点上传和读取。
+跨存储节点查看和下载只复用 `BackendJavaRouteResolver`/`BackendHttpForwarder`；owner 服务器不可用时返回
+`TRACE_CONTENT_UNAVAILABLE`，不扫描其它节点也不本机降级。
+ClickHouse 只写目录、关联和 DSH 对齐的 `record_kind/started_at/cache token/ttft/decode` 元数据，正文不进入数据库或日志。
+本地 `pendingChunks` 进入目录积压；ACK 前不删除 spool，失败只标记积压/不完整且不影响聊天。
+
 ## 测试覆盖
 
 - `NightExecutionCapacityRegistryTest`、`NightExecutionWindowCalculatorTest`、`NightExecutionTaskApplicationServiceTest`、`NightExecutionDispatchCoordinatorTest`、`NightExecutionDispatchServiceTest`、`NightExecutionDispatchLeaseGuardTest`、`NightExecutionRunLifecycleServiceTest`、`NightExecutionReconcileServiceTest` 覆盖通用参数启动加载/热刷新/失败保留、动态容量、北京时间窗口/推荐、幂等创建、容量和会话锁、固定服务器批量分发、attempt 认领/续租、普通 Run 受理、稳定 Run ID 恢复、owner 心跳失联、07:00 失败与保留清理；`RunApplicationServiceTest`、`SessionApplicationServiceTest` 额外覆盖待执行锁阻断普通发送/归档，而调度入口可启动 Run。
@@ -201,6 +211,11 @@ Run 仍用默认 opencode 的 `contextToken` 校验本地 Workspace 和连接 ge
 短期 MCP grant，关闭服务器原生文件/终端工具，再由 `ProtectedAgentMcpService` 经既有 WSS 文件网关访问
 用户授权目录。`ProtectedOpencodeAgentRuntime` 用 Redis 保存远端 Session 到服务器目录映射，所有带 directory
 的后续调用重新取该映射，缺失时失败关闭或重建，绝不回退本地绝对路径。
+
+只读 Skill 资源目录返回 `{name,path}`；读取时两者都必填并校验 `path` 必须位于 `skills/{name}/`。这样
+OpenCode 1.18.4 插件可始终从 `args.name` 记录受保护 Skill 调用，不从工具标题或资源路径推断 Skill 名称。
+Skill 正文不预拼到 system prompt；Agent 指令要求加载时必须真实调用上述只读 MCP，保证调用事实与实际
+上下文加载一致。
 
 受保护 Run 固定 `LEGACY_FULL`，`run.created` 只审计 revision/SHA-256。grant 明文只存在于签发 Java，调用时
 逐次检查 Run、Workspace、客户端实例、持有 Java、generation 和 root digest。Agent/Skill 正文、MCP

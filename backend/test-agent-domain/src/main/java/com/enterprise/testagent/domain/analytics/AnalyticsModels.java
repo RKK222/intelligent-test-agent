@@ -143,6 +143,7 @@ public final class AnalyticsModels {
             long userCount,
             long succeededCount,
             long failedCount,
+            long cancelledCount,
             long incompleteCount) {
     }
 
@@ -154,6 +155,7 @@ public final class AnalyticsModels {
             Double usageRate,
             long succeededCount,
             long failedCount,
+            long cancelledCount,
             long incompleteCount) {
     }
 

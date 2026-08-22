@@ -954,7 +954,8 @@ RunEvent，也不得改变聊天 SSE 的顺序、续传或错误语义。
 服务端 OpenCode 插件直接使用专用 HTTP 入口。本地插件只连接随机 token 保护的 loopback Java relay，本地 Java 再在
 现有 `local-opencode-client.v1` WSS 上使用以下 additive 帧：
 
-- `OBSERVABILITY_BATCH`：先声明 batch、Trace、runtime generation、序号范围、摘要、长度、丢弃数和完整标记。
+- `OBSERVABILITY_BATCH`：先声明 batch、Trace、runtime generation、序号范围、摘要、长度、丢弃数、完整标记和
+  `pendingChunks`（发送当前分片后仍待确认的本地分片数）。
 - `TRACE_CHUNK_UPLOAD`：同 requestId 发送 Base64 NDJSON 分片；单分片默认且最多 256 KiB。
 - `TRACE_CHUNK_ACK`：服务器完成原子落盘及 SHA-256 校验后确认精确 batch/Trace/末序号/摘要；客户端收到匹配 ACK 后才删除 spool。
 - `TRACE_UPLOAD_WATERMARK`：返回服务器已确认水位，供断网、重连和进程重启后的断点续传核验。
@@ -963,6 +964,15 @@ RunEvent，也不得改变聊天 SSE 的顺序、续传或错误语义。
 `OPENCODE_OBSERVABILITY_V1`；旧服务端可忽略该 capability，旧客户端不会产生这些帧。控制、模型、文件和普通 HTTP/SSE
 反向帧优先；Trace 仅在所有前台操作和模型 relay 空闲至少 3 秒后发送，默认单在途、1 MiB/s 上限，失败指数退避。
 未确认数据保留在本地 spool，不把网络或归档失败传播给聊天。
+服务器对相同序号范围的不同摘要返回非重试 `CONFLICT`，并在 `details.reason` 中固定使用
+`TRACE_CHUNK_DIGEST_CONFLICT`。客户端只对这一精确原因把正文与 metadata 移入本地持久 `blocked` 隔离区；隔离数据
+仍计入 spool 磁盘预算且不得伪装成 ACK 删除，后续分片继续上传，目录中的 Trace 必须保持 incomplete/pending。
+
+正文事件中的 `ASSISTANT_STEP_METRICS` 使用 OpenCode 1.18.4 的 step-start、首个非空 delta、step-finish usage 和
+assistant `message.updated.info.time.completed` 边界记录 `startedAt/durationMs/ttftMs/decodeMs` 与五类 token；中断 Step
+以 `timingRecorded=false` 计数但不伪造耗时。`SESSION_METRICS` 在 idle 时给出与 DeepSeek Harness
+`session-stats` 同名的 `turns/steps/llmMs/toolMs/ttftMs/ttftSteps/decodeMs/decodeTokens` 累计值。
+这些 additive 事件只属于 Observability stream，旧客户端或旧服务端可安全忽略。
 
 ## 兼容性
 

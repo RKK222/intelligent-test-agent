@@ -130,6 +130,9 @@ TEST_AGENT_DEPLOYMENT_MODE=internal
 TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114
 TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-114
 SYS_DATA_ROOT_DIR=/data/testagent/data
+TEST_AGENT_OBSERVABILITY_TRACE_ARCHIVE_ROOT=/data/testagent/data/agent-observability/traces
+TEST_AGENT_OBSERVABILITY_TRACE_WARNING_FREE_BYTES=1073741824
+TEST_AGENT_OBSERVABILITY_TOKEN_TTL=7d
 
 TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres
 TEST_AGENT_DB_USERNAME=postgres
@@ -193,6 +196,7 @@ TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 - `TEST_AGENT_MAX_PREVIEW_BYTES=5242880` 是一次性 UTF-8 读取和可编辑阈值，不是完整预览或上传总大小上限；超出后前端按约 512 KiB 渐进只读加载，可由用户加载到 EOF。`TEST_AGENT_UPLOAD_CHUNK_BYTES=262144` 只控制单个上传分片。
 - `TEST_AGENT_SERVER_ADVERTISED_HOST` 必须是 worker 和其他服务器可访问的真实地址，不能写 `127.0.0.1`。
 - `TEST_AGENT_LINUX_SERVER_ID` 是服务器长期稳定身份，升级时不得改变。
+- `TEST_AGENT_OBSERVABILITY_TRACE_ARCHIVE_ROOT` 必须位于本机持久化数据卷并由 Java 用户独占写入；正文不设 TTL，需监控剩余空间、归档失败、积压和最后成功时间。查看跨节点 Trace 时只路由到首次归档的 owner 节点，不得复制目录或配置共享扫描。
 - `backend.env` 不得包含 `TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH`；Java 日志必须显示从 `classpath:rsa-private.key` 加载。
 - XXL executor 固定使用 `.114:9999` 可达地址，注册不携带 Linux 亲和；夜间扫描后由业务层读取任务固化的目标服务器并调用对应 Java。
 - 当前 HTTP 现场必须同时保留空的 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 和显式的 `TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true`；缺一项都会按安全默认拒绝不安全终端。签票后浏览器直连 `ws://122.233.30.114:8080`，不是经 `mimo.sdc.cs.icbc:9996` 转发。
@@ -249,6 +253,11 @@ DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 
 TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 ```
+
+上述 Debian 地址只用于有公网封包机的构建阶段，不会进入企业断网运行链路。若封包机到 USTC 出现 TLS 握手失败，必须显式改用
+`DEBIAN_MIRROR=https://deb.debian.org/debian` 和
+`DEBIAN_SECURITY_MIRROR=https://security.debian.org/debian-security` 后重新执行完整封包；不得在 Dockerfile 中临时跳过证书校验、
+删除依赖或把构建期下载推迟到企业节点。
 
 `TEST_AGENT_DATA_ROOT` 必须与 Java 的 `SYS_DATA_ROOT_DIR` 完全一致；每个稳定服务器身份只运行一个 worker。当前 worker 不读取旧的 `TEST_AGENT_BACKEND`，而是读取 Java 写出的 `.serverhost` 再结合 `OPENCODE_WORKER_BACKEND_PORT` 连接本机 Java，因此不要恢复旧变量。
 

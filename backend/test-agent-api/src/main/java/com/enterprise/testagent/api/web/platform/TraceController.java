@@ -7,7 +7,6 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
-import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
 import com.enterprise.testagent.domain.trace.TraceModels;
 import com.enterprise.testagent.opencode.runtime.observability.OpencodeObservabilityModels;
 import com.enterprise.testagent.opencode.runtime.observability.TraceAccessAuditLogger;
@@ -148,14 +147,22 @@ public class TraceController {
     }
 
     private Mono<Void> routeContentIfRequired(TraceModels.Catalog catalog, ServerWebExchange exchange) {
-        BackendProcessId target = new BackendProcessId(catalog.backendProcessId());
-        if (routeResolver.isCurrent(target)) {
+        // Trace 正文归属于持久化存储节点而不是某次 Java 进程；JVM 重启后仍应由同节点的新进程读取。
+        if (routeResolver.isCurrent(catalog.linuxServerId())) {
             return null;
         }
         if ("true".equalsIgnoreCase(exchange.getRequest().getHeaders().getFirst(BackendHttpForwarder.ROUTED_HEADER))) {
             throw new PlatformException(ErrorCode.TRACE_CONTENT_UNAVAILABLE, "Trace 归档节点不可用");
         }
-        return forwarder.forwardRaw(exchange, routeResolver.requireBackend(target));
+        try {
+            return forwarder.forwardRaw(exchange, routeResolver.requireBackend(catalog.linuxServerId()));
+        } catch (RuntimeException exception) {
+            throw new PlatformException(
+                    ErrorCode.TRACE_CONTENT_UNAVAILABLE,
+                    "Trace 归档节点不可用",
+                    java.util.Map.of("linuxServerId", catalog.linuxServerId()),
+                    exception);
+        }
     }
 
     private Mono<Void> writeJson(ServerWebExchange exchange, Object body) {

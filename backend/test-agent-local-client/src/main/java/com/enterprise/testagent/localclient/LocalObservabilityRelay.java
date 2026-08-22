@@ -44,6 +44,7 @@ final class LocalObservabilityRelay implements AutoCloseable {
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final Path spoolDirectory;
+    private final Path blockedDirectory;
     private final HttpServer server;
     private final ExecutorService httpExecutor;
     private final ExecutorService writer;
@@ -75,6 +76,7 @@ final class LocalObservabilityRelay implements AutoCloseable {
 
     LocalObservabilityRelay(Path spoolDirectory, LocalObservabilitySettings settings) throws IOException {
         this.spoolDirectory = spoolDirectory.toAbsolutePath().normalize();
+        this.blockedDirectory = this.spoolDirectory.resolve("blocked");
         this.maxSpoolBytes = settings.spoolMaxBytes();
         this.maxMemoryQueueBytes = settings.memoryQueueMaxBytes();
         this.uploadChunkBytes = settings.chunkBytes();
@@ -108,9 +110,14 @@ final class LocalObservabilityRelay implements AutoCloseable {
         try (var files = Files.list(spoolDirectory)) {
             return files
                     .filter(path -> path.getFileName().toString().endsWith(".json"))
-                    .sorted()
                     .map(this::readPending)
                     .filter(java.util.Objects::nonNull)
+                    // batchId 是随机值；同一 runtime/trace 必须按事件序号上传，不能按文件名碰运气。
+                    .sorted(Comparator.comparing(PendingChunk::runtimeGeneration)
+                            .thenComparing(PendingChunk::traceId)
+                            .thenComparingLong(PendingChunk::firstSequence)
+                            .thenComparing(PendingChunk::createdAt)
+                            .thenComparing(PendingChunk::batchId))
                     .findFirst()
                     .orElse(null);
         } catch (IOException exception) {
@@ -151,8 +158,39 @@ final class LocalObservabilityRelay implements AutoCloseable {
         }
     }
 
+    /**
+     * 服务器确认同一序号区间已存在不同摘要时，分片不可能靠重试自愈。将其移入持久隔离区以免
+     * 饿死其它 Trace；正文和 metadata 均保留且继续计入磁盘预算，绝不伪装成已 ACK 删除。
+     */
+    synchronized void quarantine(PendingChunk pending, String reason) {
+        PendingChunk current = pending == null ? null : readMetadata(metaPath(pending.batchId()));
+        if (current == null || !current.equals(pending)) {
+            throw new IllegalArgumentException("observability quarantine does not match pending spool");
+        }
+        try {
+            createPrivateDirectory(blockedDirectory);
+            Path sourceData = dataPath(pending.batchId());
+            Path blockedData = blockedPath(pending.batchId(), ".ndjson");
+            Path sourceMeta = metaPath(pending.batchId());
+            Path blockedMeta = blockedPath(pending.batchId(), ".json");
+            // 先移 metadata：进程若在两次原子移动之间退出，根目录不会留下“可上传 metadata + 已搬走正文”
+            // 这种会永久阻塞队头的半状态；正文仍留在 spool 并计入空间预算，重启后可人工恢复隔离。
+            if (Files.isRegularFile(sourceMeta)) {
+                Files.move(sourceMeta, blockedMeta, StandardCopyOption.ATOMIC_MOVE);
+            }
+            if (Files.isRegularFile(sourceData)) {
+                Files.move(sourceData, blockedData, StandardCopyOption.ATOMIC_MOVE);
+            }
+            degraded.set(true);
+            writeDegradedMarker(pending.traceId(), reason);
+        } catch (IOException exception) {
+            degraded.set(true);
+            throw new IllegalStateException("failed to quarantine observability spool", exception);
+        }
+    }
+
     long backlogBytes() {
-        try (var files = Files.list(spoolDirectory)) {
+        try (var files = Files.walk(spoolDirectory, 2)) {
             return files.filter(path -> path.getFileName().toString().endsWith(".ndjson"))
                     .mapToLong(path -> {
                         try {
@@ -162,6 +200,30 @@ final class LocalObservabilityRelay implements AutoCloseable {
                         }
                     })
                     .sum();
+        } catch (IOException exception) {
+            degraded.set(true);
+            return 0;
+        }
+    }
+
+    long pendingChunkCount() {
+        try (var files = Files.list(spoolDirectory)) {
+            return files.filter(path -> path.getFileName().toString().endsWith(".json"))
+                    .map(this::readPending)
+                    .filter(java.util.Objects::nonNull)
+                    .count();
+        } catch (IOException exception) {
+            degraded.set(true);
+            return 0;
+        }
+    }
+
+    long blockedChunkCount() {
+        if (!Files.isDirectory(blockedDirectory)) {
+            return 0;
+        }
+        try (var files = Files.list(blockedDirectory)) {
+            return files.filter(path -> path.getFileName().toString().endsWith(".json")).count();
         } catch (IOException exception) {
             degraded.set(true);
             return 0;
@@ -376,6 +438,15 @@ final class LocalObservabilityRelay implements AutoCloseable {
 
     private Path dataPath(String batchId) {
         return checked(batchId, ".ndjson");
+    }
+
+    private Path blockedPath(String batchId, String suffix) {
+        Path rootPath = checked(batchId, suffix);
+        Path path = blockedDirectory.resolve(rootPath.getFileName()).normalize();
+        if (!path.startsWith(blockedDirectory)) {
+            throw new IllegalArgumentException("invalid observability blocked spool path");
+        }
+        return path;
     }
 
     private Path checked(String batchId, String suffix) {

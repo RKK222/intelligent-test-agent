@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +16,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.trace.TraceCatalogRepository;
+import com.enterprise.testagent.domain.trace.TraceModels;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -49,7 +51,7 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
-/** 验证低优先级 Trace 帧只有在服务器原子归档完成后才得到当前连接 ACK。 */
+/** 验证低优先级 Trace 归档不阻塞业务回帧，并且只在服务器原子归档完成后 ACK。 */
 class LocalClientConnectionWebSocketHandlerObservabilityTest {
 
     private static final UserId USER_ID = new UserId("usr_local_observability");
@@ -76,6 +78,7 @@ class LocalClientConnectionWebSocketHandlerObservabilityTest {
         String sha256 = sha256(body);
         CountDownLatch archiveEntered = new CountDownLatch(1);
         CountDownLatch allowArchive = new CountDownLatch(1);
+        CountDownLatch responsesReceived = new CountDownLatch(2);
         Instant archivedAt = Instant.parse("2026-08-22T08:00:00Z");
         doAnswer(invocation -> {
                     archiveEntered.countDown();
@@ -84,7 +87,7 @@ class LocalClientConnectionWebSocketHandlerObservabilityTest {
                             TRACE_ID, 1, 1, sha256, body.length, 1, false, "ARCHIVED", archivedAt);
                 })
                 .when(archiveService).ingestLocalChunk(
-                        any(), any(), any(), anyLong(), anyBoolean(), anyString(), anyLong(), anyLong(),
+                        any(), any(), any(), anyLong(), anyLong(), anyBoolean(), anyString(), anyLong(), anyLong(),
                         anyString(), any(byte[].class));
 
         LocalClientConnectionWebSocketHandler handler = handler(
@@ -92,7 +95,10 @@ class LocalClientConnectionWebSocketHandlerObservabilityTest {
         LocalClientConnectionWebSocketHandler.ConnectionState state = state(true);
         Sinks.Many<LocalClientFrame> outbound = Sinks.many().unicast().onBackpressureBuffer();
         List<LocalClientFrame> responses = new CopyOnWriteArrayList<>();
-        outbound.asFlux().take(2).subscribe(responses::add);
+        outbound.asFlux().take(2).subscribe(frame -> {
+            responses.add(frame);
+            responsesReceived.countDown();
+        });
 
         StepVerifier.create(handler.handleAuthenticated(
                         frame(LocalClientFrameType.OBSERVABILITY_BATCH, declaration(body, sha256)),
@@ -106,16 +112,13 @@ class LocalClientConnectionWebSocketHandlerObservabilityTest {
                         outbound,
                         Sinks.one(),
                         state))
-                .then(() -> {
-                    try {
-                        assertThat(archiveEntered.await(2, TimeUnit.SECONDS)).isTrue();
-                    } catch (InterruptedException exception) {
-                        throw new AssertionError(exception);
-                    }
-                    assertThat(responses).isEmpty();
-                    allowArchive.countDown();
-                })
                 .verifyComplete();
+
+        // 入站处理先完成并释放 concatMap，真正的 ACK 仍等待归档事务完成。
+        assertThat(archiveEntered.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(responses).isEmpty();
+        allowArchive.countDown();
+        assertThat(responsesReceived.await(2, TimeUnit.SECONDS)).isTrue();
 
         assertThat(responses).hasSize(2);
         assertThat(responses.get(0).type()).isEqualTo(LocalClientFrameType.TRACE_CHUNK_ACK);
@@ -138,7 +141,7 @@ class LocalClientConnectionWebSocketHandlerObservabilityTest {
         LocalClientPayloads.ObservabilityBatch stale = new LocalClientPayloads.ObservabilityBatch(
                 BATCH_ID, INSTANCE_ID.value(), CONNECTION_GENERATION - 1, TRACE_ID,
                 RUNTIME_GENERATION, "LOCAL_CLIENT", Instant.parse("2026-08-22T00:00:00Z"),
-                1, 1, sha256, body.length, 0, true, Instant.parse("2026-08-22T08:00:00Z"));
+                1, 1, sha256, body.length, 0, 0, true, Instant.parse("2026-08-22T08:00:00Z"));
         assertThatThrownBy(() -> handler.handleAuthenticated(
                 frame(LocalClientFrameType.OBSERVABILITY_BATCH, stale),
                 Sinks.many().unicast().onBackpressureBuffer(),
@@ -149,11 +152,67 @@ class LocalClientConnectionWebSocketHandlerObservabilityTest {
         verifyNoInteractions(archiveService);
     }
 
+    @Test
+    void sameFrozenLinuxNodeResumesLocallyAfterBackendJvmRestart() throws Exception {
+        TraceArchiveService archiveService = mock(TraceArchiveService.class);
+        UserRepository userRepository = mock(UserRepository.class);
+        TraceCatalogRepository catalogRepository = mock(TraceCatalogRepository.class);
+        BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
+        BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
+        User user = mock(User.class);
+        TraceModels.Catalog catalog = mock(TraceModels.Catalog.class);
+        when(user.canLogin()).thenReturn(true);
+        when(user.userId()).thenReturn(USER_ID);
+        when(userRepository.findByUserId(USER_ID)).thenReturn(Optional.of(user));
+        when(catalogRepository.find(TRACE_ID)).thenReturn(Optional.of(catalog));
+        when(catalog.linuxServerId()).thenReturn("linux-1");
+        when(catalog.backendProcessId()).thenReturn("bjp_stale_before_restart");
+        when(routeResolver.isCurrent(new LinuxServerId("linux-1"))).thenReturn(true);
+
+        byte[] body = ("{\"traceId\":\"" + TRACE_ID + "\",\"globalSequence\":1}\n")
+                .getBytes(StandardCharsets.UTF_8);
+        String digest = sha256(body);
+        when(archiveService.ingestLocalChunk(
+                any(), any(), any(), anyLong(), anyLong(), anyBoolean(), anyString(), anyLong(), anyLong(),
+                anyString(), any(byte[].class)))
+                .thenReturn(new OpencodeObservabilityModels.TraceAck(
+                        TRACE_ID, 1, 1, digest, body.length, 1, false, "ARCHIVED", Instant.now()));
+        LocalClientConnectionWebSocketHandler handler = handler(
+                archiveService, userRepository, catalogRepository, routeResolver, forwarder);
+        LocalClientConnectionWebSocketHandler.ConnectionState connectionState = state(true);
+        Sinks.Many<LocalClientFrame> outbound = Sinks.many().unicast().onBackpressureBuffer();
+        CountDownLatch ackReceived = new CountDownLatch(2);
+        outbound.asFlux().take(2).subscribe(ignored -> ackReceived.countDown());
+
+        handler.handleAuthenticated(
+                frame(LocalClientFrameType.OBSERVABILITY_BATCH, declaration(body, digest)),
+                outbound, Sinks.one(), connectionState).block();
+        handler.handleAuthenticated(
+                frame(LocalClientFrameType.TRACE_CHUNK_UPLOAD, upload(body, digest, CONNECTION_GENERATION)),
+                outbound, Sinks.one(), connectionState).block();
+
+        assertThat(ackReceived.await(2, TimeUnit.SECONDS)).isTrue();
+        verify(archiveService).ingestLocalChunk(
+                any(), any(), any(), anyLong(), anyLong(), anyBoolean(), anyString(), anyLong(), anyLong(),
+                anyString(), any(byte[].class));
+        verifyNoInteractions(forwarder);
+    }
+
     private LocalClientConnectionWebSocketHandler handler(
             TraceArchiveService archiveService,
             UserRepository userRepository,
             TraceCatalogRepository catalogRepository) {
         BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
+        return handler(
+                archiveService, userRepository, catalogRepository, routeResolver, mock(BackendHttpForwarder.class));
+    }
+
+    private LocalClientConnectionWebSocketHandler handler(
+            TraceArchiveService archiveService,
+            UserRepository userRepository,
+            TraceCatalogRepository catalogRepository,
+            BackendJavaRouteResolver routeResolver,
+            BackendHttpForwarder forwarder) {
         LocalClientConnectionWebSocketHandler handler = new LocalClientConnectionWebSocketHandler(
                 mock(LocalClientCredentialApplicationService.class),
                 mock(LocalClientRegistrationService.class),
@@ -170,7 +229,7 @@ class LocalClientConnectionWebSocketHandlerObservabilityTest {
                 archiveService,
                 userRepository,
                 catalogRepository,
-                mock(BackendHttpForwarder.class),
+                forwarder,
                 new ManagerControlSettings(
                         "manager-secret", "http://127.0.0.1:8080", new LinuxServerId("linux-1"),
                         Duration.ofSeconds(5), Duration.ofSeconds(10), Duration.ofSeconds(10), 100));
@@ -194,7 +253,7 @@ class LocalClientConnectionWebSocketHandlerObservabilityTest {
         return new LocalClientPayloads.ObservabilityBatch(
                 BATCH_ID, INSTANCE_ID.value(), CONNECTION_GENERATION, TRACE_ID,
                 RUNTIME_GENERATION, "LOCAL_CLIENT", Instant.parse("2026-08-22T00:00:00Z"),
-                1, 1, sha256, body.length, 0, true, Instant.parse("2026-08-22T08:00:00Z"));
+                1, 1, sha256, body.length, 0, 0, true, Instant.parse("2026-08-22T08:00:00Z"));
     }
 
     private LocalClientPayloads.TraceChunkUpload upload(byte[] body, String sha256, long generation) {

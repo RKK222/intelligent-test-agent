@@ -255,6 +255,9 @@ TEST_AGENT_DEPLOYMENT_MODE=internal
 TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.4
 TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-4
 SYS_DATA_ROOT_DIR=/data/testagent/data
+TEST_AGENT_OBSERVABILITY_TRACE_ARCHIVE_ROOT=/data/testagent/data/agent-observability/traces
+TEST_AGENT_OBSERVABILITY_TRACE_WARNING_FREE_BYTES=1073741824
+TEST_AGENT_OBSERVABILITY_TOKEN_TTL=7d
 
 TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres
 TEST_AGENT_DB_USERNAME=postgres
@@ -321,6 +324,9 @@ TEST_AGENT_DEPLOYMENT_MODE=internal
 TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.114
 TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-114
 SYS_DATA_ROOT_DIR=/data/testagent/data
+TEST_AGENT_OBSERVABILITY_TRACE_ARCHIVE_ROOT=/data/testagent/data/agent-observability/traces
+TEST_AGENT_OBSERVABILITY_TRACE_WARNING_FREE_BYTES=1073741824
+TEST_AGENT_OBSERVABILITY_TOKEN_TTL=7d
 
 TEST_AGENT_DB_URL=jdbc:postgresql://122.233.30.147:5432/postgres
 TEST_AGENT_DB_USERNAME=postgres
@@ -380,6 +386,8 @@ TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 
 `TEST_AGENT_MAX_PREVIEW_BYTES=5242880` 是一次性 UTF-8 读取和可编辑阈值，不会截断完整渐进预览，也不限制分片上传总大小；`TEST_AGENT_UPLOAD_CHUNK_BYTES=262144` 只控制每条上传分片的解码内存与 frame 大小。两台后端必须保持一致。个人工作区搬迁使用的 `https://test-agent.internal` 只由 Java 在精确内部 WebSocket 路径处理，不得加入上述 `TEST_AGENT_CORS_ALLOWED_ORIGINS`，也不得把企业白名单改成 `*`。
 
+两台机器的 Trace 目录都是各自现有数据卷中的本地持久化目录，不是共享目录。首次成功归档会冻结 owner 节点，后续正文查看和下载由公共 Java 路由转发到该节点。正文和目录不设 TTL；必须分别监控 `testagent.trace.archive.disk.usable.bytes`、`write.failures`、`backlog` 和 `last.success.epoch.seconds`，不得通过删除未确认数据消除告警。
+
 保存后，两台都执行以下检查；命令必须无输出：
 
 ```bash
@@ -431,6 +439,11 @@ DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 
 TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 ```
+
+上述 Debian 地址只用于有公网封包机的构建阶段，不会进入企业断网运行链路。若封包机到 USTC 出现 TLS 握手失败，必须显式改用
+`DEBIAN_MIRROR=https://deb.debian.org/debian` 和
+`DEBIAN_SECURITY_MIRROR=https://security.debian.org/debian-security` 后重新执行完整封包；不得在 Dockerfile 中临时跳过证书校验、
+删除依赖或把构建期下载推迟到企业节点。两台后台必须使用同一份已经通过断网校验的 worker image tar。
 
 当前 worker 不读取旧的 `TEST_AGENT_BACKEND`，而是读取本机 Java 写出的 `.serverhost` 并结合 `OPENCODE_WORKER_BACKEND_PORT` 建立 manager WebSocket，所以不要恢复旧变量。Nginx 使用前端服务器独立的 `nginx.env`，不在每台 worker 的 `docker.env` 中维护 upstream。
 

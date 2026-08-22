@@ -292,6 +292,21 @@ class ApiLoggingAspectTest {
             assertTrue(serialized.contains("hasResult"));
             assertTrue(!serialized.contains("workspace-content-must-not-enter-api-log"));
         }
+
+        @Test
+        @DisplayName("空 ResponseEntity 只记录状态而不展开框架 Header")
+        void emptyResponseEntityUsesNarrowSummary() throws Exception {
+            Method serializer = ApiLoggingAspect.class.getDeclaredMethod("serializeResponse", Object.class);
+            serializer.setAccessible(true);
+
+            String serialized = (String) serializer.invoke(
+                    aspect,
+                    ResponseEntity.accepted().build());
+
+            assertTrue(serialized.contains("202"));
+            assertTrue(serialized.contains("bodyPresent"));
+            assertTrue(!serialized.contains("contentDisposition"));
+        }
     }
 
     @Nested
