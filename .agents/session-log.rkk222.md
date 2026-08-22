@@ -12834,3 +12834,30 @@
 
 - 当前 `.env.test` 下可直接使用默认重启命令，不再要求人工记住 `--with-clickhouse`，helper 运行凭据会在启动 Java 前自动覆盖旧 ClickHouse 账号。
 - 本次只改变本地 Bash 开发启动行为和文档，不涉及 HTTP/API、RunEvent/SSE、数据库/Flyway、生产 ClickHouse 专机、权限、安全协议、generated SDK 或 OpenCode 源码，也未新增部署节点。
+
+## 2026-08-22 - 修复客户端工作区重复注册与网页深链
+
+### Why
+
+- 客户端再次选择已经注册过的同一目录时，服务端先生成新的 Workspace ID，再命中 `uk_local_client_workspace_root` 唯一约束，事务回滚并让托盘只显示“客户端内部错误”。
+- 托盘“打开网页”原先只打开工作台首页，没有携带刚注册的逻辑 Workspace ID；网页因此无法自动切换到客户端本地目录。
+
+### What
+
+- 本地工作区注册在客户端实例行锁内按 `userId + clientInstanceId + rootDigest` 查重；重复选择复用既有 Workspace，并重新下发 `workspace.registerRoot` 恢复客户端重启后可能丢失的内存映射。新增查询和锁均落在既有 MyBatis mapper/repository，不新增 JDBC SQL。
+- 托盘注册成功后记录最近工作区并自动打开 `/workbench?localWorkspaceId=<workspaceId>`；“打开网页”复用该深链。地址栏只传逻辑 ID，不传本机绝对路径，浏览器打开失败也不会把已经提交的注册误报为失败。
+- Agent Web 解析并鉴权查询深链中的本地 Workspace，复用既有工作区文件 WebSocket 加载目录；本地模式显示工作区名和“本地目录”，隐藏/阻断无效的 Git 变更、发布和版本菜单。
+- 同步本地客户端 README、客户端架构文档、前端总览和 Agent Web README。
+
+### How
+
+- JDK 25 下 `LocalClientTrayTest` 3 项、`LocalWorkspaceApplicationServiceTest` 1 项通过；相关后端 24 模块跳过测试打包通过，并在完整 26 模块开发重启中再次构建成功。
+- Agent Web 类型检查、production build 通过；`app-source-workspace`、`FigmaShell`、`WorkbenchFooter` 定向 Vitest 共 98 项通过。
+- 使用 `.env.test`、`test` profile 和 JDK 25 完整重启 backend、opencode-manager、frontend；本机明文回环联调开关只对当前进程临时注入，未修改环境文件。backend readiness 为 UP、frontend 3000 返回 200。
+- 新客户端 JAR 与 `/Users/kaka/Applications/TestAgent Local Client Dev.app` 内 JAR SHA-256 均为 `d1dbff76835b83b3e5dc3c5cea0ee5bfc0b7223f2c103bb214c3d28df74102c3`；客户端 PID 7134 以 generation 10 完成认证。真实重复调用注册接口成功复用 `wrk_b6daaf37eaec4939bc91bafa8eef6b5e`，返回 `LOCAL_CLIENT / online=true`。
+
+### Result
+
+- 同一目录可安全重复选择，客户端注册成功后会直接打开并选中对应网页工作区；网页通过既有文件 WebSocket 展示和操作本地目录，不依赖应用/版本下拉框。
+- 当前服务和新客户端均已运行；macOS 原生目录弹窗及浏览器可见结果仍需用户最后点击一次确认。
+- 本次不新增或变更 HTTP 路径、请求/响应 DTO、RunEvent/SSE、数据库结构、Flyway、部署节点、强制配置或额外权限；仅新增存量表查询/行锁和兼容前端状态。未修改 `.env*`、generated SDK、OpenCode 只读源码或未跟踪 `.reasonix/`。

@@ -24,6 +24,7 @@ const props = withDefaults(
     readonly?: boolean;
     saving?: boolean;
     appName?: string;
+    workspaceName?: string;
     templates?: AppWorkspaceTemplate[];
     selectedVersionId?: string;
     personalWorkspaceBranch?: string;
@@ -263,6 +264,7 @@ watch(
       :readonly="readonly"
       :saving="saving"
       :app-name="appName"
+      :workspace-name="workspaceName"
       :templates="templates"
       :selected-version-id="selectedVersionId"
       :personal-workspace-branch="personalWorkspaceBranch"

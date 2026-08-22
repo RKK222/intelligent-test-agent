@@ -95,11 +95,21 @@ public class LocalWorkspaceApplicationService {
         RootRegistration validated = registration(fileGateway.invoke(
                 clientInstanceId.value(), route.connectionGeneration(), null, null,
                 "workspace.validateRoot", input, traceId));
+
+        // 校验发生在用户桌面，随后用客户端实例行锁串行查重；同一路径重复选择时复用既有 Workspace，
+        // 同时重新下发 registerRoot，以修复客户端重装或状态文件丢失后的本地根映射。
+        localWorkspaceRepository.lockRegistration(userId, clientInstanceId);
+        Optional<LocalClientWorkspaceBinding> existingBinding =
+                localWorkspaceRepository.findByOwnerClientAndRootDigest(
+                        userId, clientInstanceId, validated.rootDigest());
+        if (existingBinding.isPresent()) {
+            return restoreExistingWorkspace(
+                    existingBinding.orElseThrow(), validated, input, route.connectionGeneration(), traceId);
+        }
+
         WorkspaceId workspaceId = new WorkspaceId(RuntimeIdGenerator.workspaceId());
-        JsonNode registeredNode = fileGateway.invoke(
-                clientInstanceId.value(), route.connectionGeneration(), workspaceId.value(), null,
-                "workspace.registerRoot", input, traceId);
-        RootRegistration registered = registration(registeredNode);
+        RootRegistration registered = registerRoot(
+                clientInstanceId, route.connectionGeneration(), workspaceId, input, traceId);
         if (!validated.equals(registered)) {
             bestEffortUnregister(clientInstanceId, route.connectionGeneration(), workspaceId, traceId);
             throw new PlatformException(ErrorCode.CONFLICT, "本地工作区根目录在注册期间发生变化");
@@ -127,6 +137,65 @@ public class LocalWorkspaceApplicationService {
                 now,
                 now));
         return LocalWorkspaceView.from(workspace, clientInstanceId, true);
+    }
+
+    private LocalWorkspaceView restoreExistingWorkspace(
+            LocalClientWorkspaceBinding binding,
+            RootRegistration validated,
+            JsonNode input,
+            long generation,
+            String traceId) {
+        Workspace workspace = workspaceRepository.findById(binding.workspaceId())
+                .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT, "本地工作区绑定存在，但 Workspace 已不可用"));
+        RootRegistration registered = registerRoot(
+                binding.clientInstanceId(), generation, binding.workspaceId(), input, traceId);
+        if (!validated.equals(registered)) {
+            bestEffortRestoreRoot(binding, generation, traceId);
+            throw new PlatformException(ErrorCode.CONFLICT, "本地工作区根目录在注册期间发生变化");
+        }
+        if (!binding.normalizedRootPath().equals(registered.normalizedRootPath())
+                || !binding.fileSystemIdentity().equals(registered.fileSystemIdentity())) {
+            Instant now = Instant.now();
+            localWorkspaceRepository.save(new LocalClientWorkspaceBinding(
+                    binding.workspaceId(),
+                    binding.userId(),
+                    binding.clientInstanceId(),
+                    registered.normalizedRootPath(),
+                    registered.rootDigest(),
+                    registered.fileSystemIdentity(),
+                    binding.createdAt(),
+                    now));
+        }
+        return LocalWorkspaceView.from(workspace, binding.clientInstanceId(), true);
+    }
+
+    private RootRegistration registerRoot(
+            LocalClientInstanceId clientInstanceId,
+            long generation,
+            WorkspaceId workspaceId,
+            JsonNode input,
+            String traceId) {
+        return registration(fileGateway.invoke(
+                clientInstanceId.value(), generation, workspaceId.value(), null,
+                "workspace.registerRoot", input, traceId));
+    }
+
+    private void bestEffortRestoreRoot(
+            LocalClientWorkspaceBinding binding,
+            long generation,
+            String traceId) {
+        try {
+            JsonNode previousRoot = objectMapper.createObjectNode()
+                    .put("absolutePath", binding.normalizedRootPath());
+            registerRoot(
+                    binding.clientInstanceId(), generation, binding.workspaceId(), previousRoot, traceId);
+        } catch (RuntimeException ignored) {
+            // 无法恢复旧根时移除客户端映射，使后续文件请求失败关闭而不是继续访问竞态后的目录。
+            bestEffortUnregister(
+                    binding.clientInstanceId(), generation, binding.workspaceId(), traceId);
+        }
     }
 
     @Transactional

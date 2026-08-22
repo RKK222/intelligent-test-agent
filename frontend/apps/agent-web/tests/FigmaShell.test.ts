@@ -1256,6 +1256,26 @@ describe("FigmaShell", () => {
     expect(wrapper.get('[aria-label="打开应用代码库源码"]').classes()).toContain("is-active");
   });
 
+  it("shows a client-selected local workspace without application version controls", async () => {
+    const wrapper = mountShell({
+      props: {
+        workspaceKind: "LOCAL_CLIENT",
+        workspaceName: "native-project"
+      }
+    });
+
+    const workspaceButton = wrapper.get('[data-testid="header-workspace-selector"]');
+    const versionButton = wrapper.get('[data-testid="header-version-selector"]');
+    expect(workspaceButton.text()).toContain("native-project");
+    expect(workspaceButton.attributes("disabled")).toBe("");
+    expect(workspaceButton.find(".figma-app-menu-chevron").exists()).toBe(false);
+    expect(versionButton.text()).toContain("本地目录");
+    expect(versionButton.attributes("disabled")).toBe("");
+
+    await workspaceButton.trigger("click");
+    expect(wrapper.find(".figma-workspace-menu-wrapper .figma-app-menu-dropdown").exists()).toBe(false);
+  });
+
   it("shows process status with server name and resolved address", async () => {
     const wrapper = mountShell({
       props: {

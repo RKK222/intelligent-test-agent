@@ -27,6 +27,10 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
   `USER` rollout 并查看 attempt；普通用户仍只从通知动作更新自己的在线实例。页面不展示或缓存 Key、签名私钥、
   下载 URL 或策略 revision；旧客户端显示需安装新 DEB。
 
+- 客户端目录注册成功后打开 `/workbench?localWorkspaceId=<workspaceId>`。工作台只接受有界逻辑 ID，再通过当前用户
+  对象级授权接口取回 `LOCAL_CLIENT` Workspace；成功后失效在途应用/源码选择、阻止默认应用覆盖并使用既有文件
+  WebSocket 加载根目录。该模式隐藏 Git/版本入口且不解析物理路径，登录回跳仍保留同源深链参数。
+
 - 会话列表提供“我的会话 / 分享给我”双 Tab；分享列表保留过期、取消、移除和会话归档记录并置灰，只有 `ACTIVE` 可进入，点击有效分享会话时使用独立浏览器标签页打开 `/s/{shareId}`，当前普通工作台不切换路由。所属人通过可从右下角双向拉伸的分享弹窗设置 1/3/7 天有效期、用户搜索、多选和逐人 `canChat` 权限（双侧显示只读与可对话）；站内通知是主入口，永久唯一链接仅作为页脚备用复制动作，原链接仍支持取消后重新启用。取消前会提示仍待执行的定时任务。
 - `/s/{id}` 按强类型前缀分流：`ses_` Session ID 直接打开仅所属人可访问的只读原始对话，`shr_` shareId 打开固定 Session/Workspace 的完整分享工作台。只读原始对话复用工作台消息归一化与 OpenCode 时间线，同时展示 `content` 和结构化 `parts`，不能把仅有 parts 的历史消息渲染成空白。分享所属人仍按普通历史会话流程跳转；被分享人隐藏会话列表等越界入口，但保留“新建对话”，点击后直接回到本人工作台的空白对话。模型与 Provider 目录显式绑定分享授权中的固定 Workspace，并通过所属人的 OpenCode 进程加载，可对话成员可选择模型后代操作。只读成员可查看消息、Run、Diff 和文件，不能修改或执行；可对话成员按所属人身份代操作，界面仍记录实际 actor。权限失效会关闭 SSE、文件连接和终端并进入明确失效页。记忆证据中的“打开原始对话”使用新标签页，原记忆中心保持不变。
 - 本人消息使用浅蓝 `#E6F4FF`，共享会话中的其他用户消息使用低饱和柔紫 token `--ta-chat-other-user-bg`（默认 `#F3E8FF`），两者均无边框并保持高对比度与清爽识别；智能体返回回答使用高质感无边框柔灰/纯白卡片 `--ta-chat-answer-bg`（默认 `#F7F8FA`），提升与输入气泡的视觉协调度与现代感；别人的用户气泡仍显示姓名，自己的不显示，姓名由分享访问上下文的参与者目录解析。多人页面以平台 `session_messages` 用户输入为正文权威源：分享 runtime-state 发现活动 Run 后立即订阅 RunEvent SSE，先恢复平台消息并按远端 message ID 与 OpenCode envelope 原位归并；空 envelope 不展示，断线重放也不重复生成气泡。后续帧中 active Run 消失时保留本地 Run 身份并按精确 `runId` 拉取终态，不能只清空 Run 导致持续“思考中”；`sessionUpdatedAt` 变化且当前无活动 Run 时重新读取消息，使 compact 结果无需刷新页面即可同步。重发的 `messageChange` 在预约提交后按 replacement Run 精确读取 USER，取消/失败时按 source Run 精确读取完整 USER/ASSISTANT 并原位恢复；前端按 Session 维护修订水位，并在异步读取返回时二次校验，拒绝迟到旧通知覆盖新状态。两条路径都不切换 Session、不重载历史树，也不触发 history loading 或滚动到底。分享模式禁用 busy follow-up 队列，任一活动 Run 都立即禁用所有参与方输入，后端唯一约束仍是最终裁决。

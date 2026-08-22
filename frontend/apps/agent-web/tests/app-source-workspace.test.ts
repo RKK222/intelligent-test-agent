@@ -13,6 +13,7 @@ import {
   ordinaryWorkspaceCanWrite,
   personalWorkspaceRuntimeContext,
   physicalPathResolutionWorkspaceId,
+  requestedLocalWorkspaceId,
   sourceContextFromOpen
 } from "../src/components/app-source-workspace";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
@@ -29,6 +30,14 @@ describe("app source workspace state", () => {
       canSelectApplicationVersion: false
     });
     expect(appSourceWorkspaceCapabilities("EXPERIENCE")).toEqual({
+      canWriteWorkspaceFiles: true,
+      canUseSessionsAndRuns: true,
+      canUseTerminal: true,
+      canUseGitPublication: false,
+      canPublishApplicationAgentConfig: false,
+      canSelectApplicationVersion: false
+    });
+    expect(appSourceWorkspaceCapabilities("LOCAL_CLIENT")).toEqual({
       canWriteWorkspaceFiles: true,
       canUseSessionsAndRuns: true,
       canUseTerminal: true,
@@ -64,10 +73,24 @@ describe("app source workspace state", () => {
   it("derives ordinary file writes from explicit workspace kind instead of personal worktree identity", () => {
     expect(ordinaryWorkspaceCanWrite("APP_SOURCE", undefined, "wrk-source")).toBe(true);
     expect(ordinaryWorkspaceCanWrite("EXPERIENCE", undefined, "wrk-experience")).toBe(true);
+    expect(ordinaryWorkspaceCanWrite("LOCAL_CLIENT", undefined, "wrk-local")).toBe(true);
     expect(ordinaryWorkspaceCanWrite("MANAGED", "pws-personal", "wrk-personal")).toBe(true);
     expect(ordinaryWorkspaceCanWrite("MANAGED", undefined, "wrk-feature-readonly")).toBe(false);
     expect(ordinaryWorkspaceCanWrite("APP_SOURCE", undefined, undefined)).toBe(false);
     expect(ordinaryWorkspaceCanWrite("EXPERIENCE", undefined, undefined)).toBe(false);
+    expect(ordinaryWorkspaceCanWrite("LOCAL_CLIENT", undefined, undefined)).toBe(false);
+  });
+
+  it("accepts only a bounded logical workspace id from the client deep link", () => {
+    expect(requestedLocalWorkspaceId("  wrk_local  ")).toBe("wrk_local");
+    expect(requestedLocalWorkspaceId(["wrk-local"])).toBeUndefined();
+    expect(requestedLocalWorkspaceId(" ")).toBeUndefined();
+    expect(requestedLocalWorkspaceId("/Users/test/project")).toBeUndefined();
+    expect(requestedLocalWorkspaceId("x".repeat(256))).toBeUndefined();
+    expect(agentWorkbenchSource).toContain("route.query.localWorkspaceId");
+    expect(agentWorkbenchSource).toContain('kind: "LOCAL_CLIENT"');
+    expect(agentWorkbenchSource).toContain('title: "已打开本地工作区"');
+    expect(agentWorkbenchSource).toContain("if (!selectedGitPublishEnabled.value)");
   });
 
   it("restores personal worktree identity only from an exact runtime workspace match", () => {
@@ -137,6 +160,7 @@ describe("app source workspace state", () => {
     expect(physicalPathResolutionWorkspaceId("MANAGED", "wrk-managed", { ...ordinary, agent: true })).toBeUndefined();
     expect(physicalPathResolutionWorkspaceId("APP_SOURCE", "wrk-source", ordinary)).toBeUndefined();
     expect(physicalPathResolutionWorkspaceId("EXPERIENCE", "wrk-experience", ordinary)).toBeUndefined();
+    expect(physicalPathResolutionWorkspaceId("LOCAL_CLIENT", "wrk-local", ordinary)).toBeUndefined();
   });
 
   it("double-gates Diff saves by workspace kind, file scope, and managed roles", () => {

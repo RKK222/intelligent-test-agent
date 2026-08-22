@@ -330,7 +330,7 @@ function refreshAgents() {
 }
 
 function refreshChanges() {
-  if (props.workspaceKind === "APP_SOURCE") return;
+  if (props.workspaceKind === "APP_SOURCE" || props.workspaceKind === "LOCAL_CLIENT") return;
   gitChangesPanelRef.value?.refreshChanges();
 }
 
@@ -353,7 +353,9 @@ watch(tab, (nextTab) => {
 });
 
 watch(() => props.workspaceKind, (kind) => {
-  if (kind === "APP_SOURCE" && tab.value === "changes") tab.value = "explorer";
+  if ((kind === "APP_SOURCE" || kind === "LOCAL_CLIENT") && tab.value === "changes") {
+    tab.value = "explorer";
+  }
 });
 
 onUnmounted(stopDiffAutoRefresh);
@@ -413,7 +415,7 @@ defineExpose({
         <Search class="h-4 w-4 figma-fe-tab-icon--search" :stroke-width="1.5" />
       </button>
       <button
-        v-if="workspaceKind !== 'APP_SOURCE'"
+        v-if="workspaceKind !== 'APP_SOURCE' && workspaceKind !== 'LOCAL_CLIENT'"
         type="button"
         :class="['ta-icon-tab', tab === 'changes' && 'is-active']"
         title="变更"
@@ -444,7 +446,7 @@ defineExpose({
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <GitChangesPanel
-        v-if="workspaceKind !== 'APP_SOURCE'"
+        v-if="workspaceKind !== 'APP_SOURCE' && workspaceKind !== 'LOCAL_CLIENT'"
         v-show="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"

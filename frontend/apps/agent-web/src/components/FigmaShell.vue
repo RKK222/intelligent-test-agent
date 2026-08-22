@@ -246,7 +246,7 @@ function closeVersionMenu() {
 }
 
 function toggleWorkspaceMenu() {
-  if (props.workspaceKind === "EXPERIENCE") return;
+  if (props.workspaceKind === "EXPERIENCE" || props.workspaceKind === "LOCAL_CLIENT") return;
   const opening = !workspaceMenuOpen.value;
   workspaceMenuOpen.value = opening;
   appMenuOpen.value = false;
@@ -336,6 +336,7 @@ const headerWorkspaceVersion = computed(() => {
 });
 const headerWorkspaceLabel = computed(() => {
   if (props.workspaceKind === "EXPERIENCE") return "体验工作区";
+  if (props.workspaceKind === "LOCAL_CLIENT") return props.workspaceName ?? "本地工作区";
   if (props.workspaceKind === "APP_SOURCE") {
     return selectedAppSourceRepository.value?.name ?? props.workspaceName ?? "应用代码库";
   }
@@ -343,6 +344,7 @@ const headerWorkspaceLabel = computed(() => {
 });
 const headerVersionLabel = computed(() => {
   if (props.workspaceKind === "EXPERIENCE") return "共享目录";
+  if (props.workspaceKind === "LOCAL_CLIENT") return "本地目录";
   if (props.workspaceKind === "APP_SOURCE") return "源码快照";
   return headerWorkspaceVersion.value?.version
     || (props.loadingAppVersions && !headerWorkspaceTemplate.value?.versions ? "加载中…" : "请选择");
@@ -2246,7 +2248,7 @@ function submitJoinApp() {
             aria-haspopup="listbox"
             :aria-expanded="workspaceMenuOpen"
             :aria-label="`工作空间：${headerWorkspaceLabel}`"
-            :disabled="workspaceKind === 'EXPERIENCE'"
+            :disabled="workspaceKind === 'EXPERIENCE' || workspaceKind === 'LOCAL_CLIENT'"
             @click="toggleWorkspaceMenu"
             @blur="onWorkspaceMenuBlur"
           >
@@ -2258,7 +2260,7 @@ function submitJoinApp() {
             />
             <FlaskConical v-else class="figma-context-trigger-type-icon figma-context-icon--workspace" aria-hidden="true" />
             <span class="figma-context-menu-value">{{ headerWorkspaceLabel }}</span>
-            <ChevronDown v-if="workspaceKind !== 'EXPERIENCE'" class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
+            <ChevronDown v-if="workspaceKind !== 'EXPERIENCE' && workspaceKind !== 'LOCAL_CLIENT'" class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
           </button>
           <ul
             v-if="workspaceMenuOpen"

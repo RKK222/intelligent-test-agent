@@ -9,6 +9,8 @@ import java.awt.Window;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -35,6 +37,25 @@ final class LocalClientDesktopActions {
             return;
         }
         openWithPlatformCommand(uri.toString());
+    }
+
+    /** 客户端工作区只通过不可猜测的 Workspace ID 深链，绝对路径不得进入浏览器地址栏。 */
+    static URI workspaceWebUri(URI webBaseUri, String workspaceId) throws IOException {
+        if (webBaseUri == null
+                || webBaseUri.getRawAuthority() == null
+                || !("https".equalsIgnoreCase(webBaseUri.getScheme())
+                || "http".equalsIgnoreCase(webBaseUri.getScheme()))) {
+            throw new IOException("网页地址无效");
+        }
+        if (workspaceId == null
+                || workspaceId.isBlank()
+                || workspaceId.length() > 255
+                || !workspaceId.matches("wrk_[A-Za-z0-9_-]+")) {
+            throw new IOException("工作区标识无效");
+        }
+        String encodedWorkspaceId = URLEncoder.encode(workspaceId.trim(), StandardCharsets.UTF_8);
+        return URI.create(webBaseUri.getScheme() + "://" + webBaseUri.getRawAuthority()
+                + "/workbench?localWorkspaceId=" + encodedWorkspaceId);
     }
 
     static void openDirectory(Path directory) throws IOException {

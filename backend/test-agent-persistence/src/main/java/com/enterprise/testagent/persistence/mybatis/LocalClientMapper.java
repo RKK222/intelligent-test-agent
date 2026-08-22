@@ -39,7 +39,16 @@ public interface LocalClientMapper {
 
     LocalClientWorkspaceRow findWorkspaceById(@Param("workspaceId") String workspaceId);
 
+    LocalClientWorkspaceRow findWorkspaceByOwnerClientAndRootDigest(
+            @Param("userId") String userId,
+            @Param("clientInstanceId") String clientInstanceId,
+            @Param("rootDigest") String rootDigest);
+
     List<LocalClientWorkspaceRow> findWorkspacesByClientInstanceId(
+            @Param("clientInstanceId") String clientInstanceId);
+
+    String lockWorkspaceRegistration(
+            @Param("userId") String userId,
             @Param("clientInstanceId") String clientInstanceId);
 
     int upsertWorkspace(LocalClientWorkspaceRow row);

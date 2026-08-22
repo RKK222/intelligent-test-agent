@@ -25,10 +25,27 @@ public class MyBatisLocalClientWorkspaceRepository implements LocalClientWorkspa
     }
 
     @Override
+    public Optional<LocalClientWorkspaceBinding> findByOwnerClientAndRootDigest(
+            UserId userId,
+            LocalClientInstanceId clientInstanceId,
+            String rootDigest) {
+        return Optional.ofNullable(mapper.findWorkspaceByOwnerClientAndRootDigest(
+                        userId.value(), clientInstanceId.value(), rootDigest))
+                .map(this::toDomain);
+    }
+
+    @Override
     public List<LocalClientWorkspaceBinding> findByClientInstanceId(LocalClientInstanceId clientInstanceId) {
         return mapper.findWorkspacesByClientInstanceId(clientInstanceId.value()).stream()
                 .map(this::toDomain)
                 .toList();
+    }
+
+    @Override
+    public void lockRegistration(UserId userId, LocalClientInstanceId clientInstanceId) {
+        if (mapper.lockWorkspaceRegistration(userId.value(), clientInstanceId.value()) == null) {
+            throw new IllegalStateException("local client instance disappeared before workspace registration");
+        }
     }
 
     @Override

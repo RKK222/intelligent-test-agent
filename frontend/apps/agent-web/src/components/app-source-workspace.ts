@@ -1,7 +1,16 @@
 import type { AppSourceOpenResult, AppSourcePurpose, PersonalWorkspace, Workspace } from "@test-agent/shared-types";
 import { BackendApiError } from "@test-agent/backend-api";
 
-export type SelectedWorkspaceKind = "MANAGED" | "APP_SOURCE" | "EXPERIENCE";
+export type SelectedWorkspaceKind = "MANAGED" | "APP_SOURCE" | "EXPERIENCE" | "LOCAL_CLIENT";
+
+/** 客户端深链只接收逻辑 Workspace ID；本机绝对路径始终留在客户端文件 RPC 边界内。 */
+export function requestedLocalWorkspaceId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const workspaceId = value.trim();
+  return workspaceId.length <= 255 && /^wrk_[A-Za-z0-9_-]+$/.test(workspaceId)
+    ? workspaceId
+    : undefined;
+}
 
 export type PersonalWorkspaceRuntimeContext = {
   personalWorkspaceId: string;
@@ -82,7 +91,7 @@ export function sourceContextFromOpen(result: AppSourceOpenResult): AppSourceWor
 
 /** 源码快照仍是普通可写 Workspace，但不具备任何 Git 发布或应用 Agent 发布能力。 */
 export function appSourceWorkspaceCapabilities(kind: SelectedWorkspaceKind) {
-  const isolatedMode = kind === "APP_SOURCE" || kind === "EXPERIENCE";
+  const isolatedMode = kind === "APP_SOURCE" || kind === "EXPERIENCE" || kind === "LOCAL_CLIENT";
   return {
     canWriteWorkspaceFiles: true,
     canUseSessionsAndRuns: true,
@@ -101,7 +110,12 @@ export function ordinaryWorkspaceCanWrite(
   personalWorkspaceId?: string,
   workspaceId?: string
 ) {
-  return Boolean(workspaceId && (kind === "APP_SOURCE" || kind === "EXPERIENCE" || personalWorkspaceId));
+  return Boolean(workspaceId && (
+    kind === "APP_SOURCE"
+    || kind === "EXPERIENCE"
+    || kind === "LOCAL_CLIENT"
+    || personalWorkspaceId
+  ));
 }
 
 export type DiffSaveCapability = {

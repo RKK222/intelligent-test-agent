@@ -12,7 +12,11 @@ Java 21 可执行客户端仅交付给麒麟 ARM64/aarch64 + glibc 的登录用�
 注册本地工作区时，用户直接从托盘点击“选择并注册工作区”：macOS 使用原生 `FileDialog`，其它有图形桌面
 的系统使用 `JFileChooser`，目录名作为默认工作区名称。客户端通过当前已认证 WSS 发送
 `WORKSPACE_REGISTER`，后台再复用既有根目录校验、注册和事务持久化服务；成功或失败均回到托盘通知，不依赖
-浏览器登录态，也不会开放新的本地 HTTP 端口。网页设置页只保留 `directory.list` 逐层浏览与手工注册兜底。
+浏览器登录态，也不会开放新的本地 HTTP 端口。同一客户端重复选择同一真实目录时复用既有 Workspace 并恢复
+客户端根映射，不会重复插入绑定。注册成功后客户端自动打开 `/workbench?localWorkspaceId=<workspaceId>`；该深链
+只携带逻辑 ID，不包含本机绝对路径，网页按当前登录用户权限取回工作区并通过文件 WebSocket 展示目录。托盘后续
+点击“打开网页”会继续打开本次进程最近注册的工作区；尚未注册时才打开平台首页。网页设置页只保留
+`directory.list` 逐层浏览与手工注册兜底。
 
 客户端自行把日志滚动写入用户 state 目录下的 `logs/client.log`，不依赖 `journalctl`；麒麟上的 journal
 仍可作为 systemd 服务级补充诊断。日志导出只包含最多 20 个 `client*.log[.gz]`，每个文件最多取末尾

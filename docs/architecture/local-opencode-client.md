@@ -90,7 +90,13 @@ HTTP 代理。
 和 generation，异步调用既有 `LocalWorkspaceApplicationService`；该服务仍通过 `FILE_REQUEST` 完成真实路径、
 权限、符号链接和文件系统身份校验与根注册，再事务性持久化。WSS 入站处理必须先释放当前 `concatMap`，避免等待
 根校验时阻塞同一连接的 `FILE_RESPONSE`。网页仅保留 `directory.list` 逐层浏览和 HTTP 注册兜底，单击目录表示
-选中、双击才进入下一级。
+选中、双击才进入下一级。同一用户、客户端实例和 root digest 的注册先锁定客户端实例行再查重；命中时复用既有
+Workspace ID，并重新下发 `workspace.registerRoot` 恢复客户端状态，不再创建可能触发唯一约束的临时 Workspace。
+
+客户端收到注册成功帧后自动打开 `/workbench?localWorkspaceId=<workspaceId>`，托盘“打开网页”在本次进程已有最近
+注册结果时使用同一深链。URI 不携带本机绝对路径；前端通过带对象级归属校验的 Workspace API 解析逻辑 ID，切换为
+`LOCAL_CLIENT` 工作区语义后仍使用既有 `file-ws-route → ticket → /file/ws` 加载文件树，并关闭 Git、版本和物理路径
+复制入口。登录页的受控 `redirect` 会保留该同源深链查询参数。
 
 ## Session、Run 与夜间任务
 

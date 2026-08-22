@@ -57,6 +57,8 @@ const props = defineProps<{
   saveBlockedReason?: string;
   /** 当前应用名（用于菜单首行提示与按钮文案） */
   appName?: string;
+  /** 非应用工作区的显示名称，例如客户端本地目录。 */
+  workspaceName?: string;
   /** 归属当前应用的工作空间模板列表；为空则不展示两级菜单 */
   templates?: AppWorkspaceTemplate[];
   /** 当前选中的版本 ID；用于标记菜单项高亮 */
@@ -369,6 +371,7 @@ const hoveredTemplate = computed<AppWorkspaceTemplate | null>(() => {
 
 const triggerLabel = computed(() => {
   if (props.workspaceKind === "EXPERIENCE") return "体验工作区";
+  if (props.workspaceKind === "LOCAL_CLIENT") return props.workspaceName ?? "本地工作区";
   if (selectedVersion.value && selectedTemplate.value) {
     return `${selectedTemplate.value.workspaceName} / ${selectedVersion.value.version}`;
   }

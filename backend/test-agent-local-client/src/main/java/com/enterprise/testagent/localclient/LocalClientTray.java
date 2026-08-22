@@ -55,6 +55,7 @@ final class LocalClientTray implements AutoCloseable {
     private final ExecutorService actions;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicReference<String> lastUiKey = new AtomicReference<>();
+    private final AtomicReference<LocalClientPayloads.WorkspaceRegistered> latestWorkspace = new AtomicReference<>();
 
     private LocalClientTray(
             LocalClientConfiguration configuration,
@@ -153,8 +154,12 @@ final class LocalClientTray implements AutoCloseable {
             MenuItem downloadLogs,
             MenuItem progress,
             MenuItem exit) {
-        openWeb.addActionListener(event -> runAction("open_web", () ->
-                LocalClientDesktopActions.openWeb(configuration.webBaseUri()), null));
+        openWeb.addActionListener(event -> runAction("open_web", () -> {
+            LocalClientPayloads.WorkspaceRegistered workspace = latestWorkspace.get();
+            LocalClientDesktopActions.openWeb(workspace == null
+                    ? configuration.webBaseUri()
+                    : LocalClientDesktopActions.workspaceWebUri(configuration.webBaseUri(), workspace.workspaceId()));
+        }, null));
         registerWorkspace.addActionListener(event -> runAction(
                 "register_workspace", this::chooseAndRegisterWorkspace, null));
         reconnect.addActionListener(event -> {
@@ -218,10 +223,23 @@ final class LocalClientTray implements AutoCloseable {
             LocalClientPayloads.WorkspaceRegistered workspace = connection.registerWorkspace(
                             workspaceName(selected), selected.toString())
                     .get(50, TimeUnit.SECONDS);
+            latestWorkspace.set(workspace);
             displayMessage(
                     "工作区注册成功",
                     workspace.name(),
                     TrayIcon.MessageType.INFO);
+            try {
+                LocalClientDesktopActions.openWeb(LocalClientDesktopActions.workspaceWebUri(
+                        configuration.webBaseUri(), workspace.workspaceId()));
+            } catch (IOException exception) {
+                // 注册事实已经提交成功；浏览器打开失败只提示用户手动点击菜单，不把成功操作误报为失败。
+                LOGGER.warn("local_client_workspace_web_open_failed reason={}",
+                        exception.getClass().getSimpleName());
+                displayMessage(
+                        "工作区已注册",
+                        "网页未能自动打开，请点击“打开网页”重试",
+                        TrayIcon.MessageType.WARNING);
+            }
         } catch (ExecutionException exception) {
             Throwable cause = exception.getCause();
             if (cause instanceof Exception resolved) {

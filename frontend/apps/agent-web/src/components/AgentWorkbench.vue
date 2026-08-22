@@ -144,6 +144,7 @@ import {
   ordinaryWorkspaceCanWrite,
   personalWorkspaceRuntimeContext,
   physicalPathResolutionWorkspaceId,
+  requestedLocalWorkspaceId,
   sourceContextFromOpen,
   type AppSourceProgressAuthority,
   type AppSourceIntentAuthority,
@@ -1605,7 +1606,11 @@ const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
 // 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
 const selectedWorkspace = computed(() => {
   // 分享模式的 session/workspace 已由后端精确授权，不依赖被分享人的应用成员关系。
-  if (shareMode.value || selectedWorkspaceKind.value === "EXPERIENCE") {
+  if (
+    shareMode.value
+    || selectedWorkspaceKind.value === "EXPERIENCE"
+    || selectedWorkspaceKind.value === "LOCAL_CLIENT"
+  ) {
     const fromList = workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
     if (fromList) return fromList;
     const snapshot = selectedWorkspaceSnapshot.value;
@@ -1629,6 +1634,57 @@ const selectedWorkspace = computed(() => {
   }
   return undefined;
 });
+
+let localWorkspaceRouteSequence = 0;
+
+async function clearLocalWorkspaceRouteQuery() {
+  const { localWorkspaceId: _ignored, ...query } = route.query;
+  await router.replace({ name: "workbench", query });
+}
+
+/** 客户端注册成功后打开此深链；网页按授权接口取回 Workspace，再走现有文件 WebSocket 加载目录。 */
+async function activateLocalWorkspaceFromRoute(workspaceId: string, sequence: number) {
+  try {
+    const workspace = workspaces.value.find((item) => item.workspaceId === workspaceId)
+      ?? await api.getWorkspace(workspaceId);
+    if (sequence !== localWorkspaceRouteSequence) return;
+    if (workspace.runtimeKind !== "LOCAL_CLIENT") {
+      throw new Error("目标不是本地客户端工作区");
+    }
+    appSelectionSeq += 1;
+    selectingAppId = undefined;
+    cancelExperienceWorkspaceFlow("WORKSPACE_SWITCHED");
+    teardownAppSourceInteractions();
+    selectedAppId.value = undefined;
+    appSourceContext.value = null;
+    const switched = await switchWorkspace(workspace, {
+      kind: "LOCAL_CLIENT",
+      isCurrent: () => sequence === localWorkspaceRouteSequence
+    });
+    if (!switched || sequence !== localWorkspaceRouteSequence) return;
+    feedback.value = {
+      kind: "success",
+      title: "已打开本地工作区",
+      description: workspace.name
+    };
+    await clearLocalWorkspaceRouteQuery();
+  } catch (error) {
+    if (sequence !== localWorkspaceRouteSequence) return;
+    feedback.value = errorFeedback("打开本地工作区失败", error);
+    await clearLocalWorkspaceRouteQuery();
+  }
+}
+
+watch(
+  [() => route.name, () => route.query.localWorkspaceId, () => authStore.token],
+  ([routeName, rawWorkspaceId, token]) => {
+    const workspaceId = requestedLocalWorkspaceId(rawWorkspaceId);
+    const sequence = ++localWorkspaceRouteSequence;
+    if (shareMode.value || routeName !== "workbench" || !token || !workspaceId) return;
+    void activateLocalWorkspaceFromRoute(workspaceId, sequence);
+  },
+  { immediate: true }
+);
 const selectedWorkspacePhysicalRootPath = computed(() => workspacePhysicalRootPath(selectedWorkspace.value));
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const selectedWorkspaceIsLocal = computed(() => selectedWorkspace.value?.runtimeKind === "LOCAL_CLIENT");
@@ -3736,6 +3792,7 @@ function trySelectDefaultApp() {
   if (
     selectedAppId.value
     || selectedWorkspaceKind.value === "EXPERIENCE"
+    || selectedWorkspaceKind.value === "LOCAL_CLIENT"
     || experienceJourneyActive.value
   ) return;
   const apps = applicationCatalog.value;
@@ -3807,7 +3864,7 @@ watch(selectedWorkspaceIdRef, (id, previous) => {
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
     void loadDirectory("", id);
-    if (selectedWorkspaceKind.value !== "APP_SOURCE") void refreshWorkspaceGitDiff();
+    if (selectedGitPublishEnabled.value) void refreshWorkspaceGitDiff();
   }
   if (selectedWorkspaceIsLocal.value && bottomMode.value === "terminal") {
     bottomMode.value = "run";
@@ -7240,6 +7297,7 @@ async function handleSelectApp(
   invalidateConversationInteraction();
   const leavingAppSource = selectedWorkspaceKind.value === "APP_SOURCE";
   const leavingExperience = selectedWorkspaceKind.value === "EXPERIENCE";
+  const leavingLocalClient = selectedWorkspaceKind.value === "LOCAL_CLIENT";
   const selectDefaultVersionWhenMissing = options.selectDefaultVersionWhenMissing === true || leavingExperience;
   if (leavingExperience && selectedWorkspaceId.value) {
     api.closeWorkspaceFileSocket(selectedWorkspaceId.value);
@@ -7249,7 +7307,7 @@ async function handleSelectApp(
   if (leavingAppSource) {
     void api.clearRecentAppSource().catch(() => undefined);
   }
-  if (leavingAppSource || leavingExperience) {
+  if (leavingAppSource || leavingExperience || leavingLocalClient) {
     selectedWorkspaceKind.value = "MANAGED";
     appSourceContext.value = null;
   }
@@ -11144,8 +11202,8 @@ async function refreshWorkspaceGitDiff(options: {
   paths?: string[];
   files?: WorkspaceGitDiffFile[];
 } = {}) {
-  // handler 层与组件隐藏双重守卫，防止源码模式通过迟到事件或编程调用触发 Git API。
-  if (selectedWorkspaceKind.value === "APP_SOURCE") {
+  // handler 层与组件隐藏双重守卫，防止无 Git 能力的源码/本地模式通过迟到事件触发 Git API。
+  if (!selectedGitPublishEnabled.value) {
     vcsDiffFiles.value = [];
     return;
   }
@@ -12151,7 +12209,7 @@ async function handleLogout() {
           :creating-version="creatingVersion"
           :pulling-personal-workspace="pullingPersonalWorkspace"
           :can-write="canWriteSelectedWorkspace"
-          :can-mutate-git="selectedWorkspaceKind !== 'APP_SOURCE' && canWriteSelectedWorkspace"
+          :can-mutate-git="selectedWorkspaceKind !== 'APP_SOURCE' && selectedWorkspaceKind !== 'LOCAL_CLIENT' && canWriteSelectedWorkspace"
           :can-undo="workspaceUndoStack.length > 0"
           :workspace-git-enabled="selectedGitPublishEnabled"
           :agent-config-enabled="selectedAgentConfigEnabled"
@@ -12319,6 +12377,7 @@ async function handleLogout() {
             :saving="saveDiffFileMutation.isPending.value"
             :readonly="!canSaveSelectedDiffFile"
             :app-name="selectedManagedApplication?.appName"
+            :workspace-name="selectedWorkspace?.name"
             :templates="appTemplatesWithVersions"
             :selected-version-id="selectedVersionId"
             :personal-workspace-branch="currentPersonalWorkspaceBranch"
@@ -12349,6 +12408,7 @@ async function handleLogout() {
           :readonly="!!activeTab?.readonly"
           :saving="saveMutation.isPending.value"
           :app-name="selectedManagedApplication?.appName"
+          :workspace-name="selectedWorkspace?.name"
           :templates="appTemplatesWithVersions"
           :selected-version-id="selectedVersionId"
           :personal-workspace-branch="currentPersonalWorkspaceBranch"

@@ -192,11 +192,27 @@
         WHERE workspace_id = #{workspaceId}
     </select>
 
+    <select id="findWorkspaceByOwnerClientAndRootDigest" resultMap="workspaceRow">
+        SELECT <include refid="workspaceColumns"/>
+        FROM local_client_workspaces
+        WHERE user_id = #{userId}
+          AND client_instance_id = #{clientInstanceId}
+          AND root_digest = #{rootDigest}
+    </select>
+
     <select id="findWorkspacesByClientInstanceId" resultMap="workspaceRow">
         SELECT <include refid="workspaceColumns"/>
         FROM local_client_workspaces
         WHERE client_instance_id = #{clientInstanceId}
         ORDER BY created_at ASC, workspace_id ASC
+    </select>
+
+    <select id="lockWorkspaceRegistration" resultType="java.lang.String">
+        SELECT client_instance_id
+        FROM local_client_instances
+        WHERE user_id = #{userId}
+          AND client_instance_id = #{clientInstanceId}
+        FOR UPDATE
     </select>
 
     <insert id="upsertWorkspace">
