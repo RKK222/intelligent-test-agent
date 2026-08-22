@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.workspace.ApplicationAutomationReferenceWorkspaceReconciliationService;
 import com.enterprise.testagent.workspace.AgentSkillHubApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
@@ -70,11 +71,19 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private final boolean allowAnyOrigin;
     private LocalClientWorkspaceFileGateway localClientFileGateway;
     private RequirementImportApplicationService requirementImportService;
+    private ApplicationAutomationReferenceWorkspaceReconciliationService automationReferenceReconciliationService;
 
     /** 需求导入为可选 setter 注入，保持既有 handler 单元测试构造器兼容。 */
     @Autowired
     void setRequirementImportService(RequirementImportApplicationService requirementImportService) {
         this.requirementImportService = requirementImportService;
+    }
+
+    /** 自动化引用对账复用 Agent 配置文件通道；直接构造的旧单元测试无需装配该可选操作。 */
+    @Autowired
+    void setAutomationReferenceReconciliationService(
+            ApplicationAutomationReferenceWorkspaceReconciliationService reconciliationService) {
+        this.automationReferenceReconciliationService = Objects.requireNonNull(reconciliationService);
     }
 
     /**
@@ -388,6 +397,8 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     agentConfigWrite(ticket, params);
                     yield null;
                 }
+                case "agent-config.automation-reference.reconcile" ->
+                        agentConfigAutomationReferenceReconcile(ticket, params, traceId);
                 case "agent-config.upload" -> {
                     agentConfigUpload(ticket, params);
                     yield null;
@@ -1046,6 +1057,28 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         }
         String worktreeId = agentConfigWorktreeId(ticket, params);
         agentConfigService.writeWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), text(params, "content"), worktreeId);
+    }
+
+    private Object agentConfigAutomationReferenceReconcile(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            String traceId) {
+        if (!SCOPE_WORKSPACE.equals(agentConfigScope(ticket, params))) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "自动化引用只能对账当前应用工作树");
+        }
+        if (agentConfigWorktreeId(ticket, params) != null) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "自动化引用不能写入独立 Agent worktree");
+        }
+        if (automationReferenceReconciliationService == null || ticketUserId(ticket) == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "自动化引用对账服务不可用");
+        }
+        Workspace workspace = workspaceService.requireWorkspaceOnCurrentServer(
+                new WorkspaceId(agentConfigWorkspaceId(ticket, params)), traceId);
+        var result = automationReferenceReconciliationService.reconcile(
+                workspace, ticketUserId(ticket), traceId);
+        return Map.of(
+                "changed", result.configurationChanged(),
+                "warnings", result.warnings());
     }
 
     private void agentConfigUpload(WorkspaceFileSocketTicket ticket, JsonNode params) {

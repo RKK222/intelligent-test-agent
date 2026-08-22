@@ -233,14 +233,16 @@ function directoryName(path: string) {
 }
 
 /** 当前工作树只由应用当前配置集合生成自动化引用；不会写入任何服务器物理路径。 */
-async function reconcileWorkspace(items = repositories.value, announce = false) {
-  const result = await reconcileAutomationReferenceWorkspace(api, props.appId, props.workspaceId, items);
+async function reconcileWorkspace(announce = false) {
+  const result = await reconcileAutomationReferenceWorkspace(api, props.workspaceId);
   if (result.changed) {
     emit("changed");
     emit("saved");
   }
   if (announce) {
-    configNotice.value = { kind: "success", message: "应用当前自动化引用已写入工作树，运行态将在空闲后重新加载" };
+    configNotice.value = result.warnings.length > 0
+      ? { kind: "info", message: result.warnings.join("；") }
+      : { kind: "success", message: "应用当前自动化引用已写入工作树，运行态将在空闲后重新加载" };
   }
 }
 
@@ -254,7 +256,6 @@ async function loadRepositories() {
     repositories.value = result;
     const repository = result.find((item) => item.repositoryId === selectedRepositoryId.value) ?? result[0] ?? null;
     if (repository) await selectRepository(repository);
-    await reconcileWorkspace(result);
   } catch (error) {
     if (props.open && token === viewToken) loadError.value = notice(error, "加载自动化代码库失败");
   } finally {
@@ -452,7 +453,7 @@ function pollOperation(token: number) {
         if (current.operation === "SYNCHRONIZE") {
           const latest = await api.listAutomationReferenceRepositories(props.appId);
           repositories.value = latest;
-          await reconcileWorkspace(latest, true);
+          await reconcileWorkspace(true);
           const selected = latest.find((item) => item.repositoryId === selectedRepositoryId.value);
           if (selected) {
             const nextDraft = configurationDraft(selected.currentConfiguration, selected);

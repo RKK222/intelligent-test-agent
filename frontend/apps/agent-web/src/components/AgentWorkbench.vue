@@ -4364,11 +4364,10 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
 }
 
 /**
- * 应用自动化引用以 JSONC 为唯一运行时事实源。重新进入工作树和新 Run 前都通过既有文件 RPC
- * 对账当前应用配置；仅在正文实际变化时登记 dispose/reload，不向 Run prompt 或消息追加内容。
+ * 应用自动化引用以 JSONC 为唯一运行时事实源。重新进入工作树时通过既有文件 RPC 调用后端权威对账器；
+ * 实际 Run 派发由后端在可见副作用前再次对账并持有代次租约，前端普通发送链路不重复写配置。
  */
 async function reconcileCurrentAutomationReferences(options: {
-  requireReloadBeforeRun?: boolean;
   quiet?: boolean;
 } = {}): Promise<boolean> {
   const appId = selectedAppId.value;
@@ -4382,7 +4381,7 @@ async function reconcileCurrentAutomationReferences(options: {
     : null;
   if (!reconciliation) {
     reconciliation = (async () => {
-      const result = await reconcileAutomationReferenceWorkspace(api, appId, workspaceId);
+      const result = await reconcileAutomationReferenceWorkspace(api, workspaceId);
       if (appId !== selectedAppId.value
         || workspaceId !== selectedWorkspaceIdRef.value
         || selectedWorkspaceKind.value !== "MANAGED") {
@@ -4403,18 +4402,8 @@ async function reconcileCurrentAutomationReferences(options: {
     }).catch(() => undefined);
   }
   const changed = await reconciliation;
-  if (!options.requireReloadBeforeRun) {
-    if (changed && !userRuntimeBusy.value) {
-      await reloadReferenceRuntimeIfIdle({ quiet: options.quiet ?? true });
-    }
-    return changed;
-  }
-  const outcome = await reloadReferenceRuntimeIfIdle({ quiet: options.quiet ?? true });
-  if (outcome === "WAITING_IDLE") {
-    throw new Error("当前用户仍有运行中的 Session，请等待旧任务结束后再启动新任务");
-  }
-  if (outcome === "FAILED") {
-    throw lastRuntimeReloadError ?? new Error("自动化引用已更新，但运行态重新加载失败");
+  if (changed && !userRuntimeBusy.value) {
+    await reloadReferenceRuntimeIfIdle({ quiet: options.quiet ?? true });
   }
   return changed;
 }
@@ -4732,7 +4721,6 @@ const startRunMutation = useMutation({
       if (!guard.workspaceId) {
         throw new Error("未选择 Workspace");
       }
-      await reconcileCurrentAutomationReferences({ requireReloadBeforeRun: true, quiet: true });
       assertConversationInteractionCurrent(guard);
       let activeSession = session.value;
       if (!activeSession) {
@@ -5240,7 +5228,6 @@ async function retryLastRun(editedPrompt: string) {
   resendStarting.value = true;
   const clientRequestId = createClientRequestId();
   try {
-    await reconcileCurrentAutomationReferences({ requireReloadBeforeRun: true, quiet: true });
     let context = await conversationRunContexts.get(currentSession.sessionId);
     let response;
     try {
@@ -6871,9 +6858,18 @@ async function resolveDefaultManagedVersionForApp(
   return version ? { template, version } : null;
 }
 
-function refreshCurrentWorkspacePanels() {
+async function refreshCurrentWorkspacePanels() {
   if (!selectedWorkspace.value) return;
-  void refreshWorkspaceView();
+  let reconciled = false;
+  try {
+    // 用户显式刷新文件树也先走服务端唯一对账器，避免只刷新组合树却仍读取旧自动化配置。
+    reconciled = await reconcileCurrentAutomationReferences({ quiet: true });
+  } catch (error) {
+    if (!(error instanceof StaleConversationInteractionError)) {
+      feedback.value = errorFeedback("自动化引用对账失败", error);
+    }
+  }
+  if (!reconciled) await refreshWorkspaceView();
   void refreshWorkspaceGitDiff();
 }
 
@@ -9773,8 +9769,6 @@ async function handleBatchTestCaseGeneration(request: BatchGenerationRequest, co
   }
 
   try {
-    // 批量立即执行和定时创建也必须先把应用当前自动化配置写入工作树，不能只覆盖普通对话入口。
-    await reconcileCurrentAutomationReferences({ requireReloadBeforeRun: true, quiet: true });
     const result = await batchTestCaseGeneration.execute(request);
     void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     if (request.executionMode === "scheduled") void refreshNightExecutionTasks();
@@ -9930,8 +9924,6 @@ async function handleScheduleNight(payload: {
 
   nightTaskSubmitting.value = true;
   try {
-    // 夜间任务固化前先对账 JSONC；后端 Run 不再补写提示词或隐藏路径。
-    await reconcileCurrentAutomationReferences({ requireReloadBeforeRun: true, quiet: true });
     const created = await api.createNightExecutionTask(request);
     nightCreateIdempotency = null;
     nightTasks.value = [created, ...nightTasks.value.filter((task) => task.taskId !== created.taskId)];

@@ -5,11 +5,12 @@
 自动化引用同步使用独立的 generation/replica 状态和 `automation-reference.sync-requested` 广播，复用 `ReferenceRepositoryReplicaTaskDispatcher` 的有界后台队列与 generation fencing。同一应用、版本库和 generation 的重复唤醒合并，不同应用或版本库互不影响；HTTP 与广播线程都不等待 Git。共享配置代次保存可编辑 `referenceAlias`、分支、目录和描述；同一应用内当前/待激活自动化别名不得与其它版本库重复，并按 OpenCode 原生引用发现边界校验。副本固定落在 `OPENCODE_REFERENCES_DIR/automation/{appDigest}/{repositoryEnglishName}/{generation}`，不进入应用资产目录，也不创建个人 worktree。
 
 - `AutomationWorkspaceReferenceCatalogService` 按用户、主工作空间、应用、版本库、配置 generation 和当前 Java 服务器解析共享只读副本，要求 JSONC 逻辑路径、目标 commit 和本机副本均可验证；展开当前代次时签发只保存哈希的标签租约，已打开标签可在管理员切换后继续读取旧代次。不可用项转为局部告警，普通工作树和其它引用继续可用。
-- `ApplicationAutomationReferenceRunLeaseService` 在 Run 可见副作用前对账工作树 JSONC 并固定本次确实 READY 的 generation；不可用单库只产生安全告警并跳过。Run 只持久化 generation 生命周期租约，绝不向消息、system prompt 或 OpenCode 上下文拼接自动化说明或路径。补偿器在 Run/标签租约均释放后退役旧 generation，并只删除本机受管共享副本。
+- `ApplicationAutomationReferenceWorkspaceReconciliationService` 是自动化 JSONC 的唯一补丁与对账入口：工作区进入/显式刷新、管理员当前页面观察到 generation READY，以及真实 Run 派发都复用它。服务端重新解析应用当前 generation 和本机精确 READY 副本，只逐字段维护托管引用与精确只读权限；写入携带最近读取内容的 SHA-256，冲突后重新读取并重算一次，第二次冲突返回 `CONFLICT`，禁止覆盖用户并发编辑。
+- `ApplicationAutomationReferenceRunLeaseService` 在 Run 可见副作用前调用上述唯一对账器，配置变化时完成运行态 reload，并固定本次确实 READY 的 generation；不可用单库只产生安全告警并跳过。Run 只持久化 generation 生命周期租约，绝不向消息、system prompt 或 OpenCode 上下文拼接自动化说明或路径。补偿器在 Run/标签租约均释放后退役旧 generation，并只删除本机受管共享副本。
 - `ApplicationAutomationReferenceService` 以不可变 generation 管理每个应用自动化版本库的一套分支、任意层级目录、共享描述和固定目标提交。每个 generation、每台服务器只维护一个共享只读仓库副本；目录只是副本内逻辑选择。在线服务器全部 READY 后才以 CAS 激活，离线节点标记 `DEFERRED` 并由 `ApplicationAutomationReferenceReconciler` 恢复后补齐；更新副本建立新提交代次，Git 指针核验只读本地状态。
 - 自动化共享副本的同步、核验和错误归因统一在引用根目录日志脱敏作用域内执行，Git 命令日志不得输出服务器物理路径；Agent/Skill 的本机快照周期对账只扫描仍启用的应用工作空间模板，已停用的旧自动化模板、版本和 worktree 只保留历史，不再被后台任务读取或投影。
 - `WorkspaceViewApplicationService` 在组合根增加虚拟“自动化代码库”，只装载当前工作树 `.opencode/opencode.jsonc` 中由平台写入且应用、版本库、generation、目录和逻辑配置路径均可重新验证的自动化条目；使用 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 定位器提供目录、文本、分片和二进制只读读取。每次操作重新授权，不接受客户端物理路径；`.git`、符号链接、越界和全部写/Git/搜索/requirements 操作固定拒绝。
-- `ApplicationAutomationReferenceRunLeaseService` 只为 Run 记录共享代次生命周期租约，不拼接 system prompt、用户消息、物理路径或其它 OpenCode 上下文；OpenCode 唯一运行时事实源仍是个人工作树 JSONC。
+- 浏览器不再读取、解析或写入自动化 JSONC；它只通过 Agent 配置文件 WebSocket 的 `agent-config.automation-reference.reconcile` 请求后端权威对账。应用资产库仍保留前端 `patchReferenceConfig` 的既有最小补丁，二者不能互相复用实现或形成第二套自动化规则。
 - 存量个人 runtime Workspace 若仍记录在应用目录而配置留在固定 `workspace/.opencode`，Agent 配置读取与组合树可兼容该受控子目录；首次引用保存会写入会话根的标准 `.opencode/opencode.jsonc`，使 OpenCode 从当前 cwd 原生加载同一份 references/permission。不会递归搜索，也不接受客户端物理路径。
 
 ## 工程定位

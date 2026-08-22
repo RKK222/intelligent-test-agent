@@ -1,30 +1,17 @@
-import { describe, expect, it } from "vitest";
-import {
-  automationReferencePatches,
-  normalizeRepositoryList
-} from "../src/components/automation-reference-config-reconciliation";
-
-const repository = {
-  repositoryId: "repo_auto",
-  currentConfiguration: {
-    generation: 2,
-    alias: "automation-auto",
-    logicalPath: "{env:OPENCODE_REFERENCES_DIR}/automation/app/auto/2/tests",
-    directoryName: "tests",
-    description: "只读自动化引用",
-    status: "READY"
-  }
-};
+import { describe, expect, it, vi } from "vitest";
+import type { BackendApiClient } from "@test-agent/backend-api";
+import { reconcileAutomationReferenceWorkspace } from "../src/components/automation-reference-config-reconciliation";
 
 describe("automation reference workspace reconciliation contract", () => {
-  it("accepts both the current array payload and the rolling-upgrade data wrapper", () => {
-    expect(normalizeRepositoryList([repository])).toEqual([repository]);
-    expect(normalizeRepositoryList({ data: [repository] })).toEqual([repository]);
-    expect(automationReferencePatches("app_demo", { data: [repository] })).toHaveLength(1);
-  });
+  it("delegates the whole operation to the backend file RPC without reading JSONC in the browser", async () => {
+    const reconcileWorkspaceAutomationReferences = vi.fn().mockResolvedValue({
+      changed: true,
+      warnings: ["自动化库 B 尚未就绪"]
+    });
+    const api = { reconcileWorkspaceAutomationReferences } as unknown as BackendApiClient;
 
-  it("reports an invalid payload instead of crashing on flatMap", () => {
-    expect(() => normalizeRepositoryList({ repositories: [] }))
-      .toThrow("自动化代码库列表响应格式无效");
+    await expect(reconcileAutomationReferenceWorkspace(api, "wrk_personal"))
+      .resolves.toEqual({ changed: true, warnings: ["自动化库 B 尚未就绪"] });
+    expect(reconcileWorkspaceAutomationReferences).toHaveBeenCalledWith("wrk_personal");
   });
 });

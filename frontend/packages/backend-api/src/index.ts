@@ -480,6 +480,12 @@ export type AutomationReferenceRepositoryStatus = {
   message?: string | null;
 };
 
+/** 后端单一 JSONC 对账器的工作树结果；警告只描述本次未就绪的局部引用。 */
+export type AutomationReferenceWorkspaceReconciliation = {
+  changed: boolean;
+  warnings: string[];
+};
+
 export type ExtraRequestInit = RequestInit & { timeoutMs?: number };
 
 type RequestFn = <T>(path: string, init?: ExtraRequestInit) => Promise<T>;
@@ -2007,6 +2013,14 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         "agent-config.write",
         { path, content },
         { workspaceId, worktreeId }
+      ),
+    reconcileWorkspaceAutomationReferences: (workspaceId: string) =>
+      agentConfigFileRpc<AutomationReferenceWorkspaceReconciliation>(
+        "WORKSPACE",
+        "agent-config.automation-reference.reconcile",
+        {},
+        { workspaceId },
+        true
       ),
     uploadWorkspaceAgentFile: async (
       workspaceId: string,

@@ -1076,6 +1076,26 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         fileService.writeContent(agentRoot.toString(), relativePath, content);
     }
 
+    /**
+     * 自动化引用对账使用条件写避免覆盖用户刚保存的 JSONC；普通配置保存和本方法在文件内核共享同一路径锁。
+     */
+    public boolean writeWorkspaceAgentFileIfUnchanged(
+            String workspaceId,
+            String relativePath,
+            boolean expectedExists,
+            String expectedSha256,
+            String content,
+            String worktreeId) {
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        ensureDirectory(agentRoot);
+        return fileService.writeContentIfUnchanged(
+                agentRoot.toString(),
+                relativePath,
+                expectedExists,
+                expectedSha256,
+                content);
+    }
+
     /** 应用配置上传固定在当前个人 worktree 的 `.opencode/**` 命名空间内。 */
     public void uploadWorkspaceAgentFile(String workspaceId, String relativePath, String contentBase64, String worktreeId) {
         requireWorkspaceAgentUploadPath(relativePath);

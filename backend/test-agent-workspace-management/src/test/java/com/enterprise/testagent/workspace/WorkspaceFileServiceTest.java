@@ -8,7 +8,12 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.HexFormat;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -34,12 +39,58 @@ class WorkspaceFileServiceTest {
     }
 
     @Test
+    void conditionalWriteRejectsAStaleContentHash() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve("opencode.jsonc"), "old");
+
+        assertThat(service.writeContentIfUnchanged(
+                root.toString(), "opencode.jsonc", true, sha256("old"), "first")).isTrue();
+        assertThat(service.writeContentIfUnchanged(
+                root.toString(), "opencode.jsonc", true, sha256("old"), "stale")).isFalse();
+
+        assertThat(root.resolve("opencode.jsonc")).hasContent("first");
+    }
+
+    @Test
+    void concurrentConditionalWritesAllowExactlyOneWinner() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve("opencode.jsonc"), "base");
+        String expectedHash = sha256("base");
+        CyclicBarrier start = new CyclicBarrier(2);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> {
+                start.await();
+                return service.writeContentIfUnchanged(
+                        root.toString(), "opencode.jsonc", true, expectedHash, "first");
+            });
+            var second = executor.submit(() -> {
+                start.await();
+                return service.writeContentIfUnchanged(
+                        root.toString(), "opencode.jsonc", true, expectedHash, "second");
+            });
+
+            assertThat(java.util.List.of(first.get(), second.get()))
+                    .containsExactlyInAnyOrder(true, false);
+            assertThat(Files.readString(root.resolve("opencode.jsonc")))
+                    .isIn("first", "second");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void serviceRejectsPathTraversalOutsideWorkspaceRoot() {
         WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
 
         assertThatThrownBy(() -> service.readContent(root.toString(), "../secret.txt"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    private String sha256(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(value.getBytes(StandardCharsets.UTF_8)));
     }
 
     @Test

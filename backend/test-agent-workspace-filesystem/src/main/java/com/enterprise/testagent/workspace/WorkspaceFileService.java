@@ -4,6 +4,8 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.InputStream;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
@@ -16,11 +18,13 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -43,6 +47,11 @@ public class WorkspaceFileService {
     private static final int DEFAULT_UPLOAD_CHUNK_BYTES = 256 * 1024;
     private static final int MAX_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
     private static final Duration STALE_UPLOAD_AGE = Duration.ofHours(24);
+    private static final int WRITE_LOCK_STRIPES = 256;
+    private static final Object[] WRITE_LOCK_MONITORS = createWriteLockMonitors();
+    private static final Path WRITE_LOCK_DIRECTORY = Path.of(
+            System.getProperty("java.io.tmpdir"),
+            "test-agent-workspace-file-locks");
 
     private final long maxPreviewBytes;
     private final int uploadChunkBytes;
@@ -247,21 +256,129 @@ public class WorkspaceFileService {
     public void writeContent(String rootPath, String relativePath, String content) {
         Path target = resolveInsideRoot(rootPath, relativePath);
         byte[] bytes = content == null ? new byte[0] : content.getBytes(StandardCharsets.UTF_8);
+        requireEditableSize(relativePath, bytes);
+        withWriteLock(target, relativePath, () -> {
+            Path parent = target.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(target, content == null ? "" : content, StandardCharsets.UTF_8);
+            return null;
+        });
+    }
+
+    /**
+     * 只在文件存在性和 SHA-256 仍与调用方最近一次读取一致时写入。
+     *
+     * <p>普通写入和条件写入共用同一路径锁，避免浏览器保存与后台 JSONC 对账在同一 Java 或同服务器
+     * 多 Java 进程间互相覆盖。返回 {@code false} 表示调用方应重新读取、重新计算补丁后再决定是否重试。
+     */
+    public boolean writeContentIfUnchanged(
+            String rootPath,
+            String relativePath,
+            boolean expectedExists,
+            String expectedSha256,
+            String content) {
+        Path target = resolveInsideRoot(rootPath, relativePath);
+        byte[] bytes = content == null ? new byte[0] : content.getBytes(StandardCharsets.UTF_8);
+        requireEditableSize(relativePath, bytes);
+        if (expectedExists && (expectedSha256 == null || !expectedSha256.matches("^[0-9a-fA-F]{64}$"))) {
+            throw new IllegalArgumentException("expectedSha256 must be a SHA-256 value when the file is expected to exist");
+        }
+        return withWriteLock(target, relativePath, () -> {
+            boolean exists = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
+            if (exists != expectedExists) {
+                return false;
+            }
+            if (exists) {
+                if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new PlatformException(
+                            ErrorCode.FORBIDDEN,
+                            "目标路径不是可写普通文件",
+                            Map.of("path", safePath(relativePath)));
+                }
+                String actualSha256 = sha256(target);
+                if (!actualSha256.equalsIgnoreCase(expectedSha256)) {
+                    return false;
+                }
+            }
+            Path parent = target.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(target, content == null ? "" : content, StandardCharsets.UTF_8);
+            return true;
+        });
+    }
+
+    private void requireEditableSize(String relativePath, byte[] bytes) {
         if (bytes.length > maxPreviewBytes) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
                     "文件超过可编辑大小限制",
                     Map.of("path", safePath(relativePath), "maxPreviewBytes", maxPreviewBytes));
         }
-        try {
-            Path parent = target.getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
+    }
+
+    private <T> T withWriteLock(Path target, String relativePath, LockedWrite<T> operation) {
+        String lockKey = sha256(target.toAbsolutePath().normalize().toString().getBytes(StandardCharsets.UTF_8));
+        Object monitor = WRITE_LOCK_MONITORS[Math.floorMod(lockKey.hashCode(), WRITE_LOCK_MONITORS.length)];
+        synchronized (monitor) {
+            try {
+                Files.createDirectories(WRITE_LOCK_DIRECTORY);
+                Path lockPath = WRITE_LOCK_DIRECTORY.resolve(lockKey + ".lock");
+                try (FileChannel channel = FileChannel.open(
+                                lockPath,
+                                StandardOpenOption.CREATE,
+                                StandardOpenOption.WRITE);
+                        var ignored = channel.lock()) {
+                    return operation.execute();
+                }
+            } catch (PlatformException exception) {
+                throw exception;
+            } catch (Exception exception) {
+                throw new PlatformException(
+                        ErrorCode.INTERNAL_ERROR,
+                        "写入文件失败",
+                        Map.of("path", safePath(relativePath)),
+                        exception);
             }
-            Files.writeString(target, content == null ? "" : content, StandardCharsets.UTF_8);
-        } catch (Exception exception) {
-            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "写入文件失败", Map.of("path", safePath(relativePath)), exception);
         }
+    }
+
+    private String sha256(Path path) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = Files.newInputStream(path)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(buffer, 0, read);
+                }
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static String sha256(byte[] value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+        } catch (Exception exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private static Object[] createWriteLockMonitors() {
+        Object[] monitors = new Object[WRITE_LOCK_STRIPES];
+        for (int index = 0; index < monitors.length; index++) {
+            monitors[index] = new Object();
+        }
+        return monitors;
+    }
+
+    @FunctionalInterface
+    private interface LockedWrite<T> {
+        T execute() throws Exception;
     }
 
     /**

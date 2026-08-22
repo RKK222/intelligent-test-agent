@@ -79,6 +79,45 @@ class AutomationReferenceWorkspaceJsoncReconcilerTest {
     }
 
     @Test
+    void updatesManagedFieldsWithoutReplacingUnknownFieldsOrInnerComments() {
+        String source = """
+                {
+                  "references": {
+                    "automation-repo": {
+                      // 用户自定义的未来字段必须保留
+                      "future-option": { "enabled": true },
+                      "path": "/old",
+                      "merge": true,
+                      "sdd-folder-name": "old",
+                      "description": "旧描述",
+                      "testagent-reference-kind": "automation",
+                      "testagent-automation-app-id": "app_demo",
+                      "testagent-automation-repository-id": "repo_auto",
+                      "testagent-automation-generation": 1,
+                      "testagent-automation-workspace-id": "awp_legacy",
+                      "testagent-automation-version-id": "awv_legacy"
+                    }
+                  },
+                  "permission": { "external_directory": { "/old/*": "allow" } }
+                }
+                """;
+        String nextPath = "{env:OPENCODE_REFERENCES_DIR}/automation/app/repo/2/tests";
+
+        String output = reconciler.reconcile(source, "app_demo", List.of(
+                new AutomationReferenceWorkspaceJsoncReconciler.Patch(
+                        "app_demo", "repo_auto", 2L, "automation-repo",
+                        nextPath, "tests", "新描述")));
+
+        assertThat(output)
+                .contains("// 用户自定义的未来字段必须保留")
+                .contains("\"future-option\": { \"enabled\": true }")
+                .contains("\"path\": " + new ObjectMapper().valueToTree(nextPath))
+                .contains("\"merge\": false")
+                .contains("\"testagent-automation-generation\": 2")
+                .doesNotContain("testagent-automation-workspace-id", "testagent-automation-version-id", "/old/*");
+    }
+
+    @Test
     void sameInputIsIdempotent() {
         var patch = new AutomationReferenceWorkspaceJsoncReconciler.Patch(
                 "app_demo", "repo_auto", 3L, "automation-repo",

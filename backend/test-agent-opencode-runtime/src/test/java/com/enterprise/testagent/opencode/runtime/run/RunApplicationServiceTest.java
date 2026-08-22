@@ -571,6 +571,14 @@ class RunApplicationServiceTest {
                 assignmentService);
         ScheduledRunLifecycleObserver observer = org.mockito.Mockito.mock(ScheduledRunLifecycleObserver.class);
         service.setScheduledRunLifecycleObservers(List.of(observer));
+        AutomationReferenceRunLeaseLifecycle automationLifecycle =
+                org.mockito.Mockito.mock(AutomationReferenceRunLeaseLifecycle.class);
+        org.mockito.Mockito.when(automationLifecycle.prepare(
+                        org.mockito.ArgumentMatchers.any(Workspace.class),
+                        org.mockito.ArgumentMatchers.eq(userId),
+                        org.mockito.ArgumentMatchers.eq("trace_1234567890abcdef")))
+                .thenReturn(AutomationReferenceRunPreparation.empty());
+        service.setAutomationReferenceRunLeaseLifecycle(automationLifecycle);
         ScheduledRunMetadata metadata = new ScheduledRunMetadata(
                 "net_night_1234567890abcdef", "nda_night_1234567890abcdef");
 
@@ -590,6 +598,17 @@ class RunApplicationServiceTest {
             assertThat(message.senderUserId()).isEqualTo(userId);
         });
         org.mockito.Mockito.verify(observer).onAccepted(metadata, run);
+        org.mockito.Mockito.verify(automationLifecycle).prepare(
+                org.mockito.ArgumentMatchers.any(Workspace.class),
+                org.mockito.ArgumentMatchers.eq(userId),
+                org.mockito.ArgumentMatchers.eq("trace_1234567890abcdef"));
+        org.mockito.Mockito.verify(automationLifecycle).acquire(
+                org.mockito.ArgumentMatchers.argThat(candidate ->
+                        candidate.runId().equals(run.runId())
+                                && candidate.sourceType() == ConversationSourceType.SCHEDULED_TASK
+                                && candidate.sourceRefId().equals(metadata.sourceRefId())),
+                org.mockito.ArgumentMatchers.eq(AutomationReferenceRunPreparation.empty()),
+                org.mockito.ArgumentMatchers.eq("trace_1234567890abcdef"));
     }
 
     @Test

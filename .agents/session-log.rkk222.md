@@ -12734,3 +12734,26 @@
 
 - backend health/readiness 为 UP、frontend 3000 返回 200、CORS 正常；后台记录 `local_client_connected ... generation=2`，未再出现 `LocalClientInstanceRow` 映射异常。
 - 不涉及 API、事件、数据库结构/Flyway、性能、安全、环境文件、generated SDK 或 OpenCode 源码；未新增部署节点。
+
+## 2026-08-22 - 统一自动化引用 JSONC 服务端对账链路
+
+### Why
+
+- 自动化引用同时存在前端 JSONC 补丁和 Java Run 派发推导，形成两套事实来源；普通发送、批量和夜间任务创建还会提前写工作树，容易覆盖用户并发编辑并制造不必要的 reload 时序。
+
+### What
+
+- 自动化 JSONC 只保留后端 `ApplicationAutomationReferenceWorkspaceReconciliationService` 一套实现：按应用当前 READY generation 与本机精确 READY 副本重算托管引用、清理同库历史身份和无用权限，并返回本次可租用代次与局部告警。前端只调用文件 WebSocket `agent-config.automation-reference.reconcile`，不再读取、解析或提交自动化 JSONC；应用资产库原有 TypeScript `patchReferenceConfig` 保持独立。
+- 工作区进入、显式刷新文件树和配置同步 READY 触发对账；普通发送、命令、重发、批量提交与定时任务创建不再预写。普通和定时 Run 真正派发前仍由后端同一入口对账、按需 reload 并建立 generation 租约，不向消息、提示词或 OpenCode 上下文注入引用说明。
+- 工作区文件内核增加基于存在性与 SHA-256 的条件写，普通写与条件写共享 JVM 分片锁和跨 Java 进程文件锁；冲突后只重新读取重算一次，第二次仍冲突返回 `CONFLICT`，避免覆盖用户编辑。同步更新文件 RPC、HTTP/事件边界、模块图、自动化验收说明及前后端 README/PACKAGE。
+
+### How
+
+- 自动化对账、JSONC、文件 CAS、Run 派发与文件 WebSocket 聚焦测试通过；前端全量 Vitest 149 个文件通过（2194 passed、1 skipped），类型检查和 production build 通过。
+- JDK 25 下 `mvn -pl test-agent-workspace-management,test-agent-opencode-runtime,test-agent-api -am test` 最终 22 模块全部通过；首次完整运行仅旁路流式测试出现一次 2 秒时序波动，单测复跑与第二次完整 reactor 均通过。
+- 使用根目录 `.env.test`、`test` profile 与 `--with-clickhouse` 完整重启 backend、opencode-manager 和 frontend；health/readiness 为 UP、前端 3000 返回 200、CORS 正常、manager 将 OpenCode 核验为 HEALTHY。浏览器为全新未登录会话，因此本轮未冒充 888888888 重做对话读取；此前同环境已真实打开并加入过自动化文件，本轮代码/组件测试覆盖改造后的读取和派发契约。
+
+### Result
+
+- `.opencode/opencode.jsonc` 继续是 OpenCode 唯一运行时事实源，自动化只由 Java 对账，浏览器不再拥有第二套自动化补丁算法；应用资产库既有前端补丁行为不变。单库副本不可用只移除/跳过该托管引用并给出安全局部告警，主工作区和其它引用继续可用。
+- 本次新增内部文件 WebSocket 操作和条件写并发保护，不新增 HTTP API、RunEvent 类型、数据库结构/Flyway、部署节点或强制环境变量；未修改 `.env*`、generated SDK、OpenCode 只读源码、未跟踪 `.reasonix/` 和并行的本地客户端持久化修复。公共 Tool 真实远程 push → rollout → 多用户 reload 全链路未执行，也不作为本次已验证项。

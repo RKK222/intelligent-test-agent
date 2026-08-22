@@ -11,17 +11,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 在服务端对账平台托管的自动化 JSONC 节点。
  *
- * <p>编辑器只替换平台拥有的引用对象和精确 external_directory 规则，用户字段、未知字段和其它区域注释
+ * <p>编辑器只逐字段更新平台拥有的引用键和精确 external_directory 规则，用户字段、未知字段和其它区域注释
  * 均原样保留。这样定时任务等无浏览器入口也能在真正派发前复用同一份 JSONC 事实源。
  */
 final class AutomationReferenceWorkspaceJsoncReconciler {
 
     private static final String SCHEMA = "https://opencode.ai/config.json";
     private static final String AUTOMATION_KIND = "automation";
+    private static final int REFERENCE_ALIAS_MAX_LENGTH = 128;
+    private static final Pattern INVALID_REFERENCE_ALIAS = Pattern.compile("[/\\\\\\s`,]");
 
     private final ObjectMapper objectMapper;
 
@@ -37,7 +40,7 @@ final class AutomationReferenceWorkspaceJsoncReconciler {
         for (Patch patch : safePatches) {
             if (!normalizedAppId.equals(patch.appId())
                     || !repositoryIds.add(requireText(patch.repositoryId(), "自动化引用缺少版本库标识"))
-                    || !aliases.add(requireText(patch.alias(), "自动化引用缺少别名"))) {
+                    || !aliases.add(requireReferenceAlias(patch.alias()))) {
                 throw invalid("同一应用的自动化版本库或引用别名不能重复");
             }
         }
@@ -90,7 +93,26 @@ final class AutomationReferenceWorkspaceJsoncReconciler {
                 }
                 previousPath = stringValue(document.content(), existing, "path");
             }
-            output = upsertProperty(output, List.of("references"), patch.alias(), managedValue(patch));
+            if (existingProperty == null) {
+                output = upsertProperty(output, List.of("references"), patch.alias(), managedValue(patch));
+            } else {
+                // 已有引用只逐字段更新平台拥有的键，保留用户注释、未知字段和未来 OpenCode 扩展字段。
+                for (Map.Entry<String, Object> managed : managedValue(patch).entrySet()) {
+                    output = upsertProperty(
+                            output,
+                            List.of("references", patch.alias()),
+                            managed.getKey(),
+                            managed.getValue());
+                }
+            }
+            output = removeProperty(
+                    output,
+                    List.of("references", patch.alias()),
+                    "testagent-automation-workspace-id");
+            output = removeProperty(
+                    output,
+                    List.of("references", patch.alias()),
+                    "testagent-automation-version-id");
             if (previousPath != null && !previousPath.equals(patch.path())) {
                 output = removeUnusedPermission(output, previousPath, patch.alias());
             }
@@ -325,6 +347,15 @@ final class AutomationReferenceWorkspaceJsoncReconciler {
         String normalized = value == null ? "" : value.trim();
         if (normalized.isEmpty()) {
             throw invalid(message);
+        }
+        return normalized;
+    }
+
+    private String requireReferenceAlias(String value) {
+        String normalized = requireText(value, "自动化引用缺少别名");
+        if (normalized.length() > REFERENCE_ALIAS_MAX_LENGTH
+                || INVALID_REFERENCE_ALIAS.matcher(normalized).find()) {
+            throw invalid("引用名称必须是 1-128 个字符，且不能包含空格、斜杠、反引号或逗号");
         }
         return normalized;
     }

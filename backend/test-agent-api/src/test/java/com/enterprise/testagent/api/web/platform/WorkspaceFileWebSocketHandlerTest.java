@@ -36,6 +36,7 @@ import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
 import com.enterprise.testagent.workspace.WorkspaceFileUpload;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.workspace.ApplicationAutomationReferenceWorkspaceReconciliationService;
 import com.enterprise.testagent.workspace.ManagedConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceViewEntry;
@@ -53,6 +54,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunPreparation;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
@@ -463,6 +465,53 @@ class WorkspaceFileWebSocketHandlerTest {
                 "agents/icon.bin",
                 "AA==",
                 null);
+    }
+
+    @Test
+    void ordinaryApplicationMemberCanRequestBackendAutomationReferenceReconciliation() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        ApplicationAutomationReferenceWorkspaceReconciliationService reconciliationService =
+                Mockito.mock(ApplicationAutomationReferenceWorkspaceReconciliationService.class);
+        Workspace workspace = new Workspace(
+                new WorkspaceId("wrk_1234567890abcdef"),
+                "个人工作树",
+                "/logical/workspace",
+                WorkspaceStatus.ACTIVE,
+                NOW,
+                NOW,
+                "linux-1",
+                TRACE_ID);
+        when(ticketService.consume("wft_workspace_agent", "http://localhost:3000"))
+                .thenReturn(agentTicket(false, "WORKSPACE", workspace.workspaceId().value(), null));
+        when(workspaceService.requireWorkspaceOnCurrentServer(workspace.workspaceId(), TRACE_ID))
+                .thenReturn(workspace);
+        when(reconciliationService.reconcile(workspace, new UserId("usr_admin"), TRACE_ID))
+                .thenReturn(new AutomationReferenceRunPreparation(
+                        List.of(), List.of("自动化库：当前副本尚未就绪"), true));
+        WorkspaceFileWebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                agentConfigService,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        handler.setAutomationReferenceReconciliationService(reconciliationService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace_agent",
+                List.of("""
+                        {"id":"req_reconcile","op":"agent-config.automation-reference.reconcile","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains(
+                        "\"type\":\"result\"",
+                        "\"changed\":true",
+                        "当前副本尚未就绪"));
+        verify(reconciliationService).reconcile(workspace, new UserId("usr_admin"), TRACE_ID);
     }
 
     @Test

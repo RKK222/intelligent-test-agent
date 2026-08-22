@@ -1,6 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BackendApiError } from "@test-agent/backend-api";
 import AutomationReferenceConfigurationPanel from "../src/components/AutomationReferenceConfigurationPanel.vue";
 
 function configuration(overrides: Record<string, unknown> = {}) {
@@ -72,13 +71,7 @@ function api(overrides: Record<string, unknown> = {}) {
     synchronizeAutomationReferenceRepository: vi.fn(),
     verifyAutomationReferenceRepository: vi.fn(),
     terminateAutomationReferenceRepository: vi.fn(),
-    readWorkspaceAgentFile: vi.fn().mockRejectedValue(new BackendApiError(404, {
-      success: false,
-      code: "FILE_NOT_FOUND",
-      message: "文件不存在",
-      traceId: "trace_missing"
-    })),
-    writeWorkspaceAgentFile: vi.fn().mockResolvedValue(undefined),
+    reconcileWorkspaceAutomationReferences: vi.fn().mockResolvedValue({ changed: false, warnings: [] }),
     ...overrides
   };
 }
@@ -136,6 +129,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
     expect(mockApi.synchronizeAutomationReferenceRepository).not.toHaveBeenCalled();
     expect(mockApi.configureAutomationReferenceRepository).not.toHaveBeenCalled();
     expect(mockApi.listAutomationReferenceRepositoryBranches).not.toHaveBeenCalled();
+    expect(mockApi.reconcileWorkspaceAutomationReferences).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("release/ui · ui/tests");
   });
 
@@ -168,26 +162,7 @@ describe("AutomationReferenceConfigurationPanel", () => {
       listAutomationReferenceRepositories: vi.fn()
         .mockResolvedValueOnce([repository()])
         .mockResolvedValueOnce([ready]),
-      readWorkspaceAgentFile: vi.fn()
-        .mockResolvedValueOnce({ content: "" })
-        .mockResolvedValueOnce({ content: `{
-  "references": {
-    "old-main": {
-      "path": "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-main",
-      "testagent-reference-kind": "automation",
-      "testagent-automation-repository-id": "repo_automation"
-    },
-    "old-release": {
-      "path": "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-release",
-      "testagent-reference-kind": "automation",
-      "testagent-automation-workspace-id": "awp_old"
-    }
-  },
-  "permission": { "external_directory": {
-    "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-main/*": "allow",
-    "{env:OPENCODE_APP_WORKSPACE_ROOT}/old-release/*": "allow"
-  } }
-}` })
+      reconcileWorkspaceAutomationReferences: vi.fn().mockResolvedValue({ changed: true, warnings: [] })
     });
     const wrapper = render(mockApi);
     await flushPromises();
@@ -219,13 +194,8 @@ describe("AutomationReferenceConfigurationPanel", () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     await flushPromises();
-    const written = mockApi.writeWorkspaceAgentFile.mock.calls.at(-1)?.[2] as string;
-    expect(written).toContain('"testagent-automation-app-id": "app-demo"');
-    expect(written).toContain('"testagent-automation-repository-id": "repo_automation"');
-    expect(written).toContain('"testagent-automation-generation": 4');
-    expect(written).toContain('"merge": false');
-    expect(written).not.toContain("old-main");
-    expect(written).not.toContain("old-release");
+    expect(mockApi.reconcileWorkspaceAutomationReferences).toHaveBeenCalledTimes(1);
+    expect(mockApi.reconcileWorkspaceAutomationReferences).toHaveBeenCalledWith("wrk-personal");
   });
 
   it("keeps members readonly while still showing current branch, directory and server status", async () => {

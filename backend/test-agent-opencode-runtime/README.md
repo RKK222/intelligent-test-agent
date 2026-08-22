@@ -1,6 +1,6 @@
 # test-agent-opencode-runtime
 
-自动化代码库与应用资产库统一由当前工作树 `.opencode/opencode.jsonc` 的 `references` 和精确 `permission.external_directory` 规则交给 OpenCode 原生加载。后端不再为普通对话、命令、重发、批量或定时 Run 拼接自动化路径、system prompt 或用户消息；派发前只对账工作树配置、固定确实 READY 的精确 generation 并记录生命周期租约，单库不可用时通过既有 `run.created` 返回安全局部告警，主 Run 继续执行。
+自动化代码库与应用资产库统一由当前工作树 `.opencode/opencode.jsonc` 的 `references` 和精确 `permission.external_directory` 规则交给 OpenCode 原生加载。后端不再为普通对话、命令、重发、批量或定时 Run 拼接自动化路径、system prompt 或用户消息；普通发送、命令、重发、批量提交和夜间任务创建阶段也不预写 JSONC。只有真实 Run（包含定时 Run）即将派发且尚未产生可见副作用时，才调用工作区模块的唯一对账器、按需 reload、固定确实 READY 的精确 generation 并记录生命周期租约；单库不可用通过既有 `run.created` 返回安全局部告警，主 Run 继续执行。
 
 ## 工程定位
 
