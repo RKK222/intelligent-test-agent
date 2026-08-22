@@ -12951,7 +12951,7 @@
 
 ### How
 
-- 定向 Maven 10 个测试类共 118 项通过、1 项按平台条件跳过；前端 3 个测试文件 200 项通过，agent-web `vue-tsc + vite build` 通过。
+- 定向 Maven 10 个测试类共执行 118 项，其中 117 项通过、1 项按平台条件跳过；前端 3 个测试文件 200 项通过，agent-web `vue-tsc + vite build` 通过。
 - 使用 `.env.test` / `test` profile 重建并重启 backend、frontend、manager；安装并运行 `/Users/kaka/Applications/TestAgent Local Client Dev.app`。最终 backend health 为 UP、frontend 为 HTTP 200，服务器 4096 与客户端 4106 的 OpenCode 1.18.4 health 均为 true，客户端实例 `lci_c8d77417e5a0462db2edbf8d4a433445` 在线。
 - 真实验证本地 `wrk_16dfcef54a8b4e48a354ce0946a04fb2` 与服务器 `wrk_0be73a3431a34f179e96f18d3f314dff` 往返切换和 recent 恢复；两端文件 route/ticket/WebSocket 均能列出各自根目录。
 - 本地/服务器普通对话分别以 `LOCAL_CHAT_E2E_OK`、`SERVER_CHAT_E2E_OK` 成功结束；本地/服务器 Agent `task` 子调用均为 completed，并分别返回 `LOCAL_AGENT_E2E_OK`、`SERVER_AGENT_E2E_OK`。Run API 最终显示真实 `LOCAL_CLIENT` 或 `SERVER_PROCESS`。
