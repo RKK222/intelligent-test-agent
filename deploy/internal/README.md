@@ -216,6 +216,8 @@ test -r "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}"
 `PUBLIC_CAPABILITIES` release artifact。公共提交或能力包摘要变化会改变 local client 组件指纹，不能在
 `--zip-only` 模式下复用旧客户端制品。能力包由平台发布流程根据固定 commit、锁文件和可移植依赖生成；禁止用公共 Git
 工作树、原始 `node_modules` 或客户端现场 npm 下载替代。
+离线分发验收会精确要求并逐文件核对 `CLIENT_JAR`、`JDK`、`OPENCODE`、`PUBLIC_CAPABILITIES`
+四类制品的路径、大小和 SHA-256；缺少任一类、额外混入未知类别或公共能力包被篡改都会终止封包。
 新版 manifest 的 `contentDigest` 是文件内容摘要，`bundleDigest` 必须是
 `sha256(sourceCommit + "\n" + contentDigest)`；即使能力文件没有变化，固定提交变化也必须使用该提交对应的新完整制品。
 

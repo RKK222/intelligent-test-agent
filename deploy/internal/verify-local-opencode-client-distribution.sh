@@ -194,13 +194,15 @@ schema_count="$(grep -Ec '^[[:space:]]*"schemaVersion":[[:space:]]*2,' "${MANIFE
 }
 
 artifact_count="$(grep -F -c '"kind":' "${MANIFEST}" || true)"
-[[ "${artifact_count}" -eq 3 ]] || {
-  echo "Local client manifest must contain exactly three runtime artifacts" >&2
+[[ "${artifact_count}" -eq 4 ]] || {
+  echo "Local client manifest must contain exactly four runtime artifacts" >&2
   exit 1
 }
 verify_artifact CLIENT_JAR
 verify_artifact JDK
 verify_artifact OPENCODE
+# 公共 Agent/Skill/Tool 能力是离线客户端的受签名运行制品，不能只检查 manifest 中是否声明。
+verify_artifact PUBLIC_CAPABILITIES
 
 catalog_line="$(grep -F "\"version\": \"${EXPECTED_VERSION}\"" "${CATALOG}" || true)"
 [[ -n "${catalog_line}" ]] || {

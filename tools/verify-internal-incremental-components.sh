@@ -46,15 +46,18 @@ cp "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" 
 printf 'fixture client jar\n' >"${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar"
 printf 'fixture Linux JDK\n' >"${LOCAL_CLIENT_RELEASE}/jdk.tar.gz"
 printf 'fixture Linux OpenCode\n' >"${LOCAL_CLIENT_RELEASE}/opencode.tar.gz"
-for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz; do
+printf 'fixture public capabilities\n' >"${LOCAL_CLIENT_RELEASE}/public-capabilities.tar.gz"
+for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz public-capabilities.tar.gz; do
   printf 'fixture signature for %s\n' "${artifact}" >"${LOCAL_CLIENT_RELEASE}/${artifact}.sig"
 done
 client_jar_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar" | awk '{print $1}')"
 jdk_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/jdk.tar.gz" | awk '{print $1}')"
 opencode_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/opencode.tar.gz" | awk '{print $1}')"
+public_capabilities_sha="$(shasum -a 256 "${LOCAL_CLIENT_RELEASE}/public-capabilities.tar.gz" | awk '{print $1}')"
 client_jar_size="$(wc -c <"${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar" | tr -d ' ')"
 jdk_size="$(wc -c <"${LOCAL_CLIENT_RELEASE}/jdk.tar.gz" | tr -d ' ')"
 opencode_size="$(wc -c <"${LOCAL_CLIENT_RELEASE}/opencode.tar.gz" | tr -d ' ')"
+public_capabilities_size="$(wc -c <"${LOCAL_CLIENT_RELEASE}/public-capabilities.tar.gz" | tr -d ' ')"
 printf '%s\n' \
   '{' \
   '  "schemaVersion": 2,' \
@@ -69,7 +72,8 @@ printf '%s\n' \
   '  "artifacts": [' \
   "    {\"kind\": \"CLIENT_JAR\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/test-agent-local-client.jar\", \"size\": ${client_jar_size}, \"sha256\": \"${client_jar_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/test-agent-local-client.jar.sig\"}," \
   "    {\"kind\": \"JDK\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/jdk.tar.gz\", \"size\": ${jdk_size}, \"sha256\": \"${jdk_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/jdk.tar.gz.sig\"}," \
-  "    {\"kind\": \"OPENCODE\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/opencode.tar.gz\", \"size\": ${opencode_size}, \"sha256\": \"${opencode_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/opencode.tar.gz.sig\"}" \
+  "    {\"kind\": \"OPENCODE\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/opencode.tar.gz\", \"size\": ${opencode_size}, \"sha256\": \"${opencode_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/opencode.tar.gz.sig\"}," \
+  "    {\"kind\": \"PUBLIC_CAPABILITIES\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/public-capabilities.tar.gz\", \"size\": ${public_capabilities_size}, \"sha256\": \"${public_capabilities_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/public-capabilities.tar.gz.sig\"}" \
   '  ]' \
   '}' >"${LOCAL_CLIENT_RELEASE}/manifest.json"
 printf 'fixture manifest signature\n' >"${LOCAL_CLIENT_RELEASE}/manifest.json.sig"
@@ -144,6 +148,20 @@ bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" 
   --expected-manifest-sha256 "${local_client_manifest_sha}" \
   --expected-signature-sha256 "${local_client_signature_sha}" \
   --expected-install-sha256 "${local_client_install_sha}" >/dev/null
+cp "${LOCAL_CLIENT_RELEASE}/public-capabilities.tar.gz" \
+  "${TMP_ROOT}/public-capabilities.tar.gz.original"
+printf 'tampered public capabilities\n' >"${LOCAL_CLIENT_RELEASE}/public-capabilities.tar.gz"
+if bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
+  --root "${LOCAL_CLIENT_ROOT}" \
+  --expected-version "${local_client_version}" \
+  --expected-manifest-sha256 "${local_client_manifest_sha}" \
+  --expected-signature-sha256 "${local_client_signature_sha}" \
+  --expected-install-sha256 "${local_client_install_sha}" >/dev/null 2>&1; then
+  echo 'Tampered public capabilities unexpectedly passed verification' >&2
+  exit 1
+fi
+cp "${TMP_ROOT}/public-capabilities.tar.gz.original" \
+  "${LOCAL_CLIENT_RELEASE}/public-capabilities.tar.gz"
 printf 'tampered deb alias\n' >"${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.deb"
 if bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
   --root "${LOCAL_CLIENT_ROOT}" \

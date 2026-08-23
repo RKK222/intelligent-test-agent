@@ -13312,3 +13312,27 @@
 - 未修改任何已发布 PostgreSQL/ClickHouse/XXL migration 字节，只修复验收基线；不新增 API、事件、数据库结构、部署节点、生产配置或依赖，不修改 `.env*`、generated SDK 和 OpenCode 只读源码。
 - 企业公共能力权威库固定为 `4d9080373845ffece1d6d055a3b042ad383a5aab`，现有能力包含 17 个 Agent、18 个 Skill、10 个 Tool 和 22 个裁剪后的离线 Node 依赖，未包含密钥、`opencode.jsonc`、`.git` 或原始仓库 `node_modules`。
 - 正式整包仍需存量客户端签名私钥；本机只有公钥 SHA-256 `6305689946819f97ecb8a3112bff8eb18386a8011207b31975c188860bea500f`，不得用临时密钥轮换后冒充可升级交付。
+
+## 2026-08-23 - 固定组织客户端签名密钥并修复四制品发布门禁
+
+### Why
+
+- 企业客户端仅有两台安装，用户明确接受本轮全量替换，因此允许执行一次签名密钥轮换；后续仍需使用同一组织私钥，避免每次打包都重新找旧密钥。
+- 新客户端已把公共 Agent/Skill/Tool 离线能力作为第 4 类 `PUBLIC_CAPABILITIES` 制品，但总发布验收脚本仍硬编码只允许 3 类，导致正确生成的客户端分发目录在 `--zip-only` 阶段被误拒绝。
+
+### What
+
+- 组织 RSA 私钥、公钥固定保存在当前仓库工作树 `.secure/`，目录与 PEM 已通过本地 `.git/info/exclude` 和既有 `*.pem` 规则排除，不提交 Git，也不得进入发布归档；组织公钥 DER SHA-256 为 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`。
+- 客户端分发验收改为精确要求 `CLIENT_JAR`、`JDK`、`OPENCODE`、`PUBLIC_CAPABILITIES` 四类制品，并逐项核对路径、大小和 SHA-256。
+- 增量发布夹具补齐公共能力制品，并新增篡改该制品后必须验收失败的负向回归；部署 README 同步记录四制品门禁。
+
+### How
+
+- `bash -n`、`git diff --check` 通过。
+- `tools/verify-internal-incremental-components.sh` 通过，覆盖全量、复封、正常增量、已部署 baseline 复用及组件单独更新。
+- `deploy/internal/tests/local-opencode-client-package-test.sh` 通过，覆盖麒麟 ARM64 单壳 DEB、不可变签名 release、catalog、公共能力离线制品和安装引导。
+
+### Result
+
+- 四制品发布门禁修复并完成定向运行验证；不变更 HTTP API、事件、数据库、Flyway、部署节点、前后端业务代码、generated SDK 或 OpenCode 只读源码。
+- 本轮客户端需在两台已安装机器上全量卸载/替换一次；之后只要固定组织私钥未丢失，即可继续正常签名升级。正式企业 ZIP 与目标机 Flyway 历史门禁仍在本次发布流程中继续处理。
