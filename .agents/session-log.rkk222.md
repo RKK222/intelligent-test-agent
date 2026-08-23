@@ -13338,4 +13338,6 @@
 
 - 四制品发布门禁修复并完成定向运行验证；不变更 HTTP API、事件、数据库、Flyway、部署节点、前后端业务代码、generated SDK 或 OpenCode 只读源码。
 - 复用 2026-08-18 节点配置时发现旧包尚无客户端版本管理公钥，现已由外层封装门禁补齐，避免覆盖现场 `backend.env` 后新客户端 release 无法验签。
-- 本轮客户端需在两台已安装机器上全量卸载/替换一次；之后只要固定组织私钥未丢失，即可继续正常签名升级。正式企业 ZIP 与目标机 Flyway 历史门禁仍在本次发布流程中继续处理。
+- 本轮客户端需在两台已安装机器上全量卸载/替换一次；之后只要固定组织私钥未丢失，即可继续正常签名升级。
+- 最终内层 ZIP SHA-256 为 `a13f0cc83850d5a1eb6eecfb37caa378e3d8cf67ebe277371b1e66390ef62397`，外层固定名双后台包 SHA-256 为 `99875cd9cb2dadfafb95e0219480a40617f4e769e00d9a8ec5360b41c9bb072f`；客户端版本为 `20260823213628`，manifest SHA-256 为 `982c55bea7c1f760bf9f036c4dd10aaf7449dbcd1b9ec7480cf97074a3e1b18e`，公共配置提交为 `4d9080373845ffece1d6d055a3b042ad383a5aab`。
+- 最终内外层 SHA/结构/嵌套一致性、147 份 Flyway SQL 的源码与 JAR 字节、四制品客户端、公钥签名、TCDS 固定域名、Qwen 优先级、离线 Node 依赖、私钥不入包及 Linux GNU tar 归档卫生均通过；目标企业 PostgreSQL 与 XXL MySQL 完整 `flyway_schema_history` 尚未取得，正式部署仍须先通过该现场门禁。
