@@ -240,7 +240,8 @@ attempt 每 30 秒补偿，所有非终态在创建 30 分钟后统一到期失�
 `LocalClientPublicCapabilityCoordinator` 是 `PUBLIC_CAPABILITY_SYNC_V1` 的服务器状态机：接收实例激活版本，
 计算最新 `AVAILABLE` 完整包，复用用户通知提示更新，并在网页或托盘显式确认后创建单实例 attempt。离线确认使用
 generation 0 持久化；持有连接的 Java 在重连后 CAS 绑定新 generation 并继续逐片下发，不自动确认，也不回退到
-其它实例。
+其它实例。定时收敛在待更新状态持续存在时会同时刷新网页通知并向当前在线 generation 补发
+`PUBLIC_CAPABILITY_AVAILABLE`，避免客户端早于能力包生成完成上线后错过托盘更新入口。
 
 更新命令锁定 `commandId/clientInstanceId/generation/sourceCommit/bundleDigest`。制品复用既有 256 KiB
 `BINARY_CHUNK` 上限，但由客户端一次只拉一片以保持出站队列背压。终态先落关系库并投影实例状态，再返回 ACK；成功

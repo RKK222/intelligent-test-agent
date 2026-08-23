@@ -13167,3 +13167,26 @@
 - 公共 subagent 已被完整打包并产生用户确认更新状态；它不会出现在 primary Agent 选择器中，但安装后应由本地 `/agent` 目录以 `mode=subagent` 返回。
 - 当前 4106 仍保持旧能力版本，未发生自动安装，符合用户确认策略；真实“确认更新 → WSS 分片安装 → 4106 出现 wrui0823”留给用户从托盘或网页执行。
 - 本次未修改平台源代码、API、RunEvent、数据库结构、Flyway、`.env*`、generated SDK 或 OpenCode 只读源码；根工作树其它未提交改动保持原状。
+
+## 2026-08-23 - 补发在线客户端公共能力更新入口
+
+### Why
+
+- 网页实例状态已显示 `UPDATE_AVAILABLE`，但 Mac 托盘仍显示当前版本。客户端在能力包生成前完成版本上报时，服务端后续定时收敛只刷新网页通知，没有补发 `PUBLIC_CAPABILITY_AVAILABLE`，导致托盘错过更新入口。
+
+### What
+
+- `LocalClientPublicCapabilityCoordinator` 在每轮待更新状态收敛时，除幂等刷新用户通知外，也向当前持有 Java 上该实例的在线 generation 补发能力可用帧。
+- 对连接查询与发送之间的断线/换代竞争按正常状态处理，等待重连上报或下一调度周期继续收敛；其它平台异常仍正常抛出。
+- 新增回归测试，覆盖“客户端先在线、能力包后生成”时托盘消息仍能送达；同步 runtime 模块 README。
+
+### How
+
+- JDK 25 执行 `mvn -pl test-agent-opencode-runtime -am -Dtest=LocalClientPublicCapabilityCoordinatorTest -Dsurefire.failIfNoSpecifiedTests=false test`，4 项全部通过，reactor `BUILD SUCCESS`。
+- 当前 Mac 客户端状态文件已实际收到 `4d9080373845` 待更新帧，记录 Agent 17 / Skill 18 / Tool 10；本机 backend readiness 为 UP、前端 3000 可访问。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并执行目标差异检查，未纳入工作树中的工作区 Git 权限巡检等并行改动。
+
+### Result
+
+- 用户可直接在小兔子托盘点击“更新公共能力”，不再必须进入网页个人设置；网页入口继续作为同一确认操作的备用入口。
+- 本次只修改服务端 WebSocket 通知补偿逻辑、测试和文档，不变更协议帧、HTTP API、RunEvent、数据库、Flyway、客户端制品、权限、部署节点、`.env*`、generated SDK 或 OpenCode 只读源码。

@@ -246,6 +246,9 @@ public class LocalClientPublicCapabilityCoordinator {
                         : repository.findReleaseByDigest(state.pendingDigest()).orElse(null);
                 if (instance != null && release != null && supports(instance)) {
                     notifyAvailable(instance, release, traceId);
+                    // 能力包可能在客户端完成版本上报后才生成；定时收敛必须同时补发桌面通知，
+                    // 不能只刷新网页通知，否则在线客户端会一直显示“当前版本”。
+                    sendAvailableToCurrentConnection(instance, release, traceId);
                 }
             }
             for (LocalClientPublicCapabilityModels.Attempt attempt : repository.findDispatchableAttempts(DISPATCH_LIMIT)) {
@@ -321,6 +324,29 @@ public class LocalClientPublicCapabilityCoordinator {
                         instanceId.value(), generation, release.sourceCommit(), release.bundleDigest(),
                         release.counts().agents(), release.counts().skills(), release.counts().tools(),
                         release.requiresRestart(), release.changeSummaryJson()))));
+    }
+
+    private void sendAvailableToCurrentConnection(
+            LocalClientInstance instance,
+            LocalClientPublicCapabilityModels.Release release,
+            String traceId) {
+        LocalClientConnectionRegistry.ConnectionSnapshot connection =
+                connectionRegistry.find(instance.clientInstanceId()).orElse(null);
+        if (connection == null || !connection.userId().equals(instance.userId())) {
+            return;
+        }
+        try {
+            sendAvailable(instance.clientInstanceId(), connection.generation(), release, traceId);
+        } catch (PlatformException exception) {
+            if (exception.errorCode() != ErrorCode.LOCAL_CLIENT_DISCONNECTED) {
+                throw exception;
+            }
+            // find 与 send 之间发生断线或换代属于正常竞争，下一个重连上报或调度周期会继续补发。
+            LOGGER.debug(
+                    "event=public_capability_available_connection_changed traceId={} clientInstanceId={}",
+                    traceId,
+                    instance.clientInstanceId().value());
+        }
     }
 
     private void notifyAvailable(

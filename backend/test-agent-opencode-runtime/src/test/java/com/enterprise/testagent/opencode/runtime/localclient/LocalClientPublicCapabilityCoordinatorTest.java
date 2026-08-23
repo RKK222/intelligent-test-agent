@@ -103,6 +103,27 @@ class LocalClientPublicCapabilityCoordinatorTest {
     }
 
     @Test
+    void reconcilePushesAvailableReleaseToAlreadyConnectedClient() {
+        RecordingSender sender = new RecordingSender();
+        connectionRegistry.register(INSTANCE_ID, USER_ID, 8L, "model-grant", sender);
+        when(repository.findUpdateAvailableStates(anyInt())).thenReturn(List.of(updateAvailableState()));
+        when(repository.findReleaseByDigest(DIGEST)).thenReturn(Optional.of(release()));
+        when(repository.findDispatchableAttempts(anyInt())).thenReturn(List.of());
+
+        coordinator.reconcile();
+
+        assertThat(sender.frames).singleElement().satisfies(frame -> {
+            assertThat(frame.type()).isEqualTo(LocalClientFrameType.PUBLIC_CAPABILITY_AVAILABLE);
+            LocalClientPayloads.PublicCapabilityAvailable available =
+                    new LocalClientFrameCodec().payload(frame, LocalClientPayloads.PublicCapabilityAvailable.class);
+            assertThat(available.clientInstanceId()).isEqualTo(INSTANCE_ID.value());
+            assertThat(available.connectionGeneration()).isEqualTo(8L);
+            assertThat(available.sourceCommit()).isEqualTo(COMMIT);
+            assertThat(available.bundleDigest()).isEqualTo(DIGEST);
+        });
+    }
+
+    @Test
     void repeatedConfirmationReusesActiveAttempt() {
         LocalClientPublicCapabilityModels.Attempt existing = new LocalClientPublicCapabilityModels.Attempt(
                 "lcpc_" + "a".repeat(32), INSTANCE_ID, USER_ID, 0L, COMMIT, DIGEST,
