@@ -31,6 +31,13 @@ OUTPUT_DIR="${TMP_ROOT}/output"
 mkdir -p "${RELEASE_ROOT}/dist/backend/lib" "${RELEASE_ROOT}/deploy/internal" \
   "${RELEASE_ROOT}/.agents" \
   "${NODES_DIR}" "${OUTPUT_DIR}"
+SIGNING_PRIVATE_KEY="${TMP_ROOT}/local-client-signing-private.pem"
+SIGNING_PUBLIC_KEY="${TMP_ROOT}/local-client-signing-public.pem"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  -out "${SIGNING_PRIVATE_KEY}" >/dev/null 2>&1
+openssl pkey -in "${SIGNING_PRIVATE_KEY}" -pubout \
+  -out "${SIGNING_PUBLIC_KEY}" >/dev/null 2>&1
+SIGNING_PUBLIC_KEY_BASE64="$(openssl base64 -A -in "${SIGNING_PUBLIC_KEY}")"
 
 JAR_ROOT="${TMP_ROOT}/jar-root"
 mkdir -p "${JAR_ROOT}/BOOT-INF/classes"
@@ -122,12 +129,20 @@ create_node_archive \
   test-agent-two-backend-122.233.30.2.tar.gz \
   nginx.env
 run_package() {
-  bash "${PACKAGE_SCRIPT}" \
+  TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY="${SIGNING_PUBLIC_KEY}" \
+    bash "${PACKAGE_SCRIPT}" \
     --release-archive "${RELEASE_ARCHIVE}" \
     --nodes-dir "${NODES_DIR}" \
     --output-dir "${OUTPUT_DIR}"
 }
 
+if bash "${PACKAGE_SCRIPT}" \
+  --release-archive "${RELEASE_ARCHIVE}" \
+  --nodes-dir "${NODES_DIR}" \
+  --output-dir "${OUTPUT_DIR}" >/dev/null 2>&1; then
+  echo "Complete package unexpectedly accepted a missing local-client signing public key" >&2
+  exit 1
+fi
 output="$(run_package 2>&1)"
 if grep -Fq 'must-not-print' <<<"${output}"; then
   echo "Complete package output leaked node configuration" >&2
@@ -213,6 +228,18 @@ node_guide="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
 grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' <<<"${backend_env}"
 grep -Fxq 'TEST_AGENT_MAX_PREVIEW_BYTES=5242880' <<<"${backend_env}"
 grep -Fxq 'TEST_AGENT_UPLOAD_CHUNK_BYTES=262144' <<<"${backend_env}"
+grep -Fxq \
+  "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=${SIGNING_PUBLIC_KEY_BASE64}" \
+  <<<"${backend_env}"
+BACKEND_114_NODE_ARCHIVE="${TMP_ROOT}/backend-114-node.tar.gz"
+unzip -p "${BUNDLE}" \
+  'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz' \
+  >"${BACKEND_114_NODE_ARCHIVE}"
+backend_114_env="$(tar -xOzf "${BACKEND_114_NODE_ARCHIVE}" \
+  'test-agent-two-backend-122.233.30.114/config/backend.env')"
+grep -Fxq \
+  "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=${SIGNING_PUBLIC_KEY_BASE64}" \
+  <<<"${backend_114_env}"
 grep -Fxq 'OPENCODE_WORKER_PORT_START=14096' <<<"${docker_env}"
 grep -Fxq 'OPENCODE_WORKER_PORT_END=15095' <<<"${docker_env}"
 grep -Fxq 'TEST_AGENT_TOOLBOX_BIND_ADDRESS=122.233.30.4' <<<"${toolbox_env}"

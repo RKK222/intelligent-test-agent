@@ -158,6 +158,7 @@ deploy/internal/dist/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256
 内层 ZIP 重建后必须立即用本次内层 ZIP 和三台节点包重建固定名外层包；不能只校验历史外层包自身 SHA 后继续交付：
 
 ```bash
+export TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY="$PWD/.secure/local-client-signing-public.pem"
 deploy/internal/package-two-backend-complete.sh \
   --release-archive deploy/internal/dist/test-agent-internal-release.zip \
   --nodes-dir /path/to/prepared-node-packages \
@@ -524,7 +525,7 @@ bash /data/testagent/deploy/internal/configure-nginx.sh \
 
 预期输出 `backend count: 2`、`server route count: 2`。正式安装必须使用本次发布包中的前端部署入口；它会更新前端和部署脚本、渲染候选配置、执行实体 Nginx `-t/-T` 并 reload，失败自动回滚：
 
-若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定站点配置：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，写入 `.4/.114` 两组工具 upstream；两个后台补齐 HTTP Cookie、大文件预览/分片参数、固定 worker 端口池，以及已部署 ClickHouse `122.233.30.147:8123`、Mem0 VIP `122.233.30.160:18888` 的地址和启用开关，并分别生成绑定本机 IP 的 `toolbox.env`。CK/Mem0/BGE/pgvector 镜像不进入平台增量包，也不会重启这些数据面容器。源敏感节点包和其中的密码/token 不会被修改或输出；旧节点包缺少 ClickHouse 密码、Mem0 service key 或模型网关 HMAC 时，包内只写目标机继承标记，`deploy-backend-node.sh` 在覆盖配置前从本机已安装 `backend.env` 原样继承，缺失、重复或长度不合格会先失败。同一键重复定义时封装直接失败，不能继续交付。
+若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定站点配置：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，写入 `.4/.114` 两组工具 upstream；两个后台写入本轮组织客户端签名公钥，补齐 HTTP Cookie、大文件预览/分片参数、固定 worker 端口池，以及已部署 ClickHouse `122.233.30.147:8123`、Mem0 VIP `122.233.30.160:18888` 的地址和启用开关，并分别生成绑定本机 IP 的 `toolbox.env`。客户端私钥始终只留在 Mac，不进入节点包。CK/Mem0/BGE/pgvector 镜像不进入平台增量包，也不会重启这些数据面容器。源敏感节点包和其中的密码/token 不会被修改或输出；旧节点包缺少 ClickHouse 密码、Mem0 service key 或模型网关 HMAC 时，包内只写目标机继承标记，`deploy-backend-node.sh` 在覆盖配置前从本机已安装 `backend.env` 原样继承，缺失、重复或长度不合格会先失败。同一键重复定义时封装直接失败，不能继续交付。
 
 ```bash
 bash /tmp/deploy-internal-frontend.sh \

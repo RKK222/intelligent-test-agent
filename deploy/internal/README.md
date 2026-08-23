@@ -292,12 +292,17 @@ deploy/internal/package-release.sh --toolbox-only --output-dir deploy/internal/d
 U 盘交付包：
 
 ```bash
+export TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY="$PWD/.secure/local-client-signing-public.pem"
 deploy/internal/package-two-backend-complete.sh \
   --release-archive deploy/internal/dist/test-agent-internal-release.zip \
   --nodes-dir /path/to/prepared-node-packages \
   --output-dir /path/to/usb-output
 
 ```
+
+外层封装必须显式读取与本轮客户端签名私钥匹配的 PEM 公钥，并把同一公钥写入 `.4/.114` 的
+`TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64`。脚本不读取也不封装私钥；缺少公钥、
+公钥格式错误或两台后台最终值不一致都会停止打包。
 
 每次重新生成内层 `test-agent-internal-release.zip` 后都必须重新执行外层封装，不能继续使用输出目录中的历史固定名外层包。封装完成后在 Mac 校验外层 SHA、ZIP 结构及内嵌内层 ZIP 与本次内层文件完全一致：
 

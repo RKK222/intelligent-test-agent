@@ -10,6 +10,8 @@ NODES_DIR=""
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 BUNDLE_NAME="test-agent-two-backend-complete"
 PRESERVE_INSTALLED_MARKER="__PRESERVE_FROM_INSTALLED_BACKEND_ENV__"
+LOCAL_CLIENT_SIGNING_PUBLIC_KEY="${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-}"
+LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64=""
 TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
 TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
 LOBEHUB_MAIN_MIGRATION_RESOURCE="db/migration/V20260730090000__add_lobehub_model_gateway.sql"
@@ -140,6 +142,12 @@ Existing fixed-name outputs are replaced without interaction. Source release
 and node archives are validated but never modified. The output contains
 sensitive node configuration and the JAR-embedded RSA key; handle it as a
 controlled artifact.
+
+Environment:
+  TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY
+      Matching organization PEM public key used by the current local-client
+      release. It is injected into both backend node configs; the private key
+      is never read or packaged by this script.
 USAGE
 }
 
@@ -412,7 +420,24 @@ require_command zip
 require_command unzip
 require_command tar
 require_command awk
+require_command openssl
 require_file "${RELEASE_ARCHIVE}"
+if [[ -z "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY}" ]]; then
+  echo "TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY is required for the complete bundle" >&2
+  exit 1
+fi
+require_file "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY}"
+if ! openssl pkey -pubin -in "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY}" -noout >/dev/null 2>&1; then
+  echo "Invalid local-client signing public key" >&2
+  exit 1
+fi
+LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64="$(
+  openssl base64 -A -in "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY}"
+)"
+if [[ -z "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64}" ]]; then
+  echo "Failed to encode the local-client signing public key" >&2
+  exit 1
+fi
 require_file "${SCRIPT_DIR}/deploy-node-common.sh"
 require_file "${SCRIPT_DIR}/deploy-backend-node.sh"
 require_file "${SCRIPT_DIR}/deploy-frontend-node.sh"
@@ -613,6 +638,10 @@ normalize_backend_node_archive() {
   docker_env="${node_root}/${node_dir}/config/docker.env"
   toolbox_env="${node_root}/${node_dir}/config/toolbox.env"
 
+  # 两台后台必须随完整包拿到同一组织公钥；私钥始终只留在外网 Mac 构建机。
+  replace_or_append_env_value "${backend_env}" \
+    TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64 \
+    "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64}"
   replace_or_append_env_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   replace_or_append_env_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     'http://tcds-prod.sdc.icbc:9080'
@@ -693,7 +722,8 @@ validate_mysql_cluster_config() {
   expected_url='jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai'
   for key in TEST_AGENT_XXL_JOB_MYSQL_URL TEST_AGENT_XXL_JOB_MYSQL_USERNAME \
     TEST_AGENT_XXL_JOB_MYSQL_PASSWORD TEST_AGENT_XXL_JOB_ACCESS_TOKEN \
-    TEST_AGENT_XXL_JOB_COOKIE_SECURE; do
+    TEST_AGENT_XXL_JOB_COOKIE_SECURE \
+    TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64; do
     [[ "$(grep -c "^${key}=" "${backend_4}" || true)" -eq 1 \
       && "$(grep -c "^${key}=" "${backend_114}" || true)" -eq 1 ]] || {
       echo "Both backend configs must contain exactly one ${key}" >&2
@@ -706,6 +736,17 @@ validate_mysql_cluster_config() {
   grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root' "${backend_114}"
   grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_4}"
   grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_114}"
+  backend_4_value="$(sed -n \
+    's/^TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=//p' \
+    "${backend_4}")"
+  backend_114_value="$(sed -n \
+    's/^TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=//p' \
+    "${backend_114}")"
+  [[ "${backend_4_value}" == "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64}" \
+    && "${backend_114_value}" == "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64}" ]] || {
+    echo "Backend local-client signing public keys do not match the package input" >&2
+    exit 1
+  }
   grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_4}"
   grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_114}"
   for expected in \

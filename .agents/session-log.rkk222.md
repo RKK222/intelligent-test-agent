@@ -13325,14 +13325,17 @@
 - 组织 RSA 私钥、公钥固定保存在当前仓库工作树 `.secure/`，目录与 PEM 已通过本地 `.git/info/exclude` 和既有 `*.pem` 规则排除，不提交 Git，也不得进入发布归档；组织公钥 DER SHA-256 为 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`。
 - 客户端分发验收改为精确要求 `CLIENT_JAR`、`JDK`、`OPENCODE`、`PUBLIC_CAPABILITIES` 四类制品，并逐项核对路径、大小和 SHA-256。
 - 增量发布夹具补齐公共能力制品，并新增篡改该制品后必须验收失败的负向回归；部署 README 同步记录四制品门禁。
+- 外层双后台封装必须显式读取匹配的组织 PEM 公钥，在临时副本中写入 `.4/.114` 同一版本管理公钥；缺少公钥、格式错误或两台最终值不一致时拒绝打包，私钥不被读取或封装。
 
 ### How
 
 - `bash -n`、`git diff --check` 通过。
 - `tools/verify-internal-incremental-components.sh` 通过，覆盖全量、复封、正常增量、已部署 baseline 复用及组件单独更新。
 - `deploy/internal/tests/local-opencode-client-package-test.sh` 通过，覆盖麒麟 ARM64 单壳 DEB、不可变签名 release、catalog、公共能力离线制品和安装引导。
+- `tools/verify-internal-two-backend-complete-package.sh` 通过，新增覆盖旧节点包自动注入同一组织公钥以及未提供公钥必须失败，并继续覆盖 Flyway、敏感配置脱敏、固定名覆盖和增量组件复用。
 
 ### Result
 
 - 四制品发布门禁修复并完成定向运行验证；不变更 HTTP API、事件、数据库、Flyway、部署节点、前后端业务代码、generated SDK 或 OpenCode 只读源码。
+- 复用 2026-08-18 节点配置时发现旧包尚无客户端版本管理公钥，现已由外层封装门禁补齐，避免覆盖现场 `backend.env` 后新客户端 release 无法验签。
 - 本轮客户端需在两台已安装机器上全量卸载/替换一次；之后只要固定组织私钥未丢失，即可继续正常签名升级。正式企业 ZIP 与目标机 Flyway 历史门禁仍在本次发布流程中继续处理。
