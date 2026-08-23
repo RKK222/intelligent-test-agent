@@ -27,6 +27,19 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 - 新版不再配置 `OPENCODE_MANAGER_ID`、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_LINUX_SERVER_ID`。
 - 当前前端实体 Nginx 安装在 `/data/apps/nginx`；单后台现场先运行 `configure-single-deployment.sh frontend` 生成 `nginx.env`，不要用 PATH 中可能读取 `/root/conf/nginx.conf` 的其他 `nginx`。
 
+## 企业公共能力权威源
+
+涉及本地客户端使用公共 Agent、Skill、Tool 时，部署设计和操作说明必须遵守以下规则：
+
+- 企业内当前正式发布的公共 Git commit 是客户端公共能力的唯一权威源。以 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 对应仓库已经提交并完成平台发布的固定 commit 为准，不读取任一服务器尚未提交的工作目录变更，也不以 Mac 打包机中的公共配置覆盖企业版本。
+- Mac 交付物中的客户端基线和可移植 Node 运行时只负责首次安装兜底及离线执行条件，不代表企业最终公共能力版本。客户端注册到企业平台后，应比较企业当前兼容能力版本，并在用户确认后切换到企业版本；后续更新继续由用户确认，不得自动安装。
+- 企业平台首次部署公共能力同步功能后，即使公共 Agent 没有再次发布，也必须从企业当前已发布 commit 生成一次初始完整能力包，避免要求管理员为了触发同步而制造无意义的新提交。
+- 能力包只允许从已发布 commit 导出 `agents/**`、`skills/**`、`tools/**` 及经过裁剪的可移植依赖；不得携带 `opencode.jsonc`、密钥、服务器地址、`.git`、缓存或原始 `node_modules`。
+- 多后台部署必须先确认所有公共配置副本已经收敛到同一发布 commit，再集中生成并按摘要保存一份能力包；禁止从随机响应的某台服务器工作目录生成客户端版本。
+- 公共 Tool 依赖不在锁定的可移植运行时中，或包含安装脚本、原生扩展、未锁定依赖时，该公共 commit 对客户端标记为 `SERVER_ONLY`。服务器公共配置仍可按现有流程发布，客户端继续使用上一兼容版本。
+- 需要增加客户端 Tool 依赖时，只能在外网 Mac 更新受控 runtime package/lock 并重新制作完整离线交付物，随后按企业升级流程部署 programs、worker、后端和相关客户端制品；禁止在企业内执行 `npm install` 或后台下载。
+- 回答部署问题时必须区分“目标规则”和“当前版本已经实现的能力”。未验证能力包生成、持久化、通知、用户确认、客户端安装与回滚链路前，不得声称企业公共能力同步已经生效。
+
 ## 每次回答必须包含
 
 回答企业内部署问题时，不要只给单条命令。必须覆盖：
@@ -39,6 +52,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 6. 验证命令和预期现象。
 7. `opencode-manager` 端口或连接报错时的优先排查点。
 8. 涉及数据库升级时，包含停机前 `flyway_schema_history` 查询、已知 checksum 判定、首台 Java 升级后复查和“失败即停止后续节点”条件。
+9. 涉及本地客户端公共能力时，说明企业公共 Git 的权威 commit、当前实现状态、客户端当前/目标版本、用户确认方式，以及不兼容 Tool 的 `SERVER_ONLY` 处理结果。
 
 ## 现场操作说明偏好
 
