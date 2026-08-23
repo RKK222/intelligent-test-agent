@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
-import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, KeyRound, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
 import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess, Workspace } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
@@ -89,8 +89,12 @@ const props = withDefaults(
     opencodeEndpointsLoading?: boolean;
     /** 实例接口成功确认管理员关闭后隐藏服务端状态；个人重启入口仍保留。 */
     showServerOpencodeStatus?: boolean;
-    /** 独立灰度接口的权威结果；加载失败或缺省时严格隐藏下载入口。 */
-    localClientDownloadAllowed?: boolean;
+    /** 独立灰度接口的权威结果；加载失败或缺省时严格隐藏全部客户端相关功能。 */
+    localClientVisible?: boolean;
+    /** Client Key 仍有效时才提供撤销入口，避免把“撤销”误当成创建或轮换。 */
+    canRevokeLocalClientKey?: boolean;
+    localClientRestartingId?: string | null;
+    localClientKeyRevoking?: boolean;
     opencodeProcessLoading?: boolean;
     opencodeProcessInitializing?: boolean;
     processRestarting?: boolean;
@@ -145,7 +149,10 @@ const props = withDefaults(
     opencodeEndpoints: () => [],
     opencodeEndpointsLoading: false,
     showServerOpencodeStatus: true,
-    localClientDownloadAllowed: false,
+    localClientVisible: false,
+    canRevokeLocalClientKey: false,
+    localClientRestartingId: null,
+    localClientKeyRevoking: false,
     showProcessStatusInPet: false,
     onboardingActive: false,
     sideQuestionAvailable: true,
@@ -202,6 +209,8 @@ const emit = defineEmits<{
   (e: "refresh-opencode-process"): void;
   (e: "initialize-process"): void;
   (e: "restart-process"): void;
+  (e: "restart-local-client", clientInstanceId: string): void;
+  (e: "revoke-local-client-key"): void;
   (e: "join-app", appId: string, callback: (success: boolean) => void): void;
   (e: "robot-side-question", question: string): void;
   (e: "close-robot-side-question"): void;
@@ -653,13 +662,16 @@ const opencodeServiceDisplay = computed(() => {
   return { tone: "unassigned", text: "待分配专属进程" };
 });
 
-const localClientEndpoints = computed(() =>
-  props.opencodeEndpoints.filter(endpoint => endpoint.runtimeKind === "LOCAL_CLIENT")
-);
+const visibleOpencodeEndpoints = computed(() => props.opencodeEndpoints.filter(
+  endpoint => endpoint.runtimeKind !== "LOCAL_CLIENT" || props.localClientVisible === true
+));
+const localClientEndpoints = computed(() => visibleOpencodeEndpoints.value.filter(
+  endpoint => endpoint.runtimeKind === "LOCAL_CLIENT"
+));
 
 /** 已有任一在线客户端时隐藏安装入口，避免把“再下载”误当成后续操作。 */
 const showLocalClientDownload = computed(() =>
-  props.localClientDownloadAllowed === true
+  props.localClientVisible === true
   && !props.opencodeEndpointsLoading
   && !localClientEndpoints.value.some(endpoint => endpoint.online)
 );
@@ -2781,10 +2793,10 @@ function submitJoinApp() {
               <UserRound class="figma-user-menu-icon" />
               <span class="figma-user-menu-name">{{ userName }}</span>
             </div>
-            <div v-if="!fixedWorkspace && (opencodeEndpoints?.length || opencodeEndpointsLoading)" class="figma-endpoint-list" aria-label="OpenCode 实例列表">
+            <div v-if="!fixedWorkspace && (visibleOpencodeEndpoints.length || opencodeEndpointsLoading)" class="figma-endpoint-list" aria-label="OpenCode 实例列表">
               <div class="figma-endpoint-list-title">OpenCode 实例</div>
-              <div v-if="opencodeEndpointsLoading && !opencodeEndpoints?.length" class="figma-endpoint-empty">正在读取实例状态…</div>
-              <article v-for="endpoint in opencodeEndpoints" :key="`${endpoint.runtimeKind}:${endpoint.endpointId}`" class="figma-endpoint-card">
+              <div v-if="opencodeEndpointsLoading && !visibleOpencodeEndpoints.length" class="figma-endpoint-empty">正在读取实例状态…</div>
+              <article v-for="endpoint in visibleOpencodeEndpoints" :key="`${endpoint.runtimeKind}:${endpoint.endpointId}`" class="figma-endpoint-card">
                 <span :class="['figma-endpoint-dot', endpoint.online && 'is-online', endpoint.online && !endpoint.healthy && 'is-warning']" aria-hidden="true" />
                 <div class="figma-endpoint-content">
                   <div class="figma-endpoint-heading">
@@ -2795,6 +2807,18 @@ function submitJoinApp() {
                   <div v-if="endpoint.observedRemoteAddress && endpoint.runtimeKind === 'LOCAL_CLIENT'">后台观察：{{ endpoint.observedRemoteAddress }}</div>
                   <div>{{ endpointVersionText(endpoint) }}</div>
                   <div v-if="endpoint.lastHeartbeatAt">心跳：{{ new Date(endpoint.lastHeartbeatAt).toLocaleString() }}</div>
+                  <button
+                    v-if="endpoint.runtimeKind === 'LOCAL_CLIENT'"
+                    type="button"
+                    class="figma-endpoint-action"
+                    role="menuitem"
+                    :data-testid="`restart-local-client-${endpoint.endpointId}`"
+                    :disabled="!endpoint.online || localClientRestartingId === endpoint.endpointId"
+                    @click="emit('restart-local-client', endpoint.endpointId)"
+                  >
+                    <RefreshCw :class="{ 'is-spinning': localClientRestartingId === endpoint.endpointId }" />
+                    {{ localClientRestartingId === endpoint.endpointId ? "正在重启本地 OpenCode…" : "重启本地 OpenCode" }}
+                  </button>
                 </div>
               </article>
             </div>
@@ -2843,6 +2867,18 @@ function submitJoinApp() {
             >
               <RefreshCw class="figma-user-menu-icon" :class="{ 'is-spinning': processRestarting }" />
               <span>{{ processRestarting ? "正在重启服务端 OpenCode…" : "重启服务端 OpenCode" }}</span>
+            </button>
+            <button
+              v-if="!fixedWorkspace && localClientVisible && canRevokeLocalClientKey"
+              type="button"
+              class="figma-user-menu-item"
+              role="menuitem"
+              data-testid="revoke-local-client-key"
+              :disabled="localClientKeyRevoking"
+              @click="emit('revoke-local-client-key')"
+            >
+              <KeyRound class="figma-user-menu-icon" />
+              <span>{{ localClientKeyRevoking ? "正在撤销 Client Key…" : "撤销 Client Key" }}</span>
             </button>
             <button v-if="false" type="button" class="figma-user-menu-item" role="menuitem" @mousedown.prevent="logout">
               <LogOut class="figma-user-menu-icon" />
@@ -4965,6 +5001,37 @@ function submitJoinApp() {
   color: #71717a;
   font-size: 10px;
   font-weight: 500;
+}
+
+.figma-endpoint-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border: 1px solid #e4e4e7;
+  border-radius: 6px;
+  background: #fff;
+  color: #3f3f46;
+  font: inherit;
+  cursor: pointer;
+}
+
+.figma-endpoint-action:hover,
+.figma-endpoint-action:focus-visible {
+  border-color: #a1a1aa;
+  outline: none;
+}
+
+.figma-endpoint-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.figma-endpoint-action svg {
+  width: 12px;
+  height: 12px;
 }
 
 .figma-user-menu-summary,

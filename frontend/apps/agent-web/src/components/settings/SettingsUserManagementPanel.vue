@@ -126,8 +126,13 @@ async function updateRollout(
   rolloutError.value = "";
   setRolloutEnabled(row.userId, capability, enabled);
   try {
+    const effectDescription = capability === "localClient"
+      ? enabled
+        ? "开启后将显示客户端下载、客户端状态、本地工作区和客户端设置，不会自动启动客户端。"
+        : "关闭后将隐藏客户端下载、客户端状态、本地工作区和客户端设置，不会停止客户端或撤销 Client Key。"
+      : "确认后将立即保存。";
     await ElMessageBox.confirm(
-      `确认${actionLabel}用户“${row.username}”的${capabilityLabel}吗？确认后将立即保存。`,
+      `确认${actionLabel}用户“${row.username}”的${capabilityLabel}吗？${effectDescription}`,
       `${capabilityLabel}设置`,
       {
         type: "warning",
@@ -627,7 +632,7 @@ onMounted(() => {
           :closable="false"
           show-icon
           title="存量用户处理说明"
-          description="账号、用户名、角色和用户级能力灰度统一在此维护。记忆模型与抽取策略是全局配置，只需在“记忆能力”页保存一次；这里仅决定哪些用户可以使用记忆或下载本地客户端。"
+          description="账号、用户名、角色和用户级能力灰度统一在此维护。记忆模型与抽取策略是全局配置，只需在“记忆能力”页保存一次；这里决定哪些用户可以使用记忆，以及是否显示本地客户端相关功能。"
         />
         <div class="ta-list-header">
           <h4 class="ta-section-title">用户列表</h4>

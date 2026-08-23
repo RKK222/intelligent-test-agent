@@ -57,9 +57,9 @@ function api(instance: LocalClientInstance = clientInstance): BackendApiClient {
   };
 }
 
-function renderPanel(client: BackendApiClient, pageActive: boolean) {
+function renderPanel(client: BackendApiClient, pageActive: boolean, localClientVisible = true) {
   return render(SettingsPersonalPanel, {
-    props: { currentUser: user, pageActive },
+    props: { currentUser: user, pageActive, localClientVisible },
     global: { provide: { api: client } }
   });
 }
@@ -86,6 +86,17 @@ describe("SettingsPersonalPanel local-client version state", () => {
     await view.rerender({ currentUser: user, pageActive: false });
     await vi.advanceTimersByTimeAsync(15_000);
     expect(client.listMyLocalClientInstances).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides client settings without disconnecting or mutating the client when rollout visibility is disabled", async () => {
+    const client = api();
+    const view = renderPanel(client, true, false);
+
+    await waitFor(() => expect(client.listPersonalSshKeys).toHaveBeenCalledTimes(1));
+    expect(view.queryByRole("region", { name: "本地 OpenCode 客户端" })).toBeNull();
+    expect(client.getMyLocalClientCredential).not.toHaveBeenCalled();
+    expect(client.listMyLocalClientInstances).not.toHaveBeenCalled();
+    expect(client.commandLocalClientOpencode).not.toHaveBeenCalled();
   });
 
   it.each([

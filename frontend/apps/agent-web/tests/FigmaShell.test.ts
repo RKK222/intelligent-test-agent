@@ -1378,7 +1378,8 @@ describe("FigmaShell", () => {
     const wrapper = mountShell({
       props: {
         currentUserName: "developer",
-        localClientDownloadAllowed: true,
+        localClientVisible: true,
+        canRevokeLocalClientKey: true,
         opencodeEndpoints: [{
           runtimeKind: "SERVER_PROCESS",
           endpointId: "server-opencode",
@@ -1406,6 +1407,9 @@ describe("FigmaShell", () => {
     expect(restartButton.attributes("disabled")).toBeUndefined();
     await restartButton.trigger("click");
     expect(wrapper.emitted("restart-process")).toHaveLength(1);
+    const revokeButton = wrapper.get('[data-testid="revoke-local-client-key"]');
+    await revokeButton.trigger("click");
+    expect(wrapper.emitted("revoke-local-client-key")).toHaveLength(1);
 
     await wrapper.setProps({ processRestarting: true });
     expect(wrapper.get('[data-testid="restart-own-process"]').attributes("disabled")).toBeDefined();
@@ -1414,6 +1418,7 @@ describe("FigmaShell", () => {
     await wrapper.setProps({ fixedWorkspace: true });
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="restart-own-process"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="revoke-local-client-key"]').exists()).toBe(false);
   });
 
   it("hides the local client download when independent access is absent or false", async () => {
@@ -1422,7 +1427,8 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
 
     await wrapper.setProps({
-      localClientDownloadAllowed: false,
+      localClientVisible: false,
+      canRevokeLocalClientKey: true,
       opencodeEndpoints: [{
         runtimeKind: "SERVER_PROCESS",
         endpointId: "server-opencode",
@@ -1433,16 +1439,30 @@ describe("FigmaShell", () => {
         reportedAddresses: [],
         healthy: true,
         capabilities: { localClientDownload: false }
+      }, {
+        runtimeKind: "LOCAL_CLIENT",
+        endpointId: "stale-local-client",
+        displayName: "不应显示的本地客户端",
+        online: true,
+        processStatus: "RUNNING",
+        connectionGeneration: 1,
+        reportedAddresses: ["127.0.0.1"],
+        healthy: true,
+        capabilities: {}
       }]
     });
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="revoke-local-client-key"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("不应显示的本地客户端");
+    expect(wrapper.find('[data-testid="restart-local-client-stale-local-client"]').exists()).toBe(false);
   });
 
   it("hides the installer while a local client is online and restores it after disconnect", async () => {
     const wrapper = mountShell({
       props: {
         currentUserName: "developer",
-        localClientDownloadAllowed: true,
+        localClientVisible: true,
+        canRevokeLocalClientKey: true,
         opencodeEndpoints: [{
           runtimeKind: "SERVER_PROCESS",
           endpointId: "server-opencode",
@@ -1475,6 +1495,9 @@ describe("FigmaShell", () => {
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("本地 OpenCode 健康");
+    const localRestart = wrapper.get('[data-testid="restart-local-client-local-client-1"]');
+    await localRestart.trigger("click");
+    expect(wrapper.emitted("restart-local-client")?.[0]).toEqual(["local-client-1"]);
 
     const currentEndpoints = wrapper.props("opencodeEndpoints") as OpencodeEndpoint[];
     await wrapper.setProps({
@@ -1483,6 +1506,7 @@ describe("FigmaShell", () => {
         : endpoint)
     });
     expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("离线");
+    expect(wrapper.get('[data-testid="restart-local-client-local-client-1"]').attributes("disabled")).toBeDefined();
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(true);
   });
 

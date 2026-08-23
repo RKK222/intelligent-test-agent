@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.localclient.LocalClientCredentialStatus;
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientRolloutRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientVersionModels;
 import com.enterprise.testagent.domain.localclient.LocalClientVersionRepository;
 import com.enterprise.testagent.domain.user.UserId;
@@ -29,6 +30,7 @@ class LocalClientInstanceApplicationServiceTest {
         LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
         LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
         LocalClientCredentialRepository credentials = mock(LocalClientCredentialRepository.class);
+        LocalClientRolloutRepository rollout = mock(LocalClientRolloutRepository.class);
         Instant now = Instant.parse("2026-08-20T10:00:00Z");
         when(credentials.findByUserId(userId)).thenReturn(Optional.of(credential(
                 userId, LocalClientCredentialStatus.ACTIVE, now, null)));
@@ -38,9 +40,11 @@ class LocalClientInstanceApplicationServiceTest {
                 "20260820200000", 6, userId, now)));
         when(versions.findUserPolicy(userId)).thenReturn(Optional.of(new LocalClientVersionModels.UserPolicy(
                 userId, "20260820180000", 7, userId, now)));
+        when(rollout.isEnabled(userId)).thenReturn(true);
 
         LocalClientInstanceApplicationService service =
                 new LocalClientInstanceApplicationService(instances, connections, versions, credentials);
+        service.setRolloutRepository(rollout);
 
         LocalClientInstanceResponses.InstanceView view = service.list(userId).getFirst();
 
@@ -58,6 +62,7 @@ class LocalClientInstanceApplicationServiceTest {
         LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
         LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
         LocalClientCredentialRepository credentials = mock(LocalClientCredentialRepository.class);
+        LocalClientRolloutRepository rollout = mock(LocalClientRolloutRepository.class);
         Instant now = Instant.parse("2026-08-20T10:00:00Z");
         when(credentials.findByUserId(userId)).thenReturn(Optional.of(credential(
                 userId, LocalClientCredentialStatus.REVOKED, now, now)));
@@ -66,6 +71,29 @@ class LocalClientInstanceApplicationServiceTest {
 
         LocalClientInstanceApplicationService service =
                 new LocalClientInstanceApplicationService(instances, connections, versions, credentials);
+        service.setRolloutRepository(rollout);
+
+        assertThat(service.list(userId)).isEmpty();
+    }
+
+    @Test
+    void administrativelyDisabledRolloutHidesInstancesWithoutRevokingTheCredential() {
+        UserId userId = new UserId("usr_local_instance_rollout_disabled");
+        LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
+        LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
+        LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
+        LocalClientCredentialRepository credentials = mock(LocalClientCredentialRepository.class);
+        LocalClientRolloutRepository rollout = mock(LocalClientRolloutRepository.class);
+        Instant now = Instant.parse("2026-08-20T10:00:00Z");
+        when(credentials.findByUserId(userId)).thenReturn(Optional.of(credential(
+                userId, LocalClientCredentialStatus.ACTIVE, now, null)));
+        when(rollout.isEnabled(userId)).thenReturn(false);
+        when(instances.findByUserId(userId)).thenReturn(List.of(instance(
+                "lci_local_instance_rollout_disabled", userId, now)));
+
+        LocalClientInstanceApplicationService service =
+                new LocalClientInstanceApplicationService(instances, connections, versions, credentials);
+        service.setRolloutRepository(rollout);
 
         assertThat(service.list(userId)).isEmpty();
     }

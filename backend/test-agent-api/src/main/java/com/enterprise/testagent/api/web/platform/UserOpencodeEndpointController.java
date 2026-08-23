@@ -28,7 +28,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/** 聚合当前用户的服务端 OpenCode 与全部本地客户端实例，供头像菜单统一展示。 */
+/** 聚合当前用户的服务端 OpenCode 与灰度可见的本地客户端实例，供头像菜单统一展示。 */
 @RestController
 public class UserOpencodeEndpointController {
 
@@ -63,7 +63,7 @@ public class UserOpencodeEndpointController {
                     if (!processAssignmentService.isServerProjectionHidden(userId, normalizedAgentId)) {
                         endpoints.add(server(
                                 processAssignmentService.status(userId, normalizedAgentId, traceId),
-                                localClientDownloadAllowed(userId, traceId)));
+                                localClientFeatureVisible(userId, traceId)));
                     }
                     localClientInstanceService.list(userId).stream().map(EndpointView::local).forEach(endpoints::add);
                     return ApiResponse.ok(List.copyOf(endpoints), traceId);
@@ -72,29 +72,29 @@ public class UserOpencodeEndpointController {
     }
 
     /**
-     * 独立返回当前用户的下载灰度，避免实例列表被路由到尚未升级的进程归属节点后丢失 capability。
+     * 兼容路径独立返回当前用户的客户端功能可见性灰度，避免实例列表被路由到旧节点后丢失 capability。
      */
     @GetMapping("/api/internal/platform/local-opencode-client/download-access/me")
     public Mono<ApiResponse<DownloadAccessView>> downloadAccess(ServerWebExchange exchange) {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         String traceId = RuntimeApiSupport.traceId(exchange);
         return Mono.fromCallable(() -> ApiResponse.ok(
-                        new DownloadAccessView(localClientDownloadAllowed(userId, traceId)),
+                        new DownloadAccessView(localClientFeatureVisible(userId, traceId)),
                         traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    /** 灰度存储异常时只隐藏下载入口，不影响用户查看和使用已有 OpenCode 实例。 */
-    private boolean localClientDownloadAllowed(UserId userId, String traceId) {
+    /** 灰度存储异常时客户端相关入口失败关闭；服务端 OpenCode 投影继续独立展示。 */
+    private boolean localClientFeatureVisible(UserId userId, String traceId) {
         try {
-            return localClientRolloutService.isDownloadAllowed(userId);
+            return localClientRolloutService.isClientFeatureVisible(userId);
         } catch (RuntimeException exception) {
-            log.warn("Local client rollout lookup failed; download entry hidden, traceId={}", traceId, exception);
+            log.warn("Local client rollout lookup failed; client features hidden, traceId={}", traceId, exception);
             return false;
         }
     }
 
-    private static EndpointView server(UserOpencodeProcessStatusResponse response, boolean localClientDownloadAllowed) {
+    private static EndpointView server(UserOpencodeProcessStatusResponse response, boolean localClientFeatureVisible) {
         boolean online = response.status() == UserOpencodeProcessAvailability.READY;
         return new EndpointView(
                 RuntimeKind.SERVER_PROCESS,
@@ -115,10 +115,10 @@ public class UserOpencodeEndpointController {
                 response.linuxServerId(),
                 response.containerId(),
                 response.serviceAddress(),
-                serverCapabilities(localClientDownloadAllowed));
+                serverCapabilities(localClientFeatureVisible));
     }
 
-    private static Map<String, Boolean> serverCapabilities(boolean localClientDownloadAllowed) {
+    private static Map<String, Boolean> serverCapabilities(boolean localClientFeatureVisible) {
         Map<String, Boolean> values = new LinkedHashMap<>();
         values.put("chat", true);
         values.put("fileManagement", true);
@@ -128,11 +128,11 @@ public class UserOpencodeEndpointController {
         values.put("agentConfig", true);
         values.put("attachments", true);
         values.put("collaboration", true);
-        values.put("localClientDownload", localClientDownloadAllowed);
+        values.put("localClientDownload", localClientFeatureVisible);
         return Map.copyOf(values);
     }
 
-    /** 当前用户下载权限只暴露布尔值，不返回灰度名单或审计信息。 */
+    /** 当前用户客户端功能可见性只暴露布尔值，不返回灰度名单或审计信息。 */
     public record DownloadAccessView(boolean allowed) {
     }
 

@@ -251,7 +251,7 @@ describe("SettingsUserManagementPanel", () => {
     );
     expect(confirm).toHaveBeenNthCalledWith(
       2,
-      "确认开启用户“alice”的客户端灰度吗？确认后将立即保存。",
+      "确认开启用户“alice”的客户端灰度吗？开启后将显示客户端下载、客户端状态、本地工作区和客户端设置，不会自动启动客户端。",
       "客户端灰度设置",
       expect.objectContaining({ confirmButtonText: "确认开启", cancelButtonText: "取消" })
     );

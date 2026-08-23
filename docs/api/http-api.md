@@ -4313,17 +4313,17 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me/copy` | `PlaintextKey(clientKey)` | 仅 `revealAvailable=true` 的首次调用成功；成功后消费展示资格，第二次返回 `409 CONFLICT` 且不再解密。强制 `no-store/no-cache/no-referrer`；调用记审计。 |
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新 `CredentialView` | 原子提升版本，重置新版本的首次展示资格，并撤销全部连接与模型 grant。 |
 | `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant，并隐藏本地实例及工作区投影；不删除平台记录或本地目录。 |
-| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户有效 Client key 下的稳定实例及在线、generation、OpenCode 状态 | 主动撤销后返回空列表；记录保留，重新启用后恢复。reported/observed 地址仅展示。 |
-| `GET` | `/api/internal/platform/local-opencode-client/download-access/me` | `{allowed}` | 当前登录用户可调用；只返回下载入口灰度布尔值。该接口不跟随 OpenCode 进程归属转发，避免滚动升级期间旧节点丢失 capability；查询异常失败关闭为 `false`。 |
-| `GET` | `/api/internal/platform/local-opencode-client/admin/rollout-users?page={page}&size={size}` | 本地客户端下载灰度用户分页 | 仅 `SUPER_ADMIN`；只返回启用记录和最近操作人/时间。 |
+| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户有效 Client key 且客户端灰度可见时的稳定实例及在线、generation、OpenCode 状态 | 主动撤销或关闭灰度后返回空列表；记录保留。灰度关闭不撤销 Key 或断开客户端。reported/observed 地址仅展示。 |
+| `GET` | `/api/internal/platform/local-opencode-client/download-access/me` | `{allowed}` | 兼容路径返回当前用户客户端相关功能是否可见；控制下载、实例状态、本地工作区和个人客户端设置。该接口不跟随 OpenCode 进程归属转发；查询异常失败关闭为 `false`。 |
+| `GET` | `/api/internal/platform/local-opencode-client/admin/rollout-users?page={page}&size={size}` | 本地客户端功能可见性灰度用户分页 | 仅 `SUPER_ADMIN`；只返回启用记录和最近操作人/时间。 |
 | `POST` | `/api/internal/platform/local-opencode-client/admin/rollout-users` | `{userId}` → 灰度用户 | 仅 `SUPER_ADMIN`；目标必须是存在且可登录的平台用户，重复添加幂等启用。 |
-| `DELETE` | `/api/internal/platform/local-opencode-client/admin/rollout-users/{userId}` | 空响应 | 仅 `SUPER_ADMIN`；关闭下载入口但保留数据库审计记录，不撤销已安装客户端或 client key。 |
+| `DELETE` | `/api/internal/platform/local-opencode-client/admin/rollout-users/{userId}` | 空响应 | 仅 `SUPER_ADMIN`；隐藏客户端相关功能并保留数据库审计记录，不停止客户端、不撤销 client key、不删除本地目录。 |
 | `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/opencode/commands` | `{action: START\|RESTART\|STOP\|STATUS}` | 复用公共启动/停止/状态服务；跨 Java 精确转发到持有 generation 的节点。 |
 | `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 网页目录浏览兜底；只允许实例 owner，目标固定持有连接 Java。 |
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 网页兜底注册；客户端先验证真实绝对目录，再事务性注册；离线失败。同步反向 RPC 调度到 `boundedElastic`。 |
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}/recent` | 本地 Workspace | 校验当前用户与有效本地绑定后，复用全局最近工作区偏好保存本次选择；重新登录或打开工作台时优先恢复该本地工作区，后续选择服务器工作区会覆盖此偏好。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
-| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 可见服务端实例加所有有效本地实例 | 当前只允许 `agentId=opencode`；服务端 binding 为 INACTIVE 时省略服务端实例，否则排第一。实例返回 capability map；`localClientDownload` 保留为 additive 兼容字段。网页下载入口以独立 `download-access/me` 为权威结果，避免实例请求转发到旧进程归属节点时闪现或消失。 |
+| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 可见服务端实例加灰度可见的有效本地实例 | 当前只允许 `agentId=opencode`；服务端 binding 为 INACTIVE 时只省略服务端实例，本地实例独立保留。实例返回 capability map；`localClientDownload` 保留为 additive 兼容字段，网页客户端功能以独立 `download-access/me` 为权威结果。 |
 
 `revealAvailable` 为 `true` 时才可消费明文；历史凭据升级后已写入展示时间，视为已经展示，必须 rotate 后才能再次
 获得一次 copy 机会。任何客户端或浏览器都不得缓存、记录或转发 `clientKey`。
@@ -4349,9 +4349,10 @@ Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追
   配置。
 
 旧调用不传 workspaceId 时仍选择服务端 OpenCode；本地实例离线或换代返回稳定冲突/不可用错误，不回退。
-客户端下载入口默认对所有用户隐藏，只能由超级管理员在“系统管理 → 用户管理”中按平台 `userId` 打开客户端灰度。该名单只
-控制网页下载入口，不是客户端 WSS 鉴权、制品下载鉴权或 client key 生命周期的一部分；即使前端被篡改，后端
-连接认证仍必须校验有效 client key。
+本地客户端相关功能默认对所有用户隐藏，只能由超级管理员在“系统管理 → 用户管理”中按平台 `userId` 打开
+客户端灰度。该名单只控制网页中的下载、实例状态、本地工作区和个人客户端设置可见性，不是客户端 WSS
+鉴权、制品下载鉴权或 client key 生命周期的一部分；关闭灰度不会断开客户端。即使前端被篡改，后端连接
+认证仍必须校验有效 client key。
 
 ## 本地工作区受保护 Agent/Skill API
 

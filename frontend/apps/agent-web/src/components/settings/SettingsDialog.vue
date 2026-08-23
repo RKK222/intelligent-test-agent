@@ -15,6 +15,7 @@ const props = defineProps<{
   initialAppId?: string;
   initialMenuKey?: MenuKey;
   initialAppTab?: "members" | "repositories" | "workspaces";
+  localClientVisible?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -117,6 +118,7 @@ function selectMenu(key: MenuKey) {
           :initial-app-tab="props.initialAppTab"
           :refresh-key="refreshKey"
           :page-active="props.open"
+          :local-client-visible="props.localClientVisible === true"
           @switch-menu="handleSwitchMenu"
           @workspace-catalog-changed="(reason?: 'LOCAL_CLIENT_REVOKED') => emit('workspace-catalog-changed', reason)"
         />

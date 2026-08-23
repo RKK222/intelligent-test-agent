@@ -42,6 +42,9 @@
                 join local_client_credentials lcc
                   on lcc.user_id = lcw_visible.user_id
                  and lcc.status = 'ACTIVE'
+                join local_client_rollout_users lcru
+                  on lcru.user_id = lcw_visible.user_id
+                 and lcru.enabled = true
                 where lcw_visible.workspace_id = w.workspace_id
                   and lcw_visible.user_id = #{userId}
             )

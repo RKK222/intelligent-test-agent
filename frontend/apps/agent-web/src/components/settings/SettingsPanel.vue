@@ -15,6 +15,7 @@ const props = defineProps<{
   initialAppTab?: "members" | "repositories" | "workspaces";
   refreshKey?: number;
   pageActive: boolean;
+  localClientVisible?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -40,7 +41,9 @@ const effectiveKey = computed(() => {
 
 const current = computed<PanelDef>(() => panels[effectiveKey.value] ?? panels.personal);
 const currentPageActivityProps = computed(() =>
-  effectiveKey.value === "personal" ? { pageActive: props.pageActive } : {}
+  effectiveKey.value === "personal"
+    ? { pageActive: props.pageActive, localClientVisible: props.localClientVisible === true }
+    : {}
 );
 </script>
 

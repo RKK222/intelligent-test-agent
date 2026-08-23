@@ -13,9 +13,11 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssi
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.enterprise.testagent.system.management.localclient.LocalClientInstanceApplicationService;
+import com.enterprise.testagent.system.management.localclient.LocalClientInstanceResponses;
 import com.enterprise.testagent.system.management.localclient.LocalClientRolloutApplicationService;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
@@ -34,7 +36,7 @@ class UserOpencodeEndpointControllerTest {
                         UserOpencodeProcessAvailability.READY, false, "ready", "opc_1", "linux-1", "container-1",
                         4098, "http://127.0.0.1:4098", NOW));
         when(instances.list(USER_ID)).thenReturn(List.of());
-        when(rollout.isDownloadAllowed(USER_ID)).thenReturn(false, true);
+        when(rollout.isClientFeatureVisible(USER_ID)).thenReturn(false, true);
         WebTestClient client = client(process, instances, rollout);
 
         client.get().uri("/api/internal/agent/opencode/opencode-endpoints/me")
@@ -55,7 +57,7 @@ class UserOpencodeEndpointControllerTest {
                         UserOpencodeProcessAvailability.READY, false, "ready", "opc_1", "linux-1", "container-1",
                         4098, "http://127.0.0.1:4098", NOW));
         when(instances.list(USER_ID)).thenReturn(List.of());
-        when(rollout.isDownloadAllowed(USER_ID)).thenThrow(new IllegalStateException("database unavailable"));
+        when(rollout.isClientFeatureVisible(USER_ID)).thenThrow(new IllegalStateException("database unavailable"));
 
         client(process, instances, rollout).get()
                 .uri("/api/internal/agent/opencode/opencode-endpoints/me")
@@ -68,7 +70,7 @@ class UserOpencodeEndpointControllerTest {
         UserOpencodeProcessAssignmentService process = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
         LocalClientInstanceApplicationService instances = org.mockito.Mockito.mock(LocalClientInstanceApplicationService.class);
         LocalClientRolloutApplicationService rollout = org.mockito.Mockito.mock(LocalClientRolloutApplicationService.class);
-        when(rollout.isDownloadAllowed(USER_ID)).thenReturn(true);
+        when(rollout.isClientFeatureVisible(USER_ID)).thenReturn(true);
 
         client(process, instances, rollout).get()
                 .uri("/api/internal/platform/local-opencode-client/download-access/me")
@@ -79,23 +81,54 @@ class UserOpencodeEndpointControllerTest {
     }
 
     @Test
-    void administrativelyClosedServerEndpointIsOmittedWithoutHidingTheRestartApi() {
+    void administrativelyClosedServerEndpointIsOmittedWithoutHidingTheLocalEndpoint() {
         UserOpencodeProcessAssignmentService process = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
         LocalClientInstanceApplicationService instances = org.mockito.Mockito.mock(LocalClientInstanceApplicationService.class);
         LocalClientRolloutApplicationService rollout = org.mockito.Mockito.mock(LocalClientRolloutApplicationService.class);
         when(process.isServerProjectionHidden(USER_ID, "opencode")).thenReturn(true);
-        when(instances.list(USER_ID)).thenReturn(List.of());
+        when(instances.list(USER_ID)).thenReturn(List.of(localInstance()));
 
         client(process, instances, rollout).get()
                 .uri("/api/internal/agent/opencode/opencode-endpoints/me")
                 .exchange().expectStatus().isOk().expectBody()
-                .jsonPath("$.data").isEmpty();
+                .jsonPath("$.data.length()").isEqualTo(1)
+                .jsonPath("$.data[0].runtimeKind").isEqualTo("LOCAL_CLIENT")
+                .jsonPath("$.data[0].endpointId").isEqualTo("lci_mac_dev");
 
         verify(process, never()).status(
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString());
-        verify(rollout, never()).isDownloadAllowed(org.mockito.ArgumentMatchers.any());
+        verify(rollout, never()).isClientFeatureVisible(org.mockito.ArgumentMatchers.any());
+    }
+
+    private static LocalClientInstanceResponses.InstanceView localInstance() {
+        return new LocalClientInstanceResponses.InstanceView(
+                "lci_mac_dev",
+                "kaka@mac-dev",
+                "darwin",
+                "arm64",
+                "20260823090000",
+                "1.18.4",
+                true,
+                3,
+                List.of("127.0.0.1"),
+                "127.0.0.1",
+                4106,
+                "RUNNING",
+                true,
+                1234L,
+                NOW,
+                NOW,
+                NOW,
+                null,
+                Map.of("chat", true),
+                true,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     private static WebTestClient client(

@@ -60,6 +60,7 @@ import type {
   ManagedApplication,
   MemoryUsageView,
   MessagePart,
+  LocalClientCredential,
   PageResponse,
   PromptPart,
   Run,
@@ -1643,6 +1644,25 @@ const selectedWorkspace = computed(() => {
 });
 
 let localWorkspaceRouteSequence = 0;
+type ManagedWorkspaceReturnTarget = {
+  appId?: string;
+  workspaceId: string;
+  personalWorkspaceId?: string;
+  personalWorkspaceBranch?: string;
+};
+let managedWorkspaceBeforeLocal: ManagedWorkspaceReturnTarget | null = null;
+
+/** 进入本地工作区前只记住真实托管工作区；源码快照和体验区仍按各自的受控恢复链路处理。 */
+function rememberManagedWorkspaceBeforeLocal() {
+  const workspace = selectedWorkspace.value;
+  if (selectedWorkspaceKind.value !== "MANAGED" || !workspace || workspace.runtimeKind === "LOCAL_CLIENT") return;
+  managedWorkspaceBeforeLocal = {
+    appId: selectedAppId.value,
+    workspaceId: workspace.workspaceId,
+    personalWorkspaceId: currentPersonalWorkspaceId.value,
+    personalWorkspaceBranch: currentPersonalWorkspaceBranch.value
+  };
+}
 
 async function clearLocalWorkspaceRouteQuery() {
   const { localWorkspaceId: _ignored, ...query } = route.query;
@@ -1651,6 +1671,7 @@ async function clearLocalWorkspaceRouteQuery() {
 
 /** 客户端注册成功后打开此深链；先切换并渲染逻辑 Workspace，文件目录继续通过 WebSocket 后台加载。 */
 async function activateLocalWorkspace(workspaceId: string, sequence: number, clearRouteQuery: boolean) {
+  rememberManagedWorkspaceBeforeLocal();
   try {
     const workspace = workspaces.value.find((item) => item.workspaceId === workspaceId)
       ?? await api.getWorkspace(workspaceId);
@@ -2744,7 +2765,7 @@ watch(
   },
   { immediate: true }
 );
-const localClientDownloadAccessQuery = useQuery({
+const localClientFeatureVisibilityQuery = useQuery({
   queryKey: computed(() => ["local-client", "download-access", "me", authStore.token ?? ""] as const),
   enabled: opencodeProcessEnabled,
   queryFn: () => api.getMyLocalClientDownloadAccess(),
@@ -2753,8 +2774,44 @@ const localClientDownloadAccessQuery = useQuery({
   refetchInterval: 5_000,
   refetchIntervalInBackground: false
 });
-const localClientDownloadAllowed = computed(
-  () => localClientDownloadAccessQuery.data.value?.allowed === true
+const localClientVisible = computed(
+  () => localClientFeatureVisibilityQuery.data.value?.allowed === true
+);
+const localClientCredentialQuery = useQuery<LocalClientCredential>({
+  queryKey: computed(() => ["local-client", "credential", "me", authStore.token ?? ""] as const),
+  enabled: computed(() => opencodeProcessEnabled.value && localClientVisible.value),
+  queryFn: () => api.getMyLocalClientCredential(),
+  retry: false,
+  refetchOnWindowFocus: true
+});
+const canRevokeLocalClientKey = computed(() =>
+  localClientVisible.value
+  && localClientCredentialQuery.data.value?.exists === true
+  && localClientCredentialQuery.data.value?.status === "ACTIVE"
+);
+let localClientFeaturesWereVisible = false;
+watch(
+  [() => localClientFeatureVisibilityQuery.isSuccess.value, localClientVisible],
+  ([querySucceeded, visible]) => {
+    if (!querySucceeded) return;
+    if (visible) {
+      if (!localClientFeaturesWereVisible) {
+        void Promise.allSettled([
+          opencodeEndpointQuery.refetch(),
+          queryClient.invalidateQueries({ queryKey: ["workspaces"] }),
+          localClientCredentialQuery.refetch()
+        ]);
+      }
+      localClientFeaturesWereVisible = true;
+      return;
+    }
+    const hadLocalProjection = localClientFeaturesWereVisible
+      || selectedWorkspaceKind.value === "LOCAL_CLIENT"
+      || workspaces.value.some(workspace => workspace.runtimeKind === "LOCAL_CLIENT");
+    localClientFeaturesWereVisible = false;
+    if (hadLocalProjection) void hideLocalClientWorkspaceProjection("CLIENT_FEATURE_HIDDEN");
+  },
+  { immediate: true }
 );
 const publicConfigMessageGateQuery = useQuery({
   queryKey: computed(() => ["runtime", "opencode-process", "message-gate", authStore.token ?? ""] as const),
@@ -5084,6 +5141,8 @@ const initializeOpencodeProcessMutation = useMutation({
 const restartMyOpencodeProcessMutation = useMutation({
   mutationFn: (confirmRunning: boolean) => api.restartMyOpencodeProcess(confirmRunning)
 });
+const localClientRestartingId = ref<string | null>(null);
+const localClientKeyRevoking = ref(false);
 
 /** 头像入口和 dispose 失败通知共用同一重启编排与后端权威二次确认。 */
 async function restartMyOpencodeProcess(): Promise<boolean> {
@@ -5129,6 +5188,84 @@ async function restartMyOpencodeProcess(): Promise<boolean> {
   } catch (error) {
     feedback.value = errorFeedback("重启服务端 OpenCode 失败", error);
     return false;
+  }
+}
+
+/** 头像中的本地重启按实例精确路由，语义与服务端重启并列但互不影响。 */
+async function restartLocalClientOpencode(clientInstanceId: string) {
+  if (!localClientVisible.value || localClientRestartingId.value) return;
+  const endpoint = opencodeEndpoints.value.find(candidate =>
+    candidate.runtimeKind === "LOCAL_CLIENT" && candidate.endpointId === clientInstanceId
+  );
+  if (!endpoint?.online) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认重启“${endpoint.displayName}”上的本地 OpenCode 吗？该操作不会重启或关闭服务端 OpenCode。`,
+      "确认重启本地 OpenCode",
+      {
+        type: "warning",
+        confirmButtonText: "确认重启",
+        cancelButtonText: "取消",
+        autofocus: false
+      }
+    );
+  } catch {
+    return;
+  }
+  localClientRestartingId.value = clientInstanceId;
+  try {
+    const result = await api.commandLocalClientOpencode(clientInstanceId, "RESTART");
+    await Promise.allSettled([
+      opencodeEndpointQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] })
+    ]);
+    feedback.value = {
+      kind: "success",
+      title: "本地 OpenCode 已重启",
+      description: result.message || endpoint.displayName
+    };
+  } catch (error) {
+    feedback.value = errorFeedback("重启本地 OpenCode 失败", error);
+  } finally {
+    localClientRestartingId.value = null;
+  }
+}
+
+/** 撤销仍复用个人设置的 Key 生命周期接口；与仅隐藏 UI 的客户端灰度保持独立。 */
+async function revokeLocalClientKeyFromAvatar() {
+  if (!canRevokeLocalClientKey.value || localClientKeyRevoking.value) return;
+  try {
+    await ElMessageBox.confirm(
+      "撤销后所有本地客户端会立即断开，本地 OpenCode 实例和工作区将不再显示；平台记录与本地目录不会删除，重新创建 Key 后可恢复。",
+      "确认撤销 Client Key",
+      {
+        type: "warning",
+        confirmButtonText: "确认撤销",
+        cancelButtonText: "取消",
+        autofocus: false
+      }
+    );
+  } catch {
+    return;
+  }
+  localClientKeyRevoking.value = true;
+  try {
+    await api.revokeMyLocalClientCredential();
+    await hideLocalClientWorkspaceProjection("LOCAL_CLIENT_REVOKED");
+    await Promise.allSettled([
+      localClientCredentialQuery.refetch(),
+      opencodeEndpointQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] })
+    ]);
+    feedback.value = {
+      kind: "success",
+      title: "Client Key 已撤销",
+      description: "本地客户端连接、实例和工作区已隐藏；客户端灰度设置未改变。"
+    };
+  } catch (error) {
+    feedback.value = errorFeedback("撤销 Client Key 失败", error);
+  } finally {
+    localClientKeyRevoking.value = false;
   }
 }
 
@@ -10356,33 +10493,82 @@ function closeSettings() {
   void router.replace({ name: "workbench" });
 }
 
-function refreshManagedWorkspaceCatalog(reason?: "LOCAL_CLIENT_REVOKED") {
-  // 异步创建操作真正成功时立即刷新底部选择器；不能只依赖关闭设置时可能过早的刷新。
-  void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
-  void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
-  if (reason !== "LOCAL_CLIENT_REVOKED") return;
+async function restoreManagedWorkspaceAfterLocalHidden(): Promise<string | undefined> {
+  // 服务端投影被超管关闭时不能为了兜底偷偷重启或选中隐藏工作区。
+  if (!opencodeEndpoints.value.some(endpoint => endpoint.runtimeKind === "SERVER_PROCESS")) return undefined;
+  const previous = managedWorkspaceBeforeLocal;
+  const previousWorkspace = previous
+    ? workspaces.value.find(workspace =>
+        workspace.workspaceId === previous.workspaceId && workspace.runtimeKind !== "LOCAL_CLIENT"
+      )
+    : undefined;
+  const previousAppVisible = !previous?.appId
+    || applicationCatalog.value.some(app => app.appId === previous.appId);
+  if (previous && previousWorkspace && previousAppVisible) {
+    if (previous.appId) selectedAppId.value = previous.appId;
+    const restored = await switchWorkspace(previousWorkspace, {
+      kind: "MANAGED",
+      awaitDirectory: false,
+      personalWorkspaceContext: personalWorkspaceContext(
+        previous.personalWorkspaceId,
+        previous.personalWorkspaceBranch
+      )
+    });
+    if (restored) return previousWorkspace.name;
+  }
 
-  // 主动撤销后立即废弃工作台中的本地快照；数据库记录与本地目录继续保留，重新启用后可恢复。
+  // 上一个工作区失效时只恢复当前应用自己的 recent，不跨应用猜选。
+  const currentAppId = selectedAppId.value;
+  if (!currentAppId || !applicationCatalog.value.some(app => app.appId === currentAppId)) return undefined;
+  await handleSelectApp(currentAppId);
+  return selectedWorkspaceKind.value === "MANAGED" ? selectedWorkspace.value?.name : undefined;
+}
+
+type LocalClientProjectionHideReason = "LOCAL_CLIENT_REVOKED" | "CLIENT_FEATURE_HIDDEN";
+
+async function hideLocalClientWorkspaceProjection(reason: LocalClientProjectionHideReason) {
+  // 只废弃浏览器和查询缓存中的本地投影；客户端 WSS、进程、Key 与本地目录均由各自生命周期维护。
   queryClient.setQueryData<PageResponse<Workspace>>(["workspaces"], (old) => old ? {
     ...old,
     items: old.items.filter((workspace) => workspace.runtimeKind !== "LOCAL_CLIENT"),
     total: Math.max(0, old.total - old.items.filter((workspace) => workspace.runtimeKind === "LOCAL_CLIENT").length)
   } : old);
-  const revokedWorkspaceId = selectedWorkspaceKind.value === "LOCAL_CLIENT"
+  void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+  const hiddenWorkspaceId = selectedWorkspaceKind.value === "LOCAL_CLIENT"
     ? selectedWorkspaceId.value
     : undefined;
-  if (!revokedWorkspaceId) return;
+  if (!hiddenWorkspaceId) return;
   localWorkspaceRouteSequence += 1;
-  api.closeWorkspaceFileSocket(revokedWorkspaceId);
+  // 这里只关闭浏览器到本地工作区的文件 RPC，不关闭客户端到平台的控制通道。
+  api.closeWorkspaceFileSocket(hiddenWorkspaceId);
   invalidateConversationInteraction();
   resetWorkspaceState();
   selectedWorkspaceId.value = undefined;
   selectedWorkspaceKind.value = "MANAGED";
-  feedback.value = {
-    kind: "info",
-    title: "本地客户端已关闭",
-    description: "本地 OpenCode 实例和工作区已隐藏；平台记录与本地目录仍保留。"
-  };
+  const restoredWorkspaceName = await restoreManagedWorkspaceAfterLocalHidden();
+  feedback.value = reason === "CLIENT_FEATURE_HIDDEN"
+    ? {
+        kind: "info",
+        title: "本地客户端功能已隐藏",
+        description: restoredWorkspaceName
+          ? `管理员已关闭客户端灰度，已恢复工作区：${restoredWorkspaceName}。客户端和本地 OpenCode 仍保持原运行状态。`
+          : "管理员已关闭客户端灰度；当前没有可恢复的服务端工作区，客户端和本地 OpenCode 仍保持原运行状态。"
+      }
+    : {
+        kind: "info",
+        title: "本地客户端已关闭",
+        description: restoredWorkspaceName
+          ? `本地实例和工作区已隐藏，已恢复工作区：${restoredWorkspaceName}。平台记录与本地目录仍保留。`
+          : "本地 OpenCode 实例和工作区已隐藏；平台记录与本地目录仍保留。"
+      };
+}
+
+function refreshManagedWorkspaceCatalog(reason?: "LOCAL_CLIENT_REVOKED") {
+  // 异步创建操作真正成功时立即刷新底部选择器；不能只依赖关闭设置时可能过早的刷新。
+  void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
+  void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+  if (reason !== "LOCAL_CLIENT_REVOKED") return;
+  void hideLocalClientWorkspaceProjection(reason);
 }
 
 /**
@@ -12262,7 +12448,10 @@ async function handleLogout() {
     :opencode-endpoints="opencodeEndpoints"
     :opencode-endpoints-loading="opencodeEndpointQuery.isFetching.value"
     :show-server-opencode-status="showServerOpencodeStatus"
-    :local-client-download-allowed="localClientDownloadAllowed"
+    :local-client-visible="localClientVisible"
+    :can-revoke-local-client-key="canRevokeLocalClientKey"
+    :local-client-restarting-id="localClientRestartingId"
+    :local-client-key-revoking="localClientKeyRevoking"
     :opencode-process-loading="selectedRuntimeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"
     :process-restarting="restartMyOpencodeProcessMutation.isPending.value"
@@ -12296,6 +12485,8 @@ async function handleLogout() {
     @refresh-opencode-process="refreshSelectedRuntimeStatus"
     @initialize-process="beginInitializeOpencodeProcess"
     @restart-process="restartMyOpencodeProcess"
+    @restart-local-client="restartLocalClientOpencode"
+    @revoke-local-client-key="revokeLocalClientKeyFromAvatar"
     @logout="handleLogout"
     @join-app="handleJoinApp"
     @robot-side-question="handleRobotSideQuestion"
@@ -13111,6 +13302,7 @@ async function handleLogout() {
     :initial-app-id="selectedAppId"
     :initial-menu-key="firstLoginGuideActive ? firstLoginGuideSettingsMenu : undefined"
     :initial-app-tab="firstLoginGuideActive ? firstLoginGuideSettingsTab : undefined"
+    :local-client-visible="localClientVisible"
     @close="closeSettings"
     @workspace-catalog-changed="refreshManagedWorkspaceCatalog"
   />

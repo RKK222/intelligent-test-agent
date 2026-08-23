@@ -13190,3 +13190,29 @@
 
 - 用户可直接在小兔子托盘点击“更新公共能力”，不再必须进入网页个人设置；网页入口继续作为同一确认操作的备用入口。
 - 本次只修改服务端 WebSocket 通知补偿逻辑、测试和文档，不变更协议帧、HTTP API、RunEvent、数据库、Flyway、客户端制品、权限、部署节点、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-23 - 收敛客户端灰度可见性并补齐头像本地操作
+
+### Why
+
+- 客户端灰度原先只约束下载入口，关闭后本地实例、工作区和个人设置仍可见；同时用户头像只提供服务端 OpenCode 重启，缺少语义明确的本地重启与 Client Key 撤销入口。
+- 超级管理员关闭服务端 OpenCode 必须与本地 OpenCode 完全隔离；灰度隐藏当前本地工作区时，需要优先回到进入本地前的服务器工作区，而不是启动、停止或切换任何 OpenCode 进程。
+
+### What
+
+- 客户端灰度统一控制客户端下载、客户端实例状态、本地工作区、个人设置客户端区及头像客户端操作的可见性；关闭只隐藏投影，不撤销 Client Key、不关闭控制 WSS、不停止本地 OpenCode。
+- 头像菜单新增逐实例“重启本地 OpenCode”和“撤销 Client Key”，既有入口明确保持“重启服务端 OpenCode”；本地重启复用现有客户端命令，撤销复用现有凭据接口与工作区清理事件。
+- 灰度隐藏已选本地工作区时，依次恢复进入本地前的可用服务器工作区、当前应用最近服务器工作区，否则清空选择；服务端实例已被超管关闭时不自动选择服务器工作区或启动服务端 OpenCode。
+- 后端实例与工作区查询加入灰度可见性门禁，并补充“服务端关闭保留本地投影、灰度关闭保留服务端投影”的回归测试；同步 API、架构、数据库、安全、后端模块、前端及用户手册稳定说明。
+
+### How
+
+- 前端全量 Vitest 150 个文件通过，2208 passed / 1 skipped；agent-web typecheck 与 production build 通过。后端 system-management、API、persistence 定向 reactor 共 23 项通过，JDK 25 构建成功。
+- 使用根目录 `.env.test`、`test` profile 和 JDK 25 完整重启 backend、frontend、ClickHouse 与 OpenCode manager；liveness/readiness 为 `UP`，前端 3000 返回 200，本地 OpenCode 4106 在灰度关闭前后保持同一 PID 监听。
+- 已登录浏览器实测灰度开启时头像同时显示本地重启、服务端重启和 Client Key 撤销；关闭后本地实例、本地工作区和个人设置客户端区消失，只保留服务端实例与服务端重启，测试账号随后恢复到验收前的灰度开启状态。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并执行 `git diff --check`；精确隔离工作树中并行的工作区 Git 权限巡检、`.reasonix/` 与根目录 `node_modules/` 改动。
+
+### Result
+
+- 客户端灰度现在只表达“客户端功能是否可见”，不会改变客户端、Client Key 或本地 OpenCode 的真实运行状态；服务端关闭、服务端重启和本地重启的语义与影响范围彼此独立。
+- 既有 HTTP 路径和 DTO 保持兼容，仅扩展现有灰度接口语义；不涉及 RunEvent/SSE、数据库结构、Flyway、部署节点、性能模型、`.env*`、generated SDK 或 OpenCode 只读源码。

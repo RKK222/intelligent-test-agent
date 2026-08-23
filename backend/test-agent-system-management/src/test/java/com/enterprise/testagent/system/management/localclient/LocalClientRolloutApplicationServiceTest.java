@@ -39,7 +39,7 @@ class LocalClientRolloutApplicationServiceTest {
         when(repository.findEnabledPage(0, 50)).thenReturn(List.of());
         when(repository.countEnabled()).thenReturn(0L);
 
-        assertThat(service.isDownloadAllowed(TARGET)).isFalse();
+        assertThat(service.isClientFeatureVisible(TARGET)).isFalse();
         assertThat(service.list(new PageRequest(1, 50)).items()).isEmpty();
     }
 

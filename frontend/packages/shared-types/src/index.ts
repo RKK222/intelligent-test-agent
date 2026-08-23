@@ -265,7 +265,7 @@ export type LocalClientCredential = {
 /** copy 是唯一携带明文 key 的响应；调用方只能在一次性对话框内短暂持有。 */
 export type LocalClientPlaintextKey = { clientKey: string };
 
-/** 超级管理员维护的本地客户端下载灰度用户；禁用记录不出现在列表响应中。 */
+/** 超级管理员维护的本地客户端功能可见性灰度用户；禁用记录不出现在列表响应中。 */
 export type LocalClientRolloutUser = {
   userId: string;
   enabled: boolean;
@@ -274,7 +274,7 @@ export type LocalClientRolloutUser = {
   updatedAt: string;
 };
 
-/** 当前登录用户是否有权看到本地客户端下载入口。 */
+/** 兼容接口返回当前登录用户是否显示本地客户端相关功能。 */
 export type LocalClientDownloadAccess = {
   allowed: boolean;
 };

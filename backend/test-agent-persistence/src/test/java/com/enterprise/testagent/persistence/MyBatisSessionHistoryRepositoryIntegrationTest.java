@@ -68,6 +68,12 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 )
                 """).update();
         jdbcClient.sql("""
+                create table local_client_rollout_users (
+                    user_id varchar(128) primary key,
+                    enabled boolean not null
+                )
+                """).update();
+        jdbcClient.sql("""
                 create table local_client_workspaces (
                     workspace_id varchar(128) primary key,
                     user_id varchar(128) not null,
@@ -273,6 +279,23 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     }
 
     @Test
+    void administrativelyDisabledClientRolloutHidesOnlyTheLocalWorkspace() {
+        jdbcClient.sql("""
+                update local_client_rollout_users
+                set enabled = false
+                where user_id = 'usr_history_current'
+                """).update();
+
+        var page = workspaceQueryRepository.findUserWorkspaces(CURRENT_USER, new PageRequest(1, 30));
+        assertThat(page.items())
+                .extracting(workspace -> workspace.workspaceId().value())
+                .contains("wrk_history_personal")
+                .doesNotContain("wrk_history_local");
+        assertThat(workspaceQueryRepository.findUserWorkspace(
+                CURRENT_USER, new WorkspaceId("wrk_history_local"))).isEmpty();
+    }
+
+    @Test
     void inactiveServerBindingHidesServerWorkspacesButKeepsAnActiveLocalWorkspace() {
         jdbcClient.sql("""
                 update user_opencode_process_bindings
@@ -343,6 +366,10 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         jdbcClient.sql("""
                 insert into local_client_credentials(user_id, status)
                 values('usr_history_current', 'ACTIVE')
+                """).update();
+        jdbcClient.sql("""
+                insert into local_client_rollout_users(user_id, enabled)
+                values('usr_history_current', true)
                 """).update();
     }
 

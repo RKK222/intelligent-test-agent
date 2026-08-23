@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 
-/** 超级管理员维护本地客户端下载入口的用户灰度名单。 */
+/** 超级管理员维护本地客户端相关功能可见性的用户灰度名单。 */
 @RestController
 @RequestMapping("/api/internal/platform/local-opencode-client/admin/rollout-users")
 public class LocalClientRolloutAdminController {

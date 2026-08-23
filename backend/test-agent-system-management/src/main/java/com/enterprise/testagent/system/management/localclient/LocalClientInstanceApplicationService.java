@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.localclient.LocalClientCredentialReposito
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientRolloutRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientVersionModels;
 import com.enterprise.testagent.domain.localclient.LocalClientVersionRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientPublicCapabilityModels;
@@ -18,8 +19,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 当前用户本地客户端实例查询与所有权校验。 */
@@ -32,6 +33,7 @@ public class LocalClientInstanceApplicationService {
     private final LocalClientConnectionStore connectionStore;
     private final LocalClientVersionRepository versionRepository;
     private final LocalClientCredentialRepository credentialRepository;
+    private LocalClientRolloutRepository rolloutRepository;
     private LocalClientPublicCapabilityRepository publicCapabilityRepository;
 
     public LocalClientInstanceApplicationService(
@@ -51,10 +53,18 @@ public class LocalClientInstanceApplicationService {
         this.publicCapabilityRepository = Objects.requireNonNull(repository);
     }
 
+    /** 方法注入保持既有模块测试构造器兼容；生产装配必须提供灰度可见性仓储。 */
+    @Autowired
+    void setRolloutRepository(LocalClientRolloutRepository repository) {
+        this.rolloutRepository = Objects.requireNonNull(repository);
+    }
+
     @Transactional(readOnly = true)
     public List<LocalClientInstanceResponses.InstanceView> list(UserId userId) {
-        // 撤销凭据表示用户主动关闭整套本地客户端能力；稳定记录保留，重新启用后可恢复展示。
-        if (credentialRepository.findByUserId(userId).filter(credential -> credential.active()).isEmpty()) {
+        // 用户撤销凭据或超管关闭客户端灰度都只隐藏投影；灰度本身不撤销 Key，也不断开客户端连接。
+        if (credentialRepository.findByUserId(userId).filter(credential -> credential.active()).isEmpty()
+                || rolloutRepository == null
+                || !rolloutRepository.isEnabled(userId)) {
             return List.of();
         }
         LocalClientVersionModels.EffectivePolicy effective = LocalClientVersionModels.resolveEffectivePolicy(

@@ -1875,17 +1875,19 @@ migration，并加载隔离路径
 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 用真实 PostgreSQL 覆盖正常主链、
 旧 release 与企业 SCM 缺失低版本 migration 的升级、第二次启动解析和未知 checksum 失败关闭。
 
-## V20260817193414 本地客户端下载灰度用户
+## V20260817193414 本地客户端功能可见性灰度用户
 
 `V20260817193414__local_client_rollout_users_create.sql` 新增 `local_client_rollout_users`。`user_id` 是引用
 `users(user_id)` 的主键，`enabled` 默认 true；`updated_by_user_id`、`created_at`、`updated_at` 保留最近
 启用或移出灰度名单的操作人和时间。表中没有 client key、客户端实例、IP、端口或本地路径。
 
-名单为空时客户端下载入口对所有用户隐藏。启用使用 `LocalClientMapper.xml` 的 PostgreSQL
+名单为空时客户端下载、本地实例状态、本地工作区和个人客户端设置对所有用户隐藏。启用使用
+`LocalClientMapper.xml` 的 PostgreSQL
 `ON CONFLICT` 幂等写入；移出名单只把 `enabled` 更新为 false，不删除审计行；查询和计数只读取
-`enabled=true`。H2 集成测试覆盖 MyBatis fallback，正式合并和发布仍须在每套已知 PostgreSQL
+`enabled=true`。该字段只控制平台投影，不停止客户端、不撤销 Key、不删除稳定绑定。H2 集成测试覆盖
+MyBatis fallback，正式合并和发布仍须在每套已知 PostgreSQL
 `flyway_schema_history` 上验证升级到 HEAD，并核对源码、persistence JAR 和最终应用 JAR 内 migration
-字节一致。该 migration 不写任何灰度用户数据，因此升级后不会自动向任何用户展示入口。
+字节一致。该 migration 不写任何灰度用户数据，因此升级后不会自动向任何用户展示客户端功能。
 源码 SHA-256 固定为 `88e870b4afc746522f2fc2a67ba3a2098fd6844e8b6ab99325ea6c7921ae5cba`，
 `FlywayMigrationNamingTest` 锁定文件名和字节。
 

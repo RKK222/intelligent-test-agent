@@ -297,7 +297,7 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 
 ## 本地客户端持久化
 
-`LocalClientMapper.xml` 保存用户唯一凭据、稳定实例、Workspace 根绑定和客户端下载灰度名单；
+`LocalClientMapper.xml` 保存用户唯一凭据、稳定实例、Workspace 根绑定和客户端功能可见性灰度名单；
 `SessionRuntimeTargetMapper.xml`、`RunRuntimeTargetMapper.xml` 与扩展后的
 `NightExecutionTaskMapper.xml` 保存冻结目标。Redis 适配器只保存 15 秒连接路由和短 TTL 模型 grant，
 所有读写都校验 generation/fencing token。结构在正常主链由
@@ -305,7 +305,8 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 历史分别使用隔离的 `V20260812202425`、`V20260818094330` 前向 migration，详见
 `docs/deployment/database.md`。
 灰度名单由 `V20260817193414__local_client_rollout_users_create.sql` 创建，启用使用 MyBatis XML 幂等 upsert，
-移出只更新 `enabled=false` 以保留操作人和时间；migration 不预置任何用户。
+移出只更新 `enabled=false` 以保留操作人和时间；用户工作区查询同时用该值隐藏本地 Workspace，但不修改
+客户端连接、Key 或稳定绑定。migration 不预置任何用户。
 `LocalClientInstanceRow.selfUpdateSupported` 是原始 `boolean`，构造器映射固定使用 MyBatis `_boolean` 别名；
 `MyBatisLocalClientInstanceRepositoryIntegrationTest` 覆盖按实例、按用户和全量查询，防止包装类型反射调用再次导致客户端注册后断线。
 

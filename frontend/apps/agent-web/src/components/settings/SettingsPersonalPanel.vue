@@ -17,10 +17,14 @@ import { encryptSshKey } from "../../utils/ssh-crypto";
 
 // SettingsPanel 统一向所有面板传入 currentUser；个人设置面板目前不依赖该字段，
 // 但保留 prop 以避免 Vue 透传告警，类型与 SettingsAppWorkspacePanel 保持一致。
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   currentUser: CurrentUser | null;
   pageActive: boolean;
-}>();
+  /** 超管客户端灰度只控制相关功能可见性，不负责停止客户端或撤销 Key。 */
+  localClientVisible?: boolean;
+}>(), {
+  localClientVisible: true
+});
 
 const emit = defineEmits<{
   (event: "workspace-catalog-changed", reason?: "LOCAL_CLIENT_REVOKED"): void;
@@ -108,7 +112,7 @@ async function deleteSshKey(sshKeyId: string) {
 
 /** 状态轮询只读取掩码与实例元数据，不请求也不持有明文 client key。 */
 async function loadLocalClientState(silent = false) {
-  if (!props.pageActive) return;
+  if (!props.pageActive || !props.localClientVisible) return;
   const requestContext = captureLocalClientRequestContext();
   if (!silent) localClientLoading.value = true;
   localClientError.value = "";
@@ -404,13 +408,21 @@ async function deleteLocalWorkspace(workspace: Workspace) {
 }
 
 watch(
-  [() => props.pageActive, () => props.currentUser?.userId ?? null],
-  ([active]) => {
+  [() => props.pageActive, () => props.currentUser?.userId ?? null, () => props.localClientVisible],
+  ([active, _userId, localClientVisible]) => {
     localClientRequestEpoch += 1;
     stopLocalClientPolling();
     clearCredentialPlaintext();
     if (!active) return;
     void loadSshKeys();
+    if (!localClientVisible) {
+      credential.value = null;
+      localClients.value = [];
+      localWorkspaces.value = [];
+      localWorkspaceClientId.value = "";
+      pickerOpen.value = false;
+      return;
+    }
     void loadLocalClientState();
     localClientRefreshTimer = setInterval(() => void loadLocalClientState(true), 5_000);
   },
@@ -456,7 +468,7 @@ function formatLocalClientTime(value?: string | null) {
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" />
     <el-alert v-if="localClientError" :title="localClientError" type="error" :closable="false" show-icon class="ta-error" />
 
-    <section class="ta-section ta-local-client-section" aria-label="本地 OpenCode 客户端">
+    <section v-if="localClientVisible" class="ta-section ta-local-client-section" aria-label="本地 OpenCode 客户端">
       <div class="ta-section-heading">
         <div>
           <h4 class="ta-section-title">本地 OpenCode 客户端</h4>

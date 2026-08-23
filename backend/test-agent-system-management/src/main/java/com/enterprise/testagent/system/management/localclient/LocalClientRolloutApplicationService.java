@@ -17,7 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 超级管理员维护本地客户端下载灰度用户，普通查询只返回当前用户是否被放开。 */
+/** 超级管理员维护本地客户端功能可见性灰度，普通查询只返回当前用户是否被放开。 */
 @Service
 public class LocalClientRolloutApplicationService {
 
@@ -43,7 +43,7 @@ public class LocalClientRolloutApplicationService {
 
     /** 名单为空或查询不到记录时严格返回 false，避免部署后意外向全员展示。 */
     @Transactional(readOnly = true)
-    public boolean isDownloadAllowed(UserId userId) {
+    public boolean isClientFeatureVisible(UserId userId) {
         return repository.isEnabled(Objects.requireNonNull(userId, "userId must not be null"));
     }
 

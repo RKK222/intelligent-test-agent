@@ -32,18 +32,21 @@ flowchart LR
 - `GeneratedOpencodeSdkGateway` 通过可注入的 `OpencodeWebClientTransport` 选择传输。服务端目标仍使用
   HTTP；本地目标使用隧道提供的 `WebClient ExchangeFunction`。generated SDK 和 OpenCode 源码不修改。
 
-## 下载入口灰度
+## 客户端功能可见性灰度
 
-客户端下载入口默认对所有用户隐藏。`SUPER_ADMIN` 在“系统管理 → 用户管理”中按平台 userId 维护
+本地客户端相关功能默认对所有用户隐藏。`SUPER_ADMIN` 在“系统管理 → 用户管理”中按平台 userId 维护
 `local_client_rollout_users`；只允许加入存在且可登录的用户，移出时保留操作人和时间。普通用户的
 `download-access/me` 由收到浏览器请求的当前 Java 直接读取共享灰度表，只返回 `allowed` 布尔值；前端仅在
-值严格为 true 时展示下载入口。`opencode-endpoints/me` 继续保留 `localClientDownload` additive capability，
-但它可能按进程归属转发到滚动升级中的旧 Java，因此不再作为网页权威灰度来源。独立接口缺字段、查询失败
-或名单为空都失败关闭为隐藏，实例健康轮询也不会覆盖下载权限。
+值严格为 true 时展示下载入口、本地实例状态、本地工作区和个人客户端设置。`opencode-endpoints/me` 继续
+保留 `localClientDownload` additive capability，但它可能按进程归属转发到滚动升级中的旧 Java，因此不再
+作为网页权威灰度来源。独立接口缺字段、查询失败或名单为空都失败关闭为隐藏，实例健康轮询也不会覆盖
+灰度结论。
 
 该名单只控制 UI 可见性，不扩大认证权限：Nginx HTTP 制品仍按内网 ACL 提供，客户端连接仍必须使用有效
 `tack_v1_` key 通过 HTTPS/WSS 认证。移出名单不会撤销 key 或断开已安装客户端；需要停用客户端时仍使用
-凭据撤销入口。
+凭据撤销入口。灰度关闭时若浏览器正处于本地工作区，只关闭浏览器文件 RPC 并优先恢复进入本地工作区前的
+托管工作区，其次恢复当前应用 recent，均不可用时保持未选择空态；客户端控制 WSS 和本地 OpenCode 不变。
+管理员显式关闭服务端 OpenCode 只隐藏 `SERVER_PROCESS` 及服务端工作区，不得影响本地投影或当前本地选择。
 
 ## 连接协议与 fencing
 

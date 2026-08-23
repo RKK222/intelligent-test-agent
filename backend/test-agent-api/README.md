@@ -201,10 +201,11 @@ runtime/capability 字段，旧服务端路径保持兼容。完整契约见 `do
 `docs/api/event-stream.md`。
 当前用户主动撤销 Client key 后，实例列表返回空，本地 Workspace 列表与详情按不存在处理；稳定实例、平台绑定
 和用户磁盘目录均保留，重新启用凭据后恢复展示。轮换和普通断连仍保留离线状态。
-`LocalClientRolloutAdminController` 仅允许 `SUPER_ADMIN` 分页、添加和移出客户端下载灰度用户；
-`UserOpencodeEndpointController` 继续把当前用户灰度作为服务端实例的 `localClientDownload` capability
-additive 返回，同时提供不跟随进程归属路由的 `download-access/me` 独立查询。网页以独立布尔结果为权威，
-查询异常时失败关闭为 false，避免滚动升级期间旧归属 Java 的实例响应让入口闪现或消失。
+`LocalClientRolloutAdminController` 仅允许 `SUPER_ADMIN` 分页、添加和移出客户端功能可见性灰度用户；
+`UserOpencodeEndpointController` 只在灰度启用时追加本地实例，同时继续把当前用户灰度作为服务端实例的
+`localClientDownload` capability additive 返回，并提供不跟随进程归属路由的 `download-access/me` 兼容
+查询。网页以独立布尔结果控制下载、实例、工作区和个人客户端设置；查询异常时失败关闭为 false。
+服务端 binding 的显式关闭只省略 `SERVER_PROCESS`，不得省略仍可见的 `LOCAL_CLIENT`。
 
 `ProtectedAgentMcpController` 仅承载服务器 OpenCode 的精确 stateless MCP JSON-RPC 入口。它从 HTTP exchange
 读取短期 Bearer grant，保持 MCP 原始 wire body，不使用平台 `ApiResponse` envelope；notification 显式返回

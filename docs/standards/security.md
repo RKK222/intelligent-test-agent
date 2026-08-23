@@ -202,10 +202,10 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
   Developer ID Installer 签名并按网络条件完成 notarization；DEB 由受控发布链路和签名清单校验。由于
   install.sh 和原生安装包仍可能经明文 HTTP 取得，主动中间人替换下载内容的风险不能只靠同源清单消除，
   必须依赖网络 ACL、可信 HTTPS 或带外固定校验。
-- 网页下载入口默认隐藏，只允许 `SUPER_ADMIN` 通过受认证管理 API 按已存在且可登录的 userId 加入灰度
-  名单。普通用户通过独立 `download-access/me` 仅接收 `allowed` 布尔值；缺字段、请求失败、存储异常和值为
-  false 均隐藏。实例 capability 仅作向后兼容，不能覆盖独立灰度结论，避免跨 Java 滚动升级时旧节点导致入口
-  闪现后消失。
+- 本地客户端相关功能默认隐藏，只允许 `SUPER_ADMIN` 通过受认证管理 API 按已存在且可登录的 userId 加入
+  灰度名单。普通用户通过兼容路径 `download-access/me` 仅接收 `allowed` 布尔值；缺字段、请求失败、存储
+  异常和值为 false 均隐藏下载、实例状态、本地工作区和个人客户端设置。实例 capability 仅作向后兼容，
+  不能覆盖独立灰度结论，避免跨 Java 滚动升级时旧节点导致入口闪现后消失。
   灰度名单不替代 Nginx ACL、制品签名或 client key 认证，前端显示与否不得作为任何后端授权依据。
 - 本地客户端托盘不得展示 prompt、绝对路径、请求体、client key 或模型 grant。日志下载只能由用户本机
   主动触发，只允许读取 state 日志目录中受控命名的客户端日志，限制文件数和单文件字节数，并排除配置、
