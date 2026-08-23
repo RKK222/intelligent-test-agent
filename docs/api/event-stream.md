@@ -1077,6 +1077,15 @@ grant；服务端完成的 Run 不自动切换到服务端实例或其它本地�
 客户端在处理后续自动启动命令前完成校验与内存配置；配置变化且本地 OpenCode 已运行时先安全重启。未声明能力的旧客户端
 继续收到原 `REGISTERED` JSON，不得依赖未知字段容错。
 
+## `WORKSPACE_GIT_ACCESS_V1` 本地工作空间 Git 巡检扩展
+
+客户端在 `REGISTER.capabilities` 声明 `WORKSPACE_GIT_ACCESS_V1` 后，服务端可发送既有 `FILE_REQUEST`，其中
+`operation=workspace.git-access.check`，`workspaceId/rootDigest` 必须匹配客户端已经注册的根目录。请求不携带本地绝对
+路径；客户端只读检查 Git 工作区、origin 和远端 heads，并以 `FILE_RESPONSE` 返回固定
+`{status:"ACCESSIBLE|INACCESSIBLE|UNKNOWN",reason?,message?}`。`ACCESSIBLE` 的 reason/message 必须为空；其余值只能是
+客户端归一后的原因码和安全中文说明，不得包含本地路径、Git URL、命令、凭据或 stderr。未声明能力的旧客户端不接收该操作，
+服务器把其状态保守记录为 `UNKNOWN`。
+
 ## `PUBLIC_CAPABILITY_SYNC_V1` 公共能力扩展
 
 客户端只有在 `REGISTER.capabilities` 声明 `PUBLIC_CAPABILITY_SYNC_V1` 后才能发送或接收以下帧；旧客户端

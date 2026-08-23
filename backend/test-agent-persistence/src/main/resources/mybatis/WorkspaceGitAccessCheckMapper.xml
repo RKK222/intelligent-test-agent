@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.WorkspaceGitAccessCheckMapper">
+
+    <resultMap id="ApplicationCandidateMap"
+               type="com.enterprise.testagent.persistence.mybatis.ApplicationWorkspaceGitAccessCandidateRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="application_workspace_id" javaType="java.lang.String"/>
+            <arg column="version_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="LocalCandidateMap"
+               type="com.enterprise.testagent.persistence.mybatis.LocalWorkspaceGitAccessCandidateRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="client_instance_id" javaType="java.lang.String"/>
+            <arg column="root_digest" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="CheckMap" type="com.enterprise.testagent.persistence.mybatis.WorkspaceGitAccessCheckRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="target_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="reason" javaType="java.lang.String"/>
+            <arg column="message" javaType="java.lang.String"/>
+            <arg column="checked_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <!-- 每个用户/模板只需任选一个 ACTIVE 版本；Git 权限由模板关联的同一版本库决定。 -->
+    <select id="findApplicationCandidatesAfter" resultMap="ApplicationCandidateMap">
+        select m.user_id,
+               aw.workspace_id as application_workspace_id,
+               min(v.version_id) as version_id
+        from application_members m
+        join users u on u.user_id = m.user_id and u.status = 'ACTIVE'
+        join applications a on a.app_id = m.app_id and a.enabled = true
+        join application_workspaces aw on aw.app_id = m.app_id and aw.enabled = true
+        join application_workspace_versions v
+          on v.application_workspace_id = aw.workspace_id and v.status = 'ACTIVE'
+        join code_repositories r on r.repository_id = aw.repository_id
+        where m.deleted_at is null
+          and (r.repository_type is null or r.repository_type &lt;&gt; 'AUTOMATION_CODE_REPOSITORY')
+        <if test="afterUserId != null">
+          and (
+              m.user_id &gt; #{afterUserId}
+              or (m.user_id = #{afterUserId} and aw.workspace_id &gt; #{afterWorkspaceId})
+          )
+        </if>
+        group by m.user_id, aw.workspace_id
+        order by m.user_id, aw.workspace_id
+        limit #{limit}
+    </select>
+
+    <select id="findLocalCandidatesAfter" resultMap="LocalCandidateMap">
+        select lcw.user_id, lcw.workspace_id, lcw.client_instance_id, lcw.root_digest
+        from local_client_workspaces lcw
+        join users u on u.user_id = lcw.user_id and u.status = 'ACTIVE'
+        join workspaces w on w.workspace_id = lcw.workspace_id and w.status = 'ACTIVE'
+        where 1 = 1
+        <if test="afterUserId != null">
+          and (
+              lcw.user_id &gt; #{afterUserId}
+              or (lcw.user_id = #{afterUserId} and lcw.workspace_id &gt; #{afterWorkspaceId})
+          )
+        </if>
+        order by lcw.user_id, lcw.workspace_id
+        limit #{limit}
+    </select>
+
+    <select id="findApplicationCheck" resultMap="CheckMap">
+        select user_id, application_workspace_id as target_id,
+               status, reason, message, checked_at
+        from application_workspace_git_access_checks
+        where user_id = #{userId}
+          and application_workspace_id = #{targetId}
+    </select>
+
+    <select id="findLocalCheck" resultMap="CheckMap">
+        select user_id, workspace_id as target_id,
+               status, reason, message, checked_at
+        from local_workspace_git_access_checks
+        where user_id = #{userId}
+          and workspace_id = #{targetId}
+    </select>
+
+    <insert id="upsertApplicationCheck" databaseId="postgresql">
+        insert into application_workspace_git_access_checks(
+            user_id, application_workspace_id, status, reason, message,
+            checked_at, created_at, updated_at
+        ) values (
+            #{row.userId}, #{row.targetId}, #{row.status}, #{row.reason}, #{row.message},
+            #{row.checkedAt}, #{now}, #{now}
+        )
+        on conflict (user_id, application_workspace_id) do update set
+            status = excluded.status,
+            reason = excluded.reason,
+            message = excluded.message,
+            checked_at = excluded.checked_at,
+            updated_at = excluded.updated_at
+    </insert>
+
+    <insert id="upsertApplicationCheck" databaseId="h2">
+        merge into application_workspace_git_access_checks(
+            user_id, application_workspace_id, status, reason, message,
+            checked_at, created_at, updated_at
+        ) key(user_id, application_workspace_id) values (
+            #{row.userId}, #{row.targetId}, #{row.status}, #{row.reason}, #{row.message},
+            #{row.checkedAt}, #{now}, #{now}
+        )
+    </insert>
+
+    <insert id="upsertLocalCheck" databaseId="postgresql">
+        insert into local_workspace_git_access_checks(
+            user_id, workspace_id, status, reason, message,
+            checked_at, created_at, updated_at
+        ) values (
+            #{row.userId}, #{row.targetId}, #{row.status}, #{row.reason}, #{row.message},
+            #{row.checkedAt}, #{now}, #{now}
+        )
+        on conflict (user_id, workspace_id) do update set
+            status = excluded.status,
+            reason = excluded.reason,
+            message = excluded.message,
+            checked_at = excluded.checked_at,
+            updated_at = excluded.updated_at
+    </insert>
+
+    <insert id="upsertLocalCheck" databaseId="h2">
+        merge into local_workspace_git_access_checks(
+            user_id, workspace_id, status, reason, message,
+            checked_at, created_at, updated_at
+        ) key(user_id, workspace_id) values (
+            #{row.userId}, #{row.targetId}, #{row.status}, #{row.reason}, #{row.message},
+            #{row.checkedAt}, #{now}, #{now}
+        )
+    </insert>
+</mapper>

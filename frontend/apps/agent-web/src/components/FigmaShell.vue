@@ -60,7 +60,10 @@ const props = withDefaults(
     /** 顶栏复用左下角工作空间选择器的数据源，不新增工作区切换链路。 */
     appTemplates?: AppWorkspaceTemplate[];
     /** 已在客户端注册的平台工作区；顶栏只显示逻辑身份和在线状态，不接触本机绝对路径。 */
-    localWorkspaces?: Pick<Workspace, "workspaceId" | "name" | "online">[];
+    localWorkspaces?: Pick<
+      Workspace,
+      "workspaceId" | "name" | "online" | "gitAccessStatus" | "gitAccessReason" | "gitAccessMessage" | "gitAccessCheckedAt"
+    >[];
     /** 顶栏与左下角共用应用代码库目录和 MANAGED/APP_SOURCE 选择语义。 */
     showAppSource?: boolean;
     workspaceKind?: SelectedWorkspaceKind;
@@ -351,7 +354,12 @@ function workspaceSearchMatches(...values: Array<string | null | undefined>) {
 }
 
 const filteredLocalWorkspaces = computed(() => visibleLocalWorkspaces.value.filter((workspace) =>
-  workspaceSearchMatches(workspace.name, workspace.online === false ? "本地 客户端离线" : "本地 客户端在线")
+  workspaceSearchMatches(
+    workspace.name,
+    workspace.online === false ? "本地 客户端离线" : "本地 客户端在线",
+    workspace.gitAccessMessage,
+    workspace.gitAccessStatus === "INACCESSIBLE" ? "Git 权限失效" : undefined
+  )
 ));
 const filteredAppSourceRepositories = computed(() => visibleAppSourceRepositories.value.filter((repository) =>
   workspaceSearchMatches(
@@ -362,7 +370,13 @@ const filteredAppSourceRepositories = computed(() => visibleAppSourceRepositorie
   )
 ));
 const filteredTestWorkspaceTemplates = computed(() => testWorkspaceTemplates.value.filter((template) =>
-  workspaceSearchMatches(template.workspaceName, template.branch, "测试工作空间 服务器")
+  workspaceSearchMatches(
+    template.workspaceName,
+    template.branch,
+    template.gitAccessMessage,
+    template.gitAccessStatus === "INACCESSIBLE" ? "Git 权限失效" : undefined,
+    "测试工作空间 服务器"
+  )
 ));
 const hasWorkspaceSearchResults = computed(() =>
   filteredLocalWorkspaces.value.length > 0
@@ -377,6 +391,7 @@ const headerWorkspaceTemplate = computed(() => {
   const templates = availableWorkspaceTemplates.value;
   return templates.find((template) => template.workspaceId === props.selectedWorkspaceTemplateId)
     ?? templates.find((template) => template.versions?.some((version) => version.versionId === props.selectedVersionId))
+    ?? templates.find((template) => template.gitAccessStatus !== "INACCESSIBLE")
     ?? templates[0]
     ?? null;
 });
@@ -385,6 +400,9 @@ const headerWorkspaceVersion = computed(() => {
   return versions.find((version) => version.versionId === props.selectedVersionId)
     ?? null;
 });
+const headerWorkspaceGitAccessBlocked = computed(() =>
+  headerWorkspaceTemplate.value?.gitAccessStatus === "INACCESSIBLE"
+);
 const headerWorkspaceLabel = computed(() => {
   if (props.workspaceKind === "EXPERIENCE") return "体验工作区";
   if (props.workspaceKind === "LOCAL_CLIENT") return props.workspaceName ?? "本地工作区";
@@ -426,6 +444,7 @@ watch(availableWorkspaceTemplates, (templates) => {
 }, { deep: true });
 
 function selectHeaderWorkspace(template: AppWorkspaceTemplate) {
+  if (template.gitAccessStatus === "INACCESSIBLE") return;
   closeWorkspaceMenu();
   if (!template.versions) {
     pendingHeaderDefaultVersionTemplateId.value = template.workspaceId;
@@ -439,7 +458,7 @@ function selectHeaderWorkspace(template: AppWorkspaceTemplate) {
 
 function selectHeaderVersion(version: AppWorkspaceVersion, explicitTemplate?: AppWorkspaceTemplate) {
   const template = explicitTemplate ?? headerWorkspaceTemplate.value;
-  if (!template) return;
+  if (!template || template.gitAccessStatus === "INACCESSIBLE") return;
   emit("select-version", { template, version });
   closeVersionMenu();
 }
@@ -467,6 +486,8 @@ function openHeaderAppSourceRepository(repository: AppSourceRepositorySummary) {
 }
 
 function selectHeaderLocalWorkspace(workspaceId: string) {
+  const workspace = visibleLocalWorkspaces.value.find((item) => item.workspaceId === workspaceId);
+  if (!workspace || workspace.online === false || workspace.gitAccessStatus === "INACCESSIBLE") return;
   closeWorkspaceMenu();
   emit("select-local-workspace", workspaceId);
 }
@@ -2359,19 +2380,34 @@ function submitJoinApp() {
                   :class="[
                     'figma-app-menu-item',
                     'figma-workspace-menu-item',
+                    workspace.gitAccessStatus === 'INACCESSIBLE' && 'is-git-inaccessible',
                     workspace.workspaceId === selectedLocalWorkspaceId && 'is-active'
                   ]"
                   role="option"
                   :aria-selected="workspace.workspaceId === selectedLocalWorkspaceId"
                   :aria-label="`打开本地工作区${workspace.name}`"
-                  :title="workspace.online === false ? '绑定的本地客户端当前离线' : `打开${workspace.name}`"
-                  :disabled="workspace.online === false"
+                  :title="workspace.online === false
+                    ? '绑定的本地客户端当前离线'
+                    : workspace.gitAccessStatus === 'INACCESSIBLE'
+                    ? (workspace.gitAccessMessage || 'Git 权限已失效')
+                    : `打开${workspace.name}`"
+                  :disabled="workspace.online === false || workspace.gitAccessStatus === 'INACCESSIBLE'"
                   @mousedown.prevent="selectHeaderLocalWorkspace(workspace.workspaceId)"
                 >
                   <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
                   <span class="figma-app-menu-item-name">{{ workspace.name }}</span>
-                  <span :class="['figma-workspace-menu-item-meta', workspace.online === false && 'is-offline']">
-                    本地 · {{ workspace.online === false ? '离线' : '在线' }}
+                  <span
+                    :class="[
+                      'figma-workspace-menu-item-meta',
+                      workspace.online === false && 'is-offline',
+                      workspace.gitAccessStatus === 'INACCESSIBLE' && 'is-git-inaccessible'
+                    ]"
+                  >
+                    本地 · {{ workspace.online === false
+                      ? '离线'
+                      : workspace.gitAccessStatus === 'INACCESSIBLE'
+                      ? (workspace.gitAccessMessage || 'Git 权限已失效')
+                      : '在线' }}
                   </span>
                   <span v-if="workspace.workspaceId === selectedLocalWorkspaceId" class="figma-app-menu-item-check">✓</span>
                 </button>
@@ -2492,16 +2528,30 @@ function submitJoinApp() {
                 :class="[
                   'figma-app-menu-item',
                   'figma-workspace-menu-item',
+                  template.gitAccessStatus === 'INACCESSIBLE' && 'is-git-inaccessible',
                   template.workspaceId === headerWorkspaceTemplate?.workspaceId && 'is-active'
                 ]"
                 role="option"
                 :aria-selected="template.workspaceId === headerWorkspaceTemplate?.workspaceId"
                 :aria-label="`打开测试工作空间${template.workspaceName}`"
+                :title="template.gitAccessStatus === 'INACCESSIBLE'
+                  ? (template.gitAccessMessage || 'Git 权限已失效')
+                  : `打开${template.workspaceName}`"
+                :disabled="template.gitAccessStatus === 'INACCESSIBLE'"
                 @mousedown.prevent="selectHeaderWorkspace(template)"
               >
                 <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
                 <span class="figma-app-menu-item-name">{{ template.workspaceName }}</span>
-                <span class="figma-workspace-menu-item-meta">服务器 · {{ template.branch }}</span>
+                <span
+                  :class="[
+                    'figma-workspace-menu-item-meta',
+                    template.gitAccessStatus === 'INACCESSIBLE' && 'is-git-inaccessible'
+                  ]"
+                >
+                  服务器 · {{ template.gitAccessStatus === 'INACCESSIBLE'
+                    ? (template.gitAccessMessage || 'Git 权限已失效')
+                    : template.branch }}
+                </span>
                 <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
               </button>
             </li>
@@ -2526,7 +2576,10 @@ function submitJoinApp() {
             aria-haspopup="listbox"
             :aria-expanded="versionMenuOpen"
             :aria-label="`版本：${headerVersionLabel}`"
-            :disabled="workspaceKind !== 'MANAGED'"
+            :disabled="workspaceKind !== 'MANAGED' || headerWorkspaceGitAccessBlocked"
+            :title="headerWorkspaceGitAccessBlocked
+              ? (headerWorkspaceTemplate?.gitAccessMessage || 'Git 权限已失效')
+              : `版本：${headerVersionLabel}`"
             @click="toggleVersionMenu"
             @blur="onVersionMenuBlur"
           >
@@ -4622,6 +4675,12 @@ function submitJoinApp() {
   text-align: left;
 }
 
+.figma-workspace-menu-item:disabled,
+.figma-workspace-menu-item.is-git-inaccessible {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .figma-workspace-menu-item .figma-app-menu-item-name {
   min-width: 0;
   flex: 1;
@@ -4643,6 +4702,10 @@ function submitJoinApp() {
 
 .figma-workspace-menu-item-meta.is-offline {
   color: #9ca3af;
+}
+
+.figma-workspace-menu-item-meta.is-git-inaccessible {
+  color: var(--ta-shell-accent-strong, #991b1b);
 }
 
 .figma-context-menu-empty.is-search-empty {

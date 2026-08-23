@@ -25,3 +25,8 @@ Client key、统一认证号或上游模型密钥。
 客户端桌面主动注册工作区使用 `WORKSPACE_REGISTER {name,rootPath}`，后台只采用已认证连接中的 userId、
 clientInstanceId 和 generation，不接受载荷伪造身份；平台完成客户端真实根校验和事务持久化后返回同 requestId 的
 `WORKSPACE_REGISTERED {workspaceId,name,rootPath}`。业务失败用同 requestId 的 `ERROR` 收敛单次请求，不关闭连接。
+
+声明 `WORKSPACE_GIT_ACCESS_V1` 的客户端额外接受 `FILE_REQUEST.operation=workspace.git-access.check`。请求继续绑定
+已注册的 `workspaceId + rootDigest`，不携带任意路径；客户端在对应真实根目录执行只读 Git 远端检查并通过
+`FILE_RESPONSE` 返回固定 `{status,reason,message}`。状态为 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`，成功时 reason/message
+为空，其余状态为固定脱敏值。旧客户端未声明能力时服务端不得发送该操作。

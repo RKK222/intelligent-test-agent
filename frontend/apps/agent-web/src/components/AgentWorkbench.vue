@@ -1600,7 +1600,8 @@ const breadcrumbDisplay = computed(() => {
 // ===== 查询 =====
 const workspacesQuery = useQuery({
   queryKey: ["workspaces"],
-  queryFn: () => api.listWorkspaces(1, 50)
+  queryFn: () => api.listWorkspaces(1, 50),
+  refetchInterval: 2 * 60 * 60 * 1000
 });
 const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
 const localWorkspaces = computed(() => workspaces.value
@@ -1608,7 +1609,11 @@ const localWorkspaces = computed(() => workspaces.value
   .map((workspace) => ({
     workspaceId: workspace.workspaceId,
     name: workspace.name,
-    online: workspace.online
+    online: workspace.online,
+    gitAccessStatus: workspace.gitAccessStatus,
+    gitAccessReason: workspace.gitAccessReason,
+    gitAccessMessage: workspace.gitAccessMessage,
+    gitAccessCheckedAt: workspace.gitAccessCheckedAt
   })));
 // selectedWorkspace 只接受应用 recent workspace 或用户显式选择产生的 selectedWorkspaceId。
 // 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
@@ -1678,6 +1683,9 @@ async function activateLocalWorkspace(workspaceId: string, sequence: number, cle
     if (sequence !== localWorkspaceRouteSequence) return;
     if (workspace.runtimeKind !== "LOCAL_CLIENT") {
       throw new Error("目标不是本地客户端工作区");
+    }
+    if (workspace.gitAccessStatus === "INACCESSIBLE") {
+      throw new Error(workspace.gitAccessMessage || "本地工作区 Git 权限已失效");
     }
     appSelectionSeq += 1;
     selectingAppId = undefined;
@@ -1952,6 +1960,7 @@ const appTemplatesQuery = useQuery({
   queryKey: ["managed-workspace", "app-templates", selectedAppIdRef],
   enabled: () => Boolean(selectedAppIdRef.value),
   queryFn: () => api.listWorkspaceTemplates(selectedAppIdRef.value!),
+  refetchInterval: 2 * 60 * 60 * 1000,
   retry: false
 });
 const appTemplates = computed<ApplicationWorkspaceTemplate[]>(() => appTemplatesQuery.data.value ?? []);
@@ -7029,6 +7038,14 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
 // 切换到某个应用版本：先只读校验当前用户对关联 Git 版本库的访问权限，再通过
 // ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区。同一用户同一版本复用 default 空间，避免重复创建。
 async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
+  if (payload.template.gitAccessStatus === "INACCESSIBLE") {
+    feedback.value = {
+      kind: "info",
+      title: "工作空间 Git 权限已失效",
+      description: payload.template.gitAccessMessage || "请恢复关联版本库读取权限，等待下次巡检后再选择。"
+    };
+    return;
+  }
   // 顶部显式选择托管工作空间代表“离开源码快照”，不是在 APP_SOURCE 内执行版本操作；
   // 后续 managed intent 与 switchWorkspace 会统一失效源码请求、清理 recent 并切回 MANAGED。
   if (!await confirmProcessInitializationBeforeWorkspaceAction("切换应用版本")) {
@@ -7522,6 +7539,14 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string) {
 }
 
 async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version: string; branch?: string }) {
+  if (payload.template.gitAccessStatus === "INACCESSIBLE") {
+    feedback.value = {
+      kind: "info",
+      title: "工作空间 Git 权限已失效",
+      description: payload.template.gitAccessMessage || "请恢复关联版本库读取权限，等待下次巡检后再操作。"
+    };
+    return;
+  }
   if (!appSourceCapabilities.value.canSelectApplicationVersion) {
     feedback.value = { kind: "info", title: "源码快照不能新增应用版本", description: "请先返回应用工作区。" };
     return;

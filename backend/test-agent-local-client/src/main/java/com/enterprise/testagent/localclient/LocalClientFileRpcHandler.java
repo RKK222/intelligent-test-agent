@@ -17,14 +17,23 @@ final class LocalClientFileRpcHandler {
 
     private final LocalWorkspaceRegistry workspaceRegistry;
     private final WorkspaceFileService fileService;
+    private final LocalGitAccessChecker gitAccessChecker;
     private final ObjectMapper objectMapper;
     private final Map<String, ActiveUpload> uploads = new ConcurrentHashMap<>();
     private final Semaphore uploadSlots = new Semaphore(MAX_ACTIVE_UPLOADS);
 
     LocalClientFileRpcHandler(LocalWorkspaceRegistry workspaceRegistry, ObjectMapper objectMapper) {
+        this(workspaceRegistry, objectMapper, new LocalGitAccessChecker());
+    }
+
+    LocalClientFileRpcHandler(
+            LocalWorkspaceRegistry workspaceRegistry,
+            ObjectMapper objectMapper,
+            LocalGitAccessChecker gitAccessChecker) {
         this.workspaceRegistry = workspaceRegistry;
         this.objectMapper = objectMapper;
         this.fileService = new WorkspaceFileService();
+        this.gitAccessChecker = gitAccessChecker;
     }
 
     JsonNode handle(LocalClientPayloads.FileRequest request) {
@@ -92,6 +101,7 @@ final class LocalClientFileRpcHandler {
                 fileService.createDirectory(root(request), requiredText(params, "path"));
                 yield null;
             }
+            case "workspace.git-access.check" -> gitAccessChecker.check(root(request));
             default -> throw new IllegalArgumentException("unsupported local file operation: " + request.operation());
         };
         return objectMapper.valueToTree(result);

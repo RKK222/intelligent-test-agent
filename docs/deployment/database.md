@@ -2097,3 +2097,21 @@ JS/WASM 依赖，不包含密钥、Client key、用户目录或 Tool 输入输�
 目标库完整 `flyway_schema_history`，并验证已部署基线到 HEAD；未知 checksum 或更高已执行版本必须停止，禁止
 `outOfOrder`、`repair` 或手工修改历史表。最终还要核对源码、persistence JAR 和应用嵌套 JAR 中上述两条 migration 的
 SHA-256 一致。
+
+## PostgreSQL V20260823191023 工作空间 Git 权限巡检投影
+
+`V20260823191023__application_workspace_git_access_checks_create.sql` 新增两张用户级投影表：
+
+- `application_workspace_git_access_checks` 以 `(user_id, application_workspace_id)` 为主键，保存服务器测试工作空间的最近巡检结果；
+- `local_workspace_git_access_checks` 以 `(user_id, workspace_id)` 为主键，保存本地客户端工作空间的最近巡检结果。
+
+状态只允许 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`。可访问行不保存原因和说明，其余状态必须保存固定原因码与脱敏中文说明；
+两表都不保存 Git URL、本地路径、命令、SSH key 或 stderr，并分别随用户和工作空间级联删除。候选分页、查询和 upsert
+全部位于 `WorkspaceGitAccessCheckMapper.xml`，未新增 JDBC SQL。原始 SHA-256 为
+`12cfe3bbaa4b0d562f2dca2a69290180c81d42aca79b1ff4aaf6ad5cf32419e2`。该 migration 已由 `test` profile
+在根目录 `.env.test` 固定验收库执行成功，`flyway_schema_history` 记录 checksum 为 `664897016`；文件名、版本和字节自此冻结。
+
+真实 PostgreSQL 验证使用根目录 `.env.test` 指定的固定数据库，在随机隔离 schema 中从空库迁移到 HEAD，再插入服务器与
+本地客户端最小业务关系，覆盖两类候选分页、生产 PostgreSQL `ON CONFLICT`、状态约束和重复刷新。代码回滚可以保留两表；
+旧版本不会读取或写入它们。企业发布前仍必须收集目标库 `flyway_schema_history` 并验证已部署基线到 HEAD；若目标环境已经存在
+更高版本或未知 checksum，必须停止发布并制定兼容方案，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。

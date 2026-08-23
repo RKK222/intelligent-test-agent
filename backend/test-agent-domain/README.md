@@ -12,7 +12,7 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、Run、ConversationRunContext、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用源码快照、夜间执行任务、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
+- Workspace、工作空间 Git 权限巡检投影、Session、AgentSessionBinding、Run、ConversationRunContext、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用源码快照、夜间执行任务、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 - 认证领域端口 `TokenSessionMarkerStore` 只定义平台 Token 的 SHA-256 session marker 写入、删除、校验与摘要规则，供平台 Token 生命周期和 XXL 会话联动复用；不暴露 Redis key。
@@ -23,6 +23,7 @@
 ## 已有模型
 
 - Workspace：`Workspace`、`WorkspaceId`。
+- 工作空间 Git 权限巡检：`WorkspaceGitAccessCheck` 只表达 `ACCESSIBLE/INACCESSIBLE/UNKNOWN` 安全投影，`WorkspaceGitAccessCheckRepository` 定义服务器应用工作空间和本地客户端工作空间的候选扫描、结果写入与用户级查询端口，`WorkspaceGitAccessInspectionEvents` 定义不携带用户、路径或凭据的集群巡检唤醒事件。
 - Agent & Skill Hub：`AgentSkillHubModels`、`AgentSkillHubRepository`、`AgentSkillHubPushIndexer`、`SkillHubGateway`；领域层表达 `PLATFORM/SKILLHUB` 双来源、外部目录/下载端口、不可变制品、精确修订、派生来源、应用级引用和 push 原样保留/分叉决策，不依赖 HTTP、压缩、Git 或 SQL 实现。
 - 会话 Workspace 权限：`ConversationWorkspaceAccessAuthorizer` 隔离 runtime 与托管应用/个人 Workspace 权威成员查询；`TrustedWorkspaceResolver` 负责当前节点可信 root/server 解析，两者职责分离。
 - Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。`BatchSessionAttributionRepository` 只定义用户级条目幂等查询、事务锁和归因标记端口，不暴露 SQL、索引或统计报表。

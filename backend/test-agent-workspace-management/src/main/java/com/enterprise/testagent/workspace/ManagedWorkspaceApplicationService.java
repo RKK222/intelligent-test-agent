@@ -58,6 +58,8 @@ import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.WorkspaceGitAccessCheck;
+import com.enterprise.testagent.domain.workspace.WorkspaceGitAccessCheckRepository;
 import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -171,6 +173,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final Object gitAccessSuccessCacheMaintenanceLock = new Object();
     private final Map<GitAccessCacheKey, Instant> gitAccessSuccessCache = new ConcurrentHashMap<>();
     private final Map<GitAccessCacheKey, CompletableFuture<Void>> gitAccessProbesInFlight = new ConcurrentHashMap<>();
+    private WorkspaceGitAccessCheckRepository workspaceGitAccessChecks;
     private ConversationContextStore conversationContextStore;
     private PublicAgentConfigRolloutCoordinator agentConfigRolloutCoordinator;
     private AgentSkillHubPushIndexer agentSkillHubPushIndexer;
@@ -469,9 +472,27 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     return ManagedWorkspaceResponses.WorkspaceTemplateResponse.from(
                             workspace,
                             repository != null && repository.standard(),
-                            repository == null ? null : repository.repositoryType());
+                            repository == null ? null : repository.repositoryType(),
+                            applicationWorkspaceGitAccess(userId, workspace.workspaceId().value()));
                 })
                 .toList();
+    }
+
+    /** 生产装配巡检结果端口；旧单元测试构造路径未注入时保持 additive 字段为空。 */
+    @Autowired(required = false)
+    void configureWorkspaceGitAccessChecks(WorkspaceGitAccessCheckRepository workspaceGitAccessChecks) {
+        this.workspaceGitAccessChecks = Objects.requireNonNull(workspaceGitAccessChecks);
+    }
+
+    private WorkspaceGitAccessCheck applicationWorkspaceGitAccess(UserId userId, String workspaceId) {
+        if (workspaceGitAccessChecks == null) {
+            return null;
+        }
+        return workspaceGitAccessChecks.find(
+                        userId,
+                        WorkspaceGitAccessCheck.TargetKind.APPLICATION_WORKSPACE,
+                        workspaceId)
+                .orElse(null);
     }
 
     public List<ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse> listVersions(String templateId, UserId userId) {

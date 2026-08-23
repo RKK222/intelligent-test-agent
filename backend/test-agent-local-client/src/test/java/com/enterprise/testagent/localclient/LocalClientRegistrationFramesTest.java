@@ -40,7 +40,7 @@ class LocalClientRegistrationFramesTest {
         assertThat(register.clientVersion()).isEqualTo("20260820153045");
         assertThat(register.capabilities()).containsExactly(
                 "SELF_UPDATE_V1", "OPENCODE_OBSERVABILITY_V1", "PUBLIC_CAPABILITY_SYNC_V1",
-                "MANAGED_MODEL_CONFIG_V1");
+                "MANAGED_MODEL_CONFIG_V1", "WORKSPACE_GIT_ACCESS_V1");
     }
 
     @Test
@@ -58,7 +58,7 @@ class LocalClientRegistrationFramesTest {
 
         assertThat(codec.payload(frame, LocalClientPayloads.Register.class).capabilities())
                 .containsExactly("OPENCODE_OBSERVABILITY_V1", "PUBLIC_CAPABILITY_SYNC_V1",
-                        "MANAGED_MODEL_CONFIG_V1");
+                        "MANAGED_MODEL_CONFIG_V1", "WORKSPACE_GIT_ACCESS_V1");
         assertThat(LocalClientConnection.shouldStartVersionChecks(
                 configuration(false), LocalClientBuildInfo.resolve("20260820153045"))).isFalse();
         assertThat(LocalClientConnection.shouldStartVersionChecks(

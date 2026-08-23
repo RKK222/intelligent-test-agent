@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVers
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.WorkspaceGitAccessCheck;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -116,11 +117,24 @@ public final class ManagedWorkspaceResponses {
             boolean standard,
             String repositoryType,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String gitAccessStatus,
+            String gitAccessReason,
+            String gitAccessMessage,
+            Instant gitAccessCheckedAt) {
         public static WorkspaceTemplateResponse from(
                 ApplicationWorkspace workspace,
                 boolean standard,
                 String repositoryType) {
+            return from(workspace, standard, repositoryType, null);
+        }
+
+        /** 巡检字段为追加响应；没有结果时保持 null，滚动升级期间不阻断既有选择。 */
+        public static WorkspaceTemplateResponse from(
+                ApplicationWorkspace workspace,
+                boolean standard,
+                String repositoryType,
+                WorkspaceGitAccessCheck gitAccess) {
             return new WorkspaceTemplateResponse(
                     workspace.workspaceId().value(),
                     workspace.appId().value(),
@@ -132,7 +146,11 @@ public final class ManagedWorkspaceResponses {
                     standard,
                     repositoryType,
                     workspace.createdAt(),
-                    workspace.updatedAt());
+                    workspace.updatedAt(),
+                    gitAccess == null ? null : gitAccess.status().name(),
+                    gitAccess == null ? null : gitAccess.reason(),
+                    gitAccess == null ? null : gitAccess.message(),
+                    gitAccess == null ? null : gitAccess.checkedAt());
         }
     }
 

@@ -247,6 +247,11 @@ export type Workspace = {
   localClientInstanceId?: string | null;
   online?: boolean;
   capabilities?: Record<string, boolean>;
+  /** 两小时只读巡检投影；UNKNOWN/缺失不能作为禁用依据。 */
+  gitAccessStatus?: "ACCESSIBLE" | "INACCESSIBLE" | "UNKNOWN" | string | null;
+  gitAccessReason?: string | null;
+  gitAccessMessage?: string | null;
+  gitAccessCheckedAt?: string | null;
 };
 
 export type LocalClientCredentialStatus = "ACTIVE" | "REVOKED" | string;
@@ -3588,6 +3593,11 @@ export type ApplicationWorkspaceConfig = {
   initialVersion?: ApplicationWorkspaceVersion | null;
   createdAt: string;
   updatedAt: string;
+  /** 当前登录用户对关联 Git 仓库的最近巡检结果。 */
+  gitAccessStatus?: "ACCESSIBLE" | "INACCESSIBLE" | "UNKNOWN" | string | null;
+  gitAccessReason?: string | null;
+  gitAccessMessage?: string | null;
+  gitAccessCheckedAt?: string | null;
 };
 
 export type WorkspaceCreateOperationStep = {

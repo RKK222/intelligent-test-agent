@@ -13191,6 +13191,30 @@
 - 用户可直接在小兔子托盘点击“更新公共能力”，不再必须进入网页个人设置；网页入口继续作为同一确认操作的备用入口。
 - 本次只修改服务端 WebSocket 通知补偿逻辑、测试和文档，不变更协议帧、HTTP API、RunEvent、数据库、Flyway、客户端制品、权限、部署节点、`.env*`、generated SDK 或 OpenCode 只读源码。
 
+## 2026-08-23 - 增加工作空间 Git 权限定时巡检与禁用提示
+
+### Why
+
+- 服务器应用工作空间和本地客户端工作空间的 Git 读取权限可能在创建后被撤销，现有选择器仍允许用户进入，直到后续 Git 操作才暴露失败；需要每两小时主动复核，并把确定失效项保留在列表中置灰、说明原因。
+
+### What
+
+- 新增 `workspace-management.git-access-inspection` XXL 任务，Cron 为 `0 0 0/2 * * ? *`：全局执行者分页并发复用服务器版本库只读预检，随后广播空载荷事件；各 Java 只检查自己实际持有连接且声明 `WORKSPACE_GIT_ACCESS_V1` 的本地客户端。
+- 新增应用工作空间与本地工作空间两张用户级 Git 巡检投影表及 MyBatis XML 仓储；状态区分 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`。只有 SSH key 缺失、认证失败、仓库不可读等确定结论写为 `INACCESSIBLE`，网络、超时、离线和旧客户端保持可选。
+- Workspace/template API 以 additive 字段返回状态、固定原因、脱敏说明和检查时间；顶部本地/服务器选择器与底部应用工作空间级联菜单对 `INACCESSIBLE` 项置灰、阻止版本选择/新增并直接展示原因。页面存续时每两小时刷新列表投影。
+- 同步 domain、workspace、runtime、local-client、persistence、API、XXL、前端模块 README/PACKAGE，以及 HTTP API、事件、数据库、架构和测试说明。
+
+### How
+
+- JDK 25 下相关后端 38 项通过，包含本地 Git 分类、服务器/本地巡检编排、Flyway 命名、根目录 `.env.test` 真实 PostgreSQL MyBatis 集成和 MySQL Testcontainers XXL migration，全部 0 failure / 0 skip；前端 FigmaShell/WorkbenchFooter 87 项通过，agent-web typecheck 通过。
+- 执行完整 26 模块后端 package、用户手册与 agent-web production build，并按 `.env.test` / `test` profile 重启 backend、frontend、ClickHouse 与 OpenCode manager；liveness/readiness 为 `UP`，3000 返回 200，登录 CORS 正常，manager WebSocket 已连接且 OpenCode health 最终为 HEALTHY。
+- PostgreSQL migration `V20260823191023` 已在固定验收库执行，Flyway checksum 为 `664897016`，原始 SHA-256 为 `12cfe3bbaa4b0d562f2dca2a69290180c81d42aca79b1ff4aaf6ad5cf32419e2`，文件名、版本和字节已冻结。提交前回顾全部 `.agents/session-log*.md` 近期记录并执行 `git diff --check`。
+
+### Result
+
+- Git 权限明确失效的服务器与本地工作空间仍可见但不可选，并显示固定脱敏原因；瞬态故障、离线客户端和滚动升级旧节点不会被误禁用，权限恢复后下一轮巡检会清除灰态。
+- 本次新增 additive HTTP DTO 字段、低敏服务器广播、本地客户端 capability、PostgreSQL migration 与 XXL MySQL migration；不新增部署节点，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。当前服务已完整启动并通过健康检查，无未完成项。
+
 ## 2026-08-23 - 收敛客户端灰度可见性并补齐头像本地操作
 
 ### Why

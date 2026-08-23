@@ -10,7 +10,7 @@
 - JIT 用户按 `platform_user_id` 幂等、改名、稳定冲突后缀和无原生密码登录。
 - 原生登录/改密/用户写入口禁用，用户列表只读保留。
 - handler 参数、未知任务/策略、`GLOBAL_MUTEX`/`ALLOW_OVERLAP`、锁续租丢失、线程中断和异常脱敏。
-- MySQL 8.4 全新 Flyway、重复启动、并发 migration、V8 已执行后升级当前版本、一个 executor 组、14 个任务和无默认管理员；V5 后夜间分发任务必须启用且 Cron 为每分钟，V6 后应用源码清理任务也必须启用、每分钟执行，V8 后个人工作区搬迁任务必须启用、每 30 分钟执行，V9 后闲置用户进程关闭必须启用、每天北京时间 02:00 执行；三个广播任务均使用 `GLOBAL_MUTEX` 和空 payload，路由/阻塞/过期/重试策略保持既有契约。V10/V11 新增内部模型供应商探活（每 5 分钟）与观测数据清理（每天北京时间 03:30）；analytics/SCM 两套已执行 V12 必须保持原 checksum 并经 V13 幂等补齐另一任务，未知 V12 checksum 失败关闭，禁止改写已执行 migration。
+- MySQL 8.4 全新 Flyway、重复启动、并发 migration、V8 已执行后升级当前版本、一个 executor 组、15 个任务和无默认管理员；V5 后夜间分发任务必须启用且 Cron 为每分钟，V6 后应用源码清理任务也必须启用、每分钟执行，V8 后个人工作区搬迁任务必须启用、每 30 分钟执行，V9 后闲置用户进程关闭必须启用、每天北京时间 02:00 执行，V14 后 Git 权限巡检必须启用、每两小时执行；四个广播任务均使用 `GLOBAL_MUTEX` 和空 payload，路由/阻塞/过期/重试策略保持既有契约。V10/V11 新增内部模型供应商探活（每 5 分钟）与观测数据清理（每天北京时间 03:30）；analytics/SCM 两套已执行 V12 必须保持原 checksum 并经 V13 幂等补齐另一任务，再经 V14 前向增加巡检任务；未知 V12 checksum 失败关闭，禁止改写已执行 migration。
 - 每分钟扫描只读取已到 `slotStart` 且未过 `windowEnd` 的 `SCHEDULED`，不按 `NIGHT_WINDOW/ADMIN_CUSTOM` 模式过滤；单轮 500、目标分组 50、服务器并发 8，目标 Java 单批 Run 受理并发 4，接口不等待 Run 终态且没有专属队列。
 - 普通用户缺失 `scheduleMode` 时保持标准夜间语义，伪造 `ADMIN_CUSTOM` 必须在创建任何 Session、幂等锁、会话锁或容量记录前返回 `FORBIDDEN`；超级管理员可创建白天完整分钟任务，边界为下一完整分钟至未来 24 小时，显示区间 1 分钟、重试窗口 15 分钟。
 - `ADMIN_CUSTOM` 创建、改期、取消、Run 受理、永久失败和窗口过期均不得调用夜间容量预留/释放；角色被移除后仍可取消，但调整自定义任务必须返回 `FORBIDDEN`。
@@ -81,7 +81,7 @@ Testcontainers 需要可用 Docker；Docker 不可用时相关 MySQL/Redis 测�
 ## 数据与日志检查
 
 - `xxl_job_user` 不存在默认管理员；JIT 行具有唯一 `platform_user_id` 和 SHA-256 session digest，不保存平台原始 Token。
-- `xxl_job_info` 恰好十条且 `platform_task_key` 唯一；所有任务为 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，夜间分发和应用源码清理均为每分钟 Cron `0 0/1 * * * ? *`，个人工作区搬迁为每 30 分钟 Cron `0 0/30 * * * ? *`，闲置用户进程关闭为每日 Cron `0 0 2 * * ? *`；三个广播任务参数都只含 taskKey、`GLOBAL_MUTEX` 和空 payload。
+- `xxl_job_info` 恰好十五条且 `platform_task_key` 唯一；所有任务为 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，夜间分发和应用源码清理均为每分钟 Cron `0 0/1 * * * ? *`，个人工作区搬迁为每 30 分钟 Cron `0 0/30 * * * ? *`，闲置用户进程关闭为每日 Cron `0 0 2 * * ? *`，Git 权限巡检为每两小时 Cron `0 0 0/2 * * ? *`；四个广播任务参数都只含 taskKey、`GLOBAL_MUTEX` 和空 payload。
 - 旧 PostgreSQL scheduler 历史仍存在，但应用内没有 runner，不再产生新的 `CRON`、`MANUAL` 或 `USER_PLAN`；旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 在短暂停机升级后均为 `SKIPPED`。
 - URL、访问日志、应用日志和错误响应不得出现票据、Cookie、Token、MySQL 密码或完整 executor 参数中的敏感载荷。
 - XXL 日志保留 30 天；PostgreSQL 已结束 scheduler 历史仍按 7 天清理。

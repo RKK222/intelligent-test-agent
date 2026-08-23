@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 public class LocalClientWorkspaceFileGateway {
 
     private static final Duration FILE_TIMEOUT = LocalClientProtocol.LONG_REQUEST_TIMEOUT;
+    private static final Duration GIT_ACCESS_TIMEOUT = Duration.ofSeconds(75);
 
     private final LocalClientTunnelGateway tunnelGateway;
     private final LocalClientFrameCodec codec = new LocalClientFrameCodec();
@@ -45,6 +46,24 @@ public class LocalClientWorkspaceFileGateway {
                 parameters,
                 traceId,
                 FILE_TIMEOUT);
+    }
+
+    /** 本地 Git 权限巡检使用独立有界超时，避免后台任务继承长文件传输等待时间。 */
+    public JsonNode checkGitAccess(
+            String clientInstanceId,
+            long connectionGeneration,
+            String workspaceId,
+            String rootDigest,
+            String traceId) {
+        return invoke(
+                clientInstanceId,
+                connectionGeneration,
+                workspaceId,
+                rootDigest,
+                "workspace.git-access.check",
+                com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode(),
+                traceId,
+                GIT_ACCESS_TIMEOUT);
     }
 
     /** 浏览器文件 WebSocket 断开时使用短超时清理远端上传临时文件，避免清理线程悬挂一天。 */

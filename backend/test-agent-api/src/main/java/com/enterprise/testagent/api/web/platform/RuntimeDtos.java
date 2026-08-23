@@ -252,7 +252,11 @@ final class RuntimeDtos {
             String runtimeKind,
             String localClientInstanceId,
             boolean online,
-            Map<String, Boolean> capabilities) {
+            Map<String, Boolean> capabilities,
+            String gitAccessStatus,
+            String gitAccessReason,
+            String gitAccessMessage,
+            Instant gitAccessCheckedAt) {
 
         /**
          * 从领域对象映射为 API 响应，避免直接暴露 domain 类型。
@@ -284,7 +288,11 @@ final class RuntimeDtos {
                     runtime.runtimeKind().name(),
                     runtime.localClientInstanceId(),
                     runtime.online(),
-                    runtime.capabilities());
+                    runtime.capabilities(),
+                    runtime.gitAccess() == null ? null : runtime.gitAccess().status().name(),
+                    runtime.gitAccess() == null ? null : runtime.gitAccess().reason(),
+                    runtime.gitAccess() == null ? null : runtime.gitAccess().message(),
+                    runtime.gitAccess() == null ? null : runtime.gitAccess().checkedAt());
         }
     }
 

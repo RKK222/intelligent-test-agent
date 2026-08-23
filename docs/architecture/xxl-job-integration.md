@@ -72,6 +72,7 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 - `V11` 注册每天北京时间 03:30 的内部模型调用观测数据清理任务 `opencode-runtime.internal-model-observability-retention`；删除 30 天前明细与 180 天前小时聚合。
 - `V12` 在 dev/release 分别形成 analytics 和 SCM Git 姓名补偿两套已执行历史；两份 SQL 的版本、文件名和字节均冻结，analytics 候选保存在隔离兼容 location，SCM 候选保留在默认主链。
 - `V13` 是唯一前向收敛迁移：对 analytics V12 历史只补 SCM 任务，对 SCM V12 历史和空库只补 analytics 任务，最终同时保有每分钟 `opencode-runtime.analytics-ingestion` 与每天 04:10 `configuration-management.scm-git-name-sync`。
+- `V14` 注册每两小时的 `workspace-management.git-access-inspection`。取得 `GLOBAL_MUTEX` 的 Java 先扫描服务器测试工作空间，再广播空载荷事件；各 Java 只向自己实际持有连接且声明 `WORKSPACE_GIT_ACCESS_V1` 的本地客户端发起只读检查。XXL 的 ROUND 节点不承担本地客户端亲和。
 - 后续新增任务或调整既有生产默认配置必须新建更高版本 SQL；禁止改写已执行 migration，也禁止启动时执行非版本化 upsert。
 
 旧 PostgreSQL 的任务定义和运行历史只做保留，不复制到 MySQL，也不再被 runner 调度。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免 runner 删除后残留永久活动记录；不删除历史审计，新夜间任务只写 `night_execution_tasks`。
@@ -121,6 +122,8 @@ SCM Git 姓名补偿使用 `GLOBAL_MUTEX`，由 ROUND 选中的单个 Java 顺�
 个人工作区搬迁同样使用 `GLOBAL_MUTEX` 只避免重复广播，不把 ROUND 命中的 executor 当成文件源。收到 `personal-workspace.relocation-requested` 的每台 Java 只扫描 `workspaces.linux_server_id=本机` 且与用户 ACTIVE `opencode` binding 不一致的个人工作区，活动 Run 先阻断搬迁。源端以 30 分钟数据库租约认领，目标文件校验和数据库切换完成后状态进入 `CLEANUP_PENDING`；旧源 Java 完成 Git worktree 清理后才终态。广播丢失、节点重启、传输响应丢失和连续换服均由下一次扫描与持久化状态恢复，不依赖 XXL 自身重试。
 
 闲置用户进程关闭也使用 `GLOBAL_MUTEX` 避免重复广播。每个 Java 只扫描当前 `linuxServerId`，并以 Redis manager 快照和本机 WebSocket 注册表确认自己持有目标容器；最近活动取全部来源 Run 的最大更新时间，无 Run 时取 manager 权威启动时间。候选 SQL 先收窄本服务器进程，再按现有 Run 用户索引和 Session 创建人索引分别聚合直接归属/legacy 活动，避免按候选重复扫描 Run 全表。北京时间 02:00 查询还排除执行窗口未结束的前一晚遗留任务和时段早于次日 00:00 的 `SCHEDULED/DISPATCHING` 任务；已过窗口、次日任务和终态不额外保护。超过 15 天的候选仍须在用户级 dispose 闸门内二次核对，任何 active Run、当日待投递任务、Session 运行、绑定/代次变化或 manager 不确定都跳过；成功关闭只把进程写为 `STOPPED`，保留 ACTIVE binding 供下次使用自动拉起。
+
+工作空间 Git 权限巡检按用户级投影结果：服务器端复用版本选择前的 SSH key + `git ls-remote` 预检，本地端复用既有客户端文件 RPC 和用户本机 Git/SSH 环境。只有明确缺少凭据、认证/仓库拒绝、非 Git 目录或缺少 origin 写为 `INACCESSIBLE`；网络、超时、旧客户端和路由变化写为 `UNKNOWN`，不能导致置灰。广播和任务结果只包含事件类型、traceId 与计数，不携带用户、路径、仓库 URL、命令或 stderr。
 
 JVM 和 XXL 统一使用 `Asia/Shanghai`。运行记录清理在北京时间 08:00 执行，对应原 UTC 00:00；XXL 日志保留 30 天，旧 PostgreSQL scheduler 历史仍由任务清理 7 天。
 

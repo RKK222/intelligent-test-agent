@@ -31,7 +31,8 @@ class LocalClientVersionCheckTest {
                 "SELF_UPDATE_V1",
                 "OPENCODE_OBSERVABILITY_V1",
                 "PUBLIC_CAPABILITY_SYNC_V1",
-                "MANAGED_MODEL_CONFIG_V1");
+                "MANAGED_MODEL_CONFIG_V1",
+                "WORKSPACE_GIT_ACCESS_V1");
         assertThat(check.checkedAt()).isEqualTo(checkedAt);
     }
 

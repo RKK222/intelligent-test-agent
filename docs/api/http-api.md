@@ -1175,9 +1175,15 @@ manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超�
   "linuxServerId": "127.0.0.1",
   "status": "ACTIVE",
   "createdAt": "2026-06-19T00:00:00Z",
-  "updatedAt": "2026-06-19T00:00:00Z"
+  "updatedAt": "2026-06-19T00:00:00Z",
+  "gitAccessStatus": "INACCESSIBLE",
+  "gitAccessReason": "REPOSITORY_PERMISSION_REQUIRED",
+  "gitAccessMessage": "Git 仓库读取权限已失效",
+  "gitAccessCheckedAt": "2026-08-23T12:00:00Z"
 }
 ```
+
+Git 巡检四字段为向后兼容的可空增量字段。当前只在 `runtimeKind=LOCAL_CLIENT` 的普通 Workspace 列表/详情中投影本地客户端巡检结果；服务器测试工作空间从下述模板接口取得同名字段。`ACCESSIBLE` 表示最近一次只读远端校验成功，`INACCESSIBLE` 表示明确缺少 SSH key、认证失败、仓库不可访问、非 Git 工作区或缺少 origin，`UNKNOWN` 表示网络、超时、旧客户端或其它瞬态故障。前端只能对 `INACCESSIBLE` 禁用选择；原因和说明均为固定脱敏值，不返回路径、Git URL、命令或 stderr。
 
 #### 平台体验工作区
 
@@ -1629,6 +1635,10 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 兼容同步入口；只读取个人 `HEAD` 的白名单文件，复用 feature 投影发布，不把未提交工作树内容复制到应用分支。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 兼容入口；校验请求后把当前版本固定 feature commit 原生 merge 到个人 worktree，不再逐文件复制，`force` 不覆盖本地内容。 |
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 显式确保默认个人工作区存在：要求当前用户 TestAgent 进程 READY，存在且同服务器时复用，否则在进程服务器创建或修复。 |
+
+`GET /applications/{appId}/workspace-templates` 的每个模板增量返回与 `WorkspaceResponse` 同名的
+`gitAccessStatus/gitAccessReason/gitAccessMessage/gitAccessCheckedAt`。该投影按当前用户和模板隔离，由每两小时
+巡检刷新；没有结果时四字段为 `null`。调用方只可把明确 `INACCESSIBLE` 视为不可选，`UNKNOWN` 不代表权限已经失效。
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取应用版本工作区或个人 worktree 的变更文件列表，并返回 feature merge 状态；Git unmerged 状态会返回 `status=conflict`。 |
 | `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前应用版本工作区或个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean；`.opencode/**` 要求 `APP_ADMIN`。 |
 | `POST` | `/workspaces/{workspaceId}/git-stage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件定点加入真实 Git index；`.opencode/**` 要求 `APP_ADMIN`。 |

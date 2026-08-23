@@ -183,6 +183,14 @@ const testTemplates = templates;
 // 当前应用关联的版本库全部在菜单中直列：已下载项打开快照，未下载项以灰色入口进入管理页。
 const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
 
+function workspaceGitAccessBlocked(template: AppWorkspaceTemplate) {
+  return template.gitAccessStatus === "INACCESSIBLE";
+}
+
+function workspaceGitAccessMessage(template: AppWorkspaceTemplate) {
+  return template.gitAccessMessage || "Git 权限已失效";
+}
+
 // ===== 应用工作空间两级菜单的弹出状态 =====
 // 模板列表尚未加载或为空时仍展示入口，用于直接暴露当前个人 worktree 分支；
 // 点击后菜单会展示加载/空态，不影响用户识别当前实际改动分支。
@@ -226,7 +234,7 @@ const createVersionBranches = ref<string[]>([]);
 const createVersionLoadingBranches = ref(false);
 
 function openCreateVersionDialog(template: AppWorkspaceTemplate) {
-  if (props.workspaceKind && props.workspaceKind !== "MANAGED") return;
+  if ((props.workspaceKind && props.workspaceKind !== "MANAGED") || workspaceGitAccessBlocked(template)) return;
   createVersionTarget.value = template;
   createVersionValue.value = "";
   createVersionBranch.value = "";
@@ -492,6 +500,13 @@ onBeforeUnmount(() => {
 });
 
 function onTemplateEnter(template: AppWorkspaceTemplate, event: MouseEvent) {
+  if (workspaceGitAccessBlocked(template)) {
+    hoveredTemplateId.value = null;
+    hoveredTemplateEl.value = null;
+    cascadeSubmenuPos.value = null;
+    clearCascadeSubmenuCloseTimer();
+    return;
+  }
   hoveredTemplateId.value = template.workspaceId;
   // 记录当前 hover 行的 DOM 引用，用于子菜单 fixed 定位 + scroll/resize 期间重算。
   hoveredTemplateEl.value = event.currentTarget as HTMLElement;
@@ -522,6 +537,7 @@ function onCascadeSubmenuLeave() {
 }
 
 function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVersion) {
+  if (workspaceGitAccessBlocked(template)) return;
   emit("select-version", { template, version });
   closeMenu();
 }
@@ -690,11 +706,14 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
                 :key="template.workspaceId"
                 :class="[
                   'ta-workbench-cascade-item',
+                  workspaceGitAccessBlocked(template) && 'is-disabled',
                   hoveredTemplateId === template.workspaceId && 'is-hovered',
                   template.versions?.some((v) => v.versionId === selectedVersionId) && 'is-selected'
                 ]"
                 role="menuitem"
-                :aria-haspopup="true"
+                :aria-haspopup="!workspaceGitAccessBlocked(template)"
+                :aria-disabled="workspaceGitAccessBlocked(template)"
+                :title="workspaceGitAccessBlocked(template) ? workspaceGitAccessMessage(template) : template.branch"
                 @mouseenter="onTemplateEnter(template, $event)"
                 @mouseleave="onTemplateLeave"
               >
@@ -704,8 +723,11 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
                 />
                 <div class="ta-workbench-cascade-item-main">
                   <span class="ta-workbench-cascade-item-name">{{ template.workspaceName }}</span>
+                  <span v-if="workspaceGitAccessBlocked(template)" class="ta-workbench-cascade-item-desc">
+                    {{ workspaceGitAccessMessage(template) }}
+                  </span>
                 </div>
-                <span class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
+                <span v-if="!workspaceGitAccessBlocked(template)" class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
               </li>
             </ul>
             <div v-if="workspaceKind === 'APP_SOURCE'" class="ta-workbench-cascade-mode-entry">
@@ -1581,6 +1603,15 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
 .ta-workbench-cascade-item.is-selected {
   background: #f0f5ff;
   color: #1d3fb0;
+}
+
+.ta-workbench-cascade-item.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.ta-workbench-cascade-item.is-disabled:hover {
+  background: transparent;
 }
 
 .ta-workbench-cascade-item-main {

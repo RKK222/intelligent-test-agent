@@ -320,6 +320,37 @@ describe("WorkbenchFooter", () => {
     expect(document.body.textContent).not.toContain("已停用工作空间");
   });
 
+  it("keeps Git-inaccessible templates visible but disables their version submenu", async () => {
+    const deniedTemplate = {
+      ...template,
+      workspaceId: "wks_denied",
+      workspaceName: "权限失效工作空间",
+      gitAccessStatus: "INACCESSIBLE",
+      gitAccessReason: "REPOSITORY_PERMISSION_REQUIRED",
+      gitAccessMessage: "Git 仓库读取权限已失效",
+      gitAccessCheckedAt: "2026-08-23T12:00:00Z"
+    };
+    const wrapper = mount(WorkbenchFooter, {
+      attachTo: document.body,
+      props: {
+        appName: "F-COSS",
+        templates: [deniedTemplate],
+        showSave: false
+      } as any
+    });
+
+    await wrapper.find(".ta-workbench-footer-branch").trigger("click");
+    const item = document.body.querySelector(".ta-workbench-cascade-item") as HTMLElement;
+    expect(item.classList).toContain("is-disabled");
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.title).toBe("Git 仓库读取权限已失效");
+    expect(item.textContent).toContain("Git 仓库读取权限已失效");
+    item.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    await wrapper.vm.$nextTick();
+    expect(document.body.querySelector(".ta-workbench-cascade-submenu")).toBeNull();
+    expect(wrapper.emitted("load-versions")).toBeUndefined();
+  });
+
   it("closes an already-open create-version dialog when source mode disables version selection", async () => {
     const wrapper = mount(WorkbenchFooter, {
       attachTo: document.body,

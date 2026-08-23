@@ -11,6 +11,8 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
+import com.enterprise.testagent.domain.workspace.WorkspaceGitAccessCheck;
+import com.enterprise.testagent.domain.workspace.WorkspaceGitAccessCheckRepository;
 import com.enterprise.testagent.domain.workspace.TrustedWorkspaceResolver;
 import com.enterprise.testagent.domain.workspace.TrustedWorkspaceResolution;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
@@ -51,6 +53,7 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
     private LocalClientWorkspaceRepository localClientWorkspaceRepository;
     private LocalClientConnectionStore localClientConnectionStore;
+    private WorkspaceGitAccessCheckRepository workspaceGitAccessChecks;
 
     /**
      * 构造 Workspace 应用服务，注入领域 Repository 端口和文件服务，避免 Controller 直接访问底层资源。
@@ -288,20 +291,37 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
                 localClientConnectionStore, "localClientConnectionStore must not be null");
     }
 
+    /** 生产装配本地工作区 Git 巡检投影；未注入的旧测试保持响应字段为空。 */
+    @Autowired(required = false)
+    void configureWorkspaceGitAccessChecks(WorkspaceGitAccessCheckRepository workspaceGitAccessChecks) {
+        this.workspaceGitAccessChecks = Objects.requireNonNull(
+                workspaceGitAccessChecks, "workspaceGitAccessChecks must not be null");
+    }
+
     /** 为 HTTP 投影补充运行目标；本地在线状态只信任短 TTL 的当前 generation 路由。 */
     public WorkspaceRuntimeMetadata runtimeMetadata(Workspace workspace) {
         if (localClientWorkspaceRepository == null) {
             return WorkspaceRuntimeMetadata.server();
         }
         return localClientWorkspaceRepository.findByWorkspaceId(workspace.workspaceId())
-                .map(binding -> new WorkspaceRuntimeMetadata(
-                        RuntimeKind.LOCAL_CLIENT,
-                        binding.clientInstanceId().value(),
-                        localClientConnectionStore != null
-                                && localClientConnectionStore.find(binding.clientInstanceId())
-                                        .filter(route -> route.userId().equals(binding.userId()))
-                                        .isPresent(),
-                        localCapabilities()))
+                .map(binding -> {
+                    WorkspaceGitAccessCheck gitAccess = workspaceGitAccessChecks == null
+                            ? null
+                            : workspaceGitAccessChecks.find(
+                                            binding.userId(),
+                                            WorkspaceGitAccessCheck.TargetKind.LOCAL_WORKSPACE,
+                                            workspace.workspaceId().value())
+                                    .orElse(null);
+                    return new WorkspaceRuntimeMetadata(
+                            RuntimeKind.LOCAL_CLIENT,
+                            binding.clientInstanceId().value(),
+                            localClientConnectionStore != null
+                                    && localClientConnectionStore.find(binding.clientInstanceId())
+                                            .filter(route -> route.userId().equals(binding.userId()))
+                                            .isPresent(),
+                            localCapabilities(),
+                            gitAccess);
+                })
                 .orElseGet(WorkspaceRuntimeMetadata::server);
     }
 
@@ -322,7 +342,8 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
             RuntimeKind runtimeKind,
             String localClientInstanceId,
             boolean online,
-            Map<String, Boolean> capabilities) {
+            Map<String, Boolean> capabilities,
+            WorkspaceGitAccessCheck gitAccess) {
 
         public static WorkspaceRuntimeMetadata server() {
             return new WorkspaceRuntimeMetadata(
@@ -337,7 +358,8 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
                             "gitPublish", true,
                             "agentConfig", true,
                             "attachments", true,
-                            "collaboration", true));
+                            "collaboration", true),
+                    null);
         }
     }
 

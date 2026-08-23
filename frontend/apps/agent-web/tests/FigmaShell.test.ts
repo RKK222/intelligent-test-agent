@@ -1329,6 +1329,50 @@ describe("FigmaShell", () => {
     });
   });
 
+  it("grays out Git-inaccessible local and server workspaces with a safe reason", async () => {
+    const deniedServer = {
+      workspaceId: "workspace-denied",
+      workspaceName: "无权限服务器空间",
+      branch: "main",
+      enabled: true,
+      gitAccessStatus: "INACCESSIBLE",
+      gitAccessReason: "REPOSITORY_PERMISSION_REQUIRED",
+      gitAccessMessage: "Git 仓库读取权限已失效",
+      gitAccessCheckedAt: "2026-08-23T12:00:00Z",
+      versions: [{ versionId: "version-denied", version: "20260823", branch: "main" }]
+    };
+    const wrapper = mountShell({
+      props: {
+        appTemplates: [deniedServer],
+        localWorkspaces: [{
+          workspaceId: "wrk-denied",
+          name: "无权限本地空间",
+          online: true,
+          gitAccessStatus: "INACCESSIBLE",
+          gitAccessReason: "REPOSITORY_PERMISSION_REQUIRED",
+          gitAccessMessage: "Git 仓库读取权限已失效",
+          gitAccessCheckedAt: "2026-08-23T12:00:00Z"
+        }]
+      } as any
+    });
+
+    await wrapper.get('[data-testid="header-workspace-selector"]').trigger("click");
+    const local = wrapper.get('[aria-label="打开本地工作区无权限本地空间"]');
+    const server = wrapper.get('[aria-label="打开测试工作空间无权限服务器空间"]');
+    expect(local.attributes("disabled")).toBe("");
+    expect(server.attributes("disabled")).toBe("");
+    expect(local.classes()).toContain("is-git-inaccessible");
+    expect(server.classes()).toContain("is-git-inaccessible");
+    expect(local.attributes("title")).toBe("Git 仓库读取权限已失效");
+    expect(server.attributes("title")).toBe("Git 仓库读取权限已失效");
+    expect(local.text()).toContain("Git 仓库读取权限已失效");
+    expect(server.text()).toContain("Git 仓库读取权限已失效");
+    await local.trigger("mousedown");
+    await server.trigger("mousedown");
+    expect(wrapper.emitted("select-local-workspace")).toBeUndefined();
+    expect(wrapper.emitted("select-version")).toBeUndefined();
+  });
+
   it("shows process status with server name and resolved address", async () => {
     const wrapper = mountShell({
       props: {

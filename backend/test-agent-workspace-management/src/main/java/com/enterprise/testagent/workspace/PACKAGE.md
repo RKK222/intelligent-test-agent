@@ -4,7 +4,7 @@
 
 Git 提交身份通过 `ScmGitIdentityResolver` 优先读取独立 SCM 姓名证据；右控明确返回姓名不一致时只在邮箱和本次实际姓名完全匹配后重建提交并重推一次，不对平台同名数字后缀做字符串猜测。
 
-Workspace 和文件管理业务包，负责工作区注册、当前用户及受控排查目标用户的只读查询、服务器目录选择、文件路径归一化、越权路径拒绝、UTF-8 文件读写、文件状态查询、工作区与引用资产的只读组合视图、设置页初始应用版本工作区创建进度、应用版本工作区和个人工作区运行编排、应用引用资产库多服务器副本、应用源码快照的固定提交物化/打开/清理，以及公共级/工作空间级 Agent 配置文件与 Git 发布编排。
+Workspace 和文件管理业务包，负责工作区注册、当前用户及受控排查目标用户的只读查询、服务器目录选择、文件路径归一化、越权路径拒绝、UTF-8 文件读写、文件状态查询、工作区与引用资产的只读组合视图、设置页初始应用版本工作区创建进度、应用版本工作区和个人工作区运行编排、每两小时的服务器/本地客户端 Git 权限巡检、应用引用资产库多服务器副本、应用源码快照的固定提交物化/打开/清理，以及公共级/工作空间级 Agent 配置文件与 Git 发布编排。
 
 ## 不负责
 
@@ -23,6 +23,7 @@ Workspace 和文件管理业务包，负责工作区注册、当前用户及受�
 - `WorkspaceDirectoryService`：列出目标后端服务器上的一层子目录，仅供超级管理员服务器工作空间选择器使用。
 - `ExperienceWorkspaceApplicationService`：解析本服务器体验目录、建立稳定 Workspace 身份与实时访问边界；直接启动 Java 时仅兜底初始化目录、Git 与 README，标准 `docs/spec` 内容由随部署包交付的 Shell 模板补齐。
 - `ManagedWorkspaceApplicationService`：应用成员校验、版本选择前按当前用户身份执行 Git 远端只读访问预检、设置页工作空间模板 + 初始版本工作区创建、进度表更新、应用版本工作区 clone/接管、通用参数路径根目录读取、每服务器版本副本、目标 commit 广播同步、个人 git worktree、最近使用、diff、同步和版本工作区 git pull 编排；个人发布先本地提交，再按白名单从个人 HEAD 投影到应用 feature worktree 后提交、推送和广播，不合并个人分支。
+- `WorkspaceGitAccessInspectionService` / `WorkspaceGitAccessInspectionTaskHandler`：XXL 每两小时扫描服务器应用工作空间的当前用户 Git 远端只读权限，把确定失效、可访问或暂时未知结果持久化为安全投影，并广播本地客户端巡检唤醒；网络异常和旧客户端能力缺失保持 `UNKNOWN`，不误置灰。
 - `AgentConfigApplicationService`：公共级/工作空间级 Agent 配置目录选择、读写、文件目标服务器归属查询、公共 worktree 切换列表、公共 Git 更新、worktree 创建、diff、stage/unstage、commit、publish、进度快照和公共配置广播同步；还在服务器级 Redis 租约下定时补偿已有 ACTIVE OpenCode binding 但缺失稳定公共个人 worktree 的超级管理员，补偿只复用本机共享仓库，不读取用户 SSH key 或切换运行态；直接发布和 worktree 合并发布复用 `GitPublishWorkflow`。
 - `AgentSkillHubApplicationService` / `AgentSkillHubResponses`：组合平台 push 与 SkillHub 接口目录；定时同步只保存外部元数据，预览、引用和更新时才校验并物化 ZIP，远端下架后隐藏发现入口但保留当前应用引用，push 时按内容摘要原子保持外部身份或转成可追溯的平台派生资产。
 - `ReferenceRepositoryApplicationService`：应用资产库列表、分支初始化/受控切换、generation 同步与只读实际指针核验、携带 expected generation 的管理员终止、当前平台规范化绝对目录的可空展示、总体/服务器状态、单层安全目录树、本机/广播/补偿/重试/取消唤醒、数据库租约 worker、Git 副本安全落盘和离线/恢复补偿编排。
