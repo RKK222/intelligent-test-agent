@@ -13064,3 +13064,27 @@
 
 - Trace 总览从传输事件堆叠改为可读的 DSH 语义轨迹，范围框选、直接点选、类型化详情、不完整轨迹和两侧折叠均已实现，同时保留完整原始归档证据。
 - 本次变更了既有 Trace 查询的 `INCOMPLETE` 过滤语义，但未变更 HTTP 字段、RunEvent/SSE、数据库或 ClickHouse schema、部署协议、安全权限、`.env*`、generated SDK 或 OpenCode 只读源码；未纳入 `.reasonix/`、根目录 `node_modules/` 和并行公共能力包改动。最终真实服务重启仍受上述并行 migration checksum 冲突阻塞。
+
+## 2026-08-23 - 撤销 Client key 后隐藏本地实例与工作区
+
+### Why
+
+- 用户主动撤销本地客户端凭据后，客户端虽然断连，但稳定实例和本地工作区仍继续出现在页面，无法区分“临时离线”和“主动关闭”。
+
+### What
+
+- 本地实例查询仅在当前用户凭据为 `ACTIVE` 时返回数据；工作区列表和详情统一要求本地工作区 owner 仍有有效凭据，活动 Session 也不能绕过该可见性门禁。
+- 撤销成功后沿用设置页的工作区目录变更事件，立即移除前端缓存和当前本地工作区快照、关闭文件 WebSocket，并显示“记录与目录仍保留”的反馈。
+- 轮换和普通断连继续展示离线记录；主动撤销只隐藏投影，不删除稳定实例、平台绑定或用户磁盘目录，重新启用后可恢复。
+- 同步 API、system-management、workspace-management、本地客户端架构和 agent-web 稳定说明；未修改 OpenCode 源码。
+
+### How
+
+- 后端定向测试 `LocalClientInstanceApplicationServiceTest` 与 `MyBatisSessionHistoryRepositoryIntegrationTest` 共 12 项通过；前端设置/事件链 3 个文件 39 项通过，agent-web typecheck 和生产 build 通过。
+- JDK 25 下后端 26 模块 `mvn clean package -DskipTests` 通过；使用 `.env.test` / `test` profile 完整重启 backend、frontend、ClickHouse 和 OpenCode manager，readiness 为 `UP`、前端与 CORS 为 200、OpenCode 1.18.4 health 持续为 `HEALTHY`。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并执行 `git diff --check`；只暂存本次语义修改，不纳入工作区并行公共能力包、Trace、`.reasonix/` 或 `node_modules/` 改动。
+
+### Result
+
+- 主动撤销现在会立即隐藏本地 OpenCode 实例和工作区，同时保留可恢复的数据与本地目录；临时离线仍按原设计可见。
+- 既有 HTTP 路径和 DTO 不变；不涉及 RunEvent/SSE、数据库结构、Flyway、部署节点、性能模型、权限协议、`.env*`、generated SDK 或 OpenCode 只读源码。

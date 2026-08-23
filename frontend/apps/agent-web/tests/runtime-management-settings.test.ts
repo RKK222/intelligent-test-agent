@@ -326,7 +326,7 @@ describe("runtime management settings", () => {
     const onWorkspaceCatalogChanged = vi.fn();
     const WorkspacePanelStub = defineComponent({
       emits: ["workspace-catalog-changed"],
-      template: `<button type="button" @click="$emit('workspace-catalog-changed')">工作空间已更新</button>`
+      template: `<button type="button" @click="$emit('workspace-catalog-changed', 'LOCAL_CLIENT_REVOKED')">工作空间已更新</button>`
     });
     const currentUser = {
       userId: "usr_admin",
@@ -341,12 +341,12 @@ describe("runtime management settings", () => {
     });
 
     await fireEvent.click(panel.getByRole("button", { name: "工作空间已更新" }));
-    expect(onWorkspaceCatalogChanged).toHaveBeenCalledTimes(1);
+    expect(onWorkspaceCatalogChanged).toHaveBeenNthCalledWith(1, "LOCAL_CLIENT_REVOKED");
     panel.unmount();
 
     const SettingsPanelStub = defineComponent({
       emits: ["workspace-catalog-changed"],
-      template: `<button type="button" @click="$emit('workspace-catalog-changed')">目录刷新事件</button>`
+      template: `<button type="button" @click="$emit('workspace-catalog-changed', 'LOCAL_CLIENT_REVOKED')">目录刷新事件</button>`
     });
     const dialog = render(SettingsDialog, {
       props: { open: true, currentUser },
@@ -362,7 +362,7 @@ describe("runtime management settings", () => {
     });
 
     await fireEvent.click(dialog.getByRole("button", { name: "目录刷新事件" }));
-    expect(onWorkspaceCatalogChanged).toHaveBeenCalledTimes(2);
+    expect(onWorkspaceCatalogChanged).toHaveBeenNthCalledWith(2, "LOCAL_CLIENT_REVOKED");
   });
 
   it("lets an application admin open application settings but not user management", () => {

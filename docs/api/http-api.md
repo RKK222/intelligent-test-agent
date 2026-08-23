@@ -1146,8 +1146,8 @@ manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超�
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/internal/platform/workspace-management/workspaces` | 分页列出当前用户拥有或由其历史会话归因的工作区。 |
-| `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}` | 查询当前用户可访问的工作区详情。 |
+| `GET` | `/api/internal/platform/workspace-management/workspaces` | 分页列出当前用户拥有或由其历史会话归因的工作区；Client key 主动撤销后隐藏本地客户端工作区。 |
+| `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}` | 查询当前用户可访问的工作区详情；凭据已撤销的本地客户端工作区按不存在处理。 |
 | `POST` | `/api/internal/platform/workspace-management/workspaces/experience/open` | 任意已登录用户随时打开当前 TestAgent 进程服务器上的共享体验工作区；无请求体。 |
 | `POST` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` | 查询当前工作区文件 WebSocket 应连接的目标后端。 |
 | `POST` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/git-commit` | 仅为体验工作区建立本服务器本地提交；请求为 `{ "commitMessage": "...", "files": ["..."] }`，不提供 push 或发布。 |
@@ -4312,8 +4312,8 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me` | 创建当前用户唯一 key，返回 `CredentialView` | 明文通过后续 copy 取得；重复创建幂等返回现有视图。 |
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me/copy` | `PlaintextKey(clientKey)` | 仅 `revealAvailable=true` 的首次调用成功；成功后消费展示资格，第二次返回 `409 CONFLICT` 且不再解密。强制 `no-store/no-cache/no-referrer`；调用记审计。 |
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新 `CredentialView` | 原子提升版本，重置新版本的首次展示资格，并撤销全部连接与模型 grant。 |
-| `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant。 |
-| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户所有稳定实例及在线、generation、OpenCode 状态 | reported/observed 地址仅展示。 |
+| `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant，并隐藏本地实例及工作区投影；不删除平台记录或本地目录。 |
+| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户有效 Client key 下的稳定实例及在线、generation、OpenCode 状态 | 主动撤销后返回空列表；记录保留，重新启用后恢复。reported/observed 地址仅展示。 |
 | `GET` | `/api/internal/platform/local-opencode-client/download-access/me` | `{allowed}` | 当前登录用户可调用；只返回下载入口灰度布尔值。该接口不跟随 OpenCode 进程归属转发，避免滚动升级期间旧节点丢失 capability；查询异常失败关闭为 `false`。 |
 | `GET` | `/api/internal/platform/local-opencode-client/admin/rollout-users?page={page}&size={size}` | 本地客户端下载灰度用户分页 | 仅 `SUPER_ADMIN`；只返回启用记录和最近操作人/时间。 |
 | `POST` | `/api/internal/platform/local-opencode-client/admin/rollout-users` | `{userId}` → 灰度用户 | 仅 `SUPER_ADMIN`；目标必须是存在且可登录的平台用户，重复添加幂等启用。 |

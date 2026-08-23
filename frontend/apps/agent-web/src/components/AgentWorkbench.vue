@@ -10272,9 +10272,33 @@ function closeSettings() {
   void router.replace({ name: "workbench" });
 }
 
-function refreshManagedWorkspaceCatalog() {
+function refreshManagedWorkspaceCatalog(reason?: "LOCAL_CLIENT_REVOKED") {
   // 异步创建操作真正成功时立即刷新底部选择器；不能只依赖关闭设置时可能过早的刷新。
   void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
+  void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+  if (reason !== "LOCAL_CLIENT_REVOKED") return;
+
+  // 主动撤销后立即废弃工作台中的本地快照；数据库记录与本地目录继续保留，重新启用后可恢复。
+  queryClient.setQueryData<PageResponse<Workspace>>(["workspaces"], (old) => old ? {
+    ...old,
+    items: old.items.filter((workspace) => workspace.runtimeKind !== "LOCAL_CLIENT"),
+    total: Math.max(0, old.total - old.items.filter((workspace) => workspace.runtimeKind === "LOCAL_CLIENT").length)
+  } : old);
+  const revokedWorkspaceId = selectedWorkspaceKind.value === "LOCAL_CLIENT"
+    ? selectedWorkspaceId.value
+    : undefined;
+  if (!revokedWorkspaceId) return;
+  localWorkspaceRouteSequence += 1;
+  api.closeWorkspaceFileSocket(revokedWorkspaceId);
+  invalidateConversationInteraction();
+  resetWorkspaceState();
+  selectedWorkspaceId.value = undefined;
+  selectedWorkspaceKind.value = "MANAGED";
+  feedback.value = {
+    kind: "info",
+    title: "本地客户端已关闭",
+    description: "本地 OpenCode 实例和工作区已隐藏；平台记录与本地目录仍保留。"
+  };
 }
 
 /**

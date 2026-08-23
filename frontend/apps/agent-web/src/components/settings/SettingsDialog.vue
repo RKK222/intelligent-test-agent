@@ -19,7 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "close"): void;
-  (e: "workspace-catalog-changed"): void;
+  (e: "workspace-catalog-changed", reason?: "LOCAL_CLIENT_REVOKED"): void;
 }>();
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -118,7 +118,7 @@ function selectMenu(key: MenuKey) {
           :refresh-key="refreshKey"
           :page-active="props.open"
           @switch-menu="handleSwitchMenu"
-          @workspace-catalog-changed="emit('workspace-catalog-changed')"
+          @workspace-catalog-changed="(reason?: 'LOCAL_CLIENT_REVOKED') => emit('workspace-catalog-changed', reason)"
         />
       </div>
     </div>

@@ -231,4 +231,29 @@ describe("SettingsPersonalPanel one-time Client key reveal", () => {
     expect(view.queryByRole("button", { name: "显示 Client key" })).toBeNull();
     expect(client.copyMyLocalClientCredential).not.toHaveBeenCalled();
   });
+
+  it("explains that revocation hides local state without deleting local directories", async () => {
+    const client = api(consumedCredential);
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const view = renderPanel(client);
+
+    const revokeButton = await view.findByRole("button", { name: "撤销" });
+    await waitFor(() => expect((revokeButton as HTMLButtonElement).disabled).toBe(false));
+    await fireEvent.click(revokeButton);
+
+    await waitFor(() => expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("本地 OpenCode 实例和工作区将不再显示"),
+      "确认撤销 Client key",
+      expect.any(Object)
+    ));
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("本地目录不会删除"),
+      "确认撤销 Client key",
+      expect.any(Object)
+    );
+    await waitFor(() => expect(client.revokeMyLocalClientCredential).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.emitted("workspace-catalog-changed")).toEqual([
+      ["LOCAL_CLIENT_REVOKED"]
+    ]));
+  });
 });

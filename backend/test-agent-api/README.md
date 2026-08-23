@@ -199,6 +199,8 @@ HTTP 注册/注销会同步等待反向文件 RPC，Controller 必须调度到 `
 Redis 快照、不直接控制本地 supervisor。Workspace/Session/Run/夜间及统一 OpenCode 实例响应仅追加
 runtime/capability 字段，旧服务端路径保持兼容。完整契约见 `docs/api/http-api.md` 与
 `docs/api/event-stream.md`。
+当前用户主动撤销 Client key 后，实例列表返回空，本地 Workspace 列表与详情按不存在处理；稳定实例、平台绑定
+和用户磁盘目录均保留，重新启用凭据后恢复展示。轮换和普通断连仍保留离线状态。
 `LocalClientRolloutAdminController` 仅允许 `SUPER_ADMIN` 分页、添加和移出客户端下载灰度用户；
 `UserOpencodeEndpointController` 继续把当前用户灰度作为服务端实例的 `localClientDownload` capability
 additive 返回，同时提供不跟随进程归属路由的 `download-access/me` 独立查询。网页以独立布尔结果为权威，

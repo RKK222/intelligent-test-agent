@@ -19,7 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "switch-menu", key: string): void;
-  (e: "workspace-catalog-changed"): void;
+  (e: "workspace-catalog-changed", reason?: "LOCAL_CLIENT_REVOKED"): void;
 }>();
 
 const panels: Record<string, PanelDef> = {
@@ -59,7 +59,7 @@ const currentPageActivityProps = computed(() =>
         :refresh-key="props.refreshKey"
         v-bind="currentPageActivityProps"
         @switch-menu="(key: string) => emit('switch-menu', key)"
-        @workspace-catalog-changed="emit('workspace-catalog-changed')"
+        @workspace-catalog-changed="(reason?: 'LOCAL_CLIENT_REVOKED') => emit('workspace-catalog-changed', reason)"
       />
     </div>
   </div>

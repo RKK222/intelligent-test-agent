@@ -5,6 +5,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientCredential;
+import com.enterprise.testagent.domain.localclient.LocalClientCredentialRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientCredentialStatus;
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
@@ -25,9 +28,51 @@ class LocalClientInstanceApplicationServiceTest {
         LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
         LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
         LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
+        LocalClientCredentialRepository credentials = mock(LocalClientCredentialRepository.class);
         Instant now = Instant.parse("2026-08-20T10:00:00Z");
-        when(instances.findByUserId(userId)).thenReturn(List.of(new LocalClientInstance(
-                new LocalClientInstanceId("lci_local_instance_view"),
+        when(credentials.findByUserId(userId)).thenReturn(Optional.of(credential(
+                userId, LocalClientCredentialStatus.ACTIVE, now, null)));
+        when(instances.findByUserId(userId)).thenReturn(List.of(instance(
+                "lci_local_instance_view", userId, now)));
+        when(versions.findGlobalPolicy()).thenReturn(Optional.of(new LocalClientVersionModels.GlobalPolicy(
+                "20260820200000", 6, userId, now)));
+        when(versions.findUserPolicy(userId)).thenReturn(Optional.of(new LocalClientVersionModels.UserPolicy(
+                userId, "20260820180000", 7, userId, now)));
+
+        LocalClientInstanceApplicationService service =
+                new LocalClientInstanceApplicationService(instances, connections, versions, credentials);
+
+        LocalClientInstanceResponses.InstanceView view = service.list(userId).getFirst();
+
+        assertThat(view.selfUpdateSupported()).isTrue();
+        assertThat(view.targetClientVersion()).isEqualTo("20260820180000");
+        assertThat(view.updateDirection()).isEqualTo("ROLLBACK");
+        assertThat(view.lastUpdateStatus()).isEqualTo("SUCCEEDED");
+        assertThat(view.lastUpdateAt()).isEqualTo(now);
+    }
+
+    @Test
+    void revokedCredentialHidesPersistedClientInstances() {
+        UserId userId = new UserId("usr_local_instance_revoked");
+        LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
+        LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
+        LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
+        LocalClientCredentialRepository credentials = mock(LocalClientCredentialRepository.class);
+        Instant now = Instant.parse("2026-08-20T10:00:00Z");
+        when(credentials.findByUserId(userId)).thenReturn(Optional.of(credential(
+                userId, LocalClientCredentialStatus.REVOKED, now, now)));
+        when(instances.findByUserId(userId)).thenReturn(List.of(instance(
+                "lci_local_instance_revoked", userId, now)));
+
+        LocalClientInstanceApplicationService service =
+                new LocalClientInstanceApplicationService(instances, connections, versions, credentials);
+
+        assertThat(service.list(userId)).isEmpty();
+    }
+
+    private static LocalClientInstance instance(String clientInstanceId, UserId userId, Instant now) {
+        return new LocalClientInstance(
+                new LocalClientInstanceId(clientInstanceId),
                 userId,
                 "麒麟工作站",
                 "linux",
@@ -43,21 +88,24 @@ class LocalClientInstanceApplicationServiceTest {
                 now.minusSeconds(3600),
                 now,
                 now,
-                null)));
-        when(versions.findGlobalPolicy()).thenReturn(Optional.of(new LocalClientVersionModels.GlobalPolicy(
-                "20260820200000", 6, userId, now)));
-        when(versions.findUserPolicy(userId)).thenReturn(Optional.of(new LocalClientVersionModels.UserPolicy(
-                userId, "20260820180000", 7, userId, now)));
+                null);
+    }
 
-        LocalClientInstanceApplicationService service =
-                new LocalClientInstanceApplicationService(instances, connections, versions);
-
-        LocalClientInstanceResponses.InstanceView view = service.list(userId).getFirst();
-
-        assertThat(view.selfUpdateSupported()).isTrue();
-        assertThat(view.targetClientVersion()).isEqualTo("20260820180000");
-        assertThat(view.updateDirection()).isEqualTo("ROLLBACK");
-        assertThat(view.lastUpdateStatus()).isEqualTo("SUCCEEDED");
-        assertThat(view.lastUpdateAt()).isEqualTo(now);
+    private static LocalClientCredential credential(
+            UserId userId,
+            LocalClientCredentialStatus status,
+            Instant now,
+            Instant revokedAt) {
+        return new LocalClientCredential(
+                userId,
+                "encrypted-client-key",
+                "fingerprint",
+                "tack_v1_****WXYZ",
+                1,
+                status,
+                now.minusSeconds(60),
+                now,
+                now.minusSeconds(30),
+                revokedAt);
     }
 }

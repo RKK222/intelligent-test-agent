@@ -20,6 +20,21 @@
         where w.status = 'ACTIVE'
           and w.workspace_id not like 'wrk!_exp!_%' escape '!'
           and (
+            not exists (
+                select 1 from local_client_workspaces lcw_kind
+                where lcw_kind.workspace_id = w.workspace_id
+            )
+            or exists (
+                select 1
+                from local_client_workspaces lcw_visible
+                join local_client_credentials lcc
+                  on lcc.user_id = lcw_visible.user_id
+                 and lcc.status = 'ACTIVE'
+                where lcw_visible.workspace_id = w.workspace_id
+                  and lcw_visible.user_id = #{userId}
+            )
+          )
+          and (
             exists (
                 select 1 from local_client_workspaces lcw
                 where lcw.workspace_id = w.workspace_id

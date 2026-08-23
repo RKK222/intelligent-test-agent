@@ -120,7 +120,8 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 通用文件安全实现已经提取到 `test-agent-workspace-filesystem`，本模块依赖并复用该内核，不再拥有第二套
 路径/符号链接/原子移动实现。本地 Workspace 的根注册和反向 RPC 编排属于 runtime/client；本模块只在
 Workspace 查询响应中投影 runtime kind、实例 ID、在线状态和 capability。注销本地 Workspace 绝不删除
-用户磁盘目录。
+用户磁盘目录。用户主动撤销 Client key 后，普通用户工作区列表与详情通过既有凭据状态隐藏全部本地
+Workspace；平台绑定和本地目录保留，凭据重新启用后恢复展示。
 
 `AgentSkillHubApplicationService` 同时实现受保护运行的只读定义端口：目录只返回用户可见的公共内置或
 已发布应用 Agent 的不可变修订 ID、名称和 SHA-256；运行解析只接受当前已发布修订，并按依赖表冻结精确

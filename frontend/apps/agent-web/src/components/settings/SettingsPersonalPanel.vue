@@ -22,7 +22,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (event: "workspace-catalog-changed"): void;
+  (event: "workspace-catalog-changed", reason?: "LOCAL_CLIENT_REVOKED"): void;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
@@ -241,7 +241,7 @@ async function rotateCredential() {
 async function revokeCredential() {
   try {
     await ElMessageBox.confirm(
-      "撤销后所有本地客户端会立即断开；已注册工作区记录保留，但离线期间不可访问。",
+      "撤销后所有本地客户端会立即断开，本地 OpenCode 实例和工作区将不再显示；平台记录与本地目录不会删除，重新启用后可恢复。",
       "确认撤销 Client key",
       { type: "warning", confirmButtonText: "确认撤销", cancelButtonText: "取消" }
     );
@@ -251,7 +251,8 @@ async function revokeCredential() {
   await runLocalClientAction(async () => {
     await api.revokeMyLocalClientCredential();
     await loadLocalClientState(true);
-    ElMessage.success("Client key 已撤销");
+    emit("workspace-catalog-changed", "LOCAL_CLIENT_REVOKED");
+    ElMessage.success("Client key 已撤销，本地客户端状态已隐藏");
   });
 }
 

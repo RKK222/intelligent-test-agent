@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.localclient.LocalClientReleaseVersion;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientCredentialRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
@@ -27,18 +28,25 @@ public class LocalClientInstanceApplicationService {
     private final LocalClientInstanceRepository instanceRepository;
     private final LocalClientConnectionStore connectionStore;
     private final LocalClientVersionRepository versionRepository;
+    private final LocalClientCredentialRepository credentialRepository;
 
     public LocalClientInstanceApplicationService(
             LocalClientInstanceRepository instanceRepository,
             LocalClientConnectionStore connectionStore,
-            LocalClientVersionRepository versionRepository) {
+            LocalClientVersionRepository versionRepository,
+            LocalClientCredentialRepository credentialRepository) {
         this.instanceRepository = Objects.requireNonNull(instanceRepository);
         this.connectionStore = Objects.requireNonNull(connectionStore);
         this.versionRepository = Objects.requireNonNull(versionRepository);
+        this.credentialRepository = Objects.requireNonNull(credentialRepository);
     }
 
     @Transactional(readOnly = true)
     public List<LocalClientInstanceResponses.InstanceView> list(UserId userId) {
+        // 撤销凭据表示用户主动关闭整套本地客户端能力；稳定记录保留，重新启用后可恢复展示。
+        if (credentialRepository.findByUserId(userId).filter(credential -> credential.active()).isEmpty()) {
+            return List.of();
+        }
         LocalClientVersionModels.EffectivePolicy effective = LocalClientVersionModels.resolveEffectivePolicy(
                 versionRepository.findGlobalPolicy().orElse(null),
                 versionRepository.findUserPolicy(userId).orElse(null));

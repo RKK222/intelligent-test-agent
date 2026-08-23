@@ -62,6 +62,12 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 "db/migration/V20260809170000__session_shares_create_collaboration_share.sql")).execute(dataSource);
         // 用户工作区查询已支持本地客户端归属，旧 H2 基线只补齐该查询所需的映射表。
         jdbcClient.sql("""
+                create table local_client_credentials (
+                    user_id varchar(128) primary key,
+                    status varchar(32) not null
+                )
+                """).update();
+        jdbcClient.sql("""
                 create table local_client_workspaces (
                     workspace_id varchar(128) primary key,
                     user_id varchar(128) not null,
@@ -241,6 +247,32 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     }
 
     @Test
+    void revokedCredentialHidesLocalWorkspaceEvenWhenAnActiveSessionStillReferencesIt() {
+        jdbcClient.sql("""
+                insert into sessions(
+                    session_id, workspace_id, title, status, trace_id,
+                    created_at, updated_at, pinned, created_by_user_id)
+                values('ses_history_local', 'wrk_history_local', '本地客户端历史', 'ACTIVE',
+                       'trace_history', :now, :now, false, 'usr_history_current')
+                """)
+                .param("now", NOW)
+                .update();
+
+        jdbcClient.sql("""
+                update local_client_credentials
+                set status = 'REVOKED'
+                where user_id = 'usr_history_current'
+                """).update();
+
+        var page = workspaceQueryRepository.findUserWorkspaces(CURRENT_USER, new PageRequest(1, 30));
+        assertThat(page.items())
+                .extracting(workspace -> workspace.workspaceId().value())
+                .doesNotContain("wrk_history_local");
+        assertThat(workspaceQueryRepository.findUserWorkspace(
+                CURRENT_USER, new WorkspaceId("wrk_history_local"))).isEmpty();
+    }
+
+    @Test
     void experiencePrefixFilterTreatsUnderscoresAsLiteralCharacters() {
         jdbcClient.sql("""
                 insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)
@@ -266,6 +298,7 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
 
     private void seedData() {
         seedUsers();
+        seedLocalClientCredential();
         seedWorkspaces();
         seedLocalClientWorkspace();
         seedApplicationContext();
@@ -283,6 +316,13 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 """)
                 .param("now", NOW)
                 .update();
+    }
+
+    private void seedLocalClientCredential() {
+        jdbcClient.sql("""
+                insert into local_client_credentials(user_id, status)
+                values('usr_history_current', 'ACTIVE')
+                """).update();
     }
 
     private void seedWorkspaces() {
