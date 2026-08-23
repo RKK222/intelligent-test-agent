@@ -387,7 +387,7 @@ class UserOpencodeBackendRoutingWebFilterTest {
     @Test
     void routesConfirmedProcessRestartToBoundBackendAndPreservesAuthTraceAndBody() {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
-        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+        Mockito.when(assignmentService.restartRoutingLinuxServerId(USER_ID, "opencode"))
                 .thenReturn(Optional.of("server-b"));
         RecordingHttpClient httpClient = new RecordingHttpClient(200, """
                 {"success":true,"traceId":"trace_restart_route","data":{"status":"READY"}}

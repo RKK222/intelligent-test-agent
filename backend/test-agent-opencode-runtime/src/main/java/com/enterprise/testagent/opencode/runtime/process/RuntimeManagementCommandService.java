@@ -30,6 +30,7 @@ public class RuntimeManagementCommandService {
     private final OpencodeProcessManagementRepository repository;
     private final OpencodeProcessStartupService startupService;
     private final OpencodeProcessStopService stopService;
+    private final UserOpencodeProcessBindingActivationService bindingActivationService;
 
     /**
      * 注入管理进程控制面网关；服务层不直接持有 WebSocket 连接细节。
@@ -39,21 +40,41 @@ public class RuntimeManagementCommandService {
         this.repository = null;
         this.startupService = null;
         this.stopService = new OpencodeProcessStopService(gateway);
+        this.bindingActivationService = null;
     }
 
     /**
      * 注入控制面网关、进程仓储、公共启动服务和公共停止服务。
      */
-    @Autowired
     public RuntimeManagementCommandService(
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessManagementRepository repository,
             OpencodeProcessStartupService startupService,
             OpencodeProcessStopService stopService) {
+        this(
+                gateway,
+                repository,
+                startupService,
+                stopService,
+                new UserOpencodeProcessBindingActivationService(
+                        repository,
+                        new RepositoryBackedOpencodeProcessAtomicMutationPort(repository)));
+    }
+
+    /** Spring 生产入口额外注入数据库级 binding CAS 服务。 */
+    @Autowired
+    public RuntimeManagementCommandService(
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessStartupService startupService,
+            OpencodeProcessStopService stopService,
+            UserOpencodeProcessBindingActivationService bindingActivationService) {
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.startupService = Objects.requireNonNull(startupService, "startupService must not be null");
         this.stopService = Objects.requireNonNull(stopService, "stopService must not be null");
+        this.bindingActivationService = Objects.requireNonNull(
+                bindingActivationService, "bindingActivationService must not be null");
     }
 
     /**
@@ -62,9 +83,29 @@ public class RuntimeManagementCommandService {
     public OpencodeProcessControlResult restartManagedProcess(OpencodeContainerId containerId, int port, String traceId) {
         Optional<OpencodeServerProcess> process = latestProcess(containerId, port);
         if (process.isPresent()) {
-            return restartTrackedProcess(process.get(), traceId, false);
+            return restartAdministrativelyManagedProcess(process.get(), traceId);
         }
         return restartUntrackedProcess(containerId, port, traceId);
+    }
+
+    /** 超管重启会恢复此前被显式关闭的 binding；启动失败则恢复隐藏状态。 */
+    private OpencodeProcessControlResult restartAdministrativelyManagedProcess(
+            OpencodeServerProcess process,
+            String traceId) {
+        boolean activated = bindingActivationService != null
+                && bindingActivationService.activateForExplicitRestart(process, traceId);
+        try {
+            return restartTrackedProcess(process, traceId, false);
+        } catch (RuntimeException exception) {
+            if (activated) {
+                try {
+                    bindingActivationService.restoreInactiveAfterFailedRestart(process, traceId);
+                } catch (RuntimeException compensationFailure) {
+                    exception.addSuppressed(compensationFailure);
+                }
+            }
+            throw exception;
+        }
     }
 
     /**
@@ -99,9 +140,16 @@ public class RuntimeManagementCommandService {
      * 停止指定容器端口上的 opencode server。
      */
     public OpencodeProcessControlResult stopManagedProcess(OpencodeContainerId containerId, int port, String traceId) {
-        return latestProcess(containerId, port)
-                .map(process -> stopService.stopAndVerify(OpencodeProcessStopRequest.tracked(process, traceId)))
-                .orElseGet(() -> stopService.stopAndVerify(OpencodeProcessStopRequest.untracked(containerId, port, traceId)));
+        Optional<OpencodeServerProcess> process = latestProcess(containerId, port);
+        if (process.isEmpty()) {
+            return stopService.stopAndVerify(OpencodeProcessStopRequest.untracked(containerId, port, traceId));
+        }
+        OpencodeProcessControlResult result = stopService.stopAndVerify(
+                OpencodeProcessStopRequest.tracked(process.get(), traceId));
+        if (bindingActivationService != null) {
+            bindingActivationService.deactivateAfterAdministrativeStop(process.get(), traceId);
+        }
+        return result;
     }
 
     private Optional<OpencodeServerProcess> latestProcess(OpencodeContainerId containerId, int port) {

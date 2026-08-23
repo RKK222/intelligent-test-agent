@@ -1347,6 +1347,21 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void inactiveBindingIsHiddenButStillRoutesAnExplicitRestartToItsOriginalServer() {
+        FakeRepository repository = new FakeRepository();
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                inactiveBinding(USER_ID, new OpencodeProcessId("ocp_existing"), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThat(service.isServerProjectionHidden(USER_ID, "opencode")).isTrue();
+        assertThat(service.routingLinuxServerId(USER_ID, "opencode")).isEmpty();
+        assertThat(service.restartRoutingLinuxServerId(USER_ID, "opencode")).contains("10.8.0.12");
+        assertThat(gateway.healthCommands).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
     void fileRoutingAffinityReportsUnavailableWhenUserHasNoBinding() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 0));

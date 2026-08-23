@@ -4,6 +4,7 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.enterprise.testagent.domain.run.RunId;
@@ -17,6 +18,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -36,6 +38,7 @@ public class UserOpencodeProcessRestartService {
     private final OpencodeProcessStopService stopService;
     private final UserOpencodeProcessAssignmentService assignmentService;
     private final UserRuntimeDisposeCoordinator disposeCoordinator;
+    private final UserOpencodeProcessBindingActivationService bindingActivationService;
 
     public UserOpencodeProcessRestartService(
             OpencodeProcessManagementRepository repository,
@@ -44,16 +47,40 @@ public class UserOpencodeProcessRestartService {
             OpencodeProcessStopService stopService,
             UserOpencodeProcessAssignmentService assignmentService,
             UserRuntimeDisposeCoordinator disposeCoordinator) {
+        this(
+                repository,
+                runtimeStateService,
+                runService,
+                stopService,
+                assignmentService,
+                disposeCoordinator,
+                new UserOpencodeProcessBindingActivationService(
+                        repository,
+                        new RepositoryBackedOpencodeProcessAtomicMutationPort(repository)));
+    }
+
+    /** Spring 生产入口额外注入显式关闭 binding 的恢复服务。 */
+    @Autowired
+    public UserOpencodeProcessRestartService(
+            OpencodeProcessManagementRepository repository,
+            SessionRuntimeStateApplicationService runtimeStateService,
+            RunApplicationService runService,
+            OpencodeProcessStopService stopService,
+            UserOpencodeProcessAssignmentService assignmentService,
+            UserRuntimeDisposeCoordinator disposeCoordinator,
+            UserOpencodeProcessBindingActivationService bindingActivationService) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.runtimeStateService = Objects.requireNonNull(runtimeStateService, "runtimeStateService must not be null");
         this.runService = Objects.requireNonNull(runService, "runService must not be null");
         this.stopService = Objects.requireNonNull(stopService, "stopService must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.disposeCoordinator = Objects.requireNonNull(disposeCoordinator, "disposeCoordinator must not be null");
+        this.bindingActivationService = Objects.requireNonNull(
+                bindingActivationService, "bindingActivationService must not be null");
     }
 
     /**
-     * 重启当前用户的 ACTIVE 进程；活动 Run 的存在与数量始终以后端租约内重新读取的快照为准。
+     * 重启当前用户的服务端 OpenCode；活动 Run 的存在与数量始终以后端租约内重新读取的快照为准。
      */
     public UserOpencodeProcessStatusResponse restart(
             UserId userId,
@@ -63,7 +90,7 @@ public class UserOpencodeProcessRestartService {
         Objects.requireNonNull(userId, "userId must not be null");
         String normalizedAgentId = normalizeAgentId(agentId);
         return disposeCoordinator.withUserMaintenance(userId, traceId, guard -> {
-            UserOpencodeProcessBinding binding = requireActiveBinding(userId, normalizedAgentId);
+            UserOpencodeProcessBinding binding = requireRestartableBinding(userId, normalizedAgentId);
             OpencodeServerProcess process = requireBoundProcess(userId, binding);
             SessionRuntimeStateSummary initial = runtimeStateService.snapshot(userId);
             if (initial.runningCount() > 0 && !confirmRunning) {
@@ -77,6 +104,28 @@ public class UserOpencodeProcessRestartService {
                 }
             }
             guard.requireActive();
+            if (binding.status() == UserOpencodeProcessBindingStatus.INACTIVE) {
+                if (process.status() != OpencodeServerProcessStatus.STOPPED) {
+                    throw new PlatformException(
+                            ErrorCode.OPENCODE_UNAVAILABLE,
+                            "管理员关闭的 TestAgent 进程状态已变化，请重试");
+                }
+                boolean activated = bindingActivationService.activateForExplicitRestart(process, traceId);
+                try {
+                    bindingActivationService.requireActiveBinding(process);
+                    guard.requireActive();
+                    return assignmentService.initialize(userId, normalizedAgentId, traceId);
+                } catch (RuntimeException exception) {
+                    if (activated) {
+                        try {
+                            bindingActivationService.restoreInactiveAfterFailedRestart(process, traceId);
+                        } catch (RuntimeException compensationFailure) {
+                            exception.addSuppressed(compensationFailure);
+                        }
+                    }
+                    throw exception;
+                }
+            }
             stopService.stopAndVerify(OpencodeProcessStopRequest.tracked(process, traceId));
             guard.requireActive();
             return assignmentService.initialize(userId, normalizedAgentId, traceId);
@@ -90,9 +139,8 @@ public class UserOpencodeProcessRestartService {
         runIds.forEach(runId -> runService.cancelRun(runId, traceId));
     }
 
-    private UserOpencodeProcessBinding requireActiveBinding(UserId userId, String agentId) {
+    private UserOpencodeProcessBinding requireRestartableBinding(UserId userId, String agentId) {
         return repository.findUserBinding(userId, agentId)
-                .filter(binding -> binding.status() == UserOpencodeProcessBindingStatus.ACTIVE)
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
                         "当前用户尚未分配可重启的 TestAgent 进程"));

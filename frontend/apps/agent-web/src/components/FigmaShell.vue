@@ -87,6 +87,8 @@ const props = withDefaults(
     opencodeProcessStatus?: UserOpencodeProcess | null;
     opencodeEndpoints?: OpencodeEndpoint[];
     opencodeEndpointsLoading?: boolean;
+    /** 实例接口成功确认管理员关闭后隐藏服务端状态；个人重启入口仍保留。 */
+    showServerOpencodeStatus?: boolean;
     /** 独立灰度接口的权威结果；加载失败或缺省时严格隐藏下载入口。 */
     localClientDownloadAllowed?: boolean;
     opencodeProcessLoading?: boolean;
@@ -142,6 +144,7 @@ const props = withDefaults(
     processRestarting: false,
     opencodeEndpoints: () => [],
     opencodeEndpointsLoading: false,
+    showServerOpencodeStatus: true,
     localClientDownloadAllowed: false,
     showProcessStatusInPet: false,
     onboardingActive: false,
@@ -2796,11 +2799,11 @@ function submitJoinApp() {
               </article>
             </div>
             <div
-              v-else-if="!fixedWorkspace"
+              v-else-if="!fixedWorkspace && showServerOpencodeStatus"
               class="figma-user-menu-service"
               :class="`figma-user-menu-service--${opencodeServiceDisplay.tone}`"
               role="status"
-              aria-label="TestAgent 服务状态"
+              aria-label="服务端 OpenCode 状态"
             >
               <span class="figma-user-menu-service-dot" aria-hidden="true" />
               <span class="figma-user-menu-service-text" :title="opencodeServiceDisplay.text">{{ opencodeServiceDisplay.text }}</span>
@@ -2839,7 +2842,7 @@ function submitJoinApp() {
               @click="emit('restart-process')"
             >
               <RefreshCw class="figma-user-menu-icon" :class="{ 'is-spinning': processRestarting }" />
-              <span>{{ processRestarting ? "正在重启…" : "重启 TestAgent 进程" }}</span>
+              <span>{{ processRestarting ? "正在重启服务端 OpenCode…" : "重启服务端 OpenCode" }}</span>
             </button>
             <button v-if="false" type="button" class="figma-user-menu-item" role="menuitem" @mousedown.prevent="logout">
               <LogOut class="figma-user-menu-icon" />

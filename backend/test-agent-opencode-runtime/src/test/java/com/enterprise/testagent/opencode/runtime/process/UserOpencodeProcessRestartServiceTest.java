@@ -51,9 +51,17 @@ class UserOpencodeProcessRestartServiceTest {
     private final RunApplicationService runService = Mockito.mock(RunApplicationService.class);
     private final OpencodeProcessStopService stopService = Mockito.mock(OpencodeProcessStopService.class);
     private final UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+    private final UserOpencodeProcessBindingActivationService bindingActivationService =
+            Mockito.mock(UserOpencodeProcessBindingActivationService.class);
     private final UserRuntimeDisposeCoordinator coordinator = new UserRuntimeDisposeCoordinator(runtimeStore, runtimeState);
     private final UserOpencodeProcessRestartService service = new UserOpencodeProcessRestartService(
-            repository, runtimeState, runService, stopService, assignmentService, coordinator);
+            repository,
+            runtimeState,
+            runService,
+            stopService,
+            assignmentService,
+            coordinator,
+            bindingActivationService);
 
     @BeforeEach
     void setUp() {
@@ -72,6 +80,41 @@ class UserOpencodeProcessRestartServiceTest {
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
         verify(stopService).stopAndVerify(OpencodeProcessStopRequest.tracked(process(), TRACE_ID));
         verify(assignmentService).initialize(USER_ID, "opencode", TRACE_ID);
+    }
+
+    @Test
+    void avatarRestartReactivatesAnAdministrativelyClosedServerProcessWithoutStoppingItAgain() {
+        UserOpencodeProcessBinding inactiveBinding = binding(UserOpencodeProcessBindingStatus.INACTIVE);
+        OpencodeServerProcess stoppedProcess = process(OpencodeServerProcessStatus.STOPPED);
+        when(repository.findUserBinding(USER_ID, "opencode")).thenReturn(Optional.of(inactiveBinding));
+        when(repository.findOpencodeServerProcessById(inactiveBinding.processId())).thenReturn(Optional.of(stoppedProcess));
+        when(runtimeState.snapshot(USER_ID)).thenReturn(summary());
+        when(bindingActivationService.activateForExplicitRestart(stoppedProcess, TRACE_ID)).thenReturn(true);
+
+        UserOpencodeProcessStatusResponse response = service.restart(USER_ID, "opencode", false, TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        verify(bindingActivationService).activateForExplicitRestart(stoppedProcess, TRACE_ID);
+        verify(bindingActivationService).requireActiveBinding(stoppedProcess);
+        verify(stopService, never()).stopAndVerify(any());
+        verify(assignmentService).initialize(USER_ID, "opencode", TRACE_ID);
+    }
+
+    @Test
+    void failedAvatarRestartRestoresTheAdministrativelyClosedProjection() {
+        UserOpencodeProcessBinding inactiveBinding = binding(UserOpencodeProcessBindingStatus.INACTIVE);
+        OpencodeServerProcess stoppedProcess = process(OpencodeServerProcessStatus.STOPPED);
+        when(repository.findUserBinding(USER_ID, "opencode")).thenReturn(Optional.of(inactiveBinding));
+        when(repository.findOpencodeServerProcessById(inactiveBinding.processId())).thenReturn(Optional.of(stoppedProcess));
+        when(runtimeState.snapshot(USER_ID)).thenReturn(summary());
+        when(bindingActivationService.activateForExplicitRestart(stoppedProcess, TRACE_ID)).thenReturn(true);
+        when(assignmentService.initialize(USER_ID, "opencode", TRACE_ID))
+                .thenThrow(new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        assertThatThrownBy(() -> service.restart(USER_ID, "opencode", false, TRACE_ID))
+                .isInstanceOf(PlatformException.class);
+
+        verify(bindingActivationService).restoreInactiveAfterFailedRestart(stoppedProcess, TRACE_ID);
     }
 
     @Test
@@ -165,28 +208,36 @@ class UserOpencodeProcessRestartServiceTest {
     }
 
     private UserOpencodeProcessBinding binding() {
+        return binding(UserOpencodeProcessBindingStatus.ACTIVE);
+    }
+
+    private UserOpencodeProcessBinding binding(UserOpencodeProcessBindingStatus status) {
         return new UserOpencodeProcessBinding(
                 USER_ID,
                 "opencode",
                 new OpencodeProcessId("ocp_restart_12345678"),
                 new LinuxServerId("server-a"),
                 4096,
-                UserOpencodeProcessBindingStatus.ACTIVE,
+                status,
                 NOW.minusSeconds(60),
                 NOW,
                 TRACE_ID);
     }
 
     private OpencodeServerProcess process() {
+        return process(OpencodeServerProcessStatus.RUNNING);
+    }
+
+    private OpencodeServerProcess process(OpencodeServerProcessStatus status) {
         return new OpencodeServerProcess(
                 binding().processId(),
                 USER_ID,
                 binding().linuxServerId(),
                 new OpencodeContainerId("ctr_restart_12345678"),
                 4096,
-                9123L,
+                status == OpencodeServerProcessStatus.STOPPED ? null : 9123L,
                 "http://10.8.0.12:4096",
-                OpencodeServerProcessStatus.RUNNING,
+                status,
                 "/data/sessions/usr_restart_12345678",
                 "/data/config/usr_restart_12345678",
                 NOW.minusSeconds(30),

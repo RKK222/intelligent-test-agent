@@ -13118,3 +13118,26 @@
 - 本地客户端现在可以在本机 OpenCode 中使用平台公共 Agent、Skill、Tool；当前公共提交即使没有后续更新也会初始化和展示，后续兼容版本由用户确认后原子更新，失败可回滚，服务器工作区行为保持不变。
 - 实现、Mac 基线与真实公共能力调用已经验证；尚未在真实 Mac 运行态制造第二个公共 commit 完成“收到通知→托盘/网页确认→WSS 下载切换”整圈，当前该段由协议/Coordinator/Updater/前端自动化覆盖。真实麒麟 ARM64 无公网安装仍属于企业现场发布门禁，脚本封包测试不能替代硬件验收。
 - 本次未新增部署节点，未修改 `.env*`、generated SDK 或 OpenCode 只读源码；提交前回顾全部 `.agents/session-log*.md` 近期记录，保留其它开发者成果，并排除 `.reasonix/` 与根目录 `node_modules/`。
+
+## 2026-08-23 - 超管关闭后隐藏服务端 OpenCode 投影
+
+### Why
+
+- 超级管理员在运行管理中明确关闭有主用户的服务端 OpenCode 后，用户头像状态和服务器工作区仍继续显示，无法区分主动关闭与普通离线；头像菜单重启还需继续保持“只重启服务端 OpenCode”的既有语义。
+
+### What
+
+- 超管 stop 仅在公共停止程序完成 manager stop 与停止后 health 确认后，将精确匹配的 ACTIVE binding 以现有数据库 CAS 切为 INACTIVE；用户实例接口省略服务端投影，工作区查询隐藏服务端工作区但保留本地客户端工作区。普通健康失败、短暂离线和自动闲置停止不切换 binding。
+- 超管 restart 与头像“重启服务端 OpenCode”允许按 INACTIVE binding 路由回原服务器，先恢复 ACTIVE 再复用公共启动程序；启动失败只补偿本次恢复的 binding。前端隐藏服务端状态并清理当前服务端工作区缓存/文件连接，重启入口始终保留。
+- 同步 runtime、persistence、agent-web README/PACKAGE 与 HTTP API；复用既有 binding status 和 MyBatis SQL，没有新增表、migration、HTTP 路径、DTO 或 RunEvent。
+
+### How
+
+- JDK 25 下 runtime/API/persistence 定向后端用例共 137 项通过，前端 `FigmaShell` 与运行管理定向 86 项通过；agent-web typecheck、生产 build 和后端 26 模块 `mvn -q -DskipTests package` 均通过。
+- 使用根目录 `.env.test`、`test` profile 和 JDK 25 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；backend liveness/readiness 为 UP，frontend 3000 返回 200，登录 CORS 预检返回正确 allow headers，manager WebSocket 已连接且服务端 OpenCode health 达到 HEALTHY。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并执行 `git diff --check`；只纳入本次投影与重启语义改动，不纳入 `.reasonix/`、根目录 `node_modules/` 等既存未跟踪目录。
+
+### Result
+
+- 超管明确关闭后，用户前端不再展示服务端 OpenCode 状态和服务器工作区；本地客户端状态/工作区不受影响。头像菜单仍明确为“重启服务端 OpenCode”，可恢复同一原服务器实例。
+- 未修改 `.env*`、generated SDK、OpenCode 只读源码、部署节点、数据库结构、安全权限或性能协议；当前服务已完整启动并通过健康检查。

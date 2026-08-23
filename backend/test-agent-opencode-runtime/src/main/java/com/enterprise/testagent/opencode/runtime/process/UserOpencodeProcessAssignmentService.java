@@ -481,6 +481,22 @@ public class UserOpencodeProcessAssignmentService {
                 .map(LinuxServerId::value);
     }
 
+    /** 个人显式重启仍须路由到被管理员关闭前的原服务器，因此允许读取 INACTIVE binding。 */
+    public Optional<String> restartRoutingLinuxServerId(UserId userId, String agentId) {
+        validateAgent(agentId);
+        return repository.findUserBinding(userId, OPENCODE_AGENT_ID)
+                .map(UserOpencodeProcessBinding::linuxServerId)
+                .map(LinuxServerId::value);
+    }
+
+    /** 只有管理员显式关闭留下的 INACTIVE binding 才隐藏服务端实例投影。 */
+    public boolean isServerProjectionHidden(UserId userId, String agentId) {
+        validateAgent(agentId);
+        return repository.findUserBinding(userId, OPENCODE_AGENT_ID)
+                .map(binding -> binding.status() == UserOpencodeProcessBindingStatus.INACTIVE)
+                .orElse(false);
+    }
+
     /**
      * 只读取数据库 ACTIVE binding 来表达“是否已分配”，不触发 manager 健康检查、
      * 容器可用性查询或进程启动，用于跨后端状态查询失败时保留用户分配事实。

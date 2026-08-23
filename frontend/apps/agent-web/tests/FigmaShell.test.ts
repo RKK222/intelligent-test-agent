@@ -1350,7 +1350,28 @@ describe("FigmaShell", () => {
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
 
     expect(wrapper.get(".figma-user-menu-service-text").text()).toBe("未运行(server-a / 192.168.100.171:82)");
-    expect(wrapper.get('[data-testid="restart-own-process"]').text()).toContain("重启 TestAgent 进程");
+    expect(wrapper.get('[data-testid="restart-own-process"]').text()).toContain("重启服务端 OpenCode");
+  });
+
+  it("hides an administratively closed server status while keeping the server restart action", async () => {
+    const wrapper = mountShell({
+      props: {
+        currentUserName: "developer",
+        showServerOpencodeStatus: false,
+        opencodeProcessStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          message: "管理员已关闭",
+          serviceStatus: "NOT_RUNNING",
+          checkedAt: "2026-08-23T00:00:00Z"
+        }
+      }
+    });
+
+    await wrapper.get(".figma-user-avatar-btn").trigger("click");
+
+    expect(wrapper.find(".figma-user-menu-service").exists()).toBe(false);
+    expect(wrapper.get('[data-testid="restart-own-process"]').text()).toContain("重启服务端 OpenCode");
   });
 
   it("emits process restart from the avatar menu, shows pending state and hides it in shared workspaces", async () => {

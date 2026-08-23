@@ -1,5 +1,7 @@
 package com.enterprise.testagent.api.web.platform;
 
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
@@ -74,6 +76,26 @@ class UserOpencodeEndpointControllerTest {
                 .jsonPath("$.data.allowed").isEqualTo(true);
 
         org.mockito.Mockito.verifyNoInteractions(process, instances);
+    }
+
+    @Test
+    void administrativelyClosedServerEndpointIsOmittedWithoutHidingTheRestartApi() {
+        UserOpencodeProcessAssignmentService process = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        LocalClientInstanceApplicationService instances = org.mockito.Mockito.mock(LocalClientInstanceApplicationService.class);
+        LocalClientRolloutApplicationService rollout = org.mockito.Mockito.mock(LocalClientRolloutApplicationService.class);
+        when(process.isServerProjectionHidden(USER_ID, "opencode")).thenReturn(true);
+        when(instances.list(USER_ID)).thenReturn(List.of());
+
+        client(process, instances, rollout).get()
+                .uri("/api/internal/agent/opencode/opencode-endpoints/me")
+                .exchange().expectStatus().isOk().expectBody()
+                .jsonPath("$.data").isEmpty();
+
+        verify(process, never()).status(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+        verify(rollout, never()).isDownloadAllowed(org.mockito.ArgumentMatchers.any());
     }
 
     private static WebTestClient client(

@@ -800,7 +800,7 @@ async function runBatchManagedProcessAction(action: ManagedProcessActionKind) {
   const actionLabel = action === "restart" ? "重启" : "关闭";
   const actionDetail = action === "restart"
     ? "每个进程都会经过现有停止、重新拉起和健康检查流程"
-    : "关闭后，对应用户再次使用时需要重新启动 OpenCode";
+    : "关闭后，对应用户的服务端 OpenCode 状态和工作区会隐藏，可由用户头像菜单或超管重启恢复";
   // 确认框打开期间也锁住入口，避免双击产生两批相同控制命令。
   batchManagedProcessAction.value = action;
   try {
@@ -1535,7 +1535,7 @@ function startResize(e: MouseEvent) {
                                           class="ta-runtime-action-button is-danger"
                                           :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'stop') }"
                                           :disabled="isManagedProcessActionDisabled(row, process)"
-                                          title="停止该 TestAgent server"
+                                          title="关闭并隐藏该用户的服务端 OpenCode"
                                           @click.stop="runManagedProcessAction(row, process, 'stop')"
                                         >
                                           停止

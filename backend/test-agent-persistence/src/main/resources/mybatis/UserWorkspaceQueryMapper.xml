@@ -20,6 +20,18 @@
         where w.status = 'ACTIVE'
           and w.workspace_id not like 'wrk!_exp!_%' escape '!'
           and (
+            exists (
+                select 1 from local_client_workspaces lcw_server_kind
+                where lcw_server_kind.workspace_id = w.workspace_id
+            )
+            or not exists (
+                select 1 from user_opencode_process_bindings uopb_hidden
+                where uopb_hidden.user_id = #{userId}
+                  and uopb_hidden.agent_id = 'opencode'
+                  and uopb_hidden.status = 'INACTIVE'
+            )
+          )
+          and (
             not exists (
                 select 1 from local_client_workspaces lcw_kind
                 where lcw_kind.workspace_id = w.workspace_id

@@ -208,7 +208,7 @@ class UserOpencodeBackendRoutingService {
             return Optional.empty();
         }
         UserId routingUserId = routingUserId(exchange, principal);
-        Optional<String> boundTarget = assignmentService.routingLinuxServerId(routingUserId, agentId.get());
+        Optional<String> boundTarget = boundTarget(exchange, routingUserId, agentId.get());
         if (boundTarget.isPresent()) {
             return boundTarget.flatMap(routeResolver::remoteTarget);
         }
@@ -460,7 +460,7 @@ class UserOpencodeBackendRoutingService {
         if (agentId.isEmpty()) {
             return Optional.empty();
         }
-        Optional<String> boundTarget = assignmentService.routingLinuxServerId(routingUserId, agentId.get());
+        Optional<String> boundTarget = boundTarget(exchange, routingUserId, agentId.get());
         if (boundTarget.isPresent()) {
             return boundTarget.flatMap(routeResolver::remoteTarget);
         }
@@ -780,6 +780,17 @@ class UserOpencodeBackendRoutingService {
         String path = exchange.getRequest().getURI().getRawPath();
         return (HttpMethod.GET.equals(method) && PROCESS_STATUS_PATH.equals(path))
                 || (HttpMethod.POST.equals(method) && PROCESS_INITIALIZE_PATH.equals(path));
+    }
+
+    /** 个人重启是服务端 OpenCode 操作；binding 已因超管关闭而 INACTIVE 时仍路由回原服务器。 */
+    private Optional<String> boundTarget(ServerWebExchange exchange, UserId userId, String agentId) {
+        String path = exchange.getRequest().getURI().getRawPath();
+        boolean personalRestart = HttpMethod.POST.equals(exchange.getRequest().getMethod())
+                && path != null
+                && path.equals(AGENT_PREFIX + OPENCODE_AGENT_ID + "/processes/me/restart");
+        return personalRestart
+                ? assignmentService.restartRoutingLinuxServerId(userId, agentId)
+                : assignmentService.routingLinuxServerId(userId, agentId);
     }
 
     private boolean shouldFallbackToAllocationStatus(

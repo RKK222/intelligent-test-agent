@@ -103,6 +103,27 @@ class RuntimeManagementCommandServiceTest {
     }
 
     @Test
+    void restartAdministrativelyStoppedUserProcessReactivatesItsBinding() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess stopped = process("ocp_admin_stopped", 4097, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(stopped.processId(), stopped);
+        repository.bindingsByProcessId.put(
+                stopped.processId(),
+                binding(stopped, NOW.minusSeconds(1800), UserOpencodeProcessBindingStatus.INACTIVE));
+        RecordingGateway gateway = new RecordingGateway();
+        RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        OpencodeProcessControlResult result = service.restartManagedProcess(
+                new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
+
+        assertThat(result.status()).isEqualTo("STARTED");
+        assertThat(repository.findUserBinding(USER_ID, "opencode"))
+                .get()
+                .extracting(UserOpencodeProcessBinding::status)
+                .isEqualTo(UserOpencodeProcessBindingStatus.ACTIVE);
+    }
+
+    @Test
     void restartTrackedUserProcessStopsThenStartsWithPersistedSessionPath() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
@@ -246,6 +267,7 @@ class RuntimeManagementCommandServiceTest {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
         repository.processes.put(running.processId(), running);
+        repository.bindingsByProcessId.put(running.processId(), binding(running, NOW.minusSeconds(1800)));
         RecordingGateway gateway = new RecordingGateway();
         gateway.healthResults.add(OpencodeProcessHealthResult.healthy(11111L, "ok"));
         gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("process not found"));
@@ -266,6 +288,10 @@ class RuntimeManagementCommandServiceTest {
             assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.STOPPED);
             assertThat(process.pid()).isNull();
         });
+        assertThat(repository.findUserBinding(USER_ID, "opencode"))
+                .get()
+                .extracting(UserOpencodeProcessBinding::status)
+                .isEqualTo(UserOpencodeProcessBindingStatus.INACTIVE);
     }
 
     @Test
@@ -352,13 +378,20 @@ class RuntimeManagementCommandServiceTest {
     }
 
     private static UserOpencodeProcessBinding binding(OpencodeServerProcess process, Instant createdAt) {
+        return binding(process, createdAt, UserOpencodeProcessBindingStatus.ACTIVE);
+    }
+
+    private static UserOpencodeProcessBinding binding(
+            OpencodeServerProcess process,
+            Instant createdAt,
+            UserOpencodeProcessBindingStatus status) {
         return new UserOpencodeProcessBinding(
                 process.userId(),
                 "opencode",
                 process.processId(),
                 process.linuxServerId(),
                 process.port(),
-                UserOpencodeProcessBindingStatus.ACTIVE,
+                status,
                 createdAt,
                 NOW,
                 TRACE_ID);
@@ -485,7 +518,11 @@ class RuntimeManagementCommandServiceTest {
         @Override public OpencodeManagerBackendConnection saveManagerBackendConnection(OpencodeManagerBackendConnection connection) { return connection; }
         @Override public Optional<OpencodeManagerBackendConnection> findManagerBackendConnection(ContainerManagerId managerId, BackendProcessId backendProcessId) { return Optional.empty(); }
         @Override public List<Integer> findOccupiedPorts(LinuxServerId linuxServerId, OpencodeContainerId containerId) { return List.of(); }
-        @Override public Optional<UserOpencodeProcessBinding> findUserBinding(UserId userId, String agentId) { return Optional.empty(); }
+        @Override public Optional<UserOpencodeProcessBinding> findUserBinding(UserId userId, String agentId) {
+            return bindingsByProcessId.values().stream()
+                    .filter(binding -> binding.userId().equals(userId) && binding.agentId().equals(agentId))
+                    .findFirst();
+        }
         @Override public List<OpencodeServerProcess> findOpencodeServerProcesses(int limit) { return List.copyOf(processes.values()); }
     }
 

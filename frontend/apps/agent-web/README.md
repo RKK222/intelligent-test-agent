@@ -253,7 +253,7 @@ Turn/Step、TTFT、Decode 和五类 token。不得把 Trace 放入运营分析 t
 
 ## 验证
 
-`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、标记已读、失败重启动作、本地客户端更新/回退文案、异常版本正文的失败关闭、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/local-client-notification-update.test.ts` 覆盖通知原始目标版本请求、成功刷新以及 409 冲突反馈后的权威刷新；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸和弱化后的备用链接入口；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单个人重启以及固定分享工作台隐藏。
+`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、标记已读、失败重启动作、本地客户端更新/回退文案、异常版本正文的失败关闭、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/local-client-notification-update.test.ts` 覆盖通知原始目标版本请求、成功刷新以及 409 冲突反馈后的权威刷新；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸和弱化后的备用链接入口；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单服务端重启、超管关闭后状态隐藏但重启入口保留，以及固定分享工作台隐藏。
 
 `tests/xxl-job-management-panel.test.ts` 覆盖隐藏表单 POST/URL 无票据、刷新重签、403/503、票据或平台会话失效、登出清空 iframe，以及横向 shell 装饰幂等、只读账号、错误页跳过和菜单滚动；`tests/support-access-shortcut.test.ts` 覆盖三击 Shift、两秒窗口、左右 Shift 兼容、捕获阶段注册、其它按键打断、长按去重和角色失效重置，`tests/support-access-panel.test.ts` 覆盖唯一排查单号请求、重复触发/撤销后换号、登录资料延迟到达、迟到响应隔离、归档筛选、离线工作区禁用、Session/Trace 上下文以及 assistant text part 通过首页时间线展示，`tests/scheduler-management-panel.test.ts` 覆盖系统管理导航、问题排查全局手势请求/激活代次与 actor/target 身份提示，以及公共配置卡死 rollout 的分支/原因/二次确认/纠错请求回归。
 
@@ -279,3 +279,4 @@ Vite 配置按 `Asia/Shanghai` 生成 `VyyyyMMdd.HHmmss` 并注入 `VITE_TEST_AG
 
 - 个人设置的本地客户端实例卡片展示公共能力当前/待更新摘要、Agent/Skill/Tool 数量和稳定错误码。网页与通知中心都只在用户二次确认后调用 `requestLocalClientPublicCapabilityUpdate`；离线实例显示“重连后继续”。确认框必须提示 Tool 使用当前本机账号权限及是否重启，不得自动安装。`settings-personal-local-client.test.ts` 覆盖摘要、确认和请求参数。
 - 用户主动撤销 Client key 后，设置页立即隐藏本地 OpenCode 实例与本地工作区；确认框明确说明平台记录和用户磁盘目录不会删除，重新启用凭据后可恢复。客户端临时离线或轮换 key 仍保留离线卡片，避免混淆“暂时离线”和“主动关闭”。
+- 超级管理员在运行管理中显式关闭有主用户的服务端 OpenCode 后，头像菜单轮询会隐藏服务端实例状态，工作台立即移除服务端工作区缓存并关闭当前服务端工作区上下文；本地客户端实例/工作区不受影响。头像菜单的“重启服务端 OpenCode”始终保留且只操作服务端进程，成功后刷新实例和工作区；普通健康失败、短暂掉线和自动闲置停止仍展示服务端实例，不套用显式关闭语义。

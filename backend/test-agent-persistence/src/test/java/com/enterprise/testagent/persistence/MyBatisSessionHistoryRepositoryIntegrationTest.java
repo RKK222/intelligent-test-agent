@@ -273,6 +273,26 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     }
 
     @Test
+    void inactiveServerBindingHidesServerWorkspacesButKeepsAnActiveLocalWorkspace() {
+        jdbcClient.sql("""
+                update user_opencode_process_bindings
+                set status = 'INACTIVE', updated_at = :now
+                where user_id = 'usr_history_current' and agent_id = 'opencode'
+                """)
+                .param("now", NOW.plusSeconds(60))
+                .update();
+
+        var page = workspaceQueryRepository.findUserWorkspaces(CURRENT_USER, new PageRequest(1, 30));
+        assertThat(page.items())
+                .extracting(workspace -> workspace.workspaceId().value())
+                .containsExactly("wrk_history_local");
+        assertThat(workspaceQueryRepository.findUserWorkspace(
+                CURRENT_USER, new WorkspaceId("wrk_history_personal"))).isEmpty();
+        assertThat(workspaceQueryRepository.findUserWorkspace(
+                CURRENT_USER, new WorkspaceId("wrk_history_local"))).isPresent();
+    }
+
+    @Test
     void experiencePrefixFilterTreatsUnderscoresAsLiteralCharacters() {
         jdbcClient.sql("""
                 insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)
@@ -298,6 +318,7 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
 
     private void seedData() {
         seedUsers();
+        seedServerProcessBinding();
         seedLocalClientCredential();
         seedWorkspaces();
         seedLocalClientWorkspace();
@@ -323,6 +344,48 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
                 insert into local_client_credentials(user_id, status)
                 values('usr_history_current', 'ACTIVE')
                 """).update();
+    }
+
+    private void seedServerProcessBinding() {
+        jdbcClient.sql("""
+                insert into linux_servers(
+                    linux_server_id, name, status, capacity_summary_json,
+                    last_heartbeat_at, trace_id, created_at, updated_at)
+                values('linux-history', 'history-server', 'ONLINE', '{}',
+                       :now, 'trace_history', :now, :now)
+                """)
+                .param("now", NOW)
+                .update();
+        jdbcClient.sql("""
+                insert into opencode_containers(
+                    container_id, linux_server_id, container_name, port_start, port_end,
+                    max_processes, current_processes, status, last_heartbeat_at,
+                    trace_id, created_at, updated_at)
+                values('ctr_history', 'linux-history', 'history-container', 4096, 4100,
+                       5, 1, 'ONLINE', :now, 'trace_history', :now, :now)
+                """)
+                .param("now", NOW)
+                .update();
+        jdbcClient.sql("""
+                insert into opencode_server_processes(
+                    process_id, user_id, linux_server_id, container_id, port, pid, base_url,
+                    status, session_path, config_path, started_at, last_health_check_at,
+                    health_message, trace_id, created_at, updated_at)
+                values('ocp_history', 'usr_history_current', 'linux-history', 'ctr_history', 4096, 12001,
+                       'http://127.0.0.1:4096', 'RUNNING', '/tmp/history-session', '/tmp/history-config',
+                       :now, :now, 'healthy', 'trace_history', :now, :now)
+                """)
+                .param("now", NOW)
+                .update();
+        jdbcClient.sql("""
+                insert into user_opencode_process_bindings(
+                    user_id, agent_id, process_id, linux_server_id, port,
+                    status, trace_id, created_at, updated_at)
+                values('usr_history_current', 'opencode', 'ocp_history', 'linux-history', 4096,
+                       'ACTIVE', 'trace_history', :now, :now)
+                """)
+                .param("now", NOW)
+                .update();
     }
 
     private void seedWorkspaces() {

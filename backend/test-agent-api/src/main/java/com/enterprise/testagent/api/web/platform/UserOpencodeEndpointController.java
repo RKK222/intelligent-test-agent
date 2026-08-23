@@ -47,7 +47,7 @@ public class UserOpencodeEndpointController {
         this.localClientRolloutService = Objects.requireNonNull(localClientRolloutService);
     }
 
-    /** 只读查询不会启动任一进程；服务端实例始终排在本地实例之前。 */
+    /** 只读查询不会启动任一进程；未被管理员显式关闭的服务端实例排在本地实例之前。 */
     @GetMapping("/api/internal/agent/{agentId}/opencode-endpoints/me")
     public Mono<ApiResponse<List<EndpointView>>> list(
             @PathVariable String agentId,
@@ -60,9 +60,11 @@ public class UserOpencodeEndpointController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return Mono.fromCallable(() -> {
                     List<EndpointView> endpoints = new ArrayList<>();
-                    endpoints.add(server(
-                            processAssignmentService.status(userId, normalizedAgentId, traceId),
-                            localClientDownloadAllowed(userId, traceId)));
+                    if (!processAssignmentService.isServerProjectionHidden(userId, normalizedAgentId)) {
+                        endpoints.add(server(
+                                processAssignmentService.status(userId, normalizedAgentId, traceId),
+                                localClientDownloadAllowed(userId, traceId)));
+                    }
                     localClientInstanceService.list(userId).stream().map(EndpointView::local).forEach(endpoints::add);
                     return ApiResponse.ok(List.copyOf(endpoints), traceId);
                 })

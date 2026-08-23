@@ -2694,6 +2694,56 @@ const opencodeEndpointQuery = useQuery({
   refetchIntervalInBackground: false
 });
 const opencodeEndpoints = computed<OpencodeEndpoint[]>(() => opencodeEndpointQuery.data.value ?? []);
+const showServerOpencodeStatus = computed(() =>
+  !opencodeEndpointQuery.isSuccess.value
+  || opencodeEndpoints.value.some(endpoint => endpoint.runtimeKind === "SERVER_PROCESS")
+);
+let serverEndpointWasVisible = false;
+let serverProjectionHidden = false;
+watch(
+  [() => opencodeEndpointQuery.isSuccess.value, opencodeEndpoints],
+  ([querySucceeded, endpoints]) => {
+    if (!querySucceeded) return;
+    const serverVisible = endpoints.some(endpoint => endpoint.runtimeKind === "SERVER_PROCESS");
+    if (serverVisible) {
+      if (serverProjectionHidden) {
+        void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      }
+      serverEndpointWasVisible = true;
+      serverProjectionHidden = false;
+      return;
+    }
+    if (!serverEndpointWasVisible) return;
+
+    // 只有服务端实例从成功响应中消失才代表超管显式关闭；普通健康失败仍保留实例卡片。
+    serverEndpointWasVisible = false;
+    serverProjectionHidden = true;
+    queryClient.setQueryData<PageResponse<Workspace>>(["workspaces"], old => old ? {
+      ...old,
+      items: old.items.filter(workspace => workspace.runtimeKind !== "SERVER_PROCESS"),
+      total: Math.max(
+        0,
+        old.total - old.items.filter(workspace => workspace.runtimeKind === "SERVER_PROCESS").length
+      )
+    } : old);
+    void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    const hiddenWorkspaceId = selectedWorkspace.value?.runtimeKind === "SERVER_PROCESS"
+      ? selectedWorkspaceId.value
+      : undefined;
+    if (!hiddenWorkspaceId) return;
+    api.closeWorkspaceFileSocket(hiddenWorkspaceId);
+    invalidateConversationInteraction();
+    resetWorkspaceState();
+    selectedWorkspaceId.value = undefined;
+    selectedWorkspaceKind.value = "MANAGED";
+    feedback.value = {
+      kind: "info",
+      title: "服务端 OpenCode 已关闭",
+      description: "管理员已关闭服务端 OpenCode，对应工作区已隐藏；可从头像菜单重新启动。"
+    };
+  },
+  { immediate: true }
+);
 const localClientDownloadAccessQuery = useQuery({
   queryKey: computed(() => ["local-client", "download-access", "me", authStore.token ?? ""] as const),
   enabled: opencodeProcessEnabled,
@@ -5047,7 +5097,7 @@ async function restartMyOpencodeProcess(): Promise<boolean> {
         try {
           await ElMessageBox.confirm(
             `${runningDescription}继续重启会先中止这些任务，是否继续？`,
-            "确认重启 TestAgent 进程",
+            "确认重启服务端 OpenCode",
             {
               type: "warning",
               confirmButtonText: "中止任务并重启",
@@ -5065,17 +5115,19 @@ async function restartMyOpencodeProcess(): Promise<boolean> {
     queryClient.setQueryData(opencodeProcessQueryKey.value, status);
     await Promise.allSettled([
       opencodeProcessQuery.refetch(),
+      opencodeEndpointQuery.refetch(),
       publicConfigMessageGateQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] }),
       refreshUserNotifications()
     ]);
     feedback.value = {
       kind: "success",
-      title: "TestAgent 进程已重启",
+      title: "服务端 OpenCode 已重启",
       description: status.serviceAddress ?? status.message
     };
     return true;
   } catch (error) {
-    feedback.value = errorFeedback("重启 TestAgent 进程失败", error);
+    feedback.value = errorFeedback("重启服务端 OpenCode 失败", error);
     return false;
   }
 }
@@ -12209,6 +12261,7 @@ async function handleLogout() {
     :opencode-process-status="selectedRuntimeProcessStatus"
     :opencode-endpoints="opencodeEndpoints"
     :opencode-endpoints-loading="opencodeEndpointQuery.isFetching.value"
+    :show-server-opencode-status="showServerOpencodeStatus"
     :local-client-download-allowed="localClientDownloadAllowed"
     :opencode-process-loading="selectedRuntimeProcessInitialLoading"
     :opencode-process-initializing="initializeOpencodeProcessMutation.isPending.value"

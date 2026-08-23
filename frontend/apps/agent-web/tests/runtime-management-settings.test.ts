@@ -894,7 +894,7 @@ describe("runtime management settings", () => {
     ]);
     expect(api.restartOpencodeRuntimeManagedProcess).not.toHaveBeenCalled();
     expect(ElMessageBox.confirm).toHaveBeenCalledWith(
-      expect.stringContaining("关闭后，对应用户再次使用时需要重新启动 OpenCode"),
+      expect.stringContaining("服务端 OpenCode 状态和工作区会隐藏"),
       "批量关闭用户 OpenCode",
       expect.objectContaining({ confirmButtonText: "批量关闭" })
     );
