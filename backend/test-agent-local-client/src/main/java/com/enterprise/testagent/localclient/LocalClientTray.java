@@ -2,6 +2,7 @@ package com.enterprise.testagent.localclient;
 
 import com.enterprise.testagent.localclient.protocol.LocalClientFrameType;
 import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.awt.AWTException;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -37,6 +38,7 @@ import org.slf4j.LoggerFactory;
 final class LocalClientTray implements AutoCloseable {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LocalClientTray.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final String ICON_RESOURCE =
             "/com/enterprise/testagent/localclient/tray/radar-bunny.png";
     private static final DateTimeFormatter DISPLAY_TIME = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
@@ -50,6 +52,7 @@ final class LocalClientTray implements AutoCloseable {
     private final MenuItem statusItem;
     private final MenuItem workspaceItem;
     private final MenuItem progressItem;
+    private final MenuItem publicCapabilityItem;
     private final BufferedImage petImage;
     private final ScheduledExecutorService updater;
     private final ExecutorService actions;
@@ -65,6 +68,7 @@ final class LocalClientTray implements AutoCloseable {
             MenuItem statusItem,
             MenuItem workspaceItem,
             MenuItem progressItem,
+            MenuItem publicCapabilityItem,
             BufferedImage petImage,
             ScheduledExecutorService updater,
             ExecutorService actions) {
@@ -75,6 +79,7 @@ final class LocalClientTray implements AutoCloseable {
         this.statusItem = statusItem;
         this.workspaceItem = workspaceItem;
         this.progressItem = progressItem;
+        this.publicCapabilityItem = publicCapabilityItem;
         this.petImage = petImage;
         this.updater = updater;
         this.actions = actions;
@@ -97,6 +102,8 @@ final class LocalClientTray implements AutoCloseable {
             MenuItem registerWorkspace = new MenuItem("选择并注册工作区…");
             registerWorkspace.setEnabled(false);
             MenuItem reconnect = new MenuItem("重连");
+            MenuItem publicCapabilities = new MenuItem("公共能力 · 暂无更新");
+            publicCapabilities.setEnabled(false);
             MenuItem viewLogs = new MenuItem("查看日志");
             MenuItem downloadLogs = new MenuItem("下载日志");
             MenuItem progress = new MenuItem("会话进度 · 0 项进行中");
@@ -108,6 +115,7 @@ final class LocalClientTray implements AutoCloseable {
             menu.add(registerWorkspace);
             menu.add(reconnect);
             menu.addSeparator();
+            menu.add(publicCapabilities);
             menu.add(viewLogs);
             menu.add(downloadLogs);
             menu.add(progress);
@@ -127,8 +135,10 @@ final class LocalClientTray implements AutoCloseable {
             ExecutorService actions = Executors.newCachedThreadPool(
                     Thread.ofPlatform().daemon().name("local-client-tray-action-", 0).factory());
             LocalClientTray result = new LocalClientTray(
-                    configuration, connection, tray, icon, status, registerWorkspace, progress, pet, updater, actions);
-            result.bindActions(openWeb, registerWorkspace, reconnect, viewLogs, downloadLogs, progress, exit);
+                    configuration, connection, tray, icon, status, registerWorkspace, progress,
+                    publicCapabilities, pet, updater, actions);
+            result.bindActions(
+                    openWeb, registerWorkspace, reconnect, publicCapabilities, viewLogs, downloadLogs, progress, exit);
             tray.add(icon);
             updater.scheduleAtFixedRate(result::refreshSafely, 0, 2, TimeUnit.SECONDS);
             LOGGER.info("local_client_tray_started platform={} icon=radar-bunny", platformName());
@@ -143,13 +153,14 @@ final class LocalClientTray implements AutoCloseable {
             LocalClientConfiguration configuration,
             LocalClientConnection connection) {
         return new LocalClientTray(
-                configuration, connection, null, null, null, null, null, null, null, null);
+                configuration, connection, null, null, null, null, null, null, null, null, null);
     }
 
     private void bindActions(
             MenuItem openWeb,
             MenuItem registerWorkspace,
             MenuItem reconnect,
+            MenuItem publicCapabilities,
             MenuItem viewLogs,
             MenuItem downloadLogs,
             MenuItem progress,
@@ -166,6 +177,8 @@ final class LocalClientTray implements AutoCloseable {
             connection.reconnect();
             displayMessage("TestAgent 客户端", "正在重新连接", TrayIcon.MessageType.INFO);
         });
+        publicCapabilities.addActionListener(event -> runAction(
+                "public_capability_update", this::confirmPublicCapabilityUpdate, null));
         viewLogs.addActionListener(event -> runAction("view_logs", () ->
                 LocalClientDesktopActions.openDirectory(LocalClientPaths.logsDirectory()), null));
         downloadLogs.addActionListener(event -> runAction("download_logs", () -> {
@@ -187,8 +200,10 @@ final class LocalClientTray implements AutoCloseable {
         }
         try {
             LocalClientRuntimeSnapshot snapshot = connection.runtimeSnapshot();
+            LocalClientPublicCapabilityStore.State capability = connection.publicCapabilitySnapshot();
             String uiKey = snapshot.connectionState() + ":" + snapshot.activeOperations().size() + ":"
-                    + processLabel(snapshot.processStatus());
+                    + processLabel(snapshot.processStatus()) + ":" + capability.status() + ":"
+                    + (capability.pendingAvailable() == null ? "" : capability.pendingAvailable().bundleDigest());
             if (uiKey.equals(lastUiKey.getAndSet(uiKey))) {
                 return;
             }
@@ -207,6 +222,18 @@ final class LocalClientTray implements AutoCloseable {
         workspaceItem.setEnabled(snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE);
         int operationCount = snapshot.activeOperations().size();
         progressItem.setLabel("会话进度 · " + operationCount + " 项进行中");
+        LocalClientPublicCapabilityStore.State capability = connection.publicCapabilitySnapshot();
+        if (capability.pendingAvailable() == null) {
+            publicCapabilityItem.setLabel("公共能力 · " + shortCommit(capability.activeCommit()) + " · 当前");
+            publicCapabilityItem.setEnabled(false);
+        } else {
+            var available = capability.pendingAvailable();
+            publicCapabilityItem.setLabel(
+                    "更新公共能力 " + shortCommit(available.sourceCommit()) + " · A" + available.agentCount()
+                            + " S" + available.skillCount() + " T" + available.toolCount());
+            publicCapabilityItem.setEnabled(
+                    snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE);
+        }
         Dimension size = systemTray.getTrayIconSize();
         trayIcon.setImage(renderIcon(
                 petImage, size.width, size.height, statusColor(snapshot.connectionState())));
@@ -272,6 +299,50 @@ final class LocalClientTray implements AutoCloseable {
         }
         JOptionPane.showMessageDialog(
                 null, message.toString(), "TestAgent 会话进度", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void confirmPublicCapabilityUpdate() {
+        LocalClientPayloads.PublicCapabilityAvailable available =
+                connection.publicCapabilitySnapshot().pendingAvailable();
+        if (available == null) {
+            return;
+        }
+        String message = "Agent " + available.agentCount()
+                + " / Skill " + available.skillCount()
+                + " / Tool " + available.toolCount() + "\n"
+                + changeSummary(available.changeSummaryJson()) + "\n"
+                + (available.requiresRestart()
+                        ? "包含 Tool 或依赖变化，将重启本地 OpenCode。"
+                        : "仅 Agent/Skill 变化，将热加载配置。")
+                + "\n公共 Tool 使用当前 macOS 登录账号权限运行，不会提权。";
+        int result = JOptionPane.showConfirmDialog(
+                null,
+                message,
+                "更新本地公共能力",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        if (result == JOptionPane.OK_OPTION) {
+            connection.requestPublicCapabilityUpdate(available.bundleDigest());
+            displayMessage("公共能力更新", "已确认，正在下载完整能力包", TrayIcon.MessageType.INFO);
+        }
+    }
+
+    private static String shortCommit(String commit) {
+        return commit == null || commit.isBlank() ? "未初始化" : commit.substring(0, Math.min(12, commit.length()));
+    }
+
+    private static String changeSummary(String summaryJson) {
+        try {
+            var summary = JSON.readTree(summaryJson);
+            java.util.List<String> changed = new java.util.ArrayList<>();
+            if (summary.path("agentsChanged").asBoolean()) { changed.add("Agent"); }
+            if (summary.path("skillsChanged").asBoolean()) { changed.add("Skill"); }
+            if (summary.path("toolsChanged").asBoolean()) { changed.add("Tool"); }
+            if (summary.path("dependenciesChanged").asBoolean()) { changed.add("依赖"); }
+            return changed.isEmpty() ? "内容摘要未变化" : "变更：" + String.join("、", changed);
+        } catch (Exception ignored) {
+            return "变更摘要暂不可读";
+        }
     }
 
     private void runAction(String action, ThrowingRunnable runnable, String successMessage) {

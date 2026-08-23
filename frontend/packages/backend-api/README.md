@@ -96,3 +96,6 @@ corepack pnpm test -- backend-api
 `createRunResend(sessionId, payload)` 调用 agent-scoped 撤销重发入口，传递远端消息前置条件、可选源 Run、页面内存中的
 `contextToken`、幂等 `clientRequestId` 和可选 `editedPrompt`；响应返回替代 Run 与可选重发元数据。该方法继续复用动态
 `X-Test-Agent-Linux-Server-Id` 路由提示，不直连 OpenCode server；client 只把修改文本放入实际请求 body，不持久化或写入调试日志。
+
+`requestLocalClientPublicCapabilityUpdate(clientInstanceId, expectedBundleDigest)` 调用当前用户实例的公共能力确认接口；
+digest 必须来自刚读取的 `LocalClientInstance.publicCapabilities.pendingDigest`，组件不能自造目标版本或下载地址。

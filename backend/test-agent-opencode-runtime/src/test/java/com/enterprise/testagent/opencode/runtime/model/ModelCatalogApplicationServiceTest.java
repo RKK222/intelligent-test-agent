@@ -177,6 +177,8 @@ class ModelCatalogApplicationServiceTest {
                 .contains("{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}")
                 .contains("{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}")
                 .contains("X-Enterprise-Model-Provider=enterprise-openai")
+                .contains("small_model=enterprise-openai/Qwen3.6-27B")
+                .contains("enabled_providers=[enterprise-openai]")
                 .doesNotContain("platform-secret-must-not-leave-backend")
                 .doesNotContain("Auth-Token");
     }

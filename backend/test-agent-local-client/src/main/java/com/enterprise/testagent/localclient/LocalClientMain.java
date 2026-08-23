@@ -52,13 +52,16 @@ public final class LocalClientMain {
         }
         LocalClientCredentialFile.Credentials credentials = LocalClientCredentialFile.read();
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        LocalClientBuildInfo buildInfo = LocalClientBuildInfo.current();
+        LocalClientPublicCapabilityStore publicCapabilities =
+                new LocalClientPublicCapabilityStore(stateStore.stateDirectory());
+        publicCapabilities.initializeBaseline(configuration, buildInfo);
         LocalWorkspaceRegistry workspaceRegistry = new LocalWorkspaceRegistry(stateStore);
         LocalObservabilitySettings observabilitySettings = LocalObservabilitySettings.load();
         try (LocalModelRelay modelRelay = new LocalModelRelay(configuration);
              LocalObservabilityRelay observabilityRelay = new LocalObservabilityRelay(stateStore, observabilitySettings)) {
             OpencodeProcessSupervisor supervisor = new OpencodeProcessSupervisor(
-                    configuration, stateStore, modelRelay, observabilityRelay);
-            LocalClientBuildInfo buildInfo = LocalClientBuildInfo.current();
+                    configuration, stateStore, modelRelay, observabilityRelay, publicCapabilities);
             if (configuration.selfUpdateConfigured() && buildInfo.managedRelease()) {
                 LocalClientUpdateMarkerStore markerStore =
                         new LocalClientUpdateMarkerStore(stateStore.stateDirectory());
@@ -70,6 +73,7 @@ public final class LocalClientMain {
                     System.exit(activationExitCode);
                 }
             }
+            recoverPublicCapabilityActivation(publicCapabilities, supervisor);
             LocalClientFileRpcHandler fileRpcHandler = new LocalClientFileRpcHandler(
                     workspaceRegistry, objectMapper);
             LocalClientConnection connection = new LocalClientConnection(
@@ -80,7 +84,8 @@ public final class LocalClientMain {
                     modelRelay,
                     fileRpcHandler,
                     observabilityRelay,
-                    observabilitySettings);
+                    observabilitySettings,
+                    publicCapabilities);
             LocalClientTray tray = LocalClientTray.install(configuration, connection);
             try (connection; tray) {
                 Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -92,6 +97,41 @@ public final class LocalClientMain {
                     System.exit(exitCode);
                 }
             }
+        }
+    }
+
+    /**
+     * 客户端可能在原子切换后、服务端 ACK 前退出；启动时先用真实 OpenCode 验证新目录，
+     * 失败则恢复 previousDigest。下载阶段中断只终止该次尝试，不触碰当前能力版本。
+     */
+    static void recoverPublicCapabilityActivation(
+            LocalClientPublicCapabilityStore store,
+            OpencodeProcessSupervisor supervisor) {
+        LocalClientPublicCapabilityStore.State state = store.snapshot();
+        if ("PENDING".equals(state.status()) || "DOWNLOADING".equals(state.status())) {
+            store.recordStatus("FAILED", "CLIENT_RESTARTED_DURING_UPDATE");
+            return;
+        }
+        if (!"APPLYING".equals(state.status())) {
+            return;
+        }
+        var health = supervisor.reloadPublicCapabilities(true);
+        if (health.success() && health.opencodeHealthy() && supervisor.validatePublicCapabilityCatalog()) {
+            store.completeActivation();
+            return;
+        }
+        org.slf4j.LoggerFactory.getLogger(LocalClientMain.class).warn(
+                "public_capability_activation_validation_failed processStatus={} healthy={} message={}",
+                health.processStatus(), health.opencodeHealthy(), health.message());
+        try {
+            store.rollback(state.previousDigest(), "OPENCODE_ACTIVATION_FAILED");
+            var restored = supervisor.reloadPublicCapabilities(true);
+            if (!restored.success() || !restored.opencodeHealthy()
+                    || !supervisor.validatePublicCapabilityCatalog()) {
+                throw new IllegalStateException("公共能力回滚后 OpenCode 未恢复健康: " + restored.message());
+            }
+        } catch (Exception exception) {
+            throw new IllegalStateException("公共能力崩溃恢复失败", exception);
         }
     }
 

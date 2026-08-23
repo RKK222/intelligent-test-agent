@@ -24,6 +24,7 @@ sha256_file() {
 
 OLD_VERSION=20260820120000
 NEW_VERSION=20260820153045
+PUBLIC_CONFIG_COMMIT=0123456789abcdef0123456789abcdef01234567
 HTTP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 DOWNLOAD_ROOT="http://127.0.0.1:${HTTP_PORT}/"
 DIST_ROOT="${TEST_ROOT}/dist/local-opencode-client"
@@ -102,6 +103,11 @@ tar -C "${TEST_ROOT}/inputs/jdk" -czf "${TEST_ROOT}/jdk-linux.tar.gz" fake-jdk
 tar -C "${TEST_ROOT}/inputs/opencode" -czf "${TEST_ROOT}/opencode-linux.tar.gz" opencode
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
   -out "${TEST_ROOT}/signing-private.pem" >/dev/null 2>&1
+mkdir -p "${TEST_ROOT}/public-capabilities/public-capabilities/agents"
+printf '%s\n' 'public test agent' >"${TEST_ROOT}/public-capabilities/public-capabilities/agents/test.md"
+printf '{"schemaVersion":1,"sourceCommit":"%s"}\n' "${PUBLIC_CONFIG_COMMIT}" \
+  >"${TEST_ROOT}/public-capabilities/public-capabilities/manifest.json"
+tar -C "${TEST_ROOT}/public-capabilities" -czf "${TEST_ROOT}/public-capabilities.tar.gz" public-capabilities
 
 package_release() {
   local version="$1"
@@ -117,6 +123,8 @@ package_release() {
       --server-url https://platform.example.internal \
       --signing-key "${TEST_ROOT}/signing-private.pem" \
       --client-jar "${TEST_ROOT}/test-agent-local-client-${version}.jar" \
+      --public-config-commit "${PUBLIC_CONFIG_COMMIT}" \
+      --public-capability-bundle "${TEST_ROOT}/public-capabilities.tar.gz" \
       --skip-build >/dev/null
 }
 

@@ -17,6 +17,8 @@ public record LocalClientBuildInfo(
     public static final String LAUNCHER_VERSION = "1";
     public static final String SELF_UPDATE_CAPABILITY = "SELF_UPDATE_V1";
     public static final String OBSERVABILITY_CAPABILITY = "OPENCODE_OBSERVABILITY_V1";
+    public static final String PUBLIC_CAPABILITY_SYNC = "PUBLIC_CAPABILITY_SYNC_V1";
+    public static final String MANAGED_MODEL_CONFIG = "MANAGED_MODEL_CONFIG_V1";
     private static final String DEVELOPMENT_VERSION = "0.1.0-dev";
     private static final String MANIFEST_VERSION_ATTRIBUTE = "Local-Client-Version";
 
@@ -35,14 +37,14 @@ public record LocalClientBuildInfo(
             return new LocalClientBuildInfo(
                     DEVELOPMENT_VERSION,
                     LAUNCHER_VERSION,
-                    List.of(OBSERVABILITY_CAPABILITY),
+                    List.of(OBSERVABILITY_CAPABILITY, PUBLIC_CAPABILITY_SYNC, MANAGED_MODEL_CONFIG),
                     false);
         }
         String managedVersion = LocalClientReleaseVersion.parse(version).value();
         return new LocalClientBuildInfo(
                 managedVersion,
                 LAUNCHER_VERSION,
-                List.of(SELF_UPDATE_CAPABILITY, OBSERVABILITY_CAPABILITY),
+                List.of(SELF_UPDATE_CAPABILITY, OBSERVABILITY_CAPABILITY, PUBLIC_CAPABILITY_SYNC, MANAGED_MODEL_CONFIG),
                 true);
     }
 

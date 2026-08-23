@@ -143,6 +143,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     private ManagedWorkspaceApplicationService managedWorkspaceApplicationService;
     private PublicAgentConfigRolloutCoordinator publicConfigRolloutCoordinator;
     private PersonalAgentConfigRuntimeReloader personalRuntimeReloader;
+    private PublicClientCapabilityPackageService publicCapabilityPackages;
     private ScheduledTaskLock scheduledTaskLock;
     private ScmGitIdentityResolver scmGitIdentityResolver;
 
@@ -162,6 +163,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     @Autowired
     void setPersonalRuntimeReloader(PersonalAgentConfigRuntimeReloader reloader) {
         this.personalRuntimeReloader = Objects.requireNonNull(reloader, "reloader must not be null");
+    }
+
+    /** 客户端能力包是公共 Git 发布的旁路制品；失败只能降级 SERVER_ONLY，不能改变服务器发布结果。 */
+    @Autowired
+    void setPublicCapabilityPackages(PublicClientCapabilityPackageService packages) {
+        this.publicCapabilityPackages = Objects.requireNonNull(packages, "packages must not be null");
     }
 
     /** 缺失公共个人 worktree 的周期补偿复用 scheduler Redis 锁，禁止同服务器多 Java 并发建目录。 */
@@ -1835,6 +1842,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
             // 发起服务器先在 PREPARING 闸门内切换自己的共享运行副本；激活后再由数据库租约确认进程清单。
             gitWorkspaceService.checkoutTrackingBranch(sharedRepoRoot, branch, privateKey);
             gitWorkspaceService.resetHardToCommit(sharedRepoRoot, commitHash);
+            generatePublicClientCapabilityPackage(sharedRepoRoot, commitHash, traceId);
             activatePublicConfigRollout(rolloutId, commitHash);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(branch, commitHash, "publish", rolloutId, traceId);
@@ -2370,6 +2378,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         } else {
             message = "公共配置仓库未初始化";
         }
+        var capabilityRelease = publicCapabilityPackages == null
+                ? null : publicCapabilityPackages.releaseForCommit(commitHash);
         return new AgentConfigResponses.PublicRepositoryStatusResponse(
                 serverIdentity.linuxServerId(),
                 serverIdentity.linuxServerId(),
@@ -2382,7 +2392,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 currentBranch,
                 commitHash,
                 message,
-                localChangesPresent);
+                localChangesPresent,
+                capabilityRelease == null ? null : capabilityRelease.compatibility().name(),
+                capabilityRelease == null ? null : capabilityRelease.bundleDigest(),
+                capabilityRelease == null ? null : capabilityRelease.errorCode());
     }
 
     private boolean isInitializedConfigDirectory(PublicConfig config) {
@@ -3109,6 +3122,23 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     private void activatePublicConfigRollout(String rolloutId, String commitHash) {
         if (rolloutId != null && publicConfigRolloutCoordinator != null) {
             publicConfigRolloutCoordinator.activate(rolloutId, commitHash);
+        }
+    }
+
+    /** 制品生成状态由能力包服务持久化；任何非预期异常都不得把已推送服务器 commit 伪报为失败。 */
+    private void generatePublicClientCapabilityPackage(Path sharedRepoRoot, String commitHash, String traceId) {
+        if (publicCapabilityPackages == null) {
+            return;
+        }
+        try {
+            publicCapabilityPackages.generateForPublishedCommit(sharedRepoRoot, commitHash, traceId);
+        } catch (RuntimeException exception) {
+            LOGGER.error(
+                    "event=public_capability_package_persist_failed commitHash={} traceId={} message={}",
+                    commitHash,
+                    traceId,
+                    safeErrorMessage(exception.getMessage()),
+                    exception);
         }
     }
 

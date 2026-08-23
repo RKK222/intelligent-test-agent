@@ -3927,7 +3927,7 @@ Java 重启后恢复调度器会立即扫描当前服务器的 `LEGACY_FULL` act
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 和 `/api/internal/platform/opencode-runtime/runs/{runId}/events` 返回 `text/event-stream`；旧 `GET /api/runs/{runId}/events` 返回 `410 API_GONE`。`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output（含 `run.snapshot.reset`）不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `?lastEventId={seq}`，后端 header 优先、query 兜底。
 
-RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding 路由。任意 Java 收到 `/runs/{runId}/events` 后，优先从 Redis manifest 读取 `producerLinuxServerId`；manifest 缺失的 legacy/旧 Run 才使用 `routing_decisions -> executionNodeId -> opencode process -> linuxServerId`。如果目标不是当前 Java，则流式转发到目标 Java 并保留 `Authorization`、`X-Trace-Id`、`Last-Event-ID`、query 和 `text/event-stream`。
+RunEvent SSE 按 Run 原始生产目标路由，不按当前用户最新服务器 binding 路由。任意 Java 收到 `/runs/{runId}/events` 后，优先从 Redis manifest 读取 `backendProcessId/producerLinuxServerId`；manifest 缺失的 legacy/旧服务器 Run 使用 `routing_decisions -> executionNodeId -> opencode process -> linuxServerId`，旧本地客户端 Run 则把稳定 `node_local_*` 锚点还原为 `lci_*`，从实时连接存储解析当前连接持有 Java。所有分支最终都复用公共 `BackendJavaRouteResolver`；目标不是当前 Java 时流式转发并保留 `Authorization`、`X-Trace-Id`、`Last-Event-ID`、query 和 `text/event-stream`。
 
 目标 Java 按 manifest 的 `storageMode` 固定分流：`LEGACY_FULL` 继续执行消息 snapshot、DB durable polling replay 和本机 live bus；`REDIS_SUMMARY` 首帧总发送完整 Redis 物化 `run.snapshot.reset`，再以 `snapshot.runtimeVersion` 为起点，由最短 5 秒的 Redis 安全扫描和本机 live bus 只唤醒、分页读取 `${runtimeVersion}-0` 的 durable/transient 尾流，live 事件仍即时唤醒但帧本身不直接输出，活跃 SSE 连接不轮询 PostgreSQL。初始 reset 的 reason 为 `TRANSIENT_SNAPSHOT_RECOVERY`，旧 durable 游标需重置时为 `CURSOR_BEFORE_EARLIEST_OR_DETAILS_TRUNCATED`，连接期间容量换代为 `RUNTIME_STREAM_TRUNCATED`。payload 包含 `reason/resetGeneration/earliestSeq/detailsAvailableUntil/snapshot.barrierSeq/snapshot.runtimeVersion/snapshot.events`；前端先清空该 Run reducer 并按顺序应用 snapshot，再只用随后 durable SSE id 推进 `Last-Event-ID`。Redis manifest/详情缺失返回 `410 RUN_DETAILS_EXPIRED`，Redis 不可用返回 `503 RUNTIME_STATE_UNAVAILABLE`，不得回退 PostgreSQL 原始事件。
 
@@ -4466,3 +4466,28 @@ HTTP DTO 在 Spring Boot 4/Jackson 3 codec 边界使用开放 `Object`，进入�
 - Word 恢复轻量文本抽取：DOCX 按段落顺序输出正文并把表格行输出为 Markdown 行，旧 DOC 使用 HWPF 文本提取；不生成 Word 行内样式、列表层级或图片附件。继续兼容 `.doc` 名称承载 DOCX，以及 Word 扩展名实际返回 UTF-8/GB18030 文本；单个转换后的 Markdown 不得超过 20 MiB。
 - `workspace.resolve-physical-path` 请求为 `{workspaceId,path}`，只在用户点击复制时解析一个现有普通文件；越界和符号链接失败关闭，分享、支持访问、体验和源码快照均拒绝。
 - 普通工作区、最近工作区和支持访问响应的 `rootPath` 固定为 `workspace:{workspaceId}`，`physicalRootPath` 为 `null`。超级管理员目录选择器响应以 `existingWorkspaceId` 标记已注册目录。
+
+# 本地客户端公共 Agent / Skill / Tool 能力包
+
+公共配置 Git 每次正式发布后，平台从该精确 commit 的 `opencode/agents/**`、`opencode/skills/**`、
+`opencode/tools/**` 生成内容寻址的完整客户端能力包。服务器公共配置发布不依赖客户端兼容性：可移植依赖检查
+失败时状态为 `SERVER_ONLY`，服务器继续发布，客户端继续使用上一个 `AVAILABLE` 版本。
+功能上线前已经存在的当前公共 Git HEAD 会在后台启动后按 Redis 全局锁补建一次，因此“从未发布新 commit”不代表
+公共版本为空；客户端安装制品仍必须内置该 commit 对应的真实完整包，并在首次连接时上报其 commit 与摘要。
+manifest 的 `contentDigest` 是有序文件清单的内容摘要，`bundleDigest` 是
+`sha256(sourceCommit + "\n" + contentDigest)`。这样内容相同的新 commit 仍有独立可查询版本；客户端兼容读取此前
+缺少 `contentDigest`、以文件摘要直接作为 `bundleDigest` 的已安装首版包。
+
+| Method | Path | 权限与说明 |
+|---|---|---|
+| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户实例列表；每项 additive 增加 `publicCapabilities`。旧客户端返回 `supported=false`。 |
+| `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/public-capabilities/updates` | 当前用户确认更新自己的指定实例。body 为 `{ "expectedBundleDigest": "<sha256>" }`；必须匹配当前待更新摘要。离线确认保存为待处理命令，重连后继续。 |
+| `GET` | `/api/internal/platform/workspace-management/agent-config/public/client-capabilities/{bundleDigest}/artifact` | `SUPER_ADMIN` 下载与固定公共 commit 对应的完整 `public-capabilities.tar.gz`，供客户端安装构建使用。 |
+
+`publicCapabilities` 包含 `supported/activeCommit/activeDigest/pendingCommit/pendingDigest/status/errorCode/reportedAt`、
+Agent/Skill/Tool 数量、`requiresRestart` 和 `changeSummaryJson`。公共配置状态响应 additive 增加
+`clientCompatibility=AVAILABLE|SERVER_ONLY`、`capabilityBundleDigest` 和 `capabilityErrorCode`。
+
+受保护 Agent 目录项 additive 增加 `source=PUBLIC_GIT|APPLICATION_HUB`。声明 `PUBLIC_CAPABILITY_SYNC_V1`
+且已有本地激活摘要的客户端不再追加 `PUBLIC_GIT` 服务器受保护副本；应用 Hub Agent 仍按现有逻辑展示。
+上述接口不返回能力正文、依赖文件、本地路径、Client key 或 Tool 参数。

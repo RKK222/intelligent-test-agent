@@ -65,6 +65,8 @@ class LocalClientReleaseDownloaderTest {
         assertThat(prepared.releaseDigest()).hasSize(64);
         assertThat(prepared.releaseDirectory()).isDirectory();
         assertThat(prepared.releaseDirectory().resolve("test-agent-local-client.jar")).hasContent("client-jar");
+        assertThat(prepared.releaseDirectory().resolve("public-capabilities.tar.gz"))
+                .hasContent("public-capabilities");
         assertThat(extractor.kinds).containsExactlyInAnyOrder("jdk.tar.gz", "opencode.tar.gz");
         assertThat(candidateChecker.checkedJava.toString()).endsWith("jdk/bin/java");
         assertThat(candidateChecker.checkedJar.toString()).endsWith("test-agent-local-client.jar");
@@ -263,6 +265,8 @@ class LocalClientReleaseDownloaderTest {
                 : remote.get(trust.resolve("releases/" + TARGET_VERSION + "/test-agent-local-client.jar")));
         Files.write(release.resolve("opencode.tar.gz"), remote.get(trust.resolve(
                 "releases/" + TARGET_VERSION + "/opencode.tar.gz")));
+        Files.write(release.resolve("public-capabilities.tar.gz"), remote.get(trust.resolve(
+                "releases/" + TARGET_VERSION + "/public-capabilities.tar.gz")));
         Files.writeString(release.resolve("jdk/bin/java"), "java");
         Files.writeString(release.resolve("jdk/bin/javac"), "javac");
         Files.writeString(release.resolve("opencode/bin/opencode"), "opencode");
@@ -279,7 +283,8 @@ class LocalClientReleaseDownloaderTest {
         List<ArtifactFixture> artifacts = List.of(
                 artifact("CLIENT_JAR", "test-agent-local-client.jar", "client-jar"),
                 artifact("JDK", "jdk.tar.gz", "jdk-archive"),
-                artifact("OPENCODE", "opencode.tar.gz", "opencode-archive"));
+                artifact("OPENCODE", "opencode.tar.gz", "opencode-archive"),
+                artifact("PUBLIC_CAPABILITIES", "public-capabilities.tar.gz", "public-capabilities"));
         var manifest = objectMapper.createObjectNode();
         manifest.put("schemaVersion", 2);
         manifest.put("version", TARGET_VERSION);

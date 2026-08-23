@@ -34,6 +34,24 @@ public final class LocalClientInstanceResponses {
             String targetClientVersion,
             String updateDirection,
             String lastUpdateStatus,
-            Instant lastUpdateAt) {
+            Instant lastUpdateAt,
+            PublicCapabilitiesView publicCapabilities) {
+    }
+
+    public record PublicCapabilitiesView(
+            boolean supported,
+            String activeCommit,
+            String activeDigest,
+            String pendingCommit,
+            String pendingDigest,
+            String status,
+            String errorCode,
+            Integer agentCount,
+            Integer skillCount,
+            Integer toolCount,
+            Boolean requiresRestart,
+            String changeSummaryJson,
+            Instant reportedAt,
+            Instant updatedAt) {
     }
 }

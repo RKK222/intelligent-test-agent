@@ -13,6 +13,8 @@ PUBLIC_KEY="${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-}"
 CLIENT_JAR="${TEST_AGENT_LOCAL_CLIENT_JAR:-}"
 DOWNLOAD_BASE_URL="${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}"
 SERVER_URL="${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}"
+PUBLIC_CONFIG_COMMIT="${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}"
+PUBLIC_CAPABILITY_BUNDLE="${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE:-}"
 SKIP_BUILD=0
 
 JDK_LINUX_URL="${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_URL:-https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.9%2B10/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.9_10.tar.gz}"
@@ -37,6 +39,8 @@ Options:
   --signing-key <path>       PEM private key; never copied to the distribution.
   --public-key <path>        Matching PEM public key; derived when omitted.
   --client-jar <path>        Prebuilt shaded client JAR.
+  --public-config-commit <id> Fixed public Git commit embedded as the first-run capability baseline.
+  --public-capability-bundle <path> Complete public-capabilities.tar.gz generated for that commit.
   --skip-build               Do not invoke Maven; requires --client-jar.
   -h, --help                 Show this help.
 USAGE
@@ -51,6 +55,8 @@ while [[ $# -gt 0 ]]; do
     --signing-key) SIGNING_KEY="$2"; shift 2 ;;
     --public-key) PUBLIC_KEY="$2"; shift 2 ;;
     --client-jar) CLIENT_JAR="$2"; shift 2 ;;
+    --public-config-commit) PUBLIC_CONFIG_COMMIT="$2"; shift 2 ;;
+    --public-capability-bundle) PUBLIC_CAPABILITY_BUNDLE="$2"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -191,6 +197,21 @@ require_command ar
   echo "TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY or --signing-key is required" >&2
   exit 1
 }
+[[ "${PUBLIC_CONFIG_COMMIT}" =~ ^[0-9a-fA-F]{40,64}$ ]] || {
+  echo "--public-config-commit must be a fixed 40-64 character hexadecimal commit" >&2
+  exit 1
+}
+PUBLIC_CONFIG_COMMIT="$(printf '%s' "${PUBLIC_CONFIG_COMMIT}" | tr '[:upper:]' '[:lower:]')"
+[[ -n "${PUBLIC_CAPABILITY_BUNDLE}" && -f "${PUBLIC_CAPABILITY_BUNDLE}" ]] || {
+  echo "--public-capability-bundle is required" >&2
+  exit 1
+}
+require_command jq
+BUNDLE_COMMIT="$(tar -xOzf "${PUBLIC_CAPABILITY_BUNDLE}" public-capabilities/manifest.json | jq -er '.sourceCommit')"
+[[ "${BUNDLE_COMMIT}" == "${PUBLIC_CONFIG_COMMIT}" ]] || {
+  echo "Public capability bundle commit mismatch: expected=${PUBLIC_CONFIG_COMMIT} actual=${BUNDLE_COMMIT}" >&2
+  exit 1
+}
 
 RELEASE_DIR="${OUTPUT_DIR}/releases/${VERSION}"
 [[ ! -e "${RELEASE_DIR}" ]] || {
@@ -224,15 +245,17 @@ fetch_source "${OPENCODE_LINUX_ARCHIVE}" "${OPENCODE_LINUX_URL}" "${OPENCODE_LIN
 STAGING_DIR="${OUTPUT_DIR}/releases/.${VERSION}.build.$$"
 mkdir -p "${STAGING_DIR}"
 cp "${CLIENT_JAR}" "${STAGING_DIR}/test-agent-local-client.jar"
+cp "${PUBLIC_CAPABILITY_BUNDLE}" "${STAGING_DIR}/public-capabilities.tar.gz"
 normalize_jdk "${TEMP_DIR}/sources/jdk-linux.tar.gz" "${STAGING_DIR}/jdk.tar.gz" "${TEMP_DIR}/jdk-linux"
 normalize_opencode "${TEMP_DIR}/sources/opencode-linux.tar.gz" "${STAGING_DIR}/opencode.tar.gz" "${TEMP_DIR}/opencode-linux"
 
-for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz; do
+for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz public-capabilities.tar.gz; do
   openssl dgst -sha256 -sign "${SIGNING_KEY}" -out "${STAGING_DIR}/${artifact}.sig" "${STAGING_DIR}/${artifact}"
 done
 CLIENT_SHA="$(sha256_file "${STAGING_DIR}/test-agent-local-client.jar")"
 JDK_SHA="$(sha256_file "${STAGING_DIR}/jdk.tar.gz")"
 OPENCODE_SHA="$(sha256_file "${STAGING_DIR}/opencode.tar.gz")"
+PUBLIC_CAPABILITY_SHA="$(sha256_file "${STAGING_DIR}/public-capabilities.tar.gz")"
 PUBLISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 MANIFEST="${STAGING_DIR}/manifest.json"
 {
@@ -249,7 +272,8 @@ MANIFEST="${STAGING_DIR}/manifest.json"
   printf '  "artifacts": [\n'
   printf '    {"kind": "CLIENT_JAR", "path": "releases/%s/test-agent-local-client.jar", "size": %s, "sha256": "%s", "signaturePath": "releases/%s/test-agent-local-client.jar.sig"},\n' "${VERSION}" "$(file_size "${STAGING_DIR}/test-agent-local-client.jar")" "${CLIENT_SHA}" "${VERSION}"
   printf '    {"kind": "JDK", "path": "releases/%s/jdk.tar.gz", "size": %s, "sha256": "%s", "signaturePath": "releases/%s/jdk.tar.gz.sig"},\n' "${VERSION}" "$(file_size "${STAGING_DIR}/jdk.tar.gz")" "${JDK_SHA}" "${VERSION}"
-  printf '    {"kind": "OPENCODE", "path": "releases/%s/opencode.tar.gz", "size": %s, "sha256": "%s", "signaturePath": "releases/%s/opencode.tar.gz.sig"}\n' "${VERSION}" "$(file_size "${STAGING_DIR}/opencode.tar.gz")" "${OPENCODE_SHA}" "${VERSION}"
+  printf '    {"kind": "OPENCODE", "path": "releases/%s/opencode.tar.gz", "size": %s, "sha256": "%s", "signaturePath": "releases/%s/opencode.tar.gz.sig"},\n' "${VERSION}" "$(file_size "${STAGING_DIR}/opencode.tar.gz")" "${OPENCODE_SHA}" "${VERSION}"
+  printf '    {"kind": "PUBLIC_CAPABILITIES", "path": "releases/%s/public-capabilities.tar.gz", "size": %s, "sha256": "%s", "signaturePath": "releases/%s/public-capabilities.tar.gz.sig"}\n' "${VERSION}" "$(file_size "${STAGING_DIR}/public-capabilities.tar.gz")" "${PUBLIC_CAPABILITY_SHA}" "${VERSION}"
   printf '  ]\n}\n'
 } >"${MANIFEST}"
 openssl dgst -sha256 -sign "${SIGNING_KEY}" -out "${STAGING_DIR}/manifest.json.sig" "${MANIFEST}"

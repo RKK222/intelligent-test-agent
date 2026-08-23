@@ -2064,3 +2064,34 @@ release 兼容历史到当前 HEAD 的升级，先留存每套 `flyway_schema_hi
 不伪造历史性能数据。迁移不写 prompt、reasoning、Tool 输入输出或物理路径，不设置 TTL；原始 SHA-256 固定为
 `328c03ca3488e64a462aa1b1e7bff0fe541bb2cf1c5bf4dce0e024fb38c2cd7c`。ClickHouse migrator 按
 `20260822174420 -> 20260822215123` 顺序执行并锁定 history checksum，完整企业封包同时校验最终 persistence JAR 内字节。
+
+## PostgreSQL V20260823104611 本地客户端公共能力包
+
+`V20260823104611__local_client_public_capability_releases_create.sql` 为现有本地客户端节点增加：
+
+- `local_client_public_capability_releases`：按公共 Git commit 和能力内容摘要保存 `AVAILABLE|SERVER_ONLY` 版本、
+  manifest、变更摘要和完整 gzip 制品；`SERVER_ONLY` 不保存伪制品。
+- `local_client_public_capability_states`：保存每个实例当前与待更新 commit/摘要、状态、稳定错误码和上报时间。
+- `local_client_public_capability_attempts`：保存用户确认后的单实例命令、connection generation 和状态机；活动
+  `(client_instance_id,target_digest)` 唯一索引保证并发确认幂等。
+- `local_client_instances` additive 增加当前公共能力投影；旧行均为空，不回填或伪造已安装版本。
+- 用户通知约束接受能力可用通知和确认操作。
+
+该 migration 已在固定 `.env.test` PostgreSQL 执行，Flyway checksum 固定为 `236715365`，原始 SHA-256 固定为
+`79efa7be62438c6bc76839e0d65a3aad1cbdbdcea44b358cc6af3db568bf342d`，后续不得重写字节。
+
+`V20260823123757__local_client_release_artifacts_public_capability_kind_add.sql` 以前向迁移扩展
+`local_client_release_artifacts.artifact_kind` 约束，使客户端 release 可保存 `PUBLIC_CAPABILITIES` 制品；它不修改已执行的
+`V20260823104611`，原始 SHA-256 为
+`3df529b51d801e7c235c230f97796e6672456cb754ac36603f7e635814ad2258`。
+
+所有关系 SQL 位于 `LocalClientPublicCapabilityMapper.xml`，不新增 JDBC SQL。制品是已裁剪的公共配置与纯
+JS/WASM 依赖，不包含密钥、Client key、用户目录或 Tool 输入输出。代码回滚后新增表和列可以保留；旧客户端不声明
+协议 capability，因此不会生成更新状态或命令。物理清理版本前必须确认没有实例状态或 attempt 引用，不能在代码回滚时
+直接删除。
+
+真实 PostgreSQL 验证使用 `.env.test` 指定的固定数据库，在随机隔离 schema 中执行从空库到 HEAD 的完整 Flyway，
+随后验证 MyBatis bytea 映射、实例状态、generation 绑定、CAS 状态迁移与活动命令唯一约束。企业发布前仍须导出每套
+目标库完整 `flyway_schema_history`，并验证已部署基线到 HEAD；未知 checksum 或更高已执行版本必须停止，禁止
+`outOfOrder`、`repair` 或手工修改历史表。最终还要核对源码、persistence JAR 和应用嵌套 JAR 中上述两条 migration 的
+SHA-256 一致。

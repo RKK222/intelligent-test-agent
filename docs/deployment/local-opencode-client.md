@@ -30,12 +30,22 @@ export TEST_AGENT_LOCAL_CLIENT_SERVER_URL=https://122.233.30.2
 export TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY=/secure/local-client-signing-private.pem
 export TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE=/secure/input/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.9_10.tar.gz
 export TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE=/secure/input/opencode-linux-arm64.tar.gz
+export TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT=<PUBLIC_GIT_COMMIT>
+export TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE=/secure/input/public-capabilities-<PUBLIC_GIT_COMMIT>.tar.gz
 test -r /secure/local-client-signing-private.pem
 test -r /secure/input/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.9_10.tar.gz
 test -r /secure/input/opencode-linux-arm64.tar.gz
+test -r "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}"
 ~~~
 
-成功条件：三个 test -r 均返回 0。私钥只可留在该外网 Mac 的受控目录，绝不放入仓库、交付包、U 盘、日志或聊天。
+成功条件：四个 `test -r` 均返回 0，公共 commit 是已经审核发布的 40-64 位十六进制固定提交，能力包 manifest 中的
+`sourceCommit` 与它完全一致。私钥只可留在该外网 Mac 的受控目录，绝不放入仓库、交付包、U 盘、日志或聊天。
+平台首次升级且该 commit 尚无能力制品时，后端会从当前已检出的公共 Git HEAD 自动补建；超级管理员再通过
+`GET /api/internal/platform/workspace-management/agent-config/public/client-capabilities/{bundleDigest}/artifact`
+导出此处的完整包。禁止用空能力包或只写一个 commit 字符串代替实际基线。
+公共能力包不包含 `opencode.jsonc` 或模型密钥；支持 `MANAGED_MODEL_CONFIG_V1` 的客户端在 WSS 注册后从服务端接收
+无密钥 provider 配置，并只通过本机 loopback 模型中继访问平台。发布验收必须确认旧客户端仍可注册、新客户端的
+`REGISTERED` 不泄露平台地址、统一认证号或上游密钥。
 
 **机器：外网 Mac（同一终端）**。执行真实打包，使用独立输出目录，避免污染固定 deploy/internal/dist。
 
@@ -251,9 +261,21 @@ Observability 现场验收还必须确认 DEB 的受控 release 包含共享插�
 服务器 watermark 续传；只有匹配 ACK 后文件才删除。空间不足时客户端必须继续对话并报告 degraded/incomplete。不得通过
 清理用户 spool、调高超过 1 MiB/s 的速率或降低 3 秒空闲门槛来使验收表面通过。
 
-当前 DEB 只交付 OpenCode 1.18.4、Java 客户端和 Observability 插件，不内置平台公共 Agent/Skill 配置。若企业验收要求本地
-OpenCode 实际执行 `test-design`，目标工作区或受控本地配置必须先通过既有配置治理链路取得同版本
-`test-design-orchestrator` 与 `test-design` 资源；禁止在封包脚本中复制本机 `.testagent` 运行目录或绕过发布治理。未提供该依赖时，
-本地 `/agent` 只有 OpenCode 默认 Agent，显式选择 `test-design-orchestrator` 会失败，不能用服务端受保护 Agent 的成功结果冒充
-`runtimeKind=LOCAL_CLIENT` 验收。正式发布前必须确定并验证公共配置对本地客户端的受控分发方案，或明确取消“本地执行测试设计”
-这一产品要求。
+新版客户端发布单元必须内置与明确公共 Git commit 对应的完整 `public-capabilities.tar.gz`。执行
+`package-local-opencode-client.sh` 时 `--public-config-commit` 和 `--public-capability-bundle` 都是必填项；脚本读取包内
+`public-capabilities/manifest.json` 校验 commit，并把该制品、摘要和签名作为 release 的
+`PUBLIC_CAPABILITIES` artifact。禁止复制本机 `.testagent`、公共仓库原始 `node_modules` 或在目标机执行 npm 下载。
+
+首次启动从安装 release 自动初始化该基线。后续公共版本只生成完整包并发送通知；用户必须在托盘或网页确认，平台不能
+自动确认。Agent/Skill-only 变化热加载，Tool/依赖变化重启本地 OpenCode；Tool 始终使用当前登录用户权限，不提权。
+候选包经安全解压、文件/内容摘要、目录接口和 OpenCode 健康校验后才原子切换，失败回到上一不可变版本。公共版本
+`SERVER_ONLY` 时不下发，客户端继续使用上一 `AVAILABLE` 版本。
+
+能力包 manifest 的 `contentDigest` 只表示文件内容，安装版本的 `bundleDigest` 固定按
+`sha256(sourceCommit + "\n" + contentDigest)` 计算。同一内容的新公共提交仍必须生成独立完整包并显示该提交哈希；
+首版客户端已经安装的文件摘要型 `bundleDigest` 继续兼容读取，但新发布包不得再使用旧算法。
+
+Mac 人工验收可以直接构建 shaded JAR，但首次基线行为仍需构造安装目录
+`<installRoot>/releases/<clientVersion>/public-capabilities.tar.gz`；在线更新则由 WSS 分片下发，不从下载 URL 获取。
+验收必须同时检查 `/agent`、Skill command、`/experimental/tool/ids`、真实对话 Tool 调用、重启后版本保留、公共 Agent
+不重复以及服务器工作区行为未变化，不能用服务器受保护 Agent 的执行结果冒充 `runtimeKind=LOCAL_CLIENT`。

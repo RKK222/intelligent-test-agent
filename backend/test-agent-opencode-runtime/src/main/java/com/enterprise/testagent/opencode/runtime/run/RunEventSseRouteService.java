@@ -2,6 +2,7 @@ package com.enterprise.testagent.opencode.runtime.run;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
@@ -12,6 +13,7 @@ import com.enterprise.testagent.domain.routing.RoutingDecision;
 import com.enterprise.testagent.domain.routing.RoutingDecisionRepository;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunRuntimeStore;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalClientExecutionNodeIdentity;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import java.util.Map;
 import java.util.Objects;
@@ -38,12 +40,21 @@ public class RunEventSseRouteService {
     private final OpencodeProcessManagementRepository processRepository;
     private final BackendJavaRouteResolver routeResolver;
     private final RunRuntimeStore runRuntimeStore;
+    private final LocalClientConnectionStore localClientConnectionStore;
 
     public RunEventSseRouteService(
             RoutingDecisionRepository routingDecisionRepository,
             OpencodeProcessManagementRepository processRepository,
             BackendJavaRouteResolver routeResolver) {
-        this(routingDecisionRepository, processRepository, routeResolver, null);
+        this(routingDecisionRepository, processRepository, routeResolver, null, null);
+    }
+
+    public RunEventSseRouteService(
+            RoutingDecisionRepository routingDecisionRepository,
+            OpencodeProcessManagementRepository processRepository,
+            BackendJavaRouteResolver routeResolver,
+            RunRuntimeStore runRuntimeStore) {
+        this(routingDecisionRepository, processRepository, routeResolver, runRuntimeStore, null);
     }
 
     @Autowired
@@ -51,13 +62,15 @@ public class RunEventSseRouteService {
             RoutingDecisionRepository routingDecisionRepository,
             OpencodeProcessManagementRepository processRepository,
             BackendJavaRouteResolver routeResolver,
-            RunRuntimeStore runRuntimeStore) {
+            RunRuntimeStore runRuntimeStore,
+            LocalClientConnectionStore localClientConnectionStore) {
         this.routingDecisionRepository = Objects.requireNonNull(
                 routingDecisionRepository,
                 "routingDecisionRepository must not be null");
         this.processRepository = Objects.requireNonNull(processRepository, "processRepository must not be null");
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
         this.runRuntimeStore = runRuntimeStore;
+        this.localClientConnectionStore = localClientConnectionStore;
     }
 
     /**
@@ -94,6 +107,15 @@ public class RunEventSseRouteService {
         }
         RoutingDecision decision = routingDecisionRepository.findByRunId(runId)
                 .orElseThrow(() -> unavailableRoute(runId, "routing_decision_missing"));
+        var localClientInstanceId = LocalClientExecutionNodeIdentity.clientInstanceId(decision.executionNodeId());
+        if (localClientInstanceId.isPresent()) {
+            if (localClientConnectionStore == null) {
+                throw unavailableRoute(runId, "local_client_route_store_unavailable");
+            }
+            var route = localClientConnectionStore.find(localClientInstanceId.orElseThrow())
+                    .orElseThrow(() -> unavailableRoute(runId, "local_client_connection_missing"));
+            return forwardTarget(route.backendProcessId());
+        }
         OpencodeProcessId processId = processId(decision)
                 .orElseThrow(() -> unavailableRoute(runId, "execution_node_unmapped"));
         OpencodeServerProcess process = processRepository.findOpencodeServerProcessById(processId)

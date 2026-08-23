@@ -970,3 +970,24 @@ LobeHub 的公开模型目录关联现有 `internal_model_providers` 与 Token�
 独立 ParadeDB、RustFS、Redis ACL、启动顺序、备份和回滚见 `docs/deployment/lobehub-offline.md`。外部 fork
 未通过准入与目标环境验收前，必须保持 `LOBEHUB_ENABLED=false`。
 Spring Boot 唯一 Flyway Bean 会在启动早期完成 migration；历史工具盒子版本的解析由 `DatabaseMigrationCompatibilityCustomizer` 在 Flyway validate 前按已执行 version/checksum 选择隔离资源，企业正式 `V20260728160800/-1966404877` 保持主 migration 原始字节，未知 checksum 失败关闭，不使用乱序迁移或 `repair`。固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒按 `linuxServerId` 写入 Redis Java 快照、服务器资源指标历史和 JVM 指标历史；`backendProcessId` 仅表示当前 Java 实例和拓扑连接字段，不再作为 Java 心跳或 JVM 历史的唯一键；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。
+
+## 公共客户端能力包构建输入
+
+公共配置发布后的能力包生成运行在现有 Java 后端节点内，不新增部署节点。生产环境应把下列 Spring 属性配置为
+同一离线 OpenCode 1.18.4 程序包的只读绝对路径；本地从仓库根或 `backend/` 启动时可以使用默认回退路径。
+
+| Spring 属性 | 默认值 | 说明 |
+|---|---|---|
+| `test-agent.local-client.public-capabilities.portable-lock` | `../deploy/internal/opencode-node-runtime.package-lock.json` | 可移植依赖唯一锁定事实源。 |
+| `test-agent.local-client.public-capabilities.node-modules` | `../.testagent/agent-opencode/.config/opencode/node_modules` | 已按锁文件离线安装的只读依赖字节；不能指向公共 Git 的 `node_modules`。 |
+| `test-agent.local-client.public-capabilities.reconcile-delay-ms` | `30000` | 离线通知和已确认命令重连补偿周期。 |
+| `test-agent.local-client.public-capabilities.bootstrap.enabled` | `true` | 启动后为尚无能力包记录的当前公共 Git HEAD 补建首个完整包；不访问远端。 |
+| `test-agent.local-client.public-capabilities.bootstrap.interval-seconds` | `60` | 历史 HEAD 补偿重试周期，最小 10 秒；多 Java 由 Redis 锁去重。 |
+
+依赖目录版本必须与锁文件完全一致，只允许纯 JS/WASM，拒绝 install scripts、`.node` 原生扩展、OS/CPU 限定和
+未锁定静态 import。此类错误只把该公共 commit 标为 `SERVER_ONLY`，不能回滚已经完成的服务器 Git 发布，也不能
+临时联网安装依赖绕过准入。
+
+升级到包含公共能力包的首个版本时，不要求管理员先制造一次空提交：后台会读取
+`OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 当前已检出的 HEAD 并补建基线。若该目录未初始化、依赖不兼容或 Redis 锁不可用，
+补偿保留失败日志并按周期重试；不能把空 commit 冒充客户端已安装版本，也不能为补偿执行 fetch/push。

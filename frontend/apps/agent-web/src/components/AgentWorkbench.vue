@@ -2203,6 +2203,38 @@ async function handleOpenNotification(notification: UserNotification) {
         feedback.value = errorFeedback("本地客户端更新失败", error);
       }
     });
+    return;
+  }
+  if (
+    notification.type === "LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE"
+    && notification.actionType === "LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE"
+    && notification.actionAvailable
+  ) {
+    try {
+      const instances = await ordinaryApi.listMyLocalClientInstances();
+      const client = instances.find((item) => item.clientInstanceId === notification.actionTargetId);
+      const capability = client?.publicCapabilities;
+      if (!client || !capability?.pendingDigest) {
+        throw new Error("待更新公共能力版本已经变化");
+      }
+      await ElMessageBox.confirm(
+        `Agent ${capability.agentCount ?? 0} / Skill ${capability.skillCount ?? 0} / Tool ${capability.toolCount ?? 0}。`
+          + (capability.requiresRestart ? "包含 Tool 或依赖变化，将重启本地 OpenCode。" : "仅 Agent/Skill 变化，将热加载。")
+          + "公共 Tool 使用本机当前登录账号权限运行，不会提权。",
+        "更新本地公共能力",
+        { confirmButtonText: "确认更新", cancelButtonText: "暂不更新", type: "warning" }
+      );
+      await ordinaryApi.requestLocalClientPublicCapabilityUpdate(
+        client.clientInstanceId,
+        capability.pendingDigest
+      );
+      ElMessage.success(client.online ? "公共能力更新命令已发送" : "已确认，客户端重连后继续更新");
+      await refreshUserNotifications();
+    } catch (error) {
+      if (error !== "cancel" && error !== "close") {
+        feedback.value = errorFeedback("公共能力更新失败", error);
+      }
+    }
   }
 }
 

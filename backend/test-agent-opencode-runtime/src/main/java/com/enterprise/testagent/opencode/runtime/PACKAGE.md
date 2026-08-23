@@ -29,7 +29,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunDiffApplicationService`：Run 级 Diff 查询、接受和拒绝；新模式先读 Redis snapshot，远端 ID 必要时读非原文 Run 锚点，过期返回 410，动作成功后以单 SQL 更新 Run 计数。
 - `run.RunEventPersistencePolicy`：区分 durable RunEvent 与 transient live output，并清洗 tool 大字段。
 - `run.RunMessageRecoveryService` / `run.RunTurnMessageSelector`：SSE 建连时按稳定 dispatch user 锚点从 agent projected messages 生成当前 Run 的 transient message snapshot；只选择该 user 的直接 assistant，锚点冲突、缺失或分页歧义时 fail-closed，已记录 child scope 可恢复但新 child 只能由选中 root 发现。
-- `run.RunEventSseRouteService`：优先按 Redis Run manifest 的 `producerLinuxServerId` 解析目标 Java，manifest 缺失的 legacy/旧 Run 才按 routing decision 和生产 opencode 进程兼容解析；分别提供 SSE 可回退读取和 cancel 写操作严格路由语义。
+- `run.RunEventSseRouteService`：优先按 Redis Run manifest 的 `backendProcessId/producerLinuxServerId` 解析目标 Java；manifest 缺失时，服务器 Run 从固定 routing decision 解析生产 opencode process，本地客户端 Run 通过 `LocalClientExecutionNodeIdentity` 和实时连接存储解析持有 Java；分别提供 SSE 可回退读取和 cancel 写操作严格路由语义。
 - `run.RunSessionMessageSnapshotService`：Run 终态/取消后先按稳定 USER 锚点裁剪，再持久化本轮 assistant 快照、parts 和最后一条 assistant 的 token/cost；消息列表刷新 fallback 保留既有 Run 归属，新消息不猜测 `runId`。
 - `run.summary.RunConversationSummarizer`：为新存储模式生成确定性 USER/ASSISTANT 双摘要，负责敏感内容清洗、Unicode code-point 截断和安全 fallback；不读取数据库、不调用外部模型，也不把原文作为失败降级结果。
 - `run.RunStorageModeSelector` / `run.RunTerminalProjectionService` / `run.RunTerminalProjectionRecoveryCoordinator`：前者按已校验上下文和 userId 稳定哈希为新 Run 固定存储模式；终态服务从 Redis 物化状态生成双摘要、usage、Diff 与远端定位投影，并通过领域端口执行三语句关系型事务；恢复协调器在启动和 5 秒周期中只由公共路由选中的同服务器 Java消费 terminal Lua 原子发布的 versioned outbox，APPLIED/版本冲突后 ack，数据库失败保留 `TERMINAL_PENDING_DB`。
@@ -45,6 +45,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `internalmodel.observability.InternalModelObservabilityQueryService`：统一内部模型可观测查询的时间与分页上限，把五类 `outcomeGroup` 展开为稳定精确结果集合后交给领域仓储；兼容精确 `outcome` 查询，且精确条件优先。
 - `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run；临时 fork 仅接收用户问题并禁用工具，通过本轮 assistant 事件流输出增量，消息快照补偿漏失终态，最后以事务 CAS 写唯一终态。
 - `localclient.LocalClientUpdateCoordinator` / `LocalClientUpdateTerminalService`：前者在事务外执行更新补偿扫描、路由与网络发送；后者以独立短事务统一 attempt 终态 CAS、实例结果、rollout 行锁、全量 attempt 读取与汇总，客户端普通/迟到终态和平台 deadline/capability/generation 终态共用同一原子边界。
+- `localclient.LocalClientExecutionNodeIdentity`：集中维护 `lci_* ↔ node_local_*` 稳定映射，供目标解析、Session binding 和 legacy Run 路由共同使用，禁止各入口自行拼接或解析前缀。
 - `runtime.SideQuestionOrphanCleanupTaskHandler` / `runtime.SideQuestionOrphanCleanupService`：复用 scheduler 每 5 分钟回收超过 10 分钟的旁路 fork；按内部映射使用原节点，404 幂等，无映射时记录潜在泄漏窗口并收敛平台 Run。
 - `process.*`：当前用户 opencode 进程分配、用户/服务器短事务预留、process/binding 生命周期代次 CAS、已有 binding 原端口恢复、公共状态查询、公共启动/owned-stop 健康确认、通用参数 session/config 路径读取、启动时可选注入当前平台 `OPENCODE_REFERENCES_DIR`、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。只有明确 `PORT_CONFLICT/PORT_OUT_OF_RANGE` 才进入既有端口选择；引用目录参数缺失不阻断滚动升级中的进程启动，既有进程不热更新环境。
 - `process.WorkspaceFileRoutingService`：复用公共 Java 路由程序定位 workspace 文件 WebSocket 的目标后端，并在普通路由阶段通过 `ConversationWorkspaceAccessAuthorizer` 校验当前用户归属，`SUPER_ADMIN` 不旁路；排查只读路由按目标工作区权威服务器选择 Java，不使用 actor affinity、回绑或本机降级，ticket 和具体 RPC 的再次校验由 API/业务入口共同完成。

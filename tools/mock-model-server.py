@@ -10,6 +10,7 @@
 
 用法：
     python3 tools/mock-model-server.py --mode ok --port 19070
+    python3 tools/mock-model-server.py --mode tool-chain --port 19070
     python3 tools/mock-model-server.py --mode http500 --port 19070
     python3 tools/mock-model-server.py --mode first-output-timeout --port 19070
 
@@ -18,6 +19,7 @@
     sse       返回 200 text/event-stream，含 data: 与 [DONE]
     finish-reason-eof 返回有效输出和 finish_reason 后直接 EOF，模拟不发 [DONE] 的企业网关
     nonstream-200 强制返回 200 JSON，用于验证流式探活拒绝非 SSE 成功响应
+    tool-chain 按消息历史依次调用公共 skill、rpc-call，再返回验收结论
     http400   返回 400 非 SSE 错误正文
     http500   返回 500 非 SSE 错误正文
     header-timeout       响应头前挂起，模拟首响应超时（timeout 为兼容别名）
@@ -41,6 +43,57 @@ def ok_body():
     ).encode("utf-8")
 
 
+def message_tool_names(body):
+    """只读取历史 assistant 消息，避免把请求中的工具声明误判成已调用。"""
+    names = []
+    for message in body.get("messages", []):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for call in message.get("tool_calls") or []:
+            function = call.get("function") if isinstance(call, dict) else None
+            if isinstance(function, dict) and isinstance(function.get("name"), str):
+                names.append(function["name"])
+    return names
+
+
+def tool_chain_chunks(body):
+    """为公共能力包 E2E 生成确定性的 Skill → Tool → 最终回答链路。"""
+    request_text = json.dumps(body, ensure_ascii=False)
+    if "PUBLIC_CAPABILITY_E2E_20260823" not in request_text:
+        return [{"content": "本地 mock 回答"}]
+
+    called = message_tool_names(body)
+    if "skill" not in called:
+        return [{
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_public_skill",
+                "type": "function",
+                "function": {"name": "skill", "arguments": '{"name":"ce-shi-ji-neng"}'},
+            }]
+        }]
+    if "rpc-call" not in called:
+        return [{
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_public_rpc",
+                "type": "function",
+                "function": {
+                    "name": "rpc-call",
+                    "arguments": json.dumps({
+                        "uri": "http://127.0.0.1:18081",
+                        "method": "public.capability.health",
+                        "params": {"marker": "PUBLIC_CAPABILITY_E2E_20260823"},
+                        "timeout": 5,
+                    }, ensure_ascii=False, separators=(",", ":")),
+                },
+            }]
+        }]
+    return [{
+        "content": "PUBLIC_CAPABILITY_E2E_20260823：公共 Agent 已运行，公共 Skill 已加载，公共 rpc-call Tool 已调用。"
+    }]
+
+
 class MockHandler(BaseHTTPRequestHandler):
     mode = "ok"
 
@@ -49,8 +102,10 @@ class MockHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         request_body = self.rfile.read(length) if length > 0 else b"{}"
         try:
-            stream_requested = bool(json.loads(request_body).get("stream"))
+            parsed_body = json.loads(request_body)
+            stream_requested = bool(parsed_body.get("stream"))
         except (json.JSONDecodeError, AttributeError):
+            parsed_body = {}
             stream_requested = False
 
         if self.mode == "http400":
@@ -77,6 +132,26 @@ class MockHandler(BaseHTTPRequestHandler):
             return
 
         # 200 分支。
+        if self.mode == "tool-chain" and stream_requested:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            for delta in tool_chain_chunks(parsed_body):
+                chunk = {
+                    "id": "mock-tool-chain",
+                    "object": "chat.completion.chunk",
+                    "model": "local-memory-chat",
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                }
+                self.wfile.write(("data: " + json.dumps(chunk, ensure_ascii=False) + "\n\n").encode("utf-8"))
+            self.wfile.write(
+                b'data: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":8,"total_tokens":16}}\n\n'
+            )
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            return
+
         if self.mode == "sse" or (self.mode == "ok" and stream_requested):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -173,7 +248,7 @@ def main():
     parser = argparse.ArgumentParser(description="OpenAI-compatible 模型 mock 服务")
     parser.add_argument("--port", type=int, default=19070)
     parser.add_argument("--mode", choices=[
-        "ok", "sse", "finish-reason-eof", "nonstream-200", "http400", "http500", "timeout",
+        "ok", "tool-chain", "sse", "finish-reason-eof", "nonstream-200", "http400", "http500", "timeout",
         "header-timeout", "first-output-timeout", "idle-timeout", "empty"
     ],
                         default="ok", help="故障模式（默认 ok）")

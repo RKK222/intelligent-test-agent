@@ -204,6 +204,21 @@ deploy/internal/package-release.sh --output-dir deploy/internal/dist
 
 当前 release 必须使用上述默认命令，不添加 `--with-lobehub`。打包后应从 `release-components.env` 复核 LobeHub 为 `disabled`，且 ZIP 中不存在 `dist/lobehub/`。
 
+本地客户端组件还必须显式提供已经审核的公共 Git 固定提交和与之匹配的完整能力包：
+
+```bash
+export TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT=<40-64 位十六进制固定提交>
+export TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE=/secure/input/public-capabilities-${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT}.tar.gz
+test -r "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}"
+```
+
+`package-local-opencode-client.sh` 会核对能力包 manifest 的 `sourceCommit`，并把能力包作为受签名保护的
+`PUBLIC_CAPABILITIES` release artifact。公共提交或能力包摘要变化会改变 local client 组件指纹，不能在
+`--zip-only` 模式下复用旧客户端制品。能力包由平台发布流程根据固定 commit、锁文件和可移植依赖生成；禁止用公共 Git
+工作树、原始 `node_modules` 或客户端现场 npm 下载替代。
+新版 manifest 的 `contentDigest` 是文件内容摘要，`bundleDigest` 必须是
+`sha256(sourceCommit + "\n" + contentDigest)`；即使能力文件没有变化，固定提交变化也必须使用该提交对应的新完整制品。
+
 后端打包前会强制运行 `SpringBeanConstructorWiringTest`，扫描全部生产 Spring Bean；发现多构造器 Bean 既没有无参构造器、也没有显式注入构造器时立即终止打包，避免只能在企业环境启动阶段暴露装配错误。其它测试仍按发布前自检要求单独执行。
 
 `VITE_TEST_AGENT_API_BASE_URL` 是编译期参数。只允许一个入口时可固化完整 origin；域名和 IP 需要同时兼容时必须显式传空值，让前端使用当前页面同源的相对 `/api`。当前双入口包使用：
@@ -225,7 +240,7 @@ deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 
 - `worker runtime`：Python/通用脚本工具、OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 是一个不可拆分单元。
 - `toolbox`：IT-Tools、OmniTools、修改源码和目录文件是一个单元。
-- `local OpenCode client`：客户端 JAR、PKG、DEB、JRE、OpenCode 归档、安装脚本和签名清单是一个单元。
+- `local OpenCode client`：客户端 JAR、PKG、DEB、JRE、OpenCode 归档、完整公共能力基线、安装脚本和签名清单是一个单元。
 
 Python 第三方库不进入上述 worker 指纹，也不烘焙进 worker 镜像。它使用独立命令、独立 tar 和独立校验文件，升级 pandas/Office/JSON 库时不需要重建或重新加载 worker 镜像：
 

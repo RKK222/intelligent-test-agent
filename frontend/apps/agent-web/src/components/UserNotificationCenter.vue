@@ -93,6 +93,7 @@ type NotificationKind =
   | 'DISPOSE_FAILED'
   | 'DISPOSE_SUPERSEDED'
   | 'LOCAL_CLIENT_UPDATE'
+  | 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE'
   | 'UNKNOWN'
 
 /** 未知类型或类型/动作组合必须失败关闭，不能把 actionTargetId 当作 URL 或其它命令。 */
@@ -103,6 +104,8 @@ function notificationKind(notification: UserNotification): NotificationKind {
   if (notification.type === 'AGENT_CONFIG_DISPOSE_FAILED' && notification.actionType === 'RESTART_OWN_PROCESS') return 'DISPOSE_FAILED'
   if (notification.type === 'AGENT_CONFIG_DISPOSE_SUPERSEDED' && notification.actionType === 'NONE') return 'DISPOSE_SUPERSEDED'
   if (notification.type === 'LOCAL_CLIENT_UPDATE_AVAILABLE' && notification.actionType === 'LOCAL_CLIENT_UPDATE') return 'LOCAL_CLIENT_UPDATE'
+  if (notification.type === 'LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE'
+    && notification.actionType === 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE') return 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE'
   return 'UNKNOWN'
 }
 
@@ -115,6 +118,7 @@ function canOpenNotification(notification: UserNotification) {
   if (kind === 'SESSION_SHARE') return notification.actionAvailable
   if (kind === 'DISPOSE_FAILED') return notification.actionAvailable
   if (kind === 'LOCAL_CLIENT_UPDATE') return parseLocalClientNotificationUpdate(notification) !== null
+  if (kind === 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE') return notification.actionAvailable
   if (kind === 'DISPOSE_PENDING' || kind === 'DISPOSE_SUCCEEDED' || kind === 'DISPOSE_SUPERSEDED') {
     return notification.unread
   }
@@ -126,6 +130,7 @@ function shouldDimNotification(notification: UserNotification) {
   return kind === 'UNKNOWN'
     || (kind === 'SESSION_SHARE' && !notification.actionAvailable)
     || (kind === 'LOCAL_CLIENT_UPDATE' && !canOpenNotification(notification))
+    || (kind === 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE' && !canOpenNotification(notification))
 }
 
 function notificationTimestamp(notification: UserNotification) {
@@ -162,6 +167,7 @@ function notificationStateLabel(notification: UserNotification) {
       case 'DISPOSE_FAILED': return '更新失败'
       case 'DISPOSE_SUPERSEDED': return '不用处理'
       case 'LOCAL_CLIENT_UPDATE': return localClientUpdateDirectionLabel(notification) ?? '版本信息不可用'
+      case 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE': return '等待确认'
       default: return '暂不支持'
   }
 }
@@ -180,6 +186,8 @@ function notificationActionLabel(notification: UserNotification) {
       const direction = localClientUpdateDirectionLabel(notification)
       return direction ? `立即${direction}` : '暂不可用'
     }
+    case 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE':
+      return notification.actionAvailable ? '更新公共能力' : '暂不可用'
     default:
       return '不支持的通知动作'
   }
@@ -392,6 +400,12 @@ onBeforeUnmount(() => {
               />
               <RefreshCw
                 v-else-if="notificationKind(notification) === 'LOCAL_CLIENT_UPDATE' && canOpenNotification(notification)"
+                class="user-notification-center__open-icon"
+                :size="15"
+                aria-hidden="true"
+              />
+              <RefreshCw
+                v-else-if="notificationKind(notification) === 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE' && canOpenNotification(notification)"
                 class="user-notification-center__open-icon"
                 :size="15"
                 aria-hidden="true"

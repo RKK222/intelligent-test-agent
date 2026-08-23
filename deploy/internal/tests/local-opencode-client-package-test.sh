@@ -23,6 +23,7 @@ sha256_file() {
 }
 
 VERSION=20260820153045
+PUBLIC_CONFIG_COMMIT=0123456789abcdef0123456789abcdef01234567
 HTTP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 DOWNLOAD_ROOT="http://127.0.0.1:${HTTP_PORT}/"
 mkdir -p "${TEST_ROOT}/inputs/jdk/fake-jdk/bin" \
@@ -105,6 +106,11 @@ chmod 0755 "${TEST_ROOT}/inputs/jdk/fake-jdk/bin/java" \
 tar -C "${TEST_ROOT}/inputs/jdk" -czf "${TEST_ROOT}/jdk-linux.tar.gz" fake-jdk
 tar -C "${TEST_ROOT}/inputs/opencode" -czf "${TEST_ROOT}/opencode-linux.tar.gz" opencode
 printf 'test client jar\n' >"${TEST_ROOT}/test-agent-local-client.jar"
+mkdir -p "${TEST_ROOT}/public-capabilities/public-capabilities/agents"
+printf '%s\n' 'public test agent' >"${TEST_ROOT}/public-capabilities/public-capabilities/agents/test.md"
+printf '{"schemaVersion":1,"sourceCommit":"%s"}\n' "${PUBLIC_CONFIG_COMMIT}" \
+  >"${TEST_ROOT}/public-capabilities/public-capabilities/manifest.json"
+tar -C "${TEST_ROOT}/public-capabilities" -czf "${TEST_ROOT}/public-capabilities.tar.gz" public-capabilities
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
   -out "${TEST_ROOT}/signing-private.pem" >/dev/null 2>&1
 
@@ -132,6 +138,8 @@ package_release() {
       --server-url https://platform.example.internal \
       --signing-key "${TEST_ROOT}/signing-private.pem" \
       --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
+      --public-config-commit "${PUBLIC_CONFIG_COMMIT}" \
+      --public-capability-bundle "${TEST_ROOT}/public-capabilities.tar.gz" \
       --skip-build
 }
 
@@ -142,7 +150,7 @@ openssl pkey -in "${TEST_ROOT}/signing-private.pem" -pubout -out "${PUBLIC_KEY}"
 openssl dgst -sha256 -verify "${PUBLIC_KEY}" \
   -signature "${RELEASE_DIR}/manifest.json.sig" \
   "${RELEASE_DIR}/manifest.json" >/dev/null
-for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz; do
+for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz public-capabilities.tar.gz; do
   openssl dgst -sha256 -verify "${PUBLIC_KEY}" \
     -signature "${RELEASE_DIR}/${artifact}.sig" \
     "${RELEASE_DIR}/${artifact}" >/dev/null
@@ -225,7 +233,9 @@ for expected_request in \
   "GET /releases/${VERSION}/test-agent-local-client.jar " \
   "GET /releases/${VERSION}/test-agent-local-client.jar.sig " \
   "GET /releases/${VERSION}/opencode.tar.gz " \
-  "GET /releases/${VERSION}/opencode.tar.gz.sig "; do
+  "GET /releases/${VERSION}/opencode.tar.gz.sig " \
+  "GET /releases/${VERSION}/public-capabilities.tar.gz " \
+  "GET /releases/${VERSION}/public-capabilities.tar.gz.sig "; do
   grep -q "${expected_request}" "${TEST_ROOT}/http.log"
 done
 

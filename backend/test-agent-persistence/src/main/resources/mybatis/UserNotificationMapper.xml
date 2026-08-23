@@ -233,7 +233,10 @@
 
     <sql id="ActionAvailablePredicate">
         (<include refid="NotificationEffectivePredicate"/>)
-        and notification.action_type in ('SESSION_SHARE', 'RESTART_OWN_PROCESS', 'LOCAL_CLIENT_UPDATE')
+        and notification.action_type in (
+            'SESSION_SHARE', 'RESTART_OWN_PROCESS', 'LOCAL_CLIENT_UPDATE',
+            'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE'
+        )
     </sql>
 
     <sql id="NotificationViewColumns">

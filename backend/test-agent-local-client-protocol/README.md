@@ -17,6 +17,11 @@ result marker 并在重连后重报；服务端完成幂等持久化才返回精
 ACK 后清 marker。deadline 失败可由迟到 `SUCCEEDED/AUTO_ROLLED_BACK` 条件纠正；其它持久化终态冲突不返回 ACK。
 目标版本大于当前为 `UPDATE`、小于为 `ROLLBACK`、相同为 `SAME`。
 
+声明 `MANAGED_MODEL_CONFIG_V1` 的客户端会在 `REGISTERED.managedModelConfig` 接收无密钥 OpenCode 模型配置；字段仅包含
+`model/small_model/enabled_providers/provider`，provider 的地址与 API key 使用客户端进程内的 loopback 环境变量占位符。
+旧客户端或未声明该能力的客户端继续收到不含此字段的原 JSON 形状。该配置不写入公共能力包，也不携带平台地址、
+Client key、统一认证号或上游模型密钥。
+
 客户端桌面主动注册工作区使用 `WORKSPACE_REGISTER {name,rootPath}`，后台只采用已认证连接中的 userId、
 clientInstanceId 和 generation，不接受载荷伪造身份；平台完成客户端真实根校验和事务持久化后返回同 requestId 的
 `WORKSPACE_REGISTERED {workspaceId,name,rootPath}`。业务失败用同 requestId 的 `ERROR` 收敛单次请求，不关闭连接。

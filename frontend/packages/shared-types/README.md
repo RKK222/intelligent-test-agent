@@ -57,3 +57,7 @@
 
 `ResendMetadata` 及 `Run/SessionMessage/AgentMessage/SessionRuntimeState.resend` 是向后兼容的可选字段；RunEvent wire union additive
 声明 `run.resend.scheduled/started/failed`，未知字段和旧后端缺失字段必须保持可忽略。
+
+`LocalClientInstance.publicCapabilities` 是 additive 可选字段；旧后端缺失时前端保持旧行为，新后端对旧客户端返回
+`supported=false`。用户通知 union additive 接受 `LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE` 和
+`LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE`，但不新增 RunEvent 类型。

@@ -515,7 +515,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 revision.revisionId(),
                 firstText(revision.displayName(), revision.technicalId()),
                 revision.description(),
-                revision.contentSha256());
+                revision.contentSha256(),
+                ProtectedAgentDefinitionResolver.CatalogSource.PUBLIC_GIT);
     }
 
     private ProtectedAgentDefinitionResolver.CatalogItem protectedCatalogItem(Asset asset, Revision revision) {
@@ -524,7 +525,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 revision.revisionId(),
                 firstText(revision.displayName(), asset.technicalId()),
                 revision.description(),
-                revision.contentSha256());
+                revision.contentSha256(),
+                ProtectedAgentDefinitionResolver.CatalogSource.APPLICATION_HUB);
     }
 
     /** 受保护运行只物化文本资产；二进制附件继续由不可变制品摘要审计，但不会进入模型上下文。 */

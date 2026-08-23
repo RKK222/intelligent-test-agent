@@ -1,5 +1,6 @@
 package com.enterprise.testagent.localclient.protocol;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.List;
@@ -73,7 +74,17 @@ public final class LocalClientPayloads {
             long connectionGeneration,
             String modelGrant,
             Instant modelGrantExpiresAt,
-            Instant serverTime) {
+            Instant serverTime,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, Object> managedModelConfig) {
+
+        /** 保留未协商 MANAGED_MODEL_CONFIG_V1 的旧服务端/客户端四字段构造。 */
+        public Registered(
+                long connectionGeneration,
+                String modelGrant,
+                Instant modelGrantExpiresAt,
+                Instant serverTime) {
+            this(connectionGeneration, modelGrant, modelGrantExpiresAt, serverTime, null);
+        }
     }
 
     public record Heartbeat(
@@ -226,6 +237,81 @@ public final class LocalClientPayloads {
 
     /** 服务端持久化更新终态后的确认；客户端仅在坐标精确匹配时删除唯一 marker。 */
     public record UpdateStatusAck(
+            String commandId,
+            String clientInstanceId,
+            long connectionGeneration,
+            String status) {
+    }
+
+    /** 客户端注册后上报当前已激活公共能力版本；空摘要表示尚未初始化基线。 */
+    public record PublicCapabilityVersion(
+            String clientInstanceId,
+            long connectionGeneration,
+            String activeCommit,
+            String activeDigest,
+            String pendingCommit,
+            String pendingDigest,
+            String pendingCommandId,
+            String status,
+            String errorCode,
+            Instant observedAt) {
+    }
+
+    /** 平台仅通知可用版本和变更摘要，不代表用户已经同意安装。 */
+    public record PublicCapabilityAvailable(
+            String clientInstanceId,
+            long connectionGeneration,
+            String sourceCommit,
+            String bundleDigest,
+            int agentCount,
+            int skillCount,
+            int toolCount,
+            boolean requiresRestart,
+            String changeSummaryJson) {
+    }
+
+    /** 托盘确认只提交当前实例和平台已通知的目标摘要。 */
+    public record PublicCapabilityUpdateRequest(
+            String clientInstanceId,
+            long connectionGeneration,
+            String expectedBundleDigest) {
+    }
+
+    /** 用户确认后下发的不可变制品坐标；客户端逐片拉取，服务端不发送任意 URL。 */
+    public record PublicCapabilityUpdateCommand(
+            String commandId,
+            String clientInstanceId,
+            long connectionGeneration,
+            String sourceCommit,
+            String bundleDigest,
+            String artifactSha256,
+            long artifactSize,
+            int chunkCount,
+            boolean requiresRestart,
+            String manifestJson) {
+    }
+
+    /** 每次只请求一个 256 KiB 分片，用连接背压自然约束能力制品传输。 */
+    public record PublicCapabilityChunkRequest(
+            String commandId,
+            String clientInstanceId,
+            long connectionGeneration,
+            String bundleDigest,
+            long sequence) {
+    }
+
+    public record PublicCapabilityUpdateStatus(
+            String commandId,
+            String clientInstanceId,
+            long connectionGeneration,
+            String sourceCommit,
+            String bundleDigest,
+            String status,
+            String errorCode,
+            Instant observedAt) {
+    }
+
+    public record PublicCapabilityUpdateStatusAck(
             String commandId,
             String clientInstanceId,
             long connectionGeneration,

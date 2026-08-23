@@ -11,12 +11,15 @@ import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientVersionModels;
 import com.enterprise.testagent.domain.localclient.LocalClientVersionRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientPublicCapabilityModels;
+import com.enterprise.testagent.domain.localclient.LocalClientPublicCapabilityRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 当前用户本地客户端实例查询与所有权校验。 */
@@ -29,6 +32,7 @@ public class LocalClientInstanceApplicationService {
     private final LocalClientConnectionStore connectionStore;
     private final LocalClientVersionRepository versionRepository;
     private final LocalClientCredentialRepository credentialRepository;
+    private LocalClientPublicCapabilityRepository publicCapabilityRepository;
 
     public LocalClientInstanceApplicationService(
             LocalClientInstanceRepository instanceRepository,
@@ -39,6 +43,12 @@ public class LocalClientInstanceApplicationService {
         this.connectionStore = Objects.requireNonNull(connectionStore);
         this.versionRepository = Objects.requireNonNull(versionRepository);
         this.credentialRepository = Objects.requireNonNull(credentialRepository);
+    }
+
+    /** 方法注入保持既有模块测试构造器兼容。 */
+    @Autowired
+    void setPublicCapabilityRepository(LocalClientPublicCapabilityRepository repository) {
+        this.publicCapabilityRepository = Objects.requireNonNull(repository);
     }
 
     @Transactional(readOnly = true)
@@ -105,7 +115,36 @@ public class LocalClientInstanceApplicationService {
                 effective.targetVersion(),
                 direction(instance, effective.targetVersion()),
                 instance.lastUpdateStatus(),
-                instance.lastUpdateAt());
+                instance.lastUpdateAt(),
+                publicCapabilities(instance));
+    }
+
+    private LocalClientInstanceResponses.PublicCapabilitiesView publicCapabilities(LocalClientInstance instance) {
+        boolean supported = instance.selfUpdateCapabilities().contains("PUBLIC_CAPABILITY_SYNC_V1");
+        if (publicCapabilityRepository == null) {
+            return new LocalClientInstanceResponses.PublicCapabilitiesView(
+                    supported, null, null, null, null, supported ? "UNKNOWN" : "UNSUPPORTED", null,
+                    null, null, null, null, null, null, null);
+        }
+        LocalClientPublicCapabilityModels.InstanceState state = publicCapabilityRepository
+                .findInstanceState(instance.clientInstanceId()).orElse(null);
+        LocalClientPublicCapabilityModels.Release pending = state == null || state.pendingDigest() == null
+                ? null : publicCapabilityRepository.findReleaseByDigest(state.pendingDigest()).orElse(null);
+        return new LocalClientInstanceResponses.PublicCapabilitiesView(
+                supported,
+                state == null ? null : state.activeCommit(),
+                state == null ? null : state.activeDigest(),
+                state == null ? null : state.pendingCommit(),
+                state == null ? null : state.pendingDigest(),
+                state == null ? supported ? "NOT_REPORTED" : "UNSUPPORTED" : state.status().name(),
+                state == null ? null : state.errorCode(),
+                pending == null ? null : pending.counts().agents(),
+                pending == null ? null : pending.counts().skills(),
+                pending == null ? null : pending.counts().tools(),
+                pending == null ? null : pending.requiresRestart(),
+                pending == null ? null : pending.changeSummaryJson(),
+                state == null ? null : state.reportedAt(),
+                state == null ? null : state.updatedAt());
     }
 
     private static String direction(LocalClientInstance instance, String targetVersion) {

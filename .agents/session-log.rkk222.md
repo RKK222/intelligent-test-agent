@@ -13088,3 +13088,33 @@
 
 - 主动撤销现在会立即隐藏本地 OpenCode 实例和工作区，同时保留可恢复的数据与本地目录；临时离线仍按原设计可见。
 - 既有 HTTP 路径和 DTO 不变；不涉及 RunEvent/SSE、数据库结构、Flyway、部署节点、性能模型、权限协议、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-23 - 本地客户端公共 Agent、Skill、Tool 完整能力包
+
+### Why
+
+- 本地客户端此前只能使用本机已有配置，平台公共 Git 已发布的 Agent、Skill、Tool 不会进入本地 OpenCode；安装后也没有完整包基线、用户确认更新、失败回滚或公共受保护 Agent 去重。
+- 功能上线时公共仓库可能长期没有新提交，但页面不能因此没有公共版本；当前公共 HEAD 必须被补建并展示。相同能力文件的新 commit 也必须保留独立可追溯版本，不能被摘要唯一约束吞掉。
+
+### What
+
+- 公共发布链新增完整能力包构建：只导出 `agents/skills/tools` 白名单，排除敏感配置、Git、缓存和原始 `node_modules`；依赖以现有 lock 与离线目录为事实源，递归接受纯 JS/WASM，拒绝未声明、未锁定、安装脚本和原生扩展。失败落 `SERVER_ONLY`，不阻断服务器公共发布。
+- manifest 记录 commit、文件清单、数量、兼容范围、依赖与变更摘要；`contentDigest` 表示文件内容，`bundleDigest=sha256(sourceCommit + "\\n" + contentDigest)`。启动补偿器在 Redis 全局锁内为尚无记录的当前公共 HEAD 补建包；客户端继续兼容首版文件摘要型基线。
+- 新增公共能力 release/state/attempt 关系表、实例当前版本字段、MyBatis XML 仓储、`PUBLIC_CAPABILITY_SYNC_V1` 协议、256 KiB 拉取分片、generation fencing、断线重连和幂等终态。网页或托盘只通知并等待用户确认，不自动升级；离线确认在重连后继续。
+- 客户端将候选包安全解压到不可变版本目录并原子切换 `OPENCODE_CONFIG_DIR`；Agent/Skill 变化调用 dispose，Tool/依赖变化重启本地 OpenCode；健康与 Agent/Skill/Tool 目录校验失败自动回滚。Tool 保持当前用户权限，不提权、不现场 npm 下载。
+- 设置页和托盘展示当前/待更新 commit、摘要、Agent/Skill/Tool 数量与重启提示；在线时隐藏下载按钮。已激活本地公共包后过滤 `PUBLIC_GIT` 受保护 Agent 重复项，应用 Hub 保持现有逻辑。补充当前实例状态/用户确认/制品下载 API 和 HTTP、事件、数据库、部署、架构及模块 README。
+- 修复本地历史 Session 使用 `lci_*` 稳定实例 ID 时的运行路由兼容：统一映射到 `node_local_*`，Run 与 SSE 继续按当前连接代次定位客户端；没有新增 RunEvent 类型。
+
+### How
+
+- JDK 25 下相关后端 24 模块完整 reactor `BUILD SUCCESS`，API 644 项、persistence 366 项（20 项按既有外部条件跳过），公共构建/降级、Store、新旧摘要兼容、Updater、Coordinator、协议、路由和 Controller 定向用例全部通过。真实 `.env.test` PostgreSQL 公共能力仓储测试 1/1 通过。
+- 两条已执行 migration 保持不可变：`V20260823104611` SHA-256 `79efa7be...bf342d`、Flyway checksum `236715365`；`V20260823123757` SHA-256 `3df529b5...ad2258`、checksum `-1442353574`。源码、persistence JAR 与最终应用嵌套 JAR 字节一致，目标数据库两条记录均 `success=true`。
+- 前端设置页定向 Vitest 7/7、agent-web lint 与 production build 通过；workspace 全量 typecheck 仅保留无关既有失败 `frontend/packages/backend-api/tests/backend-api.test.ts:933` 缺少 `alias`。麒麟 ARM64 完整包测试、稳定 launcher 静默更新/降级/自动回滚测试和开发脚本校验通过。
+- 使用临时 JSON-RPC 与确定性模型 fixture 做真实 Mac E2E：本地工作区 `wrk_284a4e8c20354168b1261cf1679cfec9` 的 Run `run_0895be7a9f68476e8437a7a5cd945558` 成功；本地 OpenCode 实际加载公共 Agent `zhi-fu-ce-shi`、Skill `ce-shi-ji-neng` 并调用公共 Tool `rpc-call` 得到 `UP`。浏览器验证本地/服务器工作区统一切换、检索、目录、历史证据和公共 Agent 去重。
+- 最终用 `.env.test` / `test` profile 重启 backend、manager、frontend、ClickHouse 和 Mac 客户端。readiness/liveness 为 UP，3000、服务器 OpenCode 4096、本地 OpenCode 4106 均监听；实例 `lci_c8d77417e5a0462db2edbf8d4a433445` 已重连到 generation 144。数据库显示当前 commit `d2c941e5...6321`、状态 `CURRENT`，对应 `AVAILABLE` 完整包包含 14 Agent / 16 Skill / 6 Tool。
+
+### Result
+
+- 本地客户端现在可以在本机 OpenCode 中使用平台公共 Agent、Skill、Tool；当前公共提交即使没有后续更新也会初始化和展示，后续兼容版本由用户确认后原子更新，失败可回滚，服务器工作区行为保持不变。
+- 实现、Mac 基线与真实公共能力调用已经验证；尚未在真实 Mac 运行态制造第二个公共 commit 完成“收到通知→托盘/网页确认→WSS 下载切换”整圈，当前该段由协议/Coordinator/Updater/前端自动化覆盖。真实麒麟 ARM64 无公网安装仍属于企业现场发布门禁，脚本封包测试不能替代硬件验收。
+- 本次未新增部署节点，未修改 `.env*`、generated SDK 或 OpenCode 只读源码；提交前回顾全部 `.agents/session-log*.md` 近期记录，保留其它开发者成果，并排除 `.reasonix/` 与根目录 `node_modules/`。

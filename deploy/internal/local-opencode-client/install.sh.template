@@ -330,6 +330,26 @@ verify_release_directory() {
       -signature "${release_directory}/$2.sig" "${release_directory}/$2" >/dev/null \
       || fail "本地制品签名无效"
   done
+  # 旧 release 的签名清单没有公共能力制品，仍允许作为回退版本继续运行；
+  # 新 release 一旦声明该制品，就必须像其它运行制品一样逐项校验。
+  public_capability_path="$(artifact_string PUBLIC_CAPABILITIES path)"
+  if [ -n "${public_capability_path}" ]; then
+    public_capability_sha="$(artifact_string PUBLIC_CAPABILITIES sha256)"
+    public_capability_size="$(artifact_number PUBLIC_CAPABILITIES size)"
+    public_capability_signature_path="$(artifact_string PUBLIC_CAPABILITIES signaturePath)"
+    safe_relative_path "${public_capability_path}" "${EXPECTED_DOWNLOAD_PREFIX}" \
+      || fail "本地公共能力制品路径无效"
+    safe_relative_path "${public_capability_signature_path}" "${EXPECTED_DOWNLOAD_PREFIX}" \
+      || fail "本地公共能力签名路径无效"
+    [ "$(file_size "${release_directory}/public-capabilities.tar.gz")" = "${public_capability_size}" ] \
+      || fail "本地公共能力制品大小变化"
+    [ "$(sha256_file "${release_directory}/public-capabilities.tar.gz")" = "${public_capability_sha}" ] \
+      || fail "本地公共能力制品摘要变化"
+    openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
+      -signature "${release_directory}/public-capabilities.tar.gz.sig" \
+      "${release_directory}/public-capabilities.tar.gz" >/dev/null \
+      || fail "本地公共能力制品签名无效"
+  fi
   [ -x "${release_directory}/jdk/bin/java" ] \
     && [ -x "${release_directory}/jdk/bin/javac" ] \
     && [ -x "${release_directory}/opencode/bin/opencode" ] \
@@ -383,6 +403,9 @@ bootstrap_release() {
     fi
     download_artifact CLIENT_JAR test-agent-local-client.jar "${staging_directory}"
     download_artifact OPENCODE opencode.tar.gz "${staging_directory}"
+    if [ -n "$(artifact_string PUBLIC_CAPABILITIES path)" ]; then
+      download_artifact PUBLIC_CAPABILITIES public-capabilities.tar.gz "${staging_directory}"
+    fi
     tar -C "${staging_directory}" -xzf "${staging_directory}/opencode.tar.gz"
     [ -x "${staging_directory}/opencode/bin/opencode" ] || fail "OpenCode 归档布局无效"
     "${staging_directory}/jdk/bin/java" -jar \

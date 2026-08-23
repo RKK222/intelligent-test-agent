@@ -1115,6 +1115,7 @@ require_file "${DEPLOY_INTERNAL_SRC}/experience-workspace-template/spec/I000001-
 require_file "${DEPLOY_INTERNAL_SRC}/deploy-python-libs.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/verify-python-libs.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-node-runtime.package.json"
+require_file "${DEPLOY_INTERNAL_SRC}/opencode-node-runtime.package-lock.json"
 require_file "${DEPLOY_INTERNAL_SRC}/verify-opencode-tool-runtime.sh"
 if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
   bash "${DEPLOY_INTERNAL_SRC}/verify-opencode-tool-runtime.sh" --archive "${PROGRAMS_ARCHIVE}"

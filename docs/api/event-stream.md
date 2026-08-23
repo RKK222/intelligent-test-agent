@@ -1067,3 +1067,43 @@ grant；服务端完成的 Run 不自动切换到服务端实例或其它本地�
 可通过条件 CAS 纠正 attempt、实例最近状态、通知与 rollout 汇总，随后才返回同终态 ACK；其它已持久化终态冲突
 返回协议冲突且不发 ACK，客户端必须保留 marker。
 网络中断或凭据失效不得上报为制品验证失败。
+
+## `MANAGED_MODEL_CONFIG_V1` 本地模型配置扩展
+
+客户端在 `REGISTER.capabilities` 声明 `MANAGED_MODEL_CONFIG_V1` 后，服务端可在 `REGISTERED` 的可选
+`managedModelConfig` 字段下发当前内部 provider 的 OpenCode 配置。载荷只允许
+`model/small_model/enabled_providers/provider`；provider 使用 `{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}`、
+`{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}` 和受控 provider header，不含平台 URL、上游密钥、Client key 或用户身份。
+客户端在处理后续自动启动命令前完成校验与内存配置；配置变化且本地 OpenCode 已运行时先安全重启。未声明能力的旧客户端
+继续收到原 `REGISTERED` JSON，不得依赖未知字段容错。
+
+## `PUBLIC_CAPABILITY_SYNC_V1` 公共能力扩展
+
+客户端只有在 `REGISTER.capabilities` 声明 `PUBLIC_CAPABILITY_SYNC_V1` 后才能发送或接收以下帧；旧客户端
+保持原行为。公共能力与整客户端静默更新是两套独立状态机，不能复用版本 policy 或自动确认。
+首次安装必须先激活安装制品内置的完整公共能力基线，再发送 `PUBLIC_CAPABILITY_VERSION`；即使公共 Git 自该客户端
+构建后没有新提交，`activeCommit/activeDigest` 也应是构建时基线，不能用两个空值代替“无更新”。
+
+| 帧 | 方向 | 说明 |
+|---|---|---|
+| `PUBLIC_CAPABILITY_VERSION` | client→server | 注册完成后上报已激活 commit/摘要、待处理 commit/摘要/commandId、状态、错误码和观测时间；用于重启恢复与平台 attempt 收敛。 |
+| `PUBLIC_CAPABILITY_AVAILABLE` | server→client | 只通知新完整包、Agent/Skill/Tool 数量、变更摘要及是否需要重启，不代表用户已同意。 |
+| `PUBLIC_CAPABILITY_UPDATE_REQUEST` | client→server | 托盘用户显式确认；网页确认使用对应 HTTP POST。 |
+| `PUBLIC_CAPABILITY_UPDATE_COMMAND` | server→client | 绑定 `commandId + clientInstanceId + generation + commit + bundleDigest` 的安装命令和制品元数据。 |
+| `PUBLIC_CAPABILITY_CHUNK_REQUEST` | client→server | 客户端按序请求一个 256 KiB 有界分片。 |
+| `BINARY_CHUNK` | server→client | 返回该序号的 Base64 制品内容；已经写入的旧序号重复帧幂等忽略，未来序号乱序、摘要或总大小不一致使该次安装失败。 |
+| `PUBLIC_CAPABILITY_UPDATE_STATUS` / `PUBLIC_CAPABILITY_UPDATE_STATUS_ACK` | 双向 | `DOWNLOADING → APPLYING → SUCCEEDED|FAILED|ROLLED_BACK` 的幂等状态收敛。 |
+
+断线后非终态 attempt 保留；重连时平台只把它重新绑定到该实例的新 generation，再从序号 0 重新拉取完整包，
+不做增量覆盖。实例离线时网页可以先确认，但平台不会代替用户确认。Agent/Skill-only 变更激活后调用
+`/global/dispose`；Tool 或依赖变更重启本地 OpenCode。客户端只有在健康和 `/agent`、`/command`、
+`/experimental/tool/ids` 均可用后才上报成功，否则原子回切上一版本。
+
+客户端进程若在 `PENDING/DOWNLOADING` 中退出，重启后通过 `PUBLIC_CAPABILITY_VERSION` 把旧命令收敛为
+`FAILED/CLIENT_RESTARTED_DURING_UPDATE`，平台可重新生成命令；若在原子切换后的 `APPLYING` 中退出，重启后必须先启动并
+验证当前能力目录，成功才补报 `SUCCEEDED`，失败则回切上一摘要并补报 `ROLLED_BACK`。平台以实例上报的 active/pending
+坐标纠正遗留非终态 attempt，避免永久卡在 APPLYING。
+
+能力可用通知复用既有用户通知实时信号，不新增 RunEvent：通知类型为
+`LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE`，操作为 `LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE`。网页收到通知后重新读取
+实例状态，不能从事件正文安装制品。

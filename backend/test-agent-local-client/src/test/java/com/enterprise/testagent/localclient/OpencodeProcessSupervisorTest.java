@@ -11,11 +11,15 @@ import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
+import java.net.URLDecoder;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -24,6 +28,49 @@ class OpencodeProcessSupervisorTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void managedModelConfigOverridesOnlyAllowedRuntimeFields() {
+        String managed = OpencodeProcessSupervisor.validateManagedModelConfig(Map.of(
+                "model", "enterprise/local-model",
+                "small_model", "enterprise/local-model",
+                "enabled_providers", List.of("enterprise"),
+                "provider", Map.of("enterprise", Map.of("api", "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}"))));
+
+        String merged = OpencodeProcessSupervisor.mergeManagedModelConfig(
+                "{\"model\":\"personal/direct\",\"theme\":\"dark\"}", managed);
+
+        assertThat(merged).contains("\"model\":\"enterprise/local-model\"")
+                .contains("\"theme\":\"dark\"")
+                .contains("TEST_AGENT_INTERNAL_PROXY_BASE_URL")
+                .doesNotContain("personal/direct");
+        assertThatThrownBy(() -> OpencodeProcessSupervisor.validateManagedModelConfig(Map.of(
+                "model", "enterprise/local-model",
+                "small_model", "enterprise/local-model",
+                "enabled_providers", List.of("enterprise"),
+                "provider", Map.of(),
+                "plugin", List.of("file:///tmp/untrusted.mjs"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not allowed");
+    }
+
+    @Test
+    void loopbackCatalogClientDisablesUnsupportedH2cUpgrade() {
+        assertThat(OpencodeProcessSupervisor.loopbackHttpClient().version())
+                .isEqualTo(HttpClient.Version.HTTP_1_1);
+    }
+
+    @Test
+    void catalogValidationUsesExplicitControlledDirectory() {
+        Path directory = temporaryDirectory.resolve("health check");
+
+        URI uri = OpencodeProcessSupervisor.catalogUri(4106, "/experimental/tool/ids", directory);
+
+        assertThat(uri.getPath()).isEqualTo("/experimental/tool/ids");
+        assertThat(URLDecoder.decode(uri.getRawQuery(), StandardCharsets.UTF_8))
+                .isEqualTo("directory=" + directory.toAbsolutePath().normalize());
+        assertThat(uri.getRawQuery()).contains("health+check");
+    }
 
     @Test
     void refusesToControlReusedPidWithDifferentAuthoritativeStartTime() throws Exception {
@@ -132,7 +179,13 @@ class OpencodeProcessSupervisorTest {
                     assertLoopbackOnly(started.processId(), started.opencodePort());
 
                     long firstPid = started.processId();
-                    var restarted = supervisor.restart(started.opencodePort());
+                    supervisor.configureManagedModel(Map.of(
+                            "model", "enterprise/local-model",
+                            "small_model", "enterprise/local-model",
+                            "enabled_providers", List.of("enterprise"),
+                            "provider", Map.of("enterprise", Map.of(
+                                    "api", "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}"))));
+                    var restarted = supervisor.start(started.opencodePort());
                     assertThat(restarted.success()).as("restart result: %s", restarted).isTrue();
                     assertThat(restarted.processStatus()).isEqualTo("RUNNING");
                     assertThat(restarted.processId()).isNotEqualTo(firstPid);

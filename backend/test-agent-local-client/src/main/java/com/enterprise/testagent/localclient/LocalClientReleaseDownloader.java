@@ -30,6 +30,7 @@ final class LocalClientReleaseDownloader {
     private static final int MAX_SIGNATURE_BYTES = 16 * 1024;
     private static final long MAX_ARTIFACT_BYTES = 4L * 1024 * 1024 * 1024;
     private static final Set<String> REQUIRED_KINDS = Set.of("CLIENT_JAR", "JDK", "OPENCODE");
+    private static final String PUBLIC_CAPABILITIES_KIND = "PUBLIC_CAPABILITIES";
     private static final String SYSTEM_JDK_PROVENANCE = "source=system-jdk21\n";
 
     private final LocalClientDownloadTrust trust;
@@ -104,7 +105,7 @@ final class LocalClientReleaseDownloader {
         try {
             writePrivate(staging.resolve("manifest.json"), manifestBytes);
             writePrivate(staging.resolve("manifest.json.sig"), manifestSignature);
-            for (String kind : REQUIRED_KINDS) {
+            for (String kind : artifacts.keySet()) {
                 ManifestArtifact artifact = artifacts.get(kind);
                 Path target = staging.resolve(localFileName(kind));
                 fetcher.fetchFile(trust.resolve(artifact.path()), target, artifact.size());
@@ -165,7 +166,9 @@ final class LocalClientReleaseDownloader {
         } catch (RuntimeException exception) {
             throw new IllegalArgumentException("release manifest contains duplicate artifacts", exception);
         }
-        if (!byKind.keySet().equals(REQUIRED_KINDS)) {
+        if (!byKind.keySet().containsAll(REQUIRED_KINDS)
+                || byKind.keySet().stream().anyMatch(kind ->
+                        !REQUIRED_KINDS.contains(kind) && !PUBLIC_CAPABILITIES_KIND.equals(kind))) {
             throw new IllegalArgumentException("release manifest must contain JDK, JAR and OpenCode");
         }
         for (ManifestArtifact artifact : byKind.values()) {
@@ -215,7 +218,7 @@ final class LocalClientReleaseDownloader {
             throw new IllegalStateException("prepared release layout is incomplete");
         }
         boolean bootstrapSystemJdk = hasBootstrapSystemJdkProvenance(releaseDirectory);
-        for (String kind : REQUIRED_KINDS) {
+        for (String kind : artifacts.keySet()) {
             if ("JDK".equals(kind) && bootstrapSystemJdk) {
                 // 只有稳定 Shell 初装写入的 marker release 可省略本地 JDK 归档摘要。
                 continue;
@@ -245,6 +248,7 @@ final class LocalClientReleaseDownloader {
             case "CLIENT_JAR" -> "test-agent-local-client.jar";
             case "JDK" -> "jdk.tar.gz";
             case "OPENCODE" -> "opencode.tar.gz";
+            case PUBLIC_CAPABILITIES_KIND -> "public-capabilities.tar.gz";
             default -> throw new IllegalArgumentException("unknown artifact kind");
         };
     }

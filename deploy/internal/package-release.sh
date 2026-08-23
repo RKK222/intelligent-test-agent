@@ -897,13 +897,18 @@ require_artifact_fingerprint() {
 plan_release_components() {
   local previous_worker previous_toolbox previous_local_client worker_config toolbox_config local_client_config
   local current_release current_manifest current_worker_mode current_worker_fingerprint
-  local current_toolbox_mode current_toolbox_fingerprint
+  local current_toolbox_mode current_toolbox_fingerprint public_capability_bundle_sha
   local current_local_client_mode current_local_client_fingerprint
   local baseline_version baseline_source_commit baseline_release_sha256 baseline_worker_fingerprint
   local client_baseline_version client_baseline_source_commit client_baseline_fingerprint
   worker_config="schema=2|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|python=${PYTHON_VERSION}|pythonSourceSize=${PYTHON_SOURCE_SIZE}|pythonSourceSha=${PYTHON_SOURCE_SHA256}|pythonSourceBase=${PYTHON_SOURCE_BASE_URL}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
   toolbox_config="schema=1|platform=${PLATFORM}|it=${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}|omni=${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}|node=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}|nginx=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
-  local_client_config="schema=3|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}"
+  public_capability_bundle_sha="missing"
+  if [[ -n "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE:-}" \
+    && -f "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}" ]]; then
+    public_capability_bundle_sha="$(sha256_file "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}")"
+  fi
+  local_client_config="schema=4|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}|publicCommit=${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}|publicBundleSha=${public_capability_bundle_sha}"
 
   WORKER_RUNTIME_FINGERPRINT="$(component_fingerprint "${worker_config}" \
     opencode-manager/go.mod \

@@ -277,4 +277,5 @@ Vite 配置按 `Asia/Shanghai` 生成 `VyyyyMMdd.HHmmss` 并注入 `VITE_TEST_AG
 - `reference-configuration-access.test.ts`、`reference-configuration-dialog.test.ts`、`reference-config-jsonc.test.ts`、`automation-reference-configuration-panel.test.ts`、`notify.test.ts`、`WorkbenchFooter.test.ts` 覆盖引用入口权限/位置、双栏初始化同步、服务器路径与旧响应回退、核验弹层先于 POST 展示、三阶段/逐服务器状态、Git 超时终止与先终止再重试、轮询临时错误、关闭限制与焦点恢复、2 秒状态轮询、蓝色资产目录/紫色自动化目录、自动化别名编辑与校验、保存反馈层级、保存/更新、迟到响应隔离、滚动、JSONC 冲突拒绝和未知字段/注释保留。
 - 工作空间 `.mmd` 格式文件在编辑器底部工具栏（`WorkbenchFooter.vue`）“定位到当前文件”按钮左侧提供 Mermaid 图表预览（`FileSearch`）与可视化编辑（`SquarePen`）入口图标；点击预览弹出 `MermaidPreviewDialog` 渲染图表 SVG，并支持一键切换至可视化编辑；点击编辑后复用 `@test-agent/editor` 的 `MermaidEditorDialog` 打开可视化编辑画布（支持流程图、时序图、状态图），编辑完成后通过 `saveMutation` 直接持久化写回 `.mmd` 文件。单测由 `WorkbenchFooter.mermaid-edit.test.ts` 与 `mermaid-mmd-editor.test.ts` 覆盖。
 
+- 个人设置的本地客户端实例卡片展示公共能力当前/待更新摘要、Agent/Skill/Tool 数量和稳定错误码。网页与通知中心都只在用户二次确认后调用 `requestLocalClientPublicCapabilityUpdate`；离线实例显示“重连后继续”。确认框必须提示 Tool 使用当前本机账号权限及是否重启，不得自动安装。`settings-personal-local-client.test.ts` 覆盖摘要、确认和请求参数。
 - 用户主动撤销 Client key 后，设置页立即隐藏本地 OpenCode 实例与本地工作区；确认框明确说明平台记录和用户磁盘目录不会删除，重新启用凭据后可恢复。客户端临时离线或轮换 key 仍保留离线卡片，避免混淆“暂时离线”和“主动关闭”。

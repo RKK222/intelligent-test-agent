@@ -129,3 +129,24 @@ Skill 修订。公共内置 Agent 没有发布依赖表，因此只从同一公�
 按完整技术 ID 明确引用的 Skill；禁止读取当前工作树或跨 commit 拼接正文。制品只在服务器解压，Agent
 文本进入服务器 system prompt，Skill 文本只通过服务器只读资源按需加载，二进制附件仅由制品摘要
 审计。该端口不得把 `AGENT.md`、`SKILL.md` 或其它正文放入列表 DTO 或本地客户端配置目录。
+
+## 公共客户端能力包
+
+公共 Git 正式发布复用 `PublicClientCapabilityPackageService` 从共享副本已 checkout 的精确 commit 生成客户端完整
+能力包。`PublicClientCapabilityPackageBuilder` 只导出 `opencode/agents|skills|tools` 白名单，排除 AGENTS.md、
+`opencode.jsonc`、密钥、地址、Git、缓存和原始 `node_modules`；Tool 静态 import 必须能在平台锁文件及离线
+node_modules 中递归解析为纯 JS/WASM。构建不运行 npm。兼容失败持久化 `SERVER_ONLY` 并允许服务器 rollout 继续，
+持久化异常只记录安全日志，不能把服务器发布伪报失败。
+
+manifest 同时记录文件级 `contentDigest` 和提交绑定的 `bundleDigest`；后者按
+`sha256(sourceCommit + "\n" + contentDigest)` 计算。即使两个公共 commit 的 Agent/Skill/Tool 文件完全一致，也会
+保留两个可追溯版本，不会因数据库摘要唯一约束让新 commit 的客户端兼容状态变成空值；内容未变时变更摘要仍全部为
+`false`，不会要求重启本地 OpenCode。
+
+`PublicClientCapabilityBootstrapReconciler` 处理功能上线前已经存在、但尚无能力包记录的公共 Git HEAD：启动后只读
+当前已检出的共享副本，不 fetch、不提交、不推送，在 Redis 全局锁内为该 commit 补建首个完整包。后续扫描命中
+同一 commit 时幂等跳过，因此客户端安装基线和平台“当前公共版本”不会停留在空值。
+
+`PublicClientCapabilityPackageBuilderTest` 覆盖确定性完整包、提交绑定版本身份、白名单/敏感文件排除、未声明依赖和原生扩展拒绝；
+`PublicClientCapabilityBootstrapReconcilerTest` 覆盖历史 HEAD 首次补建与未配置跳过；发布测试还必须验证首次版本、
+无变化版本、Agent/Skill 热加载摘要与 Tool/依赖重启摘要。

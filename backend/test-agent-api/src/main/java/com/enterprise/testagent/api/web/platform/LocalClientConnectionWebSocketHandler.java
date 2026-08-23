@@ -20,7 +20,9 @@ import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnecti
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientRegistrationService;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientTunnelGateway;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientUpdateCoordinator;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalClientPublicCapabilityCoordinator;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalWorkspaceApplicationService;
+import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStartupService;
 import com.enterprise.testagent.opencode.runtime.observability.OpencodeObservabilityModels;
@@ -73,6 +75,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
     private TraceCatalogRepository traceCatalogRepository;
     private BackendHttpForwarder backendHttpForwarder;
     private ManagerControlSettings managerSettings;
+    private LocalClientPublicCapabilityCoordinator publicCapabilityCoordinator;
+    private ModelCatalogApplicationService modelCatalogService;
 
     /** 方法注入保持既有 handler 单测构造器兼容，同时让生产连接具备 Trace 归档能力。 */
     @Autowired
@@ -87,6 +91,18 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         this.traceCatalogRepository = Objects.requireNonNull(traceCatalogRepository);
         this.backendHttpForwarder = Objects.requireNonNull(backendHttpForwarder);
         this.managerSettings = Objects.requireNonNull(managerSettings);
+    }
+
+    /** 方法注入保持既有连接 handler 测试构造器稳定。 */
+    @Autowired
+    void setPublicCapabilityCoordinator(LocalClientPublicCapabilityCoordinator coordinator) {
+        this.publicCapabilityCoordinator = Objects.requireNonNull(coordinator);
+    }
+
+    /** 受管模型配置仅向显式协商的新客户端下发，旧客户端继续接收四字段 REGISTERED。 */
+    @Autowired
+    void setModelCatalogService(ModelCatalogApplicationService service) {
+        this.modelCatalogService = Objects.requireNonNull(service);
     }
 
     public LocalClientConnectionWebSocketHandler(
@@ -231,6 +247,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             registration.selfUpdateSupported(),
                             payload.capabilities() != null
                                     && payload.capabilities().contains("OPENCODE_OBSERVABILITY_V1"),
+                            payload.capabilities() != null
+                                    && payload.capabilities().contains("PUBLIC_CAPABILITY_SYNC_V1"),
                             ConcurrentHashMap.newKeySet(),
                             new ConcurrentHashMap<>());
                     if (!stateRef.compareAndSet(null, state)) {
@@ -242,6 +260,13 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             state.generation(),
                             state.modelGrantFingerprint(),
                             sender);
+                    boolean managedModelConfigSupported = payload.capabilities() != null
+                            && payload.capabilities().contains("MANAGED_MODEL_CONFIG_V1");
+                    Map<String, Object> managedModelConfig = managedModelConfigSupported
+                            && modelCatalogService != null
+                            && modelCatalogService.managedSourceEnabled()
+                                    ? modelCatalogService.localClientProviderConfig()
+                                    : null;
                     emit(outbound, new LocalClientFrame(
                             LocalClientProtocol.VERSION,
                             LocalClientFrameType.REGISTERED,
@@ -252,7 +277,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                                     state.generation(),
                                     registration.rawModelGrant(),
                                     registration.modelGrantExpiresAt(),
-                                    Instant.now()))), closeSignal);
+                                    Instant.now(),
+                                    managedModelConfig))), closeSignal);
                     LOGGER.info(
                             "local_client_connected clientInstanceId={} userId={} generation={} backendProcessId={} traceId={}",
                             state.clientInstanceId().value(),
@@ -338,6 +364,52 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                                 frame.traceId(),
                                 state.generation(),
                                 codec.payload(persistedAck)), closeSignal))
+                        .then();
+            }
+            case PUBLIC_CAPABILITY_VERSION -> blockingUpdate(() -> requirePublicCapabilities(state).handleVersion(
+                    state.userId(),
+                    state.clientInstanceId(),
+                    state.generation(),
+                    codec.payload(frame, LocalClientPayloads.PublicCapabilityVersion.class),
+                    frame.traceId()));
+            case PUBLIC_CAPABILITY_UPDATE_REQUEST -> blockingUpdate(() -> {
+                LocalClientPayloads.PublicCapabilityUpdateRequest request = codec.payload(
+                        frame, LocalClientPayloads.PublicCapabilityUpdateRequest.class);
+                if (!state.clientInstanceId().value().equals(request.clientInstanceId())
+                        || state.generation() != request.connectionGeneration()) {
+                    throw new PlatformException(ErrorCode.CONFLICT, "公共能力更新确认 generation 已失效");
+                }
+                requirePublicCapabilities(state).requestUpdate(
+                        state.userId(), state.clientInstanceId(), request.expectedBundleDigest(), frame.traceId());
+            });
+            case PUBLIC_CAPABILITY_CHUNK_REQUEST -> {
+                LocalClientPayloads.PublicCapabilityChunkRequest request = codec.payload(
+                        frame, LocalClientPayloads.PublicCapabilityChunkRequest.class);
+                yield Mono.fromCallable(() -> requirePublicCapabilities(state).handleChunkRequest(
+                                state.userId(), state.clientInstanceId(), state.generation(), request, frame.traceId()))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .doOnNext(chunk -> emit(outbound, new LocalClientFrame(
+                                LocalClientProtocol.VERSION,
+                                LocalClientFrameType.BINARY_CHUNK,
+                                request.commandId(),
+                                frame.traceId(),
+                                state.generation(),
+                                codec.payload(chunk)), closeSignal))
+                        .then();
+            }
+            case PUBLIC_CAPABILITY_UPDATE_STATUS -> {
+                LocalClientPayloads.PublicCapabilityUpdateStatus status = codec.payload(
+                        frame, LocalClientPayloads.PublicCapabilityUpdateStatus.class);
+                yield Mono.fromCallable(() -> requirePublicCapabilities(state).handleStatus(
+                                state.userId(), state.clientInstanceId(), state.generation(), status, frame.traceId()))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .doOnNext(ack -> emit(outbound, new LocalClientFrame(
+                                LocalClientProtocol.VERSION,
+                                LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_STATUS_ACK,
+                                frame.requestId(),
+                                frame.traceId(),
+                                state.generation(),
+                                codec.payload(ack)), closeSignal))
                         .then();
             }
             case WORKSPACE_REGISTER -> registerWorkspace(frame, outbound, closeSignal, state);
@@ -593,6 +665,14 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         return state.userId();
     }
 
+    private LocalClientPublicCapabilityCoordinator requirePublicCapabilities(ConnectionState state) {
+        if (!state.publicCapabilitySupported() || publicCapabilityCoordinator == null) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN, "本地客户端未声明 PUBLIC_CAPABILITY_SYNC_V1 能力");
+        }
+        return publicCapabilityCoordinator;
+    }
+
     private Mono<Void> acceptTunnelResponse(ConnectionState state, LocalClientFrame frame) {
         if (!tunnelGateway.accept(state.clientInstanceId(), frame)) {
             LOGGER.debug(
@@ -717,6 +797,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             String traceId,
             boolean selfUpdateSupported,
             boolean observabilitySupported,
+            boolean publicCapabilitySupported,
             Set<String> workspaceRequestIds,
             Map<String, LocalClientPayloads.ObservabilityBatch> traceDeclarations) {
 
@@ -729,7 +810,21 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                 boolean selfUpdateSupported,
                 Set<String> workspaceRequestIds) {
             this(userId, clientInstanceId, generation, modelGrantFingerprint, traceId,
-                    selfUpdateSupported, false, workspaceRequestIds, new ConcurrentHashMap<>());
+                    selfUpdateSupported, false, false, workspaceRequestIds, new ConcurrentHashMap<>());
+        }
+
+        ConnectionState(
+                UserId userId,
+                LocalClientInstanceId clientInstanceId,
+                long generation,
+                String modelGrantFingerprint,
+                String traceId,
+                boolean selfUpdateSupported,
+                boolean observabilitySupported,
+                Set<String> workspaceRequestIds,
+                Map<String, LocalClientPayloads.ObservabilityBatch> traceDeclarations) {
+            this(userId, clientInstanceId, generation, modelGrantFingerprint, traceId,
+                    selfUpdateSupported, observabilitySupported, false, workspaceRequestIds, traceDeclarations);
         }
     }
 }

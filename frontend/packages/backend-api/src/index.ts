@@ -134,6 +134,7 @@ import type {
   LocalClientDownloadAccess,
   LocalClientGlobalPolicy,
   LocalClientInstance,
+  LocalClientPublicCapabilityUpdateRequest,
   LocalClientPlaintextKey,
   LocalClientRelease,
   LocalClientReleaseSyncResult,
@@ -1222,6 +1223,11 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<{ revoked: boolean }>(`${localClientBase}/credentials/me`, { method: "DELETE" }),
     listMyLocalClientInstances: () =>
       request<LocalClientInstance[]>(`${localClientBase}/instances/me`),
+    requestLocalClientPublicCapabilityUpdate: (clientInstanceId: string, expectedBundleDigest: string) =>
+      request<LocalClientPublicCapabilityUpdateRequest>(
+        `${localClientBase}/instances/${encodeURIComponent(clientInstanceId)}/public-capabilities/updates`,
+        { method: "POST", body: JSON.stringify({ expectedBundleDigest }) }
+      ),
     listLocalClientRolloutUsers: (page = 1, size = 50) =>
       request<PageResponse<LocalClientRolloutUser>>(
         `${localClientBase}/admin/rollout-users${query({ page, size })}`

@@ -36,7 +36,28 @@ public final class AgentConfigResponses {
             String currentBranch,
             String commitHash,
             String message,
-            boolean localChangesPresent) {
+            boolean localChangesPresent,
+            String clientCompatibility,
+            String capabilityBundleDigest,
+            String capabilityErrorCode) {
+
+        public PublicRepositoryStatusResponse(
+                String linuxServerId,
+                String serverName,
+                String gitRootPath,
+                String configDirPath,
+                String worktreeRootPath,
+                String status,
+                boolean initialized,
+                boolean initializationAllowed,
+                String currentBranch,
+                String commitHash,
+                String message,
+                boolean localChangesPresent) {
+            this(linuxServerId, serverName, gitRootPath, configDirPath, worktreeRootPath, status,
+                    initialized, initializationAllowed, currentBranch, commitHash, message, localChangesPresent,
+                    null, null, null);
+        }
 
         /** 兼容旧的不可用/异常状态构造，这些状态不能推断存在 Git 本地变更。 */
         public PublicRepositoryStatusResponse(
@@ -63,7 +84,10 @@ public final class AgentConfigResponses {
                     currentBranch,
                     commitHash,
                     message,
-                    false);
+                    false,
+                    null,
+                    null,
+                    null);
         }
     }
 

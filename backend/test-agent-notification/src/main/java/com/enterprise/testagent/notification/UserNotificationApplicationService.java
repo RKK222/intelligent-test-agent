@@ -307,6 +307,76 @@ public class UserNotificationApplicationService {
         }
     }
 
+    /** 公共能力包通知按实例和目标摘要去重；正文只包含计数和短摘要，不携带配置内容。 */
+    @Transactional
+    public void syncLocalClientPublicCapabilityAvailable(
+            UserId recipientUserId,
+            String clientInstanceId,
+            String clientName,
+            String bundleDigest,
+            int agentCount,
+            int skillCount,
+            int toolCount,
+            boolean requiresRestart,
+            String traceId) {
+        Objects.requireNonNull(recipientUserId, "recipientUserId must not be null");
+        String instanceId = boundedIdentifier(clientInstanceId, "clientInstanceId", 128);
+        String digest = boundedIdentifier(bundleDigest, "bundleDigest", 64).toLowerCase();
+        if (!digest.matches("[0-9a-f]{64}") || agentCount < 0 || skillCount < 0 || toolCount < 0) {
+            throw new IllegalArgumentException("public capability notification is invalid");
+        }
+        Instant now = clock.instant();
+        UserNotification notification = new UserNotification(
+                new UserNotificationId(RuntimeIdGenerator.userNotificationId()),
+                recipientUserId,
+                UserNotificationType.LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE,
+                null,
+                "本地公共能力可更新",
+                truncate(safeText(clientName, "本机设备")
+                        + " · Agent " + agentCount + " / Skill " + skillCount + " / Tool " + toolCount
+                        + (requiresRestart ? " · Tool 更新会重启本地 OpenCode" : " · 可热加载")
+                        + " · " + digest.substring(0, 12), 500),
+                UserNotificationActionType.LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE,
+                instanceId,
+                "LOCAL_CLIENT_PUBLIC_CAPABILITY:" + instanceId + ":" + digest,
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                traceId,
+                now,
+                now);
+        if (repository.reactivateByDedupKeyIfChanged(notification)) {
+            publish(recipientUserId, null, UserNotificationChangeType.UPDATED, traceId, now);
+        } else if (repository.insert(notification)) {
+            publish(recipientUserId, notification.notificationId(), UserNotificationChangeType.CREATED, traceId, now);
+        }
+    }
+
+    @Transactional
+    public void invalidateLocalClientPublicCapability(
+            UserId recipientUserId,
+            String clientInstanceId,
+            String reason,
+            String traceId) {
+        Instant now = clock.instant();
+        List<UserId> recipients = repository.findActiveRecipientsByAction(
+                UserNotificationActionType.LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE,
+                clientInstanceId,
+                recipientUserId);
+        int changed = repository.invalidateActiveByAction(
+                UserNotificationActionType.LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE,
+                clientInstanceId,
+                recipientUserId,
+                boundedIdentifier(reason, "reason", 128),
+                traceId,
+                now);
+        if (changed > 0) {
+            publishRecipients(recipients, UserNotificationChangeType.INVALIDATED, traceId, now);
+        }
+    }
+
     /**
      * 建立用户级当前状态流：首帧和每 30 秒从数据库校准，变化信号到达时立即刷新未读数。
      */
@@ -465,8 +535,8 @@ public class UserNotificationApplicationService {
                     "这次配置更新已结束",
                     "已有更新的配置，这条通知不用处理。",
                     UserNotificationActionType.NONE);
-            case SESSION_SHARED, LOCAL_CLIENT_UPDATE_AVAILABLE -> throw new IllegalArgumentException(
-                    "SESSION_SHARED is not an Agent config dispose type");
+            case SESSION_SHARED, LOCAL_CLIENT_UPDATE_AVAILABLE, LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE -> throw new IllegalArgumentException(
+                    "notification type is not an Agent config dispose type");
         };
     }
 

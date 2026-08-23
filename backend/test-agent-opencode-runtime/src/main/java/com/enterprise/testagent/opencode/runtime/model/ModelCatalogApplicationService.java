@@ -140,7 +140,7 @@ public class ModelCatalogApplicationService {
         logInternalUcidHeader(traceId, userId, ucid);
         try {
             Map<String, Object> patch = node.runtimeKind() == RuntimeKind.LOCAL_CLIENT
-                    ? localClientProviderConfigPatch()
+                    ? localClientProviderConfig()
                     : providerConfigPatch(ucid);
             runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/global/config", null, null, Map.of(), patch, traceId))
                     .block();
@@ -329,10 +329,11 @@ public class ModelCatalogApplicationService {
     }
 
     /**
-     * 本地 OpenCode 只能看见 loopback relay 和随机本地 token 的环境变量引用；平台/上游密钥不得进隧道。
-     * UCID 由后台在校验 connection-bound grant 后按用户权威数据覆盖。
+     * 返回只引用客户端 loopback relay 环境变量的受管模型配置。
+     * 该配置可随连接握手下发，不包含平台代理密钥、上游 Token、UCID 或服务器地址；
+     * 本地 OpenCode 只会看见 loopback relay 和随机本地 token 的环境变量引用。
      */
-    private Map<String, Object> localClientProviderConfigPatch() {
+    public Map<String, Object> localClientProviderConfig() {
         ModelCatalogProperties.Provider provider = properties.activeProvider();
         Map<String, Object> models = new LinkedHashMap<>();
         if ("internal".equals(properties.getSource())) {
@@ -353,8 +354,11 @@ public class ModelCatalogApplicationService {
         options.put("apiKey", localToken);
         options.put("headers", Map.of(
                 "X-Enterprise-Model-Provider", provider.getProviderId()));
+        String defaultModel = provider.getProviderId() + "/" + provider.getDefaultModel();
         return Map.of(
-                "model", provider.getProviderId() + "/" + provider.getDefaultModel(),
+                "model", defaultModel,
+                "small_model", defaultModel,
+                "enabled_providers", List.of(provider.getProviderId()),
                 "provider", Map.of(provider.getProviderId(), Map.of(
                         "name", provider.getName(),
                         "env", List.of(

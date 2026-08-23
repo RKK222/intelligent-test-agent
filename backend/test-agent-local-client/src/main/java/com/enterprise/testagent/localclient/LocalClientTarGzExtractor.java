@@ -127,6 +127,7 @@ final class LocalClientTarGzExtractor implements LocalClientReleaseDownloader.Ar
         return switch (name) {
             case "jdk.tar.gz" -> "jdk";
             case "opencode.tar.gz" -> "opencode";
+            case "public-capabilities.tar.gz" -> "public-capabilities";
             default -> throw new SecurityException("archive name is not an approved release artifact");
         };
     }

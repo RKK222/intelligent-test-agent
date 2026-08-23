@@ -305,6 +305,30 @@ export type LocalClientInstance = {
   updateDirection?: LocalClientUpdateDirection | null;
   lastUpdateStatus?: string | null;
   lastUpdateAt?: string | null;
+  publicCapabilities?: LocalClientPublicCapabilities | null;
+};
+
+export type LocalClientPublicCapabilities = {
+  supported: boolean;
+  activeCommit?: string | null;
+  activeDigest?: string | null;
+  pendingCommit?: string | null;
+  pendingDigest?: string | null;
+  status: string;
+  errorCode?: string | null;
+  agentCount?: number | null;
+  skillCount?: number | null;
+  toolCount?: number | null;
+  requiresRestart?: boolean | null;
+  changeSummaryJson?: string | null;
+  reportedAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type LocalClientPublicCapabilityUpdateRequest = {
+  commandId: string;
+  status: string;
+  targetDigest: string;
 };
 
 export type LocalClientUpdateDirection = "UPDATE" | "ROLLBACK" | "SAME" | string;
@@ -1131,12 +1155,14 @@ export type UserNotificationType =
   | "AGENT_CONFIG_DISPOSE_FAILED"
   | "AGENT_CONFIG_DISPOSE_SUPERSEDED"
   | "LOCAL_CLIENT_UPDATE_AVAILABLE"
+  | "LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE"
   | string;
 export type UserNotificationActionType =
   | "SESSION_SHARE"
   | "NONE"
   | "RESTART_OWN_PROCESS"
   | "LOCAL_CLIENT_UPDATE"
+  | "LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE"
   | string;
 export type UserNotificationStatus = "ACTIVE" | "INVALIDATED" | string;
 export type UserNotificationChangeType = "SNAPSHOT" | "CREATED" | "READ" | "UPDATED" | "INVALIDATED";

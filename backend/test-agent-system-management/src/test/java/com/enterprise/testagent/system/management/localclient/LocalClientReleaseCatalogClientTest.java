@@ -73,6 +73,7 @@ class LocalClientReleaseCatalogClientTest {
         put("releases/20260820120000/client.jar.sig", new byte[] {1});
         put("releases/20260820120000/jdk.tar.gz.sig", new byte[] {2});
         put("releases/20260820120000/opencode.tar.gz.sig", new byte[] {3});
+        put("releases/20260820120000/public-capabilities.tar.gz.sig", new byte[] {4});
         put("catalog.json", objectMapper.writeValueAsBytes(new LocalClientReleaseCatalogClient.Catalog(
                 1,
                 List.of(new LocalClientReleaseCatalogClient.CatalogEntry(
@@ -91,7 +92,7 @@ class LocalClientReleaseCatalogClientTest {
         assertThat(result.synced()).isEqualTo(1);
         assertThat(release.getValue().compatible()).isTrue();
         assertThat(release.getValue().artifacts()).extracting(LocalClientVersionModels.Artifact::kind)
-                .containsExactly("CLIENT_JAR", "JDK", "OPENCODE");
+                .containsExactly("CLIENT_JAR", "JDK", "OPENCODE", "PUBLIC_CAPABILITIES");
     }
 
     @Test
@@ -169,7 +170,9 @@ class LocalClientReleaseCatalogClientTest {
                 List.of(
                         artifact("CLIENT_JAR", prefix + "client.jar", prefix + "client.jar.sig"),
                         artifact("JDK", prefix + "jdk.tar.gz", prefix + "jdk.tar.gz.sig"),
-                        artifact("OPENCODE", prefix + "opencode.tar.gz", prefix + "opencode.tar.gz.sig"))));
+                        artifact("OPENCODE", prefix + "opencode.tar.gz", prefix + "opencode.tar.gz.sig"),
+                        artifact("PUBLIC_CAPABILITIES", prefix + "public-capabilities.tar.gz",
+                                prefix + "public-capabilities.tar.gz.sig"))));
     }
 
     private void publishManifest(byte[] manifest) throws Exception {
@@ -178,9 +181,11 @@ class LocalClientReleaseCatalogClientTest {
         put("releases/20260820120000/client.jar.sig", new byte[] {1});
         put("releases/20260820120000/jdk.tar.gz.sig", new byte[] {2});
         put("releases/20260820120000/opencode.tar.gz.sig", new byte[] {3});
+        put("releases/20260820120000/public-capabilities.tar.gz.sig", new byte[] {4});
         put("releases/20260820110000/client.jar.sig", new byte[] {1});
         put("releases/20260820110000/jdk.tar.gz.sig", new byte[] {2});
         put("releases/20260820110000/opencode.tar.gz.sig", new byte[] {3});
+        put("releases/20260820110000/public-capabilities.tar.gz.sig", new byte[] {4});
         put("catalog.json", objectMapper.writeValueAsBytes(new LocalClientReleaseCatalogClient.Catalog(
                 1,
                 List.of(new LocalClientReleaseCatalogClient.CatalogEntry(

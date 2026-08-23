@@ -21,7 +21,22 @@ public interface ProtectedAgentDefinitionResolver {
             String revisionId,
             String displayName,
             String description,
-            String contentSha256) {
+            String contentSha256,
+            CatalogSource source) {
+
+        public CatalogItem(
+                String selectionId,
+                String revisionId,
+                String displayName,
+                String description,
+                String contentSha256) {
+            this(selectionId, revisionId, displayName, description, contentSha256, CatalogSource.APPLICATION_HUB);
+        }
+    }
+
+    enum CatalogSource {
+        PUBLIC_GIT,
+        APPLICATION_HUB
     }
 
     record Definition(

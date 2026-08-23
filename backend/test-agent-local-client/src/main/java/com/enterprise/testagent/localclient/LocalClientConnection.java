@@ -69,6 +69,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private final LocalClientSelfUpdater selfUpdater;
     private final LocalObservabilityRelay observabilityRelay;
     private final LocalObservabilitySettings observabilitySettings;
+    private final LocalClientPublicCapabilityUpdater publicCapabilityUpdater;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final LocalClientFrameCodec codec = new LocalClientFrameCodec(objectMapper);
     private final HttpClient httpClient = loopbackHttpClient();
@@ -114,7 +115,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             LocalModelRelay modelRelay,
             LocalClientFileRpcHandler fileRpcHandler) {
         this(configuration, credentials, stateStore, supervisor, modelRelay, fileRpcHandler, null,
-                LocalObservabilitySettings.defaults());
+                LocalObservabilitySettings.defaults(), null);
     }
 
     LocalClientConnection(
@@ -126,7 +127,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             LocalClientFileRpcHandler fileRpcHandler,
             LocalObservabilityRelay observabilityRelay) {
         this(configuration, credentials, stateStore, supervisor, modelRelay, fileRpcHandler, observabilityRelay,
-                LocalObservabilitySettings.defaults());
+                LocalObservabilitySettings.defaults(), null);
     }
 
     LocalClientConnection(
@@ -138,6 +139,20 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             LocalClientFileRpcHandler fileRpcHandler,
             LocalObservabilityRelay observabilityRelay,
             LocalObservabilitySettings observabilitySettings) {
+        this(configuration, credentials, stateStore, supervisor, modelRelay, fileRpcHandler, observabilityRelay,
+                observabilitySettings, null);
+    }
+
+    LocalClientConnection(
+            LocalClientConfiguration configuration,
+            LocalClientCredentialFile.Credentials credentials,
+            LocalClientStateStore stateStore,
+            OpencodeProcessSupervisor supervisor,
+            LocalModelRelay modelRelay,
+            LocalClientFileRpcHandler fileRpcHandler,
+            LocalObservabilityRelay observabilityRelay,
+            LocalObservabilitySettings observabilitySettings,
+            LocalClientPublicCapabilityStore publicCapabilityStore) {
         this.configuration = configuration;
         this.credentials = credentials;
         this.buildInfo = LocalClientBuildInfo.current();
@@ -148,6 +163,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         this.observabilityRelay = observabilityRelay;
         this.observabilitySettings = observabilitySettings;
         this.selfUpdater = createSelfUpdater();
+        this.publicCapabilityUpdater = publicCapabilityStore == null ? null
+                : new LocalClientPublicCapabilityUpdater(publicCapabilityStore, supervisor, new CapabilitySink());
     }
 
     int runForever() {
@@ -194,6 +211,33 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                 lastFailure.get(),
                 processStatus.get(),
                 List.copyOf(operationProgress.values()));
+    }
+
+    LocalClientPublicCapabilityStore.State publicCapabilitySnapshot() {
+        return publicCapabilityUpdater == null
+                ? LocalClientPublicCapabilityStore.State.empty()
+                : publicCapabilityUpdater.snapshot();
+    }
+
+    /** 托盘确认只提交平台已通知且仍保存在本地状态中的目标摘要。 */
+    void requestPublicCapabilityUpdate(String expectedDigest) {
+        long currentGeneration = generation.get();
+        if (publicCapabilityUpdater == null
+                || connectionState.get() != LocalClientRuntimeSnapshot.ConnectionState.ONLINE
+                || currentGeneration < 1
+                || expectedDigest == null
+                || !expectedDigest.matches("[0-9a-f]{64}")) {
+            throw new IllegalStateException("公共能力更新当前不可确认");
+        }
+        String requestId = requestId("lcpq_");
+        sendFrame(new LocalClientFrame(
+                LocalClientProtocol.VERSION,
+                LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_REQUEST,
+                requestId,
+                requestId("trace_"),
+                currentGeneration,
+                codec.payload(new LocalClientPayloads.PublicCapabilityUpdateRequest(
+                        stateStore.read().clientInstanceId(), currentGeneration, expectedDigest))));
     }
 
     /** 中断当前连接并唤醒同一重连循环，不创建旁路连接。 */
@@ -259,11 +303,15 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.ONLINE);
             stateStore.clearReEnrollmentRequirement();
             modelRelay.updateGrant(registered.modelGrant());
+            supervisor.configureManagedModel(registered.managedModelConfig());
             startHeartbeat();
             startVersionChecks();
             startObservabilityUpload();
             if (selfUpdater != null) {
                 selfUpdater.reportStoredResult();
+            }
+            if (publicCapabilityUpdater != null) {
+                publicCapabilityUpdater.reportVersion();
             }
             LOGGER.info("local_client_registered clientInstanceId={} generation={}",
                     stateStore.read().clientInstanceId(), registered.connectionGeneration());
@@ -293,6 +341,20 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             case UPDATE_CANCEL -> handleUpdateCancel(frame);
             case UPDATE_STATUS_ACK -> requireSelfUpdater().handleStatusAck(
                     codec.payload(frame, LocalClientPayloads.UpdateStatusAck.class));
+            case PUBLIC_CAPABILITY_AVAILABLE -> requirePublicCapabilityUpdater().handleAvailable(
+                    codec.payload(frame, LocalClientPayloads.PublicCapabilityAvailable.class));
+            case PUBLIC_CAPABILITY_UPDATE_COMMAND -> requirePublicCapabilityUpdater().handleCommand(
+                    codec.payload(frame, LocalClientPayloads.PublicCapabilityUpdateCommand.class));
+            case BINARY_CHUNK -> operationExecutor.execute(() -> {
+                try {
+                    requirePublicCapabilityUpdater().handleChunk(
+                            frame.requestId(), codec.payload(frame, LocalClientPayloads.BinaryChunk.class));
+                } catch (RuntimeException exception) {
+                    sendError(frame, exception);
+                }
+            });
+            case PUBLIC_CAPABILITY_UPDATE_STATUS_ACK -> requirePublicCapabilityUpdater().handleStatusAck(
+                    codec.payload(frame, LocalClientPayloads.PublicCapabilityUpdateStatusAck.class));
             case TRACE_CHUNK_ACK -> handleTraceChunkAck(frame);
             case TRACE_UPLOAD_WATERMARK -> handleTraceWatermark(frame);
             case WORKSPACE_REGISTERED -> completeWorkspaceRegistration(frame);
@@ -928,6 +990,36 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             throw new IllegalStateException("local client self-update is not configured");
         }
         return selfUpdater;
+    }
+
+    private LocalClientPublicCapabilityUpdater requirePublicCapabilityUpdater() {
+        if (publicCapabilityUpdater == null) {
+            throw new IllegalStateException("public capability updater is not configured");
+        }
+        return publicCapabilityUpdater;
+    }
+
+    private final class CapabilitySink implements LocalClientPublicCapabilityUpdater.ProtocolSink {
+        @Override
+        public void send(LocalClientFrameType type, String requestId, Object payload) {
+            sendFrame(new LocalClientFrame(
+                    LocalClientProtocol.VERSION,
+                    type,
+                    requestId,
+                    LocalClientConnection.requestId("trace_"),
+                    generation.get(),
+                    codec.payload(payload)));
+        }
+
+        @Override
+        public String clientInstanceId() {
+            return stateStore.read().clientInstanceId();
+        }
+
+        @Override
+        public long generation() {
+            return generation.get();
+        }
     }
 
     private static void copyHeaders(Map<String, List<String>> headers, HttpRequest.Builder builder) {

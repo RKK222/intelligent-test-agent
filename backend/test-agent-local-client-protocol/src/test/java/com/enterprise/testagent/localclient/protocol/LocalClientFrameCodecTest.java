@@ -5,11 +5,27 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class LocalClientFrameCodecTest {
 
     private final LocalClientFrameCodec codec = new LocalClientFrameCodec();
+
+    @Test
+    void registeredModelConfigIsCapabilityGatedAndLegacyShapeOmitsTheField() {
+        Instant now = Instant.parse("2026-08-23T08:00:00Z");
+
+        assertThat(codec.payload(new LocalClientPayloads.Registered(7L, "grant", now, now))
+                .has("managedModelConfig")).isFalse();
+        assertThat(codec.payload(new LocalClientPayloads.Registered(
+                7L,
+                "grant",
+                now,
+                now,
+                Map.of("model", "provider/model")))
+                .has("managedModelConfig")).isTrue();
+    }
 
     @Test
     void shouldRoundTripRegisterFrameWithoutGeneration() {
@@ -142,6 +158,40 @@ class LocalClientFrameCodecTest {
         assertThat(codec.payload(decoded, LocalClientPayloads.WorkspaceRegister.class))
                 .isEqualTo(new LocalClientPayloads.WorkspaceRegister(
                         "native-project", "/Users/test/native-project"));
+    }
+
+    @Test
+    void shouldRoundTripPublicCapabilityRecoveryCoordinatesAndChunkRequest() {
+        String digest = "d".repeat(64);
+        String commit = "c".repeat(40);
+        String commandId = "lcpc_" + "a".repeat(32);
+        LocalClientFrame version = new LocalClientFrame(
+                LocalClientProtocol.VERSION,
+                LocalClientFrameType.PUBLIC_CAPABILITY_VERSION,
+                "req-capability",
+                "trace-capability",
+                9L,
+                codec.payload(new LocalClientPayloads.PublicCapabilityVersion(
+                        "lci_device", 9L, commit, digest, commit, digest, commandId,
+                        "ROLLED_BACK", "OPENCODE_ACTIVATION_FAILED", Instant.parse("2026-08-23T04:00:00Z"))));
+        LocalClientFrame chunkRequest = new LocalClientFrame(
+                LocalClientProtocol.VERSION,
+                LocalClientFrameType.PUBLIC_CAPABILITY_CHUNK_REQUEST,
+                commandId,
+                "trace-capability",
+                9L,
+                codec.payload(new LocalClientPayloads.PublicCapabilityChunkRequest(
+                        commandId, "lci_device", 9L, digest, 3)));
+
+        LocalClientPayloads.PublicCapabilityVersion decodedVersion = codec.payload(
+                codec.decode(codec.encode(version)), LocalClientPayloads.PublicCapabilityVersion.class);
+        LocalClientPayloads.PublicCapabilityChunkRequest decodedChunk = codec.payload(
+                codec.decode(codec.encode(chunkRequest)), LocalClientPayloads.PublicCapabilityChunkRequest.class);
+
+        assertThat(decodedVersion.pendingCommandId()).isEqualTo(commandId);
+        assertThat(decodedVersion.status()).isEqualTo("ROLLED_BACK");
+        assertThat(decodedChunk.connectionGeneration()).isEqualTo(9L);
+        assertThat(decodedChunk.sequence()).isEqualTo(3);
     }
 
     @Test

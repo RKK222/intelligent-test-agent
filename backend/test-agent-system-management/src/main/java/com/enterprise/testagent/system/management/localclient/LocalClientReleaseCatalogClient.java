@@ -38,6 +38,7 @@ public class LocalClientReleaseCatalogClient {
     private static final int MAX_MANIFEST_BYTES = 1024 * 1024;
     private static final int MAX_SIGNATURE_BYTES = 16 * 1024;
     private static final Set<String> REQUIRED_ARTIFACTS = Set.of("CLIENT_JAR", "JDK", "OPENCODE");
+    private static final String PUBLIC_CAPABILITIES_ARTIFACT = "PUBLIC_CAPABILITIES";
 
     private final LocalClientVersionRepository repository;
     private final LocalClientReleaseCatalogProperties properties;
@@ -131,10 +132,12 @@ public class LocalClientReleaseCatalogClient {
         } catch (IllegalStateException exception) {
             throw invalid("客户端发布清单包含重复制品");
         }
-        if (!artifactsByKind.keySet().equals(REQUIRED_ARTIFACTS)) {
+        if (!artifactsByKind.keySet().containsAll(REQUIRED_ARTIFACTS)
+                || artifactsByKind.keySet().stream().anyMatch(kind ->
+                        !REQUIRED_ARTIFACTS.contains(kind) && !PUBLIC_CAPABILITIES_ARTIFACT.equals(kind))) {
             throw invalid("客户端发布清单必须同时锁定 JAR、JDK 和 OpenCode");
         }
-        List<LocalClientVersionModels.Artifact> artifacts = REQUIRED_ARTIFACTS.stream().sorted().map(kind -> {
+        List<LocalClientVersionModels.Artifact> artifacts = artifactsByKind.keySet().stream().sorted().map(kind -> {
             ManifestArtifact artifact = artifactsByKind.get(kind);
             String releasePrefix = "releases/" + expectedVersion + "/";
             if (artifact.size() < 1 || artifact.size() > 4L * 1024 * 1024 * 1024) {

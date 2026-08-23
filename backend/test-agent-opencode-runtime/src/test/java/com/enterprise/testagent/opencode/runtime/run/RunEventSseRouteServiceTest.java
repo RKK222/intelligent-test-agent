@@ -7,6 +7,10 @@ import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
@@ -28,6 +32,7 @@ import com.enterprise.testagent.domain.run.RunStatus;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalClientExecutionNodeIdentity;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import java.time.Instant;
 import java.util.Map;
@@ -164,6 +169,45 @@ class RunEventSseRouteServiceTest {
         assertThat(service.forwardTarget(RUN_ID)).contains(target);
 
         verifyNoInteractions(routingDecisions, processes);
+    }
+
+    @Test
+    void resolvesLegacyLocalClientRunFromCurrentConnectionBackend() {
+        RoutingDecisionRepository routingDecisions = mock(RoutingDecisionRepository.class);
+        OpencodeProcessManagementRepository processes = mock(OpencodeProcessManagementRepository.class);
+        BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
+        LocalClientInstanceId clientInstanceId = new LocalClientInstanceId("lci_1234567890abcdef");
+        BackendProcessId currentBackend = new BackendProcessId("bjp_current_backend");
+        when(runtimeStore.findManifest(RUN_ID)).thenReturn(Optional.empty());
+        when(routingDecisions.findByRunId(RUN_ID)).thenReturn(Optional.of(new RoutingDecision(
+                RUN_ID,
+                LocalClientExecutionNodeIdentity.nodeId(clientInstanceId),
+                RoutingReason.STICKY_SESSION,
+                NOW,
+                "trace_route")));
+        when(connections.find(clientInstanceId)).thenReturn(Optional.of(new LocalClientConnectionRoute(
+                clientInstanceId,
+                new UserId("usr_1234567890abcdef"),
+                currentBackend,
+                7,
+                "127.0.0.1",
+                java.util.List.of("127.0.0.1"),
+                4106,
+                LocalClientProcessStatus.RUNNING,
+                12345L,
+                NOW,
+                true,
+                NOW,
+                NOW)));
+        when(routeResolver.isCurrent(currentBackend)).thenReturn(true);
+        RunEventSseRouteService service = new RunEventSseRouteService(
+                routingDecisions, processes, routeResolver, runtimeStore, connections);
+
+        assertThat(service.forwardTargetStrict(RUN_ID)).isEmpty();
+
+        verifyNoInteractions(processes);
     }
 
     private static RoutingDecision decision(String executionNodeId) {

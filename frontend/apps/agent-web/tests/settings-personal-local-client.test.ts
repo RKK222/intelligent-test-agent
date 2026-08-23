@@ -2,6 +2,7 @@ import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser, LocalClientInstance } from "@test-agent/shared-types";
+import { ElMessageBox } from "element-plus";
 import SettingsPersonalPanel from "../src/components/settings/SettingsPersonalPanel.vue";
 
 const user: CurrentUser = {
@@ -47,6 +48,11 @@ function api(instance: LocalClientInstance = clientInstance): BackendApiClient {
     listMyLocalClientInstances: vi.fn().mockResolvedValue([instance]),
     listWorkspaces: vi.fn().mockResolvedValue({ items: [], page: 1, size: 100, total: 0 }),
     commandLocalClientOpencode: vi.fn(),
+    requestLocalClientPublicCapabilityUpdate: vi.fn().mockResolvedValue({
+      commandId: "lcpc_test",
+      status: "PENDING",
+      targetDigest: "b".repeat(64)
+    }),
     listLocalClientDirectories: vi.fn().mockResolvedValue([])
   };
 }
@@ -118,6 +124,41 @@ describe("SettingsPersonalPanel local-client version state", () => {
     await waitFor(() => expect(client.listMyLocalClientInstances).toHaveBeenCalledTimes(1));
     await fireEvent.click(view.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(client.listMyLocalClientInstances).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows the pending public capability summary and updates only after user confirmation", async () => {
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue(
+      { action: "confirm" } as Awaited<ReturnType<typeof ElMessageBox.confirm>>
+    );
+    const digest = "b".repeat(64);
+    const client = api({
+      ...clientInstance,
+      publicCapabilities: {
+        supported: true,
+        activeCommit: "a".repeat(40),
+        activeDigest: "a".repeat(64),
+        pendingCommit: "b".repeat(40),
+        pendingDigest: digest,
+        status: "UPDATE_AVAILABLE",
+        agentCount: 2,
+        skillCount: 3,
+        toolCount: 1,
+        requiresRestart: true
+      }
+    });
+    const view = renderPanel(client, true);
+
+    expect(await view.findByText("公共 Agent / Skill / Tool")).toBeTruthy();
+    expect(view.getByText(/待更新版本 bbbbbbbbbbbb · Agent 2 \/ Skill 3 \/ Tool 1/)).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "更新公共能力" }));
+
+    await waitFor(() => expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("当前 macOS 登录账号的本机权限"),
+      "更新本地公共能力",
+      expect.any(Object)
+    ));
+    await waitFor(() => expect(client.requestLocalClientPublicCapabilityUpdate)
+      .toHaveBeenCalledWith("lci_device", digest));
   });
 
   it("lets the web fallback select one directory without navigating on single click", async () => {

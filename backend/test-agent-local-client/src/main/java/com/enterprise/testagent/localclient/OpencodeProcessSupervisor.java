@@ -1,15 +1,20 @@
 package com.enterprise.testagent.localclient;
 
 import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -17,30 +22,37 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** 本地 OpenCode 监管器；PID、实际启动时间和可执行文件全部匹配后才允许停止。 */
 final class OpencodeProcessSupervisor {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(OpencodeProcessSupervisor.class);
     private static final Duration HEALTH_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration HEALTH_POLL_INTERVAL = Duration.ofMillis(250);
+    private static final Duration CATALOG_TIMEOUT = Duration.ofSeconds(30);
+    private static final int MAX_MANAGED_MODEL_CONFIG_BYTES = 1024 * 1024;
+    private static final Set<String> MANAGED_MODEL_CONFIG_FIELDS = Set.of(
+            "model", "small_model", "enabled_providers", "provider");
     private final LocalClientConfiguration configuration;
     private final LocalClientStateStore stateStore;
     private final LocalModelRelay modelRelay;
     private final LocalObservabilityRelay observabilityRelay;
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(1))
-            .build();
+    private final LocalClientPublicCapabilityStore publicCapabilityStore;
+    private final HttpClient httpClient = loopbackHttpClient();
+    private volatile String managedModelConfigContent;
+    private volatile boolean managedModelRestartRequired;
 
     OpencodeProcessSupervisor(
             LocalClientConfiguration configuration,
             LocalClientStateStore stateStore,
             LocalModelRelay modelRelay) {
-        this(configuration, stateStore, modelRelay, null);
+        this(configuration, stateStore, modelRelay, null, null);
     }
 
     OpencodeProcessSupervisor(
@@ -48,16 +60,46 @@ final class OpencodeProcessSupervisor {
             LocalClientStateStore stateStore,
             LocalModelRelay modelRelay,
             LocalObservabilityRelay observabilityRelay) {
+        this(configuration, stateStore, modelRelay, observabilityRelay, null);
+    }
+
+    OpencodeProcessSupervisor(
+            LocalClientConfiguration configuration,
+            LocalClientStateStore stateStore,
+            LocalModelRelay modelRelay,
+            LocalObservabilityRelay observabilityRelay,
+            LocalClientPublicCapabilityStore publicCapabilityStore) {
         this.configuration = configuration;
         this.stateStore = stateStore;
         this.modelRelay = modelRelay;
         this.observabilityRelay = observabilityRelay;
+        this.publicCapabilityStore = publicCapabilityStore;
+    }
+
+    /**
+     * 保存服务端下发的无密钥模型配置，供下一次受管启动写入 OPENCODE_CONFIG_CONTENT。
+     * 配置只允许模型/provider 根字段，避免连接载荷改变 Tool、插件或文件系统权限。
+     */
+    synchronized void configureManagedModel(Map<String, Object> config) {
+        String validated = validateManagedModelConfig(config);
+        if (!java.util.Objects.equals(managedModelConfigContent, validated)) {
+            managedModelConfigContent = validated;
+            // 客户端升级或重连时可能继承仍在运行的旧 OpenCode；下一次 start 必须重启后再报告就绪。
+            managedModelRestartRequired = true;
+        }
     }
 
     synchronized LocalClientPayloads.LifecycleResult start(Integer preferredPort) {
         LocalClientPayloads.LifecycleResult current = status();
         if (current.success() && "RUNNING".equals(current.processStatus()) && current.opencodeHealthy()) {
-            return current;
+            if (!managedModelRestartRequired) {
+                return current;
+            }
+            LocalClientPayloads.LifecycleResult stopped = stop();
+            if (!stopped.success()) {
+                return stopped;
+            }
+            current = stopped;
         }
         if ("FAILED".equals(current.processStatus()) && current.processId() != null) {
             return current;
@@ -154,11 +196,106 @@ final class OpencodeProcessSupervisor {
                 health ? "运行中" : "进程存在但 loopback health 不健康");
     }
 
+    /** Agent/Skill 只 dispose；Tool/依赖变化必须完整重启，二者都以健康检查作为成功条件。 */
+    synchronized LocalClientPayloads.LifecycleResult reloadPublicCapabilities(boolean requiresRestart) {
+        LocalClientPayloads.LifecycleResult current = status();
+        if (requiresRestart) {
+            return restart(current.opencodePort());
+        }
+        if (!current.success() || current.opencodePort() == null || !current.opencodeHealthy()) {
+            return start(current.opencodePort());
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + current.opencodePort() + "/global/dispose"))
+                    .timeout(Duration.ofSeconds(10))
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                return result(false, "FAILED", current.processId(), current.processStartedAt(), current.opencodePort(),
+                        false, current.executable(), "OpenCode dispose 失败");
+            }
+            return status();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return result(false, "FAILED", current.processId(), current.processStartedAt(), current.opencodePort(),
+                    false, current.executable(), "OpenCode dispose 被中断");
+        } catch (IOException exception) {
+            return result(false, "FAILED", current.processId(), current.processStartedAt(), current.opencodePort(),
+                    false, current.executable(), "OpenCode dispose 连接失败");
+        }
+    }
+
+    /**
+     * 激活成功不仅要求进程存活，还要确保 OpenCode 已重新加载 Agent、Skill command 与 Tool 目录。
+     * 包内目录及 manifest 完整性已经由能力包 Store 在切换前完成校验。
+     */
+    synchronized boolean validatePublicCapabilityCatalog() {
+        LocalClientPayloads.LifecycleResult current = status();
+        if (!current.success() || !current.opencodeHealthy() || current.opencodePort() == null) {
+            return false;
+        }
+        // Tool 首次装载会初始化完整配置，先给它独立的冷启动窗口；后续 Agent/Skill 查询复用同一实例。
+        return catalogAvailable(current.opencodePort(), "/experimental/tool/ids")
+                && catalogAvailable(current.opencodePort(), "/agent")
+                && catalogAvailable(current.opencodePort(), "/command");
+    }
+
+    private boolean catalogAvailable(int port, String path) {
+        Instant startedAt = Instant.now();
+        try {
+            Path validationDirectory = configuration.opencodeDataDirectory()
+                    .resolve("public-capability-healthcheck").toAbsolutePath().normalize();
+            Files.createDirectories(validationDirectory);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(catalogUri(port, path, validationDirectory))
+                    .timeout(CATALOG_TIMEOUT)
+                    .GET()
+                    .build();
+            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            boolean available = response.statusCode() >= 200 && response.statusCode() < 300;
+            LOGGER.info("local_opencode_catalog_check path={} status={} available={} durationMs={}",
+                    path, response.statusCode(), available, Duration.between(startedAt, Instant.now()).toMillis());
+            return available;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("local_opencode_catalog_check_interrupted path={} durationMs={}",
+                    path, Duration.between(startedAt, Instant.now()).toMillis());
+            return false;
+        } catch (IOException exception) {
+            LOGGER.warn("local_opencode_catalog_check_failed path={} durationMs={} errorType={} message={}",
+                    path, Duration.between(startedAt, Instant.now()).toMillis(),
+                    exception.getClass().getSimpleName(), exception.getMessage());
+            return false;
+        }
+    }
+
+    /** OpenCode 目录型接口必须携带受控目录，避免默认使用大型当前工作目录拖慢首次能力验证。 */
+    static URI catalogUri(int port, String path, Path validationDirectory) {
+        String encodedDirectory = URLEncoder.encode(
+                validationDirectory.toAbsolutePath().normalize().toString(), StandardCharsets.UTF_8);
+        return URI.create("http://127.0.0.1:" + port + path + "?directory=" + encodedDirectory);
+    }
+
+    static HttpClient loopbackHttpClient() {
+        return HttpClient.newBuilder()
+                // OpenCode 1.18.4 的明文 loopback 目录接口不完整支持 JDK h2c upgrade，固定 HTTP/1.1。
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(1))
+                .build();
+    }
+
     private LocalClientPayloads.LifecycleResult startOnPort(Path executable, int port) {
         Process process = null;
         LocalClientPersistentState.ProcessState recorded = null;
         try {
-            Files.createDirectories(configuration.opencodeConfigDirectory());
+            Path configDirectory = publicCapabilityStore == null
+                    ? configuration.opencodeConfigDirectory()
+                    : publicCapabilityStore.activeConfigDirectory(configuration.opencodeConfigDirectory());
+            if (!Files.isSymbolicLink(configDirectory)) {
+                Files.createDirectories(configDirectory);
+            }
             Files.createDirectories(configuration.opencodeDataDirectory());
             Path dataParent = configuration.opencodeDataDirectory().toAbsolutePath().normalize().getParent();
             Path logDirectory = (dataParent == null ? configuration.opencodeDataDirectory() : dataParent)
@@ -171,12 +308,18 @@ final class OpencodeProcessSupervisor {
                     "--port", Integer.toString(port),
                     "--print-logs");
             builder.environment().put("XDG_DATA_HOME", configuration.opencodeDataDirectory().toString());
-            builder.environment().put("OPENCODE_CONFIG_DIR", configuration.opencodeConfigDirectory().toString());
+            builder.environment().put("OPENCODE_CONFIG_DIR", configDirectory.toString());
             // 企业内网客户端使用随 OpenCode 发布的模型快照；禁止启动时访问 models.dev，
             // 避免断网环境首次打开工作区时模型目录阻塞两个远端超时窗口。
             builder.environment().put("OPENCODE_DISABLE_MODELS_FETCH", "true");
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_BASE_URL", modelRelay.baseUrl());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_API_KEY", modelRelay.localToken());
+            String configContent = mergeManagedModelConfig(
+                    builder.environment().get("OPENCODE_CONFIG_CONTENT"),
+                    managedModelConfigContent);
+            if (configContent != null) {
+                builder.environment().put("OPENCODE_CONFIG_CONTENT", configContent);
+            }
             if (observabilityRelay != null) {
                 String generation = "lcg_" + UUID.randomUUID().toString().replace("-", "");
                 Path plugin = executable.getParent().getParent()
@@ -211,6 +354,7 @@ final class OpencodeProcessSupervisor {
                 stopExact(recorded, handle);
                 throw new IllegalStateException("OpenCode loopback health did not become ready");
             }
+            managedModelRestartRequired = false;
             return result(true, "RUNNING", handle.pid(), startedAt, port, true,
                     executable.toString(), "启动成功");
         } catch (IOException exception) {
@@ -241,6 +385,59 @@ final class OpencodeProcessSupervisor {
         } catch (Exception exception) {
             throw new IllegalStateException("OPENCODE_CONFIG_CONTENT is invalid", exception);
         }
+    }
+
+    static String validateManagedModelConfig(Map<String, Object> config) {
+        if (config == null || config.isEmpty()) {
+            return null;
+        }
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode root = mapper.valueToTree(config);
+            root.fieldNames().forEachRemaining(field -> {
+                if (!MANAGED_MODEL_CONFIG_FIELDS.contains(field)) {
+                    throw new IllegalArgumentException("managed model config field is not allowed: " + field);
+                }
+            });
+            if (!root.path("model").isTextual()
+                    || !root.path("small_model").isTextual()
+                    || !root.path("enabled_providers").isArray()
+                    || !root.path("provider").isObject()) {
+                throw new IllegalArgumentException("managed model config structure is invalid");
+            }
+            String json = mapper.writeValueAsString(root);
+            if (json.getBytes(StandardCharsets.UTF_8).length > MAX_MANAGED_MODEL_CONFIG_BYTES) {
+                throw new IllegalArgumentException("managed model config exceeds size limit");
+            }
+            return json;
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("managed model config is invalid", exception);
+        }
+    }
+
+    /** 服务端受管模型字段覆盖父进程同名值，其它本地覆盖项继续保留。 */
+    static String mergeManagedModelConfig(String inherited, String managed) {
+        if (managed == null || managed.isBlank()) {
+            return inherited;
+        }
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode root = inherited == null || inherited.isBlank()
+                    ? mapper.createObjectNode()
+                    : requireObject(mapper, inherited);
+            root.setAll(requireObject(mapper, managed));
+            return mapper.writeValueAsString(root);
+        } catch (IOException exception) {
+            throw new IllegalStateException("OPENCODE_CONFIG_CONTENT is invalid", exception);
+        }
+    }
+
+    private static ObjectNode requireObject(ObjectMapper mapper, String json) throws IOException {
+        var node = mapper.readTree(json);
+        if (!(node instanceof ObjectNode object)) {
+            throw new IllegalArgumentException("OPENCODE_CONFIG_CONTENT root must be an object");
+        }
+        return object;
     }
 
     /** 当前方法刚创建的 Process 对象可直接终止；成功持久化过的身份记录同时按期望值清除。 */

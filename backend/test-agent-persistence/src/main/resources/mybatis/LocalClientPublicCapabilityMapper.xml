@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.LocalClientPublicCapabilityMapper">
+
+    <resultMap id="releaseRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientPublicCapabilityReleaseRow">
+        <constructor>
+            <arg column="source_commit" javaType="java.lang.String"/><arg column="bundle_digest" javaType="java.lang.String"/>
+            <arg column="artifact_sha256" javaType="java.lang.String"/><arg column="compatibility" javaType="java.lang.String"/>
+            <arg column="error_code" javaType="java.lang.String"/><arg column="manifest_json" javaType="java.lang.String"/>
+            <arg column="change_summary_json" javaType="java.lang.String"/><arg column="agent_count" javaType="_int"/>
+            <arg column="skill_count" javaType="_int"/><arg column="tool_count" javaType="_int"/>
+            <arg column="requires_restart" javaType="_boolean"/><arg column="artifact" javaType="[B"/>
+            <arg column="compressed_size" javaType="_long"/><arg column="uncompressed_size" javaType="_long"/>
+            <arg column="file_count" javaType="_int"/><arg column="created_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="stateRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientPublicCapabilityStateRow">
+        <constructor>
+            <arg column="client_instance_id" javaType="java.lang.String"/><arg column="active_commit" javaType="java.lang.String"/>
+            <arg column="active_digest" javaType="java.lang.String"/><arg column="pending_commit" javaType="java.lang.String"/>
+            <arg column="pending_digest" javaType="java.lang.String"/><arg column="status" javaType="java.lang.String"/>
+            <arg column="error_code" javaType="java.lang.String"/><arg column="reported_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="attemptRow" type="com.enterprise.testagent.persistence.mybatis.LocalClientPublicCapabilityAttemptRow">
+        <constructor>
+            <arg column="command_id" javaType="java.lang.String"/><arg column="client_instance_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/><arg column="connection_generation" javaType="_long"/>
+            <arg column="target_commit" javaType="java.lang.String"/><arg column="target_digest" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/><arg column="error_code" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/><arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="completed_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="releaseColumns">source_commit, bundle_digest, artifact_sha256, compatibility, error_code,
+        manifest_json, change_summary_json, agent_count, skill_count, tool_count, requires_restart, artifact,
+        compressed_size, uncompressed_size, file_count, created_at</sql>
+    <sql id="stateColumns">client_instance_id, active_commit, active_digest, pending_commit, pending_digest,
+        status, error_code, reported_at, updated_at</sql>
+    <sql id="attemptColumns">command_id, client_instance_id, user_id, connection_generation, target_commit,
+        target_digest, status, error_code, created_at, updated_at, completed_at</sql>
+
+    <insert id="insertRelease">INSERT INTO local_client_public_capability_releases(
+        <include refid="releaseColumns"/>) VALUES (
+        #{sourceCommit}, #{bundleDigest}, #{artifactSha256}, #{compatibility}, #{errorCode}, #{manifestJson},
+        #{changeSummaryJson}, #{agentCount}, #{skillCount}, #{toolCount}, #{requiresRestart}, #{artifact},
+        #{compressedSize}, #{uncompressedSize}, #{fileCount}, #{createdAt})</insert>
+
+    <select id="findReleaseByDigest" resultMap="releaseRow">SELECT <include refid="releaseColumns"/>
+        FROM local_client_public_capability_releases WHERE bundle_digest = #{bundleDigest}</select>
+    <select id="findReleaseBySourceCommit" resultMap="releaseRow">SELECT <include refid="releaseColumns"/>
+        FROM local_client_public_capability_releases WHERE source_commit = #{sourceCommit}</select>
+    <select id="findLatestRelease" resultMap="releaseRow">SELECT <include refid="releaseColumns"/>
+        FROM local_client_public_capability_releases ORDER BY created_at DESC, source_commit DESC LIMIT 1</select>
+    <select id="findLatestAvailableRelease" resultMap="releaseRow">SELECT <include refid="releaseColumns"/>
+        FROM local_client_public_capability_releases WHERE compatibility = 'AVAILABLE'
+        ORDER BY created_at DESC, source_commit DESC LIMIT 1</select>
+    <select id="findInstanceState" resultMap="stateRow">SELECT <include refid="stateColumns"/>
+        FROM local_client_public_capability_states WHERE client_instance_id = #{clientInstanceId}</select>
+    <select id="findUpdateAvailableStates" resultMap="stateRow">SELECT <include refid="stateColumns"/>
+        FROM local_client_public_capability_states WHERE status = 'UPDATE_AVAILABLE'
+        ORDER BY updated_at, client_instance_id LIMIT #{limit}</select>
+
+    <insert id="upsertInstanceState">INSERT INTO local_client_public_capability_states(
+        <include refid="stateColumns"/>) VALUES (#{clientInstanceId}, #{activeCommit}, #{activeDigest},
+        #{pendingCommit}, #{pendingDigest}, #{status}, #{errorCode}, #{reportedAt}, #{updatedAt})
+        ON CONFLICT (client_instance_id) DO UPDATE SET active_commit=EXCLUDED.active_commit,
+        active_digest=EXCLUDED.active_digest, pending_commit=EXCLUDED.pending_commit,
+        pending_digest=EXCLUDED.pending_digest, status=EXCLUDED.status, error_code=EXCLUDED.error_code,
+        reported_at=EXCLUDED.reported_at, updated_at=EXCLUDED.updated_at
+        WHERE local_client_public_capability_states.reported_at &lt;= EXCLUDED.reported_at</insert>
+
+    <update id="projectInstanceState">UPDATE local_client_instances SET public_capability_commit=#{activeCommit},
+        public_capability_digest=#{activeDigest}, public_capability_status=#{status},
+        public_capability_reported_at=#{reportedAt} WHERE client_instance_id=#{clientInstanceId}</update>
+
+    <insert id="markUpdateAvailableForCapableInstances">INSERT INTO local_client_public_capability_states(
+        client_instance_id, active_commit, active_digest, pending_commit, pending_digest, status,
+        error_code, reported_at, updated_at)
+        SELECT client_instance_id, public_capability_commit, public_capability_digest,
+        CASE WHEN public_capability_digest = #{bundleDigest} THEN NULL ELSE #{sourceCommit} END,
+        CASE WHEN public_capability_digest = #{bundleDigest} THEN NULL ELSE #{bundleDigest} END,
+        CASE WHEN public_capability_digest = #{bundleDigest} THEN 'CURRENT' ELSE 'UPDATE_AVAILABLE' END,
+        NULL, #{observedAt}, #{observedAt}
+        FROM local_client_instances
+        WHERE #{capabilityName} = ANY(string_to_array(self_update_capabilities, ','))
+        ON CONFLICT (client_instance_id) DO UPDATE SET pending_commit=CASE
+            WHEN local_client_public_capability_states.active_digest = #{bundleDigest} THEN NULL
+            ELSE EXCLUDED.pending_commit END,
+        pending_digest=CASE
+            WHEN local_client_public_capability_states.active_digest = #{bundleDigest} THEN NULL
+            ELSE EXCLUDED.pending_digest END,
+        status=CASE WHEN local_client_public_capability_states.active_digest = #{bundleDigest}
+            THEN 'CURRENT' ELSE 'UPDATE_AVAILABLE' END,
+        error_code=NULL, updated_at=EXCLUDED.updated_at
+        WHERE local_client_public_capability_states.pending_digest IS DISTINCT FROM EXCLUDED.pending_digest</insert>
+
+    <insert id="insertAttempt">INSERT INTO local_client_public_capability_attempts(<include refid="attemptColumns"/>)
+        VALUES (#{commandId}, #{clientInstanceId}, #{userId}, #{connectionGeneration}, #{targetCommit},
+        #{targetDigest}, #{status}, #{errorCode}, #{createdAt}, #{updatedAt}, #{completedAt})</insert>
+    <select id="findAttempt" resultMap="attemptRow">SELECT <include refid="attemptColumns"/>
+        FROM local_client_public_capability_attempts WHERE command_id=#{commandId}</select>
+    <select id="findAttemptByTarget" resultMap="attemptRow">SELECT <include refid="attemptColumns"/>
+        FROM local_client_public_capability_attempts
+        WHERE client_instance_id=#{clientInstanceId} AND target_digest=#{targetDigest}
+        ORDER BY created_at DESC, command_id DESC LIMIT 1</select>
+    <select id="findDispatchableAttempts" resultMap="attemptRow">SELECT <include refid="attemptColumns"/>
+        FROM local_client_public_capability_attempts WHERE status IN ('PENDING','SENT','DOWNLOADING','APPLYING')
+        ORDER BY created_at, command_id LIMIT #{limit}</select>
+    <update id="bindAttemptGeneration">UPDATE local_client_public_capability_attempts
+        SET connection_generation=#{targetGeneration}, updated_at=#{observedAt}
+        WHERE command_id=#{commandId} AND connection_generation=#{expectedGeneration}
+        AND status IN ('PENDING','SENT','DOWNLOADING')</update>
+    <update id="transitionAttempt">UPDATE local_client_public_capability_attempts SET status=#{targetStatus},
+        error_code=#{errorCode}, updated_at=#{observedAt}, completed_at=<choose><when test="terminal">#{observedAt}</when><otherwise>NULL</otherwise></choose>
+        WHERE command_id=#{commandId} AND status=#{expectedStatus}</update>
+</mapper>

@@ -33,6 +33,7 @@ import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalClientExecutionNodeIdentity;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import java.time.Instant;
@@ -423,8 +424,7 @@ public class AgentRuntimeTargetResolver {
             throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地 OpenCode 尚未就绪");
         }
         Instant observedAt = route.lastHeartbeatAt();
-        ExecutionNodeId nodeId = new ExecutionNodeId(
-                "node_local_" + binding.clientInstanceId().value().substring("lci_".length()));
+        ExecutionNodeId nodeId = LocalClientExecutionNodeIdentity.nodeId(binding.clientInstanceId());
         persistLocalNodeAnchor(nodeId, route, traceId);
         return new ExecutionNode(
                 nodeId,

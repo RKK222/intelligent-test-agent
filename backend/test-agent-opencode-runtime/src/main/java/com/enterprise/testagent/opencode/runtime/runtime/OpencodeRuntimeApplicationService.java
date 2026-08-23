@@ -18,6 +18,9 @@ import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthor
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.runtime.RuntimeKind;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientPublicCapabilityRepository;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
@@ -59,6 +62,8 @@ public class OpencodeRuntimeApplicationService {
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
     private ProtectedAgentDefinitionResolver protectedAgentDefinitionResolver;
+    private LocalClientInstanceRepository localClientInstanceRepository;
+    private LocalClientPublicCapabilityRepository localClientPublicCapabilityRepository;
     private final ThreadLocal<String> agentContext = new ThreadLocal<>();
     private final ThreadLocal<UserId> userContext = new ThreadLocal<>();
 
@@ -119,6 +124,17 @@ public class OpencodeRuntimeApplicationService {
     @Autowired(required = false)
     void configureProtectedAgentDefinitionResolver(ProtectedAgentDefinitionResolver resolver) {
         this.protectedAgentDefinitionResolver = Objects.requireNonNull(resolver, "resolver must not be null");
+    }
+
+    /** 新客户端本地已安装公共 Git Agent 时，只过滤同源受保护目录；应用 Hub 资产继续保留。 */
+    @Autowired(required = false)
+    void configureLocalClientInstanceRepository(LocalClientInstanceRepository repository) {
+        this.localClientInstanceRepository = Objects.requireNonNull(repository);
+    }
+
+    @Autowired(required = false)
+    void configureLocalClientPublicCapabilityRepository(LocalClientPublicCapabilityRepository repository) {
+        this.localClientPublicCapabilityRepository = Objects.requireNonNull(repository);
     }
 
     /**
@@ -247,7 +263,10 @@ public class OpencodeRuntimeApplicationService {
         if (nativeCatalog instanceof List<?> nativeItems) {
             merged.addAll(nativeItems);
         }
+        boolean publicGitInstalled = supportsPublicCapability(location);
         protectedAgentDefinitionResolver.listCatalog(userId, location.workspaceId()).stream()
+                .filter(item -> !publicGitInstalled
+                        || item.source() != ProtectedAgentDefinitionResolver.CatalogSource.PUBLIC_GIT)
                 .map(item -> {
                     Map<String, Object> projected = new LinkedHashMap<>();
                     projected.put("id", item.selectionId());
@@ -258,12 +277,32 @@ public class OpencodeRuntimeApplicationService {
                             ? "平台受保护 Agent（服务器执行）"
                             : item.description());
                     projected.put("protected", true);
+                    projected.put("source", item.source().name());
                     projected.put("revisionId", item.revisionId());
                     projected.put("contentSha256", item.contentSha256());
                     return Map.copyOf(projected);
                 })
                 .forEach(merged::add);
         return List.copyOf(merged);
+    }
+
+    private boolean supportsPublicCapability(AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location) {
+        if (localClientInstanceRepository == null
+                || localClientPublicCapabilityRepository == null
+                || location.node().localClientInstanceId() == null) {
+            return false;
+        }
+        try {
+            LocalClientInstanceId instanceId = new LocalClientInstanceId(location.node().localClientInstanceId());
+            boolean supported = localClientInstanceRepository.findById(instanceId)
+                    .map(instance -> instance.selfUpdateCapabilities().contains("PUBLIC_CAPABILITY_SYNC_V1"))
+                    .orElse(false);
+            return supported && localClientPublicCapabilityRepository.findInstanceState(instanceId)
+                    .map(state -> state.activeDigest() != null)
+                    .orElse(false);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     /**

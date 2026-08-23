@@ -6,6 +6,7 @@ import type {
   LocalClientCredential,
   LocalClientDirectoryEntry,
   LocalClientInstance,
+  LocalClientPublicCapabilities,
   SshKeyMetadata,
   Workspace
 } from "@test-agent/shared-types";
@@ -130,6 +131,42 @@ async function loadLocalClientState(silent = false) {
     }
   } finally {
     if (!silent && isLocalClientRequestCurrent(requestContext)) localClientLoading.value = false;
+  }
+}
+
+/** 公共 Tool 以当前登录用户权限运行；确认框明确告知重启与权限语义。 */
+async function confirmPublicCapabilityUpdate(client: LocalClientInstance) {
+  const capability = client.publicCapabilities;
+  if (!capability?.pendingDigest) return;
+  const summary = `Agent ${capability.agentCount ?? 0} / Skill ${capability.skillCount ?? 0} / Tool ${capability.toolCount ?? 0}`;
+  const restart = capability.requiresRestart
+    ? "包含 Tool 或依赖变化，将重启本地 OpenCode。"
+    : "仅 Agent/Skill 变化，将热加载配置。";
+  await ElMessageBox.confirm(
+    `${summary}，${publicCapabilityChangeSummary(capability)}。${restart}公共 Tool 将使用你当前 macOS 登录账号的本机权限运行，不会提权。`,
+    "更新本地公共能力",
+    { confirmButtonText: "确认更新", cancelButtonText: "暂不更新", type: "warning" }
+  );
+  await runLocalClientAction(async () => {
+    await api.requestLocalClientPublicCapabilityUpdate(client.clientInstanceId, capability.pendingDigest!);
+    ElMessage.success(client.online ? "更新命令已发送" : "已确认，客户端重连后继续更新");
+    await loadLocalClientState(true);
+  });
+}
+
+function publicCapabilityChangeSummary(capability: LocalClientPublicCapabilities): string {
+  if (!capability.changeSummaryJson) return "变更摘要暂不可用";
+  try {
+    const summary = JSON.parse(capability.changeSummaryJson) as Record<string, unknown>;
+    const changed = [
+      summary.agentsChanged === true ? "Agent" : "",
+      summary.skillsChanged === true ? "Skill" : "",
+      summary.toolsChanged === true ? "Tool" : "",
+      summary.dependenciesChanged === true ? "依赖" : ""
+    ].filter(Boolean);
+    return changed.length > 0 ? `变更：${changed.join("、")}` : "内容摘要未变化";
+  } catch {
+    return "变更摘要暂不可读";
   }
 }
 
@@ -476,9 +513,37 @@ function formatLocalClientTime(value?: string | null) {
               <div v-else class="ta-client-update-state is-legacy">
                 <span class="ta-update-support">不支持自更新，请安装新版 DEB</span>
               </div>
+              <div v-if="client.publicCapabilities" class="ta-client-update-state">
+                <div class="ta-client-update-heading">
+                  <span :class="['ta-update-support', client.publicCapabilities.supported && 'is-supported']">
+                    {{ client.publicCapabilities.supported ? '公共 Agent / Skill / Tool' : '客户端版本不支持公共能力同步' }}
+                  </span>
+                  <span class="ta-update-direction">{{ client.publicCapabilities.status }}</span>
+                </div>
+                <div v-if="client.publicCapabilities.activeDigest" class="ta-item-subtitle">
+                  当前版本 {{ (client.publicCapabilities.activeCommit || client.publicCapabilities.activeDigest).slice(0, 12) }}
+                </div>
+                <div v-if="client.publicCapabilities.pendingDigest" class="ta-version-transition">
+                  待更新版本 {{ (client.publicCapabilities.pendingCommit || client.publicCapabilities.pendingDigest).slice(0, 12) }} ·
+                  Agent {{ client.publicCapabilities.agentCount ?? 0 }} / Skill {{ client.publicCapabilities.skillCount ?? 0 }} / Tool {{ client.publicCapabilities.toolCount ?? 0 }}
+                </div>
+                <div v-if="client.publicCapabilities.pendingDigest" class="ta-item-subtitle">
+                  {{ publicCapabilityChangeSummary(client.publicCapabilities) }}
+                </div>
+                <div v-if="client.publicCapabilities.errorCode" class="ta-item-subtitle">
+                  错误 {{ client.publicCapabilities.errorCode }}
+                </div>
+              </div>
             </div>
           </div>
           <div class="ta-row-actions">
+            <el-button
+              v-if="client.publicCapabilities?.pendingDigest"
+              size="small"
+              type="primary"
+              :disabled="localClientLoading"
+              @click="confirmPublicCapabilityUpdate(client)"
+            >更新公共能力</el-button>
             <el-button size="small" :disabled="localClientLoading || !client.online" @click="commandLocalClient(client, 'START')"><el-icon><VideoPlay /></el-icon>启动</el-button>
             <el-button size="small" :disabled="localClientLoading || !client.online" @click="commandLocalClient(client, 'RESTART')">重启</el-button>
             <el-button size="small" :disabled="localClientLoading || !client.online" @click="commandLocalClient(client, 'STOP')"><el-icon><VideoPause /></el-icon>停止</el-button>

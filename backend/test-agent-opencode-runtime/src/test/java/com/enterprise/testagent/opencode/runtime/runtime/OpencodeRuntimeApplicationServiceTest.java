@@ -20,6 +20,11 @@ import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.hub.ProtectedAgentDefinitionResolver;
+import com.enterprise.testagent.domain.localclient.LocalClientInstance;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientPublicCapabilityModels;
+import com.enterprise.testagent.domain.localclient.LocalClientPublicCapabilityRepository;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -213,11 +218,67 @@ class OpencodeRuntimeApplicationServiceTest {
                         "agentId", "protected:hub_rev_agent_1",
                         "name", "合规审查",
                         "mode", "primary",
-                        "description", "服务器执行",
-                        "protected", true,
-                        "revisionId", "hub_rev_agent_1",
+                                "description", "服务器执行",
+                                "protected", true,
+                                "source", "APPLICATION_HUB",
+                                "revisionId", "hub_rev_agent_1",
                         "contentSha256", "sha256-agent")));
         assertThat(result.toString()).doesNotContain("AGENT.md", "系统提示词", "SKILL.md");
+    }
+
+    @Test
+    void localPublicCapabilityHidesPublicGitDuplicateButKeepsApplicationHubAgent() {
+        UserId userId = new UserId("usr_publiccapcatalog1234567890");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_publiccapcatalog1234567890");
+        LocalClientInstanceId instanceId = new LocalClientInstanceId("lci_protectedcatalog1234567890");
+        AgentRuntime runtime = org.mockito.Mockito.mock(AgentRuntime.class);
+        AgentRuntimeTargetResolver targetResolver = org.mockito.Mockito.mock(AgentRuntimeTargetResolver.class);
+        ProtectedAgentDefinitionResolver definitions = org.mockito.Mockito.mock(ProtectedAgentDefinitionResolver.class);
+        LocalClientInstanceRepository instances = org.mockito.Mockito.mock(LocalClientInstanceRepository.class);
+        LocalClientPublicCapabilityRepository capabilities =
+                org.mockito.Mockito.mock(LocalClientPublicCapabilityRepository.class);
+        when(runtime.agentId()).thenReturn("opencode");
+        when(runtime.runtime(any())).thenReturn(Mono.just(new AgentRuntimeResult(
+                objectMapper.valueToTree(List.of(Map.of("id", "public-agent", "name", "本地公共 Agent"))))));
+        when(targetResolver.workspaceTarget("opencode", userId, workspaceId.value(), "trace_public_capability"))
+                .thenReturn(new AgentRuntimeTargetResolver.WorkspaceRuntimeTarget(
+                        runtime, localClientNode(), "/Users/test/workspace", workspaceId));
+        when(definitions.listCatalog(userId, workspaceId)).thenReturn(List.of(
+                new ProtectedAgentDefinitionResolver.CatalogItem(
+                        "protected:public-agent", "public-agent", "公共 Agent", "公共 Git",
+                        "sha256-public", ProtectedAgentDefinitionResolver.CatalogSource.PUBLIC_GIT),
+                new ProtectedAgentDefinitionResolver.CatalogItem(
+                        "protected:hub-agent", "hub-agent", "Hub Agent", "应用 Hub",
+                        "sha256-hub", ProtectedAgentDefinitionResolver.CatalogSource.APPLICATION_HUB)));
+        when(instances.findById(instanceId)).thenReturn(Optional.of(new LocalClientInstance(
+                instanceId, userId, "Mac 客户端", "macos", "aarch64", "1.0.0", "1.18.4", "1.0.0",
+                List.of("PUBLIC_CAPABILITY_SYNC_V1"), true, null, null, null,
+                NOW, NOW, NOW, null)));
+        when(capabilities.findInstanceState(instanceId)).thenReturn(Optional.of(
+                new LocalClientPublicCapabilityModels.InstanceState(
+                        instanceId,
+                        "a".repeat(40),
+                        "b".repeat(64),
+                        null,
+                        null,
+                        LocalClientPublicCapabilityModels.InstanceStatus.CURRENT,
+                        null,
+                        NOW,
+                        NOW)));
+        OpencodeRuntimeApplicationService service = new OpencodeRuntimeApplicationService(
+                new AgentRuntimeRegistry(List.of(runtime)), targetResolver, objectMapper, null);
+        service.configureProtectedAgentDefinitionResolver(definitions);
+        service.configureLocalClientInstanceRepository(instances);
+        service.configureLocalClientPublicCapabilityRepository(capabilities);
+
+        Object result = service.withUser(
+                userId,
+                () -> service.listAgents(workspaceId.value(), "trace_public_capability"));
+
+        assertThat(result).isInstanceOf(List.class);
+        assertThat((List<?>) result).hasSize(2);
+        assertThat(result.toString()).contains("本地公共 Agent", "Hub Agent", "APPLICATION_HUB");
+        assertThat(result.toString()).doesNotContain("公共 Git", "protected:public-agent");
     }
 
     @Test
