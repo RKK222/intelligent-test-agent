@@ -514,6 +514,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     public ManagedWorkspaceResponses.GitRepositoryAccessResponse checkVersionGitAccess(
             String versionId,
             UserId userId) {
+        return checkVersionGitAccess(versionId, userId, null);
+    }
+
+    /**
+     * 定时巡检要求成功缓存不早于本轮开始时间，既绕过历史成功结果，也允许同轮同仓库并发复用。
+     */
+    ManagedWorkspaceResponses.GitRepositoryAccessResponse checkVersionGitAccess(
+            String versionId,
+            UserId userId,
+            Instant requiredSuccessAt) {
         ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
         ensureMember(version.appId(), userId, loadingContextForVersion(
                 "check-version-git-access",
@@ -524,8 +534,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         requireGitWorkspace(version);
         try {
             GitAccessProbe probe = gitAccessProbe(repository, userId);
-            if (!hasFreshGitAccessSuccess(probe.cacheKey())) {
-                probeGitAccessOnce(probe);
+            if (!hasFreshGitAccessSuccess(probe.cacheKey(), requiredSuccessAt)) {
+                probeGitAccessOnce(probe, requiredSuccessAt);
             }
             return gitRepositoryAccessResponse(version, repository, true, null);
         } catch (PlatformException exception) {
@@ -546,15 +556,19 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
      * 同一 JVM 内对当前用户、版本库地址和 SSH key 身份做成功结果短缓存。
      * 成员关系仍在进入本方法前实时校验；失败结果不缓存，避免权限开通后继续命中旧拒绝。
      */
-    private void probeGitAccessOnce(GitAccessProbe probe) {
+    private void probeGitAccessOnce(GitAccessProbe probe, Instant requiredSuccessAt) {
         CompletableFuture<Void> candidate = new CompletableFuture<>();
         CompletableFuture<Void> existing = gitAccessProbesInFlight.putIfAbsent(probe.cacheKey(), candidate);
         if (existing != null) {
             awaitGitAccessProbe(existing);
+            // 等待中的普通选择探测可能早于本轮巡检开始；完成后必须再次核对新鲜度。
+            if (!hasFreshGitAccessSuccess(probe.cacheKey(), requiredSuccessAt)) {
+                probeGitAccessOnce(probe, requiredSuccessAt);
+            }
             return;
         }
         try {
-            if (!hasFreshGitAccessSuccess(probe.cacheKey())) {
+            if (!hasFreshGitAccessSuccess(probe.cacheKey(), requiredSuccessAt)) {
                 String privateKey = probe.sshKey() == null ? null : decryptSshKey(probe.sshKey());
                 gitRemoteService.listBranches(probe.effectiveGitUrl(), privateKey);
                 rememberGitAccessSuccess(probe.cacheKey());
@@ -584,14 +598,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
-    private boolean hasFreshGitAccessSuccess(GitAccessCacheKey cacheKey) {
-        Instant expiresAt = gitAccessSuccessCache.get(cacheKey);
+    private boolean hasFreshGitAccessSuccess(GitAccessCacheKey cacheKey, Instant requiredSuccessAt) {
+        Instant successAt = gitAccessSuccessCache.get(cacheKey);
         Instant now = clock.instant();
-        if (expiresAt != null && expiresAt.isAfter(now)) {
+        if (successAt != null
+                && successAt.plus(GIT_ACCESS_SUCCESS_TTL).isAfter(now)
+                && (requiredSuccessAt == null || !successAt.isBefore(requiredSuccessAt))) {
             return true;
         }
-        if (expiresAt != null) {
-            gitAccessSuccessCache.remove(cacheKey, expiresAt);
+        if (successAt != null && !successAt.plus(GIT_ACCESS_SUCCESS_TTL).isAfter(now)) {
+            gitAccessSuccessCache.remove(cacheKey, successAt);
         }
         return false;
     }
@@ -600,14 +616,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private void rememberGitAccessSuccess(GitAccessCacheKey cacheKey) {
         synchronized (gitAccessSuccessCacheMaintenanceLock) {
             Instant now = clock.instant();
-            gitAccessSuccessCache.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
+            gitAccessSuccessCache.entrySet().removeIf(
+                    entry -> !entry.getValue().plus(GIT_ACCESS_SUCCESS_TTL).isAfter(now));
             if (!gitAccessSuccessCache.containsKey(cacheKey)
                     && gitAccessSuccessCache.size() >= MAX_GIT_ACCESS_SUCCESS_CACHE_ENTRIES) {
                 gitAccessSuccessCache.entrySet().stream()
                         .min(Map.Entry.comparingByValue())
                         .ifPresent(entry -> gitAccessSuccessCache.remove(entry.getKey(), entry.getValue()));
             }
-            gitAccessSuccessCache.put(cacheKey, now.plus(GIT_ACCESS_SUCCESS_TTL));
+            gitAccessSuccessCache.put(cacheKey, now);
         }
     }
 

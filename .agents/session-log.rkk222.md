@@ -13263,3 +13263,29 @@
 
 - 用户点击更新后可直接从小兔子菜单看到更新中/完成/失败状态，成功或失败还会收到系统通知，不必进入个人设置。
 - 本次只调整本地客户端托盘展示、测试和模块文档，不变更 HTTP API、RunEvent、WebSocket 协议、数据库、Flyway、权限模型、部署节点、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-23 - 修复 Git 巡检 SSL 失败误归因与旧缓存复用
+
+### Why
+
+- 手工执行工作空间 Git 巡检后，“F-COSS 移动端”仍未置灰。真实 `git ls-remote` 已返回 LibreSSL `SSL_ERROR_SYSCALL`，但失败分类器未识别该 SSL/TLS 文案，最终被持久化为 `UNKNOWN`；前端按既定契约只禁用 `INACCESSIBLE`，因此表现为仍可选择。
+- 调度巡检还可能复用本轮开始前由页面查询产生的成功缓存，导致权限刚失效时本轮未实际探测远端。
+
+### What
+
+- Git 失败分类器补充 LibreSSL、GnuTLS、Schannel、TLS 握手和证书校验关键字，统一归为 `NETWORK_UNAVAILABLE`。
+- 明确状态语义：只要远端 Git 探针已完成且失败，无论认证、仓库权限、网络、DNS、SSL/TLS、超时或其它 Git 错误，均写为 `INACCESSIBLE` 并置灰；只有旧客户端、离线、路由变化、RPC 异常或探针未形成有效结论时才写 `UNKNOWN`。
+- 调度巡检要求成功结果不早于本轮开始时间，不再复用旧成功缓存；同一轮并发探测结果仍可安全复用。
+- 同步 common、domain、local-client、runtime、workspace、frontend README 及 HTTP API、XXL 集成和数据库说明；未改变 DTO 结构、事件载荷或数据库结构。
+
+### How
+
+- JDK 25 定向执行失败分类、本地探针、workspace 巡检和任务处理测试；最终 workspace 服务 104 项通过，相关补充批次 115 项及任务处理批次 3 项均通过。
+- 前端按根目录仓库脚本执行全量 Vitest，150 个测试文件通过，2208 passed / 1 skipped；一次绕过仓库配置的子包 Vitest 命令因缺少 DOM 环境失败，已按正确脚本复跑确认并非功能回归。
+- 使用根目录 `.env.test` / `test` profile 完整构建并重启 backend、frontend、ClickHouse 与 OpenCode manager；backend health/readiness 为 UP，前端 3000 返回 200，manager 与 OpenCode 健康。
+- 真实调用 XXL executor 手工执行巡检后，固定验收库中“F-COSS 移动端”相关用户投影均更新为 `INACCESSIBLE / NETWORK_UNAVAILABLE`，脱敏原因明确为 Git 远端网络或 SSL/TLS 连接失败。
+
+### Result
+
+- “F-COSS 移动端”现在会按真实不可访问结论置灰且不可选；`UNKNOWN` 只保留给没有完成有效 Git 探测的情形。
+- 本次不新增部署节点，不变更 HTTP API 结构、RunEvent、WebSocket 协议、数据库、Flyway、权限模型、`.env*`、generated SDK 或 OpenCode 只读源码；未登录浏览器会话，因此没有冒用凭据做页面点击，UI 行为由既有禁用组件测试与真实巡检投影共同验证。

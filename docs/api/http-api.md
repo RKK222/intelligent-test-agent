@@ -1183,7 +1183,7 @@ manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超�
 }
 ```
 
-Git 巡检四字段为向后兼容的可空增量字段。当前只在 `runtimeKind=LOCAL_CLIENT` 的普通 Workspace 列表/详情中投影本地客户端巡检结果；服务器测试工作空间从下述模板接口取得同名字段。`ACCESSIBLE` 表示最近一次只读远端校验成功，`INACCESSIBLE` 表示明确缺少 SSH key、认证失败、仓库不可访问、非 Git 工作区或缺少 origin，`UNKNOWN` 表示网络、超时、旧客户端或其它瞬态故障。前端只能对 `INACCESSIBLE` 禁用选择；原因和说明均为固定脱敏值，不返回路径、Git URL、命令或 stderr。
+Git 巡检四字段为向后兼容的可空增量字段。当前只在 `runtimeKind=LOCAL_CLIENT` 的普通 Workspace 列表/详情中投影本地客户端巡检结果；服务器测试工作空间从下述模板接口取得同名字段。`ACCESSIBLE` 表示最近一次只读远端校验成功；`INACCESSIBLE` 表示已执行的远端探测失败，包括缺少 SSH key、认证失败、仓库不可访问、网络/DNS、SSL/TLS、超时、非 Git 工作区或缺少 origin；`UNKNOWN` 只表示旧客户端、断线、路由变化、畸形回包或其它未形成有效探测结论的故障。前端只对 `INACCESSIBLE` 禁用选择；原因和说明均为固定脱敏值，不返回路径、Git URL、命令或 stderr。
 
 #### 平台体验工作区
 
@@ -1638,7 +1638,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `GET /applications/{appId}/workspace-templates` 的每个模板增量返回与 `WorkspaceResponse` 同名的
 `gitAccessStatus/gitAccessReason/gitAccessMessage/gitAccessCheckedAt`。该投影按当前用户和模板隔离，由每两小时
-巡检刷新；没有结果时四字段为 `null`。调用方只可把明确 `INACCESSIBLE` 视为不可选，`UNKNOWN` 不代表权限已经失效。
+巡检刷新；没有结果时四字段为 `null`。调用方只可把明确 `INACCESSIBLE` 视为不可选；网络、SSL/TLS 和超时等已执行探测失败也属于该状态，`UNKNOWN` 仅表示没有形成有效探测结论。
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取应用版本工作区或个人 worktree 的变更文件列表，并返回 feature merge 状态；Git unmerged 状态会返回 `status=conflict`。 |
 | `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前应用版本工作区或个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean；`.opencode/**` 要求 `APP_ADMIN`。 |
 | `POST` | `/workspaces/{workspaceId}/git-stage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件定点加入真实 Git index；`.opencode/**` 要求 `APP_ADMIN`。 |
@@ -1771,7 +1771,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`GET /workspace-versions/{versionId}/git-access` 无请求体。后端复用当前登录用户唯一 SSH key、内部版本库统一认证号拼接和公共 Git 命令执行器，通过 `git ls-remote --heads` 做只读预检；不会 clone、fetch、创建 worktree 或写入最近使用偏好。应用成员关系仍在每次请求中实时校验；同一 Java 只对“用户 + 版本库 + 有效 URL 摘要 + SSH key ID/指纹”的成功预检缓存 10 分钟并合并同键并发请求，URL 或 key 身份变化立即重检，失败和基础设施异常不缓存。缓存有 4096 项上限且不保存私钥明文；远端直接撤销仓库成员权限时，最迟在缓存到期后的下一次预检中体现，真正 Git 操作仍由远端实时鉴权。成功响应示例：
+`GET /workspace-versions/{versionId}/git-access` 无请求体。后端复用当前登录用户唯一 SSH key、内部版本库统一认证号拼接和公共 Git 命令执行器，通过 `git ls-remote --heads` 做只读预检；不会 clone、fetch、创建 worktree 或写入最近使用偏好。应用成员关系仍在每次请求中实时校验；同一 Java 只对“用户 + 版本库 + 有效 URL 摘要 + SSH key ID/指纹”的成功预检缓存 10 分钟并合并同键并发请求，URL 或 key 身份变化立即重检，失败和基础设施异常不缓存。缓存有 4096 项上限且不保存私钥明文；每两小时巡检要求成功记录不早于本轮开始时间，因此不会复用选择接口留下的历史成功缓存，同一巡检轮次内仍可合并同键探测。远端直接撤销仓库成员权限时，选择接口最迟在缓存到期后的下一次预检中体现，巡检则在下一轮体现；真正 Git 操作始终由远端实时鉴权。成功响应示例：
 
 ```json
 {

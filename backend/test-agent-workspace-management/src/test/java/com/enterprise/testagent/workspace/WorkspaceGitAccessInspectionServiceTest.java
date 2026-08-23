@@ -25,7 +25,7 @@ import org.mockito.ArgumentCaptor;
 class WorkspaceGitAccessInspectionServiceTest {
 
     @Test
-    void shouldPersistDeniedAccessButKeepTransientFailuresSelectable() {
+    void shouldPersistEveryCompletedRemoteProbeFailureAsInaccessible() {
         WorkspaceGitAccessCheckRepository checks = mock(WorkspaceGitAccessCheckRepository.class);
         ManagedWorkspaceApplicationService managed = mock(ManagedWorkspaceApplicationService.class);
         ScheduledTaskContext context = mock(ScheduledTaskContext.class);
@@ -36,13 +36,14 @@ class WorkspaceGitAccessInspectionServiceTest {
                 new WorkspaceGitAccessCheckRepository.ApplicationWorkspaceCandidate(userId, "awp_network", "awv_network"));
         when(checks.findApplicationWorkspaceCandidatesAfter(isNull(), isNull(), anyInt()))
                 .thenReturn(candidates);
-        when(managed.checkVersionGitAccess("awv_ok", userId)).thenReturn(
+        Instant inspectionStartedAt = Instant.parse("2026-08-23T12:00:00Z");
+        when(managed.checkVersionGitAccess("awv_ok", userId, inspectionStartedAt)).thenReturn(
                 new ManagedWorkspaceResponses.GitRepositoryAccessResponse(
                         true, "repo_ok", "可访问仓库", "main", null));
-        when(managed.checkVersionGitAccess("awv_denied", userId)).thenReturn(
+        when(managed.checkVersionGitAccess("awv_denied", userId, inspectionStartedAt)).thenReturn(
                 new ManagedWorkspaceResponses.GitRepositoryAccessResponse(
                         false, "repo_denied", "无权限仓库", "main", "REPOSITORY_PERMISSION_REQUIRED"));
-        when(managed.checkVersionGitAccess("awv_network", userId)).thenThrow(new PlatformException(
+        when(managed.checkVersionGitAccess("awv_network", userId, inspectionStartedAt)).thenThrow(new PlatformException(
                 ErrorCode.GIT_UNAVAILABLE,
                 "Git 网络不可用",
                 Map.of("gitFailureType", "NETWORK_UNAVAILABLE")));
@@ -54,7 +55,7 @@ class WorkspaceGitAccessInspectionServiceTest {
         WorkspaceGitAccessInspectionService.InspectionResult result =
                 service.inspectApplicationWorkspaces(context);
 
-        assertThat(result).isEqualTo(new WorkspaceGitAccessInspectionService.InspectionResult(3, 1, 1, 1));
+        assertThat(result).isEqualTo(new WorkspaceGitAccessInspectionService.InspectionResult(3, 1, 2, 0));
         ArgumentCaptor<WorkspaceGitAccessCheck> saved = ArgumentCaptor.forClass(WorkspaceGitAccessCheck.class);
         verify(checks, org.mockito.Mockito.times(3)).save(saved.capture());
         assertThat(saved.getAllValues())
@@ -62,9 +63,12 @@ class WorkspaceGitAccessInspectionServiceTest {
                 .containsExactlyInAnyOrder(
                         org.assertj.core.groups.Tuple.tuple("awp_ok", WorkspaceGitAccessCheck.Status.ACCESSIBLE),
                         org.assertj.core.groups.Tuple.tuple("awp_denied", WorkspaceGitAccessCheck.Status.INACCESSIBLE),
-                        org.assertj.core.groups.Tuple.tuple("awp_network", WorkspaceGitAccessCheck.Status.UNKNOWN));
+                        org.assertj.core.groups.Tuple.tuple("awp_network", WorkspaceGitAccessCheck.Status.INACCESSIBLE));
         assertThat(saved.getAllValues().stream()
                 .filter(value -> value.targetId().equals("awp_denied"))
                 .findFirst().orElseThrow().message()).isEqualTo("Git 仓库读取权限已失效");
+        assertThat(saved.getAllValues().stream()
+                .filter(value -> value.targetId().equals("awp_network"))
+                .findFirst().orElseThrow().message()).contains("SSL/TLS");
     }
 }

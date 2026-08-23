@@ -15,7 +15,7 @@
 
 - 通用异常、错误码、响应模型。
 - TraceId、Idempotency-Key、分页、时间、校验相关基础类型。
-- Git 远端只读命令、clone/worktree/diff/push/pull/fetch/reset/status 命令执行、`git archive --remote` tar 目录和目录/文件树解析、SSH key AES-GCM 加解密工具和 RSA-OAEP 公私钥包装。
+- Git 远端只读命令、clone/worktree/diff/push/pull/fetch/reset/status 命令执行、`git archive --remote` tar 目录和目录/文件树解析、SSH key AES-GCM 加解密工具和 RSA-OAEP 公私钥包装；公共失败分类器会把 DNS、连接拒绝/超时及 SSL/TLS 握手失败统一识别为 `NETWORK_UNAVAILABLE`。
 - 不含业务流程和基础设施访问代码。
 
 ## 已有契约

@@ -8,7 +8,7 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 
 - 新客户端声明 `WORKSPACE_GIT_ACCESS_V1`，通过既有受认证文件 RPC 接收 `workspace.git-access.check`；工作区 ID 与根摘要仍由注册表校验，服务端不能传入任意本地路径。
 - 客户端只读执行本地 Git 仓库识别、`remote.origin.url` 读取和 `git ls-remote --heads`，直接复用当前用户自己的 Git/SSH 凭据环境，不 clone、fetch 或修改工作树。
-- 回包只包含固定 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`、原因码和中文安全说明。认证/仓库拒绝、非 Git 目录或缺少 origin 为不可访问；网络和超时为未知，不把路径、远端 URL、命令或 stderr 送回平台。
+- 回包只包含固定 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`、原因码和中文安全说明。只要已执行的远端只读探测失败，包括认证/仓库拒绝、网络、SSL/TLS 或超时，以及非 Git 目录或缺少 origin，均返回 `INACCESSIBLE`；只有未形成有效探测结论时才返回 `UNKNOWN`。路径、远端 URL、命令和 stderr 均不送回平台。
 
 ## 公共能力包
 

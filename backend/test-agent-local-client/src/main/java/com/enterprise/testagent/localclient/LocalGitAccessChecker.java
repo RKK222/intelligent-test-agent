@@ -56,14 +56,13 @@ final class LocalGitAccessChecker {
                             "REPOSITORY_PERMISSION_REQUIRED", "Git 仓库读取权限已失效");
                 }
                 if (exception.errorCode() == ErrorCode.GIT_TIMEOUT || "TIMEOUT".equals(failureType)) {
-                    return GitAccessResult.unknown(
-                            "TIMEOUT", "Git 远端响应超时，权限状态待下次巡检确认");
+                    return GitAccessResult.inaccessible("TIMEOUT", "Git 远端响应超时，当前不可访问");
                 }
                 if ("NETWORK_UNAVAILABLE".equals(failureType)) {
-                    return GitAccessResult.unknown(
-                            failureType, "Git 远端网络暂不可用，权限状态待下次巡检确认");
+                    return GitAccessResult.inaccessible(
+                            failureType, "Git 远端网络或 SSL/TLS 连接失败，当前不可访问");
                 }
-                return GitAccessResult.unknown("INSPECTION_FAILED", "Git 权限巡检暂时无法完成");
+                return GitAccessResult.inaccessible("INSPECTION_FAILED", "Git 仓库当前不可访问");
             }
         }
     }

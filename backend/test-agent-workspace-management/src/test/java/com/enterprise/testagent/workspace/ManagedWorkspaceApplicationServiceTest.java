@@ -188,6 +188,31 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void versionGitAccessInspectionIgnoresSuccessCachedBeforeCurrentRound() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_inspection");
+        AtomicInteger probes = new AtomicInteger();
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-13T00:00:00Z"));
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                configuration, managed, workspaces, git, countingRemote(probes), clock);
+
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"));
+        assertThat(probes).hasValue(1);
+
+        clock.advanceSeconds(1);
+        Instant inspectionStartedAt = clock.instant();
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"), inspectionStartedAt);
+        service.checkVersionGitAccess(version.versionId(), new UserId("usr_1"), inspectionStartedAt);
+
+        assertThat(probes).hasValue(2);
+    }
+
+    @Test
     void versionGitAccessCheckChangesCacheIdentityWhenSshKeyChanges() {
         UserId userId = new UserId("usr_1");
         UserSshKey firstKey = sshKeyFixtures.encryptedSshKey(

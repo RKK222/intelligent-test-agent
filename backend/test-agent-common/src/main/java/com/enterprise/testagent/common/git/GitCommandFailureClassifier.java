@@ -56,7 +56,9 @@ final class GitCommandFailureClassifier {
         }
         if (containsAny(text, "could not resolve host", "could not resolve hostname", "connection timed out",
                 "connection refused", "no route to host", "network is unreachable", "operation timed out",
-                "failed to connect")) {
+                "failed to connect", "ssl_connect", "ssl_error_syscall", "tls handshake",
+                "gnutls_handshake", "schannel:", "ssl certificate problem",
+                "server certificate verification failed")) {
             return NETWORK_UNAVAILABLE;
         }
         if (containsAny(commandText, " worktree ", " worktree add ")

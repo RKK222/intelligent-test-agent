@@ -41,6 +41,7 @@ public class WorkspaceGitAccessInspectionService {
 
     /** 每轮完整扫描 ACTIVE 用户可见的启用模板；单个仓库失败不会中断其它工作空间。 */
     public InspectionResult inspectApplicationWorkspaces(ScheduledTaskContext context) {
+        Instant inspectionStartedAt = clock.instant();
         int checked = 0;
         int accessible = 0;
         int inaccessible = 0;
@@ -61,7 +62,7 @@ public class WorkspaceGitAccessInspectionService {
                 }
                 List<Future<WorkspaceGitAccessCheck>> futures = new ArrayList<>(page.size());
                 for (var candidate : page) {
-                    futures.add(executor.submit(() -> inspect(candidate)));
+                    futures.add(executor.submit(() -> inspect(candidate, inspectionStartedAt)));
                 }
                 for (Future<WorkspaceGitAccessCheck> future : futures) {
                     context.throwIfStopRequested();
@@ -86,18 +87,27 @@ public class WorkspaceGitAccessInspectionService {
     }
 
     private WorkspaceGitAccessCheck inspect(
-            WorkspaceGitAccessCheckRepository.ApplicationWorkspaceCandidate candidate) {
+            WorkspaceGitAccessCheckRepository.ApplicationWorkspaceCandidate candidate,
+            Instant inspectionStartedAt) {
         Instant checkedAt = clock.instant();
         try {
             ManagedWorkspaceResponses.GitRepositoryAccessResponse access =
-                    managedWorkspaces.checkVersionGitAccess(candidate.versionId(), candidate.userId());
+                    managedWorkspaces.checkVersionGitAccess(
+                            candidate.versionId(), candidate.userId(), inspectionStartedAt);
             if (access.accessible()) {
                 return accessible(candidate, checkedAt);
             }
             String reason = Objects.toString(access.reason(), "REPOSITORY_PERMISSION_REQUIRED");
             return inaccessible(candidate, reason, inaccessibleMessage(reason), checkedAt);
         } catch (PlatformException exception) {
-            String reason = transientReason(exception);
+            String reason = inspectionReason(exception);
+            if (isGitAccessFailure(exception)) {
+                LOGGER.warn(
+                        "event=workspace_git_access_inspection_inaccessible targetType=APPLICATION_WORKSPACE errorCode={} reason={}",
+                        exception.errorCode(),
+                        reason);
+                return inaccessible(candidate, reason, inaccessibleMessage(reason), checkedAt);
+            }
             LOGGER.warn(
                     "event=workspace_git_access_inspection_unknown targetType=APPLICATION_WORKSPACE errorCode={} reason={}",
                     exception.errorCode(),
@@ -173,17 +183,29 @@ public class WorkspaceGitAccessInspectionService {
     }
 
     private static String inaccessibleMessage(String reason) {
-        return "SSH_KEY_MISSING".equals(reason)
-                ? "未配置 Git SSH key"
-                : "Git 仓库读取权限已失效";
+        return switch (reason) {
+            case "SSH_KEY_MISSING" -> "未配置 Git SSH key";
+            case "NETWORK_UNAVAILABLE" -> "Git 远端网络或 SSL/TLS 连接失败，当前不可访问";
+            case "TIMEOUT" -> "Git 远端响应超时，当前不可访问";
+            case "REPOSITORY_PERMISSION_REQUIRED" -> "Git 仓库读取权限已失效";
+            default -> "Git 仓库当前不可访问";
+        };
     }
 
-    private static String transientReason(PlatformException exception) {
+    private static boolean isGitAccessFailure(PlatformException exception) {
+        return exception.errorCode() == ErrorCode.GIT_UNAVAILABLE
+                || exception.errorCode() == ErrorCode.GIT_TIMEOUT;
+    }
+
+    private static String inspectionReason(PlatformException exception) {
         if (exception.errorCode() == ErrorCode.GIT_TIMEOUT) {
             return "TIMEOUT";
         }
         Object failureType = exception.details().get("gitFailureType");
-        return failureType == null ? "INSPECTION_FAILED" : failureType.toString();
+        if (failureType == null || "UNKNOWN".equals(failureType.toString())) {
+            return "INSPECTION_FAILED";
+        }
+        return failureType.toString();
     }
 
     private static String unknownMessage(String reason) {

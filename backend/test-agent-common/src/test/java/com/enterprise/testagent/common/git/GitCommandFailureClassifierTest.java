@@ -44,6 +44,17 @@ class GitCommandFailureClassifierTest {
     }
 
     @Test
+    void classifiesSslHandshakeFailureAsNetworkFailure() {
+        GitCommandFailure failure = GitCommandFailureClassifier.classify(
+                List.of("git", "ls-remote", "--heads", "https://git.example.test/team/repo.git"),
+                "fatal: unable to access 'https://git.example.test/team/repo.git/': "
+                        + "LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to git.example.test:443");
+
+        assertThat(failure.type()).isEqualTo("NETWORK_UNAVAILABLE");
+        assertThat(failure.message()).contains("Git 远端网络连接失败");
+    }
+
+    @Test
     void classifiesMissingRemoteBranchAsBranchNotFound() {
         GitCommandFailure failure = GitCommandFailureClassifier.classify(
                 List.of("git", "clone", "--branch", "missing", "--single-branch", "git@gitee.com:org/repo.git", "/tmp/repo"),

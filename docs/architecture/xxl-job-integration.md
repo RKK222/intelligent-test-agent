@@ -123,7 +123,7 @@ SCM Git 姓名补偿使用 `GLOBAL_MUTEX`，由 ROUND 选中的单个 Java 顺�
 
 闲置用户进程关闭也使用 `GLOBAL_MUTEX` 避免重复广播。每个 Java 只扫描当前 `linuxServerId`，并以 Redis manager 快照和本机 WebSocket 注册表确认自己持有目标容器；最近活动取全部来源 Run 的最大更新时间，无 Run 时取 manager 权威启动时间。候选 SQL 先收窄本服务器进程，再按现有 Run 用户索引和 Session 创建人索引分别聚合直接归属/legacy 活动，避免按候选重复扫描 Run 全表。北京时间 02:00 查询还排除执行窗口未结束的前一晚遗留任务和时段早于次日 00:00 的 `SCHEDULED/DISPATCHING` 任务；已过窗口、次日任务和终态不额外保护。超过 15 天的候选仍须在用户级 dispose 闸门内二次核对，任何 active Run、当日待投递任务、Session 运行、绑定/代次变化或 manager 不确定都跳过；成功关闭只把进程写为 `STOPPED`，保留 ACTIVE binding 供下次使用自动拉起。
 
-工作空间 Git 权限巡检按用户级投影结果：服务器端复用版本选择前的 SSH key + `git ls-remote` 预检，本地端复用既有客户端文件 RPC 和用户本机 Git/SSH 环境。只有明确缺少凭据、认证/仓库拒绝、非 Git 目录或缺少 origin 写为 `INACCESSIBLE`；网络、超时、旧客户端和路由变化写为 `UNKNOWN`，不能导致置灰。广播和任务结果只包含事件类型、traceId 与计数，不携带用户、路径、仓库 URL、命令或 stderr。
+工作空间 Git 权限巡检按用户级投影结果：服务器端复用版本选择前的 SSH key + `git ls-remote` 预检，本地端复用既有客户端文件 RPC 和用户本机 Git/SSH 环境。已执行的远端只读探测只要失败，包括缺少凭据、认证/仓库拒绝、网络、SSL/TLS、超时、非 Git 目录或缺少 origin，均写为 `INACCESSIBLE` 并置灰；旧客户端、断线、路由变化和畸形回包因没有形成有效探测结论写为 `UNKNOWN`。广播和任务结果只包含事件类型、traceId 与计数，不携带用户、路径、仓库 URL、命令或 stderr。
 
 JVM 和 XXL 统一使用 `Asia/Shanghai`。运行记录清理在北京时间 08:00 执行，对应原 UTC 00:00；XXL 日志保留 30 天，旧 PostgreSQL scheduler 历史仍由任务清理 7 天。
 

@@ -45,7 +45,7 @@ class LocalGitAccessCheckerTest {
     }
 
     @Test
-    void shouldKeepWorkspaceSelectableWhenNetworkIsUnavailable() {
+    void shouldDisableWorkspaceWhenNetworkIsUnavailable() {
         PlatformException unavailable = new PlatformException(
                 ErrorCode.GIT_UNAVAILABLE,
                 "Git 不可用",
@@ -54,8 +54,9 @@ class LocalGitAccessCheckerTest {
         LocalGitAccessChecker.GitAccessResult result =
                 new LocalGitAccessChecker(executor(unavailable)).check(temporaryDirectory.toString());
 
-        assertThat(result.status()).isEqualTo("UNKNOWN");
+        assertThat(result.status()).isEqualTo("INACCESSIBLE");
         assertThat(result.reason()).isEqualTo("NETWORK_UNAVAILABLE");
+        assertThat(result.message()).contains("当前不可访问");
     }
 
     private static GitCommandExecutor executor(PlatformException remoteFailure) {
