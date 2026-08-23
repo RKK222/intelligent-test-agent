@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -58,6 +59,8 @@ final class LocalClientTray implements AutoCloseable {
     private final ExecutorService actions;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicReference<String> lastUiKey = new AtomicReference<>();
+    private final AtomicReference<String> lastPublicCapabilityStatus = new AtomicReference<>();
+    private final AtomicReference<String> lastPublicCapabilityDigest = new AtomicReference<>();
     private final AtomicReference<LocalClientPayloads.WorkspaceRegistered> latestWorkspace = new AtomicReference<>();
 
     private LocalClientTray(
@@ -201,13 +204,20 @@ final class LocalClientTray implements AutoCloseable {
         try {
             LocalClientRuntimeSnapshot snapshot = connection.runtimeSnapshot();
             LocalClientPublicCapabilityStore.State capability = connection.publicCapabilitySnapshot();
+            String previousCapabilityStatus = lastPublicCapabilityStatus.getAndSet(capability.status());
+            String previousCapabilityDigest = lastPublicCapabilityDigest.getAndSet(capability.activeDigest());
             String uiKey = snapshot.connectionState() + ":" + snapshot.activeOperations().size() + ":"
                     + processLabel(snapshot.processStatus()) + ":" + capability.status() + ":"
+                    + (capability.activeDigest() == null ? "" : capability.activeDigest()) + ":"
                     + (capability.pendingAvailable() == null ? "" : capability.pendingAvailable().bundleDigest());
             if (uiKey.equals(lastUiKey.getAndSet(uiKey))) {
                 return;
             }
-            EventQueue.invokeLater(() -> applySnapshot(snapshot));
+            EventQueue.invokeLater(() -> {
+                applySnapshot(snapshot);
+                notifyPublicCapabilityTransition(
+                        previousCapabilityStatus, previousCapabilityDigest, capability);
+            });
         } catch (RuntimeException exception) {
             LOGGER.debug("local_client_tray_refresh_failed reason={}", exception.getClass().getSimpleName());
         }
@@ -223,17 +233,9 @@ final class LocalClientTray implements AutoCloseable {
         int operationCount = snapshot.activeOperations().size();
         progressItem.setLabel("会话进度 · " + operationCount + " 项进行中");
         LocalClientPublicCapabilityStore.State capability = connection.publicCapabilitySnapshot();
-        if (capability.pendingAvailable() == null) {
-            publicCapabilityItem.setLabel("公共能力 · " + shortCommit(capability.activeCommit()) + " · 当前");
-            publicCapabilityItem.setEnabled(false);
-        } else {
-            var available = capability.pendingAvailable();
-            publicCapabilityItem.setLabel(
-                    "更新公共能力 " + shortCommit(available.sourceCommit()) + " · A" + available.agentCount()
-                            + " S" + available.skillCount() + " T" + available.toolCount());
-            publicCapabilityItem.setEnabled(
-                    snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE);
-        }
+        publicCapabilityItem.setLabel(publicCapabilityMenuLabel(capability));
+        publicCapabilityItem.setEnabled(publicCapabilityMenuEnabled(
+                capability, snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE));
         Dimension size = systemTray.getTrayIconSize();
         trayIcon.setImage(renderIcon(
                 petImage, size.width, size.height, statusColor(snapshot.connectionState())));
@@ -307,9 +309,7 @@ final class LocalClientTray implements AutoCloseable {
         if (available == null) {
             return;
         }
-        String message = "Agent " + available.agentCount()
-                + " / Skill " + available.skillCount()
-                + " / Tool " + available.toolCount() + "\n"
+        String message = "检测到新的公共能力版本。\n"
                 + changeSummary(available.changeSummaryJson()) + "\n"
                 + (available.requiresRestart()
                         ? "包含 Tool 或依赖变化，将重启本地 OpenCode。"
@@ -327,8 +327,53 @@ final class LocalClientTray implements AutoCloseable {
         }
     }
 
-    private static String shortCommit(String commit) {
-        return commit == null || commit.isBlank() ? "未初始化" : commit.substring(0, Math.min(12, commit.length()));
+    static String publicCapabilityMenuLabel(LocalClientPublicCapabilityStore.State capability) {
+        if (capability.pendingAvailable() == null) {
+            return "公共能力已是最新";
+        }
+        if (isPublicCapabilityUpdateInProgress(capability.status())) {
+            return "公共能力更新中…";
+        }
+        if (isPublicCapabilityUpdateFailed(capability.status())) {
+            return "公共能力更新失败，点击重试…";
+        }
+        return "公共能力有更新…";
+    }
+
+    static boolean publicCapabilityMenuEnabled(
+            LocalClientPublicCapabilityStore.State capability,
+            boolean online) {
+        return online
+                && capability.pendingAvailable() != null
+                && !isPublicCapabilityUpdateInProgress(capability.status());
+    }
+
+    private void notifyPublicCapabilityTransition(
+            String previousStatus,
+            String previousDigest,
+            LocalClientPublicCapabilityStore.State current) {
+        if (previousStatus == null) {
+            return;
+        }
+        if ("SUCCEEDED".equals(current.status())
+                && current.pendingAvailable() == null
+                && (!"SUCCEEDED".equals(previousStatus)
+                        || !Objects.equals(previousDigest, current.activeDigest()))) {
+            displayMessage("公共能力更新", "更新完成，可以继续使用", TrayIcon.MessageType.INFO);
+            return;
+        }
+        if (isPublicCapabilityUpdateFailed(current.status())
+                && !current.status().equals(previousStatus)) {
+            displayMessage("公共能力更新失败", "请点击托盘菜单重试或查看日志", TrayIcon.MessageType.ERROR);
+        }
+    }
+
+    private static boolean isPublicCapabilityUpdateInProgress(String status) {
+        return "PENDING".equals(status) || "DOWNLOADING".equals(status) || "APPLYING".equals(status);
+    }
+
+    private static boolean isPublicCapabilityUpdateFailed(String status) {
+        return "FAILED".equals(status) || "ROLLED_BACK".equals(status);
     }
 
     private static String changeSummary(String summaryJson) {

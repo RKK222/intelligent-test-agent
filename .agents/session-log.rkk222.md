@@ -13240,3 +13240,26 @@
 
 - 客户端灰度现在只表达“客户端功能是否可见”，不会改变客户端、Client Key 或本地 OpenCode 的真实运行状态；服务端关闭、服务端重启和本地重启的语义与影响范围彼此独立。
 - 既有 HTTP 路径和 DTO 保持兼容，仅扩展现有灰度接口语义；不涉及 RunEvent/SSE、数据库结构、Flyway、部署节点、性能模型、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-23 - 简化托盘公共能力提示并展示更新进度
+
+### Why
+
+- 托盘用 `A17 S18 T10` 和 commit 展示完整包总数，普通用户无法理解；点击更新后也缺少持续状态和明确完成反馈。
+
+### What
+
+- 托盘公共能力项改为“有更新、更新中、已是最新、更新失败点击重试”四种动作状态，不再展示 commit 和 Agent/Skill/Tool 数量。
+- `PENDING/DOWNLOADING/APPLYING` 期间禁用重复点击；`FAILED/ROLLED_BACK` 恢复重试入口。
+- 更新成功或失败时发送 macOS 系统通知；确认弹窗只保留变更类型、本地 OpenCode 是否重启及本机权限提示。
+
+### How
+
+- 复用 `LocalClientPublicCapabilityStore.State` 现有状态和托盘 2 秒内存快照刷新，没有新增轮询、协议帧或持久化字段。
+- JDK 25 定向执行托盘、能力 Store 与 Updater 测试共 13 项通过；最终托盘用例 4 项复跑通过，Maven reactor 均为 `BUILD SUCCESS`。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录并执行目标差异检查；未纳入并行遗留的 Git 失败分类补充改动。
+
+### Result
+
+- 用户点击更新后可直接从小兔子菜单看到更新中/完成/失败状态，成功或失败还会收到系统通知，不必进入个人设置。
+- 本次只调整本地客户端托盘展示、测试和模块文档，不变更 HTTP API、RunEvent、WebSocket 协议、数据库、Flyway、权限模型、部署节点、`.env*`、generated SDK 或 OpenCode 只读源码。

@@ -3,10 +3,12 @@ package com.enterprise.testagent.localclient;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.net.URI;
 import java.nio.file.Path;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class LocalClientTrayTest {
@@ -41,5 +43,37 @@ class LocalClientTrayTest {
         assertThatThrownBy(() -> LocalClientDesktopActions.workspaceWebUri(
                 URI.create("http://127.0.0.1:3000"), "/Users/test/project"))
                 .isInstanceOf(java.io.IOException.class);
+    }
+
+    @Test
+    void rendersConcisePublicCapabilityUpdateStatesWithoutPackageCounts() {
+        LocalClientPublicCapabilityStore.State available = capabilityState("SUCCEEDED", true);
+        LocalClientPublicCapabilityStore.State updating = capabilityState("DOWNLOADING", true);
+        LocalClientPublicCapabilityStore.State failed = capabilityState("FAILED", true);
+        LocalClientPublicCapabilityStore.State current = capabilityState("SUCCEEDED", false);
+
+        assertThat(LocalClientTray.publicCapabilityMenuLabel(available)).isEqualTo("公共能力有更新…");
+        assertThat(LocalClientTray.publicCapabilityMenuLabel(updating)).isEqualTo("公共能力更新中…");
+        assertThat(LocalClientTray.publicCapabilityMenuLabel(failed)).isEqualTo("公共能力更新失败，点击重试…");
+        assertThat(LocalClientTray.publicCapabilityMenuLabel(current)).isEqualTo("公共能力已是最新");
+        assertThat(LocalClientTray.publicCapabilityMenuEnabled(available, true)).isTrue();
+        assertThat(LocalClientTray.publicCapabilityMenuEnabled(updating, true)).isFalse();
+        assertThat(LocalClientTray.publicCapabilityMenuEnabled(available, false)).isFalse();
+        assertThat(LocalClientTray.publicCapabilityMenuLabel(available))
+                .doesNotContain("A17", "S18", "T10");
+    }
+
+    private static LocalClientPublicCapabilityStore.State capabilityState(String status, boolean hasUpdate) {
+        var pending = hasUpdate
+                ? new LocalClientPayloads.PublicCapabilityAvailable(
+                        "lci_tray_test", 7L, "c".repeat(40), "d".repeat(64),
+                        17, 18, 10, true, "{\"toolsChanged\":true}")
+                : null;
+        return new LocalClientPublicCapabilityStore.State(
+                "a".repeat(40), "b".repeat(64), null, status, null,
+                pending, null,
+                pending == null ? null : pending.sourceCommit(),
+                pending == null ? null : pending.bundleDigest(),
+                Instant.parse("2026-08-23T12:00:00Z"));
     }
 }
