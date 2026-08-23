@@ -13141,3 +13141,29 @@
 
 - 超管明确关闭后，用户前端不再展示服务端 OpenCode 状态和服务器工作区；本地客户端状态/工作区不受影响。头像菜单仍明确为“重启服务端 OpenCode”，可恢复同一原服务器实例。
 - 未修改 `.env*`、generated SDK、OpenCode 只读源码、部署节点、数据库结构、安全权限或性能协议；当前服务已完整启动并通过健康检查。
+
+## 2026-08-23 - 修复公共能力发布基线并重建 Mac 测试客户端
+
+### Why
+
+- 用户发布 `wrui0823` 公共 subagent 后，服务器 OpenCode 已识别但本地客户端没有待安装能力；发布 commit `458ae2c1` 被标记为 `SERVER_ONLY`。
+- 排查确认 Agent Markdown 合法且 `mode: subagent` 不影响能力包收集，阻断来自公共 Tool 依赖清单未继承以及本机可移植依赖字节版本漂移。
+
+### What
+
+- 在公共配置 Git 恢复并跟踪 `opencode/tools/package.json`，锁定 `@opencode-ai/plugin@1.18.4`，随后补充 `private=true`；公共仓库已推送提交 `f362cb7d` 和 `4d908037`。
+- 使用平台现有 `opencode-node-runtime.package.json/lock` 执行 `npm ci --ignore-scripts`，把本地能力包生成服务切换到受控 1.18.4 依赖目录；未修改 `.env.test`，也未放宽 `SERVER_ONLY` 安全校验。
+- 新公共提交 `4d908037` 已生成 `AVAILABLE` 完整包，含 17 Agent、18 Skill、10 Tool；`wrui0823.md` 和 `@opencode-ai/plugin` 字节均在包内，客户端实例进入 `UPDATE_AVAILABLE`，仍等待用户确认安装。
+- 生成本地 Mac 测试包 `TestAgent-Mac-Test-20260823192454.tar.gz`，包含客户端 JAR、OpenCode 1.18.4、公共能力完整包和固定 JDK 25 的启动脚本；该制品位于 `.tmp/local-client-build/`，不作为生产签名 PKG/麒麟 DEB。
+
+### How
+
+- 后端、manager、frontend 与 ClickHouse 使用 JDK 25、`.env.test` 和既有构建制品完成重启，readiness 与 3000 页面正常；能力包数据库记录为 `AVAILABLE`，摘要 `9f41b777...deae54`。
+- `mvn -pl test-agent-local-client -am test` 通过：local-client 91 项（1 项既有平台条件跳过），上游依赖模块 120 项全部通过。
+- 实际能力包 SHA-256 为 `cfd486f0...f5bb4`，Mac 测试归档 SHA-256 为 `0fb4cc00...b776d`；客户端 `--version` 返回 `20260823192454`，内置 OpenCode 返回 `1.18.4`。
+
+### Result
+
+- 公共 subagent 已被完整打包并产生用户确认更新状态；它不会出现在 primary Agent 选择器中，但安装后应由本地 `/agent` 目录以 `mode=subagent` 返回。
+- 当前 4106 仍保持旧能力版本，未发生自动安装，符合用户确认策略；真实“确认更新 → WSS 分片安装 → 4106 出现 wrui0823”留给用户从托盘或网页执行。
+- 本次未修改平台源代码、API、RunEvent、数据库结构、Flyway、`.env*`、generated SDK 或 OpenCode 只读源码；根工作树其它未提交改动保持原状。
