@@ -72,6 +72,9 @@ create_backend_node() {
     'TEST_AGENT_DB_PASSWORD=secret-must-not-print' \
     'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-must-not-print' \
     'TEST_AGENT_INTERNAL_PROXY_API_KEY=proxy-must-not-print' \
+    'TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=clickhouse-must-not-print' \
+    'TEST_AGENT_MEMORY_SERVICE_API_KEY=memory-service-key-must-not-print-123456' \
+    'TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=memory-hmac-must-not-print-123456789' \
     >"${root}/${node}/config/backend.env"
   printf '%s\n' 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-must-not-print' \
     >"${root}/${node}/config/docker.env"

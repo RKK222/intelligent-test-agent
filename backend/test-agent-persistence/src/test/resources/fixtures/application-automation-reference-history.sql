@@ -63,6 +63,11 @@ create table user_notifications (
     )
 );
 
+-- 上一版 release 已包含本地客户端工作区注册表；后续 Git 巡检投影会引用该稳定主键。
+create table workspaces (
+    workspace_id varchar(128) primary key
+);
+
 create table application_workspaces (
     workspace_id varchar(128) primary key,
     app_id varchar(128) not null,

@@ -13289,3 +13289,26 @@
 
 - “F-COSS 移动端”现在会按真实不可访问结论置灰且不可选；`UNKNOWN` 只保留给没有完成有效 Git 探测的情形。
 - 本次不新增部署节点，不变更 HTTP API 结构、RunEvent、WebSocket 协议、数据库、Flyway、权限模型、`.env*`、generated SDK 或 OpenCode 只读源码；未登录浏览器会话，因此没有冒用凭据做页面点击，UI 行为由既有禁用组件测试与真实巡检投影共同验证。
+
+## 2026-08-23 - 收口企业离线发布迁移与部署门禁
+
+### Why
+
+- 以 2026-08-18 上一企业包为基线重新审计当前 `release` 时，真实 PostgreSQL 历史升级测试暴露自动化引用旧基线缺少上一版已存在的 `workspaces` 表；前端 API 测试请求遗漏新必填 `alias`，多个部署验收夹具也没有跟上 Node lock、OpenCode 观测插件、客户端签名公钥、ClickHouse/Memory 密钥继承和现行文件路由安全边界。
+
+### What
+
+- 只补齐测试和发布验收夹具：自动化引用历史库增加 `workspaces` 基线；前端自动化引用请求增加 `alias`；多后台与自动节点夹具补齐 Node lock、观测插件和已部署组件密钥字段；单配置夹具补齐客户端公钥与 ClickHouse 配置。
+- 用户 OpenCode 场景改用负数测试主键、现行超级管理员限时只读排查路由和数据库权威 backend server，场景间释放 manager 端口；旧远端脏 binding 按公共路由规则验收 `503 OPENCODE_UNAVAILABLE`，明确禁止本机降级。
+
+### How
+
+- 真实 PostgreSQL Flyway 兼容链 31/31、XXL MySQL Testcontainers 7/7、ClickHouse 集成 4/4 通过；相关持久化定向 23/23 通过。后端 25 个 reactor 模块全绿，应用模块 94 项中因同一进程注入 `.env.test` 导致两个默认配置隔离断言受环境污染，随后在干净进程复跑 20/20 通过。
+- 前端全量 Vitest 150 个文件通过，2208 passed / 1 skipped；修正夹具后 backend-api 123/123、全 workspace lint、typecheck、生产 build 通过。
+- 客户端单壳 DEB、签名发布、安装引导、静默升级/降级/自动回滚与凭据复用通过；多后台、自动节点、Nginx、ClickHouse、MySQL、Redis、XXL、归档卫生、日志采集、单配置和 OpenCode 用户进程门禁均复跑通过。
+
+### Result
+
+- 未修改任何已发布 PostgreSQL/ClickHouse/XXL migration 字节，只修复验收基线；不新增 API、事件、数据库结构、部署节点、生产配置或依赖，不修改 `.env*`、generated SDK 和 OpenCode 只读源码。
+- 企业公共能力权威库固定为 `4d9080373845ffece1d6d055a3b042ad383a5aab`，现有能力包含 17 个 Agent、18 个 Skill、10 个 Tool 和 22 个裁剪后的离线 Node 依赖，未包含密钥、`opencode.jsonc`、`.git` 或原始仓库 `node_modules`。
+- 正式整包仍需存量客户端签名私钥；本机只有公钥 SHA-256 `6305689946819f97ecb8a3112bff8eb18386a8011207b31975c188860bea500f`，不得用临时密钥轮换后冒充可升级交付。

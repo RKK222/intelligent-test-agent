@@ -123,6 +123,8 @@ cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" \
   "${PROGRAMS_RUNTIME}/package.json"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \
   "${PROGRAMS_RUNTIME}/package-lock.json"
+cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
+  "${PROGRAMS_RUNTIME}/opencode-observability-plugin.mjs"
 for dependency_entry in \
   '@modelcontextprotocol/sdk|1.29.0|dist/esm/server/mcp.js' \
   '@opencode-ai/plugin|1.18.4|dist/index.js' \
@@ -160,6 +162,7 @@ cp "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
 cp -R "${ROOT_DIR}/deploy/internal/experience-workspace-template" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/verify-opencode-tool-runtime.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/configure-nginx.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/toolbox.env.example" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/toolbox-docker.sh" "${RELEASE_ROOT}/deploy/internal/"

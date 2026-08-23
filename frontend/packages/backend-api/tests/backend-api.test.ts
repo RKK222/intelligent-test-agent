@@ -931,6 +931,7 @@ describe("backend-api", () => {
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
 
     await expect(client.configureAutomationReferenceRepository("app/demo", "repo/auto", {
+      alias: "api-automation",
       branch: "main",
       directoryPath: "scripts/e2e",
       description: "接口自动化 / main / scripts/e2e，只读自动化引用",
