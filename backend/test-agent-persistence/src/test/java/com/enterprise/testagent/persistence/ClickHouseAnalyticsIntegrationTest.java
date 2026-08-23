@@ -288,6 +288,35 @@ class ClickHouseAnalyticsIntegrationTest {
                 false,
                 true);
         traceMapper.insertCatalog(catalog, 101);
+        TraceModels.Catalog activeCatalog = new TraceModels.Catalog(
+                "trc_22222222222222222222222222222222",
+                "usr-plugin",
+                "王五",
+                "插件组织",
+                "研发二部",
+                "测试平台",
+                "SERVER_PROCESS",
+                "OPENCODE_PLUGIN",
+                "process-plugin",
+                "",
+                "bjp-plugin",
+                "linux-plugin",
+                "ses-plugin-active",
+                "run-plugin-active",
+                "test-design-agent",
+                "ACTIVE",
+                "ARCHIVED",
+                occurredAt.plusSeconds(1),
+                occurredAt.plusSeconds(2),
+                occurredAt,
+                50,
+                49,
+                2048,
+                0,
+                0,
+                false,
+                true);
+        traceMapper.insertCatalog(activeCatalog, 50);
         traceMapper.insertSpans(List.of(new TraceModels.Span(
                 catalog.traceId(),
                 "evt_000000000000000000000000000000000101",
@@ -370,7 +399,7 @@ class ClickHouseAnalyticsIntegrationTest {
         });
         assertThat(traceMapper.search(traceFilter, 20, 0))
                 .extracting(TraceModels.Catalog::traceId)
-                .containsExactly(catalog.traceId());
+                .containsExactly(activeCatalog.traceId(), catalog.traceId());
         assertThat(jdbc.sql("""
                         select count() from system.columns
                         where database = currentDatabase()

@@ -13036,3 +13036,31 @@
 
 - Trace 总览短条现在可点击、可键盘操作，并能明确定位到对应明细；入口只保留在系统控制台，图标与其它菜单能力可区分。
 - 本次仅涉及前端交互、图标、测试和稳定文档，不变更 HTTP API、RunEvent/SSE、数据库、ClickHouse schema、部署协议、安全权限、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-23 - 对齐 DSH 语义轨迹与范围框选
+
+### Why
+
+- 真实 Trace 把 OpenCode 流式 delta、状态和语义记录全部绘入同一总览，并为短事件强设最小宽度，导致数千条事件叠成连续色带；DSH 实际展示的是归一化语义记录，并支持在三泳道上拖拽框选范围。
+- 用户要求保持紧凑纯色样式，同时达到 DSH 的清晰分段、耗时提示和范围选择效果。
+
+### What
+
+- 新增只用于页面展示的语义投影：保留 system/user/context、Assistant Step、Tool 终态及未结束调用；将最终文本/reasoning 合入 Assistant Step，去重重复 system prompt，不再把原始 delta/状态逐条绘入总览和明细。原始事件仍完整保留在服务器归档及单条下载中。
+- 等宽模式改为按语义记录严格连续分段，真实耗时模式按 span 展开；MODEL 使用相邻两个纯色色块表达 TTFT 与 Decode，悬停显示起止时间和 Total/TTFT/Decode，不使用渐变。
+- 三泳道支持水平拖拽范围框、跨泳道蓝色边界、窗外记录降权、指针捕获和拖拽后 click 隔离；双击或 Esc 清除范围，普通条带点击仍选中并滚动到明细。
+- 指针只在真实拖动超过阈值后捕获，修复范围框选上线后单个色块无法点击的问题；检查器按 System/User/Context、Assistant、Tool/Skill 分别提供 `Preview`、`Output`、`Result`，并从归一化正文、reasoning、工具状态和原始事件逐级回退，不再统一显示“没有返回字段”。
+- 不完整 Trace 会聚合尚未终止的 Assistant delta、Tool 状态和生命周期事件，避免目录可见但详情空白；`status=INCOMPLETE` 在 ClickHouse 查询中以 `complete=0` 为准。Trace 目录和事件检查器均可独立折叠，收起后中间轨迹占用释放空间，并保留 32px 恢复栏。
+
+### How
+
+- 直接检查本机 DSH `127.0.0.1:3080` 的真实页面交互，确认等宽语义分段、Duration span、深色耗时提示和拖拽范围的重叠筛选语义。
+- 用真实归档 `trc_fd13b13f9caa2fcd5b85aedea13407a0` 验证：3,413 条原始事件投影为 35 条语义记录，同泳道重叠为 0；拖拽范围选中 9 条、窗外 26 条；MODEL 两个纯色阶段及 `TTFT 527 ms / Decode 1083 ms` 提示正常。
+- 前端最终全量 Vitest 150 个文件通过，2202 passed / 1 skipped；Trace 定向 3/3、agent-web `vue-tsc` 和生产构建通过。ClickHouse 集成测试 4/4 通过，覆盖 `ACTIVE + ARCHIVED + complete=false` 仍可由“不完整”筛选命中。
+- 使用真实归档验证不完整生命周期 Trace 可显示 `6 records / 167 raw events`，单色块直接点击与范围框选后再次点击均保持选中；Tool Result 返回真实 Skill 参数/结果，Assistant Output 返回 reasoning。两侧折叠交互由组件测试校验折叠类、恢复入口和展开回切。
+- 使用 JDK 25、`.env.test`、`test` profile 和 ClickHouse 做最终重启时，构建与 ClickHouse 连通成功，但工作区另一组未提交的公共能力包功能先因多构造器缺少注入标记失败；临时只为验证补标记后，又被已经执行但源码字节发生变化的 `V20260823104611` checksum 不一致拦截。按 Flyway 规则未执行 repair、未改测试库历史，临时标记已撤销，因此本轮最新工作区不能宣称完整启动通过。
+
+### Result
+
+- Trace 总览从传输事件堆叠改为可读的 DSH 语义轨迹，范围框选、直接点选、类型化详情、不完整轨迹和两侧折叠均已实现，同时保留完整原始归档证据。
+- 本次变更了既有 Trace 查询的 `INCOMPLETE` 过滤语义，但未变更 HTTP 字段、RunEvent/SSE、数据库或 ClickHouse schema、部署协议、安全权限、`.env*`、generated SDK 或 OpenCode 只读源码；未纳入 `.reasonix/`、根目录 `node_modules/` 和并行公共能力包改动。最终真实服务重启仍受上述并行 migration checksum 冲突阻塞。

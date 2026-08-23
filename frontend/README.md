@@ -312,8 +312,14 @@ tools/dev-phase11-real-e2e.sh --start-services
 `/system?section=traces`。只有实时角色为 `SUPER_ADMIN` 时显示菜单，router 直接访问也会校验角色；后端四个 Trace API 仍再次
 强制鉴权。工作台最左 activity rail 不再重复提供 Trace 入口；系统控制台菜单与页签统一使用 Waypoints 轨迹图标。页面左侧
 持续保留基础目录，选中后在同一控制台原位展开 Input/Model/Tools 三泳道，支持 Duration、Turns、
-Calls、搜索、父子 Agent 折叠和 Summary/Payload/Result/Timing/Source 检查器，并显示覆盖起点、积压、归档、脱敏、丢弃和
+Calls、搜索、父子 Agent 折叠和 Summary/Payload/Result/Timing/Source 检查器；左右两侧的 Trace 目录与事件检查器都可独立折叠，折叠后中间轨迹自动占用释放空间，并显示覆盖起点、积压、归档、脱敏、丢弃和
 完整度。交互语义与 DSH 一致：Duration 在等宽和真实耗时轴之间切换，Turns 折叠/展开全部 Turn，Calls 折叠/展开 Tool
-调用；三泳道总览条带使用真实可聚焦按钮和不改变视觉高度的扩展命中区，点击后同步选中并滚动到对应明细行。Timing 展示
+调用；三泳道只投影 system/user/context、Assistant Step、Tool 终态及未结束调用等 DSH 语义记录，不把原始 delta/状态事件逐条叠入总览，
+原始事件仍保留在服务器归档与单条下载中。等宽模式按语义记录严格分段，真实耗时模式按 span 展开；模型条使用相邻纯色色块区分
+TTFT 与 Decode；三泳道上水平拖拽可框选时间范围并淡化窗外记录，双击或按 Esc 清除，悬停显示时间与耗时浮层。只有确认拖拽后才捕获指针，
+普通点击色块始终同步选中并滚动到对应明细行。检查器按记录类型显示 Preview/Output/Result：System/User/Context 预览正文，Assistant
+展示 text/reasoning/finish，Tool/Skill 展示 result/output/error，无专用字段时回退原始 payload。Timing 展示
 Step 起点、耗时、TTFT、Decode 及 input/output/reasoning/cache-read/cache-write token。正文与单条下载
 来自服务器归档，不能从客户端、本地路径或 ClickHouse 拼装。
+不完整 Run 同样允许打开：尚未闭合的 Assistant delta 和 Tool 状态会按 message/call 聚合成进行中记录，只有生命周期事件时按类型
+保留最后一条，既能检查当前进度，也不会重新把传输分片堆叠到时间线；“不完整”筛选包含所有 `complete=false` Trace。

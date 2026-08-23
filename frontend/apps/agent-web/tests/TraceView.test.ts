@@ -41,8 +41,8 @@ const trace: TraceCatalog = {
   startedAt: "2026-08-22T08:00:00Z",
   updatedAt: "2026-08-22T08:05:00Z",
   coverageStartAt: "2026-08-22T08:00:00Z",
-  completeThrough: 5,
-  eventCount: 5,
+  completeThrough: 6,
+  eventCount: 6,
   archivedBytes: 2048,
   droppedCount: 1,
   pendingChunks: 0,
@@ -62,24 +62,27 @@ const fragmentPayload = {
 const fragmentData = Buffer.from(JSON.stringify(fragmentPayload), "utf8").toString("base64");
 const events: TraceRawEvent[] = [
   event(1, "SYSTEM_PROMPT", { system: ["You are a test agent"] }),
-  event(2, "ASSISTANT_STEP_METRICS", {
-    recordKind: "message",
-    event: { type: "message.part.updated" },
-    reasoning: "分析路径",
-    startedAt: "2026-08-22T08:00:01.800Z",
-    durationMs: 200,
-    ttftMs: 40,
-    decodeMs: 160,
-    tokensInput: 100,
-    tokensOutput: 20,
-    tokensReasoning: 8,
-    tokensCacheRead: 60,
-    tokensCacheWrite: 5,
-    tokensTotal: 128,
-    decodeTokens: 20,
-    cost: 0.01,
-    finishReason: "stop",
-  }),
+  {
+    ...event(2, "ASSISTANT_STEP_METRICS", {
+      recordKind: "message",
+      event: { type: "message.part.updated" },
+      reasoning: "分析路径",
+      startedAt: "2026-08-22T08:00:01.800Z",
+      durationMs: 200,
+      ttftMs: 40,
+      decodeMs: 160,
+      tokensInput: 100,
+      tokensOutput: 20,
+      tokensReasoning: 8,
+      tokensCacheRead: 60,
+      tokensCacheWrite: 5,
+      tokensTotal: 128,
+      decodeTokens: 20,
+      cost: 0.01,
+      finishReason: "stop",
+    }),
+    messageId: "msg-assistant",
+  },
   {
     ...event(3, "TOOL_EXECUTE_AFTER", {
       tool: "skill",
@@ -104,6 +107,12 @@ const events: TraceRawEvent[] = [
     dataBase64: fragmentData,
   }),
   event(5, "OPENCODE_EVENT", { event: { type: "session.idle" } }),
+  event(6, "OPENCODE_EVENT", {
+    event: {
+      type: "message.part.delta",
+      properties: { messageID: "msg-assistant", partID: "text-1", field: "text", delta: "raw fragment" },
+    },
+  }),
 ];
 
 describe("TraceView", () => {
@@ -112,7 +121,7 @@ describe("TraceView", () => {
     sessionStorage.clear();
     api.listTraces.mockResolvedValue({ items: [trace], page: 1, size: 30, total: 1 });
     api.getTrace.mockResolvedValue(trace);
-    api.getTraceEvents.mockResolvedValue({ items: events, completeThrough: 5, complete: false });
+    api.getTraceEvents.mockResolvedValue({ items: events, completeThrough: 6, complete: false });
     api.downloadTrace.mockResolvedValue(new Blob(["gzip"]));
     api.getCurrentUser.mockResolvedValue({
       userId: "usr_admin",
@@ -154,14 +163,57 @@ describe("TraceView", () => {
     await fireEvent.click(view.getByText("test-design-agent").closest("button")!);
     await waitFor(() => expect(view.getAllByText("test-design").length).toBeGreaterThan(0));
     expect(api.getTraceEvents).toHaveBeenCalledWith(trace.traceId, 0, 500);
-    const laneText = Array.from(view.container.querySelectorAll(".lane-track"))
-      .map((element) => element.textContent?.replace(/\s+/g, " ").trim());
+    const laneText = Array.from(view.container.querySelectorAll(".lane-labels span"))
+      .map((element) => element.textContent?.trim());
     expect(laneText).toEqual(["Input", "Model", "Tools"]);
+    expect(view.container.querySelectorAll(".lane-dot")).toHaveLength(3);
+    expect(view.getByText(/3 records \/ 6 raw events/)).toBeTruthy();
+
+    await fireEvent.click(view.getByRole("button", { name: "折叠 Trace 目录" }));
+    expect(view.container.querySelector(".trace-content")?.classList.contains("trace-content--catalog-collapsed")).toBe(true);
+    expect(view.getByRole("button", { name: "展开 Trace 目录" })).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "展开 Trace 目录" }));
+    expect(view.getByRole("button", { name: "折叠 Trace 目录" })).toBeTruthy();
+
+    await fireEvent.click(view.getByRole("button", { name: "折叠事件检查器" }));
+    expect(view.container.querySelector(".trace-content")?.classList.contains("trace-content--inspector-collapsed")).toBe(true);
+    expect(view.getByRole("button", { name: "展开事件检查器" })).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "展开事件检查器" }));
+    expect(view.getByRole("button", { name: "折叠事件检查器" })).toBeTruthy();
+
+    expect(view.getByRole("button", { name: "Raw" })).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "Preview" }));
+    expect(view.container.querySelector(".inspector-body pre")?.textContent).toContain("You are a test agent");
+
+    const laneDomain = view.getByLabelText("轨迹总览；水平拖动选择时间范围，双击或按 Escape 清除");
+    const capturePointer = vi.fn();
+    Object.defineProperty(laneDomain, "setPointerCapture", { value: capturePointer });
+    vi.spyOn(laneDomain, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 100, bottom: 50, width: 100, height: 50, toJSON: () => ({}),
+    });
+    await fireEvent.pointerDown(laneDomain, { button: 0, clientX: 40 });
+    await fireEvent.pointerMove(laneDomain, { buttons: 1, clientX: 60 });
+    await fireEvent.pointerUp(laneDomain, { button: 0, clientX: 60 });
+    expect(capturePointer).toHaveBeenCalledOnce();
+    expect(view.container.querySelector(".lane-selection--range")).toBeTruthy();
+    expect(view.container.querySelectorAll('.lane-dot[data-in-range="true"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll(".event-row.outside-range")).toHaveLength(2);
+    await fireEvent.keyDown(laneDomain, { key: "Escape" });
+    expect(view.container.querySelector(".lane-selection--range")).toBeNull();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     const skillLaneButton = view.getByRole("button", { name: "选择 test-design 事件" });
+    await fireEvent.pointerDown(skillLaneButton, { button: 0, clientX: 70 });
+    await fireEvent.pointerUp(skillLaneButton, { button: 0, clientX: 70 });
     await fireEvent.click(skillLaneButton);
+    expect(capturePointer).toHaveBeenCalledOnce();
     expect(skillLaneButton.getAttribute("aria-pressed")).toBe("true");
     expect(view.container.querySelector(".event-row.selected .event-card b")?.textContent).toBe("test-design");
+
+    const modelLaneButton = view.getByRole("button", { name: "选择 message.part.updated 事件" });
+    await fireEvent.mouseEnter(modelLaneButton);
+    expect(view.container.querySelector(".lane-tooltip")?.textContent).toContain("TTFT 40 ms");
+    expect(modelLaneButton.querySelectorAll(".lane-phase")).toHaveLength(2);
 
     const skillEventTitle = Array.from(view.container.querySelectorAll(".event-card b"))
       .find((element) => element.textContent === "test-design");
@@ -175,6 +227,8 @@ describe("TraceView", () => {
     const metricEventTitle = Array.from(view.container.querySelectorAll(".event-card b"))
       .find((element) => element.textContent === "message.part.updated");
     await fireEvent.click(metricEventTitle!.closest("button")!);
+    await fireEvent.click(view.getByRole("button", { name: "Output" }));
+    expect(view.container.querySelector(".inspector-body pre")?.textContent).toContain("分析路径");
     await fireEvent.click(view.getByRole("button", { name: "Timing" }));
     expect(view.getByText("40 ms")).toBeTruthy();
     expect(view.getByText("160 ms")).toBeTruthy();
@@ -182,9 +236,9 @@ describe("TraceView", () => {
     expect(view.getByText("0.01")).toBeTruthy();
 
     const eventRows = () => view.container.querySelectorAll(".event-row").length;
-    expect(eventRows()).toBe(4);
-    await fireEvent.click(view.getByRole("button", { name: "Calls" }));
     expect(eventRows()).toBe(3);
+    await fireEvent.click(view.getByRole("button", { name: "Calls" }));
+    expect(eventRows()).toBe(2);
     await fireEvent.click(view.getByRole("button", { name: "Calls" }));
     await fireEvent.click(view.getByRole("button", { name: "Turns" }));
     expect(eventRows()).toBe(1);
@@ -194,6 +248,70 @@ describe("TraceView", () => {
     const equalWidthStyle = firstDot?.getAttribute("style");
     await fireEvent.click(durationButton);
     expect(firstDot?.getAttribute("style")).not.toBe(equalWidthStyle);
+  });
+
+  it("shows aggregated in-progress assistant content for an incomplete run", async () => {
+    const incompleteTrace = { ...trace, status: "ACTIVE", archiveStatus: "ARCHIVED", complete: false, eventCount: 4 };
+    const lifecycleTrace = {
+      ...incompleteTrace,
+      traceId: "trc_33333333333333333333333333333333",
+      completeThrough: 3,
+      eventCount: 3,
+    };
+    const incompleteEvents: TraceRawEvent[] = [
+      event(1, "OPENCODE_EVENT", {
+        event: { type: "message.updated", properties: { info: { id: "msg_pending", role: "assistant" } } },
+      }),
+      event(2, "OPENCODE_EVENT", {
+        event: { type: "message.part.delta", properties: {
+          messageID: "msg_pending", partID: "part_pending", field: "text", delta: "正在",
+        } },
+      }),
+      event(3, "OPENCODE_EVENT", {
+        event: { type: "message.part.delta", properties: {
+          messageID: "msg_pending", partID: "part_pending", field: "text", delta: "处理",
+        } },
+      }),
+      event(4, "OPENCODE_EVENT", { event: { type: "plugin.added", properties: { name: "observability" } } }),
+    ];
+    const lifecycleEvents: TraceRawEvent[] = [
+      event(1, "OPENCODE_EVENT", { event: { type: "plugin.added", properties: { name: "one" } } }),
+      event(2, "OPENCODE_EVENT", { event: { type: "plugin.added", properties: { name: "two" } } }),
+      event(3, "OPENCODE_EVENT", { event: { type: "session.created", properties: { sessionID: "ses_trace" } } }),
+    ].map((rawEvent) => ({ ...rawEvent, traceId: lifecycleTrace.traceId }));
+    api.listTraces.mockResolvedValue({ items: [incompleteTrace, lifecycleTrace], page: 1, size: 30, total: 2 });
+    api.getTrace.mockImplementation(async (traceId: string) =>
+      traceId === lifecycleTrace.traceId ? lifecycleTrace : incompleteTrace);
+    api.getTraceEvents.mockImplementation(async (traceId: string) => traceId === lifecycleTrace.traceId
+      ? { items: lifecycleEvents, completeThrough: 3, complete: false }
+      : { items: incompleteEvents, completeThrough: 4, complete: false });
+
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const authStore = useAuthStore();
+    authStore.saveToken("trace-test-token");
+    authStore.currentUser = {
+      userId: "usr_admin", username: "admin", unifiedAuthId: "admin", roles: ["SUPER_ADMIN"],
+    };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/traces", name: "traces", component: TraceView }],
+    });
+    await router.push("/traces");
+    await router.isReady();
+
+    const view = render(TraceView, { global: { plugins: [pinia, router] } });
+    await fireEvent.click((await view.findByText(incompleteTrace.traceId)).closest("button")!);
+    await waitFor(() => expect(view.getByText("正在处理")).toBeTruthy());
+    expect(view.getByText(/1 records \/ 4 raw events/)).toBeTruthy();
+    expect(view.container.querySelectorAll(".lane-dot--model")).toHaveLength(1);
+    expect(view.getAllByText("ACTIVE").length).toBeGreaterThan(0);
+
+    await fireEvent.click(view.getByText(lifecycleTrace.traceId).closest("button")!);
+    await waitFor(() => expect(view.getByText(/2 records \/ 3 raw events/)).toBeTruthy());
+    expect(view.container.querySelectorAll(".event-row")).toHaveLength(2);
+    expect(view.getAllByText("plugin.added").length).toBeGreaterThan(0);
+    expect(view.getAllByText("session.created").length).toBeGreaterThan(0);
   });
 
   it("keeps the Trace view compact and free of gradients", () => {

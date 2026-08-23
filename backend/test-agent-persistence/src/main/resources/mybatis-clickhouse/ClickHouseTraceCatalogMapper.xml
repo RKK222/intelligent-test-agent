@@ -16,7 +16,10 @@
         </if>
         <if test="filter.organization != null and filter.organization != ''">and organization = #{filter.organization}</if>
         <if test="filter.status != null and filter.status != ''">
-            and (status = #{filter.status} or archive_status = #{filter.status})
+            <choose>
+                <when test="filter.status == 'INCOMPLETE'">and complete = 0</when>
+                <otherwise>and (status = #{filter.status} or archive_status = #{filter.status})</otherwise>
+            </choose>
         </if>
         <if test="filter.traceId != null and filter.traceId != ''">and trace_id = #{filter.traceId}</if>
         <if test="filter.runId != null and filter.runId != ''">and run_id = #{filter.runId}</if>

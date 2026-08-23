@@ -8,6 +8,7 @@ import type {
   TraceRawEvent,
 } from "@test-agent/shared-types";
 import {
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   Download,
@@ -24,6 +25,8 @@ type DisplayEvent = TraceRawEvent & {
   displayPayload: Record<string, unknown>;
   lane: TraceLane;
 };
+type TimelineRange = { left: number; width: number };
+type TimelineSelection = { start: number; end: number };
 
 const API_BASE_URL = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
 const api = createBackendApiClient({ baseUrl: API_BASE_URL });
@@ -46,9 +49,13 @@ const page = ref<PageResponse<TraceCatalog>>({ items: [], page: 1, size: 30, tot
 const selectedTrace = ref<TraceCatalog | null>(null);
 const rawEvents = ref<TraceRawEvent[]>([]);
 const selectedEventId = ref<string | null>(null);
+const hoveredEventId = ref<string | null>(null);
+const timelineSelection = ref<TimelineSelection | null>(null);
 const actualDuration = ref(false);
 const allTurnsCollapsed = ref(false);
 const allCallsCollapsed = ref(false);
+const catalogCollapsed = ref(false);
+const inspectorCollapsed = ref(false);
 const inspectorTab = ref<InspectorTab>("summary");
 const eventSearch = ref("");
 const collapsedParents = ref<Set<string>>(new Set());
@@ -56,18 +63,31 @@ const loadingList = ref(false);
 const loadingEvents = ref(false);
 const downloading = ref(false);
 const error = ref<string | null>(null);
+let rangeStart = 0;
+let rangePointerActive = false;
+let rangeDragging = false;
+let suppressTimelineClick = false;
 
 const displayEvents = computed<DisplayEvent[]>(() => materializeEvents(rawEvents.value));
+const trajectoryEvents = computed<DisplayEvent[]>(() => buildTrajectoryEvents(displayEvents.value));
 const selectedEvent = computed(() =>
-  displayEvents.value.find((event) => event.eventId === selectedEventId.value) ?? null
+  trajectoryEvents.value.find((event) => event.eventId === selectedEventId.value)
+    ?? displayEvents.value.find((event) => event.eventId === selectedEventId.value)
+    ?? null
+);
+const selectedTrajectoryEvent = computed(() =>
+  trajectoryEvents.value.find((event) => event.eventId === selectedEventId.value) ?? null
+);
+const hoveredEvent = computed(() =>
+  trajectoryEvents.value.find((event) => event.eventId === hoveredEventId.value) ?? null
 );
 const filteredEvents = computed(() => {
   const keyword = eventSearch.value.trim().toLowerCase();
   const firstByTurn = new Map<string, string>();
-  for (const event of displayEvents.value) {
+  for (const event of trajectoryEvents.value) {
     if (event.turnId && !firstByTurn.has(event.turnId)) firstByTurn.set(event.turnId, event.eventId);
   }
-  return displayEvents.value.filter((event) => {
+  return trajectoryEvents.value.filter((event) => {
     if (event.parentId && collapsedParents.value.has(event.parentId)) return false;
     if (allCallsCollapsed.value && event.lane === "TOOLS") return false;
     if (allTurnsCollapsed.value && event.turnId && firstByTurn.get(event.turnId) !== event.eventId) return false;
@@ -123,6 +143,8 @@ async function loadTraces(targetPage = page.value.page) {
 async function openTrace(trace: TraceCatalog) {
   selectedTrace.value = trace;
   selectedEventId.value = null;
+  hoveredEventId.value = null;
+  timelineSelection.value = null;
   rawEvents.value = [];
   loadingEvents.value = true;
   error.value = null;
@@ -130,7 +152,7 @@ async function openTrace(trace: TraceCatalog) {
     const [detail, events] = await Promise.all([api.getTrace(trace.traceId), loadAllEvents(trace.traceId)]);
     selectedTrace.value = detail;
     rawEvents.value = events;
-    selectedEventId.value = materializeEvents(events)[0]?.eventId ?? null;
+    selectedEventId.value = buildTrajectoryEvents(materializeEvents(events))[0]?.eventId ?? null;
   } catch (cause) {
     error.value = messageOf(cause, "Trace 正文暂不可用");
   } finally {
@@ -198,6 +220,181 @@ function materializeEvents(events: TraceRawEvent[]): DisplayEvent[] {
     });
 }
 
+/**
+ * DSH 的三泳道展示语义记录，而不是传输级事件。OpenCode 的 delta、状态和生命周期原始事件
+ * 仍完整保留在服务器归档/下载中；页面把它们汇入 Assistant 摘要，避免数千个分片互相覆盖。
+ */
+function buildTrajectoryEvents(events: DisplayEvent[]): DisplayEvent[] {
+  const terminalCalls = new Set(events
+    .filter((event) => event.type === "TOOL_EXECUTE_AFTER" && event.callId)
+    .map((event) => event.callId as string));
+  const metricMessages = new Set(events
+    .filter((event) => event.type === "ASSISTANT_STEP_METRICS" && event.messageId)
+    .map((event) => event.messageId as string));
+  const userMessages = new Set(events
+    .filter((event) => event.type === "CHAT_MESSAGE" && event.messageId)
+    .map((event) => event.messageId as string));
+  const messageRoles = new Map<string, string>();
+  const assistantParts = new Map<string, Map<string, {
+    kind: string;
+    text: string;
+    event: DisplayEvent;
+    finalized: boolean;
+  }>>();
+  const pendingTools = new Map<string, DisplayEvent>();
+
+  for (const event of events) {
+    if (event.type !== "OPENCODE_EVENT" || nestedEventType(event.displayPayload) !== "message.updated") continue;
+    const properties = recordValue(recordValue(event.displayPayload.event)?.properties);
+    const info = recordValue(properties?.info);
+    const messageId = stringValue(info?.id) ?? event.messageId;
+    const role = stringValue(info?.role);
+    if (messageId && role) messageRoles.set(messageId, role);
+  }
+
+  for (const event of events) {
+    if (event.type !== "OPENCODE_EVENT") continue;
+    const nestedType = nestedEventType(event.displayPayload);
+    const properties = recordValue(recordValue(event.displayPayload.event)?.properties);
+    if (nestedType === "message.part.delta") {
+      const messageId = stringValue(properties?.messageID) ?? event.messageId;
+      const partId = stringValue(properties?.partID);
+      const field = stringValue(properties?.field);
+      const delta = stringValue(properties?.delta);
+      if (!messageId || !partId || !delta || !["text", "reasoning"].includes(field ?? "")) continue;
+      const parts = assistantParts.get(messageId) ?? new Map();
+      const current = parts.get(partId);
+      if (!current?.finalized) {
+        parts.set(partId, {
+          kind: field as string,
+          text: `${current?.text ?? ""}${delta}`,
+          event,
+          finalized: false,
+        });
+        assistantParts.set(messageId, parts);
+      }
+      continue;
+    }
+    if (nestedType !== "message.part.updated") continue;
+    const part = recordValue(properties?.part);
+    const messageId = stringValue(part?.messageID) ?? stringValue(properties?.messageID);
+    const partId = stringValue(part?.id);
+    const kind = stringValue(part?.type);
+    if (kind === "tool") {
+      const callId = stringValue(part?.callID) ?? event.callId ?? partId;
+      if (!callId || terminalCalls.has(callId)) continue;
+      const state = recordValue(part?.state);
+      const status = (stringValue(state?.status) ?? "pending").toUpperCase();
+      pendingTools.set(callId, {
+        ...event,
+        callId,
+        lane: "TOOLS",
+        displayPayload: {
+          ...event.displayPayload,
+          recordKind: "tool",
+          status,
+          tool: stringValue(part?.tool) ?? "tool",
+          args: state?.input,
+          result: state?.output,
+          error: state?.error,
+        },
+      });
+      continue;
+    }
+    const text = compactPreview(part?.text ?? part?.content ?? part?.reasoning);
+    if (!messageId || !partId || !kind || !text || !["text", "reasoning"].includes(kind)) continue;
+    const parts = assistantParts.get(messageId) ?? new Map();
+    parts.set(partId, { kind, text, event, finalized: true });
+    assistantParts.set(messageId, parts);
+  }
+
+  const seenSystemPrompts = new Set<string>();
+  const semanticTypes = new Set([
+    "CHAT_MESSAGE",
+    "SYSTEM_PROMPT",
+    "CONTEXT_MESSAGES",
+    "COMPACTION_CONTEXT",
+    "ASSISTANT_STEP_METRICS",
+    "TOOL_EXECUTE_AFTER",
+  ]);
+  const result: DisplayEvent[] = [];
+  for (const event of events) {
+    if (event.type === "TOOL_EXECUTE_BEFORE") {
+      if (!event.callId || terminalCalls.has(event.callId)) continue;
+    } else if (!semanticTypes.has(event.type)) {
+      continue;
+    }
+    if (event.type === "SYSTEM_PROMPT") {
+      const signature = JSON.stringify(event.displayPayload.system ?? event.displayPayload);
+      if (seenSystemPrompts.has(signature)) continue;
+      seenSystemPrompts.add(signature);
+    }
+    if (event.type === "ASSISTANT_STEP_METRICS" && event.messageId) {
+      const parts = [...(assistantParts.get(event.messageId)?.values() ?? [])];
+      const text = parts.filter((part) => part.kind === "text").map((part) => part.text).join("\n");
+      const reasoning = parts.filter((part) => part.kind === "reasoning").map((part) => part.text).join("\n");
+      result.push({
+        ...event,
+        displayPayload: {
+          ...event.displayPayload,
+          ...(text ? { text } : {}),
+          ...(reasoning ? { reasoning } : {}),
+        },
+      });
+      continue;
+    }
+    result.push(event);
+  }
+
+  // 未闭合 Run 尚无 Step/Tool 终态：把数百个流式分片聚合成一条进行中记录，而不是显示空白或重新堆叠 delta。
+  for (const [messageId, partMap] of assistantParts) {
+    if (metricMessages.has(messageId) || userMessages.has(messageId) || messageRoles.get(messageId) === "user") continue;
+    const parts = [...partMap.values()];
+    if (parts.length === 0) continue;
+    const event = parts.reduce((latest, part) =>
+      part.event.globalSequence > latest.globalSequence ? part.event : latest, parts[0].event);
+    const startedAt = Math.min(...parts.map((part) => Date.parse(part.event.timestamp)).filter(Number.isFinite));
+    const text = parts.filter((part) => part.kind === "text").map((part) => part.text).join("\n");
+    const reasoning = parts.filter((part) => part.kind === "reasoning").map((part) => part.text).join("\n");
+    result.push({
+      ...event,
+      messageId,
+      lane: "MODEL",
+      displayPayload: {
+        ...event.displayPayload,
+        recordKind: "message",
+        status: "ACTIVE",
+        ...(Number.isFinite(startedAt) ? { startedAt: new Date(startedAt).toISOString() } : {}),
+        durationMs: Number.isFinite(startedAt) ? Math.max(0, Date.parse(event.timestamp) - startedAt) : 0,
+        ...(text ? { text } : {}),
+        ...(reasoning ? { reasoning } : {}),
+      },
+    });
+  }
+  result.push(...pendingTools.values());
+
+  // 只有生命周期/插件事件的不完整 Trace 仍应可打开；按事件类型保留最后一条，避免同类噪声淹没页面。
+  if (result.length === 0) {
+    const lifecycle = new Map<string, DisplayEvent>();
+    for (const event of events) {
+      if (event.type === "PAYLOAD_FRAGMENT") continue;
+      const type = nestedEventType(event.displayPayload) ?? event.type;
+      lifecycle.set(type, {
+        ...event,
+        lane: "INPUT",
+        displayPayload: {
+          ...event.displayPayload,
+          recordKind: "context",
+          status: "ACTIVE",
+          content: type,
+        },
+      });
+    }
+    result.push(...lifecycle.values());
+  }
+  return result.sort((left, right) => left.globalSequence - right.globalSequence);
+}
+
 function laneOf(event: TraceRawEvent): TraceLane {
   if (event.type.startsWith("TOOL_")) return "TOOLS";
   if (["CHAT_MESSAGE", "SYSTEM_PROMPT", "CONTEXT_MESSAGES"].includes(event.type)) return "INPUT";
@@ -240,6 +437,7 @@ function eventPreview(event: DisplayEvent): string {
     payload.message,
     payload.system,
     payload.context,
+    payload.messages,
     payload.args,
     payload.result,
     payload.output,
@@ -277,17 +475,17 @@ function eventTokenLabel(event: DisplayEvent): string {
 
 function turnLabel(event: DisplayEvent): string {
   if (!event.turnId) return "";
-  const turnIds = [...new Set(displayEvents.value.map((candidate) => candidate.turnId).filter(Boolean))];
+  const turnIds = [...new Set(trajectoryEvents.value.map((candidate) => candidate.turnId).filter(Boolean))];
   return `Turn ${turnIds.indexOf(event.turnId) + 1}`;
 }
 
 function isTurnStart(event: DisplayEvent): boolean {
   if (!event.turnId) return false;
-  return displayEvents.value.find((candidate) => candidate.turnId === event.turnId)?.eventId === event.eventId;
+  return trajectoryEvents.value.find((candidate) => candidate.turnId === event.turnId)?.eventId === event.eventId;
 }
 
 function hasChildren(event: DisplayEvent): boolean {
-  return displayEvents.value.some((candidate) => candidate.parentId === event.eventId
+  return trajectoryEvents.value.some((candidate) => candidate.parentId === event.eventId
     || (event.callId && candidate.parentId === event.callId)
     || candidate.parentId === event.sessionId);
 }
@@ -306,12 +504,12 @@ function isCollapsed(event: DisplayEvent): boolean {
     || collapsedParents.value.has(event.sessionId);
 }
 
-function trackStyle(event: DisplayEvent) {
-  const visible = displayEvents.value;
+function trackRange(event: DisplayEvent): TimelineRange {
+  const visible = trajectoryEvents.value;
   const index = Math.max(0, visible.findIndex((candidate) => candidate.eventId === event.eventId));
   if (!actualDuration.value) {
-    const width = Math.max(1.2, Math.min(8, 88 / Math.max(1, visible.length)));
-    return { left: `${index / Math.max(1, visible.length) * 88}%`, width: `${width}%` };
+    const width = 100 / Math.max(1, visible.length);
+    return { left: index * width, width };
   }
   const ranges = visible.map((candidate) => {
     const start = eventStartMs(candidate);
@@ -321,15 +519,141 @@ function trackStyle(event: DisplayEvent) {
   const end = Math.max(...ranges.map((range) => range.end), start + 1);
   const span = Math.max(1, end - start);
   const eventStart = eventStartMs(event);
-  const left = (eventStart - start) / span * 88;
-  const width = Math.max(1.2, numberValue(event.displayPayload.durationMs) / span * 88);
-  return { left: `${left}%`, width: `${width}%` };
+  const left = (eventStart - start) / span * 100;
+  const width = numberValue(event.displayPayload.durationMs) / span * 100;
+  return { left, width };
+}
+
+function trackStyle(event: DisplayEvent): Record<string, string> {
+  const range = trackRange(event);
+  const lane = { INPUT: 0, MODEL: 1, TOOLS: 2 }[event.lane];
+  const gap = Math.max(0, range.width * 0.08);
+  return {
+    "--trajectory-span-left": `${range.left}%`,
+    "--trajectory-span-width": `${range.width}%`,
+    "--trajectory-span-gap": `min(${gap}%, 1px)`,
+    "--trajectory-span-lane": String(lane),
+  };
+}
+
+function selectionStyle(event: DisplayEvent): Record<string, string> {
+  const range = trackRange(event);
+  return {
+    "--trajectory-selection-left": `${range.left}%`,
+    "--trajectory-selection-width": `${Math.max(range.width, 0.16)}%`,
+  };
+}
+
+function rangeSelectionStyle(selection: TimelineSelection): Record<string, string> {
+  return {
+    "--trajectory-selection-left": `${selection.start}%`,
+    "--trajectory-selection-width": `${selection.end - selection.start}%`,
+  };
+}
+
+function tooltipStyle(event: DisplayEvent): Record<string, string> {
+  const range = trackRange(event);
+  const anchor = Math.min(90, Math.max(10, range.left + range.width / 2));
+  return { "--trajectory-tooltip-left": `${anchor}%` };
+}
+
+function assistantPhaseStyle(event: DisplayEvent): Record<string, string> {
+  const duration = numberValue(event.displayPayload.durationMs);
+  const ttft = numberValue(event.displayPayload.ttftMs);
+  const prefill = duration > 0 ? Math.min(100, Math.max(0, ttft / duration * 100)) : 0;
+  return { "--trajectory-prefill-width": `${prefill}%` };
+}
+
+function eventInTimelineSelection(event: DisplayEvent): boolean {
+  const selection = timelineSelection.value;
+  if (!selection) return true;
+  const range = trackRange(event);
+  const end = range.left + Math.max(range.width, 0.01);
+  return end >= selection.start && range.left <= selection.end;
+}
+
+function startTimelineRange(event: PointerEvent) {
+  if (event.button !== 0) return;
+  rangePointerActive = true;
+  rangeDragging = false;
+  rangeStart = timelinePercent(event);
+}
+
+function updateTimelineRange(event: PointerEvent) {
+  if (!rangePointerActive || (event.buttons & 1) === 0) return;
+  const current = timelinePercent(event);
+  if (!rangeDragging && Math.abs(current - rangeStart) < 0.5) return;
+  if (!rangeDragging) {
+    rangeDragging = true;
+    // 普通点选不捕获指针；只有确认进入拖拽后才捕获，避免色块 click 被重定向到泳道容器。
+    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  }
+  timelineSelection.value = {
+    start: Math.min(rangeStart, current),
+    end: Math.max(rangeStart, current),
+  };
+}
+
+async function finishTimelineRange(event: PointerEvent) {
+  if (!rangePointerActive) return;
+  const target = event.currentTarget as HTMLElement;
+  if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId);
+  rangePointerActive = false;
+  if (!rangeDragging || !timelineSelection.value) return;
+  rangeDragging = false;
+  // 只吞掉 pointerup 紧随产生的 click；下一轮事件循环立即恢复，避免快速点选被误伤。
+  suppressTimelineClick = true;
+  window.setTimeout(() => { suppressTimelineClick = false; }, 0);
+  const first = trajectoryEvents.value.find(eventInTimelineSelection);
+  if (!first) return;
+  await nextTick();
+  document.getElementById(`trace-event-${first.eventId}`)?.scrollIntoView?.({ block: "nearest" });
+}
+
+function cancelTimelineRange(event: PointerEvent) {
+  const target = event.currentTarget as HTMLElement;
+  if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId);
+  rangePointerActive = false;
+  rangeDragging = false;
+}
+
+function timelinePercent(event: PointerEvent): number {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  if (rect.width <= 0) return 0;
+  return Math.min(100, Math.max(0, (event.clientX - rect.left) / rect.width * 100));
 }
 
 function eventStartMs(event: DisplayEvent) {
   const explicit = stringValue(event.displayPayload.startedAt);
+  if (!explicit && event.type === "TOOL_EXECUTE_AFTER" && event.callId) {
+    const before = displayEvents.value.find((candidate) =>
+      candidate.type === "TOOL_EXECUTE_BEFORE" && candidate.callId === event.callId);
+    if (before) return Date.parse(before.timestamp);
+  }
   const timestamp = Date.parse(explicit ?? event.timestamp);
   return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function timelineTimeLabel(event: DisplayEvent): string {
+  const start = eventStartMs(event);
+  const end = start + numberValue(event.displayPayload.durationMs);
+  return `${clockTime(start)} → ${clockTime(end)}`;
+}
+
+function timelineTimingLabel(event: DisplayEvent): string {
+  const fields = [`Total ${eventDurationLabel(event)}`];
+  const ttft = numberValue(event.displayPayload.ttftMs);
+  const decode = numberValue(event.displayPayload.decodeMs);
+  if (ttft) fields.push(`TTFT ${Math.round(ttft)} ms`);
+  if (decode) fields.push(`Decode ${Math.round(decode)} ms`);
+  return fields.join(" · ");
+}
+
+function clockTime(timestamp: number): string {
+  if (!Number.isFinite(timestamp)) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hour12: false,
+  }).format(new Date(timestamp));
 }
 
 function summaryRows(event: DisplayEvent): Array<[string, string]> {
@@ -356,11 +680,38 @@ function recordKindOf(event: DisplayEvent) {
   return nestedPartType(event.displayPayload) === "compaction" ? "compacted" : "message";
 }
 
+function inspectorTabLabel(tab: InspectorTab, event: DisplayEvent | null): string {
+  if (tab === "summary") return "Summary";
+  if (tab === "timing") return "Timing";
+  if (tab === "source") return "Source";
+  if (tab === "payload") return event?.lane === "TOOLS" ? "Payload" : "Raw";
+  if (!event) return "Preview";
+  if (event.lane === "TOOLS") return "Result";
+  return eventKind(event) === "assistant" ? "Output" : "Preview";
+}
+
 function resultValue(event: DisplayEvent): unknown {
-  return event.displayPayload.result
-    ?? event.displayPayload.output
-    ?? event.displayPayload.error
-    ?? "该事件没有独立结果字段";
+  const payload = event.displayPayload;
+  if (event.lane === "TOOLS") {
+    return payload.result
+      ?? payload.output
+      ?? payload.error
+      ?? recordValue(recordValue(recordValue(payload.event)?.properties)?.part)?.state
+      ?? payload.event
+      ?? payload;
+  }
+  const kind = eventKind(event);
+  if (kind === "system") return payload.system ?? payload.prompt ?? payload.content ?? payload;
+  if (kind === "user") return payload.text ?? payload.content ?? payload.message ?? payload.input ?? payload;
+  if (kind === "context") {
+    return payload.context ?? payload.messages ?? payload.content ?? payload.system ?? payload.event ?? payload;
+  }
+  const output: Record<string, unknown> = {};
+  for (const key of ["text", "reasoning", "content", "message", "finishReason", "cost"] as const) {
+    if (payload[key] != null) output[key] = payload[key];
+  }
+  if (Object.keys(output).length > 0) return output;
+  return payload.event ?? payload;
 }
 
 function sourceValue(event: DisplayEvent) {
@@ -447,6 +798,7 @@ function base64Bytes(value: string): Uint8Array {
  * 让紧凑轨迹产生明确反馈，而不是只更新屏幕外的检查器。
  */
 async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
+  if (revealRow && suppressTimelineClick) return;
   selectedEventId.value = event.eventId;
   inspectorTab.value = "summary";
   if (!revealRow) return;
@@ -520,11 +872,16 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 
       <p v-if="error" class="trace-error" role="alert">{{ error }}</p>
 
-      <section class="trace-content">
-        <aside class="trace-list-panel">
+      <section :class="['trace-content', {
+        'trace-content--catalog-collapsed': catalogCollapsed,
+        'trace-content--inspector-collapsed': inspectorCollapsed,
+      }]">
+        <aside v-if="!catalogCollapsed" class="trace-list-panel">
           <header>
             <div><strong>Trace 目录</strong><span>{{ page.total }} 条</span></div>
             <small>ClickHouse 元数据索引</small>
+            <button type="button" class="panel-collapse-button" aria-label="折叠 Trace 目录" title="折叠 Trace 目录"
+              @click="catalogCollapsed = true"><ChevronLeft :size="15" /></button>
           </header>
           <div v-if="loadingList" class="trace-empty">正在读取目录…</div>
           <div v-else-if="page.items.length === 0" class="trace-empty">当前筛选范围暂无 Trace</div>
@@ -554,6 +911,10 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
             <button type="button" :disabled="page.page * page.size >= page.total" @click="loadTraces(page.page + 1)">下一页</button>
           </footer>
         </aside>
+        <aside v-else class="trace-panel-rail trace-panel-rail--left">
+          <button type="button" aria-label="展开 Trace 目录" title="展开 Trace 目录"
+            @click="catalogCollapsed = false"><ChevronRight :size="15" /><span>Trace</span></button>
+        </aside>
 
         <section class="trace-timeline-panel">
           <div v-if="!selectedTrace" class="trace-empty trace-empty--hero">
@@ -566,7 +927,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
               <div>
                 <p>{{ selectedTrace.username }} · {{ selectedTrace.agentId || 'opencode' }}</p>
                 <h2>{{ selectedTrace.traceId }}</h2>
-                <span>{{ selectedTrace.runId || '无 Run ID' }} · 完成水位 {{ selectedTrace.completeThrough }}</span>
+                <span>{{ selectedTrace.runId || '无 Run ID' }} · {{ trajectoryEvents.length }} records / {{ rawEvents.length }} raw events · 完成水位 {{ selectedTrace.completeThrough }}</span>
               </div>
             </header>
 
@@ -590,20 +951,54 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
             </div>
 
             <div class="lane-overview" aria-label="三泳道总览">
-              <div v-for="lane in (['INPUT', 'MODEL', 'TOOLS'] as TraceLane[])" :key="lane" class="lane-track">
-                <span>{{ lane === 'TOOLS' ? 'Tools' : lane === 'MODEL' ? 'Model' : 'Input' }}</span>
-                <div>
-                  <button
-                    v-for="event in displayEvents.filter((item) => item.lane === lane)"
-                    :key="event.eventId"
-                    type="button"
-                    :class="['lane-dot', `lane-dot--${lane.toLowerCase()}`, { selected: selectedEventId === event.eventId }]"
-                    :style="trackStyle(event)"
-                    :title="eventTitle(event)"
-                    :aria-label="`选择 ${eventTitle(event)} 事件`"
-                    :aria-pressed="selectedEventId === event.eventId"
-                    @click="selectTimelineEvent(event, true)"
-                  />
+              <div class="lane-labels" aria-hidden="true"><span>Input</span><span>Model</span><span>Tools</span></div>
+              <div
+                class="lane-domain"
+                tabindex="0"
+                aria-label="轨迹总览；水平拖动选择时间范围，双击或按 Escape 清除"
+                @pointerdown="startTimelineRange"
+                @pointermove="updateTimelineRange"
+                @pointerup="finishTimelineRange"
+                @pointercancel="cancelTimelineRange"
+                @dblclick.self="timelineSelection = null"
+                @keydown.esc="timelineSelection = null"
+              >
+                <span
+                  v-if="timelineSelection"
+                  class="lane-selection lane-selection--range"
+                  :style="rangeSelectionStyle(timelineSelection)"
+                  aria-hidden="true"
+                />
+                <span
+                  v-else-if="selectedTrajectoryEvent"
+                  class="lane-selection lane-selection--event"
+                  :style="selectionStyle(selectedTrajectoryEvent)"
+                  aria-hidden="true"
+                />
+                <button
+                  v-for="event in trajectoryEvents"
+                  :key="event.eventId"
+                  type="button"
+                  :class="['lane-dot', `lane-dot--${event.lane.toLowerCase()}`, { selected: selectedEventId === event.eventId, 'outside-range': !eventInTimelineSelection(event), 'has-timing': event.lane === 'MODEL' && numberValue(event.displayPayload.durationMs) > 0 }]"
+                  :style="trackStyle(event)"
+                  :data-in-range="eventInTimelineSelection(event)"
+                  :aria-label="`选择 ${eventTitle(event)} 事件`"
+                  :aria-pressed="selectedEventId === event.eventId"
+                  @mouseenter="hoveredEventId = event.eventId"
+                  @mouseleave="hoveredEventId = null"
+                  @focus="hoveredEventId = event.eventId"
+                  @blur="hoveredEventId = null"
+                  @click="selectTimelineEvent(event, true)"
+                >
+                  <template v-if="event.lane === 'MODEL' && numberValue(event.displayPayload.durationMs) > 0">
+                    <span class="lane-phase lane-phase--prefill" :style="assistantPhaseStyle(event)" aria-hidden="true" />
+                    <span class="lane-phase lane-phase--decode" aria-hidden="true" />
+                  </template>
+                </button>
+                <div v-if="hoveredEvent" class="lane-tooltip" role="tooltip" :style="tooltipStyle(hoveredEvent)">
+                  <strong>{{ eventKindLabel(hoveredEvent) }}</strong>
+                  <span>{{ timelineTimeLabel(hoveredEvent) }}</span>
+                  <small>{{ timelineTimingLabel(hoveredEvent) }}</small>
                 </div>
               </div>
             </div>
@@ -615,7 +1010,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
                 :key="event.eventId"
                 :id="`trace-event-${event.eventId}`"
                 type="button"
-                :class="['event-row', `event-row--${eventKind(event)}`, { selected: selectedEventId === event.eventId, 'turn-start': isTurnStart(event) }]"
+                :class="['event-row', `event-row--${eventKind(event)}`, { selected: selectedEventId === event.eventId, 'outside-range': !eventInTimelineSelection(event), 'turn-start': isTurnStart(event) }]"
                 :aria-pressed="selectedEventId === event.eventId"
                 @click="selectTimelineEvent(event)"
               >
@@ -639,15 +1034,20 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
           </template>
         </section>
 
-        <aside class="trace-inspector">
+        <aside v-if="!inspectorCollapsed" class="trace-inspector">
           <header>
             <div><strong>{{ selectedEvent ? eventTitle(selectedEvent) : '事件检查器' }}</strong><span>{{ selectedEvent?.type }}</span></div>
-            <button v-if="selectedEvent" type="button" aria-label="关闭事件检查器" @click="selectedEventId = null">×</button>
+            <span class="inspector-header-actions">
+              <button v-if="selectedEvent" type="button" aria-label="清除事件选择" title="清除事件选择"
+                @click="selectedEventId = null">×</button>
+              <button type="button" aria-label="折叠事件检查器" title="折叠事件检查器"
+                @click="inspectorCollapsed = true"><ChevronRight :size="15" /></button>
+            </span>
           </header>
           <nav aria-label="事件检查器视图">
             <button v-for="tab in (['summary', 'payload', 'result', 'timing', 'source'] as InspectorTab[])" :key="tab"
               type="button" :class="{ active: inspectorTab === tab }" @click="inspectorTab = tab">
-              {{ { summary: 'Summary', payload: 'Payload', result: 'Result', timing: 'Timing', source: 'Source' }[tab] }}
+              {{ inspectorTabLabel(tab, selectedEvent) }}
             </button>
           </nav>
           <div v-if="!selectedEvent" class="trace-empty">选择事件查看参数、结果与来源</div>
@@ -684,6 +1084,10 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
             <span>{{ selectedTrace.source }}</span>
             <span>{{ selectedTrace.archiveStatus }}</span>
           </footer>
+        </aside>
+        <aside v-else class="trace-panel-rail trace-panel-rail--right">
+          <button type="button" aria-label="展开事件检查器" title="展开事件检查器"
+            @click="inspectorCollapsed = false"><ChevronLeft :size="15" /><span>详情</span></button>
         </aside>
       </section>
     </section>
@@ -731,11 +1135,33 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 .timeline-header { display:flex; align-items:center; justify-content:space-between; padding:14px 17px; border-bottom:1px solid var(--line); background:#fff; }.timeline-header p,.timeline-header h2,.timeline-header span { margin:0; }.timeline-header p { color:#6b507e; font-size:11px; font-weight:700; }.timeline-header h2 { margin:3px 0; font:600 14px ui-monospace,SFMono-Regular,monospace; }.timeline-header span { color:var(--muted); font-size:10px; }
 .timeline-toolbar { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--line); background:#fff; }.timeline-modes { display:flex; gap:3px; padding:3px; border-radius:8px; background:#f0f0f2; }.timeline-modes button { padding:5px 9px; border:0; border-radius:6px; background:transparent; color:#777b85; font-size:10px; cursor:pointer; }.timeline-modes button.active { background:#fff; color:#2b2c31; box-shadow:0 1px 3px #0001; }
 .event-search { display:flex; align-items:center; gap:5px; width:190px; padding:0 8px; border:1px solid #dddde2; border-radius:7px; background:#fff; }.event-search input { width:100%; height:27px; border:0; outline:0; font-size:10px; }
-.lane-overview { padding:9px 12px; border-bottom:1px solid var(--line); background:#fff; }.lane-track { display:grid; grid-template-columns:68px 1fr; align-items:center; min-height:25px; }.lane-track>span { color:#858994; font-size:9px; }.lane-track>span b { float:right; margin-right:8px; }.lane-track>div { position:relative; height:11px; border-left:1px solid #dedee3; background:transparent; }.lane-dot { position:absolute; top:0; height:14px; min-width:6px; padding:0; border:0; border-radius:0; background:transparent; cursor:pointer; }.lane-dot::after { position:absolute; inset:3px 0; border-radius:2px; background:var(--lane-color); content:""; }.lane-dot--input { --lane-color:var(--input); }.lane-dot--model { --lane-color:var(--model); }.lane-dot--tools { --lane-color:var(--tools); }.lane-dot.selected::after { box-shadow:0 0 0 1px #fff,0 0 0 2px #477bea; }
+.lane-overview { height:50px; display:grid; grid-template-columns:48px minmax(0,1fr); padding:0; border-bottom:1px solid var(--line); background:#fafafa; }
+.lane-labels { display:grid; grid-template-rows:repeat(3,14px); align-content:start; padding-top:4px; border-right:1px solid var(--line); }
+.lane-labels span { display:flex; align-items:center; justify-content:flex-end; padding-right:4px; color:#858994; font-size:10px; }
+.lane-domain { position:relative; height:49px; cursor:crosshair; touch-action:none; user-select:none; }
+.lane-selection { position:absolute; z-index:1; top:0; bottom:0; left:var(--trajectory-selection-left); width:var(--trajectory-selection-width); min-width:3px; border-right:2px solid #477bea; border-left:2px solid #477bea; background:rgba(71,123,234,.08); pointer-events:none; }
+.lane-dot { position:absolute; z-index:2; top:calc(7px + var(--trajectory-span-lane) * 14px); left:calc(var(--trajectory-span-left) + var(--trajectory-span-gap)); width:calc(var(--trajectory-span-width) - var(--trajectory-span-gap) - var(--trajectory-span-gap)); min-width:2px; height:8px; display:flex; padding:0; border:0; border-radius:1px; cursor:crosshair; }
+.lane-dot::before { position:absolute; z-index:3; inset:-3px -4px; content:""; }
+.lane-dot--input { background:var(--input); }.lane-dot--model { background:var(--model); }.lane-dot--tools { background:var(--tools); }
+.lane-dot.has-timing { background:transparent; }.lane-phase { height:8px; pointer-events:none; }.lane-phase--prefill { width:var(--trajectory-prefill-width); flex:0 0 var(--trajectory-prefill-width); border-radius:1px 0 0 1px; background:#baa9cf; }.lane-phase--decode { min-width:0; flex:1; border-radius:0 1px 1px 0; background:var(--model); }
+.lane-dot.selected { box-shadow:0 0 0 1px #fff,0 0 0 2px #477bea; }.lane-dot:hover,.lane-dot:focus-visible { z-index:4; outline:0; box-shadow:0 0 0 1px #fff,0 0 0 2px #477bea; }
+.lane-dot.outside-range:not(.selected) { opacity:.18; }
+.lane-tooltip { position:absolute; z-index:8; top:46px; left:var(--trajectory-tooltip-left); min-width:210px; max-width:340px; display:grid; gap:2px; padding:7px 10px; transform:translateX(-50%); border-radius:7px; background:#2d2e32; color:#fff; box-shadow:0 5px 14px rgba(0,0,0,.18); pointer-events:none; font:10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace; }.lane-tooltip strong { font-size:10px; }.lane-tooltip span,.lane-tooltip small { color:#f1f1f3; white-space:nowrap; }.lane-tooltip small { color:#d4d5d9; }
 .event-list { min-height:0; overflow:auto; padding-bottom:30px; }.event-row { width:100%; min-height:54px; display:grid; grid-template-columns:90px 20px 1fr 62px; align-items:center; padding:6px 12px; text-align:left; border:0; border-bottom:1px solid #ededf0; background:#fff; cursor:pointer; }.event-row:hover { background:#fafafa; }.event-row.selected { background:#f6f3fb; }.event-row>time { color:#8a8d96; font:9px ui-monospace,SFMono-Regular,monospace; }.event-row>time small { display:block; margin-top:4px; font-size:8px; }.event-tree-control { color:#777; }.event-card { min-width:0; display:flex; flex-direction:column; gap:4px; padding:7px 10px; border-left:3px solid var(--model); border-radius:5px; background:#f2edf7; }.event-row--input .event-card { border-color:var(--input); background:#eaf7f0; }.event-row--tools .event-card { border-color:var(--tools); background:#fff4e6; }.event-card b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }.event-card small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#777b85; font-size:9px; }.event-duration { text-align:right; color:#777b85; font:9px ui-monospace,SFMono-Regular,monospace; }
+.event-row.outside-range:not(.selected) { opacity:.28; }
 .trace-inspector { border-left:1px solid var(--line); }.trace-inspector nav { display:flex; overflow-x:auto; padding:0 8px; border-bottom:1px solid var(--line); }.trace-inspector nav button { padding:10px 7px 8px; border:0; border-bottom:2px solid transparent; background:transparent; color:#7b7e87; font-size:9px; cursor:pointer; }.trace-inspector nav button.active { color:#684a98; border-color:#7b5ab4; }
 .inspector-body { min-height:0; flex:1; overflow:auto; padding:13px; }.inspector-body dl { display:grid; grid-template-columns:82px 1fr; gap:10px 8px; margin:0; font-size:10px; }.inspector-body dt { color:#8a8d96; }.inspector-body dd { min-width:0; margin:0; overflow-wrap:anywhere; color:#32333a; }.inspector-body pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; font:10px/1.55 ui-monospace,SFMono-Regular,monospace; color:#34353b; }
 .trace-inspector>footer { display:flex; flex-wrap:wrap; gap:6px; padding:9px 12px; border-top:1px solid var(--line); }.trace-inspector>footer span { padding:3px 7px; border-radius:999px; background:#f0f0f2; color:#6c7079; font-size:9px; }.trace-inspector>footer .safe { background:#e8f7ef; color:#147245; }.trace-inspector>footer .warning { background:#fff2de; color:#a8620f; }
+.panel-collapse-button,.inspector-header-actions button,.trace-panel-rail button { border:0; background:transparent; color:#777c85; cursor:pointer; }
+.panel-collapse-button { width:24px; height:24px; display:grid; flex:0 0 24px; place-items:center; margin-left:4px; padding:0; border-radius:3px; }
+.panel-collapse-button:hover,.inspector-header-actions button:hover,.trace-panel-rail button:hover { background:#f0f1f3; color:#30333a; }
+.inspector-header-actions { display:flex; align-items:center; gap:2px; margin-left:auto; }
+.inspector-header-actions button { width:24px; height:24px; display:grid; place-items:center; padding:0; border-radius:3px; font-size:18px; }
+.trace-panel-rail { min-width:0; display:flex; justify-content:center; border-color:var(--line); background:#fafafa; }
+.trace-panel-rail--left { border-right:1px solid var(--line); }
+.trace-panel-rail--right { border-left:1px solid var(--line); }
+.trace-panel-rail button { width:100%; display:flex; flex-direction:column; align-items:center; gap:6px; padding:9px 0; font-size:9px; }
+.trace-panel-rail button span { writing-mode:vertical-rl; letter-spacing:.8px; }
 .trace-empty { display:flex; align-items:center; justify-content:center; min-height:120px; padding:24px; color:#898c95; font-size:11px; text-align:center; }.trace-empty--hero { height:100%; flex-direction:column; gap:8px; }.trace-empty--hero strong { color:#4b4d54; font-size:14px; }.spinning { animation:spin .8s linear infinite; }@keyframes spin { to { transform:rotate(360deg); } }
 @media (max-width:1450px) { .trace-content { grid-template-columns:280px minmax(500px,1fr) 310px; }.trace-filters { grid-template-columns:repeat(5,1fr); }.trace-filters button { align-self:end; } }
 
@@ -797,15 +1223,6 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 .event-search { width:176px; height:23px; border-radius:4px; background:#fafafa; }
 .event-search:focus-within { border-color:#477bea; background:#fff; }
 .event-search input { height:21px; font-size:10px; }
-.lane-overview { height:50px; display:flex; flex-direction:column; padding:0; background:#fafafa; }
-.lane-track { min-height:0; height:14px; display:grid; grid-template-columns:48px 1fr; }
-.lane-track:first-child { margin-top:4px; }
-.lane-track>span { display:flex; align-items:center; justify-content:flex-end; padding-right:4px; border-right:1px solid var(--line); font-size:10px; }
-.lane-track>div { height:14px; border-left:0; background:transparent; }
-.lane-dot { top:0; height:14px; min-width:6px; opacity:.86; }
-.lane-dot::after { inset:3px 0; border-radius:1px; }
-.lane-dot:hover,.lane-dot:focus-visible { opacity:1; outline:0; }
-.lane-dot:hover::after,.lane-dot:focus-visible::after { box-shadow:0 0 0 1px #fff,0 0 0 2px #477bea; }
 .event-list { flex:1; padding:0; background:#fff; }
 .event-row { min-height:32px; grid-template-columns:66px 118px minmax(220px,1fr) 92px 66px; padding:0 8px; border-bottom:1px solid var(--line-soft); }
 .event-row:hover { background:#fafafa; }
@@ -828,7 +1245,6 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 .event-card small { font:10px ui-monospace,SFMono-Regular,Menlo,monospace; color:#646974; }
 .event-tokens,.event-duration { color:#858991; font:9px ui-monospace,SFMono-Regular,Menlo,monospace; }
 .trace-inspector>header { min-height:42px; align-items:center; }
-.trace-inspector>header button { margin-left:auto; border:0; background:transparent; color:#777c85; font-size:20px; cursor:pointer; }
 .trace-inspector nav button.active { color:#477bea; border-color:#477bea; }
 button:focus-visible,input:focus-visible,select:focus-visible { outline:1px solid #477bea; outline-offset:1px; }
 @media (prefers-reduced-motion:reduce) { .spinning { animation:none; } }
@@ -837,6 +1253,9 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:1px soli
 .trace-rail { display:none; }
 .trace-header { min-height:54px; padding:7px 16px; }
 .trace-content { grid-template-columns:286px minmax(520px,1fr) 330px; }
+.trace-content.trace-content--catalog-collapsed { grid-template-columns:32px minmax(520px,1fr) 330px; }
+.trace-content.trace-content--inspector-collapsed { grid-template-columns:286px minmax(520px,1fr) 32px; }
+.trace-content.trace-content--catalog-collapsed.trace-content--inspector-collapsed { grid-template-columns:32px minmax(520px,1fr) 32px; }
 .trace-list-panel { border-right:1px solid var(--line); }
 .trace-list-item { min-height:40px; display:block; padding:3px 10px; }
 .trace-list-title,.trace-list-meta { display:flex; }
@@ -846,12 +1265,15 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:1px soli
 .trace-list-title em { border-radius:4px; }
 .timeline-header { min-height:24px; }
 .timeline-toolbar { height:28px; }
-.lane-overview { height:44px; }
-.lane-track { height:13px; }
 .event-row { min-height:28px; }
 .event-card { gap:8px; }
 .event-card b { font-size:10px; }
 .event-card small { font-size:9px; }
 .event-row>time small { top:0; }
-@media (max-width:1380px) { .trace-content { grid-template-columns:260px minmax(500px,1fr) 300px; } }
+@media (max-width:1380px) {
+  .trace-content { grid-template-columns:260px minmax(500px,1fr) 300px; }
+  .trace-content.trace-content--catalog-collapsed { grid-template-columns:32px minmax(500px,1fr) 300px; }
+  .trace-content.trace-content--inspector-collapsed { grid-template-columns:260px minmax(500px,1fr) 32px; }
+  .trace-content.trace-content--catalog-collapsed.trace-content--inspector-collapsed { grid-template-columns:32px minmax(500px,1fr) 32px; }
+}
 </style>
