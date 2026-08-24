@@ -13872,3 +13872,25 @@
 
 - 选择测试工作空间后，顶部版本菜单即使暂无版本也会显示“新增版本”，与左下角入口使用完全相同的创建行为。
 - 本次不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、依赖、部署节点、安全协议或兼容性契约；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。
+
+## 2026-08-24 - 修复顶部新增版本弹窗被上下文舱裁切
+
+### Why
+
+- 顶部“新增版本”已能触发共享弹窗，但顶栏通过 `transform` 做视觉居中，Element Plus 弹窗默认留在该定位上下文时，fixed 遮罩和弹窗被限制在顶部上下文舱内，页面只显示一条灰色遮罩而看不到弹窗主体。
+
+### What
+
+- 复用项目其它顶栏弹窗既有的 `append-to-body` 方案，让 `CreateWorkspaceVersionDialog` 统一 Teleport 到 `body`；顶部与左下角仍共用同一组件和 `AgentWorkbench.handleCreateVersion` 业务链路。
+- Chromium 回归新增弹窗所属遮罩必须直属 `body`、起点为视口左上角且宽高等于完整 viewport 的断言；同步 agent-web README 与 PACKAGE 说明这一层级约束。
+
+### How
+
+- 新断言在修复前稳定失败，表现为 `body` 下没有可见的目标遮罩；最小增加 `append-to-body` 后转绿。
+- agent-web 定向 Vitest 3 个文件 89 项通过，类型检查通过；顶部与左下角新增版本两项 Chromium 回归通过；前端生产构建和 `git diff --check` 通过。
+- 标准本地前端继续运行在 `http://127.0.0.1:3000/` 并返回 HTTP 200；构建仅有既有大 chunk 与动态导入提示。
+
+### Result
+
+- 顶部点击“新增版本”后，遮罩覆盖完整视口且弹窗正常居中显示，不再被 34px 顶部上下文舱裁切；左下角入口行为保持不变。
+- 本次仅修复前端挂载层级，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、依赖、部署、性能模型、安全协议或兼容性契约。

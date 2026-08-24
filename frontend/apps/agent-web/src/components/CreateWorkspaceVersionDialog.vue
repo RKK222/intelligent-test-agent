@@ -84,10 +84,12 @@ function confirmCreateVersion() {
 </script>
 
 <template>
+  <!-- 顶部入口位于 transform 定位的上下文舱内，必须挂到 body 才能让 fixed 遮罩覆盖完整视口。 -->
   <ElDialog
     :model-value="modelValue"
     :title="`为「${template?.workspaceName ?? ''}」新增版本`"
     width="420px"
+    append-to-body
     :close-on-click-modal="false"
     @update:model-value="emit('update:modelValue', $event)"
   >

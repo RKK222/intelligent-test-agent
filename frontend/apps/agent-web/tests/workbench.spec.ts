@@ -10570,6 +10570,26 @@ test("header version menu opens the shared new-version dialog", async ({ page })
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("选择日期（格式 yyyyMMdd）")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "确定" })).toBeDisabled();
+
+  // 顶栏使用 transform 做视觉居中；弹窗必须挂到 body，否则 fixed 遮罩会被限制在顶部上下文舱内。
+  const overlayState = await dialog.evaluate((element) => {
+    const overlay = element.closest(".el-overlay");
+    const rect = overlay?.getBoundingClientRect();
+    return {
+      attachedToBody: overlay?.parentElement === document.body,
+      x: rect?.x,
+      y: rect?.y,
+      width: rect?.width,
+      height: rect?.height
+    };
+  });
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  expect(overlayState.attachedToBody).toBe(true);
+  expect(overlayState.x).toBe(0);
+  expect(overlayState.y).toBe(0);
+  expect(overlayState.width).toBe(viewport!.width);
+  expect(overlayState.height).toBe(viewport!.height);
 });
 
 test("workspace cascade submenu shifts up when it would overflow the viewport bottom", async ({ page, isMobile }) => {
