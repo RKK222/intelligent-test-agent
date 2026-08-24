@@ -1,6 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { cleanup, render, waitFor } from "@testing-library/vue";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpencodeRuntimeManagementOverview } from "@test-agent/shared-types";
 import { buildRuntimeTopologyGraph } from "../src/components/settings/runtimeTopologyGraphData";
+import RuntimeTopologyGraph from "../src/components/settings/RuntimeTopologyGraph.vue";
+
+const echartsMock = vi.hoisted(() => {
+  const chart = {
+    setOption: vi.fn(),
+    resize: vi.fn(),
+    dispose: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
+    getOption: vi.fn(() => ({ series: [{ zoom: 1 }] }))
+  };
+  return {
+    chart,
+    init: vi.fn(() => chart),
+    use: vi.fn()
+  };
+});
+
+vi.mock("echarts/core", () => ({
+  init: echartsMock.init,
+  use: echartsMock.use
+}));
+vi.mock("echarts/charts", () => ({ GraphChart: {} }));
+vi.mock("echarts/components", () => ({ TooltipComponent: {} }));
+vi.mock("echarts/renderers", () => ({ SVGRenderer: {} }));
 
 const baseOverview: OpencodeRuntimeManagementOverview = {
   generatedAt: "2026-06-24T08:00:00Z",
@@ -30,6 +56,30 @@ const baseOverview: OpencodeRuntimeManagementOverview = {
     total: 0
   }
 };
+
+const topologyOverview: OpencodeRuntimeManagementOverview = {
+  ...baseOverview,
+  managers: [
+    {
+      managerId: "mgr_resize_guard",
+      containerId: "ctr_resize_guard",
+      linuxServerId: "10.8.0.12",
+      protocolVersion: "opencode-manager.v1",
+      connectionStatus: "CONNECTED",
+      capabilities: {},
+      createdAt: "2026-06-24T08:00:00Z",
+      updatedAt: "2026-06-24T08:00:00Z",
+      traceId: "trace_resize_guard",
+      managedProcesses: []
+    }
+  ]
+};
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+});
 
 describe("runtime topology graph data", () => {
   it("builds backend, manager and opencode nodes with connection edges", () => {
@@ -199,5 +249,44 @@ describe("runtime topology graph data", () => {
       ["manager:mgr_1234567890abcdef", "manager"]
     ]);
     expect(graph.edges).toEqual([]);
+  });
+});
+
+describe("RuntimeTopologyGraph lifecycle", () => {
+  it("skips ECharts initialization and resize while the persistent page is hidden or zero-sized", async () => {
+    let width = 0;
+    let height = 0;
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => width);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(() => height);
+
+    const view = render(RuntimeTopologyGraph, {
+      props: { overview: topologyOverview, pageActive: false }
+    });
+    await Promise.resolve();
+    expect(echartsMock.init).not.toHaveBeenCalled();
+
+    width = 800;
+    height = 360;
+    await view.rerender({ overview: topologyOverview, pageActive: true });
+    await waitFor(() => expect(echartsMock.init).toHaveBeenCalledTimes(1));
+    expect(echartsMock.chart.setOption).toHaveBeenCalled();
+
+    echartsMock.chart.resize.mockClear();
+    width = 0;
+    window.dispatchEvent(new Event("resize"));
+    expect(echartsMock.chart.resize).not.toHaveBeenCalled();
+
+    width = 800;
+    height = 0;
+    window.dispatchEvent(new Event("resize"));
+    expect(echartsMock.chart.resize).not.toHaveBeenCalled();
+
+    height = 360;
+    window.dispatchEvent(new Event("resize"));
+    expect(echartsMock.chart.resize).toHaveBeenCalledTimes(1);
+
+    await view.rerender({ overview: topologyOverview, pageActive: false });
+    window.dispatchEvent(new Event("resize"));
+    expect(echartsMock.chart.resize).toHaveBeenCalledTimes(1);
   });
 });

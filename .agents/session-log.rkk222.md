@@ -13516,3 +13516,24 @@
 - 空版本策略不再使已发布客户端进入注册成功后立即断连的重试环；现场无需插入版本策略数据，部署同一后端修复到 `.4/.114` 后旧客户端即可恢复连接。
 - 本次只调整既有 WebSocket 版本策略的兼容语义和日志，不变更 HTTP API、RunEvent 类型、数据库、Flyway、部署节点、权限、generated SDK、OpenCode 只读源码或 `.env*`。
 - 本机代码与运行验证完成；尚未生成新的企业双后台增量包，也未在 `.4/.114/.2` 现场部署或复验。
+
+## 2026-08-24 - 修复运行拓扑图零尺寸 resize 控制台异常
+
+### Why
+
+- 企业控制台出现 `Cannot read properties of null (reading '0')`，堆栈由 ECharts `resize` 进入 view 坐标系 transform 复制；运行管理功能页通过 `v-show` 常驻挂载，失活后的拓扑容器宽高为 0，导致 ECharts 6 生成不可逆矩阵。
+
+### What
+
+- `RuntimeManagementPanel` 向拓扑图传递既有 `pageActive`；`RuntimeTopologyGraph` 在初始化、异步加载完成后的实例创建、更新和 resize 前统一校验页面活动、DOM 仍连接且容器宽高大于 0，恢复可见后按最新 overview 补绘。
+- 增加组件生命周期回归测试，覆盖失活页不初始化、宽度为 0、高度为 0、恢复可见和再次失活的 resize 门禁；同步前端 README、包说明、前端规范和模块图。
+
+### How
+
+- `runtime-topology-graph.test.ts` 4/4、agent-web TypeScript 检查和 production build 通过；`git diff --check` 通过。
+- 现有本地 Vite 前端在 `http://127.0.0.1:3000` 返回 200，临时浏览器访问登录页无控制台错误；浏览器没有登录态，因此未进入真实运行管理页面，现场交互验证为部分验证。
+
+### Result
+
+- 功能页隐藏或拓扑容器零尺寸时不再调用 ECharts view 坐标系布局，恢复后仍显示最新拓扑；不改变拓扑交互、overview 数据或缩放能力。
+- 本次不涉及 HTTP API、RunEvent、WebSocket、数据库、Flyway、部署节点、性能模型、安全、环境配置、generated SDK 或 OpenCode 只读源码；工作区并行存在的本地客户端改动未纳入本次提交。

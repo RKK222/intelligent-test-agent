@@ -15,6 +15,7 @@ import unknownSvgUrl from "../../assets/figma/unknown.svg";
 
 const props = defineProps<{
   overview?: OpencodeRuntimeManagementOverview | null;
+  pageActive: boolean;
 }>();
 
 const chartEl = ref<HTMLDivElement | null>(null);
@@ -165,7 +166,8 @@ function chartOption() {
 }
 
 async function ensureChart() {
-  if (!chartEl.value || chart || !hasTopology.value) {
+  const element = chartEl.value;
+  if (!element || chart || !hasTopology.value || !isChartContainerReady()) {
     return;
   }
   try {
@@ -176,7 +178,11 @@ async function ensureChart() {
       import("echarts/renderers")
     ]);
     use([GraphChart, TooltipComponent, SVGRenderer]);
-    const instance = init(chartEl.value);
+    // 异步加载 ECharts 期间页面可能已经失活，不能在零尺寸或已替换的节点上初始化实例。
+    if (chart || chartEl.value !== element || !isChartContainerReady()) {
+      return;
+    }
+    const instance = init(element);
     instance.on("click", handleChartClick);
     chart = instance;
   } catch {
@@ -191,8 +197,14 @@ async function renderChart() {
     chart = null;
     return;
   }
+  // 工作区页面通过 v-show 常驻挂载；失活后容器为 0 尺寸，ECharts 6 的 view 坐标系会生成不可逆矩阵。
+  if (!isChartContainerReady()) {
+    return;
+  }
   await ensureChart();
-  chart?.setOption(chartOption(), true);
+  if (isChartContainerReady()) {
+    chart?.setOption(chartOption(), true);
+  }
 }
 
 onMounted(() => {
@@ -214,8 +226,26 @@ watch(graph, () => {
   void renderChart();
 }, { deep: true });
 
+watch(() => props.pageActive, (active) => {
+  if (active) {
+    void nextTick(renderChart);
+  }
+});
+
+function isChartContainerReady() {
+  const element = chartEl.value;
+  return Boolean(
+    props.pageActive
+    && element?.isConnected
+    && element.clientWidth > 0
+    && element.clientHeight > 0
+  );
+}
+
 function resizeChart() {
-  chart?.resize();
+  if (chart && isChartContainerReady()) {
+    chart.resize();
+  }
 }
 
 function handleChartClick(params: unknown) {

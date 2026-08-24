@@ -1669,7 +1669,7 @@ function startResize(e: MouseEvent) {
 
             <div class="ta-runtime-block is-wide">
               <h5>Manager 与后端连接拓扑</h5>
-              <RuntimeTopologyGraph :overview="overview" />
+              <RuntimeTopologyGraph :overview="overview" :page-active="props.pageActive" />
             </div>
           </div>
         </section>
