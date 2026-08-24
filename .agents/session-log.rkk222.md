@@ -13630,3 +13630,27 @@
 ### Result
 
 - 客户端与长期记忆的可见性、配置入口和关闭后的影响已按当前实现同步到用户手册；不涉及 HTTP API、RunEvent/SSE、数据库、Flyway、部署、性能、安全策略、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-24 - 基于已提交 release 重打企业增量包并排除 Trace 在途改动
+
+### Why
+
+- 用户要求基于最新代码重新打企业包，并在发现并行 Trace 开发尚未提交后明确要求本轮不包含 Trace。
+- 上一轮临时 ZIP 继承了 worker `included` 标记，且主工作区在构建期间出现并行未提交文件，不能继续作为最终交付物。
+
+### What
+
+- 最终构建源固定为已提交的 release HEAD `4577a2c2ebd0cb9f6dde2a3fb9dc146aaaf3e800`；通过 detached 临时 worktree 构建，完整保留主工作区 Trace 在途改动但不将其编入后端、前端或部署脚本。
+- 增量包包含 backend、frontend 和签名本地客户端 `20260824155652`；客户端分发目录只保留这一版。worker runtime 与 toolbox 均为 `reuse`，LobeHub、memory 及独立 ClickHouse/Mem0/BGE/pgvector/Python 包未重复装入。
+- 三节点配置继续使用 TCDS `http://tcds-prod.sdc.icbc:9080`、SkillHub `http://ai-code.sdc.icbc/icbc/skill` 和前端附加端口 `9996`；SkillHub access key 仅保留“从目标机已安装 backend.env 继承”的占位标记，没有把密钥写入包。
+
+### How
+
+- 后端正式构建、前端 VitePress/TypeScript/production build、内层 `--validate-only`、全部受保护 PostgreSQL/ClickHouse/XXL Flyway 资源 checksum、客户端签名分发、三节点配置、内外层 ZIP 完整性与嵌套 SHA 均通过。
+- 额外从临时 HEAD 源码、后端 `TraceController.class` 和前端产物三层确认在途 `spans/records` Trace 接口及客户端调用不存在；worker/toolbox/memory/LobeHub 归档不存在，旧客户端 `20260824124347` 不存在。
+- 最终内层 SHA-256 为 `15b77c3e860fbe3ea7f36e02b94841dc11719a46fba336ec4caccc525b7e3b8c`，外层固定名包 SHA-256 为 `6d33ba0df6fc7af0d9aea3cc72519ca3a323e457f8cf0dd84023f33e63897ec4`；已复制到 `~/Desktop/mimoagent/0709` 并复验 SHA。
+
+### Result
+
+- 本轮企业增量包严格对应 release 提交 `4577a2c2e`，不含主工作区未提交的 Trace 优化；相对上一企业包没有新增 Flyway 文件。目标库若已执行到本包既有最新版本，部署后 history 不应新增记录；若上一轮在迁移完成前失败，则仍会补执行其尚未落库的既有版本，必须以前后完整 history 对比为准。
+- 目标 `.4/.114/.2` 尚未实际部署；部署前必须确认 `.4/.114` 已安装 worker 指纹 `877cea1827a6f55b994f4a82f0934d72ca1361fb12b9872ce77e45430073be33`，并各自已有长度至少 16 的 `TEST_AGENT_SKILLHUB_ACCESS_KEY`，禁止伪造指纹或用 Flyway `repair/outOfOrder` 绕过门禁。
