@@ -1,0 +1,38 @@
+{
+  "skill_name": "enterprise-troubleshooting",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "企业内用户 000857009 登录后提示 opencode 进程不可用，先帮我确认这个用户当前在哪台服务器，不要重启服务。我们可以用 DBeaver 连 PostgreSQL，终端没有 rg、jq 和 qgsql。",
+      "expected_output": "先让用户确认数据库环境并在 DBeaver 执行只读 SQL，解析 users、当前 binding、用户进程、linux_servers、容器和 manager；明确区分 linux_server_id 与 IP，不执行重启或写库。",
+      "files": [],
+      "expectations": [
+        "优先使用 DBeaver 的只读 SQL 定位用户服务器",
+        "查询 user_opencode_process_bindings 和 opencode_server_processes",
+        "明确不使用 rg、jq、qgsql 或数据库 CLI"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "用户说工作区打不开，但他的 Agent 显示 READY。请按企业现场方式排查，重点看工作区服务器和用户进程服务器是否不一致；数据库查询只能让我复制到 DBeaver 执行。",
+      "expected_output": "同时查询 personal_workspaces、workspaces.linux_server_id 与 ACTIVE binding.linux_server_id，并在不一致时继续查迁移和路由证据，不手工改工作区归属。",
+      "files": [],
+      "expectations": [
+        "对照 workspace_linux_server_id 和 binding_linux_server_id",
+        "保留当前快照可被覆盖的限制说明",
+        "数据库操作保持只读"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "前端偶发提示请求落到错误节点，用户进程本身可能是健康的。请给出从用户身份、进程服务器到 Java/worker 拓扑和时间窗日志的排查顺序，不能用 rg、jq、qgsql，也不要让我把 token 发出来。",
+      "expected_output": "先查用户和进程归属，再查 backend_java_processes、opencode_containers、manager 连接和心跳，最后用 grep/sed/journalctl/docker logs 按时间窗取证并脱敏。",
+      "files": [],
+      "expectations": [
+        "区分用户 Agent 服务器、Java 后端服务器和 worker/manager 服务器",
+        "提供时间窗日志采证方法",
+        "要求脱敏 token、Cookie、prompt 和私钥"
+      ]
+    }
+  ]
+}

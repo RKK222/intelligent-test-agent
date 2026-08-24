@@ -5,6 +5,27 @@
 
 ## Entries
 
+### 2026-08-24 - 新增企业内用户服务器定位与无专用命令排查技能
+
+### Why
+
+- 企业内问题排查需要先确认用户当前绑定在哪台服务器，再判断工作区、Java 后端和 worker/manager 是否同节点；现场可用 DBeaver 直连 PostgreSQL，但终端没有 `rg`、`jq`、`qgsql`。
+
+### What
+
+- 新增项目技能 `enterprise-troubleshooting`，以 `users`、`user_opencode_process_bindings`、`opencode_server_processes`、`workspaces`、`backend_java_processes` 和 worker/manager 拓扑为证据源。
+- 技能强制使用 DBeaver 只读 SQL，区分用户 Agent 进程服务器、工作区服务器、Java 请求节点和 worker/manager 服务器，并禁止命令行数据库客户端、`rg`、`jq`、`qgsql` 及未取证前的写库/重启。
+- 增加 3 个排查场景 eval，覆盖用户服务器定位、工作区与进程服务器不一致、跨 Java/worker 路由异常。
+
+### How
+
+- 对照项目 Flyway 表结构和既有企业排查文档编写可复制 SQL；日志采集只保留 `grep`、`sed`、`find`、`journalctl`、`docker logs` 等基础工具，并要求按时间窗和脱敏字段取证。
+- 运行技能格式校验、eval JSON 解析、`git diff --check`，并完成 3 个 with-skill 与 3 个 baseline 的轻量 smoke test。
+
+### Result
+
+- 技能文件和 eval 样例已落入 `.agents/skills/enterprise-troubleshooting/`，静态校验通过；本次不涉及业务代码、API、事件、数据库结构、环境配置或服务重启。
+
 ### 2026-08-19 - 修复 macOS screen 会话丢失环境变量与旧服务器进程绑定清理
 
 ### Why
