@@ -13440,6 +13440,7 @@
 ### Result
 
 - 客户端生成配置将使用 `http://mimo.sdc.cs.icbc:9996` 与 `allowInsecureControl=true`，旧 runtime 已下载但未 enroll 的用户只需替换用户级启动器后重新 enroll，无需 sudo 或删除既有 runtime。
-- 以发布提交 `aa868fab9c38f86d042fbda1074bec9078d787f6` 完成增量企业包：内层 SHA-256 为 `5bc42450528ac6abcd27a37a7d69bd5ad4534a47429dd67ba0035907cb786563`，外层 SHA-256 为 `c09ca4a60fe6f0c6b3a18134648c1639fa312ddc0753cde9d82b0176861aa52f`，外层嵌套内层字节一致。
-- 客户端版本为 `20260824121335`，manifest SHA-256 为 `166fd3396a964e053848ffbc718a79e9821b77010d5027df278e6aee7e9b2ea8`；DEB 为 arm64、无 macOS xattr PAX header。前端生产编译、worker 镜像与 Codex/OpenCode/Tool runtime、客户端签名分发、内外层 Flyway 固定 SHA、最终目标机 `--validate-only` 和外层 `unzip -tq` 均通过。
+- 以发布提交 `aa868fab9c38f86d042fbda1074bec9078d787f6` 完成增量企业包：内层 SHA-256 为 `4a7c5112fff4c6e25b8e9148167c6ddca599419c8eccf3631c7a3e65813e1f8a`，外层 SHA-256 为 `be61452d99e17a19bcc2e776644a53d1b7e991e2640a3502b09fe729d2e7ee1e`，外层嵌套内层字节一致。
+- 客户端版本为 `20260824124347`，manifest SHA-256 为 `24a190614334a1733e257b7b14b89d96cc824a27462c5c525caa3d0dd06f7336`；DEB 为 arm64、无 macOS xattr PAX header。为严格落实“没变动的不打包”，重建签名目录时仅保留这一个当前 release，不再携带上一版本 JDK/OpenCode/公共能力副本，内层包由约 1.2 GiB 降为 916 MiB。
+- 前端生产编译、worker 镜像与 Codex/OpenCode/Tool runtime、客户端签名分发、内外层 Flyway 固定 SHA、最终目标机 `--validate-only`、外层 `unzip -tq`、单客户端 release 目录与三节点域名/TCDS/ClickHouse/Mem0 配置均通过。
 - 本轮包含 backend、frontend、确有变化的 worker runtime 和 local client；toolbox 为 `reuse`，独立 ClickHouse/Mem0/BGE/pgvector、Python libs 与 LobeHub 未进入包。目标 PostgreSQL、XXL MySQL、ClickHouse history 核验和 `.4/.114/.2` 现场部署仍待执行，禁止用 Flyway `repair` 或 `outOfOrder` 绕过。
