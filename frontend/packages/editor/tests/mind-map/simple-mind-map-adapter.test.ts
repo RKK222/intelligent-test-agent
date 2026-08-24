@@ -6,9 +6,9 @@ import {
 import { parseMindMapMarkdown } from "../../src/mind-map/markdown";
 
 describe("SimpleMindMap 安全数据适配器", () => {
-  it("只向画布下发普通文本、ID、折叠状态和白名单样式", () => {
+  it("只向画布下发字面文本、ID、折叠状态和白名单样式", () => {
     const document = parseMindMapMarkdown(
-      "# 根\n\n<!-- mm:id=root -->\n\n- A <!-- mm:id=n1 -->\n"
+      "# 根\n\n<!-- mm:id=root -->\n\n- <script>alert(1)</script> **字面加粗** <!-- mm:id=n1 -->\n"
     ).document!;
     document.root.children[0]!.collapsed = true;
     document.root.children[0]!.style = {
@@ -36,7 +36,7 @@ describe("SimpleMindMap 安全数据适配器", () => {
 
     expect(data.children[0]).toEqual({
       data: {
-        text: "A",
+        text: "<script>alert(1)</script> **字面加粗**",
         uid: "n1",
         expand: false,
         richText: false,

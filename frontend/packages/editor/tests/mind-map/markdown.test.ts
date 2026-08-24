@@ -38,21 +38,54 @@ describe("思维导图 Markdown 领域模型", () => {
     ]);
   });
 
+  it("把 HTML、Markdown 和 SQL 特殊字符作为不执行的单行字面文本往返", () => {
+    const source = `# 登录 <script>alert('root')</script>
+
+- XSS 注入字符：<script>alert(1)</script>
+- SQL 注入字符：' OR 1=1--
+- Markdown 字符：**加粗**、\`code\`、[链接](https://example.com)、> 引用、# 标题
+`;
+
+    const parsed = parseMindMapMarkdown(source);
+
+    expect(parsed.status).toMatchObject({ canEdit: true });
+    expect(parsed.document?.root.text).toBe("登录 <script>alert('root')</script>");
+    expect(parsed.document?.root.children.map((node) => node.text)).toEqual([
+      "XSS 注入字符：<script>alert(1)</script>",
+      "SQL 注入字符：' OR 1=1--",
+      "Markdown 字符：**加粗**、`code`、[链接](https://example.com)、> 引用、# 标题"
+    ]);
+
+    const applied = prepareMindMapDocument(parsed.document!);
+    expect(applied.content).toContain("# 登录 <script>alert('root')</script>");
+    expect(applied.content).toContain("- XSS 注入字符：<script>alert(1)</script> <!-- mm:id=n1 -->");
+    expect(applied.content).toContain("- SQL 注入字符：' OR 1=1-- <!-- mm:id=n2 -->");
+    expect(parseMindMapMarkdown(applied.content).status.canEdit).toBe(true);
+  });
+
   it.each([
     ["Tab 缩进", "# 根\n\n- 一级\n\t- 二级\n", 4],
     ["跳级", "# 根\n\n- 一级\n  - 二级\n      - 跳级\n", 5],
     ["多根", "# 根一\n\n- 节点\n\n# 根二\n", 5],
     ["有序列表", "# 根\n\n1. 节点\n", 3],
     ["续行", "# 根\n\n- 节点\n  续行\n", 4],
-    ["粗体富文本", "# 根\n\n- **粗体**\n", 3],
-    ["星号斜体富文本", "# 根\n\n- *斜体*\n", 3],
-    ["下划线斜体富文本", "# 根\n\n- _斜体_\n", 3],
-    ["引用链接富文本", "# 根\n\n- [文档][guide]\n", 3]
+    ["空节点", "# 根\n\n-    \n", 3]
   ])("拒绝%s并报告源码行号", (_name, source, line) => {
     const result = parseMindMapMarkdown(source);
 
     expect(result.status.canEdit).toBe(false);
     expect(result.status.message).toContain(`第 ${line} 行`);
+  });
+
+  it.each([
+    ["纯空白", "   "],
+    ["换行", "第一行\n第二行"],
+    ["保留 mm 注释", "节点 <!-- mm:custom=value -->"]
+  ])("应用时仍拒绝%s节点文字", (_name, text) => {
+    const document = parseMindMapMarkdown("# 根\n\n- 节点\n").document!;
+    document.root.children[0]!.text = text;
+
+    expect(() => prepareMindMapDocument(document)).toThrow(/非空单行文本|保留的 mm 注释/);
   });
 
   it("首次应用按前序生成 ID、元数据并规范化项目符号和缩进", () => {

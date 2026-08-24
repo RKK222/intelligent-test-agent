@@ -26,16 +26,14 @@ function issue(line: number | undefined, code: string, message: string): MindMap
   };
 }
 
-function isPlainText(value: string): boolean {
-  return !(
-    /<[^>]*>/.test(value)
-    || /`/.test(value)
-    || /(?:\*\*|__|~~)/.test(value)
-    || /(^|[^\\])\*(?=\S)(?:[^*\n]*\S)?\*/.test(value)
-    || /(^|[\s([{（【])_(?=\S)(?:[^_\n]*\S)?_(?=$|[\s)\]}，。！？、；：,.!?;:])/.test(value)
-    || /!?\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])/.test(value)
-    || /^\s*(?:>|#{1,6}\s)/.test(value)
-  );
+/**
+ * 节点文字始终以 richText=false 下发，因此 HTML、Markdown、SQL 等特殊字符只按
+ * 字面文本显示。这里只拒绝无法安全映射到单行列表的空白、换行和内部保留注释。
+ */
+function isSupportedNodeText(value: string): boolean {
+  return value.trim().length > 0
+    && !/[\r\n]/.test(value)
+    && !/<!--\s*mm:/i.test(value);
 }
 
 function nodeCountAndDepth(root: MindMapNode): { count: number; depth: number } {
@@ -210,7 +208,9 @@ export function parseMindMapMarkdown(source: string): MindMapParseResult {
         continue;
       }
       const text = heading[1]!.trim();
-      if (!text || !isPlainText(text)) issues.push(issue(lineNumber, "invalid-root", "根标题必须是非空普通文本"));
+      if (!isSupportedNodeText(text)) {
+        issues.push(issue(lineNumber, "invalid-root", "根标题必须是非空单行文本，且不能包含保留的 mm 注释"));
+      }
       if (text.length > MIND_MAP_MAX_LABEL_LENGTH) {
         issues.push(issue(lineNumber, "label-too-long", `节点文字不能超过 ${MIND_MAP_MAX_LABEL_LENGTH} 字符`));
       }
@@ -269,8 +269,8 @@ export function parseMindMapMarkdown(source: string): MindMapParseResult {
       text = idMatch[1]!.trim();
       id = idMatch[2]!;
     }
-    if (!text || !isPlainText(text)) {
-      issues.push(issue(lineNumber, "rich-text", "节点只能包含非空普通文本"));
+    if (!isSupportedNodeText(text)) {
+      issues.push(issue(lineNumber, "invalid-text", "节点必须是非空单行文本，且不能包含保留的 mm 注释"));
     }
     if (text.length > MIND_MAP_MAX_LABEL_LENGTH) {
       issues.push(issue(lineNumber, "label-too-long", `节点文字不能超过 ${MIND_MAP_MAX_LABEL_LENGTH} 字符`));
@@ -369,8 +369,8 @@ function validateEditableTree(root: MindMapNode): void {
   if (count > MIND_MAP_MAX_NODES) throw new Error(`思维导图最多 ${MIND_MAP_MAX_NODES} 个节点`);
   if (depth > MIND_MAP_MAX_DEPTH) throw new Error(`思维导图最多 ${MIND_MAP_MAX_DEPTH} 层`);
   for (const node of walkNodes(root)) {
-    if (!node.text || node.text.length > MIND_MAP_MAX_LABEL_LENGTH || !isPlainText(node.text)) {
-      throw new Error("节点只能包含不超过 4096 字符的普通文本");
+    if (node.text.length > MIND_MAP_MAX_LABEL_LENGTH || !isSupportedNodeText(node.text)) {
+      throw new Error("节点必须是不超过 4096 字符的非空单行文本，且不能包含保留的 mm 注释");
     }
   }
 }

@@ -84,7 +84,7 @@ describe("MindMapCanvas", () => {
     vi.unstubAllGlobals();
   });
 
-  it("挂载时才懒加载依赖，并强制使用右向结构、普通文本和安全选项", async () => {
+  it("挂载时才懒加载依赖，并强制使用右向结构、单行字面文本和安全选项", async () => {
     const document = parseMindMapMarkdown("# 根\n\n- A\n").document!;
     render(MindMapCanvas, { props: { document, readonly: true, generationKey: "a.mind" } });
 

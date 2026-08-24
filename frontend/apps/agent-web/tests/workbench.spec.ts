@@ -2184,7 +2184,8 @@ test("workspace file loading distinguishes an empty file and supports retry afte
 
 test("standalone mind map previews, restores a draft, applies through dirty state, saves, and cancels without writing", async ({ page }) => {
   const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
-  const source = "# 产品冷启动\n\n- 用户分析\n  - 用户画像\n- 产品验证\n";
+  const xssLiteral = "<script>window.__mindMapExecuted = true</script>";
+  const source = `# 产品冷启动\n\n- 用户分析\n  - 用户画像\n- ${xssLiteral}\n- SQL：' OR 1=1--\n`;
   await mockBackendApi(page, {
     ...runnableWorkspaceSetup(),
     fileWriteRequests,
@@ -2196,6 +2197,8 @@ test("standalone mind map previews, restores a draft, applies through dirty stat
   await page.getByRole("button", { name: "roadmap.mind", exact: true }).click();
   await expect(page.getByTestId("mind-map-document")).toBeVisible();
   await expect(page.getByTestId("mind-map-canvas")).toBeVisible();
+  await expect(page.getByTestId("mind-map-canvas")).toContainText(xssLiteral);
+  expect(await page.evaluate(() => (window as Window & { __mindMapExecuted?: boolean }).__mindMapExecuted)).toBeUndefined();
   await expect(page.locator(".monaco-editor")).toHaveCount(0);
 
   const edit = page.getByTestId("footer-mind-map-edit");
@@ -2226,6 +2229,8 @@ test("standalone mind map previews, restores a draft, applies through dirty stat
     path: "docs/roadmap.mind"
   });
   expect(fileWriteRequests[0]?.content).toMatch(/<!-- mm:id=root -->[\s\S]*<!--mm:v1:[A-Za-z0-9_-]+-->/);
+  expect(fileWriteRequests[0]?.content).toContain(`${xssLiteral} <!-- mm:id=n3 -->`);
+  expect(fileWriteRequests[0]?.content).toContain("SQL：' OR 1=1-- <!-- mm:id=n4 -->");
   await expect(tab.locator(".figma-editor-tab-dirty-star")).toHaveCount(0);
 
   await page.getByTestId("footer-mind-map-edit").click();
