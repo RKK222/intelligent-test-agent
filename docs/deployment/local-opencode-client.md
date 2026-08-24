@@ -260,6 +260,11 @@ enroll 会交互提示统一认证号和隐藏 Client key；只在用户本机�
 
 **机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认该实例 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。此项与本机 active user service 一起证明 WS 已建立；若任一项失败，停止 rollout，先检查域名 `:9996` 的 Nginx 下载/API/Upgrade 路由、.4/.114 的明文控制开关与 TRUSTED_PROXY_ADDRESSES，以及后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
 
+全新企业环境可以尚未设置本地客户端全局/个人目标版本；这时版本策略表为空属于合法状态，客户端必须保持在线，
+不能为了通过接入验收写入假策略或修改 `flyway_schema_history`。若日志表现为反复 `REGISTERED` 后立即断线，先确认
+服务端未把 `targetVersion=null/policyRevision=0` 下发为 `VERSION_POLICY`；新版客户端日志会以安全
+`failureCode=VERSION_POLICY_INVALID` 标识旧协议错误，不输出异常正文。
+
 ## 8. 数据库与真实现场闸门
 
 本手册的文件、Nginx、首次 enroll 和 WSS/实例检查不替代数据库准入。发布前仍必须按照 [database.md](database.md) 对每套已知真实 PostgreSQL 历史留存 flyway_schema_history 的 version/checksum/success，验证升级到当前 HEAD，并检查两条固定 migration 在源码、构建输出、发布 ZIP 和安装后 backend/lib/test-agent-persistence-*.jar 中的字节。未完成真实 PostgreSQL 升级或真实麒麟 ARM64 glibc 全链路测试时，它们必须继续标记为发布闸门，不能表述为已通过。

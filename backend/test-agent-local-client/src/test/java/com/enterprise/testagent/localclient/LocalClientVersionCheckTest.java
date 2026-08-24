@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.concurrent.CompletionException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -40,5 +41,33 @@ class LocalClientVersionCheckTest {
     void shouldAddBoundedZeroToSixtySecondJitterToFiveMinuteCheck() {
         assertThat(LocalClientConnection.versionCheckDelaySeconds(0)).isEqualTo(300);
         assertThat(LocalClientConnection.versionCheckDelaySeconds(60)).isEqualTo(360);
+    }
+
+    @Test
+    void shouldAcceptOnlyStrictLegacyEmptyVersionPolicySentWithoutConfiguredTarget() {
+        LocalClientPayloads.VersionPolicy emptyPolicy = new LocalClientPayloads.VersionPolicy(
+                "lci_version_policy", 7, null, "SAME", 0, false);
+
+        assertThat(LocalClientConnection.acceptVersionPolicy("lci_version_policy", 7, emptyPolicy)).isTrue();
+        assertThat(LocalClientConnection.acceptVersionPolicy(
+                "lci_version_policy", 7,
+                new LocalClientPayloads.VersionPolicy(
+                        "lci_version_policy", 7, "20260824200000", "UPDATE", 0, false)))
+                .isFalse();
+        assertThat(LocalClientConnection.acceptVersionPolicy(
+                "lci_version_policy", 7,
+                new LocalClientPayloads.VersionPolicy(
+                        "lci_version_policy", 7, null, "SAME", 0, true)))
+                .isFalse();
+    }
+
+    @Test
+    void shouldLogSafeRootFailureCodeInsteadOfCompletionWrapper() {
+        assertThat(LocalClientConnection.connectionFailureCode(new CompletionException(
+                new IllegalArgumentException("version policy coordinates are invalid"))))
+                .isEqualTo("VERSION_POLICY_INVALID");
+        assertThat(LocalClientConnection.connectionFailureCode(new CompletionException(
+                new IllegalStateException("sensitive upstream detail"))))
+                .isEqualTo("IllegalStateException");
     }
 }

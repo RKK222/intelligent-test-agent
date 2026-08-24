@@ -1042,7 +1042,7 @@ manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字�
 | `BINARY_CHUNK` | 双向预留/传输 | Base64 数据的原始分片上限为 256 KiB。 |
 | `MODEL_GRANT` | server→client | 原子替换短 TTL 模型 grant，不下发平台模型 key。 |
 | `VERSION_CHECK` | client→server | 客户端声明版本与 capabilities。 |
-| `VERSION_POLICY` | server→client | 平台返回有效目标、方向和策略 revision。 |
+| `VERSION_POLICY` | server→client | 平台存在有效目标版本时返回目标、方向和正数策略 revision。 |
 | `UPDATE_COMMAND` | server→client | 不带下载 URL 的幂等准备命令。 |
 | `UPDATE_PREPARED` | client→server | 客户端完成下载、验签和候选自检后的回执。 |
 | `UPDATE_APPLY` | server→client | 服务端通过再次策略复核后发出的最终切换许可。 |
@@ -1059,6 +1059,10 @@ grant；服务端完成的 Run 不自动切换到服务端实例或其它本地�
 只有 `REGISTER.capabilities` 声明 `SELF_UPDATE_V1` 且携带 launcher 版本的客户端才可双向使用版本帧；服务端拒绝
 旧客户端发送 `VERSION_CHECK/UPDATE_PREPARED/UPDATE_STATUS`，也不向其发送策略、命令、应用或取消帧。所有 `UPDATE_*` 均以
 `commandId + clientInstanceId` 幂等，且必须匹配同一 connection generation、policy revision、目标版本和方向；
+平台没有配置全局或个人目标版本时，`VERSION_CHECK` 不产生 `VERSION_POLICY`，客户端保持当前版本和在线连接。
+兼容已发布旧服务端时，只允许把
+`targetVersion=null/direction=SAME/policyRevision=0/force=false` 作为无动作空策略；该哨兵不得进入任何
+`UPDATE_*` 命令或 attempt。
 重连或换代后不得复用旧授权。帧不携带 Client key、凭据、下载地址、签名或完整错误。客户端在 `PREPARED` 后，
 服务端再次校验实例所有权、在线 generation 和有效策略，才会发送 `UPDATE_APPLY`。成功、失败、取消和启动器
 自动回切用 `UPDATE_STATUS` 回报；客户端在 WebSocket 写入完成后仍保留 result marker，断线重连会继续重报，只有收到

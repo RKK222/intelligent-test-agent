@@ -187,9 +187,10 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                 }
             } catch (RuntimeException exception) {
                 if (!closed.get()) {
-                    lastFailure.set(exception.getClass().getSimpleName());
-                    LOGGER.warn("local_client_connection_failed server={} retrySeconds={}",
-                            configuration.serverBaseUri(), backoffSeconds);
+                    String failureCode = connectionFailureCode(exception);
+                    lastFailure.set(failureCode);
+                    LOGGER.warn("local_client_connection_failed server={} failureCode={} retrySeconds={}",
+                            configuration.serverBaseUri(), failureCode, backoffSeconds);
                 }
             } finally {
                 activeListener.compareAndSet(listener, null);
@@ -431,12 +432,48 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
 
     private void handleVersionPolicy(LocalClientFrame frame) {
         LocalClientPayloads.VersionPolicy policy = codec.payload(frame, LocalClientPayloads.VersionPolicy.class);
-        if (!stateStore.read().clientInstanceId().equals(policy.clientInstanceId())
-                || policy.connectionGeneration() != generation.get()
-                || policy.policyRevision() < 1) {
+        if (!acceptVersionPolicy(
+                stateStore.read().clientInstanceId(), generation.get(), policy)) {
             throw new IllegalArgumentException("version policy coordinates are invalid");
         }
         // 非强制策略只驱动平台站内信；实际切换始终等待带幂等 commandId 的 UPDATE_COMMAND。
+    }
+
+    /**
+     * 兼容旧服务端在尚未配置版本策略时发送的空策略。
+     * 只有“无目标、SAME、非强制、revision=0”可作为无动作哨兵；真实更新策略仍必须使用正 revision。
+     */
+    static boolean acceptVersionPolicy(
+            String expectedClientInstanceId,
+            long expectedGeneration,
+            LocalClientPayloads.VersionPolicy policy) {
+        if (policy == null
+                || !expectedClientInstanceId.equals(policy.clientInstanceId())
+                || policy.connectionGeneration() != expectedGeneration) {
+            return false;
+        }
+        if (policy.policyRevision() > 0) {
+            return true;
+        }
+        return policy.policyRevision() == 0
+                && policy.targetVersion() == null
+                && "SAME".equals(policy.direction())
+                && !policy.force();
+    }
+
+    /** 只输出固定错误码或异常类型，不把 WebSocket/HTTP 异常正文写入客户端日志。 */
+    static String connectionFailureCode(Throwable error) {
+        Throwable cause = error;
+        while ((cause instanceof java.util.concurrent.CompletionException
+                        || cause instanceof java.util.concurrent.ExecutionException)
+                && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        if (cause instanceof IllegalArgumentException
+                && "version policy coordinates are invalid".equals(cause.getMessage())) {
+            return "VERSION_POLICY_INVALID";
+        }
+        return cause == null ? "UNKNOWN" : cause.getClass().getSimpleName();
     }
 
     private void submitUpdateCommand(LocalClientFrame frame) {

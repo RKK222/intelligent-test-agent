@@ -13465,3 +13465,29 @@
 - 客户端版本为 `20260824124347`，manifest SHA-256 为 `24a190614334a1733e257b7b14b89d96cc824a27462c5c525caa3d0dd06f7336`；DEB 为 arm64、无 macOS xattr PAX header。为严格落实“没变动的不打包”，重建签名目录时仅保留这一个当前 release，不再携带上一版本 JDK/OpenCode/公共能力副本，内层包由约 1.2 GiB 降为 916 MiB。
 - 前端生产编译、worker 镜像与 Codex/OpenCode/Tool runtime、客户端签名分发、内外层 Flyway 固定 SHA、最终目标机 `--validate-only`、外层 `unzip -tq`、单客户端 release 目录与三节点域名/TCDS/ClickHouse/Mem0 配置均通过。
 - 本轮包含 backend、frontend、确有变化的 worker runtime 和 local client；toolbox 为 `reuse`，独立 ClickHouse/Mem0/BGE/pgvector、Python libs 与 LobeHub 未进入包。目标 PostgreSQL、XXL MySQL、ClickHouse history 核验和 `.4/.114/.2` 现场部署仍待执行，禁止用 Flyway `repair` 或 `outOfOrder` 绕过。
+
+## 2026-08-24 - 修复企业客户端在空版本策略下反复断连
+
+### Why
+
+- 企业现场日志显示客户端每次完成 `REGISTERED` 后约 0.1–0.2 秒即断开并重连；DBeaver 只读核验确认三个版本管理表均存在，但全局策略和该用户策略均为空。
+- 服务端在没有有效目标版本时仍发送 `revision=0` 的空 `VERSION_POLICY`，已发布客户端按协议拒绝该帧并主动关闭连接，继而造成网页状态红点、重启按钮置灰和下载入口短暂闪现。
+
+### What
+
+- 服务端没有全局或用户版本策略时不再发送空版本策略帧，并使旧的本地客户端升级通知按“策略已满足”失效；配置了有效目标版本时保持原有检查和升级行为。
+- 新客户端严格兼容历史空策略哨兵，只接受 `revision=0 + targetVersion=null + direction=SAME + force=false` 的完整组合；其它非法版本策略仍拒绝。
+- 客户端断连日志增加脱敏的根因码，版本策略错误记录为 `VERSION_POLICY_INVALID`，其它异常只记录根异常类型，不输出凭据或服务端消息。
+- 同步本地客户端、协议、runtime README，以及事件协议和本地客户端部署排障文档；明确空策略是合法初始状态，禁止为恢复连接伪造策略或修改 Flyway 历史。
+
+### How
+
+- 定向测试 `LocalClientVersionCheckTest` 与 `LocalClientUpdateCoordinatorTest` 共 30 项通过；相关 Maven reactor 全量测试中本地客户端 94 项（1 skipped）、OpenCode Runtime 978 项全部通过。
+- 相关模块打包成功，并生成 `backend/test-agent-local-client/target/test-agent-local-client.jar`，SHA-256 为 `c676faacead741d615f5e723c17c33678f8f77af98cb8ca32c8d8cd763efbe70`。
+- 使用 JDK 25、仓库现有 `.env.test` 和 `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 UP，前端 3000 返回 200，登录 CORS 正常，manager WebSocket 已连接且 OpenCode 健康。
+
+### Result
+
+- 空版本策略不再使已发布客户端进入注册成功后立即断连的重试环；现场无需插入版本策略数据，部署同一后端修复到 `.4/.114` 后旧客户端即可恢复连接。
+- 本次只调整既有 WebSocket 版本策略的兼容语义和日志，不变更 HTTP API、RunEvent 类型、数据库、Flyway、部署节点、权限、generated SDK、OpenCode 只读源码或 `.env*`。
+- 本机代码与运行验证完成；尚未生成新的企业双后台增量包，也未在 `.4/.114/.2` 现场部署或复验。

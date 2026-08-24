@@ -16,6 +16,9 @@ fencing 约束。只有同时携带 launcher 版本并声明 `SELF_UPDATE_V1` �
 result marker 并在重连后重报；服务端完成幂等持久化才返回精确匹配原命令 generation/status 的 ACK，客户端收到匹配
 ACK 后清 marker。deadline 失败可由迟到 `SUCCEEDED/AUTO_ROLLED_BACK` 条件纠正；其它持久化终态冲突不返回 ACK。
 目标版本大于当前为 `UPDATE`、小于为 `ROLLBACK`、相同为 `SAME`。
+平台没有配置任何有效目标版本时保持当前版本且不发送 `VERSION_POLICY`。兼容已经发布的旧服务端时，客户端只把
+`targetVersion=null/direction=SAME/policyRevision=0/force=false` 识别为无动作空策略；其它版本策略以及所有
+`UPDATE_*` 命令仍要求正数 policy revision，不能以该兼容哨兵绕过 fencing。
 
 声明 `MANAGED_MODEL_CONFIG_V1` 的客户端会在 `REGISTERED.managedModelConfig` 接收无密钥 OpenCode 模型配置；字段仅包含
 `model/small_model/enabled_providers/provider`，provider 的地址与 API key 使用客户端进程内的 loopback 环境变量占位符。

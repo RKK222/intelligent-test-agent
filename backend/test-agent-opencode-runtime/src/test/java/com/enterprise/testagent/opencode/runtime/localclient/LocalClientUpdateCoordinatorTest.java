@@ -250,6 +250,39 @@ class LocalClientUpdateCoordinatorTest {
     }
 
     @Test
+    void versionCheckWithoutConfiguredPolicyKeepsConnectionOpenWithoutSendingEmptyPolicy() {
+        LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
+        LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
+        LocalClientConnectionRegistry registry = new LocalClientConnectionRegistry();
+        UserNotificationApplicationService notifications = mock(UserNotificationApplicationService.class);
+        List<LocalClientFrame> sent = new CopyOnWriteArrayList<>();
+        registry.register(INSTANCE_ID, USER_ID, 7, "grant-fingerprint", sender(sent));
+        when(instances.findById(INSTANCE_ID)).thenReturn(Optional.of(instance(true, "20260823213628")));
+        when(versions.findGlobalPolicy()).thenReturn(Optional.empty());
+        when(versions.findUserPolicy(USER_ID)).thenReturn(Optional.empty());
+
+        coordinator(
+                versions,
+                instances,
+                mock(LocalClientConnectionStore.class),
+                mock(UserNotificationRepository.class),
+                registry,
+                notifications)
+                .handleVersionCheck(
+                        USER_ID,
+                        INSTANCE_ID,
+                        7,
+                        new LocalClientPayloads.VersionCheck(
+                                INSTANCE_ID.value(), "20260823213628", "1", "1.18.4",
+                                List.of("SELF_UPDATE_V1"), NOW),
+                        "trace_no_version_policy");
+
+        assertThat(sent).isEmpty();
+        verify(notifications).invalidateLocalClientUpdate(
+                USER_ID, INSTANCE_ID.value(), "POLICY_SATISFIED", "trace_no_version_policy");
+    }
+
+    @Test
     void compensationCancelsAttemptWhenOnlineGenerationChanged() {
         LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
         LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);

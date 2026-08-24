@@ -206,9 +206,16 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
         }
         LocalClientVersionModels.EffectivePolicy effective = effectivePolicy(userId);
         LocalClientUpdateDirection direction = direction(instance, effective.targetVersion());
+        // 新部署尚未设置任何版本策略时没有可下发的目标，不能把内部哨兵 revision=0
+        // 编码成 VERSION_POLICY；已发布客户端会把非正 revision 视为失效 fencing 并断开连接。
+        if (effective.targetVersion() == null) {
+            notifications.invalidateLocalClientUpdate(
+                    userId, clientInstanceId.value(), "POLICY_SATISFIED", traceId);
+            return;
+        }
         if (direction == LocalClientUpdateDirection.SAME) {
             notifications.invalidateLocalClientUpdate(userId, clientInstanceId.value(), "POLICY_SATISFIED", traceId);
-        } else if (effective.targetVersion() != null) {
+        } else {
             notifications.syncLocalClientUpdateAvailable(
                     userId,
                     clientInstanceId.value(),

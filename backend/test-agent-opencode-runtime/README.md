@@ -228,6 +228,8 @@ Authorization、文件参数和结果不得进入通用日志、RunEvent 或客�
 `LocalClientUpdateCoordinator` 编排本地客户端的策略快照、通知、跨 Java 唤醒和两阶段切换：仅支持
 `SELF_UPDATE_V1` 的在线实例可进入更新 attempt；`commandId + clientInstanceId + generation + policyRevision`
 必须在 `PREPARED/APPLY/CANCEL/STATUS` 全程一致。准备完成时再次校验实例所有权、连接 generation 和有效策略；
+平台尚未设置全局或个人目标版本时，版本检查只失效旧更新通知并保持连接在线，不把领域层的
+`targetVersion=null/policyRevision=0` 哨兵下发为 `VERSION_POLICY`。
 过期通知或策略改变按 `notificationId + recipient` 在独立事务中精确失效并返回冲突，不影响同实例的新通知。
 attempt 每 30 秒补偿，所有非终态在创建 30 分钟后统一到期失败，按到期优先稳定分页扫描以免超过 100 条时饥饿。扫描、网络发送和
 跨 Java 唤醒保持事务外；deadline、能力取消、generation 失效以及客户端普通/迟到终态统一调用

@@ -39,6 +39,14 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 - 客户端升级或重连时如果发现已有 OpenCode 尚未应用新配置，下一次启动命令会先按 PID/启动时间/命令身份停止旧进程，
   再用新配置重启；配置不变时保持幂等，不额外重启。
 
+## 版本策略兼容
+
+- 平台尚未设置全局或个人客户端目标版本时，客户端保持当前版本并继续在线。新版服务端不会下发无目标的
+  `VERSION_POLICY`；为兼容已发布的旧服务端，客户端只接受严格的
+  `targetVersion=null/direction=SAME/policyRevision=0/force=false` 空策略，不放宽任何真实更新命令的正 revision fencing。
+- 控制连接失败日志只输出固定 `failureCode` 或根异常类型，不记录 WebSocket/HTTP 异常正文、凭据或服务端载荷；
+  已知空策略协议错误归一为 `VERSION_POLICY_INVALID`，便于现场区分认证成功后的协议断连。
+
 ## 验证
 
 ```bash
