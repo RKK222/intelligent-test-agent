@@ -13586,3 +13586,26 @@
 
 - SkillHub 文档提供的四类能力现均有后端适配；超级管理员可以显式上传、按文档轮询到 100/-1，再同步目录查看新能力。
 - 本次新增 HTTP API 并收紧外部下载响应校验，未新增 RunEvent/SSE/WebSocket 类型、数据库、SQL、Flyway、部署节点或强制配置；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未把访问密钥写入源码或日志。企业真实 SkillHub 上传仍需部署后用内网文件联调。
+
+## 2026-08-24 - 远端开发环境启动基础中间件与 Mem0/BGE
+
+### Why
+
+- 用户要求进入 `192.168.8.100` 的 `/home/abc/intelligent-test-agent-dev` 开发副本，启动项目所需中间件，并补充启动 Mem0 与 BGE。
+
+### What
+
+- 通过项目脚本启动 PostgreSQL、Redis、XXL-Job MySQL、ClickHouse，以及 Mem0 的 pgvector PostgreSQL、BGE embedding、Mem0 三个无状态副本和本地负载均衡器。
+- 远端实际监听端口为基础中间件 `15432/16379/13306/18123`，Mem0/BGE 为 `15433/18989/18888`；Mem0 migration `20260809_01` 成功执行，初始 `rawMessageCount=0`。
+- 仅调整远端运行态：ClickHouse 生成的 users 配置文件补充容器可读权限，XXL-Job 专用账号密码与远端 `.env.test` 配置对齐；未修改项目源码、`.env` 文件或 OpenCode 源码。
+
+### How
+
+- 标准 `memory-dev-services.sh restart` 首次构建在 Hugging Face snapshot 下载阶段失败；使用临时 Dockerfile 注入 `HF_HUB_DISABLE_XET=1` 并以 host 网络重建 BGE 镜像，模型文件校验和镜像导出均通过，随后删除临时 Dockerfile。
+- `tools/memory-dev-services.sh status` 返回 memory PostgreSQL、BGE readiness 和 Mem0 VIP 全部 `OK`；ClickHouse status 返回版本 `26.3.17.56` 和数据库就绪。十个相关容器状态均为 running/healthy（一次性 migration 容器按预期 `Exited (0)`）。
+- 七个端口均通过本机 TCP 连通性检查；Mem0/BGE 的直接 HTTP readiness 端点需要服务认证，使用项目 status 脚本的内部鉴权检查作为就绪证据。
+
+### Result
+
+- 远端基础中间件和 Mem0/BGE 已启动并稳定运行；本次未启动 backend、frontend 或 opencode-manager，因为用户范围是中间件。
+- 远端 runtime 生成文件和容器状态已落地，但未产生本地源码改动、API/事件/数据库结构变更或企业部署包变更。
