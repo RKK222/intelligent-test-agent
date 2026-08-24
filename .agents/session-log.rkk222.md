@@ -13795,10 +13795,11 @@
 ### How
 
 - JDK 25 定向运行 `AgentSkillHubApplicationServiceTest`，20/20 通过；workspace-management Maven reactor 打包成功。
-- 前端能力库组件测试 14/14 通过，`agent-web` 类型检查通过；独立 Vite 在 `http://127.0.0.1:3001/hub` 启动并返回 HTTP 200，验收后已停止该临时实例，未影响既有 3000 端口服务。
+- 前端能力库组件测试 14/14 通过，`agent-web` 类型检查通过；独立 Vite 在 `http://127.0.0.1:3001/hub` 返回 HTTP 200 后停止。随后按 `.env.test` / `test` profile 完成 26 模块后端和前端生产构建并重启标准服务，backend health/readiness 为 `UP`、frontend 3000 返回 200、登录 CORS 正常，manager 最终恢复 `HEALTHY`。
 - `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，并隔离工作区中并行的本地客户端安装与主题改动。
 
 ### Result
 
 - 能力库 Skill 页面重新展示公共 Git Skill；skillmarket 筛选仍发送 `source=SKILLHUB`，不会造成 API 或旧客户端不兼容。
+- 本机公共 Git 快照对账仍记录既有分叉：数据库提交 `6fe30ab...` 与本地提交 `81605f2...` 不构成快进，因此本次展示的是数据库已索引公共 Skill；后续公共仓库新增/删除仍需先处理该 Git 历史分叉才能进入最新快照。
 - 本次不新增 HTTP 路径、RunEvent/SSE、数据库、SQL、Flyway、部署节点或强制配置，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。
