@@ -19,6 +19,8 @@ corepack pnpm build
 
 每次构建会按 `Asia/Shanghai` 把构建时刻固化为 `VyyyyMMdd.HHmmss`，设置弹窗左侧导航底部可核对。该值不从 Nginx 或运行时环境读取，刷新页面、reload Nginx 不会变化；必须重新构建并替换静态产物才会更新。
 
+系统控制台内嵌 Trace 使用控制台可用宽度，不设置独立页面级固定最小宽度。企业入口同时存在 activity rail、控制台菜单、浏览器缩放或较窄分辨率时，Trace 目录与检查器按断点收窄且可折叠，也允许拖动两侧分隔线手工调整；手工宽度有最小、最大和相对容器百分比上限，不能挤掉中间轨迹。目录标题保持单行；不得通过 Nginx 注入额外全局 CSS 或复用旧前端静态资源。若现场仍出现“Trace 目录”逐字竖排，先核对设置页构建版本与发布 manifest，再清理浏览器对旧 hashed CSS/JS 的缓存；只 reload Nginx 不会替换旧构建。
+
 企业内当前部署不单独手工执行本节命令，统一在联网 Mac 上使用 `deploy/internal/package-release.sh` 生成 `test-agent-frontend-dist.tar.gz` 和完整 `test-agent-internal-release.zip`。`VITE_TEST_AGENT_API_BASE_URL` 是编译期值；当前域名 `http://mimo.sdc.cs.icbc:9996` 与 IP `http://122.233.30.2:9996` 双入口包必须执行 `VITE_TEST_AGENT_API_BASE_URL="" deploy/internal/package-release.sh --output-dir deploy/internal/dist`，使请求保持当前页面同源，不能把内网服务器 `/data/testagent/config/docker.env` 当作 Mac 默认配置文件。部署入口见 `deploy/internal/README.md`：单后台按 `deploy/internal/SINGLE-BACKEND.md`，多后台按 `deploy/internal/MULTI-BACKEND.md`。两种模式都只在 `122.233.30.2:/data/testagent/frontend` 部署一份静态资源；`/data/testagent/config/nginx.env` 分别声明单个或多个 Java endpoint，前端部署脚本自动渲染、校验和 reload 实体 Nginx。Hub 等同源文件 ticket 可以返回 `/api/...` 相对路径，前端会按当前页面协议和 origin 转成绝对 `ws://` / `wss://`；多后台跨 Java 的 PTY、工作区文件和 Agent 配置进度连接仍按目标 Java 地址建连，浏览器网段必须能访问每台 Java `:8080`。
 
 当前 release 的 `VITE_TEST_AGENT_LOBEHUB_ENABLED` 由打包脚本注入为 `false`。构建产物不展示通用问答入口，登录回跳拒绝 `/lobehub/launch`，已登录用户直接访问也会回到工作台。后续启用必须重新审批运行制品，并使用 `--with-lobehub` 重新构建前端；只修改 Nginx 或数据库参数不能打开入口。

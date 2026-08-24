@@ -100,6 +100,37 @@ test("uses the real OpenCode 1.18.4 messages transform output to bind context to
   assert.notEqual(requests[0].events[0].traceId, "unknown")
 })
 
+test("uses OpenCode 1.18.4 chat.message input.agent as the Trace agent name", async () => {
+  const requests = []
+  const runtime = testRuntime(async (_url, request) => {
+    requests.push(JSON.parse(request.body))
+    return { ok: true, status: 200 }
+  })
+
+  runtime.hooks["chat.message"](
+    { sessionID: "ses-agent", messageID: "msg-agent", agent: "build" },
+    { message: { id: "msg-agent", sessionID: "ses-agent", role: "user" }, parts: [] },
+  )
+  await runtime.flush()
+
+  assert.equal(requests[0].events[0].payload.agentName, "build")
+})
+
+test("does not create an unknown Trace for process-level OpenCode events", async () => {
+  const requests = []
+  const runtime = testRuntime(async (_url, request) => {
+    requests.push(JSON.parse(request.body))
+    return { ok: true, status: 200 }
+  })
+
+  runtime.hooks.event({ event: { type: "plugin.added", properties: { name: "observability" } } })
+  runtime.hooks.event({ event: { type: "server.connected", properties: {} } })
+  await runtime.flush()
+
+  assert.equal(requests.length, 0)
+  assert.equal(runtime.inspect().globalSequence, 0)
+})
+
 test("turns a real OpenCode 1.18.4 tool error part into one failed capability fact", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {

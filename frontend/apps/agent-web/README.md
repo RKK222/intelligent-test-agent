@@ -230,7 +230,7 @@ Skill 目录显式合并“接口文档（SkillHub）”和“平台更新（应
 Trace 位于系统控制台的独立菜单，兼容 `/traces` 地址只重定向到 `/system?section=traces`；菜单和路由守卫只允许
 `SUPER_ADMIN`；工作台最左 activity rail 不再重复展示 Trace，系统控制台菜单和页签统一使用 Waypoints 轨迹图标。目录筛选
 使用 ClickHouse 元数据，事件检查器和下载只调用 `packages/backend-api` 的 Trace API。左侧基础目录
-默认保留，选中后在同一控制台原位展开纯色、紧凑的 DSH 轨迹；Trace 目录与右侧事件检查器都可独立折叠，折叠后轨迹区自动扩展且保留窄栏恢复入口。三泳道颜色固定为 Input 绿、Model 紫、Tools 琥珀。Duration
+默认保留，且只列出已关联平台 Run 的 Trace；`plugin.added/server.connected` 等没有 `runId` 的 OpenCode 进程生命周期广播不生成目录项。选中后在同一控制台原位展开纯色、紧凑的 DSH 轨迹；Trace 目录与右侧事件检查器都可独立折叠，也可拖动各自分隔线调整宽度（方向键微调、双击恢复默认），折叠后轨迹区自动扩展且保留窄栏恢复入口。三栏容器宽度始终服从控制台可用区，不设置页面级固定最小宽度；手工宽度仍受响应式百分比上限约束，窄屏会给中间轨迹保留空间。目录标题、条数与索引说明保持单行并对次要说明截断，避免企业入口侧栏和浏览器缩放共同挤压后竖排错位。三泳道颜色固定为 Input 绿、Model 紫、Tools 琥珀。Duration
 切换等宽/真实耗时轴，Turns 与 Calls 分别折叠全部 Turn 和 Tool 调用。三泳道只投影 DSH 语义记录，原始 delta/状态事件继续保留在
 服务器归档和单条下载中，不逐条叠入总览；等宽模式严格分段，真实耗时模式按 span 展开，模型条用两个相邻纯色色块区分 TTFT 与
 Decode；三泳道上水平拖拽可框选时间范围并淡化窗外记录，双击或按 Esc 清除，悬停浮层显示对应时间与耗时。只有确认拖拽后才捕获
@@ -238,7 +238,7 @@ Decode；三泳道上水平拖拽可框选时间范围并淡化窗外记录，�
 text/reasoning/finish 与 Tool/Skill result/output/error，无专用字段时回退原始 payload，并继续展示 DSH 对齐的记录类型、
 Turn/Step、TTFT、Decode 和五类 token。不得把 Trace 放入运营分析 tab、直连 OpenCode、读取本地 spool 或提供跨用户批量正文导出。
 
-回归由 `tests/TraceView.test.ts` 覆盖控制台内嵌三泳道、不完整状态、payload fragment 重组、Skill 调用、脱敏、source、
+目录状态区分“进行中”“待上传”“不完整”和“完整”：`ACTIVE` 且无丢弃/积压时显示进行中，有未确认分片时显示待上传，只有丢弃或已结束但未闭合等真实完整性问题才显示不完整。无法从 1.18.4 Hook 或平台 Run 关联得到 Agent 的兼容记录显示“未识别 Agent”，不得再以 `opencode` 伪装业务 Agent。回归由 `tests/TraceView.test.ts` 覆盖控制台内嵌三泳道、不完整状态、payload fragment 重组、Skill 调用、脱敏、source、
 进行中 Assistant/Tool 分片聚合、仅生命周期事件兜底、Duration/Turns/Calls 交互和 DSH Timing 字段；不完整筛选按
 `complete=false` 工作，不能因 Run 尚未产生终态而隐藏已归档正文。
 `tests/login-redirect.test.ts` 覆盖 `/traces` 登录恢复路径。

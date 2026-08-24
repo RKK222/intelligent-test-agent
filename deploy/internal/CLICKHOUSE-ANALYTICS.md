@@ -288,10 +288,12 @@ cd /data/0709/test-agent-clickhouse-offline
 
 ## 11. OpenCode 插件事实与 Trace 目录
 
-发布包包含 `V20260822174420__analytics_trace_catalog_create_tables.sql`。启动期 checksum migrator 会创建无 TTL 的
+发布包包含 `V20260822174420__analytics_trace_catalog_create_tables.sql`，并由
+`V20260824110209__analytics_capability_facts_scope_cutover_to_runs.sql` 收紧切换边界。启动期 checksum migrator 会创建无 TTL 的
 Trace catalog/span 和插件 capability facts；ClickHouse 只保存筛选、泳道、父子关系、状态、token 与耗时元数据，
 不得保存 prompt、reasoning、工具参数/结果或任何归档路径。Skill/Agent/Tool 查询优先插件事实，并按
-`event_id`、`run_id + call_id` 幂等；旧 RunEvent 事实只补足插件覆盖起点以前或未覆盖的调用。
+`event_id`、`run_id + call_id` 幂等；旧 RunEvent 事实只补足插件覆盖起点以前或未覆盖的调用。覆盖起点和目录分页只认
+`run_id` 非空的平台 Run，不能让 OpenCode 进程启动/重连广播生成大量 `opencode / 不完整` 目录或提前冻结切换点。
 
 Trace 正文写在归档 owner 后端的现有持久化数据卷，不写 ClickHouse。无自动 TTL 时运维必须监控：
 
@@ -303,4 +305,6 @@ Trace 正文写在归档 owner 后端的现有持久化数据卷，不写 ClickH
 
 本地验收使用 `./restart-dev-services.sh --profile test --env-file .env.test --with-clickhouse`；不得切换到其它 PostgreSQL
 dotenv。验证 migration 后还要检查 `analytics_trace_*` 和 `analytics_plugin_capability_facts` 均没有 raw/payload/path
-正文列，并执行插件事实覆盖同 callId 旧事实的集成测试。
+正文列，并执行插件事实覆盖同 callId 旧事实的集成测试。最终 persistence JAR 内
+`V20260824110209__analytics_capability_facts_scope_cutover_to_runs.sql` 的 SHA-256 必须为
+`7e0ae2c427a1256268d682a9be2be48b1c839b240ca05ec857e0e934d1448f9f`。

@@ -56,6 +56,9 @@ const allTurnsCollapsed = ref(false);
 const allCallsCollapsed = ref(false);
 const catalogCollapsed = ref(false);
 const inspectorCollapsed = ref(false);
+const catalogWidth = ref<number | null>(null);
+const inspectorWidth = ref<number | null>(null);
+const resizingPanel = ref<"catalog" | "inspector" | null>(null);
 const inspectorTab = ref<InspectorTab>("summary");
 const eventSearch = ref("");
 const collapsedParents = ref<Set<string>>(new Set());
@@ -67,6 +70,20 @@ let rangeStart = 0;
 let rangePointerActive = false;
 let rangeDragging = false;
 let suppressTimelineClick = false;
+let panelResizeStartX = 0;
+let panelResizeStartWidth = 0;
+
+const traceContentStyle = computed<Record<string, string>>(() => {
+  const style: Record<string, string> = {};
+  // 百分比上限保证浏览器窗口变窄后仍给中间轨迹留出可用空间。
+  if (catalogWidth.value !== null) {
+    style["--trace-catalog-width"] = `clamp(190px, ${catalogWidth.value}px, min(420px, 32%))`;
+  }
+  if (inspectorWidth.value !== null) {
+    style["--trace-inspector-width"] = `clamp(240px, ${inspectorWidth.value}px, min(520px, 36%))`;
+  }
+  return style;
+});
 
 const displayEvents = computed<DisplayEvent[]>(() => materializeEvents(rawEvents.value));
 const trajectoryEvents = computed<DisplayEvent[]>(() => buildTrajectoryEvents(displayEvents.value));
@@ -94,7 +111,7 @@ const filteredEvents = computed(() => {
     return !keyword || JSON.stringify(event).toLowerCase().includes(keyword);
   });
 });
-const completeCount = computed(() => page.value.items.filter((trace) => trace.complete).length);
+const completeCount = computed(() => page.value.items.filter(isEffectivelyComplete).length);
 const rolloutCompleteness = computed(() => page.value.items.length
   ? Math.round((completeCount.value / page.value.items.length) * 100)
   : 0);
@@ -109,6 +126,59 @@ onMounted(async () => {
   if (!authStore.currentUser) await authStore.fetchCurrentUser(api);
   await loadTraces(1);
 });
+
+function startPanelResize(side: "catalog" | "inspector", event: PointerEvent) {
+  if (event.button !== 0) return;
+  const handle = event.currentTarget as HTMLElement;
+  const content = handle.closest<HTMLElement>(".trace-content");
+  const panel = content?.querySelector<HTMLElement>(side === "catalog" ? ".trace-list-panel" : ".trace-inspector");
+  if (!panel) return;
+  resizingPanel.value = side;
+  panelResizeStartX = event.clientX;
+  panelResizeStartWidth = panel.getBoundingClientRect().width;
+  handle.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function updatePanelResize(side: "catalog" | "inspector", event: PointerEvent) {
+  if (resizingPanel.value !== side) return;
+  const delta = event.clientX - panelResizeStartX;
+  setPanelWidth(side, panelResizeStartWidth + (side === "catalog" ? delta : -delta), event.currentTarget as HTMLElement);
+}
+
+function finishPanelResize(side: "catalog" | "inspector", event: PointerEvent) {
+  if (resizingPanel.value !== side) return;
+  resizingPanel.value = null;
+  const handle = event.currentTarget as HTMLElement;
+  if (handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+}
+
+function resizePanelWithKeyboard(side: "catalog" | "inspector", event: KeyboardEvent) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  const handle = event.currentTarget as HTMLElement;
+  const content = handle.closest<HTMLElement>(".trace-content");
+  const panel = content?.querySelector<HTMLElement>(side === "catalog" ? ".trace-list-panel" : ".trace-inspector");
+  if (!panel) return;
+  const separatorDelta = event.key === "ArrowRight" ? 16 : -16;
+  setPanelWidth(side, panel.getBoundingClientRect().width + (side === "catalog" ? separatorDelta : -separatorDelta), handle);
+  event.preventDefault();
+}
+
+function setPanelWidth(side: "catalog" | "inspector", requestedWidth: number, handle: HTMLElement) {
+  const contentWidth = handle.closest<HTMLElement>(".trace-content")?.getBoundingClientRect().width ?? window.innerWidth;
+  const minimum = side === "catalog" ? 190 : 240;
+  const absoluteMaximum = side === "catalog" ? 420 : 520;
+  const responsiveMaximum = contentWidth * (side === "catalog" ? 0.32 : 0.36);
+  const maximum = Math.max(minimum, Math.min(absoluteMaximum, responsiveMaximum));
+  const width = Math.round(Math.min(Math.max(minimum, requestedWidth), maximum));
+  if (side === "catalog") catalogWidth.value = width;
+  else inspectorWidth.value = width;
+}
+
+function resetPanelWidth(side: "catalog" | "inspector") {
+  if (side === "catalog") catalogWidth.value = null;
+  else inspectorWidth.value = null;
+}
 
 async function loadTraces(targetPage = page.value.page) {
   loadingList.value = true;
@@ -749,6 +819,26 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 
+function traceStateLabel(trace: TraceCatalog) {
+  if (trace.droppedCount > 0) return "不完整";
+  if (trace.pendingChunks > 0) return "待上传";
+  if (trace.complete) return "完整";
+  if (trace.status === "ACTIVE") return "进行中";
+  return "不完整";
+}
+
+function traceStateClass(trace: TraceCatalog) {
+  if (trace.droppedCount > 0) return "incomplete";
+  if (trace.pendingChunks > 0) return "pending";
+  if (trace.complete) return "complete";
+  return trace.status === "ACTIVE" ? "active" : "incomplete";
+}
+
+/** 历史版本曾出现 complete=true 但仍有待上传分片；展示完整度必须以无积压、无丢弃为准。 */
+function isEffectivelyComplete(trace: TraceCatalog) {
+  return trace.complete && trace.pendingChunks === 0 && trace.droppedCount === 0;
+}
+
 function localDateTime(timestamp: number) {
   const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60_000);
   return date.toISOString().slice(0, 16);
@@ -875,7 +965,8 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
       <section :class="['trace-content', {
         'trace-content--catalog-collapsed': catalogCollapsed,
         'trace-content--inspector-collapsed': inspectorCollapsed,
-      }]">
+        'trace-content--resizing': resizingPanel !== null,
+      }]" :style="traceContentStyle">
         <aside v-if="!catalogCollapsed" class="trace-list-panel">
           <header>
             <div><strong>Trace 目录</strong><span>{{ page.total }} 条</span></div>
@@ -893,9 +984,9 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
             @click="openTrace(trace)"
           >
             <span class="trace-list-title">
-              <b>{{ trace.agentId || 'opencode' }}</b>
-              <em :class="trace.complete ? 'complete' : 'incomplete'">
-                {{ trace.complete ? '完整' : '不完整' }}
+              <b>{{ trace.agentId && trace.agentId !== 'unknown' ? trace.agentId : '未识别 Agent' }}</b>
+              <em :class="traceStateClass(trace)">
+                {{ traceStateLabel(trace) }}
               </em>
             </span>
             <span class="trace-list-user">{{ trace.username }} · {{ trace.runtimeKind }}</span>
@@ -915,6 +1006,16 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
           <button type="button" aria-label="展开 Trace 目录" title="展开 Trace 目录"
             @click="catalogCollapsed = false"><ChevronRight :size="15" /><span>Trace</span></button>
         </aside>
+        <div v-if="!catalogCollapsed" class="panel-resize-handle panel-resize-handle--catalog"
+          role="separator" aria-label="调整 Trace 目录宽度" aria-orientation="vertical" tabindex="0"
+          :aria-valuenow="Math.round(catalogWidth ?? 286)" aria-valuemin="190" aria-valuemax="420"
+          title="拖动调整 Trace 目录宽度，双击恢复默认"
+          @pointerdown="startPanelResize('catalog', $event)"
+          @pointermove="updatePanelResize('catalog', $event)"
+          @pointerup="finishPanelResize('catalog', $event)"
+          @pointercancel="finishPanelResize('catalog', $event)"
+          @keydown="resizePanelWithKeyboard('catalog', $event)"
+          @dblclick="resetPanelWidth('catalog')"><span /></div>
 
         <section class="trace-timeline-panel">
           <div v-if="!selectedTrace" class="trace-empty trace-empty--hero">
@@ -925,7 +1026,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
           <template v-else>
             <header class="timeline-header">
               <div>
-                <p>{{ selectedTrace.username }} · {{ selectedTrace.agentId || 'opencode' }}</p>
+                <p>{{ selectedTrace.username }} · {{ selectedTrace.agentId && selectedTrace.agentId !== 'unknown' ? selectedTrace.agentId : '未识别 Agent' }}</p>
                 <h2>{{ selectedTrace.traceId }}</h2>
                 <span>{{ selectedTrace.runId || '无 Run ID' }} · {{ trajectoryEvents.length }} records / {{ rawEvents.length }} raw events · 完成水位 {{ selectedTrace.completeThrough }}</span>
               </div>
@@ -1089,13 +1190,23 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
           <button type="button" aria-label="展开事件检查器" title="展开事件检查器"
             @click="inspectorCollapsed = false"><ChevronLeft :size="15" /><span>详情</span></button>
         </aside>
+        <div v-if="!inspectorCollapsed" class="panel-resize-handle panel-resize-handle--inspector"
+          role="separator" aria-label="调整事件检查器宽度" aria-orientation="vertical" tabindex="0"
+          :aria-valuenow="Math.round(inspectorWidth ?? 330)" aria-valuemin="240" aria-valuemax="520"
+          title="拖动调整事件检查器宽度，双击恢复默认"
+          @pointerdown="startPanelResize('inspector', $event)"
+          @pointermove="updatePanelResize('inspector', $event)"
+          @pointerup="finishPanelResize('inspector', $event)"
+          @pointercancel="finishPanelResize('inspector', $event)"
+          @keydown="resizePanelWithKeyboard('inspector', $event)"
+          @dblclick="resetPanelWidth('inspector')"><span /></div>
       </section>
     </section>
   </main>
 </template>
 
 <style scoped>
-.trace-shell { --ink:#202126; --muted:#777b86; --line:#e8e8ec; --panel:#fff; --fog:#f7f7f8; --input:#2fa36b; --model:#8063ad; --tools:#df851d; display:flex; min-width:1180px; height:100vh; overflow:hidden; color:var(--ink); background:var(--fog); font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif; }
+.trace-shell { --ink:#202126; --muted:#777b86; --line:#e8e8ec; --panel:#fff; --fog:#f7f7f8; --input:#2fa36b; --model:#8063ad; --tools:#df851d; width:100%; min-width:0; height:100%; display:flex; overflow:hidden; color:var(--ink); background:var(--fog); font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif; }
 .trace-rail { width:72px; flex:0 0 72px; display:flex; flex-direction:column; align-items:center; gap:12px; padding:14px 7px 12px; border-right:1px solid var(--line); background:#fff; }
 .trace-logo { width:34px; height:34px; object-fit:contain; margin-bottom:10px; }
 .trace-rail button { width:56px; min-height:50px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:0; border-radius:12px; background:transparent; color:#707580; font-size:10px; cursor:pointer; }
@@ -1121,14 +1232,14 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 .trace-filters input,.trace-filters select { min-width:0; height:30px; padding:0 8px; border:1px solid #dddde2; border-radius:7px; background:#fff; color:#313238; font-size:11px; }
 .trace-filters button { height:30px; display:flex; align-items:center; gap:5px; padding:0 12px; border:0; border-radius:7px; background:#27282d; color:#fff; cursor:pointer; }
 .trace-error { margin:0; padding:7px 14px; background:#fff1f1; color:#a82930; font-size:11px; }
-.trace-content { min-height:0; flex:1; display:grid; grid-template-columns:310px minmax(520px,1fr) 350px; overflow:hidden; }
+.trace-content { position:relative; min-height:0; flex:1; display:grid; grid-template-columns:310px minmax(520px,1fr) 350px; overflow:hidden; }
 .trace-list-panel,.trace-inspector { min-height:0; display:flex; flex-direction:column; background:#fff; }
 .trace-list-panel { border-right:1px solid var(--line); overflow:auto; }
 .trace-list-panel>header,.trace-inspector>header { position:sticky; top:0; z-index:2; display:flex; justify-content:space-between; padding:13px 14px; border-bottom:1px solid var(--line); background:#fff; }
 .trace-list-panel>header div,.trace-inspector>header div { display:flex; flex-direction:column; gap:2px; }.trace-list-panel>header span,.trace-list-panel>header small,.trace-inspector>header span { color:var(--muted); font-size:10px; }
 .trace-list-item { width:100%; padding:12px 14px; text-align:left; border:0; border-bottom:1px solid #efeff1; background:#fff; cursor:pointer; }
 .trace-list-item:hover { background:#faf9fd; }.trace-list-item.selected { background:#f2effa; box-shadow:inset 3px 0 #7b5ab4; }
-.trace-list-title,.trace-list-meta { display:flex; align-items:center; justify-content:space-between; gap:8px; }.trace-list-title b { font-size:12px; }.trace-list-title em { padding:2px 6px; border-radius:999px; font-size:9px; font-style:normal; }.trace-list-title em.complete { color:#147245; background:#e8f7ef; }.trace-list-title em.incomplete { color:#a8620f; background:#fff2de; }
+.trace-list-title,.trace-list-meta { display:flex; align-items:center; justify-content:space-between; gap:8px; }.trace-list-title b { font-size:12px; }.trace-list-title em { padding:2px 6px; border-radius:999px; font-size:9px; font-style:normal; }.trace-list-title em.complete { color:#147245; background:#e8f7ef; }.trace-list-title em.incomplete { color:#a8620f; background:#fff2de; }.trace-list-title em.active { color:#3567a8; background:#eaf2fc; }.trace-list-title em.pending { color:#8a6417; background:#fff6da; }
 .trace-list-user,.trace-list-item code,.trace-list-meta { display:block; margin-top:5px; color:#777b85; font-size:10px; }.trace-list-item code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#5c477f; }.trace-list-meta { display:flex; }
 .trace-pagination { position:sticky; bottom:0; display:flex; align-items:center; justify-content:space-between; padding:9px; border-top:1px solid var(--line); background:#fff; font-size:10px; }.trace-pagination button { border:1px solid #dddde2; border-radius:6px; background:#fff; font-size:10px; }
 .trace-timeline-panel { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:#fcfcfd; }
@@ -1162,6 +1273,12 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 .trace-panel-rail--right { border-left:1px solid var(--line); }
 .trace-panel-rail button { width:100%; display:flex; flex-direction:column; align-items:center; gap:6px; padding:9px 0; font-size:9px; }
 .trace-panel-rail button span { writing-mode:vertical-rl; letter-spacing:.8px; }
+.panel-resize-handle { position:absolute; z-index:8; top:0; bottom:0; width:9px; touch-action:none; cursor:col-resize; outline:0; }
+.panel-resize-handle--catalog { left:calc(var(--trace-catalog-width) - 4px); }
+.panel-resize-handle--inspector { right:calc(var(--trace-inspector-width) - 4px); }
+.panel-resize-handle span { position:absolute; top:calc(50% - 16px); left:3px; width:3px; height:32px; border-radius:2px; background:#c7c9cf; opacity:0; transition:opacity .12s ease; }
+.panel-resize-handle:hover span,.panel-resize-handle:focus-visible span,.trace-content--resizing .panel-resize-handle span { opacity:1; }
+.trace-content--resizing { cursor:col-resize; user-select:none; }
 .trace-empty { display:flex; align-items:center; justify-content:center; min-height:120px; padding:24px; color:#898c95; font-size:11px; text-align:center; }.trace-empty--hero { height:100%; flex-direction:column; gap:8px; }.trace-empty--hero strong { color:#4b4d54; font-size:14px; }.spinning { animation:spin .8s linear infinite; }@keyframes spin { to { transform:rotate(360deg); } }
 @media (max-width:1450px) { .trace-content { grid-template-columns:280px minmax(500px,1fr) 310px; }.trace-filters { grid-template-columns:repeat(5,1fr); }.trace-filters button { align-self:end; } }
 
@@ -1169,7 +1286,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
  * Trace 详情遵循 DeepSeek Harness 轨迹视图的信息密度与交互语义：全宽白底、
  * 32px 控制栏、50px 三泳道和按 Turn 排列的 ledger；平台筛选与权限仍保留自身契约。
  */
-.trace-shell { --ink:#202126; --muted:#7d818a; --caption:#a2a7b0; --line:#e7e8eb; --line-soft:#f0f1f3; --input:#39a96b; --model:#8a6bad; --tools:#df851d; min-width:1120px; color:var(--ink); background:#fff; }
+.trace-shell { --ink:#202126; --muted:#7d818a; --caption:#a2a7b0; --line:#e7e8eb; --line-soft:#f0f1f3; --input:#39a96b; --model:#8a6bad; --tools:#df851d; width:100%; min-width:0; height:100%; color:var(--ink); background:#fff; }
 .trace-rail { width:58px; flex-basis:58px; gap:14px; padding:13px 0; background:#fbfbfc; }
 .trace-logo { width:32px; height:32px; margin-bottom:12px; }
 .trace-rail button { width:38px; min-height:38px; height:38px; border-radius:7px; }
@@ -1197,9 +1314,10 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 .trace-filters button { height:27px; border-radius:4px; background:#2d2f34; }
 .trace-content--catalog { display:block; }
 .trace-content--catalog .trace-list-panel { height:100%; border-right:0; }
-.trace-list-panel>header { height:30px; align-items:center; padding:0 14px; background:#f7f8f9; }
-.trace-list-panel>header div { flex-direction:row; align-items:center; gap:6px; }
-.trace-list-panel>header small { margin-left:auto; }
+.trace-list-panel>header { height:30px; min-width:0; align-items:center; gap:6px; padding:0 10px; background:#f7f8f9; }
+.trace-list-panel>header div { min-width:max-content; flex:0 0 auto; flex-direction:row; align-items:center; gap:6px; white-space:nowrap; }
+.trace-list-panel>header div strong,.trace-list-panel>header div span { white-space:nowrap; }
+.trace-list-panel>header small { min-width:0; flex:1; margin-left:auto; overflow:hidden; text-align:right; text-overflow:ellipsis; white-space:nowrap; }
 .trace-list-item { min-height:58px; display:grid; grid-template-columns:minmax(150px,.8fr) minmax(250px,1.3fr) minmax(140px,.7fr) minmax(260px,1.2fr); align-items:center; column-gap:18px; padding:0 16px; }
 .trace-list-item:hover { background:#f8f9fa; }
 .trace-list-item.selected { background:#f3f6fc; box-shadow:inset 2px 0 #477bea; }
@@ -1252,10 +1370,10 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:1px soli
 /* 控制台嵌入态：系统导航已经提供入口，内部只保留“基础信息列表 → 原位展开轨迹”。 */
 .trace-rail { display:none; }
 .trace-header { min-height:54px; padding:7px 16px; }
-.trace-content { grid-template-columns:286px minmax(520px,1fr) 330px; }
-.trace-content.trace-content--catalog-collapsed { grid-template-columns:32px minmax(520px,1fr) 330px; }
-.trace-content.trace-content--inspector-collapsed { grid-template-columns:286px minmax(520px,1fr) 32px; }
-.trace-content.trace-content--catalog-collapsed.trace-content--inspector-collapsed { grid-template-columns:32px minmax(520px,1fr) 32px; }
+.trace-content { --trace-catalog-width:clamp(232px,19vw,286px); --trace-inspector-width:clamp(280px,22vw,330px); grid-template-columns:var(--trace-catalog-width) minmax(0,1fr) var(--trace-inspector-width); }
+.trace-content.trace-content--catalog-collapsed { grid-template-columns:32px minmax(0,1fr) var(--trace-inspector-width); }
+.trace-content.trace-content--inspector-collapsed { grid-template-columns:var(--trace-catalog-width) minmax(0,1fr) 32px; }
+.trace-content.trace-content--catalog-collapsed.trace-content--inspector-collapsed { grid-template-columns:32px minmax(0,1fr) 32px; }
 .trace-list-panel { border-right:1px solid var(--line); }
 .trace-list-item { min-height:40px; display:block; padding:3px 10px; }
 .trace-list-title,.trace-list-meta { display:flex; }
@@ -1271,9 +1389,16 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:1px soli
 .event-card small { font-size:9px; }
 .event-row>time small { top:0; }
 @media (max-width:1380px) {
-  .trace-content { grid-template-columns:260px minmax(500px,1fr) 300px; }
-  .trace-content.trace-content--catalog-collapsed { grid-template-columns:32px minmax(500px,1fr) 300px; }
-  .trace-content.trace-content--inspector-collapsed { grid-template-columns:260px minmax(500px,1fr) 32px; }
-  .trace-content.trace-content--catalog-collapsed.trace-content--inspector-collapsed { grid-template-columns:32px minmax(500px,1fr) 32px; }
+  .trace-content { --trace-catalog-width:232px; --trace-inspector-width:280px; }
+  .event-row { grid-template-columns:58px 108px minmax(0,1fr) 72px 56px; }
+  .event-card { gap:6px; }
+  .event-card b { max-width:130px; }
+}
+@media (max-width:1150px) {
+  .trace-content { --trace-catalog-width:218px; --trace-inspector-width:260px; }
+  .event-row { grid-template-columns:54px 98px minmax(0,1fr) 54px; }
+  .event-tokens { display:none; }
+  .event-card b { max-width:100px; }
+  .trace-inspector nav button { padding-right:5px; padding-left:5px; }
 }
 </style>

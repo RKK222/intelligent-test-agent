@@ -13391,3 +13391,28 @@
 
 - 本地未配置 SkillHub 时默认关闭，不影响启动；企业环境具备合法地址和密钥后，即使 SkillHub 暂不可达也不阻断 Java 启动/readiness，只影响目录同步并自动重试。启用但缺少合法地址或密钥仍按安全门禁拒绝启动。
 - 本次不新增部署节点，不变更 HTTP API、RunEvent、WebSocket、数据库、Flyway、性能模型、generated SDK、OpenCode 只读源码或 `.env*`；只调整企业部署配置、安全门禁、文档和回归测试。尚未生成新企业包，也未部署 `.4/.114/.2`。
+
+## 2026-08-24 - 修复企业 Trace 布局与伪轨迹目录
+
+### Why
+
+- 企业控制台可用宽度小于研发视口时，Trace 三栏仍带固定最小宽度，导致目录标题换行、轨迹与检查器错位；用户还要求左右面板都可手工拉伸。
+- ClickHouse 目录有大量无 `runId`、`sessionId=unknown` 的 OpenCode 进程广播，前端又把缺失 Agent 回退成 `opencode`、把所有未完成状态显示为“不完整”，造成重复伪记录和状态误解。
+
+### What
+
+- Trace 三栏改为控制台容器内的响应式网格，取消页面级固定最小宽度；目录与检查器保留独立折叠，并增加左右分隔线拖动、键盘微调和双击复位。紧凑纯色 DSH 三泳道、时间框选和色块直选保持不变。
+- 目录只分页展示已关联平台 `runId` 且 Session 有效的 Trace；已知 opaque Trace ID 的精确读取不变。OpenCode 1.18.4 插件不再把无 Session 的进程广播入队，`chat.message.input.agent` 作为 Agent 权威名称，缺失值显示为“未识别 Agent”。
+- `complete=true` 但仍有 pending 的历史记录按“待上传”处理，不计入完整率/完整水位；新增 ClickHouse 前向 migration，只允许已关联 Run 的插件目录冻结旧 RunEvent 能力事实切换点。三类企业封包/部署脚本锁定 migration 文件名和 SHA-256。
+
+### How
+
+- 插件真实 1.18.4 fixture 18/18、`TraceArchiveServiceTest` 8/8、ClickHouse Testcontainers 4/4、TraceView 定向测试、agent-web 全量测试/类型检查/生产构建均通过；企业脚本语法、双后台完整包结构门禁和麒麟 ARM64 本地客户端包测试通过。
+- 使用仓库当前 `.env.test` 和 ClickHouse 完整重启，backend readiness、前端 3000、manager OpenCode 1.18.4、ClickHouse 正常；最终应用 JAR 内新 migration SHA-256 为 `7e0ae2c427a1256268d682a9be2be48b1c839b240ca05ec857e0e934d1448f9f`。
+- 真实浏览器在 1366px 将三栏 `232/698/280` 拖到 `260/646/304`，在 1100px 将 `218/466/260` 拖到 `246/414/284`，两档横向溢出均为 0。目录原始 89 条中 70 条无 Run、37 条 unknown Session；过滤后页面显示 19 条，伪 `opencode` Agent 为 0。
+
+### Result
+
+- 企业控制台 Trace 可在较窄视口正确排版，左右栏可折叠和手工拉伸；目录不再被进程启动/重连广播刷出大量 `opencode/不完整`，进行中、待上传、丢弃不完整和完整状态分开显示。
+- 不修改 OpenCode 只读源码，不改变 RunEvent/SSE/聊天链路，不新增部署节点、PostgreSQL/Redis 字段或正文存储位置；涉及 ClickHouse 前向 migration、运营覆盖口径、前端兼容性与企业封包校验。
+- 当前 `.env.test` 实际连接 `127.0.0.1:15432/test_agent`，不是规范指定的 `192.168.8.100:15432/testagent_dev`；未修改受保护环境文件，因此规定 PostgreSQL、企业 `.4/.114/.2` 现场安装与浏览器缓存复验仍未完成。历史伪目录保留而未物理删除。

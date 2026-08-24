@@ -43,7 +43,11 @@ public final class ClickHouseSchemaMigrator implements InitializingBean {
             new Migration(
                     "20260823001128",
                     "analytics_trace_spans_add_cost_decode_tokens",
-                    "db/clickhouse/V20260823001128__analytics_trace_spans_add_cost_decode_tokens.sql"));
+                    "db/clickhouse/V20260823001128__analytics_trace_spans_add_cost_decode_tokens.sql"),
+            new Migration(
+                    "20260824110209",
+                    "analytics_capability_facts_scope_cutover_to_runs",
+                    "db/clickhouse/V20260824110209__analytics_capability_facts_scope_cutover_to_runs.sql"));
 
     private final DataSource dataSource;
 

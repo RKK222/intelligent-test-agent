@@ -181,6 +181,31 @@ describe("TraceView", () => {
     await fireEvent.click(view.getByRole("button", { name: "展开事件检查器" }));
     expect(view.getByRole("button", { name: "折叠事件检查器" })).toBeTruthy();
 
+    const traceContent = view.container.querySelector<HTMLElement>(".trace-content")!;
+    vi.spyOn(traceContent, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1200, bottom: 600, width: 1200, height: 600, toJSON: () => ({}),
+    });
+    const catalogPanel = view.container.querySelector<HTMLElement>(".trace-list-panel")!;
+    vi.spyOn(catalogPanel, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 286, bottom: 600, width: 286, height: 600, toJSON: () => ({}),
+    });
+    const catalogResize = view.getByRole("separator", { name: "调整 Trace 目录宽度" });
+    Object.defineProperty(catalogResize, "setPointerCapture", { value: vi.fn() });
+    await fireEvent.pointerDown(catalogResize, { button: 0, pointerId: 3, clientX: 286 });
+    await fireEvent.pointerMove(catalogResize, { buttons: 1, pointerId: 3, clientX: 346 });
+    expect(traceContent.style.getPropertyValue("--trace-catalog-width")).toContain("346px");
+    await fireEvent.pointerUp(catalogResize, { button: 0, pointerId: 3, clientX: 346 });
+
+    const inspectorPanel = view.container.querySelector<HTMLElement>(".trace-inspector")!;
+    vi.spyOn(inspectorPanel, "getBoundingClientRect").mockReturnValue({
+      x: 870, y: 0, left: 870, top: 0, right: 1200, bottom: 600, width: 330, height: 600, toJSON: () => ({}),
+    });
+    const inspectorResize = view.getByRole("separator", { name: "调整事件检查器宽度" });
+    await fireEvent.keyDown(inspectorResize, { key: "ArrowLeft" });
+    expect(traceContent.style.getPropertyValue("--trace-inspector-width")).toContain("346px");
+    await fireEvent.dblClick(inspectorResize);
+    expect(traceContent.style.getPropertyValue("--trace-inspector-width")).toBe("");
+
     expect(view.getByRole("button", { name: "Raw" })).toBeTruthy();
     await fireEvent.click(view.getByRole("button", { name: "Preview" }));
     expect(view.container.querySelector(".inspector-body pre")?.textContent).toContain("You are a test agent");
@@ -251,12 +276,27 @@ describe("TraceView", () => {
   });
 
   it("shows aggregated in-progress assistant content for an incomplete run", async () => {
-    const incompleteTrace = { ...trace, status: "ACTIVE", archiveStatus: "ARCHIVED", complete: false, eventCount: 4 };
+    const incompleteTrace = {
+      ...trace,
+      status: "ACTIVE",
+      archiveStatus: "ARCHIVED",
+      complete: false,
+      eventCount: 4,
+      droppedCount: 0,
+      pendingChunks: 0,
+    };
     const lifecycleTrace = {
       ...incompleteTrace,
       traceId: "trc_33333333333333333333333333333333",
       completeThrough: 3,
       eventCount: 3,
+    };
+    const historicalPendingTrace = {
+      ...trace,
+      traceId: "trc_44444444444444444444444444444444",
+      complete: true,
+      droppedCount: 0,
+      pendingChunks: 2,
     };
     const incompleteEvents: TraceRawEvent[] = [
       event(1, "OPENCODE_EVENT", {
@@ -279,7 +319,9 @@ describe("TraceView", () => {
       event(2, "OPENCODE_EVENT", { event: { type: "plugin.added", properties: { name: "two" } } }),
       event(3, "OPENCODE_EVENT", { event: { type: "session.created", properties: { sessionID: "ses_trace" } } }),
     ].map((rawEvent) => ({ ...rawEvent, traceId: lifecycleTrace.traceId }));
-    api.listTraces.mockResolvedValue({ items: [incompleteTrace, lifecycleTrace], page: 1, size: 30, total: 2 });
+    api.listTraces.mockResolvedValue({
+      items: [incompleteTrace, lifecycleTrace, historicalPendingTrace], page: 1, size: 30, total: 3,
+    });
     api.getTrace.mockImplementation(async (traceId: string) =>
       traceId === lifecycleTrace.traceId ? lifecycleTrace : incompleteTrace);
     api.getTraceEvents.mockImplementation(async (traceId: string) => traceId === lifecycleTrace.traceId
@@ -301,6 +343,9 @@ describe("TraceView", () => {
     await router.isReady();
 
     const view = render(TraceView, { global: { plugins: [pinia, router] } });
+    expect(await view.findByText("进行中")).toBeTruthy();
+    expect(view.getByText("待上传")).toBeTruthy();
+    expect(view.getByText("0/3 条已完整归档")).toBeTruthy();
     await fireEvent.click((await view.findByText(incompleteTrace.traceId)).closest("button")!);
     await waitFor(() => expect(view.getByText("正在处理")).toBeTruthy());
     expect(view.getByText(/1 records \/ 4 raw events/)).toBeTruthy();
@@ -318,6 +363,10 @@ describe("TraceView", () => {
     expect(traceViewSource).not.toMatch(/(?:linear|radial|conic)-gradient\s*\(/);
     expect(traceViewSource).toContain(".event-row { min-height:28px;");
     expect(traceViewSource).toContain(".trace-list-item { min-height:40px;");
+    expect(traceViewSource).toContain("width:100%; min-width:0; height:100%");
+    expect(traceViewSource).toContain("white-space:nowrap;");
+    expect(traceViewSource).not.toContain("min-width:1120px");
+    expect(traceViewSource).not.toContain("min-width:1180px");
     expect(agentWorkbenchSource).not.toContain('data-testid="trace-activity-button"');
   });
 });

@@ -173,6 +173,32 @@ class TraceArchiveServiceTest {
     }
 
     @Test
+    void shouldIndexAgentFromTheOpenCode1184ChatMessageInput() throws Exception {
+        InMemoryCatalogRepository repository = new InMemoryCatalogRepository();
+        TraceArchiveService service = service(repository);
+        User user = User.createNew(
+                "usr_00000000000000000000000011", "u-11", "Agent 用户", "hash", null, null, null);
+        String traceId = "trc_00000000000000000000000000000011";
+
+        service.ingestPluginBatch(
+                new OpencodeObservabilityModels.IngestionIdentity(user, "proc-11", null, "generation-11"),
+                new OpencodeObservabilityModels.PluginBatch(
+                        "1.0",
+                        new OpencodeObservabilityModels.RuntimeIdentity(
+                                "SERVER_PROCESS", "generation-11", "proc-11", "server-1", null),
+                        Instant.parse("2026-08-22T00:00:00Z"),
+                        0,
+                        false,
+                        List.of(event(traceId, 1, "CHAT_MESSAGE", """
+                                {"recordKind":"user","input":{"sessionID":"session-1","agent":"build"}}
+                                """))));
+
+        assertThat(repository.find(traceId)).get()
+                .extracting(TraceModels.Catalog::agentId)
+                .isEqualTo("build");
+    }
+
+    @Test
     void shouldRejectDigestMismatchWithoutCreatingCatalog() throws Exception {
         InMemoryCatalogRepository repository = new InMemoryCatalogRepository();
         TraceArchiveService service = service(repository);

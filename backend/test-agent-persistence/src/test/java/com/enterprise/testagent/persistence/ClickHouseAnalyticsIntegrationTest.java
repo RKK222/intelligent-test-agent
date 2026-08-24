@@ -317,6 +317,64 @@ class ClickHouseAnalyticsIntegrationTest {
                 false,
                 true);
         traceMapper.insertCatalog(activeCatalog, 50);
+        TraceModels.Catalog historicalPendingCatalog = new TraceModels.Catalog(
+                "trc_44444444444444444444444444444444",
+                "usr-plugin",
+                "王五",
+                "插件组织",
+                "研发二部",
+                "测试平台",
+                "LOCAL_CLIENT",
+                "OPENCODE_PLUGIN",
+                "",
+                "lci-plugin",
+                "bjp-plugin",
+                "linux-plugin",
+                "ses-plugin-pending",
+                "run-plugin-pending",
+                "test-design-agent",
+                "COMPLETED",
+                "ARCHIVED",
+                occurredAt.plusSeconds(1),
+                occurredAt.plusSeconds(2),
+                occurredAt,
+                50,
+                50,
+                2048,
+                0,
+                2,
+                true,
+                true);
+        traceMapper.insertCatalog(historicalPendingCatalog, 51);
+        TraceModels.Catalog processLifecycleCatalog = new TraceModels.Catalog(
+                "trc_33333333333333333333333333333333",
+                "usr-plugin",
+                "王五",
+                "插件组织",
+                "研发二部",
+                "测试平台",
+                "SERVER_PROCESS",
+                "OPENCODE_PLUGIN",
+                "process-plugin",
+                "",
+                "bjp-plugin",
+                "linux-plugin",
+                "unknown",
+                "",
+                "opencode",
+                "ACTIVE",
+                "ARCHIVED",
+                occurredAt.minusSeconds(10),
+                occurredAt.minusSeconds(9),
+                occurredAt.minusSeconds(10),
+                5,
+                5,
+                512,
+                0,
+                0,
+                false,
+                true);
+        traceMapper.insertCatalog(processLifecycleCatalog, 5);
         traceMapper.insertSpans(List.of(new TraceModels.Span(
                 catalog.traceId(),
                 "evt_000000000000000000000000000000000101",
@@ -399,7 +457,9 @@ class ClickHouseAnalyticsIntegrationTest {
         });
         assertThat(traceMapper.search(traceFilter, 20, 0))
                 .extracting(TraceModels.Catalog::traceId)
-                .containsExactly(activeCatalog.traceId(), catalog.traceId());
+                .containsExactly(activeCatalog.traceId(), historicalPendingCatalog.traceId(), catalog.traceId());
+        assertThat(traceMapper.count(traceFilter)).isEqualTo(3);
+        assertThat(traceMapper.find(processLifecycleCatalog.traceId())).isNotNull();
         assertThat(jdbc.sql("""
                         select count() from system.columns
                         where database = currentDatabase()
@@ -426,9 +486,10 @@ class ClickHouseAnalyticsIntegrationTest {
                 .query(Long.class).single()).isEqualTo(4L);
         assertThat(jdbc.sql("""
                         select count() from analytics_schema_history final
-                        where version in ('20260822215123', '20260823000346', '20260823001128') and success = 1
+                        where version in ('20260822215123', '20260823000346', '20260823001128',
+                                          '20260824110209') and success = 1
                         """)
-                .query(Long.class).single()).isEqualTo(3L);
+                .query(Long.class).single()).isEqualTo(4L);
     }
 
     @Test

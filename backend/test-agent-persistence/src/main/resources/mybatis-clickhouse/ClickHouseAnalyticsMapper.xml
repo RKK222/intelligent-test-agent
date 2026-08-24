@@ -266,7 +266,7 @@
         with (
             select minOrNull(coverage_start_at)
             from analytics_trace_catalog final
-            where source = 'OPENCODE_PLUGIN'
+            where source = 'OPENCODE_PLUGIN' and run_id != ''
         ) as plugin_cutover
         select capability_type as type, capability_name as name,
                count() as invocation_count, uniqExact(user_id) as user_count,
@@ -296,14 +296,16 @@
         with (
             select minOrNull(coverage_start_at)
             from analytics_trace_catalog final
-            where source = 'OPENCODE_PLUGIN'
+            where source = 'OPENCODE_PLUGIN' and run_id != ''
         ) as plugin_cutover
         select 'OPENCODE_PLUGIN' as source,
                plugin_cutover as coverage_start_at,
-               maxIf(updated_at, complete = 1) as complete_through,
-               if(count() = 0, 0.0, countIf(complete = 1) / count()) as rollout_completeness
+               maxIf(updated_at, complete = 1 and dropped_count = 0 and pending_chunks = 0) as complete_through,
+               if(count() = 0, 0.0,
+                  countIf(complete = 1 and dropped_count = 0 and pending_chunks = 0) / count()) as rollout_completeness
         from analytics_trace_catalog final
-        where started_at &gt;= #{filter.startTime} and started_at &lt; #{filter.endTime}
+        where run_id != ''
+          and started_at &gt;= #{filter.startTime} and started_at &lt; #{filter.endTime}
         <if test="filter.organization != null and filter.organization != ''">and organization = #{filter.organization}</if>
         <if test="filter.rdDepartment != null and filter.rdDepartment != ''">and rd_department = #{filter.rdDepartment}</if>
         <if test="filter.department != null and filter.department != ''">and department = #{filter.department}</if>

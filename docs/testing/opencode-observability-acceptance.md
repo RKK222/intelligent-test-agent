@@ -109,8 +109,8 @@
 | 能力未完成 | `incompleteCount` | 唯一调用无终态或 Trace 不完整 | 同上 | 插件能力事实 | 旧固定集一致 |
 | 能力来源 | `source` | 有插件覆盖后为 `OPENCODE_PLUGIN` | 全局切换点 | Trace 目录 | 新增兼容字段 |
 | 能力覆盖起点 | `coverageStartAt` | 首个插件批次成功持久化时间，后续冻结 | 全局切换点 | Trace 目录 | 新增兼容字段 |
-| 能力完整水位 | `completeThrough` | 完整 Trace 的最大更新时间 | 公共筛选 | Trace 目录 | 新增兼容字段 |
-| 能力 rollout | `rolloutCompleteness` | 完整 Trace 数/插件 Trace 总数 | 公共筛选 | Trace 目录 | 新增兼容字段 |
+| 能力完整水位 | `completeThrough` | `complete=true` 且无待上传、无丢弃 Trace 的最大更新时间 | 公共筛选 | Trace 目录 | 新增兼容字段 |
+| 能力 rollout | `rolloutCompleteness` | 无待上传、无丢弃的完整 Trace 数/插件 Trace 总数 | 公共筛选 | Trace 目录 | 新增兼容字段 |
 | 用户身份与组织 | `users[].userId/username/organization/rdDepartment/department` | 用户分组原值 | 公共筛选、分页、排序 | 活动事实用户维度 | 一致 |
 | 用户登录与会话 | `loginCount/sessionCount/activeSessionCount` | 用户分组求和 | 公共筛选、分页、排序 | 活动事实 | 一致 |
 | 用户消息与 Run | `userMessageCount/runCount` | 用户分组求和 | 公共筛选、分页、排序 | 活动事实 | 一致 |
@@ -155,7 +155,8 @@
 当前实现以首次成功持久化插件批次冻结 `coverageStartAt`。该时间之前保留旧能力事实，之后 Agent、Skill、Tool 查询只读取
 `OPENCODE_PLUGIN`；RunEvent 继续服务聊天、SSE 和非运行态指标，但切换后不再生成新的运行态能力事实。查询以
 `eventId` 幂等、以 `runId + callId` 反连接旧事实，并把 `source/coverageStartAt/completeThrough/rolloutCompleteness`
-作为向后兼容的新增字段返回。
+作为向后兼容的新增字段返回。切换点只取 `runId` 非空的插件 Run；未关联平台 Run 的进程生命周期事件既不进入 Trace
+目录，也不能冻结覆盖起点。
 
 真实 `test-design` Run `run_6d73a62460254293b8fa1847bb3c271f` 的 ClickHouse 核验结果如下：
 
@@ -207,7 +208,9 @@ cancelledCount=0/incompleteCount=2`。窗口包含此前插件 Trace，因此 AP
 - `message.updated.info.time.completed` 作为 assistant 完成边界，不用较早的 step-finish 伪造完成；
 - 插件、网络和归档异常 fail-open，不传播到 Hook 或聊天。
 
-`node --test tools/test-opencode-observability-plugin.mjs` 使用真实 1.18.4 fixture 覆盖 16 项，全部通过；只读快照没有修改。
+`chat.message` 直接读取 1.18.4 公开输入的 `agent`，归档兼容层同时识别既有批次中的 `payload.input.agent`；没有 Session 的
+`plugin.added/server.connected` 等进程广播不会入队。`node --test tools/test-opencode-observability-plugin.mjs` 使用真实 1.18.4 fixture
+覆盖 18 项，全部通过；只读快照没有修改。
 
 ## 5. DSH/Harness 增量可观测能力
 
@@ -220,7 +223,18 @@ completeThrough、稳定事件 ID、全局/Session 序号及父子关联。当�
 Trace 保持在控制台内：左侧为紧凑基础信息列表，点击后在原位展开 DSH 风格三泳道和右侧检查器，不跳转到独立页面。
 Input/Model/Tools 三泳道使用纯色，不使用渐变；基础信息行高 40px，事件行最低 28px。Duration 在等宽块与真实耗时块间切换，
 Turns 折叠/展开 Turn，Calls 折叠/展开 Assistant 下工具调用，三者不是三个同义坐标模式。页面还支持搜索、时间区间、父子
-Agent、Summary/Payload/Result/Timing/Source 和单条完整下载。
+Agent、Summary/Payload/Result/Timing/Source 和单条完整下载。三栏不再设置固定 `1120/1180px` 最小宽度，在企业控制台可用区
+内自适应收缩；左右分隔线均可拖动调整，支持方向键微调和双击恢复默认，并以相对容器上限保护中间轨迹。状态分别显示进行中、
+待上传、不完整和完整，不再把所有 `complete=false` 统称为不完整。兼容旧版本曾写出的 `complete=true + pendingChunks>0`
+组合时，待上传优先于完整，且该记录不计入 rollout 完整率和完整水位。
+
+本机真实 ClickHouse 在修复前有 89 条原始目录记录，其中 70 条没有 `runId`、37 条使用 `sessionId=unknown`，页面因此反复显示
+`opencode/不完整`。按平台 Run 边界过滤后页面目录为 19 条，`opencode` 伪 Agent 为 0；其中 2 条本地 Trace 有待上传分片、1 条
+服务端 Trace 仍进行中，其余为可用 Run。历史伪记录没有删除，仍可在已知 opaque Trace ID 时精确读取，避免破坏正文证据。
+
+真实浏览器在控制台布局内完成两档验证：1366px 视口三栏由 `232/698/280` 拖动为 `260/646/304`，1100px 视口由
+`218/466/260` 拖动为 `246/414/284`；两档横向溢出均为 0，目录标题保持单行，中间轨迹宽度均大于 300px。左右栏还可独立
+折叠，分隔线支持指针拖动、键盘方向键和双击恢复默认。该证据来自本机当前构建，企业现场仍需安装新前端包后复验缓存与缩放。
 
 ## 6. 本地上传与性能
 
@@ -244,7 +258,7 @@ Java Trace 内存队列上限锁定为 16 MiB，调度测试证明对话活跃�
 服务器把正文写入持久卷上的不可变 gzip NDJSON 分片，manifest 记录序号、SHA-256、大小、完整度和冻结节点；重复分片返回
 相同 ACK，摘要冲突失败关闭。跨节点读取只复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder`，不扫描其它节点、
 不本机降级。ClickHouse 只保存目录/span/能力元数据；运行态 `system.columns` 核验三个新表中 prompt、reasoning、payload、
-Tool 正文和物理路径列计数为 0，四个 migration 也没有为这些正文或路径建列，且没有 TTL。
+Tool 正文和物理路径列计数为 0，五个 Trace migration 也没有为这些正文或路径建列，且没有 TTL。
 
 定向后端测试共 28 项通过，覆盖分片幂等、摘要冲突、原子归档、冻结节点、generation fence、未 ACK 保留、ACK 后删除、
 SUPER_ADMIN 正文权限和成功/失败审计。真实下载 Trace `trc_fd13b13f9caa2fcd5b85aedea13407a0`：
@@ -262,10 +276,10 @@ audit=VIEW SUCCESS + DOWNLOAD SUCCESS（仅元数据，无正文/物理路径）
 
 ## 8. 企业部署与端到端验收
 
-后端 JAR、前端 dist、本地客户端 ARM64 离线分发物已从正式脚本生成。服务端与本地包均使用同一插件，仓库、已运行
-Dev.app 和本地分发物的插件 SHA-256 都为
-`70c5204ef254d829b554095ebf93256149f3f822fbece0f35695190572c17b3b`。本地分发 manifest 固定
-`opencodeVersion=1.18.4`，JDK、OpenCode、Java 客户端、manifest/catalog/artifact 签名和摘要全部独立验证通过。
+后端 JAR、前端 dist、本地客户端 ARM64 离线分发物曾从正式脚本生成。服务端与本地包必须使用同一插件；本轮修复后的仓库
+插件 SHA-256 为 `506d98b2c994f1b460d07c53b297e4ee79ce640194f973d80de9b5e0f8b05f06`。下列 `/tmp` 成品及
+`70c5204e...17b3b` 是上一轮历史证据，不得作为本轮企业安装包；本轮必须在提交后从同一提交重新封包并校验 manifest。
+本地分发 manifest 固定 `opencodeVersion=1.18.4`，JDK、OpenCode、Java 客户端、manifest/catalog/artifact 签名和摘要必须独立验证。
 
 ```text
 后端: /tmp/test-agent-observability-release-final/backend/test-agent-app.jar
@@ -278,14 +292,19 @@ Worker SHA-256: 482868e7b8881f7d03ddab1ce799911888626c5c4e7cc2d1ab20cdd97213def3
 Programs SHA-256: 35c6fb2f528aefc40a0d207f3319759abd9fe61126625948785e45deec61e80b
 ```
 
-后端封包已校验 PostgreSQL 与四条 ClickHouse observability migration 在最终 JAR 中的文件名和 SHA-256；企业文档已覆盖持久卷、
+本轮源码、persistence JAR 和应用 JAR 内嵌 persistence JAR 中的
+`V20260824110209__analytics_capability_facts_scope_cutover_to_runs.sql` SHA-256 均为
+`7e0ae2c427a1256268d682a9be2be48b1c839b240ca05ec857e0e934d1448f9f`；企业封包脚本已锁定同一摘要。
+后端封包需校验 PostgreSQL 与五条 ClickHouse observability migration 在最终 JAR 中的文件名和 SHA-256；企业文档已覆盖持久卷、
 容量/权限/告警、双后端路由、升级/回滚和 Flyway 历史。服务端 worker 已在 ARM64 封包机跨架构构建 `linux/amd64` 镜像，
 独立运行 `verify-opencode-node-worker-image.sh` 通过：OpenCode `1.18.4`、glibc `2.31`、离线 Node/Tool 探针均正常；镜像内
-Observability 插件 SHA-256 与仓库/本地包一致，均为 `70c5204e...17b3b`。Codex/Python 离线探针也通过；原生
+该轮镜像内 Observability 插件 SHA-256 与当时仓库/本地包一致，均为 `70c5204e...17b3b`。Codex/Python 离线探针也通过；原生
 linux/amd64 sandbox 仍按脚本要求必须在每个真实 x86 Worker 节点复验，ARM64 Docker 仿真不能替代这一项。
 
-本机按固定 `.env.test`、规定 PostgreSQL 和 ClickHouse 执行完整重启，backend readiness、frontend、manager、ClickHouse
-均正常；服务端与客户端 OpenCode 都为 1.18.4。真实服务端测试设计 Agent、真实本地/服务器普通对话与 Agent 子任务、
+本机按仓库当前 `.env.test` 和 ClickHouse 执行完整重启，backend readiness、frontend、manager、ClickHouse 均正常；服务端与客户端
+OpenCode 都为 1.18.4。但启动日志确认当前 `.env.test` 实际连接 `127.0.0.1:15432/test_agent`，不是项目验收规范指定的
+`192.168.8.100:15432/testagent_dev`，且本次未获授权修改受保护环境文件，因此该重启只能作为可运行证据，不能替代规定 PostgreSQL
+门禁。真实服务端测试设计 Agent、真实本地/服务器普通对话与 Agent 子任务、
 真实 Skill 事实、自动归档及关闭客户端后下载均已验证；但受保护测试设计 Agent 当前按平台契约在服务端执行，尚未取得
 `runtimeKind=LOCAL_CLIENT` 的真实 `test-design` 调用事实。
 

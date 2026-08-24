@@ -9,7 +9,9 @@
     </sql>
 
     <sql id="traceFilter">
-        started_at &gt;= #{filter.startTime} and started_at &lt; #{filter.endTime}
+        run_id != ''
+        and session_id != '' and session_id != 'unknown'
+        and started_at &gt;= #{filter.startTime} and started_at &lt; #{filter.endTime}
         <if test="filter.userKeyword != null and filter.userKeyword != ''">
             and (positionCaseInsensitiveUTF8(user_id, #{filter.userKeyword}) &gt; 0
                  or positionCaseInsensitiveUTF8(username, #{filter.userKeyword}) &gt; 0)
@@ -17,7 +19,9 @@
         <if test="filter.organization != null and filter.organization != ''">and organization = #{filter.organization}</if>
         <if test="filter.status != null and filter.status != ''">
             <choose>
-                <when test="filter.status == 'INCOMPLETE'">and complete = 0</when>
+                <when test="filter.status == 'INCOMPLETE'">
+                    and (complete = 0 or dropped_count &gt; 0 or pending_chunks &gt; 0)
+                </when>
                 <otherwise>and (status = #{filter.status} or archive_status = #{filter.status})</otherwise>
             </choose>
         </if>

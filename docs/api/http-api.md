@@ -4440,7 +4440,7 @@ HTTP DTO 在 Spring Boot 4/Jackson 3 codec 边界使用开放 `Object`，进入�
 
 | Method | Path | 说明 |
 |---|---|---|
-| `GET` | `/api/internal/platform/traces` | 按 ISO 时间、用户、组织、Agent、Skill、Tool、状态、Trace ID、Run ID 分页筛选目录；`status=INCOMPLETE` 按 `complete=false` 查询，包含仍为 `ACTIVE/ARCHIVED` 但尚未闭合的 Run。 |
+| `GET` | `/api/internal/platform/traces` | 按 ISO 时间、用户、组织、Agent、Skill、Tool、状态、Trace ID、Run ID 分页筛选已关联平台 Run 的目录；无 `runId` 或 Session 为 `unknown` 的进程级 OpenCode 生命周期广播不进入分页。`status=INCOMPLETE` 按 `complete=false` 查询，包含仍为 `ACTIVE/ARCHIVED` 但尚未闭合的 Run。 |
 | `GET` | `/api/internal/platform/traces/{traceId}` | 返回一条 Trace 的目录、覆盖起点、归档/积压/丢弃和完整度元数据。 |
 | `GET` | `/api/internal/platform/traces/{traceId}/events?afterSequence=0&limit=200` | 从冻结的归档节点读取正文事件；正文已归档后不依赖本地客户端在线。 |
 | `GET` | `/api/internal/platform/traces/{traceId}/download` | 下载该 Trace 的完整 `application/gzip` 压缩 NDJSON；不提供批量正文导出。 |
@@ -4452,6 +4452,7 @@ HTTP DTO 在 Spring Boot 4/Jackson 3 codec 边界使用开放 `Object`，进入�
 禁止扫描其它节点或本机降级。
 不完整 Run 只要 manifest 已落盘就可读取现有分片：前端把尚未产生 Step/Tool 终态的 `message.part.*` 聚合为进行中记录，
 只有生命周期事件时按事件类型保留最后一条；这只改变展示投影，不伪造完整状态，也不删除或改写服务器原始事件。
+目录展示把完整性与生命周期分开解释：`ACTIVE` 且无丢弃/积压为“进行中”，`pendingChunks>0` 为“待上传”，有丢弃或终态未闭合才显示“不完整”。缺失 Agent 的兼容历史不再以 `opencode` 充当业务 Agent；OpenCode 1.18.4 `chat.message` 的公开 `input.agent` 会被归档层识别为目录 Agent。
 
 运营能力响应 additive 增加 `source=OPENCODE_PLUGIN`、`coverageStartAt`、`completeThrough` 与
 `rolloutCompleteness`。查询用 `eventId/runId/callId` 幂等去重；同一调用已有插件事实时忽略旧 RunEvent 推导事实，

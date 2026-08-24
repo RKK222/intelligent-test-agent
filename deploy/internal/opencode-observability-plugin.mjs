@@ -391,6 +391,9 @@ export function createObservabilityPlugin(options = {}) {
   function enqueue(type, input, output, payload, overrides = {}) {
     if (!endpoint || !token || disposed) return
     const sessionId = overrides.sessionId ?? sessionIdOf(input, output)
+    // OpenCode 的 event hook 同时广播 server/plugin 等进程级事件；它们没有 Session，
+    // 不属于任何 Agent 轨迹。禁止把这类事件聚合到 generation + "unknown" 的伪 Trace。
+    if (!sessionId || sessionId === "unknown") return
     const baseCorrelation = correlationOf(input, output)
     const correlation = {
       ...baseCorrelation,
@@ -713,6 +716,8 @@ export function createObservabilityPlugin(options = {}) {
       recordKind: "user",
       opensTurn: true,
       turn,
+      // OpenCode 1.18.4 chat.message 的公开 input.agent 是本轮 Agent 权威名称。
+      agentName: input?.agent ?? null,
       input,
       message: output?.message ?? output,
     }, { correlation: { turnId, messageId } })

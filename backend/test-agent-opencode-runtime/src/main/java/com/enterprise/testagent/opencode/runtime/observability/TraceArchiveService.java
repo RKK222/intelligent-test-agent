@@ -386,7 +386,7 @@ public class TraceArchiveService {
                 firstNonBlank(
                         firstNonBlank(events, this::agentName),
                         firstNonBlank(correlation.agentId(),
-                                previousCatalog == null ? "opencode" : previousCatalog.agentId())),
+                                previousCatalog == null ? "unknown" : previousCatalog.agentId())),
                 terminal ? "COMPLETED" : "ACTIVE",
                 dropped > 0 || pendingChunks > 0 ? "INCOMPLETE" : "ARCHIVED",
                 manifest.createdAt(),
@@ -801,7 +801,13 @@ public class TraceArchiveService {
         JsonNode properties = payload.path("event").path("properties");
         return firstNonBlank(
                 text(payload, "agentName"),
-                firstNonBlank(text(properties, "agent"), text(properties.path("info"), "agent")));
+                firstNonBlank(
+                        // OpenCode 1.18.4 chat.message 公开契约把 Agent 放在 input.agent；
+                        // 新插件同时提升为 payload.agentName，以下路径用于兼容已上传的旧批次。
+                        text(payload.path("input"), "agent"),
+                        firstNonBlank(
+                                text(payload.path("message").path("info"), "agent"),
+                                firstNonBlank(text(properties, "agent"), text(properties.path("info"), "agent")))));
     }
 
     private long token(JsonNode payload, String directName, String usageName) {

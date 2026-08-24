@@ -2071,6 +2071,18 @@ release 兼容历史到当前 HEAD 的升级，先留存每套 `flyway_schema_hi
 `328c03ca3488e64a462aa1b1e7bff0fe541bb2cf1c5bf4dce0e024fb38c2cd7c`。ClickHouse migrator 按
 `20260822174420 -> 20260822215123` 顺序执行并锁定 history checksum，完整企业封包同时校验最终 persistence JAR 内字节。
 
+## ClickHouse V20260823001128 / V20260824110209 Trace 指标与 Run 切换边界
+
+`V20260823001128__analytics_trace_spans_add_cost_decode_tokens.sql` 为 Trace span 增加 OpenCode `step-finish.cost` 和
+DSH decode token 元数据。`V20260824110209__analytics_capability_facts_scope_cutover_to_runs.sql` 以不可变前向 migration
+重建旧 RunEvent capability materialized view：插件覆盖起点只取 `source=OPENCODE_PLUGIN AND run_id != ''` 的目录，
+`plugin.added/server.connected` 等进程生命周期广播不能提前切走历史运行态指标。目录查询同样排除空 Run 和 `unknown`
+Session，但保留按已知 opaque Trace ID 的精确运维查询，不删除既有原始行。
+
+后一 migration 的原始 SHA-256 固定为
+`7e0ae2c427a1256268d682a9be2be48b1c839b240ca05ec857e0e934d1448f9f`。企业封包、双后台完整包和现场部署脚本都必须从最终
+`test-agent-persistence` JAR 读取并校验这份字节；未知 checksum 必须停止启动，不得重写已执行 migration 或使用 repair。
+
 ## PostgreSQL V20260823104611 本地客户端公共能力包
 
 `V20260823104611__local_client_public_capability_releases_create.sql` 为现有本地客户端节点增加：

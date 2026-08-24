@@ -53,7 +53,7 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 OpenCode Observability 仍在现有模块边界内实现：`test-agent-domain` 只定义 Trace catalog/span/fact 与稳定进程代次端口，
 `test-agent-opencode-runtime` 负责短期插件令牌、不可变归档和查询编排，`test-agent-persistence` 只向 ClickHouse 写目录与
 元数据，并通过 MyBatis 把 opaque generation 写入 PostgreSQL 进程行；`test-agent-api` 提供插件/内部分片入口及
-`SUPER_ADMIN` Trace API。正文不进入数据库、Redis、RunEvent 或日志。
+`SUPER_ADMIN` Trace API。Trace 目录和插件覆盖起点只以已关联平台 Run 的采集事实为准；无 Session/Run 的进程生命周期广播不进入目录，也不能提前冻结运行态指标切换点。正文不进入数据库、Redis、RunEvent 或日志。
 
 ## 构建方式
 
