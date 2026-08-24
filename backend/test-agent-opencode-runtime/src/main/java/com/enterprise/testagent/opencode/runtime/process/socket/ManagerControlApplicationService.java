@@ -18,6 +18,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeManagerBackendCon
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeCapacityNotificationService;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessAutoRecoveryService;
 import java.time.Clock;
 import java.time.Instant;
@@ -42,6 +43,7 @@ public class ManagerControlApplicationService {
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final BackendJavaProcessLifecycleService backendLifecycle;
     private final OpencodeProcessAutoRecoveryService autoRecoveryService;
+    private final OpencodeCapacityNotificationService capacityNotificationService;
     private final Clock clock;
 
     /**
@@ -52,8 +54,15 @@ public class ManagerControlApplicationService {
             OpencodeProcessManagementRepository repository,
             OpencodeProcessHeartbeatStore heartbeatStore,
             BackendJavaProcessLifecycleService backendLifecycle,
-            OpencodeProcessAutoRecoveryService autoRecoveryService) {
-        this(repository, heartbeatStore, backendLifecycle, autoRecoveryService, Clock.systemUTC());
+            OpencodeProcessAutoRecoveryService autoRecoveryService,
+            OpencodeCapacityNotificationService capacityNotificationService) {
+        this(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                autoRecoveryService,
+                capacityNotificationService,
+                Clock.systemUTC());
     }
 
     /**
@@ -64,7 +73,7 @@ public class ManagerControlApplicationService {
             OpencodeProcessHeartbeatStore heartbeatStore,
             BackendJavaProcessLifecycleService backendLifecycle,
             Clock clock) {
-        this(repository, heartbeatStore, backendLifecycle, null, clock);
+        this(repository, heartbeatStore, backendLifecycle, null, null, clock);
     }
 
     /** 完整测试构造器允许验证 manager 配置就绪后的恢复触发。 */
@@ -74,10 +83,22 @@ public class ManagerControlApplicationService {
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessAutoRecoveryService autoRecoveryService,
             Clock clock) {
+        this(repository, heartbeatStore, backendLifecycle, autoRecoveryService, null, clock);
+    }
+
+    /** 完整测试构造器允许验证容量心跳的通知阈值编排。 */
+    ManagerControlApplicationService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessAutoRecoveryService autoRecoveryService,
+            OpencodeCapacityNotificationService capacityNotificationService,
+            Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
         this.autoRecoveryService = autoRecoveryService;
+        this.capacityNotificationService = capacityNotificationService;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -158,6 +179,7 @@ public class ManagerControlApplicationService {
         LinuxServerId linuxServerId = new LinuxServerId(message.linuxServerId());
         OpencodeContainerId containerId = new OpencodeContainerId(message.containerId());
         ContainerManagerId managerId = new ContainerManagerId(message.managerId());
+        ManagerRuntimeSnapshot previousSnapshot = previousManagerSnapshot(containerId);
         OpencodeContainer container = new OpencodeContainer(
                 containerId,
                 linuxServerId,
@@ -220,7 +242,30 @@ public class ManagerControlApplicationService {
         ManagerRuntimeSnapshot snapshot = new ManagerRuntimeSnapshot(
                 container, manager, connections, metrics, managedProcesses, message.buildVersion());
         heartbeatStore.recordManagerSnapshot(snapshot);
+        if (capacityNotificationService != null) {
+            capacityNotificationService.reconcile(previousSnapshot, snapshot, message.traceId());
+        }
         return snapshot;
+    }
+
+    /** 容量通知只比较同一容器最近的存活快照；读取失败不新增 manager 心跳失败原因。 */
+    private ManagerRuntimeSnapshot previousManagerSnapshot(OpencodeContainerId containerId) {
+        if (capacityNotificationService == null) {
+            return null;
+        }
+        try {
+            return heartbeatStore.liveManagerSnapshots().stream()
+                    .filter(snapshot -> snapshot.container().containerId().equals(containerId))
+                    .max(java.util.Comparator.comparing(
+                            snapshot -> snapshot.container().lastHeartbeatAt()))
+                    .orElse(null);
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "读取上一份 manager 容量快照失败，继续记录当前心跳 containerId={} exceptionType={}",
+                    containerId,
+                    exception.getClass().getSimpleName());
+        }
+        return null;
     }
 
     /**

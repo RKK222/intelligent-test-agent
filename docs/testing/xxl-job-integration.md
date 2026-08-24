@@ -74,7 +74,7 @@ Testcontainers 需要可用 Docker；Docker 不可用时相关 MySQL/Redis 测�
 8. 分别创建标准夜间任务和超级管理员白天 `ADMIN_CUSTOM` 任务，确认都不写 PostgreSQL `USER_PLAN`，XXL `opencode-runtime.night-execution-dispatch` 每分钟到点后按任务固化服务器调用目标 Java；自定义任务不改变 `night_execution_slot_reservations`。停止 XXL 后任务仍可提交，恢复后数据库扫描补发。
 9. 启动两个共享 XXL MySQL 的 Java，确认两个 advertised host 的 executor 都出现在同一执行器组；再新增第三节点并只 reload 中央 Nginx，前两个 Java 不修改配置、不重启，执行器组最终出现三个注册地址。
 10. 分别制造响应丢失、Java 在 legacy Run 行落库后/用户消息前退出、远端 prompt 已接收但本地 handoff 标记前退出、远端探测 UNKNOWN、锚点来源 ID 冲突、租约过期且 owner 在线/离线、07:00 窗口结束且本机 handle 仍在；确认补偿只接受当前任务锚点、没有第二个 Run，远端已接收时不会重投，且不会先写 `FAILED` 后由旧调用创建 Run。通用 stale legacy 扫描不得处理带 attempt 且未受理的 Scheduled 锚点。
-11. 在两台服务器分别准备超过 15 天无 Run 的用户进程和近期任一来源 Run 的用户进程，手动触发闲置清理；确认前者只由持有对应 manager 连接的 Java 关闭并保留 ACTIVE binding，后者不关闭。分别插入执行窗口仍有效的前一晚 `SCHEDULED`、当天 `DISPATCHING`、已过窗口、次日及 `DISPATCHED/CANCELLED/FAILED` 任务，确认只有前两类保护进程；再制造活动 Run、manager 断连、扫描后新增当天任务和扫描后二次发起 Run，确认都保守跳过。最后再次使用已关闭用户，确认原绑定进程自动拉起。
+11. 在两台服务器分别准备超过 10 天无 Run 的用户进程和近期任一来源 Run 的用户进程，手动触发闲置清理；确认前者只由持有对应 manager 连接的 Java 关闭并保留 ACTIVE binding，后者不关闭。分别插入执行窗口仍有效的前一晚 `SCHEDULED`、当天 `DISPATCHING`、已过窗口、次日及 `DISPATCHED/CANCELLED/FAILED` 任务，确认只有前两类保护进程；再制造活动 Run、manager 断连、扫描后新增当天任务和扫描后二次发起 Run，确认都保守跳过。最后再次使用已关闭用户，确认原绑定进程自动拉起。
 
 单节点启动日志还必须确认：平台 Netty 可以先于 Admin 就绪；本机 Admin Tomcat/readiness 完成后才出现 executor 启动和 `ExecutorRegistryThread` 启动；同一次启动区间不得出现指向尚未监听本机 Admin 的 `registry error` / `Connection refused`。MySQL 中注册地址必须等于平台 advertised host 加 executor 端口。
 

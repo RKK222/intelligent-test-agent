@@ -310,7 +310,7 @@ SSE `id` 不表示 durable 游标，客户端不得持久化它或请求历史 r
 
 数据库事务提交成功后才发布变化，回滚不得产生 SSE。当前 Java 先向本机该用户连接 fan-out，再复用通用 `ServerBroadcastPublisher` 唤醒其它 Java；内部广播只携带接收人 ID、可选通知 ID、变化类型和既有 trace/实例元数据，不携带标题、摘要、shareId、URL、消息正文或 Token。广播是低延迟增强，不是事实源；广播失败或断线由建连 snapshot 和 30 秒数据库校准恢复。
 
-SSE 只提供未读数和刷新信号，不承载通知正文。会话分享和 Agent 配置 dispose 通知共用本协议，不新增事件名；dispose 状态真实变化产生 `UPDATED`，相同状态重试不广播也不重复刷新未读。收到合法 snapshot/updated 后，工作台按需重新调用 `GET /api/internal/platform/notification-center/notifications` 取得权威分页；只有未读角标变化且面板未打开时可以只更新 `unreadCount`，不能从事件自行构造可点击动作、重启命令或目标 URL。
+SSE 只提供未读数和刷新信号，不承载通知正文。会话分享、Agent 配置 dispose 和 OpenCode 容量预警共用本协议，不新增事件名；dispose 状态真实变化产生 `UPDATED`，容量首次越过 80% 产生 `CREATED/UPDATED`，回落到 70% 以下产生 `INVALIDATED`，相同高位心跳不重复广播或刷新未读。收到合法 snapshot/updated 后，工作台按需重新调用 `GET /api/internal/platform/notification-center/notifications` 取得权威分页；只有未读角标变化且面板未打开时可以只更新 `unreadCount`，不能从事件自行构造可点击动作、重启命令或目标 URL。
 
 ## 分享会话运行态 fetch SSE
 

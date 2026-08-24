@@ -49,7 +49,7 @@ public class InactiveOpencodeProcessCleanupTaskHandler
 
     @Override
     public String name() {
-        return "十五天未使用用户 OpenCode 进程关闭";
+        return "十天未使用用户 OpenCode 进程关闭";
     }
 
     @Override

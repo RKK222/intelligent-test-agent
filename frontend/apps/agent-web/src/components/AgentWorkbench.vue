@@ -2190,11 +2190,12 @@ async function handleOpenNotification(notification: UserNotification) {
     return;
   }
   if (
-    [
+    ([
       "AGENT_CONFIG_DISPOSE_PENDING",
       "AGENT_CONFIG_DISPOSE_SUCCEEDED",
-      "AGENT_CONFIG_DISPOSE_SUPERSEDED"
-    ].includes(notification.type)
+      "AGENT_CONFIG_DISPOSE_SUPERSEDED",
+      "OPENCODE_CAPACITY_WARNING"
+    ] as string[]).includes(notification.type)
     && notification.actionType === "NONE"
     && notification.unread
   ) {

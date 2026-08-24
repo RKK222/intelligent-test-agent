@@ -48,7 +48,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `localclient.LocalClientExecutionNodeIdentity`：集中维护 `lci_* ↔ node_local_*` 稳定映射，供目标解析、Session binding 和 legacy Run 路由共同使用，禁止各入口自行拼接或解析前缀。
 - `localclient.LocalWorkspaceGitAccessInspectionHandler`：消费无敏感字段的集群巡检唤醒，只处理由当前 Java 持有且声明 `WORKSPACE_GIT_ACCESS_V1` 的本地客户端连接，通过既有文件反向 RPC 执行 Git 远端只读探测并持久化用户级安全投影；离线、超时和旧客户端统一记为 `UNKNOWN`。
 - `runtime.SideQuestionOrphanCleanupTaskHandler` / `runtime.SideQuestionOrphanCleanupService`：复用 scheduler 每 5 分钟回收超过 10 分钟的旁路 fork；按内部映射使用原节点，404 幂等，无映射时记录潜在泄漏窗口并收敛平台 Run。
-- `process.*`：当前用户 opencode 进程分配、用户/服务器短事务预留、process/binding 生命周期代次 CAS、已有 binding 原端口恢复、超管显式关闭后的 binding INACTIVE/ACTIVE 投影切换、个人重启原服务器路由、公共状态查询、公共启动/owned-stop 健康确认、通用参数 session/config 路径读取、启动时可选注入当前平台 `OPENCODE_REFERENCES_DIR`、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。只有明确 `PORT_CONFLICT/PORT_OUT_OF_RANGE` 才进入既有端口选择；引用目录参数缺失不阻断滚动升级中的进程启动，既有进程不热更新环境。
+- `process.*`：当前用户 opencode 进程分配、用户/服务器短事务预留、process/binding 生命周期代次 CAS、已有 binding 原端口恢复、超管显式关闭后的 binding INACTIVE/ACTIVE 投影切换、个人重启原服务器路由、公共状态查询、公共启动/owned-stop 健康确认、十天闲置关闭、manager 容量心跳 80% 超级管理员通知与 70% 恢复滞回、Java 重启首份高位/恢复态快照幂等收敛、通用参数 session/config 路径读取、启动时可选注入当前平台 `OPENCODE_REFERENCES_DIR`、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。只有明确 `PORT_CONFLICT/PORT_OUT_OF_RANGE` 才进入既有端口选择；容量通知失败不得阻断 manager 心跳；引用目录参数缺失不阻断滚动升级中的进程启动，既有进程不热更新环境。
 - `process.WorkspaceFileRoutingService`：复用公共 Java 路由程序定位 workspace 文件 WebSocket 的目标后端，并在普通路由阶段通过 `ConversationWorkspaceAccessAuthorizer` 校验当前用户归属，`SUPER_ADMIN` 不旁路；排查只读路由按目标工作区权威服务器选择 Java，不使用 actor affinity、回绑或本机降级，ticket 和具体 RPC 的再次校验由 API/业务入口共同完成。
 - `terminal.*`：PTY ticket、限流、WebSocket 背后的业务状态和本地进程适配。
 
@@ -74,7 +74,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新、消息追加默认 role 和消息列表数据库 fallback。
 - `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤、permission/question body 兼容、旁路事件隔离、终态竞态和孤儿清理。
 - `protectedagent.*` 测试必须覆盖 opaque 目录项、受保护修订/Skill 冻结、服务器节点强路由、原生工具关闭、MCP notification、WSS 文件调用、grant 换代失效、目录映射缺失和日志摘要不泄露正文。
-- `process.*` 测试必须覆盖用户进程分配、并发预留单胜者、原端口恢复与明确冲突迁移、公共状态查询、公共启动/owned-stop 健康确认、通用参数路径读取、引用目录启动环境的目标平台解析/覆盖/缺失兼容、workspace 文件路由的实时应用成员校验、manager 控制面命令路由、后端心跳注册和含可空 UCID/manager 状态的运行管理快照聚合。
+- `process.*` 测试必须覆盖用户进程分配、并发预留单胜者、原端口恢复与明确冲突迁移、公共状态查询、公共启动/owned-stop 健康确认、十天闲置边界、80% 容量越线与 70% 恢复滞回、Java 重启首份快照收敛、有效超级管理员筛选和通知失败隔离、通用参数路径读取、引用目录启动环境的目标平台解析/覆盖/缺失兼容、workspace 文件路由的实时应用成员校验、manager 控制面命令路由、后端心跳注册和含可空 UCID/manager 状态的运行管理快照聚合。
 - `terminal.*` 测试必须覆盖 ticket 签发/消费/过期、active session 互斥、输入输出限流、WebSocket envelope 和进程适配。
 
 ## 修改时必须同步更新

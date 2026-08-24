@@ -26,7 +26,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class InactiveOpencodeProcessCleanupService {
 
-    static final Duration INACTIVITY_THRESHOLD = Duration.ofDays(15);
+    static final Duration INACTIVITY_THRESHOLD = Duration.ofDays(10);
     static final int SCAN_LIMIT = 500;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(InactiveOpencodeProcessCleanupService.class);

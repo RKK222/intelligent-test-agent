@@ -40,7 +40,7 @@
 - PostgreSQL 普通 mapper 通过 `MyBatisPersistenceConfig` 显式绑定主 `sqlSessionFactory`；启用独立
   `clickHouseSqlSessionFactory` 后不会依赖按类型推断，避免两个 MyBatis 工厂造成普通 mapper 装配歧义。
 
-- 使用 `UserNotificationMapper.xml` 实现通用通知创建去重、按 dedupKey 条件状态更新、失效、接收人分页、未读统计、幂等已读和 90 天历史清理；通知有效与动作可用分别派生，`NONE` 仍可未读但不可执行。分享通知实时联表校验分享、成员、会话、所属人和到期事实，失效授权不再可点击或计入未读。
+- 使用 `UserNotificationMapper.xml` 实现通用通知创建去重、按 dedupKey 条件状态更新、失效、接收人分页、未读统计、幂等已读和 90 天历史清理；通知有效与动作可用分别派生，`NONE` 仍可未读但不可执行。分享通知实时联表校验分享、成员、会话、所属人和到期事实，失效授权不再可点击或计入未读；OpenCode 容量预警使用带固定前缀的内部目标键，与其它 `NONE` 通知隔离。
 
 - `MyBatisSessionShareRepository` / `SessionShareMapper.xml` 持久化每个 Session 唯一且永久复用的 256 位随机分享 ID、全量成员更新与软移除历史、乐观锁版本、“分享给我”失效历史、最小用户目录和 365 天安全审计。审计只保存 actor、执行所属人、share/session/workspace/resource、结果、traceId 与可选路径 SHA-256，不保存消息/文件正文、明文路径、Token 或终端输入。
 - `MyBatisSessionMessageRepository` / `SessionMessageMapper.xml` 保存消息实际发送人、统一认证号和代操作标记，并复用既有 `(session_id, run_id, created_at, id)` 索引按精确 `sessionId + runId + USER` 读取运行输入；Run、夜间任务和重发 MyBatis mapper 同步保存实际 actor 归因。普通历史与普通 runtime-state SQL 显式排除分享发送者兜底，防止一次代发永久获得普通会话访问权。
@@ -61,7 +61,7 @@
 
 ## 已有实现
 
-- `user_notifications`：只保存安全标题/摘要、受控 `action_type/action_target_id`、去重键、状态、已读/失效/到期时间和 traceId。`V20260810170000__user_notifications_create_notification_center.sql` 仅回填当前仍有效的分享成员；`V20260811213000__user_notifications_expand_dispose_types.sql` 只扩展四种 dispose 类型和 `NONE/RESTART_OWN_PROCESS` 动作约束，不写业务数据。
+- `user_notifications`：只保存安全标题/摘要、受控 `action_type/action_target_id`、去重键、状态、已读/失效/到期时间和 traceId。`V20260810170000__user_notifications_create_notification_center.sql` 仅回填当前仍有效的分享成员；`V20260811213000__user_notifications_expand_dispose_types.sql` 只扩展四种 dispose 类型和 `NONE/RESTART_OWN_PROCESS` 动作约束；`V20260824100444__user_notifications_add_opencode_capacity_warning.sql` 以前向约束变更加入 `OPENCODE_CAPACITY_WARNING`，均不写业务数据。
 
 - `V1__create_core_tables.sql`：创建 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 核心表。
 - `V20260711120000__document_side_question_run_source.sql`：只更新三个 `source_type` 字段的允许值注释以包含 `SIDE_QUESTION`，不改结构、不写数据。

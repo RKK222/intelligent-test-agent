@@ -2,6 +2,7 @@ package com.enterprise.testagent.opencode.runtime.process.socket;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -29,6 +30,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilt
 import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessAutoRecoveryService;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeCapacityNotificationService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -40,6 +42,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class ManagerControlApplicationServiceTest {
 
@@ -114,6 +117,95 @@ class ManagerControlApplicationServiceTest {
         verify(recoveryService).requestPreparedRecovery(
                 new ContainerManagerId("mgr_1234567890abcdef"),
                 "trace_1234567890abcdef");
+    }
+
+    @Test
+    void managerHeartbeatPassesPreviousContainerSnapshotToCapacityNotification() {
+        FakeRepository repository = new FakeRepository();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService backendLifecycle = backendLifecycle(repository, heartbeatStore);
+        OpencodeCapacityNotificationService notificationService = mock(OpencodeCapacityNotificationService.class);
+        ManagerControlApplicationService service = new ManagerControlApplicationService(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                null,
+                notificationService,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ManagerControlMessage first = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                5,
+                3,
+                Map.of(),
+                List.of("bjp_1234567890abcdef"),
+                "trace_capacity_first");
+        ManagerControlMessage second = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                5,
+                4,
+                Map.of(),
+                List.of("bjp_1234567890abcdef"),
+                "trace_capacity_second");
+
+        service.managerHeartbeat(first);
+        service.managerHeartbeat(second);
+
+        ArgumentCaptor<ManagerRuntimeSnapshot> previous = ArgumentCaptor.forClass(ManagerRuntimeSnapshot.class);
+        ArgumentCaptor<ManagerRuntimeSnapshot> current = ArgumentCaptor.forClass(ManagerRuntimeSnapshot.class);
+        verify(notificationService, org.mockito.Mockito.times(2))
+                .reconcile(previous.capture(), current.capture(), any());
+        assertThat(previous.getAllValues().get(0)).isNull();
+        assertThat(previous.getAllValues().get(1).container().currentProcesses()).isEqualTo(3);
+        assertThat(current.getAllValues().get(1).container().currentProcesses()).isEqualTo(4);
+    }
+
+    @Test
+    void overCapacityHeartbeatStaysConnectedAndReportsZeroSchedulableCapacity() {
+        FakeRepository repository = new FakeRepository();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService backendLifecycle = backendLifecycle(repository, heartbeatStore);
+        OpencodeCapacityNotificationService notificationService = mock(OpencodeCapacityNotificationService.class);
+        ManagerControlApplicationService service = new ManagerControlApplicationService(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                null,
+                notificationService,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                5095,
+                100,
+                101,
+                Map.of(),
+                List.of("bjp_1234567890abcdef"),
+                "trace_capacity_over");
+
+        service.managerHeartbeat(heartbeat);
+
+        assertThat(heartbeatStore.managerSnapshots).singleElement().satisfies(snapshot -> {
+            assertThat(snapshot.container().currentProcesses()).isEqualTo(101);
+            assertThat(snapshot.container().availableCapacity()).isZero();
+            assertThat(snapshot.container().canAcceptProcess()).isFalse();
+        });
+        verify(notificationService).reconcile(
+                org.mockito.ArgumentMatchers.isNull(),
+                any(ManagerRuntimeSnapshot.class),
+                org.mockito.ArgumentMatchers.eq("trace_capacity_over"));
     }
 
     @Test

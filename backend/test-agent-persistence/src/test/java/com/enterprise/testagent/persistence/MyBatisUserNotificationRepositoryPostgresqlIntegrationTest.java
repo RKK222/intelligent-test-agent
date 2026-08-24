@@ -35,7 +35,7 @@ import org.testcontainers.utility.DockerImageName;
 @Testcontainers(disabledWithoutDocker = true)
 class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
 
-    private static final String MIGRATION_VERSION = "20260811213000";
+    private static final String MIGRATION_VERSION = "20260824100444";
     private static final String PREVIOUS_VERSION = "20260809170001";
     private static final Instant NOW = Instant.parse("2026-08-10T09:00:00Z");
     private static final String SHARE_ID =
@@ -165,6 +165,46 @@ class MyBatisUserNotificationRepositoryPostgresqlIntegrationTest {
                 .param("userId", recipient.value())
                 .query(Long.class)
                 .single()).isEqualTo(1L);
+    }
+
+    @Test
+    void latestConstraintAcceptsOpencodeCapacityWarning() throws Exception {
+        DataSource capacityDataSource = dataSource("notification_capacity");
+        migrate(capacityDataSource, "notification_capacity", null);
+        JdbcClient jdbc = JdbcClient.create(capacityDataSource);
+        UserId recipient = new UserId("usr_notification_pg_capacity");
+        jdbc.sql("""
+                        insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
+                        values (:userId, 'ucid_pg_capacity', 'PostgreSQL容量通知管理员', 'hash', 'ACTIVE', :now, :now)
+                        """)
+                .param("userId", recipient.value())
+                .param("now", Timestamp.from(NOW))
+                .update();
+        UserNotificationRepository repository = repository(capacityDataSource);
+        UserNotification warning = new UserNotification(
+                new UserNotificationId("ntf_capacity_pg"),
+                recipient,
+                UserNotificationType.OPENCODE_CAPACITY_WARNING,
+                null,
+                "OpenCode 容量接近上限",
+                "服务器 server-114 的 OpenCode 进程使用率已达到 80%。",
+                UserNotificationActionType.NONE,
+                "OPENCODE_CAPACITY:container-114",
+                "OPENCODE_CAPACITY:container-114:" + recipient.value(),
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                "trace_capacity_pg",
+                NOW,
+                NOW);
+
+        assertThat(repository.insert(warning)).isTrue();
+        assertThat(repository.findPage(recipient, false, NOW, new PageRequest(1, 20)).items())
+                .singleElement()
+                .satisfies(item -> assertThat(item.type())
+                        .isEqualTo(UserNotificationType.OPENCODE_CAPACITY_WARNING));
     }
 
     private static UserNotification disposeNotification(

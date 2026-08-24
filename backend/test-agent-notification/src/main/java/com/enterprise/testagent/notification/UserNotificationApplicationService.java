@@ -12,6 +12,8 @@ import com.enterprise.testagent.domain.notification.UserNotificationRepository;
 import com.enterprise.testagent.domain.notification.UserNotificationStatus;
 import com.enterprise.testagent.domain.notification.UserNotificationType;
 import com.enterprise.testagent.domain.notification.UserNotificationView;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.sessionshare.SessionShare;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
@@ -40,6 +42,7 @@ public class UserNotificationApplicationService {
 
     private static final Duration RETENTION = Duration.ofDays(90);
     private static final Duration RECONCILE_INTERVAL = Duration.ofSeconds(30);
+    private static final String OPENCODE_CAPACITY_ACTION_TARGET_PREFIX = "OPENCODE_CAPACITY:";
     private static final Set<UserNotificationType> DISPOSE_TYPES = EnumSet.of(
             UserNotificationType.AGENT_CONFIG_DISPOSE_PENDING,
             UserNotificationType.AGENT_CONFIG_DISPOSE_SUCCEEDED,
@@ -217,6 +220,77 @@ public class UserNotificationApplicationService {
         // 并发插入可能发生在第一次 UPDATE 之后；只在状态确实不同的情况下命中并广播。
         if (repository.updateByDedupKeyIfChanged(notification)) {
             publish(recipientUserId, null, UserNotificationChangeType.UPDATED, traceId, now);
+        }
+    }
+
+    /**
+     * 按容器和接收人幂等创建 OpenCode 容量预警；正文不携带用户、端口或进程明细。
+     *
+     * <p>相同容量上限下的后续心跳不会反复重置已读；通知被容量恢复失效后，再次达到阈值时重新激活。</p>
+     */
+    @Transactional
+    public void syncOpencodeCapacityWarning(
+            UserId recipientUserId,
+            LinuxServerId linuxServerId,
+            OpencodeContainerId containerId,
+            int maxProcesses,
+            int warningPercent,
+            String traceId) {
+        Objects.requireNonNull(recipientUserId, "recipientUserId must not be null");
+        Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
+        Objects.requireNonNull(containerId, "containerId must not be null");
+        if (maxProcesses < 1 || warningPercent < 1 || warningPercent > 100) {
+            throw new IllegalArgumentException("opencode capacity warning values are invalid");
+        }
+        Instant now = clock.instant();
+        String actionTargetId = OPENCODE_CAPACITY_ACTION_TARGET_PREFIX + containerId.value();
+        UserNotification notification = new UserNotification(
+                new UserNotificationId(RuntimeIdGenerator.userNotificationId()),
+                recipientUserId,
+                UserNotificationType.OPENCODE_CAPACITY_WARNING,
+                null,
+                "OpenCode 容量接近上限",
+                "服务器 " + linuxServerId.value()
+                        + " 的 OpenCode 进程使用率已达到 " + warningPercent
+                        + "%；当前单节点上限为 " + maxProcesses
+                        + "。请评估十天闲置清理、单节点资源余量和新增节点需求。",
+                UserNotificationActionType.NONE,
+                actionTargetId,
+                "OPENCODE_CAPACITY:" + containerId.value() + ":" + recipientUserId.value(),
+                UserNotificationStatus.ACTIVE,
+                null,
+                null,
+                null,
+                null,
+                traceId,
+                now,
+                now);
+        if (repository.reactivateByDedupKeyIfChanged(notification)) {
+            publish(recipientUserId, null, UserNotificationChangeType.UPDATED, traceId, now);
+        } else if (repository.insert(notification)) {
+            publish(recipientUserId, notification.notificationId(), UserNotificationChangeType.CREATED, traceId, now);
+        }
+    }
+
+    /** 容量回落到恢复线后失效该容器全部超级管理员预警，为下一次越线重新布防。 */
+    @Transactional
+    public void invalidateOpencodeCapacityWarning(
+            OpencodeContainerId containerId,
+            String traceId) {
+        Objects.requireNonNull(containerId, "containerId must not be null");
+        Instant now = clock.instant();
+        String actionTargetId = OPENCODE_CAPACITY_ACTION_TARGET_PREFIX + containerId.value();
+        List<UserId> recipients = repository.findActiveRecipientsByAction(
+                UserNotificationActionType.NONE, actionTargetId, null);
+        int changed = repository.invalidateActiveByAction(
+                UserNotificationActionType.NONE,
+                actionTargetId,
+                null,
+                "CAPACITY_RECOVERED",
+                traceId,
+                now);
+        if (changed > 0) {
+            publishRecipients(recipients, UserNotificationChangeType.INVALIDATED, traceId, now);
         }
     }
 
@@ -535,7 +609,10 @@ public class UserNotificationApplicationService {
                     "这次配置更新已结束",
                     "已有更新的配置，这条通知不用处理。",
                     UserNotificationActionType.NONE);
-            case SESSION_SHARED, LOCAL_CLIENT_UPDATE_AVAILABLE, LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE -> throw new IllegalArgumentException(
+            case SESSION_SHARED,
+                    OPENCODE_CAPACITY_WARNING,
+                    LOCAL_CLIENT_UPDATE_AVAILABLE,
+                    LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE -> throw new IllegalArgumentException(
                     "notification type is not an Agent config dispose type");
         };
     }

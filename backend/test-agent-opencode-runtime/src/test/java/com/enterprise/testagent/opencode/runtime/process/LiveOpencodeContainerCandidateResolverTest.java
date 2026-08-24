@@ -62,6 +62,8 @@ class LiveOpencodeContainerCandidateResolverTest {
                 ManagerConnectionStatus.CONNECTED, NOW);
         ManagerRuntimeSnapshot full = snapshot("ctr_full", "server-a", 4, 4, OpencodeContainerStatus.READY,
                 ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED, NOW);
+        ManagerRuntimeSnapshot overCapacity = snapshot("ctr_over", "server-a", 5, 4, OpencodeContainerStatus.READY,
+                ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED, NOW);
         ManagerRuntimeSnapshot noLocalSocket = snapshot("ctr_no_socket", "server-a", 0, 4,
                 OpencodeContainerStatus.READY, ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND,
                 ManagerConnectionStatus.CONNECTED, NOW);
@@ -72,7 +74,7 @@ class LiveOpencodeContainerCandidateResolverTest {
                 OpencodeContainerStatus.READY, ManagerConnectionStatus.DISCONNECTED, CURRENT_BACKEND,
                 ManagerConnectionStatus.CONNECTED, NOW);
         when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(
-                validB, foreignBackend, managerDisconnected, containerBusy, full, noLocalSocket,
+                validB, foreignBackend, managerDisconnected, containerBusy, full, overCapacity, noLocalSocket,
                 duplicateOldValid, validA, duplicateLatestDown));
         connect(validA.container().containerId());
         connect(validB.container().containerId());
@@ -80,6 +82,7 @@ class LiveOpencodeContainerCandidateResolverTest {
         connect(managerDisconnected.container().containerId());
         connect(containerBusy.container().containerId());
         connect(full.container().containerId());
+        connect(overCapacity.container().containerId());
         connect(duplicateOldValid.container().containerId());
 
         List<OpencodeContainer> candidates = resolver.findCandidates(100);

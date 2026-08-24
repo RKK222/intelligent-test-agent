@@ -2,12 +2,12 @@
 
 ## 工程定位
 
-通用用户站内通知业务模块。生产者包括会话协作分享和 Agent 配置 dispose rollout；模块负责通知生命周期、未读统计、用户级实时变化和历史清理，不承载 HTTP DTO、MyBatis 实现或具体页面。
+通用用户站内通知业务模块。生产者包括会话协作分享、Agent 配置 dispose rollout 和 OpenCode 单节点容量预警；模块负责通知生命周期、未读统计、用户级实时变化和历史清理，不承载 HTTP DTO、MyBatis 实现或具体页面。
 
 ## 上游调用方
 
 - `test-agent-api`：分页、幂等已读和用户级通知 SSE。
-- `test-agent-opencode-runtime`：分享生命周期与已读同步，以及配置 dispose 的等待、成功、失败和已结束状态推进。
+- `test-agent-opencode-runtime`：分享生命周期与已读同步、配置 dispose 的等待/成功/失败/已结束状态推进，以及按 manager 容量心跳同步超级管理员预警。
 - `test-agent-app`：通过依赖图装配 Spring Bean 和定时任务。
 
 ## 下游依赖
@@ -22,6 +22,7 @@
 - 首次分享、重新加入或分享重新激活时创建新通知；普通设置更新只更新当前通知快照；成员移除、撤销和会话归档使当前通知失效。
 - dispose 按 `AGENT_CONFIG_DISPOSE:{rolloutId}:{userId}` 单行去重，采用“条件更新 → 幂等插入 → 并发重试更新”；相同状态不修改已读/更新时间或广播，真实变化清空已读并发布 `UPDATED`。失败状态只开放 `RESTART_OWN_PROCESS`，其它状态使用 `NONE`，目标只保存 rolloutId。
 - 配置状态通知使用“正在更新、更新成功、更新失败、本次更新已结束”等用户文案，不向页面暴露 dispose、rollout 或进程缓存等内部概念。
+- 容量预警按 `OPENCODE_CAPACITY:{containerId}:{userId}` 单行去重，内部 action target 使用 `OPENCODE_CAPACITY:{containerId}` 隔离其它 `NONE` 通知；正文只展示服务器 ID、80% 阈值和单节点上限，不保存用户、端口、PID 或异常明细。容量回落到 70% 以下时批量失效，重新越线可再次激活。
 - 未读口径固定为 `readAt` 为空、通知有效且未过期；分享的当前状态还要实时合并分享、成员、会话和所属人事实。
 - 分享访问鉴权成功后按 `recipientUserId + shareId` 幂等已读。该同步失败只记录脱敏告警，不阻断分享访问。
 - 数据库事务提交成功后才向本机连接和 `ServerBroadcastPublisher` 发布变化；跨节点 payload 只包含接收人 ID、通知 ID、变化类型和既有广播元数据。

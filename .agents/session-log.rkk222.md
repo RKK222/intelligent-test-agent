@@ -13341,3 +13341,30 @@
 - 本轮客户端需在两台已安装机器上全量卸载/替换一次；之后只要固定组织私钥未丢失，即可继续正常签名升级。
 - 最终内层 ZIP SHA-256 为 `a13f0cc83850d5a1eb6eecfb37caa378e3d8cf67ebe277371b1e66390ef62397`，外层固定名双后台包 SHA-256 为 `99875cd9cb2dadfafb95e0219480a40617f4e769e00d9a8ec5360b41c9bb072f`；客户端版本为 `20260823213628`，manifest SHA-256 为 `982c55bea7c1f760bf9f036c4dd10aaf7449dbcd1b9ec7480cf97074a3e1b18e`，公共配置提交为 `4d9080373845ffece1d6d055a3b042ad383a5aab`。
 - 最终内外层 SHA/结构/嵌套一致性、147 份 Flyway SQL 的源码与 JAR 字节、四制品客户端、公钥签名、TCDS 固定域名、Qwen 优先级、离线 Node 依赖、私钥不入包及 Linux GNU tar 归档卫生均通过；目标企业 PostgreSQL 与 XXL MySQL 完整 `flyway_schema_history` 尚未取得，正式部署仍须先通过该现场门禁。
+
+## 2026-08-24 - 修复 OpenCode 恢复超容量断连并增加容量预警
+
+### Why
+
+- `.114` 在 100 个运行进程后，保留 ACTIVE binding 的旧用户可通过 `bindingRecovery=true` 原端口恢复到 101；Java 把真实运行数误当成调度上限校验并拒绝 101/100 心跳，造成 manager WebSocket 持续断开和 TestAgent 不可用。
+- 需要把闲置进程关闭阈值从 15 天改为 10 天，并在单容器容量达到 80% 时用既有通知中心提醒全部有效超级管理员，为扩容评审留出时间。
+
+### What
+
+- `OpencodeContainer` 允许实际 `currentProcesses` 在端口池范围内暂时超过 `maxProcesses`，可调度容量钳制为 0；首次分配仍只选择未满容器，恢复路径继续固定原 binding。
+- 新增 `OpencodeCapacityNotificationService` 和 `OPENCODE_CAPACITY_WARNING/NONE` 通知：80% 预警、70% 以下失效、稳定去重、全部 ACTIVE 超管分页投递、Java 重启首份高位/恢复态快照幂等收敛，通知异常 fail-open。
+- 闲置关闭阈值调整为 10 天；新增 PostgreSQL 通知类型 migration 和 XXL MySQL 默认任务名称前向 migration，保留既有 V9 原始字节。
+- 前端通知中心只展示容量预警并走通用已读，不解释内部容器目标；同步 runtime、notification、persistence、前端、API、数据库、XXL 与多后台部署文档，并固化扩节点判据。
+
+### How
+
+- JDK 25 定向后端测试覆盖领域容量、候选过滤、manager 101/100 心跳、80/70 滞回、Java 重启收敛、全超管分页、通知幂等/失效和十天清理；相关批次全部通过。
+- PostgreSQL Testcontainers 3/3、XXL MySQL Testcontainers 7/7 通过；通知单元测试 14/14、最终 runtime 定向 24/24 通过。
+- 前端通知组件 Vitest 9/9、agent-web typecheck、生产 build 和 Chromium 容量通知已读 E2E 1/1 通过；后端 `test-agent-app` reactor 跳过测试打包成功，`git diff --check` 通过。
+
+### Result
+
+- 101/100 真实状态不会再关闭 manager 控制连接，容器继续可观测但不会接收新用户；新增用户在 `.114` 满而 `.4` 未满时会去 `.4`，全部候选满时仍拒绝。
+- 80% 只触发评审：十天清理后仍持续高位、无安全提上限余量、预测满载早于交付周期加两周、全节点同时高位或 N-1 规划容量不足时进入新增节点计划；新增节点不会自动迁移 `.114` 的存量 binding。
+- 新通知枚举不能由旧 Java 解析，本版企业上线必须维护窗口先停 `.4/.114` 两台旧 Java，再以同版本依次启动；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。
+- 本地只完成代码、真实存储测试和应用/前端构建，未生成外网 Mac 企业完整包，也未部署 `.4/.114/.2`；目标 PostgreSQL 与 XXL MySQL `flyway_schema_history` 仍需在正式打包部署前收集并验证。

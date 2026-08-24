@@ -265,6 +265,46 @@ test("avatar restart confirms active runs and dispose failure reuses the same cu
   await expect.poll(() => notificationReadRequests).toEqual(["ntf_dispose_failed"]);
 });
 
+test("OpenCode capacity warning uses the existing notification mark-read flow", async ({ page }) => {
+  const notificationReadRequests: string[] = [];
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.onboarding.v7:usr_capacity_admin", "seen");
+  });
+  await mockBackendApi(page, {
+    authUser: {
+      userId: "usr_capacity_admin",
+      username: "容量管理员",
+      unifiedAuthId: "ucid_capacity_admin",
+      roles: ["SUPER_ADMIN"]
+    },
+    userNotifications: [{
+      notificationId: "ntf_opencode_capacity",
+      type: "OPENCODE_CAPACITY_WARNING",
+      actorUserId: null,
+      title: "OpenCode 容量接近上限",
+      body: "服务器 server-114 的 OpenCode 进程使用率已达到 80%；当前单节点上限为 100。",
+      actionType: "NONE",
+      actionTargetId: "OPENCODE_CAPACITY:ctr_capacity_114",
+      status: "ACTIVE",
+      invalidationReason: null,
+      actionAvailable: false,
+      unread: true,
+      expiresAt: null,
+      readAt: null,
+      createdAt: "2026-08-24T09:00:00Z",
+      updatedAt: "2026-08-24T09:00:00Z"
+    }],
+    userNotificationUnreadCount: 1,
+    userNotificationReadRequests: notificationReadRequests
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByTestId("notification-center-trigger").click();
+  await page.getByTestId("notification-item-ntf_opencode_capacity").click();
+
+  await expect.poll(() => notificationReadRequests).toEqual(["ntf_opencode_capacity"]);
+});
+
 test("session share owner repairs historical collaborator resend attribution from audit metadata", async ({ page }) => {
   const historicalResend = {
     resendId: "rsd_collaborator_owner_view",

@@ -82,6 +82,8 @@ class XxlJobMysqlMigrationTest {
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.inactive-user-process-cleanup' and schedule_conf='0 0 2 * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
                     .isEqualTo(1);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.inactive-user-process-cleanup' and job_desc='十天未使用用户 OpenCode 进程关闭'"))
+                    .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='configuration-management.scm-git-name-sync' and schedule_conf='0 10 4 * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.git-access-inspection' and schedule_conf='0 0 0/2 * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
@@ -118,10 +120,12 @@ class XxlJobMysqlMigrationTest {
                 schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
             assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
-                    .isEqualTo(14);
+                    .isEqualTo(15);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.personal-workspace-relocation' and schedule_conf='0 0/30 * * * ? *' and trigger_next_time=0"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.inactive-user-process-cleanup' and schedule_conf='0 0 2 * * ? *'"))
+                    .isEqualTo(1);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.inactive-user-process-cleanup' and job_desc='十天未使用用户 OpenCode 进程关闭'"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.internal-model-probe' and schedule_conf='0 */5 * * * ? *'"))
                     .isEqualTo(1);
@@ -222,7 +226,7 @@ class XxlJobMysqlMigrationTest {
                 schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
             assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
-                    .isEqualTo(14);
+                    .isEqualTo(15);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key is not null"))
                     .isEqualTo(15);
         }
@@ -269,7 +273,7 @@ class XxlJobMysqlMigrationTest {
                 schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
             assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
-                    .isEqualTo(14);
+                    .isEqualTo(15);
             assertThat(singleInt(statement, "select checksum from flyway_schema_history where version='12'"))
                     .isEqualTo(expectedChecksum);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.analytics-ingestion'"))

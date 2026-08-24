@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStat
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -66,6 +67,12 @@ class InactiveOpencodeProcessCleanupServiceTest {
                 idleCoordinator,
                 stopService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    void inactivityThresholdIsTenDays() {
+        assertThat(InactiveOpencodeProcessCleanupService.INACTIVITY_THRESHOLD)
+                .isEqualTo(Duration.ofDays(10));
     }
 
     @Test

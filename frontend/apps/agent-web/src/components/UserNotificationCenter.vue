@@ -92,6 +92,7 @@ type NotificationKind =
   | 'DISPOSE_SUCCEEDED'
   | 'DISPOSE_FAILED'
   | 'DISPOSE_SUPERSEDED'
+  | 'OPENCODE_CAPACITY'
   | 'LOCAL_CLIENT_UPDATE'
   | 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE'
   | 'UNKNOWN'
@@ -103,6 +104,7 @@ function notificationKind(notification: UserNotification): NotificationKind {
   if (notification.type === 'AGENT_CONFIG_DISPOSE_SUCCEEDED' && notification.actionType === 'NONE') return 'DISPOSE_SUCCEEDED'
   if (notification.type === 'AGENT_CONFIG_DISPOSE_FAILED' && notification.actionType === 'RESTART_OWN_PROCESS') return 'DISPOSE_FAILED'
   if (notification.type === 'AGENT_CONFIG_DISPOSE_SUPERSEDED' && notification.actionType === 'NONE') return 'DISPOSE_SUPERSEDED'
+  if (notification.type === 'OPENCODE_CAPACITY_WARNING' && notification.actionType === 'NONE') return 'OPENCODE_CAPACITY'
   if (notification.type === 'LOCAL_CLIENT_UPDATE_AVAILABLE' && notification.actionType === 'LOCAL_CLIENT_UPDATE') return 'LOCAL_CLIENT_UPDATE'
   if (notification.type === 'LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE'
     && notification.actionType === 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE') return 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE'
@@ -119,7 +121,8 @@ function canOpenNotification(notification: UserNotification) {
   if (kind === 'DISPOSE_FAILED') return notification.actionAvailable
   if (kind === 'LOCAL_CLIENT_UPDATE') return parseLocalClientNotificationUpdate(notification) !== null
   if (kind === 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE') return notification.actionAvailable
-  if (kind === 'DISPOSE_PENDING' || kind === 'DISPOSE_SUCCEEDED' || kind === 'DISPOSE_SUPERSEDED') {
+  if (kind === 'DISPOSE_PENDING' || kind === 'DISPOSE_SUCCEEDED' || kind === 'DISPOSE_SUPERSEDED'
+    || kind === 'OPENCODE_CAPACITY') {
     return notification.unread
   }
   return false
@@ -166,6 +169,7 @@ function notificationStateLabel(notification: UserNotification) {
       case 'DISPOSE_SUCCEEDED': return '已更新'
       case 'DISPOSE_FAILED': return '更新失败'
       case 'DISPOSE_SUPERSEDED': return '不用处理'
+      case 'OPENCODE_CAPACITY': return '容量预警'
       case 'LOCAL_CLIENT_UPDATE': return localClientUpdateDirectionLabel(notification) ?? '版本信息不可用'
       case 'LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE': return '等待确认'
       default: return '暂不支持'
@@ -181,6 +185,7 @@ function notificationActionLabel(notification: UserNotification) {
     case 'DISPOSE_PENDING':
     case 'DISPOSE_SUCCEEDED':
     case 'DISPOSE_SUPERSEDED':
+    case 'OPENCODE_CAPACITY':
       return notification.unread ? '标记已读' : '已读'
     case 'LOCAL_CLIENT_UPDATE': {
       const direction = localClientUpdateDirectionLabel(notification)

@@ -68,6 +68,40 @@ class OpencodeProcessDomainTest {
     }
 
     @Test
+    void overCapacityRuntimeSnapshotIsAcceptedButHasNoSchedulableCapacity() {
+        OpencodeContainer overCapacity = new OpencodeContainer(
+                new OpencodeContainerId("ctr_01"),
+                new LinuxServerId("10.8.0.12"),
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                5,
+                OpencodeContainerStatus.READY,
+                NOW,
+                NOW,
+                NOW,
+                "trace_123");
+
+        assertThat(overCapacity.availableCapacity()).isZero();
+        assertThat(overCapacity.canAcceptProcess()).isFalse();
+        assertThatThrownBy(() -> new OpencodeContainer(
+                        new OpencodeContainerId("ctr_01"),
+                        new LinuxServerId("10.8.0.12"),
+                        "opencode-a",
+                        4096,
+                        4100,
+                        4,
+                        6,
+                        OpencodeContainerStatus.READY,
+                        NOW,
+                        NOW,
+                        NOW,
+                        "trace_123"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void serverProcessBaseUrlOnlyRequiresHttpUrlAndMatchingPort() {
         OpencodeServerProcess process = opencodeProcess();
 

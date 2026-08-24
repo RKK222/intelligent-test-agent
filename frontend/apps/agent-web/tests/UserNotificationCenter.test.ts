@@ -199,6 +199,24 @@ const localClientUpdateNotifications: UserNotification[] = [
   },
 ]
 
+const capacityNotification: UserNotification = {
+  notificationId: 'ntf_opencode_capacity',
+  type: 'OPENCODE_CAPACITY_WARNING',
+  actorUserId: null,
+  title: 'OpenCode 容量接近上限',
+  body: '服务器 server-114 的 OpenCode 进程使用率已达到 80%；当前单节点上限为 100。',
+  actionType: 'NONE',
+  actionTargetId: 'OPENCODE_CAPACITY:ctr_capacity_114',
+  status: 'ACTIVE',
+  invalidationReason: null,
+  actionAvailable: false,
+  unread: true,
+  expiresAt: null,
+  readAt: null,
+  createdAt: '2026-08-24T09:00:00Z',
+  updatedAt: '2026-08-24T09:00:00Z',
+}
+
 describe('UserNotificationCenter', () => {
   afterEach(() => vi.restoreAllMocks())
 
@@ -337,6 +355,22 @@ describe('UserNotificationCenter', () => {
 
     await action.trigger('click')
     expect(wrapper.emitted('open-notification')).toEqual([[localClientUpdateNotifications[0]]])
+  })
+
+  it('renders the OpenCode capacity warning as a mark-read notification', async () => {
+    const wrapper = mount(UserNotificationCenter, {
+      props: { notifications: [capacityNotification], unreadCount: 1 },
+    })
+
+    await wrapper.get('[data-testid="notification-center-trigger"]').trigger('click')
+    const action = wrapper.get('[data-testid="notification-item-ntf_opencode_capacity"]')
+    expect(action.text()).toContain('OpenCode 容量接近上限')
+    expect(action.text()).toContain('容量预警')
+    expect(action.text()).toContain('标记已读')
+    expect(action.attributes('disabled')).toBeUndefined()
+
+    await action.trigger('click')
+    expect(wrapper.emitted('open-notification')).toEqual([[capacityNotification]])
   })
 
   it('renders a lower local client target as rollback', async () => {

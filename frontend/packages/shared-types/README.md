@@ -10,7 +10,7 @@
 
 ## 主要职责
 
-- 定义通知中心 `UserNotification`、分页响应、`UserNotificationStreamUpdate` 和变化类型。通知类型包含 `SESSION_SHARED`、配置 dispose 的 `PENDING/SUCCEEDED/FAILED/SUPERSEDED` 四态以及 `LOCAL_CLIENT_UPDATE_AVAILABLE`，动作只允许服务端声明的 `actionType + actionTargetId`：`SESSION_SHARE` 映射到内部 `/s/{shareId}`，`NONE` 仅用于展示和已读，`RESTART_OWN_PROCESS` 只重启当前用户进程，`LOCAL_CLIENT_UPDATE` 只使用受控实例 ID；类型不提供任意 URL 字段。联合保留未知字符串以兼容滚动升级，前端必须失败关闭未知类型或动作。
+- 定义通知中心 `UserNotification`、分页响应、`UserNotificationStreamUpdate` 和变化类型。通知类型包含 `SESSION_SHARED`、配置 dispose 的 `PENDING/SUCCEEDED/FAILED/SUPERSEDED` 四态、`OPENCODE_CAPACITY_WARNING` 以及 `LOCAL_CLIENT_UPDATE_AVAILABLE`，动作只允许服务端声明的 `actionType + actionTargetId`：`SESSION_SHARE` 映射到内部 `/s/{shareId}`，`NONE` 仅用于展示和已读，`RESTART_OWN_PROCESS` 只重启当前用户进程，`LOCAL_CLIENT_UPDATE` 只使用受控实例 ID；容量预警只使用 `NONE`，不从内部目标键发起动作。类型不提供任意 URL 字段。联合保留未知字符串以兼容滚动升级，前端必须失败关闭未知类型或动作。
 
 - 定义本地客户端实例的 additive 自更新状态、受签名 release/artifact、全局/用户策略、rollout、attempt 和用户更新请求。旧后端缺少 `selfUpdateSupported/targetClientVersion/updateDirection/lastUpdateStatus/lastUpdateAt` 时按不支持自更新；版本方向允许 `UPDATE/ROLLBACK/SAME` 并保留未知 string 兼容。
 

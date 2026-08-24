@@ -21,9 +21,7 @@ public record OpencodeContainer(
         Instant updatedAt,
         String traceId) {
 
-    /**
-     * 校验端口范围、容量和当前进程数，确保后续调度不会选到无效容器。
-     */
+    /** 校验端口范围、配置容量和实际进程数；恢复路径允许实际运行数暂时超过配置上限。 */
     public OpencodeContainer {
         Objects.requireNonNull(containerId, "containerId must not be null");
         Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
@@ -35,8 +33,8 @@ public record OpencodeContainer(
         if (maxProcesses < 1 || maxProcesses > availablePorts) {
             throw new IllegalArgumentException("maxProcesses must be between 1 and available port count");
         }
-        if (currentProcesses < 0 || currentProcesses > maxProcesses) {
-            throw new IllegalArgumentException("currentProcesses must be between 0 and maxProcesses");
+        if (currentProcesses < 0 || currentProcesses > availablePorts) {
+            throw new IllegalArgumentException("currentProcesses must be between 0 and available port count");
         }
         Objects.requireNonNull(status, "status must not be null");
         lastHeartbeatAt = DomainValidation.requireInstant(lastHeartbeatAt, "lastHeartbeatAt");
@@ -52,7 +50,7 @@ public record OpencodeContainer(
      * 返回容器还能启动的 opencode 进程数量。
      */
     public int availableCapacity() {
-        return maxProcesses - currentProcesses;
+        return Math.max(0, maxProcesses - currentProcesses);
     }
 
     /**

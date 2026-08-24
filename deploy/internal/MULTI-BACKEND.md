@@ -1125,21 +1125,33 @@ where platform_task_key = 'workspace-management.personal-workspace-relocation';
 
 ### XXL 生产任务验收
 
-本轮 XXL V9 新增 `opencode-runtime.inactive-user-process-cleanup`，默认每天北京时间 02:00 执行。
+XXL 的 `opencode-runtime.inactive-user-process-cleanup` 默认每天北京时间 02:00 执行；V9 原始任务定义保持不变，后续 migration 只把仍使用默认值的任务名称更新为“十天未使用用户 OpenCode 进程关闭”。
 XXL 只取得全局锁并广播空 payload；每个 Java 只处理本机实际持有 manager 连接的用户进程。候选必须严格
-超过 15 天没有任何来源 Run 活动，且没有活动 Run、当天仍有效的待投递任务或扫描后新增活动；关闭后保留
+超过 10 天没有任何来源 Run 活动，且没有活动 Run、当天仍有效的待投递任务或扫描后新增活动；关闭后保留
 ACTIVE binding，用户再次使用时由公共启动程序按原归属恢复。任务不能以登录时间替代 Run 活动时间，也不能
 由入口 Java 直接控制远端 manager。
+
+### 容量预警与新增节点判定
+
+manager 每 5 秒上报单容器 `currentProcesses/maxProcesses`。已有 ACTIVE binding 恢复可能产生 101/100 一类超容量状态；Java 接受该真实心跳、保持 manager WebSocket，并把该容器可调度容量钳制为 0，因此不会继续接收首次分配。同一容器首次达到 80% 时，平台通过既有通知中心提醒全部有效超级管理员；回落到 70% 以下后关闭该轮预警，之后再次越过 80% 才重新提醒。Java 重启后的首份高位或恢复态心跳会做一次幂等收敛，避免 Redis 旧快照漏掉提醒或失效。80% 是容量评审触发线，不是自动调高 `OPENCODE_MANAGER_MAX_PROCESSES` 或自动创建节点的指令。
+
+收到预警后按以下顺序判断：
+
+1. 等最近一次北京时间 02:00 的十天闲置清理完成，再从运行管理页记录各节点业务峰值、CPU、内存、PID/FD 和磁盘指标；如果清理后回落到 70% 以下，本轮不扩容。
+2. 若节点仍在 80% 以上，只有在真实压测证明 CPU、内存、PID/FD、端口和外部模型容量均有足够余量时，才评估提高全局 `OPENCODE_MANAGER_MAX_PROCESSES`；端口池有空位不能代替承载能力验证。
+3. 满足任一条件就进入新增节点计划：十天清理后仍持续触发 80% 预警且资源余量不足以安全提高上限；按最近增长速度预测“达到 100% 的时间”短于节点采购、部署、验收周期加两周缓冲；全部现有节点同时达到 80%；或计划峰值已经超过“任意一台节点退出后，其余节点已验证安全容量之和的 80%”。最后一项只用于容量准备，不代表现有固定 binding 会自动故障迁移。
+
+首次分配的新用户只从 `currentProcesses < maxProcesses` 的在线候选中选择，并优先选择当前进程数较少的容器；若 `.114` 已满而 `.4` 未满，会分配到 `.4`，所有候选都满时才返回容量不足。已有 ACTIVE binding 的恢复仍固定原服务器和原端口，并显式使用 `bindingRecovery=true` 绕过新分配容量过滤。因此新增节点只会承接后续首次分配，不能自动削减 `.114` 的 101 个存量绑定；要给热点节点降载，必须先依赖十天闲置关闭，或另行执行带工作空间搬迁、binding 代次 CAS 和回滚方案的受控迁移，禁止直接改库。
 
 第一台 `.4` 启动后在 XXL MySQL 验收：
 
 ```sql
 select version, description, checksum, success
 from flyway_schema_history
-where version in ('7', '8', '9', '10', '11', '12')
+where version in ('7', '8', '9', '10', '11', '12', '13', '14', '20260824100401')
 order by installed_rank;
 
-select platform_task_key, schedule_conf, trigger_status
+select platform_task_key, job_desc, schedule_conf, trigger_status
 from xxl_job_info
 where platform_task_key in (
     'workspace-management.personal-workspace-relocation',
@@ -1152,7 +1164,7 @@ where platform_task_key in (
 order by platform_task_key;
 ```
 
-预期 V7-V9 保持原 checksum，V10/V11 保持既有 checksum，已执行 V12 字节与对应兼容分支一致；
+预期 V7-V9 保持原 checksum，V10/V11 保持既有 checksum，已执行 V12 字节与对应兼容分支一致，V13/V14 和 `20260824100401` 成功；闲置任务仍使用默认名称时应为“十天未使用用户 OpenCode 进程关闭”，管理员已自定义名称时保持自定义值；
 搬迁任务为 `0 0/30 * * * ? *`，闲置进程关闭为 `0 0 2 * * ? *`，内部模型探活为
 `0 */5 * * * ? *`，可观测数据清理为 `0 30 3 * * ? *`，ClickHouse 入库为 `0 * * * * ? *`，SCM Git 姓名补偿为
 `0 10 4 * * ? *`，六条均 `trigger_status=1`。任一条件不满足时

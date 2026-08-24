@@ -63,16 +63,20 @@ XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文主链扫描 `ba
 | `V6__register_app_source_cleanup_task.sql` | 注册每分钟应用源码到期清理广播任务。 |
 | `V7__register_personal_workspace_relocation_task.sql` | 注册每分钟个人工作区跨服务器搬迁广播任务。 |
 | `V8__schedule_personal_workspace_relocation_every_thirty_minutes.sql` | 保留 V7 原始字节，把既有搬迁任务 Cron 更新为每 30 分钟并触发下一次时间重算。 |
-| `V9__register_inactive_user_process_cleanup_task.sql` | 注册每天北京时间 02:00 执行的十五天未使用用户 OpenCode 进程关闭广播任务。 |
+| `V9__register_inactive_user_process_cleanup_task.sql` | 历史版本：注册每天北京时间 02:00 执行的十五天未使用用户 OpenCode 进程关闭广播任务；原始字节保持不变。 |
 | `V10__register_internal_model_probe_task.sql` | 注册每 5 分钟内部模型供应商探活。 |
 | `V11__register_internal_model_observability_retention_task.sql` | 注册每天 03:30 内部模型观测明细/汇总清理。 |
 | `V12__register_scm_git_name_sync_task.sql` | 默认主链注册每天 04:10 的 SCM Git 姓名补偿。 |
 | `migration-compat/analytics-v12-applied/V12__register_analytics_clickhouse_ingestion_task.sql` | 只解析 dev 已执行的 analytics V12 原始字节。 |
 | `V13__xxl_job_info_register_tasks_after_v12_branches.sql` | 对两套 V12 历史幂等补齐 ClickHouse 入库与 SCM Git 姓名补偿任务。 |
+| `V14__register_workspace_git_access_inspection_task.sql` | 注册每两小时工作空间 Git 权限巡检广播任务。 |
+| `V20260824100401__xxl_job_info_update_inactive_cleanup_description.sql` | 只把仍保持 V9 默认文案的闲置清理任务名称前向更新为“十天未使用用户 OpenCode 进程关闭”；不覆盖管理员自定义名称。 |
 
-V3-V13 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
+V3 到当前 HEAD 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
 
-所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V13 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
+`V20260824100401__xxl_job_info_update_inactive_cleanup_description.sql` 的原始 SHA-256 为 `4eda1bf4168f097f83357d097714cc66d83156f7a2e88d3dd60adc56c218be3a`。企业发布前必须在目标 XXL MySQL 的 `flyway_schema_history` 核对既有版本、checksum 和成功状态，再从该历史升级；未知更高版本或 checksum 必须停止发布，不得使用 `outOfOrder`、`repair` 或手工修改历史表。
+
+所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1 到当前 HEAD 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
 
 PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审计，不再产生新的 PostgreSQL scheduler 运行。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免旧 runner 删除后留下永久活动记录。XXL 运行日志独立留在 MySQL，默认保留 30 天。
 
@@ -2115,3 +2119,9 @@ SHA-256 一致。
 本地客户端最小业务关系，覆盖两类候选分页、生产 PostgreSQL `ON CONFLICT`、状态约束和重复刷新。代码回滚可以保留两表；
 旧版本不会读取或写入它们。企业发布前仍必须收集目标库 `flyway_schema_history` 并验证已部署基线到 HEAD；若目标环境已经存在
 更高版本或未知 checksum，必须停止发布并制定兼容方案，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。
+
+## PostgreSQL V20260824100444 OpenCode 容量预警通知类型
+
+`V20260824100444__user_notifications_add_opencode_capacity_warning.sql` 只前向重建 `user_notifications.type` 的既有 CHECK 约束，加入 `OPENCODE_CAPACITY_WARNING`，并同步字段注释；不新增表、索引或业务数据。新 Java 使用既有 `NONE` 动作、稳定去重键和带前缀的内部容器目标键创建超级管理员预警。旧 Java 的通知枚举不能解析新行，因此本版本禁止新旧 Java 混跑：进入维护窗口后先停止 `.4`、`.114` 两台旧 Java，再替换为同一版本并依次启动；第一台新 Java 完成 migration 前不得恢复旧 Java。
+
+原始 SHA-256 为 `c53ce7ecdd506219337b5f3af5251dbfebbb38486c3fb311d688a28febafaf4a`。真实 PostgreSQL 验证必须覆盖空库到 HEAD、已部署基线到 HEAD、约束接受新类型以及通知 MyBatis 读写；企业发布前仍须收集每套目标库完整 `flyway_schema_history` 并核对最终 JAR 内 migration 字节。未知 checksum、未知更高版本或顺序分叉必须停止发布，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。

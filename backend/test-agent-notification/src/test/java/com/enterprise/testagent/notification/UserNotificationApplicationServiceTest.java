@@ -23,6 +23,8 @@ import com.enterprise.testagent.domain.notification.UserNotificationStatus;
 import com.enterprise.testagent.domain.notification.UserNotificationType;
 import com.enterprise.testagent.domain.notification.UserNotificationView;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.sessionshare.SessionShare;
 import com.enterprise.testagent.domain.sessionshare.SessionShareId;
@@ -321,6 +323,76 @@ class UserNotificationApplicationServiceTest {
         verify(repository).markReadById(pending.notificationId(), MEMBER, NOW, "trace_dispose_read");
         assertThat(publisher.events).singleElement().satisfies(event ->
                 assertThat(event.payload().get("changeType")).isEqualTo("READ"));
+    }
+
+    @Test
+    void createsAndReactivatesDeduplicatedOpencodeCapacityWarning() {
+        OpencodeContainerId containerId = new OpencodeContainerId(
+                "ctr_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        when(repository.reactivateByDedupKeyIfChanged(any())).thenReturn(false, true);
+        when(repository.insert(any())).thenReturn(true);
+
+        service.syncOpencodeCapacityWarning(
+                MEMBER,
+                new LinuxServerId("server-114"),
+                containerId,
+                100,
+                80,
+                "trace_capacity_create");
+        service.syncOpencodeCapacityWarning(
+                MEMBER,
+                new LinuxServerId("server-114"),
+                containerId,
+                100,
+                80,
+                "trace_capacity_reactivate");
+
+        ArgumentCaptor<UserNotification> notification = ArgumentCaptor.forClass(UserNotification.class);
+        verify(repository).insert(notification.capture());
+        assertThat(notification.getValue()).satisfies(value -> {
+            assertThat(value.type()).isEqualTo(UserNotificationType.OPENCODE_CAPACITY_WARNING);
+            assertThat(value.title()).isEqualTo("OpenCode 容量接近上限");
+            assertThat(value.body()).contains("server-114", "80%", "单节点上限为 100", "十天闲置清理");
+            assertThat(value.body()).doesNotContain("用户", "端口", "PID");
+            assertThat(value.actionType()).isEqualTo(UserNotificationActionType.NONE);
+            assertThat(value.actionTargetId()).isEqualTo("OPENCODE_CAPACITY:" + containerId.value());
+            assertThat(value.dedupKey()).isEqualTo(
+                    "OPENCODE_CAPACITY:" + containerId.value() + ":" + MEMBER.value());
+        });
+        assertThat(publisher.events)
+                .extracting(event -> event.payload().get("changeType"))
+                .containsExactly("CREATED", "UPDATED");
+    }
+
+    @Test
+    void invalidatesAllCapacityWarningsForRecoveredContainer() {
+        OpencodeContainerId containerId = new OpencodeContainerId(
+                "ctr_1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        String actionTargetId = "OPENCODE_CAPACITY:" + containerId.value();
+        when(repository.findActiveRecipientsByAction(
+                UserNotificationActionType.NONE, actionTargetId, null))
+                .thenReturn(List.of(MEMBER, OTHER));
+        when(repository.invalidateActiveByAction(
+                UserNotificationActionType.NONE,
+                actionTargetId,
+                null,
+                "CAPACITY_RECOVERED",
+                "trace_capacity_recovered",
+                NOW))
+                .thenReturn(2);
+
+        service.invalidateOpencodeCapacityWarning(containerId, "trace_capacity_recovered");
+
+        verify(repository).invalidateActiveByAction(
+                UserNotificationActionType.NONE,
+                actionTargetId,
+                null,
+                "CAPACITY_RECOVERED",
+                "trace_capacity_recovered",
+                NOW);
+        assertThat(publisher.events)
+                .extracting(event -> event.payload().get("recipientUserId"))
+                .containsExactlyInAnyOrder(MEMBER.value(), OTHER.value());
     }
 
     @Test

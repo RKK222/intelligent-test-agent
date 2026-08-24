@@ -249,12 +249,12 @@ Turn/Step、TTFT、Decode 和五类 token。不得把 Trace 放入运营分析 t
 - 不直连 opencode server。
 - 不把通用业务组件堆在 app 内，必须下沉到 packages。
 - `/s/[shareId]` 必须使用平台 Session Share 授权，不得接 opencode 公网 share API；旧 Session ID 兼容入口只允许会话所属人访问。
-- 通知动作不得信任后端或页面传入任意 URL；只接受 `SESSION_SHARE`、`NONE`、`RESTART_OWN_PROCESS` 和 `LOCAL_CLIENT_UPDATE`。分享动作由页面对 `shareId` 做内部路由编码，点击前不调用通用已读接口；`NONE` 通知可计入未读并标记已读但不显示动作；`RESTART_OWN_PROCESS` 只调用当前用户重启接口；本地客户端更新只把 `actionTargetId` 作为受控实例路径参数，并从通知正文唯一的 14 位目标版本提交 `notificationId` 与 `expectedTargetVersion`，成功或冲突失败后均刷新权威通知列表。未知类型、动作或版本正文失败关闭。
+- 通知动作不得信任后端或页面传入任意 URL；只接受 `SESSION_SHARE`、`NONE`、`RESTART_OWN_PROCESS` 和 `LOCAL_CLIENT_UPDATE`。分享动作由页面对 `shareId` 做内部路由编码，点击前不调用通用已读接口；`NONE` 通知可计入未读并标记已读但不显示动作，`OPENCODE_CAPACITY_WARNING/NONE` 只展示容量预警并标记已读，不读取内部目标键执行操作；`RESTART_OWN_PROCESS` 只调用当前用户重启接口；本地客户端更新只把 `actionTargetId` 作为受控实例路径参数，并从通知正文唯一的 14 位目标版本提交 `notificationId` 与 `expectedTargetVersion`，成功或冲突失败后均刷新权威通知列表。未知类型、动作或版本正文失败关闭。
 - 配置更新通知按已知类型统一展示“正在更新、更新成功、更新失败、本次更新已结束”等用户文案；即使历史记录仍保存旧的 Agent、dispose 或进程术语，页面也不再直接展示这些技术细节。
 
 ## 验证
 
-`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、标记已读、失败重启动作、本地客户端更新/回退文案、异常版本正文的失败关闭、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/local-client-notification-update.test.ts` 覆盖通知原始目标版本请求、成功刷新以及 409 冲突反馈后的权威刷新；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸和弱化后的备用链接入口；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单服务端重启、超管关闭后状态隐藏但重启入口保留，以及固定分享工作台隐藏。
+`tests/UserNotificationCenter.test.ts` 覆盖铃铛、未读角标、已读/未读/失效图标、筛选、配置 dispose 状态、容量预警标记已读、失败重启动作、本地客户端更新/回退文案、异常版本正文的失败关闭、未知动作保护、分页、新标签页和键盘/焦点行为；`tests/local-client-notification-update.test.ts` 覆盖通知原始目标版本请求、成功刷新以及 409 冲突反馈后的权威刷新；`tests/process-restart.test.ts` 覆盖活动 Run 冲突识别和二次确认；`tests/workbench.spec.ts` 覆盖分享弹框双向拉伸、弱化后的备用链接入口和容量预警既有已读链路；`tests/FigmaShell.test.ts` 固化通知入口位于手册与资源/头像区之间、头像菜单服务端重启、超管关闭后状态隐藏但重启入口保留，以及固定分享工作台隐藏。
 
 `tests/xxl-job-management-panel.test.ts` 覆盖隐藏表单 POST/URL 无票据、刷新重签、403/503、票据或平台会话失效、登出清空 iframe，以及横向 shell 装饰幂等、只读账号、错误页跳过和菜单滚动；`tests/support-access-shortcut.test.ts` 覆盖三击 Shift、两秒窗口、左右 Shift 兼容、捕获阶段注册、其它按键打断、长按去重和角色失效重置，`tests/support-access-panel.test.ts` 覆盖唯一排查单号请求、重复触发/撤销后换号、登录资料延迟到达、迟到响应隔离、归档筛选、离线工作区禁用、Session/Trace 上下文以及 assistant text part 通过首页时间线展示，`tests/scheduler-management-panel.test.ts` 覆盖系统管理导航、问题排查全局手势请求/激活代次与 actor/target 身份提示，以及公共配置卡死 rollout 的分支/原因/二次确认/纠错请求回归。
 

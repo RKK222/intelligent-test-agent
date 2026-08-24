@@ -32,6 +32,7 @@
 10. 涉及 opencode server 启动、重启后拉起、端口复用或启动成功状态回写时，必须复用 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService`。业务入口不得直接调用 `OpencodeProcessManagerGateway.startProcess()` 后自行保存进程、用户 binding、Redis heartbeat 或兼容 `ExecutionNode`；启动成功必须以公共启动服务完成 manager state/PID 与 opencode HTTP health 检查为准。
 11. 涉及 opencode server 停止、停止后状态回写或运行管理停止命令时，必须复用 `test-agent-opencode-runtime` 的 `OpencodeProcessStopService`。业务入口不得直接调用 `OpencodeProcessManagerGateway.stopProcess()` 后自行判定成功或保存 `STOPPED`；平台已有进程记录时，停止成功必须以公共停止服务完成 manager stop 和停止后 health 不健康确认为准。
 12. 涉及 opencode server 状态查询、健康探测、进程状态回写或 Redis heartbeat 刷新时，必须复用 `test-agent-opencode-runtime` 的 `OpencodeProcessStatusQueryService`。业务入口不得直接调用 `OpencodeProcessManagerGateway.checkHealth()` 后自行判断 `RUNNING/STOPPED/UNHEALTHY/FAILED`；进程不存在、运行中和健康检查异常的查询语义由公共查询服务统一映射。
+13. manager 的 `currentProcesses` 是实际运行事实，`maxProcesses` 是新调度上限。ACTIVE binding 原端口恢复允许前者暂时大于后者；Java 必须接受并保留该心跳与控制连接，把可调度容量钳制为 0，禁止因超容量事实断开 manager，也禁止把负容量用于候选选择。
 
 ## DTO 与模型
 
