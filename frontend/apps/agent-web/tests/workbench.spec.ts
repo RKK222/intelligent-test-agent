@@ -10528,6 +10528,50 @@ test("workspace cascade menu +新增版本 dialog opens with yyyy年M月 label",
   await expect(dialog.getByRole("button", { name: "确定" })).toBeDisabled();
 });
 
+test("header version menu opens the shared new-version dialog", async ({ page }) => {
+  await mockBackendApi(page, {
+    workspaceTemplates: {
+      app_gcms: [
+        {
+          workspaceId: "awp_main",
+          workspaceName: "F-GCMS 主服务",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          defaultBranch: "main",
+          standard: true,
+          createdAt: "2026-06-24T00:00:00Z",
+          updatedAt: "2026-06-24T00:00:00Z"
+        }
+      ]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_main": [{
+        versionId: "awv_existing",
+        applicationWorkspaceId: "awp_main",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: "20260801",
+        branch: "feature_testagent_20260801",
+        status: "ACTIVE",
+        createdAt: "2026-08-01T00:00:00Z",
+        updatedAt: "2026-08-01T00:00:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByTestId("header-version-selector").click();
+  const createEntry = page.getByTestId("header-create-version");
+  await expect(createEntry).toBeVisible();
+  await expect(createEntry).toHaveAttribute("aria-label", "为F-GCMS 主服务新增版本");
+  await createEntry.click();
+
+  const dialog = page.locator(".el-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("选择日期（格式 yyyyMMdd）")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "确定" })).toBeDisabled();
+});
+
 test("workspace cascade submenu shifts up when it would overflow the viewport bottom", async ({ page, isMobile }) => {
   test.skip(isMobile, "viewport math is desktop-specific in this mock");
   // 构造一个触发 li 接近视口底部的场景：模板多到面板能填满视口。

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ArrowLeftRight, CodeXml, FileSearch, FlaskConical, LibraryBig, LocateFixed, PencilLine, Plus, Save, ServerCog, SquarePen } from "lucide-vue-next";
-import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
+import { ElTooltip, ElMessage } from "element-plus";
 import type {
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
@@ -9,6 +9,7 @@ import type {
 } from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import { copyTextToClipboard } from "@test-agent/ui-kit";
+import CreateWorkspaceVersionDialog from "./CreateWorkspaceVersionDialog.vue";
 import type { SelectedWorkspaceKind } from "./app-source-workspace";
 import { normalizePhysicalAbsolutePath } from "./physical-path";
 
@@ -223,32 +224,14 @@ let cascadePosRafId: number | null = null;
 let cascadeSubmenuCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ===== 「+新增版本」弹窗状态 =====
-// createVersionTarget: 当前弹窗操作的模板；createVersionValue: el-date-picker 选中的 yyyyMMdd 字符串。
-// createVersionOpen 控制 ElDialog 显隐；与两级菜单的 hover 状态解耦，避免鼠标移开后弹窗被父级 v-if 卸载。
+// 顶部与左下角共用 CreateWorkspaceVersionDialog；这里仅保存当前入口选中的模板和显隐状态。
 const api = inject<BackendApiClient>("api")!;
 const createVersionTarget = ref<AppWorkspaceTemplate | null>(null);
-const createVersionValue = ref<string>("");
 const createVersionOpen = ref(false);
-const createVersionBranch = ref<string>("");
-const createVersionBranches = ref<string[]>([]);
-const createVersionLoadingBranches = ref(false);
 
 function openCreateVersionDialog(template: AppWorkspaceTemplate) {
   if ((props.workspaceKind && props.workspaceKind !== "MANAGED") || workspaceGitAccessBlocked(template)) return;
   createVersionTarget.value = template;
-  createVersionValue.value = "";
-  createVersionBranch.value = "";
-  createVersionBranches.value = [];
-  // 如果是非标准库，加载分支列表
-  if (template.standard === false && template.repositoryId) {
-    createVersionLoadingBranches.value = true;
-    api.listRepositoryBranches(template.repositoryId).then((branches: string[]) => {
-      createVersionBranches.value = branches;
-      createVersionBranch.value = branches[0] ?? "";
-    }).finally(() => {
-      createVersionLoadingBranches.value = false;
-    });
-  }
   // 关闭两级菜单，避免弹窗被外层 click outside 监听立即关掉。
   closeMenu();
   // 下一帧再开 dialog：保证前一次 closeMenu() 触发的 v-if 卸载先完成，避免和 dialog 共存出现 stacking 问题。
@@ -256,25 +239,6 @@ function openCreateVersionDialog(template: AppWorkspaceTemplate) {
     if (props.workspaceKind && props.workspaceKind !== "MANAGED") return;
     createVersionOpen.value = true;
   });
-}
-
-function confirmCreateVersion() {
-  const target = createVersionTarget.value;
-  if ((props.workspaceKind && props.workspaceKind !== "MANAGED") || !target || !createVersionValue.value) return;
-  // value-format 是 "YYYYMMDD"，直接使用日期字符串作为版本号（yyyyMMdd）。
-  // 非标准库需要同时传递分支。
-  const version = createVersionValue.value.replaceAll("-", "");
-  const isNonStandard = target.standard === false;
-  emit("create-version", {
-    template: target,
-    version,
-    branch: isNonStandard ? createVersionBranch.value || undefined : undefined
-  });
-  createVersionOpen.value = false;
-}
-
-function cancelCreateVersion() {
-  createVersionOpen.value = false;
 }
 
 watch(() => props.workspaceKind, (workspaceKind) => {
@@ -946,68 +910,13 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
       </ElTooltip>
     </div>
   </footer>
-  <!--
-    「+新增版本」弹窗：使用 el-dialog 居中显示，与两级菜单 hover 状态解耦。
-    时间选择器 type="date" + format="YYYY-MM-DD" + value-format="YYYYMMDD"：
-    标准库直接选日期，版本号为 yyyyMMdd。
-    非标准库：先选分支，再选日期，版本号为 yyyyMMdd，分支名一并传给后端。
-  -->
-  <ElDialog
+  <CreateWorkspaceVersionDialog
     v-model="createVersionOpen"
-    :title="`为「${createVersionTarget?.workspaceName ?? ''}」新增版本`"
-    width="420px"
-    :close-on-click-modal="false"
-    @close="cancelCreateVersion"
-  >
-    <div class="ta-workbench-create-version">
-      <!-- 非标准库：先选分支 -->
-      <template v-if="createVersionTarget?.standard === false">
-        <label class="ta-workbench-create-version-label">选择分支</label>
-        <el-select
-          v-model="createVersionBranch"
-          :loading="createVersionLoadingBranches"
-          placeholder="请先选择分支"
-          filterable
-          style="width: 100%"
-        >
-          <el-option
-            v-for="branch in createVersionBranches"
-            :key="branch"
-            :label="branch"
-            :value="branch"
-          />
-        </el-select>
-      </template>
-      <label class="ta-workbench-create-version-label">选择日期（格式 yyyyMMdd）</label>
-      <ElDatePicker
-        v-model="createVersionValue"
-        type="date"
-        format="YYYY-MM-DD"
-        value-format="YYYYMMDD"
-        placeholder="请选择日期"
-        style="width: 100%"
-      />
-      <p class="ta-workbench-create-version-hint">提交后会在远端创建对应的工作空间版本。</p>
-    </div>
-    <template #footer>
-      <button
-        type="button"
-        class="ta-workbench-create-version-cancel"
-        :disabled="creatingVersion"
-        @click="cancelCreateVersion"
-      >
-        取消
-      </button>
-      <button
-        type="button"
-        class="ta-workbench-create-version-confirm"
-        :disabled="!createVersionValue || creatingVersion || (createVersionTarget?.standard === false && !createVersionBranch)"
-        @click="confirmCreateVersion"
-      >
-        {{ creatingVersion ? "创建中…" : "确定" }}
-      </button>
-    </template>
-  </ElDialog>
+    :template="createVersionTarget"
+    :creating="creatingVersion"
+    :disabled="Boolean(workspaceKind && workspaceKind !== 'MANAGED')"
+    @submit="emit('create-version', $event)"
+  />
 </template>
 
 <style scoped>
@@ -1742,63 +1651,4 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
   color: inherit;
 }
 
-/*
-  「+新增版本」弹窗内容：label + 时间选择器 + hint。
-  按钮用 plain 风格，避免与 el-button 默认 primary 撞色。
-*/
-.ta-workbench-create-version {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ta-workbench-create-version-label {
-  font-size: 12px;
-  color: #555;
-}
-
-.ta-workbench-create-version-hint {
-  font-size: 11px;
-  color: #999;
-  margin: 0;
-}
-
-.ta-workbench-create-version-cancel,
-.ta-workbench-create-version-confirm {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 28px;
-  padding: 0 14px;
-  border-radius: 6px;
-  border: 0.8px solid #dfdfdf;
-  background: #fff;
-  color: #333;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
-}
-
-.ta-workbench-create-version-confirm {
-  background: #18181b;
-  border-color: #18181b;
-  color: #fff;
-  margin-left: 8px;
-}
-
-.ta-workbench-create-version-cancel:hover:not(:disabled) {
-  background: #f5f5f5;
-  border-color: #b5b5b5;
-}
-
-.ta-workbench-create-version-confirm:hover:not(:disabled) {
-  background: #000;
-}
-
-.ta-workbench-create-version-cancel:disabled,
-.ta-workbench-create-version-confirm:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
 </style>

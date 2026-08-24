@@ -26,6 +26,7 @@ declare module 'vue' {
     ChatContextAttachmentList: typeof import('./src/components/ChatContextAttachmentList.vue')['default']
     ChatContextPreviewDrawer: typeof import('./src/components/ChatContextPreviewDrawer.vue')['default']
     ConfigurationManagementPanel: typeof import('./src/components/system/ConfigurationManagementPanel.vue')['default']
+    CreateWorkspaceVersionDialog: typeof import('./src/components/CreateWorkspaceVersionDialog.vue')['default']
     EditorPane: typeof import('./src/components/EditorPane.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAutocomplete: typeof import('element-plus/es')['ElAutocomplete']

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { DOMWrapper, mount } from "@vue/test-utils";
 import type { OpencodeEndpoint } from "@test-agent/shared-types";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import CreateWorkspaceVersionDialog from "../src/components/CreateWorkspaceVersionDialog.vue";
 import FigmaShell from "../src/components/FigmaShell.vue";
 
 const figmaShellSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/components/FigmaShell.vue"), "utf8");
@@ -1138,6 +1139,54 @@ describe("FigmaShell", () => {
     } as any);
     expect(workspaceButton.text()).toContain("待加载空间");
     expect(versionButton.text()).toContain("20260731");
+  });
+
+  it("creates a version from the header through the shared workspace-version dialog", async () => {
+    const template = {
+      workspaceId: "workspace-a",
+      appId: "app-a",
+      workspaceName: "核心服务",
+      repositoryId: "repo-a",
+      repositoryName: "核心服务版本库",
+      directoryPath: "services/core",
+      branch: "main",
+      enabled: true,
+      standard: true,
+      createdAt: "2026-08-24T00:00:00Z",
+      updatedAt: "2026-08-24T00:00:00Z",
+      versions: [{ versionId: "version-a", version: "20260801", branch: "feature_testagent_20260801" }]
+    };
+    const wrapper = mountShell({
+      attachTo: document.body,
+      global: { provide: { api: { listRepositoryBranches: vi.fn() } } },
+      props: {
+        appTemplates: [template],
+        selectedWorkspaceTemplateId: template.workspaceId,
+        selectedVersionId: "version-a",
+        workspaceKind: "MANAGED"
+      } as any
+    });
+
+    await wrapper.get('[data-testid="header-version-selector"]').trigger("click");
+    const createEntry = wrapper.get('[data-testid="header-create-version"]');
+    expect(createEntry.attributes("aria-label")).toBe("为核心服务新增版本");
+    await createEntry.trigger("mousedown");
+
+    const dialog = wrapper.getComponent(CreateWorkspaceVersionDialog);
+    expect(dialog.props("modelValue")).toBe(true);
+    expect(dialog.props("template")).toEqual(template);
+    const dialogState = (dialog.vm.$ as unknown as { setupState: Record<string, unknown> }).setupState as {
+      versionValue: string;
+      confirmCreateVersion: () => void;
+    };
+    dialogState.versionValue = "20260824";
+    dialogState.confirmCreateVersion();
+
+    expect(wrapper.emitted("create-version")?.[0]?.[0]).toEqual({
+      template,
+      version: "20260824",
+      branch: undefined
+    });
   });
 
   it("keeps automation repositories out of the header primary workspace menu", async () => {

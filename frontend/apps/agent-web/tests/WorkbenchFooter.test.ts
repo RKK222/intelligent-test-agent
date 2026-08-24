@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppSourceRepositorySummary } from "@test-agent/shared-types";
+import CreateWorkspaceVersionDialog from "../src/components/CreateWorkspaceVersionDialog.vue";
 import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
 
 describe("WorkbenchFooter", () => {
@@ -365,15 +366,18 @@ describe("WorkbenchFooter", () => {
 
     const setupState = (wrapper.vm.$ as unknown as { setupState: Record<string, unknown> }).setupState as {
       openCreateVersionDialog: (value: typeof template) => void;
-      confirmCreateVersion: () => void;
       createVersionOpen: boolean;
-      createVersionValue: string;
     };
     setupState.openCreateVersionDialog(template);
-    setupState.createVersionValue = "20260728";
     await wrapper.vm.$nextTick();
     expect(setupState.createVersionOpen).toBe(true);
-    const staleConfirm = setupState.confirmCreateVersion;
+    const dialog = wrapper.getComponent(CreateWorkspaceVersionDialog);
+    const dialogState = (dialog.vm.$ as unknown as { setupState: Record<string, unknown> }).setupState as {
+      versionValue: string;
+      confirmCreateVersion: () => void;
+    };
+    dialogState.versionValue = "20260728";
+    const staleConfirm = dialogState.confirmCreateVersion;
 
     await wrapper.setProps({ workspaceKind: "APP_SOURCE" });
 

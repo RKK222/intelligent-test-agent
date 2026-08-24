@@ -13849,3 +13849,26 @@
 
 - 设置页再次加载目录树时会读取远端所选分支的最新提交，无需等待一小时或手工删除缓存；保存后工作空间名称保持用户填写值。
 - HTTP 路径和响应结构不变，不涉及 RunEvent/SSE、数据库、SQL、Flyway、部署节点、强制配置、generated SDK、OpenCode 只读源码或 `.env*`。
+
+## 2026-08-24 - 补齐顶部新增工作空间版本入口
+
+### Why
+
+- 工作台左下角已经可以新增应用工作空间版本，但顶部版本菜单只能选择既有版本，用户在主要操作路径中找不到同等能力。
+
+### What
+
+- 提取 `CreateWorkspaceVersionDialog.vue`，让顶部版本菜单和左下角两级菜单复用同一日期/分支表单；非标准仓库的分支加载增加请求代次隔离，避免关闭或切换工作空间后的迟到响应污染下一次打开。
+- 顶部版本菜单新增“新增版本”入口，提交继续进入 `AgentWorkbench.handleCreateVersion`，复用既有进程检查、版本创建、缓存失效、默认个人 worktree 准备和版本切换链路。
+- 补充共享弹窗、顶部入口组件测试和 Chromium 工作台回归，并同步前端总览、包说明、前端规范、模块图、HTTP API 说明和内置用户手册。
+
+### How
+
+- agent-web 定向 Vitest 3 个文件 89 项通过；此前误触发的 frontend 全量 Vitest 151 个文件通过，2216 passed / 1 skipped；agent-web 类型检查通过。
+- Chromium 定向 Playwright 1 项通过；前端生产构建（用户手册与 agent-web）通过，只有既有大 chunk/动态导入提示；`git diff --check` 通过。
+- 使用 `corepack pnpm exec vite --mode localhost --host 127.0.0.1 --port 4188` 启动真实前端，`http://127.0.0.1:4188/` 返回 HTTP 200。
+
+### Result
+
+- 选择测试工作空间后，顶部版本菜单即使暂无版本也会显示“新增版本”，与左下角入口使用完全相同的创建行为。
+- 本次不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、依赖、部署节点、安全协议或兼容性契约；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。

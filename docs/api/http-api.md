@@ -1998,7 +1998,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 - 测试工作空间鼠标 hover 时仍按需加载版本；自动化配置在工作台“引用配置 → 自动化代码库”展示，管理员保存唯一当前分支、目录和描述，普通成员只读查看当前配置与服务器状态。
 - 点击版本或提交新增版本时先检查当前用户 TestAgent 专属进程是否 READY；只有强状态明确为 `NEEDS_INITIALIZATION` 且 `initializable=true` 才弹初始化/启动确认框，确认后复用既有进度弹窗，初始化完成后提示用户重新执行原操作。状态仍在查询、明确 `UNAVAILABLE`，或强状态为 READY 但弱健康尚未通过时不提供初始化按钮，只提示等待或当前不可用并刷新状态。在进程真正就绪之前不调用 Git 预检、版本创建或 default ensure，也不提前失效当前会话交互。进程就绪后，点击版本先调用 `GET /workspace-versions/{versionId}/git-access` 做只读权限预检；只有 `accessible=true` 才调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好并触发工作台切换。无仓库权限时前端展示对应版本库名称和申请指引，不创建 worktree。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
 - 当前版本匹配规则只使用服务端稳定身份：优先使用最近工作区返回的 `versionId`，旧数据回退时仅按 `runtimeWorkspace.workspaceId` 精确匹配；禁止用根路径匹配。
-- 测试工作空间的第二级版本菜单底部固定一行「+新增版本」：点击后使用日期选择器创建版本，成功后失效 `versionsByTemplateId` 缓存并按原流程切换。自动化代码库不进入该菜单，也不创建日期版本；保存应用自动化引用配置后由 generation 同步和 CAS 激活整体生效。
+- 测试工作空间的顶部版本菜单和左下角第二级版本菜单都提供「新增版本」：两处复用同一日期/分支弹窗并统一调用现有 `POST .../versions` 链路，成功后失效 `versionsByTemplateId` 缓存并按原流程切换。自动化代码库不进入该菜单，也不创建日期版本；保存应用自动化引用配置后由 generation 同步和 CAS 激活整体生效。
 
 应用级"默认工作空间"解析规则（前端 `handleSelectApp` + `pickDefaultWorkspaceForApp`）：
 
