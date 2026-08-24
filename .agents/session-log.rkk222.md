@@ -13803,3 +13803,27 @@
 - 能力库 Skill 页面重新展示公共 Git Skill；skillmarket 筛选仍发送 `source=SKILLHUB`，不会造成 API 或旧客户端不兼容。
 - 本机公共 Git 快照对账仍记录既有分叉：数据库提交 `6fe30ab...` 与本地提交 `81605f2...` 不构成快进，因此本次展示的是数据库已索引公共 Skill；后续公共仓库新增/删除仍需先处理该 Git 历史分叉才能进入最新快照。
 - 本次不新增 HTTP 路径、RunEvent/SSE、数据库、SQL、Flyway、部署节点或强制配置，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-24 - 重打最新 release 企业增量包并补齐客户端首次安装配置
+
+### Why
+
+- 用户要求基于当前最新 `release` 重新打企业增量包，并明确要在麒麟普通用户机器上清空既有用户级客户端后，从企业域名重新下载完成首次安装验收。
+- 初次封包发现客户端目录仍保留两个历史 release，导致内层 ZIP 约 966 MiB；最终节点包复核又发现旧节点配置没有固定携带客户端 catalog 下载地址、路径和可信 Nginx 地址，部署后可能影响版本同步和首次接入验收。
+
+### What
+
+- 最终增量包包含当前已提交的 Trace 首屏语义 Span/正文懒加载、思维导图特殊字符、SkillHub 预览与创建人展示、公共 Skill 恢复，以及客户端 FlatLaf 蓝灰主题和无 sudo 用户级安装脚本。
+- 客户端生成不可变版本 `20260824185203`，企业公共能力继续固定提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`，为 8 Agent / 16 Skill / 8 Tool；分发目录和 catalog 只保留本轮版本，不携带 `20260824155652/20260824170822`。
+- 复用 `package-two-backend-complete.sh` 既有配置归一函数，为 `.4/.114` 节点包补齐 catalog 下载地址、`catalog.json` 路径和可信 `.2` Nginx 地址；`deploy-multi-backend-node.sh` 增加对应失败关闭校验，并同步多后台部署文档。
+
+### How
+
+- 后端正式 Maven 构建、Spring Bean 构造器门禁、前端 VitePress/TypeScript/production build、所有受保护 PostgreSQL/ClickHouse/XXL Flyway 最终 JAR 字节校验和内层 `--validate-only` 均通过；本轮相对上一企业包没有新增 migration。
+- `local-opencode-client-package-test.sh` 通过，覆盖空安装根下载、签名校验、运行时安装、接入、用户启动器、user systemd 和桌面入口；最终节点包同时验证 `.4/.114` 的 TCDS、SkillHub、catalog 和 trusted proxy 配置。
+- worker runtime 与 toolbox 均为 `reuse`，LobeHub/memory 为 `disabled`，没有重复携带 worker/programs、工具箱、独立 ClickHouse/Mem0/BGE/pgvector/Python 制品；内外层 ZIP CRC、嵌套 SHA 和 staging 目录复制后 SHA 均通过。
+
+### Result
+
+- 内层 `test-agent-internal-release.zip` SHA-256 为 `8ffdc3d5ebfc951d7d40d54fa711ee73c8aede41f239c8b0feb79a210bb877b1`；固定外层 `test-agent-two-backend-complete.zip` SHA-256 为 `e438921189deff29e5ed136dff418827f1a4b9482392453f5d28cac9f4bcecaa`，已复制到 `~/Desktop/mimoagent/0709` 并复验。
+- 企业 `.4/.114/.2` 尚未执行实际部署，客户端真实麒麟桌面、企业域名下载、首次输入 Client Key、在线状态及本地工作区会话仍需现场验收；工作区并行出现的配置管理和前端设置未提交改动没有进入本包，也未被本次提交暂存。

@@ -691,7 +691,14 @@ normalize_backend_node_archive() {
   replace_or_append_env_value "${backend_env}" \
     TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64 \
     "${LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64}"
+  replace_or_append_env_value "${backend_env}" \
+    TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL \
+    'http://122.233.30.2/downloads/local-opencode-client/'
+  replace_or_append_env_value "${backend_env}" \
+    TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH catalog.json
   replace_or_append_env_value "${backend_env}" TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL true
+  replace_or_append_env_value "${backend_env}" \
+    TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES 122.233.30.2
   replace_or_append_env_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   replace_or_append_env_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     'http://tcds-prod.sdc.icbc:9080'
@@ -783,6 +790,9 @@ validate_mysql_cluster_config() {
     TEST_AGENT_XXL_JOB_MYSQL_PASSWORD TEST_AGENT_XXL_JOB_ACCESS_TOKEN \
     TEST_AGENT_XXL_JOB_COOKIE_SECURE \
     TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL \
+    TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL \
+    TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH \
+    TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES \
     TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64; do
     [[ "$(grep -c "^${key}=" "${backend_4}" || true)" -eq 1 \
       && "$(grep -c "^${key}=" "${backend_114}" || true)" -eq 1 ]] || {
@@ -798,6 +808,12 @@ validate_mysql_cluster_config() {
   grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_114}"
   grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true' "${backend_4}"
   grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true' "${backend_114}"
+  grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/' "${backend_4}"
+  grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/' "${backend_114}"
+  grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json' "${backend_4}"
+  grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json' "${backend_114}"
+  grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2' "${backend_4}"
+  grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2' "${backend_114}"
   backend_4_value="$(sed -n \
     's/^TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=//p' \
     "${backend_4}")"

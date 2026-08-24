@@ -287,6 +287,12 @@ TEST_AGENT_SKILLHUB_REQUEST_TIMEOUT=30s
 TEST_AGENT_SKILLHUB_SYNC_INITIAL_DELAY=10s
 TEST_AGENT_SKILLHUB_SYNC_DELAY=10m
 
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=REPLACE_ORGANIZATION_LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json
+TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true
+TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2
+
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 TEST_AGENT_API_TOKEN=
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
@@ -363,6 +369,12 @@ TEST_AGENT_SKILLHUB_CONNECT_TIMEOUT=10s
 TEST_AGENT_SKILLHUB_REQUEST_TIMEOUT=30s
 TEST_AGENT_SKILLHUB_SYNC_INITIAL_DELAY=10s
 TEST_AGENT_SKILLHUB_SYNC_DELAY=10m
+
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=REPLACE_ORGANIZATION_LOCAL_CLIENT_SIGNING_PUBLIC_KEY_BASE64
+TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json
+TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true
+TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 TEST_AGENT_API_TOKEN=
@@ -541,7 +553,7 @@ bash /data/testagent/deploy/internal/configure-nginx.sh \
 
 预期输出 `backend count: 2`、`server route count: 2`。正式安装必须使用本次发布包中的前端部署入口；它会更新前端和部署脚本、渲染候选配置、执行实体 Nginx `-t/-T` 并 reload，失败自动回滚：
 
-若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定站点配置：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，写入 `.4/.114` 两组工具 upstream；两个后台写入本轮组织客户端签名公钥，补齐 HTTP Cookie、大文件预览/分片参数、固定 worker 端口池、SkillHub 测试环境地址和启用开关，以及已部署 ClickHouse `122.233.30.147:8123`、Mem0 VIP `122.233.30.160:18888` 的地址和启用开关，并分别生成绑定本机 IP 的 `toolbox.env`。客户端私钥始终只留在 Mac，不进入节点包。CK/Mem0/BGE/pgvector 镜像不进入平台增量包，也不会重启这些数据面容器。源敏感节点包和其中的密码/token 不会被修改或输出；旧节点包缺少 SkillHub Access Key、ClickHouse 密码、Mem0 service key 或模型网关 HMAC 时，包内只写目标机继承标记，`deploy-backend-node.sh` 在覆盖配置前从本机已安装 `backend.env` 原样继承，缺失、重复或长度不合格会先失败。同一键重复定义时封装直接失败，不能继续交付。
+若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定站点配置：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，写入 `.4/.114` 两组工具 upstream；两个后台写入本轮组织客户端签名公钥、版本 catalog 下载地址/路径和可信 Nginx 地址，补齐 HTTP Cookie、大文件预览/分片参数、固定 worker 端口池、SkillHub 测试环境地址和启用开关，以及已部署 ClickHouse `122.233.30.147:8123`、Mem0 VIP `122.233.30.160:18888` 的地址和启用开关，并分别生成绑定本机 IP 的 `toolbox.env`。客户端私钥始终只留在 Mac，不进入节点包。CK/Mem0/BGE/pgvector 镜像不进入平台增量包，也不会重启这些数据面容器。源敏感节点包和其中的密码/token 不会被修改或输出；旧节点包缺少 SkillHub Access Key、ClickHouse 密码、Mem0 service key 或模型网关 HMAC 时，包内只写目标机继承标记，`deploy-backend-node.sh` 在覆盖配置前从本机已安装 `backend.env` 原样继承，缺失、重复或长度不合格会先失败。同一键重复定义时封装直接失败，不能继续交付。
 
 ```bash
 bash /tmp/deploy-internal-frontend.sh \

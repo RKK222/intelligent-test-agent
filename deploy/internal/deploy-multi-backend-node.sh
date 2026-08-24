@@ -277,6 +277,15 @@ validate_backend_config() {
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_ADMIN_PORT 18080
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_EXECUTOR_PORT 9999
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
+  require_exact_value "${backend_env}" TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL \
+    http://122.233.30.2/downloads/local-opencode-client/
+  require_nonempty_value "${backend_env}" \
+    TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64
+  require_exact_value "${backend_env}" TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH \
+    catalog.json
+  require_exact_value "${backend_env}" TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL true
+  require_exact_value "${backend_env}" TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES \
+    122.233.30.2
   require_exact_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     http://tcds-prod.sdc.icbc:9080
   require_exact_value "${backend_env}" TEST_AGENT_SKILLHUB_ENABLED true
