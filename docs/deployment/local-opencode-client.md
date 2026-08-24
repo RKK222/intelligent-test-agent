@@ -4,6 +4,8 @@
 
 本交付仅支持麒麟 Linux aarch64/arm64 + glibc 的已登录用户，不支持 macOS、Windows、非 glibc 系统、开机未登录即运行或稳定 Shell 自更新。OpenCode 固定为 1.18.4。每个 release 使用北京时间 yyyyMMddHHmmss 的 14 位版本；releases/<RELEASE_VERSION>/ 中的 JAR、JDK、OpenCode、manifest 及其签名都是不可变制品，不能原地覆盖。
 
+当前企业入口固定为 `http://mimo.sdc.cs.icbc:9996`，因此客户端控制连接为同域 `ws://`，必须在客户端包和两台 Java 的 `backend.env` 中同时显式开启明文控制例外。该例外只适用于已批准的可信内网；入口升级 HTTPS 后，客户端 URL 改为 `https://...`，并把前后台明文开关同时恢复为 `false`。
+
 交付路径固定为：外网 Mac 构建和签名 → U 盘只转运生成包 → 企业内部中转机 ~/Desktop/mimoagent/0709 校验并 scp → .4、.114 后台配置 → .2 前端 Nginx 发布 → 麒麟用户安装与接入。中转机不得创建或使用 /data/0709；只有目标节点使用自己的 /data/0709 接收文件。
 
 文中 <RELEASE_VERSION> 必须替换为同一个已批准的 14 位版本，例如 20260820183000；<部署账号> 必须替换为目标节点的实际 SSH 账号。任何一步命令非零退出、摘要不匹配、文件不存在、服务不健康或页面状态异常时，立即停止，不要继续下一台机器，也不要用 repair、outOfOrder、覆盖旧 release 或重新输入/传回 Client key 来绕过问题。
@@ -25,9 +27,10 @@ test -z "$(git diff --name-only --diff-filter=U)"
 
 ~~~bash
 export TEST_AGENT_LOCAL_CLIENT_VERSION=<RELEASE_VERSION>
-export TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
-export TEST_AGENT_LOCAL_CLIENT_SERVER_URL=https://122.233.30.2
-export TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY=/secure/local-client-signing-private.pem
+export TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL=http://mimo.sdc.cs.icbc:9996/downloads/local-opencode-client/
+export TEST_AGENT_LOCAL_CLIENT_SERVER_URL=http://mimo.sdc.cs.icbc:9996
+export TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true
+export TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY=/Users/kaka/Desktop/intelligent-test-agent/.secure/local-client-signing-private.pem
 export TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE=/secure/input/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.9_10.tar.gz
 export TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE=/secure/input/opencode-linux-arm64.tar.gz
 export TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT=<PUBLIC_GIT_COMMIT>
@@ -110,7 +113,7 @@ sudoedit /data/testagent/config/backend.env
 TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
 TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=<完整公钥_PEM_的单行_Base64>
 TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json
-TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=false
+TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true
 TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2
 ~~~
 
@@ -119,7 +122,7 @@ TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2
 ~~~bash
 sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/' /data/testagent/config/backend.env
 sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json' /data/testagent/config/backend.env
-sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=false' /data/testagent/config/backend.env
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true' /data/testagent/config/backend.env
 sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2' /data/testagent/config/backend.env
 sudo awk -F= '$1 == "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64" && $2 != "" && $2 !~ /^REPLACE_/ { print "local-client signing public key configured" }' /data/testagent/config/backend.env
 sudo systemctl restart test-agent-backend
@@ -143,7 +146,7 @@ sudoedit /data/testagent/config/backend.env
 TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
 TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=<完整公钥_PEM_的单行_Base64>
 TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json
-TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=false
+TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true
 TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2
 ~~~
 
@@ -152,7 +155,7 @@ TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2
 ~~~bash
 sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/' /data/testagent/config/backend.env
 sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_CATALOG_PATH=catalog.json' /data/testagent/config/backend.env
-sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=false' /data/testagent/config/backend.env
+sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true' /data/testagent/config/backend.env
 sudo grep -Fx 'TEST_AGENT_LOCAL_CLIENT_TRUSTED_PROXY_ADDRESSES=122.233.30.2' /data/testagent/config/backend.env
 sudo awk -F= '$1 == "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64" && $2 != "" && $2 !~ /^REPLACE_/ { print "local-client signing public key configured" }' /data/testagent/config/backend.env
 sudo systemctl restart test-agent-backend
@@ -224,33 +227,38 @@ esac
 
 成功条件：local_client_stage_dir 是本节 mktemp 生成的 /data/testagent/dist/.local-opencode-client-stage.* 目录。若变量为空、路径不匹配或不确定，停止并人工检查，不要扩大删除范围。
 
-## 7. 麒麟 ARM 用户节点：管理员安装与普通用户 enroll
+## 7. 麒麟 ARM 用户节点：普通用户级安装与 enroll
 
-**机器：麒麟 ARM 用户节点，管理员账户**。只下载并安装本次精确版本的 DEB；不要把 Client key 放到该命令、环境变量或安装日志中。
+**机器：麒麟 ARM 用户节点，同一普通登录用户，不使用 sudo**。下载本次精确版本的 DEB，校验元数据后只提取其中的稳定启动器到用户目录；不要双击系统安装器，也不要把 Client key 放到命令、环境变量或安装日志中。
 
 ~~~bash
-curl -fS --proto '=http' http://122.233.30.2/downloads/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb -o /var/tmp/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
-dpkg-deb -f /var/tmp/test-agent-local-client_<RELEASE_VERSION>_arm64.deb Package Version Architecture
-sudo dpkg -i /var/tmp/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
-test -x /usr/bin/test-agent-local-client
-/usr/bin/test-agent-local-client --version
+client_deb="$HOME/Downloads/test-agent-local-client_<RELEASE_VERSION>_arm64.deb"
+curl -fS --proto '=http' http://mimo.sdc.cs.icbc:9996/downloads/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb -o "$client_deb"
+dpkg-deb -f "$client_deb" Package Version Architecture
+client_extract_dir="$(mktemp -d /tmp/test-agent-client.XXXXXX)"
+dpkg-deb -x "$client_deb" "$client_extract_dir"
+test -x "$client_extract_dir/usr/bin/test-agent-local-client"
+mkdir -p "$HOME/.local/bin"
+install -m 0755 "$client_extract_dir/usr/bin/test-agent-local-client" "$HOME/.local/bin/test-agent-local-client"
+"$HOME/.local/bin/test-agent-local-client" --version
 ~~~
 
-成功条件：dpkg-deb 输出 Package: test-agent-local-client、Version: <RELEASE_VERSION>、Architecture: arm64，dpkg -i 成功，最后一条显示 release=not-installed（首次安装尚未由用户下载 runtime）或已有受控 release。非 ARM64/aarch64 或非 glibc 设备必须在启动器检查失败时停止。
+成功条件：`dpkg-deb` 输出 Package: test-agent-local-client、Version: <RELEASE_VERSION>、Architecture: arm64，启动器已落到 `~/.local/bin`；最后一条显示 `release=not-installed`（首次安装）或已有受控 release。非 ARM64/aarch64 或非 glibc 设备必须在启动器检查失败时停止。重新下载新 DEB 只替换启动器，不需要删除已经下载的旧 release、状态目录或日志。
 
-**机器：同一麒麟节点的普通登录用户，不能使用 sudo**。在真实交互终端执行：
+**机器：同一普通用户的真实交互终端**。首次执行 `setup`；此前已经下载完整 runtime 但 enroll 失败时直接执行 `enroll`。两条命令只选符合当前状态的一条，不要重复删除或下载既有 runtime：
 
 ~~~bash
-test-agent-local-client enroll
+"$HOME/.local/bin/test-agent-local-client" setup
+# 或："$HOME/.local/bin/test-agent-local-client" enroll
 systemctl --user is-active --quiet test-agent-local-opencode-client.service
 systemctl --user status test-agent-local-opencode-client.service --no-pager
 journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes ago' --no-pager
-test-agent-local-client --version
+"$HOME/.local/bin/test-agent-local-client" --version
 ~~~
 
 enroll 会交互提示统一认证号和隐藏 Client key；只在用户本机输入，绝不把 Key 作为命令行参数、环境变量、URL、截图、日志或聊天内容回传。成功条件：命令显示“本地客户端重新接入成功”或“本地客户端接入认证成功”，user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
 
-**机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认该实例 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。此项与本机 active user service 一起证明 WSS 已建立；若任一项失败，停止 rollout，先检查 .2 的 Nginx 下载/HTTPS-WSS 路由、.4/.114 的 TRUSTED_PROXY_ADDRESSES 和后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
+**机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认该实例 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。此项与本机 active user service 一起证明 WS 已建立；若任一项失败，停止 rollout，先检查域名 `:9996` 的 Nginx 下载/API/Upgrade 路由、.4/.114 的明文控制开关与 TRUSTED_PROXY_ADDRESSES，以及后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
 
 ## 8. 数据库与真实现场闸门
 

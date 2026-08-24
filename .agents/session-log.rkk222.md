@@ -13416,3 +13416,27 @@
 - 企业控制台 Trace 可在较窄视口正确排版，左右栏可折叠和手工拉伸；目录不再被进程启动/重连广播刷出大量 `opencode/不完整`，进行中、待上传、丢弃不完整和完整状态分开显示。
 - 不修改 OpenCode 只读源码，不改变 RunEvent/SSE/聊天链路，不新增部署节点、PostgreSQL/Redis 字段或正文存储位置；涉及 ClickHouse 前向 migration、运营覆盖口径、前端兼容性与企业封包校验。
 - 当前 `.env.test` 实际连接 `127.0.0.1:15432/test_agent`，不是规范指定的 `192.168.8.100:15432/testagent_dev`；未修改受保护环境文件，因此规定 PostgreSQL、企业 `.4/.114/.2` 现场安装与浏览器缓存复验仍未完成。历史伪目录保留而未物理删除。
+
+## 2026-08-24 - 修复企业本地客户端域名接入与用户级安装
+
+### Why
+
+- 上一版本客户端运行时下载成功，但接入阶段固定访问 `https://122.233.30.2`；现场只提供 `http://mimo.sdc.cs.icbc:9996`，因此 WSS 连接到 443 端口时直接 `Connection refused`。
+- 两名麒麟用户均无超级管理员权限，不能依赖 `dpkg -i` 把启动器安装到 `/usr/bin`；Mac 生成 DEB 时还会把扩展属性写入 PAX header，麒麟双击安装会出现不兼容告警。
+
+### What
+
+- 客户端封包增加显式 `allow-insecure-control` 契约：默认继续只接受 HTTPS/WSS，当前受控企业内网只有在客户端和两台 Java 同时设置 `true` 时才允许 HTTP/WS；下载与控制入口统一为 `mimo.sdc.cs.icbc:9996`。
+- DEB 数据包复用统一归档元数据清理，去掉 macOS `LIBARCHIVE.xattr`/`SCHILY.xattr` PAX header；普通用户可把 DEB 中的稳定启动器提取到 `~/.local/bin`，生成的 user systemd 与桌面入口会自动使用该路径。
+- 单后台、双后台节点封装、CORS、部署模板、配置示例、安全规范和本地客户端部署说明同步更新；本地客户端组件指纹 schema 升级，确保 URL/明文开关变化会触发重打。
+
+### How
+
+- `local-opencode-client-package-test.sh` 覆盖 HTTP 未显式批准时拒绝、域名 HTTP 配置、DEB 无扩展属性、用户级 systemd/桌面入口；`local-opencode-client-update-test.sh` 覆盖稳定启动器更新/回退/自动回切。
+- 单后台配置、双后台完整包结构、归档卫生门禁全部通过；变更脚本语法、`git diff --check` 和冲突标记检查通过。
+- 增量组件计划确认 backend、frontend、worker runtime 与 local client 需要重建，toolbox 指纹未变并复用；独立 ClickHouse、Mem0、BGE、pgvector、LobeHub 制品不随本轮前后台包重复携带。
+
+### Result
+
+- 客户端生成配置将使用 `http://mimo.sdc.cs.icbc:9996` 与 `allowInsecureControl=true`，旧 runtime 已下载但未 enroll 的用户只需替换用户级启动器后重新 enroll，无需 sudo 或删除既有 runtime。
+- 本轮涉及后端、前端、worker 插件、本地客户端及 PostgreSQL/XXL MySQL/ClickHouse 前向 migration；正式企业包、目标数据库 history 核验和 `.4/.114/.2` 现场部署仍待后续构建与验收，禁止用 Flyway `repair` 或 `outOfOrder` 绕过。

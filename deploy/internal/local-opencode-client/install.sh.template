@@ -6,6 +6,7 @@ PUBLIC_KEY_PEM_BASE64="__PUBLIC_KEY_PEM_BASE64__"
 PUBLIC_KEY_DER_BASE64="__PUBLIC_KEY_DER_BASE64__"
 DOWNLOAD_BASE_URL="__DOWNLOAD_BASE_URL__"
 SERVER_URL="__SERVER_URL__"
+ALLOW_INSECURE_CONTROL="__ALLOW_INSECURE_CONTROL__"
 LAUNCHER_VERSION=1
 APPLY_EXIT_CODE=42
 ACTIVATION_FAILED_EXIT_CODE=43
@@ -447,7 +448,7 @@ ensure_configuration() {
     printf 'opencodeExecutable=%s/current/opencode/bin/opencode\n' "${INSTALL_ROOT}"
     printf 'opencodeConfigDirectory=%s/opencode-config\n' "${CONFIG_DIR}"
     printf 'opencodeDataDirectory=%s/opencode-data\n' "${STATE_DIR}"
-    printf 'portMin=4096\nportMax=4195\nallowInsecureControl=false\n'
+    printf 'portMin=4096\nportMax=4195\nallowInsecureControl=%s\n' "${ALLOW_INSECURE_CONTROL}"
     printf 'downloadBaseUrl=%s\n' "${DOWNLOAD_BASE_URL}"
     printf 'signingPublicKeyBase64=%s\n' "${PUBLIC_KEY_DER_BASE64}"
     printf 'installRoot=%s\n' "${INSTALL_ROOT}"
@@ -477,19 +478,27 @@ install_user_service() {
   [ "${TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START:-false}" != true ] || return 0
   unit_dir="${HOME}/.config/systemd/user"
   desktop_dir="${HOME}/.local/share/applications"
+  if [ -x "${HOME}/.local/bin/test-agent-local-client" ]; then
+    service_launcher="${HOME}/.local/bin/test-agent-local-client"
+  else
+    service_launcher="/usr/bin/test-agent-local-client"
+  fi
+  [ -x "${service_launcher}" ] || fail "未找到可执行的用户级客户端启动器"
   mkdir -p "${unit_dir}" "${desktop_dir}"
   {
     printf '%s\n' '[Unit]' 'Description=Test Agent Local OpenCode Client' \
       'After=network-online.target' 'Wants=network-online.target' '' '[Service]'
-    printf '%s\n' 'ExecStart=/usr/bin/test-agent-local-client run' \
+    printf 'ExecStart=%s run\n' "${service_launcher}"
+    printf '%s\n' \
       'Restart=on-failure' 'RestartSec=3' 'SuccessExitStatus=0' '' '[Install]' \
       'WantedBy=default.target'
   } >"${unit_dir}/test-agent-local-opencode-client.service"
   chmod 0600 "${unit_dir}/test-agent-local-opencode-client.service"
   {
     printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Test Agent 本地客户端接入' \
-      'Comment=输入统一认证号和 Client key 重新接入' \
-      'Exec=/usr/bin/test-agent-local-client enroll' 'Terminal=true' \
+      'Comment=输入统一认证号和 Client key 重新接入'
+    printf 'Exec=%s enroll\n' "${service_launcher}"
+    printf '%s\n' 'Terminal=true' \
       'Categories=Development;Utility;'
   } >"${desktop_dir}/test-agent-local-client.desktop"
   chmod 0600 "${desktop_dir}/test-agent-local-client.desktop"

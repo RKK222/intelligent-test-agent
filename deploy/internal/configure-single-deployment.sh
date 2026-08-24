@@ -228,6 +228,7 @@ render_backend_template() {
       TEST_AGENT_CORS_ALLOWED_ORIGINS) value="http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996" ;;
       TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL) value="" ;;
       TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET) value="true" ;;
+      TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL) value="true" ;;
       TEST_AGENT_XXL_JOB_MYSQL_PASSWORD) value="${xxl_mysql_password}" ;;
       TEST_AGENT_XXL_JOB_ACCESS_TOKEN) value="${xxl_access_token}" ;;
       # 当前现场只有 HTTP 入口；模板升级为 HTTPS 后必须显式改回 true。

@@ -54,6 +54,7 @@ grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=' "${BACKEND_ENV}"
 grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true' "${BACKEND_ENV}"
+grep -Fxq 'TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true' "${BACKEND_ENV}"
 if grep -q '^TEST_AGENT_SSH_RSA_PRIVATE_KEY_PATH=' "${BACKEND_ENV}"; then
   echo 'backend.env unexpectedly contains an external RSA private key path' >&2
   exit 1

@@ -115,7 +115,8 @@ Windows 开发人员若只需要 legacy guo profile，可直接使用已提交�
 
 该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录启动编排脚本，不属于 Java 进程配置。当前本地联调默认改用 `test` profile 和 `.env.test`；Windows 用户要连同一测试环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`，WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，仍可在 IDEA/PowerShell 中显式导入 `.env.test` 的数据库、Redis、模型和 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 等变量，并用 `-Dspring.profiles.active=test` 启动 Java 后端。
 `test` profile 会直接允许本机原生客户端使用 loopback 明文 WebSocket 联调，无需额外导出
-`TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL`；该放宽不进入其它 profile，正式环境仍必须使用 HTTPS/WSS。
+`TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL`。其它 profile 默认仍拒绝明文；当前企业固定 HTTP 入口是已批准例外，
+需要在客户端包与两台 Java 同时显式启用，入口升级 TLS 后恢复 HTTPS/WSS 默认值。
 
 需要同时联调 LobeHub 时，macOS/Linux 从仓库根目录显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。默认不启动 LobeHub；该模式从

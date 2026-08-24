@@ -26,6 +26,7 @@ VERSION=20260820153045
 PUBLIC_CONFIG_COMMIT=0123456789abcdef0123456789abcdef01234567
 HTTP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 DOWNLOAD_ROOT="http://127.0.0.1:${HTTP_PORT}/"
+SERVER_ROOT="http://platform.example.internal:9996"
 mkdir -p "${TEST_ROOT}/inputs/jdk/fake-jdk/bin" \
   "${TEST_ROOT}/system-jdk/bin" \
   "${TEST_ROOT}/escaped-jdk/bin" \
@@ -126,6 +127,21 @@ if "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
   exit 1
 fi
 
+# HTTP/WS 只能通过显式开关进入发布包，避免普通生产包无意降低传输安全。
+if "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
+    --output-dir "${TEST_ROOT}/http-rejected/local-opencode-client" \
+    --version "${VERSION}" \
+    --download-base-url "${DOWNLOAD_ROOT}" \
+    --server-url "${SERVER_ROOT}" \
+    --signing-key "${TEST_ROOT}/signing-private.pem" \
+    --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
+    --public-config-commit "${PUBLIC_CONFIG_COMMIT}" \
+    --public-capability-bundle "${TEST_ROOT}/public-capabilities.tar.gz" \
+    --skip-build >/dev/null 2>&1; then
+  echo "HTTP control URL was unexpectedly accepted without explicit approval" >&2
+  exit 1
+fi
+
 package_release() {
   TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/jdk-linux.tar.gz" \
   TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jdk-linux.tar.gz")" \
@@ -135,7 +151,8 @@ package_release() {
       --output-dir "${TEST_ROOT}/dist/local-opencode-client" \
       --version "${VERSION}" \
       --download-base-url "${DOWNLOAD_ROOT}" \
-      --server-url https://platform.example.internal \
+      --server-url "${SERVER_ROOT}" \
+      --allow-insecure-control true \
       --signing-key "${TEST_ROOT}/signing-private.pem" \
       --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
       --public-config-commit "${PUBLIC_CONFIG_COMMIT}" \
@@ -175,6 +192,10 @@ DEB_DOWNLOAD_ALIAS="${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Clie
 test -f "${DEB_FILE}"
 cmp "${DEB_FILE}" "${DEB_DOWNLOAD_ALIAS}"
 ar -p "${DEB_FILE}" data.tar.gz >"${TEST_ROOT}/data.tar.gz"
+if gzip -dc "${TEST_ROOT}/data.tar.gz" | grep -aEq 'LIBARCHIVE\.xattr|SCHILY\.xattr'; then
+  echo "DEB data payload unexpectedly contains extended-attribute PAX headers" >&2
+  exit 1
+fi
 tar -tzf "${TEST_ROOT}/data.tar.gz" >"${TEST_ROOT}/deb-data.list"
 grep -q '^\./usr/bin/test-agent-local-client$' "${TEST_ROOT}/deb-data.list"
 if grep -Eq '\.(jar|tar\.gz)$' "${TEST_ROOT}/deb-data.list"; then
@@ -291,9 +312,31 @@ for marker_case in multi-line trailing-nul symbolic-link; do
   fi
 done
 grep -q "downloadBaseUrl=${DOWNLOAD_ROOT}" "${TEST_ROOT}/install/config/client.properties"
+grep -q "serverUrl=${SERVER_ROOT}" "${TEST_ROOT}/install/config/client.properties"
+grep -q '^allowInsecureControl=true$' "${TEST_ROOT}/install/config/client.properties"
 grep -q '^signingPublicKeyBase64=' "${TEST_ROOT}/install/config/client.properties"
 test "$(stat -f '%Lp' "${TEST_ROOT}/install/config/credentials.properties" 2>/dev/null \
   || stat -c '%a' "${TEST_ROOT}/install/config/credentials.properties")" = 600
+
+# 无管理员权限安装时，user systemd 和桌面入口必须使用用户级启动器，不能回退到不存在的 /usr/bin。
+mkdir -p "${TEST_ROOT}/user-home/.local/bin" "${TEST_ROOT}/fake-systemctl"
+cp "${TEST_ROOT}/dist/local-opencode-client/install.sh" \
+  "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
+chmod 0755 "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
+printf '#!/usr/bin/env sh\nexit 0\n' >"${TEST_ROOT}/fake-systemctl/systemctl"
+chmod 0755 "${TEST_ROOT}/fake-systemctl/systemctl"
+HOME="${TEST_ROOT}/user-home" \
+PATH="${TEST_ROOT}/fake-systemctl:${TEST_ROOT}/inputs/jdk/fake-jdk/bin:${PATH}" \
+TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${TEST_ROOT}/install/runtime" \
+TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install/config" \
+TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install/state" \
+  "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client" setup
+grep -Fxq "ExecStart=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client run" \
+  "${TEST_ROOT}/user-home/.config/systemd/user/test-agent-local-opencode-client.service"
+grep -Fxq "Exec=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client enroll" \
+  "${TEST_ROOT}/user-home/.local/share/applications/test-agent-local-client.desktop"
 
 for scenario in no-java java-only java17 java21-javac17 split-path-java-javac absolute-escaped-javac; do
   case "${scenario}" in

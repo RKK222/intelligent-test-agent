@@ -192,11 +192,13 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
   HTTP/SSE 请求都必须绑定 `clientInstanceId + backendProcessId + connectionGeneration`，不允许跨代复用。客户端托盘
   主动发送 `WORKSPACE_REGISTER` 时，userId 和 clientInstanceId 只能取自已认证连接状态，载荷只接受工作区名称与
   待验证绝对路径；服务端必须继续通过 FILE_REQUEST 安全内核校验和注册根目录，不能信任客户端声明或允许伪造身份。
-- 生产控制面只允许 HTTPS/WSS。OpenCode 只能绑定 loopback，平台模型 key 永不下发；OpenCode 仅持有
+- 生产控制面默认只允许 HTTPS/WSS。当前企业 `mimo.sdc.cs.icbc:9996` 是已批准的可信内网 HTTP/WS 例外，
+  客户端包与 Java 必须同时显式开启 `allowInsecureControl`，且不得把该例外扩大到公网或未知网段。OpenCode 只能绑定 loopback，平台模型 key 永不下发；OpenCode 仅持有
   随机本地 token，后台 grant 必须短 TTL 且可立即撤销。客户端 key 文件必须是当前用户所有的 `0600`，
   禁止命令行参数和环境变量传 key。
-- 后台只允许直接 HTTPS/WSS URI，或信任代理源 IP 清单内的连接携带 `X-Forwarded-Proto: https|wss`；禁止
-  无条件信任客户端可伪造的 forwarded header。企业部署必须显式维护 Nginx 源 IP，明文控制开关仅限测试。
+- 后台默认只允许直接 HTTPS/WSS URI，或信任代理源 IP 清单内的连接携带 `X-Forwarded-Proto: https|wss`；禁止
+  无条件信任客户端可伪造的 forwarded header。企业部署必须显式维护 Nginx 源 IP；当前固定 HTTP 现场允许在
+  两台 Java 显式设置 `TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true`，入口升级 TLS 后必须恢复 `false`。
 - 内网 HTTP 下载不使用 client key。stable 清单必须签名，版本化制品以及 macOS PKG/麒麟 DEB 的 SHA-256
   必须进入签名清单；打包私钥不得进入仓库、企业 ZIP、Nginx 目录或客户端。生产 macOS PKG 还必须使用
   Developer ID Installer 签名并按网络条件完成 notarization；DEB 由受控发布链路和签名清单校验。由于

@@ -912,7 +912,7 @@ plan_release_components() {
     && -f "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}" ]]; then
     public_capability_bundle_sha="$(sha256_file "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}")"
   fi
-  local_client_config="schema=4|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}|publicCommit=${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}|publicBundleSha=${public_capability_bundle_sha}"
+  local_client_config="schema=5|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|allowInsecure=${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}|publicCommit=${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}|publicBundleSha=${public_capability_bundle_sha}"
 
   WORKER_RUNTIME_FINGERPRINT="$(component_fingerprint "${worker_config}" \
     opencode-manager/go.mod \
@@ -1925,7 +1925,8 @@ fi
 
 if [[ "${PACKAGE_LOCAL_CLIENT}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
   "${SCRIPT_DIR}/package-local-opencode-client.sh" \
-    --output-dir "${OUTPUT_DIR}/local-opencode-client"
+    --output-dir "${OUTPUT_DIR}/local-opencode-client" \
+    --allow-insecure-control "${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}"
 fi
 
 if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then

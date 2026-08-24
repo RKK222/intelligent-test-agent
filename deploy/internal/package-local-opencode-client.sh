@@ -13,6 +13,7 @@ PUBLIC_KEY="${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-}"
 CLIENT_JAR="${TEST_AGENT_LOCAL_CLIENT_JAR:-}"
 DOWNLOAD_BASE_URL="${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}"
 SERVER_URL="${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}"
+ALLOW_INSECURE_CONTROL="${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}"
 PUBLIC_CONFIG_COMMIT="${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}"
 PUBLIC_CAPABILITY_BUNDLE="${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE:-}"
 SKIP_BUILD=0
@@ -35,7 +36,9 @@ Options:
   --output-dir <path>        Distribution root ending in local-opencode-client.
   --version <yyyyMMddHHmmss> Immutable Beijing-time release version; generated when omitted.
   --download-base-url <url>  Nginx HTTP root embedded in the launcher.
-  --server-url <url>         Platform HTTPS root embedded in client.properties.
+  --server-url <url>         Platform HTTP(S) root embedded in client.properties.
+  --allow-insecure-control <true|false>
+                             Explicitly allow HTTP/WS for an approved trusted-LAN site.
   --signing-key <path>       PEM private key; never copied to the distribution.
   --public-key <path>        Matching PEM public key; derived when omitted.
   --client-jar <path>        Prebuilt shaded client JAR.
@@ -52,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --version) VERSION="$2"; shift 2 ;;
     --download-base-url) DOWNLOAD_BASE_URL="$2"; shift 2 ;;
     --server-url) SERVER_URL="$2"; shift 2 ;;
+    --allow-insecure-control) ALLOW_INSECURE_CONTROL="$2"; shift 2 ;;
     --signing-key) SIGNING_KEY="$2"; shift 2 ;;
     --public-key) PUBLIC_KEY="$2"; shift 2 ;;
     --client-jar) CLIENT_JAR="$2"; shift 2 ;;
@@ -85,10 +89,21 @@ DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL%/}/"
   echo "Local client download base URL must be a canonical internal HTTP root" >&2
   exit 2
 }
-[[ "${SERVER_URL}" =~ ^https://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$ ]] || {
-  echo "Local client platform server URL must use canonical HTTPS" >&2
+[[ "${ALLOW_INSECURE_CONTROL}" == true || "${ALLOW_INSECURE_CONTROL}" == false ]] || {
+  echo "Local client allow-insecure-control must be true or false" >&2
   exit 2
 }
+if [[ "${ALLOW_INSECURE_CONTROL}" == true ]]; then
+  [[ "${SERVER_URL}" =~ ^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$ ]] || {
+    echo "Local client platform server URL must use canonical HTTP or HTTPS" >&2
+    exit 2
+  }
+else
+  [[ "${SERVER_URL}" =~ ^https://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$ ]] || {
+    echo "Local client platform server URL must use canonical HTTPS unless HTTP/WS is explicitly allowed" >&2
+    exit 2
+  }
+fi
 SERVER_URL="${SERVER_URL%/}"
 
 require_command() {
@@ -161,11 +176,19 @@ normalize_opencode() {
 
 create_root_owned_tar_gz() {
   local output="$1" directory="$2"
+  local -a metadata_flags=()
+  local value
+  while IFS= read -r value; do
+    [[ -z "${value}" ]] || metadata_flags+=("${value}")
+  done < <(archive_tar_metadata_flags)
   if tar --version 2>/dev/null | grep -qi bsdtar; then
-    tar --uid 0 --gid 0 --uname root --gname root -C "${directory}" -czf "${output}" .
+    COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 \
+      tar "${metadata_flags[@]}" --uid 0 --gid 0 --uname root --gname root \
+        -C "${directory}" -czf "${output}" .
   else
     tar --owner=0 --group=0 --numeric-owner -C "${directory}" -czf "${output}" .
   fi
+  archive_strip_file_metadata "${output}"
 }
 
 build_deb() {
@@ -295,6 +318,7 @@ sed \
   -e "s|__PUBLIC_KEY_DER_BASE64__|${PUBLIC_KEY_DER_BASE64}|" \
   -e "s|__DOWNLOAD_BASE_URL__|${DOWNLOAD_BASE_URL}|" \
   -e "s|__SERVER_URL__|${SERVER_URL}|" \
+  -e "s|__ALLOW_INSECURE_CONTROL__|${ALLOW_INSECURE_CONTROL}|" \
   "${SCRIPT_DIR}/local-opencode-client/install.sh.template" >"${OUTPUT_DIR}/install.sh"
 chmod 0755 "${OUTPUT_DIR}/install.sh"
 
