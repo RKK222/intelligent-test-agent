@@ -13413,6 +13413,31 @@
 - 本地未配置 SkillHub 时默认关闭，不影响启动；企业环境具备合法地址和密钥后，即使 SkillHub 暂不可达也不阻断 Java 启动/readiness，只影响目录同步并自动重试。启用但缺少合法地址或密钥仍按安全门禁拒绝启动。
 - 本次不新增部署节点，不变更 HTTP API、RunEvent、WebSocket、数据库、Flyway、性能模型、generated SDK、OpenCode 只读源码或 `.env*`；只调整企业部署配置、安全门禁、文档和回归测试。尚未生成新企业包，也未部署 `.4/.114/.2`。
 
+## 2026-08-24 - 兼容 SkillHub 现场目录技术标识
+
+### Why
+
+- 内网 `/list` 已成功返回 185 条真实目录，但手工同步报 `SKILLHUB_UNAVAILABLE / SkillHub 目录条目标识无效`；现场条目包含 `SLB_ENV_DEEPCHECK`、`bin-file_compare`、`threadSafe-Refactor` 等合法名称。
+- 现有应用服务额外写死小写短横线规则，误拒绝其中 14 条；项目其它 Hub 路径已允许大小写字母、数字、点、下划线和短横线。
+
+### What
+
+- 把外部目录校验与既有 Hub 技术 ID 校验合并为同一 `Pattern`，保留 SkillHub 原始 `name`，允许安全的大写、下划线、点和短横线；斜杠、空白和其它路径危险字符仍失败关闭。
+- 网关测试改用现场字段形态，锁定字符串版本 `"0"`、ISO Offset 时间和 `url`、图片、审批记录等附加字段兼容；应用服务测试锁定三类现场名称原样同步及危险名称拒绝。
+- 同步 integration/workspace README、HTTP API 与安全规范，明确未知附加字段忽略和技术 ID 边界。
+
+### How
+
+- 用 `jq` 核验用户提供的现场 JSON：185 条、全部符合安全技术 ID、14 条不符合旧小写短横线规则、名称和 ID+版本均无重复。
+- JDK 25 定向测试 `AgentSkillHubApplicationServiceTest,SkillHubHttpGatewayTest` 通过；`test-agent-workspace-management,test-agent-integration` 两个相关模块及上游 reactor 全量测试通过。
+- `git diff --check`、冲突标记和明文 SkillHub 密钥扫描通过。
+
+### Result
+
+- 现场 185 条目录在重新部署后可通过业务校验，原始名称不会被 slug/改名；远端下架隐藏和已引用保留语义不变。
+- 不变更 HTTP 路径/DTO、RunEvent、WebSocket、数据库、Flyway、部署节点、generated SDK、OpenCode 只读源码或 `.env*`。
+- 当前 `.env.test` 仍指向 `127.0.0.1:15432`，不符合固定验收库要求，未修改环境文件或启动真实服务；企业包尚未重建部署，`/download/{id}?channel=3` 也尚待内网真实 ZIP 验证。
+
 ## 2026-08-24 - 修复企业 Trace 布局与伪轨迹目录
 
 ### Why

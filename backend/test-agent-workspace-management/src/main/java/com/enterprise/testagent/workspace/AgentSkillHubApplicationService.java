@@ -70,6 +70,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -97,6 +98,9 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     private static final String PUBLIC_CONFIG_GIT_ROOT = "OPENCODE_PUBLIC_CONFIG_GIT_ROOT";
     private static final String BUILTIN_ASSET_PREFIX = "hub_builtin_";
     private static final String BUILTIN_REVISION_PREFIX = "hub_builtin_rev_";
+    /** Hub 技术标识允许 OpenCode 目录安全使用的大小写字母、数字、点、下划线和短横线。 */
+    private static final Pattern TECHNICAL_ID_PATTERN =
+            Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
     private static final ScheduledTaskKey SKILLHUB_SYNC_TASK_KEY =
             new ScheduledTaskKey("workspace-management.skillhub-catalog-sync");
     private static final AgentConfigMetadataParser METADATA_PARSER = new AgentConfigMetadataParser();
@@ -914,7 +918,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         Set<String> versions = new HashSet<>();
         for (ExternalSkill skill : skills) {
             if (skill == null || skill.id() <= 0 || skill.version() == null || skill.version().isBlank()
-                    || skill.name() == null || !skill.name().matches("[a-z0-9][a-z0-9-]{0,127}")) {
+                    || !isValidTechnicalId(skill.name())) {
                 throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 目录条目标识无效");
             }
             if (!names.add(skill.name()) || !versions.add(skill.id() + ":" + skill.version())) {
@@ -1720,10 +1724,14 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
 
     private String normalizeTechnicalId(String value) {
         String normalized = value == null ? "" : value.trim();
-        if (!normalized.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")) {
+        if (!isValidTechnicalId(normalized)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "英文技术 ID 格式无效");
         }
         return normalized;
+    }
+
+    private boolean isValidTechnicalId(String value) {
+        return value != null && TECHNICAL_ID_PATTERN.matcher(value).matches();
     }
 
     private String normalizeArtifactPath(String value) {

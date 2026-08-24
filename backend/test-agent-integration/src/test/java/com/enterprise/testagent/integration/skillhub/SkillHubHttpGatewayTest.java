@@ -27,10 +27,12 @@ class SkillHubHttpGatewayTest {
         server.createContext("/list", exchange -> {
             accessKey.set(exchange.getRequestHeaders().getFirst(SkillHubHttpGateway.ACCESS_KEY_HEADER));
             respond(exchange, "application/json", """
-                    {"code":0,"result":[{"id":42,"name":"case-design","version":"1.2.0",
-                    "description":"测试设计","source":"official","tag":"test","phase":"stable",
-                    "phaseName":"稳定","contributor":"team","createTime":"2026-08-20 10:00:00",
-                    "downloadNum":7}]}
+                    {"code":0,"msg":"ok","result":[{"id":42,"name":"SLB_ENV_DEEPCHECK","version":"0",
+                    "description":"检查测试环境的 SLB 集群 IP","url":"/skill/SLB_ENV_DEEPCHECK.zip",
+                    "source":"杭州产品部","tag":null,"sortOrder":null,"status":1,"phase":"04",
+                    "phaseName":"测试","contributor":"000831611","createTime":"2026-07-31T02:13:20.000+00:00",
+                    "updateTime":"2026-08-11T06:00:21.000+00:00","downloadNum":23,
+                    "safetyReportPic":"/skill/temp/pic/report.png","approvalRecord":"[]"}]}
                     """.getBytes(StandardCharsets.UTF_8));
         });
         server.createContext("/download/42", exchange -> {
@@ -57,11 +59,14 @@ class SkillHubHttpGatewayTest {
 
         assertThat(gateway.listSkills()).singleElement().satisfies(skill -> {
             assertThat(skill.id()).isEqualTo(42);
-            assertThat(skill.name()).isEqualTo("case-design");
-            assertThat(skill.version()).isEqualTo("1.2.0");
-            assertThat(skill.downloadCount()).isEqualTo(7);
+            assertThat(skill.name()).isEqualTo("SLB_ENV_DEEPCHECK");
+            assertThat(skill.version()).isEqualTo("0");
+            assertThat(skill.source()).isEqualTo("杭州产品部");
+            assertThat(skill.phase()).isEqualTo("04");
+            assertThat(skill.createdAt()).isEqualTo(java.time.Instant.parse("2026-07-31T02:13:20Z"));
+            assertThat(skill.downloadCount()).isEqualTo(23);
         });
-        assertThat(gateway.download(42, "1.2.0").content()).containsExactly(1, 2, 3);
+        assertThat(gateway.download(42, "0").content()).containsExactly(1, 2, 3);
         assertThat(accessKey).hasValue("test-only-access-key");
         assertThat(downloadQuery).hasValue("channel=" + SkillHubDownloadChannel.PLATFORM.code());
     }

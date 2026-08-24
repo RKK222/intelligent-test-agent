@@ -2044,7 +2044,7 @@ Hub 元数据与更新角标走 HTTP；制品正文、引用落盘和三方合�
 
 Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST_DESIGN/TEST_DATA_CONSTRUCTION/TEST_EXECUTION/TEST_ANALYSIS` 之一，`CODE` 必须选择 `WHITE_BOX_ANALYSIS`，`WORKER/OTHER` 当前不带二级事项。历史 Skill、新 push Skill 和公共 Git Skill 默认返回 `OTHER/null`；新字段对旧客户端为向后兼容新增，新前端连接旧后端缺字段时也按“其他”展示。人工分类保存在逻辑资产上，公共 Git Skill 使用独立分类记录，后续 push 或 commit 只生成新修订、不覆盖分类。
 
-平台来源仍以 push 生成不可变修订、管理员显式发布。公共配置 Git 现在只向 Hub 提供只读内置 Agent；公共 Git Skill 不再进入 Skill 目录。Skill 的第二来源是外部 SkillHub：`/list` 只同步元数据，正文只在预览、引用或更新时下载。外部条目原样写入个人 worktree 后 push，摘要未变则引用保持 `SKILLHUB` 身份，不生成目标应用的重复平台资产；内容被修改则同一事务切换到 `PLATFORM` 派生资产，记录 `forkedFromAssetId/forkedFromRevisionId`，该修订为已推送未发布，仍需管理员发布。来源下架不删除历史修订和已有引用，只禁止新建引用与更新。
+平台来源仍以 push 生成不可变修订、管理员显式发布。公共配置 Git 现在只向 Hub 提供只读内置 Agent；公共 Git Skill 不再进入 Skill 目录。Skill 的第二来源是外部 SkillHub：`/list` 只同步接口文档中的有界元数据，未知附加字段忽略，字符串 `version`（包括 `"0"`）原样保存；`name` 原样作为稳定技术 ID，允许大小写字母、数字、点、下划线和短横线且首字符必须是字母或数字，不做小写短横线转换。正文只在预览、引用或更新时下载。外部条目原样写入个人 worktree 后 push，摘要未变则引用保持 `SKILLHUB` 身份，不生成目标应用的重复平台资产；内容被修改则同一事务切换到 `PLATFORM` 派生资产，记录 `forkedFromAssetId/forkedFromRevisionId`，该修订为已推送未发布，仍需管理员发布。来源下架不删除历史修订和已有引用，只禁止新建引用与更新。
 
 引用和更新不自动提交 Git。成功写入当前个人 worktree 后返回 `PENDING_PUSH`，此时 `referenced=false/referenceStatus=PENDING_PUSH`；只有后续应用 feature 发布的远端提交内容摘要与待推送摘要一致时，引用才提升为 `ACTIVE` 并显示为已引用。取消引用先移除当前个人 worktree 文件并进入 `PENDING_REMOVE`：该关系立即从“当前应用”、有效引用计数和公开引用方清单隐藏，但保留内部记录等待远端 push 确认目标路径消失后删除；确认前再次引用会复用原记录、重新写盘并恢复为 `PENDING_PUSH`。更新以 active 修订为 base、当前 worktree 为 current、最新发布修订为 incoming 做三方合并；存在任何冲突时不改工作树，全部冲突确认后再整体落盘。修订链按每个远端 commit 保留，但更新角标比较内容 SHA-256，未改动资产不会因其它文件的 push 产生假更新。
 

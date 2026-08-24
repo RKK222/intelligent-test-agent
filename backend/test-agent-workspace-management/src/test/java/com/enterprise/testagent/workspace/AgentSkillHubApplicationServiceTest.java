@@ -29,6 +29,7 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetSummary;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ExternalSkill;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ExternalSkillPackage;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceAction;
@@ -67,6 +68,45 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.scheduling.annotation.Scheduled;
 
 class AgentSkillHubApplicationServiceTest {
+
+    @Test
+    void externalCatalogAcceptsFieldTechnicalIdsAndPreservesExactNames() {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        Instant createdAt = Instant.parse("2026-07-31T02:13:20Z");
+        List<ExternalSkill> fieldSkills = List.of(
+                externalSkill(219, "SLB_ENV_DEEPCHECK", "0", createdAt),
+                externalSkill(220, "bin-file_compare", "1", createdAt),
+                externalSkill(221, "threadSafe-Refactor", "3", createdAt));
+        when(gateway.enabled()).thenReturn(true);
+        when(gateway.listSkills()).thenReturn(fieldSkills);
+        AgentSkillHubApplicationService service = service(repository);
+        service.setSkillHubGateway(gateway);
+
+        var response = service.syncExternalSkillHubCatalog();
+
+        ArgumentCaptor<List<ExternalSkill>> catalog = ArgumentCaptor.forClass(List.class);
+        verify(repository).replaceExternalCatalog(catalog.capture(), any(Instant.class));
+        assertThat(response.assetCount()).isEqualTo(3);
+        assertThat(catalog.getValue()).extracting(ExternalSkill::name)
+                .containsExactly("SLB_ENV_DEEPCHECK", "bin-file_compare", "threadSafe-Refactor");
+    }
+
+    @Test
+    void externalCatalogStillRejectsUnsafePathName() {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        when(gateway.enabled()).thenReturn(true);
+        when(gateway.listSkills()).thenReturn(List.of(
+                externalSkill(219, "unsafe/name", "0", Instant.parse("2026-07-31T02:13:20Z"))));
+        AgentSkillHubApplicationService service = service(repository);
+        service.setSkillHubGateway(gateway);
+
+        assertThatThrownBy(service::syncExternalSkillHubCatalog)
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("条目标识无效");
+        verify(repository, never()).replaceExternalCatalog(any(), any());
+    }
 
     @Test
     void publicBuiltinReconciliationDefaultsToTenMinutes() throws Exception {
@@ -150,6 +190,22 @@ class AgentSkillHubApplicationServiceTest {
             zip.closeEntry();
         }
         return output.toByteArray();
+    }
+
+    private ExternalSkill externalSkill(long id, String name, String version, Instant createdAt) {
+        return new ExternalSkill(
+                id, name, version, name, "现场目录条目", "杭州产品部", null,
+                "04", "测试", "000831611", createdAt, 23);
+    }
+
+    private AgentSkillHubApplicationService service(AgentSkillHubRepository repository) {
+        return new AgentSkillHubApplicationService(
+                repository,
+                mock(ConfigurationManagementRepository.class),
+                mock(ManagedWorkspaceRepository.class),
+                mock(CommonParameterValues.class),
+                mock(GitWorkspaceService.class),
+                new ObjectMapper());
     }
 
     @Test
