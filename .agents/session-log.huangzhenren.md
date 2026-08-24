@@ -2595,3 +2595,19 @@
 - Result:
   - 功能页可在应用内多 Tab 间切换、排序、批量关闭并跨工作台往返，刷新只恢复安全的页面描述；工作台和编辑器文件 Tab 保持原交互，关闭最后一个功能页自动回到工作台。
   - 本次涉及前端性能和敏感内存生命周期优化，但不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、migration、部署、安全协议或强制配置；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支或推送远端。
+
+### 2026-08-24 - 放开思维导图节点特殊字符
+
+- Why:
+  - 测试用例思维导图包含 `<script>`、SQL 注入字符串、Markdown 符号等字面内容，原普通文本黑名单会把这些安全测试描述误判为富文本并禁止编辑。
+- What:
+  - 将节点文字约束从“非空普通文本”调整为“非空单行字面文本”：允许 HTML、Markdown、SQL 等特殊字符原样解析、编辑和序列化，继续限制 4,096 字符。
+  - 保留纯空白节点、节点内换行和 `<!-- mm:... -->` 保留注释阻断；SimpleMindMap 继续固定 `richText=false`，图片、可点击链接和 HTML/SVG 渲染仍不执行。
+  - 同步前端总览、editor README/PACKAGE 和内置用户手册，并为领域解析、编辑应用、安全适配和真实工作台保存补回归。
+- How:
+  - TDD RED 稳定出现 5 个目标失败，最小实现后两文件 29/29 转绿；思维导图定向 Vitest 13 个文件 118/118，editor 与 agent-web 类型检查通过。
+  - Chromium 工作台 1/1 验证 `<script>` 在真实 SimpleMindMap 中可见但未执行，并与 SQL 字符串一同应用、写入既有文件保存请求；production build 与 AI 文档校验通过。
+  - 全量 Vitest 139/139 个文件通过，2086 passed / 1 skipped；`git diff --check` 通过。提交前已回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突或会覆盖的并行成果。
+- Result:
+  - 思维导图可以承载安全测试场景中的特殊字符，保存后仍为可重开的规范 Markdown；空节点和结构冲突继续失败关闭。
+  - 本次仅调整前端文字校验，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、migration、依赖、部署、性能路径或后端安全边界；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。

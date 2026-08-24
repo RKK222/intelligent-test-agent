@@ -56,10 +56,18 @@ vi.mock("../../src/mind-map/MindMapCanvas.vue", () => ({
           type: "button",
           onClick: () => {
             const document = JSON.parse(JSON.stringify(props.document));
-            document.root.children[0].text = "**非法富文本**";
+            document.root.children[0].text = "   ";
             emit("change", document);
           }
-        }, "生成非法草稿")
+        }, "生成非法草稿"),
+        h("button", {
+          type: "button",
+          onClick: () => {
+            const document = JSON.parse(JSON.stringify(props.document));
+            document.root.children[0].text = "<script>alert(1)</script> ' OR 1=1-- **粗体** [链接](https://example.com)";
+            emit("change", document);
+          }
+        }, "生成特殊字符草稿")
       ]);
     }
   })
@@ -164,6 +172,18 @@ describe("MindMapEditor", () => {
     expect(emitted().apply).toHaveLength(1);
   });
 
+  it("特殊字符节点按字面文本应用且不启用富文本", async () => {
+    const { emitted, getByRole } = render(MindMapEditor, {
+      props: { document: documentFixture() }
+    });
+    await fireEvent.click(getByRole("button", { name: "生成特殊字符草稿" }));
+    await fireEvent.click(getByRole("button", { name: "应用思维导图" }));
+
+    expect(emitted().apply).toHaveLength(1);
+    const result = (emitted().apply as Array<[{ content: string }]>)[0]![0];
+    expect(result.content).toContain("<script>alert(1)</script> ' OR 1=1-- **粗体** [链接](https://example.com)");
+  });
+
   it("二次校验失败时不应用并显示安全中文错误", async () => {
     const { emitted, getByRole, findByRole } = render(MindMapEditor, {
       props: { document: documentFixture() }
@@ -171,7 +191,7 @@ describe("MindMapEditor", () => {
     await fireEvent.click(getByRole("button", { name: "生成非法草稿" }));
     await fireEvent.click(getByRole("button", { name: "应用思维导图" }));
 
-    expect((await findByRole("alert")).textContent).toMatch(/普通文本|第 \d+ 行/);
+    expect((await findByRole("alert")).textContent).toMatch(/非空单行文本|第 \d+ 行/);
     expect(emitted().apply).toBeUndefined();
   });
 
