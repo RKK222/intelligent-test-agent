@@ -31,4 +31,11 @@ public interface ClickHouseTraceCatalogMapper {
             @Param("limit") int limit);
 
     long countEvents(@Param("traceId") String traceId);
+
+    List<TraceModels.Span> trajectory(
+            @Param("traceId") String traceId,
+            @Param("afterSequence") long afterSequence,
+            @Param("limit") int limit);
+
+    long countTrajectory(@Param("traceId") String traceId);
 }

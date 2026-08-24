@@ -57,6 +57,7 @@ import type {
   TraceCatalog,
   TraceQueryParams,
   TraceRawEventPage,
+  TraceSpanPage,
   ApplicationWorkspaceTemplate,
   BatchContext,
   ApplicationWorkspaceVersion,
@@ -2625,6 +2626,15 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     getTraceEvents: (traceId: string, afterSequence = 0, limit = 500) =>
       request<TraceRawEventPage>(
         `${traceBase}/${encodeURIComponent(traceId)}/events${query({ afterSequence, limit })}`
+      ),
+    getTraceSpans: (traceId: string, afterSequence = 0, limit = 500) =>
+      request<TraceSpanPage>(
+        `${traceBase}/${encodeURIComponent(traceId)}/spans${query({ afterSequence, limit })}`
+      ),
+    getTraceRecord: (traceId: string, eventId: string, globalSequence: number) =>
+      request<TraceRawEventPage>(
+        `${traceBase}/${encodeURIComponent(traceId)}/records/${encodeURIComponent(eventId)}`
+          + query({ globalSequence })
       ),
     downloadTrace: (traceId: string) =>
       requestBlob(`${traceBase}/${encodeURIComponent(traceId)}/download`, {}, "application/gzip"),

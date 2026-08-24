@@ -13654,3 +13654,27 @@
 
 - 本轮企业增量包严格对应 release 提交 `4577a2c2e`，不含主工作区未提交的 Trace 优化；相对上一企业包没有新增 Flyway 文件。目标库若已执行到本包既有最新版本，部署后 history 不应新增记录；若上一轮在迁移完成前失败，则仍会补执行其尚未落库的既有版本，必须以前后完整 history 对比为准。
 - 目标 `.4/.114/.2` 尚未实际部署；部署前必须确认 `.4/.114` 已安装 worker 指纹 `877cea1827a6f55b994f4a82f0934d72ca1361fb12b9872ce77e45430073be33`，并各自已有长度至少 16 的 `TEST_AGENT_SKILLHUB_ACCESS_KEY`，禁止伪造指纹或用 Flyway `repair/outOfOrder` 绕过门禁。
+
+## 2026-08-24 - 修复大 Trace 详情首屏加载缓慢
+
+### Why
+
+- Trace 详情原先串行分页读取整条 gzip NDJSON 正文后才渲染；实库中的测试设计 Trace 有 27,234 条原始事件，其中绝大多数是 OpenCode 1.18.4 流式传输事件，导致点开时等待和浏览器内存开销随原始事件数增长。
+
+### What
+
+- 新增 `GET /api/internal/platform/traces/{traceId}/spans`，只从 ClickHouse 返回 DSH 语义 Span；过滤流式 delta、payload fragment 和已闭合 Tool before，保留未闭合 Tool 的 before。
+- 新增 `GET /api/internal/platform/traces/{traceId}/records/{eventId}`，选中事件后才从冻结归档节点读取正文；Assistant 按 `messageId` 汇聚，完成态 Tool/Skill 只读取同 `callId` 的 before/after，未闭合 before 继续读取 1.18.4 terminal event 作为错误/取消兜底。
+- Trace 前端改为语义 Span 首屏、正文异步懒加载，并对快速切换事件增加 generation/error 竞态保护；无语义 Span 的历史或未闭合生命周期 Trace 继续回退原 `/events`，不牺牲不完整 Trace 可查看能力。
+- 同步 API、事件流、前后端模块 README、ClickHouse 与企业部署说明；不新增 migration、镜像、端口、依赖或部署节点，未修改 OpenCode 1.18.4 只读源码。
+
+### How
+
+- JDK 25 下 `TraceArchiveServiceTest` 8 项、`TraceControllerTest` 6 项通过；真实 ClickHouse Testcontainers 集成用例 1 项通过。前端 `TraceView.test.ts` 3 项、typecheck 和 production build 通过。
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --with-clickhouse` 完整重建并启动 backend、frontend、ClickHouse 与 OpenCode manager 1.18.4；readiness 均成功。
+- 真实超级管理员页面点击 27,234 raw events 的 Trace，约 409 ms 显示 62 条语义记录；`/spans` 响应约 87 ms / 50 KiB。Tool 正文按需请求约 449 ms / 3.1 KiB；不完整 3-event Trace 约 408 ms 可查看。浏览器无新增 error。
+
+### Result
+
+- 正常 Trace 的首屏耗时不再与全部流式事件和归档正文大小线性绑定，事件 Payload/Result 仍按类型显示且正文继续只存在服务器归档。
+- 当前仓库 `.env.test` 实际指向本机 `127.0.0.1:15432/test_agent`，本次按用户要求使用该文件完成真实启动但未修改它；这不等同于仓库清单要求的 `.100/testagent_dev` 企业验收，后者仍需环境所有者恢复规定配置后单独执行。

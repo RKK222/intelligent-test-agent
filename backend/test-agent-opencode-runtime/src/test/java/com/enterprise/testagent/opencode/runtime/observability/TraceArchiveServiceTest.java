@@ -92,6 +92,11 @@ class TraceArchiveServiceTest {
         var page = service.readRawEvents(traceId, 0, 100);
         assertThat(page.items()).hasSize(3);
         assertThat(page.items().get(1).path("payload").path("result").asText()).contains("完整工具输出");
+        var record = service.readRecordEvents(
+                traceId, events.get(1).path("eventId").asText(), 4);
+        assertThat(record.items())
+                .extracting(node -> node.path("type").asText())
+                .containsExactly("TOOL_EXECUTE_BEFORE", "TOOL_EXECUTE_AFTER");
         try (InputStream compressed = service.openCompressedTrace(traceId);
                 GZIPInputStream gzip = new GZIPInputStream(compressed)) {
             assertThat(new String(gzip.readAllBytes(), StandardCharsets.UTF_8))
@@ -471,6 +476,11 @@ class TraceArchiveServiceTest {
 
         @Override
         public TraceModels.EventPage events(String traceId, long afterSequence, int limit) {
+            return new TraceModels.EventPage(List.of(), 0, afterSequence);
+        }
+
+        @Override
+        public TraceModels.EventPage trajectory(String traceId, long afterSequence, int limit) {
             return new TraceModels.EventPage(List.of(), 0, afterSequence);
         }
     }

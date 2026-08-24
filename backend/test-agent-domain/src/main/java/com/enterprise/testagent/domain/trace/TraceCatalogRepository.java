@@ -19,4 +19,7 @@ public interface TraceCatalogRepository {
     PageResponse<TraceModels.Catalog> search(TraceModels.Filter filter);
 
     TraceModels.EventPage events(String traceId, long afterSequence, int limit);
+
+    /** 只返回 DSH 首屏所需的语义 Span，避免把流式 delta 当作时间线记录传给浏览器。 */
+    TraceModels.EventPage trajectory(String traceId, long afterSequence, int limit);
 }

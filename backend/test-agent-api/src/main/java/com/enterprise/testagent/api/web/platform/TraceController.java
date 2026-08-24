@@ -84,6 +84,19 @@ public class TraceController {
         return ApiResponse.ok(queryService.require(traceId), RuntimeApiSupport.traceId(exchange));
     }
 
+    /** ClickHouse 仅返回无正文 DSH Span，供详情首屏使用，不触发跨节点归档读取。 */
+    @GetMapping("/{traceId}/spans")
+    public ApiResponse<TraceModels.EventPage> spans(
+            @PathVariable String traceId,
+            @RequestParam(required = false, defaultValue = "0") long afterSequence,
+            @RequestParam(required = false, defaultValue = "200") int limit,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ApiResponse.ok(
+                queryService.trajectory(traceId, afterSequence, limit),
+                RuntimeApiSupport.traceId(exchange));
+    }
+
     @GetMapping("/{traceId}/events")
     public Mono<Void> events(
             @PathVariable String traceId,
@@ -106,6 +119,36 @@ public class TraceController {
                     actor.userId(), catalog.userId(), traceId, "VIEW", "FAILED", requestTraceId));
         }
         return Mono.fromCallable(() -> archiveService.readRawEvents(traceId, afterSequence, limit))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(page -> writeJson(exchange, ApiResponse.ok(page, requestTraceId)))
+                .doOnSuccess(ignored -> auditLogger.record(
+                        actor.userId(), catalog.userId(), traceId, "VIEW", "SUCCESS", requestTraceId))
+                .doOnError(error -> auditLogger.record(
+                        actor.userId(), catalog.userId(), traceId, "VIEW", "FAILED", requestTraceId));
+    }
+
+    /** 选中单条 Span 后才读取关联正文；Assistant/Tool 分别按 messageId/callId 汇聚。 */
+    @GetMapping("/{traceId}/records/{eventId}")
+    public Mono<Void> record(
+            @PathVariable String traceId,
+            @PathVariable String eventId,
+            @RequestParam long globalSequence,
+            ServerWebExchange exchange) {
+        String requestTraceId = RuntimeApiSupport.traceId(exchange);
+        var actor = requireContentAccess(exchange, traceId, "VIEW", requestTraceId);
+        TraceModels.Catalog catalog;
+        try {
+            catalog = queryService.require(traceId);
+        } catch (RuntimeException exception) {
+            auditLogger.record(actor.userId(), null, traceId, "VIEW", "FAILED", requestTraceId);
+            throw exception;
+        }
+        Mono<Void> routed = routeContentIfRequired(catalog, exchange);
+        if (routed != null) {
+            return routed.doOnError(error -> auditLogger.record(
+                    actor.userId(), catalog.userId(), traceId, "VIEW", "FAILED", requestTraceId));
+        }
+        return Mono.fromCallable(() -> archiveService.readRecordEvents(traceId, eventId, globalSequence))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(page -> writeJson(exchange, ApiResponse.ok(page, requestTraceId)))
                 .doOnSuccess(ignored -> auditLogger.record(

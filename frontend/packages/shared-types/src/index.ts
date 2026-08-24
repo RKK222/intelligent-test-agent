@@ -1674,6 +1674,48 @@ export type TraceRawEventPage = {
   complete: boolean;
 };
 
+/** ClickHouse DSH 首屏 Span；只含索引元数据，禁止承载 prompt/reasoning/tool 正文。 */
+export type TraceSpan = {
+  traceId: string;
+  eventId: string;
+  type: string;
+  lane: "INPUT" | "MODEL" | "TOOLS" | string;
+  recordKind: string;
+  occurredAt: string;
+  startedAt?: string | null;
+  globalSequence: number;
+  sessionSequence: number;
+  sessionId: string;
+  runId?: string | null;
+  turnId?: string | null;
+  stepId?: string | null;
+  messageId?: string | null;
+  callId?: string | null;
+  parentId?: string | null;
+  capabilityKind?: string | null;
+  capabilityName?: string | null;
+  status: string;
+  durationMs: number;
+  tokensInput: number;
+  tokensOutput: number;
+  tokensReasoning: number;
+  tokensCacheRead: number;
+  tokensCacheWrite: number;
+  tokensTotal: number;
+  ttftMs?: number | null;
+  decodeMs?: number | null;
+  decodeTokens: number;
+  cost?: number | null;
+  finishReason?: string | null;
+  source: string;
+};
+
+export type TraceSpanPage = {
+  items: TraceSpan[];
+  total: number;
+  completeThrough: number;
+};
+
 export type AnalyticsOverview = {
   registeredUsers: number;
   enabledUsers: number;

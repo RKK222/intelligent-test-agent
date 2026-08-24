@@ -51,6 +51,15 @@ public class TraceQueryService {
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Trace 不存在"));
     }
 
+    /** ClickHouse 语义 Span 首屏；正文仍只允许从冻结归档节点按需读取。 */
+    public TraceModels.EventPage trajectory(String traceId, long afterSequence, int limit) {
+        require(traceId);
+        if (afterSequence < 0 || limit < 1 || limit > 500) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Trace Span 分页参数无效");
+        }
+        return repository.trajectory(traceId, afterSequence, limit);
+    }
+
     private String clean(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }

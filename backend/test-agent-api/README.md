@@ -107,7 +107,7 @@
   `OpencodeObservabilityTraceChunkController` 接收 Java 间幂等分片并委托 runtime 归档，Controller 不操作文件或 ClickHouse mapper。
 - `LocalClientConnectionWebSocketHandler` 在既有 WSS 上处理 additive Observability 声明、分片、ACK 和水位；每帧校验
   client instance/connection generation，并把 `pendingChunks` 传入归档目录。模型、控制和文件路径不复用该正文。
-- 四个 `/api/internal/platform/traces` 管理入口均强制 `SUPER_ADMIN`，正文查看、下载和失败尝试只写无正文、无物理路径的审计事实；正文按稳定 `linuxServerId` 存储节点路由，同节点 JVM 重启不会把已归档正文错误路由给离线的旧 `backendProcessId`。
+- 六个 `/api/internal/platform/traces` 管理入口均强制 `SUPER_ADMIN`；`/spans` 只查 ClickHouse 无正文语义索引，`/records/{eventId}` 仅在选中事件后按需读取关联正文。正文查看、下载和失败尝试只写无正文、无物理路径的审计事实；正文按稳定 `linuxServerId` 存储节点路由，同节点 JVM 重启不会把已归档正文错误路由给离线的旧 `backendProcessId`。
 
 ## 允许依赖
 

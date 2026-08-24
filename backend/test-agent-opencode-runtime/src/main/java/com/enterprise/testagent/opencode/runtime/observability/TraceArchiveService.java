@@ -34,10 +34,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -58,6 +60,7 @@ public class TraceArchiveService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TraceArchiveService.class);
     private static final Pattern TRACE_ID = Pattern.compile("trc_[a-f0-9]{32}");
+    private static final Pattern EVENT_ID = Pattern.compile("evt_[a-f0-9]{40}");
     private static final Pattern SHA256 = Pattern.compile("[a-f0-9]{64}");
     private static final int MAX_EVENTS_PER_BATCH = 512;
     private static final int MAX_EVENT_BYTES = 16 * 1024 * 1024;
@@ -237,6 +240,108 @@ public class TraceArchiveService {
         } catch (Exception exception) {
             throw contentUnavailable(exception);
         }
+    }
+
+    /**
+     * 只读取一条 DSH 语义记录的正文。Assistant 按 messageId 汇聚 1.18.4 流式 part，Tool 按 callId
+     * 汇聚 before/after；其它类型只返回目标事件及其正文分片，避免点击记录时下载整条 Trace。
+     */
+    public OpencodeObservabilityModels.RawEventPage readRecordEvents(
+            String traceId,
+            String eventId,
+            long globalSequence) {
+        validateTraceId(traceId);
+        if (eventId == null || !EVENT_ID.matcher(eventId).matches() || globalSequence < 1) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Trace 记录身份无效");
+        }
+        try {
+            Path directory = traceDirectory(traceId);
+            Manifest manifest = readManifest(directory, traceId);
+            List<Chunk> chunks = manifest.chunks().stream()
+                    .sorted(Comparator.comparingLong(Chunk::firstSequence))
+                    .toList();
+            JsonNode target = null;
+            for (Chunk chunk : chunks) {
+                if (globalSequence < chunk.firstSequence() || globalSequence > chunk.lastSequence()) {
+                    continue;
+                }
+                target = readChunkEvents(directory, chunk).stream()
+                        .filter(event -> globalSequence == longValue(event, "globalSequence")
+                                && eventId.equals(text(event, "eventId")))
+                        .findFirst()
+                        .orElse(null);
+                if (target != null) {
+                    break;
+                }
+            }
+            if (target == null) {
+                throw new PlatformException(ErrorCode.NOT_FOUND, "Trace 记录不存在");
+            }
+
+            String targetType = text(target, "type");
+            String callId = text(target, "callId");
+            boolean toolRecord = !blank(callId) && targetType.startsWith("TOOL_EXECUTE_");
+            // Tool 正文以 callId 为权威；不能再按同 messageId 扩大到整轮 Assistant 流式分片。
+            String messageId = toolRecord ? "" : text(target, "messageId");
+            boolean includeToolTerminalFallback = "TOOL_EXECUTE_BEFORE".equals(targetType);
+            Set<String> fragmentGroups = new HashSet<>();
+            Set<String> includedEventIds = new HashSet<>();
+            List<JsonNode> result = new ArrayList<>();
+            for (Chunk chunk : chunks) {
+                // 没有关联标识的 System/User/Context 只可能在目标事件之后携带正文分片。
+                if (blank(messageId) && blank(callId) && chunk.lastSequence() < globalSequence) {
+                    continue;
+                }
+                for (JsonNode event : readChunkEvents(directory, chunk)) {
+                    String candidateEventId = text(event, "eventId");
+                    String fragmentGroup = text(event.path("payload"), "fragmentGroupId");
+                    String candidateType = text(event, "type");
+                    boolean callIdentityMatch = toolRecord
+                            && callId.equals(text(event, "callId"))
+                            && (candidateType.startsWith("TOOL_EXECUTE_")
+                                    || (includeToolTerminalFallback && "OPENCODE_EVENT".equals(candidateType)));
+                    boolean identityMatch = eventId.equals(candidateEventId)
+                            || (!blank(messageId) && messageId.equals(text(event, "messageId")))
+                            || callIdentityMatch;
+                    boolean fragmentMatch = !blank(fragmentGroup) && fragmentGroups.contains(fragmentGroup);
+                    if (!identityMatch && !fragmentMatch) {
+                        continue;
+                    }
+                    if (includedEventIds.add(candidateEventId)) {
+                        result.add(event);
+                    }
+                    String primaryFragmentGroup = text(event.path("payload").path("fragmentedPayload"),
+                            "fragmentGroupId");
+                    if (!blank(primaryFragmentGroup)) {
+                        fragmentGroups.add(primaryFragmentGroup);
+                    }
+                }
+            }
+            result.sort(Comparator.comparingLong(event -> longValue(event, "globalSequence")));
+            return new OpencodeObservabilityModels.RawEventPage(
+                    result, manifest.completeThrough(), manifest.complete());
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw contentUnavailable(exception);
+        }
+    }
+
+    private List<JsonNode> readChunkEvents(Path directory, Chunk chunk) throws IOException {
+        List<JsonNode> events = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                new GZIPInputStream(Files.newInputStream(
+                        checkedChild(directory, chunk.fileName()),
+                        StandardOpenOption.READ)),
+                StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.isBlank()) {
+                    events.add(objectMapper.readTree(line));
+                }
+            }
+        }
+        return events;
     }
 
     private OpencodeObservabilityModels.TraceAck archive(

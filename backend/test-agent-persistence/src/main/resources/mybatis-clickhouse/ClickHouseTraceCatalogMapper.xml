@@ -118,4 +118,39 @@
     <select id="countEvents" resultType="long">
         select count() from analytics_trace_spans final where trace_id = #{traceId}
     </select>
+
+    <!--
+      DSH 时间线只消费语义记录。OpenCode 1.18.4 的 message.part.delta 等传输级事件仍完整归档，
+      但不能在打开 Trace 时成千上万条地返回浏览器；未闭合 Tool 则保留 before 作为进行中记录。
+    -->
+    <sql id="trajectoryFilter">
+        trace_id = #{traceId}
+        and (
+            type in ('CHAT_MESSAGE', 'SYSTEM_PROMPT', 'CONTEXT_MESSAGES', 'COMPACTION_CONTEXT',
+                     'ASSISTANT_STEP_METRICS', 'SESSION_METRICS', 'TOOL_EXECUTE_AFTER')
+            or (
+                type = 'TOOL_EXECUTE_BEFORE'
+                and call_id != ''
+                and call_id not in (
+                    select call_id from analytics_trace_spans final
+                    where trace_id = #{traceId} and type = 'TOOL_EXECUTE_AFTER' and call_id != ''
+                )
+            )
+        )
+    </sql>
+
+    <select id="trajectory" resultType="com.enterprise.testagent.domain.trace.TraceModels$Span">
+        select trace_id, event_id, type, lane, record_kind, occurred_at, started_at, global_sequence, session_sequence,
+               session_id, run_id, turn_id, step_id, message_id, call_id, parent_id,
+               capability_kind, capability_name, status, duration_ms, tokens_input, tokens_output,
+               tokens_reasoning, tokens_cache_read, tokens_cache_write, tokens_total, ttft_ms, decode_ms,
+               decode_tokens, cost, finish_reason, source
+        from analytics_trace_spans final
+        where <include refid="trajectoryFilter"/> and global_sequence &gt; #{afterSequence}
+        order by global_sequence, event_id limit #{limit}
+    </select>
+
+    <select id="countTrajectory" resultType="long">
+        select count() from analytics_trace_spans final where <include refid="trajectoryFilter"/>
+    </select>
 </mapper>

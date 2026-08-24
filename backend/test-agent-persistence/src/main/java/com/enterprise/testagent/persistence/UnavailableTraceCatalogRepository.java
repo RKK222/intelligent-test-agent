@@ -37,6 +37,11 @@ public class UnavailableTraceCatalogRepository implements TraceCatalogRepository
         throw unavailable();
     }
 
+    @Override
+    public TraceModels.EventPage trajectory(String traceId, long afterSequence, int limit) {
+        throw unavailable();
+    }
+
     private PlatformException unavailable() {
         return new PlatformException(ErrorCode.ANALYTICS_UNAVAILABLE, "ClickHouse Trace 目录未启用");
     }

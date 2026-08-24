@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { TraceCatalog, TraceRawEvent } from "@test-agent/shared-types";
+import type { TraceCatalog, TraceRawEvent, TraceSpan } from "@test-agent/shared-types";
 import TraceView from "../src/views/TraceView.vue";
 import traceViewSource from "../src/views/TraceView.vue?raw";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
@@ -13,6 +13,8 @@ const api = vi.hoisted(() => ({
   listTraces: vi.fn(),
   getTrace: vi.fn(),
   getTraceEvents: vi.fn(),
+  getTraceSpans: vi.fn(),
+  getTraceRecord: vi.fn(),
   downloadTrace: vi.fn(),
   getCurrentUser: vi.fn(),
 }));
@@ -122,6 +124,11 @@ describe("TraceView", () => {
     api.listTraces.mockResolvedValue({ items: [trace], page: 1, size: 30, total: 1 });
     api.getTrace.mockResolvedValue(trace);
     api.getTraceEvents.mockResolvedValue({ items: events, completeThrough: 6, complete: false });
+    const spans = events
+      .filter((candidate) => ["SYSTEM_PROMPT", "ASSISTANT_STEP_METRICS", "TOOL_EXECUTE_AFTER"].includes(candidate.type))
+      .map(span);
+    api.getTraceSpans.mockResolvedValue({ items: spans, total: spans.length, completeThrough: 6 });
+    api.getTraceRecord.mockResolvedValue({ items: events, completeThrough: 6, complete: false });
     api.downloadTrace.mockResolvedValue(new Blob(["gzip"]));
     api.getCurrentUser.mockResolvedValue({
       userId: "usr_admin",
@@ -160,9 +167,15 @@ describe("TraceView", () => {
     expect(view.queryByLabelText("返回工作台")).toBeNull();
     expect(view.getAllByText("不完整").length).toBeGreaterThan(0);
 
+    let releaseInitialRecord!: (value: { items: TraceRawEvent[]; completeThrough: number; complete: boolean }) => void;
+    api.getTraceRecord.mockImplementationOnce(() => new Promise((resolve) => { releaseInitialRecord = resolve; }));
     await fireEvent.click(view.getByText("test-design-agent").closest("button")!);
     await waitFor(() => expect(view.getAllByText("test-design").length).toBeGreaterThan(0));
-    expect(api.getTraceEvents).toHaveBeenCalledWith(trace.traceId, 0, 500);
+    expect(api.getTraceSpans).toHaveBeenCalledWith(trace.traceId, 0, 500);
+    expect(api.getTraceEvents).not.toHaveBeenCalled();
+    expect(view.getByText("正在读取所选事件正文…")).toBeTruthy();
+    releaseInitialRecord({ items: events, completeThrough: 6, complete: false });
+    await waitFor(() => expect(view.queryByText("正在读取所选事件正文…")).toBeNull());
     const laneText = Array.from(view.container.querySelectorAll(".lane-labels span"))
       .map((element) => element.textContent?.trim());
     expect(laneText).toEqual(["Input", "Model", "Tools"]);
@@ -235,7 +248,7 @@ describe("TraceView", () => {
     expect(skillLaneButton.getAttribute("aria-pressed")).toBe("true");
     expect(view.container.querySelector(".event-row.selected .event-card b")?.textContent).toBe("test-design");
 
-    const modelLaneButton = view.getByRole("button", { name: "选择 message.part.updated 事件" });
+    const modelLaneButton = view.getByRole("button", { name: "选择 ASSISTANT STEP METRICS 事件" });
     await fireEvent.mouseEnter(modelLaneButton);
     expect(view.container.querySelector(".lane-tooltip")?.textContent).toContain("TTFT 40 ms");
     expect(modelLaneButton.querySelectorAll(".lane-phase")).toHaveLength(2);
@@ -250,7 +263,7 @@ describe("TraceView", () => {
     expect(view.getByText("OPENCODE_PLUGIN")).toBeTruthy();
 
     const metricEventTitle = Array.from(view.container.querySelectorAll(".event-card b"))
-      .find((element) => element.textContent === "message.part.updated");
+      .find((element) => element.textContent === "ASSISTANT STEP METRICS");
     await fireEvent.click(metricEventTitle!.closest("button")!);
     await fireEvent.click(view.getByRole("button", { name: "Output" }));
     expect(view.container.querySelector(".inspector-body pre")?.textContent).toContain("分析路径");
@@ -324,6 +337,7 @@ describe("TraceView", () => {
     });
     api.getTrace.mockImplementation(async (traceId: string) =>
       traceId === lifecycleTrace.traceId ? lifecycleTrace : incompleteTrace);
+    api.getTraceSpans.mockResolvedValue({ items: [], total: 0, completeThrough: 0 });
     api.getTraceEvents.mockImplementation(async (traceId: string) => traceId === lifecycleTrace.traceId
       ? { items: lifecycleEvents, completeThrough: 3, complete: false }
       : { items: incompleteEvents, completeThrough: 4, complete: false });
@@ -343,8 +357,8 @@ describe("TraceView", () => {
     await router.isReady();
 
     const view = render(TraceView, { global: { plugins: [pinia, router] } });
-    expect(await view.findByText("进行中")).toBeTruthy();
-    expect(view.getByText("待上传")).toBeTruthy();
+    expect(await view.findByText("待上传")).toBeTruthy();
+    expect(view.getAllByText("进行中").length).toBeGreaterThan(1);
     expect(view.getByText("0/3 条已完整归档")).toBeTruthy();
     await fireEvent.click((await view.findByText(incompleteTrace.traceId)).closest("button")!);
     await waitFor(() => expect(view.getByText("正在处理")).toBeTruthy());
@@ -384,5 +398,48 @@ function event(sequence: number, type: string, payload: Record<string, unknown>)
     runId: "run_trace",
     turnId: "turn:msg-user",
     payload,
+  };
+}
+
+function span(rawEvent: TraceRawEvent): TraceSpan {
+  const payload = rawEvent.payload ?? {};
+  const capabilityKind = typeof payload.capabilityKind === "string" ? payload.capabilityKind : null;
+  const capabilityName = capabilityKind === "SKILL"
+    ? String(payload.skillName ?? "")
+    : String(payload.tool ?? "");
+  return {
+    traceId: rawEvent.traceId,
+    eventId: rawEvent.eventId,
+    type: rawEvent.type,
+    lane: rawEvent.type.startsWith("TOOL_") ? "TOOLS"
+      : ["CHAT_MESSAGE", "SYSTEM_PROMPT", "CONTEXT_MESSAGES"].includes(rawEvent.type) ? "INPUT" : "MODEL",
+    recordKind: String(payload.recordKind ?? (rawEvent.type === "SYSTEM_PROMPT" ? "system" : "message")),
+    occurredAt: rawEvent.timestamp,
+    startedAt: typeof payload.startedAt === "string" ? payload.startedAt : null,
+    globalSequence: rawEvent.globalSequence,
+    sessionSequence: rawEvent.sessionSequence,
+    sessionId: rawEvent.sessionId,
+    runId: rawEvent.runId,
+    turnId: rawEvent.turnId,
+    stepId: rawEvent.stepId,
+    messageId: rawEvent.messageId,
+    callId: rawEvent.callId,
+    parentId: rawEvent.parentId,
+    capabilityKind,
+    capabilityName,
+    status: String(payload.status ?? "COMPLETED"),
+    durationMs: Number(payload.durationMs ?? 0),
+    tokensInput: Number(payload.tokensInput ?? 0),
+    tokensOutput: Number(payload.tokensOutput ?? 0),
+    tokensReasoning: Number(payload.tokensReasoning ?? 0),
+    tokensCacheRead: Number(payload.tokensCacheRead ?? 0),
+    tokensCacheWrite: Number(payload.tokensCacheWrite ?? 0),
+    tokensTotal: Number(payload.tokensTotal ?? 0),
+    ttftMs: Number(payload.ttftMs ?? 0),
+    decodeMs: Number(payload.decodeMs ?? 0),
+    decodeTokens: Number(payload.decodeTokens ?? 0),
+    cost: Number(payload.cost ?? 0),
+    finishReason: typeof payload.finishReason === "string" ? payload.finishReason : null,
+    source: "OPENCODE_PLUGIN",
   };
 }

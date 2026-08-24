@@ -947,6 +947,10 @@ LobeHub 登录票据签发、HMAC 兑换/撤销、Desktop/CLI 浏览器确认、
 
 ## OpenCode Observability telemetry 与本地 Trace 帧
 
+Trace 控制台的首屏优化不新增 SSE/WSS 帧：`GET .../spans` 读取 ClickHouse 无正文语义索引，选中记录后的
+`GET .../records/{eventId}` 读取冻结归档正文，均是普通 HTTP 请求。既有 RunEvent SSE 与以下本地 Trace 上传帧的
+优先级、ACK、水位和 generation fencing 行为不变。
+
 OpenCode Observability 是独立于 RunEvent/SSE 的追加式 telemetry stream。实际 system prompt、上下文、用户消息、
 assistant/reasoning 分片、父子 Agent、Tool/Skill 参数与结果、异常、token 和耗时只进入此链路；不得映射为新的
 RunEvent，也不得改变聊天 SSE 的顺序、续传或错误语义。

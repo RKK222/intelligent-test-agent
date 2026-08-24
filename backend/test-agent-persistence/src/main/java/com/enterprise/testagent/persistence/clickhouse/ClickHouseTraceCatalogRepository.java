@@ -66,6 +66,14 @@ public class ClickHouseTraceCatalogRepository implements TraceCatalogRepository 
                 find(traceId).map(TraceModels.Catalog::completeThrough).orElse(0L)));
     }
 
+    @Override
+    public TraceModels.EventPage trajectory(String traceId, long afterSequence, int limit) {
+        return available(() -> new TraceModels.EventPage(
+                mapper.trajectory(traceId, afterSequence, limit),
+                mapper.countTrajectory(traceId),
+                find(traceId).map(TraceModels.Catalog::completeThrough).orElse(0L)));
+    }
+
     private <T> T available(java.util.concurrent.Callable<T> call) {
         try {
             return call.call();

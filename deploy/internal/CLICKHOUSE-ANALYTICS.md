@@ -294,6 +294,9 @@ Trace catalog/span 和插件 capability facts；ClickHouse 只保存筛选、泳
 不得保存 prompt、reasoning、工具参数/结果或任何归档路径。Skill/Agent/Tool 查询优先插件事实，并按
 `event_id`、`run_id + call_id` 幂等；旧 RunEvent 事实只补足插件覆盖起点以前或未覆盖的调用。覆盖起点和目录分页只认
 `run_id` 非空的平台 Run，不能让 OpenCode 进程启动/重连广播生成大量 `opencode / 不完整` 目录或提前冻结切换点。
+Trace 页面首屏的 `trajectory` 查询只读取语义 Span，不返回流式 delta、payload fragment 或任何正文；选中记录后的正文仍由
+首次归档的 owner 节点读取并经既有双后端路由转发。本次优化不新增 migration、镜像、端口或企业依赖，升级/回滚继续使用同一
+Java、前端和 ClickHouse 资源集合。
 
 Trace 正文写在归档 owner 后端的现有持久化数据卷，不写 ClickHouse。无自动 TTL 时运维必须监控：
 

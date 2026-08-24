@@ -408,6 +408,39 @@ class ClickHouseAnalyticsIntegrationTest {
                 0.125D,
                 "stop",
                 "OPENCODE_PLUGIN")));
+        traceMapper.insertSpans(List.of(new TraceModels.Span(
+                catalog.traceId(),
+                "evt_000000000000000000000000000000000102",
+                "OPENCODE_EVENT",
+                "MODEL",
+                "message",
+                occurredAt.plusSeconds(2),
+                null,
+                102,
+                11,
+                "ses-plugin",
+                "run-plugin",
+                "turn-plugin",
+                "step-plugin",
+                "message-plugin",
+                null,
+                null,
+                "",
+                "",
+                "COMPLETED",
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                null,
+                null,
+                0,
+                null,
+                null,
+                "OPENCODE_PLUGIN")));
         mapper.insertEvents(List.of(
                 event(
                         "plugin-legacy:before-cutover", 33, occurredAt.minusSeconds(1),
@@ -449,12 +482,14 @@ class ClickHouseAnalyticsIntegrationTest {
         assertThat(coverage.source()).isEqualTo("OPENCODE_PLUGIN");
         assertThat(coverage.coverageStartAt()).isEqualTo(occurredAt);
         assertThat(coverage.rolloutCompleteness()).isZero();
-        assertThat(traceMapper.events(catalog.traceId(), 0, 10)).singleElement().satisfies(span -> {
+        assertThat(traceMapper.events(catalog.traceId(), 0, 10)).hasSize(2);
+        assertThat(traceMapper.trajectory(catalog.traceId(), 0, 10)).singleElement().satisfies(span -> {
             assertThat(span.tokensTotal()).isEqualTo(127);
             assertThat(span.decodeTokens()).isEqualTo(20);
             assertThat(span.cost()).isEqualTo(0.125D);
             assertThat(span.finishReason()).isEqualTo("stop");
         });
+        assertThat(traceMapper.countTrajectory(catalog.traceId())).isEqualTo(1);
         assertThat(traceMapper.search(traceFilter, 20, 0))
                 .extracting(TraceModels.Catalog::traceId)
                 .containsExactly(activeCatalog.traceId(), historicalPendingCatalog.traceId(), catalog.traceId());

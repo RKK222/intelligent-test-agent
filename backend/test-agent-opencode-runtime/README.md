@@ -108,6 +108,8 @@
 跨存储节点查看和下载只复用 `BackendJavaRouteResolver`/`BackendHttpForwarder`；owner 服务器不可用时返回
 `TRACE_CONTENT_UNAVAILABLE`，不扫描其它节点也不本机降级。
 ClickHouse 只写目录、关联和 DSH 对齐的 `record_kind/started_at/cache token/ttft/decode` 元数据，正文不进入数据库或日志。
+Trace 首屏通过 ClickHouse 语义 Span 闭集过滤掉 OpenCode 1.18.4 流式 delta 和 payload fragment；正文归档提供按 eventId、
+globalSequence 定位的记录读取，Assistant 只汇聚同 `messageId`、Tool/Skill 只汇聚同 `callId`，避免详情页打开时跨节点下载整条 Trace。
 本地 `pendingChunks` 进入目录积压；ACK 前不删除 spool，失败只标记积压/不完整且不影响聊天。
 目录筛选中的 `INCOMPLETE` 以 `complete=false` 为准，因此仍处于 `ACTIVE`、分片已部分归档但尚未闭合的 Run 也可定位并读取现有正文；
 `archiveStatus=ARCHIVED` 只说明当前分片已归档，不等价于整条 Trace 已完整。

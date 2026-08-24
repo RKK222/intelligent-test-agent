@@ -236,10 +236,12 @@ Trace 位于系统控制台的独立菜单，兼容 `/traces` 地址只重定向
 Decode；三泳道上水平拖拽可框选时间范围并淡化窗外记录，双击或按 Esc 清除，悬停浮层显示对应时间与耗时。只有确认拖拽后才捕获
 指针，普通点击色块仍会选中并滚动到对应明细；检查器按记录类型显示 Preview/Output/Result，分别呈现输入正文、Assistant
 text/reasoning/finish 与 Tool/Skill result/output/error，无专用字段时回退原始 payload，并继续展示 DSH 对齐的记录类型、
-Turn/Step、TTFT、Decode 和五类 token。不得把 Trace 放入运营分析 tab、直连 OpenCode、读取本地 spool 或提供跨用户批量正文导出。
+Turn/Step、TTFT、Decode 和五类 token。打开 Trace 时先从 ClickHouse `/spans` 读取无正文的 DSH 语义记录，不能等待或分页下载
+整条原始归档；选中记录后才调用 `/records/{eventId}`，按 messageId/callId 补齐对应正文与 fragment。只有尚无语义 Span 的历史或
+未闭合生命周期 Trace 才回退 `/events`，保证不完整 Trace 仍可查看。不得把 Trace 放入运营分析 tab、直连 OpenCode、读取本地 spool 或提供跨用户批量正文导出。
 
 目录状态区分“进行中”“待上传”“不完整”和“完整”：`ACTIVE` 且无丢弃/积压时显示进行中，有未确认分片时显示待上传，只有丢弃或已结束但未闭合等真实完整性问题才显示不完整。无法从 1.18.4 Hook 或平台 Run 关联得到 Agent 的兼容记录显示“未识别 Agent”，不得再以 `opencode` 伪装业务 Agent。回归由 `tests/TraceView.test.ts` 覆盖控制台内嵌三泳道、不完整状态、payload fragment 重组、Skill 调用、脱敏、source、
-进行中 Assistant/Tool 分片聚合、仅生命周期事件兜底、Duration/Turns/Calls 交互和 DSH Timing 字段；不完整筛选按
+进行中 Assistant/Tool 分片聚合、语义 Span 首屏、正文懒加载、仅生命周期事件兜底、Duration/Turns/Calls 交互和 DSH Timing 字段；不完整筛选按
 `complete=false` 工作，不能因 Run 尚未产生终态而隐藏已归档正文。
 `tests/login-redirect.test.ts` 覆盖 `/traces` 登录恢复路径。
 

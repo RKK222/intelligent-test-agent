@@ -52,6 +52,25 @@ class TraceControllerTest {
     }
 
     @Test
+    void superAdminLoadsMetadataSpansWithoutReadingArchiveBody() {
+        Fixture fixture = fixture(List.of(Dictionary.ROLE_SUPER_ADMIN));
+        when(fixture.queryService().trajectory(TRACE_ID, 0, 200))
+                .thenReturn(new TraceModels.EventPage(List.of(span()), 1, 12));
+
+        fixture.client().get()
+                .uri("/api/internal/platform/traces/{traceId}/spans", TRACE_ID)
+                .header("X-Trace-Id", REQUEST_TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.items[0].type").isEqualTo("ASSISTANT_STEP_METRICS")
+                .jsonPath("$.data.total").isEqualTo(1);
+
+        verify(fixture.archiveService(), never()).readRawEvents(
+                ArgumentMatchers.anyString(), ArgumentMatchers.anyLong(), ArgumentMatchers.anyInt());
+    }
+
+    @Test
     void nonSuperAdminCannotReadTraceBodyAndAttemptIsAudited() {
         Fixture fixture = fixture(List.of(Dictionary.ROLE_APP_ADMIN));
 
@@ -107,6 +126,29 @@ class TraceControllerTest {
 
         verify(fixture.forwarder(), never()).forwardRaw(
                 ArgumentMatchers.any(), ArgumentMatchers.any());
+    }
+
+    @Test
+    void selectedRecordReadsOnlyItsRelatedArchiveEvents() {
+        Fixture fixture = fixture(List.of(Dictionary.ROLE_SUPER_ADMIN));
+        String eventId = "evt_" + "0".repeat(38) + "12";
+        when(fixture.queryService().require(TRACE_ID)).thenReturn(catalog());
+        when(fixture.routeResolver().isCurrent("linux-server-a")).thenReturn(true);
+        when(fixture.archiveService().readRecordEvents(TRACE_ID, eventId, 12))
+                .thenReturn(new OpencodeObservabilityModels.RawEventPage(List.of(), 12, true));
+
+        fixture.client().get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/internal/platform/traces/{traceId}/records/{eventId}")
+                        .queryParam("globalSequence", 12)
+                        .build(TRACE_ID, eventId))
+                .header("X-Trace-Id", REQUEST_TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.completeThrough").isEqualTo(12);
+
+        verify(fixture.archiveService()).readRecordEvents(TRACE_ID, eventId, 12);
     }
 
     private static Fixture fixture(List<String> roles) {
@@ -180,6 +222,42 @@ class TraceControllerTest {
                 0,
                 true,
                 true);
+    }
+
+    private static TraceModels.Span span() {
+        return new TraceModels.Span(
+                TRACE_ID,
+                "evt_" + "0".repeat(38) + "12",
+                "ASSISTANT_STEP_METRICS",
+                "MODEL",
+                "message",
+                NOW,
+                NOW.minusSeconds(1),
+                12,
+                12,
+                "ses_1234567890abcdef",
+                "run_1234567890abcdef",
+                "turn-1",
+                "step-1",
+                "message-1",
+                null,
+                null,
+                "",
+                "",
+                "COMPLETED",
+                1_000,
+                100,
+                20,
+                5,
+                10,
+                0,
+                125,
+                30L,
+                970L,
+                20,
+                0.01D,
+                "stop",
+                "OPENCODE_PLUGIN");
     }
 
     private record Fixture(

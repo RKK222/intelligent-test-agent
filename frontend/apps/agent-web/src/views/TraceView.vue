@@ -6,6 +6,7 @@ import type {
   TraceCatalog,
   TraceQueryParams,
   TraceRawEvent,
+  TraceSpan,
 } from "@test-agent/shared-types";
 import {
   ChevronLeft,
@@ -48,6 +49,8 @@ const filters = ref({
 const page = ref<PageResponse<TraceCatalog>>({ items: [], page: 1, size: 30, total: 0 });
 const selectedTrace = ref<TraceCatalog | null>(null);
 const rawEvents = ref<TraceRawEvent[]>([]);
+const spanEvents = ref<TraceSpan[]>([]);
+const eventDetails = ref<Map<string, DisplayEvent>>(new Map());
 const selectedEventId = ref<string | null>(null);
 const hoveredEventId = ref<string | null>(null);
 const timelineSelection = ref<TimelineSelection | null>(null);
@@ -64,6 +67,8 @@ const eventSearch = ref("");
 const collapsedParents = ref<Set<string>>(new Set());
 const loadingList = ref(false);
 const loadingEvents = ref(false);
+const loadingEventIds = ref<Set<string>>(new Set());
+const eventDetailError = ref<string | null>(null);
 const downloading = ref(false);
 const error = ref<string | null>(null);
 let rangeStart = 0;
@@ -72,6 +77,7 @@ let rangeDragging = false;
 let suppressTimelineClick = false;
 let panelResizeStartX = 0;
 let panelResizeStartWidth = 0;
+let traceOpenGeneration = 0;
 
 const traceContentStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {};
@@ -86,12 +92,17 @@ const traceContentStyle = computed<Record<string, string>>(() => {
 });
 
 const displayEvents = computed<DisplayEvent[]>(() => materializeEvents(rawEvents.value));
-const trajectoryEvents = computed<DisplayEvent[]>(() => buildTrajectoryEvents(displayEvents.value));
-const selectedEvent = computed(() =>
-  trajectoryEvents.value.find((event) => event.eventId === selectedEventId.value)
-    ?? displayEvents.value.find((event) => event.eventId === selectedEventId.value)
-    ?? null
-);
+const spanDisplayEvents = computed<DisplayEvent[]>(() => spanEvents.value.map(spanToDisplayEvent));
+const trajectoryEvents = computed<DisplayEvent[]>(() => {
+  const base = spanDisplayEvents.value.length > 0
+    ? spanDisplayEvents.value
+    : buildTrajectoryEvents(displayEvents.value);
+  return base.map((event) => mergeEventDetail(event, eventDetails.value.get(event.eventId)));
+});
+const selectedEvent = computed(() => trajectoryEvents.value
+  .find((event) => event.eventId === selectedEventId.value)
+  ?? displayEvents.value.find((event) => event.eventId === selectedEventId.value)
+  ?? null);
 const selectedTrajectoryEvent = computed(() =>
   trajectoryEvents.value.find((event) => event.eventId === selectedEventId.value) ?? null
 );
@@ -211,23 +222,52 @@ async function loadTraces(targetPage = page.value.page) {
 }
 
 async function openTrace(trace: TraceCatalog) {
+  const generation = ++traceOpenGeneration;
   selectedTrace.value = trace;
   selectedEventId.value = null;
   hoveredEventId.value = null;
   timelineSelection.value = null;
   rawEvents.value = [];
+  spanEvents.value = [];
+  eventDetails.value = new Map();
+  loadingEventIds.value = new Set();
+  eventDetailError.value = null;
   loadingEvents.value = true;
   error.value = null;
   try {
-    const [detail, events] = await Promise.all([api.getTrace(trace.traceId), loadAllEvents(trace.traceId)]);
+    const [detail, spans] = await Promise.all([api.getTrace(trace.traceId), loadAllSpans(trace.traceId)]);
+    if (generation !== traceOpenGeneration) return;
     selectedTrace.value = detail;
-    rawEvents.value = events;
-    selectedEventId.value = buildTrajectoryEvents(materializeEvents(events))[0]?.eventId ?? null;
+    spanEvents.value = spans;
+    // 历史/未闭合生命周期 Trace 可能尚无语义 Span；仅该小概率场景回退原始事件，保证仍可查看。
+    if (spans.length === 0 && detail.eventCount > 0) {
+      rawEvents.value = await loadAllEvents(trace.traceId);
+      if (generation !== traceOpenGeneration) return;
+    }
+    const first = spanEvents.value.length > 0
+      ? spanToDisplayEvent(spanEvents.value[0])
+      : buildTrajectoryEvents(materializeEvents(rawEvents.value))[0];
+    selectedEventId.value = first?.eventId ?? null;
+    if (first && spanEvents.value.length > 0) void loadEventDetail(first);
   } catch (cause) {
-    error.value = messageOf(cause, "Trace 正文暂不可用");
+    if (generation === traceOpenGeneration) error.value = messageOf(cause, "Trace 轨迹暂不可用");
   } finally {
-    loadingEvents.value = false;
+    if (generation === traceOpenGeneration) loadingEvents.value = false;
   }
+}
+
+async function loadAllSpans(traceId: string): Promise<TraceSpan[]> {
+  const result: TraceSpan[] = [];
+  let afterSequence = 0;
+  for (;;) {
+    const response = await api.getTraceSpans(traceId, afterSequence, 500);
+    result.push(...response.items);
+    if (response.items.length === 0 || result.length >= response.total || response.items.length < 500) break;
+    const next = Math.max(...response.items.map((event) => event.globalSequence));
+    if (next <= afterSequence) break;
+    afterSequence = next;
+  }
+  return result;
 }
 
 async function loadAllEvents(traceId: string): Promise<TraceRawEvent[]> {
@@ -242,6 +282,91 @@ async function loadAllEvents(traceId: string): Promise<TraceRawEvent[]> {
     afterSequence = next;
   }
   return result;
+}
+
+async function loadEventDetail(event: DisplayEvent) {
+  const trace = selectedTrace.value;
+  if (!trace || spanEvents.value.length === 0 || eventDetails.value.has(event.eventId)
+      || loadingEventIds.value.has(event.eventId)) return;
+  loadingEventIds.value = new Set([...loadingEventIds.value, event.eventId]);
+  eventDetailError.value = null;
+  try {
+    const response = await api.getTraceRecord(trace.traceId, event.eventId, event.globalSequence);
+    if (selectedTrace.value?.traceId !== trace.traceId) return;
+    const materialized = materializeEvents(response.items);
+    const detail = buildTrajectoryEvents(materialized).find((candidate) => candidate.eventId === event.eventId)
+      ?? materialized.find((candidate) => candidate.eventId === event.eventId);
+    if (detail) {
+      const next = new Map(eventDetails.value);
+      next.set(event.eventId, detail);
+      eventDetails.value = next;
+    }
+  } catch (cause) {
+    if (selectedTrace.value?.traceId === trace.traceId && selectedEventId.value === event.eventId) {
+      eventDetailError.value = messageOf(cause, "所选事件正文暂不可用");
+    }
+  } finally {
+    const next = new Set(loadingEventIds.value);
+    next.delete(event.eventId);
+    loadingEventIds.value = next;
+  }
+}
+
+function spanToDisplayEvent(span: TraceSpan): DisplayEvent {
+  const capability: Record<string, unknown> = {};
+  if (span.capabilityKind === "SKILL") capability.skillName = span.capabilityName;
+  else if (span.capabilityKind === "AGENT") capability.agentName = span.capabilityName;
+  else if (span.capabilityName) capability.tool = span.capabilityName;
+  const displayPayload: Record<string, unknown> = {
+    recordKind: span.recordKind,
+    status: span.status,
+    startedAt: span.startedAt,
+    durationMs: span.durationMs,
+    tokensInput: span.tokensInput,
+    tokensOutput: span.tokensOutput,
+    tokensReasoning: span.tokensReasoning,
+    tokensCacheRead: span.tokensCacheRead,
+    tokensCacheWrite: span.tokensCacheWrite,
+    tokensTotal: span.tokensTotal,
+    ttftMs: span.ttftMs,
+    decodeMs: span.decodeMs,
+    decodeTokens: span.decodeTokens,
+    cost: span.cost,
+    finishReason: span.finishReason,
+    source: span.source,
+    ...capability,
+  };
+  return {
+    schemaVersion: "1.0",
+    eventId: span.eventId,
+    traceId: span.traceId,
+    type: span.type,
+    timestamp: span.occurredAt,
+    globalSequence: span.globalSequence,
+    sessionSequence: span.sessionSequence,
+    sessionId: span.sessionId,
+    runId: span.runId,
+    turnId: span.turnId,
+    stepId: span.stepId,
+    messageId: span.messageId,
+    callId: span.callId,
+    parentId: span.parentId,
+    payload: displayPayload,
+    displayPayload,
+    lane: ["INPUT", "MODEL", "TOOLS"].includes(span.lane) ? span.lane as TraceLane : "MODEL",
+  };
+}
+
+function mergeEventDetail(base: DisplayEvent, detail?: DisplayEvent): DisplayEvent {
+  if (!detail) return base;
+  return {
+    ...base,
+    ...detail,
+    // Span 的父子关系和泳道是稳定索引，正文只补充各类型的 Payload/Result/Preview。
+    parentId: base.parentId,
+    lane: base.lane,
+    displayPayload: { ...base.displayPayload, ...detail.displayPayload },
+  };
 }
 
 async function downloadSelectedTrace() {
@@ -890,7 +1015,9 @@ function base64Bytes(value: string): Uint8Array {
 async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
   if (revealRow && suppressTimelineClick) return;
   selectedEventId.value = event.eventId;
+  eventDetailError.value = null;
   inspectorTab.value = "summary";
+  void loadEventDetail(event);
   if (!revealRow) return;
   await nextTick();
   document.getElementById(`trace-event-${event.eventId}`)?.scrollIntoView?.({ block: "nearest" });
@@ -1028,7 +1155,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
               <div>
                 <p>{{ selectedTrace.username }} · {{ selectedTrace.agentId && selectedTrace.agentId !== 'unknown' ? selectedTrace.agentId : '未识别 Agent' }}</p>
                 <h2>{{ selectedTrace.traceId }}</h2>
-                <span>{{ selectedTrace.runId || '无 Run ID' }} · {{ trajectoryEvents.length }} records / {{ rawEvents.length }} raw events · 完成水位 {{ selectedTrace.completeThrough }}</span>
+                <span>{{ selectedTrace.runId || '无 Run ID' }} · {{ trajectoryEvents.length }} records / {{ selectedTrace.eventCount }} raw events · 完成水位 {{ selectedTrace.completeThrough }}</span>
               </div>
             </header>
 
@@ -1104,7 +1231,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
               </div>
             </div>
 
-            <div v-if="loadingEvents" class="trace-empty">正在从归档服务器读取正文…</div>
+            <div v-if="loadingEvents" class="trace-empty">正在读取轨迹索引…</div>
             <div v-else class="event-list">
               <button
                 v-for="event in filteredEvents"
@@ -1153,6 +1280,8 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
           </nav>
           <div v-if="!selectedEvent" class="trace-empty">选择事件查看参数、结果与来源</div>
           <div v-else class="inspector-body">
+            <p v-if="loadingEventIds.has(selectedEvent.eventId)" class="inspector-loading">正在读取所选事件正文…</p>
+            <p v-else-if="eventDetailError" class="inspector-detail-error">{{ eventDetailError }}</p>
             <dl v-if="inspectorTab === 'summary'">
               <template v-for="row in summaryRows(selectedEvent)" :key="row[0]">
                 <dt>{{ row[0] }}</dt><dd>{{ row[1] }}</dd>
@@ -1262,6 +1391,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 .event-row.outside-range:not(.selected) { opacity:.28; }
 .trace-inspector { border-left:1px solid var(--line); }.trace-inspector nav { display:flex; overflow-x:auto; padding:0 8px; border-bottom:1px solid var(--line); }.trace-inspector nav button { padding:10px 7px 8px; border:0; border-bottom:2px solid transparent; background:transparent; color:#7b7e87; font-size:9px; cursor:pointer; }.trace-inspector nav button.active { color:#684a98; border-color:#7b5ab4; }
 .inspector-body { min-height:0; flex:1; overflow:auto; padding:13px; }.inspector-body dl { display:grid; grid-template-columns:82px 1fr; gap:10px 8px; margin:0; font-size:10px; }.inspector-body dt { color:#8a8d96; }.inspector-body dd { min-width:0; margin:0; overflow-wrap:anywhere; color:#32333a; }.inspector-body pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; font:10px/1.55 ui-monospace,SFMono-Regular,monospace; color:#34353b; }
+.inspector-loading,.inspector-detail-error { margin:0 0 9px; padding:6px 8px; border:1px solid #e4e5e8; border-radius:4px; background:#fafafa; color:#737781; font-size:9px; }.inspector-detail-error { border-color:#f0d4d5; background:#fff6f6; color:#aa3439; }
 .trace-inspector>footer { display:flex; flex-wrap:wrap; gap:6px; padding:9px 12px; border-top:1px solid var(--line); }.trace-inspector>footer span { padding:3px 7px; border-radius:999px; background:#f0f0f2; color:#6c7079; font-size:9px; }.trace-inspector>footer .safe { background:#e8f7ef; color:#147245; }.trace-inspector>footer .warning { background:#fff2de; color:#a8620f; }
 .panel-collapse-button,.inspector-header-actions button,.trace-panel-rail button { border:0; background:transparent; color:#777c85; cursor:pointer; }
 .panel-collapse-button { width:24px; height:24px; display:grid; flex:0 0 24px; place-items:center; margin-left:4px; padding:0; border-radius:3px; }
