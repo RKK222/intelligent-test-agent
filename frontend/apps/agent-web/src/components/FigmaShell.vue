@@ -2944,14 +2944,13 @@ function submitJoinApp() {
               class="figma-user-menu-item"
               role="menuitem"
               data-testid="download-local-client"
-              href="/downloads/local-opencode-client/install.sh"
-              download="test-agent-local-client-install.sh"
+              href="/downloads/local-opencode-client/installer"
               @click="userMenuOpen = false"
             >
               <Download class="figma-user-menu-icon" />
               <span class="figma-local-client-download-text">
-                <strong>下载本地客户端安装脚本</strong>
-                <small data-testid="local-client-install-hint">仅支持麒麟 ARM64；下载后在终端运行 sh ~/下载/test-agent-local-client-install.sh，无需软件安装器</small>
+                <strong>下载本地客户端安装包</strong>
+                <small data-testid="local-client-install-hint">仅支持麒麟 ARM64；下载后双击 DEB 安装包并按提示完成安装</small>
               </span>
             </a>
             <button

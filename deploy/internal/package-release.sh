@@ -986,6 +986,7 @@ plan_release_components() {
     backend/test-agent-local-client/src/main \
     backend/test-agent-local-client-protocol/pom.xml \
     backend/test-agent-local-client-protocol/src/main \
+    deploy/internal/build-local-opencode-client-deb.sh \
     deploy/internal/package-local-opencode-client.sh \
     deploy/internal/opencode-observability-plugin.mjs \
     deploy/internal/local-opencode-client/install.sh.template \

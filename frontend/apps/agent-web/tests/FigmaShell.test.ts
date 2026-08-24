@@ -1489,15 +1489,13 @@ describe("FigmaShell", () => {
 
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
     const downloadLink = wrapper.get('[data-testid="download-local-client"]');
-    expect(downloadLink.text()).toContain("下载本地客户端安装脚本");
-    expect(downloadLink.attributes("href")).toBe("/downloads/local-opencode-client/install.sh");
-    expect(downloadLink.attributes("download")).toBe("test-agent-local-client-install.sh");
+    expect(downloadLink.text()).toContain("下载本地客户端安装包");
+    expect(downloadLink.attributes("href")).toBe("/downloads/local-opencode-client/installer");
+    expect(downloadLink.attributes("download")).toBeUndefined();
     expect(wrapper.get('[data-testid="local-client-install-hint"]').text())
       .toContain("麒麟 ARM64");
     expect(wrapper.get('[data-testid="local-client-install-hint"]').text())
-      .toContain("sh ~/下载/test-agent-local-client-install.sh");
-    expect(wrapper.get('[data-testid="local-client-install-hint"]').text())
-      .toContain("无需软件安装器");
+      .toContain("DEB 安装包");
     const restartButton = wrapper.get('[data-testid="restart-own-process"]');
     expect(restartButton.attributes("disabled")).toBeUndefined();
     await restartButton.trigger("click");

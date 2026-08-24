@@ -5,6 +5,31 @@
 
 ## Entries
 
+### 2026-08-24 - 恢复麒麟 DEB 安装包下载并补齐桌面入口
+
+### Why
+
+- 上一轮为绕开企业麒麟“未签名软件包”阻止策略，把网页下载入口临时改成了 `install.sh`；用户明确要求普通用户下载后得到可双击安装的安装包，而不是 shell。
+- 平台运行时 RSA 清单签名与麒麟安全中心的系统包签名属于两套信任链；前者不能让未签名 DEB 在阻止模式下通过。
+
+### What
+
+- 网页、Vite 开发下载路由和 Nginx `/installer` 统一恢复下载 `TestAgent-Local-Client-Kylin-arm64.deb`，界面文案明确为“安装包”。
+- 提取 `build-local-opencode-client-deb.sh` 作为唯一 DEB 组装器，继续复用受控启动器，并新增系统应用菜单项与 512px 小兔子图标；`package-release.sh` 的客户端指纹包含该组装器。
+- 部署、安全、前端和用户手册明确：生产 DEB 必须由企业麒麟软件管理平台或 UKey 加签，并在真实终端通过 `kylinsigntool -v`；没有企业私钥时不得用脚本绕过来源检查。
+
+### How
+
+- `local-opencode-client-package-test.sh` 两次通过，验证标准 DEB、启动器、桌面入口、图标、不可变签名运行时、catalog 与 bootstrap；FigmaShell 定向 66 项通过。
+- 用户手册 VitePress build、agent-web TypeScript 检查与 production build 通过；独立 Vite 在 `http://127.0.0.1:3102` 启动，`/installer` 返回 302 到 DEB，最终响应为 `application/vnd.debian.binary-package`，下载后由 `file` 和 `ar` 识别为 Debian package。
+- 基于现有 `20260824185203` 受控启动器生成待企业加签的 `/Users/kaka/Desktop/mimoagent/0709/TestAgent-Local-Client-Kylin-arm64.deb`，最终 SHA-256 为 `4925bcda64871eae283af72c87db3a7f57b169a19492036b372800cedde68558`。
+
+### Result
+
+- 普通用户下载入口不再返回 shell；安装后可从应用菜单启动首次 `setup`，不要求用户寻找命令。
+- 本机生成的 DEB 结构与下载链路已验证，但尚未获得企业麒麟 UKey/签名服务加签，不能表述为已通过企业阻止模式；真实麒麟验签与双击安装仍是发布前闸门。
+- 本次不新增 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点或强制环境变量，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
 ### 2026-08-24 - 新增企业内用户服务器定位与无专用命令排查技能
 
 ### Why

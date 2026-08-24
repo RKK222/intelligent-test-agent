@@ -212,7 +212,9 @@ curl -fsSI http://127.0.0.1/downloads/local-opencode-client/test-agent-local-cli
 curl -fsSIL http://127.0.0.1/downloads/local-opencode-client/installer
 ~~~
 
-成功条件：配置脚本打印已安装的 gateway，前三个 curl 返回 200，`/installer` 只重定向并最终下载为 `test-agent-local-client-install.sh`；版本化 DEB 继续返回 200，但只作为受控离线载体，不交给未配置企业包信任链的图形安装器。配置中 /downloads/local-opencode-client/ 必须映射到 /data/testagent/dist/local-opencode-client/；下载服务只暴露制品，不暴露 API 或目录索引。失败即停止，脚本会恢复旧 Nginx 配置。
+成功条件：配置脚本打印已安装的 gateway，前三个 curl 返回 200，`/installer` 只重定向并最终下载为
+`TestAgent-Local-Client-Kylin-arm64.deb`。配置中 /downloads/local-opencode-client/ 必须映射到
+/data/testagent/dist/local-opencode-client/；下载服务只暴露制品，不暴露 API 或目录索引。失败即停止，脚本会恢复旧 Nginx 配置。
 
 **机器：平台网页（超级管理员）**。在 Nginx 三个 URL 都返回 200 后，进入本地客户端版本管理页面，执行“同步 release/catalog”。成功条件：页面显示 <RELEASE_VERSION> 的已同步 release，且 platform=linux、architecture=arm64、签名校验成功。同步失败或版本不兼容时停止，不能创建 rollout。
 
@@ -227,50 +229,41 @@ esac
 
 成功条件：local_client_stage_dir 是本节 mktemp 生成的 /data/testagent/dist/.local-opencode-client-stage.* 目录。若变量为空、路径不匹配或不确定，停止并人工检查，不要扩大删除范围。
 
-## 7. 麒麟 ARM 用户节点：普通用户级安装与 enroll
+## 7. 麒麟 ARM 用户节点：安装包安装与 enroll
 
-**机器：麒麟 ARM 用户节点，同一普通登录用户，不使用 sudo**。网页普通用户入口下载 `test-agent-local-client-install.sh`，脚本会把自身安装为 `~/.local/bin/test-agent-local-client` 并下载签名运行时；不要双击或调用系统软件安装器，也不要把 Client key 放到命令、环境变量或安装日志中。下面的版本化 DEB 提取方式只作为运维离线兜底：
+**机器：具备企业麒麟签名能力的发布环节**。`package-local-opencode-client.sh` 生成标准 ARM64 DEB，但平台 RSA
+清单签名只保护 TestAgent 下载的运行时，不能让麒麟安全中心信任安装包。对外发布前，必须使用企业麒麟软件管理
+平台或安全团队提供的 UKey 流程对最终 DEB 加签；签名后的字节必须作为 Nginx 下载别名实际发布。不同企业的
+UKey 与证书策略不同，仓库不保存也不模拟签名私钥。
 
-~~~bash
-client_installer="$HOME/Downloads/test-agent-local-client-install.sh"
-curl -fS --proto '=http' http://mimo.sdc.cs.icbc:9996/downloads/local-opencode-client/install.sh -o "$client_installer"
-chmod 0700 "$client_installer"
-sh "$client_installer"
-~~~
-
-成功条件：脚本提示输入统一认证号和隐藏 Client key，随后输出“麒麟 ARM64 本地客户端已安装并接入”；
-`~/.local/bin/test-agent-local-client`、user systemd unit 和桌面入口均由脚本自动创建。网页下载得到同名脚本后，
-也只需在终端执行 `sh ~/下载/test-agent-local-client-install.sh`，不要双击软件安装器。
-
-**机器：同一麒麟 ARM 用户节点，仅在网页安装脚本无法转运时使用**。版本化 DEB 只用于提取启动器，不调用
-图形软件安装器：
+**机器：真实麒麟 ARM 用户节点**。先验证网页实际下载到的是 DEB，而不是 shell，再用系统工具验签：
 
 ~~~bash
-client_deb="$HOME/Downloads/test-agent-local-client_<RELEASE_VERSION>_arm64.deb"
-curl -fS --proto '=http' http://mimo.sdc.cs.icbc:9996/downloads/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb -o "$client_deb"
+client_deb="$HOME/下载/TestAgent-Local-Client-Kylin-arm64.deb"
+file "$client_deb"
 dpkg-deb -f "$client_deb" Package Version Architecture
-client_extract_dir="$(mktemp -d /tmp/test-agent-client.XXXXXX)"
-dpkg-deb -x "$client_deb" "$client_extract_dir"
-test -x "$client_extract_dir/usr/bin/test-agent-local-client"
-mkdir -p "$HOME/.local/bin"
-install -m 0755 "$client_extract_dir/usr/bin/test-agent-local-client" "$HOME/.local/bin/test-agent-local-client"
-"$HOME/.local/bin/test-agent-local-client" --version
+kylinsigntool -v "$client_deb"
 ~~~
 
-成功条件：`dpkg-deb` 输出 Package: test-agent-local-client、Version: <RELEASE_VERSION>、Architecture: arm64，启动器已落到 `~/.local/bin`；最后一条显示 `release=not-installed`（首次安装）或已有受控 release。非 ARM64/aarch64 或非 glibc 设备必须在启动器检查失败时停止。重新下载新 DEB 只替换启动器，不需要删除已经下载的旧 release、状态目录或日志。
+成功条件：`file` 识别为 Debian binary package，包名为 `test-agent-local-client`、架构为 `arm64`，
+`kylinsigntool` 明确验签成功。若系统没有该命令，先由终端管理员按企业镜像规范安装 `kylinsigntool`；若验签失败，
+停止发布，不能通过脚本、解包复制或关闭来源检查向普通用户交付。
 
-**机器：同一普通用户的真实交互终端**。首次执行 `setup`；此前已经下载完整 runtime 但 enroll 失败时直接执行 `enroll`。两条命令只选符合当前状态的一条，不要重复删除或下载既有 runtime：
+**机器：同一麒麟 ARM 用户节点**。双击 DEB（或由文件管理器选择麒麟安装器）完成安装，再从应用菜单启动
+“TestAgent 本地客户端”。安装包的应用入口会执行首次 `setup`，下载经过平台签名校验的运行时并弹出接入向导；
+只在本机输入统一认证号和 Client key，不要把 Key 放到命令、环境变量、URL、截图或日志中。
+
+**机器：同一普通用户的真实交互终端，仅用于验收状态**。应用菜单完成首次接入后执行：
 
 ~~~bash
-"$HOME/.local/bin/test-agent-local-client" setup
-# 或："$HOME/.local/bin/test-agent-local-client" enroll
 systemctl --user is-active --quiet test-agent-local-opencode-client.service
 systemctl --user status test-agent-local-opencode-client.service --no-pager
 journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes ago' --no-pager
 "$HOME/.local/bin/test-agent-local-client" --version
 ~~~
 
-enroll 会交互提示统一认证号和隐藏 Client key；只在用户本机输入，绝不把 Key 作为命令行参数、环境变量、URL、截图、日志或聊天内容回传。成功条件：命令显示“本地客户端重新接入成功”或“本地客户端接入认证成功”，user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
+成功条件：user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的
+短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
 
 **机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认该实例 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。此项与本机 active user service 一起证明 WS 已建立；若任一项失败，停止 rollout，先检查域名 `:9996` 的 Nginx 下载/API/Upgrade 路由、.4/.114 的明文控制开关与 TRUSTED_PROXY_ADDRESSES，以及后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
 

@@ -30,7 +30,7 @@ usage() {
 Usage: deploy/internal/package-local-opencode-client.sh [options]
 
 Build one immutable Kylin ARM64/glibc local-client release, its signed catalog,
-and a DEB whose data payload contains only the stable launcher shell.
+and a DEB containing the stable launcher plus desktop-menu integration.
 
 Options:
   --output-dir <path>        Distribution root ending in local-opencode-client.
@@ -172,43 +172,6 @@ normalize_opencode() {
     cp "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" "${stage}/opencode/LICENSE"
   fi
   archive_create_tar_gz "${output}" "${stage}" opencode
-}
-
-create_root_owned_tar_gz() {
-  local output="$1" directory="$2"
-  local -a metadata_flags=()
-  local value
-  while IFS= read -r value; do
-    [[ -z "${value}" ]] || metadata_flags+=("${value}")
-  done < <(archive_tar_metadata_flags)
-  if tar --version 2>/dev/null | grep -qi bsdtar; then
-    COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 \
-      tar "${metadata_flags[@]}" --uid 0 --gid 0 --uname root --gname root \
-        -C "${directory}" -czf "${output}" .
-  else
-    tar --owner=0 --group=0 --numeric-owner -C "${directory}" -czf "${output}" .
-  fi
-  archive_strip_file_metadata "${output}"
-}
-
-build_deb() {
-  local launcher="$1" output="$2" work="$3"
-  mkdir -p "${work}/control" "${work}/data/usr/bin"
-  install -m 0755 "${launcher}" "${work}/data/usr/bin/test-agent-local-client"
-  {
-    printf 'Package: test-agent-local-client\n'
-    printf 'Version: %s\n' "${VERSION}"
-    printf 'Section: utils\nPriority: optional\nArchitecture: arm64\n'
-    printf 'Maintainer: Test Agent Platform\n'
-    printf 'Depends: curl, openssl, tar\n'
-    printf 'Description: Test Agent Kylin ARM64 local OpenCode client launcher\n'
-  } >"${work}/control/control"
-  create_root_owned_tar_gz "${work}/control.tar.gz" "${work}/control"
-  create_root_owned_tar_gz "${work}/data.tar.gz" "${work}/data"
-  printf '2.0\n' >"${work}/debian-binary"
-  rm -f "${output}"
-  # DEB 是普通 ar 容器，不需要符号索引；Apple ar 若尝试 ranlib 会丢弃非 Mach-O 成员。
-  (cd "${work}" && ar -rcS "${output}" debian-binary control.tar.gz data.tar.gz)
 }
 
 require_command openssl
@@ -363,7 +326,10 @@ mv "${CATALOG_TEMP}" "${OUTPUT_DIR}/catalog.json"
 
 DEB_PATH="$(cd "${OUTPUT_DIR}" && pwd)/test-agent-local-client_${VERSION}_arm64.deb"
 DEB_DOWNLOAD_ALIAS="${OUTPUT_DIR}/TestAgent-Local-Client-Kylin-arm64.deb"
-build_deb "${OUTPUT_DIR}/install.sh" "${DEB_PATH}" "${TEMP_DIR}/deb"
+"${SCRIPT_DIR}/build-local-opencode-client-deb.sh" \
+  --launcher "${OUTPUT_DIR}/install.sh" \
+  --version "${VERSION}" \
+  --output "${DEB_PATH}"
 cp "${DEB_PATH}" "${DEB_DOWNLOAD_ALIAS}"
 archive_strip_file_metadata "${OUTPUT_DIR}/install.sh" "${OUTPUT_DIR}/catalog.json" \
   "${OUTPUT_DIR}/catalog.json.sig" "${OUTPUT_DIR}/stable/manifest.json" \

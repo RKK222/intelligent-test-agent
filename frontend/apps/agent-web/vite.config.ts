@@ -105,7 +105,7 @@ const localClientDistributionRoute = (): Plugin => ({
         response.statusCode = 302;
         response.setHeader(
           "Location",
-          "/downloads/local-opencode-client/install.sh"
+          "/downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
         );
         response.setHeader("Cache-Control", "no-store");
         response.end();
@@ -137,9 +137,7 @@ const localClientDistributionRoute = (): Plugin => ({
             ? "public, max-age=31536000, immutable"
             : "no-store"
         );
-        if (relativePath === "install.sh") {
-          response.setHeader("Content-Disposition", 'attachment; filename="test-agent-local-client-install.sh"');
-        } else if (relativePath === "TestAgent-Local-Client-Kylin-arm64.deb") {
+        if (relativePath === "TestAgent-Local-Client-Kylin-arm64.deb") {
           response.setHeader("Content-Disposition", `attachment; filename="${relativePath}"`);
         }
         if (request.method === "HEAD") {

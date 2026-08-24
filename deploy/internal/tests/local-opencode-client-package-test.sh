@@ -184,8 +184,8 @@ test "$(grep -c 'location = /downloads/local-opencode-client/catalog.json {' "${
 test "$(grep -c 'location = /downloads/local-opencode-client/catalog.json.sig {' "${NGINX_TEMPLATE}")" -eq 2
 test "$(grep -c 'location = /downloads/local-opencode-client/installer {' "${NGINX_TEMPLATE}")" -eq 2
 test "$(grep -c 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {' "${NGINX_TEMPLATE}")" -eq 2
-test "$(grep -c 'return 302 /downloads/local-opencode-client/install.sh;' "${NGINX_TEMPLATE}")" -eq 2
-test "$(grep -c 'filename="test-agent-local-client-install.sh"' "${NGINX_TEMPLATE}")" -eq 2
+test "$(grep -c 'return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;' "${NGINX_TEMPLATE}")" -eq 2
+test "$(grep -c 'filename="TestAgent-Local-Client-Kylin-arm64.deb"' "${NGINX_TEMPLATE}")" -eq 2
 test "$(grep -F -c 'test-agent-local-client_[0-9]{14}_arm64\.deb' "${NGINX_TEMPLATE}")" -eq 2
 grep -q 'Cache-Control "public, max-age=31536000, immutable"' "${NGINX_TEMPLATE}"
 
@@ -200,10 +200,16 @@ if gzip -dc "${TEST_ROOT}/data.tar.gz" | grep -aEq 'LIBARCHIVE\.xattr|SCHILY\.xa
 fi
 tar -tzf "${TEST_ROOT}/data.tar.gz" >"${TEST_ROOT}/deb-data.list"
 grep -q '^\./usr/bin/test-agent-local-client$' "${TEST_ROOT}/deb-data.list"
+grep -q '^\./usr/share/applications/test-agent-local-client.desktop$' "${TEST_ROOT}/deb-data.list"
+grep -q '^\./usr/share/icons/hicolor/512x512/apps/test-agent-local-client.png$' "${TEST_ROOT}/deb-data.list"
 if grep -Eq '\.(jar|tar\.gz)$' "${TEST_ROOT}/deb-data.list"; then
   echo "DEB data payload unexpectedly contains a runtime artifact" >&2
   exit 1
 fi
+tar -xOzf "${TEST_ROOT}/data.tar.gz" \
+  ./usr/share/applications/test-agent-local-client.desktop >"${TEST_ROOT}/test-agent-local-client.desktop"
+grep -q '^Exec=/usr/bin/test-agent-local-client setup$' "${TEST_ROOT}/test-agent-local-client.desktop"
+grep -q '^Icon=test-agent-local-client$' "${TEST_ROOT}/test-agent-local-client.desktop"
 
 if package_release >/dev/null 2>&1; then
   echo "Duplicate immutable client version was unexpectedly overwritten" >&2
@@ -504,4 +510,4 @@ CREDENTIALS
   test ! -L "${TEST_ROOT}/install-${failure_case}/runtime/current"
 done
 
-echo "Kylin ARM64 single-shell DEB, immutable signed release, catalog and bootstrap verified"
+echo "Kylin ARM64 installer DEB, immutable signed release, catalog and bootstrap verified"
