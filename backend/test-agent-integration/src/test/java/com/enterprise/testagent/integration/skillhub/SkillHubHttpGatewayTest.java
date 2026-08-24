@@ -1,7 +1,10 @@
 package com.enterprise.testagent.integration.skillhub;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadFile;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,6 +49,18 @@ class SkillHubHttpGatewayTest {
             downloadQuery.set(exchange.getRequestURI().getQuery());
             exchange.getResponseHeaders().set("Content-Disposition", "attachment; filename=skill.zip");
             respond(exchange, "application/octet-stream", new byte[]{1, 2, 3});
+        });
+        server.createContext("/download/43", exchange -> {
+            accessKey.set(exchange.getRequestHeaders().getFirst(SkillHubHttpGateway.ACCESS_KEY_HEADER));
+            downloadQuery.set(exchange.getRequestURI().getQuery());
+            exchange.getResponseHeaders().set("Content-Type", "application/zip");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write(new byte[]{4, 5, 6});
+            exchange.close();
+        });
+        server.createContext("/download/44", exchange -> {
+            exchange.sendResponseHeaders(401, -1);
+            exchange.close();
         });
         server.createContext("/upload/progress", exchange -> {
             accessKey.set(exchange.getRequestHeaders().getFirst(SkillHubHttpGateway.ACCESS_KEY_HEADER));
@@ -92,6 +107,23 @@ class SkillHubHttpGatewayTest {
         assertThat(gateway.download(42, "0").content()).containsExactly(1, 2, 3);
         assertThat(accessKey).hasValue("test-only-access-key");
         assertThat(downloadQuery).hasValue("channel=" + SkillHubDownloadChannel.PLATFORM.code());
+    }
+
+    @Test
+    void acceptsZipMimeAndChunkedTransferWithoutOptionalDownloadMetadata() {
+        assertThat(enabledGateway().download(43, "0").content()).containsExactly(4, 5, 6);
+        assertThat(downloadQuery).hasValue("channel=" + SkillHubDownloadChannel.PLATFORM.code());
+        assertThat(accessKey).hasValue("test-only-access-key");
+    }
+
+    @Test
+    void reportsSafeUpstreamStatusWithoutReturningThirdPartyBody() {
+        assertThatThrownBy(() -> enabledGateway().download(44, "0"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.SKILLHUB_UNAVAILABLE);
+                    assertThat(exception.getMessage()).isEqualTo("SkillHub 访问凭据无效或无权限");
+                    assertThat(exception.details()).containsEntry("upstreamStatus", 401);
+                });
     }
 
     @Test

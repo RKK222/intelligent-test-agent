@@ -35,6 +35,7 @@ import {
   Search,
   Sparkles,
   UploadCloud,
+  UserRound,
   UsersRound,
   Wrench,
   X
@@ -627,6 +628,11 @@ function message(cause: unknown) {
   return cause instanceof Error ? cause.message : "Hub 操作失败";
 }
 
+/** SkillHub 文档 contributor 是创建人用户 ID，清理现场数据中可能携带的换行。 */
+function skillCreator(asset: AgentSkillHubAsset) {
+  return asset.externalContributor?.trim() || "未提供";
+}
+
 /** 列表状态必须同时给出文本与图标，不能只依赖颜色表达。 */
 function assetStatus(asset: AgentSkillHubAsset) {
   if (asset.sourceAvailable === false) return { key: "deleted", label: "来源已下架", title: "来源目录已删除，当前应用仍可移除已有引用" };
@@ -924,6 +930,9 @@ onUnmounted(() => {
             <span v-if="asset.type === 'SKILL'" class="hub-card-taxonomy">
               {{ skillCategoryLabel(asset) }}<template v-if="skillSubcategoryLabel(asset)"> · {{ skillSubcategoryLabel(asset) }}</template>
             </span>
+            <span v-if="asset.type === 'SKILL' && asset.sourceKind === 'SKILLHUB'" class="hub-card-contributor">
+              <UserRound :size="11" />创建人：{{ skillCreator(asset) }}
+            </span>
             <p>{{ asset.description || '该能力暂未提供说明。' }}</p>
             <span class="hub-card-meta">
               <span class="hub-card-origin"><Building2 :size="12" />来源：<b>{{ asset.builtin ? '平台内置' : asset.sourceAppName }}</b></span>
@@ -1025,7 +1034,7 @@ onUnmounted(() => {
               <section v-if="selectedAsset.sourceKind === 'SKILLHUB'" class="hub-classification">
                 <div>
                   <strong>SkillHub 目录元数据</strong>
-                  <span>版本 {{ selectedAsset.externalVersion || '-' }} · {{ selectedAsset.externalPhaseName || selectedAsset.externalPhase || '未标注阶段' }}</span>
+                  <span>版本 {{ selectedAsset.externalVersion || '-' }} · {{ selectedAsset.externalPhaseName || selectedAsset.externalPhase || '未标注阶段' }} · 创建人：{{ skillCreator(selectedAsset) }}</span>
                 </div>
                 <b class="hub-classification-value">{{ selectedAsset.externalTag || selectedAsset.externalSource || '外部能力' }}</b>
               </section>
@@ -1230,6 +1239,7 @@ onUnmounted(() => {
 .hub-asset-card>strong{overflow:hidden;margin-top:10px;text-overflow:ellipsis;font-size:14px;white-space:nowrap;color:#0f172a;font-weight:700}
 .hub-asset-card>code{margin-top:2px;color:#64748b;font-size:9px;font-family:var(--font-mono)}
 .hub-card-taxonomy{align-self:flex-start;margin-top:7px;border-radius:4px;background:#f1f5f9;padding:3px 6px;color:#475569;font-size:9px;font-weight:700}
+.hub-card-contributor{display:inline-flex;align-items:center;gap:3px;margin-top:6px;color:#64748b;font-size:9px;font-weight:600}
 .hub-asset-card>p{display:-webkit-box;min-height:32px;overflow:hidden;margin:8px 0;color:#475569;font-size:11px;line-height:1.5;-webkit-box-orient:vertical;-webkit-line-clamp:2}
 .hub-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;border-top:1px solid #f1f5f9;padding-top:9px;color:#64748b;font-size:10px}
 .hub-card-meta>span{display:flex;min-width:0;align-items:center;gap:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

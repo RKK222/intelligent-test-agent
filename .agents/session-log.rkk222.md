@@ -13680,3 +13680,28 @@
 - 当前仓库 `.env.test` 实际指向本机 `127.0.0.1:15432/test_agent`，本次按用户要求使用该文件完成真实启动但未修改它；这不等同于仓库清单要求的 `.100/testagent_dev` 企业验收，后者仍需环境所有者恢复规定配置后单独执行。
 - 以已提交的 release `a3db388e0` 重建企业增量包：内层 `test-agent-internal-release.zip` SHA-256 为 `933e936e2188ec4eac405fd03fcdd21808aa8a6dce1ff8300c64e2415153a9de`，固定名双后台外层包为 `c3b43b79d17f3f98a47d367465da138bb45583ab0ac06c3cada9298d0bdbea4e`；外层内嵌内层逐字节一致，两层 ZIP CRC、受保护 PostgreSQL/ClickHouse/XXL migration、客户端签名分发和三节点配置门禁均通过。
 - 发布产物中的 `test-agent-api` JAR 已用 `javap` 确认包含 `/spans`、`/records/{eventId}` 与 `globalSequence`，前端 production JS 同时包含对应请求；外层包及 checksum 已复制到 `~/Desktop/mimoagent/0709/` 并复验一致。本条是制品生成后的追溯记录，不再据此递归重封 ZIP。
+
+## 2026-08-24 - 修复 SkillHub 预览 503 并展示创建人
+
+### Why
+
+- 企业测试页面点击 SkillHub Skill“预览内容”时，平台 `POST .../materialize` 返回 503；该问题出现在下载响应头按文档收紧之后，企业反向代理的 ZIP MIME 或 chunked 传输差异会在正文安全校验前被误拒绝。
+- SkillHub `/list` 文档及现场真实 JSON 已提供 `contributor`，后端也已保存为 `externalContributor`，但能力库卡片和详情没有展示。
+
+### What
+
+- `/download/{id}?channel=3` 和 `X-Skill-Access-Key` 请求协议保持不变；下载适配器继续接受文档标准 `application/octet-stream`，同时兼容 `application/zip`、chunked 传输以及代理省略的 `Content-Disposition/Content-Length`。正文仍限制 20 MiB，后续 ZIP、路径、文件数、根 `SKILL.md` 和稳定名称校验不放宽。
+- 上游 401/404/5xx 继续统一为 `SKILLHUB_UNAVAILABLE`，但返回安全中文原因和 `details.upstreamStatus`；不回显上游 URL、请求头、密钥或正文。
+- SkillHub Skill 卡片和详情展示“创建人”，取 `externalContributor` 并清理首尾换行，空值显示“未提供”。同步 integration、agent-web README、HTTP API 与后端规范。
+
+### How
+
+- JDK 25 定向 `SkillHubHttpGatewayTest` 6/6 通过，新增 ZIP MIME/chunked 和脱敏 401 状态测试；后端 common/domain/integration reactor 共 277 项测试通过，0 失败、0 错误。
+- Agent Skill Hub 前端组件 14/14 通过，`agent-web` 类型检查和 production build 通过；24 模块后端 `-DskipTests package` 成功，最终应用 JAR 内 integration 类已用 `javap` 确认包含新的响应兼容与状态分类方法。
+- 本机到 `http://ai-code.sdc.icbc` 的探测返回 `status=000/Empty reply`，无法执行企业真实下载；没有把本机网络失败冒充企业验收。提交前已回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次八个代码/文档文件冲突的并行成果。
+
+### Result
+
+- 代码侧已消除因企业代理下载传输元数据差异导致的 503，并让真实上游非 200 在下一次现场复验时可直接区分；创建人可在外部 Skill 卡片和详情看到。
+- 企业真实 `materialize` 尚需重打包并在 `.4/.114` 两个 Java 节点部署后复验；若仍失败，应按响应 `upstreamStatus` 和两节点 `backend.env`/日志判断凭据、DNS或上游状态。
+- 本次是向后兼容的错误详情增强和前端展示，不新增 HTTP 路径、RunEvent/SSE、数据库、SQL、Flyway、部署节点或强制配置；未修改 `.env*`、generated SDK 或 OpenCode 只读源码。

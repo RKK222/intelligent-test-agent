@@ -177,7 +177,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 ### Agent / Skill / MCP / Tool Hub
 
-Skill 目录显式合并“接口文档（SkillHub）”和“平台更新（应用 push）”两类来源。外部条目打开详情不下载正文，用户点击“预览内容”、引用或更新时才按需物化；来源下架后从发现目录隐藏，但当前应用仍显示“来源已下架”并允许取消引用。外部原样 push 保持外部身份，编辑后 push 自动显示为未发布的平台派生资产。
+Skill 目录显式合并“接口文档（SkillHub）”和“平台更新（应用 push）”两类来源。SkillHub Skill 卡片和详情展示目录 `contributor` 对应的创建人用户 ID，现场值会清理首尾空白，缺失时显示“未提供”。外部条目打开详情不下载正文，用户点击“预览内容”、引用或更新时才按需物化；来源下架后从发现目录隐藏，但当前应用仍显示“来源已下架”并允许取消引用。外部原样 push 保持外部身份，编辑后 push 自动显示为未发布的平台派生资产。
 
 - activity rail 的 `Boxes` 入口统一承载 Agent、Skill、MCP 与 Tool；进入时保存并隐藏左右面板，离开时恢复用户原布局。
 - Agents/Skills 展示所有应用远端 pushed 精确快照和平台内置只读能力；发布和引用按钮根据当前应用、`APP_ADMIN/SUPER_ADMIN`、published/deleted/builtin 状态显隐。

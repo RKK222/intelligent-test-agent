@@ -158,10 +158,12 @@ final class SkillHubHttpGateway implements SkillHubGateway {
         if (id <= 0) throw new IllegalArgumentException("SkillHub id must be positive");
         URI uri = baseUri.resolve("download/" + id + "?channel=" + SkillHubDownloadChannel.PLATFORM.code());
         HttpResponse<InputStream> response = send(get(uri));
-        long contentLength = validateDownloadHeaders(response);
+        Long contentLength = validateDownloadHeaders(response);
         byte[] content = readLimited(response.body(), MAX_DOWNLOAD_BYTES, "SkillHub 下载包超过 20 MiB");
         if (content.length == 0) throw unavailable("SkillHub 下载包为空");
-        if (content.length != contentLength) throw unavailable("SkillHub 下载包长度与响应头不一致");
+        if (contentLength != null && content.length != contentLength) {
+            throw unavailable("SkillHub 下载包长度与响应头不一致");
+        }
         return new ExternalSkillPackage(id, version, content);
     }
 
@@ -180,7 +182,7 @@ final class SkillHubHttpGateway implements SkillHubGateway {
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() != 200) {
                 response.body().close();
-                throw unavailable("SkillHub 响应异常");
+                throw unavailableForStatus(response.statusCode());
             }
             return response;
         } catch (InterruptedException exception) {
@@ -212,22 +214,30 @@ final class SkillHubHttpGateway implements SkillHubGateway {
         return root.get("result");
     }
 
-    private long validateDownloadHeaders(HttpResponse<InputStream> response) {
+    /**
+     * 文档定义的标准响应是 application/octet-stream + 附件文件名 + Content-Length。
+     * 企业反向代理可能把 ZIP 标为 application/zip，或改为 chunked 传输而省略后两项；这些传输差异
+     * 不降低安全边界，正文仍受 20 MiB 上限、ZIP 解包和根 SKILL.md 校验约束。
+     */
+    private Long validateDownloadHeaders(HttpResponse<InputStream> response) {
         String contentType = response.headers().firstValue("Content-Type").orElse("");
         String normalizedType = contentType.split(";", 2)[0].trim();
-        if (!"application/octet-stream".equalsIgnoreCase(normalizedType)) {
+        if (!"application/octet-stream".equalsIgnoreCase(normalizedType)
+                && !"application/zip".equalsIgnoreCase(normalizedType)) {
             closeQuietly(response.body());
             throw unavailable("SkillHub 下载响应类型无效");
         }
         String disposition = response.headers().firstValue("Content-Disposition").orElse("");
-        if (!disposition.toLowerCase(java.util.Locale.ROOT).startsWith("attachment;")
-                || !disposition.toLowerCase(java.util.Locale.ROOT).contains("filename=")) {
+        if (!blank(disposition)
+                && !disposition.toLowerCase(java.util.Locale.ROOT).startsWith("attachment")) {
             closeQuietly(response.body());
-            throw unavailable("SkillHub 下载响应缺少附件文件名");
+            throw unavailable("SkillHub 下载响应附件类型无效");
         }
+        String contentLengthHeader = response.headers().firstValue("Content-Length").orElse(null);
+        if (blank(contentLengthHeader)) return null;
         long contentLength;
         try {
-            contentLength = Long.parseLong(response.headers().firstValue("Content-Length").orElse(""));
+            contentLength = Long.parseLong(contentLengthHeader);
         } catch (NumberFormatException exception) {
             closeQuietly(response.body());
             throw unavailable("SkillHub 下载响应长度无效", exception);
@@ -237,6 +247,19 @@ final class SkillHubHttpGateway implements SkillHubGateway {
             throw unavailable("SkillHub 下载响应长度超限");
         }
         return contentLength;
+    }
+
+    /** 上游正文可能包含内部信息，错误只保留安全状态分类和 HTTP 状态。 */
+    private PlatformException unavailableForStatus(int statusCode) {
+        String message = switch (statusCode) {
+            case 401 -> "SkillHub 访问凭据无效或无权限";
+            case 404 -> "SkillHub Skill 不存在或已下架";
+            default -> statusCode >= 500 ? "SkillHub 服务异常" : "SkillHub 响应异常";
+        };
+        return new PlatformException(
+                ErrorCode.SKILLHUB_UNAVAILABLE,
+                message,
+                java.util.Map.of("upstreamStatus", statusCode));
     }
 
     private void addFormField(List<byte[]> body, String boundary, String name, String value) {
