@@ -13966,3 +13966,29 @@
 
 - 首次路由等待期间不再白屏，也不再依赖公共字体服务；工作台大包仍约 4.1 MB（gzip 约 1.28 MB），拆包属于后续性能批次，本次未扩大范围。
 - 本次不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、部署节点、安全协议或兼容性契约；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。
+
+## 2026-08-24 - 基于 release 最新代码重打企业增量包
+
+### Why
+
+- 上一轮企业包之后，`release` 已新增工作空间目录缓存刷新、顶部新增版本入口与弹窗层级、麒麟普通用户客户端包、客户端下载恢复和工作台首次进入白屏等修复，需要基于当前本地 HEAD `8b3cd26cae08c4ec05dfc06e23f6202576e1d1e7` 重新交付。
+- 现场已经部署 worker、manager、模型目录、工具盒子和独立中间件，本轮必须继续使用组件指纹做增量封装，不能把未变化的大组件和历史客户端版本重复带入。
+
+### What
+
+- 复用 `package-release.sh`、`package-local-opencode-client.sh` 和 `package-two-backend-complete.sh` 现有正式入口，重建后端、前端和组织密钥签名的麒麟 ARM64 用户包；客户端固定版本为 `20260824215812`，首次能力基线仍锁定公共 Git commit `81605f245d1512e1ab0dd73812391f6da7d008b5`（8 Agent / 16 Skill / 8 Tool）。
+- 组件清单确认 worker runtime `reuse`、toolbox `reuse`、LobeHub `disabled`、memory `disabled`、local client `included`；新内层 ZIP 不含 programs、worker 镜像、toolbox、memory、LobeHub 或 DEB，客户端 releases 只保留 `20260824215812`。
+- 复用上一轮已部署成功的 `.4/.114/.2` 节点包重建外层固定名交付物，并重新注入当前组织签名公钥；两台后台的 TCDS、SkillHub、客户端 catalog 直连 `.2:80` 配置和前端多后台 `9996` 监听门禁均通过。
+
+### How
+
+- 后端正式 Maven 打包、Spring Bean 构造器门禁和前端 VitePress / TypeScript / production build 通过；配置管理定向测试 `ConfigurationManagementApplicationServiceTest,GitCloneCacheServiceTest` 共 17 项通过，前端 6 个目标文件 119 项通过。
+- 客户端打包回归通过，覆盖空安装根目录下载、签名校验、JDK/运行时安装、接入、用户级启动器/systemd/桌面入口；正式分发 manifest SHA-256 为 `eb7a4f608470a2f3d239101526b9dfdce259074c159f4ad5cad08303ae7b5cd4`，用户包 SHA-256 为 `516b37866e6414b42e82078908678c567bb9df81a8f30cb6ff980407ab145180`。
+- 相对上一企业包没有新增或改写 PostgreSQL、ClickHouse、XXL Flyway migration；最终 persistence JAR、内层 ZIP、解包验证和外层封装均逐项通过受保护 migration 字节门禁，工具盒子正式 migration 仍为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。
+- 内外 ZIP CRC 通过，外层内嵌 ZIP 与当前内层 SHA-256 同为 `236f80b9920e622f48b9c9187cb6c8406ab689b391fac3da5f5a4f9a5cd41403`；第一次直接从 agent-web 包目录调用 Vitest 因绕过根配置统一报 `document is not defined`，改用根 `vitest.config.ts` 后全部通过，该次错误命令不作为代码失败。
+
+### Result
+
+- 最终外层包 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip`，SHA-256 为 `f7f12fcb0a2898db02096590d36429c35302d5e5f1c012cd6c978b498d8b7bc8`；配套 `.sha256` 已覆盖并自校验为 OK。内层包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 为 `236f80b9920e622f48b9c9187cb6c8406ab689b391fac3da5f5a4f9a5cd41403`。
+- 后端 JAR SHA-256 为 `60470d47e3f8aea2feaf68830831ce3bfb98aac7d3e03bf1147f046093b05f87`，persistence JAR 为 `5dc089057c28a600ee01a2e065a3853653feb8519e21052650848867bc599d5d`，前端 tar 为 `b1221d4936b2bf149fc983be15f75d97a7f948dfc8b3b5b0aa2964133af98704`。
+- 固定组织私钥/公钥和公共能力基线只保存在 Git 忽略的 `.secure/`，未进入 Git 或发布 ZIP；构建产物同样未提交。真实企业 `.4 → .114 → .2` 部署和麒麟文件管理器双击验收仍需现场执行，本轮未推送远程。
