@@ -13778,3 +13778,27 @@
 
 - 普通用户下载后执行 `sh ~/下载/test-agent-local-client-install.sh` 即可完成用户级初始化、接入和常驻服务安装，不再触发麒麟软件中心的未签名 DEB 拒绝；这不是伪造或绕过系统签名，若未来必须由图形软件安装器安装，仍需企业提供并预置信任的 APT/debsig 密钥与策略。
 - 本次不新增 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点或强制环境变量，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。真实麒麟桌面视觉与新用户首次输入 Client key 仍需在发布该客户端和前端/Nginx入口后人工复验。
+
+## 2026-08-24 - 恢复公共 Skill 目录并调整 skillmarket 文案
+
+### Why
+
+- 双来源能力库改造曾在公共快照查询中硬编码只保留 `AGENT`，导致已经入库的公共 Git Skill 只能作为 Agent 依赖解析，无法在独立 Skill 页面展示。
+- 外部来源筛选和卡片仍显示“接口文档”，用户要求面向界面的来源名称改为 `skillmarket`。
+
+### What
+
+- `AgentSkillHubApplicationService.publicBuiltinSnapshots` 移除 `AGENT` 硬过滤，继续复用已有 `type/category/subcategory/keyword` 条件，使公共 Agent 与公共 Skill 都按调用方类型从同一数据库快照返回。
+- 公共 Skill 仍归入兼容的 `PLATFORM` 来源并保持只读、全局生效；外部来源只把前端展示名改为 `skillmarket`，内部 `SKILLHUB` 枚举、HTTP 参数和下载/同步协议不变。
+- 补充公共快照 Skill 列表、详情和正文读取回归，并同步 workspace-management、agent-web、backend-api 与 HTTP API 稳定文档。
+
+### How
+
+- JDK 25 定向运行 `AgentSkillHubApplicationServiceTest`，20/20 通过；workspace-management Maven reactor 打包成功。
+- 前端能力库组件测试 14/14 通过，`agent-web` 类型检查通过；独立 Vite 在 `http://127.0.0.1:3001/hub` 启动并返回 HTTP 200，验收后已停止该临时实例，未影响既有 3000 端口服务。
+- `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，并隔离工作区中并行的本地客户端安装与主题改动。
+
+### Result
+
+- 能力库 Skill 页面重新展示公共 Git Skill；skillmarket 筛选仍发送 `source=SKILLHUB`，不会造成 API 或旧客户端不兼容。
+- 本次不新增 HTTP 路径、RunEvent/SSE、数据库、SQL、Flyway、部署节点或强制配置，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。

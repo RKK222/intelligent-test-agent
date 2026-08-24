@@ -1464,12 +1464,11 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }).toList();
     }
 
-    /** 公共内容只读取定时任务固化的数据库快照；Skill 分类来自跨修订保留的独立记录。 */
+    /** 公共 Agent/Skill 都读取定时任务固化的数据库快照；Skill 分类来自跨修订保留的独立记录。 */
     private List<BuiltinRevision> publicBuiltinSnapshots(
             AssetType type, String keyword, SkillCategory category, SkillSubcategory subcategory) {
         String lowered = keyword == null ? null : keyword.toLowerCase(Locale.ROOT);
         return repository.listCurrentBuiltinRevisions().stream()
-                .filter(snapshot -> snapshot.assetType() == AssetType.AGENT)
                 .filter(snapshot -> type == null || snapshot.assetType() == type)
                 .filter(snapshot -> category == null || snapshot.skillCategory() == category)
                 .filter(snapshot -> subcategory == null || snapshot.skillSubcategory() == subcategory)

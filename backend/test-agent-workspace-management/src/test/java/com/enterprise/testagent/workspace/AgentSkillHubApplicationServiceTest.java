@@ -397,8 +397,24 @@ class AgentSkillHubApplicationServiceTest {
         verify(git, times(1)).listFilesAtCommit(publicRoot, commit, "opencode");
         clearInvocations(git);
         var page = service.listAssets("AGENT", null, 1, 100, new UserId("usr_1"));
+        var skillPage = service.listAssets(
+                "SKILL", null, null, "ALL", null, false, 1, 100, null, new UserId("usr_1"));
 
         assertThat(page.total()).isEqualTo(1);
+        assertThat(skillPage.total()).isEqualTo(2);
+        assertThat(skillPage.items()).extracting("technicalId")
+                .containsExactlyInAnyOrder("review", "review-api");
+        assertThat(skillPage.items()).allSatisfy(asset -> {
+            assertThat(asset.builtin()).isTrue();
+            assertThat(asset.sourceKind()).isEqualTo("PLATFORM");
+        });
+        var reviewSkill = skillPage.items().stream()
+                .filter(asset -> asset.technicalId().equals("review"))
+                .findFirst().orElseThrow();
+        var reviewSkillDetail = service.getAsset(reviewSkill.assetId(), null, new UserId("usr_1"));
+        assertThat(reviewSkillDetail.files()).extracting("path").containsExactly("SKILL.md");
+        assertThat(service.readFile(reviewSkillDetail.selectedRevisionId(), "SKILL.md").content())
+                .contains("# Review");
         var protectedCatalog = service.listCatalog(
                 new UserId("usr_1"), new WorkspaceId("wrk_protected_catalog"));
         assertThat(protectedCatalog).singleElement().satisfies(item -> {
